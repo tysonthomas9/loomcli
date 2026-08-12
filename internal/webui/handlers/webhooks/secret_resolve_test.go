@@ -12,9 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/modules/automation"
-
-	"github.com/tysonthomas9/loomcli/internal/domain"
+	connectorsmodule "github.com/tysonthomas9/loomcli/internal/modules/connectors"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -22,9 +20,9 @@ import (
 // returns (writeJSON's encoder appends the newline).
 const uniform401Body = `{"error":"webhook signature verification failed"}` + "\n"
 
-func seedConnector(t *testing.T, st store.Store, id string, kind domain.ConnectorSourceKind, secret string, status domain.ConnectorStatus) {
+func seedConnector(t *testing.T, st store.Store, id string, kind connectorsmodule.ConnectorSourceKind, secret string, status connectorsmodule.ConnectorStatus) {
 	t.Helper()
-	if _, err := st.Connectors().Create(context.Background(), store.ConnectorCreate{
+	if _, err := st.Connectors().CreateConnectorRecord(context.Background(), connectorsmodule.CreateConnectorMutation{
 		WorkspaceKey: testWS, ConnectorID: id, SourceKind: kind, InboundSecret: secret, Status: status,
 	}); err != nil {
 		t.Fatalf("seed connector %s: %v", id, err)
@@ -52,10 +50,10 @@ func captureLogs(t *testing.T) *bytes.Buffer {
 	return &buf
 }
 
-// TestWebhookConnectorSecretMigration covers the verification-root migration:
-// once an active connector exists for the binding's source kind it is the
-// only verification root; without one, the per-binding secret keeps working.
-func TestWebhookConnectorSecretMigration(t *testing.T) {
+// TestWebhookConnectorSecretAuthority proves Connectors is the sole inbound
+// verification root. Missing, unrelated, and disabled connectors all fail
+// closed.
+func TestWebhookConnectorSecretAuthority(t *testing.T) {
 	const connSecret = "connector-inbound-secret"
 	tests := []struct {
 		name       string
@@ -67,51 +65,51 @@ func TestWebhookConnectorSecretMigration(t *testing.T) {
 		{
 			name: "connector secret verifies",
 			seed: func(t *testing.T, st store.Store) {
-				seedConnector(t, st, "gh-main", domain.ConnectorSourceGitHub, connSecret, "")
+				seedConnector(t, st, "gh-main", connectorsmodule.ConnectorSourceGitHub, connSecret, "")
 			},
 			signSecret: connSecret,
 			wantStatus: http.StatusAccepted,
 			wantEvents: 1,
 		},
 		{
-			name: "binding secret rejected once connector exists",
+			name: "wrong secret rejected when connector exists",
 			seed: func(t *testing.T, st store.Store) {
-				seedConnector(t, st, "gh-main", domain.ConnectorSourceGitHub, connSecret, "")
+				seedConnector(t, st, "gh-main", connectorsmodule.ConnectorSourceGitHub, connSecret, "")
 			},
 			signSecret: testSecret,
 			wantStatus: http.StatusUnauthorized,
 			wantEvents: 0,
 		},
 		{
-			name:       "binding secret fallback when no connector",
+			name:       "no connector fails closed",
 			seed:       func(*testing.T, store.Store) {},
 			signSecret: testSecret,
-			wantStatus: http.StatusAccepted,
-			wantEvents: 1,
+			wantStatus: http.StatusUnauthorized,
+			wantEvents: 0,
 		},
 		{
-			name: "binding secret fallback when connector is for another source",
+			name: "connector for another source fails closed",
 			seed: func(t *testing.T, st store.Store) {
-				seedConnector(t, st, "slack-main", domain.ConnectorSourceSlack, "slack-secret", "")
+				seedConnector(t, st, "slack-main", connectorsmodule.ConnectorSourceSlack, "slack-secret", "")
 			},
 			signSecret: testSecret,
-			wantStatus: http.StatusAccepted,
-			wantEvents: 1,
+			wantStatus: http.StatusUnauthorized,
+			wantEvents: 0,
 		},
 		{
-			name: "disabled connector does not become the verification root",
+			name: "disabled connector fails closed",
 			seed: func(t *testing.T, st store.Store) {
-				seedConnector(t, st, "gh-off", domain.ConnectorSourceGitHub, connSecret, domain.ConnectorStatusDisabled)
+				seedConnector(t, st, "gh-off", connectorsmodule.ConnectorSourceGitHub, connSecret, connectorsmodule.ConnectorStatusDisabled)
 			},
 			signSecret: testSecret,
-			wantStatus: http.StatusAccepted,
-			wantEvents: 1,
+			wantStatus: http.StatusUnauthorized,
+			wantEvents: 0,
 		},
 		{
 			name: "any active connector for the source kind verifies",
 			seed: func(t *testing.T, st store.Store) {
-				seedConnector(t, st, "gh-a", domain.ConnectorSourceGitHub, "secret-a", "")
-				seedConnector(t, st, "gh-b", domain.ConnectorSourceGitHub, "secret-b", "")
+				seedConnector(t, st, "gh-a", connectorsmodule.ConnectorSourceGitHub, "secret-a", "")
+				seedConnector(t, st, "gh-b", connectorsmodule.ConnectorSourceGitHub, "secret-b", "")
 			},
 			signSecret: "secret-b",
 			wantStatus: http.StatusAccepted,
@@ -120,7 +118,7 @@ func TestWebhookConnectorSecretMigration(t *testing.T) {
 		{
 			name: "tampered signature 401 with connector",
 			seed: func(t *testing.T, st store.Store) {
-				seedConnector(t, st, "gh-main", domain.ConnectorSourceGitHub, connSecret, "")
+				seedConnector(t, st, "gh-main", connectorsmodule.ConnectorSourceGitHub, connSecret, "")
 			},
 			signSecret: "not-the-secret",
 			wantStatus: http.StatusUnauthorized,
@@ -129,7 +127,7 @@ func TestWebhookConnectorSecretMigration(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			st := seedStore(t, true)
+			st := seedStoreWithoutConnector(t, true)
 			tc.seed(t, st)
 			mux := newServer(st)
 
@@ -157,7 +155,7 @@ func TestWebhookConnectorSecretMigration(t *testing.T) {
 func TestWebhookRotationWindow(t *testing.T) {
 	rotate := func(t *testing.T, st store.Store, validUntil time.Time) {
 		t.Helper()
-		if _, err := st.Connectors().RotateSecrets(context.Background(), testWS, "gh-main", store.ConnectorSecretRotation{
+		if _, err := st.Connectors().RotateConnectorSecretsRecord(context.Background(), testWS, "gh-main", connectorsmodule.RotateConnectorSecretsMutation{
 			NewInboundSecret: "new-secret", PreviousSecretValidUntil: validUntil,
 		}); err != nil {
 			t.Fatalf("rotate: %v", err)
@@ -165,8 +163,8 @@ func TestWebhookRotationWindow(t *testing.T) {
 	}
 
 	t.Run("new secret verifies after rotation", func(t *testing.T) {
-		st := seedStore(t, true)
-		seedConnector(t, st, "gh-main", domain.ConnectorSourceGitHub, "old-secret", "")
+		st := seedStoreWithoutConnector(t, true)
+		seedConnector(t, st, "gh-main", connectorsmodule.ConnectorSourceGitHub, "old-secret", "")
 		rotate(t, st, time.Time{}) // default window: now + 15m
 		rr := httptest.NewRecorder()
 		newServer(st).ServeHTTP(rr, signedRequestWith("new-secret", "d-new", prOpenedBody))
@@ -176,8 +174,8 @@ func TestWebhookRotationWindow(t *testing.T) {
 	})
 
 	t.Run("previous secret accepted inside window with stale audit signal", func(t *testing.T) {
-		st := seedStore(t, true)
-		seedConnector(t, st, "gh-main", domain.ConnectorSourceGitHub, "old-secret", "")
+		st := seedStoreWithoutConnector(t, true)
+		seedConnector(t, st, "gh-main", connectorsmodule.ConnectorSourceGitHub, "old-secret", "")
 		rotate(t, st, time.Time{})
 		logs := captureLogs(t)
 		rr := httptest.NewRecorder()
@@ -192,8 +190,8 @@ func TestWebhookRotationWindow(t *testing.T) {
 	})
 
 	t.Run("current secret match emits no stale signal", func(t *testing.T) {
-		st := seedStore(t, true)
-		seedConnector(t, st, "gh-main", domain.ConnectorSourceGitHub, "old-secret", "")
+		st := seedStoreWithoutConnector(t, true)
+		seedConnector(t, st, "gh-main", connectorsmodule.ConnectorSourceGitHub, "old-secret", "")
 		rotate(t, st, time.Time{})
 		logs := captureLogs(t)
 		rr := httptest.NewRecorder()
@@ -207,8 +205,8 @@ func TestWebhookRotationWindow(t *testing.T) {
 	})
 
 	t.Run("previous secret rejected after window", func(t *testing.T) {
-		st := seedStore(t, true)
-		seedConnector(t, st, "gh-main", domain.ConnectorSourceGitHub, "old-secret", "")
+		st := seedStoreWithoutConnector(t, true)
+		seedConnector(t, st, "gh-main", connectorsmodule.ConnectorSourceGitHub, "old-secret", "")
 		rotate(t, st, time.Now().UTC().Add(-time.Second)) // already expired
 		rr := httptest.NewRecorder()
 		newServer(st).ServeHTTP(rr, signedRequestWith("old-secret", "d-expired", prOpenedBody))
@@ -226,80 +224,71 @@ func TestWebhookRotationWindow(t *testing.T) {
 }
 
 // connectorOverrideStore swaps the connector store while keeping memstore's
-// binding/secret lookups real.
+// binding reads real.
 type connectorOverrideStore struct {
 	store.Store
-	conns store.ConnectorStore
+	conns connectorsmodule.ManagementStore
 }
 
-func (s connectorOverrideStore) Connectors() store.ConnectorStore { return s.conns }
+func (s connectorOverrideStore) Connectors() connectorsmodule.ManagementStore { return s.conns }
 
 // stubConnectorStore overrides List/ResolveInboundSecret on the fail-closed
 // placeholder so resolver edge cases (errors, contract anomalies) can be
 // driven directly.
 type stubConnectorStore struct {
-	store.UnimplementedConnectorStore
-	conns      []*domain.Connector
+	connectorsmodule.ManagementStore
+	conns      []*connectorsmodule.Connector
 	listErr    error
-	secrets    map[string]*store.ConnectorInboundSecrets
+	secrets    map[string]*connectorsmodule.InboundSecrets
 	resolveErr map[string]error
 }
 
-func (s *stubConnectorStore) List(context.Context, string, store.ConnectorFilter) ([]*domain.Connector, error) {
+func (s *stubConnectorStore) ListConnectorRecords(context.Context, string, connectorsmodule.ConnectorFilter) ([]*connectorsmodule.Connector, error) {
 	if s.listErr != nil {
 		return nil, s.listErr
 	}
 	return s.conns, nil
 }
 
-func (s *stubConnectorStore) ResolveInboundSecret(_ context.Context, _, connectorID string) (*store.ConnectorInboundSecrets, error) {
+func (s *stubConnectorStore) ResolveInboundSecretsRecord(_ context.Context, _, connectorID string) (*connectorsmodule.InboundSecrets, error) {
 	if err := s.resolveErr[connectorID]; err != nil {
 		return nil, err
 	}
 	secrets, ok := s.secrets[connectorID]
 	if !ok {
-		return nil, fmt.Errorf("connector %q: %w", connectorID, domain.ErrConnectorNotFound)
+		return nil, fmt.Errorf("connector %q: %w", connectorID, connectorsmodule.ErrNotFound)
 	}
 	return secrets, nil
 }
 
-func ghConnector(id string) *domain.Connector {
-	return &domain.Connector{
+func ghConnector(id string) *connectorsmodule.Connector {
+	return &connectorsmodule.Connector{
 		WorkspaceKey: testWS, ConnectorID: id,
-		SourceKind: domain.ConnectorSourceGitHub, Status: domain.ConnectorStatusActive,
+		SourceKind: connectorsmodule.ConnectorSourceGitHub, Status: connectorsmodule.ConnectorStatusActive,
 	}
 }
 
-// TestResolveInboundSecretCandidates unit-tests the resolver's edge cases
-// against a stubbed connector store: fallback triggers, fail-closed branches,
-// and the verifier-side rotation-window re-check.
-func TestResolveInboundSecretCandidates(t *testing.T) {
+// TestConnectorSecretCandidates unit-tests fail-closed edge cases and the
+// verifier-side rotation-window re-check.
+func TestConnectorSecretCandidates(t *testing.T) {
 	now := time.Now().UTC()
-	binding := &automation.Binding{
-		WorkspaceKey: testWS, BindingID: "b1", SourceKind: "github", Enabled: true,
-	}
 	errBoom := errors.New("fleet-db unreachable")
 	tests := []struct {
 		name           string
-		conns          store.ConnectorStore
+		conns          connectorSecretSource
 		wantSecrets    []string
 		wantStaleCount int
 		wantErr        error
 	}{
 		{
-			name:        "nil connector store falls back to binding secret",
+			name:        "nil connector store has no candidates",
 			conns:       nil,
-			wantSecrets: []string{testSecret},
+			wantSecrets: []string{},
 		},
 		{
-			name:        "unsupported connector store falls back to binding secret",
-			conns:       store.UnimplementedConnectorStore{Backend: "test"},
-			wantSecrets: []string{testSecret},
-		},
-		{
-			name:        "no connectors falls back to binding secret",
+			name:        "no connectors has no candidates",
 			conns:       &stubConnectorStore{},
-			wantSecrets: []string{testSecret},
+			wantSecrets: []string{},
 		},
 		{
 			name:    "list error propagates",
@@ -309,31 +298,31 @@ func TestResolveInboundSecretCandidates(t *testing.T) {
 		{
 			name: "resolve error propagates",
 			conns: &stubConnectorStore{
-				conns:      []*domain.Connector{ghConnector("gh-a")},
+				conns:      []*connectorsmodule.Connector{ghConnector("gh-a")},
 				resolveErr: map[string]error{"gh-a": errBoom},
 			},
 			wantErr: errBoom,
 		},
 		{
-			name: "connector deleted between list and resolve falls back",
+			name: "connector deleted between list and resolve has no candidates",
 			conns: &stubConnectorStore{
-				conns: []*domain.Connector{ghConnector("gh-gone")},
+				conns: []*connectorsmodule.Connector{ghConnector("gh-gone")},
 			},
-			wantSecrets: []string{testSecret},
+			wantSecrets: []string{},
 		},
 		{
 			name: "connector with empty secrets fails closed without fallback",
 			conns: &stubConnectorStore{
-				conns:   []*domain.Connector{ghConnector("gh-a")},
-				secrets: map[string]*store.ConnectorInboundSecrets{"gh-a": {}},
+				conns:   []*connectorsmodule.Connector{ghConnector("gh-a")},
+				secrets: map[string]*connectorsmodule.InboundSecrets{"gh-a": {}},
 			},
 			wantSecrets: []string{},
 		},
 		{
 			name: "previous secret inside window is a stale candidate",
 			conns: &stubConnectorStore{
-				conns: []*domain.Connector{ghConnector("gh-a")},
-				secrets: map[string]*store.ConnectorInboundSecrets{
+				conns: []*connectorsmodule.Connector{ghConnector("gh-a")},
+				secrets: map[string]*connectorsmodule.InboundSecrets{
 					"gh-a": {Current: "cur", Previous: "prev", PreviousValidUntil: now.Add(time.Minute)},
 				},
 			},
@@ -343,8 +332,8 @@ func TestResolveInboundSecretCandidates(t *testing.T) {
 		{
 			name: "previous secret past window dropped despite store anomaly",
 			conns: &stubConnectorStore{
-				conns: []*domain.Connector{ghConnector("gh-a")},
-				secrets: map[string]*store.ConnectorInboundSecrets{
+				conns: []*connectorsmodule.Connector{ghConnector("gh-a")},
+				secrets: map[string]*connectorsmodule.InboundSecrets{
 					"gh-a": {Current: "cur", Previous: "prev", PreviousValidUntil: now.Add(-time.Minute)},
 				},
 			},
@@ -353,8 +342,8 @@ func TestResolveInboundSecretCandidates(t *testing.T) {
 		{
 			name: "previous secret with zero window dropped (fail closed)",
 			conns: &stubConnectorStore{
-				conns: []*domain.Connector{ghConnector("gh-a")},
-				secrets: map[string]*store.ConnectorInboundSecrets{
+				conns: []*connectorsmodule.Connector{ghConnector("gh-a")},
+				secrets: map[string]*connectorsmodule.InboundSecrets{
 					"gh-a": {Current: "cur", Previous: "prev"},
 				},
 			},
@@ -363,11 +352,8 @@ func TestResolveInboundSecretCandidates(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			st := seedStore(t, true)
-			verifier := NewCompatibilityVerifier(CompatibilityVerifierConfig{
-				Bindings: st.TriggerBindings(), Connectors: tc.conns,
-			})
-			got, err := verifier.resolveInboundSecretCandidates(context.Background(), testWS, binding, now)
+			verifier := NewVerifier(VerifierConfig{Connectors: tc.conns})
+			got, err := verifier.connectorSecretCandidates(context.Background(), testWS, "github", now)
 			if tc.wantErr != nil {
 				if !errors.Is(err, tc.wantErr) {
 					t.Fatalf("err = %v, want %v", err, tc.wantErr)
@@ -375,7 +361,7 @@ func TestResolveInboundSecretCandidates(t *testing.T) {
 				return
 			}
 			if err != nil {
-				t.Fatalf("resolveInboundSecretCandidates: %v", err)
+				t.Fatalf("connectorSecretCandidates: %v", err)
 			}
 			secrets := make([]string, 0, len(got))
 			stale := 0
@@ -400,12 +386,12 @@ func TestResolveInboundSecretCandidates(t *testing.T) {
 	}
 }
 
-// TestWebhookSecretResolutionFailureIsUniform401 pins the no-oracle rule at
+// TestConnectorSecretResolutionFailureIsUniform401 pins the no-oracle rule at
 // the handler level: a secret-resolution infrastructure failure returns the
 // same 401 body as a bad signature and persists nothing.
-func TestWebhookSecretResolutionFailureIsUniform401(t *testing.T) {
+func TestConnectorSecretResolutionFailureIsUniform401(t *testing.T) {
 	logs := captureLogs(t)
-	st := seedStore(t, true)
+	st := seedStoreWithoutConnector(t, true)
 	mux := newServer(connectorOverrideStore{Store: st, conns: &stubConnectorStore{listErr: errors.New("fleet-db unreachable")}})
 
 	rr := httptest.NewRecorder()
@@ -426,10 +412,10 @@ func TestWebhookSecretResolutionFailureIsUniform401(t *testing.T) {
 }
 
 func TestWebhookNilResolvedConnectorSecretFailsClosed(t *testing.T) {
-	st := seedStore(t, true)
+	st := seedStoreWithoutConnector(t, true)
 	connectors := &stubConnectorStore{
-		conns:   []*domain.Connector{ghConnector("gh-nil")},
-		secrets: map[string]*store.ConnectorInboundSecrets{"gh-nil": nil},
+		conns:   []*connectorsmodule.Connector{ghConnector("gh-nil")},
+		secrets: map[string]*connectorsmodule.InboundSecrets{"gh-nil": nil},
 	}
 	mux := newServer(connectorOverrideStore{Store: st, conns: connectors})
 

@@ -796,7 +796,7 @@ func TestCollectStatistics(t *testing.T) {
 			mock.CountResult = tt.countResult
 			deps.IssueBackend = mock
 
-			stats := collectStatisticsDeps(deps)
+			stats := collectStatisticsDeps(t.Context(), deps)
 
 			if stats.Open != tt.wantOpen {
 				t.Errorf("Open = %d, want %d", stats.Open, tt.wantOpen)
@@ -1058,7 +1058,7 @@ func TestCollectTaskStatus(t *testing.T) {
 			mock.BlockedErr = tt.backlogErr
 			deps.IssueBackend = mock
 
-			summary, needsPlanningTasks, readyToImplementTasks, reviewTasks, inProgressTasks, backlogTasks, closedTasks, agentTasks := collectTaskStatusDeps(deps, 100)
+			summary, needsPlanningTasks, readyToImplementTasks, reviewTasks, inProgressTasks, backlogTasks, closedTasks, agentTasks := collectTaskStatusDeps(t.Context(), deps, 100)
 
 			if summary.NeedsPlanning != tt.wantNeedsPlanning {
 				t.Errorf("NeedsPlanning = %d, want %d", summary.NeedsPlanning, tt.wantNeedsPlanning)
@@ -1115,7 +1115,7 @@ func TestCollectTaskStatusReadyCommandArgs(t *testing.T) {
 	}
 	deps.IssueBackend = mock
 
-	collectTaskStatusDeps(deps, 100)
+	collectTaskStatusDeps(t.Context(), deps, 100)
 
 	if !mock.Called("Ready") {
 		t.Fatal("Ready() was not called")
@@ -1168,7 +1168,7 @@ func TestCollectAgentStatus(t *testing.T) {
 		}}
 		deps.Git = &execBridgeGitRunner{Exec: deps.Exec}
 
-		agents, _ := collectAgentStatusDeps(deps, nil, "")
+		agents, _ := collectAgentStatusDeps(t.Context(), deps, nil, "")
 
 		if len(agents) != 1 {
 			t.Fatalf("expected 1 agent, got %d", len(agents))
@@ -1216,7 +1216,7 @@ func TestCollectAgentStatus(t *testing.T) {
 		}}
 		deps.Git = &execBridgeGitRunner{Exec: deps.Exec}
 
-		agents, _ := collectAgentStatusDeps(deps, nil, "")
+		agents, _ := collectAgentStatusDeps(t.Context(), deps, nil, "")
 
 		if len(agents) != 1 {
 			t.Fatalf("expected 1 agent, got %d", len(agents))
@@ -1267,7 +1267,7 @@ func TestCollectAgentStatus(t *testing.T) {
 			"spark": {ID: "T-123", Status: "in_progress"},
 		}
 
-		agents, _ := collectAgentStatusDeps(deps, agentTasks, "")
+		agents, _ := collectAgentStatusDeps(t.Context(), deps, agentTasks, "")
 
 		if len(agents) != 1 {
 			t.Fatalf("expected 1 agent, got %d", len(agents))
@@ -1315,7 +1315,7 @@ func TestCollectAgentStatus(t *testing.T) {
 		}}
 		deps.Git = &execBridgeGitRunner{Exec: deps.Exec}
 
-		agents, _ := collectAgentStatusDeps(deps, nil, "")
+		agents, _ := collectAgentStatusDeps(t.Context(), deps, nil, "")
 
 		if len(agents) != 1 {
 			t.Fatalf("expected 1 agent, got %d", len(agents))
@@ -1377,7 +1377,7 @@ func TestCollectAgentStatus(t *testing.T) {
 		}}
 		deps.Git = &execBridgeGitRunner{Exec: deps.Exec}
 
-		_, taskIDToAgents := collectAgentStatusDeps(deps, nil, "")
+		_, taskIDToAgents := collectAgentStatusDeps(t.Context(), deps, nil, "")
 
 		if len(taskIDToAgents["T-conflict"]) != 2 {
 			t.Errorf("expected 2 agents claiming same task, got %d", len(taskIDToAgents["T-conflict"]))
@@ -1431,7 +1431,7 @@ func TestCollectMonitorData(t *testing.T) {
 	mock.StatsResult = &backend.StatsData{TotalIssues: 10, OpenIssues: 3, ClosedIssues: 7}
 	deps.IssueBackend = mock
 
-	data := collectMonitorDataDeps(deps, 100, "")
+	data := collectMonitorDataDeps(t.Context(), deps, 100, "")
 
 	// Verify all sections populated
 	if data.Timestamp.IsZero() {
@@ -1509,7 +1509,7 @@ func TestCollectMonitorDataExported(t *testing.T) {
 	setDefaultIssueBackend(mock)
 	t.Cleanup(func() { resetDefaultIssueBackend() })
 
-	data := CollectMonitorData(0, "")
+	data := CollectMonitorData(t.Context(), 0, "")
 	if data == nil {
 		t.Fatal("CollectMonitorData returned nil")
 	}
@@ -1556,7 +1556,7 @@ func TestCollectAgentStatusOnlyExported(t *testing.T) {
 		return CommandResult{}
 	}})
 
-	agents := CollectAgentStatusOnly("")
+	agents := CollectAgentStatusOnly(t.Context(), "")
 	if len(agents) != 1 {
 		t.Fatalf("expected 1 agent, got %d", len(agents))
 	}
@@ -1621,7 +1621,7 @@ func TestBacklogAccumulatesReadyWithBlockersAndBlocked(t *testing.T) {
 	setDefaultIssueBackend(mock)
 	t.Cleanup(func() { resetDefaultIssueBackend() })
 
-	data := collectMonitorData(100, "")
+	data := collectMonitorData(t.Context(), 100, "")
 
 	// T-LOOM-BLOCKED from the blocked list = 1 (ready issues are trusted, no re-pass).
 	if data.Tasks.Backlog != 1 {
@@ -1686,7 +1686,7 @@ func TestEpicsExcludedFromWorkQueueButStatsRemainCanonical(t *testing.T) {
 	setDefaultIssueBackend(mock)
 	t.Cleanup(func() { resetDefaultIssueBackend() })
 
-	data := collectMonitorData(100, "")
+	data := collectMonitorData(t.Context(), 100, "")
 
 	// Epic should be tracked separately, not in work queue
 	if data.Tasks.Epics != 1 {
@@ -1771,7 +1771,7 @@ func TestMonitorStatsPreserveBackendTotals(t *testing.T) {
 	setDefaultIssueBackend(mock)
 	t.Cleanup(func() { resetDefaultIssueBackend() })
 
-	data := collectMonitorData(100, "")
+	data := collectMonitorData(t.Context(), 100, "")
 
 	// Verify each work queue category
 	if data.Tasks.NeedsPlanning != 1 {
@@ -1851,7 +1851,7 @@ func TestRunMonitorOneShot(t *testing.T) {
 	r, w, _ := os.Pipe()
 	os.Stdout = w
 
-	runMonitor(nil, nil)
+	runMonitor(commandWithContext(t), nil)
 
 	w.Close()
 	os.Stdout = oldStdout
@@ -2268,7 +2268,7 @@ func TestCollectAgentStatusLockFallback(t *testing.T) {
 				"alpha": {ID: "T-999", Title: "Test Task", Priority: 2, Status: "in_progress"},
 			}
 
-			agents, _ := collectAgentStatus(agentTasks, "")
+			agents, _ := collectAgentStatus(t.Context(), agentTasks, "")
 			if len(agents) != 1 {
 				t.Fatalf("expected 1 agent, got %d", len(agents))
 			}
@@ -2671,7 +2671,7 @@ func TestCollectTaskStatusReadyLimitParam(t *testing.T) {
 	setDefaultIssueBackend(mock)
 	defer resetDefaultIssueBackend()
 
-	collectTaskStatus(50)
+	collectTaskStatus(t.Context(), 50)
 
 	if capturedOpts.Limit != 50 {
 		t.Errorf("Ready() called with Limit=%d, want 50", capturedOpts.Limit)
@@ -2695,7 +2695,7 @@ func TestCollectReadyTasksByPriorityReadyLimitParam(t *testing.T) {
 	setDefaultIssueBackend(mock)
 	defer resetDefaultIssueBackend()
 
-	counts := collectReadyTasksByPriority(50)
+	counts := collectReadyTasksByPriority(t.Context(), 50)
 
 	// Verify Ready() was called with Limit=50
 	if capturedOpts.Limit != 50 {

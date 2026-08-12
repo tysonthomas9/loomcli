@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/tysonthomas9/loomcli/internal/atomicfile"
-	"github.com/tysonthomas9/loomcli/internal/runtimectx"
 	"github.com/tysonthomas9/loomcli/internal/sessions/redact"
 )
 
@@ -33,7 +32,7 @@ func (s *Store) SyncSubagentTranscript(sessionID, subagentID, srcPath string) er
 	if srcPath == "" || subagentID == "" {
 		return nil
 	}
-	_, span := startSpan(runtimectx.RootContext(), "service.Sessions.SyncSubagentTranscript",
+	_, span := startSpan(s.ctx, "service.Sessions.SyncSubagentTranscript",
 		attrLoomSessionID(sessionID),
 	)
 	defer span.End()
@@ -107,7 +106,7 @@ func (s *Store) SyncSubagentTranscript(sessionID, subagentID, srcPath string) er
 // subagent transcripts captured for a session. Returns an empty slice if the
 // subagents directory does not exist.
 func (s *Store) ListSubagentTranscripts(sessionID string) ([]string, error) {
-	_, span := startSpan(runtimectx.RootContext(), "service.Sessions.ListSubagentTranscripts",
+	_, span := startSpan(s.ctx, "service.Sessions.ListSubagentTranscripts",
 		attrLoomSessionID(sessionID),
 	)
 	defer span.End()

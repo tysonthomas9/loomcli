@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	appworkflowauthoring "github.com/tysonthomas9/loomcli/internal/app/workflowauthoring"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/driver"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
@@ -281,6 +282,12 @@ func (adapter workflowRunStoreTestExecution) SubmitDriverRun(
 	}, nil
 }
 
+type backendHealthQueryFunc func(string) (BackendHealth, bool)
+
+func (query backendHealthQueryFunc) BackendHealth(name string) (BackendHealth, bool) {
+	return query(name)
+}
+
 func newWorkflowTestModule(st *memstore.Store) *Module {
 	catalog := &workflowRunStoreTestCatalog{store: st}
 	return NewModule(Config{
@@ -288,11 +295,16 @@ func newWorkflowTestModule(st *memstore.Store) *Module {
 		Execution: workflowRunStoreTestExecution{store: st}, OperatorAuthority: workflowOperatorAuthorityStub{},
 		PrepareWorkflowTarget: func(ctx context.Context, workspace, workflow string) (*workflowcatalog.Driver, error) {
 			if workflowdefs.IsBuiltinWorkflow(workflow) {
-				if err := workflowdefs.EnsureBuiltinWorkflowAuthored(
+				coordinator, err := appworkflowauthoring.New(workflowdefs.NewBundleStager())
+				if err != nil {
+					return nil, err
+				}
+				if err := coordinator.EnsureBuiltin(
 					ctx,
 					catalog,
 					catalog,
 					workflowRunManagedBuiltinAuthority{},
+					workflowdefs.NewBuiltinSupport(),
 					workspace,
 					workflow,
 				); err != nil {
@@ -304,6 +316,11 @@ func newWorkflowTestModule(st *memstore.Store) *Module {
 		TaskWorkflowRuns: readprojection.NewTaskWorkflowRunReader(
 			st.TaskRuns(), st.TriggerEvents(), st.TriggerDeliveries(), st.DriverRuns(),
 		),
+		BackendHealth: backendHealthQueryFunc(func(string) (BackendHealth, bool) {
+			return BackendHealth{
+				Available: true, Installed: true, APIKeySet: true, Message: "ready",
+			}, true
+		}),
 	})
 }
 

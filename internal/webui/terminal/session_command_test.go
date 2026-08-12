@@ -2,77 +2,100 @@ package terminal
 
 import (
 	"errors"
-	"fmt"
 	"reflect"
 	"testing"
 )
 
-func TestArgvForSession(t *testing.T) {
+func TestLaunchSpecForBackendBuildsDurableEnvelope(t *testing.T) {
 	oldExecutable := currentExecutable
 	currentExecutable = func() (string, error) {
 		return "/Applications/Loom.app/Contents/MacOS/loom-aarch64-apple-darwin", nil
 	}
 	t.Cleanup(func() { currentExecutable = oldExecutable })
 
-	leadCommand := func(backend string) []string {
-		return []string{
-			"-c",
-			fmt.Sprintf("'/Applications/Loom.app/Contents/MacOS/loom-aarch64-apple-darwin' lead --backend %s", backend),
-		}
-	}
-
 	tests := []struct {
 		name    string
-		session string
+		backend string
 		want    []string
 	}{
-		{"lead-shell", "lead-shell-1", []string{"-l"}},
-		{"lead-shell with workspace prefix", "my-ws--lead-shell-1", []string{"-l"}},
-		{"lead-claude", "lead-claude-1", leadCommand("claude")},
-		{"lead-codex", "lead-codex-42", leadCommand("codex")},
-		{"lead-opencode", "lead-opencode-1", leadCommand("opencode")},
-		{"lead-gemini", "lead-gemini-1", leadCommand("gemini")},
-		{"lead-cursor", "lead-cursor-1", leadCommand("cursor")},
-		{"workspace prefix + AI", "v2-refactor--lead-claude-3", leadCommand("claude")},
-		{"unknown backend falls back", "lead-unknown-1", nil},
-		{"non-lead session falls back", "talk-to-lead", nil},
-		{"empty session falls back", "", nil},
-		{"malformed session falls back", "lead-foo", nil},
+		{"shell", "shell", []string{"-l"}},
+		{"claude", "claude", []string{"-c", "'/Applications/Loom.app/Contents/MacOS/loom-aarch64-apple-darwin' lead --backend claude"}},
+		{"codex", "codex", []string{"-c", "'/Applications/Loom.app/Contents/MacOS/loom-aarch64-apple-darwin' lead --backend codex"}},
+		{"opencode", "opencode", []string{"-c", "'/Applications/Loom.app/Contents/MacOS/loom-aarch64-apple-darwin' lead --backend opencode"}},
+		{"gemini", "gemini", []string{"-c", "'/Applications/Loom.app/Contents/MacOS/loom-aarch64-apple-darwin' lead --backend gemini"}},
+		{"cursor", "cursor", []string{"-c", "'/Applications/Loom.app/Contents/MacOS/loom-aarch64-apple-darwin' lead --backend cursor"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := ArgvForSession(tt.session)
-			if !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("ArgvForSession(%q) = %v, want %v", tt.session, got, tt.want)
+			got, err := LaunchSpecForBackend(tt.backend, "/trusted/loom-data")
+			if err != nil {
+				t.Fatalf("LaunchSpecForBackend: %v", err)
+			}
+			if !reflect.DeepEqual(got.Argv, tt.want) {
+				t.Errorf("Argv = %v, want %v", got.Argv, tt.want)
+			}
+			if got.Env["LOOM_CONFIG_DIR"] != "/trusted/loom-data" {
+				t.Errorf("LOOM_CONFIG_DIR = %q", got.Env["LOOM_CONFIG_DIR"])
 			}
 		})
 	}
 }
 
-func TestArgvForSessionFallsBackToLoomOnExecutableError(t *testing.T) {
+func TestLaunchSpecForBackendRejectsUnknownIntent(t *testing.T) {
+	for _, backend := range []string{"", "unknown", "codex-1"} {
+		launch, err := LaunchSpecForBackend(backend, "/trusted/loom-data")
+		if launch != nil || err == nil {
+			t.Fatalf("LaunchSpecForBackend(%q) = (%#v, %v), want rejection", backend, launch, err)
+		}
+	}
+}
+
+func TestLaunchSpecForBackendUsesLoomCommandWhenExecutableUnavailable(t *testing.T) {
 	oldExecutable := currentExecutable
 	currentExecutable = func() (string, error) {
 		return "", errors.New("boom")
 	}
 	t.Cleanup(func() { currentExecutable = oldExecutable })
 
-	got := ArgvForSession("lead-codex-1")
+	got, err := LaunchSpecForBackend("codex", "")
+	if err != nil {
+		t.Fatalf("LaunchSpecForBackend: %v", err)
+	}
 	want := []string{"-c", "'loom' lead --backend codex"}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("ArgvForSession() = %v, want %v", got, want)
+	if !reflect.DeepEqual(got.Argv, want) {
+		t.Fatalf("Argv = %v, want %v", got.Argv, want)
+	}
+	if got.Env != nil {
+		t.Fatalf("Env = %#v, want nil", got.Env)
 	}
 }
 
-func TestArgvForSessionQuotesExecutablePath(t *testing.T) {
+func TestLaunchSpecForBackendQuotesExecutablePath(t *testing.T) {
 	oldExecutable := currentExecutable
 	currentExecutable = func() (string, error) {
 		return "/tmp/Loom's App/loom", nil
 	}
 	t.Cleanup(func() { currentExecutable = oldExecutable })
 
-	got := ArgvForSession("lead-codex-1")
+	got, err := LaunchSpecForBackend("codex", "")
+	if err != nil {
+		t.Fatalf("LaunchSpecForBackend: %v", err)
+	}
 	want := []string{"-c", "'/tmp/Loom'\\''s App/loom' lead --backend codex"}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("ArgvForSession() = %v, want %v", got, want)
+	if !reflect.DeepEqual(got.Argv, want) {
+		t.Fatalf("Argv = %v, want %v", got.Argv, want)
+	}
+}
+
+func TestIsValidTerminalBackend(t *testing.T) {
+	for _, backend := range []string{"shell", "claude", "codex", "opencode", "gemini", "cursor"} {
+		if !IsValidTerminalBackend(backend) {
+			t.Errorf("IsValidTerminalBackend(%q) = false", backend)
+		}
+	}
+	for _, backend := range []string{"", "unknown", "codex-1"} {
+		if IsValidTerminalBackend(backend) {
+			t.Errorf("IsValidTerminalBackend(%q) = true", backend)
+		}
 	}
 }

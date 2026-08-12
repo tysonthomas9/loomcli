@@ -9,15 +9,13 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
-
-	"github.com/tysonthomas9/loomcli/internal/runtimectx"
 )
 
 // SyncLatestCodexRollout mirrors the newest Codex rollout for workDir into the
 // Loom session as agent_transcript.jsonl. It is best-effort and returns an
 // empty path when no matching rollout is available.
 func (s *Store) SyncLatestCodexRollout(sessionID, workDir string, since time.Time) (string, error) {
-	_, span := startSpan(runtimectx.RootContext(), "service.Sessions.SyncLatestCodexRollout",
+	_, span := startSpan(s.ctx, "service.Sessions.SyncLatestCodexRollout",
 		attrLoomSessionID(sessionID),
 		attrLoomBackend("codex"),
 	)

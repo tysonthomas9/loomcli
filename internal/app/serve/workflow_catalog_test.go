@@ -54,9 +54,11 @@ func TestWorkflowCatalogComposesProductionAutomationCapability(t *testing.T) {
 	module, err := NewWorkflowCatalogModule(testWorkflowCatalogConfig(WorkflowCatalogConfig{
 		Enabled: true, AutomationEnabled: true, FleetDBClient: client,
 		AutomationDriverRuns: state.DriverRuns(), AutomationWorkspaces: state.Workspaces(),
-		AutomationWebhookVerifier: webhooks.NewCompatibilityVerifier(webhooks.CompatibilityVerifierConfig{
-			Bindings: state.TriggerBindings(), Connectors: state.Connectors(),
-		}),
+		AutomationWebhookVerifierFactory: func(bindings automation.BindingQueries) WebhookVerifier {
+			return webhooks.NewVerifier(webhooks.VerifierConfig{
+				Bindings: bindings, Connectors: state.Connectors(),
+			})
+		},
 		AutomationAwaits: state.Awaits(),
 	}))
 	if err != nil {

@@ -15,6 +15,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/app/agentprovisioning"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
+	connectorsmodule "github.com/tysonthomas9/loomcli/internal/modules/connectors"
 	workflowcataloghttp "github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog/httpapi"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 	"github.com/tysonthomas9/loomcli/internal/store"
@@ -495,7 +496,7 @@ func (operations *testAgentProvisioningOperations) EnsureGrant(
 	if operations == nil || operations.store == nil {
 		return agentprovisioning.ErrUnavailable
 	}
-	existing, err := operations.store.ConnectorGrants().ListByBinding(
+	existing, err := operations.store.Connectors().ListGrantRecordsByBinding(
 		ctx,
 		command.WorkspaceKey,
 		command.BindingID,
@@ -513,9 +514,9 @@ func (operations *testAgentProvisioningOperations) EnsureGrant(
 			agentprovisioning.ErrConflict,
 		)
 	}
-	_, err = operations.store.ConnectorGrants().Create(
+	_, err = operations.store.Connectors().CreateManagementGrant(
 		ctx,
-		store.ConnectorGrantCreate{
+		connectorsmodule.CreateGrantMutation{
 			WorkspaceKey:    command.WorkspaceKey,
 			GrantID:         command.Grant.GrantID,
 			ConnectorID:     command.Grant.ConnectorID,
@@ -530,7 +531,7 @@ func (operations *testAgentProvisioningOperations) EnsureGrant(
 	if !errors.Is(err, domain.ErrAlreadyExists) {
 		return mapTestProvisioningOperationError(err)
 	}
-	existing, getErr := operations.store.ConnectorGrants().ListByBinding(
+	existing, getErr := operations.store.Connectors().ListGrantRecordsByBinding(
 		ctx,
 		command.WorkspaceKey,
 		command.BindingID,
@@ -549,7 +550,7 @@ func (operations *testAgentProvisioningOperations) EnsureGrant(
 }
 
 func testFindProvisionedGrant(
-	grants []*domain.ConnectorGrant,
+	grants []*connectorsmodule.ConnectorGrant,
 	command agentprovisioning.EnsureGrantCommand,
 ) (found, exact bool) {
 	for _, grant := range grants {

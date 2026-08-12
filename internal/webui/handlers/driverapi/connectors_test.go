@@ -11,11 +11,11 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
+	driverpkg "github.com/tysonthomas9/loomcli/internal/driver"
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/infra/connectorscatalog"
 	providers "github.com/tysonthomas9/loomcli/internal/infra/connectorsproviders"
 	"github.com/tysonthomas9/loomcli/internal/infra/connectorsvault"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
@@ -103,15 +103,15 @@ func newConnectorHarness(t *testing.T) *connectorHarness {
 	if err != nil {
 		t.Fatalf("Seal credential: %v", err)
 	}
-	if _, err := st.Connectors().Create(ctx, store.ConnectorCreate{
+	if _, err := st.Connectors().CreateConnectorRecord(ctx, connectorsmodule.CreateConnectorMutation{
 		WorkspaceKey: "WS", ConnectorID: "gh-main",
-		SourceKind:               domain.ConnectorSourceGitHub,
+		SourceKind:               connectorsmodule.ConnectorSourceGitHub,
 		OutboundCredentialSealed: sealed,
 	}); err != nil {
 		t.Fatalf("Create connector: %v", err)
 	}
 	for i, action := range []string{"github.issues.comment", "github.merge"} {
-		if _, err := st.ConnectorGrants().Create(ctx, store.ConnectorGrantCreate{
+		if _, err := st.Connectors().CreateManagementGrant(ctx, connectorsmodule.CreateGrantMutation{
 			WorkspaceKey: "WS", GrantID: fmt.Sprintf("grant-%d", i+1),
 			ConnectorID: "gh-main", BindingID: "binding-1",
 			Action: action, ResourcePattern: "repo:octocat/hello",
@@ -129,16 +129,14 @@ func newConnectorHarness(t *testing.T) *connectorHarness {
 	if err := registry.Register(connectorsmodule.ConnectorSourceGitHub, provider); err != nil {
 		t.Fatalf("Register provider: %v", err)
 	}
-	catalog, err := connectorscatalog.New(st.Connectors(), st.ConnectorGrants(), st.ConnectorCalls())
-	if err != nil {
-		t.Fatalf("New connector catalog: %v", err)
-	}
-	dispatcher, err := connectorsmodule.NewDispatch(catalog, vault, registry, nil)
+	dispatcher, err := connectorsmodule.NewDispatch(st.Connectors(), vault, registry, nil)
 	if err != nil {
 		t.Fatalf("New connector dispatcher: %v", err)
 	}
+	runTokenKey := bytes.Repeat([]byte{0x42}, 32)
 	module := NewModule(Config{
 		Store:                st,
+		RunTokenKey:          runTokenKey,
 		Execution:            testDriverRunExecution{store: st},
 		ExecutionAuthorities: testDriverRunAuthorityResolver{},
 		Dispatcher:           dispatcher,
@@ -149,13 +147,14 @@ func newConnectorHarness(t *testing.T) *connectorHarness {
 	t.Cleanup(server.Close)
 	return &connectorHarness{
 		testHarness: &testHarness{
-			server:  server,
-			store:   st,
-			module:  module,
-			runID:   claimed.RunID,
-			nodeID:  claimed.NodeID,
-			leaseID: claimed.LeaseID,
-			fence:   claimed.FencingToken,
+			server:      server,
+			store:       st,
+			module:      module,
+			runID:       claimed.RunID,
+			nodeID:      claimed.NodeID,
+			leaseID:     claimed.LeaseID,
+			fence:       claimed.FencingToken,
+			runTokenKey: runTokenKey,
 		},
 		provider:  provider,
 		bindingID: "binding-1",
@@ -203,9 +202,9 @@ func (h *connectorHarness) doRaw(t *testing.T, body any, headers map[string]stri
 	return resp.StatusCode, raw
 }
 
-func (h *connectorHarness) auditRecords(t *testing.T) []*domain.ConnectorCallRecord {
+func (h *connectorHarness) auditRecords(t *testing.T) []*connectorsmodule.ConnectorCallRecord {
 	t.Helper()
-	records, err := h.store.ConnectorCalls().ListByRun(context.Background(), "WS", h.runID, store.ConnectorCallFilter{})
+	records, err := h.store.Connectors().ListCallRecordsByRun(context.Background(), "WS", h.runID, connectorsmodule.ConnectorCallFilter{})
 	if err != nil {
 		t.Fatalf("ListByRun: %v", err)
 	}
@@ -214,10 +213,12 @@ func (h *connectorHarness) auditRecords(t *testing.T) []*domain.ConnectorCallRec
 
 func TestConnectorDispatchAuthRefusals(t *testing.T) {
 	h := newConnectorHarness(t)
-	staleOwner := h.ownerHeaders()
-	staleOwner[HeaderDriverLeaseID] = "lease-stolen"
-	unknownRun := h.ownerHeaders()
-	unknownRun[HeaderDriverRunID] = "run-unknown"
+	staleOwner := bearer(h.mintToken(t, time.Hour, func(claims *driverpkg.RunTokenClaims) {
+		claims.LeaseID = "lease-stolen"
+	}))
+	unknownRun := bearer(h.mintToken(t, time.Hour, func(claims *driverpkg.RunTokenClaims) {
+		claims.RunID = "run-unknown"
+	}))
 	cases := []struct {
 		name     string
 		headers  map[string]string
@@ -251,7 +252,7 @@ func TestConnectorDispatchAuthRefusals(t *testing.T) {
 
 func TestConnectorDispatchHappyPath(t *testing.T) {
 	h := newConnectorHarness(t)
-	status, raw := h.doRaw(t, h.dispatchBody("github.issues.comment"), h.ownerHeaders())
+	status, raw := h.doRaw(t, h.dispatchBody("github.issues.comment"), h.ownerHeaders(t))
 	if status != http.StatusOK {
 		t.Fatalf("status = %d, want 200 (body %s)", status, raw)
 	}
@@ -269,7 +270,7 @@ func TestConnectorDispatchHappyPath(t *testing.T) {
 	if got, want := strings.Join(keys, ","), "body,callId,decision,status"; got != want {
 		t.Fatalf("response keys = %q, want %q", got, want)
 	}
-	wantCallID := domain.ConnectorCallID(h.runID, "github.issues.comment", 1)
+	wantCallID := connectorsmodule.ConnectorCallID(h.runID, "github.issues.comment", 1)
 	if decoded["callId"] != wantCallID || decoded["decision"] != "granted" || decoded["status"] != float64(200) {
 		t.Fatalf("response = %v, want callId=%q decision=granted status=200", decoded, wantCallID)
 	}
@@ -296,7 +297,7 @@ func TestConnectorDispatchHappyPath(t *testing.T) {
 		t.Fatalf("audit rows = %d, want 1", len(records))
 	}
 	rec := records[0]
-	if rec.Decision != domain.ConnectorCallGranted || rec.BindingID != h.bindingID ||
+	if rec.Decision != connectorsmodule.ConnectorCallGranted || rec.BindingID != h.bindingID ||
 		rec.ConnectorID != "gh-main" || rec.UpstreamStatus != 200 || rec.CallID != wantCallID {
 		t.Fatalf("audit row = %+v, want granted/%s/gh-main/200/%s", rec, h.bindingID, wantCallID)
 	}
@@ -304,7 +305,7 @@ func TestConnectorDispatchHappyPath(t *testing.T) {
 
 func TestConnectorDispatchGrantDenied(t *testing.T) {
 	h := newConnectorHarness(t)
-	status, raw := h.doRaw(t, h.dispatchBody("github.branch.create"), h.ownerHeaders())
+	status, raw := h.doRaw(t, h.dispatchBody("github.branch.create"), h.ownerHeaders(t))
 	if status != http.StatusForbidden {
 		t.Fatalf("status = %d, want 403 (body %s)", status, raw)
 	}
@@ -313,7 +314,7 @@ func TestConnectorDispatchGrantDenied(t *testing.T) {
 		t.Fatalf("provider calls = %d on denied grant, want 0", len(h.provider.calls))
 	}
 	records := h.auditRecords(t)
-	if len(records) != 1 || records[0].Decision != domain.ConnectorCallDenied {
+	if len(records) != 1 || records[0].Decision != connectorsmodule.ConnectorCallDenied {
 		t.Fatalf("audit rows = %+v, want exactly one denied row", records)
 	}
 }
@@ -321,12 +322,12 @@ func TestConnectorDispatchGrantDenied(t *testing.T) {
 func TestConnectorDispatchNoBindingDeniedWithoutAudit(t *testing.T) {
 	// A run with no trigger lineage has no binding, hence no grants:
 	// deny-by-default refuses before any dispatch or audit work.
-	h := newTestHarness(t, "")
+	h := newTestHarness(t)
 	dispatcher := unreachableConnectorDispatcher{} // never reached
 	h.module.dispatcher = dispatcher
 	resp, decoded := h.do(t, opRequest{
 		op:      "connector-dispatch",
-		headers: h.ownerHeaders(),
+		headers: h.ownerHeaders(t),
 		body: map[string]any{
 			"connectorId": "gh-main", "action": "github.issues.comment",
 			"resource": "repo:octocat/hello", "callSeq": 1,
@@ -338,7 +339,7 @@ func TestConnectorDispatchNoBindingDeniedWithoutAudit(t *testing.T) {
 	if code := errorCode(t, decoded); code != "grant_denied" {
 		t.Fatalf("error code = %q, want grant_denied", code)
 	}
-	records, err := h.store.ConnectorCalls().ListByRun(context.Background(), "WS", h.runID, store.ConnectorCallFilter{})
+	records, err := h.store.Connectors().ListCallRecordsByRun(context.Background(), "WS", h.runID, connectorsmodule.ConnectorCallFilter{})
 	if err != nil {
 		t.Fatalf("ListByRun: %v", err)
 	}
@@ -350,7 +351,7 @@ func TestConnectorDispatchNoBindingDeniedWithoutAudit(t *testing.T) {
 func TestConnectorDispatchPreconditionRequired(t *testing.T) {
 	h := newConnectorHarness(t)
 	body := h.dispatchBody("github.merge") // granted, but no expectedHeadSha supplied
-	status, raw := h.doRaw(t, body, h.ownerHeaders())
+	status, raw := h.doRaw(t, body, h.ownerHeaders(t))
 	if status != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400 (body %s)", status, raw)
 	}
@@ -359,7 +360,7 @@ func TestConnectorDispatchPreconditionRequired(t *testing.T) {
 		t.Fatalf("provider calls = %d before precondition, want 0", len(h.provider.calls))
 	}
 	records := h.auditRecords(t)
-	if len(records) != 1 || records[0].Decision != domain.ConnectorCallPreconditionRequired {
+	if len(records) != 1 || records[0].Decision != connectorsmodule.ConnectorCallPreconditionRequired {
 		t.Fatalf("audit rows = %+v, want one precondition_required row", records)
 	}
 }
@@ -368,7 +369,7 @@ func TestConnectorDispatchPreconditionSatisfied(t *testing.T) {
 	h := newConnectorHarness(t)
 	body := h.dispatchBody("github.merge")
 	body["preconditions"] = map[string]any{"expectedHeadSha": "abc123"}
-	status, raw := h.doRaw(t, body, h.ownerHeaders())
+	status, raw := h.doRaw(t, body, h.ownerHeaders(t))
 	if status != http.StatusOK {
 		t.Fatalf("status = %d, want 200 (body %s)", status, raw)
 	}
@@ -386,13 +387,13 @@ func TestConnectorDispatchStaleSubject(t *testing.T) {
 	}
 	body := h.dispatchBody("github.merge")
 	body["preconditions"] = map[string]any{"expectedHeadSha": "abc123"}
-	status, raw := h.doRaw(t, body, h.ownerHeaders())
+	status, raw := h.doRaw(t, body, h.ownerHeaders(t))
 	if status != http.StatusConflict {
 		t.Fatalf("status = %d, want 409 (body %s)", status, raw)
 	}
 	assertOpErrorCode(t, raw, "stale_subject", false)
 	records := h.auditRecords(t)
-	if len(records) != 1 || records[0].Decision != domain.ConnectorCallStaleSubject {
+	if len(records) != 1 || records[0].Decision != connectorsmodule.ConnectorCallStaleSubject {
 		t.Fatalf("audit rows = %+v, want one stale_subject row", records)
 	}
 }
@@ -401,7 +402,7 @@ func TestConnectorDispatchRateLimited(t *testing.T) {
 	h := newConnectorHarness(t)
 	h.provider.result = providers.CallResult{Status: http.StatusTooManyRequests}
 	h.provider.err = &providers.RateLimited{Action: "github.issues.comment", Status: http.StatusTooManyRequests}
-	status, raw := h.doRaw(t, h.dispatchBody("github.issues.comment"), h.ownerHeaders())
+	status, raw := h.doRaw(t, h.dispatchBody("github.issues.comment"), h.ownerHeaders(t))
 	if status != http.StatusTooManyRequests {
 		t.Fatalf("status = %d, want 429 (body %s)", status, raw)
 	}
@@ -414,7 +415,7 @@ func TestConnectorDispatchUpstreamError(t *testing.T) {
 	h.provider.err = &providers.UpstreamError{
 		Action: "github.issues.comment", Class: providers.ClassServerError, Status: http.StatusBadGateway,
 	}
-	status, raw := h.doRaw(t, h.dispatchBody("github.issues.comment"), h.ownerHeaders())
+	status, raw := h.doRaw(t, h.dispatchBody("github.issues.comment"), h.ownerHeaders(t))
 	if status != http.StatusBadGateway {
 		t.Fatalf("status = %d, want 502 (body %s)", status, raw)
 	}
@@ -422,10 +423,10 @@ func TestConnectorDispatchUpstreamError(t *testing.T) {
 }
 
 func TestConnectorDispatchUnavailableWithoutDispatcher(t *testing.T) {
-	h := newTestHarness(t, "") // Config without Dispatcher: egress fails closed
+	h := newTestHarness(t) // Config without Dispatcher: egress fails closed
 	resp, decoded := h.do(t, opRequest{
 		op:      "connector-dispatch",
-		headers: h.ownerHeaders(),
+		headers: h.ownerHeaders(t),
 		body:    map[string]any{"connectorId": "gh-main", "action": "github.issues.comment", "resource": "r:x"},
 	})
 	if resp.StatusCode != http.StatusServiceUnavailable {
@@ -443,11 +444,11 @@ func TestConnectorDispatchNeverLeaksCredential(t *testing.T) {
 	h := newConnectorHarness(t)
 	var responses [][]byte
 
-	_, raw := h.doRaw(t, h.dispatchBody("github.issues.comment"), h.ownerHeaders())
+	_, raw := h.doRaw(t, h.dispatchBody("github.issues.comment"), h.ownerHeaders(t))
 	responses = append(responses, raw)
-	_, raw = h.doRaw(t, h.dispatchBody("github.branch.create"), h.ownerHeaders())
+	_, raw = h.doRaw(t, h.dispatchBody("github.branch.create"), h.ownerHeaders(t))
 	responses = append(responses, raw)
-	_, raw = h.doRaw(t, h.dispatchBody("github.merge"), h.ownerHeaders())
+	_, raw = h.doRaw(t, h.dispatchBody("github.merge"), h.ownerHeaders(t))
 	responses = append(responses, raw)
 
 	// A provider rudely echoing the credential upstream must still come back
@@ -460,7 +461,7 @@ func TestConnectorDispatchNeverLeaksCredential(t *testing.T) {
 	}
 	body := h.dispatchBody("github.issues.comment")
 	body["callSeq"] = 2
-	_, raw = h.doRaw(t, body, h.ownerHeaders())
+	_, raw = h.doRaw(t, body, h.ownerHeaders(t))
 	responses = append(responses, raw)
 
 	for i, resp := range responses {

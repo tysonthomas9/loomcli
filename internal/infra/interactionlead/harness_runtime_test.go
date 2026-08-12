@@ -15,7 +15,6 @@ import (
 	"github.com/olesho/harness-wrapper/pkg/wrapper"
 
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
-	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
 func TestHarnessNameForBackend(t *testing.T) {
@@ -156,7 +155,7 @@ func TestRunHarnessLeadRuntimeLifecycle(t *testing.T) {
 	if ref != "artifact://transcript-lead-session" {
 		t.Fatalf("transcript_ref = %q, want durable session transcript", ref)
 	}
-	artifact, err := st.Artifacts().Get(ctx, "WS", "transcript-lead-session")
+	artifact, err := st.ArtifactQueries().GetArtifactRecord(ctx, "WS", "transcript-lead-session")
 	if err != nil {
 		t.Fatalf("get transcript artifact: %v", err)
 	}
@@ -165,7 +164,7 @@ func TestRunHarnessLeadRuntimeLifecycle(t *testing.T) {
 		artifact.Type != "transcript" {
 		t.Fatalf("transcript artifact ownership = %+v", artifact)
 	}
-	content, err := st.Artifacts().(store.ArtifactContentReader).ReadContent(ctx, "WS", artifact.ArtifactID)
+	content, err := st.ArtifactQueries().ReadArtifactContent(ctx, "WS", artifact.ArtifactID)
 	if err != nil {
 		t.Fatalf("read transcript content: %v", err)
 	}
@@ -226,12 +225,11 @@ func TestRunHarnessLeadRuntimeTreatsStoreHistoryAsIncompleteWhenFinalEventIsLost
 		t.Fatal("runtime did not finish after the final watcher event was lost")
 	}
 
-	artifact, err := st.Artifacts().Get(t.Context(), "WS", "transcript-lead-session")
+	artifact, err := st.ArtifactQueries().GetArtifactRecord(t.Context(), "WS", "transcript-lead-session")
 	if err != nil {
 		t.Fatalf("get transcript artifact: %v", err)
 	}
-	content, err := st.Artifacts().(store.ArtifactContentReader).
-		ReadContent(t.Context(), "WS", artifact.ArtifactID)
+	content, err := st.ArtifactQueries().ReadArtifactContent(t.Context(), "WS", artifact.ArtifactID)
 	if err != nil {
 		t.Fatalf("read transcript artifact: %v", err)
 	}
@@ -387,12 +385,11 @@ func TestRunHarnessLeadRuntimeUsesValidatedRotatedSessionIDEverywhere(t *testing
 	if got := session.Metadata["transcript_ref"]; got != "artifact://transcript-lead-session" {
 		t.Fatalf("transcript_ref = %q", got)
 	}
-	artifact, err := st.Artifacts().Get(t.Context(), "WS", "transcript-lead-session")
+	artifact, err := st.ArtifactQueries().GetArtifactRecord(t.Context(), "WS", "transcript-lead-session")
 	if err != nil {
 		t.Fatalf("get transcript artifact: %v", err)
 	}
-	content, err := st.Artifacts().(store.ArtifactContentReader).
-		ReadContent(t.Context(), "WS", artifact.ArtifactID)
+	content, err := st.ArtifactQueries().ReadArtifactContent(t.Context(), "WS", artifact.ArtifactID)
 	if err != nil {
 		t.Fatalf("read transcript artifact: %v", err)
 	}
@@ -524,7 +521,7 @@ func TestRunHarnessLeadRuntimePersistsBestEffortTranscriptAfterCloseDrainFailure
 				session.Metadata["transcript_ref"] != "artifact://transcript-lead-session" {
 				t.Fatalf("final session metadata = %#v", session.Metadata)
 			}
-			artifact, err := st.Artifacts().Get(t.Context(), "WS", "transcript-lead-session")
+			artifact, err := st.ArtifactQueries().GetArtifactRecord(t.Context(), "WS", "transcript-lead-session")
 			if err != nil {
 				t.Fatalf("get transcript artifact: %v", err)
 			}
@@ -534,8 +531,7 @@ func TestRunHarnessLeadRuntimePersistsBestEffortTranscriptAfterCloseDrainFailure
 				artifact.Metadata["transcript_source_truncation_cause"] != wantCause {
 				t.Fatalf("close/drain failure provenance = %#v", artifact.Metadata)
 			}
-			content, err := st.Artifacts().(store.ArtifactContentReader).
-				ReadContent(t.Context(), "WS", artifact.ArtifactID)
+			content, err := st.ArtifactQueries().ReadArtifactContent(t.Context(), "WS", artifact.ArtifactID)
 			if err != nil {
 				t.Fatalf("read transcript artifact: %v", err)
 			}
@@ -593,7 +589,7 @@ func TestCaptureHarnessInteractiveTranscriptPersistsEveryControlledBackend(t *te
 			if got := session.Metadata["transcript_ref"]; got != "artifact://transcript-lead-session" {
 				t.Fatalf("transcript_ref = %q", got)
 			}
-			artifact, err := st.Artifacts().Get(t.Context(), "WS", "transcript-lead-session")
+			artifact, err := st.ArtifactQueries().GetArtifactRecord(t.Context(), "WS", "transcript-lead-session")
 			if err != nil {
 				t.Fatalf("get transcript artifact: %v", err)
 			}
@@ -601,8 +597,7 @@ func TestCaptureHarnessInteractiveTranscriptPersistsEveryControlledBackend(t *te
 				artifact.OwnerType != "session" || artifact.OwnerID != "lead-session" {
 				t.Fatalf("artifact ownership = %+v", artifact)
 			}
-			content, err := st.Artifacts().(store.ArtifactContentReader).
-				ReadContent(t.Context(), "WS", artifact.ArtifactID)
+			content, err := st.ArtifactQueries().ReadArtifactContent(t.Context(), "WS", artifact.ArtifactID)
 			if err != nil {
 				t.Fatalf("read transcript: %v", err)
 			}
@@ -865,7 +860,7 @@ func TestCaptureHarnessInteractiveTranscriptNativeLimitSkipsUnboundedHistory(t *
 		t.Fatalf("bounded native history session = %q, want launch-pinned session", fake.boundedHistorySession)
 	}
 
-	artifact, err := st.Artifacts().Get(t.Context(), "WS", "transcript-lead-session")
+	artifact, err := st.ArtifactQueries().GetArtifactRecord(t.Context(), "WS", "transcript-lead-session")
 	if err != nil {
 		t.Fatalf("get transcript artifact: %v", err)
 	}
@@ -877,8 +872,7 @@ func TestCaptureHarnessInteractiveTranscriptNativeLimitSkipsUnboundedHistory(t *
 			transcriptSourceCauseHarnessNative+"_and_"+transcriptSourceCauseHarnessTerminalBestEffort {
 		t.Fatalf("native truncation metadata = %#v", artifact.Metadata)
 	}
-	content, err := st.Artifacts().(store.ArtifactContentReader).
-		ReadContent(t.Context(), "WS", artifact.ArtifactID)
+	content, err := st.ArtifactQueries().ReadArtifactContent(t.Context(), "WS", artifact.ArtifactID)
 	if err != nil {
 		t.Fatalf("read transcript artifact: %v", err)
 	}
@@ -912,7 +906,7 @@ func TestCaptureHarnessInteractiveTranscriptPersistsTerminalOutputTruncation(t *
 		t.Fatalf("captureHarnessInteractiveTranscript() error = %v", err)
 	}
 
-	artifact, err := st.Artifacts().Get(t.Context(), "WS", "transcript-lead-session")
+	artifact, err := st.ArtifactQueries().GetArtifactRecord(t.Context(), "WS", "transcript-lead-session")
 	if err != nil {
 		t.Fatalf("get transcript artifact: %v", err)
 	}
@@ -921,8 +915,7 @@ func TestCaptureHarnessInteractiveTranscriptPersistsTerminalOutputTruncation(t *
 			transcriptSourceCauseHarnessTerminalBestEffort+"_and_"+transcriptSourceCauseHarnessTerminal {
 		t.Fatalf("terminal truncation metadata = %#v", artifact.Metadata)
 	}
-	content, err := st.Artifacts().(store.ArtifactContentReader).
-		ReadContent(t.Context(), "WS", artifact.ArtifactID)
+	content, err := st.ArtifactQueries().ReadArtifactContent(t.Context(), "WS", artifact.ArtifactID)
 	if err != nil {
 		t.Fatalf("read transcript artifact: %v", err)
 	}
@@ -953,7 +946,7 @@ func TestCaptureHarnessInteractiveTranscriptMarksRequiredEmptyTerminalFallback(t
 		t.Fatalf("captureHarnessInteractiveTranscript() error = %v", err)
 	}
 
-	artifact, err := st.Artifacts().Get(t.Context(), "WS", "transcript-lead-session")
+	artifact, err := st.ArtifactQueries().GetArtifactRecord(t.Context(), "WS", "transcript-lead-session")
 	if err != nil {
 		t.Fatalf("get transcript artifact: %v", err)
 	}
@@ -963,8 +956,7 @@ func TestCaptureHarnessInteractiveTranscriptMarksRequiredEmptyTerminalFallback(t
 			transcriptSourceCauseHarnessTerminalBestEffort {
 		t.Fatalf("empty terminal fallback evidence = %#v", artifact.Metadata)
 	}
-	content, err := st.Artifacts().(store.ArtifactContentReader).
-		ReadContent(t.Context(), "WS", artifact.ArtifactID)
+	content, err := st.ArtifactQueries().ReadArtifactContent(t.Context(), "WS", artifact.ArtifactID)
 	if err != nil {
 		t.Fatalf("read transcript artifact: %v", err)
 	}
@@ -1014,7 +1006,7 @@ func TestCaptureHarnessInteractiveTranscriptMarksHistoryUnavailable(t *testing.T
 		t.Fatalf("captureHarnessInteractiveTranscript() error = %v", err)
 	}
 
-	artifact, err := st.Artifacts().Get(t.Context(), "WS", "transcript-lead-session")
+	artifact, err := st.ArtifactQueries().GetArtifactRecord(t.Context(), "WS", "transcript-lead-session")
 	if err != nil {
 		t.Fatalf("get transcript artifact: %v", err)
 	}
@@ -1026,8 +1018,7 @@ func TestCaptureHarnessInteractiveTranscriptMarksHistoryUnavailable(t *testing.T
 		artifact.Metadata["transcript_native_history_limit_bytes"] != "" {
 		t.Fatalf("history-unavailable evidence = %#v", artifact.Metadata)
 	}
-	content, err := st.Artifacts().(store.ArtifactContentReader).
-		ReadContent(t.Context(), "WS", artifact.ArtifactID)
+	content, err := st.ArtifactQueries().ReadArtifactContent(t.Context(), "WS", artifact.ArtifactID)
 	if err != nil {
 		t.Fatalf("read transcript artifact: %v", err)
 	}

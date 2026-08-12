@@ -2,7 +2,6 @@ package driverapi
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 	"testing"
 
@@ -40,19 +39,13 @@ func (h *testHarness) bindConfigHeaders(t *testing.T, bindingID, sourceConfigRef
 	if err != nil {
 		t.Fatalf("claim run %q: %v", runID, err)
 	}
-	return map[string]string{
-		HeaderDriverRunID:        claimed.RunID,
-		HeaderDriverNodeID:       claimed.NodeID,
-		HeaderDriverLeaseID:      claimed.LeaseID,
-		HeaderDriverLeaseToken:   "driver-test-token",
-		HeaderDriverFencingToken: fmt.Sprintf("%d", claimed.FencingToken),
-	}
+	return h.tokenHeadersForRun(t, claimed)
 }
 
 // A run stamped with its binding resolves that binding's config by reference,
 // and a body-supplied binding id is IGNORED (server derives it from provenance).
 func TestBindingConfigResolvesFromStampedProvenance(t *testing.T) {
-	h := newTestHarness(t, "")
+	h := newTestHarness(t)
 	// A DIFFERENT binding the caller will try to smuggle via the request body.
 	// If the body were honored, the response would carry "evil-role".
 	if _, err := h.store.TriggerBindings().Create(context.Background(), store.TriggerBindingCreate{
@@ -91,8 +84,8 @@ func TestBindingConfigResolvesFromStampedProvenance(t *testing.T) {
 // A run with no binding lineage gets a clean not_found — NOT the connector
 // path's grant_denied (reading a nonexistent config is not an escalation).
 func TestBindingConfigNoBindingNotFound(t *testing.T) {
-	h := newTestHarness(t, "") // run-1 carries no binding, no source ref
-	resp, decoded := h.do(t, opRequest{op: "binding-config", headers: h.ownerHeaders()})
+	h := newTestHarness(t) // run-1 carries no binding, no source ref
+	resp, decoded := h.do(t, opRequest{op: "binding-config", headers: h.ownerHeaders(t)})
 	if resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404 (body %v)", resp.StatusCode, decoded)
 	}
@@ -103,7 +96,7 @@ func TestBindingConfigNoBindingNotFound(t *testing.T) {
 
 // binding-config authenticates like every other op: no run headers → 401.
 func TestBindingConfigRequiresRunOwnership(t *testing.T) {
-	h := newTestHarness(t, "")
+	h := newTestHarness(t)
 	resp, decoded := h.do(t, opRequest{op: "binding-config"})
 	if resp.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("status = %d, want 401", resp.StatusCode)

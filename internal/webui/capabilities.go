@@ -101,6 +101,7 @@ type ExecutionCapability interface {
 // ArtifactsCapability is the owner-fenced artifact lifecycle handle.
 type ArtifactsCapability interface {
 	ArtifactsAPI() artifacts.API
+	ArtifactQueries() artifacts.QueryAPI
 }
 
 // Exact module aliases keep ServerConfig's public field types source
@@ -108,6 +109,7 @@ type ArtifactsCapability interface {
 type (
 	IssueBackend                             = backend.IssueBackend
 	DaytonaProviderBroker                    = execution.DaytonaProviderBroker
+	ArtifactQueryAPI                         = artifacts.QueryAPI
 	SourceControlMaterializer                = sourcecontrol.Materializer
 	RepositoryAdmissionMaterializer          = sourcecontrol.RepositoryAdmissionMaterializer
 	WorkflowCatalogAPI                       = workflowcatalog.API

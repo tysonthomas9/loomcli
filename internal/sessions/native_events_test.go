@@ -3,11 +3,14 @@ package sessions
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"github.com/tysonthomas9/loomcli/internal/sessions/transcript"
 )
 
 func TestLoadNativeEvents_ReturnsNilWhenMissing(t *testing.T) {
-	store, err := NewStore(t.TempDir())
+	store, err := NewStore(t.Context(), t.TempDir())
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}
@@ -31,7 +34,7 @@ func TestLoadNativeEvents_ParsesClaude(t *testing.T) {
 	// Disable redaction for this test so the assertion on event text is deterministic.
 	t.Setenv("LOOM_REDACT_TRANSCRIPTS", "off")
 
-	store, err := NewStore(t.TempDir())
+	store, err := NewStore(t.Context(), t.TempDir())
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}
@@ -68,6 +71,101 @@ func TestLoadNativeEvents_ParsesClaude(t *testing.T) {
 	}
 }
 
+func TestLoadNativeEvents_ParsesCodex(t *testing.T) {
+	payload := []byte(`{"timestamp":"2026-04-06T17:29:41.321Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"write a file"}]}}` + "\n" +
+		`{"timestamp":"2026-04-06T17:29:51.062Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"done"}]}}` + "\n" +
+		`{"timestamp":"2026-04-06T17:29:51.064Z","type":"response_item","payload":{"type":"function_call","name":"exec_command","arguments":"{\"cmd\":\"true\"}","call_id":"call_1"}}` + "\n" +
+		`{"timestamp":"2026-04-06T17:29:51.146Z","type":"response_item","payload":{"type":"function_call_output","call_id":"call_1","output":"ok"}}` + "\n")
+	events, err := loadRawNativeEvents(t, "codex", payload)
+	if err != nil {
+		t.Fatalf("LoadNativeEvents: %v", err)
+	}
+	if len(events) != 4 {
+		t.Fatalf("want 4 events, got %d: %+v", len(events), events)
+	}
+	if events[0].Role != "user" || events[0].Text != "write a file" {
+		t.Errorf("user event = %+v", events[0])
+	}
+	if events[2].Type != "tool_use" || events[2].ToolName != "exec_command" || events[2].ToolUseID != "call_1" {
+		t.Errorf("tool event = %+v", events[2])
+	}
+	if events[3].Type != "tool_result" || events[3].ToolUseID != "call_1" {
+		t.Errorf("tool result = %+v", events[3])
+	}
+}
+
+func TestLoadNativeEvents_ParsesOpenCode(t *testing.T) {
+	payload := []byte(`{
+  "info": {"id":"s1"},
+  "messages": [
+    {"info":{"id":"m1","role":"user","time":{"created":1700000000000}},"parts":[{"type":"text","text":"write hello"}]},
+    {"info":{"id":"m2","role":"assistant","time":{"created":1700000001000}},"parts":[
+      {"type":"text","text":"I'll do it."},
+      {"type":"tool","tool":"write","callID":"c1","state":{"input":{"filePath":"/tmp/hello.txt"},"output":"wrote 5 bytes"}}
+    ]}
+  ]
+}`)
+	events, err := loadRawNativeEvents(t, "opencode", payload)
+	if err != nil {
+		t.Fatalf("LoadNativeEvents: %v", err)
+	}
+	if len(events) != 4 {
+		t.Fatalf("want 4 events, got %d: %+v", len(events), events)
+	}
+	if events[0].Role != transcript.RoleUser || events[0].Text != "write hello" {
+		t.Errorf("user event = %+v", events[0])
+	}
+	if events[2].Type != transcript.EventToolUse || events[2].ToolName != "write" || events[2].ToolUseID != "c1" {
+		t.Errorf("tool event = %+v", events[2])
+	}
+	if events[3].Type != transcript.EventToolResult || events[3].Output != "wrote 5 bytes" {
+		t.Errorf("tool result = %+v", events[3])
+	}
+}
+
+func TestLoadNativeEvents_OpenCodeToolWithoutState(t *testing.T) {
+	payload := []byte(`{"messages":[{"info":{"id":"m1","role":"assistant","time":{"created":0}},"parts":[{"type":"tool","tool":"write","callID":"c1","state":null}]}]}`)
+	events, err := loadRawNativeEvents(t, "opencode", payload)
+	if err != nil {
+		t.Fatalf("LoadNativeEvents: %v", err)
+	}
+	if len(events) != 1 || events[0].Type != transcript.EventToolUse || events[0].ToolUseID != "c1" {
+		t.Fatalf("events = %+v, want one tool-use event", events)
+	}
+}
+
+func TestLoadNativeEvents_RejectsUnknownBackend(t *testing.T) {
+	payload := []byte(`{"type":"user","uuid":"u1","message":{"content":"must not be guessed"}}` + "\n")
+	events, err := loadRawNativeEvents(t, "mystery", payload)
+	if err == nil || !strings.Contains(err.Error(), `unsupported native transcript backend "mystery"`) {
+		t.Fatalf("error = %v, want unsupported backend", err)
+	}
+	if events != nil {
+		t.Fatalf("events = %+v, want nil", events)
+	}
+}
+
+func loadRawNativeEvents(t *testing.T, backend string, payload []byte) ([]transcript.Event, error) {
+	t.Helper()
+	t.Setenv("LOOM_REDACT_TRANSCRIPTS", "off")
+	store, err := NewStore(t.Context(), t.TempDir())
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	sess, err := store.CreateSession(CreateOptions{AgentName: "parser-test", Backend: backend})
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	src := filepath.Join(t.TempDir(), "native.jsonl")
+	if err := os.WriteFile(src, payload, 0o600); err != nil {
+		t.Fatalf("write native transcript: %v", err)
+	}
+	if err := store.SyncNativeTranscript(sess.SessionID(), src, TranscriptFormatRaw); err != nil {
+		t.Fatalf("SyncNativeTranscript: %v", err)
+	}
+	return store.LoadNativeEvents(sess.SessionID())
+}
+
 // TestLoadNativeEvents_ParsesCanonicalTSLeafTranscript covers the daemon TS leaf,
 // which writes its transcript ALREADY in the canonical transcript.Event format
 // rather than the raw backend stream the Go-leaf hooks capture. The canonical
@@ -79,13 +177,13 @@ func TestLoadNativeEvents_ParsesClaude(t *testing.T) {
 func TestLoadNativeEvents_ParsesCanonicalTSLeafTranscript(t *testing.T) {
 	t.Setenv("LOOM_REDACT_TRANSCRIPTS", "off")
 
-	store, err := NewStore(t.TempDir())
+	store, err := NewStore(t.Context(), t.TempDir())
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}
 	// Backend is codex — the codex parser only understands raw `exec --json`
 	// (response_item lines) and returns 0 for canonical input, so this exercises
-	// the canonical fallback, not the codex path.
+	// the canonical path, not the codex path.
 	sess, err := store.CreateSession(CreateOptions{AgentName: "codex-coder", Backend: "codex"})
 	if err != nil {
 		t.Fatalf("CreateSession: %v", err)
@@ -126,7 +224,7 @@ func TestLoadNativeEvents_ParsesCanonicalTSLeafTranscript(t *testing.T) {
 func TestLoadNativeEvents_MarkerIsAuthoritative(t *testing.T) {
 	t.Setenv("LOOM_REDACT_TRANSCRIPTS", "off")
 
-	store, err := NewStore(t.TempDir())
+	store, err := NewStore(t.Context(), t.TempDir())
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}

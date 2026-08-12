@@ -17,7 +17,7 @@ import (
 func TestAcquireLock(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	err := AcquireLock(tmpDir, "test", "test-agent")
+	err := AcquireLock(t.Context(), tmpDir, "test", "test-agent")
 	if err != nil {
 		t.Fatalf("AcquireLock failed: %v", err)
 	}
@@ -50,14 +50,14 @@ func TestAcquireLockFailsWhenLocked(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	// Acquire first lock
-	err := AcquireLock(tmpDir, "first", "agent1")
+	err := AcquireLock(t.Context(), tmpDir, "first", "agent1")
 	if err != nil {
 		t.Fatalf("First AcquireLock failed: %v", err)
 	}
 	defer ReleaseLock(tmpDir)
 
 	// Second acquire should fail
-	err = AcquireLock(tmpDir, "second", "agent2")
+	err = AcquireLock(t.Context(), tmpDir, "second", "agent2")
 	if err == nil {
 		t.Error("Expected error when lock already held")
 	}
@@ -80,7 +80,7 @@ func TestCheckLockWithLock(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	// Create lock
-	err := AcquireLock(tmpDir, "test", "agent")
+	err := AcquireLock(t.Context(), tmpDir, "test", "agent")
 	if err != nil {
 		t.Fatalf("AcquireLock failed: %v", err)
 	}
@@ -102,7 +102,7 @@ func TestCheckLockWithLock(t *testing.T) {
 func TestUpdateLockTask(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	err := AcquireLock(tmpDir, "plan", "falcon")
+	err := AcquireLock(t.Context(), tmpDir, "plan", "falcon")
 	if err != nil {
 		t.Fatalf("AcquireLock failed: %v", err)
 	}
@@ -135,7 +135,7 @@ func TestUpdateLockTaskNoLock(t *testing.T) {
 func TestReleaseLock(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	err := AcquireLock(tmpDir, "test", "agent")
+	err := AcquireLock(t.Context(), tmpDir, "test", "agent")
 	if err != nil {
 		t.Fatalf("AcquireLock failed: %v", err)
 	}
@@ -165,26 +165,26 @@ func TestGetLockStatus(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	// No lock - should return empty
-	status := GetLockStatus(tmpDir)
+	status := GetLockStatus(t.Context(), tmpDir)
 	if status != "" {
 		t.Errorf("Expected empty status when no lock, got '%s'", status)
 	}
 
 	// With lock
-	err := AcquireLock(tmpDir, "plan", "falcon")
+	err := AcquireLock(t.Context(), tmpDir, "plan", "falcon")
 	if err != nil {
 		t.Fatalf("AcquireLock failed: %v", err)
 	}
 	defer ReleaseLock(tmpDir)
 
-	status = GetLockStatus(tmpDir)
+	status = GetLockStatus(t.Context(), tmpDir)
 	if status == "" {
 		t.Error("Expected non-empty status when lock exists")
 	}
 
 	// With task
 	UpdateLockTask(tmpDir, "loom-123", "Test Task")
-	status = GetLockStatus(tmpDir)
+	status = GetLockStatus(t.Context(), tmpDir)
 	if status == "" {
 		t.Error("Expected non-empty status with task")
 	}
@@ -193,13 +193,13 @@ func TestGetLockStatus(t *testing.T) {
 func TestGetLockStatus_PlanningAgentNoTaskID(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	err := AcquireLock(tmpDir, "plan", "falcon")
+	err := AcquireLock(t.Context(), tmpDir, "plan", "falcon")
 	if err != nil {
 		t.Fatalf("AcquireLock failed: %v", err)
 	}
 	defer ReleaseLock(tmpDir)
 
-	status := GetLockStatus(tmpDir)
+	status := GetLockStatus(t.Context(), tmpDir)
 	// Planning agent without TaskID should show "planning: ..."
 	if !strings.HasPrefix(status, "planning: ...") {
 		t.Errorf("Expected 'planning: ...' prefix, got '%s'", status)
@@ -209,13 +209,13 @@ func TestGetLockStatus_PlanningAgentNoTaskID(t *testing.T) {
 func TestGetLockStatus_WorkingAgentNoTaskID(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	err := AcquireLock(tmpDir, "task", "nova")
+	err := AcquireLock(t.Context(), tmpDir, "task", "nova")
 	if err != nil {
 		t.Fatalf("AcquireLock failed: %v", err)
 	}
 	defer ReleaseLock(tmpDir)
 
-	status := GetLockStatus(tmpDir)
+	status := GetLockStatus(t.Context(), tmpDir)
 	// Implementation agent without TaskID is not actually working on anything,
 	// so the status surfaces as idle rather than "working: ...".
 	if !strings.HasPrefix(status, "idle (") {
@@ -226,14 +226,14 @@ func TestGetLockStatus_WorkingAgentNoTaskID(t *testing.T) {
 func TestGetLockStatus_PlanningAgentWithTaskID(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	err := AcquireLock(tmpDir, "plan", "falcon")
+	err := AcquireLock(t.Context(), tmpDir, "plan", "falcon")
 	if err != nil {
 		t.Fatalf("AcquireLock failed: %v", err)
 	}
 	defer ReleaseLock(tmpDir)
 
 	UpdateLockTask(tmpDir, "loom-test", "Test Task")
-	status := GetLockStatus(tmpDir)
+	status := GetLockStatus(t.Context(), tmpDir)
 
 	// Should contain the task ID; the status prefix depends on issue status.
 	if !strings.Contains(status, "loom-test") {
@@ -244,14 +244,14 @@ func TestGetLockStatus_PlanningAgentWithTaskID(t *testing.T) {
 func TestGetLockStatus_WorkingAgentWithTaskID(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	err := AcquireLock(tmpDir, "task", "nova")
+	err := AcquireLock(t.Context(), tmpDir, "task", "nova")
 	if err != nil {
 		t.Fatalf("AcquireLock failed: %v", err)
 	}
 	defer ReleaseLock(tmpDir)
 
 	UpdateLockTask(tmpDir, "loom-test", "Test Task")
-	status := GetLockStatus(tmpDir)
+	status := GetLockStatus(t.Context(), tmpDir)
 
 	// Should contain the task ID
 	if !strings.Contains(status, "loom-test") {
@@ -262,13 +262,13 @@ func TestGetLockStatus_WorkingAgentWithTaskID(t *testing.T) {
 func TestGetLockStatus_DurationFormat(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	err := AcquireLock(tmpDir, "task", "nova")
+	err := AcquireLock(t.Context(), tmpDir, "task", "nova")
 	if err != nil {
 		t.Fatalf("AcquireLock failed: %v", err)
 	}
 	defer ReleaseLock(tmpDir)
 
-	status := GetLockStatus(tmpDir)
+	status := GetLockStatus(t.Context(), tmpDir)
 	// Should include duration in parentheses
 	if !strings.Contains(status, "(") || !strings.Contains(status, ")") {
 		t.Errorf("Expected status to include duration in parentheses, got '%s'", status)
@@ -278,7 +278,7 @@ func TestGetLockStatus_DurationFormat(t *testing.T) {
 func TestUpdateLockState(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	err := AcquireLock(tmpDir, "plan", "falcon")
+	err := AcquireLock(t.Context(), tmpDir, "plan", "falcon")
 	if err != nil {
 		t.Fatalf("AcquireLock failed: %v", err)
 	}
@@ -320,7 +320,7 @@ func TestUpdateLockStateNoLock(t *testing.T) {
 func TestGetLockStatus_IdleState(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	err := AcquireLock(tmpDir, "plan", "falcon")
+	err := AcquireLock(t.Context(), tmpDir, "plan", "falcon")
 	if err != nil {
 		t.Fatalf("AcquireLock failed: %v", err)
 	}
@@ -332,7 +332,7 @@ func TestGetLockStatus_IdleState(t *testing.T) {
 		t.Fatalf("UpdateLockState failed: %v", err)
 	}
 
-	status := GetLockStatus(tmpDir)
+	status := GetLockStatus(t.Context(), tmpDir)
 	// Should show "idle" instead of "planning: ..."
 	if !strings.HasPrefix(status, "idle") {
 		t.Errorf("Expected 'idle' prefix, got '%s'", status)
@@ -342,7 +342,7 @@ func TestGetLockStatus_IdleState(t *testing.T) {
 func TestGetLockStatus_ActiveStateShowsCommand(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	err := AcquireLock(tmpDir, "plan", "falcon")
+	err := AcquireLock(t.Context(), tmpDir, "plan", "falcon")
 	if err != nil {
 		t.Fatalf("AcquireLock failed: %v", err)
 	}
@@ -354,7 +354,7 @@ func TestGetLockStatus_ActiveStateShowsCommand(t *testing.T) {
 		t.Fatalf("UpdateLockState failed: %v", err)
 	}
 
-	status := GetLockStatus(tmpDir)
+	status := GetLockStatus(t.Context(), tmpDir)
 	// Active state without TaskID should show "planning: ..." (normal behavior)
 	if !strings.HasPrefix(status, "planning: ...") {
 		t.Errorf("Expected 'planning: ...' prefix for active state, got '%s'", status)
@@ -364,7 +364,7 @@ func TestGetLockStatus_ActiveStateShowsCommand(t *testing.T) {
 func TestGetLockStatus_IdleOverridesTaskID(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	err := AcquireLock(tmpDir, "plan", "falcon")
+	err := AcquireLock(t.Context(), tmpDir, "plan", "falcon")
 	if err != nil {
 		t.Fatalf("AcquireLock failed: %v", err)
 	}
@@ -377,7 +377,7 @@ func TestGetLockStatus_IdleOverridesTaskID(t *testing.T) {
 		t.Fatalf("UpdateLockState failed: %v", err)
 	}
 
-	status := GetLockStatus(tmpDir)
+	status := GetLockStatus(t.Context(), tmpDir)
 	// Idle state should take precedence
 	if !strings.HasPrefix(status, "idle") {
 		t.Errorf("Expected 'idle' prefix (should override task), got '%s'", status)
@@ -391,7 +391,7 @@ func TestGetLockStatus_IdleOverridesTaskID(t *testing.T) {
 func TestClearLockTaskID(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	err := AcquireLock(tmpDir, "plan", "falcon")
+	err := AcquireLock(t.Context(), tmpDir, "plan", "falcon")
 	if err != nil {
 		t.Fatalf("AcquireLock failed: %v", err)
 	}
@@ -493,7 +493,7 @@ func TestClearLockTaskIDInvalidJSON(t *testing.T) {
 func TestClearLockTaskIDAlreadyEmpty(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	err := AcquireLock(tmpDir, "plan", "falcon")
+	err := AcquireLock(t.Context(), tmpDir, "plan", "falcon")
 	if err != nil {
 		t.Fatalf("AcquireLock failed: %v", err)
 	}
@@ -660,7 +660,7 @@ func TestAcquireLockStale_ConcurrentRetry(t *testing.T) {
 	defer close(stop) // racer must not leak/busy-loop past the test (runs even on t.Fatal)
 	racerDone := spawnStaleLockRacer(lockPath, stop)
 
-	err := AcquireLock(tmpDir, "new-command", "new-agent")
+	err := AcquireLock(t.Context(), tmpDir, "new-command", "new-agent")
 	if err != nil {
 		t.Fatalf("AcquireLock should succeed after retrying stale lock race: %v", err)
 	}
@@ -744,7 +744,7 @@ func TestAcquireLockStale_RetryFindsLiveAgent(t *testing.T) {
 		t.Fatalf("failed to write live lock: %v", err)
 	}
 
-	err := AcquireLock(tmpDir, "new-command", "new-agent")
+	err := AcquireLock(t.Context(), tmpDir, "new-command", "new-agent")
 	if err == nil {
 		ReleaseLock(tmpDir)
 		t.Fatal("AcquireLock should fail when lock is held by live agent")
@@ -769,7 +769,7 @@ func TestAcquireLockStale(t *testing.T) {
 	}
 
 	// AcquireLock should detect stale lock, remove it, and succeed
-	err := AcquireLock(tmpDir, "new-command", "new-agent")
+	err := AcquireLock(t.Context(), tmpDir, "new-command", "new-agent")
 	if err != nil {
 		t.Fatalf("AcquireLock should succeed with stale lock: %v", err)
 	}
@@ -993,7 +993,7 @@ func TestGetTaskStatus(t *testing.T) {
 			setDefaultIssueBackend(mock)
 			t.Cleanup(func() { setDefaultIssueBackend(nil) })
 
-			status := getTaskStatus(tt.taskID)
+			status := getTaskStatus(t.Context(), tt.taskID)
 			if status != tt.wantStatus {
 				t.Errorf("expected status %q, got %q", tt.wantStatus, status)
 			}
@@ -1034,7 +1034,7 @@ func TestGetTaskStatus_ReviewStatus(t *testing.T) {
 			setDefaultIssueBackend(mock)
 			t.Cleanup(func() { setDefaultIssueBackend(nil) })
 
-			status := getTaskStatus("loom-test")
+			status := getTaskStatus(t.Context(), "loom-test")
 			if status != tt.wantStatus {
 				t.Errorf("expected status %q, got %q", tt.wantStatus, status)
 			}
@@ -1052,7 +1052,7 @@ func TestSingleTaskModeLockStatePattern(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	// Step 1: AcquireLock (as plan.go does)
-	err := AcquireLock(tmpDir, "plan", "falcon")
+	err := AcquireLock(t.Context(), tmpDir, "plan", "falcon")
 	if err != nil {
 		t.Fatalf("AcquireLock failed: %v", err)
 	}
@@ -1112,7 +1112,7 @@ func TestSingleTaskModeLockStatePattern_Task(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	// Step 1: AcquireLock (as task.go does)
-	err := AcquireLock(tmpDir, "task", "nova")
+	err := AcquireLock(t.Context(), tmpDir, "task", "nova")
 	if err != nil {
 		t.Fatalf("AcquireLock failed: %v", err)
 	}
@@ -1172,7 +1172,7 @@ func TestSingleTaskModeLockStatePattern_Agent(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	// Step 1: AcquireLock (as agent_cmd.go does)
-	err := AcquireLock(tmpDir, "agent", "spark")
+	err := AcquireLock(t.Context(), tmpDir, "agent", "spark")
 	if err != nil {
 		t.Fatalf("AcquireLock failed: %v", err)
 	}
@@ -1229,7 +1229,7 @@ func TestSingleTaskModeLockStatePattern_Agent(t *testing.T) {
 func TestUpdateLockClaudeSessionID(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	err := AcquireLock(tmpDir, "task", "agent1")
+	err := AcquireLock(t.Context(), tmpDir, "task", "agent1")
 	if err != nil {
 		t.Fatalf("AcquireLock failed: %v", err)
 	}
@@ -1269,7 +1269,7 @@ func TestUpdateLockClaudeSessionID_PIDMismatch(t *testing.T) {
 func TestClearLockClaudeSessionID(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	err := AcquireLock(tmpDir, "task", "agent1")
+	err := AcquireLock(t.Context(), tmpDir, "task", "agent1")
 	if err != nil {
 		t.Fatalf("AcquireLock failed: %v", err)
 	}

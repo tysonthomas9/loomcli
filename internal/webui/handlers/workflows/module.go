@@ -45,6 +45,7 @@ type Module struct {
 	execution         execution.DriverRunAPI
 	operatorAuthority workflowcataloghttp.OperatorAuthorityResolver
 	taskWorkflowRuns  readprojection.TaskWorkflowRunReader
+	backendHealth     BackendHealthQuery
 }
 
 type workflowProjectionStore interface {
@@ -67,24 +68,16 @@ type Config struct {
 	Execution                execution.DriverRunAPI
 	OperatorAuthority        workflowcataloghttp.OperatorAuthorityResolver
 	TaskWorkflowRuns         readprojection.TaskWorkflowRunReader
+	BackendHealth            BackendHealthQuery
 }
 
-// NewModule accepts Config in production. The store-only form remains a
-// read-only/test compatibility constructor, but never enables DriverRun
-// mutation: every submission must cross the typed Execution boundary.
-func NewModule(input any) *Module {
-	switch value := input.(type) {
-	case Config:
-		return &Module{
-			store: value.Store, catalog: value.Catalog, catalogRead: value.Catalog, authoring: value.Authoring,
-			catalogAuthority: value.CatalogOperatorAuthority, prepareTarget: value.PrepareWorkflowTarget,
-			execution:         value.Execution,
-			operatorAuthority: value.OperatorAuthority, taskWorkflowRuns: value.TaskWorkflowRuns,
-		}
-	case workflowProjectionStore:
-		return &Module{store: value}
-	default:
-		return &Module{}
+func NewModule(config Config) *Module {
+	return &Module{
+		store: config.Store, catalog: config.Catalog, catalogRead: config.Catalog, authoring: config.Authoring,
+		catalogAuthority: config.CatalogOperatorAuthority, prepareTarget: config.PrepareWorkflowTarget,
+		execution:         config.Execution,
+		operatorAuthority: config.OperatorAuthority, taskWorkflowRuns: config.TaskWorkflowRuns,
+		backendHealth: config.BackendHealth,
 	}
 }
 

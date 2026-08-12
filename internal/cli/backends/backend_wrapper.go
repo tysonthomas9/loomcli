@@ -96,7 +96,7 @@ func runHarness(parent context.Context, shutdown <-chan struct{}, inv harnessInv
 		TranscriptMode: transcriptModeFromEnv(),
 		HookCommand:    loomHookCommand(),
 	}
-	if sink, runID := eventStoreSink(inv.WorkDir); sink != nil {
+	if sink, runID := eventStoreSink(ctx, inv.WorkDir); sink != nil {
 		hwCfg.OnEvent = sink
 		hwCfg.RunID = runID
 	}

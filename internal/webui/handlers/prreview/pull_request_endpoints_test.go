@@ -11,12 +11,10 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/tysonthomas9/loomcli/internal/backend/api/gen"
 	providers "github.com/tysonthomas9/loomcli/internal/infra/connectorsproviders"
 	"github.com/tysonthomas9/loomcli/internal/infra/connectorsvault"
 	"github.com/tysonthomas9/loomcli/internal/modules/connectors"
 	"github.com/tysonthomas9/loomcli/internal/ops"
-	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
 func TestGetPullRequestDetail(t *testing.T) {
@@ -26,13 +24,13 @@ func TestGetPullRequestDetail(t *testing.T) {
 		t.Fatalf("status = %d, want 200 (body %s)", status, raw)
 	}
 	var decoded struct {
-		Success bool                  `json:"success"`
-		Data    gen.PullRequestDetail `json:"data"`
+		Success bool              `json:"success"`
+		Data    pullRequestDetail `json:"data"`
 	}
 	if err := json.Unmarshal(raw, &decoded); err != nil {
 		t.Fatalf("decode response: %v (body %s)", err, raw)
 	}
-	if !decoded.Success || decoded.Data.HeadSha != "headsha-123" {
+	if !decoded.Success || decoded.Data.HeadSHA != "headsha-123" {
 		t.Fatalf("response = %+v, want success with head_sha", decoded)
 	}
 	calls := h.github.snapshot()
@@ -168,7 +166,7 @@ func TestSettingsCredentialResealsAfterVaultKeyChanges(t *testing.T) {
 	if len(calls) != 2 || calls[1].authorization != "Bearer "+token {
 		t.Fatalf("calls after vault-key change = %+v, want dispatch with current token", calls)
 	}
-	sealed, err := h.store.Connectors().ResolveOutboundCredentialSealed(
+	sealed, err := h.store.Connectors().ResolveOutboundCredentialSealedRecord(
 		context.Background(), prReviewTestWorkspace, connectorID,
 	)
 	if err != nil {
@@ -214,7 +212,7 @@ func TestCredentialInvalidationDuringEnsureUsesNewToken(t *testing.T) {
 	if _, seeded := h.module.seeded.Load(cacheKey); !seeded {
 		t.Fatal("new credential seed was not cached")
 	}
-	sealed, err := h.store.Connectors().ResolveOutboundCredentialSealed(
+	sealed, err := h.store.Connectors().ResolveOutboundCredentialSealedRecord(
 		context.Background(), prReviewTestWorkspace, connectorID,
 	)
 	if err != nil {
@@ -259,8 +257,8 @@ func TestDaytonaCredentialPatchDoesNotInvalidatePRReviewSeeds(t *testing.T) {
 	if _, seeded := h.module.seeded.Load(cacheKey); !seeded {
 		t.Fatal("Daytona-only PATCH cleared PR-review seed cache")
 	}
-	rotations, err := h.store.ConnectorCalls().ListByBinding(
-		context.Background(), prReviewTestWorkspace, connectors.RotationAuditBindingID, store.ConnectorCallFilter{},
+	rotations, err := h.store.Connectors().ListCallRecordsByBinding(
+		context.Background(), prReviewTestWorkspace, connectors.RotationAuditBindingID, connectors.ConnectorCallFilter{},
 	)
 	if err != nil {
 		t.Fatalf("list connector rotations: %v", err)
@@ -427,8 +425,8 @@ func TestListPullRequestsConnectorPaginatesWithDistinctCallSeq(t *testing.T) {
 	}
 
 	runID := "webui-review:user-1:octocat/hello:list:" + providers.ActionGitHubPullsList
-	records, err := h.store.ConnectorCalls().ListByRun(
-		context.Background(), prReviewTestWorkspace, runID, store.ConnectorCallFilter{},
+	records, err := h.store.Connectors().ListCallRecordsByRun(
+		context.Background(), prReviewTestWorkspace, runID, connectors.ConnectorCallFilter{},
 	)
 	if err != nil {
 		t.Fatalf("list connector call audit: %v", err)
@@ -672,8 +670,8 @@ func TestGetPullRequestDiff(t *testing.T) {
 		t.Fatalf("status = %d, want 200 (body %s)", status, raw)
 	}
 	var decoded struct {
-		Success bool                `json:"success"`
-		Data    gen.PullRequestDiff `json:"data"`
+		Success bool            `json:"success"`
+		Data    pullRequestDiff `json:"data"`
 	}
 	if err := json.Unmarshal(raw, &decoded); err != nil {
 		t.Fatalf("decode response: %v (body %s)", err, raw)
@@ -722,13 +720,13 @@ func TestPostPullRequestReviewApprove(t *testing.T) {
 		t.Fatalf("status = %d, want 200 (body %s)", status, raw)
 	}
 	var decoded struct {
-		Success bool                        `json:"success"`
-		Data    gen.PullRequestReviewResult `json:"data"`
+		Success bool                    `json:"success"`
+		Data    pullRequestReviewResult `json:"data"`
 	}
 	if err := json.Unmarshal(raw, &decoded); err != nil {
 		t.Fatalf("decode response: %v (body %s)", err, raw)
 	}
-	if !decoded.Success || decoded.Data.ReviewId == nil || *decoded.Data.ReviewId != 101 || decoded.Data.State == nil || *decoded.Data.State != "APPROVED" {
+	if !decoded.Success || decoded.Data.ReviewID == nil || *decoded.Data.ReviewID != 101 || decoded.Data.State == nil || *decoded.Data.State != "APPROVED" {
 		t.Fatalf("response = %+v, want success with review id/state", decoded)
 	}
 	calls := h.github.snapshot()

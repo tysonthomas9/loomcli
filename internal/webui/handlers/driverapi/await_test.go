@@ -3,7 +3,6 @@ package driverapi
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"testing"
 	"time"
@@ -85,8 +84,8 @@ func TestDriverAPIAwaitEventValidation(t *testing.T) {
 			if tc.maxEnv != "" {
 				t.Setenv(driverpkg.AwaitMaxTimeoutEnvVar, tc.maxEnv)
 			}
-			h := newTestHarness(t, "")
-			resp, decoded := h.do(t, opRequest{op: "events/await", headers: h.ownerHeaders(), body: tc.body})
+			h := newTestHarness(t)
+			resp, decoded := h.do(t, opRequest{op: "events/await", headers: h.ownerHeaders(t), body: tc.body})
 			if resp.StatusCode != http.StatusBadRequest {
 				t.Fatalf("status = %d (%v), want 400", resp.StatusCode, decoded)
 			}
@@ -98,10 +97,10 @@ func TestDriverAPIAwaitEventValidation(t *testing.T) {
 }
 
 func TestDriverAPIAwaitEventSatisfiedInline(t *testing.T) {
-	h := newTestHarness(t, "")
+	h := newTestHarness(t)
 	eventID := appendAwaitJournalEvent(t, h.store, "event-merge-1", "pr.merged", "pr#7", "alice")
 
-	resp, decoded := h.do(t, opRequest{op: "events/await", headers: h.ownerHeaders(), body: awaitBody("pr.merged:pr#7", 60_000, 1)})
+	resp, decoded := h.do(t, opRequest{op: "events/await", headers: h.ownerHeaders(t), body: awaitBody("pr.merged:pr#7", 60_000, 1)})
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d (%v), want 200", resp.StatusCode, decoded)
 	}
@@ -129,9 +128,9 @@ func TestDriverAPIAwaitEventSatisfiedInline(t *testing.T) {
 }
 
 func TestDriverAPIAwaitEventPendingSuspendsRun(t *testing.T) {
-	h := newTestHarness(t, "")
+	h := newTestHarness(t)
 
-	resp, decoded := h.do(t, opRequest{op: "events/await", headers: h.ownerHeaders(), body: awaitBody("pr.merged:pr#9", 60_000, 1)})
+	resp, decoded := h.do(t, opRequest{op: "events/await", headers: h.ownerHeaders(t), body: awaitBody("pr.merged:pr#9", 60_000, 1)})
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d (%v), want 200", resp.StatusCode, decoded)
 	}
@@ -154,12 +153,12 @@ func TestDriverAPIAwaitEventPendingSuspendsRun(t *testing.T) {
 // resume -> re-entry cycle: the re-entered run hitting the same awaitIndex
 // gets the recorded event with its persisted payload inline.
 func TestDriverAPIAwaitEventReplayAfterResume(t *testing.T) {
-	h := newTestHarness(t, "")
+	h := newTestHarness(t)
 	ctx := context.Background()
 	body := awaitBody("pr.merged:pr#9", 60_000, 1)
 	instanceKey := domain.AwaitInstanceKey(h.runID, 1)
 
-	resp, decoded := h.do(t, opRequest{op: "events/await", headers: h.ownerHeaders(), body: body})
+	resp, decoded := h.do(t, opRequest{op: "events/await", headers: h.ownerHeaders(t), body: body})
 	if resp.StatusCode != http.StatusOK || decoded["status"] != driverpkg.AwaitOutcomeSuspended {
 		t.Fatalf("first call = %d %v, want suspended", resp.StatusCode, decoded)
 	}
@@ -177,13 +176,7 @@ func TestDriverAPIAwaitEventReplayAfterResume(t *testing.T) {
 	if err != nil {
 		t.Fatalf("re-claim run: %v", err)
 	}
-	headers := map[string]string{
-		HeaderDriverRunID:        reclaimed.RunID,
-		HeaderDriverNodeID:       reclaimed.NodeID,
-		HeaderDriverLeaseID:      reclaimed.LeaseID,
-		HeaderDriverLeaseToken:   "driver-test-token",
-		HeaderDriverFencingToken: fmt.Sprintf("%d", reclaimed.FencingToken),
-	}
+	headers := h.tokenHeadersForRun(t, reclaimed)
 
 	resp, decoded = h.do(t, opRequest{op: "events/await", headers: headers, body: body})
 	if resp.StatusCode != http.StatusOK {
@@ -208,9 +201,10 @@ func TestDriverAPIAwaitEventReplayAfterResume(t *testing.T) {
 }
 
 func TestDriverAPIAwaitEventFencingMismatch(t *testing.T) {
-	h := newTestHarness(t, "")
-	headers := h.ownerHeaders()
-	headers[HeaderDriverFencingToken] = "999999"
+	h := newTestHarness(t)
+	headers := bearer(h.mintToken(t, time.Hour, func(claims *driverpkg.RunTokenClaims) {
+		claims.FencingToken++
+	}))
 
 	resp, decoded := h.do(t, opRequest{op: "events/await", headers: headers, body: awaitBody("pr.merged:pr#7", 60_000, 1)})
 	if resp.StatusCode != http.StatusForbidden {
@@ -230,7 +224,7 @@ func TestDriverAPIAwaitEventFencingMismatch(t *testing.T) {
 // single string and an array both decode; entries are trimmed, de-duplicated
 // and persisted on the registration.
 func TestDriverAPIAwaitEventActorNormalization(t *testing.T) {
-	h := newTestHarness(t, "")
+	h := newTestHarness(t)
 	ctx := context.Background()
 
 	// Await 1 resolves inline (actor allow-list as a single string matching
@@ -238,7 +232,7 @@ func TestDriverAPIAwaitEventActorNormalization(t *testing.T) {
 	appendAwaitJournalEvent(t, h.store, "event-approve-1", "approval.granted", "deploy#1", "carol")
 	body1 := awaitBody("approval.granted:deploy#1", 60_000, 1)
 	body1["actor"] = "carol"
-	resp, decoded := h.do(t, opRequest{op: "events/await", headers: h.ownerHeaders(), body: body1})
+	resp, decoded := h.do(t, opRequest{op: "events/await", headers: h.ownerHeaders(t), body: body1})
 	if resp.StatusCode != http.StatusOK || decoded["status"] != string(domain.AwaitSatisfied) {
 		t.Fatalf("string-actor await = %d %v, want satisfied", resp.StatusCode, decoded)
 	}
@@ -246,7 +240,7 @@ func TestDriverAPIAwaitEventActorNormalization(t *testing.T) {
 	// Await 2 suspends; the array form is normalized before persisting.
 	body2 := awaitBody("approval.granted:deploy#2", 60_000, 2)
 	body2["actor"] = []string{" alice ", "", "bob", "alice"}
-	resp, decoded = h.do(t, opRequest{op: "events/await", headers: h.ownerHeaders(), body: body2})
+	resp, decoded = h.do(t, opRequest{op: "events/await", headers: h.ownerHeaders(t), body: body2})
 	if resp.StatusCode != http.StatusOK || decoded["status"] != driverpkg.AwaitOutcomeSuspended {
 		t.Fatalf("array-actor await = %d %v, want suspended", resp.StatusCode, decoded)
 	}
@@ -287,12 +281,12 @@ func listAwaits(t *testing.T, h *testHarness, headers map[string]string) (*http.
 // TestDriverAPIListAwaits rebuilds re-entry context: terminal awaits carry
 // their recorded events, pending awaits appear in index order.
 func TestDriverAPIListAwaits(t *testing.T) {
-	h := newTestHarness(t, "")
+	h := newTestHarness(t)
 	ctx := context.Background()
 
 	// Await 1: satisfied inline (run stays running).
 	eventID := appendAwaitJournalEvent(t, h.store, "event-merge-1", "pr.merged", "pr#7", "alice")
-	resp, decoded := h.do(t, opRequest{op: "events/await", headers: h.ownerHeaders(), body: awaitBody("pr.merged:pr#7", 60_000, 1)})
+	resp, decoded := h.do(t, opRequest{op: "events/await", headers: h.ownerHeaders(t), body: awaitBody("pr.merged:pr#7", 60_000, 1)})
 	if resp.StatusCode != http.StatusOK || decoded["status"] != string(domain.AwaitSatisfied) {
 		t.Fatalf("await 1 = %d %v, want satisfied", resp.StatusCode, decoded)
 	}
@@ -307,7 +301,7 @@ func TestDriverAPIListAwaits(t *testing.T) {
 		t.Fatalf("RegisterAwaitAndCheck: %v", err)
 	}
 
-	resp, decoded = listAwaits(t, h, h.ownerHeaders())
+	resp, decoded = listAwaits(t, h, h.ownerHeaders(t))
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d (%v), want 200", resp.StatusCode, decoded)
 	}
@@ -331,7 +325,7 @@ func TestDriverAPIListAwaits(t *testing.T) {
 }
 
 func TestDriverAPIListAwaitsRequiresIdentity(t *testing.T) {
-	h := newTestHarness(t, "")
+	h := newTestHarness(t)
 	resp, decoded := listAwaits(t, h, nil)
 	if resp.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("status = %d (%v), want 401", resp.StatusCode, decoded)

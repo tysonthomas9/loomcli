@@ -3,6 +3,7 @@ package connectors
 import (
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -150,6 +151,34 @@ type Connector struct {
 	RotatedAt                *time.Time          `json:"rotated_at,omitempty"`
 }
 
+func (connector *Connector) Validate() error {
+	if connector == nil || connector.WorkspaceKey == "" {
+		return fmt.Errorf("connector workspace_key required: %w", ErrInvalid)
+	}
+	if connector.ConnectorID == "" {
+		return fmt.Errorf("connector connector_id required: %w", ErrInvalid)
+	}
+	if !connector.SourceKind.Valid() {
+		return fmt.Errorf("connector source_kind %q unknown: %w", connector.SourceKind, ErrInvalid)
+	}
+	if !connector.Status.Valid() {
+		return fmt.Errorf("connector status %q unknown: %w", connector.Status, ErrInvalid)
+	}
+	if connector.InboundEndpointPath != "" && !strings.HasPrefix(connector.InboundEndpointPath, "/") {
+		return fmt.Errorf("connector inbound_endpoint_path must start with /: %w", ErrInvalid)
+	}
+	return nil
+}
+
+// InboundSecrets is the privileged persistence projection used by owner
+// management and inbound-verification adapters. It is never returned by the
+// public Management or Dispatcher service interfaces.
+type InboundSecrets struct {
+	Current            string
+	Previous           string
+	PreviousValidUntil time.Time
+}
+
 type CreateConnectorCommand struct {
 	WorkspaceKey        string
 	ConnectorID         string
@@ -207,6 +236,11 @@ type RevokeGrantCommand struct {
 	GrantID      string
 }
 
+type BindingGrantCleanupCommand struct {
+	WorkspaceKey string
+	BindingID    string
+}
+
 type ListGrantsQuery struct {
 	WorkspaceKey string
 	BindingID    string
@@ -250,6 +284,34 @@ type ConnectorCallRecord struct {
 	OccurredAt       time.Time             `json:"occurred_at"`
 }
 
+func (record *ConnectorCallRecord) Validate() error {
+	if record == nil || record.WorkspaceKey == "" {
+		return fmt.Errorf("connector call workspace_key required: %w", ErrInvalid)
+	}
+	if record.RunID == "" {
+		return fmt.Errorf("connector call run_id required: %w", ErrInvalid)
+	}
+	if record.BindingID == "" {
+		return fmt.Errorf("connector call binding_id required: %w", ErrInvalid)
+	}
+	if record.ConnectorID == "" {
+		return fmt.Errorf("connector call connector_id required: %w", ErrInvalid)
+	}
+	if !record.SourceKind.Valid() {
+		return fmt.Errorf("connector call source_kind %q unknown: %w", record.SourceKind, ErrInvalid)
+	}
+	if err := ValidateConnectorAction(record.Action); err != nil {
+		return err
+	}
+	if !record.Decision.Valid() {
+		return fmt.Errorf("connector call decision %q unknown: %w", record.Decision, ErrInvalid)
+	}
+	if expected := ConnectorCallID(record.RunID, record.Action, record.Seq); record.CallID != expected {
+		return fmt.Errorf("connector call_id %q does not match derived %q: %w", record.CallID, expected, ErrInvalid)
+	}
+	return nil
+}
+
 type ConnectorCallFilter struct {
 	Decision ConnectorCallDecision
 	Limit    int
@@ -275,6 +337,44 @@ type ConnectorGrant struct {
 	ResourcePattern string     `json:"resource_pattern"`
 	CreatedAt       time.Time  `json:"created_at"`
 	RevokedAt       *time.Time `json:"revoked_at,omitempty"`
+}
+
+func (grant *ConnectorGrant) Revoked() bool {
+	return grant != nil && grant.RevokedAt != nil && !grant.RevokedAt.IsZero()
+}
+
+func (grant *ConnectorGrant) Validate() error {
+	if grant == nil || grant.WorkspaceKey == "" {
+		return fmt.Errorf("grant workspace_key required: %w", ErrInvalid)
+	}
+	if grant.GrantID == "" {
+		return fmt.Errorf("grant grant_id required: %w", ErrInvalid)
+	}
+	if grant.ConnectorID == "" {
+		return fmt.Errorf("grant connector_id required: %w", ErrInvalid)
+	}
+	if grant.BindingID == "" {
+		return fmt.Errorf("grant binding_id required: %w", ErrInvalid)
+	}
+	if err := ValidateConnectorAction(grant.Action); err != nil {
+		return err
+	}
+	if grant.ResourcePattern == "" {
+		return fmt.Errorf("grant resource_pattern required: %w", ErrInvalid)
+	}
+	return nil
+}
+
+// ValidateConnectorAction checks the canonical provider.verb action format.
+func ValidateConnectorAction(action string) error {
+	normalized, err := normalizeConnectorAction(action)
+	if err != nil {
+		return err
+	}
+	if normalized != action {
+		return fmt.Errorf("connector action %q is not canonical: %w", action, ErrInvalid)
+	}
+	return nil
 }
 
 // EnsureGrantCommand requests one exact binding-scoped grant. GrantID is the

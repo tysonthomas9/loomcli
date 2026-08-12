@@ -26,6 +26,7 @@ type fakeStore struct {
 	dependencies    []Dependency
 	issues          []IssueSummary
 	blockedIssues   []IssueSummary
+	blockedQuery    AvailabilityQuery
 	readyIssues     []IssueSummary
 	readyQuery      AvailabilityQuery
 	deferredIssues  []IssueSummary
@@ -38,6 +39,7 @@ type fakeStore struct {
 	closeResult     *CloseResult
 	assigned        AssignRepositoryCommand
 	assignedIssue   *IssueSummary
+	stats           *Stats
 	err             error
 }
 
@@ -57,7 +59,8 @@ func (f *fakeStore) List(_ context.Context, filter ListFilter) ([]IssueSummary, 
 	f.listFilter = filter
 	return f.issues, f.err
 }
-func (f *fakeStore) Blocked(context.Context, AvailabilityQuery) ([]IssueSummary, error) {
+func (f *fakeStore) Blocked(_ context.Context, query AvailabilityQuery) ([]IssueSummary, error) {
+	f.blockedQuery = query
 	return f.blockedIssues, f.err
 }
 func (f *fakeStore) Ready(_ context.Context, query AvailabilityQuery) ([]IssueSummary, error) {
@@ -68,9 +71,50 @@ func (f *fakeStore) Deferred(context.Context, AvailabilityQuery) ([]IssueSummary
 	return f.deferredIssues, f.err
 }
 
+func (f *fakeStore) Stats(context.Context) (*Stats, error) { return f.stats, f.err }
+
 func (f *fakeStore) Search(_ context.Context, query SearchQuery) ([]IssueSummary, error) {
 	f.searchQuery = query
 	return f.issues, f.err
+}
+
+func TestServiceStatsUsesOwnerProjection(t *testing.T) {
+	want := &Stats{TotalIssues: 7, OpenIssues: 3, ClosedIssues: 4}
+	service, err := New(&fakeStore{stats: want})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	got, err := service.Stats(context.Background())
+	if err != nil {
+		t.Fatalf("Stats: %v", err)
+	}
+	if got == want || got == nil || got.TotalIssues != 7 || got.OpenIssues != 3 || got.ClosedIssues != 4 {
+		t.Fatalf("Stats = %+v, want cloned owner projection", got)
+	}
+}
+
+func TestServiceBlockedUsesNarrowOwnerProjection(t *testing.T) {
+	store := &fakeStore{blockedIssues: []IssueSummary{{ID: "TASK-1", Labels: []string{"blocked"}}}}
+	service, err := New(store)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	got, err := service.Blocked(context.Background(), AvailabilityQuery{Assignee: "owner", Labels: []string{"urgent"}})
+	if err != nil {
+		t.Fatalf("Blocked: %v", err)
+	}
+	if store.blockedQuery.Assignee != "owner" || len(store.blockedQuery.Labels) != 1 || store.blockedQuery.Labels[0] != "urgent" {
+		t.Fatalf("blocked query = %+v", store.blockedQuery)
+	}
+	if len(got) != 1 || got[0].ID != "TASK-1" {
+		t.Fatalf("Blocked = %+v", got)
+	}
+	got[0].Labels[0] = "mutated"
+	if store.blockedIssues[0].Labels[0] != "blocked" {
+		t.Fatal("Blocked returned adapter-owned label storage")
+	}
 }
 func (f *fakeStore) Get(_ context.Context, query GetQuery) (*IssueDetail, error) {
 	f.getQuery = query

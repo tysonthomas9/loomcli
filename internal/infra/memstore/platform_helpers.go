@@ -52,15 +52,6 @@ func defaultRetryFieldMem(value, fallback int) int {
 	return value
 }
 
-// redactedTriggerBinding clones b with the webhook signing secret cleared,
-// mirroring the fleet-db API which never returns the secret on read/list/create
-// responses. The secret is reachable only via ResolveWebhookSecret.
-func redactedTriggerBinding(b *automation.Binding) *automation.Binding {
-	out := cloneTriggerBinding(b)
-	out.WebhookSecret = ""
-	return out
-}
-
 func cloneDriverRun(r *domain.DriverRun) *domain.DriverRun {
 	out := *r
 	out.Payload = cloneJSON(r.Payload)
@@ -385,9 +376,6 @@ func applyTriggerBindingPolicyUpdateMem(b *automation.Binding, patch store.Trigg
 	}
 	if patch.AuthPolicy != nil {
 		b.AuthPolicy = *patch.AuthPolicy
-	}
-	if patch.WebhookSecret != nil {
-		b.WebhookSecret = *patch.WebhookSecret
 	}
 	if patch.Permissions != nil {
 		b.Permissions = append([]string(nil), (*patch.Permissions)...)

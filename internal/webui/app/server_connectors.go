@@ -6,7 +6,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/infra/connectorscatalog"
 	"github.com/tysonthomas9/loomcli/internal/infra/connectorsproviders"
 	"github.com/tysonthomas9/loomcli/internal/infra/connectorsvault"
 	connectorsmodule "github.com/tysonthomas9/loomcli/internal/modules/connectors"
@@ -25,41 +24,46 @@ const (
 	defaultConnectorUpstreamTimeout = 30 * time.Second
 )
 
-// buildConnectorDispatcher wires the connector egress choke point for the
-// driver-op module: the workspace store's connector/grant/audit stores, the
-// AES-256-GCM vault keyed by the explicit env override or the persisted local
-// settings key file, and the provider registry on a timeout-bounded HTTP client.
+// buildConnectorCapabilities wires the connector egress and management owner
+// interfaces from one durable adapter and one vault. The route modules receive
+// only those owner interfaces; the composite persistence store remains in the
+// application composition root.
 //
-// It returns nil — connector egress fails closed with a structured
-// "unavailable" error — when serve has no store or no usable vault key:
+// It returns nil interfaces — connector operations fail closed with a
+// structured "unavailable" error — when serve has no store or usable vault key:
 // without the key sealed credentials can never be opened, so refusing every
 // dispatch up front is strictly safer than failing per-call mid-flow.
-func (app *Server) buildConnectorDispatcher() connectorsmodule.Dispatcher {
+func (app *Server) buildConnectorCapabilities() (
+	connectorsmodule.Dispatcher,
+	connectorsmodule.Management,
+	connectorsmodule.CredentialSealer,
+) {
 	if app.config.Store == nil {
-		return nil
+		return nil, nil, nil
 	}
 	vault, err := connectorsvault.NewVaultFromEnvOrKeyFile(app.config.LocalSettingsDir)
 	if err != nil {
-		return nil
+		return nil, nil, nil
 	}
-	catalog, err := connectorscatalog.New(
-		app.config.Store.Connectors(),
-		app.config.Store.ConnectorGrants(),
-		app.config.Store.ConnectorCalls(),
-	)
-	if err != nil {
-		return nil
-	}
+	store := app.config.Store.Connectors()
 	dispatcher, err := connectorsmodule.NewDispatch(
-		catalog,
+		store,
 		vault,
 		connectorsproviders.Default(&http.Client{Timeout: connectorUpstreamTimeout()}),
 		nil,
 	)
 	if err != nil {
-		return nil
+		return nil, nil, nil
 	}
-	return dispatcher
+	vaultAdapter, err := connectorsvault.New(vault)
+	if err != nil {
+		return nil, nil, nil
+	}
+	management, err := connectorsmodule.NewManagementWithCredentialVault(store, vaultAdapter, time.Now)
+	if err != nil {
+		return nil, nil, nil
+	}
+	return dispatcher, management, vault
 }
 
 // connectorUpstreamTimeout resolves the provider HTTP client timeout from

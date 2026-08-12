@@ -72,7 +72,7 @@ func (s *stubAgentInvoker) InvokeNonInteractive(string, string, string, <-chan s
 }
 
 func TestWrapAgentInvokerWithTracing_Smoke(t *testing.T) {
-	wrapped := wrapAgentInvokerWithTracing(&stubAgentInvoker{})
+	wrapped := wrapAgentInvokerWithTracing(t.Context(), &stubAgentInvoker{})
 	if wrapped == nil {
 		t.Fatal("wrapAgentInvokerWithTracing returned nil for non-nil input")
 	}
@@ -83,13 +83,13 @@ func TestWrapAgentInvokerWithTracing_Smoke(t *testing.T) {
 		t.Errorf("InvokeNonInteractive: %v", err)
 	}
 	// Error path: ensure span error recording is exercised.
-	failing := wrapAgentInvokerWithTracing(&stubAgentInvoker{err: errors.New("invoke failed")})
+	failing := wrapAgentInvokerWithTracing(t.Context(), &stubAgentInvoker{err: errors.New("invoke failed")})
 	_ = failing.InvokeInteractive("/tmp", "", "")
 	_ = failing.InvokeNonInteractive("/tmp", "", "", nil, nil)
 }
 
 func TestWrapAgentInvokerWithTracing_Nil(t *testing.T) {
-	if got := wrapAgentInvokerWithTracing(nil); got != nil {
-		t.Errorf("wrapAgentInvokerWithTracing(nil) = %v, want nil", got)
+	if got := wrapAgentInvokerWithTracing(t.Context(), nil); got != nil {
+		t.Errorf("wrapAgentInvokerWithTracing(t.Context(), nil) = %v, want nil", got)
 	}
 }

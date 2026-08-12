@@ -1,6 +1,5 @@
-// connector.go implements store.ConnectorStore, store.ConnectorGrantStore,
-// and store.ConnectorAuditStore against fleet-db's connector control-plane
-// routes:
+// connector.go implements the Connectors-owned ManagementStore against
+// fleet-db's connector control-plane routes:
 //
 //	POST /api/v1/{ws}/connectors
 //	GET  /api/v1/{ws}/connectors
@@ -15,90 +14,103 @@
 //
 // Casing note: fleet-db's /api/v1 surface is snake_case, so responses are
 // decoded into local wire DTOs and converted — never directly into the
-// domain structs (the connector enum VALUES — "github", "active",
+// owner structs (the connector enum VALUES — "github", "active",
 // "granted" — are identical on both wires and pass through untranslated).
 //
 // Secrets note: fleet-db only ever returns inbound secrets and the sealed
 // outbound credential ciphertext from the privileged /secrets route, which
-// backs ResolveInboundSecret / ResolveOutboundCredentialSealed (the
-// ResolveWebhookSecret pattern). Get/List decode fleet-db's already-redacted
+// backs ResolveInboundSecretsRecord / ResolveOutboundCredentialSealedRecord.
+// Get/List decode fleet-db's already-redacted
 // responses. Plaintext outbound credentials never transit this client:
-// serve's vault layer seals BEFORE Create/RotateSecrets.
+// serve's vault layer seals before create/rotation.
 package fleetdb
 
 import (
 	"context"
 	"errors"
 	"fmt"
-	"net/http"
 	"net/url"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/store"
+	connectorsmodule "github.com/tysonthomas9/loomcli/internal/modules/connectors"
 )
 
-// Connectors returns the ConnectorStore.
-func (c *Client) Connectors() store.ConnectorStore { return c.connectors }
+type connectorCatalog struct {
+	*connectorStore
+	*connectorGrantStore
+	*connectorAuditStore
+	client *Client
+}
 
-// ConnectorGrants returns the ConnectorGrantStore.
-func (c *Client) ConnectorGrants() store.ConnectorGrantStore { return c.connectorGrants }
+var _ connectorsmodule.ManagementStore = (*connectorCatalog)(nil)
+var _ connectorsmodule.ConnectorGrantStore = (*connectorCatalog)(nil)
 
-// ConnectorCalls returns the ConnectorAuditStore.
-func (c *Client) ConnectorCalls() store.ConnectorAuditStore { return c.connectorCalls }
+// Connectors returns the Connectors-owned FleetDB adapter.
+func (c *Client) Connectors() connectorsmodule.ManagementStore {
+	return &connectorCatalog{
+		connectorStore: c.connectors, connectorGrantStore: c.connectorGrants, connectorAuditStore: c.connectorCalls,
+		client: c,
+	}
+}
+
+// ConnectorGrants returns the same concrete adapter narrowed to the grant
+// port used by the Connectors application module.
+func (c *Client) ConnectorGrants() connectorsmodule.ConnectorGrantStore {
+	if c == nil {
+		return nil
+	}
+	return &connectorCatalog{
+		connectorStore: c.connectors, connectorGrantStore: c.connectorGrants, connectorAuditStore: c.connectorCalls,
+		client: c,
+	}
+}
 
 // --- sentinel remapping ---
 
-// connectorSentinel layers the connector-specific CV1 sentinels on top of
-// the generic ones classifyHTTPError already attached, so callers can match
-// domain.ErrConnectorNotFound / domain.ErrConnectorExists (each of which
-// also wraps its generic counterpart) exactly like against memstore.
-func connectorSentinel(err error) error {
+// connectorOwnerError translates the transport's generic HTTP categories at
+// the adapter boundary so callers only observe Connectors-owned errors.
+func connectorOwnerError(err error) error {
 	switch {
 	case err == nil:
 		return nil
+	case errors.Is(err, connectorsmodule.ErrInvalid),
+		errors.Is(err, connectorsmodule.ErrNotFound),
+		errors.Is(err, connectorsmodule.ErrAlreadyExists),
+		errors.Is(err, connectorsmodule.ErrConflict),
+		errors.Is(err, connectorsmodule.ErrGrantRevoked),
+		errors.Is(err, connectorsmodule.ErrUnavailable):
+		return err
 	case errors.Is(err, domain.ErrNotFound):
-		return fmt.Errorf("%w: %w", domain.ErrConnectorNotFound, err)
+		return fmt.Errorf("%w: %w", connectorsmodule.ErrNotFound, err)
 	case errors.Is(err, domain.ErrAlreadyExists):
-		return fmt.Errorf("%w: %w", domain.ErrConnectorExists, err)
+		return fmt.Errorf("%w: %w", connectorsmodule.ErrAlreadyExists, err)
+	case errors.Is(err, domain.ErrInvalid):
+		return fmt.Errorf("%w: %w", connectorsmodule.ErrInvalid, err)
+	case errors.Is(err, domain.ErrConflict):
+		return fmt.Errorf("%w: %w", connectorsmodule.ErrConflict, err)
+	case errors.Is(err, domain.ErrUnavailable), errors.Is(err, domain.ErrRateLimited):
+		return fmt.Errorf("%w: %w", connectorsmodule.ErrUnavailable, err)
 	}
-	return err
+	return fmt.Errorf("%w: %w", connectorsmodule.ErrUnavailable, err)
+}
+
+func connectorRotationError(err error) error {
+	if err != nil && errors.Is(err, domain.ErrConflict) {
+		return fmt.Errorf("%w: %w", connectorsmodule.ErrRotationConflict, err)
+	}
+	return connectorOwnerError(err)
 }
 
 // grantRevokeSentinel maps fleet-db's 409 invalid_transition on a
 // double-revoke (classified as domain.ErrInvalidTransition) to the CV1
-// sentinel domain.ErrGrantRevoked, matching the memstore contract.
+// sentinel connectors.ErrGrantRevoked, matching the memstore contract.
 func grantRevokeSentinel(err error) error {
 	if err != nil && errors.Is(err, domain.ErrInvalidTransition) {
-		return fmt.Errorf("%w: %w", domain.ErrGrantRevoked, err)
+		return fmt.Errorf("%w: %w", connectorsmodule.ErrGrantRevoked, err)
 	}
 	return err
-}
-
-// mapConnectorGrantTransportError keeps legacy HTTP sentinel translation at
-// the existing compatibility edge while the narrow ConnectorGrantTransport
-// exposes only capability-neutral errors to composition.
-func mapConnectorGrantTransportError(operation string, err error) error {
-	if err == nil {
-		return nil
-	}
-	var sentinel error
-	switch {
-	case errors.Is(err, ErrConnectorGrantNotFound), errors.Is(err, ErrConnectorGrantInvalid),
-		errors.Is(err, ErrConnectorGrantConflict), errors.Is(err, ErrConnectorGrantUnavailable):
-		return err
-	case errors.Is(err, domain.ErrNotFound):
-		sentinel = ErrConnectorGrantNotFound
-	case errors.Is(err, domain.ErrInvalid):
-		sentinel = ErrConnectorGrantInvalid
-	case errors.Is(err, domain.ErrAlreadyExists), errors.Is(err, domain.ErrConflict):
-		sentinel = ErrConnectorGrantConflict
-	default:
-		sentinel = ErrConnectorGrantUnavailable
-	}
-	return fmt.Errorf("connector grant %s: %w", operation, errors.Join(sentinel, err))
 }
 
 // --- wire DTOs (fleet-db snake_case responses) ---
@@ -123,18 +135,18 @@ type connectorWire struct {
 	RotatedAt                *time.Time `json:"rotated_at"`
 }
 
-func (w *connectorWire) toDomain() *domain.Connector {
-	return &domain.Connector{
+func (w *connectorWire) toConnector() *connectorsmodule.Connector {
+	if w == nil {
+		return nil
+	}
+	return &connectorsmodule.Connector{
 		WorkspaceKey:             w.WorkspaceKey,
 		ConnectorID:              w.ConnectorID,
-		SourceKind:               domain.ConnectorSourceKind(w.SourceKind),
+		SourceKind:               connectorsmodule.ConnectorSourceKind(w.SourceKind),
 		DisplayName:              w.DisplayName,
 		InboundEndpointPath:      w.InboundEndpointPath,
-		InboundSecret:            w.InboundSecret,
-		PreviousInboundSecret:    w.PreviousInboundSecret,
 		PreviousSecretValidUntil: w.PreviousSecretValidUntil,
-		OutboundCredentialSealed: w.OutboundCredentialSealed,
-		Status:                   domain.ConnectorStatus(w.Status),
+		Status:                   connectorsmodule.ConnectorStatus(w.Status),
 		CreatedBy:                w.CreatedBy,
 		CreatedAt:                w.CreatedAt,
 		UpdatedAt:                w.UpdatedAt,
@@ -154,8 +166,11 @@ type connectorGrantWire struct {
 	RevokedAt       *time.Time `json:"revoked_at"`
 }
 
-func (w *connectorGrantWire) toDomain() *domain.ConnectorGrant {
-	return &domain.ConnectorGrant{
+func (w *connectorGrantWire) toConnector() *connectorsmodule.ConnectorGrant {
+	if w == nil {
+		return nil
+	}
+	return &connectorsmodule.ConnectorGrant{
 		WorkspaceKey:    w.WorkspaceKey,
 		GrantID:         w.GrantID,
 		ConnectorID:     w.ConnectorID,
@@ -185,18 +200,21 @@ type connectorCallWire struct {
 	OccurredAt       time.Time `json:"occurred_at"`
 }
 
-func (w *connectorCallWire) toDomain() *domain.ConnectorCallRecord {
-	return &domain.ConnectorCallRecord{
+func (w *connectorCallWire) toConnector() *connectorsmodule.ConnectorCallRecord {
+	if w == nil {
+		return nil
+	}
+	return &connectorsmodule.ConnectorCallRecord{
 		WorkspaceKey:     w.WorkspaceKey,
 		CallID:           w.CallID,
 		Seq:              w.Seq,
 		RunID:            w.RunID,
 		BindingID:        w.BindingID,
 		ConnectorID:      w.ConnectorID,
-		SourceKind:       domain.ConnectorSourceKind(w.SourceKind),
+		SourceKind:       connectorsmodule.ConnectorSourceKind(w.SourceKind),
 		Action:           w.Action,
 		Resource:         w.Resource,
-		Decision:         domain.ConnectorCallDecision(w.Decision),
+		Decision:         connectorsmodule.ConnectorCallDecision(w.Decision),
 		UpstreamStatus:   w.UpstreamStatus,
 		ErrorClass:       w.ErrorClass,
 		SanitizedSummary: w.SanitizedSummary,
@@ -208,9 +226,7 @@ func (w *connectorCallWire) toDomain() *domain.ConnectorCallRecord {
 
 type connectorStore struct{ client *Client }
 
-var _ store.ConnectorStore = (*connectorStore)(nil)
-
-func (s *connectorStore) Create(ctx context.Context, in store.ConnectorCreate) (*domain.Connector, error) {
+func (s *connectorStore) CreateConnectorRecord(ctx context.Context, in connectorsmodule.CreateConnectorMutation) (*connectorsmodule.Connector, error) {
 	body := map[string]any{
 		"connector_id": in.ConnectorID,
 		"source_kind":  in.SourceKind,
@@ -235,21 +251,21 @@ func (s *connectorStore) Create(ctx context.Context, in store.ConnectorCreate) (
 	}
 	var out connectorWire
 	if err := s.client.do(ctx, "POST", "/api/v1/"+pathEscape(in.WorkspaceKey)+"/connectors", body, &out); err != nil {
-		return nil, connectorSentinel(err)
+		return nil, connectorOwnerError(err)
 	}
-	return out.toDomain(), nil
+	return out.toConnector(), nil
 }
 
-func (s *connectorStore) Get(ctx context.Context, ws, connectorID string) (*domain.Connector, error) {
+func (s *connectorStore) GetConnectorRecord(ctx context.Context, ws, connectorID string) (*connectorsmodule.Connector, error) {
 	var out connectorWire
 	path := "/api/v1/" + pathEscape(ws) + "/connectors/" + pathEscape(connectorID)
 	if err := s.client.do(ctx, "GET", path, nil, &out); err != nil {
-		return nil, connectorSentinel(err)
+		return nil, connectorOwnerError(err)
 	}
-	return out.toDomain(), nil
+	return out.toConnector(), nil
 }
 
-func (s *connectorStore) List(ctx context.Context, ws string, filter store.ConnectorFilter) ([]*domain.Connector, error) {
+func (s *connectorStore) ListConnectorRecords(ctx context.Context, ws string, filter connectorsmodule.ConnectorFilter) ([]*connectorsmodule.Connector, error) {
 	q := url.Values{}
 	if filter.SourceKind != "" {
 		q.Set("source_kind", string(filter.SourceKind))
@@ -265,11 +281,11 @@ func (s *connectorStore) List(ctx context.Context, ws string, filter store.Conne
 		Connectors []*connectorWire `json:"connectors"`
 	}
 	if err := s.client.do(ctx, "GET", path, nil, &resp); err != nil {
-		return nil, connectorSentinel(err)
+		return nil, connectorOwnerError(err)
 	}
-	out := make([]*domain.Connector, 0, len(resp.Connectors))
+	out := make([]*connectorsmodule.Connector, 0, len(resp.Connectors))
 	for _, connector := range resp.Connectors {
-		out = append(out, connector.toDomain())
+		out = append(out, connector.toConnector())
 	}
 	return out, nil
 }
@@ -289,17 +305,17 @@ func (s *connectorStore) resolveSecrets(ctx context.Context, ws, connectorID str
 	var out connectorSecretsWire
 	path := "/api/v1/" + pathEscape(ws) + "/connectors/" + pathEscape(connectorID) + "/secrets"
 	if err := s.client.do(ctx, "GET", path, nil, &out); err != nil {
-		return nil, connectorSentinel(err)
+		return nil, connectorOwnerError(err)
 	}
 	return &out, nil
 }
 
-func (s *connectorStore) ResolveInboundSecret(ctx context.Context, ws, connectorID string) (*store.ConnectorInboundSecrets, error) {
+func (s *connectorStore) ResolveInboundSecretsRecord(ctx context.Context, ws, connectorID string) (*connectorsmodule.InboundSecrets, error) {
 	secrets, err := s.resolveSecrets(ctx, ws, connectorID)
 	if err != nil {
 		return nil, err
 	}
-	out := &store.ConnectorInboundSecrets{
+	out := &connectorsmodule.InboundSecrets{
 		Current: secrets.InboundSecret,
 	}
 	if secrets.PreviousInboundSecret != "" &&
@@ -311,7 +327,7 @@ func (s *connectorStore) ResolveInboundSecret(ctx context.Context, ws, connector
 	return out, nil
 }
 
-func (s *connectorStore) ResolveOutboundCredentialSealed(ctx context.Context, ws, connectorID string) ([]byte, error) {
+func (s *connectorStore) ResolveOutboundCredentialSealedRecord(ctx context.Context, ws, connectorID string) ([]byte, error) {
 	secrets, err := s.resolveSecrets(ctx, ws, connectorID)
 	if err != nil {
 		return nil, err
@@ -319,7 +335,7 @@ func (s *connectorStore) ResolveOutboundCredentialSealed(ctx context.Context, ws
 	return secrets.OutboundCredentialSealed, nil
 }
 
-func (s *connectorStore) RotateSecrets(ctx context.Context, ws, connectorID string, in store.ConnectorSecretRotation) (*domain.Connector, error) {
+func (s *connectorStore) RotateConnectorSecretsRecord(ctx context.Context, ws, connectorID string, in connectorsmodule.RotateConnectorSecretsMutation) (*connectorsmodule.Connector, error) {
 	body := map[string]any{
 		"new_inbound_secret": in.NewInboundSecret,
 	}
@@ -337,18 +353,16 @@ func (s *connectorStore) RotateSecrets(ctx context.Context, ws, connectorID stri
 	path := "/api/v1/" + pathEscape(ws) + "/connectors/" + pathEscape(connectorID) + "/rotate"
 	var out connectorWire
 	if err := s.client.do(ctx, "POST", path, body, &out); err != nil {
-		return nil, connectorSentinel(err)
+		return nil, connectorRotationError(err)
 	}
-	return out.toDomain(), nil
+	return out.toConnector(), nil
 }
 
 // --- ConnectorGrantStore ---
 
 type connectorGrantStore struct{ client *Client }
 
-var _ store.ConnectorGrantStore = (*connectorGrantStore)(nil)
-
-func (s *connectorGrantStore) Create(ctx context.Context, in store.ConnectorGrantCreate) (*domain.ConnectorGrant, error) {
+func (s *connectorGrantStore) CreateManagementGrant(ctx context.Context, in connectorsmodule.CreateGrantMutation) (*connectorsmodule.ConnectorGrant, error) {
 	body := map[string]any{
 		"grant_id":         in.GrantID,
 		"connector_id":     in.ConnectorID,
@@ -358,39 +372,47 @@ func (s *connectorGrantStore) Create(ctx context.Context, in store.ConnectorGran
 	}
 	var out connectorGrantWire
 	if err := s.client.do(ctx, "POST", "/api/v1/"+pathEscape(in.WorkspaceKey)+"/connector-grants", body, &out); err != nil {
-		return nil, err
+		return nil, connectorOwnerError(err)
 	}
-	return out.toDomain(), nil
+	return out.toConnector(), nil
 }
 
-func (s *connectorGrantStore) Revoke(ctx context.Context, ws, grantID string) error {
+func (s *connectorGrantStore) CreateGrant(ctx context.Context, in connectorsmodule.CreateGrantMutation) (*connectorsmodule.ConnectorGrant, error) {
+	return s.CreateManagementGrant(ctx, in)
+}
+
+func (s *connectorGrantStore) RevokeGrantRecord(ctx context.Context, ws, grantID string) error {
 	path := "/api/v1/" + pathEscape(ws) + "/connector-grants/" + pathEscape(grantID) + "/revoke"
-	return grantRevokeSentinel(s.client.do(ctx, "POST", path, nil, nil))
+	return connectorOwnerError(grantRevokeSentinel(s.client.do(ctx, "POST", path, nil, nil)))
 }
 
-func (s *connectorGrantStore) ListByBinding(ctx context.Context, ws, bindingID string) ([]*domain.ConnectorGrant, error) {
+func (s *connectorGrantStore) ListGrantRecordsByBinding(ctx context.Context, ws, bindingID string) ([]*connectorsmodule.ConnectorGrant, error) {
 	q := url.Values{}
 	q.Set("binding_id", bindingID)
 	return s.list(ctx, ws, q)
 }
 
-func (s *connectorGrantStore) ListByConnector(ctx context.Context, ws, connectorID string) ([]*domain.ConnectorGrant, error) {
+func (s *connectorGrantStore) ListGrantsByBinding(ctx context.Context, ws, bindingID string) ([]*connectorsmodule.ConnectorGrant, error) {
+	return s.ListGrantRecordsByBinding(ctx, ws, bindingID)
+}
+
+func (s *connectorGrantStore) ListGrantRecordsByConnector(ctx context.Context, ws, connectorID string) ([]*connectorsmodule.ConnectorGrant, error) {
 	q := url.Values{}
 	q.Set("connector_id", connectorID)
 	return s.list(ctx, ws, q)
 }
 
-func (s *connectorGrantStore) list(ctx context.Context, ws string, q url.Values) ([]*domain.ConnectorGrant, error) {
+func (s *connectorGrantStore) list(ctx context.Context, ws string, q url.Values) ([]*connectorsmodule.ConnectorGrant, error) {
 	path := withQuery("/api/v1/"+pathEscape(ws)+"/connector-grants", q)
 	var resp struct {
 		ConnectorGrants []*connectorGrantWire `json:"connector_grants"`
 	}
 	if err := s.client.do(ctx, "GET", path, nil, &resp); err != nil {
-		return nil, err
+		return nil, connectorOwnerError(err)
 	}
-	out := make([]*domain.ConnectorGrant, 0, len(resp.ConnectorGrants))
+	out := make([]*connectorsmodule.ConnectorGrant, 0, len(resp.ConnectorGrants))
 	for _, grant := range resp.ConnectorGrants {
-		out = append(out, grant.toDomain())
+		out = append(out, grant.toConnector())
 	}
 	return out, nil
 }
@@ -399,9 +421,7 @@ func (s *connectorGrantStore) list(ctx context.Context, ws string, q url.Values)
 
 type connectorAuditStore struct{ client *Client }
 
-var _ store.ConnectorAuditStore = (*connectorAuditStore)(nil)
-
-func (s *connectorAuditStore) Append(ctx context.Context, rec *domain.ConnectorCallRecord) error {
+func (s *connectorAuditStore) AppendConnectorCallRecord(ctx context.Context, rec *connectorsmodule.ConnectorCallRecord) error {
 	// Validate client-side like memstore so malformed records fail with
 	// the exact domain.ErrInvalid wrap without a round-trip.
 	if err := rec.Validate(); err != nil {
@@ -430,22 +450,22 @@ func (s *connectorAuditStore) Append(ctx context.Context, rec *domain.ConnectorC
 	if rec.SanitizedSummary != "" {
 		body["sanitized_summary"] = rec.SanitizedSummary
 	}
-	return s.client.do(ctx, "POST", "/api/v1/"+pathEscape(rec.WorkspaceKey)+"/connector-audit", body, nil)
+	return connectorOwnerError(s.client.do(ctx, "POST", "/api/v1/"+pathEscape(rec.WorkspaceKey)+"/connector-audit", body, nil))
 }
 
-func (s *connectorAuditStore) ListByRun(ctx context.Context, ws, runID string, filter store.ConnectorCallFilter) ([]*domain.ConnectorCallRecord, error) {
+func (s *connectorAuditStore) ListCallRecordsByRun(ctx context.Context, ws, runID string, filter connectorsmodule.ConnectorCallFilter) ([]*connectorsmodule.ConnectorCallRecord, error) {
 	q := url.Values{}
 	q.Set("run_id", runID)
 	return s.list(ctx, ws, q, filter)
 }
 
-func (s *connectorAuditStore) ListByBinding(ctx context.Context, ws, bindingID string, filter store.ConnectorCallFilter) ([]*domain.ConnectorCallRecord, error) {
+func (s *connectorAuditStore) ListCallRecordsByBinding(ctx context.Context, ws, bindingID string, filter connectorsmodule.ConnectorCallFilter) ([]*connectorsmodule.ConnectorCallRecord, error) {
 	q := url.Values{}
 	q.Set("binding_id", bindingID)
 	return s.list(ctx, ws, q, filter)
 }
 
-func (s *connectorAuditStore) list(ctx context.Context, ws string, q url.Values, filter store.ConnectorCallFilter) ([]*domain.ConnectorCallRecord, error) {
+func (s *connectorAuditStore) list(ctx context.Context, ws string, q url.Values, filter connectorsmodule.ConnectorCallFilter) ([]*connectorsmodule.ConnectorCallRecord, error) {
 	if filter.Decision != "" {
 		q.Set("decision", string(filter.Decision))
 	}
@@ -457,169 +477,11 @@ func (s *connectorAuditStore) list(ctx context.Context, ws string, q url.Values,
 		ConnectorCalls []*connectorCallWire `json:"connector_calls"`
 	}
 	if err := s.client.do(ctx, "GET", path, nil, &resp); err != nil {
-		return nil, err
+		return nil, connectorOwnerError(err)
 	}
-	out := make([]*domain.ConnectorCallRecord, 0, len(resp.ConnectorCalls))
+	out := make([]*connectorsmodule.ConnectorCallRecord, 0, len(resp.ConnectorCalls))
 	for _, record := range resp.ConnectorCalls {
-		out = append(out, record.toDomain())
+		out = append(out, record.toConnector())
 	}
 	return out, nil
-}
-
-var (
-	ErrConnectorGrantNotFound    = errors.New("fleetdb: connector grant not found")
-	ErrConnectorGrantInvalid     = errors.New("fleetdb: connector grant invalid request")
-	ErrConnectorGrantConflict    = errors.New("fleetdb: connector grant conflict")
-	ErrConnectorGrantUnavailable = errors.New("fleetdb: connector grant unavailable")
-)
-
-// ConnectorGrantRecord is the neutral FleetDB wire result exposed to
-// capability composition. It intentionally does not import the legacy domain
-// model or expose the composite Store.
-type ConnectorGrantRecord struct {
-	WorkspaceKey    string
-	GrantID         string
-	ConnectorID     string
-	BindingID       string
-	Action          string
-	ResourcePattern string
-	CreatedAt       time.Time
-	RevokedAt       *time.Time
-}
-
-type ConnectorGrantCreateCommand struct {
-	WorkspaceKey    string
-	GrantID         string
-	ConnectorID     string
-	BindingID       string
-	Action          string
-	ResourcePattern string
-}
-
-// ConnectorGrantTransport is the narrow create/list surface required by the
-// Connectors owner. Revoke and provider-secret operations are deliberately
-// absent from this grant-provisioning boundary.
-type ConnectorGrantTransport interface {
-	CreateConnectorGrant(context.Context, ConnectorGrantCreateCommand) (*ConnectorGrantRecord, error)
-	ListConnectorGrantsByBinding(context.Context, string, string) ([]*ConnectorGrantRecord, error)
-}
-
-type connectorGrantTransport struct{ client *Client }
-
-var _ ConnectorGrantTransport = (*connectorGrantTransport)(nil)
-
-func (c *Client) ConnectorGrantCommands() ConnectorGrantTransport {
-	if c == nil {
-		return nil
-	}
-	return &connectorGrantTransport{client: c}
-}
-
-func (transport *connectorGrantTransport) CreateConnectorGrant(
-	ctx context.Context,
-	command ConnectorGrantCreateCommand,
-) (*ConnectorGrantRecord, error) {
-	if err := validateConnectorGrantCreate(command); err != nil {
-		return nil, err
-	}
-	body := map[string]any{
-		"grant_id": command.GrantID, "connector_id": command.ConnectorID,
-		"binding_id": command.BindingID, "action": command.Action,
-		"resource_pattern": command.ResourcePattern,
-	}
-	var wire connectorGrantWire
-	path := "/api/v1/" + pathEscape(command.WorkspaceKey) + "/connector-grants"
-	if err := transport.client.do(ctx, http.MethodPost, path, body, &wire); err != nil {
-		return nil, mapConnectorGrantTransportError("create", err)
-	}
-	result := connectorGrantRecordFromWire(&wire)
-	if err := validateConnectorGrantRecord(result, command.WorkspaceKey, command.BindingID); err != nil {
-		return nil, err
-	}
-	if result.GrantID != command.GrantID || result.ConnectorID != command.ConnectorID ||
-		result.Action != command.Action || result.ResourcePattern != command.ResourcePattern {
-		return nil, fmt.Errorf("connector grant create returned divergent state: %w", ErrConnectorGrantUnavailable)
-	}
-	return result, nil
-}
-
-func (transport *connectorGrantTransport) ListConnectorGrantsByBinding(
-	ctx context.Context,
-	workspace,
-	bindingID string,
-) ([]*ConnectorGrantRecord, error) {
-	if err := validateConnectorGrantCoordinate("workspace", workspace); err != nil {
-		return nil, err
-	}
-	if err := validateConnectorGrantCoordinate("binding id", bindingID); err != nil {
-		return nil, err
-	}
-	query := url.Values{}
-	query.Set("binding_id", bindingID)
-	path := withQuery("/api/v1/"+pathEscape(workspace)+"/connector-grants", query)
-	var response struct {
-		ConnectorGrants []*connectorGrantWire `json:"connector_grants"`
-	}
-	if err := transport.client.do(ctx, http.MethodGet, path, nil, &response); err != nil {
-		return nil, mapConnectorGrantTransportError("list by binding", err)
-	}
-	result := make([]*ConnectorGrantRecord, len(response.ConnectorGrants))
-	for index, wire := range response.ConnectorGrants {
-		result[index] = connectorGrantRecordFromWire(wire)
-		if err := validateConnectorGrantRecord(result[index], workspace, bindingID); err != nil {
-			return nil, err
-		}
-	}
-	return result, nil
-}
-
-func validateConnectorGrantCreate(command ConnectorGrantCreateCommand) error {
-	coordinates := []struct{ label, value string }{
-		{"workspace", command.WorkspaceKey}, {"grant id", command.GrantID},
-		{"connector id", command.ConnectorID}, {"binding id", command.BindingID},
-		{"action", command.Action}, {"resource pattern", command.ResourcePattern},
-	}
-	for _, coordinate := range coordinates {
-		if err := validateConnectorGrantCoordinate(coordinate.label, coordinate.value); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func validateConnectorGrantCoordinate(label, value string) error {
-	if strings.TrimSpace(value) == "" || strings.TrimSpace(value) != value {
-		return fmt.Errorf("connector grant %s must be canonical: %w", label, ErrConnectorGrantInvalid)
-	}
-	return nil
-}
-
-func validateConnectorGrantRecord(value *ConnectorGrantRecord, workspace, bindingID string) error {
-	if value == nil || value.WorkspaceKey != workspace || value.BindingID != bindingID ||
-		strings.TrimSpace(value.GrantID) == "" || strings.TrimSpace(value.ConnectorID) == "" ||
-		strings.TrimSpace(value.Action) == "" || strings.TrimSpace(value.ResourcePattern) == "" ||
-		value.CreatedAt.IsZero() {
-		return fmt.Errorf("connector grant response escaped requested scope: %w", ErrConnectorGrantUnavailable)
-	}
-	return nil
-}
-
-func connectorGrantRecordFromWire(value *connectorGrantWire) *ConnectorGrantRecord {
-	if value == nil {
-		return nil
-	}
-	return &ConnectorGrantRecord{
-		WorkspaceKey: value.WorkspaceKey, GrantID: value.GrantID,
-		ConnectorID: value.ConnectorID, BindingID: value.BindingID,
-		Action: value.Action, ResourcePattern: value.ResourcePattern,
-		CreatedAt: value.CreatedAt, RevokedAt: cloneConnectorGrantTime(value.RevokedAt),
-	}
-}
-
-func cloneConnectorGrantTime(value *time.Time) *time.Time {
-	if value == nil {
-		return nil
-	}
-	result := *value
-	return &result
 }

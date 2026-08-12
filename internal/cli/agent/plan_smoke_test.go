@@ -156,7 +156,7 @@ func TestPlanSmoke_AgentError_SessionFinalized(t *testing.T) {
 	tmpDir := t.TempDir()
 	runtimeDir := filepath.Join(tmpDir, "runtime")
 
-	sessStore, err := sessions.NewStore(runtimeDir)
+	sessStore, err := sessions.NewStore(t.Context(), runtimeDir)
 	if err != nil {
 		t.Fatalf("failed to create session store: %v", err)
 	}

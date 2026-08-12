@@ -354,7 +354,7 @@ func createAssignedLeadSessionWithBackend(t *testing.T, st store.Store, backend 
 	}
 }
 
-func setHarnessRuntimeMetadata(t *testing.T, st store.Store, status string) {
+func setHarnessRuntimeMetadata(t *testing.T, st sessionRuntimeFixtureStore, status string) {
 	t.Helper()
 	if err := UpdateHarnessRuntimeMetadata(context.Background(), testSessionRuntime(st), "WS", "lead-session", HarnessRuntimeMetadata{
 		Provider:      "claude",

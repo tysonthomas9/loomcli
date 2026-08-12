@@ -8,8 +8,10 @@ import (
 	connectorsmodule "github.com/tysonthomas9/loomcli/internal/modules/connectors"
 	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
 	workflowcataloghttp "github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog/httpapi"
+	"github.com/tysonthomas9/loomcli/internal/modules/workspace"
 	"github.com/tysonthomas9/loomcli/internal/webui"
 	"github.com/tysonthomas9/loomcli/internal/webui/agentcoord"
+	"github.com/tysonthomas9/loomcli/internal/webui/handlers/prreview"
 	"github.com/tysonthomas9/loomcli/internal/webui/terminal"
 )
 
@@ -80,6 +82,9 @@ func PopulateUnifiedAgentCapabilityDeps(
 // so the module retains its existing fail-closed behavior.
 func NewPRReviewModule(
 	config webui.ServerConfig,
+	workspaceQueries workspace.API,
+	connectorManagement connectorsmodule.Management,
+	connectorSealer connectorsmodule.CredentialSealer,
 	dispatcher connectorsmodule.Dispatcher,
 	agentService agentcoord.AgentService,
 	terminalService terminal.TerminalService,
@@ -98,17 +103,13 @@ func NewPRReviewModule(
 		reviewerMessenger = capability.ChatMessenger()
 		reviewerInteractionAuthority = capability.OperatorAuthorityResolver()
 	}
-	return newPRReviewRouteModule(
-		config.Store,
-		dispatcher,
-		agentService,
-		terminalService,
-		config.LocalSettingsDir,
-		reviewerProvisioning,
-		reviewerAgents,
-		config.SourceControl,
-		reviewerChat,
-		reviewerMessenger,
-		reviewerInteractionAuthority,
-	)
+	return prreview.NewModule(prreview.Config{
+		Workspace: workspaceQueries, ConnectorManagement: connectorManagement, ConnectorSealer: connectorSealer,
+		Dispatcher: dispatcher, AgentService: agentService, TerminalService: terminalService,
+		LocalSettingsDir:     config.LocalSettingsDir,
+		ReviewerProvisioning: reviewerProvisioning, ReviewerAgents: reviewerAgents,
+		SourceControl:   config.SourceControl,
+		InteractionChat: reviewerChat, InteractionMessenger: reviewerMessenger,
+		InteractionAuthority: reviewerInteractionAuthority,
+	})
 }

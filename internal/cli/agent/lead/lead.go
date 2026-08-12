@@ -157,12 +157,12 @@ func runLead(cmd *cobra.Command, args []string) { //nolint:funlen // The foregro
 
 func generateLeadTerminalPrompt(ctx context.Context, registration leadSessionRegistration) (string, error) {
 	if strings.TrimSpace(leadPromptFile) != "" {
-		return agent.GenerateTerminalPrompt(leadPromptFile)
+		return agent.GenerateTerminalPrompt(ctx, leadPromptFile)
 	}
 	if prompt := loadLeadRolePrompt(ctx, registration); strings.TrimSpace(prompt) != "" {
 		return agent.GenerateTerminalPromptText(prompt)
 	}
-	return agent.GenerateTerminalPrompt("")
+	return agent.GenerateTerminalPrompt(ctx, "")
 }
 
 func loadLeadRolePrompt(ctx context.Context, registration leadSessionRegistration) string {

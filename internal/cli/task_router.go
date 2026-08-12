@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"os"
@@ -9,7 +10,6 @@ import (
 	"strings"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
-	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 )
 
@@ -177,8 +177,8 @@ func CheckTaskAvailability(routerCheck, defaultCheck func() (bool, error)) (bool
 
 // RouterTaskCheckFromEnv builds a router-based task check from daemon env vars.
 // Returns nil when no routing env vars are set.
-func RouterTaskCheckFromEnv(parentID string) func() (bool, error) {
-	return BuildRouterTaskCheck(RoleConfigFromEnv(), AgentEntryFromEnv(), parentID)
+func RouterTaskCheckFromEnv(ctx context.Context, parentID string) func() (bool, error) {
+	return BuildRouterTaskCheck(ctx, RoleConfigFromEnv(), AgentEntryFromEnv(), parentID)
 }
 
 // RoleConfigFromEnv reconstructs a partial config.RoleConfig from LOOM_ROLE_* environment
@@ -296,7 +296,7 @@ func countSkillMatches(labels []string, skills []string) int {
 }
 
 // FetchReadyIssues fetches issues ready for work.
-func FetchReadyIssues(parentID string, repoLabel string) ([]backend.IssueData, error) {
+func FetchReadyIssues(ctx context.Context, parentID string, repoLabel string) ([]backend.IssueData, error) {
 	ib := DefaultIssueBackend()
 	// Limit 10000: ready queues include open + review + in_progress, and review items
 	// can crowd out the few truly-workable open tasks past a small cutoff,
@@ -308,7 +308,7 @@ func FetchReadyIssues(parentID string, repoLabel string) ([]backend.IssueData, e
 	if sourceRepos := os.Getenv("LOOM_SOURCE_REPOS"); sourceRepos != "" {
 		opts.SourceRepos = strings.Split(sourceRepos, ",")
 	}
-	issues, err := ib.Ready(cmdstore.RootContext(), opts)
+	issues, err := ib.Ready(ctx, opts)
 	if err != nil {
 		return nil, fmt.Errorf("failed to check ready tasks: %w", err)
 	}
@@ -317,14 +317,14 @@ func FetchReadyIssues(parentID string, repoLabel string) ([]backend.IssueData, e
 
 // BuildRouterTaskCheck creates a CustomTaskCheck function that uses the task router's
 // SelectBestTask to check for available tasks. Returns nil if no filtering is needed.
-func BuildRouterTaskCheck(rc config.RoleConfig, ae config.AgentEntry, parentID string) func() (bool, error) {
+func BuildRouterTaskCheck(ctx context.Context, rc config.RoleConfig, ae config.AgentEntry, parentID string) func() (bool, error) {
 	constraints := MergeRoleConstraints(rc, ae)
 	repoLabel := ae.Repo
 	if len(constraints.Skills) == 0 && constraints.MaxPriority == nil && constraints.TaskFilter == "" && repoLabel == "" && len(constraints.SourceRepos) == 0 {
 		return nil
 	}
 	return func() (bool, error) {
-		issues, err := FetchReadyIssues(parentID, repoLabel)
+		issues, err := FetchReadyIssues(ctx, parentID, repoLabel)
 		if err != nil {
 			return false, err
 		}

@@ -5,11 +5,70 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/tysonthomas9/loomcli/internal/backend/api/gen"
 	connectorsmodule "github.com/tysonthomas9/loomcli/internal/modules/connectors"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
+
+// The PR-review HTTP adapter owns these wire shapes. They intentionally remain
+// private to the consumer instead of importing generated backend DTOs.
+type pullRequestDetail struct {
+	BaseRefName string `json:"base_ref_name"`
+	HeadRefName string `json:"head_ref_name"`
+	HeadSHA     string `json:"head_sha"`
+	IsDraft     bool   `json:"is_draft"`
+	Merged      bool   `json:"merged"`
+	Number      int    `json:"number"`
+	State       string `json:"state"`
+	Title       string `json:"title"`
+}
+
+type pullRequestDiff struct {
+	Diff  string                `json:"diff"`
+	Files []pullRequestDiffFile `json:"files"`
+}
+
+type pullRequestDiffFile struct {
+	Additions int    `json:"additions"`
+	Deletions int    `json:"deletions"`
+	Patch     string `json:"patch"`
+	Path      string `json:"path"`
+	Status    string `json:"status"`
+}
+
+type pullRequestReviewRequest struct {
+	Body            *string                       `json:"body,omitempty"`
+	Event           pullRequestReviewRequestEvent `json:"event"`
+	ExpectedHeadSHA string                        `json:"expected_head_sha"`
+}
+
+type pullRequestReviewRequestEvent string
+
+const (
+	pullRequestReviewApprove        pullRequestReviewRequestEvent = "approve"
+	pullRequestReviewComment        pullRequestReviewRequestEvent = "comment"
+	pullRequestReviewRequestChanges pullRequestReviewRequestEvent = "request_changes"
+)
+
+type pullRequestReviewResult struct {
+	ReviewID *int    `json:"review_id,omitempty"`
+	State    *string `json:"state,omitempty"`
+}
+
+type reviewerEnsureResult struct {
+	AgentName     string `json:"agent_name"`
+	CheckedOutSHA string `json:"checked_out_sha"`
+	Seeded        bool   `json:"seeded"`
+}
+
+type reviewerMessageRequest struct {
+	Text string `json:"text"`
+}
+
+type reviewerMessageResult struct {
+	Reason string `json:"reason"`
+	State  string `json:"state"`
+}
 
 // resolveAuthorizedPR parses the {owner}/{repo}/{number} path and
 // canonicalizes owner/repo through the workspace membership check, writing
@@ -186,13 +245,13 @@ func pullRequestArgs(params pullRequestPath) map[string]any {
 
 // decodeReviewRequest parses and validates a review POST body, writing the
 // HTTP error itself and returning ok=false on failure.
-func decodeReviewRequest(w http.ResponseWriter, r *http.Request) (req gen.PullRequestReviewRequest, event, expectedHeadSha string, ok bool) {
+func decodeReviewRequest(w http.ResponseWriter, r *http.Request) (req pullRequestReviewRequest, event, expectedHeadSHA string, ok bool) {
 	if err := handler.DecodeOneJSON(w, r, &req, handler.JSONDecodeOptions{}); err != nil {
 		writePRReviewErrorCode(w, http.StatusBadRequest, "invalid", "invalid review request body", false)
 		return req, "", "", false
 	}
-	expectedHeadSha = strings.TrimSpace(req.ExpectedHeadSha)
-	if expectedHeadSha == "" {
+	expectedHeadSHA = strings.TrimSpace(req.ExpectedHeadSHA)
+	if expectedHeadSHA == "" {
 		writePRReviewErrorCode(w, http.StatusPreconditionRequired, "precondition_required", "expected_head_sha is required", false)
 		return req, "", "", false
 	}
@@ -201,7 +260,7 @@ func decodeReviewRequest(w http.ResponseWriter, r *http.Request) (req gen.PullRe
 		writePRReviewErrorCode(w, http.StatusBadRequest, "invalid", "invalid review event", false)
 		return req, "", "", false
 	}
-	return req, event, expectedHeadSha, true
+	return req, event, expectedHeadSHA, true
 }
 
 // reviewSubmissionRunID builds the dispatch run id for a review POST. Unlike
@@ -227,21 +286,21 @@ func syntheticRunID(r *http.Request, params pullRequestPath, action string) stri
 	return "webui-review:" + userID + ":" + params.owner + "/" + params.repo + "#" + fmt.Sprint(params.number) + ":" + action
 }
 
-func pullRequestDetailFromBody(body map[string]any) gen.PullRequestDetail {
-	return gen.PullRequestDetail{
+func pullRequestDetailFromBody(body map[string]any) pullRequestDetail {
+	return pullRequestDetail{
 		Number:      intValue(body["number"]),
 		State:       stringValue(body["state"]),
 		Title:       stringValue(body["title"]),
 		IsDraft:     boolValue(body["draft"]),
 		HeadRefName: stringValue(body["headRef"]),
 		BaseRefName: stringValue(body["baseRef"]),
-		HeadSha:     stringValue(body["headSha"]),
+		HeadSHA:     stringValue(body["headSha"]),
 		Merged:      boolValue(body["merged"]),
 	}
 }
 
-func pullRequestDiffFromBody(body map[string]any) gen.PullRequestDiff {
-	files := []gen.PullRequestDiffFile{}
+func pullRequestDiffFromBody(body map[string]any) pullRequestDiff {
+	files := []pullRequestDiffFile{}
 	if rawFiles, ok := body["files"].([]map[string]any); ok {
 		for _, raw := range rawFiles {
 			files = append(files, pullRequestDiffFileFromBody(raw))
@@ -255,18 +314,18 @@ func pullRequestDiffFromBody(body map[string]any) gen.PullRequestDiff {
 			files = append(files, pullRequestDiffFileFromBody(raw))
 		}
 	}
-	return gen.PullRequestDiff{
+	return pullRequestDiff{
 		Files: files,
 		Diff:  stringValue(body["diff"]),
 	}
 }
 
-func pullRequestDiffFileFromBody(body map[string]any) gen.PullRequestDiffFile {
+func pullRequestDiffFileFromBody(body map[string]any) pullRequestDiffFile {
 	path := stringValue(body["path"])
 	if path == "" {
 		path = stringValue(body["filename"])
 	}
-	return gen.PullRequestDiffFile{
+	return pullRequestDiffFile{
 		Path:      path,
 		Status:    stringValue(body["status"]),
 		Additions: intValue(body["additions"]),
@@ -275,22 +334,22 @@ func pullRequestDiffFileFromBody(body map[string]any) gen.PullRequestDiffFile {
 	}
 }
 
-func githubReviewEvent(event gen.PullRequestReviewRequestEvent) (string, bool) {
+func githubReviewEvent(event pullRequestReviewRequestEvent) (string, bool) {
 	switch event {
-	case gen.PullRequestReviewRequestEventApprove:
+	case pullRequestReviewApprove:
 		return "APPROVE", true
-	case gen.PullRequestReviewRequestEventRequestChanges:
+	case pullRequestReviewRequestChanges:
 		return "REQUEST_CHANGES", true
-	case gen.PullRequestReviewRequestEventComment:
+	case pullRequestReviewComment:
 		return "COMMENT", true
 	default:
 		return "", false
 	}
 }
 
-func pullRequestReviewResultFromBody(body map[string]any) gen.PullRequestReviewResult {
-	return gen.PullRequestReviewResult{
-		ReviewId: intPtrFromValue(body["id"]),
+func pullRequestReviewResultFromBody(body map[string]any) pullRequestReviewResult {
+	return pullRequestReviewResult{
+		ReviewID: intPtrFromValue(body["id"]),
 		State:    stringPtrFromValue(body["state"]),
 	}
 }

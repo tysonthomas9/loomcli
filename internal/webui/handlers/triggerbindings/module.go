@@ -1,6 +1,6 @@
 // Package triggerbindings exposes Automation's trigger-binding management HTTP
-// surface. Product mutations cross only Automation's public ports; this adapter
-// owns request decoding, operator-authority resolution, and the legacy response
+// surface. Product mutations cross only Automation's public interfaces; this
+// adapter owns request decoding, operator-authority resolution, and the read
 // decoration needed by the current Automations UI.
 package triggerbindings
 
@@ -19,10 +19,11 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/app/workflowbinding"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	trigger "github.com/tysonthomas9/loomcli/internal/infra/automationruntime"
+	"github.com/tysonthomas9/loomcli/internal/modules/agents"
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
+	"github.com/tysonthomas9/loomcli/internal/modules/connectors"
 	workflowcataloghttp "github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog/httpapi"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
-	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 )
 
@@ -31,41 +32,16 @@ const (
 	maxBindingBodyBytes = 1 << 20
 )
 
-// RunQueries is the read-only compatibility seam used for current run-history
-// responses and list health decoration. It deliberately omits run creation and
-// every execution lifecycle mutation.
+// RunQueries is the consumer-owned read interface used for current run-history
+// responses and list health decoration. Implementations return at most limit
+// runs in deterministic newest-first order. The port deliberately omits storage
+// filters, run creation, and every execution lifecycle mutation.
 type RunQueries interface {
-	Get(ctx context.Context, workspaceKey, runID string) (*domain.DriverRun, error)
-	List(ctx context.Context, workspaceKey string, filter store.DriverRunFilter) ([]*domain.DriverRun, error)
+	ListByBinding(ctx context.Context, workspaceKey, bindingID string, limit int) ([]*domain.DriverRun, error)
 }
 
-// ConnectorCompatibility owns the two connector concerns that cannot enter
-// Automation's binding model: secret material and binding-scoped egress grants.
-// Implementations must make both methods idempotent so interrupted creates and
-// deletes can safely be resumed.
-type ConnectorCompatibility interface {
-	ConfigureBindingSecret(ctx context.Context, workspaceKey, bindingID, sourceKind, secret string) error
-	RevokeBindingGrants(ctx context.Context, workspaceKey, bindingID string) (int, error)
-}
-
-// UnattachedBindingIdentityChecker prevents an ordinary trigger binding from
-// occupying an identifier already owned by either supervised-agent
-// representation. Managed bindings attached to an AgentService bypass this
-// HTTP create path and retain their existing aggregate-owned lifecycle.
-//
-// Agent and TriggerBinding identities live in separate FleetDB namespaces, so
-// this check cannot reserve a name atomically. The HTTP adapter therefore
-// checks before and after create and compensates a failed post-check through
-// Automation's fenced disable/delete commands. Another process can still
-// create an Agent after the final successful check; eliminating that last
-// interval requires a FleetDB identity-reservation transaction shared by both
-// aggregate create paths.
-type UnattachedBindingIdentityChecker interface {
-	CheckUnattachedBindingID(ctx context.Context, workspaceKey, bindingID string) error
-}
-
-// Config contains only the public Automation ports and narrow compatibility
-// reads needed by this transport.
+// Config contains only the owner interfaces and narrow reads needed by this
+// transport.
 type Config struct {
 	CreateWorkflow       *workflowbinding.Workflow
 	Commands             automation.BindingCommands
@@ -74,8 +50,8 @@ type Config struct {
 	OperatorAuthority    workflowcataloghttp.OperatorAuthorityResolver
 	WorkspaceFromContext func(context.Context) string
 	Runs                 RunQueries
-	Connectors           ConnectorCompatibility
-	AgentIdentities      UnattachedBindingIdentityChecker
+	Connectors           connectors.BindingGrantLifecycle
+	AgentIdentities      agents.IdentityQueries
 }
 
 type Module struct {
@@ -86,8 +62,8 @@ type Module struct {
 	operatorAuthority    workflowcataloghttp.OperatorAuthorityResolver
 	workspaceFromContext func(context.Context) string
 	runs                 RunQueries
-	connectors           ConnectorCompatibility
-	agentIdentities      UnattachedBindingIdentityChecker
+	connectors           connectors.BindingGrantLifecycle
+	agentIdentities      agents.IdentityQueries
 	active               bool
 }
 
@@ -101,11 +77,6 @@ func New(config Config) *Module {
 		runs: config.Runs, connectors: config.Connectors, agentIdentities: config.AgentIdentities, active: true,
 	}
 }
-
-// NewModule is retained only so older composition continues to compile while
-// it migrates to New(Config). It is intentionally inert: a composite Store is
-// no longer an authorized trigger-binding management dependency.
-func NewModule(any) *Module { return &Module{} }
 
 func (m *Module) Register(mux *http.ServeMux) {
 	if m == nil || mux == nil || !m.active {
@@ -129,7 +100,6 @@ type createBindingRequest struct {
 	SourceKind          string                              `json:"source_kind,omitempty"`
 	Name                string                              `json:"name,omitempty"`
 	BindingID           string                              `json:"binding_id,omitempty"`
-	Secret              string                              `json:"secret,omitempty"`
 	Entrypoint          string                              `json:"entrypoint,omitempty"`
 	EventTypePatterns   []string                            `json:"event_type_patterns,omitempty"`
 	SubjectKeyTemplate  string                              `json:"subject_key_template,omitempty"`
@@ -209,19 +179,15 @@ func (m *Module) listBindings(w http.ResponseWriter, r *http.Request) {
 	handler.WriteJSON(w, http.StatusOK, map[string]any{"bindings": out})
 }
 
-// DecorateBinding remains a read-only compatibility helper for the existing
-// agent DTO adapter. Trigger-binding management no longer uses a Store.
-type bindingRunStore interface {
-	DriverRuns() store.DriverRunStore
-}
-
-func DecorateBinding(ctx context.Context, st bindingRunStore, workspace string, binding *automation.Binding, now time.Time) BindingDecorators {
-	if st == nil {
-		return BindingDecorators{NextFireAt: nextLegacyFireFor(binding, now)}
+// DecorateBinding projects schedule and run health for consumers that already
+// hold the narrow run query interface.
+func DecorateBinding(ctx context.Context, runs RunQueries, workspace string, binding *automation.Binding, now time.Time) BindingDecorators {
+	if runs == nil {
+		return BindingDecorators{NextFireAt: nextAutomationFireFor(binding, now)}
 	}
-	lastStatus, consecutiveFailures := bindingRunHealth(ctx, st.DriverRuns(), workspace, bindingID(binding))
+	lastStatus, consecutiveFailures := bindingRunHealth(ctx, runs, workspace, bindingID(binding))
 	return BindingDecorators{
-		NextFireAt: nextLegacyFireFor(binding, now), LastRunStatus: lastStatus,
+		NextFireAt: nextAutomationFireFor(binding, now), LastRunStatus: lastStatus,
 		ConsecutiveFailures: consecutiveFailures,
 	}
 }
@@ -237,13 +203,9 @@ func bindingRunHealth(ctx context.Context, runs RunQueries, workspace, bindingID
 	if runs == nil || strings.TrimSpace(bindingID) == "" {
 		return "", 0
 	}
-	items, err := runs.List(ctx, workspace, store.DriverRunFilter{BindingID: bindingID, Limit: bindingRunScanLimit})
+	items, err := runs.ListByBinding(ctx, workspace, bindingID, bindingRunScanLimit)
 	if err != nil || len(items) == 0 {
 		return "", 0
-	}
-	store.SortDriverRunsNewestFirst(items)
-	if len(items) > bindingRunScanLimit {
-		items = items[:bindingRunScanLimit]
 	}
 	lastStatus := string(items[0].Status)
 	consecutiveFailures := 0
@@ -262,13 +224,6 @@ func bindingRunHealth(ctx context.Context, runs RunQueries, workspace, bindingID
 
 func nextAutomationFireFor(binding *automation.Binding, now time.Time) *time.Time {
 	if binding == nil || !binding.Enabled || binding.SourceKind != automation.SourceKindCron || strings.TrimSpace(binding.Schedule) == "" {
-		return nil
-	}
-	return nextFire(binding.Schedule, binding.ScheduleTimezone, now)
-}
-
-func nextLegacyFireFor(binding *automation.Binding, now time.Time) *time.Time {
-	if binding == nil || !binding.Enabled || binding.SourceKind != store.CronSourceKind || strings.TrimSpace(binding.Schedule) == "" {
 		return nil
 	}
 	return nextFire(binding.Schedule, binding.ScheduleTimezone, now)
@@ -297,7 +252,9 @@ func (m *Module) createBinding(w http.ResponseWriter, r *http.Request) { //nolin
 		return
 	}
 	var request createBindingRequest
-	if err := handler.DecodeOneJSON(w, r, &request, handler.JSONDecodeOptions{MaxBytes: maxBindingBodyBytes}); err != nil {
+	if err := handler.DecodeOneJSON(w, r, &request, handler.JSONDecodeOptions{
+		MaxBytes: maxBindingBodyBytes, DisallowUnknownFields: true,
+	}); err != nil {
 		handler.RespondError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
@@ -310,11 +267,6 @@ func (m *Module) createBinding(w http.ResponseWriter, r *http.Request) { //nolin
 	enabled := true
 	if request.Enabled != nil {
 		enabled = *request.Enabled
-	}
-	secret := request.Secret
-	if sourceKind == "github" && enabled && strings.TrimSpace(secret) == "" {
-		handler.RespondError(w, http.StatusBadRequest, "secret is required to enable a github trigger binding")
-		return
 	}
 	schedule := strings.TrimSpace(request.Schedule)
 	if sourceKind == automation.SourceKindCron && schedule == "" {
@@ -355,7 +307,7 @@ func (m *Module) createBinding(w http.ResponseWriter, r *http.Request) { //nolin
 		// Browser/gallery activation uses POST as an idempotent ensure by
 		// default. The standalone CLI historically exposed strict create
 		// semantics, so its authenticated management request opts into a 409
-		// without mutating the existing binding or its secret.
+		// without mutating the existing binding.
 		if r.URL.Query().Get("create_only") == "true" {
 			writeAutomationError(w, fmt.Errorf("trigger binding %q already exists: %w", bindingID, automation.ErrConflict), "create trigger binding failed")
 			return
@@ -366,9 +318,6 @@ func (m *Module) createBinding(w http.ResponseWriter, r *http.Request) { //nolin
 		}
 		if err := m.validateEnsureIdentity(r.Context(), workspace, request, existing, sourceKind, routeKey, driverID, workflowName); err != nil {
 			writeAutomationError(w, err, "create trigger binding failed")
-			return
-		}
-		if !m.configureSecret(w, r, workspace, existing.BindingID, existing.SourceKind, secret) {
 			return
 		}
 		handler.WriteJSON(w, http.StatusOK, existing)
@@ -418,9 +367,6 @@ func (m *Module) createBinding(w http.ResponseWriter, r *http.Request) { //nolin
 		writeAutomationError(w, identityErr, "check created trigger binding identifier failed")
 		return
 	}
-	if !m.configureSecret(w, r, workspace, binding.BindingID, binding.SourceKind, secret) {
-		return
-	}
 	handler.WriteJSON(w, http.StatusCreated, binding)
 }
 
@@ -428,7 +374,21 @@ func (m *Module) checkUnattachedBindingID(ctx context.Context, workspace, bindin
 	if m == nil || m.agentIdentities == nil {
 		return automation.ErrUnavailable
 	}
-	return m.agentIdentities.CheckUnattachedBindingID(ctx, workspace, bindingID)
+	agent, err := m.agentIdentities.GetAgent(ctx, workspace, bindingID)
+	switch {
+	case errors.Is(err, agents.ErrNotFound):
+		return nil
+	case err != nil:
+		return fmt.Errorf("check durable Agent identifier %q: %w", bindingID, err)
+	case agent == nil:
+		return automation.ErrInvalidPersistedState
+	default:
+		return fmt.Errorf(
+			"trigger binding identifier %q is already used by a durable agent record: %w",
+			bindingID,
+			automation.ErrConflict,
+		)
+	}
 }
 
 // rollbackCreatedBinding removes only the unmanaged binding just returned by
@@ -531,21 +491,6 @@ func bindingEnsureConflict(bindingID, field, existing, requested string) error {
 		"trigger binding %q has %s %q, not requested %q: %w",
 		bindingID, field, existing, requested, automation.ErrConflict,
 	)
-}
-
-func (m *Module) configureSecret(w http.ResponseWriter, r *http.Request, workspace, bindingID, sourceKind, secret string) bool {
-	if secret == "" {
-		return true
-	}
-	if m.connectors == nil {
-		writeAutomationError(w, automation.ErrUnavailable, "configure trigger binding secret failed")
-		return false
-	}
-	if err := m.connectors.ConfigureBindingSecret(r.Context(), workspace, bindingID, sourceKind, secret); err != nil {
-		writeAutomationError(w, err, "configure trigger binding secret failed")
-		return false
-	}
-	return true
 }
 
 func (m *Module) setEnabled(enabled bool) http.HandlerFunc {
@@ -677,12 +622,11 @@ func (m *Module) listBindingRuns(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	runs, err := m.runs.List(r.Context(), workspace, store.DriverRunFilter{BindingID: binding.BindingID, Limit: limit})
+	runs, err := m.runs.ListByBinding(r.Context(), workspace, binding.BindingID, limit)
 	if err != nil {
 		writeAutomationError(w, err, "list trigger binding runs failed")
 		return
 	}
-	runs = handler.SortAndTrim(runs, limit)
 	handler.WriteJSON(w, http.StatusOK, map[string]any{"binding_id": binding.BindingID, "runs": runs})
 }
 
@@ -861,7 +805,10 @@ func (m *Module) deleteBinding(w http.ResponseWriter, r *http.Request) { //nolin
 		// repeat the idempotent grant cleanup so a pre-existing orphan is repaired
 		// instead of being hidden by the absent binding.
 		if errors.Is(err, automation.ErrNotFound) {
-			revoked, revokeErr := m.connectors.RevokeBindingGrants(r.Context(), workspace, bindingID)
+			revoked, revokeErr := m.connectors.RevokeBindingGrants(r.Context(), connectors.BindingGrantCleanupCommand{
+				WorkspaceKey: workspace,
+				BindingID:    bindingID,
+			})
 			if revokeErr != nil {
 				writeAutomationError(w, revokeErr, "revoke missing trigger binding grants failed")
 				return
@@ -882,7 +829,10 @@ func (m *Module) deleteBinding(w http.ResponseWriter, r *http.Request) { //nolin
 		writeAutomationError(w, err, "disable trigger binding before delete failed")
 		return
 	}
-	revoked, err := m.connectors.RevokeBindingGrants(r.Context(), workspace, bindingID)
+	revoked, err := m.connectors.RevokeBindingGrants(r.Context(), connectors.BindingGrantCleanupCommand{
+		WorkspaceKey: workspace,
+		BindingID:    bindingID,
+	})
 	if err != nil {
 		writeAutomationError(w, err, "revoke trigger binding grants failed")
 		return
@@ -900,13 +850,6 @@ func rejectManagedBinding(w http.ResponseWriter, binding *automation.Binding) bo
 	}
 	handler.RespondError(w, http.StatusConflict, "managed by agent "+strings.TrimSpace(binding.TargetAgentServiceID))
 	return true
-}
-
-// DeleteBindingAndRevokeGrants is an inert compatibility bridge for older
-// agent handlers. Direct Store deletion is intentionally unavailable; callers
-// must migrate to the Automation-backed delete workflow above.
-func DeleteBindingAndRevokeGrants(_ context.Context, _ any, _, bindingID string) (DeleteBindingResult, error) {
-	return DeleteBindingResult{BindingID: strings.TrimSpace(bindingID)}, automation.ErrUnavailable
 }
 
 func (m *Module) canonicalWorkspace(r *http.Request) (string, bool) {

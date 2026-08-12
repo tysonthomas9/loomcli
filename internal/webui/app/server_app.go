@@ -390,8 +390,17 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 		app.fileSvc = filecoord.NewFileService(config.FileOps)
 	}
 
-	// Initialize session service layer (always constructed; stores may be nil internally)
-	app.sessSvc = sessioncoord.NewSessionServiceWithRuntimeDir(config.Store, app.sessionHistoryStore, config.SessionRuntimeDir)
+	// Initialize session service over the read-only Artifacts capability.
+	var artifactQueries webui.ArtifactQueryAPI
+	if config.ArtifactsCapability != nil {
+		artifactQueries = config.ArtifactsCapability.ArtifactQueries()
+	}
+	app.sessSvc = sessioncoord.NewSessionServiceWithArtifactQueries(
+		config.Store,
+		app.sessionHistoryStore,
+		config.SessionRuntimeDir,
+		artifactQueries,
+	)
 
 	app.buildHandlers()
 	app.buildModules()

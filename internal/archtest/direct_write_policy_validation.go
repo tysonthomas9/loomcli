@@ -13,7 +13,6 @@ func (i DirectWriteInventory) validateGenericMechanisms() error {
 		"action_ledger": {"internal/modules/execution/fleetdb"},
 		"lease": {
 			"internal/modules/agents/fleetdb",
-			"internal/modules/artifacts/fleetdb",
 			"internal/modules/execution/fleetdb",
 			"internal/modules/interaction/fleetdb",
 		},

@@ -25,6 +25,10 @@ import (
 func newWorkspaceModules(deps Deps, automationModules automationRouteModules) []interface{ Register(*http.ServeMux) } {
 	onboardingModule := onboarding.NewModule(deps.WorkItems, deps.Agents, deps.AgentsOperator)
 	taskWorkflowRuns := newTaskWorkflowRunReader(deps)
+	var pendingAwaits approvals.PendingAwaitQueries
+	if deps.Store != nil {
+		pendingAwaits = deps.Store.Awaits()
+	}
 
 	return []interface{ Register(*http.ServeMux) }{
 		agents.New(agents.Config{
@@ -33,6 +37,7 @@ func newWorkspaceModules(deps Deps, automationModules automationRouteModules) []
 			AgentRecords:       deps.Agents, AgentRecordAuthority: deps.AgentsOperator,
 			Store: deps.Store, Hub: deps.Hub,
 			Bindings: deps.AutomationBindings, OperatorAuthority: deps.AutomationOperator,
+			BindingRuns:  automationModules.BindingRuns,
 			Provisioning: deps.AgentProvisioning, ProvisioningAuthority: deps.AgentProvisioningOperator,
 			PrepareWorkflowTarget: deps.WorkflowTargetPreparation,
 			WorkspaceFromContext:  automationModules.WorkspaceFromContext,
@@ -51,7 +56,7 @@ func newWorkspaceModules(deps Deps, automationModules automationRouteModules) []
 			CatalogOperatorAuthority: deps.WorkflowCatalogOperator,
 			PrepareWorkflowTarget:    deps.WorkflowTargetPreparation,
 			Execution:                deps.ExecutionDriverRuns, OperatorAuthority: deps.ExecutionOperator,
-			TaskWorkflowRuns: taskWorkflowRuns,
+			TaskWorkflowRuns: taskWorkflowRuns, BackendHealth: deps.WorkflowBackendHealth,
 		}),
 		executionmanagement.New(executionmanagement.Config{
 			WorkerProfiles: deps.ExecutionWorkerProfiles, Authority: deps.ExecutionOperator,
@@ -63,7 +68,7 @@ func newWorkspaceModules(deps Deps, automationModules automationRouteModules) []
 		automationModules.TriggerBindings,
 		connectors.NewModule(deps.Store, deps.LocalSettingsDir, deps.AutomationBindings, deps.AutomationOperator),
 		approvals.New(approvals.Config{
-			Store: deps.Store, Awaits: automationModules.EventAwaits,
+			PendingAwaits: pendingAwaits, Awaits: automationModules.EventAwaits,
 			Journal: deps.AutomationApprovalJournal, Authority: deps.AutomationApprovalAuthority,
 		}),
 		taskrunapi.NewModule(taskrunapi.Config{
@@ -74,9 +79,9 @@ func newWorkspaceModules(deps Deps, automationModules automationRouteModules) []
 		}),
 		driverapi.NewModule(driverapi.Config{
 			Store: deps.Store, APIBaseURL: deps.DriverAPIBaseURL,
-			IssueBackends: deps.ExecutionIssueBackends,
-			RolePrompts:   roles.ReadPromptBody,
-			APIToken:      deps.DriverAPIToken, RunTokenKey: deps.DriverRunTokenKey,
+			IssueBackends:    deps.ExecutionIssueBackends,
+			RolePrompts:      roles.ReadPromptBody,
+			RunTokenKey:      deps.DriverRunTokenKey,
 			LocalSettingsDir: deps.LocalSettingsDir, LocalRepoPath: storeadapter.ResolveRepoPath,
 			SourceControl:    deps.SourceControl,
 			Dispatcher:       deps.Dispatcher,
@@ -89,6 +94,34 @@ func newWorkspaceModules(deps Deps, automationModules automationRouteModules) []
 			InteractionChat: deps.InteractionChat,
 		}),
 	}
+}
+
+type workflowBackendHealthAdapter struct {
+	check BackendHealthCheck
+}
+
+// BackendHealthCheck is the composition input used to translate infrastructure
+// health into the Workflows delivery adapter's consumer-owned model.
+type BackendHealthCheck func(name string) (available, installed, apiKeySet bool, message string, ok bool)
+
+// NewWorkflowBackendHealthQuery closes the composition seam without exposing
+// the operations health model to Workflows.
+func NewWorkflowBackendHealthQuery(check BackendHealthCheck) workflows.BackendHealthQuery {
+	if check == nil {
+		return nil
+	}
+	return workflowBackendHealthAdapter{check: check}
+}
+
+func (adapter workflowBackendHealthAdapter) BackendHealth(name string) (workflows.BackendHealth, bool) {
+	available, installed, apiKeySet, message, ok := adapter.check(name)
+	if !ok {
+		return workflows.BackendHealth{}, false
+	}
+	return workflows.BackendHealth{
+		Available: available, Installed: installed,
+		APIKeySet: apiKeySet, Message: message,
+	}, true
 }
 
 func newTaskWorkflowRunReader(deps Deps) readprojection.TaskWorkflowRunReader {

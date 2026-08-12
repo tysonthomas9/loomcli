@@ -16,9 +16,6 @@ import (
 	"fmt"
 
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
-
-	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/driver/runtypes"
 )
 
 // ErrorClassSandboxRequired is the structured error class stamped on a run
@@ -70,41 +67,49 @@ func LauncherPlacementProvider(launcher SandboxLauncher) string {
 	}
 }
 
-// RefuseUntrustedPlacement is the pre-launch gate: it returns a terminal
-// failed result (and true) when the run's driver is untrusted and the
-// resolved launcher does not isolate. The launcher is never invoked — no
-// process is spawned. Trusted drivers and isolating launchers pass through.
-func RefuseUntrustedPlacement(req runtypes.RunRequest, launcher SandboxLauncher) (runtypes.RunResult, bool) {
-	if req.TrustLevel.Trusted() || launcherIsolates(launcher) {
-		return runtypes.RunResult{}, false
+// PlacementRefusal carries sandbox-owned denial evidence for the Driver owner
+// to project into its terminal run result.
+type PlacementRefusal struct {
+	Summary    string
+	ErrorClass string
+	Output     map[string]string
+}
+
+// RefuseUntrustedPlacement is the pre-launch gate: it returns denial evidence
+// (and true) when the run's driver is untrusted and the resolved launcher does
+// not isolate. The launcher is never invoked. Trusted drivers and isolating
+// launchers pass through.
+func RefuseUntrustedPlacement(driverID string, trust workflowcatalog.DriverTrustLevel, launcher SandboxLauncher) (PlacementRefusal, bool) {
+	if trust.Trusted() || launcherIsolates(launcher) {
+		return PlacementRefusal{}, false
 	}
 	provider := LauncherPlacementProvider(launcher)
-	result := runtypes.RunResult{
-		Status: domain.DriverRunFailed,
+	result := PlacementRefusal{
 		Summary: fmt.Sprintf(
 			"driver %q is untrusted and the resolved %q launcher does not isolate: refusing to launch outside a sandbox (set LOOM_DRIVER_SANDBOX=container or have an operator mark the driver trusted)",
-			req.Run.DriverID, provider),
+			driverID, provider),
 		ErrorClass: ErrorClassSandboxRequired,
 		Output: map[string]string{
 			ErrorCodeOutputKey: ErrorClassSandboxRequired,
 			RetryableOutputKey: "false",
 		},
 	}
-	RecordTrustPlacementDecision(&result, req.TrustLevel, provider)
+	result.Output = RecordTrustPlacementDecision(result.Output, trust, provider)
 	return result, true
 }
 
 // RecordTrustPlacementDecision stamps the policy inputs onto the run output
 // (§9.6 audit): every run records the trust level it executed (or was
 // refused) under and the launcher the runner resolved.
-func RecordTrustPlacementDecision(result *runtypes.RunResult, trust workflowcatalog.DriverTrustLevel, launcherProvider string) {
-	if result.Output == nil {
-		result.Output = map[string]string{}
+func RecordTrustPlacementDecision(output map[string]string, trust workflowcatalog.DriverTrustLevel, launcherProvider string) map[string]string {
+	if output == nil {
+		output = map[string]string{}
 	}
 	level := workflowcatalog.DriverTrustUntrusted
 	if trust.Trusted() {
 		level = workflowcatalog.DriverTrustTrusted
 	}
-	result.Output[TrustLevelOutputKey] = string(level)
-	result.Output[SandboxLauncherOutputKey] = launcherProvider
+	output[TrustLevelOutputKey] = string(level)
+	output[SandboxLauncherOutputKey] = launcherProvider
+	return output
 }

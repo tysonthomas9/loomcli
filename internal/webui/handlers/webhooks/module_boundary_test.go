@@ -96,28 +96,6 @@ func TestVerificationDenialsAreUniformAndDoNotAdmit(t *testing.T) {
 	}
 }
 
-func TestLegacyConstructorIsInertForMutationAndQueries(t *testing.T) {
-	st := seedStore(t, true)
-	mux := http.NewServeMux()
-	NewModule(st).Register(mux)
-
-	recorder := httptest.NewRecorder()
-	mux.ServeHTTP(recorder, signedRequest("github", "legacy-must-not-dispatch", prOpenedBody))
-	if recorder.Code != http.StatusServiceUnavailable {
-		t.Fatalf("legacy POST status = %d, want 503; body %s", recorder.Code, recorder.Body.String())
-	}
-	events, err := st.TriggerEvents().List(t.Context(), testWS, store.TriggerEventFilter{})
-	if err != nil || len(events) != 0 {
-		t.Fatalf("legacy constructor mutated events = %d, %v", len(events), err)
-	}
-
-	recorder = httptest.NewRecorder()
-	mux.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/api/workspaces/"+testWS+"/trigger-events", nil))
-	if recorder.Code != http.StatusServiceUnavailable {
-		t.Fatalf("legacy GET status = %d, want 503; body %s", recorder.Code, recorder.Body.String())
-	}
-}
-
 func TestReadRoutesUseAutomationQueryAPIsWithLegacyParameters(t *testing.T) {
 	queries := &recordingAutomationQueries{}
 	mux := http.NewServeMux()

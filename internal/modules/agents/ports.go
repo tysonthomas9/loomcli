@@ -29,17 +29,6 @@ type RoleStore interface {
 	DeleteRole(ctx context.Context, mutation DeleteRoleMutation) error
 }
 
-// RolePromptRepairStore is the deliberately narrow persistence primitive used
-// by startup compatibility repair. Implementations must atomically fill an
-// empty PromptFile, accept an exact replay without writing, and reject a
-// different non-empty value as ErrConflict.
-type RolePromptRepairStore interface {
-	SetPromptFileIfEmpty(
-		ctx context.Context,
-		workspace, roleName, promptFile string,
-	) (*Role, bool, error)
-}
-
 // AgentIdentityStore owns identity create, replace, and archive. Its methods
 // must enforce workspace scope, immutable AgentID, behavior-reference
 // integrity, and optimistic revision checks in the durable write.

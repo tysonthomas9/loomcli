@@ -16,6 +16,7 @@ import (
 	trigger "github.com/tysonthomas9/loomcli/internal/infra/automationruntime"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
+	connectorsmodule "github.com/tysonthomas9/loomcli/internal/modules/connectors"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
@@ -26,7 +27,7 @@ const (
 	testRoute  = "github.pull_request.opened"
 )
 
-func seedStore(t *testing.T, enabled bool) *memstore.Store {
+func seedStoreWithoutConnector(t *testing.T, enabled bool) *memstore.Store {
 	t.Helper()
 	st := memstore.New()
 	ctx := context.Background()
@@ -52,11 +53,38 @@ func seedStore(t *testing.T, enabled bool) *memstore.Store {
 	if _, err := st.TriggerBindings().Create(ctx, store.TriggerBindingCreate{
 		WorkspaceKey: testWS, BindingID: "b1", Name: "pr-review", SourceKind: "github",
 		RouteKey: testRoute, DriverID: "github-pr-review", DriverVersionID: "v1",
-		WebhookSecret: testSecret, Enabled: enabled,
+		Enabled: enabled,
 	}); err != nil {
 		t.Fatalf("seed binding: %v", err)
 	}
 	return st
+}
+
+func seedStore(t *testing.T, enabled bool) *memstore.Store {
+	t.Helper()
+	st := seedStoreWithoutConnector(t, enabled)
+	if _, err := st.Connectors().CreateConnectorRecord(context.Background(), connectorsmodule.CreateConnectorMutation{
+		WorkspaceKey: testWS, ConnectorID: "github-main", SourceKind: connectorsmodule.ConnectorSourceGitHub,
+		InboundSecret: testSecret, Status: connectorsmodule.ConnectorStatusActive,
+	}); err != nil {
+		t.Fatalf("seed connector: %v", err)
+	}
+	return st
+}
+
+type testBindingQueries struct{ bindings store.TriggerBindingStore }
+
+func (queries testBindingQueries) GetBinding(ctx context.Context, workspace, bindingID string) (*automation.Binding, error) {
+	binding, err := queries.bindings.Get(ctx, workspace, bindingID)
+	return binding, automationTestError(err)
+}
+
+func (queries testBindingQueries) ListBindings(ctx context.Context, workspace string, filter automation.BindingFilter) ([]*automation.Binding, error) {
+	bindings, err := queries.bindings.List(ctx, workspace, store.TriggerBindingFilter{
+		SourceKind: filter.SourceKind, RouteKey: filter.RouteKey, DriverID: filter.DriverID,
+		TargetAgentServiceID: filter.TargetAgentServiceID, Enabled: filter.Enabled, Limit: filter.Limit,
+	})
+	return bindings, automationTestError(err)
 }
 
 // legacyAdmission is deliberately test-only. It lets the pre-Phase-3 router
@@ -87,7 +115,7 @@ func (adapter legacyAdmission) AdmitEvent(ctx context.Context, _ automation.Even
 		SubjectAttrs: command.SubjectAttrs,
 	})
 	if err != nil {
-		return nil, legacyAutomationError(err)
+		return nil, automationTestError(err)
 	}
 	deliveries := make([]*automation.Delivery, 0, len(result.Deliveries))
 	for _, delivery := range result.Deliveries {
@@ -104,19 +132,19 @@ type legacyQueries struct{ st store.Store }
 
 func (adapter legacyQueries) GetEvent(ctx context.Context, workspace, eventID string) (*automation.Event, error) {
 	event, err := adapter.st.TriggerEvents().Get(ctx, workspace, eventID)
-	return event, legacyAutomationError(err)
+	return event, automationTestError(err)
 }
 
 func (adapter legacyQueries) ListEvents(ctx context.Context, workspace string, filter automation.EventFilter) ([]*automation.Event, error) {
 	events, err := adapter.st.TriggerEvents().List(ctx, workspace, store.TriggerEventFilter{
 		SourceKind: filter.SourceKind, TriggerBindingID: filter.BindingID, Limit: filter.Limit,
 	})
-	return events, legacyAutomationError(err)
+	return events, automationTestError(err)
 }
 
 func (adapter legacyQueries) GetDelivery(ctx context.Context, workspace, deliveryID string) (*automation.Delivery, error) {
 	delivery, err := adapter.st.TriggerDeliveries().Get(ctx, workspace, deliveryID)
-	return delivery, legacyAutomationError(err)
+	return delivery, automationTestError(err)
 }
 
 func (adapter legacyQueries) ListDeliveries(ctx context.Context, workspace string, filter automation.DeliveryFilter) ([]*automation.Delivery, error) {
@@ -124,10 +152,10 @@ func (adapter legacyQueries) ListDeliveries(ctx context.Context, workspace strin
 		TriggerEventID: filter.EventID, TriggerBindingID: filter.BindingID,
 		Status: filter.Status, Limit: filter.Limit,
 	})
-	return deliveries, legacyAutomationError(err)
+	return deliveries, automationTestError(err)
 }
 
-func legacyAutomationError(err error) error {
+func automationTestError(err error) error {
 	if err == nil {
 		return nil
 	}
@@ -156,8 +184,8 @@ func newServer(st store.Store) *http.ServeMux {
 		panic("webhook test store lacks atomic await resolution")
 	}
 	workflow, err := webhookingestion.New(
-		NewCompatibilityVerifier(CompatibilityVerifierConfig{
-			Bindings: st.TriggerBindings(), Connectors: st.Connectors(),
+		NewVerifier(VerifierConfig{
+			Bindings: testBindingQueries{bindings: st.TriggerBindings()}, Connectors: st.Connectors(),
 		}),
 		testAuthorityProvider{}, legacyAdmission{st: st},
 	)
@@ -275,22 +303,6 @@ func TestReceiveWebhookDispatchesDriverRun(t *testing.T) {
 	}
 	if runs[0].DriverVersionID != "v1" {
 		t.Errorf("run pinned version = %q, want v1", runs[0].DriverVersionID)
-	}
-}
-
-func TestBindingSecretRedactedButResolvable(t *testing.T) {
-	st := seedStore(t, true)
-	ctx := context.Background()
-	got, err := st.TriggerBindings().GetByRouteKey(ctx, testWS, testRoute)
-	if err != nil {
-		t.Fatalf("GetByRouteKey: %v", err)
-	}
-	if got.WebhookSecret != "" {
-		t.Errorf("GetByRouteKey leaked webhook_secret = %q, want redacted", got.WebhookSecret)
-	}
-	secret, err := st.TriggerBindings().ResolveWebhookSecret(ctx, testWS, got.BindingID)
-	if err != nil || secret != testSecret {
-		t.Fatalf("ResolveWebhookSecret = %q err=%v, want %q", secret, err, testSecret)
 	}
 }
 

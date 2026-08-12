@@ -8,7 +8,6 @@ import (
 	"testing"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
-	"github.com/tysonthomas9/loomcli/internal/types"
 )
 
 func TestCreateExternalRefSupportedUsesSinglePost(t *testing.T) {
@@ -27,7 +26,7 @@ func TestCreateExternalRefSupportedUsesSinglePost(t *testing.T) {
 		if body["external_ref"] != "https://github.com/acme/api/pull/7" {
 			t.Errorf("external_ref = %v, want PR URL", body["external_ref"])
 		}
-		respondOK(w, types.Issue{ID: "issue-1", Title: "Review PR"})
+		respondOK(w, testIssue{ID: "issue-1", Title: "Review PR"})
 	})
 	defer ts.Close()
 
@@ -60,7 +59,7 @@ func TestCreateExternalRefUnsupportedRetriesThenPatches(t *testing.T) {
 				respondErr(w, http.StatusInternalServerError, unsupportedCreateExternalRefMessage)
 				return
 			}
-			respondOK(w, types.Issue{ID: "issue-2", Title: "Review PR"})
+			respondOK(w, testIssue{ID: "issue-2", Title: "Review PR"})
 		case r.Method == http.MethodPatch && strings.HasSuffix(r.URL.Path, "/issues/issue-2"):
 			if err := json.NewDecoder(r.Body).Decode(&patchBody); err != nil {
 				t.Errorf("decode patch body: %v", err)
@@ -109,7 +108,7 @@ func TestCreateExternalRefPatchFailureReturnsCreatedIssue(t *testing.T) {
 				respondErr(w, http.StatusInternalServerError, unsupportedCreateExternalRefMessage)
 				return
 			}
-			respondOK(w, types.Issue{ID: "issue-3", Title: "Review PR"})
+			respondOK(w, testIssue{ID: "issue-3", Title: "Review PR"})
 		case r.Method == http.MethodPatch && strings.HasSuffix(r.URL.Path, "/issues/issue-3"):
 			respondErr(w, http.StatusBadRequest, "external_ref is invalid")
 		default:

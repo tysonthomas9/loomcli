@@ -122,18 +122,22 @@ func (service *ManagementService) SynchronizeConnectorCredential(
 				return cloneConnector(current), nil
 			}
 		}
-		inbound, resolveErr := service.secretStore.ResolveCurrentInboundSecretRecord(ctx, workspace, connectorID)
+		inbound, resolveErr := service.secretStore.ResolveInboundSecretsRecord(ctx, workspace, connectorID)
 		if resolveErr != nil {
 			return nil, fmt.Errorf("resolve connector inbound secret: %w", resolveErr)
 		}
-		if inbound == "" {
-			inbound, err = randomInboundSecret()
+		if inbound == nil {
+			return nil, ErrInvalidPersistedState
+		}
+		currentInbound := inbound.Current
+		if currentInbound == "" {
+			currentInbound, err = randomInboundSecret()
 			if err != nil {
 				return nil, err
 			}
 		}
 		rotated, rotateErr := service.RotateConnector(ctx, RotateConnectorCommand{
-			WorkspaceKey: workspace, ConnectorID: connectorID, NewInboundSecret: inbound,
+			WorkspaceKey: workspace, ConnectorID: connectorID, NewInboundSecret: currentInbound,
 			NewCredential:     append([]byte(nil), command.DesiredCredential...),
 			ExpectedUpdatedAt: current.UpdatedAt,
 		})
@@ -326,6 +330,49 @@ func (service *ManagementService) RevokeGrant(ctx context.Context, command Revok
 		return ErrUnavailable
 	}
 	return service.store.RevokeGrantRecord(ctx, workspace, grantID)
+}
+
+// RevokeBindingGrants converges a binding to no active Connector grants. A
+// repeated revoke is success and does not increment the changed-row count.
+func (service *ManagementService) RevokeBindingGrants(
+	ctx context.Context,
+	command BindingGrantCleanupCommand,
+) (int, error) {
+	workspace, err := requireCanonical("workspace", command.WorkspaceKey)
+	if err != nil {
+		return 0, err
+	}
+	bindingID, err := requireCanonical("binding id", command.BindingID)
+	if err != nil {
+		return 0, err
+	}
+	if service == nil || service.store == nil {
+		return 0, ErrUnavailable
+	}
+	grants, err := service.store.ListGrantRecordsByBinding(ctx, workspace, bindingID)
+	if err != nil {
+		return 0, fmt.Errorf("list binding grants: %w", err)
+	}
+	revoked := 0
+	for _, grant := range grants {
+		if grant == nil {
+			return revoked, ErrInvalidPersistedState
+		}
+		if err := validateManagementGrant(grant, ListGrantsQuery{
+			WorkspaceKey: workspace,
+			BindingID:    bindingID,
+		}); err != nil {
+			return revoked, err
+		}
+		if err := service.store.RevokeGrantRecord(ctx, workspace, grant.GrantID); err != nil {
+			if errors.Is(err, ErrGrantRevoked) {
+				continue
+			}
+			return revoked, fmt.Errorf("revoke binding grant %q: %w", grant.GrantID, err)
+		}
+		revoked++
+	}
+	return revoked, nil
 }
 
 func (service *ManagementService) ListGrants(

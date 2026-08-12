@@ -53,7 +53,7 @@ func TestGitReadBrokerExecutesOneExactCredentialFreeClone(t *testing.T) {
 	service, err := New(gitReadExecutorFunc(func(_ context.Context, command GitReadCommand) error {
 		executed = command
 		return nil
-	}), admission)
+	}), &grantStoreFake{}, admission)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -99,7 +99,7 @@ func TestGitReadBrokerExecutesOneExactCredentialFreeFetchRef(t *testing.T) {
 	service, err := New(gitReadExecutorFunc(func(_ context.Context, command GitReadCommand) error {
 		executed = append(executed, command)
 		return nil
-	}), admission)
+	}), &grantStoreFake{}, admission)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -155,7 +155,7 @@ func TestGitReadBrokerFailsClosedBeforeExecutor(t *testing.T) {
 	service, err := New(gitReadExecutorFunc(func(context.Context, GitReadCommand) error {
 		executions++
 		return nil
-	}), admission)
+	}), &grantStoreFake{}, admission)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -269,7 +269,7 @@ func TestGitReadBrokerRejectsAndDoesNotReflectURLCredentials(t *testing.T) {
 	service, err := New(gitReadExecutorFunc(func(context.Context, GitReadCommand) error {
 		executions++
 		return nil
-	}), admission)
+	}), &grantStoreFake{}, admission)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -323,7 +323,7 @@ func TestGitReadBrokerAllowsCanonicalSCPStyleRemote(t *testing.T) {
 	service, err := New(gitReadExecutorFunc(func(_ context.Context, command GitReadCommand) error {
 		executed = command
 		return nil
-	}), admission)
+	}), &grantStoreFake{}, admission)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -355,7 +355,7 @@ func TestGitReadBrokerRejectsDivergentIdempotencyCoordinates(t *testing.T) {
 	service, err := New(gitReadExecutorFunc(func(context.Context, GitReadCommand) error {
 		executions++
 		return nil
-	}), admission)
+	}), &grantStoreFake{}, admission)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -408,7 +408,7 @@ func TestGitReadBrokerSerializesConcurrentSameTarget(t *testing.T) {
 		}
 		<-releaseFirst
 		return nil
-	}), admission)
+	}), &grantStoreFake{}, admission)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -461,7 +461,7 @@ func TestGitReadBrokerRejectsContainmentFailureBeforeExecution(t *testing.T) {
 			executions++
 			return nil
 		},
-	}, admission)
+	}, &grantStoreFake{}, admission)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -505,7 +505,7 @@ func TestGitReadBrokerRejectsTargetIdentityChangeUnderLock(t *testing.T) {
 			executions++
 			return nil
 		},
-	}, admission)
+	}, &grantStoreFake{}, admission)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -543,19 +543,24 @@ func TestGitReadPublicContractsHaveNoCredentialCarryingFields(t *testing.T) {
 	}
 }
 
-func TestNewGitReadBrokerRejectsMissingComposition(t *testing.T) {
+func TestNewRejectsMissingComposition(t *testing.T) {
 	issuer := authority.NewIssuer()
 	admission, err := issuer.NewAdmission(OperationRules()...)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if service, err := New(nil, admission); service != nil || !errors.Is(err, ErrUnavailable) {
-		t.Fatalf("New(nil, admission) = %#v, %v", service, err)
+	if service, err := New(nil, &grantStoreFake{}, admission); service != nil || !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("New(nil, grants, admission) = %#v, %v", service, err)
 	}
 	if service, err := New(gitReadExecutorFunc(func(context.Context, GitReadCommand) error {
 		return nil
-	}), nil); service != nil || !errors.Is(err, ErrUnavailable) {
-		t.Fatalf("New(executor, nil) = %#v, %v", service, err)
+	}), nil, admission); service != nil || !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("New(executor, nil, admission) = %#v, %v", service, err)
+	}
+	if service, err := New(gitReadExecutorFunc(func(context.Context, GitReadCommand) error {
+		return nil
+	}), &grantStoreFake{}, nil); service != nil || !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("New(executor, grants, nil) = %#v, %v", service, err)
 	}
 	var service *Service
 	_, err = service.ExecuteGitRead(t.Context(), authority.SystemAuthority{}, GitReadCommand{

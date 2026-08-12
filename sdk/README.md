@@ -132,18 +132,18 @@ are no ambient credentials — the token is the run's identity.
 - **401 `token_expired`** means the run exceeded its maximum duration (or the
   token outlived the run). It is **never retryable**: do not retry, return a
   terminal result. A fresh token only exists for a fresh claim.
-- The legacy header-quad (`X-Loom-Driver-Run-Id` / `-Node-Id` / `-Lease-Id` /
-  `-Fencing-Token` + `Authorization`) is retained for CLI/ops tooling only;
-  workflow code should never set it.
+- Shared bearer tokens and caller-supplied identity headers are rejected. There
+  is no compatibility transport for CLI/ops tooling: every Driver API caller
+  must present a valid run-scoped token.
 
 Client env (injected by the driver — you normally set none of these):
 
 | Variable | Meaning |
 | --- | --- |
-| `LOOM_RUN_TOKEN` | Run-scoped bearer token (enables token-only auth) |
+| `LOOM_RUN_TOKEN` | Required run-scoped bearer token |
 | `LOOM_DRIVER_API_URL` | Base URL of the serve driver-op API |
 | `LOOM_DRIVER_WORKSPACE` | Workspace the run belongs to |
-| `LOOM_DRIVER_RUN_ID` | Run id (legacy transport only; implied by the token) |
+| `LOOM_DRIVER_RUN_ID` | Parent run id exposed as client context; not an authentication input |
 
 ## Operation reference
 

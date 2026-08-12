@@ -9,26 +9,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/domain"
 )
 
-// Deprecated: use DeliverCurrentAssignment. Kept while callers migrate.
-func DeliverCurrentAssignmentToCodex(ctx context.Context, st RuntimeStore, workspace, leadName string) (*DeliveryResult, error) {
-	return DeliverCurrentAssignment(ctx, st, workspace, leadName)
-}
-
-// Deprecated: use DeliverLeadMessage. Kept while callers migrate.
-func DeliverLeadMessageToCodex(ctx context.Context, st RuntimeStore, workspace, leadName, message string) (*DeliveryResult, error) {
-	return DeliverLeadMessage(ctx, st, workspace, leadName, message)
-}
-
-// Deprecated: use DeliverLeadMessageWithOptions. Kept while callers migrate.
-func DeliverLeadMessageToCodexWithOptions(ctx context.Context, st RuntimeStore, workspace, leadName, message string, opts LeadMessageDeliveryOptions) (*DeliveryResult, error) {
-	return DeliverLeadMessageWithOptions(ctx, st, workspace, leadName, message, opts)
-}
-
-// Deprecated: use DeliverPendingLeadMessages. Kept while callers migrate.
-func DeliverPendingLeadMessagesToCodex(ctx context.Context, st RuntimeStore, workspace, leadName string) (*DeliveryResult, error) {
-	return DeliverPendingLeadMessages(ctx, st, workspace, leadName)
-}
-
 // codexTurnDeliverer injects turns through the codex app-server endpoint
 // persisted in session metadata, so it works from any process.
 type codexTurnDeliverer struct {

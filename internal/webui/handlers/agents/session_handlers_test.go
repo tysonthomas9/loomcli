@@ -7,6 +7,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	artifactsmodule "github.com/tysonthomas9/loomcli/internal/modules/artifacts"
 	"github.com/tysonthomas9/loomcli/internal/sessions/transcript"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/apperrors"
@@ -102,16 +103,16 @@ func TestAgentSessionTranscriptRouteReturnsCanonicalEntriesAndEnforcesOwner(t *t
 	ctx := t.Context()
 	st := memstore.New()
 	body := []byte(`{"seq":1,"timestamp":"2026-07-24T12:00:00Z","role":"assistant","type":"text","text":"review complete"}` + "\n")
-	finalized, err := store.UploadContentArtifact(ctx, st.Artifacts(), store.ArtifactCreate{
+	finalized, err := st.SeedArtifact(ctx, artifactsmodule.Artifact{
 		WorkspaceKey:  agentRecordTestWS,
 		ArtifactID:    "transcript-interactive-1",
 		AgentID:       "local-review",
 		SessionID:     "interactive-1",
-		OwnerType:     "session",
+		OwnerType:     artifactsmodule.OwnerSession,
 		OwnerID:       "interactive-1",
 		Type:          "transcript",
 		MIMEType:      "application/x-ndjson",
-		DurableStatus: "declared",
+		DurableStatus: artifactsmodule.StatusFinalized,
 	}, body)
 	if err != nil {
 		t.Fatalf("create transcript artifact: %v", err)
@@ -171,39 +172,39 @@ func TestAgentSessionTranscriptRouteReturnsCanonicalEntriesAndEnforcesOwner(t *t
 	for _, test := range []struct {
 		name       string
 		ref        string
-		artifact   *store.ArtifactCreate
+		artifact   *artifactsmodule.Artifact
 		wantStatus int
 	}{
 		{
 			name: "forged cross-agent artifact",
 			ref:  "artifact://transcript-other-agent",
-			artifact: &store.ArtifactCreate{
+			artifact: &artifactsmodule.Artifact{
 				WorkspaceKey: agentRecordTestWS, ArtifactID: "transcript-other-agent",
 				AgentID: "another-agent", SessionID: "another-session",
-				OwnerType: "session", OwnerID: "another-session", Type: "transcript",
-				MIMEType: "application/x-ndjson", DurableStatus: "declared",
+				OwnerType: artifactsmodule.OwnerSession, OwnerID: "another-session", Type: "transcript",
+				MIMEType: "application/x-ndjson", DurableStatus: artifactsmodule.StatusFinalized,
 			},
 			wantStatus: http.StatusNotFound,
 		},
 		{
 			name: "stale cross-session artifact",
 			ref:  "artifact://transcript-other-session",
-			artifact: &store.ArtifactCreate{
+			artifact: &artifactsmodule.Artifact{
 				WorkspaceKey: agentRecordTestWS, ArtifactID: "transcript-other-session",
 				AgentID: "local-review", SessionID: "previous-session",
-				OwnerType: "session", OwnerID: "previous-session", Type: "transcript",
-				MIMEType: "application/x-ndjson", DurableStatus: "declared",
+				OwnerType: artifactsmodule.OwnerSession, OwnerID: "previous-session", Type: "transcript",
+				MIMEType: "application/x-ndjson", DurableStatus: artifactsmodule.StatusFinalized,
 			},
 			wantStatus: http.StatusNotFound,
 		},
 		{
 			name: "wrong artifact type",
 			ref:  "artifact://patch-interactive-1",
-			artifact: &store.ArtifactCreate{
+			artifact: &artifactsmodule.Artifact{
 				WorkspaceKey: agentRecordTestWS, ArtifactID: "patch-interactive-1",
 				AgentID: "local-review", SessionID: "interactive-1",
-				OwnerType: "session", OwnerID: "interactive-1", Type: "patch",
-				MIMEType: "text/x-diff", DurableStatus: "declared",
+				OwnerType: artifactsmodule.OwnerSession, OwnerID: "interactive-1", Type: "patch",
+				MIMEType: "text/x-diff", DurableStatus: artifactsmodule.StatusFinalized,
 			},
 			wantStatus: http.StatusNotFound,
 		},
@@ -215,7 +216,7 @@ func TestAgentSessionTranscriptRouteReturnsCanonicalEntriesAndEnforcesOwner(t *t
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			if test.artifact != nil {
-				if _, err := store.UploadContentArtifact(ctx, st.Artifacts(), *test.artifact, body); err != nil {
+				if _, err := st.SeedArtifact(ctx, *test.artifact, body); err != nil {
 					t.Fatalf("create forged transcript artifact: %v", err)
 				}
 			}

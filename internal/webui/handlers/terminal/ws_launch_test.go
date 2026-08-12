@@ -18,6 +18,11 @@ import (
 	webuterminal "github.com/tysonthomas9/loomcli/internal/webui/terminal"
 )
 
+func launchSpecForTerminalSession(ctx context.Context, p *terminalWSParams, session string) (*webuterminal.LaunchSpec, error) {
+	launch, _, err := resolveTerminalLaunch(ctx, p, "E2E", session)
+	return launch, err
+}
+
 type signalingAgentIdentity struct {
 	terminalAgentIdentity
 	once sync.Once
@@ -53,11 +58,11 @@ func newTabMetaStoreForWSTest(t *testing.T) *localredis.TabMetadataStore {
 	return localredis.NewTabMetadataStore(rdb, nil)
 }
 
-func TestLaunchSpecRejectsUUIDSessionWithoutMetadata(t *testing.T) {
+func TestLaunchSpecRejectsNamedSessionWithoutMetadata(t *testing.T) {
 	ctx := context.Background()
 	p := &terminalWSParams{tabMetaStore: newTabMetaStoreForWSTest(t)}
 
-	launch, err := launchSpecForTerminalSession(ctx, p, "E2E", "term_550e8400-e29b-41d4-a716-446655440000")
+	launch, err := launchSpecForTerminalSession(ctx, p, "lead-codex-1")
 	if launch != nil {
 		t.Fatalf("launch = %#v, want nil", launch)
 	}
@@ -66,11 +71,11 @@ func TestLaunchSpecRejectsUUIDSessionWithoutMetadata(t *testing.T) {
 	}
 }
 
-func TestLaunchSpecRejectsUUIDSessionWithoutTabStore(t *testing.T) {
+func TestLaunchSpecRejectsSessionWithoutTabStore(t *testing.T) {
 	ctx := context.Background()
 	p := &terminalWSParams{}
 
-	launch, err := launchSpecForTerminalSession(ctx, p, "E2E", "term_550e8400-e29b-41d4-a716-446655440000")
+	launch, err := launchSpecForTerminalSession(ctx, p, "term_550e8400-e29b-41d4-a716-446655440000")
 	if launch != nil {
 		t.Fatalf("launch = %#v, want nil", launch)
 	}
@@ -79,17 +84,57 @@ func TestLaunchSpecRejectsUUIDSessionWithoutTabStore(t *testing.T) {
 	}
 }
 
-func TestLaunchSpecKeepsLegacyNamedLeadTabs(t *testing.T) {
-	t.Setenv("LOOM_CONFIG_DIR", "/trusted/loom-data")
+func TestLaunchSpecRejectsGenericMetadataWithoutEnvelope(t *testing.T) {
 	ctx := context.Background()
-	p := &terminalWSParams{tabMetaStore: newTabMetaStoreForWSTest(t)}
+	tabStore := newTabMetaStoreForWSTest(t)
+	now := time.Now().UTC()
+	if err := tabStore.Set(ctx, &webuterminal.TabMetadata{
+		Workspace:   "E2E",
+		SessionName: "lead-codex-1",
+		Label:       "Codex",
+		Backend:     "codex",
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}); err != nil {
+		t.Fatalf("persist incomplete tab metadata: %v", err)
+	}
 
-	launch, err := launchSpecForTerminalSession(ctx, p, "E2E", "lead-codex-1")
+	launch, err := launchSpecForTerminalSession(
+		ctx,
+		&terminalWSParams{tabMetaStore: tabStore},
+		"lead-codex-1",
+	)
+	if launch != nil || !errors.Is(err, errTerminalLaunchMetaMissing) {
+		t.Fatalf("launch = %#v, err = %v; want missing-envelope rejection", launch, err)
+	}
+}
+
+func TestLaunchSpecUsesPersistedGenericEnvelope(t *testing.T) {
+	ctx := context.Background()
+	tabStore := newTabMetaStoreForWSTest(t)
+	launchEnvelope := &webuterminal.LaunchSpec{
+		Argv: []string{"-c", "'/opt/loom' lead --backend codex"},
+		Env:  map[string]string{"LOOM_CONFIG_DIR": "/trusted/loom-data"},
+	}
+	if err := tabStore.Set(ctx, &webuterminal.TabMetadata{
+		Workspace:   "E2E",
+		SessionName: "lead-codex-1",
+		Label:       "Codex",
+		Backend:     "codex",
+		Launch:      launchEnvelope,
+		CreatedAt:   time.Now().UTC(),
+		UpdatedAt:   time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("persist tab metadata: %v", err)
+	}
+	p := &terminalWSParams{tabMetaStore: tabStore}
+
+	launch, err := launchSpecForTerminalSession(ctx, p, "lead-codex-1")
 	if err != nil {
 		t.Fatalf("launchSpecForTerminalSession: %v", err)
 	}
-	if launch == nil || len(launch.Argv) == 0 {
-		t.Fatalf("launch = %#v, want legacy lead argv", launch)
+	if launch == nil || launch.Argv[1] != "'/opt/loom' lead --backend codex" {
+		t.Fatalf("launch = %#v, want persisted envelope", launch)
 	}
 	if got := launch.Env["LOOM_CONFIG_DIR"]; got != "/trusted/loom-data" {
 		t.Fatalf("LOOM_CONFIG_DIR = %q, want trusted Desktop data directory", got)

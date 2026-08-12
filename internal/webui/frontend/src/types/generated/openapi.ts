@@ -2876,6 +2876,13 @@ export interface components {
     /** @description Full dependency relation from types.Dependency */
     Dependency: {
       issue_id: string;
+      /** @description Server-owned terminal kind. Agent tabs use `agent`. */
+      kind?: string;
+      agent_id?: string;
+      role?: string;
+      /** @description Validated backend intent used to build the persisted launch envelope. */
+      backend?: string;
+      writable?: boolean;
       depends_on_id: string;
       type: string;
       /** Format: date-time */
@@ -3661,6 +3668,8 @@ export interface components {
       attached_clients: number;
     };
     TabPutRequest: {
+      /** @enum {string} */
+      backend: "shell" | "claude" | "codex" | "opencode" | "gemini" | "cursor";
       label: string;
       sort_order: number;
       notes: string;

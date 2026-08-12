@@ -122,7 +122,6 @@ func TestSignedWebhookRunFinishedSpoofBeforeCompositionRegistrationIsRejected(t 
 	st := routerE2EStore(t)
 	routerE2EBinding(t, st, store.TriggerBindingCreate{
 		BindingID: "b-run-finished-future", RouteKey: "github." + driver.RunFinishedEventType,
-		WebhookSecret: routerE2ESecret,
 	})
 	mux := routerE2EMux(st)
 	postSignedRunFinishedSpoof(t, mux, "spoof-before", "child-future")
@@ -141,7 +140,6 @@ func TestSignedWebhookRunFinishedSpoofAgainstPendingCompositionIsRejected(t *tes
 	st := routerE2EStore(t)
 	routerE2EBinding(t, st, store.TriggerBindingCreate{
 		BindingID: "b-run-finished-pending", RouteKey: "github." + driver.RunFinishedEventType,
-		WebhookSecret: routerE2ESecret,
 	})
 	key := awaitE2EPendingComposition(t, st, "parent-pending", "child-pending")
 	postSignedRunFinishedSpoof(t, routerE2EMux(st), "spoof-pending", "child-pending")
@@ -157,7 +155,7 @@ func TestSignedWebhookRunFinishedSpoofAgainstPendingCompositionIsRejected(t *tes
 func TestWebhookDispatchResumesAwaitingRun(t *testing.T) {
 	st := routerE2EStore(t)
 	routerE2EBinding(t, st, store.TriggerBindingCreate{
-		BindingID: "b-await", RouteKey: "github.pull_request.opened", WebhookSecret: routerE2ESecret,
+		BindingID: "b-await", RouteKey: "github.pull_request.opened",
 	})
 	// The await pattern is the rendered event key: adapter event type plus
 	// the normalized subject ref (RULE 1, exact equality).
@@ -199,7 +197,7 @@ func TestWebhookDispatchResumesAwaitingRun(t *testing.T) {
 func TestWebhookDispatchActorRejectedNeverResumes(t *testing.T) {
 	st := routerE2EStore(t)
 	routerE2EBinding(t, st, store.TriggerBindingCreate{
-		BindingID: "b-await-deny", RouteKey: "github.pull_request.opened", WebhookSecret: routerE2ESecret,
+		BindingID: "b-await-deny", RouteKey: "github.pull_request.opened",
 	})
 	pattern := domain.AwaitEventKey("pull_request", "acme/widgets#7")
 	key := awaitE2ESuspendedRun(t, st, "run-guarded", pattern, []string{"release-manager"})

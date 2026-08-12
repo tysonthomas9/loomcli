@@ -390,7 +390,7 @@ func TestDefaultGitRunner_Run_DelegatesToDefaultDepsExec(t *testing.T) {
 	}
 }
 
-// --- GetDeps(nil) returns the defaultDeps singleton (not a fresh DefaultDeps()) ---
+// --- GetDeps(nil) returns the defaultDeps singleton (not a fresh DefaultDeps(t.Context())) ---
 
 func TestGetDeps_NilCmd_ReturnsSingleton(t *testing.T) {
 	// GetDeps(nil) must return the exact same pointer as the package-level

@@ -58,7 +58,6 @@ type triggerBindingCreateRequest struct {
 	SourceKind          string                              `json:"source_kind,omitempty"`
 	Name                string                              `json:"name,omitempty"`
 	BindingID           string                              `json:"binding_id,omitempty"`
-	Secret              string                              `json:"secret,omitempty"`
 	Entrypoint          string                              `json:"entrypoint,omitempty"`
 	EventTypePatterns   []string                            `json:"event_type_patterns,omitempty"`
 	Enabled             *bool                               `json:"enabled,omitempty"`

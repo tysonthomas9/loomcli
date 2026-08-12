@@ -258,8 +258,7 @@ func assignBatchCreateResults(idx []int, results []backend.BatchResult, issues [
 			continue // marshal error; skip
 		}
 		if respIdx < len(issues) {
-			issue := issues[respIdx].toIssue()
-			issueData := issueToData(&issue)
+			issueData := issues[respIdx].toIssueData()
 			respIdx++
 			raw, merr := json.Marshal(issueData)
 			if merr != nil {

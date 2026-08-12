@@ -15,7 +15,6 @@ export {
   DEFAULT_SPLIT_RATIO,
   MIN_SPLIT_WIDTH_PX,
   BACKEND_BRAND_COLORS,
-  getBackendFromSessionName,
   generateTabName,
   sanitizeSessionName,
   extractBaseName,

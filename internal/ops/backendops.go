@@ -5,6 +5,7 @@ package ops
 // The cli package provides the concrete implementation.
 type BackendOps interface {
 	ListBackendsHealth() ([]BackendHealth, error)
+	BackendHealth(name string) (BackendHealth, bool)
 }
 
 // BackendHealth describes a single backend's availability and metadata.

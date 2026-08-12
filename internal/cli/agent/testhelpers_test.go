@@ -10,6 +10,8 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/spf13/cobra"
+
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/automode"
@@ -18,6 +20,13 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/testutil"
 	"github.com/tysonthomas9/loomcli/internal/usage"
 )
+
+func commandWithContext(t *testing.T) *cobra.Command {
+	t.Helper()
+	cmd := &cobra.Command{}
+	cmd.SetContext(t.Context())
+	return cmd
+}
 
 type Deps = cli.Deps
 type CommandResult = cli.CommandResult

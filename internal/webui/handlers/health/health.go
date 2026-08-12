@@ -5,19 +5,11 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/backend"
-	"github.com/tysonthomas9/loomcli/internal/types"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 	"github.com/tysonthomas9/loomcli/internal/webui/fleet"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 )
-
-// IssueBackendFn returns the active backend.IssueBackend or nil. Used by
-// HandleStatsWithBackend to serve stats through the platform runtime.
-//
-// ctx carries the per-request workspace ID so cloud-mode wirings can route
-// to a per-workspace fleet-db backend.
-type IssueBackendFn func(ctx context.Context) backend.IssueBackend
 
 // HealthStatus represents the detailed health status of the API.
 type HealthStatus struct {
@@ -46,9 +38,9 @@ type MetricsResponse struct {
 
 // StatsResponse wraps the statistics data for JSON response.
 type StatsResponse struct {
-	Success bool              `json:"success"`
-	Data    *types.Statistics `json:"data,omitempty"`
-	Error   string            `json:"error,omitempty"`
+	Success bool             `json:"success"`
+	Data    *workitems.Stats `json:"data,omitempty"`
+	Error   string           `json:"error,omitempty"`
 }
 
 // HandleHealth returns the process liveness response.
@@ -62,25 +54,16 @@ func HandleHealth() http.HandlerFunc {
 // by the workspace-scoped readyz endpoint through owned capability ports.
 func HandleAPIHealth() http.HandlerFunc { return HandleHealth() }
 
-// HandleStatsWithBackend serves workspace statistics through IssueBackend.
-func HandleStatsWithBackend(backendFn IssueBackendFn) http.HandlerFunc {
+// HandleStats serves workspace statistics through the Work Items owner.
+func HandleStats(queries workitems.StatsQueries) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		serveStatsViaBackend(w, r, backendFn)
+		serveStats(w, r, queries)
 	}
 }
 
-// serveStatsViaBackend writes a /stats response sourced from the
-// IssueBackend.Stats() projection rather than a process-local control socket.
-func serveStatsViaBackend(w http.ResponseWriter, r *http.Request, backendFn IssueBackendFn) {
-	if backendFn == nil {
-		handler.WriteJSON(w, http.StatusServiceUnavailable, StatsResponse{
-			Success: false,
-			Error:   "issue backend not configured",
-		})
-		return
-	}
-	be := backendFn(r.Context())
-	if be == nil {
+// serveStats writes the Work Items-owned /stats projection.
+func serveStats(w http.ResponseWriter, r *http.Request, queries workitems.StatsQueries) {
+	if queries == nil {
 		handler.WriteJSON(w, http.StatusServiceUnavailable, StatsResponse{
 			Success: false,
 			Error:   "issue backend not configured",
@@ -89,7 +72,7 @@ func serveStatsViaBackend(w http.ResponseWriter, r *http.Request, backendFn Issu
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
-	data, err := be.Stats(ctx)
+	data, err := queries.Stats(ctx)
 	if err != nil || data == nil {
 		message := "issue backend returned no statistics"
 		if err != nil {
@@ -101,19 +84,7 @@ func serveStatsViaBackend(w http.ResponseWriter, r *http.Request, backendFn Issu
 		})
 		return
 	}
-	stats := &types.Statistics{
-		TotalIssues:             data.TotalIssues,
-		OpenIssues:              data.OpenIssues,
-		InProgressIssues:        data.InProgressIssues,
-		ClosedIssues:            data.ClosedIssues,
-		BlockedIssues:           data.BlockedIssues,
-		DeferredIssues:          data.DeferredIssues,
-		ReadyIssues:             data.ReadyIssues,
-		TombstoneIssues:         data.TombstoneIssues,
-		PinnedIssues:            data.PinnedIssues,
-		EpicsEligibleForClosure: data.EpicsEligibleForClosure,
-	}
-	handler.WriteJSON(w, http.StatusOK, StatsResponse{Success: true, Data: stats})
+	handler.WriteJSON(w, http.StatusOK, StatsResponse{Success: true, Data: data})
 }
 
 // HandleMetrics returns a handler that exposes SSE hub runtime metrics.

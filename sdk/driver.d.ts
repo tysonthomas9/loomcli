@@ -476,22 +476,14 @@ export declare class WorkflowSuspended extends Error {
 export declare function isWorkflowSuspended(err: unknown): boolean;
 
 export interface LoomDriverClientOptions {
-  env?: NodeJS.ProcessEnv | Record<string, string | undefined>;
-  input?: Record<string, unknown>;
-  apiUrl?: string;
-  /**
-   * Legacy shared static API token (LOOM_DRIVER_API_TOKEN). Used only on the
-   * legacy header-quad transport; IGNORED whenever a run token is present.
-   */
-  apiToken?: string;
-  /**
-   * Run-scoped bearer token minted at claim. Precedence: this option, then
-   * the LOOM_RUN_TOKEN env (injected by the executor). When set, every
-   * request — JSON ops and the watch SSE stream — authenticates token-only:
-   * `Authorization: Bearer <run token>` with NO X-Loom-Driver-* identity
-   * headers and no apiToken; the server derives {run, node, lease, fence}
-   * from the verified claims. When absent, the legacy transport (header quad
-   * + optional static token) is unchanged. An expired token surfaces as
+	env?: NodeJS.ProcessEnv | Record<string, string | undefined>;
+	input?: Record<string, unknown>;
+	apiUrl?: string;
+	/**
+	 * Required run-scoped bearer token minted at claim. Precedence: this
+	 * option, then LOOM_RUN_TOKEN. Every JSON and SSE request sends only
+	 * `Authorization: Bearer <run token>`; the server derives ownership from
+	 * verified claims. An expired token surfaces as
    * DriverApiError {code: "token_expired", retryable: false} — the token TTL
    * is the max-run-duration cap, so the run must end rather than retry.
    */
@@ -514,7 +506,7 @@ export declare class LoomDriverClient {
   readonly input: Record<string, unknown>;
   readonly workspace: string;
   readonly driverRunId: string;
-  /** Run-scoped bearer token in effect ("" = legacy header-quad transport). */
+	/** Run-scoped bearer token in effect. */
   readonly runToken: string;
   readonly epics: {
     get(input?: LoomEpicInput): Promise<Record<string, unknown> | null>;

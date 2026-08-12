@@ -20,7 +20,7 @@ import (
 )
 
 // testSessionWorkspaceStore returns a store with test-ws rooted at dir.
-func testSessionWorkspaceStore(t *testing.T, dir string) storepkg.Store {
+func testSessionWorkspaceStore(t *testing.T, dir string) *memstore.Store {
 	t.Helper()
 	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
 	st := memstore.New()

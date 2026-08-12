@@ -12,7 +12,7 @@ import (
 func createTestStore(t *testing.T) *Store {
 	t.Helper()
 	dir := t.TempDir()
-	store, err := NewStore(dir)
+	store, err := NewStore(t.Context(), dir)
 	if err != nil {
 		t.Fatalf("NewStore error: %v", err)
 	}

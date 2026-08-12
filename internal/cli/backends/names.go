@@ -1,7 +1,7 @@
 package backends
 
-import "github.com/tysonthomas9/loomcli/internal/backendnames"
+import platformruntime "github.com/tysonthomas9/loomcli/internal/platform/runtime"
 
 const (
-	NameCodex = backendnames.Codex
+	NameCodex = platformruntime.ProviderCodex
 )

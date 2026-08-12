@@ -7,7 +7,6 @@ import (
 	hwtranscript "github.com/olesho/harness-wrapper/pkg/transcript"
 
 	"github.com/tysonthomas9/loomcli/internal/sessions"
-	"github.com/tysonthomas9/loomcli/internal/sessions/eventstore"
 	"github.com/tysonthomas9/loomcli/internal/sessions/transcript"
 )
 
@@ -24,17 +23,10 @@ func serveFromEventStoreEnabled() bool {
 	}
 }
 
-// sessionEventStore opens the event store for a session — events.jsonl lives in
-// the session dir (resolved via the store's single source of truth, the same
-// path the OnEvent sink writes to).
-func sessionEventStore(store *sessions.Store, sessionID string) *eventstore.Store {
-	return eventstore.Open(store.SessionDir(sessionID))
-}
-
 // eventStoreHasTranscript reports whether the session's event store holds events
 // (the F3 contributor to has_transcript; native disk-truth remains the fallback).
 func eventStoreHasTranscript(store *sessions.Store, sessionID string) bool {
-	return serveFromEventStoreEnabled() && sessionEventStore(store, sessionID).HasTranscript()
+	return serveFromEventStoreEnabled() && store.HasEventTranscript(sessionID)
 }
 
 // loomEvent maps a wrapper transcript Event (the event store's canonical form) to
@@ -68,7 +60,7 @@ func eventStoreSubagentIDs(store *sessions.Store, sessionID string) ([]string, b
 	if !serveFromEventStoreEnabled() {
 		return nil, false
 	}
-	envs, err := sessionEventStore(store, sessionID).Read()
+	envs, err := store.LoadEnvelopes(sessionID)
 	if err != nil || len(envs) == 0 {
 		return nil, false
 	}
@@ -94,7 +86,7 @@ func eventStoreEventsMatching(store *sessions.Store, sessionID string, keep func
 	if !serveFromEventStoreEnabled() {
 		return nil, false
 	}
-	envs, err := sessionEventStore(store, sessionID).Read()
+	envs, err := store.LoadEnvelopes(sessionID)
 	if err != nil || len(envs) == 0 {
 		return nil, false
 	}

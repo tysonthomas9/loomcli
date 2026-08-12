@@ -35,54 +35,23 @@ export interface TabState {
 }
 
 /**
- * True when persisted metadata describes an agent harness PTY.
- * The session-name prefix is a fallback for legacy sessions persisted before
- * kind/agent_id existed; the user-editable label is deliberately NOT
- * consulted, so renaming a plain tab to "agent-…" can't reclassify it.
+ * True when persisted metadata carries the complete server-owned agent
+ * identity. Session names and user-editable labels are placement/display data,
+ * never alternate type discriminators.
  */
 export function isAgentMetadata(meta: {
   kind?: string;
   agent_id?: string;
   session_name?: string;
 }): boolean {
-  return (
-    meta.kind === "agent" ||
-    (meta.agent_id != null && meta.agent_id !== "") ||
-    (meta.session_name?.startsWith("agent-") ?? false)
-  );
+  return meta.kind === "agent" && meta.agent_id != null && meta.agent_id !== "";
 }
 
 /** True when the tab is an agent harness PTY (Agents view only). */
 export function isAgentTab(
   tab: Pick<TabState, "kind" | "agentName" | "sessionName">,
 ): boolean {
-  return (
-    tab.kind === "agent" ||
-    tab.agentName != null ||
-    tab.sessionName.startsWith("agent-")
-  );
-}
-
-/**
- * Extract backend name from a session name.
- * Parses `lead-{backend}-{n}` or `{workspace}--lead-{backend}-{n}` pattern;
- * falls back to defaultBackend.
- */
-export function getBackendFromSessionName(
-  sessionName: string,
-  defaultBackend?: string,
-): string {
-  const leadIndex = sessionName.lastIndexOf("--lead-");
-  const localName =
-    leadIndex >= 0 ? sessionName.slice(leadIndex + 2) : sessionName;
-  if (localName.startsWith("lead-shell-")) return "shell";
-  // Match workspace-prefixed: {workspace}--lead-{backend}-{n}
-  const prefixedMatch = sessionName.match(/^.+--lead-(.+)-\d+$/);
-  if (prefixedMatch?.[1]) return prefixedMatch[1];
-  // Match unprefixed: lead-{backend}-{n}
-  const match = sessionName.match(/^lead-(.+)-\d+$/);
-  if (match?.[1]) return match[1];
-  return defaultBackend ?? "unknown";
+  return tab.kind === "agent" || tab.agentName != null;
 }
 
 /**

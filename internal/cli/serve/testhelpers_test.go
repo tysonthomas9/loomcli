@@ -1,6 +1,7 @@
 package serve
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -28,7 +29,7 @@ type WorkspaceConfig = config.WorkspaceConfig
 // --- Serve test types ---
 
 // collectDataFunc is a pluggable function for tests.
-var collectDataFunc func() *monitor.MonitorData
+var collectDataFunc func(context.Context) *monitor.MonitorData
 
 var testWorkspaceConfig *config.LoomConfig
 
@@ -111,7 +112,7 @@ func writeJSON(w http.ResponseWriter, v any) {
 }
 
 func handleStatus(w http.ResponseWriter, r *http.Request) {
-	data := collectDataFunc()
+	data := collectDataFunc(r.Context())
 	if data == nil {
 		http.Error(w, "no data", http.StatusServiceUnavailable)
 		return
@@ -126,7 +127,7 @@ func handleStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleAgents(w http.ResponseWriter, r *http.Request) {
-	data := collectDataFunc()
+	data := collectDataFunc(r.Context())
 	if data == nil {
 		http.Error(w, "no data", http.StatusServiceUnavailable)
 		return
@@ -144,7 +145,7 @@ func handleAgents(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleTasks(w http.ResponseWriter, r *http.Request) {
-	data := collectDataFunc()
+	data := collectDataFunc(r.Context())
 	if data == nil {
 		http.Error(w, "no data", http.StatusServiceUnavailable)
 		return
@@ -162,7 +163,7 @@ func handleTasks(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleStats(w http.ResponseWriter, r *http.Request) {
-	data := collectDataFunc()
+	data := collectDataFunc(r.Context())
 	if data == nil {
 		http.Error(w, "no data", http.StatusServiceUnavailable)
 		return
@@ -171,7 +172,7 @@ func handleStats(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleSync(w http.ResponseWriter, r *http.Request) {
-	data := collectDataFunc()
+	data := collectDataFunc(r.Context())
 	if data == nil {
 		http.Error(w, "no data", http.StatusServiceUnavailable)
 		return
@@ -182,7 +183,7 @@ func handleSync(w http.ResponseWriter, r *http.Request) {
 func handleMetrics(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
 
-	data := collectDataFunc()
+	data := collectDataFunc(r.Context())
 	inProgress := 0
 	if data != nil {
 		inProgress = data.Tasks.InProgress

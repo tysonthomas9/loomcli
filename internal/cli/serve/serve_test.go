@@ -16,10 +16,27 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	"github.com/tysonthomas9/loomcli/internal/modules/agents"
 	"github.com/tysonthomas9/loomcli/internal/testutil"
 	"github.com/tysonthomas9/loomcli/internal/webui"
 	"github.com/tysonthomas9/loomcli/internal/webui/fleet"
 )
+
+type workspaceAgentsCommandsStub struct{}
+
+func (workspaceAgentsCommandsStub) EnsureRole(
+	context.Context,
+	agents.EnsureRoleCommand,
+) (*agents.Role, error) {
+	return &agents.Role{}, nil
+}
+
+func (workspaceAgentsCommandsStub) RepairRolePromptFile(
+	context.Context,
+	agents.RepairManagedRolePromptFileCommand,
+) (*agents.Role, bool, error) {
+	return &agents.Role{}, false, nil
+}
 
 // mockMonitorData creates a sample MonitorData for testing
 func mockMonitorData() *MonitorData {
@@ -187,7 +204,7 @@ func TestDriverTaskRunMaxAttempts(t *testing.T) {
 func withMockData(t *testing.T, data *MonitorData, fn func()) {
 	t.Helper()
 	orig := collectDataFunc
-	collectDataFunc = func() *MonitorData { return data }
+	collectDataFunc = func(context.Context) *MonitorData { return data }
 	t.Cleanup(func() { collectDataFunc = orig })
 	fn()
 }
@@ -248,7 +265,7 @@ func TestWriteJSON(t *testing.T) {
 func TestApplyWorkspaceConfig_NilStoreDoesNotWireWorkspaceFns(t *testing.T) {
 	cfg := webui.ServerConfig{}
 
-	applyWorkspaceConfig(&cfg)
+	applyWorkspaceConfig(&cfg, workspaceAgentsCommandsStub{})
 
 	if cfg.WorkspaceIDResolverFn != nil {
 		t.Fatal("WorkspaceIDResolverFn should be nil without store")
@@ -265,7 +282,7 @@ func TestApplyWorkspaceConfig_StoreWiresStoreBackedFns(t *testing.T) {
 	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
 	cfg := webui.ServerConfig{Store: memstore.New()}
 
-	applyWorkspaceConfig(&cfg)
+	applyWorkspaceConfig(&cfg, workspaceAgentsCommandsStub{})
 
 	if cfg.WorkspaceIDResolverFn == nil {
 		t.Fatal("WorkspaceIDResolverFn was nil")
@@ -281,13 +298,23 @@ func TestApplyWorkspaceConfig_StoreWiresStoreBackedFns(t *testing.T) {
 	}
 }
 
+func TestApplyWorkspaceConfig_StoreWithoutAgentsCommandsFailsClosed(t *testing.T) {
+	cfg := webui.ServerConfig{Store: memstore.New()}
+
+	applyWorkspaceConfig(&cfg, nil)
+
+	if cfg.WorkspaceCreateFn != nil || cfg.WorkspaceAddReposFn != nil {
+		t.Fatal("workspace mutation functions were wired without Agents commands")
+	}
+}
+
 func TestApplyWorkspaceConfig_FleetClientWorkspaceOverridesCwdFallback(t *testing.T) {
 	cfg := webui.ServerConfig{
 		FleetClient:          true,
 		FleetClientWorkspace: "PARITY",
 	}
 
-	applyWorkspaceConfig(&cfg)
+	applyWorkspaceConfig(&cfg, workspaceAgentsCommandsStub{})
 
 	if cfg.InitialWorkspaceID != "PARITY" {
 		t.Fatalf("InitialWorkspaceID = %q, want PARITY", cfg.InitialWorkspaceID)

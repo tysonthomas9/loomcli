@@ -15,6 +15,12 @@ func (s *Session) SessionID() string {
 	return s.Meta.SessionID
 }
 
+func (s *Session) Backend() string { return s.Meta.Backend }
+
+func (s *Session) StartedAt() time.Time { return s.Meta.StartedAt }
+
+func (s *Session) Status() SessionStatus { return s.Meta.Status }
+
 // SyncLatestCodexRollout mirrors the matching Codex rollout into this session.
 func (s *Session) SyncLatestCodexRollout(workDir string, since time.Time) (string, error) {
 	if s == nil || s.store == nil {

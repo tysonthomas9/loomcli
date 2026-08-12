@@ -11,7 +11,7 @@ import (
 )
 
 func TestDispatchHookEvent_NilEvent(t *testing.T) {
-	err := dispatchHookEvent(nil, "/tmp/loom-runtime", "sess-123")
+	err := dispatchHookEvent(t.Context(), nil, "/tmp/loom-runtime", "sess-123")
 	if err != nil {
 		t.Fatalf("expected nil error for nil event, got: %v", err)
 	}
@@ -23,7 +23,7 @@ func TestDispatchHookEvent_EmptyBeadsDir(t *testing.T) {
 		Prompt:    "hello",
 		Timestamp: time.Now(),
 	}
-	err := dispatchHookEvent(event, "", "sess-123")
+	err := dispatchHookEvent(t.Context(), event, "", "sess-123")
 	if err != nil {
 		t.Fatalf("expected nil error for empty runtimeDir, got: %v", err)
 	}
@@ -35,7 +35,7 @@ func TestDispatchHookEvent_EmptySessionID(t *testing.T) {
 		Prompt:    "hello",
 		Timestamp: time.Now(),
 	}
-	err := dispatchHookEvent(event, "/tmp/loom-runtime", "")
+	err := dispatchHookEvent(t.Context(), event, "/tmp/loom-runtime", "")
 	if err != nil {
 		t.Fatalf("expected nil error for empty sessionID, got: %v", err)
 	}
@@ -84,13 +84,13 @@ func TestDispatchHookEvent_SessionEndCapturesTokenUsage(t *testing.T) {
 		Timestamp:  time.Now(),
 	}
 
-	err := dispatchHookEvent(event, runtimeDir, sessionID)
+	err := dispatchHookEvent(t.Context(), event, runtimeDir, sessionID)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
 	// Verify metadata was patched with token usage.
-	store, err := sessions.NewStore(runtimeDir)
+	store, err := sessions.NewStore(t.Context(), runtimeDir)
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}
@@ -150,13 +150,13 @@ func TestDispatchHookEvent_SessionEndMissingTranscript(t *testing.T) {
 		Timestamp:  time.Now(),
 	}
 
-	err := dispatchHookEvent(event, runtimeDir, sessionID)
+	err := dispatchHookEvent(t.Context(), event, runtimeDir, sessionID)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
 	// Metadata should remain unchanged (zero tokens → captureTokenUsage skips save).
-	store, err := sessions.NewStore(runtimeDir)
+	store, err := sessions.NewStore(t.Context(), runtimeDir)
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}
@@ -206,13 +206,13 @@ func TestDispatchHookEvent_SessionEndEmptySessionRef(t *testing.T) {
 		Timestamp:  time.Now(),
 	}
 
-	err := dispatchHookEvent(event, runtimeDir, sessionID)
+	err := dispatchHookEvent(t.Context(), event, runtimeDir, sessionID)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
 	// Metadata should be unchanged.
-	store, err := sessions.NewStore(runtimeDir)
+	store, err := sessions.NewStore(t.Context(), runtimeDir)
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}
@@ -252,7 +252,7 @@ func TestDispatchHookEvent_SyncsNativeTranscript(t *testing.T) {
 		Backend:    "claude",
 		Timestamp:  time.Now(),
 	}
-	if err := dispatchHookEvent(event, runtimeDir, sessionID); err != nil {
+	if err := dispatchHookEvent(t.Context(), event, runtimeDir, sessionID); err != nil {
 		t.Fatalf("dispatch: %v", err)
 	}
 
@@ -297,7 +297,7 @@ func TestDispatchHookEvent_SyncsSubagentTranscript(t *testing.T) {
 		Backend:    "claude",
 		Timestamp:  time.Now(),
 	}
-	if err := dispatchHookEvent(event, runtimeDir, sessionID); err != nil {
+	if err := dispatchHookEvent(t.Context(), event, runtimeDir, sessionID); err != nil {
 		t.Fatalf("dispatch: %v", err)
 	}
 
@@ -325,7 +325,7 @@ func TestDispatchHookEvent_NoSessionRefSkipsSync(t *testing.T) {
 		Backend:   "claude",
 		Timestamp: time.Now(),
 	}
-	if err := dispatchHookEvent(event, runtimeDir, sessionID); err != nil {
+	if err := dispatchHookEvent(t.Context(), event, runtimeDir, sessionID); err != nil {
 		t.Fatalf("dispatch: %v", err)
 	}
 

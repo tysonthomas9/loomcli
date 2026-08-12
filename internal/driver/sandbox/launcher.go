@@ -39,7 +39,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/driver/runtypes"
 )
 
 // SandboxFrameType discriminates host-bound frames on the sandbox stdout
@@ -123,18 +122,19 @@ type SandboxExit struct {
 // RecordSandboxPlacement stamps the launcher's placement descriptor onto the
 // run result output: Finish persists Output onto the DriverRun row, so the
 // row records where the workflow executed (§9.6 audit).
-func RecordSandboxPlacement(result *runtypes.RunResult, placement domain.TaskRunPlacement) {
+func RecordSandboxPlacement(output map[string]string, placement domain.TaskRunPlacement) map[string]string {
 	if placement.Empty() {
-		return
+		return output
 	}
 	encoded, err := json.Marshal(placement)
 	if err != nil {
-		return
+		return output
 	}
-	if result.Output == nil {
-		result.Output = map[string]string{}
+	if output == nil {
+		output = map[string]string{}
 	}
-	result.Output[SandboxPlacementOutputKey] = string(encoded)
+	output[SandboxPlacementOutputKey] = string(encoded)
+	return output
 }
 
 // ProcessLauncher is the default SandboxLauncher: it forks the bundle's

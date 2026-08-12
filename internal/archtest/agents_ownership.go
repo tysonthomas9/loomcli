@@ -10,7 +10,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"strconv"
 	"strings"
 	"sync"
 
@@ -24,7 +23,6 @@ const (
 	agentsDesiredStateStoreReceiver  = "github.com/tysonthomas9/loomcli/internal/modules/agents.DesiredStateStore"
 	agentsLifecycleStoreReceiver     = "github.com/tysonthomas9/loomcli/internal/modules/agents.LifecycleStore"
 	agentsOwnershipStoreReceiver     = "github.com/tysonthomas9/loomcli/internal/modules/agents.OwnershipStore"
-	agentsRolePromptStoreReceiver    = "github.com/tysonthomas9/loomcli/internal/modules/agents.RolePromptRepairStore"
 	agentsRoleStoreReceiver          = "github.com/tysonthomas9/loomcli/internal/modules/agents.RoleStore"
 )
 
@@ -56,9 +54,6 @@ var phase5AgentsMutationMethods = map[string]map[string]struct{}{
 		"ReleaseOwnership": {},
 		"RenewOwnership":   {},
 	},
-	agentsRolePromptStoreReceiver: {
-		"SetPromptFileIfEmpty": {},
-	},
 	agentsRoleStoreReceiver: {
 		"CreateRole": {},
 		"DeleteRole": {},
@@ -67,7 +62,7 @@ var phase5AgentsMutationMethods = map[string]map[string]struct{}{
 }
 
 // phase5AgentsReadMethods completes the classification of every method on the
-// nine persistence receiver families above. The completeness test loads the
+// eight persistence receiver families above. The completeness test loads the
 // real interface definitions and fails whenever a method is added, removed, or
 // silently changes classification. Without this second half, a newly added
 // mutator whose name is absent from phase5AgentsMutationMethods would evade the
@@ -88,7 +83,6 @@ var phase5AgentsReadMethods = map[string]map[string]struct{}{
 		"GetOwnership":  {},
 		"ListOwnership": {},
 	},
-	agentsRolePromptStoreReceiver: {},
 	agentsRoleStoreReceiver: {
 		"GetRole":   {},
 		"ListRoles": {},
@@ -418,77 +412,11 @@ func isPhase5AgentsMutationAllowed(mutation phase5AgentsMutation) bool {
 	case agentsLifecycleStoreReceiver:
 		return mutation.file == "internal/modules/agents/service.go" ||
 			mutation.file == "internal/modules/agents/desired_state_reconciliation.go"
-	case agentsRolePromptStoreReceiver:
-		// Startup prompt repair is a deliberately narrow owner-private
-		// compatibility adapter around one atomic repair primitive.
-		return mutation.file == "internal/infra/agentsbootstrapstore/adapter.go"
 	case legacyAgentServiceStoreReceiver, legacyRoleStoreReceiver:
-		// agentsbootstrapstore is the bounded role/service bootstrap adapter.
 		// FleetDB adapters remain owner-side transport implementations.
-		return mutation.file == "internal/infra/agentsbootstrapstore/adapter.go" ||
-			strings.HasPrefix(mutation.file, "internal/modules/agents/fleetdb/") ||
+		return strings.HasPrefix(mutation.file, "internal/modules/agents/fleetdb/") ||
 			strings.HasPrefix(mutation.file, "internal/infra/fleetdb/")
 	default:
 		return false
 	}
-}
-
-const (
-	phase5AgentsCompatibilityStoreImport = "github.com/tysonthomas9/loomcli/internal/infra/agentsbootstrapstore"
-)
-
-var phase5AgentsCompatibilityCompositions = map[string]struct{}{
-	"internal/cli/serve/workspacemgr/agents_bootstrap.go": {},
-}
-
-// snapshotPhase5AgentsCompatibilityImportBlockers enforces agentscompatstore
-// as an infrastructure-only persistence detail. Only exact composition edges
-// may import it; production consumers receive public Agents commands.
-func snapshotPhase5AgentsCompatibilityImportBlockers(root string) ([]string, error) {
-	var blockers []string
-	internalRoot := filepath.Join(root, "internal")
-	err := filepath.WalkDir(internalRoot, func(path string, entry fs.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		if entry.IsDir() {
-			if path != internalRoot && excludedWalkDirectory(entry.Name()) {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if !strings.HasSuffix(entry.Name(), ".go") || strings.HasSuffix(entry.Name(), "_test.go") {
-			return nil
-		}
-		fileSet := token.NewFileSet()
-		file, err := parser.ParseFile(fileSet, path, nil, parser.ImportsOnly)
-		if err != nil {
-			return fmt.Errorf("parse Agents compatibility importer %s: %w", path, err)
-		}
-		relative, err := filepath.Rel(root, path)
-		if err != nil {
-			return err
-		}
-		relative = filepath.ToSlash(relative)
-		for _, imported := range file.Imports {
-			importPath, err := strconv.Unquote(imported.Path.Value)
-			if err != nil {
-				return fmt.Errorf("decode import in %s: %w", relative, err)
-			}
-			if importPath != phase5AgentsCompatibilityStoreImport {
-				continue
-			}
-			if _, allowed := phase5AgentsCompatibilityCompositions[relative]; allowed {
-				continue
-			}
-			position := fileSet.Position(imported.Pos())
-			blockers = append(blockers, fmt.Sprintf("%s:%d", relative, position.Line))
-		}
-		return nil
-	})
-	if err != nil {
-		return nil, fmt.Errorf("scan Agents compatibility imports: %w", err)
-	}
-	slices.Sort(blockers)
-	return blockers, nil
 }

@@ -27,6 +27,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	trigger "github.com/tysonthomas9/loomcli/internal/infra/automationruntime"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	connectorsmodule "github.com/tysonthomas9/loomcli/internal/modules/connectors"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -53,6 +54,12 @@ func routerE2EStore(t *testing.T) *memstore.Store {
 		ValidationStatus: workflowcatalog.DriverVersionValidationPassed,
 	}); err != nil {
 		t.Fatalf("seed driver version: %v", err)
+	}
+	if _, err := st.Connectors().CreateConnectorRecord(ctx, connectorsmodule.CreateConnectorMutation{
+		WorkspaceKey: routerE2EWS, ConnectorID: "github-main", SourceKind: connectorsmodule.ConnectorSourceGitHub,
+		InboundSecret: routerE2ESecret, Status: connectorsmodule.ConnectorStatusActive,
+	}); err != nil {
+		t.Fatalf("seed connector: %v", err)
 	}
 	return st
 }
@@ -203,7 +210,7 @@ func routerE2EFinishRun(t *testing.T, st *memstore.Store, runID string) {
 func TestRouterE2EWebhookFanOutTraceAndOrigin(t *testing.T) {
 	st := routerE2EStore(t)
 	routerE2EBinding(t, st, store.TriggerBindingCreate{
-		BindingID: "b-exact", RouteKey: "github.pull_request.opened", WebhookSecret: routerE2ESecret,
+		BindingID: "b-exact", RouteKey: "github.pull_request.opened",
 	})
 	routerE2EBinding(t, st, store.TriggerBindingCreate{
 		BindingID:         "b-pattern",
@@ -302,7 +309,7 @@ func TestRouterE2EWebhookFanOutTraceAndOrigin(t *testing.T) {
 func TestRouterE2ELegacyExactLaneStable(t *testing.T) {
 	st := routerE2EStore(t)
 	routerE2EBinding(t, st, store.TriggerBindingCreate{
-		BindingID: "b-echo", RouteKey: "github.pull_request.opened", WebhookSecret: routerE2ESecret,
+		BindingID: "b-echo", RouteKey: "github.pull_request.opened",
 	})
 	mux := routerE2EMux(st)
 
@@ -349,7 +356,7 @@ func TestRouterE2ELegacyExactLaneStable(t *testing.T) {
 func TestRouterE2EReplaceSupersedeStorm(t *testing.T) {
 	st := routerE2EStore(t)
 	routerE2EBinding(t, st, store.TriggerBindingCreate{
-		BindingID: "b-replace", RouteKey: "github.pull_request.synchronize", WebhookSecret: routerE2ESecret,
+		BindingID: "b-replace", RouteKey: "github.pull_request.synchronize",
 		ConcurrencyPolicy:  automation.ConcurrencyReplace,
 		SubjectKeyTemplate: "{{subject_ref}}@{{attrs.base_ref}}",
 	})
@@ -422,7 +429,7 @@ func TestRouterE2EReplaceSupersedeStorm(t *testing.T) {
 func TestRouterE2EForbidRejectsAndQueuePromotesViaSweeper(t *testing.T) {
 	st := routerE2EStore(t)
 	routerE2EBinding(t, st, store.TriggerBindingCreate{
-		BindingID: "b-forbid", RouteKey: "github.pull_request.opened", WebhookSecret: routerE2ESecret,
+		BindingID: "b-forbid", RouteKey: "github.pull_request.opened",
 		ConcurrencyPolicy: automation.ConcurrencyForbid,
 	})
 	routerE2EBinding(t, st, store.TriggerBindingCreate{

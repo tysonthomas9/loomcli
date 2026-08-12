@@ -1,6 +1,7 @@
 package prreview
 
 import (
+	"context"
 	"net/http"
 	"strings"
 	"sync"
@@ -8,14 +9,13 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/app/prreviewer"
-	"github.com/tysonthomas9/loomcli/internal/infra/connectorscatalog"
 	"github.com/tysonthomas9/loomcli/internal/localworkspace"
 	"github.com/tysonthomas9/loomcli/internal/modules/agents"
 	connectorsmodule "github.com/tysonthomas9/loomcli/internal/modules/connectors"
 	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
 	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
+	workspacemodule "github.com/tysonthomas9/loomcli/internal/modules/workspace"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
-	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/agentcoord"
 	"github.com/tysonthomas9/loomcli/internal/webui/terminal"
 )
@@ -33,23 +33,23 @@ const (
 // grants provide defense in depth. Read grants are seeded on read paths; write
 // grants only on explicit review posts.
 type Module struct {
-	store                    prReviewStore
-	connectorManagement      connectorsmodule.Management
-	connectorManagementStore connectorsmodule.ManagementStore
-	dispatcher               connectorsmodule.Dispatcher
-	agentSvc                 agentcoord.AgentService
-	terminalSvc              terminal.TerminalService
-	reviewerProvisioning     prreviewer.Commands
-	reviewerAgents           agents.IdentityQueries
-	sourceControl            sourcecontrol.Materializer
-	interactionChat          interaction.ChatAPI
-	interactionMessenger     interaction.ChatMessenger
-	interactionAuthority     operatorAuthorityResolver
-	localSettingsDir         string
-	checkoutReviewerPRHead   reviewerCheckoutFunc
-	recordReviewerPRContext  reviewerRecordContextFunc
-	streamPollInterval       time.Duration
-	streamHeartbeatInterval  time.Duration
+	workspace               WorkspaceQueries
+	connectorManagement     connectorsmodule.Management
+	connectorSealer         connectorsmodule.CredentialSealer
+	dispatcher              connectorsmodule.Dispatcher
+	agentSvc                agentcoord.AgentService
+	terminalSvc             terminal.TerminalService
+	reviewerProvisioning    prreviewer.Commands
+	reviewerAgents          agents.IdentityQueries
+	sourceControl           sourcecontrol.Materializer
+	interactionChat         interaction.ChatAPI
+	interactionMessenger    interaction.ChatMessenger
+	interactionAuthority    OperatorAuthorityResolver
+	localSettingsDir        string
+	checkoutReviewerPRHead  reviewerCheckoutFunc
+	recordReviewerPRContext reviewerRecordContextFunc
+	streamPollInterval      time.Duration
+	streamHeartbeatInterval time.Duration
 	// seeded caches "connector+grants already ensured" by canonical resource
 	// and action set so read and write authority cannot share a cache hit.
 	seeded                     sync.Map
@@ -58,68 +58,69 @@ type Module struct {
 	beforeCredentialSeedCommit func()
 }
 
-// operatorAuthorityResolver is the narrow request-authority port consumed by
+// OperatorAuthorityResolver is the narrow request-authority port consumed by
 // PR Review. Declaring the port at the consumer boundary avoids coupling this
 // delivery adapter to Workflow Catalog's separate HTTP adapter.
-type operatorAuthorityResolver interface {
+type OperatorAuthorityResolver interface {
 	ResolveOperatorAuthority(*http.Request, string, authority.Action) (authority.OperatorAuthority, error)
 }
 
-type prReviewStore interface {
-	Workspaces() store.WorkspaceStore
-	Repos() store.RepoStore
-	Connectors() store.ConnectorStore
-	ConnectorGrants() store.ConnectorGrantStore
-	ConnectorCalls() store.ConnectorAuditStore
+// WorkspaceQueries is the complete Workspace-owned information consumed by PR
+// Review. The port lives with its consumer and deliberately excludes mutation,
+// local checkout state, and the composite persistence store.
+type WorkspaceQueries interface {
+	Resolve(context.Context, workspacemodule.ResolveQuery) (*workspacemodule.Reference, error)
+	ListRepositories(context.Context, workspacemodule.ListRepositoriesQuery) ([]workspacemodule.Repository, error)
 }
 
-// NewModule constructs the pull request review route module. localSettingsDir
-// supplies the desktop GitHub credential and connector vault fallback.
+// Config contains the owner interfaces and runtime adapters consumed by PR
+// Review. Composition belongs to the application root; the route module never
+// receives a repository collection or constructs an owner implementation.
+type Config struct {
+	Workspace            WorkspaceQueries
+	ConnectorManagement  connectorsmodule.Management
+	ConnectorSealer      connectorsmodule.CredentialSealer
+	Dispatcher           connectorsmodule.Dispatcher
+	AgentService         agentcoord.AgentService
+	TerminalService      terminal.TerminalService
+	LocalSettingsDir     string
+	ReviewerProvisioning prreviewer.Commands
+	ReviewerAgents       agents.IdentityQueries
+	SourceControl        sourcecontrol.Materializer
+	InteractionChat      interaction.ChatAPI
+	InteractionMessenger interaction.ChatMessenger
+	InteractionAuthority OperatorAuthorityResolver
+}
+
+// NewModule constructs the pull request review route module. LocalSettingsDir
+// supplies the desktop GitHub credential and connector vault location.
 // terminalSvc may be nil (no PTY manager); backend migration then skips
 // killing live reviewer terminals, which is safe because without a terminal
 // service none exist. Interaction chat dependencies own all provider/session
 // reads and message delivery; missing dependencies fail those routes closed.
-func NewModule(
-	st prReviewStore,
-	disp connectorsmodule.Dispatcher,
-	agentSvc agentcoord.AgentService,
-	terminalSvc terminal.TerminalService,
-	localSettingsDir string,
-	reviewerProvisioning prreviewer.Commands,
-	reviewerAgents agents.IdentityQueries,
-	sourceControl sourcecontrol.Materializer,
-	interactionChat interaction.ChatAPI,
-	interactionMessenger interaction.ChatMessenger,
-	interactionAuthority operatorAuthorityResolver,
-) *Module {
-	if !connectorsmodule.DispatcherAvailable(disp) {
-		disp = nil
+func NewModule(config Config) *Module {
+	if !connectorsmodule.DispatcherAvailable(config.Dispatcher) {
+		config.Dispatcher = nil
 	}
-	module := &Module{
-		store:                   st,
-		dispatcher:              disp,
-		agentSvc:                agentSvc,
-		terminalSvc:             terminalSvc,
-		reviewerProvisioning:    reviewerProvisioning,
-		reviewerAgents:          reviewerAgents,
-		sourceControl:           sourceControl,
-		interactionChat:         interactionChat,
-		interactionMessenger:    interactionMessenger,
-		interactionAuthority:    interactionAuthority,
-		localSettingsDir:        strings.TrimSpace(localSettingsDir),
+	return &Module{
+		workspace:               config.Workspace,
+		connectorManagement:     config.ConnectorManagement,
+		connectorSealer:         config.ConnectorSealer,
+		dispatcher:              config.Dispatcher,
+		agentSvc:                config.AgentService,
+		terminalSvc:             config.TerminalService,
+		reviewerProvisioning:    config.ReviewerProvisioning,
+		reviewerAgents:          config.ReviewerAgents,
+		sourceControl:           config.SourceControl,
+		interactionChat:         config.InteractionChat,
+		interactionMessenger:    config.InteractionMessenger,
+		interactionAuthority:    config.InteractionAuthority,
+		localSettingsDir:        strings.TrimSpace(config.LocalSettingsDir),
 		checkoutReviewerPRHead:  localworkspace.EnsureDetachedGitWorktreeAtFetchedPRHead,
 		recordReviewerPRContext: localworkspace.RecordPRReviewContextFromFetchedBase,
 		streamPollInterval:      reviewerStreamPollInterval,
 		streamHeartbeatInterval: reviewerStreamHeartbeatInterval,
 	}
-	if st != nil {
-		adapter, err := connectorscatalog.New(st.Connectors(), st.ConnectorGrants(), st.ConnectorCalls())
-		if err == nil {
-			module.connectorManagementStore = adapter
-			module.connectorManagement, _ = connectorsmodule.NewManagement(adapter)
-		}
-	}
-	return module
 }
 
 // InvalidateCredentialSeeds forces subsequent connector ensures to re-resolve
@@ -136,7 +137,7 @@ func (m *Module) InvalidateCredentialSeeds() {
 
 // Register adds the workspace-scoped pull request review routes.
 func (m *Module) Register(mux *http.ServeMux) {
-	if m == nil || m.store == nil {
+	if m == nil || m.workspace == nil {
 		return
 	}
 	mux.HandleFunc("GET /api/workspaces/{ws}/pull-requests", m.listPullRequests)

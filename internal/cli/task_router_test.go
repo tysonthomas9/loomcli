@@ -799,7 +799,7 @@ func TestBuildRouterTaskCheck_RepoOnlyConstraint(t *testing.T) {
 	rc := RoleConfig{Description: "frontend repo agent"}
 	ae := AgentEntry{Worktree: "falcon", Role: "task", Repo: "frontend"}
 
-	check := BuildRouterTaskCheck(rc, ae, "")
+	check := BuildRouterTaskCheck(t.Context(), rc, ae, "")
 	if check == nil {
 		t.Error("BuildRouterTaskCheck() should return non-nil when AgentEntry.Repo is set")
 	}
@@ -810,7 +810,7 @@ func TestBuildRouterTaskCheck_NoConstraints(t *testing.T) {
 	rc := RoleConfig{}
 	ae := AgentEntry{}
 
-	check := BuildRouterTaskCheck(rc, ae, "")
+	check := BuildRouterTaskCheck(t.Context(), rc, ae, "")
 	if check != nil {
 		t.Error("BuildRouterTaskCheck() should return nil for completely empty RoleConfig and AgentEntry")
 	}
@@ -933,7 +933,7 @@ func TestBuildRouterTaskCheck_SourceReposOnlyConstraint(t *testing.T) {
 	rc := RoleConfig{}
 	ae := AgentEntry{SourceRepos: []string{"repo-a"}}
 
-	check := BuildRouterTaskCheck(rc, ae, "")
+	check := BuildRouterTaskCheck(t.Context(), rc, ae, "")
 	if check == nil {
 		t.Error("BuildRouterTaskCheck() should return non-nil when AgentEntry.SourceRepos is set")
 	}

@@ -118,7 +118,7 @@ func runInitWorkspace(cmd *cobra.Command, _ []string) {
 	fmt.Println("")
 
 	fmt.Println("Step 2: Validate workspace")
-	ws := validateWorkspaceExists()
+	ws := validateWorkspaceExists(cmd.Context())
 	fmt.Println("")
 
 	fmt.Println("Step 3: Issue backend")
@@ -130,9 +130,9 @@ func runInitWorkspace(cmd *cobra.Command, _ []string) {
 
 // validateWorkspaceExists loads FleetDB workspace metadata and validates the
 // workspace exists locally on this machine.
-func validateWorkspaceExists() config.WorkspaceConfig {
+func validateWorkspaceExists(parent context.Context) config.WorkspaceConfig {
 	var out config.WorkspaceConfig
-	if err := cmdstore.WithWorkspaceCatalog(func(ctx context.Context, _ *bootstrap.StoreHandle, workspace workspacemodule.API) error {
+	if err := cmdstore.WithWorkspaceCatalog(parent, func(ctx context.Context, _ *bootstrap.StoreHandle, workspace workspacemodule.API) error {
 		ws, err := workspace.Resolve(ctx, workspacemodule.ResolveQuery{Reference: initWorkspace})
 		if err != nil {
 			return fmt.Errorf("workspace %q not found: %w", initWorkspace, err)

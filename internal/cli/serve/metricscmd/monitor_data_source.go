@@ -58,12 +58,12 @@ func (s *MonitorDataSource) Resolve(r *http.Request) *monitor.MonitorData {
 	}
 	workspaceHint := r.URL.Query().Get("workspace")
 	if workspaceHint == "" || s.backendFn == nil {
-		return s.collectDataFn()
+		return s.collectDataFn(r.Context())
 	}
 	if s.defaultWorkspace != "" && workspaceHint == s.defaultWorkspace {
-		return s.collectDataFn()
+		return s.collectDataFn(r.Context())
 	}
-	return s.workspace.get(workspaceHint)
+	return s.workspace.get(r.Context(), workspaceHint)
 }
 
 type workspaceMonitorDataCache struct {
@@ -84,30 +84,30 @@ func newWorkspaceMonitorDataCache(collectDataFn CollectDataFn, backendFn IssueBa
 	}
 }
 
-func (c *workspaceMonitorDataCache) get(workspaceHint string) *monitor.MonitorData {
+func (c *workspaceMonitorDataCache) get(ctx context.Context, workspaceHint string) *monitor.MonitorData {
 	c.mu.Lock()
 	collector := c.collectors[workspaceHint]
 	if collector == nil && len(c.collectors) >= maxWorkspaceMonitorCollectors {
 		c.mu.Unlock()
-		return c.collectWorkspace(workspaceHint)
+		return c.collectWorkspace(ctx, workspaceHint)
 	}
 	if collector == nil {
 		workspace := workspaceHint
 		collector = &cachedCollector{
 			ttl:       c.ttl,
-			collectFn: func() *monitor.MonitorData { return c.collectWorkspace(workspace) },
+			collectFn: func(ctx context.Context) *monitor.MonitorData { return c.collectWorkspace(ctx, workspace) },
 		}
 		c.collectors[workspaceHint] = collector
 	}
 	c.mu.Unlock()
 
-	return collector.get()
+	return collector.get(ctx)
 }
 
-func (c *workspaceMonitorDataCache) collectWorkspace(workspaceHint string) *monitor.MonitorData {
-	ctx := middleware.WithWorkspace(context.Background(), workspaceHint)
+func (c *workspaceMonitorDataCache) collectWorkspace(parent context.Context, workspaceHint string) *monitor.MonitorData {
+	ctx := middleware.WithWorkspace(parent, workspaceHint)
 	if be := c.backendFn(ctx); be != nil {
-		return monitor.CollectMonitorDataWithIssueBackend(be, 10000, "")
+		return monitor.CollectMonitorDataWithIssueBackend(ctx, be, 10000, "")
 	}
-	return c.collectDataFn()
+	return c.collectDataFn(ctx)
 }

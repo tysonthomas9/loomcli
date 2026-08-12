@@ -64,17 +64,6 @@ func New(config Config) *Module {
 	}
 }
 
-// NewModule is a temporary source-compatibility bridge for composition and
-// old tests that have not moved to Config. It is intentionally inert for
-// webhook mutation and Automation queries: it MUST NOT fall back to Store's
-// legacy TriggerRoutes/TriggerEvents/TriggerDeliveries paths. Serve composition
-// must use New before enabling these routes.
-//
-// Deprecated: use New.
-func NewModule(_ any) *Module {
-	return New(Config{})
-}
-
 func (m *Module) Register(mux *http.ServeMux) {
 	if m == nil || mux == nil {
 		return

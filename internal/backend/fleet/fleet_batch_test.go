@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
-	"github.com/tysonthomas9/loomcli/internal/types"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 )
 
 func TestBatch_Creates_AllOrNothingError(t *testing.T) {
@@ -84,8 +84,8 @@ func TestBatch_Mixed_FanOut(t *testing.T) {
 		switch {
 		case strings.HasSuffix(r.URL.Path, "/issues/batch"):
 			respondOK(w, map[string]interface{}{
-				"issues": []types.Issue{
-					{ID: "new-1", Title: "Created", Status: types.StatusOpen, CreatedAt: now, UpdatedAt: now},
+				"issues": []testIssue{
+					{ID: "new-1", Title: "Created", Status: workitems.StatusOpen, CreatedAt: now, UpdatedAt: now},
 				},
 				"count": 1,
 			})

@@ -6,7 +6,7 @@
 # loom serve), the durable ingestion path from the trigger-workflow proposal:
 #
 #   signed POST /api/workspaces/{ws}/webhooks/github
-#     -> HMAC verified against the binding's webhook_secret
+#     -> HMAC verified against the GitHub connector's inbound secret
 #     -> TriggerEvent persisted (signature_status=verified)
 #     -> TriggerDelivery recorded and linked to a queued DriverRun
 #     -> redelivering the same X-GitHub-Delivery produces NO duplicate effects
@@ -72,7 +72,7 @@ count() { # GET a fleet-db list endpoint, print len of the named array
 
 say "loom=$LOOM_API fleet-db=$FLEETDB_API ws=$WS route=$ROUTE"
 
-# --- Arrange: register a driver + pinned version + signed binding -------------
+# --- Arrange: register a driver + pinned version + connector + binding --------
 DRIVER="github-pr-review-$$"
 VERSION="${DRIVER}-v1"
 
@@ -94,18 +94,16 @@ DRIVER_JSON="$(fdb GET "/api/v1/$WS/drivers/$DRIVER")"
   || fail "workflow catalog lifecycle did not activate $VERSION"
 say "ok: driver version approved and active"
 
-say "creating trigger binding for $ROUTE with webhook_secret"
+CONNECTOR_ID="github-webhook-e2e-$$"
+say "creating GitHub connector $CONNECTOR_ID as the inbound verification root"
+fdb POST "/api/v1/$WS/connectors" \
+  "{\"connector_id\":\"$CONNECTOR_ID\",\"source_kind\":\"github\",\"display_name\":\"GitHub webhook E2E\",\"inbound_endpoint_path\":\"/webhooks/github\",\"inbound_secret\":\"$SECRET\",\"status\":\"active\",\"created_by\":\"local-mode-e2e\"}" >/dev/null
+
+say "creating trigger binding for $ROUTE"
 BINDING_ID="binding-$ROUTE-$$"
-BINDING_JSON="$(fdb POST "/api/v1/$WS/trigger-bindings" \
-  "{\"binding_id\":\"$BINDING_ID\",\"name\":\"pr-review\",\"source_kind\":\"github\",\"route_key\":\"$ROUTE\",\"driver_id\":\"$DRIVER\",\"driver_version_id\":\"$VERSION\",\"target_entrypoint\":\"run\",\"webhook_secret\":\"$SECRET\",\"enabled\":true}")"
-# The secret must be redacted on the create/read surface...
-[ -z "$(jfield "$BINDING_JSON" webhook_secret)" ] \
-  || fail "create response leaked webhook_secret (should be redacted)"
-# ...but resolvable via the dedicated privileged endpoint.
-SECRET_JSON="$(fdb GET "/api/v1/$WS/trigger-bindings/$BINDING_ID/webhook-secret")"
-[ "$(jfield "$SECRET_JSON" webhook_secret)" = "$SECRET" ] \
-  || fail "webhook-secret endpoint did not return the stored secret"
-say "ok: binding created; secret redacted on read, resolvable via privileged endpoint"
+fdb POST "/api/v1/$WS/trigger-bindings" \
+  "{\"binding_id\":\"$BINDING_ID\",\"name\":\"pr-review\",\"source_kind\":\"github\",\"route_key\":\"$ROUTE\",\"driver_id\":\"$DRIVER\",\"driver_version_id\":\"$VERSION\",\"target_entrypoint\":\"run\",\"enabled\":true}" >/dev/null
+say "ok: connector and binding created"
 
 # --- Act: send a signed pull_request.opened webhook --------------------------
 PAYLOAD="{\"action\":\"opened\",\"number\":4242,\"pull_request\":{\"number\":4242},\"repository\":{\"full_name\":\"acme/widgets\"},\"sender\":{\"login\":\"octocat\"}}"

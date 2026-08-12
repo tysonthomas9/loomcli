@@ -5,7 +5,6 @@ import type { BackendConfigData } from "@/api/common";
 
 import type { ConnectionState } from "@/components/TerminalView/instances";
 import {
-  getBackendFromSessionName,
   isAgentMetadata,
   isAgentTab,
   sanitizeSessionName,
@@ -17,7 +16,12 @@ interface TabInitArgs {
   metaLoading: boolean;
   config: BackendConfigData | undefined;
   configLoading: boolean;
-  createTab: (s: string, l: string, o: number) => Promise<void>;
+  createTab: (
+    s: string,
+    l: string,
+    o: number,
+    backend: string,
+  ) => Promise<void>;
   setTabs: React.Dispatch<React.SetStateAction<TabState[]>>;
   setActiveTabId: React.Dispatch<React.SetStateAction<string>>;
   initializedRef: MutableRefObject<boolean>;
@@ -43,12 +47,7 @@ function tabStateFromMetadata(
   metadata: TabMetadata,
   defaultBackend?: string,
 ): TabState & { _sortOrder: number; _pinned: boolean } {
-  const agentName = isAgentMetadata(metadata)
-    ? (metadata.agent_id ??
-      (metadata.session_name.startsWith("agent-")
-        ? metadata.session_name.slice("agent-".length)
-        : undefined))
-    : undefined;
+  const agentName = isAgentMetadata(metadata) ? metadata.agent_id : undefined;
   return {
     id: metadata.session_name,
     label: metadata.label,
@@ -56,7 +55,7 @@ function tabStateFromMetadata(
     connectionState: "disconnected" as ConnectionState,
     backendName: agentName
       ? (metadata.backend ?? "agent")
-      : getBackendFromSessionName(metadata.session_name, defaultBackend),
+      : (metadata.backend ?? defaultBackend ?? "unknown"),
     ...(agentName ? { agentName } : {}),
     ...(metadata.kind ? { kind: metadata.kind } : {}),
     ...(metadata.role ? { role: metadata.role } : {}),
@@ -160,15 +159,17 @@ export function useTabInit(args: TabInitArgs) {
         connectionState: "disconnected" as ConnectionState,
         backendName: defaultBackend,
       };
-      setTabs([newTab]);
-      setActiveTabId(newTab.id);
-
-      createTab(newTab.sessionName, newTab.label, 0).catch((err) =>
-        console.error(
-          `Failed to persist auto-created tab ${newTab.sessionName}:`,
-          err,
-        ),
-      );
+      createTab(newTab.sessionName, newTab.label, 0, newTab.backendName)
+        .then(() => {
+          setTabs([newTab]);
+          setActiveTabId(newTab.id);
+        })
+        .catch((err) =>
+          console.error(
+            `Failed to persist auto-created tab ${newTab.sessionName}:`,
+            err,
+          ),
+        );
     }
   }, [
     tabMetadata,

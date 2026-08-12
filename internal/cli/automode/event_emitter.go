@@ -2,6 +2,7 @@ package automode
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -23,9 +24,9 @@ type LocalEventEmitter struct {
 }
 
 // NewLocalEventEmitter creates an emitter that writes events to the given directory.
-func NewLocalEventEmitter(eventsDir string) *LocalEventEmitter {
+func NewLocalEventEmitter(ctx context.Context, eventsDir string) *LocalEventEmitter {
 	return &LocalEventEmitter{
-		bus: events.NewBus(eventsDir),
+		bus: events.NewBus(ctx, eventsDir),
 	}
 }
 

@@ -1,69 +1,24 @@
 package cleanup
 
 import (
+	"context"
 	"fmt"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/infra/sessionstoreadapter"
 	"github.com/tysonthomas9/loomcli/internal/sessions"
 )
 
 // cleanupSessions purges old session directories and compacts the sessions index.
 // Returns (purged count, compacted entry count, error).
-func cleanupSessions(runtimeDir string, maxAge time.Duration, dryRun bool) (int, int, error) {
-	store, err := sessionstoreadapter.New(runtimeDir)
+func cleanupSessions(ctx context.Context, runtimeDir string, maxAge time.Duration, dryRun bool) (int, int, error) {
+	archive, err := sessions.OpenArchive(ctx, runtimeDir)
 	if err != nil {
 		return 0, 0, fmt.Errorf("open session store: %w", err)
 	}
 
-	if dryRun {
-		return cleanupSessionsDryRun(store, maxAge)
-	}
-
-	// Purge old session directories.
-	purged, err := sessionstoreadapter.PurgeOlderThan(store, maxAge)
+	result, err := archive.Cleanup(sessions.CleanupOptions{OlderThan: maxAge, DryRun: dryRun, Compact: true})
 	if err != nil {
-		return purged, 0, fmt.Errorf("purge sessions: %w", err)
+		return result.Purged, result.Compacted, fmt.Errorf("clean sessions: %w", err)
 	}
-
-	// Compact index AFTER purge so orphaned entries are detected.
-	compacted, err := sessionstoreadapter.CompactIndex(store)
-	if err != nil {
-		return purged, 0, fmt.Errorf("compact sessions index: %w", err)
-	}
-
-	return purged, compacted, nil
-}
-
-// cleanupSessionsDryRun previews what cleanup would do without modifying disk.
-func cleanupSessionsDryRun(store *sessions.Store, maxAge time.Duration) (int, int, error) {
-	cutoff := time.Now().UTC().Add(-maxAge)
-
-	// Count sessions that would be purged.
-	records, err := store.Query(sessions.Filter{})
-	if err != nil {
-		return 0, 0, fmt.Errorf("query sessions for dry-run: %w", err)
-	}
-
-	wouldPurge := 0
-	for _, rec := range records {
-		if rec.Status == sessions.StatusRunning {
-			continue
-		}
-		if rec.EndedAt == nil {
-			continue
-		}
-		if rec.EndedAt.Before(cutoff) {
-			wouldPurge++
-		}
-	}
-
-	// Count compaction potential.
-	total, unique, err := store.CountIndexEntries()
-	if err != nil {
-		return wouldPurge, 0, fmt.Errorf("count index entries for dry-run: %w", err)
-	}
-	wouldCompact := total - unique // duplicates only; orphans require actual purge to detect
-
-	return wouldPurge, wouldCompact, nil
+	return result.Purged, result.Compacted, nil
 }

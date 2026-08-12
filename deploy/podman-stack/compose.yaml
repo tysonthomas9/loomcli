@@ -136,9 +136,7 @@ services:
       LOOM_DRIVER_EXECUTOR: "1"
       LOOM_DRIVER_TASK_WORKER_CONCURRENCY: ${LOOM_DRIVER_TASK_WORKER_CONCURRENCY:-2}
       LOOM_DRIVER_TASK_RUN_MAX_ATTEMPTS: ${LOOM_DRIVER_TASK_RUN_MAX_ATTEMPTS:-2}
-      # Token-only posture: no legacy node-wide bearer / lease identity in
-      # workflow envs. Runs authenticate with LOOM_RUN_TOKEN exclusively.
-      LOOM_DRIVER_LEGACY_AUTH_ENV: "0"
+      # Runs authenticate with LOOM_RUN_TOKEN exclusively.
       LOOM_RUN_TOKEN_SIGNING_KEY: ${LOOM_RUN_TOKEN_SIGNING_KEY}
       # Sandbox: empty = process launcher; this capped container is the
       # isolation boundary. "container" requires nested podman (native

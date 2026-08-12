@@ -112,7 +112,7 @@ func TestRunListNoWorktrees(t *testing.T) {
 	os.Stdout = w
 
 	// Run the command
-	runList(nil, nil)
+	runList(commandWithContext(t), nil)
 
 	// Restore stdout and read output
 	w.Close()
@@ -228,7 +228,7 @@ func TestGetWorktreeListStatus(t *testing.T) {
 				Branch: "test-branch",
 			}
 
-			status := getWorktreeListStatusDeps(deps, wt)
+			status := getWorktreeListStatusDeps(t.Context(), deps, wt)
 
 			if tc.lockRunning {
 				// Just verify it starts with the lock icon
@@ -263,7 +263,7 @@ func TestGetWorktreeListStatus(t *testing.T) {
 		mock.InstallOn(deps)
 
 		wt := WorktreeInfo{Name: "test", Path: wtPath, Branch: "test-branch"}
-		status := getWorktreeListStatusDeps(deps, wt)
+		status := getWorktreeListStatusDeps(t.Context(), deps, wt)
 
 		// With clean=false and changes=0, status should be "● dirty"
 		if status != "● dirty" {
@@ -329,7 +329,7 @@ func TestRunListWorkspaceMode(t *testing.T) {
 	r, w, _ := os.Pipe()
 	os.Stdout = w
 
-	renderListWorkspace(worktrees)
+	renderListWorkspace(t.Context(), worktrees)
 
 	w.Close()
 	os.Stdout = oldStdout
@@ -399,7 +399,7 @@ func TestRenderListWorkspaceUnassigned(t *testing.T) {
 	r, w, _ := os.Pipe()
 	os.Stdout = w
 
-	renderListWorkspace(worktrees)
+	renderListWorkspace(t.Context(), worktrees)
 
 	w.Close()
 	os.Stdout = oldStdout

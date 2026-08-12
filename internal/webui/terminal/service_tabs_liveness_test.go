@@ -80,6 +80,8 @@ func putTestTabAt(t *testing.T, svc *terminalServiceImpl, wsID, name string, at 
 		SessionName: name,
 		Workspace:   wsID,
 		Label:       name,
+		Backend:     "shell",
+		Launch:      &LaunchSpec{Argv: []string{"-l"}},
 		CreatedAt:   at,
 		UpdatedAt:   at,
 	}
@@ -219,11 +221,36 @@ func TestPutTab_RejectsOverwriteWhenPTYIsLive(t *testing.T) {
 	// Live session: PutTab should refuse to replace.
 	putTestTab(t, svc, ws, "sess")
 	fake.alive[SessionKey{Workspace: ws, Name: "sess"}] = true
-	meta := &TabMetadata{SessionName: "sess", Workspace: ws, Label: "replacement"}
+	meta := &TabMetadata{
+		SessionName: "sess", Workspace: ws, Label: "replacement", Backend: "shell",
+		Launch: &LaunchSpec{Argv: []string{"-l"}},
+	}
 	err := svc.PutTab(ctx, ws, meta)
 	var svcErr *apperrors.ServiceError
 	if !errors.As(err, &svcErr) || svcErr.Kind != apperrors.KindConflict {
 		t.Fatalf("expected ServiceError.Kind=Conflict, got %v", err)
+	}
+}
+
+func TestPutTabRejectsGenericTabWithoutDurableLaunchIntent(t *testing.T) {
+	svc, _, _ := newLivenessTestSvc(t)
+
+	for name, meta := range map[string]*TabMetadata{
+		"missing envelope": {
+			SessionName: "sess", Workspace: "w", Label: "tab", Backend: "codex",
+		},
+		"missing backend": {
+			SessionName: "sess", Workspace: "w", Label: "tab",
+			Launch: &LaunchSpec{Argv: []string{"-l"}},
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			err := svc.PutTab(t.Context(), "w", meta)
+			var typed *apperrors.ServiceError
+			if !errors.As(err, &typed) || typed.Kind != apperrors.KindValidation {
+				t.Fatalf("PutTab error = %v, want validation", err)
+			}
+		})
 	}
 }
 
@@ -235,7 +262,10 @@ func TestPutTab_AllowsCreateWhenPTYIsLiveButMetadataMissing(t *testing.T) {
 	// The frontend can open the WebSocket before its metadata PUT completes.
 	// In that race the PTY exists, but this is still a create, not a replace.
 	fake.alive[SessionKey{Workspace: ws, Name: "sess"}] = true
-	meta := &TabMetadata{SessionName: "sess", Workspace: ws, Label: "new tab"}
+	meta := &TabMetadata{
+		SessionName: "sess", Workspace: ws, Label: "new tab", Backend: "shell",
+		Launch: &LaunchSpec{Argv: []string{"-l"}},
+	}
 	if err := svc.PutTab(ctx, ws, meta); err != nil {
 		t.Fatalf("PutTab create with live PTY but missing metadata: %v", err)
 	}
@@ -255,7 +285,10 @@ func TestPutTab_AllowsReclaimWhenPTYIsDead(t *testing.T) {
 
 	// Stale metadata from a prior process, no live PTY — replace OK.
 	putTestTab(t, svc, ws, "sess")
-	meta := &TabMetadata{SessionName: "sess", Workspace: ws, Label: "reclaimed"}
+	meta := &TabMetadata{
+		SessionName: "sess", Workspace: ws, Label: "reclaimed", Backend: "shell",
+		Launch: &LaunchSpec{Argv: []string{"-l"}},
+	}
 	if err := svc.PutTab(ctx, ws, meta); err != nil {
 		t.Fatalf("PutTab reclaim: %v", err)
 	}
@@ -283,7 +316,8 @@ func TestPutTabRejectsDeadCanonicalAgentTabReplacement(t *testing.T) {
 		t.Fatal("fixture unexpectedly has a process-local PTY")
 	}
 	err := svc.PutTab(ctx, ws, &TabMetadata{
-		SessionName: "agent-tab", Workspace: ws, Label: "ordinary replacement",
+		SessionName: "agent-tab", Workspace: ws, Label: "ordinary replacement", Backend: "shell",
+		Launch: &LaunchSpec{Argv: []string{"-l"}},
 	})
 	var typed *apperrors.ServiceError
 	if !errors.As(err, &typed) || typed.Kind != apperrors.KindConflict {

@@ -23,9 +23,9 @@ type CreateGrantMutation struct {
 	ResourcePattern string
 }
 
-// ManagementStore is the Connector owner's durable definition, grant, and
-// audit port. Secret reads, vault operations, and provider dispatch are
-// deliberately absent from this query/lifecycle slice.
+// ManagementStore is the Connector owner's durable definition, secret
+// lifecycle, grant, and audit port. Vault operations and provider dispatch are
+// deliberately absent; narrow consumers depend on smaller local interfaces.
 type ManagementStore interface {
 	SecretLifecycleStore
 	CreateConnectorRecord(context.Context, CreateConnectorMutation) (*Connector, error)
@@ -40,7 +40,7 @@ type ManagementStore interface {
 
 type SecretLifecycleStore interface {
 	GetConnectorRecord(context.Context, string, string) (*Connector, error)
-	ResolveCurrentInboundSecretRecord(context.Context, string, string) (string, error)
+	ResolveInboundSecretsRecord(context.Context, string, string) (*InboundSecrets, error)
 	ResolveOutboundCredentialSealedRecord(context.Context, string, string) ([]byte, error)
 	RotateConnectorSecretsRecord(context.Context, string, string, RotateConnectorSecretsMutation) (*Connector, error)
 	AppendConnectorCallRecord(context.Context, *ConnectorCallRecord) error

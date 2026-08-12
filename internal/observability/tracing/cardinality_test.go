@@ -43,7 +43,6 @@ import (
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 
 	"github.com/tysonthomas9/loomcli/internal/cli"
-	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/events"
 	"github.com/tysonthomas9/loomcli/internal/observability/tracing"
 )
@@ -338,7 +337,7 @@ func TestSpanNames_KnownNamesMatchAllowlist(t *testing.T) {
 //     produced by tracer.Start with the same naming as
 //     internal/cli/agent_invoker_tracing.go.
 //   - The event-derived spans (`loom.task`, `loom.agent.lifecycle`),
-//     driven through the singleton cli.AgentEventBus(), which is the
+//     driven through the singleton cli.AgentEventBus(t.Context()), which is the
 //     real production wiring (otelexport subscribed to the bus).
 //
 // Span shapes that need a real stack (HTTP server middleware, pgx,
@@ -381,14 +380,9 @@ func TestSpanNames_InMemoryExporterSmoke(t *testing.T) {
 	//    so otelexport's `loom.task` span gets emitted by the real
 	//    subscriber. This is the same wiring exercised by
 	//    TestAgentEventBus_EmitsLoomTaskSpanUnderActiveContext.
-	cmdstore.SetRootContext(rootCtx)
-	t.Cleanup(func() { cmdstore.SetRootContext(context.Background()) })
-	events.SetContextProvider(cmdstore.RootContext)
-	t.Cleanup(func() { events.SetContextProvider(nil) })
-
-	bus := cli.AgentEventBus()
+	bus := cli.AgentEventBus(rootCtx)
 	if bus == nil {
-		t.Fatalf("cli.AgentEventBus() returned nil")
+		t.Fatalf("cli.AgentEventBus(t.Context()) returned nil")
 	}
 
 	claimEv, err := events.NewEvent(events.TaskClaimed, "happy-worker", "task", "EPIC-1",

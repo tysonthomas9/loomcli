@@ -23,9 +23,8 @@ type Service struct {
 	admission *authority.Admission
 }
 
-// NewWithLifecycle composes the complete operator lifecycle path without
-// changing the legacy constructor used by still-migrating tests. The returned
-// service fails closed if the atomic lifecycle port is absent.
+// NewWithLifecycle composes the complete Agents capability. The returned
+// service fails closed if any owner port is absent.
 func NewWithLifecycle(
 	reader AgentReader,
 	roles RoleReferenceReader,
@@ -37,41 +36,18 @@ func NewWithLifecycle(
 	bindings DesiredStateBindingSource,
 	admission *authority.Admission,
 ) (*Service, error) {
-	if lifecycle == nil || bindings == nil {
-		return nil, fmt.Errorf("compose Agents lifecycle: atomic lifecycle store and binding-state source are required: %w", ErrUnavailable)
-	}
-	service, err := New(reader, roles, roleStore, identity, desired, ownership, admission)
-	if err != nil {
-		return nil, err
-	}
-	service.lifecycle = lifecycle
-	service.bindings = bindings
-	return service, nil
-}
-
-var _ API = (*Service)(nil)
-
-// New fails closed unless the complete Phase 5 Agents boundary is available.
-// Composition may supply several interfaces from one adapter, but the module
-// never receives a composite legacy Store or a transport client.
-func New(
-	reader AgentReader,
-	roles RoleReferenceReader,
-	roleStore RoleStore,
-	identity AgentIdentityStore,
-	desired DesiredStateStore,
-	ownership OwnershipStore,
-	admission *authority.Admission,
-) (*Service, error) {
 	if reader == nil || roles == nil || roleStore == nil || identity == nil ||
-		desired == nil || ownership == nil || admission == nil {
+		desired == nil || ownership == nil || lifecycle == nil || bindings == nil || admission == nil {
 		return nil, fmt.Errorf("compose Agents: all capability ports and admission are required: %w", ErrUnavailable)
 	}
 	return &Service{
-		reader: reader, roles: roles, roleStore: roleStore, identity: identity, desired: desired,
+		reader: reader, roles: roles, roleStore: roleStore, identity: identity,
+		desired: desired, lifecycle: lifecycle, bindings: bindings,
 		ownership: ownership, admission: admission,
 	}, nil
 }
+
+var _ API = (*Service)(nil)
 
 func (s *Service) GetAgent(ctx context.Context, workspace, agentID string) (*Agent, error) {
 	workspace, agentID, err := normalizeWorkspaceAndAgent(workspace, agentID)

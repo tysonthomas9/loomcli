@@ -195,33 +195,3 @@ func TestBuildAndAuthorRejectsOperatorTrustAndActivationSelection(t *testing.T) 
 		})
 	}
 }
-
-func TestEnsureBuiltinWorkflowAuthoredUsesManagedAtomicPort(t *testing.T) {
-	installFakeWorkflowBuildDeps(t)
-	t.Setenv("LOOM_WORKSPACE_RUNTIME_DIR", t.TempDir())
-	api := &authoringAPISpy{}
-	authorities := &managedBuiltinAuthoritySpy{}
-	catalog := builtinCatalogStub{getDriverErr: workflowcatalog.ErrNotFound}
-
-	if err := EnsureBuiltinWorkflowAuthored(
-		context.Background(),
-		catalog,
-		api,
-		authorities,
-		"TEST",
-		BuiltinPromptAgentWorkflowName,
-	); err != nil {
-		t.Fatalf("EnsureBuiltinWorkflowAuthored: %v", err)
-	}
-	if api.managedCommand == nil || api.operatorCommand != nil {
-		t.Fatalf("authoring calls = operator:%+v managed:%+v", api.operatorCommand, api.managedCommand)
-	}
-	if !api.managedCommand.Activate || api.managedCommand.ExpectedRevision != 0 ||
-		api.managedCommand.DriverID != BuiltinPromptAgentWorkflowName ||
-		api.managedCommand.Manifest["provenance"] != workflowcatalog.ManagedBuiltinProvenance {
-		t.Fatalf("managed command = %+v", api.managedCommand)
-	}
-	if authorities.calls != 1 || authorities.workspace != "TEST" || authorities.reason == "" {
-		t.Fatalf("managed authority calls = %+v, want one scoped TEST grant", authorities)
-	}
-}

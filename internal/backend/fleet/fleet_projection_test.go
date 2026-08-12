@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
-	"github.com/tysonthomas9/loomcli/internal/types"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 )
 
 func TestGet_HydratesDependencyIssueMetadata(t *testing.T) {
@@ -100,8 +100,8 @@ func TestBlocked_NativeFleetDBWrapper(t *testing.T) {
 					Issue: fleetIssueWire{
 						ID:        "b-1",
 						Title:     "Blocked",
-						Status:    string(types.StatusOpen),
-						Type:      string(types.TypeTask),
+						Status:    string(workitems.StatusOpen),
+						Type:      string(workitems.TypeTask),
 						ParentID:  parentID,
 						CreatedAt: now,
 						UpdatedAt: now,
@@ -134,7 +134,7 @@ func TestBlocked_NativeFleetDBWrapper(t *testing.T) {
 	if got.Parent != parentID {
 		t.Errorf("Parent = %q, want %q", got.Parent, parentID)
 	}
-	if got.IssueType != string(types.TypeTask) {
+	if got.IssueType != string(workitems.TypeTask) {
 		t.Errorf("IssueType = %q, want task", got.IssueType)
 	}
 	if got.BlockedByCount != 2 {

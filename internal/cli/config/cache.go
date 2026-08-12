@@ -35,7 +35,7 @@ func LoadConfigCached() (*LoomConfig, error) {
 	if configCache.dir == dir && time.Now().Before(configCache.expires) {
 		return configCache.cfg, configCache.err
 	}
-	configCache.cfg, configCache.err = LoadConfig()
+	configCache.cfg, configCache.err = LoadConfig(context.Background())
 	configCache.dir = dir
 	configCache.expires = time.Now().Add(configCacheTTL)
 	return configCache.cfg, configCache.err

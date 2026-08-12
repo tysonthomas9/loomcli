@@ -27,6 +27,7 @@ interface UseTabActionsOptions {
     session: string,
     label: string,
     sortOrder: number,
+    backend: string,
   ) => Promise<void>;
   updateLabel: (session: string, label: string) => Promise<void>;
   deleteTab: (session: string) => Promise<void>;
@@ -94,7 +95,7 @@ export function useTabActions({
   );
 
   const handleDuplicateTab = useCallback(
-    (tabId: string) => {
+    async (tabId: string) => {
       const sourceTab = tabs.find((t) => t.id === tabId);
       if (!sourceTab) return;
       const result = getNextDuplicateName(sourceTab.label, tabs);
@@ -106,12 +107,20 @@ export function useTabActions({
         connectionState: "disconnected" as ConnectionState,
         backendName: sourceTab.backendName,
       };
-      createTab(result.sessionName, result.label, tabs.length).catch((err) =>
+      try {
+        await createTab(
+          result.sessionName,
+          result.label,
+          tabs.length,
+          sourceTab.backendName,
+        );
+      } catch (err) {
         console.error(
           `Failed to persist duplicated tab ${result.sessionName}:`,
           err,
-        ),
-      );
+        );
+        return;
+      }
       setTabs((prev) => [...prev, newTab]);
       setActiveTabId(newTab.id);
     },

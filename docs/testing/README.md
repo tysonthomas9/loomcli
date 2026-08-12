@@ -122,7 +122,8 @@ Tests
 │   ├── internal/webui/        # 21 test files - HTTP handlers, SSE, auth, terminal, routes
 │   ├── internal/webui/fleet/  # 5 test files - Fleet metrics, auth, signing
 │   ├── internal/webui/daemon/ # 5 test files - Connection pool, discovery, circuit breaker
-│   ├── internal/types/        # 8 test files - Validation, ID generation, federation
+│   ├── internal/modules/workitems/ # Owner policy, model, and use-case tests
+│   ├── internal/backend/fleet/     # Fleet wire and adapter contract tests
 │   ├── internal/kv/           # 4 test files - Redis scripts, stale detection, reconciler
 │   ├── internal/rpc/          # 6 test files - Protocol, client, auth, mutations, metrics
 │   ├── internal/circuitbreaker/ # 1 test file - State machine, concurrency

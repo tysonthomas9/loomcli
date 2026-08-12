@@ -16,7 +16,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
-	"github.com/tysonthomas9/loomcli/internal/localnodeconfig"
 	"github.com/tysonthomas9/loomcli/internal/localworkspace"
 	"github.com/tysonthomas9/loomcli/internal/modules/agents"
 	"github.com/tysonthomas9/loomcli/internal/store"
@@ -440,7 +439,7 @@ func TestAgentTerminalLaunchSpecStale_DetectsBackendChange(t *testing.T) {
 		t.Fatal("with no workspace default backend, the cached spec matches what would be built — spec is fresh")
 	}
 
-	if err := localnodeconfig.SetRuntimeProvider("E2E", "codex"); err != nil {
+	if err := bootstrap.SetRuntimeProvider("E2E", "codex"); err != nil {
 		t.Fatalf("set runtime provider: %v", err)
 	}
 
@@ -1373,7 +1372,7 @@ func TestBuildAgentLaunchSpecFallsBackToWorkspaceBackend(t *testing.T) {
 	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "E2E", Name: "E2E"}); err != nil {
 		t.Fatalf("create workspace: %v", err)
 	}
-	if err := localnodeconfig.SetRuntimeProvider("E2E", "codex"); err != nil {
+	if err := bootstrap.SetRuntimeProvider("E2E", "codex"); err != nil {
 		t.Fatalf("set runtime provider: %v", err)
 	}
 	agent := &agents.RuntimeIdentity{

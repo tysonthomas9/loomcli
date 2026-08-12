@@ -40,7 +40,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/app/webhookingestion"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/driver"
-	"github.com/tysonthomas9/loomcli/internal/infra/connectorscatalog"
 	providers "github.com/tysonthomas9/loomcli/internal/infra/connectorsproviders"
 	"github.com/tysonthomas9/loomcli/internal/infra/connectorsvault"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
@@ -69,10 +68,7 @@ const (
 	inboundSecretV1 = "whsec-e2e-inbound-v1"
 	inboundSecretV2 = "whsec-e2e-inbound-v2"
 
-	// legacyBindingSecret is configured on the TriggerBinding. Once a
-	// connector exists for the source kind it must STOP verifying (the
-	// connector inbound secret is the verification root, CV12).
-	legacyBindingSecret = "legacy-binding-secret-do-not-accept"
+	invalidInboundSecret = "invalid-inbound-secret-do-not-accept"
 )
 
 // e2eSecrets is every string the §9.5 leak scan hunts for.
@@ -81,7 +77,7 @@ var e2eSecrets = []string{
 	outboundCredentialV2,
 	inboundSecretV1,
 	inboundSecretV2,
-	legacyBindingSecret,
+	invalidInboundSecret,
 }
 
 // --- fake GitHub upstream -------------------------------------------------
@@ -233,6 +229,17 @@ func (adapter connectorE2EAdmission) AdmitEvent(ctx context.Context, _ automatio
 
 type connectorE2EQueries struct{ st store.Store }
 
+func (adapter connectorE2EQueries) GetBinding(ctx context.Context, workspace, bindingID string) (*automation.Binding, error) {
+	return adapter.st.TriggerBindings().Get(ctx, workspace, bindingID)
+}
+
+func (adapter connectorE2EQueries) ListBindings(ctx context.Context, workspace string, filter automation.BindingFilter) ([]*automation.Binding, error) {
+	return adapter.st.TriggerBindings().List(ctx, workspace, store.TriggerBindingFilter{
+		SourceKind: filter.SourceKind, RouteKey: filter.RouteKey, DriverID: filter.DriverID,
+		TargetAgentServiceID: filter.TargetAgentServiceID, Enabled: filter.Enabled, Limit: filter.Limit,
+	})
+}
+
 func (adapter connectorE2EQueries) GetEvent(ctx context.Context, workspace, eventID string) (*automation.Event, error) {
 	return adapter.st.TriggerEvents().Get(ctx, workspace, eventID)
 }
@@ -310,11 +317,7 @@ func newE2EHarness(t *testing.T) *e2eHarness {
 		providers.NewGitHub(h.github.server.Client(), h.github.server.URL)); err != nil {
 		t.Fatalf("Register github provider: %v", err)
 	}
-	catalog, err := connectorscatalog.New(h.store.Connectors(), h.store.ConnectorGrants(), h.store.ConnectorCalls())
-	if err != nil {
-		t.Fatalf("New connector catalog: %v", err)
-	}
-	dispatcher, err := connectorsmodule.NewDispatch(catalog, h.vault, registry, nil)
+	dispatcher, err := connectorsmodule.NewDispatch(h.store.Connectors(), h.vault, registry, nil)
 	if err != nil {
 		t.Fatalf("New connector dispatcher: %v", err)
 	}
@@ -343,8 +346,8 @@ func newE2EHarness(t *testing.T) *e2eHarness {
 		Execution: executionCapability.DriverRunAPI(), ExecutionAuthorities: executionCapability.DriverRunAuthorityResolver(),
 	}).Register(mux)
 	workflow, err := webhookingestion.New(
-		webhooks.NewCompatibilityVerifier(webhooks.CompatibilityVerifierConfig{
-			Bindings: h.store.TriggerBindings(), Connectors: h.store.Connectors(),
+		webhooks.NewVerifier(webhooks.VerifierConfig{
+			Bindings: connectorE2EQueries{st: h.store}, Connectors: h.store.Connectors(),
 		}),
 		connectorE2EAuthorityProvider{}, connectorE2EAdmission{st: h.store},
 	)
@@ -384,9 +387,6 @@ func (h *e2eHarness) provisionWorkspace(t *testing.T) {
 		WorkspaceKey: e2eWorkspace, BindingID: "binding-1", Name: "PR opened",
 		SourceKind: "github", RouteKey: "github.pull_request.opened",
 		DriverID: "driver-1", DriverVersionID: "version-1", Enabled: true,
-		// Legacy per-binding secret: must STOP verifying once the workspace
-		// holds a github connector (the connector becomes the root).
-		WebhookSecret: legacyBindingSecret,
 	}); err != nil {
 		t.Fatalf("Create trigger binding: %v", err)
 	}
@@ -395,9 +395,9 @@ func (h *e2eHarness) provisionWorkspace(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Seal credential: %v", err)
 	}
-	if _, err := h.store.Connectors().Create(ctx, store.ConnectorCreate{
+	if _, err := h.store.Connectors().CreateConnectorRecord(ctx, connectorsmodule.CreateConnectorMutation{
 		WorkspaceKey: e2eWorkspace, ConnectorID: "gh-main",
-		SourceKind:               domain.ConnectorSourceGitHub,
+		SourceKind:               connectorsmodule.ConnectorSourceGitHub,
 		DisplayName:              "GitHub (main)",
 		InboundSecret:            inboundSecretV1,
 		OutboundCredentialSealed: sealed,
@@ -409,7 +409,7 @@ func (h *e2eHarness) provisionWorkspace(t *testing.T) {
 	// Deny-by-default: ONLY merge and pull_request.read on repo:octocat/hello
 	// are granted. Everything else must refuse with grant_denied.
 	for i, action := range []string{"github.merge", "github.pull_request.read"} {
-		if _, err := h.store.ConnectorGrants().Create(ctx, store.ConnectorGrantCreate{
+		if _, err := h.store.Connectors().CreateManagementGrant(ctx, connectorsmodule.CreateGrantMutation{
 			WorkspaceKey: e2eWorkspace, GrantID: fmt.Sprintf("grant-%d", i+1),
 			ConnectorID: "gh-main", BindingID: "binding-1",
 			Action: action, ResourcePattern: "repo:octocat/hello",
@@ -606,10 +606,9 @@ func TestConnectorEndToEnd(t *testing.T) {
 	ctx := context.Background()
 
 	// (1) Ingress: a delivery signed with the connector's inbound secret is
-	// the ONLY one that verifies. The legacy binding secret and a tampered
-	// signature both get the uniform 401.
-	status, raw := h.postGitHubWebhook(t, "e2e-delivery-legacy", legacyBindingSecret, webhookPayload())
-	assertUniform401(t, "legacy binding secret", status, raw)
+	// the ONLY one that verifies. Invalid signatures get the uniform 401.
+	status, raw := h.postGitHubWebhook(t, "e2e-delivery-invalid", invalidInboundSecret, webhookPayload())
+	assertUniform401(t, "invalid connector secret", status, raw)
 	status, raw = h.postGitHubWebhook(t, "e2e-delivery-tampered", "completely-wrong-secret", webhookPayload())
 	assertUniform401(t, "tampered signature", status, raw)
 
@@ -702,7 +701,7 @@ func TestConnectorEndToEnd(t *testing.T) {
 		t.Fatalf("fresh merge: status = %d, want 200 (body %s)", status, raw)
 	}
 	callID, decision, upstreamStatus, body := decodeDispatch(t, raw)
-	wantMergeCallID := domain.ConnectorCallID(h.runID, "github.merge", 4)
+	wantMergeCallID := connectorsmodule.ConnectorCallID(h.runID, "github.merge", 4)
 	if callID != wantMergeCallID || decision != "granted" || upstreamStatus != 200 || body["merged"] != true {
 		t.Fatalf("fresh merge = %s/%s/%d/%v, want %s/granted/200/merged",
 			callID, decision, upstreamStatus, body, wantMergeCallID)
@@ -719,9 +718,9 @@ func TestConnectorEndToEnd(t *testing.T) {
 		t.Fatalf("upstream calls = %d, want 3 (stale merge, read, fresh merge)", len(calls))
 	}
 	wantKeys := []string{
-		domain.ConnectorCallID(h.runID, "github.merge", 2),
-		domain.ConnectorCallID(h.runID, "github.pull_request.read", 3),
-		domain.ConnectorCallID(h.runID, "github.merge", 4),
+		connectorsmodule.ConnectorCallID(h.runID, "github.merge", 2),
+		connectorsmodule.ConnectorCallID(h.runID, "github.pull_request.read", 3),
+		connectorsmodule.ConnectorCallID(h.runID, "github.merge", 4),
 	}
 	for i, call := range calls {
 		if call.Authorization != "Bearer "+outboundCredentialV1 {
@@ -735,18 +734,14 @@ func TestConnectorEndToEnd(t *testing.T) {
 	// (7) Audit journal: one row per dispatch — denied AND granted AND stale —
 	// all attributed to the server-resolved binding, never caller-supplied.
 	assertAuditTrail(t, h, map[string]auditExpectation{
-		domain.ConnectorCallID(h.runID, "github.issue_comment.post", 1): {domain.ConnectorCallDenied, 0},
-		domain.ConnectorCallID(h.runID, "github.merge", 2):              {domain.ConnectorCallStaleSubject, 409},
-		domain.ConnectorCallID(h.runID, "github.pull_request.read", 3):  {domain.ConnectorCallGranted, 200},
-		domain.ConnectorCallID(h.runID, "github.merge", 4):              {domain.ConnectorCallGranted, 200},
+		connectorsmodule.ConnectorCallID(h.runID, "github.issue_comment.post", 1): {connectorsmodule.ConnectorCallDenied, 0},
+		connectorsmodule.ConnectorCallID(h.runID, "github.merge", 2):              {connectorsmodule.ConnectorCallStaleSubject, 409},
+		connectorsmodule.ConnectorCallID(h.runID, "github.pull_request.read", 3):  {connectorsmodule.ConnectorCallGranted, 200},
+		connectorsmodule.ConnectorCallID(h.runID, "github.merge", 4):              {connectorsmodule.ConnectorCallGranted, 200},
 	})
 
 	// (8) Mid-flight rotation: both secrets rotate while the run is live.
-	catalog, err := connectorscatalog.New(h.store.Connectors(), h.store.ConnectorGrants(), h.store.ConnectorCalls())
-	if err != nil {
-		t.Fatalf("New connector catalog for rotation: %v", err)
-	}
-	management, err := connectorsmodule.NewManagementWithSecrets(catalog, h.vault, time.Now)
+	management, err := connectorsmodule.NewManagementWithSecrets(h.store.Connectors(), h.vault, time.Now)
 	if err != nil {
 		t.Fatalf("New connector management for rotation: %v", err)
 	}
@@ -802,13 +797,13 @@ func TestConnectorEndToEnd(t *testing.T) {
 
 // auditExpectation pins one journal row's decision and upstream status.
 type auditExpectation struct {
-	decision domain.ConnectorCallDecision
+	decision connectorsmodule.ConnectorCallDecision
 	status   int
 }
 
 func assertAuditTrail(t *testing.T, h *e2eHarness, want map[string]auditExpectation) {
 	t.Helper()
-	records, err := h.store.ConnectorCalls().ListByRun(context.Background(), e2eWorkspace, h.runID, store.ConnectorCallFilter{})
+	records, err := h.store.Connectors().ListCallRecordsByRun(context.Background(), e2eWorkspace, h.runID, connectorsmodule.ConnectorCallFilter{})
 	if err != nil {
 		t.Fatalf("ListByRun: %v", err)
 	}
@@ -843,11 +838,11 @@ func assertNoSecretMaterial(t *testing.T, h *e2eHarness) {
 		blobs[fmt.Sprintf("http response %d", i)] = resp
 	}
 
-	runRows, err := h.store.ConnectorCalls().ListByRun(ctx, e2eWorkspace, h.runID, store.ConnectorCallFilter{})
+	runRows, err := h.store.Connectors().ListCallRecordsByRun(ctx, e2eWorkspace, h.runID, connectorsmodule.ConnectorCallFilter{})
 	if err != nil {
 		t.Fatalf("ListByRun: %v", err)
 	}
-	rotationRows, err := h.store.ConnectorCalls().ListByBinding(ctx, e2eWorkspace, connectorsmodule.RotationAuditBindingID, store.ConnectorCallFilter{})
+	rotationRows, err := h.store.Connectors().ListCallRecordsByBinding(ctx, e2eWorkspace, connectorsmodule.RotationAuditBindingID, connectorsmodule.ConnectorCallFilter{})
 	if err != nil {
 		t.Fatalf("ListByBinding rotation rows: %v", err)
 	}
@@ -862,7 +857,7 @@ func assertNoSecretMaterial(t *testing.T, h *e2eHarness) {
 		blobs[fmt.Sprintf("audit row %d (%s)", i, rec.CallID)] = encoded
 	}
 
-	conn, err := h.store.Connectors().Get(ctx, e2eWorkspace, "gh-main")
+	conn, err := h.store.Connectors().GetConnectorRecord(ctx, e2eWorkspace, "gh-main")
 	if err != nil {
 		t.Fatalf("Get connector: %v", err)
 	}
@@ -907,7 +902,6 @@ func TestConnectorE2EWorkflowEnvNeverSeesSecrets(t *testing.T) {
 		NodePath:        stub,
 		ExecTaskCommand: []string{"loom-exec-task-stub"}, // explicit per the loomExecutablePath lesson
 		APIBaseURL:      "http://127.0.0.1:1",
-		APIToken:        "run-scoped-driver-token",
 	}
 	res, err := runner.Run(context.Background(), driver.RunRequest{
 		Run: &domain.DriverRun{
@@ -919,6 +913,7 @@ func TestConnectorE2EWorkflowEnvNeverSeesSecrets(t *testing.T) {
 		// The env seam is under test, not the SB3 trust gate: a trusted
 		// request passes the process launcher.
 		TrustLevel: workflowcatalog.DriverTrustTrusted,
+		RunToken:   "run-scoped-driver-token",
 	})
 	if err != nil {
 		t.Fatalf("NodeRunner.Run: %v", err)
@@ -934,11 +929,11 @@ func TestConnectorE2EWorkflowEnvNeverSeesSecrets(t *testing.T) {
 	env := string(dump)
 
 	// Positive controls: the dump is the real spawned env and carries the
-	// run-scoped identity + driver API token the workflow legitimately holds.
+	// run-scoped identity + run token the workflow legitimately holds.
 	for _, want := range []string{
 		"LOOM_DRIVER_RUN_ID=run-env-probe",
 		"LOOM_DRIVER_API_URL=http://127.0.0.1:1",
-		"LOOM_DRIVER_API_TOKEN=run-scoped-driver-token",
+		"LOOM_RUN_TOKEN=run-scoped-driver-token",
 	} {
 		if !strings.Contains(env, want) {
 			t.Fatalf("workflow env missing %q:\n%s", want, env)

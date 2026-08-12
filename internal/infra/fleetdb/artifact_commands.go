@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/modules/artifacts"
 )
 
 var (
@@ -683,4 +684,77 @@ func artifactMatchesFinalize(artifact *Artifact, desired resolvedArtifactFinaliz
 		strings.EqualFold(artifact.Checksum, desired.Checksum) && strings.EqualFold(artifact.ContentHash, desired.ContentHash) &&
 		artifact.Visibility == desired.Visibility && artifact.RedactionStatus == desired.RedactionStatus &&
 		reflect.DeepEqual(artifact.Metadata, desired.Metadata)
+}
+
+// artifactStore is the Artifacts-owned general read adapter. It shares the
+// command transport's client, credentials, retry policy, and connection pool
+// without exposing the horizontal control-plane repository.
+type artifactStore struct{ client *Client }
+
+var _ artifacts.QueryStore = (*artifactStore)(nil)
+
+func (s *artifactStore) GetArtifactRecord(ctx context.Context, workspace, artifactID string) (*artifacts.Artifact, error) {
+	var out artifacts.Artifact
+	if err := s.client.do(ctx, "GET", "/api/v1/"+pathEscape(workspace)+"/artifacts/"+pathEscape(artifactID), nil, &out); err != nil {
+		return nil, mapArtifactQueryError(err)
+	}
+	return &out, nil
+}
+
+func (s *artifactStore) ListArtifactRecords(ctx context.Context, workspace string, filter artifacts.SearchFilter) ([]*artifacts.Artifact, error) {
+	query := url.Values{}
+	setArtifactQueryFilter(query, "agent_id", filter.AgentID)
+	setArtifactQueryFilter(query, "session_id", filter.SessionID)
+	setArtifactQueryFilter(query, "task_id", filter.TaskID)
+	setArtifactQueryFilter(query, "owner_type", string(filter.OwnerType))
+	setArtifactQueryFilter(query, "owner_id", filter.OwnerID)
+	setArtifactQueryFilter(query, "type", filter.Type)
+	setArtifactQueryFilter(query, "durable_status", string(filter.DurableStatus))
+	if filter.Limit > 0 {
+		query.Set("limit", strconv.Itoa(filter.Limit))
+	}
+	var response struct {
+		Artifacts []*artifacts.Artifact `json:"artifacts"`
+	}
+	path := withQuery("/api/v1/"+pathEscape(workspace)+"/artifacts", query)
+	if err := s.client.do(ctx, "GET", path, nil, &response); err != nil {
+		return nil, mapArtifactQueryError(err)
+	}
+	if response.Artifacts == nil {
+		response.Artifacts = []*artifacts.Artifact{}
+	}
+	return response.Artifacts, nil
+}
+
+func (s *artifactStore) ReadArtifactContent(ctx context.Context, workspace, artifactID string) ([]byte, error) {
+	content, err := s.client.doBytes(ctx, "GET", "/api/v1/"+pathEscape(workspace)+"/artifacts/"+pathEscape(artifactID)+"/content")
+	if err != nil {
+		if errors.Is(err, ErrArtifactsUnavailable) || errors.Is(err, domain.ErrUnavailable) {
+			return nil, fmt.Errorf("read artifact content: %w", errors.Join(artifacts.ErrContentUnavailable, err))
+		}
+		return nil, mapArtifactQueryError(err)
+	}
+	return append([]byte(nil), content...), nil
+}
+
+func setArtifactQueryFilter(query url.Values, key, value string) {
+	if value != "" {
+		query.Set(key, value)
+	}
+}
+
+func mapArtifactQueryError(err error) error {
+	if err == nil {
+		return nil
+	}
+	var owner error
+	switch {
+	case errors.Is(err, domain.ErrNotFound), errors.Is(err, ErrArtifactsNotFound):
+		owner = artifacts.ErrNotFound
+	case errors.Is(err, domain.ErrInvalid), errors.Is(err, ErrArtifactsInvalid):
+		owner = artifacts.ErrInvalid
+	default:
+		owner = artifacts.ErrUnavailable
+	}
+	return fmt.Errorf("artifact query: %w", errors.Join(owner, err))
 }

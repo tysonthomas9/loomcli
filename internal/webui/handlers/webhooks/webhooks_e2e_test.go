@@ -30,6 +30,7 @@ import (
 	driverpkg "github.com/tysonthomas9/loomcli/internal/driver"
 	"github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
 	workflowauthoring "github.com/tysonthomas9/loomcli/internal/infra/workflowdistribution/authoring"
+	connectorsmodule "github.com/tysonthomas9/loomcli/internal/modules/connectors"
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 	"github.com/tysonthomas9/loomcli/internal/netutil"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
@@ -341,6 +342,7 @@ func (e *githubWebhookE2E) registerGitHubDriver() *automation.Binding {
 		route    = "github.pull_request.opened"
 		secret   = "e2e-webhook-secret"
 	)
+	e.createGitHubConnector(ctx, secret)
 	driver, err := e.fleetClient.Drivers().Create(ctx, store.DriverCreate{
 		WorkspaceKey: e.workspace,
 		DriverID:     driverID,
@@ -391,7 +393,6 @@ func (e *githubWebhookE2E) registerGitHubDriver() *automation.Binding {
 		DriverID:         driverID,
 		DriverVersionID:  version,
 		TargetEntrypoint: "run",
-		WebhookSecret:    secret,
 		Enabled:          true,
 	})
 	if err != nil && !errors.Is(err, domain.ErrAlreadyExists) {
@@ -403,17 +404,18 @@ func (e *githubWebhookE2E) registerGitHubDriver() *automation.Binding {
 			e.t.Fatalf("load existing trigger binding: %v", err)
 		}
 	}
-	if binding.WebhookSecret != "" {
-		e.t.Fatalf("trigger binding leaked webhook_secret on read: %+v", binding)
-	}
-	resolved, err := e.fleetClient.TriggerBindings().ResolveWebhookSecret(ctx, e.workspace, binding.BindingID)
-	if err != nil {
-		e.t.Fatalf("resolve webhook secret: %v", err)
-	}
-	if resolved != secret {
-		e.t.Fatalf("resolved webhook secret = %q, want %q", resolved, secret)
-	}
 	return binding
+}
+
+func (e *githubWebhookE2E) createGitHubConnector(ctx context.Context, secret string) {
+	e.t.Helper()
+	if _, err := e.fleetClient.Connectors().CreateConnectorRecord(ctx, connectorsmodule.CreateConnectorMutation{
+		WorkspaceKey: e.workspace, ConnectorID: "github-main", SourceKind: connectorsmodule.ConnectorSourceGitHub,
+		DisplayName: "GitHub", InboundEndpointPath: "/webhooks/github", InboundSecret: secret,
+		Status: connectorsmodule.ConnectorStatusActive, CreatedBy: e.actor,
+	}); err != nil {
+		e.t.Fatalf("create GitHub connector: %v", err)
+	}
 }
 
 func (e *githubWebhookE2E) writeLiveGitHubReviewDist() {
@@ -630,6 +632,7 @@ func (e *githubWebhookE2E) registerLiveGitHubDriver(live liveGitHubPR) *automati
 	if err != nil {
 		e.t.Fatalf("register live GitHub driver: %v", err)
 	}
+	e.createGitHubConnector(ctx, "e2e-webhook-secret")
 
 	binding, err := e.fleetClient.TriggerBindings().Create(ctx, store.TriggerBindingCreate{
 		WorkspaceKey:     e.workspace,
@@ -640,14 +643,10 @@ func (e *githubWebhookE2E) registerLiveGitHubDriver(live liveGitHubPR) *automati
 		DriverID:         registered.Driver.DriverID,
 		DriverVersionID:  registered.Version.VersionID,
 		TargetEntrypoint: "run",
-		WebhookSecret:    "e2e-webhook-secret",
 		Enabled:          true,
 	})
 	if err != nil {
 		e.t.Fatalf("create live trigger binding: %v", err)
-	}
-	if binding.WebhookSecret != "" {
-		e.t.Fatalf("live trigger binding leaked webhook_secret on read: %+v", binding)
 	}
 	return binding
 }

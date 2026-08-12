@@ -20,7 +20,7 @@ const (
 // NewWorkItems wraps the existing workspace-aware FleetDB backend provider in
 // the narrow Work Items durable port. Persistence translation stays at
 // composition; policy lives in the capability service.
-func NewWorkItems(provider func(context.Context) backend.IssueBackend) (workitems.API, error) {
+func NewWorkItems(provider func(context.Context) backend.IssueBackend) (*workitems.Service, error) {
 	if provider == nil {
 		return nil, nil
 	}
@@ -115,6 +115,24 @@ func (s *workItemsBackendStore) List(ctx context.Context, filter workitems.ListF
 		return nil, translateWorkItemsBackendError(err)
 	}
 	return workItemSummaries(values), nil
+}
+
+func (s *workItemsBackendStore) Stats(ctx context.Context) (*workitems.Stats, error) {
+	be, err := s.backend(ctx)
+	if err != nil {
+		return nil, err
+	}
+	ctx, cancel := context.WithTimeout(ctx, workItemOperationTimeout)
+	defer cancel()
+	value, err := be.Stats(ctx)
+	if err != nil {
+		return nil, translateWorkItemsBackendError(err)
+	}
+	if value == nil {
+		return nil, workitems.ErrInvalidPersistedState
+	}
+	out := workitems.Stats(*value)
+	return &out, nil
 }
 
 func (s *workItemsBackendStore) Blocked(ctx context.Context, query workitems.AvailabilityQuery) ([]workitems.IssueSummary, error) {

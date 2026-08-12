@@ -1044,7 +1044,7 @@ func TestCheckStaleSessionRecords_NoSessions(t *testing.T) {
 	doctorFix = false
 	t.Cleanup(func() { doctorFix = origFix })
 
-	result := checkStaleSessionRecords()
+	result := checkStaleSessionRecords(t.Context())
 	if result.Status != StatusPass {
 		t.Errorf("expected pass for no sessions, got %v: %s", result.Status, result.Summary)
 	}
@@ -1070,7 +1070,7 @@ func TestCheckStaleSessionRecords_HalfWritten(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result := checkStaleSessionRecords()
+	result := checkStaleSessionRecords(t.Context())
 	if result.Status != StatusWarn {
 		t.Errorf("expected warn, got %v: %s", result.Status, result.Summary)
 	}
@@ -1099,7 +1099,7 @@ func TestCheckStaleSessionRecords_HalfWrittenFixMode(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result := checkStaleSessionRecords()
+	result := checkStaleSessionRecords(t.Context())
 	if result.Status != StatusPass {
 		t.Errorf("expected pass after fix, got %v: %s", result.Status, result.Summary)
 	}
@@ -1141,7 +1141,7 @@ func TestCheckStaleSessionRecords_OrphanedDir(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result := checkStaleSessionRecords()
+	result := checkStaleSessionRecords(t.Context())
 	if result.Status != StatusWarn {
 		t.Errorf("expected warn, got %v: %s", result.Status, result.Summary)
 	}
@@ -1185,13 +1185,13 @@ func TestCheckStaleSessionRecords_OrphanedDirFixMode(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result := checkStaleSessionRecords()
+	result := checkStaleSessionRecords(t.Context())
 	if result.Status != StatusPass {
 		t.Errorf("expected pass after fix, got %v: %s", result.Status, result.Summary)
 	}
 
 	// Verify the session was re-indexed (should now appear in queries)
-	store, err := sessions.NewStore(dir)
+	store, err := sessions.NewStore(t.Context(), dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1220,7 +1220,7 @@ func TestCheckStaleSessionRecords_LeftoverTmp(t *testing.T) {
 	t.Cleanup(func() { doctorFix = origFix })
 
 	// Create a proper session via the store so it's in the index
-	store, err := sessions.NewStore(dir)
+	store, err := sessions.NewStore(t.Context(), dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1240,7 +1240,7 @@ func TestCheckStaleSessionRecords_LeftoverTmp(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result := checkStaleSessionRecords()
+	result := checkStaleSessionRecords(t.Context())
 	if result.Status != StatusWarn {
 		t.Errorf("expected warn, got %v: %s", result.Status, result.Summary)
 	}
@@ -1258,7 +1258,7 @@ func TestCheckStaleSessionRecords_LeftoverTmpFixMode(t *testing.T) {
 	t.Cleanup(func() { doctorFix = origFix })
 
 	// Create a proper session via the store so it's in the index
-	store, err := sessions.NewStore(dir)
+	store, err := sessions.NewStore(t.Context(), dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1279,7 +1279,7 @@ func TestCheckStaleSessionRecords_LeftoverTmpFixMode(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result := checkStaleSessionRecords()
+	result := checkStaleSessionRecords(t.Context())
 	if result.Status != StatusPass {
 		t.Errorf("expected pass after fix, got %v: %s", result.Status, result.Summary)
 	}

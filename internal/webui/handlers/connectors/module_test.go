@@ -19,6 +19,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/localsettings"
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
+	connectorsmodule "github.com/tysonthomas9/loomcli/internal/modules/connectors"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
@@ -206,11 +207,11 @@ func TestCreateConnectorSynchronizesRotatedRuntimeCredential(t *testing.T) {
 	if status != http.StatusOK {
 		t.Fatalf("rotated ensure: status = %d body=%s", status, raw)
 	}
-	rotated, err := st.Connectors().Get(context.Background(), "WS", "github")
+	rotated, err := st.Connectors().GetConnectorRecord(context.Background(), "WS", "github")
 	if err != nil {
 		t.Fatalf("get rotated connector: %v", err)
 	}
-	sealed, err := st.Connectors().ResolveOutboundCredentialSealed(context.Background(), "WS", "github")
+	sealed, err := st.Connectors().ResolveOutboundCredentialSealedRecord(context.Background(), "WS", "github")
 	if err != nil {
 		t.Fatalf("resolve rotated credential: %v", err)
 	}
@@ -233,7 +234,7 @@ func TestCreateConnectorSynchronizesRotatedRuntimeCredential(t *testing.T) {
 	if status != http.StatusOK {
 		t.Fatalf("idempotent rotated ensure: status = %d body=%s", status, raw)
 	}
-	unchanged, err := st.Connectors().Get(context.Background(), "WS", "github")
+	unchanged, err := st.Connectors().GetConnectorRecord(context.Background(), "WS", "github")
 	if err != nil {
 		t.Fatalf("get unchanged connector: %v", err)
 	}
@@ -350,8 +351,8 @@ func seedGrantReplacementFixture(t *testing.T) (store.Store, *automation.Binding
 	}); err != nil {
 		t.Fatalf("create driver version: %v", err)
 	}
-	if _, err := st.Connectors().Create(ctx, store.ConnectorCreate{
-		WorkspaceKey: "WS", ConnectorID: "github", SourceKind: domain.ConnectorSourceGitHub,
+	if _, err := st.Connectors().CreateConnectorRecord(ctx, connectorsmodule.CreateConnectorMutation{
+		WorkspaceKey: "WS", ConnectorID: "github", SourceKind: connectorsmodule.ConnectorSourceGitHub,
 	}); err != nil {
 		t.Fatalf("create connector: %v", err)
 	}
@@ -441,7 +442,7 @@ func TestReplaceBindingGrantsRetargetsWithoutRetainingOldScope(t *testing.T) {
 	if retargeted.GrantsRevoked != 3 || len(retargeted.Grants) != 3 {
 		t.Fatalf("retargeted replace = %+v, want 3 replacements and 3 revoked", retargeted)
 	}
-	active, err := st.ConnectorGrants().ListByBinding(context.Background(), "WS", binding.BindingID)
+	active, err := st.Connectors().ListGrantRecordsByBinding(context.Background(), "WS", binding.BindingID)
 	if err != nil {
 		t.Fatalf("list retargeted grants: %v", err)
 	}
@@ -534,7 +535,7 @@ func TestReplaceBindingGrantsRequiresExactDisabledRevisionBeforeMutation(t *test
 	if status != http.StatusConflict {
 		t.Fatalf("enabled replace: status = %d, want 409 (body %s)", status, raw)
 	}
-	active, err := st.ConnectorGrants().ListByBinding(context.Background(), "WS", binding.BindingID)
+	active, err := st.Connectors().ListGrantRecordsByBinding(context.Background(), "WS", binding.BindingID)
 	if err != nil {
 		t.Fatalf("list after rejected replace: %v", err)
 	}
@@ -567,11 +568,11 @@ func TestReplaceBindingGrantsUsesCanonicalWorkspaceContext(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("canonical workspace replace: status = %d, want 200 (body %s)", rec.Code, rec.Body.String())
 	}
-	grants, err := st.ConnectorGrants().ListByBinding(context.Background(), "WS", binding.BindingID)
+	grants, err := st.Connectors().ListGrantRecordsByBinding(context.Background(), "WS", binding.BindingID)
 	if err != nil || len(grants) != 3 {
 		t.Fatalf("canonical workspace grants = %+v err=%v, want 3", grants, err)
 	}
-	aliasGrants, err := st.ConnectorGrants().ListByBinding(context.Background(), "WORKSPACE-ALIAS", binding.BindingID)
+	aliasGrants, err := st.Connectors().ListGrantRecordsByBinding(context.Background(), "WORKSPACE-ALIAS", binding.BindingID)
 	if err != nil || len(aliasGrants) != 0 {
 		t.Fatalf("alias workspace grants = %+v err=%v, want none", aliasGrants, err)
 	}

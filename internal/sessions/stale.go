@@ -3,8 +3,6 @@ package sessions
 import (
 	"fmt"
 	"time"
-
-	"github.com/tysonthomas9/loomcli/internal/runtimectx"
 )
 
 // StaleSessionThreshold is the duration after which a running session
@@ -46,7 +44,7 @@ func (s *Store) healStaleRecords(records []SessionRecord) ([]SessionRecord, int)
 // new agents launch. During normal operation, Query() performs the same
 // healing lazily.
 func (s *Store) SweepOrphans() (int, error) {
-	_, span := startSpan(runtimectx.RootContext(), "service.Sessions.SweepOrphans")
+	_, span := startSpan(s.ctx, "service.Sessions.SweepOrphans")
 	defer span.End()
 
 	records, err := s.readDedupedIndex(Filter{})

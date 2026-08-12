@@ -1,7 +1,9 @@
 package sessions
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -10,7 +12,6 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/lockfile"
-	"github.com/tysonthomas9/loomcli/internal/runtimectx"
 )
 
 const (
@@ -22,6 +23,7 @@ const (
 // Each session gets its own subdirectory containing metadata.json,
 // transcript.jsonl, and prompt.txt.
 type Store struct {
+	ctx context.Context
 	dir string // absolute path to <runtimeDir>/sessions/
 }
 
@@ -40,8 +42,11 @@ func (s *Store) SessionDir(sessionID string) string {
 
 // NewStore creates a Store rooted at runtimeDir/sessions/.
 // It creates the sessions/ directory if it does not exist.
-func NewStore(runtimeDir string) (*Store, error) {
-	_, span := startSpan(runtimectx.RootContext(), "service.Sessions.NewStore")
+func NewStore(ctx context.Context, runtimeDir string) (*Store, error) {
+	if ctx == nil {
+		return nil, errors.New("sessions: context is required")
+	}
+	_, span := startSpan(ctx, "service.Sessions.NewStore")
 	defer span.End()
 
 	dir := filepath.Join(runtimeDir, "sessions")
@@ -49,14 +54,14 @@ func NewStore(runtimeDir string) (*Store, error) {
 		recordErr(span, err)
 		return nil, fmt.Errorf("create sessions dir: %w", err)
 	}
-	return &Store{dir: dir}, nil
+	return &Store{ctx: ctx, dir: dir}, nil
 }
 
 // CreateSession initializes a new session directory with prompt.txt and
 // metadata.json (status=running). Returns a Session handle for the caller
 // to use during the agent run.
 func (s *Store) CreateSession(opts CreateOptions) (*Session, error) {
-	_, span := startSpan(runtimectx.RootContext(), "service.Sessions.CreateSession",
+	_, span := startSpan(s.ctx, "service.Sessions.CreateSession",
 		attrLoomAgent(opts.AgentName),
 		attrLoomBackend(opts.Backend),
 	)
@@ -118,7 +123,7 @@ func initialSessionMetadata(sid string, opts CreateOptions) SessionMetadata {
 // daemon-created parent session be filled by the child CLI after it renders the
 // final role/task prompt.
 func (s *Store) UpdatePrompt(sessionID, prompt string) error {
-	_, span := startSpan(runtimectx.RootContext(), "service.Sessions.UpdatePrompt",
+	_, span := startSpan(s.ctx, "service.Sessions.UpdatePrompt",
 		attrLoomSessionID(sessionID),
 	)
 	defer span.End()
@@ -148,7 +153,7 @@ func (s *Store) UpdatePrompt(sessionID, prompt string) error {
 // The Seq field is auto-assigned from a counter file (seq) in the session
 // directory, ensuring monotonic ordering even across concurrent processes.
 func (s *Store) AppendTranscript(sessionID string, entry TranscriptEntry) error {
-	_, span := startSpan(runtimectx.RootContext(), "service.Sessions.AppendTranscript",
+	_, span := startSpan(s.ctx, "service.Sessions.AppendTranscript",
 		attrLoomSessionID(sessionID),
 	)
 	defer span.End()
@@ -231,7 +236,7 @@ func readAndIncrementSeq(sessDir string) int {
 // specified session. This is used by hook handlers to patch metadata (e.g.,
 // token usage) outside of the normal Finalize flow.
 func (s *Store) SaveMetadata(sessionID string, meta *SessionMetadata) error {
-	_, span := startSpan(runtimectx.RootContext(), "service.Sessions.SaveMetadata",
+	_, span := startSpan(s.ctx, "service.Sessions.SaveMetadata",
 		attrLoomSessionID(sessionID),
 	)
 	defer span.End()

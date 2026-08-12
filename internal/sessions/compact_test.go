@@ -10,7 +10,7 @@ import (
 
 func TestCompactIndex_Empty(t *testing.T) {
 	dir := t.TempDir()
-	store, err := NewStore(dir)
+	store, err := NewStore(t.Context(), dir)
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}
@@ -26,7 +26,7 @@ func TestCompactIndex_Empty(t *testing.T) {
 
 func TestCompactIndex_NoDuplicates(t *testing.T) {
 	dir := t.TempDir()
-	store, err := NewStore(dir)
+	store, err := NewStore(t.Context(), dir)
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}
@@ -60,7 +60,7 @@ func TestCompactIndex_NoDuplicates(t *testing.T) {
 
 func TestCompactIndex_RemovesDuplicates(t *testing.T) {
 	dir := t.TempDir()
-	store, err := NewStore(dir)
+	store, err := NewStore(t.Context(), dir)
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}
@@ -122,7 +122,7 @@ func TestCompactIndex_RemovesDuplicates(t *testing.T) {
 
 func TestCompactIndex_RemovesOrphanedEntries(t *testing.T) {
 	dir := t.TempDir()
-	store, err := NewStore(dir)
+	store, err := NewStore(t.Context(), dir)
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}
@@ -172,7 +172,7 @@ func TestCompactIndex_RemovesOrphanedEntries(t *testing.T) {
 
 func TestCompactIndex_CorruptLines(t *testing.T) {
 	dir := t.TempDir()
-	store, err := NewStore(dir)
+	store, err := NewStore(t.Context(), dir)
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}
@@ -218,7 +218,7 @@ func TestCompactIndex_CorruptLines(t *testing.T) {
 
 func TestCompactIndex_PreservesRunning(t *testing.T) {
 	dir := t.TempDir()
-	store, err := NewStore(dir)
+	store, err := NewStore(t.Context(), dir)
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}
@@ -249,7 +249,7 @@ func TestCompactIndex_PreservesRunning(t *testing.T) {
 
 func TestCompactIndex_MixedDuplicatesAndOrphans(t *testing.T) {
 	dir := t.TempDir()
-	store, err := NewStore(dir)
+	store, err := NewStore(t.Context(), dir)
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}
@@ -310,7 +310,7 @@ func TestCompactIndex_MixedDuplicatesAndOrphans(t *testing.T) {
 
 func TestCompactIndex_Idempotent(t *testing.T) {
 	dir := t.TempDir()
-	store, err := NewStore(dir)
+	store, err := NewStore(t.Context(), dir)
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}
@@ -352,7 +352,7 @@ func TestCompactIndex_Idempotent(t *testing.T) {
 
 func TestCompactIndex_PreservesRecordData(t *testing.T) {
 	dir := t.TempDir()
-	store, err := NewStore(dir)
+	store, err := NewStore(t.Context(), dir)
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}
@@ -422,7 +422,7 @@ func TestCompactIndex_PreservesRecordData(t *testing.T) {
 
 func TestCountIndexEntries(t *testing.T) {
 	dir := t.TempDir()
-	store, err := NewStore(dir)
+	store, err := NewStore(t.Context(), dir)
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}
@@ -459,7 +459,7 @@ func TestCountIndexEntries(t *testing.T) {
 
 func TestCountIndexEntries_CorruptLinesCountedInTotal(t *testing.T) {
 	dir := t.TempDir()
-	store, err := NewStore(dir)
+	store, err := NewStore(t.Context(), dir)
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}

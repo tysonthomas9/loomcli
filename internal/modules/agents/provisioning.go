@@ -68,6 +68,100 @@ func (s *Service) EnsureManagedRole(
 	return cloneRole(existing), nil
 }
 
+// RepairManagedRolePromptFile atomically converges the one mutable field that
+// older built-in Roles may lack. The Agents owner performs the empty-value
+// policy and uses its existing optimistic Role revision; persistence exposes
+// no repair-specific or compatibility interface.
+func (s *Service) RepairManagedRolePromptFile(
+	ctx context.Context,
+	auth authority.SystemAuthority,
+	command RepairManagedRolePromptFileCommand,
+) (*Role, bool, error) {
+	command, err := normalizeManagedRolePromptRepair(command)
+	if err != nil {
+		return nil, false, err
+	}
+	if err := s.requireSystem(ActionRepairManagedRolePromptFile, command.WorkspaceKey, auth); err != nil {
+		return nil, false, err
+	}
+	if s == nil || s.roleStore == nil {
+		return nil, false, ErrUnavailable
+	}
+
+	current, err := s.roleStore.GetRole(ctx, command.WorkspaceKey, command.RoleName)
+	if err != nil {
+		return nil, false, fmt.Errorf("get managed role %q for prompt repair: %w", command.RoleName, err)
+	}
+	if err := validatePersistedRole(current, command.WorkspaceKey, command.RoleName); err != nil {
+		return nil, false, err
+	}
+	if current.PromptFile == command.PromptFile {
+		return cloneRole(current), false, nil
+	}
+	if current.PromptFile != "" {
+		return nil, false, ErrConflict
+	}
+
+	promptFile := command.PromptFile
+	updated, err := s.roleStore.UpdateRole(ctx, UpdateRoleMutation{
+		WorkspaceKey:      command.WorkspaceKey,
+		RoleName:          command.RoleName,
+		ExpectedUpdatedAt: current.UpdatedAt,
+		Patch:             RolePatch{PromptFile: &promptFile},
+		UpdatedBy:         auth.Subject(),
+	})
+	if err == nil {
+		if err := validatePersistedRole(updated, command.WorkspaceKey, command.RoleName); err != nil {
+			return nil, false, err
+		}
+		if updated.PromptFile != command.PromptFile || !updated.UpdatedAt.After(current.UpdatedAt) {
+			return nil, false, ErrInvalidPersistedState
+		}
+		return cloneRole(updated), true, nil
+	}
+	if !errors.Is(err, ErrConflict) {
+		return nil, false, fmt.Errorf("repair managed role %q prompt file: %w", command.RoleName, err)
+	}
+	return s.resolveManagedRolePromptRepairRace(ctx, command, err)
+}
+
+func (s *Service) resolveManagedRolePromptRepairRace(
+	ctx context.Context,
+	command RepairManagedRolePromptFileCommand,
+	updateErr error,
+) (*Role, bool, error) {
+	winner, getErr := s.roleStore.GetRole(ctx, command.WorkspaceKey, command.RoleName)
+	if getErr != nil {
+		return nil, false, errors.Join(updateErr, fmt.Errorf("read prompt repair winner: %w", getErr))
+	}
+	if err := validatePersistedRole(winner, command.WorkspaceKey, command.RoleName); err != nil {
+		return nil, false, err
+	}
+	if winner.PromptFile != command.PromptFile {
+		return nil, false, ErrConflict
+	}
+	return cloneRole(winner), false, nil
+}
+
+func normalizeManagedRolePromptRepair(
+	command RepairManagedRolePromptFileCommand,
+) (RepairManagedRolePromptFileCommand, error) {
+	var err error
+	command.RequestID, err = requireCanonical("request id", command.RequestID)
+	if err != nil {
+		return RepairManagedRolePromptFileCommand{}, err
+	}
+	command.WorkspaceKey, command.RoleName, err = normalizeRoleIdentity(command.WorkspaceKey, command.RoleName)
+	if err != nil {
+		return RepairManagedRolePromptFileCommand{}, err
+	}
+	command.PromptFile, err = requireCanonical("prompt file", command.PromptFile)
+	if err != nil {
+		return RepairManagedRolePromptFileCommand{}, err
+	}
+	return command, nil
+}
+
 // EnsureManagedAgent converges one exact Agent identity. Desired-state changes
 // after provisioning remain explicit commands; this method only admits the
 // immutable initial intent or an exact replay of it.

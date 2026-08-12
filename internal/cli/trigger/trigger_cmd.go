@@ -38,7 +38,6 @@ var (
 	bindCreateWorkflow  string
 	bindCreateDriver    string
 	bindCreateVersion   string
-	bindCreateSecret    string
 	bindCreateName      string
 	bindCreateSource    string
 	bindCreateBindingID string
@@ -324,11 +323,6 @@ func runBindingsCreate(cmd *cobra.Command, _ []string) error {
 	if driverRef == "" {
 		return fmt.Errorf("one of --driver or --workflow is required")
 	}
-	// An enabled github binding with no secret rejects every signed webhook
-	// (HMAC verification fails on an empty secret), so refuse to create one.
-	if source == "github" && !bindCreateDisabled && strings.TrimSpace(bindCreateSecret) == "" {
-		return fmt.Errorf("enabled github bindings require --secret (or pass --disabled to create it inactive)")
-	}
 	if err := bindCreateRouter.validateForCreate(source); err != nil {
 		return err
 	}
@@ -363,7 +357,6 @@ func newBindingCreateRequest(routeKey, source string) triggerBindingCreateReques
 		DriverVersionID:     strings.TrimSpace(bindCreateVersion),
 		Entrypoint:          strings.TrimSpace(bindCreateEntry),
 		ConcurrencyPolicy:   automation.BindingConcurrencyPolicy(strings.TrimSpace(bindCreateRouter.concurrencyPolicy)),
-		Secret:              bindCreateSecret,
 		SubjectKeyTemplate:  strings.TrimSpace(bindCreateRouter.subjectKeyTemplate),
 		ActorFilter:         bindCreateRouter.actorFilter(),
 		RetryMaxAttempts:    bindCreateRouter.retryMaxAttempts,
@@ -679,7 +672,6 @@ func init() {
 	bindingsCreateCmd.Flags().StringVar(&bindCreateWorkflow, "workflow", "", "workflow name backing the driver")
 	bindingsCreateCmd.Flags().StringVar(&bindCreateDriver, "driver", "", "driver id or name (alternative to --workflow)")
 	bindingsCreateCmd.Flags().StringVar(&bindCreateVersion, "driver-version", "", "pin a specific driver version id (default: active version)")
-	bindingsCreateCmd.Flags().StringVar(&bindCreateSecret, "secret", "", "webhook HMAC secret for signature verification")
 	bindingsCreateCmd.Flags().StringVar(&bindCreateName, "name", "", "binding display name (default: route key)")
 	bindingsCreateCmd.Flags().StringVar(&bindCreateSource, "source", "github", "source kind")
 	bindingsCreateCmd.Flags().StringVar(&bindCreateBindingID, "binding-id", "", "binding id (default: derived from route key)")

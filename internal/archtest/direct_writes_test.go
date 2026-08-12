@@ -14,15 +14,15 @@ func TestCheckedInDirectWriteInventoryStrictCounts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(inventory.Writes) != 98 {
-		t.Fatalf("direct-write rows = %d, want current migration ratchet of 98", len(inventory.Writes))
+	if len(inventory.Writes) != 86 {
+		t.Fatalf("direct-write rows = %d, want current migration ratchet of 86", len(inventory.Writes))
 	}
 	totalSites := 0
 	for _, use := range inventory.Writes {
 		totalSites += use.Count
 	}
-	if totalSites != 107 {
-		t.Fatalf("direct-write sites = %d, want current migration ratchet of 107", totalSites)
+	if totalSites != 95 {
+		t.Fatalf("direct-write sites = %d, want current migration ratchet of 95", totalSites)
 	}
 	if err := inventory.ValidateCompletedPhase(7); err != nil {
 		t.Fatalf("checked-in inventory is not ready for Phase 7 completion: %v", err)
@@ -46,6 +46,24 @@ func TestSnapshotDirectWritesTypeResolvesStoreInterface(t *testing.T) {
 	}
 	if use.Count != 1 {
 		t.Fatalf("direct write count = %d, want one source call across two profiles", use.Count)
+	}
+}
+
+func TestSnapshotDirectWritesAcceptsExactAdapterFile(t *testing.T) {
+	root := directWriteFixture(t)
+	writeGoFile(t, root, "internal/cli/other.go", `package cli
+import "github.com/tysonthomas9/loomcli/internal/store"
+func otherWrite(s store.WorkspaceStore) error { return s.Create("outside-exact-adapter") }
+`)
+	matrix := oneDirectWriteProfile()
+	inventory := directWriteTestInventory(matrix)
+	inventory.AdapterRoots = []string{"internal/cli/write.go"}
+	uses, err := SnapshotDirectWrites(root, matrix, inventory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(uses) != 1 || uses[0].File != "internal/cli/write.go" || uses[0].Method != "Create" {
+		t.Fatalf("direct writes = %+v, want only the exact adapter file", uses)
 	}
 }
 
@@ -698,7 +716,6 @@ func genericMechanismTestPolicies() []GenericMechanismUse {
 		{Mechanism: "action_ledger", AllowedAdapterRoots: []string{"internal/modules/execution/fleetdb"}},
 		{Mechanism: "lease", AllowedAdapterRoots: []string{
 			"internal/modules/agents/fleetdb",
-			"internal/modules/artifacts/fleetdb",
 			"internal/modules/execution/fleetdb",
 			"internal/modules/interaction/fleetdb",
 		}},

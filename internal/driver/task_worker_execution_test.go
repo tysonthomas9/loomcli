@@ -1,6 +1,7 @@
 package driver
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"reflect"
@@ -100,7 +101,12 @@ func (taskWorkerTestAuthorities) ResolveDriverRunAuthority(context.Context, stri
 	return authority.ExecutionAuthority{}, nil
 }
 
-func wireTaskWorkerTestExecution(worker *TaskWorker, st store.Store) {
+type taskWorkerTestStore interface {
+	store.Store
+	bridgeArtifactFixtureStore
+}
+
+func wireTaskWorkerTestExecution(worker *TaskWorker, st taskWorkerTestStore) {
 	adapter := taskWorkerTestExecution{store: st}
 	worker.Execution = adapter
 	worker.TaskRunAuthorities = taskWorkerTestAuthorities{}
@@ -130,6 +136,9 @@ func wireExecutorTestExecution(executor *Executor, st store.Store) {
 
 func testExecutor(st store.Store, value Executor) *Executor {
 	executor := &value
+	if len(executor.RunTokenKey) == 0 {
+		executor.RunTokenKey = bytes.Repeat([]byte{0x42}, 32)
+	}
 	wireExecutorTestExecution(executor, st)
 	return executor
 }

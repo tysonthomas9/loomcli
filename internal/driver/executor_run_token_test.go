@@ -16,32 +16,22 @@ import (
 // memstore with an injected recording runner (no workflow process is ever
 // spawned — the loomExecutablePath fork-bomb lesson) and verifies the token
 // minted at claim time is bound to the claimed lease + fence with the locked
-// TTL semantics (max run duration: default 24h, LOOM_RUN_TOKEN_TTL knob,
-// invalid knob degrades to the default instead of failing the run).
+// TTL semantics (max run duration: default 24h and LOOM_RUN_TOKEN_TTL knob).
 func TestExecutorRunOnceMintsRunTokenAtClaim(t *testing.T) {
 	key := bytes.Repeat([]byte{0x42}, 32)
 	cases := []struct {
-		name      string
-		key       []byte
-		ttlEnv    string
-		wantToken bool
-		wantTTL   time.Duration
+		name    string
+		key     []byte
+		ttlEnv  string
+		wantTTL time.Duration
 	}{
-		{name: "default ttl is max run duration", key: key, ttlEnv: "", wantToken: true, wantTTL: DefaultRunTokenTTL},
-		{name: "ttl env knob overrides", key: key, ttlEnv: "45m", wantToken: true, wantTTL: 45 * time.Minute},
-		{name: "invalid ttl env degrades to default", key: key, ttlEnv: "not-a-duration", wantToken: true, wantTTL: DefaultRunTokenTTL},
-		{name: "nil key disables minting", key: nil, ttlEnv: "", wantToken: false},
+		{name: "default ttl is max run duration", key: key, ttlEnv: "", wantTTL: DefaultRunTokenTTL},
+		{name: "ttl env knob overrides", key: key, ttlEnv: "45m", wantTTL: 45 * time.Minute},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Setenv(RunTokenTTLEnv, tc.ttlEnv)
 			runner, claimed := runOnceWithRunTokenKey(t, tc.key)
-			if !tc.wantToken {
-				if runner.req.RunToken != "" {
-					t.Fatalf("RunToken = %q, want empty without RunTokenKey", runner.req.RunToken)
-				}
-				return
-			}
 			if runner.req.RunToken == "" {
 				t.Fatal("RunToken empty, want minted token")
 			}
@@ -57,9 +47,51 @@ func TestExecutorRunOnceMintsRunTokenAtClaim(t *testing.T) {
 	}
 }
 
+func TestExecutorRunOnceFailsClosedWithoutRunTokenKey(t *testing.T) {
+	runner, result, err := runOnceWithRunTokenKeyResult(t, nil)
+	if err != nil {
+		t.Fatalf("RunOnce: %v", err)
+	}
+	if runner.calls != 0 {
+		t.Fatalf("runner calls = %d, want 0 when run-token signing is unavailable", runner.calls)
+	}
+	if result == nil || result.Final == nil || result.Final.Status != domain.DriverRunFailed {
+		t.Fatalf("result = %+v, want terminal failed run", result)
+	}
+}
+
+func TestExecutorRunOnceFailsClosedWithInvalidRunTokenTTL(t *testing.T) {
+	t.Setenv(RunTokenTTLEnv, "not-a-duration")
+	runner, result, err := runOnceWithRunTokenKeyResult(t, bytes.Repeat([]byte{0x42}, 32))
+	if err != nil {
+		t.Fatalf("RunOnce: %v", err)
+	}
+	if runner.calls != 0 {
+		t.Fatalf("runner calls = %d, want 0 with invalid run-token TTL", runner.calls)
+	}
+	if result == nil || result.Final == nil || result.Final.Status != domain.DriverRunFailed {
+		t.Fatalf("result = %+v, want terminal failed run", result)
+	}
+}
+
 // runOnceWithRunTokenKey registers a Flue driver, queues one run and executes
 // RunOnce with a recording runner, returning the runner and the claimed run.
 func runOnceWithRunTokenKey(t *testing.T, key []byte) (*recordingRunner, *domain.DriverRun) {
+	t.Helper()
+	runner, result, err := runOnceWithRunTokenKeyResult(t, key)
+	if err != nil {
+		t.Fatalf("RunOnce: %v", err)
+	}
+	if runner.calls != 1 {
+		t.Fatalf("runner calls = %d, want 1", runner.calls)
+	}
+	if result.Claimed == nil || result.Claimed.LeaseID != "lease-1" || result.Claimed.FencingToken == 0 {
+		t.Fatalf("claimed = %+v, want lease-1 with fencing token", result.Claimed)
+	}
+	return runner, result.Claimed
+}
+
+func runOnceWithRunTokenKeyResult(t *testing.T, key []byte) (*recordingRunner, *ExecutionResult, error) {
 	t.Helper()
 	ctx := context.Background()
 	root := t.TempDir()
@@ -76,7 +108,7 @@ func runOnceWithRunTokenKey(t *testing.T, key []byte) (*recordingRunner, *domain
 		t.Fatalf("CreateDriverRun: %v", err)
 	}
 	runner := &recordingRunner{result: RunResult{Status: domain.DriverRunCompleted, Summary: "driver completed"}}
-	result, err := testExecutor(st, Executor{
+	executor := testExecutor(st, Executor{
 		Store:             st,
 		WorkspaceKey:      "TEST",
 		WorkDir:           root,
@@ -85,17 +117,10 @@ func runOnceWithRunTokenKey(t *testing.T, key []byte) (*recordingRunner, *domain
 		Runner:            runner,
 		RunTokenKey:       key,
 		HeartbeatInterval: -1,
-	}).RunOnce(ctx)
-	if err != nil {
-		t.Fatalf("RunOnce: %v", err)
-	}
-	if runner.calls != 1 {
-		t.Fatalf("runner calls = %d, want 1", runner.calls)
-	}
-	if result.Claimed == nil || result.Claimed.LeaseID != "lease-1" || result.Claimed.FencingToken == 0 {
-		t.Fatalf("claimed = %+v, want lease-1 with fencing token", result.Claimed)
-	}
-	return runner, result.Claimed
+	})
+	executor.RunTokenKey = key
+	result, err := executor.RunOnce(ctx)
+	return runner, result, err
 }
 
 func assertRunTokenBoundToClaim(t *testing.T, claims *RunTokenClaims, claimed *domain.DriverRun) {
@@ -113,8 +138,8 @@ func assertRunTokenBoundToClaim(t *testing.T, claims *RunTokenClaims, claimed *d
 }
 
 // TestFlueRuntimeEnvInjectsRunToken verifies the env seam: the per-run token
-// rides RunRequest into LOOM_RUN_TOKEN, no token env appears without a mint,
-// and any inherited LOOM_RUN_TOKEN* parent vars (TOKEN fragment) are filtered
+// rides RunRequest into LOOM_RUN_TOKEN, and any inherited LOOM_RUN_TOKEN*
+// parent vars (TOKEN fragment) are filtered
 // so a workflow only ever sees the token minted for its own run.
 func TestFlueRuntimeEnvInjectsRunToken(t *testing.T) {
 	t.Setenv("LOOM_RUN_TOKEN", "stale-parent-token")
@@ -125,7 +150,6 @@ func TestFlueRuntimeEnvInjectsRunToken(t *testing.T) {
 		want     string
 	}{
 		{name: "minted token exported", runToken: "minted.jwt.token", want: "minted.jwt.token"},
-		{name: "no mint no token env", runToken: "", want: ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

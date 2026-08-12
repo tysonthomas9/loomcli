@@ -27,6 +27,7 @@ function newClient(apiUrl, input = { epicId: "EPIC-1" }) {
     env: {
       LOOM_DRIVER_WORKSPACE: "WS",
       LOOM_DRIVER_RUN_ID: "run-1",
+      LOOM_RUN_TOKEN: "run-token-jwt",
     },
   });
 }

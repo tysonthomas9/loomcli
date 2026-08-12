@@ -65,11 +65,11 @@ type Adapter interface {
 	// malformed requests.
 	Normalize(r *http.Request, body []byte) (NormalizedEvent, error)
 	// PresentedSignature extracts only the caller-provided proof. Server-side
-	// secret material stays inside CompatibilityVerifier and never enters the
+	// secret material stays inside Verifier and never enters the
 	// webhookingestion workflow or Automation.
 	PresentedSignature(r *http.Request) string
 	// VerifySignature checks caller-provided proof against one secret resolved
-	// inside CompatibilityVerifier. Implementations compare in constant time.
+	// inside Verifier. Implementations compare in constant time.
 	VerifySignature(body []byte, presentedSignature, secret string) error
 }
 

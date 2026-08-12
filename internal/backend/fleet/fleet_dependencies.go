@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
-	"github.com/tysonthomas9/loomcli/internal/types"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 )
 
 // fleetDepWire is one row from fleet-db's GET /issues/{id}/deps response. Each
@@ -193,11 +193,11 @@ func (b *FleetBackend) clearBlockedStatusAfterDependencyRemoval(ctx context.Cont
 	if err != nil {
 		return err
 	}
-	if detail == nil || detail.Status != string(types.StatusBlocked) || len(detail.Dependencies) > 0 {
+	if detail == nil || detail.Status != string(workitems.StatusBlocked) || len(detail.Dependencies) > 0 {
 		return nil
 	}
 	_, err = b.exec(ctx, "RemoveDependency", "PATCH", "/issues/"+url.PathEscape(id), map[string]interface{}{
-		"status": string(types.StatusOpen),
+		"status": string(workitems.StatusOpen),
 	})
 	return err
 }

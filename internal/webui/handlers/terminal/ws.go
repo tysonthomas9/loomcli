@@ -17,7 +17,6 @@ import (
 	"go.opentelemetry.io/otel/trace"
 	"nhooyr.io/websocket" //nolint:staticcheck // SA1019: websocket migration tracked separately
 
-	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/modules/agents"
 	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
@@ -407,7 +406,7 @@ func classifyAttachErr(err error, session, workspace string) (websocket.StatusCo
 // the bidirectional relay until the WebSocket closes. On WS close the session
 // is detached (grace period armed); the PTY and child process stay alive.
 //
-//nolint:funlen,staticcheck // Keep the legacy websocket relay, attachment lifecycle, and exact close semantics in one boundary.
+//nolint:funlen,staticcheck // Keep the websocket relay, attachment lifecycle, and exact close semantics in one boundary.
 func runTerminalRelay(
 	reqCtx context.Context,
 	conn *websocket.Conn,
@@ -615,31 +614,20 @@ func ensureWorkspacePTYRegistered(ctx context.Context, p *terminalWSParams, work
 	}
 }
 
-func launchSpecForTerminalSession(ctx context.Context, p *terminalWSParams, workspace, session string) (*webuterminal.LaunchSpec, error) {
-	launch, _, err := resolveTerminalLaunch(ctx, p, workspace, session)
-	return launch, err
-}
-
 func resolveTerminalLaunch(
 	ctx context.Context,
 	p *terminalWSParams,
 	workspace, session string,
 ) (*webuterminal.LaunchSpec, string, error) {
 	if p.tabMetaStore == nil {
-		if isUUIDTerminalSession(session) {
-			return nil, "", errTerminalLaunchMetaMissing
-		}
-		return legacyLaunchSpecForSession(session), "", nil
+		return nil, "", errTerminalLaunchMetaMissing
 	}
 	meta, err := p.tabMetaStore.Get(ctx, workspace, session)
 	if err != nil {
 		return nil, "", fmt.Errorf("load terminal metadata: %w", err)
 	}
 	if meta == nil {
-		if isUUIDTerminalSession(session) {
-			return nil, "", errTerminalLaunchMetaMissing
-		}
-		return legacyLaunchSpecForSession(session), "", nil
+		return nil, "", errTerminalLaunchMetaMissing
 	}
 	if meta.Kind == "agent" {
 		if err := authorizeAgentTerminalLaunch(
@@ -659,10 +647,20 @@ func resolveTerminalLaunch(
 		}
 		return meta.Launch, meta.AgentID, nil
 	}
-	if meta.Launch != nil && (len(meta.Launch.Argv) > 0 || len(meta.Launch.Env) > 0) {
+	if meta.Launch != nil && len(meta.Launch.Argv) > 0 {
 		return meta.Launch, "", nil
 	}
-	return legacyLaunchSpecForSession(session), "", nil
+	// Setup terminals are started by the backend before the browser attaches.
+	// They need persisted placement metadata but no respawn contract while the
+	// exact in-process PTY is alive. After a restart, the PTY is absent and the
+	// missing launch envelope correctly fails closed instead of replaying setup.
+	if p.manager != nil && p.manager.HasSession(webuterminal.SessionKey{
+		Workspace: workspace,
+		Name:      session,
+	}) {
+		return nil, "", nil
+	}
+	return nil, "", errTerminalLaunchMetaMissing
 }
 
 func authorizeAgentTerminalLaunch(
@@ -694,27 +692,6 @@ func authorizeAgentTerminalLaunch(
 		return errAgentTerminalStopped
 	}
 	return nil
-}
-
-func isUUIDTerminalSession(session string) bool {
-	return strings.HasPrefix(session, "term_")
-}
-
-func legacyLaunchSpecForSession(session string) *webuterminal.LaunchSpec {
-	argv := webuterminal.ArgvForSession(session)
-	if len(argv) == 0 {
-		return nil
-	}
-	launch := &webuterminal.LaunchSpec{Argv: argv}
-	// Generic workspace terminals predate durable agent-tab metadata, so they
-	// do not carry a persisted launch envelope. Re-add only the server-resolved
-	// local data directory; PTYManager separately binds LOOM_WORKSPACE from the
-	// workspace-scoped SessionKey. This keeps child `loom` commands on the same
-	// Desktop registry without admitting ambient credentials or product scope.
-	if configDir := strings.TrimSpace(bootstrap.LoomDir()); configDir != "" {
-		launch.Env = map[string]string{"LOOM_CONFIG_DIR": configDir}
-	}
-	return launch
 }
 
 func initialTerminalSizeFromRequest(r *http.Request) (uint16, uint16) {

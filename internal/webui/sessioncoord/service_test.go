@@ -1,7 +1,6 @@
 package sessioncoord
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -17,7 +16,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	artifactsmodule "github.com/tysonthomas9/loomcli/internal/modules/artifacts"
 	"github.com/tysonthomas9/loomcli/internal/sessions"
-	"github.com/tysonthomas9/loomcli/internal/sessions/eventstore"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/apperrors"
 )
@@ -133,7 +131,7 @@ func TestSessionServiceExecutionTaskRunOwnsBatchHistoryAndTranscript(t *testing.
 
 	// A stale local session may also reuse the former Flue shadow ID. It must
 	// never override the canonical TaskRun lifecycle, transcript, or patch.
-	localStore, err := sessions.NewStore(runtimeDir)
+	localStore, err := sessions.NewStore(t.Context(), runtimeDir)
 	if err != nil {
 		t.Fatalf("create local session store: %v", err)
 	}
@@ -268,7 +266,8 @@ func TestSessionServiceExecutionTaskHistoryDoesNotDependOnInteractionSessionList
 		t.Fatalf("create task run: %v", err)
 	}
 	wrapped := &interactionListFailureStore{
-		Store: st,
+		Store:           st,
+		artifactQueries: st.ArtifactQueries(),
 		sessions: &interactionListFailureAgentSessions{
 			AgentSessionStore: st.AgentSessions(),
 		},
@@ -284,11 +283,16 @@ func TestSessionServiceExecutionTaskHistoryDoesNotDependOnInteractionSessionList
 
 type interactionListFailureStore struct {
 	store.Store
-	sessions store.AgentSessionStore
+	sessions        store.AgentSessionStore
+	artifactQueries artifactsmodule.QueryStore
 }
 
 func (s *interactionListFailureStore) AgentSessions() store.AgentSessionStore {
 	return s.sessions
+}
+
+func (s *interactionListFailureStore) ArtifactQueries() artifactsmodule.QueryStore {
+	return s.artifactQueries
 }
 
 type interactionListFailureAgentSessions struct {
@@ -307,16 +311,16 @@ func TestSessionServiceDaemonSessionOwnedTranscriptArtifactReadContent(t *testin
 	ctx := t.Context()
 	st := memstore.New()
 	body := []byte(`{"seq":1,"timestamp":"2026-07-28T12:00:00Z","role":"assistant","type":"text","text":"daemon transcript"}` + "\n")
-	finalized, err := store.UploadContentArtifact(ctx, st.Artifacts(), store.ArtifactCreate{
+	finalized, err := st.SeedArtifact(ctx, artifactsmodule.Artifact{
 		WorkspaceKey:  "WS",
 		ArtifactID:    "transcript-daemon-session",
 		SessionID:     "daemon-session",
 		TaskID:        "TASK-DAEMON",
-		OwnerType:     "session",
+		OwnerType:     artifactsmodule.OwnerSession,
 		OwnerID:       "daemon-session",
 		Type:          "transcript",
 		MIMEType:      "application/x-ndjson",
-		DurableStatus: "declared",
+		DurableStatus: artifactsmodule.StatusFinalized,
 		// AgentID is deliberately empty to cover artifacts written before the
 		// daemon began stamping the already session-bound agent identity.
 	}, body)
@@ -436,7 +440,7 @@ func TestSessionServiceTranscriptUsesRuntimeStoreBeforeWorkspaceTopology(t *test
 	if err := os.MkdirAll(runtimeDir, 0o700); err != nil {
 		t.Fatalf("create active runtime directory: %v", err)
 	}
-	runtimeStore, err := sessions.NewStore(targetRuntimeDir)
+	runtimeStore, err := sessions.NewStore(t.Context(), targetRuntimeDir)
 	if err != nil {
 		t.Fatalf("new target runtime session store: %v", err)
 	}
@@ -460,7 +464,9 @@ func TestSessionServiceTranscriptUsesRuntimeStoreBeforeWorkspaceTopology(t *test
 	}
 
 	baseStore := memstore.New()
-	countingStore := &workspaceAccessCountingStore{Store: baseStore}
+	countingStore := &workspaceAccessCountingStore{
+		Store: baseStore, artifactQueries: baseStore.ArtifactQueries(),
+	}
 	svc := NewSessionServiceWithRuntimeDir(countingStore, nil, runtimeDir)
 	events, err := svc.GetSessionTranscript(ctx, "WS", "TASK-RUNTIME-1", sess.SessionID())
 	if err != nil {
@@ -482,7 +488,7 @@ func TestSessionServiceAgentTranscriptEnforcesOwnership(t *testing.T) {
 	if err := os.MkdirAll(runtimeDir, 0o700); err != nil {
 		t.Fatalf("create active runtime directory: %v", err)
 	}
-	localStore, err := sessions.NewStore(workspaceRuntimeDir)
+	localStore, err := sessions.NewStore(t.Context(), workspaceRuntimeDir)
 	if err != nil {
 		t.Fatalf("new workspace session store: %v", err)
 	}
@@ -506,7 +512,7 @@ func TestSessionServiceAgentTranscriptEnforcesOwnership(t *testing.T) {
 	if err := sess.Finalize(sessions.FinalizeOptions{TaskID: "TASK-LOCAL-1", ExitCode: 0}); err != nil {
 		t.Fatalf("finalize local supervised session: %v", err)
 	}
-	activeStore, err := sessions.NewStore(runtimeDir)
+	activeStore, err := sessions.NewStore(t.Context(), runtimeDir)
 	if err != nil {
 		t.Fatalf("new active workspace session store: %v", err)
 	}
@@ -570,12 +576,17 @@ func TestSiblingWorkspaceRuntimeDirRequiresDirectWorkspaceSibling(t *testing.T) 
 
 type workspaceAccessCountingStore struct {
 	store.Store
-	workspaceCalls int
+	artifactQueries artifactsmodule.QueryStore
+	workspaceCalls  int
 }
 
 func (s *workspaceAccessCountingStore) Workspaces() store.WorkspaceStore {
 	s.workspaceCalls++
 	return s.Store.Workspaces()
+}
+
+func (s *workspaceAccessCountingStore) ArtifactQueries() artifactsmodule.QueryStore {
+	return s.artifactQueries
 }
 
 func TestSessionServiceAgentSessionTranscriptUsesAgentOwnership(t *testing.T) {
@@ -585,16 +596,16 @@ func TestSessionServiceAgentSessionTranscriptUsesAgentOwnership(t *testing.T) {
 		`{"seq":1,"timestamp":"2026-07-24T12:00:00Z","role":"user","type":"text","text":"Review this."}` + "\n" +
 			`{"seq":2,"timestamp":"2026-07-24T12:00:01Z","role":"assistant","type":"text","text":"Looks good."}` + "\n",
 	)
-	finalized, err := store.UploadContentArtifact(ctx, st.Artifacts(), store.ArtifactCreate{
+	finalized, err := st.SeedArtifact(ctx, artifactsmodule.Artifact{
 		WorkspaceKey:  "WS",
 		ArtifactID:    "transcript-interactive-1",
 		AgentID:       "local-review",
 		SessionID:     "interactive-1",
-		OwnerType:     "session",
+		OwnerType:     artifactsmodule.OwnerSession,
 		OwnerID:       "interactive-1",
 		Type:          "transcript",
 		MIMEType:      "application/x-ndjson",
-		DurableStatus: "declared",
+		DurableStatus: artifactsmodule.StatusFinalized,
 	}, transcriptBody)
 	if err != nil {
 		t.Fatalf("create interactive transcript artifact: %v", err)
@@ -641,7 +652,7 @@ func TestSessionServiceTranscriptPreservesControlPlaneReadFailures(
 		{
 			name: "unavailable",
 			err: errors.Join(
-				store.ErrControlPlaneUnavailable,
+				domain.ErrUnavailable,
 				errors.New("connection refused"),
 			),
 			wantKind: apperrors.KindUnavailable,
@@ -649,7 +660,7 @@ func TestSessionServiceTranscriptPreservesControlPlaneReadFailures(
 		{
 			name: "rate limited",
 			err: errors.Join(
-				store.ErrControlPlaneRateLimited,
+				domain.ErrRateLimited,
 				errors.New("HTTP 429"),
 			),
 			wantKind: apperrors.KindRateLimited,
@@ -659,7 +670,8 @@ func TestSessionServiceTranscriptPreservesControlPlaneReadFailures(
 		t.Run(test.name, func(t *testing.T) {
 			base := memstore.New()
 			wrapped := &sessionReadErrorStore{
-				Store: base,
+				Store:           base,
+				artifactQueries: base.ArtifactQueries(),
 				sessions: &agentSessionReadErrorStore{
 					AgentSessionStore: base.AgentSessions(),
 					err:               test.err,
@@ -697,8 +709,9 @@ func TestSessionServiceTranscriptPreservesControlPlaneReadFailures(
 
 type sessionReadErrorStore struct {
 	store.Store
-	sessions store.AgentSessionStore
-	taskRuns store.TaskRunStore
+	sessions        store.AgentSessionStore
+	taskRuns        store.TaskRunStore
+	artifactQueries artifactsmodule.QueryStore
 }
 
 func (wrapped *sessionReadErrorStore) AgentSessions() store.AgentSessionStore {
@@ -707,6 +720,10 @@ func (wrapped *sessionReadErrorStore) AgentSessions() store.AgentSessionStore {
 
 func (wrapped *sessionReadErrorStore) TaskRuns() store.TaskRunStore {
 	return wrapped.taskRuns
+}
+
+func (wrapped *sessionReadErrorStore) ArtifactQueries() artifactsmodule.QueryStore {
+	return wrapped.artifactQueries
 }
 
 type agentSessionReadErrorStore struct {
@@ -738,16 +755,16 @@ func (wrapped *taskRunReadErrorStore) Get(
 func TestSessionServiceAgentTranscriptPreservesManagedContentFailureKind(t *testing.T) {
 	ctx := t.Context()
 	st := memstore.New()
-	finalized, err := store.UploadContentArtifact(ctx, st.Artifacts(), store.ArtifactCreate{
+	finalized, err := st.SeedArtifact(ctx, artifactsmodule.Artifact{
 		WorkspaceKey:  "WS",
 		ArtifactID:    "transcript-interactive-errors",
 		AgentID:       "local-review",
 		SessionID:     "interactive-errors",
-		OwnerType:     "session",
+		OwnerType:     artifactsmodule.OwnerSession,
 		OwnerID:       "interactive-errors",
 		Type:          "transcript",
 		MIMEType:      "application/x-ndjson",
-		DurableStatus: "declared",
+		DurableStatus: artifactsmodule.StatusFinalized,
 	}, []byte(`{"seq":1,"timestamp":"2026-07-24T12:00:00Z","role":"assistant","type":"text","text":"saved"}`+"\n"))
 	if err != nil {
 		t.Fatalf("create transcript artifact: %v", err)
@@ -770,7 +787,7 @@ func TestSessionServiceAgentTranscriptPreservesManagedContentFailureKind(t *test
 	}{
 		{
 			name:     "content plane unavailable",
-			readErr:  store.ErrArtifactContentUnavailable,
+			readErr:  artifactsmodule.ErrContentUnavailable,
 			wantKind: apperrors.KindUnavailable,
 		},
 		{
@@ -780,11 +797,11 @@ func TestSessionServiceAgentTranscriptPreservesManagedContentFailureKind(t *test
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			artifacts := &transcriptContentErrorArtifactStore{
-				ArtifactStore: st.Artifacts(),
-				err:           tc.readErr,
+			artifactQueries := &transcriptContentErrorArtifactStore{
+				QueryStore: st.ArtifactQueries(),
+				err:        tc.readErr,
 			}
-			wrapped := &transcriptContentErrorStore{Store: st, artifacts: artifacts}
+			wrapped := &transcriptContentErrorStore{Store: st, artifacts: artifactQueries}
 			svc := NewSessionService(wrapped, nil).(AgentSessionTranscriptService)
 			_, err := svc.GetAgentSessionTranscript(ctx, "WS", "local-review", "interactive-errors")
 			assertServiceErrorKind(t, err, tc.wantKind)
@@ -794,17 +811,19 @@ func TestSessionServiceAgentTranscriptPreservesManagedContentFailureKind(t *test
 
 type transcriptContentErrorStore struct {
 	store.Store
-	artifacts store.ArtifactStore
+	artifacts artifactsmodule.QueryStore
 }
 
-func (s *transcriptContentErrorStore) Artifacts() store.ArtifactStore { return s.artifacts }
+func (s *transcriptContentErrorStore) ArtifactQueries() artifactsmodule.QueryStore {
+	return s.artifacts
+}
 
 type transcriptContentErrorArtifactStore struct {
-	store.ArtifactStore
+	artifactsmodule.QueryStore
 	err error
 }
 
-func (s *transcriptContentErrorArtifactStore) ReadContent(context.Context, string, string) ([]byte, error) {
+func (s *transcriptContentErrorArtifactStore) ReadArtifactContent(context.Context, string, string) ([]byte, error) {
 	return nil, s.err
 }
 
@@ -817,33 +836,22 @@ func TestSessionServiceAgentTranscriptRejectsUnfinalizedArtifact(t *testing.T) {
 				artifactID = "transcript-unfinalized"
 				sessionID  = "interactive-unfinalized"
 			)
-			if _, err := st.Artifacts().Create(ctx, store.ArtifactCreate{
+			content := []byte(nil)
+			if status == "uploading" {
+				content = []byte(`{"seq":1,"timestamp":"2026-07-24T12:00:00Z","role":"assistant","type":"text","text":"not durable"}` + "\n")
+			}
+			if _, err := st.SeedArtifact(ctx, artifactsmodule.Artifact{
 				WorkspaceKey:  "WS",
 				ArtifactID:    artifactID,
 				AgentID:       "local-review",
 				SessionID:     sessionID,
-				OwnerType:     "session",
+				OwnerType:     artifactsmodule.OwnerSession,
 				OwnerID:       sessionID,
 				Type:          "transcript",
 				MIMEType:      "application/x-ndjson",
-				DurableStatus: status,
-			}); err != nil {
+				DurableStatus: artifactsmodule.DurableStatus(status),
+			}, content); err != nil {
 				t.Fatalf("create %s transcript artifact: %v", status, err)
-			}
-			if status == "uploading" {
-				if _, err := st.Artifacts().UploadContent(
-					ctx,
-					"WS",
-					artifactID,
-					store.ArtifactContentUpload{
-						Body: bytes.NewBufferString(
-							`{"seq":1,"timestamp":"2026-07-24T12:00:00Z","role":"assistant","type":"text","text":"not durable"}` + "\n",
-						),
-						MIMEType: "application/x-ndjson",
-					},
-				); err != nil {
-					t.Fatalf("upload unfinalized transcript artifact: %v", err)
-				}
 			}
 			if _, err := st.AgentSessions().Create(ctx, store.AgentSessionCreate{
 				WorkspaceKey: "WS",
@@ -897,7 +905,7 @@ func TestSessionServiceTaskTranscriptAndDiffPreserveManagedContentFailureKind(t 
 	}{
 		{
 			name:     "content plane unavailable",
-			readErr:  store.ErrArtifactContentUnavailable,
+			readErr:  artifactsmodule.ErrContentUnavailable,
 			wantKind: apperrors.KindUnavailable,
 		},
 		{
@@ -907,11 +915,11 @@ func TestSessionServiceTaskTranscriptAndDiffPreserveManagedContentFailureKind(t 
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			artifacts := &transcriptContentErrorArtifactStore{
-				ArtifactStore: st.Artifacts(),
-				err:           tc.readErr,
+			artifactQueries := &transcriptContentErrorArtifactStore{
+				QueryStore: st.ArtifactQueries(),
+				err:        tc.readErr,
 			}
-			wrapped := &transcriptContentErrorStore{Store: st, artifacts: artifacts}
+			wrapped := &transcriptContentErrorStore{Store: st, artifacts: artifactQueries}
 			svc := NewSessionService(wrapped, nil)
 
 			_, transcriptErr := svc.GetSessionTranscript(ctx, "WS", "TASK-ERRORS", "task-session-errors")
@@ -1110,7 +1118,7 @@ func TestSessionServiceControlPlaneDiffMissingPatchArtifact(t *testing.T) {
 func TestSessionServiceLocalDiffMissingFallsBackToControlPlaneArtifact(t *testing.T) {
 	ctx := t.Context()
 	runtimeDir := t.TempDir()
-	sessStore, err := sessions.NewStore(runtimeDir)
+	sessStore, err := sessions.NewStore(t.Context(), runtimeDir)
 	if err != nil {
 		t.Fatalf("new session store: %v", err)
 	}
@@ -1156,7 +1164,7 @@ func TestSessionServiceLocalDiffMissingFallsBackToControlPlaneArtifact(t *testin
 
 func TestSessionServiceLocalDiffMissingWithoutControlPlaneReturnsDiffNotFound(t *testing.T) {
 	runtimeDir := t.TempDir()
-	sessStore, err := sessions.NewStore(runtimeDir)
+	sessStore, err := sessions.NewStore(t.Context(), runtimeDir)
 	if err != nil {
 		t.Fatalf("new session store: %v", err)
 	}
@@ -1238,24 +1246,17 @@ func finishExecutionTaskRun(
 
 func createFinalizedArtifact(t *testing.T, st *memstore.Store, artifactID, sessionID, taskID, ownerID, artifactType, mimeType string, body []byte) {
 	t.Helper()
-	if _, err := st.Artifacts().Create(t.Context(), store.ArtifactCreate{
+	if _, err := st.SeedArtifact(t.Context(), artifactsmodule.Artifact{
 		WorkspaceKey:  "WS",
 		ArtifactID:    artifactID,
 		SessionID:     sessionID,
 		TaskID:        taskID,
-		OwnerType:     "task_run",
+		OwnerType:     artifactsmodule.OwnerTaskRun,
 		OwnerID:       ownerID,
 		Type:          artifactType,
 		MIMEType:      mimeType,
-		DurableStatus: "declared",
-	}); err != nil {
-		t.Fatalf("create %s artifact: %v", artifactType, err)
-	}
-	uploaded, err := st.Artifacts().UploadContent(t.Context(), "WS", artifactID, store.ArtifactContentUpload{Body: bytes.NewReader(body), MIMEType: mimeType})
-	if err != nil {
-		t.Fatalf("upload %s artifact: %v", artifactType, err)
-	}
-	if _, err := st.Artifacts().Finalize(t.Context(), "WS", artifactID, store.ArtifactFinalize{ContentHash: &uploaded.ContentHash}); err != nil {
+		DurableStatus: artifactsmodule.StatusFinalized,
+	}, body); err != nil {
 		t.Fatalf("finalize %s artifact: %v", artifactType, err)
 	}
 }
@@ -1305,7 +1306,7 @@ func TestSessionServiceListTaskSessionsEnrichesControlPlaneWithLocalUsage(t *tes
 	ctx := t.Context()
 	runtimeDir := t.TempDir()
 
-	sessStore, err := sessions.NewStore(runtimeDir)
+	sessStore, err := sessions.NewStore(t.Context(), runtimeDir)
 	if err != nil {
 		t.Fatalf("new session store: %v", err)
 	}
@@ -1421,7 +1422,7 @@ func TestSessionServiceListTaskSessionsFallsBackToFileStores(t *testing.T) {
 		t.Fatalf("save state cache: %v", err)
 	}
 
-	sessStore, err := sessions.NewStore(repoPath)
+	sessStore, err := sessions.NewStore(t.Context(), repoPath)
 	if err != nil {
 		t.Fatalf("new session store: %v", err)
 	}
@@ -1487,7 +1488,7 @@ func TestSessionServiceListTaskSessionsSearchesRuntimeDir(t *testing.T) {
 		t.Fatalf("save state cache: %v", err)
 	}
 
-	sessStore, err := sessions.NewStore(runtimeDir)
+	sessStore, err := sessions.NewStore(t.Context(), runtimeDir)
 	if err != nil {
 		t.Fatalf("new runtime session store: %v", err)
 	}
@@ -1519,7 +1520,7 @@ func TestSessionServiceListTaskSessionsSearchesRuntimeDir(t *testing.T) {
 func TestSessionServiceEventStoreSubagentsAreDiscoverable(t *testing.T) {
 	t.Setenv("LOOM_SERVE_FROM_EVENTSTORE", "1")
 	runtimeDir := t.TempDir()
-	sessStore, err := sessions.NewStore(runtimeDir)
+	sessStore, err := sessions.NewStore(t.Context(), runtimeDir)
 	if err != nil {
 		t.Fatalf("new session store: %v", err)
 	}
@@ -1536,8 +1537,7 @@ func TestSessionServiceEventStoreSubagentsAreDiscoverable(t *testing.T) {
 		t.Fatalf("finalize session: %v", err)
 	}
 
-	es := eventstore.Open(sessStore.SessionDir(sessionID))
-	if err := es.AppendEnvelope(hwtranscript.EventEnvelope{
+	if err := sessStore.AppendEnvelope(sessionID, hwtranscript.EventEnvelope{
 		RunID: "run-1", Harness: "claude", HarnessSessionID: "agent-789", ParentSessionID: "parent-native",
 		Event: hwtranscript.Event{
 			Seq: 0, Timestamp: time.Unix(2, 0), Role: "assistant", Type: "text",

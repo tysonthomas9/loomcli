@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/tysonthomas9/loomcli/internal/webui/agentmodules"
 	githandlers "github.com/tysonthomas9/loomcli/internal/webui/handlers/git"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/sessioncoord"
@@ -15,14 +16,14 @@ import (
 func (app *Server) buildModules() {
 	storeBacked := app.config.Store != nil
 
-	// Core workspace operations use the workflow-catalog IssueBackend port.
-	opsModule := NewWorkspaceOpsModule(app.workspaceSvc, nil).WithWorkItems(app.workItems)
+	// Core workspace operations use owned capability ports.
+	opsModule := NewWorkspaceOpsModule(app.workspaceSvc, nil).
+		WithWorkItems(app.workItems).
+		WithWorkItemStats(app.workItems).
+		WithWorkItemGraph(app.workItems)
 	if app.workspaceCatalog != nil && app.workspaceStore != nil && app.workspaceSvc != nil {
 		workspaceProjection := NewWorkspaceHTTPProjection(app.workspaceStore, app.workspaceSvc)
 		opsModule = opsModule.WithWorkspaceCatalog(app.workspaceCatalog, workspaceProjection)
-	}
-	if app.config.IssueBackendFn != nil {
-		opsModule = opsModule.WithIssueBackendFn(app.config.IssueBackendFn)
 	}
 	if storeBacked {
 		// Healing variant: when readyz finds no local path, attempt a one-shot
@@ -117,7 +118,7 @@ func (app *Server) buildInfraModules() {
 }
 
 func (app *Server) buildStoreBackedInfraModules() {
-	app.connectorDispatcher = app.buildConnectorDispatcher()
+	app.connectorDispatcher, app.connectorManagement, app.connectorSealer = app.buildConnectorCapabilities()
 	unifiedDeps := app.unifiedAgentModuleDeps()
 	app.wsModules = append(app.wsModules, NewUnifiedAgentModules(unifiedDeps)...)
 	app.buildPRReviewModule()
@@ -129,14 +130,23 @@ func (app *Server) unifiedAgentModuleDeps() UnifiedAgentModuleDeps {
 		WorkItems: app.workItems, Hub: app.hub,
 		FleetBaseURL: app.config.FleetDBBaseURL, DriverAPIBaseURL: app.config.DriverAPIBaseURL,
 		ExecutionIssueBackends: app.config.ExecutionIssueBackends,
-		DriverAPIToken:         app.config.DriverAPIToken, DriverRunTokenKey: app.config.DriverRunTokenKey,
-		DaytonaProvider:  app.config.DaytonaProvider,
-		LocalSettingsDir: app.config.LocalSettingsDir, Dispatcher: app.connectorDispatcher,
-		WorkflowCatalog:           app.config.WorkflowCatalogAPI,
-		WorkflowCatalogAuthoring:  app.config.WorkflowCatalogAuthoring,
-		WorkflowCatalogOperator:   app.config.WorkflowCatalogOperator,
-		WorkflowTargetPreparation: app.config.WorkflowTargetPreparation,
-		SourceControl:             app.config.SourceControl,
+		DriverRunTokenKey:      app.config.DriverRunTokenKey,
+		DaytonaProvider:        app.config.DaytonaProvider,
+		LocalSettingsDir:       app.config.LocalSettingsDir, Dispatcher: app.connectorDispatcher,
+		ConnectorBindingGrantLifecycle: app.connectorManagement,
+		WorkflowCatalog:                app.config.WorkflowCatalogAPI,
+		WorkflowCatalogAuthoring:       app.config.WorkflowCatalogAuthoring,
+		WorkflowCatalogOperator:        app.config.WorkflowCatalogOperator,
+		WorkflowTargetPreparation:      app.config.WorkflowTargetPreparation,
+		SourceControl:                  app.config.SourceControl,
+	}
+	if app.config.BackendOps != nil {
+		deps.WorkflowBackendHealth = agentmodules.NewWorkflowBackendHealthQuery(
+			func(name string) (bool, bool, bool, string, bool) {
+				status, ok := app.config.BackendOps.BackendHealth(name)
+				return status.Available, status.Installed, status.APIKeySet, status.Message, ok
+			},
+		)
 	}
 	if transcripts, ok := app.sessSvc.(sessioncoord.AgentSessionTranscriptService); ok {
 		deps.AgentSessionTranscripts = transcripts
@@ -151,6 +161,9 @@ func (app *Server) unifiedAgentModuleDeps() UnifiedAgentModuleDeps {
 func (app *Server) buildPRReviewModule() {
 	prReviewModule := NewPRReviewModule(
 		app.config,
+		app.workspaceCatalog,
+		app.connectorManagement,
+		app.connectorSealer,
 		app.connectorDispatcher,
 		app.agentSvc,
 		app.termSvc,

@@ -54,9 +54,11 @@ type Server struct {
 	mux                 *http.ServeMux
 	wsModules           []wsModule // workspace-scoped route modules (registered on wsMux)
 	connectorDispatcher connectorsmodule.Dispatcher
+	connectorManagement connectorsmodule.Management
+	connectorSealer     connectorsmodule.CredentialSealer
 
 	// Service layer
-	workItems        workitems.API
+	workItems        *workitems.Service
 	workspaceCatalog workspace.API
 	workspaceStore   store.WorkspaceStore
 	workItemMover    workitemmove.Commands

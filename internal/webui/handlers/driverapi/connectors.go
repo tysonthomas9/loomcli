@@ -139,7 +139,7 @@ func (m *Module) resolveParentBindingID(ctx context.Context, ws string, parent *
 		return "", fmt.Errorf(
 			"driver run %q has no trigger binding; connector egress is deny-by-default: %w",
 			parent.RunID,
-			errors.Join(connectorsmodule.ErrGrantDenied, domain.ErrGrantDenied),
+			connectorsmodule.ErrGrantDenied,
 		)
 	}
 	if err != nil {

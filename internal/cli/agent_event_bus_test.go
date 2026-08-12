@@ -14,12 +14,11 @@ import (
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 
 	"github.com/tysonthomas9/loomcli/internal/cli"
-	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/events"
 )
 
 // TestAgentEventBus_EmitsLoomTaskSpanUnderActiveContext exercises the real
-// cli.AgentEventBus() singleton + events.Bus.Emit (with ambient context
+// cli.AgentEventBus singleton + events.Bus.Emit (with explicit context
 // injection) + otelexport pipeline, and asserts that:
 //
 //  1. A bus.Emit(TaskClaimed) call from inside an active span produces a
@@ -51,21 +50,13 @@ func TestAgentEventBus_EmitsLoomTaskSpanUnderActiveContext(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("LOOM_EVENTS_DIR", tmp)
 
-	// Start a parent span and publish it as the root context. This is what
-	// cli.Execute does at startup; we emulate it here.
+	// Start a parent span and pass it directly into the bus constructor.
 	ctx, parentSpan := tp.Tracer("test").Start(context.Background(), "loom.cli.plan")
-	cmdstore.SetRootContext(ctx)
-	t.Cleanup(func() { cmdstore.SetRootContext(context.Background()) })
-
-	// Bus.Emit needs the ambient context provider to capture trace context
-	// onto each event. cli.Execute does this; do it explicitly here.
-	events.SetContextProvider(cmdstore.RootContext)
-	t.Cleanup(func() { events.SetContextProvider(nil) })
 
 	// Get the singleton bus. otelexport is subscribed inside.
-	bus := cli.AgentEventBus()
+	bus := cli.AgentEventBus(ctx)
 	if bus == nil {
-		t.Fatalf("cli.AgentEventBus() returned nil")
+		t.Fatalf("cli.AgentEventBus(t.Context()) returned nil")
 	}
 
 	// Emit a TaskClaimed event the same way the agent's claim flow would.
@@ -211,7 +202,7 @@ func TestAgentEventBus_MkdirFails_ReturnsNil(t *testing.T) {
 	}
 	t.Setenv("LOOM_EVENTS_DIR", filepath.Join(parent, "events"))
 
-	if bus := cli.AgentEventBus(); bus != nil {
+	if bus := cli.AgentEventBus(t.Context()); bus != nil {
 		t.Errorf("AgentEventBus() = %v, want nil when events dir is unwritable", bus)
 	}
 }

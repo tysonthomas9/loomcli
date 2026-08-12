@@ -15,11 +15,14 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/app/workflowbinding"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	agentsmodule "github.com/tysonthomas9/loomcli/internal/modules/agents"
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
+	connectorsmodule "github.com/tysonthomas9/loomcli/internal/modules/connectors"
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 	workflowcataloghttp "github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog/httpapi"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/webui/readprojection"
 )
 
 // seededMux returns a mux wired to a memstore that already has a workflow
@@ -63,7 +66,7 @@ func seededMux(t *testing.T) (*http.ServeMux, store.Store) {
 		CreateWorkflow: createWorkflow,
 		Commands:       automationAPI, Queries: automationAPI, ManualDispatch: automationAPI,
 		OperatorAuthority: testOperatorResolver{}, WorkspaceFromContext: func(context.Context) string { return "WS" },
-		Runs: s.DriverRuns(), Connectors: &testConnectorCompatibility{store: s},
+		Runs: readprojection.NewBindingRunReader(s.DriverRuns()), Connectors: &testConnectorLifecycle{store: s},
 		AgentIdentities: testAgentIdentityChecker{store: s},
 	}).Register(mux)
 	return mux, s
@@ -72,7 +75,7 @@ func seededMux(t *testing.T) (*http.ServeMux, store.Store) {
 func muxWithIdentityChecker(
 	t *testing.T,
 	s store.Store,
-	checker UnattachedBindingIdentityChecker,
+	checker agentsmodule.IdentityQueries,
 ) *http.ServeMux {
 	t.Helper()
 	automationAPI := &testAutomationAPI{store: s}
@@ -87,7 +90,7 @@ func muxWithIdentityChecker(
 		CreateWorkflow: createWorkflow,
 		Commands:       automationAPI, Queries: automationAPI, ManualDispatch: automationAPI,
 		OperatorAuthority: testOperatorResolver{}, WorkspaceFromContext: func(context.Context) string { return "WS" },
-		Runs: s.DriverRuns(), Connectors: &testConnectorCompatibility{store: s},
+		Runs: readprojection.NewBindingRunReader(s.DriverRuns()), Connectors: &testConnectorLifecycle{store: s},
 		AgentIdentities: checker,
 	}).Register(mux)
 	return mux
@@ -116,16 +119,21 @@ type testAgentIdentityChecker struct {
 	store store.Store
 }
 
-func (checker testAgentIdentityChecker) CheckUnattachedBindingID(
+func (checker testAgentIdentityChecker) GetAgent(
 	ctx context.Context,
 	workspace, bindingID string,
-) error {
+) (*agentsmodule.Agent, error) {
 	if _, err := checker.store.AgentServices().Get(ctx, workspace, bindingID); err == nil {
-		return fmt.Errorf("trigger binding identifier %q is already used by a durable agent record: %w", bindingID, automation.ErrConflict)
-	} else if !errors.Is(err, domain.ErrNotFound) {
-		return err
+		return &agentsmodule.Agent{WorkspaceKey: workspace, AgentID: bindingID}, nil
+	} else if errors.Is(err, domain.ErrNotFound) {
+		return nil, agentsmodule.ErrNotFound
+	} else {
+		return nil, err
 	}
-	return nil
+}
+
+func (checker testAgentIdentityChecker) ListAgents(context.Context, string, agentsmodule.AgentFilter) ([]*agentsmodule.Agent, error) {
+	return nil, nil
 }
 
 type postCreateCollisionChecker struct {
@@ -134,10 +142,10 @@ type postCreateCollisionChecker struct {
 	calls int
 }
 
-func (checker *postCreateCollisionChecker) CheckUnattachedBindingID(
+func (checker *postCreateCollisionChecker) GetAgent(
 	ctx context.Context,
 	workspace, bindingID string,
-) error {
+) (*agentsmodule.Agent, error) {
 	checker.mu.Lock()
 	defer checker.mu.Unlock()
 	checker.calls++
@@ -146,10 +154,14 @@ func (checker *postCreateCollisionChecker) CheckUnattachedBindingID(
 			WorkspaceKey: workspace, ServiceID: bindingID, Name: bindingID, RoleName: "review",
 			Kind: domain.AgentServiceKindEvent, DesiredState: domain.AgentServiceDesiredRunning, MaxInstances: 1,
 		}); err != nil {
-			return fmt.Errorf("insert concurrent agent fixture: %w", err)
+			return nil, fmt.Errorf("insert concurrent agent fixture: %w", err)
 		}
 	}
-	return testAgentIdentityChecker{store: checker.store}.CheckUnattachedBindingID(ctx, workspace, bindingID)
+	return testAgentIdentityChecker{store: checker.store}.GetAgent(ctx, workspace, bindingID)
+}
+
+func (checker *postCreateCollisionChecker) ListAgents(context.Context, string, agentsmodule.AgentFilter) ([]*agentsmodule.Agent, error) {
+	return nil, nil
 }
 
 func (checker *postCreateCollisionChecker) callCount() int {
@@ -362,24 +374,12 @@ func mapTestAutomationError(err error) error {
 	}
 }
 
-type testConnectorCompatibility struct {
-	store   store.Store
-	mu      sync.Mutex
-	secrets map[string]string
+type testConnectorLifecycle struct {
+	store store.Store
 }
 
-func (c *testConnectorCompatibility) ConfigureBindingSecret(_ context.Context, workspace, bindingID, _ string, secret string) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.secrets == nil {
-		c.secrets = make(map[string]string)
-	}
-	c.secrets[workspace+"/"+bindingID] = secret
-	return nil
-}
-
-func (c *testConnectorCompatibility) RevokeBindingGrants(ctx context.Context, workspace, bindingID string) (int, error) {
-	grants, err := c.store.ConnectorGrants().ListByBinding(ctx, workspace, bindingID)
+func (c *testConnectorLifecycle) RevokeBindingGrants(ctx context.Context, command connectorsmodule.BindingGrantCleanupCommand) (int, error) {
+	grants, err := c.store.Connectors().ListGrantRecordsByBinding(ctx, command.WorkspaceKey, command.BindingID)
 	if err != nil {
 		return 0, err
 	}
@@ -388,8 +388,8 @@ func (c *testConnectorCompatibility) RevokeBindingGrants(ctx context.Context, wo
 		if grant == nil {
 			continue
 		}
-		if err := c.store.ConnectorGrants().Revoke(ctx, workspace, grant.GrantID); err != nil {
-			if errors.Is(err, domain.ErrGrantRevoked) {
+		if err := c.store.Connectors().RevokeGrantRecord(ctx, command.WorkspaceKey, grant.GrantID); err != nil {
+			if errors.Is(err, connectorsmodule.ErrGrantRevoked) {
 				continue
 			}
 			return revoked, err
@@ -727,7 +727,7 @@ func TestCreateBinding_EnsureResolvesWorkflowBeforeReusingBinding(t *testing.T) 
 		CreateWorkflow: createWorkflow,
 		Commands:       automationAPI, Queries: automationAPI, ManualDispatch: automationAPI,
 		OperatorAuthority: testOperatorResolver{}, WorkspaceFromContext: func(context.Context) string { return "WS" },
-		Runs: st.DriverRuns(), Connectors: &testConnectorCompatibility{store: st},
+		Runs: readprojection.NewBindingRunReader(st.DriverRuns()), Connectors: &testConnectorLifecycle{store: st},
 		AgentIdentities: testAgentIdentityChecker{store: st},
 	}).Register(mux)
 
@@ -793,7 +793,7 @@ func TestCreateBinding_WorkflowTargetFreshStoreReturns201Then200(t *testing.T) {
 		CreateWorkflow: createWorkflow,
 		Commands:       automationAPI, Queries: automationAPI, ManualDispatch: automationAPI,
 		OperatorAuthority: testOperatorResolver{}, WorkspaceFromContext: func(context.Context) string { return "WS" },
-		Runs: st.DriverRuns(), Connectors: &testConnectorCompatibility{store: st},
+		Runs: readprojection.NewBindingRunReader(st.DriverRuns()), Connectors: &testConnectorLifecycle{store: st},
 		AgentIdentities: testAgentIdentityChecker{store: st},
 	}).Register(mux)
 	body := `{"workflow":"github-review-agent","source_kind":"cron","schedule":"*/10 * * * *","binding_id":"fresh-review","enabled":true}`
@@ -1005,16 +1005,12 @@ func TestCreateBinding_RequiresRouteKey(t *testing.T) {
 	}
 }
 
-func TestCreateBinding_GithubRequiresSecret(t *testing.T) {
+func TestCreateBinding_GithubDoesNotCarryConnectorSecret(t *testing.T) {
 	mux, _ := seededMux(t)
-	// Enabled github binding with no secret must be rejected before it is stored.
 	rec := do(t, mux, http.MethodPost, "/api/workspaces/WS/trigger-bindings",
 		`{"workflow":"github-review-agent","route_key":"github.pull_request.opened","source_kind":"github","enabled":true}`)
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400; body=%s", rec.Code, rec.Body.String())
-	}
-	if !strings.Contains(rec.Body.String(), "secret") {
-		t.Fatalf("expected secret-required error, got %s", rec.Body.String())
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201; body=%s", rec.Code, rec.Body.String())
 	}
 }
 
@@ -1247,7 +1243,7 @@ func TestDeleteBinding_GoneAndGrantsRevoked(t *testing.T) {
 
 	// Seed two active grants for the binding (memstore grants need no connector FK).
 	for i, action := range []string{"github.pull_request.read", "github.compare.read"} {
-		if _, err := st.ConnectorGrants().Create(ctx, store.ConnectorGrantCreate{
+		if _, err := st.Connectors().CreateManagementGrant(ctx, connectorsmodule.CreateGrantMutation{
 			WorkspaceKey:    "WS",
 			GrantID:         "grant-" + string(rune('a'+i)),
 			ConnectorID:     "github",
@@ -1278,7 +1274,7 @@ func TestDeleteBinding_GoneAndGrantsRevoked(t *testing.T) {
 		t.Fatalf("binding s2 still present after delete")
 	}
 	// Grants are revoked (ListByBinding excludes revoked grants).
-	grants, err := st.ConnectorGrants().ListByBinding(ctx, "WS", "s2")
+	grants, err := st.Connectors().ListGrantRecordsByBinding(ctx, "WS", "s2")
 	if err != nil {
 		t.Fatalf("list grants: %v", err)
 	}
@@ -1302,7 +1298,7 @@ func TestDeleteBinding_GoneAndGrantsRevoked(t *testing.T) {
 // when the caller cannot distinguish an original miss from a lost response.
 func TestDeleteBinding_MissingConverges(t *testing.T) {
 	mux, st := seededMux(t)
-	if _, err := st.ConnectorGrants().Create(t.Context(), store.ConnectorGrantCreate{
+	if _, err := st.Connectors().CreateManagementGrant(t.Context(), connectorsmodule.CreateGrantMutation{
 		WorkspaceKey: "WS", GrantID: "orphan-grant", ConnectorID: "github", BindingID: "missing",
 		Action: "github.pull_request.read", ResourcePattern: "repo:o/r",
 	}); err != nil {

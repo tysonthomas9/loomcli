@@ -44,7 +44,6 @@ function createOptions(
     instanceRefs: {
       current: new Map<string, TerminalInstanceHandle>(),
     } as React.MutableRefObject<Map<string, TerminalInstanceHandle>>,
-    onTabConnected: undefined as ((tabId: string) => void) | undefined,
     ...overrides,
   };
 }
@@ -110,38 +109,7 @@ describe("useConnectionState", () => {
     expect(result.current.tabHasConnected).toBe(firstMap);
   });
 
-  // 4. onTabConnected called on "connected" state
-  it("onTabConnected called on connected state", () => {
-    const onTabConnected = vi.fn();
-    const opts = createOptions({ onTabConnected });
-    const { result } = renderHook(() => useConnectionState(opts));
-
-    act(() => {
-      result.current.handleConnectionStateChange("tab-1", "connected", false);
-    });
-
-    expect(onTabConnected).toHaveBeenCalledWith("tab-1");
-    expect(onTabConnected).toHaveBeenCalledTimes(1);
-  });
-
-  // 5. onTabConnected NOT called on "disconnected" state
-  it("onTabConnected NOT called on disconnected state", () => {
-    const onTabConnected = vi.fn();
-    const opts = createOptions({ onTabConnected });
-    const { result } = renderHook(() => useConnectionState(opts));
-
-    act(() => {
-      result.current.handleConnectionStateChange(
-        "tab-1",
-        "disconnected",
-        false,
-      );
-    });
-
-    expect(onTabConnected).not.toHaveBeenCalled();
-  });
-
-  // 6. handleReconnectStateChange updates state map
+  // 4. handleReconnectStateChange updates state map
   it("handleReconnectStateChange updates state map", () => {
     const opts = createOptions();
     const { result } = renderHook(() => useConnectionState(opts));

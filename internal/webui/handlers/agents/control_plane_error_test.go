@@ -6,7 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/domain"
 )
 
 func TestAgentReadErrorsPreserveControlPlaneAvailability(t *testing.T) {
@@ -19,25 +19,25 @@ func TestAgentReadErrorsPreserveControlPlaneAvailability(t *testing.T) {
 		{
 			name:       "binding read is rate limited",
 			writeError: writeBindingError,
-			err:        fmt.Errorf("list runs: %w", store.ErrControlPlaneRateLimited),
+			err:        fmt.Errorf("list runs: %w", domain.ErrRateLimited),
 			wantStatus: http.StatusTooManyRequests,
 		},
 		{
 			name:       "binding read is unavailable",
 			writeError: writeBindingError,
-			err:        fmt.Errorf("list runs: %w", store.ErrControlPlaneUnavailable),
+			err:        fmt.Errorf("list runs: %w", domain.ErrUnavailable),
 			wantStatus: http.StatusServiceUnavailable,
 		},
 		{
 			name:       "agent read is rate limited",
 			writeError: writeAgentRecordError,
-			err:        fmt.Errorf("get agent: %w", store.ErrControlPlaneRateLimited),
+			err:        fmt.Errorf("get agent: %w", domain.ErrRateLimited),
 			wantStatus: http.StatusTooManyRequests,
 		},
 		{
 			name:       "agent read is unavailable",
 			writeError: writeAgentRecordError,
-			err:        fmt.Errorf("get agent: %w", store.ErrControlPlaneUnavailable),
+			err:        fmt.Errorf("get agent: %w", domain.ErrUnavailable),
 			wantStatus: http.StatusServiceUnavailable,
 		},
 	}

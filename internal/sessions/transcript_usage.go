@@ -2,11 +2,10 @@ package sessions
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
-
-	"github.com/tysonthomas9/loomcli/internal/runtimectx"
 )
 
 // TokenUsage holds aggregated token counts from a Claude transcript.
@@ -41,8 +40,8 @@ type claudeTranscriptEntry struct {
 //
 // On I/O errors mid-scan, returns partial results alongside the error.
 // Callers that need exact totals should check the error before using the result.
-func SumTranscriptUsage(transcriptPath string) (TokenUsage, error) {
-	_, span := startSpan(runtimectx.RootContext(), "service.Sessions.SumTranscriptUsage")
+func SumTranscriptUsage(ctx context.Context, transcriptPath string) (TokenUsage, error) {
+	_, span := startSpan(ctx, "service.Sessions.SumTranscriptUsage")
 	defer span.End()
 
 	// #nosec G304 — transcriptPath comes from Claude's hook payload (trusted)

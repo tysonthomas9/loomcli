@@ -11,7 +11,9 @@ import (
 	"testing"
 
 	"github.com/tysonthomas9/loomcli/internal/app/workflowbinding"
+	agentsmodule "github.com/tysonthomas9/loomcli/internal/modules/agents"
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
+	connectorsmodule "github.com/tysonthomas9/loomcli/internal/modules/connectors"
 	workflowcataloghttp "github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog/httpapi"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 )
@@ -89,15 +91,18 @@ func (s *stubBindingAPI) DispatchBinding(ctx context.Context, auth authority.Ope
 	return s.dispatch(ctx, auth, command)
 }
 
-type connectorCompatibilityStub struct {
-	configure func(context.Context, string, string, string, string) error
-	revoke    func(context.Context, string, string) (int, error)
+type connectorLifecycleStub struct {
+	revoke func(context.Context, connectorsmodule.BindingGrantCleanupCommand) (int, error)
 }
 
 type allowUnattachedBindingIdentity struct{}
 
-func (allowUnattachedBindingIdentity) CheckUnattachedBindingID(context.Context, string, string) error {
-	return nil
+func (allowUnattachedBindingIdentity) GetAgent(context.Context, string, string) (*agentsmodule.Agent, error) {
+	return nil, agentsmodule.ErrNotFound
+}
+
+func (allowUnattachedBindingIdentity) ListAgents(context.Context, string, agentsmodule.AgentFilter) ([]*agentsmodule.Agent, error) {
+	return nil, nil
 }
 
 type unexpectedWorkflowTargetPreparer struct{}
@@ -106,21 +111,14 @@ func (unexpectedWorkflowTargetPreparer) PrepareWorkflowTarget(context.Context, s
 	panic("explicit driver request unexpectedly prepared a workflow target")
 }
 
-func (s *connectorCompatibilityStub) ConfigureBindingSecret(ctx context.Context, workspace, bindingID, sourceKind, secret string) error {
-	if s.configure == nil {
-		return nil
-	}
-	return s.configure(ctx, workspace, bindingID, sourceKind, secret)
-}
-
-func (s *connectorCompatibilityStub) RevokeBindingGrants(ctx context.Context, workspace, bindingID string) (int, error) {
+func (s *connectorLifecycleStub) RevokeBindingGrants(ctx context.Context, command connectorsmodule.BindingGrantCleanupCommand) (int, error) {
 	if s.revoke == nil {
 		return 0, nil
 	}
-	return s.revoke(ctx, workspace, bindingID)
+	return s.revoke(ctx, command)
 }
 
-func registerBoundaryModule(api *stubBindingAPI, resolver workflowcataloghttp.OperatorAuthorityResolver, connectors ConnectorCompatibility) *http.ServeMux {
+func registerBoundaryModule(api *stubBindingAPI, resolver workflowcataloghttp.OperatorAuthorityResolver, connectors connectorsmodule.BindingGrantLifecycle) *http.ServeMux {
 	createWorkflow, err := workflowbinding.New(unexpectedWorkflowTargetPreparer{}, api)
 	if err != nil {
 		panic(err)
@@ -199,49 +197,32 @@ func TestMutationAuthorityFailuresStopBeforeAutomation(t *testing.T) {
 	}
 }
 
-func TestCreateKeepsSecretOutOfAutomation(t *testing.T) {
-	const secret = "connector-only-secret"
-	var commandJSON []byte
+func TestCreateRejectsRetiredBindingSecretField(t *testing.T) {
+	called := false
 	api := &stubBindingAPI{
 		get: func(context.Context, string, string) (*automation.Binding, error) {
 			return nil, automation.ErrNotFound
 		},
 		create: func(_ context.Context, _ authority.OperatorAuthority, command automation.CreateBindingCommand) (*automation.Binding, error) {
-			commandJSON, _ = json.Marshal(command)
-			return &automation.Binding{
-				WorkspaceKey: command.WorkspaceKey, BindingID: command.Definition.BindingID,
-				Name: command.Definition.Name, SourceKind: command.Definition.SourceKind,
-				RouteKey: command.Definition.RouteKey, DriverID: "driver-1", DriverVersionID: "version-1",
-				Enabled: command.Definition.Enabled,
-			}, nil
+			called = true
+			return nil, errors.New("must not be called")
 		},
 	}
-	var connectorSecret string
-	connectors := &connectorCompatibilityStub{configure: func(_ context.Context, workspace, bindingID, sourceKind, got string) error {
-		if workspace != "CANONICAL" || bindingID != "github-binding" || sourceKind != "github" {
-			t.Fatalf("connector scope = %q/%q/%q", workspace, bindingID, sourceKind)
-		}
-		connectorSecret = got
-		return nil
-	}}
 	resolver := operatorResolverFunc(func(*http.Request, string, authority.Action) (authority.OperatorAuthority, error) {
 		return authority.OperatorAuthority{}, nil
 	})
-	mux := registerBoundaryModule(api, resolver, connectors)
+	mux := registerBoundaryModule(api, resolver, nil)
 	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/alias/trigger-bindings", strings.NewReader(
-		`{"driver_id":"driver-1","binding_id":"github-binding","route_key":"github.pull_request.opened","source_kind":"github","secret":"`+secret+`","enabled":true}`,
+		`{"driver_id":"driver-1","binding_id":"github-binding","route_key":"github.pull_request.opened","source_kind":"github","secret":"retired","enabled":true}`,
 	))
 	req.Header.Set("Authorization", "Bearer operator")
 	response := httptest.NewRecorder()
 	mux.ServeHTTP(response, req)
-	if response.Code != http.StatusCreated {
-		t.Fatalf("status = %d, want 201; body=%s", response.Code, response.Body.String())
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body=%s", response.Code, response.Body.String())
 	}
-	if connectorSecret != secret {
-		t.Fatalf("connector secret = %q, want supplied secret", connectorSecret)
-	}
-	if strings.Contains(string(commandJSON), secret) || strings.Contains(response.Body.String(), secret) || strings.Contains(response.Body.String(), "webhook_secret") {
-		t.Fatalf("secret crossed Automation or response boundary: command=%s response=%s", commandJSON, response.Body.String())
+	if called {
+		t.Fatal("Automation create was invoked for a retired binding-secret request")
 	}
 }
 
@@ -262,7 +243,7 @@ func TestDeleteDisablesRevokesThenDeletesAndCanResume(t *testing.T) {
 			return nil
 		},
 	}
-	connectors := &connectorCompatibilityStub{revoke: func(context.Context, string, string) (int, error) {
+	connectors := &connectorLifecycleStub{revoke: func(context.Context, connectorsmodule.BindingGrantCleanupCommand) (int, error) {
 		calls = append(calls, "revoke")
 		revokeAttempts++
 		if revokeAttempts == 1 {
@@ -301,16 +282,6 @@ func TestDeleteDisablesRevokesThenDeletesAndCanResume(t *testing.T) {
 	wantSecond := append(append([]string(nil), wantFirst[:4]...), "revoke", "delete")
 	if strings.Join(calls, ",") != strings.Join(wantSecond, ",") {
 		t.Fatalf("retry calls = %v, want %v", calls, wantSecond)
-	}
-}
-
-func TestLegacyConstructorIsInert(t *testing.T) {
-	mux := http.NewServeMux()
-	NewModule(nil).Register(mux)
-	response := httptest.NewRecorder()
-	mux.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/workspaces/WS/trigger-bindings", nil))
-	if response.Code != http.StatusNotFound {
-		t.Fatalf("legacy constructor registered routes: status=%d", response.Code)
 	}
 }
 

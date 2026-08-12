@@ -1,8 +1,8 @@
 # Modular Monolith Migration
 
-- **Status:** Phase 8 structural consolidation complete; the modular monolith
-  is ratcheted to 189 production packages with all capability boundaries green
-- **Date:** 2026-08-08
+- **Status:** Phase 9 package consolidation in progress; its first twenty-one
+  slices ratchet the modular monolith to 167 production packages
+- **Date:** 2026-08-11
 - **Scope:** `loom serve`, the operator CLI entry surfaces, the Vite frontend counterpart, and the fleet-db contracts those capabilities depend on
 - **Provenance:** [Phase 0 integration baseline](00-phase-0-baseline.md), final [Phase 1 evidence](06-phase-1-decisions-and-evidence.md) at Loom `7e8a6dd2`, [Phase 2 evidence](07-phase-2-decisions-and-evidence.md) at Loom `84cccb761` with FleetDB `430dce8d9`, [Phase 3 evidence](08-phase-3-decisions-and-evidence.md) at core implementation commits Loom `7f95b9bf1` and FleetDB `f1c4e1119`, final [Phase 4 evidence](09-phase-4-decisions-and-evidence.md) at Loom `53cbe2577` with FleetDB `afb688768`, and the appended reliability-validation record at Loom `67c45972f` with FleetDB `9ffa69f60`
 - **Related:** [Unified agent UX](../../design/2026-07-01-unified-agent-ux-proposal.md) · [Durable agent identity](../../design/2026-07-07-agent-identity-record.md) · [Workflow driver authoring](../../design/workflow-driver-authoring-guide.md)
@@ -24,7 +24,25 @@ pre-guardrail source snapshot had 165 Go packages, while the Phase 7 completion
 tree had 250 production package directories and 115 one-file packages. Phase 8
 adds shrink-only shape ratchets and removes duplicated knowledge and
 forwarding-only packages while preserving the capability graph. The completed
-tree has 189 production packages and 67 one-file packages.
+tree has 189 production packages and 67 one-file packages. Phase 9 continues
+from that exact shape toward 160 packages by deleting residual horizontal
+models, repositories, and shallow composition seams without merging capability
+owners.
+
+Through Wave 9.16, Phase 9 has retired the residual `internal/types` plane,
+duplicate Connectors and Artifacts repository/model layers, forwarding-only
+owner adapters, runtime and authentication compatibility paths, horizontal
+handler dependencies, three shallow vocabulary packages, and the ambient
+runtime-context package. It also folds native-transcript dispatch into Sessions,
+deletes the forwarding-only Codex parser package, and rejects unknown transcript
+backends instead of falling back to Claude. Wave 9.15 deletes the remaining
+shallow Claude and OpenCode parser packages and their unused public helpers.
+Wave 9.16 deletes the forwarding-only local-session store adapter, replaces its
+persistence-shaped calls with Sessions-owned archive intents, and folds the
+nested event-store package into that implementation. The exact current shape
+is 171 production packages: 15 under `internal/modules`, 156 outside module
+roots, 51 one-file packages, and 72 one-or-two-file packages. Known runtime
+compatibility planes remain unfinished work, not accepted target architecture.
 
 ## Reading order
 
@@ -46,6 +64,7 @@ tree has 189 production packages and 67 one-file packages.
 | [13-phase-6-decisions-and-evidence.md](13-phase-6-decisions-and-evidence.md) | Which supervisor paths were deleted, what replaced them, and which exact gates prove Phase 6? |
 | [14-phase-7-decisions-and-evidence.md](14-phase-7-decisions-and-evidence.md) | Which remaining capability and frontend boundaries closed, and what exact packaged-product matrix completes the migration? |
 | [15-phase-8-consolidation-and-evidence.md](15-phase-8-consolidation-and-evidence.md) | How is post-extraction fragmentation removed without weakening ports-and-adapters boundaries? |
+| [16-phase-9-package-consolidation.md](16-phase-9-package-consolidation.md) | Which residual horizontal planes and shallow packages will be retired next, and what has the first slice proved? |
 
 ## Scope boundaries
 
@@ -196,6 +215,122 @@ persistence all pass. No generic replacement business-logic bucket or FleetDB
 contract change was introduced. See the
 [Phase 8 plan and evidence](15-phase-8-consolidation-and-evidence.md).
 
+Phase 9 is active from the Phase 8 documentation head `1fc9d887c`. Wave 9.1
+removes the unused `internal/types` product-model plane, moves live
+classification policy to its owner or enforcing consumer, and makes the
+FleetDB adapter project private wire records directly to the existing backend
+compatibility DTOs. Wave 9.2 then makes the sole-consumer IssueBackend E2E
+suite test-only and folds diff-path traversal validation into its source-control
+consumer while deleting an unused sensitive-path classifier. Wave 9.3 moves
+the remaining connector models and persistence contracts into their declared
+owner, makes FleetDB and memstore implement that port directly, and deletes
+the horizontal domain, composite-repository, placeholder, and mapping-only
+catalog layers. Wave 9.4 then makes Artifacts the sole model and port owner,
+has FleetDB and memstore implement those ports directly, injects owner queries
+through the Artifacts capability, and physically removes the horizontal
+Artifact model, repository, upload, and mapping-only catalog surfaces without
+a fallback facade. Together the waves reduce the exact production shape from
+189 to 184 packages, outside-module packages from 172 to 167, one-file
+packages from 67 to 63, and one-or-two-file packages from 89 to 85. Wave 9.5
+removes the forwarding-only Artifacts FleetDB subpackage, lets the composition
+bridge implement the owner ports directly, and tightens the exact shape again
+to 183 packages and 84 one-or-two-file packages without changing the ten
+capability owners. Wave 9.6 then removes the duplicate Connectors grant
+transport/adapter plane and the Git-only runtime-failing compatibility
+constructor. FleetDB and memstore now implement the Connectors grant owner port
+directly, reducing the exact shape to 182 packages, 62 one-file packages, and
+83 one-or-two-file packages. Wave 9.7 then physically removes 11 dead
+source-compatibility functions or values, deletes the obsolete test-only Driver
+stale-recovery implementation, characterizes the Execution owner instead, and
+guards against handwritten deprecated production APIs returning. It removes
+499 net lines without changing the package count or widening import fanout.
+The 25 `legacy handler imports` remain live allowlisted compatibility edges,
+not historical labels, and the Driver still has an active shared-token/header
+authentication fallback. Wave 9.8 deletes that Driver fallback and requires
+signed run-scoped identity throughout the runtime. Wave 9.9 then routes Git
+graph, blocked-list, health statistics, readiness, and config-label delivery
+through narrow Work Items or presentation ports, deletes the dead workspace
+backend setter and config env fallback, and tightens the exact live handler
+imports from 25 to 22. Wave 9.10 then removes PR-review's two generated-backend
+DTO imports and composite-store import, makes the HTTP adapter own its wire
+shapes, injects a two-method Workspace query port, and composes Connector
+dispatch, management, and credential sealing once at the application root. It
+physically deletes the old positional constructor and forwarding-only route
+composition function, lowers live handler imports from 22 to 19, and tightens
+PR-review import fanout from 18 to 15. Wave 9.11 then absorbs the sole live
+runtime-preflight policy into its Workflows consumer, injects backend readiness
+through a consumer-owned port, deletes the horizontal package and global test
+hook, and ratchets the exact shape to 181 production packages, 166 packages
+outside modules, 61 one-file packages, and 82 one-or-two-file packages. The
+session-store facade remains a known migration target only because bypassing it
+would create 24 forbidden direct persistence writes; the later deletion wave
+must migrate the complete port and remove the facade together. Wave 9.12
+deletes three one-file vocabulary seams (`authmode`, `backendnames`, and
+`cli/backendapi`) and ratchets the exact shape to 178 packages. Wave 9.13 then
+deletes the process-global runtime-context package and ambient event context
+provider, requires explicit caller context throughout CLI, session, event,
+monitor, and worker paths, and moves automode prompt construction to its
+composition callers. That slice ratchets the exact shape again to 177 packages,
+162 outside modules, 57 one-file packages, and 78 one-or-two-file packages
+without a replacement shim. Wave 9.14 deletes the shallow native-transcript
+dispatcher and Codex wrapper, makes Sessions select the recorded backend
+parser, and replaces the unknown
+backend's silent Claude fallback with an explicit error. It ratchets the exact
+shape to 175 packages, 160 outside modules, 55 one-file packages, and 76
+one-or-two-file packages. Wave 9.15 then deletes the remaining Claude and
+OpenCode transcript parser packages, keeps only owner-private parsing behavior
+in Sessions, and ratchets the exact shape to 173 packages, 158 outside modules,
+53 one-file packages, and 74 one-or-two-file packages. Wave 9.16 then deletes the
+forwarding-only session-store adapter and the separate session event-store
+package, moves archive and event-log policy behind the Sessions owner, and
+ratchets the exact shape to 171 packages, 156 outside modules, 51 one-file
+packages, and 72 one-or-two-file packages. Wave 9.17 deletes the terminal
+session-name command protocol and frontend name-derived backend/agent
+classification, requires server-derived durable launch envelopes before
+WebSocket attachment, and removes the dead connect-seeding callback. It leaves
+the exact package count unchanged while eliminating the known executable
+compatibility path. Wave 9.18 deletes the neutral Driver run-types bridge,
+makes Driver own its invocation contract, leaves Sandbox with placement policy
+and launcher evidence only, and deletes Driver's stale import-fanout exception.
+It ratchets the exact shape to 170 packages, 155 outside modules, 50 one-file
+packages, and 71 one-or-two-file packages. Wave 9.19 then deletes the shallow
+local-node-config wrapper and lets Bootstrap own the runtime-provider
+operations for its existing machine-local state cache. It ratchets the exact
+shape to 169 packages, 154 outside modules, 49 one-file packages, and 70
+one-or-two-file packages. Wave 9.20 deletes the Agents bootstrap application
+facade and horizontal store adapter, moves the
+monotonic PromptFile repair into the Agents owner over its revisioned Role
+port, requires injected owner commands for workspace creation and startup
+repair, and deletes the legacy Agents constructor and repair-specific
+persistence interface. It ratchets the exact shape to 167 packages, 152
+outside modules, 47 one-file packages, and 68 one-or-two-file packages while
+lowering direct persistence to 86 rows/95 sites and workspacemgr fanout to 14
+with no exception. Wave 9.21 deletes the Automation composition adapters that
+reconstructed binding-secret, grant-cleanup, and Agent-identity behavior over
+horizontal stores. Trigger-binding routes now consume the Connectors-owned
+binding lifecycle and canonical Agents identity queries, the real FleetDB and
+memstore adapters implement the owner persistence seam, and `agentmodules`
+fanout tightens from 38 to 37 without increasing the Agents handler ceiling.
+The exact package and direct-write shapes remain unchanged. Wave 9.22 removes
+the approval endpoint's composite Store/AwaitStore access and the
+trigger-binding endpoint's DriverRunStore/filter/ordering access. Both now
+consume exact read ports backed by the existing WebUI read-projection module;
+there is no handler fallback to the removed persistence paths. The live handler
+allowance falls from 19 to 17, while the exact package shape becomes
+`167 / 15 / 152 / 46 / 68` because `readprojection` is no longer a one-file
+package. Direct persistence remains `86 / 95`. Wave 9.23 then deletes the
+TriggerBinding secret plane across FleetDB and Loom. Connectors becomes the
+sole inbound-signing authority, the verifier consumes a narrow Automation
+route query and fails closed without a Connector, and the old field, route,
+permission, persistence column, CLI flag, compatibility verifier, and fallback
+resolver are absent. The handler allowance falls again to 16 and FleetDB
+client call sites fall from 238 to 236 without changing package shape or
+direct-write counts. The remaining waves delete the other horizontal
+handler/store edges and residual shallow
+packages; an empty
+capability-graph `legacy_paths` list alone is not completion proof. See the
+[Phase 9 plan](16-phase-9-package-consolidation.md).
+
 ## Approved architecture decisions
 
 | ID | Outcome |
@@ -217,4 +352,4 @@ historical Phase 1 through Phase 4 evidence remains immutable.
 
 ---
 
-[All migrations](../README.md) · Next: [Current-state evidence](01-current-state.md) · [Phase 7 evidence](14-phase-7-decisions-and-evidence.md) · [Phase 8 consolidation](15-phase-8-consolidation-and-evidence.md)
+[All migrations](../README.md) · Next: [Current-state evidence](01-current-state.md) · [Phase 8 consolidation](15-phase-8-consolidation-and-evidence.md) · [Phase 9 consolidation](16-phase-9-package-consolidation.md)

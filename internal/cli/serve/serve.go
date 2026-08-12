@@ -220,13 +220,6 @@ func runServe(cmd *cobra.Command, args []string) {
 		log.Fatalf("failed to open fleet-db store: %v", storeErr)
 	}
 	defer func() { _ = storeHandle.Close() }()
-	// Backfill TS-contract prompt bodies for the builtin plan/task roles in
-	// existing workspaces (idempotent; never clobbers a customized prompt), so
-	// the prompt-agent role-reuse lane works for workspaces created before the
-	// bodies were seeded. Best-effort — a failure logs and serve continues.
-	if err := workspacemgr.EnsureBuiltinRolePrompts(ctx, storeHandle.Store); err != nil {
-		slog.Warn("builtin role prompt backfill failed", "err", err)
-	}
 	issueBackendFn := cli.WorkspaceAwareIssueBackendForConfig(
 		storeHandle.URL(),
 		storeHandle.FleetDBClientAPIKey(),
@@ -250,6 +243,14 @@ func runServe(cmd *cobra.Command, args []string) {
 	cfg, capabilities, err := buildServerConfig(monitorHandlers, fleetState, storeHandle)
 	if err != nil {
 		log.Fatalf("failed to compose serve capabilities: %v", err)
+	}
+	// Backfill TS-contract prompt bodies only after the Agents capability has
+	// been composed. Workspace management receives owner commands, never the
+	// horizontal Role or Agent stores.
+	if err := workspacemgr.EnsureBuiltinRolePrompts(
+		ctx, storeHandle.Store, capabilities.agents,
+	); err != nil {
+		slog.Warn("builtin role prompt backfill failed", "err", err)
 	}
 	if cfg.AgentsCapability == nil || cfg.AgentsCapability.AgentsAPI() == nil {
 		log.Fatal("failed to compose monitor: canonical Agents directory is required")
@@ -370,6 +371,11 @@ func buildDriverExecutor(
 	executionCapability webui.ExecutionCapability,
 	nodeCapacity int,
 ) (*driverexecutor.Executor, bool) {
+	runTokenKey, err := driverRunTokenKey()
+	if err != nil {
+		slog.Error("driver executor disabled: invalid run-token signing key", "err", err)
+		return nil, false
+	}
 	sandboxLauncher, err := driverexecutor.ResolveSandboxLauncher()
 	if err != nil {
 		slog.Error("driver executor disabled: invalid sandbox configuration", "err", err)
@@ -391,11 +397,22 @@ func buildDriverExecutor(
 		NodeID:          os.Getenv("LOOM_DRIVER_EXECUTOR_NODE_ID"),
 		NodeCapacity:    nodeCapacity,
 		APIBaseURL:      driverAPIBaseURL(),
-		APIToken:        driverAPIToken(),
-		RunTokenKey:     driverRunTokenKey(),
+		RunTokenKey:     runTokenKey,
 		SandboxLauncher: sandboxLauncher,
 		RunOutcomes:     runOutcomes,
 	}
+	configureDriverExecutorCapability(executor, executionCapability)
+	workspaceScope := executor.WorkspaceKey
+	if workspaceScope == "" {
+		workspaceScope = "*all*"
+	}
+	slog.Info("Driver executor enabled", "workspace", workspaceScope, "work_dir", workDir, "sandbox", sandboxMode,
+		"sandbox_egress", sandboxEgress,
+		"task_worker_concurrency", nodeCapacity, "task_run_max_attempts", driverTaskRunMaxAttempts())
+	return executor, true
+}
+
+func configureDriverExecutorCapability(executor *driverexecutor.Executor, executionCapability webui.ExecutionCapability) {
 	if executionCapability != nil {
 		executor.Execution = executionCapability.DriverRunAPI()
 		executor.RunOutcomeQueue = executionCapability.DriverRunOutcomeAPI()
@@ -406,14 +423,6 @@ func buildDriverExecutor(
 		executor.TaskRunRecovery = executionCapability.TaskRunRecoveryAPI()
 		executor.StaleTaskRunMaxAge = driverStaleTaskMaxAge()
 	}
-	workspaceScope := executor.WorkspaceKey
-	if workspaceScope == "" {
-		workspaceScope = "*all*"
-	}
-	slog.Info("Driver executor enabled", "workspace", workspaceScope, "work_dir", workDir, "sandbox", sandboxMode,
-		"sandbox_egress", sandboxEgress,
-		"task_worker_concurrency", nodeCapacity, "task_run_max_attempts", driverTaskRunMaxAttempts())
-	return executor, true
 }
 
 // startDriverTaskWorkers launches the local TaskRun worker claim loops, one
@@ -437,24 +446,12 @@ func driverAPIBaseURL() string {
 	return fmt.Sprintf("http://%s:%d", host, servePort)
 }
 
-// driverAPIToken is the shared bearer token required by the driver-op HTTP
-// API; the executor forwards it to driver runtimes. Empty disables the gate.
-func driverAPIToken() string {
-	return os.Getenv("LOOM_DRIVER_API_TOKEN")
-}
-
 // driverRunTokenKey resolves the HS256 signing key for run-scoped driver-op
 // tokens (LOOM_RUN_TOKEN_SIGNING_KEY, with an ephemeral per-process fallback
-// for single-instance deployments). A malformed env key logs and disables the
-// run-token auth path — legacy header-quad auth keeps working — rather than
-// aborting serve.
-func driverRunTokenKey() []byte {
-	key, err := driverexecutor.ResolveRunTokenSigningKey()
-	if err != nil {
-		slog.Error("driver run-token auth disabled: resolve signing key", "err", err)
-		return nil
-	}
-	return key
+// for single-instance deployments). Malformed configuration is returned to
+// composition so serve fails before registering a tokenless Driver API.
+func driverRunTokenKey() ([]byte, error) {
+	return driverexecutor.ResolveRunTokenSigningKey()
 }
 
 // resolveDriverExecutorWorkspace resolves the workspace scope for the driver
@@ -553,7 +550,7 @@ type fleetState struct {
 
 func resolveFleetState(ctx context.Context) fleetState {
 	fs := fleetState{}
-	if dc, dcErr := config.LoadRuntimeConfig("."); dcErr == nil {
+	if dc, dcErr := config.LoadRuntimeConfig(ctx, "."); dcErr == nil {
 		fs.modeDetected = cli.IsFleetMode(dc)
 	} else {
 		fs.modeDetected = cli.IsFleetModeFromEnv()
@@ -628,7 +625,7 @@ func applyStoreHandleServerConfig(
 	fs fleetState,
 	storeHandle *bootstrap.StoreHandle,
 	gitOps *opsimpl.GitOpsImpl,
-) fleetState {
+) (fleetState, error) {
 	cfg.Store = storeHandle.Store
 	gitOps.WithStore(storeHandle.Store)
 	if url := storeHandle.URL(); url != "" {
@@ -642,15 +639,19 @@ func applyStoreHandleServerConfig(
 		cfg.FleetDBBaseURL = url
 		fs = withStoreFleetConfig(fs, url, fleetAPIKey)
 	}
-	cfg.DriverAPIToken = driverAPIToken()
 	cfg.DriverAPIBaseURL = driverAPIBaseURL()
-	cfg.DriverRunTokenKey = driverRunTokenKey()
-	return fs
+	runTokenKey, err := driverRunTokenKey()
+	if err != nil {
+		return fs, fmt.Errorf("resolve Driver API run-token signing key: %w", err)
+	}
+	cfg.DriverRunTokenKey = runTokenKey
+	return fs, nil
 }
 
 type serveCapabilitySet struct {
 	workflowCatalog     *serveadapter.WorkflowCatalogModule
 	automation          *serveadapter.AutomationCapability
+	agents              *serveadapter.AgentsCapability
 	interaction         *serveadapter.InteractionCapability
 	workspaceAdmissions *workspacemgr.StoreBackedWorkspaceAdmissionOperations
 	runtime             []serveadapter.RuntimeContributor
@@ -669,7 +670,11 @@ func buildServerConfig(
 	cfg := buildCoreServerConfig(monitorHandlers, gitOps, resolvedBackend)
 	cfg.DaytonaProvider = serveadapter.NewDaytonaProviderBroker(cfg.LocalSettingsDir)
 	if storeHandle != nil {
-		fs = applyStoreHandleServerConfig(&cfg, fs, storeHandle, gitOps)
+		var err error
+		fs, err = applyStoreHandleServerConfig(&cfg, fs, storeHandle, gitOps)
+		if err != nil {
+			return webui.ServerConfig{}, serveCapabilitySet{}, err
+		}
 	}
 	if cfg.Store != nil {
 		workspaceCapability, workspaceErr := workspacecatalog.New(cfg.Store.Workspaces(), cfg.Store.Repos())
@@ -720,6 +725,7 @@ func buildServerConfig(
 			return webui.ServerConfig{}, serveCapabilitySet{}, agentsErr
 		}
 		cfg.AgentsCapability = agentsCapability
+		capabilities.agents = agentsCapability
 		gitOps.WithAgentQueries(agentsCapability.AgentsAPI())
 		cfg.SourceControl = agentsCapability.SourceControlMaterializer()
 		cfg.WorkspaceSourceControl = agentsCapability.RepositoryAdmissionMaterializer()
@@ -763,6 +769,7 @@ func buildServerConfig(
 		&cfg,
 		storeHandle,
 		repositoryAdmissionJournal,
+		capabilities.agents,
 	)
 	if workspaceAdmissions != nil {
 		capabilities.workspaceAdmissions = workspaceAdmissions
@@ -860,14 +867,18 @@ func applyFleetConfig(cfg *webui.ServerConfig, fs fleetState) {
 
 // applyWorkspaceConfig wires store-backed workspace operations into the webui
 // server. Nil-store serve leaves workspace management unavailable.
-func applyWorkspaceConfig(cfg *webui.ServerConfig) {
-	_ = applyWorkspaceConfigWithAdmission(cfg, nil, nil)
+func applyWorkspaceConfig(
+	cfg *webui.ServerConfig,
+	agentsCommands workspacemgr.ManagedAgentsCommands,
+) {
+	_ = applyWorkspaceConfigWithAdmission(cfg, nil, nil, agentsCommands)
 }
 
 func applyWorkspaceConfigWithAdmission(
 	cfg *webui.ServerConfig,
 	storeHandle *bootstrap.StoreHandle,
 	journal *workspacemgr.RepositoryAdmissionJournal,
+	agentsCommands workspacemgr.ManagedAgentsCommands,
 ) *workspacemgr.StoreBackedWorkspaceAdmissionOperations {
 	if cfg.Store == nil {
 		applyFleetInitialWorkspaceFallback(cfg, true)
@@ -884,10 +895,14 @@ func applyWorkspaceConfigWithAdmission(
 	operations := workspacemgr.NewStoreBackedWorkspaceAdmissionOperationsWithWorkspace(
 		cfg.Store,
 		cfg.WorkspaceCatalog,
+		agentsCommands,
 		admissions,
 		journal,
 		cfg.WorkspaceSourceControl,
 	)
+	if operations == nil {
+		return nil
+	}
 	cfg.WorkspaceCreateFn = operations.CreateWorkspace
 	cfg.WorkspaceAddReposFn = operations.AddWorkspaceRepos
 	if len(operations.RuntimeRegistrations()) > 0 {

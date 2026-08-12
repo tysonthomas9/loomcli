@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"sort"
@@ -48,10 +49,10 @@ func runList(cmd *cobra.Command, args []string) {
 		return
 	}
 
-	renderListWorkspace(worktrees)
+	renderListWorkspace(cmd.Context(), worktrees)
 }
 
-func renderListWorkspace(worktrees []cli.WorktreeInfo) {
+func renderListWorkspace(ctx context.Context, worktrees []cli.WorktreeInfo) {
 	// Group worktrees by workspace
 	groups := make(map[string][]cli.WorktreeInfo)
 	for _, wt := range worktrees {
@@ -75,7 +76,7 @@ func renderListWorkspace(worktrees []cli.WorktreeInfo) {
 	for _, ws := range wsNames {
 		fmt.Printf("\n[%s]\n", ws)
 		for _, wt := range groups[ws] {
-			status := getWorktreeListStatus(wt)
+			status := getWorktreeListStatus(ctx, wt)
 			fmt.Printf("  %-12s  %-20s  %s\n", wt.Name, wt.Branch, status)
 		}
 	}
@@ -85,9 +86,9 @@ func renderListWorkspace(worktrees []cli.WorktreeInfo) {
 	fmt.Printf("Default branch: %s\n", cli.GetDefaultBranchForWorktrees(worktrees))
 }
 
-func getWorktreeListStatusDeps(deps *cli.Deps, wt cli.WorktreeInfo) string {
+func getWorktreeListStatusDeps(ctx context.Context, deps *cli.Deps, wt cli.WorktreeInfo) string {
 	// Check for running agent first (highest priority)
-	lockStatus := cli.GetLockStatus(wt.Path)
+	lockStatus := cli.GetLockStatus(ctx, wt.Path)
 	if lockStatus != "" {
 		return fmt.Sprintf("● %s", lockStatus)
 	}
@@ -108,8 +109,8 @@ func getWorktreeListStatusDeps(deps *cli.Deps, wt cli.WorktreeInfo) string {
 	return status
 }
 
-func getWorktreeListStatus(wt cli.WorktreeInfo) string {
-	return getWorktreeListStatusDeps(cli.GetDeps(nil), wt)
+func getWorktreeListStatus(ctx context.Context, wt cli.WorktreeInfo) string {
+	return getWorktreeListStatusDeps(ctx, cli.GetDeps(nil), wt)
 }
 
 func GetUncommittedChangesCountDeps(deps *cli.Deps, path string) int {

@@ -22,7 +22,7 @@ func TestSessionCapture_FullLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	store, err := sessions.NewStore(runtimeDir)
+	store, err := sessions.NewStore(t.Context(), runtimeDir)
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}
@@ -153,7 +153,7 @@ func TestSessionCapture_FullLifecycle(t *testing.T) {
 // writes entries with auto-assigned Seq numbers.
 func TestSessionCapture_TranscriptAppend(t *testing.T) {
 	runtimeDir := t.TempDir()
-	store, err := sessions.NewStore(runtimeDir)
+	store, err := sessions.NewStore(t.Context(), runtimeDir)
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}
@@ -210,7 +210,7 @@ func TestSessionCapture_TranscriptAppend(t *testing.T) {
 // queryable records sorted by StartedAt.
 func TestSessionCapture_MultipleSessionsPerTask(t *testing.T) {
 	runtimeDir := t.TempDir()
-	store, err := sessions.NewStore(runtimeDir)
+	store, err := sessions.NewStore(t.Context(), runtimeDir)
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}
@@ -281,7 +281,7 @@ func TestSessionCapture_FailedSession(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	store, err := sessions.NewStore(runtimeDir)
+	store, err := sessions.NewStore(t.Context(), runtimeDir)
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}
@@ -353,7 +353,7 @@ func TestSessionCapture_FailedSession(t *testing.T) {
 // matching what the HTTP handler would return.
 func TestSessionCapture_ApiQuery(t *testing.T) {
 	runtimeDir := t.TempDir()
-	store, err := sessions.NewStore(runtimeDir)
+	store, err := sessions.NewStore(t.Context(), runtimeDir)
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}

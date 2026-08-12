@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/gitauth"
 	infralocalgit "github.com/tysonthomas9/loomcli/internal/infra/localgit"
 	"github.com/tysonthomas9/loomcli/internal/modules/connectors"
 	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
@@ -17,6 +18,33 @@ import (
 )
 
 type sourceControlRepositoryResolverFunc func(context.Context, string, string) (sourcecontrol.RepositoryCheckout, error)
+
+type sourceControlGrantStoreStub struct{}
+
+func (sourceControlGrantStoreStub) CreateGrant(context.Context, connectors.CreateGrantMutation) (*connectors.ConnectorGrant, error) {
+	return nil, connectors.ErrUnavailable
+}
+
+func (sourceControlGrantStoreStub) ListGrantsByBinding(context.Context, string, string) ([]*connectors.ConnectorGrant, error) {
+	return []*connectors.ConnectorGrant{}, nil
+}
+
+func newSourceControlCapability(
+	issuer *authority.Issuer,
+	credentialSource gitauth.Source,
+	repositories sourcecontrol.RepositoryResolver,
+	inspector sourcecontrol.CheckoutInspector,
+	now func() time.Time,
+) (*SourceControlCapability, error) {
+	return newSourceControlCapabilityWithGrants(
+		issuer,
+		credentialSource,
+		repositories,
+		inspector,
+		sourceControlGrantStoreStub{},
+		now,
+	)
+}
 
 func (function sourceControlRepositoryResolverFunc) ResolveRepositoryCheckout(
 	ctx context.Context,
@@ -334,11 +362,12 @@ func TestSourceControlCompositionRejectsMissingDependencies(t *testing.T) {
 	); capability != nil || err == nil {
 		t.Fatalf("nil clock composition = %#v, %v", capability, err)
 	}
-	if capability, err := NewSourceControlCapability(
+	if capability, err := NewSourceControlCapabilityWithFleetDB(
 		"",
 		sourceControlRepositoryResolverFunc(func(context.Context, string, string) (sourcecontrol.RepositoryCheckout, error) {
 			return sourcecontrol.RepositoryCheckout{}, nil
 		}),
+		nil,
 		nil,
 	); capability != nil || err == nil {
 		t.Fatalf("nil catalog composition = %#v, %v", capability, err)

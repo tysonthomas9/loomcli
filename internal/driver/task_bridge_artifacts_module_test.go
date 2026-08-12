@@ -106,7 +106,7 @@ func TestBridgeCreateContentArtifactUsesArtifactsOwnerLifecycle(t *testing.T) {
 		t.Fatalf("CreateContent references = %#v", artifactsAPI.contentReferences)
 	}
 
-	persisted, err := st.Artifacts().Get(ctx, req.WorkspaceKey, artifact.ArtifactID)
+	persisted, err := st.ArtifactQueries().GetArtifactRecord(ctx, req.WorkspaceKey, artifact.ArtifactID)
 	if err != nil {
 		t.Fatalf("get persisted artifact: %v", err)
 	}
@@ -125,7 +125,7 @@ func TestBridgeArtifactMutationFailsClosedWithoutCapability(t *testing.T) {
 	if !errors.Is(err, artifactsmodule.ErrUnavailable) {
 		t.Fatalf("createContentArtifact error = %v, want Artifacts unavailable", err)
 	}
-	if _, getErr := st.Artifacts().Get(context.Background(), req.WorkspaceKey, "logs-task-run-1"); !errors.Is(getErr, domain.ErrNotFound) {
+	if _, getErr := st.ArtifactQueries().GetArtifactRecord(context.Background(), req.WorkspaceKey, "logs-task-run-1"); !errors.Is(getErr, artifactsmodule.ErrNotFound) {
 		t.Fatalf("artifact persisted without capability, get error = %v", getErr)
 	}
 }
@@ -144,7 +144,7 @@ func TestBridgeCreateContentArtifactRejectsUnfencedOwnerBeforePersistence(t *tes
 	if !errors.Is(err, authority.ErrInvalidScope) {
 		t.Fatalf("createContentArtifact error = %v, want authority.ErrInvalidScope", err)
 	}
-	if _, getErr := st.Artifacts().Get(ctx, req.WorkspaceKey, "logs-task-run-1"); !errors.Is(getErr, domain.ErrNotFound) {
+	if _, getErr := st.ArtifactQueries().GetArtifactRecord(ctx, req.WorkspaceKey, "logs-task-run-1"); !errors.Is(getErr, artifactsmodule.ErrNotFound) {
 		t.Fatalf("unfenced call persisted artifact, get error = %v", getErr)
 	}
 }
@@ -214,7 +214,7 @@ func TestBridgeCreatePatchArtifactRejectsUnfencedOwnerBeforePersistence(t *testi
 	if !errors.Is(err, authority.ErrInvalidScope) {
 		t.Fatalf("createPatchArtifact error = %v, want authority.ErrInvalidScope", err)
 	}
-	if _, getErr := st.Artifacts().Get(ctx, req.WorkspaceKey, "patch-"+req.TaskRunID); !errors.Is(getErr, domain.ErrNotFound) {
+	if _, getErr := st.ArtifactQueries().GetArtifactRecord(ctx, req.WorkspaceKey, "patch-"+req.TaskRunID); !errors.Is(getErr, artifactsmodule.ErrNotFound) {
 		t.Fatalf("unfenced call persisted artifact, get error = %v", getErr)
 	}
 }

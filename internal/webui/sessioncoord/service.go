@@ -9,11 +9,9 @@ import (
 	"strings"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/infra/artifactcatalog"
 	artifactsmodule "github.com/tysonthomas9/loomcli/internal/modules/artifacts"
 	"github.com/tysonthomas9/loomcli/internal/sessions"
 	"github.com/tysonthomas9/loomcli/internal/sessions/transcript"
-	"github.com/tysonthomas9/loomcli/internal/sessions/transcript/backends"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/apperrors"
 	"github.com/tysonthomas9/loomcli/internal/webui/storeadapter"
@@ -32,6 +30,12 @@ var errNoUsableSessionStores = errors.New("no usable local session stores")
 
 func sessionControlPlaneReadError(message string, err error) error {
 	switch {
+	case errors.Is(err, domain.ErrNotFound), errors.Is(err, artifactsmodule.ErrNotFound):
+		return apperrors.NewServiceError(
+			apperrors.KindNotFound,
+			message,
+			err,
+		)
 	case errors.Is(err, domain.ErrRateLimited):
 		return apperrors.NewServiceError(
 			apperrors.KindRateLimited,
@@ -63,24 +67,32 @@ type ProjectionReader interface {
 	storeadapter.WorkspaceTopologyReader
 	TaskRuns() store.TaskRunStore
 	AgentSessions() store.AgentSessionStore
-	Artifacts() store.ArtifactStore
+}
+
+// ProjectionReaderWithArtifactQueries is the convenience composition surface
+// used by tests and narrow callers that hold a concrete persistence adapter.
+// Runtime Web UI composition injects the Artifacts capability QueryAPI
+// directly instead of routing it through the horizontal Store interface.
+type ProjectionReaderWithArtifactQueries interface {
+	ProjectionReader
+	ArtifactQueries() artifactsmodule.QueryStore
 }
 
 // NewSessionService creates a new SessionService implementation.
-func NewSessionService(st ProjectionReader, histStore HistoryReader) SessionService {
+func NewSessionService(st ProjectionReaderWithArtifactQueries, histStore HistoryReader) SessionService {
 	return NewSessionServiceWithRuntimeDir(st, histStore, "")
 }
 
 // NewSessionServiceWithRuntimeDir creates a SessionService that also searches
 // the daemon/runtime session store used by local desktop mode.
-func NewSessionServiceWithRuntimeDir(st ProjectionReader, histStore HistoryReader, runtimeDir string) SessionService {
+func NewSessionServiceWithRuntimeDir(st ProjectionReaderWithArtifactQueries, histStore HistoryReader, runtimeDir string) SessionService {
 	return NewSessionServiceWithArtifactQueries(st, histStore, runtimeDir, composeArtifactQueries(st))
 }
 
 // NewSessionServiceWithArtifactQueries composes session UI projections over
 // the Artifacts owner query surface. Production and boundary tests can inject
-// the capability directly; legacy constructors above retain compatibility by
-// adapting the composite Store once at composition time.
+// the capability directly; the convenience constructors derive it from the
+// owner-owned query port exposed by the projection reader.
 func NewSessionServiceWithArtifactQueries(
 	st ProjectionReader,
 	histStore HistoryReader,
@@ -90,12 +102,11 @@ func NewSessionServiceWithArtifactQueries(
 	return &sessionServiceImpl{store: st, artifacts: artifactQueries, histStore: histStore, runtimeDir: runtimeDir}
 }
 
-func composeArtifactQueries(st ProjectionReader) artifactsmodule.QueryAPI {
-	catalog, err := artifactcatalog.FromProvider(st)
-	if err != nil {
+func composeArtifactQueries(st ProjectionReaderWithArtifactQueries) artifactsmodule.QueryAPI {
+	if st == nil {
 		return nil
 	}
-	queries, err := artifactsmodule.NewQuery(catalog)
+	queries, err := artifactsmodule.NewQuery(st.ArtifactQueries())
 	if err != nil {
 		return nil
 	}
@@ -106,7 +117,7 @@ func composeArtifactQueries(st ProjectionReader) artifactsmodule.QueryAPI {
 // Agent worktrees store sessions in their own directories, so we need to
 // search across all repos to find sessions for a given task.
 func (s *sessionServiceImpl) storesForWorkspace(ctx context.Context, wsID string) ([]*sessions.Store, error) {
-	collection := newSessionStoreCollection()
+	collection := newSessionStoreCollection(ctx)
 	s.addRuntimeSessionStoreCandidates(wsID, collection)
 	if err := s.addWorkspaceSessionStores(ctx, wsID, collection); err != nil {
 		return nil, err
@@ -118,12 +129,13 @@ func (s *sessionServiceImpl) storesForWorkspace(ctx context.Context, wsID string
 }
 
 type sessionStoreCollection struct {
+	ctx    context.Context
 	stores []*sessions.Store
 	seen   map[string]struct{}
 }
 
-func newSessionStoreCollection() *sessionStoreCollection {
-	return &sessionStoreCollection{seen: make(map[string]struct{})}
+func newSessionStoreCollection(ctx context.Context) *sessionStoreCollection {
+	return &sessionStoreCollection{ctx: ctx, seen: make(map[string]struct{})}
 }
 
 func (c *sessionStoreCollection) add(runtimeDir string) {
@@ -138,7 +150,7 @@ func (c *sessionStoreCollection) add(runtimeDir string) {
 		return
 	}
 	c.seen[key] = struct{}{}
-	st, err := sessions.NewStore(runtimeDir)
+	st, err := sessions.NewStore(c.ctx, runtimeDir)
 	if err != nil {
 		logger.Warn("failed to open local session store", "runtime_dir", runtimeDir, "err", err)
 		return
@@ -279,7 +291,7 @@ func (s *sessionServiceImpl) findStoreForSession(ctx context.Context, wsID, sess
 	// stale. Check those local candidates first so loading a transcript, diff,
 	// or detail does not depend on a control-plane fanout.
 	if validSessionID.MatchString(sessionID) {
-		collection := newSessionStoreCollection()
+		collection := newSessionStoreCollection(ctx)
 		s.addRuntimeSessionStoreCandidates(wsID, collection)
 		if st := storeOwningSession(collection.stores, sessionID); st != nil {
 			return st, nil
@@ -788,7 +800,7 @@ func (s *sessionServiceImpl) GetSessionSubagentTranscript(ctx context.Context, w
 		}
 		return nil, apperrors.ErrInternal("stat subagent transcript", statErr)
 	}
-	events, parseErr := backends.ParseEventsFromFile(meta.Backend, path)
+	events, parseErr := sessions.ParseNativeEventsFromFile(meta.Backend, path)
 	if parseErr != nil {
 		return nil, apperrors.ErrInternal("parse subagent transcript", parseErr)
 	}

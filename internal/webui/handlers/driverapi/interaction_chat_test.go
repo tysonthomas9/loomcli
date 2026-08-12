@@ -8,7 +8,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
+	driverpkg "github.com/tysonthomas9/loomcli/internal/driver"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
@@ -217,7 +219,8 @@ func newInteractionHTTPModule(
 		FencingToken: 1,
 	}
 	return NewModule(Config{
-		Store: memstore.New(),
+		Store:       memstore.New(),
+		RunTokenKey: bytes.Repeat([]byte{0x42}, 32),
 		Execution: interactionHTTPExecution{
 			run: &execution.DriverRun{
 				WorkspaceKey: "WS",
@@ -245,11 +248,13 @@ func serveInteractionHTTPRequest(
 			`{"agent":"worker-1","message":"hello"}`,
 		),
 	)
-	request.Header.Set(HeaderDriverRunID, "run-1")
-	request.Header.Set(HeaderDriverNodeID, "node-1")
-	request.Header.Set(HeaderDriverLeaseID, "lease-1")
-	request.Header.Set(HeaderDriverLeaseToken, "lease-token")
-	request.Header.Set(HeaderDriverFencingToken, "1")
+	runToken, err := driverpkg.MintRunToken(driverpkg.RunTokenClaims{
+		WorkspaceKey: "WS", RunID: "run-1", NodeID: "node-1", LeaseID: "lease-1", FencingToken: 1,
+	}, bytes.Repeat([]byte{0x42}, 32), time.Hour)
+	if err != nil {
+		t.Fatalf("MintRunToken: %v", err)
+	}
+	request.Header.Set("Authorization", "Bearer "+runToken)
 	recorder := httptest.NewRecorder()
 	mux.ServeHTTP(recorder, request)
 	return recorder

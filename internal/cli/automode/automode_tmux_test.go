@@ -47,9 +47,9 @@ func TestGetAnyAvailableTasks_WithParentID(t *testing.T) {
 			}
 			setDefaultIssueBackend(mock)
 
-			_, err := GetAnyAvailableTasks(tt.parentID, "")
+			_, err := GetAnyAvailableTasks(t.Context(), tt.parentID, "")
 			if err != nil {
-				t.Fatalf("GetAnyAvailableTasks(%q) unexpected error: %v", tt.parentID, err)
+				t.Fatalf("GetAnyAvailableTasks(t.Context(), %q) unexpected error: %v", tt.parentID, err)
 			}
 
 			if capturedOpts.ParentID != tt.wantParentID {
@@ -97,13 +97,13 @@ func TestHasAvailablePlanningTasks_WithParentID(t *testing.T) {
 			}
 			setDefaultIssueBackend(mock)
 
-			got, err := HasAvailablePlanningTasks(tt.parentID, "")
+			got, err := HasAvailablePlanningTasks(t.Context(), tt.parentID, "")
 			if err != nil {
-				t.Fatalf("HasAvailablePlanningTasks(%q) unexpected error: %v", tt.parentID, err)
+				t.Fatalf("HasAvailablePlanningTasks(t.Context(), %q) unexpected error: %v", tt.parentID, err)
 			}
 
 			if !got {
-				t.Errorf("HasAvailablePlanningTasks(%q) = false, want true", tt.parentID)
+				t.Errorf("HasAvailablePlanningTasks(t.Context(), %q) = false, want true", tt.parentID)
 			}
 
 			if capturedOpts.ParentID != tt.wantParentID {
@@ -148,13 +148,13 @@ func TestHasAvailableImplementationTasks_WithParentID(t *testing.T) {
 			}
 			setDefaultIssueBackend(mock)
 
-			got, err := HasAvailableImplementationTasks(tt.parentID, "")
+			got, err := HasAvailableImplementationTasks(t.Context(), tt.parentID, "")
 			if err != nil {
-				t.Fatalf("HasAvailableImplementationTasks(%q) unexpected error: %v", tt.parentID, err)
+				t.Fatalf("HasAvailableImplementationTasks(t.Context(), %q) unexpected error: %v", tt.parentID, err)
 			}
 
 			if !got {
-				t.Errorf("HasAvailableImplementationTasks(%q) = false, want true", tt.parentID)
+				t.Errorf("HasAvailableImplementationTasks(t.Context(), %q) = false, want true", tt.parentID)
 			}
 
 			if capturedOpts.ParentID != tt.wantParentID {
@@ -199,13 +199,13 @@ func TestHasAnyAvailableTasks_WithParentID(t *testing.T) {
 			}
 			setDefaultIssueBackend(mock)
 
-			got, err := HasAnyAvailableTasks(tt.parentID, "")
+			got, err := HasAnyAvailableTasks(t.Context(), tt.parentID, "")
 			if err != nil {
-				t.Fatalf("HasAnyAvailableTasks(%q) unexpected error: %v", tt.parentID, err)
+				t.Fatalf("HasAnyAvailableTasks(t.Context(), %q) unexpected error: %v", tt.parentID, err)
 			}
 
 			if !got {
-				t.Errorf("HasAnyAvailableTasks(%q) = false, want true", tt.parentID)
+				t.Errorf("HasAnyAvailableTasks(t.Context(), %q) = false, want true", tt.parentID)
 			}
 
 			if capturedOpts.ParentID != tt.wantParentID {
@@ -300,7 +300,7 @@ func TestFetchReadyIssues_EmptyResult(t *testing.T) {
 	mock.ReadyResult = []backend.IssueData{}
 	setDefaultIssueBackend(mock)
 
-	issues, err := fetchReadyIssues("", "")
+	issues, err := fetchReadyIssues(t.Context(), "", "")
 	if err != nil {
 		t.Fatalf("fetchReadyIssues() unexpected error: %v", err)
 	}
@@ -320,7 +320,7 @@ func TestFetchReadyIssues_ReturnsTrackerResult(t *testing.T) {
 	}
 	setDefaultIssueBackend(mock)
 
-	issues, err := fetchReadyIssues("", "")
+	issues, err := fetchReadyIssues(t.Context(), "", "")
 	if err != nil {
 		t.Fatalf("fetchReadyIssues() unexpected error: %v", err)
 	}
@@ -339,7 +339,7 @@ func TestFetchReadyIssues_TrackerError(t *testing.T) {
 	mock.ReadyErr = fmt.Errorf("command failed")
 	setDefaultIssueBackend(mock)
 
-	_, err := fetchReadyIssues("", "")
+	_, err := fetchReadyIssues(t.Context(), "", "")
 	if err == nil {
 		t.Fatal("fetchReadyIssues() expected error, got nil")
 	}
@@ -359,7 +359,7 @@ func TestFetchReadyIssues_PassesParentID(t *testing.T) {
 	}
 	setDefaultIssueBackend(mock)
 
-	_, err := fetchReadyIssues("epic-123", "")
+	_, err := fetchReadyIssues(t.Context(), "epic-123", "")
 	if err != nil {
 		t.Fatalf("fetchReadyIssues() unexpected error: %v", err)
 	}
@@ -383,7 +383,7 @@ func TestFetchReadyIssues_PassesRepoLabel(t *testing.T) {
 	}
 	setDefaultIssueBackend(mock)
 
-	_, err := fetchReadyIssues("", "frontend")
+	_, err := fetchReadyIssues(t.Context(), "", "frontend")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -403,7 +403,7 @@ func TestFetchReadyIssues_NoRepoLabel(t *testing.T) {
 	}
 	setDefaultIssueBackend(mock)
 
-	_, err := fetchReadyIssues("", "")
+	_, err := fetchReadyIssues(t.Context(), "", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -423,7 +423,7 @@ func TestFetchReadyIssues_PassesBothFilters(t *testing.T) {
 	}
 	setDefaultIssueBackend(mock)
 
-	_, err := fetchReadyIssues("E-1", "backend")
+	_, err := fetchReadyIssues(t.Context(), "E-1", "backend")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -451,7 +451,7 @@ func TestFetchReadyIssues_PassesSourceRepos(t *testing.T) {
 	setDefaultIssueBackend(mock)
 	t.Setenv("LOOM_SOURCE_REPOS", "repo-a,repo-b")
 
-	_, err := fetchReadyIssues("", "")
+	_, err := fetchReadyIssues(t.Context(), "", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -472,7 +472,7 @@ func TestFetchReadyIssues_SourceReposWithParent(t *testing.T) {
 	setDefaultIssueBackend(mock)
 	t.Setenv("LOOM_SOURCE_REPOS", "repo-a")
 
-	_, err := fetchReadyIssues("epic-123", "")
+	_, err := fetchReadyIssues(t.Context(), "epic-123", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -496,7 +496,7 @@ func TestFetchReadyIssues_NoSourceRepos(t *testing.T) {
 	setDefaultIssueBackend(mock)
 	t.Setenv("LOOM_SOURCE_REPOS", "")
 
-	_, err := fetchReadyIssues("", "")
+	_, err := fetchReadyIssues(t.Context(), "", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -551,14 +551,14 @@ func TestRunAutoModeLoop_ConsecutiveNoProgress(t *testing.T) {
 		WorktreePath: tmpDir,
 		BackoffBase:  500 * time.Millisecond, // Long enough for 100ms shutdown to arrive during backoff
 		TaskPause:    10 * time.Millisecond,
-		CustomPromptGen: func(name string, _ *WorkspaceConfig) string {
+		Prompt: func(name string) string {
 			return "test-prompt-for-" + name
 		},
 	}
 
 	done := make(chan struct{})
 	go func() {
-		RunAutoModeLoop(opts, shutdown)
+		RunAutoModeLoop(t.Context(), opts, shutdown)
 		close(done)
 	}()
 
@@ -616,14 +616,14 @@ func TestRunAutoModeLoop_NoProgressCounterResetOnSuccess(t *testing.T) {
 		WorktreePath: tmpDir,
 		BackoffBase:  10 * time.Millisecond,
 		TaskPause:    10 * time.Millisecond,
-		CustomPromptGen: func(name string, _ *WorkspaceConfig) string {
+		Prompt: func(name string) string {
 			return "test-prompt-for-" + name
 		},
 	}
 
 	done := make(chan struct{})
 	go func() {
-		RunAutoModeLoop(opts, shutdown)
+		RunAutoModeLoop(t.Context(), opts, shutdown)
 		close(done)
 	}()
 
@@ -939,7 +939,7 @@ func TestRunAutoModeTmux_NoTasks(t *testing.T) {
 
 	done := make(chan struct{})
 	go func() {
-		RunAutoModeTmux(opts, shutdown)
+		RunAutoModeTmux(t.Context(), opts, shutdown)
 		close(done)
 	}()
 
@@ -982,7 +982,7 @@ func TestRunAutoModeTmux_TaskCheckError(t *testing.T) {
 
 	done := make(chan struct{})
 	go func() {
-		RunAutoModeTmux(opts, shutdown)
+		RunAutoModeTmux(t.Context(), opts, shutdown)
 		close(done)
 	}()
 
@@ -1037,14 +1037,14 @@ func TestRunAutoModeLoop_LockStateTransitions(t *testing.T) {
 		WorktreePath: tmpDir,
 		BackoffBase:  10 * time.Millisecond,
 		TaskPause:    10 * time.Millisecond,
-		CustomPromptGen: func(name string, _ *WorkspaceConfig) string {
+		Prompt: func(name string) string {
 			return "test-prompt-for-" + name
 		},
 	}
 
 	done := make(chan struct{})
 	go func() {
-		RunAutoModeLoop(opts, shutdown)
+		RunAutoModeLoop(t.Context(), opts, shutdown)
 		close(done)
 	}()
 
@@ -1114,14 +1114,14 @@ func TestRunAutoModeLoop_ClearsTaskIDBeforeEachSession(t *testing.T) {
 		WorktreePath: tmpDir,
 		BackoffBase:  10 * time.Millisecond,
 		TaskPause:    10 * time.Millisecond,
-		CustomPromptGen: func(name string, _ *WorkspaceConfig) string {
+		Prompt: func(name string) string {
 			return "test-prompt-for-" + name
 		},
 	}
 
 	done := make(chan struct{})
 	go func() {
-		RunAutoModeLoop(opts, shutdown)
+		RunAutoModeLoop(t.Context(), opts, shutdown)
 		close(done)
 	}()
 
@@ -1386,14 +1386,14 @@ func TestRunAutoModeLoop_ThreeConsecutiveNoProgressExits(t *testing.T) {
 		WorktreePath: tmpDir,
 		BackoffBase:  10 * time.Millisecond,
 		TaskPause:    10 * time.Millisecond,
-		CustomPromptGen: func(name string, _ *WorkspaceConfig) string {
+		Prompt: func(name string) string {
 			return "test-prompt-for-" + name
 		},
 	}
 
 	done := make(chan struct{})
 	go func() {
-		RunAutoModeLoop(opts, shutdown)
+		RunAutoModeLoop(t.Context(), opts, shutdown)
 		close(done)
 	}()
 

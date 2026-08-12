@@ -127,7 +127,7 @@ type EventData struct {
 }
 
 // StatsData contains aggregate issue statistics.
-// Fields mirror types.Statistics so no data is dropped during mapping.
+// Fields preserve the existing statistics JSON contract.
 type StatsData struct {
 	TotalIssues             int     `json:"total_issues"`
 	OpenIssues              int     `json:"open_issues"`

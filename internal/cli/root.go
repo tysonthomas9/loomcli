@@ -12,8 +12,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
-	"github.com/tysonthomas9/loomcli/internal/events"
 	"github.com/tysonthomas9/loomcli/internal/observability/tracing"
 )
 
@@ -128,7 +126,7 @@ func init() {
 		// inherited from the shell. resolveDirectIssueBackend() reads
 		// defaultDeps.IssueBackend, so refresh it here before any
 		// subcommand runs.
-		deps := DefaultDeps()
+		deps := DefaultDeps(cmd.Context())
 		defaultDeps = deps
 		cmd.SetContext(WithDeps(cmd.Context(), deps))
 		return nil
@@ -183,10 +181,9 @@ func Execute() error {
 
 	// Wrap the entire CLI invocation in a root span so HTTP calls to fleet-db
 	// hang off it as children rather than fragmenting into per-call traces.
-	// Cobra subcommands ignore cmd.Context() in many helpers (cmdstore.WithStore
-	// builds its own SignalContext), so we publish the trace-bearing context
-	// as a process-wide root via cmdstore.SetRootContext for any helper that
-	// derives its context from there.
+	// Cobra carries the trace-bearing context through every command. Helpers
+	// receive it explicitly so tracing and cancellation never depend on ambient
+	// process-global state.
 	tracer := tracing.Tracer("github.com/tysonthomas9/loomcli/internal/cli")
 	// BootstrapContext consumes LOOM_TRACE_PARENT (set by a parent loom
 	// process — platform runtime spawning an agent, or loom spawning embedded fleet-db)
@@ -196,14 +193,10 @@ func Execute() error {
 	ctx, span := tracer.Start(bootstrapCtx, "loom.cli")
 	defer span.End()
 	rootCmd.SetContext(ctx)
-	cmdstore.SetRootContext(ctx)
+	defaultDeps = DefaultDeps(ctx)
 	// Publish the active span + shutdown so any handler that calls os.Exit
 	// can route through ExitWithFlush() and still flush traces.
 	RegisterActiveTraceState(span, traceShutdown)
-	// Bus.Emit uses this provider to capture the active trace context into
-	// every emitted event (Event.TraceParent). Without it, loom.task /
-	// loom.agent.lifecycle spans would land in a separate trace.
-	events.SetContextProvider(cmdstore.RootContext)
 	if len(os.Args) > 1 {
 		span.SetName("loom.cli." + os.Args[1])
 	}

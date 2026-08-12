@@ -76,7 +76,7 @@ func (tc *testSSEClient) Close() {
 func newTestSessionStore(t *testing.T) *sessions.Store {
 	t.Helper()
 	dir := t.TempDir()
-	store, err := sessions.NewStore(dir)
+	store, err := sessions.NewStore(t.Context(), dir)
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}
@@ -87,7 +87,7 @@ func newTestSessionStore(t *testing.T) *sessions.Store {
 func newTestSessionStoreWithDir(t *testing.T) (*sessions.Store, string) {
 	t.Helper()
 	dir := t.TempDir()
-	store, err := sessions.NewStore(dir)
+	store, err := sessions.NewStore(t.Context(), dir)
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}
@@ -286,7 +286,7 @@ func (m *mockGitOps) CheckGhInstalled() error {
 	}
 	return nil
 }
-func (m *mockGitOps) SetRepoDefaultBranch(_, repoName, branch string) error {
+func (m *mockGitOps) SetRepoDefaultBranch(_ context.Context, _, repoName, branch string) error {
 	if m.setRepoDefaultFunc != nil {
 		return m.setRepoDefaultFunc(repoName, branch)
 	}

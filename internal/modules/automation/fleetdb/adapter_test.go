@@ -107,28 +107,25 @@ func (f *transportFake) TransitionDelivery(_ context.Context, transition Transpo
 	return f.delivery, f.err
 }
 
-func TestAdapterRedactsReadsAndRejectsPlaintextBindingSecrets(t *testing.T) {
+func TestAdapterDefensivelyCopiesBindingReads(t *testing.T) {
 	persisted := &automation.Binding{
-		WorkspaceKey: "WS", BindingID: "binding-a", WebhookSecret: "must-not-cross",
+		WorkspaceKey: "WS", BindingID: "binding-a",
 		EventTypePatterns: []string{"github.*"}, ActorFilter: &automation.ActorFilter{AllowActors: []string{"octocat"}},
 	}
 	fake := &transportFake{
 		binding: persisted,
 		match: &TransportBindingMatchSnapshot{
 			WorkspaceKey: "WS", RouteKey: "github.push", BindingSetRevision: 4,
-			Bindings: []*automation.Binding{{WorkspaceKey: "WS", BindingID: "exact", RouteKey: "github.push", WebhookSecret: "secret"},
-				{WorkspaceKey: "WS", BindingID: "pattern", EventTypePatterns: []string{"github.*"}, WebhookSecret: "secret"}},
+			Bindings: []*automation.Binding{{WorkspaceKey: "WS", BindingID: "exact", RouteKey: "github.push"},
+				{WorkspaceKey: "WS", BindingID: "pattern", EventTypePatterns: []string{"github.*"}}},
 		},
 	}
 	adapter, err := New(fake)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	if _, err := adapter.CreateBinding(t.Context(), persisted); !errors.Is(err, automation.ErrInvalid) || fake.createCalls != 0 {
-		t.Fatalf("secret create = calls:%d err:%v", fake.createCalls, err)
-	}
 	got, err := adapter.GetBinding(t.Context(), "WS", "binding-a")
-	if err != nil || got.WebhookSecret != "" || persisted.WebhookSecret == "" {
+	if err != nil {
 		t.Fatalf("GetBinding = %+v, %v (source=%+v)", got, err, persisted)
 	}
 	got.EventTypePatterns[0] = "changed"
@@ -143,11 +140,6 @@ func TestAdapterRedactsReadsAndRejectsPlaintextBindingSecrets(t *testing.T) {
 	}
 	if got := []string{snapshot.Bindings[0].BindingID, snapshot.Bindings[1].BindingID}; !reflect.DeepEqual(got, []string{"exact", "pattern"}) {
 		t.Fatalf("match order = %v", got)
-	}
-	for _, binding := range snapshot.Bindings {
-		if binding.WebhookSecret != "" {
-			t.Fatalf("match leaked secret: %+v", binding)
-		}
 	}
 }
 
@@ -168,7 +160,7 @@ func TestAdapterManagedBindingCarriesExactConditionalSnapshotAndMapsConflict(t *
 		ExpectedRouteKey: "internal:agent-1", ExpectedCreatedAt: createdAt, ExpectedUpdatedAt: updatedAt,
 	}
 	got, err := adapter.ReplaceManagedBinding(t.Context(), automation.ManagedBindingReplacement{Expected: expected, Binding: replacement})
-	if err != nil || got.WebhookSecret != "" {
+	if err != nil {
 		t.Fatalf("ReplaceManagedBinding = %+v, %v", got, err)
 	}
 	want := transportManagedBindingSnapshot(expected)
@@ -205,7 +197,7 @@ func TestAdapterUnmanagedBindingCarriesExactConditionalSnapshotAndMapsOwnershipC
 		ExpectedCreatedAt: createdAt, ExpectedUpdatedAt: updatedAt,
 	}
 	got, err := adapter.ReplaceUnmanagedBinding(t.Context(), automation.UnmanagedBindingReplacement{Expected: expected, Binding: replacement})
-	if err != nil || got.WebhookSecret != "" {
+	if err != nil {
 		t.Fatalf("ReplaceUnmanagedBinding = %+v, %v", got, err)
 	}
 	want := transportUnmanagedBindingSnapshot(expected)

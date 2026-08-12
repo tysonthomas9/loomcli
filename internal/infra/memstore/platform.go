@@ -390,7 +390,7 @@ func (s *triggerBindingStore) Create(_ context.Context, in store.TriggerBindingC
 	}
 	binding := newTriggerBindingMem(in)
 	s.items[in.WorkspaceKey][in.BindingID] = binding
-	return redactedTriggerBinding(binding), nil
+	return cloneTriggerBinding(binding), nil
 }
 
 func (s *triggerBindingStore) validateTriggerBindingCreate(in store.TriggerBindingCreate) error {
@@ -443,7 +443,6 @@ func newTriggerBindingMem(in store.TriggerBindingCreate) *automation.Binding {
 		ConcurrencyPolicy:    defaultTriggerBindingConcurrencyMem(in.ConcurrencyPolicy),
 		IdempotencyPolicy:    firstNonEmptyMem(in.IdempotencyPolicy, "header:Idempotency-Key"),
 		AuthPolicy:           firstNonEmptyMem(in.AuthPolicy, "workspace_user"),
-		WebhookSecret:        in.WebhookSecret,
 		SubjectKeyTemplate:   in.SubjectKeyTemplate,
 		ActorFilter:          normalizedActorFilterMem(in.ActorFilter),
 		RetryMaxAttempts:     defaultRetryFieldMem(in.RetryMaxAttempts, automation.DefaultTriggerRetryMaxAttempts),
@@ -471,7 +470,7 @@ func (s *triggerBindingStore) Get(_ context.Context, ws, bindingID string) (*aut
 	if !ok {
 		return nil, fmt.Errorf("trigger binding %q in workspace %q: %w", bindingID, ws, domain.ErrNotFound)
 	}
-	return redactedTriggerBinding(binding), nil
+	return cloneTriggerBinding(binding), nil
 }
 
 func (s *triggerBindingStore) GetByRouteKey(_ context.Context, ws, routeKey string) (*automation.Binding, error) {
@@ -479,22 +478,10 @@ func (s *triggerBindingStore) GetByRouteKey(_ context.Context, ws, routeKey stri
 	defer s.mu.RUnlock()
 	for _, binding := range s.items[ws] {
 		if binding.RouteKey == routeKey {
-			return redactedTriggerBinding(binding), nil
+			return cloneTriggerBinding(binding), nil
 		}
 	}
 	return nil, fmt.Errorf("trigger binding route %q in workspace %q: %w", routeKey, ws, domain.ErrNotFound)
-}
-
-// ResolveWebhookSecret returns the stored plaintext secret (never redacted),
-// mirroring fleet-db's privileged webhook-secret endpoint.
-func (s *triggerBindingStore) ResolveWebhookSecret(_ context.Context, ws, bindingID string) (string, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	binding, ok := s.items[ws][bindingID]
-	if !ok {
-		return "", fmt.Errorf("trigger binding %q in workspace %q: %w", bindingID, ws, domain.ErrNotFound)
-	}
-	return binding.WebhookSecret, nil
 }
 
 func (s *triggerBindingStore) List(_ context.Context, ws string, filter store.TriggerBindingFilter) ([]*automation.Binding, error) {
@@ -503,7 +490,7 @@ func (s *triggerBindingStore) List(_ context.Context, ws string, filter store.Tr
 	out := make([]*automation.Binding, 0, len(s.items[ws]))
 	for _, binding := range s.items[ws] {
 		if triggerBindingMatchesMem(binding, filter) {
-			out = append(out, redactedTriggerBinding(binding))
+			out = append(out, cloneTriggerBinding(binding))
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.After(out[j].CreatedAt) })
@@ -541,7 +528,7 @@ func (s *triggerBindingStore) Update(_ context.Context, ws, bindingID string, pa
 	}
 	updated.UpdatedAt = time.Now().UTC()
 	s.items[ws][bindingID] = updated
-	return redactedTriggerBinding(updated), nil
+	return cloneTriggerBinding(updated), nil
 }
 
 // Delete removes a binding. Connector-grant revocation is the caller's

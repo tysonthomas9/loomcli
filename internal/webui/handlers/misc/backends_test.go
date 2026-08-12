@@ -19,6 +19,10 @@ func (m *mockBackendOps) ListBackendsHealth() ([]ops.BackendHealth, error) {
 	return m.fn()
 }
 
+func (m *mockBackendOps) BackendHealth(string) (ops.BackendHealth, bool) {
+	return ops.BackendHealth{}, false
+}
+
 func TestHandleGetBackendsHealth_AllAvailable(t *testing.T) {
 	backendOps := &mockBackendOps{fn: func() ([]ops.BackendHealth, error) {
 		return []ops.BackendHealth{

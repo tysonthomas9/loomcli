@@ -14,11 +14,13 @@ import (
 	workflowdefs "github.com/tysonthomas9/loomcli/internal/infra/workflowdistribution/authoring"
 	agentsmodule "github.com/tysonthomas9/loomcli/internal/modules/agents"
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
+	connectorsmodule "github.com/tysonthomas9/loomcli/internal/modules/connectors"
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 	workflowcataloghttp "github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog/httpapi"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/agentcoord"
+	"github.com/tysonthomas9/loomcli/internal/webui/readprojection"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 )
 
@@ -92,7 +94,7 @@ func testBindingMatchesDefinition(
 	existing *automation.Binding,
 	expected automation.BindingDefinition,
 ) bool {
-	if existing == nil || existing.WebhookSecret != "" {
+	if existing == nil {
 		return false
 	}
 	if expected.RouteKey == "" {
@@ -508,7 +510,7 @@ func (api *testAgentRecordAPI) ApplyLifecycle(
 				return nil, mapTestAgentRecordError(err)
 			}
 		case agentsmodule.LifecycleDelete:
-			grants, err := api.store.ConnectorGrants().ListByBinding(
+			grants, err := api.store.Connectors().ListGrantRecordsByBinding(
 				ctx,
 				command.WorkspaceKey,
 				binding.BindingID,
@@ -517,7 +519,7 @@ func (api *testAgentRecordAPI) ApplyLifecycle(
 				return nil, mapTestAgentRecordError(err)
 			}
 			for _, grant := range grants {
-				if err := api.store.ConnectorGrants().Revoke(
+				if err := api.store.Connectors().RevokeGrantRecord(
 					ctx,
 					command.WorkspaceKey,
 					grant.GrantID,
@@ -627,18 +629,27 @@ func mapTestAgentRecordError(err error) error {
 	}
 }
 
-type testBindingGrantCompatibility struct{ grants store.ConnectorGrantStore }
-
-type testTriggerConnectorCompatibility struct {
-	testBindingGrantCompatibility
+type testBindingGrantCleanup struct {
+	grants connectorsmodule.ManagementStore
 }
 
-func (testTriggerConnectorCompatibility) ConfigureBindingSecret(context.Context, string, string, string, string) error {
-	return nil
+type testTriggerConnectorLifecycle struct {
+	grants connectorsmodule.ManagementStore
 }
 
-func (c testBindingGrantCompatibility) RevokeBindingGrants(ctx context.Context, workspace, bindingID string) (int, error) {
-	grants, err := c.grants.ListByBinding(ctx, workspace, bindingID)
+func (c testTriggerConnectorLifecycle) RevokeBindingGrants(
+	ctx context.Context,
+	command connectorsmodule.BindingGrantCleanupCommand,
+) (int, error) {
+	return testBindingGrantCleanup(c).RevokeBindingGrants(
+		ctx,
+		command.WorkspaceKey,
+		command.BindingID,
+	)
+}
+
+func (c testBindingGrantCleanup) RevokeBindingGrants(ctx context.Context, workspace, bindingID string) (int, error) {
+	grants, err := c.grants.ListGrantRecordsByBinding(ctx, workspace, bindingID)
 	if err != nil {
 		return 0, err
 	}
@@ -647,8 +658,8 @@ func (c testBindingGrantCompatibility) RevokeBindingGrants(ctx context.Context, 
 		if grant == nil {
 			continue
 		}
-		if err := c.grants.Revoke(ctx, workspace, grant.GrantID); err != nil {
-			if errors.Is(err, domain.ErrGrantRevoked) {
+		if err := c.grants.RevokeGrantRecord(ctx, workspace, grant.GrantID); err != nil {
+			if errors.Is(err, connectorsmodule.ErrGrantRevoked) {
 				continue
 			}
 			return revoked, err
@@ -669,7 +680,8 @@ func newTestAgentsModule(agentSvc agentcoord.AgentService, st store.Store, hub *
 		bindings := &testBindingOperations{store: st}
 		provisioning := newTestAgentProvisioning(st, bindings)
 		config.Bindings = bindings
-		config.BindingGrants = testBindingGrantCompatibility{grants: st.ConnectorGrants()}
+		config.BindingRuns = readprojection.NewBindingRunReader(st.DriverRuns())
+		config.BindingGrants = testBindingGrantCleanup{grants: st.Connectors()}
 		config.Provisioning = provisioning
 		config.ProvisioningAuthority = provisioning
 		config.PrepareWorkflowTarget = testWorkflowTargetPreparation(st)

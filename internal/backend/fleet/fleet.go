@@ -20,7 +20,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/fleethttp"
-	"github.com/tysonthomas9/loomcli/internal/types"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 )
 
 // maxResponseBody limits response body reads to 50MB to prevent OOM.
@@ -290,8 +290,8 @@ func hasData(resp *apiResponse) bool {
 	return resp != nil && resp.Data != nil && string(resp.Data) != "null"
 }
 
-// unmarshalIssueList unmarshals a []*types.IssueWithCounts response and
-// converts to []backend.IssueData. Used by List, GetChildren, and SearchIssues.
+// unmarshalIssueList unmarshals FleetDB issue rows and converts them to
+// []backend.IssueData. Used by List, GetChildren, and SearchIssues.
 //
 // fleet-db list endpoints may return a bare array or {"issues": [...]}.
 //
@@ -356,16 +356,7 @@ func (b *FleetBackend) Get(ctx context.Context, id string) (*backend.IssueDetail
 	if err := json.Unmarshal(resp.Data, &wire); err != nil {
 		return nil, backend.ErrInternal("Get", "unmarshal response", err)
 	}
-	issue := wire.toIssue()
-	details := types.IssueDetails{Issue: issue}
-	// wire.parent() reads either the "parent_id" or "parent" JSON field;
-	// detailsToDetailData expects *types.IssueDetails.Parent to be set, so
-	// project it across explicitly. Without this, loom data show --output json
-	// returns parent:null even when fleet-db has the relationship recorded.
-	if parent := wire.parent(); parent != "" {
-		details.Parent = &parent
-	}
-	result := detailsToDetailData(&details)
+	result := wire.fleetIssueWire.toIssueDetailData()
 	result.IssueData.Labels = append([]string(nil), wire.Labels...)
 	result.IssueData.DependencyCount = wire.DependencyCount
 	result.IssueData.DependentCount = wire.DependentCount
@@ -450,14 +441,14 @@ func (b *FleetBackend) Stats(ctx context.Context) (*backend.StatsData, error) {
 	}
 	return &backend.StatsData{
 		TotalIssues:      int(countResp.Total),
-		OpenIssues:       int(groups[string(types.StatusOpen)]),
-		InProgressIssues: int(groups[string(types.StatusInProgress)]),
-		ClosedIssues:     int(groups[string(types.StatusClosed)]),
+		OpenIssues:       int(groups[string(workitems.StatusOpen)]),
+		InProgressIssues: int(groups[string(workitems.StatusInProgress)]),
+		ClosedIssues:     int(groups[string(workitems.StatusClosed)]),
 		BlockedIssues:    len(blocked),
 		DeferredIssues:   len(deferred),
 		ReadyIssues:      len(ready),
-		TombstoneIssues:  int(groups[string(types.StatusTombstone)]),
-		PinnedIssues:     int(groups[string(types.StatusPinned)]),
+		TombstoneIssues:  int(groups[string(workitems.StatusTombstone)]),
+		PinnedIssues:     int(groups[string(workitems.StatusPinned)]),
 		// EpicsEligibleForClosure, AverageLeadTime: 0 (fleet-08yg).
 		// StatusReview and StatusHooked counts are included in TotalIssues but have
 		// no dedicated StatsData field; they are silently omitted from per-status counts.
@@ -565,12 +556,12 @@ func (b *FleetBackend) createIssueOnce(ctx context.Context, params backend.Creat
 	if !hasData(apiResp) {
 		return nil, backend.ErrInternal("Create", "empty response from server", nil)
 	}
-	var issue types.Issue
+	var issue fleetIssueWire
 	if err := json.Unmarshal(apiResp.Data, &issue); err != nil {
 		return nil, backend.ErrInternal("Create", "unmarshal response", err)
 	}
 	logIdempotencyResponse(respHeaders, issue.ID)
-	result := issueToData(&issue)
+	result := issue.toIssueData()
 	return &result, nil
 }
 
@@ -884,9 +875,9 @@ func (b *FleetBackend) Close(ctx context.Context, id string, params backend.Clos
 		return nil, backend.ErrInternal("Close", "unmarshal response", err)
 	}
 	if cr.Closed == nil && len(cr.Unblocked) == 0 {
-		var issue types.Issue
+		var issue fleetIssueWire
 		if err := json.Unmarshal(resp.Data, &issue); err == nil && issue.ID != "" {
-			closed := issueToData(&issue)
+			closed := issue.toIssueData()
 			return &backend.CloseResult{Closed: &closed, Unblocked: []backend.IssueData{}}, nil
 		}
 	}

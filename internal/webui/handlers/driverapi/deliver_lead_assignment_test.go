@@ -24,7 +24,7 @@ func listDueOutboxRows(t *testing.T, st store.Store) []*domain.OutboxRecord {
 }
 
 func TestDeliverLeadAssignmentEnqueuesOutboxOnPending(t *testing.T) {
-	h := newTestHarness(t, "")
+	h := newTestHarness(t)
 	h.module.deliverAssignment = func(context.Context, Store, string, string) (driverpkg.AgentMessageDeliveryResult, error) {
 		return driverpkg.AgentMessageDeliveryResult{State: "pending", Reason: "lead has no orchestration session"}, nil
 	}
@@ -32,7 +32,7 @@ func TestDeliverLeadAssignmentEnqueuesOutboxOnPending(t *testing.T) {
 	req := opRequest{
 		op:      "deliver-lead-assignment",
 		body:    map[string]string{"agent": "lead-1"},
-		headers: h.ownerHeaders(),
+		headers: h.ownerHeaders(t),
 	}
 	resp, decoded := h.do(t, req)
 	if resp.StatusCode != http.StatusOK {
@@ -77,14 +77,14 @@ func TestDeliverLeadAssignmentSkipsOutboxOnDeliveredAndUnsupported(t *testing.T)
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			h := newTestHarness(t, "")
+			h := newTestHarness(t)
 			h.module.deliverAssignment = func(context.Context, Store, string, string) (driverpkg.AgentMessageDeliveryResult, error) {
 				return driverpkg.AgentMessageDeliveryResult{State: tc.state}, nil
 			}
 			resp, decoded := h.do(t, opRequest{
 				op:      "deliver-lead-assignment",
 				body:    map[string]string{"agent": "lead-1"},
-				headers: h.ownerHeaders(),
+				headers: h.ownerHeaders(t),
 			})
 			if resp.StatusCode != http.StatusOK {
 				t.Fatalf("status = %d, want 200: %v", resp.StatusCode, decoded)

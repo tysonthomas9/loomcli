@@ -7,7 +7,7 @@ func TestBuildRouterTaskCheck_NilWhenNoConstraints(t *testing.T) {
 	rc := RoleConfig{Description: "basic"} // no Skills or MaxPriority
 	ae := AgentEntry{Worktree: "falcon", Role: "task"}
 
-	check := BuildRouterTaskCheck(rc, ae, "")
+	check := BuildRouterTaskCheck(t.Context(), rc, ae, "")
 	if check != nil {
 		t.Error("BuildRouterTaskCheck() should return nil for unconstrained role")
 	}
@@ -21,7 +21,7 @@ func TestBuildRouterTaskCheck_NonNilWithSkills(t *testing.T) {
 	}
 	ae := AgentEntry{Worktree: "falcon", Role: "task"}
 
-	check := BuildRouterTaskCheck(rc, ae, "")
+	check := BuildRouterTaskCheck(t.Context(), rc, ae, "")
 	if check == nil {
 		t.Error("BuildRouterTaskCheck() should return non-nil for role with skills")
 	}
@@ -36,7 +36,7 @@ func TestBuildRouterTaskCheck_NonNilWithMaxPriority(t *testing.T) {
 	}
 	ae := AgentEntry{Worktree: "falcon", Role: "task"}
 
-	check := BuildRouterTaskCheck(rc, ae, "")
+	check := BuildRouterTaskCheck(t.Context(), rc, ae, "")
 	if check == nil {
 		t.Error("BuildRouterTaskCheck() should return non-nil for role with max priority")
 	}
@@ -50,7 +50,7 @@ func TestBuildRouterTaskCheck_NilWithOnlyPathPatterns(t *testing.T) {
 		PathPatterns: []string{"src/components/**"},
 	}
 	ae := AgentEntry{Worktree: "falcon", Role: "task"}
-	check := BuildRouterTaskCheck(rc, ae, "")
+	check := BuildRouterTaskCheck(t.Context(), rc, ae, "")
 	if check != nil {
 		t.Error("BuildRouterTaskCheck() should return nil when only RoleConfig.PathPatterns is set (not a routing constraint)")
 	}
@@ -58,7 +58,7 @@ func TestBuildRouterTaskCheck_NilWithOnlyPathPatterns(t *testing.T) {
 	// AgentEntry-level PathPatterns
 	rc2 := RoleConfig{Description: "frontend specialist"}
 	ae2 := AgentEntry{Worktree: "falcon", Role: "task", PathPatterns: []string{"internal/**"}}
-	check2 := BuildRouterTaskCheck(rc2, ae2, "")
+	check2 := BuildRouterTaskCheck(t.Context(), rc2, ae2, "")
 	if check2 != nil {
 		t.Error("BuildRouterTaskCheck() should return nil when only AgentEntry.PathPatterns is set (not a routing constraint)")
 	}

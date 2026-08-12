@@ -151,6 +151,7 @@ func sandboxSeamRunRequest(root string) RunRequest {
 		// Seam tests exercise launch mechanics, not the SB3 trust gate (see
 		// sandbox_policy_test.go): a trusted request passes every launcher.
 		TrustLevel: workflowcatalog.DriverTrustTrusted,
+		RunToken:   testWorkflowRunToken,
 	}
 }
 

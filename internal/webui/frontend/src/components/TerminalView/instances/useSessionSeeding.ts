@@ -21,6 +21,7 @@ interface UseSessionSeedingOptions {
     session: string,
     label: string,
     sortOrder: number,
+    backend: string,
   ) => Promise<void>;
   config: { backend: string } | undefined;
   initializedRef: React.MutableRefObject<boolean>;
@@ -28,18 +29,9 @@ interface UseSessionSeedingOptions {
   workspaceIdRef: React.MutableRefObject<string>;
 }
 
-interface UseSessionSeedingReturn {
-  trySeedOnConnect: (tabId: string) => void;
-}
-
 /**
  * Manages pending issue / agent context delivery into the terminal tab
- * system. The backend "seed" flow that used to inject issue prompts via
- * tmux send-keys is gone with the tmux removal; this hook now only
- * handles the tab-opening half (create or switch to the appropriate tab).
- * `trySeedOnConnect` is retained as a stable no-op so callers don't need
- * to change — it's the natural extension point if client-side seeding is
- * re-introduced later.
+ * system by creating or switching to the appropriate tab.
  */
 export function useSessionSeeding({
   pendingIssueContext,
@@ -53,7 +45,7 @@ export function useSessionSeeding({
   config,
   initializedRef,
   workspaceIdRef,
-}: UseSessionSeedingOptions): UseSessionSeedingReturn {
+}: UseSessionSeedingOptions): void {
   const agentResolutionRef = useRef<{
     key: string;
     promise: ReturnType<typeof ensureAgentTerminalSession>;
@@ -94,21 +86,25 @@ export function useSessionSeeding({
       return;
     }
 
+    const backend = config?.backend?.trim();
+    if (!backend) return;
+
     const newTab: TabState = {
       id: sessionName,
       label: `issue-${sanitizeSessionName(pendingIssueContext.issue_id)}`,
       sessionName,
       connectionState: "disconnected" as ConnectionState,
-      backendName: config?.backend ?? "unknown",
+      backendName: backend,
     };
-    setTabs((prev) => [...prev, newTab]);
-    setActiveTabId(sessionName);
-
-    createTab(sessionName, newTab.label, tabs.length).catch((err) =>
-      console.error(`Failed to persist issue tab ${sessionName}:`, err),
-    );
-
-    onIssueContextConsumed?.();
+    createTab(sessionName, newTab.label, tabs.length, newTab.backendName)
+      .then(() => {
+        setTabs((prev) => [...prev, newTab]);
+        setActiveTabId(sessionName);
+        onIssueContextConsumed?.();
+      })
+      .catch((err) =>
+        console.error(`Failed to persist issue tab ${sessionName}:`, err),
+      );
   }, [
     pendingIssueContext,
     tabs,
@@ -212,11 +208,4 @@ export function useSessionSeeding({
     workspaceIdRef,
     mergeExistingAgentTab,
   ]);
-
-  const trySeedOnConnect = useCallback((_tabId: string) => {
-    // No-op: backend-side seeding was removed with the tmux migration.
-    // Extension point for future client-side prompt injection.
-  }, []);
-
-  return { trySeedOnConnect };
 }

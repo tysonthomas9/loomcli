@@ -13,9 +13,10 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 
+	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
-	"github.com/tysonthomas9/loomcli/internal/localnodeconfig"
+	artifactsmodule "github.com/tysonthomas9/loomcli/internal/modules/artifacts"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -70,7 +71,7 @@ func TestHostBridgeTaskExecutorFailsClosedOnInvalidResult(t *testing.T) {
 				t.Fatalf("file content = %q, want unchanged (no patch applied)", repo.read("file.txt"))
 			}
 			// No artifacts of any kind reached the store.
-			artifacts, err := st.Artifacts().List(ctx, "WS", store.ArtifactFilter{})
+			artifacts, err := st.ArtifactQueries().ListArtifactRecords(ctx, "WS", artifactsmodule.SearchFilter{})
 			if err != nil {
 				t.Fatalf("list artifacts: %v", err)
 			}
@@ -234,7 +235,7 @@ func TestLocalTaskRunnerBackendEnvResolution(t *testing.T) {
 		if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "WS", Name: "ws"}); err != nil {
 			t.Fatalf("create workspace: %v", err)
 		}
-		if err := localnodeconfig.SetRuntimeProvider("WS", "claude"); err != nil {
+		if err := bootstrap.SetRuntimeProvider("WS", "claude"); err != nil {
 			t.Fatalf("set runtime provider: %v", err)
 		}
 		req := hostBridgeTaskExecRequest()
@@ -251,7 +252,7 @@ func TestLocalTaskRunnerBackendEnvResolution(t *testing.T) {
 		if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "WS", Name: "ws"}); err != nil {
 			t.Fatalf("create workspace: %v", err)
 		}
-		if err := localnodeconfig.SetRuntimeProvider("WS", "claude"); err != nil {
+		if err := bootstrap.SetRuntimeProvider("WS", "claude"); err != nil {
 			t.Fatalf("set runtime provider: %v", err)
 		}
 		req := hostBridgeTaskExecRequest()

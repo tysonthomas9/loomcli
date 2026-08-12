@@ -28,6 +28,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/fleethttp"
+	"github.com/tysonthomas9/loomcli/internal/modules/artifacts"
 	"github.com/tysonthomas9/loomcli/internal/store"
 
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
@@ -296,8 +297,9 @@ func (c *Client) AgentSessions() store.AgentSessionStore { return c.sessions }
 // TerminalSessions returns the TerminalSessionStore.
 func (c *Client) TerminalSessions() store.TerminalSessionStore { return c.terminals }
 
-// Artifacts returns the ArtifactStore.
-func (c *Client) Artifacts() store.ArtifactStore { return c.artifacts }
+// ArtifactQueries exposes the Artifacts-owned read port without routing UI
+// consumers through a legacy catalog adapter.
+func (c *Client) ArtifactQueries() artifacts.QueryStore { return c.artifacts }
 
 // ArtifactCommands exposes the narrow owner-fenced Artifacts transport. It
 // shares this Client's credentials, tracing, retry policy, and connection pool

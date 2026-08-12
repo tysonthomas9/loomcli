@@ -30,7 +30,7 @@ func TestDriverRuntimeClientUsesRunTokenWithoutLegacyIdentityHeaders(t *testing.
 	t.Setenv("LOOM_DRIVER_FENCING_TOKEN", "hostile-not-a-number")
 
 	client, err := newDriverRuntimeClient(driverRuntimeClientOptions{
-		DriverRunID: "run-header", NodeID: "node-header", LeaseID: "lease-header", FencingToken: 9,
+		DriverRunID: "run-header",
 	})
 	if err != nil {
 		t.Fatalf("newDriverRuntimeClient: %v", err)
@@ -45,7 +45,7 @@ func TestDriverRuntimeClientUsesRunTokenWithoutLegacyIdentityHeaders(t *testing.
 	if got := request.Header.Get("Authorization"); got != "Bearer run-token" {
 		t.Fatalf("Authorization = %q, want run token", got)
 	}
-	for _, header := range []string{driverRunIDHeader, driverNodeIDHeader, driverLeaseIDHeader, driverLeaseTokenHeader, driverFencingTokenHeader} {
+	for _, header := range []string{"X-Loom-Driver-Run-Id", "X-Loom-Driver-Node-Id", "X-Loom-Driver-Lease-Id", "X-Loom-Driver-Lease-Token", "X-Loom-Driver-Fencing-Token"} {
 		if got := request.Header.Get(header); got != "" {
 			t.Fatalf("token-only request leaked %s=%q", header, got)
 		}
@@ -55,33 +55,23 @@ func TestDriverRuntimeClientUsesRunTokenWithoutLegacyIdentityHeaders(t *testing.
 	}
 }
 
-func TestDriverRuntimeClientPreservesLegacyHeaderQuadAndStaticBearer(t *testing.T) {
-	var request *http.Request
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		request = req.Clone(req.Context())
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"ok":true}`))
+func TestDriverRuntimeClientRejectsLegacyCredentialsWithoutRunToken(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		t.Fatal("legacy credentials reached the driver API")
 	}))
 	t.Cleanup(server.Close)
 	t.Setenv("LOOM_DRIVER_API_URL", server.URL)
 	t.Setenv("LOOM_DRIVER_WORKSPACE", "WS")
 	t.Setenv("LOOM_RUN_TOKEN", "")
 	t.Setenv("LOOM_DRIVER_API_TOKEN", "static-token")
+	t.Setenv("LOOM_DRIVER_LEASE_TOKEN", "driver-secret")
+	t.Setenv("LOOM_DRIVER_FENCING_TOKEN", "7")
 
-	client, err := newDriverRuntimeClient(driverRuntimeClientOptions{
-		DriverRunID: "run-1", NodeID: "node-1", LeaseID: "lease-1", LeaseToken: "driver-secret", FencingToken: 7,
+	_, err := newDriverRuntimeClient(driverRuntimeClientOptions{
+		DriverRunID: "run-1",
 	})
-	if err != nil {
-		t.Fatalf("newDriverRuntimeClient: %v", err)
-	}
-	if err := client.call(context.Background(), "complete-task", map[string]string{"taskRunId": "task-run-1"}, nil); err != nil {
-		t.Fatalf("call: %v", err)
-	}
-	if request.Header.Get("Authorization") != "Bearer static-token" ||
-		request.Header.Get(driverRunIDHeader) != "run-1" || request.Header.Get(driverNodeIDHeader) != "node-1" ||
-		request.Header.Get(driverLeaseIDHeader) != "lease-1" || request.Header.Get(driverLeaseTokenHeader) != "driver-secret" ||
-		request.Header.Get(driverFencingTokenHeader) != "7" {
-		t.Fatalf("legacy headers = %v", request.Header)
+	if err == nil {
+		t.Fatal("newDriverRuntimeClient accepted legacy static-token/header credentials without LOOM_RUN_TOKEN")
 	}
 }
 

@@ -2,8 +2,6 @@ package store
 
 import (
 	"context"
-	"errors"
-	"io"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
@@ -150,119 +148,6 @@ type TerminalSessionStore interface {
 	List(ctx context.Context, workspaceKey string, filter TerminalSessionFilter) ([]*domain.TerminalSession, error)
 	Update(ctx context.Context, workspaceKey, terminalID string, patch TerminalSessionUpdate) (*domain.TerminalSession, error)
 }
-
-type ArtifactCreate struct {
-	WorkspaceKey    string
-	ArtifactID      string
-	AgentID         string
-	SessionID       string
-	TerminalID      string
-	TaskID          string
-	OwnerType       string
-	OwnerID         string
-	Type            string
-	URI             string
-	Summary         string
-	MIMEType        string
-	SizeBytes       int64
-	Checksum        string
-	ContentHash     string
-	Visibility      string
-	RedactionStatus string
-	DurableStatus   string
-	Metadata        map[string]string
-}
-
-type ArtifactFilter struct {
-	AgentID    string
-	SessionID  string
-	TerminalID string
-	TaskID     string
-	OwnerType  string
-	OwnerID    string
-	Type       string
-	Status     string
-	Limit      int
-}
-
-type ArtifactUpdate struct {
-	AgentID         *string
-	SessionID       *string
-	TerminalID      *string
-	TaskID          *string
-	OwnerType       *string
-	OwnerID         *string
-	Type            *string
-	URI             *string
-	Summary         *string
-	MIMEType        *string
-	SizeBytes       *int64
-	Checksum        *string
-	ContentHash     *string
-	Visibility      *string
-	RedactionStatus *string
-	DurableStatus   *string
-	Metadata        *map[string]string
-	FinalizedAt     *time.Time
-}
-
-type ArtifactFinalize struct {
-	URI             *string
-	Summary         *string
-	MIMEType        *string
-	SizeBytes       *int64
-	Checksum        *string
-	ContentHash     *string
-	Visibility      *string
-	RedactionStatus *string
-	Metadata        *map[string]string
-}
-
-type ArtifactContentUpload struct {
-	Body     io.Reader
-	MIMEType string
-}
-
-type ArtifactStore interface {
-	Create(ctx context.Context, in ArtifactCreate) (*domain.Artifact, error)
-	Get(ctx context.Context, workspaceKey, artifactID string) (*domain.Artifact, error)
-	List(ctx context.Context, workspaceKey string, filter ArtifactFilter) ([]*domain.Artifact, error)
-	UploadContent(ctx context.Context, workspaceKey, artifactID string, upload ArtifactContentUpload) (*domain.Artifact, error)
-	Finalize(ctx context.Context, workspaceKey, artifactID string, finalize ArtifactFinalize) (*domain.Artifact, error)
-	Update(ctx context.Context, workspaceKey, artifactID string, patch ArtifactUpdate) (*domain.Artifact, error)
-}
-
-// ArtifactContentReader is implemented by artifact stores that can read back
-// uploaded content bytes. It is optional so older/control-plane stores can
-// still expose metadata-only artifact APIs while callers retain URI fallbacks.
-type ArtifactContentReader interface {
-	ReadContent(ctx context.Context, workspaceKey, artifactID string) ([]byte, error)
-}
-
-// ErrArtifactContentUnavailable identifies a temporary failure of the managed
-// artifact content plane. Services should preserve it as an unavailable
-// response rather than collapsing a retryable FleetDB/content-store outage into
-// an internal error.
-var ErrArtifactContentUnavailable = errors.New("artifact content temporarily unavailable")
-
-// ErrControlPlaneUnavailable identifies a retryable failure to reach or serve
-// the durable control plane. Infrastructure adapters wrap this sentinel while
-// preserving their concrete transport error so service layers can return 503
-// without importing a FleetDB implementation or exposing transport details.
-//
-// Deprecated: use domain.ErrUnavailable at capability and transport
-// boundaries. This alias preserves errors.Is compatibility for legacy Store
-// consumers without making upper layers import persistence contracts.
-var ErrControlPlaneUnavailable = domain.ErrUnavailable
-
-// ErrControlPlaneRateLimited is the narrower retryable admission failure.
-// Services preserve it as 429 so clients can apply bounded backoff rather than
-// presenting a durable transcript or session failure.
-//
-// Deprecated: use domain.ErrRateLimited at capability and transport
-// boundaries. This alias preserves errors.Is compatibility for legacy Store
-// consumers without making upper layers import persistence contracts.
-var ErrControlPlaneRateLimited = domain.ErrRateLimited
 
 type AgentLeaseCreate struct {
 	WorkspaceKey string

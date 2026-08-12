@@ -2,43 +2,10 @@ package events
 
 import (
 	"context"
-	"sync/atomic"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/propagation"
 )
-
-// ambientCtxProvider is consulted by Bus.Emit (when set) to capture trace
-// context into every event without callers having to switch to EmitCtx. The
-// CLI agent path installs this provider to point at cmdstore.RootContext()
-// so all task/agent events emitted during a run land under the agent's root
-// span. Stored as atomic.Value to allow lock-free reads on the hot Emit
-// path.
-var ambientCtxProvider atomic.Value // func() context.Context
-
-// SetContextProvider installs a context provider read by Bus.Emit before
-// each write. Pass nil to disable. Safe to call concurrently. See the
-// contract doc for the policy: events emitted in agent processes carry
-// the run's traceparent so otelexport can rebuild the parent span.
-func SetContextProvider(fn func() context.Context) {
-	if fn == nil {
-		ambientCtxProvider.Store((func() context.Context)(nil))
-		return
-	}
-	ambientCtxProvider.Store(fn)
-}
-
-func ambientCtx() context.Context {
-	v := ambientCtxProvider.Load()
-	if v == nil {
-		return context.Background()
-	}
-	fn, _ := v.(func() context.Context)
-	if fn == nil {
-		return context.Background()
-	}
-	return fn()
-}
 
 // InjectTraceContext fills e.TraceParent and e.TraceState from the active
 // span in ctx. Pass-through when no active span (or tracing disabled). Used

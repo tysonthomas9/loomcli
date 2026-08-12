@@ -103,4 +103,29 @@ func TestClassificationPolicy(t *testing.T) {
 			t.Fatal("unknown agent state was accepted")
 		}
 	})
+
+	t.Run("ready query classifications", func(t *testing.T) {
+		t.Parallel()
+		for _, moleculeType := range []MoleculeType{
+			"", MoleculeTypeSwarm, MoleculeTypePatrol, MoleculeTypeWork,
+		} {
+			if !moleculeType.IsValid() {
+				t.Fatalf("valid molecule type %q was rejected", moleculeType)
+			}
+		}
+		if MoleculeType("unknown").IsValid() {
+			t.Fatal("unknown molecule type was accepted")
+		}
+
+		for _, policy := range []SortPolicy{
+			"", SortPolicyHybrid, SortPolicyPriority, SortPolicyOldest,
+		} {
+			if !policy.IsValid() {
+				t.Fatalf("valid sort policy %q was rejected", policy)
+			}
+		}
+		if SortPolicy("newest").IsValid() {
+			t.Fatal("unknown sort policy was accepted")
+		}
+	})
 }

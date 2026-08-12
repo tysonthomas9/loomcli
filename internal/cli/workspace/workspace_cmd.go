@@ -15,6 +15,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
+	"github.com/tysonthomas9/loomcli/internal/cli/serve/serveadapter"
 	"github.com/tysonthomas9/loomcli/internal/cli/serve/workspacemgr"
 	workspacemodule "github.com/tysonthomas9/loomcli/internal/modules/workspace"
 	"github.com/tysonthomas9/loomcli/internal/webui/workspacecoord"
@@ -123,8 +124,15 @@ func runWorkspaceCreate(cmd *cobra.Command, args []string) {
 	branch := validateCreateInputs(wsName)
 	repoPaths := parseRepoPaths()
 
-	if err := cmdstore.WithStore(func(ctx context.Context, h *bootstrap.StoreHandle) error {
-		create := workspacemgr.BuildStoreBackedCreateWorkspace(h.Store)
+	if err := cmdstore.WithStore(cmd.Context(), func(ctx context.Context, h *bootstrap.StoreHandle) error {
+		agentsCapability, err := serveadapter.BuildAgentsCapability(serveadapter.AgentsConfig{
+			StoreHandle: h,
+			Workspace:   wsName,
+		})
+		if err != nil {
+			return fmt.Errorf("compose Agents for workspace creation: %w", err)
+		}
+		create := workspacemgr.BuildStoreBackedCreateWorkspace(h.Store, agentsCapability)
 		result, err := create(ctx, workspacecoord.WorkspaceCreateRequest{
 			Name:   wsName,
 			Type:   "empty",
@@ -169,15 +177,15 @@ func parseRepoPaths() []string {
 }
 
 func runWorkspaceList(cmd *cobra.Command, args []string) {
-	if err := runFleetWorkspaceList(); err != nil {
+	if err := runFleetWorkspaceList(cmd.Context()); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
 }
 
 //nolint:gocognit,funlen // CLI table/JSON output branches share one store read path.
-func runFleetWorkspaceList() error {
-	return cmdstore.WithWorkspaceCatalog(func(ctx context.Context, _ *bootstrap.StoreHandle, workspace workspacemodule.API) error {
+func runFleetWorkspaceList(parent context.Context) error {
+	return cmdstore.WithWorkspaceCatalog(parent, func(ctx context.Context, _ *bootstrap.StoreHandle, workspace workspacemodule.API) error {
 		workspaces, err := workspace.List(ctx, workspacemodule.ListQuery{})
 		if err != nil {
 			return fmt.Errorf("list workspaces: %w", err)
@@ -249,7 +257,7 @@ func runFleetWorkspaceList() error {
 func runWorkspaceRemove(cmd *cobra.Command, args []string) {
 	deps := cli.GetDeps(cmd)
 	wsName := args[0]
-	if err := cmdstore.WithWorkspaceCatalog(func(ctx context.Context, _ *bootstrap.StoreHandle, workspace workspacemodule.API) error {
+	if err := cmdstore.WithWorkspaceCatalog(cmd.Context(), func(ctx context.Context, _ *bootstrap.StoreHandle, workspace workspacemodule.API) error {
 		ws, err := workspace.Resolve(ctx, workspacemodule.ResolveQuery{Reference: wsName})
 		if err != nil {
 			return fmt.Errorf("workspace %q not found: %w", wsName, err)

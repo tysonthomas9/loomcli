@@ -30,6 +30,11 @@ type AwaitStore = store.AwaitStore
 type WorkspaceStore = store.WorkspaceStore
 type WebhookVerifier = webhookingestion.Verifier
 
+// WebhookVerifierFactory lets the composition root supply Automation's
+// canonical binding queries after the owner adapter exists. The resulting
+// verifier resolves signing material through Connectors only.
+type WebhookVerifierFactory func(automation.BindingQueries) webhookingestion.Verifier
+
 // NewAwaitEventReconcilerWithExecutionStores composes Automation's durable
 // await-notification loop without exposing its infrastructure type to the
 // outer serve package.
@@ -105,14 +110,14 @@ type CatalogOwner struct {
 }
 
 type automationWorkflowCatalogConfig struct {
-	Workspace             string
-	FleetDBClient         *infrafleetdb.Client
-	DriverRuns            store.DriverRunStore
-	Awaits                store.AwaitStore
-	Workspaces            store.WorkspaceStore
-	WebhookVerifier       webhookingestion.Verifier
-	PrepareWorkflowTarget WorkflowTargetPreparationFactory
-	Catalog               CatalogOwner
+	Workspace              string
+	FleetDBClient          *infrafleetdb.Client
+	DriverRuns             store.DriverRunStore
+	Awaits                 store.AwaitStore
+	Workspaces             store.WorkspaceStore
+	WebhookVerifierFactory WebhookVerifierFactory
+	PrepareWorkflowTarget  WorkflowTargetPreparationFactory
+	Catalog                CatalogOwner
 }
 
 // ExecutionAwaitResolverBinding bridges Workflow Catalog/Automation startup
@@ -165,6 +170,13 @@ func ComposeWorkflowCatalogAutomation(
 	if err != nil {
 		return nil, nil, fmt.Errorf("compose automation FleetDB adapter: %w", err)
 	}
+	if config.WebhookVerifierFactory == nil {
+		return nil, nil, fmt.Errorf("compose automation webhook verifier: factory is required: %w", automation.ErrUnavailable)
+	}
+	webhookVerifier := config.WebhookVerifierFactory(automationAdapter)
+	if webhookVerifier == nil {
+		return nil, nil, fmt.Errorf("compose automation webhook verifier: factory returned nil: %w", automation.ErrUnavailable)
+	}
 	approvalEvents, ok := config.FleetDBClient.TriggerEvents().(automation.ApprovalEventStore)
 	if !ok {
 		return nil, nil, fmt.Errorf("compose automation approval journal: %w", automation.ErrUnavailable)
@@ -198,7 +210,7 @@ func ComposeWorkflowCatalogAutomation(
 				newAutomationFleetExecutionDispatch(config.FleetDBClient),
 			),
 			cron: automationAdapter, retries: automationAdapter, awaits: awaitNotifier,
-			workspaces: workspaceLister, webhookVerifier: config.WebhookVerifier,
+			workspaces: workspaceLister, webhookVerifier: webhookVerifier,
 			workflowTargets: workflowTargets,
 		},
 	)
@@ -212,9 +224,9 @@ func composeWorkflowTargetPreparer(
 	config automationWorkflowCatalogConfig,
 ) (workflowbinding.WorkflowTargetPreparer, error) {
 	if config.DriverRuns == nil || config.Awaits == nil || config.Workspaces == nil ||
-		config.WebhookVerifier == nil || config.PrepareWorkflowTarget == nil {
+		config.WebhookVerifierFactory == nil || config.PrepareWorkflowTarget == nil {
 		return nil, fmt.Errorf(
-			"compose automation compatibility adapters: required narrow stores are unavailable",
+			"compose automation owner dependencies: required ports are unavailable",
 		)
 	}
 	prepareWorkflowTarget := config.PrepareWorkflowTarget(workflowbinding.ErrUnavailable)

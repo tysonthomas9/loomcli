@@ -27,18 +27,20 @@ const (
 // synchronous WebUI admission seam and contributes restart recovery to the
 // platform runtime host while exposing neither FleetDB nor Source Control.
 type StoreBackedWorkspaceAdmissionOperations struct {
-	store     admissionstore.Store
-	workspace workspacemodule.API
-	process   *repositoryAdmissionProcess
+	store          admissionstore.Store
+	workspace      workspacemodule.API
+	agentsCommands ManagedAgentsCommands
+	process        *repositoryAdmissionProcess
 }
 
 func NewStoreBackedWorkspaceAdmissionOperations(
 	store admissionstore.Store,
+	agentsCommands ManagedAgentsCommands,
 	admissions infrafleetdb.RepositoryAdmissionTransport,
 	journal *RepositoryAdmissionJournal,
 	materializer repositoryCheckoutMaterializer,
 ) *StoreBackedWorkspaceAdmissionOperations {
-	if store == nil {
+	if store == nil || agentsCommands == nil {
 		return nil
 	}
 	workspace, err := workspacecatalog.New(store.Workspaces(), store.Repos())
@@ -46,22 +48,23 @@ func NewStoreBackedWorkspaceAdmissionOperations(
 		return nil
 	}
 	return NewStoreBackedWorkspaceAdmissionOperationsWithWorkspace(
-		store, workspace, admissions, journal, materializer,
+		store, workspace, agentsCommands, admissions, journal, materializer,
 	)
 }
 
 func NewStoreBackedWorkspaceAdmissionOperationsWithWorkspace(
 	store admissionstore.Store,
 	workspace workspacemodule.API,
+	agentsCommands ManagedAgentsCommands,
 	admissions infrafleetdb.RepositoryAdmissionTransport,
 	journal *RepositoryAdmissionJournal,
 	materializer repositoryCheckoutMaterializer,
 ) *StoreBackedWorkspaceAdmissionOperations {
-	if store == nil {
+	if store == nil || agentsCommands == nil {
 		return nil
 	}
 	return &StoreBackedWorkspaceAdmissionOperations{
-		store: store, workspace: workspace,
+		store: store, workspace: workspace, agentsCommands: agentsCommands,
 		process: newRepositoryAdmissionProcess(admissions, journal, materializer),
 	}
 }
@@ -79,12 +82,14 @@ func (operations *StoreBackedWorkspaceAdmissionOperations) CreateWorkspace(
 		}
 		return createStoreBackedCloneWorkspaceAdmission(
 			ctx,
-			operations.store,
+			operations.agentsCommands,
 			req,
 			operations.process,
 		)
 	}
-	return createStoreBackedEmptyWorkspace(ctx, operations.store, operations.workspace, req)
+	return createStoreBackedEmptyWorkspace(
+		ctx, operations.workspace, operations.agentsCommands, req,
+	)
 }
 
 func (operations *StoreBackedWorkspaceAdmissionOperations) AddWorkspaceRepos(
@@ -107,7 +112,6 @@ func (operations *StoreBackedWorkspaceAdmissionOperations) AddWorkspaceRepos(
 	}
 	return addReposToStoreBackedWorkspaceAdmission(
 		ctx,
-		operations.store,
 		operations.workspace,
 		req,
 		operations.process,

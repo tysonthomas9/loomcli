@@ -1,16 +1,14 @@
 schema_version: 1
 status: complete
-source_head: 4acb1880b5d818854cebcf78db41a9321e931d22
+source_head: 081fad5c21828b457ef59ea7a7da82f532765027
 adapter_roots:
   - internal/app
   - internal/cli
   - internal/driver
-  - internal/infra/agentsbootstrapstore
-  - internal/infra/connectorscatalog
-  - internal/infra/sessionstoreadapter
   - internal/infra/sourcecontrolstackstore
   - internal/infra/workspacecatalog
   - internal/modules
+  - internal/sessions/archive.go
   - internal/usage
   - internal/webui/handlers
 owner_adapters:
@@ -36,16 +34,12 @@ owner_adapters:
     aggregate_owner: interaction
   - path: internal/cli/serve/workspacemgr
     aggregate_owner: workspace
-  - path: internal/infra/agentsbootstrapstore
-    aggregate_owner: agents
-  - path: internal/infra/connectorscatalog
-    aggregate_owner: connectors
-  - path: internal/infra/sessionstoreadapter
-    aggregate_owner: interaction
   - path: internal/infra/sourcecontrolstackstore
     aggregate_owner: sourcecontrol
   - path: internal/infra/workspacecatalog
     aggregate_owner: workspace
+  - path: internal/sessions/archive.go
+    aggregate_owner: interaction
   - path: internal/usage
     aggregate_owner: read_projection
 analysis_profiles:
@@ -80,7 +74,7 @@ persistence_packages:
     receiver_names: [LocalStore]
     receiver_suffixes: []
   - path: github.com/tysonthomas9/loomcli/internal/modules/agents
-    receiver_names: [AgentIdentityStore, BootstrapStore, DesiredStateStore, LifecycleStore, OwnershipStore, RolePromptRepairStore, RoleStore]
+    receiver_names: [AgentIdentityStore, DesiredStateStore, LifecycleStore, OwnershipStore, RoleStore]
     receiver_suffixes: []
   - path: github.com/tysonthomas9/loomcli/internal/modules/artifacts
     receiver_names: [QueryStore, SessionStore, Store]
@@ -109,9 +103,6 @@ persistence_packages:
   - path: github.com/tysonthomas9/loomcli/internal/sessions
     receiver_names: [Session, Store]
     receiver_suffixes: []
-  - path: github.com/tysonthomas9/loomcli/internal/sessions/eventstore
-    receiver_names: [Store]
-    receiver_suffixes: []
   - path: github.com/tysonthomas9/loomcli/internal/store
     receiver_names: []
     receiver_suffixes: [Appender, Dispatcher, Reader, Store, Support]
@@ -126,9 +117,6 @@ method_sets:
   - name: agentprovisioning_progress
     read_only: [Get, ListPending]
     mutating: [Begin, Save]
-  - name: agents_bootstrap
-    read_only: []
-    mutating: [EnsureAgent, EnsureRole, RepairManagedRolePromptFile]
   - name: agents_identity
     read_only: []
     mutating: [ArchiveAgent, CreateAgent, UpdateAgent]
@@ -140,7 +128,7 @@ method_sets:
     mutating: [AcquireOwnership, ReleaseOwnership, RenewOwnership]
   - name: agents_roles
     read_only: [GetRole, ListRoles]
-    mutating: [CreateRole, DeleteRole, SetPromptFileIfEmpty, UpdateRole]
+    mutating: [CreateRole, DeleteRole, UpdateRole]
   - name: agents_state
     read_only: []
     mutating: [SetDesiredState, SetDesiredStateOwned]
@@ -163,7 +151,6 @@ method_sets:
       - AgentOwnershipLeases
       - AgentServices
       - AgentSessions
-      - Artifacts
       - Awaits
       - ConnectorCalls
       - ConnectorGrants
@@ -197,7 +184,7 @@ method_sets:
     read_only: [GetConnectorRecord, ListCallRecordsByBinding, ListCallRecordsByRun, ListConnectorRecords, ListGrantRecordsByBinding, ListGrantRecordsByConnector]
     mutating: [CreateConnectorRecord, CreateManagementGrant, RevokeGrantRecord]
   - name: connectors_secret_lifecycle
-    read_only: [GetConnectorRecord, ResolveCurrentInboundSecretRecord, ResolveOutboundCredentialSealedRecord]
+    read_only: [GetConnectorRecord, ResolveInboundSecretsRecord, ResolveOutboundCredentialSealedRecord]
     mutating: [AppendConnectorCallRecord, RotateConnectorSecretsRecord]
   - name: fleetdb_agent_management_transport
     read_only: [GetAgentOwnership, GetAgentRole, GetAgentService, ListAgentOwnership, ListAgentRoles, ListAgentServices]
@@ -212,12 +199,11 @@ method_sets:
       - AgentServices
       - AgentSessions
       - ArtifactCommands
-      - Artifacts
+      - ArtifactQueries
       - Automation
       - Awaits
       - Close
       - ConnectorCalls
-      - ConnectorGrantCommands
       - ConnectorGrants
       - Connectors
       - DriverRuns
@@ -275,11 +261,8 @@ method_sets:
     read_only: [Observe, Prune, ReplayFromFile, Snapshot]
     mutating: []
   - name: session
-    read_only: [SessionID]
+    read_only: [Backend, SessionID, StartedAt, Status]
     mutating: [Finalize, SyncLatestClaudeTranscript, SyncLatestCodexRollout]
-  - name: session_event_store
-    read_only: [HasTranscript, Path, Read]
-    mutating: [AppendEnvelope, Compact]
   - name: session_history
     read_only: [Close, List, getHistory]
     mutating: [Add, Complete, saveHistory]
@@ -287,7 +270,9 @@ method_sets:
     read_only:
       - CountIndexEntries
       - Dir
+      - HasEventTranscript
       - ListSubagentTranscripts
+      - LoadEnvelopes
       - LoadMetadata
       - LoadNativeEvents
       - LoadTranscript
@@ -299,6 +284,7 @@ method_sets:
       - SessionsByTask
       - SubagentTranscriptPath
     mutating:
+      - AppendEnvelope
       - AppendTranscript
       - CompactIndex
       - CreateSession
@@ -342,7 +328,6 @@ method_sets:
       - ReadContent
       - ResolveInboundSecret
       - ResolveOutboundCredentialSealed
-      - ResolveWebhookSecret
     mutating:
       - Ack
       - Acquire
@@ -408,7 +393,7 @@ method_sets:
     read_only: []
     mutating: [AuthorVersion]
   - name: workitems_port
-    read_only: [Blocked, Deferred, Get, List, ListComments, ListDependencies, ListEvents, Ready, RequireRepositoryAdmission, Search]
+    read_only: [Blocked, Deferred, Get, List, ListComments, ListDependencies, ListEvents, Ready, RequireRepositoryAdmission, Search, Stats]
     mutating: [AddComment, AddDependency, AssignRepository, BlockRepositoryRequired, Claim, Close, Create, Delete, Patch, RemoveDependency, Reopen]
   - name: workspace_admission_store
     read_only: [AgentServices, Agents, Repos, Roles, Workspaces]
@@ -439,10 +424,6 @@ receiver_surfaces:
   - receiver: "*github.com/tysonthomas9/loomcli/internal/sessions.Store"
     package: github.com/tysonthomas9/loomcli/internal/sessions
     method_set: session_store
-    capability_owner: interaction
-  - receiver: "*github.com/tysonthomas9/loomcli/internal/sessions/eventstore.Store"
-    package: github.com/tysonthomas9/loomcli/internal/sessions/eventstore
-    method_set: session_event_store
     capability_owner: interaction
   - receiver: "*github.com/tysonthomas9/loomcli/internal/usage.Store"
     package: github.com/tysonthomas9/loomcli/internal/usage
@@ -532,10 +513,6 @@ receiver_surfaces:
     package: github.com/tysonthomas9/loomcli/internal/modules/agents
     method_set: agents_identity
     capability_owner: agents
-  - receiver: github.com/tysonthomas9/loomcli/internal/modules/agents.BootstrapStore
-    package: github.com/tysonthomas9/loomcli/internal/modules/agents
-    method_set: agents_bootstrap
-    capability_owner: agents
   - receiver: github.com/tysonthomas9/loomcli/internal/modules/agents.DesiredStateStore
     package: github.com/tysonthomas9/loomcli/internal/modules/agents
     method_set: agents_state
@@ -547,10 +524,6 @@ receiver_surfaces:
   - receiver: github.com/tysonthomas9/loomcli/internal/modules/agents.OwnershipStore
     package: github.com/tysonthomas9/loomcli/internal/modules/agents
     method_set: agents_ownership
-    capability_owner: agents
-  - receiver: github.com/tysonthomas9/loomcli/internal/modules/agents.RolePromptRepairStore
-    package: github.com/tysonthomas9/loomcli/internal/modules/agents
-    method_set: agents_roles
     capability_owner: agents
   - receiver: github.com/tysonthomas9/loomcli/internal/modules/agents.RoleStore
     package: github.com/tysonthomas9/loomcli/internal/modules/agents
@@ -672,14 +645,6 @@ receiver_surfaces:
     package: github.com/tysonthomas9/loomcli/internal/store
     method_set: store_repository
     capability_owner: interaction
-  - receiver: github.com/tysonthomas9/loomcli/internal/store.ArtifactContentReader
-    package: github.com/tysonthomas9/loomcli/internal/store
-    method_set: store_repository
-    capability_owner: artifacts
-  - receiver: github.com/tysonthomas9/loomcli/internal/store.ArtifactStore
-    package: github.com/tysonthomas9/loomcli/internal/store
-    method_set: store_repository
-    capability_owner: artifacts
   - receiver: github.com/tysonthomas9/loomcli/internal/store.AtomicAwaitStore
     package: github.com/tysonthomas9/loomcli/internal/store
     method_set: store_repository
@@ -692,18 +657,6 @@ receiver_surfaces:
     package: github.com/tysonthomas9/loomcli/internal/store
     method_set: store_repository
     capability_owner: execution
-  - receiver: github.com/tysonthomas9/loomcli/internal/store.ConnectorAuditStore
-    package: github.com/tysonthomas9/loomcli/internal/store
-    method_set: store_repository
-    capability_owner: connectors
-  - receiver: github.com/tysonthomas9/loomcli/internal/store.ConnectorGrantStore
-    package: github.com/tysonthomas9/loomcli/internal/store
-    method_set: store_repository
-    capability_owner: connectors
-  - receiver: github.com/tysonthomas9/loomcli/internal/store.ConnectorStore
-    package: github.com/tysonthomas9/loomcli/internal/store
-    method_set: store_repository
-    capability_owner: connectors
   - receiver: github.com/tysonthomas9/loomcli/internal/store.DriverRunCancelSupport
     package: github.com/tysonthomas9/loomcli/internal/store
     method_set: store_repository
@@ -906,14 +859,6 @@ function_surfaces:
     access: read-only
     capability_owner: sourcecontrol
   - package: github.com/tysonthomas9/loomcli/internal/modules/agents
-    function: New
-    access: read-only
-    capability_owner: agents
-  - package: github.com/tysonthomas9/loomcli/internal/modules/agents
-    function: NewBootstrapService
-    access: read-only
-    capability_owner: agents
-  - package: github.com/tysonthomas9/loomcli/internal/modules/agents
     function: NewWithLifecycle
     access: read-only
     capability_owner: agents
@@ -1062,10 +1007,6 @@ function_surfaces:
     access: read-only
     capability_owner: connectors
   - package: github.com/tysonthomas9/loomcli/internal/modules/connectors
-    function: NewWithGrants
-    access: read-only
-    capability_owner: connectors
-  - package: github.com/tysonthomas9/loomcli/internal/modules/connectors
     function: NormalizeAction
     access: read-only
     capability_owner: connectors
@@ -1075,6 +1016,10 @@ function_surfaces:
     capability_owner: connectors
   - package: github.com/tysonthomas9/loomcli/internal/modules/connectors
     function: RequiredActionPreconditions
+    access: read-only
+    capability_owner: connectors
+  - package: github.com/tysonthomas9/loomcli/internal/modules/connectors
+    function: ValidateConnectorAction
     access: read-only
     capability_owner: connectors
   - package: github.com/tysonthomas9/loomcli/internal/modules/interaction
@@ -1226,11 +1171,11 @@ function_surfaces:
     access: read-only
     capability_owner: interaction
   - package: github.com/tysonthomas9/loomcli/internal/sessions
-    function: SumTranscriptUsage
+    function: OpenArchive
     access: read-only
     capability_owner: interaction
-  - package: github.com/tysonthomas9/loomcli/internal/sessions/eventstore
-    function: Open
+  - package: github.com/tysonthomas9/loomcli/internal/sessions
+    function: SumTranscriptUsage
     access: read-only
     capability_owner: interaction
   - package: github.com/tysonthomas9/loomcli/internal/store
@@ -1684,126 +1629,6 @@ writes:
       count: 1
       aggregate_owner: workspace
       disposition: owner_adapter
-    - file: internal/infra/agentsbootstrapstore/adapter.go
-      receiver: github.com/tysonthomas9/loomcli/internal/modules/agents.RolePromptRepairStore
-      method: SetPromptFileIfEmpty
-      count: 1
-      aggregate_owner: agents
-      disposition: owner_adapter
-    - file: internal/infra/agentsbootstrapstore/adapter.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.AgentServiceStore
-      method: Create
-      count: 1
-      aggregate_owner: agents
-      disposition: owner_adapter
-    - file: internal/infra/agentsbootstrapstore/adapter.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.RoleStore
-      method: Create
-      count: 1
-      aggregate_owner: agents
-      disposition: owner_adapter
-    - file: internal/infra/connectorscatalog/catalog.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.ConnectorAuditStore
-      method: Append
-      count: 1
-      aggregate_owner: connectors
-      disposition: owner_adapter
-    - file: internal/infra/connectorscatalog/catalog.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.ConnectorGrantStore
-      method: Create
-      count: 1
-      aggregate_owner: connectors
-      disposition: owner_adapter
-    - file: internal/infra/connectorscatalog/catalog.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.ConnectorGrantStore
-      method: Revoke
-      count: 1
-      aggregate_owner: connectors
-      disposition: owner_adapter
-    - file: internal/infra/connectorscatalog/catalog.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.ConnectorStore
-      method: Create
-      count: 1
-      aggregate_owner: connectors
-      disposition: owner_adapter
-    - file: internal/infra/connectorscatalog/catalog.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.ConnectorStore
-      method: RotateSecrets
-      count: 1
-      aggregate_owner: connectors
-      disposition: owner_adapter
-    - file: internal/infra/sessionstoreadapter/adapter.go
-      receiver: '*github.com/tysonthomas9/loomcli/internal/sessions.Session'
-      method: Finalize
-      count: 1
-      aggregate_owner: interaction
-      disposition: owner_adapter
-    - file: internal/infra/sessionstoreadapter/adapter.go
-      receiver: '*github.com/tysonthomas9/loomcli/internal/sessions.Session'
-      method: SyncLatestClaudeTranscript
-      count: 1
-      aggregate_owner: interaction
-      disposition: owner_adapter
-    - file: internal/infra/sessionstoreadapter/adapter.go
-      receiver: '*github.com/tysonthomas9/loomcli/internal/sessions.Session'
-      method: SyncLatestCodexRollout
-      count: 1
-      aggregate_owner: interaction
-      disposition: owner_adapter
-    - file: internal/infra/sessionstoreadapter/adapter.go
-      receiver: '*github.com/tysonthomas9/loomcli/internal/sessions.Store'
-      method: CompactIndex
-      count: 1
-      aggregate_owner: interaction
-      disposition: owner_adapter
-    - file: internal/infra/sessionstoreadapter/adapter.go
-      receiver: '*github.com/tysonthomas9/loomcli/internal/sessions.Store'
-      method: CreateSession
-      count: 1
-      aggregate_owner: interaction
-      disposition: owner_adapter
-    - file: internal/infra/sessionstoreadapter/adapter.go
-      receiver: '*github.com/tysonthomas9/loomcli/internal/sessions.Store'
-      method: PurgeOlderThan
-      count: 1
-      aggregate_owner: interaction
-      disposition: owner_adapter
-    - file: internal/infra/sessionstoreadapter/adapter.go
-      receiver: '*github.com/tysonthomas9/loomcli/internal/sessions.Store'
-      method: ReIndex
-      count: 1
-      aggregate_owner: interaction
-      disposition: owner_adapter
-    - file: internal/infra/sessionstoreadapter/adapter.go
-      receiver: '*github.com/tysonthomas9/loomcli/internal/sessions.Store'
-      method: SaveMetadata
-      count: 1
-      aggregate_owner: interaction
-      disposition: owner_adapter
-    - file: internal/infra/sessionstoreadapter/adapter.go
-      receiver: '*github.com/tysonthomas9/loomcli/internal/sessions.Store'
-      method: SyncNativeTranscript
-      count: 1
-      aggregate_owner: interaction
-      disposition: owner_adapter
-    - file: internal/infra/sessionstoreadapter/adapter.go
-      receiver: '*github.com/tysonthomas9/loomcli/internal/sessions.Store'
-      method: SyncSubagentTranscript
-      count: 1
-      aggregate_owner: interaction
-      disposition: owner_adapter
-    - file: internal/infra/sessionstoreadapter/adapter.go
-      receiver: '*github.com/tysonthomas9/loomcli/internal/sessions/eventstore.Store'
-      method: AppendEnvelope
-      count: 1
-      aggregate_owner: interaction
-      disposition: owner_adapter
-    - file: internal/infra/sessionstoreadapter/adapter.go
-      receiver: github.com/tysonthomas9/loomcli/internal/sessions
-      method: NewStore
-      count: 1
-      aggregate_owner: interaction
-      disposition: owner_adapter
     - file: internal/infra/sourcecontrolstackstore/stackstore.go
       receiver: '*github.com/tysonthomas9/loomcli/internal/infra/sourcecontrolstackstore.LocalStore'
       method: save
@@ -1858,6 +1683,54 @@ writes:
       count: 3
       aggregate_owner: workspace
       disposition: owner_adapter
+    - file: internal/sessions/archive.go
+      receiver: '*github.com/tysonthomas9/loomcli/internal/sessions.Store'
+      method: AppendEnvelope
+      count: 1
+      aggregate_owner: interaction
+      disposition: owner_adapter
+    - file: internal/sessions/archive.go
+      receiver: '*github.com/tysonthomas9/loomcli/internal/sessions.Store'
+      method: CompactIndex
+      count: 1
+      aggregate_owner: interaction
+      disposition: owner_adapter
+    - file: internal/sessions/archive.go
+      receiver: '*github.com/tysonthomas9/loomcli/internal/sessions.Store'
+      method: CreateSession
+      count: 1
+      aggregate_owner: interaction
+      disposition: owner_adapter
+    - file: internal/sessions/archive.go
+      receiver: '*github.com/tysonthomas9/loomcli/internal/sessions.Store'
+      method: PurgeOlderThan
+      count: 1
+      aggregate_owner: interaction
+      disposition: owner_adapter
+    - file: internal/sessions/archive.go
+      receiver: '*github.com/tysonthomas9/loomcli/internal/sessions.Store'
+      method: ReIndex
+      count: 1
+      aggregate_owner: interaction
+      disposition: owner_adapter
+    - file: internal/sessions/archive.go
+      receiver: '*github.com/tysonthomas9/loomcli/internal/sessions.Store'
+      method: SaveMetadata
+      count: 1
+      aggregate_owner: interaction
+      disposition: owner_adapter
+    - file: internal/sessions/archive.go
+      receiver: '*github.com/tysonthomas9/loomcli/internal/sessions.Store'
+      method: SyncNativeTranscript
+      count: 1
+      aggregate_owner: interaction
+      disposition: owner_adapter
+    - file: internal/sessions/archive.go
+      receiver: '*github.com/tysonthomas9/loomcli/internal/sessions.Store'
+      method: SyncSubagentTranscript
+      count: 1
+      aggregate_owner: interaction
+      disposition: owner_adapter
     - file: internal/usage/projection.go
       receiver: '*github.com/tysonthomas9/loomcli/internal/usage.Store'
       method: Append
@@ -1882,7 +1755,6 @@ generic_mechanisms:
     owner_mapping: agent_service=agents;driver_run|task_run=execution;terminal=interaction;artifact_upload=artifacts
     allowed_adapter_roots:
       - internal/modules/agents/fleetdb
-      - internal/modules/artifacts/fleetdb
       - internal/modules/execution/fleetdb
       - internal/modules/interaction/fleetdb
     enforcement: Reject any generic Lease accessor outside an owner-scoped adapter; dedicated legacy AgentLease APIs remain separately ratcheted.

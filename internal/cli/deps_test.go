@@ -225,7 +225,7 @@ func NewTestDeps(t *testing.T) (*Deps, *MockGitRunner, *MockExecRunner, *MockFil
 // --- Tests ---
 
 func TestDefaultDeps_NonNilFields(t *testing.T) {
-	d := DefaultDeps()
+	d := DefaultDeps(t.Context())
 	if d.Git == nil {
 		t.Error("Git is nil")
 	}
@@ -259,7 +259,7 @@ func TestDefaultDeps_NonNilFields(t *testing.T) {
 }
 
 func TestWithDeps_GetDeps_RoundTrip(t *testing.T) {
-	d := DefaultDeps()
+	d := DefaultDeps(t.Context())
 	ctx := WithDeps(context.Background(), d)
 
 	cmd := &cobra.Command{}
@@ -386,7 +386,7 @@ func TestFetchReadyIssues_UsesTracker(t *testing.T) {
 	}
 	setDefaultIssueBackend(mock)
 
-	got, err := fetchReadyIssues("epic-1", "")
+	got, err := fetchReadyIssues(t.Context(), "epic-1", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -413,7 +413,7 @@ func TestFetchReadyIssues_NoParentViaTracker(t *testing.T) {
 	}
 	setDefaultIssueBackend(mock)
 
-	_, err := fetchReadyIssues("", "")
+	_, err := fetchReadyIssues(t.Context(), "", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -506,7 +506,7 @@ func TestDefaultDeps_NoBDField(t *testing.T) {
 	// This serves as a regression check that BD was removed and no new
 	// unexpected field was added. We verify by checking all fields are non-nil
 	// (which covers every field in the struct).
-	d := DefaultDeps()
+	d := DefaultDeps(t.Context())
 
 	// All 9 fields must be non-nil.
 	fields := []struct {
@@ -525,7 +525,7 @@ func TestDefaultDeps_NoBDField(t *testing.T) {
 	}
 	for _, f := range fields {
 		if f.isNil {
-			t.Errorf("DefaultDeps().%s is nil", f.name)
+			t.Errorf("DefaultDeps(t.Context()).%s is nil", f.name)
 		}
 	}
 
@@ -538,7 +538,7 @@ func TestDefaultDeps_NoBDField(t *testing.T) {
 func TestDefaultDeps_DefaultsToFleetDB(t *testing.T) {
 	t.Setenv("LOOM_ISSUE_BACKEND", "")
 
-	d := DefaultDeps()
+	d := DefaultDeps(t.Context())
 	if got := d.IssueBackend.BackendName(); got != "fleet-db" {
 		t.Fatalf("DefaultDeps IssueBackend = %q, want fleet-db", got)
 	}
@@ -547,7 +547,7 @@ func TestDefaultDeps_DefaultsToFleetDB(t *testing.T) {
 func TestDefaultDeps_FleetConstructionFailureFailsClosed(t *testing.T) {
 	t.Setenv("LOOM_ISSUE_BACKEND", "fleet")
 
-	d := DefaultDeps()
+	d := DefaultDeps(t.Context())
 	if got := d.IssueBackend.BackendName(); got != "fleet-unavailable" {
 		t.Fatalf("DefaultDeps IssueBackend = %q, want fleet-unavailable", got)
 	}
@@ -561,7 +561,7 @@ func TestDefaultDeps_APIConstructionFailureFailsClosed(t *testing.T) {
 	t.Setenv("LOOM_ISSUE_BACKEND", "api")
 	t.Setenv("LOOM_SERVER_URL", "")
 
-	d := DefaultDeps()
+	d := DefaultDeps(t.Context())
 	if got := d.IssueBackend.BackendName(); got != "api-unavailable" {
 		t.Fatalf("DefaultDeps IssueBackend = %q, want api-unavailable", got)
 	}

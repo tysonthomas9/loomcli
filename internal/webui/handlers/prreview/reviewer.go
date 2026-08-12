@@ -17,7 +17,6 @@ import (
 	workspacemodule "github.com/tysonthomas9/loomcli/internal/modules/workspace"
 
 	"github.com/tysonthomas9/loomcli/internal/app/prreviewer"
-	"github.com/tysonthomas9/loomcli/internal/backend/api/gen"
 	"github.com/tysonthomas9/loomcli/internal/localworkspace"
 	"github.com/tysonthomas9/loomcli/internal/modules/agents"
 	connectorsmodule "github.com/tysonthomas9/loomcli/internal/modules/connectors"
@@ -122,18 +121,16 @@ func (m *Module) resolveRepositoryRef(
 	ctx context.Context,
 	ws, owner, repo string,
 ) (repositoryRef, repoName string, ok bool, err error) {
-	if m == nil || m.store == nil {
+	if m == nil || m.workspace == nil {
 		return "", "", false, sourcecontrol.ErrUnavailable
 	}
-	repositories, err := m.store.Repos().List(ctx, ws)
+	repositories, err := m.workspace.ListRepositories(ctx, workspacemodule.ListRepositoriesQuery{WorkspaceReference: ws})
 	if err != nil {
 		return "", "", false, err
 	}
 	var matched *workspacemodule.Repository
-	for _, workspaceRepo := range repositories {
-		if workspaceRepo == nil {
-			return "", "", false, sourcecontrol.ErrInvalidMaterialization
-		}
+	for index := range repositories {
+		workspaceRepo := &repositories[index]
 		gotOwner, gotRepo, parsed := parseGitHubOwnerRepo(workspaceRepo.RemoteURL)
 		if !parsed {
 			continue
@@ -281,9 +278,9 @@ func (m *Module) ensureReviewer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, gen.ReviewerEnsureResult{
+	writeJSON(w, reviewerEnsureResult{
 		AgentName:     agentName,
-		CheckedOutSha: checkedOutSHA,
+		CheckedOutSHA: checkedOutSHA,
 		Seeded:        true,
 	})
 }
@@ -443,7 +440,7 @@ func (m *Module) postReviewerMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var req gen.ReviewerMessageRequest
+	var req reviewerMessageRequest
 	if err := handler.DecodeOneJSON(w, r, &req, handler.JSONDecodeOptions{}); err != nil {
 		writePRReviewErrorCode(w, http.StatusBadRequest, "invalid", "invalid reviewer message request body", false)
 		return
@@ -493,7 +490,7 @@ func (m *Module) postReviewerMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, gen.ReviewerMessageResult{
+	writeJSON(w, reviewerMessageResult{
 		State:  string(result.State),
 		Reason: result.Reason,
 	})

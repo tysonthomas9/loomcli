@@ -17,7 +17,7 @@ import (
 // it verbatim onto the created TaskRun.Input, so the runner that later claims
 // the run receives the review diff+rubric.
 func TestDriverAPIExecTaskPersistsInputPayload(t *testing.T) {
-	h := newTestHarness(t, "")
+	h := newTestHarness(t)
 	registerExecTaskWorkerNode(t, h, "task-node-1", "local-noop")
 
 	// The raw JSON object the workflow passed to loom.taskRuns.request({input}).
@@ -40,7 +40,7 @@ func TestDriverAPIExecTaskPersistsInputPayload(t *testing.T) {
 			"enqueueOnly":     true,
 			"input":           reviewInput,
 		},
-		headers: h.ownerHeaders(),
+		headers: h.ownerHeaders(t),
 	})
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want 200 (body=%v)", resp.StatusCode, decoded)
@@ -87,7 +87,7 @@ func TestDriverAPIExecTaskPersistsInputPayload(t *testing.T) {
 // request without `input` persists a TaskRun with no Input (the field stays
 // nil), so existing callers behave exactly as before.
 func TestDriverAPIExecTaskOmitsInputWhenAbsent(t *testing.T) {
-	h := newTestHarness(t, "")
+	h := newTestHarness(t)
 	registerExecTaskWorkerNode(t, h, "task-node-2", "local-noop")
 
 	resp, decoded := h.do(t, opRequest{
@@ -98,7 +98,7 @@ func TestDriverAPIExecTaskOmitsInputWhenAbsent(t *testing.T) {
 			"providerProfile": "local-noop",
 			"enqueueOnly":     true,
 		},
-		headers: h.ownerHeaders(),
+		headers: h.ownerHeaders(t),
 	})
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want 200 (body=%v)", resp.StatusCode, decoded)
@@ -114,7 +114,7 @@ func TestDriverAPIExecTaskOmitsInputWhenAbsent(t *testing.T) {
 }
 
 func TestDriverAPIExecTaskPreservesRequestedNodeID(t *testing.T) {
-	h := newTestHarness(t, "")
+	h := newTestHarness(t)
 	registerExecTaskWorkerNode(t, h, "task-node-target", "local-noop")
 	registerExecTaskWorkerNode(t, h, "task-node-other", "local-noop")
 
@@ -127,7 +127,7 @@ func TestDriverAPIExecTaskPreservesRequestedNodeID(t *testing.T) {
 			"nodeId":          "task-node-target",
 			"enqueueOnly":     true,
 		},
-		headers: h.ownerHeaders(),
+		headers: h.ownerHeaders(t),
 	})
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want 200 (body=%v)", resp.StatusCode, decoded)
@@ -163,7 +163,7 @@ func TestDriverAPIExecTaskPreservesRequestedNodeID(t *testing.T) {
 }
 
 func TestDriverAPIExecTaskPinnedUnschedulableNode(t *testing.T) {
-	h := newTestHarness(t, "")
+	h := newTestHarness(t)
 	registerExecTaskWorkerNode(t, h, "task-node-target", "other-provider")
 	registerExecTaskWorkerNode(t, h, "task-node-eligible", "local-noop")
 
@@ -176,7 +176,7 @@ func TestDriverAPIExecTaskPinnedUnschedulableNode(t *testing.T) {
 			"nodeId":          "task-node-target",
 			"enqueueOnly":     true,
 		},
-		headers: h.ownerHeaders(),
+		headers: h.ownerHeaders(t),
 	})
 	if resp.StatusCode != http.StatusConflict {
 		t.Fatalf("status = %d, want 409 (body=%v)", resp.StatusCode, decoded)

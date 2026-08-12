@@ -95,12 +95,12 @@ func (m *Module) workspaceHasRepo(ctx context.Context, ws, owner, repo string) (
 // authorization and listing. The former full WorkspaceData projection also
 // loaded agent configuration and every workspace summary, coupling a repository
 // membership check to unrelated read models.
-func (m *Module) workspaceRepos(ctx context.Context, workspace string) ([]*workspacemodule.Repository, error) {
-	if m == nil || m.store == nil {
+func (m *Module) workspaceRepos(ctx context.Context, workspace string) ([]workspacemodule.Repository, error) {
+	if m == nil || m.workspace == nil {
 		return nil, errEgressUnavailable
 	}
-	if _, err := m.store.Workspaces().Get(ctx, workspace); err != nil {
+	if _, err := m.workspace.Resolve(ctx, workspacemodule.ResolveQuery{Reference: workspace}); err != nil {
 		return nil, err
 	}
-	return m.store.Repos().List(ctx, workspace)
+	return m.workspace.ListRepositories(ctx, workspacemodule.ListRepositoriesQuery{WorkspaceReference: workspace})
 }

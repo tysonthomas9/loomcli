@@ -634,7 +634,7 @@ func testExecutionAwait(instance *domain.AwaitInstance) *execution.DriverAwaitIn
 	}
 }
 
-func newTestHarness(t *testing.T, apiToken string) *testHarness {
+func newTestHarness(t *testing.T) *testHarness {
 	t.Helper()
 	ctx := context.Background()
 	st := memstore.New()
@@ -672,9 +672,8 @@ func newTestHarness(t *testing.T, apiToken string) *testHarness {
 		t.Fatalf("Claim driver run: %v", err)
 	}
 	fake := &fakeIssueBackend{}
-	// Every harness carries a run-token signing key so all existing
-	// header-quad/static-bearer tests double as proof the legacy path is
-	// unchanged when the token auth path is enabled.
+	// Every harness carries a run-token signing key; every request authenticates
+	// through the same token-only seam as a workflow runtime.
 	runTokenKey := bytes.Repeat([]byte{0x42}, 32)
 	eventWorkflow, err := workfloweventing.New(testWorkflowEventAuthorityProvider{}, testLegacyEventAdmission{st: st})
 	if err != nil {
@@ -699,7 +698,6 @@ func newTestHarness(t *testing.T, apiToken string) *testHarness {
 	}
 	module := NewModule(Config{
 		Store:                st,
-		APIToken:             apiToken,
 		RunTokenKey:          runTokenKey,
 		WorkflowEventing:     eventWorkflow,
 		Execution:            testDriverRunExecution{DriverRunAPI: executionCapability.DriverRunAPI(), store: st, issues: fake},
@@ -776,19 +774,14 @@ func (h *testHarness) doAny(t *testing.T, req opRequest) (*http.Response, any) {
 	return resp, decoded
 }
 
-func (h *testHarness) ownerHeaders() map[string]string {
-	return map[string]string{
-		HeaderDriverRunID:        h.runID,
-		HeaderDriverNodeID:       h.nodeID,
-		HeaderDriverLeaseID:      h.leaseID,
-		HeaderDriverLeaseToken:   "driver-test-token",
-		HeaderDriverFencingToken: fmt.Sprintf("%d", h.fence),
-	}
+func (h *testHarness) ownerHeaders(t *testing.T) map[string]string {
+	t.Helper()
+	return bearer(h.mintToken(t, time.Hour, nil))
 }
 
 func TestVerifyRunOpProvesOwnerThroughExecution(t *testing.T) {
-	h := newTestHarness(t, "")
-	resp, decoded := h.do(t, opRequest{op: "verify-run", headers: h.ownerHeaders()})
+	h := newTestHarness(t)
+	resp, decoded := h.do(t, opRequest{op: "verify-run", headers: h.ownerHeaders(t)})
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d body=%v, want 200", resp.StatusCode, decoded)
 	}
@@ -796,8 +789,9 @@ func TestVerifyRunOpProvesOwnerThroughExecution(t *testing.T) {
 		t.Fatalf("verified run = %v", decoded)
 	}
 
-	wrongOwner := h.ownerHeaders()
-	wrongOwner[HeaderDriverFencingToken] = fmt.Sprint(h.fence + 1)
+	wrongOwner := bearer(h.mintToken(t, time.Hour, func(claims *driverpkg.RunTokenClaims) {
+		claims.FencingToken++
+	}))
 	resp, decoded = h.do(t, opRequest{op: "verify-run", headers: wrongOwner})
 	if resp.StatusCode != http.StatusForbidden || errorCode(t, decoded) != "not_owner" {
 		t.Fatalf("wrong-owner status/body = %d/%v, want 403 not_owner", resp.StatusCode, decoded)
@@ -805,14 +799,14 @@ func TestVerifyRunOpProvesOwnerThroughExecution(t *testing.T) {
 }
 
 func TestIssueOpsFailClosedWithoutInjectedExecutionIssueBackend(t *testing.T) {
-	h := newTestHarness(t, "")
+	h := newTestHarness(t)
 	h.module.issueBackends = nil
 	t.Setenv("LOOM_FLEET_DB_API_KEY", "ambient-credentials-must-not-enable-the-handler")
 
 	resp, decoded := h.do(t, opRequest{
 		op:      "issue-get",
 		body:    map[string]string{"issueId": "TASK-1"},
-		headers: h.ownerHeaders(),
+		headers: h.ownerHeaders(t),
 	})
 	if resp.StatusCode != http.StatusServiceUnavailable || errorCode(t, decoded) != "unavailable" {
 		t.Fatalf("status/body = %d/%v, want 503 unavailable", resp.StatusCode, decoded)
@@ -824,7 +818,7 @@ func TestIssueOpsFailClosedWithoutInjectedExecutionIssueBackend(t *testing.T) {
 }
 
 func TestUpdateAgentParentUsesVerifiedDriverRunGeneration(t *testing.T) {
-	h := newTestHarness(t, "")
+	h := newTestHarness(t)
 	if _, err := h.store.Roles().Create(t.Context(), store.RoleCreate{WorkspaceKey: "WS", Name: "task"}); err != nil {
 		t.Fatalf("create task role: %v", err)
 	}
@@ -853,7 +847,7 @@ func TestUpdateAgentParentUsesVerifiedDriverRunGeneration(t *testing.T) {
 		body: map[string]string{
 			"agent": "child", "parent": h.runID, "expectParent": "",
 		},
-		headers: h.ownerHeaders(),
+		headers: h.ownerHeaders(t),
 	})
 	if response.StatusCode != http.StatusOK {
 		t.Fatalf("update parent status/body = %d/%v, want 200", response.StatusCode, decoded)
@@ -866,8 +860,9 @@ func TestUpdateAgentParentUsesVerifiedDriverRunGeneration(t *testing.T) {
 		t.Fatalf("child parent = %q, want %q", child.ParentEpic, h.runID)
 	}
 
-	staleHeaders := h.ownerHeaders()
-	staleHeaders[HeaderDriverFencingToken] = fmt.Sprint(h.fence + 1)
+	staleHeaders := bearer(h.mintToken(t, time.Hour, func(claims *driverpkg.RunTokenClaims) {
+		claims.FencingToken++
+	}))
 	response, decoded = h.do(t, opRequest{
 		op: "update-agent-parent",
 		body: map[string]string{
@@ -888,12 +883,12 @@ func TestUpdateAgentParentUsesVerifiedDriverRunGeneration(t *testing.T) {
 }
 
 func TestVerifyRunOpRejectsTrailingJSON(t *testing.T) {
-	h := newTestHarness(t, "")
+	h := newTestHarness(t)
 	req, err := http.NewRequest(http.MethodPost, h.server.URL+"/api/workspaces/WS/driver/verify-run", strings.NewReader(`{} {}`))
 	if err != nil {
 		t.Fatalf("new request: %v", err)
 	}
-	for name, value := range h.ownerHeaders() {
+	for name, value := range h.ownerHeaders(t) {
 		req.Header.Set(name, value)
 	}
 	resp, err := http.DefaultClient.Do(req)
@@ -921,7 +916,7 @@ func errorCode(t *testing.T, decoded map[string]any) string {
 }
 
 func TestDriverAPIRequiresRunIDHeader(t *testing.T) {
-	h := newTestHarness(t, "")
+	h := newTestHarness(t)
 	resp, decoded := h.do(t, opRequest{op: "list-agents"})
 	if resp.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("status = %d, want 401", resp.StatusCode)
@@ -931,34 +926,28 @@ func TestDriverAPIRequiresRunIDHeader(t *testing.T) {
 	}
 }
 
-func TestDriverAPIBearerToken(t *testing.T) {
-	h := newTestHarness(t, "secret-token")
+func TestDriverAPIRequiresValidRunToken(t *testing.T) {
+	h := newTestHarness(t)
 
-	headers := h.ownerHeaders()
-	resp, decoded := h.do(t, opRequest{op: "list-agents", headers: headers})
+	resp, decoded := h.do(t, opRequest{op: "list-agents"})
+	if resp.StatusCode != http.StatusUnauthorized || errorCode(t, decoded) != "unauthenticated" {
+		t.Fatalf("missing token status/body = %d/%v, want 401 unauthenticated", resp.StatusCode, decoded)
+	}
+
+	resp, _ = h.do(t, opRequest{op: "list-agents", headers: bearer("secret-token")})
 	if resp.StatusCode != http.StatusUnauthorized {
-		t.Fatalf("status without token = %d, want 401", resp.StatusCode)
-	}
-	if code := errorCode(t, decoded); code != "unauthenticated" {
-		t.Fatalf("error code = %q, want unauthenticated", code)
+		t.Fatalf("status with legacy static token = %d, want 401", resp.StatusCode)
 	}
 
-	headers["Authorization"] = "Bearer wrong"
-	resp, _ = h.do(t, opRequest{op: "list-agents", headers: headers})
-	if resp.StatusCode != http.StatusUnauthorized {
-		t.Fatalf("status with wrong token = %d, want 401", resp.StatusCode)
-	}
-
-	headers["Authorization"] = "Bearer secret-token"
-	resp, _ = h.do(t, opRequest{op: "list-agents", headers: headers})
+	resp, _ = h.do(t, opRequest{op: "list-agents", headers: h.ownerHeaders(t)})
 	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status with correct token = %d, want 200", resp.StatusCode)
+		t.Fatalf("status with signed run token = %d, want 200", resp.StatusCode)
 	}
 }
 
 func TestDriverAPIUnknownOp(t *testing.T) {
-	h := newTestHarness(t, "")
-	resp, decoded := h.do(t, opRequest{op: "no-such-op", headers: h.ownerHeaders()})
+	h := newTestHarness(t)
+	resp, decoded := h.do(t, opRequest{op: "no-such-op", headers: h.ownerHeaders(t)})
 	if resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404", resp.StatusCode)
 	}
@@ -968,13 +957,13 @@ func TestDriverAPIUnknownOp(t *testing.T) {
 }
 
 func TestDriverAPIBlocksRepositoryRequiredIssueThroughAtomicBackend(t *testing.T) {
-	h := newTestHarness(t, "")
+	h := newTestHarness(t)
 	h.backend.repositoryBlockResult = &backend.RepositoryRequirementResult{
 		Issue:   &backend.IssueData{ID: "TASK-REPO", Status: "blocked"},
 		Changed: true,
 	}
 	resp, decoded := h.do(t, opRequest{
-		op: "issue-block-repository-required", body: map[string]any{"issueId": "TASK-REPO"}, headers: h.ownerHeaders(),
+		op: "issue-block-repository-required", body: map[string]any{"issueId": "TASK-REPO"}, headers: h.ownerHeaders(t),
 	})
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status/body = %d/%v, want 200", resp.StatusCode, decoded)
@@ -989,10 +978,10 @@ func TestDriverAPIBlocksRepositoryRequiredIssueThroughAtomicBackend(t *testing.T
 }
 
 func TestDriverAPIRepositoryBlockMapsBackendUnavailable(t *testing.T) {
-	h := newTestHarness(t, "")
+	h := newTestHarness(t)
 	h.backend.repositoryBlockErr = backend.ErrUnavailable("BlockRepositoryRequired", "fleet unavailable", nil)
 	resp, decoded := h.do(t, opRequest{
-		op: "issue-block-repository-required", body: map[string]any{"issueId": "TASK-REPO"}, headers: h.ownerHeaders(),
+		op: "issue-block-repository-required", body: map[string]any{"issueId": "TASK-REPO"}, headers: h.ownerHeaders(t),
 	})
 	if resp.StatusCode != http.StatusServiceUnavailable || errorCode(t, decoded) != "unavailable" {
 		t.Fatalf("status/body = %d/%v, want 503 unavailable", resp.StatusCode, decoded)
@@ -1004,9 +993,10 @@ func TestDriverAPIRepositoryBlockMapsBackendUnavailable(t *testing.T) {
 }
 
 func TestDriverAPIRejectsForeignOwnerCredentials(t *testing.T) {
-	h := newTestHarness(t, "")
-	headers := h.ownerHeaders()
-	headers[HeaderDriverFencingToken] = "999999"
+	h := newTestHarness(t)
+	headers := bearer(h.mintToken(t, time.Hour, func(claims *driverpkg.RunTokenClaims) {
+		claims.FencingToken++
+	}))
 	resp, decoded := h.do(t, opRequest{op: "active-task-runs", headers: headers})
 	if resp.StatusCode != http.StatusForbidden {
 		t.Fatalf("status = %d, want 403", resp.StatusCode)
@@ -1017,12 +1007,12 @@ func TestDriverAPIRejectsForeignOwnerCredentials(t *testing.T) {
 }
 
 func TestDriverAPIRecoverStaleTasksRequiresOwnership(t *testing.T) {
-	h := newTestHarness(t, "")
+	h := newTestHarness(t)
 
 	// Missing owner credentials must not be able to fail this run's tasks.
 	resp, decoded := h.do(t, opRequest{
 		op:      "recover-stale-tasks",
-		headers: map[string]string{HeaderDriverRunID: h.runID},
+		headers: map[string]string{"X-Loom-Driver-Run-Id": h.runID},
 	})
 	if resp.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("status without owner creds = %d, want 401", resp.StatusCode)
@@ -1031,17 +1021,17 @@ func TestDriverAPIRecoverStaleTasksRequiresOwnership(t *testing.T) {
 		t.Fatalf("error code = %q, want unauthenticated", code)
 	}
 
-	resp, _ = h.do(t, opRequest{op: "recover-stale-tasks", headers: h.ownerHeaders()})
+	resp, _ = h.do(t, opRequest{op: "recover-stale-tasks", headers: h.ownerHeaders(t)})
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status with owner creds = %d, want 200", resp.StatusCode)
 	}
 }
 
 func TestDriverAPIClaimReady(t *testing.T) {
-	h := newTestHarness(t, "")
+	h := newTestHarness(t)
 	h.backend.ready = []backend.IssueData{{ID: "TASK-7", Title: "do the thing"}}
 
-	resp, decoded := h.do(t, opRequest{op: "claim-ready", headers: h.ownerHeaders()})
+	resp, decoded := h.do(t, opRequest{op: "claim-ready", headers: h.ownerHeaders(t)})
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
 	}
@@ -1057,7 +1047,7 @@ func TestDriverAPIClaimReady(t *testing.T) {
 		t.Fatalf("claimActionId = %v, want %q", decoded["claimActionId"], wantActionID)
 	}
 	if len(h.backend.typedClaims) != 1 || h.backend.typedClaims[0].RequestID != wantRequestID ||
-		h.backend.typedClaims[0].Owner.ResourceID != h.runID || h.backend.typedClaims[0].Owner.LeaseToken != "driver-test-token" {
+		h.backend.typedClaims[0].Owner.ResourceID != h.runID || h.backend.typedClaims[0].Owner.LeaseToken != h.ownerLeaseToken(t) {
 		t.Fatalf("typed claims = %+v, want exact parent owner/request envelope", h.backend.typedClaims)
 	}
 	if len(h.backend.claimed) != 0 {
@@ -1066,7 +1056,7 @@ func TestDriverAPIClaimReady(t *testing.T) {
 }
 
 func TestDriverAPIClaimReadyReturnsOnlyCommittedWorkItemMetadata(t *testing.T) {
-	h := newTestHarness(t, "")
+	h := newTestHarness(t)
 	h.backend.ready = []backend.IssueData{{
 		ID: "TASK-7", Title: "stale title", Priority: 9, IssueType: "stale", Labels: []string{"stale"},
 		SourceRepo: "stale/repo", Parent: "STALE-EPIC",
@@ -1079,7 +1069,7 @@ func TestDriverAPIClaimReadyReturnsOnlyCommittedWorkItemMetadata(t *testing.T) {
 		},
 	}
 
-	resp, decoded := h.do(t, opRequest{op: "claim-ready", headers: h.ownerHeaders()})
+	resp, decoded := h.do(t, opRequest{op: "claim-ready", headers: h.ownerHeaders(t)})
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status=%d body=%v", resp.StatusCode, decoded)
 	}
@@ -1094,11 +1084,11 @@ func TestDriverAPIClaimReadyReturnsOnlyCommittedWorkItemMetadata(t *testing.T) {
 }
 
 func TestDriverAPIClaimReadyScansPastTypedClaimConflict(t *testing.T) {
-	h := newTestHarness(t, "")
+	h := newTestHarness(t)
 	h.backend.ready = []backend.IssueData{{ID: "TASK-1"}, {ID: "TASK-2"}}
 	h.backend.typedClaimErrors = map[string]error{"TASK-1": execution.ErrConflict}
 
-	resp, decoded := h.do(t, opRequest{op: "claim-ready", headers: h.ownerHeaders()})
+	resp, decoded := h.do(t, opRequest{op: "claim-ready", headers: h.ownerHeaders(t)})
 	if resp.StatusCode != http.StatusOK || decoded["id"] != "TASK-2" {
 		t.Fatalf("status/body = %d/%v, want TASK-2 after first conflict", resp.StatusCode, decoded)
 	}
@@ -1111,13 +1101,13 @@ func TestDriverAPIClaimReadyScansPastTypedClaimConflict(t *testing.T) {
 // reaches the ready view server-side (ITEM 3): the op decodes it and threads it
 // into ReadyOpts.Type so a caller can claim only, e.g., bugs.
 func TestDriverAPIClaimReadyThreadsTypeFilter(t *testing.T) {
-	h := newTestHarness(t, "")
+	h := newTestHarness(t)
 	h.backend.ready = []backend.IssueData{{ID: "BUG-1", IssueType: "bug"}}
 
 	resp, decoded := h.do(t, opRequest{
 		op:      "claim-ready",
 		body:    map[string]any{"type": "bug"},
-		headers: h.ownerHeaders(),
+		headers: h.ownerHeaders(t),
 	})
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
@@ -1135,13 +1125,13 @@ func TestDriverAPIClaimReadyThreadsTypeFilter(t *testing.T) {
 // that label. The lock actor is always derived from the verified run, so a run
 // can only ever claim under its own lease — no cross-agent lock takeover.
 func TestDriverAPIClaimTaskIgnoresBodyActor(t *testing.T) {
-	h := newTestHarness(t, "")
+	h := newTestHarness(t)
 	h.backend.ready = []backend.IssueData{{ID: "TASK-7"}}
 
 	resp, decoded := h.do(t, opRequest{
 		op:      "claim-task",
 		body:    map[string]any{"taskId": "TASK-7", "actor": "driver-run:victim"},
-		headers: h.ownerHeaders(),
+		headers: h.ownerHeaders(t),
 	})
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
@@ -1166,12 +1156,12 @@ func TestDriverAPIClaimTaskIgnoresBodyActor(t *testing.T) {
 // symmetric with the claim path (same run -> same actor) while cross-agent
 // theft is impossible.
 func TestDriverAPIReleaseTaskIgnoresBodyActor(t *testing.T) {
-	h := newTestHarness(t, "")
+	h := newTestHarness(t)
 
 	resp, _ := h.do(t, opRequest{
 		op:      "release-task",
 		body:    map[string]any{"taskId": "TASK-7", "actor": "driver-run:victim"},
-		headers: h.ownerHeaders(),
+		headers: h.ownerHeaders(t),
 	})
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
@@ -1187,7 +1177,7 @@ func TestDriverAPIReleaseTaskIgnoresBodyActor(t *testing.T) {
 }
 
 func TestDriverAPIHandoffReviewBindsExactParentClaimAndChild(t *testing.T) {
-	h := newTestHarness(t, "")
+	h := newTestHarness(t)
 	taskID := "TASK-REVIEW-7"
 	taskRunID := "review-child-7"
 
@@ -1196,7 +1186,7 @@ func TestDriverAPIHandoffReviewBindsExactParentClaimAndChild(t *testing.T) {
 		body: map[string]any{
 			"taskId": taskID, "taskRunId": taskRunID, "status": "closed", "reason": "approved",
 		},
-		headers: h.ownerHeaders(),
+		headers: h.ownerHeaders(t),
 	})
 	if resp.StatusCode != http.StatusOK || decoded["id"] != taskID || decoded["status"] != "closed" {
 		t.Fatalf("status/body = %d/%v, want closed handoff", resp.StatusCode, decoded)
@@ -1209,7 +1199,7 @@ func TestDriverAPIHandoffReviewBindsExactParentClaimAndChild(t *testing.T) {
 		execution.ClaimDriverRunWorkItemRequestID(h.runID, taskID),
 	)
 	wantRequestID := execution.HandoffDriverRunReviewWorkItemRequestID(h.runID, taskID, taskRunID)
-	if command.Owner.ResourceID != h.runID || command.Owner.LeaseToken != "driver-test-token" ||
+	if command.Owner.ResourceID != h.runID || command.Owner.LeaseToken != h.ownerLeaseToken(t) ||
 		command.ClaimActionID != wantClaimActionID || command.RequestID != wantRequestID ||
 		command.TaskRunID != taskRunID || command.TargetStatus != "closed" || command.Reason != "approved" {
 		t.Fatalf("handoff command = %+v, want exact parent/claim/child envelope", command)
@@ -1217,7 +1207,7 @@ func TestDriverAPIHandoffReviewBindsExactParentClaimAndChild(t *testing.T) {
 }
 
 func TestDriverAPIHandoffReviewCarriesAtomicReviewAnnotations(t *testing.T) {
-	h := newTestHarness(t, "")
+	h := newTestHarness(t)
 	taskID := "TASK-TRIAGE-7"
 	taskRunID := "triage-child-7"
 	externalRef := "local-branch:loom/TASK-TRIAGE-7@" + strings.Repeat("a", 40)
@@ -1230,7 +1220,7 @@ func TestDriverAPIHandoffReviewCarriesAtomicReviewAnnotations(t *testing.T) {
 			"commentBody": "Automated bug triage completed.",
 			"externalRef": externalRef,
 		},
-		headers: h.ownerHeaders(),
+		headers: h.ownerHeaders(t),
 	})
 	if resp.StatusCode != http.StatusOK || decoded["id"] != taskID || decoded["status"] != "review" {
 		t.Fatalf("status/body = %d/%v, want review handoff", resp.StatusCode, decoded)
@@ -1313,9 +1303,9 @@ func TestDriverAPIHandoffReviewRejectsInvalidAnnotationEnvelope(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			h := newTestHarness(t, "")
+			h := newTestHarness(t)
 			resp, decoded := h.do(t, opRequest{
-				op: "handoff-review", body: tc.body, headers: h.ownerHeaders(),
+				op: "handoff-review", body: tc.body, headers: h.ownerHeaders(t),
 			})
 			if resp.StatusCode != http.StatusBadRequest || errorCode(t, decoded) != "invalid" {
 				t.Fatalf("status/body = %d/%v, want invalid", resp.StatusCode, decoded)
@@ -1337,13 +1327,13 @@ func TestTaskRunRequestMetadataRetainedClaimIsServerOwned(t *testing.T) {
 		t.Fatalf("metadata = %+v, want non-closing retained review policy", metadata)
 	}
 
-	h := newTestHarness(t, "")
+	h := newTestHarness(t)
 	resp, decoded := h.do(t, opRequest{
 		op: "exec-task",
 		body: map[string]any{
 			"taskId": "TASK-1", "taskRunId": "review-child-1", "retainWorkItemClaim": true,
 		},
-		headers: h.ownerHeaders(),
+		headers: h.ownerHeaders(t),
 	})
 	if resp.StatusCode != http.StatusBadRequest || errorCode(t, decoded) != "invalid" {
 		t.Fatalf("retain without closeTask=false status/body=%d/%v", resp.StatusCode, decoded)
@@ -1351,10 +1341,10 @@ func TestTaskRunRequestMetadataRetainedClaimIsServerOwned(t *testing.T) {
 }
 
 func TestDriverAPIEpicGet(t *testing.T) {
-	h := newTestHarness(t, "")
+	h := newTestHarness(t)
 	h.backend.epic = &backend.IssueDetailData{IssueData: backend.IssueData{ID: "EPIC-1", Title: "epic"}}
 
-	resp, decoded := h.do(t, opRequest{op: "epic-get", headers: h.ownerHeaders()})
+	resp, decoded := h.do(t, opRequest{op: "epic-get", headers: h.ownerHeaders(t)})
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
 	}
@@ -1364,8 +1354,8 @@ func TestDriverAPIEpicGet(t *testing.T) {
 }
 
 func TestDriverAPIActiveTaskRunsEmpty(t *testing.T) {
-	h := newTestHarness(t, "")
-	resp, decoded := h.do(t, opRequest{op: "active-task-runs", headers: h.ownerHeaders()})
+	h := newTestHarness(t)
+	resp, decoded := h.do(t, opRequest{op: "active-task-runs", headers: h.ownerHeaders(t)})
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
 	}
@@ -1378,7 +1368,7 @@ func TestDriverAPIActiveTaskRunsEmpty(t *testing.T) {
 }
 
 func TestDriverAPIExecTaskEnqueueUnschedulable(t *testing.T) {
-	h := newTestHarness(t, "")
+	h := newTestHarness(t)
 	resp, decoded := h.do(t, opRequest{
 		op: "exec-task",
 		body: map[string]any{
@@ -1387,7 +1377,7 @@ func TestDriverAPIExecTaskEnqueueUnschedulable(t *testing.T) {
 			"providerProfile": "local-noop",
 			"enqueueOnly":     true,
 		},
-		headers: h.ownerHeaders(),
+		headers: h.ownerHeaders(t),
 	})
 	if resp.StatusCode != http.StatusConflict {
 		t.Fatalf("status = %d, want 409", resp.StatusCode)
@@ -1409,11 +1399,11 @@ func TestDriverAPIExecTaskEnqueueUnschedulable(t *testing.T) {
 }
 
 func TestDriverAPITaskRunGetNotFound(t *testing.T) {
-	h := newTestHarness(t, "")
+	h := newTestHarness(t)
 	resp, decoded := h.do(t, opRequest{
 		op:      "task-run-get",
 		body:    map[string]string{"taskRunId": "missing-run"},
-		headers: h.ownerHeaders(),
+		headers: h.ownerHeaders(t),
 	})
 	if resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404", resp.StatusCode)
@@ -1424,11 +1414,11 @@ func TestDriverAPITaskRunGetNotFound(t *testing.T) {
 }
 
 func TestDriverAPIInvalidParams(t *testing.T) {
-	h := newTestHarness(t, "")
+	h := newTestHarness(t)
 	resp, decoded := h.do(t, opRequest{
 		op:      "deliver-agent-message",
 		body:    map[string]string{"agent": "", "message": ""},
-		headers: h.ownerHeaders(),
+		headers: h.ownerHeaders(t),
 	})
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400", resp.StatusCode)
@@ -1459,7 +1449,7 @@ func TestDecodeParamsRejectsTrailingJSON(t *testing.T) {
 }
 
 func TestRoleGetUsesInjectedPromptReader(t *testing.T) {
-	h := newTestHarness(t, "")
+	h := newTestHarness(t)
 	if _, err := h.store.Roles().Create(t.Context(), store.RoleCreate{
 		WorkspaceKey: "WS",
 		Name:         "reviewer",
@@ -1477,7 +1467,7 @@ func TestRoleGetUsesInjectedPromptReader(t *testing.T) {
 	resp, decoded := h.do(t, opRequest{
 		op:      "role-get",
 		body:    map[string]string{"name": "reviewer"},
-		headers: h.ownerHeaders(),
+		headers: h.ownerHeaders(t),
 	})
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status/body = %d/%v, want 200", resp.StatusCode, decoded)
@@ -1491,11 +1481,11 @@ func TestRoleGetUsesInjectedPromptReader(t *testing.T) {
 }
 
 func TestRoleGetFailsClosedWithoutPromptReader(t *testing.T) {
-	h := newTestHarness(t, "")
+	h := newTestHarness(t)
 	resp, decoded := h.do(t, opRequest{
 		op:      "role-get",
 		body:    map[string]string{"name": "reviewer"},
-		headers: h.ownerHeaders(),
+		headers: h.ownerHeaders(t),
 	})
 	if resp.StatusCode != http.StatusServiceUnavailable || errorCode(t, decoded) != "unavailable" {
 		t.Fatalf("status/body = %d/%v, want 503 unavailable", resp.StatusCode, decoded)

@@ -20,7 +20,7 @@ import (
 func newTestSessionStore(t *testing.T) *sessions.Store {
 	t.Helper()
 	dir := t.TempDir()
-	store, err := sessions.NewStore(dir)
+	store, err := sessions.NewStore(t.Context(), dir)
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}

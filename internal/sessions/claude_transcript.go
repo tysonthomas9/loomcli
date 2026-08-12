@@ -6,8 +6,6 @@ import (
 	"regexp"
 	"strings"
 	"time"
-
-	"github.com/tysonthomas9/loomcli/internal/runtimectx"
 )
 
 // SyncLatestClaudeTranscript mirrors Claude Code's native JSONL transcript for
@@ -25,7 +23,7 @@ import (
 // counterpart of the hook-driven capture used outside fleet mode — agents run
 // by `loom plan|task` in fleet mode have no Claude Code hooks installed.
 func (s *Store) SyncLatestClaudeTranscript(sessionID, workDir, claudeUUID string, since time.Time) (string, error) {
-	_, span := startSpan(runtimectx.RootContext(), "service.Sessions.SyncLatestClaudeTranscript",
+	_, span := startSpan(s.ctx, "service.Sessions.SyncLatestClaudeTranscript",
 		attrLoomSessionID(sessionID),
 		attrLoomBackend("claude"),
 	)

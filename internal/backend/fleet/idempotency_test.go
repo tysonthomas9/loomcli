@@ -8,7 +8,6 @@ import (
 	"testing"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
-	"github.com/tysonthomas9/loomcli/internal/types"
 )
 
 func sampleCreateParams() backend.CreateParams {
@@ -44,7 +43,7 @@ func TestCreate_IdempotencyHeadersAndWireBody(t *testing.T) {
 		gotBody, _ = io.ReadAll(r.Body)
 		gotKey = r.Header.Get("X-Idempotency-Key")
 		gotForce = r.Header.Get("X-Idempotency-Force")
-		respondOK(w, types.Issue{ID: "TEST-1", Title: params.Title})
+		respondOK(w, testIssue{ID: "TEST-1", Title: params.Title})
 	})
 	defer ts.Close()
 
@@ -94,7 +93,7 @@ func TestCreate_NoIdempotencyHeadersWhenUnset(t *testing.T) {
 	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		_, sawKey = r.Header["X-Idempotency-Key"]
 		_, sawForce = r.Header["X-Idempotency-Force"]
-		respondOK(w, types.Issue{ID: "TEST-1"})
+		respondOK(w, testIssue{ID: "TEST-1"})
 	})
 	defer ts.Close()
 
@@ -109,7 +108,7 @@ func TestCreate_NoIdempotencyHeadersWhenUnset(t *testing.T) {
 func TestCreate_ReplayedResponseStillReturnsIssue(t *testing.T) {
 	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Idempotency-Replayed", "true")
-		respondOK(w, types.Issue{ID: "TEST-1", Title: "dup me"})
+		respondOK(w, testIssue{ID: "TEST-1", Title: "dup me"})
 	})
 	defer ts.Close()
 

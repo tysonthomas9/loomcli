@@ -33,7 +33,6 @@ type WorkflowEventAwaitDispatcher interface {
 type Config struct {
 	Store            Store
 	APIBaseURL       string
-	APIToken         string //nolint:gosec // G117: driver API bearer token intentionally carried by handler config.
 	RunTokenKey      []byte
 	WorktreePath     string
 	LocalSettingsDir string

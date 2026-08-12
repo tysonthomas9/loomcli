@@ -165,7 +165,7 @@ func TestHasAvailablePlanningTasks(t *testing.T) {
 			}
 			setDefaultIssueBackend(mock)
 
-			got, err := HasAvailablePlanningTasks("", "")
+			got, err := HasAvailablePlanningTasks(t.Context(), "", "")
 			if (err != nil) != tt.wantErr {
 				t.Errorf("HasAvailablePlanningTasks() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -282,7 +282,7 @@ func TestHasAvailableImplementationTasks(t *testing.T) {
 			}
 			setDefaultIssueBackend(mock)
 
-			got, err := HasAvailableImplementationTasks("", "")
+			got, err := HasAvailableImplementationTasks(t.Context(), "", "")
 			if (err != nil) != tt.wantErr {
 				t.Errorf("HasAvailableImplementationTasks() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -724,7 +724,7 @@ func TestRunAutoModeTmux_MaxTasksZero(t *testing.T) {
 	// Should return immediately due to shutdown
 	done := make(chan struct{})
 	go func() {
-		RunAutoModeTmux(opts, shutdown)
+		RunAutoModeTmux(t.Context(), opts, shutdown)
 		close(done)
 	}()
 
@@ -1118,7 +1118,7 @@ func TestAgentClaimedTask_WithTaskID(t *testing.T) {
 	t.Parallel()
 	tmpDir := t.TempDir()
 
-	err := AcquireLock(tmpDir, "plan", "falcon")
+	err := AcquireLock(t.Context(), tmpDir, "plan", "falcon")
 	if err != nil {
 		t.Fatalf("AcquireLock failed: %v", err)
 	}
@@ -1139,7 +1139,7 @@ func TestAgentClaimedTask_WithoutTaskID(t *testing.T) {
 	t.Parallel()
 	tmpDir := t.TempDir()
 
-	err := AcquireLock(tmpDir, "plan", "falcon")
+	err := AcquireLock(t.Context(), tmpDir, "plan", "falcon")
 	if err != nil {
 		t.Fatalf("AcquireLock failed: %v", err)
 	}
@@ -1165,7 +1165,7 @@ func TestAgentClaimedTask_AfterClear(t *testing.T) {
 	t.Parallel()
 	tmpDir := t.TempDir()
 
-	err := AcquireLock(tmpDir, "plan", "falcon")
+	err := AcquireLock(t.Context(), tmpDir, "plan", "falcon")
 	if err != nil {
 		t.Fatalf("AcquireLock failed: %v", err)
 	}
@@ -1184,7 +1184,7 @@ func TestAgentClaimedTask_ClearThenReclaim(t *testing.T) {
 	t.Parallel()
 	tmpDir := t.TempDir()
 
-	err := AcquireLock(tmpDir, "plan", "falcon")
+	err := AcquireLock(t.Context(), tmpDir, "plan", "falcon")
 	if err != nil {
 		t.Fatalf("AcquireLock failed: %v", err)
 	}
@@ -1227,7 +1227,7 @@ func TestTmuxCycle_DaemonExitsWithoutClaimingTask(t *testing.T) {
 	_ = os.Remove(lockPath)
 
 	// Daemon acquires lock (simulating daemon start)
-	if err := AcquireLock(tmpDir, "plan", "falcon"); err != nil {
+	if err := AcquireLock(t.Context(), tmpDir, "plan", "falcon"); err != nil {
 		t.Fatalf("AcquireLock failed: %v", err)
 	}
 
@@ -1260,7 +1260,7 @@ func TestTmuxCycle_DaemonClaimsTask(t *testing.T) {
 	_ = os.Remove(lockPath)
 
 	// Daemon acquires lock
-	if err := AcquireLock(tmpDir, "plan", "falcon"); err != nil {
+	if err := AcquireLock(t.Context(), tmpDir, "plan", "falcon"); err != nil {
 		t.Fatalf("AcquireLock failed: %v", err)
 	}
 
@@ -1282,7 +1282,7 @@ func TestTmuxCycle_DaemonClaimsTask(t *testing.T) {
 	}
 
 	// Next daemon can acquire a fresh lock
-	if err := AcquireLock(tmpDir, "plan", "falcon"); err != nil {
+	if err := AcquireLock(t.Context(), tmpDir, "plan", "falcon"); err != nil {
 		t.Fatalf("AcquireLock failed on next cycle: %v", err)
 	}
 
@@ -1308,7 +1308,7 @@ func TestTmuxCycle_ConsecutiveNoProgress(t *testing.T) {
 		_ = os.Remove(lockPath)
 
 		// Daemon acquires lock
-		if err := AcquireLock(tmpDir, "plan", "falcon"); err != nil {
+		if err := AcquireLock(t.Context(), tmpDir, "plan", "falcon"); err != nil {
 			t.Fatalf("Cycle %d: AcquireLock failed: %v", cycle, err)
 		}
 
@@ -1529,7 +1529,7 @@ func TestRunAutoModeLoop_ShutdownImmediately(t *testing.T) {
 		WorktreePath: tmpDir,
 		BackoffBase:  10 * time.Millisecond,
 		TaskPause:    10 * time.Millisecond,
-		CustomPromptGen: func(name string, _ *WorkspaceConfig) string {
+		Prompt: func(name string) string {
 			return "test-prompt-for-" + name
 		},
 	}
@@ -1537,7 +1537,7 @@ func TestRunAutoModeLoop_ShutdownImmediately(t *testing.T) {
 	// Run loop - should exit immediately due to shutdown
 	done := make(chan struct{})
 	go func() {
-		RunAutoModeLoop(opts, shutdown)
+		RunAutoModeLoop(t.Context(), opts, shutdown)
 		close(done)
 	}()
 
@@ -1586,14 +1586,14 @@ func TestRunAutoModeLoop_MaxTasksLimit(t *testing.T) {
 		WorktreePath: tmpDir,
 		BackoffBase:  10 * time.Millisecond,
 		TaskPause:    10 * time.Millisecond,
-		CustomPromptGen: func(name string, _ *WorkspaceConfig) string {
+		Prompt: func(name string) string {
 			return "test-prompt-for-" + name
 		},
 	}
 
 	done := make(chan struct{})
 	go func() {
-		RunAutoModeLoop(opts, shutdown)
+		RunAutoModeLoop(t.Context(), opts, shutdown)
 		close(done)
 	}()
 
@@ -1648,14 +1648,14 @@ func TestRunAutoModeLoop_WithoutTmux(t *testing.T) {
 		WorktreePath: tmpDir,
 		BackoffBase:  10 * time.Millisecond,
 		TaskPause:    10 * time.Millisecond,
-		CustomPromptGen: func(name string, _ *WorkspaceConfig) string {
+		Prompt: func(name string) string {
 			return "test-prompt-for-" + name
 		},
 	}
 
 	done := make(chan struct{})
 	go func() {
-		RunAutoModeLoop(opts, shutdown)
+		RunAutoModeLoop(t.Context(), opts, shutdown)
 		close(done)
 	}()
 
@@ -1696,7 +1696,7 @@ func TestRunAutoModeLoop_GracefulShutdownNoTasks(t *testing.T) {
 		CustomTaskCheck: func() (bool, error) {
 			return false, nil // No tasks
 		},
-		CustomPromptGen: func(name string, _ *WorkspaceConfig) string {
+		Prompt: func(name string) string {
 			return "test-prompt-for-" + name
 		},
 	}
@@ -1708,7 +1708,7 @@ func TestRunAutoModeLoop_GracefulShutdownNoTasks(t *testing.T) {
 
 	done := make(chan struct{})
 	go func() {
-		RunAutoModeLoop(opts, shutdown)
+		RunAutoModeLoop(t.Context(), opts, shutdown)
 		close(done)
 	}()
 
@@ -1757,14 +1757,14 @@ func TestRunAutoModeLoop_NoTasks(t *testing.T) {
 			checkCount++
 			return false, nil // No tasks
 		},
-		CustomPromptGen: func(name string, _ *WorkspaceConfig) string {
+		Prompt: func(name string) string {
 			return "test-prompt-for-" + name
 		},
 	}
 
 	done := make(chan struct{})
 	go func() {
-		RunAutoModeLoop(opts, shutdown)
+		RunAutoModeLoop(t.Context(), opts, shutdown)
 		close(done)
 	}()
 
@@ -1815,14 +1815,14 @@ func TestRunAutoModeLoop_TaskExecution(t *testing.T) {
 		CustomTaskCheck: func() (bool, error) {
 			return true, nil // Always has tasks
 		},
-		CustomPromptGen: func(name string, _ *WorkspaceConfig) string {
+		Prompt: func(name string) string {
 			return "test-prompt-for-" + name
 		},
 	}
 
 	done := make(chan struct{})
 	go func() {
-		RunAutoModeLoop(opts, shutdown)
+		RunAutoModeLoop(t.Context(), opts, shutdown)
 		close(done)
 	}()
 
@@ -1868,14 +1868,14 @@ func TestRunAutoModeLoop_ConsecutiveErrors(t *testing.T) {
 		WorktreePath: tmpDir,
 		BackoffBase:  10 * time.Millisecond,
 		TaskPause:    10 * time.Millisecond,
-		CustomPromptGen: func(name string, _ *WorkspaceConfig) string {
+		Prompt: func(name string) string {
 			return "test-prompt-for-" + name
 		},
 	}
 
 	done := make(chan struct{})
 	go func() {
-		RunAutoModeLoop(opts, shutdown)
+		RunAutoModeLoop(t.Context(), opts, shutdown)
 		close(done)
 	}()
 
@@ -1924,14 +1924,14 @@ func TestRunAutoModeLoop_PlanAgentType(t *testing.T) {
 		WorktreePath: tmpDir,
 		BackoffBase:  10 * time.Millisecond,
 		TaskPause:    10 * time.Millisecond,
-		CustomPromptGen: func(name string, _ *WorkspaceConfig) string {
+		Prompt: func(name string) string {
 			return "test-plan-prompt-for-" + name
 		},
 	}
 
 	done := make(chan struct{})
 	go func() {
-		RunAutoModeLoop(opts, shutdown)
+		RunAutoModeLoop(t.Context(), opts, shutdown)
 		close(done)
 	}()
 
@@ -1980,14 +1980,14 @@ func TestRunAutoModeLoop_TaskAgentType(t *testing.T) {
 		WorktreePath: tmpDir,
 		BackoffBase:  10 * time.Millisecond,
 		TaskPause:    10 * time.Millisecond,
-		CustomPromptGen: func(name string, _ *WorkspaceConfig) string {
+		Prompt: func(name string) string {
 			return "test-task-prompt-for-" + name
 		},
 	}
 
 	done := make(chan struct{})
 	go func() {
-		RunAutoModeLoop(opts, shutdown)
+		RunAutoModeLoop(t.Context(), opts, shutdown)
 		close(done)
 	}()
 
@@ -2042,14 +2042,14 @@ func TestRunAutoModeLoop_ErrorRecovery(t *testing.T) {
 		WorktreePath: tmpDir,
 		BackoffBase:  10 * time.Millisecond,
 		TaskPause:    10 * time.Millisecond,
-		CustomPromptGen: func(name string, _ *WorkspaceConfig) string {
+		Prompt: func(name string) string {
 			return "test-prompt-for-" + name
 		},
 	}
 
 	done := make(chan struct{})
 	go func() {
-		RunAutoModeLoop(opts, shutdown)
+		RunAutoModeLoop(t.Context(), opts, shutdown)
 		close(done)
 	}()
 
@@ -2098,14 +2098,14 @@ func TestRunAutoModeLoop_ReadyQueryError(t *testing.T) {
 			readyErrorCount++
 			return false, fmt.Errorf("issue-store error")
 		},
-		CustomPromptGen: func(name string, _ *WorkspaceConfig) string {
+		Prompt: func(name string) string {
 			return "test-prompt-for-" + name
 		},
 	}
 
 	done := make(chan struct{})
 	go func() {
-		RunAutoModeLoop(opts, shutdown)
+		RunAutoModeLoop(t.Context(), opts, shutdown)
 		close(done)
 	}()
 
@@ -2162,7 +2162,7 @@ func TestRunAutoModeLoop_ShutdownDuringBackoff(t *testing.T) {
 		// sleep is still in progress when shutdown closes at 200ms.
 		BackoffBase: 5 * time.Second,
 		TaskPause:   10 * time.Millisecond,
-		CustomPromptGen: func(name string, _ *WorkspaceConfig) string {
+		Prompt: func(name string) string {
 			return "test-prompt-for-" + name
 		},
 	}
@@ -2170,7 +2170,7 @@ func TestRunAutoModeLoop_ShutdownDuringBackoff(t *testing.T) {
 	start := time.Now()
 	done := make(chan struct{})
 	go func() {
-		RunAutoModeLoop(opts, shutdown)
+		RunAutoModeLoop(t.Context(), opts, shutdown)
 		close(done)
 	}()
 
@@ -2474,7 +2474,7 @@ func TestHasAnyAvailableTasks(t *testing.T) {
 				return CommandResult{Stdout: tt.readyOutput, Err: tt.readyErr}
 			}})
 
-			got, err := HasAnyAvailableTasks("", "")
+			got, err := HasAnyAvailableTasks(t.Context(), "", "")
 			if (err != nil) != tt.wantErr {
 				t.Errorf("HasAnyAvailableTasks() error = %v, wantErr %v", err, tt.wantErr)
 				return

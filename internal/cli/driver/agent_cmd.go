@@ -21,24 +21,15 @@ import (
 var (
 	driverListAgentsWorkspaceKey string
 	driverListAgentsDriverRunID  string
-	driverListAgentsNodeID       string
-	driverListAgentsLeaseID      string
-	driverListAgentsFence        int64
 	driverListAgentsJSON         bool
 
 	driverAgentSessionWorkspaceKey string
 	driverAgentSessionDriverRunID  string
-	driverAgentSessionNodeID       string
-	driverAgentSessionLeaseID      string
-	driverAgentSessionFence        int64
 	driverAgentSessionName         string
 	driverAgentSessionJSON         bool
 
 	driverUpdateAgentParentWorkspaceKey string
 	driverUpdateAgentParentDriverRunID  string
-	driverUpdateAgentParentNodeID       string
-	driverUpdateAgentParentLeaseID      string
-	driverUpdateAgentParentFence        int64
 	driverUpdateAgentParentName         string
 	driverUpdateAgentParentParent       string
 	driverUpdateAgentParentExpectParent string
@@ -46,17 +37,11 @@ var (
 
 	driverDeliverLeadWorkspaceKey string
 	driverDeliverLeadDriverRunID  string
-	driverDeliverLeadNodeID       string
-	driverDeliverLeadLeaseID      string
-	driverDeliverLeadFence        int64
 	driverDeliverLeadName         string
 	driverDeliverLeadJSON         bool
 
 	driverDeliverAgentMessageWorkspaceKey string
 	driverDeliverAgentMessageDriverRunID  string
-	driverDeliverAgentMessageNodeID       string
-	driverDeliverAgentMessageLeaseID      string
-	driverDeliverAgentMessageFence        int64
 	driverDeliverAgentMessageName         string
 	driverDeliverAgentMessageText         string
 	driverDeliverAgentMessageJSON         bool
@@ -105,18 +90,12 @@ var driverDeliverAgentMessageCmd = &cobra.Command{
 func bindDriverListAgentsFlags(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&driverListAgentsWorkspaceKey, "workspace-key", "", "Workspace key (default: LOOM_DRIVER_WORKSPACE or active workspace)")
 	cmd.Flags().StringVar(&driverListAgentsDriverRunID, "driver-run-id", "", "Parent DriverRun ID (default: LOOM_DRIVER_RUN_ID)")
-	cmd.Flags().StringVar(&driverListAgentsNodeID, "node-id", "", "Parent DriverRun node ID")
-	cmd.Flags().StringVar(&driverListAgentsLeaseID, "lease-id", "", "Parent DriverRun lease ID")
-	cmd.Flags().Int64Var(&driverListAgentsFence, "fencing-token", 0, "Parent DriverRun fencing token")
 	cmd.Flags().BoolVar(&driverListAgentsJSON, "json", false, "JSON output")
 }
 
 func bindDriverAgentOrchestrationSessionFlags(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&driverAgentSessionWorkspaceKey, "workspace-key", "", "Workspace key (default: LOOM_DRIVER_WORKSPACE or active workspace)")
 	cmd.Flags().StringVar(&driverAgentSessionDriverRunID, "driver-run-id", "", "Parent DriverRun ID (default: LOOM_DRIVER_RUN_ID)")
-	cmd.Flags().StringVar(&driverAgentSessionNodeID, "node-id", "", "Parent DriverRun node ID")
-	cmd.Flags().StringVar(&driverAgentSessionLeaseID, "lease-id", "", "Parent DriverRun lease ID")
-	cmd.Flags().Int64Var(&driverAgentSessionFence, "fencing-token", 0, "Parent DriverRun fencing token")
 	cmd.Flags().StringVar(&driverAgentSessionName, "agent", "", "Agent name")
 	cmd.Flags().BoolVar(&driverAgentSessionJSON, "json", false, "JSON output")
 	_ = cmd.MarkFlagRequired("agent")
@@ -125,9 +104,6 @@ func bindDriverAgentOrchestrationSessionFlags(cmd *cobra.Command) {
 func bindDriverUpdateAgentParentFlags(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&driverUpdateAgentParentWorkspaceKey, "workspace-key", "", "Workspace key (default: LOOM_DRIVER_WORKSPACE or active workspace)")
 	cmd.Flags().StringVar(&driverUpdateAgentParentDriverRunID, "driver-run-id", "", "Parent DriverRun ID (default: LOOM_DRIVER_RUN_ID)")
-	cmd.Flags().StringVar(&driverUpdateAgentParentNodeID, "node-id", "", "Parent DriverRun node ID")
-	cmd.Flags().StringVar(&driverUpdateAgentParentLeaseID, "lease-id", "", "Parent DriverRun lease ID")
-	cmd.Flags().Int64Var(&driverUpdateAgentParentFence, "fencing-token", 0, "Parent DriverRun fencing token")
 	cmd.Flags().StringVar(&driverUpdateAgentParentName, "agent", "", "Agent name")
 	cmd.Flags().StringVar(&driverUpdateAgentParentParent, "parent", "", "New parent epic ID")
 	cmd.Flags().StringVar(&driverUpdateAgentParentExpectParent, "expect-parent", "", "Expected current parent before update")
@@ -139,9 +115,6 @@ func bindDriverUpdateAgentParentFlags(cmd *cobra.Command) {
 func bindDriverDeliverLeadAssignmentFlags(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&driverDeliverLeadWorkspaceKey, "workspace-key", "", "Workspace key (default: LOOM_DRIVER_WORKSPACE or active workspace)")
 	cmd.Flags().StringVar(&driverDeliverLeadDriverRunID, "driver-run-id", "", "Parent DriverRun ID (default: LOOM_DRIVER_RUN_ID)")
-	cmd.Flags().StringVar(&driverDeliverLeadNodeID, "node-id", "", "Parent DriverRun node ID")
-	cmd.Flags().StringVar(&driverDeliverLeadLeaseID, "lease-id", "", "Parent DriverRun lease ID")
-	cmd.Flags().Int64Var(&driverDeliverLeadFence, "fencing-token", 0, "Parent DriverRun fencing token")
 	cmd.Flags().StringVar(&driverDeliverLeadName, "agent", "", "Lead agent name")
 	cmd.Flags().BoolVar(&driverDeliverLeadJSON, "json", false, "JSON output")
 	_ = cmd.MarkFlagRequired("agent")
@@ -150,9 +123,6 @@ func bindDriverDeliverLeadAssignmentFlags(cmd *cobra.Command) {
 func bindDriverDeliverAgentMessageFlags(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&driverDeliverAgentMessageWorkspaceKey, "workspace-key", "", "Workspace key (default: LOOM_DRIVER_WORKSPACE or active workspace)")
 	cmd.Flags().StringVar(&driverDeliverAgentMessageDriverRunID, "driver-run-id", "", "Parent DriverRun ID (default: LOOM_DRIVER_RUN_ID)")
-	cmd.Flags().StringVar(&driverDeliverAgentMessageNodeID, "node-id", "", "Parent DriverRun node ID")
-	cmd.Flags().StringVar(&driverDeliverAgentMessageLeaseID, "lease-id", "", "Parent DriverRun lease ID")
-	cmd.Flags().Int64Var(&driverDeliverAgentMessageFence, "fencing-token", 0, "Parent DriverRun fencing token")
 	cmd.Flags().StringVar(&driverDeliverAgentMessageName, "agent", "", "Agent name")
 	cmd.Flags().StringVar(&driverDeliverAgentMessageText, "message", "", "Message text to deliver")
 	cmd.Flags().BoolVar(&driverDeliverAgentMessageJSON, "json", false, "JSON output")
@@ -160,9 +130,9 @@ func bindDriverDeliverAgentMessageFlags(cmd *cobra.Command) {
 	_ = cmd.MarkFlagRequired("message")
 }
 
-func runDriverListAgents(_ *cobra.Command, _ []string) error {
-	return cmdstore.WithStore(func(ctx context.Context, h *bootstrap.StoreHandle) error {
-		ws, _, err := resolveRunningDriverRun(ctx, h, driverListAgentsWorkspaceKey, driverListAgentsDriverRunID, driverListAgentsNodeID, driverListAgentsLeaseID, driverListAgentsFence)
+func runDriverListAgents(cmd *cobra.Command, _ []string) error {
+	return cmdstore.WithStore(cmd.Context(), func(ctx context.Context, h *bootstrap.StoreHandle) error {
+		ws, _, err := resolveRunningDriverRun(ctx, h, driverListAgentsWorkspaceKey, driverListAgentsDriverRunID)
 		if err != nil {
 			return err
 		}
@@ -183,9 +153,9 @@ func runDriverListAgents(_ *cobra.Command, _ []string) error {
 	})
 }
 
-func runDriverAgentOrchestrationSession(_ *cobra.Command, _ []string) error {
-	return cmdstore.WithStore(func(ctx context.Context, h *bootstrap.StoreHandle) error {
-		ws, _, err := resolveRunningDriverRun(ctx, h, driverAgentSessionWorkspaceKey, driverAgentSessionDriverRunID, driverAgentSessionNodeID, driverAgentSessionLeaseID, driverAgentSessionFence)
+func runDriverAgentOrchestrationSession(cmd *cobra.Command, _ []string) error {
+	return cmdstore.WithStore(cmd.Context(), func(ctx context.Context, h *bootstrap.StoreHandle) error {
+		ws, _, err := resolveRunningDriverRun(ctx, h, driverAgentSessionWorkspaceKey, driverAgentSessionDriverRunID)
 		if err != nil {
 			return err
 		}
@@ -215,9 +185,6 @@ func runDriverUpdateAgentParent(cmd *cobra.Command, _ []string) error {
 	client, err := newDriverRuntimeClient(driverRuntimeClientOptions{
 		WorkspaceKey: driverUpdateAgentParentWorkspaceKey,
 		DriverRunID:  driverUpdateAgentParentDriverRunID,
-		NodeID:       driverUpdateAgentParentNodeID,
-		LeaseID:      driverUpdateAgentParentLeaseID,
-		FencingToken: driverUpdateAgentParentFence,
 	})
 	if err != nil {
 		return err
@@ -236,9 +203,9 @@ func runDriverUpdateAgentParent(cmd *cobra.Command, _ []string) error {
 	return nil
 }
 
-func runDriverDeliverLeadAssignment(_ *cobra.Command, _ []string) error {
-	return cmdstore.WithStore(func(ctx context.Context, h *bootstrap.StoreHandle) error {
-		ws, _, err := resolveRunningDriverRun(ctx, h, driverDeliverLeadWorkspaceKey, driverDeliverLeadDriverRunID, driverDeliverLeadNodeID, driverDeliverLeadLeaseID, driverDeliverLeadFence)
+func runDriverDeliverLeadAssignment(cmd *cobra.Command, _ []string) error {
+	return cmdstore.WithStore(cmd.Context(), func(ctx context.Context, h *bootstrap.StoreHandle) error {
+		ws, _, err := resolveRunningDriverRun(ctx, h, driverDeliverLeadWorkspaceKey, driverDeliverLeadDriverRunID)
 		if err != nil {
 			return err
 		}
@@ -271,9 +238,9 @@ func runDriverDeliverLeadAssignment(_ *cobra.Command, _ []string) error {
 	})
 }
 
-func runDriverDeliverAgentMessage(_ *cobra.Command, _ []string) error {
-	return cmdstore.WithStore(func(ctx context.Context, h *bootstrap.StoreHandle) error {
-		ws, parent, err := resolveRunningDriverRun(ctx, h, driverDeliverAgentMessageWorkspaceKey, driverDeliverAgentMessageDriverRunID, driverDeliverAgentMessageNodeID, driverDeliverAgentMessageLeaseID, driverDeliverAgentMessageFence)
+func runDriverDeliverAgentMessage(cmd *cobra.Command, _ []string) error {
+	return cmdstore.WithStore(cmd.Context(), func(ctx context.Context, h *bootstrap.StoreHandle) error {
+		ws, parent, err := resolveRunningDriverRun(ctx, h, driverDeliverAgentMessageWorkspaceKey, driverDeliverAgentMessageDriverRunID)
 		if err != nil {
 			return err
 		}

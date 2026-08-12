@@ -23,7 +23,7 @@ func TestCanonicalModelWireFieldParity(t *testing.T) {
 				"DriverVersionID:driver_version_id", "TargetEntrypoint:target_entrypoint,omitempty",
 				"TargetAgentServiceID:target_agent_service_id,omitempty", "ConcurrencyPolicy:concurrency_policy",
 				"IdempotencyPolicy:idempotency_policy,omitempty", "AuthPolicy:auth_policy,omitempty",
-				"WebhookSecret:webhook_secret,omitempty", "SubjectKeyTemplate:subject_key_template,omitempty",
+				"SubjectKeyTemplate:subject_key_template,omitempty",
 				"ActorFilter:actor_filter,omitempty", "RetryMaxAttempts:retry_max_attempts,omitempty",
 				"RetryBackoffSeconds:retry_backoff_seconds,omitempty", "Schedule:schedule,omitempty",
 				"ScheduleTimezone:schedule_timezone,omitempty", "Permissions:permissions,omitempty", "Enabled:enabled",

@@ -189,47 +189,6 @@ func buildLeafRunnerEnv(opts BundledRunnerOptions, entrypoint, requestJSON strin
 	return env
 }
 
-// LegacyDriverAuthEnvVar names the env switch that keeps the deprecated
-// static-bearer auth surface flowing to workflow runtimes that already
-// receive a run-scoped token: LOOM_DRIVER_API_TOKEN (node-wide shared bearer,
-// cross-run authority) plus the LOOM_DRIVER_LEASE_ID/LOOM_DRIVER_FENCING_TOKEN
-// identity vars used by header-quad auth. While enabled, workflow bundles
-// built against the pre-token SDK keep authenticating; bundles on the
-// token-aware SDK ignore the legacy vars and go token-only.
-//
-// Deprecated — removal path (§9.5 workflow env lockdown):
-//  1. This release: default ON, so loom-dev keeps working at deploy. Rebuild
-//     workflow bundles against the token-aware SDK, then set
-//     LOOM_DRIVER_LEGACY_AUTH_ENV=0 on serve to lock the env down.
-//  2. Next release: the default flips OFF (=1 stays as break-glass).
-//  3. The release after: the switch and the legacy export are removed.
-//
-// Runs without a minted token (no RunTokenKey, e.g. CLI/ops executors) always
-// get the legacy env regardless of this switch — no flag-day.
-const LegacyDriverAuthEnvVar = "LOOM_DRIVER_LEGACY_AUTH_ENV"
-
-// legacyDriverAuthEnv reports whether this run's workflow env carries the
-// legacy static-bearer auth surface. Token-less runs always do (it is their
-// only auth); token-carrying runs only while the deprecated
-// LegacyDriverAuthEnvVar fallback stays enabled.
-func legacyDriverAuthEnv(req RunRequest) bool {
-	if strings.TrimSpace(req.RunToken) == "" {
-		return true
-	}
-	return legacyDriverAuthEnvEnabled(os.Getenv(LegacyDriverAuthEnvVar))
-}
-
-// legacyDriverAuthEnvEnabled parses the switch value: default ON for one
-// release; only an explicit false-y value locks the env down.
-func legacyDriverAuthEnvEnabled(raw string) bool {
-	switch strings.ToLower(strings.TrimSpace(raw)) {
-	case "0", "false", "off", "no":
-		return false
-	default:
-		return true
-	}
-}
-
 type NodeRunner struct {
 	NodePath        string
 	ExecTaskCommand []string
@@ -237,12 +196,6 @@ type NodeRunner struct {
 	// LOOM_DRIVER_API_URL so the workflow SDK uses the driver-op HTTP API on
 	// loom serve instead of spawning CLI subprocesses.
 	APIBaseURL string
-	// APIToken is the shared driver API bearer token forwarded as
-	// LOOM_DRIVER_API_TOKEN when APIBaseURL is set — but only to runs on the
-	// legacy auth surface (no run token, or the deprecated
-	// LegacyDriverAuthEnvVar fallback still on). Token-carrying runs are
-	// token-only: the static bearer never reaches their workflow env.
-	APIToken string //nolint:gosec // G117: driver API bearer token intentionally forwarded to legacy runtimes.
 	// Launcher launches the workflow-bundle runtime (SB1 sandbox seam).
 	// Nil means the default local node-process launcher — today's
 	// flue-local behavior, unchanged.
@@ -276,8 +229,13 @@ func (r NodeRunner) runBuiltFlueServer(ctx context.Context, req RunRequest, node
 	// SB3 trust placement policy: an untrusted bundle never launches outside
 	// an isolating sandbox — the run fails sandbox_required with no process
 	// spawned, never a silent fallback.
-	if refusal, refused := sandbox.RefuseUntrustedPlacement(req, launcher); refused {
-		return refusal, nil
+	if refusal, refused := sandbox.RefuseUntrustedPlacement(req.Run.DriverID, req.TrustLevel, launcher); refused {
+		return RunResult{
+			Status:     domain.DriverRunFailed,
+			Summary:    refusal.Summary,
+			ErrorClass: refusal.ErrorClass,
+			Output:     refusal.Output,
+		}, nil
 	}
 	process, err := launcher.Launch(ctx, LaunchSpec{
 		BundleRoot: req.BundleRoot,
@@ -292,16 +250,14 @@ func (r NodeRunner) runBuiltFlueServer(ctx context.Context, req RunRequest, node
 	}
 	exit, waitErr := process.Wait()
 	result := flueRuntimeResult(ctx, req, exit.Stdout, exit.Stderr, waitErr)
-	sandbox.RecordSandboxPlacement(&result, process.Placement())
-	sandbox.RecordTrustPlacementDecision(&result, req.TrustLevel, sandbox.LauncherPlacementProvider(launcher))
+	result.Output = sandbox.RecordSandboxPlacement(result.Output, process.Placement())
+	result.Output = sandbox.RecordTrustPlacementDecision(result.Output, req.TrustLevel, sandbox.LauncherPlacementProvider(launcher))
 	return result, nil
 }
 
 // runtimeEnv assembles the complete workflow runtime environment: the
 // identity/auth env from flueRuntimeEnv plus the driver-op API endpoint. The
-// node-wide static bearer is cross-run authority, so token-carrying runs drop
-// it (workflow calls are token-only per the step-9 locked decision) unless
-// the deprecated LegacyDriverAuthEnvVar fallback is still on.
+// run-scoped token is the only workflow credential.
 func (r NodeRunner) runtimeEnv(req RunRequest, input []byte) ([]string, error) {
 	execTaskCommand, err := r.execTaskCommand()
 	if err != nil {
@@ -316,29 +272,20 @@ func (r NodeRunner) runtimeEnv(req RunRequest, input []byte) ([]string, error) {
 		return env, nil
 	}
 	env = append(env, "LOOM_DRIVER_API_URL="+apiBaseURL)
-	if apiToken := strings.TrimSpace(r.APIToken); apiToken != "" && legacyDriverAuthEnv(req) {
-		env = append(env, "LOOM_DRIVER_API_TOKEN="+apiToken)
-	}
 	return env, nil
 }
 
 func flueRuntimeEnv(req RunRequest, input []byte, execTaskCommand []string) ([]string, error) {
+	runToken := strings.TrimSpace(req.RunToken)
+	if runToken == "" {
+		return nil, fmt.Errorf("run-scoped workflow token required: %w", domain.ErrInvalid)
+	}
 	env := platformruntime.CurrentSubprocessEnv(platformruntime.SubprocessEnvDriverRemote)
 	env = append(env,
 		"LOOM_DRIVER_WORKSPACE="+req.Run.WorkspaceKey,
 		"LOOM_DRIVER_RUN_ID="+req.Run.RunID,
 		"LOOM_DRIVER_NODE_ID="+req.Run.NodeID,
 	)
-	// Lease identity doubles as auth material under header-quad auth, so a
-	// token-carrying run keeps it out of the workflow env (§9.5 lockdown:
-	// blast radius = one run x one lease TTL) unless the deprecated
-	// LegacyDriverAuthEnvVar fallback is still on.
-	if legacyDriverAuthEnv(req) {
-		env = append(env,
-			"LOOM_DRIVER_LEASE_ID="+req.Run.LeaseID,
-			fmt.Sprintf("LOOM_DRIVER_FENCING_TOKEN=%d", req.Run.FencingToken),
-		)
-	}
 	env = append(env,
 		"LOOM_FLUE_SERVER_PATH="+req.ServerPath,
 		"LOOM_FLUE_BUNDLE_ROOT="+req.BundleRoot,
@@ -348,9 +295,7 @@ func flueRuntimeEnv(req RunRequest, input []byte, execTaskCommand []string) ([]s
 	// Run-scoped bearer token (LOOM_RUN_TOKEN), minted at claim time. The
 	// parent-env filter strips any inherited *TOKEN* variable, so the only
 	// token a workflow process ever sees is the one minted for its own run.
-	if token := strings.TrimSpace(req.RunToken); token != "" {
-		env = append(env, "LOOM_RUN_TOKEN="+token)
-	}
+	env = append(env, "LOOM_RUN_TOKEN="+runToken)
 	if len(execTaskCommand) > 0 {
 		encoded, err := json.Marshal(execTaskCommand)
 		if err != nil {

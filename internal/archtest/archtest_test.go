@@ -70,7 +70,7 @@ func TestCheckedInManifestsAndRepository(t *testing.T) {
 	if got, want := len(report.CompositeStoreOutside), 0; got != want {
 		t.Fatalf("outside-composition Store file count = %d, want %d", got, want)
 	}
-	if got, want := len(report.LegacyHandlerImports), 26; got != want {
+	if got, want := len(report.LegacyHandlerImports), 16; got != want {
 		t.Fatalf("legacy handler imports = %d, want %d", got, want)
 	}
 	if got, want := report.ModuleRoots, checkedInModuleRoots; !slices.Equal(got, want) {
@@ -85,7 +85,7 @@ func TestCheckedInManifestsAndRepository(t *testing.T) {
 	if got, want := report.MutationCommands, 107; got != want {
 		t.Fatalf("mutation commands = %d, want %d", got, want)
 	}
-	if got, want := report.DirectPersistenceWrites, 98; got != want {
+	if got, want := report.DirectPersistenceWrites, 86; got != want {
 		t.Fatalf("direct persistence-write rows = %d, want %d", got, want)
 	}
 	if got, want := report.RuntimeComponents, 71; got != want {
@@ -671,20 +671,42 @@ func TestRetiredLegacyWorkflowsPathCannotReturn(t *testing.T) {
 	}
 }
 
-func TestPhase7RetiredHorizontalRootsCannotReturn(t *testing.T) {
+func TestRetiredHorizontalRootsCannotReturn(t *testing.T) {
 	root, err := filepath.Abs(filepath.Join("..", ".."))
 	if err != nil {
 		t.Fatal(err)
 	}
 	retired := []string{
 		"internal/agentinbox",
+		"internal/app/agentsbootstrap",
+		"internal/authmode",
+		"internal/backend/backendtest",
+		"internal/backendnames",
+		"internal/cli/backendapi",
 		"internal/connector",
+		"internal/driver/runtypes",
+		"internal/infra/agentsbootstrapstore",
+		"internal/infra/artifactcatalog",
+		"internal/infra/connectorscatalog",
+		"internal/infra/sessionstoreadapter",
 		"internal/leadcontrol",
+		"internal/localnodeconfig",
+		"internal/modules/artifacts/fleetdb",
+		"internal/modules/connectors/fleetdb",
 		"internal/modules/sourcecontrol/stackpublish",
+		"internal/pathsec",
+		"internal/runtimectx",
+		"internal/runtimepreflight",
+		"internal/sessions/eventstore",
+		"internal/sessions/transcript/backends",
+		"internal/sessions/transcript/claude",
+		"internal/sessions/transcript/codex",
+		"internal/sessions/transcript/opencode",
 		"internal/stacklineage",
 		"internal/stackpublish",
 		"internal/stackstore",
 		"internal/trigger",
+		"internal/types",
 		"internal/webui/service",
 		"internal/webui/svcimpl",
 		"internal/workspace",
@@ -746,12 +768,525 @@ func TestPhase7RetiredHorizontalRootsCannotReturn(t *testing.T) {
 	}
 }
 
+func TestRetiredDriverRunContractBridgeCannotReturn(t *testing.T) {
+	root, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	content, err := os.ReadFile(filepath.Join(root, "internal", "driver", "executor.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, forbidden := range []string{
+		"runtypes.",
+		"legacy direct-store compatibility path",
+	} {
+		if strings.Contains(string(content), forbidden) {
+			t.Errorf("retired Driver run-contract compatibility %q returned", forbidden)
+		}
+	}
+}
+
+func TestRetiredAgentsBootstrapCompatibilityCannotReturn(t *testing.T) {
+	root, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, statErr := os.Stat(filepath.Join(root, "internal", "modules", "agents", "bootstrap.go")); !os.IsNotExist(statErr) {
+		t.Errorf("retired Agents bootstrap implementation returned: %v", statErr)
+	}
+	for _, relative := range []string{
+		"internal/modules/agents",
+		"internal/infra/memstore",
+	} {
+		files, globErr := filepath.Glob(filepath.Join(root, filepath.FromSlash(relative), "*.go"))
+		if globErr != nil {
+			t.Fatal(globErr)
+		}
+		for _, path := range files {
+			if strings.HasSuffix(path, "_test.go") {
+				continue
+			}
+			parsed, parseErr := parser.ParseFile(token.NewFileSet(), path, nil, 0)
+			if parseErr != nil {
+				t.Fatal(parseErr)
+			}
+			for _, declaration := range parsed.Decls {
+				switch value := declaration.(type) {
+				case *ast.FuncDecl:
+					if value.Name.Name == "NewBootstrapService" || value.Name.Name == "SetPromptFileIfEmpty" {
+						t.Errorf("retired Agents bootstrap function %s returned in %s", value.Name.Name, path)
+					}
+				case *ast.GenDecl:
+					for _, specification := range value.Specs {
+						typeSpec, ok := specification.(*ast.TypeSpec)
+						if !ok {
+							continue
+						}
+						switch typeSpec.Name.Name {
+						case "BootstrapAPI", "BootstrapService", "BootstrapStore", "RolePromptRepairStore":
+							t.Errorf("retired Agents bootstrap type %s returned in %s", typeSpec.Name.Name, path)
+						}
+					}
+				}
+			}
+		}
+	}
+}
+
+func TestRetiredAmbientRuntimeContextCannotReturn(t *testing.T) {
+	root, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	forbidden := []string{
+		"cmdstore.RootContext()",
+		"runtimectx.RootContext()",
+		"runtimectx.SetRootContext(",
+		"events.SetContextProvider(",
+		"func SetRootContext(",
+		"func RootContext()",
+		"func SetContextProvider(",
+		"ambientCtxProvider",
+	}
+	err = filepath.WalkDir(filepath.Join(root, "internal"), func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() {
+			if entry.Name() == "archtest" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+		content, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return readErr
+		}
+		for _, fragment := range forbidden {
+			if strings.Contains(string(content), fragment) {
+				relative, _ := filepath.Rel(root, path)
+				t.Errorf("retired ambient runtime-context fallback %q returned in %s", fragment, filepath.ToSlash(relative))
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRetiredConnectorModelAndRepositoryPlaneCannotReturn(t *testing.T) {
+	root, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, relative := range []string{
+		"internal/domain/connector.go",
+		"internal/store/connector_store.go",
+		"internal/store/connector_unimplemented.go",
+	} {
+		if _, statErr := os.Stat(filepath.Join(root, filepath.FromSlash(relative))); !os.IsNotExist(statErr) {
+			t.Errorf("retired connector plane file %s returned (stat error: %v)", relative, statErr)
+		}
+	}
+}
+
+func TestRetiredConnectorCompatibilityConstructorsCannotReturn(t *testing.T) {
+	root, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for relative, forbidden := range map[string]string{
+		"internal/modules/connectors/service.go":           "NewWithGrants",
+		"internal/app/serve/source_control_composition.go": "NewSourceControlCapability",
+		"internal/app/serve/workflow_catalog.go":           "NewSourceControlCapability",
+	} {
+		path := filepath.Join(root, filepath.FromSlash(relative))
+		parsed, parseErr := parser.ParseFile(token.NewFileSet(), path, nil, 0)
+		if parseErr != nil {
+			t.Fatal(parseErr)
+		}
+		for _, declaration := range parsed.Decls {
+			function, ok := declaration.(*ast.FuncDecl)
+			if ok && function.Name.Name == forbidden {
+				t.Errorf("retired Connector compatibility constructor %s returned in %s", forbidden, relative)
+			}
+		}
+	}
+}
+
+func TestRetiredAutomationCompositionCompatibilityCannotReturn(t *testing.T) {
+	root, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, relative := range []string{
+		"internal/webui/agentmodules/automation_agent_identity_compat.go",
+		"internal/webui/agentmodules/automation_agent_identity_compat_test.go",
+		"internal/webui/agentmodules/automation_connector_compat.go",
+		"internal/webui/agentmodules/automation_connector_compat_test.go",
+	} {
+		if _, statErr := os.Stat(filepath.Join(root, filepath.FromSlash(relative))); !os.IsNotExist(statErr) {
+			t.Errorf("retired Automation compatibility file %s returned (stat error: %v)", relative, statErr)
+		}
+	}
+	for relative, forbidden := range map[string][]string{
+		"internal/webui/handlers/triggerbindings/module.go": {
+			"ConnectorCompatibility", "UnattachedBindingIdentityChecker", "DeleteBindingAndRevokeGrants",
+		},
+		"internal/webui/handlers/agents/module.go": {"BindingGrantCompatibility"},
+		"internal/webui/agentmodules/automation_routes.go": {
+			"storeConnectorCompatibility", "storeAgentIdentityCompatibility", "bindingGrantCompatibility",
+		},
+	} {
+		content, readErr := os.ReadFile(filepath.Join(root, filepath.FromSlash(relative)))
+		if readErr != nil {
+			t.Fatal(readErr)
+		}
+		for _, fragment := range forbidden {
+			if strings.Contains(string(content), fragment) {
+				t.Errorf("retired Automation compatibility symbol %q returned in %s", fragment, relative)
+			}
+		}
+	}
+}
+
+func TestRetiredSourceCompatibilityAPIsCannotReturn(t *testing.T) {
+	root, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, relative := range []string{
+		"internal/driver/stale_task_sweeper_legacy_test.go",
+		"internal/driver/stale_task_sweeper_test.go",
+	} {
+		if _, statErr := os.Stat(filepath.Join(root, filepath.FromSlash(relative))); !os.IsNotExist(statErr) {
+			t.Errorf("retired compatibility test implementation %s returned (stat error: %v)", relative, statErr)
+		}
+	}
+	files := map[string]map[string]struct{}{
+		"internal/infra/interactionlead/codex_delivery.go": {
+			"DeliverCurrentAssignmentToCodex": {}, "DeliverLeadMessageToCodex": {},
+			"DeliverLeadMessageToCodexWithOptions": {}, "DeliverPendingLeadMessagesToCodex": {},
+		},
+		"internal/infra/automationruntime/await_reconcilers.go": {
+			"NewAutomationAwaitEventNotifier": {},
+		},
+		"internal/webui/handlers/webhooks/module.go":        {"NewModule": {}},
+		"internal/webui/handlers/triggerbindings/module.go": {"NewModule": {}},
+		"internal/infra/workflowdistribution/authoring/builtin_authoring.go": {
+			"EnsureBuiltinWorkflowAuthored": {}, "EnsureBoundPromptAgentWorkflowsAuthored": {},
+		},
+		"internal/driver/stale_task_sweeper.go":       {"DefaultStaleTaskRunMaxAge": {}},
+		"internal/webui/storeadapter/storeadapter.go": {"DefaultWorkspaceKey": {}},
+	}
+	for relative, forbidden := range files {
+		parsed, parseErr := parser.ParseFile(
+			token.NewFileSet(), filepath.Join(root, filepath.FromSlash(relative)), nil, 0,
+		)
+		if parseErr != nil {
+			t.Fatal(parseErr)
+		}
+		for _, declaration := range parsed.Decls {
+			switch value := declaration.(type) {
+			case *ast.FuncDecl:
+				if _, retired := forbidden[value.Name.Name]; retired {
+					t.Errorf("retired compatibility function %s returned in %s", value.Name.Name, relative)
+				}
+			case *ast.GenDecl:
+				for _, spec := range value.Specs {
+					values, ok := spec.(*ast.ValueSpec)
+					if !ok {
+						continue
+					}
+					for _, name := range values.Names {
+						if _, retired := forbidden[name.Name]; retired {
+							t.Errorf("retired compatibility value %s returned in %s", name.Name, relative)
+						}
+					}
+				}
+			}
+		}
+	}
+}
+
+func TestRetiredDriverAuthenticationFallbackCannotReturn(t *testing.T) {
+	root, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	forbidden := []string{
+		"LOOM_DRIVER_API_TOKEN", "LOOM_DRIVER_LEGACY_AUTH_ENV",
+		"HeaderDriverRunID", "HeaderDriverNodeID", "HeaderDriverLeaseID", "HeaderDriverLeaseToken", "HeaderDriverFencingToken",
+		"legacyDriverAuthEnv", "driverAPIToken",
+	}
+	err = filepath.WalkDir(filepath.Join(root, "internal"), func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() {
+			if entry.Name() == "archtest" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+		content, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return readErr
+		}
+		for _, fragment := range forbidden {
+			if strings.Contains(string(content), fragment) {
+				relative, _ := filepath.Rel(root, path)
+				t.Errorf("retired Driver authentication fallback %q returned in %s", fragment, filepath.ToSlash(relative))
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRetiredTerminalLaunchFallbackCannotReturn(t *testing.T) {
+	root, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	files := map[string][]string{
+		"internal/webui/terminal/session_command.go": {
+			"ArgvForSession", "session names encode the backend",
+		},
+		"internal/webui/handlers/terminal/ws.go": {
+			"legacyLaunchSpecForSession", "isUUIDTerminalSession",
+		},
+		"internal/webui/frontend/src/components/TerminalView/tabs/terminalTabUtils.ts": {
+			"getBackendFromSessionName", `startsWith("agent-")`,
+		},
+		"internal/webui/frontend/src/components/TerminalView/tabs/useTabInit.ts": {
+			"getBackendFromSessionName", `startsWith("agent-")`,
+		},
+		"internal/webui/frontend/src/components/IssueDetailPanel/IssueDetailPanel.tsx": {
+			"getBackendFromSessionName",
+		},
+		"internal/webui/frontend/src/components/TerminalView/instances/useSessionSeeding.ts": {
+			"trySeedOnConnect",
+		},
+		"internal/webui/frontend/src/components/TerminalView/instances/useConnectionState.ts": {
+			"onTabConnected",
+		},
+	}
+	for relative, forbidden := range files {
+		content, readErr := os.ReadFile(filepath.Join(root, filepath.FromSlash(relative)))
+		if readErr != nil {
+			t.Fatal(readErr)
+		}
+		for _, fragment := range forbidden {
+			if strings.Contains(string(content), fragment) {
+				t.Errorf("retired terminal launch fallback %q returned in %s", fragment, relative)
+			}
+		}
+	}
+}
+
+func TestRetiredHandlerBackendCompatibilityCannotReturn(t *testing.T) {
+	root, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	files := map[string]map[string]struct{}{
+		"internal/webui/app/workspace_routes.go": {
+			"WithIssueBackendFn": {},
+		},
+		"internal/webui/handlers/git/graph.go": {
+			"IssueBackendFn": {}, "HandleBlockedWithBackend": {}, "HandleGraphWithBackend": {},
+			"serveBlockedViaBackend": {}, "serveGraphViaBackend": {},
+		},
+		"internal/webui/handlers/health/health.go": {
+			"IssueBackendFn": {}, "HandleStatsWithBackend": {}, "serveStatsViaBackend": {},
+		},
+	}
+	for relative, forbidden := range files {
+		path := filepath.Join(root, filepath.FromSlash(relative))
+		parsed, parseErr := parser.ParseFile(token.NewFileSet(), path, nil, 0)
+		if parseErr != nil {
+			t.Fatal(parseErr)
+		}
+		checkName := func(name string) {
+			if _, retired := forbidden[name]; retired {
+				t.Errorf("retired handler backend compatibility symbol %s returned in %s", name, relative)
+			}
+		}
+		for _, declaration := range parsed.Decls {
+			switch value := declaration.(type) {
+			case *ast.FuncDecl:
+				checkName(value.Name.Name)
+			case *ast.GenDecl:
+				for _, spec := range value.Specs {
+					switch named := spec.(type) {
+					case *ast.TypeSpec:
+						checkName(named.Name.Name)
+					case *ast.ValueSpec:
+						for _, name := range named.Names {
+							checkName(name.Name)
+						}
+					}
+				}
+			}
+		}
+	}
+	authConfig, err := os.ReadFile(filepath.Join(root, "internal", "webui", "handlers", "misc", "auth_config.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(authConfig), `os.Getenv("LOOM_ISSUE_BACKEND")`) {
+		t.Error("retired /api/config backend environment fallback returned")
+	}
+}
+
+func TestHandwrittenProductionAPIsDoNotRemainDeprecated(t *testing.T) {
+	root, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	internalRoot := filepath.Join(root, "internal")
+	var deprecated []string
+	err = filepath.WalkDir(internalRoot, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() {
+			relative, relErr := filepath.Rel(internalRoot, path)
+			if relErr != nil {
+				return relErr
+			}
+			if relative == "archtest" || relative == filepath.Join("backend", "api", "gen") {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+		parsed, parseErr := parser.ParseFile(token.NewFileSet(), path, nil, parser.ParseComments)
+		if parseErr != nil {
+			return parseErr
+		}
+		for _, comment := range parsed.Comments {
+			if strings.Contains(comment.Text(), "Deprecated:") {
+				relative, relErr := filepath.Rel(root, path)
+				if relErr != nil {
+					return relErr
+				}
+				deprecated = append(deprecated, filepath.ToSlash(relative))
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	slices.Sort(deprecated)
+	if len(deprecated) != 0 {
+		t.Fatalf("handwritten production Deprecated declarations returned: %v", deprecated)
+	}
+}
+
+func TestWorkflowHTTPModuleRequiresTypedConfig(t *testing.T) {
+	root, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(root, "internal", "webui", "handlers", "workflows", "module.go")
+	parsed, err := parser.ParseFile(token.NewFileSet(), path, nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, declaration := range parsed.Decls {
+		function, ok := declaration.(*ast.FuncDecl)
+		if !ok || function.Name.Name != "NewModule" {
+			continue
+		}
+		if function.Type.Params == nil || len(function.Type.Params.List) != 1 {
+			t.Fatal("workflows.NewModule must accept exactly one typed Config")
+		}
+		parameter, ok := function.Type.Params.List[0].Type.(*ast.Ident)
+		if !ok || parameter.Name != "Config" {
+			t.Fatalf("workflows.NewModule parameter = %T, want Config", function.Type.Params.List[0].Type)
+		}
+		return
+	}
+	t.Fatal("workflows.NewModule is missing")
+}
+
+func TestRetiredArtifactModelAndRepositoryPlaneCannotReturn(t *testing.T) {
+	root, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, relative := range []string{
+		"internal/store/artifact_upload.go",
+		"internal/infra/artifactcatalog/catalog.go",
+	} {
+		if _, statErr := os.Stat(filepath.Join(root, filepath.FromSlash(relative))); !os.IsNotExist(statErr) {
+			t.Errorf("retired artifact plane path %s returned (stat error: %v)", relative, statErr)
+		}
+	}
+
+	forbiddenNames := map[string]struct{}{
+		"Artifact": {}, "ArtifactStore": {}, "ArtifactContentReader": {},
+		"ArtifactCreate": {}, "ArtifactFilter": {}, "ArtifactUpdate": {},
+		"ArtifactFinalize": {}, "ArtifactContentUpload": {},
+		"UploadContentArtifact": {}, "Artifacts": {}, "ArtifactQueries": {},
+	}
+	for _, relative := range []string{"internal/domain", "internal/store"} {
+		files, globErr := filepath.Glob(filepath.Join(root, filepath.FromSlash(relative), "*.go"))
+		if globErr != nil {
+			t.Fatal(globErr)
+		}
+		for _, path := range files {
+			if strings.HasSuffix(path, "_test.go") {
+				continue
+			}
+			parsed, parseErr := parser.ParseFile(token.NewFileSet(), path, nil, 0)
+			if parseErr != nil {
+				t.Fatal(parseErr)
+			}
+			ast.Inspect(parsed, func(node ast.Node) bool {
+				switch declaration := node.(type) {
+				case *ast.TypeSpec:
+					if _, forbidden := forbiddenNames[declaration.Name.Name]; forbidden {
+						t.Errorf("retired artifact type %s returned in %s", declaration.Name.Name, path)
+					}
+				case *ast.FuncDecl:
+					if _, forbidden := forbiddenNames[declaration.Name.Name]; forbidden {
+						t.Errorf("retired artifact function or method %s returned in %s", declaration.Name.Name, path)
+					}
+				case *ast.Field:
+					for _, name := range declaration.Names {
+						if _, forbidden := forbiddenNames[name.Name]; forbidden {
+							t.Errorf("retired artifact field or interface method %s returned in %s", name.Name, path)
+						}
+					}
+				}
+				return true
+			})
+		}
+	}
+}
+
 func TestPhase7LegacyTypeBucketsCannotPublishAliases(t *testing.T) {
 	root, err := filepath.Abs(filepath.Join("..", ".."))
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, relative := range []string{"internal/domain", "internal/entity", "internal/types"} {
+	for _, relative := range []string{"internal/domain", "internal/entity"} {
 		relative := relative
 		t.Run(strings.ReplaceAll(relative, "/", "_"), func(t *testing.T) {
 			files, err := filepath.Glob(filepath.Join(root, filepath.FromSlash(relative), "*.go"))

@@ -183,7 +183,8 @@ const (
 // startLeadMessageDeliveryRetry loops: task_events.go (and the
 // deliver-lead-assignment driver op) create rows, and this dispatcher drains
 // due rows, attempts delivery, and records the outcome with retry backoff.
-// Like StaleTaskSweeper it is always-on policy: loom serve runs it whenever
+// Like owner-fenced stale TaskRun recovery, it is always-on policy: loom serve
+// runs it whenever
 // it has a store, independent of LOOM_DRIVER_EXECUTOR.
 type OutboxDispatcher struct {
 	Delivery    execution.OutboxDeliveryAPI
@@ -397,7 +398,7 @@ func outboxRetryDelay(attempt int) time.Duration {
 }
 
 // workspaceKeys resolves the dispatch targets: the configured workspace, or
-// every known workspace when unscoped (mirrors StaleTaskSweeper).
+// every known workspace when unscoped (mirrors Executor.RecoverStaleOnce).
 func (d *OutboxDispatcher) workspaceKeys(ctx context.Context) ([]string, error) {
 	if d.WorkspaceKey != "" {
 		return []string{d.WorkspaceKey}, nil

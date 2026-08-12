@@ -14,7 +14,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/driver/runtypes"
 	"github.com/tysonthomas9/loomcli/internal/driver/sandbox"
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 	"github.com/tysonthomas9/loomcli/internal/store"
@@ -26,14 +25,36 @@ type Runner interface {
 	Run(ctx context.Context, req RunRequest) (RunResult, error)
 }
 
-// The driver's core run types and the SB1 sandbox seam live in the
-// internal/driver/sandbox subpackage (extracted so the run/orchestration types
-// and the sandbox launchers stop forming an import cycle). These aliases keep
-// driver.RunRequest / driver.SandboxLauncher / the §9.6 audit consts available
-// to in-package code, cross-package callers, and tests unchanged.
+// RunRequest is the Driver-owned input to one workflow runtime invocation.
+type RunRequest struct {
+	Run          *domain.DriverRun
+	Version      *workflowcatalog.DriverVersion
+	BundleRoot   string
+	WorkflowPath string
+	ServerPath   string
+	Manifest     map[string]string
+	// RunToken is the run-scoped bearer token minted at claim time and exported
+	// to the workflow runtime as LOOM_RUN_TOKEN. Runtime launch rejects an empty
+	// token, and the executor terminally fails a claimed run when minting is
+	// unavailable.
+	RunToken string
+	// TrustLevel is resolved server-side. Anything except trusted, including
+	// empty or unknown, refuses a non-isolating launcher.
+	TrustLevel workflowcatalog.DriverTrustLevel
+}
+
+// RunResult is the Driver-owned terminal result of one workflow invocation.
+type RunResult struct {
+	Status     domain.DriverRunStatus
+	Summary    string
+	ErrorClass string
+	Output     map[string]string
+}
+
+// The SB1 sandbox seam lives in a child package. These aliases keep the
+// Driver's public launcher surface stable without introducing a neutral DTO
+// package between the owner and its adapter.
 type (
-	RunRequest        = runtypes.RunRequest
-	RunResult         = runtypes.RunResult
 	SandboxLauncher   = sandbox.SandboxLauncher
 	IsolatingLauncher = sandbox.IsolatingLauncher
 	LaunchSpec        = sandbox.LaunchSpec
@@ -77,17 +98,11 @@ type Executor struct {
 	LeaseID           string
 	Runner            Runner
 	HeartbeatInterval time.Duration
-	// APIBaseURL/APIToken configure the driver-op HTTP API exported to driver
-	// runtimes via the default NodeRunner (LOOM_DRIVER_API_URL/_TOKEN).
+	// APIBaseURL configures the driver-op HTTP API exported to driver runtimes.
 	APIBaseURL string
-	APIToken   string //nolint:gosec // G117: driver API bearer token intentionally stored in runtime config.
-	// RunTokenKey, when set, is the HS256 signing key used to mint the
+	// RunTokenKey is the required HS256 signing key used to mint the
 	// run-scoped bearer token injected into the workflow runtime as
-	// LOOM_RUN_TOKEN at claim time. Nil disables minting and keeps the
-	// legacy LOOM_DRIVER_API_TOKEN + identity-quad env authenticating (no
-	// flag-day). Token-carrying runs drop that legacy env once the
-	// deprecated LegacyDriverAuthEnvVar fallback is switched off. Must be
-	// the same key the serve driver-op API verifies with
+	// LOOM_RUN_TOKEN at claim time. It must be the same key the serve driver-op API verifies with
 	// (ResolveRunTokenSigningKey: one key per process).
 	RunTokenKey []byte
 	// SandboxLauncher, when set, launches workflow runtimes through the SB1
@@ -103,9 +118,8 @@ type Executor struct {
 	// notification, which is owned by Execution and remains store-backed.
 	RunOutcomes RunOutcomePublisher
 	// Execution is the Phase 4 owner of live DriverRun lifecycle mutations.
-	// Serve always supplies this API and its typed authority resolvers. Nil
-	// retains the legacy direct-store compatibility path for standalone CLI
-	// callers and existing isolated tests until their command family migrates.
+	// Serve and standalone composition must supply this API and its typed
+	// authority resolvers; RunOnce fails closed when any owner API is absent.
 	Execution                 execution.DriverRunAPI
 	RunOutcomeQueue           execution.DriverRunOutcomeAPI
 	TerminalWorkRecoveryQueue execution.TerminalDriverRunWorkRecoveryQueueAPI
@@ -186,13 +200,17 @@ func (e *Executor) RunOnce(ctx context.Context) (*ExecutionResult, error) {
 func (e *Executor) runClaimed(ctx context.Context, workDir string, claimed *domain.DriverRun) RunResult {
 	runner := e.Runner
 	if runner == nil {
-		runner = NodeRunner{APIBaseURL: e.APIBaseURL, APIToken: e.APIToken, Launcher: e.SandboxLauncher}
+		runner = NodeRunner{APIBaseURL: e.APIBaseURL, Launcher: e.SandboxLauncher}
 	}
 	req, err := loadRunRequest(ctx, workDir, claimed, e.Store)
 	if err != nil {
 		return RunResult{Status: domain.DriverRunFailed, Summary: err.Error(), ErrorClass: "bundle_verification"}
 	}
-	req.RunToken = e.mintRunToken(ctx, claimed)
+	runToken, err := e.mintRunToken(claimed)
+	if err != nil {
+		return RunResult{Status: domain.DriverRunFailed, Summary: err.Error(), ErrorClass: "driver_auth"}
+	}
+	req.RunToken = runToken
 	runResult, runErr := runner.Run(ctx, req)
 	if runErr != nil && ctx.Err() != nil {
 		// The runner context was cancelled under it (cooperative cancel
@@ -212,19 +230,16 @@ func (e *Executor) runClaimed(ctx context.Context, workDir string, claimed *doma
 // the claims so fenced run verification doubles as revocation: a superseded
 // lease rejects the token regardless of expiry. TTL = maximum run duration
 // (LOOM_RUN_TOKEN_TTL, default 24h) per the locked step-9 decision — expiry
-// is the hard run-duration cap, not the lease window. Failures degrade to ""
-// with a warning rather than failing the claimed run: a token-less run keeps
-// the legacy LOOM_DRIVER_API_TOKEN + identity-quad env, which still
-// authenticates.
-func (e *Executor) mintRunToken(ctx context.Context, claimed *domain.DriverRun) string {
+// is the hard run-duration cap, not the lease window. Token issuance is
+// mandatory: a claimed run fails before workflow launch when signing is not
+// available.
+func (e *Executor) mintRunToken(claimed *domain.DriverRun) (string, error) {
 	if len(e.RunTokenKey) == 0 || claimed == nil {
-		return ""
+		return "", fmt.Errorf("driver run-token signing key and claimed run are required: %w", domain.ErrInvalid)
 	}
 	ttl, err := RunTokenTTL()
 	if err != nil {
-		slog.WarnContext(ctx, "driver run token TTL env invalid; using default",
-			"default", DefaultRunTokenTTL, "err", err)
-		ttl = DefaultRunTokenTTL
+		return "", fmt.Errorf("resolve driver run-token TTL: %w", err)
 	}
 	token, err := MintRunToken(RunTokenClaims{
 		WorkspaceKey: claimed.WorkspaceKey,
@@ -234,11 +249,9 @@ func (e *Executor) mintRunToken(ctx context.Context, claimed *domain.DriverRun) 
 		FencingToken: claimed.FencingToken,
 	}, e.RunTokenKey, ttl)
 	if err != nil {
-		slog.WarnContext(ctx, "mint driver run token failed; runtime falls back to legacy driver API auth",
-			"runID", claimed.RunID, "err", err)
-		return ""
+		return "", fmt.Errorf("mint driver run token for %s: %w", claimed.RunID, err)
 	}
-	return token
+	return token, nil
 }
 
 func (e *Executor) RecoverStaleOnce(ctx context.Context) (*store.StaleDriverRunRecoveryResult, error) {

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 	"github.com/tysonthomas9/loomcli/internal/webui"
 	"github.com/tysonthomas9/loomcli/internal/webui/agentcoord"
 	"github.com/tysonthomas9/loomcli/internal/webui/filecoord"
@@ -20,7 +21,6 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/store"
-	"github.com/tysonthomas9/loomcli/internal/types"
 	healthhandlers "github.com/tysonthomas9/loomcli/internal/webui/handlers/health"
 	hterminal "github.com/tysonthomas9/loomcli/internal/webui/handlers/terminal"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
@@ -50,7 +50,7 @@ func setupTestRoutes(t *testing.T, app *Server) {
 
 // TestStatsResponse_SuccessSerialization tests successful healthhandlers.StatsResponse serialization.
 func TestStatsResponse_SuccessSerialization(t *testing.T) {
-	stats := &types.Statistics{
+	stats := &workitems.Stats{
 		TotalIssues:      100,
 		OpenIssues:       50,
 		InProgressIssues: 20,
@@ -155,7 +155,7 @@ func TestStatsResponse_ErrorOmitsDataField(t *testing.T) {
 func TestStatsResponse_SuccessOmitsErrorField(t *testing.T) {
 	resp := healthhandlers.StatsResponse{
 		Success: true,
-		Data:    &types.Statistics{TotalIssues: 10},
+		Data:    &workitems.Stats{TotalIssues: 10},
 	}
 
 	data, err := json.Marshal(resp)

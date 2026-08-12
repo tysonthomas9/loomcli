@@ -10,7 +10,7 @@ import (
 func newStoreWithSession(t *testing.T, sessionID string) (*Store, string) {
 	t.Helper()
 	runtimeDir := t.TempDir()
-	store, err := NewStore(runtimeDir)
+	store, err := NewStore(t.Context(), runtimeDir)
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}
@@ -62,7 +62,7 @@ func TestSyncNativeTranscript_MissingSrcIsNoop(t *testing.T) {
 
 func TestSyncNativeTranscript_RejectsPathTraversal(t *testing.T) {
 	runtimeDir := t.TempDir()
-	store, err := NewStore(runtimeDir)
+	store, err := NewStore(t.Context(), runtimeDir)
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}
@@ -73,7 +73,7 @@ func TestSyncNativeTranscript_RejectsPathTraversal(t *testing.T) {
 
 func TestSyncNativeTranscript_RejectsMissingSession(t *testing.T) {
 	runtimeDir := t.TempDir()
-	store, err := NewStore(runtimeDir)
+	store, err := NewStore(t.Context(), runtimeDir)
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}

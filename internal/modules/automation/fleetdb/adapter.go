@@ -209,16 +209,16 @@ func New(transport Transport) (*Adapter, error) {
 }
 
 func (a *Adapter) CreateBinding(ctx context.Context, binding *automation.Binding) (*automation.Binding, error) {
-	if err := rejectSecret(binding); err != nil {
+	if err := requireBinding(binding); err != nil {
 		return nil, err
 	}
 	result, err := a.transport.CreateBinding(ctx, cloneBinding(binding))
-	return redactBindingResult("create binding", result, err)
+	return bindingResult("create binding", result, err)
 }
 
 func (a *Adapter) GetBinding(ctx context.Context, workspace, bindingID string) (*automation.Binding, error) {
 	result, err := a.transport.GetBinding(ctx, workspace, bindingID)
-	return redactBindingResult("get binding", result, err)
+	return bindingResult("get binding", result, err)
 }
 
 func (a *Adapter) ListBindings(ctx context.Context, workspace string, filter automation.BindingFilter) ([]*automation.Binding, error) {
@@ -226,15 +226,15 @@ func (a *Adapter) ListBindings(ctx context.Context, workspace string, filter aut
 	if err != nil {
 		return nil, mapError("list bindings", err)
 	}
-	return redactBindings(results), nil
+	return cloneBindings(results), nil
 }
 
 func (a *Adapter) UpdateBinding(ctx context.Context, binding *automation.Binding) (*automation.Binding, error) {
-	if err := rejectSecret(binding); err != nil {
+	if err := requireBinding(binding); err != nil {
 		return nil, err
 	}
 	result, err := a.transport.UpdateBinding(ctx, cloneBinding(binding))
-	return redactBindingResult("update binding", result, err)
+	return bindingResult("update binding", result, err)
 }
 
 func (a *Adapter) DeleteBinding(ctx context.Context, workspace, bindingID string) error {
@@ -242,14 +242,14 @@ func (a *Adapter) DeleteBinding(ctx context.Context, workspace, bindingID string
 }
 
 func (a *Adapter) ReplaceUnmanagedBinding(ctx context.Context, replacement automation.UnmanagedBindingReplacement) (*automation.Binding, error) {
-	if err := rejectSecret(replacement.Binding); err != nil {
+	if err := requireBinding(replacement.Binding); err != nil {
 		return nil, err
 	}
 	result, err := a.transport.ReplaceUnmanagedBinding(ctx, TransportUnmanagedBindingReplacement{
 		Expected: transportUnmanagedBindingSnapshot(replacement.Expected),
 		Binding:  cloneBinding(replacement.Binding),
 	})
-	return redactBindingResult("replace unmanaged binding", result, err)
+	return bindingResult("replace unmanaged binding", result, err)
 }
 
 func (a *Adapter) DeleteUnmanagedBindingIfUnchanged(ctx context.Context, expected automation.UnmanagedBindingSnapshot) error {
@@ -265,22 +265,22 @@ func transportUnmanagedBindingSnapshot(expected automation.UnmanagedBindingSnaps
 }
 
 func (a *Adapter) CreateManagedBinding(ctx context.Context, binding *automation.Binding) (*automation.Binding, error) {
-	if err := rejectSecret(binding); err != nil {
+	if err := requireBinding(binding); err != nil {
 		return nil, err
 	}
 	result, err := a.transport.CreateManagedBinding(ctx, cloneBinding(binding))
-	return redactBindingResult("create managed binding", result, err)
+	return bindingResult("create managed binding", result, err)
 }
 
 func (a *Adapter) ReplaceManagedBinding(ctx context.Context, replacement automation.ManagedBindingReplacement) (*automation.Binding, error) {
-	if err := rejectSecret(replacement.Binding); err != nil {
+	if err := requireBinding(replacement.Binding); err != nil {
 		return nil, err
 	}
 	result, err := a.transport.ReplaceManagedBinding(ctx, TransportManagedBindingReplacement{
 		Expected: transportManagedBindingSnapshot(replacement.Expected),
 		Binding:  cloneBinding(replacement.Binding),
 	})
-	return redactBindingResult("replace managed binding", result, err)
+	return bindingResult("replace managed binding", result, err)
 }
 
 func (a *Adapter) DeleteManagedBindingIfUnchanged(ctx context.Context, expected automation.ManagedBindingSnapshot) error {
@@ -306,7 +306,7 @@ func (a *Adapter) MatchBindings(ctx context.Context, workspace, routeKey string)
 	}
 	return &automation.BindingMatchSnapshot{
 		WorkspaceKey: result.WorkspaceKey, RouteKey: result.RouteKey,
-		BindingSetRevision: result.BindingSetRevision, Bindings: redactBindings(result.Bindings),
+		BindingSetRevision: result.BindingSetRevision, Bindings: cloneBindings(result.Bindings),
 	}, nil
 }
 
@@ -550,38 +550,27 @@ func claimIdempotencyKey(workspace string, before, claimUntil time.Time, limit i
 	return "automation-claim:" + hex.EncodeToString(sum[:])
 }
 
-func rejectSecret(binding *automation.Binding) error {
+func requireBinding(binding *automation.Binding) error {
 	if binding == nil {
 		return fmt.Errorf("binding is required: %w", automation.ErrInvalid)
-	}
-	if binding.WebhookSecret != "" {
-		return fmt.Errorf("webhook_secret is connector-owned and cannot cross Automation persistence: %w", automation.ErrInvalid)
 	}
 	return nil
 }
 
-func redactBindingResult(operation string, binding *automation.Binding, err error) (*automation.Binding, error) {
+func bindingResult(operation string, binding *automation.Binding, err error) (*automation.Binding, error) {
 	if err != nil {
 		return nil, mapError(operation, err)
 	}
 	if binding == nil {
 		return nil, fmt.Errorf("%s: empty FleetDB response: %w", operation, automation.ErrInvalidPersistedState)
 	}
-	return redactBinding(binding), nil
+	return cloneBinding(binding), nil
 }
 
-func redactBindings(bindings []*automation.Binding) []*automation.Binding {
+func cloneBindings(bindings []*automation.Binding) []*automation.Binding {
 	out := make([]*automation.Binding, 0, len(bindings))
 	for _, binding := range bindings {
-		out = append(out, redactBinding(binding))
-	}
-	return out
-}
-
-func redactBinding(binding *automation.Binding) *automation.Binding {
-	out := cloneBinding(binding)
-	if out != nil {
-		out.WebhookSecret = ""
+		out = append(out, cloneBinding(binding))
 	}
 	return out
 }

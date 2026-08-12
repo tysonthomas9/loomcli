@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
-	driverexecutor "github.com/tysonthomas9/loomcli/internal/driver"
 	trigger "github.com/tysonthomas9/loomcli/internal/infra/automationruntime"
 )
 
@@ -38,9 +37,8 @@ func buildServeRuntimeConfig() serveRuntimeConfig {
 }
 
 func driverStaleTaskMaxAge() time.Duration {
-	defaultSeconds := int(driverexecutor.DefaultStaleTaskRunMaxAge / time.Second)
 	return time.Duration(
-		boundedIntEnv(envLoomDriverStaleTaskMaxAge, defaultSeconds, 86400),
+		boundedIntEnv(envLoomDriverStaleTaskMaxAge, 0, 86400),
 	) * time.Second
 }
 

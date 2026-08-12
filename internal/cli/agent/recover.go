@@ -87,7 +87,7 @@ func runRecover(cmd *cobra.Command, args []string) {
 
 	if lockInfo == nil {
 		fmt.Println("No lock file found - checking for orphaned tasks...")
-		resetOrphanedAgentTasks(deps, worktreePath, worktreeName, "", !recoverNoAnalyze)
+		resetOrphanedAgentTasks(cmd.Context(), deps, worktreePath, worktreeName, "", !recoverNoAnalyze)
 		fmt.Println("Agent is ready for new work.")
 		return
 	}
@@ -101,10 +101,10 @@ func runRecover(cmd *cobra.Command, args []string) {
 	clearStaleLock(worktreePath, lockInfo.PID)
 
 	if lockInfo.TaskID != "" {
-		handleOrphanedTask(deps, worktreePath, lockInfo.TaskID, !recoverNoAnalyze)
+		handleOrphanedTask(cmd.Context(), deps, worktreePath, lockInfo.TaskID, !recoverNoAnalyze)
 	}
 
-	resetOrphanedAgentTasks(deps, worktreePath, lockInfo.AgentName, lockInfo.TaskID, !recoverNoAnalyze)
+	resetOrphanedAgentTasks(cmd.Context(), deps, worktreePath, lockInfo.AgentName, lockInfo.TaskID, !recoverNoAnalyze)
 	cleanUntrackedFiles(worktreePath, recoverForce)
 
 	fmt.Println("")
@@ -114,17 +114,16 @@ func runRecover(cmd *cobra.Command, args []string) {
 }
 
 // releaseFleetIssueLock releases the fleet-db lock held by agentName. A missing
-// lock is an idempotent success. KindNotImplemented is also accepted for legacy
-// backends without distributed locks; callers must still verify task ownership
-// immediately before any destructive status/assignee reset.
-func releaseFleetIssueLock(deps *cli.Deps, agentName, taskID string) error {
+// lock is an idempotent success. Callers still verify task ownership immediately
+// before any destructive status or assignee reset.
+func releaseFleetIssueLock(parent context.Context, deps *cli.Deps, agentName, taskID string) error {
 	if deps == nil || deps.IssueBackend == nil || agentName == "" || taskID == "" {
 		return nil
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(parent, 5*time.Second)
 	defer cancel()
 	if err := deps.IssueBackend.ReleaseIssueLock(ctx, taskID, agentName); err != nil {
-		if backend.IsKind(err, backend.KindNotFound) || backend.IsKind(err, backend.KindNotImplemented) {
+		if backend.IsKind(err, backend.KindNotFound) {
 			return nil
 		}
 		if errors.Is(err, context.DeadlineExceeded) {
@@ -175,7 +174,7 @@ func clearStaleLock(worktreePath string, pid int) {
 // RecoverWorktree provides a non-interactive recovery path for daemon use:
 // force-release locks, kill processes, reset orphaned tasks, clean files.
 // On clean exit (code 0) trusts agent's task status; on non-zero resets tasks.
-func RecoverWorktree(worktreePath, agentName string, exitCode int) error {
+func RecoverWorktree(ctx context.Context, worktreePath, agentName string, exitCode int) error {
 	deps := &cli.Deps{}
 	*deps = *cli.GetDeps(nil)
 	deps.IssueBackend = cli.DefaultIssueBackend()
@@ -205,7 +204,7 @@ func RecoverWorktree(worktreePath, agentName string, exitCode int) error {
 			// open via Update or Close) do NOT release the lock server-side,
 			// so without this call the lock survives until its TTL expires
 			// and other agents get spurious claim conflicts.
-			releaseErr := releaseFleetIssueLock(deps, agentName, lockInfo.TaskID)
+			releaseErr := releaseFleetIssueLock(ctx, deps, agentName, lockInfo.TaskID)
 			if releaseErr != nil {
 				return fmt.Errorf("release task %s before recovery mutations: %w", lockInfo.TaskID, releaseErr)
 			}
@@ -218,7 +217,7 @@ func RecoverWorktree(worktreePath, agentName string, exitCode int) error {
 			} else {
 				fmt.Printf("[recover] Agent %s exited with code %d, resetting task %s\n",
 					agentName, exitCode, lockInfo.TaskID)
-				if err := resetTaskOwnedByAgent(deps, lockInfo.TaskID, agentName); err != nil {
+				if err := resetTaskOwnedByAgent(ctx, deps, lockInfo.TaskID, agentName); err != nil {
 					return fmt.Errorf("reset interrupted task %s: %w", lockInfo.TaskID, err)
 				}
 			}
@@ -236,7 +235,7 @@ func RecoverWorktree(worktreePath, agentName string, exitCode int) error {
 	if lockInfo != nil {
 		lockTaskID = lockInfo.TaskID
 	}
-	resetOrphanedAgentTasks(deps, worktreePath, agentName, lockTaskID, false)
+	resetOrphanedAgentTasks(ctx, deps, worktreePath, agentName, lockTaskID, false)
 
 	// 6. Clean untracked files (force=true, no prompting)
 	cleanUntrackedFiles(worktreePath, true)

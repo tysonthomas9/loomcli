@@ -25,12 +25,12 @@ import (
 //
 // Report-only. Returns an empty CheckResult (skipped) when no IssueBackend is
 // configured, when listing fails, or when no in_progress issues exist.
-func checkOrphanedFleetLocks(deps *cli.Deps) CheckResult {
+func checkOrphanedFleetLocks(parent context.Context, deps *cli.Deps) CheckResult {
 	if deps == nil || deps.IssueBackend == nil {
 		return CheckResult{}
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(parent, 3*time.Second)
 	defer cancel()
 
 	issues, err := deps.IssueBackend.List(ctx, backend.ListOpts{Status: "in_progress"})
@@ -41,7 +41,7 @@ func checkOrphanedFleetLocks(deps *cli.Deps) CheckResult {
 		return CheckResult{}
 	}
 
-	orphans := orphanedFleetLocks(issues, activeFleetAgentNames())
+	orphans := orphanedFleetLocks(issues, activeFleetAgentNames(ctx))
 
 	if len(orphans) == 0 {
 		return CheckResult{
@@ -60,9 +60,9 @@ func checkOrphanedFleetLocks(deps *cli.Deps) CheckResult {
 	}
 }
 
-func activeFleetAgentNames() map[string]struct{} {
+func activeFleetAgentNames(ctx context.Context) map[string]struct{} {
 	active := make(map[string]struct{})
-	for _, agent := range monitor.CollectAgentStatusOnly("") {
+	for _, agent := range monitor.CollectAgentStatusOnly(ctx, "") {
 		if agent.LiveStatus == "working" || agent.ActiveTaskID != "" || agent.CurrentTaskID != "" ||
 			strings.HasPrefix(agent.Status, "working:") || strings.HasPrefix(agent.Status, "planning:") ||
 			strings.HasPrefix(agent.Status, "review:") {

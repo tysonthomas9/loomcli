@@ -9,7 +9,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
-	"github.com/tysonthomas9/loomcli/internal/localnodeconfig"
 	agentsmodule "github.com/tysonthomas9/loomcli/internal/modules/agents"
 	workspacemodule "github.com/tysonthomas9/loomcli/internal/modules/workspace"
 	"github.com/tysonthomas9/loomcli/internal/store"
@@ -630,7 +629,7 @@ func TestGetWorkspaceBackend_ReadsLocalNodeConfig(t *testing.T) {
 	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "ALPHA", Name: "Alpha Project"}); err != nil {
 		t.Fatalf("create workspace: %v", err)
 	}
-	if err := localnodeconfig.SetRuntimeProvider("ALPHA", "codex"); err != nil {
+	if err := bootstrap.SetRuntimeProvider("ALPHA", "codex"); err != nil {
 		t.Fatalf("set runtime provider: %v", err)
 	}
 
@@ -684,7 +683,7 @@ func TestPatchWorkspaceBackend_WritesLocalNodeConfig(t *testing.T) {
 	if data.ID != "ALPHA" {
 		t.Fatalf("data.ID = %q, want ALPHA", data.ID)
 	}
-	provider, err := localnodeconfig.RuntimeProvider("ALPHA")
+	provider, err := bootstrap.RuntimeProvider("ALPHA")
 	if err != nil {
 		t.Fatalf("get runtime provider: %v", err)
 	}

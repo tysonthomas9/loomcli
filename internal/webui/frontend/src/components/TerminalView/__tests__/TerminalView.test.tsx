@@ -426,28 +426,32 @@ describe("TerminalView", () => {
       ).toBe(true);
     });
 
-    it("auto-creates only default backend tab on first open (empty metadata)", () => {
+    it("auto-creates only default backend tab on first open (empty metadata)", async () => {
       setMetadata([]);
       render(<TerminalView />);
 
       // Only the default backend tab is auto-created; users add others via "+"
-      expect(screen.getByTestId("tab-lead-claude-1")).toBeInTheDocument();
+      expect(
+        await screen.findByTestId("tab-lead-claude-1"),
+      ).toBeInTheDocument();
       expect(screen.queryByTestId("tab-lead-codex-1")).not.toBeInTheDocument();
       expect(
         screen.queryByTestId("tab-lead-opencode-1"),
       ).not.toBeInTheDocument();
     });
 
-    it("claude tab is active by default on first open", () => {
+    it("claude tab is active by default on first open", async () => {
       setMetadata([]);
       render(<TerminalView />);
 
-      expect(screen.getByTestId("active-tab-id").textContent).toBe(
-        "lead-claude-1",
+      await waitFor(() =>
+        expect(screen.getByTestId("active-tab-id").textContent).toBe(
+          "lead-claude-1",
+        ),
       );
     });
 
-    it("first tab active when claude not available", () => {
+    it("first tab active when claude not available", async () => {
       mockBackendConfigHook.config = {
         backend: "codex",
         source: "default",
@@ -457,8 +461,10 @@ describe("TerminalView", () => {
       setMetadata([]);
       render(<TerminalView />);
 
-      expect(screen.getByTestId("active-tab-id").textContent).toBe(
-        "lead-codex-1",
+      await waitFor(() =>
+        expect(screen.getByTestId("active-tab-id").textContent).toBe(
+          "lead-codex-1",
+        ),
       );
     });
 
@@ -484,6 +490,7 @@ describe("TerminalView", () => {
         "lead-claude-1",
         "lead-claude-1",
         0,
+        "claude",
       );
     });
 
@@ -609,7 +616,7 @@ describe("TerminalView", () => {
       expect(screen.queryByTestId("tab-lead-claude-1")).not.toBeInTheDocument();
     });
 
-    it("initializes tabs when isActive transitions from false to true", () => {
+    it("initializes tabs when isActive transitions from false to true", async () => {
       setMetadata([]);
       const { rerender } = render(<TerminalView isActive={false} />);
 
@@ -620,7 +627,9 @@ describe("TerminalView", () => {
       rerender(<TerminalView isActive={true} />);
 
       // Now tabs should appear — only default backend tab auto-created
-      expect(screen.getByTestId("tab-lead-claude-1")).toBeInTheDocument();
+      expect(
+        await screen.findByTestId("tab-lead-claude-1"),
+      ).toBeInTheDocument();
       expect(screen.getByTestId("active-tab-id").textContent).toBe(
         "lead-claude-1",
       );
@@ -896,7 +905,7 @@ describe("TerminalView", () => {
   // ── Issue context (sanitizeSessionName + pendingIssueContext) ─────────────
 
   describe("issue context and sanitizeSessionName", () => {
-    it("creates tab with dots replaced by dashes in issue ID", () => {
+    it("creates tab with dots replaced by dashes in issue ID", async () => {
       setMetadata(DEFAULT_METADATA);
       render(
         <TerminalView
@@ -911,11 +920,11 @@ describe("TerminalView", () => {
       // sanitizeSessionName("proj.sub.123") => "proj-sub-123"
       // tab sessionName => "issue-proj-sub-123"
       expect(
-        screen.getByTestId("terminal-instance-issue-proj-sub-123"),
+        await screen.findByTestId("terminal-instance-issue-proj-sub-123"),
       ).toBeInTheDocument();
     });
 
-    it("creates tab with special chars stripped from issue ID", () => {
+    it("creates tab with special chars stripped from issue ID", async () => {
       setMetadata(DEFAULT_METADATA);
       render(
         <TerminalView
@@ -930,11 +939,11 @@ describe("TerminalView", () => {
       // sanitizeSessionName("proj@123!") => "proj123"
       // tab sessionName => "issue-proj123"
       expect(
-        screen.getByTestId("terminal-instance-issue-proj123"),
+        await screen.findByTestId("terminal-instance-issue-proj123"),
       ).toBeInTheDocument();
     });
 
-    it("creates tab preserving hyphens and underscores in issue ID", () => {
+    it("creates tab preserving hyphens and underscores in issue ID", async () => {
       setMetadata(DEFAULT_METADATA);
       render(
         <TerminalView
@@ -947,11 +956,11 @@ describe("TerminalView", () => {
       );
 
       expect(
-        screen.getByTestId("terminal-instance-issue-proj-sub_123"),
+        await screen.findByTestId("terminal-instance-issue-proj-sub_123"),
       ).toBeInTheDocument();
     });
 
-    it("new issue tab becomes active", () => {
+    it("new issue tab becomes active", async () => {
       setMetadata(DEFAULT_METADATA);
       render(
         <TerminalView
@@ -963,12 +972,14 @@ describe("TerminalView", () => {
         />,
       );
 
-      expect(screen.getByTestId("active-tab-id").textContent).toBe(
-        "issue-PROJ-42",
+      await waitFor(() =>
+        expect(screen.getByTestId("active-tab-id").textContent).toBe(
+          "issue-PROJ-42",
+        ),
       );
     });
 
-    it("calls onIssueContextConsumed after creating tab", () => {
+    it("calls onIssueContextConsumed after creating tab", async () => {
       setMetadata(DEFAULT_METADATA);
       const onConsumed = vi.fn();
       render(
@@ -981,7 +992,7 @@ describe("TerminalView", () => {
         />,
       );
 
-      expect(onConsumed).toHaveBeenCalled();
+      await waitFor(() => expect(onConsumed).toHaveBeenCalled());
     });
 
     it("switches to existing tab if issue tab already exists", () => {
@@ -1023,6 +1034,7 @@ describe("TerminalView", () => {
         "issue-PROJ-99",
         "issue-PROJ-99",
         expect.any(Number),
+        "claude",
       );
     });
   });
@@ -1370,6 +1382,7 @@ describe("TerminalView", () => {
         {
           session_name: "lead-codex-1",
           label: "lead-codex-1",
+          backend: "codex",
           notes: "",
           sort_order: 0,
           created_at: "2024-01-01T00:00:00Z",
@@ -1402,7 +1415,13 @@ describe("TerminalView", () => {
     });
 
     it("gemini backend gets correct brand color (#8e24aa)", async () => {
-      setMetadata([{ session_name: "lead-gemini-1", label: "lead-gemini-1" }]);
+      setMetadata([
+        {
+          session_name: "lead-gemini-1",
+          label: "lead-gemini-1",
+          backend: "gemini",
+        },
+      ]);
       render(<TerminalView />);
 
       const { TerminalTabBar } = await import("../tabs/TerminalTabBar");
@@ -1416,7 +1435,13 @@ describe("TerminalView", () => {
     });
 
     it("unknown backend names get undefined brandColor (CSS fallbacks apply)", async () => {
-      setMetadata([{ session_name: "lead-foobar-1", label: "lead-foobar-1" }]);
+      setMetadata([
+        {
+          session_name: "lead-foobar-1",
+          label: "lead-foobar-1",
+          backend: "foobar",
+        },
+      ]);
       render(<TerminalView />);
 
       const { TerminalTabBar } = await import("../tabs/TerminalTabBar");

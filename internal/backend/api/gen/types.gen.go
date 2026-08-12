@@ -1104,6 +1104,36 @@ func (e SessionHistoryRecordStatus) Valid() bool {
 	}
 }
 
+// Defines values for TabPutRequestBackend.
+const (
+	Claude   TabPutRequestBackend = "claude"
+	Codex    TabPutRequestBackend = "codex"
+	Cursor   TabPutRequestBackend = "cursor"
+	Gemini   TabPutRequestBackend = "gemini"
+	Opencode TabPutRequestBackend = "opencode"
+	Shell    TabPutRequestBackend = "shell"
+)
+
+// Valid indicates whether the value is a known member of the TabPutRequestBackend enum.
+func (e TabPutRequestBackend) Valid() bool {
+	switch e {
+	case Claude:
+		return true
+	case Codex:
+		return true
+	case Cursor:
+		return true
+	case Gemini:
+		return true
+	case Opencode:
+		return true
+	case Shell:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for TranscriptEntryRole.
 const (
 	TranscriptEntryRoleAssistant TranscriptEntryRole = "assistant"
@@ -2250,13 +2280,22 @@ type DeleteUnifiedAgentResponse = DeleteAgentRecordResponse
 
 // Dependency Full dependency relation from types.Dependency
 type Dependency struct {
+	AgentId *string `json:"agent_id,omitempty"`
+
+	// Backend Validated backend intent used to build the persisted launch envelope.
+	Backend     *string   `json:"backend,omitempty"`
 	CreatedAt   time.Time `json:"created_at"`
 	CreatedBy   *string   `json:"created_by,omitempty"`
 	DependsOnId string    `json:"depends_on_id"`
 	IssueId     string    `json:"issue_id"`
-	Metadata    *string   `json:"metadata,omitempty"`
-	ThreadId    *string   `json:"thread_id,omitempty"`
-	Type        string    `json:"type"`
+
+	// Kind Server-owned terminal kind. Agent tabs use `agent`.
+	Kind     *string `json:"kind,omitempty"`
+	Metadata *string `json:"metadata,omitempty"`
+	Role     *string `json:"role,omitempty"`
+	ThreadId *string `json:"thread_id,omitempty"`
+	Type     string  `json:"type"`
+	Writable *bool   `json:"writable,omitempty"`
 }
 
 // DependencyRef Slim reference to a dependency/dependent issue
@@ -3399,11 +3438,15 @@ type TabPatchRequest struct {
 
 // TabPutRequest defines model for TabPutRequest.
 type TabPutRequest struct {
-	Label     string `json:"label"`
-	Notes     string `json:"notes"`
-	Pinned    bool   `json:"pinned"`
-	SortOrder int    `json:"sort_order"`
+	Backend   TabPutRequestBackend `json:"backend"`
+	Label     string               `json:"label"`
+	Notes     string               `json:"notes"`
+	Pinned    bool                 `json:"pinned"`
+	SortOrder int                  `json:"sort_order"`
 }
+
+// TabPutRequestBackend defines model for TabPutRequest.Backend.
+type TabPutRequestBackend string
 
 // TaskWorkflowRunsResponse defines model for TaskWorkflowRunsResponse.
 type TaskWorkflowRunsResponse struct {

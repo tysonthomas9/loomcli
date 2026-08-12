@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/authmode"
+	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
@@ -60,7 +60,7 @@ func New(cfg Config) (*Client, error) {
 	}
 	c.authMode = authMode
 
-	if authMode.Mode == authmode.ModeOIDC {
+	if authMode.Mode == authority.TrustModeOIDC {
 		if err := c.ensureToken(); err != nil {
 			return nil, err
 		}
@@ -84,7 +84,7 @@ func (c *Client) AuthMode() AuthMode {
 // On 401 response, it clears the cached token, re-authenticates, and retries once.
 func (c *Client) Do(req *http.Request) (*http.Response, error) {
 	c.mu.Lock()
-	if c.authMode.Mode == authmode.ModeOIDC {
+	if c.authMode.Mode == authority.TrustModeOIDC {
 		if err := c.ensureToken(); err != nil {
 			c.mu.Unlock()
 			return nil, err
@@ -99,7 +99,7 @@ func (c *Client) Do(req *http.Request) (*http.Response, error) {
 	}
 
 	// On 401, clear cache and retry once.
-	if resp.StatusCode == http.StatusUnauthorized && c.authMode.Mode == authmode.ModeOIDC {
+	if resp.StatusCode == http.StatusUnauthorized && c.authMode.Mode == authority.TrustModeOIDC {
 		resp.Body.Close()
 
 		// Reset request body for retry. If the original request had a body
@@ -162,10 +162,10 @@ func (c *Client) discoverAuthMode() (*AuthMode, error) {
 		return nil, fmt.Errorf("parsing /api/config response: %w", err)
 	}
 
-	if !authmode.Valid(mode.Mode) {
+	if !authority.ValidTrustMode(mode.Mode) {
 		return nil, fmt.Errorf("unsupported auth mode %q from server (client may need updating)", mode.Mode)
 	}
-	if mode.Mode == authmode.ModeOIDC && strings.TrimSpace(mode.AuthURL) == "" {
+	if mode.Mode == authority.TrustModeOIDC && strings.TrimSpace(mode.AuthURL) == "" {
 		mode.AuthURL = c.serverURL
 	}
 

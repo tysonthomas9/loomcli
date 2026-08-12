@@ -1,13 +1,12 @@
 package backends
 
 import (
-	"path/filepath"
 	"testing"
 
 	hwharness "github.com/olesho/harness-wrapper/pkg/harness"
 	"github.com/olesho/harness-wrapper/pkg/transcript"
 
-	"github.com/tysonthomas9/loomcli/internal/sessions/eventstore"
+	"github.com/tysonthomas9/loomcli/internal/sessions"
 )
 
 func TestTranscriptModeFromEnv(t *testing.T) {
@@ -46,7 +45,7 @@ func TestEventStoreWriteEnabled(t *testing.T) {
 
 func TestEventStoreSinkDisabledByDefault(t *testing.T) {
 	t.Setenv("LOOM_EVENTSTORE_WRITE", "") // F2 off
-	sink, runID := eventStoreSink("/some/wd")
+	sink, runID := eventStoreSink(t.Context(), "/some/wd")
 	if sink != nil || runID != "" {
 		t.Errorf("F2 off ⇒ no sink, got sink=%v runID=%q", sink != nil, runID)
 	}
@@ -55,7 +54,7 @@ func TestEventStoreSinkDisabledByDefault(t *testing.T) {
 func TestEventStoreSinkNoActiveSession(t *testing.T) {
 	t.Setenv("LOOM_EVENTSTORE_WRITE", "1")
 	ClearActiveSessionEnv() // standalone: no session
-	if sink, _ := eventStoreSink("/some/wd"); sink != nil {
+	if sink, _ := eventStoreSink(t.Context(), "/some/wd"); sink != nil {
 		t.Error("no active session ⇒ no sink")
 	}
 }
@@ -67,7 +66,7 @@ func TestEventStoreSinkWritesToSessionDir(t *testing.T) {
 	SetActiveSessionRuntimeEnv(runtimeDir, sid)
 	t.Cleanup(ClearActiveSessionEnv)
 
-	sink, runID := eventStoreSink("/no/such/worktree") // no lock ⇒ runID falls back to sid
+	sink, runID := eventStoreSink(t.Context(), "/no/such/worktree") // no lock ⇒ runID falls back to sid
 	if sink == nil {
 		t.Fatal("F2 on + active session ⇒ expected a sink")
 	}
@@ -84,7 +83,11 @@ func TestEventStoreSinkWritesToSessionDir(t *testing.T) {
 	if err := sink(env); err != nil {
 		t.Fatalf("sink append: %v", err)
 	}
-	got, err := eventstore.Open(filepath.Join(runtimeDir, "sessions", sid)).Read()
+	archive, err := sessions.OpenArchive(t.Context(), runtimeDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := archive.LoadEnvelopes(sid)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"fmt"
 	"os"
 
@@ -75,7 +76,7 @@ func runAgent(cmd *cobra.Command, args []string) {
 	argName := args[0]
 	validatePromptFile(agentPromptFile)
 
-	taskCheckFn, err := mapTaskFilter(agentTaskFilter, agentParentID)
+	taskCheckFn, err := mapTaskFilter(cmd.Context(), agentTaskFilter, agentParentID)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		cli.ExitWithFlush(1)
@@ -83,7 +84,7 @@ func runAgent(cmd *cobra.Command, args []string) {
 
 	// Override with a server-provided router when this compatibility command is
 	// launched with explicit role routing constraints.
-	if routerCheck := cli.BuildRouterTaskCheck(cli.RoleConfigFromEnv(), cli.AgentEntryFromEnv(), agentParentID); routerCheck != nil {
+	if routerCheck := cli.BuildRouterTaskCheck(cmd.Context(), cli.RoleConfigFromEnv(), cli.AgentEntryFromEnv(), agentParentID); routerCheck != nil {
 		taskCheckFn = routerCheck
 	}
 
@@ -98,11 +99,11 @@ func runAgent(cmd *cobra.Command, args []string) {
 	promptGen := makeCustomPromptGen(agentPromptFile)
 
 	if agentAutoMode {
-		runAgentAutoMode(worktreePath, agentName, promptGen, taskCheckFn)
+		runAgentAutoMode(cmd.Context(), worktreePath, agentName, promptGen, taskCheckFn)
 		return
 	}
 
-	runAgentSingleTask(worktreePath, agentName, promptGen, taskCheckFn)
+	runAgentSingleTask(cmd.Context(), worktreePath, agentName, promptGen, taskCheckFn)
 }
 
 // validatePromptFile ensures the prompt path exists and is a regular file.
@@ -119,7 +120,7 @@ func validatePromptFile(path string) {
 }
 
 // agentAutoOpts builds the common AutoModeOptions for auto mode invocations.
-func agentAutoOpts(worktreePath, agentName string, promptGen func(string, *config.WorkspaceConfig) string, taskCheckFn func() (bool, error)) automode.AutoModeOptions {
+func agentAutoOpts(worktreePath, agentName string, prompt func(string) string, taskCheckFn func() (bool, error)) automode.AutoModeOptions {
 	return automode.AutoModeOptions{
 		Interval:        agentInterval,
 		MaxTasks:        agentMaxTasks,
@@ -128,7 +129,7 @@ func agentAutoOpts(worktreePath, agentName string, promptGen func(string, *confi
 		AgentName:       agentName,
 		WorktreePath:    worktreePath,
 		ParentID:        agentParentID,
-		CustomPromptGen: promptGen,
+		Prompt:          prompt,
 		CustomTaskCheck: taskCheckFn,
 	}
 }
@@ -136,9 +137,9 @@ func agentAutoOpts(worktreePath, agentName string, promptGen func(string, *confi
 // runAgentAutoMode handles continuous custom-agent execution in the current
 // process. Custom agents require their prompt generator and filter in memory,
 // so they cannot be reconstructed by a detached compatibility child.
-func runAgentAutoMode(worktreePath, agentName string, promptGen func(string, *config.WorkspaceConfig) string, taskCheckFn func() (bool, error)) {
-	opts := agentAutoOpts(worktreePath, agentName, promptGen, taskCheckFn)
-	if err := cli.AcquireLock(worktreePath, "agent", agentName); err != nil {
+func runAgentAutoMode(ctx context.Context, worktreePath, agentName string, prompt func(string) string, taskCheckFn func() (bool, error)) {
+	opts := agentAutoOpts(worktreePath, agentName, prompt, taskCheckFn)
+	if err := cli.AcquireLock(ctx, worktreePath, "agent", agentName); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		cli.ExitWithFlush(1)
 	}
@@ -146,12 +147,12 @@ func runAgentAutoMode(worktreePath, agentName string, promptGen func(string, *co
 
 	fmt.Println("[auto] using managed JSON streaming mode")
 	shutdown := automode.SetupSignalHandler()
-	automode.RunAutoModeLoop(opts, shutdown)
+	automode.RunAutoModeLoop(ctx, opts, shutdown)
 }
 
 // runAgentSingleTask handles the single-task execution path.
-func runAgentSingleTask(worktreePath, agentName string, promptGen func(string, *config.WorkspaceConfig) string, taskCheckFn func() (bool, error)) {
-	if err := cli.AcquireLock(worktreePath, "agent", agentName); err != nil {
+func runAgentSingleTask(ctx context.Context, worktreePath, agentName string, prompt func(string) string, taskCheckFn func() (bool, error)) {
+	if err := cli.AcquireLock(ctx, worktreePath, "agent", agentName); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		cli.ExitWithFlush(1)
 	}
@@ -180,9 +181,7 @@ func runAgentSingleTask(worktreePath, agentName string, promptGen func(string, *
 		fmt.Fprintf(os.Stderr, "Warning: could not update lock state: %v\n", err)
 	}
 
-	ws, _ := config.ResolveActiveWorkspace()
-	prompt := promptGen(agentName, ws)
-	if err := cli.InvokeAgent(worktreePath, prompt, agentName); err != nil {
+	if err := cli.InvokeAgent(worktreePath, prompt(agentName), agentName); err != nil {
 		fmt.Fprintf(os.Stderr, "Error running agent: %v\n", err)
 		cli.ExitWithFlush(1)
 	}
@@ -190,21 +189,21 @@ func runAgentSingleTask(worktreePath, agentName string, promptGen func(string, *
 
 // mapTaskFilter converts a filter string to the corresponding HasAvailable* function.
 // The parentID is captured in the returned closure to scope task discovery.
-func mapTaskFilter(filter, parentID string) (func() (bool, error), error) {
+func mapTaskFilter(ctx context.Context, filter, parentID string) (func() (bool, error), error) {
 	repoLabel := os.Getenv("LOOM_AGENT_REPO")
 	switch filter {
 	case "needs_design":
-		return func() (bool, error) { return automode.HasAvailablePlanningTasks(parentID, repoLabel) }, nil
+		return func() (bool, error) { return automode.HasAvailablePlanningTasks(ctx, parentID, repoLabel) }, nil
 	case "has_design":
-		return func() (bool, error) { return automode.HasAvailableImplementationTasks(parentID, repoLabel) }, nil
+		return func() (bool, error) { return automode.HasAvailableImplementationTasks(ctx, parentID, repoLabel) }, nil
 	case "bug":
-		return cli.BuildRouterTaskCheck(
+		return cli.BuildRouterTaskCheck(ctx,
 			config.RoleConfig{TaskFilter: "bug"},
 			config.AgentEntry{Repo: repoLabel},
 			parentID,
 		), nil
 	case "any", "":
-		return func() (bool, error) { return automode.HasAnyAvailableTasks(parentID, repoLabel) }, nil
+		return func() (bool, error) { return automode.HasAnyAvailableTasks(ctx, parentID, repoLabel) }, nil
 	default:
 		return nil, fmt.Errorf("invalid task filter: %s (must be needs_design, has_design, bug, or any)", filter)
 	}
@@ -212,8 +211,8 @@ func mapTaskFilter(filter, parentID string) (func() (bool, error), error) {
 
 // makeCustomPromptGen creates a prompt generator closure that loads and templates
 // the specified prompt file.
-func makeCustomPromptGen(promptFile string) func(string, *config.WorkspaceConfig) string {
-	return func(agentName string, workspace *config.WorkspaceConfig) string {
+func makeCustomPromptGen(promptFile string) func(string) string {
+	return func(agentName string) string {
 		// In workspace mode, agent name may differ from worktree name,
 		// but we use the same value for consistency with plan/task prompts.
 		worktreeName := agentName

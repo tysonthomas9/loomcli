@@ -97,11 +97,11 @@ func init() {
 	workspaceCmd.AddCommand(workspaceStatusCmd)
 }
 
-func runWorkspaceAdd(_ *cobra.Command, args []string) error {
+func runWorkspaceAdd(cmd *cobra.Command, args []string) error {
 	if !validDesignFormat(wsAddDesignFormat) {
 		return fmt.Errorf("invalid --design-format %q: must be \"markdown\" or \"html\"", wsAddDesignFormat)
 	}
-	return cmdstore.WithWorkspaceCatalog(func(ctx context.Context, h *bootstrap.StoreHandle, workspace workspacemodule.API) error {
+	return cmdstore.WithWorkspaceCatalog(cmd.Context(), func(ctx context.Context, h *bootstrap.StoreHandle, workspace workspacemodule.API) error {
 		key := args[0]
 		ws, err := workspace.Create(ctx, workspacemodule.CreateCommand{
 			Key:           key,
@@ -131,7 +131,7 @@ func runWorkspaceSet(cmd *cobra.Command, args []string) error {
 	if !validDesignFormat(wsSetDesignFormat) {
 		return fmt.Errorf("invalid --design-format %q: must be \"markdown\" or \"html\"", wsSetDesignFormat)
 	}
-	return cmdstore.WithWorkspaceCatalog(func(ctx context.Context, _ *bootstrap.StoreHandle, workspace workspacemodule.API) error {
+	return cmdstore.WithWorkspaceCatalog(cmd.Context(), func(ctx context.Context, _ *bootstrap.StoreHandle, workspace workspacemodule.API) error {
 		key := args[0]
 		v := wsSetDesignFormat
 		ws, err := workspace.SetDesignFormat(ctx, workspacemodule.SetDesignFormatCommand{Reference: key, Format: v})
@@ -158,8 +158,8 @@ func displayDesignFormat(v string) string {
 	return v
 }
 
-func runWorkspaceUse(_ *cobra.Command, args []string) error {
-	return cmdstore.WithWorkspaceCatalog(func(ctx context.Context, _ *bootstrap.StoreHandle, workspace workspacemodule.API) error {
+func runWorkspaceUse(cmd *cobra.Command, args []string) error {
+	return cmdstore.WithWorkspaceCatalog(cmd.Context(), func(ctx context.Context, _ *bootstrap.StoreHandle, workspace workspacemodule.API) error {
 		key := args[0]
 		value, err := workspace.Resolve(ctx, workspacemodule.ResolveQuery{Reference: key})
 		if err != nil {
@@ -177,8 +177,8 @@ func runWorkspaceUse(_ *cobra.Command, args []string) error {
 	})
 }
 
-func runWorkspaceShow(_ *cobra.Command, args []string) error {
-	return cmdstore.WithWorkspaceCatalog(func(ctx context.Context, h *bootstrap.StoreHandle, workspace workspacemodule.API) error {
+func runWorkspaceShow(cmd *cobra.Command, args []string) error {
+	return cmdstore.WithWorkspaceCatalog(cmd.Context(), func(ctx context.Context, h *bootstrap.StoreHandle, workspace workspacemodule.API) error {
 		key, err := pickWorkspaceKey(ctx, workspace, args)
 		if err != nil {
 			return err
@@ -257,8 +257,8 @@ func gatherWorkspaceDetails(ctx context.Context, s workspaceDetailStore, workspa
 	return ws, repos, agents, roles, nil
 }
 
-func runWorkspaceStatus(_ *cobra.Command, args []string) error {
-	return cmdstore.WithWorkspaceCatalog(func(ctx context.Context, _ *bootstrap.StoreHandle, workspace workspacemodule.API) error {
+func runWorkspaceStatus(cmd *cobra.Command, args []string) error {
+	return cmdstore.WithWorkspaceCatalog(cmd.Context(), func(ctx context.Context, _ *bootstrap.StoreHandle, workspace workspacemodule.API) error {
 		key, err := pickWorkspaceKey(ctx, workspace, args)
 		if err != nil {
 			return err

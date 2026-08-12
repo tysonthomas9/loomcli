@@ -1,4 +1,4 @@
-# Exact Phase 8 production-package topology ratchet.
+# Exact Phase 9 production-package topology ratchet.
 # Generated .go files count as compiled package topology; _test.go files do not.
 # Refresh only after an intentional consolidation review; see package_shape_test.go.
 schema_version: 1
@@ -13,17 +13,16 @@ semantics:
     - vendor
     - worktrees
 ceilings:
-  total_packages: 189
-  module_packages: 17
-  outside_module_packages: 172
-  one_file_packages: 67
-  one_or_two_file_packages: 89
+  total_packages: 167
+  module_packages: 15
+  outside_module_packages: 152
+  one_file_packages: 46
+  one_or_two_file_packages: 68
 packages:
   - internal/agenterr
   - internal/agentpolicy
   - internal/app/agentprovisioning
   - internal/app/agentprovisioning/fleetdb
-  - internal/app/agentsbootstrap
   - internal/app/connectorgrants
   - internal/app/prreviewer
   - internal/app/serve
@@ -36,13 +35,10 @@ packages:
   - internal/app/workitemmove
   - internal/archtest
   - internal/atomicfile
-  - internal/authmode
   - internal/backend
   - internal/backend/api
   - internal/backend/api/gen
-  - internal/backend/backendtest
   - internal/backend/fleet
-  - internal/backendnames
   - internal/bootstrap
   - internal/circuitbreaker
   - internal/cli
@@ -50,7 +46,6 @@ packages:
   - internal/cli/agent/lead
   - internal/cli/agentdef
   - internal/cli/automode
-  - internal/cli/backendapi
   - internal/cli/backends
   - internal/cli/cleanup
   - internal/cli/clitest
@@ -87,7 +82,6 @@ packages:
   - internal/driver
   - internal/driver/daytonahost
   - internal/driver/nativearchive
-  - internal/driver/runtypes
   - internal/driver/sandbox
   - internal/driver/taskworktree
   - internal/epicrunner
@@ -99,10 +93,7 @@ packages:
   - internal/harness
   - internal/harness/fakeharness/mock
   - internal/httpclient
-  - internal/infra/agentsbootstrapstore
-  - internal/infra/artifactcatalog
   - internal/infra/automationruntime
-  - internal/infra/connectorscatalog
   - internal/infra/connectorsproviders
   - internal/infra/connectorsvault
   - internal/infra/fleetdb
@@ -111,14 +102,12 @@ packages:
   - internal/infra/interactionlead
   - internal/infra/localgit
   - internal/infra/memstore
-  - internal/infra/sessionstoreadapter
   - internal/infra/sourcecontrolpublisher
   - internal/infra/sourcecontrolstackstore
   - internal/infra/workflowdistribution
   - internal/infra/workflowdistribution/authoring
   - internal/infra/workspacecatalog
   - internal/kv
-  - internal/localnodeconfig
   - internal/localsettings
   - internal/localworkspace
   - internal/lockfile
@@ -127,11 +116,9 @@ packages:
   - internal/modules/agents
   - internal/modules/agents/fleetdb
   - internal/modules/artifacts
-  - internal/modules/artifacts/fleetdb
   - internal/modules/automation
   - internal/modules/automation/fleetdb
   - internal/modules/connectors
-  - internal/modules/connectors/fleetdb
   - internal/modules/execution
   - internal/modules/interaction
   - internal/modules/interaction/fleetdb
@@ -144,26 +131,17 @@ packages:
   - internal/netutil
   - internal/observability/tracing
   - internal/ops
-  - internal/pathsec
   - internal/platform/authority
   - internal/platform/httptransport
   - internal/platform/repositoryremote
   - internal/platform/runtime
   - internal/roleprompts
-  - internal/runtimectx
-  - internal/runtimepreflight
   - internal/sessions
-  - internal/sessions/eventstore
   - internal/sessions/redact
   - internal/sessions/transcript
-  - internal/sessions/transcript/backends
-  - internal/sessions/transcript/claude
-  - internal/sessions/transcript/codex
-  - internal/sessions/transcript/opencode
   - internal/store
   - internal/store/storetest
   - internal/testutil
-  - internal/types
   - internal/usage
   - internal/webui
   - internal/webui/agentcoord

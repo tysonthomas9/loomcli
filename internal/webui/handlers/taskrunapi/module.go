@@ -74,12 +74,12 @@ type IssueBackendFactory func(ws, actor string) (backend.IssueBackend, error)
 // Config wires the module's dependencies.
 type Config struct {
 	Store taskRunProjectionStore
-	// Execution owns every running TaskRun mutation. Store remains only for
-	// the legacy read projection and unrelated compatibility surfaces.
+	// Execution owns every running TaskRun mutation. Store is a read-only
+	// projection dependency for exact TaskRun lookup and lease verification.
 	Execution   execution.TaskRunAPI
 	Authorities execution.TaskRunAuthorityResolver
-	// Artifacts is the owner-fenced capability API. Artifact handlers never
-	// fall back to Store.Artifacts; a nil API fails artifact operations closed.
+	// Artifacts is the owner-fenced capability API. A nil API fails artifact
+	// operations closed.
 	Artifacts artifactsmodule.API
 	// DaytonaProvider is the host-owned opaque provider broker. It is reachable
 	// only after this module verifies the exact Daytona TaskRun lease/fence.
@@ -93,7 +93,6 @@ type Config struct {
 
 type taskRunProjectionStore interface {
 	TaskRuns() store.TaskRunStore
-	Artifacts() store.ArtifactStore
 }
 
 // Module serves the workspace-scoped task-run routes.

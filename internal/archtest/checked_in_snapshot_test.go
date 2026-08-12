@@ -26,11 +26,11 @@ func checkedInSnapshotReport() Report {
 	return Report{
 		CompositeStoreFiles:        make([]string, 15),
 		CompositeStoreOutside:      make([]string, 0),
-		LegacyHandlerImports:       make([]LegacyImportUse, 26),
+		LegacyHandlerImports:       make([]LegacyImportUse, 16),
 		ModuleRoots:                append([]string(nil), checkedInModuleRoots...),
 		AnalysisProfilesEnforced:   11,
 		MutationCommands:           107,
-		DirectPersistenceWrites:    98,
+		DirectPersistenceWrites:    86,
 		RuntimeComponents:          71,
 		RuntimeGoroutineLaunches:   80,
 		PerformanceMetrics:         6,

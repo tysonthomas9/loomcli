@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/modules/artifacts"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -646,7 +647,7 @@ func (s *taskRunStore) validateCompletionArtifactsLocked(ctx context.Context, ws
 		return nil
 	}
 	for _, artifactID := range artifactIDs {
-		artifact, err := s.artifacts.Get(ctx, ws, strings.TrimSpace(artifactID))
+		artifact, err := s.artifacts.GetArtifactRecord(ctx, ws, strings.TrimSpace(artifactID))
 		if err != nil {
 			return err
 		}
@@ -666,14 +667,14 @@ func (s *taskRunStore) validateCompletionArtifactsLocked(ctx context.Context, ws
 	return nil
 }
 
-func artifactOwnedByTaskRunCompletionMem(artifact *domain.Artifact, taskRunID string) bool {
+func artifactOwnedByTaskRunCompletionMem(artifact *artifacts.Artifact, taskRunID string) bool {
 	if artifact == nil {
 		return false
 	}
-	return artifact.OwnerType == "task_run" && artifact.OwnerID == strings.TrimSpace(taskRunID)
+	return artifact.OwnerType == artifacts.OwnerTaskRun && artifact.OwnerID == strings.TrimSpace(taskRunID)
 }
 
-func artifactReadyForTaskRunCompletionMem(artifact *domain.Artifact) bool {
+func artifactReadyForTaskRunCompletionMem(artifact *artifacts.Artifact) bool {
 	if artifact == nil || artifact.DurableStatus != "finalized" {
 		return false
 	}
@@ -692,7 +693,7 @@ func taskRunRequiresCloudSafeArtifactsMem(run *domain.TaskRun) bool {
 	}
 }
 
-func artifactCloudSafeForTaskRunCompletionMem(artifact *domain.Artifact) bool {
+func artifactCloudSafeForTaskRunCompletionMem(artifact *artifacts.Artifact) bool {
 	if artifact == nil {
 		return false
 	}

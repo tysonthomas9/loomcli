@@ -1,6 +1,7 @@
 package events
 
 import (
+	"context"
 	"sync"
 )
 
@@ -16,13 +17,18 @@ type Emitter interface {
 // Bus writes events to a JSONL file and notifies listeners synchronously.
 type Bus struct {
 	mu        sync.Mutex
+	ctx       context.Context
 	writer    *JSONLWriter
 	listeners []Listener
 }
 
 // NewBus creates an event bus that writes to eventsDir with default rotation settings.
-func NewBus(eventsDir string) *Bus {
+func NewBus(ctx context.Context, eventsDir string) *Bus {
+	if ctx == nil {
+		panic("events: nil context")
+	}
 	return &Bus{
+		ctx:    ctx,
 		writer: NewJSONLWriter(eventsDir, defaultMaxSize, defaultMaxBackups),
 	}
 }
@@ -35,11 +41,10 @@ func (b *Bus) Subscribe(l Listener) {
 }
 
 // Emit writes an event to the JSONL writer and notifies all listeners.
-// Auto-sets Timestamp if zero. Captures the active trace context from the
-// ambient provider (set via SetContextProvider) into e.TraceParent so
-// downstream consumers (otelexport) can re-root their spans under the
-// originating request. Pre-populated TraceParent on the input event is
-// preserved.
+// Auto-sets Timestamp if zero. Captures the bus's explicitly supplied trace
+// context into e.TraceParent so downstream consumers (otelexport) can re-root
+// their spans under the originating request. Pre-populated TraceParent on the
+// input event is preserved.
 //
 // Note: under concurrent emits, listener notification order may differ from
 // file write order. Listeners should not depend on ordering.
@@ -48,7 +53,7 @@ func (b *Bus) Emit(e Event) error {
 		e.Timestamp = Now()
 	}
 	if e.TraceParent == "" {
-		e.InjectTraceContext(ambientCtx())
+		e.InjectTraceContext(b.ctx)
 	}
 
 	if err := b.writer.Write(e); err != nil {

@@ -46,8 +46,7 @@ export function expectType<T>(_value: T): void {
 export async function exerciseLoomDriverClientSurface(): Promise<void> {
   const client: LoomDriverClient = createLoomDriverClient({
     apiUrl: "http://localhost:8080",
-    apiToken: "static-token",
-    runToken: "run-token",
+	runToken: "run-token",
     env: { LOOM_DRIVER_WORKSPACE: "WS" },
     input: { epicId: "EPIC-1" },
   });

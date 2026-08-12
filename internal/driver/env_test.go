@@ -86,6 +86,7 @@ func TestFlueRuntimeEnvCarriesNoFleetDBCredentials(t *testing.T) {
 		BundleRoot: "/tmp/bundle",
 		ServerPath: "/tmp/bundle/dist/server.mjs",
 		Manifest:   map[string]string{"workflow_name": "epic-runner"},
+		RunToken:   testWorkflowRunToken,
 	}, []byte(`{}`), nil)
 	if err != nil {
 		t.Fatalf("flueRuntimeEnv: %v", err)
@@ -101,39 +102,18 @@ func TestFlueRuntimeEnvCarriesNoFleetDBCredentials(t *testing.T) {
 	}
 }
 
-// TestNodeRunnerRuntimeEnvAuthSurface pins the §9.5 workflow env lockdown:
-// a token-carrying run with the deprecated legacy fallback switched off gets
+// TestNodeRunnerRuntimeEnvAuthSurface pins the token-only workflow env:
 // exactly {LOOM_RUN_TOKEN, LOOM_DRIVER_API_URL, workspace/run/node id} on top
-// of the allowlisted base — no static bearer, no lease/fencing identity. The
-// fallback default stays ON for one release (loom-dev deploy safety), and a
-// token-less run keeps the legacy env regardless of the switch (no flag-day).
+// of the allowlisted base — no static bearer or lease/fencing credential.
 func TestNodeRunnerRuntimeEnvAuthSurface(t *testing.T) {
-	cases := []struct {
-		name       string
-		runToken   string
-		legacyEnv  string
-		wantLegacy bool
-	}{
-		{name: "token with legacy fallback off locks env down", runToken: "minted.jwt.token", legacyEnv: "0", wantLegacy: false},
-		{name: "token with fallback false locks env down", runToken: "minted.jwt.token", legacyEnv: "false", wantLegacy: false},
-		{name: "token with fallback unset keeps deprecated legacy env (default on)", runToken: "minted.jwt.token", legacyEnv: "", wantLegacy: true},
-		{name: "token with fallback explicitly on keeps legacy env", runToken: "minted.jwt.token", legacyEnv: "1", wantLegacy: true},
-		{name: "no token ignores fallback off (legacy env is the only auth)", runToken: "", legacyEnv: "0", wantLegacy: true},
-		{name: "no token default keeps legacy env", runToken: "", legacyEnv: "", wantLegacy: true},
+	runner := NodeRunner{APIBaseURL: "http://127.0.0.1:1", ExecTaskCommand: []string{"/bin/loom"}}
+	env, err := runner.runtimeEnv(runtimeEnvAuthRequest("minted.jwt.token"), []byte(`{}`))
+	if err != nil {
+		t.Fatalf("runtimeEnv: %v", err)
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Setenv(LegacyDriverAuthEnvVar, tc.legacyEnv)
-			env, err := (NodeRunner{
-				APIBaseURL:      "http://127.0.0.1:1",
-				APIToken:        "static-shared-bearer",
-				ExecTaskCommand: []string{"/bin/loom"},
-			}).runtimeEnv(runtimeEnvAuthRequest(tc.runToken), []byte(`{}`))
-			if err != nil {
-				t.Fatalf("runtimeEnv: %v", err)
-			}
-			assertRuntimeEnvAuthSurface(t, envMap(env), tc.runToken, tc.wantLegacy)
-		})
+	assertRuntimeEnvAuthSurface(t, envMap(env), "minted.jwt.token")
+	if _, err := runner.runtimeEnv(runtimeEnvAuthRequest(""), []byte(`{}`)); err == nil {
+		t.Fatal("runtimeEnv accepted a workflow request without a run token")
 	}
 }
 
@@ -153,7 +133,7 @@ func runtimeEnvAuthRequest(runToken string) RunRequest {
 	}
 }
 
-func assertRuntimeEnvAuthSurface(t *testing.T, got map[string]string, runToken string, wantLegacy bool) {
+func assertRuntimeEnvAuthSurface(t *testing.T, got map[string]string, runToken string) {
 	t.Helper()
 	if got["LOOM_RUN_TOKEN"] != runToken {
 		t.Fatalf("LOOM_RUN_TOKEN = %q, want %q", got["LOOM_RUN_TOKEN"], runToken)
@@ -169,23 +149,12 @@ func assertRuntimeEnvAuthSurface(t *testing.T, got map[string]string, runToken s
 			t.Fatalf("%s = %q, want %q (env: %+v)", key, got[key], want, got)
 		}
 	}
-	legacy := map[string]string{
-		"LOOM_DRIVER_API_TOKEN":     "static-shared-bearer",
-		"LOOM_DRIVER_LEASE_ID":      "lease-1",
-		"LOOM_DRIVER_FENCING_TOKEN": "42",
-	}
-	for key, want := range legacy {
-		value, present := got[key]
-		if wantLegacy && value != want {
-			t.Fatalf("%s = %q, want %q (env: %+v)", key, value, want, got)
-		}
-		if !wantLegacy && present {
-			t.Fatalf("%s leaked into locked-down workflow env: %+v", key, got)
+	for _, key := range []string{"LOOM_DRIVER_API_TOKEN", "LOOM_DRIVER_LEASE_ID", "LOOM_DRIVER_FENCING_TOKEN"} {
+		if _, present := got[key]; present {
+			t.Fatalf("%s leaked into token-only workflow env: %+v", key, got)
 		}
 	}
-	if !wantLegacy {
-		assertExactLockedDownDriverEnv(t, got)
-	}
+	assertExactLockedDownDriverEnv(t, got)
 }
 
 // assertExactLockedDownDriverEnv asserts the locked-down env's LOOM_* surface

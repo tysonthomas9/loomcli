@@ -217,7 +217,6 @@ type TriggerBindingCreate struct {
 	ConcurrencyPolicy    automation.BindingConcurrencyPolicy
 	IdempotencyPolicy    string
 	AuthPolicy           string
-	WebhookSecret        string
 	SubjectKeyTemplate   string
 	ActorFilter          *automation.ActorFilter
 	RetryMaxAttempts     int
@@ -301,7 +300,6 @@ type TriggerBindingUpdate struct {
 	ConcurrencyPolicy    *automation.BindingConcurrencyPolicy
 	IdempotencyPolicy    *string
 	AuthPolicy           *string
-	WebhookSecret        *string
 	SubjectKeyTemplate   *string
 	// ActorFilter replaces the whole filter when set; a zero-valued filter
 	// (no constraints) clears it, mirroring fleet-db's patch semantics.
@@ -324,10 +322,6 @@ type TriggerBindingStore interface {
 	// revocation (Decision 6): the caller revokes the binding's connector grants
 	// so no credentials outlive it. A missing binding wraps domain.ErrNotFound.
 	Delete(ctx context.Context, workspaceKey, bindingID string) error
-	// ResolveWebhookSecret fetches a binding's plaintext webhook signing secret.
-	// Read/Get/List return the binding with the secret redacted; this is the
-	// privileged path the webhook verifier uses to check inbound signatures.
-	ResolveWebhookSecret(ctx context.Context, workspaceKey, bindingID string) (string, error)
 }
 
 // TriggerEventFilter narrows TriggerEvent listings.

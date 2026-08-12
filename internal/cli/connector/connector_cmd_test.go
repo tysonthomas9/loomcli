@@ -13,8 +13,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/infra/connectorscatalog"
 	vault "github.com/tysonthomas9/loomcli/internal/infra/connectorsvault"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	connectorsmodule "github.com/tysonthomas9/loomcli/internal/modules/connectors"
@@ -30,11 +28,7 @@ const (
 
 func testConnectorManagement(t *testing.T, st store.Store) connectorsmodule.Management {
 	t.Helper()
-	adapter, err := connectorscatalog.New(st.Connectors(), st.ConnectorGrants(), st.ConnectorCalls())
-	if err != nil {
-		t.Fatalf("compose connector adapter: %v", err)
-	}
-	management, err := connectorsmodule.NewManagement(adapter)
+	management, err := connectorsmodule.NewManagement(st.Connectors())
 	if err != nil {
 		t.Fatalf("compose connector management: %v", err)
 	}
@@ -43,15 +37,11 @@ func testConnectorManagement(t *testing.T, st store.Store) connectorsmodule.Mana
 
 func testConnectorSecretManagement(t *testing.T, st store.Store) connectorsmodule.Management {
 	t.Helper()
-	adapter, err := connectorscatalog.New(st.Connectors(), st.ConnectorGrants(), st.ConnectorCalls())
-	if err != nil {
-		t.Fatalf("compose connector adapter: %v", err)
-	}
 	sealer, err := newConnectorVault()
 	if err != nil {
 		t.Fatalf("compose connector vault: %v", err)
 	}
-	management, err := connectorsmodule.NewManagementWithSecrets(adapter, sealer, time.Now)
+	management, err := connectorsmodule.NewManagementWithSecrets(st.Connectors(), sealer, time.Now)
 	if err != nil {
 		t.Fatalf("compose connector secret management: %v", err)
 	}
@@ -100,7 +90,7 @@ func TestCreateThenList_RedactsAndNeverEchoesSecrets(t *testing.T) {
 			stdin := strings.NewReader(testInboundSecret + "\n" + testCredential + "\n")
 			err := createConnector(ctx, testConnectorManagement(t, st), testWS, createParams{
 				connectorID: "gh-main",
-				source:      domain.ConnectorSourceGitHub,
+				source:      connectorsmodule.ConnectorSourceGitHub,
 				displayName: "GitHub main",
 				endpoint:    "/hooks/github",
 				secretStdin: true,
@@ -121,7 +111,7 @@ func TestCreateThenList_RedactsAndNeverEchoesSecrets(t *testing.T) {
 	var out bytes.Buffer
 	stdin := strings.NewReader(testInboundSecret + "\n" + testCredential + "\n")
 	if err := createConnector(ctx, testConnectorManagement(t, st), testWS, createParams{
-		source:      domain.ConnectorSourceGitHub, // connectorID defaults to "github"
+		source:      connectorsmodule.ConnectorSourceGitHub, // connectorID defaults to "github"
 		secretStdin: true,
 		credStdin:   true,
 	}, stdin, &out); err != nil {
@@ -149,14 +139,14 @@ func TestCreateThenList_RedactsAndNeverEchoesSecrets(t *testing.T) {
 	// The secrets reached the store intact: the privileged resolve paths
 	// return the inbound secret, and the sealed credential unseals back to
 	// the plaintext under the same key + AAD the CLI sealed with.
-	secrets, err := st.Connectors().ResolveInboundSecret(ctx, testWS, "github")
+	secrets, err := st.Connectors().ResolveInboundSecretsRecord(ctx, testWS, "github")
 	if err != nil {
 		t.Fatalf("ResolveInboundSecret: %v", err)
 	}
 	if secrets.Current != testInboundSecret {
 		t.Fatalf("stored inbound secret = %q, want %q", secrets.Current, testInboundSecret)
 	}
-	sealed, err := st.Connectors().ResolveOutboundCredentialSealed(ctx, testWS, "github")
+	sealed, err := st.Connectors().ResolveOutboundCredentialSealedRecord(ctx, testWS, "github")
 	if err != nil {
 		t.Fatalf("ResolveOutboundCredentialSealed: %v", err)
 	}
@@ -181,13 +171,13 @@ func TestCreateConnectorUsesServeVaultFallback(t *testing.T) {
 	var out bytes.Buffer
 	if err := createConnector(context.Background(), testConnectorManagement(t, st), testWS, createParams{
 		connectorID: "github",
-		source:      domain.ConnectorSourceGitHub,
+		source:      connectorsmodule.ConnectorSourceGitHub,
 		credStdin:   true,
 	}, strings.NewReader(testCredential+"\n"), &out); err != nil {
 		t.Fatalf("createConnector: %v", err)
 	}
 
-	sealed, err := st.Connectors().ResolveOutboundCredentialSealed(context.Background(), testWS, "github")
+	sealed, err := st.Connectors().ResolveOutboundCredentialSealedRecord(context.Background(), testWS, "github")
 	if err != nil {
 		t.Fatalf("ResolveOutboundCredentialSealed: %v", err)
 	}
@@ -218,27 +208,27 @@ func TestCreateConnector_ErrorPaths(t *testing.T) {
 	}{
 		{
 			name:    "empty inbound secret on stdin",
-			params:  createParams{source: domain.ConnectorSourceGitHub, secretStdin: true},
+			params:  createParams{source: connectorsmodule.ConnectorSourceGitHub, secretStdin: true},
 			stdin:   "\n",
 			wantMsg: "inbound secret from stdin is empty",
 		},
 		{
 			name:    "missing credential line",
-			params:  createParams{source: domain.ConnectorSourceGitHub, secretStdin: true, credStdin: true},
+			params:  createParams{source: connectorsmodule.ConnectorSourceGitHub, secretStdin: true, credStdin: true},
 			stdin:   testInboundSecret + "\n",
 			wantMsg: "outbound credential from stdin is empty",
 		},
 		{
 			name:    "vault source missing fails closed before any store write",
-			params:  createParams{source: domain.ConnectorSourceGitHub, credStdin: true},
+			params:  createParams{source: connectorsmodule.ConnectorSourceGitHub, credStdin: true},
 			stdin:   testCredential + "\n",
 			noKey:   true,
 			wantMsg: "vault key",
 		},
 		{
 			name:    "duplicate connector",
-			params:  createParams{connectorID: "dup", source: domain.ConnectorSourceSlack},
-			wantErr: domain.ErrConnectorExists,
+			params:  createParams{connectorID: "dup", source: connectorsmodule.ConnectorSourceSlack},
+			wantErr: connectorsmodule.ErrAlreadyExists,
 		},
 	}
 	for _, tt := range tests {
@@ -258,8 +248,8 @@ func TestCreateConnector_ErrorPaths(t *testing.T) {
 			}
 			st := memstore.New()
 			if tt.params.connectorID == "dup" {
-				if _, err := st.Connectors().Create(ctx, store.ConnectorCreate{
-					WorkspaceKey: testWS, ConnectorID: "dup", SourceKind: domain.ConnectorSourceSlack,
+				if _, err := st.Connectors().CreateConnectorRecord(ctx, connectorsmodule.CreateConnectorMutation{
+					WorkspaceKey: testWS, ConnectorID: "dup", SourceKind: connectorsmodule.ConnectorSourceSlack,
 				}); err != nil {
 					t.Fatalf("seed: %v", err)
 				}
@@ -276,7 +266,7 @@ func TestCreateConnector_ErrorPaths(t *testing.T) {
 			// Failed creates must not leave a connector behind (seal/stdin
 			// errors happen before the store write).
 			if tt.params.connectorID == "" {
-				if _, err := st.Connectors().Get(ctx, testWS, string(tt.params.source)); !errors.Is(err, domain.ErrConnectorNotFound) {
+				if _, err := st.Connectors().GetConnectorRecord(ctx, testWS, string(tt.params.source)); !errors.Is(err, connectorsmodule.ErrNotFound) {
 					t.Fatalf("Get after failed create = %v, want ErrConnectorNotFound", err)
 				}
 			}
@@ -291,12 +281,12 @@ func TestCreateParamsValidate(t *testing.T) {
 		params  createParams
 		wantErr string // empty means valid
 	}{
-		{name: "valid", params: createParams{source: domain.ConnectorSourceGitHub}},
+		{name: "valid", params: createParams{source: connectorsmodule.ConnectorSourceGitHub}},
 		{name: "missing source", params: createParams{}, wantErr: "--source is required"},
 		{name: "unknown source", params: createParams{source: "jira"}, wantErr: `--source "jira" is invalid`},
 		{
 			name:    "endpoint without slash",
-			params:  createParams{source: domain.ConnectorSourceGitHub, endpoint: "hooks"},
+			params:  createParams{source: connectorsmodule.ConnectorSourceGitHub, endpoint: "hooks"},
 			wantErr: "--endpoint-path must start with /",
 		},
 	}
@@ -359,10 +349,10 @@ func TestRotateConnector_SetsPreviousSecretWindow(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			st := memstore.New()
-			if _, err := st.Connectors().Create(ctx, store.ConnectorCreate{
+			if _, err := st.Connectors().CreateConnectorRecord(ctx, connectorsmodule.CreateConnectorMutation{
 				WorkspaceKey:  testWS,
 				ConnectorID:   "gh-main",
-				SourceKind:    domain.ConnectorSourceGitHub,
+				SourceKind:    connectorsmodule.ConnectorSourceGitHub,
 				InboundSecret: testInboundSecret,
 			}); err != nil {
 				t.Fatalf("seed connector: %v", err)
@@ -385,7 +375,7 @@ func TestRotateConnector_SetsPreviousSecretWindow(t *testing.T) {
 			}
 			assertNoSecrets(t, out.String(), testInboundSecret, testRotatedSecret, "new-OUTBOUND-token-2")
 
-			secrets, err := st.Connectors().ResolveInboundSecret(ctx, testWS, "gh-main")
+			secrets, err := st.Connectors().ResolveInboundSecretsRecord(ctx, testWS, "gh-main")
 			if err != nil {
 				t.Fatalf("ResolveInboundSecret: %v", err)
 			}
@@ -398,7 +388,7 @@ func TestRotateConnector_SetsPreviousSecretWindow(t *testing.T) {
 			}
 
 			if tt.credStdin {
-				sealed, err := st.Connectors().ResolveOutboundCredentialSealed(ctx, testWS, "gh-main")
+				sealed, err := st.Connectors().ResolveOutboundCredentialSealedRecord(ctx, testWS, "gh-main")
 				if err != nil {
 					t.Fatalf("ResolveOutboundCredentialSealed: %v", err)
 				}
@@ -421,10 +411,10 @@ func TestRotateConnector_SetsPreviousSecretWindow(t *testing.T) {
 func TestRotateConnector_JSONOutputRedacted(t *testing.T) {
 	ctx := context.Background()
 	st := memstore.New()
-	if _, err := st.Connectors().Create(ctx, store.ConnectorCreate{
+	if _, err := st.Connectors().CreateConnectorRecord(ctx, connectorsmodule.CreateConnectorMutation{
 		WorkspaceKey:  testWS,
 		ConnectorID:   "gh-main",
-		SourceKind:    domain.ConnectorSourceGitHub,
+		SourceKind:    connectorsmodule.ConnectorSourceGitHub,
 		InboundSecret: testInboundSecret,
 	}); err != nil {
 		t.Fatalf("seed connector: %v", err)
@@ -446,7 +436,7 @@ func TestRotateConnector_NotFound(t *testing.T) {
 	st := memstore.New()
 	err := rotateConnector(context.Background(), testConnectorManagement(t, st), testWS, rotateParams{connectorID: "nope"},
 		strings.NewReader(testRotatedSecret+"\n"), &out)
-	if !errors.Is(err, domain.ErrConnectorNotFound) {
+	if !errors.Is(err, connectorsmodule.ErrNotFound) {
 		t.Fatalf("rotateConnector = %v, want ErrConnectorNotFound", err)
 	}
 }
@@ -481,7 +471,7 @@ func TestGrantRoundTrip(t *testing.T) {
 	}
 
 	// Duplicate create fails with the store sentinel.
-	if err := createGrant(ctx, management, in, false, &out); !errors.Is(err, domain.ErrAlreadyExists) {
+	if err := createGrant(ctx, management, in, false, &out); !errors.Is(err, connectorsmodule.ErrAlreadyExists) {
 		t.Fatalf("duplicate createGrant = %v, want ErrAlreadyExists", err)
 	}
 
@@ -503,7 +493,7 @@ func TestGrantRoundTrip(t *testing.T) {
 	}
 
 	// Double revoke surfaces the ErrGrantRevoked sentinel.
-	if err := revokeGrant(ctx, management, testWS, "grant-binding-pr-github-merge", &out); !errors.Is(err, domain.ErrGrantRevoked) {
+	if err := revokeGrant(ctx, management, testWS, "grant-binding-pr-github-merge", &out); !errors.Is(err, connectorsmodule.ErrGrantRevoked) {
 		t.Fatalf("second revokeGrant = %v, want ErrGrantRevoked", err)
 	}
 }
@@ -586,7 +576,7 @@ func TestNewGrantCreateInput_Validation(t *testing.T) {
 			if in.GrantID != tt.wantID {
 				t.Fatalf("GrantID = %q, want %q", in.GrantID, tt.wantID)
 			}
-			if errors.Is(domain.ValidateConnectorAction(in.Action), domain.ErrInvalid) {
+			if errors.Is(connectorsmodule.ValidateConnectorAction(in.Action), connectorsmodule.ErrInvalid) {
 				t.Fatalf("action %q invalid after parse", in.Action)
 			}
 		})
@@ -619,28 +609,28 @@ func TestListGrants_SelectorValidation(t *testing.T) {
 func seedAuditJournal(t *testing.T, st store.Store) {
 	t.Helper()
 	now := time.Date(2026, 6, 11, 12, 0, 0, 0, time.UTC)
-	recs := []*domain.ConnectorCallRecord{
+	recs := []*connectorsmodule.ConnectorCallRecord{
 		{
 			RunID: "run-1", BindingID: "binding-pr", Action: "github.merge", Seq: 1,
-			Decision: domain.ConnectorCallGranted, Resource: "repo:octocat/hello", UpstreamStatus: 200,
+			Decision: connectorsmodule.ConnectorCallGranted, Resource: "repo:octocat/hello", UpstreamStatus: 200,
 			OccurredAt: now,
 		},
 		{
 			RunID: "run-1", BindingID: "binding-pr", Action: "github.comment", Seq: 2,
-			Decision: domain.ConnectorCallDenied, Resource: "repo:octocat/hello",
+			Decision: connectorsmodule.ConnectorCallDenied, Resource: "repo:octocat/hello",
 			SanitizedSummary: "no grant for github.comment", OccurredAt: now.Add(time.Second),
 		},
 		{
 			RunID: "run-2", BindingID: "binding-other", Action: "slack.chat.post_message", Seq: 1,
-			Decision: domain.ConnectorCallGranted, OccurredAt: now.Add(2 * time.Second),
+			Decision: connectorsmodule.ConnectorCallGranted, OccurredAt: now.Add(2 * time.Second),
 		},
 	}
 	for _, r := range recs {
 		r.WorkspaceKey = testWS
 		r.ConnectorID = "gh-main"
-		r.SourceKind = domain.ConnectorSourceGitHub
-		r.CallID = domain.ConnectorCallID(r.RunID, r.Action, r.Seq)
-		if err := st.ConnectorCalls().Append(context.Background(), r); err != nil {
+		r.SourceKind = connectorsmodule.ConnectorSourceGitHub
+		r.CallID = connectorsmodule.ConnectorCallID(r.RunID, r.Action, r.Seq)
+		if err := st.Connectors().AppendConnectorCallRecord(context.Background(), r); err != nil {
 			t.Fatalf("seed audit %s: %v", r.CallID, err)
 		}
 	}

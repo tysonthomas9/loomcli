@@ -450,12 +450,14 @@ func TestRepositoryAdmissionBlockedCloneCancelsBeforeTakeoverAndCannotPublish(
 	}
 	first := NewStoreBackedWorkspaceAdmissionOperations(
 		st,
+		managedAgentsForTest(st),
 		transport,
 		firstJournal,
 		transport,
 	)
 	second := NewStoreBackedWorkspaceAdmissionOperations(
 		st,
+		managedAgentsForTest(st),
 		transport,
 		secondJournal,
 		transport,
@@ -642,7 +644,7 @@ func TestRepositoryAdmissionLocalBatchFenceRetainsWorktreeWithoutPartialState(
 	t.Setenv("LOOM_CONFIG_DIR", loomDir)
 	st := memstore.New()
 	workspacePath := filepath.Join(loomDir, "workspaces", "local-batch")
-	if _, err := BuildStoreBackedCreateWorkspace(st)(
+	if _, err := BuildStoreBackedCreateWorkspace(st, managedAgentsForTest(st))(
 		t.Context(),
 		workspacecoord.WorkspaceCreateRequest{
 			Name: "local-batch", Type: "empty", Path: workspacePath,
@@ -680,6 +682,7 @@ func TestRepositoryAdmissionLocalBatchFenceRetainsWorktreeWithoutPartialState(
 	}
 	operations := NewStoreBackedWorkspaceAdmissionOperations(
 		st,
+		managedAgentsForTest(st),
 		transport,
 		journal,
 		transport,
@@ -758,6 +761,7 @@ func TestRepositoryAdmissionStopCancelsAndWaitsForBlockedClone(t *testing.T) {
 	}
 	operations := NewStoreBackedWorkspaceAdmissionOperations(
 		st,
+		managedAgentsForTest(st),
 		transport,
 		journal,
 		transport,
@@ -820,6 +824,7 @@ func TestRepositoryAdmissionConcurrentBeginCannotEscapeStop(t *testing.T) {
 		}
 		operations := NewStoreBackedWorkspaceAdmissionOperations(
 			st,
+			managedAgentsForTest(st),
 			transport,
 			journal,
 			transport,

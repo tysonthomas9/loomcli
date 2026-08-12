@@ -219,7 +219,9 @@ func IsRunTokenExpired(err error) bool {
 	return errors.Is(err, jwt.ErrTokenExpired)
 }
 
-// ephemeralRunTokenKey generates the per-process fallback signing key once.
+// ephemeralRunTokenKey generates the secure local-mode signing key once when
+// an operator-managed key is not configured. This selects key custody; it
+// does not enable an alternate authentication scheme.
 var ephemeralRunTokenKey = sync.OnceValues(func() ([]byte, error) {
 	key := make([]byte, runTokenKeyLen)
 	if _, err := rand.Read(key); err != nil {

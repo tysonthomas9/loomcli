@@ -54,6 +54,7 @@ func OperationRules() []authority.OperationRule {
 // behind their respective capabilities.
 type API interface {
 	ProvisioningCommands
+	ManagedRoleRepairCommands
 	IdentityQueries
 	IdentityCommands
 	RoleQueries
@@ -127,6 +128,13 @@ type ProvisioningCommands interface {
 	EnsureManagedAgent(ctx context.Context, auth authority.SystemAuthority, command EnsureAgentCommand) (*Agent, error)
 }
 
+// ManagedRoleRepairCommands contains the one monotonic startup repair owned by
+// Agents. The command uses the Role revision CAS; callers never receive a
+// persistence interface or a generic Role update authority.
+type ManagedRoleRepairCommands interface {
+	RepairManagedRolePromptFile(context.Context, authority.SystemAuthority, RepairManagedRolePromptFileCommand) (*Role, bool, error)
+}
+
 type IdentityQueries interface {
 	GetAgent(ctx context.Context, workspace, agentID string) (*Agent, error)
 	ListAgents(ctx context.Context, workspace string, filter AgentFilter) ([]*Agent, error)
@@ -190,6 +198,13 @@ type EnsureRoleCommand struct {
 	RequestID    string         `json:"request_id"`
 	WorkspaceKey string         `json:"workspace_key"`
 	Role         RoleDefinition `json:"role"`
+}
+
+type RepairManagedRolePromptFileCommand struct {
+	RequestID    string `json:"request_id"`
+	WorkspaceKey string `json:"workspace_key"`
+	RoleName     string `json:"role_name"`
+	PromptFile   string `json:"prompt_file"`
 }
 
 type CreateRoleCommand struct {

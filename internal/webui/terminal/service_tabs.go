@@ -108,6 +108,12 @@ func (s *terminalServiceImpl) PutTab(ctx context.Context, wsID string, meta *Tab
 	if err := ValidateSessionName(meta.SessionName); err != nil {
 		return apperrors.ErrValidation(err.Error())
 	}
+	if meta.Launch == nil || len(meta.Launch.Argv) == 0 {
+		return apperrors.ErrValidation("terminal launch envelope is required")
+	}
+	if meta.Kind == "" && !IsValidTerminalBackend(meta.Backend) {
+		return apperrors.ErrValidation("supported terminal backend is required")
+	}
 
 	// Generic PUT must not erase server-owned canonical Interaction identity,
 	// even when a restart has lost the process-local PTY. Such tabs must pass

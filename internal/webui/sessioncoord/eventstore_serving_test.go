@@ -1,31 +1,23 @@
 package sessioncoord
 
 import (
-	"os"
-	"path/filepath"
 	"testing"
 	"time"
 
 	hwtranscript "github.com/olesho/harness-wrapper/pkg/transcript"
 
 	"github.com/tysonthomas9/loomcli/internal/sessions"
-	"github.com/tysonthomas9/loomcli/internal/sessions/eventstore"
 )
 
 // seedEventStore creates a session store + writes a parent event and a subagent
 // event into the session's events.jsonl, returning the store + session id.
 func seedEventStore(t *testing.T) (*sessions.Store, string) {
 	t.Helper()
-	store, err := sessions.NewStore(t.TempDir())
+	store, err := sessions.NewStore(t.Context(), t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
 	const sid = "20260601-120000-claude-abcd"
-	sessionDir := filepath.Dir(store.NativeTranscriptPath(sid))
-	if err := os.MkdirAll(sessionDir, 0o755); err != nil { // production does this in eventStoreSink
-		t.Fatal(err)
-	}
-	es := eventstore.Open(sessionDir)
 	parent := hwtranscript.EventEnvelope{
 		RunID: "r", Harness: "claude", HarnessSessionID: "parent-native",
 		Event: hwtranscript.Event{Seq: 0, Timestamp: time.Unix(1, 0), Role: "assistant", Type: "text", Text: "parent says", Source: hwtranscript.SourceFile, NativeID: "msg:p1"},
@@ -34,10 +26,10 @@ func seedEventStore(t *testing.T) (*sessions.Store, string) {
 		RunID: "r", Harness: "claude", HarnessSessionID: "sub-1", ParentSessionID: "parent-native",
 		Event: hwtranscript.Event{Seq: 0, Timestamp: time.Unix(2, 0), Role: "assistant", Type: "text", Text: "subagent says", Source: hwtranscript.SourceFile, NativeID: "msg:s1"},
 	}
-	if err := es.AppendEnvelope(parent); err != nil {
+	if err := store.AppendEnvelope(sid, parent); err != nil {
 		t.Fatal(err)
 	}
-	if err := es.AppendEnvelope(sub); err != nil {
+	if err := store.AppendEnvelope(sid, sub); err != nil {
 		t.Fatal(err)
 	}
 	return store, sid
@@ -93,7 +85,7 @@ func TestEventStoreSubagentEvents(t *testing.T) {
 
 func TestEventStoreEmptyFallsBack(t *testing.T) {
 	t.Setenv("LOOM_SERVE_FROM_EVENTSTORE", "1")
-	store, err := sessions.NewStore(t.TempDir())
+	store, err := sessions.NewStore(t.Context(), t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

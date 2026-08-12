@@ -8,10 +8,18 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
-	"github.com/tysonthomas9/loomcli/internal/runtimepreflight"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
+
+func setWorkflowRuntimeProvider(t *testing.T, backend string) {
+	t.Helper()
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+	if err := bootstrap.SetRuntimeProvider("TEST", backend); err != nil {
+		t.Fatalf("set runtime provider: %v", err)
+	}
+}
 
 // When the epic-runner run resolves to the local task runner and the backend
 // CLI/auth is missing, the run must be rejected fail-closed (400) and no
@@ -22,13 +30,13 @@ func TestCreateWorkflowRunPreflightFailsClosedForLocalRunner(t *testing.T) {
 	installFakeFlueBuild(t)
 	t.Chdir(t.TempDir())
 
-	restore := runtimepreflight.SetHealthCheckerForTest(func(string) (runtimepreflight.HealthStatus, bool) {
-		return runtimepreflight.HealthStatus{Installed: false, APIKeySet: false, Message: "codex binary not found on PATH"}, true
+	module := newWorkflowTestModule(st)
+	module.backendHealth = backendHealthQueryFunc(func(string) (BackendHealth, bool) {
+		return BackendHealth{Installed: false, APIKeySet: false, Message: "codex binary not found on PATH"}, true
 	})
-	defer restore()
 
 	mux := http.NewServeMux()
-	newWorkflowTestModule(st).Register(mux)
+	module.Register(mux)
 
 	// Absent runner field => UI "Locally" default => local-task-runner.
 	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/TEST/workflows/"+BuiltinEpicRunnerWorkflowName, stringsReader(`{"epicId":"EPIC-1","requestedBy":"ui"}`))
@@ -58,11 +66,6 @@ func TestCreateWorkflowRunPreflightPassesWhenHealthy(t *testing.T) {
 	installFakeFlueBuild(t)
 	t.Chdir(t.TempDir())
 
-	restore := runtimepreflight.SetHealthCheckerForTest(func(string) (runtimepreflight.HealthStatus, bool) {
-		return runtimepreflight.HealthStatus{Healthy: true, Installed: true, APIKeySet: true, Message: "ready"}, true
-	})
-	defer restore()
-
 	mux := http.NewServeMux()
 	newWorkflowTestModule(st).Register(mux)
 
@@ -83,14 +86,14 @@ func TestCreateWorkflowRunPreflightSkipsExplicitNonLocalRunner(t *testing.T) {
 	t.Chdir(t.TempDir())
 
 	called := false
-	restore := runtimepreflight.SetHealthCheckerForTest(func(string) (runtimepreflight.HealthStatus, bool) {
+	module := newWorkflowTestModule(st)
+	module.backendHealth = backendHealthQueryFunc(func(string) (BackendHealth, bool) {
 		called = true
-		return runtimepreflight.HealthStatus{Installed: false}, true
+		return BackendHealth{Installed: false}, true
 	})
-	defer restore()
 
 	mux := http.NewServeMux()
-	newWorkflowTestModule(st).Register(mux)
+	module.Register(mux)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/TEST/workflows/"+BuiltinEpicRunnerWorkflowName, stringsReader(`{"epicId":"EPIC-1","runner":"daytona-task-runner"}`))
 	rec := httptest.NewRecorder()
@@ -101,6 +104,102 @@ func TestCreateWorkflowRunPreflightSkipsExplicitNonLocalRunner(t *testing.T) {
 	}
 	if called {
 		t.Fatalf("backend health check ran for an explicit non-local runner")
+	}
+}
+
+func TestCreateWorkflowRunPreflightUsesConfiguredBackend(t *testing.T) {
+	st := memstore.New()
+	installFakeFlueBuild(t)
+	t.Chdir(t.TempDir())
+	setWorkflowRuntimeProvider(t, "gemini")
+
+	checked := ""
+	module := newWorkflowTestModule(st)
+	module.backendHealth = backendHealthQueryFunc(func(name string) (BackendHealth, bool) {
+		checked = name
+		return BackendHealth{Available: true, Installed: true, APIKeySet: true}, true
+	})
+
+	mux := http.NewServeMux()
+	module.Register(mux)
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/TEST/workflows/"+BuiltinEpicRunnerWorkflowName, stringsReader(`{"epicId":"EPIC-1"}`))
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status = %d body=%s, want 202", rec.Code, rec.Body.String())
+	}
+	if checked != "gemini" {
+		t.Fatalf("health-checked backend = %q, want configured gemini", checked)
+	}
+}
+
+func TestCreateWorkflowRunPreflightRejectsMissingAuth(t *testing.T) {
+	st := memstore.New()
+	installFakeFlueBuild(t)
+	t.Chdir(t.TempDir())
+	setWorkflowRuntimeProvider(t, "codex")
+
+	module := newWorkflowTestModule(st)
+	module.backendHealth = backendHealthQueryFunc(func(string) (BackendHealth, bool) {
+		return BackendHealth{Installed: true, APIKeySet: false, Message: "OPENAI_API_KEY not set"}, true
+	})
+
+	mux := http.NewServeMux()
+	module.Register(mux)
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/TEST/workflows/"+BuiltinEpicRunnerWorkflowName, stringsReader(`{"epicId":"EPIC-1"}`))
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "local_backend_auth_missing") {
+		t.Fatalf("status = %d body=%s, want missing-auth rejection", rec.Code, rec.Body.String())
+	}
+}
+
+func TestCreateWorkflowRunPreflightRejectsUnknownBackend(t *testing.T) {
+	st := memstore.New()
+	installFakeFlueBuild(t)
+	t.Chdir(t.TempDir())
+	setWorkflowRuntimeProvider(t, "made-up")
+
+	module := newWorkflowTestModule(st)
+	module.backendHealth = backendHealthQueryFunc(func(string) (BackendHealth, bool) {
+		return BackendHealth{}, false
+	})
+
+	mux := http.NewServeMux()
+	module.Register(mux)
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/TEST/workflows/"+BuiltinEpicRunnerWorkflowName, stringsReader(`{"epicId":"EPIC-1"}`))
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "made-up") {
+		t.Fatalf("status = %d body=%s, want unknown-backend rejection", rec.Code, rec.Body.String())
+	}
+}
+
+func TestCreateWorkflowRunPreflightRejectsMissingHealthPort(t *testing.T) {
+	st := memstore.New()
+	installFakeFlueBuild(t)
+	t.Chdir(t.TempDir())
+
+	module := newWorkflowTestModule(st)
+	module.backendHealth = nil
+	mux := http.NewServeMux()
+	module.Register(mux)
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/TEST/workflows/"+BuiltinEpicRunnerWorkflowName, stringsReader(`{"epicId":"EPIC-1"}`))
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "backend health is unavailable") {
+		t.Fatalf("status = %d body=%s, want missing-port fail-closed rejection", rec.Code, rec.Body.String())
+	}
+	runs, err := st.DriverRuns().List(context.Background(), "TEST", store.DriverRunFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(runs) != 0 {
+		t.Fatalf("created %d runs without a health port, want 0", len(runs))
 	}
 }
 

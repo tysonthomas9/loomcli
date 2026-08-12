@@ -257,7 +257,7 @@ func TestHasAvailableImplementationTasks_Success(t *testing.T) {
 	})
 	mock.Install()
 
-	available, err := HasAvailableImplementationTasks("", "")
+	available, err := HasAvailableImplementationTasks(t.Context(), "", "")
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
@@ -275,7 +275,7 @@ func TestHasAvailableImplementationTasks_SkipsTasksWithoutDesign(t *testing.T) {
 	})
 	mock.Install()
 
-	available, err := HasAvailableImplementationTasks("", "")
+	available, err := HasAvailableImplementationTasks(t.Context(), "", "")
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
@@ -293,7 +293,7 @@ func TestHasAvailableImplementationTasks_SkipsNeedsRevision(t *testing.T) {
 	})
 	mock.Install()
 
-	available, err := HasAvailableImplementationTasks("", "")
+	available, err := HasAvailableImplementationTasks(t.Context(), "", "")
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
@@ -309,7 +309,7 @@ func TestHasAvailableImplementationTasks_ReadyError(t *testing.T) {
 	})
 	mock.Install()
 
-	_, err := HasAvailableImplementationTasks("", "")
+	_, err := HasAvailableImplementationTasks(t.Context(), "", "")
 	if err == nil {
 		t.Error("expected error when issue-store command fails")
 	}
@@ -327,7 +327,7 @@ func TestGetAvailableImplementationTasks_Success(t *testing.T) {
 	})
 	mock.Install()
 
-	tasks, err := GetAvailableImplementationTasks("", "")
+	tasks, err := GetAvailableImplementationTasks(t.Context(), "", "")
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
@@ -347,7 +347,7 @@ func TestGetAvailableImplementationTasks_ReturnsEmpty(t *testing.T) {
 	})
 	mock.Install()
 
-	tasks, err := GetAvailableImplementationTasks("", "")
+	tasks, err := GetAvailableImplementationTasks(t.Context(), "", "")
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
@@ -364,7 +364,7 @@ func TestGetAvailableImplementationTasks_SkipsNeedsRevision(t *testing.T) {
 	})
 	mock.Install()
 
-	tasks, err := GetAvailableImplementationTasks("", "")
+	tasks, err := GetAvailableImplementationTasks(t.Context(), "", "")
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
@@ -380,7 +380,7 @@ func TestGetAvailableImplementationTasks_ReadyError(t *testing.T) {
 	})
 	mock.Install()
 
-	_, err := GetAvailableImplementationTasks("", "")
+	_, err := GetAvailableImplementationTasks(t.Context(), "", "")
 	if err == nil {
 		t.Error("expected error when issue-store command fails")
 	}
