@@ -897,7 +897,7 @@ func TestCollectTaskStatus(t *testing.T) {
 		inProgressErr           error
 		reviewIssues            []backend.IssueData
 		reviewErr               error
-		backlogIssues           []backend.IssueData
+		backlogIssues           []workitems.IssueSummary
 		backlogErr              error
 		closedIssues            []backend.IssueData
 		closedErr               error
@@ -949,7 +949,7 @@ func TestCollectTaskStatus(t *testing.T) {
 		},
 		{
 			name: "blocked tasks from blocked list",
-			backlogIssues: []backend.IssueData{
+			backlogIssues: []workitems.IssueSummary{
 				{ID: "T-1", Title: "Blocked task", Status: "blocked"},
 				{ID: "T-2", Title: "Another blocked", Status: "blocked"},
 			},
@@ -1615,7 +1615,7 @@ func TestBacklogAccumulatesReadyWithBlockersAndBlocked(t *testing.T) {
 		{ID: "T-BLOCKED-READY", Title: "Blocked in ready", Status: "open", Design: "plan"},
 		{ID: "T-NORMAL", Title: "Normal task", Status: "open", Design: "plan"},
 	}
-	mock.BlockedResult = []backend.IssueData{
+	mock.BlockedResult = []workitems.IssueSummary{
 		{ID: "T-LOOM-BLOCKED", Title: "Blocked by dependency", Status: "open"},
 	}
 	mock.StatsResult = &workitems.Stats{TotalIssues: 20, OpenIssues: 10, ClosedIssues: 5}
@@ -1765,7 +1765,7 @@ func TestMonitorStatsPreserveBackendTotals(t *testing.T) {
 		}
 		return nil, nil
 	}
-	mock.BlockedResult = []backend.IssueData{
+	mock.BlockedResult = []workitems.IssueSummary{
 		{ID: "T-6", Title: "Blocked task", Status: "open"},
 	}
 	mock.StatsResult = &workitems.Stats{TotalIssues: 50, OpenIssues: 8, ClosedIssues: 40}

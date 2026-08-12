@@ -261,6 +261,7 @@ type fleetDBIssueBackend struct{}
 
 var _ backend.IssueBackend = (*fleetDBIssueBackend)(nil)
 var _ backend.ClaimReleaser = (*fleetDBIssueBackend)(nil)
+var _ workitems.BlockedQueries = (*fleetDBIssueBackend)(nil)
 var _ workitems.StatsQueries = (*fleetDBIssueBackend)(nil)
 
 func newFleetDBIssueBackend() backend.IssueBackend {
@@ -334,11 +335,15 @@ func (b *fleetDBIssueBackend) Ready(ctx context.Context, opts backend.ReadyOpts)
 	return out, err
 }
 
-func (b *fleetDBIssueBackend) Blocked(ctx context.Context, opts backend.BlockedOpts) ([]backend.IssueData, error) {
-	var out []backend.IssueData
+func (b *fleetDBIssueBackend) Blocked(ctx context.Context, query workitems.AvailabilityQuery) ([]workitems.IssueSummary, error) {
+	var out []workitems.IssueSummary
 	err := b.withBackend(ctx, "Blocked", func(ib backend.IssueBackend) error {
+		blocked, ok := ib.(workitems.BlockedQueries)
+		if !ok {
+			return workitems.ErrUnavailable
+		}
 		var err error
-		out, err = ib.Blocked(ctx, opts)
+		out, err = blocked.Blocked(ctx, query)
 		return err
 	})
 	return out, err
@@ -523,6 +528,7 @@ type unavailableIssueBackend struct {
 }
 
 var _ backend.IssueBackend = (*unavailableIssueBackend)(nil)
+var _ workitems.BlockedQueries = (*unavailableIssueBackend)(nil)
 var _ workitems.StatsQueries = (*unavailableIssueBackend)(nil)
 
 func newUnavailableIssueBackend(name string, err error) backend.IssueBackend {
@@ -542,7 +548,7 @@ func (b *unavailableIssueBackend) List(context.Context, backend.ListOpts) ([]bac
 func (b *unavailableIssueBackend) Ready(context.Context, backend.ReadyOpts) ([]backend.IssueData, error) {
 	return nil, b.unavailable("Ready")
 }
-func (b *unavailableIssueBackend) Blocked(context.Context, backend.BlockedOpts) ([]backend.IssueData, error) {
+func (b *unavailableIssueBackend) Blocked(context.Context, workitems.AvailabilityQuery) ([]workitems.IssueSummary, error) {
 	return nil, b.unavailable("Blocked")
 }
 func (b *unavailableIssueBackend) Stats(context.Context) (*workitems.Stats, error) {

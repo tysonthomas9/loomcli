@@ -120,6 +120,17 @@ func TestWorkItemsStatsFailsClosedWithoutOwnerPort(t *testing.T) {
 	}
 }
 
+func TestWorkItemsBlockedFailsClosedWithoutOwnerPort(t *testing.T) {
+	api, err := NewWorkItems(func(context.Context) backend.IssueBackend { return &claimOnlyBackend{} })
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = api.Blocked(context.Background(), workitems.AvailabilityQuery{})
+	if !errors.Is(err, workitems.ErrUnavailable) {
+		t.Fatalf("blocked error = %v, want unavailable", err)
+	}
+}
+
 func TestWorkItemsSearchUsesOwnerPort(t *testing.T) {
 	api, err := NewWorkItems(func(context.Context) backend.IssueBackend { return &searchOnlyBackend{} })
 	if err != nil {

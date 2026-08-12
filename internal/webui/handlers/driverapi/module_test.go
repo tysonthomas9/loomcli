@@ -38,7 +38,7 @@ type fakeIssueBackend struct {
 	backend.IssueBackend
 	ready                 []backend.IssueData
 	readyOpts             []backend.ReadyOpts
-	blocked               []backend.IssueData
+	blocked               []workitems.IssueSummary
 	children              []backend.IssueData
 	epic                  *backend.IssueDetailData
 	actor                 string
@@ -200,11 +200,11 @@ func (items testWorkItems) Ready(ctx context.Context, query workitems.Availabili
 }
 
 func (items testWorkItems) Blocked(ctx context.Context, query workitems.AvailabilityQuery) ([]workitems.IssueSummary, error) {
-	values, err := items.backend.Blocked(ctx, backend.BlockedOpts{ParentID: query.ParentID, Limit: query.Limit})
+	values, err := items.backend.Blocked(ctx, query)
 	if err != nil {
 		return nil, testWorkItemError(err)
 	}
-	return testWorkItemSummaries(values), nil
+	return values, nil
 }
 
 func (items testWorkItems) Patch(context.Context, workitems.PatchCommand) (*workitems.IssueDetail, error) {
@@ -314,7 +314,7 @@ func (f *fakeIssueBackend) ReleaseIssueAsActor(_ context.Context, id, actor stri
 	return nil
 }
 
-func (f *fakeIssueBackend) Blocked(_ context.Context, _ backend.BlockedOpts) ([]backend.IssueData, error) {
+func (f *fakeIssueBackend) Blocked(_ context.Context, _ workitems.AvailabilityQuery) ([]workitems.IssueSummary, error) {
 	return f.blocked, nil
 }
 

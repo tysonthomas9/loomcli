@@ -5,7 +5,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/tysonthomas9/loomcli/internal/backend"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 )
 
 var (
@@ -24,16 +24,20 @@ var blockedCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		opts := backend.BlockedOpts{
-			Limit:    blockedLimit,
-			Type:     blockedType,
-			ParentID: blockedParent,
+		query := workitems.AvailabilityQuery{
+			Limit:     blockedLimit,
+			IssueType: blockedType,
+			ParentID:  blockedParent,
 		}
-		items, err := ib.Blocked(ctx, opts)
+		blocked, ok := ib.(workitems.BlockedQueries)
+		if !ok {
+			return workitems.ErrUnavailable
+		}
+		items, err := blocked.Blocked(ctx, query)
 		if err != nil {
 			return err
 		}
-		return printIssueList(os.Stdout, items, outputFormat)
+		return printWorkItemSummaries(os.Stdout, items, outputFormat)
 	},
 }
 

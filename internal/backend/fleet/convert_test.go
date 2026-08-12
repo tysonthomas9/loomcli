@@ -148,9 +148,8 @@ func TestReadyAndBlockedIssueProjections(t *testing.T) {
 	if len(ready) != 1 || ready[0].Parent != parent {
 		t.Fatalf("ready projection = %#v", ready)
 	}
-	blocked := blockedIssuesToData([]*blockedIssueWire{
-		{fleetIssueWire: fleetIssueWire{ID: "TASK-2", Status: string(workitems.StatusBlocked)}, BlockedBy: []string{"TASK-1"}, BlockedByCount: 1},
-		nil,
+	blocked := blockedIssueResponsesToSummaries([]blockedIssueResponseWire{
+		{Issue: fleetIssueWire{ID: "TASK-2", Status: string(workitems.StatusBlocked)}, Blockers: []blockedBlockerWire{{ID: "TASK-1"}}},
 	})
 	if len(blocked) != 1 || blocked[0].BlockedByCount != 1 || blocked[0].BlockedBy[0] != "TASK-1" {
 		t.Fatalf("blocked projection = %#v", blocked)

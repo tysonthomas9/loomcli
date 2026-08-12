@@ -145,15 +145,15 @@ func (s *workItemsBackendStore) Blocked(ctx context.Context, query workitems.Ava
 	}
 	ctx, cancel := context.WithTimeout(ctx, workItemOperationTimeout)
 	defer cancel()
-	values, err := be.Blocked(ctx, backend.BlockedOpts{
-		ParentID: query.ParentID, Assignee: query.Assignee, Priority: query.Priority,
-		Type: query.IssueType, Labels: query.Labels, SourceRepos: query.SourceRepos,
-		Limit: query.Limit,
-	})
+	blocked, ok := be.(workitems.BlockedQueries)
+	if !ok {
+		return nil, workitems.ErrUnavailable
+	}
+	values, err := blocked.Blocked(ctx, query)
 	if err != nil {
 		return nil, translateWorkItemsBackendError(err)
 	}
-	return workItemSummaries(values), nil
+	return values, nil
 }
 
 func (s *workItemsBackendStore) Ready(ctx context.Context, query workitems.AvailabilityQuery) ([]workitems.IssueSummary, error) {

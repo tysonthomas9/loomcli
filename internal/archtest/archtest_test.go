@@ -1299,7 +1299,7 @@ func TestUnusedIssueBackendCompatibilityOperationsCannotReturn(t *testing.T) {
 	forbiddenNames := map[string]struct{}{
 		"BatchOp": {}, "BatchResult": {}, "Batch": {}, "GetChildren": {},
 		"DeferIssue": {}, "UndeferIssue": {}, "AddLabel": {}, "RemoveLabel": {},
-		"CountOpts": {}, "Count": {}, "SearchIssues": {}, "StatsData": {},
+		"CountOpts": {}, "Count": {}, "SearchIssues": {}, "StatsData": {}, "BlockedOpts": {},
 	}
 	for _, relative := range []string{
 		"internal/backend",

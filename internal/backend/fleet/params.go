@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 )
 
 // --- Unsupported filter validation ---
@@ -254,23 +255,25 @@ func readyServerOpts(opts backend.ReadyOpts) backend.ReadyOpts {
 	return server
 }
 
-func blockedOptsToQuery(opts backend.BlockedOpts) string {
+func blockedQueryToQuery(opts workitems.AvailabilityQuery) string {
 	q := url.Values{}
 	setNonEmpty(q, "parent_id", opts.ParentID)
 	setNonEmpty(q, "assignee", opts.Assignee)
 	setOptInt(q, "priority", opts.Priority)
-	setNonEmpty(q, "type", opts.Type)
+	setNonEmpty(q, "type", opts.IssueType)
 	if opts.Limit > 0 {
 		q.Set("limit", strconv.Itoa(opts.Limit))
 	}
 	return q.Encode()
 }
 
-func blockedServerOpts(opts backend.BlockedOpts) backend.BlockedOpts {
+func blockedServerQuery(opts workitems.AvailabilityQuery) workitems.AvailabilityQuery {
 	server := opts
+	server.Unassigned = false
 	server.Labels = nil
+	server.LabelsAny = nil
 	server.SourceRepos = nil
-	if len(opts.Labels) > 0 || len(opts.SourceRepos) > 0 {
+	if opts.Unassigned || len(opts.Labels) > 0 || len(opts.LabelsAny) > 0 || len(opts.SourceRepos) > 0 {
 		server.Limit = 0
 	}
 	return server

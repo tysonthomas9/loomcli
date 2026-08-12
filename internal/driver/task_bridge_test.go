@@ -21,7 +21,6 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
-	runtimesettings "github.com/tysonthomas9/loomcli/internal/localsettings"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -310,21 +309,17 @@ func TestHostBridgeTaskExecutorRequiresTaskRunAPIURL(t *testing.T) {
 }
 
 func TestLocalTaskRunnerSettingsNeverExportGitHubCredential(t *testing.T) {
-	settingsDir := t.TempDir()
-	credential, err := runtimesettings.SealRuntimeCredential(settingsDir, runtimesettings.RuntimeCredentialProviderGitHub, "settings-token", time.Now())
-	if err != nil {
-		t.Fatalf("seal github credential: %v", err)
-	}
-	settings := runtimesettings.Default()
-	settings.LocalTaskRunner.OpenCodeModel = "opencode/model"
-	settings.RuntimeCredentials.GitHub = credential
-	if err := runtimesettings.Save(settingsDir, settings); err != nil {
-		t.Fatalf("save local settings: %v", err)
-	}
-
 	req := hostBridgeTaskExecRequest()
 	req.RunnerEntrypoint = LocalTaskRunnerEntrypoint
-	executor := HostBridgeTaskExecutor{WorktreePath: "/wt", LocalSettingsDir: settingsDir}
+	executor := HostBridgeTaskExecutor{
+		WorktreePath: "/wt",
+		LocalTaskRunnerEnv: func(existing []string) []string {
+			if envHasAny(existing, "LOOM_OPENCODE_MODEL") {
+				return nil
+			}
+			return []string{"LOOM_OPENCODE_MODEL=opencode/model"}
+		},
+	}
 
 	env := executor.taskRunnerEnv(req, "{}", []string{"PATH=/bin", "GITHUB_TOKEN=host-token"})
 	if envHasAny(env, "GITHUB_TOKEN", "GH_TOKEN") {

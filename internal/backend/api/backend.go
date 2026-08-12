@@ -43,6 +43,7 @@ type APIBackend struct {
 
 // Compile-time interface check.
 var _ backend.IssueBackend = (*APIBackend)(nil)
+var _ workitems.BlockedQueries = (*APIBackend)(nil)
 var _ workitems.SearchQueries = (*APIBackend)(nil)
 var _ workitems.StatsQueries = (*APIBackend)(nil)
 
@@ -230,9 +231,12 @@ func (b *APIBackend) Ready(ctx context.Context, opts backend.ReadyOpts) ([]backe
 	return unmarshalIssueList(resp, "Ready")
 }
 
-func (b *APIBackend) Blocked(ctx context.Context, opts backend.BlockedOpts) ([]backend.IssueData, error) {
+func (b *APIBackend) Blocked(ctx context.Context, query workitems.AvailabilityQuery) ([]workitems.IssueSummary, error) {
+	if err := checkBlockedQuerySupported(query); err != nil {
+		return nil, err
+	}
 	path := "/blocked"
-	if q := blockedOptsToQuery(opts); q != "" {
+	if q := blockedQueryToQuery(query); q != "" {
 		path += "?" + q
 	}
 	resp, err := b.exec(ctx, "Blocked", http.MethodGet, path, nil)
@@ -240,15 +244,15 @@ func (b *APIBackend) Blocked(ctx context.Context, opts backend.BlockedOpts) ([]b
 		return nil, err
 	}
 	if !hasData(resp) {
-		return []backend.IssueData{}, nil
+		return []workitems.IssueSummary{}, nil
 	}
 	var issues []gen.BlockedIssue
 	if err := json.Unmarshal(resp.Data, &issues); err != nil {
 		return nil, backend.ErrInternal("Blocked", "unmarshal response", err)
 	}
-	result := make([]backend.IssueData, 0, len(issues))
+	result := make([]workitems.IssueSummary, 0, len(issues))
 	for _, i := range issues {
-		result = append(result, blockedIssueToData(i))
+		result = append(result, blockedIssueToSummary(i))
 	}
 	return result, nil
 }

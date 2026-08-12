@@ -39,6 +39,7 @@ type tracedIssueBackend struct {
 }
 
 var _ workitems.StatsQueries = (*tracedIssueBackend)(nil)
+var _ workitems.BlockedQueries = (*tracedIssueBackend)(nil)
 
 // wrapIssueBackendWithTracing returns a tracing-decorated IssueBackend.
 // nil-safe: passing nil returns nil so callers can wrap unconditionally.
@@ -136,9 +137,14 @@ func (t *tracedIssueBackend) Ready(ctx context.Context, opts backend.ReadyOpts) 
 	return out, err
 }
 
-func (t *tracedIssueBackend) Blocked(ctx context.Context, opts backend.BlockedOpts) ([]backend.IssueData, error) {
-	ctx, span := t.startSpan(ctx, "Blocked")
-	out, err := t.inner.Blocked(ctx, opts)
+func (t *tracedIssueBackend) Blocked(ctx context.Context, query workitems.AvailabilityQuery) ([]workitems.IssueSummary, error) {
+	ctx, span := t.startServiceSpan(ctx, "WorkItems", "Blocked")
+	blocked, ok := t.inner.(workitems.BlockedQueries)
+	if !ok {
+		endSpan(span, workitems.ErrUnavailable)
+		return nil, workitems.ErrUnavailable
+	}
+	out, err := blocked.Blocked(ctx, query)
 	if err == nil {
 		span.SetAttributes(attribute.Int("result.count", len(out)))
 	}

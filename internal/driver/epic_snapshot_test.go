@@ -10,13 +10,14 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/testdata/clitest"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
 func TestLoadEpicSnapshotCountsOnlyOpenChildren(t *testing.T) {
 	ib := clitest.NewMockIssueBackend()
 	ib.ReadyResult = []backend.IssueData{{ID: "TASK-1", Title: "Ready", Status: "open", Parent: "EPIC-1"}}
-	ib.BlockedResult = []backend.IssueData{{ID: "TASK-2", Title: "Blocked", Status: "blocked", Parent: "EPIC-1", BlockedBy: []string{"TASK-0"}, BlockedByCount: 1}}
+	ib.BlockedResult = []workitems.IssueSummary{{ID: "TASK-2", Title: "Blocked", Status: "blocked", Parent: "EPIC-1", BlockedBy: []string{"TASK-0"}, BlockedByCount: 1}}
 	ib.ListResult = []backend.IssueData{
 		{ID: "TASK-1", Status: "open", Parent: "EPIC-1"},
 		{ID: "TASK-2", Status: "blocked", Parent: "EPIC-1"},

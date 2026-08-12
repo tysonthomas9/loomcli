@@ -9,6 +9,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/testdata/clitest"
 	stackstore "github.com/tysonthomas9/loomcli/internal/infra/sourcecontrolstackstore"
 	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 )
 
 // baseOf returns the planned BaseTaskID for a task, or "<absent>" if the task
@@ -129,7 +130,7 @@ func TestProjectEpicStack_BuildsForestAndIsIdempotent(t *testing.T) {
 		{ID: "T-X", Status: "closed", Parent: epicID}, // closed → excluded from the universe
 	}
 	ib.ReadyResult = []backend.IssueData{{ID: "T-A", Status: "open", Parent: epicID}}
-	ib.BlockedResult = []backend.IssueData{
+	ib.BlockedResult = []workitems.IssueSummary{
 		{ID: "T-B", Status: "blocked", Parent: epicID, BlockedBy: []string{"T-A"}, BlockedByCount: 1},
 		{ID: "T-C", Status: "blocked", Parent: epicID, BlockedBy: []string{"T-B"}, BlockedByCount: 1},
 	}

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 )
 
 // issueBackendSuiteConfig configures the IssueBackend conformance suite.
@@ -70,12 +71,18 @@ func runReadyAndBlockedAgreeOnUnblockedIssue(t *testing.T, ib backend.IssueBacke
 		t.Fatalf("Ready did not include unblocked issue %q; got ids %v", created.ID, issueIDs(ready))
 	}
 
-	blocked, err := ib.Blocked(ctx, backend.BlockedOpts{Limit: 100})
+	blockedQueries, ok := ib.(workitems.BlockedQueries)
+	if !ok {
+		t.Fatal("backend does not implement Work Items blocked queries")
+	}
+	blocked, err := blockedQueries.Blocked(ctx, workitems.AvailabilityQuery{Limit: 100})
 	if err != nil {
 		t.Fatalf("Blocked: %v", err)
 	}
-	if containsIssueID(blocked, created.ID) {
-		t.Fatalf("Blocked unexpectedly included unblocked issue %q", created.ID)
+	for _, issue := range blocked {
+		if issue.ID == created.ID {
+			t.Fatalf("Blocked unexpectedly included unblocked issue %q", created.ID)
+		}
 	}
 }
 

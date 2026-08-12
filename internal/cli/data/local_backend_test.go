@@ -11,6 +11,7 @@ import (
 	"github.com/spf13/pflag"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 )
 
 type localBackendCall struct {
@@ -47,9 +48,15 @@ func (b *localBackendStub) Ready(_ context.Context, opts backend.ReadyOpts) ([]b
 	return b.readyItems, nil
 }
 
-func (b *localBackendStub) Blocked(_ context.Context, opts backend.BlockedOpts) ([]backend.IssueData, error) {
-	b.record("Blocked", "", opts)
-	return b.readyItems, nil
+func (b *localBackendStub) Blocked(_ context.Context, query workitems.AvailabilityQuery) ([]workitems.IssueSummary, error) {
+	b.record("Blocked", "", query)
+	out := make([]workitems.IssueSummary, 0, len(b.readyItems))
+	for _, issue := range b.readyItems {
+		out = append(out, workitems.IssueSummary{
+			ID: issue.ID, Title: issue.Title, Status: issue.Status, Priority: issue.Priority, IssueType: issue.IssueType,
+		})
+	}
+	return out, nil
 }
 
 func (b *localBackendStub) Create(_ context.Context, params backend.CreateParams) (*backend.IssueData, error) {
@@ -257,8 +264,8 @@ func TestDataBlocked_NoServerUsesLocalBackend(t *testing.T) {
 		if len(stub.calls) != 1 || stub.calls[0].method != "Blocked" {
 			t.Fatalf("calls = %#v, want one Blocked call", stub.calls)
 		}
-		opts := stub.calls[0].args.(backend.BlockedOpts)
-		if opts.Limit != 7 || opts.Type != "bug" || opts.ParentID != "epic-2" {
+		opts := stub.calls[0].args.(workitems.AvailabilityQuery)
+		if opts.Limit != 7 || opts.IssueType != "bug" || opts.ParentID != "epic-2" {
 			t.Fatalf("Blocked opts = %#v", opts)
 		}
 	})

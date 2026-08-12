@@ -1794,17 +1794,16 @@ func TestBlocked_HappyPath(t *testing.T) {
 		if got, want := r.URL.Path, "/api/v1/test-ws/issues/blocked"; got != want {
 			t.Errorf("path = %q, want %q", got, want)
 		}
-		respondOK(w, []*testBlockedIssue{
+		respondOK(w, []blockedIssueResponseWire{
 			{
-				testIssue:      testIssue{ID: "b-1", Title: "Blocked", Status: workitems.StatusBlocked, CreatedAt: now, UpdatedAt: now},
-				BlockedBy:      []string{"dep-1"},
-				BlockedByCount: 1,
+				Issue:    fleetIssueWire{ID: "b-1", Title: "Blocked", Status: string(workitems.StatusBlocked), CreatedAt: now, UpdatedAt: now},
+				Blockers: []blockedBlockerWire{{ID: "dep-1"}},
 			},
 		})
 	})
 	defer ts.Close()
 
-	result, err := fb.Blocked(context.Background(), backend.BlockedOpts{Limit: 10})
+	result, err := fb.Blocked(context.Background(), workitems.AvailabilityQuery{Limit: 10})
 	if err != nil {
 		t.Fatalf("Blocked: %v", err)
 	}

@@ -252,9 +252,10 @@ func statisticsToStats(s gen.Statistics) workitems.Stats {
 	}
 }
 
-// blockedIssueToData converts gen.BlockedIssue to backend.IssueData.
-func blockedIssueToData(b gen.BlockedIssue) backend.IssueData {
-	d := backend.IssueData{
+// blockedIssueToSummary converts the generated blocked wire projection to the
+// Work Items owner projection.
+func blockedIssueToSummary(b gen.BlockedIssue) workitems.IssueSummary {
+	d := workitems.IssueSummary{
 		ID:             b.Id,
 		Title:          b.Title,
 		Priority:       b.Priority,
@@ -282,6 +283,7 @@ func blockedIssueToData(b gen.BlockedIssue) backend.IssueData {
 	}
 	if b.SourceRepo != nil {
 		d.SourceRepo = *b.SourceRepo
+		d.Repo = *b.SourceRepo
 	}
 	if b.Parent != nil {
 		d.Parent = *b.Parent
@@ -297,7 +299,7 @@ func blockedIssueToData(b gen.BlockedIssue) backend.IssueData {
 
 // --- Helpers ---
 
-func copyBlockedDesign(d *backend.IssueData, b gen.BlockedIssue) {
+func copyBlockedDesign(d *workitems.IssueSummary, b gen.BlockedIssue) {
 	if b.Design != nil {
 		d.Design = *b.Design
 	}

@@ -32,11 +32,6 @@ type IssueBackend interface {
 	// narrowing filters.
 	Ready(ctx context.Context, opts ReadyOpts) ([]IssueData, error)
 
-	// Blocked returns the canonical blocked view, including explicit blocked
-	// status, dependency-blocked work, and parent-blocked descendants when
-	// supported by the backend.
-	Blocked(ctx context.Context, opts BlockedOpts) ([]IssueData, error)
-
 	// --- Mutation operations ---
 
 	// Create creates a new issue and returns the slim projection of the

@@ -8,6 +8,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -87,9 +88,9 @@ func LoadEpicSnapshot(ctx context.Context, issueBackend backend.IssueBackend, op
 	if err != nil {
 		return nil, fmt.Errorf("ready query: %w", err)
 	}
-	blocked, err := issueBackend.Blocked(ctx, backend.BlockedOpts{ParentID: epicID, Limit: blockedLimit})
+	blocked, err := loadBlockedEpicTasks(ctx, issueBackend, epicID, blockedLimit)
 	if err != nil {
-		return nil, fmt.Errorf("blocked query: %w", err)
+		return nil, err
 	}
 	children, err := issueBackend.List(ctx, backend.ListOpts{ParentID: epicID, Limit: openLimit})
 	if err != nil {
@@ -108,9 +109,21 @@ func LoadEpicSnapshot(ctx context.Context, issueBackend backend.IssueBackend, op
 		BlockedCount:      len(blocked),
 		OpenChildrenCount: len(openChildren),
 		Ready:             epicTaskSummaries(ready),
-		Blocked:           epicTaskSummaries(blocked),
+		Blocked:           blockedTaskSummaries(blocked),
 		OpenChildren:      epicTaskSummaries(openChildren),
 	}, nil
+}
+
+func loadBlockedEpicTasks(ctx context.Context, issueBackend backend.IssueBackend, epicID string, limit int) ([]workitems.IssueSummary, error) {
+	queries, ok := issueBackend.(workitems.BlockedQueries)
+	if !ok {
+		return nil, fmt.Errorf("blocked query unavailable: %w", workitems.ErrUnavailable)
+	}
+	blocked, err := queries.Blocked(ctx, workitems.AvailabilityQuery{ParentID: epicID, Limit: limit})
+	if err != nil {
+		return nil, fmt.Errorf("blocked query: %w", err)
+	}
+	return blocked, nil
 }
 
 type taskRunListStore interface {
@@ -179,6 +192,19 @@ func epicTaskSummaries(issues []backend.IssueData) []EpicTaskSummary {
 			Parent:         issue.Parent,
 			BlockedByCount: issue.BlockedByCount,
 			BlockedBy:      append([]string(nil), issue.BlockedBy...),
+		})
+	}
+	return out
+}
+
+func blockedTaskSummaries(issues []workitems.IssueSummary) []EpicTaskSummary {
+	out := make([]EpicTaskSummary, 0, len(issues))
+	for _, issue := range issues {
+		out = append(out, EpicTaskSummary{
+			ID: issue.ID, Title: issue.Title, Status: issue.Status, Priority: issue.Priority,
+			IssueType: issue.IssueType, Assignee: issue.Assignee, Labels: append([]string(nil), issue.Labels...),
+			SourceRepo: issue.SourceRepo, Parent: issue.Parent,
+			BlockedByCount: issue.BlockedByCount, BlockedBy: append([]string(nil), issue.BlockedBy...),
 		})
 	}
 	return out

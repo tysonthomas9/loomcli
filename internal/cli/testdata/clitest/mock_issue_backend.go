@@ -31,9 +31,9 @@ type MockIssueBackend struct {
 	ReadyResult         []backend.IssueData
 	ReadyErr            error
 	ReadyFn             func(ctx context.Context, opts backend.ReadyOpts) ([]backend.IssueData, error)
-	BlockedResult       []backend.IssueData
+	BlockedResult       []workitems.IssueSummary
 	BlockedErr          error
-	BlockedFn           func(ctx context.Context, opts backend.BlockedOpts) ([]backend.IssueData, error)
+	BlockedFn           func(ctx context.Context, query workitems.AvailabilityQuery) ([]workitems.IssueSummary, error)
 	StatsResult         *workitems.Stats
 	StatsErr            error
 	StatsFn             func(ctx context.Context) (*workitems.Stats, error)
@@ -108,13 +108,13 @@ func (m *MockIssueBackend) Ready(ctx context.Context, opts backend.ReadyOpts) ([
 	}
 	return r, e
 }
-func (m *MockIssueBackend) Blocked(ctx context.Context, opts backend.BlockedOpts) ([]backend.IssueData, error) {
+func (m *MockIssueBackend) Blocked(ctx context.Context, query workitems.AvailabilityQuery) ([]workitems.IssueSummary, error) {
 	m.mu.Lock()
-	m.record("Blocked", opts)
+	m.record("Blocked", query)
 	fn, r, e := m.BlockedFn, m.BlockedResult, m.BlockedErr
 	m.mu.Unlock()
 	if fn != nil {
-		return fn(ctx, opts)
+		return fn(ctx, query)
 	}
 	return r, e
 }

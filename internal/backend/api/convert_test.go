@@ -492,9 +492,9 @@ func TestStatisticsToStats(t *testing.T) {
 	}
 }
 
-// --- blockedIssueToData ---
+// --- blockedIssueToSummary ---
 
-func TestBlockedIssueToData_AllNilPointers(t *testing.T) {
+func TestBlockedIssueToSummary_AllNilPointers(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
 	b := gen.BlockedIssue{
 		Id:        "b-1",
@@ -503,7 +503,7 @@ func TestBlockedIssueToData_AllNilPointers(t *testing.T) {
 		CreatedAt: now,
 		UpdatedAt: now,
 	}
-	d := blockedIssueToData(b)
+	d := blockedIssueToSummary(b)
 	if d.ID != "b-1" || d.Title != "Blocked" || d.Priority != 2 {
 		t.Errorf("basic: %+v", d)
 	}
@@ -518,7 +518,7 @@ func TestBlockedIssueToData_AllNilPointers(t *testing.T) {
 	}
 }
 
-func TestBlockedIssueToData_AllFieldsSet(t *testing.T) {
+func TestBlockedIssueToSummary_AllFieldsSet(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
 	status := gen.BlockedIssueStatus("open")
 	issueType := gen.BlockedIssueIssueType("task")
@@ -554,7 +554,7 @@ func TestBlockedIssueToData_AllFieldsSet(t *testing.T) {
 		DeferUntil:       &defer_,
 		BlockedBy:        []string{"b-1"},
 	}
-	d := blockedIssueToData(b)
+	d := blockedIssueToSummary(b)
 	if d.Status != "open" || d.IssueType != "task" {
 		t.Errorf("enums: %+v", d)
 	}
@@ -564,7 +564,7 @@ func TestBlockedIssueToData_AllFieldsSet(t *testing.T) {
 	if len(d.Labels) != 1 || d.Labels[0] != "x" {
 		t.Errorf("labels: %v", d.Labels)
 	}
-	if d.SourceRepo != "r" || d.Parent != "p" || d.Design != "d" {
+	if d.SourceRepo != "r" || d.Repo != "r" || d.Parent != "p" || d.Design != "d" {
 		t.Errorf("more ptrs")
 	}
 	if !d.HasDesign || d.DesignArtifactID != designArtifactID || d.DesignFormat != "html" {

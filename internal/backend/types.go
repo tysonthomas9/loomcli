@@ -249,17 +249,6 @@ type DeferredOpts struct {
 	Limit       int      `json:"limit,omitempty"`
 }
 
-// BlockedOpts configures the canonical Blocked query.
-type BlockedOpts struct {
-	ParentID    string   `json:"parent_id,omitempty"`
-	Assignee    string   `json:"assignee,omitempty"`
-	Priority    *int     `json:"priority,omitempty"`
-	Type        string   `json:"type,omitempty"`
-	Labels      []string `json:"labels,omitempty"`
-	SourceRepos []string `json:"source_repos,omitempty"`
-	Limit       int      `json:"limit,omitempty"`
-}
-
 // ---------------------------------------------------------------------------
 // Section 3: Param structs (mutation inputs)
 // ---------------------------------------------------------------------------

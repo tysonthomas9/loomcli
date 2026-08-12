@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 )
 
 func (b *FleetBackend) Deferred(ctx context.Context, opts backend.DeferredOpts) ([]backend.IssueData, error) {
@@ -46,16 +47,32 @@ func filterReadyIssues(issues []backend.IssueData, opts backend.ReadyOpts) []bac
 	})
 }
 
-func filterBlockedIssues(issues []backend.IssueData, opts backend.BlockedOpts) []backend.IssueData {
-	return filterIssueData(issues, issueDataFilter{
+func filterBlockedSummaries(issues []workitems.IssueSummary, opts workitems.AvailabilityQuery) []workitems.IssueSummary {
+	filter := issueDataFilter{
 		Assignee:    opts.Assignee,
+		Unassigned:  opts.Unassigned,
 		Priority:    opts.Priority,
-		Type:        opts.Type,
+		Type:        opts.IssueType,
 		ParentID:    opts.ParentID,
 		Labels:      opts.Labels,
+		LabelsAny:   opts.LabelsAny,
 		SourceRepos: opts.SourceRepos,
 		Limit:       opts.Limit,
-	})
+	}
+	if !filter.needsFilter() {
+		return issues
+	}
+	out := make([]workitems.IssueSummary, 0, len(issues))
+	for _, issue := range issues {
+		if !filter.matches(issue.Assignee, issue.Priority, issue.IssueType, issue.Parent, issue.Labels, issue.SourceRepo) {
+			continue
+		}
+		out = append(out, issue)
+		if filter.Limit > 0 && len(out) >= filter.Limit {
+			break
+		}
+	}
+	return out
 }
 
 func filterListIssues(issues []backend.IssueData, opts backend.ListOpts) []backend.IssueData {
@@ -71,6 +88,7 @@ func filterListIssues(issues []backend.IssueData, opts backend.ListOpts) []backe
 
 type issueDataFilter struct {
 	Assignee    string
+	Unassigned  bool
 	Priority    *int
 	Type        string
 	ParentID    string
@@ -98,30 +116,37 @@ func filterIssueData(issues []backend.IssueData, opts issueDataFilter) []backend
 }
 
 func (opts issueDataFilter) needsFilter() bool {
-	return opts.Assignee != "" || opts.Priority != nil || opts.Type != "" || opts.ParentID != "" ||
+	return opts.Assignee != "" || opts.Unassigned || opts.Priority != nil || opts.Type != "" || opts.ParentID != "" ||
 		len(opts.Labels) > 0 || len(opts.LabelsAny) > 0 || len(opts.SourceRepos) > 0 || opts.Limit > 0
 }
 
 func issueDataMatches(issue backend.IssueData, opts issueDataFilter) bool {
-	if opts.Assignee != "" && issue.Assignee != opts.Assignee {
+	return opts.matches(issue.Assignee, issue.Priority, issue.IssueType, issue.Parent, issue.Labels, issue.SourceRepo)
+}
+
+func (opts issueDataFilter) matches(assignee string, priority int, issueType, parent string, labels []string, sourceRepo string) bool {
+	if opts.Assignee != "" && assignee != opts.Assignee {
 		return false
 	}
-	if opts.Priority != nil && issue.Priority != *opts.Priority {
+	if opts.Unassigned && assignee != "" {
 		return false
 	}
-	if opts.Type != "" && issue.IssueType != opts.Type {
+	if opts.Priority != nil && priority != *opts.Priority {
 		return false
 	}
-	if opts.ParentID != "" && issue.Parent != opts.ParentID {
+	if opts.Type != "" && issueType != opts.Type {
 		return false
 	}
-	if len(opts.Labels) > 0 && !hasAllStrings(issue.Labels, opts.Labels) {
+	if opts.ParentID != "" && parent != opts.ParentID {
 		return false
 	}
-	if len(opts.LabelsAny) > 0 && !hasAnyOfStrings(issue.Labels, opts.LabelsAny) {
+	if len(opts.Labels) > 0 && !hasAllStrings(labels, opts.Labels) {
 		return false
 	}
-	if len(opts.SourceRepos) > 0 && !hasAnyString(opts.SourceRepos, issue.SourceRepo) {
+	if len(opts.LabelsAny) > 0 && !hasAnyOfStrings(labels, opts.LabelsAny) {
+		return false
+	}
+	if len(opts.SourceRepos) > 0 && !hasAnyString(opts.SourceRepos, sourceRepo) {
 		return false
 	}
 	return true

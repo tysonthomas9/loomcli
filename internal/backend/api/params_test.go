@@ -1,11 +1,13 @@
 package api
 
 import (
+	"errors"
 	"net/url"
 	"strings"
 	"testing"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 )
 
 func intPtr(v int) *int       { return &v }
@@ -183,24 +185,24 @@ func TestReadyOptsToQuery_AllFields(t *testing.T) {
 	}
 }
 
-// --- blockedOptsToQuery ---
+// --- blockedQueryToQuery ---
 
-func TestBlockedOptsToQuery_Empty(t *testing.T) {
-	if q := blockedOptsToQuery(backend.BlockedOpts{}); q != "" {
+func TestBlockedQueryToQuery_Empty(t *testing.T) {
+	if q := blockedQueryToQuery(workitems.AvailabilityQuery{}); q != "" {
 		t.Errorf("empty = %q", q)
 	}
 }
 
-func TestBlockedOptsToQuery_AllFields(t *testing.T) {
+func TestBlockedQueryToQuery_AllFields(t *testing.T) {
 	p := 1
-	opts := backend.BlockedOpts{
-		ParentID: "epic-9",
-		Assignee: "bob",
-		Priority: &p,
-		Type:     "feature",
-		Limit:    5,
+	opts := workitems.AvailabilityQuery{
+		ParentID:  "epic-9",
+		Assignee:  "bob",
+		Priority:  &p,
+		IssueType: "feature",
+		Limit:     5,
 	}
-	q := blockedOptsToQuery(opts)
+	q := blockedQueryToQuery(opts)
 	values, _ := url.ParseQuery(q)
 	for k, want := range map[string]string{
 		"parent_id": "epic-9",
@@ -211,6 +213,22 @@ func TestBlockedOptsToQuery_AllFields(t *testing.T) {
 	} {
 		if got := values.Get(k); got != want {
 			t.Errorf("%s = %q, want %q", k, got, want)
+		}
+	}
+}
+
+func TestCheckBlockedQuerySupportedFailsClosed(t *testing.T) {
+	tests := []workitems.AvailabilityQuery{
+		{Unassigned: true},
+		{Labels: []string{"urgent"}},
+		{LabelsAny: []string{"urgent"}},
+		{SourceRepos: []string{"loomcli"}},
+		{SortPolicy: "priority"},
+		{MolType: "work"},
+	}
+	for _, query := range tests {
+		if err := checkBlockedQuerySupported(query); !errors.Is(err, backend.ErrFilterNotSupported) {
+			t.Fatalf("query %#v error = %v, want unsupported filter", query, err)
 		}
 	}
 }

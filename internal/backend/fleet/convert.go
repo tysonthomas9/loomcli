@@ -134,21 +134,6 @@ type readyIssueWithParent struct {
 	Repo        *string `json:"repo,omitempty"`
 }
 
-// The BlockedByDetails field is captured for unmarshal completeness only;
-// IssueData carries the summary blocker fields used by kanban/list views.
-type blockedIssueWire struct {
-	fleetIssueWire
-	BlockedByCount   int              `json:"blocked_by_count,omitempty"`
-	BlockedBy        []string         `json:"blocked_by,omitempty"`
-	BlockedByDetails []blockerRefWire `json:"blocked_by_details,omitempty"`
-}
-
-type blockerRefWire struct {
-	ID       string `json:"id"`
-	Title    string `json:"title"`
-	Priority int    `json:"priority"`
-}
-
 // blockedIssueResponseWire mirrors fleet-db's native blocked response shape:
 // {"issue": {...}, "blockers": [{...}]}.
 type blockedIssueResponseWire struct {
@@ -222,36 +207,15 @@ func readyIssuesToData(issues []*readyIssueWithParent) []backend.IssueData {
 	return result
 }
 
-// blockedIssuesToData converts blocked issues to []backend.IssueData.
-func blockedIssuesToData(issues []*blockedIssueWire) []backend.IssueData {
-	result := make([]backend.IssueData, 0, len(issues))
-	for _, bi := range issues {
-		if bi == nil {
-			continue
-		}
-		d := bi.fleetIssueWire.toIssueData()
-		if parent := bi.fleetIssueWire.parent(); parent != "" {
-			d.Parent = parent
-		}
-		d.BlockedByCount = bi.BlockedByCount
-		d.BlockedBy = append([]string(nil), bi.BlockedBy...)
-		result = append(result, d)
+// unmarshalBlockedIssueList accepts only FleetDB's canonical native blocked
+// response. The former flat Loom bridge dialect was a cross-version fallback
+// and is intentionally rejected.
+func unmarshalBlockedIssueList(data []byte, op string) ([]workitems.IssueSummary, error) {
+	nested, ok := unmarshalNativeBlockedIssues(data)
+	if !ok {
+		return nil, backend.ErrInternal(op, "unmarshal canonical blocked response", nil)
 	}
-	return result
-}
-
-// unmarshalBlockedIssueList accepts both blocked response dialects:
-// fleet-db native {"issues":[{"issue":...,"blockers":[...]}]} and the older
-// flat BlockedIssue shape used by loom's legacy API bridge.
-func unmarshalBlockedIssueList(data []byte, op string) ([]backend.IssueData, error) {
-	if nested, ok := unmarshalNativeBlockedIssues(data); ok {
-		return blockedIssueResponsesToData(nested), nil
-	}
-	issues, err := unmarshalListOrWrapper[*blockedIssueWire](data, op)
-	if err != nil {
-		return nil, err
-	}
-	return blockedIssuesToData(issues), nil
+	return blockedIssueResponsesToSummaries(nested), nil
 }
 
 func unmarshalNativeBlockedIssues(data []byte) ([]blockedIssueResponseWire, bool) {
@@ -283,13 +247,13 @@ func blockedResponsesHaveIssue(issues []blockedIssueResponseWire) bool {
 	return false
 }
 
-func blockedIssueResponsesToData(issues []blockedIssueResponseWire) []backend.IssueData {
-	result := make([]backend.IssueData, 0, len(issues))
+func blockedIssueResponsesToSummaries(issues []blockedIssueResponseWire) []workitems.IssueSummary {
+	result := make([]workitems.IssueSummary, 0, len(issues))
 	for _, entry := range issues {
 		if entry.Issue.ID == "" {
 			continue
 		}
-		d := entry.Issue.toIssueData()
+		d := entry.Issue.toIssueSummary()
 		if parent := entry.Issue.parent(); parent != "" {
 			d.Parent = parent
 		}

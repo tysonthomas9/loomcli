@@ -1,12 +1,42 @@
 package api
 
 import (
+	"fmt"
 	"net/url"
 	"strconv"
+	"strings"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/backend/api/gen"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 )
+
+func checkBlockedQuerySupported(query workitems.AvailabilityQuery) error {
+	var unsupported []string
+	if query.Unassigned {
+		unsupported = append(unsupported, "Unassigned")
+	}
+	if len(query.Labels) > 0 {
+		unsupported = append(unsupported, "Labels")
+	}
+	if len(query.LabelsAny) > 0 {
+		unsupported = append(unsupported, "LabelsAny")
+	}
+	if len(query.SourceRepos) > 0 {
+		unsupported = append(unsupported, "SourceRepos")
+	}
+	if query.SortPolicy != "" {
+		unsupported = append(unsupported, "SortPolicy")
+	}
+	if query.MolType != "" {
+		unsupported = append(unsupported, "MolType")
+	}
+	if len(unsupported) == 0 {
+		return nil
+	}
+	return fmt.Errorf("loom API: unsupported blocked filters [%s]: %w",
+		strings.Join(unsupported, ", "), backend.ErrFilterNotSupported)
+}
 
 // listOptsToQuery builds the query string for GET /issues from ListOpts.
 // Only filters supported by the loom server are sent; unsupported fields
@@ -74,13 +104,14 @@ func readyOptsToQuery(opts backend.ReadyOpts) string {
 	return q.Encode()
 }
 
-// blockedOptsToQuery builds the query string for GET /blocked from BlockedOpts.
-func blockedOptsToQuery(opts backend.BlockedOpts) string {
+// blockedQueryToQuery builds the query string for GET /blocked from the Work
+// Items owner projection.
+func blockedQueryToQuery(opts workitems.AvailabilityQuery) string {
 	q := url.Values{}
 	setNonEmpty(q, "parent_id", opts.ParentID)
 	setNonEmpty(q, "assignee", opts.Assignee)
 	setOptInt(q, "priority", opts.Priority)
-	setNonEmpty(q, "type", opts.Type)
+	setNonEmpty(q, "type", opts.IssueType)
 	if opts.Limit > 0 {
 		q.Set("limit", strconv.Itoa(opts.Limit))
 	}

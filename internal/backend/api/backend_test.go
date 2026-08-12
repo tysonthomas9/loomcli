@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -350,7 +351,7 @@ func TestBlocked_HappyPath(t *testing.T) {
 	})
 	defer ts.Close()
 
-	result, err := ab.Blocked(context.Background(), backend.BlockedOpts{Limit: 5})
+	result, err := ab.Blocked(context.Background(), workitems.AvailabilityQuery{Limit: 5})
 	if err != nil {
 		t.Fatalf("Blocked: %v", err)
 	}
@@ -383,7 +384,7 @@ func TestBlockedIncludesExplicitBlockedStatusIssues(t *testing.T) {
 	})
 	defer ts.Close()
 
-	result, err := ab.Blocked(context.Background(), backend.BlockedOpts{ParentID: parent, Limit: 5})
+	result, err := ab.Blocked(context.Background(), workitems.AvailabilityQuery{ParentID: parent, Limit: 5})
 	if err != nil {
 		t.Fatalf("Blocked: %v", err)
 	}
@@ -401,6 +402,18 @@ func TestBlockedIncludesExplicitBlockedStatusIssues(t *testing.T) {
 	}
 	if len(seen) != 1 {
 		t.Fatalf("requests = %#v, want only canonical /blocked", seen)
+	}
+}
+
+func TestBlockedRejectsUnsupportedOwnerFiltersBeforeRequest(t *testing.T) {
+	ab, ts := newTestServer(t, func(http.ResponseWriter, *http.Request) {
+		t.Fatal("unsupported filter must not issue a request")
+	})
+	defer ts.Close()
+
+	_, err := ab.Blocked(context.Background(), workitems.AvailabilityQuery{LabelsAny: []string{"urgent"}})
+	if !errors.Is(err, backend.ErrFilterNotSupported) {
+		t.Fatalf("Blocked error = %v, want unsupported filter", err)
 	}
 }
 

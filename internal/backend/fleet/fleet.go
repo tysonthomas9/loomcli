@@ -41,6 +41,7 @@ type FleetBackend struct {
 
 // Compile-time interface check.
 var _ backend.IssueBackend = (*FleetBackend)(nil)
+var _ workitems.BlockedQueries = (*FleetBackend)(nil)
 var _ workitems.SearchQueries = (*FleetBackend)(nil)
 var _ workitems.StatsQueries = (*FleetBackend)(nil)
 var _ workitems.MutationStream = (*FleetBackend)(nil)
@@ -429,7 +430,7 @@ func (b *FleetBackend) Stats(ctx context.Context) (*workitems.Stats, error) {
 		return nil, backend.ErrInternal("Stats", "unmarshal response", err)
 	}
 	groups := countResp.Groups
-	blocked, err := b.Blocked(ctx, backend.BlockedOpts{})
+	blocked, err := b.Blocked(ctx, workitems.AvailabilityQuery{})
 	if err != nil {
 		return nil, err
 	}

@@ -7,6 +7,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/backend/api/gen"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 )
 
 const (
@@ -76,17 +77,40 @@ func printIssueList(w io.Writer, items []backend.IssueData, format string) error
 	if format == formatJSON {
 		return writeJSON(w, items)
 	}
+	return printIssueRows(w, items, func(item backend.IssueData) issueListRow {
+		return issueListRow{item.ID, item.Title, item.Status, item.IssueType, item.Priority}
+	})
+}
+
+func printWorkItemSummaries(w io.Writer, items []workitems.IssueSummary, format string) error {
+	if items == nil {
+		items = []workitems.IssueSummary{}
+	}
+	if format == formatJSON {
+		return writeJSON(w, items)
+	}
+	return printIssueRows(w, items, func(item workitems.IssueSummary) issueListRow {
+		return issueListRow{item.ID, item.Title, item.Status, item.IssueType, item.Priority}
+	})
+}
+
+type issueListRow struct {
+	id, title, status, issueType string
+	priority                     int
+}
+
+func printIssueRows[T any](w io.Writer, items []T, project func(T) issueListRow) error {
 	if len(items) == 0 {
 		fmt.Fprintln(w, "(no issues)")
 		return nil
 	}
-	for _, it := range items {
-		typ := it.IssueType
-		if typ == "" {
-			typ = "-"
+	for _, item := range items {
+		row := project(item)
+		if row.issueType == "" {
+			row.issueType = "-"
 		}
 		fmt.Fprintf(w, "%-24s  P%d  %-10s  %-10s  %s\n",
-			it.ID, it.Priority, it.Status, typ, it.Title)
+			row.id, row.priority, row.status, row.issueType, row.title)
 	}
 	return nil
 }

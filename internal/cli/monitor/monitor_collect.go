@@ -348,8 +348,9 @@ func collectTaskStatus(ctx context.Context, readyLimit int) (TaskSummary, []Task
 
 // taskQueryResults holds the raw results from parallel issue queries.
 type taskQueryResults struct {
-	readyIssues, inProgressIssues, reviewIssues, backlogIssues, closedIssues []backend.IssueData
-	readyErr, inProgressErr, reviewErr, backlogErr, closedErr                error
+	readyIssues, inProgressIssues, reviewIssues, closedIssues []backend.IssueData
+	backlogIssues                                             []workitems.IssueSummary
+	readyErr, inProgressErr, reviewErr, backlogErr, closedErr error
 }
 
 func collectTaskStatusDeps(ctx context.Context, deps *cli.Deps, readyLimit int) (TaskSummary, []TaskInfo, []TaskInfo, []TaskInfo, []TaskInfo, []TaskInfo, []TaskInfo, map[string]TaskInfo) {
@@ -397,7 +398,15 @@ func runParallelTaskQueries(ctx context.Context, deps *cli.Deps, readyLimit int)
 		defer wg.Done()
 		qr.reviewIssues, qr.reviewErr = ib.List(ctx, backend.ListOpts{Status: "review", Limit: 10000})
 	}()
-	go func() { defer wg.Done(); qr.backlogIssues, qr.backlogErr = ib.Blocked(ctx, backend.BlockedOpts{}) }()
+	go func() {
+		defer wg.Done()
+		blocked, ok := ib.(workitems.BlockedQueries)
+		if !ok {
+			qr.backlogErr = workitems.ErrUnavailable
+			return
+		}
+		qr.backlogIssues, qr.backlogErr = blocked.Blocked(ctx, workitems.AvailabilityQuery{})
+	}()
 	go func() {
 		defer wg.Done()
 		qr.closedIssues, qr.closedErr = ib.List(ctx, backend.ListOpts{Status: "closed", Limit: 50})
@@ -475,7 +484,7 @@ func processReviewIssues(issues []backend.IssueData, err error, summary *TaskSum
 	return tasks
 }
 
-func processBacklogIssues(issues []backend.IssueData, err error, summary *TaskSummary) []TaskInfo {
+func processBacklogIssues(issues []workitems.IssueSummary, err error, summary *TaskSummary) []TaskInfo {
 	if err != nil {
 		return nil
 	}

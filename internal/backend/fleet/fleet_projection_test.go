@@ -7,7 +7,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 )
 
@@ -117,7 +116,7 @@ func TestBlocked_NativeFleetDBWrapper(t *testing.T) {
 	})
 	defer ts.Close()
 
-	result, err := fb.Blocked(context.Background(), backend.BlockedOpts{Limit: 10})
+	result, err := fb.Blocked(context.Background(), workitems.AvailabilityQuery{Limit: 10})
 	if err != nil {
 		t.Fatalf("Blocked: %v", err)
 	}

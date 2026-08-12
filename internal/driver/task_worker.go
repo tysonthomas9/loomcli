@@ -89,10 +89,9 @@ type TaskWorker struct {
 	// APIBaseURL is the serve task-run API base URL exported to bridge task
 	// runners as LOOM_TASK_RUN_API_URL (see HostBridgeTaskExecutor).
 	APIBaseURL string
-	// LocalSettingsDir is passed through to HostBridgeTaskExecutor and the
-	// default worktree resolver so bundled runners and git operations can read
-	// desktop-local settings just in time.
-	LocalSettingsDir string
+	// LocalTaskRunnerEnv is the desktop-composed non-secret settings projection
+	// forwarded to the host bridge.
+	LocalTaskRunnerEnv func([]string) []string
 	// SourceControl is the authority-free checkout materializer used by the
 	// default local task worktree resolver.
 	SourceControl sourcecontrol.Materializer
@@ -201,7 +200,7 @@ func (w *TaskWorker) runOnceInWorkspace(ctx context.Context, ws, workDir string)
 			ArtifactAuthorities: w.TaskRunAuthorities,
 			WorktreePath:        workDir,
 			APIBaseURL:          w.APIBaseURL,
-			LocalSettingsDir:    w.LocalSettingsDir,
+			LocalTaskRunnerEnv:  w.LocalTaskRunnerEnv,
 			WorktreeResolver: firstNonNilTaskWorktreeResolver(w.WorktreeResolver, LocalTaskWorktreeResolver{
 				Store:         w.Store,
 				Lineage:       StackLineageLookup{Bindings: w.StackBindings},
