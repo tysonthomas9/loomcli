@@ -9,6 +9,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
+	loomapi "github.com/tysonthomas9/loomcli/internal/platform/loomapi/gen"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 )
 
@@ -207,12 +208,6 @@ func (m *Module) pollReviewerStream(ctx context.Context, sw *realtime.Writer, se
 	return true
 }
 
-type reviewerConversation struct {
-	State    string                  `json:"state"`
-	Detail   string                  `json:"detail,omitempty"`
-	Messages []reviewerStreamMessage `json:"messages"`
-}
-
 // getReviewerConversation is the POLL target: a single snapshot of the whole
 // reviewer conversation. The frontend polls this (the SSE stream above only
 // works over loopback — EventSource can't send the auth Bearer header, so under
@@ -231,7 +226,23 @@ func (m *Module) getReviewerConversation(w http.ResponseWriter, r *http.Request)
 	if msgs == nil {
 		msgs = []reviewerStreamMessage{}
 	}
-	writeJSON(w, reviewerConversation{State: snap.state, Detail: snap.detail, Messages: msgs})
+	generatedMessages := make([]loomapi.ReviewerMessage, 0, len(msgs))
+	for _, message := range msgs {
+		generatedMessages = append(generatedMessages, loomapi.ReviewerMessage{
+			ItemId: message.ItemID, Phase: optionalReviewString(message.Phase), Role: message.Role,
+			Text: message.Text, TurnId: message.TurnID,
+		})
+	}
+	writeJSON(w, loomapi.ReviewerConversation{
+		State: snap.state, Detail: optionalReviewString(snap.detail), Messages: generatedMessages,
+	})
+}
+
+func optionalReviewString(value string) *string {
+	if value == "" {
+		return nil
+	}
+	return &value
 }
 
 func writeReviewerStatus(sw *realtime.Writer, lastStatus *string, snap reviewerSnapshot) bool {

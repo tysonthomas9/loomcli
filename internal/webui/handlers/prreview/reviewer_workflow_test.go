@@ -508,7 +508,7 @@ func TestEnsureReviewerCreatesAgentWorktreeAndSeed(t *testing.T) {
 		t.Fatalf("decode response: %v (body %s)", err, raw)
 	}
 	agentName := reviewerAgentName("octocat", "hello", 7)
-	if !decoded.Success || decoded.Data.AgentName != agentName || decoded.Data.CheckedOutSHA != headSHA || !decoded.Data.Seeded {
+	if !decoded.Success || decoded.Data.AgentName != agentName || decoded.Data.CheckedOutSha != headSHA || !decoded.Data.Seeded {
 		t.Fatalf("response = %+v, want agent %s sha %s seeded", decoded, agentName, headSHA)
 	}
 	if got := h.reviewers.ensureCount(); got != 1 {

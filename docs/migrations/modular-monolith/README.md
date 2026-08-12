@@ -82,6 +82,7 @@ one-file packages, and 60 one-or-two-file packages.
 | [18-post-phase-9-webui-deepening-plan.md](18-post-phase-9-webui-deepening-plan.md) | Superseded WebUI architecture discussion and complete decision ledger; retained for rationale. |
 | [19-phase-10-application-deepening-goal.md](19-phase-10-application-deepening-goal.md) | Superseded application-deepening discussion; retained for rationale and accepted supporting ADRs. |
 | [20-phase-10-consolidated-deep-module-goal.md](20-phase-10-consolidated-deep-module-goal.md) | Canonical Phase 10 ownership decisions, supersession map, ordered twelve-PR manifest, gates, and completion criteria. |
+| [21-phase-10-1-generated-http-contract-evidence.md](21-phase-10-1-generated-http-contract-evidence.md) | Stack 10.1 implementation and proof for the canonical generated Go and TypeScript HTTP contract seam. |
 
 ## Scope boundaries
 

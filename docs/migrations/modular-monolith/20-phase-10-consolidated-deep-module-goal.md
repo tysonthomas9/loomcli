@@ -1,7 +1,7 @@
 # Phase 10 Consolidated Deep Module Goal
 
-- **Status:** Canonical approved architecture; implementation not started by
-  this record
+- **Status:** Canonical approved architecture; implementation in progress
+- **Implemented:** Stack 10.1 canonical generated HTTP contract seam
 - **Date:** 2026-08-12
 - **Baseline:** Phase 9 Wave 9.41, 158 production packages
 - **Supersedes:** the
@@ -240,6 +240,9 @@ generated-contract, and shrink-only inventory guards. Tests exercise behavior
 through the same interfaces used by production callers. Product E2E is
 required for every user-visible stack; stack 10.12 runs the complete packaged
 Desktop matrix rather than substituting API-only evidence.
+
+Implementation evidence is recorded per stack. Stack 10.1 is documented in
+[Phase 10.1 generated HTTP contract evidence](21-phase-10-1-generated-http-contract-evidence.md).
 
 ## Superseded alternatives
 

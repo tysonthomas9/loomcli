@@ -309,7 +309,7 @@ func TestAgentServiceHandlerUsesManagedCoreCASForCreateUpdateAndDelete(t *testin
 	rejectedRole := request(http.MethodPatch, "/api/workspaces/WS/agents/"+createdDTO.ID,
 		`{"name":"Must not persist","behavior":{"role_name":"reviewer"}}`)
 	if rejectedRole.Code != http.StatusBadRequest ||
-		!strings.Contains(rejectedRole.Body.String(), "behavior.role_name is immutable") {
+		!strings.Contains(rejectedRole.Body.String(), "invalid request body") {
 		t.Fatalf("role patch status = %d; body=%s", rejectedRole.Code, rejectedRole.Body.String())
 	}
 	unchangedRecord, err = st.AgentServices().Get(t.Context(), agentRecordTestWS, createdDTO.ID)

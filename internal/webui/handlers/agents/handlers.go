@@ -5,22 +5,27 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	loomapi "github.com/tysonthomas9/loomcli/internal/platform/loomapi/gen"
 	"github.com/tysonthomas9/loomcli/internal/webui/agentcoord"
 	"github.com/tysonthomas9/loomcli/internal/webui/apperrors"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 )
 
-type interactivePromptsResponse struct {
-	Prompts []domain.BuiltinInteractivePrompt `json:"prompts"`
-}
-
 func HandleInteractivePrompts() http.HandlerFunc {
 	return func(w http.ResponseWriter, _ *http.Request) {
-		handler.WriteJSON(w, http.StatusOK, interactivePromptsResponse{
-			Prompts: visibleInteractivePrompts(),
+		handler.WriteJSON(w, http.StatusOK, loomapi.InteractivePromptsResponse{
+			Prompts: generatedInteractivePrompts(visibleInteractivePrompts()),
 		})
 	}
+}
+
+func generatedInteractivePrompts(prompts []domain.BuiltinInteractivePrompt) []loomapi.InteractivePrompt {
+	out := make([]loomapi.InteractivePrompt, 0, len(prompts))
+	for _, prompt := range prompts {
+		out = append(out, loomapi.InteractivePrompt{Id: prompt.ID, Label: prompt.Label})
+	}
+	return out
 }
 
 func visibleInteractivePrompts() []domain.BuiltinInteractivePrompt {

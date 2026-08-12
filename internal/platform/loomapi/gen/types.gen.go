@@ -1981,7 +1981,7 @@ type AgentRunsResponse struct {
 	Sessions []AgentHistorySession `json:"sessions"`
 }
 
-// AgentStatusResponse Agent entity from dto.AgentStatusResponse
+// AgentStatusResponse Agent status returned by the canonical HTTP contract.
 type AgentStatusResponse struct {
 	AgentState   *AgentStatusResponseAgentState `json:"agent_state,omitempty"`
 	CreatedAt    time.Time                      `json:"created_at"`
@@ -2108,7 +2108,7 @@ type CommentRequest struct {
 	Text string `json:"text"`
 }
 
-// CommentResponse Comment in IssueResponse (dto.CommentResponse)
+// CommentResponse Comment returned within an IssueResponse.
 type CommentResponse struct {
 	Author    string     `json:"author"`
 	CreatedAt time.Time  `json:"created_at"`
@@ -2313,6 +2313,7 @@ type DependencyRef struct {
 // DriverRun defines model for DriverRun.
 type DriverRun struct {
 	AgentServiceId        *string            `json:"agent_service_id,omitempty"`
+	AwaitInstanceKey      *string            `json:"await_instance_key,omitempty"`
 	CancelRequestedAt     *time.Time         `json:"cancel_requested_at,omitempty"`
 	CancelRequestedReason *string            `json:"cancel_requested_reason,omitempty"`
 	CreatedAt             time.Time          `json:"created_at"`
@@ -2336,6 +2337,7 @@ type DriverRun struct {
 	SourceRef             *string            `json:"source_ref,omitempty"`
 	StartedAt             *time.Time         `json:"started_at,omitempty"`
 	Status                string             `json:"status"`
+	SubjectKey            *string            `json:"subject_key,omitempty"`
 	Summary               *string            `json:"summary,omitempty"`
 	SuspendedAt           *time.Time         `json:"suspended_at,omitempty"`
 	TriggerBindingId      *string            `json:"trigger_binding_id,omitempty"`
@@ -2641,6 +2643,17 @@ type InteractiveAgentRecord struct {
 
 // InteractiveAgentRecordKind defines model for InteractiveAgentRecord.Kind.
 type InteractiveAgentRecordKind string
+
+// InteractivePrompt defines model for InteractivePrompt.
+type InteractivePrompt struct {
+	Id    string `json:"id"`
+	Label string `json:"label"`
+}
+
+// InteractivePromptsResponse defines model for InteractivePromptsResponse.
+type InteractivePromptsResponse struct {
+	Prompts []InteractivePrompt `json:"prompts"`
+}
 
 // Issue Core issue type used in list endpoints. Maps to `types.Issue` json
 // serialization. Some list endpoints return this shape directly (not
@@ -3338,7 +3351,7 @@ type SessionHistoryRecordLauncher string
 // SessionHistoryRecordStatus defines model for SessionHistoryRecord.Status.
 type SessionHistoryRecordStatus string
 
-// SessionResponse Session audit record from dto.SessionResponse
+// SessionResponse Session audit record returned by the canonical HTTP contract.
 type SessionResponse struct {
 	AgentName        string     `json:"agent_name"`
 	AttemptNum       int        `json:"attempt_num"`

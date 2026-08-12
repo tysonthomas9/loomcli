@@ -7,7 +7,7 @@ import (
 	"time"
 
 	agentsmodule "github.com/tysonthomas9/loomcli/internal/modules/agents"
-	"github.com/tysonthomas9/loomcli/internal/webui/server/dto"
+	loomapi "github.com/tysonthomas9/loomcli/internal/platform/loomapi/gen"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/terminal"
 )
@@ -114,9 +114,9 @@ func (m *Module) applyCanonicalLifecycle(
 		}
 	}
 	broadcastAgentRefresh(m.hub, target.workspace, target.agentID, r.Header.Get("X-Actor"))
-	handler.WriteJSON(w, http.StatusOK, dto.AgentLifecycleResponse{
+	handler.WriteJSON(w, http.StatusOK, loomapi.AgentLifecycleResponse{
 		Message: fmt.Sprintf("agent %q %s", target.agentID, target.pastTense),
-		Status:  "succeeded",
+		Status:  loomapi.AgentLifecycleResponseStatusSucceeded,
 	})
 }
 

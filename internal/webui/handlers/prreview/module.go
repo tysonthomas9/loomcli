@@ -17,7 +17,6 @@ import (
 	workspacemodule "github.com/tysonthomas9/loomcli/internal/modules/workspace"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 	"github.com/tysonthomas9/loomcli/internal/webui/agentcoord"
-	"github.com/tysonthomas9/loomcli/internal/webui/terminal"
 )
 
 const (
@@ -38,7 +37,6 @@ type Module struct {
 	connectorSealer         connectorsmodule.CredentialSealer
 	dispatcher              connectorsmodule.Dispatcher
 	agentSvc                agentcoord.AgentService
-	terminalSvc             terminal.TerminalService
 	reviewerProvisioning    prreviewer.Commands
 	reviewerAgents          agents.IdentityQueries
 	sourceControl           sourcecontrol.Materializer
@@ -82,7 +80,6 @@ type Config struct {
 	ConnectorSealer      connectorsmodule.CredentialSealer
 	Dispatcher           connectorsmodule.Dispatcher
 	AgentService         agentcoord.AgentService
-	TerminalService      terminal.TerminalService
 	LocalSettingsDir     string
 	ReviewerProvisioning prreviewer.Commands
 	ReviewerAgents       agents.IdentityQueries
@@ -94,10 +91,8 @@ type Config struct {
 
 // NewModule constructs the pull request review route module. LocalSettingsDir
 // supplies the desktop GitHub credential and connector vault location.
-// terminalSvc may be nil (no PTY manager); backend migration then skips
-// killing live reviewer terminals, which is safe because without a terminal
-// service none exist. Interaction chat dependencies own all provider/session
-// reads and message delivery; missing dependencies fail those routes closed.
+// Interaction chat dependencies own all provider/session reads and message
+// delivery; missing dependencies fail those routes closed.
 func NewModule(config Config) *Module {
 	if !connectorsmodule.DispatcherAvailable(config.Dispatcher) {
 		config.Dispatcher = nil
@@ -108,7 +103,6 @@ func NewModule(config Config) *Module {
 		connectorSealer:         config.ConnectorSealer,
 		dispatcher:              config.Dispatcher,
 		agentSvc:                config.AgentService,
-		terminalSvc:             config.TerminalService,
 		reviewerProvisioning:    config.ReviewerProvisioning,
 		reviewerAgents:          config.ReviewerAgents,
 		sourceControl:           config.SourceControl,

@@ -14,6 +14,12 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
 
+type taskWorkflowRunsResponse struct {
+	TaskID     string              `json:"task_id"`
+	SubjectRef string              `json:"subject_ref"`
+	Runs       []*domain.DriverRun `json:"runs"`
+}
+
 const taskWorkflowRunRoute = "internal.task.ready"
 
 func seedTaskWorkflowBinding(t *testing.T, ctx context.Context, st store.Store) {

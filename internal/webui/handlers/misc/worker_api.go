@@ -17,6 +17,7 @@ import (
 	"sync"
 	"time"
 
+	loomapi "github.com/tysonthomas9/loomcli/internal/platform/loomapi/gen"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 )
 
@@ -89,13 +90,6 @@ func workerAuthMiddleware(workerToken string, next http.Handler) http.Handler {
 	})
 }
 
-// workerRegisterRequest is the JSON body for POST /api/internal/workers/register.
-type workerRegisterRequest struct {
-	Workspace string `json:"workspace"`
-	Agent     string `json:"agent"`
-	Backend   string `json:"backend"`
-}
-
 // workerRegisterResponse is the JSON response for worker registration.
 type workerRegisterResponse struct {
 	WorkerID string `json:"worker_id"`
@@ -122,8 +116,8 @@ func readWorkerStreamBody(w http.ResponseWriter, r *http.Request) ([]byte, bool)
 // If validateWorkspace is non-nil, the workspace UUID is validated at registration time.
 func HandleWorkerRegister(registry *WorkerRegistry, validateWorkspace func(id string) bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		var req workerRegisterRequest
-		if err := handler.DecodeOneJSON(w, r, &req, handler.JSONDecodeOptions{}); err != nil {
+		var req loomapi.WorkerRegisterRequest
+		if err := handler.DecodeOneJSON(w, r, &req, handler.JSONDecodeOptions{DisallowUnknownFields: true}); err != nil {
 			handler.RespondError(w, http.StatusBadRequest, "invalid request body")
 			return
 		}
@@ -151,7 +145,7 @@ func HandleWorkerRegister(registry *WorkerRegistry, validateWorkspace func(id st
 			ID:        workerID,
 			Workspace: req.Workspace,
 			Agent:     req.Agent,
-			Backend:   req.Backend,
+			Backend:   optionalWorkerString(req.Backend),
 			StartedAt: time.Now(),
 		}
 		registry.Register(info)
@@ -182,15 +176,6 @@ func handleWorkerDeregister(registry *WorkerRegistry) http.HandlerFunc {
 	}
 }
 
-// workerStateRequest is the JSON body for POST /api/internal/workers/{id}/state.
-type workerStateRequest struct {
-	Action    string `json:"action"`     // "update_state", "update_task", "clear_task", "read"
-	State     string `json:"state"`      // for update_state
-	AgentName string `json:"agent_name"` // agent name
-	TaskID    string `json:"task_id"`    // for update_task
-	TaskTitle string `json:"task_title"` // for update_task
-}
-
 // handleWorkerState handles lock state operations from remote workers.
 // It writes to the agent's lock file so existing LogStreamer/status code continues working.
 func handleWorkerState(registry *WorkerRegistry, resolveWorktreePath func(workspace, agent string) string) http.HandlerFunc {
@@ -202,8 +187,8 @@ func handleWorkerState(registry *WorkerRegistry, resolveWorktreePath func(worksp
 			return
 		}
 
-		var req workerStateRequest
-		if err := handler.DecodeOneJSON(w, r, &req, handler.JSONDecodeOptions{}); err != nil {
+		var req loomapi.WorkerStateRequest
+		if err := handler.DecodeOneJSON(w, r, &req, handler.JSONDecodeOptions{DisallowUnknownFields: true}); err != nil {
 			handler.RespondError(w, http.StatusBadRequest, "invalid request body")
 			return
 		}
@@ -219,17 +204,17 @@ func handleWorkerState(registry *WorkerRegistry, resolveWorktreePath func(worksp
 }
 
 // dispatchWorkerAction executes the requested worker state action.
-func dispatchWorkerAction(w http.ResponseWriter, workerID, worktreePath string, req *workerStateRequest) {
+func dispatchWorkerAction(w http.ResponseWriter, workerID, worktreePath string, req *loomapi.WorkerStateRequest) {
 	switch req.Action {
 	case "update_state":
-		if err := updateWorkerLockState(worktreePath, req.State); err != nil {
+		if err := updateWorkerLockState(worktreePath, optionalWorkerString(req.State)); err != nil {
 			slog.Warn("worker state update failed", "worker_id", workerID, "err", err)
 			handler.RespondError(w, http.StatusInternalServerError, "failed to update state")
 			return
 		}
 		w.WriteHeader(http.StatusOK)
 	case "update_task":
-		if err := updateWorkerLockTask(worktreePath, req.TaskID, req.TaskTitle); err != nil {
+		if err := updateWorkerLockTask(worktreePath, optionalWorkerString(req.TaskId), optionalWorkerString(req.TaskTitle)); err != nil {
 			slog.Warn("worker task update failed", "worker_id", workerID, "err", err)
 			handler.RespondError(w, http.StatusInternalServerError, "failed to update task")
 			return
@@ -252,6 +237,13 @@ func dispatchWorkerAction(w http.ResponseWriter, workerID, worktreePath string, 
 	default:
 		handler.RespondError(w, http.StatusBadRequest, fmt.Sprintf("unknown action %q", req.Action))
 	}
+}
+
+func optionalWorkerString(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
 }
 
 // handleWorkerEvents receives domain events from remote workers and writes to JSONL.

@@ -2357,19 +2357,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                required: [prompts]
-                properties:
-                  prompts:
-                    type: array
-                    items:
-                      type: object
-                      required: [id, label]
-                      properties:
-                        id:
-                          type: string
-                        label:
-                          type: string
+                $ref: "#/components/schemas/InteractivePromptsResponse"
 
   /api/workspaces/{ws}/agents:
     get:
@@ -4889,6 +4877,24 @@ components:
         type: string
 
   schemas:
+    InteractivePromptsResponse:
+      type: object
+      required: [prompts]
+      properties:
+        prompts:
+          type: array
+          items:
+            $ref: "#/components/schemas/InteractivePrompt"
+
+    InteractivePrompt:
+      type: object
+      required: [id, label]
+      properties:
+        id:
+          type: string
+        label:
+          type: string
+
     # ── Response Envelopes ──────────────────────────────────────────────
     ErrorResponse:
       type: object
@@ -5759,7 +5765,7 @@ components:
 
     CommentResponse:
       type: object
-      description: Comment in IssueResponse (dto.CommentResponse)
+      description: Comment returned within an IssueResponse.
       required: [id, author, text, created_at]
       properties:
         id:
@@ -6209,7 +6215,7 @@ components:
     # ── Agent Schemas ───────────────────────────────────────────────────
     AgentStatusResponse:
       type: object
-      description: Agent entity from dto.AgentStatusResponse
+      description: Agent status returned by the canonical HTTP contract.
       required: [id, title, created_at, updated_at, labels]
       properties:
         id:
@@ -6889,6 +6895,8 @@ components:
           type: string
         agent_service_id:
           type: string
+        subject_key:
+          type: string
         status:
           type: string
         node_id:
@@ -6920,6 +6928,8 @@ components:
           format: date-time
         parent_run_id:
           type: string
+        await_instance_key:
+          type: string
         suspended_at:
           type: [string, "null"]
           format: date-time
@@ -6940,7 +6950,7 @@ components:
     # ── Session Schemas ─────────────────────────────────────────────────
     SessionResponse:
       type: object
-      description: Session audit record from dto.SessionResponse
+      description: Session audit record returned by the canonical HTTP contract.
       required:
         - session_id
         - task_id

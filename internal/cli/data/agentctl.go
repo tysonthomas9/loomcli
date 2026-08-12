@@ -12,7 +12,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// agentMessageEnvelope matches dto.MessageResponse returned by the agent
+// agentMessageEnvelope matches the generated MessageResponse contract returned by the agent
 // control endpoints.
 type agentMessageEnvelope struct {
 	Success bool   `json:"success"`
@@ -110,7 +110,7 @@ func postAgentAction(ctx context.Context, cli *http.Client, path, action string)
 	return raw, nil
 }
 
-// decodeAgentMessage extracts a message from the dto.MessageResponse envelope.
+// decodeAgentMessage extracts a message from the generated MessageResponse envelope.
 func decodeAgentMessage(raw []byte, action string) (string, error) {
 	var env agentMessageEnvelope
 	if err := json.Unmarshal(raw, &env); err != nil {

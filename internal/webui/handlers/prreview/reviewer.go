@@ -280,7 +280,7 @@ func (m *Module) ensureReviewer(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, reviewerEnsureResult{
 		AgentName:     agentName,
-		CheckedOutSHA: checkedOutSHA,
+		CheckedOutSha: checkedOutSHA,
 		Seeded:        true,
 	})
 }
@@ -441,7 +441,7 @@ func (m *Module) postReviewerMessage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req reviewerMessageRequest
-	if err := handler.DecodeOneJSON(w, r, &req, handler.JSONDecodeOptions{}); err != nil {
+	if err := handler.DecodeOneJSON(w, r, &req, handler.JSONDecodeOptions{DisallowUnknownFields: true}); err != nil {
 		writePRReviewErrorCode(w, http.StatusBadRequest, "invalid", "invalid reviewer message request body", false)
 		return
 	}

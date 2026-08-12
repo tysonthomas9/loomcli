@@ -1,7 +1,6 @@
 package agents
 
 import (
-	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -14,6 +13,7 @@ import (
 	agentsmodule "github.com/tysonthomas9/loomcli/internal/modules/agents"
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
+	loomapi "github.com/tysonthomas9/loomcli/internal/platform/loomapi/gen"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/triggerbindings"
 )
 
@@ -24,148 +24,77 @@ const (
 	agentArchiveMetadataKey    = "archived_at"
 )
 
-type agentRecordDTO struct {
-	ID                  string             `json:"id"`
-	Name                string             `json:"name"`
-	Kind                string             `json:"kind"`
-	Enabled             bool               `json:"enabled"`
-	Behavior            agentBehaviorDTO   `json:"behavior"`
-	BudgetPolicy        string             `json:"budget_policy,omitempty"`
-	WorkspaceKey        string             `json:"workspace_key"`
-	Bindings            []recordBindingDTO `json:"bindings,omitempty"`
-	LastRunStatus       string             `json:"last_run_status,omitempty"`
-	ConsecutiveFailures int                `json:"consecutive_failures,omitempty"`
-	NextFireAt          *time.Time         `json:"next_fire_at,omitempty"`
-	Metadata            map[string]string  `json:"metadata,omitempty"`
-	CreatedAt           time.Time          `json:"created_at"`
-	UpdatedAt           time.Time          `json:"updated_at"`
-}
-
-type agentBehaviorDTO struct {
-	RoleName        string `json:"role_name,omitempty"`
-	DriverID        string `json:"driver_id,omitempty"`
-	DriverVersionID string `json:"driver_version_id,omitempty"`
-}
-
-type recordBindingDTO struct {
-	*automation.Binding
-	NextFireAt          *time.Time `json:"next_fire_at,omitempty"`
-	LastRunStatus       string     `json:"last_run_status,omitempty"`
-	ConsecutiveFailures int        `json:"consecutive_failures,omitempty"`
-}
-
-// agentRunsResponse is the canonical AgentService history envelope. Sessions
-// remains an empty array for the current browser wire contract; runtime
-// sessions are owned by Interaction and are not projected as Agent history.
-type agentRunsResponse struct {
-	AgentID  string                    `json:"agent_id"`
-	Runs     []*domain.DriverRun       `json:"runs"`
-	Sessions []*agentHistorySessionDTO `json:"sessions"`
-}
-
-// agentHistorySessionDTO is retained only as an empty wire-shape member while
-// clients move to canonical DriverRun history. No Phase 6 server path projects
-// Interaction sessions into an Agent response.
-type agentHistorySessionDTO struct {
-	WorkspaceKey string                    `json:"workspace_key"`
-	SessionID    string                    `json:"session_id"`
-	AgentID      string                    `json:"agent_id"`
-	Kind         domain.AgentSessionKind   `json:"kind"`
-	TaskID       string                    `json:"task_id,omitempty"`
-	Status       domain.AgentSessionStatus `json:"status"`
-	StartedAt    *time.Time                `json:"started_at,omitempty"`
-	Metadata     map[string]string         `json:"metadata,omitempty"`
-}
-
-type createAgentKindProbe struct {
-	Name string `json:"name"`
-	Kind string `json:"kind"`
-}
-
-type createPromptAgentRequest struct {
-	Kind         string                    `json:"kind"`
-	Name         string                    `json:"name"`
-	Backend      string                    `json:"backend,omitempty"`
-	Behavior     promptAgentBehaviorCreate `json:"behavior"`
-	Trigger      promptAgentTriggerRequest `json:"trigger,omitempty"`
-	Grants       []promptAgentGrantRequest `json:"grants,omitempty"`
-	Enabled      *bool                     `json:"enabled,omitempty"`
-	BudgetPolicy string                    `json:"budget_policy,omitempty"`
+type promptAgentCreateInput struct {
+	Name         string
+	Backend      string
+	Behavior     promptAgentBehaviorCreate
+	Trigger      promptAgentTriggerRequest
+	Grants       []promptAgentGrantRequest
+	Enabled      *bool
+	BudgetPolicy string
 }
 
 type promptAgentBehaviorCreate struct {
-	RoleName   string                 `json:"role_name"`
-	RoleCreate *promptRoleCreateInput `json:"role_create,omitempty"`
+	RoleName   string
+	RoleCreate *promptRoleCreateInput
 }
 
 type promptRoleCreateInput struct {
-	Prompt         string   `json:"prompt,omitempty"`
-	PromptFilename string   `json:"prompt_filename,omitempty"`
-	Description    string   `json:"description,omitempty"`
-	TaskFilter     string   `json:"task_filter,omitempty"`
-	Model          string   `json:"model,omitempty"`
-	Backend        string   `json:"backend,omitempty"`
-	Effort         string   `json:"effort,omitempty"`
-	ReadOnly       bool     `json:"read_only,omitempty"`
-	AllowedTools   []string `json:"allowed_tools,omitempty"`
-	DeniedTools    []string `json:"denied_tools,omitempty"`
-	Skills         []string `json:"skills,omitempty"`
+	Prompt         string
+	PromptFilename string
+	Description    string
+	TaskFilter     string
+	Model          string
+	Backend        string
+	Effort         string
+	ReadOnly       bool
+	AllowedTools   []string
+	DeniedTools    []string
+	Skills         []string
 }
 
 type promptAgentTriggerRequest struct {
-	SourceKind        string   `json:"source_kind,omitempty"`
-	RouteKey          string   `json:"route_key,omitempty"`
-	BindingID         string   `json:"binding_id,omitempty"`
-	EventTypePatterns []string `json:"event_type_patterns,omitempty"`
-	Schedule          string   `json:"schedule,omitempty"`
-	ScheduleTimezone  string   `json:"schedule_timezone,omitempty"`
-	Entrypoint        string   `json:"entrypoint,omitempty"`
+	SourceKind        string
+	RouteKey          string
+	BindingID         string
+	EventTypePatterns []string
+	Schedule          string
+	ScheduleTimezone  string
+	Entrypoint        string
 }
 
 type promptAgentGrantRequest struct {
-	ConnectorID     string `json:"connector_id"`
-	Action          string `json:"action"`
-	ResourcePattern string `json:"resource_pattern"`
-	GrantID         string `json:"grant_id,omitempty"`
+	ConnectorID     string
+	Action          string
+	ResourcePattern string
+	GrantID         string
 }
 
-type patchAgentRecordRequest struct {
-	Name             *string                   `json:"name,omitempty"`
-	Behavior         *patchAgentBehaviorRecord `json:"behavior,omitempty"`
-	BudgetPolicy     *string                   `json:"budget_policy,omitempty"`
-	BindingID        *string                   `json:"binding_id,omitempty"`
-	Schedule         *string                   `json:"schedule,omitempty"`
-	ScheduleTimezone *string                   `json:"schedule_timezone,omitempty"`
-}
-
-func (request *patchAgentRecordRequest) UnmarshalJSON(data []byte) error {
-	type patchAgentRecordRequestAlias patchAgentRecordRequest
-	decoder := json.NewDecoder(bytes.NewReader(data))
-	decoder.DisallowUnknownFields()
-	return decoder.Decode((*patchAgentRecordRequestAlias)(request))
-}
-
-type patchAgentBehaviorRecord struct {
-	RoleName *string `json:"role_name,omitempty"`
-}
-
-func (m *Module) agentRecordDTO(ctx context.Context, ws string, record *domain.AgentService, now time.Time) (agentRecordDTO, error) {
+func (m *Module) agentRecordDTO(ctx context.Context, ws string, record *domain.AgentService, now time.Time) (loomapi.UnifiedAgent, error) {
 	kind, err := m.canonicalAgentRecordKind(ctx, ws, record)
 	if err != nil {
-		return newAgentRecordDTO(record), err
+		out, mapErr := newAgentRecordDTO(record, deriveAgentRecordKind(record), nil, nil)
+		if mapErr != nil {
+			return loomapi.UnifiedAgent{}, mapErr
+		}
+		return out, err
 	}
 	if m.bindings == nil {
-		out := newAgentRecordDTO(record)
-		out.Kind = kind
+		out, mapErr := newAgentRecordDTO(record, kind, nil, nil)
+		if mapErr != nil {
+			return loomapi.UnifiedAgent{}, mapErr
+		}
 		return out, automation.ErrUnavailable
 	}
 	bindings, err := m.bindings.ListBindings(ctx, ws, automation.BindingFilter{TargetAgentServiceID: record.ServiceID})
 	if err != nil {
-		return newAgentRecordDTO(record), err
+		out, mapErr := newAgentRecordDTO(record, kind, nil, nil)
+		if mapErr != nil {
+			return loomapi.UnifiedAgent{}, mapErr
+		}
+		return out, err
 	}
-	out := m.agentRecordDTOWithBindings(ctx, ws, record, bindings, now)
-	out.Kind = kind
-	return out, nil
+	return m.agentRecordDTOWithBindingsAndKind(ctx, ws, record, kind, bindings, now)
 }
 
 func (m *Module) canonicalAgentRecordKind(
@@ -205,50 +134,235 @@ func (m *Module) canonicalAgentRecordKind(
 	return agentRecordKindPrompt, nil
 }
 
-func newAgentRecordDTO(record *domain.AgentService) agentRecordDTO {
-	return agentRecordDTO{
-		ID:      record.ServiceID,
-		Name:    record.Name,
-		Kind:    deriveAgentRecordKind(record),
-		Enabled: record.DesiredState == domain.AgentServiceDesiredRunning,
-		Behavior: agentBehaviorDTO{
-			RoleName:        record.RoleName,
-			DriverID:        record.DriverID,
-			DriverVersionID: record.DriverVersionID,
-		},
-		BudgetPolicy: record.BudgetPolicy,
-		WorkspaceKey: record.WorkspaceKey,
-		Metadata:     cloneStringMap(record.Metadata),
-		CreatedAt:    record.CreatedAt,
-		UpdatedAt:    record.UpdatedAt,
-	}
-}
-
 func (m *Module) agentRecordDTOWithBindings(
 	ctx context.Context,
 	ws string,
 	record *domain.AgentService,
 	bindings []*automation.Binding,
 	now time.Time,
-) agentRecordDTO {
-	out := newAgentRecordDTO(record)
+) (loomapi.UnifiedAgent, error) {
+	kind, err := m.canonicalAgentRecordKind(ctx, ws, record)
+	if err != nil {
+		return loomapi.UnifiedAgent{}, err
+	}
+	return m.agentRecordDTOWithBindingsAndKind(ctx, ws, record, kind, bindings, now)
+}
+
+func (m *Module) agentRecordDTOWithBindingsAndKind(
+	ctx context.Context,
+	ws string,
+	record *domain.AgentService,
+	kind string,
+	bindings []*automation.Binding,
+	now time.Time,
+) (loomapi.UnifiedAgent, error) {
 	decorators := make([]triggerbindings.BindingDecorators, 0, len(bindings))
-	out.Bindings = make([]recordBindingDTO, 0, len(bindings))
+	transportBindings := make([]loomapi.AgentRecordBinding, 0, len(bindings))
 	for _, b := range bindings {
 		if b == nil {
 			continue
 		}
 		dec := triggerbindings.DecorateBinding(ctx, m.bindingRuns, ws, b, now)
 		decorators = append(decorators, dec)
-		out.Bindings = append(out.Bindings, recordBindingDTO{
-			Binding:             b,
-			NextFireAt:          dec.NextFireAt,
-			LastRunStatus:       dec.LastRunStatus,
-			ConsecutiveFailures: dec.ConsecutiveFailures,
-		})
+		transportBindings = append(transportBindings, agentRecordBindingDTO(b, dec))
 	}
-	out.LastRunStatus, out.ConsecutiveFailures, out.NextFireAt = aggregateBindingDecorators(decorators)
-	return out
+	lastStatus, failures, next := aggregateBindingDecorators(decorators)
+	return newAgentRecordDTO(record, kind, transportBindings, &agentRecordDecorators{
+		lastRunStatus: lastStatus, consecutiveFailures: failures, nextFireAt: next,
+	})
+}
+
+type agentRecordDecorators struct {
+	lastRunStatus       string
+	consecutiveFailures int
+	nextFireAt          *time.Time
+}
+
+func newAgentRecordDTO(
+	record *domain.AgentService,
+	kind string,
+	bindings []loomapi.AgentRecordBinding,
+	decorators *agentRecordDecorators,
+) (loomapi.UnifiedAgent, error) {
+	fields := agentRecordFields(record, bindings, decorators)
+	var out loomapi.UnifiedAgent
+	switch kind {
+	case agentRecordKindInteractive:
+		err := out.FromInteractiveAgentRecord(loomapi.InteractiveAgentRecord{
+			Behavior: loomapi.PromptAgentBehavior{RoleName: record.RoleName},
+			Bindings: fields.bindings, BudgetPolicy: fields.budgetPolicy,
+			ConsecutiveFailures: fields.consecutiveFailures, CreatedAt: record.CreatedAt,
+			Enabled: fields.enabled, Id: record.ServiceID,
+			Kind:          loomapi.InteractiveAgentRecordKindInteractive,
+			LastRunStatus: fields.lastRunStatus, Metadata: fields.metadata,
+			Name: record.Name, NextFireAt: fields.nextFireAt,
+			UpdatedAt: record.UpdatedAt, WorkspaceKey: record.WorkspaceKey,
+		})
+		return out, err
+	case agentRecordKindScripted:
+		err := out.FromScriptedAgentRecord(loomapi.ScriptedAgentRecord{
+			Behavior: loomapi.ScriptedAgentBehavior{
+				DriverId: record.DriverID, DriverVersionId: record.DriverVersionID,
+			},
+			Bindings: fields.bindings, BudgetPolicy: fields.budgetPolicy,
+			ConsecutiveFailures: fields.consecutiveFailures, CreatedAt: record.CreatedAt,
+			Enabled: fields.enabled, Id: record.ServiceID, Kind: loomapi.Scripted,
+			LastRunStatus: fields.lastRunStatus, Metadata: fields.metadata,
+			Name: record.Name, NextFireAt: fields.nextFireAt,
+			UpdatedAt: record.UpdatedAt, WorkspaceKey: record.WorkspaceKey,
+		})
+		return out, err
+	default:
+		err := out.FromPromptAgentRecord(loomapi.PromptAgentRecord{
+			Behavior: loomapi.PromptAgentBehavior{RoleName: record.RoleName},
+			Bindings: fields.bindings, BudgetPolicy: fields.budgetPolicy,
+			ConsecutiveFailures: fields.consecutiveFailures, CreatedAt: record.CreatedAt,
+			Enabled: fields.enabled, Id: record.ServiceID,
+			Kind:          loomapi.PromptAgentRecordKindPrompt,
+			LastRunStatus: fields.lastRunStatus, Metadata: fields.metadata,
+			Name: record.Name, NextFireAt: fields.nextFireAt,
+			UpdatedAt: record.UpdatedAt, WorkspaceKey: record.WorkspaceKey,
+		})
+		return out, err
+	}
+}
+
+type agentRecordTransportFields struct {
+	bindings            *[]loomapi.AgentRecordBinding
+	budgetPolicy        *string
+	consecutiveFailures *int
+	enabled             bool
+	lastRunStatus       *string
+	metadata            *map[string]string
+	nextFireAt          *time.Time
+}
+
+func agentRecordFields(
+	record *domain.AgentService,
+	bindings []loomapi.AgentRecordBinding,
+	decorators *agentRecordDecorators,
+) agentRecordTransportFields {
+	fields := agentRecordTransportFields{
+		bindings:     optionalAgentRecordBindings(bindings),
+		budgetPolicy: optionalAgentRecordString(record.BudgetPolicy),
+		enabled:      record.DesiredState == domain.AgentServiceDesiredRunning,
+		metadata:     optionalAgentRecordMap(cloneStringMap(record.Metadata)),
+	}
+	if decorators != nil {
+		fields.consecutiveFailures = optionalAgentRecordInt(decorators.consecutiveFailures)
+		fields.lastRunStatus = optionalAgentRecordString(decorators.lastRunStatus)
+		fields.nextFireAt = decorators.nextFireAt
+	}
+	return fields
+}
+
+func agentRecordBindingDTO(binding *automation.Binding, decorators triggerbindings.BindingDecorators) loomapi.AgentRecordBinding {
+	return loomapi.AgentRecordBinding{
+		ActorFilter:          agentRecordActorFilter(binding.ActorFilter),
+		AuthPolicy:           optionalAgentRecordString(binding.AuthPolicy),
+		BindingId:            binding.BindingID,
+		ConcurrencyPolicy:    string(binding.ConcurrencyPolicy),
+		ConsecutiveFailures:  optionalAgentRecordInt(decorators.ConsecutiveFailures),
+		CreatedAt:            binding.CreatedAt,
+		DriverId:             binding.DriverID,
+		DriverVersionId:      binding.DriverVersionID,
+		Enabled:              binding.Enabled,
+		EventTypePatterns:    optionalAgentRecordStrings(binding.EventTypePatterns),
+		FilterRef:            optionalAgentRecordString(binding.FilterRef),
+		IdempotencyPolicy:    optionalAgentRecordString(binding.IdempotencyPolicy),
+		LastRunStatus:        optionalAgentRecordString(decorators.LastRunStatus),
+		Method:               optionalAgentRecordString(binding.Method),
+		Name:                 binding.Name,
+		NextFireAt:           decorators.NextFireAt,
+		PathTemplate:         optionalAgentRecordString(binding.PathTemplate),
+		Permissions:          optionalAgentRecordStrings(binding.Permissions),
+		RetryBackoffSeconds:  optionalAgentRecordInt(binding.RetryBackoffSeconds),
+		RetryMaxAttempts:     optionalAgentRecordInt(binding.RetryMaxAttempts),
+		RouteKey:             optionalAgentRecordString(binding.RouteKey),
+		Schedule:             optionalAgentRecordString(binding.Schedule),
+		ScheduleTimezone:     optionalAgentRecordString(binding.ScheduleTimezone),
+		SourceConfigRef:      optionalAgentRecordString(binding.SourceConfigRef),
+		SourceKind:           binding.SourceKind,
+		SourceRef:            optionalAgentRecordString(binding.SourceRef),
+		SubjectKeyTemplate:   optionalAgentRecordString(binding.SubjectKeyTemplate),
+		TargetAgentServiceId: optionalAgentRecordString(binding.TargetAgentServiceID),
+		TargetEntrypoint:     optionalAgentRecordString(binding.TargetEntrypoint),
+		Topic:                optionalAgentRecordString(binding.Topic),
+		UpdatedAt:            binding.UpdatedAt,
+		WorkspaceKey:         binding.WorkspaceKey,
+	}
+}
+
+func agentRecordActorFilter(filter *automation.ActorFilter) *loomapi.TriggerActorFilter {
+	if filter == nil || filter.IsZero() {
+		return nil
+	}
+	return &loomapi.TriggerActorFilter{
+		AllowActors:       optionalAgentRecordStrings(filter.AllowActors),
+		ExcludeActorKinds: optionalAgentRecordStrings(filter.ExcludeActorKinds),
+	}
+}
+
+func optionalAgentRecordString(value string) *string {
+	if value == "" {
+		return nil
+	}
+	return &value
+}
+
+func optionalAgentRecordInt(value int) *int {
+	if value == 0 {
+		return nil
+	}
+	return &value
+}
+
+func optionalAgentRecordStrings(value []string) *[]string {
+	if len(value) == 0 {
+		return nil
+	}
+	copyOfValue := append([]string(nil), value...)
+	return &copyOfValue
+}
+
+func optionalAgentRecordBindings(value []loomapi.AgentRecordBinding) *[]loomapi.AgentRecordBinding {
+	if len(value) == 0 {
+		return nil
+	}
+	copyOfValue := append([]loomapi.AgentRecordBinding(nil), value...)
+	return &copyOfValue
+}
+
+func optionalAgentRecordMap(value map[string]string) *map[string]string {
+	if len(value) == 0 {
+		return nil
+	}
+	return &value
+}
+
+func optionalAgentRecordStringValue(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
+}
+
+func optionalAgentRecordStringsValue(value *[]string) []string {
+	if value == nil {
+		return nil
+	}
+	return append([]string(nil), (*value)...)
+}
+
+func optionalAgentRecordBoolValue(value *bool) bool {
+	return value != nil && *value
+}
+
+func stringValueFromInteractiveKind(value *loomapi.CreateInteractiveAgentRequestKind) string {
+	if value == nil {
+		return ""
+	}
+	return string(*value)
 }
 
 func aggregateBindingDecorators(decorators []triggerbindings.BindingDecorators) (string, int, *time.Time) {

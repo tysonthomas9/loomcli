@@ -6,18 +6,13 @@ import (
 	"strings"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	loomapi "github.com/tysonthomas9/loomcli/internal/platform/loomapi/gen"
 	"github.com/tysonthomas9/loomcli/internal/webui/readprojection"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
 
 var validTaskWorkflowRunID = regexp.MustCompile(`^[a-zA-Z0-9._-]+$`)
-
-type taskWorkflowRunsResponse struct {
-	TaskID     string              `json:"task_id"`
-	SubjectRef string              `json:"subject_ref"`
-	Runs       []*domain.DriverRun `json:"runs"`
-}
 
 // listTaskWorkflowRuns is the HTTP adapter for the task workflow-run read
 // projection. Cross-capability joins and session-aware dedupe stay behind the
@@ -50,7 +45,7 @@ func (m *Module) listTaskWorkflowRuns(w http.ResponseWriter, r *http.Request) {
 	if runs == nil {
 		runs = []*domain.DriverRun{}
 	}
-	handler.WriteJSON(w, http.StatusOK, taskWorkflowRunsResponse{
-		TaskID: taskID, SubjectRef: projection.SubjectRef, Runs: runs,
+	handler.WriteJSON(w, http.StatusOK, loomapi.TaskWorkflowRunsResponse{
+		TaskId: taskID, SubjectRef: projection.SubjectRef, Runs: handler.DriverRunsFromDomain(runs),
 	})
 }

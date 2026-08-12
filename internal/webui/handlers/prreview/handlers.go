@@ -6,43 +6,16 @@ import (
 	"strings"
 
 	connectorsmodule "github.com/tysonthomas9/loomcli/internal/modules/connectors"
+	loomapi "github.com/tysonthomas9/loomcli/internal/platform/loomapi/gen"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
 
-// The PR-review HTTP adapter owns these wire shapes. They intentionally remain
-// private to the consumer instead of importing generated backend DTOs.
-type pullRequestDetail struct {
-	BaseRefName string `json:"base_ref_name"`
-	HeadRefName string `json:"head_ref_name"`
-	HeadSHA     string `json:"head_sha"`
-	IsDraft     bool   `json:"is_draft"`
-	Merged      bool   `json:"merged"`
-	Number      int    `json:"number"`
-	State       string `json:"state"`
-	Title       string `json:"title"`
-}
-
-type pullRequestDiff struct {
-	Diff  string                `json:"diff"`
-	Files []pullRequestDiffFile `json:"files"`
-}
-
-type pullRequestDiffFile struct {
-	Additions int    `json:"additions"`
-	Deletions int    `json:"deletions"`
-	Patch     string `json:"patch"`
-	Path      string `json:"path"`
-	Status    string `json:"status"`
-}
-
-type pullRequestReviewRequest struct {
-	Body            *string                       `json:"body,omitempty"`
-	Event           pullRequestReviewRequestEvent `json:"event"`
-	ExpectedHeadSHA string                        `json:"expected_head_sha"`
-}
-
-type pullRequestReviewRequestEvent string
+type pullRequestDetail = loomapi.PullRequestDetail
+type pullRequestDiff = loomapi.PullRequestDiff
+type pullRequestDiffFile = loomapi.PullRequestDiffFile
+type pullRequestReviewRequest = loomapi.PullRequestReviewRequest
+type pullRequestReviewRequestEvent = loomapi.PullRequestReviewRequestEvent
 
 const (
 	pullRequestReviewApprove        pullRequestReviewRequestEvent = "approve"
@@ -50,25 +23,10 @@ const (
 	pullRequestReviewRequestChanges pullRequestReviewRequestEvent = "request_changes"
 )
 
-type pullRequestReviewResult struct {
-	ReviewID *int    `json:"review_id,omitempty"`
-	State    *string `json:"state,omitempty"`
-}
-
-type reviewerEnsureResult struct {
-	AgentName     string `json:"agent_name"`
-	CheckedOutSHA string `json:"checked_out_sha"`
-	Seeded        bool   `json:"seeded"`
-}
-
-type reviewerMessageRequest struct {
-	Text string `json:"text"`
-}
-
-type reviewerMessageResult struct {
-	Reason string `json:"reason"`
-	State  string `json:"state"`
-}
+type pullRequestReviewResult = loomapi.PullRequestReviewResult
+type reviewerEnsureResult = loomapi.ReviewerEnsureResult
+type reviewerMessageRequest = loomapi.ReviewerMessageRequest
+type reviewerMessageResult = loomapi.ReviewerMessageResult
 
 // resolveAuthorizedPR parses the {owner}/{repo}/{number} path and
 // canonicalizes owner/repo through the workspace membership check, writing
@@ -246,11 +204,11 @@ func pullRequestArgs(params pullRequestPath) map[string]any {
 // decodeReviewRequest parses and validates a review POST body, writing the
 // HTTP error itself and returning ok=false on failure.
 func decodeReviewRequest(w http.ResponseWriter, r *http.Request) (req pullRequestReviewRequest, event, expectedHeadSHA string, ok bool) {
-	if err := handler.DecodeOneJSON(w, r, &req, handler.JSONDecodeOptions{}); err != nil {
+	if err := handler.DecodeOneJSON(w, r, &req, handler.JSONDecodeOptions{DisallowUnknownFields: true}); err != nil {
 		writePRReviewErrorCode(w, http.StatusBadRequest, "invalid", "invalid review request body", false)
 		return req, "", "", false
 	}
-	expectedHeadSHA = strings.TrimSpace(req.ExpectedHeadSHA)
+	expectedHeadSHA = strings.TrimSpace(req.ExpectedHeadSha)
 	if expectedHeadSHA == "" {
 		writePRReviewErrorCode(w, http.StatusPreconditionRequired, "precondition_required", "expected_head_sha is required", false)
 		return req, "", "", false
@@ -294,7 +252,7 @@ func pullRequestDetailFromBody(body map[string]any) pullRequestDetail {
 		IsDraft:     boolValue(body["draft"]),
 		HeadRefName: stringValue(body["headRef"]),
 		BaseRefName: stringValue(body["baseRef"]),
-		HeadSHA:     stringValue(body["headSha"]),
+		HeadSha:     stringValue(body["headSha"]),
 		Merged:      boolValue(body["merged"]),
 	}
 }
@@ -349,7 +307,7 @@ func githubReviewEvent(event pullRequestReviewRequestEvent) (string, bool) {
 
 func pullRequestReviewResultFromBody(body map[string]any) pullRequestReviewResult {
 	return pullRequestReviewResult{
-		ReviewID: intPtrFromValue(body["id"]),
+		ReviewId: intPtrFromValue(body["id"]),
 		State:    stringPtrFromValue(body["state"]),
 	}
 }

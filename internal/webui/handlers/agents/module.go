@@ -10,8 +10,8 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
-	workflowcataloghttp "github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog/httpapi"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
+	loomapi "github.com/tysonthomas9/loomcli/internal/platform/loomapi/gen"
 	"github.com/tysonthomas9/loomcli/internal/webui/agentcoord"
 	"github.com/tysonthomas9/loomcli/internal/webui/apperrors"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/triggerbindings"
@@ -33,15 +33,15 @@ type Config struct {
 	AgentRecords          AgentRecordAPI
 	AgentIdentityCreator  CanonicalInteractiveAgentAPI
 	InteractiveRuntime    agentcoord.InteractiveAgentRuntime
-	AgentRecordAuthority  workflowcataloghttp.OperatorAuthorityResolver
+	AgentRecordAuthority  OperatorAuthorityResolver
 	SessionTranscripts    sessioncoord.AgentSessionTranscriptService
 	AgentRuns             AgentRunQueries
 	Hub                   *realtime.Hub
 	Bindings              automation.BindingOperations
 	BindingRuns           triggerbindings.RunQueries
-	OperatorAuthority     workflowcataloghttp.OperatorAuthorityResolver
+	OperatorAuthority     OperatorAuthorityResolver
 	Provisioning          agentprovisioning.Commands
-	ProvisioningAuthority workflowcataloghttp.OperatorAuthorityResolver
+	ProvisioningAuthority OperatorAuthorityResolver
 	PrepareWorkflowTarget func(context.Context, string, string) (*workflowcatalog.Driver, error)
 	WorkspaceFromContext  func(context.Context) string
 	BindingGrants         BindingGrantCleanup
@@ -59,19 +59,26 @@ type Module struct {
 	agentIdentityCreator  CanonicalInteractiveAgentAPI
 	agentRoleQueries      agentsmodule.RoleQueries
 	interactiveRuntime    agentcoord.InteractiveAgentRuntime
-	agentRecordAuthority  workflowcataloghttp.OperatorAuthorityResolver
+	agentRecordAuthority  OperatorAuthorityResolver
 	sessionTranscripts    sessioncoord.AgentSessionTranscriptService
 	agentRuns             AgentRunQueries
 	hub                   *realtime.Hub
 	bindings              automation.BindingOperations
 	bindingRuns           triggerbindings.RunQueries
-	operatorAuthority     workflowcataloghttp.OperatorAuthorityResolver
+	operatorAuthority     OperatorAuthorityResolver
 	provisioning          agentprovisioning.Commands
-	provisioningAuthority workflowcataloghttp.OperatorAuthorityResolver
+	provisioningAuthority OperatorAuthorityResolver
 	prepareWorkflowTarget func(context.Context, string, string) (*workflowcatalog.Driver, error)
 	agentLifecycle        AgentLifecycleAPI
 	workspaceFromContext  func(context.Context) string
 	bindingGrants         BindingGrantCleanup
+}
+
+// OperatorAuthorityResolver is the request-scoped authority seam consumed by
+// Agents. Keeping it here avoids coupling this delivery adapter to Workflow
+// Catalog's HTTP adapter package.
+type OperatorAuthorityResolver interface {
+	ResolveOperatorAuthority(*http.Request, string, authority.Action) (authority.OperatorAuthority, error)
 }
 
 // New constructs the Automation-aware agent HTTP module.
@@ -147,8 +154,8 @@ func writeAgentSessionTranscriptServiceError(w http.ResponseWriter, err error) {
 		status = handler.StatusForKind(svcErr.Kind)
 		message = svcErr.Message
 	}
-	handler.WriteJSON(w, status, agentSessionTranscriptResponse{
+	handler.WriteJSON(w, status, loomapi.TranscriptResponse{
 		Success: false,
-		Error:   message,
+		Error:   optionalAgentRecordString(message),
 	})
 }

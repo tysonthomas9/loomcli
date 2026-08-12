@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
+	loomapi "github.com/tysonthomas9/loomcli/internal/platform/loomapi/gen"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/terminal"
@@ -57,17 +58,8 @@ func HandleGetTerminalTab(svc terminal.TerminalService) http.HandlerFunc {
 	}
 }
 
-// tabPatchRequest represents the partial update body for PATCH.
-type tabPatchRequest struct {
-	Label     *string `json:"label"`
-	Notes     *string `json:"notes"`
-	SortOrder *int    `json:"sort_order"`
-	Pinned    *bool   `json:"pinned"`
-	IssueID   *string `json:"issue_id"`
-}
-
-// buildPatchFields converts a tabPatchRequest into a partial fields map for store.Patch.
-func buildPatchFields(req tabPatchRequest) map[string]string {
+// buildPatchFields converts the generated request into a partial fields map for store.Patch.
+func buildPatchFields(req loomapi.TabPatchRequest) map[string]string {
 	fields := make(map[string]string)
 	if req.Label != nil {
 		fields["label"] = *req.Label
@@ -81,8 +73,8 @@ func buildPatchFields(req tabPatchRequest) map[string]string {
 	if req.Pinned != nil {
 		fields["pinned"] = strconv.FormatBool(*req.Pinned)
 	}
-	if req.IssueID != nil {
-		fields["issue_id"] = *req.IssueID
+	if req.IssueId != nil {
+		fields["issue_id"] = *req.IssueId
 	}
 	return fields
 }
@@ -93,8 +85,8 @@ func HandlePatchTerminalTab(svc terminal.TerminalService) http.HandlerFunc {
 		workspace := middleware.WorkspaceFromContext(r.Context())
 		session := r.PathValue("session")
 
-		var req tabPatchRequest
-		if err := handler.DecodeOneJSON(w, r, &req, handler.JSONDecodeOptions{}); err != nil {
+		var req loomapi.TabPatchRequest
+		if err := handler.DecodeOneJSON(w, r, &req, handler.JSONDecodeOptions{DisallowUnknownFields: true}); err != nil {
 			handler.WriteJSON(w, http.StatusBadRequest, tabMetadataResponse{
 				Success: false,
 				Error:   "invalid request body",
@@ -124,17 +116,8 @@ func HandlePatchTerminalTab(svc terminal.TerminalService) http.HandlerFunc {
 	}
 }
 
-// tabPutRequest represents the full create-or-replace body for PUT.
-type tabPutRequest struct {
-	Backend   string `json:"backend"`
-	Label     string `json:"label"`
-	SortOrder int    `json:"sort_order"`
-	Notes     string `json:"notes"`
-	Pinned    bool   `json:"pinned"`
-}
-
-func newTabMetadata(workspace, session string, req tabPutRequest) (*terminal.TabMetadata, error) {
-	backend := strings.ToLower(strings.TrimSpace(req.Backend))
+func newTabMetadata(workspace, session string, req loomapi.TabPutRequest) (*terminal.TabMetadata, error) {
+	backend := strings.ToLower(strings.TrimSpace(string(req.Backend)))
 	launch, err := terminal.LaunchSpecForBackend(backend, bootstrap.LoomDir())
 	if err != nil {
 		return nil, err
@@ -160,8 +143,8 @@ func HandlePutTerminalTab(svc terminal.TerminalService) http.HandlerFunc {
 		workspace := middleware.WorkspaceFromContext(r.Context())
 		session := r.PathValue("session")
 
-		var req tabPutRequest
-		if err := handler.DecodeOneJSON(w, r, &req, handler.JSONDecodeOptions{}); err != nil {
+		var req loomapi.TabPutRequest
+		if err := handler.DecodeOneJSON(w, r, &req, handler.JSONDecodeOptions{DisallowUnknownFields: true}); err != nil {
 			handler.WriteJSON(w, http.StatusBadRequest, tabMetadataResponse{
 				Success: false,
 				Error:   "invalid request body",

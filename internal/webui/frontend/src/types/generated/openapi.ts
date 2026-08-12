@@ -2457,6 +2457,13 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
   schemas: {
+    InteractivePromptsResponse: {
+      prompts: components["schemas"]["InteractivePrompt"][];
+    };
+    InteractivePrompt: {
+      id: string;
+      label: string;
+    };
     ErrorResponse: {
       /** @constant */
       success: false;
@@ -2901,7 +2908,7 @@ export interface components {
       /** Format: date-time */
       created_at: string;
     };
-    /** @description Comment in IssueResponse (dto.CommentResponse) */
+    /** @description Comment returned within an IssueResponse. */
     CommentResponse: {
       /** Format: int64 */
       id: number;
@@ -3117,7 +3124,7 @@ export interface components {
       role: string;
       backend: string;
     };
-    /** @description Agent entity from dto.AgentStatusResponse */
+    /** @description Agent status returned by the canonical HTTP contract. */
     AgentStatusResponse: {
       id: string;
       title: string;
@@ -3483,6 +3490,7 @@ export interface components {
       epic_id?: string;
       trigger_binding_id?: string;
       agent_service_id?: string;
+      subject_key?: string;
       status: string;
       node_id?: string;
       lease_id?: string;
@@ -3502,6 +3510,7 @@ export interface components {
       /** Format: date-time */
       finished_at?: string | null;
       parent_run_id?: string;
+      await_instance_key?: string;
       /** Format: date-time */
       suspended_at?: string | null;
       /** Format: date-time */
@@ -3513,7 +3522,7 @@ export interface components {
       /** Format: date-time */
       updated_at: string;
     };
-    /** @description Session audit record from dto.SessionResponse */
+    /** @description Session audit record returned by the canonical HTTP contract. */
     SessionResponse: {
       session_id: string;
       task_id: string;
@@ -6652,12 +6661,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": {
-            prompts: {
-              id: string;
-              label: string;
-            }[];
-          };
+          "application/json": components["schemas"]["InteractivePromptsResponse"];
         };
       };
     };
