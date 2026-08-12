@@ -249,20 +249,21 @@ export function TerminalView({
 
   // Hook ordering: useSessionSeeding before useConnectionState so
   // trySeedOnConnect is available as the onTabConnected callback.
-  const { trySeedOnConnect } = useSessionSeeding({
-    pendingIssueContext,
-    onIssueContextConsumed,
-    pendingAgentName,
-    onAgentNameConsumed,
-    tabs,
-    setTabs,
-    setActiveTabId,
-    createTab,
-    config: config ?? undefined,
-    initializedRef,
-    tabsRef,
-    workspaceIdRef,
-  });
+  const { trySeedOnConnect, agentResolutionState, agentResolutionError } =
+    useSessionSeeding({
+      pendingIssueContext,
+      onIssueContextConsumed,
+      pendingAgentName,
+      onAgentNameConsumed,
+      tabs,
+      setTabs,
+      setActiveTabId,
+      createTab,
+      config: config ?? undefined,
+      initializedRef,
+      tabsRef,
+      workspaceIdRef,
+    });
 
   const {
     tabHasConnected,
@@ -840,7 +841,24 @@ export function TerminalView({
   const containerClassName = styles.container;
   return (
     <div className={containerClassName} data-testid="terminal-view">
-      {(metaLoading || configLoading) && visibleTabs.length === 0 ? (
+      {hideTabs && pendingAgentName && agentResolutionState === "waking" ? (
+        <div
+          className={styles.leadWaking}
+          role="status"
+          data-testid="lead-sandbox-waking"
+        >
+          Lead sandbox is waking up…
+        </div>
+      ) : hideTabs && pendingAgentName && agentResolutionState === "failed" ? (
+        <div
+          className={styles.leadWaking}
+          role="alert"
+          data-testid="lead-sandbox-failed"
+        >
+          {agentResolutionError ??
+            "Lead sandbox did not become ready. Try opening the agent again."}
+        </div>
+      ) : (metaLoading || configLoading) && visibleTabs.length === 0 ? (
         <LoadingSkeleton.Terminal />
       ) : visibleTabs.length === 0 ? (
         <NoBackendsEmptyState

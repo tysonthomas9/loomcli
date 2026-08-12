@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/connector"
+	"github.com/tysonthomas9/loomcli/internal/leadprovision"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/approvals"
 	githandlers "github.com/tysonthomas9/loomcli/internal/webui/handlers/git"
@@ -73,17 +74,28 @@ type TerminalModuleDeps struct {
 	TabMetaStore    *tabmeta.Store
 	Hub             *realtime.Hub
 	ServerStartedAt time.Time
+	LeadReviver     *leadprovision.ReviveCoordinator
 }
 
 // NewTerminalModules creates the terminal tab and main terminal modules.
 func NewTerminalModules(deps TerminalModuleDeps) []interface{ Register(*http.ServeMux) } {
-	return []interface{ Register(*http.ServeMux) }{
-		hterminal.NewTabModule(deps.TermSvc),
-		hterminal.NewModule(
+	var terminalModule interface{ Register(*http.ServeMux) }
+	if deps.LeadReviver == nil {
+		terminalModule = hterminal.NewModule(
 			deps.TermSvc, deps.AgentSvc, deps.PTYMgr, deps.AgentTmuxMgr,
 			deps.TermAuth, deps.CORSOrigins,
 			deps.SelfURL, deps.Store,
-			deps.TabMetaStore, deps.Hub, deps.ServerStartedAt),
+			deps.TabMetaStore, deps.Hub, deps.ServerStartedAt)
+	} else {
+		terminalModule = hterminal.NewModule(
+			deps.TermSvc, deps.AgentSvc, deps.PTYMgr, deps.AgentTmuxMgr,
+			deps.TermAuth, deps.CORSOrigins,
+			deps.SelfURL, deps.Store,
+			deps.TabMetaStore, deps.Hub, deps.ServerStartedAt, deps.LeadReviver)
+	}
+	return []interface{ Register(*http.ServeMux) }{
+		hterminal.NewTabModule(deps.TermSvc),
+		terminalModule,
 	}
 }
 

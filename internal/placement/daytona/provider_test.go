@@ -250,6 +250,190 @@ func TestGetMapsNotFoundButNotTransportOrServer(t *testing.T) {
 	})
 }
 
+func TestEnsureRunningRawStateContract(t *testing.T) {
+	tests := []struct {
+		name        string
+		initial     string
+		wantResumed bool
+		wantStart   bool
+		wantErr     bool
+		wantMissing bool
+	}{
+		{name: "started", initial: "started"},
+		{name: "stopped", initial: "stopped", wantResumed: true, wantStart: true},
+		{name: "archived", initial: "archived", wantResumed: true, wantStart: true},
+		{name: "paused", initial: "paused", wantResumed: true, wantStart: true},
+		{name: "starting", initial: "starting", wantResumed: true},
+		{name: "restoring", initial: "restoring", wantResumed: true},
+		{name: "resuming", initial: "resuming", wantResumed: true},
+		{name: "error", initial: "error", wantErr: true},
+		{name: "build failed", initial: "build_failed", wantErr: true},
+		{name: "destroyed", initial: "destroyed", wantErr: true, wantMissing: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			getCalls := 0
+			startCalls := 0
+			provider := newTestProvider(t, func(req *http.Request) (*http.Response, error) {
+				switch {
+				case req.Method == http.MethodGet && req.URL.Path == "/api/sandbox/sandbox-1":
+					getCalls++
+					state := tt.initial
+					if getCalls > 1 {
+						state = "started"
+					}
+					return jsonResponse(http.StatusOK, sandboxBody("sandbox-1", state, "https://daytona.test/toolbox", nil)), nil
+				case req.Method == http.MethodPost && req.URL.Path == "/api/sandbox/sandbox-1/start":
+					startCalls++
+					return jsonResponse(http.StatusOK, sandboxBody("sandbox-1", "started", "https://daytona.test/toolbox", nil)), nil
+				default:
+					t.Fatalf("unexpected request %s %s", req.Method, req.URL.Path)
+					return nil, nil
+				}
+			})
+
+			resumed, err := provider.EnsureRunning(context.Background(), "sandbox-1")
+			if resumed != tt.wantResumed {
+				t.Fatalf("EnsureRunning resumed = %v, want %v", resumed, tt.wantResumed)
+			}
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("EnsureRunning error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if errors.Is(err, placement.ErrSandboxNotFound) != tt.wantMissing {
+				t.Fatalf("EnsureRunning missing = %v, want %v (error %v)", errors.Is(err, placement.ErrSandboxNotFound), tt.wantMissing, err)
+			}
+			if got := startCalls > 0; got != tt.wantStart {
+				t.Fatalf("StartSandbox called = %v, want %v", got, tt.wantStart)
+			}
+		})
+	}
+}
+
+func TestEnsureRunningMapsMissingAndHonorsCallerTimeout(t *testing.T) {
+	t.Run("missing", func(t *testing.T) {
+		provider := newTestProvider(t, func(req *http.Request) (*http.Response, error) {
+			return jsonResponse(http.StatusNotFound, `{"message":"Sandbox not found"}`), nil
+		})
+		resumed, err := provider.EnsureRunning(context.Background(), "missing")
+		if resumed || !errors.Is(err, placement.ErrSandboxNotFound) {
+			t.Fatalf("EnsureRunning = (%v, %v), want false, ErrSandboxNotFound", resumed, err)
+		}
+	})
+
+	t.Run("timeout", func(t *testing.T) {
+		provider := newTestProvider(t, func(req *http.Request) (*http.Response, error) {
+			return jsonResponse(http.StatusOK, sandboxBody("sandbox-1", "starting", "https://daytona.test/toolbox", nil)), nil
+		})
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+		defer cancel()
+		resumed, err := provider.EnsureRunning(ctx, "sandbox-1")
+		if !resumed || !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("EnsureRunning = (%v, %v), want true, deadline exceeded", resumed, err)
+		}
+	})
+}
+
+func TestEnsureRunningWaitsForStoppingThenStarts(t *testing.T) {
+	getCalls := 0
+	startCalls := 0
+	provider := newTestProvider(t, func(req *http.Request) (*http.Response, error) {
+		switch {
+		case req.Method == http.MethodGet && req.URL.Path == "/api/sandbox/sandbox-1":
+			getCalls++
+			state := "stopping"
+			if getCalls > 1 {
+				state = "stopped"
+			}
+			return jsonResponse(http.StatusOK, sandboxBody("sandbox-1", state, "https://daytona.test/toolbox", nil)), nil
+		case req.Method == http.MethodPost && req.URL.Path == "/api/sandbox/sandbox-1/start":
+			startCalls++
+			return jsonResponse(http.StatusOK, sandboxBody("sandbox-1", "started", "https://daytona.test/toolbox", nil)), nil
+		default:
+			t.Fatalf("unexpected request %s %s", req.Method, req.URL.Path)
+			return nil, nil
+		}
+	})
+
+	resumed, err := provider.EnsureRunning(context.Background(), "sandbox-1")
+	if err != nil || !resumed {
+		t.Fatalf("EnsureRunning = (%v, %v), want true, nil", resumed, err)
+	}
+	if startCalls != 1 {
+		t.Fatalf("StartSandbox calls = %d, want 1", startCalls)
+	}
+}
+
+func TestEnsureRunningReturnsFalseWhenStartSandboxFails(t *testing.T) {
+	provider := newTestProvider(t, func(req *http.Request) (*http.Response, error) {
+		if req.Method == http.MethodGet {
+			return jsonResponse(http.StatusOK, sandboxBody("sandbox-1", "stopped", "https://daytona.test/toolbox", nil)), nil
+		}
+		return jsonResponse(http.StatusInternalServerError, `{"message":"start failed"}`), nil
+	})
+
+	resumed, err := provider.EnsureRunning(context.Background(), "sandbox-1")
+	if err == nil || resumed {
+		t.Fatalf("EnsureRunning = (%v, %v), want false with start error", resumed, err)
+	}
+}
+
+func TestEnsureRunningToleratesStartStateChangeInProgress(t *testing.T) {
+	getCalls := 0
+	startCalls := 0
+	provider := newTestProvider(t, func(req *http.Request) (*http.Response, error) {
+		switch req.Method {
+		case http.MethodGet:
+			getCalls++
+			state := "stopped"
+			if getCalls > 1 {
+				state = "started"
+			}
+			return jsonResponse(http.StatusOK, sandboxBody("sandbox-1", state, "https://daytona.test/toolbox", nil)), nil
+		case http.MethodPost:
+			startCalls++
+			return jsonResponse(http.StatusConflict, `{"message":"Sandbox state change in progress"}`), nil
+		default:
+			t.Fatalf("unexpected request %s %s", req.Method, req.URL.Path)
+			return nil, nil
+		}
+	})
+
+	resumed, err := provider.EnsureRunning(context.Background(), "sandbox-1")
+	if err != nil || !resumed {
+		t.Fatalf("EnsureRunning = (%v, %v), want true, nil", resumed, err)
+	}
+	if startCalls != 1 {
+		t.Fatalf("StartSandbox calls = %d, want 1", startCalls)
+	}
+}
+
+func TestEnsureRunningExitsWhenStartedSandboxReturnsToStopped(t *testing.T) {
+	getCalls := 0
+	provider := newTestProvider(t, func(req *http.Request) (*http.Response, error) {
+		switch req.Method {
+		case http.MethodGet:
+			getCalls++
+			state := "stopped"
+			return jsonResponse(http.StatusOK, sandboxBody("sandbox-1", state, "https://daytona.test/toolbox", nil)), nil
+		case http.MethodPost:
+			return jsonResponse(http.StatusOK, sandboxBody("sandbox-1", "starting", "https://daytona.test/toolbox", nil)), nil
+		default:
+			t.Fatalf("unexpected request %s %s", req.Method, req.URL.Path)
+			return nil, nil
+		}
+	})
+	ctx, cancel := context.WithTimeout(context.Background(), 2500*time.Millisecond)
+	defer cancel()
+
+	resumed, err := provider.EnsureRunning(ctx, "sandbox-1")
+	if !resumed || err == nil || errors.Is(err, context.DeadlineExceeded) || !strings.Contains(err.Error(), "stopped before reaching started") {
+		t.Fatalf("EnsureRunning = (%v, %v), want true with immediate stopped-state error", resumed, err)
+	}
+	if getCalls != 2 {
+		t.Fatalf("GetSandbox calls = %d, want initial read plus one stopped confirmation", getCalls)
+	}
+}
+
 func TestDeleteMapsAlreadyGoneToNotFound(t *testing.T) {
 	provider := newTestProvider(t, func(req *http.Request) (*http.Response, error) {
 		if req.Method != http.MethodDelete {

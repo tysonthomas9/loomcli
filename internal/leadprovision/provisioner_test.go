@@ -16,15 +16,16 @@ import (
 )
 
 type fakeBroker struct {
-	mu    sync.Mutex
-	calls []placement.ProvisionRequest
+	mu             sync.Mutex
+	calls          []placement.ProvisionRequest
+	leadStartError string
 }
 
 func (f *fakeBroker) Provision(_ context.Context, req placement.ProvisionRequest) (*placement.ProvisionResult, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls = append(f.calls, req)
-	return &placement.ProvisionResult{}, nil
+	return &placement.ProvisionResult{LeadStartError: f.leadStartError}, nil
 }
 
 func (f *fakeBroker) callCount() int {
@@ -115,6 +116,35 @@ func TestProvisionForAgentBuildsCodexDaytonaRequest(t *testing.T) {
 	}
 	if req.GitToken != nil {
 		t.Fatalf("GitToken configured without github slot")
+	}
+}
+
+func TestProvisionForAgentSurfacesLeadStartError(t *testing.T) {
+	ctx := context.Background()
+	st, broker := newProvisionFixture(t, domain.RoleKindInteractive, domain.RuntimeProviderDaytona, "codex")
+	broker.leadStartError = "lead PTY exited immediately after create"
+	dir := t.TempDir()
+	sealRuntimeCredential(t, dir, runtimesettings.RuntimeCredentialProviderCodex, `{"tokens":{"access":"codex-secret"}}`)
+	provisioner := New(broker, st, dir, DefaultAllowlist(), daytona.DefaultSnapshotName, DefaultResource())
+
+	err := provisioner.ProvisionForAgent(ctx, "WS", "nova")
+	if err == nil || !strings.Contains(err.Error(), broker.leadStartError) {
+		t.Fatalf("ProvisionForAgent = %v, want wrapped lead start error", err)
+	}
+}
+
+func TestReviveForAgentForcesLeadProbe(t *testing.T) {
+	ctx := context.Background()
+	st, broker := newProvisionFixture(t, domain.RoleKindInteractive, domain.RuntimeProviderDaytona, "codex")
+	dir := t.TempDir()
+	sealRuntimeCredential(t, dir, runtimesettings.RuntimeCredentialProviderCodex, `{"tokens":{"access":"codex-secret"}}`)
+	provisioner := New(broker, st, dir, DefaultAllowlist(), daytona.DefaultSnapshotName, DefaultResource())
+
+	if err := provisioner.ReviveForAgent(ctx, "WS", "nova"); err != nil {
+		t.Fatalf("ReviveForAgent: %v", err)
+	}
+	if req := broker.onlyCall(t); !req.ForceLeadProbe {
+		t.Fatal("ForceLeadProbe = false, want true for revive")
 	}
 }
 

@@ -4,8 +4,12 @@
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { api } from "@/api/common";
-import { getTabMetadata, patchTabMetadata } from "../terminal";
+import { api, ApiError } from "@/api/common";
+import {
+  getTabMetadata,
+  isStartingTerminalSessionError,
+  patchTabMetadata,
+} from "../terminal";
 
 vi.mock("@/api/common", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/api/common")>();
@@ -58,5 +62,23 @@ describe("terminal tab metadata API", () => {
       statusText: "OK",
       body: "missing response envelope",
     });
+  });
+
+  it("recognizes ensure-session starting errors only by structured kind", () => {
+    expect(
+      isStartingTerminalSessionError(
+        new ApiError(503, "Service Unavailable", { error: "waking" }),
+      ),
+    ).toBe(false);
+    expect(
+      isStartingTerminalSessionError(
+        new ApiError(500, "Internal Server Error", { kind: "starting" }),
+      ),
+    ).toBe(true);
+    expect(
+      isStartingTerminalSessionError(
+        new ApiError(500, "Internal Server Error", { kind: "internal" }),
+      ),
+    ).toBe(false);
   });
 });

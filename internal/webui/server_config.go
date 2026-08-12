@@ -88,29 +88,30 @@ type ServerConfig struct {
 	// Store is the unified state store for workspaces, repos, agents, roles,
 	// and daemon profiles. Local and distributed modes both use this store
 	// as the authoritative workspace/config source.
-	Store                store.Store
-	BackendOps           ops.BackendOps                                       // Backend health operations interface (optional; nil disables backend health endpoint)
-	ScrollbackMaxLines   int                                                  // Maximum lines per scrollback buffer (0 = default 10000)
-	NotifyTokenDir       string                                               // Directory to write notify.token (typically runtime dir); empty = token file not written
-	SessionRuntimeDir    string                                               // Runtime dir searched for local agent sessions; empty = workspace/repo stores only
-	LocalSettingsDir     string                                               // Desktop-local settings directory; empty disables /api/local/settings
-	AgentControlFn       agentcontrol.AgentControlFn                          // Sends agent lifecycle commands to the daemon control socket; nil in fleet mode or --no-daemon
-	DaemonSupervisorFn   func() (*DaemonSupervisorData, error)                // Returns daemon supervisor state from state file; nil = endpoint unavailable
-	DaemonConfigFn       func() (json.RawMessage, error)                      // Returns effective merged daemon config as JSON; nil = endpoint unavailable
-	AgentQueueFn         func(agentName string) ([]AgentQueueEntry, error)    // Returns scored work queue for named agent; nil = endpoint unavailable
-	FleetMode            bool                                                 // When true, skip local daemon lifecycle hooks; fleet server manages agents
-	FleetClientURL       string                                               // Fleet server URL for fleet-mode workers (e.g., "http://fleet.example.com"); empty = no fleet client
-	FleetClientWorkspace string                                               // Explicit fleet server workspace ID; empty = unset.
-	FleetClientAPIKey    string                                               // Pre-shared API key for fleet worker backend auth
-	FleetClientActor     string                                               // X-Actor header value for fleet-db --auth-dev-mode (typically the loom agent name)
-	FleetDBBaseURL       string                                               // fleet-db HTTP base URL backing Store; used by the driver-op API to build issue backends
-	DriverAPIToken       string                                               // Optional shared bearer token required by the driver-op HTTP API (LOOM_DRIVER_API_TOKEN)
-	DriverAPIBaseURL     string                                               // This serve process's own driver/task-run API base URL, exported to task runners as LOOM_TASK_RUN_API_URL; empty keeps runners on the legacy direct-fleet-db env
-	DriverRunTokenKey    []byte                                               // HS256 signing key for run-scoped driver-op tokens (LOOM_RUN_TOKEN_SIGNING_KEY or ephemeral); nil disables the token auth path
-	LeadProvisioner      *leadprovision.Provisioner                           // Eager Daytona lead provisioner; nil disables agent-create provisioning.
-	DaemonStartupFn      func(ctx context.Context, onReady func(wsID string)) // Starts daemons for secondary workspaces; calls onReady(wsID) when each is reachable
-	Logger               *slog.Logger                                         // Structured logger (optional; nil falls back to slog.Default())
-	SentryDSN            string                                               // Sentry/GlitchTip DSN for error tracking (optional; empty disables)
+	Store                 store.Store
+	BackendOps            ops.BackendOps                                       // Backend health operations interface (optional; nil disables backend health endpoint)
+	ScrollbackMaxLines    int                                                  // Maximum lines per scrollback buffer (0 = default 10000)
+	NotifyTokenDir        string                                               // Directory to write notify.token (typically runtime dir); empty = token file not written
+	SessionRuntimeDir     string                                               // Runtime dir searched for local agent sessions; empty = workspace/repo stores only
+	LocalSettingsDir      string                                               // Desktop-local settings directory; empty disables /api/local/settings
+	AgentControlFn        agentcontrol.AgentControlFn                          // Sends agent lifecycle commands to the daemon control socket; nil in fleet mode or --no-daemon
+	DaemonSupervisorFn    func() (*DaemonSupervisorData, error)                // Returns daemon supervisor state from state file; nil = endpoint unavailable
+	DaemonConfigFn        func() (json.RawMessage, error)                      // Returns effective merged daemon config as JSON; nil = endpoint unavailable
+	AgentQueueFn          func(agentName string) ([]AgentQueueEntry, error)    // Returns scored work queue for named agent; nil = endpoint unavailable
+	FleetMode             bool                                                 // When true, skip local daemon lifecycle hooks; fleet server manages agents
+	FleetClientURL        string                                               // Fleet server URL for fleet-mode workers (e.g., "http://fleet.example.com"); empty = no fleet client
+	FleetClientWorkspace  string                                               // Explicit fleet server workspace ID; empty = unset.
+	FleetClientAPIKey     string                                               // Pre-shared API key for fleet worker backend auth
+	FleetClientActor      string                                               // X-Actor header value for fleet-db --auth-dev-mode (typically the loom agent name)
+	FleetDBBaseURL        string                                               // fleet-db HTTP base URL backing Store; used by the driver-op API to build issue backends
+	DriverAPIToken        string                                               // Optional shared bearer token required by the driver-op HTTP API (LOOM_DRIVER_API_TOKEN)
+	DriverAPIBaseURL      string                                               // This serve process's own driver/task-run API base URL, exported to task runners as LOOM_TASK_RUN_API_URL; empty keeps runners on the legacy direct-fleet-db env
+	DriverRunTokenKey     []byte                                               // HS256 signing key for run-scoped driver-op tokens (LOOM_RUN_TOKEN_SIGNING_KEY or ephemeral); nil disables the token auth path
+	LeadProvisioner       *leadprovision.Provisioner                           // Eager Daytona lead provisioner; nil disables agent-create provisioning.
+	LeadReviveCoordinator *leadprovision.ReviveCoordinator                     // Attach-time Daytona lead revive coordinator; nil disables self-heal.
+	DaemonStartupFn       func(ctx context.Context, onReady func(wsID string)) // Starts daemons for secondary workspaces; calls onReady(wsID) when each is reachable
+	Logger                *slog.Logger                                         // Structured logger (optional; nil falls back to slog.Default())
+	SentryDSN             string                                               // Sentry/GlitchTip DSN for error tracking (optional; empty disables)
 	// IssueBackendFn returns the active backend.IssueBackend used by the
 	// webui issue service for the migrated CRUD operations (Get, Create,
 	// Update/Patch, Close, Claim, Delete, AddComment, AddDependency,

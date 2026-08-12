@@ -28,6 +28,7 @@ const (
 	deleteConfirmBackoff             = 400 * time.Millisecond
 	defaultLeadHeartbeatStaleAfter   = 5 * time.Minute
 	defaultParkingAutostopInterval   = 2 * time.Minute
+	reviveAutostopInterval           = 30 * time.Minute
 	defaultLeadBootPrepTimeout       = 5 * time.Minute
 	defaultLeadPromptPath            = "/tmp/loom-lead-prompt.md"
 	leadCheckoutRoot                 = "/root/workspace"
@@ -110,6 +111,9 @@ type ProvisionRequest struct {
 	SeedFiles []SandboxFile
 	Backend   string
 	AgentRole string
+	// ForceLeadProbe bypasses the heartbeat freshness shortcut for attach-time
+	// revive, where provider state already proved the lead PTY may be missing.
+	ForceLeadProbe bool
 }
 
 // ProvisionResult is returned by Provision for both created and existing rows.
@@ -494,72 +498,137 @@ func (b *Broker) recordSandboxID(ctx context.Context, node *domain.Node, sandbox
 	return updated, nil
 }
 
-func (b *Broker) resumeLivePlacement(ctx context.Context, req ProvisionRequest, node *domain.Node) (*ProvisionResult, bool, error) {
+func (b *Broker) resumeLivePlacement(ctx context.Context, req ProvisionRequest, node *domain.Node) (result *ProvisionResult, retry bool, err error) {
 	if node == nil || node.Placement == nil {
 		return nil, false, fmt.Errorf("placement record required: %w", domain.ErrInvalid)
 	}
-	sandboxID := strings.TrimSpace(node.Placement.SandboxID)
-	if sandboxID == "" {
-		recoveredID, err := b.providerSandboxIDForPlacement(ctx, node.NodeID)
-		if err != nil {
-			return nil, false, err
-		}
-		if recoveredID == "" {
-			if !b.provisioningDeadlineExpired(node) {
-				return nil, false, fmt.Errorf("placement %q has no sandbox id and provisioning deadline has not elapsed: %w", node.NodeID, domain.ErrConflict)
-			}
-			if _, err := b.markReleased(ctx, node.WorkspaceKey, node.NodeID, ReleaseFence{Generation: node.Placement.Generation}); err != nil {
-				return nil, false, err
-			}
-			return nil, true, nil
-		}
-		recorded, err := b.recordSandboxID(ctx, node, recoveredID)
-		if err != nil {
-			return nil, false, fmt.Errorf("record recovered sandbox id %q for placement %q: %w", recoveredID, node.NodeID, err)
-		}
-		node = recorded
-		sandboxID = recoveredID
+	var sandboxID string
+	node, sandboxID, retry, err = b.resolveResumeSandbox(ctx, node)
+	if err != nil || retry {
+		return nil, retry, err
 	}
 	sandbox, err := b.confirmRecordedSandbox(ctx, node, sandboxID)
 	if errors.Is(err, ErrSandboxNotFound) {
-		if markErr := b.markLost(ctx, node); markErr != nil {
-			return nil, false, markErr
-		}
-		return nil, false, fmt.Errorf("placement %q active sandbox %q is Get-confirmed absent and marked lost: %w", node.NodeID, sandboxID, domain.ErrConflict)
+		return nil, false, b.markLostResumeAbsent(ctx, node, sandboxID, "is Get-confirmed absent and marked lost")
 	}
 	if err != nil {
 		return nil, false, err
 	}
 	if sandbox.State == ProviderSandboxAbsent {
+		return nil, false, b.markLostResumeAbsent(ctx, node, sandboxID, "is Get-confirmed absent and marked lost")
+	}
+	if err := b.setAutostopInterval(ctx, sandboxID, reviveAutostopInterval); err != nil {
+		if errors.Is(err, ErrSandboxNotFound) {
+			return nil, false, b.markLostResumeAbsent(ctx, node, sandboxID, "disappeared before autostop shielding and was marked lost")
+		}
+		return nil, false, err
+	}
+	sandboxConfirmedAbsent := false
+	defer func() {
+		if sandboxConfirmedAbsent {
+			return
+		}
+		err = b.restoreParkingAfterResume(ctx, node, sandboxID, result, err)
+	}()
+
+	resumed, err := b.provider.EnsureRunning(ctx, sandboxID)
+	if errors.Is(err, ErrSandboxNotFound) {
+		sandboxConfirmedAbsent = true
 		if markErr := b.markLost(ctx, node); markErr != nil {
 			return nil, false, markErr
 		}
-		return nil, false, fmt.Errorf("placement %q active sandbox %q is Get-confirmed absent and marked lost: %w", node.NodeID, sandboxID, domain.ErrConflict)
+		return nil, false, fmt.Errorf("placement %q active sandbox %q disappeared before resume and was marked lost: %w", node.NodeID, sandboxID, domain.ErrConflict)
 	}
-	result, err := b.startOrReplaceRecordedSandbox(ctx, req, node)
+	if err != nil {
+		return nil, false, fmt.Errorf("ensure placement %q sandbox %q running: %w", node.NodeID, sandboxID, err)
+	}
+	result, sandboxConfirmedAbsent, err = b.startOrReplaceRecordedSandbox(ctx, req, node, resumed)
 	if err != nil {
 		return nil, false, err
 	}
 	return result, false, nil
 }
 
-func (b *Broker) startOrReplaceRecordedSandbox(ctx context.Context, req ProvisionRequest, node *domain.Node) (*ProvisionResult, error) {
+// restoreParkingAfterResume re-arms the parking autostop when a revive exits
+// and folds a restore failure into the resume outcome without masking it:
+// joined into the returned error on failure paths, recorded on LeadStartError
+// when the resume otherwise succeeded.
+func (b *Broker) restoreParkingAfterResume(ctx context.Context, node *domain.Node, sandboxID string, result *ProvisionResult, err error) error {
+	restoreErr := b.armParkingAutostop(ctx, sandboxID)
+	if restoreErr == nil {
+		return err
+	}
+	if err != nil || result == nil {
+		return errors.Join(err, restoreErr)
+	}
+	if result.LeadStartError == "" {
+		result.LeadStartError = restoreErr.Error()
+	} else {
+		result.LeadStartError = errors.Join(errors.New(result.LeadStartError), restoreErr).Error()
+	}
+	slog.WarnContext(ctx, "restore revived lead sandbox autostop failed",
+		"workspace", node.WorkspaceKey,
+		"placement", node.NodeID,
+		"sandbox", sandboxID,
+		"error", restoreErr)
+	return err
+}
+
+// resolveResumeSandbox recovers a missing recorded sandbox id from provider
+// labels. retry=true means the deadline-expired placement was released and the
+// caller should re-admit from scratch.
+func (b *Broker) resolveResumeSandbox(ctx context.Context, node *domain.Node) (*domain.Node, string, bool, error) {
+	sandboxID := strings.TrimSpace(node.Placement.SandboxID)
+	if sandboxID != "" {
+		return node, sandboxID, false, nil
+	}
+	recoveredID, err := b.providerSandboxIDForPlacement(ctx, node.NodeID)
+	if err != nil {
+		return nil, "", false, err
+	}
+	if recoveredID == "" {
+		if !b.provisioningDeadlineExpired(node) {
+			return nil, "", false, fmt.Errorf("placement %q has no sandbox id and provisioning deadline has not elapsed: %w", node.NodeID, domain.ErrConflict)
+		}
+		if _, err := b.markReleased(ctx, node.WorkspaceKey, node.NodeID, ReleaseFence{Generation: node.Placement.Generation}); err != nil {
+			return nil, "", false, err
+		}
+		return nil, "", true, nil
+	}
+	recorded, err := b.recordSandboxID(ctx, node, recoveredID)
+	if err != nil {
+		return nil, "", false, fmt.Errorf("record recovered sandbox id %q for placement %q: %w", recoveredID, node.NodeID, err)
+	}
+	return recorded, recoveredID, false, nil
+}
+
+// markLostResumeAbsent marks the placement lost after a resume step confirmed
+// the recorded sandbox is gone; reason carries the exact step wording callers
+// previously formatted inline.
+func (b *Broker) markLostResumeAbsent(ctx context.Context, node *domain.Node, sandboxID, reason string) error {
+	if markErr := b.markLost(ctx, node); markErr != nil {
+		return markErr
+	}
+	return fmt.Errorf("placement %q active sandbox %q %s: %w", node.NodeID, sandboxID, reason, domain.ErrConflict)
+}
+
+func (b *Broker) startOrReplaceRecordedSandbox(ctx context.Context, req ProvisionRequest, node *domain.Node, resumed bool) (result *ProvisionResult, sandboxAbsent bool, err error) {
 	token, caps, err := b.mintToken(node, req.Caps)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	sandboxID := strings.TrimSpace(node.Placement.SandboxID)
 	if sandboxID == "" {
-		return nil, fmt.Errorf("placement %q has no recorded sandbox id: %w", node.NodeID, domain.ErrInvalid)
+		return nil, false, fmt.Errorf("placement %q has no recorded sandbox id: %w", node.NodeID, domain.ErrInvalid)
 	}
-	result := &ProvisionResult{Node: node, Token: token, Caps: caps, LeadStarted: leadProcessRecorded(node)}
-	if !b.shouldProbeLeadProcess(node) {
-		return result, nil
+	result = &ProvisionResult{Node: node, Token: token, Caps: caps, LeadStarted: leadProcessRecorded(node)}
+	if !resumed && !req.ForceLeadProbe && !b.shouldProbeLeadProcess(node) {
+		return result, false, nil
 	}
 	bootPlan, err := b.resolveLeadBootPlan(ctx, req, false)
 	if err != nil {
 		b.recordLeadBootOutcome(ctx, result, leadBootOutcome{node: node}, err)
-		return result, nil
+		return result, false, nil
 	}
 	// Prep must run on this path too, or a resume whose checkout or prompt
 	// file is missing boots a PTY that dies on the hook's cd/--prompt and every
@@ -574,28 +643,28 @@ func (b *Broker) startOrReplaceRecordedSandbox(ctx context.Context, req Provisio
 		prepCancel()
 		if errors.Is(prepErr, ErrSandboxNotFound) {
 			if lostErr := b.markLostAfterBootNotFound(ctx, node, sandboxID); lostErr != nil {
-				return nil, lostErr
+				return nil, false, lostErr
 			}
-			return nil, fmt.Errorf("placement %q active sandbox %q is Get-confirmed absent and marked lost: %w", node.NodeID, sandboxID, domain.ErrConflict)
+			return nil, true, fmt.Errorf("placement %q active sandbox %q is Get-confirmed absent and marked lost: %w", node.NodeID, sandboxID, domain.ErrConflict)
 		}
 		if prepErr != nil {
 			b.recordLeadBootOutcome(ctx, result, leadBootOutcome{node: node}, prepErr)
-			return result, nil
+			return result, false, nil
 		}
 	}
-	outcome, err := b.tryStartLeadProcess(ctx, req, node, token, bootPlan)
+	outcome, err := b.tryStartLeadProcess(ctx, req, node, token, bootPlan, false)
 	if errors.Is(err, ErrSandboxNotFound) {
 		if lostErr := b.markLostAfterBootNotFound(ctx, node, sandboxID); lostErr != nil {
-			return nil, lostErr
+			return nil, false, lostErr
 		}
-		return nil, fmt.Errorf("placement %q active sandbox %q is Get-confirmed absent and marked lost: %w", node.NodeID, sandboxID, domain.ErrConflict)
+		return nil, true, fmt.Errorf("placement %q active sandbox %q is Get-confirmed absent and marked lost: %w", node.NodeID, sandboxID, domain.ErrConflict)
 	}
 	if err != nil {
 		b.recordLeadBootOutcome(ctx, result, outcome, err)
-		return result, nil
+		return result, false, nil
 	}
 	b.recordLeadBootOutcome(ctx, result, outcome, nil)
-	return result, nil
+	return result, false, nil
 }
 
 func (b *Broker) markLeadProcessStarted(ctx context.Context, node *domain.Node, sandboxID string) (*domain.Node, error) {
@@ -659,7 +728,7 @@ func (b *Broker) populateLeadBootResult(ctx context.Context, req ProvisionReques
 	if result == nil || result.Node == nil || result.Node.Placement == nil {
 		return
 	}
-	outcome, err := b.tryStartLeadProcess(ctx, req, result.Node, token, bootPlan)
+	outcome, err := b.tryStartLeadProcess(ctx, req, result.Node, token, bootPlan, true)
 	b.recordLeadBootOutcome(ctx, result, outcome, err)
 }
 
@@ -680,7 +749,7 @@ func (b *Broker) recordLeadBootOutcome(ctx context.Context, result *ProvisionRes
 	result.LeadStartError = outcome.errText
 }
 
-func (b *Broker) tryStartLeadProcess(ctx context.Context, req ProvisionRequest, node *domain.Node, token string, bootPlan leadBootPlan) (leadBootOutcome, error) {
+func (b *Broker) tryStartLeadProcess(ctx context.Context, req ProvisionRequest, node *domain.Node, token string, bootPlan leadBootPlan, armAutostop bool) (leadBootOutcome, error) {
 	sandboxID := strings.TrimSpace(node.Placement.SandboxID)
 	if sandboxID == "" {
 		return leadBootOutcome{node: node}, fmt.Errorf("placement %q has no recorded sandbox id: %w", node.NodeID, domain.ErrInvalid)
@@ -720,13 +789,15 @@ func (b *Broker) tryStartLeadProcess(ctx context.Context, req ProvisionRequest, 
 	if err != nil {
 		return leadBootOutcome{node: node}, err
 	}
-	if err := b.armParkingAutostop(ctx, sandboxID); err != nil {
-		slog.WarnContext(ctx, "arm lead sandbox autostop failed",
-			"workspace", node.WorkspaceKey,
-			"placement", node.NodeID,
-			"sandbox", sandboxID,
-			"error", err)
-		return leadBootOutcome{node: started, started: true, errText: err.Error()}, nil
+	if armAutostop {
+		if err := b.armParkingAutostop(ctx, sandboxID); err != nil {
+			slog.WarnContext(ctx, "arm lead sandbox autostop failed",
+				"workspace", node.WorkspaceKey,
+				"placement", node.NodeID,
+				"sandbox", sandboxID,
+				"error", err)
+			return leadBootOutcome{node: started, started: true, errText: err.Error()}, nil
+		}
 	}
 	return leadBootOutcome{node: started, started: true}, nil
 }
@@ -750,9 +821,13 @@ func (b *Broker) armParkingAutostop(ctx context.Context, sandboxID string) error
 	if b.parkingAutostopInterval <= 0 {
 		return nil
 	}
+	return b.setAutostopInterval(ctx, sandboxID, b.parkingAutostopInterval)
+}
+
+func (b *Broker) setAutostopInterval(ctx context.Context, sandboxID string, interval time.Duration) error {
 	stopCtx, cancel := detachedTimeout(ctx, detachedProviderOperationTimeout)
 	defer cancel()
-	if err := b.provider.SetAutostopInterval(stopCtx, sandboxID, b.parkingAutostopInterval); err != nil {
+	if err := b.provider.SetAutostopInterval(stopCtx, sandboxID, interval); err != nil {
 		return fmt.Errorf("set sandbox %q autostop interval: %w", sandboxID, err)
 	}
 	return nil

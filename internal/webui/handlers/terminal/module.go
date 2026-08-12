@@ -32,6 +32,7 @@ type Module struct {
 	tabMetaStore    *tabmeta.Store
 	hub             *realtime.Hub
 	serverStartedAt time.Time
+	leadReviver     leadPlacementReviver
 }
 
 // NewModule returns a Module. Any of agentSvc, agentTmuxMgr, and termAuth
@@ -50,7 +51,12 @@ func NewModule(
 	tabMetaStore *tabmeta.Store,
 	hub *realtime.Hub,
 	serverStartedAt time.Time,
+	leadRevivers ...leadPlacementReviver,
 ) *Module {
+	var leadReviver leadPlacementReviver
+	if len(leadRevivers) > 0 {
+		leadReviver = leadRevivers[0]
+	}
 	return &Module{
 		termSvc:         termSvc,
 		agentSvc:        agentSvc,
@@ -63,6 +69,7 @@ func NewModule(
 		tabMetaStore:    tabMetaStore,
 		hub:             hub,
 		serverStartedAt: serverStartedAt,
+		leadReviver:     leadReviver,
 	}
 }
 
@@ -76,7 +83,7 @@ func (m *Module) Register(mux *http.ServeMux) {
 		}
 	}
 	if m.termSvc != nil && m.store != nil {
-		mux.HandleFunc("POST /api/workspaces/{ws}/agents/{name}/terminal/session", HandleEnsureAgentTerminalSession(m.termSvc, m.store))
+		mux.HandleFunc("POST /api/workspaces/{ws}/agents/{name}/terminal/session", HandleEnsureAgentTerminalSession(m.termSvc, m.store, m.leadReviver))
 	}
 	if m.agentTmuxMgr != nil {
 		mux.HandleFunc("GET /api/workspaces/{ws}/agents/{name}/terminal/ws", HandleAgentTerminalWS(m.agentTmuxMgr, m.termAuth, m.allowedOrigins))

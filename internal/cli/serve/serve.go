@@ -246,7 +246,7 @@ func runServe(cmd *cobra.Command, args []string) {
 	// buildPlacementBroker returns nil unless Daytona creds + a deployment id
 	// + an occupant-token key are all configured, so this is a no-op on
 	// deployments that do not place leads in sandboxes.
-	placementBroker := buildPlacementBroker(storeHandle.Store)
+	placementBroker, placementProvider := buildPlacementBroker(storeHandle.Store)
 	startPlacementReaper(ctx, placementBroker, placementReaperInterval(), placementReaperEnforce())
 
 	issueBackendFn := cli.WorkspaceAwareIssueBackendForURL(storeHandle.URL(), fleetState.clientCfg.Actor)
@@ -256,7 +256,7 @@ func runServe(cmd *cobra.Command, args []string) {
 
 	webuiErr := make(chan error, 1)
 	go func() {
-		cfg := buildServerConfig(monitorHandlers, fleetState, storeHandle, placementBroker)
+		cfg := buildServerConfig(monitorHandlers, fleetState, storeHandle, placementBroker, placementProvider)
 		webuiErr <- webuiapp.StartServer(ctx, cfg)
 	}()
 
@@ -468,29 +468,29 @@ func driverRunTokenKey() []byte {
 // key the leadapi module verifies (DriverRunTokenKey), so a mismatch would make
 // every sandboxed lead's API call fail. Callers treat nil as "sandbox placement
 // disabled".
-func buildPlacementBroker(st store.Store) *placement.Broker {
+func buildPlacementBroker(st store.Store) (*placement.Broker, placement.Provider) {
 	if strings.TrimSpace(os.Getenv(daytona.APIKeyEnv)) == "" {
-		return nil
+		return nil, nil
 	}
 	tokenKey := driverRunTokenKey()
 	if len(tokenKey) == 0 {
 		slog.Warn("placement broker disabled: no occupant-token signing key (set LOOM_RUN_TOKEN_SIGNING_KEY)")
-		return nil
+		return nil, nil
 	}
 	provider, err := daytona.New(daytona.Config{})
 	if err != nil {
 		slog.Error("placement broker disabled: construct Daytona provider", "err", err)
-		return nil
+		return nil, nil
 	}
 	broker, err := newServePlacementBroker(st, provider, tokenKey)
 	if err != nil {
 		// Most commonly a missing LOOM_DEPLOYMENT_ID (required so provider
 		// sandboxes carry the loom-env label the reaper scopes to).
 		slog.Error("placement broker disabled: construct broker", "err", err)
-		return nil
+		return nil, nil
 	}
 	slog.Info("Placement broker enabled (Daytona lead sandboxes)")
-	return broker
+	return broker, provider
 }
 
 func newServePlacementBroker(st store.Store, provider placement.Provider, tokenKey []byte) (*placement.Broker, error) {
@@ -726,7 +726,7 @@ func buildMonitorHandlers(collectDataFn metricscmd.CollectDataFn, staleDetectorH
 	}
 }
 
-func buildServerConfig(monitorHandlers webui.MonitorHandlers, fs fleetState, storeHandle *bootstrap.StoreHandle, placementBroker *placement.Broker) webui.ServerConfig {
+func buildServerConfig(monitorHandlers webui.MonitorHandlers, fs fleetState, storeHandle *bootstrap.StoreHandle, placementBroker *placement.Broker, placementProvider placement.Provider) webui.ServerConfig {
 	gitOps := opsimpl.NewGitOps()
 	resolvedBackend := cli.ResolveBackendName()
 	log.Printf("Terminal backend: %s", resolvedBackend)
@@ -744,6 +744,9 @@ func buildServerConfig(monitorHandlers webui.MonitorHandlers, fs fleetState, sto
 		cfg.DriverAPIBaseURL = driverAPIBaseURL()
 		cfg.DriverRunTokenKey = driverRunTokenKey()
 		cfg.LeadProvisioner = buildLeadProvisioner(storeHandle.Store, placementBroker)
+		if cfg.LeadProvisioner != nil && placementProvider != nil {
+			cfg.LeadReviveCoordinator = leadprovision.NewReviveCoordinator(placementProvider, cfg.LeadProvisioner)
+		}
 	}
 	applyFleetConfig(&cfg, fs)
 	applyWorkspaceConfig(&cfg)

@@ -24,6 +24,8 @@ import { TerminalView } from "../TerminalView";
 import { TerminalInstance } from "../instances/TerminalInstance";
 import { MAX_TABS } from "@/components/TerminalView/tabs/terminalTabUtils";
 import { CLI_SETUP_REQUEST_KEY } from "@/utils/cliSetup";
+import { ApiError } from "@/types/common";
+import * as reconnectBackoff from "@/utils/reconnectBackoff";
 import {
   BackendPickerPrompt,
   SessionNamePrompt,
@@ -1124,6 +1126,71 @@ describe("TerminalView", () => {
       );
 
       await waitFor(() => expect(onConsumed).toHaveBeenCalled());
+    });
+
+    it("shows a waking state without consuming the pending agent", async () => {
+      setMetadata(DEFAULT_METADATA);
+      const onConsumed = vi.fn();
+      mockTerminalApi.ensureAgentTerminalSession.mockRejectedValueOnce(
+        new ApiError(503, "Service Unavailable", {
+          error: "Lead sandbox is waking up…",
+          kind: "starting",
+        }),
+      );
+
+      render(
+        <TerminalView
+          hideTabs
+          pendingAgentName="fox"
+          onAgentNameConsumed={onConsumed}
+        />,
+      );
+
+      expect(
+        await screen.findByText("Lead sandbox is waking up…"),
+      ).toBeInTheDocument();
+      expect(onConsumed).not.toHaveBeenCalled();
+    });
+
+    it("shows a failure when the waking retry budget is exhausted", async () => {
+      vi.useFakeTimers();
+      const backoffSpy = vi
+        .spyOn(reconnectBackoff, "calculateBackoffDelay")
+        .mockReturnValue(1);
+      const consoleSpy = vi
+        .spyOn(console, "error")
+        .mockImplementation(() => {});
+      setMetadata(DEFAULT_METADATA);
+      const onConsumed = vi.fn();
+      mockTerminalApi.ensureAgentTerminalSession.mockRejectedValue(
+        new ApiError(503, "Service Unavailable", {
+          error: "Lead sandbox is waking up…",
+          kind: "starting",
+        }),
+      );
+
+      render(
+        <TerminalView
+          hideTabs
+          pendingAgentName="fox"
+          onAgentNameConsumed={onConsumed}
+        />,
+      );
+      await act(async () => {
+        for (let i = 0; i < 5; i += 1) await Promise.resolve();
+        await vi.advanceTimersByTimeAsync(10);
+      });
+
+      expect(mockTerminalApi.ensureAgentTerminalSession).toHaveBeenCalledTimes(
+        11,
+      );
+      expect(screen.getByTestId("lead-sandbox-failed")).toHaveTextContent(
+        "Lead sandbox did not become ready. Try opening the agent again.",
+      );
+      expect(onConsumed).not.toHaveBeenCalled();
+      backoffSpy.mockRestore();
+      consoleSpy.mockRestore();
+      vi.useRealTimers();
     });
 
     it("does not re-resolve an unchanged pending agent after consumption", async () => {

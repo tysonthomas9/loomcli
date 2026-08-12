@@ -3,6 +3,7 @@ package leadprovision
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -84,6 +85,16 @@ func DefaultResource() placement.ResourceSize {
 // ProvisionForAgent is a no-op unless the agent is an interactive lead on the
 // Daytona runtime. Missing required credentials fail closed.
 func (p *Provisioner) ProvisionForAgent(ctx context.Context, workspaceKey, agentName string) error {
+	return p.provisionForAgent(ctx, workspaceKey, agentName, false)
+}
+
+// ReviveForAgent re-drives provisioning for an existing Daytona lead and
+// forces the broker to verify the provider-side lead PTY.
+func (p *Provisioner) ReviveForAgent(ctx context.Context, workspaceKey, agentName string) error {
+	return p.provisionForAgent(ctx, workspaceKey, agentName, true)
+}
+
+func (p *Provisioner) provisionForAgent(ctx context.Context, workspaceKey, agentName string, forceLeadProbe bool) error {
 	if p == nil {
 		return fmt.Errorf("lead provisioner is not configured")
 	}
@@ -119,8 +130,16 @@ func (p *Provisioner) ProvisionForAgent(ctx context.Context, workspaceKey, agent
 		return fmt.Errorf("resolve lead prompt text for Daytona lead provisioning: %w", err)
 	}
 
-	_, err = p.broker.Provision(ctx, p.provisionRequest(ws, name, authJSON, gitToken, promptText))
-	return err
+	req := p.provisionRequest(ws, name, authJSON, gitToken, promptText)
+	req.ForceLeadProbe = forceLeadProbe
+	result, err := p.broker.Provision(ctx, req)
+	if err != nil {
+		return err
+	}
+	if result != nil && strings.TrimSpace(result.LeadStartError) != "" {
+		return fmt.Errorf("start Daytona lead process for agent %q: %w", name, errors.New(result.LeadStartError))
+	}
+	return nil
 }
 
 func (p *Provisioner) loadProvisionTarget(ctx context.Context, ws, name string) (provisionTarget, error) {

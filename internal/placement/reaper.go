@@ -174,7 +174,7 @@ func (r *PlacementReaper) reapProvisioningMatchedSandbox(ctx context.Context, no
 		r.logObserve(ctx, node, sandboxID, "provisioning sandbox exists before deadline")
 		return nil
 	}
-	return r.withFreshNodeAction(ctx, result, node, sandboxID, domain.PlacementStateReleased, reaperActionAdoptDelete, func(current *domain.Node) bool {
+	return r.withFreshNodeAction(ctx, result, node, sandboxID, reaperActionAdoptDelete, func(current *domain.Node) bool {
 		return samePlacementCandidate(current, node) &&
 			current.Placement.State == domain.PlacementStateProvisioning &&
 			r.broker.provisioningDeadlineExpired(current)
@@ -199,7 +199,7 @@ func (r *PlacementReaper) reapProvisioningWithoutSandbox(ctx context.Context, no
 		r.logObserve(ctx, node, "", "provisioning without sandbox before deadline")
 		return nil
 	}
-	return r.withFreshNodeAction(ctx, result, node, "", domain.PlacementStateReleased, reaperActionMarkReleased, func(current *domain.Node) bool {
+	return r.withFreshNodeAction(ctx, result, node, "", reaperActionMarkReleased, func(current *domain.Node) bool {
 		return samePlacementCandidate(current, node) &&
 			current.Placement.State == domain.PlacementStateProvisioning &&
 			strings.TrimSpace(current.Placement.SandboxID) == "" &&
@@ -230,7 +230,7 @@ func (r *PlacementReaper) reapProvisioningRecordedSandbox(ctx context.Context, n
 }
 
 func (r *PlacementReaper) releaseAbsentProvisioningSandbox(ctx context.Context, node *domain.Node, sandboxID string, result *ReaperResult) error {
-	return r.withFreshNodeAction(ctx, result, node, sandboxID, domain.PlacementStateReleased, reaperActionMarkReleased, func(current *domain.Node) bool {
+	return r.withFreshNodeAction(ctx, result, node, sandboxID, reaperActionMarkReleased, func(current *domain.Node) bool {
 		return samePlacementCandidate(current, node) &&
 			current.Placement.State == domain.PlacementStateProvisioning &&
 			strings.TrimSpace(current.Placement.SandboxID) == sandboxID &&
@@ -251,13 +251,7 @@ func (r *PlacementReaper) reapActive(ctx context.Context, node *domain.Node, res
 	}
 	sandbox, err := r.broker.confirmRecordedSandbox(ctx, node, sandboxID)
 	if errors.Is(err, ErrSandboxNotFound) || sandbox.State == ProviderSandboxAbsent {
-		return r.withFreshNodeAction(ctx, result, node, sandboxID, domain.PlacementStateLost, reaperActionMarkLost, func(current *domain.Node) bool {
-			return samePlacementCandidate(current, node) &&
-				current.Placement.State == domain.PlacementStateActive &&
-				strings.TrimSpace(current.Placement.SandboxID) == sandboxID
-		}, func(current *domain.Node) error {
-			return r.broker.markLost(ctx, current)
-		})
+		return r.markActiveLostIfStillAbsent(ctx, result, node, sandboxID)
 	}
 	if err != nil {
 		if errors.Is(err, domain.ErrConflict) {
@@ -279,6 +273,47 @@ func (r *PlacementReaper) reapActive(ctx context.Context, node *domain.Node, res
 	return nil
 }
 
+func (r *PlacementReaper) markActiveLostIfStillAbsent(ctx context.Context, result *ReaperResult, candidate *domain.Node, sandboxID string) error {
+	agentName := placementAgentName(candidate)
+	if agentName == "" {
+		return r.deadLetterNode(ctx, result, candidate, sandboxID, fmt.Errorf("placement %q agent missing: %w", candidate.NodeID, domain.ErrInvalid))
+	}
+	unlock := r.broker.lockPlacement(candidate.WorkspaceKey, agentName)
+	defer unlock()
+	current, err := r.broker.Get(ctx, candidate.WorkspaceKey, candidate.NodeID)
+	if errors.Is(err, domain.ErrNotFound) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("fresh get placement %q/%q: %w", candidate.WorkspaceKey, candidate.NodeID, err)
+	}
+	if !samePlacementCandidate(current, candidate) ||
+		current.Placement.State != domain.PlacementStateActive ||
+		strings.TrimSpace(current.Placement.SandboxID) != sandboxID {
+		r.logObserve(ctx, current, sandboxID, "placement candidate changed before reaper mutation")
+		return nil
+	}
+	_, confirmErr := r.broker.confirmRecordedSandbox(ctx, current, sandboxID)
+	if confirmErr == nil {
+		r.logObserve(ctx, current, sandboxID, "active sandbox reappeared before locked lost transition")
+		return nil
+	}
+	if errors.Is(confirmErr, domain.ErrConflict) {
+		return r.deadLetterNode(ctx, result, current, sandboxID, confirmErr)
+	}
+	if confirmErr != nil && !errors.Is(confirmErr, ErrSandboxNotFound) {
+		return fmt.Errorf("re-confirm active sandbox %q before marking placement %q lost: %w", sandboxID, current.NodeID, confirmErr)
+	}
+	action := reaperActionFromNode(current, sandboxID, reaperActionMarkLost, string(current.Placement.State), string(domain.PlacementStateLost))
+	result.Acted++
+	result.Actions = append(result.Actions, action)
+	r.logAction(ctx, action, slog.LevelInfo)
+	if !r.enforce {
+		return nil
+	}
+	return r.broker.markLost(ctx, current)
+}
+
 func (r *PlacementReaper) reapReleasing(ctx context.Context, node *domain.Node, result *ReaperResult) error {
 	sandboxID := strings.TrimSpace(node.Placement.SandboxID)
 	if sandboxID == "" {
@@ -288,7 +323,7 @@ func (r *PlacementReaper) reapReleasing(ctx context.Context, node *domain.Node, 
 		r.logObserve(ctx, node, sandboxID, "releasing placement delete backoff not due")
 		return nil
 	}
-	return r.withFreshNodeAction(ctx, result, node, sandboxID, domain.PlacementStateReleased, reaperActionDeleteReleased, func(current *domain.Node) bool {
+	return r.withFreshNodeAction(ctx, result, node, sandboxID, reaperActionDeleteReleased, func(current *domain.Node) bool {
 		if !samePlacementCandidate(current, node) ||
 			current.Placement.State != domain.PlacementStateReleasing ||
 			strings.TrimSpace(current.Placement.SandboxID) != sandboxID {
@@ -458,7 +493,6 @@ func (r *PlacementReaper) withFreshNodeAction(
 	result *ReaperResult,
 	candidate *domain.Node,
 	sandboxID string,
-	toState domain.PlacementState,
 	actionName string,
 	stillCandidate func(*domain.Node) bool,
 	mutate func(*domain.Node) error,
@@ -480,7 +514,7 @@ func (r *PlacementReaper) withFreshNodeAction(
 		r.logObserve(ctx, current, sandboxID, "placement candidate changed before reaper mutation")
 		return nil
 	}
-	action := reaperActionFromNode(current, sandboxID, actionName, string(current.Placement.State), string(toState))
+	action := reaperActionFromNode(current, sandboxID, actionName, string(current.Placement.State), string(domain.PlacementStateReleased))
 	result.Acted++
 	result.Actions = append(result.Actions, action)
 	r.logAction(ctx, action, slog.LevelInfo)

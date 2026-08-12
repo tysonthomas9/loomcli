@@ -158,6 +158,7 @@ func TestProvisionPreparesLeadBootBeforeCreatePty(t *testing.T) {
 		"create:sandbox-1",
 		"prep:sandbox-1",
 		"startProcess:sandbox-1",
+		"autostop:2m0s",
 	})
 	prep := provider.prepCall(t, 0)
 	if prep.Repo == nil || prep.Repo.Checkout != "/root/workspace/app" || prep.Repo.Ref != "main" {
@@ -1040,6 +1041,255 @@ func TestStaleHeartbeatUsesPtyObservationBeforeRedrive(t *testing.T) {
 	}
 }
 
+func TestProvisionResumeFreshHeartbeatRunningSandboxIsUnchanged(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	startedAt := time.Now().UTC().Add(-time.Minute)
+	node := createPlacementNode(t, st, "WS", "lead-placement-running", "nova", domain.NodePlacement{
+		SandboxID:            "sandbox-1",
+		Generation:           1,
+		ReservedVCPU:         2,
+		ReservedMemGiB:       4,
+		State:                domain.PlacementStateActive,
+		LeadProcessStartedAt: &startedAt,
+		SnapshotRef:          "snapshot://lead",
+	})
+	provider := &fakeProvider{}
+	provider.addSandbox(ProviderSandbox{
+		ID: "sandbox-1",
+		Labels: map[string]string{
+			PlacementLabelKey:   node.NodeID,
+			EnvironmentLabelKey: testDeploymentID,
+			"loom-workspace":    "WS",
+		},
+		State: ProviderSandboxRunning,
+	})
+	broker := mustBroker(t, st, provider)
+
+	result := mustProvision(t, ctx, broker, "nova", 2, 4)
+	assertPlacement(t, result.Node, domain.PlacementStateActive, "sandbox-1")
+	if got := provider.ensureRunningCallCount(); got != 1 {
+		t.Fatalf("EnsureRunning calls = %d, want 1", got)
+	}
+	if got := provider.listPtySessionCallCount(); got != 0 {
+		t.Fatalf("ListPtySessions calls = %d, want no fresh-heartbeat RUNNING probe", got)
+	}
+	if got := provider.startProcessCallCount(); got != 0 {
+		t.Fatalf("CreatePty calls = %d, want 0", got)
+	}
+	if got := provider.deleteCallCount(); got != 0 {
+		t.Fatalf("Delete calls = %d, want 0", got)
+	}
+}
+
+func TestProvisionRevivedSandboxForcesLeadProbeAndRestoresParking(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	createRepo(t, st, "WS", "app", "https://github.com/acme/app", "main")
+	startedAt := time.Now().UTC().Add(-time.Minute)
+	node := createPlacementNode(t, st, "WS", "lead-placement-parked", "nova", domain.NodePlacement{
+		SandboxID:            "sandbox-1",
+		Generation:           7,
+		ReservedVCPU:         2,
+		ReservedMemGiB:       4,
+		State:                domain.PlacementStateActive,
+		LeadProcessStartedAt: &startedAt,
+		SnapshotRef:          "snapshot://lead",
+	})
+	provider := &fakeProvider{}
+	provider.addSandbox(ProviderSandbox{
+		ID: "sandbox-1",
+		Labels: map[string]string{
+			PlacementLabelKey:   node.NodeID,
+			EnvironmentLabelKey: testDeploymentID,
+			"loom-workspace":    "WS",
+		},
+		State: ProviderSandboxStopped,
+	})
+	broker := mustBroker(t, st, provider)
+	req := testProvisionRequest("nova", 2, 4)
+	req.PromptText = "lead prompt"
+	req.NetworkDomainAllowlist = []string{"github.com"}
+
+	result, err := broker.Provision(ctx, req)
+	if err != nil {
+		t.Fatalf("Provision: %v", err)
+	}
+	if result.Node.NodeID != node.NodeID || result.Node.Placement.Generation != 7 {
+		t.Fatalf("placement = %q generation %d, want same %q generation 7", result.Node.NodeID, result.Node.Placement.Generation, node.NodeID)
+	}
+	if !result.LeadStarted || result.LeadStartError != "" {
+		t.Fatalf("lead boot = started %v error %q, want revived", result.LeadStarted, result.LeadStartError)
+	}
+	if got := provider.startProcessCallCount(); got != 1 {
+		t.Fatalf("CreatePty calls = %d, want forced probe followed by recreate", got)
+	}
+	assertDurationSlicesEqual(t, provider.setAutostopCallsSnapshot(), []time.Duration{30 * time.Minute, 2 * time.Minute})
+	assertStringSlicesEqual(t, provider.eventsSnapshot(), []string{
+		"autostop:30m0s",
+		"ensureRunning:sandbox-1",
+		"prep:sandbox-1",
+		"startProcess:sandbox-1",
+		"autostop:2m0s",
+	})
+	if got := provider.createCallCount(); got != 0 {
+		t.Fatalf("Create calls = %d, want 0", got)
+	}
+	if got := provider.deleteCallCount(); got != 0 {
+		t.Fatalf("Delete calls = %d, want 0", got)
+	}
+}
+
+func TestProvisionRevivedSandboxRestoresParkingAfterPrepFailure(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	createRepo(t, st, "WS", "app", "https://github.com/acme/app", "main")
+	node := createPlacementNode(t, st, "WS", "lead-placement-parked", "nova", domain.NodePlacement{
+		SandboxID:      "sandbox-1",
+		Generation:     3,
+		State:          domain.PlacementStateActive,
+		SnapshotRef:    "snapshot://lead",
+		ReservedVCPU:   2,
+		ReservedMemGiB: 4,
+	})
+	provider := &fakeProvider{prepErr: errors.New("prep failed")}
+	provider.addSandbox(ProviderSandbox{
+		ID: "sandbox-1",
+		Labels: map[string]string{
+			PlacementLabelKey: node.NodeID,
+			"loom-workspace":  "WS",
+		},
+		State: ProviderSandboxStopped,
+	})
+	broker := mustBroker(t, st, provider)
+	req := testProvisionRequest("nova", 2, 4)
+	req.PromptText = "lead prompt"
+	req.NetworkDomainAllowlist = []string{"github.com"}
+
+	result, err := broker.Provision(ctx, req)
+	if err != nil {
+		t.Fatalf("Provision: %v", err)
+	}
+	if result.LeadStarted || !strings.Contains(result.LeadStartError, "prep failed") {
+		t.Fatalf("lead boot = started %v error %q, want prep failure", result.LeadStarted, result.LeadStartError)
+	}
+	assertDurationSlicesEqual(t, provider.setAutostopCallsSnapshot(), []time.Duration{30 * time.Minute, 2 * time.Minute})
+	if got := provider.createCallCount(); got != 0 {
+		t.Fatalf("Create calls = %d, want 0", got)
+	}
+	if got := provider.deleteCallCount(); got != 0 {
+		t.Fatalf("Delete calls = %d, want 0", got)
+	}
+}
+
+func TestProvisionForcedLeadProbeRestoresParkingOnEveryBootOutcome(t *testing.T) {
+	tests := []struct {
+		name              string
+		configureProvider func(*fakeProvider)
+		wantStarted       bool
+		wantError         string
+		wantCreatePty     int
+	}{
+		{
+			name: "CreatePty failure",
+			configureProvider: func(provider *fakeProvider) {
+				provider.startProcessErr = errors.New("create PTY failed")
+			},
+			wantError:     "create PTY failed",
+			wantCreatePty: 1,
+		},
+		{
+			name: "PTY exits immediately",
+			configureProvider: func(provider *fakeProvider) {
+				provider.dropPtyAfterCreate = true
+			},
+			wantError:     "exited immediately",
+			wantCreatePty: 1,
+		},
+		{
+			name: "lead PTY already exists",
+			configureProvider: func(provider *fakeProvider) {
+				provider.addPtySession("sandbox-1", LeadPTYSessionID)
+			},
+			wantStarted: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.Background()
+			st := memstore.New()
+			startedAt := time.Now().UTC()
+			node := createPlacementNode(t, st, "WS", "lead-placement-running", "nova", domain.NodePlacement{
+				SandboxID:            "sandbox-1",
+				Generation:           3,
+				State:                domain.PlacementStateActive,
+				SnapshotRef:          "snapshot://lead",
+				ReservedVCPU:         2,
+				ReservedMemGiB:       4,
+				LeadProcessStartedAt: &startedAt,
+			})
+			provider := &fakeProvider{}
+			provider.addSandbox(ProviderSandbox{
+				ID: "sandbox-1",
+				Labels: map[string]string{
+					PlacementLabelKey: node.NodeID,
+					"loom-workspace":  "WS",
+				},
+				State: ProviderSandboxRunning,
+			})
+			tt.configureProvider(provider)
+			broker := mustBroker(t, st, provider)
+			req := testProvisionRequest("nova", 2, 4)
+			req.ForceLeadProbe = true
+
+			result, err := broker.Provision(ctx, req)
+			if err != nil {
+				t.Fatalf("Provision: %v", err)
+			}
+			wrongError := result.LeadStartError != ""
+			if tt.wantError != "" {
+				wrongError = !strings.Contains(result.LeadStartError, tt.wantError)
+			}
+			if result.LeadStarted != tt.wantStarted || wrongError {
+				t.Fatalf("lead boot = started %v error %q, want started %v error containing %q", result.LeadStarted, result.LeadStartError, tt.wantStarted, tt.wantError)
+			}
+			if got := provider.startProcessCallCount(); got != tt.wantCreatePty {
+				t.Fatalf("CreatePty calls = %d, want %d", got, tt.wantCreatePty)
+			}
+			assertDurationSlicesEqual(t, provider.setAutostopCallsSnapshot(), []time.Duration{30 * time.Minute, 2 * time.Minute})
+		})
+	}
+}
+
+func TestProvisionConfirmedAbsentSandboxSkipsParkingRestore(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	node := createPlacementNode(t, st, "WS", "lead-placement-missing", "nova", domain.NodePlacement{
+		SandboxID:      "sandbox-1",
+		Generation:     3,
+		State:          domain.PlacementStateActive,
+		SnapshotRef:    "snapshot://lead",
+		ReservedVCPU:   2,
+		ReservedMemGiB: 4,
+	})
+	provider := &fakeProvider{ensureRunningErr: ErrSandboxNotFound}
+	provider.addSandbox(ProviderSandbox{
+		ID: "sandbox-1",
+		Labels: map[string]string{
+			PlacementLabelKey: node.NodeID,
+			"loom-workspace":  "WS",
+		},
+		State: ProviderSandboxRunning,
+	})
+	broker := mustBroker(t, st, provider)
+
+	_, err := broker.Provision(ctx, testProvisionRequest("nova", 2, 4))
+	if !errors.Is(err, domain.ErrConflict) {
+		t.Fatalf("Provision = %v, want marked-lost conflict", err)
+	}
+	assertDurationSlicesEqual(t, provider.setAutostopCallsSnapshot(), []time.Duration{30 * time.Minute})
+}
+
 func TestResumeLeadProcessStartFailureReturnsPlacementResult(t *testing.T) {
 	ctx := context.Background()
 	st := memstore.New()
@@ -1762,6 +2012,18 @@ func assertStringSlicesEqual(t *testing.T, got, want []string) {
 	}
 }
 
+func assertDurationSlicesEqual(t *testing.T, got, want []time.Duration) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Fatalf("durations = %v, want %v", got, want)
+	}
+	for i := range got {
+		if got[i] != want[i] {
+			t.Fatalf("durations = %v, want %v", got, want)
+		}
+	}
+}
+
 func getNodeState(t *testing.T, st store.Store, workspaceKey, nodeID string) domain.PlacementState {
 	t.Helper()
 	return getNode(t, st, workspaceKey, nodeID).Placement.State
@@ -1882,6 +2144,7 @@ type fakeProvider struct {
 	startProcessSandboxIDs []string
 	deleteCalls            []string
 	getCalls               []string
+	ensureRunningCalls     []string
 	listCalls              []map[string]string
 	listPtySessionCalls    []string
 	setAutostopCalls       []time.Duration
@@ -1895,6 +2158,8 @@ type fakeProvider struct {
 	deleteErr              error
 	prepErr                error
 	getErr                 error
+	getHook                func(string, int)
+	ensureRunningErr       error
 	listErr                error
 	listPtySessionsErr     error
 	setAutostopErr         error
@@ -1942,16 +2207,47 @@ func (f *fakeProvider) Create(ctx context.Context, req CreateRequest) (CreateRes
 
 func (f *fakeProvider) Get(_ context.Context, sandboxID string) (ProviderSandbox, error) {
 	f.mu.Lock()
-	defer f.mu.Unlock()
 	f.getCalls = append(f.getCalls, sandboxID)
+	call := len(f.getCalls)
+	hook := f.getHook
 	if f.getErr != nil {
-		return ProviderSandbox{}, f.getErr
+		err := f.getErr
+		f.mu.Unlock()
+		if hook != nil {
+			hook(sandboxID, call)
+		}
+		return ProviderSandbox{}, err
 	}
 	sandbox, ok := f.sandboxes[sandboxID]
+	f.mu.Unlock()
+	if hook != nil {
+		hook(sandboxID, call)
+	}
 	if !ok {
 		return ProviderSandbox{}, ErrSandboxNotFound
 	}
 	return cloneProviderSandbox(sandbox), nil
+}
+
+func (f *fakeProvider) EnsureRunning(_ context.Context, sandboxID string) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.ensureRunningCalls = append(f.ensureRunningCalls, sandboxID)
+	f.events = append(f.events, "ensureRunning:"+sandboxID)
+	if f.ensureRunningErr != nil {
+		return false, f.ensureRunningErr
+	}
+	sandbox, ok := f.sandboxes[sandboxID]
+	if !ok || sandbox.State == ProviderSandboxAbsent {
+		return false, ErrSandboxNotFound
+	}
+	if sandbox.State != ProviderSandboxStopped {
+		return false, nil
+	}
+	sandbox.State = ProviderSandboxRunning
+	f.sandboxes[sandboxID] = sandbox
+	delete(f.ptySessions, sandboxID)
+	return true, nil
 }
 
 func (f *fakeProvider) Delete(_ context.Context, sandboxID string) error {
@@ -1986,6 +2282,7 @@ func (f *fakeProvider) SetAutostopInterval(_ context.Context, sandboxID string, 
 		return ErrSandboxNotFound
 	}
 	f.setAutostopCalls = append(f.setAutostopCalls, interval)
+	f.events = append(f.events, "autostop:"+interval.String())
 	return nil
 }
 
@@ -2178,6 +2475,12 @@ func (f *fakeProvider) getCallCount() int {
 	return len(f.getCalls)
 }
 
+func (f *fakeProvider) ensureRunningCallCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.ensureRunningCalls)
+}
+
 func (f *fakeProvider) createContextErr() error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -2224,6 +2527,12 @@ func (f *fakeProvider) eventsSnapshot() []string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return append([]string(nil), f.events...)
+}
+
+func (f *fakeProvider) setAutostopCallsSnapshot() []time.Duration {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]time.Duration(nil), f.setAutostopCalls...)
 }
 
 func (f *fakeProvider) startProcessSandboxIDsSnapshot() []string {

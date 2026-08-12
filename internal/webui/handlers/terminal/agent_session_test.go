@@ -2,7 +2,11 @@ package terminal
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,8 +20,11 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	"github.com/tysonthomas9/loomcli/internal/leadprovision"
 	"github.com/tysonthomas9/loomcli/internal/localworkspace"
+	"github.com/tysonthomas9/loomcli/internal/placement"
 	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 	"github.com/tysonthomas9/loomcli/internal/webui/tabmeta"
 	webuiterminal "github.com/tysonthomas9/loomcli/internal/webui/terminal"
@@ -182,8 +189,9 @@ func TestEnsureAgentTerminalSessionCreatesDaytonaLeadRemoteLaunchSpec(t *testing
 		t.Fatalf("create agent: %v", err)
 	}
 	createActiveDaytonaLeadPlacement(t, st, "E2E", "nova", "placement-1", "sandbox-1", 1)
+	reviver := &fakeLeadPlacementReviver{}
 
-	meta, err := ensureAgentTerminalSession(ctx, svc, st, "E2E", "nova")
+	meta, err := ensureAgentTerminalSession(ctx, svc, st, "E2E", "nova", reviver)
 	if err != nil {
 		t.Fatalf("ensureAgentTerminalSession: %v", err)
 	}
@@ -202,6 +210,214 @@ func TestEnsureAgentTerminalSessionCreatesDaytonaLeadRemoteLaunchSpec(t *testing
 	if !meta.PTYAlive {
 		t.Fatal("PTYAlive = false, want remote metadata attachable")
 	}
+	if reviver.calls != 1 || reviver.sandboxID != "sandbox-1" {
+		t.Fatalf("reviver = calls %d sandbox %q, want one bounded RUNNING-state check", reviver.calls, reviver.sandboxID)
+	}
+}
+
+func TestEnsureAgentTerminalSessionMapsReviveToStarting503(t *testing.T) {
+	ctx := context.Background()
+	st, tabStore, rdb := newAgentSessionTestDeps(t)
+	svc := webuiterminal.NewTerminalService(nil, tabStore, nil, rdb, nil, time.Now().Add(-time.Second))
+	if _, err := st.Roles().Create(ctx, store.RoleCreate{
+		WorkspaceKey: "E2E",
+		Name:         "lead",
+		Backend:      "codex",
+	}); err != nil {
+		t.Fatalf("create role: %v", err)
+	}
+	if _, err := st.Agents().Create(ctx, store.AgentCreate{
+		WorkspaceKey:    "E2E",
+		Name:            "nova",
+		RoleName:        "lead",
+		RuntimeProvider: domain.RuntimeProviderDaytona,
+	}); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+	createActiveDaytonaLeadPlacement(t, st, "E2E", "nova", "placement-1", "sandbox-1", 1)
+	reviver := &fakeLeadPlacementReviver{err: leadprovision.ErrReviveStarting}
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/E2E/agents/nova/terminal/session", nil)
+	req.SetPathValue("name", "nova")
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "E2E"))
+	rec := httptest.NewRecorder()
+
+	HandleEnsureAgentTerminalSession(svc, st, reviver).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503; body %s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("Retry-After"); got != "5" {
+		t.Fatalf("Retry-After = %q, want 5", got)
+	}
+	var body map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body["kind"] != string(service.KindStarting) {
+		t.Fatalf("kind = %q, want starting", body["kind"])
+	}
+	if reviver.calls != 1 || reviver.sandboxID != "sandbox-1" {
+		t.Fatalf("reviver = calls %d sandbox %q, want 1/sandbox-1", reviver.calls, reviver.sandboxID)
+	}
+}
+
+func TestEnsureAgentTerminalSessionMapsReviveFailuresWithoutLeakingCause(t *testing.T) {
+	tests := []struct {
+		name       string
+		reviveErr  error
+		wantStatus int
+		wantError  string
+		secret     string
+	}{
+		{
+			name:       "sandbox missing",
+			reviveErr:  fmt.Errorf("provider lookup detail: %w", placement.ErrSandboxNotFound),
+			wantStatus: http.StatusBadRequest,
+			wantError:  "lead sandbox is no longer available",
+			secret:     "provider lookup detail",
+		},
+		{
+			name:       "terminal provider state",
+			reviveErr:  fmt.Errorf("provider state build_failed: %w", leadprovision.ErrReviveTerminalState),
+			wantStatus: http.StatusConflict,
+			wantError:  "lead sandbox is in a terminal provider state and cannot be revived",
+			secret:     "build_failed",
+		},
+		{
+			name:       "internal provider failure",
+			reviveErr:  errors.New("sensitive provider cause"),
+			wantStatus: http.StatusInternalServerError,
+			wantError:  "lead sandbox revive failed",
+			secret:     "sensitive provider cause",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.Background()
+			st, tabStore, rdb := newAgentSessionTestDeps(t)
+			svc := webuiterminal.NewTerminalService(nil, tabStore, nil, rdb, nil, time.Now().Add(-time.Second))
+			if _, err := st.Roles().Create(ctx, store.RoleCreate{WorkspaceKey: "E2E", Name: "lead", Backend: "codex"}); err != nil {
+				t.Fatalf("create role: %v", err)
+			}
+			if _, err := st.Agents().Create(ctx, store.AgentCreate{
+				WorkspaceKey:    "E2E",
+				Name:            "nova",
+				RoleName:        "lead",
+				RuntimeProvider: domain.RuntimeProviderDaytona,
+			}); err != nil {
+				t.Fatalf("create agent: %v", err)
+			}
+			createActiveDaytonaLeadPlacement(t, st, "E2E", "nova", "placement-1", "sandbox-1", 1)
+			req := httptest.NewRequest(http.MethodPost, "/api/workspaces/E2E/agents/nova/terminal/session", nil)
+			req.SetPathValue("name", "nova")
+			req = req.WithContext(middleware.WithWorkspace(req.Context(), "E2E"))
+			rec := httptest.NewRecorder()
+
+			HandleEnsureAgentTerminalSession(svc, st, &fakeLeadPlacementReviver{err: tt.reviveErr}).ServeHTTP(rec, req)
+
+			if rec.Code != tt.wantStatus {
+				t.Fatalf("status = %d, want %d; body %s", rec.Code, tt.wantStatus, rec.Body.String())
+			}
+			var body map[string]string
+			if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+				t.Fatalf("decode response: %v", err)
+			}
+			if body["error"] != tt.wantError {
+				t.Fatalf("error = %q, want %q", body["error"], tt.wantError)
+			}
+			if strings.Contains(rec.Body.String(), tt.secret) {
+				t.Fatalf("response leaked revive cause: %s", rec.Body.String())
+			}
+		})
+	}
+}
+
+func TestEnsureAgentTerminalSessionReturnsLiveCachedTabBeforePlacementValidation(t *testing.T) {
+	ctx := context.Background()
+	st, tabStore, rdb := newAgentSessionTestDeps(t)
+	svc := webuiterminal.NewTerminalService(nil, tabStore, nil, rdb, nil, time.Now().Add(-time.Second))
+	if _, err := st.Roles().Create(ctx, store.RoleCreate{WorkspaceKey: "E2E", Name: "lead", Backend: "codex"}); err != nil {
+		t.Fatalf("create role: %v", err)
+	}
+	if _, err := st.Agents().Create(ctx, store.AgentCreate{
+		WorkspaceKey:    "E2E",
+		Name:            "nova",
+		RoleName:        "lead",
+		RuntimeProvider: domain.RuntimeProviderDaytona,
+	}); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+	createActiveDaytonaLeadPlacement(t, st, "E2E", "nova", "placement-1", "sandbox-1", 1)
+	cached, err := ensureAgentTerminalSession(ctx, svc, st, "E2E", "nova")
+	if err != nil {
+		t.Fatalf("create cached terminal: %v", err)
+	}
+	node, err := st.Nodes().Get(ctx, "E2E", "placement-1")
+	if err != nil {
+		t.Fatalf("get placement: %v", err)
+	}
+	nextPlacement := *node.Placement
+	nextPlacement.State = domain.PlacementStateReleased
+	nextPlacementPtr := &nextPlacement
+	if _, err := st.Nodes().Update(ctx, "E2E", node.NodeID, store.NodeUpdate{Placement: &nextPlacementPtr}); err != nil {
+		t.Fatalf("release placement: %v", err)
+	}
+	reviver := &fakeLeadPlacementReviver{err: errors.New("must not be called")}
+
+	got, err := ensureAgentTerminalSession(ctx, svc, st, "E2E", "nova", reviver)
+	if err != nil {
+		t.Fatalf("ensure cached terminal: %v", err)
+	}
+	if got.SessionName != cached.SessionName {
+		t.Fatalf("session = %q, want cached %q", got.SessionName, cached.SessionName)
+	}
+	if reviver.calls != 0 {
+		t.Fatalf("reviver calls = %d, want 0 for live cached tab", reviver.calls)
+	}
+}
+
+func TestEnsureAgentTerminalSessionDoesNotReviveInactiveAgent(t *testing.T) {
+	ctx := context.Background()
+	st, tabStore, rdb := newAgentSessionTestDeps(t)
+	svc := webuiterminal.NewTerminalService(nil, tabStore, nil, rdb, nil, time.Now().Add(-time.Second))
+	if _, err := st.Roles().Create(ctx, store.RoleCreate{WorkspaceKey: "E2E", Name: "worker", Kind: string(domain.RoleKindWorker)}); err != nil {
+		t.Fatalf("create role: %v", err)
+	}
+	if _, err := st.Agents().Create(ctx, store.AgentCreate{
+		WorkspaceKey:    "E2E",
+		Name:            "nova",
+		RoleName:        "worker",
+		RuntimeProvider: domain.RuntimeProviderDaytona,
+	}); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+	createActiveDaytonaLeadPlacement(t, st, "E2E", "nova", "placement-1", "sandbox-1", 1)
+	stopped := domain.AgentDesiredStopped
+	if _, err := st.Agents().Update(ctx, "E2E", "nova", store.AgentUpdate{DesiredState: &stopped}); err != nil {
+		t.Fatalf("stop agent: %v", err)
+	}
+	reviver := &fakeLeadPlacementReviver{err: errors.New("must not be called")}
+
+	_, err := ensureAgentTerminalSession(ctx, svc, st, "E2E", "nova", reviver)
+	var svcErr *service.ServiceError
+	if !errors.As(err, &svcErr) || svcErr.Kind != service.KindValidation {
+		t.Fatalf("ensure inactive terminal = %v, want validation error", err)
+	}
+	if reviver.calls != 0 {
+		t.Fatalf("reviver calls = %d, want 0 for inactive agent", reviver.calls)
+	}
+}
+
+type fakeLeadPlacementReviver struct {
+	err       error
+	calls     int
+	sandboxID string
+}
+
+func (f *fakeLeadPlacementReviver) EnsureAttachable(_ context.Context, _, _, sandboxID string) error {
+	f.calls++
+	f.sandboxID = sandboxID
+	return f.err
 }
 
 func TestLatestActiveDaytonaLeadPlacementReportsProvisioning(t *testing.T) {

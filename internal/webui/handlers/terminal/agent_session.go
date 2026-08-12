@@ -14,7 +14,9 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/leadprovision"
 	"github.com/tysonthomas9/loomcli/internal/localworkspace"
+	"github.com/tysonthomas9/loomcli/internal/placement"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
@@ -31,10 +33,14 @@ const (
 
 var agentTerminalSessionLocks sync.Map
 
+type leadPlacementReviver interface {
+	EnsureAttachable(context.Context, string, string, string) error
+}
+
 // HandleEnsureAgentTerminalSession resolves an agent name to a persisted UUID
 // terminal session. The session's launch command lives in tab metadata; the
 // WebSocket path never infers agent behavior from the session name.
-func HandleEnsureAgentTerminalSession(svc service.TerminalService, st store.Store) http.HandlerFunc {
+func HandleEnsureAgentTerminalSession(svc service.TerminalService, st store.Store, revivers ...leadPlacementReviver) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if svc == nil {
 			handler.WriteJSON(w, http.StatusServiceUnavailable, tabMetadataResponse{
@@ -61,7 +67,7 @@ func HandleEnsureAgentTerminalSession(svc service.TerminalService, st store.Stor
 			return
 		}
 
-		meta, err := ensureAgentTerminalSession(r.Context(), svc, st, workspace, agentName)
+		meta, err := ensureAgentTerminalSession(r.Context(), svc, st, workspace, agentName, revivers...)
 		if err != nil {
 			handler.HandleServiceError(w, err)
 			return
@@ -74,7 +80,7 @@ func HandleEnsureAgentTerminalSession(svc service.TerminalService, st store.Stor
 	}
 }
 
-func ensureAgentTerminalSession(ctx context.Context, svc service.TerminalService, st store.Store, workspace, agentName string) (*tabmeta.TabMetadata, error) {
+func ensureAgentTerminalSession(ctx context.Context, svc service.TerminalService, st store.Store, workspace, agentName string, revivers ...leadPlacementReviver) (*tabmeta.TabMetadata, error) {
 	unlock := lockAgentTerminalSession(workspace, agentName)
 	defer unlock()
 
@@ -91,7 +97,6 @@ func ensureAgentTerminalSession(ctx context.Context, svc service.TerminalService
 	if isDaemonOwnedEphemeralWorker(agent, roleKind) {
 		return nil, service.ErrValidation("daemon-owned ephemeral worker terminals cannot be started from the agents page; use worker logs or task session history")
 	}
-
 	tabs, err := svc.ListTabs(ctx, workspace)
 	if err != nil {
 		return nil, err
@@ -112,6 +117,9 @@ func ensureAgentTerminalSession(ctx context.Context, svc service.TerminalService
 	}
 	if !agentTerminalLaunchAllowed(agent, roleKind) {
 		return inactiveAgentTerminalSession(ctx, svc, workspace, existing)
+	}
+	if err := ensureDaytonaLeadAttachable(ctx, st, workspace, agentName, agent, roleKind, revivers); err != nil {
+		return nil, err
 	}
 
 	sessionName, label, sortOrder := newAgentTerminalTabPlacement(tabs, existing, agentName)
@@ -138,6 +146,37 @@ func ensureAgentTerminalSession(ctx context.Context, svc service.TerminalService
 // session was created, so the cached argv has no --backend flag but the
 // next render would include it. Without this check, the stale spec is
 // returned indefinitely and the running PTY never picks up the change.
+// ensureDaytonaLeadAttachable resolves the lead's active placement and asks the
+// reviver to wake a parked sandbox, mapping revive outcomes onto the terminal
+// error vocabulary (starting/validation/conflict) without leaking cause chains.
+// It is a no-op for non-interactive roles, non-Daytona runtimes, and serves
+// with no reviver configured.
+func ensureDaytonaLeadAttachable(ctx context.Context, st store.Store, workspace, agentName string, agent *domain.Agent, roleKind domain.RoleKind, revivers []leadPlacementReviver) error {
+	if roleKind != domain.RoleKindInteractive ||
+		agentRuntimeProvider(ctx, st, workspace, agent) != domain.RuntimeProviderDaytona ||
+		len(revivers) == 0 || revivers[0] == nil {
+		return nil
+	}
+	reviver := revivers[0]
+	node, err := latestActiveDaytonaLeadPlacement(ctx, st, workspace, agentName)
+	if err != nil {
+		return err
+	}
+	err = reviver.EnsureAttachable(ctx, workspace, agentName, node.Placement.SandboxID)
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, leadprovision.ErrReviveStarting):
+		return service.ErrStarting("Lead sandbox is waking up…")
+	case errors.Is(err, placement.ErrSandboxNotFound):
+		return service.ErrValidation("lead sandbox is no longer available")
+	case errors.Is(err, leadprovision.ErrReviveTerminalState):
+		return service.ErrConflict("lead sandbox is in a terminal provider state and cannot be revived")
+	default:
+		return service.ErrInternal("lead sandbox revive failed", fmt.Errorf("revive Daytona lead %q: %w", agentName, err))
+	}
+}
+
 func agentTerminalLaunchSpecStale(
 	ctx context.Context,
 	st store.Store,
@@ -399,8 +438,8 @@ func latestActiveDaytonaLeadPlacement(ctx context.Context, st store.Store, works
 		}
 	}
 	if best == nil {
-		// Attach-time self-heal provisioning is deferred; agent-create owns
-		// eager provisioning for now, so surface the latest placement state.
+		// Attach-time revive only applies to active placements. Replacement
+		// provisioning remains owned by agent-create, so surface the latest state.
 		if latestAnyState != nil {
 			return nil, service.ErrValidation(daytonaLeadPlacementAttachError(latestAnyState))
 		}

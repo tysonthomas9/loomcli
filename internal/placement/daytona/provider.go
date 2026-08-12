@@ -48,6 +48,7 @@ const (
 	DefaultSnapshotName               = "loom-lead-poc-v2"
 	DefaultSnapshotID                 = "ae429d20-520a-401f-9a6d-b87b89d75939"
 	defaultHTTPTimeout                = 60 * time.Second
+	defaultSandboxStartTimeout        = 3 * time.Minute
 	defaultLeadBootPrepTimeout        = 5 * time.Minute
 	defaultCreateAutoStop             = 15 * time.Minute
 	defaultVCPU                       = 1
@@ -237,6 +238,91 @@ func (p *Provider) Get(ctx context.Context, sandboxID string) (placement.Provide
 		return placement.ProviderSandbox{}, fmt.Errorf("%w: daytona sandbox %q state %q", placement.ErrSandboxNotFound, sandboxID, sandboxState(sandbox))
 	}
 	return out, nil
+}
+
+// EnsureRunning starts a parked sandbox or waits for an in-flight start to
+// reach Daytona's raw started state. ProviderSandboxState is too lossy here:
+// it maps transitional and terminal raw states to running.
+func (p *Provider) EnsureRunning(ctx context.Context, sandboxID string) (bool, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(ctx, defaultSandboxStartTimeout)
+	defer cancel()
+
+	sandbox, err := p.getSandbox(ctx, sandboxID)
+	if err != nil {
+		return false, err
+	}
+	resumeInProgress := false
+	startConflictAttempt := 0
+	for {
+		switch state := sandboxState(sandbox); state {
+		case apiclient.SANDBOXSTATE_STARTED:
+			return resumeInProgress, nil
+		case apiclient.SANDBOXSTATE_STOPPED, apiclient.SANDBOXSTATE_ARCHIVED, apiclient.SANDBOXSTATE_PAUSED:
+			resumeInProgress = true
+			started, retry, startErr := p.startParkedSandbox(ctx, sandboxID, &startConflictAttempt)
+			if startErr != nil {
+				return false, startErr
+			}
+			if retry {
+				sandbox = started
+				continue
+			}
+			if err := p.waitForStarted(ctx, started); err != nil {
+				return true, err
+			}
+			return true, nil
+		case apiclient.SANDBOXSTATE_STARTING, apiclient.SANDBOXSTATE_RESTORING, apiclient.SANDBOXSTATE_RESUMING:
+			if err := p.waitForStarted(ctx, sandbox); err != nil {
+				return true, err
+			}
+			return true, nil
+		case apiclient.SANDBOXSTATE_STOPPING, apiclient.SANDBOXSTATE_PAUSING, apiclient.SANDBOXSTATE_ARCHIVING:
+			resumeInProgress = true
+			sandbox, err = p.waitForParkingTransition(ctx, sandbox)
+			if err != nil {
+				return true, err
+			}
+		case apiclient.SANDBOXSTATE_ERROR, apiclient.SANDBOXSTATE_BUILD_FAILED:
+			return false, fmt.Errorf("daytona sandbox %q cannot start from state %q: %s", sandboxID, state, strings.TrimSpace(sandbox.GetErrorReason()))
+		default:
+			return false, fmt.Errorf("daytona sandbox %q cannot ensure running from state %q", sandboxID, state)
+		}
+	}
+}
+
+// startParkedSandbox issues the start call for a stopped/archived/paused
+// sandbox. On a state-change conflict it backs off, re-reads the sandbox, and
+// returns retry=true so the caller re-dispatches on the fresh raw state.
+func (p *Provider) startParkedSandbox(ctx context.Context, sandboxID string, attempt *int) (*apiclient.Sandbox, bool, error) {
+	apiReq := p.apiClient.SandboxAPI.StartSandbox(p.authContext(ctx), strings.TrimSpace(sandboxID))
+	if p.organizationID != "" {
+		apiReq = apiReq.XDaytonaOrganizationID(p.organizationID)
+	}
+	started, httpResp, startErr := apiReq.Execute()
+	if startErr == nil {
+		return started, false, nil
+	}
+	mapped := p.mapSandboxOperationError("start", sandboxID, convertAPIError(startErr, httpResp))
+	if !isStateChangeInProgress(mapped) || *attempt == deleteConflictAttempts-1 {
+		return nil, false, mapped
+	}
+	delay := deleteConflictBackoff << *attempt
+	*attempt++
+	timer := time.NewTimer(delay)
+	select {
+	case <-ctx.Done():
+		timer.Stop()
+		return nil, false, fmt.Errorf("daytona start sandbox %q: %w", sandboxID, ctx.Err())
+	case <-timer.C:
+	}
+	refreshed, err := p.getSandbox(ctx, sandboxID)
+	if err != nil {
+		return nil, false, err
+	}
+	return refreshed, true, nil
 }
 
 // ListManaged lists Daytona sandboxes with the requested labels. Daytona's list
@@ -845,6 +931,8 @@ func (p *Provider) waitForStarted(ctx context.Context, sandbox *apiclient.Sandbo
 		switch state {
 		case apiclient.SANDBOXSTATE_STARTED:
 			return nil
+		case apiclient.SANDBOXSTATE_STOPPED:
+			return fmt.Errorf("daytona sandbox %q stopped before reaching started state", id)
 		case apiclient.SANDBOXSTATE_ERROR, apiclient.SANDBOXSTATE_BUILD_FAILED:
 			return fmt.Errorf("daytona sandbox %q failed to start with state %q: %s", id, state, strings.TrimSpace(sandbox.GetErrorReason()))
 		}
@@ -863,6 +951,33 @@ func (p *Provider) waitForStarted(ctx context.Context, sandbox *apiclient.Sandbo
 		}
 		sandbox = next
 		state = sandboxState(next)
+	}
+}
+
+func (p *Provider) waitForParkingTransition(ctx context.Context, sandbox *apiclient.Sandbox) (*apiclient.Sandbox, error) {
+	id := strings.TrimSpace(sandbox.GetId())
+	for {
+		switch state := sandboxState(sandbox); state {
+		case apiclient.SANDBOXSTATE_STOPPING, apiclient.SANDBOXSTATE_PAUSING, apiclient.SANDBOXSTATE_ARCHIVING:
+		case apiclient.SANDBOXSTATE_ERROR, apiclient.SANDBOXSTATE_BUILD_FAILED:
+			return nil, fmt.Errorf("daytona sandbox %q failed during state transition with state %q: %s", id, state, strings.TrimSpace(sandbox.GetErrorReason()))
+		default:
+			return sandbox, nil
+		}
+
+		timer := time.NewTimer(time.Second)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return nil, fmt.Errorf("wait for daytona sandbox %q state transition: %w", id, ctx.Err())
+		case <-timer.C:
+		}
+
+		next, err := p.getSandbox(ctx, id)
+		if err != nil {
+			return nil, fmt.Errorf("wait for daytona sandbox %q state transition: %w", id, err)
+		}
+		sandbox = next
 	}
 }
 
@@ -1068,6 +1183,7 @@ func providerSandboxFromAPI(sandbox *apiclient.Sandbox) placement.ProviderSandbo
 		ID:        strings.TrimSpace(sandbox.GetId()),
 		Labels:    cleanMap(sandbox.GetLabels()),
 		State:     providerState(sandboxState(sandbox)),
+		RawState:  placement.ProviderSandboxRawState(sandboxState(sandbox)),
 		CreatedAt: providerSandboxCreatedAt(sandbox.GetCreatedAt()),
 	}
 }
@@ -1077,6 +1193,7 @@ func providerSandboxFromListItem(item apiclient.SandboxListItem) placement.Provi
 		ID:        strings.TrimSpace(item.GetId()),
 		Labels:    cleanMap(item.GetLabels()),
 		State:     providerState(item.GetState()),
+		RawState:  placement.ProviderSandboxRawState(item.GetState()),
 		CreatedAt: providerSandboxCreatedAt(item.GetCreatedAt()),
 	}
 }

@@ -1,13 +1,15 @@
 /**
  * @vitest-environment jsdom
  */
-import { renderHook, waitFor } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { act, renderHook, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { StrictMode, type ReactNode } from "react";
 import type React from "react";
 
 import { useSessionSeeding } from "../useSessionSeeding";
+import { ApiError } from "@/types/common";
 import type { TabState } from "@/components/TerminalView/tabs";
+import * as reconnectBackoff from "@/utils/reconnectBackoff";
 
 const mockHooksApi = vi.hoisted(() => ({
   ensureAgentTerminalSession: vi.fn(),
@@ -41,6 +43,11 @@ function makeArgs(overrides: Partial<Parameters<typeof useSessionSeeding>[0]>) {
 describe("useSessionSeeding", () => {
   beforeEach(() => {
     mockHooksApi.ensureAgentTerminalSession.mockReset();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
   });
 
   it("resolves pending agent names even when a stale restored tab exists", async () => {
@@ -189,5 +196,157 @@ describe("useSessionSeeding", () => {
       crashReason: null,
     });
     expect(onAgentNameConsumed).toHaveBeenCalledTimes(1);
+  });
+
+  it("retries a starting ensure without consuming the pending agent", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(reconnectBackoff, "calculateBackoffDelay").mockReturnValue(1000);
+    const onAgentNameConsumed = vi.fn();
+    mockHooksApi.ensureAgentTerminalSession
+      .mockRejectedValueOnce(
+        new ApiError(503, "Service Unavailable", {
+          error: "Lead sandbox is waking up…",
+          kind: "starting",
+        }),
+      )
+      .mockResolvedValueOnce({
+        session_name: "term_456",
+        label: "agent-lead-ui-e2e",
+        notes: "",
+        sort_order: 1,
+        pinned: false,
+        kind: "agent",
+        agent_id: "lead-ui-e2e",
+        role: "lead",
+        backend: "codex",
+        writable: true,
+        pty_alive: true,
+        attached_clients: 0,
+        created_at: "2026-05-11T00:00:00Z",
+        updated_at: "2026-05-11T00:00:00Z",
+      });
+
+    const args = makeArgs({
+      pendingAgentName: "lead-ui-e2e",
+      onAgentNameConsumed,
+    });
+    const { result } = renderHook(() => useSessionSeeding(args));
+    await act(async () => {
+      for (let i = 0; i < 5; i += 1) await Promise.resolve();
+    });
+
+    expect(onAgentNameConsumed).not.toHaveBeenCalled();
+    expect(mockHooksApi.ensureAgentTerminalSession).toHaveBeenCalledTimes(1);
+    expect(result.current.agentResolutionState).toBe("waking");
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1000);
+      await Promise.resolve();
+    });
+    expect(mockHooksApi.ensureAgentTerminalSession).toHaveBeenCalledTimes(2);
+    expect(onAgentNameConsumed).toHaveBeenCalledTimes(1);
+    expect(result.current.agentResolutionState).toBe("idle");
+  });
+
+  it("does not retry a bare 503 without starting kind", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const onAgentNameConsumed = vi.fn();
+    mockHooksApi.ensureAgentTerminalSession.mockRejectedValueOnce(
+      new ApiError(503, "Service Unavailable", { error: "unavailable" }),
+    );
+    const args = makeArgs({
+      pendingAgentName: "lead-ui-e2e",
+      onAgentNameConsumed,
+    });
+    const { result } = renderHook(() => useSessionSeeding(args));
+    await act(async () => {
+      for (let i = 0; i < 5; i += 1) await Promise.resolve();
+      await vi.runOnlyPendingTimersAsync();
+    });
+
+    expect(mockHooksApi.ensureAgentTerminalSession).toHaveBeenCalledTimes(1);
+    expect(onAgentNameConsumed).toHaveBeenCalledTimes(1);
+    expect(result.current.agentResolutionState).toBe("idle");
+  });
+
+  it("does not retry early when tab state churns during waking", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(reconnectBackoff, "calculateBackoffDelay").mockReturnValue(1000);
+    mockHooksApi.ensureAgentTerminalSession.mockRejectedValue(
+      new ApiError(503, "Service Unavailable", {
+        error: "Lead sandbox is waking up…",
+        kind: "starting",
+      }),
+    );
+    const tabsRef = { current: [] as TabState[] };
+    const args = makeArgs({
+      pendingAgentName: "lead-ui-e2e",
+      tabsRef,
+    });
+    const { rerender } = renderHook(
+      ({ tabs }: { tabs: TabState[] }) => {
+        tabsRef.current = tabs;
+        return useSessionSeeding({ ...args, tabs });
+      },
+      { initialProps: { tabs: [] as TabState[] } },
+    );
+    await act(async () => {
+      for (let i = 0; i < 5; i += 1) await Promise.resolve();
+    });
+    expect(mockHooksApi.ensureAgentTerminalSession).toHaveBeenCalledTimes(1);
+
+    rerender({
+      tabs: [
+        {
+          id: "shell-1",
+          label: "Shell",
+          sessionName: "shell-1",
+          connectionState: "disconnected",
+          backendName: "shell",
+        },
+      ],
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await vi.advanceTimersByTimeAsync(999);
+    });
+    expect(mockHooksApi.ensureAgentTerminalSession).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1);
+    });
+    expect(mockHooksApi.ensureAgentTerminalSession).toHaveBeenCalledTimes(2);
+  });
+
+  it("surfaces a visible failure state when the waking retry budget is exhausted", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.spyOn(reconnectBackoff, "calculateBackoffDelay").mockReturnValue(1000);
+    const onAgentNameConsumed = vi.fn();
+    mockHooksApi.ensureAgentTerminalSession.mockRejectedValue(
+      new ApiError(503, "Service Unavailable", {
+        error: "Lead sandbox is waking up…",
+        kind: "starting",
+      }),
+    );
+    const args = makeArgs({
+      pendingAgentName: "lead-ui-e2e",
+      onAgentNameConsumed,
+    });
+    const { result } = renderHook(() => useSessionSeeding(args));
+    await act(async () => {
+      for (let i = 0; i < 5; i += 1) await Promise.resolve();
+      for (let i = 0; i < 10; i += 1) {
+        await vi.advanceTimersByTimeAsync(1000);
+      }
+    });
+
+    expect(mockHooksApi.ensureAgentTerminalSession).toHaveBeenCalledTimes(11);
+    expect(result.current.agentResolutionState).toBe("failed");
+    expect(result.current.agentResolutionError).toBe(
+      "Lead sandbox did not become ready. Try opening the agent again.",
+    );
+    expect(onAgentNameConsumed).not.toHaveBeenCalled();
   });
 });

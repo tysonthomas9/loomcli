@@ -55,6 +55,7 @@ var ErrPtySessionAlreadyExists = errors.New("placement: pty session already exis
 type Provider interface {
 	Create(context.Context, CreateRequest) (CreateResult, error)
 	Get(context.Context, string) (ProviderSandbox, error)
+	EnsureRunning(context.Context, string) (bool, error)
 	ListManaged(context.Context, map[string]string) ([]ProviderSandbox, error)
 	Delete(context.Context, string) error
 	UpdateLastActivity(context.Context, string) error
@@ -151,11 +152,32 @@ const (
 	ProviderSandboxAbsent  ProviderSandboxState = "absent"
 )
 
+// ProviderSandboxRawState preserves the provider lifecycle state when attach
+// readiness cannot be inferred from the neutral reconciliation state.
+type ProviderSandboxRawState string
+
+const (
+	ProviderSandboxRawStarted     ProviderSandboxRawState = "started"
+	ProviderSandboxRawStopped     ProviderSandboxRawState = "stopped"
+	ProviderSandboxRawArchived    ProviderSandboxRawState = "archived"
+	ProviderSandboxRawPaused      ProviderSandboxRawState = "paused"
+	ProviderSandboxRawStarting    ProviderSandboxRawState = "starting"
+	ProviderSandboxRawRestoring   ProviderSandboxRawState = "restoring"
+	ProviderSandboxRawResuming    ProviderSandboxRawState = "resuming"
+	ProviderSandboxRawStopping    ProviderSandboxRawState = "stopping"
+	ProviderSandboxRawPausing     ProviderSandboxRawState = "pausing"
+	ProviderSandboxRawArchiving   ProviderSandboxRawState = "archiving"
+	ProviderSandboxRawError       ProviderSandboxRawState = "error"
+	ProviderSandboxRawBuildFailed ProviderSandboxRawState = "build_failed"
+	ProviderSandboxRawDestroyed   ProviderSandboxRawState = "destroyed"
+)
+
 // ProviderSandbox is a reconciliation view of provider-side sandbox state.
 type ProviderSandbox struct {
 	ID        string
 	Labels    map[string]string
 	State     ProviderSandboxState
+	RawState  ProviderSandboxRawState
 	CreatedAt time.Time
 }
 

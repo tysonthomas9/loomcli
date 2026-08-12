@@ -89,6 +89,7 @@ func (app *Server) buildTerminalModules() {
 				TabMetaStore:    app.tabMetaStore,
 				Hub:             app.hub,
 				ServerStartedAt: app.startedAt,
+				LeadReviver:     app.config.LeadReviveCoordinator,
 			})...)
 	}
 

@@ -227,9 +227,10 @@ func (p *serveTestPlacementProvider) Create(_ context.Context, req placement.Cre
 	id := "sandbox-" + strconv.Itoa(p.next)
 	p.createRequests = append(p.createRequests, cloneServeCreateRequest(req))
 	p.sandboxes[id] = placement.ProviderSandbox{
-		ID:     id,
-		Labels: copyStringMap(req.Labels),
-		State:  placement.ProviderSandboxRunning,
+		ID:       id,
+		Labels:   copyStringMap(req.Labels),
+		State:    placement.ProviderSandboxRunning,
+		RawState: placement.ProviderSandboxRawStarted,
 	}
 	return placement.CreateResult{SandboxID: id}, nil
 }
@@ -252,6 +253,23 @@ func (p *serveTestPlacementProvider) Get(_ context.Context, sandboxID string) (p
 		return placement.ProviderSandbox{}, placement.ErrSandboxNotFound
 	}
 	return sandbox, nil
+}
+
+func (p *serveTestPlacementProvider) EnsureRunning(_ context.Context, sandboxID string) (bool, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	sandbox, ok := p.sandboxes[sandboxID]
+	if !ok {
+		return false, placement.ErrSandboxNotFound
+	}
+	if sandbox.State != placement.ProviderSandboxStopped {
+		return false, nil
+	}
+	sandbox.State = placement.ProviderSandboxRunning
+	sandbox.RawState = placement.ProviderSandboxRawStarted
+	p.sandboxes[sandboxID] = sandbox
+	delete(p.ptys, sandboxID)
+	return true, nil
 }
 
 func (p *serveTestPlacementProvider) ListManaged(_ context.Context, labels map[string]string) ([]placement.ProviderSandbox, error) {
