@@ -1,0 +1,93 @@
+.banner {
+  margin: 8px 12px 0;
+  padding: 10px 12px;
+  border: 1px solid var(--color-warning-border, #f0c36d);
+  border-radius: 8px;
+  background: var(--color-warning-bg, #fdf6e3);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.badge {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-warning-text, #8a6d3b);
+}
+
+.kind {
+  font-size: 11px;
+  font-family: var(--font-mono, monospace);
+  color: var(--color-text-secondary, #6b7280);
+  background: var(--color-bg-secondary, #f3f4f6);
+  border-radius: 4px;
+  padding: 1px 6px;
+}
+
+.prompt {
+  font-size: 13px;
+  white-space: pre-wrap;
+  color: var(--color-text-primary, #1f2937);
+}
+
+.error {
+  font-size: 12px;
+  color: var(--color-error, #b91c1c);
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.optionButton,
+.declineButton,
+.sendButton {
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--color-border, #d1d5db);
+  background: var(--color-bg-primary, #fff);
+  cursor: pointer;
+}
+
+.optionButton:hover:not(:disabled),
+.sendButton:hover:not(:disabled) {
+  background: var(--color-bg-hover, #f3f4f6);
+}
+
+.declineButton {
+  color: var(--color-error, #b91c1c);
+}
+
+.declineButton:hover:not(:disabled) {
+  background: var(--color-error-bg, #fef2f2);
+}
+
+.optionButton:disabled,
+.declineButton:disabled,
+.sendButton:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.textRow {
+  display: flex;
+  gap: 6px;
+}
+
+.textInput {
+  flex: 1;
+  font-size: 12px;
+  padding: 4px 8px;
+  border: 1px solid var(--color-border, #d1d5db);
+  border-radius: 6px;
+  background: var(--color-bg-primary, #fff);
+}

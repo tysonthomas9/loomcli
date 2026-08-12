@@ -93,7 +93,7 @@ func (r *PatchIssueRequest) Validate() error {
 	// status: if set, must be a user-facing status (not internal like tombstone/pinned/hooked)
 	if r.Status != nil {
 		if !isAPIStatus(*r.Status) {
-			b.add("status", "must be a valid status (open, in_progress, blocked, deferred, review, closed)")
+			b.add("status", fmt.Sprintf("must be a valid status (%s)", apiStatusList()))
 		}
 	}
 

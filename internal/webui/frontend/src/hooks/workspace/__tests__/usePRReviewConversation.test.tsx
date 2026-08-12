@@ -77,6 +77,102 @@ describe("usePRReviewConversation", () => {
     expect(mocks.ensureReviewer).toHaveBeenCalledTimes(1);
   });
 
+  it("loads conversation before ensure finishes and shows early messages", async () => {
+    const ensure = deferred<{ agent_name: string }>();
+    const conversation = deferred<{
+      messages: Array<{ role: string; content: string }>;
+      state: string;
+    }>();
+    mocks.ensureReviewer.mockReturnValue(ensure.promise);
+    mocks.getReviewerConversation.mockReturnValue(conversation.promise);
+
+    const { result } = renderHook(() =>
+      usePRReviewConversation({
+        workspaceId: "WS",
+        owner: "octocat",
+        repo: "hello",
+        number: 7,
+        enabled: true,
+      }),
+    );
+
+    await waitFor(() => {
+      expect(mocks.getReviewerConversation).toHaveBeenCalled();
+      expect(mocks.ensureReviewer).toHaveBeenCalled();
+    });
+    expect(result.current.agentName).toBeNull();
+    expect(result.current.messages).toEqual([]);
+
+    await act(async () => {
+      conversation.resolve({
+        messages: [{ role: "assistant", content: "Already reviewing" }],
+        state: "idle",
+      });
+      await conversation.promise;
+    });
+
+    await waitFor(() => {
+      expect(result.current.messages).toEqual([
+        { role: "assistant", content: "Already reviewing" },
+      ]);
+      expect(result.current.state).toBe("idle");
+    });
+    // Ensure still in flight — send stays gated on agentName.
+    expect(result.current.agentName).toBeNull();
+
+    await act(async () => {
+      ensure.resolve({ agent_name: "review-octocat-hello-pr-7" });
+      await ensure.promise;
+    });
+
+    await waitFor(() => {
+      expect(result.current.agentName).toBe("review-octocat-hello-pr-7");
+    });
+  });
+
+  it("keeps preparing when conversation 404s until ensure completes", async () => {
+    const ensure = deferred<{ agent_name: string }>();
+    mocks.ensureReviewer.mockReturnValue(ensure.promise);
+    mocks.getReviewerConversation
+      .mockRejectedValueOnce(
+        new ApiError(404, "Not Found", {
+          code: "reviewer_not_started",
+          error: "reviewer not started",
+        }),
+      )
+      .mockResolvedValue({
+        messages: [],
+        state: "idle",
+      });
+
+    const { result } = renderHook(() =>
+      usePRReviewConversation({
+        workspaceId: "WS",
+        owner: "octocat",
+        repo: "hello",
+        number: 7,
+        enabled: true,
+      }),
+    );
+
+    await waitFor(() => {
+      expect(mocks.getReviewerConversation).toHaveBeenCalled();
+      expect(mocks.ensureReviewer).toHaveBeenCalled();
+    });
+    expect(result.current.state).toBe("starting");
+    expect(result.current.error).toBeNull();
+
+    await act(async () => {
+      ensure.resolve({ agent_name: "review-octocat-hello-pr-7" });
+      await ensure.promise;
+    });
+
+    await waitFor(() => {
+      expect(result.current.agentName).toBe("review-octocat-hello-pr-7");
+      expect(result.current.state).toBe("idle");
+    });
+  });
+
   it("reports a stale subject to the latest callback without re-ensuring on callback churn", async () => {
     const ensure = deferred<{ agent_name: string }>();
     mocks.ensureReviewer.mockReturnValue(ensure.promise);

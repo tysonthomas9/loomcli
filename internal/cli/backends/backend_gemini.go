@@ -35,7 +35,7 @@ var geminiNonInteractiveInvoker func(workDir, prompt, agentName string, shutdown
 // buildGeminiInteractiveCmd constructs the exec.Cmd for interactive Gemini invocation.
 // Extracted for testability — callers can inspect the returned cmd without execution.
 func buildGeminiInteractiveCmd(workDir, prompt, agentName string) *exec.Cmd {
-	cmd := exec.Command("gemini", "--approval-mode=yolo", prompt) //nolint:gosec // G204: prompt is from the CLI operator, not untrusted input
+	cmd := exec.Command("gemini", geminiApprovalModeArg(), prompt) //nolint:gosec // G204: prompt is from the CLI operator, not untrusted input
 	cmd.Dir = workDir
 	cmd.Env = buildGeminiEnv(workDir, agentName)
 	cmd.Stdin = os.Stdin
@@ -54,13 +54,16 @@ func buildGeminiEnv(workDir, agentName string) []string {
 }
 
 func defaultGeminiInvoker(workDir, prompt, agentName string) error {
+	if err := validateSafetyKnobsFromEnv("gemini"); err != nil {
+		return err
+	}
 	// When stdin is not a TTY (e.g. daemon subprocess), Gemini interactive
 	// mode may fail. Fall back to non-interactive -p mode which works headlessly.
 	if !isTerminal(os.Stdin) {
 		fmt.Println("Launching Gemini agent (non-interactive, no TTY)...")
 		fmt.Println("")
 
-		cmd := exec.Command("gemini", "--approval-mode=yolo", "-p", prompt) //nolint:gosec // G204: prompt is from the CLI operator, not untrusted input
+		cmd := exec.Command("gemini", geminiApprovalModeArg(), "-p", prompt) //nolint:gosec // G204: prompt is from the CLI operator, not untrusted input
 		cmd.Dir = workDir
 		cmd.Env = buildGeminiEnv(workDir, agentName)
 		cmd.Stdout = os.Stdout
@@ -77,6 +80,9 @@ func defaultGeminiInvoker(workDir, prompt, agentName string) error {
 }
 
 func defaultGeminiNonInteractiveInvoker(workDir, prompt, agentName string, shutdown <-chan struct{}, collector *usage.Collector) error {
+	if err := validateSafetyKnobsFromEnv("gemini"); err != nil {
+		return err
+	}
 	fmt.Println("Launching Gemini agent (non-interactive)...")
 	fmt.Println("")
 
@@ -85,7 +91,7 @@ func defaultGeminiNonInteractiveInvoker(workDir, prompt, agentName string, shutd
 	// an empty stdin so the harness sees EOF immediately if it reads).
 	return runHarness(context.Background(), shutdown, harnessInvocation{
 		BinaryName:  "gemini",
-		Args:        []string{"--approval-mode=yolo", "-p", prompt, "-o", "stream-json"},
+		Args:        []string{geminiApprovalModeArg(), "-p", prompt, "-o", "stream-json"},
 		WorkDir:     workDir,
 		Env:         buildGeminiEnv(workDir, agentName),
 		Prompt:      "",

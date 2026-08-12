@@ -261,6 +261,13 @@ func (s *Supervisor) claimIssueForAgent(ap *AgentProcess, taskID, reason string)
 // operationContext returns a context bounded by both the given timeout and
 // the supervisor's Shutdown channel, so a slow backend call doesn't outlive
 // supervisor shutdown.
+//
+// Within this branch every caller passes claimOperationTimeout, but the
+// completion-hook line calls this with completionHookTimeout, so the parameter
+// is load-bearing once the stacks are combined (proven on the integration
+// branch) — hence the unparam waiver rather than a drop.
+//
+//nolint:unparam
 func (s *Supervisor) operationContext(timeout time.Duration) (context.Context, context.CancelFunc) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	if s.Shutdown == nil {

@@ -17,6 +17,10 @@ import { useStore } from "zustand";
 
 import { useAgentStoreInstance } from "@/hooks";
 import { type LoomAgentStatus, parseLoomStatus } from "@/types";
+import {
+  agentCompactAvatarLabel,
+  agentDisplayTitle,
+} from "@/utils/agentDisplay";
 import { orderAgentsForEpicRunner } from "@/utils/agentRole";
 import { getCompactAvatarInitials } from "@/utils/compactAvatarInitials";
 import { getAvatarColor, shouldUseWhiteText } from "@/utils/colorUtils";
@@ -106,14 +110,21 @@ export function isLiveAgentRailVisible(agent: LoomAgentStatus): boolean {
 export { orderAgentsForEpicRunner } from "@/utils/agentRole";
 
 export function agentAvatarTooltip(agent: LoomAgentStatus): string {
+  const title = agentDisplayTitle(agent);
   const parsed = parseLoomStatus(agent.status ?? "");
   if (parsed.taskId && parsed.taskId.length > 0) {
-    return `${agent.name} — ${parsed.type} · ${parsed.taskId}`;
+    return `${title} — ${parsed.type} · ${parsed.taskId}`;
   }
   if (agent.parent) {
-    return `${agent.name} — ${parsed.type || "idle"} · ${agent.parent}`;
+    return `${title} — ${parsed.type || "idle"} · ${agent.parent}`;
   }
-  return `${agent.name} — ${parsed.type || "idle"}`;
+  return `${title} — ${parsed.type || "idle"}`;
+}
+
+function avatarLabelFontSize(label: string, size: number): number {
+  if (label.length >= 4) return size <= 32 ? 8 : 9;
+  if (label.length > 1) return size <= 32 ? 10 : 11;
+  return size <= 32 ? 12 : 14;
 }
 
 export function AgentAvatarButton({
@@ -132,7 +143,8 @@ export function AgentAvatarButton({
     [agent.status],
   );
   const dotColor = STATUS_DOT_COLOR[parsed.type] ?? STATUS_DOT_COLOR["idle"];
-  const initial = getCompactAvatarInitials(agent.name ?? "");
+  const prLabel = agentCompactAvatarLabel(agent);
+  const initial = prLabel || getCompactAvatarInitials(agent.name ?? "");
   const avatarBg = getAvatarColor(agent.name ?? "");
   const avatarFg = shouldUseWhiteText(avatarBg) ? "#fff" : "#1a1a1a";
   const tooltip = agentAvatarTooltip(agent);
@@ -150,8 +162,7 @@ export function AgentAvatarButton({
       style={{
         width: size,
         height: size,
-        fontSize:
-          initial.length > 1 ? (size <= 32 ? 10 : 11) : size <= 32 ? 12 : 14,
+        fontSize: avatarLabelFontSize(initial, size),
         background: avatarBg,
         color: avatarFg,
         border: selected

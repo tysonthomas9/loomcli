@@ -15,6 +15,7 @@ import (
 	"time"
 
 	hwharness "github.com/olesho/harness-wrapper/pkg/harness"
+	"golang.org/x/term"
 
 	"github.com/tysonthomas9/loomcli/internal/usage"
 )
@@ -379,6 +380,11 @@ func TestFakeClaudeTUIProcess(t *testing.T) {
 	if os.Getenv("LOOM_FAKE_CLAUDE_TUI") != "1" {
 		t.Skip("helper process only")
 	}
+	if term.IsTerminal(int(os.Stdin.Fd())) {
+		if _, err := term.MakeRaw(int(os.Stdin.Fd())); err != nil {
+			t.Fatalf("put fake Claude TUI in raw mode: %v", err)
+		}
+	}
 
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, os.Interrupt)
@@ -391,6 +397,10 @@ func TestFakeClaudeTUIProcess(t *testing.T) {
 	fmt.Println("❯")
 
 	scanner := bufio.NewScanner(os.Stdin)
+	// Current harness-wrapper submits Claude input with the Kitty keyboard
+	// protocol's Enter key (CSI 13u). Keep accepting line endings as well so
+	// this fake models both enhanced and plain terminal input paths.
+	scanner.Split(scanFakeClaudeSubmit)
 	if scanner.Scan() {
 		fmt.Printf("assistant reply: %s\n", scanner.Text())
 		fmt.Println("claude --resume 123e4567-e89b-12d3-a456-426614174000")
@@ -399,6 +409,27 @@ func TestFakeClaudeTUIProcess(t *testing.T) {
 	}
 
 	select {}
+}
+
+func scanFakeClaudeSubmit(data []byte, atEOF bool) (advance int, token []byte, err error) {
+	const kittyEnter = "\x1b[13u"
+	kittyAt := bytes.Index(data, []byte(kittyEnter))
+	lineAt := bytes.IndexAny(data, "\r\n")
+
+	if lineAt >= 0 && (kittyAt < 0 || lineAt < kittyAt) {
+		advance = lineAt + 1
+		if data[lineAt] == '\r' && len(data) > advance && data[advance] == '\n' {
+			advance++
+		}
+		return advance, data[:lineAt], nil
+	}
+	if kittyAt >= 0 {
+		return kittyAt + len(kittyEnter), data[:kittyAt], nil
+	}
+	if atEOF && len(data) > 0 {
+		return len(data), data, nil
+	}
+	return 0, nil, nil
 }
 
 // TestShutdownRace_NoSignalAfterExit verifies that no SIGTERM is sent when

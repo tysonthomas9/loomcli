@@ -13,6 +13,8 @@ export type { CollapsibleSectionProps } from "./CollapsibleSection";
 export { SplitDetailSummary } from "./SplitDetailSummary";
 export type { SplitDetailSummaryProps } from "./SplitDetailSummary";
 export { default as sessionTabStyles } from "./sessions/SessionsTab.module.css";
+export { MarkdownRenderer } from "./sections/MarkdownRenderer";
+export type { MarkdownRendererProps } from "./sections/MarkdownRenderer";
 
 export * from "./actions";
 export * from "./fields";

@@ -5,9 +5,11 @@ import type { Issue } from "@/types";
 import {
   buildPullRequestRows,
   groupKeyFor,
+  parseReviewPrParam,
   prReviewRef,
   prStateFromGithub,
   rowState,
+  stubPullRequestFromSubject,
 } from "@/views/PRsPage";
 
 function makeIssue(overrides: Partial<Issue>): Issue {
@@ -72,6 +74,40 @@ describe("prReviewRef", () => {
     expect(
       prReviewRef({ ...base, number: undefined as unknown as number }),
     ).toBeNull();
+  });
+});
+
+describe("parseReviewPrParam", () => {
+  it("parses owner/repo#number deep-links", () => {
+    expect(parseReviewPrParam("tysonthomas9/loomcli#220")).toEqual({
+      owner: "tysonthomas9",
+      repo: "loomcli",
+      number: 220,
+    });
+  });
+
+  it("rejects malformed refs", () => {
+    expect(parseReviewPrParam("loomcli#220")).toBeNull();
+    expect(parseReviewPrParam("tysonthomas9/loomcli")).toBeNull();
+    expect(parseReviewPrParam("")).toBeNull();
+    expect(parseReviewPrParam(null)).toBeNull();
+  });
+});
+
+describe("stubPullRequestFromSubject", () => {
+  it("builds a mountable GitHub PR stub for the review workspace", () => {
+    expect(
+      stubPullRequestFromSubject({
+        owner: "tysonthomas9",
+        repo: "loomcli",
+        number: 220,
+      }),
+    ).toMatchObject({
+      number: 220,
+      title: "tysonthomas9/loomcli#220",
+      url: "https://github.com/tysonthomas9/loomcli/pull/220",
+      repo_name: "tysonthomas9/loomcli",
+    });
   });
 });
 

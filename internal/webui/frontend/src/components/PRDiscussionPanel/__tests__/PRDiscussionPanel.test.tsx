@@ -59,6 +59,64 @@ describe("PRDiscussionPanel", () => {
     });
   });
 
+  it("renders assistant chat text as formatted Markdown (bold + inline code)", async () => {
+    mocks.getReviewerConversation.mockResolvedValue({
+      state: "idle",
+      messages: [
+        {
+          turn_id: "t1",
+          item_id: "i1",
+          role: "assistant",
+          text: "Risk at **foo.go** via `checkout`.",
+        },
+      ],
+    });
+    const { container } = render(
+      <PRDiscussionPanel
+        workspaceId="WS"
+        owner="octocat"
+        repo="hello"
+        number={7}
+        onClose={vi.fn()}
+      />,
+    );
+
+    const messages = await screen.findByTestId("pr-chat-messages");
+    expect(await within(messages).findByText("foo.go")).toBeInTheDocument();
+    expect(container.querySelector("strong")).toHaveTextContent("foo.go");
+    expect(container.querySelector("code")).toHaveTextContent("checkout");
+    expect(container.textContent).not.toContain("**foo.go**");
+    expect(container.textContent).not.toContain("`checkout`");
+  });
+
+  it("lays out multi-paragraph markdown without pre-wrap gaps", async () => {
+    mocks.getReviewerConversation.mockResolvedValue({
+      state: "idle",
+      messages: [
+        {
+          turn_id: "t1",
+          item_id: "i1",
+          role: "assistant",
+          text: "First paragraph.\n\nSecond paragraph.",
+        },
+      ],
+    });
+    render(
+      <PRDiscussionPanel
+        workspaceId="WS"
+        owner="octocat"
+        repo="hello"
+        number={7}
+        onClose={vi.fn()}
+      />,
+    );
+
+    const markdown = await screen.findByTestId("markdown-content");
+    expect(markdown.querySelectorAll("p")).toHaveLength(2);
+    expect(markdown).toHaveTextContent("First paragraph.");
+    expect(markdown).toHaveTextContent("Second paragraph.");
+  });
+
   it("ensures, renders messages, sends chat text, and keeps the terminal mounted", async () => {
     render(
       <PRDiscussionPanel
@@ -208,6 +266,49 @@ describe("PRDiscussionPanel", () => {
     expect(notice).toHaveTextContent("stopped unexpectedly");
     expect(screen.getByTestId("pr-chat-composer")).toBeDisabled();
     expect(screen.queryByTestId("pr-chat-open-terminal")).toBeNull();
+  });
+
+  it("renders tool calls as collapsed pills that expand on click", async () => {
+    mocks.getReviewerConversation.mockResolvedValue({
+      state: "idle",
+      messages: [
+        {
+          turn_id: "t1",
+          item_id: "i-tool",
+          role: "assistant",
+          kind: "tool_use",
+          text: "Bash",
+          tool_name: "Bash",
+          tool_input: '{"command":"ls src"}',
+          tool_result: "a.ts\nb.ts",
+        },
+        {
+          turn_id: "t1",
+          item_id: "i-text",
+          role: "assistant",
+          text: "two files",
+        },
+      ],
+    });
+    render(
+      <PRDiscussionPanel
+        workspaceId="WS"
+        owner="octocat"
+        repo="hello"
+        number={7}
+        onClose={vi.fn()}
+      />,
+    );
+
+    const messages = await screen.findByTestId("pr-chat-messages");
+    const pill = await within(messages).findByTestId("tool-pill");
+    expect(pill).toHaveTextContent("Bash");
+    expect(pill).toHaveTextContent("ls src");
+    expect(within(messages).queryByText("a.ts")).toBeNull();
+
+    fireEvent.click(pill);
+    expect(await within(messages).findByText(/a\.ts/)).toBeInTheDocument();
+    expect(within(messages).getByText("two files")).toBeInTheDocument();
   });
 
   it("keeps the last good messages through a reconnecting snapshot", async () => {

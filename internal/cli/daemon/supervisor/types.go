@@ -44,12 +44,16 @@ type AgentProcess struct {
 	ResumeFailures         int               // consecutive failed RECOVERY attempts — resume AND checkpoint fallback (PERSISTS across cycles); escalation: resume×maxResumeFailures → checkpoint×1 → cold-start
 	RecoveryMode           recoveryMode      // this cycle's recovery classification (resume|checkpoint|cold); per-cycle, set in preFlightSetup, read by recordResumeOutcome to decide whether the run's outcome advances ResumeFailures
 	LastActivity           time.Time         // most recent PTY output observed by the agent's wrapper (driven by agent IPC heartbeats); zero between spawn and first observation
+	InputWaitPending       int               // interactive harness prompts currently awaiting an answer; a count (not a flag) so overlapping prompts nest — see input_wait.go
+	InputWaitSince         time.Time         // when InputWaitPending last rose from zero; anchors the bound that stops a suspension from outliving its cause
 
 	RestartCount   int       // consecutive restart attempts
 	LastStart      time.Time // when subprocess was last spawned
 	LastExit       time.Time // when subprocess last exited
 	LastExitCode   int       // exit code from last run
 	AssignedEpicID string    // epic this agent is currently assigned to (empty = non-epic mode)
+
+	SoftKnobWarning string // last soft-enforcement warning logged by gateSafetyKnobsEnforceable; deduplicates a per-poll-cycle line down to one per change
 
 	LastError      *agenterr.AgentError // classified error from most recent exit (nil on clean exit)
 	RateRetryCount int                  // consecutive rate-limit retries (separate from RestartCount)
@@ -66,7 +70,7 @@ type AgentProcess struct {
 
 	StopReason StopReason // why the agent was stopped (set at decision site, empty while running)
 
-	Mu sync.Mutex // protects Cmd, Pid, LogFile, restart tracking, AssignedEpicID, AssignedTaskID, RequestedTaskID, ResumeTaskID, ResumeFailures, RecoveryMode, LastError, CurrentBackendIdx, Session, AgentSessionID, ParentSessionID, AgentLeaseID, AgentLeaseToken, ownership fields, TranscriptPath, BeforeRef, StopReason, LastActivity
+	Mu sync.Mutex // protects Cmd, Pid, LogFile, SoftKnobWarning, restart tracking, AssignedEpicID, AssignedTaskID, RequestedTaskID, ResumeTaskID, ResumeFailures, RecoveryMode, LastError, CurrentBackendIdx, Session, AgentSessionID, ParentSessionID, AgentLeaseID, AgentLeaseToken, ownership fields, TranscriptPath, BeforeRef, StopReason, LastActivity, InputWaitPending, InputWaitSince
 }
 
 // StopReason identifies why an agent was stopped.
@@ -95,6 +99,17 @@ const (
 	// with backends exhausted, or a capped block that never made progress).
 	// Surfaced as "failed" in daemon-status.
 	StopReasonFastFail StopReason = "fast_fail"
+	// StopReasonRunDurationExceeded marks a run the supervisor killed for
+	// outliving its wall-clock cap (see run_duration.go).
+	//
+	// Deliberately NOT folded into StopReasonWatchdog. That reason means "silent
+	// too long"; this one means "running too long", and the two describe
+	// opposite failures: an agent hitting this cap may have been chattering
+	// happily the whole time, or parked on a prompt the silence watchdog was
+	// explicitly told to excuse. classifyAgentExit keys on the distinction —
+	// a watchdog stop with no task is read as idle NoWork, which is the one
+	// verdict a four-hour run must never get.
+	StopReasonRunDurationExceeded StopReason = "run_duration_exceeded"
 )
 
 // resolveRemote returns the git remote name for this agent.

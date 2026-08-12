@@ -103,6 +103,19 @@ describe("agentAvatarTooltip", () => {
       agentAvatarTooltip(agent({ name: "local-coder", status: "3 changes" })),
     ).toBe("local-coder — changes");
   });
+
+  it("uses the short PR display title for reviewer agents", () => {
+    expect(
+      agentAvatarTooltip(
+        agent({
+          name: "review-tysonthomas9-loomcli-3a8e1ebe-pr-220",
+          role: "pr-reviewer",
+          display_name: "loomcli#220",
+          status: "idle",
+        }),
+      ),
+    ).toBe("loomcli#220 — idle");
+  });
 });
 
 describe("AgentAvatarButton", () => {
@@ -121,6 +134,26 @@ describe("AgentAvatarButton", () => {
     ).toHaveTextContent("LC");
   });
 
+  it("renders the PR number for reviewer agents instead of name initials", () => {
+    render(
+      createElement(AgentAvatarButton, {
+        agent: agent({
+          name: "review-tysonthomas9-loomcli-3a8e1ebe-pr-220",
+          role: "pr-reviewer",
+          display_name: "loomcli#220",
+          status: "idle",
+        }),
+        selected: false,
+        onClick: vi.fn(),
+        size: 32,
+      }),
+    );
+
+    const button = screen.getByRole("button", { name: /loomcli#220/ });
+    expect(button).toHaveTextContent("#220");
+    expect(button).not.toHaveTextContent("RT");
+  });
+
   it("renders a hover tooltip with agent details", () => {
     render(
       createElement(AgentAvatarButton, {
@@ -137,6 +170,30 @@ describe("AgentAvatarButton", () => {
     fireEvent.mouseEnter(button);
     expect(
       screen.getByRole("tooltip", { name: "local-coder — changes" }),
+    ).toBeInTheDocument();
+  });
+
+  it("renders a hover tooltip with the PR display title", () => {
+    render(
+      createElement(AgentAvatarButton, {
+        agent: agent({
+          name: "review-tysonthomas9-loomcli-3a8e1ebe-pr-220",
+          role: "pr-reviewer",
+          display_name: "loomcli#220",
+          status: "idle",
+        }),
+        selected: false,
+        onClick: vi.fn(),
+        size: 32,
+      }),
+    );
+
+    const button = screen.getByRole("button", {
+      name: "loomcli#220 — idle",
+    });
+    fireEvent.mouseEnter(button);
+    expect(
+      screen.getByRole("tooltip", { name: "loomcli#220 — idle" }),
     ).toBeInTheDocument();
   });
 });
