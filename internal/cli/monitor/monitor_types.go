@@ -40,6 +40,9 @@ type AgentStatus struct {
 	Ahead                 int            `json:"ahead"`                             // commits ahead of integration branch
 	Behind                int            `json:"behind"`                            // commits behind integration branch
 	Role                  string         `json:"role,omitempty"`                    // role from daemon config (e.g., "plan", "task")
+	RoleKind              string         `json:"role_kind,omitempty"`               // resolved role kind ("interactive" or "worker")
+	RoleLabel             string         `json:"role_label,omitempty"`              // optional short UI role label (e.g. "Review")
+	DisplayName           string         `json:"display_name,omitempty"`            // optional short UI title (e.g. "loomcli#222")
 	Repo                  string         `json:"repo,omitempty"`                    // repository this agent is assigned to (multi-repo)
 	Workspace             string         `json:"workspace"`                         // workspace name
 	DaemonManaged         bool           `json:"daemon_managed,omitempty"`          // true if under daemon supervision

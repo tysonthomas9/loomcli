@@ -263,7 +263,10 @@ func (s *Slack) classify(spec CallSpec, channel string, res httpResult) (map[str
 			RetryAfter: parseRetryAfter(res.header),
 		}
 	}
-	obj := decodeObject(res.body)
+	obj, err := decodeResponseObject(spec, res.status, res.body)
+	if err != nil {
+		return nil, err
+	}
 	code, _ := obj["error"].(string)
 	if res.status >= 500 {
 		return nil, &UpstreamError{
@@ -372,14 +375,5 @@ func doJSON(ctx context.Context, client *http.Client, spec CallSpec, method, url
 		}
 	}
 	defer resp.Body.Close()
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes))
-	if err != nil {
-		return httpResult{}, &UpstreamError{
-			Action:  spec.Action,
-			Class:   ClassNetwork,
-			Status:  resp.StatusCode,
-			Summary: sanitize(err.Error()),
-		}
-	}
-	return httpResult{status: resp.StatusCode, header: resp.Header, body: raw}, nil
+	return readHTTPResult(spec, resp, sanitize)
 }

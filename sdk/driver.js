@@ -143,6 +143,7 @@ export class LoomDriverClient {
       epicId: this.#epicID(input),
       actor: input.actor || "",
       limit: input.limit || "",
+      excludeLabels: input.excludeLabels || [],
     });
   }
 

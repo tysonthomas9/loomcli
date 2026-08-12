@@ -11,6 +11,7 @@ import (
 )
 
 const prListJSONFields = "number,title,url,state,isDraft,headRefName,baseRefName,author,createdAt,updatedAt,reviewDecision,additions,deletions,changedFiles"
+const defaultPRListLimit = 500
 
 type ghPRAuthor struct {
 	Login string `json:"login"`
@@ -37,9 +38,7 @@ type ghPRItem struct {
 // Callers are expected to have verified gh availability once per request
 // (a missing binary still surfaces as a run error).
 func ListPullRequests(repoPath, state string, limit int) ([]ops.GitPullRequest, error) {
-	if limit <= 0 {
-		limit = 100
-	}
+	limit = normalizePRListLimit(limit)
 
 	result := cli.GetDeps(nil).Exec.Run(
 		repoPath,
@@ -86,6 +85,13 @@ func ListPullRequests(repoPath, state string, limit int) ([]ops.GitPullRequest, 
 		})
 	}
 	return out, nil
+}
+
+func normalizePRListLimit(limit int) int {
+	if limit <= 0 || limit == 30 {
+		return defaultPRListLimit
+	}
+	return limit
 }
 
 func mapPRListGhState(state string) string {

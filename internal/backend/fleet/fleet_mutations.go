@@ -3,6 +3,7 @@ package fleet
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/url"
 	"strings"
 
@@ -18,7 +19,36 @@ func (b *FleetBackend) AddDependency(ctx context.Context, params backend.DepAddP
 	return b.waitForDependencyState(ctx, "AddDependency", params.FromID, params.ToID, true)
 }
 
+// fleetDependencyTypes is fleet-db's dependency vocabulary (models.DependencyType).
+// It is deliberately narrower than loom's in-process types/entity vocabularies,
+// which also declare "waits-for" and "conditional-blocks" — those describe
+// semantics no storage backend implements, so fleet-db rejects them with
+// ErrInvalidDepType. Catching it here turns an opaque server 400 into a message
+// that names the supported set at the call site.
+var fleetDependencyTypes = map[string]struct{}{
+	"blocks":        {},
+	"parent-child":  {},
+	"related":       {},
+	"duplicate-of":  {},
+	"superseded-by": {},
+}
+
+func validateFleetDepType(depType string) error {
+	depType = strings.TrimSpace(depType)
+	if depType == "" {
+		return nil // server defaults to "blocks"
+	}
+	if _, ok := fleetDependencyTypes[depType]; ok {
+		return nil
+	}
+	return backend.ErrValidation("AddDependency", fmt.Sprintf(
+		"dependency type %q is not storable in fleet-db (supported: blocks, parent-child, related, duplicate-of, superseded-by)", depType))
+}
+
 func (b *FleetBackend) postDependency(ctx context.Context, params backend.DepAddParams) error {
+	if err := validateFleetDepType(params.DepType); err != nil {
+		return err
+	}
 	// fleet-db mounts dependency routes at /issues/{id}/deps (abbreviated)
 	// and its AddDependencyRequest names the dep kind "type" (not
 	// "dep_type"). Path + body tweaked to match.

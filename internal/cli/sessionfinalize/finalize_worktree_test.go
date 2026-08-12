@@ -86,8 +86,8 @@ func TestWithWorktree_TranscriptUsageFallback(t *testing.T) {
 	if meta.CacheWriteTokens != 50 {
 		t.Errorf("CacheWriteTokens = %d, want 50", meta.CacheWriteTokens)
 	}
-	if meta.EstimatedCostUSD <= 0 {
-		t.Errorf("EstimatedCostUSD = %f, want > 0", meta.EstimatedCostUSD)
+	if meta.EstimatedCostUSD != 0 {
+		t.Errorf("EstimatedCostUSD = %f, want 0 (no token-based estimate)", meta.EstimatedCostUSD)
 	}
 }
 
@@ -118,13 +118,12 @@ func TestWithWorktree_NonZeroOptsWinOverTranscript(t *testing.T) {
 	}
 }
 
-func TestApplyTranscriptUsageFallback_ZeroTranscriptLeavesOptsUntouched(t *testing.T) {
+func TestRecoverUsageFromNativeTranscript_ZeroTranscriptLeavesOptsUntouched(t *testing.T) {
 	store, sess := createTestSession(t)
 	writeTranscript(t, store, sess,
 		`{"type":"assistant","message":{"id":"msg_1","usage":{"input_tokens":0,"output_tokens":0,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}}`+"\n")
 
-	opts := WithWorktreeOptions{}
-	applyTranscriptUsageFallback(sess, &opts)
+	opts := recoverUsageFromNativeTranscript(sess, WithWorktreeOptions{})
 	if opts.InputTokens != 0 || opts.OutputTokens != 0 ||
 		opts.CacheReadTokens != 0 || opts.CacheWriteTokens != 0 ||
 		opts.EstimatedCostUSD != 0 {
@@ -132,7 +131,7 @@ func TestApplyTranscriptUsageFallback_ZeroTranscriptLeavesOptsUntouched(t *testi
 	}
 }
 
-func TestApplyTranscriptUsageFallback_HookCapturedDiskValuesWin(t *testing.T) {
+func TestRecoverUsageFromNativeTranscript_UsesFinalTranscriptAfterPartialCapture(t *testing.T) {
 	store, sess := createTestSession(t)
 	writeTranscript(t, store, sess, transcriptFixture)
 
@@ -147,14 +146,13 @@ func TestApplyTranscriptUsageFallback_HookCapturedDiskValuesWin(t *testing.T) {
 		t.Fatalf("SaveMetadata error: %v", err)
 	}
 
-	opts := WithWorktreeOptions{}
-	applyTranscriptUsageFallback(sess, &opts)
-	if opts.InputTokens != 0 || opts.OutputTokens != 0 || opts.EstimatedCostUSD != 0 {
-		t.Errorf("fallback applied despite hook-captured disk values: %+v", opts)
+	opts := recoverUsageFromNativeTranscript(sess, WithWorktreeOptions{})
+	if opts.InputTokens != 1500 || opts.OutputTokens != 300 || opts.EstimatedCostUSD != 0 {
+		t.Errorf("usage not recovered from final transcript: %+v", opts)
 	}
 }
 
-func TestApplyTranscriptUsageFallback_CodexSkipped(t *testing.T) {
+func TestRecoverUsageFromNativeTranscript_IsBackendAgnostic(t *testing.T) {
 	store, err := sessions.NewStore(t.TempDir())
 	if err != nil {
 		t.Fatalf("NewStore error: %v", err)
@@ -167,29 +165,26 @@ func TestApplyTranscriptUsageFallback_CodexSkipped(t *testing.T) {
 	}
 	writeTranscript(t, store, sess, transcriptFixture)
 
-	opts := WithWorktreeOptions{}
-	applyTranscriptUsageFallback(sess, &opts)
-	if opts.InputTokens != 0 || opts.EstimatedCostUSD != 0 {
-		t.Errorf("fallback applied for codex backend: %+v", opts)
+	opts := recoverUsageFromNativeTranscript(sess, WithWorktreeOptions{})
+	if opts.InputTokens != 1500 || opts.OutputTokens != 300 || opts.EstimatedCostUSD != 0 {
+		t.Errorf("usage not recovered for codex backend: %+v", opts)
 	}
 }
 
-func TestApplyTranscriptUsageFallback_MissingTranscriptLeavesOptsUntouched(t *testing.T) {
+func TestRecoverUsageFromNativeTranscript_MissingTranscriptLeavesOptsUntouched(t *testing.T) {
 	_, sess := createTestSession(t)
 
-	opts := WithWorktreeOptions{}
-	applyTranscriptUsageFallback(sess, &opts)
+	opts := recoverUsageFromNativeTranscript(sess, WithWorktreeOptions{})
 	if opts.InputTokens != 0 || opts.EstimatedCostUSD != 0 {
 		t.Errorf("opts modified on missing transcript: %+v", opts)
 	}
 }
 
-func TestApplyTranscriptUsageFallback_NonZeroOptsReturnEarly(t *testing.T) {
+func TestRecoverUsageFromNativeTranscript_NonZeroOptsReturnEarly(t *testing.T) {
 	store, sess := createTestSession(t)
 	writeTranscript(t, store, sess, transcriptFixture)
 
-	opts := WithWorktreeOptions{CacheReadTokens: 9}
-	applyTranscriptUsageFallback(sess, &opts)
+	opts := recoverUsageFromNativeTranscript(sess, WithWorktreeOptions{CacheReadTokens: 9})
 	if opts.InputTokens != 0 || opts.OutputTokens != 0 ||
 		opts.CacheReadTokens != 9 || opts.EstimatedCostUSD != 0 {
 		t.Errorf("fallback applied despite non-zero opts: %+v", opts)

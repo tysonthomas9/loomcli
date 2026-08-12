@@ -23,6 +23,7 @@ vi.mock("@codemirror/state", () => ({
   EditorState: {
     create: vi.fn(() => ({
       doc: { toString: () => "", length: 0 },
+      selection: { main: { head: 0 } },
     })),
     readOnly: { of: vi.fn(() => []) },
   },
@@ -30,11 +31,22 @@ vi.mock("@codemirror/state", () => ({
     of = vi.fn(() => []);
     reconfigure = vi.fn(() => ({ type: "reconfigure" }));
   },
+  RangeSetBuilder: class {
+    add = vi.fn();
+    finish = vi.fn(() => []);
+  },
 }));
 
 vi.mock("@codemirror/view", () => ({
   EditorView: class {
-    state = { doc: { toString: () => "", length: 0 } };
+    state = {
+      doc: {
+        toString: () => "",
+        length: 0,
+        lineAt: () => ({ number: 1, from: 0, to: 0 }),
+      },
+      selection: { main: { head: 0 } },
+    };
     dispatch = vi.fn();
     destroy = vi.fn();
     requestMeasure = vi.fn();
@@ -49,10 +61,29 @@ vi.mock("@codemirror/view", () => ({
     }
     static theme = vi.fn(() => []);
     static updateListener = { of: vi.fn(() => []) };
+    static editable = { of: vi.fn(() => []) };
+    static baseTheme = vi.fn(() => []);
   },
   keymap: { of: vi.fn(() => []) },
   placeholder: vi.fn(() => []),
   lineNumbers: vi.fn(() => []),
+  gutter: vi.fn(() => []),
+  GutterMarker: class {
+    elementClass = "";
+    eq = vi.fn(() => false);
+    toDOM = vi.fn(() => document.createElement("span"));
+  },
+  Decoration: {
+    none: [],
+    widget: vi.fn(() => ({})),
+  },
+  ViewPlugin: {
+    fromClass: vi.fn(() => []),
+  },
+  WidgetType: class {
+    eq = vi.fn(() => false);
+    toDOM = vi.fn(() => document.createElement("span"));
+  },
 }));
 
 vi.mock("@codemirror/commands", () => ({
@@ -64,6 +95,7 @@ vi.mock("@codemirror/commands", () => ({
 vi.mock("@codemirror/search", () => ({
   search: vi.fn(() => []),
   searchKeymap: [],
+  gotoLine: vi.fn(() => true),
   openSearchPanel: mocks.openSearchPanel,
   closeSearchPanel: mocks.closeSearchPanel,
 }));

@@ -120,6 +120,23 @@ describe("IssueDetailView", () => {
     });
   });
 
+  describe("HTML design rendering", () => {
+    it("lets DesignPanel own presentation without description whitespace styles", () => {
+      const issue = createTestIssue({
+        design_format: "html",
+        design:
+          '<style>.card{display:grid}</style><div class="card">Plan</div>',
+      });
+
+      render(<IssueDetailView {...createDefaultProps({ issue })} />);
+
+      const panel = screen.getByTestId("design-panel");
+      expect(panel.className).not.toMatch(/description/);
+      expect(screen.getAllByText("Design")).toHaveLength(1);
+      expect(screen.getByTitle("HTML design artifact")).toBeInTheDocument();
+    });
+  });
+
   describe("Escape key handling", () => {
     it("registers escape layer and handler calls onBack", () => {
       const onBack = vi.fn();

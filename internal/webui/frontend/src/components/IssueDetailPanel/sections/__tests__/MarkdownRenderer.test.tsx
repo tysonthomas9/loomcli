@@ -119,8 +119,7 @@ const x = 1;
       expect(em.tagName.toLowerCase()).toBe("em");
     });
 
-    // Tables require remark-gfm plugin which is not currently configured
-    it.skip("renders tables", () => {
+    it("renders GFM tables", () => {
       const content = `| Col1 | Col2 |
 |------|------|
 | A | B |`;
@@ -128,6 +127,34 @@ const x = 1;
       expect(screen.getByRole("table")).toBeInTheDocument();
       expect(screen.getByText("A")).toBeInTheDocument();
       expect(screen.getByText("B")).toBeInTheDocument();
+      expect(
+        screen.getByRole("columnheader", { name: "Col1" }),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole("columnheader", { name: "Col2" }),
+      ).toBeInTheDocument();
+    });
+
+    it("renders multi-repo workspace prompt tables", () => {
+      const content = `### Workspace Mode: Multi-Repo Environment
+You are working in a multi-repo workspace.
+
+| Repo | Path | Default Branch |
+|------|------|----------------|
+| source-repo | ./root/.loom/workspaces/LOCALMODE/source-repo | localmode |
+
+**Important workspace rules:**
+- Run \`loom data\` commands from the workspace root`;
+      render(<MarkdownRenderer content={content} />);
+      expect(screen.getByRole("table")).toBeInTheDocument();
+      expect(
+        screen.getByRole("columnheader", { name: "Repo" }),
+      ).toBeInTheDocument();
+      expect(screen.getByText("source-repo")).toBeInTheDocument();
+      expect(
+        screen.getByText("./root/.loom/workspaces/LOCALMODE/source-repo"),
+      ).toBeInTheDocument();
+      expect(screen.getByText("localmode")).toBeInTheDocument();
     });
 
     it("renders paragraphs", () => {
@@ -152,6 +179,14 @@ Second paragraph`;
       const container = screen.getByTestId("markdown-empty");
       expect(container).toHaveClass("custom-class");
     });
+  });
+});
+
+describe("MarkdownRenderer format boundary", () => {
+  it("does not promote HTML-looking ordinary markdown content into DOM elements", () => {
+    render(<MarkdownRenderer content='<p class="danger">text</p>' />);
+    const container = screen.getByTestId("markdown-content");
+    expect(container.querySelector("p.danger")).toBeNull();
   });
 });
 

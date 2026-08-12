@@ -11,6 +11,7 @@ type WorkspaceData struct {
 	Workspaces       []WorkspaceSummary   `json:"workspaces"`
 	WorkspaceOrder   []string             `json:"workspace_order,omitempty"`
 	DefaultWorkspace string               `json:"default_workspace"`
+	DesignFormat     string               `json:"design_format,omitempty"`
 }
 
 // WorkspaceSummary provides a lightweight summary of a configured workspace.

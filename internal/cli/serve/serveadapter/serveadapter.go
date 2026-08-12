@@ -71,18 +71,14 @@ func deleteWorkspaceLocalState(key string) error {
 	if key == "" {
 		return nil
 	}
-	return bootstrap.WithStateLock(func() error {
-		sc, err := bootstrap.LoadStateCache()
-		if err != nil {
-			return err
-		}
+	return bootstrap.MutateStateCache(func(sc *bootstrap.StateCache) error {
 		if sc.Workspaces != nil {
 			delete(sc.Workspaces, key)
 		}
 		if sc.LastWorkspace == key {
 			sc.LastWorkspace = ""
 		}
-		return bootstrap.SaveStateCache(sc)
+		return nil
 	})
 }
 

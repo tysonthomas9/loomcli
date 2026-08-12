@@ -4,9 +4,8 @@
  * connection state, worktree breadcrumb, and optional git actions.
  * Designed to be rendered inside terminal-type tabs in IssueDetailPanel.
  *
- * Selection, copy, and paste are handled natively by wterm's DOM renderer
- * + the browser's built-in clipboard API, so no JS interception layer is
- * needed here.
+ * Selection, copy, and paste stay inside the selected terminal renderer;
+ * this wrapper only owns the surrounding header and layout.
  */
 
 import { forwardRef, useState, useCallback } from "react";
@@ -78,6 +77,7 @@ export const EmbeddedTerminal = forwardRef<
           ref={ref}
           sessionName={sessionName}
           isActive={isActive}
+          backendName={backend}
           onConnectionStateChange={handleConnectionStateChange}
         />
       </div>

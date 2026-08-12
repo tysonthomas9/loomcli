@@ -10,6 +10,9 @@ export type {
 
 export { useCreateWorkspaceAgent } from "./useCreateWorkspaceAgent";
 
+export { useInteractivePrompts } from "./useInteractivePrompts";
+export type { UseInteractivePromptsReturn } from "./useInteractivePrompts";
+
 export { useIssueSessionMap } from "./useIssueSessionMap";
 export type { UseIssueSessionMapReturn } from "./useIssueSessionMap";
 
@@ -27,3 +30,10 @@ export type {
 
 export { useUsage } from "./useUsage";
 export type { UseUsageOptions, UseUsageResult } from "./useUsage";
+
+export { usePendingInput } from "./usePendingInput";
+export type {
+  PendingAnswerBody,
+  PendingInput,
+  UsePendingInputReturn,
+} from "./usePendingInput";

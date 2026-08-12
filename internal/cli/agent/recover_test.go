@@ -154,6 +154,19 @@ func TestResetTask_AlreadyClosed(t *testing.T) {
 	}
 }
 
+func TestResetTask_SkipsBlocked(t *testing.T) {
+	t.Parallel()
+	deps, _, _, _, tracker := NewTestDeps(t)
+
+	tracker.GetResult = &backend.IssueDetailData{IssueData: backend.IssueData{ID: "task-789", Status: "blocked"}}
+
+	resetTask(deps, "task-789")
+
+	if tracker.Called("Update") {
+		t.Error("UpdateIssue should not be called for a blocked task (daemon quarantine / human block must not be flipped back to open)")
+	}
+}
+
 func TestResetTask_GetIssueFails(t *testing.T) {
 	t.Parallel()
 	deps, _, _, _, tracker := NewTestDeps(t)
@@ -729,7 +742,7 @@ func TestRecoverWorktree_NoLock(t *testing.T) {
 	})
 	mock.Install()
 
-	err := RecoverWorktree(tmpDir, "test-agent", -1)
+	err := RecoverWorktree(tmpDir, "test-agent", -1, false)
 	if err != nil {
 		t.Errorf("expected nil error, got: %v", err)
 	}
@@ -769,7 +782,7 @@ func TestRecoverWorktree_StaleLock(t *testing.T) {
 	})
 	mock.Install()
 
-	err := RecoverWorktree(tmpDir, "test-agent", -1)
+	err := RecoverWorktree(tmpDir, "test-agent", -1, false)
 	if err != nil {
 		t.Errorf("expected nil error, got: %v", err)
 	}
@@ -795,7 +808,7 @@ func TestRecoverWorktree_LockCheckError(t *testing.T) {
 	mock := NewCommandMock(t, []CommandStub{})
 	mock.Install()
 
-	err := RecoverWorktree(tmpDir, "test-agent", -1)
+	err := RecoverWorktree(tmpDir, "test-agent", -1, false)
 	if err == nil {
 		t.Error("expected error when CheckLock fails, got nil")
 	}
@@ -819,7 +832,7 @@ func TestRecoverWorktree_EmptyAgentName(t *testing.T) {
 	})
 	mock.Install()
 
-	err := RecoverWorktree(tmpDir, "", -1)
+	err := RecoverWorktree(tmpDir, "", -1, false)
 	if err != nil {
 		t.Errorf("expected nil error, got: %v", err)
 	}
@@ -1259,7 +1272,7 @@ func TestRecoverWorktree_WorkspaceStaleLock(t *testing.T) {
 	mock.Install()
 
 	// Pass repoDir as worktreePath -- lock is at repoDir (per-worktree)
-	err := RecoverWorktree(repoDir, "test-agent", -1)
+	err := RecoverWorktree(repoDir, "test-agent", -1, false)
 	if err != nil {
 		t.Errorf("expected nil error, got: %v", err)
 	}

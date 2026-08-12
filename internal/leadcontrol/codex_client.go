@@ -41,11 +41,69 @@ type CodexThread struct {
 	UpdatedAt   float64           `json:"updatedAt"`
 	UpdatedAtMS float64           `json:"updatedAtMs"`
 	Status      CodexThreadStatus `json:"status"`
+	Turns       []CodexTurn       `json:"turns"`
 }
 
 type CodexThreadStatus struct {
 	Type        string   `json:"type"`
 	ActiveFlags []string `json:"activeFlags,omitempty"`
+}
+
+type CodexTurn struct {
+	ID     string          `json:"id"`
+	Status string          `json:"status"`
+	Items  []CodexTurnItem `json:"items"`
+}
+
+type CodexTurnItem struct {
+	Type    string              `json:"type"`
+	ID      string              `json:"id"`
+	Text    string              `json:"text"`
+	Content []CodexContentBlock `json:"content"`
+	Phase   string              `json:"phase,omitempty"`
+
+	// Tool-ish item fields (commandExecution, mcpToolCall, fileChange, …).
+	// Unknown types keep unmarshaling; consumers ignore empty fields.
+	Command          string            `json:"command,omitempty"`
+	Cwd              string            `json:"cwd,omitempty"`
+	Status           string            `json:"status,omitempty"`
+	AggregatedOutput string            `json:"aggregatedOutput,omitempty"`
+	Query            string            `json:"query,omitempty"`
+	Server           string            `json:"server,omitempty"`
+	Tool             string            `json:"tool,omitempty"`
+	Arguments        json.RawMessage   `json:"arguments,omitempty"`
+	Result           json.RawMessage   `json:"result,omitempty"`
+	Error            json.RawMessage   `json:"error,omitempty"`
+	Changes          []CodexFileChange `json:"changes,omitempty"`
+}
+
+type CodexFileChange struct {
+	Path string `json:"path"`
+	Kind string `json:"kind,omitempty"`
+	Diff string `json:"diff,omitempty"`
+}
+
+type CodexContentBlock struct {
+	Type string `json:"type"`
+	Text string `json:"text"`
+}
+
+func (it CodexTurnItem) PlainText() string {
+	switch it.Type {
+	case "agentMessage":
+		return it.Text
+	case "userMessage":
+		var b strings.Builder
+		for _, block := range it.Content {
+			if block.Type != "text" {
+				continue
+			}
+			b.WriteString(block.Text)
+		}
+		return b.String()
+	default:
+		return ""
+	}
 }
 
 func (s CodexThreadStatus) RuntimeStatus() string {
@@ -178,6 +236,30 @@ func (c *CodexClient) ReadThread(ctx context.Context, threadID string) (*CodexTh
 	if err := c.Call(ctx, "thread/read", map[string]any{
 		"threadId":     threadID,
 		"includeTurns": false,
+	}, &result); err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(result.Thread.ID) == "" {
+		return nil, fmt.Errorf("codex thread/read returned no thread for %s", threadID)
+	}
+	return &result.Thread, nil
+}
+
+func (c *CodexClient) ReadThreadWithTurns(ctx context.Context, threadID string) (*CodexThread, error) {
+	threadID = strings.TrimSpace(threadID)
+	if threadID == "" {
+		return nil, errors.New("codex thread id required")
+	}
+	var result struct {
+		Thread CodexThread `json:"thread"`
+	}
+	// itemsView defaults to "summary", which only returns chat-style
+	// user/agent messages. "full" includes commandExecution / mcpToolCall /
+	// fileChange / webSearch items so the PR chat can render tool pills.
+	if err := c.Call(ctx, "thread/read", map[string]any{
+		"threadId":     threadID,
+		"includeTurns": true,
+		"itemsView":    "full",
 	}, &result); err != nil {
 		return nil, err
 	}

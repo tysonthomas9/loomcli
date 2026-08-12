@@ -310,20 +310,16 @@ func workspaceLocalConfig(ctx context.Context, h *bootstrap.StoreHandle, key str
 }
 
 func deleteWorkspaceLocalState(key string) error {
-	return bootstrap.WithStateLock(func() error {
-		sc, err := bootstrap.LoadStateCache()
-		if err != nil {
-			return fmt.Errorf("load local workspace state: %w", err)
-		}
+	if err := bootstrap.MutateStateCache(func(sc *bootstrap.StateCache) error {
 		delete(sc.Workspaces, key)
 		if sc.LastWorkspace == key {
 			sc.LastWorkspace = ""
 		}
-		if err := bootstrap.SaveStateCache(sc); err != nil {
-			return fmt.Errorf("save local workspace state: %w", err)
-		}
 		return nil
-	})
+	}); err != nil {
+		return fmt.Errorf("update local workspace state: %w", err)
+	}
+	return nil
 }
 
 func checkRunningAgentsOrExit(ws config.WorkspaceConfig) {

@@ -10,6 +10,14 @@ export function isLeadRole(role: string | undefined): boolean {
   return normalized === "lead" || normalized === "orchestrator";
 }
 
+export function isInteractiveAgent(
+  agent: Pick<LoomAgentStatus, "role" | "role_kind">,
+): boolean {
+  const kind = (agent.role_kind ?? "").trim().toLowerCase();
+  if (kind !== "") return kind === "interactive";
+  return isLeadRole(agent.role);
+}
+
 const BACKGROUND_ROLE_NAMES = new Set([
   "plan",
   "planner",
@@ -28,7 +36,7 @@ export function isWorkerRole(role: string | undefined): boolean {
  * stay in the regular section because they run interactively in a terminal.
  */
 export function isBackgroundAgent(agent: LoomAgentStatus): boolean {
-  if (isLeadRole(agent.role)) return false;
+  if (isInteractiveAgent(agent)) return false;
   if (agent.daemon_managed === true) return true;
   return isWorkerRole(agent.role);
 }
@@ -45,8 +53,8 @@ export function splitAgentsByRuntime(agents: LoomAgentStatus[]): {
   return { regular, background };
 }
 
-function agentRailRank(agent: LoomAgentStatus): number {
-  if (isLeadRole(agent.role)) return 0;
+export function agentRailRank(agent: LoomAgentStatus): number {
+  if (isInteractiveAgent(agent)) return 0;
   if (agent.orchestrator_session_id || agent.parent) return 1;
   return 2;
 }

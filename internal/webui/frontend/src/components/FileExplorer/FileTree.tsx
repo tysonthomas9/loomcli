@@ -1,6 +1,35 @@
-import { useCallback } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent,
+  type FormEvent,
+  type MouseEvent,
+} from "react";
 import type { FileEntry } from "@/api/workspace";
+import {
+  buildFolderGitDecorations,
+  gitDecorationForStatus,
+  type FolderGitDecoration,
+} from "./gitDecorations";
 import styles from "./FileExplorer.module.css";
+
+export interface FileTreeNodeInfo {
+  path: string;
+  name: string;
+  isDir: boolean;
+  depth: number;
+}
+
+export interface FileTreeInlineEdit {
+  kind: "create-file" | "create-folder" | "rename";
+  parentPath: string;
+  path?: string | undefined;
+  value: string;
+  isDir: boolean;
+}
 
 interface FileTreeProps {
   treeData: Map<string, FileEntry[]>;
@@ -9,19 +38,32 @@ interface FileTreeProps {
   filterText: string;
   onToggle: (dirPath: string) => Promise<void>;
   onSelectFile: (filePath: string | null) => void;
+  onContextMenuNode?: (
+    node: FileTreeNodeInfo,
+    event: MouseEvent<HTMLDivElement>,
+  ) => void;
+  onRequestRename?: (node: FileTreeNodeInfo) => void;
+  onRequestDelete?: (node: FileTreeNodeInfo) => void;
+  inlineEdit?: FileTreeInlineEdit | null | undefined;
+  onInlineEditChange?: (value: string) => void;
+  onInlineEditCommit?: () => void;
+  onInlineEditCancel?: () => void;
+  gitStatus?: Record<string, string> | undefined;
+  /** When set, scroll this path into view + focus it once it appears (jump-to). */
+  scrollToPath?: string | null | undefined;
+  /** Visual depth offset when this tree is nested under a semantic root. */
+  depthOffset?: number | undefined;
+  /** Stable id prefix to avoid aria-activedescendant collisions across roots. */
+  idPrefix?: string | undefined;
 }
 
-interface TreeNodeProps {
-  entry: FileEntry;
-  /** Full path of this entry (parentPath/entry.name or just entry.name for root) */
-  fullPath: string;
+/** A single node in the flattened, visible-order tree. */
+interface VisNode {
+  path: string;
+  name: string;
+  isDir: boolean;
   depth: number;
-  treeData: Map<string, FileEntry[]>;
-  expanded: Set<string>;
-  selectedPath: string | null;
-  filterText: string;
-  onToggle: (dirPath: string) => Promise<void>;
-  onSelectFile: (filePath: string | null) => void;
+  isExpanded: boolean;
 }
 
 function highlightMatch(name: string, filter: string): JSX.Element {
@@ -45,6 +87,22 @@ function buildPath(parentPath: string, name: string): string {
   return parentPath ? `${parentPath}/${name}` : name;
 }
 
+/** Lowercased file extension (no leading dot), or undefined when none. */
+function fileExtension(name: string): string | undefined {
+  const i = name.lastIndexOf(".");
+  return i > 0 ? name.slice(i + 1).toLowerCase() : undefined;
+}
+
+/** Stable DOM id for a node (for aria-activedescendant). */
+function nodeDomId(prefix: string, path: string): string {
+  return `${prefix}-${encodeURIComponent(path)}`;
+}
+
+function parentOf(path: string): string {
+  const i = path.lastIndexOf("/");
+  return i > 0 ? path.slice(0, i) : "";
+}
+
 function shouldShow(
   entry: FileEntry,
   parentPath: string,
@@ -65,111 +123,309 @@ function shouldShow(
   return false;
 }
 
-function TreeNode({
-  entry,
-  fullPath,
-  depth,
-  treeData,
-  expanded,
-  selectedPath,
-  filterText,
-  onToggle,
-  onSelectFile,
-}: TreeNodeProps) {
-  const isExpanded = expanded.has(fullPath);
-  const isSelected = selectedPath === fullPath;
-  const children = entry.is_dir ? treeData.get(fullPath) : undefined;
-  const indent = 8 + depth * 16;
-
-  const handleClick = useCallback(() => {
-    if (entry.is_dir) {
-      onToggle(fullPath);
-    } else {
-      onSelectFile(fullPath);
+/**
+ * flattenVisible walks treeData from the root into expanded directories,
+ * applying the filter, and returns nodes in render (visible) order. The render
+ * and keyboard navigation both consume this single list so they never diverge.
+ */
+function flattenVisible(
+  treeData: Map<string, FileEntry[]>,
+  expanded: Set<string>,
+  filter: string,
+): VisNode[] {
+  const out: VisNode[] = [];
+  const walk = (parentPath: string, depth: number) => {
+    const entries = (treeData.get(parentPath) ?? []).filter((e) =>
+      shouldShow(e, parentPath, filter, treeData),
+    );
+    for (const e of entries) {
+      const path = buildPath(parentPath, e.name);
+      const isExpanded = e.is_dir && expanded.has(path);
+      out.push({ path, name: e.name, isDir: e.is_dir, depth, isExpanded });
+      if (isExpanded) walk(path, depth + 1);
     }
-  }, [entry.is_dir, fullPath, onToggle, onSelectFile]);
+  };
+  walk("", 0);
+  return out;
+}
+
+const DirChevron = ({ expanded }: { expanded: boolean }) => (
+  <span
+    className={`${styles.chevron} ${expanded ? styles.chevronExpanded : ""}`}
+  >
+    <svg viewBox="0 0 16 16" aria-hidden="true">
+      <path
+        d="M6 4l4 4-4 4"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.5"
+      />
+    </svg>
+  </span>
+);
+
+const NodeIcon = ({ node }: { node: VisNode }) => (
+  <span
+    className={styles.icon}
+    data-ext={node.isDir ? undefined : fileExtension(node.name)}
+  >
+    {node.isDir ? (
+      <svg viewBox="0 0 16 16" aria-hidden="true">
+        <path
+          d="M2 3h4l2 2h6v8H2V3z"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.2"
+          strokeLinejoin="round"
+        />
+      </svg>
+    ) : (
+      <svg viewBox="0 0 16 16" aria-hidden="true">
+        <path
+          d="M4 2h5l3 3v9H4V2z"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.2"
+          strokeLinejoin="round"
+        />
+        <path
+          d="M9 2v3h3"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.2"
+        />
+      </svg>
+    )}
+  </span>
+);
+
+function InlineEditRow({
+  depth,
+  value,
+  isDir,
+  onChange,
+  onCommit,
+  onCancel,
+}: {
+  depth: number;
+  value: string;
+  isDir: boolean;
+  onChange?: ((value: string) => void) | undefined;
+  onCommit?: (() => void) | undefined;
+  onCancel?: (() => void) | undefined;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const canceledRef = useRef(false);
+
+  useEffect(() => {
+    inputRef.current?.focus();
+    inputRef.current?.select();
+  }, []);
+
+  const submit = (event: FormEvent) => {
+    event.preventDefault();
+    onCommit?.();
+  };
 
   return (
-    <>
-      <button
-        type="button"
-        className={styles.treeNode}
-        style={{ paddingLeft: indent }}
-        data-selected={isSelected || undefined}
-        data-dir={entry.is_dir || undefined}
-        onClick={handleClick}
-        aria-expanded={entry.is_dir ? isExpanded : undefined}
-        aria-label={entry.name}
-      >
-        {entry.is_dir ? (
-          <span
-            className={`${styles.chevron} ${isExpanded ? styles.chevronExpanded : ""}`}
-          >
-            <svg viewBox="0 0 16 16" aria-hidden="true">
-              <path
-                d="M6 4l4 4-4 4"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.5"
-              />
-            </svg>
-          </span>
-        ) : (
-          <span className={styles.fileIconSpacer} />
-        )}
-        <span className={styles.icon}>
-          {entry.is_dir ? (
-            <svg viewBox="0 0 16 16" aria-hidden="true">
-              <path
-                d="M2 3h4l2 2h6v8H2V3z"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.2"
-                strokeLinejoin="round"
-              />
-            </svg>
-          ) : (
-            <svg viewBox="0 0 16 16" aria-hidden="true">
-              <path
-                d="M4 2h5l3 3v9H4V2z"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.2"
-                strokeLinejoin="round"
-              />
-              <path
-                d="M9 2v3h3"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.2"
-              />
-            </svg>
-          )}
-        </span>
+    <form
+      className={styles.inlineEditRow}
+      style={{ paddingLeft: 8 + depth * 16 }}
+      onSubmit={submit}
+      onClick={(event) => event.stopPropagation()}
+      data-testid="file-tree-inline-edit"
+    >
+      <span className={styles.fileIconSpacer} />
+      <NodeIcon
+        node={{
+          path: "__inline__",
+          name: value,
+          isDir,
+          depth,
+          isExpanded: false,
+        }}
+      />
+      <input
+        ref={inputRef}
+        className={styles.inlineEditInput}
+        value={value}
+        onChange={(event) => onChange?.(event.target.value)}
+        onBlur={() => {
+          if (!canceledRef.current) onCommit?.();
+        }}
+        onKeyDown={(event) => {
+          if (event.key === "Escape") {
+            canceledRef.current = true;
+            event.preventDefault();
+            onCancel?.();
+          }
+        }}
+        aria-label="File name"
+      />
+    </form>
+  );
+}
+
+function InlineEditInput({
+  value,
+  onChange,
+  onCommit,
+  onCancel,
+}: {
+  value: string;
+  onChange?: ((value: string) => void) | undefined;
+  onCommit?: (() => void) | undefined;
+  onCancel?: (() => void) | undefined;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const canceledRef = useRef(false);
+
+  useEffect(() => {
+    inputRef.current?.focus();
+    inputRef.current?.select();
+  }, []);
+
+  return (
+    <input
+      ref={inputRef}
+      className={styles.inlineEditInput}
+      value={value}
+      onClick={(event) => event.stopPropagation()}
+      onChange={(event) => onChange?.(event.target.value)}
+      onBlur={() => {
+        if (!canceledRef.current) onCommit?.();
+      }}
+      onKeyDown={(event) => {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          onCommit?.();
+        }
+        if (event.key === "Escape") {
+          canceledRef.current = true;
+          event.preventDefault();
+          onCancel?.();
+        }
+      }}
+      aria-label="File name"
+    />
+  );
+}
+
+function TreeNodeRow({
+  node,
+  depthOffset,
+  idPrefix,
+  activePath,
+  selectedPath,
+  filterText,
+  inlineEdit,
+  gitStatus,
+  folderDecorations,
+  onActivate,
+  onContextMenuNode,
+  onInlineEditChange,
+  onInlineEditCommit,
+  onInlineEditCancel,
+}: {
+  node: VisNode;
+  depthOffset: number;
+  idPrefix: string;
+  activePath: string | null;
+  selectedPath: string | null;
+  filterText: string;
+  inlineEdit?: FileTreeInlineEdit | null | undefined;
+  gitStatus: Record<string, string>;
+  folderDecorations: Map<string, FolderGitDecoration>;
+  onActivate: (node: VisNode) => void;
+  onContextMenuNode?: (
+    node: FileTreeNodeInfo,
+    event: MouseEvent<HTMLDivElement>,
+  ) => void;
+  onInlineEditChange?: ((value: string) => void) | undefined;
+  onInlineEditCommit?: (() => void) | undefined;
+  onInlineEditCancel?: (() => void) | undefined;
+}) {
+  const fileDecoration = node.isDir
+    ? null
+    : gitDecorationForStatus(gitStatus[node.path]);
+  const folderDecoration = node.isDir
+    ? folderDecorations.get(node.path)
+    : undefined;
+  const decorationKind =
+    fileDecoration?.kind ??
+    (folderDecoration?.conflict
+      ? "conflict"
+      : folderDecoration?.changed
+        ? "modified"
+        : undefined);
+  const hasConflict =
+    !!fileDecoration?.conflict || !!folderDecoration?.conflict;
+  const visualDepth = node.depth + depthOffset;
+
+  return (
+    <div
+      id={nodeDomId(idPrefix, node.path)}
+      data-path={node.path}
+      role="treeitem"
+      aria-label={node.name}
+      title={node.path}
+      aria-level={visualDepth + 1}
+      aria-expanded={node.isDir ? node.isExpanded : undefined}
+      aria-selected={node.path === selectedPath || undefined}
+      data-selected={node.path === selectedPath || undefined}
+      data-dir={node.isDir || undefined}
+      data-focused={node.path === activePath || undefined}
+      data-git-status-kind={decorationKind}
+      data-conflict={hasConflict || undefined}
+      className={styles.treeNode}
+      style={{
+        paddingLeft: 8 + visualDepth * 16,
+      }}
+      onClick={() => onActivate(node)}
+      onContextMenu={(event) => {
+        event.preventDefault();
+        onContextMenuNode?.(node, event);
+      }}
+    >
+      {node.isDir ? (
+        <DirChevron expanded={node.isExpanded} />
+      ) : (
+        <span className={styles.fileIconSpacer} />
+      )}
+      <NodeIcon node={node} />
+      {inlineEdit?.kind === "rename" && inlineEdit.path === node.path ? (
+        <InlineEditInput
+          value={inlineEdit.value}
+          onChange={onInlineEditChange}
+          onCommit={onInlineEditCommit}
+          onCancel={onInlineEditCancel}
+        />
+      ) : (
         <span className={styles.fileName}>
-          {highlightMatch(entry.name, filterText)}
+          {highlightMatch(node.name, filterText)}
         </span>
-      </button>
-      {entry.is_dir &&
-        isExpanded &&
-        children &&
-        children
-          .filter((child) => shouldShow(child, fullPath, filterText, treeData))
-          .map((child) => (
-            <TreeNode
-              key={buildPath(fullPath, child.name)}
-              entry={child}
-              fullPath={buildPath(fullPath, child.name)}
-              depth={depth + 1}
-              treeData={treeData}
-              expanded={expanded}
-              selectedPath={selectedPath}
-              filterText={filterText}
-              onToggle={onToggle}
-              onSelectFile={onSelectFile}
-            />
-          ))}
-    </>
+      )}
+      {node.isDir && folderDecoration?.changed && (
+        <span
+          className={styles.gitStatusDot}
+          data-conflict={folderDecoration.conflict || undefined}
+          aria-hidden="true"
+        />
+      )}
+      {!node.isDir && fileDecoration && (
+        <span
+          className={styles.gitStatusDot}
+          data-kind={fileDecoration.kind}
+          data-conflict={fileDecoration.conflict || undefined}
+          aria-hidden="true"
+        />
+      )}
+      {hasConflict && (
+        <span className={styles.conflictBadge} title="Merge conflict">
+          !
+        </span>
+      )}
+    </div>
   );
 }
 
@@ -180,38 +436,233 @@ export function FileTree({
   filterText,
   onToggle,
   onSelectFile,
+  onContextMenuNode,
+  onRequestRename,
+  onRequestDelete,
+  inlineEdit,
+  onInlineEditChange,
+  onInlineEditCommit,
+  onInlineEditCancel,
+  gitStatus = {},
+  scrollToPath,
+  depthOffset = 0,
+  idPrefix = "ft",
 }: FileTreeProps) {
-  const rootEntries = treeData.get("") ?? [];
+  const treeRef = useRef<HTMLDivElement>(null);
+  const [focusedPath, setFocusedPath] = useState<string | null>(null);
+  const lastRevealRef = useRef<string | null>(null);
+
+  const nodes = useMemo(
+    () => flattenVisible(treeData, expanded, filterText),
+    [treeData, expanded, filterText],
+  );
+  const folderDecorations = useMemo(
+    () => buildFolderGitDecorations(gitStatus),
+    [gitStatus],
+  );
+
+  // The active (keyboard) node: the explicitly focused one if still visible,
+  // else the selected file, else the first node.
+  const activePath = useMemo(() => {
+    const has = (p: string | null) =>
+      p != null && nodes.some((n) => n.path === p);
+    if (has(focusedPath)) return focusedPath;
+    if (has(selectedPath)) return selectedPath;
+    return nodes[0]?.path ?? null;
+  }, [focusedPath, selectedPath, nodes]);
+
+  const focusNode = useCallback((path: string | null) => {
+    setFocusedPath(path);
+    if (!path) return;
+    const el = treeRef.current?.querySelector(
+      `[data-path="${path.replace(/"/g, '\\"')}"]`,
+    );
+    // scrollIntoView is unimplemented in jsdom; guard so tests don't throw.
+    if (el && typeof el.scrollIntoView === "function") {
+      el.scrollIntoView({ block: "nearest" });
+    }
+  }, []);
+
+  const activate = useCallback(
+    (node: VisNode) => {
+      setFocusedPath(node.path);
+      treeRef.current?.focus();
+      if (node.isDir) {
+        void onToggle(node.path);
+      } else {
+        onSelectFile(node.path);
+      }
+    },
+    [onToggle, onSelectFile],
+  );
+
+  const handleKeyDown = useCallback(
+    (e: KeyboardEvent<HTMLDivElement>) => {
+      if (nodes.length === 0) return;
+      const idx = activePath
+        ? nodes.findIndex((n) => n.path === activePath)
+        : -1;
+      const cur = idx >= 0 ? nodes[idx] : undefined;
+
+      switch (e.key) {
+        case "ArrowDown":
+          e.preventDefault();
+          focusNode(nodes[Math.min(nodes.length - 1, idx + 1)]?.path ?? null);
+          break;
+        case "ArrowUp":
+          e.preventDefault();
+          focusNode(nodes[Math.max(0, idx - 1)]?.path ?? null);
+          break;
+        case "Home":
+          e.preventDefault();
+          focusNode(nodes[0]?.path ?? null);
+          break;
+        case "End":
+          e.preventDefault();
+          focusNode(nodes[nodes.length - 1]?.path ?? null);
+          break;
+        case "ArrowRight":
+          e.preventDefault();
+          if (cur?.isDir && !cur.isExpanded) void onToggle(cur.path);
+          else if (cur?.isDir && cur.isExpanded)
+            focusNode(nodes[idx + 1]?.path ?? null);
+          break;
+        case "ArrowLeft":
+          e.preventDefault();
+          if (cur?.isDir && cur.isExpanded) void onToggle(cur.path);
+          else if (cur) {
+            const p = parentOf(cur.path);
+            if (nodes.some((n) => n.path === p)) focusNode(p);
+          }
+          break;
+        case "Enter":
+        case " ":
+          e.preventDefault();
+          if (cur) activate(cur);
+          break;
+        case "F2":
+          if (cur) {
+            e.preventDefault();
+            onRequestRename?.(cur);
+          }
+          break;
+        case "Delete":
+        case "Backspace":
+          if (cur) {
+            e.preventDefault();
+            onRequestDelete?.(cur);
+          }
+          break;
+        default:
+          // Type-ahead: jump to the next node whose name starts with the key.
+          if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+            const lower = e.key.toLowerCase();
+            for (let i = 1; i <= nodes.length; i++) {
+              const n = nodes[(idx + i) % nodes.length];
+              if (n && n.name.toLowerCase().startsWith(lower)) {
+                focusNode(n.path);
+                break;
+              }
+            }
+          }
+      }
+    },
+    [
+      nodes,
+      activePath,
+      focusNode,
+      onToggle,
+      activate,
+      onRequestRename,
+      onRequestDelete,
+    ],
+  );
+
+  // Jump-to-folder: when a reveal target appears in the tree, focus + scroll it
+  // into view once (guarded so expanding other folders doesn't yank the view).
+  useEffect(() => {
+    if (!scrollToPath || scrollToPath === lastRevealRef.current) return;
+    if (!nodes.some((n) => n.path === scrollToPath)) return;
+    lastRevealRef.current = scrollToPath;
+    setFocusedPath(scrollToPath);
+    treeRef.current?.focus();
+    const el = treeRef.current?.querySelector(
+      `[data-path="${scrollToPath.replace(/"/g, '\\"')}"]`,
+    );
+    if (el && typeof el.scrollIntoView === "function") {
+      el.scrollIntoView({ block: "center" });
+    }
+  }, [scrollToPath, nodes]);
+
+  const filtering = filterText.length > 0;
 
   return (
-    <div className={styles.tree} role="tree" aria-label="File tree">
-      {rootEntries
-        .filter((entry) => shouldShow(entry, "", filterText, treeData))
-        .map((entry) => (
-          <TreeNode
-            key={entry.name}
-            entry={entry}
-            fullPath={entry.name}
-            depth={0}
-            treeData={treeData}
-            expanded={expanded}
+    <div
+      ref={treeRef}
+      className={styles.tree}
+      role="tree"
+      aria-label="File tree"
+      tabIndex={0}
+      aria-activedescendant={
+        activePath ? nodeDomId(idPrefix, activePath) : undefined
+      }
+      onKeyDown={handleKeyDown}
+    >
+      {inlineEdit &&
+        inlineEdit.kind !== "rename" &&
+        inlineEdit.parentPath === "" && (
+          <InlineEditRow
+            depth={depthOffset}
+            value={inlineEdit.value}
+            isDir={inlineEdit.isDir}
+            onChange={onInlineEditChange}
+            onCommit={onInlineEditCommit}
+            onCancel={onInlineEditCancel}
+          />
+        )}
+      {nodes.map((node) => (
+        <div key={node.path}>
+          <TreeNodeRow
+            node={node}
+            depthOffset={depthOffset}
+            idPrefix={idPrefix}
+            activePath={activePath}
             selectedPath={selectedPath}
             filterText={filterText}
-            onToggle={onToggle}
-            onSelectFile={onSelectFile}
+            inlineEdit={inlineEdit}
+            gitStatus={gitStatus}
+            folderDecorations={folderDecorations}
+            onActivate={activate}
+            onContextMenuNode={(rowNode, event) => {
+              setFocusedPath(rowNode.path);
+              onContextMenuNode?.(rowNode, event);
+            }}
+            onInlineEditChange={onInlineEditChange}
+            onInlineEditCommit={onInlineEditCommit}
+            onInlineEditCancel={onInlineEditCancel}
           />
-        ))}
-      {rootEntries.length === 0 && !filterText && (
+          {inlineEdit &&
+            inlineEdit.kind !== "rename" &&
+            inlineEdit.parentPath === node.path && (
+              <InlineEditRow
+                depth={node.depth + depthOffset + 1}
+                value={inlineEdit.value}
+                isDir={inlineEdit.isDir}
+                onChange={onInlineEditChange}
+                onCommit={onInlineEditCommit}
+                onCancel={onInlineEditCancel}
+              />
+            )}
+        </div>
+      ))}
+      {nodes.length === 0 && !filtering && (
         <div className={styles.empty}>No files found</div>
       )}
-      {rootEntries.length > 0 &&
-        filterText &&
-        rootEntries.filter((e) => shouldShow(e, "", filterText, treeData))
-          .length === 0 && (
-          <div className={styles.empty}>
-            No matches for &ldquo;{filterText}&rdquo;
-          </div>
-        )}
+      {nodes.length === 0 && filtering && (
+        <div className={styles.empty}>
+          No matches in loaded folders for &ldquo;{filterText}&rdquo;
+        </div>
+      )}
     </div>
   );
 }

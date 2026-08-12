@@ -188,7 +188,7 @@ func buildClaudeContinueSessionArgs(sessionID string) []string {
 	if effort := resolveAgentEffort(); effort != "" {
 		args = append(args, "--effort", effort)
 	}
-	return args
+	return appendClaudeSafetyArgs(args)
 }
 
 // LastSessionID returns the most recent session ID. Returns "" because Claude
@@ -214,6 +214,10 @@ func buildClaudeInteractiveCmd(workDir, prompt, agentName string) *exec.Cmd {
 	if effort := resolveAgentEffort(); effort != "" {
 		args = append(args, "--effort", effort)
 	}
+	if model := resolveAgentModel(); model != "" {
+		args = append(args, "--model", model)
+	}
+	args = appendClaudeSafetyArgs(args)
 	args = append(args, prompt)
 	cmd := exec.Command("claude", args...) //nolint:gosec // G204: intentional subprocess launch for claude CLI
 	cmd.Dir = workDir
@@ -226,6 +230,15 @@ func buildClaudeInteractiveCmd(workDir, prompt, agentName string) *exec.Cmd {
 
 // defaultClaudeInvoker is the real Claude invocation
 func defaultClaudeInvoker(workDir, prompt, agentName string) error {
+	// When stdin is not a TTY (e.g. daemon subprocess), Claude's interactive
+	// TUI renders nothing on the inherited pipes and the run dies silently
+	// under the watchdog. Fall back to the harness-backed non-interactive
+	// path, mirroring defaultCodexInvoker's guard.
+	if !isTerminal(os.Stdin) {
+		shutdown := make(chan struct{})
+		return claudeNonInteractiveInvoker(workDir, prompt, agentName, shutdown, nil)
+	}
+
 	cmd := buildClaudeInteractiveCmd(workDir, prompt, agentName)
 
 	fmt.Println("Launching Claude agent...")
@@ -243,9 +256,16 @@ func buildClaudeEnv(workDir, agentName string) []string {
 	if agentName != "" {
 		env = append(env, "LOOM_AGENT_NAME="+agentName)
 	}
-	// claude-code refuses `--dangerously-skip-permissions` when running as root unless
-	// IS_SANDBOX is set. loom runs claude as root inside its isolated lead/agent container,
-	// so set it explicitly (FilteredEnv strips it otherwise). Harmless outside a container.
+	// claude-code refuses `--dangerously-skip-permissions` when running as root
+	// unless IS_SANDBOX is set, so a containerized deployment that runs loom as
+	// root cannot launch an agent without it (FilteredEnv strips it otherwise).
+	//
+	// Be clear about what this is: loom does NOT create a container around an
+	// agent — see docs/design/execution-isolation.md — so on a host run this
+	// asserts a sandbox that is not there, purely to stop claude-code from
+	// refusing. It buys nothing and costs nothing outside a container, and
+	// inside one it is the deployment's container doing the isolating, not
+	// loom's.
 	env = append(env, "IS_SANDBOX=1")
 	return append(env, activeSessionEnvVars()...)
 }
@@ -270,7 +290,10 @@ func buildClaudeRunTurnArgs(resumeSessionID string) []string {
 	if effort := resolveAgentEffort(); effort != "" {
 		args = append(args, "--effort", effort)
 	}
-	return args
+	// Role safety knobs (allowed/denied tools, read_only deny-set). Appended
+	// on the RunTurn path too, so the daemon leaf is enforced, not just the
+	// interactive one.
+	return appendClaudeSafetyArgs(args)
 }
 
 func claudeResumeArgs(sessionID string) []string {
@@ -298,6 +321,10 @@ func defaultClaudeNonInteractiveInvoker(workDir, prompt, agentName string, shutd
 	ctx, cancel := contextFromShutdown(context.Background(), shutdown)
 	defer cancel()
 
+	if roleExecutor() == RoleExecutorConversation {
+		return runClaudeConversation(ctx, workDir, prompt, agentName, resumeID, collector)
+	}
+
 	res, err := runClaudeTurnWithRetry(ctx, func() (claudeRunTurnResult, error) {
 		return invokeClaudeRunTurn(ctx, workDir, prompt, agentName, resumeID, cli.DaemonActivityObserver(), collector)
 	})
@@ -307,6 +334,16 @@ func defaultClaudeNonInteractiveInvoker(workDir, prompt, agentName string, shutd
 			reason := strings.TrimSpace(res.Turn.Reason)
 			if reason == "" {
 				reason = "claude turn errored"
+			}
+			// The harness may have declared WHY the turn is terminal. When it
+			// names an expired login or an exhausted quota, carry that verdict
+			// out as a marker so the supervisor's classifier acts on it
+			// directly instead of re-deriving it from the log tail — the
+			// difference between "renew the login" / "back off blamelessly"
+			// and an Unknown that burns the restart budget on a turn that
+			// cannot succeed.
+			if ie := terminalTurnInvocationError(reason, outputTail); ie != nil {
+				return ie
 			}
 			return &InvocationError{Err: errors.New(reason), OutputTail: outputTail, ExitCode: 1}
 		}
@@ -336,21 +373,35 @@ func invokeClaudeRunTurn(ctx context.Context, workDir, prompt, agentName, resume
 	if onActivity != nil {
 		raw.onActivity = onActivity
 	}
+	// Interactive prompts the harness raises mid-turn (folder trust, the
+	// permission-acceptance screen) are resolved from the ROLE's input policy.
+	// The default with no policy configured is deny-everything, and that is a
+	// decision rather than a fallthrough: resolveRoleInputPolicy returns nil
+	// for an absent or malformed policy, and DispositionFor reads nil as deny.
+	// See backend_input_policy.go for why loom does not adopt harness-wrapper's
+	// auto-accept default, which would say yes to a skip-all-permissions screen.
+	inputPolicy, onInputRequest := inputPolicyTurnFields(resolveRoleInputPolicy())
 	res, err := claudeRunTurn(ctx, claudeRunTurnConfig{
-		Harness:       "claude",
-		BinaryPath:    "claude",
-		Args:          buildClaudeRunTurnArgs(resumeID),
-		WorkingDir:    workDir,
-		Env:           buildClaudeEnv(workDir, agentName),
-		Prompt:        prompt,
-		ExitAfterTurn: true,
-		Output:        output,
+		Harness:        "claude",
+		BinaryPath:     "claude",
+		Args:           buildClaudeRunTurnArgs(resumeID),
+		WorkingDir:     workDir,
+		Env:            buildClaudeEnv(workDir, agentName),
+		Prompt:         prompt,
+		ExitAfterTurn:  true,
+		Output:         output,
+		Model:          resolveAgentModel(),
+		InputPolicy:    inputPolicy,
+		OnInputRequest: onInputRequest,
 	})
 	// RunTurn drives Claude Code's interactive TUI, which does not expose the
-	// stream-json usage records consumed by collectClaudeStreamUsage. Keep the
-	// collector accepted for API compatibility; usage remains unavailable until
-	// Harness Wrapper surfaces transcript usage metadata.
-	_ = collector
+	// stream-json usage records consumed by collectClaudeStreamUsage — which is
+	// why this used to be a bare `_ = collector` and every Claude run booked 0
+	// tokens / $0. Read the totals back out of Claude Code's own transcript
+	// instead, keyed by the session id RunTurn reports. Strictly best-effort:
+	// accumulateHarnessUsage cannot error, so a missing or unreadable transcript
+	// leaves the turn result and the exit code exactly as they were.
+	accumulateHarnessUsage(collector, "claude", res.Session.HarnessSessionID, workDir)
 	if err != nil && claudeRunTurnEvidence(res, raw.String()) == "" {
 		res.Turn.Text = raw.String()
 	}

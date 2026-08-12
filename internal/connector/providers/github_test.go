@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -115,6 +116,15 @@ func reviewSpec() CallSpec {
 		Preconditions:  Preconditions{ExpectedHeadSha: "deadbeef"},
 		IdempotencyKey: "run-1#github.review.post#0",
 		Credential:     testToken,
+	}
+}
+
+func pullsListSpec() CallSpec {
+	return CallSpec{
+		Action:     ActionGitHubPullsList,
+		Resource:   "repo:octocat/hello",
+		Args:       map[string]any{"owner": "octocat", "repo": "hello"},
+		Credential: testToken,
 	}
 }
 
@@ -466,7 +476,9 @@ func TestGitHubReads(t *testing.T) {
 	})
 	fake.route(http.MethodGet, "/repos/octocat/hello/pulls", fakeResponse{
 		status: http.StatusOK,
-		body:   `[{"number":7,"state":"open","title":"feat","head":{"sha":"deadbeef","ref":"feat"},"base":{"ref":"main"}}]`,
+		body: `[{"number":7,"state":"closed","title":"feat","merged_at":"2026-07-13T12:00:00Z",
+			"updated_at":"2026-07-13T13:00:00Z","user":{"login":"octocat"},
+			"head":{"sha":"deadbeef","ref":"feat"},"base":{"ref":"main"}}]`,
 	})
 	fake.route(http.MethodGet, "/repos/octocat/hello/compare/main...feat", fakeResponse{
 		status: http.StatusOK,
@@ -496,7 +508,7 @@ func TestGitHubReads(t *testing.T) {
 			Action: ActionGitHubPullsList,
 			Args: map[string]any{
 				"owner": "octocat", "repo": "hello",
-				"state": "open", "base": "main", "perPage": 50,
+				"state": "open", "base": "main", "perPage": 50, "page": 2,
 			},
 			Credential: testToken,
 		})
@@ -507,9 +519,13 @@ func TestGitHubReads(t *testing.T) {
 		if !ok || len(pulls) != 1 || pulls[0]["headSha"] != "deadbeef" {
 			t.Errorf("body = %+v", result.Body)
 		}
+		if pulls[0]["merged"] != true || pulls[0]["authorLogin"] != "octocat" ||
+			pulls[0]["updatedAt"] != "2026-07-13T13:00:00Z" {
+			t.Errorf("projected list fields = %+v", pulls[0])
+		}
 		reqs := fake.recorded()
 		last := reqs[len(reqs)-1]
-		for _, want := range []string{"state=open", "base=main", "per_page=50"} {
+		for _, want := range []string{"state=open", "base=main", "per_page=50", "page=2"} {
 			if !strings.Contains(last.Query, want) {
 				t.Errorf("query %q missing %q", last.Query, want)
 			}
@@ -529,6 +545,70 @@ func TestGitHubReads(t *testing.T) {
 			t.Errorf("body = %+v, want camelCase aheadBy", result.Body)
 		}
 	})
+}
+
+func TestGitHubPullsListRejectsOversizedResponse(t *testing.T) {
+	fake := newFakeGitHub(t)
+	fake.route(http.MethodGet, "/repos/octocat/hello/pulls", fakeResponse{
+		status: http.StatusOK,
+		body:   strings.Repeat("x", maxResponseBytes+1),
+	})
+
+	result, err := fake.provider().Call(context.Background(), pullsListSpec())
+	var upstream *UpstreamError
+	if !errors.As(err, &upstream) {
+		t.Fatalf("error %T is not *UpstreamError", err)
+	}
+	if result.Decision != domain.ConnectorCallUpstreamError {
+		t.Fatalf("decision = %q, want upstream_error", result.Decision)
+	}
+	want := fmt.Sprintf("response exceeded %d bytes", maxResponseBytes)
+	if upstream.Summary != want {
+		t.Fatalf("summary = %q, want %q", upstream.Summary, want)
+	}
+}
+
+func TestGitHubPullsListRejectsMalformedJSON(t *testing.T) {
+	fake := newFakeGitHub(t)
+	fake.route(http.MethodGet, "/repos/octocat/hello/pulls", fakeResponse{
+		status: http.StatusOK,
+		body:   `[{`,
+	})
+
+	result, err := fake.provider().Call(context.Background(), pullsListSpec())
+	var upstream *UpstreamError
+	if !errors.As(err, &upstream) {
+		t.Fatalf("error %T is not *UpstreamError", err)
+	}
+	if result.Decision != domain.ConnectorCallUpstreamError {
+		t.Fatalf("decision = %q, want upstream_error", result.Decision)
+	}
+	if !strings.Contains(upstream.Summary, "invalid JSON response") {
+		t.Fatalf("summary = %q, want parse context", upstream.Summary)
+	}
+}
+
+func TestGitHubPullsListAcceptsResponseExactlyAtCap(t *testing.T) {
+	const prefix = `[{"number":7,"state":"open","title":"feat","padding":"`
+	const suffix = `"}]`
+	body := prefix + strings.Repeat("x", maxResponseBytes-len(prefix)-len(suffix)) + suffix
+	if len(body) != maxResponseBytes {
+		t.Fatalf("test body size = %d, want %d", len(body), maxResponseBytes)
+	}
+	fake := newFakeGitHub(t)
+	fake.route(http.MethodGet, "/repos/octocat/hello/pulls", fakeResponse{
+		status: http.StatusOK,
+		body:   body,
+	})
+
+	result, err := fake.provider().Call(context.Background(), pullsListSpec())
+	if err != nil {
+		t.Fatalf("list exactly at cap: %v", err)
+	}
+	pulls, ok := result.Body["pullRequests"].([]map[string]any)
+	if !ok || len(pulls) != 1 || pulls[0]["number"] != float64(7) {
+		t.Fatalf("pulls = %+v, want one projected PR", result.Body["pullRequests"])
+	}
 }
 
 func TestGitHubIssueCommentPost(t *testing.T) {

@@ -15,6 +15,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/agent"
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	cfgpkg "github.com/tysonthomas9/loomcli/internal/cli/config"
+	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/events"
 	"github.com/tysonthomas9/loomcli/internal/observability/tracing"
 
@@ -46,6 +47,10 @@ func (s *Supervisor) buildCommand(ap *AgentProcess) (*exec.Cmd, error) {
 
 	cmd.Env = appendRoleEnv(cmd.Env, ap)
 	cmd.Env = appendRoutingEnv(cmd.Env, ap)
+	// Both ends of a human answer wait need the same clock: the child's ask
+	// deadline runs slightly inside this bound so an unanswered prompt ends in
+	// the child's clean decline, never the watchdog's kill.
+	cmd.Env = append(cmd.Env, fmt.Sprintf("LOOM_INPUT_WAIT_MAX_SECONDS=%d", s.GetInputWaitMax()))
 
 	sourceRepos, err := cfgpkg.ResolveAgentRepos(ap.Entry, s.Repos)
 	if err != nil {
@@ -131,14 +136,38 @@ func appendRoleEnv(env []string, ap *AgentProcess) []string {
 	if ap.RoleConfig.ReadOnly {
 		env = append(env, "LOOM_READ_ONLY=1")
 	}
+	// The input policy is structured, so unlike the tool lists it travels as
+	// JSON in one variable. Nothing is exported for a nil policy: the leaf
+	// reads an absent variable as deny-everything, which is the same state, so
+	// an empty export would only add a way for the two to disagree. An encode
+	// failure is logged and skipped rather than failing the spawn — the agent
+	// then runs under the deny-everything default, which is the restrictive
+	// direction, and refusing to spawn over a serialization bug would take the
+	// fleet down for a knob that is failing safe.
+	if policy, err := domain.EncodeRoleInputPolicy(ap.RoleConfig.InputPolicy); err != nil {
+		log.Printf("[daemon] Agent %s: input_policy not exported (%v) — the agent will deny every harness prompt",
+			ap.Entry.Worktree, err)
+	} else if policy != "" {
+		env = append(env, fmt.Sprintf("LOOM_ROLE_INPUT_POLICY=%s", policy))
+	}
 	if ap.RoleConfig.MaxBudgetUSD != nil {
 		env = append(env, fmt.Sprintf("LOOM_MAX_BUDGET_USD=%.2f", *ap.RoleConfig.MaxBudgetUSD))
+	}
+	if ap.RoleConfig.Executor != "" {
+		env = append(env, fmt.Sprintf("LOOM_ROLE_EXECUTOR=%s", ap.RoleConfig.Executor))
 	}
 	if ap.RoleConfig.Effort != "" {
 		env = append(env,
 			fmt.Sprintf("LOOM_AGENT_EFFORT=%s", ap.RoleConfig.Effort),
 			fmt.Sprintf("LOOM_CLAUDE_EFFORT=%s", ap.RoleConfig.Effort),
 		)
+	}
+	if ap.RoleConfig.Model != "" {
+		// Consumed by resolveAgentModel(): claude TurnConfig.Model /
+		// --model, codex -c model=, opencode --model fallback. Without this
+		// the role's model field was stored and displayed but never reached
+		// any backend.
+		env = append(env, fmt.Sprintf("LOOM_AGENT_MODEL=%s", ap.RoleConfig.Model))
 	}
 	return env
 }
@@ -298,6 +327,17 @@ func (s *Supervisor) setupAgentLogFile(ap *AgentProcess, cmd *exec.Cmd) {
 
 	switch len(sinks) {
 	case 0:
+		// Both sinks are unavailable, so the child's stdout and stderr go
+		// nowhere: cmd.Stdout/Stderr stay nil, which os/exec wires to
+		// /dev/null. That is survivable but it must not be silent — with no
+		// child output there is no way to tell a working agent from one that
+		// printed an error and exited, which is exactly the state that made a
+		// real "every agent exits 0 doing nothing" bug undiagnosable. The two
+		// openers each log their own reason above; this says what the
+		// combination costs.
+		log.Printf("[daemon] Agent %s: NO LOG SINK — the agent's output is being discarded; "+
+			"set daemon.log_dir or fix the agent archive to make this run diagnosable",
+			ap.Entry.Worktree)
 		return
 	case 1:
 		cmd.Stdout, cmd.Stderr = sinks[0], sinks[0]
@@ -429,9 +469,14 @@ func (s *Supervisor) waitForAgent(ap *AgentProcess) int {
 
 // recoverAgent calls RecoverWorktree for cleanup.
 // exitCode is passed so recovery can make smarter decisions (e.g. skip task
-// reset on clean exit when the task status is already terminal).
-func (s *Supervisor) recoverAgent(ap *AgentProcess, exitCode int) error {
-	return agent.RecoverWorktree(ap.WorktreePath, ap.Entry.Worktree, exitCode)
+// reset on clean exit when the task status is already terminal). incomplete
+// splits the exit-0 case further: an unfinished turn requeues its task but
+// keeps the worktree intact for the next attempt. It is an explicit argument
+// rather than a read of ap.LastError because the pre-flight caller runs BEFORE
+// this cycle classifies anything — it would otherwise inherit the previous
+// cycle's verdict and skip the cold-start cleanup it exists to perform.
+func (s *Supervisor) recoverAgent(ap *AgentProcess, exitCode int, incomplete bool) error {
+	return agent.RecoverWorktree(ap.WorktreePath, ap.Entry.Worktree, exitCode, incomplete)
 }
 
 // appendDaemonEnv appends daemon-level env vars (workspace ID, IPC socket path)

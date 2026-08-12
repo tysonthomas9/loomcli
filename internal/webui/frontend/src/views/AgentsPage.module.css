@@ -226,7 +226,7 @@
   font-size: var(--font-size-sm);
 }
 
-/* Real interactive agent terminal — positioned for the wterm grid + overlays. */
+/* Real interactive agent terminal — positioned for the xterm grid + overlays. */
 .agentTerminal {
   position: relative;
   flex: 1;

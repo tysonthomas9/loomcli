@@ -11,38 +11,51 @@ import (
 type RoleCreate struct {
 	WorkspaceKey   string
 	Name           string
+	Kind           string
 	Description    string
+	Prompt         string
 	PromptFile     string
 	Model          string
 	TaskFilter     string
+	Executor       string
 	Backend        string
 	Effort         string
 	PathPatterns   []string
 	Skills         []string
+	InputPolicy    *domain.RoleInputPolicy
 	MaxPriority    *int
 	MaxConcurrency *int
 	ReadOnly       bool
 	AllowedTools   []string
 	DeniedTools    []string
 	MaxBudgetUSD   *float64
+	MaxRunDuration *int
 }
 
 // RoleUpdate is the partial-update payload for roles.
 type RoleUpdate struct {
-	Description    *string
-	PromptFile     *string
-	Model          *string
-	TaskFilter     *string
-	Backend        *string
-	Effort         *string
-	PathPatterns   *[]string
-	Skills         *[]string
+	Kind         *string
+	Description  *string
+	Prompt       *string
+	PromptFile   *string
+	Model        *string
+	TaskFilter   *string
+	Executor     *string
+	Backend      *string
+	Effort       *string
+	PathPatterns *[]string
+	Skills       *[]string
+	// InputPolicy uses the same double-pointer convention as the other
+	// optional pointer fields: nil leaves it alone, &nil clears it back to the
+	// deny-everything zero value, and a pointer to a non-nil policy sets it.
+	InputPolicy    **domain.RoleInputPolicy
 	MaxPriority    **int
 	MaxConcurrency **int
 	ReadOnly       *bool
 	AllowedTools   *[]string
 	DeniedTools    *[]string
 	MaxBudgetUSD   **float64
+	MaxRunDuration **int
 }
 
 // RoleStore is the persistence interface for Role entities. Roles are

@@ -34,6 +34,12 @@ import type {
 import { useAgentStoreInstance } from "@/hooks";
 import { wsUrl } from "@/hooks/api";
 import { type LoomAgentStatus, parseLoomStatus } from "@/types";
+import { isInteractiveAgent, isLeadRole } from "@/utils/agentRole";
+import {
+  agentDisplayRoleLabel,
+  agentDisplayTitle,
+  agentUsesLiteralTitle,
+} from "@/utils/agentDisplay";
 import { getCompactAvatarInitials } from "@/utils/compactAvatarInitials";
 import { getAvatarColor, shouldUseWhiteText } from "@/utils/colorUtils";
 
@@ -94,7 +100,7 @@ export function AgentDetailMain({
   const terminalUnavailable = agent != null && isTerminalUnavailable(agent);
   const ephemeralWorker = agent != null && isEphemeralWorker(agent);
   const shouldResolveLeadTerminal =
-    agent != null && isLeadRole(agent.role) && terminalUnavailable;
+    agent != null && isInteractiveAgent(agent) && terminalUnavailable;
   const terminalEmptyState =
     agent != null && terminalUnavailable
       ? terminalUnavailableEmptyState(agent)
@@ -180,7 +186,7 @@ function terminalUnavailableEmptyState(_agent: LoomAgentStatus): {
 }
 
 function isEphemeralWorker(agent: LoomAgentStatus): boolean {
-  return agent.mode === "ephemeral" && !isLeadRole(agent.role);
+  return agent.mode === "ephemeral" && !isInteractiveAgent(agent);
 }
 
 function EphemeralWorkerSummary({
@@ -383,12 +389,6 @@ function EphemeralWorkerSummary({
   );
 }
 
-function formatHeaderRoleLabel(role: string): string {
-  const trimmed = role.trim();
-  if (!trimmed) return "";
-  return trimmed.charAt(0).toUpperCase() + trimmed.slice(1).toLowerCase();
-}
-
 function Header({
   agent,
   agentName,
@@ -408,7 +408,7 @@ function Header({
   const branch = displayBranch(agent?.branch);
   const role = (agent?.role ?? "").trim();
   const assignedEpic = (agent?.parent ?? "").trim();
-  const isLead = isLeadRole(role);
+  const isLead = isLeadRole(agent?.role);
   const deliveryLabel = isLead
     ? leadDeliveryStateLabel(agent?.delivery_state)
     : "";
@@ -421,7 +421,16 @@ function Header({
         ? `${failedInbox} failed message${failedInbox === 1 ? "" : "s"}`
         : "";
   const hideIdleLeadStatus = isLead && parsed.type === "idle";
-  const roleLabel = formatHeaderRoleLabel(role);
+  const titleAgent = agent ?? {
+    name: agentName,
+    branch: "",
+    status: "",
+    ahead: 0,
+    behind: 0,
+  };
+  const roleLabel = role ? agentDisplayRoleLabel(titleAgent) : "";
+  const title = agentDisplayTitle(titleAgent);
+  const literalTitle = agentUsesLiteralTitle(titleAgent);
   const metaSegments: Array<{ key: string; node: ReactNode }> = [];
 
   if (!hideIdleLeadStatus) {
@@ -566,10 +575,10 @@ function Header({
           style={{
             fontSize: 14,
             fontWeight: 700,
-            textTransform: "capitalize",
+            textTransform: literalTitle ? "none" : "capitalize",
           }}
         >
-          {agentName}
+          {title}
         </div>
         <div
           style={{
@@ -613,11 +622,6 @@ function displayBranch(branch: string | undefined): string {
     return "";
   }
   return value;
-}
-
-function isLeadRole(role: string | undefined): boolean {
-  const normalized = (role ?? "").trim().toLowerCase();
-  return normalized === "lead" || normalized === "orchestrator";
 }
 
 function EmptyState({

@@ -10,6 +10,15 @@ type Session struct {
 	Meta  SessionMetadata
 }
 
+// TranscriptUsage recovers token usage from this session's on-disk native
+// transcript. Zero when the session has no store or nothing is recoverable.
+func (s *Session) TranscriptUsage() TokenUsage {
+	if s == nil || s.store == nil {
+		return TokenUsage{}
+	}
+	return s.store.TranscriptUsage(s.Meta.SessionID)
+}
+
 // SessionID returns the session's unique identifier.
 func (s *Session) SessionID() string {
 	return s.Meta.SessionID

@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -23,7 +24,7 @@ func (s *Store) SyncLatestCodexRollout(sessionID, workDir string, since time.Tim
 	)
 	defer span.End()
 
-	root := codexSessionsRoot()
+	root := CodexSessionsRoot()
 	if root == "" {
 		return "", nil
 	}
@@ -75,7 +76,10 @@ func findLatestCodexRollout(root, workDir string, since time.Time) (string, erro
 	return bestPath, nil
 }
 
-func codexSessionsRoot() string {
+// CodexSessionsRoot returns $CODEX_HOME/sessions (defaulting CODEX_HOME to
+// ~/.codex), or "" when it does not exist. Single source of truth for where
+// codex records its rollouts.
+func CodexSessionsRoot() string {
 	home := strings.TrimSpace(os.Getenv("CODEX_HOME"))
 	if home == "" {
 		userHome, err := os.UserHomeDir()
@@ -95,22 +99,38 @@ func codexSessionWalkRoots(root string, since, now time.Time) []string {
 	if root == "" {
 		return nil
 	}
+	// The host zone is taken from `now` (time.Now() in production) rather than
+	// time.Local so the zone-spanning behavior below is testable under any TZ.
+	local := now.Location()
 	cutoff := since.Add(-1 * time.Minute)
 	if now.Before(cutoff) {
 		now = cutoff
 	}
-	start := dateOnly(cutoff)
-	end := dateOnly(now)
-	if end.Sub(start) > 14*24*time.Hour {
+	if now.Sub(cutoff) > 14*24*time.Hour {
 		return []string{root}
 	}
+	// Codex names its day directories in LOCAL time, but a session's StartedAt
+	// is UTC — so deriving the day span from one zone can miss the directory the
+	// rollout is actually in, and deriving `start` and `end` from different
+	// zones can even yield an empty span (start after end) that silently finds
+	// no rollout at all. Walk the span in both zones, deduped and ordered.
 	var roots []string
-	for day := start; !day.After(end); day = day.AddDate(0, 0, 1) {
-		dir := filepath.Join(root, fmt.Sprintf("%04d", day.Year()), fmt.Sprintf("%02d", int(day.Month())), fmt.Sprintf("%02d", day.Day()))
-		if info, err := os.Stat(dir); err == nil && info.IsDir() {
-			roots = append(roots, dir)
+	seen := make(map[string]bool)
+	for _, loc := range []*time.Location{local, time.UTC} {
+		end := dateOnly(now.In(loc))
+		for day := dateOnly(cutoff.In(loc)); !day.After(end); day = day.AddDate(0, 0, 1) {
+			dir := filepath.Join(root, fmt.Sprintf("%04d", day.Year()), fmt.Sprintf("%02d", int(day.Month())), fmt.Sprintf("%02d", day.Day()))
+			if seen[dir] {
+				continue
+			}
+			seen[dir] = true
+			if info, err := os.Stat(dir); err == nil && info.IsDir() {
+				roots = append(roots, dir)
+			}
 		}
 	}
+	// Path-lexicographic order is chronological for this layout.
+	sort.Strings(roots)
 	if len(roots) == 0 {
 		if hasCodexDateLayout(root) {
 			return nil

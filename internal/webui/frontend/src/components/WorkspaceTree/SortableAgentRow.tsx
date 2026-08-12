@@ -5,12 +5,17 @@ import { AgentCard } from "@/components/AgentCard";
 import type { LoomAgentStatus } from "@/types";
 
 import styles from "./AgentSection.module.css";
+import { ArchiveIcon } from "./ArchiveIcon";
 
 export interface SortableAgentRowProps {
   agent: LoomAgentStatus;
   taskTitle?: string | undefined;
   onAgentClick?: ((agentName: string) => void) | undefined;
   selected?: boolean | undefined;
+  onArchive?: ((agentName: string) => void) | undefined;
+  onContextMenu?:
+    | ((event: React.MouseEvent, agentName: string) => void)
+    | undefined;
 }
 
 export function SortableAgentRow({
@@ -18,6 +23,8 @@ export function SortableAgentRow({
   taskTitle,
   onAgentClick,
   selected = false,
+  onArchive,
+  onContextMenu,
 }: SortableAgentRowProps): JSX.Element {
   const {
     attributes,
@@ -44,6 +51,12 @@ export function SortableAgentRow({
       style={style}
       className={styles.agentRow}
       data-dragging={isDragging || undefined}
+      data-testid="sortable-agent-row"
+      onContextMenu={(event) => {
+        if (!onContextMenu) return;
+        event.preventDefault();
+        onContextMenu(event, agent.name);
+      }}
     >
       <AgentCard
         agent={agent}
@@ -54,6 +67,23 @@ export function SortableAgentRow({
         className={styles.agentCardInRow}
         onClick={handleClick}
       />
+      {onArchive && (
+        <button
+          type="button"
+          className={styles.archiveButton}
+          aria-label={`Archive ${agent.name}`}
+          data-testid="agent-row-archive"
+          onClick={(event) => {
+            event.stopPropagation();
+            event.preventDefault();
+            onArchive(agent.name);
+          }}
+          onPointerDown={(event) => event.stopPropagation()}
+          onKeyDown={(event) => event.stopPropagation()}
+        >
+          <ArchiveIcon />
+        </button>
+      )}
       <span
         className={styles.dragHandle}
         {...attributes}

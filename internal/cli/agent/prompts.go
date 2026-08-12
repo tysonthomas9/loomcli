@@ -16,6 +16,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/backends"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/cli/git"
+	"github.com/tysonthomas9/loomcli/internal/domain"
 )
 
 //go:embed prompts/*.md
@@ -24,6 +25,7 @@ var promptFS embed.FS
 // promptTemplateData holds all template context fields for prompt rendering.
 type promptTemplateData struct {
 	AgentName         string
+	Role              string
 	WorkspaceBlock    string
 	EpicScope         string
 	SafetyBlock       string
@@ -37,6 +39,26 @@ type promptTemplateData struct {
 	TargetBranch      string
 	ConflictList      string
 	PushRef           string
+	DesignFormat      string
+}
+
+// resolveDesignFormat returns the design output format for planner prompts.
+// Only an explicit workspace setting of "html" switches the format; anything
+// else (nil workspace, empty, "markdown", unrecognized values) falls back to
+// "markdown" so plan generation never breaks on bad data.
+func resolveDesignFormat(workspace *config.WorkspaceConfig) string {
+	if workspace != nil && workspace.DesignFormat == "html" {
+		return "html"
+	}
+	return "markdown"
+}
+
+// BuiltinInteractivePrompt is a selectable built-in terminal-agent prompt.
+type BuiltinInteractivePrompt = domain.BuiltinInteractivePrompt
+
+// BuiltinInteractivePrompts returns the built-in interactive terminal prompts.
+func BuiltinInteractivePrompts() []BuiltinInteractivePrompt {
+	return domain.BuiltinInteractivePrompts()
 }
 
 // renderPrompt loads a template by name, checks for per-project override,
@@ -69,6 +91,12 @@ func renderPrompt(name string, data promptTemplateData) string {
 		}
 	}
 
+	// Soft layer of the read_only knob: the hard enforcement is the backend
+	// flag mapping (backends.ValidateSafetyKnobs and friends); the preamble
+	// tells the model WHY writes are denied so it reports instead of retrying.
+	if preamble := ReadOnlyPreamble(); preamble != "" {
+		return preamble + "\n\n" + buf.String()
+	}
 	return buf.String()
 }
 
@@ -136,6 +164,19 @@ func buildWorkspaceContextBlock(workspace *config.WorkspaceConfig) string {
 	return sb.String()
 }
 
+// buildEpicScopeBlock returns the epic-scoping instruction injected into a
+// prompt when the agent is confined to one epic. Returns empty string when
+// parentID is empty (the agent may select from the whole backlog).
+//
+// Extracted from the planning/task builders so custom prompts can request the
+// same sentence via {{.EpicScope}} instead of hand-rolling their own wording.
+func buildEpicScopeBlock(parentID string) string {
+	if parentID == "" {
+		return ""
+	}
+	return fmt.Sprintf("\n**Epic scope: %s** — You MUST only select tasks from this epic. Do not work on tasks from other epics.\n", parentID)
+}
+
 // buildSafetyGuardrailsBlock returns the multi-agent safety rules section.
 // These rules prevent agents from interfering with each other when running
 // in parallel across worktrees.
@@ -187,11 +228,13 @@ func buildTestStep(caps backendCapabilities) string {
 - Use the Task tool to spawn an agent to write tests
 - Prompt: 'Write unit tests for the changes made in [files]. Follow existing test patterns in the codebase.'
 - Verify tests pass by running the test command (e.g., 'go test ./...' or 'npm test')
+- For Go suites, isolate config state: run 'LOOM_CONFIG_DIR=$(mktemp -d) go test ./...' (or use scripts/test.sh, which isolates automatically)
 - If tests fail, fix the code or tests until they pass`
 	}
 	return `### Step 5: Write Tests
 - Write unit tests for your changes, following existing test patterns in the codebase
 - Verify tests pass by running the test command (e.g., 'go test ./...' or 'npm test')
+- For Go suites, isolate config state: run 'LOOM_CONFIG_DIR=$(mktemp -d) go test ./...' (or use scripts/test.sh, which isolates automatically)
 - If tests fail, fix the code or tests until they pass`
 }
 
@@ -230,12 +273,11 @@ func buildInspectReviewStep(caps backendCapabilities) string {
 func GeneratePlanningPrompt(agentName string, workspace *config.WorkspaceConfig, parentID string) string {
 	readyJSON := "loom data ready --limit 200 --output json"
 	readyFallback := "loom data ready --limit 200"
-	epicScope := ""
 	if parentID != "" {
 		readyJSON = fmt.Sprintf("loom data ready --parent %s --limit 200 --output json", parentID)
 		readyFallback = fmt.Sprintf("loom data ready --parent %s --limit 200", parentID)
-		epicScope = fmt.Sprintf("\n**Epic scope: %s** — You MUST only select tasks from this epic. Do not work on tasks from other epics.\n", parentID)
 	}
+	epicScope := buildEpicScopeBlock(parentID)
 
 	prompt := renderPrompt("planning", promptTemplateData{
 		AgentName:      agentName,
@@ -244,6 +286,7 @@ func GeneratePlanningPrompt(agentName string, workspace *config.WorkspaceConfig,
 		SafetyBlock:    buildSafetyGuardrailsBlock(),
 		ReadyJSON:      readyJSON,
 		ReadyFallback:  readyFallback,
+		DesignFormat:   resolveDesignFormat(workspace),
 	})
 
 	// Inject the prior-attempt checkpoint as a FALLBACK — skipped when a session
@@ -261,12 +304,11 @@ func GeneratePlanningPrompt(agentName string, workspace *config.WorkspaceConfig,
 func GenerateTaskPrompt(agentName string, workspace *config.WorkspaceConfig, parentID string, backendName string) string {
 	readyJSON := "loom data ready --limit 200 --output json"
 	readyFallback := "loom data ready --limit 200"
-	epicScope := ""
 	if parentID != "" {
 		readyJSON = fmt.Sprintf("loom data ready --parent %s --limit 200 --output json", parentID)
 		readyFallback = fmt.Sprintf("loom data ready --parent %s --limit 200", parentID)
-		epicScope = fmt.Sprintf("\n**Epic scope: %s** — You MUST only select tasks from this epic. Do not work on tasks from other epics.\n", parentID)
 	}
+	epicScope := buildEpicScopeBlock(parentID)
 
 	caps := capabilitiesFor(backendName)
 	prompt := renderPrompt("task", promptTemplateData{
@@ -295,6 +337,7 @@ func GenerateFleetPlanningPrompt(agentName, taskID string, workspace *config.Wor
 		WorkspaceBlock: buildWorkspaceContextBlock(workspace),
 		SafetyBlock:    buildSafetyGuardrailsBlock(),
 		TaskID:         taskID,
+		DesignFormat:   resolveDesignFormat(workspace),
 	})
 	return injectCheckpointIfNotResuming(prompt)
 }
@@ -339,6 +382,93 @@ func GenerateLeadPrompt() string {
 	})
 }
 
+// GenerateTerminalPrompt creates the base prompt for the interactive terminal
+// agent runtime. Empty promptFile preserves the built-in lead prompt; a custom
+// prompt file replaces that base and still receives the terminal safety rules.
+func GenerateTerminalPrompt(promptFile string) (string, error) {
+	promptFile = strings.TrimSpace(promptFile)
+	if promptFile == "" {
+		return GenerateLeadPrompt(), nil
+	}
+	if strings.HasPrefix(promptFile, "builtin:") {
+		id := strings.TrimSpace(strings.TrimPrefix(promptFile, "builtin:"))
+		if !isBuiltinInteractivePrompt(id) {
+			return "", fmt.Errorf("unknown built-in interactive prompt %q", id)
+		}
+		return renderPrompt(id, terminalPromptTemplateData()), nil
+	}
+	path, err := resolveTerminalPromptPath(promptFile)
+	if err != nil {
+		return "", err
+	}
+	agentName, role := terminalPromptIdentity()
+	prompt, err := LoadPromptTemplate(path, PromptData{
+		AgentName:    agentName,
+		WorktreeName: agentName,
+		Role:         role,
+	})
+	if err != nil {
+		return "", err
+	}
+	return prompt + "\n\n" + buildSafetyGuardrailsBlock(), nil
+}
+
+// GenerateTerminalPromptText uses literal inline text as the terminal-agent
+// base prompt and appends the standard safety guardrails exactly once. Inline
+// text is intentionally not parsed as a Go template.
+func GenerateTerminalPromptText(text string) (string, error) {
+	return text + "\n\n" + buildSafetyGuardrailsBlock(), nil
+}
+
+func isBuiltinInteractivePrompt(id string) bool {
+	return domain.IsBuiltinInteractivePrompt(id)
+}
+
+func terminalPromptTemplateData() promptTemplateData {
+	agentName, role := terminalPromptIdentity()
+	return promptTemplateData{
+		AgentName:   agentName,
+		Role:        role,
+		SafetyBlock: buildSafetyGuardrailsBlock(),
+	}
+}
+
+func terminalPromptIdentity() (agentName, role string) {
+	agentName = strings.TrimSpace(os.Getenv("LOOM_AGENT_NAME"))
+	if agentName == "" {
+		agentName = "lead"
+	}
+	role = strings.TrimSpace(os.Getenv("LOOM_AGENT_ROLE"))
+	if role == "" {
+		role = "lead"
+	}
+	return agentName, role
+}
+
+func resolveTerminalPromptPath(promptFile string) (string, error) {
+	promptFile = strings.TrimSpace(promptFile)
+	if filepath.IsAbs(promptFile) {
+		return promptFile, nil
+	}
+	if cwd, err := os.Getwd(); err == nil {
+		candidate := filepath.Join(cwd, promptFile)
+		if _, statErr := os.Stat(candidate); statErr == nil {
+			return candidate, nil
+		} else if !os.IsNotExist(statErr) {
+			return "", fmt.Errorf("resolve prompt file %q relative to cwd: %w", promptFile, statErr)
+		}
+	}
+	if ws, err := config.ResolveActiveWorkspace(); err == nil && ws != nil && strings.TrimSpace(ws.Path) != "" {
+		candidate := filepath.Join(ws.Path, promptFile)
+		if _, statErr := os.Stat(candidate); statErr == nil {
+			return candidate, nil
+		} else if !os.IsNotExist(statErr) {
+			return "", fmt.Errorf("resolve prompt file %q relative to workspace %q: %w", promptFile, ws.Path, statErr)
+		}
+	}
+	return "", fmt.Errorf("prompt file %q not found relative to current directory or active workspace root", promptFile)
+}
+
 // injectCheckpointIfNotResuming adds the prior-attempt checkpoint to the prompt
 // as a FALLBACK, but SKIPS it when a session resume is armed
 // (backends.GetResumeSessionID() != ""). Resume-first / checkpoint-fallback (P4):
@@ -347,25 +477,55 @@ func GenerateLeadPrompt() string {
 // model already has. Callers must arm the resume (SetResumeSessionID) BEFORE
 // building the prompt for this to take effect.
 func injectCheckpointIfNotResuming(prompt string) string {
+	block := checkpointBlockIfNotResuming()
+	if block == "" {
+		return prompt
+	}
+	return spliceCheckpointBlock(prompt, block)
+}
+
+// checkpointBlockIfNotResuming returns the prior-attempt checkpoint block, or
+// "" when there is nothing to say — same resume-first / checkpoint-fallback
+// rule injectCheckpointIfNotResuming applies, just without the splicing.
+//
+// Custom prompts use this: they have no "### Step 1:" anchor to splice against
+// and no business being edited behind the author's back, so they place the
+// block themselves via {{.CheckpointBlock}}.
+func checkpointBlockIfNotResuming() string {
 	if backends.GetResumeSessionID() != "" {
-		return prompt // resuming → the session carries the context; no checkpoint
+		return "" // resuming → the session carries the context; no checkpoint
 	}
 	wtPath := os.Getenv("LOOM_WORKTREE_PATH")
 	if wtPath == "" {
-		return prompt
+		return ""
 	}
 	cp, err := config.LoadCheckpoint(cli.ResolveLockDir(wtPath))
 	if err != nil || cp == nil {
-		return prompt
+		return ""
 	}
-	return injectCheckpointContext(prompt, cp)
+	return buildCheckpointBlock(cp)
 }
 
 // injectCheckpointContext inserts a "PREVIOUS ATTEMPT CONTEXT" section into the prompt.
 // It places the block before "### Step 1:" if found, otherwise appends to the end.
-// Yield checkpoints (YieldReason non-empty) get trusting "continue" instructions,
-// while crash checkpoints get cautious "review and decide" instructions.
 func injectCheckpointContext(prompt string, cp *config.Checkpoint) string {
+	return spliceCheckpointBlock(prompt, buildCheckpointBlock(cp))
+}
+
+// spliceCheckpointBlock places an already-rendered checkpoint block before
+// "### Step 1:" if the prompt has that anchor, otherwise appends it.
+func spliceCheckpointBlock(prompt, block string) string {
+	idx := strings.Index(prompt, "### Step 1:")
+	if idx > 0 {
+		return prompt[:idx] + block + "\n" + prompt[idx:]
+	}
+	return prompt + block
+}
+
+// buildCheckpointBlock renders the "PREVIOUS ATTEMPT CONTEXT" section for a
+// checkpoint. Yield checkpoints (YieldReason non-empty) get trusting "continue"
+// instructions, while crash checkpoints get cautious "review and decide" ones.
+func buildCheckpointBlock(cp *config.Checkpoint) string {
 	var sb strings.Builder
 	sb.WriteString("\n\n## PREVIOUS ATTEMPT CONTEXT\n\n")
 
@@ -394,12 +554,7 @@ func injectCheckpointContext(prompt string, cp *config.Checkpoint) string {
 		sb.WriteString("**Instructions**: Review the previous changes. If they look correct and complete, continue from where they left off. If they look wrong or incomplete, start fresh. Do NOT blindly re-apply the diff — use it as context to understand what was attempted.\n")
 	}
 
-	// Inject before "### Step 1:" if found
-	idx := strings.Index(prompt, "### Step 1:")
-	if idx > 0 {
-		return prompt[:idx] + sb.String() + "\n" + prompt[idx:]
-	}
-	return prompt + sb.String()
+	return sb.String()
 }
 
 const readOnlyPreamble = `IMPORTANT: You are running in READ-ONLY mode. You MUST NOT modify any files, create new files, or run destructive commands. You may only read files, search code, and provide analysis/comments. Use loom data commands to comment on tasks but do not make code changes.`

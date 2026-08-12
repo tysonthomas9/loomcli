@@ -116,6 +116,30 @@ func decideHarness(c wrapper.ErrorClass) Disposition {
 	}
 }
 
+// QuarantineEligible reports whether an Outcome counts toward TASK-level
+// quarantine (repeated no-progress kills of the same task, across agents).
+// Declared here in the policy seat; counted by the supervisor (mirrors how
+// BlockBudget is declared in the table and counted via ap.BlockCount).
+//
+// Eligible: the classes a watchdog/ownership kill of a silently-stalled
+// backend actually produces via the exit-code fallback (-1 → Unknown,
+// 137 → Timeout, 143 → Transient), plus ContextOverflow (FastFails the
+// agent, but the task returns to open and boomerangs across siblings).
+// Not eligible: domain outcomes (coordination signals, not task-fault),
+// RateLimited (backend-wide, not task-specific), and Auth/Billing/
+// ModelNotFound (operator-actionable; the agent stops anyway).
+func QuarantineEligible(o agenterr.Outcome) bool {
+	if o.IsDomain() {
+		return false
+	}
+	switch o.Harness {
+	case wrapper.ErrUnknown, wrapper.ErrTimeout, wrapper.ErrTransient, wrapper.ErrContextOverflow:
+		return true
+	default:
+		return false
+	}
+}
+
 func decideDomain(d agenterr.DomainOutcome) Disposition {
 	switch d {
 	case agenterr.NoWorkOutcome:
@@ -125,6 +149,23 @@ func decideDomain(d agenterr.DomainOutcome) Disposition {
 	case agenterr.LockConflictOutcome:
 		return Disposition{Decision: Retry, Backoff: BPDefault, OnExhaustion: Block, BlockBudget: defaultBlockBudget}
 	case agenterr.SpawnFailureOutcome:
+		return Disposition{Decision: Retry, Backoff: BPDefault, OnExhaustion: Block, BlockBudget: defaultBlockBudget}
+	case agenterr.CompletionHookFailureOutcome:
+		// The turn itself succeeded; only the supervisor's issue write failed.
+		// Transient write errors clear on retry, and a permanent one (bad label
+		// permission) must still stop rather than spin — so bounded counted
+		// retry with the default backoff, then Block.
+		return Disposition{Decision: Retry, Backoff: BPDefault, OnExhaustion: Block, BlockBudget: defaultBlockBudget}
+	case agenterr.IncompleteRunOutcome:
+		// The turn ended before the task did. Retrying is the right move — the
+		// worktree, the checkpoint and (across a daemon restart) the session id
+		// are all preserved for it — but it is a COUNTED retry: an agent that
+		// keeps handing back unfinished turns without ever signaling
+		// completion is the exact spiral max_retries exists to catch, and the
+		// clean-success reset would otherwise zero the budget every cycle.
+		// Bounded block escalation (defaultBlockBudget) so a task that can
+		// never be finished surfaces as failed instead of consuming turns
+		// forever; a run that does complete resets the budget as usual.
 		return Disposition{Decision: Retry, Backoff: BPDefault, OnExhaustion: Block, BlockBudget: defaultBlockBudget}
 	default:
 		return Disposition{Decision: Retry, Backoff: BPDefault, OnExhaustion: Block, BlockBudget: defaultBlockBudget}

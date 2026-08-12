@@ -78,6 +78,9 @@ type AgentCreateInput struct {
 	WorkspaceKey     string                   `json:"workspace_key"`
 	Name             string                   `json:"name"`
 	RoleName         string                   `json:"role_name"`
+	Kind             string                   `json:"kind,omitempty"`
+	Prompt           string                   `json:"prompt,omitempty"`
+	PromptFile       string                   `json:"prompt_file,omitempty"`
 	Auto             bool                     `json:"auto"`
 	Backend          string                   `json:"backend,omitempty"`
 	FallbackBackends []string                 `json:"fallback_backends,omitempty"`

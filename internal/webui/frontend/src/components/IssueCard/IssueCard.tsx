@@ -307,6 +307,16 @@ export const IssueCard = memo(function IssueCard({
               Deferred
             </span>
           )}
+          {issue.status === "blocked" &&
+            issue.labels?.includes("loom:quarantined") && (
+              <span
+                className={styles.quarantinedBadge}
+                title="Task quarantined by daemon after repeated no-progress kills — see comment for the kill timeline"
+                aria-label="Task quarantined"
+              >
+                Quarantined
+              </span>
+            )}
         </span>
       </header>
       <h3 className={styles.title}>

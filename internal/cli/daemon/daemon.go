@@ -59,6 +59,10 @@ type Daemon struct {
 	// profile data.
 	store       store.Store
 	storeHandle *bootstrap.StoreHandle
+
+	// inputs holds each agent's outstanding interactive prompt so an operator
+	// can see and answer it (see daemon_input.go).
+	inputs *inputRegistry
 }
 
 // configSnapshot returns a snapshot of the current config pointer under RLock.
@@ -93,6 +97,7 @@ func NewDaemon(config *cfgpkg.DaemonConfig, projectDir string, eventBus events.E
 		notifyBus:    notify.NopPublisher{},
 		issueBackend: issueBackend,
 		store:        st,
+		inputs:       newInputRegistry(),
 	}
 
 	// Build the supervisor
@@ -110,7 +115,7 @@ func NewDaemon(config *cfgpkg.DaemonConfig, projectDir string, eventBus events.E
 	wireSupervisorCallbacks(sup, issueBackend)
 	loadSupervisorWorkspace(sup)
 
-	if err := initSupervisorAgents(sup, config.Agents); err != nil {
+	if err := initSupervisorAgents(sup, config.Agents, config.Roles); err != nil {
 		return nil, err
 	}
 
@@ -177,6 +182,12 @@ func (d *Daemon) Agents() []supervisor.SupervisedAgentStatus {
 // AgentCount returns the number of configured agents.
 func (d *Daemon) AgentCount() int {
 	return d.sup.AgentCount()
+}
+
+// QuarantinedTasks returns the supervisor's quarantined-task snapshot for
+// state-file and status surfacing.
+func (d *Daemon) QuarantinedTasks() []supervisor.QuarantinedTaskInfo {
+	return d.sup.QuarantinedTasks()
 }
 
 // isAgentStopped returns true if the named agent was stopped via the control socket.
@@ -300,9 +311,9 @@ func loadSupervisorWorkspace(sup *supervisor.Supervisor) {
 }
 
 // initSupervisorAgents creates agent processes from config entries.
-func initSupervisorAgents(sup *supervisor.Supervisor, agents []cfgpkg.AgentEntry) error {
+func initSupervisorAgents(sup *supervisor.Supervisor, agents []cfgpkg.AgentEntry, roles map[string]cfgpkg.RoleConfig) error {
 	for i, entry := range agents {
-		if !entry.ShouldSupervise() {
+		if !entry.ShouldSuperviseWithRoles(roles) {
 			slog.Info("skipping agent with non-running desired state", "worktree", entry.Worktree, "desired_state", entry.DesiredState)
 			continue
 		}

@@ -61,6 +61,7 @@ export LOOM_WORKSPACE="EPICRUN"
 export LOOM_BACKEND="codex"
 export LOOM_ISSUE_BACKEND="fleetdb"
 export LOOM_FLEET_DB_ACTOR="epic-runner-e2e"
+export LOOM_SDK_ROOT="${LOOM_SDK_ROOT:-/src/sdk}"
 export STUB_CODEX_EPIC_RUNNER="1"
 export STUB_CODEX_INVOCATIONS="$ROOT/codex-invocations.log"
 export LEAD_SESSION_ID="lead-session-e2e"
@@ -95,6 +96,18 @@ git -C "$SEED" commit -m "Initial app" >/dev/null
 git -C "$SEED" push origin seed:main >/dev/null
 
 loom workspace create "$LOOM_WORKSPACE" --repos "$SEED" --path "$WORKSPACE_PATH" --branch main
+
+sleep 0.5
+for _ in {1..40}; do
+    if loom workspace show --json "$LOOM_WORKSPACE" >/dev/null 2>&1; then
+        break
+    fi
+    sleep 0.25
+done
+if ! loom workspace show --json "$LOOM_WORKSPACE" >/dev/null 2>&1; then
+    echo "workspace did not become readable after creation" >&2
+    exit 1
+fi
 cd "$WORKSPACE_PATH"
 
 loom daemon > "$ROOT/daemon.log" 2>&1 &
@@ -155,8 +168,7 @@ LOOM_ORCHESTRATOR_SESSION_ID="$LEAD_SESSION_ID" timeout "$EPIC_RUNNER_TIMEOUT" l
     --lead nova \
     --max-concurrency 1 \
     --interval-seconds 1 \
-    --node-id "$NODE_ID" \
-    --role task
+    --node-id "$NODE_ID"
 
 loom data --output json show "$TASK_A" | jq -e '.status == "closed"' >/dev/null
 loom data --output json show "$TASK_B" | jq -e '.status == "closed"' >/dev/null

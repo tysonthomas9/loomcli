@@ -7,6 +7,14 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 SKIP_FILE="$REPO_ROOT/.test-skip"
 
+# Isolate tests from the real ~/.loom so state-cache writes never clobber
+# the user's workspace path registry (LOOMDEV-14).
+if [[ -z "${LOOM_CONFIG_DIR:-}" ]]; then
+    LOOM_CONFIG_DIR="$(mktemp -d)"
+    export LOOM_CONFIG_DIR
+    trap 'rm -rf "$LOOM_CONFIG_DIR"' EXIT
+fi
+
 # Build skip pattern from .test-skip file
 build_skip_pattern() {
     if [[ ! -f "$SKIP_FILE" ]]; then

@@ -9,6 +9,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/agenterr"
 	"github.com/tysonthomas9/loomcli/internal/agentpolicy"
 	"github.com/tysonthomas9/loomcli/internal/cli/backendcheck"
+	"github.com/tysonthomas9/loomcli/internal/cli/backends"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 )
 
@@ -81,6 +82,49 @@ func (s *Supervisor) gateBackendAvailable(ap *AgentProcess) error {
 			worktree, backend, info.InstallHint)
 	}
 	return ErrBackendUnavailable
+}
+
+// gateSafetyKnobsEnforceable fails closed when the role carries safety knobs
+// the resolved backend cannot enforce, and warns when a knob is in force only
+// softly. Spawning under a dropped restriction would be the exact
+// config-that-lies failure these knobs used to be, so a tool list the backend
+// cannot apply parks the agent with a visible error (SpawnFailure class); the
+// daemon's config poll picks up a corrected role without a restart.
+//
+// read_only on a backend with no hard mechanism is the one knob that
+// degrades rather than refuses — see backends.ValidateSafetyKnobs for why —
+// and the warning is what keeps that honest. It is logged once per distinct
+// message rather than per spawn attempt: this gate runs on every polling
+// cycle, including cycles that claim no task, so an unconditional line would
+// bury the daemon log.
+func (s *Supervisor) gateSafetyKnobsEnforceable(ap *AgentProcess) error {
+	backendName := s.GetEffectiveBackend(ap)
+	warning, err := backends.ValidateSafetyKnobs(backendName,
+		ap.RoleConfig.AllowedTools, ap.RoleConfig.DeniedTools, ap.RoleConfig.ReadOnly)
+	if err == nil {
+		if warning != "" {
+			ap.Mu.Lock()
+			repeat := ap.SoftKnobWarning == warning
+			ap.SoftKnobWarning = warning
+			worktree := ap.Entry.Worktree
+			ap.Mu.Unlock()
+			if !repeat {
+				log.Printf("[daemon] Agent %s: SOFT ENFORCEMENT ONLY — %s", worktree, warning)
+			}
+		}
+		return nil
+	}
+	ap.Mu.Lock()
+	ap.LastError = &agenterr.AgentError{
+		Class:     agenterr.OutcomeFromDomain(agenterr.SpawnFailureOutcome),
+		Message:   err.Error(),
+		Backend:   backendName,
+		Timestamp: time.Now(),
+	}
+	worktree := ap.Entry.Worktree
+	ap.Mu.Unlock()
+	log.Printf("[daemon] Agent %s: %v — skipping spawn", worktree, err)
+	return err
 }
 
 // GetEffectiveBackend returns the backend name for the agent's current failover position.

@@ -25,17 +25,34 @@ export type {
   SubscriptionOptions,
 } from "./useEventProvider";
 
-export { useFileContent } from "./useFileContent";
-export type { UseFileContentReturn } from "./useFileContent";
+export {
+  FileDocumentRegistryProvider,
+  useFileDocument,
+  useFileDocumentRegistry,
+  useFileDocumentRegistryRevision,
+} from "./useFileDocument";
+export type { UseFileDocumentReturn } from "./useFileDocument";
 
-export { useFileTree } from "./useFileTree";
-export type { UseFileTreeReturn, UseFileTreeOptions } from "./useFileTree";
+export {
+  FileCapabilitiesProvider,
+  useFileCapabilities,
+} from "./useFileCapabilities";
+export type { FileCapabilitiesState } from "./useFileCapabilities";
+
+export { useScopedFileTree } from "./useScopedFileTree";
+export type { UseScopedFileTreeReturn } from "./useScopedFileTree";
 
 export { useFolderPicker } from "./useFolderPicker";
 export type {
   UseFolderPickerOptions,
   UseFolderPickerReturn,
 } from "./useFolderPicker";
+
+export { useFileEditorBuffer } from "./useFileEditorBuffer";
+export type {
+  UseFileEditorBufferOptions,
+  UseFileEditorBufferReturn,
+} from "./useFileEditorBuffer";
 
 export { usePollingWithBackoff } from "./usePollingWithBackoff";
 export type {
@@ -62,3 +79,16 @@ export {
   NO_STORE_CONTEXT,
 } from "./useStoreContext";
 export type { StoreContextValue, StoreProviderProps } from "./useStoreContext";
+
+export {
+  agentFileBrowserTabsStorageKey,
+  FileBrowserStoreProvider,
+  fileBrowserTabsStorageKey,
+  useFileBrowserStore,
+  useFileBrowserStoreInstance,
+} from "@/stores";
+export type {
+  FileBrowserGroup,
+  FileBrowserStore,
+  FileBrowserTab,
+} from "@/stores";

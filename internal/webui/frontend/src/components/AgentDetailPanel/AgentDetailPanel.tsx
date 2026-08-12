@@ -25,9 +25,9 @@ import {
 import type { LoomAgentStatus, LoomTaskInfo } from "@/types";
 import { parseLoomStatus, resolveAgentByName } from "@/types";
 
-const FileEditorPanel = lazy(() =>
-  import("@/components/FileEditorPanel").then((m) => ({
-    default: m.FileEditorPanel,
+const WorkspaceFileBrowser = lazy(() =>
+  import("@/components/FileExplorer").then((m) => ({
+    default: m.WorkspaceFileBrowser,
   })),
 );
 
@@ -41,6 +41,7 @@ import { OpenInEditor } from "../OpenInEditor";
 import { RepoBadge } from "../RepoBadge";
 import styles from "./AgentDetailPanel.module.css";
 import { AgentLogsTab } from "./AgentLogsTab";
+import { PendingInputBanner } from "./PendingInputBanner";
 import { GitTab } from "./GitTab";
 import {
   getAvatarColor,
@@ -234,6 +235,8 @@ export function AgentDetailPanel({
                   )}
                 </div>
               ) : null}
+
+              <PendingInputBanner agentName={agent.name} />
 
               {/* Tab Bar */}
               <div
@@ -469,10 +472,9 @@ export function AgentDetailPanel({
                     </div>
                   }
                 >
-                  <FileEditorPanel
+                  <WorkspaceFileBrowser
+                    mode="agent"
                     agentName={agent.name}
-                    agentRole={agent.role}
-                    agentRepo={agent.repo}
                     isActive={activeTab === "files"}
                   />
                 </Suspense>

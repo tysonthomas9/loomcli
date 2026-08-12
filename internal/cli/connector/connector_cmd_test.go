@@ -7,6 +7,8 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -139,6 +141,37 @@ func TestCreateThenList_RedactsAndNeverEchoesSecrets(t *testing.T) {
 	}
 }
 
+func TestCreateConnectorUsesServeVaultFallback(t *testing.T) {
+	t.Setenv(vault.VaultKeyEnvVar, "")
+	dataDir := t.TempDir()
+	t.Setenv("LOOM_CONFIG_DIR", dataDir)
+	st := memstore.New()
+	var out bytes.Buffer
+	if err := createConnector(context.Background(), st, testWS, createParams{
+		connectorID: "github",
+		source:      domain.ConnectorSourceGitHub,
+		credStdin:   true,
+	}, strings.NewReader(testCredential+"\n"), &out); err != nil {
+		t.Fatalf("createConnector: %v", err)
+	}
+
+	sealed, err := st.Connectors().ResolveOutboundCredentialSealed(context.Background(), testWS, "github")
+	if err != nil {
+		t.Fatalf("ResolveOutboundCredentialSealed: %v", err)
+	}
+	serveVault, err := vault.NewVaultFromEnvOrKeyFile(dataDir)
+	if err != nil {
+		t.Fatalf("serve-style vault: %v", err)
+	}
+	plain, err := serveVault.Unseal(sealed, vault.CredentialAAD(testWS, "github"))
+	if err != nil {
+		t.Fatalf("serve-style vault could not unseal CLI credential: %v", err)
+	}
+	if string(plain) != testCredential {
+		t.Fatalf("unsealed credential = %q, want %q", plain, testCredential)
+	}
+}
+
 func TestCreateConnector_ErrorPaths(t *testing.T) {
 	setVaultKey(t)
 	ctx := context.Background()
@@ -164,11 +197,11 @@ func TestCreateConnector_ErrorPaths(t *testing.T) {
 			wantMsg: "outbound credential from stdin is empty",
 		},
 		{
-			name:    "vault key missing fails closed before any store write",
+			name:    "vault source missing fails closed before any store write",
 			params:  createParams{source: domain.ConnectorSourceGitHub, credStdin: true},
 			stdin:   testCredential + "\n",
 			noKey:   true,
-			wantErr: vault.ErrVaultKeyMissing,
+			wantMsg: "vault key",
 		},
 		{
 			name:    "duplicate connector",
@@ -179,7 +212,17 @@ func TestCreateConnector_ErrorPaths(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			if tt.noKey {
+				// Since #152 LoomDir() always yields a writable per-process
+				// temp dir under `go test`, so "no vault source" can't be
+				// staged by clearing env alone: the key-file fallback would
+				// succeed. Point LOOM_CONFIG_DIR below a regular file so the
+				// key-file path cannot be created either.
 				t.Setenv(vault.VaultKeyEnvVar, "")
+				blocker := filepath.Join(t.TempDir(), "blocker")
+				if err := os.WriteFile(blocker, []byte("x"), 0o600); err != nil {
+					t.Fatalf("write blocker: %v", err)
+				}
+				t.Setenv("LOOM_CONFIG_DIR", filepath.Join(blocker, "loom"))
 			}
 			st := memstore.New()
 			if tt.params.connectorID == "dup" {

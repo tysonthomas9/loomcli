@@ -5,6 +5,11 @@
 export { useBackendConfig } from "./useBackendConfig";
 export type { UseBackendConfigReturn } from "./useBackendConfig";
 
+export { useWorkspaceDesignFormat } from "./useWorkspaceDesignFormat";
+export type { UseWorkspaceDesignFormatReturn } from "./useWorkspaceDesignFormat";
+
+export { useDeleteWorkspaceAgent } from "./useDeleteWorkspaceAgent";
+
 export { useLocalSettings } from "./useLocalSettings";
 export type { UseLocalSettingsReturn } from "./useLocalSettings";
 
@@ -32,6 +37,18 @@ export type {
   UsePullRequestsOptions,
   UsePullRequestsReturn,
 } from "./usePullRequests";
+
+export { usePullRequestDiff } from "./usePullRequestDiff";
+export type {
+  UsePullRequestDiffParams,
+  UsePullRequestDiffResult,
+} from "./usePullRequestDiff";
+
+export { usePRReviewConversation } from "./usePRReviewConversation";
+export type {
+  UsePRReviewConversationParams,
+  UsePRReviewConversationResult,
+} from "./usePRReviewConversation";
 
 export { useRepoFilter, parseReposFromUrl } from "./useRepoFilter";
 export type {

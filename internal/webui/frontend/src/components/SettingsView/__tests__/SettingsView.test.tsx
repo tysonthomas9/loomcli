@@ -18,7 +18,6 @@ import type {
   UseBackendsReturn,
   UseLocalSettingsReturn,
 } from "@/hooks/workspace";
-import type { UseTerminalFontReturn } from "@/hooks/terminal";
 import type { BackendConfigData } from "@/api/common";
 
 import { SettingsView } from "../SettingsView";
@@ -34,15 +33,9 @@ vi.mock("@/hooks/workspace", async () => {
     useBackendConfig: vi.fn(),
     useBackends: vi.fn(),
     useLocalSettings: vi.fn(),
+    useWorkspaceDesignFormat: vi.fn(),
+    useWorkspaceContext: vi.fn(),
   };
-});
-
-vi.mock("@/hooks/terminal", async () => {
-  const actual =
-    await vi.importActual<typeof import("@/hooks/terminal")>(
-      "@/hooks/terminal",
-    );
-  return { ...actual, useTerminalFont: vi.fn() };
 });
 
 vi.mock("@/hooks/ui", async () => {
@@ -63,14 +56,16 @@ import {
   useBackendConfig,
   useBackends,
   useLocalSettings,
+  useWorkspaceDesignFormat,
+  useWorkspaceContext,
 } from "@/hooks/workspace";
-import { useTerminalFont } from "@/hooks/terminal";
 import { useToast } from "@/hooks/ui";
 
 const mockUseBackendConfig = vi.mocked(useBackendConfig);
 const mockUseBackends = vi.mocked(useBackends);
 const mockUseLocalSettings = vi.mocked(useLocalSettings);
-const mockUseTerminalFont = vi.mocked(useTerminalFont);
+const mockUseWorkspaceDesignFormat = vi.mocked(useWorkspaceDesignFormat);
+const mockUseWorkspaceContext = vi.mocked(useWorkspaceContext);
 const mockUseToast = vi.mocked(useToast);
 
 /**
@@ -173,21 +168,6 @@ function createMockLocalSettingsReturn(
 describe("SettingsView", () => {
   const mockShowToast = vi.fn();
 
-  const mockSetFontFamily = vi.fn();
-  const mockSetFontSize = vi.fn();
-
-  function createMockFontReturn(
-    overrides?: Partial<UseTerminalFontReturn>,
-  ): UseTerminalFontReturn {
-    return {
-      fontFamily: 'Menlo, Monaco, "Courier New", monospace',
-      fontSize: 14,
-      setFontFamily: mockSetFontFamily,
-      setFontSize: mockSetFontSize,
-      ...overrides,
-    };
-  }
-
   beforeEach(() => {
     vi.clearAllMocks();
     mockUseToast.mockReturnValue({
@@ -197,8 +177,27 @@ describe("SettingsView", () => {
       dismissAll: vi.fn(),
     });
     mockUseBackends.mockReturnValue(createMockBackendsReturn());
-    mockUseTerminalFont.mockReturnValue(createMockFontReturn());
     mockUseLocalSettings.mockReturnValue(createMockLocalSettingsReturn());
+    mockUseWorkspaceContext.mockReturnValue({
+      workspaceId: "ALPHA",
+      workspace: {
+        id: "ALPHA",
+        name: "Alpha",
+        path: "/tmp/alpha",
+        repos: [],
+        groups: [],
+        agents: [],
+        workspaces: [],
+        default_workspace: "",
+        design_format: "markdown",
+      },
+      refetch: vi.fn(),
+    } as ReturnType<typeof useWorkspaceContext>);
+    mockUseWorkspaceDesignFormat.mockReturnValue({
+      isSaving: false,
+      error: null,
+      updateDesignFormat: vi.fn().mockResolvedValue(true),
+    });
   });
 
   describe("loading state", () => {
@@ -296,6 +295,132 @@ describe("SettingsView", () => {
       render(<SettingsView />);
 
       expect(screen.getByText("Default")).toBeInTheDocument();
+    });
+  });
+
+  describe("credential sections", () => {
+    it("groups GitHub separately from remote runtime credentials", () => {
+      mockUseBackendConfig.mockReturnValue(createMockHookReturn());
+
+      render(<SettingsView />);
+
+      const githubPanel = screen.getByTestId("github-settings-panel");
+      const remoteRuntimesPanel = screen.getByTestId("remote-runtimes-panel");
+
+      expect(
+        within(githubPanel).getByRole("heading", { name: "GitHub" }),
+      ).toBeInTheDocument();
+      expect(
+        within(githubPanel).getByLabelText(
+          "GitHub Token for Runtimes and PR Review",
+        ),
+      ).toBeInTheDocument();
+      expect(
+        within(githubPanel).getByText(
+          "Used for GitHub PR review and remote runtime provisioning.",
+        ),
+      ).toBeInTheDocument();
+      expect(
+        within(githubPanel).queryByTestId("daytona-api-key-input"),
+      ).not.toBeInTheDocument();
+
+      expect(
+        within(remoteRuntimesPanel).getByRole("heading", {
+          name: "Remote runtimes",
+        }),
+      ).toBeInTheDocument();
+      expect(
+        within(remoteRuntimesPanel).getByTestId("daytona-api-key-input"),
+      ).toBeInTheDocument();
+      expect(
+        within(remoteRuntimesPanel).queryByTestId("github-token-input"),
+      ).not.toBeInTheDocument();
+      expect(
+        within(remoteRuntimesPanel).queryByText(/GitHub/i),
+      ).not.toBeInTheDocument();
+    });
+
+    it("saves the GitHub token with the existing runtime credential shape", async () => {
+      const updateRuntimeCredentials = vi.fn().mockResolvedValue(true);
+      mockUseBackendConfig.mockReturnValue(createMockHookReturn());
+      mockUseLocalSettings.mockReturnValue(
+        createMockLocalSettingsReturn({ updateRuntimeCredentials }),
+      );
+
+      render(<SettingsView />);
+
+      fireEvent.change(screen.getByTestId("github-token-input"), {
+        target: { value: " github_pat_new " },
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByTestId("github-credential-save-button"));
+      });
+
+      expect(updateRuntimeCredentials).toHaveBeenCalledWith({
+        github: { token: "github_pat_new" },
+      });
+    });
+
+    it("clears the configured GitHub token with the existing PATCH shape", async () => {
+      const updateRuntimeCredentials = vi.fn().mockResolvedValue(true);
+      mockUseBackendConfig.mockReturnValue(createMockHookReturn());
+      mockUseLocalSettings.mockReturnValue(
+        createMockLocalSettingsReturn({
+          settings: {
+            version: 1,
+            fleetdb_redis: {
+              enabled: false,
+              db: 0,
+              tls: false,
+              password_set: false,
+            },
+            agent_runtime: { default: "local" },
+            local_task_runner: {},
+            runtime_credentials: {
+              daytona: { configured: false },
+              github: {
+                configured: true,
+                updated_at: "2026-07-13T12:00:00Z",
+              },
+            },
+          },
+          updateRuntimeCredentials,
+        }),
+      );
+
+      render(<SettingsView />);
+
+      expect(screen.getByTestId("github-settings-panel")).toHaveTextContent(
+        "Credential saved.",
+      );
+      await act(async () => {
+        fireEvent.click(screen.getByTestId("github-credential-clear-button"));
+      });
+
+      expect(updateRuntimeCredentials).toHaveBeenCalledWith({
+        github: { clear: true },
+      });
+    });
+
+    it("keeps Daytona saves scoped to the remote runtime credential", async () => {
+      const updateRuntimeCredentials = vi.fn().mockResolvedValue(true);
+      mockUseBackendConfig.mockReturnValue(createMockHookReturn());
+      mockUseLocalSettings.mockReturnValue(
+        createMockLocalSettingsReturn({ updateRuntimeCredentials }),
+      );
+
+      render(<SettingsView />);
+
+      fireEvent.change(screen.getByTestId("daytona-api-key-input"), {
+        target: { value: " dtn_new " },
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByTestId("daytona-credential-save-button"));
+      });
+
+      expect(updateRuntimeCredentials).toHaveBeenCalledWith({
+        daytona: { api_key: "dtn_new" },
+      });
     });
   });
 
@@ -441,6 +566,68 @@ describe("SettingsView", () => {
     });
   });
 
+  describe("planner design format", () => {
+    it("resets an unsaved selection when the active workspace changes", () => {
+      mockUseBackendConfig.mockReturnValue(createMockHookReturn());
+      const { rerender } = render(<SettingsView />);
+
+      fireEvent.change(screen.getByTestId("design-format-select"), {
+        target: { value: "html" },
+      });
+      expect(screen.getByTestId("design-format-select")).toHaveValue("html");
+
+      mockUseWorkspaceContext.mockReturnValue({
+        workspaceId: "BETA",
+        workspace: {
+          id: "BETA",
+          name: "Beta",
+          path: "/tmp/beta",
+          repos: [],
+          groups: [],
+          agents: [],
+          workspaces: [],
+          default_workspace: "",
+          design_format: "markdown",
+        },
+        refetch: vi.fn(),
+      } as ReturnType<typeof useWorkspaceContext>);
+      rerender(<SettingsView />);
+
+      expect(screen.getByTestId("design-format-select")).toHaveValue(
+        "markdown",
+      );
+      expect(screen.getByTestId("design-format-save-button")).toBeDisabled();
+    });
+
+    it("persists an HTML selection for the active workspace", async () => {
+      const updateDesignFormat = vi.fn().mockResolvedValue(true);
+      mockUseWorkspaceDesignFormat.mockReturnValue({
+        isSaving: false,
+        error: null,
+        updateDesignFormat,
+      });
+      mockUseBackendConfig.mockReturnValue(createMockHookReturn());
+      render(<SettingsView />);
+
+      expect(screen.getByTestId("design-format-select")).toHaveValue(
+        "markdown",
+      );
+      fireEvent.change(screen.getByTestId("design-format-select"), {
+        target: { value: "html" },
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByTestId("design-format-save-button"));
+      });
+
+      expect(updateDesignFormat).toHaveBeenCalledWith("html");
+      expect(mockShowToast).toHaveBeenCalledWith(
+        "Design format updated successfully",
+        { type: "success" },
+      );
+    });
+  });
+
   describe("local task runner settings", () => {
     it("saves the opencode model setting", async () => {
       const mockUpdateLocalTaskRunner = vi.fn().mockResolvedValue(true);
@@ -546,106 +733,15 @@ describe("SettingsView", () => {
   });
 
   describe("terminal font panel", () => {
-    it("renders the Terminal Font panel", () => {
+    it("does not render the Terminal Font panel", () => {
       mockUseBackendConfig.mockReturnValue(createMockHookReturn());
-
-      render(<SettingsView />);
-
-      expect(screen.getByTestId("terminal-font-panel")).toBeInTheDocument();
-      expect(screen.getByText("Terminal Font")).toBeInTheDocument();
-    });
-
-    it("renders font family select with current preset value", () => {
-      mockUseBackendConfig.mockReturnValue(createMockHookReturn());
-      mockUseTerminalFont.mockReturnValue(
-        createMockFontReturn({ fontFamily: "Menlo, monospace" }),
-      );
-
-      render(<SettingsView />);
-
-      const select = screen.getByTestId(
-        "font-family-select",
-      ) as HTMLSelectElement;
-      expect(select.value).toBe("Menlo, monospace");
-    });
-
-    it("renders font size select with current value", () => {
-      mockUseBackendConfig.mockReturnValue(createMockHookReturn());
-      mockUseTerminalFont.mockReturnValue(
-        createMockFontReturn({ fontSize: 18 }),
-      );
-
-      render(<SettingsView />);
-
-      const select = screen.getByTestId(
-        "font-size-select",
-      ) as HTMLSelectElement;
-      expect(select.value).toBe("18");
-    });
-
-    it("calls setFontFamily when font family select changes", () => {
-      mockUseBackendConfig.mockReturnValue(createMockHookReturn());
-
-      render(<SettingsView />);
-
-      const select = screen.getByTestId("font-family-select");
-      fireEvent.change(select, { target: { value: "Monaco, monospace" } });
-
-      expect(mockSetFontFamily).toHaveBeenCalledWith("Monaco, monospace");
-    });
-
-    it("calls setFontSize when font size select changes", () => {
-      mockUseBackendConfig.mockReturnValue(createMockHookReturn());
-
-      render(<SettingsView />);
-
-      const select = screen.getByTestId("font-size-select");
-      fireEvent.change(select, { target: { value: "20" } });
-
-      expect(mockSetFontSize).toHaveBeenCalledWith(20);
-    });
-
-    it("shows custom input when Custom is selected", () => {
-      mockUseBackendConfig.mockReturnValue(createMockHookReturn());
-      // A non-preset font shows the custom input
-      mockUseTerminalFont.mockReturnValue(
-        createMockFontReturn({ fontFamily: "MyCustomFont, serif" }),
-      );
 
       render(<SettingsView />);
 
       expect(
-        screen.getByTestId("font-family-custom-input"),
-      ).toBeInTheDocument();
-    });
-
-    it("does not show custom input for preset fonts", () => {
-      mockUseBackendConfig.mockReturnValue(createMockHookReturn());
-      mockUseTerminalFont.mockReturnValue(
-        createMockFontReturn({ fontFamily: "Menlo, monospace" }),
-      );
-
-      render(<SettingsView />);
-
-      expect(
-        screen.queryByTestId("font-family-custom-input"),
+        screen.queryByTestId("terminal-font-panel"),
       ).not.toBeInTheDocument();
-    });
-
-    it("typing in custom input calls setFontFamily", () => {
-      mockUseBackendConfig.mockReturnValue(createMockHookReturn());
-      mockUseTerminalFont.mockReturnValue(
-        createMockFontReturn({ fontFamily: "MyFont" }),
-      );
-
-      render(<SettingsView />);
-
-      const input = screen.getByTestId(
-        "font-family-custom-input",
-      ) as HTMLInputElement;
-      fireEvent.change(input, { target: { value: "AnotherFont, monospace" } });
-
-      expect(mockSetFontFamily).toHaveBeenCalledWith("AnotherFont, monospace");
+      expect(screen.queryByText("Terminal Font")).not.toBeInTheDocument();
     });
   });
 

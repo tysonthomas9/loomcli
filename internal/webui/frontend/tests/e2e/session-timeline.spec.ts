@@ -519,25 +519,21 @@ async function openIssuePanelAndSwitchToSessions(page: Page) {
 
 test.describe("Session Timeline", () => {
   test.describe("Timeline rendering", () => {
-    test("sessions tab shows cost summary bar", async ({ page }) => {
+    test("sessions tab shows aggregate summary in timeline header", async ({
+      page,
+    }) => {
       await installIssuesMock(page, [testIssue]);
       await setupBaseMocks(page);
       await setupSessionMocks(page);
       await navigateAndWaitForBoard(page);
       await openIssuePanelAndSwitchToSessions(page);
 
-      const sessionsTab = page.getByTestId("sessions-tab");
-      await expect(sessionsTab).toBeVisible();
-
-      // Verify summary shows session count
-      await expect(sessionsTab).toContainText("Sessions");
-      await expect(sessionsTab).toContainText("4");
-
-      // Verify summary shows tokens
-      await expect(sessionsTab).toContainText("Tokens");
-
-      // Verify summary shows cost
-      await expect(sessionsTab).toContainText("Cost");
+      const summary = page.getByTestId("timeline-summary");
+      await expect(summary).toBeVisible();
+      await expect(summary).toContainText("Runs");
+      await expect(summary).toContainText("4");
+      await expect(summary).toContainText("tok");
+      await expect(summary).toContainText("$");
     });
 
     test("active sessions count badge appears when running sessions exist", async ({
@@ -598,8 +594,9 @@ test.describe("Session Timeline", () => {
       await expect(row).toContainText("nova");
       await expect(row).toContainText("implementation");
       await expect(row).toContainText("5m 0s");
-      await expect(row).toContainText("8.0K tok");
+      await expect(row).toContainText("8.0K");
       await expect(row).toContainText("$1.50");
+      await expect(row).toContainText("Completed");
 
       // Status dot
       const statusDot = row.locator('[data-status="completed"]');
@@ -614,7 +611,7 @@ test.describe("Session Timeline", () => {
       await openIssuePanelAndSwitchToSessions(page);
 
       await expect(page.getByTestId("sessions-empty")).toContainText(
-        "No sessions recorded yet",
+        "No agent runs recorded yet",
       );
     });
   });
@@ -628,7 +625,7 @@ test.describe("Session Timeline", () => {
       await openIssuePanelAndSwitchToSessions(page);
 
       await expect(
-        page.getByText("Select a session to view details"),
+        page.getByText("Select a run to view details"),
       ).toBeVisible();
       await expect(page.getByTestId("session-detail-view")).not.toBeVisible();
     });
@@ -644,7 +641,7 @@ test.describe("Session Timeline", () => {
 
       await expect(page.getByTestId("session-detail-view")).toBeVisible();
       await expect(
-        page.getByText("Select a session to view details"),
+        page.getByText("Select a run to view details"),
       ).not.toBeVisible();
     });
 
@@ -822,7 +819,7 @@ test.describe("Session Timeline", () => {
       await expect(page.getByTestId("session-transcript")).toBeVisible();
     });
 
-    test("transcript renders assistant turns and surfaces prompt in masthead", async ({
+    test("transcript renders assistant turns without a Prompt masthead", async ({
       page,
     }) => {
       await installIssuesMock(page, [testIssue]);
@@ -833,14 +830,13 @@ test.describe("Session Timeline", () => {
 
       await page.getByTestId("session-row-sess-1").click();
 
-      // Transcript region contains assistant turn(s); first user text is
-      // pulled up into the masthead Prompt block.
+      // Transcript region contains assistant turn(s); kickoff user text is omitted.
       const transcript = page.getByTestId("session-transcript");
       await expect(transcript).toBeVisible();
       await expect(
         transcript.locator('article[data-role="assistant"]').first(),
       ).toBeVisible();
-      await expect(page.getByTestId("session-detail-view")).toContainText(
+      await expect(page.getByTestId("session-detail-view")).not.toContainText(
         "Prompt",
       );
     });
@@ -995,15 +991,13 @@ test.describe("Session Timeline", () => {
       await navigateAndWaitForBoard(page);
       await openIssuePanelAndSwitchToSessions(page);
 
-      // sess-1: 5000+3000=8000 → "8.0K tok"
+      // sess-1: 5000+3000=8000 → "8.0K"
       await expect(page.getByTestId("session-row-sess-1")).toContainText(
-        "8.0K tok",
+        "8.0K",
       );
 
-      // sess-2: 300+200=500 → "500 tok"
-      await expect(page.getByTestId("session-row-sess-2")).toContainText(
-        "500 tok",
-      );
+      // sess-2: 300+200=500 → "500"
+      await expect(page.getByTestId("session-row-sess-2")).toContainText("500");
     });
 
     test("cost formats as USD", async ({ page }) => {

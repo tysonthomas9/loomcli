@@ -111,6 +111,14 @@ export interface LoomTaskRunRequest {
   input?: unknown;
 }
 
+export interface LoomClaimReadyInput extends LoomEpicInput {
+  /** Skip ready tasks carrying ANY of these labels. Use it to keep tasks that
+   *  are mid-flight in a label-routed pipeline out of an epic drain. */
+  readonly excludeLabels?: readonly string[];
+  readonly actor?: string;
+  readonly limit?: number;
+}
+
 export interface LoomEpicInput {
   epicId?: string;
 }
@@ -410,7 +418,7 @@ export declare class LoomDriverClient {
     message(input?: LoomAgentMessageInput): Promise<Record<string, unknown> | null>;
   };
   readonly tasks: {
-    claimReady(input?: LoomEpicInput): Promise<Record<string, unknown> | null>;
+    claimReady(input?: LoomClaimReadyInput): Promise<Record<string, unknown> | null>;
     complete(input?: LoomTaskSelector | string): Promise<Record<string, unknown> | null>;
     release(input?: LoomTaskSelector | string): Promise<Record<string, unknown> | null>;
   };
@@ -448,7 +456,7 @@ export declare class LoomDriverClient {
     logsRef?: string;
     artifactsRef?: string;
   }): LoomDriverResult;
-  claimReady(input?: LoomEpicInput): Promise<Record<string, unknown> | null>;
+  claimReady(input?: LoomClaimReadyInput): Promise<Record<string, unknown> | null>;
   getEpic(input?: LoomEpicInput): Promise<Record<string, unknown> | null>;
   epicSnapshot(input?: LoomEpicInput): Promise<Record<string, unknown> | null>;
   watchEpic(input?: LoomEpicWatchInput): AsyncGenerator<LoomEpicWatchEvent, void, undefined>;

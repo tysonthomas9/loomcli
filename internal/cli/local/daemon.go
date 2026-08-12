@@ -81,7 +81,7 @@ func localDaemonRunnableWorkspace(ctx context.Context, dataDir, runtimeURL strin
 		return workspaceKey, false, err
 	}
 	for _, agent := range config.Agents {
-		if agent.ShouldSupervise() {
+		if agent.ShouldSuperviseWithRoles(config.Roles) {
 			return workspaceKey, true, nil
 		}
 	}

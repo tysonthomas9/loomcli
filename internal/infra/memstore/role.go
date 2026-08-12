@@ -39,20 +39,25 @@ func (s *roleStore) Create(_ context.Context, in store.RoleCreate) (*domain.Role
 	r := &domain.Role{
 		WorkspaceKey:   in.WorkspaceKey,
 		Name:           in.Name,
+		Kind:           domain.RoleKind(in.Kind),
 		Description:    in.Description,
+		Prompt:         in.Prompt,
 		PromptFile:     in.PromptFile,
 		Model:          in.Model,
 		TaskFilter:     in.TaskFilter,
+		Executor:       in.Executor,
 		Backend:        in.Backend,
 		Effort:         in.Effort,
 		PathPatterns:   append([]string(nil), in.PathPatterns...),
 		Skills:         append([]string(nil), in.Skills...),
+		InputPolicy:    in.InputPolicy.Clone(),
 		MaxPriority:    clonePtr(in.MaxPriority),
 		MaxConcurrency: clonePtr(in.MaxConcurrency),
 		ReadOnly:       in.ReadOnly,
 		AllowedTools:   append([]string(nil), in.AllowedTools...),
 		DeniedTools:    append([]string(nil), in.DeniedTools...),
 		MaxBudgetUSD:   clonePtr(in.MaxBudgetUSD),
+		MaxRunDuration: clonePtr(in.MaxRunDuration),
 		CreatedAt:      now,
 		UpdatedAt:      now,
 	}
@@ -89,8 +94,23 @@ func (s *roleStore) Update(_ context.Context, ws, name string, patch store.RoleU
 	if !ok {
 		return nil, fmt.Errorf("role %q in workspace %q: %w", name, ws, domain.ErrNotFound)
 	}
+	applyRoleDefinitionPatch(r, patch)
+	applyRoleControlPatch(r, patch)
+	r.UpdatedAt = time.Now().UTC()
+	return cloneRole(r), nil
+}
+
+// applyRoleDefinitionPatch applies the definition half of the patch: what the
+// role is, how it prompts, and which backend runs it.
+func applyRoleDefinitionPatch(r *domain.Role, patch store.RoleUpdate) {
 	if patch.Description != nil {
 		r.Description = *patch.Description
+	}
+	if patch.Kind != nil {
+		r.Kind = domain.RoleKind(*patch.Kind)
+	}
+	if patch.Prompt != nil {
+		r.Prompt = *patch.Prompt
 	}
 	if patch.PromptFile != nil {
 		r.PromptFile = *patch.PromptFile
@@ -100,6 +120,9 @@ func (s *roleStore) Update(_ context.Context, ws, name string, patch store.RoleU
 	}
 	if patch.TaskFilter != nil {
 		r.TaskFilter = *patch.TaskFilter
+	}
+	if patch.Executor != nil {
+		r.Executor = *patch.Executor
 	}
 	if patch.Backend != nil {
 		r.Backend = *patch.Backend
@@ -112,6 +135,17 @@ func (s *roleStore) Update(_ context.Context, ws, name string, patch store.RoleU
 	}
 	if patch.Skills != nil {
 		r.Skills = append([]string(nil), (*patch.Skills)...)
+	}
+}
+
+// applyRoleControlPatch applies the routing and safety half of the patch:
+// label constraints, input policy, and the run/spend bounds.
+func applyRoleControlPatch(r *domain.Role, patch store.RoleUpdate) {
+	if patch.InputPolicy != nil {
+		// Deep-copied on the way in as well as on the way out: the caller keeps
+		// a reference to the Kinds map it built, and a shared map would let it
+		// flip a role's disposition after the store accepted the patch.
+		r.InputPolicy = (*patch.InputPolicy).Clone()
 	}
 	if patch.MaxPriority != nil {
 		r.MaxPriority = clonePtr(*patch.MaxPriority)
@@ -131,8 +165,9 @@ func (s *roleStore) Update(_ context.Context, ws, name string, patch store.RoleU
 	if patch.MaxBudgetUSD != nil {
 		r.MaxBudgetUSD = clonePtr(*patch.MaxBudgetUSD)
 	}
-	r.UpdatedAt = time.Now().UTC()
-	return cloneRole(r), nil
+	if patch.MaxRunDuration != nil {
+		r.MaxRunDuration = clonePtr(*patch.MaxRunDuration)
+	}
 }
 
 func (s *roleStore) Delete(_ context.Context, ws, name string) error {
@@ -161,8 +196,10 @@ func cloneRole(r *domain.Role) *domain.Role {
 	out.Skills = append([]string(nil), r.Skills...)
 	out.AllowedTools = append([]string(nil), r.AllowedTools...)
 	out.DeniedTools = append([]string(nil), r.DeniedTools...)
+	out.InputPolicy = r.InputPolicy.Clone()
 	out.MaxPriority = clonePtr(r.MaxPriority)
 	out.MaxConcurrency = clonePtr(r.MaxConcurrency)
 	out.MaxBudgetUSD = clonePtr(r.MaxBudgetUSD)
+	out.MaxRunDuration = clonePtr(r.MaxRunDuration)
 	return &out
 }

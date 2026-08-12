@@ -92,6 +92,12 @@ type Supervisor struct {
 	IssueBackendReady func(epicID string) (bool, error)
 	IssueBackend      backend.IssueBackend
 
+	// quarantine is the supervisor-scoped, task-ID-keyed ledger of repeated
+	// no-progress kills (see quarantine.go). Lazily initialized via qrec so
+	// the cross-package composite-literal construction site stays untouched.
+	quarantine     *taskQuarantine
+	quarantineOnce sync.Once
+
 	// ControlStore is the fleet-db-backed control plane used for node,
 	// session, lease, terminal, artifact, and command records.
 	ControlStore store.Store
@@ -375,34 +381,13 @@ func (s *Supervisor) clearAgentSessionState(ap *AgentProcess) {
 	ap.ResumeTaskID = ""          // per-cycle; re-detected in preFlightSetup (ResumeFailures persists)
 	ap.RecoveryMode = recoverCold // per-cycle; re-classified in preFlightSetup
 	ap.LastActivity = time.Time{}
+	// A child that died while parked on an interactive prompt never sends its
+	// "end", so the in-flight count must not survive into the next cycle: a
+	// stale pending count would suspend the output-timeout watchdog for an
+	// agent that is no longer waiting on anything.
+	ap.InputWaitPending = 0
+	ap.InputWaitSince = time.Time{}
 	ap.Mu.Unlock()
-}
-
-// RecordAgentActivity advances ap.LastActivity for the named agent toward the
-// observed PTY-output timestamp. It is a no-op if the agent isn't currently
-// supervised. Out-of-order heartbeats never regress the stored value — callers
-// can safely retry without ever rewinding the timestamp.
-func (s *Supervisor) RecordAgentActivity(agentName string, at time.Time) {
-	if agentName == "" || at.IsZero() {
-		return
-	}
-	s.AgentsMu.RLock()
-	var target *AgentProcess
-	for _, ap := range s.Agents {
-		if ap.Entry.Worktree == agentName {
-			target = ap
-			break
-		}
-	}
-	s.AgentsMu.RUnlock()
-	if target == nil {
-		return
-	}
-	target.Mu.Lock()
-	if at.After(target.LastActivity) {
-		target.LastActivity = at
-	}
-	target.Mu.Unlock()
 }
 
 // preFlightSetup verifies the backend is spawnable, then runs recovery,
@@ -421,6 +406,9 @@ func (s *Supervisor) preFlightSetup(ap *AgentProcess) bool {
 	if err := s.gateBackendAvailable(ap); err != nil {
 		return false
 	}
+	if err := s.gateSafetyKnobsEnforceable(ap); err != nil {
+		return false
+	}
 
 	taskID, mode := s.detectRecovery(ap)
 	switch mode {
@@ -432,7 +420,9 @@ func (s *Supervisor) preFlightSetup(ap *AgentProcess) bool {
 		ap.Mu.Lock()
 		ap.ResumeFailures = 0 // cold-starting ⇒ let a future interruption recover again
 		ap.Mu.Unlock()
-		if err := s.recoverAgent(ap, 0); err != nil {
+		// Cold start: nothing here is being continued, so recovery takes its
+		// fully destructive form (incomplete=false).
+		if err := s.recoverAgent(ap, 0, false); err != nil {
 			slog.Warn("pre-flight recovery failed", "worktree", ap.Entry.Worktree, "err", err)
 		}
 	}
@@ -806,9 +796,23 @@ func (s *Supervisor) spawnAndWait(ap *AgentProcess) {
 
 	exitCode := s.waitForAgent(ap)
 	s.classifyAgentExit(ap, exitCode)
+	// Ledger hook: LastError is set, the lock is still present, and
+	// AgentSessionID has not been cleared by finalize yet. It runs with the
+	// FACTUAL exit code, so a clean run that later fails a completion hook
+	// evicts its ledger entry and the hook failure never counts toward task
+	// quarantine — deliberate (hook outcomes are agent-side, not task-side) and
+	// bounded instead by the agent's block budget via CompletionHookFailure.
+	s.recordTaskExitForQuarantine(ap, exitCode)
+	// Completion hooks run while the session id, claim, and transcript still
+	// exist, and before finalize/checkpoint/recovery decide the run's fate: a
+	// failed hook write demotes exitCode so the owned task is reopened.
+	exitCode = s.runCompletionHooks(ap, exitCode)
 	s.finalizeAgentSession(ap, exitCode)
 	s.handleAgentCheckpoint(ap, exitCode)
 	s.postMortemRecovery(ap, exitCode)
+	// Sweep AFTER recovery reset the task to open, so the quarantine write
+	// transitions open→blocked.
+	s.sweepQuarantineDue(ap)
 	s.Concurrency.Release(ap.Entry.Role)
 	s.handleEpicTransition(ap)
 }
@@ -819,7 +823,7 @@ func (s *Supervisor) postMortemRecovery(ap *AgentProcess, exitCode int) {
 		slog.Info("skipping post-mortem recovery for yield exit", "worktree", ap.Entry.Worktree)
 		return
 	}
-	if err := s.recoverAgent(ap, exitCode); err != nil {
+	if err := s.recoverAgent(ap, exitCode, isIncompleteRun(ap)); err != nil {
 		slog.Warn("post-mortem recovery failed", "worktree", ap.Entry.Worktree, "err", err)
 	}
 }

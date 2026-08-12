@@ -5,7 +5,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/webui"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlermux"
-	locsettings "github.com/tysonthomas9/loomcli/internal/webui/handlers/localsettings"
+	"github.com/tysonthomas9/loomcli/internal/webui/modbuilder"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
 
@@ -46,8 +46,9 @@ func (app *Server) registerCoreAPIRoutes(h *handlermux.Handlers) {
 	app.mux.HandleFunc("GET /api/metrics", h.Metrics)
 	app.mux.HandleFunc("GET /api/config/terminal", h.GetTerminalConfig)
 	if app.config.LocalSettingsDir != "" {
-		app.mux.HandleFunc("GET /api/local/settings", locsettings.HandleGet(app.config.LocalSettingsDir))
-		app.mux.HandleFunc("PATCH /api/local/settings", locsettings.HandlePatch(app.config.LocalSettingsDir))
+		settingsHandlers := modbuilder.NewLocalSettingsHandlers(app.config.LocalSettingsDir, app.prReviewCredentialSeeds)
+		app.mux.HandleFunc("GET /api/local/settings", settingsHandlers.Get)
+		app.mux.HandleFunc("PATCH /api/local/settings", settingsHandlers.Patch)
 	}
 	if h.GetBackendsHealth != nil {
 		app.mux.HandleFunc("GET /api/backends", h.GetBackendsHealth)
@@ -153,6 +154,7 @@ func (app *Server) registerWorkspaceRoutes() {
 	app.mux.Handle("PATCH /api/workspaces/{ws}/name", workspaceMW(handlermux.HandleWorkspaceRename(app.workspaceSvc)))
 	app.mux.Handle("GET /api/workspaces/{ws}/config/backend", workspaceMW(handlermux.HandleWorkspaceBackendGet(app.workspaceSvc)))
 	app.mux.Handle("PATCH /api/workspaces/{ws}/config/backend", workspaceMW(handlermux.HandleWorkspaceBackendPatch(app.workspaceSvc)))
+	app.mux.Handle("PATCH /api/workspaces/{ws}/config/design-format", workspaceMW(handlermux.HandleWorkspaceDesignFormatPatch(app.workspaceSvc)))
 	if statusHandler := app.config.MonitorHandlers.Status; statusHandler != nil {
 		app.mux.Handle("GET /api/workspaces/{ws}/monitor/status", workspaceMW(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			q := r.URL.Query()

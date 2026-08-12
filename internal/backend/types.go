@@ -11,6 +11,8 @@ package backend
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"time"
 )
@@ -32,8 +34,12 @@ type IssueData struct {
 	Labels     []string `json:"labels,omitempty"`
 	SourceRepo string   `json:"source_repo,omitempty"`
 	Parent     string   `json:"parent,omitempty"`
-	// Populated by backends that include design in list queries.
-	Design string `json:"design,omitempty"`
+	// Collection responses may omit a large design body while retaining its
+	// stable presence flag and managed-artifact reference.
+	Design           string `json:"design,omitempty"`
+	DesignArtifactID string `json:"design_artifact_id,omitempty"`
+	DesignFormat     string `json:"design_format,omitempty"`
+	HasDesign        bool   `json:"has_design"`
 	// Notes is in the slim list projection (not detail-only) so kanban/filter
 	// UIs can categorize a blocked issue that carries an external-blocker note
 	// (the "blocked with notes" needs-attention state) without a detail fetch.
@@ -360,6 +366,8 @@ type CreateParams struct {
 // fleet-db's CreateIssueRequest expects. fleet-db's strict JSON validation
 // rejects unknown fields, so loom-only fields are dropped rather than
 // shipped as-is.
+// FleetBackend.Create retries without external_ref for deployed fleet-dbs
+// whose create schema predates that field, then applies it via PATCH.
 //
 // Field renames vs CreateParams:
 //   - "issue_type"  → "type"
@@ -405,6 +413,20 @@ func (p CreateParams) FleetCreateBody() map[string]interface{} {
 	return req
 }
 
+// FleetCreateIdempotencyKey derives the default create key from a UTC date
+// bucket and the exact fleet-db request body.
+func (p CreateParams) FleetCreateIdempotencyKey(now time.Time) (string, error) {
+	body, err := json.Marshal(p.FleetCreateBody())
+	if err != nil {
+		return "", err
+	}
+	h := sha256.New()
+	h.Write([]byte(now.UTC().Format("20060102")))
+	h.Write([]byte{0})
+	h.Write(body)
+	return hex.EncodeToString(h.Sum(nil)), nil
+}
+
 // setNonEmptyMapStr sets m[key] = val if val is non-empty.
 func setNonEmptyMapStr(m map[string]interface{}, key, val string) {
 	if val != "" {
@@ -436,6 +458,7 @@ type UpdateParams struct {
 	Status             *string  `json:"status,omitempty"`
 	Priority           *int     `json:"priority,omitempty"`
 	Design             *string  `json:"design,omitempty"`
+	DesignFormat       *string  `json:"design_format,omitempty"`
 	AcceptanceCriteria *string  `json:"acceptance_criteria,omitempty"`
 	Notes              *string  `json:"notes,omitempty"`
 	Assignee           *string  `json:"assignee,omitempty"`

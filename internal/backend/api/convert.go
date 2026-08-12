@@ -44,6 +44,16 @@ func issueToData(issue gen.Issue) backend.IssueData {
 	if issue.Design != nil {
 		d.Design = *issue.Design
 	}
+	if issue.DesignArtifactId != nil {
+		d.DesignArtifactID = *issue.DesignArtifactId
+	}
+	if issue.DesignFormat != nil {
+		d.DesignFormat = string(*issue.DesignFormat)
+	}
+	if issue.HasDesign != nil {
+		d.HasDesign = *issue.HasDesign
+	}
+	d.HasDesign = d.HasDesign || d.Design != ""
 	if issue.ExternalRef != nil {
 		d.ExternalRef = *issue.ExternalRef
 	}
@@ -84,6 +94,16 @@ func issueResponseToData(r gen.IssueResponse) backend.IssueData {
 	if r.Design != nil {
 		d.Design = *r.Design
 	}
+	if r.DesignArtifactId != nil {
+		d.DesignArtifactID = *r.DesignArtifactId
+	}
+	if r.DesignFormat != nil {
+		d.DesignFormat = string(*r.DesignFormat)
+	}
+	if r.HasDesign != nil {
+		d.HasDesign = *r.HasDesign
+	}
+	d.HasDesign = d.HasDesign || d.Design != ""
 	if r.ExternalRef != nil {
 		d.ExternalRef = *r.ExternalRef
 	}
@@ -251,9 +271,7 @@ func blockedIssueToData(b gen.BlockedIssue) backend.IssueData {
 	if b.Parent != nil {
 		d.Parent = *b.Parent
 	}
-	if b.Design != nil {
-		d.Design = *b.Design
-	}
+	copyBlockedDesign(&d, b)
 	if b.ExternalRef != nil {
 		d.ExternalRef = *b.ExternalRef
 	}
@@ -263,6 +281,22 @@ func blockedIssueToData(b gen.BlockedIssue) backend.IssueData {
 }
 
 // --- Helpers ---
+
+func copyBlockedDesign(d *backend.IssueData, b gen.BlockedIssue) {
+	if b.Design != nil {
+		d.Design = *b.Design
+	}
+	if b.DesignArtifactId != nil {
+		d.DesignArtifactID = *b.DesignArtifactId
+	}
+	if b.DesignFormat != nil {
+		d.DesignFormat = string(*b.DesignFormat)
+	}
+	if b.HasDesign != nil {
+		d.HasDesign = *b.HasDesign
+	}
+	d.HasDesign = d.HasDesign || d.Design != "" || d.DesignArtifactID != ""
+}
 
 func cloneTimePtr(t *time.Time) *time.Time {
 	if t == nil {
