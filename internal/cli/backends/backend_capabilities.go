@@ -1,8 +1,10 @@
 package backends
 
 import (
+	"context"
 	"os/exec"
 	"strings"
+	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/backendapi"
@@ -56,18 +58,52 @@ type BackendCapabilities struct {
 
 	Streaming StreamingBackend
 	Sessions  SessionAwareBackend
-	Tools     ToolAwareBackend
 	Health    HealthCheckableBackend
 	Config    ConfigurableBackend
 	Meta      MetadataProvider
 }
 
+// VersionProbeTimeout bounds a single "<binary> --version" invocation.
+//
+// It deliberately matches harness-wrapper's own probe bound (also 20s):
+// both spawn the same node-based CLIs, where a cold --version costs a
+// second or two just to start node and considerably more on a loaded
+// machine. harness-wrapper had to raise its bound from 2s after probe
+// children were SIGKILLed mid-start under parallel load and reported as
+// unknown versions; there is no reason for loom's copy of the same probe
+// to relearn that. This is a hang guard, not a latency target.
+//
+// It is a var rather than a const only so tests can shrink it —
+// production never assigns to it. Callers sizing a deadline that must
+// outlast a probe should read this instead of re-deriving 20s of their
+// own (see workspace ops ensure-runtime).
+var VersionProbeTimeout = 20 * time.Second
+
+// versionProbeWaitDelay caps how long Output() may linger after the
+// probe context fires. Killing the child is not enough on its own: a
+// grandchild that inherited the stdout pipe keeps the read blocked, so
+// without this the bound above would not actually be a ceiling.
+const versionProbeWaitDelay = 2 * time.Second
+
 // detectBinaryVersion runs "<binary> --version" and returns the first line of
-// output trimmed of whitespace. Returns "" if the binary is not found or the
-// command fails.
+// output trimmed of whitespace. Returns "" if the binary is not found, the
+// command fails, or the probe outlives VersionProbeTimeout.
+//
+// The bound is load-bearing rather than defensive. Nothing on the path from
+// `loom workspace ops ensure-runtime` down to here carries a context: the
+// ops deadline is only polled between iterations of the daemon wait loop,
+// backendcheck.CheckBackend takes no context, and neither do the Meta() /
+// HealthCheck() callers below. An unbounded --version on a wedged CLI
+// therefore hangs the whole command with no deadline able to reach it.
 func detectBinaryVersion(binary string) string {
-	out, err := exec.Command(binary, "--version").Output()
+	ctx, cancel := context.WithTimeout(context.Background(), VersionProbeTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, binary, "--version")
+	cmd.WaitDelay = versionProbeWaitDelay
+	out, err := cmd.Output()
 	if err != nil {
+		// A timeout surfaces as an error here, so it collapses into the
+		// same "" that callers already treat as "version unknown".
 		return ""
 	}
 	line := strings.SplitN(string(out), "\n", 2)[0]
@@ -94,10 +130,12 @@ func InspectCapabilities(b cli.Backend) BackendCapabilities {
 		caps.HasSessions = true
 		caps.Sessions = s
 	}
-	if t, ok := b.(ToolAwareBackend); ok {
-		caps.HasToolControl = true
-		caps.Tools = t
-	}
+	// Tool control is a static per-backend fact (which CLI flags exist), not
+	// an optional Go interface: the old ToolAwareBackend interface shipped for
+	// months with zero implementations while the config it implied was
+	// silently ignored. SupportsToolControl reads the same capability table
+	// ValidateSafetyKnobs enforces.
+	caps.HasToolControl = SupportsToolControl(b.Name())
 	if h, ok := b.(HealthCheckableBackend); ok {
 		caps.HasHealthCheck = true
 		caps.Health = h

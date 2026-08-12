@@ -78,10 +78,22 @@ func persistAssignedTaskToLock(worktreePath, assignedTaskID string) {
 	}
 }
 
-// clearDaemonResumeOnSuccess clears the carried session id after a successful
+// clearDaemonResumeOnSuccess clears the carried session id after a COMPLETED
 // daemon run so the next restart starts the next task fresh (resume-first /
 // checkpoint-fallback: a failed run instead KEEPS the session for carry-forward).
+//
+// A nil invoke error is not by itself proof the task finished — an agent whose
+// turn ends mid-task returns just as cleanly as one that worked the task to a
+// conclusion. `loom complete` is what actually separates them (see
+// ClaimStillHeld), so a claim this worktree still holds means the run stopped
+// short, and the session id is kept exactly as it would be for a failed run.
+// Dropping it there is what forced the next cycle to cold-start with no memory
+// of the turn it is continuing.
 func clearDaemonResumeOnSuccess(worktreePath string) {
+	if claimStillHeldForWorktree(worktreePath) {
+		fmt.Println("[daemon] run ended with its task still claimed; keeping the Claude session for resume")
+		return
+	}
 	if err := cli.ClearLockClaudeSessionID(worktreePath); err != nil {
 		fmt.Fprintf(os.Stderr, "[daemon] failed to clear claude session ID after success: %v\n", err)
 	}

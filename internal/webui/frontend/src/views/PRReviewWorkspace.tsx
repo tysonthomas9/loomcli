@@ -45,6 +45,8 @@ export interface PRReviewWorkspaceProps {
   /** Return to the PR list. */
   onBack: () => void;
   onLinkedTicket?: (issueId: string) => void;
+  /** Open the Discuss PR panel on mount (e.g. sidebar agent click). */
+  initialDiscussOpen?: boolean | undefined;
 }
 
 /** Agents linked to a task issue (worker, status/task_id match, assignee). */
@@ -143,6 +145,7 @@ export function PRReviewWorkspace({
   pullRequest,
   onBack,
   onLinkedTicket,
+  initialDiscussOpen = false,
 }: PRReviewWorkspaceProps): JSX.Element {
   const navigate = useNavigate();
   const { agents, issues } = useWorkspaceViewData();
@@ -156,7 +159,7 @@ export function PRReviewWorkspace({
   const [stale, setStale] = useState(false);
   const [diffRefreshKey, setDiffRefreshKey] = useState(0);
   const [creatingTicket, setCreatingTicket] = useState(false);
-  const [discussOpen, setDiscussOpen] = useState(false);
+  const [discussOpen, setDiscussOpen] = useState(initialDiscussOpen);
 
   const diffAgent = useMemo(
     () => (issue ? resolveDiffAgentForIssue(issue, agents) : undefined),

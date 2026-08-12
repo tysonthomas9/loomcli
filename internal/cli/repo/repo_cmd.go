@@ -77,7 +77,7 @@ func init() {
 	repoListCmd.Flags().BoolVar(&repoListJSON, "json", false, "JSON output")
 	repoShowCmd.Flags().BoolVar(&repoShowJSON, "json", false, "JSON output")
 
-	repoCmd.AddCommand(repoAddCmd, repoListCmd, repoShowCmd, repoRemoveCmd)
+	repoCmd.AddCommand(repoAddCmd, repoListCmd, repoShowCmd, repoSetCmd, repoRemoveCmd)
 	cli.RegisterCommand(repoCmd)
 }
 
@@ -206,6 +206,11 @@ func runRepoShow(_ *cobra.Command, args []string) error {
 		}
 		if len(r.Groups) > 0 {
 			fmt.Printf("Groups:       %s\n", strings.Join(r.Groups, ", "))
+		}
+		// Printed because it is settable: a field that decides issue routing
+		// and cannot be seen is the trap the role task_filter fix closed.
+		if r.SourceRepoID != "" {
+			fmt.Printf("Source repo id: %s\n", r.SourceRepoID)
 		}
 		return nil
 	})

@@ -194,6 +194,7 @@ type AgentIPCRequest struct {
 	LeaseToken     string          `json:"lease_token,omitempty"`      // fleet-db AgentLease token
 	Args           json.RawMessage `json:"args,omitempty"`             // operation-specific params
 	LastActivityAt time.Time       `json:"last_activity_at,omitempty"` // wrapper.Snapshot.LastOutputAt; carried on every op so the daemon can update per-agent liveness
+	InputWait      string          `json:"input_wait,omitempty"`       // IPCInputWaitBegin/End; carried like LastActivityAt so the daemon can suspend its idle-kill watchdog while a prompt is outstanding
 }
 
 // AgentIPCResponse is sent by the daemon back to the agent subprocess.
@@ -212,6 +213,14 @@ const (
 	IPCOpHeartbeat    = "heartbeat" // liveness ping carrying LastActivityAt; no mutation
 	IPCOpReleaseLock  = "release_lock"
 	IPCOpReleaseClaim = "release_claim"
+)
+
+// Interactive-input-wait phases carried in AgentIPCRequest.InputWait.
+// These string values must stay in sync with the daemon package's
+// ipcInputWait* constants.
+const (
+	IPCInputWaitBegin = "begin"
+	IPCInputWaitEnd   = "end"
 )
 
 // IPCClaimArgs are the optional arguments for the claim operation.

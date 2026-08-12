@@ -111,8 +111,8 @@ func TestDispatchHookEvent_SessionEndCapturesTokenUsage(t *testing.T) {
 	if loaded.CacheWriteTokens != 150 {
 		t.Errorf("CacheWriteTokens = %d, want 150 (100+50)", loaded.CacheWriteTokens)
 	}
-	if loaded.EstimatedCostUSD <= 0 {
-		t.Errorf("EstimatedCostUSD = %f, want > 0", loaded.EstimatedCostUSD)
+	if loaded.EstimatedCostUSD != 0 {
+		t.Errorf("EstimatedCostUSD = %f, want 0 (no token-based estimate)", loaded.EstimatedCostUSD)
 	}
 }
 

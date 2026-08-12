@@ -21,13 +21,12 @@ import { getAvatarColor, shouldUseWhiteText } from "@/utils/colorUtils";
 import { PRReviewWorkspace } from "./PRReviewWorkspace";
 import styles from "./PRsPage.module.css";
 
-type PRFilter = "all" | "review" | "open" | "merged";
+type PRFilter = "all" | "review" | "merged";
 type GroupMode = "none" | "repo" | "epic";
 
 const FILTERS: { id: PRFilter; label: string }[] = [
   { id: "all", label: "All" },
   { id: "review", label: "Needs review" },
-  { id: "open", label: "Open" },
   { id: "merged", label: "Merged" },
 ];
 
@@ -68,8 +67,6 @@ function matchesFilter(row: PullRequestRow, filter: PRFilter): boolean {
       return true;
     case "review":
       return needsReview(row);
-    case "open":
-      return isOpenRow(row);
     case "merged":
       return row.pr?.state === "MERGED";
     default:
@@ -120,6 +117,41 @@ export function rowState(row: PullRequestRow): { label: string; key: string } {
 
 export function prReviewRef(pr: GitPullRequest): string | null {
   return pr.repo_name && pr.number ? `${pr.repo_name}#${pr.number}` : null;
+}
+
+/** Parsed `?review-pr=owner/repo#number` deep-link subject. */
+export interface PullRequestSubject {
+  owner: string;
+  repo: string;
+  number: number;
+}
+
+/** Parse `owner/repo#number` from the review-pr query param. */
+export function parseReviewPrParam(
+  value: string | null | undefined,
+): PullRequestSubject | null {
+  if (!value) return null;
+  const match = /^([^/#\s]+)\/([^/#\s]+)#(\d+)$/.exec(value.trim());
+  if (!match?.[1] || !match[2] || !match[3]) return null;
+  const number = Number.parseInt(match[3], 10);
+  if (!Number.isFinite(number) || number <= 0) return null;
+  return { owner: match[1], repo: match[2], number };
+}
+
+/** Minimal GitHub PR row so the review workspace can mount before the list loads. */
+export function stubPullRequestFromSubject(
+  subject: PullRequestSubject,
+): GitPullRequest {
+  return {
+    number: subject.number,
+    title: `${subject.owner}/${subject.repo}#${subject.number}`,
+    url: `https://github.com/${subject.owner}/${subject.repo}/pull/${subject.number}`,
+    state: "OPEN",
+    is_draft: false,
+    head_ref_name: "",
+    base_ref_name: "",
+    repo_name: `${subject.owner}/${subject.repo}`,
+  };
 }
 
 /**
@@ -208,11 +240,14 @@ export function PRsPage(): JSX.Element {
   const { pullRequests, warnings, loading, error } = usePullRequests({
     state: "all",
   });
-  const [filter, setFilter] = useState<PRFilter>("all");
+  const [filter, setFilter] = useState<PRFilter>("review");
   const [groupMode, setGroupMode] = useState<GroupMode>("none");
   const [searchParams, setSearchParams] = useSearchParams();
   const reviewId = searchParams.get("review");
   const reviewPrParam = searchParams.get("review-pr");
+  const discussOpen =
+    searchParams.get("discuss") === "1" ||
+    searchParams.get("discuss") === "true";
 
   const rows = useMemo(
     () => buildPullRequestRows(issues, pullRequests),
@@ -234,7 +269,6 @@ export function PRsPage(): JSX.Element {
     const c: Record<PRFilter, number> = {
       all: 0,
       review: 0,
-      open: 0,
       merged: 0,
     };
     for (const row of rows) {
@@ -357,11 +391,28 @@ export function PRsPage(): JSX.Element {
     ? rows.find((r) => r.issue?.id === reviewIssue.id)?.pr
     : undefined;
 
+  const reviewPrSubject = useMemo(
+    () => parseReviewPrParam(reviewPrParam),
+    [reviewPrParam],
+  );
+
+  const reviewPrLinkedIssue = useMemo(() => {
+    if (!reviewPrSubject) return undefined;
+    const key =
+      `${reviewPrSubject.owner}/${reviewPrSubject.repo}#${reviewPrSubject.number}`.toLowerCase();
+    return issues.find((issue) => {
+      const issueKey = prKeyFromRef(issue.external_ref);
+      return issueKey != null && issueKey.toLowerCase() === key;
+    });
+  }, [issues, reviewPrSubject]);
+
   if (reviewIssue) {
     return (
       <PRReviewWorkspace
+        key={`review-${reviewIssue.id}`}
         issue={reviewIssue}
         {...(reviewPr ? { pullRequest: reviewPr } : {})}
+        initialDiscussOpen={discussOpen}
         onBack={() => setSearchParams({}, { replace: true })}
       />
     );
@@ -371,17 +422,33 @@ export function PRsPage(): JSX.Element {
     ? rows.find((r) => r.pr && prReviewRef(r.pr) === reviewPrParam)
     : undefined;
 
-  if (reviewPrParam && reviewPrRow?.pr) {
-    // If a hand-edited/bookmarked ?review-pr points at a PR that DOES have a
-    // linked ticket, render it issue-linked so we don't offer "Create ticket"
-    // on an already-ticketed PR (which would make a duplicate).
+  if (reviewPrParam && (reviewPrRow?.pr || reviewPrSubject)) {
+    // Prefer the list-backed PR when available (real title/state). Otherwise
+    // mount immediately from the deep-link subject so kanban → review does not
+    // flash the PR list while usePullRequests is still cold.
+    const pullRequest =
+      reviewPrRow?.pr ?? stubPullRequestFromSubject(reviewPrSubject!);
+    const linkedIssue = reviewPrRow?.issue ?? reviewPrLinkedIssue;
     return (
       <PRReviewWorkspace
-        pullRequest={reviewPrRow.pr}
-        {...(reviewPrRow.issue ? { issue: reviewPrRow.issue } : {})}
+        key={`review-pr-${reviewPrParam}`}
+        pullRequest={pullRequest}
+        {...(linkedIssue ? { issue: linkedIssue } : {})}
+        initialDiscussOpen={discussOpen}
         onBack={() => setSearchParams({}, { replace: true })}
         onLinkedTicket={(issueId) => setSearchParams({ review: issueId })}
       />
+    );
+  }
+
+  if (reviewPrParam && loading) {
+    return (
+      <div className={styles.page} data-testid="pr-review-loading">
+        <header className={styles.header}>
+          <h1 className={styles.title}>Pull Requests</h1>
+        </header>
+        <p className={styles.subtitle}>Opening pull request…</p>
+      </div>
     );
   }
 
@@ -430,25 +497,25 @@ export function PRsPage(): JSX.Element {
               role="tablist"
               aria-label="Filter pull requests"
             >
-              {FILTERS.filter((f) => f.id === "all" || counts[f.id] > 0).map(
-                (f) => {
-                  const isActive = filter === f.id;
-                  return (
-                    <button
-                      key={f.id}
-                      type="button"
-                      role="tab"
-                      aria-selected={isActive}
-                      className={styles.pill}
-                      data-active={isActive || undefined}
-                      onClick={() => setFilter(f.id)}
-                    >
-                      {f.label}
-                      <span className={styles.pillCount}>{counts[f.id]}</span>
-                    </button>
-                  );
-                },
-              )}
+              {FILTERS.filter(
+                (f) => f.id === "all" || f.id === "review" || counts[f.id] > 0,
+              ).map((f) => {
+                const isActive = filter === f.id;
+                return (
+                  <button
+                    key={f.id}
+                    type="button"
+                    role="tab"
+                    aria-selected={isActive}
+                    className={styles.pill}
+                    data-active={isActive || undefined}
+                    onClick={() => setFilter(f.id)}
+                  >
+                    {f.label}
+                    <span className={styles.pillCount}>{counts[f.id]}</span>
+                  </button>
+                );
+              })}
             </div>
             <div className={styles.groupControl}>
               <span className={styles.groupLabel}>Group</span>
