@@ -1748,6 +1748,55 @@ remaining availability query surface; final success still requires deleting
 the horizontal interface and duplicate DTO plane rather than preserving them
 as a compatibility facade.
 
+## Wave 9.37 result
+
+Wave 9.37 moves the canonical ready-work view from the horizontal
+`IssueBackend` contract to the Work Items-owned `ReadyQueries` port. The Loom
+API and FleetDB adapters now return `workitems.IssueSummary` directly; CLI data,
+task routing, automode, monitor, serve reconciliation, Driver claims and epic
+snapshots, WebUI composition and Fleet claim delivery, the lazy workspace
+proxy, unavailable backend, tracing decorator, and test doubles all require
+the owner port and fail closed when it is absent.
+
+The duplicate `backend.ReadyOpts` DTO is deleted rather than aliased. Ready
+filters now use `workitems.AvailabilityQuery` end to end, and task selection
+uses the Work Items summary without converting back through
+`backend.IssueData`. Deferred work still uses its own broad operation and DTO;
+its conversion helper is explicitly isolated for the next deletion wave rather
+than used as a Ready fallback.
+
+The broad interface contracts from 16 methods to 15. Implementation commit
+`a8f655f52` changes 54 files with 616 insertions and 480 deletions. The net
+addition is dominated by converting build-tagged conformance fixtures and
+consumer tests to the owner projection. Exact package shape remains
+`159 / 15 / 144 / 42 / 60`; no facade, alias, or production package was added.
+The gate also exposed a twenty-eighth import on the serve composition root.
+Instead of raising its exact exception, serve now calls the existing WebUI
+Workspace composition seam and deletes its duplicate direct infrastructure
+dependency, restoring fanout to 27.
+
+## Wave 9.37 validation
+
+| Check | Result |
+|---|---|
+| Repository compile graph and focused behavior | PASS: every Go package compiles; API, FleetDB, Work Items, CLI, automode, monitor, Driver, WebUI, proxy, and tracing suites pass against the paired FleetDB binary |
+| Retired symbols and owner-port dispatch | PASS: `IssueBackend.Ready` and `backend.ReadyOpts` have no production definitions; the cannot-return ratchet rejects `ReadyOpts`; missing `ReadyQueries` fails closed |
+| Tagged conformance and topology | PASS: the `issuebackend_e2e` profile compiles against `workitems.IssueSummary`; exact serve fanout remains 27 and no exception or threshold was raised |
+| Measured architecture guard | PASS: 11/11 profiles, 10 capability roots, zero legacy handler imports, 90 direct-write rows, 107 reviewed mutation commands, 70 runtime components, 79 goroutine launches, zero pending decisions, and 1,196.4 MiB peak process-tree RSS under 2,048 MiB |
+| Loom `make gate` | PASS: all Go and frontend quality gates, repository-wide race tests, and coverage against paired FleetDB source `e9c185b` and binary SHA-256 `ce781e5f…89b53`, with four Go OS threads, two Go package workers, one Vitest worker, and a 2 GiB Go soft memory limit |
+
+The gate first rejected one `goimports` grouping, then the new serve import,
+then two build-tag-only helpers that still required `[]backend.IssueData`.
+Each issue was fixed at the owning seam; the unchanged-source final rerun passed
+all quality gates. No test, profile, threshold, architecture rule, or
+compatibility exception was disabled.
+
+Phase 9 remains incomplete. `IssueBackend` still carries 15 lifecycle, query,
+and command methods plus duplicate issue/detail/comment/event DTOs and
+transitional composition/proxy machinery. The next wave deletes the Deferred
+query and its DTO; completion still requires removing `IssueBackend` itself and
+the remaining horizontal model/proxy plane.
+
 ---
 
 [Migration overview](README.md) · [Phase 8 consolidation](15-phase-8-consolidation-and-evidence.md)
