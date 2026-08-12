@@ -104,7 +104,7 @@ func TestGetReviewerConversationClaudeTranscript(t *testing.T) {
 	writeClaudeTranscriptFixture(t, projectsRoot, worktree, []string{
 		// The reviewer prompt bubble (claude's positional first turn) — trimmed.
 		`{"type":"user","uuid":"u-prompt","message":{"role":"user","content":"## READ-ONLY PR REVIEWER\nreview the diff"},"timestamp":"2026-07-10T12:00:00Z"}`,
-		// A tool call — never a chat bubble.
+		// A tool call — rendered as a collapsed tool pill in chat.
 		`{"type":"assistant","uuid":"a-tool","message":{"role":"assistant","content":[{"type":"tool_use","id":"tu-1","name":"Bash","input":{"command":"git diff"}}]},"timestamp":"2026-07-10T12:00:01Z"}`,
 		// The review, carrying a secret that must not reach the client. The
 		// token is assembled at runtime so no credential-shaped literal lands
@@ -122,14 +122,17 @@ func TestGetReviewerConversationClaudeTranscript(t *testing.T) {
 	if state != "idle" {
 		t.Fatalf("state = %q, want idle (from runtime status)", state)
 	}
-	if len(msgs) != 2 {
-		t.Fatalf("messages = %+v, want 2 (prompt trimmed, tool skipped)", msgs)
+	if len(msgs) != 3 {
+		t.Fatalf("messages = %+v, want 3 (prompt trimmed, tool + review + follow-up)", msgs)
 	}
-	if msgs[0].Role != "assistant" || strings.Contains(msgs[0].Text, "ghp_") || !strings.Contains(msgs[0].Text, "REDACTED") {
-		t.Fatalf("review message = %+v, want redacted assistant text", msgs[0])
+	if msgs[0].Kind != "tool_use" || msgs[0].ToolName != "Bash" || !strings.Contains(msgs[0].ToolInput, "git diff") {
+		t.Fatalf("tool message = %+v", msgs[0])
 	}
-	if msgs[1].Role != "user" || msgs[1].Text != "is it exploitable?" {
-		t.Fatalf("follow-up = %+v", msgs[1])
+	if msgs[1].Role != "assistant" || strings.Contains(msgs[1].Text, "ghp_") || !strings.Contains(msgs[1].Text, "REDACTED") {
+		t.Fatalf("review message = %+v, want redacted assistant text", msgs[1])
+	}
+	if msgs[2].Role != "user" || msgs[2].Text != "is it exploitable?" {
+		t.Fatalf("follow-up = %+v", msgs[2])
 	}
 	for _, msg := range msgs {
 		if !strings.HasPrefix(msg.ItemID, "claude/"+testClaudeSessionID[:8]+"/") {
@@ -404,7 +407,7 @@ func TestReviewerMessagesFromEventsGroupsBlocksByTurn(t *testing.T) {
 	events := []hwtranscript.Event{
 		{Seq: 1, Role: hwtranscript.RoleAssistant, Type: hwtranscript.EventText, Text: "part one", UUID: "msg-1"},
 		{Seq: 2, Role: hwtranscript.RoleAssistant, Type: hwtranscript.EventText, Text: "part two", UUID: "msg-1"},
-		{Seq: 3, Role: hwtranscript.RoleTool, Type: hwtranscript.EventToolResult, Output: "skipped"},
+		{Seq: 3, Role: hwtranscript.RoleTool, Type: hwtranscript.EventToolResult, Output: "orphaned"},
 		{Seq: 4, Role: hwtranscript.RoleSystem, Type: hwtranscript.EventText, Text: "skipped"},
 	}
 	msgs := reviewerMessagesFromEvents("claude", testClaudeSessionID, events)
@@ -416,5 +419,41 @@ func TestReviewerMessagesFromEventsGroupsBlocksByTurn(t *testing.T) {
 	}
 	if msgs[0].ItemID == msgs[1].ItemID {
 		t.Fatalf("blocks of one native message share an item id: %q", msgs[0].ItemID)
+	}
+}
+
+func TestReviewerMessagesFromEventsIncludesPairedTools(t *testing.T) {
+	events := []hwtranscript.Event{
+		{
+			Seq: 1, Role: hwtranscript.RoleAssistant, Type: hwtranscript.EventToolUse,
+			ToolName: "Bash", ToolUseID: "t1", ToolInput: []byte(`{"command":"ls"}`), UUID: "msg-1",
+		},
+		{
+			Seq: 2, Role: hwtranscript.RoleTool, Type: hwtranscript.EventToolResult,
+			ToolUseID: "t1", Output: "a.txt\nb.txt",
+		},
+		{
+			Seq: 3, Role: hwtranscript.RoleAssistant, Type: hwtranscript.EventText,
+			Text: "there are two files", UUID: "msg-1",
+		},
+	}
+	msgs := reviewerMessagesFromEvents("claude", testClaudeSessionID, events)
+	if len(msgs) != 2 {
+		t.Fatalf("messages = %+v, want tool + text", msgs)
+	}
+	if msgs[0].Kind != "tool_use" || msgs[0].ToolName != "Bash" {
+		t.Fatalf("tool message = %+v", msgs[0])
+	}
+	if msgs[0].ToolInput != `{"command":"ls"}` {
+		t.Fatalf("tool_input = %q", msgs[0].ToolInput)
+	}
+	if msgs[0].ToolResult != "a.txt\nb.txt" {
+		t.Fatalf("tool_result = %q", msgs[0].ToolResult)
+	}
+	if msgs[0].TurnID != msgs[1].TurnID {
+		t.Fatalf("tool and text should share turn id: %q vs %q", msgs[0].TurnID, msgs[1].TurnID)
+	}
+	if msgs[1].Text != "there are two files" || msgs[1].Kind != "" {
+		t.Fatalf("text message = %+v", msgs[1])
 	}
 }

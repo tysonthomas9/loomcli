@@ -8,6 +8,8 @@ export type { UseBackendConfigReturn } from "./useBackendConfig";
 export { useWorkspaceDesignFormat } from "./useWorkspaceDesignFormat";
 export type { UseWorkspaceDesignFormatReturn } from "./useWorkspaceDesignFormat";
 
+export { useDeleteWorkspaceAgent } from "./useDeleteWorkspaceAgent";
+
 export { useLocalSettings } from "./useLocalSettings";
 export type { UseLocalSettingsReturn } from "./useLocalSettings";
 

@@ -61,6 +61,26 @@ type CodexTurnItem struct {
 	Text    string              `json:"text"`
 	Content []CodexContentBlock `json:"content"`
 	Phase   string              `json:"phase,omitempty"`
+
+	// Tool-ish item fields (commandExecution, mcpToolCall, fileChange, …).
+	// Unknown types keep unmarshaling; consumers ignore empty fields.
+	Command          string            `json:"command,omitempty"`
+	Cwd              string            `json:"cwd,omitempty"`
+	Status           string            `json:"status,omitempty"`
+	AggregatedOutput string            `json:"aggregatedOutput,omitempty"`
+	Query            string            `json:"query,omitempty"`
+	Server           string            `json:"server,omitempty"`
+	Tool             string            `json:"tool,omitempty"`
+	Arguments        json.RawMessage   `json:"arguments,omitempty"`
+	Result           json.RawMessage   `json:"result,omitempty"`
+	Error            json.RawMessage   `json:"error,omitempty"`
+	Changes          []CodexFileChange `json:"changes,omitempty"`
+}
+
+type CodexFileChange struct {
+	Path string `json:"path"`
+	Kind string `json:"kind,omitempty"`
+	Diff string `json:"diff,omitempty"`
 }
 
 type CodexContentBlock struct {
@@ -233,9 +253,13 @@ func (c *CodexClient) ReadThreadWithTurns(ctx context.Context, threadID string) 
 	var result struct {
 		Thread CodexThread `json:"thread"`
 	}
+	// itemsView defaults to "summary", which only returns chat-style
+	// user/agent messages. "full" includes commandExecution / mcpToolCall /
+	// fileChange / webSearch items so the PR chat can render tool pills.
 	if err := c.Call(ctx, "thread/read", map[string]any{
 		"threadId":     threadID,
 		"includeTurns": true,
+		"itemsView":    "full",
 	}, &result); err != nil {
 		return nil, err
 	}

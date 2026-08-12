@@ -53,9 +53,13 @@ func WithWorktree(sess *sessions.Session, opts WithWorktreeOptions) (WithWorktre
 	}
 	if sess.Meta.Backend == backendnames.Codex {
 		_, _ = sess.SyncLatestCodexRollout(opts.WorktreePath, sess.Meta.StartedAt)
+		// Go-leaf daemon finalize often arrives with zeros because the worker was
+		// reaped before collector finalize. Recover usage from the synced rollout.
+		opts = recoverUsageFromNativeTranscript(sess, opts)
 	}
 	if sess.Meta.Backend == backendnames.Claude {
 		_, _ = sess.SyncLatestClaudeTranscript(opts.WorktreePath, opts.ClaudeSessionID, sess.Meta.StartedAt)
+		opts = recoverUsageFromNativeTranscript(sess, opts)
 	}
 	return result, sess.Finalize(sessions.FinalizeOptions{
 		TaskID:       opts.TaskID,
@@ -71,4 +75,20 @@ func WithWorktree(sess *sessions.Session, opts WithWorktreeOptions) (WithWorktre
 		CacheWriteTokens: opts.CacheWriteTokens,
 		EstimatedCostUSD: opts.EstimatedCostUSD,
 	})
+}
+
+func recoverUsageFromNativeTranscript(sess *sessions.Session, opts WithWorktreeOptions) WithWorktreeOptions {
+	if opts.InputTokens != 0 || opts.OutputTokens != 0 ||
+		opts.CacheReadTokens != 0 || opts.CacheWriteTokens != 0 {
+		return opts
+	}
+	u := sess.TranscriptUsage()
+	if u.IsZero() {
+		return opts
+	}
+	opts.InputTokens = u.InputTokens
+	opts.OutputTokens = u.OutputTokens
+	opts.CacheReadTokens = u.CacheReadTokens
+	opts.CacheWriteTokens = u.CacheWriteTokens
+	return opts
 }

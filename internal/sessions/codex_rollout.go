@@ -24,7 +24,7 @@ func (s *Store) SyncLatestCodexRollout(sessionID, workDir string, since time.Tim
 	)
 	defer span.End()
 
-	root := codexSessionsRoot()
+	root := CodexSessionsRoot()
 	if root == "" {
 		return "", nil
 	}
@@ -76,7 +76,10 @@ func findLatestCodexRollout(root, workDir string, since time.Time) (string, erro
 	return bestPath, nil
 }
 
-func codexSessionsRoot() string {
+// CodexSessionsRoot returns $CODEX_HOME/sessions (defaulting CODEX_HOME to
+// ~/.codex), or "" when it does not exist. Single source of truth for where
+// codex records its rollouts.
+func CodexSessionsRoot() string {
 	home := strings.TrimSpace(os.Getenv("CODEX_HOME"))
 	if home == "" {
 		userHome, err := os.UserHomeDir()

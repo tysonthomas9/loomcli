@@ -1,7 +1,11 @@
 import { useState } from "react";
 
+import type { ReviewerMessage } from "@/api/workspace/prReview";
+import { MarkdownRenderer } from "@/components/IssueDetailPanel";
 import { TerminalView } from "@/components/TerminalView";
+import { ToolPill } from "@/components/ToolPill";
 import { usePRReviewConversation } from "@/hooks/workspace";
+import { argPreviewFromJSON } from "@/utils/toolPreview";
 
 import styles from "./PRDiscussionPanel.module.css";
 
@@ -15,6 +19,30 @@ interface PRDiscussionPanelProps {
 }
 
 type Tab = "chat" | "terminal";
+
+function isToolMessage(message: ReviewerMessage): boolean {
+  return message.kind === "tool_use" || Boolean(message.tool_name);
+}
+
+function ReviewerToolPill({
+  message,
+}: {
+  message: ReviewerMessage;
+}): JSX.Element {
+  const [expanded, setExpanded] = useState(false);
+  return (
+    <ToolPill
+      name={message.tool_name || "tool"}
+      arg={argPreviewFromJSON(message.tool_input)}
+      input={(message.tool_input ?? "").trim()}
+      result={(message.tool_result ?? "").trim()}
+      expanded={expanded}
+      onToggle={() => setExpanded((v) => !v)}
+      className={styles.toolBlock}
+      testId="pr-chat-tool"
+    />
+  );
+}
 
 export function PRDiscussionPanel({
   workspaceId,
@@ -137,18 +165,25 @@ export function PRDiscussionPanel({
               here.
             </div>
           ) : (
-            messages.map((message) => (
-              <div
-                key={message.item_id}
-                className={
-                  message.role === "user"
-                    ? styles.messageUser
-                    : styles.messageAssistant
-                }
-              >
-                <div className={styles.messageText}>{message.text}</div>
-              </div>
-            ))
+            messages.map((message) =>
+              isToolMessage(message) ? (
+                <ReviewerToolPill key={message.item_id} message={message} />
+              ) : (
+                <div
+                  key={message.item_id}
+                  className={
+                    message.role === "user"
+                      ? styles.messageUser
+                      : styles.messageAssistant
+                  }
+                >
+                  <MarkdownRenderer
+                    content={message.text}
+                    className={styles.messageText}
+                  />
+                </div>
+              ),
+            )
           )}
         </div>
         <div className={styles.composer}>
