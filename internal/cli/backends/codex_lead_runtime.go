@@ -16,13 +16,15 @@ func RunCodexLeadRuntime(
 	sessionID string,
 	workDir string,
 	prompt string,
+	resumeEligible bool,
 ) error {
 	return leadcontrol.RunCodexLeadRuntime(ctx, leadcontrol.CodexLeadRuntimeConfig{
-		Store:     st,
-		Workspace: workspace,
-		LeadName:  leadName,
-		SessionID: sessionID,
-		WorkDir:   workDir,
-		Prompt:    prompt,
+		Store:          st,
+		Workspace:      workspace,
+		LeadName:       leadName,
+		SessionID:      sessionID,
+		WorkDir:        workDir,
+		Prompt:         prompt,
+		ResumeEligible: resumeEligible,
 	})
 }

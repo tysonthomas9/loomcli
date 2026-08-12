@@ -84,14 +84,21 @@ func init() {
 // supplied via --prompt wins, otherwise inline role prompt and default lead
 // prompt resolution happen in that order.
 func leadStartupPrompt(ctx context.Context, registration leadSessionRegistration) (string, error) {
+	return leadStartupPromptForRuntime(ctx, registration, false)
+}
+
+func leadStartupPromptForRuntime(ctx context.Context, registration leadSessionRegistration, resumeEligible bool) (string, error) {
 	prompt, err := generateLeadTerminalPrompt(ctx, registration)
 	if err != nil {
 		return "", err
 	}
-	return applyLeadPromptContext(prompt), nil
+	return applyLeadPromptContext(prompt, resumeEligible), nil
 }
 
 func runLead(cmd *cobra.Command, args []string) {
+	inheritedOrchestratorSession := strings.TrimSpace(os.Getenv(envOrchestratorSessionID)) != ""
+	resumeEligible := leadResumeEligible(sandboxLeadStoreRequired(), inheritedOrchestratorSession)
+
 	// Get current working directory
 	workDir, err := os.Getwd()
 	if err != nil {
@@ -121,7 +128,11 @@ func runLead(cmd *cobra.Command, args []string) {
 	defer registration.Finalize()
 
 	// Generate the terminal-agent prompt and append the user's initial request if provided.
-	prompt, err := leadStartupPrompt(context.Background(), registration)
+	prompt, err := leadStartupPromptForRuntime(
+		context.Background(),
+		registration,
+		resumeEligible && strings.EqualFold(strings.TrimSpace(backendName), backends.NameCodex),
+	)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error loading terminal prompt: %v\n", err)
 		fmt.Fprintf(os.Stderr, "\nDropping into a shell. Fix the prompt file and run 'loom lead' to retry.\n\n")
@@ -142,6 +153,7 @@ func runLead(cmd *cobra.Command, args []string) {
 		workDir,
 		prompt,
 		backendName,
+		resumeEligible,
 	)
 	if !handled {
 		invokeErr = cli.InvokeAgent(workDir, prompt, "")
@@ -206,9 +218,17 @@ func loadLeadRolePrompt(ctx context.Context, registration leadSessionRegistratio
 
 // applyLeadPromptContext appends the backend assignment context and the
 // optional --message initial request onto the base terminal-agent prompt.
-func applyLeadPromptContext(prompt string) string {
-	if assignment := currentLeadAssignmentPrompt(context.Background()); assignment != "" {
-		prompt += "\n\n## Loom Backend Assignment\n\n" + assignment
+//
+// Resume-eligible leads never embed the assignment here: their assignment is
+// delivered as an inbox turn (the delivered-mark stays unset so the server
+// re-enqueues it). Embedding it as well would deliver the assignment twice on
+// any fresh path such leads still take (first boot, resume-validation failure,
+// or the fail-safe fresh relaunch), which all reuse this prompt.
+func applyLeadPromptContext(prompt string, resumeEligible bool) string {
+	if !resumeEligible {
+		if assignment := currentLeadAssignmentPrompt(context.Background(), true); assignment != "" {
+			prompt += "\n\n## Loom Backend Assignment\n\n" + assignment
+		}
 	}
 	if leadMessage != "" {
 		prompt += "\n\n## User's Initial Request\n\n" + leadMessage +
@@ -217,7 +237,7 @@ func applyLeadPromptContext(prompt string) string {
 	return prompt
 }
 
-func currentLeadAssignmentPrompt(ctx context.Context) string {
+func currentLeadAssignmentPrompt(ctx context.Context, markDelivered bool) string {
 	handle, ws, err := openLeadSessionStore(ctx)
 	if err != nil {
 		slog.Debug("lead assignment context: store unavailable", "err", err)
@@ -231,10 +251,16 @@ func currentLeadAssignmentPrompt(ctx context.Context) string {
 	if err != nil || assignment == nil {
 		return ""
 	}
-	if err := markLeadAssignmentDelivered(loadCtx, handle.Store, ws, assignment); err != nil {
-		slog.Debug("lead assignment delivery marker failed", "err", err)
+	if markDelivered {
+		if err := markLeadAssignmentDelivered(loadCtx, handle.Store, ws, assignment); err != nil {
+			slog.Debug("lead assignment delivery marker failed", "err", err)
+		}
 	}
 	return epicrunner.FormatLeadAssignmentContext(assignment)
+}
+
+func leadResumeEligible(isSandboxLead, inheritedOrchestratorSession bool) bool {
+	return isSandboxLead && !inheritedOrchestratorSession
 }
 
 func markLeadAssignmentDelivered(ctx context.Context, st store.Store, ws string, assignment *epicrunner.LeadAssignmentContext) error {

@@ -39,13 +39,14 @@ const (
 )
 
 type CodexRuntimeMetadata struct {
-	Endpoint    string
-	ThreadID    string
-	RuntimeHome string
-	SQLiteHome  string
-	PID         int
-	Status      string
-	Controlled  bool
+	Endpoint      string
+	ThreadID      string
+	ClearThreadID bool
+	RuntimeHome   string
+	SQLiteHome    string
+	PID           int
+	Status        string
+	Controlled    bool
 }
 
 func RuntimeMetadataFromSession(session *domain.AgentSession) CodexRuntimeMetadata {
@@ -87,7 +88,9 @@ func UpdateCodexRuntimeMetadata(ctx context.Context, st store.Store, workspace, 
 	if runtime.Endpoint != "" {
 		metadata[MetadataCodexEndpoint] = runtime.Endpoint
 	}
-	if runtime.ThreadID != "" {
+	if runtime.ClearThreadID {
+		delete(metadata, MetadataCodexThreadID)
+	} else if runtime.ThreadID != "" {
 		metadata[MetadataCodexThreadID] = runtime.ThreadID
 	}
 	if runtime.RuntimeHome != "" {

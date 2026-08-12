@@ -47,13 +47,14 @@ func RunControlledLeadRuntime(
 	workDir string,
 	prompt string,
 	backendName string,
+	resumeEligible bool,
 ) (bool, error) {
 	if leadControlDisabled() {
 		return false, nil
 	}
 	backend := strings.ToLower(strings.TrimSpace(backendName))
 	if backend == NameCodex {
-		return true, RunCodexLeadRuntime(ctx, st, workspace, leadName, sessionID, workDir, prompt)
+		return true, RunCodexLeadRuntime(ctx, st, workspace, leadName, sessionID, workDir, prompt, resumeEligible)
 	}
 	inv, ok := harnessLeadInvocation(backend, workDir)
 	if !ok {
