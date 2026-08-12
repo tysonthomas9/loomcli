@@ -352,7 +352,14 @@ application seam and no persistence fallback. Handler legacy imports fall from
 the exact package shape remains `160 / 15 / 145 / 42 / 61`. The fully pinned
 aggregate gate passes against FleetDB source and binary `9c1859a`. The
 remaining waves delete residual horizontal model/projection planes and shallow
-packages; an empty
+packages. Wave 9.28 then deletes the one-consumer AgentProvisioning owner-adapter
+package and makes its action-specific translations private implementation of
+the existing serve composition root. Exact package shape tightens to
+`159 / 15 / 144 / 42 / 60` and serve fanout to 30, while direct persistence,
+handler imports, and runtime inventory remain at their lower Wave 9.27
+ratchets. The fully pinned aggregate gate remains green. The next coherent
+replacement targets the horizontal Work Items backend model/repository plane;
+an empty
 capability-graph `legacy_paths` list alone is not completion proof. See the
 [Phase 9 plan](16-phase-9-package-consolidation.md).
 

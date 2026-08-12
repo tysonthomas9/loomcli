@@ -29,6 +29,7 @@
 - **Wave 9.25 implementation:** `9caddc7e5`
 - **Wave 9.26 implementation:** `cfe542420`
 - **Wave 9.27 implementation:** `14f4ee9ac`
+- **Wave 9.28 implementation:** `a6856f943`
 - **Stacked branches:** `modular-monolith-phase9-01-types-ratchet`, then
   `modular-monolith-phase9-02-shallow-seams`, then
   `modular-monolith-phase9-03-legacy-planes`, then
@@ -55,7 +56,8 @@
   `modular-monolith-phase9-24-shallow-package-deletion`, then
   `modular-monolith-phase9-25-legacy-package-deletion`, then
   `modular-monolith-phase9-26-runtime-legacy-deletion`, then
-  `modular-monolith-phase9-27-handler-port-deletion`
+  `modular-monolith-phase9-27-handler-port-deletion`, then
+  `modular-monolith-phase9-28-shallow-composition-deletion`
 - **Purpose:** Reduce the residual package surface toward 160 production Go
   packages without weakening capability ownership, consumer-owned ports, or
   independently replaceable adapters.
@@ -1349,6 +1351,47 @@ the next run rejected the older globally installed FleetDB binary. The final
 run pinned both paired source and freshly built paired binary and passed every
 Go and frontend quality gate. No contract snapshot, architecture exception, or
 compatibility path was changed to make the gate pass.
+
+## Wave 9.28 result
+
+Wave 9.28 deletes
+`internal/app/serve/agentcomposition/owneradapters`, a one-consumer in-process
+translation package. Its fixed-action authority checks, error mapping, command
+preservation, and audit-ID validation now live as private implementation in the
+existing serve composition root beside the AgentProvisioning process-manager
+wiring that owns them. The owner capability interfaces remain unchanged, and
+the application root still composes Agents, Automation, and Connectors through
+their action-specific authority issuers.
+
+This is a deepening change rather than a relocation of a public abstraction:
+the separate constructors and exported adapter types are gone, the private
+adapter seam cannot be imported by another package, and replacement tests
+exercise command preservation, exact authority purpose, missing dependency,
+authority failure, owner-command failure, and noncanonical audit rejection
+through the serve composition package. A cannot-return guard rejects the old
+package root and any future importer.
+
+Exact package shape tightens from `160 / 15 / 145 / 42 / 61` to
+`159 / 15 / 144 / 42 / 60`. The serve composition root's exact import fanout
+tightens from 31 to 30. Direct persistence remains `90 / 108`, production
+handler legacy imports remain zero, composite Store remains `14 / 14`, and
+runtime inventory remains `70 / 79`. No package, fanout, persistence, handler,
+or runtime allowance increases. The implementation changes 11 files with 391
+insertions and 714 deletions, a net removal of 323 lines.
+
+## Wave 9.28 validation
+
+| Check | Result |
+|---|---|
+| AgentProvisioning composition and owner-adapter behavior | PASS in the complete `internal/app/serve` suite, including temporary HTTP adapter listeners |
+| Exact production topology and retired-root guard | PASS: shape `159 / 15 / 144 / 42 / 60`; the old owner-adapter root and every importer are absent |
+| Package-size, import-fanout, and focused lint | PASS: serve remains at the 25-file ceiling; exact internal fanout is 30; zero lint issues |
+| Aggregate `make gate` | PASS: all Go and frontend quality gates, including the measured 11-profile architecture sweep under its 2,048 MiB process-tree ceiling, against explicitly pinned FleetDB source `9c1859a` and its freshly built paired binary |
+
+The next consolidation target is the residual horizontal Work Items backend
+model/repository plane. It spans CLI, subscription, and FleetDB adapter
+consumers, so it must be replaced as one coherent owner migration; retaining a
+partial backend wrapper would recreate the legacy plane under a new name.
 
 ---
 
