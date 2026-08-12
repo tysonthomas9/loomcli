@@ -509,20 +509,3 @@ type CommentAddParams struct {
 	Author  string `json:"author"`
 	Text    string `json:"text"`
 }
-
-// BatchOp represents a single operation in a batch request.
-// Operation is the method name (e.g., "create", "update", "close").
-// Args is the JSON-encoded operation-specific parameters.
-type BatchOp struct {
-	Operation string          `json:"operation"`
-	Args      json.RawMessage `json:"args"`
-}
-
-// BatchResult represents the outcome of a single operation in a batch.
-// The method-level error from Batch is reserved for transport failures;
-// individual operation failures are recorded in each BatchResult.
-type BatchResult struct {
-	Success bool            `json:"success"`
-	Data    json.RawMessage `json:"data,omitempty"`
-	Error   string          `json:"error,omitempty"`
-}

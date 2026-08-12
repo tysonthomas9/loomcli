@@ -362,16 +362,6 @@ func (b *fleetDBIssueBackend) Count(ctx context.Context, opts backend.CountOpts)
 	return out, err
 }
 
-func (b *fleetDBIssueBackend) GetChildren(ctx context.Context, id string) ([]backend.IssueData, error) {
-	var out []backend.IssueData
-	err := b.withBackend(ctx, "GetChildren", func(ib backend.IssueBackend) error {
-		var err error
-		out, err = ib.GetChildren(ctx, id)
-		return err
-	})
-	return out, err
-}
-
 func (b *fleetDBIssueBackend) SearchIssues(ctx context.Context, query string, limit int) ([]backend.IssueData, error) {
 	var out []backend.IssueData
 	err := b.withBackend(ctx, "SearchIssues", func(ib backend.IssueBackend) error {
@@ -461,18 +451,6 @@ func (b *fleetDBIssueBackend) ReleaseIssueAsActor(ctx context.Context, id string
 	})
 }
 
-func (b *fleetDBIssueBackend) DeferIssue(ctx context.Context, id string, until time.Time) error {
-	return b.withBackend(ctx, "DeferIssue", func(ib backend.IssueBackend) error {
-		return ib.DeferIssue(ctx, id, until)
-	})
-}
-
-func (b *fleetDBIssueBackend) UndeferIssue(ctx context.Context, id string) error {
-	return b.withBackend(ctx, "UndeferIssue", func(ib backend.IssueBackend) error {
-		return ib.UndeferIssue(ctx, id)
-	})
-}
-
 func (b *fleetDBIssueBackend) Close(ctx context.Context, id string, params backend.CloseParams) (*backend.CloseResult, error) {
 	var out *backend.CloseResult
 	err := b.withBackend(ctx, "Close", func(ib backend.IssueBackend) error {
@@ -507,18 +485,6 @@ func (b *fleetDBIssueBackend) RemoveDependency(ctx context.Context, params backe
 	})
 }
 
-func (b *fleetDBIssueBackend) AddLabel(ctx context.Context, id string, label string) error {
-	return b.withBackend(ctx, "AddLabel", func(ib backend.IssueBackend) error {
-		return ib.AddLabel(ctx, id, label)
-	})
-}
-
-func (b *fleetDBIssueBackend) RemoveLabel(ctx context.Context, id string, label string) error {
-	return b.withBackend(ctx, "RemoveLabel", func(ib backend.IssueBackend) error {
-		return ib.RemoveLabel(ctx, id, label)
-	})
-}
-
 func (b *fleetDBIssueBackend) ListComments(ctx context.Context, id string) ([]backend.CommentData, error) {
 	var out []backend.CommentData
 	err := b.withBackend(ctx, "ListComments", func(ib backend.IssueBackend) error {
@@ -544,16 +510,6 @@ func (b *fleetDBIssueBackend) ListEvents(ctx context.Context, id string, limit i
 	err := b.withBackend(ctx, "ListEvents", func(ib backend.IssueBackend) error {
 		var err error
 		out, err = ib.ListEvents(ctx, id, limit)
-		return err
-	})
-	return out, err
-}
-
-func (b *fleetDBIssueBackend) Batch(ctx context.Context, ops []backend.BatchOp) ([]backend.BatchResult, error) {
-	var out []backend.BatchResult
-	err := b.withBackend(ctx, "Batch", func(ib backend.IssueBackend) error {
-		var err error
-		out, err = ib.Batch(ctx, ops)
 		return err
 	})
 	return out, err
@@ -594,9 +550,6 @@ func (b *unavailableIssueBackend) Stats(context.Context) (*backend.StatsData, er
 func (b *unavailableIssueBackend) Count(context.Context, backend.CountOpts) (int, error) {
 	return 0, b.unavailable("Count")
 }
-func (b *unavailableIssueBackend) GetChildren(context.Context, string) ([]backend.IssueData, error) {
-	return nil, b.unavailable("GetChildren")
-}
 func (b *unavailableIssueBackend) SearchIssues(context.Context, string, int) ([]backend.IssueData, error) {
 	return nil, b.unavailable("SearchIssues")
 }
@@ -611,12 +564,6 @@ func (b *unavailableIssueBackend) ClaimIssue(context.Context, string, time.Durat
 }
 func (b *unavailableIssueBackend) ReleaseIssueLock(context.Context, string, string) error {
 	return b.unavailable("ReleaseIssueLock")
-}
-func (b *unavailableIssueBackend) DeferIssue(context.Context, string, time.Time) error {
-	return b.unavailable("DeferIssue")
-}
-func (b *unavailableIssueBackend) UndeferIssue(context.Context, string) error {
-	return b.unavailable("UndeferIssue")
 }
 func (b *unavailableIssueBackend) Close(context.Context, string, backend.CloseParams) (*backend.CloseResult, error) {
 	return nil, b.unavailable("Close")
@@ -633,12 +580,6 @@ func (b *unavailableIssueBackend) AddDependency(context.Context, backend.DepAddP
 func (b *unavailableIssueBackend) RemoveDependency(context.Context, backend.DepRemoveParams) error {
 	return b.unavailable("RemoveDependency")
 }
-func (b *unavailableIssueBackend) AddLabel(context.Context, string, string) error {
-	return b.unavailable("AddLabel")
-}
-func (b *unavailableIssueBackend) RemoveLabel(context.Context, string, string) error {
-	return b.unavailable("RemoveLabel")
-}
 func (b *unavailableIssueBackend) ListComments(context.Context, string) ([]backend.CommentData, error) {
 	return nil, b.unavailable("ListComments")
 }
@@ -647,8 +588,5 @@ func (b *unavailableIssueBackend) AddComment(context.Context, backend.CommentAdd
 }
 func (b *unavailableIssueBackend) ListEvents(context.Context, string, int) ([]backend.EventData, error) {
 	return nil, b.unavailable("ListEvents")
-}
-func (b *unavailableIssueBackend) Batch(context.Context, []backend.BatchOp) ([]backend.BatchResult, error) {
-	return nil, b.unavailable("Batch")
 }
 func (b *unavailableIssueBackend) BackendName() string { return b.name + "-unavailable" }

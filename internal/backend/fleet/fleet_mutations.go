@@ -54,9 +54,7 @@ func (b *FleetBackend) RemoveDependency(ctx context.Context, params backend.DepR
 	return b.clearBlockedStatusAfterDependencyRemoval(ctx, params.FromID)
 }
 
-// --- Label operations ---
-
-func (b *FleetBackend) AddLabel(ctx context.Context, id string, label string) error {
+func (b *FleetBackend) addLabel(ctx context.Context, id string, label string) error {
 	req := struct {
 		Label string `json:"label"`
 	}{Label: label}
@@ -64,7 +62,7 @@ func (b *FleetBackend) AddLabel(ctx context.Context, id string, label string) er
 	return err
 }
 
-func (b *FleetBackend) RemoveLabel(ctx context.Context, id string, label string) error {
+func (b *FleetBackend) removeLabel(ctx context.Context, id string, label string) error {
 	_, err := b.exec(ctx, "RemoveLabel", "DELETE", "/issues/"+url.PathEscape(id)+"/labels/"+url.PathEscape(label), nil)
 	return err
 }

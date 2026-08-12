@@ -45,12 +45,6 @@ type IssueBackend interface {
 	// backends that don't support grouping return KindNotImplemented.
 	Count(ctx context.Context, opts CountOpts) (int, error)
 
-	// GetChildren returns the direct children of the given issue (typically an
-	// epic). Returns an empty slice if the issue has no children or does not
-	// exist. This is a hierarchy query — it returns all children regardless of
-	// status. Returns KindValidation if id is empty.
-	GetChildren(ctx context.Context, id string) ([]IssueData, error)
-
 	// SearchIssues performs a full-text relevance-ranked search across issue
 	// title, description, and ID. Unlike List with a Query filter (substring
 	// matching among other filters), this is a dedicated search operation;
@@ -91,17 +85,6 @@ type IssueBackend interface {
 	// lock untouched).
 	ReleaseIssueLock(ctx context.Context, id string, actor string) error
 
-	// DeferIssue defers an issue by setting status to "deferred" and
-	// optionally setting defer_until. A zero `until` (time.Time{}) means
-	// status-only defer with no end date. Returns KindValidation if id is
-	// empty, KindNotFound if the issue does not exist.
-	DeferIssue(ctx context.Context, id string, until time.Time) error
-
-	// UndeferIssue restores a deferred issue to "open" status and clears its
-	// defer_until field. Returns KindValidation if id is empty, KindNotFound
-	// if the issue does not exist.
-	UndeferIssue(ctx context.Context, id string) error
-
 	// Close marks an issue as closed and returns the closed issue along with
 	// any issues that became unblocked as a result. Returns KindNotFound if
 	// the issue does not exist.
@@ -128,16 +111,6 @@ type IssueBackend interface {
 	// Returns KindNotFound if the dependency does not exist.
 	RemoveDependency(ctx context.Context, params DepRemoveParams) error
 
-	// --- Label operations ---
-
-	// AddLabel adds a label to an issue. No-op if the label already exists.
-	// Returns KindNotFound if the issue does not exist.
-	AddLabel(ctx context.Context, id string, label string) error
-
-	// RemoveLabel removes a label from an issue. No-op if the label is not
-	// present. Returns KindNotFound if the issue does not exist.
-	RemoveLabel(ctx context.Context, id string, label string) error
-
 	// --- Comment operations ---
 
 	// ListComments returns all comments for an issue, ordered by creation time.
@@ -154,14 +127,6 @@ type IssueBackend interface {
 	// If limit is 0, the backend uses its default. Returns KindNotFound if
 	// the issue does not exist.
 	ListEvents(ctx context.Context, id string, limit int) ([]EventData, error)
-
-	// --- Batch operations ---
-
-	// Batch executes multiple operations in a single call. Each BatchResult
-	// contains the outcome for the corresponding BatchOp. The method-level
-	// error is reserved for transport failures (e.g., connection lost);
-	// individual operation failures are in each BatchResult.
-	Batch(ctx context.Context, ops []BatchOp) ([]BatchResult, error)
 
 	// --- Metadata ---
 

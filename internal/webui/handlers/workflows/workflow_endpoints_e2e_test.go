@@ -652,7 +652,7 @@ func (e *workflowEndpointE2E) expectDAGDrained(dag workflowEndpointDAG, runID st
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 
-	children, err := e.issueBackend.GetChildren(ctx, dag.epicID)
+	children, err := e.issueBackend.List(ctx, backend.ListOpts{ParentID: dag.epicID})
 	if err != nil {
 		e.t.Fatalf("list epic children: %v", err)
 	}
@@ -703,7 +703,7 @@ func (e *workflowEndpointE2E) expectSingleDaytonaTaskDrained(dag workflowEndpoin
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 
-	children, err := e.issueBackend.GetChildren(ctx, dag.epicID)
+	children, err := e.issueBackend.List(ctx, backend.ListOpts{ParentID: dag.epicID})
 	if err != nil {
 		e.t.Fatalf("list epic children: %v", err)
 	}
@@ -738,7 +738,7 @@ func (e *workflowEndpointE2E) expectDaytonaPRChainDrained(dag workflowEndpointDA
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 
-	children, err := e.issueBackend.GetChildren(ctx, dag.epicID)
+	children, err := e.issueBackend.List(ctx, backend.ListOpts{ParentID: dag.epicID})
 	if err != nil {
 		e.t.Fatalf("list epic children: %v", err)
 	}

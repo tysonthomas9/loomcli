@@ -424,107 +424,7 @@ func TestUpdateParams_JSONRoundTrip(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Section 6: BatchOp and BatchResult — json.RawMessage round-trip
-// ---------------------------------------------------------------------------
-
-func TestBatchOp_RawMessageRoundTrip(t *testing.T) {
-	argsJSON := json.RawMessage(`{"title":"New issue","priority":1}`)
-
-	op := BatchOp{
-		Operation: "create",
-		Args:      argsJSON,
-	}
-
-	data, err := json.Marshal(op)
-	if err != nil {
-		t.Fatalf("Marshal: %v", err)
-	}
-
-	var decoded BatchOp
-	if err := json.Unmarshal(data, &decoded); err != nil {
-		t.Fatalf("Unmarshal: %v", err)
-	}
-
-	if decoded.Operation != "create" {
-		t.Errorf("Operation = %q, want %q", decoded.Operation, "create")
-	}
-
-	// Verify the raw JSON is preserved.
-	var argsMap map[string]any
-	if err := json.Unmarshal(decoded.Args, &argsMap); err != nil {
-		t.Fatalf("Unmarshal decoded Args: %v", err)
-	}
-	if argsMap["title"] != "New issue" {
-		t.Errorf("Args.title = %v, want %q", argsMap["title"], "New issue")
-	}
-	if argsMap["priority"] != float64(1) {
-		t.Errorf("Args.priority = %v, want 1", argsMap["priority"])
-	}
-}
-
-func TestBatchResult_RawMessageRoundTrip(t *testing.T) {
-	resultData := json.RawMessage(`{"id":"created-1","status":"open"}`)
-
-	result := BatchResult{
-		Success: true,
-		Data:    resultData,
-	}
-
-	data, err := json.Marshal(result)
-	if err != nil {
-		t.Fatalf("Marshal: %v", err)
-	}
-
-	var decoded BatchResult
-	if err := json.Unmarshal(data, &decoded); err != nil {
-		t.Fatalf("Unmarshal: %v", err)
-	}
-
-	if !decoded.Success {
-		t.Error("Success = false, want true")
-	}
-	if decoded.Error != "" {
-		t.Errorf("Error = %q, want empty", decoded.Error)
-	}
-
-	var dataMap map[string]any
-	if err := json.Unmarshal(decoded.Data, &dataMap); err != nil {
-		t.Fatalf("Unmarshal decoded Data: %v", err)
-	}
-	if dataMap["id"] != "created-1" {
-		t.Errorf("Data.id = %v, want %q", dataMap["id"], "created-1")
-	}
-}
-
-func TestBatchResult_ErrorCase(t *testing.T) {
-	result := BatchResult{
-		Success: false,
-		Error:   "issue not found",
-	}
-
-	data, err := json.Marshal(result)
-	if err != nil {
-		t.Fatalf("Marshal: %v", err)
-	}
-
-	var decoded BatchResult
-	if err := json.Unmarshal(data, &decoded); err != nil {
-		t.Fatalf("Unmarshal: %v", err)
-	}
-
-	if decoded.Success {
-		t.Error("Success = true, want false")
-	}
-	if decoded.Error != "issue not found" {
-		t.Errorf("Error = %q, want %q", decoded.Error, "issue not found")
-	}
-	if decoded.Data != nil {
-		t.Errorf("Data = %s, want nil", decoded.Data)
-	}
-}
-
-// Section 7: OmitEmpty correctness for optional fields
+// Section 6: OmitEmpty correctness for optional fields
 // ---------------------------------------------------------------------------
 
 func TestIssueData_OmitEmptyFields(t *testing.T) {
@@ -564,7 +464,7 @@ func TestIssueData_OmitEmptyFields(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Section 8: CloseResult JSON round-trip
+// Section 7: CloseResult JSON round-trip
 // ---------------------------------------------------------------------------
 
 func TestCloseResult_JSONRoundTrip(t *testing.T) {
@@ -615,7 +515,7 @@ func TestCloseResult_JSONRoundTrip(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Section 9: ListOpts pointer fields — Priority filter
+// Section 8: ListOpts pointer fields — Priority filter
 // ---------------------------------------------------------------------------
 
 func TestListOpts_PriorityFilterNilVsZero(t *testing.T) {
@@ -642,7 +542,7 @@ func TestListOpts_PriorityFilterNilVsZero(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Section 10: CommentData with optional pointer fields
+// Section 9: CommentData with optional pointer fields
 // ---------------------------------------------------------------------------
 
 func TestCommentData_JSONRoundTrip(t *testing.T) {

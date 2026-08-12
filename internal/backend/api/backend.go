@@ -169,7 +169,7 @@ func hasData(resp *apiResponse) bool {
 }
 
 // unmarshalIssueList unmarshals a []gen.Issue response and converts to
-// []backend.IssueData. Used by List, Ready, GetChildren, and SearchIssues.
+// []backend.IssueData. Used by List, Ready, and SearchIssues.
 func unmarshalIssueList(resp *apiResponse, op string) ([]backend.IssueData, error) {
 	if !hasData(resp) {
 		return []backend.IssueData{}, nil
@@ -286,20 +286,6 @@ func (b *APIBackend) Count(_ context.Context, _ backend.CountOpts) (int, error) 
 	return 0, backend.ErrNotImplemented("Count", "server has no count endpoint")
 }
 
-// GetChildren returns the direct children of an issue by calling /issues with
-// a parent filter. Returns an empty slice if the issue has no children.
-func (b *APIBackend) GetChildren(ctx context.Context, id string) ([]backend.IssueData, error) {
-	if id == "" {
-		return nil, backend.ErrValidation("GetChildren", "id must not be empty")
-	}
-	path := "/issues?parent_id=" + url.QueryEscape(id)
-	resp, err := b.exec(ctx, "GetChildren", http.MethodGet, path, nil)
-	if err != nil {
-		return nil, err
-	}
-	return unmarshalIssueList(resp, "GetChildren")
-}
-
 // SearchIssues performs a full-text search via the /issues endpoint using the
 // q query parameter. Returns an empty slice if no results match.
 // Note: the loom server uses "q" (not "query") for its search param — see
@@ -389,35 +375,6 @@ func claimIssueBody(lockTTL time.Duration) (any, error) {
 	}{LockTTL: seconds}, nil
 }
 
-// DeferIssue defers an issue via PATCH with status="deferred" and optional
-// defer_until. A zero `until` means status-only defer with no end date.
-func (b *APIBackend) DeferIssue(ctx context.Context, id string, until time.Time) error {
-	if id == "" {
-		return backend.ErrValidation("DeferIssue", "id must not be empty")
-	}
-	status := gen.PatchIssueRequestStatus("deferred")
-	req := gen.PatchIssueRequest{Status: &status}
-	if !until.IsZero() {
-		formatted := until.Format(time.RFC3339)
-		req.DeferUntil = &formatted
-	}
-	_, err := b.exec(ctx, "DeferIssue", http.MethodPatch, "/issues/"+url.PathEscape(id), req)
-	return err
-}
-
-// UndeferIssue restores a deferred issue to "open" status and clears the
-// defer_until field by sending an empty string.
-func (b *APIBackend) UndeferIssue(ctx context.Context, id string) error {
-	if id == "" {
-		return backend.ErrValidation("UndeferIssue", "id must not be empty")
-	}
-	status := gen.PatchIssueRequestStatus("open")
-	emptyStr := ""
-	req := gen.PatchIssueRequest{Status: &status, DeferUntil: &emptyStr}
-	_, err := b.exec(ctx, "UndeferIssue", http.MethodPatch, "/issues/"+url.PathEscape(id), req)
-	return err
-}
-
 func (b *APIBackend) Close(ctx context.Context, id string, params backend.CloseParams) (*backend.CloseResult, error) {
 	req := gen.CloseRequest{}
 	if params.Reason != "" {
@@ -499,22 +456,6 @@ func (b *APIBackend) RemoveDependency(ctx context.Context, params backend.DepRem
 	return err
 }
 
-// --- Label operations ---
-
-func (b *APIBackend) AddLabel(ctx context.Context, id, label string) error {
-	addLabels := []string{label}
-	req := gen.PatchIssueRequest{AddLabels: &addLabels}
-	_, err := b.exec(ctx, "AddLabel", http.MethodPatch, "/issues/"+url.PathEscape(id), req)
-	return err
-}
-
-func (b *APIBackend) RemoveLabel(ctx context.Context, id, label string) error {
-	removeLabels := []string{label}
-	req := gen.PatchIssueRequest{RemoveLabels: &removeLabels}
-	_, err := b.exec(ctx, "RemoveLabel", http.MethodPatch, "/issues/"+url.PathEscape(id), req)
-	return err
-}
-
 // --- Comment operations ---
 
 func (b *APIBackend) ListComments(ctx context.Context, id string) ([]backend.CommentData, error) {
@@ -573,10 +514,4 @@ func (b *APIBackend) ListEvents(ctx context.Context, id string, limit int) ([]ba
 		result = append(result, eventToData(e))
 	}
 	return result, nil
-}
-
-// --- Batch operations ---
-
-func (b *APIBackend) Batch(_ context.Context, _ []backend.BatchOp) ([]backend.BatchResult, error) {
-	return nil, backend.ErrNotImplemented("Batch", "server has no batch endpoint")
 }

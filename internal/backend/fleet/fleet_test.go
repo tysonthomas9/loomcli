@@ -414,13 +414,13 @@ func TestList_EmptyOpts_NoError(t *testing.T) {
 	}
 }
 
-// --- GetChildren ---
+// --- List parent filter ---
 
-func TestGetChildren_HappyPath(t *testing.T) {
+func TestList_ParentFilter_HappyPath(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
 	issues := []*testIssueWithCounts{
-		{testIssue: &testIssue{ID: "c1", Title: "Child 1", Status: workitems.StatusOpen, CreatedAt: now, UpdatedAt: now}},
-		{testIssue: &testIssue{ID: "c2", Title: "Child 2", Status: workitems.StatusOpen, CreatedAt: now, UpdatedAt: now}},
+		{testIssue: &testIssue{ID: "c1", Title: "Child 1", Parent: "epic-1", Status: workitems.StatusOpen, CreatedAt: now, UpdatedAt: now}},
+		{testIssue: &testIssue{ID: "c2", Title: "Child 2", Parent: "epic-1", Status: workitems.StatusOpen, CreatedAt: now, UpdatedAt: now}},
 	}
 
 	var gotPath string
@@ -435,9 +435,9 @@ func TestGetChildren_HappyPath(t *testing.T) {
 	})
 	defer ts.Close()
 
-	result, err := fb.GetChildren(context.Background(), "epic-1")
+	result, err := fb.List(context.Background(), backend.ListOpts{ParentID: "epic-1"})
 	if err != nil {
-		t.Fatalf("GetChildren: %v", err)
+		t.Fatalf("List: %v", err)
 	}
 	if !strings.HasSuffix(gotPath, "/issues") {
 		t.Errorf("path = %q, want suffix /issues", gotPath)
@@ -450,28 +450,14 @@ func TestGetChildren_HappyPath(t *testing.T) {
 	}
 }
 
-func TestGetChildren_EmptyID(t *testing.T) {
-	fb, err := New(Config{BaseURL: "http://x", WorkspaceID: "ws"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = fb.GetChildren(context.Background(), "")
-	if err == nil {
-		t.Fatal("expected error")
-	}
-	if !backend.IsKind(err, backend.KindValidation) {
-		t.Errorf("expected KindValidation, got %v", err)
-	}
-}
-
-func TestGetChildren_Empty(t *testing.T) {
+func TestList_ParentFilter_Empty(t *testing.T) {
 	fb, ts := newTestServer(t, func(w http.ResponseWriter, _ *http.Request) {
 		respondOK(w, []*testIssueWithCounts{})
 	})
 	defer ts.Close()
-	result, err := fb.GetChildren(context.Background(), "epic-1")
+	result, err := fb.List(context.Background(), backend.ListOpts{ParentID: "epic-1"})
 	if err != nil {
-		t.Fatalf("GetChildren: %v", err)
+		t.Fatalf("List: %v", err)
 	}
 	if len(result) != 0 {
 		t.Errorf("expected 0, got %d", len(result))
@@ -1123,7 +1109,7 @@ func TestClaimIssue_Conflict(t *testing.T) {
 	}
 }
 
-func TestDeferIssue_UsesDedicatedEndpointWithoutDate(t *testing.T) {
+func TestDeferWorkflow_UsesDedicatedEndpointWithoutDate(t *testing.T) {
 	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != "POST" || !strings.HasSuffix(r.URL.Path, "/issues/test-1/defer") {
 			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
@@ -1135,12 +1121,12 @@ func TestDeferIssue_UsesDedicatedEndpointWithoutDate(t *testing.T) {
 	})
 	defer ts.Close()
 
-	if err := fb.DeferIssue(context.Background(), "test-1", time.Time{}); err != nil {
-		t.Fatalf("DeferIssue: %v", err)
+	if err := fb.deferIssue(context.Background(), "test-1", time.Time{}); err != nil {
+		t.Fatalf("deferIssue: %v", err)
 	}
 }
 
-func TestRemoveLabel_UsesDedicatedEndpoint(t *testing.T) {
+func TestRemoveLabelRequest_UsesDedicatedEndpoint(t *testing.T) {
 	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != "DELETE" || !strings.HasSuffix(r.URL.Path, "/issues/test-1/labels/backend") {
 			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
@@ -1149,8 +1135,8 @@ func TestRemoveLabel_UsesDedicatedEndpoint(t *testing.T) {
 	})
 	defer ts.Close()
 
-	if err := fb.RemoveLabel(context.Background(), "test-1", "backend"); err != nil {
-		t.Fatalf("RemoveLabel: %v", err)
+	if err := fb.removeLabel(context.Background(), "test-1", "backend"); err != nil {
+		t.Fatalf("removeLabel: %v", err)
 	}
 }
 
@@ -1465,7 +1451,7 @@ func TestRemoveDependency(t *testing.T) {
 
 // --- Label tests ---
 
-func TestAddLabel(t *testing.T) {
+func TestAddLabelRequest(t *testing.T) {
 	var gotPath, gotMethod string
 	var gotBody map[string]interface{}
 	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
@@ -1480,9 +1466,9 @@ func TestAddLabel(t *testing.T) {
 	})
 	defer ts.Close()
 
-	err := fb.AddLabel(context.Background(), "test-1", "urgent")
+	err := fb.addLabel(context.Background(), "test-1", "urgent")
 	if err != nil {
-		t.Fatalf("AddLabel: %v", err)
+		t.Fatalf("addLabel: %v", err)
 	}
 	if gotMethod != http.MethodPost {
 		t.Errorf("Method = %q, want POST", gotMethod)
@@ -1495,7 +1481,7 @@ func TestAddLabel(t *testing.T) {
 	}
 }
 
-func TestRemoveLabel(t *testing.T) {
+func TestRemoveLabelRequest(t *testing.T) {
 	var gotPath, gotMethod string
 	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		gotPath = r.URL.Path
@@ -1508,9 +1494,9 @@ func TestRemoveLabel(t *testing.T) {
 	})
 	defer ts.Close()
 
-	err := fb.RemoveLabel(context.Background(), "test-1", "urgent")
+	err := fb.removeLabel(context.Background(), "test-1", "urgent")
 	if err != nil {
-		t.Fatalf("RemoveLabel: %v", err)
+		t.Fatalf("removeLabel: %v", err)
 	}
 	if gotMethod != http.MethodDelete {
 		t.Errorf("Method = %q, want DELETE", gotMethod)
@@ -1901,9 +1887,9 @@ func TestListComments_NoComments(t *testing.T) {
 	}
 }
 
-// --- DeferIssue / UndeferIssue ---
+// --- Deferred workflow ---
 
-func TestDeferIssue_WithUntil(t *testing.T) {
+func TestDeferWorkflow_WithUntil(t *testing.T) {
 	until := time.Date(2026, 4, 10, 0, 0, 0, 0, time.UTC)
 	wantUntil := until.Format(time.RFC3339)
 
@@ -1917,8 +1903,8 @@ func TestDeferIssue_WithUntil(t *testing.T) {
 	})
 	defer ts.Close()
 
-	if err := fb.DeferIssue(context.Background(), "loom-1", until); err != nil {
-		t.Fatalf("DeferIssue: %v", err)
+	if err := fb.deferIssue(context.Background(), "loom-1", until); err != nil {
+		t.Fatalf("deferIssue: %v", err)
 	}
 	if gotMethod != http.MethodPost {
 		t.Errorf("method = %q, want POST", gotMethod)
@@ -1931,7 +1917,7 @@ func TestDeferIssue_WithUntil(t *testing.T) {
 	}
 }
 
-func TestDeferIssue_ZeroUntil(t *testing.T) {
+func TestDeferWorkflow_ZeroUntil(t *testing.T) {
 	var gotPath, gotMethod string
 	var gotBody map[string]interface{}
 	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
@@ -1942,8 +1928,8 @@ func TestDeferIssue_ZeroUntil(t *testing.T) {
 	})
 	defer ts.Close()
 
-	if err := fb.DeferIssue(context.Background(), "loom-1", time.Time{}); err != nil {
-		t.Fatalf("DeferIssue: %v", err)
+	if err := fb.deferIssue(context.Background(), "loom-1", time.Time{}); err != nil {
+		t.Fatalf("deferIssue: %v", err)
 	}
 	if gotMethod != http.MethodPost {
 		t.Errorf("method = %q, want POST", gotMethod)
@@ -1953,54 +1939,6 @@ func TestDeferIssue_ZeroUntil(t *testing.T) {
 	}
 	if gotBody != nil {
 		t.Errorf("defer_until should not be set for zero until, got %v", gotBody["defer_until"])
-	}
-}
-
-func TestDeferIssue_EmptyID(t *testing.T) {
-	fb, err := New(Config{BaseURL: "http://x", WorkspaceID: "ws"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	err = fb.DeferIssue(context.Background(), "", time.Time{})
-	if err == nil {
-		t.Fatal("expected error")
-	}
-	if !backend.IsKind(err, backend.KindValidation) {
-		t.Errorf("expected KindValidation, got %v", err)
-	}
-}
-
-func TestUndeferIssue_Success(t *testing.T) {
-	var gotPath, gotMethod string
-	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
-		gotPath = r.URL.Path
-		gotMethod = r.Method
-		respondOK(w, map[string]interface{}{})
-	})
-	defer ts.Close()
-
-	if err := fb.UndeferIssue(context.Background(), "loom-1"); err != nil {
-		t.Fatalf("UndeferIssue: %v", err)
-	}
-	if gotMethod != http.MethodPost {
-		t.Errorf("method = %q, want POST", gotMethod)
-	}
-	if !strings.HasSuffix(gotPath, "/issues/loom-1/undefer") {
-		t.Errorf("path = %q, want suffix /issues/loom-1/undefer", gotPath)
-	}
-}
-
-func TestUndeferIssue_EmptyID(t *testing.T) {
-	fb, err := New(Config{BaseURL: "http://x", WorkspaceID: "ws"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	err = fb.UndeferIssue(context.Background(), "")
-	if err == nil {
-		t.Fatal("expected error")
-	}
-	if !backend.IsKind(err, backend.KindValidation) {
-		t.Errorf("expected KindValidation, got %v", err)
 	}
 }
 
@@ -2174,81 +2112,5 @@ func TestWaitForMutationsAfter_IntegerCursorAddsRedisSequence(t *testing.T) {
 	want := fleetOpaqueCursorPrefix + base64.RawURLEncoding.EncodeToString([]byte("1700000000000-0"))
 	if gotSince != want {
 		t.Fatalf("since = %q, want integer cursor normalized to opaque stream ID %q", gotSince, want)
-	}
-}
-
-// --- Batch tests ---
-
-func TestBatch_EmptyOpsReturnsEmpty(t *testing.T) {
-	fb, ts := newTestServer(t, func(_ http.ResponseWriter, _ *http.Request) {
-		t.Fatal("server should not be called for empty ops")
-	})
-	defer ts.Close()
-
-	got, err := fb.Batch(context.Background(), nil)
-	if err != nil {
-		t.Fatalf("Batch: %v", err)
-	}
-	if len(got) != 0 {
-		t.Errorf("len = %d, want 0", len(got))
-	}
-}
-
-func TestBatch_Creates_Aggregated(t *testing.T) {
-	now := time.Now().UTC().Truncate(time.Second)
-	var gotPath string
-	var gotBody map[string]interface{}
-	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
-		gotPath = r.URL.Path
-		_ = json.NewDecoder(r.Body).Decode(&gotBody)
-		respondOK(w, map[string]interface{}{
-			"issues": []map[string]interface{}{
-				{"id": "new-1", "title": "One", "status": "open", "type": "task", "priority": 2, "created_at": now, "updated_at": now},
-				{"id": "new-2", "title": "Two", "status": "open", "type": "task", "priority": 2, "created_at": now, "updated_at": now},
-			},
-			"count": 2,
-		})
-	})
-	defer ts.Close()
-
-	ops := []backend.BatchOp{
-		{Operation: "create", Args: json.RawMessage(`{"title":"One","issue_type":"task","priority":2}`)},
-		{Operation: "create", Args: json.RawMessage(`{"title":"Two","issue_type":"task","priority":2}`)},
-	}
-	results, err := fb.Batch(context.Background(), ops)
-	if err != nil {
-		t.Fatalf("Batch: %v", err)
-	}
-	if !strings.HasSuffix(gotPath, "/issues/batch") {
-		t.Errorf("path = %q, want suffix /issues/batch", gotPath)
-	}
-	issues, ok := gotBody["issues"].([]interface{})
-	if !ok || len(issues) != 2 {
-		t.Errorf("body.issues len = %d, want 2 (body=%+v)", len(issues), gotBody)
-	}
-	firstIssue, _ := issues[0].(map[string]interface{})
-	if _, exists := firstIssue["issue_type"]; exists {
-		t.Errorf("body.issues[0] contains issue_type; fleet-db batch API expects type (body=%+v)", firstIssue)
-	}
-	if firstIssue["type"] != "task" {
-		t.Errorf("body.issues[0].type = %v, want task", firstIssue["type"])
-	}
-	if len(results) != 2 {
-		t.Fatalf("results len = %d, want 2", len(results))
-	}
-	for i, r := range results {
-		if !r.Success {
-			t.Errorf("results[%d].Success = false, error = %q", i, r.Error)
-		}
-		if len(r.Data) == 0 {
-			t.Errorf("results[%d].Data is empty", i)
-		}
-		var data backend.IssueData
-		if err := json.Unmarshal(r.Data, &data); err != nil {
-			t.Fatalf("results[%d].Data unmarshal: %v", i, err)
-		}
-		if data.IssueType != "task" {
-			t.Errorf("results[%d].Data.issue_type = %q, want task", i, data.IssueType)
-		}
 	}
 }

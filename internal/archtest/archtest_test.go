@@ -1291,6 +1291,57 @@ func TestRetiredBackendMutationPlaneCannotReturn(t *testing.T) {
 	}
 }
 
+func TestUnusedIssueBackendCompatibilityOperationsCannotReturn(t *testing.T) {
+	root, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	forbiddenNames := map[string]struct{}{
+		"BatchOp": {}, "BatchResult": {}, "Batch": {}, "GetChildren": {},
+		"DeferIssue": {}, "UndeferIssue": {}, "AddLabel": {}, "RemoveLabel": {},
+	}
+	for _, relative := range []string{
+		"internal/backend",
+		"internal/backend/api",
+		"internal/backend/fleet",
+		"internal/cli",
+		"internal/cli/data",
+	} {
+		files, globErr := filepath.Glob(filepath.Join(root, filepath.FromSlash(relative), "*.go"))
+		if globErr != nil {
+			t.Fatal(globErr)
+		}
+		for _, path := range files {
+			if strings.HasSuffix(path, "_test.go") {
+				continue
+			}
+			parsed, parseErr := parser.ParseFile(token.NewFileSet(), path, nil, 0)
+			if parseErr != nil {
+				t.Fatal(parseErr)
+			}
+			ast.Inspect(parsed, func(node ast.Node) bool {
+				switch declaration := node.(type) {
+				case *ast.TypeSpec:
+					if _, forbidden := forbiddenNames[declaration.Name.Name]; forbidden {
+						t.Errorf("retired backend compatibility type %s returned in %s", declaration.Name.Name, path)
+					}
+				case *ast.FuncDecl:
+					if _, forbidden := forbiddenNames[declaration.Name.Name]; forbidden {
+						t.Errorf("retired backend compatibility function %s returned in %s", declaration.Name.Name, path)
+					}
+				case *ast.Field:
+					for _, name := range declaration.Names {
+						if _, forbidden := forbiddenNames[name.Name]; forbidden {
+							t.Errorf("retired backend compatibility method %s returned in %s", name.Name, path)
+						}
+					}
+				}
+				return true
+			})
+		}
+	}
+}
+
 func TestHandwrittenProductionAPIsDoNotRemainDeprecated(t *testing.T) {
 	root, err := filepath.Abs(filepath.Join("..", ".."))
 	if err != nil {

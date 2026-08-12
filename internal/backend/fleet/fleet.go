@@ -291,7 +291,7 @@ func hasData(resp *apiResponse) bool {
 }
 
 // unmarshalIssueList unmarshals FleetDB issue rows and converts them to
-// []backend.IssueData. Used by List, GetChildren, and SearchIssues.
+// []backend.IssueData. Used by List and SearchIssues.
 //
 // fleet-db list endpoints may return a bare array or {"issues": [...]}.
 //
@@ -489,20 +489,6 @@ func (b *FleetBackend) Count(ctx context.Context, opts backend.CountOpts) (int, 
 		return 0, backend.ErrInternal("Count", "unmarshal response", err)
 	}
 	return int(countResp.Total), nil
-}
-
-// GetChildren returns the direct children of the given issue (typically an epic)
-// by calling the fleet-db list endpoint with a parent filter.
-func (b *FleetBackend) GetChildren(ctx context.Context, id string) ([]backend.IssueData, error) {
-	if id == "" {
-		return nil, backend.ErrValidation("GetChildren", "id must not be empty")
-	}
-	path := "/issues?parent_id=" + url.QueryEscape(id)
-	resp, err := b.exec(ctx, "GetChildren", "GET", path, nil)
-	if err != nil {
-		return nil, err
-	}
-	return unmarshalIssueList(resp, "GetChildren")
 }
 
 // SearchIssues performs a full-text search through fleet-db's dedicated search
@@ -829,24 +815,6 @@ func (b *FleetBackend) ClaimIssue(ctx context.Context, id string, lockTTL time.D
 	}
 	_, err = b.exec(ctx, "ClaimIssue", "POST", "/issues/"+url.PathEscape(id)+"/claim", body)
 	return err
-}
-
-// DeferIssue defers an issue via fleet-db's workflow endpoint. A zero until
-// means status-only defer with no end date.
-func (b *FleetBackend) DeferIssue(ctx context.Context, id string, until time.Time) error {
-	if id == "" {
-		return backend.ErrValidation("DeferIssue", "id must not be empty")
-	}
-	return b.deferIssue(ctx, id, until)
-}
-
-// UndeferIssue restores a deferred issue to "open" status and clears defer_until.
-func (b *FleetBackend) UndeferIssue(ctx context.Context, id string) error {
-	if id == "" {
-		return backend.ErrValidation("UndeferIssue", "id must not be empty")
-	}
-	_, callErr := b.exec(ctx, "UndeferIssue", "POST", "/issues/"+url.PathEscape(id)+"/undefer", nil)
-	return callErr
 }
 
 func (b *FleetBackend) Close(ctx context.Context, id string, params backend.CloseParams) (*backend.CloseResult, error) {

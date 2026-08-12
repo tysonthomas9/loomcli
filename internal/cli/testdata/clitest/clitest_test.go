@@ -191,23 +191,21 @@ func TestMockIssueBackendDefaultPaths(t *testing.T) {
 	m.BlockedResult = []backend.IssueData{{ID: "blocked"}}
 	m.StatsResult = &backend.StatsData{}
 	m.CountResult = 4
-	m.GetChildrenResult = []backend.IssueData{{ID: "child"}}
 	m.SearchIssuesResult = []backend.IssueData{{ID: "search"}}
 	m.CreateResult = &backend.IssueData{ID: "created"}
 	m.CloseResult = &backend.CloseResult{}
 	m.ListCommentsResult = []backend.CommentData{{ID: 1}}
 	m.AddCommentResult = &backend.CommentData{ID: 2}
 	m.ListEventsResult = []backend.EventData{{ID: "event"}}
-	m.BatchResult = []backend.BatchResult{{Success: true}}
 	m.BackendNameResult = "mock-backend"
 
 	callDefaults(t, ctx, m)
 
 	wantMethods := []string{
-		"Get", "List", "Ready", "Blocked", "Stats", "Count", "GetChildren", "SearchIssues",
-		"Create", "Update", "ClaimIssue", "DeferIssue", "UndeferIssue", "Close", "Reopen",
-		"Delete", "AddDependency", "RemoveDependency", "AddLabel", "RemoveLabel", "ListComments",
-		"AddComment", "ListEvents", "Batch", "BackendName",
+		"Get", "List", "Ready", "Blocked", "Stats", "Count", "SearchIssues",
+		"Create", "Update", "ClaimIssue", "Close", "Reopen", "Delete",
+		"AddDependency", "RemoveDependency", "ListComments", "AddComment", "ListEvents",
+		"BackendName",
 	}
 	for _, method := range wantMethods {
 		if !m.Called(method) {
@@ -283,9 +281,6 @@ func callDefaults(t *testing.T, ctx context.Context, m *MockIssueBackend) {
 	if got, err := m.Count(ctx, backend.CountOpts{}); err != nil || got != 4 {
 		t.Fatalf("Count returned %d, %v", got, err)
 	}
-	if _, err := m.GetChildren(ctx, "id"); err != nil {
-		t.Fatalf("GetChildren returned error: %v", err)
-	}
 	if _, err := m.SearchIssues(ctx, "query", 10); err != nil {
 		t.Fatalf("SearchIssues returned error: %v", err)
 	}
@@ -294,8 +289,6 @@ func callDefaults(t *testing.T, ctx context.Context, m *MockIssueBackend) {
 	}
 	mustNoErr("Update", m.Update(ctx, "id", backend.UpdateParams{}))
 	mustNoErr("ClaimIssue", m.ClaimIssue(ctx, "id", time.Second))
-	mustNoErr("DeferIssue", m.DeferIssue(ctx, "id", time.Now()))
-	mustNoErr("UndeferIssue", m.UndeferIssue(ctx, "id"))
 	if _, err := m.Close(ctx, "id", backend.CloseParams{}); err != nil {
 		t.Fatalf("Close returned error: %v", err)
 	}
@@ -303,8 +296,6 @@ func callDefaults(t *testing.T, ctx context.Context, m *MockIssueBackend) {
 	mustNoErr("Delete", m.Delete(ctx, backend.DeleteParams{}))
 	mustNoErr("AddDependency", m.AddDependency(ctx, backend.DepAddParams{}))
 	mustNoErr("RemoveDependency", m.RemoveDependency(ctx, backend.DepRemoveParams{}))
-	mustNoErr("AddLabel", m.AddLabel(ctx, "id", "label"))
-	mustNoErr("RemoveLabel", m.RemoveLabel(ctx, "id", "label"))
 	if _, err := m.ListComments(ctx, "id"); err != nil {
 		t.Fatalf("ListComments returned error: %v", err)
 	}
@@ -313,9 +304,6 @@ func callDefaults(t *testing.T, ctx context.Context, m *MockIssueBackend) {
 	}
 	if _, err := m.ListEvents(ctx, "id", 10); err != nil {
 		t.Fatalf("ListEvents returned error: %v", err)
-	}
-	if _, err := m.Batch(ctx, []backend.BatchOp{}); err != nil {
-		t.Fatalf("Batch returned error: %v", err)
 	}
 	if got := m.BackendName(); got != "mock-backend" {
 		t.Fatalf("BackendName returned %q", got)

@@ -55,11 +55,6 @@ type MockIssueBackend struct {
 	CountErr    error
 	CountFn     func(ctx context.Context, opts backend.CountOpts) (int, error)
 
-	// GetChildren
-	GetChildrenResult []backend.IssueData
-	GetChildrenErr    error
-	GetChildrenFn     func(ctx context.Context, id string) ([]backend.IssueData, error)
-
 	// SearchIssues
 	SearchIssuesResult []backend.IssueData
 	SearchIssuesErr    error
@@ -82,14 +77,6 @@ type MockIssueBackend struct {
 	ReleaseIssueLockErr error
 	ReleaseIssueLockFn  func(ctx context.Context, id, actor string) error
 
-	// DeferIssue
-	DeferIssueErr error
-	DeferIssueFn  func(ctx context.Context, id string, until time.Time) error
-
-	// UndeferIssue
-	UndeferIssueErr error
-	UndeferIssueFn  func(ctx context.Context, id string) error
-
 	// Close
 	CloseResult *backend.CloseResult
 	CloseErr    error
@@ -111,14 +98,6 @@ type MockIssueBackend struct {
 	RemoveDependencyErr error
 	RemoveDependencyFn  func(ctx context.Context, params backend.DepRemoveParams) error
 
-	// AddLabel
-	AddLabelErr error
-	AddLabelFn  func(ctx context.Context, id string, label string) error
-
-	// RemoveLabel
-	RemoveLabelErr error
-	RemoveLabelFn  func(ctx context.Context, id string, label string) error
-
 	// ListComments
 	ListCommentsResult []backend.CommentData
 	ListCommentsErr    error
@@ -133,11 +112,6 @@ type MockIssueBackend struct {
 	ListEventsResult []backend.EventData
 	ListEventsErr    error
 	ListEventsFn     func(ctx context.Context, id string, limit int) ([]backend.EventData, error)
-
-	// Batch
-	BatchResult []backend.BatchResult
-	BatchErr    error
-	BatchFn     func(ctx context.Context, ops []backend.BatchOp) ([]backend.BatchResult, error)
 
 	// BackendName
 	BackendNameResult string
@@ -236,19 +210,6 @@ func (m *MockIssueBackend) Count(ctx context.Context, opts backend.CountOpts) (i
 	return result, resultErr
 }
 
-// GetChildren implements backend.IssueBackend.
-func (m *MockIssueBackend) GetChildren(ctx context.Context, id string) ([]backend.IssueData, error) {
-	m.mu.Lock()
-	m.record("GetChildren", id)
-	fn := m.GetChildrenFn
-	result, resultErr := m.GetChildrenResult, m.GetChildrenErr
-	m.mu.Unlock()
-	if fn != nil {
-		return fn(ctx, id)
-	}
-	return result, resultErr
-}
-
 // SearchIssues implements backend.IssueBackend.
 func (m *MockIssueBackend) SearchIssues(ctx context.Context, query string, limit int) ([]backend.IssueData, error) {
 	m.mu.Lock()
@@ -310,32 +271,6 @@ func (m *MockIssueBackend) ReleaseIssueLock(ctx context.Context, id, actor strin
 	m.mu.Unlock()
 	if fn != nil {
 		return fn(ctx, id, actor)
-	}
-	return resultErr
-}
-
-// DeferIssue implements backend.IssueBackend.
-func (m *MockIssueBackend) DeferIssue(ctx context.Context, id string, until time.Time) error {
-	m.mu.Lock()
-	m.record("DeferIssue", id, until)
-	fn := m.DeferIssueFn
-	resultErr := m.DeferIssueErr
-	m.mu.Unlock()
-	if fn != nil {
-		return fn(ctx, id, until)
-	}
-	return resultErr
-}
-
-// UndeferIssue implements backend.IssueBackend.
-func (m *MockIssueBackend) UndeferIssue(ctx context.Context, id string) error {
-	m.mu.Lock()
-	m.record("UndeferIssue", id)
-	fn := m.UndeferIssueFn
-	resultErr := m.UndeferIssueErr
-	m.mu.Unlock()
-	if fn != nil {
-		return fn(ctx, id)
 	}
 	return resultErr
 }
@@ -405,32 +340,6 @@ func (m *MockIssueBackend) RemoveDependency(ctx context.Context, params backend.
 	return resultErr
 }
 
-// AddLabel implements backend.IssueBackend.
-func (m *MockIssueBackend) AddLabel(ctx context.Context, id string, label string) error {
-	m.mu.Lock()
-	m.record("AddLabel", id, label)
-	fn := m.AddLabelFn
-	resultErr := m.AddLabelErr
-	m.mu.Unlock()
-	if fn != nil {
-		return fn(ctx, id, label)
-	}
-	return resultErr
-}
-
-// RemoveLabel implements backend.IssueBackend.
-func (m *MockIssueBackend) RemoveLabel(ctx context.Context, id string, label string) error {
-	m.mu.Lock()
-	m.record("RemoveLabel", id, label)
-	fn := m.RemoveLabelFn
-	resultErr := m.RemoveLabelErr
-	m.mu.Unlock()
-	if fn != nil {
-		return fn(ctx, id, label)
-	}
-	return resultErr
-}
-
 // ListComments implements backend.IssueBackend.
 func (m *MockIssueBackend) ListComments(ctx context.Context, id string) ([]backend.CommentData, error) {
 	m.mu.Lock()
@@ -466,19 +375,6 @@ func (m *MockIssueBackend) ListEvents(ctx context.Context, id string, limit int)
 	m.mu.Unlock()
 	if fn != nil {
 		return fn(ctx, id, limit)
-	}
-	return result, resultErr
-}
-
-// Batch implements backend.IssueBackend.
-func (m *MockIssueBackend) Batch(ctx context.Context, ops []backend.BatchOp) ([]backend.BatchResult, error) {
-	m.mu.Lock()
-	m.record("Batch", ops)
-	fn := m.BatchFn
-	result, resultErr := m.BatchResult, m.BatchErr
-	m.mu.Unlock()
-	if fn != nil {
-		return fn(ctx, ops)
 	}
 	return result, resultErr
 }

@@ -56,9 +56,6 @@ func (b *localBackendStub) Stats(context.Context) (*backend.StatsData, error) { 
 func (b *localBackendStub) Count(context.Context, backend.CountOpts) (int, error) {
 	return 0, nil
 }
-func (b *localBackendStub) GetChildren(context.Context, string) ([]backend.IssueData, error) {
-	return nil, nil
-}
 func (b *localBackendStub) SearchIssues(context.Context, string, int) ([]backend.IssueData, error) {
 	return nil, nil
 }
@@ -93,9 +90,6 @@ func (b *localBackendStub) ReleaseIssueLock(_ context.Context, id, actor string)
 	return nil
 }
 
-func (b *localBackendStub) DeferIssue(context.Context, string, time.Time) error { return nil }
-func (b *localBackendStub) UndeferIssue(context.Context, string) error          { return nil }
-
 func (b *localBackendStub) Close(_ context.Context, id string, params backend.CloseParams) (*backend.CloseResult, error) {
 	b.record("Close", id, params)
 	if b.closeErr != nil {
@@ -119,8 +113,6 @@ func (b *localBackendStub) RemoveDependency(_ context.Context, params backend.De
 	b.record("RemoveDependency", params.FromID, params)
 	return nil
 }
-func (b *localBackendStub) AddLabel(context.Context, string, string) error    { return nil }
-func (b *localBackendStub) RemoveLabel(context.Context, string, string) error { return nil }
 func (b *localBackendStub) ListComments(context.Context, string) ([]backend.CommentData, error) {
 	return nil, nil
 }
@@ -129,9 +121,6 @@ func (b *localBackendStub) AddComment(_ context.Context, params backend.CommentA
 	return &backend.CommentData{IssueID: params.IssueID, Author: params.Author, Text: params.Text}, nil
 }
 func (b *localBackendStub) ListEvents(context.Context, string, int) ([]backend.EventData, error) {
-	return nil, nil
-}
-func (b *localBackendStub) Batch(context.Context, []backend.BatchOp) ([]backend.BatchResult, error) {
 	return nil, nil
 }
 func (b *localBackendStub) BackendName() string { return "local-stub" }

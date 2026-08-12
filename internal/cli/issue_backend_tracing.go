@@ -156,18 +156,6 @@ func (t *tracedIssueBackend) Count(ctx context.Context, opts backend.CountOpts) 
 	return out, err
 }
 
-func (t *tracedIssueBackend) GetChildren(ctx context.Context, id string) ([]backend.IssueData, error) {
-	ctx, span := t.startSpan(ctx, "GetChildren",
-		attribute.String("loom.task_id", id),
-	)
-	out, err := t.inner.GetChildren(ctx, id)
-	if err == nil {
-		span.SetAttributes(attribute.Int("result.count", len(out)))
-	}
-	endSpan(span, err)
-	return out, err
-}
-
 func (t *tracedIssueBackend) SearchIssues(ctx context.Context, query string, limit int) ([]backend.IssueData, error) {
 	// NB: per §6, query content is PII-sensitive — only its length is
 	// recorded as an attribute, never the raw string.
@@ -294,24 +282,6 @@ func (t *tracedIssueBackend) ReleaseClaim(ctx context.Context, id, actor string)
 	return err
 }
 
-func (t *tracedIssueBackend) DeferIssue(ctx context.Context, id string, until time.Time) error {
-	ctx, span := t.startSpan(ctx, "DeferIssue",
-		attribute.String("loom.task_id", id),
-	)
-	err := t.inner.DeferIssue(ctx, id, until)
-	endSpan(span, err)
-	return err
-}
-
-func (t *tracedIssueBackend) UndeferIssue(ctx context.Context, id string) error {
-	ctx, span := t.startSpan(ctx, "UndeferIssue",
-		attribute.String("loom.task_id", id),
-	)
-	err := t.inner.UndeferIssue(ctx, id)
-	endSpan(span, err)
-	return err
-}
-
 func (t *tracedIssueBackend) Close(ctx context.Context, id string, params backend.CloseParams) (*backend.CloseResult, error) {
 	ctx, span := t.startSpan(ctx, "Close",
 		attribute.String("loom.task_id", id),
@@ -359,31 +329,6 @@ func (t *tracedIssueBackend) RemoveDependency(ctx context.Context, params backen
 	return err
 }
 
-// --- Label operations ---
-
-func (t *tracedIssueBackend) AddLabel(ctx context.Context, id string, label string) error {
-	// NB: label names can be tag-like and PII-low risk, but the contract's
-	// strict allowlist says low-cardinality only. Capture id (always
-	// allowlisted) and label.bytes; skip the raw label value.
-	ctx, span := t.startSpan(ctx, "AddLabel",
-		attribute.String("loom.task_id", id),
-		attribute.Int("label.bytes", len(label)),
-	)
-	err := t.inner.AddLabel(ctx, id, label)
-	endSpan(span, err)
-	return err
-}
-
-func (t *tracedIssueBackend) RemoveLabel(ctx context.Context, id string, label string) error {
-	ctx, span := t.startSpan(ctx, "RemoveLabel",
-		attribute.String("loom.task_id", id),
-		attribute.Int("label.bytes", len(label)),
-	)
-	err := t.inner.RemoveLabel(ctx, id, label)
-	endSpan(span, err)
-	return err
-}
-
 // --- Comment operations ---
 
 func (t *tracedIssueBackend) ListComments(ctx context.Context, id string) ([]backend.CommentData, error) {
@@ -418,20 +363,6 @@ func (t *tracedIssueBackend) ListEvents(ctx context.Context, id string, limit in
 		attribute.Int("limit", limit),
 	)
 	out, err := t.inner.ListEvents(ctx, id, limit)
-	if err == nil {
-		span.SetAttributes(attribute.Int("result.count", len(out)))
-	}
-	endSpan(span, err)
-	return out, err
-}
-
-// --- Batch operations ---
-
-func (t *tracedIssueBackend) Batch(ctx context.Context, ops []backend.BatchOp) ([]backend.BatchResult, error) {
-	ctx, span := t.startSpan(ctx, "Batch",
-		attribute.Int("ops.count", len(ops)),
-	)
-	out, err := t.inner.Batch(ctx, ops)
 	if err == nil {
 		span.SetAttributes(attribute.Int("result.count", len(out)))
 	}
