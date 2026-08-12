@@ -191,3 +191,58 @@ func TestValidateSpec_CycleShipLabelIsAStamp(t *testing.T) {
 		t.Fatalf("expected the cycle ship label to be treated as a stamp, got: %v", problems)
 	}
 }
+
+// The clobber this guards against, found by using the command on a live
+// workspace: a spec that names a role only to add one field must not erase the
+// gates it did not mention. Every optional RoleUpdate field is a pointer whose
+// zero value CLEARS, so "the struct decoded to empty" and "the operator asked
+// for empty" are indistinguishable without presence tracking.
+func TestParsePresence_OnlyNamedFieldsAreWritable(t *testing.T) {
+	spec := []byte(`
+roles:
+  critic:
+    input_policy:
+      default: deny
+  plan:
+    labels: [ready]
+    exclude_labels: []
+agents:
+  - worktree: critic
+    role: critic
+  - worktree: worker
+    backend: claude
+`)
+	p := parsePresence(spec)
+
+	// critic named ONLY input_policy: its gates must be untouchable.
+	if !p.roleHas("critic", "input_policy") {
+		t.Fatal(`critic input_policy not seen as present`)
+	}
+	for _, f := range []string{"labels", "exclude_labels", "task_filter", "model", "prompt_file"} {
+		if p.roleHas("critic", f) {
+			t.Fatalf("critic %s reported present; applying would clear a field the spec never mentioned", f)
+		}
+	}
+
+	// An explicitly empty list IS a deliberate clear and must stay writable —
+	// that is the difference presence tracking exists to preserve.
+	if !p.roleHas("plan", "exclude_labels") {
+		t.Fatal("plan exclude_labels was written as an empty list; that is an explicit clear and must be applied")
+	}
+
+	if !p.agentHas("critic", "role") || p.agentHas("critic", "backend") {
+		t.Fatal("agent presence is wrong: role named, backend omitted")
+	}
+	if !p.agentHas("worker", "backend") || p.agentHas("worker", "hooks") {
+		t.Fatal("agent presence is wrong: backend named, hooks omitted")
+	}
+}
+
+// No presence data (malformed or empty YAML) must degrade to the old
+// whole-spec behaviour rather than silently applying nothing.
+func TestParsePresence_UnparseableFallsBackToWholeSpec(t *testing.T) {
+	p := parsePresence([]byte("\t not: [valid"))
+	if !p.roleHas("anything", "labels") || !p.agentHas("anything", "hooks") {
+		t.Fatal("unparseable presence must fall back to writable, not to silently skipping every field")
+	}
+}

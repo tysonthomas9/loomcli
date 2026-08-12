@@ -36,6 +36,65 @@ var (
 	applyDryRun   bool
 )
 
+// specPresence records which keys the spec actually names, per role and per
+// agent. It is the difference between "set this to empty" and "do not touch
+// this": every optional field on RoleUpdate is a pointer whose zero value is a
+// legitimate CLEAR, so patching a field the spec never mentioned silently wipes
+// it. A spec that names a role only to add an input policy must not erase that
+// role's label gates on the way past — which is exactly how a routing pipeline
+// dies quietly.
+type specPresence struct {
+	roles  map[string]map[string]bool
+	agents map[string]map[string]bool
+}
+
+func (p specPresence) roleHas(role, field string) bool {
+	if p.roles == nil {
+		return true // no presence data: fall back to whole-spec semantics
+	}
+	return p.roles[role][field]
+}
+
+func (p specPresence) agentHas(agent, field string) bool {
+	if p.agents == nil {
+		return true
+	}
+	return p.agents[agent][field]
+}
+
+// parsePresence re-reads the spec as untyped maps. yaml.v3 gives no "was this
+// key present" signal on a typed decode, and adding a pointer for every field
+// would change config.DaemonConfig — the shape the daemon shares.
+func parsePresence(raw []byte) specPresence {
+	var doc struct {
+		Roles  map[string]map[string]any `yaml:"roles"`
+		Agents []map[string]any          `yaml:"agents"`
+	}
+	if err := yaml.Unmarshal(raw, &doc); err != nil {
+		return specPresence{}
+	}
+	out := specPresence{roles: map[string]map[string]bool{}, agents: map[string]map[string]bool{}}
+	for name, fields := range doc.Roles {
+		set := map[string]bool{}
+		for k := range fields {
+			set[k] = true
+		}
+		out.roles[name] = set
+	}
+	for _, fields := range doc.Agents {
+		name, _ := fields["worktree"].(string)
+		if name == "" {
+			continue
+		}
+		set := map[string]bool{}
+		for k := range fields {
+			set[k] = true
+		}
+		out.agents[name] = set
+	}
+	return out
+}
+
 var workspaceApplyCmd = &cobra.Command{
 	Use:   "apply",
 	Short: "Apply a declarative workspace spec (roles, agents, daemon settings)",
@@ -110,8 +169,9 @@ func runWorkspaceApply(_ *cobra.Command, _ []string) error {
 		printPlan(&spec)
 		return nil
 	}
+	presence := parsePresence(raw)
 	return cmdstore.WithActiveWorkspace(func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error {
-		return applySpec(ctx, h, ws, &spec)
+		return applySpec(ctx, h, ws, &spec, presence)
 	})
 }
 
@@ -314,26 +374,26 @@ func orDash(s string) string {
 
 // applySpec writes roles before agents (an agent references its role) and the
 // daemon profile last.
-func applySpec(ctx context.Context, h *bootstrap.StoreHandle, ws string, spec *cfgpkg.DaemonConfig) error {
+func applySpec(ctx context.Context, h *bootstrap.StoreHandle, ws string, spec *cfgpkg.DaemonConfig, presence specPresence) error {
 	names := make([]string, 0, len(spec.Roles))
 	for n := range spec.Roles {
 		names = append(names, n)
 	}
 	sort.Strings(names)
 	for _, name := range names {
-		if err := applyRole(ctx, h, ws, name, spec.Roles[name]); err != nil {
+		if err := applyRole(ctx, h, ws, name, spec.Roles[name], presence); err != nil {
 			return err
 		}
 	}
 	for _, a := range spec.Agents {
-		if err := applyAgent(ctx, h, ws, a); err != nil {
+		if err := applyAgent(ctx, h, ws, a, presence); err != nil {
 			return err
 		}
 	}
 	return applyDaemonSettings(ctx, h, ws, spec)
 }
 
-func applyRole(ctx context.Context, h *bootstrap.StoreHandle, ws, name string, rc cfgpkg.RoleConfig) error {
+func applyRole(ctx context.Context, h *bootstrap.StoreHandle, ws, name string, rc cfgpkg.RoleConfig, presence specPresence) error {
 	kind := rc.Kind
 	if kind == "" {
 		kind = "worker"
@@ -351,28 +411,39 @@ func applyRole(ctx context.Context, h *bootstrap.StoreHandle, ws, name string, r
 			return fmt.Errorf("create role %s: %w", name, cerr)
 		}
 	}
-	patch := store.RoleUpdate{
-		Kind: &kind, TaskFilter: &rc.TaskFilter,
-		Labels: &rc.Labels, ExcludeLabels: &rc.ExcludeLabels,
+	// Only what the spec named. An omitted key means "leave it alone", never
+	// "clear it" — see specPresence.
+	patch := store.RoleUpdate{}
+	if presence.roleHas(name, "kind") {
+		patch.Kind = &kind
 	}
-	if rc.Model != "" {
+	if presence.roleHas(name, "task_filter") {
+		patch.TaskFilter = &rc.TaskFilter
+	}
+	if presence.roleHas(name, "labels") {
+		patch.Labels = &rc.Labels
+	}
+	if presence.roleHas(name, "exclude_labels") {
+		patch.ExcludeLabels = &rc.ExcludeLabels
+	}
+	if presence.roleHas(name, "model") {
 		patch.Model = &rc.Model
 	}
-	if rc.Executor != "" {
+	if presence.roleHas(name, "executor") {
 		patch.Executor = &rc.Executor
 	}
-	if rc.PromptFile != "" {
+	if presence.roleHas(name, "prompt_file") {
 		patch.PromptFile = &rc.PromptFile
 	}
-	if rc.InputPolicy != nil {
+	if presence.roleHas(name, "input_policy") {
 		ip := rc.InputPolicy
 		patch.InputPolicy = &ip
 	}
-	if rc.MaxBudgetUSD != nil {
+	if presence.roleHas(name, "max_budget_usd") {
 		b := rc.MaxBudgetUSD
 		patch.MaxBudgetUSD = &b
 	}
-	if rc.MaxRunDuration != nil {
+	if presence.roleHas(name, "max_run_duration") {
 		d := rc.MaxRunDuration
 		patch.MaxRunDuration = &d
 	}
@@ -383,7 +454,7 @@ func applyRole(ctx context.Context, h *bootstrap.StoreHandle, ws, name string, r
 	return nil
 }
 
-func applyAgent(ctx context.Context, h *bootstrap.StoreHandle, ws string, a cfgpkg.AgentEntry) error {
+func applyAgent(ctx context.Context, h *bootstrap.StoreHandle, ws string, a cfgpkg.AgentEntry, presence specPresence) error {
 	existing, err := h.Store.Agents().Get(ctx, ws, a.Worktree)
 	if err != nil || existing == nil {
 		in := store.AgentCreate{
@@ -397,11 +468,20 @@ func applyAgent(ctx context.Context, h *bootstrap.StoreHandle, ws string, a cfgp
 		fmt.Printf("  agent %s created\n", a.Worktree)
 		return nil
 	}
-	patch := store.AgentUpdate{RoleName: &a.Role, Auto: &a.Auto, Hooks: a.Hooks}
-	if a.Backend != "" {
+	patch := store.AgentUpdate{}
+	if presence.agentHas(a.Worktree, "role") {
+		patch.RoleName = &a.Role
+	}
+	if presence.agentHas(a.Worktree, "auto") {
+		patch.Auto = &a.Auto
+	}
+	if presence.agentHas(a.Worktree, "hooks") {
+		patch.Hooks = a.Hooks
+	}
+	if presence.agentHas(a.Worktree, "backend") {
 		patch.Backend = &a.Backend
 	}
-	if len(a.Repos) > 0 {
+	if presence.agentHas(a.Worktree, "repos") {
 		patch.Repos = &a.Repos
 	}
 	if _, err := h.Store.Agents().Update(ctx, ws, a.Worktree, patch); err != nil {
