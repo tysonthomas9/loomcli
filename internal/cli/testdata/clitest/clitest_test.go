@@ -190,7 +190,6 @@ func TestMockIssueBackendDefaultPaths(t *testing.T) {
 	m.ReadyResult = []backend.IssueData{{ID: "ready"}}
 	m.BlockedResult = []backend.IssueData{{ID: "blocked"}}
 	m.StatsResult = &backend.StatsData{}
-	m.CountResult = 4
 	m.SearchIssuesResult = []backend.IssueData{{ID: "search"}}
 	m.CreateResult = &backend.IssueData{ID: "created"}
 	m.CloseResult = &backend.CloseResult{}
@@ -202,7 +201,7 @@ func TestMockIssueBackendDefaultPaths(t *testing.T) {
 	callDefaults(t, ctx, m)
 
 	wantMethods := []string{
-		"Get", "List", "Ready", "Blocked", "Stats", "Count", "SearchIssues",
+		"Get", "List", "Ready", "Blocked", "Stats", "SearchIssues",
 		"Create", "Update", "ClaimIssue", "Close", "Reopen", "Delete",
 		"AddDependency", "RemoveDependency", "ListComments", "AddComment", "ListEvents",
 		"BackendName",
@@ -229,9 +228,6 @@ func TestMockIssueBackendFunctionPaths(t *testing.T) {
 	m.GetFn = func(ctx context.Context, id string) (*backend.IssueDetailData, error) {
 		return &backend.IssueDetailData{IssueData: backend.IssueData{ID: id}}, nil
 	}
-	m.CountFn = func(ctx context.Context, opts backend.CountOpts) (int, error) {
-		return 42, nil
-	}
 	m.UpdateFn = func(ctx context.Context, id string, params backend.UpdateParams) error {
 		return errors.New(id)
 	}
@@ -242,9 +238,6 @@ func TestMockIssueBackendFunctionPaths(t *testing.T) {
 	detail, err := m.Get(ctx, "task-1")
 	if err != nil || detail.ID != "task-1" {
 		t.Fatalf("Get func path = %+v, %v", detail, err)
-	}
-	if got, err := m.Count(ctx, backend.CountOpts{}); err != nil || got != 42 {
-		t.Fatalf("Count func path = %d, %v", got, err)
 	}
 	if err := m.Update(ctx, "task-2", backend.UpdateParams{}); err == nil || err.Error() != "task-2" {
 		t.Fatalf("Update func path = %v", err)
@@ -277,9 +270,6 @@ func callDefaults(t *testing.T, ctx context.Context, m *MockIssueBackend) {
 	}
 	if _, err := m.Stats(ctx); err != nil {
 		t.Fatalf("Stats returned error: %v", err)
-	}
-	if got, err := m.Count(ctx, backend.CountOpts{}); err != nil || got != 4 {
-		t.Fatalf("Count returned %d, %v", got, err)
 	}
 	if _, err := m.SearchIssues(ctx, "query", 10); err != nil {
 		t.Fatalf("SearchIssues returned error: %v", err)

@@ -559,20 +559,6 @@ func TestSearchIssues_UnmarshalError(t *testing.T) {
 	}
 }
 
-func TestCount_NotImplemented(t *testing.T) {
-	ab, err := New(Config{BaseURL: "http://x", WorkspaceID: "ws"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = ab.Count(context.Background(), backend.CountOpts{})
-	if err == nil {
-		t.Fatal("expected error")
-	}
-	if !backend.IsKind(err, backend.KindNotImplemented) {
-		t.Errorf("expected KindNotImplemented, got %v", err)
-	}
-}
-
 func TestClaimIssue_Success(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
 	var gotMethod, gotPath string

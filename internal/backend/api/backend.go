@@ -282,10 +282,6 @@ func (b *APIBackend) Stats(ctx context.Context) (*backend.StatsData, error) {
 	return &result, nil
 }
 
-func (b *APIBackend) Count(_ context.Context, _ backend.CountOpts) (int, error) {
-	return 0, backend.ErrNotImplemented("Count", "server has no count endpoint")
-}
-
 // SearchIssues performs a full-text search via the /issues endpoint using the
 // q query parameter. Returns an empty slice if no results match.
 // Note: the loom server uses "q" (not "query") for its search param — see

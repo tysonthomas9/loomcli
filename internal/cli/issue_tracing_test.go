@@ -31,7 +31,6 @@ func TestWrapIssueBackendWithTracing_Smoke(t *testing.T) {
 	_, _ = wrapped.Ready(ctx, backend.ReadyOpts{Limit: 10})
 	_, _ = wrapped.Blocked(ctx, backend.BlockedOpts{Limit: 10})
 	_, _ = wrapped.Stats(ctx)
-	_, _ = wrapped.Count(ctx, backend.CountOpts{})
 	_, _ = wrapped.SearchIssues(ctx, "query", 10)
 	_, _ = wrapped.Create(ctx, backend.CreateParams{Title: "t"})
 	_ = wrapped.Update(ctx, "id-1", backend.UpdateParams{})

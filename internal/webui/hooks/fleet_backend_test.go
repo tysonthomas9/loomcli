@@ -65,9 +65,7 @@ func TestFleetBackendHook_OnRegisterScopesBackendToRegisteredWorkspace(t *testin
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"success": true,
-			"data": map[string]any{
-				"total": 0,
-			},
+			"data":    []any{},
 		})
 	}))
 	defer srv.Close()
@@ -83,10 +81,10 @@ func TestFleetBackendHook_OnRegisterScopesBackendToRegisteredWorkspace(t *testin
 		t.Fatal("expected fleet backend resource")
 	}
 	be := res.(backend.IssueBackend)
-	if _, err := be.Count(context.Background(), backend.CountOpts{}); err != nil {
-		t.Fatalf("Count returned error: %v", err)
+	if _, err := be.Ready(context.Background(), backend.ReadyOpts{}); err != nil {
+		t.Fatalf("Ready returned error: %v", err)
 	}
-	if gotPath != "/api/v1/DEMO-WS/issues/count" {
+	if gotPath != "/api/v1/DEMO-WS/issues/ready" {
 		t.Fatalf("request path = %q, want DEMO-WS scoped backend", gotPath)
 	}
 }

@@ -570,9 +570,9 @@ func collectStatisticsDeps(ctx context.Context, deps *cli.Deps) MonitorStats {
 			stats.Remaining = 0
 		}
 
-		reviewCount, countErr := deps.IssueBackend.Count(ctx, backend.CountOpts{Status: "review"})
-		if countErr == nil {
-			stats.Review = reviewCount
+		review, listErr := deps.IssueBackend.List(ctx, backend.ListOpts{Status: "review", Limit: 10000})
+		if listErr == nil {
+			stats.Review = len(review)
 		}
 	}
 

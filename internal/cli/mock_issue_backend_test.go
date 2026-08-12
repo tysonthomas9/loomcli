@@ -50,11 +50,6 @@ type MockIssueBackend struct {
 	StatsErr    error
 	StatsFn     func(ctx context.Context) (*backend.StatsData, error)
 
-	// Count
-	CountResult int
-	CountErr    error
-	CountFn     func(ctx context.Context, opts backend.CountOpts) (int, error)
-
 	// SearchIssues
 	SearchIssuesResult []backend.IssueData
 	SearchIssuesErr    error
@@ -198,18 +193,6 @@ func (m *MockIssueBackend) Stats(ctx context.Context) (*backend.StatsData, error
 }
 
 // Count implements backend.IssueBackend.
-func (m *MockIssueBackend) Count(ctx context.Context, opts backend.CountOpts) (int, error) {
-	m.mu.Lock()
-	m.record("Count", opts)
-	fn := m.CountFn
-	result, resultErr := m.CountResult, m.CountErr
-	m.mu.Unlock()
-	if fn != nil {
-		return fn(ctx, opts)
-	}
-	return result, resultErr
-}
-
 // SearchIssues implements backend.IssueBackend.
 func (m *MockIssueBackend) SearchIssues(ctx context.Context, query string, limit int) ([]backend.IssueData, error) {
 	m.mu.Lock()

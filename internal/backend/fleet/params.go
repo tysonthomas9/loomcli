@@ -254,46 +254,6 @@ func readyServerOpts(opts backend.ReadyOpts) backend.ReadyOpts {
 	return server
 }
 
-// countOptsToQuery serializes the subset of backend.CountOpts fields that the
-// fleet-db count endpoint evaluates server-side (see openapi.yaml
-// /issues/count). Callers validate fields that would otherwise be lossy via
-// checkFleetUnsupportedCountFilters before invoking this serializer.
-//
-// Supported: Status, IssueType (mapped to "type"), Assignee, Labels
-// (mapped to singular "label"; fleet's count endpoint accepts a single label
-// filter, not a list), SourceRepos (mapped to singular "repo"), GroupBy.
-func countOptsToQuery(opts backend.CountOpts) string {
-	q := url.Values{}
-	setNonEmpty(q, "status", opts.Status)
-	setNonEmpty(q, "type", opts.IssueType)
-	setNonEmpty(q, "assignee", opts.Assignee)
-	// fleet-db's count endpoint takes a single label/repo; validation rejects
-	// multi-value inputs before this serializer runs.
-	if len(opts.Labels) > 0 {
-		q.Set("label", opts.Labels[0])
-	}
-	if len(opts.SourceRepos) > 0 {
-		q.Set("repo", opts.SourceRepos[0])
-	}
-	setNonEmpty(q, "group_by", opts.GroupBy)
-	return q.Encode()
-}
-
-func checkFleetUnsupportedCountFilters(opts backend.CountOpts) error {
-	var unsupported []string
-	if len(opts.Labels) > 1 {
-		unsupported = append(unsupported, "Labels")
-	}
-	if len(opts.SourceRepos) > 1 {
-		unsupported = append(unsupported, "SourceRepos")
-	}
-	if len(unsupported) > 0 {
-		return fmt.Errorf("fleet-db: unsupported count filters [%s]: %w",
-			strings.Join(unsupported, ", "), backend.ErrFilterNotSupported)
-	}
-	return nil
-}
-
 func blockedOptsToQuery(opts backend.BlockedOpts) string {
 	q := url.Values{}
 	setNonEmpty(q, "parent_id", opts.ParentID)

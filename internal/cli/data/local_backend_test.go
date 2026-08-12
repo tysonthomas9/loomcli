@@ -53,9 +53,6 @@ func (b *localBackendStub) Blocked(_ context.Context, opts backend.BlockedOpts) 
 }
 
 func (b *localBackendStub) Stats(context.Context) (*backend.StatsData, error) { return nil, nil }
-func (b *localBackendStub) Count(context.Context, backend.CountOpts) (int, error) {
-	return 0, nil
-}
 func (b *localBackendStub) SearchIssues(context.Context, string, int) ([]backend.IssueData, error) {
 	return nil, nil
 }

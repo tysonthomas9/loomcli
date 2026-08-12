@@ -40,11 +40,6 @@ type IssueBackend interface {
 	// Stats returns aggregate issue statistics for the project.
 	Stats(ctx context.Context) (*StatsData, error)
 
-	// Count returns the number of issues matching the given filters.
-	// When CountOpts.GroupBy is set, returns the total across all groups;
-	// backends that don't support grouping return KindNotImplemented.
-	Count(ctx context.Context, opts CountOpts) (int, error)
-
 	// SearchIssues performs a full-text relevance-ranked search across issue
 	// title, description, and ID. Unlike List with a Query filter (substring
 	// matching among other filters), this is a dedicated search operation;

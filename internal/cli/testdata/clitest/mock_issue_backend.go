@@ -36,9 +36,6 @@ type MockIssueBackend struct {
 	StatsResult         *backend.StatsData
 	StatsErr            error
 	StatsFn             func(ctx context.Context) (*backend.StatsData, error)
-	CountResult         int
-	CountErr            error
-	CountFn             func(ctx context.Context, opts backend.CountOpts) (int, error)
 	SearchIssuesResult  []backend.IssueData
 	SearchIssuesErr     error
 	SearchIssuesFn      func(ctx context.Context, query string, limit int) ([]backend.IssueData, error)
@@ -127,16 +124,6 @@ func (m *MockIssueBackend) Stats(ctx context.Context) (*backend.StatsData, error
 	m.mu.Unlock()
 	if fn != nil {
 		return fn(ctx)
-	}
-	return r, e
-}
-func (m *MockIssueBackend) Count(ctx context.Context, opts backend.CountOpts) (int, error) {
-	m.mu.Lock()
-	m.record("Count", opts)
-	fn, r, e := m.CountFn, m.CountResult, m.CountErr
-	m.mu.Unlock()
-	if fn != nil {
-		return fn(ctx, opts)
 	}
 	return r, e
 }

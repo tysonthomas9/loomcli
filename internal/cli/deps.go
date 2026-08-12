@@ -352,16 +352,6 @@ func (b *fleetDBIssueBackend) Stats(ctx context.Context) (*backend.StatsData, er
 	return out, err
 }
 
-func (b *fleetDBIssueBackend) Count(ctx context.Context, opts backend.CountOpts) (int, error) {
-	var out int
-	err := b.withBackend(ctx, "Count", func(ib backend.IssueBackend) error {
-		var err error
-		out, err = ib.Count(ctx, opts)
-		return err
-	})
-	return out, err
-}
-
 func (b *fleetDBIssueBackend) SearchIssues(ctx context.Context, query string, limit int) ([]backend.IssueData, error) {
 	var out []backend.IssueData
 	err := b.withBackend(ctx, "SearchIssues", func(ib backend.IssueBackend) error {
@@ -546,9 +536,6 @@ func (b *unavailableIssueBackend) Blocked(context.Context, backend.BlockedOpts) 
 }
 func (b *unavailableIssueBackend) Stats(context.Context) (*backend.StatsData, error) {
 	return nil, b.unavailable("Stats")
-}
-func (b *unavailableIssueBackend) Count(context.Context, backend.CountOpts) (int, error) {
-	return 0, b.unavailable("Count")
 }
 func (b *unavailableIssueBackend) SearchIssues(context.Context, string, int) ([]backend.IssueData, error) {
 	return nil, b.unavailable("SearchIssues")

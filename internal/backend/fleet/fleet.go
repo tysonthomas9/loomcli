@@ -455,42 +455,6 @@ func (b *FleetBackend) Stats(ctx context.Context) (*backend.StatsData, error) {
 	}, nil
 }
 
-// Count returns the number of issues matching opts via fleet-db's
-// /issues/count endpoint. It wires a subset of backend.CountOpts into the
-// endpoint's supported query params (status/type/assignee/label/repo) and
-// returns the Total field from the response.
-//
-// Grouping is rejected: when opts.GroupBy is non-empty, the caller wants a
-// breakdown that cannot fit into a single int return value. The grouped
-// variant is exposed through Stats(), which calls /issues/count?group_by=status
-// directly. Future work (fleet-08yg) may expand Stats to cover more groupings
-// without changing Count's signature.
-func (b *FleetBackend) Count(ctx context.Context, opts backend.CountOpts) (int, error) {
-	if opts.GroupBy != "" {
-		return 0, backend.ErrNotImplemented("Count",
-			"group_by is not supported by Count (use Stats for grouped status counts)")
-	}
-	if err := checkFleetUnsupportedCountFilters(opts); err != nil {
-		return 0, err
-	}
-	path := "/issues/count"
-	if q := countOptsToQuery(opts); q != "" {
-		path += "?" + q
-	}
-	resp, err := b.exec(ctx, "Count", "GET", path, nil)
-	if err != nil {
-		return 0, err
-	}
-	if !hasData(resp) {
-		return 0, backend.ErrInternal("Count", "empty response from server", nil)
-	}
-	var countResp countIssuesResponse
-	if err := json.Unmarshal(resp.Data, &countResp); err != nil {
-		return 0, backend.ErrInternal("Count", "unmarshal response", err)
-	}
-	return int(countResp.Total), nil
-}
-
 // SearchIssues performs a full-text search through fleet-db's dedicated search
 // endpoint. The ordinary list endpoint does not support a text-query filter;
 // sending query= there silently returns an unfiltered first page.

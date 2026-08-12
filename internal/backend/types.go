@@ -276,46 +276,6 @@ type BlockedOpts struct {
 	Limit       int      `json:"limit,omitempty"`
 }
 
-// CountOpts configures the Count query.
-type CountOpts struct {
-	// Supports the same filters as ListOpts for scoping the count.
-	Status    string   `json:"status,omitempty"`
-	Priority  *int     `json:"priority,omitempty"`
-	IssueType string   `json:"issue_type,omitempty"`
-	Assignee  string   `json:"assignee,omitempty"`
-	Labels    []string `json:"labels,omitempty"`
-	LabelsAny []string `json:"labels_any,omitempty"`
-	IDs       []string `json:"ids,omitempty"`
-
-	// Pattern matching.
-	TitleContains       string `json:"title_contains,omitempty"`
-	DescriptionContains string `json:"description_contains,omitempty"`
-	NotesContains       string `json:"notes_contains,omitempty"`
-
-	// Date ranges.
-	CreatedAfter  string `json:"created_after,omitempty"`
-	CreatedBefore string `json:"created_before,omitempty"`
-	UpdatedAfter  string `json:"updated_after,omitempty"`
-	UpdatedBefore string `json:"updated_before,omitempty"`
-	ClosedAfter   string `json:"closed_after,omitempty"`
-	ClosedBefore  string `json:"closed_before,omitempty"`
-
-	// Empty/null checks.
-	EmptyDescription bool `json:"empty_description,omitempty"`
-	NoAssignee       bool `json:"no_assignee,omitempty"`
-	NoLabels         bool `json:"no_labels,omitempty"`
-
-	// Priority range.
-	PriorityMin *int `json:"priority_min,omitempty"`
-	PriorityMax *int `json:"priority_max,omitempty"`
-
-	// Grouping (returns grouped counts when set).
-	GroupBy string `json:"group_by,omitempty"`
-
-	// Multi-repo.
-	SourceRepos []string `json:"source_repos,omitempty"`
-}
-
 // ---------------------------------------------------------------------------
 // Section 3: Param structs (mutation inputs)
 // ---------------------------------------------------------------------------

@@ -146,16 +146,6 @@ func (t *tracedIssueBackend) Stats(ctx context.Context) (*backend.StatsData, err
 	return out, err
 }
 
-func (t *tracedIssueBackend) Count(ctx context.Context, opts backend.CountOpts) (int, error) {
-	ctx, span := t.startSpan(ctx, "Count")
-	out, err := t.inner.Count(ctx, opts)
-	if err == nil {
-		span.SetAttributes(attribute.Int("result.count", out))
-	}
-	endSpan(span, err)
-	return out, err
-}
-
 func (t *tracedIssueBackend) SearchIssues(ctx context.Context, query string, limit int) ([]backend.IssueData, error) {
 	// NB: per §6, query content is PII-sensitive — only its length is
 	// recorded as an attribute, never the raw string.
