@@ -3,6 +3,7 @@ package agents
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -19,8 +20,8 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
+	loomapi "github.com/tysonthomas9/loomcli/internal/platform/loomapi/gen"
 	"github.com/tysonthomas9/loomcli/internal/webui/apperrors"
-	"github.com/tysonthomas9/loomcli/internal/webui/server/dto"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 )
 
@@ -30,7 +31,7 @@ func (m *Module) listAgents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	now := time.Now()
-	items := []any{}
+	items := []loomapi.UnifiedAgent{}
 
 	includeArchived := strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("include")), "archived")
 	records, err := m.listAgentRecords(r.Context(), ws, includeArchived)
@@ -50,7 +51,11 @@ func (m *Module) listAgents(w http.ResponseWriter, r *http.Request) {
 		items = append(items, dto)
 	}
 
-	handler.WriteJSON(w, http.StatusOK, dto.NewListResponse(items, len(items)))
+	handler.WriteJSON(w, http.StatusOK, loomapi.UnifiedAgentListResponse{
+		Success: true,
+		Data:    items,
+		Total:   len(items),
+	})
 }
 
 func (m *Module) createAgent(w http.ResponseWriter, r *http.Request) {
@@ -65,14 +70,21 @@ func (m *Module) createAgent(w http.ResponseWriter, r *http.Request) {
 	}
 	resetAgentCreateBody(r, body)
 
-	var probe createAgentKindProbe
-	if err := handler.DecodeOneJSONBytes(body, &probe, handler.JSONDecodeOptions{
+	var fields map[string]json.RawMessage
+	if err := handler.DecodeOneJSONBytes(body, &fields, handler.JSONDecodeOptions{
 		MaxBytes: handler.MaxRequestBody,
 	}); err != nil {
 		handler.RespondError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
-	switch strings.ToLower(strings.TrimSpace(probe.Kind)) {
+	var kind string
+	if raw := fields["kind"]; len(raw) != 0 {
+		if err := json.Unmarshal(raw, &kind); err != nil {
+			handler.RespondError(w, http.StatusBadRequest, "kind must be a string")
+			return
+		}
+	}
+	switch strings.ToLower(strings.TrimSpace(kind)) {
 	case "", string(domain.RoleKindInteractive):
 		m.createCanonicalInteractiveAgent(w, r, ws, body)
 	case string(domain.RoleKindWorker):
@@ -82,12 +94,12 @@ func (m *Module) createAgent(w http.ResponseWriter, r *http.Request) {
 	case agentRecordKindPrompt:
 		m.createPromptAgent(w, r, body)
 	default:
-		handler.RespondError(w, http.StatusBadRequest, "unsupported agent kind: "+probe.Kind)
+		handler.RespondError(w, http.StatusBadRequest, "unsupported agent kind: "+kind)
 	}
 }
 
 type promptAgentCreatePlan struct {
-	request    createPromptAgentRequest
+	request    promptAgentCreateInput
 	roleName   string
 	sourceKind string
 	enabled    bool
@@ -100,12 +112,13 @@ const (
 )
 
 func parsePromptAgentCreatePlan(body []byte) (promptAgentCreatePlan, error) {
-	var req createPromptAgentRequest
-	if err := handler.DecodeOneJSONBytes(body, &req, handler.JSONDecodeOptions{
-		MaxBytes: handler.MaxRequestBody,
+	var wire loomapi.CreatePromptAgentRequest
+	if err := handler.DecodeOneJSONBytes(body, &wire, handler.JSONDecodeOptions{
+		MaxBytes: handler.MaxRequestBody, DisallowUnknownFields: true,
 	}); err != nil {
 		return promptAgentCreatePlan{}, errors.New("invalid JSON body")
 	}
+	req := promptAgentCreateRequest(wire)
 	roleName := strings.TrimSpace(req.Behavior.RoleName)
 	if roleName == "" {
 		return promptAgentCreatePlan{}, errors.New("behavior.role_name is required")
@@ -132,6 +145,51 @@ func parsePromptAgentCreatePlan(body []byte) (promptAgentCreatePlan, error) {
 		enabled:    enabled,
 		desired:    desired,
 	}, nil
+}
+
+func promptAgentCreateRequest(wire loomapi.CreatePromptAgentRequest) promptAgentCreateInput {
+	request := promptAgentCreateInput{
+		Name: optionalAgentRecordStringValue(wire.Name), Backend: optionalAgentRecordStringValue(wire.Backend),
+		Enabled: wire.Enabled, BudgetPolicy: optionalAgentRecordStringValue(wire.BudgetPolicy),
+		Behavior: promptAgentBehaviorCreate{RoleName: wire.Behavior.RoleName},
+	}
+	if wire.Behavior.RoleCreate != nil {
+		role := wire.Behavior.RoleCreate
+		request.Behavior.RoleCreate = &promptRoleCreateInput{
+			Prompt: optionalAgentRecordStringValue(role.Prompt), PromptFilename: optionalAgentRecordStringValue(role.PromptFilename),
+			Description: optionalAgentRecordStringValue(role.Description), TaskFilter: optionalAgentRecordStringValue(role.TaskFilter),
+			Model: optionalAgentRecordStringValue(role.Model), Backend: optionalAgentRecordStringValue(role.Backend),
+			Effort: optionalAgentRecordStringValue(role.Effort), ReadOnly: role.ReadOnly != nil && *role.ReadOnly,
+			AllowedTools: optionalAgentRecordStringsValue(role.AllowedTools), DeniedTools: optionalAgentRecordStringsValue(role.DeniedTools),
+			Skills: optionalAgentRecordStringsValue(role.Skills),
+		}
+	}
+	if wire.Trigger != nil {
+		request.Trigger = promptAgentTriggerRequest{
+			SourceKind: optionalPromptAgentSourceKind(wire.Trigger.SourceKind),
+			RouteKey:   optionalAgentRecordStringValue(wire.Trigger.RouteKey), BindingID: optionalAgentRecordStringValue(wire.Trigger.BindingId),
+			EventTypePatterns: optionalAgentRecordStringsValue(wire.Trigger.EventTypePatterns),
+			Schedule:          optionalAgentRecordStringValue(wire.Trigger.Schedule), ScheduleTimezone: optionalAgentRecordStringValue(wire.Trigger.ScheduleTimezone),
+			Entrypoint: optionalAgentRecordStringValue(wire.Trigger.Entrypoint),
+		}
+	}
+	if wire.Grants != nil {
+		request.Grants = make([]promptAgentGrantRequest, 0, len(*wire.Grants))
+		for _, grant := range *wire.Grants {
+			request.Grants = append(request.Grants, promptAgentGrantRequest{
+				ConnectorID: grant.ConnectorId, Action: grant.Action, ResourcePattern: grant.ResourcePattern,
+				GrantID: optionalAgentRecordStringValue(grant.GrantId),
+			})
+		}
+	}
+	return request
+}
+
+func optionalPromptAgentSourceKind(value *loomapi.CreatePromptAgentTriggerSourceKind) string {
+	if value == nil {
+		return ""
+	}
+	return string(*value)
 }
 
 func (m *Module) resolvePromptAgentDriverForCreate(
@@ -228,8 +286,12 @@ func (m *Module) createPromptAgent(w http.ResponseWriter, r *http.Request, body 
 		writeAgentProvisioningError(w, err, "read prompt-agent provisioning result failed")
 		return
 	}
-	out := m.agentRecordDTOWithBindings(r.Context(), ws, record, []*automation.Binding{binding}, time.Now())
-	broadcastAgentRefresh(m.hub, ws, out.ID, r.Header.Get("X-Actor"))
+	out, err := m.agentRecordDTOWithBindings(r.Context(), ws, record, []*automation.Binding{binding}, time.Now())
+	if err != nil {
+		writeBindingError(w, err, "map prompt-agent response failed")
+		return
+	}
+	broadcastAgentRefresh(m.hub, ws, record.ServiceID, r.Header.Get("X-Actor"))
 	handler.WriteJSON(w, http.StatusCreated, out)
 }
 
@@ -268,18 +330,14 @@ func (m *Module) patchAgent(w http.ResponseWriter, r *http.Request) { //nolint:c
 		return
 	}
 	id := agentRouteValue(r, "name", "idOrName")
-	var req patchAgentRecordRequest
-	if err := handler.ReadJSON(w, r, &req); err != nil {
-		handler.HandleServiceError(w, err)
+	var req loomapi.PatchUnifiedAgentRequest
+	if err := handler.DecodeOneJSON(w, r, &req, handler.JSONDecodeOptions{DisallowUnknownFields: true}); err != nil {
+		handler.HandleServiceError(w, apperrors.ErrValidation("invalid request body"))
 		return
 	}
 	existingRecord, recordErr := m.getAgentRecord(r.Context(), ws, id)
 	if recordErr != nil {
 		writeAgentRecordError(w, recordErr, "get agent record failed")
-		return
-	}
-	if req.Behavior != nil && req.Behavior.RoleName != nil {
-		handler.RespondError(w, http.StatusBadRequest, "behavior.role_name is immutable for managed agent records")
 		return
 	}
 	patch := agentsmodule.AgentPatch{}
@@ -301,7 +359,7 @@ func (m *Module) patchAgent(w http.ResponseWriter, r *http.Request) { //nolint:c
 		return
 	}
 	hasBindingPatch := bindingPatch.Schedule != nil || bindingPatch.ScheduleTimezone != nil
-	if hasBindingPatch && (req.Name != nil || req.Behavior != nil || req.BudgetPolicy != nil) {
+	if hasBindingPatch && (req.Name != nil || req.BudgetPolicy != nil) {
 		handler.RespondError(w, http.StatusBadRequest, "schedule updates cannot be combined with agent record updates")
 		return
 	}
@@ -352,7 +410,7 @@ func (m *Module) patchAgent(w http.ResponseWriter, r *http.Request) { //nolint:c
 		writeBindingError(w, err, "decorate agent record failed")
 		return
 	}
-	broadcastAgentRefresh(m.hub, ws, out.ID, r.Header.Get("X-Actor"))
+	broadcastAgentRefresh(m.hub, ws, record.ServiceID, r.Header.Get("X-Actor"))
 	handler.WriteJSON(w, http.StatusOK, out)
 }
 
@@ -399,7 +457,7 @@ func (m *Module) deleteAgent(w http.ResponseWriter, r *http.Request) { //nolint:
 		writeBindingError(w, err, "decorate archived agent record failed")
 		return
 	}
-	broadcastAgentRefresh(m.hub, ws, out.ID, r.Header.Get("X-Actor"))
+	broadcastAgentRefresh(m.hub, ws, archived.ServiceID, r.Header.Get("X-Actor"))
 	handler.WriteJSON(w, http.StatusOK, map[string]any{
 		"agent":            out,
 		"archived":         true,
@@ -512,7 +570,7 @@ func (m *Module) setRecordEnabled(enabled bool) http.HandlerFunc {
 			writeBindingError(w, err, "decorate agent record failed")
 			return
 		}
-		broadcastAgentRefresh(m.hub, ws, out.ID, r.Header.Get("X-Actor"))
+		broadcastAgentRefresh(m.hub, ws, updatedRecord.ServiceID, r.Header.Get("X-Actor"))
 		handler.WriteJSON(w, http.StatusOK, out)
 	}
 }

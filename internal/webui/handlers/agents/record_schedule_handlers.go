@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
+	loomapi "github.com/tysonthomas9/loomcli/internal/platform/loomapi/gen"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 )
 
@@ -12,19 +13,19 @@ func (m *Module) buildAttachedSchedulePatch(
 	w http.ResponseWriter,
 	r *http.Request,
 	ws, agentID string,
-	req patchAgentRecordRequest,
+	req loomapi.PatchUnifiedAgentRequest,
 ) (string, automation.BindingPatch, bool) {
 	hasScheduleField := req.Schedule != nil || req.ScheduleTimezone != nil
 	if !hasScheduleField {
-		if req.BindingID != nil {
+		if req.BindingId != nil {
 			handler.RespondError(w, http.StatusBadRequest, "binding_id requires schedule or schedule_timezone")
 			return "", automation.BindingPatch{}, false
 		}
 		return "", automation.BindingPatch{}, true
 	}
 	bindingID := ""
-	if req.BindingID != nil {
-		bindingID = strings.TrimSpace(*req.BindingID)
+	if req.BindingId != nil {
+		bindingID = strings.TrimSpace(*req.BindingId)
 	}
 	if bindingID == "" {
 		handler.RespondError(w, http.StatusBadRequest, "binding_id is required for schedule updates")
@@ -67,7 +68,7 @@ func (m *Module) validateAttachedScheduleBinding(
 
 func buildSchedulePatch(
 	w http.ResponseWriter,
-	req patchAgentRecordRequest,
+	req loomapi.PatchUnifiedAgentRequest,
 ) (automation.BindingPatch, bool) {
 	patch := automation.BindingPatch{}
 	if req.Schedule != nil {

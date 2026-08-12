@@ -14,10 +14,10 @@ semantics:
     - vendor
     - worktrees
 ceilings:
-  total_packages: 158
+  total_packages: 157
   module_packages: 17
-  outside_module_packages: 141
-  one_file_packages: 42
+  outside_module_packages: 140
+  one_file_packages: 40
   one_or_two_file_packages: 60
 packages:
   - internal/agenterr
@@ -168,7 +168,6 @@ packages:
   - internal/webui/hooks
   - internal/webui/localredis
   - internal/webui/readprojection
-  - internal/webui/server/dto
   - internal/webui/server/handler
   - internal/webui/server/middleware
   - internal/webui/server/realtime

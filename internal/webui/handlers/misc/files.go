@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 
+	loomapi "github.com/tysonthomas9/loomcli/internal/platform/loomapi/gen"
 	"github.com/tysonthomas9/loomcli/internal/webui/apperrors"
 	"github.com/tysonthomas9/loomcli/internal/webui/filecoord"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
@@ -37,6 +38,13 @@ func repoFromQueryAndBody(queryRepo, bodyRepo string) (string, error) {
 		return bodyRepo, nil
 	}
 	return queryRepo, nil
+}
+
+func optionalFileRepo(repo *string) string {
+	if repo == nil {
+		return ""
+	}
+	return *repo
 }
 
 func parseStrongETag(value string) (string, error) {
@@ -75,7 +83,7 @@ func decodeJSONBody(w http.ResponseWriter, r *http.Request, dst any, optional bo
 		return false
 	}
 	defer r.Body.Close()
-	err := handler.DecodeOneJSON(w, r, dst, handler.JSONDecodeOptions{})
+	err := handler.DecodeOneJSON(w, r, dst, handler.JSONDecodeOptions{DisallowUnknownFields: true})
 	if err == nil {
 		return true
 	}
@@ -298,16 +306,6 @@ func HandleFileCheckoutRepair(svc filecoord.FileService) http.HandlerFunc {
 	}
 }
 
-// fileWriteRequest is the JSON body for the scoped workspace file write endpoint.
-type fileWriteRequest struct {
-	Content string `json:"content"`
-	Repo    string `json:"repo,omitempty"`
-}
-
-type fileRepoRequest struct {
-	Repo string `json:"repo,omitempty"`
-}
-
 // HandleScopedFileWrite handles PUT /api/workspaces/{ws}/files?scope=&target=&path=.
 func HandleScopedFileWrite(svc filecoord.FileService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -315,12 +313,12 @@ func HandleScopedFileWrite(svc filecoord.FileService) http.HandlerFunc {
 		scope, target, queryRepo := scopeFromQuery(r)
 		reqPath := r.URL.Query().Get("path")
 
-		var req fileWriteRequest
+		var req loomapi.FileWriteRequest
 		if !decodeRequiredJSONBody(w, r, &req) {
 			return
 		}
 
-		repo, err := repoFromQueryAndBody(queryRepo, req.Repo)
+		repo, err := repoFromQueryAndBody(queryRepo, optionalFileRepo(req.Repo))
 		if err != nil {
 			handler.HandleServiceError(w, err)
 			return
@@ -372,11 +370,11 @@ func HandleScopedFileMkdir(svc filecoord.FileService) http.HandlerFunc {
 		wsID := middleware.WorkspaceFromContext(r.Context())
 		scope, target, queryRepo := scopeFromQuery(r)
 		reqPath := r.URL.Query().Get("path")
-		var req fileRepoRequest
+		var req loomapi.FileRepoQualifierRequest
 		if !decodeOptionalJSONBody(w, r, &req) {
 			return
 		}
-		repo, err := repoFromQueryAndBody(queryRepo, req.Repo)
+		repo, err := repoFromQueryAndBody(queryRepo, optionalFileRepo(req.Repo))
 		if err != nil {
 			handler.HandleServiceError(w, err)
 			return

@@ -12,7 +12,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui"
 	"github.com/tysonthomas9/loomcli/internal/webui/agentcoord"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/prreview"
-	"github.com/tysonthomas9/loomcli/internal/webui/terminal"
 )
 
 // NewTerminalModules adds the identity and Interaction capability projections
@@ -89,7 +88,6 @@ func NewPRReviewModule(
 	connectorSealer connectorsmodule.CredentialSealer,
 	dispatcher connectorsmodule.Dispatcher,
 	agentService agentcoord.AgentService,
-	terminalService terminal.TerminalService,
 ) PRReviewModule {
 	var reviewerProvisioning prreviewer.Commands
 	var reviewerAgents agents.IdentityQueries
@@ -107,7 +105,7 @@ func NewPRReviewModule(
 	}
 	return prreview.NewModule(prreview.Config{
 		Workspace: workspaceQueries, ConnectorManagement: connectorManagement, ConnectorSealer: connectorSealer,
-		Dispatcher: dispatcher, AgentService: agentService, TerminalService: terminalService,
+		Dispatcher: dispatcher, AgentService: agentService,
 		LocalSettingsDir:     config.LocalSettingsDir,
 		ReviewerProvisioning: reviewerProvisioning, ReviewerAgents: reviewerAgents,
 		SourceControl:   config.SourceControl,

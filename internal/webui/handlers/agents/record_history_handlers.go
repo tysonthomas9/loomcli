@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	loomapi "github.com/tysonthomas9/loomcli/internal/platform/loomapi/gen"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 )
 
@@ -43,10 +44,10 @@ func (m *Module) writeAgentRecordRuns(
 	if runs == nil {
 		runs = []*domain.DriverRun{}
 	}
-	handler.WriteJSON(w, http.StatusOK, agentRunsResponse{
-		AgentID:  record.ServiceID,
-		Runs:     runs,
-		Sessions: []*agentHistorySessionDTO{},
+	handler.WriteJSON(w, http.StatusOK, loomapi.AgentRunsResponse{
+		AgentId:  record.ServiceID,
+		Runs:     handler.DriverRunsFromDomain(runs),
+		Sessions: []loomapi.AgentHistorySession{},
 	})
 }
 
