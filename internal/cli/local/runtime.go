@@ -447,6 +447,11 @@ func localEnv(dataDir string, port int) []string {
 	if exe, err := os.Executable(); err == nil {
 		exeDir := filepath.Dir(exe)
 		env = append(env, "PATH="+desktopRuntimePath(exeDir, os.Getenv("PATH")))
+		if os.Getenv("LOOM_BUILTIN_WORKFLOW_BUNDLE_DIR") == "" {
+			if bundleDir := bundledWorkflowBundleDirForExecutable(exe); bundleDir != "" {
+				env = append(env, "LOOM_BUILTIN_WORKFLOW_BUNDLE_DIR="+bundleDir)
+			}
+		}
 	}
 	if os.Getenv("FLEET_DB_BIN") == "" {
 		if fleetDBBin := bundledExecutable("fleet-db"); fleetDBBin != "" {
@@ -459,6 +464,28 @@ func localEnv(dataDir string, port int) []string {
 		}
 	}
 	return env
+}
+
+func bundledWorkflowBundleDirForExecutable(exe string) string {
+	exeDir := filepath.Dir(exe)
+	for _, candidate := range []string{
+		filepath.Join(exeDir, "workflows"),
+		filepath.Join(exeDir, "..", "Resources", "workflows"),
+		filepath.Join(exeDir, "..", "Resources", "resources", "workflows"),
+		filepath.Join(exeDir, "..", "resources", "workflows"),
+	} {
+		candidate = filepath.Clean(candidate)
+		if regularFile(filepath.Join(candidate, "epic-runner", "server.mjs")) &&
+			regularFile(filepath.Join(candidate, "epic-runner", "source-digest.txt")) {
+			return candidate
+		}
+	}
+	return ""
+}
+
+func regularFile(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.Mode().IsRegular()
 }
 
 func desktopRuntimePath(exeDir, currentPath string) string {

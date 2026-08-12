@@ -61,6 +61,27 @@ func TestLocalEnvMarksDesktopRuntimeMode(t *testing.T) {
 	}
 }
 
+func TestBundledWorkflowBundleDirForExecutable(t *testing.T) {
+	appRoot := t.TempDir()
+	exe := filepath.Join(appRoot, "Contents", "MacOS", "loom")
+	bundleDir := filepath.Join(appRoot, "Contents", "Resources", "workflows", "epic-runner")
+	if err := os.MkdirAll(bundleDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(bundleDir, "server.mjs"), []byte("export {};\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(bundleDir, "source-digest.txt"), []byte("sha256:test\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	got := bundledWorkflowBundleDirForExecutable(exe)
+	want := filepath.Join(appRoot, "Contents", "Resources", "workflows")
+	if got != want {
+		t.Fatalf("bundledWorkflowBundleDirForExecutable() = %q, want %q", got, want)
+	}
+}
+
 func TestLocalEnvPrependsExecutableDirToPath(t *testing.T) {
 	env := localEnv("/tmp/loom-data", 12345)
 	exe, err := os.Executable()

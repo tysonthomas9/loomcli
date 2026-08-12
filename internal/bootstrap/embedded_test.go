@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -87,6 +88,13 @@ func TestAppendEmbeddedFleetDBEnvDefaultsPreservesConfiguredValues(t *testing.T)
 	}
 	if !envHas(env, EnvFleetRedisMinIdleConns+"=2") {
 		t.Fatalf("expected configured min idle conns to be preserved in env %v", env)
+	}
+}
+
+func TestEmbeddedFleetDBArgsDisableRateLimitForSingleUserRuntime(t *testing.T) {
+	args := embeddedFleetDBArgs()
+	if !slices.Contains(args, "--rate-limit-enabled=false") {
+		t.Fatalf("embeddedFleetDBArgs() = %v, missing disabled rate limiter", args)
 	}
 }
 
