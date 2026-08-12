@@ -84,6 +84,7 @@ type AgentCreateInput struct {
 	Auto             bool                     `json:"auto"`
 	Backend          string                   `json:"backend,omitempty"`
 	FallbackBackends []string                 `json:"fallback_backends,omitempty"`
+	RuntimeProvider  domain.RuntimeProvider   `json:"runtime_provider,omitempty"`
 	Repos            []string                 `json:"repos,omitempty"`
 	RepoGroups       []string                 `json:"repo_groups,omitempty"`
 	CrossRepo        bool                     `json:"cross_repo,omitempty"`

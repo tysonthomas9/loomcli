@@ -6017,6 +6017,14 @@ export interface operations {
           auto?: boolean;
           backend?: string;
           fallback_backends?: string[];
+          /** @enum {string} */
+          runtime_provider?:
+            | "local"
+            | "e2b"
+            | "kubernetes"
+            | "daytona"
+            | "ci"
+            | "other";
           repos?: string[];
           repo_groups?: string[];
           cross_repo?: boolean;

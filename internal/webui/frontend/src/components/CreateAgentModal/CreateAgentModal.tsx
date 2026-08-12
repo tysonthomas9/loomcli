@@ -19,6 +19,7 @@ import styles from "./CreateAgentModal.module.css";
 
 type AgentKind = "background" | "interactive";
 type BackgroundRole = "plan" | "task";
+type RuntimeProvider = "" | "local" | "daytona";
 
 const CUSTOM_PROMPT_ID = "custom";
 
@@ -151,6 +152,7 @@ export function CreateAgentModal({
     initialSelection.backgroundRole,
   );
   const [backend, setBackend] = useState(resolvedDefaultBackend);
+  const [runtimeProvider, setRuntimeProvider] = useState<RuntimeProvider>("");
   const [selectedRepos, setSelectedRepos] = useState<string[]>([]);
   const [selectedBuiltinPromptID, setSelectedBuiltinPromptID] =
     useState("pr-review");
@@ -247,6 +249,7 @@ export function CreateAgentModal({
     setSelectedKind(selection.kind);
     setBackgroundRole(selection.backgroundRole);
     setBackend(resolvedDefaultBackend);
+    setRuntimeProvider("");
     setSelectedRepos(defaultRepos);
     setSelectedBuiltinPromptID("pr-review");
     setCustomPrompt("");
@@ -339,6 +342,7 @@ export function CreateAgentModal({
       const agent = await createAgent({
         ...request,
         ...(trimmedBackend ? { backend: trimmedBackend } : {}),
+        ...(runtimeProvider ? { runtime_provider: runtimeProvider } : {}),
       });
       onSuccess(agent);
       const selection = resolveInitialSelection(
@@ -349,6 +353,7 @@ export function CreateAgentModal({
       setSelectedKind(selection.kind);
       setBackgroundRole(selection.backgroundRole);
       setBackend(resolvedDefaultBackend);
+      setRuntimeProvider("");
       setSelectedRepos(defaultRepos);
       setSelectedBuiltinPromptID("pr-review");
       setCustomPrompt("");
@@ -538,6 +543,26 @@ export function CreateAgentModal({
                     {option.label}
                   </option>
                 ))}
+              </select>
+            </div>
+
+            <div className={styles.fieldGroup}>
+              <label className={styles.label} htmlFor="agent-runtime-provider">
+                Runtime provider
+              </label>
+              <select
+                id="agent-runtime-provider"
+                className={styles.select}
+                value={runtimeProvider}
+                onChange={(event) =>
+                  setRuntimeProvider(event.target.value as RuntimeProvider)
+                }
+                disabled={isSubmitting}
+                data-testid="create-agent-runtime-provider"
+              >
+                <option value="">Workspace default</option>
+                <option value="local">Local</option>
+                <option value="daytona">Daytona sandbox</option>
               </select>
             </div>
           </div>

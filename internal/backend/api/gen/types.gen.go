@@ -1070,6 +1070,36 @@ func (e WorkspaceResponseDesignFormat) Valid() bool {
 	}
 }
 
+// Defines values for CreateAgentJSONBodyRuntimeProvider.
+const (
+	Ci         CreateAgentJSONBodyRuntimeProvider = "ci"
+	Daytona    CreateAgentJSONBodyRuntimeProvider = "daytona"
+	E2b        CreateAgentJSONBodyRuntimeProvider = "e2b"
+	Kubernetes CreateAgentJSONBodyRuntimeProvider = "kubernetes"
+	Local      CreateAgentJSONBodyRuntimeProvider = "local"
+	Other      CreateAgentJSONBodyRuntimeProvider = "other"
+)
+
+// Valid indicates whether the value is a known member of the CreateAgentJSONBodyRuntimeProvider enum.
+func (e CreateAgentJSONBodyRuntimeProvider) Valid() bool {
+	switch e {
+	case Ci:
+		return true
+	case Daytona:
+		return true
+	case E2b:
+		return true
+	case Kubernetes:
+		return true
+	case Local:
+		return true
+	case Other:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ListBlockedParamsType.
 const (
 	ListBlockedParamsTypeBug     ListBlockedParamsType = "bug"
@@ -3073,12 +3103,16 @@ type CreateAgentJSONBody struct {
 	Prompt *string `json:"prompt,omitempty"`
 
 	// PromptFile Custom or builtin prompt selector for interactive roles.
-	PromptFile   *string   `json:"prompt_file,omitempty"`
-	RepoGroups   *[]string `json:"repo_groups,omitempty"`
-	Repos        *[]string `json:"repos,omitempty"`
-	RoleName     string    `json:"role_name"`
-	WorkspaceKey *string   `json:"workspace_key,omitempty"`
+	PromptFile      *string                             `json:"prompt_file,omitempty"`
+	RepoGroups      *[]string                           `json:"repo_groups,omitempty"`
+	Repos           *[]string                           `json:"repos,omitempty"`
+	RoleName        string                              `json:"role_name"`
+	RuntimeProvider *CreateAgentJSONBodyRuntimeProvider `json:"runtime_provider,omitempty"`
+	WorkspaceKey    *string                             `json:"workspace_key,omitempty"`
 }
+
+// CreateAgentJSONBodyRuntimeProvider defines parameters for CreateAgent.
+type CreateAgentJSONBodyRuntimeProvider string
 
 // GetDiffFileParams defines parameters for GetDiffFile.
 type GetDiffFileParams struct {

@@ -129,6 +129,63 @@ func TestHandleCreateCarriesInlinePrompt(t *testing.T) {
 	}
 }
 
+func TestHandleCreateRuntimeProvider(t *testing.T) {
+	tests := []struct {
+		name         string
+		body         string
+		wantStatus   int
+		wantProvider domain.RuntimeProvider
+	}{
+		{
+			name:         "daytona",
+			body:         `{"name":"lead-daytona","role_name":"lead","runtime_provider":"daytona"}`,
+			wantStatus:   http.StatusCreated,
+			wantProvider: domain.RuntimeProviderDaytona,
+		},
+		{
+			name:       "workspace default",
+			body:       `{"name":"lead-default","role_name":"lead","runtime_provider":""}`,
+			wantStatus: http.StatusCreated,
+		},
+		{
+			name:       "invalid",
+			body:       `{"name":"lead-invalid","role_name":"lead","runtime_provider":"unknown"}`,
+			wantStatus: http.StatusBadRequest,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.Background()
+			st := memstore.New()
+			if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{
+				Key: "TEST2", Name: "Test 2", DefaultBranch: "main",
+			}); err != nil {
+				t.Fatalf("create workspace: %v", err)
+			}
+			agentSvc := svcimpl.NewAgentService(nil, nil, nil, st)
+			req := httptest.NewRequest(http.MethodPost, "/api/workspaces/TEST2/agents", bytes.NewBufferString(tt.body))
+			req = req.WithContext(middleware.WithWorkspace(req.Context(), "TEST2"))
+			rr := httptest.NewRecorder()
+
+			HandleCreate(agentSvc, nil, nil).ServeHTTP(rr, req)
+
+			if rr.Code != tt.wantStatus {
+				t.Fatalf("status = %d body = %s, want %d", rr.Code, rr.Body.String(), tt.wantStatus)
+			}
+			if tt.wantStatus != http.StatusCreated {
+				return
+			}
+			var created domain.Agent
+			if err := json.Unmarshal(rr.Body.Bytes(), &created); err != nil {
+				t.Fatalf("decode created agent: %v", err)
+			}
+			if created.RuntimeProvider != tt.wantProvider {
+				t.Fatalf("created.RuntimeProvider = %q, want %q", created.RuntimeProvider, tt.wantProvider)
+			}
+		})
+	}
+}
+
 func TestHandleCreateStartsProvisioningAsync(t *testing.T) {
 	ctx := context.Background()
 	st := memstore.New()

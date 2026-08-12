@@ -15,6 +15,7 @@ import {
 } from "@/api/common";
 import { createIssue } from "@/api/issues";
 import type { Issue } from "@/types";
+import type { operations } from "@/types/generated/openapi";
 
 // ============= Types =============
 
@@ -39,18 +40,8 @@ export interface WorkspaceAgentInfo {
   backend?: string;
 }
 
-export interface CreateAgentRequest {
-  name: string;
-  role_name: string;
-  kind?: string;
-  prompt?: string;
-  prompt_file?: string;
-  auto?: boolean;
-  backend?: string;
-  repos?: string[];
-  repo_groups?: string[];
-  cross_repo?: boolean;
-}
+export type CreateAgentRequest =
+  operations["createAgent"]["requestBody"]["content"]["application/json"];
 
 export interface InteractivePromptInfo {
   id: string;

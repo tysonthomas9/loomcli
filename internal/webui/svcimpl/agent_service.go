@@ -370,6 +370,7 @@ func (s *agentServiceImpl) CreateAgent(ctx context.Context, in service.AgentCrea
 		Auto:             in.Auto,
 		Backend:          in.Backend,
 		FallbackBackends: in.FallbackBackends,
+		RuntimeProvider:  in.RuntimeProvider,
 		Repos:            in.Repos,
 		RepoGroups:       in.RepoGroups,
 		CrossRepo:        in.CrossRepo,
@@ -625,9 +626,20 @@ func validateAgentCreateInput(in service.AgentCreateInput) error {
 	}
 	switch in.Kind {
 	case "", string(domain.RoleKindInteractive), string(domain.RoleKindWorker):
-		return nil
 	default:
 		return service.ErrValidation("invalid role kind")
+	}
+	switch in.RuntimeProvider {
+	case "",
+		domain.RuntimeProviderLocal,
+		domain.RuntimeProviderE2B,
+		domain.RuntimeProviderKubernetes,
+		domain.RuntimeProviderDaytona,
+		domain.RuntimeProviderCI,
+		domain.RuntimeProviderOther:
+		return nil
+	default:
+		return service.ErrValidation("invalid runtime provider")
 	}
 }
 

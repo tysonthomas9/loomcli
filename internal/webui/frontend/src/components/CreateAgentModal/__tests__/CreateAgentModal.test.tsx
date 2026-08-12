@@ -140,6 +140,18 @@ describe("CreateAgentModal: default prop seeding", () => {
     expect(screen.getByTestId("create-agent-backend")).toHaveValue("codex");
   });
 
+  it("defaults runtime to Workspace default and offers local and Daytona", () => {
+    renderModal();
+    expect(screen.getByTestId("create-agent-runtime-provider")).toHaveValue("");
+    expect(
+      screen.getByRole("option", { name: "Workspace default" }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "Local" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("option", { name: "Daytona sandbox" }),
+    ).toBeInTheDocument();
+  });
+
   it("renders built-in interactive prompts as cards without a standalone Lead section", () => {
     renderModal();
     expect(
@@ -311,6 +323,20 @@ describe("CreateAgentModal: submission", () => {
       backend: "claude",
     });
     await waitFor(() => expect(onSuccess).toHaveBeenCalledWith(sampleAgent));
+  });
+
+  it("includes runtime_provider only when a runtime override is selected", async () => {
+    mockCreateAgent.mockResolvedValueOnce(sampleAgent);
+    renderModal({ defaultName: "sandboxed-lead" });
+    fireEvent.change(screen.getByTestId("create-agent-runtime-provider"), {
+      target: { value: "daytona" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /create agent/i }));
+
+    await waitFor(() => expect(mockCreateAgent).toHaveBeenCalled());
+    expect(mockCreateAgent.mock.calls[0][0]).toMatchObject({
+      runtime_provider: "daytona",
+    });
   });
 
   // (The "omit backend when empty" case is unreachable now that AI Backend is a

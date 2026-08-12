@@ -2325,6 +2325,9 @@ paths:
                   type: array
                   items:
                     type: string
+                runtime_provider:
+                  type: string
+                  enum: [local, e2b, kubernetes, daytona, ci, other]
                 repos:
                   type: array
                   items:
