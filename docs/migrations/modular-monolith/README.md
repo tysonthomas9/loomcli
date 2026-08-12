@@ -79,6 +79,9 @@ one-file packages, and 60 one-or-two-file packages.
 | [15-phase-8-consolidation-and-evidence.md](15-phase-8-consolidation-and-evidence.md) | How is post-extraction fragmentation removed without weakening ports-and-adapters boundaries? |
 | [16-phase-9-package-consolidation.md](16-phase-9-package-consolidation.md) | Which residual horizontal planes and shallow packages will be retired next, and what has the first slice proved? |
 | [17-phase-9-direct-write-and-outside-package-catalog.md](17-phase-9-direct-write-and-outside-package-catalog.md) | Which direct persistence calls remain, and why does each production package outside `internal/modules/` still exist? |
+| [18-post-phase-9-webui-deepening-plan.md](18-post-phase-9-webui-deepening-plan.md) | Superseded WebUI architecture discussion and complete decision ledger; retained for rationale. |
+| [19-phase-10-application-deepening-goal.md](19-phase-10-application-deepening-goal.md) | Superseded application-deepening discussion; retained for rationale and accepted supporting ADRs. |
+| [20-phase-10-consolidated-deep-module-goal.md](20-phase-10-consolidated-deep-module-goal.md) | Canonical Phase 10 ownership decisions, supersession map, ordered twelve-PR manifest, gates, and completion criteria. |
 
 ## Scope boundaries
 

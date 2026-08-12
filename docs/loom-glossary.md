@@ -50,6 +50,47 @@ Prompt values can be:
   `builtin:pr-review` selects the embedded PR-review terminal-agent prompt.
 - Empty for the default built-in lead prompt.
 
+## Repository and Source Control
+
+- **Repository Reference**: The stable, Workspace-scoped identity of a
+  registered repository. Filesystem paths and remote URLs are locations that
+  may change; they are not repository identity.
+- **Source Control**: The capability that owns repository working state,
+  working-tree file browsing and mutation, checkout materialization, branch
+  operations, diffs, stack lineage and publication, and pull-request
+  operations. It is one capability presented through cohesive Browse, Mutate,
+  and Checkout ports. It receives Repository References from Workspace and
+  does not own the Workspace catalog or connector credentials.
+- **Read Projection**: An immutable query view that may combine information
+  from multiple capabilities. It owns no product state and cannot mutate a
+  participating capability's records.
+- **Repository Admission**: The recoverable application workflow that adds one
+  or more repositories while creating a Workspace or afterward. It coordinates
+  Workspace catalog identity with Source Control materialization. FleetDB is
+  authoritative for process status and fencing; a machine-local journal may
+  retain only materialization and cleanup facts needed for crash recovery.
+- **Transcript Evidence**: The canonical, authorized Read Projection of an
+  Execution or Interaction transcript within a Run Capture. The lifecycle
+  owner records the durable Artifact reference; Artifacts owns evidence policy
+  and the durable content, while private platform adapters implement backend-
+  specific parsing and mechanical redaction. Live runtime output is ephemeral
+  observation rather than durable evidence.
+- **Run Capture**: The immutable evidence associated with one Execution run or
+  Interaction session, including its prompt, transcript, diff, logs, and
+  reports. The lifecycle owner owns the run or session, Artifacts owns the
+  evidence content, and the Run Capture owns no product state.
+- **Run Capture Archive**: The queryable collection of Run Captures. It is a
+  Read Projection rather than a separate lifecycle or storage authority.
+- **Workflow Distribution**: The packaging module that locates workflow source,
+  validates its layout, builds, stages, promotes, and verifies an immutable
+  content-addressed bundle, and reports digest, trust, and source provenance.
+  Workflow Authoring requests this work; Workflow Catalog owns the resulting
+  durable version and its bundle-availability lifecycle.
+- **Workflow Bundle Availability**: The Workflow Catalog invariant that records
+  whether a pending immutable version's digest-addressed content is executable.
+  Only an `available` version may be approved, activated, or dispatched;
+  missing, drifted, or terminally invalid content fails closed.
+
 ## Other Overloaded Names
 
 - **fleet / fleet-db**: The control-plane data service that stores Loom state.
