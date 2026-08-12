@@ -365,6 +365,20 @@ func (b *Broker) createSandbox(ctx context.Context, req ProvisionRequest, node *
 			if deleteErr := b.deleteSandbox(createCtx, sandboxID); deleteErr != nil {
 				return nil, fmt.Errorf("create sandbox for placement %q returned sandbox %q but failed: %v; compensating delete failed, leaked sandbox id %q: %w", node.NodeID, sandboxID, err, sandboxID, deleteErr)
 			}
+		} else {
+			// Create produced no sandbox at all: this placement can never boot, so
+			// flip it out of provisioning to a terminal released state with the
+			// cause recorded, rather than leaving it stuck until the reaper's
+			// deadline (which would also leak the MaxLive reservation). Only the
+			// no-sandbox case is safe to release here; a returned-then-deleted
+			// sandbox stays provisioning so the reaper confirm-deletes it. Best
+			// effort: never mask the original create error.
+			if markErr := b.markProvisionFailed(createCtx, node, err.Error()); markErr != nil {
+				slog.WarnContext(createCtx, "mark lead placement provision-failed failed",
+					"workspace", node.WorkspaceKey,
+					"placement", node.NodeID,
+					"error", markErr)
+			}
 		}
 		return nil, fmt.Errorf("create sandbox for placement %q: %w", node.NodeID, err)
 	}
@@ -945,6 +959,50 @@ func (b *Broker) markLost(ctx context.Context, node *domain.Node) error {
 		return fmt.Errorf("mark lost placement %q returned no placement: %w", node.NodeID, domain.ErrInvalid)
 	}
 	return nil
+}
+
+// provisionFailureReasonMaxLen bounds the provider error text stamped onto the
+// placement so an unbounded provider string (or stack trace) cannot bloat the
+// node record or the attach-error surface.
+const provisionFailureReasonMaxLen = 500
+
+// markProvisionFailed flips a placement whose sandbox create never produced a
+// sandbox out of provisioning into the terminal released state, recording the
+// cause in LastDeleteError so the attach path can surface why. released (not
+// lost) is deliberate: it frees the MaxLive reservation and is the only terminal
+// state agent-create will reprovision over. Fence-free like markLost — callers
+// hold the per-agent placement lock, so no generation race is possible.
+func (b *Broker) markProvisionFailed(ctx context.Context, node *domain.Node, reason string) error {
+	if node == nil || node.Placement == nil {
+		return fmt.Errorf("placement record required: %w", domain.ErrInvalid)
+	}
+	if node.Placement.State == domain.PlacementStateReleased {
+		return nil
+	}
+	placement := clonePlacement(node.Placement)
+	placement.State = domain.PlacementStateReleased
+	placement.LeadProcessStartedAt = nil
+	placement.ProvisioningDeadlineAt = nil
+	placement.LastDeleteError = truncateProvisionFailureReason(reason)
+	placementPtr := &placement
+	writeCtx, cancel := detachedTimeout(ctx, detachedStoreWriteTimeout)
+	defer cancel()
+	updated, err := b.store.Nodes().Update(writeCtx, node.WorkspaceKey, node.NodeID, store.NodeUpdate{Placement: &placementPtr})
+	if err != nil {
+		return err
+	}
+	if updated == nil || updated.Placement == nil {
+		return fmt.Errorf("mark provision-failed placement %q returned no placement: %w", node.NodeID, domain.ErrInvalid)
+	}
+	return nil
+}
+
+func truncateProvisionFailureReason(reason string) string {
+	reason = strings.TrimSpace(reason)
+	if len(reason) <= provisionFailureReasonMaxLen {
+		return reason
+	}
+	return reason[:provisionFailureReasonMaxLen] + "…"
 }
 
 func (b *Broker) appendAbandonedSandboxID(ctx context.Context, node *domain.Node, sandboxID string) (*domain.Node, error) {

@@ -98,9 +98,19 @@ func TestProvisionRecordBeforeCreateFailure(t *testing.T) {
 		t.Fatalf("list nodes: %v", err)
 	}
 	if len(nodes) != 1 {
-		t.Fatalf("nodes = %d, want one provisioning record", len(nodes))
+		t.Fatalf("nodes = %d, want one placement record", len(nodes))
 	}
-	assertPlacement(t, nodes[0], domain.PlacementStateProvisioning, "")
+	// A create that produced no sandbox can never boot, so the record is flipped
+	// out of provisioning to released with the cause recorded — it must not hang
+	// in provisioning until the reaper deadline (which would also leak the
+	// MaxLive reservation, since released is not quota-reserved).
+	assertPlacement(t, nodes[0], domain.PlacementStateReleased, "")
+	if got := nodes[0].Placement.LastDeleteError; !strings.Contains(got, "provider down") {
+		t.Fatalf("LastDeleteError = %q, want the create error recorded", got)
+	}
+	if nodes[0].Placement.ProvisioningDeadlineAt != nil {
+		t.Fatalf("ProvisioningDeadlineAt = %v, want cleared on provision failure", nodes[0].Placement.ProvisioningDeadlineAt)
+	}
 	if got := provider.deleteCallCount(); got != 0 {
 		t.Fatalf("Delete calls = %d, want 0 when Create returned no id", got)
 	}
