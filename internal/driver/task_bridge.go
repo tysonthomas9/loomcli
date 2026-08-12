@@ -221,6 +221,13 @@ func (e HostBridgeTaskExecutor) ExecuteTask(ctx context.Context, req TaskExecReq
 	if rootFailure.ErrorClass != "" {
 		return rootFailure, nil
 	}
+	rootManifestJSON := ""
+	if rooted {
+		rootManifestJSON, err = durableTaskRootManifest(resolvedRoot.ManifestPath)
+		if err != nil {
+			return TaskExecResult{}, fmt.Errorf("capture task root manifest: %w", err)
+		}
+	}
 	if rooted {
 		defer func() {
 			state := domain.TaskRunRootRetained
@@ -397,9 +404,10 @@ func (e HostBridgeTaskExecutor) ExecuteTask(ctx context.Context, req TaskExecReq
 	}
 	if rooted {
 		result.RuntimeMetadata = mergeStringMaps(result.RuntimeMetadata, map[string]string{
-			"task_root_path":     resolvedRoot.Path,
-			"task_root_manifest": resolvedRoot.ManifestPath,
-			"repository_count":   fmt.Sprintf("%d", len(resolvedRoot.Repositories)),
+			"task_root_path":          resolvedRoot.Path,
+			"task_root_manifest":      resolvedRoot.ManifestPath,
+			"task_root_manifest_json": rootManifestJSON,
+			"repository_count":        fmt.Sprintf("%d", len(resolvedRoot.Repositories)),
 		})
 	}
 	if artifacts := runner.finalizedArtifacts(); len(artifacts) > 0 {
@@ -1134,6 +1142,26 @@ func firstNonNilStrings(values ...[]string) []string {
 		}
 	}
 	return nil
+}
+
+// durableTaskRootManifest captures the exact repository/root binding before
+// the runner starts. The Root Manager removes the physical manifest when a
+// successful run is released, so the compact JSON copy in TaskRun runtime
+// metadata is the durable audit record used by handoff and review evidence.
+func durableTaskRootManifest(path string) (string, error) {
+	payload, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	var manifest taskroot.RootManifest
+	if err := json.Unmarshal(payload, &manifest); err != nil {
+		return "", fmt.Errorf("decode %s: %w", path, err)
+	}
+	canonical, err := json.Marshal(manifest)
+	if err != nil {
+		return "", fmt.Errorf("encode %s: %w", path, err)
+	}
+	return string(canonical), nil
 }
 
 func firstNonEmpty(values ...string) string {

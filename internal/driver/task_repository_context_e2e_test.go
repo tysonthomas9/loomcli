@@ -1,6 +1,7 @@
 package driver
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -74,6 +75,13 @@ printf '%s\n' '{"status":"completed","exit_code":0,"session_id":"implementation-
 	}
 	if implementationResult.RuntimeMetadata["backend_session_ref"] != "implementation-session" {
 		t.Fatalf("implementation session = %q", implementationResult.RuntimeMetadata["backend_session_ref"])
+	}
+	var durableManifest taskroot.RootManifest
+	if err := json.Unmarshal([]byte(implementationResult.RuntimeMetadata["task_root_manifest_json"]), &durableManifest); err != nil {
+		t.Fatalf("decode durable task root manifest: %v", err)
+	}
+	if durableManifest.TaskRunID != "implementation-1" || durableManifest.RootPath != implementationManifest.RootPath || len(durableManifest.Repositories) != 2 {
+		t.Fatalf("durable task root manifest = %+v", durableManifest)
 	}
 	for _, entry := range recorder.changeSet.Entries {
 		if entry.BaseSHA != baseSHAs[entry.RepoName] || entry.HeadSHA == entry.BaseSHA || entry.PublicationStatus != domain.TaskChangePublicationConfirmed {
