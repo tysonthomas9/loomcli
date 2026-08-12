@@ -102,23 +102,15 @@ func ensureAgentTerminalSession(ctx context.Context, svc service.TerminalService
 		return nil, err
 	}
 	existing := selectAgentTerminalTab(tabs, agentName)
-	if existing != nil && existing.PTYAlive {
-		// Cache-validity check: if the agent's effective backend/role has
-		// changed since the existing tab was built, the cached launch spec
-		// is stale (e.g. agent was created with no backend, workspace
-		// default was codex, then user set agent.backend = claude). The
-		// running PTY is still on the old backend. Rebuild a candidate
-		// spec and compare argv; if they differ, fall through to the
-		// rebuild path which will issue a fresh tab metadata. The stale
-		// PTY is killed by svc.PutTab → reattach when the user reloads.
-		if !agentTerminalLaunchSpecStale(ctx, st, workspace, existing, agent) {
-			return existing, nil
-		}
+	launchAllowed := agentTerminalLaunchAllowed(agent, roleKind)
+	cached, err := cachedAgentTerminalTab(ctx, st, workspace, agentName, agent, roleKind, existing, launchAllowed, revivers)
+	if err != nil || cached != nil {
+		return cached, err
 	}
-	if !agentTerminalLaunchAllowed(agent, roleKind) {
+	if !launchAllowed {
 		return inactiveAgentTerminalSession(ctx, svc, workspace, existing)
 	}
-	if err := ensureDaytonaLeadAttachable(ctx, st, workspace, agentName, agent, roleKind, revivers); err != nil {
+	if err := ensureDaytonaLeadAttachable(ctx, st, workspace, agentName, agent, roleKind, revivers, false); err != nil {
 		return nil, err
 	}
 
@@ -146,12 +138,37 @@ func ensureAgentTerminalSession(ctx context.Context, svc service.TerminalService
 // session was created, so the cached argv has no --backend flag but the
 // next render would include it. Without this check, the stale spec is
 // returned indefinitely and the running PTY never picks up the change.
+// cachedAgentTerminalTab returns the existing live tab when its launch spec is
+// still valid. Cache-validity: if the agent's effective backend/role changed
+// since the tab was built, the cached launch spec is stale and the caller
+// rebuilds it (the stale PTY is killed by svc.PutTab → reattach on reload).
+// PTYAlive means "present in the manager", not "upstream alive" — a parked
+// sandbox leaves a tab that claims alive while every attach fails — so
+// launch-eligible Daytona leads consult the reviver even on this fast path; a
+// placement-lookup failure keeps viewport semantics and returns the tab.
+func cachedAgentTerminalTab(ctx context.Context, st store.Store, workspace, agentName string, agent *domain.Agent, roleKind domain.RoleKind, existing *tabmeta.TabMetadata, launchAllowed bool, revivers []leadPlacementReviver) (*tabmeta.TabMetadata, error) {
+	if existing == nil || !existing.PTYAlive {
+		return nil, nil
+	}
+	if agentTerminalLaunchSpecStale(ctx, st, workspace, existing, agent) {
+		return nil, nil
+	}
+	if launchAllowed {
+		if err := ensureDaytonaLeadAttachable(ctx, st, workspace, agentName, agent, roleKind, revivers, true); err != nil {
+			return nil, err
+		}
+	}
+	return existing, nil
+}
+
 // ensureDaytonaLeadAttachable resolves the lead's active placement and asks the
 // reviver to wake a parked sandbox, mapping revive outcomes onto the terminal
 // error vocabulary (starting/validation/conflict) without leaking cause chains.
 // It is a no-op for non-interactive roles, non-Daytona runtimes, and serves
-// with no reviver configured.
-func ensureDaytonaLeadAttachable(ctx context.Context, st store.Store, workspace, agentName string, agent *domain.Agent, roleKind domain.RoleKind, revivers []leadPlacementReviver) error {
+// with no reviver configured. liveTabFallback callers hold a live cached tab:
+// a placement-lookup failure then returns nil so the tab keeps serving as a
+// viewport instead of erroring.
+func ensureDaytonaLeadAttachable(ctx context.Context, st store.Store, workspace, agentName string, agent *domain.Agent, roleKind domain.RoleKind, revivers []leadPlacementReviver, liveTabFallback bool) error {
 	if roleKind != domain.RoleKindInteractive ||
 		agentRuntimeProvider(ctx, st, workspace, agent) != domain.RuntimeProviderDaytona ||
 		len(revivers) == 0 || revivers[0] == nil {
@@ -160,6 +177,9 @@ func ensureDaytonaLeadAttachable(ctx context.Context, st store.Store, workspace,
 	reviver := revivers[0]
 	node, err := latestActiveDaytonaLeadPlacement(ctx, st, workspace, agentName)
 	if err != nil {
+		if liveTabFallback {
+			return nil
+		}
 		return err
 	}
 	err = reviver.EnsureAttachable(ctx, workspace, agentName, node.Placement.SandboxID)

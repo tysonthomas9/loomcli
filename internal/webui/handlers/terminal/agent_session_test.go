@@ -376,6 +376,37 @@ func TestEnsureAgentTerminalSessionReturnsLiveCachedTabBeforePlacementValidation
 	}
 }
 
+func TestEnsureAgentTerminalSessionRevivesParkedSandboxDespiteLiveCachedTab(t *testing.T) {
+	ctx := context.Background()
+	st, tabStore, rdb := newAgentSessionTestDeps(t)
+	svc := webuiterminal.NewTerminalService(nil, tabStore, nil, rdb, nil, time.Now().Add(-time.Second))
+	if _, err := st.Roles().Create(ctx, store.RoleCreate{WorkspaceKey: "E2E", Name: "lead", Backend: "codex"}); err != nil {
+		t.Fatalf("create role: %v", err)
+	}
+	if _, err := st.Agents().Create(ctx, store.AgentCreate{
+		WorkspaceKey:    "E2E",
+		Name:            "nova",
+		RoleName:        "lead",
+		RuntimeProvider: domain.RuntimeProviderDaytona,
+	}); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+	createActiveDaytonaLeadPlacement(t, st, "E2E", "nova", "placement-1", "sandbox-1", 1)
+	if _, err := ensureAgentTerminalSession(ctx, svc, st, "E2E", "nova"); err != nil {
+		t.Fatalf("create cached terminal: %v", err)
+	}
+	reviver := &fakeLeadPlacementReviver{err: leadprovision.ErrReviveStarting}
+
+	_, err := ensureAgentTerminalSession(ctx, svc, st, "E2E", "nova", reviver)
+	var svcErr *service.ServiceError
+	if !errors.As(err, &svcErr) || svcErr.Kind != service.KindStarting {
+		t.Fatalf("ensure parked terminal = %v, want starting error despite live cached tab", err)
+	}
+	if reviver.calls != 1 || reviver.sandboxID != "sandbox-1" {
+		t.Fatalf("reviver = calls %d sandbox %q, want 1/sandbox-1", reviver.calls, reviver.sandboxID)
+	}
+}
+
 func TestEnsureAgentTerminalSessionDoesNotReviveInactiveAgent(t *testing.T) {
 	ctx := context.Background()
 	st, tabStore, rdb := newAgentSessionTestDeps(t)
