@@ -74,32 +74,13 @@ func (b *FleetBackend) SetIssueRepository(ctx context.Context, id, repo string) 
 		return nil, backend.ErrInternal("SetIssueRepository", "empty response from server", nil)
 	}
 
-	issue, err := unmarshalCanonicalRepositoryIssue(resp.Data)
-	if err != nil {
-		return nil, err
-	}
-	return issue, nil
-}
-
-// unmarshalCanonicalRepositoryIssue accepts the native fleet-db command
-// response (`{"issue": ...}`) and a bare issue for compatibility with an
-// envelope whose data field is already the canonical projection.
-func unmarshalCanonicalRepositoryIssue(data []byte) (*backend.IssueData, error) {
-	var wrapped struct {
-		Issue *fleetIssueWithCountsWire `json:"issue"`
-	}
-	if err := json.Unmarshal(data, &wrapped); err == nil && wrapped.Issue != nil {
-		issue := wrapped.Issue.toIssueData()
-		return &issue, nil
-	}
-
-	var bare fleetIssueWithCountsWire
-	if err := json.Unmarshal(data, &bare); err != nil {
+	var wire fleetIssueWithCountsWire
+	if err := json.Unmarshal(resp.Data, &wire); err != nil {
 		return nil, backend.ErrInternal("SetIssueRepository", "unmarshal response", err)
 	}
-	if strings.TrimSpace(bare.ID) == "" {
+	if strings.TrimSpace(wire.ID) == "" {
 		return nil, backend.ErrInternal("SetIssueRepository", "response is missing canonical issue", nil)
 	}
-	issue := bare.toIssueData()
+	issue := wire.toIssueData()
 	return &issue, nil
 }

@@ -1342,6 +1342,60 @@ func TestUnusedIssueBackendCompatibilityOperationsCannotReturn(t *testing.T) {
 	}
 }
 
+func TestRetiredFleetWorkItemFallbacksCannotReturn(t *testing.T) {
+	root, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	retiredFile := filepath.Join(root, "internal", "backend", "fleet", "create_compat.go")
+	if _, statErr := os.Stat(retiredFile); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("retired Fleet create compatibility file returned: %v", statErr)
+	}
+
+	forbiddenNames := map[string]struct{}{
+		"isCreateExternalRefUnsupported":    {},
+		"createWithoutExternalRef":          {},
+		"createExternalRefPatchError":       {},
+		"unmarshalCanonicalRepositoryIssue": {},
+	}
+	files, err := filepath.Glob(filepath.Join(root, "internal", "backend", "fleet", "*.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range files {
+		if strings.HasSuffix(path, "_test.go") {
+			continue
+		}
+		source, readErr := os.ReadFile(path)
+		if readErr != nil {
+			t.Fatal(readErr)
+		}
+		for _, retiredText := range []string{
+			`unknown field \"external_ref\"`,
+			"derive compatibility idempotency key",
+			"retries without external_ref",
+			"bare issue for compatibility",
+		} {
+			if strings.Contains(string(source), retiredText) {
+				t.Errorf("retired Fleet fallback text %q returned in %s", retiredText, path)
+			}
+		}
+		parsed, parseErr := parser.ParseFile(token.NewFileSet(), path, source, 0)
+		if parseErr != nil {
+			t.Fatal(parseErr)
+		}
+		ast.Inspect(parsed, func(node ast.Node) bool {
+			declaration, ok := node.(*ast.FuncDecl)
+			if ok {
+				if _, forbidden := forbiddenNames[declaration.Name.Name]; forbidden {
+					t.Errorf("retired Fleet fallback function %s returned in %s", declaration.Name.Name, path)
+				}
+			}
+			return true
+		})
+	}
+}
+
 func TestHandwrittenProductionAPIsDoNotRemainDeprecated(t *testing.T) {
 	root, err := filepath.Abs(filepath.Join("..", ".."))
 	if err != nil {

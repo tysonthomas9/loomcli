@@ -80,11 +80,9 @@ func TestSetIssueRepository_UsesAtomicCommandAndReturnsCanonicalIssue(t *testing
 		if body.Repo != "hello-world" {
 			t.Fatalf("repo = %q", body.Repo)
 		}
-		respondOK(w, map[string]any{
-			"issue": fleetIssueWithCountsWire{fleetIssueWire: fleetIssueWire{
-				ID: "task-11", Title: "Recovered", Status: "open", Repo: "hello-world", CreatedAt: now, UpdatedAt: now,
-			}},
-		})
+		respondOK(w, fleetIssueWithCountsWire{fleetIssueWire: fleetIssueWire{
+			ID: "task-11", Title: "Recovered", Status: "open", Repo: "hello-world", CreatedAt: now, UpdatedAt: now,
+		}})
 	})
 	defer ts.Close()
 
@@ -97,20 +95,23 @@ func TestSetIssueRepository_UsesAtomicCommandAndReturnsCanonicalIssue(t *testing
 	}
 }
 
-func TestSetIssueRepository_AcceptsBareCanonicalIssue(t *testing.T) {
+func TestSetIssueRepositoryRejectsNonCanonicalWrappedIssue(t *testing.T) {
 	fb, ts := newTestServer(t, func(w http.ResponseWriter, _ *http.Request) {
-		respondOK(w, fleetIssueWithCountsWire{fleetIssueWire: fleetIssueWire{
-			ID: "task-11", Status: "open", Repo: "hello-world",
-		}})
+		respondOK(w, map[string]any{
+			"issue": fleetIssueWithCountsWire{fleetIssueWire: fleetIssueWire{ID: "task-11", Status: "open"}},
+		})
 	})
 	defer ts.Close()
 
 	issue, err := fb.SetIssueRepository(context.Background(), "task-11", "hello-world")
-	if err != nil {
-		t.Fatalf("SetIssueRepository: %v", err)
+	if err == nil {
+		t.Fatal("SetIssueRepository error = nil, want canonical-shape rejection")
 	}
-	if issue == nil || issue.SourceRepo != "hello-world" {
-		t.Fatalf("issue = %+v", issue)
+	if issue != nil {
+		t.Fatalf("issue = %+v, want nil", issue)
+	}
+	if !backend.IsKind(err, backend.KindInternal) {
+		t.Fatalf("error = %v, want KindInternal", err)
 	}
 }
 
