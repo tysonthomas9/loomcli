@@ -1837,6 +1837,52 @@ issue/detail/comment/event models, and their proxy/composition machinery are
 still deletion targets. The next wave moves a lifecycle-owned slice rather
 than retaining another optional repository extension.
 
+## Wave 9.39 result
+
+Wave 9.39 removes comments, events, and dependency mutations from the
+horizontal `IssueBackend`. The broad interface contracts from 15 methods to 10.
+Work Items now owns four explicit consumer ports: `EventQueries`,
+`CommentQueries`, `CommentCommands`, and `DependencyCommands`. Both real HTTP
+adapters, the lazy FleetDB opener, tracing, CLI commands, and Work Items
+composition implement or consume those ports directly. Missing activity
+support fails closed; there is no call-through fallback to `IssueBackend`.
+
+The duplicate `backend.EventData`, `backend.DepAddParams`,
+`backend.DepRemoveParams`, and `backend.CommentAddParams` types are deleted and
+ratcheted by the cannot-return architecture test. The horizontal comment sorter
+is also deleted; FleetDB keeps its wire-order normalization private and returns
+the Work Items-owned `Comment` projection. `backend.CommentData` survives only
+inside the still-transitional `IssueDetailData` projection and will be deleted
+with the detail cutover rather than retained as a second comment model.
+
+Implementation commit `8989e6127` changes 30 files with 436 insertions and 366
+deletions. Exact package shape remains `159 / 15 / 144 / 42 / 60`; no facade,
+alias, fallback, production package, import exception, or architecture
+threshold was added.
+
+## Wave 9.39 validation
+
+| Check | Result |
+|---|---|
+| Owner ports and real adapters | PASS: API and FleetDB comment, event, and dependency suites pass with Work Items commands and projections; CLI commands, lazy opening, tracing, and test doubles compile against the same ports |
+| Fail-closed composition | PASS: missing event, comment-query, comment-command, add-dependency, or remove-dependency support returns `workitems.ErrUnavailable` |
+| Retired compatibility plane | PASS: the four deleted DTO/parameter names and horizontal comment sorter have zero Go definitions or uses; the cannot-return ratchet rejects their return |
+| Measured architecture guard | PASS: 11/11 profiles, 10 capability roots, zero legacy handler imports, 90 direct-write rows, 107 reviewed mutation commands, 70 runtime components, 79 goroutine launches, zero pending decisions, and 1,163.0 MiB peak process-tree RSS under 2,048 MiB |
+| Loom `make gate` | PASS: all Go and frontend quality gates, measured architecture profiles, repository-wide race tests, generated-contract checks, and coverage against paired FleetDB source `e9c185b` and an exact source-built binary |
+
+The first full gate used the workspace's obsolete `fleet-db/unified-agents`
+checkout and correctly rejected its OpenAPI mismatch. No snapshot was copied
+backward. The unchanged candidate was rerun with explicit `FLEET_DB_REPO` and
+`FLEET_DB_BIN` values from the clean Phase 9 companion checkout; its OpenAPI
+hash exactly matched Loom's vendored snapshot and the complete gate passed.
+
+No test, profile, threshold, architecture rule, or compatibility exception was
+disabled. Phase 9 remains incomplete: the 10-method `IssueBackend`, duplicate
+issue/detail/comment/dependency projections, and lifecycle proxy/composition
+machinery are still deletion targets. The next wave moves lifecycle commands
+and detail/list projections to Work Items owner ports, then deletes
+`IssueBackend` rather than preserving it as a compatibility facade.
+
 ---
 
 [Migration overview](README.md) · [Phase 8 consolidation](15-phase-8-consolidation-and-evidence.md)
