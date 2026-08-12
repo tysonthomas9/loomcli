@@ -1930,6 +1930,48 @@ outbound adapters, not legacy facades; the final Phase 9 audit will decide their
 owner-local placement without collapsing distinct external transports into the
 Work Items core.
 
+## Wave 9.41 result
+
+Wave 9.41 removes the final legacy location. The concrete FleetDB adapter now
+lives at `internal/modules/workitems/fleetdb`, and the Loom management-API
+adapter lives at `internal/modules/workitems/httpapi`. Both remain distinct
+packages because they adapt different external systems to the same
+consumer-owned Work Items ports; folding them into the capability core would
+violate the transport boundary rather than deepen the module.
+
+Capability-neutral HTTP request, connection-pool, and trace-propagation
+mechanics move to `internal/platform/{fleethttp,httptransport}`. Generated Loom
+OpenAPI wire types move to `internal/platform/loomapi/gen`. This keeps concrete
+transport libraries out of the Work Items core while allowing the two
+owner-local adapters to contain only mapping and adapter behavior. Internal
+types and hooks are renamed from `*Backend` to `Adapter` and Work Items-specific
+names. The public `issue_backend` JSON/configuration key remains unchanged.
+
+Implementation commit `d03b64717` changes 93 files with 440 insertions and 387
+deletions. This is an ownership relocation, not a package-count claim: exact
+topology remains `158 / 17 / 141 / 42 / 60`, and `internal/backend` no longer
+exists.
+
+## Wave 9.41 validation and final audit
+
+| Check | Result |
+|---|---|
+| Physical and symbol deletion | PASS: no `internal/backend` directory, production import, `IssueBackend` runtime type, `APIBackend`, `FleetBackend`, or backend-named lifecycle hook remains |
+| Real adapter conformance | PASS: `workitems_e2e` exercises local FleetDB, remote FleetDB, direct FleetDB, and Loom HTTP API adapters after relocation |
+| Generated contract and compile profiles | PASS: generated Go types match `api/openapi.yaml`; untagged and all enforced tagged package graphs compile at the new paths |
+| Measured architecture guard | PASS: 11/11 profiles, 10 capability roots, zero legacy handler imports, zero Store files outside composition, 90 direct-write rows, 107 reviewed mutation commands, 70 runtime components, 79 goroutine launches, and 1,214.6 MiB peak process-tree RSS under 2,048 MiB |
+| Loom aggregate `make gate` | PASS: all Go and frontend quality gates, repository-wide race and coverage checks, generated-contract checks, and paired FleetDB source/binary at `e9c185b`; the measured architecture pass was not duplicated inside this invocation |
+
+The closing shallow-package audit reviewed all 42 one-file and 60 one-or-two-file
+production packages. The remaining small packages are capability adapters,
+named application workflows, delivery/CLI entry surfaces, generated contracts,
+or reusable platform mechanisms with distinct consumers and policies. None is
+a residual horizontal model/repository plane or fallback. Collapsing them only
+to lower the count would merge capability ownership, couple independent
+external adapters, or reintroduce duplicated transport policy. Phase 9 therefore
+closes at 158 packages—below its 160-package target—with the ten capability
+owners, consumer-owned ports, and independently replaceable adapters intact.
+
 ---
 
 [Migration overview](README.md) · [Phase 8 consolidation](15-phase-8-consolidation-and-evidence.md)
