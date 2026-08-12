@@ -90,6 +90,9 @@ services:
       LOOM_FLEET_ACTOR: local-user
       LOOM_FLEET_DB_ACTOR: local-user
       LOOM_AGENT_NAME: local-user
+      # This empty-store regression disables FleetDB authorization and does not
+      # prove the Workflow Catalog lifecycle capability.
+      LOOM_WORKFLOW_CATALOG_ENABLED: "false"
       LOOM_FLEET_REQUIRED: "1"
       LOOM_FRONTEND_URL: "http://localhost:${LOOM_UI_PORT:-8091}"
       LOOM_DAEMON_SCAN_INTERVAL: "2"

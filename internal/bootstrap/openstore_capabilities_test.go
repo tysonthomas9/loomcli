@@ -52,6 +52,12 @@ func TestOpenStoreCloudWithRequirementsChecksCapabilities(t *testing.T) {
 	if err != nil {
 		t.Fatalf("OpenStoreWithOptions: %v", err)
 	}
+	if handle.FleetDBClient() == nil {
+		t.Fatal("shared FleetDB client is nil")
+	}
+	if handle.Store != handle.FleetDBClient() {
+		t.Fatal("legacy Store and capability composition do not share one FleetDB client")
+	}
 	if err := handle.Close(); err != nil {
 		t.Fatalf("Close: %v", err)
 	}

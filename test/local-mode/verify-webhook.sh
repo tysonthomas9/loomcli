@@ -22,7 +22,7 @@ set -euo pipefail
 LOOM_API="${LOCAL_MODE_API_URL:-http://localhost:${LOCAL_MODE_API_PORT:-8282}}"
 FLEETDB_API="${LOCAL_MODE_FLEETDB_URL:-http://localhost:${LOCAL_MODE_FLEETDB_PORT:-8280}}"
 WS="${LOOM_WORKSPACE:-LOCALMODE}"
-ACTOR="${LOOM_FLEET_DB_ACTOR:-webhook-e2e@fixture.local}"
+API_KEY="${LOCAL_MODE_FLEETDB_API_KEY:-loom-local-mode-test-only-admin-key-v1}"
 SECRET="${WEBHOOK_E2E_SECRET:-e2e-webhook-secret}"
 ROUTE="github.pull_request.opened"
 DELIVERY="e2e-delivery-$$"
@@ -52,9 +52,9 @@ fdb() { # method path [body]
   local method="$1" path="$2" body="${3:-}"
   if [ -n "$body" ]; then
     curl -fsS --max-time 15 -X "$method" "$FLEETDB_API$path" \
-      -H 'Content-Type: application/json' -H "X-Actor: $ACTOR" -d "$body"
+      -H 'Content-Type: application/json' -H "X-API-Key: $API_KEY" -d "$body"
   else
-    curl -fsS --max-time 15 -X "$method" "$FLEETDB_API$path" -H "X-Actor: $ACTOR"
+    curl -fsS --max-time 15 -X "$method" "$FLEETDB_API$path" -H "X-API-Key: $API_KEY"
   fi
 }
 

@@ -39,18 +39,14 @@ func NewModule(st store.Store) *Module {
 func (m *Module) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/workspaces/{ws}/workflows", m.listWorkflows)
 	mux.HandleFunc("POST /api/workspaces/{ws}/workflows/{name}/versions", m.createWorkflowVersion)
-	// Phase B: read a builtin workflow's TS source (to seed an in-UI editor) and
-	// manage its versions (list + approve→trusted + activate an existing one).
-	// The build+register path (createWorkflowVersion above) already exists; these
-	// close the version-lifecycle gaps that were CLI-only.
+	// Builtin source/build/run behavior remains in this compatibility module.
+	// Registered-driver reads and version lifecycle commands are owned by the
+	// Workflow Catalog capability module and registered separately by app/serve.
 	mux.HandleFunc("GET /api/workspaces/{ws}/workflows/{name}/source", m.getWorkflowSource)
-	mux.HandleFunc("GET /api/workspaces/{ws}/workflows/{name}/versions", m.listWorkflowVersions)
 	// Run history for a workflow: a thin, read-only view over DriverRunStore.List
 	// so the UI can show past/active runs (Phase 1). Unlike the run/version
 	// mutation paths it must not self-heal a driver, so it uses ResolveDriver.
 	mux.HandleFunc("GET /api/workspaces/{ws}/workflows/{name}/runs", m.listWorkflowRuns)
-	mux.HandleFunc("POST /api/workspaces/{ws}/workflows/{name}/versions/{versionId}/approve", m.approveWorkflowVersion)
-	mux.HandleFunc("POST /api/workspaces/{ws}/workflows/{name}/versions/{versionId}/activate", m.activateWorkflowVersion)
 	mux.HandleFunc("POST /api/workspaces/{ws}/workflows/{name}", m.createWorkflowRun)
 	mux.HandleFunc("GET /api/workspaces/{ws}/runs/{runId}", m.getRun)
 	mux.HandleFunc("GET /api/workspaces/{ws}/runs/{runId}/events", m.getRunEvents)
@@ -95,33 +91,6 @@ func (m *Module) getWorkflowSource(w http.ResponseWriter, r *http.Request) {
 		"builtin":    true,
 		"entrypoint": spec.Entrypoint,
 		"files":      spec.Files,
-	})
-}
-
-// listWorkflowVersions lists the driver versions built for a workflow, newest
-// state first, so the UI can show version history and drive approve/activate. A
-// workflow with no registered driver yet is a 404.
-func (m *Module) listWorkflowVersions(w http.ResponseWriter, r *http.Request) {
-	ws := strings.TrimSpace(r.PathValue("ws"))
-	name := strings.TrimSpace(r.PathValue("name"))
-	if ws == "" || name == "" {
-		handler.RespondError(w, http.StatusBadRequest, "workspace and workflow name are required")
-		return
-	}
-	drv, err := workflowdefs.ResolveDriver(r.Context(), m.store, ws, name)
-	if err != nil {
-		handler.WriteDomainError(w, err, "resolve workflow driver failed")
-		return
-	}
-	versions, err := m.store.DriverVersions().List(r.Context(), ws, store.DriverVersionFilter{DriverID: drv.DriverID})
-	if err != nil {
-		handler.WriteDomainError(w, err, "list workflow versions failed")
-		return
-	}
-	handler.WriteJSON(w, http.StatusOK, map[string]any{
-		"driver_id":         drv.DriverID,
-		"active_version_id": drv.ActiveVersionID,
-		"versions":          versions,
 	})
 }
 
@@ -198,47 +167,6 @@ func isKnownRunStatus(s domain.DriverRunStatus) bool {
 	}
 }
 
-// approveWorkflowVersion / activateWorkflowVersion expose the operator actions
-// that were CLI-only (driver.ApproveDriverVersion / ActivateDriverVersion) — both
-// are pure driver-metadata updates (no build). Approve flips an
-// HTTP-built-untrusted version to trusted so it can actually run; activate points
-// the driver at an existing version without a rebuild.
-func (m *Module) approveWorkflowVersion(w http.ResponseWriter, r *http.Request) {
-	m.workflowVersionAction(w, r, "approve", driver.ApproveDriverVersion)
-}
-
-func (m *Module) activateWorkflowVersion(w http.ResponseWriter, r *http.Request) {
-	m.workflowVersionAction(w, r, "activate", driver.ActivateDriverVersion)
-}
-
-// workflowVersionAction runs one driver-version operation (approve/activate);
-// action is only the label used in response and error text.
-func (m *Module) workflowVersionAction(
-	w http.ResponseWriter,
-	r *http.Request,
-	action string,
-	apply func(context.Context, store.Store, string, string, string) (*domain.Driver, *domain.DriverVersion, error),
-) {
-	ws := strings.TrimSpace(r.PathValue("ws"))
-	name := strings.TrimSpace(r.PathValue("name"))
-	versionID := strings.TrimSpace(r.PathValue("versionId"))
-	if ws == "" || name == "" || versionID == "" {
-		handler.RespondError(w, http.StatusBadRequest, "workspace, workflow name and version id are required")
-		return
-	}
-	driverID, err := workflowdefs.ResolveDriverID(r.Context(), m.store, ws, name)
-	if err != nil {
-		handler.WriteDomainError(w, err, "resolve workflow driver failed")
-		return
-	}
-	drv, ver, err := apply(r.Context(), m.store, ws, driverID, versionID)
-	if err != nil {
-		handler.WriteDomainError(w, err, action+" workflow version failed")
-		return
-	}
-	handler.WriteJSON(w, http.StatusOK, map[string]any{"action": action, "driver": drv, "version": ver})
-}
-
 type createWorkflowVersionRequest struct {
 	Files      map[string]string `json:"files"`
 	Entrypoint string            `json:"entrypoint,omitempty"`
@@ -248,7 +176,6 @@ type createWorkflowVersionRequest struct {
 type workflowVersionInput struct {
 	entrypoint string
 	files      map[string]string
-	activate   bool
 }
 
 // parseCreateWorkflowVersionRequest decodes and validates the request body
@@ -282,11 +209,11 @@ func parseCreateWorkflowVersionRequest(w http.ResponseWriter, r *http.Request, n
 		writeError(w, http.StatusBadRequest, "entrypoint file is missing")
 		return in, false
 	}
-	in.files = files
-	in.activate = true
-	if req.Activate != nil {
-		in.activate = *req.Activate
+	if req.Activate != nil && *req.Activate {
+		writeError(w, http.StatusBadRequest, "activate=true is not supported; approve and activate the version through the workflow catalog lifecycle API")
+		return in, false
 	}
+	in.files = files
 	return in, true
 }
 
@@ -306,7 +233,9 @@ func (m *Module) createWorkflowVersion(w http.ResponseWriter, r *http.Request) {
 		Name:         name,
 		Entrypoint:   in.entrypoint,
 		Files:        in.files,
-		Activate:     in.activate,
+		// HTTP submission only builds and registers. Approval and activation
+		// cross the Workflow Catalog lifecycle command boundary explicitly.
+		Activate: false,
 	})
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())

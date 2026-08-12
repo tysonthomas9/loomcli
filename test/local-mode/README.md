@@ -75,6 +75,18 @@ Open:
 - API: http://localhost:8282
 - fleet-db: http://localhost:8280
 
+FleetDB is bound to host loopback and runs with authentication plus RBAC
+enabled. The stack bootstraps the checked-in
+`loom-local-mode-test-only-admin-key-v1` fixture and gives the matching key to
+Loom through both Fleet client environment aliases. This deterministic key is
+only for this disposable local test profile: do not reuse it or expose the
+FleetDB port on a shared network. Override it consistently for a run with
+`LOCAL_MODE_FLEETDB_API_KEY=<test-key>`.
+
+When testing a paired FleetDB feature worktree, set
+`LOCAL_MODE_FLEETDB_SOURCE_ROOT=/absolute/path/to/fleet-db-worktree`; otherwise
+the Compose build keeps using the traditional sibling `fleet-db` checkout.
+
 What starts:
 
 - `fleet-db`: shared control plane and issue store.

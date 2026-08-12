@@ -46,6 +46,9 @@ LOOM_PORT="${LOOM_PORT:-18198}"
 PROBE_PORT="${PROBE_PORT:-18199}"
 FLEET_URL="http://127.0.0.1:${FLEET_PORT}"
 LOOM_URL="http://127.0.0.1:${LOOM_PORT}"
+# This sandbox regression intentionally disables FleetDB authorization and
+# does not prove the Workflow Catalog lifecycle capability.
+export LOOM_WORKFLOW_CATALOG_ENABLED=false
 
 TMP_ROOT="$(mktemp -d -t loom-step9-sandbox.XXXXXX)"
 BIN_DIR="$TMP_ROOT/bin"

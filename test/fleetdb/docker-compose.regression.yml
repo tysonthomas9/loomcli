@@ -106,6 +106,9 @@ services:
       LOOM_ISSUE_BACKEND: fleet-db
       LOOM_FLEET_URL: http://fleet-db:8080
       LOOM_WORKSPACE: FLEETDB
+      # This UI/store regression disables FleetDB authorization and does not
+      # prove the Workflow Catalog lifecycle capability.
+      LOOM_WORKFLOW_CATALOG_ENABLED: "false"
       LOOM_BACKEND: codex
       CODEX_HOME: /root/.codex
       LOOM_AGENT_NAME: fleetdb-regression-harness

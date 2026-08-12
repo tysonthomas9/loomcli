@@ -80,21 +80,34 @@ loom_serve_startup_readiness:
 
 workflow_approval_latency:
   record:
-    status: not-yet-migrated
+    status: measured
     rationale: >-
-      Phase 2 is the first point at which workflow approve executes through the
-      migrated Workflow management boundary. Sampling the current direct-Store
-      command would not measure the required migrated use case.
+      Thirty authenticated approve requests through the committed Phase 2 Loom
+      management boundary and a fresh real FleetDB/miniredis process establish
+      the first reproducible workflow-approval latency baseline.
     evidence:
-      source_sha: b64b5256ba206d482037a5dee2703fdecbb3c497
-      measured_at: 2026-07-15
-      evidence_source: docs/migrations/modular-monolith/03-migration-plan.md Phase 2 and 04-enforcement-and-gates.md Performance and operability
-      command: []
+      source_sha: e96925ae638163352197e2273577fbb1ecedbfb8
+      measured_at: 2026-07-16T06:26:47Z
+      evidence_source: docs/migrations/modular-monolith/07-phase-2-decisions-and-evidence.md performance evidence
+      command:
+        - go
+        - test
+        - -tags=e2e
+        - ./internal/webui/handlers/workflows
+        - -run
+        - ^TestE2E_WorkflowCatalogPhase2ApprovePerformance$
+        - -count=1
+        - -v
       procedure: >-
-        After the Phase 2 management route and client conversion exist, seed a
-        fixed workflow version, execute at least 30 approve calls against one
-        isolated local FleetDB deployment, retain all raw durations, and record
-        nearest-rank p50 and p95. Until then both values remain explicit nulls.
+        With FLEET_DB_REPO pinned to FleetDB 430dce8d, build the committed Loom
+        and FleetDB binaries, start a fresh embedded Redis-backed FleetDB and
+        real loom serve, seed a fixed validated version, then execute thirty
+        independently seeded authenticated approve requests through Loom. The
+        retained raw milliseconds are [6.572, 6.574, 11.456, 8.563, 7.772,
+        35.834, 5.737, 12.309, 8.867, 5.149, 9.533, 8.886, 7.218,
+        61.979, 32.628, 11.228, 17.288, 6.621, 13.756, 23.212, 9.538,
+        12.001, 6.003, 9.736, 10.260, 8.835, 26.930, 6.807, 7.456,
+        7.202]. Aggregates use nearest-rank percentiles.
       environment:
         operating_system: macOS 15.6.1 (24G90)
         architecture: arm64
@@ -102,37 +115,45 @@ workflow_approval_latency:
         memory: 24 GB
         go_version: go1.26.0
         node_version: v24.13.1
-        profile: not executable before the Phase 2 Workflow management boundary exists
-        dependencies: []
+        profile: committed Phase 2 heads; fresh real FleetDB/miniredis and loom serve; local operator authentication; no external model
+        dependencies:
+          - fleet-db@430dce8d9fcc9c48bc9d52613b78403b8aae19d4
   result:
     use_case: workflow approve through the migrated authenticated management API
-    sample_count: 0
+    sample_count: 30
     p50:
-      value: null
+      value: 8.886
       unit: milliseconds
     p95:
-      value: null
+      value: 35.834
       unit: milliseconds
 
 fleetdb_round_trips:
   record:
-    status: not-yet-migrated
+    status: measured
     rationale: >-
-      The representative workflow-approve management command and its stable
-      request boundary do not exist until Phase 2, so a target-path FleetDB
-      round-trip count cannot yet be observed without substituting legacy
-      direct-Store behavior.
+      The same thirty-sample committed-head measurement observed every
+      Loom-to-FleetDB request and established a stable six-request successful
+      approve path instead of inferring the count from source call sites.
     evidence:
-      source_sha: b64b5256ba206d482037a5dee2703fdecbb3c497
-      measured_at: 2026-07-15
-      evidence_source: docs/migrations/modular-monolith/03-migration-plan.md Phase 2 and 04-enforcement-and-gates.md Performance and operability
-      command: []
+      source_sha: e96925ae638163352197e2273577fbb1ecedbfb8
+      measured_at: 2026-07-16T06:26:47Z
+      evidence_source: docs/migrations/modular-monolith/07-phase-2-decisions-and-evidence.md performance evidence
+      command:
+        - go
+        - test
+        - -tags=e2e
+        - ./internal/webui/handlers/workflows
+        - -run
+        - ^TestE2E_WorkflowCatalogPhase2ApprovePerformance$
+        - -count=1
+        - -v
       procedure: >-
-        Once the Phase 2 workflow-approve route exists, run one fixed command
-        against an isolated FleetDB, count client transport requests or spans
-        from command start through response, repeat to confirm the count is
-        stable, and record the exact round-trips per command. No inferred count
-        from source call sites is accepted.
+        Instrument the Loom FleetDB HTTP transport for each of the thirty
+        authenticated approve samples and count from command start through the
+        successful management response. Every sample observed exactly two
+        workspace GETs, two driver GETs, one driver-version GET, and one
+        lifecycle POST; no count is inferred from source.
       environment:
         operating_system: macOS 15.6.1 (24G90)
         architecture: arm64
@@ -140,13 +161,14 @@ fleetdb_round_trips:
         memory: 24 GB
         go_version: go1.26.0
         node_version: v24.13.1
-        profile: not executable before the Phase 2 Workflow management boundary exists
-        dependencies: []
+        profile: committed Phase 2 heads; fresh real FleetDB/miniredis and loom serve; instrumented Loom FleetDB HTTP transport; no external model
+        dependencies:
+          - fleet-db@430dce8d9fcc9c48bc9d52613b78403b8aae19d4
   result:
     command_name: workflow approve through the migrated authenticated management API
     sampling_scope: command start through successful management response, including every Loom-to-FleetDB HTTP request
     round_trips_per_command:
-      value: null
+      value: 6
       unit: round-trips/command
 
 production_background_loops:

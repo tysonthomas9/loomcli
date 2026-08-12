@@ -66,6 +66,9 @@ services:
       LOOM_AGENT_NAME: distributed-loom-a
       LOOM_FLEET_ACTOR: distributed-loom-a
       LOOM_FLEET_REQUIRED: "1"
+      # This distributed regression disables FleetDB authorization and does
+      # not prove the Workflow Catalog lifecycle capability.
+      LOOM_WORKFLOW_CATALOG_ENABLED: "false"
     volumes:
       - ../../tmp/distributed-smoke/bin/loom:/usr/local/bin/loom:ro
     command:
@@ -109,6 +112,7 @@ services:
       LOOM_AGENT_NAME: distributed-loom-b
       LOOM_FLEET_ACTOR: distributed-loom-b
       LOOM_FLEET_REQUIRED: "1"
+      LOOM_WORKFLOW_CATALOG_ENABLED: "false"
     volumes:
       - ../../tmp/distributed-smoke/bin/loom:/usr/local/bin/loom:ro
     command:
@@ -228,6 +232,7 @@ services:
       LOOM_AGENT_NAME: distributed-smoke
       LOOM_FLEET_ACTOR: distributed-smoke
       LOOM_FLEET_REQUIRED: "1"
+      LOOM_WORKFLOW_CATALOG_ENABLED: "false"
     volumes:
       - ../../tmp/distributed-smoke/bin/loom:/usr/local/bin/loom:ro
     networks: [distributed]

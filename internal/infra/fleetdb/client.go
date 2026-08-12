@@ -84,6 +84,7 @@ type Client struct {
 	inbox      *agentInboxMessageStore
 	drivers    *driverStore
 	versions   *driverVersionStore
+	catalog    *workflowCatalogStore
 	profiles   *workerProfileStore
 	services   *agentServiceStore
 	bindings   *triggerBindingStore
@@ -136,6 +137,7 @@ func New(cfg Config) (*Client, error) {
 	c.inbox = &agentInboxMessageStore{client: c}
 	c.drivers = &driverStore{client: c}
 	c.versions = &driverVersionStore{client: c}
+	c.catalog = &workflowCatalogStore{client: c}
 	c.profiles = &workerProfileStore{client: c}
 	c.services = &agentServiceStore{client: c}
 	c.bindings = &triggerBindingStore{client: c}
@@ -195,6 +197,12 @@ func (c *Client) Drivers() store.DriverStore { return c.drivers }
 
 // DriverVersions returns the DriverVersionStore.
 func (c *Client) DriverVersions() store.DriverVersionStore { return c.versions }
+
+// WorkflowCatalog exposes the narrow transport surface used by the Workflow
+// Catalog adapter. It reuses this Client's authentication, tracing, retry, and
+// connection pool; composition must not construct a second FleetDB client for
+// the capability.
+func (c *Client) WorkflowCatalog() WorkflowCatalogTransport { return c.catalog }
 
 func (c *Client) WorkerProfiles() store.WorkerProfileStore { return c.profiles }
 
@@ -380,15 +388,14 @@ func (c *Client) doRequest(req *http.Request, method, path string, out any) erro
 func classifyHTTPError(method, path string, status int, body []byte) error {
 	msg := extractErrorMessage(body)
 	code := extractErrorCode(body)
-	prefix := fmt.Sprintf("fleetdb: %s %s: HTTP %d", method, path, status)
-	if msg != "" {
-		prefix += ": " + msg
-	}
+	prefix := formatHTTPErrorPrefix(method, path, status, msg)
 	switch status {
 	case http.StatusNotFound:
 		return fmt.Errorf("%s: %w", prefix, domain.ErrNotFound)
 	case http.StatusConflict:
 		switch code {
+		case "revision_conflict":
+			return fmt.Errorf("%s: %w", prefix, ErrWorkflowCatalogRevisionConflict)
 		case "already_claimed":
 			return fmt.Errorf("%s: %w", prefix, domain.ErrAlreadyClaimed)
 		case "invalid_transition":
@@ -410,6 +417,14 @@ func classifyHTTPError(method, path string, status int, body []byte) error {
 		}
 		return fmt.Errorf("%s: %w", prefix, domain.ErrConflict)
 	case http.StatusBadRequest, http.StatusUnprocessableEntity:
+		switch code {
+		case "workflow_catalog_version_ownership":
+			return fmt.Errorf("%s: %w", prefix, ErrWorkflowCatalogVersionOwnership)
+		case "workflow_catalog_version_not_validated":
+			return fmt.Errorf("%s: %w", prefix, ErrWorkflowCatalogVersionNotValidated)
+		case "workflow_catalog_version_not_approved":
+			return fmt.Errorf("%s: %w", prefix, ErrWorkflowCatalogVersionNotApproved)
+		}
 		// Structured await validation codes map back onto their domain
 		// sentinels (each wraps domain.ErrInvalid).
 		if sentinel := awaitErrSentinel(code); sentinel != nil {
@@ -425,6 +440,14 @@ func classifyHTTPError(method, path string, status int, body []byte) error {
 		return fmt.Errorf("%s: %w", prefix, domain.ErrConflict)
 	}
 	return errors.New(prefix)
+}
+
+func formatHTTPErrorPrefix(method, path string, status int, message string) string {
+	prefix := fmt.Sprintf("fleetdb: %s %s: HTTP %d", method, path, status)
+	if message != "" {
+		prefix += ": " + message
+	}
+	return prefix
 }
 
 // extractErrorMessage delegates to fleethttp.ExtractErrorMessage and

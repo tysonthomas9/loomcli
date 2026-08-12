@@ -319,21 +319,45 @@ func TestApplyFleetConfig_StoreBackedServeDoesNotExpectDaemon(t *testing.T) {
 	}
 }
 
-func TestWithStoreFleetURLUsesEmbeddedStoreURL(t *testing.T) {
-	fs := withStoreFleetURL(fleetState{}, "http://127.0.0.1:19090")
+func TestWithStoreFleetConfigUsesEmbeddedStoreConnection(t *testing.T) {
+	fs := withStoreFleetConfig(fleetState{}, "http://127.0.0.1:19090", "local-service-key")
 
 	if fs.clientCfg.URL != "http://127.0.0.1:19090" {
 		t.Fatalf("clientCfg.URL = %q, want embedded store URL", fs.clientCfg.URL)
 	}
+	if fs.clientCfg.APIKey != "local-service-key" {
+		t.Fatal("clientCfg.APIKey did not inherit the embedded Store credential")
+	}
+	var cfg webui.ServerConfig
+	applyFleetConfig(&cfg, fs)
+	if cfg.FleetClientAPIKey != "local-service-key" {
+		t.Fatal("ServerConfig did not receive the embedded Store credential for FleetBackendHook composition")
+	}
 }
 
-func TestWithStoreFleetURLKeepsExplicitURL(t *testing.T) {
-	fs := withStoreFleetURL(fleetState{
-		clientCfg: config.FleetClientConfig{URL: "http://fleet-db:8080"},
-	}, "http://127.0.0.1:19090")
+func TestWithStoreFleetConfigKeepsExplicitExternalConnection(t *testing.T) {
+	fs := withStoreFleetConfig(fleetState{
+		clientCfg: config.FleetClientConfig{
+			URL:    "http://fleet-db:8080",
+			APIKey: "external-key",
+		},
+	}, "http://127.0.0.1:19090", "local-service-key")
 
 	if fs.clientCfg.URL != "http://fleet-db:8080" {
 		t.Fatalf("clientCfg.URL = %q, want explicit fleet URL", fs.clientCfg.URL)
+	}
+	if fs.clientCfg.APIKey != "external-key" {
+		t.Fatal("clientCfg.APIKey was replaced by an unrelated local Store credential")
+	}
+}
+
+func TestWithStoreFleetConfigAuthenticatesMatchingExplicitURL(t *testing.T) {
+	fs := withStoreFleetConfig(fleetState{
+		clientCfg: config.FleetClientConfig{URL: "http://127.0.0.1:19090/"},
+	}, "http://127.0.0.1:19090", "store-key")
+
+	if fs.clientCfg.APIKey != "store-key" {
+		t.Fatal("matching explicit Fleet URL did not inherit the Store credential")
 	}
 }
 

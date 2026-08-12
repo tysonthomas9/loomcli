@@ -90,6 +90,45 @@ func TestFleetBackendHook_OnRegisterScopesBackendToRegisteredWorkspace(t *testin
 	}
 }
 
+func TestFleetBackendHook_V2MutationWaitCarriesAPIKey(t *testing.T) {
+	const serviceCredential = "embedded-service-credential"
+	var requests int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		if r.Method != http.MethodGet || r.URL.Path != "/api/v2/SECURE/events/mutations" {
+			t.Errorf("request = %s %s, want GET /api/v2/SECURE/events/mutations", r.Method, r.URL.Path)
+		}
+		if r.Header.Get("X-API-Key") != serviceCredential || r.Header.Get("X-Fleet-API-Key") != serviceCredential {
+			t.Error("v2 mutation wait did not carry the FleetBackendHook API key")
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"events": []any{}, "cursor": "0"})
+	}))
+	defer server.Close()
+
+	hook := NewFleetBackendHook(server.URL, "", serviceCredential, "local-service", slog.Default())
+	ctx := regCtx("SECURE", "/tmp/secure")
+	if err := hook.OnRegister(ctx); err != nil {
+		t.Fatalf("OnRegister: %v", err)
+	}
+	resource, ok := ctx.Resolve(coordinator.ResourceKeyFleetBackend)
+	if !ok {
+		t.Fatal("expected FleetBackend resource")
+	}
+	cursorBackend, ok := resource.(backend.CursorMutationBackend)
+	if !ok {
+		t.Fatalf("resource %T does not implement CursorMutationBackend", resource)
+	}
+	if _, err := cursorBackend.WaitForMutationsAfter(context.Background(), "0", 1); err != nil {
+		t.Fatalf("WaitForMutationsAfter: %v", err)
+	}
+	if requests != 1 {
+		t.Fatalf("requests = %d, want 1", requests)
+	}
+}
+
 func TestFleetBackendHook_EmptyWorkspaceRequiresExplicitWorkspace(t *testing.T) {
 	hook := NewFleetBackendHook(testFleetURL, "", "", "test-actor", slog.Default())
 	ctx := regCtx("", "/tmp/demo")

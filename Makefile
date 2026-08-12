@@ -29,6 +29,15 @@ LOCAL_MODE_RUN_ID := $(LOCAL_MODE_RUN_ID)
 LOCAL_MODE_COMPOSE ?=
 LOCAL_MODE_COMPOSE_FILES ?=
 LOCAL_MODE_COMPOSE_UP_FLAGS ?= --build
+# This checked-in credential is intentionally deterministic so the disposable
+# local-mode Compose profile and its host-side verification scripts agree. It
+# is an admin credential for this test stack only; never reuse it in a shared
+# or production FleetDB deployment.
+LOCAL_MODE_FLEETDB_API_KEY ?= loom-local-mode-test-only-admin-key-v1
+LOCAL_MODE_FLEETDB_ADMIN_ACTOR ?= local-mode-harness@fixture.local
+# Override this when validating a paired FleetDB feature worktree. The default
+# preserves the long-standing sibling-repository layout.
+LOCAL_MODE_FLEETDB_SOURCE_ROOT ?= $(abspath test/local-mode/../../../fleet-db)
 FLUE_SRC ?= $(abspath test/local-mode/../../../../dynamic-workflows/flue)
 # The local-mode image is Debian/glibc and normally uses the host CPU
 # architecture. Override this only when Compose is targeting another CPU.
@@ -52,6 +61,9 @@ export LOCAL_MODE_CHECKOUT_ID
 export LOCAL_MODE_COMPOSE_PROJECT
 export LOCAL_MODE_RUN_ID
 export LOCAL_MODE_EXPECTED_BACKEND
+export LOCAL_MODE_FLEETDB_API_KEY
+export LOCAL_MODE_FLEETDB_ADMIN_ACTOR
+export LOCAL_MODE_FLEETDB_SOURCE_ROOT
 export FLUE_SRC
 LOCAL_MODE_COMPOSE_SELECT = \
 	if [ "$(strip $(LOCAL_MODE_COMPOSE))" != "" ]; then \

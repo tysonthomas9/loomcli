@@ -31,6 +31,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
 	runtimesettings "github.com/tysonthomas9/loomcli/internal/localsettings"
 	"github.com/tysonthomas9/loomcli/internal/netutil"
+	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -60,9 +61,9 @@ func TestE2E_WorkflowEndpointsRunCustomizedEpicRunnerFromCLI(t *testing.T) {
 	e2e.startFleetDB()
 	e2e.seedWorkspace()
 	dag := e2e.seedEpicDAG()
+	e2e.startLoomServe()
 	marker := "loom-custom-epic-runner-marker"
 	customVersionID := e2e.customizeEpicRunnerViaCLI(marker)
-	e2e.startLoomServe()
 
 	runID := e2e.startWorkflowRun(BuiltinEpicRunnerWorkflowName, map[string]any{
 		"epicId":      dag.epicID,
@@ -105,9 +106,9 @@ func TestE2E_WorkflowEndpointsRunCustomizedEpicRunnerWithDaytonaSandbox(t *testi
 	e2e.startFleetDB()
 	e2e.seedWorkspace()
 	dag := e2e.seedSingleTaskEpic()
+	e2e.startLoomServe()
 	marker := "loom-custom-epic-runner-marker"
 	customVersionID := e2e.customizeEpicRunnerViaCLI(marker)
-	e2e.startLoomServe()
 
 	runID := e2e.startWorkflowRun(BuiltinEpicRunnerWorkflowName, map[string]any{
 		"epicId":           dag.epicID,
@@ -157,9 +158,9 @@ func TestE2E_WorkflowEndpointsRunCustomizedEpicRunnerWithDaytonaPRChain(t *testi
 	e2e.seedWorkspace()
 	e2e.seedWorkspaceRepo(repoURL)
 	dag := e2e.seedSlackPRChainEpic(repoURL)
+	e2e.startLoomServe()
 	marker := "loom-custom-epic-runner-marker"
 	customVersionID := e2e.customizeEpicRunnerViaCLI(marker)
-	e2e.startLoomServe()
 
 	runID := e2e.startWorkflowRun(BuiltinEpicRunnerWorkflowName, map[string]any{
 		"epicId":              dag.epicID,
@@ -206,8 +207,9 @@ type workflowEndpointE2E struct {
 	useBundledTaskRunners bool
 	serveHome             string
 
-	fleetURL string
-	loomURL  string
+	fleetURL    string
+	fleetAPIKey string
+	loomURL     string
 
 	fleetClient  *fleetdb.Client
 	issueBackend backend.IssueBackend
@@ -262,7 +264,8 @@ func (e *workflowEndpointE2E) startFleetDB() {
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	e.t.Cleanup(cancel)
 
-	embedded, err := bootstrap.StartEmbedded(ctx, filepath.Join(e.t.TempDir(), "fleet-data"), workflowEndpointQuietLogger())
+	dataDir := filepath.Join(e.t.TempDir(), "fleet-data")
+	embedded, err := bootstrap.StartEmbedded(ctx, dataDir, workflowEndpointQuietLogger())
 	if err != nil {
 		e.t.Fatalf("start embedded fleet-db: %v", err)
 	}
@@ -273,10 +276,11 @@ func (e *workflowEndpointE2E) startFleetDB() {
 	})
 
 	e.fleetURL = embedded.URL()
-	e.fleetClient, err = fleetdb.New(fleetdb.Config{
-		BaseURL: e.fleetURL,
-		Actor:   e.actor,
-	})
+	e.fleetAPIKey, err = authority.ReadLocalFleetDBServiceCredential(filepath.Join(dataDir, "fleet-db", "auth"))
+	if err != nil {
+		e.t.Fatalf("read embedded FleetDB service credential: %v", err)
+	}
+	e.fleetClient, err = embedded.NewClient(fleetdb.Config{Actor: e.actor})
 	if err != nil {
 		e.t.Fatalf("create fleet-db client: %v", err)
 	}
@@ -316,6 +320,7 @@ func (e *workflowEndpointE2E) seedWorkspace() {
 	e.issueBackend, err = fleet.New(fleet.Config{
 		BaseURL:     e.fleetURL,
 		WorkspaceID: e.workspace,
+		APIKey:      e.fleetAPIKey,
 		Actor:       e.actor,
 	})
 	if err != nil {
@@ -487,6 +492,7 @@ func (e *workflowEndpointE2E) startLoomServe() {
 		"HOME":                             e.serveHomeDir(),
 		"LOOM_CONFIG_DIR":                  e.configDir,
 		"LOOM_WORKSPACE":                   e.workspace,
+		"LOOM_WORKSPACE_RUNTIME_DIR":       e.workDir,
 		"LOOM_FLEET_DB_URL":                e.fleetURL,
 		"LOOM_FLEET_URL":                   "",
 		"LOOM_SERVER_URL":                  "",
@@ -502,7 +508,7 @@ func (e *workflowEndpointE2E) startLoomServe() {
 		"OPENAI_API_KEY":                   firstNonEmpty(strings.TrimSpace(os.Getenv("OPENAI_API_KEY")), "workflow-endpoint-e2e-test-key"),
 		"LOOM_ISSUE_BACKEND":               "",
 		bootstrap.EnvFleetDBBin:            e.fleetDBBin,
-		bootstrap.EnvFleetDBAPIKey:         "",
+		bootstrap.EnvFleetDBAPIKey:         e.fleetAPIKey,
 		bootstrap.EnvFleetDBActor:          e.actor,
 	})
 	var stdout bytes.Buffer
@@ -531,20 +537,21 @@ func (e *workflowEndpointE2E) loomEnv() []string {
 		e.t.Fatalf("encode Flue command: %v", err)
 	}
 	return workflowEndpointEnv(map[string]string{
-		"HOME":                     filepath.Join(e.configDir, "home"),
-		"LOOM_CONFIG_DIR":          e.configDir,
-		"LOOM_WORKSPACE":           e.workspace,
-		"LOOM_FLEET_DB_URL":        e.fleetURL,
-		"LOOM_FLEET_URL":           "",
-		"LOOM_SERVER_URL":          "",
-		"LOOM_REAL_FLUE_CMD_JSON":  string(flueCommandJSON),
-		"LOOM_SDK_ROOT":            filepath.Join(e.repoRoot, "sdk"),
-		"LOOM_FLUE_RUNTIME_ROOT":   filepath.Join(e.flueRepo, "packages", "runtime"),
-		"FLUE_REPO":                e.flueRepo,
-		"DAYTONA_SDK_ROOT":         e.daytonaSDKRoot(),
-		bootstrap.EnvFleetDBBin:    e.fleetDBBin,
-		bootstrap.EnvFleetDBAPIKey: "",
-		bootstrap.EnvFleetDBActor:  e.actor,
+		"HOME":                       filepath.Join(e.configDir, "home"),
+		"LOOM_CONFIG_DIR":            e.configDir,
+		"LOOM_WORKSPACE":             e.workspace,
+		"LOOM_WORKSPACE_RUNTIME_DIR": e.workDir,
+		"LOOM_FLEET_DB_URL":          e.fleetURL,
+		"LOOM_FLEET_URL":             "",
+		"LOOM_SERVER_URL":            e.loomURL,
+		"LOOM_REAL_FLUE_CMD_JSON":    string(flueCommandJSON),
+		"LOOM_SDK_ROOT":              filepath.Join(e.repoRoot, "sdk"),
+		"LOOM_FLUE_RUNTIME_ROOT":     filepath.Join(e.flueRepo, "packages", "runtime"),
+		"FLUE_REPO":                  e.flueRepo,
+		"DAYTONA_SDK_ROOT":           e.daytonaSDKRoot(),
+		bootstrap.EnvFleetDBBin:      e.fleetDBBin,
+		bootstrap.EnvFleetDBAPIKey:   e.fleetAPIKey,
+		bootstrap.EnvFleetDBActor:    e.actor,
 	})
 }
 
@@ -1104,6 +1111,7 @@ func (e *workflowEndpointE2E) getFleetJSON(path string, wantStatus int, out any)
 		e.t.Fatalf("create fleet GET %s: %v", path, err)
 	}
 	req.Header.Set("X-Actor", e.actor)
+	req.Header.Set("X-API-Key", e.fleetAPIKey)
 	resp, err := e.httpClient.Do(req)
 	if err != nil {
 		e.t.Fatalf("fleet GET %s: %v", path, err)
@@ -1134,6 +1142,7 @@ func (e *workflowEndpointE2E) doFleetJSON(method, path string, body any, wantSta
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Actor", e.actor)
+	req.Header.Set("X-API-Key", e.fleetAPIKey)
 	resp, err := e.httpClient.Do(req)
 	if err != nil {
 		e.t.Fatalf("fleet %s %s: %v", method, path, err)

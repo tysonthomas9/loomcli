@@ -43,7 +43,7 @@ services:
   fleet-db:
     image: ${LOCAL_MODE_FLEETDB_IMAGE:-loomcli-local-mode-fleet-db:latest}
     build:
-      context: ../../../fleet-db
+      context: ${LOCAL_MODE_FLEETDB_SOURCE_ROOT:-../../../fleet-db}
       dockerfile: deploy/docker/Dockerfile
     depends_on:
       redis:
@@ -59,18 +59,25 @@ services:
       # dogfood stack self-contained; without it fleet-db exits on startup.
       FLEETDB_ARTIFACT_CONTENT_BACKEND: local
       FLEETDB_ARTIFACT_CONTENT_DIR: /var/lib/fleetdb/artifacts
+      # Local-mode exercises the production authentication and authorization
+      # path. This deterministic bootstrap credential is a checked-in test
+      # fixture for this disposable, loopback-bound stack only; never reuse it
+      # for a shared or production FleetDB deployment.
+      FLEET_AUTH_ENABLED: "true"
+      FLEET_AUTH_DEV_MODE: "false"
+      FLEET_AUTHZ_ENABLED: "true"
+      FLEET_AUTH_BOOTSTRAP_ADMIN_ACTOR: "${LOCAL_MODE_FLEETDB_ADMIN_ACTOR:-local-mode-harness@fixture.local}"
+      FLEET_AUTH_BOOTSTRAP_ADMIN_KEY: "${LOCAL_MODE_FLEETDB_API_KEY:-loom-local-mode-test-only-admin-key-v1}"
     command:
       - "--redis-addr"
       - "redis:6379"
       - "--addr"
       - ":8080"
-      - "--auth-dev-mode"
-      - "--authz-enabled=false"
     networks: [local-mode]
     volumes:
       - fleetdb-artifacts:/var/lib/fleetdb/artifacts
     ports:
-      - "${LOCAL_MODE_FLEETDB_PORT:-8280}:8080"
+      - "127.0.0.1:${LOCAL_MODE_FLEETDB_PORT:-8280}:8080"
 
   loom-local:
     image: ${LOCAL_MODE_LOOM_IMAGE:-loomcli-local-mode-loom:latest}
@@ -92,9 +99,17 @@ services:
       LOOM_ISSUE_BACKEND: fleetdb
       LOOM_FLEET_DB_URL: http://fleet-db:8080
       LOOM_FLEET_URL: http://fleet-db:8080
+      # The Store/capability clients and the legacy fleet adapter resolve
+      # different environment aliases; both must authenticate as the same
+      # bootstrap admin in this test profile.
+      LOOM_FLEET_DB_API_KEY: "${LOCAL_MODE_FLEETDB_API_KEY:-loom-local-mode-test-only-admin-key-v1}"
+      LOOM_FLEET_API_KEY: "${LOCAL_MODE_FLEETDB_API_KEY:-loom-local-mode-test-only-admin-key-v1}"
       LOOM_FLEETDB_REDIS_URL: redis:6379
-      LOOM_FLEET_DB_ACTOR: local-mode-harness@fixture.local
-      LOOM_FLEET_ACTOR: local-mode-harness@fixture.local
+      LOOM_FLEET_DB_ACTOR: "${LOCAL_MODE_FLEETDB_ADMIN_ACTOR:-local-mode-harness@fixture.local}"
+      LOOM_FLEET_ACTOR: "${LOCAL_MODE_FLEETDB_ADMIN_ACTOR:-local-mode-harness@fixture.local}"
+      # This profile is the product proof for the Workflow Catalog slice; do
+      # not make auth migration pass by disabling the capability.
+      LOOM_WORKFLOW_CATALOG_ENABLED: "true"
       LOOM_BACKEND: localdogfood
       LOOM_SERVER_URL: http://127.0.0.1:8080
       LOOM_WEBUI_URL: http://127.0.0.1:8080

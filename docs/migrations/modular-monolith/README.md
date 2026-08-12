@@ -1,9 +1,9 @@
 # Modular Monolith Migration
 
-- **Status:** Reviewed — Phase 1 complete; Phase 2 not started
-- **Date:** 2026-07-15
+- **Status:** Reviewed — Phase 2 complete; Phase 3 is next
+- **Date:** 2026-07-16
 - **Scope:** `loom serve`, the operator CLI entry surfaces, the Vite frontend counterpart, and the fleet-db contracts those capabilities depend on
-- **Provenance:** [Phase 0 integration baseline](00-phase-0-baseline.md), refreshed at Loom `122d4d79` and FleetDB `8120c788`
+- **Provenance:** [Phase 0 integration baseline](00-phase-0-baseline.md), final [Phase 1 evidence](06-phase-1-decisions-and-evidence.md) at Loom `7e8a6dd2`, and [Phase 2 evidence](07-phase-2-decisions-and-evidence.md) at Loom implementation head `84cccb761` with FleetDB `430dce8d9`
 - **Related:** [Unified agent UX](../../design/2026-07-01-unified-agent-ux-proposal.md) · [Durable agent identity](../../design/2026-07-07-agent-identity-record.md) · [Workflow driver authoring](../../design/workflow-driver-authoring-guide.md)
 
 ## Decision summary
@@ -31,6 +31,7 @@ This is not a package-count project. The pre-guardrail source snapshot already h
 | [04-enforcement-and-gates.md](04-enforcement-and-gates.md) | What automated rules, tests, metrics, and stop conditions make the boundary real? |
 | [05-v5-integration-regression-closure.md](05-v5-integration-regression-closure.md) | Which integration regressions were closed, and what evidence is required before extraction starts? |
 | [06-phase-1-decisions-and-evidence.md](06-phase-1-decisions-and-evidence.md) | Which decisions were approved, what Phase 1 proved, and what remains explicitly RED or not yet migrated? |
+| [07-phase-2-decisions-and-evidence.md](07-phase-2-decisions-and-evidence.md) | What Workflow Catalog boundary was implemented, which invariants it owns, what passed, and which external proof remains? |
 
 ## Scope boundaries
 
@@ -47,13 +48,15 @@ This is not a package-count project. The pre-guardrail source snapshot already h
 
 The migration does **not** introduce microservices, multiple `go.mod` files, feature npm packages, microfrontends, or a generic in-process event bus.
 
-## Phase 0 and Phase 1 status
+## Phase 0, Phase 1, and current Phase 2 status
 
 The required base integration is complete and its validated code heads are pushed. The Phase 1 branch starts from Loom `122d4d79`, where `origin/v5` at `95e97289` is an ancestor; companion FleetDB is `8120c788`. The original divergence counts, semantic conflict ledger, gate results, and local-mode proof remain frozen in the [Phase 0 baseline](00-phase-0-baseline.md), while the machine-readable baseline records the refreshed heads and structural ratchets.
 
-Phase 0 and Phase 1 are complete. Phase 1 approved the capability graph, completed the direct-write, authority, transaction, runtime, and performance inventories, enforced all 11 declared build profiles plus all-files AST checks, added the characterization gate, and productized the supervisor-disabled proof contract. It also closed the stale-task default/clock and session-heartbeat reliability items and added fail-fast FleetDB capability negotiation for slices that declare required keys.
+Phase 0 and Phase 1 are complete. The final Phase 1 Loom head is `7e8a6dd2`; it approved the capability graph, completed the direct-write, authority, transaction, runtime, and performance inventories, enforced all 11 declared build profiles plus all-files AST checks, added the characterization gate, and productized the supervisor-disabled proof contract. It also closed the stale-task default/clock and session-heartbeat reliability items and added fail-fast FleetDB capability negotiation for slices that declare required keys.
 
-No capability package has been extracted: the architecture report still records zero `internal/modules/*` roots, all three Workflow Catalog ledger commands are Phase 2B specifications, and migrated workflow-approval latency and FleetDB round trips remain explicit nulls. The supervisor-disabled execution row is intentionally RED and cannot count as parity proof. See the [Phase 1 evidence](06-phase-1-decisions-and-evidence.md).
+Phase 2 is complete with an active `internal/modules/workflowcatalog` root. Loom implementation head `84cccb761` and FleetDB `430dce8d9` implement the read API, typed operator commands, shared FleetDB adapter, management HTTP and CLI adapters, local credential mechanism, and Redis/Postgres lifecycle contract. The paired gates, checksum `4f50d5e0…ca19`, real route/CLI E2E, packaged Desktop journey, checkout-scoped deterministic local-mode integration, and measured p50/p95 plus round trips pass. The graph is ratcheted to `completed_phase: 2`, and the machine baseline includes the immutable Phase 2 validation snapshot. See the [Phase 2 evidence](07-phase-2-decisions-and-evidence.md).
+
+The supervisor-disabled execution row remains intentionally RED and cannot count as parity proof or be changed by the Workflow Catalog pilot.
 
 ## Approved architecture decisions
 
@@ -71,4 +74,4 @@ These outcomes are enforced by `capability-graph.yaml` and `migration-baseline.j
 
 ---
 
-[All migrations](../README.md) · Next: [Current-state evidence](01-current-state.md) · [Phase 1 evidence](06-phase-1-decisions-and-evidence.md)
+[All migrations](../README.md) · Next: [Current-state evidence](01-current-state.md) · [Phase 2 evidence](07-phase-2-decisions-and-evidence.md)

@@ -533,6 +533,9 @@ func classifyDirectWriteCalls(
 			continue
 		}
 		if access == persistenceMutating {
+			if ownerCoreUsesOwnDeclaredPort(call, owner) {
+				continue
+			}
 			counts[directWriteCountKey{file: call.file, receiver: call.receiver, method: call.method, owner: owner}]++
 		}
 	}
@@ -543,6 +546,27 @@ func classifyDirectWriteCalls(
 		)
 	}
 	return directWriteRows(counts), nil
+}
+
+// ownerCoreUsesOwnDeclaredPort distinguishes target architecture from a
+// legacy direct persistence write. A capability core is expected to invoke
+// its own declared command port; concrete fleetdb/httpapi adapters remain in
+// the direct-write inventory, as do calls to legacy or foreign-owner stores.
+func ownerCoreUsesOwnDeclaredPort(call directWriteCall, owner string) bool {
+	owner = strings.TrimSpace(owner)
+	if owner == "" {
+		return false
+	}
+	prefix := "internal/modules/" + owner + "/"
+	if !strings.HasPrefix(call.file, prefix) {
+		return false
+	}
+	remainder := strings.TrimPrefix(call.file, prefix)
+	if first, _, found := strings.Cut(remainder, "/"); found && isConcreteAdapterSegment(first) {
+		return false
+	}
+	receiver := strings.TrimPrefix(call.receiver, "*")
+	return strings.HasPrefix(receiver, modulePath+"/internal/modules/"+owner+".")
 }
 
 func directWriteProblemMessages(problems map[directWriteProblemIdentity]directWriteProblem) []string {

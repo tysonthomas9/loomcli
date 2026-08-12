@@ -52,28 +52,52 @@ if [[ -s "$tmp" ]]; then
     "use bootstrap.OpenStore/cmdstore.OpenStore so runtime traffic goes through fleet-db over HTTP."
 fi
 
-# Runtime code outside bootstrap should not import the fleet-db store client
-# directly. Bootstrap owns local/cloud selection and returns the store.Store
-# handle callers should use.
+# Runtime code outside bootstrap and the declared capability-composition seams
+# should not import the fleet-db store client directly. Bootstrap still owns
+# local/cloud selection and construction. The Phase 2 Workflow Catalog seams
+# below only share that already-constructed client, expose its capability key,
+# or translate its narrow transport into the module-owned adapter contract.
 rg -n \
   -e 'github\.com/tysonthomas9/loomcli/internal/infra/fleetdb' \
   cmd internal \
   --glob '*.go' \
   --glob '!**/*_test.go' \
-  --glob '!internal/bootstrap/openstore.go' \
   --glob '!internal/infra/fleetdb/**' \
   >"$tmp" || true
 
 if [[ -s "$tmp" ]]; then
-  fail_with_matches \
-    "fleet-db store client imported outside internal/bootstrap/openstore.go:" \
-    "route callers through bootstrap.OpenStore/cmdstore.OpenStore so mode selection stays centralized."
+  disallowed="$(mktemp)"
+  trap 'rm -f "$tmp" "$disallowed"' EXIT
+  while IFS=: read -r file line text; do
+    [[ -n "${file:-}" ]] || continue
+    case "$file" in
+      internal/bootstrap/openstore.go | \
+      internal/bootstrap/embedded.go | \
+      internal/app/serve/workflow_catalog.go | \
+      internal/app/serve/workflow_catalog_fleetdb.go | \
+      internal/cli/serve/serveadapter/workflow_catalog.go)
+        ;;
+      *)
+        printf '%s:%s:%s\n' "$file" "$line" "$text" >>"$disallowed"
+        ;;
+    esac
+  done <"$tmp"
+
+  if [[ -s "$disallowed" ]]; then
+    cp "$disallowed" "$tmp"
+    fail_with_matches \
+      "fleet-db store client imported outside bootstrap or a declared composition seam:" \
+      "route callers through bootstrap.OpenStore/cmdstore.OpenStore, or add a reviewed capability adapter/composition seam without constructing another client."
+  fi
 fi
 
 # The fleet-db store client should be constructed by the bootstrap opener only.
 # That keeps local/cloud selection centralized and prevents alternate runtime
 # control-plane paths from growing in command or UI code.
-rg -n 'fleetdb\.New\(' \
+# Match the fleetdb identifier itself, not longer adapter aliases such as
+# catalogfleetdb.New. Construction remains restricted to bootstrap even though
+# the exact import allowlist above permits composition code to share the client.
+rg -n '\bfleetdb\.New\(' \
   cmd internal \
   --glob '*.go' \
   --glob '!**/*_test.go' \
@@ -84,7 +108,7 @@ if [[ -s "$tmp" ]]; then
   trap 'rm -f "$tmp" "$disallowed"' EXIT
   while IFS=: read -r file line text; do
     [[ -n "${file:-}" ]] || continue
-    if [[ "$file" != "internal/bootstrap/openstore.go" ]]; then
+    if [[ "$file" != "internal/bootstrap/openstore.go" && "$file" != "internal/bootstrap/embedded.go" ]]; then
       printf '%s:%s:%s\n' "$file" "$line" "$text" >>"$disallowed"
     fi
   done <"$tmp"
@@ -92,7 +116,7 @@ if [[ -s "$tmp" ]]; then
   if [[ -s "$disallowed" ]]; then
     cp "$disallowed" "$tmp"
     fail_with_matches \
-      "fleetdb.New called outside internal/bootstrap/openstore.go:" \
+      "fleetdb.New called outside bootstrap client construction:" \
       "route callers through bootstrap.OpenStore/cmdstore.OpenStore instead of constructing a separate client path."
   fi
 fi

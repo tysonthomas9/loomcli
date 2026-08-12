@@ -102,9 +102,10 @@ func TestWorkflowReadyzJSONReportsLocalRoots(t *testing.T) {
 	}
 }
 
-func TestWorkflowStoreCommandsJSON(t *testing.T) {
+func TestWorkflowManagementAndStoreLaneCommandsJSON(t *testing.T) {
 	ctx, st := setupWorkflowCommandStore(t)
 	withWorkflowCommandStore(t, st)
+	setupWorkflowManagementFixture(t)
 
 	workflowVersionID = "version-1"
 	workflowApproveJSON = true
@@ -221,8 +222,9 @@ func TestWorkflowStoreCommandsJSON(t *testing.T) {
 }
 
 func TestWorkflowApproveUnknownVersionReturnsError(t *testing.T) {
-	_, st := setupWorkflowCommandStore(t)
-	withWorkflowCommandStore(t, st)
+	resetWorkflowCommandGlobals()
+	t.Cleanup(resetWorkflowCommandGlobals)
+	setupWorkflowManagementFixture(t)
 	workflowVersionID = "missing-version"
 	workflowApproveJSON = true
 
@@ -281,14 +283,56 @@ func TestWorkflowRunLocalRunnerPreflightFailureDoesNotCreateRun(t *testing.T) {
 }
 
 func TestWorkflowVersionsUnknownWorkflowReturnsError(t *testing.T) {
-	_, st := setupWorkflowCommandStore(t)
-	withWorkflowCommandStore(t, st)
+	resetWorkflowCommandGlobals()
+	t.Cleanup(resetWorkflowCommandGlobals)
+	setupWorkflowManagementFixture(t)
 	workflowVersionsJSON = true
 	_, err := captureWorkflowStdout(t, func() error {
 		return runWorkflowVersions(&cobra.Command{}, []string{"missing-workflow"})
 	})
 	if !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("runWorkflowVersions err = %v, want ErrNotFound", err)
+	}
+}
+
+func TestWorkflowBuildTextHandoffNamesManagementServerAndWorkspace(t *testing.T) {
+	_, st := setupWorkflowCommandStore(t)
+	withWorkflowCommandStore(t, st)
+	workflowBuildSource = writeWorkflowSourceLayout(t, "custom-flow")
+	const versionID = "custom-version-1"
+	const digest = "sha256:custom-source"
+	var gotOptions workflows.BuildAndRegisterOptions
+	originalBuild := workflowBuildAndRegister
+	workflowBuildAndRegister = func(_ context.Context, _ store.Store, opts workflows.BuildAndRegisterOptions) (*driverpkg.RegisterFlueResult, string, error) {
+		gotOptions = opts
+		return &driverpkg.RegisterFlueResult{
+			Driver:  &domain.Driver{WorkspaceKey: opts.WorkspaceKey, DriverID: opts.Name},
+			Version: &domain.DriverVersion{WorkspaceKey: opts.WorkspaceKey, DriverID: opts.Name, VersionID: versionID, SourceDigest: digest},
+		}, "", nil
+	}
+	t.Cleanup(func() { workflowBuildAndRegister = originalBuild })
+
+	stdout, err := captureWorkflowStdout(t, func() error {
+		return runWorkflowBuild(&cobra.Command{}, []string{"custom-flow"})
+	})
+	if err != nil {
+		t.Fatalf("runWorkflowBuild: %v", err)
+	}
+	if gotOptions.WorkspaceKey != "TEST" || gotOptions.Activate {
+		t.Fatalf("build options = %+v, want workspace TEST and inactive registration", gotOptions)
+	}
+	for _, want := range []string{
+		"Management server required: set LOOM_SERVER_URL to its URL, or replace $LOOM_SERVER_URL below with the URL.",
+		"Target workspace: TEST",
+		"loom --server \"$LOOM_SERVER_URL\" --workspace TEST workflow approve custom-flow --version " + versionID,
+		"loom --server \"$LOOM_SERVER_URL\" --workspace TEST workflow activate custom-flow --version " + versionID,
+	} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("build output = %q, want %q", stdout, want)
+		}
+	}
+	if strings.Contains(stdout, "loom workflow approve") {
+		t.Fatalf("build output retained endpoint-free legacy handoff: %q", stdout)
 	}
 }
 

@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -24,8 +25,14 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
+	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
+
+type issueBackendFleetRuntime struct {
+	URL    string
+	APIKey string
+}
 
 func TestE2E_IssueBackendConformance_AllModes(t *testing.T) {
 	fleetDBBin := fleetDBBinaryForIssueBackendConformance(t)
@@ -58,13 +65,14 @@ func TestE2E_IssueBackendConformance_AllModes(t *testing.T) {
 		workspace := "CONTRACTCLOUD"
 		createRemoteWorkspace(t, remoteURL, workspace)
 		setBackendModeEnv(t, map[string]string{
-			"LOOM_CONFIG_DIR":    t.TempDir(),
-			"LOOM_WORKSPACE":     workspace,
-			"LOOM_AGENT_NAME":    "contract-cloud",
-			"LOOM_ISSUE_BACKEND": "fleetdb",
-			"LOOM_FLEET_DB_URL":  remoteURL,
-			"LOOM_FLEET_URL":     "",
-			"LOOM_SERVER_URL":    "",
+			"LOOM_CONFIG_DIR":       t.TempDir(),
+			"LOOM_WORKSPACE":        workspace,
+			"LOOM_AGENT_NAME":       "contract-cloud",
+			"LOOM_ISSUE_BACKEND":    "fleetdb",
+			"LOOM_FLEET_DB_URL":     remoteURL.URL,
+			"LOOM_FLEET_DB_API_KEY": remoteURL.APIKey,
+			"LOOM_FLEET_URL":        "",
+			"LOOM_SERVER_URL":       "",
 		})
 		backendtest.RunIssueBackendConformance(t, backendtest.IssueBackendSuiteConfig{
 			NewBackend: func(testing.TB) backend.IssueBackend {
@@ -81,7 +89,8 @@ func TestE2E_IssueBackendConformance_AllModes(t *testing.T) {
 			"LOOM_WORKSPACE":     workspace,
 			"LOOM_AGENT_NAME":    "contract-fleet",
 			"LOOM_ISSUE_BACKEND": "fleet",
-			"LOOM_FLEET_URL":     remoteURL,
+			"LOOM_FLEET_URL":     remoteURL.URL,
+			"LOOM_FLEET_API_KEY": remoteURL.APIKey,
 			"LOOM_FLEET_DB_URL":  "",
 			"LOOM_SERVER_URL":    "",
 		})
@@ -148,11 +157,12 @@ func loomBinaryForIssueBackendConformance(t *testing.T) string {
 	return path
 }
 
-func startFleetDBForIssueBackendConformance(t *testing.T) string {
+func startFleetDBForIssueBackendConformance(t *testing.T) issueBackendFleetRuntime {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	t.Cleanup(cancel)
-	emb, err := bootstrap.StartEmbedded(ctx, t.TempDir(), slog.Default())
+	dataDir := t.TempDir()
+	emb, err := bootstrap.StartEmbedded(ctx, dataDir, slog.Default())
 	if err != nil {
 		t.Fatalf("start fleet-db: %v", err)
 	}
@@ -161,7 +171,11 @@ func startFleetDBForIssueBackendConformance(t *testing.T) string {
 			t.Logf("stop fleet-db: %v", err)
 		}
 	})
-	return emb.URL()
+	apiKey, err := authority.ReadLocalFleetDBServiceCredential(filepath.Join(dataDir, "fleet-db", "auth"))
+	if err != nil {
+		t.Fatalf("read embedded FleetDB service credential: %v", err)
+	}
+	return issueBackendFleetRuntime{URL: emb.URL(), APIKey: apiKey}
 }
 
 func createLocalWorkspace(t *testing.T, configDir, workspace string) {
@@ -176,9 +190,9 @@ func createLocalWorkspace(t *testing.T, configDir, workspace string) {
 	createWorkspace(t, ctx, handle.Store.Workspaces(), workspace)
 }
 
-func createRemoteWorkspace(t *testing.T, baseURL, workspace string) {
+func createRemoteWorkspace(t *testing.T, runtime issueBackendFleetRuntime, workspace string) {
 	t.Helper()
-	client, err := fleetdb.New(fleetdb.Config{BaseURL: baseURL, Actor: "backend-conformance"})
+	client, err := fleetdb.New(fleetdb.Config{BaseURL: runtime.URL, APIKey: runtime.APIKey, Actor: "backend-conformance"})
 	if err != nil {
 		t.Fatalf("fleetdb client: %v", err)
 	}
@@ -203,19 +217,20 @@ func createWorkspace(t *testing.T, ctx context.Context, workspaces store.Workspa
 	}
 }
 
-func startLoomAPIServerForIssueBackendConformance(t *testing.T, loomBin, configDir, fleetDBURL, workspace string) string {
+func startLoomAPIServerForIssueBackendConformance(t *testing.T, loomBin, configDir string, fleetRuntime issueBackendFleetRuntime, workspace string) string {
 	t.Helper()
 	port := freeLoopbackPort(t)
 	serverURL := "http://127.0.0.1:" + strconv.Itoa(port)
 	cmd := exec.Command(loomBin, "serve", "--no-daemon", "--bind", "127.0.0.1", "--port", strconv.Itoa(port))
 	cmd.Env = backendModeEnv(map[string]string{
-		"LOOM_CONFIG_DIR":    configDir,
-		"LOOM_WORKSPACE":     workspace,
-		"LOOM_AGENT_NAME":    "contract-api-server",
-		"LOOM_FLEET_DB_URL":  fleetDBURL,
-		"LOOM_ISSUE_BACKEND": "",
-		"LOOM_FLEET_URL":     "",
-		"LOOM_SERVER_URL":    "",
+		"LOOM_CONFIG_DIR":       configDir,
+		"LOOM_WORKSPACE":        workspace,
+		"LOOM_AGENT_NAME":       "contract-api-server",
+		"LOOM_FLEET_DB_URL":     fleetRuntime.URL,
+		"LOOM_FLEET_DB_API_KEY": fleetRuntime.APIKey,
+		"LOOM_ISSUE_BACKEND":    "",
+		"LOOM_FLEET_URL":        "",
+		"LOOM_SERVER_URL":       "",
 	})
 	var stderr bytes.Buffer
 	cmd.Stdout = &stderr
@@ -283,7 +298,9 @@ func setBackendModeEnv(t *testing.T, values map[string]string) {
 		"LOOM_AGENT_NAME",
 		"LOOM_ISSUE_BACKEND",
 		"LOOM_FLEET_DB_URL",
+		"LOOM_FLEET_DB_API_KEY",
 		"LOOM_FLEET_URL",
+		"LOOM_FLEET_API_KEY",
 		"LOOM_SERVER_URL",
 	} {
 		t.Setenv(key, values[key])

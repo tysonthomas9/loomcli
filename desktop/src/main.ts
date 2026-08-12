@@ -1,4 +1,3 @@
-import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Command } from "@tauri-apps/plugin-shell";
@@ -23,12 +22,22 @@ type RuntimeStatus = {
   error?: string;
 };
 
+type BrowserSessionInfo = {
+  runtime_url: string;
+  workspace: string;
+  launch_code: string;
+  expires_at: string;
+};
+
 type StageMode = "starting" | "ready" | "error";
 
 const SIDECAR = "binaries/loom";
 const RUNTIME_TIMEOUT_MS = 45_000;
 const RUNTIME_POLL_MS = 500;
-const NEW_WORKSPACE_WINDOW_EVENT = "loom:new-workspace-window";
+const OPEN_ADDITIONAL_WORKSPACE_WINDOW = Boolean(
+  (window as unknown as Record<string, unknown>)
+    .__LOOM_OPEN_ADDITIONAL_WORKSPACE_WINDOW__,
+);
 
 const app = document.querySelector<HTMLDivElement>("#app");
 if (!app) {
@@ -80,7 +89,8 @@ app.innerHTML = `
 `;
 
 const stageTitle = document.querySelector<HTMLHeadingElement>("#stageTitle")!;
-const stageDetail = document.querySelector<HTMLParagraphElement>("#stageDetail")!;
+const stageDetail =
+  document.querySelector<HTMLParagraphElement>("#stageDetail")!;
 const actions = document.querySelector<HTMLElement>("#actions")!;
 const details = document.querySelector<HTMLDetailsElement>("#details")!;
 const output = document.querySelector<HTMLPreElement>("#output")!;
@@ -137,7 +147,9 @@ async function runLoom(args: string[]) {
 async function readRuntimeStatus() {
   const result = await runLoom(["local", "status", "--json"]);
   if (result.code !== 0) {
-    throw new Error(result.stderr || result.stdout || `loom exited ${result.code}`);
+    throw new Error(
+      result.stderr || result.stdout || `loom exited ${result.code}`,
+    );
   }
   const status = JSON.parse(result.stdout) as RuntimeStatus;
   status.healthy = Boolean(status.healthy);
@@ -155,11 +167,17 @@ async function ensureRuntime() {
   });
   renderRuntime(initial);
 
-  setStage("starting", "Starting Loom", "Ensuring the local runtime matches this app.");
+  setStage(
+    "starting",
+    "Starting Loom",
+    "Ensuring the local runtime matches this app.",
+  );
   const start = await runLoom(["local", "start"]);
   renderRuntime(initial, `${start.stdout}\n${start.stderr}`);
   if (start.code !== 0) {
-    throw new Error(start.stderr || start.stdout || `loom exited ${start.code}`);
+    throw new Error(
+      start.stderr || start.stdout || `loom exited ${start.code}`,
+    );
   }
 
   return waitForHealthyRuntime();
@@ -196,13 +214,72 @@ function workspaceEntryUrl(runtimeUrl: string, route = "/") {
   return route.startsWith("/") ? `${base}${route}` : `${base}/${route}`;
 }
 
+function routeMatchesWorkspace(entry: URL, workspace: string) {
+  const segments = entry.pathname.split("/");
+  if (segments[1] !== "ws") {
+    return true;
+  }
+  try {
+    return (
+      Boolean(segments[2]) && decodeURIComponent(segments[2]) === workspace
+    );
+  } catch {
+    return false;
+  }
+}
+
+async function trustedWorkspaceEntryUrl(runtimeUrl: string, route = "/") {
+  // The durable mode-0600 operator token stays in the sidecar. Desktop receives
+  // only a 30-second, single-use launch code and places it in the fragment so
+  // it is never sent in the initial HTTP request or retained in server logs.
+  const result = await runLoom(["local", "browser-session"]);
+  if (result.code !== 0) {
+    throw new Error(
+      result.stderr || "Could not create a trusted browser session.",
+    );
+  }
+  let session: BrowserSessionInfo;
+  try {
+    session = JSON.parse(result.stdout) as BrowserSessionInfo;
+  } catch {
+    throw new Error("Loom returned an invalid trusted browser session.");
+  }
+  if (
+    !session.workspace?.trim() ||
+    !/^[0-9a-f]{64}$/.test(session.launch_code ?? "")
+  ) {
+    throw new Error("Loom returned an incomplete trusted browser session.");
+  }
+
+  let entry = new URL(workspaceEntryUrl(runtimeUrl, route));
+  const issuedFor = new URL(session.runtime_url);
+  if (entry.origin !== issuedFor.origin) {
+    throw new Error("The local runtime changed while opening the workspace.");
+  }
+  // A crash-recovery route may describe a window from the previously active
+  // workspace. Never pair that route with a launch code minted for a different
+  // workspace: recover at the runtime root and let the normal workspace route
+  // selection use the launch authority instead.
+  if (!routeMatchesWorkspace(entry, session.workspace)) {
+    entry = new URL(workspaceEntryUrl(runtimeUrl));
+  }
+  const fragment = new URLSearchParams(
+    entry.hash.startsWith("#") ? entry.hash.slice(1) : entry.hash,
+  );
+  fragment.set("loom_launch", session.launch_code);
+  fragment.set("loom_workspace", session.workspace);
+  entry.hash = fragment.toString();
+  return entry.toString();
+}
+
 async function openWorkspaceWindow(
   runtimeUrl: string,
   options: { forceNew?: boolean; route?: string } = {},
 ) {
   setStage("starting", "Opening Workspace", "Loading the workspace window.");
+  const entryUrl = await trustedWorkspaceEntryUrl(runtimeUrl, options.route);
   await invoke("open_workspace_window", {
-    runtimeUrl: workspaceEntryUrl(runtimeUrl, options.route),
+    runtimeUrl: entryUrl,
     forceNew: Boolean(options.forceNew),
   });
 }
@@ -218,18 +295,11 @@ async function readPendingRecoveryRoute() {
   return pendingRecoveryRoute;
 }
 
-async function openAdditionalWorkspaceWindow() {
-  if (bootInFlight) return;
-  if (lastRuntimeUrl) {
-    await openWorkspaceWindow(lastRuntimeUrl, { forceNew: true });
-    return;
-  }
-  await boot({ forceNew: true });
-}
-
 async function focusExistingWorkspaceWindow() {
   if (lastRuntimeUrl) {
-    await openWorkspaceWindow(lastRuntimeUrl);
+    await openWorkspaceWindow(lastRuntimeUrl, {
+      forceNew: OPEN_ADDITIONAL_WORKSPACE_WINDOW,
+    });
     return;
   }
   await boot();
@@ -248,7 +318,11 @@ function showFailure(err: unknown) {
 // from /Applications. The bundled loom sidecar cannot start from there, so show
 // actionable guidance rather than a confusing "Could Not Open Workspace" error.
 async function needsRelocation() {
-  if (Boolean((window as unknown as Record<string, unknown>).__LOOM_NEEDS_RELOCATION__)) {
+  if (
+    Boolean(
+      (window as unknown as Record<string, unknown>).__LOOM_NEEDS_RELOCATION__,
+    )
+  ) {
     return true;
   }
   return Boolean(await invoke<boolean>("needs_relocation"));
@@ -260,13 +334,17 @@ function showRelocationNotice() {
   setStage(
     "error",
     "Move Loom to Applications",
-    "Loom can't run from a disk image or your Downloads folder. Drag \"Loom Agents\" into your Applications folder, then open it from there.",
+    'Loom can\'t run from a disk image or your Downloads folder. Drag "Loom Agents" into your Applications folder, then open it from there.',
   );
   actions.hidden = true;
   details.open = false;
 }
 
-async function boot(options: { forceNew?: boolean } = {}) {
+async function boot(
+  options: { forceNew?: boolean } = {
+    forceNew: OPEN_ADDITIONAL_WORKSPACE_WINDOW,
+  },
+) {
   if (bootInFlight) return;
   bootInFlight = true;
 
@@ -278,7 +356,9 @@ async function boot(options: { forceNew?: boolean } = {}) {
 
     actions.hidden = true;
     openWorkspaceBtn.disabled = !lastRuntimeUrl;
-    const recoveryRoute = options.forceNew ? "" : await readPendingRecoveryRoute();
+    const recoveryRoute = options.forceNew
+      ? ""
+      : await readPendingRecoveryRoute();
 
     const status = await ensureRuntime();
     const runtimeUrl = status.runtime?.url;
@@ -306,11 +386,9 @@ retryBtn.addEventListener("click", () => {
 
 openWorkspaceBtn.addEventListener("click", () => {
   if (!lastRuntimeUrl) return;
-  void openWorkspaceWindow(lastRuntimeUrl).catch(showFailure);
-});
-
-void listen(NEW_WORKSPACE_WINDOW_EVENT, () => {
-  void openAdditionalWorkspaceWindow().catch(showFailure);
+  void openWorkspaceWindow(lastRuntimeUrl, {
+    forceNew: OPEN_ADDITIONAL_WORKSPACE_WINDOW,
+  }).catch(showFailure);
 });
 
 void getCurrentWindow().onFocusChanged(({ payload }) => {
@@ -326,7 +404,7 @@ void getCurrentWindow().onFocusChanged(({ payload }) => {
 
 async function startLauncher() {
   startupRelocationChecked = true;
-  await boot();
+  await boot({ forceNew: OPEN_ADDITIONAL_WORKSPACE_WINDOW });
 }
 
 void startLauncher().catch(showFailure);

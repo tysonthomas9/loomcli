@@ -8,14 +8,14 @@ use std::{
 
 use tauri::{
     menu::{Menu, MenuItem, MenuItemKind, PredefinedMenuItem, Submenu, WINDOW_SUBMENU_ID},
-    AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, RunEvent, Runtime, Url, WebviewUrl,
+    AppHandle, LogicalPosition, LogicalSize, Manager, RunEvent, Runtime, Url, WebviewUrl,
     WebviewWindow, WebviewWindowBuilder,
 };
 
 const MENU_NEW_WORKSPACE_WINDOW: &str = "new-workspace-window";
 const MENU_NEW_WORKSPACE_WINDOW_ALT: &str = "new-workspace-window-window-menu";
-const EVENT_NEW_WORKSPACE_WINDOW: &str = "loom:new-workspace-window";
 const PRIMARY_WORKSPACE_WINDOW_LABEL: &str = "main";
+const ADDITIONAL_WORKSPACE_WINDOW_PREFIX: &str = "workspace-";
 const WORKSPACE_WINDOW_WIDTH: f64 = 1280.0;
 const WORKSPACE_WINDOW_HEIGHT: f64 = 800.0;
 const WORKSPACE_MIN_WIDTH: f64 = 720.0;
@@ -47,6 +47,13 @@ fn path_needs_relocation(path: &Path) -> bool {
 /// JS shim read by the launcher frontend (src/main.ts) before it boots.
 fn relocation_init_script() -> String {
     format!("window.__LOOM_NEEDS_RELOCATION__ = {};", needs_relocation())
+}
+
+fn additional_workspace_launcher_init_script() -> String {
+    format!(
+        "{} window.__LOOM_OPEN_ADDITIONAL_WORKSPACE_WINDOW__ = true;",
+        relocation_init_script()
+    )
 }
 
 pub fn run() {
@@ -88,10 +95,12 @@ pub fn run() {
 #[tauri::command]
 fn open_workspace_window<R: Runtime>(
     app: AppHandle<R>,
+    caller: WebviewWindow<R>,
     runtime_url: String,
     force_new: bool,
 ) -> Result<(), String> {
-    open_workspace_window_native(&app, &runtime_url, force_new).map_err(|err| err.to_string())
+    open_workspace_window_native(&app, &caller, &runtime_url, force_new)
+        .map_err(|err| err.to_string())
 }
 
 #[tauri::command]
@@ -300,11 +309,32 @@ fn workspace_recovery_route(url: &Url) -> String {
         route.push('?');
         route.push_str(query);
     }
-    if let Some(fragment) = url.fragment() {
+    if let Some(fragment) = sanitized_workspace_fragment(url.fragment()) {
         route.push('#');
-        route.push_str(fragment);
+        route.push_str(&fragment);
     }
     route
+}
+
+fn sanitized_workspace_fragment(fragment: Option<&str>) -> Option<String> {
+    let fragment = fragment?.trim();
+    if fragment.is_empty() {
+        return None;
+    }
+    let retained = fragment
+        .split('&')
+        .filter(|part| !part.is_empty())
+        .filter(|part| {
+            let key = url::form_urlencoded::parse(part.as_bytes())
+                .next()
+                .map(|(key, _)| key);
+            !matches!(key.as_deref(), Some("loom_launch" | "loom_workspace"))
+        })
+        .collect::<Vec<_>>();
+    if retained.is_empty() {
+        return None;
+    }
+    Some(retained.join("&"))
 }
 
 fn runtime_health_probe(url: &Url, timeout: Duration) -> bool {
@@ -398,32 +428,61 @@ fn activate_app_ignoring_other_apps() {
 
 fn open_workspace_window_native<R: Runtime>(
     app: &AppHandle<R>,
+    caller: &WebviewWindow<R>,
     runtime_url: &str,
     force_new: bool,
 ) -> tauri::Result<()> {
     let url = workspace_entry_url(runtime_url)?;
 
-    if !force_new {
-        if let Some(window) = app.get_webview_window(PRIMARY_WORKSPACE_WINDOW_LABEL) {
-            configure_workspace_window(&window)?;
-            window.navigate(url)?;
-            reveal_window(app, &window);
-            return Ok(());
+    // A user-created additional window starts as bundled launcher content so
+    // it can ask the sidecar for its own one-time browser launch code. Reuse
+    // that exact invoking launcher only after verifying it has not already
+    // navigated to runtime content. This prevents cloning an existing URL (and
+    // its consumed launch fragment) into another workspace window.
+    if force_new {
+        if !is_additional_workspace_launcher(app, caller)? {
+            return Err(tauri::Error::InvalidWebviewUrl(
+                "additional workspace windows must originate from bundled launcher content",
+            ));
         }
+        configure_workspace_window(caller)?;
+        caller.navigate(url)?;
+        reveal_window(app, caller);
+        return Ok(());
     }
 
-    let label = if force_new {
-        format!(
-            "workspace-{}-{}",
-            current_time_millis(),
-            app.webview_windows().len()
-        )
-    } else {
-        PRIMARY_WORKSPACE_WINDOW_LABEL.to_string()
-    };
+    if let Some(window) = app.get_webview_window(PRIMARY_WORKSPACE_WINDOW_LABEL) {
+        configure_workspace_window(&window)?;
+        window.navigate(url)?;
+        reveal_window(app, &window);
+        return Ok(());
+    }
 
-    let window = WebviewWindowBuilder::new(app, label, WebviewUrl::External(url))
+    let window = WebviewWindowBuilder::new(
+        app,
+        PRIMARY_WORKSPACE_WINDOW_LABEL,
+        WebviewUrl::External(url),
+    )
+    .title("Loom")
+    .inner_size(WORKSPACE_WINDOW_WIDTH, WORKSPACE_WINDOW_HEIGHT)
+    .min_inner_size(WORKSPACE_MIN_WIDTH, WORKSPACE_MIN_HEIGHT)
+    .content_protected(false)
+    .focused(true)
+    .build()?;
+    reveal_window(app, &window);
+    Ok(())
+}
+
+fn open_additional_workspace_window<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
+    let label = format!(
+        "{}{}-{}",
+        ADDITIONAL_WORKSPACE_WINDOW_PREFIX,
+        current_time_millis(),
+        app.webview_windows().len()
+    );
+    let window = WebviewWindowBuilder::new(app, label, WebviewUrl::default())
         .title("Loom")
+        .initialization_script(&additional_workspace_launcher_init_script())
         .inner_size(WORKSPACE_WINDOW_WIDTH, WORKSPACE_WINDOW_HEIGHT)
         .min_inner_size(WORKSPACE_MIN_WIDTH, WORKSPACE_MIN_HEIGHT)
         .content_protected(false)
@@ -433,26 +492,19 @@ fn open_workspace_window_native<R: Runtime>(
     Ok(())
 }
 
-fn open_additional_workspace_window<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
-    let Some(url) = current_workspace_url(app)? else {
-        show_primary_window(app);
-        app.emit(EVENT_NEW_WORKSPACE_WINDOW, ())?;
-        return Ok(());
-    };
-    let label = format!(
-        "workspace-{}-{}",
-        current_time_millis(),
-        app.webview_windows().len()
-    );
-    let window = WebviewWindowBuilder::new(app, label, WebviewUrl::External(url))
-        .title("Loom")
-        .inner_size(WORKSPACE_WINDOW_WIDTH, WORKSPACE_WINDOW_HEIGHT)
-        .min_inner_size(WORKSPACE_MIN_WIDTH, WORKSPACE_MIN_HEIGHT)
-        .content_protected(false)
-        .focused(true)
-        .build()?;
-    reveal_window(app, &window);
-    Ok(())
+fn is_additional_workspace_launcher<R: Runtime>(
+    app: &AppHandle<R>,
+    caller: &WebviewWindow<R>,
+) -> tauri::Result<bool> {
+    Ok(is_additional_workspace_launcher_url(
+        caller.label(),
+        &caller.url()?,
+        &launcher_url(app)?,
+    ))
+}
+
+fn is_additional_workspace_launcher_url(label: &str, current: &Url, launcher: &Url) -> bool {
+    label.starts_with(ADDITIONAL_WORKSPACE_WINDOW_PREFIX) && current == launcher
 }
 
 fn configure_workspace_window<R: Runtime>(window: &WebviewWindow<R>) -> tauri::Result<()> {
@@ -467,22 +519,14 @@ fn configure_workspace_window<R: Runtime>(window: &WebviewWindow<R>) -> tauri::R
 }
 
 fn workspace_entry_url(runtime_url: &str) -> tauri::Result<Url> {
-    Url::parse(runtime_url.trim()).map_err(tauri::Error::InvalidUrl)
-}
-
-fn current_workspace_url<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Option<Url>> {
-    if let Some(window) = app.get_webview_window(PRIMARY_WORKSPACE_WINDOW_LABEL) {
-        let url = window.url()?;
-        if url.scheme() == "http" || url.scheme() == "https" {
-            return Ok(Some(url));
-        }
+    let url = Url::parse(runtime_url.trim()).map_err(tauri::Error::InvalidUrl)?;
+    if !is_loopback_runtime_url(&url) {
+        // Reuse the URL parser's typed error path so callers receive a normal
+        // Tauri InvalidUrl without introducing a stringly native-command error.
+        let parse_error = Url::parse("http://[").expect_err("invalid URL fixture");
+        return Err(tauri::Error::InvalidUrl(parse_error));
     }
-    for (label, window) in app.webview_windows() {
-        if label.starts_with("workspace-") {
-            return window.url().map(Some);
-        }
-    }
-    Ok(None)
+    Ok(url)
 }
 
 fn current_time_millis() -> u128 {
@@ -495,6 +539,7 @@ fn current_time_millis() -> u128 {
 #[cfg(test)]
 mod tests {
     use super::{
+        additional_workspace_launcher_init_script, is_additional_workspace_launcher_url,
         is_loopback_runtime_url, path_needs_relocation, runtime_health_probe, workspace_entry_url,
         workspace_recovery_route,
     };
@@ -527,6 +572,38 @@ mod tests {
         assert!(!path_needs_relocation(Path::new(
             "/Applications/Loom Agents.app/Contents/MacOS/loom-desktop"
         )));
+    }
+
+    #[test]
+    fn additional_workspace_launcher_requests_fresh_browser_authority() {
+        let script = additional_workspace_launcher_init_script();
+        assert!(script.contains("__LOOM_OPEN_ADDITIONAL_WORKSPACE_WINDOW__ = true"));
+        assert!(!script.contains("loom_launch"));
+        assert!(!script.contains("loom_workspace"));
+        assert!(!script.contains("http://"));
+    }
+
+    #[test]
+    fn only_bundled_additional_launcher_can_reuse_its_window() {
+        let launcher = Url::parse("tauri://localhost").unwrap();
+        let runtime = Url::parse(
+            "http://127.0.0.1:4567/ws/DESKTOP#loom_launch=consumed&loom_workspace=DESKTOP",
+        )
+        .unwrap();
+
+        assert!(is_additional_workspace_launcher_url(
+            "workspace-1-1",
+            &launcher,
+            &launcher,
+        ));
+        assert!(!is_additional_workspace_launcher_url(
+            "workspace-1-1",
+            &runtime,
+            &launcher,
+        ));
+        assert!(!is_additional_workspace_launcher_url(
+            "main", &launcher, &launcher,
+        ));
     }
 
     #[test]
@@ -564,6 +641,32 @@ mod tests {
     }
 
     #[test]
+    fn recovery_strips_one_time_browser_authority() {
+        let url = Url::parse(
+			"http://127.0.0.1:4567/ws/DESKTOP/list?search=abc#section=versions&loom_launch=secret&loom_workspace=DESKTOP",
+		)
+		.unwrap();
+        assert_eq!(
+            workspace_recovery_route(&url),
+            "/ws/DESKTOP/list?search=abc#section=versions"
+        );
+        let only_secret = Url::parse(
+            "http://127.0.0.1:4567/ws/DESKTOP#loom_launch=secret&loom_workspace=DESKTOP",
+        )
+        .unwrap();
+        assert_eq!(workspace_recovery_route(&only_secret), "/ws/DESKTOP");
+
+        let encoded_secret = Url::parse(
+            "http://127.0.0.1:4567/ws/DESKTOP#section&loom%5Flaunch=secret&loom%5Fworkspace=DESKTOP",
+        )
+        .unwrap();
+        assert_eq!(
+            workspace_recovery_route(&encoded_secret),
+            "/ws/DESKTOP#section"
+        );
+    }
+
+    #[test]
     fn workspace_entry_url_preserves_full_route() {
         let url = workspace_entry_url("http://127.0.0.1:4567/ws/DESKTOP/list?search=abc#section")
             .unwrap();
@@ -571,6 +674,18 @@ mod tests {
             url.as_str(),
             "http://127.0.0.1:4567/ws/DESKTOP/list?search=abc#section"
         );
+    }
+
+    #[test]
+    fn workspace_entry_url_rejects_non_loopback_and_missing_port() {
+        for raw in [
+            "https://127.0.0.1:4567/ws/DESKTOP",
+            "http://127.0.0.1/ws/DESKTOP",
+            "http://192.0.2.10:4567/ws/DESKTOP",
+            "https://example.com/ws/DESKTOP",
+        ] {
+            assert!(workspace_entry_url(raw).is_err(), "{raw}");
+        }
     }
 
     #[test]

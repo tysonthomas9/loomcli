@@ -32,11 +32,16 @@ func TestDiscoverAuthMode_Open(t *testing.T) {
 	}
 	defer c.Close()
 
-	if c.authMode.Mode != "open" {
-		t.Errorf("expected mode 'open', got %q", c.authMode.Mode)
+	mode := c.AuthMode()
+	if mode.Mode != "open" {
+		t.Errorf("expected mode 'open', got %q", mode.Mode)
 	}
-	if c.authMode.AuthURL != "" {
-		t.Errorf("expected empty auth_url, got %q", c.authMode.AuthURL)
+	if mode.AuthURL != "" {
+		t.Errorf("expected empty auth_url, got %q", mode.AuthURL)
+	}
+	mode.Mode = "oidc"
+	if c.AuthMode().Mode != "open" {
+		t.Error("AuthMode returned mutable client state")
 	}
 }
 

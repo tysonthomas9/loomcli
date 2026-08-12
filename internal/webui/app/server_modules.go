@@ -48,6 +48,9 @@ func (app *Server) buildModules() {
 		})
 	}
 	app.wsModules = append(app.wsModules, opsModule)
+	if app.config.WorkflowCatalogModule != nil {
+		app.wsModules = append(app.wsModules, app.config.WorkflowCatalogModule)
+	}
 
 	// Issue + session modules
 	app.wsModules = append(app.wsModules,

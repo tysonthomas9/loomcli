@@ -111,6 +111,13 @@ func profilePackageViolations(root, profile string, pkg *packages.Package, graph
 	if !strings.HasPrefix(pkg.PkgPath, modulePath+"/internal/") {
 		return nil
 	}
+	// packages.Load(Tests: true) adds a synthetic test-main package whose path
+	// ends in ".test". Its imports are the test harness, not a production or
+	// test source boundary. The real package-under-test variants are loaded
+	// separately and remain fully checked, including their _test.go imports.
+	if strings.HasSuffix(pkg.PkgPath, ".test") {
+		return nil
+	}
 	violations := []string{}
 	for importPath := range pkg.Imports {
 		if reason := forbiddenBoundaryImport(pkg.PkgPath, importPath, graph); reason != "" {
@@ -374,312 +381,6 @@ func transitiveModuleViolations(profile string, root *packages.Package) []string
 	return nil
 }
 
-type boundaryPackageKind uint8
-
-const (
-	boundaryPackageOther boundaryPackageKind = iota
-	boundaryPackageCapabilityPublic
-	boundaryPackageCapabilityCore
-	boundaryPackageCapabilityAdapter
-	boundaryPackageUnknownCapability
-	boundaryPackageAppCore
-	boundaryPackageAppAdapter
-	boundaryPackageComposition
-	boundaryPackagePlatform
-)
-
-type boundaryPackage struct {
-	kind    boundaryPackageKind
-	owner   string
-	adapter string
-}
-
-func forbiddenBoundaryImport(from, to string, graph CapabilityGraph) string {
-	fromPackage := classifyBoundaryPackage(from, graph)
-	toPackage := classifyBoundaryPackage(to, graph)
-
-	if fromPackage.kind == boundaryPackagePlatform {
-		switch {
-		case toPackage.kind == boundaryPackagePlatform:
-			return ""
-		case isModuleInternalPath(to):
-			return "platform may not import this package: product/app/legacy internals are forbidden; it may import only other platform packages, standard-library mechanisms, and reviewed external dependencies"
-		default:
-			return platformExternalImportViolation(to, graph.ExternalImports)
-		}
-	}
-
-	if isCapabilityPackage(fromPackage.kind) {
-		if reason := forbiddenCapabilityImport(to, fromPackage, toPackage, graph); reason != "" {
-			return reason
-		}
-	}
-
-	if fromPackage.kind == boundaryPackageAppCore || fromPackage.kind == boundaryPackageAppAdapter {
-		if reason := forbiddenApplicationImport(to, fromPackage, toPackage, graph); reason != "" {
-			return reason
-		}
-	}
-	return ""
-}
-
-func forbiddenApplicationImport(
-	toPath string,
-	fromPackage, toPackage boundaryPackage,
-	graph CapabilityGraph,
-) string {
-	if toPackage.kind == boundaryPackageUnknownCapability {
-		return "named application workflow may import only declared capability public roots"
-	}
-	if fromPackage.kind == boundaryPackageAppAdapter {
-		return forbiddenApplicationAdapterImport(toPath, fromPackage, toPackage, graph.ExternalImports)
-	}
-	return forbiddenApplicationCoreImport(toPath, fromPackage, toPackage, graph.ExternalImports)
-}
-
-func forbiddenApplicationAdapterImport(
-	toPath string,
-	fromPackage, toPackage boundaryPackage,
-	policy ExternalImportPolicy,
-) string {
-	switch {
-	case toPackage.kind == boundaryPackageAppCore && toPackage.owner == fromPackage.owner:
-		return ""
-	case toPackage.kind == boundaryPackageAppAdapter &&
-		toPackage.owner == fromPackage.owner && toPackage.adapter == fromPackage.adapter:
-		return ""
-	case toPackage.kind == boundaryPackagePlatform:
-		return ""
-	case fromPackage.adapter == "fleetdb" && isSharedFleetDBTransport(toPath):
-		return ""
-	case !isModuleInternalPath(toPath):
-		return layerExternalImportViolation(toPath, true, "named application workflow", policy)
-	default:
-		return "application adapter may import only its workflow API and adapter subtree, approved platform mechanisms, and the shared FleetDB transport from a fleetdb adapter"
-	}
-}
-
-func forbiddenApplicationCoreImport(
-	toPath string,
-	fromPackage, toPackage boundaryPackage,
-	policy ExternalImportPolicy,
-) string {
-	if isCapabilityPackage(toPackage.kind) {
-		if toPackage.kind != boundaryPackageCapabilityPublic {
-			return "named application workflow may import only capability public roots"
-		}
-		return ""
-	}
-	if toPackage.kind == boundaryPackageComposition {
-		return "named application workflow may not import the composition root"
-	}
-	if toPackage.kind == boundaryPackageAppAdapter ||
-		(toPackage.kind == boundaryPackageAppCore && toPackage.owner != fromPackage.owner) {
-		return "named application workflow core may use only its own ports, not application implementations"
-	}
-	if toPackage.kind == boundaryPackageAppCore || toPackage.kind == boundaryPackagePlatform {
-		return ""
-	}
-	if !isModuleInternalPath(toPath) {
-		return layerExternalImportViolation(toPath, false, "named application workflow", policy)
-	}
-	return "named application workflow core may use only capability public APIs, its own packages and ports, and approved platform mechanisms"
-}
-
-func classifyBoundaryPackage(importPath string, graph CapabilityGraph) boundaryPackage {
-	if segments, ok := importPathSegments(importPath, graph.ModuleRoot); ok && len(segments) > 0 {
-		capability := capabilityNameForRoot(segments[0], graph)
-		if capability == "" {
-			return boundaryPackage{kind: boundaryPackageUnknownCapability, owner: segments[0]}
-		}
-		if len(segments) == 1 {
-			return boundaryPackage{kind: boundaryPackageCapabilityPublic, owner: capability}
-		}
-		if isConcreteAdapterSegment(segments[1]) {
-			return boundaryPackage{kind: boundaryPackageCapabilityAdapter, owner: capability, adapter: segments[1]}
-		}
-		return boundaryPackage{kind: boundaryPackageCapabilityCore, owner: capability}
-	}
-	if segments, ok := importPathSegments(importPath, graph.AppRoot); ok && len(segments) > 0 {
-		if segments[0] == "serve" {
-			return boundaryPackage{kind: boundaryPackageComposition, owner: "serve"}
-		}
-		if len(segments) > 1 && isConcreteAdapterSegment(segments[1]) {
-			return boundaryPackage{kind: boundaryPackageAppAdapter, owner: segments[0], adapter: segments[1]}
-		}
-		return boundaryPackage{kind: boundaryPackageAppCore, owner: segments[0]}
-	}
-	if _, ok := importPathSegments(importPath, graph.PlatformRoot); ok {
-		return boundaryPackage{kind: boundaryPackagePlatform}
-	}
-	return boundaryPackage{kind: boundaryPackageOther}
-}
-
-func forbiddenCapabilityImport(
-	toPath string,
-	fromPackage, toPackage boundaryPackage,
-	graph CapabilityGraph,
-) string {
-	if toPackage.kind == boundaryPackageUnknownCapability {
-		return "capability imports must target a declared capability public root"
-	}
-
-	if fromPackage.kind == boundaryPackageCapabilityAdapter {
-		switch {
-		case toPackage.kind == boundaryPackageCapabilityPublic && toPackage.owner == fromPackage.owner:
-			return ""
-		case toPackage.kind == boundaryPackageCapabilityAdapter &&
-			toPackage.owner == fromPackage.owner && toPackage.adapter == fromPackage.adapter:
-			return ""
-		case toPackage.kind == boundaryPackagePlatform:
-			return ""
-		case fromPackage.adapter == "fleetdb" && isSharedFleetDBTransport(toPath):
-			return ""
-		case !isModuleInternalPath(toPath):
-			return layerExternalImportViolation(toPath, true, "capability", graph.ExternalImports)
-		default:
-			return "capability adapter may import only its own public root and adapter subtree, approved platform mechanisms, and the shared FleetDB transport from a fleetdb adapter"
-		}
-	}
-
-	if isCapabilityPackage(toPackage.kind) {
-		if toPackage.owner == fromPackage.owner {
-			if toPackage.kind == boundaryPackageCapabilityAdapter {
-				return "capability core may not import its own concrete adapter"
-			}
-			return ""
-		}
-		if toPackage.kind != boundaryPackageCapabilityPublic {
-			return "cross-capability imports must use the public root"
-		}
-		if !graphAllowsImport(graph, fromPackage.owner, toPackage.owner) {
-			return "capability edge is not declared"
-		}
-		return ""
-	}
-	if toPackage.kind == boundaryPackagePlatform {
-		return ""
-	}
-	if !isModuleInternalPath(toPath) {
-		return layerExternalImportViolation(toPath, false, "capability", graph.ExternalImports)
-	}
-	return fmt.Sprintf("capability core may not import internal implementation package %s; use its own packages, declared capability public roots, or approved platform mechanisms", toPath)
-}
-
-func layerExternalImportViolation(importPath string, adapter bool, subject string, policy ExternalImportPolicy) string {
-	if importPath == modulePath || strings.HasPrefix(importPath, modulePath+"/") {
-		return fmt.Sprintf("%s package may not import Loom implementation package %s outside the approved module, app, or platform roots", subject, importPath)
-	}
-	if isStandardLibraryImport(importPath) {
-		if !adapter && matchesImportPrefix(importPath, policy.CoreDeniedStandardPrefixes) {
-			return fmt.Sprintf("%s core may not import standard-library infrastructure package %s", subject, importPath)
-		}
-		return ""
-	}
-	allowed := policy.CoreAllowedPrefixes
-	layer := "core"
-	if adapter {
-		allowed = policy.AdapterAllowedPrefixes
-		layer = "adapter"
-	}
-	if matchesImportPrefix(importPath, allowed) {
-		return ""
-	}
-	return fmt.Sprintf("%s %s external import %s is not approved by the capability graph", subject, layer, importPath)
-}
-
-func isStandardLibraryImport(importPath string) bool {
-	first, _, _ := strings.Cut(importPath, "/")
-	return first != "" && !strings.Contains(first, ".")
-}
-
-func platformExternalImportViolation(importPath string, policy ExternalImportPolicy) string {
-	if importPath == modulePath || strings.HasPrefix(importPath, modulePath+"/") {
-		return fmt.Sprintf("platform may not import Loom implementation package %s outside internal/platform", importPath)
-	}
-	if isStandardLibraryImport(importPath) || matchesImportPrefix(importPath, policy.PlatformAllowedPrefixes) {
-		return ""
-	}
-	return fmt.Sprintf("platform external import %s is not approved by the capability graph", importPath)
-}
-
-func isModuleInternalPath(importPath string) bool {
-	prefix := modulePath + "/internal"
-	return importPath == prefix || strings.HasPrefix(importPath, prefix+"/")
-}
-
-func importPathSegments(importPath, root string) ([]string, bool) {
-	prefix := modulePath + "/" + strings.Trim(root, "/")
-	if importPath == prefix {
-		return nil, true
-	}
-	if !strings.HasPrefix(importPath, prefix+"/") {
-		return nil, false
-	}
-	return strings.Split(strings.TrimPrefix(importPath, prefix+"/"), "/"), true
-}
-
-func capabilityNameForRoot(root string, graph CapabilityGraph) string {
-	for _, capability := range graph.Capabilities {
-		if capability.Root == root {
-			return capability.Name
-		}
-	}
-	return ""
-}
-
-func isConcreteAdapterSegment(segment string) bool {
-	return segment == "fleetdb" || segment == "httpapi"
-}
-
-func isSharedFleetDBTransport(importPath string) bool {
-	prefix := modulePath + "/internal/infra/fleetdb"
-	return importPath == prefix || strings.HasPrefix(importPath, prefix+"/")
-}
-
-func isCapabilityPackage(kind boundaryPackageKind) bool {
-	return kind == boundaryPackageCapabilityPublic || kind == boundaryPackageCapabilityCore || kind == boundaryPackageCapabilityAdapter
-}
-
-func isForbiddenModuleDependency(importPath string) bool {
-	for _, prefix := range []string{
-		modulePath + "/internal/app",
-		modulePath + "/internal/domain",
-		modulePath + "/internal/driver",
-		modulePath + "/internal/workflows",
-		modulePath + "/internal/store",
-		modulePath + "/internal/webui",
-		modulePath + "/internal/cli",
-		modulePath + "/internal/infra",
-	} {
-		if importPath == prefix || strings.HasPrefix(importPath, prefix+"/") {
-			return true
-		}
-	}
-	return false
-}
-
-func capabilityForImport(importPath string, graph CapabilityGraph) string {
-	classified := classifyBoundaryPackage(importPath, graph)
-	if !isCapabilityPackage(classified.kind) {
-		return ""
-	}
-	return classified.owner
-}
-
-func isCapabilityPublicRoot(importPath string, graph CapabilityGraph) bool {
-	return classifyBoundaryPackage(importPath, graph).kind == boundaryPackageCapabilityPublic
-}
-
-func graphAllowsImport(graph CapabilityGraph, from, to string) bool {
-	for _, edge := range graph.Edges {
-		if edge.From == from && edge.To == to && slices.Contains(edge.Kinds, "import") {
-			return true
-		}
-	}
-	return false
-}
-
 func analyzeAllGoFiles(root string, matrix AnalysisMatrix, graph CapabilityGraph, genericMechanisms []GenericMechanismUse) ([]string, error) {
 	state := &allFileScanState{
 		root: root, profile: matrix.AST, graph: graph,
@@ -854,8 +555,13 @@ func boundaryImportViolations(rel, directoryImport string, specs []*ast.ImportSp
 }
 
 func moduleASTViolations(rel string, file *ast.File, aliases map[string]string, graph CapabilityGraph) []string {
-	violations := []string{}
 	localLeaks := localLeakedTypeAliases(file, aliases, graph)
+	violations := compositeStoreInjectionViolations(rel, file, aliases)
+	return append(violations, exportedTypeLeakViolations(rel, file, aliases, localLeaks, graph)...)
+}
+
+func compositeStoreInjectionViolations(rel string, file *ast.File, aliases map[string]string) []string {
+	violations := []string{}
 	storeAlias := ""
 	for alias, importPath := range aliases {
 		if importPath == modulePath+"/internal/store" {
@@ -876,30 +582,37 @@ func moduleASTViolations(rel string, file *ast.File, aliases map[string]string, 
 		}
 		return true
 	})
+	return violations
+}
+
+func exportedTypeLeakViolations(rel string, file *ast.File, aliases, localLeaks map[string]string, graph CapabilityGraph) []string {
+	violations := []string{}
 	for _, decl := range file.Decls {
 		if !exportedDeclaration(decl) {
 			continue
 		}
-		ast.Inspect(decl, func(node ast.Node) bool {
-			if ident, ok := node.(*ast.Ident); ok {
-				if importPath := localLeaks[ident.Name]; importPath != "" {
-					violations = append(violations, fmt.Sprintf("AST file %s exports local alias %s of forbidden type from %s", rel, ident.Name, importPath))
+		for _, expression := range exportedSignatureExpressions(decl) {
+			ast.Inspect(expression, func(node ast.Node) bool {
+				if ident, ok := node.(*ast.Ident); ok {
+					if importPath := localLeaks[ident.Name]; importPath != "" {
+						violations = append(violations, fmt.Sprintf("AST file %s exports local alias %s of forbidden type from %s", rel, ident.Name, importPath))
+					}
+					return true
+				}
+				selector, ok := node.(*ast.SelectorExpr)
+				if !ok {
+					return true
+				}
+				ident, ok := selector.X.(*ast.Ident)
+				if !ok {
+					return true
+				}
+				if importPath := aliases[ident.Name]; isLeakedSignatureImport(importPath, graph) {
+					violations = append(violations, fmt.Sprintf("AST file %s exports legacy or implementation type %s.%s", rel, ident.Name, selector.Sel.Name))
 				}
 				return true
-			}
-			selector, ok := node.(*ast.SelectorExpr)
-			if !ok {
-				return true
-			}
-			ident, ok := selector.X.(*ast.Ident)
-			if !ok {
-				return true
-			}
-			if importPath := aliases[ident.Name]; isLeakedSignatureImport(importPath, graph) {
-				violations = append(violations, fmt.Sprintf("AST file %s exports legacy or implementation type %s.%s", rel, ident.Name, selector.Sel.Name))
-			}
-			return true
-		})
+			})
+		}
 	}
 	return violations
 }
@@ -924,13 +637,159 @@ func localLeakedTypeAliases(file *ast.File, aliases map[string]string, graph Cap
 			if leaked[spec.Name.Name] != "" {
 				continue
 			}
-			if importPath := firstLeakedASTTypeImport(spec.Type, aliases, leaked, graph); importPath != "" {
-				leaked[spec.Name.Name] = importPath
-				changed = true
+			for _, expression := range publicTypeExpressions(spec.Type) {
+				if importPath := firstLeakedASTTypeImport(expression, aliases, leaked, graph); importPath != "" {
+					leaked[spec.Name.Name] = importPath
+					changed = true
+					break
+				}
 			}
 		}
 	}
 	return leaked
+}
+
+// exportedSignatureExpressions returns only type/value expressions that are
+// observable through the package API. Function bodies, method receivers,
+// unexported receiver methods, and unexported struct/interface fields are
+// implementation details and must not turn an allowed private adapter field
+// into a public-signature violation.
+func exportedSignatureExpressions(decl ast.Decl) []ast.Expr {
+	switch value := decl.(type) {
+	case *ast.FuncDecl:
+		if !exportedFunctionDeclaration(value) {
+			return nil
+		}
+		return appendFieldListExpressions(nil, value.Type.TypeParams, value.Type.Params, value.Type.Results)
+	case *ast.GenDecl:
+		expressions := []ast.Expr{}
+		for _, spec := range value.Specs {
+			switch typed := spec.(type) {
+			case *ast.TypeSpec:
+				if typed.Name.IsExported() {
+					expressions = append(expressions, publicTypeExpressions(typed.Type)...)
+				}
+			case *ast.ValueSpec:
+				expressions = append(expressions, exportedValueExpressions(typed)...)
+			}
+		}
+		return expressions
+	default:
+		return nil
+	}
+}
+
+func appendFieldListExpressions(expressions []ast.Expr, lists ...*ast.FieldList) []ast.Expr {
+	for _, list := range lists {
+		if list == nil {
+			continue
+		}
+		for _, field := range list.List {
+			expressions = append(expressions, field.Type)
+		}
+	}
+	return expressions
+}
+
+func exportedValueExpressions(spec *ast.ValueSpec) []ast.Expr {
+	if spec == nil {
+		return nil
+	}
+	exported := make([]int, 0, len(spec.Names))
+	for index, name := range spec.Names {
+		if name.IsExported() {
+			exported = append(exported, index)
+		}
+	}
+	if len(exported) == 0 {
+		return nil
+	}
+	expressions := []ast.Expr{}
+	if spec.Type != nil {
+		expressions = append(expressions, spec.Type)
+	}
+	if len(spec.Values) != len(spec.Names) {
+		return append(expressions, spec.Values...)
+	}
+	for _, index := range exported {
+		expressions = append(expressions, spec.Values[index])
+	}
+	return expressions
+}
+
+// publicTypeExpressions mirrors the typed exported-signature check for files
+// outside the active build profile. Private struct fields and private explicit
+// interface methods are not package API. Embedded interface types remain part
+// of the public type identity and are therefore checked.
+func publicTypeExpressions(expression ast.Expr) []ast.Expr {
+	switch typed := expression.(type) {
+	case *ast.StructType:
+		return publicStructTypeExpressions(typed)
+	case *ast.InterfaceType:
+		return publicInterfaceTypeExpressions(typed)
+	default:
+		return []ast.Expr{expression}
+	}
+}
+
+func publicStructTypeExpressions(typed *ast.StructType) []ast.Expr {
+	expressions := []ast.Expr{}
+	if typed.Fields == nil {
+		return expressions
+	}
+	for _, field := range typed.Fields.List {
+		if len(field.Names) == 0 {
+			if embeddedFieldExported(field.Type) {
+				expressions = append(expressions, field.Type)
+			}
+			continue
+		}
+		if hasExportedFieldName(field.Names) {
+			expressions = append(expressions, field.Type)
+		}
+	}
+	return expressions
+}
+
+func publicInterfaceTypeExpressions(typed *ast.InterfaceType) []ast.Expr {
+	expressions := []ast.Expr{}
+	if typed.Methods == nil {
+		return expressions
+	}
+	for _, field := range typed.Methods.List {
+		if len(field.Names) == 0 || hasExportedFieldName(field.Names) {
+			expressions = append(expressions, field.Type)
+		}
+	}
+	return expressions
+}
+
+func hasExportedFieldName(names []*ast.Ident) bool {
+	for _, name := range names {
+		if name.IsExported() {
+			return true
+		}
+	}
+	return false
+}
+
+func embeddedFieldExported(expression ast.Expr) bool {
+	switch typed := expression.(type) {
+	case *ast.Ident:
+		return typed.IsExported()
+	case *ast.SelectorExpr:
+		return typed.Sel.IsExported()
+	case *ast.StarExpr:
+		return embeddedFieldExported(typed.X)
+	case *ast.IndexExpr:
+		return embeddedFieldExported(typed.X)
+	case *ast.IndexListExpr:
+		return embeddedFieldExported(typed.X)
+	case *ast.ParenExpr:
+		return embeddedFieldExported(typed.X)
+	default:
+		return false
+	}
 }
 
 func firstLeakedASTTypeImport(expression ast.Expr, aliases, localLeaks map[string]string, graph CapabilityGraph) string {
@@ -961,7 +820,7 @@ func firstLeakedASTTypeImport(expression ast.Expr, aliases, localLeaks map[strin
 func exportedDeclaration(decl ast.Decl) bool {
 	switch value := decl.(type) {
 	case *ast.FuncDecl:
-		return value.Name.IsExported()
+		return exportedFunctionDeclaration(value)
 	case *ast.GenDecl:
 		for _, spec := range value.Specs {
 			switch typed := spec.(type) {
@@ -979,6 +838,16 @@ func exportedDeclaration(decl ast.Decl) bool {
 		}
 	}
 	return false
+}
+
+func exportedFunctionDeclaration(function *ast.FuncDecl) bool {
+	if function == nil || !function.Name.IsExported() {
+		return false
+	}
+	if function.Recv == nil || len(function.Recv.List) == 0 {
+		return true
+	}
+	return embeddedFieldExported(function.Recv.List[0].Type)
 }
 
 func isLeakedSignatureImport(importPath string, graph CapabilityGraph) bool {
