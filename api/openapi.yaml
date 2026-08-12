@@ -5572,6 +5572,8 @@ components:
       properties:
         name:
           type: string
+        role_name:
+          type: string
         repos:
           type: array
           items:

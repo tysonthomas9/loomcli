@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/backend/api/gen"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/store"
@@ -78,11 +79,27 @@ func TestHandleCreateCarriesInteractiveKindAndPromptFile(t *testing.T) {
 	if rr.Code != http.StatusCreated {
 		t.Fatalf("status = %d body = %s, want 201", rr.Code, rr.Body.String())
 	}
-	var created domain.Agent
+	var wire map[string]json.RawMessage
+	if err := json.Unmarshal(rr.Body.Bytes(), &wire); err != nil {
+		t.Fatalf("decode created agent wire response: %v", err)
+	}
+	for _, field := range []string{"role_name", "repos", "repo_groups", "cross_repo"} {
+		if _, ok := wire[field]; !ok {
+			t.Fatalf("created agent response missing required %q: %s", field, rr.Body.String())
+		}
+	}
+	for field, want := range map[string]string{
+		"repos": "[]", "repo_groups": "[]", "cross_repo": "false",
+	} {
+		if got := string(wire[field]); got != want {
+			t.Fatalf("%s = %s, want %s", field, got, want)
+		}
+	}
+	var created gen.WorkspaceAgentInfo
 	if err := json.Unmarshal(rr.Body.Bytes(), &created); err != nil {
 		t.Fatalf("decode created agent: %v", err)
 	}
-	if created.Name != "review-nova" || created.RoleName != "pr-review" {
+	if created.Name != "review-nova" || created.RoleName == nil || *created.RoleName != "pr-review" {
 		t.Fatalf("created agent = %#v, want review-nova/pr-review", created)
 	}
 	role, err := st.Roles().Get(ctx, "TEST2", "pr-review")

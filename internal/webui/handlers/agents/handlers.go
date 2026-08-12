@@ -8,6 +8,7 @@ import (
 
 	"go.opentelemetry.io/otel/attribute"
 
+	"github.com/tysonthomas9/loomcli/internal/backend/api/gen"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/dto"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
@@ -83,7 +84,17 @@ func HandleCreate(agentSvc service.AgentService, hub *realtime.Hub) http.Handler
 			return
 		}
 		broadcastAgentRefresh(hub, ws, created.Name, r.Header.Get("X-Actor"))
-		handler.WriteJSON(w, http.StatusCreated, created)
+		handler.WriteJSON(w, http.StatusCreated, workspaceAgentInfo(created))
+	}
+}
+
+func workspaceAgentInfo(agent *domain.Agent) gen.WorkspaceAgentInfo {
+	return gen.WorkspaceAgentInfo{
+		Name:       agent.Name,
+		RoleName:   &agent.RoleName,
+		Repos:      append([]string{}, agent.Repos...),
+		RepoGroups: append([]string{}, agent.RepoGroups...),
+		CrossRepo:  agent.CrossRepo,
 	}
 }
 
