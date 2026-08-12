@@ -32,6 +32,8 @@
 - **Wave 9.28 implementation:** `a6856f943`
 - **Wave 9.29 implementation:** `eb0fd856b`
 - **Wave 9.30 implementation:** `962b65d63`
+- **Wave 9.31 implementation:** `5c504cdb4`
+- **Wave 9.31 FleetDB contract:** `e9c185b`
 - **Stacked branches:** `modular-monolith-phase9-01-types-ratchet`, then
   `modular-monolith-phase9-02-shallow-seams`, then
   `modular-monolith-phase9-03-legacy-planes`, then
@@ -61,7 +63,8 @@
   `modular-monolith-phase9-27-handler-port-deletion`, then
   `modular-monolith-phase9-28-shallow-composition-deletion`, then
   `modular-monolith-phase9-29-workitems-backend-deletion`, then
-  `modular-monolith-phase9-30-workitems-lifecycle-query-deletion`
+  `modular-monolith-phase9-30-workitems-lifecycle-query-deletion`, then
+  `modular-monolith-phase9-31-fleet-compatibility-deletion`
 - **Purpose:** Reduce the residual package surface toward 160 production Go
   packages without weakening capability ownership, consumer-owned ports, or
   independently replaceable adapters.
@@ -1487,6 +1490,48 @@ backend-owned DTOs remain a horizontal plane.
 The next wave must migrate a real consumer block—starting with query models and
 ports—rather than merely prune unused methods. Success remains deletion of
 `IssueBackend` and its duplicate DTO plane, not a smaller legacy interface.
+
+## Wave 9.31 result
+
+Wave 9.31 deletes two executable FleetDB compatibility paths instead of
+carrying them into the Work Items owner migration:
+
+- FleetDB issue creation now accepts `external_ref` through its canonical
+  OpenAPI, HTTP, RPC, batch, service, and Go-client contract. Loom sends one
+  create request containing that reference; it no longer probes support,
+  retries without the field, and patches the issue afterward.
+- repository assignment accepts the canonical bare FleetDB `Issue` response.
+  The alternate `{ "issue": ... }` response decoder is deleted and that stale
+  wire shape now fails visibly at the adapter boundary.
+
+The Loom implementation deletes 198 lines while adding 84 lines of canonical
+contract enforcement and tests, a net removal of 114 lines. The paired FleetDB
+contract adds 40 net lines, so the cross-repository change still removes 74
+lines. A cannot-return architecture guard rejects the deleted create fallback,
+its support-probing helpers, and the dual repository-response decoder. Package
+shape remains `159 / 15 / 144 / 42 / 60`; this wave removes behavior rather
+than disguising it as a renamed package.
+
+Phase 9 remains incomplete. The 20-method `IssueBackend` lifecycle/query/command
+plane and its duplicate DTOs still exist, and Work Items still has one explicit
+post-create summary fallback. Those are the next deletion targets.
+
+## Wave 9.31 validation
+
+| Check | Result |
+|---|---|
+| FleetDB canonical create contract | PASS: focused API, RPC, service, and client tests cover `external_ref` propagation |
+| Loom FleetDB adapter behavior | PASS: focused adapter tests prove one canonical create request, no failure retry, and rejection of the wrapped repository response |
+| Vendored contract | PASS: Loom's FleetDB OpenAPI snapshot and client-route coverage match paired FleetDB commit `e9c185b` |
+| Cannot-return architecture ratchet | PASS: `TestRetiredFleetWorkItemFallbacksCannotReturn` |
+| FleetDB `make gate` | PASS: static, unit, Postgres contract, coverage, container E2E, crash recovery, and harness-evaluation lanes against `e9c185b` |
+| Loom `make gate` | PASS: all Go and frontend gates against paired FleetDB source `e9c185b` and its exact binary, with four Go OS threads, two Go package workers, one Vitest worker, and a 2 GiB Go soft memory limit |
+
+The first Loom aggregate attempt exhausted the temporary volume during isolated
+architecture-profile compilation; archcheck's measured peak remained 1.23 GiB,
+below its 2 GiB limit. After clearing only this wave's generated Go caches, the
+unchanged tree passed the complete pinned gate. No rule, profile, or threshold
+was disabled.
 
 ---
 

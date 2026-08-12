@@ -1,6 +1,6 @@
 # Modular Monolith Migration
 
-- **Status:** Phase 9 package consolidation in progress; through Wave 9.30 the
+- **Status:** Phase 9 package consolidation in progress; through Wave 9.31 the
   modular monolith is ratcheted to 159 production packages
 - **Date:** 2026-08-11
 - **Scope:** `loom serve`, the operator CLI entry surfaces, the Vite frontend counterpart, and the fleet-db contracts those capabilities depend on
@@ -29,7 +29,7 @@ from that exact shape toward 160 packages by deleting residual horizontal
 models, repositories, and shallow composition seams without merging capability
 owners.
 
-Through Wave 9.30, Phase 9 has retired the residual `internal/types` plane,
+Through Wave 9.31, Phase 9 has retired the residual `internal/types` plane,
 duplicate Connectors and Artifacts repository/model layers, forwarding-only
 owner adapters, runtime and authentication compatibility paths, horizontal
 handler dependencies, three shallow vocabulary packages, and the ambient
@@ -365,7 +365,10 @@ including timestamp fallbacks and API no-op methods, and gives Work Items the
 narrow durable mutation-stream port. The broad lifecycle/query/command
 interface then contracts from 26 to 20 methods in Wave 9.30 by deleting unused
 children, defer/undefer, label, and polymorphic batch compatibility operations.
-Its 20 real lifecycle/query/command methods remain the next deletion target; an empty capability-graph
+Wave 9.31 makes FleetDB `external_ref` part of canonical atomic issue creation,
+then deletes Loom's probe/retry/patch fallback and alternate wrapped repository
+response decoder. Its 20 real lifecycle/query/command methods and the Work Items
+post-create summary fallback remain the next deletion targets; an empty capability-graph
 `legacy_paths` list alone is not completion proof. See the
 [Phase 9 plan](16-phase-9-package-consolidation.md).
 
