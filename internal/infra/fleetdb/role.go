@@ -76,31 +76,37 @@ func (r roleWire) toDomain() *domain.Role {
 	}
 }
 
-func (s *roleStore) Create(ctx context.Context, in store.RoleCreate) (*domain.Role, error) {
-	body := struct {
-		Name           string                  `json:"name"`
-		Kind           string                  `json:"kind,omitempty"`
-		Description    string                  `json:"description,omitempty"`
-		Prompt         string                  `json:"prompt,omitempty"`
-		PromptFile     string                  `json:"prompt_file,omitempty"`
-		Model          string                  `json:"model,omitempty"`
-		TaskFilter     string                  `json:"task_filter,omitempty"`
-		Executor       string                  `json:"executor,omitempty"`
-		Backend        string                  `json:"backend,omitempty"`
-		Effort         string                  `json:"effort,omitempty"`
-		PathPatterns   []string                `json:"path_patterns,omitempty"`
-		Skills         []string                `json:"skills,omitempty"`
-		InputPolicy    *domain.RoleInputPolicy `json:"input_policy,omitempty"`
-		MaxPriority    *int                    `json:"max_priority,omitempty"`
-		MaxConcurrency *int                    `json:"max_concurrency,omitempty"`
-		ReadOnly       bool                    `json:"read_only,omitempty"`
-		AllowedTools   []string                `json:"allowed_tools,omitempty"`
-		DeniedTools    []string                `json:"denied_tools,omitempty"`
-		MaxBudgetUSD   *float64                `json:"max_budget_usd,omitempty"`
-		MaxRunDuration *int                    `json:"max_run_duration,omitempty"`
-		Labels         []string                `json:"labels,omitempty"`
-		ExcludeLabels  []string                `json:"exclude_labels,omitempty"`
-	}{
+// roleCreateBody is the create wire payload. It lives outside Create because
+// the struct literal alone is longer than the function-length limit — the
+// field list grew on two axes at once (label routing here, input policy and
+// the run caps on v5).
+type roleCreateBody struct {
+	Name           string                  `json:"name"`
+	Kind           string                  `json:"kind,omitempty"`
+	Description    string                  `json:"description,omitempty"`
+	Prompt         string                  `json:"prompt,omitempty"`
+	PromptFile     string                  `json:"prompt_file,omitempty"`
+	Model          string                  `json:"model,omitempty"`
+	TaskFilter     string                  `json:"task_filter,omitempty"`
+	Executor       string                  `json:"executor,omitempty"`
+	Backend        string                  `json:"backend,omitempty"`
+	Effort         string                  `json:"effort,omitempty"`
+	PathPatterns   []string                `json:"path_patterns,omitempty"`
+	Skills         []string                `json:"skills,omitempty"`
+	InputPolicy    *domain.RoleInputPolicy `json:"input_policy,omitempty"`
+	MaxPriority    *int                    `json:"max_priority,omitempty"`
+	MaxConcurrency *int                    `json:"max_concurrency,omitempty"`
+	ReadOnly       bool                    `json:"read_only,omitempty"`
+	AllowedTools   []string                `json:"allowed_tools,omitempty"`
+	DeniedTools    []string                `json:"denied_tools,omitempty"`
+	MaxBudgetUSD   *float64                `json:"max_budget_usd,omitempty"`
+	MaxRunDuration *int                    `json:"max_run_duration,omitempty"`
+	Labels         []string                `json:"labels,omitempty"`
+	ExcludeLabels  []string                `json:"exclude_labels,omitempty"`
+}
+
+func newRoleCreateBody(in store.RoleCreate) roleCreateBody {
+	return roleCreateBody{
 		Name:           in.Name,
 		Kind:           in.Kind,
 		Description:    in.Description,
@@ -124,8 +130,11 @@ func (s *roleStore) Create(ctx context.Context, in store.RoleCreate) (*domain.Ro
 		MaxBudgetUSD:   in.MaxBudgetUSD,
 		MaxRunDuration: in.MaxRunDuration,
 	}
+}
+
+func (s *roleStore) Create(ctx context.Context, in store.RoleCreate) (*domain.Role, error) {
 	var resp roleWire
-	if err := s.client.do(ctx, "POST", "/api/v1/"+pathEscape(in.WorkspaceKey)+"/roles", body, &resp); err != nil {
+	if err := s.client.do(ctx, "POST", "/api/v1/"+pathEscape(in.WorkspaceKey)+"/roles", newRoleCreateBody(in), &resp); err != nil {
 		return nil, err
 	}
 	return resp.toDomain(), nil
