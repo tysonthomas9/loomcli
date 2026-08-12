@@ -21,7 +21,7 @@ var dataRootCmd = &cobra.Command{
 	Use:   "data",
 	Short: "Data-only commands for local or remote loom backends",
 	Long: `The 'loom data' subtree contains thin CLI commands that interact
-with the configured loom issue backend. When --server or LOOM_SERVER_URL is
+with the configured Work Items adapter. When --server or LOOM_SERVER_URL is
 set, commands talk to that loom server over HTTP. Without a server, issue
 commands use the local backend selected by the workspace configuration and
 platform runtime environment.

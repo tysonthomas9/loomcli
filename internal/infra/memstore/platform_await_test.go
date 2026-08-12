@@ -17,7 +17,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/store"
-	"github.com/tysonthomas9/loomcli/internal/store/storetest"
+	"github.com/tysonthomas9/loomcli/internal/store/testdata/storetest"
 )
 
 // TestMemstoreAwaitConformance runs the shared store-agnostic await suite

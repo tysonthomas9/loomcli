@@ -29,9 +29,9 @@ type BackendNameFn func(context.Context) string
 // parity harness) can distinguish local FleetDB from a remote fleet instance
 // without poking at LOOM_ISSUE_BACKEND on the host.
 type authConfigResponse struct {
-	Mode         string `json:"mode"`                    // "open" or "oidc"
-	AuthURL      string `json:"auth_url,omitempty"`      // Better Auth service base URL for OAuth redirects (only when mode is "oidc")
-	IssueBackend string `json:"issue_backend,omitempty"` // "fleet" | "fleetdb" | "api" | "agent-ipc" (active provider name, normalized)
+	Mode             string `json:"mode"`                    // "open" or "oidc"
+	AuthURL          string `json:"auth_url,omitempty"`      // Better Auth service base URL for OAuth redirects (only when mode is "oidc")
+	WorkItemsAdapter string `json:"issue_backend,omitempty"` // "fleet" | "fleetdb" | "api" | "agent-ipc" (active provider name, normalized)
 }
 
 // AuthConfigLimiter is a per-IP token bucket rate limiter for GET /api/config.
@@ -159,7 +159,7 @@ func HandleAuthConfig(extAuthURL string, limiter *AuthConfigLimiter, backendName
 		// reflect in the response. Most of the time this is a simple pointer
 		// load and never-nil — cost is negligible vs the rate limiter above.
 		resp := baseResp
-		resp.IssueBackend = resolveIssueBackendLabel(r.Context(), backendNameFn)
+		resp.WorkItemsAdapter = resolveWorkItemsAdapterLabel(r.Context(), backendNameFn)
 
 		// SECURITY: no-store prevents caching that could enable downgrade attacks.
 		// An attacker who poisons a cached response with mode:"open" would bypass
@@ -169,11 +169,11 @@ func HandleAuthConfig(extAuthURL string, limiter *AuthConfigLimiter, backendName
 	}
 }
 
-// resolveIssueBackendLabel returns the normalized issue backend family name
+// resolveWorkItemsAdapterLabel returns the normalized Work Items adapter family name
 // ("fleet", "fleetdb", "api", "agent-ipc") for /api/config. The
 // normalization collapses backend-specific suffixes (e.g. "fleet-db" ->
 // "fleet") so the frontend can switch on a small set of stable labels.
-func resolveIssueBackendLabel(ctx context.Context, backendNameFn BackendNameFn) string {
+func resolveWorkItemsAdapterLabel(ctx context.Context, backendNameFn BackendNameFn) string {
 	if backendNameFn != nil {
 		if name := backendNameFn(ctx); name != "" {
 			return normalizeBackendName(name)

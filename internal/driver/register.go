@@ -16,6 +16,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 )
 
 const (
@@ -52,13 +53,9 @@ type RegisterFlueOptions struct {
 	// workflow builds. It is persisted on DriverVersion; failed builds never
 	// reach registration.
 	BuildDiagnostics string
-	// Trust is the trust level the SERVER stamps on the driver row (§7 step 9
-	// sandbox placement policy) — it is never read from client input or the
-	// bundle manifest, so a submission cannot self-elevate. Empty defaults to
-	// trusted: calling RegisterFlueDriver directly is the operator/source-tree
-	// path (CLI `loom driver register`). External submission paths (the
-	// workflows HTTP API via workflows.BuildAndRegister) must stamp
-	// workflowcatalog.DriverTrustUntrusted explicitly.
+	// Trust is selected by the authoring adapter and stamped into the staged
+	// bundle. It is never read from client manifest input. Empty selects the
+	// trusted source-tree default; external authoring selects untrusted.
 	Trust workflowcatalog.DriverTrustLevel
 }
 
@@ -316,7 +313,7 @@ func resolveDriverRunner(version *workflowcatalog.DriverVersion, runnerName stri
 	return DriverRunnerSpec{}, fmt.Errorf("runner %q is not declared by driver version %q: %w: %w", runnerName, version.VersionID, ErrRunnerNotDeclared, domain.ErrInvalid)
 }
 
-func applyResolvedRunner(opts TaskRunRequestOptions, parent *domain.DriverRun, version *workflowcatalog.DriverVersion) (TaskRunRequestOptions, error) {
+func applyResolvedRunner(opts TaskRunRequestOptions, parent *execution.DriverRun, version *workflowcatalog.DriverVersion) (TaskRunRequestOptions, error) {
 	opts.Runner = strings.TrimSpace(opts.Runner)
 	if opts.Runner == "" {
 		return opts, nil
@@ -332,7 +329,7 @@ func applyResolvedRunner(opts TaskRunRequestOptions, parent *domain.DriverRun, v
 	return opts, nil
 }
 
-func resolvedRunnerRef(parent *domain.DriverRun, version *workflowcatalog.DriverVersion, spec DriverRunnerSpec) string {
+func resolvedRunnerRef(parent *execution.DriverRun, version *workflowcatalog.DriverVersion, spec DriverRunnerSpec) string {
 	driverID := ""
 	if version != nil {
 		driverID = version.DriverID
@@ -542,9 +539,8 @@ func promoteFlueBundle(tmpRoot, finalRoot string) error {
 	return nil
 }
 
-// registrationTrust resolves the trust level a registration stamps: empty
-// means the operator/source-tree default (trusted). See
-// RegisterFlueOptions.Trust for the contract.
+// registrationTrust resolves the authoring-selected bundle trust: empty means
+// the source-tree default (trusted).
 func registrationTrust(trust workflowcatalog.DriverTrustLevel) workflowcatalog.DriverTrustLevel {
 	if trust == "" {
 		return workflowcatalog.DriverTrustTrusted

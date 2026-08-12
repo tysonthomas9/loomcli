@@ -143,6 +143,29 @@ func testExecutor(st store.Store, value Executor) *Executor {
 	return executor
 }
 
+func (adapter taskWorkerTestExecution) GetDriverRun(ctx context.Context, workspaceKey, runID string) (*execution.DriverRun, error) {
+	run, err := adapter.store.DriverRuns().Get(ctx, workspaceKey, runID)
+	return testExecutionDriverRunSnapshot(run), err
+}
+
+func (adapter taskWorkerTestExecution) ListDriverRuns(ctx context.Context, query execution.DriverRunQuery) ([]*execution.DriverRun, error) {
+	runs, err := adapter.store.DriverRuns().List(ctx, query.WorkspaceKey, store.DriverRunFilter{
+		DriverID: query.DriverID, EpicID: query.EpicID, AgentServiceID: query.AgentServiceID,
+		Status: domain.DriverRunStatus(query.Status), Limit: query.Limit,
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]*execution.DriverRun, 0, len(runs))
+	for _, run := range runs {
+		if query.ParentRunID != "" && run.ParentRunID != query.ParentRunID {
+			continue
+		}
+		out = append(out, testExecutionDriverRunSnapshot(run))
+	}
+	return out, nil
+}
+
 func (adapter taskWorkerTestExecution) ClaimDriverRun(ctx context.Context, _ authority.SystemAuthority, command execution.ClaimDriverRunCommand) (*execution.DriverRun, error) {
 	run, err := adapter.store.DriverRuns().Claim(ctx, command.WorkspaceKey, command.RunID, command.NodeID, command.LeaseID)
 	return testExecutionDriverRunSnapshot(run), err
@@ -163,18 +186,10 @@ func (adapter taskWorkerTestExecution) FinalizeDriverRun(ctx context.Context, _ 
 }
 
 func (adapter taskWorkerTestExecution) CascadeChildDriverRuns(
-	ctx context.Context,
+	_ context.Context,
 	_ authority.ExecutionAuthority,
 	command execution.CascadeChildDriverRunsCommand,
 ) (execution.CascadeChildDriverRunsResult, error) {
-	parent, err := adapter.store.DriverRuns().Get(ctx, command.WorkspaceKey, command.ParentRunID)
-	if err != nil {
-		return execution.CascadeChildDriverRunsResult{}, err
-	}
-	// Test-only compatibility: production uses Execution's single atomic
-	// recursive cascade port. Legacy composition fixtures still exercise their
-	// historical store shape behind this fake.
-	cascadeCancelChildren(ctx, adapter.store, adapter.outcomes, parent, 0)
 	return execution.CascadeChildDriverRunsResult{
 		Committed: &execution.CascadeChildDriverRunsCommit{
 			WorkspaceKey: command.WorkspaceKey, ParentRunID: command.ParentRunID,
@@ -194,15 +209,10 @@ func (taskWorkerTestExecution) RecoverTerminalDriverRunWork(
 }
 
 func (adapter taskWorkerTestExecution) RecoverChildDriverRunCascade(
-	ctx context.Context,
+	_ context.Context,
 	_ authority.SystemAuthority,
 	command execution.RecoverChildDriverRunCascadeCommand,
 ) (execution.CascadeChildDriverRunsResult, error) {
-	parent, err := adapter.store.DriverRuns().Get(ctx, command.WorkspaceKey, command.ParentRunID)
-	if err != nil {
-		return execution.CascadeChildDriverRunsResult{}, err
-	}
-	cascadeCancelChildren(ctx, adapter.store, adapter.outcomes, parent, 0)
 	return execution.CascadeChildDriverRunsResult{
 		ActionID: command.RequestID,
 		Committed: &execution.CascadeChildDriverRunsCommit{

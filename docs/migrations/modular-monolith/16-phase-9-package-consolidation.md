@@ -23,6 +23,21 @@
 - **Wave 9.19 implementation:** `c412c3f61`
 - **Wave 9.20 implementation:** `d34fb0ed1`
 - **Wave 9.21 implementation:** `fb16ce443`
+- **Wave 9.22 implementation:** `22688c1c0`
+- **Wave 9.23 implementation:** `ce388df2d`
+- **Wave 9.24 implementation:** `015ff85ef`
+- **Wave 9.25 implementation:** `9caddc7e5`
+- **Wave 9.26 implementation:** `cfe542420`
+- **Wave 9.27 implementation:** `14f4ee9ac`
+- **Wave 9.28 implementation:** `a6856f943`
+- **Wave 9.29 implementation:** `eb0fd856b`
+- **Wave 9.30 implementation:** `962b65d63`
+- **Wave 9.31 implementation:** `5c504cdb4`
+- **Wave 9.31 FleetDB contract:** `e9c185b`
+- **Wave 9.32 implementation:** `06609d6ca`
+- **Wave 9.33 implementation:** `cad1c8b31`
+- **Wave 9.34 implementation:** `280ef5435`
+- **Wave 9.35 implementation:** `0a6363960`
 - **Stacked branches:** `modular-monolith-phase9-01-types-ratchet`, then
   `modular-monolith-phase9-02-shallow-seams`, then
   `modular-monolith-phase9-03-legacy-planes`, then
@@ -43,7 +58,21 @@
   `modular-monolith-phase9-18-driver-run-contract`, then
   `modular-monolith-phase9-19-local-node-state`, then
   `modular-monolith-phase9-20-agents-bootstrap-composition`, then
-  `modular-monolith-phase9-21-automation-owner-intents`
+  `modular-monolith-phase9-21-automation-owner-intents`, then
+  `modular-monolith-phase9-22-handler-read-ports`, then
+  `modular-monolith-phase9-23-connector-inbound-secrets`, then
+  `modular-monolith-phase9-24-shallow-package-deletion`, then
+  `modular-monolith-phase9-25-legacy-package-deletion`, then
+  `modular-monolith-phase9-26-runtime-legacy-deletion`, then
+  `modular-monolith-phase9-27-handler-port-deletion`, then
+  `modular-monolith-phase9-28-shallow-composition-deletion`, then
+  `modular-monolith-phase9-29-workitems-backend-deletion`, then
+  `modular-monolith-phase9-30-workitems-lifecycle-query-deletion`, then
+  `modular-monolith-phase9-31-fleet-compatibility-deletion`, then
+  `modular-monolith-phase9-32-workitems-create-fallback-deletion`, then
+  `modular-monolith-phase9-33-workitems-query-deletion`, then
+  `modular-monolith-phase9-34-workitems-query-ports`, then
+  `modular-monolith-phase9-35-workitems-stats-port`
 - **Purpose:** Reduce the residual package surface toward 160 production Go
   packages without weakening capability ownership, consumer-owned ports, or
   independently replaceable adapters.
@@ -1127,9 +1156,821 @@ paired FleetDB contract and migration implementation is `9c1859a`.
 | FleetDB aggregate `make gate` at `9c1859a` | PASS: static analysis, race/coverage, Redis and Postgres integration, migration/storage contracts, 80.8% total coverage, all 28 measured packages above the 50% floor, container E2E, crash/recovery, and harness evaluation against the explicit active Podman socket |
 | Loom aggregate `make gate` at `ce388df2d` against FleetDB `9c1859a` | PASS: all Go and frontend quality gates with byte-identical OpenAPI SHA-256 `54a75342…65733`, exact companion binary SHA-256 `8f963829…7c0f0`, `GOMAXPROCS=4`, one Go test worker, two Vitest workers, and a 3 GiB Go soft memory limit |
 
-Later waves must update this document with the selected package candidates,
-the boundary reason retained or removed for each, exact shape changes, and
-same-head evidence.
+## Wave 9.24 result
+
+The twenty-fourth slice removes three package boundaries that no longer pass
+the boundary test while preserving their behavior in the owning package or
+test surface:
+
+- `internal/cli/serve/serveadapter/daytonabroker` had one production consumer,
+  while its parent contained only a type alias and forwarding constructor. The
+  real credential-isolating external adapter and its live proof now live in
+  `serveadapter`; no provider behavior, port, or fail-closed check was removed.
+- `internal/cli/serve/workspacemgr/workspacematerialization` had one consumer,
+  its parent `workspacemgr`, plus duplicated forwarding helpers. The Git
+  inspection, recovery, cancellation, worktree attachment, and rollback logic
+  now live directly with the workspace materialization workflow.
+- `internal/harness/fakeharness/mock` was a test executable, not a production
+  package. It now lives under `internal/harness/fakeharness/testdata/mock`, and
+  the package-shape scanner explicitly follows Go's `testdata` exclusion
+  convention while the integration test continues to compile and execute it.
+
+The three retired roots are in the cannot-return guard, and no imports target
+them. Exact package shape falls from `167 / 15 / 152 / 46 / 68` to
+`164 / 15 / 149 / 43 / 65`. Capability roots remain 10, live handler imports
+remain 16, and direct persistence remains `86 / 95`. The implementation is
+`015ff85ef`.
+
+## Wave 9.24 validation
+
+| Check | Result |
+|---|---|
+| Workspace materialization, Daytona host adapter, workflow-distribution authoring, backend, and harness suites | PASS |
+| Exact package topology, retired-root, source-control reachability, and import-fanout ratchets | PASS: shape `164 / 15 / 149 / 43 / 65`; all three old roots absent; `serveadapter` remains at its exact approved fanout |
+| Measured architecture guard | PASS: 11/11 profiles, 10 capability roots, 16 live legacy-handler allowances, 86 direct-write rows, zero pending decisions, and 1,165.1 MiB peak process-tree RSS under 2,048 MiB |
+| Aggregate `make gate` at `015ff85ef` against FleetDB `9c1859a` | PASS: all Go and frontend quality gates with the exact paired source and binary, `GOMAXPROCS=4`, one Go test worker, two Vitest workers, and a 3 GiB Go soft memory limit |
+
+The first aggregate run rejected a new twenty-eighth import on `serveadapter`.
+The corrected implementation consumes Daytona runtime layout and bundle staging
+through the already-imported workflow-distribution authoring adapter, removing
+the extra edge instead of increasing the exact fanout exception. The complete
+unchanged-source gate then passed.
+
+## Wave 9.25 result
+
+The twenty-fifth slice deletes four more production package boundaries and the
+compatibility APIs that kept two of them alive:
+
+- `internal/cli/serve/workspacemgr/admissionstore` was a Workspace-internal
+  repository plane with one real consumer. Its journal now lives directly in
+  `workspacemgr`; the broad four-store interface, forwarding journal, old
+  constructor, and six `BuildStoreBacked*` compatibility wrappers are deleted.
+  Serve and the workspace CLI compose the Workspace owner API explicitly.
+- `internal/driver/taskworktree` was used only by its parent. Worktree
+  preparation and stack lineage now live in `driver`; production receives the
+  three Source Control ports explicitly instead of recovering two of them with
+  type assertions. A lineage lookup error now fails closed rather than silently
+  selecting the repository default branch.
+- `internal/cli/clitest` and `internal/store/storetest` contained only shared
+  test support. Both move under their owners' `testdata` trees, so Go continues
+  compiling their tests while production topology no longer counts them.
+
+All non-port journal methods made public by the former child package are now
+private. `ResolveLocalRepositoryAdmission` remains public because it implements
+the Source Control consumer-owned resolver port. The direct-write analyzer now
+honors an exact declared receiver without treating every function in the same
+mixed package as persistence. A regression proves that undeclared methods on
+that receiver fail closed while unrelated package helpers remain outside the
+classifier.
+
+Exact package shape falls from `164 / 15 / 149 / 43 / 65` to
+`160 / 15 / 145 / 42 / 61`. The retired-root guard prevents all four old paths
+from returning. The source-backed direct-write inventory changes from `86 / 95`
+to `94 / 112`: two forwarding-constructor rows disappear, while the analyzer
+now sees every actual private journal mutation rather than hiding the journal
+behind a package-wide declaration. This is stricter observation, not eight new
+persistence operations. Live handler allowances remain 16, capability roots
+remain 10, and no architecture exception is widened. The implementation is
+`9caddc7e5`.
+
+## Wave 9.25 validation
+
+| Check | Result |
+|---|---|
+| Workspace admission, local journal recovery/fencing, task worktree/lineage, moved CLI/store test support, serve composition, Driver API, automode, and paired FleetDB contract suites | PASS |
+| Exact topology, retired-root, Source Control reachability, exact-receiver default-deny, and direct-write ratchets | PASS: shape `160 / 15 / 145 / 42 / 61`; writes `94 / 112`; all four old package roots and all six wrapper constructors absent |
+| Measured `make check-architecture` | PASS: 11/11 profiles, 10 capability roots, 16 live legacy-handler allowances, 94 direct-write rows, 107 reviewed mutation commands, 71 runtime components, 80 goroutine launches, all six performance rows measured, zero pending decisions, and 1,159.4 MiB peak process-tree RSS under 2,048 MiB |
+| Aggregate `make gate` against FleetDB `9c1859a` | PASS: all Go and frontend quality gates with the exact paired source and binary, `GOMAXPROCS=4`, one Go test worker, two Vitest workers, and a 3 GiB Go soft memory limit |
+
+The initial aggregate attempts caught eight moved-import formatting changes and
+a three-line `funlen` overage after explicit Source Control port injection. The
+final source formats the imports and extracts task-worker construction; the
+linter reports zero issues and the uninterrupted aggregate rerun passes. No
+lint exception or topology allowance was added.
+
+## Wave 9.26 result
+
+Wave 9.26 deletes executable compatibility behavior that remained inside the
+160-package topology. It does not rename those paths or preserve their policy in
+test-only copies:
+
+- Execution now owns DriverRun and TaskRun lifecycle mutation through its typed
+  APIs. Driver runtime, webhook ingestion, Workflow HTTP, retry/recovery, and
+  await completion callers no longer reconstruct the retired direct-Store
+  request/run/event implementations.
+- Automation owns internal-event admission, matching, scheduling, trigger
+  delivery, and provenance. The parallel trigger-route repository and
+  dispatcher plane, old runtime cron/delivery/internal-source implementations,
+  and duplicate FleetDB/memstore fanout fixtures are deleted.
+- Workflow Catalog owns builtin authoring and refresh. The old native/builtin
+  authoring implementation is gone; tests seed only the narrow catalog
+  projections they consume instead of copying the deleted production policy.
+- Task workflow history now projects canonical DriverRuns directly through
+  immutable `SourceRef` lineage rather than joining through the retired
+  TriggerDelivery representation or consulting Interaction shadows.
+- The issue-journal bridge requires durable cursors plus current Work Items
+  lookup, startup-ready reconciliation, and commit-time repository admission.
+  Missing ports fail composition; there is no journal-only dispatch or
+  in-memory cursor branch. FleetDB's retired `source_repo` journal alias is no
+  longer interpreted.
+- Runtime discovery no longer accepts a Node executable beside `loom`, and
+  repository selection no longer aliases a selector to an unrelated remote
+  basename. Explicit overrides, the packaged Desktop runtime, PATH installs,
+  exact repository identity, and the Work Items-owned single-repository
+  admission rule remain supported contracts rather than migration fallbacks.
+
+The implementation deletes 41 files and changes 217 total files, with 3,008
+insertions and 15,647 deletions: a net removal of 12,639 lines. New test support
+is consumer-scoped and delegates to the same Execution or Workflow Catalog
+contracts as production. Architecture tombstones prevent the deleted runtime
+implementations, selector helpers, TriggerRoute surface, and test-only legacy
+copies from returning.
+
+Package shape remains exactly `160 / 15 / 145 / 42 / 61`. This is intentional:
+the wave removes 12,639 net lines and several live horizontal planes from
+packages that still own other durable adapters. Direct persistence remains
+`94 / 112`, the live handler allowance remains 16, and all ten capability roots
+remain active. No package, handler, topology, or direct-write allowance grows.
+The implementation is `cfe542420`; the paired FleetDB contract source is
+`9c1859a`.
+
+## Wave 9.26 validation
+
+| Check | Result |
+|---|---|
+| Full production `internal/...` compile | PASS after deleting the old Driver, Automation runtime, trigger-route, and Workflow Catalog implementations |
+| Automation, Execution, serve composition, Workflow Catalog authoring, memstore/FleetDB adapters, WebUI app/handlers/hooks/projections/session coordination, trigger CLI, and full Driver suites | PASS against paired FleetDB `9c1859a` |
+| Webhook E2E-tag build | PASS; the deleted router integration fixture is not required to compile the current module boundary |
+| Exact retired-surface, topology, package-shape, and default-deny guards | PASS: shape `160 / 15 / 145 / 42 / 61`; writes `94 / 112`; 16 live handler allowances; deleted selectors and compatibility implementations absent |
+| Measured `make check-architecture` | PASS under the 2,048 MiB process-tree ceiling with all 11 profiles, ten capability roots, all six performance records measured, and zero pending decisions |
+| Aggregate `make gate` | PASS against FleetDB source `9c1859a` and a freshly built paired binary, with `GOMAXPROCS=4`, one Go test worker, two Vitest workers, and a 3 GiB Go soft memory limit |
+
+The gate was run after the final fail-closed journal composition change and the
+Node/repository selector deletions. `git diff --check` was clean before the
+implementation commit. No generated frontend output, runtime state, or test
+report was added to the source tree.
+
+Later waves must continue deleting executable legacy model, projection, and
+Store fallback paths. Reaching 160 packages is a progress metric, not the Phase
+9 completion criterion.
+
+## Wave 9.27 result
+
+Wave 9.27 removes the remaining WebUI-handler access to the horizontal Store,
+backend, and FleetDB planes. Agents, Roles, TaskRun, Driver API, Terminal, and
+Workflows now consume exact capability or presentation ports. Application
+composition supplies the real adapters; handler tests supply consumer-local
+adapters through the same interfaces. There is no handler fallback to the old
+persistence path.
+
+Execution now owns the TaskRun and DriverRun queries and mutations used by
+serve and the Driver/TaskRun handlers. Work Items owns blocked-state and
+repository-required projections. Agents owns Role and Agent records. Workspace
+owns workspace identity and path lookup. Terminal's four-method state query is
+consumer-owned because it combines those owners with the orchestration-session
+store at the composition seam; it does not expose a repository interface to
+the handler.
+
+The deleted surfaces include the old Driver task-scheduling implementation and
+the prompt-agent create response compatibility layer. The characterization
+matrix no longer points at deleted Driver or Automation-runtime tests: Workflow
+Catalog directly proves version-scoped approval, while Automation directly
+proves authority-derived event identity, hop-depth rejection, and replay after
+an Execution owner handoff.
+
+Package shape remains exactly `160 / 15 / 145 / 42 / 61` because the handler,
+capability, and composition packages are still real modules. The measurable
+ownership surface tightens instead: composite Store files fall from 15 to 14;
+production handler legacy imports fall from 16 to 0; direct persistence falls
+from `94 / 112` to `90 / 108`; named runtime components fall from 71 to 70;
+and in-scope goroutine launch definitions fall from 80 to 79. All ten
+capability roots and all 107 reviewed mutation commands remain enforced. The
+implementation changes 96 files with 2,390 insertions and 1,674 deletions; the
+added code is typed capability/presentation contracts, composition adapters,
+and boundary tests, not a renamed compatibility implementation.
+
+## Wave 9.27 validation
+
+| Check | Result |
+|---|---|
+| Handler legacy-import and composition ratchets | PASS: zero production imports of `internal/store`, `internal/backend`, or `internal/fleet` below `internal/webui/handlers`; composite Store `14 / 14`; outside-composition Store `0 / 0` |
+| Capability-owned characterization matrix | PASS: all 6 authoritative rows, including Workflow Catalog approval and Automation admission/replay/hop-cap proofs |
+| Exact topology, package-shape, direct-write, runtime, LOC, package-size, and import-fanout guards | PASS: shape `160 / 15 / 145 / 42 / 61`; writes `90 / 108`; runtime `70 / 79`; no exception increased |
+| Measured architecture guard in the pre-final aggregate attempt | PASS: 11/11 profiles, ten capability roots, 107 reviewed mutation commands, all six performance records measured, zero pending decisions, and 1,188.7 MiB peak process-tree RSS under 2,048 MiB |
+| Aggregate `make gate` | PASS with FleetDB source `9c1859a` and a freshly built binary from that exact checkout pinned explicitly, `GOMAXPROCS=4`, two Go package workers, one Vitest worker, and a 2 GiB Go soft memory limit |
+
+The first aggregate run reached the race suite and correctly rejected the stale
+112-site direct-write assertion plus an unrelated generic sibling FleetDB spec.
+After lowering the source-backed ratchet to 108 and pinning the paired source,
+the next run rejected the older globally installed FleetDB binary. The final
+run pinned both paired source and freshly built paired binary and passed every
+Go and frontend quality gate. No contract snapshot, architecture exception, or
+compatibility path was changed to make the gate pass.
+
+## Wave 9.28 result
+
+Wave 9.28 deletes
+`internal/app/serve/agentcomposition/owneradapters`, a one-consumer in-process
+translation package. Its fixed-action authority checks, error mapping, command
+preservation, and audit-ID validation now live as private implementation in the
+existing serve composition root beside the AgentProvisioning process-manager
+wiring that owns them. The owner capability interfaces remain unchanged, and
+the application root still composes Agents, Automation, and Connectors through
+their action-specific authority issuers.
+
+This is a deepening change rather than a relocation of a public abstraction:
+the separate constructors and exported adapter types are gone, the private
+adapter seam cannot be imported by another package, and replacement tests
+exercise command preservation, exact authority purpose, missing dependency,
+authority failure, owner-command failure, and noncanonical audit rejection
+through the serve composition package. A cannot-return guard rejects the old
+package root and any future importer.
+
+Exact package shape tightens from `160 / 15 / 145 / 42 / 61` to
+`159 / 15 / 144 / 42 / 60`. The serve composition root's exact import fanout
+tightens from 31 to 30. Direct persistence remains `90 / 108`, production
+handler legacy imports remain zero, composite Store remains `14 / 14`, and
+runtime inventory remains `70 / 79`. No package, fanout, persistence, handler,
+or runtime allowance increases. The implementation changes 11 files with 391
+insertions and 714 deletions, a net removal of 323 lines.
+
+## Wave 9.28 validation
+
+| Check | Result |
+|---|---|
+| AgentProvisioning composition and owner-adapter behavior | PASS in the complete `internal/app/serve` suite, including temporary HTTP adapter listeners |
+| Exact production topology and retired-root guard | PASS: shape `159 / 15 / 144 / 42 / 60`; the old owner-adapter root and every importer are absent |
+| Package-size, import-fanout, and focused lint | PASS: serve remains at the 25-file ceiling; exact internal fanout is 30; zero lint issues |
+| Aggregate `make gate` | PASS: all Go and frontend quality gates, including the measured 11-profile architecture sweep under its 2,048 MiB process-tree ceiling, against explicitly pinned FleetDB source `9c1859a` and its freshly built paired binary |
+
+The next consolidation target is the residual horizontal Work Items backend
+model/repository plane. It spans CLI, subscription, and FleetDB adapter
+consumers, so it must be replaced as one coherent owner migration; retaining a
+partial backend wrapper would recreate the legacy plane under a new name.
+
+## Wave 9.29 result
+
+Wave 9.29 deletes the realtime mutation sub-plane from the horizontal
+`internal/backend` contract. `MutationData`, `CursorMutationBackend`, the
+timestamp-based `GetMutations` and `WaitForMutations` methods, their API
+not-implemented stubs, FleetDB timestamp adapters, CLI forwarders, and the
+unregistered-workspace SSE fallback are gone. Work Items now owns the durable
+`Mutation` projection and narrow `MutationStream` port, while FleetDB remains
+the real external adapter behind that port.
+
+The WebUI subscription runtime is now `WorkItemMutationSubscriber`; its source,
+constructor, runtime component, logs, tests, and catch-up conversion all use the
+owner vocabulary. It accepts only an exact Work Items mutation stream and only
+registered workspace composition can activate it. Opaque FleetDB cursors are
+round-tripped without the retired millisecond conversion, eliminating the
+same-millisecond duplicate-or-skip compatibility trade. A cannot-return guard
+rejects every retired type, method, fallback function, activation reason, and
+API no-op implementation.
+
+This is a net deletion of 687 lines across 35 implementation and enforcement
+files: 812 insertions and 1,499 deletions. Exact package shape remains
+`159 / 15 / 144 / 42 / 60`, direct persistence remains `90 / 108`, production
+handler legacy imports remain zero, and runtime inventory remains `70 / 79`;
+the managed component was renamed and re-owned rather than added. Phase 9 is
+still incomplete because the lifecycle/query/command portions of
+`internal/backend.IssueBackend` and their duplicate DTO plane remain.
+
+## Wave 9.29 validation
+
+| Check | Result |
+|---|---|
+| Work Items mutation owner and realtime behavior | PASS: `internal/modules/workitems`, `internal/webui/subscription`, `internal/webui/server/realtime`, and `internal/webui/hooks` suites, including opaque cursor advancement, reconnect catch-up, retry, cancellation, and wire projection |
+| FleetDB and API adapter behavior | PASS: complete `internal/backend`, `internal/backend/api`, and `internal/backend/fleet` suites with loopback test servers |
+| Retired-plane and runtime inventory ratchets | PASS: `TestRetiredBackendMutationPlaneCannotReturn` and `TestCheckedInRuntimeInventoryMatchesRepository`; all internal packages compile |
+| Aggregate `make gate` | PASS: all Go and frontend quality gates against paired FleetDB source `9c1859ab1` and a freshly built binary, with four Go OS threads, two Go package workers, one Vitest worker, and a 2 GiB Go soft memory limit |
+
+The first aggregate attempt correctly rejected the stale runtime inventory and
+then exhausted disk while compiling all architecture profiles and frontend
+coverage. After re-owning the component entry and clearing only the generated
+Go caches from that run, the exact pinned gate passed. No architecture
+exception, compatibility path, or coverage threshold was weakened.
+
+The next deletion slice migrates the remaining Work Items lifecycle and query
+consumers to capability-owned ports and models, then deletes the corresponding
+`IssueBackend` methods and backend DTOs. The broad interface is not an accepted
+endpoint.
+
+## Wave 9.30 result
+
+Wave 9.30 deletes six more operations from the horizontal `IssueBackend`
+contract after proving they had no production consumer beyond adapters,
+decorators, lazy proxies, unavailable stubs, and test mocks:
+
+- `GetChildren` is replaced at its test-only workflow consumers by the existing
+  filtered list query;
+- dedicated `DeferIssue` and `UndeferIssue` are removed because status changes
+  already flow through Work Items `Patch` and the adapter's private transition
+  implementation;
+- public `AddLabel` and `RemoveLabel` disappear while FleetDB label requests
+  remain private details of its update adapter; and
+- the polymorphic `Batch` contract, `BatchOp`/`BatchResult` DTOs, API no-op,
+  FleetDB fan-out emulation, and all forwarding scaffolding are deleted.
+
+This removes the entire 461-line `fleet_batch_mutations.go` implementation and
+its two dedicated test files. Durable FleetDB event and mutation-stream code
+that shared that file moves into the accurately named `fleet_events.go`; no
+batch abstraction or public replacement survives. A cannot-return guard rejects
+all six operation names and both batch DTOs across production backend, adapter,
+and CLI roots.
+
+The core interface contracts from 26 methods to 20. The implementation and
+enforcement commit changes 23 files with 251 insertions and 1,721 deletions, a
+net removal of 1,470 lines. Exact package shape remains
+`159 / 15 / 144 / 42 / 60`, direct persistence remains `90 / 108`, handler
+legacy imports remain zero, and runtime inventory remains `70 / 79`. Phase 9
+is still incomplete because those 20 lifecycle/query/command methods and their
+backend-owned DTOs remain a horizontal plane.
+
+## Wave 9.30 validation
+
+| Check | Result |
+|---|---|
+| Complete backend adapter behavior | PASS: `internal/backend`, `internal/backend/api`, and `internal/backend/fleet`; retained list-parent, private deferred workflow, private label requests, and mutation events are covered |
+| CLI adapter and mock behavior | PASS: `internal/cli/data` and `internal/cli/testdata/clitest`; every internal package compiles after removing the forwarding methods |
+| Cannot-return architecture ratchet | PASS: `TestUnusedIssueBackendCompatibilityOperationsCannotReturn` and the prior mutation-plane guard |
+| Aggregate `make gate` | PASS: all Go and frontend quality gates against paired FleetDB source `9c1859ab1` and its exact built binary, with four Go OS threads, two Go package workers, one Vitest worker, and a 2 GiB Go soft memory limit |
+
+The next wave must migrate a real consumer block—starting with query models and
+ports—rather than merely prune unused methods. Success remains deletion of
+`IssueBackend` and its duplicate DTO plane, not a smaller legacy interface.
+
+## Wave 9.31 result
+
+Wave 9.31 deletes two executable FleetDB compatibility paths instead of
+carrying them into the Work Items owner migration:
+
+- FleetDB issue creation now accepts `external_ref` through its canonical
+  OpenAPI, HTTP, RPC, batch, service, and Go-client contract. Loom sends one
+  create request containing that reference; it no longer probes support,
+  retries without the field, and patches the issue afterward.
+- repository assignment accepts the canonical bare FleetDB `Issue` response.
+  The alternate `{ "issue": ... }` response decoder is deleted and that stale
+  wire shape now fails visibly at the adapter boundary.
+
+The Loom implementation deletes 198 lines while adding 84 lines of canonical
+contract enforcement and tests, a net removal of 114 lines. The paired FleetDB
+contract adds 40 net lines, so the cross-repository change still removes 74
+lines. A cannot-return architecture guard rejects the deleted create fallback,
+its support-probing helpers, and the dual repository-response decoder. Package
+shape remains `159 / 15 / 144 / 42 / 60`; this wave removes behavior rather
+than disguising it as a renamed package.
+
+At the Wave 9.31 boundary, Phase 9 remains incomplete: the 20-method
+`IssueBackend` lifecycle/query/command plane and its duplicate DTOs still exist,
+and Work Items still has one explicit post-create summary fallback. Wave 9.32
+deletes that fallback; the backend plane remains the next deletion target.
+
+## Wave 9.31 validation
+
+| Check | Result |
+|---|---|
+| FleetDB canonical create contract | PASS: focused API, RPC, service, and client tests cover `external_ref` propagation |
+| Loom FleetDB adapter behavior | PASS: focused adapter tests prove one canonical create request, no failure retry, and rejection of the wrapped repository response |
+| Vendored contract | PASS: Loom's FleetDB OpenAPI snapshot and client-route coverage match paired FleetDB commit `e9c185b` |
+| Cannot-return architecture ratchet | PASS: `TestRetiredFleetWorkItemFallbacksCannotReturn` |
+| FleetDB `make gate` | PASS: static, unit, Postgres contract, coverage, container E2E, crash recovery, and harness-evaluation lanes against `e9c185b` |
+| Loom `make gate` | PASS: all Go and frontend gates against paired FleetDB source `e9c185b` and its exact binary, with four Go OS threads, two Go package workers, one Vitest worker, and a 2 GiB Go soft memory limit |
+
+The first Loom aggregate attempt exhausted the temporary volume during isolated
+architecture-profile compilation; archcheck's measured peak remained 1.23 GiB,
+below its 2 GiB limit. After clearing only this wave's generated Go caches, the
+unchanged tree passed the complete pinned gate. No rule, profile, or threshold
+was disabled.
+
+## Wave 9.32 result
+
+Wave 9.32 deletes Work Items' last create-result compatibility path. `Create`
+now returns exactly one owner-owned `IssueSummary`; the `CreatedIssue` union,
+custom JSON marshaler, optional detail branch, optional summary branch, and
+consumer-side `createdIssueID` helpers are gone. The service returns the
+canonical projection produced by the durable create and, when required, the
+repository-admission command. It no longer performs a post-create read whose
+failure could turn durable success into an ambiguous error.
+
+The implementation and cannot-return guard change ten files with 77 insertions
+and 106 deletions, a net removal of 29 lines. The guard rejects the union type,
+its fallback documentation, and result-branch helper from Work Items and its
+two production consumers. Package shape and the 20-method `IssueBackend`
+contract remain unchanged; the next wave migrates actual query consumers away
+from that horizontal plane.
+
+## Wave 9.32 validation
+
+| Check | Result |
+|---|---|
+| Work Items create policy | PASS: repository admission, canonical projection cloning, and absence of post-create reads are covered |
+| Create consumers | PASS: cross-workspace move, onboarding first-task, and issue HTTP handler tests compile and pass with the single result type |
+| Cannot-return architecture ratchet | PASS: `TestRetiredWorkItemCreateProjectionFallbackCannotReturn` |
+| Loom `make gate` | PASS: all Go and frontend gates against paired FleetDB source `e9c185b` and its exact binary, with four Go OS threads, two Go package workers, one Vitest worker, and a 2 GiB Go soft memory limit |
+
+Two unchanged aggregate attempts exhausted the temporary volume during isolated
+profile and race-test linking. After clearing only verified-inactive generated
+Go caches from older archcheck runs, the identical tree passed the complete
+pinned gate. The successful architecture pass peaked at 1.16 GiB RSS under its
+2 GiB limit; no test, threshold, or profile was skipped.
+
+## Wave 9.33 result
+
+Wave 9.33 deletes the generic `Count` query from the horizontal
+`IssueBackend` plane. Its only production consumer asked for the number of
+review issues in the CLI monitor, so that consumer now derives the value from
+the existing canonical filtered `List` query. No replacement count facade or
+adapter is introduced.
+
+The deletion removes `CountOpts`, including its unused generic filtering and
+grouping surface, plus the API no-op, FleetDB query translation and validation,
+lazy-workspace proxy, unavailable stub, tracing decorator, mocks, and adapter
+tests. FleetDB's private status-count response remains solely behind `Stats`,
+where grouped lifecycle statistics are actually consumed. A cannot-return
+ratchet rejects both `Count` and `CountOpts` across the backend, adapter, and
+CLI roots.
+
+The broad interface contracts from 20 methods to 19. The implementation and
+enforcement commit `cad1c8b31` changes 19 files with 13 insertions and 344
+deletions, a net removal of 331 lines. Exact package shape remains
+`159 / 15 / 144 / 42 / 60`; this wave removes a query operation and its DTO
+rather than adding another package or compatibility layer.
+
+## Wave 9.33 validation
+
+| Check | Result |
+|---|---|
+| Focused query, adapter, monitor, proxy, tracing, mock, and architecture regressions | PASS across backend, API, FleetDB, CLI, monitor, test helper, WebUI hook, and archtest packages |
+| Cannot-return architecture ratchet | PASS: `TestUnusedIssueBackendCompatibilityOperationsCannotReturn` rejects `Count` and `CountOpts` |
+| Loom `make gate` | PASS: all Go and frontend quality gates against paired FleetDB source `e9c185b` and its exact rebuilt binary, with four Go OS threads, two Go package workers, one Vitest worker, and a 2 GiB Go soft memory limit |
+
+The aggregate gate rebuilt its isolated architecture package graph before the
+repository-wide race and coverage pass. The architecture process tree stayed
+well below the 2 GiB guard; no test, threshold, profile, or owner rule was
+disabled.
+
+Phase 9 remains incomplete. The next wave moves the remaining real query
+consumers from `IssueBackend` DTOs to narrow Work Items ports, while preserving
+the dedicated relevance-ranked search semantics at the owning boundary. The
+19-method horizontal interface is still an intermediate deletion target, not
+the intended architecture.
+
+## Wave 9.34 result
+
+Wave 9.34 moves relevance-ranked search from the horizontal `IssueBackend`
+contract to the Work Items-owned `SearchQueries` port. The Loom API and FleetDB
+adapters implement that owner projection directly. FleetDB still calls its
+dedicated `/issues/search` endpoint, and the Loom API still uses its dedicated
+`q` query path; neither adapter can silently substitute an ordinary paginated
+list or substring filter.
+
+The Work Items composition requires the owner port and fails closed with
+`ErrUnavailable` when it is absent. The lazy workspace proxy, unavailable
+backend, tracing decorator, and test doubles expose the same narrow port, while
+the trace span moves from `service.IssueBackend.SearchIssues` to
+`service.WorkItems.Search`. A cannot-return ratchet rejects the deleted
+`SearchIssues` method throughout backend, adapter, and CLI production roots.
+
+The broad interface contracts from 19 methods to 18. Implementation commit
+`280ef5435` changes 21 files with 226 insertions and 113 deletions. This wave is
+net additive because adapters now construct the owner projection directly and
+the cutover adds fail-closed and dedicated-endpoint regression coverage; it
+does not create a compatibility facade or production package. Exact package
+shape remains `159 / 15 / 144 / 42 / 60`.
+
+## Wave 9.34 validation
+
+| Check | Result |
+|---|---|
+| Work Items owner behavior | PASS: query normalization, persisted-ID validation, result cloning, owner-port dispatch, and fail-closed absence are covered |
+| API and FleetDB search adapters | PASS: focused tests preserve query escaping, limits, validation, empty results, error mapping, and FleetDB's dedicated ranked endpoint |
+| CLI proxy, unavailable backend, tracing, and mocks | PASS: all consumers compile against `SearchQueries`; search text remains excluded from trace attributes |
+| Cannot-return architecture ratchet | PASS: `TestUnusedIssueBackendCompatibilityOperationsCannotReturn` rejects `SearchIssues` |
+| Repository compile graph | PASS: every Go package compiled after the interface contraction |
+| Loom `make gate` | PASS: all Go and frontend quality gates against paired FleetDB source `e9c185b` and its exact binary, with four Go OS threads, two Go package workers, one Vitest worker, and a 2 GiB Go soft memory limit |
+
+The aggregate gate completed its exhaustive tagged architecture scan without a
+memory spike; the observed architecture process remained below 100 MiB RSS.
+No test, threshold, profile, or owner rule was disabled.
+
+Phase 9 remains incomplete. `IssueBackend` still carries 18 lifecycle, query,
+and command methods plus duplicate DTOs and transitional composition/proxy
+machinery. Subsequent waves continue moving real consumers to owner ports and
+delete the horizontal plane only after its final consumer is gone.
+
+## Wave 9.35 result
+
+Wave 9.35 moves aggregate statistics from the horizontal `IssueBackend`
+contract to the existing Work Items-owned `StatsQueries` port. The Loom API and
+FleetDB adapters now return `workitems.Stats` directly; the WebUI composition,
+CLI monitor, lazy workspace proxy, unavailable backend, and tracing decorator
+all require that owner port and fail closed when it is missing.
+
+The field-for-field duplicate `backend.StatsData` DTO is deleted rather than
+retained as an alias. Its JSON round-trip and meaningful-zero-value tests move
+to the owner model. The tracing span moves from the implicit
+`service.IssueBackend.Stats` convention to `service.WorkItems.Stats`, and a
+cannot-return ratchet rejects `StatsData` throughout backend, adapter, and CLI
+roots.
+
+The broad interface contracts from 18 methods to 17. Implementation commit
+`0a6363960` changes 23 files with 125 insertions and 130 deletions, a net
+removal of five lines. Exact package shape remains `159 / 15 / 144 / 42 / 60`;
+this wave deletes a duplicated representation and adds no facade, alias, or
+production package.
+
+## Wave 9.35 validation
+
+| Check | Result |
+|---|---|
+| Repository compile graph | PASS: every Go package compiled after deleting `IssueBackend.Stats` and `backend.StatsData` |
+| Owner and adapter behavior | PASS: Work Items cloning and JSON contracts plus API and FleetDB statistics behavior pass |
+| WebUI, health, monitor, metrics, proxy, and tracing consumers | PASS: focused suites use `StatsQueries`, including fail-closed missing-port behavior |
+| Cannot-return architecture ratchet | PASS: `TestUnusedIssueBackendCompatibilityOperationsCannotReturn` rejects `StatsData` |
+| Loom `make gate` | PASS: all Go and frontend quality gates against paired FleetDB source `e9c185b` and its exact binary, with four Go OS threads, two Go package workers, one Vitest worker, and a 2 GiB Go soft memory limit |
+
+The complete gate rebuilt its tagged architecture graphs before the later race,
+coverage, and integration stages. The observed architecture process remained
+below 355 MiB RSS, comfortably inside the 2 GiB guard. No test, threshold,
+profile, or owner rule was disabled.
+
+Phase 9 remains incomplete. `IssueBackend` still carries 17 lifecycle, query,
+and command methods plus duplicate issue/detail/comment/event DTOs and
+transitional composition/proxy machinery. Those are deletion targets, not
+accepted compatibility architecture.
+
+## Wave 9.36 result
+
+Wave 9.36 moves the canonical blocked-work view from the horizontal
+`IssueBackend` contract to the Work Items-owned `BlockedQueries` port. The
+Loom API and FleetDB adapters now return `workitems.IssueSummary` directly;
+WebUI composition, CLI data and monitor commands, epic snapshots, the lazy
+workspace proxy, unavailable backend, tracing decorator, and test doubles all
+require that narrow owner port and fail closed when it is absent.
+
+The duplicate `backend.BlockedOpts` DTO, FleetDB's flat `blockedIssueWire`
+dialect, its blocker wire DTO, and the dual-response decoder are deleted. The
+FleetDB adapter accepts only the canonical nested issue-plus-blockers response;
+the retired flat bridge shape fails visibly. Both adapters also reject owner
+filters they cannot evaluate instead of silently returning partially filtered
+results. FleetDB retains client-side filtering only for fields present in the
+canonical projection.
+
+The broad interface contracts from 17 methods to 16. Implementation commit
+`5a5df111c` changes 46 files with 524 insertions and 267 deletions. The wave is
+net additive because it adds direct owner projections, explicit fail-closed
+filter coverage, and removes a second horizontal dependency discovered by the
+gate: Driver no longer imports desktop settings to read one optional model.
+The existing serve adapter now injects that non-secret projection, deleting
+`internal/driver/runner_settings.go` and keeping Driver's import fanout at 18
+without an exception. Exact package shape remains `159 / 15 / 144 / 42 / 60`.
+
+## Wave 9.36 validation
+
+| Check | Result |
+|---|---|
+| Repository compile graph | PASS: every Go package compiles after removing `IssueBackend.Blocked` and `backend.BlockedOpts` |
+| API and FleetDB blocked adapters | PASS: canonical projection, nested blocker response, explicit blocked status, client-side supported filters, unsupported-filter rejection, and retired flat-response rejection are covered |
+| CLI, monitor, epic snapshot, WebUI composition, proxy, and tracing consumers | PASS: focused suites use `BlockedQueries`, including fail-closed missing-port behavior |
+| Cannot-return architecture ratchet | PASS: `TestUnusedIssueBackendCompatibilityOperationsCannotReturn` rejects `BlockedOpts`; retired FleetDB wire helpers have no production definitions |
+| Dependency topology | PASS: Driver fanout remains 18 after moving desktop-settings projection to the existing serve adapter; no exception or threshold was raised |
+| Loom `make gate` | PASS: all Go and frontend quality gates against paired FleetDB source `e9c185b` and its exact binary, with four Go OS threads, two Go package workers, one Vitest worker, and a 2 GiB Go soft memory limit |
+
+The complete gate passed FleetDB compatibility, lint, exact package and import
+ratchets, the measured architecture sweep, repository-wide race tests, and
+coverage. No test, threshold, profile, owner rule, or compatibility exception
+was disabled.
+
+Phase 9 remains incomplete. `IssueBackend` still carries 16 lifecycle, query,
+and command methods plus duplicate issue/detail/comment/event DTOs and
+transitional composition/proxy machinery. The next wave continues with the
+remaining availability query surface; final success still requires deleting
+the horizontal interface and duplicate DTO plane rather than preserving them
+as a compatibility facade.
+
+## Wave 9.37 result
+
+Wave 9.37 moves the canonical ready-work view from the horizontal
+`IssueBackend` contract to the Work Items-owned `ReadyQueries` port. The Loom
+API and FleetDB adapters now return `workitems.IssueSummary` directly; CLI data,
+task routing, automode, monitor, serve reconciliation, Driver claims and epic
+snapshots, WebUI composition and Fleet claim delivery, the lazy workspace
+proxy, unavailable backend, tracing decorator, and test doubles all require
+the owner port and fail closed when it is absent.
+
+The duplicate `backend.ReadyOpts` DTO is deleted rather than aliased. Ready
+filters now use `workitems.AvailabilityQuery` end to end, and task selection
+uses the Work Items summary without converting back through
+`backend.IssueData`. Deferred work still uses its own broad operation and DTO;
+its conversion helper is explicitly isolated for the next deletion wave rather
+than used as a Ready fallback.
+
+The broad interface contracts from 16 methods to 15. Implementation commit
+`a8f655f52` changes 54 files with 616 insertions and 480 deletions. The net
+addition is dominated by converting build-tagged conformance fixtures and
+consumer tests to the owner projection. Exact package shape remains
+`159 / 15 / 144 / 42 / 60`; no facade, alias, or production package was added.
+The gate also exposed a twenty-eighth import on the serve composition root.
+Instead of raising its exact exception, serve now calls the existing WebUI
+Workspace composition seam and deletes its duplicate direct infrastructure
+dependency, restoring fanout to 27.
+
+## Wave 9.37 validation
+
+| Check | Result |
+|---|---|
+| Repository compile graph and focused behavior | PASS: every Go package compiles; API, FleetDB, Work Items, CLI, automode, monitor, Driver, WebUI, proxy, and tracing suites pass against the paired FleetDB binary |
+| Retired symbols and owner-port dispatch | PASS: `IssueBackend.Ready` and `backend.ReadyOpts` have no production definitions; the cannot-return ratchet rejects `ReadyOpts`; missing `ReadyQueries` fails closed |
+| Tagged conformance and topology | PASS: the `issuebackend_e2e` profile compiles against `workitems.IssueSummary`; exact serve fanout remains 27 and no exception or threshold was raised |
+| Measured architecture guard | PASS: 11/11 profiles, 10 capability roots, zero legacy handler imports, 90 direct-write rows, 107 reviewed mutation commands, 70 runtime components, 79 goroutine launches, zero pending decisions, and 1,196.4 MiB peak process-tree RSS under 2,048 MiB |
+| Loom `make gate` | PASS: all Go and frontend quality gates, repository-wide race tests, and coverage against paired FleetDB source `e9c185b` and binary SHA-256 `ce781e5f…89b53`, with four Go OS threads, two Go package workers, one Vitest worker, and a 2 GiB Go soft memory limit |
+
+The gate first rejected one `goimports` grouping, then the new serve import,
+then two build-tag-only helpers that still required `[]backend.IssueData`.
+Each issue was fixed at the owning seam; the unchanged-source final rerun passed
+all quality gates. No test, profile, threshold, architecture rule, or
+compatibility exception was disabled.
+
+Phase 9 remains incomplete. `IssueBackend` still carries 15 lifecycle, query,
+and command methods plus duplicate issue/detail/comment/event DTOs and
+transitional composition/proxy machinery. The next wave deletes the Deferred
+query and its DTO; completion still requires removing `IssueBackend` itself and
+the remaining horizontal model/proxy plane.
+
+## Wave 9.38 result
+
+Wave 9.38 deletes the optional horizontal `DeferredIssueBackend` extension and
+its duplicate `backend.DeferredOpts` DTO. FleetDB now implements the Work
+Items-owned `DeferredQueries` port and returns `workitems.IssueSummary`
+directly. Work Items composition requires that port and fails closed when it is
+absent; the former behavior that silently converted a missing deferred
+capability into an empty queue is gone.
+
+Ready, blocked, and deferred FleetDB views now share one owner-projection
+converter, one availability-filter implementation, and one fail-closed check
+for filters absent from the projection. The temporary deferred-to-`IssueData`
+converter from the independently green Ready wave is deleted. Deferred
+filtering now supports every projected availability field, including
+unassigned, any-label, and repository filters, while rejecting `MolType` and
+`SortPolicy` before issuing a request because the deferred projection cannot
+prove them.
+
+Implementation commit `3ef2fcfd6` changes 12 files with 85 insertions and 107
+deletions, a net removal of 22 lines. Exact package shape remains
+`159 / 15 / 144 / 42 / 60`; no facade, alias, fallback, production package, or
+import exception was added. `IssueBackend` remains at 15 methods because the
+deleted deferred contract was a separate optional interface.
+
+## Wave 9.38 validation
+
+| Check | Result |
+|---|---|
+| Repository compile graph | PASS: every Go package compiles after deleting `DeferredIssueBackend` and `backend.DeferredOpts` |
+| FleetDB deferred owner adapter | PASS: canonical owner projection, parent/repository mapping, projected filters, empty results, and unsupported-filter rejection are covered |
+| Work Items composition | PASS: deferred queries use `DeferredQueries`; missing support returns `workitems.ErrUnavailable` rather than an empty result |
+| Retired symbols and topology | PASS: the cannot-return ratchet rejects both deleted symbols; focused lint, build-tag compilation, diff checks, and exact import fanout pass |
+| Loom `make gate` | PASS: all Go and frontend quality gates, measured architecture profiles, repository-wide race tests, and coverage against paired FleetDB source `e9c185b` and its exact binary, with four Go OS threads, two Go package workers, one Vitest worker, and a 2 GiB Go soft memory limit |
+
+No test, profile, threshold, architecture rule, or compatibility exception was
+disabled. Phase 9 remains incomplete: the 15-method `IssueBackend`, duplicate
+issue/detail/comment/event models, and their proxy/composition machinery are
+still deletion targets. The next wave moves a lifecycle-owned slice rather
+than retaining another optional repository extension.
+
+## Wave 9.39 result
+
+Wave 9.39 removes comments, events, and dependency mutations from the
+horizontal `IssueBackend`. The broad interface contracts from 15 methods to 10.
+Work Items now owns four explicit consumer ports: `EventQueries`,
+`CommentQueries`, `CommentCommands`, and `DependencyCommands`. Both real HTTP
+adapters, the lazy FleetDB opener, tracing, CLI commands, and Work Items
+composition implement or consume those ports directly. Missing activity
+support fails closed; there is no call-through fallback to `IssueBackend`.
+
+The duplicate `backend.EventData`, `backend.DepAddParams`,
+`backend.DepRemoveParams`, and `backend.CommentAddParams` types are deleted and
+ratcheted by the cannot-return architecture test. The horizontal comment sorter
+is also deleted; FleetDB keeps its wire-order normalization private and returns
+the Work Items-owned `Comment` projection. `backend.CommentData` survives only
+inside the still-transitional `IssueDetailData` projection and will be deleted
+with the detail cutover rather than retained as a second comment model.
+
+Implementation commit `8989e6127` changes 30 files with 436 insertions and 366
+deletions. Exact package shape remains `159 / 15 / 144 / 42 / 60`; no facade,
+alias, fallback, production package, import exception, or architecture
+threshold was added.
+
+## Wave 9.39 validation
+
+| Check | Result |
+|---|---|
+| Owner ports and real adapters | PASS: API and FleetDB comment, event, and dependency suites pass with Work Items commands and projections; CLI commands, lazy opening, tracing, and test doubles compile against the same ports |
+| Fail-closed composition | PASS: missing event, comment-query, comment-command, add-dependency, or remove-dependency support returns `workitems.ErrUnavailable` |
+| Retired compatibility plane | PASS: the four deleted DTO/parameter names and horizontal comment sorter have zero Go definitions or uses; the cannot-return ratchet rejects their return |
+| Measured architecture guard | PASS: 11/11 profiles, 10 capability roots, zero legacy handler imports, 90 direct-write rows, 107 reviewed mutation commands, 70 runtime components, 79 goroutine launches, zero pending decisions, and 1,163.0 MiB peak process-tree RSS under 2,048 MiB |
+| Loom `make gate` | PASS: all Go and frontend quality gates, measured architecture profiles, repository-wide race tests, generated-contract checks, and coverage against paired FleetDB source `e9c185b` and an exact source-built binary |
+
+The first full gate used the workspace's obsolete `fleet-db/unified-agents`
+checkout and correctly rejected its OpenAPI mismatch. No snapshot was copied
+backward. The unchanged candidate was rerun with explicit `FLEET_DB_REPO` and
+`FLEET_DB_BIN` values from the clean Phase 9 companion checkout; its OpenAPI
+hash exactly matched Loom's vendored snapshot and the complete gate passed.
+
+No test, profile, threshold, architecture rule, or compatibility exception was
+disabled. Phase 9 remains incomplete: the 10-method `IssueBackend`, duplicate
+issue/detail/comment/dependency projections, and lifecycle proxy/composition
+machinery are still deletion targets. The next wave moves lifecycle commands
+and detail/list projections to Work Items owner ports, then deletes
+`IssueBackend` rather than preserving it as a compatibility facade.
+
+## Wave 9.40 result
+
+Wave 9.40 completes that deletion. The residual ten-method
+`internal/backend.IssueBackend`, its duplicate issue/detail/comment/dependency
+DTO and error plane, the 562-line WebUI composition proxy, the driver task
+mutation facade, compatibility tracing, and their compatibility mocks are
+removed. There is no replacement umbrella interface, alias, call-through
+fallback, or legacy package.
+
+The Work Items owner now exposes the consumer-facing lifecycle, list, detail,
+claim-lease, comment, event, and dependency ports. The real FleetDB and Loom HTTP
+adapters implement those ports directly, while CLI, runtime, driver, and WebUI
+consumers depend on the owner contracts. Claim leasing remains an explicit
+`ClaimLeaseCommands` capability instead of being hidden inside the general
+store. Workspace routing is centralized in the owner-owned `ContextAPI`, and
+create identity is owner vocabulary rather than a backend DTO.
+
+The behavioral conformance suite was restored against the canonical Work Items
+contracts under the `workitems_e2e` profile. It exercises local FleetDB, remote
+FleetDB, direct FleetDB, and Loom HTTP API paths with real processes. The
+external `issue_backend` JSON/configuration name is deliberately retained as a
+stable operator and wire contract; it no longer corresponds to an internal
+runtime interface or fallback implementation.
+
+Implementation commit `5a7fdb799` changes 188 files with 4,429 insertions and
+8,199 deletions, a net removal of 3,770 lines. Exact package shape falls to
+`158 / 15 / 143 / 42 / 60`. Import fanout also falls from 39 to 38 for
+`internal/webui/app` and from 27 to 26 for `internal/cli/serve`; both exact
+ratchets were tightened to the lower counts.
+
+## Wave 9.40 validation
+
+| Check | Result |
+|---|---|
+| Real adapter conformance | PASS: the `workitems_e2e` suite exercises local FleetDB, remote FleetDB, direct FleetDB, and Loom HTTP API adapters with real processes |
+| Focused owner and consumer tests | PASS: Work Items, API and Fleet adapters, CLI data/agent/automode/epic/monitor/serve, driver, WebUI app/hooks/routes, and local-mode composition |
+| Retired plane and cannot-return guard | PASS: the root backend Go package, `IssueBackend`, duplicate DTOs/errors, WebUI proxy, driver facade, compatibility tracing, and old mocks are absent; the architecture guard rejects their return |
+| Measured architecture guard | PASS: 11/11 profiles, 10 capability roots, zero legacy handler imports, 90 direct-write rows, 107 reviewed mutation commands, 70 runtime components, 79 goroutine launches, zero pending decisions, and 1,130.2 MiB peak process-tree RSS under 2,048 MiB |
+| Loom aggregate `make gate` | PASS: all Go and frontend quality gates, repository-wide race and coverage checks, generated-contract checks, and the paired FleetDB source/binary at `e9c185b`; the separately measured architecture run was not duplicated in this aggregate invocation |
+
+No test, profile, threshold, architecture rule, or compatibility exception was
+disabled. The horizontal IssueBackend migration is complete. The remaining
+`internal/backend/api` and `internal/backend/fleet` packages are concrete
+outbound adapters, not legacy facades; the final Phase 9 audit will decide their
+owner-local placement without collapsing distinct external transports into the
+Work Items core.
+
+## Wave 9.41 result
+
+Wave 9.41 removes the final legacy location. The concrete FleetDB adapter now
+lives at `internal/modules/workitems/fleetdb`, and the Loom management-API
+adapter lives at `internal/modules/workitems/httpapi`. Both remain distinct
+packages because they adapt different external systems to the same
+consumer-owned Work Items ports; folding them into the capability core would
+violate the transport boundary rather than deepen the module.
+
+Capability-neutral HTTP request, connection-pool, and trace-propagation
+mechanics move to `internal/platform/{fleethttp,httptransport}`. Generated Loom
+OpenAPI wire types move to `internal/platform/loomapi/gen`. This keeps concrete
+transport libraries out of the Work Items core while allowing the two
+owner-local adapters to contain only mapping and adapter behavior. Internal
+types and hooks are renamed from `*Backend` to `Adapter` and Work Items-specific
+names. The public `issue_backend` JSON/configuration key remains unchanged.
+
+Implementation commit `d03b64717` changes 93 files with 440 insertions and 387
+deletions. This is an ownership relocation, not a package-count claim: exact
+topology remains `158 / 17 / 141 / 42 / 60`, and `internal/backend` no longer
+exists.
+
+## Wave 9.41 validation and final audit
+
+| Check | Result |
+|---|---|
+| Physical and symbol deletion | PASS: no `internal/backend` directory, production import, `IssueBackend` runtime type, `APIBackend`, `FleetBackend`, or backend-named lifecycle hook remains |
+| Real adapter conformance | PASS: `workitems_e2e` exercises local FleetDB, remote FleetDB, direct FleetDB, and Loom HTTP API adapters after relocation |
+| Generated contract and compile profiles | PASS: generated Go types match `api/openapi.yaml`; untagged and all enforced tagged package graphs compile at the new paths |
+| Measured architecture guard | PASS: 11/11 profiles, 10 capability roots, zero legacy handler imports, zero Store files outside composition, 90 direct-write rows, 107 reviewed mutation commands, 70 runtime components, 79 goroutine launches, and 1,214.6 MiB peak process-tree RSS under 2,048 MiB |
+| Loom aggregate `make gate` | PASS: all Go and frontend quality gates, repository-wide race and coverage checks, generated-contract checks, and paired FleetDB source/binary at `e9c185b`; the measured architecture pass was not duplicated inside this invocation |
+
+The closing shallow-package audit reviewed all 42 one-file and 60 one-or-two-file
+production packages. The remaining small packages are capability adapters,
+named application workflows, delivery/CLI entry surfaces, generated contracts,
+or reusable platform mechanisms with distinct consumers and policies. None is
+a residual horizontal model/repository plane or fallback. Collapsing them only
+to lower the count would merge capability ownership, couple independent
+external adapters, or reintroduce duplicated transport policy. Phase 9 therefore
+closes at 158 packages—below its 160-package target—with the ten capability
+owners, consumer-owned ports, and independently replaceable adapters intact.
 
 ---
 

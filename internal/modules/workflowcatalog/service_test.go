@@ -554,6 +554,64 @@ func TestLifecycleCommandsPreserveSemanticsAndMutationCoordinates(t *testing.T) 
 	})
 }
 
+func TestVersionScopedApprovalDoesNotTrustSiblingVersions(t *testing.T) {
+	fixture := newCatalogFixture(t)
+	fixture.reader.versions["v3"] = &DriverVersion{
+		WorkspaceKey:     "TEST",
+		DriverID:         "driver-1",
+		VersionID:        "v3",
+		Version:          3,
+		SourceDigest:     "digest-v3",
+		Manifest:         map[string]string{ManifestTrustLevelKey: "untrusted"},
+		ValidationStatus: DriverVersionValidationPassed,
+	}
+	ctx := context.Background()
+
+	approve, err := fixture.service.ApproveVersion(ctx, fixture.operator(t, "TEST", ActionApproveVersion), VersionCommand{
+		WorkspaceKey: "TEST", DriverID: "driver-1", VersionID: "v2", ExpectedRevision: 7,
+	})
+	if err != nil {
+		t.Fatalf("ApproveVersion: %v", err)
+	}
+	if !VersionApproved(approve.Driver, fixture.reader.versions["v1"]) {
+		t.Fatal("approving v2 removed the existing v1 approval")
+	}
+	if !VersionApproved(approve.Driver, fixture.reader.versions["v2"]) {
+		t.Fatal("v2 is not approved after its approval command")
+	}
+	if VersionApproved(approve.Driver, fixture.reader.versions["v3"]) || EffectiveTrust(approve.Driver, fixture.reader.versions["v3"]) != DriverTrustUntrusted {
+		t.Fatal("v3 inherited trust from the v2 approval")
+	}
+
+	fixture.reader.drivers["driver-1"] = cloneDriver(approve.Driver)
+	activate, err := fixture.service.ActivateVersion(ctx, fixture.operator(t, "TEST", ActionActivateVersion), VersionCommand{
+		WorkspaceKey: "TEST", DriverID: "driver-1", VersionID: "v2", ExpectedRevision: 8,
+	})
+	if err != nil {
+		t.Fatalf("ActivateVersion: %v", err)
+	}
+	if activate.Driver.ActiveVersionID != "v2" || !VersionApproved(activate.Driver, fixture.reader.versions["v1"]) || !VersionApproved(activate.Driver, fixture.reader.versions["v2"]) {
+		t.Fatalf("activation did not preserve version-scoped approvals: %+v", activate.Driver)
+	}
+	if VersionApproved(activate.Driver, fixture.reader.versions["v3"]) {
+		t.Fatal("activating v2 implicitly approved v3")
+	}
+
+	fixture.reader.drivers["driver-1"] = cloneDriver(activate.Driver)
+	unapprove, err := fixture.service.UnapproveVersion(ctx, fixture.operator(t, "TEST", ActionUnapproveVersion), VersionCommand{
+		WorkspaceKey: "TEST", DriverID: "driver-1", VersionID: "v2", ExpectedRevision: 9,
+	})
+	if err != nil {
+		t.Fatalf("UnapproveVersion: %v", err)
+	}
+	if VersionApproved(unapprove.Driver, fixture.reader.versions["v2"]) {
+		t.Fatal("v2 remains approved after its unapproval command")
+	}
+	if !VersionApproved(unapprove.Driver, fixture.reader.versions["v1"]) {
+		t.Fatal("unapproving v2 removed the sibling v1 approval")
+	}
+}
+
 func assertVersionResultContract(t *testing.T, result *VersionResult, action authority.Action, revision uint64, impact string) {
 	t.Helper()
 	if result.Action != action || result.CommittedRevision != revision || result.Driver.Revision != revision || result.SemanticImpact != impact {

@@ -20,27 +20,21 @@ import (
 	workflowcataloghttp "github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog/httpapi"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 	"github.com/tysonthomas9/loomcli/internal/roleprompts"
-	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
-	"github.com/tysonthomas9/loomcli/internal/webui/storeadapter"
 )
 
 const maxRoleBodyBytes = 1 << 20
 
-// Module registers role read/create routes. It writes prompt files to the
-// machine-local workspace directory, so it holds the store directly (the same
-// shape as the workflows/webhooks modules).
+// Module registers role read/create routes. Prompt-file placement is supplied
+// through a narrow machine-local workspace-path resolver.
 type Module struct {
-	store     roleWorkspaceStore
-	roles     RoleAPI
-	authority workflowcataloghttp.OperatorAuthorityResolver
+	workspacePath WorkspacePathResolver
+	roles         RoleAPI
+	authority     workflowcataloghttp.OperatorAuthorityResolver
 }
 
-type roleWorkspaceStore interface {
-	Workspaces() store.WorkspaceStore
-	Repos() store.RepoStore
-}
+type WorkspacePathResolver func(context.Context, string) string
 
 type RoleAPI interface {
 	agents.RoleQueries
@@ -48,17 +42,17 @@ type RoleAPI interface {
 }
 
 type Config struct {
-	Store     roleWorkspaceStore
-	Roles     RoleAPI
-	Authority workflowcataloghttp.OperatorAuthorityResolver
+	WorkspacePath WorkspacePathResolver
+	Roles         RoleAPI
+	Authority     workflowcataloghttp.OperatorAuthorityResolver
 }
 
 func NewModule(config Config) *Module {
-	return &Module{store: config.Store, roles: config.Roles, authority: config.Authority}
+	return &Module{workspacePath: config.WorkspacePath, roles: config.Roles, authority: config.Authority}
 }
 
 func (m *Module) Register(mux *http.ServeMux) {
-	if m.store == nil || m.roles == nil {
+	if m.workspacePath == nil || m.roles == nil {
 		return
 	}
 	mux.HandleFunc("GET /api/workspaces/{ws}/roles", m.listRoles)
@@ -180,13 +174,13 @@ func (m *Module) listRoles(w http.ResponseWriter, r *http.Request) {
 
 func EnsureRole(
 	ctx context.Context,
-	st roleWorkspaceStore,
+	workspacePath WorkspacePathResolver,
 	api RoleAPI,
 	auth authority.OperatorAuthority,
 	ws string,
 	req EnsureRoleRequest,
 ) (*domain.Role, bool, error) {
-	result, err := EnsureRoleWithReceipt(ctx, st, api, auth, ws, req)
+	result, err := EnsureRoleWithReceipt(ctx, workspacePath, api, auth, ws, req)
 	if err != nil {
 		return nil, false, err
 	}
@@ -196,14 +190,14 @@ func EnsureRole(
 // EnsureRoleWithReceipt is EnsureRole with a compensating ownership receipt.
 func EnsureRoleWithReceipt(
 	ctx context.Context,
-	st roleWorkspaceStore,
+	workspacePath WorkspacePathResolver,
 	api RoleAPI,
 	auth authority.OperatorAuthority,
 	ws string,
 	req EnsureRoleRequest,
 ) (*EnsureRoleResult, error) {
-	if st == nil || api == nil {
-		return nil, fmt.Errorf("store and Agents role API are required: %w", domain.ErrInvalid)
+	if workspacePath == nil || api == nil {
+		return nil, fmt.Errorf("workspace path resolver and Agents role API are required: %w", domain.ErrInvalid)
 	}
 	ws = strings.TrimSpace(ws)
 	name := strings.TrimSpace(req.Name)
@@ -219,13 +213,13 @@ func EnsureRoleWithReceipt(
 		return &EnsureRoleResult{Role: existing}, nil
 	}
 
-	in, _, err := buildEnsuredRoleCreate(ctx, st, ws, name, req)
+	in, _, err := buildEnsuredRoleCreate(ctx, workspacePath, ws, name, req)
 	if err != nil {
 		return nil, err
 	}
 	created, err := api.CreateRole(ctx, auth, agents.CreateRoleCommand{
 		WorkspaceKey: ws,
-		Role:         roleDefinitionFromCreate(in),
+		Role:         in,
 	})
 	if err == nil {
 		return &EnsureRoleResult{Role: domainRole(created), Created: true}, nil
@@ -252,13 +246,12 @@ func EnsureRoleWithReceipt(
 
 func buildEnsuredRoleCreate(
 	ctx context.Context,
-	st roleWorkspaceStore,
+	workspacePath WorkspacePathResolver,
 	ws string,
 	name string,
 	req EnsureRoleRequest,
-) (store.RoleCreate, roleprompts.PromptFileReceipt, error) {
-	in := store.RoleCreate{
-		WorkspaceKey:   ws,
+) (agents.RoleDefinition, roleprompts.PromptFileReceipt, error) {
+	in := agents.RoleDefinition{
 		Name:           name,
 		Kind:           strings.TrimSpace(req.Kind),
 		Description:    strings.TrimSpace(req.Description),
@@ -282,9 +275,9 @@ func buildEnsuredRoleCreate(
 	var receipt roleprompts.PromptFileReceipt
 	if !req.PersistInlinePrompt && strings.TrimSpace(req.Prompt) != "" {
 		var err error
-		receipt, err = ensureRolePromptWithReceipt(ctx, st, ws, name, req.PromptFilename, req.Prompt)
+		receipt, err = ensureRolePromptWithReceipt(ctx, workspacePath, ws, name, req.PromptFilename, req.Prompt)
 		if err != nil {
-			return store.RoleCreate{}, roleprompts.PromptFileReceipt{}, err
+			return agents.RoleDefinition{}, roleprompts.PromptFileReceipt{}, err
 		}
 		in.PromptFile = receipt.Path
 	}
@@ -295,7 +288,7 @@ func buildEnsuredRoleCreate(
 // RoleStore exposes only name-based Delete, so check-then-delete could remove a
 // concurrently edited, recreated, or newly adopted role. An exact retry safely
 // reuses the retained definition.
-func (*EnsureRoleResult) Compensate(context.Context, roleWorkspaceStore, string) error {
+func (*EnsureRoleResult) Compensate(context.Context, WorkspacePathResolver, string) error {
 	return nil
 }
 
@@ -454,7 +447,7 @@ func (m *Module) createRole(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	role, created, err := EnsureRole(r.Context(), m.store, m.roles, auth, ws, EnsureRoleRequest{
+	role, created, err := EnsureRole(r.Context(), m.workspacePath, m.roles, auth, ws, EnsureRoleRequest{
 		Name:                name,
 		Kind:                req.Kind,
 		Description:         req.Description,
@@ -540,7 +533,7 @@ func (m *Module) updateRole(w http.ResponseWriter, r *http.Request) { //nolint:f
 
 	// A nil field means "leave unchanged"; RoleUpdate's fields are all pointers,
 	// so trimPtr threads that through for the string fields.
-	patch := store.RoleUpdate{
+	patch := agents.RolePatch{
 		Kind:           trimPtr(req.Kind),
 		Description:    trimPtr(req.Description),
 		PromptFile:     trimPtr(req.PromptFile),
@@ -566,7 +559,7 @@ func (m *Module) updateRole(w http.ResponseWriter, r *http.Request) { //nolint:f
 			if req.PromptFilename != nil {
 				filename = strings.TrimSpace(*req.PromptFilename)
 			}
-			promptPath, werr := ensureRolePrompt(r.Context(), m.store, ws, name, filename, *req.Prompt)
+			promptPath, werr := ensureRolePrompt(r.Context(), m.workspacePath, ws, name, filename, *req.Prompt)
 			if werr != nil {
 				handler.WriteDomainError(w, werr, "update role prompt failed")
 				return
@@ -577,7 +570,7 @@ func (m *Module) updateRole(w http.ResponseWriter, r *http.Request) { //nolint:f
 
 	updated, err := m.roles.UpdateRole(r.Context(), auth, agents.UpdateRoleCommand{
 		WorkspaceKey: ws, RoleName: name, ExpectedUpdatedAt: current.UpdatedAt,
-		Patch: rolePatchFromStore(patch),
+		Patch: patch,
 	})
 	if err != nil {
 		writeRoleError(w, err, "update role failed")
@@ -632,8 +625,7 @@ func (m *Module) cloneRole(w http.ResponseWriter, r *http.Request) { //nolint:fu
 	if description == "" {
 		description = src.Description
 	}
-	in := store.RoleCreate{
-		WorkspaceKey:   ws,
+	in := agents.RoleDefinition{
 		Name:           target,
 		Description:    description,
 		Model:          src.Model,
@@ -660,7 +652,7 @@ func (m *Module) cloneRole(w http.ResponseWriter, r *http.Request) { //nolint:fu
 
 	created, err := m.roles.CreateRole(r.Context(), auth, agents.CreateRoleCommand{
 		WorkspaceKey: ws,
-		Role:         roleDefinitionFromCreate(in),
+		Role:         in,
 	})
 	if err != nil {
 		writeRoleError(w, err, "clone role failed")
@@ -735,10 +727,26 @@ func ReadPromptBody(role *domain.Role) string {
 	if role == nil {
 		return ""
 	}
-	if strings.TrimSpace(role.PromptFile) == "" {
-		return role.Prompt
+	return readPromptBody(role.Prompt, role.PromptFile)
+}
+
+// ReadAgentRolePromptBody materializes the canonical Agents Role projection
+// without converting it back through the retired horizontal domain model.
+func ReadAgentRolePromptBody(role *agents.Role) string {
+	if role == nil {
+		return ""
 	}
-	data, err := os.ReadFile(role.PromptFile)
+	return readPromptBody(role.Prompt, role.PromptFile)
+}
+
+func readPromptBody(prompt, promptFile string) string {
+	if strings.TrimSpace(promptFile) == "" {
+		return prompt
+	}
+	// PromptFile is an operator-managed Role field and this helper never accepts
+	// a request path directly. Reads intentionally preserve the existing Role
+	// contract, including built-in prompts outside a workspace checkout.
+	data, err := os.ReadFile(promptFile) // #nosec G304 -- persisted Role configuration is the trust boundary
 	if err != nil {
 		return ""
 	}
@@ -824,29 +832,6 @@ func writeRoleError(w http.ResponseWriter, err error, fallback string) {
 	}
 }
 
-func roleDefinitionFromCreate(input store.RoleCreate) agents.RoleDefinition {
-	return agents.RoleDefinition{
-		Name: input.Name, Kind: input.Kind, Description: input.Description,
-		Prompt: input.Prompt, PromptFile: input.PromptFile, Model: input.Model,
-		TaskFilter: input.TaskFilter, Backend: input.Backend, Effort: input.Effort,
-		PathPatterns: slices.Clone(input.PathPatterns), Skills: slices.Clone(input.Skills),
-		MaxPriority: cloneInt(input.MaxPriority), MaxConcurrency: cloneInt(input.MaxConcurrency),
-		ReadOnly: input.ReadOnly, AllowedTools: slices.Clone(input.AllowedTools),
-		DeniedTools: slices.Clone(input.DeniedTools), MaxBudgetUSD: cloneFloat64(input.MaxBudgetUSD),
-	}
-}
-
-func rolePatchFromStore(patch store.RoleUpdate) agents.RolePatch {
-	return agents.RolePatch{
-		Kind: patch.Kind, Description: patch.Description, Prompt: patch.Prompt,
-		PromptFile: patch.PromptFile, Model: patch.Model, TaskFilter: patch.TaskFilter,
-		Backend: patch.Backend, Effort: patch.Effort, PathPatterns: patch.PathPatterns,
-		Skills: patch.Skills, MaxPriority: patch.MaxPriority, MaxConcurrency: patch.MaxConcurrency,
-		ReadOnly: patch.ReadOnly, AllowedTools: patch.AllowedTools, DeniedTools: patch.DeniedTools,
-		MaxBudgetUSD: patch.MaxBudgetUSD,
-	}
-}
-
 func domainRole(role *agents.Role) *domain.Role {
 	if role == nil {
 		return nil
@@ -893,28 +878,28 @@ func equalFloat64(left, right *float64) bool {
 // agree on layout (this handler must not be imported by workspacemgr, hence the
 // neutral shared package).
 func (m *Module) writeRolePrompt(ctx context.Context, ws, roleName, filename, content string) (string, error) {
-	return writeRolePrompt(ctx, m.store, ws, roleName, filename, content)
+	return writeRolePrompt(ctx, m.workspacePath, ws, roleName, filename, content)
 }
 
-func writeRolePrompt(ctx context.Context, st roleWorkspaceStore, ws, roleName, filename, content string) (string, error) {
-	wsPath := strings.TrimSpace(storeadapter.ResolveOrHealWorkspacePath(ctx, st, ws))
+func writeRolePrompt(ctx context.Context, workspacePath WorkspacePathResolver, ws, roleName, filename, content string) (string, error) {
+	wsPath := strings.TrimSpace(workspacePath(ctx, ws))
 	if wsPath == "" {
 		return "", fmt.Errorf("workspace path unavailable; cannot persist role prompt")
 	}
 	return roleprompts.WritePromptFile(wsPath, roleName, filename, content)
 }
 
-func ensureRolePrompt(ctx context.Context, st roleWorkspaceStore, ws, roleName, filename, content string) (string, error) {
-	receipt, err := ensureRolePromptWithReceipt(ctx, st, ws, roleName, filename, content)
+func ensureRolePrompt(ctx context.Context, workspacePath WorkspacePathResolver, ws, roleName, filename, content string) (string, error) {
+	receipt, err := ensureRolePromptWithReceipt(ctx, workspacePath, ws, roleName, filename, content)
 	return receipt.Path, err
 }
 
 func ensureRolePromptWithReceipt(
 	ctx context.Context,
-	st roleWorkspaceStore,
+	workspacePath WorkspacePathResolver,
 	ws, roleName, filename, content string,
 ) (roleprompts.PromptFileReceipt, error) {
-	wsPath := strings.TrimSpace(storeadapter.ResolveOrHealWorkspacePath(ctx, st, ws))
+	wsPath := strings.TrimSpace(workspacePath(ctx, ws))
 	if wsPath == "" {
 		return roleprompts.PromptFileReceipt{}, fmt.Errorf("workspace path unavailable; cannot persist role prompt")
 	}

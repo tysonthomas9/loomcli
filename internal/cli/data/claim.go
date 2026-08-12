@@ -4,6 +4,8 @@ import (
 	"os"
 
 	"github.com/spf13/cobra"
+
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 )
 
 // claimActor is captured for command-line parity with the local-mode claim
@@ -17,11 +19,11 @@ var claimCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
-		ib, err := getIssueBackend(ctx)
+		itemsAPI, err := getWorkItems(ctx)
 		if err != nil {
 			return err
 		}
-		if err := ib.ClaimIssue(ctx, args[0], 0); err != nil {
+		if _, err := itemsAPI.Claim(ctx, workitems.ClaimCommand{IssueID: args[0]}); err != nil {
 			return err
 		}
 		return printMessageResult(os.Stdout, "claimed "+args[0], outputFormat)

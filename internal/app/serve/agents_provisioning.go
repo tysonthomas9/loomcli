@@ -2,13 +2,14 @@ package serve
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/tysonthomas9/loomcli/internal/app/agentprovisioning"
 	provisioningfleetdb "github.com/tysonthomas9/loomcli/internal/app/agentprovisioning/fleetdb"
-	"github.com/tysonthomas9/loomcli/internal/app/serve/agentcomposition/owneradapters"
 	infrafleetdb "github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
 	"github.com/tysonthomas9/loomcli/internal/modules/agents"
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
@@ -177,15 +178,15 @@ func composeAgentProvisioningCapability(
 			agentprovisioning.ErrUnavailable,
 		)
 	}
-	agentsAdapter, err := owneradapters.NewAgentsAdapter(agentSteps, authorities)
+	agentsAdapter, err := newAgentProvisioningAgentsAdapter(agentSteps, authorities)
 	if err != nil {
 		return nil, err
 	}
-	automationAdapter, err := owneradapters.NewAutomationAdapter(bindingSteps, authorities)
+	automationAdapter, err := newAgentProvisioningAutomationAdapter(bindingSteps, authorities)
 	if err != nil {
 		return nil, err
 	}
-	connectorsAdapter, err := owneradapters.NewConnectorsAdapter(grantSteps, authorities)
+	connectorsAdapter, err := newAgentProvisioningConnectorsAdapter(grantSteps, authorities)
 	if err != nil {
 		return nil, err
 	}
@@ -289,4 +290,170 @@ func (provider *agentProvisioningAuthorityProvider) issue(
 		return authority.SystemAuthority{}, err
 	}
 	return issuer.IssueSystem(principal, workspace, action, reason)
+}
+
+type agentProvisioningAgentsOperations interface {
+	EnsureRole(context.Context, agentprovisioning.EnsureRoleCommand) error
+	EnsureAgent(context.Context, agentprovisioning.EnsureAgentCommand) error
+}
+
+// agentProvisioningAgentsAuthority exposes fixed actions so this composition
+// adapter cannot turn a provisioning step into another Agents action.
+type agentProvisioningAgentsAuthority interface {
+	AuthorityForRole(context.Context, string, string) (authority.SystemAuthority, error)
+	AuthorityForAgent(context.Context, string, string) (authority.SystemAuthority, error)
+}
+
+type agentProvisioningAgentsAdapter struct {
+	operations  agentProvisioningAgentsOperations
+	authorities agentProvisioningAgentsAuthority
+}
+
+var (
+	_ agentprovisioning.RoleOperations  = (*agentProvisioningAgentsAdapter)(nil)
+	_ agentprovisioning.AgentOperations = (*agentProvisioningAgentsAdapter)(nil)
+)
+
+func newAgentProvisioningAgentsAdapter(
+	operations agentProvisioningAgentsOperations,
+	authorities agentProvisioningAgentsAuthority,
+) (*agentProvisioningAgentsAdapter, error) {
+	if operations == nil || authorities == nil {
+		return nil, fmt.Errorf("compose AgentProvisioning Agents adapter: %w", agentprovisioning.ErrUnavailable)
+	}
+	return &agentProvisioningAgentsAdapter{operations: operations, authorities: authorities}, nil
+}
+
+func (adapter *agentProvisioningAgentsAdapter) EnsureRole(
+	ctx context.Context,
+	command agentprovisioning.EnsureRoleCommand,
+) error {
+	_, err := adapter.authorities.AuthorityForRole(ctx, command.WorkspaceKey, "AgentProvisioning "+command.CommandID)
+	if err != nil {
+		return fmt.Errorf(
+			"issue role authority through Agents guarded owner command: %w",
+			errors.Join(agentprovisioning.ErrUnavailable, err),
+		)
+	}
+	if err := adapter.operations.EnsureRole(ctx, command); err != nil {
+		return fmt.Errorf("ensure role through Agents guarded owner command: %w", err)
+	}
+	return nil
+}
+
+func (adapter *agentProvisioningAgentsAdapter) EnsureAgent(
+	ctx context.Context,
+	command agentprovisioning.EnsureAgentCommand,
+) error {
+	_, err := adapter.authorities.AuthorityForAgent(ctx, command.WorkspaceKey, "AgentProvisioning "+command.CommandID)
+	if err != nil {
+		return fmt.Errorf(
+			"issue agent authority through Agents guarded owner command: %w",
+			errors.Join(agentprovisioning.ErrUnavailable, err),
+		)
+	}
+	if err := adapter.operations.EnsureAgent(ctx, command); err != nil {
+		return fmt.Errorf("ensure agent through Agents guarded owner command: %w", err)
+	}
+	return nil
+}
+
+type agentProvisioningAutomationOperations interface {
+	EnsureBinding(context.Context, agentprovisioning.EnsureBindingCommand) error
+}
+
+type agentProvisioningAutomationAuthority interface {
+	AuthorityForBinding(context.Context, string, string) (authority.SystemAuthority, error)
+}
+
+type agentProvisioningAutomationAdapter struct {
+	operations  agentProvisioningAutomationOperations
+	authorities agentProvisioningAutomationAuthority
+}
+
+var _ agentprovisioning.BindingOperations = (*agentProvisioningAutomationAdapter)(nil)
+
+func newAgentProvisioningAutomationAdapter(
+	operations agentProvisioningAutomationOperations,
+	authorities agentProvisioningAutomationAuthority,
+) (*agentProvisioningAutomationAdapter, error) {
+	if operations == nil || authorities == nil {
+		return nil, fmt.Errorf("compose AgentProvisioning Automation adapter: %w", agentprovisioning.ErrUnavailable)
+	}
+	return &agentProvisioningAutomationAdapter{operations: operations, authorities: authorities}, nil
+}
+
+func (adapter *agentProvisioningAutomationAdapter) EnsureBinding(
+	ctx context.Context,
+	command agentprovisioning.EnsureBindingCommand,
+) error {
+	_, err := adapter.authorities.AuthorityForBinding(ctx, command.WorkspaceKey, "AgentProvisioning "+command.CommandID)
+	if err != nil {
+		return fmt.Errorf(
+			"issue binding authority through Automation guarded owner command: %w",
+			errors.Join(agentprovisioning.ErrUnavailable, err),
+		)
+	}
+	if err := adapter.operations.EnsureBinding(ctx, command); err != nil {
+		return fmt.Errorf("ensure binding through Automation guarded owner command: %w", err)
+	}
+	return nil
+}
+
+// agentProvisioningConnectorsAuthority is action-specific: composition may
+// issue only Connectors' ensure-grant action for the requested workspace.
+type agentProvisioningConnectorsAuthority interface {
+	AuthorityForGrant(context.Context, string, string) (authority.SystemAuthority, error)
+}
+
+type agentProvisioningConnectorsAdapter struct {
+	grants    agentprovisioning.GrantOperations
+	authority agentProvisioningConnectorsAuthority
+}
+
+var _ agentprovisioning.GrantOperations = (*agentProvisioningConnectorsAdapter)(nil)
+
+func newAgentProvisioningConnectorsAdapter(
+	grants agentprovisioning.GrantOperations,
+	authorityProvider agentProvisioningConnectorsAuthority,
+) (*agentProvisioningConnectorsAdapter, error) {
+	if grants == nil || authorityProvider == nil {
+		return nil, fmt.Errorf("compose AgentProvisioning Connector grants: dependencies are required: %w", agentprovisioning.ErrUnavailable)
+	}
+	return &agentProvisioningConnectorsAdapter{grants: grants, authority: authorityProvider}, nil
+}
+
+func (adapter *agentProvisioningConnectorsAdapter) EnsureGrant(
+	ctx context.Context,
+	command agentprovisioning.EnsureGrantCommand,
+) error {
+	if adapter == nil || adapter.grants == nil || adapter.authority == nil {
+		return agentprovisioning.ErrUnavailable
+	}
+	if !canonicalAgentProvisioningAuditID(command.CommandID) {
+		return fmt.Errorf("connector grant command id is not canonical: %w", agentprovisioning.ErrInvalid)
+	}
+	_, err := adapter.authority.AuthorityForGrant(ctx, command.WorkspaceKey, "AgentProvisioning "+command.CommandID)
+	if err != nil {
+		return fmt.Errorf(
+			"issue Connector grant authority: %w",
+			errors.Join(agentprovisioning.ErrUnavailable, err),
+		)
+	}
+	if err := adapter.grants.EnsureGrant(ctx, command); err != nil {
+		return fmt.Errorf("ensure Connector grant through Connectors guarded owner command: %w", err)
+	}
+	return nil
+}
+
+func canonicalAgentProvisioningAuditID(value string) bool {
+	if value == "" || value != strings.TrimSpace(value) {
+		return false
+	}
+	for _, character := range value {
+		if unicode.IsControl(character) {
+			return false
+		}
+	}
+	return true
 }

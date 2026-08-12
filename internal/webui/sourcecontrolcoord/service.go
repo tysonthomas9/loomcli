@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 	"github.com/tysonthomas9/loomcli/internal/ops"
-	"github.com/tysonthomas9/loomcli/internal/webui"
 	"github.com/tysonthomas9/loomcli/internal/webui/agentcoord"
 	"github.com/tysonthomas9/loomcli/internal/webui/apperrors"
 )
@@ -30,17 +30,16 @@ func validateDiffPath(path string) bool {
 
 // diffServiceImpl is the concrete implementation of DiffService.
 type diffServiceImpl struct {
-	gitOps    ops.GitOps
-	backendFn IssueBackendProvider
-	scope     WorkspaceScope
+	gitOps      ops.GitOps
+	workItemsFn workitems.Provider
+	scope       WorkspaceScope
 }
 
-type IssueBackendProvider func(context.Context) webui.IssueBackend
 type WorkspaceScope func(context.Context, string) context.Context
 
 // NewDiffService creates a new DiffService implementation.
-func NewDiffService(gitOps ops.GitOps, backendFn IssueBackendProvider, scope WorkspaceScope) DiffService {
-	return &diffServiceImpl{gitOps: gitOps, backendFn: backendFn, scope: scope}
+func NewDiffService(gitOps ops.GitOps, workItemsFn workitems.Provider, scope WorkspaceScope) DiffService {
+	return &diffServiceImpl{gitOps: gitOps, workItemsFn: workItemsFn, scope: scope}
 }
 
 func (s *diffServiceImpl) resolveAgent(wsID, agentName string) (*ops.AgentWorktree, error) {
@@ -177,20 +176,20 @@ func (s *diffServiceImpl) GetIssueDiffStat(ctx context.Context, wsID, issueID st
 	if issueID == "" {
 		return nil, apperrors.ErrValidation("missing issue ID")
 	}
-	if s.backendFn == nil {
-		return nil, apperrors.ErrUnavailable("issue backend unavailable")
+	if s.workItemsFn == nil {
+		return nil, apperrors.ErrUnavailable("Work Items unavailable")
 	}
 	if s.scope == nil {
 		return nil, apperrors.ErrUnavailable("workspace scope unavailable")
 	}
 	ctx = s.scope(ctx, wsID)
-	be := s.backendFn(ctx)
-	if be == nil {
-		return nil, apperrors.ErrUnavailable("issue backend unavailable")
+	items := s.workItemsFn(ctx)
+	if items == nil {
+		return nil, apperrors.ErrUnavailable("Work Items unavailable")
 	}
 	backendCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	issue, err := be.Get(backendCtx, issueID)
+	issue, err := items.Get(backendCtx, workitems.GetQuery{IssueID: issueID})
 	if err != nil {
 		return nil, apperrors.ErrInternal("failed to get issue", err)
 	}

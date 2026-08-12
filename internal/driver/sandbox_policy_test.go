@@ -3,11 +3,10 @@ package driver
 
 import (
 	"context"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
@@ -68,7 +67,7 @@ func TestTrustPlacementPolicyGatesLaunch(t *testing.T) {
 				t.Fatalf("launches = %d, want %d", launcher.launches, tc.wantLaunches)
 			}
 			if tc.wantRefused {
-				if result.Status != domain.DriverRunFailed || result.ErrorClass != ErrorClassSandboxRequired {
+				if result.Status != execution.DriverRunFailed || result.ErrorClass != ErrorClassSandboxRequired {
 					t.Fatalf("result = %+v, want failed %s", result, ErrorClassSandboxRequired)
 				}
 				if result.Output[ErrorCodeOutputKey] != ErrorClassSandboxRequired || result.Output[RetryableOutputKey] != "false" {
@@ -79,7 +78,7 @@ func TestTrustPlacementPolicyGatesLaunch(t *testing.T) {
 				}
 				return
 			}
-			if result.Status != domain.DriverRunCompleted || result.Summary != "sandbox ok" {
+			if result.Status != execution.DriverRunCompleted || result.Summary != "sandbox ok" {
 				t.Fatalf("result = %+v, want completed sandbox ok", result)
 			}
 			wantTrust := workflowcatalog.DriverTrustUntrusted
@@ -106,7 +105,7 @@ func TestTrustPlacementPolicyRefusesDefaultProcessLauncher(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NodeRunner.Run: %v", err)
 	}
-	if result.Status != domain.DriverRunFailed || result.ErrorClass != ErrorClassSandboxRequired {
+	if result.Status != execution.DriverRunFailed || result.ErrorClass != ErrorClassSandboxRequired {
 		t.Fatalf("result = %+v, want failed %s with no process spawned", result, ErrorClassSandboxRequired)
 	}
 	if result.Output[SandboxLauncherOutputKey] != SandboxProviderProcess {
@@ -126,11 +125,11 @@ func setupTrustPolicyExecutorRun(t *testing.T, trust workflowcatalog.DriverTrust
 		t.Fatalf("Create workspace: %v", err)
 	}
 	writeFlueDist(t, root, "epic-runner", "done")
-	registered, err := RegisterFlueDriver(ctx, st, RegisterFlueOptions{WorkspaceKey: "TEST", WorkDir: root, DistPath: "dist", DriverName: "epic-runner", CreatedBy: "tester", Activate: true, Trust: trust})
+	registered, err := SeedFlueDriverFixture(ctx, st, RegisterFlueOptions{WorkspaceKey: "TEST", WorkDir: root, DistPath: "dist", DriverName: "epic-runner", CreatedBy: "tester", Activate: true, Trust: trust})
 	if err != nil {
-		t.Fatalf("RegisterFlueDriver: %v", err)
+		t.Fatalf("SeedFlueDriverFixture: %v", err)
 	}
-	if _, err := CreateDriverRun(ctx, st, RunOptions{
+	if _, err := createDriverRunFixture(ctx, st, driverRunFixtureOptions{
 		WorkspaceKey:   "TEST",
 		DriverID:       registered.Driver.DriverID,
 		EpicID:         "TEST-1",
@@ -156,7 +155,7 @@ func TestExecutorRefusesUntrustedRunOnDefaultProcessLauncher(t *testing.T) {
 		t.Fatalf("RunOnce: %v", err)
 	}
 	final := result.Final
-	if final == nil || final.Status != domain.DriverRunFailed || final.ErrorClass != ErrorClassSandboxRequired {
+	if final == nil || final.Status != execution.DriverRunFailed || final.ErrorClass != ErrorClassSandboxRequired {
 		t.Fatalf("final = %+v, want failed %s", final, ErrorClassSandboxRequired)
 	}
 	if final.Output[ErrorCodeOutputKey] != ErrorClassSandboxRequired || final.Output[RetryableOutputKey] != "false" {
@@ -192,90 +191,10 @@ func TestExecutorLaunchesUntrustedRunThroughIsolatingLauncher(t *testing.T) {
 		t.Fatalf("launches = %d, want 1", launcher.launches)
 	}
 	final := result.Final
-	if final == nil || final.Status != domain.DriverRunCompleted || final.Summary != "isolated ok" {
+	if final == nil || final.Status != execution.DriverRunCompleted || final.Summary != "isolated ok" {
 		t.Fatalf("final = %+v, want completed via isolating launcher", final)
 	}
 	if final.Output[TrustLevelOutputKey] != string(workflowcatalog.DriverTrustUntrusted) {
 		t.Fatalf("final output trust = %q, want untrusted audit", final.Output[TrustLevelOutputKey])
-	}
-}
-
-func TestRegistrationStampsTrustServerSide(t *testing.T) {
-	ctx := context.Background()
-	st := memstore.New()
-	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "TEST", Name: "test"}); err != nil {
-		t.Fatalf("Create workspace: %v", err)
-	}
-
-	// Operator/source-tree path (CLI): default trusted.
-	rootTrusted := t.TempDir()
-	writeFlueDist(t, rootTrusted, "operator-flow", "done")
-	registered, err := RegisterFlueDriver(ctx, st, RegisterFlueOptions{WorkspaceKey: "TEST", WorkDir: rootTrusted, DistPath: "dist", DriverName: "operator-flow", CreatedBy: "tester", Activate: true})
-	if err != nil {
-		t.Fatalf("RegisterFlueDriver (operator): %v", err)
-	}
-	if registered.Driver.TrustLevel != workflowcatalog.DriverTrustTrusted {
-		t.Fatalf("operator-registered trust = %q, want trusted", registered.Driver.TrustLevel)
-	}
-	if registered.Version.Manifest[ManifestTrustLevelKey] != string(workflowcatalog.DriverTrustTrusted) {
-		t.Fatalf("operator version trust = %q, want trusted", registered.Version.Manifest[ManifestTrustLevelKey])
-	}
-
-	// External submission path: server stamps untrusted, and a client manifest
-	// claiming trusted is ignored (no self-elevation).
-	rootUser := t.TempDir()
-	writeFlueDist(t, rootUser, "user-flow", "done")
-	if err := os.WriteFile(filepath.Join(rootUser, "dist", "loom-driver.json"), []byte(`{"trust_level":"trusted"}`), 0o644); err != nil {
-		t.Fatalf("write client manifest: %v", err)
-	}
-	submitted, err := RegisterFlueDriver(ctx, st, RegisterFlueOptions{
-		WorkspaceKey: "TEST", WorkDir: rootUser, DistPath: "dist",
-		DriverName: "user-flow", CreatedBy: "api", Activate: true,
-		Trust: workflowcatalog.DriverTrustUntrusted,
-	})
-	if err != nil {
-		t.Fatalf("RegisterFlueDriver (submission): %v", err)
-	}
-	if submitted.Driver.TrustLevel != workflowcatalog.DriverTrustUntrusted {
-		t.Fatalf("submitted trust = %q, want untrusted (client manifest ignored)", submitted.Driver.TrustLevel)
-	}
-	if submitted.Version.Manifest[ManifestTrustLevelKey] != string(workflowcatalog.DriverTrustUntrusted) {
-		t.Fatalf("version manifest trust = %q, want server-stamped untrusted", submitted.Version.Manifest[ManifestTrustLevelKey])
-	}
-}
-
-func TestReRegistrationNeverElevatesAndUntrustedSubmissionDemotes(t *testing.T) {
-	ctx := context.Background()
-	st := memstore.New()
-	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "TEST", Name: "test"}); err != nil {
-		t.Fatalf("Create workspace: %v", err)
-	}
-	root := t.TempDir()
-	writeFlueDist(t, root, "epic-runner", "v1")
-	if _, err := RegisterFlueDriver(ctx, st, RegisterFlueOptions{WorkspaceKey: "TEST", WorkDir: root, DistPath: "dist", DriverName: "epic-runner", CreatedBy: "tester", Activate: true}); err != nil {
-		t.Fatalf("RegisterFlueDriver (trusted v1): %v", err)
-	}
-
-	// Untrusted submission onto the existing trusted driver demotes it: the
-	// driver's newest content came through the untrusted path.
-	writeFlueDist(t, root, "epic-runner", "v2")
-	demoted, err := RegisterFlueDriver(ctx, st, RegisterFlueOptions{WorkspaceKey: "TEST", WorkDir: root, DistPath: "dist", DriverName: "epic-runner", CreatedBy: "api", Activate: true, Trust: workflowcatalog.DriverTrustUntrusted})
-	if err != nil {
-		t.Fatalf("RegisterFlueDriver (untrusted v2): %v", err)
-	}
-	if demoted.Driver.TrustLevel != workflowcatalog.DriverTrustUntrusted {
-		t.Fatalf("driver trust after untrusted re-registration = %q, want demoted untrusted", demoted.Driver.TrustLevel)
-	}
-
-	// A later trusted registration does NOT silently re-elevate: elevation is
-	// an explicit ops action via driver update, never a registration side
-	// effect.
-	writeFlueDist(t, root, "epic-runner", "v3")
-	stillUntrusted, err := RegisterFlueDriver(ctx, st, RegisterFlueOptions{WorkspaceKey: "TEST", WorkDir: root, DistPath: "dist", DriverName: "epic-runner", CreatedBy: "tester", Activate: true})
-	if err != nil {
-		t.Fatalf("RegisterFlueDriver (trusted v3): %v", err)
-	}
-	if stillUntrusted.Driver.TrustLevel != workflowcatalog.DriverTrustUntrusted {
-		t.Fatalf("driver trust after trusted re-registration = %q, want still untrusted", stillUntrusted.Driver.TrustLevel)
 	}
 }

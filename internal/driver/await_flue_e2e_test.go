@@ -27,6 +27,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/driver"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -121,13 +122,13 @@ func runRealFlueAwaitSmoke(t *testing.T, flueCommand []string, workflow, source 
 	root := t.TempDir()
 	writeAwaitSmokeProject(t, root, workflow, source)
 	buildAwaitSmokeProject(t, root, flueCommand)
-	registered, err := driver.RegisterFlueDriver(ctx, st, driver.RegisterFlueOptions{
+	registered, err := driver.SeedFlueDriverFixture(ctx, st, driver.RegisterFlueOptions{
 		WorkspaceKey: ws, WorkDir: root, DistPath: "dist", DriverName: workflow,
 		WorkflowName: workflow, SourceRef: "workflows/" + workflow + ".ts",
 		CreatedBy: "aw12", Activate: true,
 	})
 	if err != nil {
-		t.Fatalf("RegisterFlueDriver after real Flue build %q: %v", strings.Join(flueCommand, " "), err)
+		t.Fatalf("SeedFlueDriverFixture after real Flue build %q: %v", strings.Join(flueCommand, " "), err)
 	}
 	runTokenKey := bytes.Repeat([]byte{0x5a}, 32)
 	server, executionCapability := newAwaitFlowsServer(t, st, runTokenKey)
@@ -156,7 +157,7 @@ func runRealFlueAwaitSmoke(t *testing.T, flueCommand []string, workflow, source 
 	// shape the runtime reports, the executor settles on the authoritative
 	// server-side suspension.
 	res1 := runExecutor("node-flue-1")
-	if res1.Final == nil || res1.Final.Status != domain.DriverRunSuspendedAwaitingEvent {
+	if res1.Final == nil || res1.Final.Status != execution.DriverRunSuspendedAwait {
 		t.Fatalf("first pass = %+v, want suspended_awaiting_event", res1.Final)
 	}
 
@@ -172,13 +173,13 @@ func runRealFlueAwaitSmoke(t *testing.T, flueCommand []string, workflow, source 
 	// Pass 2 on a second executor: the replayed await returns the recorded
 	// decision inline and the workflow completes.
 	res2 := runExecutor("node-flue-2")
-	if res2.Final == nil || res2.Final.Status != domain.DriverRunCompleted ||
+	if res2.Final == nil || res2.Final.Status != execution.DriverRunCompleted ||
 		!strings.Contains(res2.Final.Summary, "decision=approved") ||
 		!strings.Contains(res2.Final.Summary, "status=satisfied") {
 		t.Fatalf("final = %+v, want completed with the replayed approval decision", res2.Final)
 	}
-	if res2.Claimed.NodeID != "node-flue-2" {
-		t.Fatalf("resumed run claimed by %q, want the second executor", res2.Claimed.NodeID)
+	if res2.Claimed.Owner.NodeID != "node-flue-2" {
+		t.Fatalf("resumed run claimed by %q, want the second executor", res2.Claimed.Owner.NodeID)
 	}
 }
 

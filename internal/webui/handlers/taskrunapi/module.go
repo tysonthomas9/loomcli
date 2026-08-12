@@ -20,8 +20,8 @@
 // Fenced TaskRun mutations (heartbeat, log-append, complete) and the Artifacts
 // capability both forward the opaque lease token to FleetDB's owner-fenced
 // command/query ports, so lease-token-hash + {node, lease, fencing} remains the
-// durable authority. Legacy get/task-get operations still prove ownership with
-// a fenced no-op heartbeat before reading their compatibility projections.
+// durable authority. Read operations first prove ownership with a fenced
+// heartbeat, then use capability-owned TaskRun and Work Item queries.
 package taskrunapi
 
 import (
@@ -31,20 +31,16 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"os"
 	"strconv"
 	"strings"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/backend"
-	"github.com/tysonthomas9/loomcli/internal/backend/fleet"
-	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	driverpkg "github.com/tysonthomas9/loomcli/internal/driver"
 	artifactsmodule "github.com/tysonthomas9/loomcli/internal/modules/artifacts"
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
-	"github.com/tysonthomas9/loomcli/internal/store"
 	serverhandler "github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 )
 
@@ -67,56 +63,45 @@ const (
 // taskRunOwnerType is the artifact owner type this surface is scoped to.
 const taskRunOwnerType = "task_run"
 
-// IssueBackendFactory builds a workspace-scoped fleet-db issue backend acting
-// as the given actor. Overridable in tests.
-type IssueBackendFactory func(ws, actor string) (backend.IssueBackend, error)
+type WorkItemQueries interface {
+	Get(context.Context, workitems.GetQuery) (*workitems.IssueDetail, error)
+}
 
 // Config wires the module's dependencies.
 type Config struct {
-	Store taskRunProjectionStore
-	// Execution owns every running TaskRun mutation. Store is a read-only
-	// projection dependency for exact TaskRun lookup and lease verification.
+	TaskRuns    execution.TaskRunQueries
 	Execution   execution.TaskRunAPI
 	Authorities execution.TaskRunAuthorityResolver
+	WorkItems   WorkItemQueries
 	// Artifacts is the owner-fenced capability API. A nil API fails artifact
 	// operations closed.
 	Artifacts artifactsmodule.API
 	// DaytonaProvider is the host-owned opaque provider broker. It is reachable
 	// only after this module verifies the exact Daytona TaskRun lease/fence.
 	DaytonaProvider execution.DaytonaProviderBroker
-	// FleetBaseURL is the fleet-db HTTP base URL used to build issue
-	// backends for exact-task reads. TaskRun mutations use Execution ports.
-	FleetBaseURL string
-	// IssueBackends overrides the default fleet-db issue backend factory.
-	IssueBackends IssueBackendFactory
-}
-
-type taskRunProjectionStore interface {
-	TaskRuns() store.TaskRunStore
 }
 
 // Module serves the workspace-scoped task-run routes.
 type Module struct {
-	store           taskRunProjectionStore
+	taskRuns        execution.TaskRunQueries
 	execution       execution.TaskRunAPI
 	authorities     execution.TaskRunAuthorityResolver
+	workItems       WorkItemQueries
 	artifacts       artifactsmodule.API
 	daytonaProvider execution.DaytonaProviderBroker
-	issueBackends   IssueBackendFactory
 	ops             map[string]opHandler
 	now             func() time.Time
 }
 
-// NewModule constructs the task-run API module. Nil-safe: with a nil store,
-// Register registers nothing.
+// NewModule constructs the task-run API module.
 func NewModule(cfg Config) *Module {
 	m := &Module{
-		store:           cfg.Store,
+		taskRuns:        cfg.TaskRuns,
 		execution:       cfg.Execution,
 		authorities:     cfg.Authorities,
+		workItems:       cfg.WorkItems,
 		artifacts:       cfg.Artifacts,
 		daytonaProvider: cfg.DaytonaProvider,
-		issueBackends:   cfg.IssueBackends,
 		now:             func() time.Time { return time.Now().UTC() },
 	}
 	m.ops = map[string]opHandler{
@@ -132,32 +117,11 @@ func NewModule(cfg Config) *Module {
 		"artifact-list":      m.artifactList,
 		"artifact-finalize":  m.artifactFinalize,
 	}
-	if m.issueBackends == nil {
-		m.issueBackends = defaultIssueBackends(cfg.FleetBaseURL)
-	}
 	return m
 }
 
-// defaultIssueBackends builds the production issue-backend factory: a
-// fleet-db client per (workspace, actor) against the configured base URL.
-// The fleet-db API key stays inside the serve process.
-func defaultIssueBackends(baseURL string) IssueBackendFactory {
-	return func(ws, actor string) (backend.IssueBackend, error) {
-		issueBackend, err := fleet.New(fleet.Config{
-			BaseURL:     baseURL,
-			WorkspaceID: ws,
-			APIKey:      os.Getenv(bootstrap.EnvFleetDBAPIKey),
-			Actor:       actor,
-		})
-		if err != nil {
-			return nil, fmt.Errorf("create fleet-db issue backend: %w", err)
-		}
-		return issueBackend, nil
-	}
-}
-
 func (m *Module) Register(mux *http.ServeMux) {
-	if m.store == nil || m.execution == nil || m.authorities == nil {
+	if m.taskRuns == nil || m.execution == nil || m.authorities == nil {
 		return
 	}
 	mux.HandleFunc("POST /api/workspaces/{ws}/task-run/{op}", m.handleOp)
@@ -263,7 +227,7 @@ var errLeaseDenied = errors.New("task-run lease verification failed")
 // hash and the {node, lease, fencing} tuple — the exact validation the
 // runner's direct fleet-db calls were subject to. The heartbeat doubles as
 // liveness (it only touches last_heartbeat; empty refs/metadata are no-ops).
-func (m *Module) verifyLease(ctx context.Context, ws string, id leaseIdentity) (*domain.TaskRun, error) {
+func (m *Module) verifyLease(ctx context.Context, ws string, id leaseIdentity) (*execution.TaskRun, error) {
 	owner, auth, err := m.taskRunAuthority(ctx, ws, execution.ActionHeartbeat, id)
 	if err == nil {
 		_, err = m.execution.Heartbeat(ctx, auth, execution.HeartbeatCommand{
@@ -275,7 +239,7 @@ func (m *Module) verifyLease(ctx context.Context, ws string, id leaseIdentity) (
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", errLeaseDenied, err)
 	}
-	run, err := m.store.TaskRuns().Get(ctx, ws, id.TaskRunID)
+	run, err := m.taskRuns.GetTaskRun(ctx, ws, id.TaskRunID)
 	if err != nil {
 		return nil, fmt.Errorf("load verified task run: %w", err)
 	}
@@ -340,7 +304,7 @@ func (m *Module) get(ctx context.Context, ws string, id leaseIdentity, _ []byte)
 	if err != nil {
 		return nil, err
 	}
-	return driverpkg.TaskRunResultFromDomain(run), nil
+	return driverpkg.TaskRunResultFromExecution(run), nil
 }
 
 func (m *Module) taskGet(ctx context.Context, ws string, id leaseIdentity, body []byte) (any, error) {
@@ -354,19 +318,18 @@ func (m *Module) taskGet(ctx context.Context, ws string, id leaseIdentity, body 
 	if err != nil {
 		return nil, err
 	}
-	result := map[string]any{"taskRun": driverpkg.TaskRunResultFromDomain(run)}
-	taskID := strings.TrimSpace(run.TaskID)
+	result := map[string]any{"taskRun": driverpkg.TaskRunResultFromExecution(run)}
+	taskID := strings.TrimSpace(run.WorkItemID)
 	if taskID == "" {
 		return result, nil
 	}
 	if requested := strings.TrimSpace(params.TaskID); requested != "" && requested != taskID {
 		return nil, fmt.Errorf("task %q is outside task run %q: %w", requested, run.TaskRunID, domain.ErrNotOwner)
 	}
-	issueBackend, err := m.issueBackends(ws, taskRunActor(run))
-	if err != nil {
-		return nil, err
+	if m.workItems == nil {
+		return nil, workitems.ErrUnavailable
 	}
-	task, err := issueBackend.Get(ctx, taskID)
+	task, err := m.workItems.Get(ctx, workitems.GetQuery{IssueID: taskID})
 	if err != nil {
 		return nil, fmt.Errorf("get task: %w", err)
 	}
@@ -422,15 +385,6 @@ func (m *Module) taskDesignUpdate(ctx context.Context, ws string, id leaseIdenti
 	return map[string]any{"taskId": result.WorkItemID, "actionId": result.ActionID, "replayed": result.Replay}, nil
 }
 
-// taskRunActor is the audit actor for exact-task Work Item operations performed
-// on behalf of a task runner.
-func taskRunActor(run *domain.TaskRun) string {
-	if run.DriverRunID != "" {
-		return driverpkg.DriverRunActor(run.DriverRunID)
-	}
-	return "task-run:" + run.TaskRunID
-}
-
 func (m *Module) heartbeat(ctx context.Context, ws string, id leaseIdentity, body []byte) (any, error) {
 	params, err := decodeParams[struct {
 		RuntimeMetadata map[string]string `json:"runtimeMetadata"`
@@ -455,11 +409,11 @@ func (m *Module) heartbeat(ctx context.Context, ws string, id leaseIdentity, bod
 	if err != nil {
 		return nil, fmt.Errorf("heartbeat task run: %w", err)
 	}
-	run, err := m.store.TaskRuns().Get(ctx, ws, id.TaskRunID)
+	run, err := m.taskRuns.GetTaskRun(ctx, ws, id.TaskRunID)
 	if err != nil {
 		return nil, fmt.Errorf("load heartbeat task run: %w", err)
 	}
-	return driverpkg.TaskRunResultFromDomain(run), nil
+	return driverpkg.TaskRunResultFromExecution(run), nil
 }
 
 type logAppendParams struct {
@@ -622,7 +576,7 @@ func (m *Module) complete(ctx context.Context, ws string, id leaseIdentity, body
 	if err != nil {
 		return nil, fmt.Errorf("complete task run: %w", err)
 	}
-	run, err := m.store.TaskRuns().Get(ctx, ws, id.TaskRunID)
+	run, err := m.taskRuns.GetTaskRun(ctx, ws, id.TaskRunID)
 	if err != nil {
 		return nil, fmt.Errorf("load completed task run: %w", err)
 	}
@@ -631,7 +585,7 @@ func (m *Module) complete(ctx context.Context, ws string, id leaseIdentity, body
 			"completionId": complete.RequestID,
 			"artifactIds":  complete.RequiredArtifactIDs,
 		},
-		"taskRun": driverpkg.TaskRunResultFromDomain(run),
+		"taskRun": driverpkg.TaskRunResultFromExecution(run),
 	}, nil
 }
 
@@ -671,6 +625,8 @@ func writeDomainOpError(w http.ResponseWriter, err error) {
 		writeOpError(w, http.StatusNotFound, "not_found", err.Error(), false)
 	case errors.Is(err, execution.ErrNotFound):
 		writeOpError(w, http.StatusNotFound, "not_found", err.Error(), false)
+	case errors.Is(err, workitems.ErrNotFound):
+		writeOpError(w, http.StatusNotFound, "not_found", err.Error(), false)
 	case errors.Is(err, domain.ErrNotOwner):
 		writeOpError(w, http.StatusForbidden, "not_owner", err.Error(), false)
 	case errors.Is(err, domain.ErrInvalidTransition):
@@ -683,9 +639,11 @@ func writeDomainOpError(w http.ResponseWriter, err error) {
 		writeOpError(w, http.StatusBadRequest, "invalid", err.Error(), false)
 	case errors.Is(err, execution.ErrInvalid):
 		writeOpError(w, http.StatusBadRequest, "invalid", err.Error(), false)
+	case errors.Is(err, workitems.ErrInvalid):
+		writeOpError(w, http.StatusBadRequest, "invalid", err.Error(), false)
 	case errors.Is(err, execution.ErrFenceConflict), errors.Is(err, authority.ErrAdmissionDenied):
 		writeOpError(w, http.StatusForbidden, "not_owner", err.Error(), false)
-	case errors.Is(err, execution.ErrUnavailable), errors.Is(err, artifactsmodule.ErrUnavailable):
+	case errors.Is(err, execution.ErrUnavailable), errors.Is(err, artifactsmodule.ErrUnavailable), errors.Is(err, workitems.ErrUnavailable):
 		writeOpError(w, http.StatusServiceUnavailable, "unavailable", err.Error(), true)
 	case errors.Is(err, context.DeadlineExceeded):
 		writeOpError(w, http.StatusGatewayTimeout, "timeout", err.Error(), true)

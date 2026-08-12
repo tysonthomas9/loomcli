@@ -40,7 +40,7 @@ func TestWorkspaceRuntimeReadyRequiresBackend(t *testing.T) {
 		t.Fatalf("status = %d, want 503", rec.Code)
 	}
 	body := decodeReady(t, rec)
-	if body.Mode != "workflow-catalog" || body.Reason != "issue backend not configured" {
+	if body.Mode != "workflow-catalog" || body.Reason != "Work Items service not configured" {
 		t.Fatalf("body = %+v", body)
 	}
 }

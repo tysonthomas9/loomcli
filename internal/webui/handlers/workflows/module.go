@@ -19,10 +19,10 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/driver"
 	workflowdefs "github.com/tysonthomas9/loomcli/internal/infra/workflowdistribution/authoring"
+	"github.com/tysonthomas9/loomcli/internal/modules/automation"
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 	workflowcataloghttp "github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog/httpapi"
-	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/readprojection"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
@@ -36,23 +36,17 @@ const (
 )
 
 type Module struct {
-	store             workflowProjectionStore
 	catalog           workflowcatalog.API
 	catalogRead       workflowCatalogDriverReader
 	authoring         workflowcatalog.VersionAuthoringAPI
 	catalogAuthority  workflowcataloghttp.OperatorAuthorityResolver
 	prepareTarget     func(context.Context, string, string) (*workflowcatalog.Driver, error)
 	execution         execution.DriverRunAPI
+	taskRuns          execution.TaskRunQueries
+	bindings          automation.BindingQueries
 	operatorAuthority workflowcataloghttp.OperatorAuthorityResolver
 	taskWorkflowRuns  readprojection.TaskWorkflowRunReader
 	backendHealth     BackendHealthQuery
-}
-
-type workflowProjectionStore interface {
-	DriverRuns() store.DriverRunStore
-	DriverSteps() store.DriverStepStore
-	TaskRuns() store.TaskRunStore
-	TriggerBindings() store.TriggerBindingStore
 }
 
 type workflowCatalogDriverReader interface {
@@ -60,12 +54,13 @@ type workflowCatalogDriverReader interface {
 }
 
 type Config struct {
-	Store                    workflowProjectionStore
 	Catalog                  workflowcatalog.API
 	Authoring                workflowcatalog.VersionAuthoringAPI
 	CatalogOperatorAuthority workflowcataloghttp.OperatorAuthorityResolver
 	PrepareWorkflowTarget    func(context.Context, string, string) (*workflowcatalog.Driver, error)
 	Execution                execution.DriverRunAPI
+	TaskRuns                 execution.TaskRunQueries
+	Bindings                 automation.BindingQueries
 	OperatorAuthority        workflowcataloghttp.OperatorAuthorityResolver
 	TaskWorkflowRuns         readprojection.TaskWorkflowRunReader
 	BackendHealth            BackendHealthQuery
@@ -73,9 +68,9 @@ type Config struct {
 
 func NewModule(config Config) *Module {
 	return &Module{
-		store: config.Store, catalog: config.Catalog, catalogRead: config.Catalog, authoring: config.Authoring,
+		catalog: config.Catalog, catalogRead: config.Catalog, authoring: config.Authoring,
 		catalogAuthority: config.CatalogOperatorAuthority, prepareTarget: config.PrepareWorkflowTarget,
-		execution:         config.Execution,
+		execution: config.Execution, taskRuns: config.TaskRuns, bindings: config.Bindings,
 		operatorAuthority: config.OperatorAuthority, taskWorkflowRuns: config.TaskWorkflowRuns,
 		backendHealth: config.BackendHealth,
 	}
@@ -182,7 +177,7 @@ func (m *Module) createDriverRun(w http.ResponseWriter, r *http.Request) {
 		writeDomainError(w, err, "submit DriverRun failed")
 		return
 	}
-	run, err := driver.LegacyDriverRunSnapshot(snapshot)
+	run, err := newDriverRunResponse(snapshot)
 	if err != nil {
 		writeDomainError(w, err, "map DriverRun submission result failed")
 		return
@@ -267,10 +262,9 @@ func (m *Module) resolveDriverRunSubmissionTarget(
 ) (*workflowcatalog.Driver, *workflowcatalog.DriverVersion, bool) {
 	driverTarget, err := m.catalog.GetDriver(r.Context(), workspace, driverRef)
 	if errors.Is(err, workflowcatalog.ErrNotFound) && workflowSubmissionPreparesBuiltin(sourceRef) &&
-		workflowdefs.IsBuiltinWorkflow(driverRef) && m.store != nil {
-		// Workflow distribution remains a bounded Phase-5 compatibility lane.
-		// Preserve the established builtin self-heal here, then return to the
-		// public Catalog read and typed Execution mutation boundaries.
+		workflowdefs.IsBuiltinWorkflow(driverRef) {
+		// Builtin materialization is an explicit application workflow. Return to
+		// the public Catalog read after it completes.
 		if _, prepareErr := m.resolveWorkflowTarget(r.Context(), workspace, driverRef); prepareErr != nil {
 			writeDomainError(w, prepareErr, "prepare builtin DriverRun target failed")
 			return nil, nil, false
@@ -362,10 +356,10 @@ func workflowSubmissionPreparesBuiltin(sourceRef string) bool {
 // `loom workflow run`: a bound workflow stamps its binding route key; an
 // unbound workflow retains the plain CLI provenance label.
 func (m *Module) resolveManualWorkflowRunSourceRef(ctx context.Context, workspace, driverID string) string {
-	if m == nil || m.store == nil {
+	if m == nil || m.bindings == nil {
 		return "loom workflow run"
 	}
-	bindings, err := m.store.TriggerBindings().List(ctx, workspace, store.TriggerBindingFilter{DriverID: driverID, Limit: 1})
+	bindings, err := m.bindings.ListBindings(ctx, workspace, automation.BindingFilter{DriverID: driverID, Limit: 1})
 	if err == nil && len(bindings) > 0 && bindings[0] != nil && strings.TrimSpace(bindings[0].RouteKey) != "" {
 		return bindings[0].RouteKey
 	}
@@ -413,11 +407,9 @@ func (m *Module) getWorkflowSource(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// listWorkflowRuns returns a workflow's run history, newest first, over
-// DriverRunStore.List. It resolves the workflow through Workflow Catalog
-// without self-healing or registering a driver, so an unregistered workflow is
-// a 404. The generic-store fallback preserves the documented read-only/test
-// compatibility constructor and performs no mutation.
+// listWorkflowRuns returns a workflow's Execution-owned run history, newest
+// first. It resolves the workflow through Workflow Catalog without
+// self-healing or registering a driver, so an unregistered workflow is a 404.
 func (m *Module) listWorkflowRuns(w http.ResponseWriter, r *http.Request) {
 	ws := strings.TrimSpace(r.PathValue("ws"))
 	name := strings.TrimSpace(r.PathValue("name"))
@@ -438,25 +430,26 @@ func (m *Module) listWorkflowRuns(w http.ResponseWriter, r *http.Request) {
 		writeDomainError(w, err, "resolve workflow driver failed")
 		return
 	}
-	// Both backends now order newest-first by StartedAt BEFORE applying the
-	// limit (fleet-db server-side; memstore in store.DriverRuns().List), so the
-	// limit can be pushed down — it returns the newest-by-StartedAt window
-	// rather than dropping runs that belong in it. The client-side sort/truncate
-	// below stays as defense in depth against an unordered backend.
-	runs, err := m.store.DriverRuns().List(r.Context(), ws, store.DriverRunFilter{
-		DriverID: drv.DriverID,
-		Status:   status,
-		Limit:    limit,
+	if m.execution == nil {
+		writeDomainError(w, execution.ErrUnavailable, "list workflow runs failed")
+		return
+	}
+	runs, err := m.execution.ListDriverRuns(r.Context(), execution.DriverRunQuery{
+		WorkspaceKey: ws, DriverID: drv.DriverID, Status: status, Limit: limit,
 	})
 	if err != nil {
 		writeDomainError(w, err, "list workflow runs failed")
 		return
 	}
-	runs = handler.SortAndTrim(runs, limit)
+	responses, err := driverRunResponses(runs, limit)
+	if err != nil {
+		writeDomainError(w, err, "map workflow runs failed")
+		return
+	}
 	handler.WriteJSON(w, http.StatusOK, map[string]any{
 		"driver_id":         drv.DriverID,
 		"active_version_id": drv.ActiveVersionID,
-		"runs":              runs,
+		"runs":              responses,
 	})
 }
 
@@ -473,12 +466,12 @@ func (m *Module) resolveWorkflowDriverRead(
 // parseRunStatusFilter reads the optional ?status= filter and validates it
 // against the known DriverRunStatus values. On an unknown status it writes a
 // 400 and returns ok=false; an empty filter is allowed (no status constraint).
-func parseRunStatusFilter(w http.ResponseWriter, r *http.Request) (domain.DriverRunStatus, bool) {
+func parseRunStatusFilter(w http.ResponseWriter, r *http.Request) (execution.DriverRunStatus, bool) {
 	raw := strings.TrimSpace(r.URL.Query().Get("status"))
 	if raw == "" {
 		return "", true
 	}
-	status := domain.DriverRunStatus(raw)
+	status := execution.DriverRunStatus(raw)
 	if !isKnownRunStatus(status) {
 		writeError(w, http.StatusBadRequest, "invalid status: "+raw)
 		return "", false
@@ -486,11 +479,11 @@ func parseRunStatusFilter(w http.ResponseWriter, r *http.Request) (domain.Driver
 	return status, true
 }
 
-func isKnownRunStatus(s domain.DriverRunStatus) bool {
+func isKnownRunStatus(s execution.DriverRunStatus) bool {
 	switch s {
-	case domain.DriverRunQueued, domain.DriverRunRunning, domain.DriverRunCompleted,
-		domain.DriverRunFailed, domain.DriverRunNeedsReview, domain.DriverRunCancelled,
-		domain.DriverRunSuspendedAwaitingEvent:
+	case execution.DriverRunQueued, execution.DriverRunRunning, execution.DriverRunCompleted,
+		execution.DriverRunFailed, execution.DriverRunNeedsReview, execution.DriverRunCancelled,
+		execution.DriverRunSuspendedAwait:
 		return true
 	default:
 		return false
@@ -706,7 +699,7 @@ func (m *Module) createWorkflowRun(w http.ResponseWriter, r *http.Request) {
 	handler.WriteJSON(w, http.StatusAccepted, run)
 }
 
-func (m *Module) submitWorkflowRun(r *http.Request, workspace string, target *workflowcatalog.Driver, payload json.RawMessage) (*domain.DriverRun, error) {
+func (m *Module) submitWorkflowRun(r *http.Request, workspace string, target *workflowcatalog.Driver, payload json.RawMessage) (*driverRunResponse, error) {
 	if target == nil {
 		return nil, domain.ErrNotFound
 	}
@@ -740,7 +733,7 @@ func (m *Module) submitWorkflowRun(r *http.Request, workspace string, target *wo
 	if err != nil {
 		return nil, err
 	}
-	return driver.LegacyDriverRunSnapshot(snapshot)
+	return newDriverRunResponse(snapshot)
 }
 
 func workflowSubmissionRunID(workspace, targetID, requestID string) string {
@@ -770,9 +763,18 @@ func (m *Module) resolveWorkflowTarget(ctx context.Context, ws, name string) (*w
 
 func (m *Module) getRun(w http.ResponseWriter, r *http.Request) {
 	ws := r.PathValue("ws")
-	run, err := m.store.DriverRuns().Get(r.Context(), ws, r.PathValue("runId"))
+	if m.execution == nil {
+		writeDomainError(w, execution.ErrUnavailable, "run not found")
+		return
+	}
+	run, err := m.execution.GetDriverRun(r.Context(), ws, r.PathValue("runId"))
 	if err != nil {
 		writeDomainError(w, err, "run not found")
+		return
+	}
+	response, err := newDriverRunResponse(run)
+	if err != nil {
+		writeDomainError(w, err, "map run failed")
 		return
 	}
 	steps, err := m.runStepSummaries(r.Context(), ws, run.RunID)
@@ -780,44 +782,41 @@ func (m *Module) getRun(w http.ResponseWriter, r *http.Request) {
 		writeDomainError(w, err, "run steps unavailable")
 		return
 	}
-	handler.WriteJSON(w, http.StatusOK, runDetailResponse{DriverRun: run, Steps: steps})
+	handler.WriteJSON(w, http.StatusOK, runDetailResponse{driverRunResponse: response, Steps: steps})
 }
 
 type runDetailResponse struct {
-	*domain.DriverRun
+	*driverRunResponse
 	Steps []runStepSummary `json:"steps,omitempty"`
 }
 
 type runStepSummary struct {
-	ID        string                  `json:"id"`
-	StepKind  string                  `json:"step_kind"`
-	TaskRunID string                  `json:"task_run_id,omitempty"`
-	TaskID    string                  `json:"task_id,omitempty"`
-	Status    domain.DriverStepStatus `json:"status"`
+	ID        string `json:"id"`
+	StepKind  string `json:"step_kind"`
+	TaskRunID string `json:"task_run_id,omitempty"`
+	TaskID    string `json:"task_id,omitempty"`
+	Status    string `json:"status"`
 }
 
 func (m *Module) runStepSummaries(ctx context.Context, ws, runID string) ([]runStepSummary, error) {
-	steps, err := m.store.DriverSteps().ListForRun(ctx, ws, runID, store.DriverStepFilter{})
+	if m.execution == nil {
+		return nil, execution.ErrUnavailable
+	}
+	steps, err := m.execution.ListDriverRunSteps(ctx, ws, runID)
 	if err != nil {
 		return nil, err
 	}
 	out := make([]runStepSummary, 0, len(steps))
 	for _, step := range steps {
-		if step == nil {
-			continue
-		}
 		summary := runStepSummary{
-			ID:        step.StepID,
-			StepKind:  step.StepKind,
-			TaskRunID: step.TaskRunID,
-			Status:    step.Status,
+			ID: step.StepID, StepKind: step.StepKind, TaskRunID: step.TaskRunID, Status: step.Status,
 		}
-		if step.TaskRunID != "" {
+		if step.TaskRunID != "" && m.taskRuns != nil {
 			// Task IDs are best-effort enrichment: older or partial stores may have
 			// the step before the task-run row is readable, but the step link itself
 			// should still reach the UI.
-			if taskRun, err := m.store.TaskRuns().Get(ctx, ws, step.TaskRunID); err == nil && taskRun != nil {
-				summary.TaskID = taskRun.TaskID
+			if taskRun, err := m.taskRuns.GetTaskRun(ctx, ws, step.TaskRunID); err == nil && taskRun != nil {
+				summary.TaskID = taskRun.WorkItemID
 			}
 		}
 		out = append(out, summary)
@@ -835,14 +834,13 @@ func (m *Module) getRunEvents(w http.ResponseWriter, r *http.Request) {
 }
 
 func (m *Module) streamRunEvents(w http.ResponseWriter, r *http.Request) {
-	reader, ok := m.store.DriverRuns().(store.DriverRunEventsReader)
-	if !ok {
-		writeError(w, http.StatusNotImplemented, "run event stream is unavailable for this store")
-		return
-	}
 	ws := r.PathValue("ws")
 	runID := r.PathValue("runId")
-	if _, err := m.store.DriverRuns().Get(r.Context(), ws, runID); err != nil {
+	if m.execution == nil {
+		writeDomainError(w, execution.ErrUnavailable, "run not found")
+		return
+	}
+	if _, err := m.execution.GetDriverRun(r.Context(), ws, runID); err != nil {
 		writeDomainError(w, err, "run not found")
 		return
 	}
@@ -861,7 +859,9 @@ func (m *Module) streamRunEvents(w http.ResponseWriter, r *http.Request) {
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 	for {
-		page, err := reader.Events(r.Context(), ws, runID, after, 100)
+		page, err := m.execution.ListDriverRunEvents(r.Context(), execution.DriverRunEventQuery{
+			WorkspaceKey: ws, RunID: runID, After: after, Limit: 100,
+		})
 		if err != nil {
 			writeSSE(w, "error", map[string]string{"error": err.Error()})
 			flusher.Flush()
@@ -882,14 +882,13 @@ func (m *Module) streamRunEvents(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (m *Module) loadRunEvents(ctx context.Context, r *http.Request, defaultLimit int) (*domain.PlatformEventsPage, error) {
-	reader, ok := m.store.DriverRuns().(store.DriverRunEventsReader)
-	if !ok {
-		return nil, store.ErrDriverRunEventsUnavailable
-	}
+func (m *Module) loadRunEvents(ctx context.Context, r *http.Request, defaultLimit int) (*execution.DriverRunEventPage, error) {
 	ws := r.PathValue("ws")
 	runID := r.PathValue("runId")
-	if _, err := m.store.DriverRuns().Get(ctx, ws, runID); err != nil {
+	if m.execution == nil {
+		return nil, execution.ErrUnavailable
+	}
+	if _, err := m.execution.GetDriverRun(ctx, ws, runID); err != nil {
 		return nil, err
 	}
 	limit := defaultLimit
@@ -900,7 +899,9 @@ func (m *Module) loadRunEvents(ctx context.Context, r *http.Request, defaultLimi
 		}
 		limit = parsed
 	}
-	return reader.Events(ctx, ws, runID, strings.TrimSpace(r.URL.Query().Get("after")), limit)
+	return m.execution.ListDriverRunEvents(ctx, execution.DriverRunEventQuery{
+		WorkspaceKey: ws, RunID: runID, After: strings.TrimSpace(r.URL.Query().Get("after")), Limit: limit,
+	})
 }
 
 func readRawJSONBody(w http.ResponseWriter, r *http.Request) (json.RawMessage, error) {
@@ -929,14 +930,7 @@ func writeError(w http.ResponseWriter, status int, message string) {
 	handler.WriteJSON(w, status, map[string]string{"error": message})
 }
 
-// writeDomainError handles this package's one extra sentinel (event reads on a
-// store without event support → 501), then defers to the shared domain mapper.
 func writeDomainError(w http.ResponseWriter, err error, fallback string) {
-	switch {
-	case errors.Is(err, store.ErrDriverRunEventsUnavailable):
-		writeError(w, http.StatusNotImplemented, err.Error())
-		return
-	}
 	if classification, ok := handler.ClassifyAuthenticationAuthorityError(err); ok {
 		message := "authentication required"
 		if classification.Status == http.StatusForbidden {

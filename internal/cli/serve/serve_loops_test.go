@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/backend"
 	trigger "github.com/tysonthomas9/loomcli/internal/infra/automationruntime"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -21,20 +21,40 @@ type readerCapableEvents struct {
 	store.TriggerEventStore
 }
 
+type discardIssueJournalEmitter struct{}
+
+func (discardIssueJournalEmitter) Emit(context.Context, string, trigger.InternalEvent) (*trigger.InternalEmitResult, error) {
+	return &trigger.InternalEmitResult{}, nil
+}
+
+func issueJournalTaskLaneTestPorts() (
+	trigger.TaskReadyIssueLookup,
+	trigger.TaskReadySnapshotLister,
+	trigger.TaskReadyRepositoryRequiredBlocker,
+) {
+	return func(context.Context, string, string) (trigger.TaskReadySnapshot, error) {
+			return trigger.TaskReadySnapshot{}, nil
+		}, func(context.Context, string) ([]trigger.TaskReadySnapshot, error) {
+			return nil, nil
+		}, func(context.Context, string, string) (trigger.TaskReadyRepositoryRequiredResult, error) {
+			return trigger.TaskReadyRepositoryRequiredResult{}, nil
+		}
+}
+
 type repositoryRequirementTestBackend struct {
-	backend.IssueBackend
-	result *backend.RepositoryRequirementResult
+	workitems.API
+	result *workitems.RepositoryAdmissionResult
 	err    error
 	ids    []string
 }
 
-func (b *repositoryRequirementTestBackend) BlockRepositoryRequired(_ context.Context, id string) (*backend.RepositoryRequirementResult, error) {
-	b.ids = append(b.ids, id)
+func (b *repositoryRequirementTestBackend) BlockRepositoryRequired(_ context.Context, command workitems.BlockRepositoryRequiredCommand) (*workitems.RepositoryAdmissionResult, error) {
+	b.ids = append(b.ids, command.IssueID)
 	return b.result, b.err
 }
 
-func (*repositoryRequirementTestBackend) SetIssueRepository(_ context.Context, id, repo string) (*backend.IssueData, error) {
-	return &backend.IssueData{ID: id, SourceRepo: repo}, nil
+func (*repositoryRequirementTestBackend) AssignRepository(_ context.Context, command workitems.AssignRepositoryCommand) (*workitems.IssueSummary, error) {
+	return &workitems.IssueSummary{ID: command.IssueID, SourceRepo: command.Repository}, nil
 }
 
 func (readerCapableEvents) ListIssueEvents(_ context.Context, _, afterCursor string, _ int) ([]store.JournalEvent, string, bool, error) {
@@ -71,16 +91,20 @@ func TestStartIssueJournalBridge_MemstoreGatedNoLoop(t *testing.T) {
 	// memstore does not implement store.IssueJournalReader, so the bridge must
 	// not start: no cursor state file is ever created.
 	mem := memstore.New()
-	startIssueJournalBridge(
-		ctx, mem, nil, nil, nil, &trigger.InternalSource{Store: mem},
+	if err := startIssueJournalBridge(
+		ctx, mem, nil, nil, nil, discardIssueJournalEmitter{},
 		buildServeRuntimeConfig().IssueJournal,
-	)
+	); err != nil {
+		t.Fatalf("start memstore-gated bridge: %v", err)
+	}
 
 	// Also a nil store is a clean no-op.
-	startIssueJournalBridge(
+	if err := startIssueJournalBridge(
 		ctx, nil, nil, nil, nil, nil,
 		buildServeRuntimeConfig().IssueJournal,
-	)
+	); err != nil {
+		t.Fatalf("start nil-store bridge: %v", err)
+	}
 
 	if _, err := os.Stat(statePath); !os.IsNotExist(err) {
 		t.Fatalf("cursor state file created for memstore-gated serve: stat err = %v", err)
@@ -99,11 +123,13 @@ func TestStartIssueJournalBridge_DisabledFlagHonored(t *testing.T) {
 	// Even with a reader-capable store the disabled flag wins: no loop, no
 	// cursor file.
 	mem := memstore.New()
-	startIssueJournalBridge(
+	if err := startIssueJournalBridge(
 		ctx, readerCapableStore{Store: mem}, nil, nil, nil,
-		&trigger.InternalSource{Store: mem},
+		discardIssueJournalEmitter{},
 		buildServeRuntimeConfig().IssueJournal,
-	)
+	); err != nil {
+		t.Fatalf("start disabled bridge: %v", err)
+	}
 
 	if _, err := os.Stat(statePath); !os.IsNotExist(err) {
 		t.Fatalf("cursor state file created while bridge disabled: stat err = %v", err)
@@ -127,11 +153,14 @@ func TestStartIssueJournalBridge_EnabledLoopWritesCursorState(t *testing.T) {
 	// A reader-capable store passes the gate; the first pass fast-forwards the
 	// seeded workspace to the (empty) journal tail and persists its cursor, so
 	// the state file appears.
-	startIssueJournalBridge(
-		ctx, readerCapableStore{Store: mem}, nil, nil, nil,
-		&trigger.InternalSource{Store: mem},
+	issueLookup, readySnapshots, repositoryAdmission := issueJournalTaskLaneTestPorts()
+	if err := startIssueJournalBridge(
+		ctx, readerCapableStore{Store: mem}, issueLookup, readySnapshots, repositoryAdmission,
+		discardIssueJournalEmitter{},
 		buildServeRuntimeConfig().IssueJournal,
-	)
+	); err != nil {
+		t.Fatalf("start enabled bridge: %v", err)
+	}
 
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
@@ -210,16 +239,23 @@ func TestDriverStaleTaskMaxAgeDefersToExecutionDefault(t *testing.T) {
 
 func TestBuildIssueJournalBridgeAlwaysEnablesTaskReviewEvents(t *testing.T) {
 	mem := memstore.New()
-	source := &trigger.InternalSource{Store: mem}
+	source := discardIssueJournalEmitter{}
 
 	t.Setenv(envLoomIssueBridgeDisabled, "")
 	t.Setenv(envLoomIssueBridgeStatePath, filepath.Join(t.TempDir(), "cursor.json"))
-	bridge := buildIssueJournalBridge(
+	if bridge, err := buildIssueJournalBridge(
 		readerCapableStore{Store: mem}, nil, nil, nil, source,
 		buildServeRuntimeConfig().IssueJournal,
+	); err == nil || bridge != nil {
+		t.Fatalf("missing task-lane ports returned bridge/error = %+v/%v, want fail-closed composition error", bridge, err)
+	}
+	issueLookup, readySnapshots, repositoryAdmission := issueJournalTaskLaneTestPorts()
+	bridge, err := buildIssueJournalBridge(
+		readerCapableStore{Store: mem}, issueLookup, readySnapshots, repositoryAdmission, source,
+		buildServeRuntimeConfig().IssueJournal,
 	)
-	if bridge == nil || !bridge.EmitTaskReview {
-		t.Fatalf("bridge = %+v, want generic task-review lane enabled", bridge)
+	if err != nil || bridge == nil || !bridge.EmitTaskReview {
+		t.Fatalf("bridge/error = %+v/%v, want generic task-review lane enabled", bridge, err)
 	}
 }
 
@@ -248,21 +284,21 @@ func TestTaskReadyRepositoryRequired(t *testing.T) {
 }
 
 func TestBlockRepositoryRequiredTaskUsesAtomicExtension(t *testing.T) {
-	atomic := &repositoryRequirementTestBackend{result: &backend.RepositoryRequirementResult{Changed: true}}
+	atomic := &repositoryRequirementTestBackend{result: &workitems.RepositoryAdmissionResult{Changed: true}}
 	result, err := blockRepositoryRequiredTask(t.Context(), atomic, "TASK-1")
 	if err != nil || !result.Blocked || result.DispatchReady != nil || len(atomic.ids) != 1 || atomic.ids[0] != "TASK-1" {
 		t.Fatalf("block result/error/calls = %+v/%v/%v, want changed TASK-1", result, err, atomic.ids)
 	}
 
-	atomic.result = &backend.RepositoryRequirementResult{Replayed: true, Blocked: true}
+	atomic.result = &workitems.RepositoryAdmissionResult{Replayed: true, Blocked: true}
 	result, err = blockRepositoryRequiredTask(t.Context(), atomic, "TASK-1")
 	if err != nil || result.Blocked || result.DispatchReady != nil {
 		t.Fatalf("replayed block result/error = %+v/%v, want suppressed no-op", result, err)
 	}
 
-	atomic.result = &backend.RepositoryRequirementResult{
+	atomic.result = &workitems.RepositoryAdmissionResult{
 		DispatchReady: true,
-		Issue: &backend.IssueData{
+		Issue: &workitems.IssueSummary{
 			ID: "TASK-1", Status: "open", IssueType: "task", SourceRepo: "fleet-source",
 			HasDesign: true, Labels: []string{"phase4"}, UpdatedAt: time.Date(2026, 7, 18, 23, 0, 0, 0, time.UTC),
 		},
@@ -279,18 +315,18 @@ func TestBlockRepositoryRequiredTaskUsesAtomicExtension(t *testing.T) {
 	// An exactly-single-repository workspace satisfies admission without
 	// assigning the Issue. DispatchReady still carries a known-empty source repo
 	// and must not be reclassified as repository-required by Loom.
-	atomic.result = &backend.RepositoryRequirementResult{
+	atomic.result = &workitems.RepositoryAdmissionResult{
 		DispatchReady: true,
-		Issue:         &backend.IssueData{ID: "TASK-COUNT", Status: "open", IssueType: "task"},
+		Issue:         &workitems.IssueSummary{ID: "TASK-COUNT", Status: "open", IssueType: "task"},
 	}
 	result, err = blockRepositoryRequiredTask(t.Context(), atomic, "TASK-COUNT")
 	if err != nil || result.DispatchReady == nil || result.DispatchReady.SourceRepo != "" || result.DispatchReady.RepositoryRequired {
 		t.Fatalf("single-repo dispatch result/error = %+v/%v", result, err)
 	}
 
-	atomic.result = &backend.RepositoryRequirementResult{
+	atomic.result = &workitems.RepositoryAdmissionResult{
 		DispatchReady: true,
-		Issue: &backend.IssueData{
+		Issue: &workitems.IssueSummary{
 			ID: "TASK-REVIEW", Status: "review", IssueType: "task", SourceRepo: "fleet-source",
 		},
 	}
@@ -300,25 +336,17 @@ func TestBlockRepositoryRequiredTaskUsesAtomicExtension(t *testing.T) {
 		t.Fatalf("review dispatch result/error = %+v/%v", result, err)
 	}
 
-	atomic.result = &backend.RepositoryRequirementResult{
-		Issue: &backend.IssueData{ID: "TASK-1", Status: "in_progress", IssueType: "task", SourceRepo: "fleet-source"},
+	atomic.result = &workitems.RepositoryAdmissionResult{
+		Issue: &workitems.IssueSummary{ID: "TASK-1", Status: "in_progress", IssueType: "task", SourceRepo: "fleet-source"},
 	}
 	result, err = blockRepositoryRequiredTask(t.Context(), atomic, "TASK-1")
 	if err != nil || result.Blocked || result.DispatchReady != nil {
 		t.Fatalf("stale non-ready result/error = %+v/%v, want suppressed no-op", result, err)
 	}
 
-	atomic.err = backend.ErrNotFound("BlockRepositoryRequired", "issue deleted")
+	atomic.err = workitems.AdapterNotFound("BlockRepositoryRequired", "issue deleted")
 	result, err = blockRepositoryRequiredTask(t.Context(), atomic, "TASK-GONE")
 	if err != nil || result.Blocked || result.DispatchReady != nil {
 		t.Fatalf("deleted block result/error = %+v/%v, want durably stale no-op", result, err)
-	}
-}
-
-func TestBlockRepositoryRequiredTaskFailsClosedWithoutAtomicExtension(t *testing.T) {
-	unsupported := struct{ backend.IssueBackend }{}
-	result, err := blockRepositoryRequiredTask(t.Context(), unsupported, "TASK-1")
-	if result.Blocked || result.DispatchReady != nil || !backend.IsKind(err, backend.KindNotImplemented) {
-		t.Fatalf("unsupported result/error = %+v/%v, want not_implemented", result, err)
 	}
 }

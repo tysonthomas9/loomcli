@@ -3,12 +3,21 @@ package execution
 import "context"
 
 type TaskRunDependencies struct {
+	Queries         TaskRunQueryPort
 	Requests        TaskRunRequestPort
 	Claims          TaskRunClaimPort
 	WorkItemDesign  TaskRunWorkItemDesignPort
 	Requeues        TaskRunRequeuePort
 	RetryExhaustion TaskRunRetryExhaustionPort
 	Scheduling      TaskRunSchedulingQueryPort
+}
+
+// TaskRunQueryPort is the owner-private read seam for one canonical TaskRun
+// snapshot. It never returns the raw lease credential.
+type TaskRunQueryPort interface {
+	GetTaskRun(context.Context, string, string) (*TaskRun, error)
+	ListActiveTaskRuns(context.Context, ActiveTaskRunQuery) ([]*TaskRun, error)
+	ListTaskRunEvents(context.Context, TaskRunEventQuery) ([]*TaskRunEvent, error)
 }
 
 // TaskRunRequestPort owns the idempotent queued TaskRun + DriverStep link +

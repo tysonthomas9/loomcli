@@ -25,7 +25,7 @@ const taskReadyReconcileEventIDPrefix = "task-ready-reconcile-v1-"
 const taskReadyReconcileActor = "system:task-ready-reconcile"
 
 // TaskReadySnapshot is the narrow, consumer-owned projection needed to emit a
-// current task.ready state without importing the issue backend into trigger.
+// current task.ready state without importing Work Items into trigger.
 // UpdatedAt is the ready-generation anchor. SourceRepo is explicit (including
 // empty), while RepositoryRequired separately captures whether that empty value
 // is invalid for this workspace; single-repo fallback remains valid.
@@ -50,7 +50,7 @@ type TaskReadySnapshot struct {
 type TaskReadyIssueLookup func(context.Context, string, string) (TaskReadySnapshot, error)
 
 // TaskReadySnapshotLister returns the canonical current Ready view for one
-// workspace. Serve adapts IssueBackend.Ready to this consumer-owned port.
+// workspace. Serve supplies the Work Items owner's consumer-facing ready port.
 type TaskReadySnapshotLister func(context.Context, string) ([]TaskReadySnapshot, error)
 
 // TaskReadyRepositoryRequiredResult is the consumer-owned outcome of the Work
@@ -88,7 +88,7 @@ type taskReadyReconcileIdentity struct {
 }
 
 func (b *IssueJournalBridge) reconcileTaskReadyOnce(ctx context.Context, ws string, out *IssueJournalSweepResult) error {
-	if !b.EmitTaskReady || b.ReadySnapshots == nil || b.taskReadyReconciliationDone(ws) {
+	if !b.EmitTaskReady || b.taskReadyReconciliationDone(ws) {
 		return nil
 	}
 

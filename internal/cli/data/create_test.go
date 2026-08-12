@@ -5,12 +5,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tysonthomas9/loomcli/internal/backend"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 )
 
 func TestCreateCommand_UsesLocalBackend(t *testing.T) {
 	stub := &localBackendStub{
-		createItem: &backend.IssueData{
+		createItem: &workitems.IssueSummary{
 			ID:         "loom-123",
 			Title:      "Add local mode setup",
 			Status:     "open",
@@ -51,7 +51,7 @@ func TestCreateCommand_UsesLocalBackend(t *testing.T) {
 		if len(stub.calls) != 1 || stub.calls[0].method != "Create" {
 			t.Fatalf("calls = %#v, want one Create call", stub.calls)
 		}
-		params := stub.calls[0].args.(backend.CreateParams)
+		params := stub.calls[0].args.(workitems.CreateCommand)
 		if params.Title != "Add local mode setup" || params.IssueType != "task" || params.Priority != 1 {
 			t.Fatalf("Create params basic fields = %#v", params)
 		}
@@ -72,7 +72,7 @@ func TestCreateCommand_UsesLocalBackend(t *testing.T) {
 
 func TestCreateCommand_JSONPrintsCreatedIssue(t *testing.T) {
 	stub := &localBackendStub{
-		createItem: &backend.IssueData{ID: "epic-1", Title: "Local mode", IssueType: "epic", Priority: 2},
+		createItem: &workitems.IssueSummary{ID: "epic-1", Title: "Local mode", IssueType: "epic", Priority: 2},
 	}
 	withLocalBackend(t, stub, func() {
 		outputFormat = "json"
@@ -83,7 +83,7 @@ func TestCreateCommand_JSONPrintsCreatedIssue(t *testing.T) {
 		if err != nil {
 			t.Fatalf("create: %v", err)
 		}
-		var decoded backend.IssueData
+		var decoded workitems.IssueSummary
 		if err := json.Unmarshal([]byte(out), &decoded); err != nil {
 			t.Fatalf("decode JSON: %v (out=%q)", err, out)
 		}

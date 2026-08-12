@@ -1,5 +1,11 @@
 # loom-fleet → fleet-db HTTP connection reuse
 
+> Historical diagnosis. The connection-reuse fixes described here landed, and
+> Phase 9 Wave 9.29 retired `BackendMutationSubscriber`, the timestamp mutation
+> methods, and their fallback path. The current runtime is
+> `WorkItemMutationSubscriber` over `workitems.MutationStream` with opaque
+> cursors.
+
 ## Symptom
 
 fleet-db's redis pool is exhausting under load. Every loom-fleet → fleet-db

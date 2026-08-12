@@ -394,8 +394,8 @@ type TriggerDeliveryResultUpdate struct {
 }
 
 // TriggerDeliveryStore reads persisted trigger deliveries and records
-// retry-sweeper attempt outcomes. Deliveries themselves are created by the
-// dispatch path (TriggerRouteDispatcher), never directly through this store.
+// Automation retry outcomes. Deliveries themselves are created only by
+// Automation admission, never directly through this read/update projection.
 type TriggerDeliveryStore interface {
 	Get(ctx context.Context, workspaceKey, deliveryID string) (*automation.Delivery, error)
 	List(ctx context.Context, workspaceKey string, filter TriggerDeliveryFilter) ([]*automation.Delivery, error)
@@ -411,77 +411,6 @@ type TriggerDeliveryStore interface {
 	// with domain.ErrInvalidTransition; re-applying the same status is
 	// idempotent.
 	UpdateResult(ctx context.Context, workspaceKey, deliveryID string, update TriggerDeliveryResultUpdate) (*automation.Delivery, error)
-}
-
-// TriggerRouteDispatch carries the normalized fields an adapter resolves from
-// an inbound external event before handing off to the durable dispatch path.
-type TriggerRouteDispatch struct {
-	RunID            string
-	IdempotencyKey   string
-	SourceEventID    string
-	EventType        string
-	SubjectRef       string
-	ActorRef         string
-	EpicID           string
-	RawPayloadRef    string
-	RawPayloadDigest string
-	SignatureStatus  string
-	ReplayOfEventID  string
-	Payload          json.RawMessage
-	// SubjectAttrs carries adapter-enriched subject attributes consumed by
-	// subject-key templating ({{attrs.X}}). Webhook adapters populate it
-	// (C15); templates never read the raw payload. Not yet sent on the
-	// fleet-db wire — the server-side templating lane lands separately.
-	SubjectAttrs map[string]string
-}
-
-// TriggerRouteDelivery is one fan-out leg of a trigger-route dispatch. The
-// JSON tags pin fleet-db's BREAKING router-v2 webhook wire: the response
-// carries deliveries[] only, with no top-level driver_run_id.
-type TriggerRouteDelivery struct {
-	DeliveryID      string                    `json:"delivery_id"`
-	BindingID       string                    `json:"trigger_binding_id"`
-	RunID           string                    `json:"driver_run_id"`
-	Status          automation.DeliveryStatus `json:"status"`
-	RejectionReason string                    `json:"rejection_reason,omitempty"`
-}
-
-// TriggerRouteDispatchResult collects the fan-out legs of one dispatch in
-// dispatch order: the exact RouteKey owner first (when present and enabled),
-// then pattern matches in binding-id order.
-type TriggerRouteDispatchResult struct {
-	// PrimaryRun is the admitted run for the first matched binding. In-process
-	// backends populate it directly; HTTP backends may leave it nil because the
-	// router-v2 wire no longer returns run bodies (callers needing the run
-	// fetch it by Deliveries[0].RunID).
-	PrimaryRun *domain.DriverRun
-	Deliveries []TriggerRouteDelivery
-}
-
-// TriggerRouteDispatcher resolves the matched binding set for a route key —
-// the exact-RouteKey binding unioned with enabled bindings whose
-// event_type_patterns match the key — persists ONE TriggerEvent, then per
-// matched binding enqueues a queued DriverRun and records a TriggerDelivery,
-// in that order. It fronts fleet-db's trigger-routes endpoint.
-//
-// Each write is individually idempotent: the event dedups on the dispatch
-// idempotency key, each leg's run dedups on the Automation-owned per-binding
-// delivery identity (preserving the historical {idempotencyKey}#{bindingID}
-// form when Fleet accepts it; the legacy single-binding exact path keeps the
-// bare key), and each leg's delivery id is deterministic. The sequence is
-// NOT a single transaction: a failure after earlier legs are durable surfaces
-// as an error, and the caller's redelivery re-runs the sequence, deduping the
-// event and every already-admitted run while writing only the missing
-// deliveries — redelivery heals each leg independently. Callers should treat
-// dispatch as durable and eventually-consistent, not transactional, and retry
-// on error.
-type TriggerRouteDispatcher interface {
-	// DispatchTriggerRoute is the legacy single-run lane: it runs the same
-	// fan-out dispatch and returns only the primary run. Kept so existing
-	// webhook callers compile until they move to DispatchTriggerRouteV2.
-	DispatchTriggerRoute(ctx context.Context, workspaceKey, routeKey string, in TriggerRouteDispatch) (*domain.DriverRun, error)
-	// DispatchTriggerRouteV2 surfaces every fan-out leg of the dispatch.
-	DispatchTriggerRouteV2(ctx context.Context, workspaceKey, routeKey string, in TriggerRouteDispatch) (*TriggerRouteDispatchResult, error)
 }
 
 type EpicRunCreate struct {

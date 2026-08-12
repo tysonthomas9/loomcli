@@ -37,7 +37,7 @@ type RunOutcome struct {
 	EventID       string
 	EventType     string
 	RunID         string
-	Status        domain.DriverRunStatus
+	Status        execution.DriverRunStatus
 	ActorRef      string
 	ParentEventID string
 	EpicID        string
@@ -88,7 +88,7 @@ func runOutcomeJournalEvent(outcome RunOutcome) *automation.Event {
 // large run identity. Status and the truncation marker always survive.
 func marshalBoundedRunFinishedPayload(
 	runID string,
-	status domain.DriverRunStatus,
+	status execution.DriverRunStatus,
 	summary, errorClass, parentRunID string,
 ) (json.RawMessage, error) {
 	boundedRunID, runIDTruncated := boundedRunFinishedText(runID, runFinishedIdentityPayloadLimit)
@@ -164,9 +164,8 @@ type RunOutcomeAwaitNotifier interface {
 	NotifyRunOutcomeAwaits(context.Context, RunOutcome) error
 }
 
-// RunOutcomeAwaitResolver is the command edge used by the driver coordinator.
-// Production injects the typed Execution adapter; the legacy Store capability
-// is confined to characterization tests.
+// RunOutcomeAwaitResolver is the Execution command edge used by the driver
+// coordinator. Production and tests inject the same typed capability shape.
 type RunOutcomeAwaitResolver interface {
 	ResolveRunOutcomeAwaitAndResume(
 		context.Context,
@@ -459,7 +458,7 @@ func (reconciler *RunOutcomeReconciler) deliverRunOutcome(
 
 const childDriverRunCascadeErrorClass = "parent_run_terminal"
 
-func childDriverRunCascadeReason(status domain.DriverRunStatus) string {
+func childDriverRunCascadeReason(status execution.DriverRunStatus) string {
 	return "parent driver run became " + string(status)
 }
 
@@ -491,7 +490,7 @@ func (reconciler *RunOutcomeReconciler) recoverTerminalDriverRunWork(
 		),
 		DriverRunID:  persisted.RunID,
 		ParentStatus: persisted.Status,
-		Reason:       childDriverRunCascadeReason(domain.DriverRunStatus(persisted.Status)),
+		Reason:       childDriverRunCascadeReason(persisted.Status),
 		ErrorClass:   childDriverRunCascadeErrorClass,
 		RecoveredAt:  persisted.OccurredAt.UTC(),
 	})
@@ -526,7 +525,7 @@ func (reconciler *RunOutcomeReconciler) recoverChildDriverRunCascade(
 		),
 		ParentRunID:  persisted.RunID,
 		ParentStatus: status,
-		Reason:       childDriverRunCascadeReason(domain.DriverRunStatus(persisted.Status)),
+		Reason:       childDriverRunCascadeReason(persisted.Status),
 		ErrorClass:   childDriverRunCascadeErrorClass,
 		CascadedAt:   persisted.OccurredAt.UTC(),
 		MaxDepth:     DefaultCompositionMaxDepth,
@@ -630,17 +629,17 @@ func persistedRunOutcome(persisted execution.DriverRunOutcome) (RunOutcome, erro
 		return RunOutcome{}, fmt.Errorf("invalid persisted run outcome for %q", persisted.RunID)
 	}
 	payload, err := marshalBoundedRunFinishedPayload(
-		persisted.RunID, domain.DriverRunStatus(persisted.Status), persisted.Summary, persisted.ErrorClass, persisted.ParentRunID,
+		persisted.RunID, persisted.Status, persisted.Summary, persisted.ErrorClass, persisted.ParentRunID,
 	)
 	if err != nil {
 		return RunOutcome{}, fmt.Errorf("encode persisted run outcome %q: %w", persisted.RunID, err)
 	}
 	return RunOutcome{
 		WorkspaceKey:  persisted.WorkspaceKey,
-		EventID:       RunFinishedEventID(persisted.RunID, domain.DriverRunStatus(persisted.Status)),
+		EventID:       RunFinishedEventID(persisted.RunID, persisted.Status),
 		EventType:     RunFinishedEventType,
 		RunID:         persisted.RunID,
-		Status:        domain.DriverRunStatus(persisted.Status),
+		Status:        persisted.Status,
 		ActorRef:      RunFinishedActor,
 		ParentEventID: persisted.ParentEventID,
 		EpicID:        persisted.EpicID,

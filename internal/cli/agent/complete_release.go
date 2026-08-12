@@ -6,7 +6,6 @@ import (
 	"os"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 )
 
@@ -30,17 +29,13 @@ func releaseClaimOnComplete(worktreePath string) {
 	if err != nil || info == nil || info.TaskID == "" || info.AgentName == "" {
 		return
 	}
-	ib := cli.DefaultIssueBackend()
-	if ib == nil {
-		return
-	}
-	releaser, ok := ib.(backend.ClaimReleaser)
-	if !ok {
+	leases := cli.GetDeps(nil).ClaimLeases
+	if leases == nil {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), releaseClaimTimeout)
 	defer cancel()
-	if err := releaser.ReleaseClaim(ctx, info.TaskID, info.AgentName); err != nil {
+	if err := leases.ReleaseClaim(ctx, info.TaskID, info.AgentName); err != nil {
 		fmt.Fprintf(os.Stderr, "complete: release claim on %s failed (continuing): %v\n",
 			info.TaskID, err)
 	}

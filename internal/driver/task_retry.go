@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 )
 
 // Retry-then-block policy support for claimed TaskRun execution: decide
@@ -18,7 +19,7 @@ type taskRunRetryDecisionResult struct {
 	MaxAttempts int
 }
 
-func taskRunRetryDecision(claimed *domain.TaskRun, opts executeClaimedTaskRunOptions, completion taskExecCompletion) taskRunRetryDecisionResult {
+func taskRunRetryDecision(claimed *execution.TaskRun, opts executeClaimedTaskRunOptions, completion taskExecCompletion) taskRunRetryDecisionResult {
 	maxAttempts := opts.MaxAttempts
 	if maxAttempts < 1 {
 		maxAttempts = 1
@@ -31,7 +32,7 @@ func taskRunRetryDecision(claimed *domain.TaskRun, opts executeClaimedTaskRunOpt
 	return decision
 }
 
-func taskRunAttempt(run *domain.TaskRun) int {
+func taskRunAttempt(run *execution.TaskRun) int {
 	if run == nil || run.RuntimeMetadata == nil {
 		return 0
 	}
@@ -76,11 +77,11 @@ func taskRunRetryBackoff(attempt int) time.Duration {
 	return backoff
 }
 
-func taskRunRetryMetadata(_ *domain.TaskRun, retry taskRunRetryDecisionResult, completion taskExecCompletion, metadata map[string]string) map[string]string {
+func taskRunRetryMetadata(_ *execution.TaskRun, retry taskRunRetryDecisionResult, completion taskExecCompletion, metadata map[string]string) map[string]string {
 	return schedulerMetadata(metadata, "retrying", retry.Attempt, retry.MaxAttempts, completion)
 }
 
-func taskRunBlockedMetadata(claimed *domain.TaskRun, opts executeClaimedTaskRunOptions, completion taskExecCompletion, metadata map[string]string) map[string]string {
+func taskRunBlockedMetadata(claimed *execution.TaskRun, opts executeClaimedTaskRunOptions, completion taskExecCompletion, metadata map[string]string) map[string]string {
 	maxAttempts := opts.MaxAttempts
 	if maxAttempts < 1 {
 		maxAttempts = 1

@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/backend"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 )
 
 // sharedFixtureTimestamp is a deterministic instant used by every fixture
@@ -23,9 +23,9 @@ func derefMutationAssignee(value *string) string {
 
 // makeSharedFixture returns equivalent backend and realtime mutation values
 // that represent the same logical event. Used to assert byte-level
-// equivalence between BackendMutationToPayload and MutationEventToPayload.
-func makeSharedFixture() (backend.MutationData, MutationEvent) {
-	bm := backend.MutationData{
+// equivalence between WorkItemMutationToPayload and MutationEventToPayload.
+func makeSharedFixture() (workitems.Mutation, MutationEvent) {
+	bm := workitems.Mutation{
 		Type:       "status",
 		EntityType: "issue",
 		EntityID:   "loom-fleet-42",
@@ -60,12 +60,12 @@ func makeSharedFixture() (backend.MutationData, MutationEvent) {
 	return bm, rm
 }
 
-// TestBackendMutationToPayload_AllFields verifies every field is projected
-// from backend.MutationData to MutationPayload, with workspaceID injected
-// (since backend.MutationData has no WorkspaceID member).
-func TestBackendMutationToPayload_AllFields(t *testing.T) {
+// TestWorkItemMutationToPayload_AllFields verifies every field is projected
+// from workitems.Mutation to MutationPayload, with workspaceID injected
+// (since workitems.Mutation has no WorkspaceID member).
+func TestWorkItemMutationToPayload_AllFields(t *testing.T) {
 	bm, _ := makeSharedFixture()
-	got := BackendMutationToPayload(bm, "ws-fleet-1")
+	got := WorkItemMutationToPayload(bm, "ws-fleet-1")
 
 	checks := map[string]struct {
 		actual, expected any
@@ -97,8 +97,8 @@ func TestBackendMutationToPayload_AllFields(t *testing.T) {
 	}
 }
 
-func TestBackendMutationToPayload_GenericAgentEvent(t *testing.T) {
-	bm := backend.MutationData{
+func TestWorkItemMutationToPayload_GenericAgentEvent(t *testing.T) {
+	bm := workitems.Mutation{
 		Type:       "status",
 		EntityType: "agent",
 		EntityID:   "agent-alpha",
@@ -107,7 +107,7 @@ func TestBackendMutationToPayload_GenericAgentEvent(t *testing.T) {
 		Actor:      "tester",
 		Timestamp:  sharedFixtureTimestamp,
 	}
-	got := BackendMutationToPayload(bm, "ws-agent-1")
+	got := WorkItemMutationToPayload(bm, "ws-agent-1")
 
 	checks := map[string]struct {
 		actual, expected any
@@ -131,22 +131,22 @@ func TestBackendMutationToPayload_GenericAgentEvent(t *testing.T) {
 	}
 }
 
-// TestBackendMutationToPayload_TimestampNonUTC verifies that a
+// TestWorkItemMutationToPayload_TimestampNonUTC verifies that a
 // non-UTC backend timestamp is normalized to UTC before formatting.
 // Without this, two events emitted from different time zones would
 // serialize differently even though they represent the same instant.
-func TestBackendMutationToPayload_TimestampNonUTC(t *testing.T) {
+func TestWorkItemMutationToPayload_TimestampNonUTC(t *testing.T) {
 	loc, err := time.LoadLocation("America/New_York")
 	if err != nil {
 		t.Skipf("zoneinfo not available: %v", err)
 	}
 	// 2026-04-25T10:30:45Z is 2026-04-25T06:30:45-04:00
-	bm := backend.MutationData{
+	bm := workitems.Mutation{
 		Type:      "create",
 		IssueID:   "loom-1",
 		Timestamp: sharedFixtureTimestamp.In(loc),
 	}
-	got := BackendMutationToPayload(bm, "ws-1")
+	got := WorkItemMutationToPayload(bm, "ws-1")
 	if got.Timestamp != "2026-04-25T10:30:45Z" {
 		t.Errorf("non-UTC timestamp not normalized: got %q, want %q", got.Timestamp, "2026-04-25T10:30:45Z")
 	}
@@ -156,7 +156,7 @@ func TestMutationPayloadPreservesSubsecondTimestamp(t *testing.T) {
 	ts := time.Date(2026, 4, 25, 10, 30, 45, 987654321, time.UTC)
 	want := "2026-04-25T10:30:45.987654321Z"
 
-	backendPayload := BackendMutationToPayload(backend.MutationData{
+	backendPayload := WorkItemMutationToPayload(workitems.Mutation{
 		Type:      "status",
 		IssueID:   "loom-1",
 		Timestamp: ts,
@@ -175,16 +175,16 @@ func TestMutationPayloadPreservesSubsecondTimestamp(t *testing.T) {
 	}
 }
 
-// TestBackendMutationToPayload_EmptyOptionalFields verifies that empty
+// TestWorkItemMutationToPayload_EmptyOptionalFields verifies that empty
 // optional fields stay empty so omitempty produces minimal JSON, matching
 // what MutationEventToPayload produces for a minimal event.
-func TestBackendMutationToPayload_EmptyOptionalFields(t *testing.T) {
-	bm := backend.MutationData{
+func TestWorkItemMutationToPayload_EmptyOptionalFields(t *testing.T) {
+	bm := workitems.Mutation{
 		Type:      "create",
 		IssueID:   "loom-7",
 		Timestamp: sharedFixtureTimestamp,
 	}
-	got := BackendMutationToPayload(bm, "ws-min")
+	got := WorkItemMutationToPayload(bm, "ws-min")
 
 	if got.Title != "" || got.Assignee != nil || got.Actor != "" ||
 		got.OldStatus != "" || got.NewStatus != "" || got.ParentID != "" ||
@@ -196,8 +196,8 @@ func TestBackendMutationToPayload_EmptyOptionalFields(t *testing.T) {
 	}
 }
 
-func TestBackendMutationToPayload_AssigneeClearIsExplicit(t *testing.T) {
-	got := BackendMutationToPayload(backend.MutationData{
+func TestWorkItemMutationToPayload_AssigneeClearIsExplicit(t *testing.T) {
+	got := WorkItemMutationToPayload(workitems.Mutation{
 		Type:       "update",
 		EntityType: "issue",
 		EntityID:   "loom-7",
@@ -218,8 +218,8 @@ func TestBackendMutationToPayload_AssigneeClearIsExplicit(t *testing.T) {
 	}
 }
 
-func TestBackendMutationToPayload_TaskRunTerminalHandoffClearsAssignee(t *testing.T) {
-	got := BackendMutationToPayload(backend.MutationData{
+func TestWorkItemMutationToPayload_TaskRunTerminalHandoffClearsAssignee(t *testing.T) {
+	got := WorkItemMutationToPayload(workitems.Mutation{
 		Type:       "update",
 		EntityType: "issue",
 		EntityID:   "loom-8",
@@ -236,8 +236,8 @@ func TestBackendMutationToPayload_TaskRunTerminalHandoffClearsAssignee(t *testin
 	}
 }
 
-func TestBackendMutationToPayload_HumanStatusMoveDoesNotInventAssigneeClear(t *testing.T) {
-	got := BackendMutationToPayload(backend.MutationData{
+func TestWorkItemMutationToPayload_HumanStatusMoveDoesNotInventAssigneeClear(t *testing.T) {
+	got := WorkItemMutationToPayload(workitems.Mutation{
 		Type:       "update",
 		EntityType: "issue",
 		EntityID:   "loom-9",
@@ -254,8 +254,8 @@ func TestBackendMutationToPayload_HumanStatusMoveDoesNotInventAssigneeClear(t *t
 	}
 }
 
-// TestBackendMutationToPayload_WireFormatStability is the load-bearing
-// assertion of this file: the JSON bytes produced by BackendMutationToPayload
+// TestWorkItemMutationToPayload_WireFormatStability is the load-bearing
+// assertion of this file: the JSON bytes produced by WorkItemMutationToPayload
 // MUST equal the JSON bytes produced by MutationEventToPayload for the same
 // logical event (after WorkspaceID is set on the rpc-derived payload by
 // the SSE handler — we apply the same workspaceID by hand here).
@@ -263,11 +263,11 @@ func TestBackendMutationToPayload_HumanStatusMoveDoesNotInventAssigneeClear(t *t
 // Any field-projection drift (renamed JSON tag, missing field, different
 // time format, etc.) breaks reconnect catch-up where store-sourced and
 // fleet-sourced events flow through the same SSE stream.
-func TestBackendMutationToPayload_WireFormatStability(t *testing.T) {
+func TestWorkItemMutationToPayload_WireFormatStability(t *testing.T) {
 	bm, rm := makeSharedFixture()
 	const wsID = "ws-shared"
 
-	backendPayload := BackendMutationToPayload(bm, wsID)
+	backendPayload := WorkItemMutationToPayload(bm, wsID)
 	eventPayload := MutationEventToPayload(rm)
 	eventPayload.WorkspaceID = wsID // SSE handler injects this; mirror that here
 
@@ -284,15 +284,15 @@ func TestBackendMutationToPayload_WireFormatStability(t *testing.T) {
 	}
 }
 
-// TestBackendMutationToEvent_RoundTripFields verifies that every field
-// of backend.MutationData is preserved when projected to MutationEvent and
+// TestWorkItemMutationToEvent_RoundTripFields verifies that every field
+// of workitems.Mutation is preserved when projected to MutationEvent and
 // back. The catch-up path projects backend to realtime; this test guards
 // against losing fields silently when the two structs evolve.
-func TestBackendMutationToEvent_RoundTripFields(t *testing.T) {
+func TestWorkItemMutationToEvent_RoundTripFields(t *testing.T) {
 	original, _ := makeSharedFixture()
 
-	event := BackendMutationToEvent(original)
-	roundTripped := EventToMutationData(event)
+	event := WorkItemMutationToEvent(original)
+	roundTripped := EventToWorkItemMutation(event)
 
 	if !roundTripped.Timestamp.Equal(original.Timestamp) {
 		t.Errorf("Timestamp lost equality: orig=%v rt=%v", original.Timestamp, roundTripped.Timestamp)
@@ -305,11 +305,11 @@ func TestBackendMutationToEvent_RoundTripFields(t *testing.T) {
 	}
 }
 
-// TestEventToMutationData_AllFields verifies the inverse projection.
-func TestEventToMutationData_AllFields(t *testing.T) {
+// TestEventToWorkItemMutation_AllFields verifies the inverse projection.
+func TestEventToWorkItemMutation_AllFields(t *testing.T) {
 	_, rm := makeSharedFixture()
 
-	got := EventToMutationData(rm)
+	got := EventToWorkItemMutation(rm)
 	if got.Type != rm.Type || got.EntityType != rm.EntityType ||
 		got.EntityID != rm.EntityID || got.Action != rm.Action ||
 		got.IssueID != rm.IssueID ||
@@ -317,7 +317,7 @@ func TestEventToMutationData_AllFields(t *testing.T) {
 		got.Actor != rm.Actor || got.OldStatus != rm.OldStatus ||
 		got.NewStatus != rm.NewStatus || got.ParentID != rm.ParentID ||
 		got.StepCount != rm.StepCount || got.SourceRepo != rm.SourceRepo {
-		t.Errorf("EventToMutationData field drift: got=%+v event=%+v", got, rm)
+		t.Errorf("EventToWorkItemMutation field drift: got=%+v event=%+v", got, rm)
 	}
 	if !got.Timestamp.Equal(rm.Timestamp) {
 		t.Errorf("Timestamp drift: got=%v event=%v", got.Timestamp, rm.Timestamp)

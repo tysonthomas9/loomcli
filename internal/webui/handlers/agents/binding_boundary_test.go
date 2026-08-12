@@ -58,7 +58,7 @@ func TestLegacyBindingPatchIsNotAnAgentRoute(t *testing.T) {
 	}
 	bindings := &testBindingOperations{store: st}
 	module := New(Config{
-		Store: st, Bindings: bindings, AgentRecords: &testAgentRecordAPI{store: st},
+		AgentRuns: testAgentRunQueries{store: st}, Bindings: bindings, AgentRecords: &testAgentRecordAPI{store: st},
 		AgentRecordAuthority: testOperatorAuthorityResolver{},
 		OperatorAuthority: boundaryOperatorResolverFunc(func(_ *http.Request, workspace string, action authority.Action) (authority.OperatorAuthority, error) {
 			t.Fatalf("retired legacy binding route requested authority for %q/%q", workspace, action)
@@ -106,7 +106,7 @@ func TestManagedBindingLifecycleUsesExactActions(t *testing.T) {
 		return authority.OperatorAuthority{}, nil
 	})
 	module := New(Config{
-		Store: st, Bindings: bindings,
+		AgentRuns: testAgentRunQueries{store: st}, Bindings: bindings,
 		OperatorAuthority: resolver,
 		AgentRecords:      &testAgentRecordAPI{store: st}, AgentRecordAuthority: resolver,
 		Provisioning:          provisioning,
@@ -219,7 +219,7 @@ func TestManagedAgentDeleteResumesAfterParkOrArchiveFailure(t *testing.T) {
 			services := &faultAgentServiceStore{AgentServiceStore: base.AgentServices(), failStep: failStep}
 			faultStore := &faultAgentRecordStore{Store: base, services: services}
 			module := New(Config{
-				Store: faultStore, Bindings: &testBindingOperations{store: faultStore},
+				AgentRuns: testAgentRunQueries{store: faultStore}, Bindings: &testBindingOperations{store: faultStore},
 				OperatorAuthority:    testOperatorAuthorityResolver{},
 				AgentRecords:         &testAgentRecordAPI{store: faultStore},
 				AgentRecordAuthority: testOperatorAuthorityResolver{},

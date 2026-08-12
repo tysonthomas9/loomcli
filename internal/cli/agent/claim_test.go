@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tysonthomas9/loomcli/internal/backend"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 )
 
 func TestRunClaim_Success(t *testing.T) {
@@ -33,13 +33,13 @@ func TestRunClaim_Success(t *testing.T) {
 	os.WriteFile(filepath.Join(tmpDir, LockFileName), lockData, 0644)
 
 	// Mock IssueTracker for getTaskTitle
-	mockTracker := &MockIssueBackend{
-		GetFn: func(ctx context.Context, id string) (*backend.IssueDetailData, error) {
-			return &backend.IssueDetailData{IssueData: backend.IssueData{ID: id, Title: "Test Task Title"}}, nil
+	mockTracker := &MockWorkItems{
+		GetFn: func(ctx context.Context, query workitems.GetQuery) (*workitems.IssueDetail, error) {
+			return &workitems.IssueDetail{ID: query.IssueID, Title: "Test Task Title"}, nil
 		},
 	}
-	setDefaultIssueBackend(mockTracker)
-	t.Cleanup(func() { setDefaultIssueBackend(nil) })
+	setDefaultWorkItems(mockTracker)
+	t.Cleanup(func() { setDefaultWorkItems(nil) })
 
 	// Capture stdout
 	oldStdout := os.Stdout
@@ -99,13 +99,13 @@ func TestRunClaim_NoTitle(t *testing.T) {
 	os.WriteFile(filepath.Join(tmpDir, LockFileName), lockData, 0644)
 
 	// Mock IssueTracker returning error
-	mockTracker := &MockIssueBackend{
-		GetFn: func(ctx context.Context, id string) (*backend.IssueDetailData, error) {
+	mockTracker := &MockWorkItems{
+		GetFn: func(ctx context.Context, query workitems.GetQuery) (*workitems.IssueDetail, error) {
 			return nil, errors.New("issue lookup error")
 		},
 	}
-	setDefaultIssueBackend(mockTracker)
-	t.Cleanup(func() { setDefaultIssueBackend(nil) })
+	setDefaultWorkItems(mockTracker)
+	t.Cleanup(func() { setDefaultWorkItems(nil) })
 
 	// Capture stdout
 	oldStdout := os.Stdout
@@ -130,13 +130,13 @@ func TestRunClaim_NoTitle(t *testing.T) {
 }
 
 func TestGetTaskTitle_Success(t *testing.T) {
-	mock := &MockIssueBackend{
-		GetFn: func(ctx context.Context, id string) (*backend.IssueDetailData, error) {
-			return &backend.IssueDetailData{IssueData: backend.IssueData{ID: id, Title: "My Task Title"}}, nil
+	mock := &MockWorkItems{
+		GetFn: func(ctx context.Context, query workitems.GetQuery) (*workitems.IssueDetail, error) {
+			return &workitems.IssueDetail{ID: query.IssueID, Title: "My Task Title"}, nil
 		},
 	}
-	setDefaultIssueBackend(mock)
-	t.Cleanup(func() { setDefaultIssueBackend(nil) })
+	setDefaultWorkItems(mock)
+	t.Cleanup(func() { setDefaultWorkItems(nil) })
 
 	title := getTaskTitle(t.Context(), "loom-789")
 	if title != "My Task Title" {
@@ -145,13 +145,13 @@ func TestGetTaskTitle_Success(t *testing.T) {
 }
 
 func TestGetTaskTitle_IssueLookupError(t *testing.T) {
-	mock := &MockIssueBackend{
-		GetFn: func(ctx context.Context, id string) (*backend.IssueDetailData, error) {
+	mock := &MockWorkItems{
+		GetFn: func(ctx context.Context, query workitems.GetQuery) (*workitems.IssueDetail, error) {
 			return nil, errors.New("issue lookup error")
 		},
 	}
-	setDefaultIssueBackend(mock)
-	t.Cleanup(func() { setDefaultIssueBackend(nil) })
+	setDefaultWorkItems(mock)
+	t.Cleanup(func() { setDefaultWorkItems(nil) })
 
 	title := getTaskTitle(t.Context(), "loom-error")
 	if title != "" {
@@ -160,13 +160,13 @@ func TestGetTaskTitle_IssueLookupError(t *testing.T) {
 }
 
 func TestGetTaskTitle_NilIssue(t *testing.T) {
-	mock := &MockIssueBackend{
-		GetFn: func(ctx context.Context, id string) (*backend.IssueDetailData, error) {
+	mock := &MockWorkItems{
+		GetFn: func(ctx context.Context, query workitems.GetQuery) (*workitems.IssueDetail, error) {
 			return nil, nil
 		},
 	}
-	setDefaultIssueBackend(mock)
-	t.Cleanup(func() { setDefaultIssueBackend(nil) })
+	setDefaultWorkItems(mock)
+	t.Cleanup(func() { setDefaultWorkItems(nil) })
 
 	title := getTaskTitle(t.Context(), "loom-empty")
 	if title != "" {
@@ -176,14 +176,14 @@ func TestGetTaskTitle_NilIssue(t *testing.T) {
 
 func TestGetTaskTitle_PassesCorrectID(t *testing.T) {
 	var capturedID string
-	mock := &MockIssueBackend{
-		GetFn: func(ctx context.Context, id string) (*backend.IssueDetailData, error) {
-			capturedID = id
-			return &backend.IssueDetailData{IssueData: backend.IssueData{ID: id, Title: "Test"}}, nil
+	mock := &MockWorkItems{
+		GetFn: func(ctx context.Context, query workitems.GetQuery) (*workitems.IssueDetail, error) {
+			capturedID = query.IssueID
+			return &workitems.IssueDetail{ID: query.IssueID, Title: "Test"}, nil
 		},
 	}
-	setDefaultIssueBackend(mock)
-	t.Cleanup(func() { setDefaultIssueBackend(nil) })
+	setDefaultWorkItems(mock)
+	t.Cleanup(func() { setDefaultWorkItems(nil) })
 
 	getTaskTitle(t.Context(), "loom-123")
 	if capturedID != "loom-123" {
@@ -204,13 +204,13 @@ func TestRunClaim_LockUpdateFailureIsNonFatal(t *testing.T) {
 	os.Chdir(tmpDir)
 	t.Cleanup(func() { os.Chdir(origDir) })
 
-	mockTracker := &MockIssueBackend{
-		GetFn: func(ctx context.Context, id string) (*backend.IssueDetailData, error) {
-			return &backend.IssueDetailData{IssueData: backend.IssueData{ID: id, Title: "Test Task Title"}}, nil
+	mockTracker := &MockWorkItems{
+		GetFn: func(ctx context.Context, query workitems.GetQuery) (*workitems.IssueDetail, error) {
+			return &workitems.IssueDetail{ID: query.IssueID, Title: "Test Task Title"}, nil
 		},
 	}
-	setDefaultIssueBackend(mockTracker)
-	t.Cleanup(func() { setDefaultIssueBackend(nil) })
+	setDefaultWorkItems(mockTracker)
+	t.Cleanup(func() { setDefaultWorkItems(nil) })
 
 	oldStdout, oldStderr := os.Stdout, os.Stderr
 	rOut, wOut, _ := os.Pipe()

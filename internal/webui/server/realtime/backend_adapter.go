@@ -4,19 +4,19 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/backend"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 )
 
-// BackendMutationToPayload converts a backend.MutationData into the SSE
+// WorkItemMutationToPayload converts a Work Items mutation into the SSE
 // MutationPayload wire format. The workspaceID parameter is injected onto
-// the payload because backend.MutationData is workspace-agnostic — fleet-db
+// the payload because Work Items mutations are workspace-agnostic — fleet-db
 // emits per-workspace mutation streams keyed by URL path, so the wire-level
 // workspace tag must come from the subscriber that produced the event.
 //
 // This function MUST produce a MutationPayload that, when JSON-marshaled,
 // is byte-identical to MutationEventToPayload's output for the same logical
 // event. Any drift breaks reconnection catch-up across RPC and backend streams.
-func BackendMutationToPayload(m backend.MutationData, workspaceID string) *MutationPayload {
+func WorkItemMutationToPayload(m workitems.Mutation, workspaceID string) *MutationPayload {
 	return &MutationPayload{
 		Cursor:      m.Cursor,
 		Type:        m.Type,
@@ -54,12 +54,12 @@ func mutationAssignee(action, assignee, actor, oldStatus, newStatus string) *str
 	return &value
 }
 
-// BackendMutationToEvent projects backend mutation data to the durable
+// WorkItemMutationToEvent projects Work Items mutation data to the durable
 // realtime catch-up event. Used by the catch-up path so that
 // MultiWorkspaceSubscriber.GetMutationsSinceForWorkspace can return a single
 // []MutationEvent. The Timestamp is preserved as-is; MutationEventToPayload
 // formats it into RFC3339.
-func BackendMutationToEvent(m backend.MutationData) MutationEvent {
+func WorkItemMutationToEvent(m workitems.Mutation) MutationEvent {
 	return MutationEvent{
 		Cursor:     m.Cursor,
 		Type:       m.Type,
@@ -79,9 +79,9 @@ func BackendMutationToEvent(m backend.MutationData) MutationEvent {
 	}
 }
 
-// EventToMutationData is the inverse of BackendMutationToEvent.
-func EventToMutationData(e MutationEvent) backend.MutationData {
-	return backend.MutationData{
+// EventToWorkItemMutation is the inverse of WorkItemMutationToEvent.
+func EventToWorkItemMutation(e MutationEvent) workitems.Mutation {
+	return workitems.Mutation{
 		Cursor:     e.Cursor,
 		Type:       e.Type,
 		EntityType: e.EntityType,

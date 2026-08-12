@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/data"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 
 	// Sub-package registrations — each package's init() calls cli.RegisterCommand().
 	_ "github.com/tysonthomas9/loomcli/internal/cli/agent"
@@ -39,8 +39,8 @@ import (
 // which we register explicitly from main.
 func init() {
 	cli.RegisterPreBackendCommandGuard(data.EnforceTaskRunCommandScope)
-	data.SetLocalIssueBackendProvider(func(_ context.Context) backend.IssueBackend {
-		return cli.DefaultIssueBackend()
+	data.SetLocalWorkItemsProvider(func(_ context.Context) workitems.API {
+		return cli.DefaultWorkItems()
 	})
 	for _, c := range data.Commands() {
 		cli.RegisterCommand(c)

@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tysonthomas9/loomcli/internal/backend"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 )
 
 func TestMapTaskFilter(t *testing.T) {
@@ -169,17 +169,17 @@ func TestMapTaskFilter_WithParentID(t *testing.T) {
 					capturedArgs = append([]string{name}, args...)
 				}
 				// Return appropriate mock data based on filter
-				var mockIssue backend.IssueData
+				var mockIssue workitems.IssueSummary
 				if tt.filter == "needs_design" {
-					mockIssue = backend.IssueData{ID: "T-1", Title: "Task", Status: "open", Design: ""}
+					mockIssue = workitems.IssueSummary{ID: "T-1", Title: "Task", Status: "open", Design: ""}
 				} else if tt.filter == "has_design" {
-					mockIssue = backend.IssueData{ID: "T-2", Title: "Task with design", Status: "open", Design: "Implementation plan"}
+					mockIssue = workitems.IssueSummary{ID: "T-2", Title: "Task with design", Status: "open", Design: "Implementation plan"}
 				} else if tt.filter == "bug" {
-					mockIssue = backend.IssueData{ID: "BUG-1", Title: "Bug", Status: "open", IssueType: "bug"}
+					mockIssue = workitems.IssueSummary{ID: "BUG-1", Title: "Bug", Status: "open", IssueType: "bug"}
 				} else {
-					mockIssue = backend.IssueData{ID: "T-3", Title: "Any task", Status: "open", Design: ""}
+					mockIssue = workitems.IssueSummary{ID: "T-3", Title: "Any task", Status: "open", Design: ""}
 				}
-				return CommandResult{Stdout: mustJSON([]backend.IssueData{mockIssue})}
+				return CommandResult{Stdout: mustJSON([]workitems.IssueSummary{mockIssue})}
 			}})
 
 			// Get the function from mapTaskFilter
@@ -232,7 +232,7 @@ func TestMapTaskFilter_ParentIDCapturedInClosure(t *testing.T) {
 			readyCapturedArgs = append(readyCapturedArgs, fullArgs)
 		}
 		return CommandResult{
-			Stdout: mustJSON([]backend.IssueData{
+			Stdout: mustJSON([]workitems.IssueSummary{
 				{ID: "T-1", Title: "Task", Status: "open", Design: ""},
 			}),
 		}

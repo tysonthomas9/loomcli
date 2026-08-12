@@ -5,7 +5,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/tysonthomas9/loomcli/internal/backend"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 )
 
 var (
@@ -21,21 +21,21 @@ var readyCmd = &cobra.Command{
 	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
-		ib, err := getIssueBackend(ctx)
+		itemsAPI, err := getWorkItems(ctx)
 		if err != nil {
 			return err
 		}
-		opts := backend.ReadyOpts{
-			Limit:    readyLimit,
-			Assignee: readyAssignee,
-			Type:     readyType,
-			ParentID: readyParent,
+		opts := workitems.AvailabilityQuery{
+			Limit:     readyLimit,
+			Assignee:  readyAssignee,
+			IssueType: readyType,
+			ParentID:  readyParent,
 		}
-		items, err := ib.Ready(ctx, opts)
+		items, err := itemsAPI.Ready(ctx, opts)
 		if err != nil {
 			return err
 		}
-		return printIssueList(os.Stdout, items, outputFormat)
+		return printWorkItemSummaries(os.Stdout, items, outputFormat)
 	},
 }
 

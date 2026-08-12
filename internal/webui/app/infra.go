@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/backend"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 	"github.com/tysonthomas9/loomcli/internal/webui/coordinator"
 	"github.com/tysonthomas9/loomcli/internal/webui/fleet"
 	"github.com/tysonthomas9/loomcli/internal/webui/hooks"
@@ -50,7 +50,6 @@ type HookConfig struct {
 	PTYMultiMgr *terminal.MultiPTYManager
 	FleetReg    *fleet.StoreRegistry
 	FleetURL    string
-	FleetWS     string
 	FleetKey    string
 	FleetActor  string // X-Actor header value (fleet-db --auth-dev-mode)
 	FleetMode   bool
@@ -78,14 +77,14 @@ func RegisterHooks(registry *WorkspaceRegistry, cfg HookConfig) RegisteredHooks 
 		_ = registry.AddHook(hooks.NewFleetStoreHook(cfg.FleetReg, cfg.Logger))
 	}
 	if cfg.FleetURL != "" {
-		// FleetBackendHook MUST be added before FleetSubscriberHook so that
-		// by the time FleetSubscriberHook.Activate fires, the FleetBackend
+		// WorkItemsFleetDBHook MUST be added before FleetSubscriberHook so that
+		// by the time FleetSubscriberHook.Activate fires, the Work Items FleetDB adapter
 		// resource is already in the workspace handle.
-		_ = registry.AddHook(hooks.NewFleetBackendHook(cfg.FleetURL, cfg.FleetWS, cfg.FleetKey, cfg.FleetActor, cfg.Logger))
+		_ = registry.AddHook(hooks.NewWorkItemsFleetDBHook(cfg.FleetURL, cfg.FleetKey, cfg.FleetActor, cfg.Logger))
 	}
 
 	// FleetDB-backed SSE push: FleetSubscriberHook bridges the per-workspace
-	// FleetBackend (provided by FleetBackendHook above) into the shared
+	// Work Items FleetDB adapter (provided by WorkItemsFleetDBHook above) into the shared
 	// MultiWorkspaceSubscriber so the SSE hub gets push events. This is needed
 	// for both local fleet-db mode and remote fleet mode; FleetMode only means
 	// external fleet orchestration owns agent scheduling.
@@ -263,6 +262,6 @@ type PTYHook = hooks.PTYHook
 type FleetModule = fleet.Module
 
 // NewFleetModule creates a new fleet workspace-scoped module.
-func NewFleetModule(registry *FleetStoreRegistry, tokenCfg *FleetTokenConfig, issueBackendFn func(context.Context) backend.IssueBackend, claimMetrics *FleetClaimMetrics, regCfg *FleetRegisterConfig) *FleetModule {
-	return fleet.NewModule(registry.Get, tokenCfg, issueBackendFn, claimMetrics, regCfg)
+func NewFleetModule(registry *FleetStoreRegistry, tokenCfg *FleetTokenConfig, workItemsFn workitems.Provider, claimMetrics *FleetClaimMetrics, regCfg *FleetRegisterConfig) *FleetModule {
+	return fleet.NewModule(registry.Get, tokenCfg, workItemsFn, claimMetrics, regCfg)
 }

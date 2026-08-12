@@ -30,9 +30,11 @@ func TestPhase5SourceControlProductionReachabilityRatchet(t *testing.T) {
 		},
 		"internal/cli/serve/serve.go": {
 			"SourceControlMaterializer",
+			"TaskStackBindings",
+			"TaskOutcomes",
 			"RepositoryAdmissionMaterializer",
 			"NewRepositoryAdmissionJournal",
-			"NewStoreBackedWorkspaceAdmissionOperationsWithWorkspace",
+			"NewStoreBackedWorkspaceAdmissionOperations",
 			"CreateWorkspace",
 			"AddWorkspaceRepos",
 			"RuntimeRegistrations",
@@ -43,7 +45,7 @@ func TestPhase5SourceControlProductionReachabilityRatchet(t *testing.T) {
 		"internal/driver/task_worktree_resolver.go": {
 			"PrepareTaskCheckout",
 		},
-		"internal/driver/taskworktree/preparer.go": {
+		"internal/driver/task_worktree_preparer.go": {
 			"EnsureDetachedGitWorktreeAtRef",
 		},
 		"internal/infra/localgit/executor.go": {
@@ -117,6 +119,9 @@ func TestPhase5SourceControlProductionReachabilityRatchet(t *testing.T) {
 	if agentsFacts.functions["RepositoryAdmissionMaterializer"] == 0 {
 		t.Error("serve composition no longer publishes the Workspace-only RepositoryAdmissionMaterializer")
 	}
+	if agentsFacts.functions["TaskStackBindings"] == 0 || agentsFacts.functions["TaskOutcomes"] == 0 {
+		t.Error("serve composition no longer publishes explicit Source Control task lineage and outcome ports")
+	}
 	if !agentsFacts.retainsSourceControl {
 		t.Error("Agents composition no longer retains the SourceControl capability it constructs")
 	}
@@ -154,13 +159,10 @@ func TestPhase5SourceControlProductionReachabilityRatchet(t *testing.T) {
 
 	credentialFreePaths := []string{
 		"internal/driver/task_worker.go",
+		"internal/driver/task_worktree_preparer.go",
 		"internal/driver/task_worktree_resolver.go",
 		"internal/webui/handlers/driverapi/task_runs.go",
 	}
-	credentialFreePaths = append(
-		credentialFreePaths,
-		productionGoFilesBelow(t, root, "internal/driver/taskworktree")...,
-	)
 	credentialFreePaths = append(
 		credentialFreePaths,
 		productionGoFilesBelow(t, root, "internal/webui/handlers/prreview")...,
@@ -185,6 +187,18 @@ func TestPhase5SourceControlProductionReachabilityRatchet(t *testing.T) {
 			}
 		}
 	}
+	for _, path := range []string{
+		"internal/driver/task_worker.go",
+		"internal/webui/handlers/driverapi/task_runs.go",
+	} {
+		assertFileExcludes(t, root, path, []string{
+			"StackBindingResolverFor",
+			"taskOutcomeRecorder",
+		})
+	}
+	assertFileExcludes(t, root, "internal/driver/task_worktree_resolver.go", []string{
+		"lineage base lookup failed; using repo default branch",
+	})
 
 	credentialOwnerPrefixes := []string{
 		"internal/gitauth/",
@@ -288,7 +302,7 @@ func TestPhase5CredentialContainmentRatchet(t *testing.T) {
 			"verifyLease",
 			"ExecuteDaytona",
 		},
-		"internal/cli/serve/serveadapter/daytonabroker/daytona_provider.go": {
+		"internal/cli/serve/serveadapter/daytona_provider.go": {
 			"UnsealRuntimeCredentialBytes",
 			"RunDaytonaProviderHost",
 		},
@@ -316,7 +330,7 @@ func TestPhase5CredentialContainmentRatchet(t *testing.T) {
 		`"daytona-execute":`,
 		"DaytonaProvider execution.DaytonaProviderBroker",
 	})
-	assertFileIncludes(t, root, "internal/cli/serve/serveadapter/daytonabroker/daytona_provider.go", []string{
+	assertFileIncludes(t, root, "internal/cli/serve/serveadapter/daytona_provider.go", []string{
 		"type DaytonaProviderBroker struct",
 		"localsettings.UnsealRuntimeCredentialBytes",
 		"driver.RunDaytonaProviderHost",

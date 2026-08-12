@@ -179,9 +179,9 @@ func collectMonitorStoreData(
 	workspaceData := monitorWorkspaceDataForAgents(ctx, st, wsKey, wsName)
 	rolesByName := monitorCanonicalRolesByName(roles, wsKey)
 	latestSessions := latestAgentSessionsForMonitor(ctx, st, wsKey)
-	orchestrationByAgent := latestOrchestrationSessionsForMonitor(ctx, st, wsKey)
+	interactiveByAgent := latestInteractiveSessionsForMonitor(ctx, st, wsKey)
 	inboxByAgent := agentInboxSummariesForMonitor(ctx, st, wsKey)
-	data.Agents = monitorAgentStatuses(identities, rolesByName, workspaceData, latestSessions, orchestrationByAgent, inboxByAgent, wsName)
+	data.Agents = monitorAgentStatuses(identities, rolesByName, workspaceData, latestSessions, interactiveByAgent, inboxByAgent, wsName)
 	return data
 }
 
@@ -190,14 +190,14 @@ func monitorAgentStatuses(
 	rolesByName map[string]*agentsmodule.Role,
 	workspaceData *ops.WorkspaceData,
 	latestSessions map[string]*domain.AgentSession,
-	orchestrationByAgent map[string]*domain.AgentSession,
+	interactiveByAgent map[string]*domain.AgentSession,
 	inboxByAgent map[string]agentInboxSummary,
 	wsName string,
 ) []monitor.AgentStatus {
 	statuses := []monitor.AgentStatus{}
 	for _, identity := range identities {
 		status, ok := monitorAgentStatus(identity, rolesByName, workspaceData, latestSessions,
-			orchestrationByAgent, inboxByAgent, wsName)
+			interactiveByAgent, inboxByAgent, wsName)
 		if ok {
 			statuses = append(statuses, status)
 		}
@@ -214,7 +214,7 @@ func monitorAgentStatus(
 	rolesByName map[string]*agentsmodule.Role,
 	workspaceData *ops.WorkspaceData,
 	latestSessions map[string]*domain.AgentSession,
-	orchestrationByAgent map[string]*domain.AgentSession,
+	interactiveByAgent map[string]*domain.AgentSession,
 	inboxByAgent map[string]agentInboxSummary,
 	wsName string,
 ) (monitor.AgentStatus, bool) {
@@ -232,8 +232,8 @@ func monitorAgentStatus(
 	}
 	session := monitorAgentSession(latestSessions[identity.AgentID])
 	orchestrationID := ""
-	if orchestration := orchestrationByAgent[identity.AgentID]; orchestration != nil {
-		orchestrationID = orchestration.SessionID
+	if interactive := interactiveByAgent[identity.AgentID]; interactive != nil {
+		orchestrationID = interactive.SessionID
 	}
 	inbox := inboxByAgent[identity.AgentID]
 	return monitor.AgentStatus{

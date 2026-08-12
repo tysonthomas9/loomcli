@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/backend"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 )
 
 func TestAcquireLock(t *testing.T) {
@@ -939,32 +939,32 @@ func TestGetTaskStatus(t *testing.T) {
 	tests := []struct {
 		name       string
 		taskID     string
-		issue      *backend.IssueDetailData
+		issue      *workitems.IssueDetail
 		issueErr   error
 		wantStatus string
 	}{
 		{
 			name:       "closed task",
 			taskID:     "loom-123",
-			issue:      &backend.IssueDetailData{IssueData: backend.IssueData{ID: "loom-123", Status: "closed"}},
+			issue:      &workitems.IssueDetail{ID: "loom-123", Status: "closed"},
 			wantStatus: "closed",
 		},
 		{
 			name:       "review task maps to needs_review",
 			taskID:     "loom-456",
-			issue:      &backend.IssueDetailData{IssueData: backend.IssueData{ID: "loom-456", Status: "review"}},
+			issue:      &workitems.IssueDetail{ID: "loom-456", Status: "review"},
 			wantStatus: "needs_review",
 		},
 		{
 			name:       "open task",
 			taskID:     "loom-789",
-			issue:      &backend.IssueDetailData{IssueData: backend.IssueData{ID: "loom-789", Status: "open"}},
+			issue:      &workitems.IssueDetail{ID: "loom-789", Status: "open"},
 			wantStatus: "open",
 		},
 		{
 			name:       "in progress task",
 			taskID:     "loom-101",
-			issue:      &backend.IssueDetailData{IssueData: backend.IssueData{ID: "loom-101", Status: "in_progress"}},
+			issue:      &workitems.IssueDetail{ID: "loom-101", Status: "in_progress"},
 			wantStatus: "in_progress",
 		},
 		{
@@ -985,13 +985,13 @@ func TestGetTaskStatus(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			mock := &MockIssueBackend{
-				GetFn: func(ctx context.Context, id string) (*backend.IssueDetailData, error) {
+			mock := &MockWorkItems{
+				GetFn: func(ctx context.Context, id string) (*workitems.IssueDetail, error) {
 					return tt.issue, tt.issueErr
 				},
 			}
-			setDefaultIssueBackend(mock)
-			t.Cleanup(func() { setDefaultIssueBackend(nil) })
+			setDefaultWorkItems(mock)
+			t.Cleanup(func() { setDefaultWorkItems(nil) })
 
 			status := getTaskStatus(t.Context(), tt.taskID)
 			if status != tt.wantStatus {
@@ -1026,13 +1026,13 @@ func TestGetTaskStatus_ReviewStatus(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			mock := &MockIssueBackend{
-				GetFn: func(ctx context.Context, id string) (*backend.IssueDetailData, error) {
-					return &backend.IssueDetailData{IssueData: backend.IssueData{ID: id, Status: tt.rawStatus}}, nil
+			mock := &MockWorkItems{
+				GetFn: func(ctx context.Context, id string) (*workitems.IssueDetail, error) {
+					return &workitems.IssueDetail{ID: id, Status: tt.rawStatus}, nil
 				},
 			}
-			setDefaultIssueBackend(mock)
-			t.Cleanup(func() { setDefaultIssueBackend(nil) })
+			setDefaultWorkItems(mock)
+			t.Cleanup(func() { setDefaultWorkItems(nil) })
 
 			status := getTaskStatus(t.Context(), "loom-test")
 			if status != tt.wantStatus {

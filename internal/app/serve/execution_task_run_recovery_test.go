@@ -33,7 +33,7 @@ func TestExecutionTaskRunRecoveryAdapterUsesFleetParentOwnerCommand(t *testing.T
 	}
 	transport := &recoveryFleetTransportStub{}
 	dependencies, err := NewExecutionTaskRunRecoveryDependencies(ExecutionTaskRunRecoveryDependencies{
-		Workspaces: state.Workspaces(), Transport: transport,
+		Workspaces: state.Workspaces(), ChildRecoveries: &executionTaskRunFleetRecoveryAdapter{transport: transport},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -60,12 +60,12 @@ func TestExecutionTaskRunRecoveryAdapterUsesFleetParentOwnerCommand(t *testing.T
 	}
 }
 
-func TestExecutionTaskRunRecoveryProductionRejectsTokenlessStoreFallback(t *testing.T) {
+func TestExecutionTaskRunRecoveryRequiresOwnerFencedPort(t *testing.T) {
 	state := memstore.New()
 	_, err := NewExecutionTaskRunRecoveryDependencies(ExecutionTaskRunRecoveryDependencies{
-		Workspaces: state.Workspaces(), LegacyDriverRuns: state.DriverRuns(),
+		Workspaces: state.Workspaces(),
 	})
 	if err == nil {
-		t.Fatal("production recovery composition accepted tokenless DriverRunStore fallback")
+		t.Fatal("recovery composition accepted a missing owner-fenced port")
 	}
 }

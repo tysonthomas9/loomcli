@@ -16,8 +16,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 	"github.com/tysonthomas9/loomcli/internal/usage"
 )
@@ -67,6 +67,42 @@ type mockExecCall struct {
 	Dir  string
 	Name string
 	Args []string
+}
+
+type MockWorkItems struct {
+	workitems.API
+	ReadyResult       []workitems.IssueSummary
+	ReadyFn           func(context.Context, workitems.AvailabilityQuery) ([]workitems.IssueSummary, error)
+	GetResult         *workitems.IssueDetail
+	GetErr            error
+	GetFn             func(context.Context, string) (*workitems.IssueDetail, error)
+	BackendNameResult string
+}
+
+func (m *MockWorkItems) BackendName() string { return m.BackendNameResult }
+
+func (m *MockWorkItems) Get(ctx context.Context, query workitems.GetQuery) (*workitems.IssueDetail, error) {
+	if m.GetFn != nil {
+		return m.GetFn(ctx, query.IssueID)
+	}
+	return m.GetResult, m.GetErr
+}
+
+func NewMockWorkItems() *MockWorkItems { return &MockWorkItems{} }
+
+func (m *MockWorkItems) Ready(ctx context.Context, query workitems.AvailabilityQuery) ([]workitems.IssueSummary, error) {
+	if m.ReadyFn != nil {
+		return m.ReadyFn(ctx, query)
+	}
+	return m.ReadyResult, nil
+}
+
+func workItemsName(api workitems.API) string {
+	named, ok := api.(interface{ BackendName() string })
+	if !ok {
+		return ""
+	}
+	return named.BackendName()
 }
 
 func (m *MockExecRunner) Run(dir, name string, args ...string) CommandResult {
@@ -202,22 +238,22 @@ func (m *MockFileSystem) Remove(path string) error {
 }
 
 // NewTestDeps returns a *Deps with all fields set to mock implementations.
-func NewTestDeps(t *testing.T) (*Deps, *MockGitRunner, *MockExecRunner, *MockFileSystem, *MockIssueBackend) {
+func NewTestDeps(t *testing.T) (*Deps, *MockGitRunner, *MockExecRunner, *MockFileSystem, *MockWorkItems) {
 	t.Helper()
 	git := &MockGitRunner{}
 	execR := &MockExecRunner{}
 	fs := NewMockFileSystem()
-	tracker := NewMockIssueBackend()
+	tracker := NewMockWorkItems()
 	deps := &Deps{
-		Git:          git,
-		Exec:         execR,
-		FS:           fs,
-		Logger:       slog.Default(),
-		IssueBackend: tracker,
-		Clock:        func() time.Time { return time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC) },
-		LookPath:     func(file string) (string, error) { return "/usr/bin/" + file, nil },
-		ExecCtx:      &MockExecContextRunner{},
-		Agent:        &MockAgentInvoker{},
+		Git:       git,
+		Exec:      execR,
+		FS:        fs,
+		Logger:    slog.Default(),
+		WorkItems: tracker,
+		Clock:     func() time.Time { return time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC) },
+		LookPath:  func(file string) (string, error) { return "/usr/bin/" + file, nil },
+		ExecCtx:   &MockExecContextRunner{},
+		Agent:     &MockAgentInvoker{},
 	}
 	return deps, git, execR, fs, tracker
 }
@@ -241,11 +277,11 @@ func TestDefaultDeps_NonNilFields(t *testing.T) {
 	if d.Clock == nil {
 		t.Error("Clock is nil")
 	}
-	if d.IssueBackend == nil {
+	if d.WorkItems == nil {
 		t.Error("Tracker is nil")
 	}
-	if d.IssueBackend.BackendName() != "fleet-db" {
-		t.Errorf("Tracker.BackendName() = %q, want fleet-db", d.IssueBackend.BackendName())
+	if workItemsName(d.WorkItems) != "fleet-db" {
+		t.Errorf("Tracker.BackendName() = %q, want fleet-db", workItemsName(d.WorkItems))
 	}
 	if d.LookPath == nil {
 		t.Error("LookPath is nil")
@@ -372,19 +408,19 @@ func TestRunGitCommandWithOutput_UsesDefaultDeps(t *testing.T) {
 }
 
 func TestFetchReadyIssues_UsesTracker(t *testing.T) {
-	resetDefaultIssueBackend()
-	t.Cleanup(resetDefaultIssueBackend)
+	resetDefaultWorkItems()
+	t.Cleanup(resetDefaultWorkItems)
 
-	mock := NewMockIssueBackend()
-	mock.ReadyResult = []backend.IssueData{
+	mock := NewMockWorkItems()
+	mock.ReadyResult = []workitems.IssueSummary{
 		{ID: "test-1", Title: "Test task", Status: "open"},
 	}
-	var capturedOpts backend.ReadyOpts
-	mock.ReadyFn = func(_ context.Context, opts backend.ReadyOpts) ([]backend.IssueData, error) {
+	var capturedOpts workitems.AvailabilityQuery
+	mock.ReadyFn = func(_ context.Context, opts workitems.AvailabilityQuery) ([]workitems.IssueSummary, error) {
 		capturedOpts = opts
 		return mock.ReadyResult, nil
 	}
-	setDefaultIssueBackend(mock)
+	setDefaultWorkItems(mock)
 
 	got, err := fetchReadyIssues(t.Context(), "epic-1", "")
 	if err != nil {
@@ -402,16 +438,16 @@ func TestFetchReadyIssues_UsesTracker(t *testing.T) {
 }
 
 func TestFetchReadyIssues_NoParentViaTracker(t *testing.T) {
-	resetDefaultIssueBackend()
-	t.Cleanup(resetDefaultIssueBackend)
+	resetDefaultWorkItems()
+	t.Cleanup(resetDefaultWorkItems)
 
-	mock := NewMockIssueBackend()
-	var capturedOpts backend.ReadyOpts
-	mock.ReadyFn = func(_ context.Context, opts backend.ReadyOpts) ([]backend.IssueData, error) {
+	mock := NewMockWorkItems()
+	var capturedOpts workitems.AvailabilityQuery
+	mock.ReadyFn = func(_ context.Context, opts workitems.AvailabilityQuery) ([]workitems.IssueSummary, error) {
 		capturedOpts = opts
 		return nil, nil
 	}
-	setDefaultIssueBackend(mock)
+	setDefaultWorkItems(mock)
 
 	_, err := fetchReadyIssues(t.Context(), "", "")
 	if err != nil {
@@ -426,7 +462,7 @@ func TestFetchReadyIssues_NoParentViaTracker(t *testing.T) {
 }
 
 // TestFetchUnclosedIssueIDs_UsesTracker removed: fetchUnclosedIssueIDs was
-// removed in the IssueBackend migration. The backend now pre-filters blocked
+// removed in the WorkItems migration. The backend now pre-filters blocked
 // issues in Ready/Blocked endpoints.
 
 func TestMockFileSystem_ReadWrite(t *testing.T) {
@@ -490,8 +526,8 @@ func TestNewTestDeps_Returns5Tuple(t *testing.T) {
 	if deps.FS != fs {
 		t.Error("deps.FS is not the returned MockFileSystem")
 	}
-	if deps.IssueBackend != tracker {
-		t.Error("deps.IssueBackend is not the returned MockIssueBackend")
+	if deps.WorkItems != tracker {
+		t.Error("deps.WorkItems is not the returned MockWorkItems")
 	}
 	if deps.Logger == nil {
 		t.Error("deps.Logger is nil")
@@ -518,7 +554,7 @@ func TestDefaultDeps_NoBDField(t *testing.T) {
 		{"FS", d.FS == nil},
 		{"Logger", d.Logger == nil},
 		{"Clock", d.Clock == nil},
-		{"IssueBackend", d.IssueBackend == nil},
+		{"WorkItems", d.WorkItems == nil},
 		{"LookPath", d.LookPath == nil},
 		{"ExecCtx", d.ExecCtx == nil},
 		{"Agent", d.Agent == nil},
@@ -529,9 +565,9 @@ func TestDefaultDeps_NoBDField(t *testing.T) {
 		}
 	}
 
-	// Verify IssueBackend defaults to fleet-db without constructing an external adapter.
-	if d.IssueBackend.BackendName() != "fleet-db" {
-		t.Errorf("Tracker.BackendName() = %q, want fleet-db", d.IssueBackend.BackendName())
+	// Verify WorkItems defaults to fleet-db without constructing an external adapter.
+	if workItemsName(d.WorkItems) != "fleet-db" {
+		t.Errorf("Tracker.BackendName() = %q, want fleet-db", workItemsName(d.WorkItems))
 	}
 }
 
@@ -539,8 +575,8 @@ func TestDefaultDeps_DefaultsToFleetDB(t *testing.T) {
 	t.Setenv("LOOM_ISSUE_BACKEND", "")
 
 	d := DefaultDeps(t.Context())
-	if got := d.IssueBackend.BackendName(); got != "fleet-db" {
-		t.Fatalf("DefaultDeps IssueBackend = %q, want fleet-db", got)
+	if got := workItemsName(d.WorkItems); got != "fleet-db" {
+		t.Fatalf("DefaultDeps WorkItems = %q, want fleet-db", got)
 	}
 }
 
@@ -548,11 +584,11 @@ func TestDefaultDeps_FleetConstructionFailureFailsClosed(t *testing.T) {
 	t.Setenv("LOOM_ISSUE_BACKEND", "fleet")
 
 	d := DefaultDeps(t.Context())
-	if got := d.IssueBackend.BackendName(); got != "fleet-unavailable" {
-		t.Fatalf("DefaultDeps IssueBackend = %q, want fleet-unavailable", got)
+	if got := workItemsName(d.WorkItems); got != "fleet-unavailable" {
+		t.Fatalf("DefaultDeps WorkItems = %q, want fleet-unavailable", got)
 	}
-	_, err := d.IssueBackend.Ready(context.Background(), backend.ReadyOpts{})
-	if !backend.IsKind(err, backend.KindUnavailable) {
+	_, err := d.WorkItems.(workitems.ReadyQueries).Ready(context.Background(), workitems.AvailabilityQuery{})
+	if !workitems.IsKind(err, workitems.KindUnavailable) {
 		t.Fatalf("Ready error = %v, want unavailable", err)
 	}
 }
@@ -562,74 +598,63 @@ func TestDefaultDeps_APIConstructionFailureFailsClosed(t *testing.T) {
 	t.Setenv("LOOM_SERVER_URL", "")
 
 	d := DefaultDeps(t.Context())
-	if got := d.IssueBackend.BackendName(); got != "api-unavailable" {
-		t.Fatalf("DefaultDeps IssueBackend = %q, want api-unavailable", got)
+	if got := workItemsName(d.WorkItems); got != "api-unavailable" {
+		t.Fatalf("DefaultDeps WorkItems = %q, want api-unavailable", got)
 	}
-	_, err := d.IssueBackend.Ready(context.Background(), backend.ReadyOpts{})
-	if !backend.IsKind(err, backend.KindUnavailable) {
+	_, err := d.WorkItems.(workitems.ReadyQueries).Ready(context.Background(), workitems.AvailabilityQuery{})
+	if !workitems.IsKind(err, workitems.KindUnavailable) {
 		t.Fatalf("Ready error = %v, want unavailable", err)
 	}
 }
 
-func TestUnavailableIssueBackend_AllMethodsFailClosed(t *testing.T) {
+func TestUnavailableWorkItems_AllMethodsFailClosed(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
-	ib := newUnavailableIssueBackend("test", fmt.Errorf("boom"))
+	ib := newUnavailableWorkItems("test", fmt.Errorf("boom"))
 
-	if got := ib.BackendName(); got != "test-unavailable" {
+	if got := workItemsName(ib); got != "test-unavailable" {
 		t.Fatalf("BackendName() = %q, want test-unavailable", got)
 	}
 
 	assertUnavailable := func(name string, err error) {
 		t.Helper()
-		if !backend.IsKind(err, backend.KindUnavailable) {
+		if !workitems.IsKind(err, workitems.KindUnavailable) {
 			t.Fatalf("%s error = %v, want unavailable", name, err)
 		}
 	}
 
-	_, err := ib.Get(ctx, "T-1")
+	_, err := ib.Get(ctx, workitems.GetQuery{IssueID: "T-1"})
 	assertUnavailable("Get", err)
-	_, err = ib.List(ctx, backend.ListOpts{})
+	_, err = ib.List(ctx, workitems.ListQuery{})
 	assertUnavailable("List", err)
-	_, err = ib.Ready(ctx, backend.ReadyOpts{})
+	_, err = ib.Ready(ctx, workitems.AvailabilityQuery{})
 	assertUnavailable("Ready", err)
-	_, err = ib.Blocked(ctx, backend.BlockedOpts{})
+	_, err = ib.Blocked(ctx, workitems.AvailabilityQuery{})
 	assertUnavailable("Blocked", err)
-	_, err = ib.Stats(ctx)
+	_, err = ib.(workitems.StatsQueries).Stats(ctx)
 	assertUnavailable("Stats", err)
-	_, err = ib.Count(ctx, backend.CountOpts{})
-	assertUnavailable("Count", err)
-	_, err = ib.GetChildren(ctx, "T-1")
-	assertUnavailable("GetChildren", err)
-	_, err = ib.SearchIssues(ctx, "query", 10)
-	assertUnavailable("SearchIssues", err)
-	_, err = ib.Create(ctx, backend.CreateParams{})
+	_, err = ib.Search(ctx, workitems.SearchQuery{Query: "query", Limit: 10})
+	assertUnavailable("Search", err)
+	_, err = ib.Create(ctx, workitems.CreateCommand{})
 	assertUnavailable("Create", err)
-	assertUnavailable("Update", ib.Update(ctx, "T-1", backend.UpdateParams{}))
-	assertUnavailable("ClaimIssue", ib.ClaimIssue(ctx, "T-1", time.Minute))
-	assertUnavailable("DeferIssue", ib.DeferIssue(ctx, "T-1", time.Now()))
-	assertUnavailable("UndeferIssue", ib.UndeferIssue(ctx, "T-1"))
-	_, err = ib.Close(ctx, "T-1", backend.CloseParams{})
+	_, err = ib.Patch(ctx, workitems.PatchCommand{IssueID: "T-1"})
+	assertUnavailable("Patch", err)
+	_, err = ib.Claim(ctx, workitems.ClaimCommand{IssueID: "T-1"})
+	assertUnavailable("Claim", err)
+	_, err = ib.Close(ctx, workitems.CloseCommand{IssueID: "T-1"})
 	assertUnavailable("Close", err)
-	assertUnavailable("Reopen", ib.Reopen(ctx, "T-1", backend.ReopenParams{}))
-	assertUnavailable("Delete", ib.Delete(ctx, backend.DeleteParams{}))
-	assertUnavailable("AddDependency", ib.AddDependency(ctx, backend.DepAddParams{}))
-	assertUnavailable("RemoveDependency", ib.RemoveDependency(ctx, backend.DepRemoveParams{}))
-	assertUnavailable("AddLabel", ib.AddLabel(ctx, "T-1", "label"))
-	assertUnavailable("RemoveLabel", ib.RemoveLabel(ctx, "T-1", "label"))
-	_, err = ib.ListComments(ctx, "T-1")
+	assertUnavailable("Reopen", ib.Reopen(ctx, workitems.ReopenCommand{IssueID: "T-1"}))
+	_, err = ib.Delete(ctx, workitems.DeleteCommand{IssueID: "T-1"})
+	assertUnavailable("Delete", err)
+	assertUnavailable("AddDependency", ib.AddDependency(ctx, workitems.AddDependencyCommand{}))
+	assertUnavailable("RemoveDependency", ib.RemoveDependency(ctx, workitems.RemoveDependencyCommand{}))
+	_, err = ib.ListComments(ctx, workitems.ListCommentsQuery{IssueID: "T-1"})
 	assertUnavailable("ListComments", err)
-	_, err = ib.AddComment(ctx, backend.CommentAddParams{})
+	_, err = ib.AddComment(ctx, workitems.AddCommentCommand{})
 	assertUnavailable("AddComment", err)
-	_, err = ib.ListEvents(ctx, "T-1", 10)
+	_, err = ib.ListEvents(ctx, workitems.ListEventsQuery{IssueID: "T-1", Limit: 10})
 	assertUnavailable("ListEvents", err)
-	_, err = ib.Batch(ctx, []backend.BatchOp{})
-	assertUnavailable("Batch", err)
-	_, err = ib.GetMutations(ctx, 0)
-	assertUnavailable("GetMutations", err)
-	_, err = ib.WaitForMutations(ctx, 0, 1)
-	assertUnavailable("WaitForMutations", err)
 }
 
 func TestFleetDBActorPreference(t *testing.T) {
@@ -651,7 +676,7 @@ func TestFleetDBActorPreference(t *testing.T) {
 	}
 }
 
-func TestFleetDBIssueBackend_LocalReuseUsesStoreHandleCredential(t *testing.T) {
+func TestFleetDBWorkItems_LocalReuseUsesStoreHandleCredential(t *testing.T) {
 	const (
 		workspaceKey      = "SECURE"
 		ambientCredential = "ambient-credential-must-not-win"
@@ -723,8 +748,8 @@ func TestFleetDBIssueBackend_LocalReuseUsesStoreHandleCredential(t *testing.T) {
 		t.Fatalf("write embedded FleetDB runtime: %v", err)
 	}
 
-	issueBackend := newFleetDBIssueBackend()
-	if _, err := issueBackend.List(context.Background(), backend.ListOpts{}); err != nil {
+	workItems := newFleetDBWorkItemsAdapter()
+	if _, err := workItems.List(context.Background(), workitems.ListFilter{}); err != nil {
 		t.Fatalf("List through reused local FleetDB runtime: %v; secondary client must use the StoreHandle credential, not the ambient key", err)
 	}
 	if got := workspaceRequests.Load(); got != 1 {
@@ -737,7 +762,7 @@ func TestFleetDBIssueBackend_LocalReuseUsesStoreHandleCredential(t *testing.T) {
 		t.Fatal("reused local FleetDB request used the wrong ambient credential")
 	}
 	if got := os.Getenv(bootstrap.EnvFleetDBAPIKey); got != ambientCredential {
-		t.Fatalf("%s was mutated while composing the local issue backend", bootstrap.EnvFleetDBAPIKey)
+		t.Fatalf("%s was mutated while composing the local Work Items adapter", bootstrap.EnvFleetDBAPIKey)
 	}
 }
 
@@ -747,12 +772,12 @@ func writeFleetDBTestUnauthorized(w http.ResponseWriter) {
 	_, _ = w.Write([]byte(`{"error":{"code":"UNAUTHORIZED","message":"authentication required"}}`))
 }
 
-func TestFleetDBIssueBackend_FailsClosedWhenStoreUnavailable(t *testing.T) {
+func TestFleetDBWorkItems_FailsClosedWhenStoreUnavailable(t *testing.T) {
 	t.Setenv("FLEET_DB_BIN", "/missing/fleet-db")
 	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
 
 	ctx := context.Background()
-	ib := newFleetDBIssueBackend()
+	ib := newFleetDBWorkItemsAdapter()
 
 	if got := ib.BackendName(); got != "fleet-db" {
 		t.Fatalf("BackendName() = %q, want fleet-db", got)
@@ -760,65 +785,41 @@ func TestFleetDBIssueBackend_FailsClosedWhenStoreUnavailable(t *testing.T) {
 
 	assertUnavailable := func(name string, err error) {
 		t.Helper()
-		if !backend.IsKind(err, backend.KindUnavailable) {
+		if !workitems.IsKind(err, workitems.KindUnavailable) {
 			t.Fatalf("%s error = %v, want unavailable", name, err)
 		}
 	}
 
-	_, err := ib.Get(ctx, "T-1")
+	_, err := ib.Get(ctx, workitems.GetQuery{IssueID: "T-1"})
 	assertUnavailable("Get", err)
-	_, err = ib.List(ctx, backend.ListOpts{})
+	_, err = ib.List(ctx, workitems.ListFilter{})
 	assertUnavailable("List", err)
-	_, err = ib.Ready(ctx, backend.ReadyOpts{})
+	_, err = ib.Ready(ctx, workitems.AvailabilityQuery{})
 	assertUnavailable("Ready", err)
-	_, err = ib.Blocked(ctx, backend.BlockedOpts{})
+	_, err = ib.Blocked(ctx, workitems.AvailabilityQuery{})
 	assertUnavailable("Blocked", err)
 	_, err = ib.Stats(ctx)
 	assertUnavailable("Stats", err)
-	_, err = ib.Count(ctx, backend.CountOpts{})
-	assertUnavailable("Count", err)
-	_, err = ib.GetChildren(ctx, "T-1")
-	assertUnavailable("GetChildren", err)
-	_, err = ib.SearchIssues(ctx, "query", 10)
-	assertUnavailable("SearchIssues", err)
-	_, err = ib.Create(ctx, backend.CreateParams{})
+	_, err = ib.Search(ctx, workitems.SearchQuery{Query: "query", Limit: 10})
+	assertUnavailable("Search", err)
+	_, err = ib.Create(ctx, workitems.CreateCommand{})
 	assertUnavailable("Create", err)
-	assertUnavailable("Update", ib.Update(ctx, "T-1", backend.UpdateParams{}))
-	assertUnavailable("ClaimIssue", ib.ClaimIssue(ctx, "T-1", time.Minute))
-	actorBackend, ok := ib.(interface {
-		ClaimIssueAsActor(context.Context, string, time.Duration, string) error
-	})
-	if !ok {
-		t.Fatal("fleetDBIssueBackend does not implement ClaimIssueAsActor")
-	}
-	assertUnavailable("ClaimIssueAsActor", actorBackend.ClaimIssueAsActor(ctx, "T-1", time.Minute, "agent"))
-	renewBackend, ok := ib.(interface {
-		RenewIssueClaimAsActor(context.Context, string, time.Duration, string) error
-	})
-	if !ok {
-		t.Fatal("fleetDBIssueBackend does not implement RenewIssueClaimAsActor")
-	}
-	assertUnavailable("RenewIssueClaimAsActor", renewBackend.RenewIssueClaimAsActor(ctx, "T-1", time.Minute, "agent"))
-	assertUnavailable("DeferIssue", ib.DeferIssue(ctx, "T-1", time.Now()))
-	assertUnavailable("UndeferIssue", ib.UndeferIssue(ctx, "T-1"))
-	_, err = ib.Close(ctx, "T-1", backend.CloseParams{})
+	assertUnavailable("Patch", ib.Patch(ctx, workitems.PatchCommand{IssueID: "T-1"}))
+	_, err = ib.Claim(ctx, workitems.ClaimCommand{IssueID: "T-1"})
+	assertUnavailable("Claim", err)
+	assertUnavailable("ClaimAsActor", ib.ClaimAsActor(ctx, "T-1", time.Minute, "agent"))
+	assertUnavailable("RenewClaimAsActor", ib.RenewClaimAsActor(ctx, "T-1", time.Minute, "agent"))
+	_, err = ib.Close(ctx, workitems.CloseCommand{IssueID: "T-1"})
 	assertUnavailable("Close", err)
-	assertUnavailable("Reopen", ib.Reopen(ctx, "T-1", backend.ReopenParams{}))
-	assertUnavailable("Delete", ib.Delete(ctx, backend.DeleteParams{}))
-	assertUnavailable("AddDependency", ib.AddDependency(ctx, backend.DepAddParams{}))
-	assertUnavailable("RemoveDependency", ib.RemoveDependency(ctx, backend.DepRemoveParams{}))
-	assertUnavailable("AddLabel", ib.AddLabel(ctx, "T-1", "label"))
-	assertUnavailable("RemoveLabel", ib.RemoveLabel(ctx, "T-1", "label"))
-	_, err = ib.ListComments(ctx, "T-1")
+	assertUnavailable("Reopen", ib.Reopen(ctx, workitems.ReopenCommand{IssueID: "T-1"}))
+	_, err = ib.Delete(ctx, workitems.DeleteCommand{IssueID: "T-1"})
+	assertUnavailable("Delete", err)
+	assertUnavailable("AddDependency", ib.AddDependency(ctx, workitems.AddDependencyCommand{}))
+	assertUnavailable("RemoveDependency", ib.RemoveDependency(ctx, workitems.RemoveDependencyCommand{}))
+	_, err = ib.ListComments(ctx, workitems.ListCommentsQuery{IssueID: "T-1"})
 	assertUnavailable("ListComments", err)
-	_, err = ib.AddComment(ctx, backend.CommentAddParams{})
+	_, err = ib.AddComment(ctx, workitems.AddCommentCommand{})
 	assertUnavailable("AddComment", err)
-	_, err = ib.ListEvents(ctx, "T-1", 10)
+	_, err = ib.ListEvents(ctx, workitems.ListEventsQuery{IssueID: "T-1", Limit: 10})
 	assertUnavailable("ListEvents", err)
-	_, err = ib.Batch(ctx, []backend.BatchOp{})
-	assertUnavailable("Batch", err)
-	_, err = ib.GetMutations(ctx, 0)
-	assertUnavailable("GetMutations", err)
-	_, err = ib.WaitForMutations(ctx, 0, 1)
-	assertUnavailable("WaitForMutations", err)
 }

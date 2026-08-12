@@ -197,8 +197,15 @@ func TestServiceCreateOwnsRepositoryAdmissionAndCanonicalMerge(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if store.admissionChecks != 1 || store.admissionCalls != 1 || result.Detail == nil || result.Detail.Status != "blocked" || len(result.Detail.Labels) != 1 {
+	if store.admissionChecks != 1 || store.admissionCalls != 1 || result.Status != "blocked" || len(result.Labels) != 1 {
 		t.Fatalf("repository admission not preserved: checks=%d calls=%d result=%#v", store.admissionChecks, store.admissionCalls, result)
+	}
+	if store.getQuery.IssueID != "" {
+		t.Fatalf("Create performed a post-create read: %#v", store.getQuery)
+	}
+	result.Labels[0] = "mutated"
+	if store.admissionResult.Issue.Labels[0] != "loom.repository-required" {
+		t.Fatal("Create returned adapter-owned label storage")
 	}
 }
 
@@ -212,7 +219,7 @@ func TestServiceCreateWithExplicitRepositorySkipsAdmission(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if store.admissionChecks != 0 || store.admissionCalls != 0 || result.Detail.SourceRepo != "loomcli" {
+	if store.admissionChecks != 0 || store.admissionCalls != 0 || result.SourceRepo != "loomcli" {
 		t.Fatalf("explicit repository unexpectedly entered admission: %#v", result)
 	}
 }

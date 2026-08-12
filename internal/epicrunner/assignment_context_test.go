@@ -39,7 +39,7 @@ func TestLoadLeadAssignmentContextReturnsAssignedLead(t *testing.T) {
 		WorkspaceKey: "WS",
 		SessionID:    "lead-session",
 		AgentID:      "nova",
-		Kind:         domain.AgentSessionKindOrchestration,
+		Kind:         domain.AgentSessionKindInteractive,
 		Status:       domain.AgentSessionRunning,
 	}); err != nil {
 		t.Fatalf("create session: %v", err)

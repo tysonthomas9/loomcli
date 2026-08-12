@@ -157,6 +157,10 @@ func validateRequest(request IngestRequest) (IngestRequest, error) {
 	if request.SourceKind == automation.SourceKindInternal || request.SourceKind == automation.SourceKindCron {
 		return IngestRequest{}, fmt.Errorf("%w: webhook source kind %q is reserved", ErrInvalidRequest, request.SourceKind)
 	}
+	request.SourceRef, err = required("source ref", request.SourceRef)
+	if err != nil {
+		return IngestRequest{}, err
+	}
 	request.RouteKey, err = required("route key", request.RouteKey)
 	if err != nil {
 		return IngestRequest{}, err
@@ -170,7 +174,6 @@ func validateRequest(request IngestRequest) (IngestRequest, error) {
 		return IngestRequest{}, err
 	}
 
-	request.SourceRef = strings.TrimSpace(request.SourceRef)
 	request.SubjectRef = strings.TrimSpace(request.SubjectRef)
 	request.ActorRef = strings.TrimSpace(request.ActorRef)
 	request.RawPayloadRef = strings.TrimSpace(request.RawPayloadRef)

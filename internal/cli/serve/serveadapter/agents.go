@@ -81,6 +81,20 @@ func (capability *AgentsCapability) SourceControlMaterializer() sourcecontrol.Ma
 	return capability.sourceControl.SourceControlMaterializer()
 }
 
+func (capability *AgentsCapability) TaskStackBindings() sourcecontrol.StackBindingResolver {
+	if capability == nil || capability.sourceControl == nil {
+		return nil
+	}
+	return capability.sourceControl
+}
+
+func (capability *AgentsCapability) TaskOutcomes() sourcecontrol.TaskOutcomeRecorder {
+	if capability == nil || capability.sourceControl == nil {
+		return nil
+	}
+	return capability.sourceControl
+}
+
 func (capability *AgentsCapability) RepositoryAdmissionMaterializer() sourcecontrol.RepositoryAdmissionMaterializer {
 	if capability == nil || capability.sourceControl == nil {
 		return nil

@@ -42,11 +42,16 @@ func (m *Module) resolvePromptAgentRoleForCreate(
 ) (agentprovisioning.RoleSpec, bool) {
 	roleCreate := plan.request.Behavior.RoleCreate
 	if roleCreate == nil {
-		role, err := m.store.Roles().Get(r.Context(), ws, plan.roleName)
+		if m == nil || m.agentRoleQueries == nil {
+			handler.WriteDomainError(w, agentsmodule.ErrUnavailable, "get prompt-agent role failed")
+			return agentprovisioning.RoleSpec{}, false
+		}
+		value, err := m.agentRoleQueries.GetRole(r.Context(), ws, plan.roleName)
 		if err != nil {
 			handler.WriteDomainError(w, err, "get prompt-agent role failed")
 			return agentprovisioning.RoleSpec{}, false
 		}
+		role := canonicalRoleProjection(value)
 		role, ok := validatePromptAgentRoleForCreate(w, role)
 		if !ok {
 			return agentprovisioning.RoleSpec{}, false
@@ -110,7 +115,7 @@ func (m *Module) promptAgentProvisioningSpec(
 	role agentprovisioning.RoleSpec,
 	driver *workflowcatalog.Driver,
 ) (agentprovisioning.Spec, error) {
-	if m == nil || m.store == nil || driver == nil {
+	if m == nil || m.agentRecords == nil || driver == nil {
 		return agentprovisioning.Spec{}, agentprovisioning.ErrUnavailable
 	}
 	versionID, err := activePromptAgentVersion(driver)
@@ -256,9 +261,9 @@ func (m *Module) mintAvailablePromptAgentID(
 		if err != nil {
 			return "", err
 		}
-		if _, err := m.store.AgentServices().Get(ctx, workspace, agentID); err == nil {
+		if _, err := m.agentRecords.GetAgent(ctx, workspace, agentID); err == nil {
 			continue
-		} else if !errors.Is(err, domain.ErrNotFound) {
+		} else if !errors.Is(err, agentsmodule.ErrNotFound) && !errors.Is(err, domain.ErrNotFound) {
 			return "", err
 		}
 		return agentID, nil
@@ -268,6 +273,22 @@ func (m *Module) mintAvailablePromptAgentID(
 		workspace,
 		agentprovisioning.ErrConflict,
 	)
+}
+
+func canonicalRoleProjection(role *agentsmodule.Role) *domain.Role {
+	if role == nil {
+		return nil
+	}
+	return &domain.Role{
+		WorkspaceKey: role.WorkspaceKey, Name: role.Name, Kind: domain.RoleKind(role.Kind),
+		Description: role.Description, Prompt: role.Prompt, PromptFile: role.PromptFile,
+		Model: role.Model, TaskFilter: role.TaskFilter, Backend: role.Backend, Effort: role.Effort,
+		PathPatterns: append([]string(nil), role.PathPatterns...), Skills: append([]string(nil), role.Skills...),
+		MaxPriority: clonePromptAgentInt(role.MaxPriority), MaxConcurrency: clonePromptAgentInt(role.MaxConcurrency),
+		ReadOnly: role.ReadOnly, AllowedTools: append([]string(nil), role.AllowedTools...),
+		DeniedTools: append([]string(nil), role.DeniedTools...), MaxBudgetUSD: clonePromptAgentFloat64(role.MaxBudgetUSD),
+		CreatedAt: role.CreatedAt, UpdatedAt: role.UpdatedAt,
+	}
 }
 
 func promptAgentCommittedProjection(

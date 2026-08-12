@@ -60,10 +60,10 @@ type HostBridgeTaskExecutor struct {
 	// targets with its per-task-run lease token. Direct FleetDB runner access
 	// is intentionally unsupported.
 	APIBaseURL string
-	// LocalSettingsDir points at the desktop-local settings directory. When set,
-	// only local-task-runner receives non-secret local runner settings and the
-	// sealed GitHub token as process env for opt-in PR delivery.
-	LocalSettingsDir string
+	// LocalTaskRunnerEnv is composed by the desktop boundary. It may project
+	// non-secret local runner settings, but receives only the already-filtered
+	// environment and cannot widen Driver's credential policy.
+	LocalTaskRunnerEnv func([]string) []string
 	// WorktreeResolver maps bundled local task runs onto isolated per-run git
 	// worktrees. When nil, WorktreePath is used as supplied by the caller.
 	WorktreeResolver TaskWorktreeResolver
@@ -756,11 +756,25 @@ func (e HostBridgeTaskExecutor) taskRunnerEnv(req TaskExecRequest, requestJSON s
 }
 
 func (e HostBridgeTaskExecutor) localTaskRunnerSettingsEnv(existing []string) []string {
-	return localTaskRunnerEnv(e.LocalSettingsDir, existing)
+	if e.LocalTaskRunnerEnv == nil {
+		return nil
+	}
+	return e.LocalTaskRunnerEnv(existing)
 }
 
 func envHasAny(env []string, names ...string) bool {
-	return hasAny(env, names...)
+	for _, entry := range env {
+		name, value, ok := strings.Cut(entry, "=")
+		if !ok || strings.TrimSpace(value) == "" {
+			continue
+		}
+		for _, want := range names {
+			if name == want {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (e HostBridgeTaskExecutor) taskRunnerBundleEnv(req TaskExecRequest) []string {

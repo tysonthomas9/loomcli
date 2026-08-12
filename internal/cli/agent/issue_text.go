@@ -4,12 +4,12 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/tysonthomas9/loomcli/internal/backend"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 )
 
-// FormatIssueText renders an IssueDetailData as a human-readable text summary.
+// FormatIssueText renders a Work Items detail projection as human-readable text.
 // Used by analyzeTaskCompletion to provide context to Claude.
-func FormatIssueText(detail *backend.IssueDetailData) string {
+func FormatIssueText(detail *workitems.IssueDetail) string {
 	if detail == nil {
 		return ""
 	}
@@ -47,7 +47,7 @@ func FormatIssueText(detail *backend.IssueDetailData) string {
 	if len(detail.Dependencies) > 0 {
 		fmt.Fprintf(&b, "\nDependencies:\n")
 		for _, dep := range detail.Dependencies {
-			fmt.Fprintf(&b, "  - %s (%s) [%s]\n", dep.DependsOnID, dep.Type, dep.Status)
+			fmt.Fprintf(&b, "  - %s (%s) [%s]\n", dep.ID, dep.DependencyType, dep.Status)
 		}
 	}
 

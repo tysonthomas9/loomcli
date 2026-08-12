@@ -10,6 +10,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	driverpkg "github.com/tysonthomas9/loomcli/internal/driver"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 )
 
 var (
@@ -64,11 +65,11 @@ func runDriverEpicGet(cmd *cobra.Command, _ []string) error {
 		if epicID == "" {
 			return fmt.Errorf("epic id required: %w", domain.ErrInvalid)
 		}
-		issueBackend, err := newDriverIssueBackend(h, ws, driverRunActor(parent.RunID))
+		items, err := newDriverWorkItems(h, ws, driverRunActor(parent.RunID))
 		if err != nil {
 			return err
 		}
-		epic, err := issueBackend.Get(ctx, epicID)
+		epic, err := items.Get(ctx, workitems.GetQuery{IssueID: epicID})
 		if err != nil {
 			return fmt.Errorf("get epic: %w", err)
 		}
@@ -91,11 +92,11 @@ func runDriverEpicSnapshot(cmd *cobra.Command, _ []string) error {
 			return err
 		}
 		epicID := firstNonEmpty(driverEpicSnapshotEpicID, parent.EpicID, driverRunPayloadEpicID(parent.Payload))
-		issueBackend, err := newDriverIssueBackend(h, ws, driverRunActor(parent.RunID))
+		items, err := newDriverWorkItems(h, ws, driverRunActor(parent.RunID))
 		if err != nil {
 			return err
 		}
-		snapshot, err := driverpkg.LoadEpicSnapshot(ctx, issueBackend, driverpkg.EpicSnapshotOptions{EpicID: epicID})
+		snapshot, err := driverpkg.LoadEpicSnapshot(ctx, items, driverpkg.EpicSnapshotOptions{EpicID: epicID})
 		if err != nil {
 			return fmt.Errorf("snapshot epic: %w", err)
 		}

@@ -87,72 +87,55 @@ func (queries testBindingQueries) ListBindings(ctx context.Context, workspace st
 	return bindings, automationTestError(err)
 }
 
-// legacyAdmission is deliberately test-only. It lets the pre-Phase-3 router
-// behavior suites drive the new named workflow while their fixtures still use
-// memstore's legacy trigger dispatcher. Production handler files contain no
-// corresponding fallback.
-type legacyAdmission struct{ st store.Store }
-
-func (adapter legacyAdmission) AdmitEvent(ctx context.Context, _ automation.EventAuthority, command automation.AdmitEventCommand) (*automation.AdmissionResult, error) {
-	if adapter.st == nil || adapter.st.TriggerRoutes() == nil {
-		return nil, automation.ErrUnavailable
-	}
-	// Mirror Automation's centralized derived-admission boundary in this
-	// deliberately legacy test adapter. Production always calls the real core;
-	// this keeps signed HTTP regression tests on the same shared policy.
-	if !automation.EligibleForAdmission(
-		command.EventType, string(automation.EventOriginExternal), command.SourceKind,
-		command.ActorRef, command.SourceEventID,
-	) {
-		return nil, automation.ErrInvalid
-	}
-	result, err := adapter.st.TriggerRoutes().DispatchTriggerRouteV2(ctx, command.WorkspaceKey, command.RouteKey, store.TriggerRouteDispatch{
-		IdempotencyKey: command.SourceKind + ":" + command.SourceEventID,
-		SourceEventID:  command.SourceEventID, EventType: command.EventType,
-		SubjectRef: command.SubjectRef, ActorRef: command.ActorRef,
-		SignatureStatus: "verified", RawPayloadRef: command.RawPayloadRef,
-		RawPayloadDigest: command.RawPayloadDigest, Payload: command.Payload,
-		SubjectAttrs: command.SubjectAttrs,
-	})
-	if err != nil {
-		return nil, automationTestError(err)
-	}
-	deliveries := make([]*automation.Delivery, 0, len(result.Deliveries))
-	for _, delivery := range result.Deliveries {
-		deliveries = append(deliveries, &automation.Delivery{
-			DeliveryID: delivery.DeliveryID, TriggerBindingID: delivery.BindingID,
-			DriverRunID: delivery.RunID, Status: delivery.Status,
-			RejectionReason: delivery.RejectionReason,
-		})
-	}
-	return &automation.AdmissionResult{Deliveries: deliveries}, nil
+// testAdmission is a narrow fake of Automation's public admission port. It
+// deliberately does not reproduce matching, reservation, persistence,
+// idempotency, or dispatch; those behaviors belong to Automation's tests.
+type testAdmission struct {
+	commands []automation.AdmitEventCommand
+	result   *automation.AdmissionResult
+	err      error
 }
 
-type legacyQueries struct{ st store.Store }
-
-func (adapter legacyQueries) GetEvent(ctx context.Context, workspace, eventID string) (*automation.Event, error) {
-	event, err := adapter.st.TriggerEvents().Get(ctx, workspace, eventID)
-	return event, automationTestError(err)
+func (adapter *testAdmission) AdmitEvent(_ context.Context, _ automation.EventAuthority, command automation.AdmitEventCommand) (*automation.AdmissionResult, error) {
+	adapter.commands = append(adapter.commands, command)
+	if adapter.result == nil && adapter.err == nil {
+		return &automation.AdmissionResult{Deliveries: []*automation.Delivery{{
+			DeliveryID: "delivery-b1", TriggerBindingID: "b1",
+			DriverRunID: "run-b1", Status: automation.DeliveryDispatched,
+		}}}, nil
+	}
+	return adapter.result, adapter.err
 }
 
-func (adapter legacyQueries) ListEvents(ctx context.Context, workspace string, filter automation.EventFilter) ([]*automation.Event, error) {
-	events, err := adapter.st.TriggerEvents().List(ctx, workspace, store.TriggerEventFilter{
-		SourceKind: filter.SourceKind, TriggerBindingID: filter.BindingID, Limit: filter.Limit,
-	})
-	return events, automationTestError(err)
+type testAutomationQueries struct {
+	events     []*automation.Event
+	deliveries []*automation.Delivery
 }
 
-func (adapter legacyQueries) GetDelivery(ctx context.Context, workspace, deliveryID string) (*automation.Delivery, error) {
-	delivery, err := adapter.st.TriggerDeliveries().Get(ctx, workspace, deliveryID)
-	return delivery, automationTestError(err)
+func (queries testAutomationQueries) GetEvent(_ context.Context, _, eventID string) (*automation.Event, error) {
+	for _, event := range queries.events {
+		if event != nil && event.EventID == eventID {
+			return event, nil
+		}
+	}
+	return nil, automation.ErrNotFound
 }
 
-func (adapter legacyQueries) ListDeliveries(ctx context.Context, workspace string, filter automation.DeliveryFilter) ([]*automation.Delivery, error) {
-	deliveries, err := adapter.st.TriggerDeliveries().List(ctx, workspace, store.TriggerDeliveryFilter{
-		TriggerEventID: filter.EventID, TriggerBindingID: filter.BindingID,
-		Status: filter.Status, Limit: filter.Limit,
-	})
-	return deliveries, automationTestError(err)
+func (queries testAutomationQueries) ListEvents(context.Context, string, automation.EventFilter) ([]*automation.Event, error) {
+	return queries.events, nil
+}
+
+func (queries testAutomationQueries) GetDelivery(_ context.Context, _, deliveryID string) (*automation.Delivery, error) {
+	for _, delivery := range queries.deliveries {
+		if delivery != nil && delivery.DeliveryID == deliveryID {
+			return delivery, nil
+		}
+	}
+	return nil, automation.ErrNotFound
+}
+
+func (queries testAutomationQueries) ListDeliveries(context.Context, string, automation.DeliveryFilter) ([]*automation.Delivery, error) {
+	return queries.deliveries, nil
 }
 
 func automationTestError(err error) error {
@@ -178,6 +161,10 @@ func (testAuthorityProvider) AuthorityForVerifiedWebhook(context.Context, webhoo
 }
 
 func newServer(st store.Store) *http.ServeMux {
+	return newServerWithPorts(st, &testAdmission{}, testAutomationQueries{})
+}
+
+func newServerWithPorts(st store.Store, admission automation.EventAdmission, queries AutomationQueries) *http.ServeMux {
 	mux := http.NewServeMux()
 	resolver, ok := st.Awaits().(store.AtomicAwaitStore)
 	if !ok {
@@ -187,13 +174,13 @@ func newServer(st store.Store) *http.ServeMux {
 		NewVerifier(VerifierConfig{
 			Bindings: testBindingQueries{bindings: st.TriggerBindings()}, Connectors: st.Connectors(),
 		}),
-		testAuthorityProvider{}, legacyAdmission{st: st},
+		testAuthorityProvider{}, admission,
 	)
 	if err != nil {
 		panic(err)
 	}
 	New(Config{
-		Workflow: workflow, Automation: legacyQueries{st: st},
+		Workflow: workflow, Automation: queries,
 		Awaits: trigger.NewAwaitMatcherWithResolver(st.Awaits(), st.DriverRuns(), resolver),
 	}).Register(mux)
 	return mux
@@ -212,10 +199,10 @@ var prOpenedBody = []byte(`{"action":"opened","pull_request":{"number":7},"repos
 // webhookResponse decodes the 202 body on the BREAKING router-v2 wire:
 // deliveries[] only, no top-level driver_run_id / driver_run.
 type webhookResponse struct {
-	Status         string                       `json:"status"`
-	RouteKey       string                       `json:"route_key"`
-	IdempotencyKey string                       `json:"idempotency_key"`
-	Deliveries     []store.TriggerRouteDelivery `json:"deliveries"`
+	Status         string             `json:"status"`
+	RouteKey       string             `json:"route_key"`
+	IdempotencyKey string             `json:"idempotency_key"`
+	Deliveries     []deliveryResponse `json:"deliveries"`
 }
 
 func decodeWebhookResponse(t *testing.T, rr *httptest.ResponseRecorder) webhookResponse {
@@ -232,8 +219,8 @@ func decodeWebhookResponse(t *testing.T, rr *httptest.ResponseRecorder) webhookR
 
 func TestReceiveWebhookDispatchesDriverRun(t *testing.T) {
 	st := seedStore(t, true)
-	mux := newServer(st)
-	ctx := context.Background()
+	admission := &testAdmission{}
+	mux := newServerWithPorts(st, admission, testAutomationQueries{})
 
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, signedRequest("github", "delivery-1", prOpenedBody))
@@ -262,54 +249,34 @@ func TestReceiveWebhookDispatchesDriverRun(t *testing.T) {
 		}
 	}
 
-	// TriggerEvent persisted with verified signature + digest.
-	events, _ := st.TriggerEvents().List(ctx, testWS, store.TriggerEventFilter{})
-	if len(events) != 1 {
-		t.Fatalf("want 1 trigger event, got %d", len(events))
+	if len(admission.commands) != 1 {
+		t.Fatalf("admission calls = %d, want 1", len(admission.commands))
 	}
-	ev := events[0]
-	if ev.SignatureStatus != "verified" {
-		t.Errorf("signature_status = %q, want verified", ev.SignatureStatus)
+	command := admission.commands[0]
+	if command.WorkspaceKey != testWS || command.RouteKey != testRoute || command.SourceEventID != "delivery-1" {
+		t.Fatalf("admission command routing = %+v", command)
 	}
-	if ev.SourceEventID != "delivery-1" {
-		t.Errorf("source_event_id = %q, want delivery-1", ev.SourceEventID)
-	}
-	if ev.RawPayloadDigest == "" {
-		t.Error("raw_payload_digest is empty")
-	}
-
-	// TriggerDelivery linked to the run.
-	deliveries, _ := st.TriggerDeliveries().List(ctx, testWS, store.TriggerDeliveryFilter{})
-	if len(deliveries) != 1 {
-		t.Fatalf("want 1 delivery, got %d", len(deliveries))
-	}
-	if deliveries[0].DriverRunID != leg.RunID || deliveries[0].TriggerEventID != ev.EventID {
-		t.Errorf("delivery not linked: %+v", deliveries[0])
-	}
-	if deliveries[0].DeliveryID != leg.DeliveryID {
-		t.Errorf("persisted delivery id %q != response leg %q", deliveries[0].DeliveryID, leg.DeliveryID)
-	}
-
-	// Queued DriverRun carrying the original payload.
-	runs, _ := st.DriverRuns().List(ctx, testWS, store.DriverRunFilter{Status: domain.DriverRunQueued})
-	if len(runs) != 1 {
-		t.Fatalf("want 1 queued run, got %d", len(runs))
+	if command.RawPayloadDigest == "" {
+		t.Error("admission command raw_payload_digest is empty")
 	}
 	var payload struct {
 		Action string `json:"action"`
 	}
-	if err := json.Unmarshal(runs[0].Payload, &payload); err != nil || payload.Action != "opened" {
-		t.Errorf("run payload = %s (err %v)", runs[0].Payload, err)
+	if err := json.Unmarshal(command.Payload, &payload); err != nil || payload.Action != "opened" {
+		t.Errorf("admission payload = %s (err %v)", command.Payload, err)
 	}
-	if runs[0].DriverVersionID != "v1" {
-		t.Errorf("run pinned version = %q, want v1", runs[0].DriverVersionID)
+	wantAttrs := map[string]string{"repo": "acme/widgets", "pr_number": "7"}
+	for key, want := range wantAttrs {
+		if got := command.SubjectAttrs[key]; got != want {
+			t.Errorf("SubjectAttrs[%q] = %q, want %q", key, got, want)
+		}
 	}
 }
 
-func TestReceiveWebhookDuplicateDeliveryIsIdempotent(t *testing.T) {
+func TestReceiveWebhookRedeliveryUsesStableAdmissionIdentity(t *testing.T) {
 	st := seedStore(t, true)
-	mux := newServer(st)
-	ctx := context.Background()
+	admission := &testAdmission{}
+	mux := newServerWithPorts(st, admission, testAutomationQueries{})
 
 	first := httptest.NewRecorder()
 	mux.ServeHTTP(first, signedRequest("github", "delivery-dup", prOpenedBody))
@@ -318,8 +285,8 @@ func TestReceiveWebhookDuplicateDeliveryIsIdempotent(t *testing.T) {
 	mux.ServeHTTP(second, signedRequest("github", "delivery-dup", prOpenedBody))
 	secondResp := decodeWebhookResponse(t, second)
 
-	// Redelivery of the same X-GitHub-Delivery must surface the same run and
-	// delivery ids — the dispatch path dedups per leg.
+	// Webhook Ingestion must pass the same source identity on redelivery;
+	// Automation owns durable idempotency and stable delivery/run ids.
 	if len(firstResp.Deliveries) != 1 || len(secondResp.Deliveries) != 1 {
 		t.Fatalf("want 1 delivery leg each, got %d and %d", len(firstResp.Deliveries), len(secondResp.Deliveries))
 	}
@@ -330,29 +297,21 @@ func TestReceiveWebhookDuplicateDeliveryIsIdempotent(t *testing.T) {
 		t.Errorf("redelivery changed delivery id: %q != %q", firstResp.Deliveries[0].DeliveryID, secondResp.Deliveries[0].DeliveryID)
 	}
 
-	events, _ := st.TriggerEvents().List(ctx, testWS, store.TriggerEventFilter{})
-	deliveries, _ := st.TriggerDeliveries().List(ctx, testWS, store.TriggerDeliveryFilter{})
-	runs, _ := st.DriverRuns().List(ctx, testWS, store.DriverRunFilter{})
-	if len(events) != 1 || len(deliveries) != 1 || len(runs) != 1 {
-		t.Fatalf("duplicate delivery created extra state: events=%d deliveries=%d runs=%d",
-			len(events), len(deliveries), len(runs))
+	if len(admission.commands) != 2 {
+		t.Fatalf("admission calls = %d, want 2", len(admission.commands))
+	}
+	if firstID, secondID := admission.commands[0].SourceEventID, admission.commands[1].SourceEventID; firstID != secondID || firstID != "delivery-dup" {
+		t.Fatalf("redelivery source ids = %q, %q", firstID, secondID)
 	}
 }
 
 func TestReceiveWebhookFanOutResponseListsAllDeliveries(t *testing.T) {
 	st := seedStore(t, true)
-	ctx := context.Background()
-	// Pattern-only binding (no RouteKey) matching the ingress route: fans out
-	// alongside the exact b1 owner. Signature verification stays keyed to b1's
-	// secret — pattern bindings carry none (locked interim decision).
-	if _, err := st.TriggerBindings().Create(ctx, store.TriggerBindingCreate{
-		WorkspaceKey: testWS, BindingID: "b2-pattern", Name: "pr-audit", SourceKind: "github",
-		EventTypePatterns: []string{"github.pull_request.*"},
-		DriverID:          "github-pr-review", DriverVersionID: "v1", Enabled: true,
-	}); err != nil {
-		t.Fatalf("seed pattern binding: %v", err)
-	}
-	mux := newServer(st)
+	admission := &testAdmission{result: &automation.AdmissionResult{Deliveries: []*automation.Delivery{
+		{DeliveryID: "delivery-b1", TriggerBindingID: "b1", DriverRunID: "run-b1", Status: automation.DeliveryDispatched},
+		{DeliveryID: "delivery-b2", TriggerBindingID: "b2-pattern", DriverRunID: "run-b2", Status: automation.DeliveryDispatched},
+	}}}
+	mux := newServerWithPorts(st, admission, testAutomationQueries{})
 
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, signedRequest("github", "delivery-fan", prOpenedBody))
@@ -374,16 +333,8 @@ func TestReceiveWebhookFanOutResponseListsAllDeliveries(t *testing.T) {
 		t.Errorf("legs share run id %q", resp.Deliveries[0].RunID)
 	}
 
-	// One event, one delivery + run per leg.
-	events, _ := st.TriggerEvents().List(ctx, testWS, store.TriggerEventFilter{})
-	deliveries, _ := st.TriggerDeliveries().List(ctx, testWS, store.TriggerDeliveryFilter{})
-	runs, _ := st.DriverRuns().List(ctx, testWS, store.DriverRunFilter{})
-	if len(events) != 1 || len(deliveries) != 2 || len(runs) != 2 {
-		t.Fatalf("fan-out state: events=%d deliveries=%d runs=%d, want 1/2/2",
-			len(events), len(deliveries), len(runs))
-	}
-
-	// Redelivery returns the same legs with stable ids and creates no state.
+	// Redelivery returns the same legs because Automation's public result is
+	// rendered without transport-side interpretation.
 	again := httptest.NewRecorder()
 	mux.ServeHTTP(again, signedRequest("github", "delivery-fan", prOpenedBody))
 	replay := decodeWebhookResponse(t, again)
@@ -395,54 +346,17 @@ func TestReceiveWebhookFanOutResponseListsAllDeliveries(t *testing.T) {
 			t.Errorf("replay leg %d run id %q != %q", i, replay.Deliveries[i].RunID, resp.Deliveries[i].RunID)
 		}
 	}
-	runs, _ = st.DriverRuns().List(ctx, testWS, store.DriverRunFilter{})
-	if len(runs) != 2 {
-		t.Fatalf("replay created runs: got %d, want 2", len(runs))
-	}
 }
-
-// stubDispatcher is a canned TriggerRouteDispatcher that records its input so
-// handler tests can pin the dispatch wire (incl. SubjectAttrs plumbing) and
-// surface result shapes the memstore never produces, e.g. a rejected leg from
-// a forbid concurrency policy (admission lives in fleet-db).
-type stubDispatcher struct {
-	gotWS    string
-	gotRoute string
-	gotIn    store.TriggerRouteDispatch
-	result   *store.TriggerRouteDispatchResult
-}
-
-func (s *stubDispatcher) DispatchTriggerRoute(ctx context.Context, ws, routeKey string, in store.TriggerRouteDispatch) (*domain.DriverRun, error) {
-	result, err := s.DispatchTriggerRouteV2(ctx, ws, routeKey, in)
-	if err != nil {
-		return nil, err
-	}
-	return result.PrimaryRun, nil
-}
-
-func (s *stubDispatcher) DispatchTriggerRouteV2(_ context.Context, ws, routeKey string, in store.TriggerRouteDispatch) (*store.TriggerRouteDispatchResult, error) {
-	s.gotWS, s.gotRoute, s.gotIn = ws, routeKey, in
-	return s.result, nil
-}
-
-// dispatcherOverrideStore swaps the dispatcher while keeping memstore's
-// binding/secret lookups so authorizeWebhook still runs for real.
-type dispatcherOverrideStore struct {
-	store.Store
-	dispatcher store.TriggerRouteDispatcher
-}
-
-func (s dispatcherOverrideStore) TriggerRoutes() store.TriggerRouteDispatcher { return s.dispatcher }
 
 func TestReceiveWebhookSurfacesRejectedLegAndPlumbsSubjectAttrs(t *testing.T) {
-	stub := &stubDispatcher{result: &store.TriggerRouteDispatchResult{
-		Deliveries: []store.TriggerRouteDelivery{
-			{DeliveryID: "delivery-e1-b1", BindingID: "b1", RunID: "run-aaa", Status: automation.DeliveryDispatched},
-			{DeliveryID: "delivery-e1-b3", BindingID: "b3-forbid", Status: automation.DeliveryRejected,
+	admission := &testAdmission{result: &automation.AdmissionResult{
+		Deliveries: []*automation.Delivery{
+			{DeliveryID: "delivery-e1-b1", TriggerBindingID: "b1", DriverRunID: "run-aaa", Status: automation.DeliveryDispatched},
+			{DeliveryID: "delivery-e1-b3", TriggerBindingID: "b3-forbid", Status: automation.DeliveryRejected,
 				RejectionReason: "concurrency policy forbid: active run for subject acme/widgets#7"},
 		},
 	}}
-	mux := newServer(dispatcherOverrideStore{Store: seedStore(t, true), dispatcher: stub})
+	mux := newServerWithPorts(seedStore(t, true), admission, testAutomationQueries{})
 
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, signedRequest("github", "delivery-rej", prOpenedBody))
@@ -456,26 +370,22 @@ func TestReceiveWebhookSurfacesRejectedLegAndPlumbsSubjectAttrs(t *testing.T) {
 		t.Errorf("rejected leg not surfaced: %+v", rejected)
 	}
 
-	// Dispatch input wire: SubjectAttrs from the adapter (C15) reach the
-	// dispatcher alongside the normalized routing fields.
-	if stub.gotWS != testWS || stub.gotRoute != testRoute {
-		t.Errorf("dispatch routing = (%q, %q), want (%q, %q)", stub.gotWS, stub.gotRoute, testWS, testRoute)
+	if len(admission.commands) != 1 {
+		t.Fatalf("admission calls = %d, want 1", len(admission.commands))
 	}
-	if stub.gotIn.IdempotencyKey != "github:delivery-rej" || stub.gotIn.SignatureStatus != "verified" {
-		t.Errorf("dispatch input envelope: %+v", stub.gotIn)
-	}
+	command := admission.commands[0]
 	wantAttrs := map[string]string{"repo": "acme/widgets", "pr_number": "7"}
 	for key, want := range wantAttrs {
-		if got := stub.gotIn.SubjectAttrs[key]; got != want {
-			t.Errorf("SubjectAttrs[%q] = %q, want %q (all: %v)", key, got, want, stub.gotIn.SubjectAttrs)
+		if got := command.SubjectAttrs[key]; got != want {
+			t.Errorf("SubjectAttrs[%q] = %q, want %q (all: %v)", key, got, want, command.SubjectAttrs)
 		}
 	}
 }
 
 func TestReceiveWebhookRejectsBadSignature(t *testing.T) {
 	st := seedStore(t, true)
-	mux := newServer(st)
-	ctx := context.Background()
+	admission := &testAdmission{}
+	mux := newServerWithPorts(st, admission, testAutomationQueries{})
 
 	r := signedRequest("github", "delivery-x", prOpenedBody)
 	r.Header.Set(githubSignatureHeader, "sha256=deadbeef") // wrong
@@ -485,10 +395,8 @@ func TestReceiveWebhookRejectsBadSignature(t *testing.T) {
 	if rr.Code != http.StatusUnauthorized {
 		t.Fatalf("status = %d, want 401, body %s", rr.Code, rr.Body.String())
 	}
-	events, _ := st.TriggerEvents().List(ctx, testWS, store.TriggerEventFilter{})
-	runs, _ := st.DriverRuns().List(ctx, testWS, store.DriverRunFilter{})
-	if len(events) != 0 || len(runs) != 0 {
-		t.Fatalf("unverified request created state: events=%d runs=%d", len(events), len(runs))
+	if len(admission.commands) != 0 {
+		t.Fatalf("unverified request reached admission %d times", len(admission.commands))
 	}
 }
 
@@ -530,8 +438,14 @@ func TestReceiveWebhookNoBindingForRoute(t *testing.T) {
 
 func TestListTriggerEventsAndDeliveries(t *testing.T) {
 	st := seedStore(t, true)
-	mux := newServer(st)
-	mux.ServeHTTP(httptest.NewRecorder(), signedRequest("github", "delivery-list", prOpenedBody))
+	queries := testAutomationQueries{
+		events: []*automation.Event{{WorkspaceKey: testWS, EventID: "event-list", SourceKind: "github"}},
+		deliveries: []*automation.Delivery{{
+			WorkspaceKey: testWS, DeliveryID: "delivery-list", TriggerEventID: "event-list",
+			TriggerBindingID: "b1", Status: automation.DeliveryDispatched,
+		}},
+	}
+	mux := newServerWithPorts(st, &testAdmission{}, queries)
 
 	evRec := httptest.NewRecorder()
 	mux.ServeHTTP(evRec, httptest.NewRequest(http.MethodGet, "/api/workspaces/"+testWS+"/trigger-events", nil))

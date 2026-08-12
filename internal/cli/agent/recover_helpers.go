@@ -10,10 +10,10 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	clibackends "github.com/tysonthomas9/loomcli/internal/cli/backends"
 	"github.com/tysonthomas9/loomcli/internal/cli/git"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 )
 
 // handleOrphanedTask decides whether to close or reopen an orphaned task
@@ -41,7 +41,7 @@ func handleOrphanedTask(ctx context.Context, deps *cli.Deps, worktreePath, taskI
 // In workspace mode, it searches git logs across ALL repos in the workspace
 // to give Claude the most complete picture of relevant commits.
 func analyzeTaskCompletion(ctx context.Context, deps *cli.Deps, worktreePath, taskID string) (completed bool, reason string) {
-	detail, err := deps.IssueBackend.Get(ctx, taskID)
+	detail, err := deps.WorkItems.Get(ctx, workitems.GetQuery{IssueID: taskID})
 	if err != nil || detail == nil {
 		return false, "Could not fetch task details"
 	}
@@ -134,7 +134,7 @@ func parseCompletionResponse(stdout string) (completed bool, reason string) {
 // closeTask closes a completed task
 func closeTask(ctx context.Context, deps *cli.Deps, taskID, reason string) {
 	closeReason := fmt.Sprintf("Completed (verified by recovery analysis): %s", reason)
-	_, err := deps.IssueBackend.Close(ctx, taskID, backend.CloseParams{Reason: closeReason})
+	_, err := deps.WorkItems.Close(ctx, workitems.CloseCommand{IssueID: taskID, Reason: closeReason})
 	if err != nil {
 		fmt.Printf("Warning: failed to close task: %v\n", err)
 	} else {
@@ -148,10 +148,10 @@ func closeTask(ctx context.Context, deps *cli.Deps, taskID, reason string) {
 // daemon (or blocked by a human) and must not be flipped back to open by a
 // crash-recovery pass.
 func resetTask(ctx context.Context, deps *cli.Deps, taskID string) {
-	ib := deps.IssueBackend
+	items := deps.WorkItems
 
 	// Check current status before resetting
-	detail, err := ib.Get(ctx, taskID)
+	detail, err := items.Get(ctx, workitems.GetQuery{IssueID: taskID})
 	if err == nil && detail != nil {
 		if detail.Status == "review" || detail.Status == "closed" || detail.Status == "blocked" {
 			fmt.Printf("✓ Task %s already %s, skipping reset\n", taskID, detail.Status)
@@ -159,9 +159,8 @@ func resetTask(ctx context.Context, deps *cli.Deps, taskID string) {
 		}
 	}
 
-	err = ib.Update(ctx, taskID, backend.UpdateParams{
-		Status:   strPtr("open"),
-		Assignee: strPtr(""),
+	_, err = items.Patch(ctx, workitems.PatchCommand{
+		IssueID: taskID, Status: strPtr("open"), Assignee: strPtr(""),
 	})
 	if err != nil {
 		fmt.Printf("Warning: failed to reset task: %v\n", err)
@@ -181,17 +180,17 @@ func resetTask(ctx context.Context, deps *cli.Deps, taskID string) {
 // until this reset makes it open, so this check also closes the release-to-reset
 // handoff without broadening the backend API.
 func resetTaskOwnedByAgent(ctx context.Context, deps *cli.Deps, taskID, agentName string) error {
-	if deps == nil || deps.IssueBackend == nil {
-		return errors.New("issue backend is unavailable")
+	if deps == nil || deps.WorkItems == nil {
+		return errors.New("work items unavailable")
 	}
 	if taskID == "" || agentName == "" {
 		return errors.New("task id and agent name are required")
 	}
 
-	ib := deps.IssueBackend
-	detail, err := ib.Get(ctx, taskID)
+	items := deps.WorkItems
+	detail, err := items.Get(ctx, workitems.GetQuery{IssueID: taskID})
 	if err != nil {
-		if backend.IsKind(err, backend.KindNotFound) {
+		if errors.Is(err, workitems.ErrNotFound) {
 			return nil
 		}
 		return fmt.Errorf("get current task state: %w", err)
@@ -205,9 +204,8 @@ func resetTaskOwnedByAgent(ctx context.Context, deps *cli.Deps, taskID, agentNam
 		return nil
 	}
 
-	if err := ib.Update(ctx, taskID, backend.UpdateParams{
-		Status:   strPtr("open"),
-		Assignee: strPtr(""),
+	if _, err := items.Patch(ctx, workitems.PatchCommand{
+		IssueID: taskID, Status: strPtr("open"), Assignee: strPtr(""),
 	}); err != nil {
 		return fmt.Errorf("update task to open: %w", err)
 	}
@@ -369,15 +367,16 @@ func resetOrphanedAgentTasks(ctx context.Context, deps *cli.Deps, worktreePath, 
 		return
 	}
 
-	issues, err := deps.IssueBackend.List(ctx, backend.ListOpts{Assignee: agentName, Status: "in_progress"})
+	result, err := deps.WorkItems.List(ctx, workitems.ListQuery{Filter: workitems.ListFilter{Assignee: agentName, Status: "in_progress"}})
 	if err != nil {
 		fmt.Printf("Warning: could not check for orphaned tasks: %v\n", err)
 		return
 	}
 
 	// Filter out the task already handled from lock file
-	var orphaned []backend.IssueData
-	for _, t := range issues {
+	var orphaned []workitems.IssueSummary
+	for _, item := range result.Issues {
+		t := item.IssueSummary
 		if t.ID != alreadyHandledTaskID {
 			orphaned = append(orphaned, t)
 		}

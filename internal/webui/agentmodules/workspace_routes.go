@@ -1,7 +1,10 @@
 package agentmodules
 
 import (
+	"context"
 	"net/http"
+
+	"github.com/tysonthomas9/loomcli/internal/store"
 
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/agents"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/agentsmanagement"
@@ -35,7 +38,7 @@ func newWorkspaceModules(deps Deps, automationModules automationRouteModules) []
 			SessionTranscripts: deps.AgentSessionTranscripts,
 			InteractiveRuntime: deps.InteractiveAgentRuntime,
 			AgentRecords:       deps.Agents, AgentRecordAuthority: deps.AgentsOperator,
-			Store: deps.Store, Hub: deps.Hub,
+			AgentRuns: deps.ExecutionDriverRuns, Hub: deps.Hub,
 			Bindings: deps.AutomationBindings, OperatorAuthority: deps.AutomationOperator,
 			BindingRuns:  automationModules.BindingRuns,
 			Provisioning: deps.AgentProvisioning, ProvisioningAuthority: deps.AgentProvisioningOperator,
@@ -52,10 +55,11 @@ func newWorkspaceModules(deps Deps, automationModules automationRouteModules) []
 		}),
 		onboardingModule,
 		workflows.NewModule(workflows.Config{
-			Store: deps.Store, Catalog: deps.WorkflowCatalog, Authoring: deps.WorkflowCatalogAuthoring,
+			Catalog: deps.WorkflowCatalog, Authoring: deps.WorkflowCatalogAuthoring,
 			CatalogOperatorAuthority: deps.WorkflowCatalogOperator,
 			PrepareWorkflowTarget:    deps.WorkflowTargetPreparation,
-			Execution:                deps.ExecutionDriverRuns, OperatorAuthority: deps.ExecutionOperator,
+			Execution:                deps.ExecutionDriverRuns, TaskRuns: deps.ExecutionTaskRunQueries,
+			Bindings: deps.AutomationBindings, OperatorAuthority: deps.ExecutionOperator,
 			TaskWorkflowRuns: taskWorkflowRuns, BackendHealth: deps.WorkflowBackendHealth,
 		}),
 		executionmanagement.New(executionmanagement.Config{
@@ -63,7 +67,10 @@ func newWorkspaceModules(deps Deps, automationModules automationRouteModules) []
 		}),
 		automationModules.Webhooks,
 		roles.NewModule(roles.Config{
-			Store: deps.Store, Roles: deps.Agents, Authority: deps.AgentsOperator,
+			WorkspacePath: func(ctx context.Context, workspace string) string {
+				return storeadapter.ResolveOrHealWorkspacePath(ctx, deps.Store, workspace)
+			},
+			Roles: deps.Agents, Authority: deps.AgentsOperator,
 		}),
 		automationModules.TriggerBindings,
 		connectors.NewModule(deps.Store, deps.LocalSettingsDir, deps.AutomationBindings, deps.AutomationOperator),
@@ -72,28 +79,46 @@ func newWorkspaceModules(deps Deps, automationModules automationRouteModules) []
 			Journal: deps.AutomationApprovalJournal, Authority: deps.AutomationApprovalAuthority,
 		}),
 		taskrunapi.NewModule(taskrunapi.Config{
-			Store: deps.Store, FleetBaseURL: deps.FleetBaseURL,
-			IssueBackends: deps.ExecutionIssueBackends,
-			Execution:     deps.ExecutionTaskRuns, Authorities: deps.ExecutionTaskRunAuthorities, Artifacts: deps.Artifacts,
+			TaskRuns: deps.ExecutionTaskRunQueries, WorkItems: deps.WorkItems,
+			Execution: deps.ExecutionTaskRuns, Authorities: deps.ExecutionTaskRunAuthorities, Artifacts: deps.Artifacts,
 			DaytonaProvider: deps.DaytonaProvider,
 		}),
 		driverapi.NewModule(driverapi.Config{
-			Store: deps.Store, APIBaseURL: deps.DriverAPIBaseURL,
-			IssueBackends:    deps.ExecutionIssueBackends,
-			RolePrompts:      roles.ReadPromptBody,
-			RunTokenKey:      deps.DriverRunTokenKey,
-			LocalSettingsDir: deps.LocalSettingsDir, LocalRepoPath: storeadapter.ResolveRepoPath,
-			SourceControl:    deps.SourceControl,
+			APIBaseURL:            deps.DriverAPIBaseURL,
+			WorkItems:             deps.WorkItems,
+			Repositories:          deps.Workspace,
+			OrchestrationSessions: orchestrationSessionQueryAdapter{store: deps.Store},
+			AutomationBindings:    deps.AutomationBindings,
+			AutomationEvents:      deps.AutomationAudit,
+			AutomationDeliveries:  deps.AutomationAudit,
+			RolePrompts:           roles.ReadAgentRolePromptBody,
+			RunTokenKey:           deps.DriverRunTokenKey, LocalRepoPath: storeadapter.ResolveRepoPath,
 			Dispatcher:       deps.Dispatcher,
 			WorkflowEventing: deps.AutomationEventing, EventAwaits: automationModules.EventAwaits,
 			Execution: deps.ExecutionDriverRuns, ExecutionAuthorities: deps.ExecutionDriverRunAuthorities,
-			AgentIdentities: deps.Agents,
+			AgentIdentities: deps.Agents, AgentRoles: deps.Agents,
 			TaskRunRequests: deps.ExecutionTaskRunRequests, TaskRunRecovery: deps.ExecutionTaskRunRecovery,
-			TaskRuns: deps.ExecutionTaskRuns, TaskRunAuthorities: deps.ExecutionTaskRunAuthorities,
-			WorkflowCatalog: deps.WorkflowCatalog, Artifacts: deps.Artifacts,
-			InteractionChat: deps.InteractionChat,
+			TaskRuns: deps.ExecutionTaskRuns, TaskRunQueries: deps.ExecutionTaskRunQueries,
+			TaskRunAuthorities: deps.ExecutionTaskRunAuthorities,
+			WorkflowCatalog:    deps.WorkflowCatalog,
+			InteractionChat:    deps.InteractionChat,
 		}),
 	}
+}
+
+type orchestrationSessionQueryAdapter struct {
+	store store.OrchestrationSessionStore
+}
+
+func (adapter orchestrationSessionQueryAdapter) FindActiveOrchestrationSession(
+	ctx context.Context,
+	workspace,
+	agentID string,
+) (string, error) {
+	if adapter.store == nil {
+		return "", nil
+	}
+	return store.OrchestrationSessionIDFor(ctx, adapter.store, workspace, agentID)
 }
 
 type workflowBackendHealthAdapter struct {
@@ -131,7 +156,6 @@ func newTaskWorkflowRunReader(deps Deps) readprojection.TaskWorkflowRunReader {
 	return readprojection.NewTaskWorkflowRunReader(
 		deps.Store.TaskRuns(),
 		deps.Store.TriggerEvents(),
-		deps.Store.TriggerDeliveries(),
 		deps.Store.DriverRuns(),
 	)
 }

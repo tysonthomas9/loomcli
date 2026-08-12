@@ -6,11 +6,10 @@ import (
 	"os"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/spf13/pflag"
 
-	"github.com/tysonthomas9/loomcli/internal/backend"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 )
 
 type localBackendCall struct {
@@ -20,11 +19,12 @@ type localBackendCall struct {
 }
 
 type localBackendStub struct {
+	workitems.API
 	calls       []localBackendCall
-	readyItems  []backend.IssueData
-	detail      *backend.IssueDetailData
-	createItem  *backend.IssueData
-	closeResult *backend.CloseResult
+	readyItems  []workitems.IssueSummary
+	detail      *workitems.IssueDetail
+	createItem  *workitems.IssueSummary
+	closeResult *workitems.CloseResult
 	closeErr    error
 }
 
@@ -32,42 +32,48 @@ func (b *localBackendStub) record(method, id string, args interface{}) {
 	b.calls = append(b.calls, localBackendCall{method: method, id: id, args: args})
 }
 
-func (b *localBackendStub) Get(_ context.Context, id string) (*backend.IssueDetailData, error) {
-	b.record("Get", id, nil)
+func (b *localBackendStub) Get(_ context.Context, query workitems.GetQuery) (*workitems.IssueDetail, error) {
+	b.record("Get", query.IssueID, nil)
 	return b.detail, nil
 }
 
-func (b *localBackendStub) List(_ context.Context, opts backend.ListOpts) ([]backend.IssueData, error) {
-	b.record("List", "", opts)
-	return b.readyItems, nil
+func (b *localBackendStub) List(_ context.Context, query workitems.ListQuery) (*workitems.ListResult, error) {
+	b.record("List", "", query)
+	items := make([]workitems.ListItem, 0, len(b.readyItems))
+	for _, issue := range b.readyItems {
+		items = append(items, workitems.ListItem{IssueSummary: issue})
+	}
+	return &workitems.ListResult{Issues: items}, nil
 }
 
-func (b *localBackendStub) Ready(_ context.Context, opts backend.ReadyOpts) ([]backend.IssueData, error) {
+func (b *localBackendStub) Ready(_ context.Context, opts workitems.AvailabilityQuery) ([]workitems.IssueSummary, error) {
 	b.record("Ready", "", opts)
-	return b.readyItems, nil
+	out := make([]workitems.IssueSummary, 0, len(b.readyItems))
+	for _, issue := range b.readyItems {
+		out = append(out, workitems.IssueSummary{
+			ID: issue.ID, Title: issue.Title, Status: issue.Status, Priority: issue.Priority, IssueType: issue.IssueType,
+		})
+	}
+	return out, nil
 }
 
-func (b *localBackendStub) Blocked(_ context.Context, opts backend.BlockedOpts) ([]backend.IssueData, error) {
-	b.record("Blocked", "", opts)
-	return b.readyItems, nil
+func (b *localBackendStub) Blocked(_ context.Context, query workitems.AvailabilityQuery) ([]workitems.IssueSummary, error) {
+	b.record("Blocked", "", query)
+	out := make([]workitems.IssueSummary, 0, len(b.readyItems))
+	for _, issue := range b.readyItems {
+		out = append(out, workitems.IssueSummary{
+			ID: issue.ID, Title: issue.Title, Status: issue.Status, Priority: issue.Priority, IssueType: issue.IssueType,
+		})
+	}
+	return out, nil
 }
 
-func (b *localBackendStub) Stats(context.Context) (*backend.StatsData, error) { return nil, nil }
-func (b *localBackendStub) Count(context.Context, backend.CountOpts) (int, error) {
-	return 0, nil
-}
-func (b *localBackendStub) GetChildren(context.Context, string) ([]backend.IssueData, error) {
-	return nil, nil
-}
-func (b *localBackendStub) SearchIssues(context.Context, string, int) ([]backend.IssueData, error) {
-	return nil, nil
-}
-func (b *localBackendStub) Create(_ context.Context, params backend.CreateParams) (*backend.IssueData, error) {
+func (b *localBackendStub) Create(_ context.Context, params workitems.CreateCommand) (*workitems.IssueSummary, error) {
 	b.record("Create", "", params)
 	if b.createItem != nil {
 		return b.createItem, nil
 	}
-	return &backend.IssueData{
+	return &workitems.IssueSummary{
 		ID:         params.ID,
 		Title:      params.Title,
 		Status:     params.Status,
@@ -78,14 +84,14 @@ func (b *localBackendStub) Create(_ context.Context, params backend.CreateParams
 		SourceRepo: params.SourceRepo,
 	}, nil
 }
-func (b *localBackendStub) Update(_ context.Context, id string, params backend.UpdateParams) error {
-	b.record("Update", id, params)
-	return nil
+func (b *localBackendStub) Patch(_ context.Context, command workitems.PatchCommand) (*workitems.IssueDetail, error) {
+	b.record("Patch", command.IssueID, command)
+	return b.detail, nil
 }
 
-func (b *localBackendStub) ClaimIssue(_ context.Context, id string, lockTTL time.Duration) error {
-	b.record("ClaimIssue", id, lockTTL)
-	return nil
+func (b *localBackendStub) Claim(_ context.Context, command workitems.ClaimCommand) (*workitems.IssueDetail, error) {
+	b.record("Claim", command.IssueID, command)
+	return b.detail, nil
 }
 
 func (b *localBackendStub) ReleaseIssueLock(_ context.Context, id, actor string) error {
@@ -93,51 +99,41 @@ func (b *localBackendStub) ReleaseIssueLock(_ context.Context, id, actor string)
 	return nil
 }
 
-func (b *localBackendStub) DeferIssue(context.Context, string, time.Time) error { return nil }
-func (b *localBackendStub) UndeferIssue(context.Context, string) error          { return nil }
-
-func (b *localBackendStub) Close(_ context.Context, id string, params backend.CloseParams) (*backend.CloseResult, error) {
-	b.record("Close", id, params)
+func (b *localBackendStub) Close(_ context.Context, command workitems.CloseCommand) (*workitems.CloseResult, error) {
+	b.record("Close", command.IssueID, command)
 	if b.closeErr != nil {
 		return nil, b.closeErr
 	}
 	if b.closeResult != nil {
 		return b.closeResult, nil
 	}
-	return &backend.CloseResult{}, nil
+	return &workitems.CloseResult{}, nil
 }
 
-func (b *localBackendStub) Reopen(context.Context, string, backend.ReopenParams) error {
+func (b *localBackendStub) Reopen(_ context.Context, command workitems.ReopenCommand) error {
+	b.record("Reopen", command.IssueID, command)
 	return nil
 }
-func (b *localBackendStub) Delete(context.Context, backend.DeleteParams) error { return nil }
-func (b *localBackendStub) AddDependency(_ context.Context, params backend.DepAddParams) error {
-	b.record("AddDependency", params.FromID, params)
+func (b *localBackendStub) Delete(_ context.Context, command workitems.DeleteCommand) (workitems.DeleteResult, error) {
+	b.record("Delete", command.IssueID, command)
+	return workitems.DeleteResult{DeletedCount: 1, DeletedIDs: []string{command.IssueID}}, nil
+}
+func (b *localBackendStub) AddDependency(_ context.Context, command workitems.AddDependencyCommand) error {
+	b.record("AddDependency", command.IssueID, command)
 	return nil
 }
-func (b *localBackendStub) RemoveDependency(_ context.Context, params backend.DepRemoveParams) error {
-	b.record("RemoveDependency", params.FromID, params)
+func (b *localBackendStub) RemoveDependency(_ context.Context, command workitems.RemoveDependencyCommand) error {
+	b.record("RemoveDependency", command.IssueID, command)
 	return nil
 }
-func (b *localBackendStub) AddLabel(context.Context, string, string) error    { return nil }
-func (b *localBackendStub) RemoveLabel(context.Context, string, string) error { return nil }
-func (b *localBackendStub) ListComments(context.Context, string) ([]backend.CommentData, error) {
+func (b *localBackendStub) ListComments(context.Context, workitems.ListCommentsQuery) ([]*workitems.Comment, error) {
 	return nil, nil
 }
-func (b *localBackendStub) AddComment(_ context.Context, params backend.CommentAddParams) (*backend.CommentData, error) {
-	b.record("AddComment", params.IssueID, params)
-	return &backend.CommentData{IssueID: params.IssueID, Author: params.Author, Text: params.Text}, nil
+func (b *localBackendStub) AddComment(_ context.Context, command workitems.AddCommentCommand) (*workitems.Comment, error) {
+	b.record("AddComment", command.IssueID, command)
+	return &workitems.Comment{IssueID: command.IssueID, Author: command.Author, Text: command.Text}, nil
 }
-func (b *localBackendStub) ListEvents(context.Context, string, int) ([]backend.EventData, error) {
-	return nil, nil
-}
-func (b *localBackendStub) Batch(context.Context, []backend.BatchOp) ([]backend.BatchResult, error) {
-	return nil, nil
-}
-func (b *localBackendStub) GetMutations(context.Context, int64) ([]backend.MutationData, error) {
-	return nil, nil
-}
-func (b *localBackendStub) WaitForMutations(context.Context, int64, int64) ([]backend.MutationData, error) {
+func (b *localBackendStub) ListEvents(context.Context, workitems.ListEventsQuery) ([]*workitems.Event, error) {
 	return nil, nil
 }
 func (b *localBackendStub) BackendName() string { return "local-stub" }
@@ -147,11 +143,11 @@ func withLocalBackend(t *testing.T, stub *localBackendStub, fn func()) {
 	withDataClientState(t, func() {
 		t.Setenv("LOOM_SERVER_URL", "")
 		serverURL = ""
-		SetLocalIssueBackendProvider(func(context.Context) backend.IssueBackend {
+		SetLocalWorkItemsProvider(func(context.Context) workitems.API {
 			return stub
 		})
 		t.Cleanup(func() {
-			SetLocalIssueBackendProvider(nil)
+			SetLocalWorkItemsProvider(nil)
 		})
 		fn()
 	})
@@ -178,7 +174,7 @@ func captureDataStdout(t *testing.T, fn func() error) (string, error) {
 
 func TestDataReady_NoServerUsesLocalBackend(t *testing.T) {
 	stub := &localBackendStub{
-		readyItems: []backend.IssueData{{
+		readyItems: []workitems.IssueSummary{{
 			ID:        "loom-1",
 			Title:     "local task",
 			Status:    "open",
@@ -205,8 +201,8 @@ func TestDataReady_NoServerUsesLocalBackend(t *testing.T) {
 		if len(stub.calls) != 1 || stub.calls[0].method != "Ready" {
 			t.Fatalf("calls = %#v, want one Ready call", stub.calls)
 		}
-		opts := stub.calls[0].args.(backend.ReadyOpts)
-		if opts.Limit != 3 || opts.Assignee != "agent-1" || opts.Type != "task" || opts.ParentID != "epic-1" {
+		opts := stub.calls[0].args.(workitems.AvailabilityQuery)
+		if opts.Limit != 3 || opts.Assignee != "agent-1" || opts.IssueType != "task" || opts.ParentID != "epic-1" {
 			t.Fatalf("Ready opts = %#v", opts)
 		}
 	})
@@ -214,7 +210,7 @@ func TestDataReady_NoServerUsesLocalBackend(t *testing.T) {
 
 func TestDataList_NoServerUsesLocalBackend(t *testing.T) {
 	stub := &localBackendStub{
-		readyItems: []backend.IssueData{{
+		readyItems: []workitems.IssueSummary{{
 			ID:        "loom-10",
 			Title:     "filtered task",
 			Status:    "review",
@@ -243,7 +239,7 @@ func TestDataList_NoServerUsesLocalBackend(t *testing.T) {
 		if len(stub.calls) != 1 || stub.calls[0].method != "List" {
 			t.Fatalf("calls = %#v, want one List call", stub.calls)
 		}
-		opts := stub.calls[0].args.(backend.ListOpts)
+		opts := stub.calls[0].args.(workitems.ListQuery).Filter
 		if opts.Status != "review" || opts.IssueType != "task" || opts.ParentID != "epic-1" || opts.Limit != 5 {
 			t.Fatalf("List opts = %#v", opts)
 		}
@@ -255,7 +251,7 @@ func TestDataList_NoServerUsesLocalBackend(t *testing.T) {
 
 func TestDataBlocked_NoServerUsesLocalBackend(t *testing.T) {
 	stub := &localBackendStub{
-		readyItems: []backend.IssueData{{
+		readyItems: []workitems.IssueSummary{{
 			ID:        "loom-20",
 			Title:     "blocked bug",
 			Status:    "blocked",
@@ -281,8 +277,8 @@ func TestDataBlocked_NoServerUsesLocalBackend(t *testing.T) {
 		if len(stub.calls) != 1 || stub.calls[0].method != "Blocked" {
 			t.Fatalf("calls = %#v, want one Blocked call", stub.calls)
 		}
-		opts := stub.calls[0].args.(backend.BlockedOpts)
-		if opts.Limit != 7 || opts.Type != "bug" || opts.ParentID != "epic-2" {
+		opts := stub.calls[0].args.(workitems.AvailabilityQuery)
+		if opts.Limit != 7 || opts.IssueType != "bug" || opts.ParentID != "epic-2" {
 			t.Fatalf("Blocked opts = %#v", opts)
 		}
 	})
@@ -290,14 +286,13 @@ func TestDataBlocked_NoServerUsesLocalBackend(t *testing.T) {
 
 func TestDataShowClaimClose_NoServerUsesLocalBackend(t *testing.T) {
 	stub := &localBackendStub{
-		detail: &backend.IssueDetailData{
-			IssueData: backend.IssueData{
-				ID:        "loom-1",
-				Title:     "local task",
-				Status:    "open",
-				IssueType: "task",
-				Priority:  1,
-			},
+		detail: &workitems.IssueDetail{
+
+			ID:        "loom-1",
+			Title:     "local task",
+			Status:    "open",
+			IssueType: "task",
+			Priority:  1,
 		},
 	}
 	withLocalBackend(t, stub, func() {
@@ -338,7 +333,7 @@ func TestDataShowClaimClose_NoServerUsesLocalBackend(t *testing.T) {
 			t.Fatalf("update: %v", err)
 		}
 
-		wantMethods := []string{"Get", "ClaimIssue", "Close", "Update"}
+		wantMethods := []string{"Get", "Claim", "Close", "Patch"}
 		if len(stub.calls) != len(wantMethods) {
 			t.Fatalf("calls = %#v, want %v", stub.calls, wantMethods)
 		}
@@ -347,11 +342,11 @@ func TestDataShowClaimClose_NoServerUsesLocalBackend(t *testing.T) {
 				t.Fatalf("call %d = %#v, want %s loom-1", i, stub.calls[i], want)
 			}
 		}
-		params := stub.calls[2].args.(backend.CloseParams)
+		params := stub.calls[2].args.(workitems.CloseCommand)
 		if params.Reason != "done" || params.Session != "session-1" || !params.Force {
 			t.Fatalf("Close params = %#v", params)
 		}
-		updateParams := stub.calls[3].args.(backend.UpdateParams)
+		updateParams := stub.calls[3].args.(workitems.PatchCommand)
 		if updateParams.Status == nil || *updateParams.Status != status {
 			t.Fatalf("Update status = %#v", updateParams.Status)
 		}
@@ -385,10 +380,10 @@ func TestDataUpdate_AllChangedFields(t *testing.T) {
 		if !strings.Contains(out, `"message": "updated loom-30"`) {
 			t.Fatalf("update output = %q, want JSON message", out)
 		}
-		if len(stub.calls) != 1 || stub.calls[0].method != "Update" || stub.calls[0].id != "loom-30" {
-			t.Fatalf("calls = %#v, want one Update call", stub.calls)
+		if len(stub.calls) != 1 || stub.calls[0].method != "Patch" || stub.calls[0].id != "loom-30" {
+			t.Fatalf("calls = %#v, want one Patch call", stub.calls)
 		}
-		params := stub.calls[0].args.(backend.UpdateParams)
+		params := stub.calls[0].args.(workitems.PatchCommand)
 		if params.Status == nil || *params.Status != "review" {
 			t.Fatalf("Update status = %#v", params.Status)
 		}
@@ -431,7 +426,7 @@ func TestDataComment_NoServerUsesLocalBackend(t *testing.T) {
 		if len(stub.calls) != 1 || stub.calls[0].method != "AddComment" || stub.calls[0].id != "loom-2" {
 			t.Fatalf("calls = %#v, want one AddComment call", stub.calls)
 		}
-		params := stub.calls[0].args.(backend.CommentAddParams)
+		params := stub.calls[0].args.(workitems.AddCommentCommand)
 		if params.IssueID != "loom-2" || params.Author != "planner" || params.Text != "ship it" {
 			t.Fatalf("Comment params = %#v", params)
 		}

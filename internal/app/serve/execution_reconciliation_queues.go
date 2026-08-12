@@ -8,9 +8,9 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
-// executionReconciliationQueueAdapter is the only production translation
-// from Execution's queue commands to the legacy Store capability interfaces.
-// Callers receive the typed module API, never this adapter or either Store.
+// executionReconciliationQueueAdapter is the production persistence adapter
+// for Execution's durable reconciliation queues. Callers receive the typed
+// module API, never this adapter or its storage interfaces.
 type executionReconciliationQueueAdapter struct {
 	awaitEvents            store.AwaitEventNotificationStore
 	runOutcomes            store.DriverRunOutcomeStore

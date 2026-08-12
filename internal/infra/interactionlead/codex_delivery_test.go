@@ -267,7 +267,7 @@ func TestCodexDeliverLeadMessageQueuesBeforeSessionAndDrainsLater(t *testing.T) 
 		WorkspaceKey: "WS",
 		SessionID:    "lead-session",
 		AgentID:      "nova",
-		Kind:         domain.AgentSessionKindOrchestration,
+		Kind:         domain.AgentSessionKindInteractive,
 		Status:       domain.AgentSessionRunning,
 		Metadata:     map[string]string{"actor": "test"},
 	}); err != nil {
@@ -308,7 +308,7 @@ func TestCodexDeliverLeadMessageDoesNotDuplicateSessionlessMessageAfterSessionSt
 		WorkspaceKey: "WS",
 		SessionID:    "lead-session",
 		AgentID:      "nova",
-		Kind:         domain.AgentSessionKindOrchestration,
+		Kind:         domain.AgentSessionKindInteractive,
 		Status:       domain.AgentSessionRunning,
 		Metadata:     map[string]string{"actor": "test"},
 	}); err != nil {
@@ -390,7 +390,7 @@ func createAssignedLeadSession(t *testing.T, st store.Store, label string, metad
 		WorkspaceKey: "WS",
 		SessionID:    "lead-session",
 		AgentID:      "nova",
-		Kind:         domain.AgentSessionKindOrchestration,
+		Kind:         domain.AgentSessionKindInteractive,
 		Status:       domain.AgentSessionRunning,
 		Metadata:     metadata,
 	}); err != nil {

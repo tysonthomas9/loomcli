@@ -259,7 +259,7 @@ func TestAgentServiceHandlerUsesManagedCoreCASForCreateUpdateAndDelete(t *testin
 		bindings:           persistence,
 	}
 	module := New(Config{
-		Store: countingStore, Bindings: bindings, OperatorAuthority: resolver,
+		AgentRuns: testAgentRunQueries{store: countingStore}, Bindings: bindings, OperatorAuthority: resolver,
 		AgentRecords:          lifecycle,
 		AgentRecordAuthority:  resolver,
 		Provisioning:          provisioning,

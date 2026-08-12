@@ -16,6 +16,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -29,11 +30,11 @@ func TestExecutorRunOnceClaimsVerifiesAndFinishes(t *testing.T) {
 		t.Fatalf("Create workspace: %v", err)
 	}
 	writeFlueDist(t, root, "epic-runner", "done")
-	registered, err := RegisterFlueDriver(ctx, st, RegisterFlueOptions{WorkspaceKey: "TEST", WorkDir: root, DistPath: "dist", DriverName: "epic-runner", CreatedBy: "tester", Activate: true})
+	registered, err := SeedFlueDriverFixture(ctx, st, RegisterFlueOptions{WorkspaceKey: "TEST", WorkDir: root, DistPath: "dist", DriverName: "epic-runner", CreatedBy: "tester", Activate: true})
 	if err != nil {
-		t.Fatalf("RegisterFlueDriver: %v", err)
+		t.Fatalf("SeedFlueDriverFixture: %v", err)
 	}
-	run, err := CreateDriverRun(ctx, st, RunOptions{
+	run, err := createDriverRunFixture(ctx, st, driverRunFixtureOptions{
 		WorkspaceKey:   "TEST",
 		DriverID:       registered.Driver.DriverID,
 		EpicID:         "TEST-1",
@@ -44,7 +45,7 @@ func TestExecutorRunOnceClaimsVerifiesAndFinishes(t *testing.T) {
 		t.Fatalf("CreateDriverRun: %v", err)
 	}
 
-	runner := &recordingRunner{result: RunResult{Status: domain.DriverRunCompleted, Summary: "driver completed"}}
+	runner := &recordingRunner{result: RunResult{Status: execution.DriverRunCompleted, Summary: "driver completed"}}
 	result, err := testExecutor(st, Executor{
 		Store:             st,
 		WorkspaceKey:      "TEST",
@@ -57,10 +58,10 @@ func TestExecutorRunOnceClaimsVerifiesAndFinishes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RunOnce: %v", err)
 	}
-	if result.Claimed == nil || result.Claimed.Status != domain.DriverRunRunning || result.Claimed.NodeID != "node-1" {
+	if result.Claimed == nil || result.Claimed.Status != execution.DriverRunRunning || result.Claimed.Owner.NodeID != "node-1" {
 		t.Fatalf("claimed = %+v, want running node-1", result.Claimed)
 	}
-	if result.Final == nil || result.Final.Status != domain.DriverRunCompleted || result.Final.Summary != "driver completed" {
+	if result.Final == nil || result.Final.Status != execution.DriverRunCompleted || result.Final.Summary != "driver completed" {
 		t.Fatalf("final = %+v, want completed summary", result.Final)
 	}
 	if runner.calls != 1 {
@@ -99,18 +100,18 @@ func TestExecutorRunOnceTargetsSpecificQueuedRunID(t *testing.T) {
 		t.Fatalf("Create workspace: %v", err)
 	}
 	writeFlueDist(t, root, "epic-runner", "done")
-	registered, err := RegisterFlueDriver(ctx, st, RegisterFlueOptions{WorkspaceKey: "TEST", WorkDir: root, DistPath: "dist", DriverName: "epic-runner", CreatedBy: "tester", Activate: true})
+	registered, err := SeedFlueDriverFixture(ctx, st, RegisterFlueOptions{WorkspaceKey: "TEST", WorkDir: root, DistPath: "dist", DriverName: "epic-runner", CreatedBy: "tester", Activate: true})
 	if err != nil {
-		t.Fatalf("RegisterFlueDriver: %v", err)
+		t.Fatalf("SeedFlueDriverFixture: %v", err)
 	}
-	if _, err := CreateDriverRun(ctx, st, RunOptions{WorkspaceKey: "TEST", DriverID: registered.Driver.DriverID, EpicID: "TEST-1", RunID: "run-1"}); err != nil {
+	if _, err := createDriverRunFixture(ctx, st, driverRunFixtureOptions{WorkspaceKey: "TEST", DriverID: registered.Driver.DriverID, EpicID: "TEST-1", RunID: "run-1"}); err != nil {
 		t.Fatalf("Create first DriverRun: %v", err)
 	}
-	if _, err := CreateDriverRun(ctx, st, RunOptions{WorkspaceKey: "TEST", DriverID: registered.Driver.DriverID, EpicID: "TEST-2", RunID: "run-2"}); err != nil {
+	if _, err := createDriverRunFixture(ctx, st, driverRunFixtureOptions{WorkspaceKey: "TEST", DriverID: registered.Driver.DriverID, EpicID: "TEST-2", RunID: "run-2"}); err != nil {
 		t.Fatalf("Create second DriverRun: %v", err)
 	}
 
-	runner := &recordingRunner{result: RunResult{Status: domain.DriverRunCompleted, Summary: "targeted"}}
+	runner := &recordingRunner{result: RunResult{Status: execution.DriverRunCompleted, Summary: "targeted"}}
 	result, err := testExecutor(st, Executor{
 		Store:             st,
 		WorkspaceKey:      "TEST",
@@ -124,7 +125,7 @@ func TestExecutorRunOnceTargetsSpecificQueuedRunID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RunOnce: %v", err)
 	}
-	if result.Final == nil || result.Final.RunID != "run-2" || result.Final.Status != domain.DriverRunCompleted {
+	if result.Final == nil || result.Final.RunID != "run-2" || result.Final.Status != execution.DriverRunCompleted {
 		t.Fatalf("final = %+v, want completed run-2", result.Final)
 	}
 	if runner.req.Run == nil || runner.req.Run.RunID != "run-2" {
@@ -215,11 +216,11 @@ func TestExecutorRunOnceFailsNonTerminalRunnerResult(t *testing.T) {
 		t.Fatalf("Create workspace: %v", err)
 	}
 	writeFlueDist(t, root, "epic-runner", "done")
-	registered, err := RegisterFlueDriver(ctx, st, RegisterFlueOptions{WorkspaceKey: "TEST", WorkDir: root, DistPath: "dist", DriverName: "epic-runner", CreatedBy: "tester", Activate: true})
+	registered, err := SeedFlueDriverFixture(ctx, st, RegisterFlueOptions{WorkspaceKey: "TEST", WorkDir: root, DistPath: "dist", DriverName: "epic-runner", CreatedBy: "tester", Activate: true})
 	if err != nil {
-		t.Fatalf("RegisterFlueDriver: %v", err)
+		t.Fatalf("SeedFlueDriverFixture: %v", err)
 	}
-	if _, err := CreateDriverRun(ctx, st, RunOptions{
+	if _, err := createDriverRunFixture(ctx, st, driverRunFixtureOptions{
 		WorkspaceKey: "TEST",
 		DriverID:     registered.Driver.DriverID,
 		RunID:        "run-1",
@@ -233,13 +234,13 @@ func TestExecutorRunOnceFailsNonTerminalRunnerResult(t *testing.T) {
 		WorkDir:           root,
 		NodeID:            "node-1",
 		LeaseID:           "lease-1",
-		Runner:            &recordingRunner{result: RunResult{Status: domain.DriverRunRunning, Summary: "still working"}},
+		Runner:            &recordingRunner{result: RunResult{Status: execution.DriverRunRunning, Summary: "still working"}},
 		HeartbeatInterval: -1,
 	}).RunOnce(ctx)
 	if err != nil {
 		t.Fatalf("RunOnce: %v", err)
 	}
-	if result.Final == nil || result.Final.Status != domain.DriverRunFailed || result.Final.ErrorClass != "invalid_driver_result" {
+	if result.Final == nil || result.Final.Status != execution.DriverRunFailed || result.Final.ErrorClass != "invalid_driver_result" {
 		t.Fatalf("final = %+v, want failed invalid_driver_result", result.Final)
 	}
 	if result.Final.Summary != `driver result status "running" is not terminal: still working` {
@@ -255,18 +256,18 @@ func TestExecutorRunOnceFailsTamperedBundleBeforeRunner(t *testing.T) {
 		t.Fatalf("Create workspace: %v", err)
 	}
 	writeFlueDist(t, root, "epic-runner", "done")
-	registered, err := RegisterFlueDriver(ctx, st, RegisterFlueOptions{WorkspaceKey: "TEST", WorkDir: root, DistPath: "dist", DriverName: "epic-runner", CreatedBy: "tester", Activate: true})
+	registered, err := SeedFlueDriverFixture(ctx, st, RegisterFlueOptions{WorkspaceKey: "TEST", WorkDir: root, DistPath: "dist", DriverName: "epic-runner", CreatedBy: "tester", Activate: true})
 	if err != nil {
-		t.Fatalf("RegisterFlueDriver: %v", err)
+		t.Fatalf("SeedFlueDriverFixture: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(root, filepath.FromSlash(registered.Version.BundleRef), "dist", "server.mjs"), []byte("tampered\n"), 0o644); err != nil {
 		t.Fatalf("tamper bundle: %v", err)
 	}
-	if _, err := CreateDriverRun(ctx, st, RunOptions{WorkspaceKey: "TEST", DriverID: registered.Driver.DriverID, EpicID: "TEST-1", RunID: "run-1"}); err != nil {
+	if _, err := createDriverRunFixture(ctx, st, driverRunFixtureOptions{WorkspaceKey: "TEST", DriverID: registered.Driver.DriverID, EpicID: "TEST-1", RunID: "run-1"}); err != nil {
 		t.Fatalf("CreateDriverRun: %v", err)
 	}
 
-	runner := &recordingRunner{result: RunResult{Status: domain.DriverRunCompleted}}
+	runner := &recordingRunner{result: RunResult{Status: execution.DriverRunCompleted}}
 	result, err := testExecutor(st, Executor{
 		Store:             st,
 		WorkspaceKey:      "TEST",
@@ -282,7 +283,7 @@ func TestExecutorRunOnceFailsTamperedBundleBeforeRunner(t *testing.T) {
 	if runner.calls != 0 {
 		t.Fatalf("runner calls = %d, want 0 for tampered bundle", runner.calls)
 	}
-	if result.Final == nil || result.Final.Status != domain.DriverRunFailed || result.Final.ErrorClass != "bundle_verification" {
+	if result.Final == nil || result.Final.Status != execution.DriverRunFailed || result.Final.ErrorClass != "bundle_verification" {
 		t.Fatalf("final = %+v, want failed bundle_verification", result.Final)
 	}
 }
@@ -305,11 +306,11 @@ func TestNodeRunnerRunsBuiltFlueServer(t *testing.T) {
 		t.Fatalf("Create workspace: %v", err)
 	}
 	writeFlueDist(t, root, "epic-runner", "fake flue")
-	registered, err := RegisterFlueDriver(ctx, st, RegisterFlueOptions{WorkspaceKey: "TEST", WorkDir: root, DistPath: "dist", DriverName: "epic-runner", CreatedBy: "tester", Activate: true})
+	registered, err := SeedFlueDriverFixture(ctx, st, RegisterFlueOptions{WorkspaceKey: "TEST", WorkDir: root, DistPath: "dist", DriverName: "epic-runner", CreatedBy: "tester", Activate: true})
 	if err != nil {
-		t.Fatalf("RegisterFlueDriver: %v", err)
+		t.Fatalf("SeedFlueDriverFixture: %v", err)
 	}
-	run, err := CreateDriverRun(ctx, st, RunOptions{WorkspaceKey: "TEST", DriverID: registered.Driver.DriverID, EpicID: "TEST-1", RunID: "run-1"})
+	run, err := createDriverRunFixture(ctx, st, driverRunFixtureOptions{WorkspaceKey: "TEST", DriverID: registered.Driver.DriverID, EpicID: "TEST-1", RunID: "run-1"})
 	if err != nil {
 		t.Fatalf("CreateDriverRun: %v", err)
 	}
@@ -317,7 +318,7 @@ func TestNodeRunnerRunsBuiltFlueServer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Claim: %v", err)
 	}
-	req, err := loadRunRequest(ctx, root, claimed, st)
+	req, err := loadRunRequest(ctx, root, testExecutionDriverRunSnapshot(claimed), st)
 	if err != nil {
 		t.Fatalf("loadRunRequest: %v", err)
 	}
@@ -326,7 +327,7 @@ func TestNodeRunnerRunsBuiltFlueServer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NodeRunner.Run: %v", err)
 	}
-	if result.Status != domain.DriverRunCompleted || result.Summary != "fake flue" {
+	if result.Status != execution.DriverRunCompleted || result.Summary != "fake flue" {
 		t.Fatalf("result = %+v, want completed fake flue", result)
 	}
 }
@@ -343,7 +344,7 @@ func TestNodeRunnerRunsRegisteredNativeFlueArtifact(t *testing.T) {
 	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "TEST", Name: "test"}); err != nil {
 		t.Fatalf("Create workspace: %v", err)
 	}
-	registered, err := RegisterFlueDriver(ctx, st, RegisterFlueOptions{
+	registered, err := SeedFlueDriverFixture(ctx, st, RegisterFlueOptions{
 		WorkspaceKey: "TEST",
 		WorkDir:      root,
 		DistPath:     "dist",
@@ -352,9 +353,9 @@ func TestNodeRunnerRunsRegisteredNativeFlueArtifact(t *testing.T) {
 		CreatedBy:    "tester",
 	})
 	if err != nil {
-		t.Fatalf("RegisterFlueDriver: %v", err)
+		t.Fatalf("SeedFlueDriverFixture: %v", err)
 	}
-	run, err := CreateDriverRun(ctx, st, RunOptions{WorkspaceKey: "TEST", DriverID: registered.Driver.DriverID, EpicID: "TEST-1", RunID: "run-1"})
+	run, err := createDriverRunFixture(ctx, st, driverRunFixtureOptions{WorkspaceKey: "TEST", DriverID: registered.Driver.DriverID, EpicID: "TEST-1", RunID: "run-1"})
 	if err != nil {
 		t.Fatalf("CreateDriverRun: %v", err)
 	}
@@ -362,7 +363,7 @@ func TestNodeRunnerRunsRegisteredNativeFlueArtifact(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Claim: %v", err)
 	}
-	req, err := loadRunRequest(ctx, root, claimed, st)
+	req, err := loadRunRequest(ctx, root, testExecutionDriverRunSnapshot(claimed), st)
 	if err != nil {
 		t.Fatalf("loadRunRequest: %v", err)
 	}
@@ -374,7 +375,7 @@ func TestNodeRunnerRunsRegisteredNativeFlueArtifact(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NodeRunner.Run: %v", err)
 	}
-	if result.Status != domain.DriverRunCompleted || result.Summary != "native flue" {
+	if result.Status != execution.DriverRunCompleted || result.Summary != "native flue" {
 		t.Fatalf("result = %+v, want completed native flue", result)
 	}
 	if result.Output["logs_ref"] != "driver-run://run-1/flue-local" || result.Output["runtime"] != RuntimeFlueNode {
@@ -386,7 +387,7 @@ func TestNodeRunnerFailsWhenRuntimeReturnsNoResult(t *testing.T) {
 	root := t.TempDir()
 	nodePath := writeExecutable(t, root, "fake-node", "#!/bin/sh\nexit 0\n")
 	result, err := (NodeRunner{NodePath: nodePath}).Run(context.Background(), RunRequest{
-		Run: &domain.DriverRun{
+		Run: &execution.DriverRun{
 			WorkspaceKey:    "TEST",
 			RunID:           "run-empty",
 			Payload:         json.RawMessage(`{}`),
@@ -402,7 +403,7 @@ func TestNodeRunnerFailsWhenRuntimeReturnsNoResult(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NodeRunner.Run: %v", err)
 	}
-	if result.Status != domain.DriverRunFailed || result.ErrorClass != "invalid_driver_result" || result.Summary != "Flue workflow returned no result" {
+	if result.Status != execution.DriverRunFailed || result.ErrorClass != "invalid_driver_result" || result.Summary != "Flue workflow returned no result" {
 		t.Fatalf("result = %+v, want failed invalid_driver_result for empty output", result)
 	}
 }
@@ -411,7 +412,7 @@ func TestNodeRunnerFailsWhenWorkflowResultIsMissingTerminalStatus(t *testing.T) 
 	root := t.TempDir()
 	nodePath := writeExecutable(t, root, "fake-node", "#!/bin/sh\nprintf '%s\\n' '{\"summary\":\"done\"}'\n")
 	result, err := (NodeRunner{NodePath: nodePath}).Run(context.Background(), RunRequest{
-		Run: &domain.DriverRun{
+		Run: &execution.DriverRun{
 			WorkspaceKey:    "TEST",
 			RunID:           "run-missing-status",
 			Payload:         json.RawMessage(`{}`),
@@ -427,7 +428,7 @@ func TestNodeRunnerFailsWhenWorkflowResultIsMissingTerminalStatus(t *testing.T) 
 	if err != nil {
 		t.Fatalf("NodeRunner.Run: %v", err)
 	}
-	if result.Status != domain.DriverRunFailed || result.ErrorClass != "invalid_driver_result" {
+	if result.Status != execution.DriverRunFailed || result.ErrorClass != "invalid_driver_result" {
 		t.Fatalf("result = %+v, want failed invalid_driver_result", result)
 	}
 	if result.Summary != "driver result missing terminal status: done" {
@@ -478,12 +479,10 @@ if (process.send) {
 	}, 1)
 	go func() {
 		result, err := (NodeRunner{}).Run(ctx, RunRequest{
-			Run: &domain.DriverRun{
+			Run: &execution.DriverRun{
 				WorkspaceKey:    "TEST",
 				RunID:           "run-cancel",
-				NodeID:          "node-1",
-				LeaseID:         "lease-1",
-				FencingToken:    42,
+				Owner:           execution.Owner{NodeID: "node-1", LeaseID: "lease-1", FencingToken: 42},
 				Payload:         json.RawMessage(`{}`),
 				DriverID:        "epic-runner",
 				DriverVersionID: "version-1",
@@ -506,7 +505,7 @@ if (process.send) {
 		if out.err != nil {
 			t.Fatalf("NodeRunner.Run err = %v", out.err)
 		}
-		if out.result.Status != domain.DriverRunCancelled || out.result.ErrorClass != "driver_cancelled" {
+		if out.result.Status != execution.DriverRunCancelled || out.result.ErrorClass != "driver_cancelled" {
 			t.Fatalf("result = %+v, want cancelled driver_cancelled", out.result)
 		}
 	case <-time.After(30 * time.Second):
@@ -563,12 +562,10 @@ if (process.send) {
 	}
 
 	result, err := (NodeRunner{}).Run(context.Background(), RunRequest{
-		Run: &domain.DriverRun{
+		Run: &execution.DriverRun{
 			WorkspaceKey:    "TEST",
 			RunID:           "run-1",
-			NodeID:          "node-1",
-			LeaseID:         "lease-1",
-			FencingToken:    42,
+			Owner:           execution.Owner{NodeID: "node-1", LeaseID: "lease-1", FencingToken: 42},
 			Payload:         json.RawMessage(`{}`),
 			Entrypoint:      EntrypointRun,
 			DriverID:        "driver-1",
@@ -583,7 +580,7 @@ if (process.send) {
 	if err != nil {
 		t.Fatalf("NodeRunner.Run: %v", err)
 	}
-	if result.Status != domain.DriverRunCompleted || result.Summary != "handoff dropped" {
+	if result.Status != execution.DriverRunCompleted || result.Summary != "handoff dropped" {
 		t.Fatalf("result = %+v, want completed handoff dropped", result)
 	}
 }
@@ -623,11 +620,11 @@ func TestExecutorScansWorkspacesAndReportsNoQueuedRun(t *testing.T) {
 		t.Fatalf("Create TEST workspace: %v", err)
 	}
 	writeFlueDist(t, root, "epic-runner", "done")
-	registered, err := RegisterFlueDriver(ctx, st, RegisterFlueOptions{WorkspaceKey: "TEST", WorkDir: root, DistPath: "dist", DriverName: "epic-runner", CreatedBy: "tester", Activate: true})
+	registered, err := SeedFlueDriverFixture(ctx, st, RegisterFlueOptions{WorkspaceKey: "TEST", WorkDir: root, DistPath: "dist", DriverName: "epic-runner", CreatedBy: "tester", Activate: true})
 	if err != nil {
-		t.Fatalf("RegisterFlueDriver: %v", err)
+		t.Fatalf("SeedFlueDriverFixture: %v", err)
 	}
-	if _, err := CreateDriverRun(ctx, st, RunOptions{WorkspaceKey: "TEST", DriverID: registered.Driver.DriverID, EpicID: "TEST-1", RunID: "run-1"}); err != nil {
+	if _, err := createDriverRunFixture(ctx, st, driverRunFixtureOptions{WorkspaceKey: "TEST", DriverID: registered.Driver.DriverID, EpicID: "TEST-1", RunID: "run-1"}); err != nil {
 		t.Fatalf("CreateDriverRun: %v", err)
 	}
 	result, err := testExecutor(st, Executor{
@@ -635,7 +632,7 @@ func TestExecutorScansWorkspacesAndReportsNoQueuedRun(t *testing.T) {
 		WorkDir:           root,
 		NodeID:            "node-1",
 		LeaseID:           "lease-1",
-		Runner:            &recordingRunner{result: RunResult{Status: domain.DriverRunCompleted, Summary: "done"}},
+		Runner:            &recordingRunner{result: RunResult{Status: execution.DriverRunCompleted, Summary: "done"}},
 		HeartbeatInterval: -1,
 	}).RunOnce(ctx)
 	if err != nil {
@@ -683,10 +680,10 @@ type suspendingRunner struct {
 
 func (r *suspendingRunner) Run(ctx context.Context, req RunRequest) (RunResult, error) {
 	run := req.Run
-	if _, err := r.store.DriverRuns().Suspend(ctx, run.WorkspaceKey, run.RunID, run.NodeID, run.LeaseID, run.FencingToken, domain.AwaitInstanceKey(run.RunID, 1)); err != nil {
+	if _, err := r.store.DriverRuns().Suspend(ctx, run.WorkspaceKey, run.RunID, run.Owner.NodeID, run.Owner.LeaseID, run.Owner.FencingToken, domain.AwaitInstanceKey(run.RunID, 1)); err != nil {
 		return RunResult{}, err
 	}
-	return RunResult{Status: domain.DriverRunSuspendedAwaitingEvent, Summary: "workflow suspended awaiting event"}, nil
+	return RunResult{Status: execution.DriverRunSuspendedAwait, Summary: "workflow suspended awaiting event"}, nil
 }
 
 // A suspended runner result is acknowledged without a Finish: the run stays
@@ -700,11 +697,11 @@ func TestExecutorRunOnceAcknowledgesSuspendedRun(t *testing.T) {
 		t.Fatalf("Create workspace: %v", err)
 	}
 	writeFlueDist(t, root, "epic-runner", "done")
-	registered, err := RegisterFlueDriver(ctx, st, RegisterFlueOptions{WorkspaceKey: "TEST", WorkDir: root, DistPath: "dist", DriverName: "epic-runner", CreatedBy: "tester", Activate: true})
+	registered, err := SeedFlueDriverFixture(ctx, st, RegisterFlueOptions{WorkspaceKey: "TEST", WorkDir: root, DistPath: "dist", DriverName: "epic-runner", CreatedBy: "tester", Activate: true})
 	if err != nil {
-		t.Fatalf("RegisterFlueDriver: %v", err)
+		t.Fatalf("SeedFlueDriverFixture: %v", err)
 	}
-	if _, err := CreateDriverRun(ctx, st, RunOptions{WorkspaceKey: "TEST", DriverID: registered.Driver.DriverID, RunID: "run-1"}); err != nil {
+	if _, err := createDriverRunFixture(ctx, st, driverRunFixtureOptions{WorkspaceKey: "TEST", DriverID: registered.Driver.DriverID, RunID: "run-1"}); err != nil {
 		t.Fatalf("CreateDriverRun: %v", err)
 	}
 
@@ -720,7 +717,7 @@ func TestExecutorRunOnceAcknowledgesSuspendedRun(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RunOnce: %v", err)
 	}
-	if result.Final == nil || result.Final.Status != domain.DriverRunSuspendedAwaitingEvent {
+	if result.Final == nil || result.Final.Status != execution.DriverRunSuspendedAwait {
 		t.Fatalf("final = %+v, want suspended_awaiting_event", result.Final)
 	}
 	stored, err := st.DriverRuns().Get(ctx, "TEST", "run-1")
@@ -750,11 +747,11 @@ func TestExecutorRunOnceFailsSuspendedReportWithoutSuspendedRun(t *testing.T) {
 		t.Fatalf("Create workspace: %v", err)
 	}
 	writeFlueDist(t, root, "epic-runner", "done")
-	registered, err := RegisterFlueDriver(ctx, st, RegisterFlueOptions{WorkspaceKey: "TEST", WorkDir: root, DistPath: "dist", DriverName: "epic-runner", CreatedBy: "tester", Activate: true})
+	registered, err := SeedFlueDriverFixture(ctx, st, RegisterFlueOptions{WorkspaceKey: "TEST", WorkDir: root, DistPath: "dist", DriverName: "epic-runner", CreatedBy: "tester", Activate: true})
 	if err != nil {
-		t.Fatalf("RegisterFlueDriver: %v", err)
+		t.Fatalf("SeedFlueDriverFixture: %v", err)
 	}
-	if _, err := CreateDriverRun(ctx, st, RunOptions{WorkspaceKey: "TEST", DriverID: registered.Driver.DriverID, RunID: "run-1"}); err != nil {
+	if _, err := createDriverRunFixture(ctx, st, driverRunFixtureOptions{WorkspaceKey: "TEST", DriverID: registered.Driver.DriverID, RunID: "run-1"}); err != nil {
 		t.Fatalf("CreateDriverRun: %v", err)
 	}
 
@@ -764,13 +761,13 @@ func TestExecutorRunOnceFailsSuspendedReportWithoutSuspendedRun(t *testing.T) {
 		WorkDir:           root,
 		NodeID:            "node-1",
 		LeaseID:           "lease-1",
-		Runner:            &recordingRunner{result: RunResult{Status: domain.DriverRunSuspendedAwaitingEvent, Summary: "workflow suspended awaiting event"}},
+		Runner:            &recordingRunner{result: RunResult{Status: execution.DriverRunSuspendedAwait, Summary: "workflow suspended awaiting event"}},
 		HeartbeatInterval: -1,
 	}).RunOnce(ctx)
 	if err != nil {
 		t.Fatalf("RunOnce: %v", err)
 	}
-	if result.Final == nil || result.Final.Status != domain.DriverRunFailed || result.Final.ErrorClass != "invalid_driver_result" {
+	if result.Final == nil || result.Final.Status != execution.DriverRunFailed || result.Final.ErrorClass != "invalid_driver_result" {
 		t.Fatalf("final = %+v, want failed invalid_driver_result", result.Final)
 	}
 	if result.Final.Summary != "driver reported suspended but no await suspended the run" {
@@ -812,11 +809,11 @@ func TestNodeRunnerMapsWorkflowSuspensionToSuspendedResult(t *testing.T) {
 				t.Fatalf("Create workspace: %v", err)
 			}
 			writeFlueDistWithHandler(t, root, "suspender", tc.send)
-			registered, err := RegisterFlueDriver(ctx, st, RegisterFlueOptions{WorkspaceKey: "TEST", WorkDir: root, DistPath: "dist", DriverName: "suspender", CreatedBy: "tester", Activate: true})
+			registered, err := SeedFlueDriverFixture(ctx, st, RegisterFlueOptions{WorkspaceKey: "TEST", WorkDir: root, DistPath: "dist", DriverName: "suspender", CreatedBy: "tester", Activate: true})
 			if err != nil {
-				t.Fatalf("RegisterFlueDriver: %v", err)
+				t.Fatalf("SeedFlueDriverFixture: %v", err)
 			}
-			run, err := CreateDriverRun(ctx, st, RunOptions{WorkspaceKey: "TEST", DriverID: registered.Driver.DriverID, RunID: "run-1"})
+			run, err := createDriverRunFixture(ctx, st, driverRunFixtureOptions{WorkspaceKey: "TEST", DriverID: registered.Driver.DriverID, RunID: "run-1"})
 			if err != nil {
 				t.Fatalf("CreateDriverRun: %v", err)
 			}
@@ -824,7 +821,7 @@ func TestNodeRunnerMapsWorkflowSuspensionToSuspendedResult(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Claim: %v", err)
 			}
-			req, err := loadRunRequest(ctx, root, claimed, st)
+			req, err := loadRunRequest(ctx, root, testExecutionDriverRunSnapshot(claimed), st)
 			if err != nil {
 				t.Fatalf("loadRunRequest: %v", err)
 			}
@@ -833,7 +830,7 @@ func TestNodeRunnerMapsWorkflowSuspensionToSuspendedResult(t *testing.T) {
 			if err != nil {
 				t.Fatalf("NodeRunner.Run: %v", err)
 			}
-			if result.Status != domain.DriverRunSuspendedAwaitingEvent {
+			if result.Status != execution.DriverRunSuspendedAwait {
 				t.Fatalf("result = %+v, want suspended_awaiting_event", result)
 			}
 			if result.Summary != "workflow suspended awaiting event" {

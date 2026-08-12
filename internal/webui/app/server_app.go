@@ -12,6 +12,7 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	"github.com/tysonthomas9/loomcli/internal/app/workitemmove"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 	"github.com/tysonthomas9/loomcli/internal/webui"
 	"github.com/tysonthomas9/loomcli/internal/webui/agentcoord"
 	"github.com/tysonthomas9/loomcli/internal/webui/filecoord"
@@ -74,7 +75,7 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 
 	// Log configuration
 	logger.Info("starting web UI server", "port", config.Port, "bind_address", config.BindAddress)
-	logger.Info("workflow catalog issue backend enabled")
+	logger.Info("workflow catalog Work Items adapter enabled")
 	if app.corsConfig.Enabled {
 		logger.Info("CORS enabled", "origins", app.corsConfig.AllowedOrigins)
 	}
@@ -110,10 +111,7 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 
 	app.initialWorkspaceID = config.InitialWorkspaceID
 
-	app.workItems, err = NewWorkItems(config.IssueBackendFn)
-	if err != nil {
-		return nil, fmt.Errorf("compose Work Items capability: %w", err)
-	}
+	app.workItems = workitems.Route(config.WorkItemsFn)
 	if config.Store != nil {
 		app.workspaceStore = config.Store.Workspaces()
 		app.workspaceCatalog = config.WorkspaceCatalog
@@ -136,7 +134,7 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 	go app.hub.Run()
 	cleanups = append(cleanups, func() { app.hub.Stop() })
 
-	// Bridge per-workspace backend mutations to SSE clients.
+	// Bridge per-workspace Work Items mutations to SSE clients.
 	app.multiSub = NewMultiSub(ctx, app.hub, config.Logger)
 	app.getMutationsSince = GetMutationsSinceFn(app.multiSub)
 	cleanups = append(cleanups, func() { app.multiSub.Stop() })
@@ -227,7 +225,6 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 		PTYMultiMgr: app.ptyMgr,
 		FleetReg:    app.fleetRegistry,
 		FleetURL:    config.FleetClientURL,
-		FleetWS:     config.FleetClientWorkspace,
 		FleetKey:    config.FleetClientAPIKey,
 		FleetActor:  config.FleetClientActor,
 		FleetMode:   config.FleetMode,
@@ -327,11 +324,6 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 		}
 		return middleware.WorkspaceRef{}, false
 	}
-	app.wsExistsFn = func(id string) bool {
-		_, ok := app.wsResolveFn(context.Background(), id)
-		return ok
-	}
-
 	// Initialize workspace service layer. FleetDB Store is the authoritative
 	// workspace source in both local and distributed modes.
 	var workspaceAgents workspacecoord.WorkspaceAgentDirectory
@@ -382,7 +374,7 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 
 	// Initialize diff service layer (requires ops.GitOps)
 	if config.GitOps != nil {
-		app.diffSvc = sourcecontrolcoord.NewDiffService(config.GitOps, config.IssueBackendFn, middleware.WithWorkspace)
+		app.diffSvc = sourcecontrolcoord.NewDiffService(config.GitOps, config.WorkItemsFn, middleware.WithWorkspace)
 	}
 
 	// Initialize file service layer (requires ops.FileOps)
@@ -465,7 +457,7 @@ func isLoopbackBindAddress(bindAddress string) bool {
 	return ip != nil && ip.IsLoopback()
 }
 
-func (app *Server) activateSSESubscriber(ctx context.Context, wsID string) {
+func (app *Server) activateSSESubscriber(_ context.Context, wsID string) {
 	if app == nil || wsID == "" || app.multiSub == nil {
 		return
 	}
@@ -474,28 +466,6 @@ func (app *Server) activateSSESubscriber(ctx context.Context, wsID string) {
 			logger.Warn("failed to activate registered workspace SSE subscriber",
 				"workspace", wsID, "err", err)
 		}
-		return
-	}
-	app.ensureStoreBackedSSESubscriber(ctx, wsID)
-}
-
-func (app *Server) ensureStoreBackedSSESubscriber(ctx context.Context, wsID string) {
-	if app == nil || wsID == "" || app.multiSub == nil || app.config.IssueBackendFn == nil {
-		return
-	}
-	if app.multiSub.HasSubscriber(wsID) {
-		return
-	}
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	be := app.config.IssueBackendFn(middleware.WithWorkspace(ctx, wsID))
-	if be == nil {
-		return
-	}
-	if err := app.multiSub.EnsureActive(ctx, wsID, be, ActivationReasonSSE); err != nil {
-		logger.Warn("failed to start store-backed workspace subscriber",
-			"workspace", wsID, "err", err)
 	}
 }
 

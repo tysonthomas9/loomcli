@@ -46,7 +46,7 @@ const maxRequestBody = 1 << 20
 // ---------------------------------------------------------------------------
 
 // handleAuthConfig is a 2-arg shim for tests written before the third
-// issueBackendFn parameter was added — they don't exercise that path and
+// workItemsFn parameter was added — they don't exercise that path and
 // default to nil so the env-var fallback covers them.
 func handleAuthConfig(extAuthURL string, limiter *AuthConfigLimiter) http.HandlerFunc {
 	return HandleAuthConfig(extAuthURL, limiter, nil)

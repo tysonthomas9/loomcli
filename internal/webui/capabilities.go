@@ -14,7 +14,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/app/webhookingestion"
 	"github.com/tysonthomas9/loomcli/internal/app/workflowbinding"
 	"github.com/tysonthomas9/loomcli/internal/app/workfloweventing"
-	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/modules/agents"
 	"github.com/tysonthomas9/loomcli/internal/modules/artifacts"
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
@@ -78,6 +77,7 @@ type InteractionCapability interface {
 // adapters. It intentionally exposes no shared issuer or persistence adapter.
 type ExecutionCapability interface {
 	TaskRunAPI() execution.TaskRunAPI
+	TaskRunQueries() execution.TaskRunQueries
 	TaskRunRequestAPI() execution.TaskRunRequestAPI
 	TaskRunWorkerAPI() execution.TaskRunWorkerAPI
 	TaskRunSchedulingAPI() execution.TaskRunSchedulingAPI
@@ -107,10 +107,11 @@ type ArtifactsCapability interface {
 // Exact module aliases keep ServerConfig's public field types source
 // compatible while preserving the capability-owned contracts.
 type (
-	IssueBackend                             = backend.IssueBackend
 	DaytonaProviderBroker                    = execution.DaytonaProviderBroker
 	ArtifactQueryAPI                         = artifacts.QueryAPI
 	SourceControlMaterializer                = sourcecontrol.Materializer
+	SourceControlStackBindingResolver        = sourcecontrol.StackBindingResolver
+	SourceControlTaskOutcomeRecorder         = sourcecontrol.TaskOutcomeRecorder
 	RepositoryAdmissionMaterializer          = sourcecontrol.RepositoryAdmissionMaterializer
 	WorkflowCatalogAPI                       = workflowcatalog.API
 	WorkflowCatalogVersionAuthoringAPI       = workflowcatalog.VersionAuthoringAPI

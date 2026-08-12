@@ -42,6 +42,12 @@ func validatePattern(pattern string) error {
 	return nil
 }
 
+// ValidateEventPattern validates Automation's public binding-pattern grammar
+// for inbound adapters such as the trigger CLI.
+func ValidateEventPattern(pattern string) error {
+	return validatePattern(pattern)
+}
+
 func matchAny(patterns []string, routeKey string) bool {
 	for _, pattern := range patterns {
 		segments, err := parsePattern(pattern)

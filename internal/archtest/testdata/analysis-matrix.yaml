@@ -54,11 +54,11 @@ tag_profiles:
     enforced: true
     owner: modular-monolith
     acceptance_criteria: Load the tagged package graph and report the exact profile for each violation.
-  - name: issuebackend-e2e
+  - name: workitems-e2e
     goos: linux
     goarch: amd64
-    tags: [issuebackend_e2e]
-    required_files: [internal/cli/issue_backend_conformance_e2e_test.go]
+    tags: [workitems_e2e]
+    required_files: [internal/cli/workitems_conformance_e2e_test.go]
     enforced: true
     owner: modular-monolith
     acceptance_criteria: Load the tagged package graph and report the exact profile for each violation.

@@ -192,10 +192,5 @@ func (app *Server) registerWorkspaceRoutes() {
 }
 
 func (app *Server) workspaceMiddleware() middleware.Middleware {
-	if app.wsResolveFn != nil {
-		return middleware.WorkspaceResolved(app.wsResolveFn)
-	}
-	return middleware.Workspace(func(id string) bool {
-		return app.wsExistsFn != nil && app.wsExistsFn(id)
-	})
+	return middleware.WorkspaceResolved(app.wsResolveFn)
 }

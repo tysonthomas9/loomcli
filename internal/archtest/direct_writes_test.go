@@ -14,15 +14,15 @@ func TestCheckedInDirectWriteInventoryStrictCounts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(inventory.Writes) != 86 {
-		t.Fatalf("direct-write rows = %d, want current migration ratchet of 86", len(inventory.Writes))
+	if len(inventory.Writes) != 90 {
+		t.Fatalf("direct-write rows = %d, want current source-backed ratchet of 90", len(inventory.Writes))
 	}
 	totalSites := 0
 	for _, use := range inventory.Writes {
 		totalSites += use.Count
 	}
-	if totalSites != 95 {
-		t.Fatalf("direct-write sites = %d, want current migration ratchet of 95", totalSites)
+	if totalSites != 108 {
+		t.Fatalf("direct-write sites = %d, want current source-backed ratchet of 108", totalSites)
 	}
 	if err := inventory.ValidateCompletedPhase(7); err != nil {
 		t.Fatalf("checked-in inventory is not ready for Phase 7 completion: %v", err)
@@ -436,10 +436,10 @@ func TestDirectWritePersistencePolicyRejectsUnassignedOwner(t *testing.T) {
 	}
 }
 
-func TestDirectWritePersistencePolicyAllowsExplicitCandidateSurfaceWithoutClassifyingWholePackage(t *testing.T) {
+func TestDirectWritePersistencePolicyAllowsExactReceiverWithoutClassifyingWholePackage(t *testing.T) {
 	inventory := directWriteTestInventory(oneDirectWriteProfile())
 	const packagePath = modulePath + "/internal/example"
-	const receiver = packagePath + ".projectionStore"
+	const receiver = packagePath + ".Journal"
 	inventory.MethodSets = append([]PersistenceMethodSet{{
 		Name: "projection", ReadOnly: []string{"Workspaces"}, Mutating: []string{},
 	}}, inventory.MethodSets...)
@@ -454,9 +454,47 @@ func TestDirectWritePersistencePolicyAllowsExplicitCandidateSurfaceWithoutClassi
 	if classifier.isPersistenceFunctionPackage(packagePath) {
 		t.Fatal("declaring one narrow candidate receiver classified every package helper as persistence")
 	}
+	if !classifier.isPersistenceCandidate(packagePath, "Journal") {
+		t.Fatal("exact receiver surface was not recognized as a persistence candidate")
+	}
 	access, owner, ok := classifier.classify(receiver, "Workspaces")
 	if !ok || access != persistenceReadOnly || owner != "read_projection" {
 		t.Fatalf("candidate receiver classification = (%v, %q, %t), want read-only read_projection", access, owner, ok)
+	}
+}
+
+func TestSnapshotDirectWritesExactReceiverFailsClosedWithoutClassifyingPackageFunctions(t *testing.T) {
+	root := t.TempDir()
+	writeDirectWriteModule(t, root)
+	writeGoFile(t, root, "internal/example/journal.go", `package example
+type Journal struct{}
+func New() *Journal { return &Journal{} }
+func (journal *Journal) Persist() error { return nil }
+func (journal *Journal) UndeclaredWrite() error { return nil }
+`)
+	writeGoFile(t, root, "internal/cli/write.go", `package cli
+import "github.com/tysonthomas9/loomcli/internal/example"
+func write(journal *example.Journal) error {
+	_ = example.New()
+	return journal.UndeclaredWrite()
+}
+`)
+	matrix := oneDirectWriteProfile()
+	inventory := directWriteTestInventory(matrix)
+	inventory.MethodSets = append([]PersistenceMethodSet{{
+		Name: "journal", ReadOnly: []string{}, Mutating: []string{"Persist"},
+	}}, inventory.MethodSets...)
+	inventory.ReceiverSurfaces = append([]PersistenceReceiverSurface{{
+		Receiver: "*" + modulePath + "/internal/example.Journal",
+		Package:  modulePath + "/internal/example", MethodSet: "journal", CapabilityOwner: "workspace",
+	}}, inventory.ReceiverSurfaces...)
+
+	_, err := SnapshotDirectWrites(root, matrix, inventory)
+	if err == nil || !strings.Contains(err.Error(), "Journal.UndeclaredWrite") {
+		t.Fatalf("error = %v, want exact receiver's undeclared method to fail closed", err)
+	}
+	if strings.Contains(err.Error(), "example.New") {
+		t.Fatalf("error = %v, exact receiver must not classify unrelated package functions", err)
 	}
 }
 

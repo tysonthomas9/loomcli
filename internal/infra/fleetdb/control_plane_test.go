@@ -115,7 +115,7 @@ func TestAgentSessionList_FiltersKindAndParentClientSide(t *testing.T) {
 			t.Fatalf("limit must not be set when client-side kind/parent filter is active; got %q", q.Get("limit"))
 		}
 		writeJSON(t, w, map[string]any{"agent_sessions": []domain.AgentSession{
-			{WorkspaceKey: "WS", SessionID: "orch-1", Kind: domain.AgentSessionKindOrchestration},
+			{WorkspaceKey: "WS", SessionID: "orch-1", Kind: domain.AgentSessionKindInteractive},
 			{WorkspaceKey: "WS", SessionID: "task-a", Kind: domain.AgentSessionKindTask, ParentSessionID: "orch-1"},
 			{WorkspaceKey: "WS", SessionID: "task-b", Kind: domain.AgentSessionKindTask, ParentSessionID: "orch-1"},
 			{WorkspaceKey: "WS", SessionID: "task-c", Kind: domain.AgentSessionKindTask, ParentSessionID: "orch-other"},

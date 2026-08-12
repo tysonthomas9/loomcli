@@ -15,7 +15,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/localworkspace"
 	"github.com/tysonthomas9/loomcli/internal/modules/agents"
-	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/agentcoord"
 	"github.com/tysonthomas9/loomcli/internal/webui/apperrors"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
@@ -36,7 +35,7 @@ var errBackgroundWorkerTerminal = errors.New("background worker terminals cannot
 // WebSocket path never infers agent behavior from the session name.
 func HandleEnsureAgentTerminalSession(
 	svc webuterminal.TerminalService,
-	st terminalStore,
+	state StateQueries,
 	identities ...terminalAgentIdentity,
 ) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -47,10 +46,10 @@ func HandleEnsureAgentTerminalSession(
 			})
 			return
 		}
-		if st == nil {
+		if state == nil {
 			handler.WriteJSON(w, http.StatusServiceUnavailable, tabMetadataResponse{
 				Success: false,
-				Error:   "agent store not initialized",
+				Error:   "agent terminal state not initialized",
 			})
 			return
 		}
@@ -68,7 +67,7 @@ func HandleEnsureAgentTerminalSession(
 		meta, err := ensureAgentTerminalSession(
 			r.Context(),
 			svc,
-			st,
+			state,
 			workspace,
 			agentName,
 			identities...,
@@ -89,7 +88,7 @@ func HandleEnsureAgentTerminalSession(
 func ensureAgentTerminalSession(
 	ctx context.Context,
 	svc webuterminal.TerminalService,
-	st terminalStore,
+	state StateQueries,
 	workspace,
 	agentName string,
 	identities ...terminalAgentIdentity,
@@ -106,11 +105,11 @@ func ensureAgentTerminalSession(
 	if err != nil {
 		return nil, terminalAgentIdentityServiceError(err)
 	}
-	role, err := loadAgentLaunchRole(ctx, st, workspace, agent.RoleName)
+	role, err := loadAgentLaunchRole(ctx, state, workspace, agent.RoleName)
 	if err != nil {
 		return nil, err
 	}
-	roleKind := domain.ResolveRoleKind(role, agent.RoleName)
+	roleKind := resolveTerminalRoleKind(role, agent.RoleName)
 
 	if isBackgroundWorker(agent, roleKind) {
 		return nil, apperrors.ErrValidation(errBackgroundWorkerTerminal.Error())
@@ -130,7 +129,7 @@ func ensureAgentTerminalSession(
 		// spec and compare argv; if they differ, fall through to the
 		// rebuild path which will issue a fresh tab metadata. The stale
 		// PTY is killed by svc.PutTab → reattach when the user reloads.
-		if !agentTerminalLaunchSpecStale(ctx, st, workspace, existing, agent) {
+		if !agentTerminalLaunchSpecStale(ctx, state, workspace, existing, agent) {
 			return existing, nil
 		}
 	}
@@ -139,8 +138,8 @@ func ensureAgentTerminalSession(
 	}
 
 	sessionName, label, sortOrder := newAgentTerminalTabPlacement(tabs, existing, agentName)
-	agentForLaunch, orchestratorID := ensureTerminalOrchestratorLink(ctx, st, workspace, agent, roleKind)
-	launch, backend, err := buildAgentLaunchSpec(ctx, st, workspace, sessionName, &agentForLaunch, orchestratorID)
+	agentForLaunch, orchestratorID := ensureTerminalOrchestratorLink(ctx, state, workspace, agent, roleKind)
+	launch, backend, err := buildAgentLaunchSpec(ctx, state, workspace, sessionName, &agentForLaunch, orchestratorID)
 	if err != nil {
 		return nil, err
 	}
@@ -180,7 +179,7 @@ func terminalAgentIdentityServiceError(err error) error {
 // returned indefinitely and the running PTY never picks up the change.
 func agentTerminalLaunchSpecStale(
 	ctx context.Context,
-	st terminalStore,
+	state StateQueries,
 	workspace string,
 	existing *webuterminal.TabMetadata,
 	agent *agents.RuntimeIdentity,
@@ -193,7 +192,7 @@ func agentTerminalLaunchSpecStale(
 	// per-session ids that legitimately differ and shouldn't trigger churn.
 	// Pass empty orchestratorID — the argv doesn't include it (it's an env
 	// var only), so the stale-check is unaffected by the orchestrator.
-	candidate, _, err := buildAgentLaunchSpec(ctx, st, workspace, existing.SessionName, agent, "")
+	candidate, _, err := buildAgentLaunchSpec(ctx, state, workspace, existing.SessionName, agent, "")
 	if err != nil || candidate == nil {
 		return false
 	}
@@ -232,13 +231,13 @@ func newAgentTerminalTabPlacement(tabs []webuterminal.TabMetadata, existing *web
 // reserves an ID for the launch environment. It deliberately does not persist
 // a running record: loom lead creates and heartbeats that record only after the
 // PTY child actually starts, so an unlaunched tab cannot become a stale session.
-func ensureTerminalOrchestratorLink(ctx context.Context, st terminalStore, workspace string, agent *agents.RuntimeIdentity, kind domain.RoleKind) (agents.RuntimeIdentity, string) {
+func ensureTerminalOrchestratorLink(ctx context.Context, state StateQueries, workspace string, agent *agents.RuntimeIdentity, kind domain.RoleKind) (agents.RuntimeIdentity, string) {
 	agentForLaunch := *agent
 	if kind != domain.RoleKindInteractive {
 		return agentForLaunch, ""
 	}
 	// Skip when this terminal agent already has an active orchestration session.
-	if existingID, err := store.OrchestrationSessionIDFor(ctx, st, workspace, agentForLaunch.AgentID); err == nil && existingID != "" {
+	if existingID, err := state.FindActiveOrchestrationSession(ctx, workspace, agentForLaunch.AgentID); err == nil && existingID != "" {
 		return agentForLaunch, existingID
 	}
 
@@ -316,12 +315,12 @@ func pruneStaleAgentTerminalTabs(ctx context.Context, svc webuterminal.TerminalS
 // orchestratorID is the lead → orchestration session id resolved by
 // ensureTerminalOrchestratorLink. It is passed in rather than read off the
 // agent struct because AgentSession is the single source of truth.
-func buildAgentLaunchSpec(ctx context.Context, st terminalStore, workspace, sessionName string, agent *agents.RuntimeIdentity, orchestratorID string) (*webuterminal.LaunchSpec, string, error) {
-	role, err := loadAgentLaunchRole(ctx, st, workspace, agent.RoleName)
+func buildAgentLaunchSpec(ctx context.Context, state StateQueries, workspace, sessionName string, agent *agents.RuntimeIdentity, orchestratorID string) (*webuterminal.LaunchSpec, string, error) {
+	role, err := loadAgentLaunchRole(ctx, state, workspace, agent.RoleName)
 	if err != nil {
 		return nil, "", err
 	}
-	roleKind := domain.ResolveRoleKind(role, agent.RoleName)
+	roleKind := resolveTerminalRoleKind(role, agent.RoleName)
 	if isBackgroundWorker(agent, roleKind) {
 		return nil, "", apperrors.ErrValidation(errBackgroundWorkerTerminal.Error())
 	}
@@ -350,9 +349,9 @@ func agentLaunchCwd(workspace string, agent *agents.RuntimeIdentity) string {
 	return worktree
 }
 
-func loadAgentLaunchRole(ctx context.Context, st terminalStore, workspace, roleName string) (*domain.Role, error) {
-	role, err := st.Roles().Get(ctx, workspace, roleName)
-	if errors.Is(err, domain.ErrNotFound) {
+func loadAgentLaunchRole(ctx context.Context, state StateQueries, workspace, roleName string) (*agents.Role, error) {
+	role, err := state.GetRole(ctx, workspace, roleName)
+	if errors.Is(err, agents.ErrNotFound) {
 		return nil, nil
 	}
 	if err != nil {
@@ -361,7 +360,7 @@ func loadAgentLaunchRole(ctx context.Context, st terminalStore, workspace, roleN
 	return role, nil
 }
 
-func agentLaunchBackend(workspace string, agent *agents.RuntimeIdentity, role *domain.Role) string {
+func agentLaunchBackend(workspace string, agent *agents.RuntimeIdentity, role *agents.Role) string {
 	backend := strings.TrimSpace(agent.Backend)
 	if backend == "" && role != nil {
 		backend = strings.TrimSpace(role.Backend)
@@ -388,7 +387,7 @@ func agentLaunchBaseArgs(workspace, backend string) []string {
 	return args
 }
 
-func agentLaunchCommandArgs(kind domain.RoleKind, role *domain.Role) ([]string, error) {
+func agentLaunchCommandArgs(kind domain.RoleKind, role *agents.Role) ([]string, error) {
 	if kind == domain.RoleKindInteractive {
 		args := []string{"lead"}
 		if role != nil && strings.TrimSpace(role.Prompt) == "" && strings.TrimSpace(role.PromptFile) != "" {
@@ -397,6 +396,18 @@ func agentLaunchCommandArgs(kind domain.RoleKind, role *domain.Role) ([]string, 
 		return args, nil
 	}
 	return nil, apperrors.ErrValidation(errBackgroundWorkerTerminal.Error())
+}
+
+func resolveTerminalRoleKind(role *agents.Role, roleName string) domain.RoleKind {
+	if role != nil {
+		if kind := strings.TrimSpace(strings.ToLower(role.Kind)); kind != "" {
+			return domain.RoleKind(kind)
+		}
+	}
+	if domain.IsInteractiveRoleName(roleName) {
+		return domain.RoleKindInteractive
+	}
+	return domain.RoleKindWorker
 }
 
 func agentLaunchEnv(workspace, sessionName, backend, orchestratorID string, agent *agents.RuntimeIdentity) map[string]string {

@@ -9,10 +9,34 @@ import (
 
 	infrafleetdb "github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	"github.com/tysonthomas9/loomcli/internal/infra/workspacecatalog"
 	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
 	platformruntime "github.com/tysonthomas9/loomcli/internal/platform/runtime"
+	storepkg "github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/workspacecoord"
 )
+
+func newTestStoreBackedWorkspaceAdmissionOperations(
+	t testing.TB,
+	store storepkg.Store,
+	agentsCommands ManagedAgentsCommands,
+	admissions infrafleetdb.RepositoryAdmissionTransport,
+	journal *RepositoryAdmissionJournal,
+	materializer repositoryCheckoutMaterializer,
+) *StoreBackedWorkspaceAdmissionOperations {
+	t.Helper()
+	workspace, err := workspacecatalog.New(store.Workspaces(), store.Repos())
+	if err != nil {
+		t.Fatalf("compose test Workspace capability: %v", err)
+	}
+	return NewStoreBackedWorkspaceAdmissionOperations(
+		workspace,
+		agentsCommands,
+		admissions,
+		journal,
+		materializer,
+	)
+}
 
 func TestWorkspaceAdmissionCoordinatorPreparesDurablyBeforeMaterialization(t *testing.T) {
 	loomDir := t.TempDir()
@@ -28,7 +52,7 @@ func TestWorkspaceAdmissionCoordinatorPreparesDurablyBeforeMaterialization(t *te
 	if err != nil {
 		t.Fatalf("new journal: %v", err)
 	}
-	operations := NewStoreBackedWorkspaceAdmissionOperations(
+	operations := newTestStoreBackedWorkspaceAdmissionOperations(t,
 		st,
 		managedAgentsForTest(st),
 		transport,
@@ -76,7 +100,7 @@ func TestWorkspaceAdmissionCoordinatorPreparesDurablyBeforeMaterialization(t *te
 	if result.WorkspaceID != "DURABLE-PREPARE" {
 		t.Fatalf("workspace ID = %q, want DURABLE-PREPARE", result.WorkspaceID)
 	}
-	restarted := NewStoreBackedWorkspaceAdmissionOperations(
+	restarted := newTestStoreBackedWorkspaceAdmissionOperations(t,
 		st,
 		managedAgentsForTest(st),
 		transport,
@@ -136,7 +160,7 @@ func TestWorkspaceAdmissionRuntimeRecoversRetryablePartialCheckout(t *testing.T)
 	}
 	transport.failNextRepositoryRef = "beta"
 	transport.failNextMaterializeError = sourcecontrol.ErrUnavailable
-	first := NewStoreBackedWorkspaceAdmissionOperations(
+	first := newTestStoreBackedWorkspaceAdmissionOperations(t,
 		st,
 		managedAgentsForTest(st),
 		transport,
@@ -153,7 +177,7 @@ func TestWorkspaceAdmissionRuntimeRecoversRetryablePartialCheckout(t *testing.T)
 		t.Fatalf("retained partial checkout missing: %v", err)
 	}
 
-	restarted := NewStoreBackedWorkspaceAdmissionOperations(
+	restarted := newTestStoreBackedWorkspaceAdmissionOperations(t,
 		st,
 		managedAgentsForTest(st),
 		transport,
@@ -171,7 +195,7 @@ func TestWorkspaceAdmissionRuntimeRecoversRetryablePartialCheckout(t *testing.T)
 	if _, err := os.Stat(filepath.Join(request.Path, "beta", ".git")); err != nil {
 		t.Fatalf("runtime recovery did not finish beta checkout: %v", err)
 	}
-	locals, err := journal.List(t.Context())
+	locals, err := journal.list(t.Context())
 	if err != nil || len(locals) != 1 {
 		t.Fatalf("local admissions = %#v, err=%v", locals, err)
 	}
@@ -198,7 +222,7 @@ func TestWorkspaceAdmissionLeaseRenewalTracksOnlyActiveMaterialization(t *testin
 	if err != nil {
 		t.Fatalf("new journal: %v", err)
 	}
-	operations := NewStoreBackedWorkspaceAdmissionOperations(
+	operations := newTestStoreBackedWorkspaceAdmissionOperations(t,
 		st,
 		managedAgentsForTest(st),
 		transport,
@@ -314,7 +338,7 @@ func TestWorkspaceAdmissionRuntimeRecoversUnstartedPreparedJobWithoutRenewingIt(
 	if err != nil {
 		t.Fatalf("new journal: %v", err)
 	}
-	operations := NewStoreBackedWorkspaceAdmissionOperations(
+	operations := newTestStoreBackedWorkspaceAdmissionOperations(t,
 		st,
 		managedAgentsForTest(st),
 		transport,
@@ -405,7 +429,7 @@ func TestWorkspaceAdmissionRuntimeClaimsExpiredOwnerAfterHardCrash(t *testing.T)
 		CloneURLs: []string{src},
 		Path:      filepath.Join(loomDir, "workspaces", "hard-crash"),
 	}
-	first := NewStoreBackedWorkspaceAdmissionOperations(
+	first := newTestStoreBackedWorkspaceAdmissionOperations(t,
 		st,
 		managedAgentsForTest(st),
 		transport,
@@ -431,7 +455,7 @@ func TestWorkspaceAdmissionRuntimeClaimsExpiredOwnerAfterHardCrash(t *testing.T)
 	oldGuard := repositoryAdmissionGuard(old)
 
 	// A new serve incarnation cannot steal a live lease.
-	restarted := NewStoreBackedWorkspaceAdmissionOperations(
+	restarted := newTestStoreBackedWorkspaceAdmissionOperations(t,
 		st,
 		managedAgentsForTest(st),
 		transport,

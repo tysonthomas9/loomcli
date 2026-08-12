@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tysonthomas9/loomcli/internal/backend"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 )
 
 // fakeAuthConfigServer returns an httptest.Server whose /api/config endpoint
@@ -132,32 +132,32 @@ func TestResetClient(t *testing.T) {
 	})
 }
 
-func TestGetIssueBackend_NoServerNoProvider(t *testing.T) {
+func TestGetWorkItems_NoServerNoProvider(t *testing.T) {
 	withDataClientState(t, func() {
 		t.Setenv("LOOM_SERVER_URL", "")
 		serverURL = ""
-		SetLocalIssueBackendProvider(nil)
+		SetLocalWorkItemsProvider(nil)
 
-		_, err := getIssueBackend(context.Background())
+		_, err := getWorkItems(context.Background())
 		if err == nil {
 			t.Fatal("expected missing backend provider error")
 		}
-		if !strings.Contains(err.Error(), "local backend provider") {
-			t.Fatalf("error = %q, want local backend provider hint", err.Error())
+		if !strings.Contains(err.Error(), "local Work Items provider") {
+			t.Fatalf("error = %q, want local Work Items provider hint", err.Error())
 		}
 	})
 }
 
-func TestGetIssueBackend_NilProviderResult(t *testing.T) {
+func TestGetWorkItems_NilProviderResult(t *testing.T) {
 	withDataClientState(t, func() {
 		t.Setenv("LOOM_SERVER_URL", "")
 		serverURL = ""
-		SetLocalIssueBackendProvider(func(context.Context) backend.IssueBackend {
+		SetLocalWorkItemsProvider(func(context.Context) workitems.API {
 			return nil
 		})
-		t.Cleanup(func() { SetLocalIssueBackendProvider(nil) })
+		t.Cleanup(func() { SetLocalWorkItemsProvider(nil) })
 
-		_, err := getIssueBackend(context.Background())
+		_, err := getWorkItems(context.Background())
 		if err == nil {
 			t.Fatal("expected nil provider result error")
 		}
@@ -167,7 +167,7 @@ func TestGetIssueBackend_NilProviderResult(t *testing.T) {
 	})
 }
 
-func TestGetIssueBackend_FromServerURL(t *testing.T) {
+func TestGetWorkItems_FromServerURL(t *testing.T) {
 	srv := fakeAuthConfigServer(t)
 	defer srv.Close()
 
@@ -176,14 +176,18 @@ func TestGetIssueBackend_FromServerURL(t *testing.T) {
 		t.Setenv("LOOM_WORKSPACE", "default")
 		serverURL = srv.URL
 
-		ib, err := getIssueBackend(context.Background())
+		ib, err := getWorkItems(context.Background())
 		if err != nil {
-			t.Fatalf("getIssueBackend: %v", err)
+			t.Fatalf("getWorkItems: %v", err)
 		}
 		if ib == nil {
-			t.Fatal("expected issue backend")
+			t.Fatal("expected Work Items adapter")
 		}
-		if got := ib.BackendName(); got != "api" {
+		named, ok := ib.(interface{ BackendName() string })
+		if !ok {
+			t.Fatal("API Work Items adapter does not expose its diagnostic name")
+		}
+		if got := named.BackendName(); got != "api" {
 			t.Fatalf("BackendName = %q, want api", got)
 		}
 	})

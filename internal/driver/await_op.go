@@ -1,15 +1,9 @@
 package driver
 
 import (
-	"context"
-	"errors"
-	"fmt"
 	"os"
 	"strconv"
 	"time"
-
-	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
 const (
@@ -67,43 +61,4 @@ func resolveAwaitTotalSuspendCap() time.Duration {
 		}
 	}
 	return DefaultAwaitTotalSuspendCap
-}
-
-const (
-	maxAwaitListProbe       = 1000
-	awaitPendingScanLimit   = 10000
-	awaitPendingScanHorizon = 24 * time.Hour * 365 * 10
-)
-
-// ListRunAwaits is the read-only re-entry projection. It accepts only the
-// narrow AwaitStore query port; it cannot mutate DriverRun state.
-func ListRunAwaits(ctx context.Context, awaits store.AwaitStore, workspace, runID string) ([]*domain.AwaitInstance, error) {
-	due, err := awaits.ListDueAwaitDeadlines(ctx, workspace,
-		time.Now().UTC().Add(awaitPendingScanHorizon), awaitPendingScanLimit)
-	if err != nil {
-		return nil, fmt.Errorf("scan pending awaits: %w", err)
-	}
-	pending := make(map[string]*domain.AwaitInstance)
-	for _, instance := range due {
-		if instance.RunID == runID {
-			pending[instance.InstanceKey] = instance
-		}
-	}
-	out := make([]*domain.AwaitInstance, 0)
-	for index := 1; index <= maxAwaitListProbe; index++ {
-		key := domain.AwaitInstanceKey(runID, index)
-		if instance, ok := pending[key]; ok {
-			out = append(out, instance)
-			continue
-		}
-		instance, getErr := awaits.GetSatisfiedAwait(ctx, workspace, key)
-		if errors.Is(getErr, domain.ErrNotFound) {
-			break
-		}
-		if getErr != nil {
-			return nil, fmt.Errorf("get await %s: %w", key, getErr)
-		}
-		out = append(out, instance)
-	}
-	return out, nil
 }

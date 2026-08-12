@@ -12,15 +12,14 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
-// legacyReconciliationQueuePort is test-only glue for compact memstore
-// fixtures. Production composition owns the equivalent Store translation in
-// app/serve and publishes only Execution's typed API.
-type legacyReconciliationQueuePort struct {
+// testReconciliationQueuePort adapts compact memstore fixtures to Execution's
+// current queue ports. Production composition publishes only the typed API.
+type testReconciliationQueuePort struct {
 	awaitEvents store.AwaitEventNotificationStore
 	runOutcomes store.DriverRunOutcomeStore
 }
 
-func (port *legacyReconciliationQueuePort) ClaimAwaitEventNotifications(
+func (port *testReconciliationQueuePort) ClaimAwaitEventNotifications(
 	ctx context.Context,
 	lease execution.AwaitEventNotificationLease,
 ) ([]execution.AwaitEventNotification, error) {
@@ -49,7 +48,7 @@ func (port *legacyReconciliationQueuePort) ClaimAwaitEventNotifications(
 	return out, nil
 }
 
-func (port *legacyReconciliationQueuePort) CompleteAwaitEventNotification(
+func (port *testReconciliationQueuePort) CompleteAwaitEventNotification(
 	ctx context.Context,
 	completion execution.AwaitEventNotificationCompletion,
 ) error {
@@ -59,7 +58,7 @@ func (port *legacyReconciliationQueuePort) CompleteAwaitEventNotification(
 	})
 }
 
-func (port *legacyReconciliationQueuePort) RetryAwaitEventNotification(
+func (port *testReconciliationQueuePort) RetryAwaitEventNotification(
 	ctx context.Context,
 	retry execution.AwaitEventNotificationRetry,
 ) error {
@@ -69,7 +68,7 @@ func (port *legacyReconciliationQueuePort) RetryAwaitEventNotification(
 	})
 }
 
-func (port *legacyReconciliationQueuePort) ClaimDriverRunOutcomes(
+func (port *testReconciliationQueuePort) ClaimDriverRunOutcomes(
 	ctx context.Context,
 	lease execution.DriverRunOutcomeLease,
 ) ([]execution.DriverRunOutcome, error) {
@@ -93,7 +92,7 @@ func (port *legacyReconciliationQueuePort) ClaimDriverRunOutcomes(
 	return out, nil
 }
 
-func (port *legacyReconciliationQueuePort) CompleteDriverRunOutcome(
+func (port *testReconciliationQueuePort) CompleteDriverRunOutcome(
 	ctx context.Context,
 	completion execution.DriverRunOutcomeCompletion,
 ) error {
@@ -103,7 +102,7 @@ func (port *legacyReconciliationQueuePort) CompleteDriverRunOutcome(
 	})
 }
 
-func (port *legacyReconciliationQueuePort) RetryDriverRunOutcome(
+func (port *testReconciliationQueuePort) RetryDriverRunOutcome(
 	ctx context.Context,
 	retry execution.DriverRunOutcomeRetry,
 ) error {
@@ -113,11 +112,11 @@ func (port *legacyReconciliationQueuePort) RetryDriverRunOutcome(
 	})
 }
 
-type legacyReconciliationAuthorities struct {
+type testReconciliationAuthorities struct {
 	issuer *authority.Issuer
 }
 
-func (resolver *legacyReconciliationAuthorities) ResolveExecutionSystemAuthority(
+func (resolver *testReconciliationAuthorities) ResolveExecutionSystemAuthority(
 	_ context.Context,
 	workspace string,
 	action authority.Action,
@@ -133,31 +132,31 @@ func (resolver *legacyReconciliationAuthorities) ResolveExecutionSystemAuthority
 	return resolver.issuer.IssueSystem(principal, workspace, action, "test reconciliation component")
 }
 
-func newLegacyReconciliationQueues(
+func newTestReconciliationQueues(
 	awaitEvents store.AwaitEventNotificationStore,
 	runOutcomes store.DriverRunOutcomeStore,
-) (*execution.Service, *legacyReconciliationAuthorities, error) {
+) (*execution.Service, *testReconciliationAuthorities, error) {
 	issuer := authority.NewIssuer()
 	rules := append(execution.OperationRules(), execution.DriverRunOperationRules()...)
 	admission, err := issuer.NewAdmission(rules...)
 	if err != nil {
 		return nil, nil, err
 	}
-	port := &legacyReconciliationQueuePort{awaitEvents: awaitEvents, runOutcomes: runOutcomes}
+	port := &testReconciliationQueuePort{awaitEvents: awaitEvents, runOutcomes: runOutcomes}
 	service, err := execution.New(execution.Dependencies{AwaitEvents: port, RunOutcomes: port}, admission)
 	if err != nil {
 		return nil, nil, err
 	}
-	return service, &legacyReconciliationAuthorities{issuer: issuer}, nil
+	return service, &testReconciliationAuthorities{issuer: issuer}, nil
 }
 
-func NewAwaitEventReconciler(
+func newTestAwaitEventReconciler(
 	outbox store.AwaitEventNotificationStore,
 	dispatcher trigger.AwaitEventDispatcher,
 	workspace string,
 	workspaces RunOutcomeWorkspaceLister,
 ) (*trigger.AwaitEventReconciler, error) {
-	queue, authorities, err := newLegacyReconciliationQueues(outbox, nil)
+	queue, authorities, err := newTestReconciliationQueues(outbox, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -228,7 +227,7 @@ func (noOpRunOutcomeCascade) RecoverChildDriverRunCascade(
 	}, nil
 }
 
-func NewRunOutcomeReconciler(
+func newTestRunOutcomeReconciler(
 	outbox store.DriverRunOutcomeStore,
 	awaits RunOutcomeAwaitNotifier,
 	journal store.TriggerEventAppender,
@@ -236,7 +235,7 @@ func NewRunOutcomeReconciler(
 	workspace string,
 	workspaces RunOutcomeWorkspaceLister,
 ) (*RunOutcomeReconciler, error) {
-	queue, authorities, err := newLegacyReconciliationQueues(nil, outbox)
+	queue, authorities, err := newTestReconciliationQueues(nil, outbox)
 	if err != nil {
 		return nil, err
 	}
@@ -248,8 +247,8 @@ func NewRunOutcomeReconciler(
 
 func testRunOutcomeQueue(
 	outbox store.DriverRunOutcomeStore,
-) (*execution.Service, *legacyReconciliationAuthorities, error) {
-	return newLegacyReconciliationQueues(nil, outbox)
+) (*execution.Service, *testReconciliationAuthorities, error) {
+	return newTestReconciliationQueues(nil, outbox)
 }
 
 func testAwaitEvent(workspace, eventID, sourceEventID, eventType, subjectRef, sourceKind string, origin automation.EventOrigin, actor string, payload []byte) execution.AwaitEvent {

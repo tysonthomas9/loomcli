@@ -56,7 +56,7 @@ const (
 // package tree's non-test sources.
 // When you add/remove/move a client call, update clientRoutes below FIRST, then
 // bump this constant.
-const expectedClientCallSites = 236
+const expectedClientCallSites = 234
 
 // clientRoute is one method+path template the client issues. Path params are
 // written as {} (already normalized).

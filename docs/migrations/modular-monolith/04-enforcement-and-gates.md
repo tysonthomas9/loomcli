@@ -133,7 +133,7 @@ Use both:
 The initial matrix is explicit rather than “all build tags”:
 
 - untagged packages for the release targets `linux/amd64`, `linux/arm64`, `darwin/amd64`, and `darwin/arm64`;
-- Linux/amd64 profiles for `integration`, `e2e`, `testbackend`, `issuebackend_e2e`, `container`, `playground`, and `race` source selection;
+- Linux/amd64 profiles for `integration`, `e2e`, `testbackend`, `workitems_e2e`, `container`, `playground`, and `race` source selection;
 - an AST-only pass over every non-generated `.go` and `_test.go` file regardless of selected tags, so Windows/wasm and mutually exclusive files cannot hide a forbidden import or signature;
 - `//go:build ignore` files excluded only through a named allowlist entry with a reason and expiry.
 

@@ -16,12 +16,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/cli/serve/serveadapter"
 	driverexecutor "github.com/tysonthomas9/loomcli/internal/driver"
 	trigger "github.com/tysonthomas9/loomcli/internal/infra/automationruntime"
 	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
 	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui"
 )
@@ -55,6 +55,8 @@ func buildExecutionRuntimePasses(
 	executionCapability webui.ExecutionCapability,
 	artifactsCapability webui.ArtifactsCapability,
 	sourceControl sourcecontrol.Materializer,
+	stackBindings sourcecontrol.StackBindingResolver,
+	taskOutcomes sourcecontrol.TaskOutcomeRecorder,
 	config serveRuntimeConfig,
 ) (serveadapter.ExecutionRuntimePasses, error) {
 	if err := validateExecutionRuntimePassCapabilities(st, executionCapability, artifactsCapability); err != nil {
@@ -73,9 +75,9 @@ func buildExecutionRuntimePasses(
 	if !config.DriverExecutorEnabled {
 		return passes, nil
 	}
-	if sourceControl == nil {
+	if sourceControl == nil || stackBindings == nil || taskOutcomes == nil {
 		return serveadapter.ExecutionRuntimePasses{}, fmt.Errorf(
-			"compose Execution task workers: Source Control materializer is required",
+			"compose Execution task workers: Source Control materializer, stack bindings, and task outcomes are required",
 		)
 	}
 	workDir, err := os.Getwd()
@@ -90,18 +92,40 @@ func buildExecutionRuntimePasses(
 	if !ok {
 		return serveadapter.ExecutionRuntimePasses{}, fmt.Errorf("compose Execution driver executor: sandbox configuration rejected")
 	}
-	taskWorkerTemplate := driverexecutor.TaskWorker{
+	taskWorkerTemplate := newExecutionTaskWorker(
+		st, executor, artifactsCapability, executionCapability,
+		sourceControl, stackBindings, taskOutcomes, config, workDir, nodeCapacity,
+	)
+	passes.DriverExecutor, passes.TaskWorkers = serveadapter.BuildSharedNodeExecutionRuntimePasses(executor, taskWorkerTemplate, nodeCapacity)
+	return passes, nil
+}
+
+func newExecutionTaskWorker(
+	st store.Store,
+	executor *driverexecutor.Executor,
+	artifactsCapability webui.ArtifactsCapability,
+	executionCapability webui.ExecutionCapability,
+	sourceControl sourcecontrol.Materializer,
+	stackBindings sourcecontrol.StackBindingResolver,
+	taskOutcomes sourcecontrol.TaskOutcomeRecorder,
+	config serveRuntimeConfig,
+	workDir string,
+	nodeCapacity int,
+) driverexecutor.TaskWorker {
+	return driverexecutor.TaskWorker{
 		Store: st, WorkspaceKey: executor.WorkspaceKey, WorkDir: workDir,
 		Artifacts: artifactsCapability.ArtifactsAPI(),
 		NodeID:    executor.NodeID, NodeCapacity: nodeCapacity, RunnerID: config.TaskWorkerRunnerID,
 		MaxAttempts: config.TaskRunMaxAttempts, APIBaseURL: config.DriverAPIBaseURL,
-		LocalSettingsDir: config.LocalSettingsDir, Execution: executionCapability.TaskRunWorkerAPI(),
-		SourceControl:      sourceControl,
-		TaskRunAuthorities: executionCapability.TaskRunAuthorityResolver(),
-		Convergence:        executionCapability.TaskRunConvergenceAPI(), ExecutionAuthorities: executionCapability.SystemAuthorityResolver(),
+		LocalTaskRunnerEnv:   serveadapter.LocalTaskRunnerEnvProvider(config.LocalSettingsDir),
+		Execution:            executionCapability.TaskRunWorkerAPI(),
+		SourceControl:        sourceControl,
+		StackBindings:        stackBindings,
+		TaskOutcomes:         taskOutcomes,
+		TaskRunAuthorities:   executionCapability.TaskRunAuthorityResolver(),
+		Convergence:          executionCapability.TaskRunConvergenceAPI(),
+		ExecutionAuthorities: executionCapability.SystemAuthorityResolver(),
 	}
-	passes.DriverExecutor, passes.TaskWorkers = serveadapter.BuildSharedNodeExecutionRuntimePasses(executor, taskWorkerTemplate, nodeCapacity)
-	return passes, nil
 }
 
 // startOutboxDispatcher launches the always-on server-side outbox delivery
@@ -196,10 +220,13 @@ func startIssueJournalBridge(
 	repositoryRequiredBlocker trigger.TaskReadyRepositoryRequiredBlocker,
 	source trigger.InternalEventEmitter,
 	config issueJournalConfig,
-) {
-	bridge := buildIssueJournalBridge(st, issueLookup, readySnapshots, repositoryRequiredBlocker, source, config)
+) error {
+	bridge, err := buildIssueJournalBridge(st, issueLookup, readySnapshots, repositoryRequiredBlocker, source, config)
+	if err != nil {
+		return err
+	}
 	if bridge == nil {
-		return
+		return nil
 	}
 	interval := config.Interval
 	slog.Info("Issue journal bridge enabled", "workspace", bridge.WorkspaceKey, "interval", interval,
@@ -223,6 +250,7 @@ func startIssueJournalBridge(
 			}
 		}
 	}()
+	return nil
 }
 
 func buildIssueJournalBridge(
@@ -232,26 +260,31 @@ func buildIssueJournalBridge(
 	repositoryRequiredBlocker trigger.TaskReadyRepositoryRequiredBlocker,
 	source trigger.InternalEventEmitter,
 	config issueJournalConfig,
-) *trigger.IssueJournalBridge {
+) (*trigger.IssueJournalBridge, error) {
 	if st == nil || source == nil {
 		if st != nil {
 			slog.Info("issue journal bridge disabled: Automation system eventing is unavailable")
 		}
-		return nil
+		return nil, nil
 	}
 	if config.Disabled {
 		slog.Info("issue journal bridge disabled: LOOM_ISSUE_BRIDGE_DISABLED set")
-		return nil
+		return nil, nil
 	}
 	reader, ok := st.TriggerEvents().(store.IssueJournalReader)
 	if !ok {
 		slog.Info("issue journal bridge disabled: store has no journal reader")
-		return nil
+		return nil, nil
+	}
+	if (config.EmitTaskReady || config.EmitTaskReview) && (issueLookup == nil || repositoryRequiredBlocker == nil) {
+		return nil, fmt.Errorf("compose issue journal task lanes: current issue lookup and repository admission are required")
+	}
+	if config.EmitTaskReady && readySnapshots == nil {
+		return nil, fmt.Errorf("compose issue journal task-ready lane: current ready snapshots are required")
 	}
 	cursors, err := trigger.NewFileIssueJournalCursorStore(config.StatePath, slog.Default())
 	if err != nil {
-		slog.Error("issue journal bridge disabled: cannot load cursor state", "err", err)
-		return nil
+		return nil, fmt.Errorf("compose issue journal cursor store: %w", err)
 	}
 	return &trigger.IssueJournalBridge{
 		Store:  st,
@@ -270,7 +303,7 @@ func buildIssueJournalBridge(
 		IssueLookup:               issueLookup,
 		ReadySnapshots:            readySnapshots,
 		RepositoryRequiredBlocker: repositoryRequiredBlocker,
-	}
+	}, nil
 }
 
 // taskReadyRepositoryRequired reports whether a runnable issue without an
@@ -289,25 +322,21 @@ func taskReadyRepositoryRequired(issueType, sourceRepo string, repoCount int) bo
 // overwrite a concurrent claim or repository assignment.
 func blockRepositoryRequiredTask(
 	ctx context.Context,
-	issueBackend backend.IssueBackend,
+	items workitems.API,
 	issueID string,
 ) (trigger.TaskReadyRepositoryRequiredResult, error) {
-	repositoryBackend, ok := issueBackend.(backend.RepositoryRequirementBackend)
-	if !ok {
-		return trigger.TaskReadyRepositoryRequiredResult{}, backend.ErrNotImplemented(
-			"BlockRepositoryRequired",
-			"issue backend does not support atomic repository-required admission",
-		)
+	if items == nil {
+		return trigger.TaskReadyRepositoryRequiredResult{}, workitems.ErrUnavailable
 	}
-	result, err := repositoryBackend.BlockRepositoryRequired(ctx, issueID)
+	result, err := items.BlockRepositoryRequired(ctx, workitems.BlockRepositoryRequiredCommand{IssueID: issueID})
 	if err != nil {
-		if backend.IsKind(err, backend.KindNotFound) {
+		if errors.Is(err, workitems.ErrNotFound) {
 			return trigger.TaskReadyRepositoryRequiredResult{}, nil
 		}
 		return trigger.TaskReadyRepositoryRequiredResult{}, fmt.Errorf("move repository-required task to blocked: %w", err)
 	}
 	if result == nil {
-		return trigger.TaskReadyRepositoryRequiredResult{}, backend.ErrInternal(
+		return trigger.TaskReadyRepositoryRequiredResult{}, workitems.AdapterInternal(
 			"BlockRepositoryRequired",
 			"atomic repository-required admission returned no result",
 			nil,
@@ -335,9 +364,9 @@ func blockRepositoryRequiredTask(
 	return trigger.TaskReadyRepositoryRequiredResult{DispatchReady: canonical}, nil
 }
 
-func repositoryRequiredDispatchSnapshot(result *backend.RepositoryRequirementResult) (*trigger.TaskReadySnapshot, error) {
+func repositoryRequiredDispatchSnapshot(result *workitems.RepositoryAdmissionResult) (*trigger.TaskReadySnapshot, error) {
 	if result.Issue == nil || strings.TrimSpace(result.Issue.ID) == "" {
-		return nil, backend.ErrInternal(
+		return nil, workitems.AdapterInternal(
 			"BlockRepositoryRequired",
 			"dispatch-ready result is missing the canonical issue",
 			nil,

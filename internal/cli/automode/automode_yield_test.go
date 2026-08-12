@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/backend"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 	"github.com/tysonthomas9/loomcli/internal/usage"
 )
 
@@ -90,7 +90,7 @@ func TestRunAutoModeLoop_YieldBeforeFirstTask(t *testing.T) {
 	// Mock issue-store ready to return tasks (loop would continue without yield)
 	installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
 		return CommandResult{
-			Stdout: mustJSON([]backend.IssueData{
+			Stdout: mustJSON([]workitems.IssueSummary{
 				{ID: "T-1", Title: "Task", Status: "open", Design: "Design"},
 			}),
 		}
@@ -144,7 +144,7 @@ func TestRunAutoModeLoop_YieldAfterTask(t *testing.T) {
 
 	installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
 		return CommandResult{
-			Stdout: mustJSON([]backend.IssueData{
+			Stdout: mustJSON([]workitems.IssueSummary{
 				{ID: "T-1", Title: "Task", Status: "open", Design: "Design"},
 			}),
 		}
@@ -203,7 +203,7 @@ func TestRunAutoModeLoop_NoYieldFileEnv(t *testing.T) {
 
 	installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
 		return CommandResult{
-			Stdout: mustJSON([]backend.IssueData{
+			Stdout: mustJSON([]workitems.IssueSummary{
 				{ID: "T-1", Title: "Task", Status: "open", Design: "Design"},
 			}),
 		}
@@ -259,7 +259,7 @@ func TestRunAutoModeLoop_YieldWithMalformedJSON(t *testing.T) {
 
 	installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
 		return CommandResult{
-			Stdout: mustJSON([]backend.IssueData{
+			Stdout: mustJSON([]workitems.IssueSummary{
 				{ID: "T-1", Title: "Task", Status: "open", Design: "Design"},
 			}),
 		}

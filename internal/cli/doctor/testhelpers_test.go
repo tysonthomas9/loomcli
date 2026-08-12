@@ -8,8 +8,8 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli"
-	"github.com/tysonthomas9/loomcli/internal/cli/clitest"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
+	"github.com/tysonthomas9/loomcli/internal/cli/testdata/clitest"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
@@ -20,13 +20,13 @@ type LoomConfig = config.LoomConfig
 type WorkspaceConfig = config.WorkspaceConfig
 type FleetDBServerConfig = config.FleetDBServerConfig
 type MockExecRunner = clitest.MockExecRunner
-type MockIssueBackend = clitest.MockIssueBackend
+type MockWorkItems = clitest.MockWorkItems
 
 const LockFileName = cli.LockFileName
 
 var ResetWorkspaceRuntimeDirCache = cli.ResetWorkspaceRuntimeDirCache
 
-func NewTestDeps(t *testing.T) (*cli.Deps, *clitest.MockGitRunner, *clitest.MockExecRunner, *clitest.MockFileSystem, *clitest.MockIssueBackend) {
+func NewTestDeps(t *testing.T) (*cli.Deps, *clitest.MockGitRunner, *clitest.MockExecRunner, *clitest.MockFileSystem, *clitest.MockWorkItems) {
 	return clitest.NewTestDeps(t)
 }
 

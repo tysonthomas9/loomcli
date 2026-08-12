@@ -11,9 +11,9 @@ import (
 	"testing"
 
 	"github.com/tysonthomas9/loomcli/internal/cli"
-	"github.com/tysonthomas9/loomcli/internal/cli/clitest"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/cli/monitor"
+	"github.com/tysonthomas9/loomcli/internal/cli/testdata/clitest"
 )
 
 type MonitorData = monitor.MonitorData
@@ -237,7 +237,7 @@ func handleWorkspaces(w http.ResponseWriter, r *http.Request) {
 
 type CommandResult = cli.CommandResult
 
-func NewTestDeps(t testing.TB) (*cli.Deps, *clitest.MockGitRunner, *clitest.MockExecRunner, *clitest.MockFileSystem, *clitest.MockIssueBackend) {
+func NewTestDeps(t testing.TB) (*cli.Deps, *clitest.MockGitRunner, *clitest.MockExecRunner, *clitest.MockFileSystem, *clitest.MockWorkItems) {
 	return clitest.NewTestDeps(t.(*testing.T))
 }
 

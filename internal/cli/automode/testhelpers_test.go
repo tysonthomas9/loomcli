@@ -6,11 +6,11 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/backends"
-	"github.com/tysonthomas9/loomcli/internal/cli/clitest"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
+	"github.com/tysonthomas9/loomcli/internal/cli/testdata/clitest"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 	"github.com/tysonthomas9/loomcli/internal/usage"
 )
 
@@ -31,15 +31,14 @@ const (
 )
 
 var (
-	AcquireLock         = cli.AcquireLock
-	ReleaseLock         = cli.ReleaseLock
-	UpdateLockTask      = cli.UpdateLockTask
-	ClearLockTaskID     = cli.ClearLockTaskID
-	ReadLockFile        = cli.ReadLockFile
-	GetSignalFilePath   = cli.GetSignalFilePath
-	HasUnclosedBlockers = cli.HasUnclosedBlockers
-	RegisterBackend     = cli.RegisterBackend
-	SetBackend          = cli.SetBackend
+	AcquireLock       = cli.AcquireLock
+	ReleaseLock       = cli.ReleaseLock
+	UpdateLockTask    = cli.UpdateLockTask
+	ClearLockTaskID   = cli.ClearLockTaskID
+	ReadLockFile      = cli.ReadLockFile
+	GetSignalFilePath = cli.GetSignalFilePath
+	RegisterBackend   = cli.RegisterBackend
+	SetBackend        = cli.SetBackend
 )
 
 func generateTestPlanPrompt(agentName string) string {
@@ -50,10 +49,10 @@ func generateTestTaskPrompt(agentName string) string {
 	return "test-task-prompt-for-" + agentName
 }
 
-func NewMockIssueBackend() *clitest.MockIssueBackend { return clitest.NewMockIssueBackend() }
+func NewMockWorkItems() *clitest.MockWorkItems { return clitest.NewMockWorkItems() }
 
-var resetDefaultIssueBackend = cli.ResetDefaultIssueBackend
-var setDefaultIssueBackend = cli.SetDefaultIssueBackend
+var resetDefaultWorkItems = cli.ResetDefaultWorkItems
+var setDefaultWorkItems = cli.SetDefaultWorkItems
 
 func resetBackendState(t *testing.T) {
 	t.Helper()
@@ -64,31 +63,31 @@ func installExecMock(t *testing.T, m *clitest.MockExecRunner) {
 	t.Helper()
 	dd := cli.TestingGetDefaultDeps()
 	orig := dd.Exec
-	origIssueBackend := dd.IssueBackend
+	origWorkItems := dd.WorkItems
 	dd.Exec = m
-	dd.IssueBackend = newExecReadyIssueBackend(m)
-	cli.ResetDefaultIssueBackend()
+	dd.WorkItems = newExecReadyWorkItems(m)
+	cli.ResetDefaultWorkItems()
 	t.Cleanup(func() {
 		dd.Exec = orig
-		dd.IssueBackend = origIssueBackend
-		cli.ResetDefaultIssueBackend()
+		dd.WorkItems = origWorkItems
+		cli.ResetDefaultWorkItems()
 	})
 }
 
-type execReadyIssueBackend struct {
-	*clitest.MockIssueBackend
+type execReadyWorkItems struct {
+	*clitest.MockWorkItems
 	run func(dir, name string, args ...string) cli.CommandResult
 }
 
-func newExecReadyIssueBackend(m *clitest.MockExecRunner) *execReadyIssueBackend {
-	return &execReadyIssueBackend{
-		MockIssueBackend: clitest.NewMockIssueBackend(),
-		run:              m.Run,
+func newExecReadyWorkItems(m *clitest.MockExecRunner) *execReadyWorkItems {
+	return &execReadyWorkItems{
+		MockWorkItems: clitest.NewMockWorkItems(),
+		run:           m.Run,
 	}
 }
 
-func (b *execReadyIssueBackend) Ready(ctx context.Context, opts backend.ReadyOpts) ([]backend.IssueData, error) {
-	b.MockIssueBackend.Ready(ctx, opts)
+func (b *execReadyWorkItems) Ready(ctx context.Context, opts workitems.AvailabilityQuery) ([]workitems.IssueSummary, error) {
+	b.MockWorkItems.Ready(ctx, opts)
 	result := b.run(cli.GetWorkspaceRuntimeDir(), "issue-store", readyArgs(opts)...)
 	if result.Err != nil {
 		return nil, result.Err
@@ -96,7 +95,7 @@ func (b *execReadyIssueBackend) Ready(ctx context.Context, opts backend.ReadyOpt
 	return parseReadyIssues(result.Stdout)
 }
 
-func readyArgs(opts backend.ReadyOpts) []string {
+func readyArgs(opts workitems.AvailabilityQuery) []string {
 	limit := opts.Limit
 	if limit <= 0 {
 		limit = 10000
@@ -108,18 +107,18 @@ func readyArgs(opts backend.ReadyOpts) []string {
 	return args
 }
 
-func parseReadyIssues(stdout string) ([]backend.IssueData, error) {
+func parseReadyIssues(stdout string) ([]workitems.IssueSummary, error) {
 	type issueWire struct {
-		backend.IssueData
+		workitems.IssueSummary
 		Type string `json:"type,omitempty"`
 	}
 	var wire []issueWire
 	if err := json.Unmarshal([]byte(stdout), &wire); err != nil {
 		return nil, err
 	}
-	issues := make([]backend.IssueData, len(wire))
+	issues := make([]workitems.IssueSummary, len(wire))
 	for i, item := range wire {
-		issues[i] = item.IssueData
+		issues[i] = item.IssueSummary
 		if issues[i].IssueType == "" {
 			issues[i].IssueType = item.Type
 		}

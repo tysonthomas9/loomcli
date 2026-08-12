@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/tysonthomas9/loomcli/internal/backend"
-	"github.com/tysonthomas9/loomcli/internal/backend/api/gen"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
+	"github.com/tysonthomas9/loomcli/internal/platform/loomapi/gen"
 )
 
 const (
@@ -21,8 +21,8 @@ func writeJSON(w io.Writer, v interface{}) error {
 	return enc.Encode(v)
 }
 
-// printIssueDetail renders a backend.IssueDetailData in the requested format.
-func printIssueDetail(w io.Writer, d *backend.IssueDetailData, format string) error {
+// printIssueDetail renders a Work Items detail in the requested format.
+func printIssueDetail(w io.Writer, d *workitems.IssueDetail, format string) error {
 	if d == nil {
 		return fmt.Errorf("issue detail is nil")
 	}
@@ -66,27 +66,35 @@ func printIssueDetail(w io.Writer, d *backend.IssueDetailData, format string) er
 	return nil
 }
 
-// printIssueList renders a slice of backend.IssueData in the requested format.
-// An empty list prints `(no issues)` in text mode and `[]` in JSON mode so
-// shell pipelines never see "null".
-func printIssueList(w io.Writer, items []backend.IssueData, format string) error {
+func printWorkItemSummaries(w io.Writer, items []workitems.IssueSummary, format string) error {
 	if items == nil {
-		items = []backend.IssueData{}
+		items = []workitems.IssueSummary{}
 	}
 	if format == formatJSON {
 		return writeJSON(w, items)
 	}
+	return printIssueRows(w, items, func(item workitems.IssueSummary) issueListRow {
+		return issueListRow{item.ID, item.Title, item.Status, item.IssueType, item.Priority}
+	})
+}
+
+type issueListRow struct {
+	id, title, status, issueType string
+	priority                     int
+}
+
+func printIssueRows[T any](w io.Writer, items []T, project func(T) issueListRow) error {
 	if len(items) == 0 {
 		fmt.Fprintln(w, "(no issues)")
 		return nil
 	}
-	for _, it := range items {
-		typ := it.IssueType
-		if typ == "" {
-			typ = "-"
+	for _, item := range items {
+		row := project(item)
+		if row.issueType == "" {
+			row.issueType = "-"
 		}
 		fmt.Fprintf(w, "%-24s  P%d  %-10s  %-10s  %s\n",
-			it.ID, it.Priority, it.Status, typ, it.Title)
+			row.id, row.priority, row.status, row.issueType, row.title)
 	}
 	return nil
 }
@@ -99,7 +107,7 @@ func printIssueList(w io.Writer, items []backend.IssueData, format string) error
 //     stdout line;
 //   - JSON mode: stdout stays pure JSON (the issue object); "CREATED <id>"
 //     goes to errW (stderr) so `... | jq .` keeps working.
-func printCreatedIssue(w, errW io.Writer, issue *backend.IssueData, format string) error {
+func printCreatedIssue(w, errW io.Writer, issue *workitems.IssueSummary, format string) error {
 	if issue == nil {
 		return fmt.Errorf("created issue is nil")
 	}
@@ -110,7 +118,7 @@ func printCreatedIssue(w, errW io.Writer, issue *backend.IssueData, format strin
 		fmt.Fprintf(errW, "CREATED %s\n", issue.ID)
 		return nil
 	}
-	if err := printIssueList(w, []backend.IssueData{*issue}, format); err != nil {
+	if err := printWorkItemSummaries(w, []workitems.IssueSummary{*issue}, format); err != nil {
 		return err
 	}
 	fmt.Fprintf(w, "CREATED %s\n", issue.ID)

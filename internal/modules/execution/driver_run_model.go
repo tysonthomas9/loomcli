@@ -20,6 +20,10 @@ const (
 	DriverRunSuspendedAwait DriverRunStatus = "suspended_awaiting_event"
 )
 
+func (status DriverAwaitStatus) IsTerminal() bool {
+	return status == DriverAwaitSatisfied || status == DriverAwaitTimedOut
+}
+
 func (status DriverRunStatus) IsTerminal() bool {
 	switch status {
 	case DriverRunCompleted, DriverRunFailed, DriverRunNeedsReview, DriverRunCancelled:
@@ -61,6 +65,18 @@ type DriverRun struct {
 	ResumeSourceEventID   string
 	CreatedAt             time.Time
 	UpdatedAt             time.Time
+}
+
+// DriverRunQuery is Execution's consumer-owned run-history filter. It keeps
+// query callers independent of the horizontal repository filter model.
+type DriverRunQuery struct {
+	WorkspaceKey   string
+	DriverID       string
+	EpicID         string
+	ParentRunID    string
+	AgentServiceID string
+	Status         DriverRunStatus
+	Limit          int
 }
 
 type SubmitDriverRunCommand struct {
@@ -375,19 +391,19 @@ const (
 )
 
 type DriverAwaitInstance struct {
-	WorkspaceKey       string
-	InstanceKey        string
-	RunID              string
-	Pattern            string
-	ActorAllow         []string
-	Deadline           time.Time
-	RegisteredAt       time.Time
-	Status             DriverAwaitStatus
-	SatisfiedByEventID string
-	SatisfiedActor     string
-	SatisfiedPayload   json.RawMessage
-	ResolvedAt         *time.Time
-	ResumedAt          *time.Time
+	WorkspaceKey       string            `json:"workspaceKey"`
+	InstanceKey        string            `json:"instanceKey"`
+	RunID              string            `json:"runId"`
+	Pattern            string            `json:"pattern"`
+	ActorAllow         []string          `json:"actorAllow,omitempty"`
+	Deadline           time.Time         `json:"deadline"`
+	RegisteredAt       time.Time         `json:"registeredAt"`
+	Status             DriverAwaitStatus `json:"status"`
+	SatisfiedByEventID string            `json:"satisfiedByEventId,omitempty"`
+	SatisfiedActor     string            `json:"satisfiedActor,omitempty"`
+	SatisfiedPayload   json.RawMessage   `json:"satisfiedPayload,omitempty"`
+	ResolvedAt         *time.Time        `json:"resolvedAt,omitempty"`
+	ResumedAt          *time.Time        `json:"resumedAt,omitempty"`
 }
 
 type DriverAwaitResult struct {
@@ -395,6 +411,42 @@ type DriverAwaitResult struct {
 	Instance *DriverAwaitInstance
 	Run      *DriverRun
 	Replay   bool
+}
+
+// DriverRunStep is Execution's read-only projection of a step linked to one
+// DriverRun. It exposes no repository mutation surface.
+type DriverRunStep struct {
+	WorkspaceKey string `json:"workspace_key"`
+	StepID       string `json:"step_id"`
+	DriverRunID  string `json:"driver_run_id"`
+	StepKind     string `json:"step_kind"`
+	Status       string `json:"status"`
+	TaskRunID    string `json:"task_run_id,omitempty"`
+}
+
+type DriverRunEvent struct {
+	ID          string            `json:"id"`
+	Timestamp   time.Time         `json:"timestamp"`
+	Actor       string            `json:"actor"`
+	Action      string            `json:"action"`
+	EntityType  string            `json:"entity_type"`
+	EntityID    string            `json:"entity_id"`
+	WorkspaceID string            `json:"workspace_id"`
+	Before      string            `json:"before,omitempty"`
+	After       string            `json:"after,omitempty"`
+	Metadata    map[string]string `json:"metadata,omitempty"`
+}
+
+type DriverRunEventQuery struct {
+	WorkspaceKey string
+	RunID        string
+	After        string
+	Limit        int
+}
+
+type DriverRunEventPage struct {
+	Events []DriverRunEvent `json:"events"`
+	Cursor string           `json:"cursor"`
 }
 
 const DriverAwaitOutcomeSuspended = "suspended"

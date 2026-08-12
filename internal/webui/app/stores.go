@@ -32,7 +32,6 @@ type ActivationReason = subscription.ActivationReason
 const (
 	ActivationReasonHTTP     = subscription.ActivationReasonHTTP
 	ActivationReasonRegistry = subscription.ActivationReasonRegistry
-	ActivationReasonSSE      = subscription.ActivationReasonSSE
 )
 
 // SessionRecord is a type alias for the session coordination projection.

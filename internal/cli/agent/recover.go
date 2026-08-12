@@ -9,8 +9,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/cli"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 )
 
 // strPtr returns a pointer to s. Used for UpdateOpts.Assignee where
@@ -117,13 +117,13 @@ func runRecover(cmd *cobra.Command, args []string) {
 // lock is an idempotent success. Callers still verify task ownership immediately
 // before any destructive status or assignee reset.
 func releaseFleetIssueLock(parent context.Context, deps *cli.Deps, agentName, taskID string) error {
-	if deps == nil || deps.IssueBackend == nil || agentName == "" || taskID == "" {
+	if deps == nil || deps.ClaimLeases == nil || agentName == "" || taskID == "" {
 		return nil
 	}
 	ctx, cancel := context.WithTimeout(parent, 5*time.Second)
 	defer cancel()
-	if err := deps.IssueBackend.ReleaseIssueLock(ctx, taskID, agentName); err != nil {
-		if backend.IsKind(err, backend.KindNotFound) {
+	if err := deps.ClaimLeases.ReleaseIssueLock(ctx, taskID, agentName); err != nil {
+		if errors.Is(err, workitems.ErrNotFound) {
 			return nil
 		}
 		if errors.Is(err, context.DeadlineExceeded) {
@@ -177,7 +177,8 @@ func clearStaleLock(worktreePath string, pid int) {
 func RecoverWorktree(ctx context.Context, worktreePath, agentName string, exitCode int) error {
 	deps := &cli.Deps{}
 	*deps = *cli.GetDeps(nil)
-	deps.IssueBackend = cli.DefaultIssueBackend()
+	deps.WorkItems = cli.DefaultWorkItems()
+	deps.ClaimLeases = cli.GetDeps(nil).ClaimLeases
 
 	// 1. Check lock status
 	lockInfo, isRunning, err := cli.CheckLock(worktreePath)

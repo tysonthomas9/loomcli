@@ -12,6 +12,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -38,7 +39,7 @@ func trustedBuiltinRunnerOwner(t *testing.T, trust workflowcatalog.DriverTrustLe
 // registerUntrustedCaller seeds an UNTRUSTED custom driver + version that does
 // NOT declare local-task-runner, plus returns a running parent DriverRun pinned
 // to it — the caller a global-fallback must resolve on behalf of.
-func registerUntrustedCaller(t *testing.T, st *memstore.Store) *domain.DriverRun {
+func registerUntrustedCaller(t *testing.T, st *memstore.Store) *execution.DriverRun {
 	t.Helper()
 	ctx := context.Background()
 	if _, err := st.Drivers().Create(ctx, store.DriverCreate{
@@ -66,7 +67,17 @@ func registerUntrustedCaller(t *testing.T, st *memstore.Store) *domain.DriverRun
 	if _, err := st.UnapproveDriverVersionForTest(ctx, "WS", "custom-agent", "custom-agent-v1"); err != nil {
 		t.Fatalf("restore caller version to active-untrusted: %v", err)
 	}
-	return &domain.DriverRun{RunID: "run-1", DriverID: "custom-agent", DriverVersionID: "custom-agent-v1", Status: domain.DriverRunRunning}
+	return &execution.DriverRun{RunID: "run-1", DriverID: "custom-agent", DriverVersionID: "custom-agent-v1", Status: execution.DriverRunRunning}
+}
+
+type testTaskRunRequestCatalog struct{ store *memstore.Store }
+
+func (catalog testTaskRunRequestCatalog) GetDriver(ctx context.Context, workspace, driverID string) (*workflowcatalog.Driver, error) {
+	return catalog.store.Drivers().Get(ctx, workspace, driverID)
+}
+
+func (catalog testTaskRunRequestCatalog) GetVersion(ctx context.Context, workspace, versionID string) (*workflowcatalog.DriverVersion, error) {
+	return catalog.store.DriverVersions().Get(ctx, workspace, versionID)
 }
 
 // An untrusted custom driver that never bundled local-task-runner resolves it
@@ -86,7 +97,7 @@ func TestResolveTaskRunRequestRunnerGlobalFallbackUsesBuiltinOwner(t *testing.T)
 	})
 	defer restore()
 
-	resolved, err := resolveTaskRunRequestRunner(context.Background(), st, TaskRunRequestOptions{WorkspaceKey: "WS", Runner: "local-task-runner"}, parent)
+	resolved, err := resolveTaskRunRequestRunner(context.Background(), testTaskRunRequestCatalog{store: st}, TaskRunRequestOptions{WorkspaceKey: "WS", Runner: "local-task-runner"}, parent)
 	if err != nil {
 		t.Fatalf("resolveTaskRunRequestRunner: %v", err)
 	}
@@ -114,7 +125,7 @@ func TestResolveTaskRunRequestRunnerUnknownRunnerSameError(t *testing.T) {
 	})
 	defer restore()
 
-	_, err := resolveTaskRunRequestRunner(context.Background(), st, TaskRunRequestOptions{WorkspaceKey: "WS", Runner: "no-such-runner"}, parent)
+	_, err := resolveTaskRunRequestRunner(context.Background(), testTaskRunRequestCatalog{store: st}, TaskRunRequestOptions{WorkspaceKey: "WS", Runner: "no-such-runner"}, parent)
 	if !errors.Is(err, ErrRunnerNotDeclared) || !errors.Is(err, domain.ErrInvalid) {
 		t.Fatalf("unknown runner err = %v, want the original not-declared (ErrRunnerNotDeclared + ErrInvalid)", err)
 	}
@@ -136,7 +147,7 @@ func TestResolveTaskRunRequestRunnerUntrustedOwnerNotResolvable(t *testing.T) {
 	})
 	defer restore()
 
-	_, err := resolveTaskRunRequestRunner(context.Background(), st, TaskRunRequestOptions{WorkspaceKey: "WS", Runner: "local-task-runner"}, parent)
+	_, err := resolveTaskRunRequestRunner(context.Background(), testTaskRunRequestCatalog{store: st}, TaskRunRequestOptions{WorkspaceKey: "WS", Runner: "local-task-runner"}, parent)
 	if !errors.Is(err, ErrRunnerNotDeclared) {
 		t.Fatalf("untrusted owner err = %v, want fall-through to the not-declared error", err)
 	}

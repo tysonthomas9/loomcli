@@ -1,20 +1,25 @@
 package workitems
 
-import "context"
+import (
+	"context"
+	"time"
+)
 
 // API is the Work Items-owned lifecycle, comment, event, and dependency
 // surface. Commands use aggregate-specific inputs; callers never receive a
 // generic issue updater.
 type API interface {
-	Create(context.Context, CreateCommand) (*CreatedIssue, error)
+	Create(context.Context, CreateCommand) (*IssueSummary, error)
 	List(context.Context, ListQuery) (*ListResult, error)
 	Ready(context.Context, AvailabilityQuery) ([]IssueSummary, error)
+	Blocked(context.Context, AvailabilityQuery) ([]IssueSummary, error)
 	Search(context.Context, SearchQuery) ([]IssueSummary, error)
 	Get(context.Context, GetQuery) (*IssueDetail, error)
 	Patch(context.Context, PatchCommand) (*IssueDetail, error)
 	Close(context.Context, CloseCommand) (*CloseResult, error)
 	Claim(context.Context, ClaimCommand) (*IssueDetail, error)
 	Reopen(context.Context, ReopenCommand) error
+	BlockRepositoryRequired(context.Context, BlockRepositoryRequiredCommand) (*RepositoryAdmissionResult, error)
 	AssignRepository(context.Context, AssignRepositoryCommand) (*IssueSummary, error)
 	Delete(context.Context, DeleteCommand) (DeleteResult, error)
 	ListEvents(context.Context, ListEventsQuery) ([]*Event, error)
@@ -31,6 +36,12 @@ type ReadyQueries interface {
 	Ready(context.Context, AvailabilityQuery) ([]IssueSummary, error)
 }
 
+// DeferredQueries is the narrow deferred-work projection consumed by queue
+// composition and aggregate statistics. It does not expose mutation authority.
+type DeferredQueries interface {
+	Deferred(context.Context, AvailabilityQuery) ([]IssueSummary, error)
+}
+
 // StatsQueries is the narrow aggregate projection consumed by health and
 // readiness delivery adapters.
 type StatsQueries interface {
@@ -44,6 +55,50 @@ type BlockedQueries interface {
 	Blocked(context.Context, AvailabilityQuery) ([]IssueSummary, error)
 }
 
+// SearchQueries is the narrow relevance-ranked query projection consumed by
+// search delivery. It is deliberately separate from List: adapters must use
+// their dedicated search endpoint rather than silently degrading to substring
+// filtering over an arbitrary page.
+type SearchQueries interface {
+	Search(context.Context, SearchQuery) ([]IssueSummary, error)
+}
+
+// EventQueries is the narrow immutable activity projection consumed by Work
+// Items delivery. Event storage dialects remain private to their adapters.
+type EventQueries interface {
+	ListEvents(context.Context, ListEventsQuery) ([]*Event, error)
+}
+
+// CommentQueries is the narrow immutable comment projection consumed by Work
+// Items delivery and issue-detail assembly.
+type CommentQueries interface {
+	ListComments(context.Context, ListCommentsQuery) ([]*Comment, error)
+}
+
+// CommentCommands is the narrow comment mutation port. Validation and default
+// author policy remain in the Work Items module.
+type CommentCommands interface {
+	AddComment(context.Context, AddCommentCommand) (*Comment, error)
+}
+
+// DependencyCommands is the narrow dependency mutation port. The adapter owns
+// transport translation; callers use only Work Items commands.
+type DependencyCommands interface {
+	AddDependency(context.Context, AddDependencyCommand) error
+	RemoveDependency(context.Context, RemoveDependencyCommand) error
+}
+
+// ClaimLeaseCommands is the operational claim-fencing port used by workers
+// and supervisors. It is separate from the lifecycle API because actor-scoped
+// lease renewal and lock-only release are not user-level Work Item commands.
+type ClaimLeaseCommands interface {
+	ClaimAsActor(context.Context, string, time.Duration, string) error
+	RenewClaimAsActor(context.Context, string, time.Duration, string) error
+	ReleaseIssueLock(context.Context, string, string) error
+	ReleaseIssueAsActor(context.Context, string, string) error
+	ReleaseClaim(context.Context, string, string) error
+}
+
 type ListQuery struct {
 	Filter         ListFilter
 	ExcludeStatus  []string
@@ -52,6 +107,7 @@ type ListQuery struct {
 
 type ListFilter struct {
 	Query               string
+	ExternalRef         string
 	Status              string
 	Priority            *int
 	IssueType           string
@@ -163,6 +219,13 @@ type ClaimCommand struct {
 type ReopenCommand struct {
 	IssueID string
 	Reason  string
+}
+
+// BlockRepositoryRequiredCommand performs the Work Items-owned atomic
+// repository-admission transition. Callers cannot mint the reserved block
+// metadata through the generic Patch command.
+type BlockRepositoryRequiredCommand struct {
+	IssueID string
 }
 
 type AssignRepositoryCommand struct {

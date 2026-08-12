@@ -22,6 +22,19 @@ type Service struct {
 var _ API = (*Service)(nil)
 var _ StatsQueries = (*Service)(nil)
 var _ BlockedQueries = (*Service)(nil)
+var _ SearchQueries = (*Service)(nil)
+
+// BackendName exposes adapter identity for diagnostics without exposing the
+// adapter itself or adding transport metadata to the product API.
+func (s *Service) BackendName() string {
+	if s == nil {
+		return ""
+	}
+	if named, ok := s.store.(interface{ BackendName() string }); ok {
+		return named.BackendName()
+	}
+	return ""
+}
 
 func New(store Store) (*Service, error) {
 	if store == nil {
@@ -30,7 +43,7 @@ func New(store Store) (*Service, error) {
 	return &Service{store: store}, nil
 }
 
-func (s *Service) Create(ctx context.Context, command CreateCommand) (*CreatedIssue, error) {
+func (s *Service) Create(ctx context.Context, command CreateCommand) (*IssueSummary, error) {
 	command.Title = CanonicalTitle(command.Title)
 	if err := validateCreate(command); err != nil {
 		return nil, err
@@ -61,12 +74,8 @@ func (s *Service) Create(ctx context.Context, command CreateCommand) (*CreatedIs
 		}
 		canonical = cloneIssueSummary(*admission.Issue)
 	}
-	detail, getErr := s.store.Get(ctx, GetQuery{IssueID: created.ID})
-	if getErr == nil && detail != nil && detail.ID == created.ID {
-		mergeCanonicalSummary(detail, canonical)
-		return &CreatedIssue{Detail: cloneIssueDetail(detail)}, nil
-	}
-	return &CreatedIssue{Summary: &canonical}, nil
+	result := cloneIssueSummary(canonical)
+	return &result, nil
 }
 
 //nolint:funlen // Kanban projection joins ready, blocked, deferred, and canonical issue state in one read workflow.
@@ -255,6 +264,27 @@ func (s *Service) blockRepositoryRequired(ctx context.Context, issueID string) (
 		return result, err
 	}
 	return s.store.BlockRepositoryRequired(ctx, issueID)
+}
+
+// BlockRepositoryRequired atomically moves repository-less work into the
+// policy-owned blocked state. The durable adapter remains responsible for
+// making the transition and its reserved metadata indivisible.
+func (s *Service) BlockRepositoryRequired(
+	ctx context.Context,
+	command BlockRepositoryRequiredCommand,
+) (*RepositoryAdmissionResult, error) {
+	issueID, err := required("issue id", command.IssueID)
+	if err != nil {
+		return nil, err
+	}
+	result, err := s.blockRepositoryRequired(ctx, issueID)
+	if err != nil {
+		return nil, err
+	}
+	if result == nil || result.Issue == nil || strings.TrimSpace(result.Issue.ID) != issueID {
+		return nil, fmt.Errorf("repository admission for %q returned an invalid result: %w", issueID, ErrInvalidPersistedState)
+	}
+	return cloneRepositoryAdmissionResult(result), nil
 }
 
 func validateCreate(command CreateCommand) error {
@@ -609,6 +639,18 @@ func cloneCloseResult(value *CloseResult) *CloseResult {
 	return out
 }
 
+func cloneRepositoryAdmissionResult(value *RepositoryAdmissionResult) *RepositoryAdmissionResult {
+	if value == nil {
+		return nil
+	}
+	copy := *value
+	if value.Issue != nil {
+		issue := cloneIssueSummary(*value.Issue)
+		copy.Issue = &issue
+	}
+	return &copy
+}
+
 func cloneIssueDetail(value *IssueDetail) *IssueDetail {
 	if value == nil {
 		return nil
@@ -643,34 +685,4 @@ func cloneIssueDetail(value *IssueDetail) *IssueDetail {
 		copy.DeferUntil = &deferUntil
 	}
 	return &copy
-}
-
-func mergeCanonicalSummary(detail *IssueDetail, summary IssueSummary) {
-	if detail == nil {
-		return
-	}
-	detail.ID = summary.ID
-	detail.Title = summary.Title
-	detail.Status = summary.Status
-	detail.Priority = summary.Priority
-	detail.IssueType = summary.IssueType
-	detail.Assignee = summary.Assignee
-	detail.Owner = summary.Owner
-	detail.Labels = append([]string(nil), summary.Labels...)
-	detail.SourceRepo = summary.SourceRepo
-	detail.Repo = summary.Repo
-	detail.Parent = summary.Parent
-	detail.Design = summary.Design
-	detail.DesignArtifactID = summary.DesignArtifactID
-	detail.DesignFormat = summary.DesignFormat
-	detail.HasDesign = summary.HasDesign
-	detail.Notes = summary.Notes
-	detail.CreatedBy = summary.CreatedBy
-	detail.CreatedAt = summary.CreatedAt
-	detail.UpdatedAt = summary.UpdatedAt
-	detail.ClosedAt = summary.ClosedAt
-	detail.CloseReason = summary.CloseReason
-	detail.ExternalRef = summary.ExternalRef
-	detail.DueAt = summary.DueAt
-	detail.DeferUntil = summary.DeferUntil
 }

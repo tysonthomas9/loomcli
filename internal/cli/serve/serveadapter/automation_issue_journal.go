@@ -13,8 +13,8 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
 )
 
-// automationIssueJournalEmitter is the composition adapter from the legacy
-// journal poller's narrow producer contract to the named systemeventing
+// automationIssueJournalEmitter adapts the journal poller's narrow producer
+// contract to the named systemeventing
 // workflow. It has no TriggerRoute or trigger persistence access.
 type automationIssueJournalEmitter struct {
 	emitter systemeventing.IssueJournalEmitter
@@ -24,7 +24,7 @@ type automationIssueJournalEmitter struct {
 var _ trigger.InternalEventEmitter = (*automationIssueJournalEmitter)(nil)
 
 // NewAutomationIssueJournalEmitter returns the narrow journal producer used
-// by the legacy polling loop while Automation owns admission and policy.
+// by the polling loop while Automation owns admission and policy.
 func NewAutomationIssueJournalEmitter(
 	emitter systemeventing.IssueJournalEmitter,
 	awaits *trigger.AwaitMatcher,

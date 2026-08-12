@@ -8,9 +8,12 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/app/workfloweventing"
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/modules/agents"
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
+	"github.com/tysonthomas9/loomcli/internal/modules/workspace"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 )
 
@@ -57,13 +60,77 @@ func writeSpecializedOpError(w http.ResponseWriter, err error) bool {
 // envelope. Defaults to a non-retryable internal error: only transient
 // classes (timeouts, cancellation) advertise retryability.
 func writeDomainOpError(w http.ResponseWriter, err error) {
-	if writeSpecializedOpError(w, err) || writeBackendDomainOpError(w, err) ||
+	if writeSpecializedOpError(w, err) || writeWorkItemsDomainOpError(w, err) ||
+		writeAgentsDomainOpError(w, err) ||
+		writeWorkspaceDomainOpError(w, err) ||
 		writeAutomationDomainOpError(w, err) ||
 		writeInteractionDomainOpError(w, err) ||
 		writeExecutionDomainOpError(w, err) {
 		return
 	}
 	writeBaseDomainOpError(w, err)
+}
+
+func writeWorkspaceDomainOpError(w http.ResponseWriter, err error) bool {
+	message := workspace.PublicErrorMessage(err)
+	switch {
+	case errors.Is(err, workspace.ErrInvalid):
+		writeOpError(w, http.StatusBadRequest, "invalid", message, false)
+	case errors.Is(err, workspace.ErrNotFound):
+		writeOpError(w, http.StatusNotFound, "not_found", message, false)
+	case errors.Is(err, workspace.ErrConflict):
+		writeOpError(w, http.StatusConflict, "conflict", message, false)
+	case errors.Is(err, workspace.ErrUnavailable):
+		writeOpError(w, http.StatusServiceUnavailable, "unavailable", message, true)
+	case errors.Is(err, workspace.ErrInvalidPersistedState):
+		writeOpError(w, http.StatusInternalServerError, "internal", "internal server error", false)
+	default:
+		return false
+	}
+	return true
+}
+
+func writeAgentsDomainOpError(w http.ResponseWriter, err error) bool {
+	switch {
+	case errors.Is(err, agents.ErrInvalid):
+		writeOpError(w, http.StatusBadRequest, "invalid", err.Error(), false)
+	case errors.Is(err, agents.ErrNotFound):
+		writeOpError(w, http.StatusNotFound, "not_found", err.Error(), false)
+	case errors.Is(err, agents.ErrAlreadyExists), errors.Is(err, agents.ErrConflict), errors.Is(err, agents.ErrInvalidTransition):
+		writeOpError(w, http.StatusConflict, "conflict", err.Error(), false)
+	case errors.Is(err, agents.ErrNotOwner):
+		writeOpError(w, http.StatusForbidden, "not_owner", err.Error(), false)
+	case errors.Is(err, agents.ErrUnavailable):
+		writeOpError(w, http.StatusServiceUnavailable, "unavailable", err.Error(), true)
+	case errors.Is(err, agents.ErrInvalidPersistedState):
+		writeOpError(w, http.StatusInternalServerError, "internal", "internal server error", false)
+	default:
+		return false
+	}
+	return true
+}
+
+func writeWorkItemsDomainOpError(w http.ResponseWriter, err error) bool {
+	message := workitems.PublicErrorMessage(err)
+	switch {
+	case errors.Is(err, workitems.ErrInvalid):
+		writeOpError(w, http.StatusBadRequest, "invalid", message, false)
+	case errors.Is(err, workitems.ErrNotFound):
+		writeOpError(w, http.StatusNotFound, "not_found", message, false)
+	case errors.Is(err, workitems.ErrConflict):
+		writeOpError(w, http.StatusConflict, "conflict", message, false)
+	case errors.Is(err, workitems.ErrNotImplemented):
+		writeOpError(w, http.StatusNotImplemented, "not_implemented", message, false)
+	case errors.Is(err, workitems.ErrUnavailable):
+		writeOpError(w, http.StatusServiceUnavailable, "unavailable", message, true)
+	case errors.Is(err, workitems.ErrTimeout):
+		writeOpError(w, http.StatusGatewayTimeout, "timeout", message, true)
+	case errors.Is(err, workitems.ErrInvalidPersistedState):
+		writeOpError(w, http.StatusInternalServerError, "internal", "internal server error", false)
+	default:
+		return false
+	}
+	return true
 }
 
 func writeAutomationDomainOpError(w http.ResponseWriter, err error) bool {

@@ -19,14 +19,14 @@ const monitorCollectionLimit = 10000
 // buildCollectDataFn returns the on-demand monitor collector used by serve.
 func buildCollectDataFn(
 	workspaceHint string,
-	issueBackendFn metricscmd.IssueBackendFn,
+	workItemsFn metricscmd.WorkItemsFn,
 	cacheTTL time.Duration,
 ) metricscmd.CollectDataFn {
 	collectFn := func(ctx context.Context) *monitor.MonitorData {
-		if workspaceHint != "" && issueBackendFn != nil {
+		if workspaceHint != "" && workItemsFn != nil {
 			ctx = middleware.WithWorkspace(ctx, workspaceHint)
-			if be := issueBackendFn(ctx); be != nil {
-				return monitor.CollectMonitorDataWithIssueBackend(ctx, be, monitorCollectionLimit, "")
+			if items := workItemsFn(ctx); items != nil {
+				return monitor.CollectMonitorDataWithWorkItems(ctx, items, monitorCollectionLimit, "")
 			}
 		}
 		return monitor.CollectMonitorData(ctx, monitorCollectionLimit, "")
@@ -46,7 +46,7 @@ func buildUsageHandler(runtimeDir string) http.HandlerFunc {
 func composeMonitorHandlers(
 	collectDataFn metricscmd.CollectDataFn,
 	staleDetectorHandler http.HandlerFunc,
-	issueBackendFn metricscmd.IssueBackendFn,
+	workItemsFn metricscmd.WorkItemsFn,
 	defaultWorkspace string,
 	usageHandler http.HandlerFunc,
 	monitorStoreDataSource *metricscmd.MonitorStoreDataSource,
@@ -54,7 +54,7 @@ func composeMonitorHandlers(
 	driverRuns store.DriverRunStore,
 ) webui.MonitorHandlers {
 	eventsDir := metricscmd.ResolveEventsDir()
-	monitorDataSource := metricscmd.NewMonitorDataSourceWithDefaultWorkspace(collectDataFn, issueBackendFn, defaultWorkspace)
+	monitorDataSource := metricscmd.NewMonitorDataSourceWithDefaultWorkspace(collectDataFn, workItemsFn, defaultWorkspace)
 	driverRunMetrics := durableDriverRunMetricsReader(driverRuns)
 	return webui.MonitorHandlers{
 		Status:               metricscmd.HandleStatusWithSources(monitorDataSource, monitorStoreDataSource),

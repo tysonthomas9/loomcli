@@ -14,7 +14,6 @@ import (
 	agentsmodule "github.com/tysonthomas9/loomcli/internal/modules/agents"
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
-	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/triggerbindings"
 )
 
@@ -310,7 +309,7 @@ func isAgentRecordArchived(record *domain.AgentService) bool {
 }
 
 func agentServiceKindForSource(sourceKind string) domain.AgentServiceKind {
-	if sourceKind == store.CronSourceKind {
+	if sourceKind == promptAgentSourceCron {
 		return domain.AgentServiceKindCron
 	}
 	return domain.AgentServiceKindEvent

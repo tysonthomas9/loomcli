@@ -21,7 +21,7 @@ type Options struct {
 	Resolver ConflictResolver
 	// PRMetaFor, when set, supplies issue-derived title/summary/acceptance for a
 	// unit at PR-create time. It is injected from the cli layer so stackpublish
-	// needn't depend on the issue backend; returning ok=false (or an empty meta)
+	// needn't depend on Work Items; returning ok=false (or an empty meta)
 	// falls back to the owned commit's subject/body.
 	PRMetaFor func(ctx context.Context, taskID string) (PRMeta, bool)
 }

@@ -2,13 +2,14 @@ package serve
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 	workspacemodule "github.com/tysonthomas9/loomcli/internal/modules/workspace"
 
-	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli/serve/metricscmd"
 	"github.com/tysonthomas9/loomcli/internal/cli/serve/serveadapter"
@@ -69,12 +70,12 @@ type taskReadyRepositoryLister interface {
 	List(context.Context, string) ([]*workspacemodule.Repository, error)
 }
 
-func buildTaskReadyBridgeCallbacks(repositories taskReadyRepositoryLister, issueBackendFn metricscmd.IssueBackendFn) taskReadyBridgeCallbacks {
+func buildTaskReadyBridgeCallbacks(repositories taskReadyRepositoryLister, workItemsFn metricscmd.WorkItemsFn) taskReadyBridgeCallbacks {
 	repositoryRequired := buildTaskReadyRepositoryResolver(repositories)
 	return taskReadyBridgeCallbacks{
-		issueLookup:               buildTaskReadyIssueLookup(issueBackendFn, repositoryRequired),
-		readySnapshots:            buildTaskReadySnapshotLister(repositories, issueBackendFn),
-		repositoryRequiredBlocker: buildTaskReadyRepositoryRequiredBlocker(issueBackendFn),
+		issueLookup:               buildTaskReadyIssueLookup(workItemsFn, repositoryRequired),
+		readySnapshots:            buildTaskReadySnapshotLister(repositories, workItemsFn),
+		repositoryRequiredBlocker: buildTaskReadyRepositoryRequiredBlocker(workItemsFn),
 	}
 }
 
@@ -92,13 +93,13 @@ func buildTaskReadyRepositoryResolver(repositories taskReadyRepositoryLister) ta
 }
 
 func buildTaskReadyIssueLookup(
-	issueBackendFn metricscmd.IssueBackendFn,
+	workItemsFn metricscmd.WorkItemsFn,
 	repositoryRequired taskReadyRepositoryResolver,
 ) trigger.TaskReadyIssueLookup {
 	return func(ctx context.Context, ws, issueID string) (trigger.TaskReadySnapshot, error) {
-		detail, err := issueBackendFn(middleware.WithWorkspace(ctx, ws)).Get(ctx, issueID)
+		detail, err := workItemsFn(middleware.WithWorkspace(ctx, ws)).Get(ctx, workitems.GetQuery{IssueID: issueID})
 		if err != nil {
-			if backend.IsKind(err, backend.KindNotFound) {
+			if errors.Is(err, workitems.ErrNotFound) {
 				return trigger.TaskReadySnapshot{}, domain.ErrNotFound
 			}
 			return trigger.TaskReadySnapshot{}, err
@@ -119,9 +120,10 @@ func buildTaskReadyIssueLookup(
 	}
 }
 
-func buildTaskReadySnapshotLister(repositories taskReadyRepositoryLister, issueBackendFn metricscmd.IssueBackendFn) trigger.TaskReadySnapshotLister {
+func buildTaskReadySnapshotLister(repositories taskReadyRepositoryLister, workItemsFn metricscmd.WorkItemsFn) trigger.TaskReadySnapshotLister {
 	return func(ctx context.Context, ws string) ([]trigger.TaskReadySnapshot, error) {
-		issues, err := issueBackendFn(middleware.WithWorkspace(ctx, ws)).Ready(ctx, backend.ReadyOpts{
+		items := workItemsFn(middleware.WithWorkspace(ctx, ws))
+		issues, err := items.Ready(ctx, workitems.AvailabilityQuery{
 			Unassigned: true,
 			// Reconciliation is exhaustive; a cap would strand later tasks.
 			Limit: 0,
@@ -151,7 +153,7 @@ func taskReadyReconciliationRepoCount(
 	ctx context.Context,
 	repositories taskReadyRepositoryLister,
 	ws string,
-	issues []backend.IssueData,
+	issues []workitems.IssueSummary,
 ) (int, error) {
 	for _, issue := range issues {
 		if !strings.EqualFold(strings.TrimSpace(issue.IssueType), "epic") && strings.TrimSpace(issue.SourceRepo) == "" {
@@ -166,13 +168,13 @@ func taskReadyReconciliationRepoCount(
 }
 
 func buildTaskReadyRepositoryRequiredBlocker(
-	issueBackendFn metricscmd.IssueBackendFn,
+	workItemsFn metricscmd.WorkItemsFn,
 ) trigger.TaskReadyRepositoryRequiredBlocker {
 	return func(ctx context.Context, ws, issueID string) (trigger.TaskReadyRepositoryRequiredResult, error) {
 		// The Work Items-owned conditional command revalidates any snapshot that
 		// raced a repository assignment or claim.
-		issueBackend := issueBackendFn(middleware.WithWorkspace(ctx, ws))
-		return blockRepositoryRequiredTask(ctx, issueBackend, issueID)
+		items := workItemsFn(middleware.WithWorkspace(ctx, ws))
+		return blockRepositoryRequiredTask(ctx, items, issueID)
 	}
 }
 
@@ -197,12 +199,15 @@ func startServeRuntime(
 		}
 	}
 	issueJournalSource, runOutcomes := serveAutomationRuntimePorts(storeHandle, cfg, automationCapability)
-	startIssueJournalBridge(
+	if err := startIssueJournalBridge(
 		ctx, storeHandle.Store, callbacks.issueLookup, callbacks.readySnapshots,
 		callbacks.repositoryRequiredBlocker, issueJournalSource, config.IssueJournal,
-	)
+	); err != nil {
+		return nil, err
+	}
 	executionPasses, err := buildExecutionRuntimePasses(
-		storeHandle.Store, runOutcomes, cfg.ExecutionCapability, cfg.ArtifactsCapability, cfg.SourceControl, config,
+		storeHandle.Store, runOutcomes, cfg.ExecutionCapability, cfg.ArtifactsCapability,
+		cfg.SourceControl, cfg.TaskStackBindings, cfg.TaskOutcomes, config,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("compose Execution compatibility passes: %w", err)

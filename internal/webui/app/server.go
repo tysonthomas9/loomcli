@@ -58,7 +58,10 @@ type Server struct {
 	connectorSealer     connectorsmodule.CredentialSealer
 
 	// Service layer
-	workItems        *workitems.Service
+	workItems interface {
+		workitems.API
+		workitems.StatsQueries
+	}
 	workspaceCatalog workspace.API
 	workspaceStore   store.WorkspaceStore
 	workItemMover    workitemmove.Commands
@@ -110,7 +113,6 @@ type Server struct {
 	jobStore *workspacecoord.WorkspaceJobRegistry
 
 	// Workspace resolver
-	wsExistsFn  func(string) bool // legacy identity resolver used by tests
 	wsResolveFn middleware.WorkspaceResolveFn
 
 	// Notify token for session change endpoint auth
@@ -162,7 +164,7 @@ func (app *Server) buildHandlers() {
 		TerminalGraceMS:    graceMS,
 		TerminalIdleMS:     idleMS,
 		TerminalMaxSession: maxSess,
-		IssueBackendFn:     app.config.IssueBackendFn,
+		WorkItemsFn:        app.config.WorkItemsFn,
 	})
 }
 

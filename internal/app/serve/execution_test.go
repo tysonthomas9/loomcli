@@ -44,6 +44,7 @@ func (executionTestClaimPort) ExhaustTaskRunRetries(context.Context, execution.E
 
 func executionTestDependencies(t *testing.T, st store.Store) ExecutionDependencies {
 	t.Helper()
+	mutations := testutil.TaskRunMutationAdapter{TaskRuns: st.TaskRuns()}
 	repairs, ok := st.DriverSteps().(store.TerminalDriverStepRepairStore)
 	if !ok {
 		t.Fatal("test DriverStep store lacks terminal repair support")
@@ -56,7 +57,8 @@ func executionTestDependencies(t *testing.T, st store.Store) ExecutionDependenci
 		AtomicTaskRunRequests: executionTestClaimPort{}, AtomicTaskRunClaims: executionTestClaimPort{},
 		AtomicTaskRunWorkItemDesign: executionTestClaimPort{},
 		AtomicTaskRunRequeues:       executionTestClaimPort{}, AtomicTaskRunRetryExhaustion: executionTestClaimPort{},
-		AllowLegacyStoreAdapters: true,
+		StaleChildTaskRunRecovery: testutil.StaticTaskRunRecoveryPort{},
+		TaskRunHeartbeats:         mutations, TaskRunLogs: mutations, TaskRunFinalizer: mutations,
 	}
 }
 

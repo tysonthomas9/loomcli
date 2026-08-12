@@ -50,7 +50,7 @@ type recoveryGatedRunner struct {
 func (runner *recoveryGatedRunner) Run(context.Context, RunRequest) (RunResult, error) {
 	close(runner.started)
 	<-runner.release
-	return RunResult{Status: domain.DriverRunCompleted, Summary: "recovery loop tested"}, nil
+	return RunResult{Status: execution.DriverRunCompleted, Summary: "recovery loop tested"}, nil
 }
 
 type fenceAfterRunnerStartRecoveryAPIStub struct {
@@ -79,7 +79,7 @@ func (runner *fenceCancellationGatedRunner) Run(ctx context.Context, _ RunReques
 	close(runner.started)
 	<-ctx.Done()
 	close(runner.cancelled)
-	return RunResult{Status: domain.DriverRunCompleted, Summary: "stale owner must not complete"}, ctx.Err()
+	return RunResult{Status: execution.DriverRunCompleted, Summary: "stale owner must not complete"}, ctx.Err()
 }
 
 type staleOwnerDriverRunAPIStub struct {
@@ -132,13 +132,13 @@ func TestExecutorPeriodicallyRecoversStaleChildrenOnlyDuringOwnedRun(t *testing.
 		t.Fatalf("Create workspace: %v", err)
 	}
 	writeFlueDist(t, root, "epic-runner", "done")
-	registered, err := RegisterFlueDriver(ctx, state, RegisterFlueOptions{
+	registered, err := SeedFlueDriverFixture(ctx, state, RegisterFlueOptions{
 		WorkspaceKey: "TEST", WorkDir: root, DistPath: "dist", DriverName: "epic-runner", CreatedBy: "tester", Activate: true,
 	})
 	if err != nil {
-		t.Fatalf("RegisterFlueDriver: %v", err)
+		t.Fatalf("SeedFlueDriverFixture: %v", err)
 	}
-	if _, err := CreateDriverRun(ctx, state, RunOptions{
+	if _, err := createDriverRunFixture(ctx, state, driverRunFixtureOptions{
 		WorkspaceKey: "TEST", DriverID: registered.Driver.DriverID, EpicID: "TEST-1", RunID: "run-1",
 	}); err != nil {
 		t.Fatalf("CreateDriverRun: %v", err)
@@ -199,7 +199,7 @@ func TestExecutorPeriodicallyRecoversStaleChildrenOnlyDuringOwnedRun(t *testing.
 	if completed.err != nil {
 		t.Fatalf("RunOnce: %v", completed.err)
 	}
-	if completed.result.Final == nil || completed.result.Final.Status != domain.DriverRunCompleted {
+	if completed.result.Final == nil || completed.result.Final.Status != execution.DriverRunCompleted {
 		t.Fatalf("final result = %+v", completed.result.Final)
 	}
 
@@ -220,13 +220,13 @@ func TestExecutorCancelsRunnerWhenStaleChildRecoveryLosesParentFence(t *testing.
 		t.Fatalf("Create workspace: %v", err)
 	}
 	writeFlueDist(t, root, "epic-runner", "done")
-	registered, err := RegisterFlueDriver(ctx, state, RegisterFlueOptions{
+	registered, err := SeedFlueDriverFixture(ctx, state, RegisterFlueOptions{
 		WorkspaceKey: "TEST", WorkDir: root, DistPath: "dist", DriverName: "epic-runner", CreatedBy: "tester", Activate: true,
 	})
 	if err != nil {
-		t.Fatalf("RegisterFlueDriver: %v", err)
+		t.Fatalf("SeedFlueDriverFixture: %v", err)
 	}
-	if _, err := CreateDriverRun(ctx, state, RunOptions{
+	if _, err := createDriverRunFixture(ctx, state, driverRunFixtureOptions{
 		WorkspaceKey: "TEST", DriverID: registered.Driver.DriverID, EpicID: "TEST-1", RunID: "run-fenced",
 	}); err != nil {
 		t.Fatalf("CreateDriverRun: %v", err)
@@ -298,13 +298,13 @@ func TestExecutorCancelsRunnerWhenParentHeartbeatLosesFence(t *testing.T) {
 		t.Fatalf("Create workspace: %v", err)
 	}
 	writeFlueDist(t, root, "epic-runner", "done")
-	registered, err := RegisterFlueDriver(ctx, state, RegisterFlueOptions{
+	registered, err := SeedFlueDriverFixture(ctx, state, RegisterFlueOptions{
 		WorkspaceKey: "TEST", WorkDir: root, DistPath: "dist", DriverName: "epic-runner", CreatedBy: "tester", Activate: true,
 	})
 	if err != nil {
-		t.Fatalf("RegisterFlueDriver: %v", err)
+		t.Fatalf("SeedFlueDriverFixture: %v", err)
 	}
-	if _, err := CreateDriverRun(ctx, state, RunOptions{
+	if _, err := createDriverRunFixture(ctx, state, driverRunFixtureOptions{
 		WorkspaceKey: "TEST", DriverID: registered.Driver.DriverID, EpicID: "TEST-1", RunID: "run-heartbeat-fenced",
 	}); err != nil {
 		t.Fatalf("CreateDriverRun: %v", err)

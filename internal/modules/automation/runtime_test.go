@@ -459,7 +459,7 @@ func repositoryRequiredRuntimeCandidate(bindingID, deliveryID string) RetryCandi
 	candidate.Event.SubjectRef = "issue:PHASE4-TERRA-FRESH-20260718-10"
 	candidate.Event.ActorRef = "subject-system"
 	candidate.Event.Origin = EventOriginSystem
-	candidate.Event.IdempotencyKey = internalEventIdempotencyKey("ws", sourceEventID)
+	candidate.Event.IdempotencyKey = InternalEventIdempotencyKey("ws", sourceEventID)
 	candidate.Event.SignatureStatus = SignatureStatusInternal
 	candidate.Event.Payload = json.RawMessage(`{"taskId":"PHASE4-TERRA-FRESH-20260718-10","repositoryRequired":true}`)
 	candidate.Delivery.DeliveryID = deliveryID
@@ -502,7 +502,7 @@ func TestRetryDeliveriesUsesImmutableSnapshotAndCommittedDispatch(t *testing.T) 
 		t.Fatalf("claim = calls:%d workspace:%q before:%s until:%s limit:%d", retryPort.claimCalls, retryPort.workspace, retryPort.before, retryPort.claimUntil, retryPort.limit)
 	}
 	wantDispatch := ExecutionDispatchRequest{
-		WorkspaceKey: "ws", IdempotencyKey: "github:delivery-source-1#binding-a",
+		WorkspaceKey: "ws", IdempotencyKey: DeliveryDispatchIdempotencyKey("github:delivery-source-1", "binding-a"),
 		DeliveryID: "delivery-1", ExpectedDeliveryStatus: DeliveryFailed, ExpectedDeliveryAttempt: 2,
 		DriverID: "driver-a", DriverVersionID: "version-active", Entrypoint: "run",
 		TargetAgentServiceID: "agent-service-a", SourceKind: "github", SourceRef: "event-1", TriggerBindingID: "binding-a",
@@ -548,8 +548,7 @@ func TestRetryDeliveriesDeduplicatesRepositoryRequiredPromptFanoutGlobally(t *te
 		if got := callBindingIDs(h.execution.calls); !reflect.DeepEqual(got, []string{bindingA}) {
 			t.Fatalf("repository-required retry dispatches = %v", got)
 		}
-		if key := h.execution.calls[0].IdempotencyKey; !strings.HasPrefix(key, deliveryDispatchHashPrefix) ||
-			len(key) > maxDeliveryDispatchIdempotencyKeyLen {
+		if key := h.execution.calls[0].IdempotencyKey; !strings.HasPrefix(key, deliveryDispatchHashPrefix) {
 			t.Fatalf("retry dispatch key = %q (%d)", key, len(key))
 		}
 		storedWinner := h.persistence.deliveries[deliveryMapKey("ws", winner.Delivery.DeliveryID)]

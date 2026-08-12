@@ -320,11 +320,15 @@ func TestIssueJournalBridgeTaskReviewRequiresLiveReviewAndLookup(t *testing.T) {
 	event := taskReviewJournalEvent(
 		"issue.update", "user:alice", `{"status":"open"}`, `{"status":"review"}`, nil,
 	)
+	if _, err := (&IssueJournalBridge{Source: &taskReviewCaptureEmitter{}, EmitTaskReview: true}).emitBatch(
+		t.Context(), "WS", []store.JournalEvent{event}, &IssueJournalSweepResult{},
+	); !errors.Is(err, domain.ErrInvalid) {
+		t.Fatalf("missing lookup err = %v, want ErrInvalid", err)
+	}
 	tests := []struct {
 		name   string
 		lookup TaskReadyIssueLookup
 	}{
-		{name: "missing lookup"},
 		{
 			name: "live task moved on",
 			lookup: func(context.Context, string, string) (TaskReadySnapshot, error) {
@@ -389,7 +393,7 @@ func TestIssueJournalBridgeTaskReviewNoListenerCountsAndAdvances(t *testing.T) {
 	bridge := &IssueJournalBridge{
 		Source: emitter, EmitTaskReview: true,
 		IssueLookup: func(context.Context, string, string) (TaskReadySnapshot, error) {
-			return TaskReadySnapshot{TaskID: "TASK-1", Status: "review", IssueType: "task"}, nil
+			return TaskReadySnapshot{TaskID: "TASK-1", Status: "review", IssueType: "task", SourceRepo: "acme/app"}, nil
 		},
 	}
 	event := taskReviewJournalEvent(

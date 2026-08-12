@@ -7,11 +7,12 @@ import (
 	"os"
 	"strings"
 
-	"github.com/tysonthomas9/loomcli/internal/backend/fleet"
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	driverpkg "github.com/tysonthomas9/loomcli/internal/driver"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
+	fleet "github.com/tysonthomas9/loomcli/internal/modules/workitems/fleetdb"
 )
 
 // driverRunContext is the resolved identity preamble shared by driver runtime
@@ -76,17 +77,21 @@ func resolveRunningDriverRun(ctx context.Context, h *bootstrap.StoreHandle, work
 	return rc.WorkspaceKey, parent, nil
 }
 
-func newDriverIssueBackend(h *bootstrap.StoreHandle, ws, actor string) (*fleet.FleetBackend, error) {
-	issueBackend, err := fleet.New(fleet.Config{
+func newDriverWorkItems(h *bootstrap.StoreHandle, ws, actor string) (workitems.API, error) {
+	store, err := fleet.New(fleet.Config{
 		BaseURL:     h.URL(),
 		WorkspaceID: ws,
 		APIKey:      h.FleetDBClientAPIKey(),
 		Actor:       actor,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("create fleet-db issue backend: %w", err)
+		return nil, fmt.Errorf("create FleetDB Work Items adapter: %w", err)
 	}
-	return issueBackend, nil
+	items, err := workitems.New(store)
+	if err != nil {
+		return nil, fmt.Errorf("compose Work Items: %w", err)
+	}
+	return items, nil
 }
 
 func driverRunActor(runID string) string {

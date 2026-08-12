@@ -2,6 +2,15 @@ package workitems
 
 import "context"
 
+// MutationStream is the Work Items-owned durable event port used by realtime
+// delivery. FleetDB cursors are opaque; the timestamp-based compatibility path
+// was intentionally deleted because it could duplicate or skip same-millisecond
+// events.
+type MutationStream interface {
+	GetMutationsAfter(context.Context, string) ([]Mutation, error)
+	WaitForMutationsAfter(context.Context, string, int64) ([]Mutation, error)
+}
+
 // Store is the consumer-owned durable port for the Work Items capability. It
 // exposes aggregate-specific queries and commands instead of generic CRUD or
 // a process-wide Store.

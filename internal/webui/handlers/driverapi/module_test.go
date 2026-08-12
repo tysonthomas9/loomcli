@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -16,29 +17,29 @@ import (
 
 	appserve "github.com/tysonthomas9/loomcli/internal/app/serve"
 	"github.com/tysonthomas9/loomcli/internal/app/workfloweventing"
-	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	driverpkg "github.com/tysonthomas9/loomcli/internal/driver"
-	trigger "github.com/tysonthomas9/loomcli/internal/infra/automationruntime"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/modules/agents"
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
+	workspacemodule "github.com/tysonthomas9/loomcli/internal/modules/workspace"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/testutil"
 )
 
-// fakeIssueBackend embeds the interface so only the methods the driver ops
+// fakeWorkItems embeds the interface so only the methods the driver ops
 // touch need real implementations; anything else panics loudly.
-type fakeIssueBackend struct {
-	backend.IssueBackend
-	ready                 []backend.IssueData
-	readyOpts             []backend.ReadyOpts
-	blocked               []backend.IssueData
-	children              []backend.IssueData
-	epic                  *backend.IssueDetailData
+type fakeWorkItems struct {
+	workitems.API
+	ready                 []workitems.IssueSummary
+	readyOpts             []workitems.AvailabilityQuery
+	blocked               []workitems.IssueSummary
+	children              []workitems.IssueSummary
+	epic                  *workitems.IssueDetail
 	actor                 string
 	claimed               []string
 	releases              []fakeRelease
@@ -48,8 +49,110 @@ type fakeIssueBackend struct {
 	typedClaimErrors      map[string]error
 	typedClaimItems       map[string]*execution.DriverRunWorkItem
 	repositoryBlocks      []string
-	repositoryBlockResult *backend.RepositoryRequirementResult
+	repositoryBlockResult *workitems.RepositoryAdmissionResult
 	repositoryBlockErr    error
+}
+
+type testAutomationQueries struct{ store store.Store }
+
+type testRepositoryQueries struct{ store store.RepoStore }
+
+type testOrchestrationSessionQueries struct {
+	store store.OrchestrationSessionStore
+}
+
+func (queries testOrchestrationSessionQueries) FindActiveOrchestrationSession(
+	ctx context.Context,
+	workspace,
+	agentID string,
+) (string, error) {
+	return store.OrchestrationSessionIDFor(ctx, queries.store, workspace, agentID)
+}
+
+func (queries testRepositoryQueries) GetRepository(
+	ctx context.Context,
+	query workspacemodule.GetRepositoryQuery,
+) (*workspacemodule.Repository, error) {
+	return queries.store.Get(ctx, query.WorkspaceReference, query.Name)
+}
+
+func (queries testRepositoryQueries) ListRepositories(
+	ctx context.Context,
+	query workspacemodule.ListRepositoriesQuery,
+) ([]workspacemodule.Repository, error) {
+	values, err := queries.store.List(ctx, query.WorkspaceReference)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]workspacemodule.Repository, 0, len(values))
+	for _, value := range values {
+		if value != nil {
+			out = append(out, *value)
+		}
+	}
+	return out, nil
+}
+
+func (queries testAutomationQueries) GetBinding(ctx context.Context, workspace, bindingID string) (*automation.Binding, error) {
+	value, err := queries.store.TriggerBindings().Get(ctx, workspace, bindingID)
+	return value, testAutomationError(err)
+}
+
+func (queries testAutomationQueries) ListBindings(
+	ctx context.Context,
+	workspace string,
+	filter automation.BindingFilter,
+) ([]*automation.Binding, error) {
+	values, err := queries.store.TriggerBindings().List(ctx, workspace, store.TriggerBindingFilter{
+		SourceKind: filter.SourceKind, RouteKey: filter.RouteKey, DriverID: filter.DriverID,
+		TargetAgentServiceID: filter.TargetAgentServiceID, Enabled: filter.Enabled, Limit: filter.Limit,
+	})
+	return values, testAutomationError(err)
+}
+
+func (queries testAutomationQueries) GetEvent(ctx context.Context, workspace, eventID string) (*automation.Event, error) {
+	value, err := queries.store.TriggerEvents().Get(ctx, workspace, eventID)
+	return value, testAutomationError(err)
+}
+
+func (queries testAutomationQueries) ListEvents(
+	ctx context.Context,
+	workspace string,
+	filter automation.EventFilter,
+) ([]*automation.Event, error) {
+	values, err := queries.store.TriggerEvents().List(ctx, workspace, store.TriggerEventFilter{
+		SourceKind: filter.SourceKind, TriggerBindingID: filter.BindingID, Limit: filter.Limit,
+	})
+	return values, testAutomationError(err)
+}
+
+func (queries testAutomationQueries) GetDelivery(ctx context.Context, workspace, deliveryID string) (*automation.Delivery, error) {
+	value, err := queries.store.TriggerDeliveries().Get(ctx, workspace, deliveryID)
+	return value, testAutomationError(err)
+}
+
+func (queries testAutomationQueries) ListDeliveries(
+	ctx context.Context,
+	workspace string,
+	filter automation.DeliveryFilter,
+) ([]*automation.Delivery, error) {
+	values, err := queries.store.TriggerDeliveries().List(ctx, workspace, store.TriggerDeliveryFilter{
+		TriggerEventID: filter.EventID, TriggerBindingID: filter.BindingID, Status: filter.Status, Limit: filter.Limit,
+	})
+	return values, testAutomationError(err)
+}
+
+func testAutomationError(err error) error {
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, domain.ErrNotFound):
+		return fmt.Errorf("%s: %w", err, automation.ErrNotFound)
+	case errors.Is(err, domain.ErrConflict):
+		return fmt.Errorf("%s: %w", err, automation.ErrConflict)
+	default:
+		return err
+	}
 }
 
 type fakeRelease struct {
@@ -57,116 +160,106 @@ type fakeRelease struct {
 	actor string
 }
 
-// testWorkflowEventAuthorityProvider and testLegacyEventAdmission are
-// deliberately test-only compatibility wiring for the pre-Phase-3 memstore
-// route suites. Production driverapi has no InternalSource or TriggerRoutes
-// fallback.
+// These narrow test adapters keep the generic driver-route harness at the
+// Workflow Eventing interface. Automation admission behavior is tested by the
+// Automation module, not reimplemented in HTTP tests.
 type testWorkflowEventAuthorityProvider struct{}
 
 func (testWorkflowEventAuthorityProvider) AuthorityForVerifiedRun(context.Context, workfloweventing.VerifiedRun) (authority.ExecutionAuthority, error) {
 	return authority.ExecutionAuthority{}, nil
 }
 
-type testLegacyEventAdmission struct{ st store.Store }
+type testEventAdmission struct{}
 
-func (adapter testLegacyEventAdmission) AdmitEvent(ctx context.Context, _ automation.EventAuthority, command automation.AdmitEventCommand) (*automation.AdmissionResult, error) {
-	parent, err := adapter.st.DriverRuns().Get(ctx, command.WorkspaceKey, "run-1")
-	if err != nil {
-		return nil, err
-	}
-	sourceResult, err := (&trigger.InternalSource{Store: adapter.st}).Emit(ctx, command.WorkspaceKey, trigger.InternalEvent{
-		EventID: command.SourceEventID, EventType: command.EventType,
-		Origin: automation.EventOriginWorkflow, ParentEventID: parent.SourceRef,
-		EmittedByRunID: parent.RunID, SubjectRef: command.SubjectRef,
-		ActorRef: driverpkg.DriverRunActor(parent.RunID),
-		EpicID:   firstNonEmpty(parent.EpicID, driverpkg.DriverRunPayloadEpicID(parent.Payload)),
-		Payload:  command.Payload, SubjectAttrs: command.SubjectAttrs,
-	})
-	if err != nil {
-		return nil, err
-	}
-	result := &automation.AdmissionResult{
-		Dropped: sourceResult.Dropped, DropReason: sourceResult.DropReason,
-		EventType: sourceResult.EventType, RouteKey: sourceResult.RouteKey,
-		Origin: sourceResult.Origin, HopDepth: sourceResult.HopDepth,
-	}
-	if sourceResult.Dropped {
-		return result, nil
-	}
-	result.Event = &automation.Event{
-		WorkspaceKey: command.WorkspaceKey, SourceKind: automation.SourceKindInternal,
-		SourceEventID: command.SourceEventID, EventType: sourceResult.EventType,
-		RouteKey: sourceResult.RouteKey, SubjectRef: command.SubjectRef,
-		ActorRef: driverpkg.DriverRunActor(parent.RunID), EmittingRunID: parent.RunID,
-		ParentEventID: parent.SourceRef, EpicID: firstNonEmpty(parent.EpicID, driverpkg.DriverRunPayloadEpicID(parent.Payload)),
-		Origin: sourceResult.Origin, HopDepth: sourceResult.HopDepth,
-	}
-	if sourceResult.Dispatch != nil {
-		result.Deliveries = make([]*automation.Delivery, 0, len(sourceResult.Dispatch.Deliveries))
-		for _, delivery := range sourceResult.Dispatch.Deliveries {
-			result.Deliveries = append(result.Deliveries, &automation.Delivery{
-				DeliveryID: delivery.DeliveryID, TriggerBindingID: delivery.BindingID,
-				DriverRunID: delivery.RunID, Status: delivery.Status,
-				RejectionReason: delivery.RejectionReason,
-			})
-		}
-	}
-	return result, nil
+func (testEventAdmission) AdmitEvent(_ context.Context, _ automation.EventAuthority, command automation.AdmitEventCommand) (*automation.AdmissionResult, error) {
+	return &automation.AdmissionResult{
+		EventType: command.EventType,
+		RouteKey:  "internal." + strings.TrimSpace(command.EventType),
+		Origin:    automation.EventOriginWorkflow,
+		HopDepth:  1,
+		Event: &automation.Event{
+			WorkspaceKey:  command.WorkspaceKey,
+			SourceEventID: command.SourceEventID,
+			EventType:     command.EventType,
+			SubjectRef:    command.SubjectRef,
+			Origin:        automation.EventOriginWorkflow,
+			HopDepth:      1,
+		},
+	}, nil
 }
 
-func (f *fakeIssueBackend) Ready(_ context.Context, opts backend.ReadyOpts) ([]backend.IssueData, error) {
+func (f *fakeWorkItems) Ready(_ context.Context, opts workitems.AvailabilityQuery) ([]workitems.IssueSummary, error) {
 	f.readyOpts = append(f.readyOpts, opts)
 	return f.ready, nil
 }
 
-func (f *fakeIssueBackend) ReleaseIssueAsActor(_ context.Context, id, actor string) error {
+func (f *fakeWorkItems) ReleaseIssueAsActor(_ context.Context, id, actor string) error {
 	f.releases = append(f.releases, fakeRelease{id: id, actor: actor})
 	return nil
 }
 
-func (f *fakeIssueBackend) Blocked(_ context.Context, _ backend.BlockedOpts) ([]backend.IssueData, error) {
+func (f *fakeWorkItems) Blocked(_ context.Context, _ workitems.AvailabilityQuery) ([]workitems.IssueSummary, error) {
 	return f.blocked, nil
 }
 
-func (f *fakeIssueBackend) List(_ context.Context, _ backend.ListOpts) ([]backend.IssueData, error) {
-	return f.children, nil
+func (f *fakeWorkItems) List(_ context.Context, _ workitems.ListQuery) (*workitems.ListResult, error) {
+	items := make([]workitems.ListItem, len(f.children))
+	for index := range f.children {
+		items[index] = workitems.ListItem{IssueSummary: f.children[index]}
+	}
+	return &workitems.ListResult{Issues: items}, nil
 }
 
-func (f *fakeIssueBackend) ClaimIssue(_ context.Context, id string, _ time.Duration) error {
-	f.claimed = append(f.claimed, id)
-	return nil
+func (f *fakeWorkItems) Claim(_ context.Context, command workitems.ClaimCommand) (*workitems.IssueDetail, error) {
+	f.claimed = append(f.claimed, command.IssueID)
+	return f.epic, nil
 }
 
-func (f *fakeIssueBackend) ClaimIssueAsActor(_ context.Context, id string, _ time.Duration, actor string) error {
+func (f *fakeWorkItems) ClaimAsActor(_ context.Context, id string, _ time.Duration, actor string) error {
 	f.claimed = append(f.claimed, id)
 	f.actor = actor
 	return nil
 }
 
-func (f *fakeIssueBackend) Get(_ context.Context, _ string) (*backend.IssueDetailData, error) {
+func (f *fakeWorkItems) Get(_ context.Context, _ workitems.GetQuery) (*workitems.IssueDetail, error) {
+	if f.epic == nil {
+		return nil, workitems.ErrNotFound
+	}
 	return f.epic, nil
 }
 
-func (f *fakeIssueBackend) BlockRepositoryRequired(_ context.Context, id string) (*backend.RepositoryRequirementResult, error) {
-	f.repositoryBlocks = append(f.repositoryBlocks, id)
+func (f *fakeWorkItems) Patch(context.Context, workitems.PatchCommand) (*workitems.IssueDetail, error) {
+	return nil, workitems.ErrNotImplemented
+}
+
+func (f *fakeWorkItems) AddComment(context.Context, workitems.AddCommentCommand) (*workitems.Comment, error) {
+	return nil, workitems.ErrNotImplemented
+}
+
+func (f *fakeWorkItems) ListComments(context.Context, workitems.ListCommentsQuery) ([]*workitems.Comment, error) {
+	return nil, workitems.ErrNotImplemented
+}
+
+func (f *fakeWorkItems) BlockRepositoryRequired(_ context.Context, command workitems.BlockRepositoryRequiredCommand) (*workitems.RepositoryAdmissionResult, error) {
+	f.repositoryBlocks = append(f.repositoryBlocks, command.IssueID)
 	if f.repositoryBlockErr != nil {
 		return nil, f.repositoryBlockErr
 	}
 	if f.repositoryBlockResult != nil {
 		return f.repositoryBlockResult, nil
 	}
-	return &backend.RepositoryRequirementResult{Changed: true}, nil
+	return &workitems.RepositoryAdmissionResult{Changed: true}, nil
 }
 
-func (f *fakeIssueBackend) SetIssueRepository(_ context.Context, id, repo string) (*backend.IssueData, error) {
-	return &backend.IssueData{ID: id, SourceRepo: repo}, nil
+func (f *fakeWorkItems) AssignRepository(_ context.Context, command workitems.AssignRepositoryCommand) (*workitems.IssueSummary, error) {
+	return &workitems.IssueSummary{ID: command.IssueID, SourceRepo: command.Repository}, nil
 }
 
 type testHarness struct {
 	server      *httptest.Server
 	store       *memstore.Store
 	module      *Module
-	backend     *fakeIssueBackend
+	backend     *fakeWorkItems
 	runID       string
 	nodeID      string
 	leaseID     string
@@ -177,6 +270,43 @@ type testHarness struct {
 
 type testStoreAgentIdentities struct {
 	store store.AgentServiceStore
+}
+
+type testStoreAgentRoles struct{ store store.RoleStore }
+
+func (queries testStoreAgentRoles) GetRole(ctx context.Context, workspace, roleName string) (*agents.Role, error) {
+	value, err := queries.store.Get(ctx, workspace, roleName)
+	if err != nil {
+		return nil, err
+	}
+	return testCanonicalRole(value), nil
+}
+
+func (queries testStoreAgentRoles) ListRoles(ctx context.Context, workspace string) ([]*agents.Role, error) {
+	values, err := queries.store.List(ctx, workspace)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]*agents.Role, 0, len(values))
+	for _, value := range values {
+		out = append(out, testCanonicalRole(value))
+	}
+	return out, nil
+}
+
+func testCanonicalRole(value *domain.Role) *agents.Role {
+	if value == nil {
+		return nil
+	}
+	return &agents.Role{
+		WorkspaceKey: value.WorkspaceKey, Name: value.Name, Kind: string(value.Kind),
+		Description: value.Description, Prompt: value.Prompt, PromptFile: value.PromptFile,
+		Model: value.Model, TaskFilter: value.TaskFilter, Backend: value.Backend, Effort: value.Effort,
+		PathPatterns: append([]string(nil), value.PathPatterns...), Skills: append([]string(nil), value.Skills...),
+		MaxPriority: value.MaxPriority, MaxConcurrency: value.MaxConcurrency, ReadOnly: value.ReadOnly,
+		AllowedTools: append([]string(nil), value.AllowedTools...), DeniedTools: append([]string(nil), value.DeniedTools...),
+		MaxBudgetUSD: value.MaxBudgetUSD, CreatedAt: value.CreatedAt, UpdatedAt: value.UpdatedAt,
+	}
 }
 
 func (queries testStoreAgentIdentities) GetAgent(ctx context.Context, workspace, agentID string) (*agents.Agent, error) {
@@ -214,6 +344,7 @@ func testCanonicalAgent(value *domain.AgentService) *agents.Agent {
 		Name:         value.Name,
 		Behavior:     agents.BehaviorReference{RoleName: value.RoleName},
 		ProfileName:  value.ProfileName,
+		Metadata:     maps.Clone(value.Metadata),
 		CreatedAt:    value.CreatedAt,
 		UpdatedAt:    value.UpdatedAt,
 	}
@@ -222,7 +353,7 @@ func testCanonicalAgent(value *domain.AgentService) *agents.Agent {
 type testDriverRunExecution struct {
 	execution.DriverRunAPI
 	store  store.Store
-	issues *fakeIssueBackend
+	issues *fakeWorkItems
 }
 
 // testNoOpTerminalWorkRecoveryExecution supplies the atomic Fleet-only
@@ -280,7 +411,7 @@ func (adapter testDriverRunExecution) ClaimDriverRunWorkItem(
 	if err := adapter.issues.typedClaimErrors[command.WorkItemID]; err != nil {
 		return execution.DriverRunWorkItemMutationResult{}, err
 	}
-	var source backend.IssueData
+	var source workitems.IssueSummary
 	for _, issue := range adapter.issues.ready {
 		if issue.ID == command.WorkItemID {
 			source = issue
@@ -671,11 +802,11 @@ func newTestHarness(t *testing.T) *testHarness {
 	if err != nil {
 		t.Fatalf("Claim driver run: %v", err)
 	}
-	fake := &fakeIssueBackend{}
+	fake := &fakeWorkItems{}
 	// Every harness carries a run-token signing key; every request authenticates
 	// through the same token-only seam as a workflow runtime.
 	runTokenKey := bytes.Repeat([]byte{0x42}, 32)
-	eventWorkflow, err := workfloweventing.New(testWorkflowEventAuthorityProvider{}, testLegacyEventAdmission{st: st})
+	eventWorkflow, err := workfloweventing.New(testWorkflowEventAuthorityProvider{}, testEventAdmission{})
 	if err != nil {
 		t.Fatalf("new test workflow eventing: %v", err)
 	}
@@ -684,6 +815,7 @@ func newTestHarness(t *testing.T) *testHarness {
 		t.Fatal("test DriverStep store lacks terminal repair support")
 	}
 	taskRunCommands := &testTaskRunClaimPort{store: st, requestReceipts: make(map[string]execution.RequestTaskRunResult)}
+	mutations := testutil.TaskRunMutationAdapter{TaskRuns: st.TaskRuns()}
 	executionCapability, err := appserve.NewExecutionCapability(appserve.ExecutionDependencies{
 		TaskRuns: st.TaskRuns(), DriverRuns: st.DriverRuns(), DriverSteps: st.DriverSteps(),
 		TerminalStepRepairs: repairs, TaskRunEvents: st.TaskRunEvents(), Nodes: st.Nodes(),
@@ -691,27 +823,31 @@ func newTestHarness(t *testing.T) *testHarness {
 		Workspaces: st.Workspaces(), AtomicTaskRunRequests: taskRunCommands, AtomicTaskRunClaims: taskRunCommands,
 		AtomicTaskRunWorkItemDesign: taskRunCommands,
 		AtomicTaskRunRequeues:       taskRunCommands, AtomicTaskRunRetryExhaustion: taskRunCommands,
-		AllowLegacyStoreAdapters: true,
+		StaleChildTaskRunRecovery: testutil.StaticTaskRunRecoveryPort{},
+		TaskRunHeartbeats:         mutations, TaskRunLogs: mutations, TaskRunFinalizer: mutations,
 	})
 	if err != nil {
 		t.Fatalf("new test Execution capability: %v", err)
 	}
 	module := NewModule(Config{
-		Store:                st,
-		RunTokenKey:          runTokenKey,
-		WorkflowEventing:     eventWorkflow,
-		Execution:            testDriverRunExecution{DriverRunAPI: executionCapability.DriverRunAPI(), store: st, issues: fake},
-		ExecutionAuthorities: executionCapability.DriverRunAuthorityResolver(),
-		AgentIdentities:      testStoreAgentIdentities{store: st.AgentServices()},
-		TaskRunRequests:      executionCapability.TaskRunRequestAPI(),
-		TaskRunRecovery:      executionCapability.TaskRunRecoveryAPI(),
-		TaskRuns:             executionCapability.TaskRunAPI(),
-		TaskRunAuthorities:   executionCapability.TaskRunAuthorityResolver(),
-		WorkflowCatalog:      testWorkflowCatalog{store: st},
-		IssueBackends: func(_, actor string) (backend.IssueBackend, error) {
-			fake.actor = actor
-			return fake, nil
-		},
+		RunTokenKey:           runTokenKey,
+		WorkflowEventing:      eventWorkflow,
+		Execution:             testDriverRunExecution{DriverRunAPI: executionCapability.DriverRunAPI(), store: st, issues: fake},
+		ExecutionAuthorities:  executionCapability.DriverRunAuthorityResolver(),
+		AgentIdentities:       testStoreAgentIdentities{store: st.AgentServices()},
+		AgentRoles:            testStoreAgentRoles{store: st.Roles()},
+		AutomationBindings:    testAutomationQueries{store: st},
+		AutomationEvents:      testAutomationQueries{store: st},
+		AutomationDeliveries:  testAutomationQueries{store: st},
+		TaskRunRequests:       executionCapability.TaskRunRequestAPI(),
+		TaskRunRecovery:       executionCapability.TaskRunRecoveryAPI(),
+		TaskRuns:              executionCapability.TaskRunAPI(),
+		TaskRunQueries:        executionCapability.TaskRunQueries(),
+		TaskRunAuthorities:    executionCapability.TaskRunAuthorityResolver(),
+		WorkflowCatalog:       testWorkflowCatalog{store: st},
+		WorkItems:             fake,
+		Repositories:          testRepositoryQueries{store: st.Repos()},
+		OrchestrationSessions: testOrchestrationSessionQueries{store: st},
 	})
 	mux := http.NewServeMux()
 	module.Register(mux)
@@ -798,9 +934,9 @@ func TestVerifyRunOpProvesOwnerThroughExecution(t *testing.T) {
 	}
 }
 
-func TestIssueOpsFailClosedWithoutInjectedExecutionIssueBackend(t *testing.T) {
+func TestIssueOpsFailClosedWithoutInjectedWorkItems(t *testing.T) {
 	h := newTestHarness(t)
-	h.module.issueBackends = nil
+	h.module.workItems = nil
 	t.Setenv("LOOM_FLEET_DB_API_KEY", "ambient-credentials-must-not-enable-the-handler")
 
 	resp, decoded := h.do(t, opRequest{
@@ -958,8 +1094,8 @@ func TestDriverAPIUnknownOp(t *testing.T) {
 
 func TestDriverAPIBlocksRepositoryRequiredIssueThroughAtomicBackend(t *testing.T) {
 	h := newTestHarness(t)
-	h.backend.repositoryBlockResult = &backend.RepositoryRequirementResult{
-		Issue:   &backend.IssueData{ID: "TASK-REPO", Status: "blocked"},
+	h.backend.repositoryBlockResult = &workitems.RepositoryAdmissionResult{
+		Issue:   &workitems.IssueSummary{ID: "TASK-REPO", Status: "blocked"},
 		Changed: true,
 	}
 	resp, decoded := h.do(t, opRequest{
@@ -979,7 +1115,7 @@ func TestDriverAPIBlocksRepositoryRequiredIssueThroughAtomicBackend(t *testing.T
 
 func TestDriverAPIRepositoryBlockMapsBackendUnavailable(t *testing.T) {
 	h := newTestHarness(t)
-	h.backend.repositoryBlockErr = backend.ErrUnavailable("BlockRepositoryRequired", "fleet unavailable", nil)
+	h.backend.repositoryBlockErr = workitems.AdapterUnavailable("BlockRepositoryRequired", "fleet unavailable", nil)
 	resp, decoded := h.do(t, opRequest{
 		op: "issue-block-repository-required", body: map[string]any{"issueId": "TASK-REPO"}, headers: h.ownerHeaders(t),
 	})
@@ -1029,7 +1165,7 @@ func TestDriverAPIRecoverStaleTasksRequiresOwnership(t *testing.T) {
 
 func TestDriverAPIClaimReady(t *testing.T) {
 	h := newTestHarness(t)
-	h.backend.ready = []backend.IssueData{{ID: "TASK-7", Title: "do the thing"}}
+	h.backend.ready = []workitems.IssueSummary{{ID: "TASK-7", Title: "do the thing"}}
 
 	resp, decoded := h.do(t, opRequest{op: "claim-ready", headers: h.ownerHeaders(t)})
 	if resp.StatusCode != http.StatusOK {
@@ -1051,13 +1187,13 @@ func TestDriverAPIClaimReady(t *testing.T) {
 		t.Fatalf("typed claims = %+v, want exact parent owner/request envelope", h.backend.typedClaims)
 	}
 	if len(h.backend.claimed) != 0 {
-		t.Fatalf("generic IssueBackend claim was called: %v", h.backend.claimed)
+		t.Fatalf("generic Work Items claim was called: %v", h.backend.claimed)
 	}
 }
 
 func TestDriverAPIClaimReadyReturnsOnlyCommittedWorkItemMetadata(t *testing.T) {
 	h := newTestHarness(t)
-	h.backend.ready = []backend.IssueData{{
+	h.backend.ready = []workitems.IssueSummary{{
 		ID: "TASK-7", Title: "stale title", Priority: 9, IssueType: "stale", Labels: []string{"stale"},
 		SourceRepo: "stale/repo", Parent: "STALE-EPIC",
 	}}
@@ -1085,7 +1221,7 @@ func TestDriverAPIClaimReadyReturnsOnlyCommittedWorkItemMetadata(t *testing.T) {
 
 func TestDriverAPIClaimReadyScansPastTypedClaimConflict(t *testing.T) {
 	h := newTestHarness(t)
-	h.backend.ready = []backend.IssueData{{ID: "TASK-1"}, {ID: "TASK-2"}}
+	h.backend.ready = []workitems.IssueSummary{{ID: "TASK-1"}, {ID: "TASK-2"}}
 	h.backend.typedClaimErrors = map[string]error{"TASK-1": execution.ErrConflict}
 
 	resp, decoded := h.do(t, opRequest{op: "claim-ready", headers: h.ownerHeaders(t)})
@@ -1099,10 +1235,10 @@ func TestDriverAPIClaimReadyScansPastTypedClaimConflict(t *testing.T) {
 
 // TestDriverAPIClaimReadyThreadsTypeFilter proves the claim-ready `type` param
 // reaches the ready view server-side (ITEM 3): the op decodes it and threads it
-// into ReadyOpts.Type so a caller can claim only, e.g., bugs.
+// into AvailabilityQuery.Type so a caller can claim only, e.g., bugs.
 func TestDriverAPIClaimReadyThreadsTypeFilter(t *testing.T) {
 	h := newTestHarness(t)
-	h.backend.ready = []backend.IssueData{{ID: "BUG-1", IssueType: "bug"}}
+	h.backend.ready = []workitems.IssueSummary{{ID: "BUG-1", IssueType: "bug"}}
 
 	resp, decoded := h.do(t, opRequest{
 		op:      "claim-ready",
@@ -1115,7 +1251,7 @@ func TestDriverAPIClaimReadyThreadsTypeFilter(t *testing.T) {
 	if decoded["id"] != "BUG-1" {
 		t.Fatalf("claimed id = %v, want BUG-1", decoded["id"])
 	}
-	if len(h.backend.readyOpts) != 1 || h.backend.readyOpts[0].Type != "bug" {
+	if len(h.backend.readyOpts) != 1 || h.backend.readyOpts[0].IssueType != "bug" {
 		t.Fatalf("ready opts = %+v, want the type=bug filter threaded to the ready view", h.backend.readyOpts)
 	}
 }
@@ -1126,7 +1262,7 @@ func TestDriverAPIClaimReadyThreadsTypeFilter(t *testing.T) {
 // can only ever claim under its own lease — no cross-agent lock takeover.
 func TestDriverAPIClaimTaskIgnoresBodyActor(t *testing.T) {
 	h := newTestHarness(t)
-	h.backend.ready = []backend.IssueData{{ID: "TASK-7"}}
+	h.backend.ready = []workitems.IssueSummary{{ID: "TASK-7"}}
 
 	resp, decoded := h.do(t, opRequest{
 		op:      "claim-task",
@@ -1172,7 +1308,7 @@ func TestDriverAPIReleaseTaskIgnoresBodyActor(t *testing.T) {
 		t.Fatalf("typed releases = %+v, want exact owner and claim action", h.backend.typedReleases)
 	}
 	if len(h.backend.releases) != 0 {
-		t.Fatalf("generic IssueBackend release was called: %+v", h.backend.releases)
+		t.Fatalf("generic Work Items release was called: %+v", h.backend.releases)
 	}
 }
 
@@ -1342,7 +1478,7 @@ func TestTaskRunRequestMetadataRetainedClaimIsServerOwned(t *testing.T) {
 
 func TestDriverAPIEpicGet(t *testing.T) {
 	h := newTestHarness(t)
-	h.backend.epic = &backend.IssueDetailData{IssueData: backend.IssueData{ID: "EPIC-1", Title: "epic"}}
+	h.backend.epic = &workitems.IssueDetail{ID: "EPIC-1", Title: "epic"}
 
 	resp, decoded := h.do(t, opRequest{op: "epic-get", headers: h.ownerHeaders(t)})
 	if resp.StatusCode != http.StatusOK {
@@ -1459,8 +1595,8 @@ func TestRoleGetUsesInjectedPromptReader(t *testing.T) {
 		t.Fatalf("create role: %v", err)
 	}
 
-	var readRole *domain.Role
-	h.module.rolePrompts = func(role *domain.Role) string {
+	var readRole *agents.Role
+	h.module.rolePrompts = func(role *agents.Role) string {
 		readRole = role
 		return "materialized file prompt"
 	}

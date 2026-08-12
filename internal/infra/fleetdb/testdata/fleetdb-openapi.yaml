@@ -10505,6 +10505,8 @@ components:
             snapshot can briefly exceed it.
           additionalProperties:
             type: string
+        external_ref:
+          type: string
         parent_id:
           type: string
         repo:

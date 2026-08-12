@@ -10,8 +10,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
 
 	"github.com/spf13/cobra"
-
-	trigger "github.com/tysonthomas9/loomcli/internal/infra/automationruntime"
 )
 
 // parseRouterFlags registers the Router v2 flag set on a throwaway command and
@@ -117,11 +115,11 @@ func TestRouterBindingFlagsValidate(t *testing.T) {
 	}
 }
 
-func TestRouterBindingFlagsValidateWrapsPatternSentinel(t *testing.T) {
+func TestRouterBindingFlagsValidateWrapsAutomationInvalidSentinel(t *testing.T) {
 	f, _ := parseRouterFlags(t, "--event-pattern", "github.{push")
 	err := f.validate()
-	if !errors.Is(err, trigger.ErrInvalidPattern) {
-		t.Fatalf("validate() = %v, want errors.Is ErrInvalidPattern", err)
+	if !errors.Is(err, automation.ErrInvalid) {
+		t.Fatalf("validate() = %v, want errors.Is automation.ErrInvalid", err)
 	}
 }
 

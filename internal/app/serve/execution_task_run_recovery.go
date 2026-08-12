@@ -11,30 +11,22 @@ import (
 )
 
 // ExecutionTaskRunRecoveryDependencies keeps workspace enumeration read-only
-// and binds stale-child mutation to FleetDB's parent-owner-fenced command.
-// LegacyDriverRuns is accepted only by explicitly opted-in test composition.
+// and binds stale-child mutation to the exact Execution-owned recovery port.
 type ExecutionTaskRunRecoveryDependencies struct {
-	Workspaces               store.WorkspaceStore
-	Transport                fleetdb.ExecutionTransport
-	LegacyDriverRuns         store.DriverRunStore
-	AllowLegacyStoreAdapters bool
+	Workspaces      store.WorkspaceStore
+	ChildRecoveries execution.TaskRunStaleChildRecoveryPort
 }
 
 func NewExecutionTaskRunRecoveryDependencies(dependencies ExecutionTaskRunRecoveryDependencies) (execution.TaskRunRecoveryDependencies, error) {
 	if dependencies.Workspaces == nil {
 		return execution.TaskRunRecoveryDependencies{}, fmt.Errorf("compose stale child TaskRun recovery: workspace scope is required")
 	}
-	var recoveries execution.TaskRunStaleChildRecoveryPort
-	if dependencies.Transport != nil {
-		recoveries = &executionTaskRunFleetRecoveryAdapter{transport: dependencies.Transport}
-	} else if dependencies.AllowLegacyStoreAdapters && dependencies.LegacyDriverRuns != nil {
-		recoveries = &executionTaskRunLegacyRecoveryAdapter{driverRuns: dependencies.LegacyDriverRuns}
-	} else {
-		return execution.TaskRunRecoveryDependencies{}, fmt.Errorf("compose stale child TaskRun recovery: Fleet owner transport is required")
+	if dependencies.ChildRecoveries == nil {
+		return execution.TaskRunRecoveryDependencies{}, fmt.Errorf("compose stale child TaskRun recovery: owner-fenced recovery port is required")
 	}
 	return execution.TaskRunRecoveryDependencies{
 		Scopes:          &executionTaskRunRecoveryScopeAdapter{workspaces: dependencies.Workspaces},
-		ChildRecoveries: recoveries,
+		ChildRecoveries: dependencies.ChildRecoveries,
 	}, nil
 }
 
@@ -81,29 +73,5 @@ func (adapter *executionTaskRunFleetRecoveryAdapter) RecoverStaleChildTaskRuns(c
 	}, nil
 }
 
-// executionTaskRunLegacyRecoveryAdapter is a test-only parity seam. Production
-// composition never reaches the tokenless DriverRunStore command.
-type executionTaskRunLegacyRecoveryAdapter struct {
-	driverRuns store.DriverRunStore
-}
-
-func (adapter *executionTaskRunLegacyRecoveryAdapter) RecoverStaleChildTaskRuns(ctx context.Context, command execution.RecoverStaleChildTaskRunsCommand) (execution.RecoverStaleTaskRunsResult, error) {
-	result, err := adapter.driverRuns.RecoverStaleTaskRuns(ctx, command.WorkspaceKey, command.DriverRunID, store.StaleTaskRunRecovery{
-		StaleBefore: command.StaleBefore, ErrorClass: command.ErrorClass, ErrorMessage: command.ErrorMessage,
-	})
-	if err != nil {
-		return execution.RecoverStaleTaskRunsResult{}, err
-	}
-	if result == nil {
-		return execution.RecoverStaleTaskRunsResult{}, execution.ErrConflict
-	}
-	return execution.RecoverStaleTaskRunsResult{
-		WorkspaceKey: result.WorkspaceKey, StaleBefore: result.StaleBefore, RecoveredAt: result.RecoveredAt,
-		Recovered: result.Recovered, Released: result.Released, SkippedFresh: result.SkippedFresh,
-		RecoveredTaskRunIDs: append([]string(nil), result.RecoveredTaskRunIDs...),
-	}, nil
-}
-
 var _ execution.TaskRunRecoveryScopePort = (*executionTaskRunRecoveryScopeAdapter)(nil)
 var _ execution.TaskRunStaleChildRecoveryPort = (*executionTaskRunFleetRecoveryAdapter)(nil)
-var _ execution.TaskRunStaleChildRecoveryPort = (*executionTaskRunLegacyRecoveryAdapter)(nil)

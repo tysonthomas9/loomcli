@@ -14,11 +14,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/backend"
-	issuefleet "github.com/tysonthomas9/loomcli/internal/backend/fleet"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
+	issuefleet "github.com/tysonthomas9/loomcli/internal/modules/workitems/fleetdb"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/taskrunapi"
 )
@@ -98,7 +98,7 @@ func TestE2E_TaskRunPhase4WorkItemDesignPerformance(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	persisted, err := fixture.issues.Get(ctx, fixture.workItemID)
+	persisted, err := fixture.issues.Get(ctx, workitems.GetQuery{IssueID: fixture.workItemID})
 	if err != nil {
 		t.Fatalf("read final durable Work Item directly from FleetDB: %v", err)
 	}
@@ -115,7 +115,7 @@ type phase4TaskDesignFixture struct {
 	leaseID      string
 	leaseToken   string
 	fencingToken int64
-	issues       backend.IssueBackend
+	issues       workitems.API
 }
 
 func seedPhase4TaskDesignFixture(t *testing.T, e2e *workflowCatalogPhase2E2E) phase4TaskDesignFixture {
@@ -130,7 +130,11 @@ func seedPhase4TaskDesignFixture(t *testing.T, e2e *workflowCatalogPhase2E2E) ph
 	if err != nil {
 		t.Fatalf("create direct FleetDB Issue backend: %v", err)
 	}
-	workItem, err := issues.Create(ctx, backend.CreateParams{
+	workItemAPI, err := workitems.New(issues)
+	if err != nil {
+		t.Fatalf("compose direct FleetDB Work Items: %v", err)
+	}
+	workItem, err := workItemAPI.Create(ctx, workitems.CreateCommand{
 		Title: "Plan the Phase 4 TaskRun facade", Status: "open", IssueType: "task", Priority: 2,
 		IdempotencyKey: "phase4-task-design-performance-work-item",
 	})
@@ -216,7 +220,7 @@ func seedPhase4TaskDesignFixture(t *testing.T, e2e *workflowCatalogPhase2E2E) ph
 	return phase4TaskDesignFixture{
 		workItemID: workItem.ID, taskRunID: taskRunID,
 		nodeID: taskNodeID, leaseID: taskLeaseID, leaseToken: taskToken,
-		fencingToken: started.TaskRun.FencingToken, issues: issues,
+		fencingToken: started.TaskRun.FencingToken, issues: workItemAPI,
 	}
 }
 

@@ -9,9 +9,9 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/backend/fleet"
 	"github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
+	"github.com/tysonthomas9/loomcli/internal/platform/fleethttp"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -141,11 +141,11 @@ func OpenStoreWithOptions(ctx context.Context, dataDir string, logger *slog.Logg
 
 	// Reuse the shared transport-pooled client so fleet-db RPCs aren't
 	// throttled by http.DefaultTransport's MaxIdleConnsPerHost=2 cap.
-	// See internal/backend/fleet/transport.go for the rationale.
+	// See internal/platform/fleethttp/client.go for the rationale.
 	cfg := fleetdb.Config{
 		APIKey:     os.Getenv(EnvFleetDBAPIKey),
 		Actor:      resolveActor(),
-		HTTPClient: fleet.SharedHTTPClient(),
+		HTTPClient: fleethttp.SharedHTTPClient(),
 	}
 
 	handle, err := openStoreForMode(ctx, dataDir, cfg, logger, mode)

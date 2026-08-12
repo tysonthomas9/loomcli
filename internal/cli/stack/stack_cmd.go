@@ -23,6 +23,7 @@ import (
 	stackstore "github.com/tysonthomas9/loomcli/internal/infra/sourcecontrolstackstore"
 	"github.com/tysonthomas9/loomcli/internal/localworkspace"
 	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 )
 
 var stackCmd = &cobra.Command{
@@ -558,7 +559,7 @@ func publishCmd() *cobra.Command {
 			// Seed PR titles/bodies from issue metadata when available; the
 			// reconciler falls back to the owned commit's subject otherwise.
 			opts.PRMetaFor = func(ctx context.Context, taskID string) (stackpublish.PRMeta, bool) {
-				d, derr := cli.DefaultIssueBackend().Get(ctx, taskID)
+				d, derr := cli.DefaultWorkItems().Get(ctx, workitems.GetQuery{IssueID: taskID})
 				if derr != nil || d == nil {
 					return stackpublish.PRMeta{}, false
 				}

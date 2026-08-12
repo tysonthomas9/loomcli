@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/fleet"
@@ -54,7 +55,7 @@ type ServerConfig struct {
 	FleetEnabled        bool // Register fleet API routes (requires Redis coordination)
 	// FleetClient is true when this loom server is a fleet-db CLIENT (not a
 	// fleet API server itself). In this mode there is no local issue daemon to
-	// talk to — the IssueBackend is fleet-db over HTTP. Drives the
+	// talk to — Work Items uses FleetDB over HTTP. Drives the
 	// /api/health handler choice so a missing daemon is reported as the
 	// expected steady state, not a degraded one.
 	FleetClient           bool
@@ -79,6 +80,8 @@ type ServerConfig struct {
 	AgentsCapability          AgentsCapability
 	AgentProvisioning         AgentProvisioningCapability
 	SourceControl             SourceControlMaterializer
+	TaskStackBindings         SourceControlStackBindingResolver
+	TaskOutcomes              SourceControlTaskOutcomeRecorder
 	WorkspaceSourceControl    RepositoryAdmissionMaterializer
 	WorkspaceCatalog          WorkspaceAPI
 	InteractionCapability     InteractionCapability
@@ -94,42 +97,35 @@ type ServerConfig struct {
 	// Store is the transitional unified state store for workspace configuration
 	// not yet migrated behind capability-owned APIs. Local and distributed modes
 	// both use it as the authoritative source for those remaining records.
-	Store                store.Store
-	BackendOps           ops.BackendOps // Backend health operations interface (optional; nil disables backend health endpoint)
-	ScrollbackMaxLines   int            // Maximum lines per scrollback buffer (0 = default 10000)
-	NotifyTokenDir       string         // Directory to write notify.token (typically runtime dir); empty = token file not written
-	SessionRuntimeDir    string         // Runtime dir searched for local agent sessions; empty = workspace/repo stores only
-	LocalSettingsDir     string         // Desktop-local settings directory; empty disables /api/local/settings
-	FleetMode            bool           // When true, skip local daemon lifecycle hooks; fleet server manages agents
-	FleetClientURL       string         // Fleet server URL for fleet-mode workers (e.g., "http://fleet.example.com"); empty = no fleet client
-	FleetClientWorkspace string         // Explicit fleet server workspace ID; empty = unset.
-	FleetClientAPIKey    string         // Pre-shared API key for fleet worker backend auth
-	FleetClientActor     string         // X-Actor header value for fleet-db --auth-dev-mode (typically the loom agent name)
-	FleetDBBaseURL       string         // fleet-db HTTP base URL backing Store; used by the driver-op API to build issue backends
-	// ExecutionIssueBackends builds the workspace- and actor-scoped FleetDB
-	// clients used behind the run-token-authenticated DriverRun and TaskRun
-	// facades. Embedded mode captures its process-local service credential in
-	// this closure instead of exporting it through environment state.
-	ExecutionIssueBackends func(workspace, actor string) (IssueBackend, error)
-	DriverAPIBaseURL       string                // This serve process's own driver/task-run API base URL, required by task runners as LOOM_TASK_RUN_API_URL
-	DriverRunTokenKey      []byte                // Required HS256 signing key for run-scoped driver-op tokens (LOOM_RUN_TOKEN_SIGNING_KEY or ephemeral)
-	ExecutionCapability    ExecutionCapability   // Active Execution APIs and typed authority resolvers; nil fails mutating execution routes closed
-	DaytonaProvider        DaytonaProviderBroker // Host-owned, owner-fenced Daytona provider operation; nil fails closed.
-	ArtifactsCapability    ArtifactsCapability   // Active owner-fenced Artifact lifecycle; nil fails artifact mutations closed
-	Logger                 *slog.Logger          // Structured logger (optional; nil falls back to slog.Default())
-	SentryDSN              string                // Sentry/GlitchTip DSN for error tracking (optional; empty disables)
-	// IssueBackendFn returns the active backend.IssueBackend wrapped at server
-	// composition by the Work Items capability's narrow durable adapter. When
+	Store               store.Store
+	BackendOps          ops.BackendOps        // Backend health operations interface (optional; nil disables backend health endpoint)
+	ScrollbackMaxLines  int                   // Maximum lines per scrollback buffer (0 = default 10000)
+	NotifyTokenDir      string                // Directory to write notify.token (typically runtime dir); empty = token file not written
+	SessionRuntimeDir   string                // Runtime dir searched for local agent sessions; empty = workspace/repo stores only
+	LocalSettingsDir    string                // Desktop-local settings directory; empty disables /api/local/settings
+	FleetMode           bool                  // When true, skip local daemon lifecycle hooks; fleet server manages agents
+	FleetClientURL      string                // Fleet server URL for fleet-mode workers (e.g., "http://fleet.example.com"); empty = no fleet client
+	FleetClientAPIKey   string                // Pre-shared API key for fleet worker backend auth
+	FleetClientActor    string                // X-Actor header value for fleet-db --auth-dev-mode (typically the loom agent name)
+	FleetDBBaseURL      string                // fleet-db HTTP base URL backing Store
+	DriverAPIBaseURL    string                // This serve process's own driver/task-run API base URL, required by task runners as LOOM_TASK_RUN_API_URL
+	DriverRunTokenKey   []byte                // Required HS256 signing key for run-scoped driver-op tokens (LOOM_RUN_TOKEN_SIGNING_KEY or ephemeral)
+	ExecutionCapability ExecutionCapability   // Active Execution APIs and typed authority resolvers; nil fails mutating execution routes closed
+	DaytonaProvider     DaytonaProviderBroker // Host-owned, owner-fenced Daytona provider operation; nil fails closed.
+	ArtifactsCapability ArtifactsCapability   // Active owner-fenced Artifact lifecycle; nil fails artifact mutations closed
+	Logger              *slog.Logger          // Structured logger (optional; nil falls back to slog.Default())
+	SentryDSN           string                // Sentry/GlitchTip DSN for error tracking (optional; empty disables)
+	// WorkItemsFn returns the active workspace-scoped Work Items capability. When
 	// nil, Work Items HTTP and onboarding routes remain unavailable.
 	//
-	// Threaded as a closure rather than a backend.IssueBackend field so the
+	// Threaded as a closure rather than an API field so the
 	// cli wiring can resolve the backend lazily without webui depending on
 	// internal/cli (which would create an import cycle).
 	//
 	// The ctx carries the per-request workspace ID via middleware.WithWorkspace,
-	// allowing the closure to construct a per-workspace fleet-db backend in
-	// cloud mode. Local wirings return the process-global fleet-db backend.
-	IssueBackendFn func(ctx context.Context) IssueBackend
+	// allowing the closure to resolve a per-workspace capability in cloud mode.
+	// Local wirings return the process-global Work Items capability.
+	WorkItemsFn workitems.Provider
 }
 
 // WorkspaceIDResolverFn resolves a workspace name to its stable UUID.

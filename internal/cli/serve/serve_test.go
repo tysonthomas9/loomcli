@@ -12,11 +12,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	"github.com/tysonthomas9/loomcli/internal/infra/workspacecatalog"
 	"github.com/tysonthomas9/loomcli/internal/modules/agents"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 	"github.com/tysonthomas9/loomcli/internal/testutil"
 	"github.com/tysonthomas9/loomcli/internal/webui"
 	"github.com/tysonthomas9/loomcli/internal/webui/fleet"
@@ -92,7 +93,7 @@ func mockMonitorData() *MonitorData {
 func TestBuildMonitorCollectDataFnIsLazy(t *testing.T) {
 	var backendCalls atomic.Int32
 
-	_ = buildMonitorCollectDataFn("WS", func(context.Context) backend.IssueBackend {
+	_ = buildMonitorCollectDataFn("WS", func(context.Context) workitems.API {
 		backendCalls.Add(1)
 		return nil
 	})
@@ -100,7 +101,7 @@ func TestBuildMonitorCollectDataFnIsLazy(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 
 	if got := backendCalls.Load(); got != 0 {
-		t.Fatalf("buildMonitorCollectDataFn called issue backend before first request: got %d calls", got)
+		t.Fatalf("buildMonitorCollectDataFn called Work Items adapter before first request: got %d calls", got)
 	}
 }
 
@@ -280,7 +281,12 @@ func TestApplyWorkspaceConfig_NilStoreDoesNotWireWorkspaceFns(t *testing.T) {
 
 func TestApplyWorkspaceConfig_StoreWiresStoreBackedFns(t *testing.T) {
 	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
-	cfg := webui.ServerConfig{Store: memstore.New()}
+	st := memstore.New()
+	workspace, err := workspacecatalog.New(st.Workspaces(), st.Repos())
+	if err != nil {
+		t.Fatalf("compose Workspace capability: %v", err)
+	}
+	cfg := webui.ServerConfig{Store: st, WorkspaceCatalog: workspace}
 
 	applyWorkspaceConfig(&cfg, workspaceAgentsCommandsStub{})
 
@@ -308,19 +314,6 @@ func TestApplyWorkspaceConfig_StoreWithoutAgentsCommandsFailsClosed(t *testing.T
 	}
 }
 
-func TestApplyWorkspaceConfig_FleetClientWorkspaceOverridesCwdFallback(t *testing.T) {
-	cfg := webui.ServerConfig{
-		FleetClient:          true,
-		FleetClientWorkspace: "PARITY",
-	}
-
-	applyWorkspaceConfig(&cfg, workspaceAgentsCommandsStub{})
-
-	if cfg.InitialWorkspaceID != "PARITY" {
-		t.Fatalf("InitialWorkspaceID = %q, want PARITY", cfg.InitialWorkspaceID)
-	}
-}
-
 func TestApplyFleetConfig_StoreBackedServeDoesNotExpectDaemon(t *testing.T) {
 	cfg := webui.ServerConfig{Store: memstore.New()}
 
@@ -343,7 +336,7 @@ func TestWithStoreFleetConfigUsesEmbeddedStoreConnection(t *testing.T) {
 	var cfg webui.ServerConfig
 	applyFleetConfig(&cfg, fs)
 	if cfg.FleetClientAPIKey != "local-service-key" {
-		t.Fatal("ServerConfig did not receive the embedded Store credential for FleetBackendHook composition")
+		t.Fatal("ServerConfig did not receive the embedded Store credential for WorkItemsFleetDBHook composition")
 	}
 }
 

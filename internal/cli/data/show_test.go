@@ -10,12 +10,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/backend/api"
-	"github.com/tysonthomas9/loomcli/internal/backend/api/gen"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
+	api "github.com/tysonthomas9/loomcli/internal/modules/workitems/httpapi"
+	"github.com/tysonthomas9/loomcli/internal/platform/loomapi/gen"
 )
 
 // canned envelope mirroring api.apiResponse — re-declared here because it is
-// unexported in internal/backend/api.
+// unexported in internal/modules/workitems/httpapi.
 type testEnvelope struct {
 	Success bool            `json:"success"`
 	Data    json.RawMessage `json:"data,omitempty"`
@@ -90,7 +91,7 @@ func runShow(t *testing.T, srvURL, id, format string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	detail, err := ab.Get(ctx, id)
+	detail, err := ab.Get(ctx, workitems.GetQuery{IssueID: id})
 	if err != nil {
 		return "", err
 	}

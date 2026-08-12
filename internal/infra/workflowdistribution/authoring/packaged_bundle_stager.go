@@ -50,7 +50,7 @@ func stagePackagedBuiltin(
 		_ = os.RemoveAll(buildRoot)
 		return nil, true, err
 	}
-	runners := legacyRunnerSpecs(options.Runners)
+	runners := driverRunnerSpecs(options.Runners)
 	if len(runners) == 0 && options.DeriveRunners {
 		runners = deriveWorkflowRunnerSpecs(options.Entrypoint, options.Files)
 	}
@@ -74,7 +74,7 @@ func stagePackagedBuiltin(
 		_ = os.RemoveAll(buildRoot)
 		return nil, true, err
 	}
-	return &legacyStagedBundle{
+	return &stagedBundle{
 		staged:      staged,
 		cleanupRoot: buildRoot,
 	}, true, nil

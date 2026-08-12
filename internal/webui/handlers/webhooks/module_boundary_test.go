@@ -145,7 +145,7 @@ func TestProductionWebhookHandlerHasNoLegacyMutationOrQueryFallback(t *testing.T
 	}
 
 	forbidden := map[string]struct{}{
-		"TriggerRoutes": {}, "DispatchTriggerRoute": {}, "DispatchTriggerRouteV2": {},
+		"TriggerRoutes": {}, "DispatchTriggerRouteV2": {},
 		"TriggerEvents": {}, "TriggerDeliveries": {},
 	}
 	files := token.NewFileSet()

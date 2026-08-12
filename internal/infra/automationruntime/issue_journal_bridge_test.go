@@ -1,7 +1,5 @@
-// Issue-journal-bridge tests live in the external trigger_test package so they
-// drive the real memstore dispatch path through InternalSource (memstore
-// imports trigger for the pattern engine, so an in-package test would cycle) —
-// mirroring internal_source_test.go.
+// Issue-journal-bridge tests live in the external trigger_test package and
+// exercise the bridge through its consumer-owned event-emission port.
 package trigger_test
 
 import (
@@ -15,8 +13,6 @@ import (
 	"testing"
 
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
-
-	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	trigger "github.com/tysonthomas9/loomcli/internal/infra/automationruntime"
@@ -45,6 +41,53 @@ type failingInternalEmitter struct {
 	mu    sync.Mutex
 	calls int
 	err   error
+}
+
+type capturedInternalEmission struct {
+	workspace string
+	event     trigger.InternalEvent
+}
+
+type capturingInternalEmitter struct {
+	mu        sync.Mutex
+	emissions []capturedInternalEmission
+}
+
+func (emitter *capturingInternalEmitter) Emit(_ context.Context, workspace string, event trigger.InternalEvent) (*trigger.InternalEmitResult, error) {
+	emitter.mu.Lock()
+	defer emitter.mu.Unlock()
+	event.Payload = append(json.RawMessage(nil), event.Payload...)
+	event.SubjectAttrs = cloneTestStringMap(event.SubjectAttrs)
+	emitter.emissions = append(emitter.emissions, capturedInternalEmission{workspace: workspace, event: event})
+	return &trigger.InternalEmitResult{EventType: event.EventType, Origin: event.Origin}, nil
+}
+
+func (emitter *capturingInternalEmitter) snapshot() []capturedInternalEmission {
+	emitter.mu.Lock()
+	defer emitter.mu.Unlock()
+	return append([]capturedInternalEmission(nil), emitter.emissions...)
+}
+
+func (emitter *capturingInternalEmitter) eventsOfType(eventType string) []trigger.InternalEvent {
+	emissions := emitter.snapshot()
+	events := make([]trigger.InternalEvent, 0, len(emissions))
+	for _, emission := range emissions {
+		if emission.event.EventType == eventType {
+			events = append(events, emission.event)
+		}
+	}
+	return events
+}
+
+func cloneTestStringMap(values map[string]string) map[string]string {
+	if values == nil {
+		return nil
+	}
+	cloned := make(map[string]string, len(values))
+	for key, value := range values {
+		cloned[key] = value
+	}
+	return cloned
 }
 
 func (e *failingInternalEmitter) Emit(context.Context, string, trigger.InternalEvent) (*trigger.InternalEmitResult, error) {
@@ -113,22 +156,21 @@ func issueEvent(id, action, actor, entityID string, after string) store.JournalE
 	return store.JournalEvent{ID: id, Action: action, Actor: actor, EntityID: entityID, After: raw}
 }
 
-// newBridge wires a scoped bridge over a fresh memstore that already carries an
-// internal.issue.created binding (setupInternalBinding from
-// internal_source_test.go). A pre-seeded cursor of "" found makes the drain
+// newBridge wires a scoped bridge over a fresh workspace query store and a
+// capture of the current event-emission port. A pre-seeded cursor of "" makes the drain
 // start from the beginning without the bootstrap fast-forward; pass a nil
 // cursor store and rely on bootstrap when testing first-run behavior.
-func newBridge(t *testing.T, reader *fakeIssueJournalReader, cursors trigger.IssueJournalCursorStore) (*trigger.IssueJournalBridge, *memstore.Store) {
+func newBridge(t *testing.T, reader *fakeIssueJournalReader, cursors trigger.IssueJournalCursorStore) (*trigger.IssueJournalBridge, *capturingInternalEmitter) {
 	t.Helper()
 	s := memstore.New()
-	setupInternalBinding(t, s)
+	emitter := &capturingInternalEmitter{}
 	return &trigger.IssueJournalBridge{
 		Store:        s,
-		Source:       &trigger.InternalSource{Store: s},
+		Source:       emitter,
 		Reader:       reader,
 		WorkspaceKey: "WS",
 		Cursors:      cursors,
-	}, s
+	}, emitter
 }
 
 // seenStart marks a workspace as already observed (cursor "") so RunOnce drains
@@ -146,7 +188,7 @@ func TestIssueJournalBridgeEmitsCreateOnInternalBinding(t *testing.T) {
 	}}
 	cursors := newFixedCursorStore()
 	seenStart(cursors, "WS")
-	bridge, s := newBridge(t, reader, cursors)
+	bridge, emitter := newBridge(t, reader, cursors)
 
 	out, err := bridge.RunOnce(t.Context())
 	if err != nil {
@@ -156,27 +198,22 @@ func TestIssueJournalBridgeEmitsCreateOnInternalBinding(t *testing.T) {
 		t.Fatalf("result = %+v, want 1 emitted", out)
 	}
 
-	events, runs := internalCounts(t, s)
-	if events != 1 || runs != 1 {
-		t.Fatalf("store = %d events %d runs, want 1/1", events, runs)
+	emissions := emitter.snapshot()
+	if len(emissions) != 1 {
+		t.Fatalf("emissions = %d, want 1", len(emissions))
 	}
 	if got, _ := cursors.Load("WS"); got != "100" {
 		t.Fatalf("cursor = %q, want 100", got)
 	}
 
-	// The persisted event carries the deterministic loopback identity and the
-	// system origin in its envelope; the After snapshot landed in SubjectAttrs.
-	evs, err := s.TriggerEvents().List(t.Context(), "WS", store.TriggerEventFilter{})
-	if err != nil {
-		t.Fatalf("List events: %v", err)
-	}
-	event := evs[0]
-	if event.SourceEventID != "fleet-journal-100" ||
-		event.IdempotencyKey != "internal:WS:fleet-journal-100" ||
-		event.EventType != "issue.created" ||
+	// The bridge sends deterministic source identity and trusted journal data;
+	// Automation owns normalization, idempotency, and persistence.
+	event := emissions[0].event
+	if emissions[0].workspace != "WS" || event.EventID != "fleet-journal-100" ||
+		event.EventType != "issue.create" || event.Origin != automation.EventOriginSystem ||
 		event.SubjectRef != "issue:42" ||
 		event.ActorRef != "user:alice" {
-		t.Fatalf("persisted event = %+v, want loopback identity from journal entry", event)
+		t.Fatalf("emitted event = %+v, want journal identity", event)
 	}
 }
 
@@ -192,56 +229,22 @@ func TestIssueJournalBridgeProvenanceAndAttrs(t *testing.T) {
 	}}
 	cursors := newFixedCursorStore()
 	seenStart(cursors, "WS")
-	bridge, s := newBridge(t, reader, cursors)
+	bridge, emitter := newBridge(t, reader, cursors)
 
 	if _, err := bridge.RunOnce(t.Context()); err != nil {
 		t.Fatalf("RunOnce: %v", err)
 	}
 
-	runs, err := s.DriverRuns().List(t.Context(), "WS", store.DriverRunFilter{})
-	if err != nil || len(runs) != 1 {
-		t.Fatalf("List runs = %v, %v; want 1 run", runs, err)
-	}
-	var envelope struct {
-		Origin        string          `json:"origin"`
-		HopDepth      int             `json:"hopDepth"`
-		ParentEventID string          `json:"parentEventId"`
-		Event         json.RawMessage `json:"event"`
-	}
-	if err := json.Unmarshal(runs[0].Payload, &envelope); err != nil {
-		t.Fatalf("decode envelope: %v", err)
-	}
-	if envelope.Origin != "system" || envelope.HopDepth != 0 || envelope.ParentEventID != "" {
-		t.Fatalf("envelope = %+v, want system origin depth-0 root", envelope)
+	emissions := emitter.snapshot()
+	if len(emissions) != 1 || emissions[0].event.Origin != automation.EventOriginSystem || emissions[0].event.ParentEventID != "" {
+		t.Fatalf("emissions = %+v, want one system root", emissions)
 	}
 	var ev map[string]any
-	if err := json.Unmarshal(envelope.Event, &ev); err != nil {
+	if err := json.Unmarshal(emissions[0].event.Payload, &ev); err != nil {
 		t.Fatalf("decode emitter payload: %v", err)
 	}
 	if ev["status"] != "open" || ev["title"] != "T" {
 		t.Fatalf("emitter payload = %v, want the After snapshot", ev)
-	}
-}
-
-func TestIssueJournalBridgeReplayDedups(t *testing.T) {
-	reader := &fakeIssueJournalReader{pages: map[string]journalPage{
-		"": {events: []store.JournalEvent{
-			issueEvent("100", "issue.create", "u", "42", `{"status":"open"}`),
-		}, next: "100"},
-	}}
-	// Re-run from the SAME starting cursor: the bridge re-emits the same stream
-	// id, which dedups in the dispatch path (no second event/run).
-	cursors := newFixedCursorStore()
-	bridge, s := newBridge(t, reader, cursors)
-
-	for pass := 0; pass < 2; pass++ {
-		seenStart(cursors, "WS") // force the drain to start at "" both passes
-		if _, err := bridge.RunOnce(t.Context()); err != nil {
-			t.Fatalf("RunOnce pass %d: %v", pass, err)
-		}
-	}
-	if events, runs := internalCounts(t, s); events != 1 || runs != 1 {
-		t.Fatalf("store after replay = %d events %d runs, want 1/1 deduped", events, runs)
 	}
 }
 
@@ -265,7 +268,7 @@ func TestIssueJournalBridgeEmitFailureHoldsCursor(t *testing.T) {
 	}
 	cursors := newFixedCursorStore()
 	seenStart(cursors, "WS")
-	bridge, s := newBridge(t, reader, cursors)
+	bridge, emitter := newBridge(t, reader, cursors)
 
 	out, err := bridge.RunOnce(t.Context())
 	if err == nil {
@@ -278,8 +281,8 @@ func TestIssueJournalBridgeEmitFailureHoldsCursor(t *testing.T) {
 	if got, _ := cursors.Load("WS"); got != "100" {
 		t.Fatalf("cursor = %q, want 100 (first page persisted, second page failed)", got)
 	}
-	if events, _ := internalCounts(t, s); events != 1 {
-		t.Fatalf("events = %d, want 1 (second entry never emitted)", events)
+	if emissions := emitter.snapshot(); len(emissions) != 1 {
+		t.Fatalf("emissions = %d, want 1 (second entry never emitted)", len(emissions))
 	}
 }
 
@@ -303,7 +306,7 @@ func TestIssueJournalBridgeDrainsPastFilteredPage(t *testing.T) {
 	}}
 	cursors := newFixedCursorStore()
 	seenStart(cursors, "WS")
-	bridge, s := newBridge(t, reader, cursors)
+	bridge, emitter := newBridge(t, reader, cursors)
 
 	out, err := bridge.RunOnce(t.Context())
 	if err != nil {
@@ -312,8 +315,8 @@ func TestIssueJournalBridgeDrainsPastFilteredPage(t *testing.T) {
 	if out.Emitted != 1 {
 		t.Fatalf("emitted = %d, want 1 (drained past the filtered page to the issue event)", out.Emitted)
 	}
-	if events, runs := internalCounts(t, s); events != 1 || runs != 1 {
-		t.Fatalf("store = %d events %d runs, want 1/1", events, runs)
+	if emissions := emitter.snapshot(); len(emissions) != 1 {
+		t.Fatalf("emissions = %d, want 1", len(emissions))
 	}
 	if got, _ := cursors.Load("WS"); got != "100" {
 		t.Fatalf("cursor = %q, want 100 (advanced past the all-filtered page)", got)
@@ -330,7 +333,7 @@ func TestIssueJournalBridgeActionAllowlistSkips(t *testing.T) {
 	}}
 	cursors := newFixedCursorStore()
 	seenStart(cursors, "WS")
-	bridge, s := newBridge(t, reader, cursors)
+	bridge, emitter := newBridge(t, reader, cursors)
 
 	out, err := bridge.RunOnce(t.Context())
 	if err != nil {
@@ -341,8 +344,8 @@ func TestIssueJournalBridgeActionAllowlistSkips(t *testing.T) {
 	if out.Emitted != 1 || out.Skipped != 2 {
 		t.Fatalf("result = %+v, want 1 emitted 2 skipped", out)
 	}
-	if events, _ := internalCounts(t, s); events != 1 {
-		t.Fatalf("events = %d, want 1 (only issue.create emitted)", events)
+	if emissions := emitter.snapshot(); len(emissions) != 1 {
+		t.Fatalf("emissions = %d, want 1 (only issue.create emitted)", len(emissions))
 	}
 	if got, _ := cursors.Load("WS"); got != "12" {
 		t.Fatalf("cursor = %q, want 12 (advanced past skipped entries)", got)
@@ -358,18 +361,8 @@ func TestIssueJournalBridgeCustomAllowlist(t *testing.T) {
 	}}
 	cursors := newFixedCursorStore()
 	seenStart(cursors, "WS")
-	bridge, s := newBridge(t, reader, cursors)
+	bridge, emitter := newBridge(t, reader, cursors)
 	bridge.ActionAllowlist = []string{"issue.close"} // close behind the allowlist
-	// The default binding listens on internal.issue.created; add one on
-	// internal.issue.closed so the closed emission has a listener.
-	if _, err := s.TriggerBindings().Create(t.Context(), store.TriggerBindingCreate{
-		WorkspaceKey: "WS", BindingID: "b-closed", Name: "b-closed",
-		SourceKind: "internal", RouteKey: "internal.issue.closed",
-		DriverID: "issue-bot", DriverVersionID: "v1", TargetEntrypoint: "run",
-		ConcurrencyPolicy: automation.ConcurrencyAllow, Enabled: true,
-	}); err != nil {
-		t.Fatalf("Create issue.closed binding: %v", err)
-	}
 
 	out, err := bridge.RunOnce(t.Context())
 	if err != nil {
@@ -378,9 +371,9 @@ func TestIssueJournalBridgeCustomAllowlist(t *testing.T) {
 	if out.Emitted != 1 || out.Skipped != 1 {
 		t.Fatalf("result = %+v, want 1 emitted (close) 1 skipped (create)", out)
 	}
-	evs, _ := s.TriggerEvents().List(t.Context(), "WS", store.TriggerEventFilter{})
-	if len(evs) != 1 || evs[0].EventType != "issue.closed" {
-		t.Fatalf("events = %+v, want one issue.closed", evs)
+	emissions := emitter.snapshot()
+	if len(emissions) != 1 || emissions[0].event.EventType != "issue.close" {
+		t.Fatalf("emissions = %+v, want one issue.close journal event", emissions)
 	}
 }
 
@@ -397,7 +390,7 @@ func TestIssueJournalBridgeBootstrapFastForward(t *testing.T) {
 		}, next: "3"},
 	}}
 	cursors := newFixedCursorStore() // empty: WS is unseen -> bootstrap
-	bridge, s := newBridge(t, reader, cursors)
+	bridge, emitter := newBridge(t, reader, cursors)
 
 	out, err := bridge.RunOnce(t.Context())
 	if err != nil {
@@ -406,8 +399,8 @@ func TestIssueJournalBridgeBootstrapFastForward(t *testing.T) {
 	if out.FastForwarded != 1 || out.Emitted != 0 {
 		t.Fatalf("result = %+v, want bootstrap fast-forward, nothing emitted", out)
 	}
-	if events, runs := internalCounts(t, s); events != 0 || runs != 0 {
-		t.Fatalf("store = %d events %d runs, want 0/0 (no triage storm)", events, runs)
+	if emissions := emitter.snapshot(); len(emissions) != 0 {
+		t.Fatalf("emissions = %d, want 0 (no triage storm)", len(emissions))
 	}
 	if got, _ := cursors.Load("WS"); got != "3" {
 		t.Fatalf("cursor = %q, want 3 (paused at journal tail)", got)
@@ -423,8 +416,8 @@ func TestIssueJournalBridgeBootstrapFastForward(t *testing.T) {
 	if _, err := bridge.RunOnce(t.Context()); err != nil {
 		t.Fatalf("RunOnce second pass: %v", err)
 	}
-	if events, _ := internalCounts(t, s); events != 1 {
-		t.Fatalf("events after new entry = %d, want 1 (only the post-bootstrap entry)", events)
+	if emissions := emitter.snapshot(); len(emissions) != 1 {
+		t.Fatalf("emissions after new entry = %d, want 1", len(emissions))
 	}
 }
 
@@ -439,7 +432,7 @@ func TestIssueJournalBridgeReplayEnvDrainsFromZero(t *testing.T) {
 		}, next: "1"},
 	}}
 	cursors := newFixedCursorStore() // unseen WS, but replay opts into drain-from-0
-	bridge, s := newBridge(t, reader, cursors)
+	bridge, emitter := newBridge(t, reader, cursors)
 
 	out, err := bridge.RunOnce(t.Context())
 	if err != nil {
@@ -448,8 +441,8 @@ func TestIssueJournalBridgeReplayEnvDrainsFromZero(t *testing.T) {
 	if out.FastForwarded != 0 || out.Emitted != 1 {
 		t.Fatalf("result = %+v, want replay-from-zero emit, no fast-forward", out)
 	}
-	if events, _ := internalCounts(t, s); events != 1 {
-		t.Fatalf("events = %d, want 1 (historical entry replayed)", events)
+	if emissions := emitter.snapshot(); len(emissions) != 1 {
+		t.Fatalf("emissions = %d, want 1 (historical entry replayed)", len(emissions))
 	}
 }
 
@@ -464,9 +457,6 @@ func TestIssueJournalBridgeMultiWorkspaceCursorIsolation(t *testing.T) {
 	if _, err := s.Workspaces().Create(t.Context(), store.WorkspaceCreate{Key: "WS2", Name: "ws2"}); err != nil {
 		t.Fatalf("create WS2: %v", err)
 	}
-	setupInternalBinding(t, s)
-	setupInternalBindingIn(t, s, "WS2")
-
 	reader := &perWorkspaceReader{m: map[string]*fakeIssueJournalReader{
 		"WS": {pages: map[string]journalPage{
 			"": {events: []store.JournalEvent{issueEvent("a1", "issue.create", "u", "1", `{"status":"open"}`)}, next: "a1"},
@@ -481,7 +471,8 @@ func TestIssueJournalBridgeMultiWorkspaceCursorIsolation(t *testing.T) {
 	cursors := newFixedCursorStore()
 	seenStart(cursors, "WS")
 	seenStart(cursors, "WS2")
-	bridge := &trigger.IssueJournalBridge{Store: s, Source: &trigger.InternalSource{Store: s}, Reader: reader, Cursors: cursors}
+	emitter := &capturingInternalEmitter{}
+	bridge := &trigger.IssueJournalBridge{Store: s, Source: emitter, Reader: reader, Cursors: cursors}
 
 	out, err := bridge.RunOnce(t.Context())
 	if err != nil {
@@ -496,11 +487,12 @@ func TestIssueJournalBridgeMultiWorkspaceCursorIsolation(t *testing.T) {
 	if c, _ := cursors.Load("WS2"); c != "b2" {
 		t.Fatalf("WS2 cursor = %q, want b2", c)
 	}
-	if n := countEvents(t, s, "WS"); n != 1 {
-		t.Fatalf("WS events = %d, want 1", n)
+	counts := map[string]int{}
+	for _, emission := range emitter.snapshot() {
+		counts[emission.workspace]++
 	}
-	if n := countEvents(t, s, "WS2"); n != 2 {
-		t.Fatalf("WS2 events = %d, want 2", n)
+	if counts["WS"] != 1 || counts["WS2"] != 2 {
+		t.Fatalf("emissions by workspace = %+v, want WS=1 WS2=2", counts)
 	}
 }
 
@@ -603,9 +595,9 @@ func TestIssueJournalBridgeNilDependenciesRejected(t *testing.T) {
 		name   string
 		bridge *trigger.IssueJournalBridge
 	}{
-		{name: "nil store", bridge: &trigger.IssueJournalBridge{Source: &trigger.InternalSource{}, Reader: &fakeIssueJournalReader{}}},
+		{name: "nil store", bridge: &trigger.IssueJournalBridge{Source: &capturingInternalEmitter{}, Reader: &fakeIssueJournalReader{}}},
 		{name: "nil source", bridge: &trigger.IssueJournalBridge{Store: memstore.New(), Reader: &fakeIssueJournalReader{}}},
-		{name: "nil reader", bridge: &trigger.IssueJournalBridge{Store: memstore.New(), Source: &trigger.InternalSource{}}},
+		{name: "nil reader", bridge: &trigger.IssueJournalBridge{Store: memstore.New(), Source: &capturingInternalEmitter{}}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -629,7 +621,7 @@ func TestIssueJournalBridgeNoBindingAdvancesCursor(t *testing.T) {
 	}}
 	cursors := newFixedCursorStore()
 	seenStart(cursors, "WS")
-	bridge := &trigger.IssueJournalBridge{Store: s, Source: &trigger.InternalSource{Store: s}, Reader: reader, WorkspaceKey: "WS", Cursors: cursors}
+	bridge := &trigger.IssueJournalBridge{Store: s, Source: &failingInternalEmitter{err: domain.ErrNotFound}, Reader: reader, WorkspaceKey: "WS", Cursors: cursors}
 
 	out, err := bridge.RunOnce(t.Context())
 	if err != nil {
@@ -657,40 +649,4 @@ func (r *perWorkspaceReader) ListIssueEvents(ctx context.Context, ws, afterCurso
 		return nil, afterCursor, false, nil
 	}
 	return inner.ListIssueEvents(ctx, ws, afterCursor, limit)
-}
-
-// setupInternalBindingIn seeds the internal.issue.created binding (and its
-// driver/version) in a non-default workspace.
-func setupInternalBindingIn(t *testing.T, s *memstore.Store, ws string) {
-	t.Helper()
-	ctx := t.Context()
-	if _, err := s.Drivers().Create(ctx, store.DriverCreate{
-		WorkspaceKey: ws, DriverID: "issue-bot", Name: "issue-bot",
-		OwnerType: workflowcatalog.DriverOwnerSystem, Status: workflowcatalog.DriverStatusActive,
-	}); err != nil {
-		t.Fatalf("Create driver in %q: %v", ws, err)
-	}
-	if _, err := s.DriverVersions().Create(ctx, store.DriverVersionCreate{
-		WorkspaceKey: ws, VersionID: "v1", DriverID: "issue-bot", Version: 1,
-		SourceDigest: "sha256:s", BundleDigest: "sha256:b", ValidationStatus: workflowcatalog.DriverVersionValidationPassed,
-	}); err != nil {
-		t.Fatalf("Create driver version in %q: %v", ws, err)
-	}
-	if _, err := s.TriggerBindings().Create(ctx, store.TriggerBindingCreate{
-		WorkspaceKey: ws, BindingID: "b-internal", Name: "b-internal",
-		SourceKind: "internal", RouteKey: internalRouteKey,
-		DriverID: "issue-bot", DriverVersionID: "v1", TargetEntrypoint: "run",
-		ConcurrencyPolicy: automation.ConcurrencyAllow, Enabled: true,
-	}); err != nil {
-		t.Fatalf("Create trigger binding in %q: %v", ws, err)
-	}
-}
-
-func countEvents(t *testing.T, s *memstore.Store, ws string) int {
-	t.Helper()
-	evs, err := s.TriggerEvents().List(t.Context(), ws, store.TriggerEventFilter{})
-	if err != nil {
-		t.Fatalf("List events in %q: %v", ws, err)
-	}
-	return len(evs)
 }

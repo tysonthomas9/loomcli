@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tysonthomas9/loomcli/internal/backend"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -16,12 +16,12 @@ func TestTaskDiffReturnsLocalBranchDiffFromFilesystemOrigin(t *testing.T) {
 	origin, head := createLocalBranchOrigin(t, "changed\n")
 	h := newTestHarness(t)
 	seedTaskDiffRepo(t, h, origin)
-	h.backend.epic = &backend.IssueDetailData{IssueData: backend.IssueData{
+	h.backend.epic = &workitems.IssueDetail{
 		ID:          "TASK-1",
 		Status:      "review",
 		SourceRepo:  "source-repo",
 		ExternalRef: "local-branch:loom/TASK-1@" + head,
-	}}
+	}
 
 	resp, decoded := h.do(t, opRequest{
 		op:      "task-diff",
@@ -58,12 +58,12 @@ func TestTaskDiffRejectsNonFilesystemOrigin(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("create repo: %v", err)
 	}
-	h.backend.epic = &backend.IssueDetailData{IssueData: backend.IssueData{
+	h.backend.epic = &workitems.IssueDetail{
 		ID:          "TASK-1",
 		Status:      "review",
 		SourceRepo:  "source-repo",
 		ExternalRef: "local-branch:loom/TASK-1@abcdef1",
-	}}
+	}
 
 	resp, decoded := h.do(t, opRequest{
 		op:      "task-diff",
@@ -97,12 +97,12 @@ func TestTaskDiffReturnsLocalBranchDiffFromVerifiedWorkspaceCheckout(t *testing.
 		}
 		return ""
 	}
-	h.backend.epic = &backend.IssueDetailData{IssueData: backend.IssueData{
+	h.backend.epic = &workitems.IssueDetail{
 		ID:          "TASK-1",
 		Status:      "review",
 		SourceRepo:  "source-repo",
 		ExternalRef: "local-branch:loom/TASK-1@" + head,
-	}}
+	}
 
 	resp, decoded := h.do(t, opRequest{
 		op:      "task-diff",
@@ -139,12 +139,12 @@ func TestTaskDiffReturnsLocalBranchDiffFromWorkspaceCheckoutWithoutOrigin(t *tes
 		}
 		return ""
 	}
-	h.backend.epic = &backend.IssueDetailData{IssueData: backend.IssueData{
+	h.backend.epic = &workitems.IssueDetail{
 		ID:          "TASK-1",
 		Status:      "review",
 		SourceRepo:  "source-repo",
 		ExternalRef: "local-branch:loom/TASK-1@" + head,
-	}}
+	}
 
 	resp, decoded := h.do(t, opRequest{
 		op:      "task-diff",
@@ -184,12 +184,12 @@ func TestTaskDiffRejectsMissingConfiguredFilesystemOrigin(t *testing.T) {
 		}
 		return ""
 	}
-	h.backend.epic = &backend.IssueDetailData{IssueData: backend.IssueData{
+	h.backend.epic = &workitems.IssueDetail{
 		ID:          "TASK-1",
 		Status:      "review",
 		SourceRepo:  "source-repo",
 		ExternalRef: "local-branch:loom/TASK-1@" + head,
-	}}
+	}
 
 	resp, decoded := h.do(t, opRequest{
 		op:      "task-diff",
@@ -225,12 +225,12 @@ func TestTaskDiffUsesRepoDefaultInsteadOfWorkspaceIsolationBranch(t *testing.T) 
 		t.Fatalf("create attached repo metadata: %v", err)
 	}
 
-	h.backend.epic = &backend.IssueDetailData{IssueData: backend.IssueData{
+	h.backend.epic = &workitems.IssueDetail{
 		ID:          "TASK-1",
 		Status:      "review",
 		SourceRepo:  "source-repo",
 		ExternalRef: "local-branch:loom/TASK-1@" + head,
-	}}
+	}
 	resp, decoded := h.do(t, opRequest{
 		op:      "task-diff",
 		headers: h.ownerHeaders(t),
@@ -267,12 +267,12 @@ func TestTaskDiffRejectsWorkspaceCheckoutRemoteMismatch(t *testing.T) {
 		}
 		return ""
 	}
-	h.backend.epic = &backend.IssueDetailData{IssueData: backend.IssueData{
+	h.backend.epic = &workitems.IssueDetail{
 		ID:          "TASK-1",
 		Status:      "review",
 		SourceRepo:  "source-repo",
 		ExternalRef: "local-branch:loom/TASK-1@abcdef1",
-	}}
+	}
 
 	resp, decoded := h.do(t, opRequest{
 		op:      "task-diff",
@@ -292,12 +292,12 @@ func TestTaskDiffEnforcesDiffSizeCap(t *testing.T) {
 	origin, head := createLocalBranchOrigin(t, strings.Repeat("x", taskDiffMaxBytes+2048)+"\n")
 	h := newTestHarness(t)
 	seedTaskDiffRepo(t, h, origin)
-	h.backend.epic = &backend.IssueDetailData{IssueData: backend.IssueData{
+	h.backend.epic = &workitems.IssueDetail{
 		ID:          "TASK-1",
 		Status:      "review",
 		SourceRepo:  "source-repo",
 		ExternalRef: "local-branch:loom/TASK-1@" + head,
-	}}
+	}
 
 	resp, decoded := h.do(t, opRequest{
 		op:      "task-diff",

@@ -1,0 +1,83 @@
+package cli
+
+import (
+	"context"
+	"log/slog"
+	"os"
+	"sync"
+
+	"github.com/tysonthomas9/loomcli/internal/bootstrap"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
+	fleet "github.com/tysonthomas9/loomcli/internal/modules/workitems/fleetdb"
+	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
+)
+
+// WorkspaceAwareWorkItems returns a Work Items provider that picks a
+// backend based on the workspace ID carried on ctx. In cloud mode
+// (LOOM_FLEET_DB_URL set) it builds (and caches) a fleet-db backend per
+// workspace so /api/workspaces/{ws}/... handlers see workspace-scoped data
+// instead of the process-global default backend. Falls back to
+// DefaultWorkItems when ctx has no workspace or the env var is unset.
+func WorkspaceAwareWorkItems() func(ctx context.Context) workitems.API {
+	return WorkspaceAwareWorkItemsForURL(os.Getenv(bootstrap.EnvFleetDBURL), os.Getenv(bootstrap.EnvFleetDBActor))
+}
+
+// WorkspaceAwareWorkItemsForURL returns a Work Items provider scoped to a
+// concrete fleet-db base URL. Serve uses this for embedded local mode, where
+// fleet-db is running but LOOM_FLEET_DB_URL intentionally remains unset.
+func WorkspaceAwareWorkItemsForURL(fleetURL, actor string) func(ctx context.Context) workitems.API {
+	return WorkspaceAwareWorkItemsForConfig(fleetURL, os.Getenv(bootstrap.EnvFleetDBAPIKey), actor)
+}
+
+// WorkspaceAwareWorkItemsForConfig returns a Work Items provider scoped
+// to a concrete FleetDB connection. The API key is captured in process memory;
+// it is never copied into environment state or emitted to logs. Serve uses this
+// path for embedded local mode because its service credential is intentionally
+// absent from the parent process environment.
+func WorkspaceAwareWorkItemsForConfig(fleetURL, apiKey, actor string) func(ctx context.Context) workitems.API {
+	if fleetURL == "" {
+		// Local mode: ctx-aware factory degenerates to the global backend.
+		return func(_ context.Context) workitems.API {
+			return DefaultWorkItems()
+		}
+	}
+
+	if actor == "" {
+		actor = os.Getenv(bootstrap.EnvFleetDBActor)
+	}
+	if actor == "" {
+		actor = os.Getenv("USER")
+	}
+	var (
+		mu    sync.Mutex
+		cache = make(map[string]workitems.API)
+	)
+	return func(ctx context.Context) workitems.API {
+		wsID := middleware.WorkspaceFromContext(ctx)
+		if wsID == "" {
+			return DefaultWorkItems()
+		}
+
+		mu.Lock()
+		defer mu.Unlock()
+		if be, ok := cache[wsID]; ok {
+			return be
+		}
+		fb, err := fleet.New(fleet.Config{
+			BaseURL:     fleetURL,
+			WorkspaceID: wsID,
+			APIKey:      apiKey,
+			Actor:       actor,
+		})
+		if err != nil {
+			slog.Error("workspace fleet backend construction failed", "ws", wsID, "err", err)
+			return newUnavailableWorkItems(WorkItemsAdapterFleetDB, err)
+		}
+		api, err := workitems.New(fb)
+		if err != nil {
+			return newUnavailableWorkItems(WorkItemsAdapterFleetDB, err)
+		}
+		cache[wsID] = api
+		return api
+	}
+}

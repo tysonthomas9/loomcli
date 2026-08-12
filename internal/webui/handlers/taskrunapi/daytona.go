@@ -47,7 +47,7 @@ func (m *Module) daytonaExecute(
 	result, err := m.daytonaProvider.ExecuteDaytona(ctx, execution.DaytonaProviderCommand{
 		WorkspaceKey: workspace,
 		TaskRunID:    run.TaskRunID,
-		WorkItemID:   run.TaskID,
+		WorkItemID:   run.WorkItemID,
 		DriverRunID:  run.DriverRunID,
 		Intent:       intent,
 	})
@@ -60,7 +60,7 @@ func (m *Module) daytonaExecute(
 	return result, nil
 }
 
-func isDaytonaTaskRun(run *domain.TaskRun) bool {
+func isDaytonaTaskRun(run *execution.TaskRun) bool {
 	if run == nil {
 		return false
 	}

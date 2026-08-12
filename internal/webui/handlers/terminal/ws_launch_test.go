@@ -11,7 +11,6 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
-	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/modules/agents"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 	"github.com/tysonthomas9/loomcli/internal/webui/localredis"
@@ -143,7 +142,7 @@ func TestLaunchSpecUsesPersistedGenericEnvelope(t *testing.T) {
 
 func TestAgentTerminalAttachRequiresStartAfterStop(t *testing.T) {
 	ctx := context.Background()
-	st := memstore.New()
+	st := newTerminalTestState()
 	if _, err := terminalTestAgents(st).Create(ctx, terminalTestAgentCreate{
 		WorkspaceKey: "E2E",
 		Name:         "reviewer",
@@ -180,7 +179,7 @@ func TestAgentTerminalAttachRequiresStartAfterStop(t *testing.T) {
 	t.Cleanup(func() { _ = manager.Shutdown() })
 	p := &terminalWSParams{
 		manager:         manager,
-		store:           st,
+		state:           st,
 		tabMetaStore:    tabStore,
 		interactionNode: "test-node",
 		loomServerURL:   "http://127.0.0.1:8683",
@@ -237,7 +236,7 @@ func TestAgentTerminalAttachRequiresStartAfterStop(t *testing.T) {
 
 func TestAgentTerminalAttachRejectsDaemonSupervisedWorkerStoredLaunch(t *testing.T) {
 	ctx := context.Background()
-	st := memstore.New()
+	st := newTerminalTestState()
 	if _, err := terminalTestAgents(st).Create(ctx, terminalTestAgentCreate{
 		WorkspaceKey: "E2E",
 		Name:         "advanced-worker",
@@ -273,7 +272,7 @@ func TestAgentTerminalAttachRejectsDaemonSupervisedWorkerStoredLaunch(t *testing
 	t.Cleanup(func() { _ = manager.Shutdown() })
 	p := &terminalWSParams{
 		manager:       manager,
-		store:         st,
+		state:         st,
 		tabMetaStore:  tabStore,
 		agentIdentity: terminalStoreIdentity{services: st.AgentServices()},
 	}
@@ -293,7 +292,7 @@ func TestAgentTerminalAttachRejectsDaemonSupervisedWorkerStoredLaunch(t *testing
 
 func TestAgentTerminalAttachCannotSpawnDuringStopSnapshotGap(t *testing.T) {
 	ctx := context.Background()
-	st := memstore.New()
+	st := newTerminalTestState()
 	if _, err := terminalTestAgents(st).Create(ctx, terminalTestAgentCreate{
 		WorkspaceKey: "E2E",
 		Name:         "reviewer-race",
@@ -338,7 +337,7 @@ func TestAgentTerminalAttachCannotSpawnDuringStopSnapshotGap(t *testing.T) {
 	}
 	p := &terminalWSParams{
 		manager:       manager,
-		store:         st,
+		state:         st,
 		tabMetaStore:  tabStore,
 		agentIdentity: agentIdentity,
 	}
@@ -422,7 +421,7 @@ func TestEnsureWorkspacePTYRegisteredUsesLocalState(t *testing.T) {
 
 	mm := webuterminal.NewMultiPTYManager("cat", 0)
 	t.Cleanup(func() { _ = mm.Close() })
-	p := &terminalWSParams{manager: mm}
+	p := &terminalWSParams{manager: mm, state: newTerminalTestState()}
 
 	ensureWorkspacePTYRegistered(context.Background(), p, "E2E")
 

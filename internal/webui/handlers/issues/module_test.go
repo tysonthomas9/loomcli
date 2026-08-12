@@ -136,9 +136,9 @@ func (m *routeMover) Move(_ context.Context, command workitemmove.Command) (*wor
 	return &workitemmove.Result{SourceID: command.IssueID, TargetID: "TARGET-1"}, nil
 }
 
-func (f *routeWorkItems) Create(_ context.Context, command workitems.CreateCommand) (*workitems.CreatedIssue, error) {
+func (f *routeWorkItems) Create(_ context.Context, command workitems.CreateCommand) (*workitems.IssueSummary, error) {
 	f.createCalls++
-	return &workitems.CreatedIssue{Summary: &workitems.IssueSummary{ID: "TASK-NEW", Title: command.Title, Status: "open"}}, nil
+	return &workitems.IssueSummary{ID: "TASK-NEW", Title: command.Title, Status: "open"}, nil
 }
 func (f *routeWorkItems) List(context.Context, workitems.ListQuery) (*workitems.ListResult, error) {
 	f.listCalls++
@@ -146,6 +146,10 @@ func (f *routeWorkItems) List(context.Context, workitems.ListQuery) (*workitems.
 }
 
 func (f *routeWorkItems) Ready(context.Context, workitems.AvailabilityQuery) ([]workitems.IssueSummary, error) {
+	return []workitems.IssueSummary{}, nil
+}
+
+func (f *routeWorkItems) Blocked(context.Context, workitems.AvailabilityQuery) ([]workitems.IssueSummary, error) {
 	return []workitems.IssueSummary{}, nil
 }
 
@@ -171,6 +175,9 @@ func (f *routeWorkItems) AssignRepository(_ context.Context, command workitems.A
 		return nil, f.assignRepositoryErr
 	}
 	return &workitems.IssueSummary{ID: command.IssueID, SourceRepo: command.Repository, Repo: command.Repository}, nil
+}
+func (f *routeWorkItems) BlockRepositoryRequired(context.Context, workitems.BlockRepositoryRequiredCommand) (*workitems.RepositoryAdmissionResult, error) {
+	return &workitems.RepositoryAdmissionResult{}, nil
 }
 func (f *routeWorkItems) Claim(_ context.Context, command workitems.ClaimCommand) (*workitems.IssueDetail, error) {
 	f.claimIDs = append(f.claimIDs, command.IssueID)

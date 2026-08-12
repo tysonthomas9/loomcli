@@ -11,7 +11,6 @@ import (
 	"time"
 
 	driverpkg "github.com/tysonthomas9/loomcli/internal/driver"
-	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
@@ -219,7 +218,6 @@ func newInteractionHTTPModule(
 		FencingToken: 1,
 	}
 	return NewModule(Config{
-		Store:       memstore.New(),
 		RunTokenKey: bytes.Repeat([]byte{0x42}, 32),
 		Execution: interactionHTTPExecution{
 			run: &execution.DriverRun{

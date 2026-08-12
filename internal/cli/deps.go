@@ -10,9 +10,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/tysonthomas9/loomcli/internal/backend"
-	"github.com/tysonthomas9/loomcli/internal/backend/fleet"
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
+	fleet "github.com/tysonthomas9/loomcli/internal/modules/workitems/fleetdb"
 	"github.com/tysonthomas9/loomcli/internal/usage"
 )
 
@@ -77,7 +77,8 @@ type Deps struct {
 	FS           FileSystem
 	Logger       *slog.Logger
 	Clock        func() time.Time
-	IssueBackend backend.IssueBackend
+	WorkItems    workitems.API
+	ClaimLeases  workitems.ClaimLeaseCommands
 	LookPath     func(file string) (string, error)
 	ExecCtx      ExecContextRunner
 	Agent        AgentInvoker
@@ -147,51 +148,52 @@ func (defaultExecContextRunner) Run(ctx context.Context, dir, name string, args 
 
 // DefaultDeps returns a Deps populated with real (production) implementations.
 func DefaultDeps(ctx context.Context) *Deps {
-	var issueBackend backend.IssueBackend
+	var workItemAPI workitems.API
+	var claimLeases workitems.ClaimLeaseCommands
 
-	switch ResolveIssueBackendType() {
-	case IssueBackendFleetDB:
-		issueBackend = newFleetDBIssueBackend()
-	case IssueBackendFleet:
-		fb, err := createFleetIssueBackend()
+	switch ResolveWorkItemsAdapterType() {
+	case WorkItemsAdapterFleetDB:
+		store := newFleetDBWorkItemsAdapter()
+		workItemAPI, _ = workitems.New(store)
+		claimLeases = store
+	case WorkItemsAdapterFleet:
+		fb, err := createFleetWorkItemStore()
 		if err != nil {
 			slog.Error("fleet backend creation failed", "err", err)
-			issueBackend = newUnavailableIssueBackend(IssueBackendFleet, err)
+			workItemAPI = newUnavailableWorkItems(WorkItemsAdapterFleet, err)
 		} else {
-			issueBackend = fb
+			workItemAPI, _ = workitems.New(fb)
+			claimLeases = fb
 		}
-	case IssueBackendAPI:
-		ab, err := createAPIIssueBackend()
+	case WorkItemsAdapterAPI:
+		ab, err := createAPIWorkItems()
 		if err != nil {
 			slog.Error("api backend creation failed", "err", err)
-			issueBackend = newUnavailableIssueBackend(IssueBackendAPI, err)
+			workItemAPI = newUnavailableWorkItems(WorkItemsAdapterAPI, err)
 		} else {
-			issueBackend = ab
+			workItemAPI = ab
 		}
 	}
-	if issueBackend == nil {
-		issueBackend = newFleetDBIssueBackend()
+	if workItemAPI == nil {
+		store := newFleetDBWorkItemsAdapter()
+		workItemAPI, _ = workitems.New(store)
+		claimLeases = store
 	}
-
-	// Wrap the resolved IssueBackend with tracing so every method call
-	// emits a `service.IssueBackend.<Method>` sub-span under the active
-	// CLI / HTTP-server / agent span. Applied after backend selection so
-	// fleet-db, fleet, and api backends all get the same instrumentation.
-	// See issue_backend_tracing.go.
-	issueBackend = wrapIssueBackendWithTracing(issueBackend)
+	workItemAPI = wrapWorkItemsWithTracing(workItemAPI)
 
 	return &Deps{
 		// Wrap the default git runner with tracing so every git subprocess
 		// (push/pull/fetch/merge/status/etc.) emits a sub-span under the
 		// active loom.cli span. See git_runner_tracing.go.
-		Git:          wrapGitRunnerWithTracing(ctx, defaultGitRunner{}),
-		Exec:         defaultExecRunner{},
-		FS:           defaultFileSystem{},
-		Logger:       slog.Default(),
-		Clock:        time.Now,
-		IssueBackend: issueBackend,
-		LookPath:     exec.LookPath,
-		ExecCtx:      defaultExecContextRunner{},
+		Git:         wrapGitRunnerWithTracing(ctx, defaultGitRunner{}),
+		Exec:        defaultExecRunner{},
+		FS:          defaultFileSystem{},
+		Logger:      slog.Default(),
+		Clock:       time.Now,
+		WorkItems:   workItemAPI,
+		ClaimLeases: claimLeases,
+		LookPath:    exec.LookPath,
+		ExecCtx:     defaultExecContextRunner{},
 		// Wrap the registry-backed invoker with tracing so every backend call
 		// from agent flows (plan/task/automode/etc.) emits a sub-span under
 		// the active loom.cli span. See agent_invoker_tracing.go.
@@ -253,32 +255,32 @@ func TestingGetDefaultDeps() *Deps {
 	return ensureDefaultDeps()
 }
 
-// fleetDBIssueBackend lazily opens fleet-db for IssueBackend calls. It avoids
+// fleetDBWorkItemsAdapter lazily opens FleetDB for Work Items calls. It avoids
 // spawning embedded fleet-db during package init while still making fleet-db
-// the default CLI issue backend.
-type fleetDBIssueBackend struct{}
+// the default CLI Work Items adapter.
+type fleetDBWorkItemsAdapter struct{}
 
-var _ backend.IssueBackend = (*fleetDBIssueBackend)(nil)
-var _ backend.ClaimReleaser = (*fleetDBIssueBackend)(nil)
+var _ workitems.Store = (*fleetDBWorkItemsAdapter)(nil)
+var _ workitems.ClaimLeaseCommands = (*fleetDBWorkItemsAdapter)(nil)
 
-func newFleetDBIssueBackend() backend.IssueBackend {
-	return &fleetDBIssueBackend{}
+func newFleetDBWorkItemsAdapter() *fleetDBWorkItemsAdapter {
+	return &fleetDBWorkItemsAdapter{}
 }
 
-func (b *fleetDBIssueBackend) withBackend(ctx context.Context, op string, fn func(backend.IssueBackend) error) error {
+func (b *fleetDBWorkItemsAdapter) withStore(ctx context.Context, op string, fn func(*fleet.Adapter) error) error {
 	dataDir := bootstrap.LoomDir()
 	if dataDir == "" {
-		return backend.ErrUnavailable(op, "cannot resolve loom data directory; set HOME or LOOM_CONFIG_DIR", nil)
+		return workitems.AdapterUnavailable(op, "cannot resolve loom data directory; set HOME or LOOM_CONFIG_DIR", nil)
 	}
 	handle, err := bootstrap.OpenStore(ctx, dataDir, nil)
 	if err != nil {
-		return backend.ErrUnavailable(op, "open fleet-db store", err)
+		return workitems.AdapterUnavailable(op, "open fleet-db store", err)
 	}
 	defer func() { _ = handle.Close() }()
 
 	ws, err := bootstrap.ResolveActiveWorkspaceKey(ctx, handle.Store.Workspaces())
 	if err != nil {
-		return backend.ErrUnavailable(op, "resolve active fleet-db workspace", err)
+		return workitems.AdapterUnavailable(op, "resolve active fleet-db workspace", err)
 	}
 	fb, err := fleet.New(fleet.Config{
 		BaseURL:     handle.URL(),
@@ -287,7 +289,7 @@ func (b *fleetDBIssueBackend) withBackend(ctx context.Context, op string, fn fun
 		Actor:       fleetDBActor(),
 	})
 	if err != nil {
-		return backend.ErrUnavailable(op, "create fleet-db issue backend", err)
+		return workitems.AdapterUnavailable(op, "create FleetDB Work Items adapter", err)
 	}
 	return fn(fb)
 }
@@ -302,147 +304,133 @@ func fleetDBActor() string {
 	return os.Getenv("USER")
 }
 
-func (b *fleetDBIssueBackend) Get(ctx context.Context, id string) (*backend.IssueDetailData, error) {
-	var out *backend.IssueDetailData
-	err := b.withBackend(ctx, "Get", func(ib backend.IssueBackend) error {
+func (b *fleetDBWorkItemsAdapter) RequireRepositoryAdmission(ctx context.Context) error {
+	return b.withStore(ctx, "RequireRepositoryAdmission", func(store *fleet.Adapter) error {
+		return store.RequireRepositoryAdmission(ctx)
+	})
+}
+
+func (b *fleetDBWorkItemsAdapter) Get(ctx context.Context, query workitems.GetQuery) (*workitems.IssueDetail, error) {
+	var out *workitems.IssueDetail
+	err := b.withStore(ctx, "Get", func(store *fleet.Adapter) error {
 		var err error
-		out, err = ib.Get(ctx, id)
+		out, err = store.Get(ctx, query)
 		return err
 	})
 	return out, err
 }
 
-func (b *fleetDBIssueBackend) List(ctx context.Context, opts backend.ListOpts) ([]backend.IssueData, error) {
-	var out []backend.IssueData
-	err := b.withBackend(ctx, "List", func(ib backend.IssueBackend) error {
+func (b *fleetDBWorkItemsAdapter) List(ctx context.Context, opts workitems.ListFilter) ([]workitems.IssueSummary, error) {
+	var out []workitems.IssueSummary
+	err := b.withStore(ctx, "List", func(store *fleet.Adapter) error {
 		var err error
-		out, err = ib.List(ctx, opts)
+		out, err = store.List(ctx, opts)
 		return err
 	})
 	return out, err
 }
 
-func (b *fleetDBIssueBackend) Ready(ctx context.Context, opts backend.ReadyOpts) ([]backend.IssueData, error) {
-	var out []backend.IssueData
-	err := b.withBackend(ctx, "Ready", func(ib backend.IssueBackend) error {
+func (b *fleetDBWorkItemsAdapter) Ready(ctx context.Context, query workitems.AvailabilityQuery) ([]workitems.IssueSummary, error) {
+	var out []workitems.IssueSummary
+	err := b.withStore(ctx, "Ready", func(store *fleet.Adapter) error {
 		var err error
-		out, err = ib.Ready(ctx, opts)
+		out, err = store.Ready(ctx, query)
 		return err
 	})
 	return out, err
 }
 
-func (b *fleetDBIssueBackend) Blocked(ctx context.Context, opts backend.BlockedOpts) ([]backend.IssueData, error) {
-	var out []backend.IssueData
-	err := b.withBackend(ctx, "Blocked", func(ib backend.IssueBackend) error {
+func (b *fleetDBWorkItemsAdapter) Blocked(ctx context.Context, query workitems.AvailabilityQuery) ([]workitems.IssueSummary, error) {
+	var out []workitems.IssueSummary
+	err := b.withStore(ctx, "Blocked", func(store *fleet.Adapter) error {
 		var err error
-		out, err = ib.Blocked(ctx, opts)
+		out, err = store.Blocked(ctx, query)
 		return err
 	})
 	return out, err
 }
 
-func (b *fleetDBIssueBackend) Stats(ctx context.Context) (*backend.StatsData, error) {
-	var out *backend.StatsData
-	err := b.withBackend(ctx, "Stats", func(ib backend.IssueBackend) error {
+func (b *fleetDBWorkItemsAdapter) Deferred(ctx context.Context, query workitems.AvailabilityQuery) ([]workitems.IssueSummary, error) {
+	var out []workitems.IssueSummary
+	err := b.withStore(ctx, "Deferred", func(store *fleet.Adapter) error {
 		var err error
-		out, err = ib.Stats(ctx)
+		out, err = store.Deferred(ctx, query)
 		return err
 	})
 	return out, err
 }
 
-func (b *fleetDBIssueBackend) Count(ctx context.Context, opts backend.CountOpts) (int, error) {
-	var out int
-	err := b.withBackend(ctx, "Count", func(ib backend.IssueBackend) error {
+func (b *fleetDBWorkItemsAdapter) Stats(ctx context.Context) (*workitems.Stats, error) {
+	var out *workitems.Stats
+	err := b.withStore(ctx, "Stats", func(store *fleet.Adapter) error {
 		var err error
-		out, err = ib.Count(ctx, opts)
+		out, err = store.Stats(ctx)
 		return err
 	})
 	return out, err
 }
 
-func (b *fleetDBIssueBackend) GetChildren(ctx context.Context, id string) ([]backend.IssueData, error) {
-	var out []backend.IssueData
-	err := b.withBackend(ctx, "GetChildren", func(ib backend.IssueBackend) error {
+func (b *fleetDBWorkItemsAdapter) Search(ctx context.Context, query workitems.SearchQuery) ([]workitems.IssueSummary, error) {
+	var out []workitems.IssueSummary
+	err := b.withStore(ctx, "Search", func(store *fleet.Adapter) error {
 		var err error
-		out, err = ib.GetChildren(ctx, id)
+		out, err = store.Search(ctx, query)
 		return err
 	})
 	return out, err
 }
 
-func (b *fleetDBIssueBackend) SearchIssues(ctx context.Context, query string, limit int) ([]backend.IssueData, error) {
-	var out []backend.IssueData
-	err := b.withBackend(ctx, "SearchIssues", func(ib backend.IssueBackend) error {
+func (b *fleetDBWorkItemsAdapter) Create(ctx context.Context, command workitems.CreateCommand) (*workitems.IssueSummary, error) {
+	var out *workitems.IssueSummary
+	err := b.withStore(ctx, "Create", func(store *fleet.Adapter) error {
 		var err error
-		out, err = ib.SearchIssues(ctx, query, limit)
+		out, err = store.Create(ctx, command)
 		return err
 	})
 	return out, err
 }
 
-func (b *fleetDBIssueBackend) Create(ctx context.Context, params backend.CreateParams) (*backend.IssueData, error) {
-	var out *backend.IssueData
-	err := b.withBackend(ctx, "Create", func(ib backend.IssueBackend) error {
+func (b *fleetDBWorkItemsAdapter) Patch(ctx context.Context, command workitems.PatchCommand) error {
+	return b.withStore(ctx, "Patch", func(store *fleet.Adapter) error {
+		return store.Patch(ctx, command)
+	})
+}
+
+func (b *fleetDBWorkItemsAdapter) Claim(ctx context.Context, command workitems.ClaimCommand) (*workitems.IssueDetail, error) {
+	var out *workitems.IssueDetail
+	err := b.withStore(ctx, "Claim", func(store *fleet.Adapter) error {
 		var err error
-		out, err = ib.Create(ctx, params)
+		out, err = store.Claim(ctx, command)
 		return err
 	})
 	return out, err
-}
-
-func (b *fleetDBIssueBackend) Update(ctx context.Context, id string, params backend.UpdateParams) error {
-	return b.withBackend(ctx, "Update", func(ib backend.IssueBackend) error {
-		return ib.Update(ctx, id, params)
-	})
-}
-
-func (b *fleetDBIssueBackend) ClaimIssue(ctx context.Context, id string, lockTTL time.Duration) error {
-	return b.withBackend(ctx, "ClaimIssue", func(ib backend.IssueBackend) error {
-		return ib.ClaimIssue(ctx, id, lockTTL)
-	})
 }
 
 // ReleaseClaim implements backend.ClaimReleaser by forwarding to the
-// underlying FleetBackend (which is the only IssueBackend implementation
+// underlying Fleet adapter (the only Work Items adapter
 // that maintains an explicit claim lock distinct from issue status).
 // Used by `loom complete` to close the planner-leaked-lock path in LOOM-1.
-func (b *fleetDBIssueBackend) ReleaseClaim(ctx context.Context, id, actor string) error {
-	return b.withBackend(ctx, "ReleaseClaim", func(ib backend.IssueBackend) error {
-		r, ok := ib.(backend.ClaimReleaser)
-		if !ok {
-			return nil
-		}
-		return r.ReleaseClaim(ctx, id, actor)
+func (b *fleetDBWorkItemsAdapter) ReleaseClaim(ctx context.Context, id, actor string) error {
+	return b.withStore(ctx, "ReleaseClaim", func(store *fleet.Adapter) error {
+		return store.ReleaseClaim(ctx, id, actor)
 	})
 }
 
-func (b *fleetDBIssueBackend) ClaimIssueAsActor(ctx context.Context, id string, lockTTL time.Duration, actor string) error {
-	return b.withBackend(ctx, "ClaimIssue", func(ib backend.IssueBackend) error {
-		if actorBackend, ok := ib.(interface {
-			ClaimIssueAsActor(context.Context, string, time.Duration, string) error
-		}); ok {
-			return actorBackend.ClaimIssueAsActor(ctx, id, lockTTL, actor)
-		}
-		return ib.ClaimIssue(ctx, id, lockTTL)
+func (b *fleetDBWorkItemsAdapter) ClaimAsActor(ctx context.Context, id string, lockTTL time.Duration, actor string) error {
+	return b.withStore(ctx, "Claim", func(store *fleet.Adapter) error {
+		return store.ClaimAsActor(ctx, id, lockTTL, actor)
 	})
 }
 
-func (b *fleetDBIssueBackend) RenewIssueClaimAsActor(ctx context.Context, id string, lockTTL time.Duration, actor string) error {
-	return b.withBackend(ctx, "RenewIssueClaim", func(ib backend.IssueBackend) error {
-		if actorBackend, ok := ib.(interface {
-			RenewIssueClaimAsActor(context.Context, string, time.Duration, string) error
-		}); ok {
-			return actorBackend.RenewIssueClaimAsActor(ctx, id, lockTTL, actor)
-		}
-		return fmt.Errorf("renew issue claim: backend does not support renewal-only claims")
+func (b *fleetDBWorkItemsAdapter) RenewClaimAsActor(ctx context.Context, id string, lockTTL time.Duration, actor string) error {
+	return b.withStore(ctx, "RenewClaim", func(store *fleet.Adapter) error {
+		return store.RenewClaimAsActor(ctx, id, lockTTL, actor)
 	})
 }
 
-func (b *fleetDBIssueBackend) ReleaseIssueLock(ctx context.Context, id, actor string) error {
-	return b.withBackend(ctx, "ReleaseIssueLock", func(ib backend.IssueBackend) error {
-		return ib.ReleaseIssueLock(ctx, id, actor)
+func (b *fleetDBWorkItemsAdapter) ReleaseIssueLock(ctx context.Context, id, actor string) error {
+	return b.withStore(ctx, "ReleaseIssueLock", func(store *fleet.Adapter) error {
+		return store.ReleaseIssueLock(ctx, id, actor)
 	})
 }
 
@@ -450,231 +438,188 @@ func (b *fleetDBIssueBackend) ReleaseIssueLock(ctx context.Context, id, actor st
 // free a lock acquired via ClaimIssueAsActor when the agent process exits.
 // Falls back to ReleaseIssueLock(id, actor) if the underlying backend does
 // not expose a dedicated actor variant.
-func (b *fleetDBIssueBackend) ReleaseIssueAsActor(ctx context.Context, id string, actor string) error {
-	return b.withBackend(ctx, "ReleaseIssue", func(ib backend.IssueBackend) error {
-		if actorBackend, ok := ib.(interface {
-			ReleaseIssueAsActor(context.Context, string, string) error
-		}); ok {
-			return actorBackend.ReleaseIssueAsActor(ctx, id, actor)
-		}
-		return ib.ReleaseIssueLock(ctx, id, actor)
+func (b *fleetDBWorkItemsAdapter) ReleaseIssueAsActor(ctx context.Context, id string, actor string) error {
+	return b.withStore(ctx, "ReleaseIssue", func(store *fleet.Adapter) error {
+		return store.ReleaseIssueAsActor(ctx, id, actor)
 	})
 }
 
-func (b *fleetDBIssueBackend) DeferIssue(ctx context.Context, id string, until time.Time) error {
-	return b.withBackend(ctx, "DeferIssue", func(ib backend.IssueBackend) error {
-		return ib.DeferIssue(ctx, id, until)
-	})
-}
-
-func (b *fleetDBIssueBackend) UndeferIssue(ctx context.Context, id string) error {
-	return b.withBackend(ctx, "UndeferIssue", func(ib backend.IssueBackend) error {
-		return ib.UndeferIssue(ctx, id)
-	})
-}
-
-func (b *fleetDBIssueBackend) Close(ctx context.Context, id string, params backend.CloseParams) (*backend.CloseResult, error) {
-	var out *backend.CloseResult
-	err := b.withBackend(ctx, "Close", func(ib backend.IssueBackend) error {
+func (b *fleetDBWorkItemsAdapter) Close(ctx context.Context, command workitems.CloseCommand) (*workitems.CloseResult, error) {
+	var out *workitems.CloseResult
+	err := b.withStore(ctx, "Close", func(store *fleet.Adapter) error {
 		var err error
-		out, err = ib.Close(ctx, id, params)
+		out, err = store.Close(ctx, command)
 		return err
 	})
 	return out, err
 }
 
-func (b *fleetDBIssueBackend) Reopen(ctx context.Context, id string, params backend.ReopenParams) error {
-	return b.withBackend(ctx, "Reopen", func(ib backend.IssueBackend) error {
-		return ib.Reopen(ctx, id, params)
+func (b *fleetDBWorkItemsAdapter) Reopen(ctx context.Context, command workitems.ReopenCommand) error {
+	return b.withStore(ctx, "Reopen", func(store *fleet.Adapter) error {
+		return store.Reopen(ctx, command)
 	})
 }
 
-func (b *fleetDBIssueBackend) Delete(ctx context.Context, params backend.DeleteParams) error {
-	return b.withBackend(ctx, "Delete", func(ib backend.IssueBackend) error {
-		return ib.Delete(ctx, params)
-	})
-}
-
-func (b *fleetDBIssueBackend) AddDependency(ctx context.Context, params backend.DepAddParams) error {
-	return b.withBackend(ctx, "AddDependency", func(ib backend.IssueBackend) error {
-		return ib.AddDependency(ctx, params)
-	})
-}
-
-func (b *fleetDBIssueBackend) RemoveDependency(ctx context.Context, params backend.DepRemoveParams) error {
-	return b.withBackend(ctx, "RemoveDependency", func(ib backend.IssueBackend) error {
-		return ib.RemoveDependency(ctx, params)
-	})
-}
-
-func (b *fleetDBIssueBackend) AddLabel(ctx context.Context, id string, label string) error {
-	return b.withBackend(ctx, "AddLabel", func(ib backend.IssueBackend) error {
-		return ib.AddLabel(ctx, id, label)
-	})
-}
-
-func (b *fleetDBIssueBackend) RemoveLabel(ctx context.Context, id string, label string) error {
-	return b.withBackend(ctx, "RemoveLabel", func(ib backend.IssueBackend) error {
-		return ib.RemoveLabel(ctx, id, label)
-	})
-}
-
-func (b *fleetDBIssueBackend) ListComments(ctx context.Context, id string) ([]backend.CommentData, error) {
-	var out []backend.CommentData
-	err := b.withBackend(ctx, "ListComments", func(ib backend.IssueBackend) error {
+func (b *fleetDBWorkItemsAdapter) Delete(ctx context.Context, command workitems.DeleteCommand) (workitems.DeleteResult, error) {
+	var out workitems.DeleteResult
+	err := b.withStore(ctx, "Delete", func(store *fleet.Adapter) error {
 		var err error
-		out, err = ib.ListComments(ctx, id)
+		out, err = store.Delete(ctx, command)
 		return err
 	})
 	return out, err
 }
 
-func (b *fleetDBIssueBackend) AddComment(ctx context.Context, params backend.CommentAddParams) (*backend.CommentData, error) {
-	var out *backend.CommentData
-	err := b.withBackend(ctx, "AddComment", func(ib backend.IssueBackend) error {
+func (b *fleetDBWorkItemsAdapter) BlockRepositoryRequired(ctx context.Context, id string) (*workitems.RepositoryAdmissionResult, error) {
+	var out *workitems.RepositoryAdmissionResult
+	err := b.withStore(ctx, "BlockRepositoryRequired", func(store *fleet.Adapter) error {
 		var err error
-		out, err = ib.AddComment(ctx, params)
+		out, err = store.BlockRepositoryRequired(ctx, id)
 		return err
 	})
 	return out, err
 }
 
-func (b *fleetDBIssueBackend) ListEvents(ctx context.Context, id string, limit int) ([]backend.EventData, error) {
-	var out []backend.EventData
-	err := b.withBackend(ctx, "ListEvents", func(ib backend.IssueBackend) error {
+func (b *fleetDBWorkItemsAdapter) AssignRepository(ctx context.Context, command workitems.AssignRepositoryCommand) (*workitems.IssueSummary, error) {
+	var out *workitems.IssueSummary
+	err := b.withStore(ctx, "AssignRepository", func(store *fleet.Adapter) error {
 		var err error
-		out, err = ib.ListEvents(ctx, id, limit)
+		out, err = store.AssignRepository(ctx, command)
 		return err
 	})
 	return out, err
 }
 
-func (b *fleetDBIssueBackend) Batch(ctx context.Context, ops []backend.BatchOp) ([]backend.BatchResult, error) {
-	var out []backend.BatchResult
-	err := b.withBackend(ctx, "Batch", func(ib backend.IssueBackend) error {
+func (b *fleetDBWorkItemsAdapter) AddDependency(ctx context.Context, command workitems.AddDependencyCommand) error {
+	return b.withStore(ctx, "AddDependency", func(store *fleet.Adapter) error {
+		return store.AddDependency(ctx, command)
+	})
+}
+
+func (b *fleetDBWorkItemsAdapter) RemoveDependency(ctx context.Context, command workitems.RemoveDependencyCommand) error {
+	return b.withStore(ctx, "RemoveDependency", func(store *fleet.Adapter) error {
+		return store.RemoveDependency(ctx, command)
+	})
+}
+
+func (b *fleetDBWorkItemsAdapter) ListDependencies(ctx context.Context, query workitems.ListDependenciesQuery) ([]workitems.Dependency, error) {
+	var out []workitems.Dependency
+	err := b.withStore(ctx, "ListDependencies", func(store *fleet.Adapter) error {
 		var err error
-		out, err = ib.Batch(ctx, ops)
+		out, err = store.ListDependencies(ctx, query)
 		return err
 	})
 	return out, err
 }
 
-func (b *fleetDBIssueBackend) GetMutations(ctx context.Context, sinceMs int64) ([]backend.MutationData, error) {
-	var out []backend.MutationData
-	err := b.withBackend(ctx, "GetMutations", func(ib backend.IssueBackend) error {
+func (b *fleetDBWorkItemsAdapter) ListComments(ctx context.Context, query workitems.ListCommentsQuery) ([]*workitems.Comment, error) {
+	var out []*workitems.Comment
+	err := b.withStore(ctx, "ListComments", func(store *fleet.Adapter) error {
 		var err error
-		out, err = ib.GetMutations(ctx, sinceMs)
+		out, err = store.ListComments(ctx, query)
 		return err
 	})
 	return out, err
 }
 
-func (b *fleetDBIssueBackend) WaitForMutations(ctx context.Context, sinceMs int64, timeoutMs int64) ([]backend.MutationData, error) {
-	var out []backend.MutationData
-	err := b.withBackend(ctx, "WaitForMutations", func(ib backend.IssueBackend) error {
+func (b *fleetDBWorkItemsAdapter) AddComment(ctx context.Context, command workitems.AddCommentCommand) (*workitems.Comment, error) {
+	var out *workitems.Comment
+	err := b.withStore(ctx, "AddComment", func(store *fleet.Adapter) error {
 		var err error
-		out, err = ib.WaitForMutations(ctx, sinceMs, timeoutMs)
+		out, err = store.AddComment(ctx, command)
 		return err
 	})
 	return out, err
 }
 
-func (b *fleetDBIssueBackend) BackendName() string { return "fleet-db" }
+func (b *fleetDBWorkItemsAdapter) ListEvents(ctx context.Context, query workitems.ListEventsQuery) ([]*workitems.Event, error) {
+	var out []*workitems.Event
+	err := b.withStore(ctx, "ListEvents", func(store *fleet.Adapter) error {
+		var err error
+		out, err = store.ListEvents(ctx, query)
+		return err
+	})
+	return out, err
+}
 
-type unavailableIssueBackend struct {
+func (b *fleetDBWorkItemsAdapter) BackendName() string { return "fleet-db" }
+
+type unavailableWorkItems struct {
 	name string
 	err  error
 }
 
-var _ backend.IssueBackend = (*unavailableIssueBackend)(nil)
+var _ workitems.API = (*unavailableWorkItems)(nil)
 
-func newUnavailableIssueBackend(name string, err error) backend.IssueBackend {
-	return &unavailableIssueBackend{name: name, err: err}
+func newUnavailableWorkItems(name string, err error) workitems.API {
+	return &unavailableWorkItems{name: name, err: err}
 }
 
-func (b *unavailableIssueBackend) unavailable(op string) error {
-	return backend.ErrUnavailable(op, fmt.Sprintf("%s issue backend unavailable", b.name), b.err)
+func (b *unavailableWorkItems) unavailable(op string) error {
+	return workitems.AdapterUnavailable(op, fmt.Sprintf("%s Work Items unavailable", b.name), b.err)
 }
 
-func (b *unavailableIssueBackend) Get(context.Context, string) (*backend.IssueDetailData, error) {
+func (b *unavailableWorkItems) Get(context.Context, workitems.GetQuery) (*workitems.IssueDetail, error) {
 	return nil, b.unavailable("Get")
 }
-func (b *unavailableIssueBackend) List(context.Context, backend.ListOpts) ([]backend.IssueData, error) {
+func (b *unavailableWorkItems) List(context.Context, workitems.ListQuery) (*workitems.ListResult, error) {
 	return nil, b.unavailable("List")
 }
-func (b *unavailableIssueBackend) Ready(context.Context, backend.ReadyOpts) ([]backend.IssueData, error) {
+func (b *unavailableWorkItems) Ready(context.Context, workitems.AvailabilityQuery) ([]workitems.IssueSummary, error) {
 	return nil, b.unavailable("Ready")
 }
-func (b *unavailableIssueBackend) Blocked(context.Context, backend.BlockedOpts) ([]backend.IssueData, error) {
+func (b *unavailableWorkItems) Deferred(context.Context, workitems.AvailabilityQuery) ([]workitems.IssueSummary, error) {
+	return nil, b.unavailable("Deferred")
+}
+func (b *unavailableWorkItems) Blocked(context.Context, workitems.AvailabilityQuery) ([]workitems.IssueSummary, error) {
 	return nil, b.unavailable("Blocked")
 }
-func (b *unavailableIssueBackend) Stats(context.Context) (*backend.StatsData, error) {
+func (b *unavailableWorkItems) Stats(context.Context) (*workitems.Stats, error) {
 	return nil, b.unavailable("Stats")
 }
-func (b *unavailableIssueBackend) Count(context.Context, backend.CountOpts) (int, error) {
-	return 0, b.unavailable("Count")
+func (b *unavailableWorkItems) Search(context.Context, workitems.SearchQuery) ([]workitems.IssueSummary, error) {
+	return nil, b.unavailable("Search")
 }
-func (b *unavailableIssueBackend) GetChildren(context.Context, string) ([]backend.IssueData, error) {
-	return nil, b.unavailable("GetChildren")
-}
-func (b *unavailableIssueBackend) SearchIssues(context.Context, string, int) ([]backend.IssueData, error) {
-	return nil, b.unavailable("SearchIssues")
-}
-func (b *unavailableIssueBackend) Create(context.Context, backend.CreateParams) (*backend.IssueData, error) {
+func (b *unavailableWorkItems) Create(context.Context, workitems.CreateCommand) (*workitems.IssueSummary, error) {
 	return nil, b.unavailable("Create")
 }
-func (b *unavailableIssueBackend) Update(context.Context, string, backend.UpdateParams) error {
-	return b.unavailable("Update")
+func (b *unavailableWorkItems) Patch(context.Context, workitems.PatchCommand) (*workitems.IssueDetail, error) {
+	return nil, b.unavailable("Patch")
 }
-func (b *unavailableIssueBackend) ClaimIssue(context.Context, string, time.Duration) error {
-	return b.unavailable("ClaimIssue")
+func (b *unavailableWorkItems) Claim(context.Context, workitems.ClaimCommand) (*workitems.IssueDetail, error) {
+	return nil, b.unavailable("Claim")
 }
-func (b *unavailableIssueBackend) ReleaseIssueLock(context.Context, string, string) error {
-	return b.unavailable("ReleaseIssueLock")
-}
-func (b *unavailableIssueBackend) DeferIssue(context.Context, string, time.Time) error {
-	return b.unavailable("DeferIssue")
-}
-func (b *unavailableIssueBackend) UndeferIssue(context.Context, string) error {
-	return b.unavailable("UndeferIssue")
-}
-func (b *unavailableIssueBackend) Close(context.Context, string, backend.CloseParams) (*backend.CloseResult, error) {
+func (b *unavailableWorkItems) Close(context.Context, workitems.CloseCommand) (*workitems.CloseResult, error) {
 	return nil, b.unavailable("Close")
 }
-func (b *unavailableIssueBackend) Reopen(context.Context, string, backend.ReopenParams) error {
+func (b *unavailableWorkItems) Reopen(context.Context, workitems.ReopenCommand) error {
 	return b.unavailable("Reopen")
 }
-func (b *unavailableIssueBackend) Delete(context.Context, backend.DeleteParams) error {
-	return b.unavailable("Delete")
+func (b *unavailableWorkItems) Delete(context.Context, workitems.DeleteCommand) (workitems.DeleteResult, error) {
+	return workitems.DeleteResult{}, b.unavailable("Delete")
 }
-func (b *unavailableIssueBackend) AddDependency(context.Context, backend.DepAddParams) error {
+func (b *unavailableWorkItems) BlockRepositoryRequired(context.Context, workitems.BlockRepositoryRequiredCommand) (*workitems.RepositoryAdmissionResult, error) {
+	return nil, b.unavailable("BlockRepositoryRequired")
+}
+func (b *unavailableWorkItems) AssignRepository(context.Context, workitems.AssignRepositoryCommand) (*workitems.IssueSummary, error) {
+	return nil, b.unavailable("AssignRepository")
+}
+func (b *unavailableWorkItems) AddDependency(context.Context, workitems.AddDependencyCommand) error {
 	return b.unavailable("AddDependency")
 }
-func (b *unavailableIssueBackend) RemoveDependency(context.Context, backend.DepRemoveParams) error {
+func (b *unavailableWorkItems) RemoveDependency(context.Context, workitems.RemoveDependencyCommand) error {
 	return b.unavailable("RemoveDependency")
 }
-func (b *unavailableIssueBackend) AddLabel(context.Context, string, string) error {
-	return b.unavailable("AddLabel")
+func (b *unavailableWorkItems) ListDependencies(context.Context, workitems.ListDependenciesQuery) ([]workitems.Dependency, error) {
+	return nil, b.unavailable("ListDependencies")
 }
-func (b *unavailableIssueBackend) RemoveLabel(context.Context, string, string) error {
-	return b.unavailable("RemoveLabel")
-}
-func (b *unavailableIssueBackend) ListComments(context.Context, string) ([]backend.CommentData, error) {
+func (b *unavailableWorkItems) ListComments(context.Context, workitems.ListCommentsQuery) ([]*workitems.Comment, error) {
 	return nil, b.unavailable("ListComments")
 }
-func (b *unavailableIssueBackend) AddComment(context.Context, backend.CommentAddParams) (*backend.CommentData, error) {
+func (b *unavailableWorkItems) AddComment(context.Context, workitems.AddCommentCommand) (*workitems.Comment, error) {
 	return nil, b.unavailable("AddComment")
 }
-func (b *unavailableIssueBackend) ListEvents(context.Context, string, int) ([]backend.EventData, error) {
+func (b *unavailableWorkItems) ListEvents(context.Context, workitems.ListEventsQuery) ([]*workitems.Event, error) {
 	return nil, b.unavailable("ListEvents")
 }
-func (b *unavailableIssueBackend) Batch(context.Context, []backend.BatchOp) ([]backend.BatchResult, error) {
-	return nil, b.unavailable("Batch")
-}
-func (b *unavailableIssueBackend) GetMutations(context.Context, int64) ([]backend.MutationData, error) {
-	return nil, b.unavailable("GetMutations")
-}
-func (b *unavailableIssueBackend) WaitForMutations(context.Context, int64, int64) ([]backend.MutationData, error) {
-	return nil, b.unavailable("WaitForMutations")
-}
-func (b *unavailableIssueBackend) BackendName() string { return b.name + "-unavailable" }
+func (b *unavailableWorkItems) BackendName() string { return b.name + "-unavailable" }

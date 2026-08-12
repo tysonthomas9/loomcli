@@ -55,6 +55,41 @@ type RuntimeStore interface {
 	Roles() store.RoleStore
 }
 
+// RuntimeDependencies names the exact persistence ports required by lead
+// delivery. Composition must supply each port explicitly; the provider never
+// receives the process-wide Store aggregate.
+type RuntimeDependencies struct {
+	Sessions       store.OrchestrationSessionStore
+	InboxMessages  store.AgentInboxMessageStore
+	AgentServices  store.AgentServiceStore
+	WorkerProfiles store.WorkerProfileStore
+	Roles          store.RoleStore
+}
+
+type runtimeDependencies struct {
+	RuntimeDependencies
+}
+
+func (dependencies runtimeDependencies) AgentSessions() store.AgentSessionStore {
+	return dependencies.Sessions.AgentSessions()
+}
+
+func (dependencies runtimeDependencies) AgentInboxMessages() store.AgentInboxMessageStore {
+	return dependencies.InboxMessages
+}
+
+func (dependencies runtimeDependencies) AgentServices() store.AgentServiceStore {
+	return dependencies.RuntimeDependencies.AgentServices
+}
+
+func (dependencies runtimeDependencies) WorkerProfiles() store.WorkerProfileStore {
+	return dependencies.RuntimeDependencies.WorkerProfiles
+}
+
+func (dependencies runtimeDependencies) Roles() store.RoleStore {
+	return dependencies.RuntimeDependencies.Roles
+}
+
 // InteractionChatDependencies is the provider-specific lead runtime surface
 // consumed by Interaction's infrastructure adapter. It contains operations,
 // not the process-wide persistence aggregate.
@@ -80,13 +115,14 @@ type InteractionChatDependencies struct {
 	) (*domain.AgentSession, error)
 }
 
-// LegacyInteractionChatDependencies confines the remaining composite Store
-// dependency to leadcontrol while exposing only provider operations to
-// Interaction.
-func LegacyInteractionChatDependencies(st RuntimeStore) InteractionChatDependencies {
-	if st == nil {
-		return InteractionChatDependencies{}
+// NewInteractionChatDependencies binds the exact provider persistence ports
+// to Interaction's operation-shaped adapter.
+func NewInteractionChatDependencies(dependencies RuntimeDependencies) (InteractionChatDependencies, error) {
+	if dependencies.Sessions == nil || dependencies.InboxMessages == nil || dependencies.AgentServices == nil ||
+		dependencies.WorkerProfiles == nil || dependencies.Roles == nil {
+		return InteractionChatDependencies{}, fmt.Errorf("compose lead delivery: all runtime persistence ports are required")
 	}
+	st := runtimeDependencies{RuntimeDependencies: dependencies}
 	return InteractionChatDependencies{
 		DeliverMessage: func(
 			ctx context.Context,
@@ -123,7 +159,7 @@ func LegacyInteractionChatDependencies(st RuntimeStore) InteractionChatDependenc
 		) (*domain.AgentSession, error) {
 			return store.OrchestrationSessionFor(ctx, st, workspace, agentID)
 		},
-	}
+	}, nil
 }
 
 const (

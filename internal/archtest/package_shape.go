@@ -18,6 +18,7 @@ const (
 var packageShapeExcludedDirectories = []string{
 	".git",
 	"node_modules",
+	"testdata",
 	"third_party",
 	"vendor",
 	"worktrees",

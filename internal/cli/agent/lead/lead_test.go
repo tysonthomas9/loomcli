@@ -15,7 +15,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/agent"
-	"github.com/tysonthomas9/loomcli/internal/cli/clitest"
+	"github.com/tysonthomas9/loomcli/internal/cli/testdata/clitest"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/epicrunner"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
@@ -33,7 +33,7 @@ func TestRegisteredLeadSessionHeartbeatAdvancesUntilStopped(t *testing.T) {
 		WorkspaceKey: "WS",
 		SessionID:    "lead-session",
 		AgentID:      "lead",
-		Kind:         domain.AgentSessionKindOrchestration,
+		Kind:         domain.AgentSessionKindInteractive,
 		Status:       domain.AgentSessionRunning,
 	}); err != nil {
 		t.Fatalf("create session: %v", err)
@@ -440,7 +440,7 @@ func TestMarkLeadAssignmentDelivered(t *testing.T) {
 		WorkspaceKey: "WS",
 		SessionID:    "lead-session",
 		AgentID:      "nova",
-		Kind:         domain.AgentSessionKindOrchestration,
+		Kind:         domain.AgentSessionKindInteractive,
 		Status:       domain.AgentSessionRunning,
 		Metadata:     map[string]string{"actor": "test"},
 	}); err != nil {

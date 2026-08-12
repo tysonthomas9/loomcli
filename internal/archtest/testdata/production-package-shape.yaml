@@ -9,15 +9,16 @@ semantics:
   excluded_directories:
     - .git
     - node_modules
+    - testdata
     - third_party
     - vendor
     - worktrees
 ceilings:
-  total_packages: 167
-  module_packages: 15
-  outside_module_packages: 152
-  one_file_packages: 46
-  one_or_two_file_packages: 68
+  total_packages: 158
+  module_packages: 17
+  outside_module_packages: 141
+  one_file_packages: 42
+  one_or_two_file_packages: 60
 packages:
   - internal/agenterr
   - internal/agentpolicy
@@ -26,7 +27,6 @@ packages:
   - internal/app/connectorgrants
   - internal/app/prreviewer
   - internal/app/serve
-  - internal/app/serve/agentcomposition/owneradapters
   - internal/app/systemeventing
   - internal/app/webhookingestion
   - internal/app/workflowauthoring
@@ -35,10 +35,6 @@ packages:
   - internal/app/workitemmove
   - internal/archtest
   - internal/atomicfile
-  - internal/backend
-  - internal/backend/api
-  - internal/backend/api/gen
-  - internal/backend/fleet
   - internal/bootstrap
   - internal/circuitbreaker
   - internal/cli
@@ -48,7 +44,6 @@ packages:
   - internal/cli/automode
   - internal/cli/backends
   - internal/cli/cleanup
-  - internal/cli/clitest
   - internal/cli/cmdstore
   - internal/cli/config
   - internal/cli/connector
@@ -67,11 +62,8 @@ packages:
   - internal/cli/serve/metricscmd
   - internal/cli/serve/opsimpl
   - internal/cli/serve/serveadapter
-  - internal/cli/serve/serveadapter/daytonabroker
   - internal/cli/serve/worker
   - internal/cli/serve/workspacemgr
-  - internal/cli/serve/workspacemgr/admissionstore
-  - internal/cli/serve/workspacemgr/workspacematerialization
   - internal/cli/sessionfinalize
   - internal/cli/stack
   - internal/cli/trigger
@@ -83,15 +75,12 @@ packages:
   - internal/driver/daytonahost
   - internal/driver/nativearchive
   - internal/driver/sandbox
-  - internal/driver/taskworktree
   - internal/epicrunner
   - internal/events
   - internal/events/otelexport
-  - internal/fleethttp
   - internal/gitauth
   - internal/gitbranch
   - internal/harness
-  - internal/harness/fakeharness/mock
   - internal/httpclient
   - internal/infra/automationruntime
   - internal/infra/connectorsproviders
@@ -127,12 +116,16 @@ packages:
   - internal/modules/workflowcatalog/fleetdb
   - internal/modules/workflowcatalog/httpapi
   - internal/modules/workitems
+  - internal/modules/workitems/fleetdb
+  - internal/modules/workitems/httpapi
   - internal/modules/workspace
   - internal/netutil
   - internal/observability/tracing
   - internal/ops
   - internal/platform/authority
+  - internal/platform/fleethttp
   - internal/platform/httptransport
+  - internal/platform/loomapi/gen
   - internal/platform/repositoryremote
   - internal/platform/runtime
   - internal/roleprompts
@@ -140,7 +133,6 @@ packages:
   - internal/sessions/redact
   - internal/sessions/transcript
   - internal/store
-  - internal/store/storetest
   - internal/testutil
   - internal/usage
   - internal/webui

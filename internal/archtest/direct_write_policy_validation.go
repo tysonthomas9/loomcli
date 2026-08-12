@@ -134,12 +134,19 @@ func validatePersistenceReceiverSurfaces(
 		if !ok || receiverPackage != surface.Package {
 			return fmt.Errorf("direct-write receiver surface %s does not match package %s receiver policy", surface.Receiver, surface.Package)
 		}
+		if !strings.HasPrefix(surface.Package, modulePath+"/internal/") {
+			return fmt.Errorf("direct-write receiver surface %s must be below the module internal root", surface.Receiver)
+		}
 		pkg, declaredPackage := packagesByPath[surface.Package]
 		matchesCandidate := strings.HasPrefix(surface.Package, modulePath+"/internal/") && slices.ContainsFunc(
 			candidateReceiverSuffixes,
 			func(suffix string) bool { return strings.HasSuffix(receiverName, suffix) },
 		)
-		if (!declaredPackage || !pkg.matchesReceiver(receiverName)) && !matchesCandidate {
+		// An exact receiver surface is sufficient policy for a mixed package: it
+		// keeps that receiver default-deny without misclassifying every helper in
+		// the package as persistence. A declared persistence package remains
+		// stricter because its receiver allowlist is itself part of the policy.
+		if declaredPackage && !pkg.matchesReceiver(receiverName) && !matchesCandidate {
 			return fmt.Errorf("direct-write receiver surface %s does not match package %s receiver policy", surface.Receiver, surface.Package)
 		}
 		if surface.CapabilityOwner == "" || surface.CapabilityOwner == "unassigned_legacy" {

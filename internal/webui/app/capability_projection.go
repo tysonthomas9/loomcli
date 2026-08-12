@@ -24,6 +24,7 @@ func NewTerminalModules(
 ) []interface{ Register(*http.ServeMux) } {
 	if agentsCapability != nil {
 		deps.Agents = agentsCapability.AgentsAPI()
+		deps.Roles = agentsCapability.AgentsAPI()
 	}
 	if interactionCapability != nil {
 		deps.Interaction = interactionCapability.InteractionAPI()
@@ -66,6 +67,7 @@ func PopulateUnifiedAgentCapabilityDeps(
 	}
 	if capability := config.ExecutionCapability; capability != nil {
 		deps.ExecutionTaskRuns = capability.TaskRunAPI()
+		deps.ExecutionTaskRunQueries = capability.TaskRunQueries()
 		deps.ExecutionTaskRunRequests = capability.TaskRunRequestAPI()
 		deps.ExecutionTaskRunRecovery = capability.TaskRunRecoveryAPI()
 		deps.ExecutionTaskRunAuthorities = capability.TaskRunAuthorityResolver()

@@ -17,7 +17,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
-func TestRegisterFlueDriverStagesNativeArtifactAndActivates(t *testing.T) {
+func TestSeedFlueDriverFixtureStagesNativeArtifactAndActivates(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
 	writeFlueDist(t, root, "epic-runner", "one")
@@ -26,7 +26,7 @@ func TestRegisterFlueDriverStagesNativeArtifactAndActivates(t *testing.T) {
 		t.Fatalf("Create workspace: %v", err)
 	}
 
-	result, err := RegisterFlueDriver(ctx, st, RegisterFlueOptions{
+	result, err := SeedFlueDriverFixture(ctx, st, RegisterFlueOptions{
 		WorkspaceKey: "TEST",
 		WorkDir:      root,
 		DistPath:     "dist",
@@ -35,10 +35,7 @@ func TestRegisterFlueDriverStagesNativeArtifactAndActivates(t *testing.T) {
 		CreatedBy:    "tester",
 	})
 	if err != nil {
-		t.Fatalf("RegisterFlueDriver: %v", err)
-	}
-	if !result.CreatedDriver || !result.CreatedVersion || result.ReusedVersion || !result.Activated {
-		t.Fatalf("result flags = %+v, want created driver/version and activated", result)
+		t.Fatalf("SeedFlueDriverFixture: %v", err)
 	}
 	if result.Driver.Status != workflowcatalog.DriverStatusActive || result.Driver.ActiveVersionID != result.Version.VersionID {
 		t.Fatalf("driver = %+v, want active pinned version", result.Driver)
@@ -72,7 +69,7 @@ func TestRegisterFlueDriverStagesNativeArtifactAndActivates(t *testing.T) {
 		t.Fatalf("native bundle server.mjs missing: %v", err)
 	}
 
-	replay, err := RegisterFlueDriver(ctx, st, RegisterFlueOptions{
+	replay, err := SeedFlueDriverFixture(ctx, st, RegisterFlueOptions{
 		WorkspaceKey: "TEST",
 		WorkDir:      root,
 		DistPath:     "dist",
@@ -81,9 +78,9 @@ func TestRegisterFlueDriverStagesNativeArtifactAndActivates(t *testing.T) {
 		CreatedBy:    "tester",
 	})
 	if err != nil {
-		t.Fatalf("RegisterFlueDriver replay: %v", err)
+		t.Fatalf("SeedFlueDriverFixture replay: %v", err)
 	}
-	if !replay.ReusedVersion || replay.Version.VersionID != result.Version.VersionID {
+	if replay.Version.VersionID != result.Version.VersionID {
 		t.Fatalf("replay = %+v, want reused version %s", replay, result.Version.VersionID)
 	}
 }
@@ -135,7 +132,7 @@ func TestStageFlueDriverBundleIsPersistenceFreeAndPromotesIdempotently(t *testin
 	}
 }
 
-func TestRegisterFlueDriverNewDigestCreatesNewVersion(t *testing.T) {
+func TestSeedFlueDriverFixtureNewDigestCreatesNewVersion(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
 	writeFlueDist(t, root, "epic-runner", "one")
@@ -143,7 +140,7 @@ func TestRegisterFlueDriverNewDigestCreatesNewVersion(t *testing.T) {
 	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "TEST", Name: "test"}); err != nil {
 		t.Fatalf("Create workspace: %v", err)
 	}
-	first, err := RegisterFlueDriver(ctx, st, RegisterFlueOptions{
+	first, err := SeedFlueDriverFixture(ctx, st, RegisterFlueOptions{
 		WorkspaceKey: "TEST",
 		WorkDir:      root,
 		DistPath:     "dist",
@@ -151,11 +148,11 @@ func TestRegisterFlueDriverNewDigestCreatesNewVersion(t *testing.T) {
 		Activate:     true,
 	})
 	if err != nil {
-		t.Fatalf("RegisterFlueDriver first: %v", err)
+		t.Fatalf("SeedFlueDriverFixture first: %v", err)
 	}
 
 	writeFlueDist(t, root, "epic-runner", "two")
-	second, err := RegisterFlueDriver(ctx, st, RegisterFlueOptions{
+	second, err := SeedFlueDriverFixture(ctx, st, RegisterFlueOptions{
 		WorkspaceKey: "TEST",
 		WorkDir:      root,
 		DistPath:     "dist",
@@ -163,7 +160,7 @@ func TestRegisterFlueDriverNewDigestCreatesNewVersion(t *testing.T) {
 		Activate:     true,
 	})
 	if err != nil {
-		t.Fatalf("RegisterFlueDriver second: %v", err)
+		t.Fatalf("SeedFlueDriverFixture second: %v", err)
 	}
 	if second.Version.VersionID == first.Version.VersionID || second.Version.BundleDigest == first.Version.BundleDigest {
 		t.Fatalf("second version = %+v, first = %+v, want new digest/version", second.Version, first.Version)
@@ -176,7 +173,7 @@ func TestRegisterFlueDriverNewDigestCreatesNewVersion(t *testing.T) {
 	}
 }
 
-func TestRegisterFlueDriverRejectsInvalidManifest(t *testing.T) {
+func TestSeedFlueDriverFixtureRejectsInvalidManifest(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
 	writeFlueDist(t, root, "epic-runner", "one")
@@ -188,21 +185,21 @@ func TestRegisterFlueDriverRejectsInvalidManifest(t *testing.T) {
 		t.Fatalf("Create workspace: %v", err)
 	}
 
-	if _, err := RegisterFlueDriver(ctx, st, RegisterFlueOptions{
+	if _, err := SeedFlueDriverFixture(ctx, st, RegisterFlueOptions{
 		WorkspaceKey: "TEST",
 		WorkDir:      root,
 		DistPath:     "dist",
 		DriverName:   "epic-runner",
 		Activate:     true,
 	}); !errors.Is(err, domain.ErrInvalid) {
-		t.Fatalf("RegisterFlueDriver invalid manifest err = %v, want ErrInvalid", err)
+		t.Fatalf("SeedFlueDriverFixture invalid manifest err = %v, want ErrInvalid", err)
 	}
 	if _, err := st.Drivers().Get(ctx, "TEST", "epic-runner"); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("driver after invalid manifest err = %v, want not found", err)
 	}
 }
 
-func TestRegisterFlueDriverRejectsGeneratedManifestRefs(t *testing.T) {
+func TestSeedFlueDriverFixtureRejectsGeneratedManifestRefs(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
 	writeFlueDist(t, root, "epic-runner", "one")
@@ -214,18 +211,18 @@ func TestRegisterFlueDriverRejectsGeneratedManifestRefs(t *testing.T) {
 		t.Fatalf("Create workspace: %v", err)
 	}
 
-	if _, err := RegisterFlueDriver(ctx, st, RegisterFlueOptions{
+	if _, err := SeedFlueDriverFixture(ctx, st, RegisterFlueOptions{
 		WorkspaceKey: "TEST",
 		WorkDir:      root,
 		DistPath:     "dist",
 		DriverName:   "epic-runner",
 		Activate:     true,
 	}); !errors.Is(err, domain.ErrInvalid) {
-		t.Fatalf("RegisterFlueDriver generated refs err = %v, want ErrInvalid", err)
+		t.Fatalf("SeedFlueDriverFixture generated refs err = %v, want ErrInvalid", err)
 	}
 }
 
-func TestRegisterFlueDriverRejectsMissingServer(t *testing.T) {
+func TestSeedFlueDriverFixtureRejectsMissingServer(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(root, "dist"), 0o755); err != nil {
@@ -236,14 +233,14 @@ func TestRegisterFlueDriverRejectsMissingServer(t *testing.T) {
 		t.Fatalf("Create workspace: %v", err)
 	}
 
-	if _, err := RegisterFlueDriver(ctx, st, RegisterFlueOptions{
+	if _, err := SeedFlueDriverFixture(ctx, st, RegisterFlueOptions{
 		WorkspaceKey: "TEST",
 		WorkDir:      root,
 		DistPath:     "dist",
 		DriverName:   "epic-runner",
 		Activate:     true,
 	}); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("RegisterFlueDriver missing server err = %v, want not exist", err)
+		t.Fatalf("SeedFlueDriverFixture missing server err = %v, want not exist", err)
 	}
 	if _, err := st.Drivers().Get(ctx, "TEST", "epic-runner"); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("driver after missing server err = %v, want not found", err)

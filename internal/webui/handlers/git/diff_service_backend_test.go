@@ -5,18 +5,18 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/tysonthomas9/loomcli/internal/backend"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
 
 type issueLookupBackend struct {
-	backend.IssueBackend
-	issue *backend.IssueDetailData
+	workitems.API
+	issue *workitems.IssueDetail
 	err   error
 }
 
-func (b *issueLookupBackend) Get(_ context.Context, _ string) (*backend.IssueDetailData, error) {
+func (b *issueLookupBackend) Get(_ context.Context, _ workitems.GetQuery) (*workitems.IssueDetail, error) {
 	return b.issue, b.err
 }
 
@@ -35,10 +35,10 @@ func TestDiffServiceGetIssueDiffStat_UsesWorkspaceBackend(t *testing.T) {
 			return ops.DiffStatResult{LinesAdded: 12, LinesRemoved: 3}
 		},
 	}
-	be := &issueLookupBackend{issue: &backend.IssueDetailData{
-		IssueData: backend.IssueData{ID: "TASK-1", Assignee: "coder-1"},
+	be := &issueLookupBackend{issue: &workitems.IssueDetail{
+		ID: "TASK-1", Assignee: "coder-1",
 	}}
-	svc := newTestDiffService(gitOps, func(ctx context.Context) backend.IssueBackend {
+	svc := newTestDiffService(gitOps, func(ctx context.Context) workitems.API {
 		backendWorkspace = middleware.WorkspaceFromContext(ctx)
 		return be
 	})
@@ -60,7 +60,7 @@ func TestDiffServiceGetIssueDiffStat_UsesWorkspaceBackend(t *testing.T) {
 
 func TestDiffServiceGetIssueDiffStat_BackendFailuresFailClosed(t *testing.T) {
 	t.Run("backend missing", func(t *testing.T) {
-		svc := newTestDiffService(&mockGitOps{}, func(context.Context) backend.IssueBackend { return nil })
+		svc := newTestDiffService(&mockGitOps{}, func(context.Context) workitems.API { return nil })
 		if _, err := svc.GetIssueDiffStat(context.Background(), "WS-1", "TASK-1"); err == nil {
 			t.Fatal("GetIssueDiffStat() error = nil, want unavailable error")
 		}
@@ -68,7 +68,7 @@ func TestDiffServiceGetIssueDiffStat_BackendFailuresFailClosed(t *testing.T) {
 
 	t.Run("backend read fails", func(t *testing.T) {
 		be := &issueLookupBackend{err: errors.New("backend down")}
-		svc := newTestDiffService(&mockGitOps{}, func(context.Context) backend.IssueBackend { return be })
+		svc := newTestDiffService(&mockGitOps{}, func(context.Context) workitems.API { return be })
 		if _, err := svc.GetIssueDiffStat(context.Background(), "WS-1", "TASK-1"); err == nil {
 			t.Fatal("GetIssueDiffStat() error = nil, want internal error")
 		}

@@ -17,7 +17,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/tysonthomas9/loomcli/internal/backend"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 )
 
 const (
@@ -95,7 +95,7 @@ var taskRunDataMarkerEnv = [...]string{
 // EnforceTaskRunCommandScope prevents the model-controlled TaskRun process
 // from escaping the lease-authenticated task facade through a sibling
 // `loom data` command. The CLI root invokes this before resolving or building
-// any generic issue backend; show and design-only update perform their
+// the general Work Items API; show and design-only update perform their
 // narrower per-command validation after this subtree gate.
 func EnforceTaskRunCommandScope(cmd *cobra.Command) error {
 	if cmd == nil || !taskRunDataModeActive() || !belongsToDataCommandTree(cmd) {
@@ -141,7 +141,7 @@ func (err *taskRunDataAPIError) Error() string {
 
 // taskRunDataClientFromEnv returns active=false only outside a TaskRun. Once
 // any TaskRun-specific marker is present, incomplete configuration fails
-// closed instead of falling back to a direct issue backend.
+// closed instead of falling back to the general Work Items API.
 func taskRunDataClientFromEnv() (*taskRunDataClient, bool, error) {
 	if !taskRunDataModeActive() {
 		return nil, false, nil
@@ -346,12 +346,12 @@ func (client *taskRunDataClient) requireBoundTask(requested string) error {
 	return nil
 }
 
-func (client *taskRunDataClient) getTask(ctx context.Context, taskID string) (*backend.IssueDetailData, error) {
+func (client *taskRunDataClient) getTask(ctx context.Context, taskID string) (*workitems.IssueDetail, error) {
 	if err := client.requireBoundTask(taskID); err != nil {
 		return nil, err
 	}
 	var result struct {
-		Task *backend.IssueDetailData `json:"task"`
+		Task *workitems.IssueDetail `json:"task"`
 	}
 	if err := client.call(ctx, "task-get", map[string]string{"taskId": client.taskID}, &result); err != nil {
 		return nil, err

@@ -136,10 +136,10 @@ func TestBridgeRunnerCompletesTaskRunViaServeSurface(t *testing.T) {
 		t.Fatalf("compose Execution capability: %v", err)
 	}
 	module := NewModule(Config{
-		Store: st, Execution: executionCapability.TaskRunAPI(),
+		TaskRuns: executionCapability.TaskRunQueries(), Execution: executionCapability.TaskRunAPI(),
 		Authorities: executionCapability.TaskRunAuthorityResolver(),
 	})
-	artifactsAPI := newTaskRunArtifactAPIForTest(module)
+	artifactsAPI := newTaskRunArtifactAPIForTest(module, st)
 	module.artifacts = artifactsAPI
 	module.Register(mux)
 	server := httptest.NewServer(mux)

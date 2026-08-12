@@ -553,7 +553,7 @@ func seedRuntimeSession(
 			WorkspaceKey: "WS",
 			SessionID:    "session-1",
 			AgentID:      "reviewer",
-			Kind:         domain.AgentSessionKindOrchestration,
+			Kind:         domain.AgentSessionKindInteractive,
 			Status:       domain.AgentSessionRunning,
 			Metadata:     metadata,
 		},

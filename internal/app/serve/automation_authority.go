@@ -330,14 +330,11 @@ func (provider *automationWebhookAuthorityProvider) AuthorityForVerifiedWebhook(
 	}
 	workspace := strings.TrimSpace(request.WorkspaceKey)
 	sourceKind := strings.ToLower(strings.TrimSpace(request.SourceKind))
+	sourceRef := strings.TrimSpace(request.SourceRef)
 	routeKey := strings.TrimSpace(request.RouteKey)
-	if workspace == "" || sourceKind == "" || routeKey == "" ||
+	if workspace == "" || sourceKind == "" || sourceRef == "" || routeKey == "" ||
 		sourceKind == automation.SourceKindCron || sourceKind == automation.SourceKindInternal {
 		return authority.WebhookAuthority{}, fmt.Errorf("verified webhook authority scope is invalid: %w", authority.ErrInvalidScope)
-	}
-	sourceRef := strings.TrimSpace(request.SourceRef)
-	if sourceRef == "" {
-		sourceRef = routeKey
 	}
 	now := time.Now
 	if provider.now != nil {

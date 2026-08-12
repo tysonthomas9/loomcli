@@ -5,7 +5,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/tysonthomas9/loomcli/internal/backend"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 )
 
 var commentAuthor string
@@ -16,16 +16,16 @@ var commentCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
-		ib, err := getIssueBackend(ctx)
+		itemsAPI, err := getWorkItems(ctx)
 		if err != nil {
 			return err
 		}
-		params := backend.CommentAddParams{
+		command := workitems.AddCommentCommand{
 			IssueID: args[0],
 			Author:  commentAuthor,
 			Text:    args[1],
 		}
-		if _, err := ib.AddComment(ctx, params); err != nil {
+		if _, err := itemsAPI.AddComment(ctx, command); err != nil {
 			return err
 		}
 		return printMessageResult(os.Stdout, "comment added to "+args[0], outputFormat)

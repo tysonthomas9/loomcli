@@ -21,7 +21,6 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
-	runtimesettings "github.com/tysonthomas9/loomcli/internal/localsettings"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -310,21 +309,17 @@ func TestHostBridgeTaskExecutorRequiresTaskRunAPIURL(t *testing.T) {
 }
 
 func TestLocalTaskRunnerSettingsNeverExportGitHubCredential(t *testing.T) {
-	settingsDir := t.TempDir()
-	credential, err := runtimesettings.SealRuntimeCredential(settingsDir, runtimesettings.RuntimeCredentialProviderGitHub, "settings-token", time.Now())
-	if err != nil {
-		t.Fatalf("seal github credential: %v", err)
-	}
-	settings := runtimesettings.Default()
-	settings.LocalTaskRunner.OpenCodeModel = "opencode/model"
-	settings.RuntimeCredentials.GitHub = credential
-	if err := runtimesettings.Save(settingsDir, settings); err != nil {
-		t.Fatalf("save local settings: %v", err)
-	}
-
 	req := hostBridgeTaskExecRequest()
 	req.RunnerEntrypoint = LocalTaskRunnerEntrypoint
-	executor := HostBridgeTaskExecutor{WorktreePath: "/wt", LocalSettingsDir: settingsDir}
+	executor := HostBridgeTaskExecutor{
+		WorktreePath: "/wt",
+		LocalTaskRunnerEnv: func(existing []string) []string {
+			if envHasAny(existing, "LOOM_OPENCODE_MODEL") {
+				return nil
+			}
+			return []string{"LOOM_OPENCODE_MODEL=opencode/model"}
+		},
+	}
 
 	env := executor.taskRunnerEnv(req, "{}", []string{"PATH=/bin", "GITHUB_TOKEN=host-token"})
 	if envHasAny(env, "GITHUB_TOKEN", "GH_TOKEN") {
@@ -562,7 +557,7 @@ func TestHostBridgeTaskExecutorPreservesFinalizedPatchArtifactOnConflict(t *test
 	}
 }
 
-func TestHostBridgeTaskExecutorThroughRequestTaskRun(t *testing.T) {
+func TestHostBridgeTaskExecutorPersistsPatchArtifact(t *testing.T) {
 	ctx, st, run := setupRunningDriverRun(t)
 	repo := newPatchBackRepo(t)
 	base := repo.commitFile("file.txt", "old\n", "base")
@@ -576,32 +571,18 @@ func TestHostBridgeTaskExecutorThroughRequestTaskRun(t *testing.T) {
 		Command:             hostBridgeHelperCommand(t, "success", base, patch),
 	}
 
-	outcome, err := RequestTaskRunWithResult(ctx, st, TaskRunRequestOptions{
-		WorkspaceKey:    "TEST",
-		DriverRunID:     run.RunID,
-		TaskRunID:       "task-run-1",
-		TaskID:          "TEST-1",
-		ProviderProfile: "flue-daytona",
-		ParentNodeID:    run.NodeID,
-		ParentLeaseID:   run.LeaseID,
-		ParentFence:     run.FencingToken,
-		DeferCompletion: true,
-	}, executor)
+	req := hostBridgeTaskExecRequest()
+	req.WorkspaceKey, req.DriverRunID = "TEST", run.RunID
+	req.NodeID, req.LeaseID, req.FencingToken = run.NodeID, run.LeaseID, run.FencingToken
+	result, err := executor.ExecuteTask(ctx, req)
 	if err != nil {
-		t.Fatalf("RequestTaskRunWithResult: %v", err)
+		t.Fatalf("ExecuteTask: %v", err)
 	}
-	if outcome.Run.Status != domain.TaskRunCompleted || outcome.Run.ArtifactsRef != "artifacts://task-run-1" {
-		t.Fatalf("run = %+v, want completed with artifacts ref", outcome.Run)
+	if result.Status != domain.TaskRunCompleted || result.ArtifactsRef != "artifacts://task-run-1" {
+		t.Fatalf("result = %+v, want completed with artifacts ref", result)
 	}
-	stored, err := st.TaskRuns().Get(ctx, "TEST", "task-run-1")
-	if err != nil {
-		t.Fatalf("get stored task run: %v", err)
-	}
-	if stored.Status != domain.TaskRunRunning || stored.ArtifactsRef != "artifacts://task-run-1" {
-		t.Fatalf("stored run = %+v, want running with pending artifacts ref", stored)
-	}
-	if len(outcome.ArtifactIDs) != 1 || outcome.ArtifactIDs[0] != "patch-task-run-1" {
-		t.Fatalf("outcome artifact ids = %+v, want patch artifact", outcome.ArtifactIDs)
+	if len(result.ArtifactIDs) != 1 || result.ArtifactIDs[0] != "patch-task-run-1" {
+		t.Fatalf("result artifact ids = %+v, want patch artifact", result.ArtifactIDs)
 	}
 	artifact, err := st.ArtifactQueries().GetArtifactRecord(ctx, "TEST", "patch-task-run-1")
 	if err != nil {
@@ -609,28 +590,6 @@ func TestHostBridgeTaskExecutorThroughRequestTaskRun(t *testing.T) {
 	}
 	if artifact.DurableStatus != "finalized" || artifact.OwnerID != "task-run-1" {
 		t.Fatalf("artifact = %+v, want finalized child artifact", artifact)
-	}
-	exitCode := 0
-	completed, err := st.TaskRuns().Complete(ctx, "TEST", "task-run-1", store.TaskRunComplete{
-		CompletionID:        "complete-task-run-1",
-		NodeID:              stored.NodeID,
-		LeaseID:             stored.LeaseID,
-		LeaseToken:          outcome.LeaseToken,
-		FencingToken:        stored.FencingToken,
-		Status:              domain.TaskRunCompleted,
-		ExitCode:            &exitCode,
-		LogsRef:             outcome.Run.LogsRef,
-		ArtifactsRef:        outcome.Run.ArtifactsRef,
-		RequiredArtifactIDs: outcome.ArtifactIDs,
-		RequireArtifacts:    true,
-		CloseTask:           true,
-		CloseReason:         "patched",
-	})
-	if err != nil {
-		t.Fatalf("complete deferred task run: %v", err)
-	}
-	if completed.Status != domain.TaskRunCompleted {
-		t.Fatalf("completed status = %s, want completed", completed.Status)
 	}
 }
 
@@ -645,28 +604,21 @@ func TestHostBridgeTaskExecutorRegistersFinalizedRunnerArtifacts(t *testing.T) {
 		Command:             hostBridgeHelperCommand(t, "artifact", "unused-base", "unused-patch"),
 	}
 
-	outcome, err := RequestTaskRunWithResult(ctx, st, TaskRunRequestOptions{
-		WorkspaceKey:    "TEST",
-		DriverRunID:     run.RunID,
-		TaskRunID:       "task-run-1",
-		TaskID:          "TEST-1",
-		ProviderProfile: "flue-daytona",
-		ParentNodeID:    run.NodeID,
-		ParentLeaseID:   run.LeaseID,
-		ParentFence:     run.FencingToken,
-		DeferCompletion: true,
-	}, executor)
+	req := hostBridgeTaskExecRequest()
+	req.WorkspaceKey, req.DriverRunID = "TEST", run.RunID
+	req.NodeID, req.LeaseID, req.FencingToken = run.NodeID, run.LeaseID, run.FencingToken
+	result, err := executor.ExecuteTask(ctx, req)
 	if err != nil {
-		t.Fatalf("RequestTaskRunWithResult: %v", err)
+		t.Fatalf("ExecuteTask: %v", err)
 	}
-	if outcome.Run.Status != domain.TaskRunCompleted {
-		t.Fatalf("run status = %s error=%s, want completed", outcome.Run.Status, outcome.Run.ErrorMessage)
+	if result.Status != domain.TaskRunCompleted {
+		t.Fatalf("run status = %s error=%s, want completed", result.Status, result.ErrorMessage)
 	}
-	if len(outcome.ArtifactIDs) != 1 || outcome.ArtifactIDs[0] != "artifact-task-run-1" {
-		t.Fatalf("outcome artifact ids = %+v, want finalized runner artifact", outcome.ArtifactIDs)
+	if len(result.ArtifactIDs) != 1 || result.ArtifactIDs[0] != "artifact-task-run-1" {
+		t.Fatalf("result artifact ids = %+v, want finalized runner artifact", result.ArtifactIDs)
 	}
-	if outcome.Run.ArtifactsRef != "artifacts://task-run-1" {
-		t.Fatalf("artifacts ref = %q, want default task-run artifact ref", outcome.Run.ArtifactsRef)
+	if result.ArtifactsRef != "artifacts://task-run-1" {
+		t.Fatalf("artifacts ref = %q, want default task-run artifact ref", result.ArtifactsRef)
 	}
 	artifact, err := st.ArtifactQueries().GetArtifactRecord(ctx, "TEST", "artifact-task-run-1")
 	if err != nil {
@@ -674,27 +626,6 @@ func TestHostBridgeTaskExecutorRegistersFinalizedRunnerArtifacts(t *testing.T) {
 	}
 	if artifact.DurableStatus != "finalized" || artifact.URI != "artifact://artifact-task-run-1" || artifact.ContentHash != "sha256:remote-artifact" || artifact.OwnerID != "task-run-1" {
 		t.Fatalf("artifact = %+v, want finalized server-visible task-run artifact", artifact)
-	}
-	stored, err := st.TaskRuns().Get(ctx, "TEST", "task-run-1")
-	if err != nil {
-		t.Fatalf("get stored task run: %v", err)
-	}
-	exitCode := 0
-	if _, err := st.TaskRuns().Complete(ctx, "TEST", "task-run-1", store.TaskRunComplete{
-		CompletionID:        "complete-finalized-artifact-task-run-1",
-		NodeID:              stored.NodeID,
-		LeaseID:             stored.LeaseID,
-		LeaseToken:          outcome.LeaseToken,
-		FencingToken:        stored.FencingToken,
-		Status:              domain.TaskRunCompleted,
-		ExitCode:            &exitCode,
-		ArtifactsRef:        outcome.Run.ArtifactsRef,
-		RequiredArtifactIDs: outcome.ArtifactIDs,
-		RequireArtifacts:    true,
-		CloseTask:           true,
-		CloseReason:         "runner finalized artifact",
-	}); err != nil {
-		t.Fatalf("complete task run with finalized runner artifact: %v", err)
 	}
 }
 
@@ -709,26 +640,21 @@ func TestHostBridgeTaskExecutorPersistsFlueTranscriptWithoutSessionShadow(t *tes
 		Command:             hostBridgeHelperCommand(t, "flue-transcript", "unused-base", "unused-patch"),
 	}
 
-	outcome, err := RequestTaskRunWithResult(ctx, st, TaskRunRequestOptions{
-		WorkspaceKey:    "TEST",
-		DriverRunID:     run.RunID,
-		TaskRunID:       "task-run-1",
-		TaskID:          "TEST-1",
-		Runner:          "local-task-runner",
-		ParentSessionID: "lead-session-1",
-		ParentNodeID:    run.NodeID,
-		ParentLeaseID:   run.LeaseID,
-		ParentFence:     run.FencingToken,
-		DeferCompletion: true,
-	}, executor)
+	req := hostBridgeTaskExecRequest()
+	req.WorkspaceKey, req.DriverRunID = "TEST", run.RunID
+	req.NodeID, req.LeaseID, req.FencingToken = run.NodeID, run.LeaseID, run.FencingToken
+	req.Runner = "local-task-runner"
+	req.RunnerKind = RunnerKindFlueWorkflow
+	req.RunnerTrustLevel = workflowcatalog.DriverTrustTrusted
+	result, err := executor.ExecuteTask(ctx, req)
 	if err != nil {
-		t.Fatalf("RequestTaskRunWithResult: %v", err)
+		t.Fatalf("ExecuteTask: %v", err)
 	}
-	if outcome.Run.Status != domain.TaskRunCompleted {
-		t.Fatalf("run status = %s error=%s, want completed", outcome.Run.Status, outcome.Run.ErrorMessage)
+	if result.Status != domain.TaskRunCompleted {
+		t.Fatalf("run status = %s error=%s, want completed", result.Status, result.ErrorMessage)
 	}
-	if len(outcome.ArtifactIDs) != 2 || outcome.ArtifactIDs[0] != "transcript-task-run-1" || outcome.ArtifactIDs[1] != "logs-task-run-1" {
-		t.Fatalf("artifact ids = %+v, want transcript and logs artifacts", outcome.ArtifactIDs)
+	if len(result.ArtifactIDs) != 2 || result.ArtifactIDs[0] != "transcript-task-run-1" || result.ArtifactIDs[1] != "logs-task-run-1" {
+		t.Fatalf("artifact ids = %+v, want transcript and logs artifacts", result.ArtifactIDs)
 	}
 	if _, err := st.AgentSessions().Get(ctx, "TEST", "flue-task-run-1"); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("batch TaskRun created Interaction AgentSession shadow: err=%v", err)
@@ -760,15 +686,15 @@ func TestHostBridgeTaskExecutorPersistsFlueTranscriptWithoutSessionShadow(t *tes
 	if first["type"] == "turn_request" {
 		t.Fatalf("first transcript line looks like raw event: %+v", first)
 	}
-	var result map[string]any
-	if err := json.Unmarshal([]byte(lines[2]), &result); err != nil {
+	var toolResult map[string]any
+	if err := json.Unmarshal([]byte(lines[2]), &toolResult); err != nil {
 		t.Fatalf("parse tool result transcript line: %v", err)
 	}
-	if result["role"] != "tool" || result["type"] != "tool_result" || result["tool_use_id"] != "tool-1" || result["output"] != "ok" {
-		t.Fatalf("tool result line = %+v, want canonical tool result output", result)
+	if toolResult["role"] != "tool" || toolResult["type"] != "tool_result" || toolResult["tool_use_id"] != "tool-1" || toolResult["output"] != "ok" {
+		t.Fatalf("tool result line = %+v, want canonical tool result output", toolResult)
 	}
-	if _, hasText := result["text"]; hasText {
-		t.Fatalf("tool result line should use output, not text: %+v", result)
+	if _, hasText := toolResult["text"]; hasText {
+		t.Fatalf("tool result line should use output, not text: %+v", toolResult)
 	}
 }
 

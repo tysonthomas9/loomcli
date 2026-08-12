@@ -2,10 +2,13 @@ package authoring
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
+	appworkflowauthoring "github.com/tysonthomas9/loomcli/internal/app/workflowauthoring"
 	driverpkg "github.com/tysonthomas9/loomcli/internal/driver"
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
@@ -14,6 +17,7 @@ import (
 type authoringAPISpy struct {
 	operatorCommand *workflowcatalog.AuthorVersionCommand
 	managedCommand  *workflowcatalog.AuthorManagedVersionCommand
+	managedCommands []workflowcatalog.AuthorManagedVersionCommand
 }
 
 type builtinCatalogStub struct {
@@ -71,7 +75,21 @@ func (spy *authoringAPISpy) AuthorManagedVersion(
 	command workflowcatalog.AuthorManagedVersionCommand,
 ) (*workflowcatalog.AuthorVersionResult, error) {
 	spy.managedCommand = &command
+	spy.managedCommands = append(spy.managedCommands, command)
 	return authoredResult(command.AuthorVersionCommand, command.Activate), nil
+}
+
+type boundPromptAgentIndexStub struct {
+	workspaces []string
+	enabled    map[string]bool
+}
+
+func (stub boundPromptAgentIndexStub) ListWorkspaceKeys(context.Context) ([]string, error) {
+	return append([]string(nil), stub.workspaces...), nil
+}
+
+func (stub boundPromptAgentIndexStub) HasEnabledPromptAgentBinding(_ context.Context, workspace string) (bool, error) {
+	return stub.enabled[workspace], nil
 }
 
 func authoredResult(command workflowcatalog.AuthorVersionCommand, activated bool) *workflowcatalog.AuthorVersionResult {
@@ -102,11 +120,15 @@ func TestBuildAndAuthorSubmitsOneUntrustedInactiveCatalogCommand(t *testing.T) {
 	api := &authoringAPISpy{}
 	workDir := t.TempDir()
 
-	result, diagnostics, err := BuildAndAuthor(
+	coordinator, err := appworkflowauthoring.New(NewBundleStager())
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, diagnostics, err := coordinator.AuthorOperator(
 		context.Background(),
 		api,
 		authority.OperatorAuthority{},
-		BuildAndRegisterOptions{
+		appworkflowauthoring.BuildOptions{
 			WorkspaceKey: "TEST",
 			Name:         "custom-flow",
 			Entrypoint:   "workflows/custom-flow.ts",
@@ -150,11 +172,15 @@ func TestBuildAndAuthorManagedStampsCanonicalProvenance(t *testing.T) {
 		t.Fatal("local-review builtin missing")
 	}
 
-	result, diagnostics, err := BuildAndAuthorManaged(
+	coordinator, err := appworkflowauthoring.New(NewBundleStager())
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, diagnostics, err := coordinator.AuthorManaged(
 		context.Background(),
 		api,
 		authority.SystemAuthority{},
-		BuildAndRegisterOptions{
+		appworkflowauthoring.BuildOptions{
 			WorkspaceKey:  "TEST",
 			Name:          BuiltinLocalReviewAgentWorkflowName,
 			Entrypoint:    spec.Entrypoint,
@@ -180,18 +206,116 @@ func TestBuildAndAuthorManagedStampsCanonicalProvenance(t *testing.T) {
 }
 
 func TestBuildAndAuthorRejectsOperatorTrustAndActivationSelection(t *testing.T) {
-	for name, opts := range map[string]BuildAndRegisterOptions{
+	for name, opts := range map[string]appworkflowauthoring.BuildOptions{
 		"activate": {Activate: true},
 		"trusted":  {Trust: workflowcatalog.DriverTrustTrusted},
 	} {
 		t.Run(name, func(t *testing.T) {
 			api := &authoringAPISpy{}
-			if _, _, err := BuildAndAuthor(context.Background(), api, authority.OperatorAuthority{}, opts); err == nil {
+			coordinator, err := appworkflowauthoring.New(NewBundleStager())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, _, err := coordinator.AuthorOperator(context.Background(), api, authority.OperatorAuthority{}, opts); err == nil {
 				t.Fatal("BuildAndAuthor succeeded")
 			}
 			if api.operatorCommand != nil || api.managedCommand != nil {
 				t.Fatalf("authoring API called after rejected intent: %+v", api)
 			}
 		})
+	}
+}
+
+func TestEnsureBuiltinRefreshesCurrentDigestWithRetiredRunnerThroughManagedAuthoring(t *testing.T) {
+	installFakeWorkflowBuildDeps(t)
+	runtimeDir := t.TempDir()
+	t.Setenv("LOOM_WORKSPACE_RUNTIME_DIR", runtimeDir)
+	bundleRef := filepath.ToSlash(filepath.Join("bundles", "old"))
+	bundleRoot := filepath.Join(runtimeDir, filepath.FromSlash(bundleRef))
+	if err := os.MkdirAll(filepath.Join(bundleRoot, "dist"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for path, content := range map[string]string{
+		filepath.Join(bundleRoot, "manifest.json"):      "{}\n",
+		filepath.Join(bundleRoot, "dist", "server.mjs"): "export {};\n",
+	} {
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	name := BuiltinGitHubReviewAgentWorkflowName
+	spec, ok := BuiltinWorkflow(name)
+	if !ok {
+		t.Fatal("github review builtin missing")
+	}
+	digest, err := SourceDigest(spec.Files)
+	if err != nil {
+		t.Fatal(err)
+	}
+	retiredRunners, err := json.Marshal([]driverpkg.DriverRunnerSpec{
+		{Name: BuiltinGitHubReviewTaskRunnerName, Kind: driverpkg.RunnerKindFlueWorkflow, Entrypoint: BuiltinGitHubReviewTaskRunnerName},
+		{Name: driverpkg.OpenShellRunnerName, Kind: driverpkg.RunnerKindFlueWorkflow, Entrypoint: driverpkg.OpenShellRunnerName},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	catalog := builtinCatalogStub{
+		driver: &workflowcatalog.Driver{
+			WorkspaceKey: "TEST", DriverID: name, Name: name,
+			ActiveVersionID: "old-version", Revision: 7,
+		},
+		version: &workflowcatalog.DriverVersion{
+			WorkspaceKey: "TEST", DriverID: name, VersionID: "old-version",
+			SourceRef: workflowcatalog.BuiltinSourceRef(name, digest), SourceDigest: digest,
+			BundleRef: bundleRef, CreatedBy: "system",
+			Manifest: map[string]string{"runners": string(retiredRunners)},
+		},
+	}
+	api := &authoringAPISpy{}
+	authorities := &managedBuiltinAuthoritySpy{}
+	coordinator, err := appworkflowauthoring.New(NewBundleStager())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := coordinator.EnsureBuiltin(
+		t.Context(), catalog, api, authorities, NewBuiltinSupport(), "TEST", name,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if api.managedCommand == nil || api.managedCommand.ExpectedRevision != 7 || !api.managedCommand.Activate {
+		t.Fatalf("managed refresh command = %+v", api.managedCommand)
+	}
+	if authorities.calls != 1 || authorities.workspace != "TEST" {
+		t.Fatalf("authority calls/workspace = %d/%q", authorities.calls, authorities.workspace)
+	}
+	if strings.Contains(api.managedCommand.Manifest["runners"], driverpkg.OpenShellRunnerName) {
+		t.Fatalf("managed refresh retained retired runner: %+v", api.managedCommand.Manifest)
+	}
+}
+
+func TestRefreshBoundPromptAgentWorkflowsUsesCurrentIndexAndManagedInterface(t *testing.T) {
+	installFakeWorkflowBuildDeps(t)
+	api := &authoringAPISpy{}
+	authorities := &managedBuiltinAuthoritySpy{}
+	coordinator, err := appworkflowauthoring.New(NewBundleStager())
+	if err != nil {
+		t.Fatal(err)
+	}
+	index := boundPromptAgentIndexStub{
+		workspaces: []string{"ENABLED", "DISABLED"},
+		enabled:    map[string]bool{"ENABLED": true},
+	}
+	if err := coordinator.RefreshBoundPromptAgentWorkflows(
+		t.Context(), index,
+		builtinCatalogStub{getDriverErr: workflowcatalog.ErrNotFound},
+		api, authorities, NewBuiltinSupport(),
+	); err != nil {
+		t.Fatal(err)
+	}
+	if len(api.managedCommands) != 1 ||
+		api.managedCommands[0].WorkspaceKey != "ENABLED" ||
+		api.managedCommands[0].DriverID != BuiltinPromptAgentWorkflowName {
+		t.Fatalf("managed commands = %+v", api.managedCommands)
 	}
 }

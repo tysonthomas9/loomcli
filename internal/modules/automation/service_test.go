@@ -362,7 +362,7 @@ func TestWebhookAdmissionMatchesDeterministicallyFiltersActorsAndSnapshotsActive
 	}
 }
 
-func TestDeliveryDispatchIdempotencyKeyPreservesLegacyAndBoundsFallback(t *testing.T) {
+func TestDeliveryDispatchIdempotencyKeyUsesOneCanonicalDigestFormat(t *testing.T) {
 	bindingID := "binding-a"
 	if got := DeliveryDispatchIdempotencyKey("", bindingID); got != "" {
 		t.Fatalf("missing event identity produced dispatch key %q", got)
@@ -370,36 +370,23 @@ func TestDeliveryDispatchIdempotencyKeyPreservesLegacyAndBoundsFallback(t *testi
 	if got := DeliveryDispatchIdempotencyKey("event-a", ""); got != "" {
 		t.Fatalf("missing binding identity produced dispatch key %q", got)
 	}
-	boundaryEventKey := strings.Repeat("e", maxDeliveryDispatchIdempotencyKeyLen-len(bindingID)-1)
-	boundaryLegacy := boundaryEventKey + "#" + bindingID
-	if len(boundaryLegacy) != maxDeliveryDispatchIdempotencyKeyLen {
-		t.Fatalf("boundary fixture length = %d", len(boundaryLegacy))
-	}
-	if got := DeliveryDispatchIdempotencyKey(boundaryEventKey, bindingID); got != boundaryLegacy {
-		t.Fatalf("128-byte legacy key changed to %q", got)
-	}
-
-	oversizedEventKey := boundaryEventKey + "x"
-	legacy := oversizedEventKey + "#" + bindingID
-	wantDigest := sha256.Sum256([]byte(legacy))
+	eventKey := "event-a"
+	wantDigest := sha256.Sum256([]byte(eventKey + "#" + bindingID))
 	want := deliveryDispatchHashPrefix + hex.EncodeToString(wantDigest[:])
-	got := DeliveryDispatchIdempotencyKey(oversizedEventKey, bindingID)
-	if got != want || len(got) > maxDeliveryDispatchIdempotencyKeyLen || got != strings.TrimSpace(got) {
-		t.Fatalf("oversized key = %q (%d), want %q", got, len(got), want)
+	got := DeliveryDispatchIdempotencyKey(eventKey, bindingID)
+	if got != want || got != strings.TrimSpace(got) {
+		t.Fatalf("canonical key = %q, want %q", got, want)
 	}
-	if replay := DeliveryDispatchIdempotencyKey(oversizedEventKey, bindingID); replay != got {
-		t.Fatalf("oversized key is not deterministic: %q != %q", replay, got)
+	if replay := DeliveryDispatchIdempotencyKey(eventKey, bindingID); replay != got {
+		t.Fatalf("canonical key is not deterministic: %q != %q", replay, got)
 	}
-	if distinct := DeliveryDispatchIdempotencyKey(oversizedEventKey+"y", bindingID); distinct == got {
-		t.Fatalf("distinct oversized legacy inputs collided at %q", got)
+	if distinct := DeliveryDispatchIdempotencyKey(eventKey+"y", bindingID); distinct == got {
+		t.Fatalf("distinct inputs collided at %q", got)
 	}
-	liveEventKey := internalEventIdempotencyKey("ws", "task-ready-reconcile-v1-"+strings.Repeat("a", 64))
+	liveEventKey := InternalEventIdempotencyKey("ws", "task-ready-reconcile-v1-"+strings.Repeat("a", 64))
 	liveBindingID := "agent-binding-" + strings.Repeat("b", 32)
-	if live := DeliveryDispatchIdempotencyKey(liveEventKey, liveBindingID); !strings.HasPrefix(live, deliveryDispatchHashPrefix) || len(live) > maxDeliveryDispatchIdempotencyKeyLen {
+	if live := DeliveryDispatchIdempotencyKey(liveEventKey, liveBindingID); !strings.HasPrefix(live, deliveryDispatchHashPrefix) {
 		t.Fatalf("task-ready reconcile dispatch key = %q (%d)", live, len(live))
-	}
-	if noncanonical := DeliveryDispatchIdempotencyKey(" "+boundaryEventKey[:8], bindingID); !strings.HasPrefix(noncanonical, deliveryDispatchHashPrefix) {
-		t.Fatalf("non-canonical legacy key was not bounded: %q", noncanonical)
 	}
 	for name, eventKey := range map[string]string{
 		"embedded space": "event key",
@@ -408,40 +395,27 @@ func TestDeliveryDispatchIdempotencyKeyPreservesLegacyAndBoundsFallback(t *testi
 	} {
 		t.Run(name, func(t *testing.T) {
 			key := DeliveryDispatchIdempotencyKey(eventKey, bindingID)
-			if !strings.HasPrefix(key, deliveryDispatchHashPrefix) || !deliveryDispatchLegacyKeyAccepted(key) {
-				t.Fatalf("fallback key = %q", key)
+			if !strings.HasPrefix(key, deliveryDispatchHashPrefix) {
+				t.Fatalf("canonical key = %q", key)
 			}
 		})
 	}
 }
 
-func TestInternalEventIdempotencyKeyPreservesValidLegacyAndBoundsMaxWorkspace(t *testing.T) {
+func TestInternalEventIdempotencyKeyUsesOneCanonicalDigestFormat(t *testing.T) {
 	workspace := strings.Repeat("W", 32)
-	boundarySourceEventID := strings.Repeat("e", maxDeliveryDispatchIdempotencyKeyLen-len("internal:")-len(workspace)-1)
-	boundaryLegacy := "internal:" + workspace + ":" + boundarySourceEventID
-	if len(boundaryLegacy) != maxDeliveryDispatchIdempotencyKeyLen {
-		t.Fatalf("boundary internal key length = %d", len(boundaryLegacy))
-	}
-	if got := internalEventIdempotencyKey(workspace, boundarySourceEventID); got != boundaryLegacy {
-		t.Fatalf("valid 128-byte internal key changed to %q", got)
-	}
-
 	reconcileSourceEventID := "task-ready-reconcile-v1-" + strings.Repeat("a", 64)
-	legacy := "internal:" + workspace + ":" + reconcileSourceEventID
-	if len(legacy) <= maxDeliveryDispatchIdempotencyKeyLen {
-		t.Fatalf("max-workspace fixture unexpectedly fits: %d", len(legacy))
-	}
-	wantDigest := sha256.Sum256([]byte(legacy))
+	wantDigest := sha256.Sum256([]byte(workspace + ":" + reconcileSourceEventID))
 	want := internalAdmissionHashPrefix + hex.EncodeToString(wantDigest[:])
-	got := internalEventIdempotencyKey(workspace, reconcileSourceEventID)
-	if got != want || !deliveryDispatchLegacyKeyAccepted(got) {
-		t.Fatalf("bounded internal key = %q (%d), want %q", got, len(got), want)
+	got := InternalEventIdempotencyKey(workspace, reconcileSourceEventID)
+	if got != want {
+		t.Fatalf("canonical internal key = %q, want %q", got, want)
 	}
-	if replay := internalEventIdempotencyKey(workspace, reconcileSourceEventID); replay != got {
-		t.Fatalf("bounded internal key is not deterministic: %q != %q", replay, got)
+	if replay := InternalEventIdempotencyKey(workspace, reconcileSourceEventID); replay != got {
+		t.Fatalf("canonical internal key is not deterministic: %q != %q", replay, got)
 	}
-	if distinct := internalEventIdempotencyKey(workspace, reconcileSourceEventID+"x"); distinct == got {
-		t.Fatalf("distinct oversized internal inputs collided at %q", got)
+	if distinct := InternalEventIdempotencyKey(workspace, reconcileSourceEventID+"x"); distinct == got {
+		t.Fatalf("distinct internal inputs collided at %q", got)
 	}
 }
 
@@ -481,7 +455,7 @@ func TestTaskReadyRepositoryRequirementDeduplicatesOnlyPromptAgentFanout(t *test
 		h.t.Helper()
 		h.persistence.mu.Lock()
 		defer h.persistence.mu.Unlock()
-		record := h.persistence.reservations[reservationMapKey("ws", internalEventIdempotencyKey("ws", sourceEventID))]
+		record := h.persistence.reservations[reservationMapKey("ws", InternalEventIdempotencyKey("ws", sourceEventID))]
 		if record == nil || record.result == nil || len(record.result.Deliveries) != len(result.Deliveries) {
 			h.t.Fatalf("reservation for %q = %#v", sourceEventID, record)
 		}
@@ -505,7 +479,7 @@ func TestTaskReadyRepositoryRequirementDeduplicatesOnlyPromptAgentFanout(t *test
 		h.t.Helper()
 		h.persistence.mu.Lock()
 		defer h.persistence.mu.Unlock()
-		record := h.persistence.reservations[reservationMapKey("ws", internalEventIdempotencyKey("ws", sourceEventID))]
+		record := h.persistence.reservations[reservationMapKey("ws", InternalEventIdempotencyKey("ws", sourceEventID))]
 		if record == nil || record.result == nil || len(record.result.Deliveries) != len(result.Deliveries) {
 			h.t.Fatalf("reservation for %q = %#v", sourceEventID, record)
 		}
@@ -550,8 +524,7 @@ func TestTaskReadyRepositoryRequirementDeduplicatesOnlyPromptAgentFanout(t *test
 		if got := string(h.execution.calls[0].Payload); got != string(commandPayload) {
 			t.Fatalf("DriverRun payload = %s, want flat TriggerEvent payload %s", got, commandPayload)
 		}
-		if key := h.execution.calls[0].IdempotencyKey; !strings.HasPrefix(key, internalAdmissionHashPrefix) ||
-			!deliveryDispatchLegacyKeyAccepted(key) {
+		if key := h.execution.calls[0].IdempotencyKey; !strings.HasPrefix(key, deliveryDispatchHashPrefix) {
 			t.Fatalf("reconcile dispatch key = %q (%d)", key, len(key))
 		}
 		winner, duplicate := findDelivery(t, result, "prompt-a"), findDelivery(t, result, "prompt-z")
@@ -606,8 +579,7 @@ func TestTaskReadyRepositoryRequirementDeduplicatesOnlyPromptAgentFanout(t *test
 		if recovered.Replayed || recovered.Event == nil || recovered.Event.SourceEventID != wantRecoveryID {
 			t.Fatalf("recovered result = %+v, want fresh %q", recovered, wantRecoveryID)
 		}
-		if len(wantRecoveryID) > maxTaskReadyRecoverySourceEventIDLen ||
-			!strings.HasSuffix(wantRecoveryID, taskReadyExhaustedRecoverySuffix) {
+		if !strings.HasPrefix(wantRecoveryID, taskReadyExhaustedRecoveryHashPrefix) {
 			t.Fatalf("recovery source id = %q (%d)", wantRecoveryID, len(wantRecoveryID))
 		}
 		if got := callBindingIDs(h.execution.calls); !reflect.DeepEqual(got, []string{"prompt-a"}) {
@@ -624,13 +596,12 @@ func TestTaskReadyRepositoryRequirementDeduplicatesOnlyPromptAgentFanout(t *test
 			t.Fatalf("durable generations events/reservations = %d/%d, want 2/2",
 				len(h.persistence.events), len(h.persistence.reservations))
 		}
-		if key := h.execution.calls[0].IdempotencyKey; !deliveryDispatchLegacyKeyAccepted(key) {
+		if key := h.execution.calls[0].IdempotencyKey; !strings.HasPrefix(key, deliveryDispatchHashPrefix) {
 			t.Fatalf("recovery dispatch key = %q (%d)", key, len(key))
 		}
 		longBase := taskReadyReconcileSourceEventPrefix + strings.Repeat("x", 256)
 		longRecovery := taskReadyExhaustedRecoverySourceEventID(longBase)
-		if len(longRecovery) > maxTaskReadyRecoverySourceEventIDLen ||
-			!strings.HasPrefix(longRecovery, taskReadyExhaustedRecoveryHashPrefix) ||
+		if !strings.HasPrefix(longRecovery, taskReadyExhaustedRecoveryHashPrefix) ||
 			!isTaskReadyExhaustedRecoverySourceEventID(longRecovery) ||
 			taskReadyExhaustedRecoverySourceEventID(longBase) != longRecovery {
 			t.Fatalf("bounded long recovery source id = %q (%d)", longRecovery, len(longRecovery))
@@ -778,7 +749,7 @@ func TestTaskReadyRepositoryRequirementDeduplicatesOnlyPromptAgentFanout(t *test
 		h := newTestHarness(t)
 		seedPromptAgentBindings(h)
 		payload := json.RawMessage(`{"repositoryRequired":true}`)
-		sourceEventID := "task-ready-reconcile-v1-" + strings.Repeat("d", 32) + taskReadyExhaustedRecoverySuffix
+		sourceEventID := taskReadyExhaustedRecoverySourceEventID("task-ready-reconcile-v1-" + strings.Repeat("d", 32))
 		first := admitTaskReady(t, h, sourceEventID, payload)
 		exhaustTaskReadyGeneration(h, sourceEventID, first)
 		h.execution.calls = nil
@@ -861,7 +832,7 @@ func TestTaskReadyRepositoryRequirementDeduplicatesOnlyPromptAgentFanout(t *test
 			first := admitTaskReady(t, h, sourceEventID, payload)
 
 			h.persistence.mu.Lock()
-			record := h.persistence.reservations[reservationMapKey("ws", internalEventIdempotencyKey("ws", sourceEventID))]
+			record := h.persistence.reservations[reservationMapKey("ws", InternalEventIdempotencyKey("ws", sourceEventID))]
 			for index, delivery := range first.Deliveries {
 				receipt := cloneDelivery(delivery)
 				receipt.Status, receipt.RejectionReason, receipt.DriverRunID = DeliveryAccepted, "", ""
@@ -1566,7 +1537,7 @@ func TestWorkflowAdmissionDerivesRunActorParentHopAndIgnoresForgedFields(t *test
 		event.EventType != "issue.created" || event.RouteKey != "internal.issue.created" ||
 		event.ActorRef != "agent-trusted" || event.EmittingRunID != "run-trusted" ||
 		event.ParentEventID != "parent-1" || event.EpicID != "epic-trusted" ||
-		event.IdempotencyKey != "internal:ws:emission-1" {
+		event.IdempotencyKey != InternalEventIdempotencyKey("ws", "emission-1") {
 		t.Fatalf("derived event = %+v", event)
 	}
 	delivery := findDelivery(t, result, binding.BindingID)
@@ -1585,7 +1556,7 @@ func TestWorkflowHopCapDropsBeforeMatchingOrReservation(t *testing.T) {
 	h.persistence.seedEvent(&Event{
 		WorkspaceKey: "ws", EventID: "parent-cap", SourceKind: SourceKindInternal, SourceEventID: "parent-cap-source",
 		EventType: "issue.created", RouteKey: "internal.issue.created", Origin: EventOriginSystem,
-		HopDepth: DefaultEventHopDepthCap, IdempotencyKey: "internal:ws:parent-cap-source",
+		HopDepth: DefaultEventHopDepthCap, IdempotencyKey: InternalEventIdempotencyKey("ws", "parent-cap-source"),
 	})
 	h.execution.emission = &ExecutionEmissionContext{
 		WorkspaceKey: "ws", RunID: "run-cap", ParentEventID: "parent-cap", ActorRef: "agent",
@@ -1664,7 +1635,7 @@ func TestWorkflowAdmissionRejectsExecutionOwnerTupleDrift(t *testing.T) {
 
 func TestWorkflowAdmissionReplaySurvivesOwnerHandoff(t *testing.T) {
 	h := newTestHarness(t)
-	binding := seedBinding("internal-binding", "internal.issue.created")
+	binding := seedBinding("internal-binding", "internal.deploy.requested")
 	binding.SourceKind = SourceKindInternal
 	h.persistence.seedBinding(binding)
 	h.execution.emission = &ExecutionEmissionContext{
@@ -1673,7 +1644,7 @@ func TestWorkflowAdmissionReplaySurvivesOwnerHandoff(t *testing.T) {
 	}
 	auth := NewExecutionEventAuthority(h.issueExecution(ActionAdmitEvent))
 	command := AdmitEventCommand{
-		WorkspaceKey: "ws", SourceEventID: "handoff-emission", EventType: "issue.created",
+		WorkspaceKey: "ws", SourceEventID: "handoff-emission", EventType: "deploy.requested",
 		ExecutionNodeID: "node-a", ExecutionLeaseID: "lease-a", ExecutionFencingToken: 7,
 		Payload: []byte(`{"issue":"LOOM-1"}`),
 	}
@@ -1693,6 +1664,10 @@ func TestWorkflowAdmissionReplaySurvivesOwnerHandoff(t *testing.T) {
 	replayed, err := h.service.AdmitEvent(t.Context(), auth, replay)
 	if err != nil || replayed == nil || !replayed.Replayed || replayed.Event.EventID != first.Event.EventID {
 		t.Fatalf("B replay after owner handoff = %#v, %v", replayed, err)
+	}
+	if len(h.persistence.events) != 1 || len(h.persistence.reservations) != 1 || len(h.execution.calls) != 1 {
+		t.Fatalf("handoff replay duplicated durable admission: events=%d reservations=%d dispatches=%d",
+			len(h.persistence.events), len(h.persistence.reservations), len(h.execution.calls))
 	}
 	if h.persistence.matchCalls != matchCalls || len(h.catalog.calls) != catalogCalls {
 		t.Fatalf("handoff replay consulted mutable preconditions: match %d->%d catalog %d->%d",

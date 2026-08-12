@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/backend"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 	"github.com/tysonthomas9/loomcli/internal/usage"
 )
 
@@ -70,42 +70,42 @@ func TestHasAvailablePlanningTasks(t *testing.T) {
 	}{
 		{
 			name: "has task needing planning (no design)",
-			readyOutput: mustJSON([]backend.IssueData{
+			readyOutput: mustJSON([]workitems.IssueSummary{
 				{ID: "T-1", Title: "Add feature", Status: "open", Design: ""},
 			}),
 			want: true,
 		},
 		{
 			name: "task has design - not needing planning",
-			readyOutput: mustJSON([]backend.IssueData{
+			readyOutput: mustJSON([]workitems.IssueSummary{
 				{ID: "T-1", Title: "Add feature", Status: "open", Design: "Some design"},
 			}),
 			want: false,
 		},
 		{
 			name: "include tasks with needs-revision label (revision task)",
-			readyOutput: mustJSON([]backend.IssueData{
+			readyOutput: mustJSON([]workitems.IssueSummary{
 				{ID: "T-1", Title: "Add feature", Status: "open", Design: "existing design", Labels: []string{"needs-revision"}},
 			}),
 			want: true,
 		},
 		{
 			name: "skip in_progress tasks",
-			readyOutput: mustJSON([]backend.IssueData{
+			readyOutput: mustJSON([]workitems.IssueSummary{
 				{ID: "T-1", Title: "Add feature", Status: "in_progress", Design: ""},
 			}),
 			want: false,
 		},
 		{
 			name: "skip review tasks",
-			readyOutput: mustJSON([]backend.IssueData{
+			readyOutput: mustJSON([]workitems.IssueSummary{
 				{ID: "T-1", Title: "In review", Status: "review", Design: ""},
 			}),
 			want: false,
 		},
 		{
 			name: "skip epics",
-			readyOutput: mustJSON([]backend.IssueData{
+			readyOutput: mustJSON([]workitems.IssueSummary{
 				{ID: "T-1", Title: "Big Epic", Status: "open", IssueType: "epic", Design: ""},
 			}),
 			want: false,
@@ -117,7 +117,7 @@ func TestHasAvailablePlanningTasks(t *testing.T) {
 		},
 		{
 			name: "mixed - one valid task",
-			readyOutput: mustJSON([]backend.IssueData{
+			readyOutput: mustJSON([]workitems.IssueSummary{
 				{ID: "T-1", Title: "Has design and needs-revision", Status: "open", Design: "plan", Labels: []string{"needs-revision"}},
 				{ID: "T-2", Title: "Work on me", Status: "open", Design: ""},
 				{ID: "T-3", Title: "Has design", Status: "open", Design: "Already planned"},
@@ -126,21 +126,21 @@ func TestHasAvailablePlanningTasks(t *testing.T) {
 		},
 		{
 			name: "blocked tasks excluded by backend (not in ready results)",
-			readyOutput: mustJSON([]backend.IssueData{
+			readyOutput: mustJSON([]workitems.IssueSummary{
 				{ID: "T-0", Title: "Blocker", Status: "open", Design: "has design"},
 			}),
 			want: false, // T-0 has design so not available for planning; blocked T-1 not returned by backend
 		},
 		{
 			name: "parent-child dependency does not block planning",
-			readyOutput: mustJSON([]backend.IssueData{
+			readyOutput: mustJSON([]workitems.IssueSummary{
 				{ID: "T-1", Title: "Task with parent-child dep", Status: "open", Design: ""},
 			}),
 			want: true,
 		},
 		{
 			name: "task with design and parent-child dep not needing planning",
-			readyOutput: mustJSON([]backend.IssueData{
+			readyOutput: mustJSON([]workitems.IssueSummary{
 				{ID: "T-1", Title: "Task with deps and design", Status: "open", Design: "Approved plan"},
 			}),
 			want: false,
@@ -149,21 +149,19 @@ func TestHasAvailablePlanningTasks(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			resetDefaultIssueBackend()
-			t.Cleanup(resetDefaultIssueBackend)
-			mock := NewMockIssueBackend()
-			var issues []backend.IssueData
+			resetDefaultWorkItems()
+			t.Cleanup(resetDefaultWorkItems)
+			mock := NewMockWorkItems()
+			var issues []workitems.IssueSummary
 			if tt.readyOutput != "" {
 				json.Unmarshal([]byte(tt.readyOutput), &issues)
 			}
 			if tt.readyErr != nil {
 				mock.ReadyErr = tt.readyErr
-				mock.ListErr = tt.readyErr
 			} else {
 				mock.ReadyResult = issues
-				mock.ListResult = issues
 			}
-			setDefaultIssueBackend(mock)
+			setDefaultWorkItems(mock)
 
 			got, err := HasAvailablePlanningTasks(t.Context(), "", "")
 			if (err != nil) != tt.wantErr {
@@ -187,42 +185,42 @@ func TestHasAvailableImplementationTasks(t *testing.T) {
 	}{
 		{
 			name: "has task with design - ready for implementation",
-			readyOutput: mustJSON([]backend.IssueData{
+			readyOutput: mustJSON([]workitems.IssueSummary{
 				{ID: "T-1", Title: "Add feature", Status: "open", Design: "Implementation plan here"},
 			}),
 			want: true,
 		},
 		{
 			name: "task has no design - not ready for implementation",
-			readyOutput: mustJSON([]backend.IssueData{
+			readyOutput: mustJSON([]workitems.IssueSummary{
 				{ID: "T-1", Title: "Add feature", Status: "open", Design: ""},
 			}),
 			want: false,
 		},
 		{
 			name: "skip tasks with needs-revision label even with design",
-			readyOutput: mustJSON([]backend.IssueData{
+			readyOutput: mustJSON([]workitems.IssueSummary{
 				{ID: "T-1", Title: "Add feature", Status: "open", Design: "Has design", Labels: []string{"needs-revision"}},
 			}),
 			want: false,
 		},
 		{
 			name: "skip in_progress tasks",
-			readyOutput: mustJSON([]backend.IssueData{
+			readyOutput: mustJSON([]workitems.IssueSummary{
 				{ID: "T-1", Title: "Add feature", Status: "in_progress", Design: "Has design"},
 			}),
 			want: false,
 		},
 		{
 			name: "skip review tasks",
-			readyOutput: mustJSON([]backend.IssueData{
+			readyOutput: mustJSON([]workitems.IssueSummary{
 				{ID: "T-1", Title: "In review", Status: "review", Design: "Has design"},
 			}),
 			want: false,
 		},
 		{
 			name: "skip epics even with design",
-			readyOutput: mustJSON([]backend.IssueData{
+			readyOutput: mustJSON([]workitems.IssueSummary{
 				{ID: "T-1", Title: "Big Epic", Status: "open", IssueType: "epic", Design: "Has design"},
 			}),
 			want: false,
@@ -234,7 +232,7 @@ func TestHasAvailableImplementationTasks(t *testing.T) {
 		},
 		{
 			name: "mixed - one valid task with design",
-			readyOutput: mustJSON([]backend.IssueData{
+			readyOutput: mustJSON([]workitems.IssueSummary{
 				{ID: "T-1", Title: "Has needs-revision label", Status: "open", Design: "Has design", Labels: []string{"needs-revision"}},
 				{ID: "T-2", Title: "No design yet", Status: "open", Design: ""},
 				{ID: "T-3", Title: "Ready to implement", Status: "open", Design: "Detailed plan"},
@@ -243,21 +241,21 @@ func TestHasAvailableImplementationTasks(t *testing.T) {
 		},
 		{
 			name: "blocked tasks excluded by backend (not in ready results)",
-			readyOutput: mustJSON([]backend.IssueData{
+			readyOutput: mustJSON([]workitems.IssueSummary{
 				{ID: "T-0", Title: "Blocker", Status: "open"},
 			}),
 			want: false, // T-0 has no design so not available for implementation; blocked T-1 not returned by backend
 		},
 		{
 			name: "parent-child dependency does not block implementation",
-			readyOutput: mustJSON([]backend.IssueData{
+			readyOutput: mustJSON([]workitems.IssueSummary{
 				{ID: "T-1", Title: "Ready with parent-child dep", Status: "open", Design: "Implementation plan"},
 			}),
 			want: true,
 		},
 		{
 			name: "task with parent-child dep but no design not ready",
-			readyOutput: mustJSON([]backend.IssueData{
+			readyOutput: mustJSON([]workitems.IssueSummary{
 				{ID: "T-1", Title: "Not ready with deps", Status: "open", Design: ""},
 			}),
 			want: false,
@@ -266,21 +264,19 @@ func TestHasAvailableImplementationTasks(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			resetDefaultIssueBackend()
-			t.Cleanup(resetDefaultIssueBackend)
-			mock := NewMockIssueBackend()
-			var issues []backend.IssueData
+			resetDefaultWorkItems()
+			t.Cleanup(resetDefaultWorkItems)
+			mock := NewMockWorkItems()
+			var issues []workitems.IssueSummary
 			if tt.readyOutput != "" {
 				json.Unmarshal([]byte(tt.readyOutput), &issues)
 			}
 			if tt.readyErr != nil {
 				mock.ReadyErr = tt.readyErr
-				mock.ListErr = tt.readyErr
 			} else {
 				mock.ReadyResult = issues
-				mock.ListResult = issues
 			}
-			setDefaultIssueBackend(mock)
+			setDefaultWorkItems(mock)
 
 			got, err := HasAvailableImplementationTasks(t.Context(), "", "")
 			if (err != nil) != tt.wantErr {
@@ -1504,7 +1500,7 @@ func TestRunAutoModeLoop_ShutdownImmediately(t *testing.T) {
 	// Mock issue-store ready to return tasks (so loop would continue without shutdown)
 	installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
 		return CommandResult{
-			Stdout: mustJSON([]backend.IssueData{
+			Stdout: mustJSON([]workitems.IssueSummary{
 				{ID: "T-1", Title: "Available task", Status: "open", Design: "Has design"},
 			}),
 		}
@@ -1561,7 +1557,7 @@ func TestRunAutoModeLoop_MaxTasksLimit(t *testing.T) {
 	// Mock issue-store ready to always return tasks
 	installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
 		return CommandResult{
-			Stdout: mustJSON([]backend.IssueData{
+			Stdout: mustJSON([]workitems.IssueSummary{
 				{ID: "T-1", Title: "Task", Status: "open", Design: "Design"},
 			}),
 		}
@@ -1625,7 +1621,7 @@ func TestRunAutoModeLoop_WithoutTmux(t *testing.T) {
 
 	installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
 		return CommandResult{
-			Stdout: mustJSON([]backend.IssueData{
+			Stdout: mustJSON([]workitems.IssueSummary{
 				{ID: "T-1", Title: "Task", Status: "open", Design: "Design"},
 			}),
 		}
@@ -1845,7 +1841,7 @@ func TestRunAutoModeLoop_ConsecutiveErrors(t *testing.T) {
 	// Always return tasks
 	installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
 		return CommandResult{
-			Stdout: mustJSON([]backend.IssueData{
+			Stdout: mustJSON([]workitems.IssueSummary{
 				{ID: "T-1", Title: "Task", Status: "open", Design: "Design"},
 			}),
 		}
@@ -1900,7 +1896,7 @@ func TestRunAutoModeLoop_PlanAgentType(t *testing.T) {
 	// Return a task WITHOUT design (needs planning)
 	installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
 		return CommandResult{
-			Stdout: mustJSON([]backend.IssueData{
+			Stdout: mustJSON([]workitems.IssueSummary{
 				{ID: "T-1", Title: "Needs planning", Status: "open", Design: ""},
 			}),
 		}
@@ -1956,7 +1952,7 @@ func TestRunAutoModeLoop_TaskAgentType(t *testing.T) {
 	// Return a task WITH design (ready for implementation)
 	installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
 		return CommandResult{
-			Stdout: mustJSON([]backend.IssueData{
+			Stdout: mustJSON([]workitems.IssueSummary{
 				{ID: "T-1", Title: "Ready to implement", Status: "open", Design: "Design here"},
 			}),
 		}
@@ -2012,7 +2008,7 @@ func TestRunAutoModeLoop_ErrorRecovery(t *testing.T) {
 
 	installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
 		return CommandResult{
-			Stdout: mustJSON([]backend.IssueData{
+			Stdout: mustJSON([]workitems.IssueSummary{
 				{ID: "T-1", Title: "Task", Status: "open", Design: "Design"},
 			}),
 		}
@@ -2131,7 +2127,7 @@ func TestRunAutoModeLoop_ShutdownDuringBackoff(t *testing.T) {
 
 	installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
 		return CommandResult{
-			Stdout: mustJSON([]backend.IssueData{
+			Stdout: mustJSON([]workitems.IssueSummary{
 				{ID: "T-1", Title: "Task", Status: "open", Design: "Design"},
 			}),
 		}
@@ -2393,42 +2389,42 @@ func TestHasAnyAvailableTasks(t *testing.T) {
 	}{
 		{
 			name: "task with no design - available",
-			readyOutput: mustJSON([]backend.IssueData{
+			readyOutput: mustJSON([]workitems.IssueSummary{
 				{ID: "T-1", Title: "Add feature", Status: "open", Design: ""},
 			}),
 			want: true,
 		},
 		{
 			name: "task with design - available",
-			readyOutput: mustJSON([]backend.IssueData{
+			readyOutput: mustJSON([]workitems.IssueSummary{
 				{ID: "T-1", Title: "Add feature", Status: "open", Design: "Some design"},
 			}),
 			want: true,
 		},
 		{
 			name: "task with needs-revision label - available (for HasAny)",
-			readyOutput: mustJSON([]backend.IssueData{
+			readyOutput: mustJSON([]workitems.IssueSummary{
 				{ID: "T-1", Title: "Add feature", Status: "open", Design: "", Labels: []string{"needs-revision"}},
 			}),
 			want: true,
 		},
 		{
 			name: "skip in_progress tasks",
-			readyOutput: mustJSON([]backend.IssueData{
+			readyOutput: mustJSON([]workitems.IssueSummary{
 				{ID: "T-1", Title: "Add feature", Status: "in_progress", Design: ""},
 			}),
 			want: false,
 		},
 		{
 			name: "skip review tasks",
-			readyOutput: mustJSON([]backend.IssueData{
+			readyOutput: mustJSON([]workitems.IssueSummary{
 				{ID: "T-1", Title: "In review", Status: "review", Design: ""},
 			}),
 			want: false,
 		},
 		{
 			name: "skip epics",
-			readyOutput: mustJSON([]backend.IssueData{
+			readyOutput: mustJSON([]workitems.IssueSummary{
 				{ID: "T-1", Title: "Big Epic", Status: "open", IssueType: "epic", Design: ""},
 			}),
 			want: false,
@@ -2440,7 +2436,7 @@ func TestHasAnyAvailableTasks(t *testing.T) {
 		},
 		{
 			name: "mixed - epic + valid task",
-			readyOutput: mustJSON([]backend.IssueData{
+			readyOutput: mustJSON([]workitems.IssueSummary{
 				{ID: "T-1", Title: "Valid task with revision", Status: "open", Design: "plan", Labels: []string{"needs-revision"}},
 				{ID: "T-2", Title: "Big Epic", Status: "open", IssueType: "epic", Design: ""},
 				{ID: "T-3", Title: "Valid task", Status: "open", Design: ""},
@@ -2449,14 +2445,14 @@ func TestHasAnyAvailableTasks(t *testing.T) {
 		},
 		{
 			name: "blocked tasks excluded by backend (only epics returned)",
-			readyOutput: mustJSON([]backend.IssueData{
+			readyOutput: mustJSON([]workitems.IssueSummary{
 				{ID: "T-0", Title: "Blocker", Status: "open", IssueType: "epic"},
 			}),
 			want: false, // only epic returned; blocked T-1 filtered out by backend
 		},
 		{
 			name: "parent-child dependency does not block",
-			readyOutput: mustJSON([]backend.IssueData{
+			readyOutput: mustJSON([]workitems.IssueSummary{
 				{ID: "T-1", Title: "Child task", Status: "open", Design: ""},
 			}),
 			want: true,

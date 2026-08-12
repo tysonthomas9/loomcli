@@ -247,13 +247,6 @@ func fillExecutionTaskRunEvidence(
 	}
 }
 
-func legacyAgentSessionTaskRunID(rec *domain.AgentSession) string {
-	if rec == nil || rec.Metadata == nil {
-		return ""
-	}
-	return strings.TrimSpace(rec.Metadata["task_run_id"])
-}
-
 func (s *sessionServiceImpl) executionTaskRunTranscript(
 	ctx context.Context,
 	wsID string,

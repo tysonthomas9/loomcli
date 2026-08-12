@@ -46,21 +46,10 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
-// AwaitMatcherStore is the legacy narrow query view used by existing trigger
-// adapters. Mutation authority is never derived from this repository.
-type AwaitMatcherStore interface {
-	Awaits() store.AwaitStore
-	DriverRuns() store.DriverRunStore
-}
-
-// AwaitMatcher resolves pending awaits against admitted router events. Reads
-// may use the legacy Store view, but mutation requires an explicitly injected
-// AtomicResolver. It is safe for concurrent use (it holds no state of its own).
+// AwaitMatcher resolves pending awaits against admitted router events through
+// explicit read and mutation ports. It is safe for concurrent use because it
+// holds no state of its own.
 type AwaitMatcher struct {
-	Store AwaitMatcherStore
-	// AwaitStore and DriverRunStore are the preferred narrow composition
-	// inputs. Store remains only for compatibility with legacy trigger owners
-	// that have not yet completed their later-phase extraction.
 	AwaitStore     store.AwaitStore
 	DriverRunStore store.DriverRunStore
 	AtomicResolver store.AtomicAwaitStore
@@ -279,16 +268,7 @@ func (m *AwaitMatcher) persistence() (store.AwaitStore, store.DriverRunStore) {
 	if m == nil {
 		return nil, nil
 	}
-	awaits, driverRuns := m.AwaitStore, m.DriverRunStore
-	if m.Store != nil {
-		if awaits == nil {
-			awaits = m.Store.Awaits()
-		}
-		if driverRuns == nil {
-			driverRuns = m.Store.DriverRuns()
-		}
-	}
-	return awaits, driverRuns
+	return m.AwaitStore, m.DriverRunStore
 }
 
 // auditActorRejected records the RULE 4 rejection. DEVIATION from the chunk

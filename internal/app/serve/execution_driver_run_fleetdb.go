@@ -188,7 +188,7 @@ func (adapter *fleetDriverRunCommandPort) SuspendDriverRun(ctx context.Context, 
 }
 
 func (adapter *fleetDriverRunCommandPort) FinalizeDriverRun(ctx context.Context, command execution.FinalizeDriverRunCommand) (*execution.DriverRun, error) {
-	status, err := legacyDriverRunStatus(command.Status)
+	status, err := storedDriverRunStatus(command.Status)
 	if err != nil {
 		return nil, err
 	}
@@ -238,7 +238,7 @@ func (adapter *fleetDriverRunCommandPort) StartChildDriverRun(ctx context.Contex
 func (adapter *fleetDriverRunCommandPort) CascadeChildDriverRuns(ctx context.Context, command execution.CascadeChildDriverRunsCommand) (execution.CascadeChildDriverRunsResult, error) {
 	transportCommand := fleetdb.ExecutionDriverRunCascadeCommand{
 		WorkspaceKey: command.WorkspaceKey, RequestID: command.RequestID, ParentRunID: command.ParentRunID,
-		ParentStatus: legacyDriverRunStatusValue(command.ParentStatus), Reason: command.Reason,
+		ParentStatus: storedDriverRunStatusValue(command.ParentStatus), Reason: command.Reason,
 		ErrorClass: command.ErrorClass, CascadedAt: command.CascadedAt, MaxDepth: command.MaxDepth,
 		SystemRecovery: command.SystemRecovery,
 	}
@@ -288,7 +288,7 @@ func executionDriverRunSnapshots(runs []*domain.DriverRun) ([]*execution.DriverR
 	return out, nil
 }
 
-func legacyDriverRunStatusValue(status execution.DriverRunStatus) domain.DriverRunStatus {
+func storedDriverRunStatusValue(status execution.DriverRunStatus) domain.DriverRunStatus {
 	return domain.DriverRunStatus(status)
 }
 

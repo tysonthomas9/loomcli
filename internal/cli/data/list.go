@@ -5,7 +5,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/tysonthomas9/loomcli/internal/backend"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 )
 
 var (
@@ -22,11 +22,11 @@ var listCmd = &cobra.Command{
 	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
-		ib, err := getIssueBackend(ctx)
+		itemsAPI, err := getWorkItems(ctx)
 		if err != nil {
 			return err
 		}
-		opts := backend.ListOpts{
+		filter := workitems.ListFilter{
 			Status:    listStatus,
 			IssueType: listType,
 			ParentID:  listParent,
@@ -34,13 +34,17 @@ var listCmd = &cobra.Command{
 		}
 		if cmd.Flags().Changed("priority") {
 			p := listPriority
-			opts.Priority = &p
+			filter.Priority = &p
 		}
-		items, err := ib.List(ctx, opts)
+		result, err := itemsAPI.List(ctx, workitems.ListQuery{Filter: filter})
 		if err != nil {
 			return err
 		}
-		return printIssueList(os.Stdout, items, outputFormat)
+		items := make([]workitems.IssueSummary, len(result.Issues))
+		for index := range result.Issues {
+			items[index] = result.Issues[index].IssueSummary
+		}
+		return printWorkItemSummaries(os.Stdout, items, outputFormat)
 	},
 }
 

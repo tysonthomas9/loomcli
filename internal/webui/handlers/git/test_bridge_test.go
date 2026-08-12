@@ -7,8 +7,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 	"github.com/tysonthomas9/loomcli/internal/ops"
-	"github.com/tysonthomas9/loomcli/internal/webui"
 	"github.com/tysonthomas9/loomcli/internal/webui/agentcoord"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
@@ -101,7 +101,7 @@ func (s *stubDiffService) GetIssueDiffStat(_ context.Context, _, _ string) (*sou
 	return &sourcecontrolcoord.IssueDiffStatResult{}, nil
 }
 
-func newTestDiffService(gitOps ops.GitOps, backendFn func(context.Context) webui.IssueBackend) sourcecontrolcoord.DiffService {
+func newTestDiffService(gitOps ops.GitOps, backendFn workitems.Provider) sourcecontrolcoord.DiffService {
 	return sourcecontrolcoord.NewDiffService(gitOps, backendFn, middleware.WithWorkspace)
 }
 

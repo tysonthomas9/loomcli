@@ -82,13 +82,14 @@ func newConnectorHarness(t *testing.T) *connectorHarness {
 	}); err != nil {
 		t.Fatalf("Create trigger binding: %v", err)
 	}
-	run, err := st.TriggerRoutes().DispatchTriggerRoute(ctx, "WS", "github.pull_request.opened", store.TriggerRouteDispatch{
-		IdempotencyKey: "idem-1",
-		EventType:      "pull_request.opened",
-		SubjectRef:     "repo:octocat/hello",
+	run, err := st.DriverRuns().Create(ctx, store.DriverRunCreate{
+		WorkspaceKey: "WS", RunID: "run-connector-1",
+		DriverID: "driver-1", DriverVersionID: "version-1", Entrypoint: "run",
+		SourceKind: "github", SourceRef: "event-connector-1",
+		TriggerBindingID: "binding-1", IdempotencyKey: "idem-1",
 	})
 	if err != nil {
-		t.Fatalf("DispatchTriggerRoute: %v", err)
+		t.Fatalf("create connector run fixture: %v", err)
 	}
 	claimed, err := st.DriverRuns().Claim(ctx, "WS", run.RunID, "node-1", "lease-1")
 	if err != nil {
@@ -135,11 +136,12 @@ func newConnectorHarness(t *testing.T) *connectorHarness {
 	}
 	runTokenKey := bytes.Repeat([]byte{0x42}, 32)
 	module := NewModule(Config{
-		Store:                st,
 		RunTokenKey:          runTokenKey,
 		Execution:            testDriverRunExecution{store: st},
 		ExecutionAuthorities: testDriverRunAuthorityResolver{},
 		Dispatcher:           dispatcher,
+		AutomationBindings:   testAutomationQueries{store: st},
+		AutomationDeliveries: testAutomationQueries{store: st},
 	})
 	mux := http.NewServeMux()
 	module.Register(mux)

@@ -15,11 +15,11 @@ import (
 	"time"
 
 	appserve "github.com/tysonthomas9/loomcli/internal/app/serve"
-	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	artifactsmodule "github.com/tysonthomas9/loomcli/internal/modules/artifacts"
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/testutil"
 )
@@ -90,6 +90,7 @@ func executionDependenciesForTaskRunAPITest(
 	designPorts ...execution.TaskRunWorkItemDesignPort,
 ) appserve.ExecutionDependencies {
 	t.Helper()
+	mutations := testutil.TaskRunMutationAdapter{TaskRuns: st.TaskRuns()}
 	var designs execution.TaskRunWorkItemDesignPort = executionClaimPortStub{}
 	if len(designPorts) > 0 && designPorts[0] != nil {
 		designs = designPorts[0]
@@ -106,28 +107,27 @@ func executionDependenciesForTaskRunAPITest(
 		AtomicTaskRunRequests: executionClaimPortStub{}, AtomicTaskRunClaims: executionClaimPortStub{},
 		AtomicTaskRunWorkItemDesign: designs,
 		AtomicTaskRunRequeues:       executionClaimPortStub{}, AtomicTaskRunRetryExhaustion: executionClaimPortStub{},
-		AllowLegacyStoreAdapters: true,
+		StaleChildTaskRunRecovery: testutil.StaticTaskRunRecoveryPort{},
+		TaskRunHeartbeats:         mutations, TaskRunLogs: mutations, TaskRunFinalizer: mutations,
 	}
 }
 
-// fakeIssueBackend embeds the interface so only the exact-task read needs a
-// real implementation; any mutation attempt panics loudly.
-type fakeIssueBackend struct {
-	backend.IssueBackend
-	task  *backend.IssueDetailData
-	actor string
+type fakeWorkItemQueries struct {
+	task    *workitems.IssueDetail
+	issueID string
 }
 
-func (f *fakeIssueBackend) Get(_ context.Context, _ string) (*backend.IssueDetailData, error) {
+func (f *fakeWorkItemQueries) Get(_ context.Context, query workitems.GetQuery) (*workitems.IssueDetail, error) {
+	f.issueID = query.IssueID
 	return f.task, nil
 }
 
 type testHarness struct {
-	server  *httptest.Server
-	store   *memstore.Store
-	backend *fakeIssueBackend
-	designs *taskRunWorkItemDesignPortStub
-	module  *Module
+	server    *httptest.Server
+	store     *memstore.Store
+	workItems *fakeWorkItemQueries
+	designs   *taskRunWorkItemDesignPortStub
+	module    *Module
 
 	taskRunID string
 	nodeID    string
@@ -145,7 +145,7 @@ func newHarnessWithRunner(t *testing.T, runner string) *testHarness {
 	st := memstore.New()
 	h := &testHarness{
 		store:     st,
-		backend:   &fakeIssueBackend{task: &backend.IssueDetailData{IssueData: backend.IssueData{ID: "TASK-1", Title: "Do the work"}}},
+		workItems: &fakeWorkItemQueries{task: &workitems.IssueDetail{ID: "TASK-1", Title: "Do the work"}},
 		taskRunID: "task-run-1",
 		nodeID:    "node-1",
 		leaseID:   "lease-1",
@@ -178,15 +178,12 @@ func newHarnessWithRunner(t *testing.T, runner string) *testHarness {
 		t.Fatalf("compose Execution capability: %v", err)
 	}
 	module := NewModule(Config{
-		Store:       st,
+		TaskRuns:    executionCapability.TaskRunQueries(),
 		Execution:   executionCapability.TaskRunAPI(),
 		Authorities: executionCapability.TaskRunAuthorityResolver(),
-		IssueBackends: func(_, actor string) (backend.IssueBackend, error) {
-			h.backend.actor = actor
-			return h.backend, nil
-		},
+		WorkItems:   h.workItems,
 	})
-	module.artifacts = newTaskRunArtifactAPIForTest(module)
+	module.artifacts = newTaskRunArtifactAPIForTest(module, st)
 	h.module = module
 	mux := http.NewServeMux()
 	module.Register(mux)
@@ -331,8 +328,8 @@ func TestTaskRunGetAndTaskGet(t *testing.T) {
 	if taskRun, ok := out["taskRun"].(map[string]any); !ok || taskRun["taskRunId"] != "task-run-1" {
 		t.Fatalf("task-get taskRun = %v", out["taskRun"])
 	}
-	if h.backend.actor != "task-run:task-run-1" {
-		t.Fatalf("issue backend actor = %q, want task-run scoped actor", h.backend.actor)
+	if h.workItems.issueID != "TASK-1" {
+		t.Fatalf("Work Items query = %q, want TASK-1", h.workItems.issueID)
 	}
 
 	resp, out = h.postOp(t, "task-get", map[string]any{"taskId": "TASK-2"}, identity{})

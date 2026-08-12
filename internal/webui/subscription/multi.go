@@ -5,11 +5,10 @@ import (
 	"fmt"
 	"log/slog"
 	"sort"
-	"strconv"
 	"sync"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/backend"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 )
 
@@ -24,15 +23,13 @@ type ActivationReason string
 const (
 	ActivationReasonHTTP     ActivationReason = "http"
 	ActivationReasonRegistry ActivationReason = "registry"
-	ActivationReasonLegacy   ActivationReason = "legacy"
-	ActivationReasonSSE      ActivationReason = "sse"
 )
 
-// workspaceSubscriber abstracts a per-workspace backend mutation source.
+// workspaceSubscriber abstracts a per-workspace Work Items mutation source.
 type workspaceSubscriber interface {
 	Start()
 	Stop()
-	GetMutationDataSince(since string) []backend.MutationData
+	GetMutationsAfter(cursor string) []workitems.Mutation
 }
 
 // subscriberEntry tracks a subscriber and when it last had SSE clients.
@@ -81,23 +78,22 @@ func NewMultiWorkspaceSubscriber(hub *realtime.Hub, logger *slog.Logger) *MultiW
 	}
 }
 
-// AddWorkspaceWithBackend creates and starts a BackendMutationSubscriber
-// for the given workspace, sourcing mutations from the supplied
-// IssueBackend (typically a *fleet.FleetBackend in fleet mode). Mirrors
+// AddWorkspaceWithStream creates and starts a WorkItemMutationSubscriber for
+// the given workspace, sourcing mutations from the supplied Work Items stream. Mirrors
 // AddWorkspace's contract: idempotent under wsID, takes the same write
 // lock to close the TOCTOU window between HasSubscriber and insertion.
 // Returns an error if b is nil.
-func (m *MultiWorkspaceSubscriber) AddWorkspaceWithBackend(wsID string, b backend.IssueBackend) error {
-	return m.EnsureActive(context.Background(), wsID, b, ActivationReasonLegacy)
+func (m *MultiWorkspaceSubscriber) AddWorkspaceWithStream(wsID string, stream workitems.MutationStream) error {
+	return m.EnsureActive(context.Background(), wsID, stream, ActivationReasonRegistry)
 }
 
 // EnsureActive creates and starts the per-workspace backend subscriber if one
 // is not already active. SSE token/stream traffic activates subscribers;
 // connected SSE clients retain them, and the manager idle loop removes
 // subscribers with no SSE clients after the idle grace period.
-func (m *MultiWorkspaceSubscriber) EnsureActive(ctx context.Context, wsID string, b backend.IssueBackend, reason ActivationReason) error {
-	if b == nil {
-		return fmt.Errorf("EnsureActive: backend must not be nil for workspace %q", wsID)
+func (m *MultiWorkspaceSubscriber) EnsureActive(ctx context.Context, wsID string, stream workitems.MutationStream, reason ActivationReason) error {
+	if stream == nil {
+		return fmt.Errorf("EnsureActive: mutation stream must not be nil for workspace %q", wsID)
 	}
 	if ctx != nil && ctx.Err() != nil {
 		return ctx.Err()
@@ -113,7 +109,7 @@ func (m *MultiWorkspaceSubscriber) EnsureActive(ctx context.Context, wsID string
 		return nil
 	}
 
-	sub := NewBackendMutationSubscriber(b, m.hub, wsID)
+	sub := NewWorkItemMutationSubscriber(stream, m.hub, wsID)
 	sub.Start()
 	m.subscribers[wsID] = &subscriberEntry{sub: sub}
 
@@ -216,9 +212,9 @@ func (m *MultiWorkspaceSubscriber) GetMutationsSince(since string) []realtime.Mu
 
 	var all []realtime.MutationEvent
 	for _, entry := range entries {
-		muts := entry.sub.GetMutationDataSince(since)
+		muts := entry.sub.GetMutationsAfter(since)
 		for _, m := range muts {
-			all = append(all, realtime.BackendMutationToEvent(m))
+			all = append(all, realtime.WorkItemMutationToEvent(m))
 		}
 	}
 	return all
@@ -280,21 +276,13 @@ func (m *MultiWorkspaceSubscriber) GetMutationsSinceForWorkspace(wsID string, si
 	if !ok {
 		return nil
 	}
-	muts := entry.sub.GetMutationDataSince(since)
+	muts := entry.sub.GetMutationsAfter(since)
 	if len(muts) == 0 {
 		return nil
 	}
 	out := make([]realtime.MutationEvent, len(muts))
 	for i, m := range muts {
-		out[i] = realtime.BackendMutationToEvent(m)
+		out[i] = realtime.WorkItemMutationToEvent(m)
 	}
 	return out
-}
-
-func parseCursorMillis(cursor string) int64 {
-	if cursor == "" {
-		return 0
-	}
-	n, _ := strconv.ParseInt(cursor, 10, 64)
-	return n
 }

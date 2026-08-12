@@ -10,10 +10,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	driverpkg "github.com/tysonthomas9/loomcli/internal/driver"
-	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 )
 
@@ -107,34 +106,34 @@ func (m *Module) prepareWatch(w http.ResponseWriter, r *http.Request) (watchSess
 		writeDomainOpError(w, err)
 		return watchSession{}, nil, false
 	}
-	issueBackend, err := m.executionIssueBackend(ws, driverpkg.DriverRunActor(parent.RunID))
+	items, err := m.requireWorkItems()
 	if err != nil {
 		writeDomainOpError(w, err)
 		return watchSession{}, nil, false
 	}
-	snapshot, err := m.loadWatchSnapshot(ctx, issueBackend, ws, parent.RunID, epicID)
+	snapshot, err := m.loadWatchSnapshot(ctx, items, ws, parent.RunID, epicID)
 	if err != nil {
 		writeDomainOpError(w, err)
 		return watchSession{}, nil, false
 	}
 	return watchSession{
-		ws:           ws,
-		epicID:       epicID,
-		id:           id,
-		driverRunID:  parent.RunID,
-		issueBackend: issueBackend,
-		cursor:       cursor,
+		ws:          ws,
+		epicID:      epicID,
+		id:          id,
+		driverRunID: parent.RunID,
+		workItems:   items,
+		cursor:      cursor,
 	}, snapshot, true
 }
 
 // watchSession carries the resolved per-stream state into the watch loop.
 type watchSession struct {
-	ws           string
-	epicID       string
-	id           driverIdentity
-	driverRunID  string
-	issueBackend backend.IssueBackend
-	cursor       int64
+	ws          string
+	epicID      string
+	id          driverIdentity
+	driverRunID string
+	workItems   WorkItemOperations
+	cursor      int64
 }
 
 // runWatchLoop drives an established watch stream until the client
@@ -169,7 +168,7 @@ func (m *Module) runWatchLoop(ctx context.Context, sw *realtime.Writer, session 
 				return
 			}
 			// Reconciliation snapshot guards against any dropped append.
-			snapshot, err := m.loadWatchSnapshot(ctx, session.issueBackend, session.ws, session.driverRunID, session.epicID)
+			snapshot, err := m.loadWatchSnapshot(ctx, session.workItems, session.ws, session.driverRunID, session.epicID)
 			if err != nil {
 				return
 			}
@@ -199,17 +198,12 @@ func watchCursor(r *http.Request) (int64, error) {
 }
 
 // loadWatchSnapshot assembles the snapshot frame payload.
-func (m *Module) loadWatchSnapshot(ctx context.Context, issueBackend backend.IssueBackend, ws, driverRunID, epicID string) (*watchSnapshotData, error) {
-	epic, err := driverpkg.LoadEpicSnapshot(ctx, issueBackend, driverpkg.EpicSnapshotOptions{EpicID: epicID})
+func (m *Module) loadWatchSnapshot(ctx context.Context, items WorkItemOperations, ws, driverRunID, epicID string) (*watchSnapshotData, error) {
+	epic, err := loadEpicSnapshot(ctx, items, epicID)
 	if err != nil {
 		return nil, fmt.Errorf("snapshot epic: %w", err)
 	}
-	active, err := driverpkg.ListActiveTaskRuns(ctx, m.store, driverpkg.ActiveTaskRunsOptions{
-		WorkspaceKey: ws,
-		DriverRunID:  driverRunID,
-		EpicID:       epicID,
-		Limit:        watchActiveTaskRunsLimit,
-	})
+	active, err := m.loadActiveTaskRuns(ctx, ws, driverRunID, epicID, watchActiveTaskRunsLimit)
 	if err != nil {
 		return nil, fmt.Errorf("list active task runs: %w", err)
 	}
@@ -220,10 +214,11 @@ func (m *Module) loadWatchSnapshot(ctx context.Context, issueBackend backend.Iss
 // an "event: taskRun" frame whose id is the event Seq. Returns the advanced
 // cursor; a non-nil error means the stream should end.
 func (m *Module) streamWatchEvents(ctx context.Context, sw *realtime.Writer, ws, epicID string, afterSeq int64) (int64, error) {
-	events, err := m.store.TaskRunEvents().ListSince(ctx, ws, store.TaskRunEventFilter{
-		EpicID:   epicID,
-		AfterSeq: afterSeq,
-		Limit:    watchEventBatchLimit,
+	if m.taskRunQueries == nil {
+		return afterSeq, execution.ErrUnavailable
+	}
+	events, err := m.taskRunQueries.ListTaskRunEvents(ctx, execution.TaskRunEventQuery{
+		WorkspaceKey: ws, EpicID: epicID, AfterSeq: afterSeq, Limit: watchEventBatchLimit,
 	})
 	if err != nil {
 		return afterSeq, err

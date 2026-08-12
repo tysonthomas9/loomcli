@@ -4,7 +4,6 @@ import (
 	"net/http"
 	"strings"
 
-	trigger "github.com/tysonthomas9/loomcli/internal/infra/automationruntime"
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 )
@@ -73,7 +72,7 @@ func buildSchedulePatch(
 	patch := automation.BindingPatch{}
 	if req.Schedule != nil {
 		schedule := strings.TrimSpace(*req.Schedule)
-		if err := trigger.ValidateSchedule(schedule); err != nil {
+		if err := automation.ValidateSchedule(schedule); err != nil {
 			handler.RespondError(w, http.StatusBadRequest, err.Error())
 			return patch, false
 		}
@@ -81,7 +80,7 @@ func buildSchedulePatch(
 	}
 	if req.ScheduleTimezone != nil {
 		timezone := strings.TrimSpace(*req.ScheduleTimezone)
-		if err := trigger.ValidateScheduleTimezone(timezone); err != nil {
+		if err := automation.ValidateScheduleTimezone(timezone); err != nil {
 			handler.RespondError(w, http.StatusBadRequest, err.Error())
 			return patch, false
 		}

@@ -27,7 +27,7 @@ type ReadyResponse struct {
 
 // readyFilter is the HTTP adapter's validated query contract. Keeping this
 // transport-owned prevents the retired daemon RPC protocol from leaking into
-// the direct IssueBackend port.
+// the Work Items query port.
 type readyFilter struct {
 	Assignee    string
 	Unassigned  bool
@@ -46,7 +46,7 @@ type readyFilter struct {
 func HandleReadyWorkItems(queries workitems.ReadyQueries) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if queries == nil {
-			handler.WriteJSON(w, http.StatusServiceUnavailable, ReadyResponse{Success: false, Error: "issue backend not configured"})
+			handler.WriteJSON(w, http.StatusServiceUnavailable, ReadyResponse{Success: false, Error: "Work Items service not configured"})
 			return
 		}
 		args, err := parseReadyParams(r)

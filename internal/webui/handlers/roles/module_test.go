@@ -18,6 +18,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
+	"github.com/tysonthomas9/loomcli/internal/webui/storeadapter"
 )
 
 type testRoleAPI struct {
@@ -125,8 +126,14 @@ func (resolver *capturingRoleAuthorityResolver) ResolveOperatorAuthority(
 
 func newTestRoleModule(st store.Store) *Module {
 	return NewModule(Config{
-		Store: st, Roles: &testRoleAPI{store: st}, Authority: testRoleAuthorityResolver{},
+		WorkspacePath: testRoleWorkspacePath(st), Roles: &testRoleAPI{store: st}, Authority: testRoleAuthorityResolver{},
 	})
+}
+
+func testRoleWorkspacePath(st store.Store) WorkspacePathResolver {
+	return func(ctx context.Context, workspace string) string {
+		return storeadapter.ResolveOrHealWorkspacePath(ctx, st, workspace)
+	}
 }
 
 func ensureRoleForTest(
@@ -135,7 +142,7 @@ func ensureRoleForTest(
 	ws string,
 	req EnsureRoleRequest,
 ) (*domain.Role, bool, error) {
-	return EnsureRole(ctx, st, &testRoleAPI{store: st}, authority.OperatorAuthority{}, ws, req)
+	return EnsureRole(ctx, testRoleWorkspacePath(st), &testRoleAPI{store: st}, authority.OperatorAuthority{}, ws, req)
 }
 
 func ensureRoleWithReceiptForTest(
@@ -144,7 +151,7 @@ func ensureRoleWithReceiptForTest(
 	ws string,
 	req EnsureRoleRequest,
 ) (*EnsureRoleResult, error) {
-	return EnsureRoleWithReceipt(ctx, st, &testRoleAPI{store: st}, authority.OperatorAuthority{}, ws, req)
+	return EnsureRoleWithReceipt(ctx, testRoleWorkspacePath(st), &testRoleAPI{store: st}, authority.OperatorAuthority{}, ws, req)
 }
 
 func agentsRoleFromDomain(role *domain.Role) *agents.Role {
@@ -210,7 +217,7 @@ func TestRoleRoutesUseCanonicalWorkspaceAndFailClosedWithoutResolution(t *testin
 		resolver := &capturingRoleAuthorityResolver{}
 		mux := http.NewServeMux()
 		NewModule(Config{
-			Store: st, Roles: &testRoleAPI{store: st}, Authority: resolver,
+			WorkspacePath: testRoleWorkspacePath(st), Roles: &testRoleAPI{store: st}, Authority: resolver,
 		}).Register(mux)
 		req := httptest.NewRequest(
 			http.MethodPost,
@@ -241,7 +248,7 @@ func TestRoleRoutesUseCanonicalWorkspaceAndFailClosedWithoutResolution(t *testin
 		resolver := &capturingRoleAuthorityResolver{}
 		mux := http.NewServeMux()
 		NewModule(Config{
-			Store: st, Roles: &testRoleAPI{store: st}, Authority: resolver,
+			WorkspacePath: testRoleWorkspacePath(st), Roles: &testRoleAPI{store: st}, Authority: resolver,
 		}).Register(mux)
 		req := httptest.NewRequest(
 			http.MethodPost,
@@ -388,7 +395,7 @@ func TestEnsureRoleCompensationRetainsRetryableRoleAndPrompt(t *testing.T) {
 		t.Fatalf("EnsureRoleWithReceipt = %+v err=%v, want created receipt", created, err)
 	}
 	promptPath := created.Role.PromptFile
-	if err := created.Compensate(ctx, st, "WS"); err != nil {
+	if err := created.Compensate(ctx, testRoleWorkspacePath(st), "WS"); err != nil {
 		t.Fatalf("Compensate created role: %v", err)
 	}
 	if _, err := st.Roles().Get(ctx, "WS", "reviewer"); err != nil {
@@ -426,7 +433,7 @@ func TestEnsureRoleCompensationNeverDeletesEditedGeneration(t *testing.T) {
 	if _, err := st.Roles().Update(ctx, "WS", "reviewer", store.RoleUpdate{Description: &description}); err != nil {
 		t.Fatalf("edit role: %v", err)
 	}
-	if err := receipt.Compensate(ctx, st, "WS"); err != nil {
+	if err := receipt.Compensate(ctx, testRoleWorkspacePath(st), "WS"); err != nil {
 		t.Fatalf("Compensate edited role: %v", err)
 	}
 	if _, err := st.Roles().Get(ctx, "WS", "reviewer"); err != nil {

@@ -59,7 +59,7 @@ goroutine_launches:
   - {file: "internal/driver/stale_task_sweeper.go", function: "Executor.startHeartbeats", site: "go#1", callee: "heartbeatDriverRun", disposition: component, component_ids: [driver-run-heartbeat]}
   - {file: "internal/driver/stale_task_sweeper.go", function: "Executor.startHeartbeats", site: "go#2", callee: "heartbeatExecutorNode", disposition: component, component_ids: [executor-node-heartbeat]}
   - {file: "internal/driver/task_worker.go", function: "TaskWorker.startExecutionTaskRunHeartbeat", site: "go#1", callee: "<anonymous>", disposition: component, component_ids: [execution-task-run-heartbeat]}
-  - {file: "internal/harness/fakeharness/mock/main.go", function: "installSignalCleanup", site: "go#1", callee: "<anonymous>", disposition: helper, reason: "explicitly test-only fake-harness signal helper included by the all-source scan"}
+  - {file: "internal/harness/fakeharness/testdata/mock/main.go", function: "installSignalCleanup", site: "go#1", callee: "<anonymous>", disposition: helper, reason: "explicitly test-only fake-harness signal helper included by the all-source scan"}
   - {file: "internal/infra/interactionlead/codex_runtime.go", function: "RunCodexLeadRuntime", site: "go#1", callee: "discoverCodexLeadThread", disposition: component, component_ids: [codex-lead-thread-discovery]}
   - {file: "internal/infra/interactionlead/codex_runtime.go", function: "RunCodexLeadRuntime", site: "go#2", callee: "drainLeadMessageQueue", disposition: component, component_ids: [lead-message-delivery-drain]}
   - {file: "internal/infra/interactionlead/codex_runtime.go", function: "startCodexAppServer", site: "go#1", callee: "<anonymous>", disposition: component, component_ids: [codex-app-server-process-reaper]}
@@ -74,7 +74,6 @@ goroutine_launches:
   - {file: "internal/webui/editor/launch_linux.go", function: "LaunchEditor", site: "go#1", callee: "cmd.Wait", disposition: component, component_ids: [editor-process-reaper-linux]}
   - {file: "internal/webui/editor/launch_windows.go", function: "LaunchEditor", site: "go#1", callee: "cmd.Wait", disposition: component, component_ids: [editor-process-reaper-windows]}
   - {file: "internal/webui/filecoord/git_status.go", function: "fileServiceImpl.inspectWorkspaceCheckouts", site: "go#1", callee: "<anonymous>", disposition: bounded, reason: "checkout inspection uses a ten-second context and joins its fan-out before return"}
-  - {file: "internal/webui/filecoord/history.go", function: "fileServiceImpl.startLegacyHistoryCleanup", site: "go#1", callee: "<anonymous>", disposition: component, component_ids: [legacy-file-history-boot-cleanup]}
   - {file: "internal/webui/fleet/timeout.go", function: "TimeoutEnforcer.Start", site: "go#1", callee: "t.run", disposition: component, component_ids: [fleet-task-timeout-enforcer]}
   - {file: "internal/webui/handlers/misc/auth_config.go", function: "NewAuthConfigLimiter", site: "go#1", callee: "l.CleanupLoop", disposition: component, component_ids: [auth-config-rate-limit-cleanup]}
   - {file: "internal/webui/handlers/misc/client_errors.go", function: "NewClientErrorLimiter", site: "go#1", callee: "l.CleanupLoop", disposition: component, component_ids: [client-error-rate-limit-cleanup]}
@@ -86,8 +85,8 @@ goroutine_launches:
   - {file: "internal/webui/server/middleware/ratelimit.go", function: "RateLimit", site: "go#1", callee: "rl.cleanupLoop", disposition: component, component_ids: [http-rate-limit-cleanup]}
   - {file: "internal/webui/server/realtime/sse_token.go", function: "NewTokenStore", site: "go#1", callee: "s.cleanupLoop", disposition: component, component_ids: [sse-token-nonce-cleanup]}
   - {file: "internal/webui/server/realtime/terminal_auth.go", function: "NewTerminalAuth", site: "go#1", callee: "ta.cleanupLoop", disposition: component, component_ids: [terminal-token-nonce-cleanup]}
-  - {file: "internal/webui/subscription/backend_subscriber.go", function: "BackendMutationSubscriber.Start", site: "go#1", callee: "s.loop", disposition: component, component_ids: [backend-mutation-long-poll]}
   - {file: "internal/webui/subscription/multi.go", function: "MultiWorkspaceSubscriber.Start", site: "go#1", callee: "<anonymous>", disposition: component, component_ids: [workspace-subscriber-idle-deactivation]}
+  - {file: "internal/webui/subscription/workitem_mutation_subscriber.go", function: "WorkItemMutationSubscriber.Start", site: "go#1", callee: "s.loop", disposition: component, component_ids: [workitem-mutation-long-poll]}
   - {file: "internal/webui/terminal/agent_tmux.go", function: "AgentTmuxManager.KillWorkspaceSessions", site: "go#1", callee: "<anonymous>", disposition: bounded, reason: "tmux cleanup fan-out is WaitGroup-joined before return"}
   - {file: "internal/webui/terminal/agent_tmux.go", function: "AgentTmuxManager.KillWorkspaceSessions", site: "go#2", callee: "<anonymous>", disposition: bounded, reason: "tmux cleanup fan-out is WaitGroup-joined before return"}
   - {file: "internal/webui/terminal/pty_manager.go", function: "NewPTYManager", site: "go#1", callee: "m.reapLoop", disposition: component, component_ids: [terminal-idle-reaper]}
@@ -98,11 +97,11 @@ components:
   # Bounded command and startup polling.
   - id: fleet-dependency-state-wait
     kind: ticker
-    file: internal/backend/fleet/fleet_dependencies.go
-    function: FleetBackend.waitForDependencyState
+    file: internal/modules/workitems/fleetdb/fleet_dependencies.go
+    function: Adapter.waitForDependencyState
     site: "time.NewTicker#1"
     capability: work-items
-    owner: fleet backend compatibility
+    owner: Work Items FleetDB adapter
     cadence: "25ms, bounded by a 2s timer"
     cancellation: "caller context or the 2s operation timer"
     readiness_health: "success requires the requested dependency state to become observable"
@@ -111,11 +110,11 @@ components:
 
   - id: fleet-label-state-wait
     kind: ticker
-    file: internal/backend/fleet/fleet_labels.go
-    function: FleetBackend.waitForLabelState
+    file: internal/modules/workitems/fleetdb/fleet_labels.go
+    function: Adapter.waitForLabelState
     site: "time.NewTicker#1"
     capability: work-items
-    owner: fleet backend compatibility
+    owner: Work Items FleetDB adapter
     cadence: "25ms, bounded by a 2s timer"
     cancellation: "caller context or the 2s operation timer"
     readiness_health: "success requires the requested label state to become observable"
@@ -893,17 +892,17 @@ components:
     retry_backoff: "no in-process listener restart"
     classification: managed
 
-  - id: backend-mutation-long-poll
+  - id: workitem-mutation-long-poll
     kind: component
-    file: internal/webui/subscription/backend_subscriber.go
-    function: BackendMutationSubscriber.loop
+    file: internal/webui/subscription/workitem_mutation_subscriber.go
+    function: WorkItemMutationSubscriber.loop
     site: component:mutation-long-poll
-    capability: workspace
+    capability: workitems
     owner: web subscription runtime
-    cadence: "backend long-poll, normally bounded by backendWaitTimeout"
+    cadence: "Work Items stream long-poll, normally bounded by mutationWaitTimeout"
     cancellation: "subscriber context cancellation with WaitGroup join"
     readiness_health: "durable cursor advances before broadcast; errors are workspace-scoped in logs"
-    retry_backoff: "backendRetryDelay after errors and backendEmptyPollDelay after early empty responses"
+    retry_backoff: "mutationRetryDelay after errors and mutationEmptyPollDelay after early empty responses"
     classification: managed
 
   - id: logrouter-lock-watcher
@@ -944,19 +943,6 @@ components:
     readiness_health: "relay construction must bind before the sandbox starts; accept errors terminate the loop"
     retry_backoff: "no accept-loop restart; per-connection forwarding failures remain isolated"
     classification: request-scoped
-
-  - id: legacy-file-history-boot-cleanup
-    kind: component
-    file: internal/webui/filecoord/history.go
-    function: fileServiceImpl.startLegacyHistoryCleanup
-    site: component:boot-cleanup
-    capability: artifacts
-    owner: file service adapter
-    cadence: "once asynchronously when the file service is constructed"
-    cancellation: "not cancellable after launch; historyCleanupDone closes on completion"
-    readiness_health: "does not gate readiness; records and warning-logs the cleanup result"
-    retry_backoff: "none in-process; a later file-service construction retries the idempotent cleanup"
-    classification: managed
 
   - id: editor-process-reaper-darwin
     kind: component

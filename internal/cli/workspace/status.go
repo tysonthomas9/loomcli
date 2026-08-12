@@ -49,14 +49,14 @@ func init() {
 
 // StatusData is the top-level JSON output for loom status.
 type StatusData struct {
-	Runtime      RuntimeInfo      `json:"runtime"`
-	Backend      BackendInfo      `json:"backend"`
-	IssueBackend string           `json:"issue_backend"`
-	Worktrees    WorktreesSummary `json:"worktrees"`
-	Tasks        TaskSummary      `json:"tasks"`
-	Git          GitSummary       `json:"git"`
-	Redis        RedisInfo        `json:"redis"`
-	Issues       []StatusIssue    `json:"issues,omitempty"`
+	Runtime          RuntimeInfo      `json:"runtime"`
+	Backend          BackendInfo      `json:"backend"`
+	WorkItemsAdapter string           `json:"issue_backend"`
+	Worktrees        WorktreesSummary `json:"worktrees"`
+	Tasks            TaskSummary      `json:"tasks"`
+	Git              GitSummary       `json:"git"`
+	Redis            RedisInfo        `json:"redis"`
+	Issues           []StatusIssue    `json:"issues,omitempty"`
 }
 
 // RuntimeInfo reports the local HTTP runtime used by Desktop deployments.
@@ -174,10 +174,10 @@ func collectRuntimeStatus() RuntimeInfo {
 
 func buildStatusData(runtime RuntimeInfo, mon *monitor.MonitorData) StatusData {
 	data := StatusData{
-		Runtime:      runtime,
-		Backend:      collectBackendInfo(),
-		IssueBackend: cli.ResolveIssueBackendType(),
-		Redis:        collectRedisStatus(),
+		Runtime:          runtime,
+		Backend:          collectBackendInfo(),
+		WorkItemsAdapter: cli.ResolveWorkItemsAdapterType(),
+		Redis:            collectRedisStatus(),
 	}
 
 	if mon != nil {
@@ -317,7 +317,7 @@ func isActiveStatus(status string) bool {
 func renderStatusHuman(data StatusData) {
 	renderStatusRuntime(data.Runtime)
 	fmt.Printf("Backend:    %s (via %s)\n", data.Backend.Name, data.Backend.Source)
-	fmt.Printf("Issues:     %s\n", data.IssueBackend)
+	fmt.Printf("Issues:     %s\n", data.WorkItemsAdapter)
 	renderStatusWorktrees(data.Worktrees)
 	fmt.Printf("Tasks:      %d open, %d in-progress, %d review, %d closed\n",
 		data.Tasks.Open, data.Tasks.InProgress, data.Tasks.Review, data.Tasks.Closed)

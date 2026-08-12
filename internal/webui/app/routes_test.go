@@ -356,8 +356,7 @@ func TestSetupRoutes_SSEEndpointRegisteredOnWorkspaceScope(t *testing.T) {
 	go hub.Run()
 	defer hub.Stop()
 
-	wsExistsFn := func(id string) bool { return id == "test-ws" }
-	app := &Server{hub: hub, wsExistsFn: wsExistsFn}
+	app := &Server{hub: hub, wsResolveFn: testWorkspaceResolver("test-ws")}
 	app.sessSvc = sessioncoord.NewSessionService(nil, nil)
 	setupTestRoutes(t, app)
 
@@ -419,9 +418,8 @@ func TestSetupRoutes_SSEEndpointUsesCanonicalWorkspace(t *testing.T) {
 }
 
 func TestSetupRoutes_WorkspaceMonitorStatusInjectsWorkspace(t *testing.T) {
-	wsExistsFn := func(id string) bool { return id == "test-ws" }
 	app := &Server{
-		wsExistsFn: wsExistsFn,
+		wsResolveFn: testWorkspaceResolver("test-ws"),
 		config: webui.ServerConfig{
 			MonitorHandlers: webui.MonitorHandlers{
 				Status: func(w http.ResponseWriter, r *http.Request) {
@@ -499,7 +497,6 @@ func waitForWorkspaceClientCount(t *testing.T, hub *realtime.Hub, wsID string, e
 }
 
 func TestSetupRoutes_WorkspaceBackendGetEndpoint(t *testing.T) {
-	wsExistsFn := func(id string) bool { return id == "test-ws" }
 	wsSvc := &mockWorkspaceService{
 		getWorkspaceBackendFn: func(_ context.Context, wsID string) (*workspacecoord.BackendConfigData, error) {
 			if wsID != "test-ws" {
@@ -512,7 +509,7 @@ func TestSetupRoutes_WorkspaceBackendGetEndpoint(t *testing.T) {
 			}, nil
 		},
 	}
-	app := &Server{config: webui.ServerConfig{}, wsExistsFn: wsExistsFn, workspaceSvc: wsSvc}
+	app := &Server{config: webui.ServerConfig{}, wsResolveFn: testWorkspaceResolver("test-ws"), workspaceSvc: wsSvc}
 	app.sessSvc = sessioncoord.NewSessionService(nil, nil)
 	setupTestRoutes(t, app)
 
@@ -547,13 +544,12 @@ func TestSetupRoutes_WorkspaceBackendGetEndpoint(t *testing.T) {
 // PATCH /api/workspaces/{ws}/config/backend is handled by handleWorkspaceBackendPatch
 // (which returns workspaceResponse shape) rather than handlePatchBackendConfig.
 func TestSetupRoutes_WorkspaceBackendPatchEndpoint(t *testing.T) {
-	wsExistsFn := func(id string) bool { return id == "test-ws" }
 	wsSvc := &mockWorkspaceService{
 		patchWorkspaceBackendFn: func(_ context.Context, _ string, _ string) (*ops.WorkspaceData, error) {
 			return &ops.WorkspaceData{Name: "test-ws", Path: "/tmp/test"}, nil
 		},
 	}
-	app := &Server{config: webui.ServerConfig{}, wsExistsFn: wsExistsFn, workspaceSvc: wsSvc}
+	app := &Server{config: webui.ServerConfig{}, wsResolveFn: testWorkspaceResolver("test-ws"), workspaceSvc: wsSvc}
 	app.sessSvc = sessioncoord.NewSessionService(nil, nil)
 	setupTestRoutes(t, app)
 
@@ -600,7 +596,6 @@ func TestSetupRoutes_WorkspaceBackendPatchEndpoint(t *testing.T) {
 // wildcard subtree pattern. If someone moves these routes back into wsMux,
 // body decoding would break and this test would catch it.
 func TestSetupRoutes_WorkspaceRenamePatchEndpoint(t *testing.T) {
-	wsExistsFn := func(id string) bool { return id == "test-ws" }
 	st := memstore.New()
 	if _, err := st.Workspaces().Create(context.Background(), store.WorkspaceCreate{Key: "test-ws", Name: "test-ws"}); err != nil {
 		t.Fatal(err)
@@ -612,7 +607,7 @@ func TestSetupRoutes_WorkspaceRenamePatchEndpoint(t *testing.T) {
 	wsSvc := workspacecoord.NewWorkspaceService(workspacecoord.WorkspaceServiceConfig{Topology: st, Workspace: catalog})
 	app := &Server{
 		config:           webui.ServerConfig{Store: st},
-		wsExistsFn:       wsExistsFn,
+		wsResolveFn:      testWorkspaceResolver("test-ws"),
 		workspaceSvc:     wsSvc,
 		workspaceCatalog: catalog,
 		workspaceStore:   st.Workspaces(),
@@ -663,8 +658,6 @@ func TestSetupRoutes_WorkspaceRenamePatchEndpoint(t *testing.T) {
 // receives the request body at the handler. Complements
 // TestSetupRoutes_WorkspaceBackendPatchEndpoint which only asserts the shape.
 func TestSetupRoutes_WorkspaceBackendPatchReadsBody(t *testing.T) {
-	wsExistsFn := func(id string) bool { return id == "test-ws" }
-
 	var capturedBackend string
 	wsSvc := &mockWorkspaceService{
 		patchWorkspaceBackendFn: func(_ context.Context, _ string, backend string) (*ops.WorkspaceData, error) {
@@ -672,7 +665,7 @@ func TestSetupRoutes_WorkspaceBackendPatchReadsBody(t *testing.T) {
 			return &ops.WorkspaceData{Name: "test-ws", Path: "/tmp/test"}, nil
 		},
 	}
-	app := &Server{config: webui.ServerConfig{}, wsExistsFn: wsExistsFn, workspaceSvc: wsSvc}
+	app := &Server{config: webui.ServerConfig{}, wsResolveFn: testWorkspaceResolver("test-ws"), workspaceSvc: wsSvc}
 	app.sessSvc = sessioncoord.NewSessionService(nil, nil)
 	setupTestRoutes(t, app)
 
@@ -945,8 +938,6 @@ func TestSetupRoutes_TabMetadataReturns404WhenStoreNil(t *testing.T) {
 // POST /api/workspaces/{ws}/agents/{name}/git/push) still work.
 func TestFlatAgentRoutesRemoved(t *testing.T) {
 	// Register workspace identity so workspace-scoped routes are functional.
-	wsExistsFn := func(id string) bool { return id == "test-ws" }
-
 	gitOps := &mockGitOps{}
 	worktreeDir := t.TempDir()
 	fileOps := &mockFileOps{
@@ -971,7 +962,7 @@ func TestFlatAgentRoutesRemoved(t *testing.T) {
 		},
 	}
 
-	app := &Server{config: webui.ServerConfig{GitOps: gitOps, FileOps: fileOps}, wsExistsFn: wsExistsFn, agentSvc: agentcoord.NewAgentService(gitOps, nil, nil)}
+	app := &Server{config: webui.ServerConfig{GitOps: gitOps, FileOps: fileOps}, wsResolveFn: testWorkspaceResolver("test-ws"), agentSvc: agentcoord.NewAgentService(gitOps, nil, nil)}
 	app.diffSvc = sourcecontrolcoord.NewDiffService(gitOps, nil, middleware.WithWorkspace)
 	app.fileSvc = filecoord.NewFileService(fileOps)
 	app.sessSvc = sessioncoord.NewSessionService(nil, nil)

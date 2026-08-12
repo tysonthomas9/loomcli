@@ -15,6 +15,87 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 )
 
+func (service *Service) GetTaskRun(ctx context.Context, workspace, taskRunID string) (*TaskRun, error) {
+	if strings.TrimSpace(workspace) == "" || strings.TrimSpace(taskRunID) == "" {
+		return nil, ErrInvalid
+	}
+	if service.dependencies.TaskRuns.Queries == nil {
+		return nil, ErrUnavailable
+	}
+	run, err := service.dependencies.TaskRuns.Queries.GetTaskRun(ctx, workspace, taskRunID)
+	if err != nil {
+		return nil, err
+	}
+	if run == nil || run.WorkspaceKey != workspace || run.TaskRunID != taskRunID {
+		return nil, ErrConflict
+	}
+	return cloneTaskRun(run), nil
+}
+
+func (service *Service) ListActiveTaskRuns(ctx context.Context, query ActiveTaskRunQuery) ([]*TaskRun, error) {
+	query.WorkspaceKey = strings.TrimSpace(query.WorkspaceKey)
+	query.DriverRunID = strings.TrimSpace(query.DriverRunID)
+	if query.WorkspaceKey == "" || query.DriverRunID == "" || query.Limit < 0 {
+		return nil, ErrInvalid
+	}
+	port := service.dependencies.TaskRuns.Queries
+	if port == nil {
+		return nil, ErrUnavailable
+	}
+	values, err := port.ListActiveTaskRuns(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]*TaskRun, 0, len(values))
+	for _, run := range values {
+		if run == nil || run.WorkspaceKey != query.WorkspaceKey || run.DriverRunID != query.DriverRunID ||
+			(run.Status != StatusQueued && run.Status != StatusRunning) {
+			return nil, ErrConflict
+		}
+		out = append(out, cloneTaskRun(run))
+	}
+	if query.Limit > 0 && len(out) > query.Limit {
+		return nil, ErrConflict
+	}
+	return out, nil
+}
+
+func (service *Service) ListTaskRunEvents(ctx context.Context, query TaskRunEventQuery) ([]*TaskRunEvent, error) {
+	query.WorkspaceKey = strings.TrimSpace(query.WorkspaceKey)
+	query.EpicID = strings.TrimSpace(query.EpicID)
+	query.DriverRunID = strings.TrimSpace(query.DriverRunID)
+	if query.WorkspaceKey == "" || query.AfterSeq < 0 || query.Limit < 0 {
+		return nil, ErrInvalid
+	}
+	port := service.dependencies.TaskRuns.Queries
+	if port == nil {
+		return nil, ErrUnavailable
+	}
+	values, err := port.ListTaskRunEvents(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]*TaskRunEvent, 0, len(values))
+	previous := query.AfterSeq
+	for _, event := range values {
+		if event == nil || event.WorkspaceKey != query.WorkspaceKey || event.Seq <= previous ||
+			strings.TrimSpace(event.EventID) == "" || strings.TrimSpace(event.TaskRunID) == "" {
+			return nil, ErrConflict
+		}
+		copy := *event
+		if event.NextEligibleAt != nil {
+			value := *event.NextEligibleAt
+			copy.NextEligibleAt = &value
+		}
+		out = append(out, &copy)
+		previous = event.Seq
+	}
+	if query.Limit > 0 && len(out) > query.Limit {
+		return nil, ErrConflict
+	}
+	return out, nil
+}
+
 func (service *Service) RequestTaskRun(ctx context.Context, auth authority.ExecutionAuthority, command RequestTaskRunCommand) (*TaskRun, error) {
 	if err := service.requireOwner(ActionRequestTaskRun, command.WorkspaceKey, command.ParentOwner, auth); err != nil {
 		return nil, err

@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/backend"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 )
 
@@ -21,8 +21,8 @@ func TestGetMutationsSinceForWorkspace_KnownWorkspace(t *testing.T) {
 	defer hub.Stop()
 
 	multi := NewMultiWorkspaceSubscriber(hub, nil)
-	multi.AddWorkspaceWithBackend("ws-1", &fakeBackend{getFn: func(_ context.Context, _ int64) ([]backend.MutationData, error) {
-		return []backend.MutationData{
+	multi.AddWorkspaceWithStream("ws-1", &fakeMutationStream{getFn: func(_ context.Context, _ string) ([]workitems.Mutation, error) {
+		return []workitems.Mutation{
 			{Type: "create", IssueID: "fleet-ws1-1", Timestamp: ts},
 			{Type: "update", IssueID: "fleet-ws1-2", Timestamp: ts},
 		}, nil
@@ -66,11 +66,11 @@ func TestGetMutationsSinceForWorkspace_OnlyQueriesCorrectSubscriber(t *testing.T
 	defer hub.Stop()
 
 	multi := NewMultiWorkspaceSubscriber(hub, nil)
-	multi.AddWorkspaceWithBackend("ws-1", &fakeBackend{getFn: func(_ context.Context, _ int64) ([]backend.MutationData, error) {
-		return []backend.MutationData{{Type: "create", IssueID: "fleet-from-ws1", Timestamp: ts}}, nil
+	multi.AddWorkspaceWithStream("ws-1", &fakeMutationStream{getFn: func(_ context.Context, _ string) ([]workitems.Mutation, error) {
+		return []workitems.Mutation{{Type: "create", IssueID: "fleet-from-ws1", Timestamp: ts}}, nil
 	}})
-	multi.AddWorkspaceWithBackend("ws-2", &fakeBackend{getFn: func(_ context.Context, _ int64) ([]backend.MutationData, error) {
-		return []backend.MutationData{{Type: "update", IssueID: "fleet-from-ws2", Timestamp: ts}}, nil
+	multi.AddWorkspaceWithStream("ws-2", &fakeMutationStream{getFn: func(_ context.Context, _ string) ([]workitems.Mutation, error) {
+		return []workitems.Mutation{{Type: "update", IssueID: "fleet-from-ws2", Timestamp: ts}}, nil
 	}})
 
 	// Query ws-1 only
@@ -92,10 +92,10 @@ func TestGetMutationsSinceForWorkspace_OnlyQueriesCorrectSubscriber(t *testing.T
 	}
 }
 
-// TestAddWorkspaceWithBackend_Idempotent verifies that calling
-// AddWorkspaceWithBackend twice for the same wsID does not start a second
+// TestAddWorkspaceWithStream_Idempotent verifies that calling
+// AddWorkspaceWithStream twice for the same wsID does not start a second
 // subscriber, mirroring AddWorkspace's idempotent contract.
-func TestAddWorkspaceWithBackend_Idempotent(t *testing.T) {
+func TestAddWorkspaceWithStream_Idempotent(t *testing.T) {
 	hub := realtime.NewHub()
 	go hub.Run()
 	defer hub.Stop()
@@ -103,12 +103,12 @@ func TestAddWorkspaceWithBackend_Idempotent(t *testing.T) {
 	multi := NewMultiWorkspaceSubscriber(hub, nil)
 	defer multi.Stop()
 
-	be := &fakeBackend{}
-	if err := multi.AddWorkspaceWithBackend("ws-fleet-1", be); err != nil {
-		t.Fatalf("first AddWorkspaceWithBackend: %v", err)
+	stream := &fakeMutationStream{}
+	if err := multi.AddWorkspaceWithStream("ws-fleet-1", stream); err != nil {
+		t.Fatalf("first AddWorkspaceWithStream: %v", err)
 	}
-	if err := multi.AddWorkspaceWithBackend("ws-fleet-1", be); err != nil {
-		t.Fatalf("second AddWorkspaceWithBackend: %v", err)
+	if err := multi.AddWorkspaceWithStream("ws-fleet-1", stream); err != nil {
+		t.Fatalf("second AddWorkspaceWithStream: %v", err)
 	}
 
 	if !multi.HasSubscriber("ws-fleet-1") {
@@ -119,10 +119,10 @@ func TestAddWorkspaceWithBackend_Idempotent(t *testing.T) {
 	}
 }
 
-// TestAddWorkspaceWithBackend_NilBackend_Errors verifies the input
-// validation guard (nil backend should not silently start a subscriber
+// TestAddWorkspaceWithStream_NilStream_Errors verifies the input
+// validation guard (nil stream should not silently start a subscriber
 // with a typed-nil reference).
-func TestAddWorkspaceWithBackend_NilBackend_Errors(t *testing.T) {
+func TestAddWorkspaceWithStream_NilStream_Errors(t *testing.T) {
 	hub := realtime.NewHub()
 	go hub.Run()
 	defer hub.Stop()
@@ -130,20 +130,20 @@ func TestAddWorkspaceWithBackend_NilBackend_Errors(t *testing.T) {
 	multi := NewMultiWorkspaceSubscriber(hub, nil)
 	defer multi.Stop()
 
-	if err := multi.AddWorkspaceWithBackend("ws-nil", nil); err == nil {
-		t.Error("expected error when backend is nil")
+	if err := multi.AddWorkspaceWithStream("ws-nil", nil); err == nil {
+		t.Error("expected error when stream is nil")
 	}
 	if multi.HasSubscriber("ws-nil") {
-		t.Error("subscriber should not be registered when backend is nil")
+		t.Error("subscriber should not be registered when stream is nil")
 	}
 }
 
-// TestAddWorkspaceWithBackend_TOCTOUSafe verifies that two concurrent
-// AddWorkspaceWithBackend calls for the same wsID result in exactly one
+// TestAddWorkspaceWithStream_TOCTOUSafe verifies that two concurrent
+// AddWorkspaceWithStream calls for the same wsID result in exactly one
 // subscriber, not two. The mu.Lock() guard in the implementation closes
 // the time-of-check / time-of-use window between the existence check and
 // the insertion.
-func TestAddWorkspaceWithBackend_TOCTOUSafe(t *testing.T) {
+func TestAddWorkspaceWithStream_TOCTOUSafe(t *testing.T) {
 	hub := realtime.NewHub()
 	go hub.Run()
 	defer hub.Stop()
@@ -152,7 +152,7 @@ func TestAddWorkspaceWithBackend_TOCTOUSafe(t *testing.T) {
 	defer multi.Stop()
 
 	const goroutines = 16
-	be := &fakeBackend{}
+	stream := &fakeMutationStream{}
 	var wg sync.WaitGroup
 	wg.Add(goroutines)
 	start := make(chan struct{})
@@ -160,7 +160,7 @@ func TestAddWorkspaceWithBackend_TOCTOUSafe(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			<-start
-			_ = multi.AddWorkspaceWithBackend("ws-race", be)
+			_ = multi.AddWorkspaceWithStream("ws-race", stream)
 		}()
 	}
 	close(start)
@@ -216,7 +216,7 @@ func TestEnsureActive_AfterStopErrors(t *testing.T) {
 	multi := NewStartedMultiWorkspaceSubscriber(context.Background(), hub, nil)
 	multi.Stop()
 
-	err := multi.EnsureActive(context.Background(), "ws-stopped", &fakeBackend{}, ActivationReasonHTTP)
+	err := multi.EnsureActive(context.Background(), "ws-stopped", &fakeMutationStream{}, ActivationReasonHTTP)
 	if err == nil {
 		t.Fatal("expected EnsureActive after Stop to error")
 	}
@@ -234,18 +234,18 @@ func TestGetMutationsSinceForWorkspace_ConcurrentStop(t *testing.T) {
 	getStarted := make(chan struct{})
 	releaseGet := make(chan struct{})
 	var signalStarted sync.Once
-	fb := &fakeBackend{getFn: func(ctx context.Context, _ int64) ([]backend.MutationData, error) {
+	stream := &fakeMutationStream{getFn: func(ctx context.Context, _ string) ([]workitems.Mutation, error) {
 		signalStarted.Do(func() { close(getStarted) })
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		case <-releaseGet:
-			return []backend.MutationData{{Type: "create", IssueID: "fleet-stop-race", Timestamp: ts}}, nil
+			return []workitems.Mutation{{Type: "create", IssueID: "fleet-stop-race", Timestamp: ts}}, nil
 		}
 	}}
 
 	multi := NewStartedMultiWorkspaceSubscriber(context.Background(), hub, nil)
-	if err := multi.EnsureActive(context.Background(), "ws-stop-race", fb, ActivationReasonHTTP); err != nil {
+	if err := multi.EnsureActive(context.Background(), "ws-stop-race", stream, ActivationReasonHTTP); err != nil {
 		t.Fatalf("EnsureActive: %v", err)
 	}
 
@@ -263,7 +263,7 @@ func TestGetMutationsSinceForWorkspace_ConcurrentStop(t *testing.T) {
 	select {
 	case <-stopped:
 	case <-time.After(time.Second):
-		t.Fatal("Stop blocked while catch-up GetMutationDataSince was in flight")
+		t.Fatal("Stop blocked while catch-up GetMutationsAfter was in flight")
 	}
 
 	close(releaseGet)
@@ -291,7 +291,7 @@ func (s *trackingWorkspaceSubscriber) Stop() {
 	s.stopCalls.Add(1)
 }
 
-func (s *trackingWorkspaceSubscriber) GetMutationDataSince(string) []backend.MutationData {
+func (s *trackingWorkspaceSubscriber) GetMutationsAfter(string) []workitems.Mutation {
 	s.getCalls.Add(1)
 	return nil
 }

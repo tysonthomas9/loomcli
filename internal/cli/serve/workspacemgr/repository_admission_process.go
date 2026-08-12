@@ -99,7 +99,7 @@ func (process *repositoryAdmissionProcess) prepareCreate(
 	if err != nil {
 		return nil, err
 	}
-	local, err := process.journal.Prepare(ctx, localRepositoryAdmissionIntent{
+	local, err := process.journal.prepare(ctx, localRepositoryAdmissionIntent{
 		OperationID: operationID, WorkspaceKey: workspace.Key,
 		WorkspaceName: workspace.Name, WorkspacePath: workspacePath,
 		Kind:   localRepositoryAdmissionCreateWorkspace,
@@ -157,7 +157,7 @@ func (process *repositoryAdmissionProcess) prepareExisting(
 	if err != nil {
 		return nil, err
 	}
-	local, err := process.journal.Prepare(ctx, localRepositoryAdmissionIntent{
+	local, err := process.journal.prepare(ctx, localRepositoryAdmissionIntent{
 		OperationID: operationID, WorkspaceKey: workspaceKey,
 		WorkspacePath: workspacePath,
 		Kind:          localRepositoryAdmissionAddRepositories,
@@ -221,7 +221,7 @@ func (process *repositoryAdmissionProcess) prepare(
 					// machine's intent never acquired durable coordinates. Keeping
 					// the unbound receipt would make recovery repeatedly replay a
 					// conflict that it can never own.
-					if removeErr := process.journal.Remove(
+					if removeErr := process.journal.remove(
 						ctx,
 						local.Intent.OperationID,
 					); removeErr != nil {
@@ -232,7 +232,7 @@ func (process *repositoryAdmissionProcess) prepare(
 			}
 		}
 		if err == nil && record != nil {
-			local, err = process.journal.Bind(
+			local, err = process.journal.bind(
 				ctx,
 				local.Intent.OperationID,
 				record.AdmissionID,
@@ -784,7 +784,7 @@ func (process *repositoryAdmissionProcess) resolveCreateWorkspacePath(
 	if err != nil {
 		return workspaceDirPlan{}, err
 	}
-	local, err := process.journal.GetByOperation(ctx, operationID)
+	local, err := process.journal.getByOperation(ctx, operationID)
 	if err == nil {
 		if local.Intent.WorkspaceKey != workspaceKey ||
 			local.Intent.WorkspaceName != strings.TrimSpace(workspaceName) ||

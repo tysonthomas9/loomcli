@@ -7,7 +7,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/app/webhookingestion"
 	"github.com/tysonthomas9/loomcli/internal/app/workflowbinding"
 	"github.com/tysonthomas9/loomcli/internal/app/workfloweventing"
-	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/modules/agents"
 	"github.com/tysonthomas9/loomcli/internal/modules/artifacts"
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
@@ -18,6 +17,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 	workflowcataloghttp "github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog/httpapi"
 	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
+	"github.com/tysonthomas9/loomcli/internal/modules/workspace"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/agentcoord"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/workflows"
@@ -54,13 +54,15 @@ type Deps struct {
 	InteractiveAgentRuntime        agentcoord.InteractiveAgentRuntime
 	AgentSessionTranscripts        sessioncoord.AgentSessionTranscriptService
 	WorkItems                      workitems.API
+	Workspace                      workspace.API
 	Hub                            *realtime.Hub
 	FleetBaseURL                   string
-	ExecutionIssueBackends         func(workspace, actor string) (backend.IssueBackend, error)
 	DriverAPIBaseURL               string
 	DriverRunTokenKey              []byte
 	LocalSettingsDir               string
 	SourceControl                  sourcecontrol.Materializer
+	TaskStackBindings              sourcecontrol.StackBindingResolver
+	TaskOutcomes                   sourcecontrol.TaskOutcomeRecorder
 	Dispatcher                     connectorsmodule.Dispatcher
 	ConnectorBindingGrantLifecycle connectorsmodule.BindingGrantLifecycle
 	AutomationBindings             automation.BindingOperations
@@ -86,6 +88,7 @@ type Deps struct {
 	WorkflowBackendHealth          workflows.BackendHealthQuery
 	Artifacts                      artifacts.API
 	ExecutionTaskRuns              execution.TaskRunAPI
+	ExecutionTaskRunQueries        execution.TaskRunQueries
 	DaytonaProvider                execution.DaytonaProviderBroker
 	ExecutionTaskRunRequests       execution.TaskRunRequestAPI
 	ExecutionTaskRunRecovery       execution.TaskRunRecoveryAPI

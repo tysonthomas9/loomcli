@@ -17,7 +17,7 @@ const moveTimeout = 30 * time.Second
 
 type WorkItems interface {
 	Get(context.Context, workitems.GetQuery) (*workitems.IssueDetail, error)
-	Create(context.Context, workitems.CreateCommand) (*workitems.CreatedIssue, error)
+	Create(context.Context, workitems.CreateCommand) (*workitems.IssueSummary, error)
 	AddComment(context.Context, workitems.AddCommentCommand) (*workitems.Comment, error)
 	Close(context.Context, workitems.CloseCommand) (*workitems.CloseResult, error)
 }
@@ -97,7 +97,7 @@ func (c *Coordinator) Move(ctx context.Context, command Command) (*Result, error
 	if err != nil {
 		return nil, err
 	}
-	targetID := createdIssueID(created)
+	targetID := created.ID
 	if targetID == "" {
 		return nil, fmt.Errorf("move created an issue without an id: %w", workitems.ErrInvalidPersistedState)
 	}
@@ -147,19 +147,6 @@ func moveCreateCommand(source *workitems.IssueDetail) workitems.CreateCommand {
 		Labels: append([]string(nil), source.Labels...),
 		DueAt:  formatTime(source.DueAt), DeferUntil: formatTime(source.DeferUntil),
 	}
-}
-
-func createdIssueID(value *workitems.CreatedIssue) string {
-	if value == nil {
-		return ""
-	}
-	if value.Detail != nil {
-		return value.Detail.ID
-	}
-	if value.Summary != nil {
-		return value.Summary.ID
-	}
-	return ""
 }
 
 func formatTime(value *time.Time) string {

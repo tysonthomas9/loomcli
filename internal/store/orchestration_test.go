@@ -24,20 +24,17 @@ func TestOrchestrationSessionFor_NoSession(t *testing.T) {
 	}
 }
 
-func TestOrchestrationSessionFor_FallsBackToLegacyOrchestrationKind(t *testing.T) {
+func TestOrchestrationSessionFor_IgnoresNonInteractiveKind(t *testing.T) {
 	st := memstore.New()
 	ctx := context.Background()
 
-	// Phase 4 and older sessions used the orchestration kind. Keep them
-	// readable while Phase 5 writes the canonical interactive kind.
-	want, err := st.AgentSessions().Create(ctx, store.AgentSessionCreate{
+	if _, err := st.AgentSessions().Create(ctx, store.AgentSessionCreate{
 		WorkspaceKey: "WS",
 		SessionID:    "lead-nova-abc",
 		AgentID:      "nova",
-		Kind:         domain.AgentSessionKindOrchestration,
+		Kind:         domain.AgentSessionKindTask,
 		Status:       domain.AgentSessionRunning,
-	})
-	if err != nil {
+	}); err != nil {
 		t.Fatalf("create orch: %v", err)
 	}
 	// Plus an unrelated task session for a different agent — should be ignored
@@ -55,15 +52,12 @@ func TestOrchestrationSessionFor_FallsBackToLegacyOrchestrationKind(t *testing.T
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
-	if got == nil {
-		t.Fatal("expected session, got nil")
-	}
-	if got.SessionID != want.SessionID {
-		t.Fatalf("session id = %q, want %q", got.SessionID, want.SessionID)
+	if got != nil {
+		t.Fatalf("got = %+v, want non-interactive session ignored", got)
 	}
 }
 
-func TestOrchestrationSessionFor_PrefersCanonicalInteractiveKind(t *testing.T) {
+func TestOrchestrationSessionFor_IgnoresNewerNonInteractiveKind(t *testing.T) {
 	st := memstore.New()
 	ctx := context.Background()
 
@@ -80,12 +74,12 @@ func TestOrchestrationSessionFor_PrefersCanonicalInteractiveKind(t *testing.T) {
 	time.Sleep(2 * time.Millisecond)
 	if _, err := st.AgentSessions().Create(ctx, store.AgentSessionCreate{
 		WorkspaceKey: "WS",
-		SessionID:    "lead-nova-legacy-newer",
+		SessionID:    "lead-nova-task-newer",
 		AgentID:      "nova",
-		Kind:         domain.AgentSessionKindOrchestration,
+		Kind:         domain.AgentSessionKindTask,
 		Status:       domain.AgentSessionRunning,
 	}); err != nil {
-		t.Fatalf("create newer legacy orchestration session: %v", err)
+		t.Fatalf("create newer task session: %v", err)
 	}
 
 	got, err := store.OrchestrationSessionFor(ctx, st, "WS", "nova")
@@ -97,7 +91,7 @@ func TestOrchestrationSessionFor_PrefersCanonicalInteractiveKind(t *testing.T) {
 	}
 }
 
-func TestOrchestrationSessionFor_FallsBackWhenCanonicalSessionIsInactive(t *testing.T) {
+func TestOrchestrationSessionFor_ReturnsNilWhenInteractiveSessionIsInactive(t *testing.T) {
 	st := memstore.New()
 	ctx := context.Background()
 
@@ -110,23 +104,22 @@ func TestOrchestrationSessionFor_FallsBackWhenCanonicalSessionIsInactive(t *test
 	}); err != nil {
 		t.Fatalf("create inactive canonical session: %v", err)
 	}
-	legacy, err := st.AgentSessions().Create(ctx, store.AgentSessionCreate{
+	if _, err := st.AgentSessions().Create(ctx, store.AgentSessionCreate{
 		WorkspaceKey: "WS",
-		SessionID:    "lead-nova-legacy-running",
+		SessionID:    "lead-nova-task-running",
 		AgentID:      "nova",
-		Kind:         domain.AgentSessionKindOrchestration,
+		Kind:         domain.AgentSessionKindTask,
 		Status:       domain.AgentSessionRunning,
-	})
-	if err != nil {
-		t.Fatalf("create active legacy session: %v", err)
+	}); err != nil {
+		t.Fatalf("create active task session: %v", err)
 	}
 
 	got, err := store.OrchestrationSessionFor(ctx, st, "WS", "nova")
 	if err != nil {
 		t.Fatalf("OrchestrationSessionFor: %v", err)
 	}
-	if got == nil || got.SessionID != legacy.SessionID {
-		t.Fatalf("got = %+v, want active legacy session %q", got, legacy.SessionID)
+	if got != nil {
+		t.Fatalf("got = %+v, want nil without an active interactive session", got)
 	}
 }
 

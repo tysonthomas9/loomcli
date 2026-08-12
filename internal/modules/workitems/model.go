@@ -1,25 +1,6 @@
 package workitems
 
-import (
-	"encoding/json"
-	"time"
-)
-
-// CreatedIssue preserves create's durable-success behavior: a canonical full
-// projection is preferred, while Summary remains a valid fallback when the
-// post-create read is unavailable. Its JSON representation is the selected
-// issue itself, not a migration wrapper.
-type CreatedIssue struct {
-	Detail  *IssueDetail
-	Summary *IssueSummary
-}
-
-func (r CreatedIssue) MarshalJSON() ([]byte, error) {
-	if r.Detail != nil {
-		return json.Marshal(r.Detail)
-	}
-	return json.Marshal(r.Summary)
-}
+import "time"
 
 // IssueSummary is the Work Items-owned list/search projection. Repo mirrors
 // SourceRepo for the existing Web UI wire contract while callers migrate.
@@ -102,13 +83,13 @@ type CloseResult struct {
 }
 
 type RepositoryAdmissionResult struct {
-	Issue         *IssueSummary
-	Changed       bool
-	Replayed      bool
-	DispatchReady bool
-	Blocked       bool
-	Reopened      bool
-	Outcome       string
+	Issue         *IssueSummary `json:"issue,omitempty"`
+	Changed       bool          `json:"changed"`
+	Replayed      bool          `json:"replayed"`
+	DispatchReady bool          `json:"dispatch_ready"`
+	Blocked       bool          `json:"blocked,omitempty"`
+	Reopened      bool          `json:"reopened,omitempty"`
+	Outcome       string        `json:"outcome,omitempty"`
 }
 
 type ListResult struct {
@@ -156,6 +137,40 @@ type Event struct {
 	Comment   *string   `json:"comment,omitempty"`
 	CreatedAt time.Time `json:"created_at"`
 }
+
+// Mutation is the durable Work Items change-stream projection consumed by
+// realtime delivery. Cursor is opaque and owned by FleetDB; callers must pass
+// it back unchanged rather than deriving a timestamp cursor.
+type Mutation struct {
+	Cursor     string    `json:"cursor,omitempty"`
+	Type       string    `json:"type"`
+	EntityType string    `json:"entity_type,omitempty"`
+	EntityID   string    `json:"entity_id,omitempty"`
+	Action     string    `json:"action,omitempty"`
+	IssueID    string    `json:"issue_id,omitempty"`
+	Title      string    `json:"title,omitempty"`
+	Assignee   string    `json:"assignee,omitempty"`
+	Actor      string    `json:"actor,omitempty"`
+	Timestamp  time.Time `json:"timestamp"`
+	OldStatus  string    `json:"old_status,omitempty"`
+	NewStatus  string    `json:"new_status,omitempty"`
+	ParentID   string    `json:"parent_id,omitempty"`
+	SourceRepo string    `json:"source_repo,omitempty"`
+	StepCount  int       `json:"step_count,omitempty"`
+}
+
+const (
+	MutationCreate        = "create"
+	MutationUpdate        = "update"
+	MutationDelete        = "delete"
+	MutationComment       = "comment"
+	MutationBonded        = "bonded"
+	MutationSquashed      = "squashed"
+	MutationBurned        = "burned"
+	MutationStatus        = "status"
+	MutationRefresh       = "refresh"
+	MutationSessionChange = "session_change"
+)
 
 type EventType string
 

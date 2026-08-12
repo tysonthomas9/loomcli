@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/backend"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 )
 
@@ -26,7 +26,7 @@ type FleetClaimResponse struct {
 }
 
 // WorkHandoffPayload is the adapter-private Fleet compatibility response.
-// Keeping the transport DTO here preserves the legacy JSON contract without
+// Keeping the transport DTO here preserves the stable JSON contract without
 // reintroducing a public horizontal product model.
 type WorkHandoffPayload struct {
 	Issue            *fleetClaimIssue       `json:"issue"`
@@ -76,13 +76,11 @@ type fleetClaimDependency struct {
 	ThreadID    string    `json:"thread_id,omitempty"`
 }
 
-type IssueBackendFn func(context.Context) backend.IssueBackend
-
-func handleFleetClaim(backendFn IssueBackendFn, claimMetrics *ClaimMetrics) http.HandlerFunc {
+func handleFleetClaim(workItemsFn workitems.Provider, claimMetrics *ClaimMetrics) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		be := resolveFleetClaimBackend(r.Context(), backendFn)
-		if be == nil {
-			handler.WriteJSON(w, http.StatusServiceUnavailable, FleetClaimResponse{Error: "issue backend not configured"})
+		items := resolveFleetClaimWorkItems(r.Context(), workItemsFn)
+		if items == nil {
+			handler.WriteJSON(w, http.StatusServiceUnavailable, FleetClaimResponse{Error: "Work Items not configured"})
 			return
 		}
 		var req FleetClaimRequest
@@ -102,17 +100,17 @@ func handleFleetClaim(backendFn IssueBackendFn, claimMetrics *ClaimMetrics) http
 		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 		defer cancel()
 		if req.IssueID != "" {
-			claimIssueWithBackend(w, ctx, be, req.IssueID, claimMetrics, true)
+			claimWorkItem(w, ctx, items, req.IssueID, claimMetrics, true)
 			return
 		}
-		ready, err := be.Ready(ctx, backend.ReadyOpts{Type: req.IssueType, Priority: req.MaxPriority, Limit: 10})
+		ready, err := items.Ready(ctx, workitems.AvailabilityQuery{IssueType: req.IssueType, Priority: req.MaxPriority, Limit: 10})
 		if err != nil {
 			recordClaim(claimMetrics, ClaimResultTimeout)
-			handler.WriteJSON(w, http.StatusServiceUnavailable, FleetClaimResponse{Error: "issue backend unavailable"})
+			handler.WriteJSON(w, http.StatusServiceUnavailable, FleetClaimResponse{Error: "Work Items unavailable"})
 			return
 		}
 		for i := range ready {
-			if claimIssueWithBackend(w, ctx, be, ready[i].ID, claimMetrics, false) {
+			if claimWorkItem(w, ctx, items, ready[i].ID, claimMetrics, false) {
 				return
 			}
 		}
@@ -120,17 +118,17 @@ func handleFleetClaim(backendFn IssueBackendFn, claimMetrics *ClaimMetrics) http
 	}
 }
 
-func resolveFleetClaimBackend(ctx context.Context, backendFn IssueBackendFn) backend.IssueBackend {
-	if backendFn == nil {
+func resolveFleetClaimWorkItems(ctx context.Context, workItemsFn workitems.Provider) workitems.API {
+	if workItemsFn == nil {
 		return nil
 	}
-	return backendFn(ctx)
+	return workItemsFn(ctx)
 }
 
-func claimIssueWithBackend(w http.ResponseWriter, ctx context.Context, be backend.IssueBackend, issueID string, metrics *ClaimMetrics, writeConflict bool) bool {
-	if err := be.ClaimIssue(ctx, issueID, 0); err != nil {
-		var backendErr *backend.BackendError
-		if errors.As(err, &backendErr) && backendErr.Kind == backend.KindConflict {
+func claimWorkItem(w http.ResponseWriter, ctx context.Context, items workitems.API, issueID string, metrics *ClaimMetrics, writeConflict bool) bool {
+	detail, err := items.Claim(ctx, workitems.ClaimCommand{IssueID: issueID})
+	if err != nil {
+		if errors.Is(err, workitems.ErrConflict) {
 			recordClaim(metrics, ClaimResultCollision)
 			if writeConflict {
 				handler.WriteJSON(w, http.StatusConflict, FleetClaimResponse{Error: "task already claimed by another worker"})
@@ -142,8 +140,7 @@ func claimIssueWithBackend(w http.ResponseWriter, ctx context.Context, be backen
 		}
 		return false
 	}
-	detail, err := be.Get(ctx, issueID)
-	if err != nil || detail == nil {
+	if detail == nil {
 		if writeConflict {
 			handler.WriteJSON(w, http.StatusInternalServerError, FleetClaimResponse{Error: "failed to read claimed task"})
 		}
@@ -158,7 +155,7 @@ func claimIssueWithBackend(w http.ResponseWriter, ctx context.Context, be backen
 	return true
 }
 
-func issueDetailToWorkHandoff(d *backend.IssueDetailData) *fleetClaimIssue {
+func issueDetailToWorkHandoff(d *workitems.IssueDetail) *fleetClaimIssue {
 	return &fleetClaimIssue{
 		ID: d.ID, Title: d.Title, Description: d.Description, Design: d.Design,
 		DesignArtifactID: d.DesignArtifactID, DesignFormat: d.DesignFormat,

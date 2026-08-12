@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/driver"
+	appworkflowauthoring "github.com/tysonthomas9/loomcli/internal/app/workflowauthoring"
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 )
@@ -222,7 +222,7 @@ func TestAuthorNativeFlueDriverConvergesAfterEachCommittedLostResponseSplit(t *t
 	tests := []struct {
 		name          string
 		configure     func(*nativeAuthoringStateFake)
-		options       func(driver.RegisterFlueOptions) driver.RegisterFlueOptions
+		options       func(appworkflowauthoring.NativeOptions) appworkflowauthoring.NativeOptions
 		wantApprove   int
 		wantActivate  int
 		wantActivated bool
@@ -230,14 +230,14 @@ func TestAuthorNativeFlueDriverConvergesAfterEachCommittedLostResponseSplit(t *t
 		{
 			name:      "author",
 			configure: func(fake *nativeAuthoringStateFake) { fake.loseAuthorOnce = true },
-			options:   func(opts driver.RegisterFlueOptions) driver.RegisterFlueOptions { return opts },
+			options:   func(opts appworkflowauthoring.NativeOptions) appworkflowauthoring.NativeOptions { return opts },
 		},
 		{
 			name: "approve before activate",
 			configure: func(fake *nativeAuthoringStateFake) {
 				fake.loseApproveOnce = true
 			},
-			options: func(opts driver.RegisterFlueOptions) driver.RegisterFlueOptions {
+			options: func(opts appworkflowauthoring.NativeOptions) appworkflowauthoring.NativeOptions {
 				opts.Trust, opts.Activate = workflowcatalog.DriverTrustTrusted, true
 				return opts
 			},
@@ -248,7 +248,7 @@ func TestAuthorNativeFlueDriverConvergesAfterEachCommittedLostResponseSplit(t *t
 			configure: func(fake *nativeAuthoringStateFake) {
 				fake.loseActivateOnce = true
 			},
-			options: func(opts driver.RegisterFlueOptions) driver.RegisterFlueOptions {
+			options: func(opts appworkflowauthoring.NativeOptions) appworkflowauthoring.NativeOptions {
 				opts.Trust, opts.Activate = workflowcatalog.DriverTrustTrusted, true
 				return opts
 			},
@@ -262,12 +262,12 @@ func TestAuthorNativeFlueDriverConvergesAfterEachCommittedLostResponseSplit(t *t
 			authorities := nativeTestAuthorities(t, "TEST", "operator-1")
 			options := test.options(nativeAuthoringOptions(t))
 
-			if _, err := AuthorNativeFlueDriver(
+			if _, err := authorNativeForTest(
 				context.Background(), fake, fake, authorities, options,
 			); !errors.Is(err, errNativeAuthoringLostResponse) {
 				t.Fatalf("first attempt error = %v, want lost response", err)
 			}
-			result, err := AuthorNativeFlueDriver(
+			result, err := authorNativeForTest(
 				context.Background(), fake, fake, authorities, options,
 			)
 			if err != nil {
@@ -292,7 +292,7 @@ func TestAuthorNativeFlueDriverReReadsDurableRevisionAfterOlderAuthorReceipt(t *
 	fake := &nativeAuthoringStateFake{advanceAfterAuthorOnce: true}
 	options := nativeAuthoringOptions(t)
 	options.Trust = workflowcatalog.DriverTrustTrusted
-	result, err := AuthorNativeFlueDriver(
+	result, err := authorNativeForTest(
 		context.Background(),
 		fake,
 		fake,
@@ -314,7 +314,7 @@ func TestAuthorNativeFlueDriverConcurrentWriterConflictFailsClosed(t *testing.T)
 	fake := &nativeAuthoringStateFake{conflictBeforeApprove: true}
 	options := nativeAuthoringOptions(t)
 	options.Trust = workflowcatalog.DriverTrustTrusted
-	_, err := AuthorNativeFlueDriver(
+	_, err := authorNativeForTest(
 		context.Background(),
 		fake,
 		fake,
@@ -335,7 +335,7 @@ func TestAuthorNativeFlueDriverRejectsIncompleteAuthoritySetBeforeStaging(t *tes
 	authorities := nativeTestAuthorities(t, "TEST", "operator-1")
 	authorities.Approve = nil
 	fake := &nativeAuthoringStateFake{}
-	_, err := AuthorNativeFlueDriver(
+	_, err := authorNativeForTest(
 		context.Background(),
 		fake,
 		fake,
@@ -353,7 +353,7 @@ func TestAuthorNativeFlueDriverRejectsIncompleteAuthoritySetBeforeStaging(t *tes
 	}
 }
 
-func nativeAuthoringOptions(t *testing.T) driver.RegisterFlueOptions {
+func nativeAuthoringOptions(t *testing.T) appworkflowauthoring.NativeOptions {
 	t.Helper()
 	workDir := t.TempDir()
 	dist := filepath.Join(workDir, "dist")
@@ -363,7 +363,7 @@ func nativeAuthoringOptions(t *testing.T) driver.RegisterFlueOptions {
 	if err := os.WriteFile(filepath.Join(dist, "server.mjs"), []byte("export {};\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	return driver.RegisterFlueOptions{
+	return appworkflowauthoring.NativeOptions{
 		WorkspaceKey: "TEST",
 		WorkDir:      workDir,
 		DistPath:     dist,
@@ -374,7 +374,7 @@ func nativeAuthoringOptions(t *testing.T) driver.RegisterFlueOptions {
 	}
 }
 
-func nativeTestAuthorities(t *testing.T, workspace, subject string) NativeAuthoringAuthorities {
+func nativeTestAuthorities(t *testing.T, workspace, subject string) appworkflowauthoring.NativeAuthoringAuthorities {
 	t.Helper()
 	now := time.Date(2026, time.July, 30, 12, 0, 0, 0, time.UTC)
 	issuer, err := authority.NewIssuerWithClock(func() time.Time { return now })
@@ -405,7 +405,21 @@ func nativeTestAuthorities(t *testing.T, workspace, subject string) NativeAuthor
 	if err != nil {
 		t.Fatal(err)
 	}
-	return NativeAuthoringAuthorities{Author: author, Approve: &approve, Activate: &activate}
+	return appworkflowauthoring.NativeAuthoringAuthorities{Author: author, Approve: &approve, Activate: &activate}
+}
+
+func authorNativeForTest(
+	ctx context.Context,
+	catalog workflowcatalog.API,
+	authoring workflowcatalog.VersionAuthoringAPI,
+	authorities appworkflowauthoring.NativeAuthoringAuthorities,
+	options appworkflowauthoring.NativeOptions,
+) (*appworkflowauthoring.Result, error) {
+	coordinator, err := appworkflowauthoring.NewWithNative(NewBundleStager(), NewNativeBundleStager())
+	if err != nil {
+		return nil, err
+	}
+	return coordinator.AuthorNative(ctx, catalog, authoring, authorities, options)
 }
 
 func cloneNativeDriver(input *workflowcatalog.Driver) *workflowcatalog.Driver {

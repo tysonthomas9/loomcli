@@ -219,8 +219,8 @@ func TestHandleAuthConfig_DoesNotUseLegacyBackendEnvFallback(t *testing.T) {
 	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if resp.IssueBackend != "" {
-		t.Errorf("IssueBackend = %q, want empty without composed provider", resp.IssueBackend)
+	if resp.WorkItemsAdapter != "" {
+		t.Errorf("WorkItemsAdapter = %q, want empty without composed provider", resp.WorkItemsAdapter)
 	}
 }
 
@@ -240,7 +240,7 @@ func TestHandleAuthConfig_UsesNarrowBackendNameProvider(t *testing.T) {
 	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if resp.IssueBackend != "fleet" {
-		t.Errorf("IssueBackend = %q, want %q", resp.IssueBackend, "fleet")
+	if resp.WorkItemsAdapter != "fleet" {
+		t.Errorf("WorkItemsAdapter = %q, want %q", resp.WorkItemsAdapter, "fleet")
 	}
 }

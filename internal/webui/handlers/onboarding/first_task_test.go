@@ -15,7 +15,7 @@ import (
 
 func TestHandleRunFirstTaskCreatesClaimableTaskAndQueuesAgentStart(t *testing.T) {
 	issueSvc := &stubIssueService{
-		createFunc: func(_ context.Context, params workitems.CreateCommand) (*workitems.CreatedIssue, error) {
+		createFunc: func(_ context.Context, params workitems.CreateCommand) (*workitems.IssueSummary, error) {
 			if params.Title != "Explore Hello-World onboarding" {
 				t.Fatalf("Title = %q", params.Title)
 			}
@@ -68,7 +68,7 @@ func TestHandleRunFirstTaskCreatesClaimableTaskAndQueuesAgentStart(t *testing.T)
 
 func TestHandleRunFirstTaskKeepsTaskClaimableForExecution(t *testing.T) {
 	issueSvc := &stubIssueService{
-		createFunc: func(_ context.Context, params workitems.CreateCommand) (*workitems.CreatedIssue, error) {
+		createFunc: func(_ context.Context, params workitems.CreateCommand) (*workitems.IssueSummary, error) {
 			if params.Status != "open" || params.Assignee != "" {
 				t.Fatalf("created task must remain claimable, got status=%q assignee=%q", params.Status, params.Assignee)
 			}
@@ -99,7 +99,7 @@ func TestHandleRunFirstTaskKeepsTaskClaimableForExecution(t *testing.T) {
 func TestHandleRunFirstTaskDeletesCreatedIssueWhenStartFails(t *testing.T) {
 	var deletedIssueID string
 	issueSvc := &stubIssueService{
-		createFunc: func(context.Context, workitems.CreateCommand) (*workitems.CreatedIssue, error) {
+		createFunc: func(context.Context, workitems.CreateCommand) (*workitems.IssueSummary, error) {
 			return createdWorkItem("task-1", "Explore Hello-World onboarding"), nil
 		},
 		deleteFunc: func(_ context.Context, command workitems.DeleteCommand) (workitems.DeleteResult, error) {
@@ -140,7 +140,7 @@ func TestHandleRunFirstTaskCleanupRunsWithLiveContextWhenClientDisconnects(t *te
 	var deleteCalled bool
 	var deletedID string
 	issueSvc := &stubIssueService{
-		createFunc: func(context.Context, workitems.CreateCommand) (*workitems.CreatedIssue, error) {
+		createFunc: func(context.Context, workitems.CreateCommand) (*workitems.IssueSummary, error) {
 			return createdWorkItem("task-1", "Explore Hello-World onboarding"), nil
 		},
 		deleteFunc: func(ctx context.Context, command workitems.DeleteCommand) (workitems.DeleteResult, error) {
@@ -183,7 +183,7 @@ func TestHandleRunFirstTaskCleanupRunsWithLiveContextWhenClientDisconnects(t *te
 
 func TestHandleRunFirstTaskRejectsUnknownAgent(t *testing.T) {
 	issueSvc := &stubIssueService{
-		createFunc: func(context.Context, workitems.CreateCommand) (*workitems.CreatedIssue, error) {
+		createFunc: func(context.Context, workitems.CreateCommand) (*workitems.IssueSummary, error) {
 			t.Fatal("CreateIssue should not be called")
 			return nil, nil
 		},
@@ -207,15 +207,15 @@ func TestHandleRunFirstTaskRejectsUnknownAgent(t *testing.T) {
 }
 
 type stubIssueService struct {
-	createFunc func(context.Context, workitems.CreateCommand) (*workitems.CreatedIssue, error)
+	createFunc func(context.Context, workitems.CreateCommand) (*workitems.IssueSummary, error)
 	deleteFunc func(context.Context, workitems.DeleteCommand) (workitems.DeleteResult, error)
 }
 
-func createdWorkItem(id, title string) *workitems.CreatedIssue {
-	return &workitems.CreatedIssue{Summary: &workitems.IssueSummary{ID: id, Title: title, Status: "open", IssueType: "task"}}
+func createdWorkItem(id, title string) *workitems.IssueSummary {
+	return &workitems.IssueSummary{ID: id, Title: title, Status: "open", IssueType: "task"}
 }
 
-func (s *stubIssueService) Create(ctx context.Context, command workitems.CreateCommand) (*workitems.CreatedIssue, error) {
+func (s *stubIssueService) Create(ctx context.Context, command workitems.CreateCommand) (*workitems.IssueSummary, error) {
 	if s.createFunc != nil {
 		return s.createFunc(ctx, command)
 	}
@@ -225,6 +225,9 @@ func (s *stubIssueService) List(context.Context, workitems.ListQuery) (*workitem
 	return nil, workitems.ErrNotImplemented
 }
 func (s *stubIssueService) Ready(context.Context, workitems.AvailabilityQuery) ([]workitems.IssueSummary, error) {
+	return nil, workitems.ErrNotImplemented
+}
+func (s *stubIssueService) Blocked(context.Context, workitems.AvailabilityQuery) ([]workitems.IssueSummary, error) {
 	return nil, workitems.ErrNotImplemented
 }
 func (s *stubIssueService) Search(context.Context, workitems.SearchQuery) ([]workitems.IssueSummary, error) {
@@ -246,6 +249,9 @@ func (s *stubIssueService) Reopen(context.Context, workitems.ReopenCommand) erro
 	return workitems.ErrNotImplemented
 }
 func (s *stubIssueService) AssignRepository(context.Context, workitems.AssignRepositoryCommand) (*workitems.IssueSummary, error) {
+	return nil, workitems.ErrNotImplemented
+}
+func (s *stubIssueService) BlockRepositoryRequired(context.Context, workitems.BlockRepositoryRequiredCommand) (*workitems.RepositoryAdmissionResult, error) {
 	return nil, workitems.ErrNotImplemented
 }
 func (s *stubIssueService) Delete(ctx context.Context, command workitems.DeleteCommand) (workitems.DeleteResult, error) {

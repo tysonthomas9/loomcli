@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 	platformruntime "github.com/tysonthomas9/loomcli/internal/platform/runtime"
 )
 
@@ -76,12 +76,10 @@ func TestFlueRuntimeEnvCarriesNoFleetDBCredentials(t *testing.T) {
 	t.Setenv("LOOM_DRIVER_FLEET_DB_ACTOR", "driver-run:run-1")
 
 	env, err := flueRuntimeEnv(RunRequest{
-		Run: &domain.DriverRun{
+		Run: &execution.DriverRun{
 			WorkspaceKey: "TEST",
 			RunID:        "run-1",
-			NodeID:       "node-1",
-			LeaseID:      "lease-1",
-			FencingToken: 42,
+			Owner:        execution.Owner{NodeID: "node-1", LeaseID: "lease-1", FencingToken: 42},
 		},
 		BundleRoot: "/tmp/bundle",
 		ServerPath: "/tmp/bundle/dist/server.mjs",
@@ -119,12 +117,10 @@ func TestNodeRunnerRuntimeEnvAuthSurface(t *testing.T) {
 
 func runtimeEnvAuthRequest(runToken string) RunRequest {
 	return RunRequest{
-		Run: &domain.DriverRun{
+		Run: &execution.DriverRun{
 			WorkspaceKey: "TEST",
 			RunID:        "run-1",
-			NodeID:       "node-1",
-			LeaseID:      "lease-1",
-			FencingToken: 42,
+			Owner:        execution.Owner{NodeID: "node-1", LeaseID: "lease-1", FencingToken: 42},
 		},
 		BundleRoot: "/tmp/bundle",
 		ServerPath: "/tmp/bundle/dist/server.mjs",

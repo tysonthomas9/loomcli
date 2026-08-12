@@ -7,11 +7,10 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 )
 
-func (e *Executor) startHeartbeats(ctx context.Context, claimed *domain.DriverRun, nodeID, leaseToken string, cancelRun context.CancelFunc) (context.CancelFunc, <-chan struct{}) {
+func (e *Executor) startHeartbeats(ctx context.Context, claimed *execution.DriverRun, nodeID, leaseToken string, cancelRun context.CancelFunc) (context.CancelFunc, <-chan struct{}) {
 	hbCtx, stopHeartbeat := context.WithCancel(ctx)
 	interval := e.heartbeatInterval()
 	if interval <= 0 {
@@ -48,7 +47,7 @@ func (e *Executor) staleTaskRunRecoveryInterval() time.Duration {
 func heartbeatDriverRun(
 	ctx context.Context,
 	executor *Executor,
-	claimed *domain.DriverRun,
+	claimed *execution.DriverRun,
 	leaseToken string,
 	interval time.Duration,
 	cancelRun context.CancelFunc,
@@ -99,14 +98,14 @@ func heartbeatDriverRun(
 	}
 }
 
-func (e *Executor) ownedStaleTaskRunRecovery(claimed *domain.DriverRun, leaseToken string) *execution.OwnedStaleTaskRunRecovery {
+func (e *Executor) ownedStaleTaskRunRecovery(claimed *execution.DriverRun, leaseToken string) *execution.OwnedStaleTaskRunRecovery {
 	if e == nil || e.TaskRunRecovery == nil || e.ExecutionAuthorities == nil || claimed == nil {
 		return nil
 	}
 	return &execution.OwnedStaleTaskRunRecovery{
 		API: e.TaskRunRecovery, Authorities: e.ExecutionAuthorities,
 		WorkspaceKey: claimed.WorkspaceKey,
-		ParentOwner:  executionOwnerFromLegacyDriverRun(claimed, leaseToken),
+		ParentOwner:  executionOwnerFromDriverRun(claimed, leaseToken),
 		MaxAge:       e.StaleTaskRunMaxAge,
 	}
 }

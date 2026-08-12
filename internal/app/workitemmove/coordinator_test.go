@@ -10,7 +10,7 @@ import (
 
 type fakeWorkItems struct {
 	source  *workitems.IssueDetail
-	created *workitems.CreatedIssue
+	created *workitems.IssueSummary
 	create  workitems.CreateCommand
 	comment workitems.AddCommentCommand
 	close   workitems.CloseCommand
@@ -19,7 +19,7 @@ type fakeWorkItems struct {
 func (f *fakeWorkItems) Get(context.Context, workitems.GetQuery) (*workitems.IssueDetail, error) {
 	return f.source, nil
 }
-func (f *fakeWorkItems) Create(_ context.Context, command workitems.CreateCommand) (*workitems.CreatedIssue, error) {
+func (f *fakeWorkItems) Create(_ context.Context, command workitems.CreateCommand) (*workitems.IssueSummary, error) {
 	f.create = command
 	return f.created, nil
 }
@@ -44,7 +44,7 @@ func (fakeWorkspaces) Resolve(_ context.Context, query workspace.ResolveQuery) (
 func TestMoveCoordinatesOwnerAPIs(t *testing.T) {
 	items := &fakeWorkItems{
 		source:  &workitems.IssueDetail{ID: "TASK-1", Title: "Proof", IssueType: "task", Priority: 2, Description: "body", Labels: []string{"proof"}},
-		created: &workitems.CreatedIssue{Summary: &workitems.IssueSummary{ID: "TARGET-1"}},
+		created: &workitems.IssueSummary{ID: "TARGET-1"},
 	}
 	var scopes []string
 	coordinator, err := New(items, fakeWorkspaces{}, func(ctx context.Context, key string) context.Context {

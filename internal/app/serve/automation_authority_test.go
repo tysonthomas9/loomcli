@@ -215,7 +215,7 @@ func TestAutomationWebhookAuthorityProviderBindsVerifiedSource(t *testing.T) {
 	issuer := authority.NewIssuer()
 	provider := &automationWebhookAuthorityProvider{issuer: issuer, now: time.Now}
 	value, err := provider.AuthorityForVerifiedWebhook(context.Background(), webhookingestion.AuthorityRequest{
-		WorkspaceKey: "TEST", SourceKind: "GitHub", RouteKey: "github.pull_request.opened",
+		WorkspaceKey: "TEST", SourceKind: "GitHub", SourceRef: "github.pull_request.opened", RouteKey: "github.pull_request.opened",
 	})
 	if err != nil {
 		t.Fatalf("AuthorityForVerifiedWebhook: %v", err)

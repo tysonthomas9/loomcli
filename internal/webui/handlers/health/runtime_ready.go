@@ -74,7 +74,7 @@ func localWorkspacePathNotReady(localPathFn WorkspaceLocalPathFn, ws string) str
 func probeWorkItems(ctx context.Context, stats workitems.StatsQueries, ws string) RuntimeReadyResponse {
 	resp := RuntimeReadyResponse{Mode: "workflow-catalog", Workspace: ws}
 	if stats == nil {
-		resp.Reason = "issue backend not configured"
+		resp.Reason = "Work Items service not configured"
 		return resp
 	}
 	ctx = middleware.WithWorkspace(ctx, ws)

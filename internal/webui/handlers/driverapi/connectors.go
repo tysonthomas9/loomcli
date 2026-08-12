@@ -23,8 +23,9 @@ import (
 	"strings"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/modules/automation"
 	connectorsmodule "github.com/tysonthomas9/loomcli/internal/modules/connectors"
-	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 )
 
 // errConnectorEgressUnavailable is returned when the module has no
@@ -133,7 +134,7 @@ func (m *Module) connectorDispatch(ctx context.Context, ws string, id driverIden
 // grants, so it is refused before any store or provider work happens. This
 // refusal cannot be journaled: without a binding there is no valid
 // ConnectorCallRecord.
-func (m *Module) resolveParentBindingID(ctx context.Context, ws string, parent *domain.DriverRun) (string, error) {
+func (m *Module) resolveParentBindingID(ctx context.Context, ws string, parent *execution.DriverRun) (string, error) {
 	bindingID, err := m.lookupParentBindingID(ctx, ws, parent)
 	if errors.Is(err, domain.ErrNotFound) {
 		return "", fmt.Errorf(
@@ -164,7 +165,7 @@ func (m *Module) resolveParentBindingID(ctx context.Context, ws string, parent *
 // Returns domain.ErrNotFound (wrapped) when the run has no binding lineage;
 // callers map that onto their own policy — connector egress denies-by-default,
 // binding.config surfaces a clean not_found.
-func (m *Module) lookupParentBindingID(ctx context.Context, ws string, parent *domain.DriverRun) (string, error) {
+func (m *Module) lookupParentBindingID(ctx context.Context, ws string, parent *execution.DriverRun) (string, error) {
 	if id := strings.TrimSpace(parent.TriggerBindingID); id != "" {
 		return id, nil
 	}
@@ -172,7 +173,10 @@ func (m *Module) lookupParentBindingID(ctx context.Context, ws string, parent *d
 	if sourceRef == "" {
 		return "", fmt.Errorf("driver run %q has no binding provenance: %w", parent.RunID, domain.ErrNotFound)
 	}
-	deliveries, err := m.store.TriggerDeliveries().List(ctx, ws, store.TriggerDeliveryFilter{TriggerEventID: sourceRef})
+	if m.automationDeliveries == nil || m.automationBindings == nil {
+		return "", fmt.Errorf("automation provenance queries are unavailable: %w", automation.ErrUnavailable)
+	}
+	deliveries, err := m.automationDeliveries.ListDeliveries(ctx, ws, automation.DeliveryFilter{EventID: sourceRef})
 	if err != nil && !errors.Is(err, domain.ErrNotFound) {
 		return "", fmt.Errorf("resolve trigger delivery for driver run %q: %w", parent.RunID, err)
 	}
@@ -181,14 +185,17 @@ func (m *Module) lookupParentBindingID(ctx context.Context, ws string, parent *d
 			return delivery.TriggerBindingID, nil
 		}
 	}
-	binding, err := m.store.TriggerBindings().GetByRouteKey(ctx, ws, sourceRef)
+	bindings, err := m.automationBindings.ListBindings(ctx, ws, automation.BindingFilter{RouteKey: sourceRef, Limit: 2})
 	if err != nil {
-		if errors.Is(err, domain.ErrNotFound) {
+		if errors.Is(err, automation.ErrNotFound) {
 			return "", fmt.Errorf("driver run %q source ref %q resolves to no binding: %w", parent.RunID, sourceRef, domain.ErrNotFound)
 		}
 		return "", fmt.Errorf("resolve trigger binding for driver run %q: %w", parent.RunID, err)
 	}
-	return binding.BindingID, nil
+	if len(bindings) != 1 || bindings[0] == nil || strings.TrimSpace(bindings[0].RouteKey) != sourceRef {
+		return "", fmt.Errorf("driver run %q source ref %q resolves to no unique binding: %w", parent.RunID, sourceRef, domain.ErrNotFound)
+	}
+	return bindings[0].BindingID, nil
 }
 
 // writeConnectorOpError maps connector-specific dispatch errors onto the

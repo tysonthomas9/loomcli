@@ -9,29 +9,37 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/cli"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 )
 
-// releaserStub is a MockIssueBackend that also implements backend.ClaimReleaser.
-// MockIssueBackend (clitest) intentionally does not, since LOOM-1's design
+// releaserStub is a MockWorkItems that also implements workitems.ClaimLeaseCommands.
+// MockWorkItems (clitest) intentionally does not, since LOOM-1's design
 // keeps the interface optional and capability-detected. This stub adds the
 // method so we can assert releaseClaimOnComplete dispatches through it.
 type releaserStub struct {
-	*MockIssueBackend
+	*MockWorkItems
 	called    atomic.Int32
 	lastID    atomic.Value // string
 	lastActor atomic.Value // string
 	releaseE  error
 }
 
-var _ backend.ClaimReleaser = (*releaserStub)(nil)
+var _ workitems.ClaimLeaseCommands = (*releaserStub)(nil)
 
 func newReleaserStub(releaseErr error) *releaserStub {
-	s := &releaserStub{MockIssueBackend: NewMockIssueBackend(), releaseE: releaseErr}
+	s := &releaserStub{MockWorkItems: NewMockWorkItems(), releaseE: releaseErr}
 	s.lastID.Store("")
 	s.lastActor.Store("")
 	return s
+}
+
+func installClaimLeases(t *testing.T, leases workitems.ClaimLeaseCommands) {
+	t.Helper()
+	deps := cli.TestingGetDefaultDeps()
+	original := deps.ClaimLeases
+	deps.ClaimLeases = leases
+	t.Cleanup(func() { deps.ClaimLeases = original })
 }
 
 func (s *releaserStub) ReleaseClaim(_ context.Context, id, actor string) error {
@@ -64,8 +72,9 @@ func writeReleaseTestLock(t *testing.T, worktreePath, taskID string) {
 
 func TestReleaseClaimOnComplete_DispatchesReleaseWithLockTaskID(t *testing.T) {
 	stub := newReleaserStub(nil)
-	cli.SetDefaultIssueBackend(stub)
-	t.Cleanup(cli.ResetDefaultIssueBackend)
+	cli.SetDefaultWorkItems(stub)
+	installClaimLeases(t, stub)
+	t.Cleanup(cli.ResetDefaultWorkItems)
 
 	wt := t.TempDir()
 	writeReleaseTestLock(t, wt, "ISSUE-42")
@@ -85,8 +94,9 @@ func TestReleaseClaimOnComplete_DispatchesReleaseWithLockTaskID(t *testing.T) {
 
 func TestReleaseClaimOnComplete_NoLockFileIsNoop(t *testing.T) {
 	stub := newReleaserStub(nil)
-	cli.SetDefaultIssueBackend(stub)
-	t.Cleanup(cli.ResetDefaultIssueBackend)
+	cli.SetDefaultWorkItems(stub)
+	installClaimLeases(t, stub)
+	t.Cleanup(cli.ResetDefaultWorkItems)
 
 	wt := t.TempDir() // no .agent.lock written
 
@@ -99,8 +109,9 @@ func TestReleaseClaimOnComplete_NoLockFileIsNoop(t *testing.T) {
 
 func TestReleaseClaimOnComplete_EmptyTaskIDIsNoop(t *testing.T) {
 	stub := newReleaserStub(nil)
-	cli.SetDefaultIssueBackend(stub)
-	t.Cleanup(cli.ResetDefaultIssueBackend)
+	cli.SetDefaultWorkItems(stub)
+	installClaimLeases(t, stub)
+	t.Cleanup(cli.ResetDefaultWorkItems)
 
 	wt := t.TempDir()
 	writeReleaseTestLock(t, wt, "") // lock present but TaskID empty
@@ -113,12 +124,13 @@ func TestReleaseClaimOnComplete_EmptyTaskIDIsNoop(t *testing.T) {
 }
 
 func TestReleaseClaimOnComplete_BackendWithoutClaimReleaserIsNoop(t *testing.T) {
-	// Plain MockIssueBackend does NOT implement ClaimReleaser. Release-on-complete
+	// Plain MockWorkItems does NOT implement ClaimReleaser. Release-on-complete
 	// should not try to reconstruct claim-release semantics from generic
 	// Get/Update calls; actor-safe behavior belongs behind the capability.
-	plain := NewMockIssueBackend()
-	cli.SetDefaultIssueBackend(plain)
-	t.Cleanup(cli.ResetDefaultIssueBackend)
+	plain := NewMockWorkItems()
+	cli.SetDefaultWorkItems(plain)
+	installClaimLeases(t, nil)
+	t.Cleanup(cli.ResetDefaultWorkItems)
 
 	wt := t.TempDir()
 	writeReleaseTestLock(t, wt, "ISSUE-42")
@@ -132,8 +144,9 @@ func TestReleaseClaimOnComplete_BackendWithoutClaimReleaserIsNoop(t *testing.T) 
 
 func TestReleaseClaimOnComplete_ReleaseErrorIsSwallowed(t *testing.T) {
 	stub := newReleaserStub(errors.New("simulated release failure"))
-	cli.SetDefaultIssueBackend(stub)
-	t.Cleanup(cli.ResetDefaultIssueBackend)
+	cli.SetDefaultWorkItems(stub)
+	installClaimLeases(t, stub)
+	t.Cleanup(cli.ResetDefaultWorkItems)
 
 	wt := t.TempDir()
 	writeReleaseTestLock(t, wt, "ISSUE-42")
@@ -162,8 +175,9 @@ func TestRunComplete_WritesSignalEvenWhenReleaseFails(t *testing.T) {
 	writeReleaseTestLock(t, worktree, "LOOM-99")
 
 	stub := newReleaserStub(errors.New("simulated release failure"))
-	cli.SetDefaultIssueBackend(stub)
-	t.Cleanup(cli.ResetDefaultIssueBackend)
+	cli.SetDefaultWorkItems(stub)
+	installClaimLeases(t, stub)
+	t.Cleanup(cli.ResetDefaultWorkItems)
 
 	absPath, _ := filepath.Abs(worktree)
 	resolved, err := filepath.EvalSymlinks(absPath)

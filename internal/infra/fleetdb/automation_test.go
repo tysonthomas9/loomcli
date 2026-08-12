@@ -178,7 +178,7 @@ func TestAutomationTransportWorkflowReplayCarriesCurrentOwnerPrecondition(t *tes
 		if got, want := r.URL.EscapedPath(), "/api/v1/WS/driver-runs/run-1/automation/admissions/workflow.done"; got != want {
 			t.Errorf("path = %q, want %q", got, want)
 		}
-		if got := r.Header.Get("Idempotency-Key"); got != "internal:WS:emission-1" {
+		if got := r.Header.Get("Idempotency-Key"); got != automation.InternalEventIdempotencyKey("WS", "emission-1") {
 			t.Errorf("Idempotency-Key = %q", got)
 		}
 		var body map[string]json.RawMessage
@@ -199,7 +199,7 @@ func TestAutomationTransportWorkflowReplayCarriesCurrentOwnerPrecondition(t *tes
 	defer server.Close()
 	client, _ := New(Config{BaseURL: server.URL})
 	result, err := client.Automation().ReserveEvent(t.Context(), AutomationEventReservation{
-		WorkspaceKey: "WS", RouteKey: "workflow.done", IdempotencyKey: "internal:WS:emission-1",
+		WorkspaceKey: "WS", RouteKey: "workflow.done", IdempotencyKey: automation.InternalEventIdempotencyKey("WS", "emission-1"),
 		ReplayOnly: true, Origin: automation.EventOriginWorkflow, EmittingRunID: "run-1",
 		NodeID: "node-b", LeaseID: "lease-b", FencingToken: 8,
 		SourceEventID: "emission-1", EventType: "workflow.done", Payload: []byte(`{"stable":true}`),

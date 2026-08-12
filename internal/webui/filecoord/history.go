@@ -3,8 +3,6 @@ package filecoord
 import (
 	"context"
 	"errors"
-	"log/slog"
-	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -14,9 +12,8 @@ import (
 )
 
 const (
-	fileHistoryGitLogLimit   = 100
-	fileBlameMaxLines        = 5000
-	legacySaveHistoryDirName = "file-history"
+	fileHistoryGitLogLimit = 100
+	fileBlameMaxLines      = 5000
 )
 
 type fileCheckoutRef struct {
@@ -351,60 +348,4 @@ func countLines(content string) int {
 		count++
 	}
 	return count
-}
-
-func (s *fileServiceImpl) startLegacyHistoryCleanup() {
-	s.historyCleanupOnce.Do(func() {
-		go func() {
-			defer close(s.historyCleanupDone)
-			err := s.cleanupLegacyHistoryOnce()
-			if err != nil {
-				slog.Default().Warn("file browser: legacy save-history cleanup skipped", "error", err)
-			}
-			s.historyCleanupMu.Lock()
-			s.historyCleanupErr = err
-			s.historyCleanupMu.Unlock()
-		}()
-	})
-}
-
-func (s *fileServiceImpl) cleanupLegacyHistoryOnce() error {
-	if s.fileOps == nil {
-		return apperrors.ErrInternal("failed to resolve loom data directory", errors.New("file ops is nil"))
-	}
-	dataDir, err := s.fileOps.ResolveLoomDataDir()
-	if err != nil {
-		return apperrors.ErrInternal("failed to resolve loom data directory", err)
-	}
-	return cleanupLegacySaveHistory(dataDir)
-}
-
-// cleanupLegacySaveHistory removes only the dedicated plaintext snapshot root.
-// Refusing a symlink keeps this one-time migration from following an alias.
-func cleanupLegacySaveHistory(dataDir string) error {
-	root, err := filepath.Abs(dataDir)
-	if err != nil {
-		return apperrors.ErrInternal("failed to resolve legacy file history root", err)
-	}
-	target := filepath.Join(root, legacySaveHistoryDirName)
-	if filepath.Dir(target) != root || filepath.Base(target) != legacySaveHistoryDirName {
-		return apperrors.ErrInternal("invalid legacy file history root", nil)
-	}
-	info, err := os.Lstat(target)
-	if os.IsNotExist(err) {
-		return nil
-	}
-	if err != nil {
-		return apperrors.ErrInternal("failed to inspect legacy file history root", err)
-	}
-	if info.Mode()&os.ModeSymlink != 0 {
-		return apperrors.ErrForbidden("legacy file history root is a symlink")
-	}
-	if !info.IsDir() {
-		return apperrors.ErrInternal("legacy file history root is not a directory", nil)
-	}
-	if err := os.RemoveAll(target); err != nil {
-		return apperrors.ErrInternal("failed to remove legacy file history", err)
-	}
-	return nil
 }

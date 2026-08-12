@@ -5,7 +5,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/tysonthomas9/loomcli/internal/backend"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 )
 
 var (
@@ -20,20 +20,20 @@ var blockedCmd = &cobra.Command{
 	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
-		ib, err := getIssueBackend(ctx)
+		itemsAPI, err := getWorkItems(ctx)
 		if err != nil {
 			return err
 		}
-		opts := backend.BlockedOpts{
-			Limit:    blockedLimit,
-			Type:     blockedType,
-			ParentID: blockedParent,
+		query := workitems.AvailabilityQuery{
+			Limit:     blockedLimit,
+			IssueType: blockedType,
+			ParentID:  blockedParent,
 		}
-		items, err := ib.Blocked(ctx, opts)
+		items, err := itemsAPI.Blocked(ctx, query)
 		if err != nil {
 			return err
 		}
-		return printIssueList(os.Stdout, items, outputFormat)
+		return printWorkItemSummaries(os.Stdout, items, outputFormat)
 	},
 }
 

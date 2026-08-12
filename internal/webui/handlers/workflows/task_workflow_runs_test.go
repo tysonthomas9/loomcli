@@ -6,8 +6,10 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/modules/automation"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
@@ -27,20 +29,30 @@ func seedTaskWorkflowBinding(t *testing.T, ctx context.Context, st store.Store) 
 
 func dispatchTaskWorkflowRun(t *testing.T, ctx context.Context, st store.Store, taskID, idempotencyKey string, payload json.RawMessage) *domain.DriverRun {
 	t.Helper()
-	result, err := st.TriggerRoutes().DispatchTriggerRouteV2(ctx, "TEST", taskWorkflowRunRoute, store.TriggerRouteDispatch{
-		IdempotencyKey: idempotencyKey,
-		SourceEventID:  idempotencyKey,
-		EventType:      "task.ready",
-		SubjectRef:     "issue:" + taskID,
-		Payload:        payload,
+	eventID := "event-" + idempotencyKey
+	journal, ok := st.TriggerEvents().(store.TriggerEventAppender)
+	if !ok {
+		t.Fatal("task workflow fixture requires the current event journal port")
+	}
+	_, err := journal.AppendTriggerEvent(ctx, &automation.Event{
+		WorkspaceKey: "TEST", EventID: eventID, SourceEventID: idempotencyKey,
+		EventType: "task.ready", SourceKind: automation.SourceKindInternal,
+		SubjectRef: "issue:" + taskID, Origin: automation.EventOriginSystem,
+		OccurredAt: time.Now().UTC(), ReceivedAt: time.Now().UTC(), Payload: payload,
 	})
 	if err != nil {
-		t.Fatalf("dispatch task workflow run: %v", err)
+		t.Fatalf("append task workflow event: %v", err)
 	}
-	if result.PrimaryRun == nil {
-		t.Fatalf("dispatch task workflow run = %+v, want primary run", result)
+	run, err := st.DriverRuns().Create(ctx, store.DriverRunCreate{
+		WorkspaceKey: "TEST", RunID: "run-" + idempotencyKey,
+		DriverID: "demo", DriverVersionID: "version-1", Entrypoint: "run",
+		SourceKind: automation.SourceKindInternal, SourceRef: eventID,
+		TriggerBindingID: "task-automation", IdempotencyKey: idempotencyKey, Payload: payload,
+	})
+	if err != nil {
+		t.Fatalf("create task workflow run: %v", err)
 	}
-	return result.PrimaryRun
+	return run
 }
 
 func finishTaskWorkflowRun(t *testing.T, ctx context.Context, st store.Store, runID string) {

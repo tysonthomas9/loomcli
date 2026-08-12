@@ -8,15 +8,13 @@ import (
 )
 
 // OrchestrationSessionStore is the narrow read boundary required by the
-// orchestration-session join helpers.
+// interactive-session join helpers.
 type OrchestrationSessionStore interface {
 	AgentSessions() AgentSessionStore
 }
 
 // OrchestrationSessionFor returns the most recent active interactive session
-// for a lead agent, or (nil, nil) if none exists. Phase 4 and older records
-// used kind=orchestration, so the lookup falls back to that legacy kind only
-// when no active kind=interactive record exists.
+// for a lead agent, or (nil, nil) if none exists.
 //
 // This join is the only durable representation of the relationship:
 // AgentSession{Kind=interactive, AgentID=<lead-name>}. Reading via
@@ -33,23 +31,15 @@ func OrchestrationSessionFor(ctx context.Context, s OrchestrationSessionStore, w
 		return nil, nil
 	}
 
-	for _, kind := range []domain.AgentSessionKind{
-		domain.AgentSessionKindInteractive,
-		domain.AgentSessionKindOrchestration,
-	} {
-		sessions, err := s.AgentSessions().List(ctx, workspaceKey, AgentSessionFilter{
-			AgentID: agentID,
-			Kind:    kind,
-			Limit:   8,
-		})
-		if err != nil {
-			return nil, err
-		}
-		if best := mostRecentActiveSession(sessions); best != nil {
-			return best, nil
-		}
+	sessions, err := s.AgentSessions().List(ctx, workspaceKey, AgentSessionFilter{
+		AgentID: agentID,
+		Kind:    domain.AgentSessionKindInteractive,
+		Limit:   8,
+	})
+	if err != nil {
+		return nil, err
 	}
-	return nil, nil
+	return mostRecentActiveSession(sessions), nil
 }
 
 // OrchestrationSessionIDFor is a convenience wrapper around

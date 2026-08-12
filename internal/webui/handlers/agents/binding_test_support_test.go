@@ -10,11 +10,13 @@ import (
 	"sort"
 	"strings"
 
+	appworkflowauthoring "github.com/tysonthomas9/loomcli/internal/app/workflowauthoring"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	workflowdefs "github.com/tysonthomas9/loomcli/internal/infra/workflowdistribution/authoring"
 	agentsmodule "github.com/tysonthomas9/loomcli/internal/modules/agents"
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
 	connectorsmodule "github.com/tysonthomas9/loomcli/internal/modules/connectors"
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 	workflowcataloghttp "github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog/httpapi"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
@@ -326,6 +328,48 @@ func (testAgentRecordAuthorityResolver) ResolveOperatorAuthority(
 // handlers never receive AgentServiceStore directly for durable record writes.
 type testAgentRecordAPI struct {
 	store store.Store
+}
+
+type testAgentRunQueries struct {
+	store store.Store
+}
+
+func (queries testAgentRunQueries) ListDriverRuns(
+	ctx context.Context,
+	query execution.DriverRunQuery,
+) ([]*execution.DriverRun, error) {
+	runs, err := queries.store.DriverRuns().List(ctx, query.WorkspaceKey, store.DriverRunFilter{
+		DriverID: query.DriverID, EpicID: query.EpicID,
+		AgentServiceID: query.AgentServiceID, Status: domain.DriverRunStatus(query.Status), Limit: query.Limit,
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]*execution.DriverRun, 0, len(runs))
+	for _, run := range runs {
+		if run == nil {
+			continue
+		}
+		out = append(out, &execution.DriverRun{
+			WorkspaceKey: run.WorkspaceKey, RunID: run.RunID,
+			DriverID: run.DriverID, DriverVersionID: run.DriverVersionID,
+			Entrypoint: run.Entrypoint, SourceKind: run.SourceKind, SourceRef: run.SourceRef,
+			EpicID: run.EpicID, ParentRunID: run.ParentRunID,
+			TriggerBindingID: run.TriggerBindingID, AgentServiceID: run.AgentServiceID,
+			SubjectKey: run.SubjectKey, Status: execution.DriverRunStatus(run.Status),
+			Owner: execution.Owner{ResourceKind: execution.ResourceDriverRun, ResourceID: run.RunID,
+				NodeID: run.NodeID, LeaseID: run.LeaseID, FencingToken: run.FencingToken},
+			IdempotencyKey: run.IdempotencyKey, Payload: append([]byte(nil), run.Payload...),
+			Output: cloneStringMap(run.Output), Summary: run.Summary, ErrorClass: run.ErrorClass,
+			StartedAt: run.StartedAt, LastHeartbeat: run.LastHeartbeat,
+			FinishedAt: cloneAgentRecordTime(run.FinishedAt), AwaitInstanceKey: run.AwaitInstanceKey,
+			SuspendedAt:           cloneAgentRecordTime(run.SuspendedAt),
+			CancelRequestedAt:     cloneAgentRecordTime(run.CancelRequestedAt),
+			CancelRequestedReason: run.CancelRequestedReason, ResumeSourceEventID: run.ResumeSourceEventID,
+			CreatedAt: run.CreatedAt, UpdatedAt: run.UpdatedAt,
+		})
+	}
+	return out, nil
 }
 
 func (api *testAgentRecordAPI) GetAgent(
@@ -671,10 +715,11 @@ func (c testBindingGrantCleanup) RevokeBindingGrants(ctx context.Context, worksp
 
 func newTestAgentsModule(agentSvc agentcoord.AgentService, st store.Store, hub *realtime.Hub, workspace string) *Module {
 	config := Config{
-		Store: st, Hub: hub,
+		Hub:               hub,
 		OperatorAuthority: testOperatorAuthorityResolver{}, WorkspaceFromContext: func(context.Context) string { return workspace },
 	}
 	if st != nil {
+		config.AgentRuns = testAgentRunQueries{store: st}
 		config.AgentRecords = &testAgentRecordAPI{store: st}
 		config.AgentRecordAuthority = testAgentRecordAuthorityResolver{}
 		bindings := &testBindingOperations{store: st}
@@ -706,11 +751,15 @@ func testWorkflowTargetPreparation(
 			if digestErr != nil {
 				return nil, digestErr
 			}
-			_, _, buildErr := workflowdefs.BuildAndAuthorManaged(
+			coordinator, coordinatorErr := appworkflowauthoring.New(workflowdefs.NewBundleStager())
+			if coordinatorErr != nil {
+				return nil, coordinatorErr
+			}
+			_, _, buildErr := coordinator.AuthorManaged(
 				ctx,
 				testUnexpectedManagedAuthoring{},
 				authority.SystemAuthority{},
-				workflowdefs.BuildAndRegisterOptions{
+				appworkflowauthoring.BuildOptions{
 					WorkspaceKey:  workspace,
 					Name:          workflow,
 					Entrypoint:    spec.Entrypoint,

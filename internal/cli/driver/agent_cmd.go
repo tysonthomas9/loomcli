@@ -9,11 +9,11 @@ import (
 
 	appserve "github.com/tysonthomas9/loomcli/internal/app/serve"
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
-	"github.com/tysonthomas9/loomcli/internal/cli/backends"
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	driverpkg "github.com/tysonthomas9/loomcli/internal/driver"
 	"github.com/tysonthomas9/loomcli/internal/infra/interactionchat"
+	leadcontrol "github.com/tysonthomas9/loomcli/internal/infra/interactionlead"
 	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
@@ -316,8 +316,15 @@ func buildDriverInteractionChat(
 			"compose Interaction chat: Agents queries are unavailable",
 		)
 	}
+	leadDependencies, err := leadcontrol.NewInteractionChatDependencies(leadcontrol.RuntimeDependencies{
+		Sessions: handle.Store, InboxMessages: handle.Store.AgentInboxMessages(),
+		AgentServices: handle.Store.AgentServices(), WorkerProfiles: handle.Store.WorkerProfiles(), Roles: handle.Store.Roles(),
+	})
+	if err != nil {
+		return nil, err
+	}
 	runtime, err := interactionchat.New(
-		backends.LegacyInteractionChatDependencies(handle.Store),
+		leadDependencies,
 		capability.InboxEnqueuer(),
 		agentsCapability.AgentsAPI(),
 	)

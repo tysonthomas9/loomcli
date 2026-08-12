@@ -113,7 +113,7 @@ func TestAgentSessionFilter_KindAndParent(t *testing.T) {
 
 	if _, err := st.AgentSessions().Create(ctx, store.AgentSessionCreate{
 		WorkspaceKey: "WS", SessionID: "orch-1", AgentID: "nova",
-		Kind: domain.AgentSessionKindOrchestration, Status: domain.AgentSessionRunning,
+		Kind: domain.AgentSessionKindInteractive, Status: domain.AgentSessionRunning,
 	}); err != nil {
 		t.Fatalf("create orch: %v", err)
 	}
@@ -140,7 +140,7 @@ func TestAgentSessionFilter_KindAndParent(t *testing.T) {
 	}
 
 	// Kind-only filter
-	got, err := st.AgentSessions().List(ctx, "WS", store.AgentSessionFilter{Kind: domain.AgentSessionKindOrchestration})
+	got, err := st.AgentSessions().List(ctx, "WS", store.AgentSessionFilter{Kind: domain.AgentSessionKindInteractive})
 	if err != nil {
 		t.Fatalf("list kind=orch: %v", err)
 	}
@@ -170,7 +170,7 @@ func TestAgentSessionFilter_KindAndParent(t *testing.T) {
 
 	// Mismatch returns empty
 	got, err = st.AgentSessions().List(ctx, "WS", store.AgentSessionFilter{
-		Kind: domain.AgentSessionKindOrchestration, ParentSessionID: "orch-1",
+		Kind: domain.AgentSessionKindInteractive, ParentSessionID: "orch-1",
 	})
 	if err != nil {
 		t.Fatalf("list mismatch: %v", err)

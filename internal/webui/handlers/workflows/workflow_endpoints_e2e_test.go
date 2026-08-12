@@ -26,11 +26,11 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 
-	"github.com/tysonthomas9/loomcli/internal/backend"
-	"github.com/tysonthomas9/loomcli/internal/backend/fleet"
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
+	fleet "github.com/tysonthomas9/loomcli/internal/modules/workitems/fleetdb"
 	"github.com/tysonthomas9/loomcli/internal/netutil"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 	"github.com/tysonthomas9/loomcli/internal/store"
@@ -108,9 +108,9 @@ type workflowEndpointE2E struct {
 	fleetAPIKey string
 	loomURL     string
 
-	fleetClient  *fleetdb.Client
-	issueBackend backend.IssueBackend
-	httpClient   *http.Client
+	fleetClient *fleetdb.Client
+	workItems   workitems.API
+	httpClient  *http.Client
 }
 
 type workflowEndpointDAG struct {
@@ -214,14 +214,18 @@ func (e *workflowEndpointE2E) seedWorkspace() {
 		e.t.Fatalf("create executor node: %v", err)
 	}
 
-	e.issueBackend, err = fleet.New(fleet.Config{
+	adapter, err := fleet.New(fleet.Config{
 		BaseURL:     e.fleetURL,
 		WorkspaceID: e.workspace,
 		APIKey:      e.fleetAPIKey,
 		Actor:       e.actor,
 	})
 	if err != nil {
-		e.t.Fatalf("create issue backend: %v", err)
+		e.t.Fatalf("create Work Items adapter: %v", err)
+	}
+	e.workItems, err = workitems.New(adapter)
+	if err != nil {
+		e.t.Fatalf("compose Work Items: %v", err)
 	}
 }
 
@@ -238,20 +242,20 @@ func (e *workflowEndpointE2E) seedWorkspaceRepo(repoURL string) {
 
 func (e *workflowEndpointE2E) seedEpicDAG() workflowEndpointDAG {
 	e.t.Helper()
-	epic := e.createIssue(backend.CreateParams{
+	epic := e.createIssue(workitems.CreateCommand{
 		Title:     "Workflow endpoint E2E Epic",
 		IssueType: "epic",
 		Priority:  1,
 		CreatedBy: e.actor,
 	})
-	taskA := e.createIssue(backend.CreateParams{
+	taskA := e.createIssue(workitems.CreateCommand{
 		Title:     "A",
 		IssueType: "task",
 		Parent:    epic.ID,
 		Priority:  1,
 		CreatedBy: e.actor,
 	})
-	taskB := e.createIssue(backend.CreateParams{
+	taskB := e.createIssue(workitems.CreateCommand{
 		Title:        "B",
 		IssueType:    "task",
 		Parent:       epic.ID,
@@ -259,7 +263,7 @@ func (e *workflowEndpointE2E) seedEpicDAG() workflowEndpointDAG {
 		CreatedBy:    e.actor,
 		Dependencies: []string{taskA.ID},
 	})
-	taskC := e.createIssue(backend.CreateParams{
+	taskC := e.createIssue(workitems.CreateCommand{
 		Title:        "C",
 		IssueType:    "task",
 		Parent:       epic.ID,
@@ -267,7 +271,7 @@ func (e *workflowEndpointE2E) seedEpicDAG() workflowEndpointDAG {
 		CreatedBy:    e.actor,
 		Dependencies: []string{taskA.ID},
 	})
-	taskD := e.createIssue(backend.CreateParams{
+	taskD := e.createIssue(workitems.CreateCommand{
 		Title:        "D",
 		IssueType:    "task",
 		Parent:       epic.ID,
@@ -286,13 +290,13 @@ func (e *workflowEndpointE2E) seedEpicDAG() workflowEndpointDAG {
 
 func (e *workflowEndpointE2E) seedSingleTaskEpic() workflowEndpointDAG {
 	e.t.Helper()
-	epic := e.createIssue(backend.CreateParams{
+	epic := e.createIssue(workitems.CreateCommand{
 		Title:     "Workflow endpoint Daytona E2E Epic",
 		IssueType: "epic",
 		Priority:  1,
 		CreatedBy: e.actor,
 	})
-	task := e.createIssue(backend.CreateParams{
+	task := e.createIssue(workitems.CreateCommand{
 		Title:     "Daytona smoke task",
 		IssueType: "task",
 		Parent:    epic.ID,
@@ -305,7 +309,7 @@ func (e *workflowEndpointE2E) seedSingleTaskEpic() workflowEndpointDAG {
 func (e *workflowEndpointE2E) seedSlackPRChainEpic(repoURL string) workflowEndpointDAG {
 	e.t.Helper()
 	repo := workflowEndpointRepoSlug(repoURL)
-	epic := e.createIssue(backend.CreateParams{
+	epic := e.createIssue(workitems.CreateCommand{
 		Title:       "Tiny Slack clone PR chain",
 		Description: "Build a tiny Slack-style collaboration app through three dependent task PRs. Each task should produce one visible GitHub pull request.",
 		IssueType:   "epic",
@@ -313,7 +317,7 @@ func (e *workflowEndpointE2E) seedSlackPRChainEpic(repoURL string) workflowEndpo
 		CreatedBy:   e.actor,
 		SourceRepo:  repo,
 	})
-	taskA := e.createIssue(backend.CreateParams{
+	taskA := e.createIssue(workitems.CreateCommand{
 		Title:       "Scaffold Slack clone app",
 		Description: "Create a tiny static Slack-style app under a clear project directory. Include package.json, an HTML entrypoint, CSS, JavaScript state/rendering code, sample channel/message data, and a Node built-in test that validates the rendered data model. Keep dependencies minimal and make npm test pass.",
 		IssueType:   "task",
@@ -322,7 +326,7 @@ func (e *workflowEndpointE2E) seedSlackPRChainEpic(repoURL string) workflowEndpo
 		CreatedBy:   e.actor,
 		SourceRepo:  repo,
 	})
-	taskB := e.createIssue(backend.CreateParams{
+	taskB := e.createIssue(workitems.CreateCommand{
 		Title:        "Add channel navigation and unread state",
 		Description:  "Extend the Slack clone from the prior PR with multiple channels, active-channel switching affordances, unread badges, timestamps, and stronger sidebar styling. Update or add tests so npm test proves the channel data/render helpers still work.",
 		IssueType:    "task",
@@ -332,7 +336,7 @@ func (e *workflowEndpointE2E) seedSlackPRChainEpic(repoURL string) workflowEndpo
 		SourceRepo:   repo,
 		Dependencies: []string{taskA.ID},
 	})
-	taskC := e.createIssue(backend.CreateParams{
+	taskC := e.createIssue(workitems.CreateCommand{
 		Title:        "Add composer search and polish",
 		Description:  "Extend the stacked Slack clone with a message composer, search or command palette behavior, responsive layout polish, and final seed data. Update tests and keep npm test passing.",
 		IssueType:    "task",
@@ -350,11 +354,11 @@ func (e *workflowEndpointE2E) seedSlackPRChainEpic(repoURL string) workflowEndpo
 	}
 }
 
-func (e *workflowEndpointE2E) createIssue(params backend.CreateParams) *backend.IssueData {
+func (e *workflowEndpointE2E) createIssue(params workitems.CreateCommand) *workitems.IssueSummary {
 	e.t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
-	issue, err := e.issueBackend.Create(ctx, params)
+	issue, err := e.workItems.Create(ctx, params)
 	if err != nil {
 		e.t.Fatalf("create issue %q: %v", params.Title, err)
 	}
@@ -652,10 +656,11 @@ func (e *workflowEndpointE2E) expectDAGDrained(dag workflowEndpointDAG, runID st
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 
-	children, err := e.issueBackend.GetChildren(ctx, dag.epicID)
+	result, err := e.workItems.List(ctx, workitems.ListQuery{Filter: workitems.ListFilter{ParentID: dag.epicID}})
 	if err != nil {
 		e.t.Fatalf("list epic children: %v", err)
 	}
+	children := result.Issues
 	closed := 0
 	for _, child := range children {
 		if child.Status == "closed" {
@@ -703,10 +708,11 @@ func (e *workflowEndpointE2E) expectSingleDaytonaTaskDrained(dag workflowEndpoin
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 
-	children, err := e.issueBackend.GetChildren(ctx, dag.epicID)
+	result, err := e.workItems.List(ctx, workitems.ListQuery{Filter: workitems.ListFilter{ParentID: dag.epicID}})
 	if err != nil {
 		e.t.Fatalf("list epic children: %v", err)
 	}
+	children := result.Issues
 	if len(children) != 1 || children[0].ID != dag.taskA || children[0].Status != "closed" {
 		e.t.Fatalf("children = %+v, want single closed Daytona smoke task %s", children, dag.taskA)
 	}
@@ -738,10 +744,11 @@ func (e *workflowEndpointE2E) expectDaytonaPRChainDrained(dag workflowEndpointDA
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 
-	children, err := e.issueBackend.GetChildren(ctx, dag.epicID)
+	result, err := e.workItems.List(ctx, workitems.ListQuery{Filter: workitems.ListFilter{ParentID: dag.epicID}})
 	if err != nil {
 		e.t.Fatalf("list epic children: %v", err)
 	}
+	children := result.Issues
 	if len(children) != 3 {
 		e.t.Fatalf("child task count = %d, want 3; children=%+v", len(children), children)
 	}

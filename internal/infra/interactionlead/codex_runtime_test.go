@@ -517,7 +517,7 @@ func TestCaptureCodexInteractiveTranscriptPersistsSessionArtifactAndRef(t *testi
 		WorkspaceKey: "WS",
 		SessionID:    "lead-session",
 		AgentID:      "local-review",
-		Kind:         domain.AgentSessionKindOrchestration,
+		Kind:         domain.AgentSessionKindInteractive,
 		Status:       domain.AgentSessionRunning,
 		Metadata:     map[string]string{"assignment": "preserve-me"},
 	}); err != nil {

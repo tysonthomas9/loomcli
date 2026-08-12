@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Verifies that internal/backend/api/gen/types.gen.go is in sync with
+# Verifies that internal/platform/loomapi/gen/types.gen.go is in sync with
 # api/openapi.yaml. Regenerates types into a temp file and diffs against the
 # committed file. Exits 1 if they differ (spec changed but types not
 # regenerated).
@@ -12,7 +12,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 SPEC_PATH="$REPO_ROOT/api/openapi.yaml"
 CONFIG_PATH="$REPO_ROOT/api/oapi-codegen.yaml"
-GENERATED_PATH="$REPO_ROOT/internal/backend/api/gen/types.gen.go"
+GENERATED_PATH="$REPO_ROOT/internal/platform/loomapi/gen/types.gen.go"
 OAPI_CODEGEN_VERSION="v2.6.0"
 
 cd "$REPO_ROOT"

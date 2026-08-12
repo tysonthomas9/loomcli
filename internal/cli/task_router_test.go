@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tysonthomas9/loomcli/internal/backend"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 )
 
 // --- MergeRoleConstraints tests ---
@@ -113,7 +113,7 @@ func TestMergeRoleConstraints_EmptyPathPatternsOverride(t *testing.T) {
 // --- MatchTask tests ---
 
 func TestMatchTask_BaseScore(t *testing.T) {
-	issue := backend.IssueData{
+	issue := workitems.IssueSummary{
 		ID: "T-1", Status: "open", IssueType: "task",
 		Priority: 0, Design: "plan",
 	}
@@ -128,7 +128,7 @@ func TestMatchTask_BaseScore(t *testing.T) {
 }
 
 func TestMatchTask_RejectEpic(t *testing.T) {
-	issue := backend.IssueData{ID: "E-1", Status: "open", IssueType: "epic"}
+	issue := workitems.IssueSummary{ID: "E-1", Status: "open", IssueType: "epic"}
 	c := RoleConstraints{}
 
 	got := MatchTask(issue, c)
@@ -145,7 +145,7 @@ func TestMatchTask_RejectNonWorkType(t *testing.T) {
 	nonWorkTypes := []string{"merge-request", "gate", "molecule", "message", "agent", "role", "rig"}
 	for _, typ := range nonWorkTypes {
 		t.Run(typ, func(t *testing.T) {
-			issue := backend.IssueData{ID: "T-1", Status: "open", IssueType: typ}
+			issue := workitems.IssueSummary{ID: "T-1", Status: "open", IssueType: typ}
 			c := RoleConstraints{}
 
 			got := MatchTask(issue, c)
@@ -161,7 +161,7 @@ func TestMatchTask_RejectNonWorkType(t *testing.T) {
 }
 
 func TestMatchTask_RejectNonOpen(t *testing.T) {
-	issue := backend.IssueData{ID: "T-1", Status: "in_progress", IssueType: "task"}
+	issue := workitems.IssueSummary{ID: "T-1", Status: "in_progress", IssueType: "task"}
 	c := RoleConstraints{}
 
 	got := MatchTask(issue, c)
@@ -179,7 +179,7 @@ func TestMatchTask_RejectNonOpen(t *testing.T) {
 
 func TestMatchTask_RejectPriorityExceedsMax(t *testing.T) {
 	maxP := 1
-	issue := backend.IssueData{
+	issue := workitems.IssueSummary{
 		ID: "T-1", Status: "open", IssueType: "task",
 		Priority: 2, Design: "plan",
 	}
@@ -193,7 +193,7 @@ func TestMatchTask_RejectPriorityExceedsMax(t *testing.T) {
 }
 
 func TestMatchTask_MaxPriorityNil(t *testing.T) {
-	issue := backend.IssueData{
+	issue := workitems.IssueSummary{
 		ID: "T-1", Status: "open", IssueType: "task",
 		Priority: 4, Design: "plan",
 	}
@@ -211,14 +211,14 @@ func TestMatchTask_MaxPriorityZero(t *testing.T) {
 	c := RoleConstraints{TaskFilter: "has_design", MaxPriority: &maxP}
 
 	// P0 should be accepted
-	p0 := backend.IssueData{ID: "T-1", Status: "open", IssueType: "task", Priority: 0, Design: "plan"}
+	p0 := workitems.IssueSummary{ID: "T-1", Status: "open", IssueType: "task", Priority: 0, Design: "plan"}
 	got := MatchTask(p0, c)
 	if got.Score == 0 {
 		t.Error("P0 Score = 0, want non-zero")
 	}
 
 	// P1 should be rejected
-	p1 := backend.IssueData{ID: "T-2", Status: "open", IssueType: "task", Priority: 1, Design: "plan"}
+	p1 := workitems.IssueSummary{ID: "T-2", Status: "open", IssueType: "task", Priority: 1, Design: "plan"}
 	got = MatchTask(p1, c)
 	if got.Score != 0 {
 		t.Errorf("P1 Score = %d, want 0", got.Score)
@@ -226,7 +226,7 @@ func TestMatchTask_MaxPriorityZero(t *testing.T) {
 }
 
 func TestMatchTask_SkillMatch(t *testing.T) {
-	issue := backend.IssueData{
+	issue := workitems.IssueSummary{
 		ID: "T-1", Status: "open", IssueType: "task",
 		Priority: 2, Design: "plan",
 		Labels: []string{"go", "routing", "daemon"},
@@ -245,7 +245,7 @@ func TestMatchTask_SkillMatch(t *testing.T) {
 }
 
 func TestMatchTask_MultipleSkillMatches(t *testing.T) {
-	issue := backend.IssueData{
+	issue := workitems.IssueSummary{
 		ID: "T-1", Status: "open", IssueType: "task",
 		Priority: 2, Design: "plan",
 		Labels: []string{"go", "routing", "daemon"},
@@ -264,7 +264,7 @@ func TestMatchTask_MultipleSkillMatches(t *testing.T) {
 }
 
 func TestMatchTask_SkillFallback(t *testing.T) {
-	issue := backend.IssueData{
+	issue := workitems.IssueSummary{
 		ID: "T-1", Status: "open", IssueType: "task",
 		Priority: 2, Design: "plan",
 		Labels: []string{"frontend", "css"},
@@ -285,7 +285,7 @@ func TestMatchTask_SkillFallback(t *testing.T) {
 }
 
 func TestMatchTask_SkillFallbackNoLabels(t *testing.T) {
-	issue := backend.IssueData{
+	issue := workitems.IssueSummary{
 		ID: "T-1", Status: "open", IssueType: "task",
 		Priority: 2, Design: "plan",
 	}
@@ -302,7 +302,7 @@ func TestMatchTask_SkillFallbackNoLabels(t *testing.T) {
 }
 
 func TestMatchTask_NegativePriority(t *testing.T) {
-	issue := backend.IssueData{
+	issue := workitems.IssueSummary{
 		ID: "T-1", Status: "open", IssueType: "task",
 		Priority: -1, Design: "plan",
 	}
@@ -320,7 +320,7 @@ func TestMatchTask_NegativePriority(t *testing.T) {
 }
 
 func TestMatchTask_NoSkillsNoBonus(t *testing.T) {
-	issue := backend.IssueData{
+	issue := workitems.IssueSummary{
 		ID: "T-1", Status: "open", IssueType: "task",
 		Priority: 2, Design: "plan",
 		Labels: []string{"go", "routing"},
@@ -348,7 +348,7 @@ func TestMatchTask_PriorityBonus(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		issue := backend.IssueData{
+		issue := workitems.IssueSummary{
 			ID: "T-1", Status: "open", IssueType: "task",
 			Priority: tt.priority, Design: "plan",
 		}
@@ -367,14 +367,14 @@ func TestMatchTask_TaskFilterNeedsPlan(t *testing.T) {
 	c := RoleConstraints{TaskFilter: "needs_plan"}
 
 	// Issue without design should match
-	noDesign := backend.IssueData{ID: "T-1", Status: "open", IssueType: "task"}
+	noDesign := workitems.IssueSummary{ID: "T-1", Status: "open", IssueType: "task"}
 	got := MatchTask(noDesign, c)
 	if got.Score == 0 {
 		t.Error("no-design issue rejected by needs_plan filter, want accepted")
 	}
 
 	// Issue with design but needs-revision should match
-	revision := backend.IssueData{
+	revision := workitems.IssueSummary{
 		ID: "T-2", Status: "open", IssueType: "task",
 		Design: "plan", Labels: []string{"needs-revision"},
 	}
@@ -384,7 +384,7 @@ func TestMatchTask_TaskFilterNeedsPlan(t *testing.T) {
 	}
 
 	// Issue with approved design should NOT match
-	hasDesign := backend.IssueData{
+	hasDesign := workitems.IssueSummary{
 		ID: "T-3", Status: "open", IssueType: "task",
 		Design: "plan",
 	}
@@ -398,7 +398,7 @@ func TestMatchTask_TaskFilterHasDesign(t *testing.T) {
 	c := RoleConstraints{TaskFilter: "has_design"}
 
 	// Issue with approved design should match
-	ready := backend.IssueData{
+	ready := workitems.IssueSummary{
 		ID: "T-1", Status: "open", IssueType: "task",
 		Design: "plan",
 	}
@@ -408,7 +408,7 @@ func TestMatchTask_TaskFilterHasDesign(t *testing.T) {
 	}
 
 	// Issue without design should NOT match
-	noDesign := backend.IssueData{ID: "T-2", Status: "open", IssueType: "task"}
+	noDesign := workitems.IssueSummary{ID: "T-2", Status: "open", IssueType: "task"}
 	got = MatchTask(noDesign, c)
 	if got.Score != 0 {
 		t.Errorf("no-design issue passed has_design filter, want rejected (Score=%d)", got.Score)
@@ -419,13 +419,13 @@ func TestMatchTask_TaskFilterAny(t *testing.T) {
 	c := RoleConstraints{TaskFilter: "any"}
 
 	// Both designed and undesigned should match
-	noDesign := backend.IssueData{ID: "T-1", Status: "open", IssueType: "task"}
+	noDesign := workitems.IssueSummary{ID: "T-1", Status: "open", IssueType: "task"}
 	got := MatchTask(noDesign, c)
 	if got.Score == 0 {
 		t.Error("no-design issue rejected by any filter, want accepted")
 	}
 
-	hasDesign := backend.IssueData{
+	hasDesign := workitems.IssueSummary{
 		ID: "T-2", Status: "open", IssueType: "task",
 		Design: "plan",
 	}
@@ -440,7 +440,7 @@ func TestMatchTask_TaskFilterBug(t *testing.T) {
 
 	for _, issueType := range []string{"bug", " BUG "} {
 		t.Run("accepts_"+strings.TrimSpace(issueType), func(t *testing.T) {
-			got := MatchTask(backend.IssueData{
+			got := MatchTask(workitems.IssueSummary{
 				ID: "BUG-1", Status: "open", IssueType: issueType, Priority: 1,
 			}, c)
 			if got.Score == 0 {
@@ -451,7 +451,7 @@ func TestMatchTask_TaskFilterBug(t *testing.T) {
 
 	for _, issueType := range []string{"task", "feature", ""} {
 		t.Run("rejects_"+issueType, func(t *testing.T) {
-			got := MatchTask(backend.IssueData{
+			got := MatchTask(workitems.IssueSummary{
 				ID: "TASK-1", Status: "open", IssueType: issueType, Priority: 0,
 			}, c)
 			if got.Score != 0 || got.Reason != "filter: issue type is not bug" {
@@ -460,7 +460,7 @@ func TestMatchTask_TaskFilterBug(t *testing.T) {
 		})
 	}
 
-	triaged := MatchTask(backend.IssueData{
+	triaged := MatchTask(workitems.IssueSummary{
 		ID: "BUG-2", Status: "open", IssueType: "bug", Labels: []string{" TRIAGED "},
 	}, c)
 	if triaged.Score != 0 || triaged.Reason != "filter: bug is already triaged" {
@@ -472,7 +472,7 @@ func TestMatchTask_TaskFilterDefault(t *testing.T) {
 	// Empty TaskFilter defaults to "has_design"
 	c := RoleConstraints{}
 
-	ready := backend.IssueData{
+	ready := workitems.IssueSummary{
 		ID: "T-1", Status: "open", IssueType: "task",
 		Design: "plan",
 	}
@@ -481,7 +481,7 @@ func TestMatchTask_TaskFilterDefault(t *testing.T) {
 		t.Error("ready issue rejected by default filter, want accepted")
 	}
 
-	noDesign := backend.IssueData{ID: "T-2", Status: "open", IssueType: "task"}
+	noDesign := workitems.IssueSummary{ID: "T-2", Status: "open", IssueType: "task"}
 	got = MatchTask(noDesign, c)
 	if got.Score != 0 {
 		t.Errorf("no-design issue passed default filter, want rejected (Score=%d)", got.Score)
@@ -492,13 +492,13 @@ func TestMatchTask_TaskFilterUnknown(t *testing.T) {
 	// Unknown filter value falls back to "has_design" behavior
 	c := RoleConstraints{TaskFilter: "invalid_filter"}
 
-	ready := backend.IssueData{ID: "T-1", Status: "open", IssueType: "task", Design: "plan"}
+	ready := workitems.IssueSummary{ID: "T-1", Status: "open", IssueType: "task", Design: "plan"}
 	got := MatchTask(ready, c)
 	if got.Score == 0 {
 		t.Error("ready issue rejected by unknown filter, want has_design fallback")
 	}
 
-	noDesign := backend.IssueData{ID: "T-2", Status: "open", IssueType: "task"}
+	noDesign := workitems.IssueSummary{ID: "T-2", Status: "open", IssueType: "task"}
 	got = MatchTask(noDesign, c)
 	if got.Score != 0 {
 		t.Errorf("no-design issue passed unknown filter, want rejected (Score=%d)", got.Score)
@@ -506,7 +506,7 @@ func TestMatchTask_TaskFilterUnknown(t *testing.T) {
 }
 
 func TestMatchTask_CombinedScore(t *testing.T) {
-	issue := backend.IssueData{
+	issue := workitems.IssueSummary{
 		ID: "T-1", Status: "open", IssueType: "task",
 		Priority: 1, Design: "plan",
 		Labels: []string{"go", "daemon", "routing"},
@@ -537,7 +537,7 @@ func TestSelectBestTask_Empty(t *testing.T) {
 }
 
 func TestSelectBestTask_AllRejected(t *testing.T) {
-	issues := []backend.IssueData{
+	issues := []workitems.IssueSummary{
 		{ID: "E-1", Status: "open", IssueType: "epic"},
 		{ID: "T-1", Status: "closed", IssueType: "task"},
 	}
@@ -551,7 +551,7 @@ func TestSelectBestTask_AllRejected(t *testing.T) {
 }
 
 func TestSelectBestTask_SingleMatch(t *testing.T) {
-	issues := []backend.IssueData{
+	issues := []workitems.IssueSummary{
 		{ID: "E-1", Status: "open", IssueType: "epic"},
 		{ID: "T-1", Status: "open", IssueType: "task", Design: "plan"},
 	}
@@ -568,7 +568,7 @@ func TestSelectBestTask_SingleMatch(t *testing.T) {
 }
 
 func TestSelectBestTask_HighestScore(t *testing.T) {
-	issues := []backend.IssueData{
+	issues := []workitems.IssueSummary{
 		{ID: "T-1", Status: "open", IssueType: "task", Priority: 2, Design: "plan", Labels: []string{"go"}},
 		{ID: "T-2", Status: "open", IssueType: "task", Priority: 2, Design: "plan", Labels: []string{"frontend"}},
 	}
@@ -590,7 +590,7 @@ func TestSelectBestTask_HighestScore(t *testing.T) {
 func TestSelectBestTask_HigherPriorityWins(t *testing.T) {
 	// T-2 wins because P0 produces a higher priority bonus (20) vs P2 (12),
 	// giving it a higher overall score.
-	issues := []backend.IssueData{
+	issues := []workitems.IssueSummary{
 		{ID: "T-1", Status: "open", IssueType: "task", Priority: 2, Design: "plan"},
 		{ID: "T-2", Status: "open", IssueType: "task", Priority: 0, Design: "plan"},
 	}
@@ -607,7 +607,7 @@ func TestSelectBestTask_HigherPriorityWins(t *testing.T) {
 }
 
 func TestSelectBestTask_BugFilterSkipsHigherScoringNonBug(t *testing.T) {
-	issues := []backend.IssueData{
+	issues := []workitems.IssueSummary{
 		{ID: "TASK-1", Status: "open", IssueType: "task", Priority: 0, Labels: []string{"triage"}},
 		{ID: "BUG-1", Status: "open", IssueType: "bug", Priority: 4},
 	}
@@ -622,7 +622,7 @@ func TestSelectBestTask_BugFilterSkipsHigherScoringNonBug(t *testing.T) {
 
 func TestSelectBestTask_TiebreakByID(t *testing.T) {
 	// Same priority, same score — tiebreak by ID
-	issues := []backend.IssueData{
+	issues := []workitems.IssueSummary{
 		{ID: "T-B", Status: "open", IssueType: "task", Priority: 2, Design: "plan"},
 		{ID: "T-A", Status: "open", IssueType: "task", Priority: 2, Design: "plan"},
 	}
@@ -639,7 +639,7 @@ func TestSelectBestTask_TiebreakByID(t *testing.T) {
 }
 
 func TestSelectBestTask_MixedScores(t *testing.T) {
-	issues := []backend.IssueData{
+	issues := []workitems.IssueSummary{
 		{ID: "E-1", Status: "open", IssueType: "epic"},                                                                // rejected (epic)
 		{ID: "T-1", Status: "open", IssueType: "task", Priority: 2, Design: "plan", Labels: []string{"frontend"}},     // fallback (skill mismatch)
 		{ID: "T-2", Status: "open", IssueType: "task", Priority: 1, Design: "plan", Labels: []string{"go"}},           // high score (skill match)
@@ -819,7 +819,7 @@ func TestBuildRouterTaskCheck_NoConstraints(t *testing.T) {
 // --- Repo affinity tests ---
 
 func TestMatchTask_RepoAffinityMatch(t *testing.T) {
-	issue := backend.IssueData{
+	issue := workitems.IssueSummary{
 		ID: "T-1", Status: "open", IssueType: "task",
 		Priority: 2, Design: "plan",
 		SourceRepo: "repo-a",
@@ -838,7 +838,7 @@ func TestMatchTask_RepoAffinityMatch(t *testing.T) {
 }
 
 func TestMatchTask_RepoAffinityMismatch(t *testing.T) {
-	issue := backend.IssueData{
+	issue := workitems.IssueSummary{
 		ID: "T-1", Status: "open", IssueType: "task",
 		Priority: 2, Design: "plan",
 		SourceRepo: "repo-b",
@@ -859,7 +859,7 @@ func TestMatchTask_RepoAffinityMismatch(t *testing.T) {
 }
 
 func TestMatchTask_RepoAffinityNoConstraint(t *testing.T) {
-	issue := backend.IssueData{
+	issue := workitems.IssueSummary{
 		ID: "T-1", Status: "open", IssueType: "task",
 		Priority: 2, Design: "plan",
 		SourceRepo: "repo-a",
@@ -875,7 +875,7 @@ func TestMatchTask_RepoAffinityNoConstraint(t *testing.T) {
 }
 
 func TestMatchTask_RepoAffinityEmptyIssueRepo(t *testing.T) {
-	issue := backend.IssueData{
+	issue := workitems.IssueSummary{
 		ID: "T-1", Status: "open", IssueType: "task",
 		Priority: 2, Design: "plan",
 		SourceRepo: "",
