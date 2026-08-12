@@ -69,5 +69,9 @@ tests:
         intent: "Wait until the terminal wrapper mounts the xterm grid"
       - wait:
           fn: >-
-            (() => { const rows = document.querySelectorAll('[data-testid=terminal-wrapper] .term-row'); return rows.length > 0 && Array.from(rows).map((row) => row.textContent).join('').trim().length > 0; })()
+            (() => {
+              const wrapper = document.querySelector('[data-testid=terminal-wrapper]');
+              const rows = wrapper?.querySelector('.xterm-rows')?.textContent || '';
+              return rows.trim().length > 0;
+            })()
         intent: "Wait until the live terminal renders non-empty backend output"
