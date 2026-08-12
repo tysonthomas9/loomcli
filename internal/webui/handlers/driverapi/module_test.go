@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -24,6 +25,8 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
+	workspacemodule "github.com/tysonthomas9/loomcli/internal/modules/workspace"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/testutil"
@@ -49,6 +52,223 @@ type fakeIssueBackend struct {
 	repositoryBlocks      []string
 	repositoryBlockResult *backend.RepositoryRequirementResult
 	repositoryBlockErr    error
+}
+
+type testWorkItems struct{ backend *fakeIssueBackend }
+
+type testAutomationQueries struct{ store store.Store }
+
+type testRepositoryQueries struct{ store store.RepoStore }
+
+type testOrchestrationSessionQueries struct {
+	store store.OrchestrationSessionStore
+}
+
+func (queries testOrchestrationSessionQueries) FindActiveOrchestrationSession(
+	ctx context.Context,
+	workspace,
+	agentID string,
+) (string, error) {
+	return store.OrchestrationSessionIDFor(ctx, queries.store, workspace, agentID)
+}
+
+func (queries testRepositoryQueries) GetRepository(
+	ctx context.Context,
+	query workspacemodule.GetRepositoryQuery,
+) (*workspacemodule.Repository, error) {
+	return queries.store.Get(ctx, query.WorkspaceReference, query.Name)
+}
+
+func (queries testRepositoryQueries) ListRepositories(
+	ctx context.Context,
+	query workspacemodule.ListRepositoriesQuery,
+) ([]workspacemodule.Repository, error) {
+	values, err := queries.store.List(ctx, query.WorkspaceReference)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]workspacemodule.Repository, 0, len(values))
+	for _, value := range values {
+		if value != nil {
+			out = append(out, *value)
+		}
+	}
+	return out, nil
+}
+
+func (queries testAutomationQueries) GetBinding(ctx context.Context, workspace, bindingID string) (*automation.Binding, error) {
+	value, err := queries.store.TriggerBindings().Get(ctx, workspace, bindingID)
+	return value, testAutomationError(err)
+}
+
+func (queries testAutomationQueries) ListBindings(
+	ctx context.Context,
+	workspace string,
+	filter automation.BindingFilter,
+) ([]*automation.Binding, error) {
+	values, err := queries.store.TriggerBindings().List(ctx, workspace, store.TriggerBindingFilter{
+		SourceKind: filter.SourceKind, RouteKey: filter.RouteKey, DriverID: filter.DriverID,
+		TargetAgentServiceID: filter.TargetAgentServiceID, Enabled: filter.Enabled, Limit: filter.Limit,
+	})
+	return values, testAutomationError(err)
+}
+
+func (queries testAutomationQueries) GetEvent(ctx context.Context, workspace, eventID string) (*automation.Event, error) {
+	value, err := queries.store.TriggerEvents().Get(ctx, workspace, eventID)
+	return value, testAutomationError(err)
+}
+
+func (queries testAutomationQueries) ListEvents(
+	ctx context.Context,
+	workspace string,
+	filter automation.EventFilter,
+) ([]*automation.Event, error) {
+	values, err := queries.store.TriggerEvents().List(ctx, workspace, store.TriggerEventFilter{
+		SourceKind: filter.SourceKind, TriggerBindingID: filter.BindingID, Limit: filter.Limit,
+	})
+	return values, testAutomationError(err)
+}
+
+func (queries testAutomationQueries) GetDelivery(ctx context.Context, workspace, deliveryID string) (*automation.Delivery, error) {
+	value, err := queries.store.TriggerDeliveries().Get(ctx, workspace, deliveryID)
+	return value, testAutomationError(err)
+}
+
+func (queries testAutomationQueries) ListDeliveries(
+	ctx context.Context,
+	workspace string,
+	filter automation.DeliveryFilter,
+) ([]*automation.Delivery, error) {
+	values, err := queries.store.TriggerDeliveries().List(ctx, workspace, store.TriggerDeliveryFilter{
+		TriggerEventID: filter.EventID, TriggerBindingID: filter.BindingID, Status: filter.Status, Limit: filter.Limit,
+	})
+	return values, testAutomationError(err)
+}
+
+func testAutomationError(err error) error {
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, domain.ErrNotFound):
+		return fmt.Errorf("%s: %w", err, automation.ErrNotFound)
+	case errors.Is(err, domain.ErrConflict):
+		return fmt.Errorf("%s: %w", err, automation.ErrConflict)
+	default:
+		return err
+	}
+}
+
+func (items testWorkItems) Get(ctx context.Context, query workitems.GetQuery) (*workitems.IssueDetail, error) {
+	value, err := items.backend.Get(ctx, query.IssueID)
+	if err != nil {
+		return nil, testWorkItemError(err)
+	}
+	if value == nil {
+		return nil, workitems.ErrNotFound
+	}
+	return &workitems.IssueDetail{
+		ID: value.ID, Title: value.Title, Status: value.Status, Priority: value.Priority,
+		IssueType: value.IssueType, Assignee: value.Assignee, Labels: append([]string(nil), value.Labels...),
+		SourceRepo: value.SourceRepo, Parent: value.Parent, ExternalRef: value.ExternalRef,
+		UpdatedAt: value.UpdatedAt,
+	}, nil
+}
+
+func (items testWorkItems) List(ctx context.Context, query workitems.ListQuery) (*workitems.ListResult, error) {
+	values, err := items.backend.List(ctx, backend.ListOpts{
+		ExternalRef: query.Filter.ExternalRef, Status: query.Filter.Status, IssueType: query.Filter.IssueType,
+		ParentID: query.Filter.ParentID, Limit: query.Filter.Limit,
+	})
+	if err != nil {
+		return nil, testWorkItemError(err)
+	}
+	out := make([]workitems.ListItem, 0, len(values))
+	for _, value := range values {
+		out = append(out, workitems.ListItem{IssueSummary: testWorkItemSummary(value)})
+	}
+	return &workitems.ListResult{Issues: out}, nil
+}
+
+func (items testWorkItems) Ready(ctx context.Context, query workitems.AvailabilityQuery) ([]workitems.IssueSummary, error) {
+	values, err := items.backend.Ready(ctx, backend.ReadyOpts{
+		ParentID: query.ParentID, Type: query.IssueType, SourceRepos: query.SourceRepos, Limit: query.Limit,
+	})
+	if err != nil {
+		return nil, testWorkItemError(err)
+	}
+	return testWorkItemSummaries(values), nil
+}
+
+func (items testWorkItems) Blocked(ctx context.Context, query workitems.AvailabilityQuery) ([]workitems.IssueSummary, error) {
+	values, err := items.backend.Blocked(ctx, backend.BlockedOpts{ParentID: query.ParentID, Limit: query.Limit})
+	if err != nil {
+		return nil, testWorkItemError(err)
+	}
+	return testWorkItemSummaries(values), nil
+}
+
+func (items testWorkItems) Patch(context.Context, workitems.PatchCommand) (*workitems.IssueDetail, error) {
+	return nil, workitems.ErrNotImplemented
+}
+
+func (items testWorkItems) AddComment(context.Context, workitems.AddCommentCommand) (*workitems.Comment, error) {
+	return nil, workitems.ErrNotImplemented
+}
+
+func (items testWorkItems) ListComments(context.Context, workitems.ListCommentsQuery) ([]*workitems.Comment, error) {
+	return nil, workitems.ErrNotImplemented
+}
+
+func (items testWorkItems) BlockRepositoryRequired(
+	ctx context.Context,
+	command workitems.BlockRepositoryRequiredCommand,
+) (*workitems.RepositoryAdmissionResult, error) {
+	value, err := items.backend.BlockRepositoryRequired(ctx, command.IssueID)
+	if err != nil {
+		return nil, testWorkItemError(err)
+	}
+	out := &workitems.RepositoryAdmissionResult{
+		Changed: value.Changed, Replayed: value.Replayed, DispatchReady: value.DispatchReady,
+		Blocked: value.Blocked, Reopened: value.Reopened, Outcome: value.Outcome,
+	}
+	if value.Issue != nil {
+		issue := testWorkItemSummary(*value.Issue)
+		out.Issue = &issue
+	}
+	return out, nil
+}
+
+func testWorkItemSummaries(values []backend.IssueData) []workitems.IssueSummary {
+	out := make([]workitems.IssueSummary, 0, len(values))
+	for _, value := range values {
+		out = append(out, testWorkItemSummary(value))
+	}
+	return out
+}
+
+func testWorkItemSummary(value backend.IssueData) workitems.IssueSummary {
+	return workitems.IssueSummary{
+		ID: value.ID, Title: value.Title, Status: value.Status, Priority: value.Priority,
+		IssueType: value.IssueType, Assignee: value.Assignee, Labels: append([]string(nil), value.Labels...),
+		SourceRepo: value.SourceRepo, Parent: value.Parent, ExternalRef: value.ExternalRef,
+		BlockedByCount: value.BlockedByCount, BlockedBy: append([]string(nil), value.BlockedBy...),
+		UpdatedAt: value.UpdatedAt,
+	}
+}
+
+func testWorkItemError(err error) error {
+	switch {
+	case backend.IsKind(err, backend.KindValidation):
+		return fmt.Errorf("%s: %w", err, workitems.ErrInvalid)
+	case backend.IsKind(err, backend.KindNotFound):
+		return fmt.Errorf("%s: %w", err, workitems.ErrNotFound)
+	case backend.IsKind(err, backend.KindConflict):
+		return fmt.Errorf("%s: %w", err, workitems.ErrConflict)
+	case backend.IsKind(err, backend.KindUnavailable):
+		return fmt.Errorf("%s: %w", err, workitems.ErrUnavailable)
+	default:
+		return err
+	}
 }
 
 type fakeRelease struct {
@@ -149,6 +369,43 @@ type testStoreAgentIdentities struct {
 	store store.AgentServiceStore
 }
 
+type testStoreAgentRoles struct{ store store.RoleStore }
+
+func (queries testStoreAgentRoles) GetRole(ctx context.Context, workspace, roleName string) (*agents.Role, error) {
+	value, err := queries.store.Get(ctx, workspace, roleName)
+	if err != nil {
+		return nil, err
+	}
+	return testCanonicalRole(value), nil
+}
+
+func (queries testStoreAgentRoles) ListRoles(ctx context.Context, workspace string) ([]*agents.Role, error) {
+	values, err := queries.store.List(ctx, workspace)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]*agents.Role, 0, len(values))
+	for _, value := range values {
+		out = append(out, testCanonicalRole(value))
+	}
+	return out, nil
+}
+
+func testCanonicalRole(value *domain.Role) *agents.Role {
+	if value == nil {
+		return nil
+	}
+	return &agents.Role{
+		WorkspaceKey: value.WorkspaceKey, Name: value.Name, Kind: string(value.Kind),
+		Description: value.Description, Prompt: value.Prompt, PromptFile: value.PromptFile,
+		Model: value.Model, TaskFilter: value.TaskFilter, Backend: value.Backend, Effort: value.Effort,
+		PathPatterns: append([]string(nil), value.PathPatterns...), Skills: append([]string(nil), value.Skills...),
+		MaxPriority: value.MaxPriority, MaxConcurrency: value.MaxConcurrency, ReadOnly: value.ReadOnly,
+		AllowedTools: append([]string(nil), value.AllowedTools...), DeniedTools: append([]string(nil), value.DeniedTools...),
+		MaxBudgetUSD: value.MaxBudgetUSD, CreatedAt: value.CreatedAt, UpdatedAt: value.UpdatedAt,
+	}
+}
+
 func (queries testStoreAgentIdentities) GetAgent(ctx context.Context, workspace, agentID string) (*agents.Agent, error) {
 	value, err := queries.store.Get(ctx, workspace, agentID)
 	if err != nil {
@@ -184,6 +441,7 @@ func testCanonicalAgent(value *domain.AgentService) *agents.Agent {
 		Name:         value.Name,
 		Behavior:     agents.BehaviorReference{RoleName: value.RoleName},
 		ProfileName:  value.ProfileName,
+		Metadata:     maps.Clone(value.Metadata),
 		CreatedAt:    value.CreatedAt,
 		UpdatedAt:    value.UpdatedAt,
 	}
@@ -669,21 +927,24 @@ func newTestHarness(t *testing.T) *testHarness {
 		t.Fatalf("new test Execution capability: %v", err)
 	}
 	module := NewModule(Config{
-		Store:                st,
-		RunTokenKey:          runTokenKey,
-		WorkflowEventing:     eventWorkflow,
-		Execution:            testDriverRunExecution{DriverRunAPI: executionCapability.DriverRunAPI(), store: st, issues: fake},
-		ExecutionAuthorities: executionCapability.DriverRunAuthorityResolver(),
-		AgentIdentities:      testStoreAgentIdentities{store: st.AgentServices()},
-		TaskRunRequests:      executionCapability.TaskRunRequestAPI(),
-		TaskRunRecovery:      executionCapability.TaskRunRecoveryAPI(),
-		TaskRuns:             executionCapability.TaskRunAPI(),
-		TaskRunAuthorities:   executionCapability.TaskRunAuthorityResolver(),
-		WorkflowCatalog:      testWorkflowCatalog{store: st},
-		IssueBackends: func(_, actor string) (backend.IssueBackend, error) {
-			fake.actor = actor
-			return fake, nil
-		},
+		RunTokenKey:           runTokenKey,
+		WorkflowEventing:      eventWorkflow,
+		Execution:             testDriverRunExecution{DriverRunAPI: executionCapability.DriverRunAPI(), store: st, issues: fake},
+		ExecutionAuthorities:  executionCapability.DriverRunAuthorityResolver(),
+		AgentIdentities:       testStoreAgentIdentities{store: st.AgentServices()},
+		AgentRoles:            testStoreAgentRoles{store: st.Roles()},
+		AutomationBindings:    testAutomationQueries{store: st},
+		AutomationEvents:      testAutomationQueries{store: st},
+		AutomationDeliveries:  testAutomationQueries{store: st},
+		TaskRunRequests:       executionCapability.TaskRunRequestAPI(),
+		TaskRunRecovery:       executionCapability.TaskRunRecoveryAPI(),
+		TaskRuns:              executionCapability.TaskRunAPI(),
+		TaskRunQueries:        executionCapability.TaskRunQueries(),
+		TaskRunAuthorities:    executionCapability.TaskRunAuthorityResolver(),
+		WorkflowCatalog:       testWorkflowCatalog{store: st},
+		WorkItems:             testWorkItems{backend: fake},
+		Repositories:          testRepositoryQueries{store: st.Repos()},
+		OrchestrationSessions: testOrchestrationSessionQueries{store: st},
 	})
 	mux := http.NewServeMux()
 	module.Register(mux)
@@ -770,9 +1031,9 @@ func TestVerifyRunOpProvesOwnerThroughExecution(t *testing.T) {
 	}
 }
 
-func TestIssueOpsFailClosedWithoutInjectedExecutionIssueBackend(t *testing.T) {
+func TestIssueOpsFailClosedWithoutInjectedWorkItems(t *testing.T) {
 	h := newTestHarness(t)
-	h.module.issueBackends = nil
+	h.module.workItems = nil
 	t.Setenv("LOOM_FLEET_DB_API_KEY", "ambient-credentials-must-not-enable-the-handler")
 
 	resp, decoded := h.do(t, opRequest{
@@ -1431,8 +1692,8 @@ func TestRoleGetUsesInjectedPromptReader(t *testing.T) {
 		t.Fatalf("create role: %v", err)
 	}
 
-	var readRole *domain.Role
-	h.module.rolePrompts = func(role *domain.Role) string {
+	var readRole *agents.Role
+	h.module.rolePrompts = func(role *agents.Role) string {
 		readRole = role
 		return "materialized file prompt"
 	}

@@ -74,7 +74,6 @@ goroutine_launches:
   - {file: "internal/webui/editor/launch_linux.go", function: "LaunchEditor", site: "go#1", callee: "cmd.Wait", disposition: component, component_ids: [editor-process-reaper-linux]}
   - {file: "internal/webui/editor/launch_windows.go", function: "LaunchEditor", site: "go#1", callee: "cmd.Wait", disposition: component, component_ids: [editor-process-reaper-windows]}
   - {file: "internal/webui/filecoord/git_status.go", function: "fileServiceImpl.inspectWorkspaceCheckouts", site: "go#1", callee: "<anonymous>", disposition: bounded, reason: "checkout inspection uses a ten-second context and joins its fan-out before return"}
-  - {file: "internal/webui/filecoord/history.go", function: "fileServiceImpl.startLegacyHistoryCleanup", site: "go#1", callee: "<anonymous>", disposition: component, component_ids: [legacy-file-history-boot-cleanup]}
   - {file: "internal/webui/fleet/timeout.go", function: "TimeoutEnforcer.Start", site: "go#1", callee: "t.run", disposition: component, component_ids: [fleet-task-timeout-enforcer]}
   - {file: "internal/webui/handlers/misc/auth_config.go", function: "NewAuthConfigLimiter", site: "go#1", callee: "l.CleanupLoop", disposition: component, component_ids: [auth-config-rate-limit-cleanup]}
   - {file: "internal/webui/handlers/misc/client_errors.go", function: "NewClientErrorLimiter", site: "go#1", callee: "l.CleanupLoop", disposition: component, component_ids: [client-error-rate-limit-cleanup]}
@@ -944,19 +943,6 @@ components:
     readiness_health: "relay construction must bind before the sandbox starts; accept errors terminate the loop"
     retry_backoff: "no accept-loop restart; per-connection forwarding failures remain isolated"
     classification: request-scoped
-
-  - id: legacy-file-history-boot-cleanup
-    kind: component
-    file: internal/webui/filecoord/history.go
-    function: fileServiceImpl.startLegacyHistoryCleanup
-    site: component:boot-cleanup
-    capability: artifacts
-    owner: file service adapter
-    cadence: "once asynchronously when the file service is constructed"
-    cancellation: "not cancellable after launch; historyCleanupDone closes on completion"
-    readiness_health: "does not gate readiness; records and warning-logs the cleanup result"
-    retry_backoff: "none in-process; a later file-service construction retries the idempotent cleanup"
-    classification: managed
 
   - id: editor-process-reaper-darwin
     kind: component

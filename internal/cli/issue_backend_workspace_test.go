@@ -80,38 +80,3 @@ func TestWorkspaceAwareIssueBackendForURLKeepsExternalEnvironmentAuth(t *testing
 		t.Fatalf("GetMutationsAfter: %v", err)
 	}
 }
-
-func TestWorkspaceActorIssueBackendForConfigKeepsServiceCredentialInFactory(t *testing.T) {
-	const serviceCredential = "embedded-runtime-service-credential"
-	t.Setenv(bootstrap.EnvFleetDBAPIKey, "ambient-credential-must-not-win")
-	var requests int
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		requests++
-		if r.Method != http.MethodGet || r.URL.Path != "/api/v1/PHASE4/issues/ready" {
-			t.Errorf("request = %s %s, want GET /api/v1/PHASE4/issues/ready", r.Method, r.URL.Path)
-		}
-		if r.Header.Get("X-API-Key") != serviceCredential || r.Header.Get("X-Fleet-API-Key") != serviceCredential {
-			t.Error("execution issue backend did not carry the captured FleetDB service credential")
-			w.WriteHeader(http.StatusUnauthorized)
-			return
-		}
-		if got := r.Header.Get("X-Actor"); got != "driver-run:run-1" {
-			t.Errorf("X-Actor = %q, want fenced DriverRun actor", got)
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "data": []any{}})
-	}))
-	defer server.Close()
-
-	factory := WorkspaceActorIssueBackendForConfig(server.URL, serviceCredential)
-	issueBackend, err := factory("PHASE4", "driver-run:run-1")
-	if err != nil {
-		t.Fatalf("build execution issue backend: %v", err)
-	}
-	if _, err := issueBackend.Ready(context.Background(), backend.ReadyOpts{}); err != nil {
-		t.Fatalf("Ready: %v", err)
-	}
-	if requests != 1 {
-		t.Fatalf("requests = %d, want 1", requests)
-	}
-}

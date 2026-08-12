@@ -17,14 +17,12 @@ import (
 	"go.opentelemetry.io/otel/trace"
 	"nhooyr.io/websocket" //nolint:staticcheck // SA1019: websocket migration tracked separately
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/modules/agents"
 	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
-	"github.com/tysonthomas9/loomcli/internal/webui/storeadapter"
 	webuterminal "github.com/tysonthomas9/loomcli/internal/webui/terminal"
 )
 
@@ -74,7 +72,7 @@ type terminalWSParams struct {
 	auth          *realtime.TerminalAuth
 	patterns      []string
 	loomServerURL string
-	store         terminalStore
+	state         StateQueries
 	tabMetaStore  webuterminal.TabMetadataReader
 	hub           *realtime.Hub
 	// serverStartedAt is used to distinguish "tab metadata from a prior
@@ -107,7 +105,7 @@ func HandleTerminalWS(
 	auth *realtime.TerminalAuth,
 	allowedOrigins []string,
 	loomServerURL string,
-	st terminalStore,
+	state StateQueries,
 	tabMetaStore webuterminal.TabMetadataReader,
 	hub *realtime.Hub,
 	serverStartedAt time.Time,
@@ -118,7 +116,7 @@ func HandleTerminalWS(
 		auth,
 		allowedOrigins,
 		loomServerURL,
-		st,
+		state,
 		tabMetaStore,
 		hub,
 		serverStartedAt,
@@ -137,7 +135,7 @@ func HandleTerminalWSWithInteraction(
 	auth *realtime.TerminalAuth,
 	allowedOrigins []string,
 	loomServerURL string,
-	st terminalStore,
+	state StateQueries,
 	tabMetaStore webuterminal.TabMetadataReader,
 	hub *realtime.Hub,
 	serverStartedAt time.Time,
@@ -149,7 +147,7 @@ func HandleTerminalWSWithInteraction(
 		auth:            auth,
 		patterns:        originHosts(allowedOrigins),
 		loomServerURL:   loomServerURL,
-		store:           st,
+		state:           state,
 		tabMetaStore:    tabMetaStore,
 		hub:             hub,
 		serverStartedAt: serverStartedAt,
@@ -438,7 +436,7 @@ func runTerminalRelay(
 	// part of the scrollback replay.
 	if !reattach && session == "talk-to-lead" && p.loomServerURL != "" {
 		wsID := middleware.WorkspaceFromContext(reqCtx)
-		injectTerminalContextBanner(att, p.loomServerURL, workspaceNameFromStore(reqCtx, p.store, wsID))
+		injectTerminalContextBanner(att, p.loomServerURL, workspaceName(reqCtx, p.state, wsID))
 	}
 
 	broadcastSessionIssueEvent(p.tabMetaStore, p.hub, workspace, session)
@@ -530,7 +528,7 @@ func attachTerminalSession(
 		defer unlock()
 		if err := authorizeAgentTerminalLaunch(
 			ctx,
-			p.store,
+			p.state,
 			key.Workspace,
 			agentID,
 			p.agentIdentity,
@@ -580,7 +578,7 @@ func attachTerminalSession(
 	// boundary.
 	if err := authorizeAgentTerminalLaunch(
 		ctx,
-		p.store,
+		p.state,
 		key.Workspace,
 		agentID,
 		p.agentIdentity,
@@ -604,7 +602,10 @@ func ensureWorkspacePTYRegistered(ctx context.Context, p *terminalWSParams, work
 	// Healing resolve: if the local path is missing from state.json, re-bind it
 	// from an existing on-disk checkout so the PTY can register (otherwise the
 	// attach fails with "workspace unavailable" → the UI shows "Disconnected").
-	path := storeadapter.ResolveOrHealWorkspacePath(ctx, p.store, workspace)
+	if p.state == nil {
+		return
+	}
+	path := p.state.ResolveWorkspacePath(ctx, workspace)
 	if strings.TrimSpace(path) == "" {
 		return
 	}
@@ -632,7 +633,7 @@ func resolveTerminalLaunch(
 	if meta.Kind == "agent" {
 		if err := authorizeAgentTerminalLaunch(
 			ctx,
-			p.store,
+			p.state,
 			workspace,
 			meta.AgentID,
 			p.agentIdentity,
@@ -665,13 +666,13 @@ func resolveTerminalLaunch(
 
 func authorizeAgentTerminalLaunch(
 	ctx context.Context,
-	st terminalStore,
+	state StateQueries,
 	workspace,
 	agentID string,
 	identities ...terminalAgentIdentity,
 ) error {
-	if st == nil {
-		return errors.New("agent terminal state store unavailable")
+	if state == nil {
+		return errors.New("agent terminal state unavailable")
 	}
 	agentID = strings.TrimSpace(agentID)
 	if agentID == "" {
@@ -681,11 +682,11 @@ func authorizeAgentTerminalLaunch(
 	if err != nil {
 		return fmt.Errorf("load agent terminal state: %w", err)
 	}
-	role, err := loadAgentLaunchRole(ctx, st, workspace, agent.RoleName)
+	role, err := loadAgentLaunchRole(ctx, state, workspace, agent.RoleName)
 	if err != nil {
 		return fmt.Errorf("load agent terminal role: %w", err)
 	}
-	if isBackgroundWorker(agent, domain.ResolveRoleKind(role, agent.RoleName)) {
+	if isBackgroundWorker(agent, resolveTerminalRoleKind(role, agent.RoleName)) {
 		return errBackgroundWorkerTerminal
 	}
 	if agent.DesiredState != agents.DesiredRunning {
@@ -758,13 +759,13 @@ func injectTerminalContextBanner(att webuterminal.Attachment, loomServerURL stri
 	}
 }
 
-func workspaceNameFromStore(ctx context.Context, st terminalStore, wsID string) string {
-	if st == nil || wsID == "" {
+func workspaceName(ctx context.Context, state StateQueries, wsID string) string {
+	if state == nil || wsID == "" {
 		return ""
 	}
-	ws, err := st.Workspaces().Get(ctx, wsID)
-	if err != nil || ws == nil {
+	name, err := state.ResolveWorkspaceName(ctx, wsID)
+	if err != nil {
 		return ""
 	}
-	return ws.Name
+	return name
 }

@@ -149,6 +149,10 @@ func (f *routeWorkItems) Ready(context.Context, workitems.AvailabilityQuery) ([]
 	return []workitems.IssueSummary{}, nil
 }
 
+func (f *routeWorkItems) Blocked(context.Context, workitems.AvailabilityQuery) ([]workitems.IssueSummary, error) {
+	return []workitems.IssueSummary{}, nil
+}
+
 func (f *routeWorkItems) Search(context.Context, workitems.SearchQuery) ([]workitems.IssueSummary, error) {
 	f.searchCalls++
 	return []workitems.IssueSummary{}, nil
@@ -171,6 +175,9 @@ func (f *routeWorkItems) AssignRepository(_ context.Context, command workitems.A
 		return nil, f.assignRepositoryErr
 	}
 	return &workitems.IssueSummary{ID: command.IssueID, SourceRepo: command.Repository, Repo: command.Repository}, nil
+}
+func (f *routeWorkItems) BlockRepositoryRequired(context.Context, workitems.BlockRepositoryRequiredCommand) (*workitems.RepositoryAdmissionResult, error) {
+	return &workitems.RepositoryAdmissionResult{}, nil
 }
 func (f *routeWorkItems) Claim(_ context.Context, command workitems.ClaimCommand) (*workitems.IssueDetail, error) {
 	f.claimIDs = append(f.claimIDs, command.IssueID)

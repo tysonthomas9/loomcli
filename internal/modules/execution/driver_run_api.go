@@ -2,6 +2,7 @@ package execution
 
 import (
 	"context"
+	"strings"
 
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 )
@@ -57,6 +58,9 @@ func DriverRunOperationRules() []authority.OperationRule {
 type DriverRunAPI interface {
 	GetDriverRun(context.Context, string, string) (*DriverRun, error)
 	ListDriverRuns(context.Context, DriverRunQuery) ([]*DriverRun, error)
+	ListDriverRunAwaits(context.Context, string, string) ([]*DriverAwaitInstance, error)
+	ListDriverRunSteps(context.Context, string, string) ([]DriverRunStep, error)
+	ListDriverRunEvents(context.Context, DriverRunEventQuery) (*DriverRunEventPage, error)
 	SubmitDriverRun(context.Context, authority.OperatorAuthority, SubmitDriverRunCommand) (*DriverRun, error)
 	StartChildDriverRun(context.Context, authority.ExecutionAuthority, StartChildDriverRunCommand) (*DriverRun, error)
 	CascadeChildDriverRuns(context.Context, authority.ExecutionAuthority, CascadeChildDriverRunsCommand) (CascadeChildDriverRunsResult, error)
@@ -73,6 +77,135 @@ type DriverRunAPI interface {
 	ResolveDriverAwait(context.Context, authority.SystemAuthority, ResolveDriverAwaitCommand) error
 	BindWorkerProfileParent(context.Context, authority.ExecutionAuthority, BindWorkerProfileParentCommand) (*WorkerProfile, error)
 	EnqueueLeadAssignment(context.Context, authority.ExecutionAuthority, EnqueueLeadAssignmentCommand) (*OutboxDelivery, error)
+}
+
+func (service *Service) GetDriverRun(ctx context.Context, workspace, runID string) (*DriverRun, error) {
+	if strings.TrimSpace(workspace) == "" || strings.TrimSpace(runID) == "" {
+		return nil, ErrInvalid
+	}
+	port := service.dependencies.DriverRuns.Queries
+	if port == nil {
+		return nil, ErrUnavailable
+	}
+	run, err := port.GetDriverRun(ctx, workspace, runID)
+	if err != nil {
+		return nil, err
+	}
+	if run == nil || run.WorkspaceKey != workspace || run.RunID != runID {
+		return nil, ErrConflict
+	}
+	return cloneDriverRun(run), nil
+}
+
+func (service *Service) ListDriverRuns(ctx context.Context, query DriverRunQuery) ([]*DriverRun, error) {
+	if strings.TrimSpace(query.WorkspaceKey) == "" || query.Limit < 0 {
+		return nil, ErrInvalid
+	}
+	port := service.dependencies.DriverRuns.Queries
+	if port == nil {
+		return nil, ErrUnavailable
+	}
+	runs, err := port.ListDriverRuns(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]*DriverRun, 0, len(runs))
+	for _, run := range runs {
+		if run == nil || run.WorkspaceKey != query.WorkspaceKey ||
+			(query.DriverID != "" && run.DriverID != query.DriverID) ||
+			(query.EpicID != "" && run.EpicID != query.EpicID) ||
+			(query.ParentRunID != "" && run.ParentRunID != query.ParentRunID) ||
+			(query.AgentServiceID != "" && run.AgentServiceID != query.AgentServiceID) ||
+			(query.Status != "" && run.Status != query.Status) {
+			return nil, ErrConflict
+		}
+		result = append(result, cloneDriverRun(run))
+	}
+	if query.Limit > 0 && len(result) > query.Limit {
+		return nil, ErrConflict
+	}
+	return result, nil
+}
+
+func (service *Service) ListDriverRunAwaits(
+	ctx context.Context,
+	workspace,
+	runID string,
+) ([]*DriverAwaitInstance, error) {
+	workspace = strings.TrimSpace(workspace)
+	runID = strings.TrimSpace(runID)
+	if workspace == "" || runID == "" {
+		return nil, ErrInvalid
+	}
+	port := service.dependencies.DriverRuns.AwaitQueries
+	if port == nil {
+		return nil, ErrUnavailable
+	}
+	values, err := port.ListDriverRunAwaits(ctx, workspace, runID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]*DriverAwaitInstance, 0, len(values))
+	for _, value := range values {
+		if value == nil || value.WorkspaceKey != workspace || value.RunID != runID {
+			return nil, ErrConflict
+		}
+		out = append(out, cloneDriverAwait(value))
+	}
+	return out, nil
+}
+
+func (service *Service) ListDriverRunSteps(ctx context.Context, workspace, runID string) ([]DriverRunStep, error) {
+	workspace = strings.TrimSpace(workspace)
+	runID = strings.TrimSpace(runID)
+	if workspace == "" || runID == "" {
+		return nil, ErrInvalid
+	}
+	port := service.dependencies.DriverRuns.Projections
+	if port == nil {
+		return nil, ErrUnavailable
+	}
+	values, err := port.ListDriverRunSteps(ctx, workspace, runID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]DriverRunStep, len(values))
+	copy(out, values)
+	for index := range out {
+		if out[index].WorkspaceKey != workspace || out[index].DriverRunID != runID || strings.TrimSpace(out[index].StepID) == "" {
+			return nil, ErrConflict
+		}
+	}
+	return out, nil
+}
+
+func (service *Service) ListDriverRunEvents(ctx context.Context, query DriverRunEventQuery) (*DriverRunEventPage, error) {
+	query.WorkspaceKey = strings.TrimSpace(query.WorkspaceKey)
+	query.RunID = strings.TrimSpace(query.RunID)
+	query.After = strings.TrimSpace(query.After)
+	if query.WorkspaceKey == "" || query.RunID == "" || query.Limit < 1 || query.Limit > 1000 {
+		return nil, ErrInvalid
+	}
+	port := service.dependencies.DriverRuns.Projections
+	if port == nil {
+		return nil, ErrUnavailable
+	}
+	page, err := port.ListDriverRunEvents(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	if page == nil {
+		return nil, ErrConflict
+	}
+	out := &DriverRunEventPage{Cursor: page.Cursor, Events: make([]DriverRunEvent, len(page.Events))}
+	copy(out.Events, page.Events)
+	for index := range out.Events {
+		out.Events[index].Metadata = cloneDriverRunStringMap(out.Events[index].Metadata)
+		if out.Events[index].WorkspaceID != query.WorkspaceKey {
+			return nil, ErrConflict
+		}
+	}
+	return out, nil
 }
 
 // DriverRunAuthorityResolver derives one exact run-bound authority after the

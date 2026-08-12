@@ -6,17 +6,19 @@ import (
 )
 
 type DriverRunDependencies struct {
-	Submissions DriverRunSubmissionPort
-	ChildStarts DriverRunChildStartPort
-	Cascades    DriverRunCascadePort
-	Claims      DriverRunClaimPort
-	Heartbeats  DriverRunHeartbeatPort
-	WorkItems   DriverRunWorkItemPort
-	Finalizer   DriverRunFinalizePort
-	Recovery    DriverRunRecoveryPort
-	Awaits      DriverAwaitPort
-	Queries     DriverRunQueryPort
-	Resolutions DriverAwaitResolutionPort
+	Submissions  DriverRunSubmissionPort
+	ChildStarts  DriverRunChildStartPort
+	Cascades     DriverRunCascadePort
+	Claims       DriverRunClaimPort
+	Heartbeats   DriverRunHeartbeatPort
+	WorkItems    DriverRunWorkItemPort
+	Finalizer    DriverRunFinalizePort
+	Recovery     DriverRunRecoveryPort
+	Awaits       DriverAwaitPort
+	Queries      DriverRunQueryPort
+	AwaitQueries DriverAwaitQueryPort
+	Projections  DriverRunProjectionPort
+	Resolutions  DriverAwaitResolutionPort
 
 	// TerminalWorkRecovery is a system-only convergence seam for descendants
 	// and claims left behind after a DriverRun has reached terminal state.
@@ -78,6 +80,15 @@ type DriverRunRecoveryPort interface {
 type DriverRunQueryPort interface {
 	GetDriverRun(context.Context, string, string) (*DriverRun, error)
 	ListDriverRuns(context.Context, DriverRunQuery) ([]*DriverRun, error)
+}
+
+type DriverAwaitQueryPort interface {
+	ListDriverRunAwaits(context.Context, string, string) ([]*DriverAwaitInstance, error)
+}
+
+type DriverRunProjectionPort interface {
+	ListDriverRunSteps(context.Context, string, string) ([]DriverRunStep, error)
+	ListDriverRunEvents(context.Context, DriverRunEventQuery) (*DriverRunEventPage, error)
 }
 
 type DriverAwaitResolutionPort interface {

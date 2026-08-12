@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -18,6 +19,8 @@ import (
 // command port from FleetDB's Execution transport; this composition has no
 // generic TaskRun/DriverStep/Event mutation fallback.
 type ExecutionTaskRunPortDependencies struct {
+	TaskRuns        store.TaskRunStore
+	TaskRunEvents   store.TaskRunEventStore
 	Requests        execution.TaskRunRequestPort
 	Claims          execution.TaskRunClaimPort
 	WorkItemDesign  execution.TaskRunWorkItemDesignPort
@@ -28,18 +31,87 @@ type ExecutionTaskRunPortDependencies struct {
 }
 
 func NewExecutionTaskRunPorts(dependencies ExecutionTaskRunPortDependencies) (execution.TaskRunDependencies, execution.WorkerDependencies, error) {
-	if dependencies.Requests == nil || dependencies.Claims == nil || dependencies.WorkItemDesign == nil || dependencies.Requeues == nil ||
+	if dependencies.TaskRuns == nil || dependencies.TaskRunEvents == nil || dependencies.Requests == nil || dependencies.Claims == nil || dependencies.WorkItemDesign == nil || dependencies.Requeues == nil ||
 		dependencies.RetryExhaustion == nil || dependencies.Nodes == nil || dependencies.WorkerProfiles == nil {
 		return execution.TaskRunDependencies{}, execution.WorkerDependencies{}, fmt.Errorf("compose TaskRun Execution ports: every narrow dependency is required")
 	}
 	adapter := &executionTaskRunPortsAdapter{dependencies: dependencies}
 	return execution.TaskRunDependencies{
+			Queries:  adapter,
 			Requests: dependencies.Requests, Claims: dependencies.Claims, WorkItemDesign: dependencies.WorkItemDesign,
 			Requeues:        dependencies.Requeues,
 			RetryExhaustion: dependencies.RetryExhaustion, Scheduling: adapter,
 		}, execution.WorkerDependencies{
 			Registration: adapter, Heartbeats: adapter, Drain: adapter, Profiles: adapter,
 		}, nil
+}
+
+func (adapter *executionTaskRunPortsAdapter) ListActiveTaskRuns(
+	ctx context.Context,
+	query execution.ActiveTaskRunQuery,
+) ([]*execution.TaskRun, error) {
+	var active []*domain.TaskRun
+	for _, status := range []domain.TaskRunStatus{domain.TaskRunQueued, domain.TaskRunRunning} {
+		filter := store.TaskRunFilter{DriverRunID: query.DriverRunID, Status: status}
+		if query.Limit > 0 {
+			filter.Limit = query.Limit
+		}
+		values, err := adapter.dependencies.TaskRuns.List(ctx, query.WorkspaceKey, filter)
+		if err != nil {
+			return nil, err
+		}
+		active = append(active, values...)
+	}
+	sort.SliceStable(active, func(i, j int) bool {
+		if active[i].CreatedAt.Equal(active[j].CreatedAt) {
+			return active[i].TaskRunID < active[j].TaskRunID
+		}
+		return active[i].CreatedAt.Before(active[j].CreatedAt)
+	})
+	if query.Limit > 0 && len(active) > query.Limit {
+		active = active[:query.Limit]
+	}
+	out := make([]*execution.TaskRun, 0, len(active))
+	for _, value := range active {
+		run, err := executionTaskRunSnapshot(value, "")
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, run)
+	}
+	return out, nil
+}
+
+func (adapter *executionTaskRunPortsAdapter) ListTaskRunEvents(
+	ctx context.Context,
+	query execution.TaskRunEventQuery,
+) ([]*execution.TaskRunEvent, error) {
+	values, err := adapter.dependencies.TaskRunEvents.ListSince(ctx, query.WorkspaceKey, store.TaskRunEventFilter{
+		EpicID: query.EpicID, DriverRunID: query.DriverRunID, AfterSeq: query.AfterSeq, Limit: query.Limit,
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]*execution.TaskRunEvent, 0, len(values))
+	for _, value := range values {
+		if value == nil {
+			return nil, execution.ErrConflict
+		}
+		status := execution.Status(value.Status)
+		if value.Status == domain.TaskRunCompleted {
+			status = execution.StatusSucceeded
+		}
+		out = append(out, &execution.TaskRunEvent{
+			WorkspaceKey: value.WorkspaceKey, EventID: value.EventID, Seq: value.Seq,
+			EpicID: value.EpicID, DriverRunID: value.DriverRunID, WorkItemID: value.TaskID,
+			TaskRunID: value.TaskRunID, Type: string(value.Type), Status: status,
+			SchedulerState: value.SchedulerState, Attempt: value.Attempt,
+			ErrorClass: value.ErrorClass, ErrorMessage: value.ErrorMessage,
+			LogsRef: value.LogsRef, ArtifactsRef: value.ArtifactsRef,
+			NextEligibleAt: value.NextEligibleAt, OccurredAt: value.OccurredAt,
+		})
+	}
+	return out, nil
 }
 
 // NewFleetTaskRunCommandPorts binds every owner-sensitive TaskRun command to
@@ -251,17 +323,17 @@ func (adapter *fleetTaskRunCommandPort) ExhaustTaskRunRetries(ctx context.Contex
 
 func mapFleetExecutionPortError(err error) error {
 	switch {
-	case errors.Is(err, fleetdb.ErrExecutionNotFound):
+	case errors.Is(err, fleetdb.ErrExecutionNotFound), errors.Is(err, domain.ErrNotFound):
 		return errors.Join(execution.ErrNotFound, err)
-	case errors.Is(err, fleetdb.ErrExecutionInvalid):
+	case errors.Is(err, fleetdb.ErrExecutionInvalid), errors.Is(err, domain.ErrInvalid):
 		return errors.Join(execution.ErrInvalid, err)
-	case errors.Is(err, fleetdb.ErrExecutionNotOwner):
+	case errors.Is(err, fleetdb.ErrExecutionNotOwner), errors.Is(err, domain.ErrNotOwner):
 		return errors.Join(execution.ErrFenceConflict, err)
-	case errors.Is(err, fleetdb.ErrExecutionInvalidTransition):
+	case errors.Is(err, fleetdb.ErrExecutionInvalidTransition), errors.Is(err, domain.ErrInvalidTransition):
 		return errors.Join(execution.ErrInvalidTransition, err)
 	case errors.Is(err, fleetdb.ErrExecutionAlreadyResumed):
 		return errors.Join(execution.ErrAlreadyResumed, err)
-	case errors.Is(err, fleetdb.ErrExecutionConflict):
+	case errors.Is(err, fleetdb.ErrExecutionConflict), errors.Is(err, domain.ErrConflict):
 		return errors.Join(execution.ErrConflict, err)
 	default:
 		return errors.Join(execution.ErrUnavailable, err)
@@ -270,6 +342,18 @@ func mapFleetExecutionPortError(err error) error {
 
 type executionTaskRunPortsAdapter struct {
 	dependencies ExecutionTaskRunPortDependencies
+}
+
+func (adapter *executionTaskRunPortsAdapter) GetTaskRun(
+	ctx context.Context,
+	workspace,
+	taskRunID string,
+) (*execution.TaskRun, error) {
+	run, err := adapter.dependencies.TaskRuns.Get(ctx, workspace, taskRunID)
+	if err != nil {
+		return nil, mapFleetExecutionPortError(err)
+	}
+	return executionTaskRunSnapshot(run, "")
 }
 
 func (adapter *executionTaskRunPortsAdapter) RegisterWorkerNode(ctx context.Context, command execution.RegisterWorkerNodeCommand) (*execution.WorkerNode, error) {

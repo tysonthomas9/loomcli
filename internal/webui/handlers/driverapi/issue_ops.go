@@ -5,44 +5,24 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	driverpkg "github.com/tysonthomas9/loomcli/internal/driver"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 )
 
-func (m *Module) executionIssueBackend(workspace, actor string) (backend.IssueBackend, error) {
-	if m == nil || m.issueBackends == nil {
-		return nil, backend.ErrUnavailable(
-			"driver-api.issue-backend",
-			"execution issue backend capability is not configured",
-			nil,
-		)
+func (m *Module) workItemsForRun(
+	ctx context.Context,
+	ws string,
+	id driverIdentity,
+) (WorkItemOperations, string, error) {
+	if m == nil || m.workItems == nil {
+		return nil, "", fmt.Errorf("driver Work Items capability is not configured: %w", workitems.ErrUnavailable)
 	}
-	issueBackend, err := m.issueBackends(workspace, actor)
-	if err != nil {
-		return nil, err
-	}
-	if issueBackend == nil {
-		return nil, backend.ErrUnavailable(
-			"driver-api.issue-backend",
-			"execution issue backend capability returned no backend",
-			nil,
-		)
-	}
-	return issueBackend, nil
-}
-
-func (m *Module) issueBackendForRun(ctx context.Context, ws string, id driverIdentity) (backend.IssueBackend, string, error) {
 	parent, err := m.verifyParent(ctx, ws, id)
 	if err != nil {
 		return nil, "", err
 	}
-	actor := driverpkg.DriverRunActor(parent.RunID)
-	issueBackend, err := m.executionIssueBackend(ws, actor)
-	if err != nil {
-		return nil, "", err
-	}
-	return issueBackend, actor, nil
+	return m.workItems, driverpkg.DriverRunActor(parent.RunID), nil
 }
 
 func (m *Module) issueGet(ctx context.Context, ws string, id driverIdentity, body []byte) (any, error) {
@@ -52,14 +32,14 @@ func (m *Module) issueGet(ctx context.Context, ws string, id driverIdentity, bod
 	if err != nil {
 		return nil, err
 	}
-	issueBackend, _, err := m.issueBackendForRun(ctx, ws, id)
+	items, _, err := m.workItemsForRun(ctx, ws, id)
 	if err != nil {
 		return nil, err
 	}
 	if strings.TrimSpace(params.IssueID) == "" {
 		return nil, fmt.Errorf("issueId required: %w", domain.ErrInvalid)
 	}
-	return issueBackend.Get(ctx, params.IssueID)
+	return items.Get(ctx, workitems.GetQuery{IssueID: params.IssueID})
 }
 
 func (m *Module) issueList(ctx context.Context, ws string, id driverIdentity, body []byte) (any, error) {
@@ -72,7 +52,7 @@ func (m *Module) issueList(ctx context.Context, ws string, id driverIdentity, bo
 	if err != nil {
 		return nil, err
 	}
-	issueBackend, _, err := m.issueBackendForRun(ctx, ws, id)
+	items, _, err := m.workItemsForRun(ctx, ws, id)
 	if err != nil {
 		return nil, err
 	}
@@ -80,7 +60,20 @@ func (m *Module) issueList(ctx context.Context, ws string, id driverIdentity, bo
 	if limit <= 0 {
 		limit = 100
 	}
-	return issueBackend.List(ctx, backend.ListOpts{ExternalRef: params.ExternalRef, IssueType: params.Type, Status: params.Status, Limit: limit})
+	result, err := items.List(ctx, workitems.ListQuery{Filter: workitems.ListFilter{
+		ExternalRef: params.ExternalRef,
+		IssueType:   params.Type,
+		Status:      params.Status,
+		Limit:       limit,
+	}})
+	if err != nil {
+		return nil, err
+	}
+	issues := make([]workitems.IssueSummary, 0, len(result.Issues))
+	for _, issue := range result.Issues {
+		issues = append(issues, issue.IssueSummary)
+	}
+	return issues, nil
 }
 
 func (m *Module) issueListComments(ctx context.Context, ws string, id driverIdentity, body []byte) (any, error) {
@@ -90,14 +83,14 @@ func (m *Module) issueListComments(ctx context.Context, ws string, id driverIden
 	if err != nil {
 		return nil, err
 	}
-	issueBackend, _, err := m.issueBackendForRun(ctx, ws, id)
+	items, _, err := m.workItemsForRun(ctx, ws, id)
 	if err != nil {
 		return nil, err
 	}
 	if strings.TrimSpace(params.IssueID) == "" {
 		return nil, fmt.Errorf("issueId required: %w", domain.ErrInvalid)
 	}
-	return issueBackend.ListComments(ctx, params.IssueID)
+	return items.ListComments(ctx, workitems.ListCommentsQuery{IssueID: params.IssueID})
 }
 
 func (m *Module) issueComment(ctx context.Context, ws string, id driverIdentity, body []byte) (any, error) {
@@ -108,14 +101,18 @@ func (m *Module) issueComment(ctx context.Context, ws string, id driverIdentity,
 	if err != nil {
 		return nil, err
 	}
-	issueBackend, actor, err := m.issueBackendForRun(ctx, ws, id)
+	items, actor, err := m.workItemsForRun(ctx, ws, id)
 	if err != nil {
 		return nil, err
 	}
 	if strings.TrimSpace(params.IssueID) == "" || strings.TrimSpace(params.Body) == "" {
 		return nil, fmt.Errorf("issueId and body required: %w", domain.ErrInvalid)
 	}
-	return issueBackend.AddComment(ctx, backend.CommentAddParams{IssueID: params.IssueID, Author: actor, Text: params.Body})
+	return items.AddComment(ctx, workitems.AddCommentCommand{
+		IssueID: params.IssueID,
+		Author:  actor,
+		Text:    params.Body,
+	})
 }
 
 func (m *Module) issueUpdate(ctx context.Context, ws string, id driverIdentity, body []byte) (any, error) {
@@ -130,18 +127,21 @@ func (m *Module) issueUpdate(ctx context.Context, ws string, id driverIdentity, 
 	if err != nil {
 		return nil, err
 	}
-	issueBackend, _, err := m.issueBackendForRun(ctx, ws, id)
+	items, _, err := m.workItemsForRun(ctx, ws, id)
 	if err != nil {
 		return nil, err
 	}
 	if strings.TrimSpace(params.IssueID) == "" {
 		return nil, fmt.Errorf("issueId required: %w", domain.ErrInvalid)
 	}
-	update := backend.UpdateParams{Status: params.Status, Priority: params.Priority, Assignee: params.Assignee, ExternalRef: params.ExternalRef}
-	if params.Labels != nil {
-		update.SetLabels = params.Labels
+	command := workitems.PatchCommand{
+		IssueID: params.IssueID, Status: params.Status, Priority: params.Priority,
+		Assignee: params.Assignee, ExternalRef: params.ExternalRef,
 	}
-	if err := issueBackend.Update(ctx, params.IssueID, update); err != nil {
+	if params.Labels != nil {
+		command.SetLabels = params.Labels
+	}
+	if _, err := items.Patch(ctx, command); err != nil {
 		return nil, fmt.Errorf("update issue: %w", err)
 	}
 	return map[string]any{"id": params.IssueID}, nil
@@ -154,21 +154,14 @@ func (m *Module) issueBlockRepositoryRequired(ctx context.Context, ws string, id
 	if err != nil {
 		return nil, err
 	}
-	issueBackend, _, err := m.issueBackendForRun(ctx, ws, id)
+	items, _, err := m.workItemsForRun(ctx, ws, id)
 	if err != nil {
 		return nil, err
 	}
 	if strings.TrimSpace(params.IssueID) == "" {
 		return nil, fmt.Errorf("issueId required: %w", domain.ErrInvalid)
 	}
-	repositoryBackend, ok := issueBackend.(backend.RepositoryRequirementBackend)
-	if !ok {
-		return nil, backend.ErrNotImplemented(
-			"BlockRepositoryRequired",
-			"issue backend does not support atomic repository-required admission",
-		)
-	}
-	result, err := repositoryBackend.BlockRepositoryRequired(ctx, params.IssueID)
+	result, err := items.BlockRepositoryRequired(ctx, workitems.BlockRepositoryRequiredCommand{IssueID: params.IssueID})
 	if err != nil {
 		return nil, fmt.Errorf("block repository-required issue: %w", err)
 	}
@@ -191,19 +184,20 @@ func (m *Module) issueLabelOp(ctx context.Context, ws string, id driverIdentity,
 	if err != nil {
 		return nil, err
 	}
-	issueBackend, _, err := m.issueBackendForRun(ctx, ws, id)
+	items, _, err := m.workItemsForRun(ctx, ws, id)
 	if err != nil {
 		return nil, err
 	}
 	if strings.TrimSpace(params.IssueID) == "" || strings.TrimSpace(params.Label) == "" {
 		return nil, fmt.Errorf("issueId and label required: %w", domain.ErrInvalid)
 	}
+	command := workitems.PatchCommand{IssueID: params.IssueID}
 	if add {
-		err = issueBackend.AddLabel(ctx, params.IssueID, params.Label)
+		command.AddLabels = []string{params.Label}
 	} else {
-		err = issueBackend.RemoveLabel(ctx, params.IssueID, params.Label)
+		command.RemoveLabels = []string{params.Label}
 	}
-	if err != nil {
+	if _, err := items.Patch(ctx, command); err != nil {
 		return nil, err
 	}
 	return map[string]any{"id": params.IssueID, "label": params.Label}, nil

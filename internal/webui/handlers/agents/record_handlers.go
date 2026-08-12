@@ -16,9 +16,9 @@ import (
 	workflowdefs "github.com/tysonthomas9/loomcli/internal/infra/workflowdistribution/authoring"
 	agentsmodule "github.com/tysonthomas9/loomcli/internal/modules/agents"
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
-	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/apperrors"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/dto"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
@@ -94,6 +94,11 @@ type promptAgentCreatePlan struct {
 	desired    domain.AgentServiceDesiredState
 }
 
+const (
+	promptAgentSourceInternal = "internal"
+	promptAgentSourceCron     = "cron"
+)
+
 func parsePromptAgentCreatePlan(body []byte) (promptAgentCreatePlan, error) {
 	var req createPromptAgentRequest
 	if err := handler.DecodeOneJSONBytes(body, &req, handler.JSONDecodeOptions{
@@ -108,12 +113,12 @@ func parsePromptAgentCreatePlan(body []byte) (promptAgentCreatePlan, error) {
 	enabled := req.Enabled == nil || *req.Enabled
 	sourceKind := strings.TrimSpace(req.Trigger.SourceKind)
 	if sourceKind == "" {
-		sourceKind = store.InternalSourceKind
+		sourceKind = promptAgentSourceInternal
 	}
-	if sourceKind != store.InternalSourceKind && sourceKind != store.CronSourceKind {
+	if sourceKind != promptAgentSourceInternal && sourceKind != promptAgentSourceCron {
 		return promptAgentCreatePlan{}, errors.New("prompt agents support internal or cron triggers")
 	}
-	if sourceKind == store.CronSourceKind && strings.TrimSpace(req.Trigger.Schedule) == "" {
+	if sourceKind == promptAgentSourceCron && strings.TrimSpace(req.Trigger.Schedule) == "" {
 		return promptAgentCreatePlan{}, errors.New("schedule is required for a cron prompt agent")
 	}
 	desired := domain.AgentServiceDesiredPaused
@@ -150,8 +155,8 @@ func (m *Module) resolvePromptAgentDriverForCreate(
 
 //nolint:funlen // Keep prompt-agent validation, authority resolution, provisioning, and response projection in one compensating transaction.
 func (m *Module) createPromptAgent(w http.ResponseWriter, r *http.Request, body []byte) {
-	if m.store == nil || m.provisioning == nil || m.provisioningAuthority == nil {
-		handler.HandleServiceError(w, apperrors.ErrUnavailable("fleet-db store not configured"))
+	if m.agentRecords == nil || m.provisioning == nil || m.provisioningAuthority == nil {
+		handler.HandleServiceError(w, apperrors.ErrUnavailable("agent provisioning not configured"))
 		return
 	}
 	ws, ok := m.requireCanonicalWorkspace(w, r)
@@ -223,7 +228,7 @@ func (m *Module) createPromptAgent(w http.ResponseWriter, r *http.Request, body 
 		writeAgentProvisioningError(w, err, "read prompt-agent provisioning result failed")
 		return
 	}
-	out := m.createdPromptAgentResponse(r.Context(), ws, record, binding, time.Now())
+	out := m.agentRecordDTOWithBindings(r.Context(), ws, record, []*automation.Binding{binding}, time.Now())
 	broadcastAgentRefresh(m.hub, ws, out.ID, r.Header.Get("X-Actor"))
 	handler.WriteJSON(w, http.StatusCreated, out)
 }
@@ -403,11 +408,11 @@ func (m *Module) deleteAgent(w http.ResponseWriter, r *http.Request) { //nolint:
 	})
 }
 
-func (m *Module) requireAgentRunsStore(w http.ResponseWriter) bool {
-	if m.store != nil {
+func (m *Module) requireAgentRuns(w http.ResponseWriter) bool {
+	if m.agentRuns != nil {
 		return true
 	}
-	handler.HandleServiceError(w, apperrors.ErrUnavailable("fleet-db store not configured"))
+	handler.HandleServiceError(w, apperrors.ErrUnavailable("agent run history not configured"))
 	return false
 }
 
@@ -420,16 +425,45 @@ func (m *Module) listAgentServiceRunsForHistory(
 	ws, agentID string,
 	limit int,
 ) ([]*domain.DriverRun, error) {
-	return m.store.DriverRuns().List(ctx, ws, store.DriverRunFilter{AgentServiceID: agentID, Limit: limit})
+	runs, err := m.agentRuns.ListDriverRuns(ctx, execution.DriverRunQuery{
+		WorkspaceKey: ws, AgentServiceID: agentID, Limit: limit,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return agentHistoryRuns(runs), nil
+}
+
+func agentHistoryRuns(runs []*execution.DriverRun) []*domain.DriverRun {
+	out := make([]*domain.DriverRun, 0, len(runs))
+	for _, run := range runs {
+		if run == nil {
+			continue
+		}
+		out = append(out, &domain.DriverRun{
+			WorkspaceKey: run.WorkspaceKey, RunID: run.RunID,
+			DriverID: run.DriverID, DriverVersionID: run.DriverVersionID,
+			Entrypoint: run.Entrypoint, SourceKind: run.SourceKind, SourceRef: run.SourceRef,
+			EpicID: run.EpicID, ParentRunID: run.ParentRunID,
+			TriggerBindingID: run.TriggerBindingID, AgentServiceID: run.AgentServiceID,
+			SubjectKey: run.SubjectKey, Status: domain.DriverRunStatus(run.Status),
+			NodeID: run.Owner.NodeID, LeaseID: run.Owner.LeaseID, FencingToken: run.Owner.FencingToken,
+			IdempotencyKey: run.IdempotencyKey, Payload: append([]byte(nil), run.Payload...),
+			Output: cloneStringMap(run.Output), Summary: run.Summary, ErrorClass: run.ErrorClass,
+			StartedAt: run.StartedAt, LastHeartbeat: run.LastHeartbeat,
+			FinishedAt: cloneAgentRecordTime(run.FinishedAt), AwaitInstanceKey: run.AwaitInstanceKey,
+			SuspendedAt:           cloneAgentRecordTime(run.SuspendedAt),
+			CancelRequestedAt:     cloneAgentRecordTime(run.CancelRequestedAt),
+			CancelRequestedReason: run.CancelRequestedReason, ResumeSourceEventID: run.ResumeSourceEventID,
+			CreatedAt: run.CreatedAt, UpdatedAt: run.UpdatedAt,
+		})
+	}
+	return out
 }
 
 //nolint:funlen // Keep kind routing, authority checks, and desired-state mutation in one lifecycle endpoint transaction.
 func (m *Module) setRecordEnabled(enabled bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if m.store == nil {
-			handler.HandleServiceError(w, apperrors.ErrUnavailable("fleet-db store not configured"))
-			return
-		}
 		ws, ok := m.requireCanonicalWorkspace(w, r)
 		if !ok {
 			return

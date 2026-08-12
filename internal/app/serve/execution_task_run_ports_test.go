@@ -46,7 +46,9 @@ func TestExecutionTaskRunPortsRequireAtomicCommandsWithoutStoreFallback(t *testi
 	st := memstore.New()
 	commands := &atomicTaskRunPortStub{}
 	taskRuns, _, err := NewExecutionTaskRunPorts(ExecutionTaskRunPortDependencies{
-		Requests: commands, Claims: commands, WorkItemDesign: commands, Requeues: commands, RetryExhaustion: commands,
+		TaskRuns:      st.TaskRuns(),
+		TaskRunEvents: st.TaskRunEvents(),
+		Requests:      commands, Claims: commands, WorkItemDesign: commands, Requeues: commands, RetryExhaustion: commands,
 		Nodes: st.Nodes(), WorkerProfiles: st.WorkerProfiles(),
 	})
 	if err != nil {
@@ -62,7 +64,9 @@ func TestExecutionWorkerNodePortsPreserveDrainAndOwnSchedulingReads(t *testing.T
 	st, _ := setupExecutionTaskRunParent(t, ctx)
 	commands := &atomicTaskRunPortStub{}
 	_, workers, err := NewExecutionTaskRunPorts(ExecutionTaskRunPortDependencies{
-		Requests: commands, Claims: commands, WorkItemDesign: commands, Requeues: commands, RetryExhaustion: commands,
+		TaskRuns:      st.TaskRuns(),
+		TaskRunEvents: st.TaskRunEvents(),
+		Requests:      commands, Claims: commands, WorkItemDesign: commands, Requeues: commands, RetryExhaustion: commands,
 		Nodes: st.Nodes(), WorkerProfiles: st.WorkerProfiles(),
 	})
 	if err != nil {

@@ -60,6 +60,12 @@ func (app *Server) buildModules() {
 // dependencies are available.
 func (app *Server) buildTerminalModules() {
 	if app.termSvc != nil {
+		var workspacePath func(context.Context, string) string
+		if app.config.Store != nil {
+			workspacePath = func(ctx context.Context, workspaceKey string) string {
+				return storeadapter.ResolveOrHealWorkspacePath(ctx, app.config.Store, workspaceKey)
+			}
+		}
 		app.wsModules = append(app.wsModules,
 			NewTerminalModules(
 				app.config.AgentsCapability,
@@ -72,7 +78,9 @@ func (app *Server) buildTerminalModules() {
 					TermAuth:        app.termAuth,
 					CORSOrigins:     app.corsConfig.AllowedOrigins,
 					SelfURL:         fmt.Sprintf("http://localhost:%d", app.actualPort),
-					Store:           app.config.Store,
+					Workspace:       app.workspaceCatalog,
+					Orchestration:   app.config.Store,
+					WorkspacePath:   workspacePath,
 					TabMetaStore:    app.tabMetaStore,
 					Hub:             app.hub,
 					ServerStartedAt: app.startedAt,
@@ -127,12 +135,11 @@ func (app *Server) buildStoreBackedInfraModules() {
 func (app *Server) unifiedAgentModuleDeps() UnifiedAgentModuleDeps {
 	deps := UnifiedAgentModuleDeps{
 		Store: app.config.Store, InteractiveAgentRuntime: app.agentRuntime,
-		WorkItems: app.workItems, Hub: app.hub,
+		WorkItems: app.workItems, Workspace: app.workspaceCatalog, Hub: app.hub,
 		FleetBaseURL: app.config.FleetDBBaseURL, DriverAPIBaseURL: app.config.DriverAPIBaseURL,
-		ExecutionIssueBackends: app.config.ExecutionIssueBackends,
-		DriverRunTokenKey:      app.config.DriverRunTokenKey,
-		DaytonaProvider:        app.config.DaytonaProvider,
-		LocalSettingsDir:       app.config.LocalSettingsDir, Dispatcher: app.connectorDispatcher,
+		DriverRunTokenKey: app.config.DriverRunTokenKey,
+		DaytonaProvider:   app.config.DaytonaProvider,
+		LocalSettingsDir:  app.config.LocalSettingsDir, Dispatcher: app.connectorDispatcher,
 		ConnectorBindingGrantLifecycle: app.connectorManagement,
 		WorkflowCatalog:                app.config.WorkflowCatalogAPI,
 		WorkflowCatalogAuthoring:       app.config.WorkflowCatalogAuthoring,

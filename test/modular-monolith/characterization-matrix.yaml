@@ -5,28 +5,28 @@ description: >-
   migration changes package ownership and runtime composition.
 rows:
   - id: workflow-approval
-    package: ./internal/driver
+    package: ./internal/modules/workflowcatalog
     test_regex: '^TestVersionScopedApprovalDoesNotTrustSiblingVersions$'
     expected_tests:
       - TestVersionScopedApprovalDoesNotTrustSiblingVersions
     timeout: 2m
     expected_behavior:
       - Approval grants trust only to the selected workflow version, never to a sibling version.
-      - Activation preserves existing approval metadata and does not implicitly approve the activated version.
-      - Unapproval removes the selected version's approval.
+      - Activation requires prior approval and preserves every existing version-scoped approval.
+      - Unapproval removes only the selected version's approval.
 
   - id: trigger-admission
-    package: ./internal/infra/automationruntime
-    test_regex: '^TestInternalSource(EmitValidation|HopDepthChainAndCap|IdempotentReEmit)$'
+    package: ./internal/modules/automation
+    test_regex: '^Test(WorkflowAdmissionDerivesRunActorParentHopAndIgnoresForgedFields|WorkflowAdmissionReplaySurvivesOwnerHandoff|WorkflowHopCapDropsBeforeMatchingOrReservation)$'
     expected_tests:
-      - TestInternalSourceHopDepthChainAndCap
-      - TestInternalSourceEmitValidation
-      - TestInternalSourceIdempotentReEmit
+      - TestWorkflowAdmissionDerivesRunActorParentHopAndIgnoresForgedFields
+      - TestWorkflowAdmissionReplaySurvivesOwnerHandoff
+      - TestWorkflowHopCapDropsBeforeMatchingOrReservation
     timeout: 2m
     expected_behavior:
-      - Invalid or forged internal events fail admission without persisting events or creating runs.
-      - A trigger chain is admitted through the configured hop-depth cap and is then dropped with auditable evidence.
-      - Re-emitting the same event ID is idempotent and creates exactly one event and one run.
+      - Workflow event identity is derived from verified Execution ownership; forged fields are ignored and invalid authority fails before persistence.
+      - A trigger chain is admitted through the configured hop-depth cap, then drops before matching, reservation, catalog lookup, or dispatch.
+      - Re-emitting the same event ID after an owner handoff replays exactly one durable event, reservation, and dispatch.
 
   - id: agent-provisioning
     package: ./internal/webui/handlers/agents

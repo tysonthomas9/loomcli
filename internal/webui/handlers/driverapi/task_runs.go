@@ -10,6 +10,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	driverpkg "github.com/tysonthomas9/loomcli/internal/driver"
+	"github.com/tysonthomas9/loomcli/internal/modules/agents"
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 )
 
@@ -92,20 +93,9 @@ func (p execTaskParams) requestOptions(ws string, id driverIdentity, fencingToke
 	return opts
 }
 
-func (m *Module) taskRequestExecutor() driverpkg.HostBridgeTaskExecutor {
+func (m *Module) taskRequestPreflighter() driverpkg.HostBridgeTaskExecutor {
 	return driverpkg.HostBridgeTaskExecutor{
-		Store:            m.store,
-		Artifacts:        m.artifacts,
-		WorktreePath:     m.worktreePath,
-		APIBaseURL:       m.apiBaseURL,
-		LocalSettingsDir: m.localSettingsDir,
-		WorktreeResolver: driverpkg.LocalTaskWorktreeResolver{
-			Store:         m.store,
-			Lineage:       driverpkg.StackLineageLookup{Bindings: m.stackBindings},
-			SourceControl: m.sourceControl,
-		},
-		StackBindings: m.stackBindings,
-		TaskOutcomes:  m.taskOutcomes,
+		APIBaseURL: m.apiBaseURL,
 	}
 }
 
@@ -160,7 +150,7 @@ func (m *Module) execTask(ctx context.Context, ws string, id driverIdentity, bod
 		return nil, err
 	}
 	opts := params.requestOptions(ws, id, fencingToken)
-	opts, err = driverpkg.PrepareTaskRunRequest(ctx, m.store, opts, parent, m.taskRequestExecutor())
+	opts, err = driverpkg.PrepareTaskRunRequest(ctx, m.workflowCatalog, opts, parent, m.taskRequestPreflighter())
 	if err != nil {
 		return nil, fmt.Errorf("prepare task request: %w", err)
 	}
@@ -228,15 +218,18 @@ func (m *Module) resolveManagedAgentPolicy(
 	ws string,
 	agentServiceID string,
 ) (managedAgentPolicyInput, error) {
-	service, err := m.store.AgentServices().Get(ctx, ws, agentServiceID)
+	if m.agentIdentities == nil || m.agentRoles == nil {
+		return managedAgentPolicyInput{}, fmt.Errorf("canonical Agent policy queries are unavailable: %w", agents.ErrUnavailable)
+	}
+	service, err := m.agentIdentities.GetAgent(ctx, ws, agentServiceID)
 	if err != nil {
 		return managedAgentPolicyInput{}, fmt.Errorf("resolve managed TaskRun agent service: %w", err)
 	}
-	roleName := strings.TrimSpace(service.RoleName)
+	roleName := strings.TrimSpace(service.Behavior.RoleName)
 	if roleName == "" {
 		return managedAgentPolicyInput{}, fmt.Errorf("managed agent %q has no role: %w", agentServiceID, domain.ErrInvalid)
 	}
-	role, err := m.store.Roles().Get(ctx, ws, roleName)
+	role, err := m.agentRoles.GetRole(ctx, ws, roleName)
 	if err != nil {
 		return managedAgentPolicyInput{}, fmt.Errorf("resolve managed TaskRun role %q: %w", roleName, err)
 	}
@@ -255,8 +248,8 @@ func (m *Module) resolveManagedAgentPolicy(
 
 func resolveManagedAgentBackend(
 	ws string,
-	service *domain.AgentService,
-	role *domain.Role,
+	service *agents.Agent,
+	role *agents.Role,
 ) string {
 	backend := firstNonEmpty(strings.TrimSpace(service.Metadata["backend"]), strings.TrimSpace(role.Backend))
 	if backend == "" {
@@ -355,14 +348,17 @@ func (m *Module) taskRunGet(ctx context.Context, ws string, id driverIdentity, b
 	if taskRunID == "" {
 		return nil, fmt.Errorf("taskRunId required: %w", domain.ErrInvalid)
 	}
-	run, err := m.store.TaskRuns().Get(ctx, ws, taskRunID)
+	if m.taskRunQueries == nil {
+		return nil, fmt.Errorf("execution TaskRun queries are unavailable: %w", execution.ErrUnavailable)
+	}
+	run, err := m.taskRunQueries.GetTaskRun(ctx, ws, taskRunID)
 	if err != nil {
 		return nil, fmt.Errorf("get task run: %w", err)
 	}
 	if run.DriverRunID != parent.RunID {
 		return nil, fmt.Errorf("task run %q does not belong to driver run %q: %w", taskRunID, parent.RunID, domain.ErrNotFound)
 	}
-	return driverpkg.TaskRunResultFromDomain(run), nil
+	return taskRunResultFromExecution(run), nil
 }
 
 func (m *Module) activeTaskRuns(ctx context.Context, ws string, id driverIdentity, body []byte) (any, error) {
@@ -382,14 +378,31 @@ func (m *Module) activeTaskRuns(ctx context.Context, ws string, id driverIdentit
 	if limit <= 0 {
 		limit = 100
 	}
-	active, err := driverpkg.ListActiveTaskRuns(ctx, m.store, driverpkg.ActiveTaskRunsOptions{
-		WorkspaceKey: ws,
-		DriverRunID:  parent.RunID,
-		EpicID:       epicID,
-		Limit:        limit,
+	return m.loadActiveTaskRuns(ctx, ws, parent.RunID, epicID, limit)
+}
+
+func (m *Module) loadActiveTaskRuns(
+	ctx context.Context,
+	ws,
+	driverRunID,
+	epicID string,
+	limit int,
+) (*driverpkg.ActiveTaskRuns, error) {
+	if m.taskRunQueries == nil {
+		return nil, fmt.Errorf("execution TaskRun queries are unavailable: %w", execution.ErrUnavailable)
+	}
+	runs, err := m.taskRunQueries.ListActiveTaskRuns(ctx, execution.ActiveTaskRunQuery{
+		WorkspaceKey: ws, DriverRunID: driverRunID, Limit: limit,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("list active task runs: %w", err)
+	}
+	active := &driverpkg.ActiveTaskRuns{
+		WorkspaceKey: ws, DriverRunID: driverRunID, EpicID: epicID,
+		ActiveCount: len(runs), TaskRuns: make([]driverpkg.TaskRunRequestResult, 0, len(runs)),
+	}
+	for _, run := range runs {
+		active.TaskRuns = append(active.TaskRuns, taskRunResultFromExecution(run))
 	}
 	return active, nil
 }
@@ -498,20 +511,23 @@ func (m *Module) completeTask(ctx context.Context, ws string, id driverIdentity,
 	if taskRunID == "" {
 		return nil, fmt.Errorf("taskRunId is required for fenced driver completion: %w", domain.ErrInvalid)
 	}
-	run, err := m.store.TaskRuns().Get(ctx, ws, taskRunID)
+	if m.taskRunQueries == nil {
+		return nil, fmt.Errorf("execution TaskRun queries are unavailable: %w", execution.ErrUnavailable)
+	}
+	run, err := m.taskRunQueries.GetTaskRun(ctx, ws, taskRunID)
 	if err != nil {
 		return nil, fmt.Errorf("get task run: %w", err)
 	}
 	if run.DriverRunID != parent.RunID {
 		return nil, fmt.Errorf("task run %q does not belong to driver run %q: %w", taskRunID, parent.RunID, domain.ErrNotFound)
 	}
-	if taskID := strings.TrimSpace(params.TaskID); taskID != "" && taskID != run.TaskID {
-		return nil, fmt.Errorf("task run %q belongs to task %q, not %q: %w", taskRunID, run.TaskID, taskID, domain.ErrInvalid)
+	if taskID := strings.TrimSpace(params.TaskID); taskID != "" && taskID != run.WorkItemID {
+		return nil, fmt.Errorf("task run %q belongs to task %q, not %q: %w", taskRunID, run.WorkItemID, taskID, domain.ErrInvalid)
 	}
 	owner := execution.Owner{
 		ResourceKind: execution.ResourceTaskRun, ResourceID: run.TaskRunID,
-		NodeID: run.NodeID, LeaseID: run.LeaseID, LeaseToken: strings.TrimSpace(params.LeaseToken),
-		FencingToken: run.FencingToken,
+		NodeID: run.Owner.NodeID, LeaseID: run.Owner.LeaseID, LeaseToken: strings.TrimSpace(params.LeaseToken),
+		FencingToken: run.Owner.FencingToken,
 	}
 	auth, err := m.taskRunAuthorities.ResolveTaskRunAuthority(ctx, ws, execution.ActionFinalize, owner)
 	if err != nil {
@@ -528,7 +544,7 @@ func (m *Module) completeTask(ctx context.Context, ws string, id driverIdentity,
 	if err != nil {
 		return nil, fmt.Errorf("complete task run: %w", err)
 	}
-	return &driverpkg.TaskMutationResult{ID: run.TaskID, Status: string(domain.TaskRunCompleted), Reason: reason}, nil
+	return &driverpkg.TaskMutationResult{ID: run.WorkItemID, Status: string(domain.TaskRunCompleted), Reason: reason}, nil
 }
 
 func (m *Module) releaseTask(ctx context.Context, ws string, id driverIdentity, body []byte) (any, error) {

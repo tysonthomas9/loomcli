@@ -227,6 +227,9 @@ func (s *stubIssueService) List(context.Context, workitems.ListQuery) (*workitem
 func (s *stubIssueService) Ready(context.Context, workitems.AvailabilityQuery) ([]workitems.IssueSummary, error) {
 	return nil, workitems.ErrNotImplemented
 }
+func (s *stubIssueService) Blocked(context.Context, workitems.AvailabilityQuery) ([]workitems.IssueSummary, error) {
+	return nil, workitems.ErrNotImplemented
+}
 func (s *stubIssueService) Search(context.Context, workitems.SearchQuery) ([]workitems.IssueSummary, error) {
 	return nil, workitems.ErrNotImplemented
 }
@@ -246,6 +249,9 @@ func (s *stubIssueService) Reopen(context.Context, workitems.ReopenCommand) erro
 	return workitems.ErrNotImplemented
 }
 func (s *stubIssueService) AssignRepository(context.Context, workitems.AssignRepositoryCommand) (*workitems.IssueSummary, error) {
+	return nil, workitems.ErrNotImplemented
+}
+func (s *stubIssueService) BlockRepositoryRequired(context.Context, workitems.BlockRepositoryRequiredCommand) (*workitems.RepositoryAdmissionResult, error) {
 	return nil, workitems.ErrNotImplemented
 }
 func (s *stubIssueService) Delete(ctx context.Context, command workitems.DeleteCommand) (workitems.DeleteResult, error) {

@@ -230,6 +230,14 @@ type TaskRunAPI interface {
 	Finalize(context.Context, authority.ExecutionAuthority, FinalizeCommand) (FinalizeResult, error)
 }
 
+// TaskRunQueries exposes the exact TaskRun snapshot needed by inbound runtime
+// adapters after they have verified run-scoped authority.
+type TaskRunQueries interface {
+	GetTaskRun(context.Context, string, string) (*TaskRun, error)
+	ListActiveTaskRuns(context.Context, ActiveTaskRunQuery) ([]*TaskRun, error)
+	ListTaskRunEvents(context.Context, TaskRunEventQuery) ([]*TaskRunEvent, error)
+}
+
 // TaskRunAuthorityResolver is an inbound composition seam. The transport
 // supplies the request-derived owner tuple and chooses one exact action; the
 // resolver returns an opaque authority bound to that tuple. The outbound

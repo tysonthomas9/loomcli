@@ -352,7 +352,7 @@ func newE2EHarness(t *testing.T) *e2eHarness {
 
 	mux := http.NewServeMux()
 	driverapi.NewModule(driverapi.Config{
-		Store: h.store, Dispatcher: dispatcher, RunTokenKey: h.runTokenKey,
+		Dispatcher: dispatcher, RunTokenKey: h.runTokenKey,
 		Execution: executionCapability.DriverRunAPI(), ExecutionAuthorities: executionCapability.DriverRunAuthorityResolver(),
 	}).Register(mux)
 	workflow, err := webhookingestion.New(

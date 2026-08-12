@@ -23,6 +23,7 @@ import (
 type ExecutionCapability struct {
 	issuer                 *authority.Issuer
 	taskRuns               execution.TaskRunAPI
+	taskRunQueries         execution.TaskRunQueries
 	taskRunRequests        execution.TaskRunRequestAPI
 	taskRunWorkers         execution.TaskRunWorkerAPI
 	taskRunScheduling      execution.TaskRunSchedulingAPI
@@ -141,6 +142,13 @@ func (capability *ExecutionCapability) TaskRunAPI() execution.TaskRunAPI {
 	return capability.taskRuns
 }
 
+func (capability *ExecutionCapability) TaskRunQueries() execution.TaskRunQueries {
+	if capability == nil {
+		return nil
+	}
+	return capability.taskRunQueries
+}
+
 func (capability *ExecutionCapability) TaskRunAuthorityResolver() execution.TaskRunAuthorityResolver {
 	if capability == nil {
 		return nil
@@ -241,7 +249,7 @@ func newExecutionTaskRunMutationPorts(dependencies ExecutionDependencies) (execu
 }
 
 func newExecutionDriverRunDependencies(dependencies ExecutionDependencies) (execution.DriverRunDependencies, error) {
-	driverRunAdapter := &executionDriverRunStoreAdapter{driverRuns: dependencies.DriverRuns, awaits: dependencies.Awaits}
+	driverRunAdapter := &executionDriverRunStoreAdapter{driverRuns: dependencies.DriverRuns, driverSteps: dependencies.DriverSteps, awaits: dependencies.Awaits}
 	var driverRunChildStarts execution.DriverRunChildStartPort
 	var driverRunCascades execution.DriverRunCascadePort
 	var driverRunTerminalWorkRecovery execution.DriverRunTerminalWorkRecoveryPort
@@ -265,13 +273,16 @@ func newExecutionDriverRunDependencies(dependencies ExecutionDependencies) (exec
 		Submissions: driverRunAdapter, ChildStarts: driverRunChildStarts, Cascades: driverRunCascades,
 		Claims: driverRunClaims, Heartbeats: driverRunHeartbeats, WorkItems: driverRunWorkItems, Finalizer: driverRunFinalizer,
 		TerminalWorkRecovery: driverRunTerminalWorkRecovery,
-		Recovery:             driverRunAdapter, Awaits: driverRunAwaits, Queries: driverRunAdapter, Resolutions: driverRunAdapter,
+		Recovery:             driverRunAdapter, Awaits: driverRunAwaits, Queries: driverRunAdapter,
+		AwaitQueries: driverRunAdapter, Projections: driverRunAdapter, Resolutions: driverRunAdapter,
 	}, nil
 }
 
 func newExecutionTaskRunDependencies(dependencies ExecutionDependencies) (execution.TaskRunDependencies, execution.WorkerDependencies, error) {
 	return NewExecutionTaskRunPorts(ExecutionTaskRunPortDependencies{
-		Requests: dependencies.AtomicTaskRunRequests, Claims: dependencies.AtomicTaskRunClaims,
+		TaskRuns:      dependencies.TaskRuns,
+		TaskRunEvents: dependencies.TaskRunEvents,
+		Requests:      dependencies.AtomicTaskRunRequests, Claims: dependencies.AtomicTaskRunClaims,
 		WorkItemDesign: dependencies.AtomicTaskRunWorkItemDesign,
 		Requeues:       dependencies.AtomicTaskRunRequeues, RetryExhaustion: dependencies.AtomicTaskRunRetryExhaustion,
 		Nodes: dependencies.Nodes, WorkerProfiles: dependencies.WorkerProfiles,
@@ -348,6 +359,7 @@ func newExecutionCapabilityHandle(
 	return &ExecutionCapability{
 		issuer:                 issuer,
 		taskRuns:               service,
+		taskRunQueries:         service,
 		taskRunRequests:        service,
 		taskRunWorkers:         service,
 		taskRunScheduling:      service,
@@ -519,8 +531,9 @@ func cloneExecutionStringMap(values map[string]string) map[string]string {
 }
 
 type executionDriverRunStoreAdapter struct {
-	driverRuns store.DriverRunStore
-	awaits     store.AwaitStore
+	driverRuns  store.DriverRunStore
+	driverSteps store.DriverStepStore
+	awaits      store.AwaitStore
 }
 
 func (adapter *executionDriverRunStoreAdapter) SubmitDriverRun(
@@ -587,6 +600,106 @@ func (adapter *executionDriverRunStoreAdapter) ListDriverRuns(
 		}
 	}
 	return filtered, nil
+}
+
+func (adapter *executionDriverRunStoreAdapter) ListDriverRunAwaits(
+	ctx context.Context,
+	workspace,
+	runID string,
+) ([]*execution.DriverAwaitInstance, error) {
+	const (
+		maxAwaitListProbe       = 1000
+		awaitPendingScanLimit   = 10000
+		awaitPendingScanHorizon = 24 * time.Hour * 365 * 10
+	)
+	due, err := adapter.awaits.ListDueAwaitDeadlines(
+		ctx, workspace, time.Now().UTC().Add(awaitPendingScanHorizon), awaitPendingScanLimit,
+	)
+	if err != nil {
+		return nil, translateDriverRunStoreError(err)
+	}
+	pending := make(map[string]*domain.AwaitInstance)
+	for _, instance := range due {
+		if instance != nil && instance.RunID == runID {
+			pending[instance.InstanceKey] = instance
+		}
+	}
+	out := make([]*execution.DriverAwaitInstance, 0)
+	for index := 1; index <= maxAwaitListProbe; index++ {
+		key := domain.AwaitInstanceKey(runID, index)
+		if instance, ok := pending[key]; ok {
+			snapshot, snapshotErr := executionDriverAwaitSnapshot(instance)
+			if snapshotErr != nil {
+				return nil, snapshotErr
+			}
+			out = append(out, snapshot)
+			continue
+		}
+		instance, getErr := adapter.awaits.GetSatisfiedAwait(ctx, workspace, key)
+		if errors.Is(getErr, domain.ErrNotFound) {
+			break
+		}
+		if getErr != nil {
+			return nil, translateDriverRunStoreError(getErr)
+		}
+		snapshot, snapshotErr := executionDriverAwaitSnapshot(instance)
+		if snapshotErr != nil {
+			return nil, snapshotErr
+		}
+		out = append(out, snapshot)
+	}
+	return out, nil
+}
+
+func (adapter *executionDriverRunStoreAdapter) ListDriverRunSteps(
+	ctx context.Context,
+	workspace,
+	runID string,
+) ([]execution.DriverRunStep, error) {
+	if adapter.driverSteps == nil {
+		return nil, execution.ErrUnavailable
+	}
+	values, err := adapter.driverSteps.ListForRun(ctx, workspace, runID, store.DriverStepFilter{})
+	if err != nil {
+		return nil, translateDriverRunStoreError(err)
+	}
+	out := make([]execution.DriverRunStep, 0, len(values))
+	for _, value := range values {
+		if value == nil {
+			continue
+		}
+		out = append(out, execution.DriverRunStep{
+			WorkspaceKey: value.WorkspaceKey, StepID: value.StepID, DriverRunID: value.DriverRunID,
+			StepKind: value.StepKind, Status: string(value.Status), TaskRunID: value.TaskRunID,
+		})
+	}
+	return out, nil
+}
+
+func (adapter *executionDriverRunStoreAdapter) ListDriverRunEvents(
+	ctx context.Context,
+	query execution.DriverRunEventQuery,
+) (*execution.DriverRunEventPage, error) {
+	reader, ok := adapter.driverRuns.(store.DriverRunEventsReader)
+	if !ok {
+		return nil, execution.ErrUnavailable
+	}
+	page, err := reader.Events(ctx, query.WorkspaceKey, query.RunID, query.After, query.Limit)
+	if err != nil {
+		return nil, translateDriverRunStoreError(err)
+	}
+	if page == nil {
+		return nil, execution.ErrConflict
+	}
+	out := &execution.DriverRunEventPage{Cursor: page.Cursor, Events: make([]execution.DriverRunEvent, 0, len(page.Events))}
+	for _, value := range page.Events {
+		out.Events = append(out.Events, execution.DriverRunEvent{
+			ID: value.ID, Timestamp: value.Timestamp, Actor: value.Actor, Action: value.Action,
+			EntityType: value.EntityType, EntityID: value.EntityID, WorkspaceID: value.WorkspaceID,
+			Before: value.Before, After: value.After, Metadata: cloneExecutionStringMap(value.Metadata),
+		})
+	}
+	return out, nil
 }
 
 func (adapter *executionDriverRunStoreAdapter) ResolveAndResumeDriverAwait(

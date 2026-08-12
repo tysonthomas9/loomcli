@@ -257,6 +257,27 @@ func (s *Service) blockRepositoryRequired(ctx context.Context, issueID string) (
 	return s.store.BlockRepositoryRequired(ctx, issueID)
 }
 
+// BlockRepositoryRequired atomically moves repository-less work into the
+// policy-owned blocked state. The durable adapter remains responsible for
+// making the transition and its reserved metadata indivisible.
+func (s *Service) BlockRepositoryRequired(
+	ctx context.Context,
+	command BlockRepositoryRequiredCommand,
+) (*RepositoryAdmissionResult, error) {
+	issueID, err := required("issue id", command.IssueID)
+	if err != nil {
+		return nil, err
+	}
+	result, err := s.blockRepositoryRequired(ctx, issueID)
+	if err != nil {
+		return nil, err
+	}
+	if result == nil || result.Issue == nil || strings.TrimSpace(result.Issue.ID) != issueID {
+		return nil, fmt.Errorf("repository admission for %q returned an invalid result: %w", issueID, ErrInvalidPersistedState)
+	}
+	return cloneRepositoryAdmissionResult(result), nil
+}
+
 func validateCreate(command CreateCommand) error {
 	if err := ValidateTitle(command.Title); err != nil {
 		return err
@@ -607,6 +628,18 @@ func cloneCloseResult(value *CloseResult) *CloseResult {
 		out.Unblocked[index] = cloneIssueSummary(value.Unblocked[index])
 	}
 	return out
+}
+
+func cloneRepositoryAdmissionResult(value *RepositoryAdmissionResult) *RepositoryAdmissionResult {
+	if value == nil {
+		return nil
+	}
+	copy := *value
+	if value.Issue != nil {
+		issue := cloneIssueSummary(*value.Issue)
+		copy.Issue = &issue
+	}
+	return &copy
 }
 
 func cloneIssueDetail(value *IssueDetail) *IssueDetail {

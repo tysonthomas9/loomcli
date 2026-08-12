@@ -77,19 +77,3 @@ func WorkspaceAwareIssueBackendForConfig(fleetURL, apiKey, actor string) func(ct
 		return fb
 	}
 }
-
-// WorkspaceActorIssueBackendForConfig returns the runtime factory used by
-// DriverRun and TaskRun HTTP adapters. Unlike WorkspaceAwareIssueBackendForConfig,
-// the workspace and actor are explicit inputs derived from the fenced run.
-// The FleetDB service credential remains captured in process memory and is
-// never copied into ambient environment state or a workflow child process.
-func WorkspaceActorIssueBackendForConfig(fleetURL, apiKey string) func(workspace, actor string) (backend.IssueBackend, error) {
-	return func(workspace, actor string) (backend.IssueBackend, error) {
-		return fleet.New(fleet.Config{
-			BaseURL:     fleetURL,
-			WorkspaceID: workspace,
-			APIKey:      apiKey,
-			Actor:       actor,
-		})
-	}
-}

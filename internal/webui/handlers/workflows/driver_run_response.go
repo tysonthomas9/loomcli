@@ -48,7 +48,7 @@ type driverRunResponse struct {
 
 func newDriverRunResponse(run *execution.DriverRun) (*driverRunResponse, error) {
 	if run == nil {
-		return nil, fmt.Errorf("Execution returned no DriverRun: %w", execution.ErrConflict)
+		return nil, fmt.Errorf("execution returned no DriverRun: %w", execution.ErrConflict)
 	}
 	return &driverRunResponse{
 		WorkspaceKey: run.WorkspaceKey, RunID: run.RunID, DriverID: run.DriverID, DriverVersionID: run.DriverVersionID,

@@ -8,7 +8,49 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/modules/agents"
 	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/webui/storeadapter"
 )
+
+type terminalTestState struct{ *memstore.Store }
+
+func newTerminalTestState() *terminalTestState {
+	return &terminalTestState{Store: memstore.New()}
+}
+
+func (state *terminalTestState) GetRole(ctx context.Context, workspace, roleName string) (*agents.Role, error) {
+	role, err := state.Roles().Get(ctx, workspace, roleName)
+	if errors.Is(err, domain.ErrNotFound) {
+		return nil, agents.ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &agents.Role{
+		WorkspaceKey: role.WorkspaceKey, Name: role.Name, Kind: string(role.Kind),
+		Description: role.Description, Prompt: role.Prompt, PromptFile: role.PromptFile,
+		Model: role.Model, TaskFilter: role.TaskFilter, Backend: role.Backend, Effort: role.Effort,
+		PathPatterns: role.PathPatterns, Skills: role.Skills, MaxPriority: role.MaxPriority,
+		MaxConcurrency: role.MaxConcurrency, ReadOnly: role.ReadOnly,
+		AllowedTools: role.AllowedTools, DeniedTools: role.DeniedTools,
+		MaxBudgetUSD: role.MaxBudgetUSD, CreatedAt: role.CreatedAt, UpdatedAt: role.UpdatedAt,
+	}, nil
+}
+
+func (state *terminalTestState) FindActiveOrchestrationSession(ctx context.Context, workspace, agentID string) (string, error) {
+	return store.OrchestrationSessionIDFor(ctx, state.Store, workspace, agentID)
+}
+
+func (state *terminalTestState) ResolveWorkspaceName(ctx context.Context, workspace string) (string, error) {
+	record, err := state.Workspaces().Get(ctx, workspace)
+	if err != nil || record == nil {
+		return "", err
+	}
+	return record.Name, nil
+}
+
+func (state *terminalTestState) ResolveWorkspacePath(ctx context.Context, workspace string) string {
+	return storeadapter.ResolveOrHealWorkspacePath(ctx, state.Store, workspace)
+}
 
 type terminalTestAgentCreate struct {
 	WorkspaceKey   string
@@ -38,7 +80,10 @@ type terminalTestAgentStore struct {
 	roles    store.RoleStore
 }
 
-func terminalTestAgents(st *memstore.Store) terminalTestAgentStore {
+func terminalTestAgents(st interface {
+	AgentServices() store.AgentServiceStore
+	Roles() store.RoleStore
+}) terminalTestAgentStore {
 	return terminalTestAgentStore{services: st.AgentServices(), roles: st.Roles()}
 }
 

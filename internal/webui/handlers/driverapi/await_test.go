@@ -315,7 +315,7 @@ func TestDriverAPIListAwaits(t *testing.T) {
 	first, _ := awaits[0].(map[string]any)
 	second, _ := awaits[1].(map[string]any)
 	if first["instanceKey"] != domain.AwaitInstanceKey(h.runID, 1) ||
-		first["status"] != string(domain.AwaitSatisfied) || first["satisfiedByEventID"] != eventID {
+		first["status"] != string(domain.AwaitSatisfied) || first["satisfiedByEventId"] != eventID {
 		t.Fatalf("awaits[0] = %v, want satisfied await-1 by %q", first, eventID)
 	}
 	if second["instanceKey"] != domain.AwaitInstanceKey(h.runID, 2) ||

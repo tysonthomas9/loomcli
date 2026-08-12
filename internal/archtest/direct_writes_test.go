@@ -14,15 +14,15 @@ func TestCheckedInDirectWriteInventoryStrictCounts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(inventory.Writes) != 94 {
-		t.Fatalf("direct-write rows = %d, want current source-backed ratchet of 94", len(inventory.Writes))
+	if len(inventory.Writes) != 90 {
+		t.Fatalf("direct-write rows = %d, want current source-backed ratchet of 90", len(inventory.Writes))
 	}
 	totalSites := 0
 	for _, use := range inventory.Writes {
 		totalSites += use.Count
 	}
-	if totalSites != 112 {
-		t.Fatalf("direct-write sites = %d, want current source-backed ratchet of 112", totalSites)
+	if totalSites != 108 {
+		t.Fatalf("direct-write sites = %d, want current source-backed ratchet of 108", totalSites)
 	}
 	if err := inventory.ValidateCompletedPhase(7); err != nil {
 		t.Fatalf("checked-in inventory is not ready for Phase 7 completion: %v", err)

@@ -635,7 +635,6 @@ func applyStoreHandleServerConfig(
 			fleetAPIKey,
 			fs.clientCfg.Actor,
 		)
-		cfg.ExecutionIssueBackends = cli.WorkspaceActorIssueBackendForConfig(url, fleetAPIKey)
 		cfg.FleetDBBaseURL = url
 		fs = withStoreFleetConfig(fs, url, fleetAPIKey)
 	}

@@ -425,11 +425,12 @@ func newStep9TwoRuns(t *testing.T) *step9TwoRuns {
 	rig.runA = rig.claimRunWithTaskRun(t, "run-a", "TEST-A", "node-a", "lease-a")
 	rig.runB = rig.claimRunWithTaskRun(t, "run-b", "TEST-B", "node-b", "lease-b")
 	module := driverapi.NewModule(driverapi.Config{
-		Store: f.st, RunTokenKey: step9TokenKey,
-		Execution: f.exec.DriverRunAPI(), ExecutionAuthorities: f.exec.DriverRunAuthorityResolver(),
+		RunTokenKey: step9TokenKey,
+		Execution:   f.exec.DriverRunAPI(), ExecutionAuthorities: f.exec.DriverRunAuthorityResolver(),
 		AgentIdentities: testutil.StaticAgentQueries{},
 		TaskRunRequests: f.exec.TaskRunRequestAPI(), TaskRunRecovery: f.exec.TaskRunRecoveryAPI(),
-		TaskRuns: f.exec.TaskRunAPI(), TaskRunAuthorities: f.exec.TaskRunAuthorityResolver(),
+		TaskRuns: f.exec.TaskRunAPI(), TaskRunQueries: f.exec.TaskRunQueries(),
+		TaskRunAuthorities: f.exec.TaskRunAuthorityResolver(),
 	})
 	mux := http.NewServeMux()
 	module.Register(mux)

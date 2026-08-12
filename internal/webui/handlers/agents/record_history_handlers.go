@@ -9,7 +9,7 @@ import (
 )
 
 func (m *Module) listAgentRuns(w http.ResponseWriter, r *http.Request) {
-	if !m.requireAgentRunsStore(w) {
+	if !m.requireAgentRuns(w) {
 		return
 	}
 	ws, ok := m.requireCanonicalWorkspace(w, r)

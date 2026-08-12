@@ -10,6 +10,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
 	workflowcataloghttp "github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog/httpapi"
 	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
+	"github.com/tysonthomas9/loomcli/internal/modules/workspace"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/agentcoord"
@@ -19,7 +20,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/issues"
 	locsettings "github.com/tysonthomas9/loomcli/internal/webui/handlers/localsettings"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/misc"
-	"github.com/tysonthomas9/loomcli/internal/webui/handlers/taskrunapi"
 	hterminal "github.com/tysonthomas9/loomcli/internal/webui/handlers/terminal"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
@@ -66,11 +66,14 @@ type TerminalModuleDeps struct {
 	TermAuth           *realtime.TerminalAuth
 	CORSOrigins        []string
 	SelfURL            string
-	Store              store.Store
 	TabMetaStore       terminal.TabMetadataStore
 	Hub                *realtime.Hub
 	ServerStartedAt    time.Time
 	Agents             agents.IdentityQueries
+	Roles              agents.RoleQueries
+	Workspace          workspace.API
+	Orchestration      store.OrchestrationSessionStore
+	WorkspacePath      func(context.Context, string) string
 	Interaction        interaction.API
 	Operator           workflowcataloghttp.OperatorAuthorityResolver
 	SessionAuthorities interface {
@@ -84,12 +87,16 @@ type TerminalModuleDeps struct {
 
 // NewTerminalModules creates the terminal tab and main terminal modules.
 func newTerminalRouteModules(deps TerminalModuleDeps) []interface{ Register(*http.ServeMux) } {
+	state := terminalStateQueryAdapter{
+		roles: deps.Roles, workspace: deps.Workspace,
+		orchestration: deps.Orchestration, workspacePath: deps.WorkspacePath,
+	}
 	return []interface{ Register(*http.ServeMux) }{
 		hterminal.NewTabModule(deps.TermSvc),
 		hterminal.NewModule(
 			deps.TermSvc, deps.AgentSvc, deps.PTYMgr, deps.AgentTmuxMgr,
 			deps.TermAuth, deps.CORSOrigins,
-			deps.SelfURL, deps.Store,
+			deps.SelfURL, state,
 			deps.TabMetaStore, deps.Hub, deps.ServerStartedAt,
 			hterminal.InteractionDependencies{
 				API: deps.Interaction, Operator: deps.Operator,
@@ -98,6 +105,45 @@ func newTerminalRouteModules(deps TerminalModuleDeps) []interface{ Register(*htt
 			},
 			deps.Agents),
 	}
+}
+
+type terminalStateQueryAdapter struct {
+	roles         agents.RoleQueries
+	workspace     workspace.API
+	orchestration store.OrchestrationSessionStore
+	workspacePath func(context.Context, string) string
+}
+
+func (adapter terminalStateQueryAdapter) GetRole(ctx context.Context, workspaceKey, roleName string) (*agents.Role, error) {
+	if adapter.roles == nil {
+		return nil, agents.ErrNotFound
+	}
+	return adapter.roles.GetRole(ctx, workspaceKey, roleName)
+}
+
+func (adapter terminalStateQueryAdapter) FindActiveOrchestrationSession(ctx context.Context, workspaceKey, agentID string) (string, error) {
+	if adapter.orchestration == nil {
+		return "", nil
+	}
+	return store.OrchestrationSessionIDFor(ctx, adapter.orchestration, workspaceKey, agentID)
+}
+
+func (adapter terminalStateQueryAdapter) ResolveWorkspaceName(ctx context.Context, reference string) (string, error) {
+	if adapter.workspace == nil {
+		return "", nil
+	}
+	resolved, err := adapter.workspace.Resolve(ctx, workspace.ResolveQuery{Reference: reference})
+	if err != nil || resolved == nil {
+		return "", err
+	}
+	return resolved.Name, nil
+}
+
+func (adapter terminalStateQueryAdapter) ResolveWorkspacePath(ctx context.Context, workspaceKey string) string {
+	if adapter.workspacePath == nil {
+		return ""
+	}
+	return adapter.workspacePath(ctx, workspaceKey)
 }
 
 // NewIssueTabModule creates the issue tab module.
@@ -127,14 +173,6 @@ func NewLocalSettingsHandlers(dataDir string, invalidator credentialSeedInvalida
 		Patch:                      locsettings.HandlePatch(dataDir, options),
 		RuntimeCredentialPreflight: locsettings.HandleRuntimeCredentialPreflight(dataDir),
 	}
-}
-
-// NewTaskRunAPIModule creates the task-runner HTTP API module
-// (POST /api/workspaces/{ws}/task-run/{op}, lease-token auth) so task runner
-// processes talk to serve instead of holding fleet-db credentials.
-func NewTaskRunAPIModule(st store.Store, fleetBaseURL string, localSettingsDir string) interface{ Register(*http.ServeMux) } {
-	_ = localSettingsDir // compatibility input only; task runners never receive Local Settings.
-	return taskrunapi.NewModule(taskrunapi.Config{Store: st, FleetBaseURL: fleetBaseURL})
 }
 
 // UnifiedAgentModuleDeps contains the dependencies for unified agent modules.

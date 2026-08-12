@@ -332,6 +332,45 @@ type TaskRunSchedulingQuery struct {
 	RequiredFeatures []string
 }
 
+// ActiveTaskRunQuery is the bounded parent-run projection used by workflow
+// status and watch transports. Execution defines which lifecycle states are
+// active; callers cannot provide arbitrary status filters.
+type ActiveTaskRunQuery struct {
+	WorkspaceKey string
+	DriverRunID  string
+	Limit        int
+}
+
+type TaskRunEventQuery struct {
+	WorkspaceKey string
+	EpicID       string
+	DriverRunID  string
+	AfterSeq     int64
+	Limit        int
+}
+
+// TaskRunEvent is Execution's public append-only lifecycle observation. It
+// intentionally contains no lease credential or persistence-specific cursor.
+type TaskRunEvent struct {
+	WorkspaceKey   string     `json:"workspaceKey"`
+	EventID        string     `json:"eventID"`
+	Seq            int64      `json:"seq"`
+	EpicID         string     `json:"epicID,omitempty"`
+	DriverRunID    string     `json:"driverRunID,omitempty"`
+	WorkItemID     string     `json:"taskID,omitempty"`
+	TaskRunID      string     `json:"taskRunID"`
+	Type           string     `json:"type"`
+	Status         Status     `json:"status,omitempty"`
+	SchedulerState string     `json:"schedulerState,omitempty"`
+	Attempt        int        `json:"attempt"`
+	ErrorClass     string     `json:"errorClass,omitempty"`
+	ErrorMessage   string     `json:"errorMessage,omitempty"`
+	LogsRef        string     `json:"logsRef,omitempty"`
+	ArtifactsRef   string     `json:"artifactsRef,omitempty"`
+	NextEligibleAt *time.Time `json:"nextEligibleAt,omitempty"`
+	OccurredAt     time.Time  `json:"occurredAt"`
+}
+
 type TaskRunSchedulingResult struct {
 	Schedulable bool
 	ReasonCode  string

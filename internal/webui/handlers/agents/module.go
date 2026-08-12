@@ -8,10 +8,10 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/app/agentprovisioning"
 	agentsmodule "github.com/tysonthomas9/loomcli/internal/modules/agents"
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 	workflowcataloghttp "github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog/httpapi"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
-	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/agentcoord"
 	"github.com/tysonthomas9/loomcli/internal/webui/apperrors"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/triggerbindings"
@@ -28,17 +28,14 @@ type BindingGrantCleanup interface {
 
 type agentSessionTranscriptEvents = sessioncoord.TranscriptEvents
 
-// Config composes the unified transport with the canonical Agents identity
-// surface and Automation bindings. The composite Store remains for
-// prompt-agent build/provisioning projections and run history; public durable Agent identity reads and
-// mutations never use store.AgentServices directly.
+// Config composes the unified transport with capability-owned interfaces.
 type Config struct {
 	AgentRecords          AgentRecordAPI
 	AgentIdentityCreator  CanonicalInteractiveAgentAPI
 	InteractiveRuntime    agentcoord.InteractiveAgentRuntime
 	AgentRecordAuthority  workflowcataloghttp.OperatorAuthorityResolver
 	SessionTranscripts    sessioncoord.AgentSessionTranscriptService
-	Store                 agentProjectionStore
+	AgentRuns             AgentRunQueries
 	Hub                   *realtime.Hub
 	Bindings              automation.BindingOperations
 	BindingRuns           triggerbindings.RunQueries
@@ -50,10 +47,10 @@ type Config struct {
 	BindingGrants         BindingGrantCleanup
 }
 
-type agentProjectionStore interface {
-	AgentServices() store.AgentServiceStore
-	Roles() store.RoleStore
-	DriverRuns() store.DriverRunStore
+// AgentRunQueries is the read-only Execution projection needed by Agent run
+// history. The handler cannot reach Execution persistence or lifecycle commands.
+type AgentRunQueries interface {
+	ListDriverRuns(context.Context, execution.DriverRunQuery) ([]*execution.DriverRun, error)
 }
 
 // Module registers fleet-db-backed agent assignment routes.
@@ -64,7 +61,7 @@ type Module struct {
 	interactiveRuntime    agentcoord.InteractiveAgentRuntime
 	agentRecordAuthority  workflowcataloghttp.OperatorAuthorityResolver
 	sessionTranscripts    sessioncoord.AgentSessionTranscriptService
-	store                 agentProjectionStore
+	agentRuns             AgentRunQueries
 	hub                   *realtime.Hub
 	bindings              automation.BindingOperations
 	bindingRuns           triggerbindings.RunQueries
@@ -92,7 +89,7 @@ func New(config Config) *Module {
 		interactiveRuntime:   config.InteractiveRuntime,
 		agentRecordAuthority: config.AgentRecordAuthority,
 		sessionTranscripts:   config.SessionTranscripts,
-		store:                config.Store, hub: config.Hub,
+		agentRuns:            config.AgentRuns, hub: config.Hub,
 		bindings: config.Bindings, bindingRuns: config.BindingRuns, operatorAuthority: config.OperatorAuthority,
 		provisioning: config.Provisioning, provisioningAuthority: config.ProvisioningAuthority,
 		prepareWorkflowTarget: config.PrepareWorkflowTarget,
@@ -123,9 +120,6 @@ type AgentLifecycleAPI interface {
 }
 
 func (m *Module) Register(mux *http.ServeMux) {
-	if m.agentRecords == nil && m.store == nil && m.sessionTranscripts == nil {
-		return
-	}
 	mux.HandleFunc("GET /api/workspaces/{ws}/interactive-prompts", HandleInteractivePrompts())
 	mux.HandleFunc("GET /api/workspaces/{ws}/agents", m.listAgents)
 	mux.HandleFunc("POST /api/workspaces/{ws}/agents", m.createAgent)

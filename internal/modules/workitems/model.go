@@ -102,13 +102,13 @@ type CloseResult struct {
 }
 
 type RepositoryAdmissionResult struct {
-	Issue         *IssueSummary
-	Changed       bool
-	Replayed      bool
-	DispatchReady bool
-	Blocked       bool
-	Reopened      bool
-	Outcome       string
+	Issue         *IssueSummary `json:"issue,omitempty"`
+	Changed       bool          `json:"changed"`
+	Replayed      bool          `json:"replayed"`
+	DispatchReady bool          `json:"dispatch_ready"`
+	Blocked       bool          `json:"blocked,omitempty"`
+	Reopened      bool          `json:"reopened,omitempty"`
+	Outcome       string        `json:"outcome,omitempty"`
 }
 
 type ListResult struct {

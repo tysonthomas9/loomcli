@@ -11,7 +11,6 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
-	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
 type LocalTaskExecutor struct{}
@@ -102,27 +101,24 @@ type TaskRunRequestOutcome struct {
 	ArtifactIDs []string
 }
 
-type taskRunRequestStore interface {
-	Drivers() store.DriverStore
-	DriverVersions() store.DriverVersionStore
-	Nodes() store.NodeStore
-	WorkerProfiles() store.WorkerProfileStore
+type TaskRunRequestCatalog interface {
+	GetDriver(context.Context, string, string) (*workflowcatalog.Driver, error)
+	GetVersion(context.Context, string, string) (*workflowcatalog.DriverVersion, error)
 }
 
 // PrepareTaskRunRequest resolves the requested runner and performs provider
 // preflight without writing TaskRun or DriverStep state. The driver-op HTTP
-// adapter uses this read-only compatibility seam while Execution owns the
-// idempotent request mutation. New callers must not follow this with one of
-// the legacy Store-writing request helpers.
+// adapter supplies Workflow Catalog's public query surface while Execution
+// owns the idempotent request mutation.
 func PrepareTaskRunRequest(
 	ctx context.Context,
-	s taskRunRequestStore,
+	catalog TaskRunRequestCatalog,
 	opts TaskRunRequestOptions,
 	parent *execution.DriverRun,
 	preflighter TaskProviderPreflighter,
 ) (TaskRunRequestOptions, error) {
-	if s == nil || parent == nil {
-		return opts, fmt.Errorf("store and parent driver run required: %w", domain.ErrInvalid)
+	if catalog == nil || parent == nil {
+		return opts, fmt.Errorf("workflow catalog and parent driver run required: %w", domain.ErrInvalid)
 	}
 	opts = normalizeTaskRunRequestOptions(opts)
 	if err := validateTaskRunRequestOptions(opts); err != nil {
@@ -131,7 +127,7 @@ func PrepareTaskRunRequest(
 	if parent.WorkspaceKey != opts.WorkspaceKey || parent.RunID != opts.DriverRunID || parent.Status != execution.DriverRunRunning {
 		return opts, fmt.Errorf("parent driver run does not match active request owner: %w", domain.ErrNotOwner)
 	}
-	resolved, err := resolveTaskRunRequestRunner(ctx, s, opts, parent)
+	resolved, err := resolveTaskRunRequestRunner(ctx, catalog, opts, parent)
 	if err != nil {
 		return opts, err
 	}
@@ -184,14 +180,14 @@ func preflightTaskRunRequest(ctx context.Context, opts TaskRunRequestOptions, ca
 	return resolved, nil
 }
 
-func resolveTaskRunRequestRunner(ctx context.Context, s taskRunRequestStore, opts TaskRunRequestOptions, parent *execution.DriverRun) (TaskRunRequestOptions, error) {
+func resolveTaskRunRequestRunner(ctx context.Context, catalog TaskRunRequestCatalog, opts TaskRunRequestOptions, parent *execution.DriverRun) (TaskRunRequestOptions, error) {
 	if strings.TrimSpace(opts.Runner) == "" {
 		return opts, nil
 	}
 	if parent == nil || strings.TrimSpace(parent.DriverVersionID) == "" {
 		return opts, fmt.Errorf("parent driver run version required to resolve runner %q: %w", opts.Runner, domain.ErrInvalid)
 	}
-	version, err := s.DriverVersions().Get(ctx, opts.WorkspaceKey, parent.DriverVersionID)
+	version, err := catalog.GetVersion(ctx, opts.WorkspaceKey, parent.DriverVersionID)
 	if err != nil {
 		return opts, fmt.Errorf("load runner manifest from driver version %q: %w", parent.DriverVersionID, err)
 	}
@@ -200,7 +196,7 @@ func resolveTaskRunRequestRunner(ctx context.Context, s taskRunRequestStore, opt
 	}
 	resolved, err := applyResolvedRunner(opts, parent, version)
 	if err == nil {
-		driver, derr := s.Drivers().Get(ctx, opts.WorkspaceKey, parent.DriverID)
+		driver, derr := catalog.GetDriver(ctx, opts.WorkspaceKey, parent.DriverID)
 		if derr != nil {
 			return opts, fmt.Errorf("load driver %q for runner trust policy: %w", parent.DriverID, derr)
 		}

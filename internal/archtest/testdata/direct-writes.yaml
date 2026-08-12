@@ -907,7 +907,23 @@ function_surfaces:
     access: read-only
     capability_owner: automation
   - package: github.com/tysonthomas9/loomcli/internal/modules/automation
+    function: NextScheduledFire
+    access: read-only
+    capability_owner: automation
+  - package: github.com/tysonthomas9/loomcli/internal/modules/automation
     function: RuntimeRegistrations
+    access: read-only
+    capability_owner: automation
+  - package: github.com/tysonthomas9/loomcli/internal/modules/automation
+    function: ValidateEventPattern
+    access: read-only
+    capability_owner: automation
+  - package: github.com/tysonthomas9/loomcli/internal/modules/automation
+    function: ValidateSchedule
+    access: read-only
+    capability_owner: automation
+  - package: github.com/tysonthomas9/loomcli/internal/modules/automation
+    function: ValidateScheduleTimezone
     access: read-only
     capability_owner: automation
   - package: github.com/tysonthomas9/loomcli/internal/modules/automation
@@ -1126,12 +1142,20 @@ function_surfaces:
     function: New
     access: read-only
     capability_owner: workitems
+  - package: github.com/tysonthomas9/loomcli/internal/modules/workitems
+    function: PublicErrorMessage
+    access: read-only
+    capability_owner: workitems
   - package: github.com/tysonthomas9/loomcli/internal/modules/workspace
     function: New
     access: read-only
     capability_owner: workspace
   - package: github.com/tysonthomas9/loomcli/internal/modules/workspace
     function: NewCreateError
+    access: read-only
+    capability_owner: workspace
+  - package: github.com/tysonthomas9/loomcli/internal/modules/workspace
+    function: PublicErrorMessage
     access: read-only
     capability_owner: workspace
   - package: github.com/tysonthomas9/loomcli/internal/modules/workspace
@@ -1343,24 +1367,6 @@ writes:
       count: 1
       aggregate_owner: execution
       disposition: owner_adapter
-    - file: internal/app/serve/execution.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.TaskRunStore
-      method: AppendLog
-      count: 1
-      aggregate_owner: execution
-      disposition: owner_adapter
-    - file: internal/app/serve/execution.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.TaskRunStore
-      method: Complete
-      count: 1
-      aggregate_owner: execution
-      disposition: owner_adapter
-    - file: internal/app/serve/execution.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.TaskRunStore
-      method: Heartbeat
-      count: 1
-      aggregate_owner: execution
-      disposition: owner_adapter
     - file: internal/app/serve/execution_outbox_delivery.go
       receiver: github.com/tysonthomas9/loomcli/internal/store.OutboxStore
       method: Create
@@ -1467,12 +1473,6 @@ writes:
       receiver: github.com/tysonthomas9/loomcli/internal/store.NodeStore
       method: Update
       count: 2
-      aggregate_owner: execution
-      disposition: owner_adapter
-    - file: internal/app/serve/execution_task_run_recovery.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.DriverRunStore
-      method: RecoverStaleTaskRuns
-      count: 1
       aggregate_owner: execution
       disposition: owner_adapter
     - file: internal/app/serve/execution_worker_profiles.go

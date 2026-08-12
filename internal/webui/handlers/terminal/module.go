@@ -8,7 +8,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
 	workflowcataloghttp "github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog/httpapi"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
-	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/agentcoord"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 	webuterminal "github.com/tysonthomas9/loomcli/internal/webui/terminal"
@@ -46,19 +45,12 @@ type Module struct {
 	termAuth        *realtime.TerminalAuth         // may be nil — token routes skipped
 	allowedOrigins  []string
 	loomServerURL   string
-	store           terminalStore
+	state           StateQueries
 	tabMetaStore    webuterminal.TabMetadataReader
 	hub             *realtime.Hub
 	serverStartedAt time.Time
 	agentIdentity   terminalAgentIdentity
 	interaction     InteractionDependencies
-}
-
-type terminalStore interface {
-	store.OrchestrationSessionStore
-	Roles() store.RoleStore
-	Workspaces() store.WorkspaceStore
-	Repos() store.RepoStore
 }
 
 // NewModule returns a Module. Any of agentSvc, agentTmuxMgr, and termAuth
@@ -73,7 +65,7 @@ func NewModule(
 	termAuth *realtime.TerminalAuth,
 	allowedOrigins []string,
 	loomServerURL string,
-	st terminalStore,
+	state StateQueries,
 	tabMetaStore webuterminal.TabMetadataReader,
 	hub *realtime.Hub,
 	serverStartedAt time.Time,
@@ -88,7 +80,7 @@ func NewModule(
 		termAuth:        termAuth,
 		allowedOrigins:  allowedOrigins,
 		loomServerURL:   loomServerURL,
-		store:           st,
+		state:           state,
 		tabMetaStore:    tabMetaStore,
 		hub:             hub,
 		serverStartedAt: serverStartedAt,
@@ -106,10 +98,10 @@ func (m *Module) Register(mux *http.ServeMux) {
 			mux.HandleFunc("GET /api/workspaces/{ws}/agents/{name}/terminal/token", HandleGetAgentTerminalToken(m.agentSvc))
 		}
 	}
-	if m.termSvc != nil && m.store != nil {
+	if m.termSvc != nil && m.state != nil {
 		mux.HandleFunc(
 			"POST /api/workspaces/{ws}/agents/{name}/terminal/session",
-			HandleEnsureAgentTerminalSession(m.termSvc, m.store, m.agentIdentity),
+			HandleEnsureAgentTerminalSession(m.termSvc, m.state, m.agentIdentity),
 		)
 	}
 	if m.agentTmuxMgr != nil {
@@ -128,7 +120,7 @@ func (m *Module) Register(mux *http.ServeMux) {
 				m.termAuth,
 				m.allowedOrigins,
 				m.loomServerURL,
-				m.store,
+				m.state,
 				m.tabMetaStore,
 				m.hub,
 				m.serverStartedAt,

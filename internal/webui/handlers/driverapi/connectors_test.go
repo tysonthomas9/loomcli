@@ -136,11 +136,12 @@ func newConnectorHarness(t *testing.T) *connectorHarness {
 	}
 	runTokenKey := bytes.Repeat([]byte{0x42}, 32)
 	module := NewModule(Config{
-		Store:                st,
 		RunTokenKey:          runTokenKey,
 		Execution:            testDriverRunExecution{store: st},
 		ExecutionAuthorities: testDriverRunAuthorityResolver{},
 		Dispatcher:           dispatcher,
+		AutomationBindings:   testAutomationQueries{store: st},
+		AutomationDeliveries: testAutomationQueries{store: st},
 	})
 	mux := http.NewServeMux()
 	module.Register(mux)

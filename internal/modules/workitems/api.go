@@ -9,12 +9,14 @@ type API interface {
 	Create(context.Context, CreateCommand) (*CreatedIssue, error)
 	List(context.Context, ListQuery) (*ListResult, error)
 	Ready(context.Context, AvailabilityQuery) ([]IssueSummary, error)
+	Blocked(context.Context, AvailabilityQuery) ([]IssueSummary, error)
 	Search(context.Context, SearchQuery) ([]IssueSummary, error)
 	Get(context.Context, GetQuery) (*IssueDetail, error)
 	Patch(context.Context, PatchCommand) (*IssueDetail, error)
 	Close(context.Context, CloseCommand) (*CloseResult, error)
 	Claim(context.Context, ClaimCommand) (*IssueDetail, error)
 	Reopen(context.Context, ReopenCommand) error
+	BlockRepositoryRequired(context.Context, BlockRepositoryRequiredCommand) (*RepositoryAdmissionResult, error)
 	AssignRepository(context.Context, AssignRepositoryCommand) (*IssueSummary, error)
 	Delete(context.Context, DeleteCommand) (DeleteResult, error)
 	ListEvents(context.Context, ListEventsQuery) ([]*Event, error)
@@ -52,6 +54,7 @@ type ListQuery struct {
 
 type ListFilter struct {
 	Query               string
+	ExternalRef         string
 	Status              string
 	Priority            *int
 	IssueType           string
@@ -163,6 +166,13 @@ type ClaimCommand struct {
 type ReopenCommand struct {
 	IssueID string
 	Reason  string
+}
+
+// BlockRepositoryRequiredCommand performs the Work Items-owned atomic
+// repository-admission transition. Callers cannot mint the reserved block
+// metadata through the generic Patch command.
+type BlockRepositoryRequiredCommand struct {
+	IssueID string
 }
 
 type AssignRepositoryCommand struct {

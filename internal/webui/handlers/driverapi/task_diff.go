@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 	workspacemodule "github.com/tysonthomas9/loomcli/internal/modules/workspace"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
@@ -109,11 +110,11 @@ func (m *Module) taskDiff(ctx context.Context, ws string, id driverIdentity, bod
 	if taskID == "" {
 		return nil, taskDiffError(http.StatusBadRequest, "task_diff_task_id_required", "taskId required", false, nil, domain.ErrInvalid)
 	}
-	issueBackend, _, err := m.issueBackendForRun(ctx, ws, id)
+	items, _, err := m.workItemsForRun(ctx, ws, id)
 	if err != nil {
 		return nil, err
 	}
-	card, err := issueBackend.Get(ctx, taskID)
+	card, err := items.Get(ctx, workitems.GetQuery{IssueID: taskID})
 	if err != nil {
 		return nil, fmt.Errorf("get issue for task diff: %w", err)
 	}
@@ -123,7 +124,10 @@ func (m *Module) taskDiff(ctx context.Context, ws string, id driverIdentity, bod
 		return nil, err
 	}
 
-	repos, err := m.store.Repos().List(ctx, ws)
+	if m.repositories == nil {
+		return nil, fmt.Errorf("workspace repository queries are unavailable: %w", workspacemodule.ErrUnavailable)
+	}
+	repos, err := m.repositories.ListRepositories(ctx, workspacemodule.ListRepositoriesQuery{WorkspaceReference: ws})
 	if err != nil {
 		return nil, fmt.Errorf("list repos for task diff: %w", err)
 	}
@@ -289,12 +293,10 @@ func parseLocalBranchExternalRef(externalRef string) (string, string, error) {
 	return branch, strings.ToLower(sha), nil
 }
 
-func selectTaskDiffRepo(repos []*workspacemodule.Repository, sourceRepo string) (*workspacemodule.Repository, error) {
+func selectTaskDiffRepo(repos []workspacemodule.Repository, sourceRepo string) (*workspacemodule.Repository, error) {
 	available := make([]*workspacemodule.Repository, 0, len(repos))
-	for _, repo := range repos {
-		if repo != nil {
-			available = append(available, repo)
-		}
+	for index := range repos {
+		available = append(available, &repos[index])
 	}
 	if len(available) == 0 {
 		return nil, taskDiffError(http.StatusNotFound, "task_diff_repo_missing", "workspace has no repos", false, nil, domain.ErrNotFound)

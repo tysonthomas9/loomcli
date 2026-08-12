@@ -78,6 +78,7 @@ type InteractionCapability interface {
 // adapters. It intentionally exposes no shared issuer or persistence adapter.
 type ExecutionCapability interface {
 	TaskRunAPI() execution.TaskRunAPI
+	TaskRunQueries() execution.TaskRunQueries
 	TaskRunRequestAPI() execution.TaskRunRequestAPI
 	TaskRunWorkerAPI() execution.TaskRunWorkerAPI
 	TaskRunSchedulingAPI() execution.TaskRunSchedulingAPI

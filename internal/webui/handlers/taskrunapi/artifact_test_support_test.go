@@ -5,8 +5,8 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	artifactsmodule "github.com/tysonthomas9/loomcli/internal/modules/artifacts"
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 )
 
@@ -23,8 +23,8 @@ type taskRunArtifactTestAdapter struct {
 
 var _ artifactsmodule.Store = taskRunArtifactTestAdapter{}
 
-func newTaskRunArtifactAPIForTest(module *Module) artifactsmodule.API {
-	provider, ok := module.store.(artifactCommandStore)
+func newTaskRunArtifactAPIForTest(module *Module, source any) artifactsmodule.API {
+	provider, ok := source.(artifactCommandStore)
 	if !ok {
 		panic("task-run artifact test store does not expose the Artifacts command port")
 	}
@@ -103,7 +103,7 @@ func (a taskRunArtifactTestAdapter) Create(ctx context.Context, owner artifactsm
 		return nil, err
 	}
 	if strings.TrimSpace(command.TaskID) == "" {
-		command.TaskID = run.TaskID
+		command.TaskID = run.WorkItemID
 	}
 	return a.store.Create(ctx, owner, command)
 }
@@ -143,8 +143,8 @@ func (a taskRunArtifactTestAdapter) List(ctx context.Context, owner artifactsmod
 	return a.store.List(ctx, owner, filter)
 }
 
-func (a taskRunArtifactTestAdapter) authorize(ctx context.Context, owner artifactsmodule.ExecutionOwner) (*domain.TaskRun, error) {
-	if a.module == nil || a.module.store == nil || a.store == nil {
+func (a taskRunArtifactTestAdapter) authorize(ctx context.Context, owner artifactsmodule.ExecutionOwner) (*execution.TaskRun, error) {
+	if a.module == nil || a.module.taskRuns == nil || a.store == nil {
 		return nil, artifactsmodule.ErrUnavailable
 	}
 	run, err := a.module.verifyLease(ctx, owner.WorkspaceKey, leaseIdentity{

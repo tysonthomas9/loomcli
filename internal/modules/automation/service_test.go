@@ -1635,7 +1635,7 @@ func TestWorkflowAdmissionRejectsExecutionOwnerTupleDrift(t *testing.T) {
 
 func TestWorkflowAdmissionReplaySurvivesOwnerHandoff(t *testing.T) {
 	h := newTestHarness(t)
-	binding := seedBinding("internal-binding", "internal.issue.created")
+	binding := seedBinding("internal-binding", "internal.deploy.requested")
 	binding.SourceKind = SourceKindInternal
 	h.persistence.seedBinding(binding)
 	h.execution.emission = &ExecutionEmissionContext{
@@ -1644,7 +1644,7 @@ func TestWorkflowAdmissionReplaySurvivesOwnerHandoff(t *testing.T) {
 	}
 	auth := NewExecutionEventAuthority(h.issueExecution(ActionAdmitEvent))
 	command := AdmitEventCommand{
-		WorkspaceKey: "ws", SourceEventID: "handoff-emission", EventType: "issue.created",
+		WorkspaceKey: "ws", SourceEventID: "handoff-emission", EventType: "deploy.requested",
 		ExecutionNodeID: "node-a", ExecutionLeaseID: "lease-a", ExecutionFencingToken: 7,
 		Payload: []byte(`{"issue":"LOOM-1"}`),
 	}
@@ -1664,6 +1664,10 @@ func TestWorkflowAdmissionReplaySurvivesOwnerHandoff(t *testing.T) {
 	replayed, err := h.service.AdmitEvent(t.Context(), auth, replay)
 	if err != nil || replayed == nil || !replayed.Replayed || replayed.Event.EventID != first.Event.EventID {
 		t.Fatalf("B replay after owner handoff = %#v, %v", replayed, err)
+	}
+	if len(h.persistence.events) != 1 || len(h.persistence.reservations) != 1 || len(h.execution.calls) != 1 {
+		t.Fatalf("handoff replay duplicated durable admission: events=%d reservations=%d dispatches=%d",
+			len(h.persistence.events), len(h.persistence.reservations), len(h.execution.calls))
 	}
 	if h.persistence.matchCalls != matchCalls || len(h.catalog.calls) != catalogCalls {
 		t.Fatalf("handoff replay consulted mutable preconditions: match %d->%d catalog %d->%d",

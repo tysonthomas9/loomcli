@@ -107,7 +107,7 @@ func (s *workItemsBackendStore) List(ctx context.Context, filter workitems.ListF
 	ctx, cancel := context.WithTimeout(ctx, workItemOperationTimeout)
 	defer cancel()
 	values, err := be.List(ctx, backend.ListOpts{
-		Status: filter.Status, IssueType: filter.IssueType, Assignee: filter.Assignee,
+		Status: filter.Status, IssueType: filter.IssueType, ExternalRef: filter.ExternalRef, Assignee: filter.Assignee,
 		Labels: filter.Labels, ParentID: filter.ParentID, Limit: filter.Limit,
 		SourceRepos: filter.SourceRepos,
 	})

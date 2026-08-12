@@ -441,10 +441,6 @@ func TestPublicAgentRecordProductionPathsHaveNoLegacyMutations(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	allowedReads := map[string]int{
-		"prompt_agent_create_helpers.go":  1,
-		"prompt_agent_create_response.go": 1,
-	}
 	for _, file := range files {
 		if strings.HasSuffix(file, "_test.go") {
 			continue
@@ -459,19 +455,9 @@ func TestPublicAgentRecordProductionPathsHaveNoLegacyMutations(t *testing.T) {
 			strings.Contains(text, "AgentServices().Create") {
 			t.Fatalf("%s contains a legacy AgentService mutation", file)
 		}
-		count := strings.Count(text, "AgentServices().")
-		if count != allowedReads[filepath.Base(file)] {
-			t.Fatalf(
-				"%s has %d direct AgentService reads, want explicit compatibility count %d",
-				file,
-				count,
-				allowedReads[filepath.Base(file)],
-			)
+		if strings.Contains(text, "AgentServices().") {
+			t.Fatalf("%s contains a direct AgentService repository read", file)
 		}
-		delete(allowedReads, filepath.Base(file))
-	}
-	if len(allowedReads) != 0 {
-		t.Fatalf("explicit prompt-agent compatibility reads were not found: %v", allowedReads)
 	}
 }
 

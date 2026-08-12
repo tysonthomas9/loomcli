@@ -132,7 +132,6 @@ func TestAgentSessionTranscriptRouteReturnsCanonicalEntriesAndEnforcesOwner(t *t
 		t.Fatal("session service does not implement AgentSessionTranscriptService")
 	}
 	module := New(Config{
-		Store:              st,
 		SessionTranscripts: transcripts,
 		WorkspaceFromContext: func(context.Context) string {
 			return agentRecordTestWS
@@ -242,7 +241,6 @@ func TestAgentSessionTranscriptRouteReturnsCanonicalEntriesAndEnforcesOwner(t *t
 
 func TestAgentSessionTranscriptRouteFailsClosedWithoutService(t *testing.T) {
 	module := New(Config{
-		Store: memstore.New(),
 		WorkspaceFromContext: func(context.Context) string {
 			return agentRecordTestWS
 		},
@@ -269,7 +267,6 @@ func TestAgentSessionTranscriptRouteFailsClosedWithoutService(t *testing.T) {
 
 func TestAgentSessionTranscriptRoutePreservesUnavailable(t *testing.T) {
 	module := New(Config{
-		Store: memstore.New(),
 		SessionTranscripts: agentSessionTranscriptErrorService{
 			err: apperrors.ErrUnavailable("transcript content is temporarily unavailable"),
 		},

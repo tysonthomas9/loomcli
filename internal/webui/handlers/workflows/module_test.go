@@ -17,6 +17,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/driver"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	workflowdefs "github.com/tysonthomas9/loomcli/internal/infra/workflowdistribution/authoring"
+	"github.com/tysonthomas9/loomcli/internal/modules/automation"
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
@@ -91,6 +92,62 @@ func (stub *workflowRunCaptureExecution) SubmitDriverRun(
 type workflowRunStoreTestExecution struct {
 	execution.DriverRunAPI
 	store store.Store
+}
+
+func (adapter workflowRunStoreTestExecution) ListDriverRunSteps(ctx context.Context, workspace, runID string) ([]execution.DriverRunStep, error) {
+	values, err := adapter.store.DriverSteps().ListForRun(ctx, workspace, runID, store.DriverStepFilter{})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]execution.DriverRunStep, 0, len(values))
+	for _, value := range values {
+		if value != nil {
+			out = append(out, execution.DriverRunStep{WorkspaceKey: value.WorkspaceKey, StepID: value.StepID, DriverRunID: value.DriverRunID, StepKind: value.StepKind, Status: string(value.Status), TaskRunID: value.TaskRunID})
+		}
+	}
+	return out, nil
+}
+
+func (adapter workflowRunStoreTestExecution) ListDriverRunEvents(ctx context.Context, query execution.DriverRunEventQuery) (*execution.DriverRunEventPage, error) {
+	reader, ok := adapter.store.DriverRuns().(store.DriverRunEventsReader)
+	if !ok {
+		return nil, execution.ErrUnavailable
+	}
+	page, err := reader.Events(ctx, query.WorkspaceKey, query.RunID, query.After, query.Limit)
+	if err != nil {
+		return nil, err
+	}
+	out := &execution.DriverRunEventPage{Cursor: page.Cursor, Events: make([]execution.DriverRunEvent, 0, len(page.Events))}
+	for _, value := range page.Events {
+		out.Events = append(out.Events, execution.DriverRunEvent{ID: value.ID, Timestamp: value.Timestamp, Actor: value.Actor, Action: value.Action, EntityType: value.EntityType, EntityID: value.EntityID, WorkspaceID: value.WorkspaceID, Before: value.Before, After: value.After, Metadata: value.Metadata})
+	}
+	return out, nil
+}
+
+func (adapter workflowRunStoreTestExecution) GetTaskRun(ctx context.Context, workspace, taskRunID string) (*execution.TaskRun, error) {
+	value, err := adapter.store.TaskRuns().Get(ctx, workspace, taskRunID)
+	if err != nil {
+		return nil, err
+	}
+	return &execution.TaskRun{WorkspaceKey: value.WorkspaceKey, TaskRunID: value.TaskRunID, WorkItemID: value.TaskID}, nil
+}
+
+func (adapter workflowRunStoreTestExecution) ListActiveTaskRuns(context.Context, execution.ActiveTaskRunQuery) ([]*execution.TaskRun, error) {
+	return nil, nil
+}
+
+func (adapter workflowRunStoreTestExecution) ListTaskRunEvents(context.Context, execution.TaskRunEventQuery) ([]*execution.TaskRunEvent, error) {
+	return nil, nil
+}
+
+type workflowBindingQueries struct{ store store.TriggerBindingStore }
+
+func (queries workflowBindingQueries) GetBinding(ctx context.Context, workspace, bindingID string) (*automation.Binding, error) {
+	return queries.store.Get(ctx, workspace, bindingID)
+}
+
+func (queries workflowBindingQueries) ListBindings(ctx context.Context, workspace string, filter automation.BindingFilter) ([]*automation.Binding, error) {
+	return queries.store.List(ctx, workspace, store.TriggerBindingFilter{DriverID: filter.DriverID, Limit: filter.Limit})
 }
 
 func (adapter workflowRunStoreTestExecution) GetDriverRun(
@@ -331,9 +388,11 @@ func (query backendHealthQueryFunc) BackendHealth(name string) (BackendHealth, b
 
 func newWorkflowTestModule(st *memstore.Store) *Module {
 	catalog := &workflowRunStoreTestCatalog{store: st}
+	executionAdapter := workflowRunStoreTestExecution{store: st}
 	return NewModule(Config{
-		Store: st, Catalog: catalog, Authoring: catalog,
-		Execution: workflowRunStoreTestExecution{store: st}, OperatorAuthority: workflowOperatorAuthorityStub{},
+		Catalog: catalog, Authoring: catalog,
+		Execution: executionAdapter, TaskRuns: executionAdapter, Bindings: workflowBindingQueries{store: st.TriggerBindings()},
+		OperatorAuthority: workflowOperatorAuthorityStub{},
 		PrepareWorkflowTarget: func(ctx context.Context, workspace, workflow string) (*workflowcatalog.Driver, error) {
 			if workflowdefs.IsBuiltinWorkflow(workflow) {
 				coordinator, err := appworkflowauthoring.New(workflowdefs.NewBundleStager())
@@ -616,7 +675,8 @@ func TestCreateDriverRunServerStampsWorkflowBindingSourceRef(t *testing.T) {
 	submissions := &workflowRunCaptureExecution{}
 	mux := http.NewServeMux()
 	NewModule(Config{
-		Store: st, Catalog: catalog, Execution: submissions, OperatorAuthority: workflowOperatorAuthorityStub{},
+		Catalog: catalog, Execution: submissions, Bindings: workflowBindingQueries{store: st.TriggerBindings()},
+		OperatorAuthority: workflowOperatorAuthorityStub{},
 	}).Register(mux)
 	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/TEST/execution/driver-runs", stringsReader(
 		`{"cli_command":"workflow-run","driver_ref":"demo","payload":{"runner":"daytona-task-runner"}}`,
@@ -637,7 +697,7 @@ func TestCreateWorkflowRunLostResponseRetryKeepsRunIdentity(t *testing.T) {
 	submissions := &workflowRunSubmissionStub{}
 	mux := http.NewServeMux()
 	NewModule(Config{
-		Store: st, Execution: submissions, OperatorAuthority: workflowOperatorAuthorityStub{},
+		Execution: submissions, OperatorAuthority: workflowOperatorAuthorityStub{},
 		PrepareWorkflowTarget: func(ctx context.Context, workspace, workflow string) (*workflowcatalog.Driver, error) {
 			return resolveWorkflowDriverForTest(ctx, st, workspace, workflow)
 		},
@@ -1310,7 +1370,7 @@ func TestCreateWorkflowVersionRegistersWithoutActivation(t *testing.T) {
 	authoring := &workflowVersionAuthoringStub{}
 	mux := http.NewServeMux()
 	NewModule(Config{
-		Store: st, Catalog: catalog, Authoring: authoring,
+		Catalog: catalog, Authoring: authoring,
 		CatalogOperatorAuthority: workflowOperatorAuthorityStub{},
 	}).Register(mux)
 

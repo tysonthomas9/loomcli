@@ -16,6 +16,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	"github.com/tysonthomas9/loomcli/internal/modules/automation"
 )
 
 // bindingConfig is the "binding-config" op handler. Flow: verify the caller
@@ -42,7 +44,10 @@ func (m *Module) bindingConfig(ctx context.Context, ws string, id driverIdentity
 		// a privilege escalation.
 		return nil, err
 	}
-	binding, err := m.store.TriggerBindings().Get(ctx, ws, bindingID)
+	if m.automationBindings == nil {
+		return nil, fmt.Errorf("automation binding queries are unavailable: %w", automation.ErrUnavailable)
+	}
+	binding, err := m.automationBindings.GetBinding(ctx, ws, bindingID)
 	if err != nil {
 		return nil, fmt.Errorf("get trigger binding %q: %w", bindingID, err)
 	}

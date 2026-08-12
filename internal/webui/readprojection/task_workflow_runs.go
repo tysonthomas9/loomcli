@@ -107,11 +107,32 @@ func (reader *taskWorkflowRunReader) ListTaskWorkflowRuns(
 	}
 
 	subjectRef := issueTriggerSubjectPrefix + taskID
-	events, err := reader.events.List(ctx, workspace, store.TriggerEventFilter{SubjectRef: subjectRef})
+	eventIDs, err := reader.taskEventIDs(ctx, workspace, subjectRef)
 	if err != nil {
 		return TaskWorkflowRunResult{}, err
 	}
+	runs, err := reader.unrepresentedDriverRuns(ctx, workspace, eventIDs, representedDriverRuns)
+	if err != nil {
+		return TaskWorkflowRunResult{}, err
+	}
+	store.SortDriverRunsNewestFirst(runs)
+	if query.Limit > 0 && len(runs) > query.Limit {
+		runs = runs[:query.Limit]
+	}
+	if runs == nil {
+		runs = []*domain.DriverRun{}
+	}
+	return TaskWorkflowRunResult{SubjectRef: subjectRef, Runs: runs}, nil
+}
 
+func (reader *taskWorkflowRunReader) taskEventIDs(
+	ctx context.Context,
+	workspace, subjectRef string,
+) (map[string]struct{}, error) {
+	events, err := reader.events.List(ctx, workspace, store.TriggerEventFilter{SubjectRef: subjectRef})
+	if err != nil {
+		return nil, err
+	}
 	eventIDs := make(map[string]struct{}, len(events))
 	for _, event := range events {
 		// Keep the exact check even when the backing store pushes SubjectRef
@@ -121,10 +142,17 @@ func (reader *taskWorkflowRunReader) ListTaskWorkflowRuns(
 		}
 		eventIDs[event.EventID] = struct{}{}
 	}
+	return eventIDs, nil
+}
 
+func (reader *taskWorkflowRunReader) unrepresentedDriverRuns(
+	ctx context.Context,
+	workspace string,
+	eventIDs, representedDriverRuns map[string]struct{},
+) ([]*domain.DriverRun, error) {
 	allRuns, err := reader.driverRuns.List(ctx, workspace, store.DriverRunFilter{})
 	if err != nil {
-		return TaskWorkflowRunResult{}, err
+		return nil, err
 	}
 	runsByID := make(map[string]*domain.DriverRun)
 	for _, run := range allRuns {
@@ -144,14 +172,7 @@ func (reader *taskWorkflowRunReader) ListTaskWorkflowRuns(
 	for _, run := range runsByID {
 		runs = append(runs, run)
 	}
-	store.SortDriverRunsNewestFirst(runs)
-	if query.Limit > 0 && len(runs) > query.Limit {
-		runs = runs[:query.Limit]
-	}
-	if runs == nil {
-		runs = []*domain.DriverRun{}
-	}
-	return TaskWorkflowRunResult{SubjectRef: subjectRef, Runs: runs}, nil
+	return runs, nil
 }
 
 func (reader *taskWorkflowRunReader) representedDriverRunIDs(

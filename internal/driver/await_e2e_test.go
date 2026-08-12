@@ -313,12 +313,13 @@ func newAwaitFlowsServer(t *testing.T, st store.Store, runTokenKey []byte) (*htt
 	)
 	mux := http.NewServeMux()
 	driverapi.NewModule(driverapi.Config{
-		Store: st, RunTokenKey: runTokenKey,
+		RunTokenKey:          runTokenKey,
 		Execution:            awaitE2EDriverRunAPI{DriverRunAPI: executionCapability.DriverRunAPI(), store: st},
 		ExecutionAuthorities: executionCapability.DriverRunAuthorityResolver(),
 		TaskRunRequests:      executionCapability.TaskRunRequestAPI(), TaskRunRecovery: executionCapability.TaskRunRecoveryAPI(),
-		TaskRuns: executionCapability.TaskRunAPI(), TaskRunAuthorities: executionCapability.TaskRunAuthorityResolver(),
-		WorkflowCatalog: awaitE2EWorkflowCatalog{store: st},
+		TaskRuns: executionCapability.TaskRunAPI(), TaskRunQueries: executionCapability.TaskRunQueries(),
+		TaskRunAuthorities: executionCapability.TaskRunAuthorityResolver(),
+		WorkflowCatalog:    awaitE2EWorkflowCatalog{store: st},
 	}).Register(mux)
 	approvals.New(approvals.Config{
 		PendingAwaits: st.Awaits(), Awaits: awaitMatcher, Journal: approvalJournal,
@@ -894,12 +895,12 @@ func testMultiTurnLoopFlow(t *testing.T, h *awaitFlows) {
 			t.Fatalf("invocation %d saw %v, want %v (fast-forward from satisfied history)", i, invocations[i], texts)
 		}
 	}
-	awaits, err := driver.ListRunAwaits(h.ctx, h.st.Awaits(), h.ws, "run-loop")
+	awaits, err := h.execution.DriverRunAPI().ListDriverRunAwaits(h.ctx, h.ws, "run-loop")
 	if err != nil || len(awaits) != 3 {
-		t.Fatalf("ListRunAwaits = %d (%v), want the three turn awaits", len(awaits), err)
+		t.Fatalf("ListDriverRunAwaits = %d (%v), want the three turn awaits", len(awaits), err)
 	}
 	for i, inst := range awaits {
-		if inst.Status != domain.AwaitSatisfied || inst.SatisfiedByEventID != steps[i].eventID {
+		if inst.Status != execution.DriverAwaitSatisfied || inst.SatisfiedByEventID != steps[i].eventID {
 			t.Fatalf("await %d = %+v, want satisfied by %s", i+1, inst, steps[i].eventID)
 		}
 	}

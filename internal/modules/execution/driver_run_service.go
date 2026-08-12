@@ -25,54 +25,6 @@ const (
 	driverRunWorkItemReviewClaimFingerprintPrefix = "driver-run-work-item-claim-v2:"
 )
 
-func (service *Service) GetDriverRun(ctx context.Context, workspace, runID string) (*DriverRun, error) {
-	if strings.TrimSpace(workspace) == "" || strings.TrimSpace(runID) == "" {
-		return nil, ErrInvalid
-	}
-	port := service.dependencies.DriverRuns.Queries
-	if port == nil {
-		return nil, ErrUnavailable
-	}
-	run, err := port.GetDriverRun(ctx, workspace, runID)
-	if err != nil {
-		return nil, err
-	}
-	if run == nil || run.WorkspaceKey != workspace || run.RunID != runID {
-		return nil, ErrConflict
-	}
-	return cloneDriverRun(run), nil
-}
-
-func (service *Service) ListDriverRuns(ctx context.Context, query DriverRunQuery) ([]*DriverRun, error) {
-	if strings.TrimSpace(query.WorkspaceKey) == "" || query.Limit < 0 {
-		return nil, ErrInvalid
-	}
-	port := service.dependencies.DriverRuns.Queries
-	if port == nil {
-		return nil, ErrUnavailable
-	}
-	runs, err := port.ListDriverRuns(ctx, query)
-	if err != nil {
-		return nil, err
-	}
-	result := make([]*DriverRun, 0, len(runs))
-	for _, run := range runs {
-		if run == nil || run.WorkspaceKey != query.WorkspaceKey ||
-			(query.DriverID != "" && run.DriverID != query.DriverID) ||
-			(query.EpicID != "" && run.EpicID != query.EpicID) ||
-			(query.ParentRunID != "" && run.ParentRunID != query.ParentRunID) ||
-			(query.AgentServiceID != "" && run.AgentServiceID != query.AgentServiceID) ||
-			(query.Status != "" && run.Status != query.Status) {
-			return nil, ErrConflict
-		}
-		result = append(result, cloneDriverRun(run))
-	}
-	if query.Limit > 0 && len(result) > query.Limit {
-		return nil, ErrConflict
-	}
-	return result, nil
-}
-
 func (service *Service) SubmitDriverRun(ctx context.Context, auth authority.OperatorAuthority, command SubmitDriverRunCommand) (*DriverRun, error) {
 	if err := service.requireOperator(ActionSubmitDriverRun, command.WorkspaceKey, auth); err != nil {
 		return nil, err

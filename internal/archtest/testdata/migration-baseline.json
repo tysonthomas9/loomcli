@@ -738,7 +738,7 @@
   },
   "ratchets": {
     "composite_store": {
-      "max_production_files": 15,
+      "max_production_files": 14,
       "max_outside_composition": 0,
       "composition_prefixes": [
         "internal/bootstrap/",
@@ -761,7 +761,6 @@
         "internal/cli/serve/workspacemgr/workspace_store.go",
         "internal/infra/fleetdb/client.go",
         "internal/infra/memstore/store.go",
-        "internal/webui/app/composition_modules.go",
         "internal/webui/app/server_workspace.go",
         "internal/webui/server_config.go"
       ]
@@ -775,24 +774,7 @@
         "github.com/tysonthomas9/loomcli/internal/webui/daemon",
         "github.com/tysonthomas9/loomcli/internal/webui/store"
       ],
-      "allowed": [
-        {"file": "internal/webui/handlers/agents/module.go", "import": "github.com/tysonthomas9/loomcli/internal/store"},
-        {"file": "internal/webui/handlers/agents/record_dto.go", "import": "github.com/tysonthomas9/loomcli/internal/store"},
-        {"file": "internal/webui/handlers/agents/record_handlers.go", "import": "github.com/tysonthomas9/loomcli/internal/store"},
-        {"file": "internal/webui/handlers/driverapi/connectors.go", "import": "github.com/tysonthomas9/loomcli/internal/store"},
-        {"file": "internal/webui/handlers/driverapi/issue_ops.go", "import": "github.com/tysonthomas9/loomcli/internal/backend"},
-        {"file": "internal/webui/handlers/driverapi/module.go", "import": "github.com/tysonthomas9/loomcli/internal/backend"},
-        {"file": "internal/webui/handlers/driverapi/module.go", "import": "github.com/tysonthomas9/loomcli/internal/store"},
-        {"file": "internal/webui/handlers/driverapi/watch.go", "import": "github.com/tysonthomas9/loomcli/internal/backend"},
-        {"file": "internal/webui/handlers/driverapi/watch.go", "import": "github.com/tysonthomas9/loomcli/internal/store"},
-        {"file": "internal/webui/handlers/roles/module.go", "import": "github.com/tysonthomas9/loomcli/internal/store"},
-        {"file": "internal/webui/handlers/taskrunapi/module.go", "import": "github.com/tysonthomas9/loomcli/internal/backend"},
-        {"file": "internal/webui/handlers/taskrunapi/module.go", "import": "github.com/tysonthomas9/loomcli/internal/backend/fleet"},
-        {"file": "internal/webui/handlers/taskrunapi/module.go", "import": "github.com/tysonthomas9/loomcli/internal/store"},
-        {"file": "internal/webui/handlers/terminal/agent_session.go", "import": "github.com/tysonthomas9/loomcli/internal/store"},
-        {"file": "internal/webui/handlers/terminal/module.go", "import": "github.com/tysonthomas9/loomcli/internal/store"},
-        {"file": "internal/webui/handlers/workflows/module.go", "import": "github.com/tysonthomas9/loomcli/internal/store"}
-      ]
+      "allowed": []
     },
     "legacy_handler_service_imports": {
       "root": "internal/webui/handlers",

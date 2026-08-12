@@ -15,7 +15,6 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/localworkspace"
 	"github.com/tysonthomas9/loomcli/internal/modules/agents"
 	"github.com/tysonthomas9/loomcli/internal/store"
@@ -24,12 +23,12 @@ import (
 	webuiterminal "github.com/tysonthomas9/loomcli/internal/webui/terminal"
 )
 
-func newAgentSessionTestDeps(t *testing.T) (*memstore.Store, *localredis.TabMetadataStore, *redis.Client) {
+func newAgentSessionTestDeps(t *testing.T) (*terminalTestState, *localredis.TabMetadataStore, *redis.Client) {
 	t.Helper()
 	mr := miniredis.RunT(t)
 	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
 	t.Cleanup(func() { _ = rdb.Close() })
-	return memstore.New(), localredis.NewTabMetadataStore(rdb, nil), rdb
+	return newTerminalTestState(), localredis.NewTabMetadataStore(rdb, nil), rdb
 }
 
 type slowListTerminalService struct {
@@ -169,7 +168,7 @@ func TestBuildAgentLaunchSpecIncludesPromptForInteractiveRole(t *testing.T) {
 	configDir := t.TempDir()
 	t.Setenv("LOOM_CONFIG_DIR", configDir)
 	ctx := context.Background()
-	st := memstore.New()
+	st := newTerminalTestState()
 	if _, err := st.Roles().Create(ctx, store.RoleCreate{
 		WorkspaceKey: "E2E",
 		Name:         "lead",
@@ -197,7 +196,7 @@ func TestBuildAgentLaunchSpecIncludesPromptForInteractiveRole(t *testing.T) {
 
 func TestBuildAgentLaunchSpecIncludesBuiltinPromptForInteractiveRole(t *testing.T) {
 	ctx := context.Background()
-	st := memstore.New()
+	st := newTerminalTestState()
 	if _, err := st.Roles().Create(ctx, store.RoleCreate{
 		WorkspaceKey: "E2E",
 		Name:         "pr-review",
@@ -222,7 +221,7 @@ func TestBuildAgentLaunchSpecIncludesBuiltinPromptForInteractiveRole(t *testing.
 
 func TestBuildAgentLaunchSpecIncludesCheckoutPromptForPRReviewerRole(t *testing.T) {
 	ctx := context.Background()
-	st := memstore.New()
+	st := newTerminalTestState()
 	if _, err := st.Roles().Create(ctx, store.RoleCreate{
 		WorkspaceKey: "E2E",
 		Name:         "pr-reviewer",
@@ -247,7 +246,7 @@ func TestBuildAgentLaunchSpecIncludesCheckoutPromptForPRReviewerRole(t *testing.
 
 func TestBuildAgentLaunchSpecInlinePromptOmitsRolePromptFile(t *testing.T) {
 	ctx := context.Background()
-	st := memstore.New()
+	st := newTerminalTestState()
 	if _, err := st.Roles().Create(ctx, store.RoleCreate{
 		WorkspaceKey: "E2E",
 		Name:         "operator",
@@ -274,7 +273,7 @@ func TestBuildAgentLaunchSpecInlinePromptOmitsRolePromptFile(t *testing.T) {
 
 func TestBuildAgentLaunchSpecCustomInteractiveRoleUsesLeadRuntime(t *testing.T) {
 	ctx := context.Background()
-	st := memstore.New()
+	st := newTerminalTestState()
 	if _, err := st.Roles().Create(ctx, store.RoleCreate{
 		WorkspaceKey: "E2E",
 		Name:         "operator",
@@ -304,7 +303,7 @@ func TestBuildAgentLaunchSpecCustomInteractiveRoleUsesLeadRuntime(t *testing.T) 
 
 func TestBuildAgentLaunchSpecRejectsDaemonSupervisedWorker(t *testing.T) {
 	ctx := context.Background()
-	st := memstore.New()
+	st := newTerminalTestState()
 	if _, err := st.Roles().Create(ctx, store.RoleCreate{
 		WorkspaceKey: "E2E",
 		Name:         "reviewer",
@@ -386,7 +385,7 @@ func TestEnsureAgentTerminalSessionLaunchesLeadInConfiguredWorktree(t *testing.T
 func TestBuildAgentLaunchSpecFallsBackWhenConfiguredWorktreeMissing(t *testing.T) {
 	ctx := context.Background()
 	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
-	st := memstore.New()
+	st := newTerminalTestState()
 	missing := filepath.Join(t.TempDir(), "missing", "nova")
 	if err := localworkspace.RememberAgentWorktree("E2E", "nova", missing); err != nil {
 		t.Fatalf("remember worktree: %v", err)
@@ -417,7 +416,7 @@ func TestBuildAgentLaunchSpecFallsBackWhenConfiguredWorktreeMissing(t *testing.T
 func TestAgentTerminalLaunchSpecStale_DetectsBackendChange(t *testing.T) {
 	ctx := context.Background()
 	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
-	st := memstore.New()
+	st := newTerminalTestState()
 	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "E2E", Name: "E2E"}); err != nil {
 		t.Fatalf("create workspace: %v", err)
 	}
@@ -450,7 +449,7 @@ func TestAgentTerminalLaunchSpecStale_DetectsBackendChange(t *testing.T) {
 
 func TestAgentTerminalLaunchSpecStaleDetectsInteractivePromptFileChange(t *testing.T) {
 	ctx := context.Background()
-	st := memstore.New()
+	st := newTerminalTestState()
 	if _, err := st.Roles().Create(ctx, store.RoleCreate{
 		WorkspaceKey: "E2E",
 		Name:         "operator",
@@ -484,7 +483,7 @@ func TestAgentTerminalLaunchSpecStaleDetectsInteractivePromptFileChange(t *testi
 // ensure() rebuild instead of failing to attach forever.
 func TestAgentTerminalLaunchSpecStale_NilLaunchTreatedStale(t *testing.T) {
 	ctx := context.Background()
-	st := memstore.New()
+	st := newTerminalTestState()
 	agent := &agents.RuntimeIdentity{WorkspaceKey: "E2E", AgentID: "nova", RoleName: "lead"}
 	existing := &webuiterminal.TabMetadata{SessionName: "term_old", Launch: nil}
 	if !agentTerminalLaunchSpecStale(ctx, st, "E2E", existing, agent) {
@@ -1348,7 +1347,7 @@ func TestEnsureAgentTerminalSessionCreatesFreshTabForStaleRunningInteractiveAgen
 
 func TestBuildAgentLaunchSpecRejectsUnknownRoleWithoutPrompt(t *testing.T) {
 	ctx := context.Background()
-	st := memstore.New()
+	st := newTerminalTestState()
 	agent := &agents.RuntimeIdentity{
 		WorkspaceKey: "E2E",
 		AgentID:      "reviewer",
@@ -1368,7 +1367,7 @@ func TestBuildAgentLaunchSpecRejectsUnknownRoleWithoutPrompt(t *testing.T) {
 func TestBuildAgentLaunchSpecFallsBackToWorkspaceBackend(t *testing.T) {
 	ctx := context.Background()
 	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
-	st := memstore.New()
+	st := newTerminalTestState()
 	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "E2E", Name: "E2E"}); err != nil {
 		t.Fatalf("create workspace: %v", err)
 	}

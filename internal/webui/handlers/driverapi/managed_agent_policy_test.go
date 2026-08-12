@@ -10,6 +10,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	"github.com/tysonthomas9/loomcli/internal/modules/agents"
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
@@ -169,7 +170,7 @@ func TestSnapshotManagedAgentPolicyStripsReservedKeyForUnmanagedRun(t *testing.T
 func TestSnapshotManagedAgentPolicyFailsClosedWhenRoleIsMissing(t *testing.T) {
 	h := newManagedAgentPolicyHarness(t)
 	parent := seedManagedAgentPolicy(t, h)
-	h.module.store = snapshotMissingRoleStore{Store: h.store}
+	h.module.agentRoles = snapshotMissingRoleQueries{}
 
 	snapshot, err := h.module.snapshotManagedAgentPolicy(
 		t.Context(),
@@ -183,8 +184,8 @@ func TestSnapshotManagedAgentPolicyFailsClosedWhenRoleIsMissing(t *testing.T) {
 	if snapshot != nil {
 		t.Fatalf("snapshot = %s, want nil on missing managed role", snapshot)
 	}
-	if !errors.Is(err, domain.ErrNotFound) {
-		t.Fatalf("error = %v, want ErrNotFound", err)
+	if !errors.Is(err, agents.ErrNotFound) {
+		t.Fatalf("error = %v, want Agents ErrNotFound", err)
 	}
 	if !strings.Contains(err.Error(), `resolve managed TaskRun role "managed-role"`) {
 		t.Fatalf("error = %q, want managed-role resolution context", err)
@@ -205,8 +206,11 @@ func newManagedAgentPolicyHarness(t *testing.T) *managedAgentPolicyHarness {
 		}
 	})
 	return &managedAgentPolicyHarness{
-		module: NewModule(Config{Store: st}),
-		store:  st,
+		module: NewModule(Config{
+			AgentIdentities: testStoreAgentIdentities{store: st.AgentServices()},
+			AgentRoles:      testStoreAgentRoles{store: st.Roles()},
+		}),
+		store: st,
 	}
 }
 
@@ -271,18 +275,12 @@ func decodeJSONString(t *testing.T, raw json.RawMessage) string {
 	return value
 }
 
-type snapshotMissingRoleStore struct {
-	store.Store
+type snapshotMissingRoleQueries struct{}
+
+func (snapshotMissingRoleQueries) GetRole(context.Context, string, string) (*agents.Role, error) {
+	return nil, agents.ErrNotFound
 }
 
-func (s snapshotMissingRoleStore) Roles() store.RoleStore {
-	return snapshotMissingRoleLookup{RoleStore: s.Store.Roles()}
-}
-
-type snapshotMissingRoleLookup struct {
-	store.RoleStore
-}
-
-func (snapshotMissingRoleLookup) Get(context.Context, string, string) (*domain.Role, error) {
-	return nil, domain.ErrNotFound
+func (snapshotMissingRoleQueries) ListRoles(context.Context, string) ([]*agents.Role, error) {
+	return nil, agents.ErrNotFound
 }
