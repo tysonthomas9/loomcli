@@ -1242,8 +1242,8 @@ func TestRetiredBackendMutationPlaneCannotReturn(t *testing.T) {
 	}
 	for _, relative := range []string{
 		"internal/backend",
-		"internal/backend/api",
-		"internal/backend/fleet",
+		"internal/modules/workitems/httpapi",
+		"internal/modules/workitems/fleetdb",
 		"internal/cli",
 		"internal/webui/app",
 		"internal/webui/subscription",
@@ -1282,7 +1282,7 @@ func TestRetiredBackendMutationPlaneCannotReturn(t *testing.T) {
 		}
 	}
 
-	apiBackend, err := os.ReadFile(filepath.Join(root, "internal", "backend", "api", "backend.go"))
+	apiBackend, err := os.ReadFile(filepath.Join(root, "internal", "modules", "workitems", "httpapi", "backend.go"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1305,8 +1305,8 @@ func TestRetiredWorkItemsCompatibilityOperationsCannotReturn(t *testing.T) {
 	}
 	for _, relative := range []string{
 		"internal/backend",
-		"internal/backend/api",
-		"internal/backend/fleet",
+		"internal/modules/workitems/httpapi",
+		"internal/modules/workitems/fleetdb",
 		"internal/cli",
 		"internal/cli/data",
 	} {

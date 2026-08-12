@@ -97,11 +97,11 @@ components:
   # Bounded command and startup polling.
   - id: fleet-dependency-state-wait
     kind: ticker
-    file: internal/backend/fleet/fleet_dependencies.go
-    function: FleetBackend.waitForDependencyState
+    file: internal/modules/workitems/fleetdb/fleet_dependencies.go
+    function: Adapter.waitForDependencyState
     site: "time.NewTicker#1"
     capability: work-items
-    owner: fleet backend compatibility
+    owner: Work Items FleetDB adapter
     cadence: "25ms, bounded by a 2s timer"
     cancellation: "caller context or the 2s operation timer"
     readiness_health: "success requires the requested dependency state to become observable"
@@ -110,11 +110,11 @@ components:
 
   - id: fleet-label-state-wait
     kind: ticker
-    file: internal/backend/fleet/fleet_labels.go
-    function: FleetBackend.waitForLabelState
+    file: internal/modules/workitems/fleetdb/fleet_labels.go
+    function: Adapter.waitForLabelState
     site: "time.NewTicker#1"
     capability: work-items
-    owner: fleet backend compatibility
+    owner: Work Items FleetDB adapter
     cadence: "25ms, bounded by a 2s timer"
     cancellation: "caller context or the 2s operation timer"
     readiness_health: "success requires the requested label state to become observable"

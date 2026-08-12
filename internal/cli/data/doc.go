@@ -6,11 +6,11 @@
 // rely solely on:
 //
 //   - github.com/spf13/cobra — the command framework
-//   - internal/backend, internal/backend/api, internal/backend/api/gen —
+//   - internal/modules/workitems, its Loom API adapter, and generated wire types —
 //     the generic backend types and the HTTP client implementation of
 //     workitems.API
 //   - internal/httpclient — the auth-aware HTTP client used as a transport
-//     for api.APIBackend (supports OIDC device flow and token cache)
+//     for api.Adapter (supports OIDC device flow and token cache)
 //
 // This invariant is enforced by the depguard `data-isolation` rule in
 // .golangci.yml. The rule's files filter matches `**/internal/cli/data/**`

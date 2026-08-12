@@ -356,7 +356,7 @@ func TestHandleAgents_UsesWorkspaceQueryOverActiveWorkspace(t *testing.T) {
 	}
 }
 
-func TestHandleStatusWithBackend_UsesWorkspaceScopedIssueBackend(t *testing.T) {
+func TestHandleStatusWithBackend_UsesWorkspaceScopedWorkItems(t *testing.T) {
 	t.Setenv("LOOM_WORKSPACE", "WS1")
 	ctx := context.Background()
 	st := memstore.New()

@@ -77,14 +77,14 @@ func RegisterHooks(registry *WorkspaceRegistry, cfg HookConfig) RegisteredHooks 
 		_ = registry.AddHook(hooks.NewFleetStoreHook(cfg.FleetReg, cfg.Logger))
 	}
 	if cfg.FleetURL != "" {
-		// FleetBackendHook MUST be added before FleetSubscriberHook so that
-		// by the time FleetSubscriberHook.Activate fires, the FleetBackend
+		// WorkItemsFleetDBHook MUST be added before FleetSubscriberHook so that
+		// by the time FleetSubscriberHook.Activate fires, the Work Items FleetDB adapter
 		// resource is already in the workspace handle.
-		_ = registry.AddHook(hooks.NewFleetBackendHook(cfg.FleetURL, cfg.FleetKey, cfg.FleetActor, cfg.Logger))
+		_ = registry.AddHook(hooks.NewWorkItemsFleetDBHook(cfg.FleetURL, cfg.FleetKey, cfg.FleetActor, cfg.Logger))
 	}
 
 	// FleetDB-backed SSE push: FleetSubscriberHook bridges the per-workspace
-	// FleetBackend (provided by FleetBackendHook above) into the shared
+	// Work Items FleetDB adapter (provided by WorkItemsFleetDBHook above) into the shared
 	// MultiWorkspaceSubscriber so the SSE hub gets push events. This is needed
 	// for both local fleet-db mode and remote fleet mode; FleetMode only means
 	// external fleet orchestration owns agent scheduling.

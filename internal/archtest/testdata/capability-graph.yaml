@@ -22,7 +22,9 @@ external_import_policy:
   core_allowed_prefixes:
     - github.com/robfig/cron/v3
   adapter_allowed_prefixes: []
-  platform_allowed_prefixes: []
+  platform_allowed_prefixes:
+    - github.com/oapi-codegen/runtime
+    - go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp
   core_denied_standard_prefixes:
     - database/sql
     - net/http

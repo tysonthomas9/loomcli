@@ -336,7 +336,7 @@ func TestWithStoreFleetConfigUsesEmbeddedStoreConnection(t *testing.T) {
 	var cfg webui.ServerConfig
 	applyFleetConfig(&cfg, fs)
 	if cfg.FleetClientAPIKey != "local-service-key" {
-		t.Fatal("ServerConfig did not receive the embedded Store credential for FleetBackendHook composition")
+		t.Fatal("ServerConfig did not receive the embedded Store credential for WorkItemsFleetDBHook composition")
 	}
 }
 

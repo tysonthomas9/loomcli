@@ -7,12 +7,12 @@ import (
 	"os"
 	"strings"
 
-	"github.com/tysonthomas9/loomcli/internal/backend/fleet"
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	driverpkg "github.com/tysonthomas9/loomcli/internal/driver"
 	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
+	fleet "github.com/tysonthomas9/loomcli/internal/modules/workitems/fleetdb"
 )
 
 // driverRunContext is the resolved identity preamble shared by driver runtime

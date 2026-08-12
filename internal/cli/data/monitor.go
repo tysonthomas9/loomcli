@@ -10,7 +10,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/tysonthomas9/loomcli/internal/backend/api/gen"
+	"github.com/tysonthomas9/loomcli/internal/platform/loomapi/gen"
 )
 
 var monitorCmd = &cobra.Command{
@@ -36,7 +36,7 @@ or draw terminal boxes.`,
 
 // fetchMonitorStatus performs a single GET to /api/monitor/status and
 // decodes the response. The monitor endpoint does NOT use the
-// {success,data,error} envelope that api.APIBackend's doRequest expects —
+// {success,data,error} envelope that api.Adapter's doRequest expects —
 // it returns MonitorStatusResponse directly — so we inline a small helper
 // here instead of reusing the backend's exec loop.
 func fetchMonitorStatus(ctx context.Context, cli *http.Client, baseURL string) (*gen.MonitorStatusResponse, error) {

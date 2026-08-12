@@ -27,8 +27,8 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/fleethttp"
 	"github.com/tysonthomas9/loomcli/internal/modules/artifacts"
+	"github.com/tysonthomas9/loomcli/internal/platform/fleethttp"
 	"github.com/tysonthomas9/loomcli/internal/store"
 
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"

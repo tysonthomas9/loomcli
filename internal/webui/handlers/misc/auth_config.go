@@ -29,9 +29,9 @@ type BackendNameFn func(context.Context) string
 // parity harness) can distinguish local FleetDB from a remote fleet instance
 // without poking at LOOM_ISSUE_BACKEND on the host.
 type authConfigResponse struct {
-	Mode         string `json:"mode"`                    // "open" or "oidc"
-	AuthURL      string `json:"auth_url,omitempty"`      // Better Auth service base URL for OAuth redirects (only when mode is "oidc")
-	IssueBackend string `json:"issue_backend,omitempty"` // "fleet" | "fleetdb" | "api" | "agent-ipc" (active provider name, normalized)
+	Mode             string `json:"mode"`                    // "open" or "oidc"
+	AuthURL          string `json:"auth_url,omitempty"`      // Better Auth service base URL for OAuth redirects (only when mode is "oidc")
+	WorkItemsAdapter string `json:"issue_backend,omitempty"` // "fleet" | "fleetdb" | "api" | "agent-ipc" (active provider name, normalized)
 }
 
 // AuthConfigLimiter is a per-IP token bucket rate limiter for GET /api/config.
@@ -159,7 +159,7 @@ func HandleAuthConfig(extAuthURL string, limiter *AuthConfigLimiter, backendName
 		// reflect in the response. Most of the time this is a simple pointer
 		// load and never-nil — cost is negligible vs the rate limiter above.
 		resp := baseResp
-		resp.IssueBackend = resolveWorkItemsAdapterLabel(r.Context(), backendNameFn)
+		resp.WorkItemsAdapter = resolveWorkItemsAdapterLabel(r.Context(), backendNameFn)
 
 		// SECURITY: no-store prevents caching that could enable downgrade attacks.
 		// An attacker who poisons a cached response with mode:"open" would bypass

@@ -133,7 +133,7 @@ func collectDoctorChecks(cmd *cobra.Command) []checkFunc {
 		func() CheckResult { return checkGit(deps) },
 		func() CheckResult { return checkGitRepo(deps) },
 		func() CheckResult { return checkTmux(deps) },
-		checkIssueBackend,
+		checkWorkItemsAdapter,
 	}
 	if cli.IsFleetActive() {
 		checks = append(checks, checkFleet)

@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/backend/api/gen"
+	"github.com/tysonthomas9/loomcli/internal/platform/loomapi/gen"
 )
 
 func monitorStatusServer(t *testing.T, payload *gen.MonitorStatusResponse, status int) *httptest.Server {

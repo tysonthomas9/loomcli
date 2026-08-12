@@ -481,7 +481,7 @@ gen-go-api:
 	@go run ./scripts/openapi-to-30 api/openapi.yaml > tmp/openapi-3.0.yaml
 	@go run github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@$(OAPI_CODEGEN_VERSION) --config api/oapi-codegen.yaml tmp/openapi-3.0.yaml
 	@rm -f tmp/openapi-3.0.yaml
-	@echo "Generated: internal/backend/api/gen/types.gen.go"
+	@echo "Generated: internal/platform/loomapi/gen/types.gen.go"
 
 # Check that committed types.gen.go is in sync with api/openapi.yaml
 check-go-api-staleness:

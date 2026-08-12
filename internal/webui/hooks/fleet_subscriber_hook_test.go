@@ -11,13 +11,13 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 )
 
-// stubFleetBackend is the minimal Work Items mutation stream used by the hook tests.
-type stubFleetBackend struct{}
+// stubWorkItemsFleetDB is the minimal Work Items mutation stream used by the hook tests.
+type stubWorkItemsFleetDB struct{}
 
-func (stubFleetBackend) WaitForMutationsAfter(_ context.Context, _ string, _ int64) ([]workitems.Mutation, error) {
+func (stubWorkItemsFleetDB) WaitForMutationsAfter(_ context.Context, _ string, _ int64) ([]workitems.Mutation, error) {
 	return nil, errors.New("stub: not configured")
 }
-func (stubFleetBackend) GetMutationsAfter(_ context.Context, _ string) ([]workitems.Mutation, error) {
+func (stubWorkItemsFleetDB) GetMutationsAfter(_ context.Context, _ string) ([]workitems.Mutation, error) {
 	return nil, errors.New("stub: not configured")
 }
 
@@ -43,13 +43,13 @@ func newFleetSubscriberHookEnv(t *testing.T) (*FleetSubscriberHook, *MultiWorksp
 // in the resource bag.
 func registerFleetWorkspaceWithBackend(t *testing.T, registry *coordinator.WorkspaceRegistry, wsID string) workitems.MutationStream {
 	t.Helper()
-	be := stubFleetBackend{}
+	be := stubWorkItemsFleetDB{}
 
 	// Use a stub hook that just provides the resource — exactly what
-	// FleetBackendHook does in production but without the network call.
+	// WorkItemsFleetDBHook does in production but without the network call.
 	provider := &resourceProviderHook{
-		name:  "stub-fleet-backend-provider",
-		key:   coordinator.ResourceKeyFleetBackend,
+		name:  "stub-workitems-fleetdb-provider",
+		key:   coordinator.ResourceKeyWorkItemsFleetDB,
 		value: be,
 	}
 	if err := registry.AddHook(provider); err != nil {
@@ -63,7 +63,7 @@ func registerFleetWorkspaceWithBackend(t *testing.T, registry *coordinator.Works
 
 // resourceProviderHook is a tiny LifecycleHook that puts a fixed value
 // into the resource bag during OnRegister. Used to inject a fleet backend
-// resource without standing up the real FleetBackendHook (which requires
+// resource without standing up the real WorkItemsFleetDBHook (which requires
 // a non-empty BaseURL and a working HTTP client).
 type resourceProviderHook struct {
 	name  string
@@ -112,7 +112,7 @@ func TestFleetSubscriberHook_Activate_StartsSubscriber(t *testing.T) {
 	hook, multiSub, registry := newFleetSubscriberHookEnv(t)
 
 	// Add hook to registry AFTER the resource provider, mirroring what
-	// app.RegisterHooks does (FleetBackendHook before FleetSubscriberHook).
+	// app.RegisterHooks does (WorkItemsFleetDBHook before FleetSubscriberHook).
 	registerFleetWorkspaceWithBackend(t, registry, "ws-fleet-1")
 	if err := registry.AddHook(hook); err != nil {
 		t.Fatalf("AddHook(fleet-subscriber): %v", err)
@@ -169,10 +169,10 @@ func TestFleetSubscriberHook_Activate_UnregisteredWorkspace_NoOp(t *testing.T) {
 	}
 }
 
-func TestFleetSubscriberHook_Activate_NoFleetBackendResource(t *testing.T) {
-	// Workspace is registered but no FleetBackendHook ran, so the
+func TestFleetSubscriberHook_Activate_NoWorkItemsFleetDBResource(t *testing.T) {
+	// Workspace is registered but no WorkItemsFleetDBHook ran, so the
 	// resource bag is missing the fleet backend. Activate should log and
-	// return nil (not crash) — this is the "FleetBackendHook misconfigured"
+	// return nil (not crash) — this is the "WorkItemsFleetDBHook misconfigured"
 	// safety net.
 	hook, multiSub, registry := newFleetSubscriberHookEnv(t)
 

@@ -381,9 +381,9 @@ func TestCheckBackendCLI(t *testing.T) {
 	})
 }
 
-func TestCheckIssueBackend(t *testing.T) {
+func TestCheckWorkItemsAdapter(t *testing.T) {
 	t.Run("fleetdb active", func(t *testing.T) {
-		result := checkIssueBackend()
+		result := checkWorkItemsAdapter()
 		if result.Name != "issue_backend" {
 			t.Errorf("expected name 'issue_backend', got %q", result.Name)
 		}
@@ -396,7 +396,7 @@ func TestCheckIssueBackend(t *testing.T) {
 	})
 
 	t.Run("empty env var falls through to default fleetdb", func(t *testing.T) {
-		result := checkIssueBackend()
+		result := checkWorkItemsAdapter()
 		if !strings.Contains(result.Summary, "fleet-db") {
 			t.Errorf("expected summary to contain 'fleet-db', got %q", result.Summary)
 		}

@@ -13,8 +13,8 @@ import (
 	"sync/atomic"
 	"testing"
 
-	fleetbackend "github.com/tysonthomas9/loomcli/internal/backend/fleet"
 	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
+	fleetbackend "github.com/tysonthomas9/loomcli/internal/modules/workitems/fleetdb"
 	issuehandlers "github.com/tysonthomas9/loomcli/internal/webui/handlers/issues"
 )
 

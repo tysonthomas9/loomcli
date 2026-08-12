@@ -8,7 +8,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
 
-func TestWorkspaceAwareIssueBackendForURL_UsesConcreteURLWhenEnvUnset(t *testing.T) {
+func TestWorkspaceAwareWorkItemsForURL_UsesConcreteURLWhenEnvUnset(t *testing.T) {
 	t.Setenv(bootstrap.EnvFleetDBURL, "")
 	t.Setenv(bootstrap.EnvFleetDBActor, "")
 

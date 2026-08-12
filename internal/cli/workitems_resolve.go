@@ -6,9 +6,9 @@ import (
 	"os"
 	"sync"
 
-	"github.com/tysonthomas9/loomcli/internal/backend/api"
 	"github.com/tysonthomas9/loomcli/internal/httpclient"
 	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
+	api "github.com/tysonthomas9/loomcli/internal/modules/workitems/httpapi"
 )
 
 // Work Items adapter type constants. The LOOM_ISSUE_BACKEND environment key
@@ -128,7 +128,7 @@ func resolveWorkItems() workitems.API {
 // cannot be resolved, or if http client construction fails. On success, the
 // returned backend uses httpclient.Client for auth (OIDC device flow + token
 // cache) transparently via api.AuthTransport.
-func createAPIWorkItems() (*api.APIBackend, error) {
+func createAPIWorkItems() (*api.Adapter, error) {
 	serverURL := os.Getenv("LOOM_SERVER_URL")
 	if serverFlag != "" {
 		serverURL = serverFlag

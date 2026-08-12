@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/tysonthomas9/loomcli/internal/backend/api/gen"
 	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
+	"github.com/tysonthomas9/loomcli/internal/platform/loomapi/gen"
 )
 
 const (

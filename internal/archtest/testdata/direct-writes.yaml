@@ -1139,7 +1139,31 @@ function_surfaces:
     access: read-only
     capability_owner: workflowcatalog
   - package: github.com/tysonthomas9/loomcli/internal/modules/workitems
+    function: AdapterCanceled
+    access: read-only
+    capability_owner: workitems
+  - package: github.com/tysonthomas9/loomcli/internal/modules/workitems
+    function: AdapterConflict
+    access: read-only
+    capability_owner: workitems
+  - package: github.com/tysonthomas9/loomcli/internal/modules/workitems
     function: AdapterInternal
+    access: read-only
+    capability_owner: workitems
+  - package: github.com/tysonthomas9/loomcli/internal/modules/workitems
+    function: AdapterInvalid
+    access: read-only
+    capability_owner: workitems
+  - package: github.com/tysonthomas9/loomcli/internal/modules/workitems
+    function: AdapterNotFound
+    access: read-only
+    capability_owner: workitems
+  - package: github.com/tysonthomas9/loomcli/internal/modules/workitems
+    function: AdapterNotImplemented
+    access: read-only
+    capability_owner: workitems
+  - package: github.com/tysonthomas9/loomcli/internal/modules/workitems
+    function: AdapterTimeout
     access: read-only
     capability_owner: workitems
   - package: github.com/tysonthomas9/loomcli/internal/modules/workitems
@@ -1151,7 +1175,15 @@ function_surfaces:
     access: read-only
     capability_owner: workitems
   - package: github.com/tysonthomas9/loomcli/internal/modules/workitems
+    function: IsKind
+    access: read-only
+    capability_owner: workitems
+  - package: github.com/tysonthomas9/loomcli/internal/modules/workitems
     function: New
+    access: read-only
+    capability_owner: workitems
+  - package: github.com/tysonthomas9/loomcli/internal/modules/workitems
+    function: NewOperationError
     access: read-only
     capability_owner: workitems
   - package: github.com/tysonthomas9/loomcli/internal/modules/workitems

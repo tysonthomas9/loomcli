@@ -15,8 +15,8 @@ semantics:
     - worktrees
 ceilings:
   total_packages: 158
-  module_packages: 15
-  outside_module_packages: 143
+  module_packages: 17
+  outside_module_packages: 141
   one_file_packages: 42
   one_or_two_file_packages: 60
 packages:
@@ -35,9 +35,6 @@ packages:
   - internal/app/workitemmove
   - internal/archtest
   - internal/atomicfile
-  - internal/backend/api
-  - internal/backend/api/gen
-  - internal/backend/fleet
   - internal/bootstrap
   - internal/circuitbreaker
   - internal/cli
@@ -81,7 +78,6 @@ packages:
   - internal/epicrunner
   - internal/events
   - internal/events/otelexport
-  - internal/fleethttp
   - internal/gitauth
   - internal/gitbranch
   - internal/harness
@@ -120,12 +116,16 @@ packages:
   - internal/modules/workflowcatalog/fleetdb
   - internal/modules/workflowcatalog/httpapi
   - internal/modules/workitems
+  - internal/modules/workitems/fleetdb
+  - internal/modules/workitems/httpapi
   - internal/modules/workspace
   - internal/netutil
   - internal/observability/tracing
   - internal/ops
   - internal/platform/authority
+  - internal/platform/fleethttp
   - internal/platform/httptransport
+  - internal/platform/loomapi/gen
   - internal/platform/repositoryremote
   - internal/platform/runtime
   - internal/roleprompts

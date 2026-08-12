@@ -10,9 +10,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/tysonthomas9/loomcli/internal/backend/fleet"
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
+	fleet "github.com/tysonthomas9/loomcli/internal/modules/workitems/fleetdb"
 	"github.com/tysonthomas9/loomcli/internal/usage"
 )
 
@@ -267,7 +267,7 @@ func newFleetDBWorkItemsAdapter() *fleetDBWorkItemsAdapter {
 	return &fleetDBWorkItemsAdapter{}
 }
 
-func (b *fleetDBWorkItemsAdapter) withStore(ctx context.Context, op string, fn func(*fleet.FleetBackend) error) error {
+func (b *fleetDBWorkItemsAdapter) withStore(ctx context.Context, op string, fn func(*fleet.Adapter) error) error {
 	dataDir := bootstrap.LoomDir()
 	if dataDir == "" {
 		return workitems.AdapterUnavailable(op, "cannot resolve loom data directory; set HOME or LOOM_CONFIG_DIR", nil)
@@ -305,14 +305,14 @@ func fleetDBActor() string {
 }
 
 func (b *fleetDBWorkItemsAdapter) RequireRepositoryAdmission(ctx context.Context) error {
-	return b.withStore(ctx, "RequireRepositoryAdmission", func(store *fleet.FleetBackend) error {
+	return b.withStore(ctx, "RequireRepositoryAdmission", func(store *fleet.Adapter) error {
 		return store.RequireRepositoryAdmission(ctx)
 	})
 }
 
 func (b *fleetDBWorkItemsAdapter) Get(ctx context.Context, query workitems.GetQuery) (*workitems.IssueDetail, error) {
 	var out *workitems.IssueDetail
-	err := b.withStore(ctx, "Get", func(store *fleet.FleetBackend) error {
+	err := b.withStore(ctx, "Get", func(store *fleet.Adapter) error {
 		var err error
 		out, err = store.Get(ctx, query)
 		return err
@@ -322,7 +322,7 @@ func (b *fleetDBWorkItemsAdapter) Get(ctx context.Context, query workitems.GetQu
 
 func (b *fleetDBWorkItemsAdapter) List(ctx context.Context, opts workitems.ListFilter) ([]workitems.IssueSummary, error) {
 	var out []workitems.IssueSummary
-	err := b.withStore(ctx, "List", func(store *fleet.FleetBackend) error {
+	err := b.withStore(ctx, "List", func(store *fleet.Adapter) error {
 		var err error
 		out, err = store.List(ctx, opts)
 		return err
@@ -332,7 +332,7 @@ func (b *fleetDBWorkItemsAdapter) List(ctx context.Context, opts workitems.ListF
 
 func (b *fleetDBWorkItemsAdapter) Ready(ctx context.Context, query workitems.AvailabilityQuery) ([]workitems.IssueSummary, error) {
 	var out []workitems.IssueSummary
-	err := b.withStore(ctx, "Ready", func(store *fleet.FleetBackend) error {
+	err := b.withStore(ctx, "Ready", func(store *fleet.Adapter) error {
 		var err error
 		out, err = store.Ready(ctx, query)
 		return err
@@ -342,7 +342,7 @@ func (b *fleetDBWorkItemsAdapter) Ready(ctx context.Context, query workitems.Ava
 
 func (b *fleetDBWorkItemsAdapter) Blocked(ctx context.Context, query workitems.AvailabilityQuery) ([]workitems.IssueSummary, error) {
 	var out []workitems.IssueSummary
-	err := b.withStore(ctx, "Blocked", func(store *fleet.FleetBackend) error {
+	err := b.withStore(ctx, "Blocked", func(store *fleet.Adapter) error {
 		var err error
 		out, err = store.Blocked(ctx, query)
 		return err
@@ -352,7 +352,7 @@ func (b *fleetDBWorkItemsAdapter) Blocked(ctx context.Context, query workitems.A
 
 func (b *fleetDBWorkItemsAdapter) Deferred(ctx context.Context, query workitems.AvailabilityQuery) ([]workitems.IssueSummary, error) {
 	var out []workitems.IssueSummary
-	err := b.withStore(ctx, "Deferred", func(store *fleet.FleetBackend) error {
+	err := b.withStore(ctx, "Deferred", func(store *fleet.Adapter) error {
 		var err error
 		out, err = store.Deferred(ctx, query)
 		return err
@@ -362,7 +362,7 @@ func (b *fleetDBWorkItemsAdapter) Deferred(ctx context.Context, query workitems.
 
 func (b *fleetDBWorkItemsAdapter) Stats(ctx context.Context) (*workitems.Stats, error) {
 	var out *workitems.Stats
-	err := b.withStore(ctx, "Stats", func(store *fleet.FleetBackend) error {
+	err := b.withStore(ctx, "Stats", func(store *fleet.Adapter) error {
 		var err error
 		out, err = store.Stats(ctx)
 		return err
@@ -372,7 +372,7 @@ func (b *fleetDBWorkItemsAdapter) Stats(ctx context.Context) (*workitems.Stats, 
 
 func (b *fleetDBWorkItemsAdapter) Search(ctx context.Context, query workitems.SearchQuery) ([]workitems.IssueSummary, error) {
 	var out []workitems.IssueSummary
-	err := b.withStore(ctx, "Search", func(store *fleet.FleetBackend) error {
+	err := b.withStore(ctx, "Search", func(store *fleet.Adapter) error {
 		var err error
 		out, err = store.Search(ctx, query)
 		return err
@@ -382,7 +382,7 @@ func (b *fleetDBWorkItemsAdapter) Search(ctx context.Context, query workitems.Se
 
 func (b *fleetDBWorkItemsAdapter) Create(ctx context.Context, command workitems.CreateCommand) (*workitems.IssueSummary, error) {
 	var out *workitems.IssueSummary
-	err := b.withStore(ctx, "Create", func(store *fleet.FleetBackend) error {
+	err := b.withStore(ctx, "Create", func(store *fleet.Adapter) error {
 		var err error
 		out, err = store.Create(ctx, command)
 		return err
@@ -391,14 +391,14 @@ func (b *fleetDBWorkItemsAdapter) Create(ctx context.Context, command workitems.
 }
 
 func (b *fleetDBWorkItemsAdapter) Patch(ctx context.Context, command workitems.PatchCommand) error {
-	return b.withStore(ctx, "Patch", func(store *fleet.FleetBackend) error {
+	return b.withStore(ctx, "Patch", func(store *fleet.Adapter) error {
 		return store.Patch(ctx, command)
 	})
 }
 
 func (b *fleetDBWorkItemsAdapter) Claim(ctx context.Context, command workitems.ClaimCommand) (*workitems.IssueDetail, error) {
 	var out *workitems.IssueDetail
-	err := b.withStore(ctx, "Claim", func(store *fleet.FleetBackend) error {
+	err := b.withStore(ctx, "Claim", func(store *fleet.Adapter) error {
 		var err error
 		out, err = store.Claim(ctx, command)
 		return err
@@ -411,25 +411,25 @@ func (b *fleetDBWorkItemsAdapter) Claim(ctx context.Context, command workitems.C
 // that maintains an explicit claim lock distinct from issue status).
 // Used by `loom complete` to close the planner-leaked-lock path in LOOM-1.
 func (b *fleetDBWorkItemsAdapter) ReleaseClaim(ctx context.Context, id, actor string) error {
-	return b.withStore(ctx, "ReleaseClaim", func(store *fleet.FleetBackend) error {
+	return b.withStore(ctx, "ReleaseClaim", func(store *fleet.Adapter) error {
 		return store.ReleaseClaim(ctx, id, actor)
 	})
 }
 
 func (b *fleetDBWorkItemsAdapter) ClaimAsActor(ctx context.Context, id string, lockTTL time.Duration, actor string) error {
-	return b.withStore(ctx, "Claim", func(store *fleet.FleetBackend) error {
+	return b.withStore(ctx, "Claim", func(store *fleet.Adapter) error {
 		return store.ClaimAsActor(ctx, id, lockTTL, actor)
 	})
 }
 
 func (b *fleetDBWorkItemsAdapter) RenewClaimAsActor(ctx context.Context, id string, lockTTL time.Duration, actor string) error {
-	return b.withStore(ctx, "RenewClaim", func(store *fleet.FleetBackend) error {
+	return b.withStore(ctx, "RenewClaim", func(store *fleet.Adapter) error {
 		return store.RenewClaimAsActor(ctx, id, lockTTL, actor)
 	})
 }
 
 func (b *fleetDBWorkItemsAdapter) ReleaseIssueLock(ctx context.Context, id, actor string) error {
-	return b.withStore(ctx, "ReleaseIssueLock", func(store *fleet.FleetBackend) error {
+	return b.withStore(ctx, "ReleaseIssueLock", func(store *fleet.Adapter) error {
 		return store.ReleaseIssueLock(ctx, id, actor)
 	})
 }
@@ -439,14 +439,14 @@ func (b *fleetDBWorkItemsAdapter) ReleaseIssueLock(ctx context.Context, id, acto
 // Falls back to ReleaseIssueLock(id, actor) if the underlying backend does
 // not expose a dedicated actor variant.
 func (b *fleetDBWorkItemsAdapter) ReleaseIssueAsActor(ctx context.Context, id string, actor string) error {
-	return b.withStore(ctx, "ReleaseIssue", func(store *fleet.FleetBackend) error {
+	return b.withStore(ctx, "ReleaseIssue", func(store *fleet.Adapter) error {
 		return store.ReleaseIssueAsActor(ctx, id, actor)
 	})
 }
 
 func (b *fleetDBWorkItemsAdapter) Close(ctx context.Context, command workitems.CloseCommand) (*workitems.CloseResult, error) {
 	var out *workitems.CloseResult
-	err := b.withStore(ctx, "Close", func(store *fleet.FleetBackend) error {
+	err := b.withStore(ctx, "Close", func(store *fleet.Adapter) error {
 		var err error
 		out, err = store.Close(ctx, command)
 		return err
@@ -455,14 +455,14 @@ func (b *fleetDBWorkItemsAdapter) Close(ctx context.Context, command workitems.C
 }
 
 func (b *fleetDBWorkItemsAdapter) Reopen(ctx context.Context, command workitems.ReopenCommand) error {
-	return b.withStore(ctx, "Reopen", func(store *fleet.FleetBackend) error {
+	return b.withStore(ctx, "Reopen", func(store *fleet.Adapter) error {
 		return store.Reopen(ctx, command)
 	})
 }
 
 func (b *fleetDBWorkItemsAdapter) Delete(ctx context.Context, command workitems.DeleteCommand) (workitems.DeleteResult, error) {
 	var out workitems.DeleteResult
-	err := b.withStore(ctx, "Delete", func(store *fleet.FleetBackend) error {
+	err := b.withStore(ctx, "Delete", func(store *fleet.Adapter) error {
 		var err error
 		out, err = store.Delete(ctx, command)
 		return err
@@ -472,7 +472,7 @@ func (b *fleetDBWorkItemsAdapter) Delete(ctx context.Context, command workitems.
 
 func (b *fleetDBWorkItemsAdapter) BlockRepositoryRequired(ctx context.Context, id string) (*workitems.RepositoryAdmissionResult, error) {
 	var out *workitems.RepositoryAdmissionResult
-	err := b.withStore(ctx, "BlockRepositoryRequired", func(store *fleet.FleetBackend) error {
+	err := b.withStore(ctx, "BlockRepositoryRequired", func(store *fleet.Adapter) error {
 		var err error
 		out, err = store.BlockRepositoryRequired(ctx, id)
 		return err
@@ -482,7 +482,7 @@ func (b *fleetDBWorkItemsAdapter) BlockRepositoryRequired(ctx context.Context, i
 
 func (b *fleetDBWorkItemsAdapter) AssignRepository(ctx context.Context, command workitems.AssignRepositoryCommand) (*workitems.IssueSummary, error) {
 	var out *workitems.IssueSummary
-	err := b.withStore(ctx, "AssignRepository", func(store *fleet.FleetBackend) error {
+	err := b.withStore(ctx, "AssignRepository", func(store *fleet.Adapter) error {
 		var err error
 		out, err = store.AssignRepository(ctx, command)
 		return err
@@ -491,20 +491,20 @@ func (b *fleetDBWorkItemsAdapter) AssignRepository(ctx context.Context, command 
 }
 
 func (b *fleetDBWorkItemsAdapter) AddDependency(ctx context.Context, command workitems.AddDependencyCommand) error {
-	return b.withStore(ctx, "AddDependency", func(store *fleet.FleetBackend) error {
+	return b.withStore(ctx, "AddDependency", func(store *fleet.Adapter) error {
 		return store.AddDependency(ctx, command)
 	})
 }
 
 func (b *fleetDBWorkItemsAdapter) RemoveDependency(ctx context.Context, command workitems.RemoveDependencyCommand) error {
-	return b.withStore(ctx, "RemoveDependency", func(store *fleet.FleetBackend) error {
+	return b.withStore(ctx, "RemoveDependency", func(store *fleet.Adapter) error {
 		return store.RemoveDependency(ctx, command)
 	})
 }
 
 func (b *fleetDBWorkItemsAdapter) ListDependencies(ctx context.Context, query workitems.ListDependenciesQuery) ([]workitems.Dependency, error) {
 	var out []workitems.Dependency
-	err := b.withStore(ctx, "ListDependencies", func(store *fleet.FleetBackend) error {
+	err := b.withStore(ctx, "ListDependencies", func(store *fleet.Adapter) error {
 		var err error
 		out, err = store.ListDependencies(ctx, query)
 		return err
@@ -514,7 +514,7 @@ func (b *fleetDBWorkItemsAdapter) ListDependencies(ctx context.Context, query wo
 
 func (b *fleetDBWorkItemsAdapter) ListComments(ctx context.Context, query workitems.ListCommentsQuery) ([]*workitems.Comment, error) {
 	var out []*workitems.Comment
-	err := b.withStore(ctx, "ListComments", func(store *fleet.FleetBackend) error {
+	err := b.withStore(ctx, "ListComments", func(store *fleet.Adapter) error {
 		var err error
 		out, err = store.ListComments(ctx, query)
 		return err
@@ -524,7 +524,7 @@ func (b *fleetDBWorkItemsAdapter) ListComments(ctx context.Context, query workit
 
 func (b *fleetDBWorkItemsAdapter) AddComment(ctx context.Context, command workitems.AddCommentCommand) (*workitems.Comment, error) {
 	var out *workitems.Comment
-	err := b.withStore(ctx, "AddComment", func(store *fleet.FleetBackend) error {
+	err := b.withStore(ctx, "AddComment", func(store *fleet.Adapter) error {
 		var err error
 		out, err = store.AddComment(ctx, command)
 		return err
@@ -534,7 +534,7 @@ func (b *fleetDBWorkItemsAdapter) AddComment(ctx context.Context, command workit
 
 func (b *fleetDBWorkItemsAdapter) ListEvents(ctx context.Context, query workitems.ListEventsQuery) ([]*workitems.Event, error) {
 	var out []*workitems.Event
-	err := b.withStore(ctx, "ListEvents", func(store *fleet.FleetBackend) error {
+	err := b.withStore(ctx, "ListEvents", func(store *fleet.Adapter) error {
 		var err error
 		out, err = store.ListEvents(ctx, query)
 		return err

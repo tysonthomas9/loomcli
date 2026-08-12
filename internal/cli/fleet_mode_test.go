@@ -27,7 +27,7 @@ func TestIsFleetMode_UnsupportedBackend(t *testing.T) {
 	}
 }
 
-func TestIsFleetMode_FleetBackend(t *testing.T) {
+func TestIsFleetMode_FleetWorkItemsAdapter(t *testing.T) {
 	t.Setenv(fleetModeEnvVar, "")
 	cfg := &RuntimeConfig{Backend: BackendFleet}
 	if !isFleetMode(cfg) {

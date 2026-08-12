@@ -13,10 +13,10 @@ import (
 // FleetSubscriberHook implements coordinator.LifecycleHook for per-workspace
 // WorkItemMutationSubscriber lifecycle. It uses the same deferred-Activate
 // pattern as other workspace hooks and sources Work Items mutations from the
-// FleetDB adapter provided by FleetBackendHook on OnRegister.
+// FleetDB adapter provided by WorkItemsFleetDBHook on OnRegister.
 //
-// Hook ordering matters: FleetBackendHook must register first so that by
-// the time Activate fires, ResourceKeyFleetBackend is in the workspace's
+// Hook ordering matters: WorkItemsFleetDBHook must register first so that by
+// the time Activate fires, ResourceKeyWorkItemsFleetDB is in the workspace's
 // resource bag. app.RegisterHooks enforces this.
 type FleetSubscriberHook struct {
 	multiSub *subscription.MultiWorkspaceSubscriber
@@ -62,7 +62,7 @@ func (h *FleetSubscriberHook) OnRegister(ctx *coordinator.RegistrationContext) e
 
 // Activate is the subscriberActivator interface method called by
 // WorkspaceRegistry.ActivateSubscriber when an SSE route opens for a workspace.
-// It looks up the FleetBackend that FleetBackendHook previously stored on the
+// It looks up the Work Items FleetDB adapter that WorkItemsFleetDBHook previously stored on the
 // workspace handle and hands it to the
 // MultiWorkspaceSubscriber to spin up a long-poll loop.
 //
@@ -90,9 +90,9 @@ func (h *FleetSubscriberHook) Activate(wsID string) error {
 		return nil
 	}
 
-	res, ok := handle.Resource(coordinator.ResourceKeyFleetBackend)
+	res, ok := handle.Resource(coordinator.ResourceKeyWorkItemsFleetDB)
 	if !ok {
-		// FleetBackendHook not registered for this workspace — possible
+		// WorkItemsFleetDBHook not registered for this workspace — possible
 		// when fleet mode is off but the hook somehow ran. Log and skip
 		// rather than crash.
 		h.logger.Warn("fleet subscriber activate: no fleet backend resource on workspace handle",

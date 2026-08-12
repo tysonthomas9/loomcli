@@ -7,9 +7,9 @@ import (
 	"os"
 	"sync"
 
-	"github.com/tysonthomas9/loomcli/internal/backend/api"
 	"github.com/tysonthomas9/loomcli/internal/httpclient"
 	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
+	api "github.com/tysonthomas9/loomcli/internal/modules/workitems/httpapi"
 )
 
 // Package-level HTTP client state. The client is lazily constructed on the

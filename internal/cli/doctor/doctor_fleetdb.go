@@ -111,7 +111,7 @@ func defaultFleetHealthProbe(ctx context.Context, baseURL string) error {
 	return nil
 }
 
-func checkIssueBackend() CheckResult {
+func checkWorkItemsAdapter() CheckResult {
 	if cli.IsFleetActive() {
 		return CheckResult{
 			Name:    "issue_backend",

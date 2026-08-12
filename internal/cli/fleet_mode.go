@@ -5,8 +5,8 @@ import (
 	"log/slog"
 	"os"
 
-	"github.com/tysonthomas9/loomcli/internal/backend/fleet"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
+	fleet "github.com/tysonthomas9/loomcli/internal/modules/workitems/fleetdb"
 )
 
 // BackendFleet is the Work Items adapter identifier for fleet mode (external fleet
@@ -43,16 +43,16 @@ func IsFleetModeFromEnv() bool {
 // --- Fleet backend adapter (merged from cli_fleet_adapter.go) ---
 
 // createFleetWorkItemStore resolves Fleet config from the environment, then
-// constructs a FleetBackend. Returns an error if the fleet URL is
+// constructs a Work Items FleetDB adapter. Returns an error if the fleet URL is
 // not configured.
-func createFleetWorkItemStore() (*fleet.FleetBackend, error) {
+func createFleetWorkItemStore() (*fleet.Adapter, error) {
 	cfg := config.ResolveFleetConfig()
 	return createFleetWorkItemStoreFromConfig(cfg)
 }
 
 // createFleetWorkItemStoreFromConfig constructs a Fleet adapter from pre-resolved
 // config. Used when the caller already has the config (e.g., serve.go).
-func createFleetWorkItemStoreFromConfig(cfg config.FleetClientConfig) (*fleet.FleetBackend, error) {
+func createFleetWorkItemStoreFromConfig(cfg config.FleetClientConfig) (*fleet.Adapter, error) {
 	if cfg.URL == "" {
 		return nil, fmt.Errorf("fleet URL is required")
 	}

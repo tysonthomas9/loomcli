@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/backend/api"
-	"github.com/tysonthomas9/loomcli/internal/backend/api/gen"
 	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
+	api "github.com/tysonthomas9/loomcli/internal/modules/workitems/httpapi"
+	"github.com/tysonthomas9/loomcli/internal/platform/loomapi/gen"
 )
 
 func issueListServer(t *testing.T, payload []gen.Issue, captureQuery *string) *httptest.Server {
