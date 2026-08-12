@@ -234,9 +234,10 @@ func eventToData(e gen.IssueEvent) backend.EventData {
 	}
 }
 
-// statisticsToData converts gen.Statistics to backend.StatsData.
-func statisticsToData(s gen.Statistics) backend.StatsData {
-	return backend.StatsData{
+// statisticsToStats converts the generated wire projection to the Work Items
+// owner projection.
+func statisticsToStats(s gen.Statistics) workitems.Stats {
+	return workitems.Stats{
 		TotalIssues:             s.TotalIssues,
 		OpenIssues:              s.OpenIssues,
 		InProgressIssues:        s.InProgressIssues,

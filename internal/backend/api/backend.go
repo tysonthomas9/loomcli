@@ -44,6 +44,7 @@ type APIBackend struct {
 // Compile-time interface check.
 var _ backend.IssueBackend = (*APIBackend)(nil)
 var _ workitems.SearchQueries = (*APIBackend)(nil)
+var _ workitems.StatsQueries = (*APIBackend)(nil)
 
 // apiResponse is the JSON envelope returned by loom server endpoints that
 // follow the { success, data, error } convention.
@@ -255,7 +256,7 @@ func (b *APIBackend) Blocked(ctx context.Context, opts backend.BlockedOpts) ([]b
 // Stats fetches per-workspace statistics. The server returns a raw
 // Statistics object directly (not wrapped in the envelope) at
 // GET /api/workspaces/{ws}/stats.
-func (b *APIBackend) Stats(ctx context.Context) (*backend.StatsData, error) {
+func (b *APIBackend) Stats(ctx context.Context) (*workitems.Stats, error) {
 	// The /stats endpoint does not use the envelope — call via raw doRequest
 	// and decode directly into Statistics.
 	fullURL := b.baseURL + b.workspaceBasePath() + "/stats"
@@ -280,7 +281,7 @@ func (b *APIBackend) Stats(ctx context.Context) (*backend.StatsData, error) {
 	if err := json.Unmarshal(body, &stats); err != nil {
 		return nil, backend.ErrInternal("Stats", "unmarshal response", err)
 	}
-	result := statisticsToData(stats)
+	result := statisticsToStats(stats)
 	return &result, nil
 }
 

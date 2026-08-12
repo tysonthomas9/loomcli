@@ -2,9 +2,43 @@ package workitems
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 )
+
+func TestStatsJSONRoundTrip(t *testing.T) {
+	original := Stats{
+		TotalIssues: 100, OpenIssues: 40, InProgressIssues: 15,
+		ClosedIssues: 30, BlockedIssues: 5, DeferredIssues: 3,
+		ReadyIssues: 7, PinnedIssues: 2, EpicsEligibleForClosure: 1,
+		AverageLeadTime: 48.5,
+	}
+	data, err := json.Marshal(original)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded Stats
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded != original {
+		t.Fatalf("stats round trip = %+v, want %+v", decoded, original)
+	}
+}
+
+func TestStatsJSONKeepsMeaningfulZeroValues(t *testing.T) {
+	data, err := json.Marshal(Stats{TotalIssues: 10, OpenIssues: 5})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw := string(data)
+	for _, field := range []string{`"average_lead_time_hours":0`, `"total_issues":10`, `"epics_eligible_for_closure":0`} {
+		if !strings.Contains(raw, field) {
+			t.Errorf("stats JSON %s does not contain %s", raw, field)
+		}
+	}
+}
 
 func TestMutationJSONRoundTripPreservesOpaqueCursor(t *testing.T) {
 	original := Mutation{

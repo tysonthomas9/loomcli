@@ -124,15 +124,18 @@ func (s *workItemsBackendStore) Stats(ctx context.Context) (*workitems.Stats, er
 	}
 	ctx, cancel := context.WithTimeout(ctx, workItemOperationTimeout)
 	defer cancel()
-	value, err := be.Stats(ctx)
+	stats, ok := be.(workitems.StatsQueries)
+	if !ok {
+		return nil, workitems.ErrUnavailable
+	}
+	value, err := stats.Stats(ctx)
 	if err != nil {
 		return nil, translateWorkItemsBackendError(err)
 	}
 	if value == nil {
 		return nil, workitems.ErrInvalidPersistedState
 	}
-	out := workitems.Stats(*value)
-	return &out, nil
+	return value, nil
 }
 
 func (s *workItemsBackendStore) Blocked(ctx context.Context, query workitems.AvailabilityQuery) ([]workitems.IssueSummary, error) {

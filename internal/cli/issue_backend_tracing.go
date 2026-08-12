@@ -38,6 +38,8 @@ type tracedIssueBackend struct {
 	backendAttr attribute.KeyValue // cached at construction; backend name is stable
 }
 
+var _ workitems.StatsQueries = (*tracedIssueBackend)(nil)
+
 // wrapIssueBackendWithTracing returns a tracing-decorated IssueBackend.
 // nil-safe: passing nil returns nil so callers can wrap unconditionally.
 func wrapIssueBackendWithTracing(inner backend.IssueBackend) backend.IssueBackend {
@@ -144,9 +146,14 @@ func (t *tracedIssueBackend) Blocked(ctx context.Context, opts backend.BlockedOp
 	return out, err
 }
 
-func (t *tracedIssueBackend) Stats(ctx context.Context) (*backend.StatsData, error) {
-	ctx, span := t.startSpan(ctx, "Stats")
-	out, err := t.inner.Stats(ctx)
+func (t *tracedIssueBackend) Stats(ctx context.Context) (*workitems.Stats, error) {
+	ctx, span := t.startServiceSpan(ctx, "WorkItems", "Stats")
+	stats, ok := t.inner.(workitems.StatsQueries)
+	if !ok {
+		endSpan(span, workitems.ErrUnavailable)
+		return nil, workitems.ErrUnavailable
+	}
+	out, err := stats.Stats(ctx)
 	endSpan(span, err)
 	return out, err
 }

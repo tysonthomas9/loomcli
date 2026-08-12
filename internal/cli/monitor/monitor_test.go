@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 )
 
 func TestDisplayWidth(t *testing.T) {
@@ -720,7 +721,7 @@ func TestCollectStatistics(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name           string
-		statsResult    *backend.StatsData
+		statsResult    *workitems.Stats
 		statsErr       error
 		wantOpen       int
 		wantClosed     int
@@ -734,13 +735,13 @@ func TestCollectStatistics(t *testing.T) {
 	}{
 		{
 			name:        "normal case",
-			statsResult: &backend.StatsData{TotalIssues: 10, OpenIssues: 3, ClosedIssues: 7},
+			statsResult: &workitems.Stats{TotalIssues: 10, OpenIssues: 3, ClosedIssues: 7},
 			wantOpen:    3, wantClosed: 7, wantTotal: 10, wantCompl: 70.0,
 			wantRemaining: 3,
 		},
 		{
 			name:        "empty stats (no issues)",
-			statsResult: &backend.StatsData{},
+			statsResult: &workitems.Stats{},
 		},
 		{
 			name:     "Stats() returns error",
@@ -752,33 +753,33 @@ func TestCollectStatistics(t *testing.T) {
 		},
 		{
 			name:        "all closed (100% completion)",
-			statsResult: &backend.StatsData{TotalIssues: 5, ClosedIssues: 5},
+			statsResult: &workitems.Stats{TotalIssues: 5, ClosedIssues: 5},
 			wantClosed:  5, wantTotal: 5, wantCompl: 100.0,
 		},
 		{
 			name:        "all store stats fields populated",
-			statsResult: &backend.StatsData{TotalIssues: 20, OpenIssues: 10, InProgressIssues: 2, ClosedIssues: 5, BlockedIssues: 1},
+			statsResult: &workitems.Stats{TotalIssues: 20, OpenIssues: 10, InProgressIssues: 2, ClosedIssues: 5, BlockedIssues: 1},
 			wantOpen:    10, wantClosed: 5, wantTotal: 20, wantCompl: 25.0,
 			wantRemaining: 15, wantInProgress: 2, wantBlocked: 1,
 			wantReview: 2, reviewCount: 2,
 		},
 		{
 			name:        "negative review clamped to zero",
-			statsResult: &backend.StatsData{TotalIssues: 10, OpenIssues: 5, InProgressIssues: 3, ClosedIssues: 3, BlockedIssues: 2},
+			statsResult: &workitems.Stats{TotalIssues: 10, OpenIssues: 5, InProgressIssues: 3, ClosedIssues: 3, BlockedIssues: 2},
 			wantOpen:    5, wantClosed: 3, wantTotal: 10, wantCompl: 30.0,
 			wantRemaining: 7, wantInProgress: 3, wantBlocked: 2,
 			wantReview: 0, // clamped from -3
 		},
 		{
 			name:        "negative remaining clamped to zero",
-			statsResult: &backend.StatsData{TotalIssues: 5, ClosedIssues: 6, TombstoneIssues: 1},
+			statsResult: &workitems.Stats{TotalIssues: 5, ClosedIssues: 6, TombstoneIssues: 1},
 			wantClosed:  6, wantTotal: 5, wantCompl: 120.0,
 			wantRemaining: 0, // clamped from -1
 			wantReview:    0, // clamped
 		},
 		{
 			name:        "review computed with deferred and pinned",
-			statsResult: &backend.StatsData{TotalIssues: 30, OpenIssues: 10, InProgressIssues: 3, ClosedIssues: 8, BlockedIssues: 2, DeferredIssues: 2, TombstoneIssues: 1, PinnedIssues: 1},
+			statsResult: &workitems.Stats{TotalIssues: 30, OpenIssues: 10, InProgressIssues: 3, ClosedIssues: 8, BlockedIssues: 2, DeferredIssues: 2, TombstoneIssues: 1, PinnedIssues: 1},
 			wantOpen:    10, wantClosed: 8, wantTotal: 30,
 			wantCompl:     float64(8) / float64(30) * 100,
 			wantRemaining: 22, wantInProgress: 3, wantBlocked: 2,
@@ -1428,7 +1429,7 @@ func TestCollectMonitorData(t *testing.T) {
 		{ID: "T-1", Title: "Task 1", Status: "open", Design: ""},
 		{ID: "T-2", Title: "Task 2", Status: "open", Design: "plan"},
 	}
-	mock.StatsResult = &backend.StatsData{TotalIssues: 10, OpenIssues: 3, ClosedIssues: 7}
+	mock.StatsResult = &workitems.Stats{TotalIssues: 10, OpenIssues: 3, ClosedIssues: 7}
 	deps.IssueBackend = mock
 
 	data := collectMonitorDataDeps(t.Context(), deps, 100, "")
@@ -1505,7 +1506,7 @@ func TestCollectMonitorDataExported(t *testing.T) {
 	}})
 
 	mock := NewMockIssueBackend()
-	mock.StatsResult = &backend.StatsData{TotalIssues: 5, OpenIssues: 2, ClosedIssues: 3}
+	mock.StatsResult = &workitems.Stats{TotalIssues: 5, OpenIssues: 2, ClosedIssues: 3}
 	setDefaultIssueBackend(mock)
 	t.Cleanup(func() { resetDefaultIssueBackend() })
 
@@ -1617,7 +1618,7 @@ func TestBacklogAccumulatesReadyWithBlockersAndBlocked(t *testing.T) {
 	mock.BlockedResult = []backend.IssueData{
 		{ID: "T-LOOM-BLOCKED", Title: "Blocked by dependency", Status: "open"},
 	}
-	mock.StatsResult = &backend.StatsData{TotalIssues: 20, OpenIssues: 10, ClosedIssues: 5}
+	mock.StatsResult = &workitems.Stats{TotalIssues: 20, OpenIssues: 10, ClosedIssues: 5}
 	setDefaultIssueBackend(mock)
 	t.Cleanup(func() { resetDefaultIssueBackend() })
 
@@ -1682,7 +1683,7 @@ func TestEpicsExcludedFromWorkQueueButStatsRemainCanonical(t *testing.T) {
 		{ID: "T-EPIC", Title: "Epic task", Status: "open", IssueType: "epic"},
 		{ID: "T-2", Title: "Needs planning", Status: "open", Design: ""},
 	}
-	mock.StatsResult = &backend.StatsData{TotalIssues: 10, OpenIssues: 5, ClosedIssues: 3}
+	mock.StatsResult = &workitems.Stats{TotalIssues: 10, OpenIssues: 5, ClosedIssues: 3}
 	setDefaultIssueBackend(mock)
 	t.Cleanup(func() { resetDefaultIssueBackend() })
 
@@ -1767,7 +1768,7 @@ func TestMonitorStatsPreserveBackendTotals(t *testing.T) {
 	mock.BlockedResult = []backend.IssueData{
 		{ID: "T-6", Title: "Blocked task", Status: "open"},
 	}
-	mock.StatsResult = &backend.StatsData{TotalIssues: 50, OpenIssues: 8, ClosedIssues: 40}
+	mock.StatsResult = &workitems.Stats{TotalIssues: 50, OpenIssues: 8, ClosedIssues: 40}
 	setDefaultIssueBackend(mock)
 	t.Cleanup(func() { resetDefaultIssueBackend() })
 

@@ -52,7 +52,6 @@ func (b *localBackendStub) Blocked(_ context.Context, opts backend.BlockedOpts) 
 	return b.readyItems, nil
 }
 
-func (b *localBackendStub) Stats(context.Context) (*backend.StatsData, error) { return nil, nil }
 func (b *localBackendStub) Create(_ context.Context, params backend.CreateParams) (*backend.IssueData, error) {
 	b.record("Create", "", params)
 	if b.createItem != nil {

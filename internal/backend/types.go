@@ -126,22 +126,6 @@ type EventData struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
-// StatsData contains aggregate issue statistics.
-// Fields preserve the existing statistics JSON contract.
-type StatsData struct {
-	TotalIssues             int     `json:"total_issues"`
-	OpenIssues              int     `json:"open_issues"`
-	InProgressIssues        int     `json:"in_progress_issues"`
-	ClosedIssues            int     `json:"closed_issues"`
-	BlockedIssues           int     `json:"blocked_issues"`
-	DeferredIssues          int     `json:"deferred_issues"`
-	ReadyIssues             int     `json:"ready_issues"`
-	TombstoneIssues         int     `json:"tombstone_issues"`
-	PinnedIssues            int     `json:"pinned_issues"`
-	EpicsEligibleForClosure int     `json:"epics_eligible_for_closure"`
-	AverageLeadTime         float64 `json:"average_lead_time_hours"`
-}
-
 // CloseResult is returned by Close. It contains the closed issue
 // and any issues that became unblocked as a result.
 type CloseResult struct {

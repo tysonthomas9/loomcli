@@ -261,6 +261,7 @@ type fleetDBIssueBackend struct{}
 
 var _ backend.IssueBackend = (*fleetDBIssueBackend)(nil)
 var _ backend.ClaimReleaser = (*fleetDBIssueBackend)(nil)
+var _ workitems.StatsQueries = (*fleetDBIssueBackend)(nil)
 
 func newFleetDBIssueBackend() backend.IssueBackend {
 	return &fleetDBIssueBackend{}
@@ -343,11 +344,15 @@ func (b *fleetDBIssueBackend) Blocked(ctx context.Context, opts backend.BlockedO
 	return out, err
 }
 
-func (b *fleetDBIssueBackend) Stats(ctx context.Context) (*backend.StatsData, error) {
-	var out *backend.StatsData
+func (b *fleetDBIssueBackend) Stats(ctx context.Context) (*workitems.Stats, error) {
+	var out *workitems.Stats
 	err := b.withBackend(ctx, "Stats", func(ib backend.IssueBackend) error {
+		stats, ok := ib.(workitems.StatsQueries)
+		if !ok {
+			return workitems.ErrUnavailable
+		}
 		var err error
-		out, err = ib.Stats(ctx)
+		out, err = stats.Stats(ctx)
 		return err
 	})
 	return out, err
@@ -518,6 +523,7 @@ type unavailableIssueBackend struct {
 }
 
 var _ backend.IssueBackend = (*unavailableIssueBackend)(nil)
+var _ workitems.StatsQueries = (*unavailableIssueBackend)(nil)
 
 func newUnavailableIssueBackend(name string, err error) backend.IssueBackend {
 	return &unavailableIssueBackend{name: name, err: err}
@@ -539,7 +545,7 @@ func (b *unavailableIssueBackend) Ready(context.Context, backend.ReadyOpts) ([]b
 func (b *unavailableIssueBackend) Blocked(context.Context, backend.BlockedOpts) ([]backend.IssueData, error) {
 	return nil, b.unavailable("Blocked")
 }
-func (b *unavailableIssueBackend) Stats(context.Context) (*backend.StatsData, error) {
+func (b *unavailableIssueBackend) Stats(context.Context) (*workitems.Stats, error) {
 	return nil, b.unavailable("Stats")
 }
 func (b *unavailableIssueBackend) Search(context.Context, workitems.SearchQuery) ([]workitems.IssueSummary, error) {

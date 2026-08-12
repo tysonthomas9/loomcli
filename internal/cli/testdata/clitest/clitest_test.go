@@ -190,7 +190,7 @@ func TestMockIssueBackendDefaultPaths(t *testing.T) {
 	m.ListResult = []backend.IssueData{{ID: "list"}}
 	m.ReadyResult = []backend.IssueData{{ID: "ready"}}
 	m.BlockedResult = []backend.IssueData{{ID: "blocked"}}
-	m.StatsResult = &backend.StatsData{}
+	m.StatsResult = &workitems.Stats{}
 	m.SearchResult = []workitems.IssueSummary{{ID: "search"}}
 	m.CreateResult = &backend.IssueData{ID: "created"}
 	m.CloseResult = &backend.CloseResult{}

@@ -42,6 +42,7 @@ type FleetBackend struct {
 // Compile-time interface check.
 var _ backend.IssueBackend = (*FleetBackend)(nil)
 var _ workitems.SearchQueries = (*FleetBackend)(nil)
+var _ workitems.StatsQueries = (*FleetBackend)(nil)
 var _ workitems.MutationStream = (*FleetBackend)(nil)
 var _ backend.ClaimReleaser = (*FleetBackend)(nil)
 var _ backend.RepositoryRequirementBackend = (*FleetBackend)(nil)
@@ -415,7 +416,7 @@ func (b *FleetBackend) Ready(ctx context.Context, opts backend.ReadyOpts) ([]bac
 // Stats builds lifecycle counts from fleet-db's status count endpoint and
 // canonical operational counts from FleetDB's computed ready/blocked/deferred
 // views.
-func (b *FleetBackend) Stats(ctx context.Context) (*backend.StatsData, error) {
+func (b *FleetBackend) Stats(ctx context.Context) (*workitems.Stats, error) {
 	resp, err := b.exec(ctx, "Stats", "GET", "/issues/count?group_by=status", nil)
 	if err != nil {
 		return nil, err
@@ -440,7 +441,7 @@ func (b *FleetBackend) Stats(ctx context.Context) (*backend.StatsData, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &backend.StatsData{
+	return &workitems.Stats{
 		TotalIssues:      int(countResp.Total),
 		OpenIssues:       int(groups[string(workitems.StatusOpen)]),
 		InProgressIssues: int(groups[string(workitems.StatusInProgress)]),
@@ -452,7 +453,7 @@ func (b *FleetBackend) Stats(ctx context.Context) (*backend.StatsData, error) {
 		PinnedIssues:     int(groups[string(workitems.StatusPinned)]),
 		// EpicsEligibleForClosure, AverageLeadTime: 0 (fleet-08yg).
 		// StatusReview and StatusHooked counts are included in TotalIssues but have
-		// no dedicated StatsData field; they are silently omitted from per-status counts.
+		// no dedicated owner-stat field; they are silently omitted from per-status counts.
 	}, nil
 }
 

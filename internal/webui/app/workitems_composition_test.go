@@ -24,8 +24,8 @@ func (*searchOnlyBackend) Search(_ context.Context, query workitems.SearchQuery)
 	return []workitems.IssueSummary{{ID: "SEARCH-1", Title: query.Query}}, nil
 }
 
-func (*statsOnlyBackend) Stats(context.Context) (*backend.StatsData, error) {
-	return &backend.StatsData{TotalIssues: 9, ReadyIssues: 2}, nil
+func (*statsOnlyBackend) Stats(context.Context) (*workitems.Stats, error) {
+	return &workitems.Stats{TotalIssues: 9, ReadyIssues: 2}, nil
 }
 
 func (b *claimOnlyBackend) ClaimIssue(_ context.Context, id string, ttl time.Duration) error {
@@ -95,7 +95,7 @@ func TestWorkItemsClaimUsesOneAtomicMutationThenRead(t *testing.T) {
 	}
 }
 
-func TestWorkItemsStatsMapsBackendProjectionAtComposition(t *testing.T) {
+func TestWorkItemsStatsUsesOwnerPort(t *testing.T) {
 	api, err := NewWorkItems(func(context.Context) backend.IssueBackend { return &statsOnlyBackend{} })
 	if err != nil {
 		t.Fatal(err)
@@ -106,6 +106,17 @@ func TestWorkItemsStatsMapsBackendProjectionAtComposition(t *testing.T) {
 	}
 	if stats == nil || stats.TotalIssues != 9 || stats.ReadyIssues != 2 {
 		t.Fatalf("stats = %+v", stats)
+	}
+}
+
+func TestWorkItemsStatsFailsClosedWithoutOwnerPort(t *testing.T) {
+	api, err := NewWorkItems(func(context.Context) backend.IssueBackend { return &claimOnlyBackend{} })
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = api.Stats(context.Background())
+	if !errors.Is(err, workitems.ErrUnavailable) {
+		t.Fatalf("stats error = %v, want unavailable", err)
 	}
 }
 

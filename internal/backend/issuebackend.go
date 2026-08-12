@@ -37,9 +37,6 @@ type IssueBackend interface {
 	// supported by the backend.
 	Blocked(ctx context.Context, opts BlockedOpts) ([]IssueData, error)
 
-	// Stats returns aggregate issue statistics for the project.
-	Stats(ctx context.Context) (*StatsData, error)
-
 	// --- Mutation operations ---
 
 	// Create creates a new issue and returns the slim projection of the

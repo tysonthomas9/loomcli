@@ -34,9 +34,9 @@ type MockIssueBackend struct {
 	BlockedResult       []backend.IssueData
 	BlockedErr          error
 	BlockedFn           func(ctx context.Context, opts backend.BlockedOpts) ([]backend.IssueData, error)
-	StatsResult         *backend.StatsData
+	StatsResult         *workitems.Stats
 	StatsErr            error
-	StatsFn             func(ctx context.Context) (*backend.StatsData, error)
+	StatsFn             func(ctx context.Context) (*workitems.Stats, error)
 	SearchResult        []workitems.IssueSummary
 	SearchErr           error
 	SearchFn            func(ctx context.Context, query workitems.SearchQuery) ([]workitems.IssueSummary, error)
@@ -118,7 +118,7 @@ func (m *MockIssueBackend) Blocked(ctx context.Context, opts backend.BlockedOpts
 	}
 	return r, e
 }
-func (m *MockIssueBackend) Stats(ctx context.Context) (*backend.StatsData, error) {
+func (m *MockIssueBackend) Stats(ctx context.Context) (*workitems.Stats, error) {
 	m.mu.Lock()
 	m.record("Stats")
 	fn, r, e := m.StatsFn, m.StatsResult, m.StatsErr

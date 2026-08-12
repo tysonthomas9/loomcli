@@ -269,64 +269,6 @@ func TestIssueDetailData_DesignNotShadowed(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Section 4: StatsData JSON round-trip
-// ---------------------------------------------------------------------------
-
-func TestStatsData_JSONRoundTrip(t *testing.T) {
-	original := StatsData{
-		TotalIssues:             100,
-		OpenIssues:              40,
-		InProgressIssues:        15,
-		ClosedIssues:            30,
-		BlockedIssues:           5,
-		DeferredIssues:          3,
-		ReadyIssues:             7,
-		TombstoneIssues:         0,
-		PinnedIssues:            2,
-		EpicsEligibleForClosure: 1,
-		AverageLeadTime:         48.5,
-	}
-
-	data, err := json.Marshal(original)
-	if err != nil {
-		t.Fatalf("Marshal: %v", err)
-	}
-
-	var decoded StatsData
-	if err := json.Unmarshal(data, &decoded); err != nil {
-		t.Fatalf("Unmarshal: %v", err)
-	}
-
-	if decoded != original {
-		t.Errorf("StatsData round-trip mismatch:\n got  %+v\n want %+v", decoded, original)
-	}
-}
-
-func TestStatsData_ZeroValuesPresent(t *testing.T) {
-	stats := StatsData{
-		TotalIssues: 10,
-		OpenIssues:  5,
-		// AverageLeadTime is zero — no omitempty, so it must be present (0 is meaningful).
-	}
-
-	data, err := json.Marshal(stats)
-	if err != nil {
-		t.Fatalf("Marshal: %v", err)
-	}
-
-	raw := string(data)
-	if !strings.Contains(raw, `"average_lead_time_hours":0`) {
-		t.Errorf("AverageLeadTime 0 must be present (no omitempty), got: %s", raw)
-	}
-	if !strings.Contains(raw, `"total_issues":10`) {
-		t.Errorf("total_issues should be present, got: %s", raw)
-	}
-	if !strings.Contains(raw, `"epics_eligible_for_closure":0`) {
-		t.Errorf("EpicsEligibleForClosure 0 must be present, got: %s", raw)
-	}
-}
-
-// ---------------------------------------------------------------------------
 // Section 5: UpdateParams pointer fields — nil vs zero-value
 // ---------------------------------------------------------------------------
 

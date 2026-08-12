@@ -20,6 +20,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	agentsmodule "github.com/tysonthomas9/loomcli/internal/modules/agents"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/usage"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
@@ -371,7 +372,7 @@ func TestHandleStatusWithBackend_UsesWorkspaceScopedIssueBackend(t *testing.T) {
 	scopedBackend.ReadyResult = []backend.IssueData{
 		{ID: "T-1", Title: "Scoped task", Status: "open", Design: ""},
 	}
-	scopedBackend.StatsResult = &backend.StatsData{TotalIssues: 7, OpenIssues: 6, ClosedIssues: 1}
+	scopedBackend.StatsResult = &workitems.Stats{TotalIssues: 7, OpenIssues: 6, ClosedIssues: 1}
 	backendFn := func(ctx context.Context) backend.IssueBackend {
 		if got := middleware.WorkspaceFromContext(ctx); got != "WS2" {
 			t.Fatalf("workspace context = %q, want WS2", got)
@@ -426,7 +427,7 @@ func TestMonitorDataSource_CachesWorkspaceCollectionAcrossEndpoints(t *testing.T
 	scopedBackend.ReadyResult = []backend.IssueData{
 		{ID: "T-1", Title: "Scoped task", Status: "open", Design: ""},
 	}
-	scopedBackend.StatsResult = &backend.StatsData{TotalIssues: 7, OpenIssues: 6, ClosedIssues: 1}
+	scopedBackend.StatsResult = &workitems.Stats{TotalIssues: 7, OpenIssues: 6, ClosedIssues: 1}
 
 	backendFnCalls := 0
 	backendFn := func(ctx context.Context) backend.IssueBackend {

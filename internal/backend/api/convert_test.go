@@ -440,9 +440,9 @@ func TestEventToData(t *testing.T) {
 	}
 }
 
-// --- statisticsToData ---
+// --- statisticsToStats ---
 
-func TestStatisticsToData(t *testing.T) {
+func TestStatisticsToStats(t *testing.T) {
 	s := gen.Statistics{
 		TotalIssues:             100,
 		OpenIssues:              40,
@@ -456,7 +456,7 @@ func TestStatisticsToData(t *testing.T) {
 		EpicsEligibleForClosure: 4,
 		AverageLeadTimeHours:    12.5,
 	}
-	d := statisticsToData(s)
+	d := statisticsToStats(s)
 	if d.TotalIssues != 100 {
 		t.Errorf("TotalIssues = %d", d.TotalIssues)
 	}

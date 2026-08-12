@@ -9,6 +9,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/cli"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 )
 
 func CollectMonitorData(ctx context.Context, readyLimit int, branch string) *MonitorData {
@@ -553,7 +554,11 @@ func collectStatistics(ctx context.Context) MonitorStats {
 func collectStatisticsDeps(ctx context.Context, deps *cli.Deps) MonitorStats {
 	var stats MonitorStats
 
-	statsData, err := deps.IssueBackend.Stats(ctx)
+	statsQueries, ok := deps.IssueBackend.(workitems.StatsQueries)
+	if !ok {
+		return stats
+	}
+	statsData, err := statsQueries.Stats(ctx)
 	if err == nil && statsData != nil {
 		stats.Open = statsData.OpenIssues
 		stats.Closed = statsData.ClosedIssues
