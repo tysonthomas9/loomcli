@@ -14,11 +14,11 @@ semantics:
     - vendor
     - worktrees
 ceilings:
-  total_packages: 160
+  total_packages: 159
   module_packages: 15
-  outside_module_packages: 145
+  outside_module_packages: 144
   one_file_packages: 42
-  one_or_two_file_packages: 61
+  one_or_two_file_packages: 60
 packages:
   - internal/agenterr
   - internal/agentpolicy
@@ -27,7 +27,6 @@ packages:
   - internal/app/connectorgrants
   - internal/app/prreviewer
   - internal/app/serve
-  - internal/app/serve/agentcomposition/owneradapters
   - internal/app/systemeventing
   - internal/app/webhookingestion
   - internal/app/workflowauthoring
