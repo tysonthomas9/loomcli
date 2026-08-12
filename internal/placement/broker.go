@@ -457,7 +457,7 @@ func (b *Broker) createProvisioningNode(ctx context.Context, req ProvisionReques
 		Labels:          nodeLabels(req),
 		Capabilities:    []string{CapLeadSession},
 		ToolInventory:   []string{"loom-lead"},
-		DrainState:      domain.NodeDrainActive,
+		DrainState:      domain.NodeDrainDrained,
 		TTL:             b.nodeTTL,
 	})
 }

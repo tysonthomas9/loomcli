@@ -18,7 +18,7 @@ const SOURCE = path.join(here, "daytona-task-runner.ts");
 let stageRoot;
 let mod;
 const savedEnv = {};
-const ENV_KEYS = ["LOOM_DAYTONA_TASK_RUNNER_ENABLE_DEMO_MODES", "DAYTONA_TASK_MODE", "LOOM_TASK_RUN_REQUEST_JSON"];
+const ENV_KEYS = ["LOOM_DAYTONA_TASK_RUNNER_ENABLE_DEMO_MODES", "LOOM_FLUE_AGENT_MODEL", "DAYTONA_TASK_MODE", "LOOM_TASK_RUN_REQUEST_JSON"];
 
 function stub(dir, relFile, contents = "export default {};\n") {
   const file = path.join(dir, relFile);
@@ -35,18 +35,32 @@ before(async () => {
   const daytona = path.join(nm, "@daytona", "sdk");
   const flue = path.join(nm, "@flue", "runtime");
   const loom = path.join(nm, "@loom", "sdk");
-  stub(daytona, "index.js", "export const Daytona = function () {};\nexport default { Daytona };\n");
+  stub(daytona, "index.js", [
+    "export class Daytona {",
+    "  async create(options) { globalThis.__daytonaCreateOptions = options; throw new Error('stop after create'); }",
+    "}",
+    "export default { Daytona };",
+  ].join("\n") + "\n");
   fs.writeFileSync(path.join(daytona, "package.json"), JSON.stringify({ name: "@daytona/sdk", type: "module", main: "index.js" }));
   // defineAgent/defineWorkflow are invoked at module-eval time by the default
   // export; the test exercises the named exports, so trivial pass-throughs suffice.
   stub(flue, "index.js", "export const defineAgent = (fn) => ({ __agent: fn });\nexport const defineWorkflow = (def) => def;\n");
-  stub(flue, "internal.js");
+  stub(flue, "internal.js", "export const resolveModel = () => ({ provider: 'test' });\n");
   fs.writeFileSync(path.join(flue, "package.json"), JSON.stringify({
     name: "@flue/runtime",
     type: "module",
     exports: { ".": "./index.js", "./internal": "./internal.js" },
   }));
-  stub(loom, "runner.js", "export class TaskRunClient { static fromEnv() { throw new Error('stub'); } }\n");
+  stub(loom, "runner.js", [
+    "export class TaskRunClient {",
+    "  static fromEnv() {",
+    "    return {",
+    "      getTask: async () => null,",
+    "      runtimeCredentials: { get: async ({ provider }) => ({ value: provider === 'daytona' ? 'test-key' : '' }) },",
+    "    };",
+    "  }",
+    "}",
+  ].join("\n") + "\n");
   stub(loom, "runtime-adapters.js", [
     "export const createFlueTranscriptCollector = () => ({ entries: [], push() { return []; } });",
     "export const flueUsageToTaskUsage = () => ({});",
@@ -158,6 +172,46 @@ describe("sandboxLeakProbeCommand covers the full widened provider-cred set", ()
         `probe command must reference ${name} (${partsLiteral})`,
       );
     }
+  });
+});
+
+describe("daytona-task-runner sandbox labels", () => {
+  it("passes through string labels without allowing required or loom-* labels to be forged", async () => {
+    process.env.LOOM_FLUE_AGENT_MODEL = "test/model";
+    delete globalThis.__daytonaCreateOptions;
+
+    await mod.run({
+      payload: {
+        task_run_id: "tr-labels",
+        input: {
+          repoUrl: "https://github.com/acme/repo",
+          sandboxLabels: {
+            team: "platform",
+            empty: "",
+            count: 3,
+            enabled: true,
+            loom: "override",
+            runner: "override",
+            task_run_id: "override",
+            "loom-placement": "lead-placement-deadbeef",
+            "loom-env": "forged-env",
+            "loom-workspace": "forged-ws",
+            "loom-agent": "forged-agent",
+            "Loom-Placement": "case-dodge",
+          },
+        },
+      },
+    });
+
+    assert.deepEqual(globalThis.__daytonaCreateOptions.labels, {
+      team: "platform",
+      empty: "",
+      loom: "epic-runner",
+      runner: "daytona-task-runner",
+      task_run_id: "tr-labels",
+    });
+    delete globalThis.__daytonaCreateOptions;
+    delete process.env.LOOM_FLUE_AGENT_MODEL;
   });
 });
 

@@ -116,6 +116,9 @@ func TestProvisionCreateLabelAndToken(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Provision: %v", err)
 	}
+	if got := result.Node.DrainState; got != domain.NodeDrainDrained {
+		t.Fatalf("placement drain state = %q, want %q", got, domain.NodeDrainDrained)
+	}
 	call := provider.createCall(t, 0)
 	if got := call.Labels[PlacementLabelKey]; got != result.Node.NodeID {
 		t.Fatalf("create label %s = %q, want node id %q", PlacementLabelKey, got, result.Node.NodeID)
@@ -1820,7 +1823,7 @@ func createPlacementNode(t *testing.T, st store.Store, workspaceKey, nodeID, age
 		},
 		Capabilities:  []string{CapLeadSession},
 		ToolInventory: []string{"loom-lead"},
-		DrainState:    domain.NodeDrainActive,
+		DrainState:    domain.NodeDrainDrained,
 		TTL:           defaultNodeTTL,
 	})
 	if err != nil {
