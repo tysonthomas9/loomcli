@@ -35,6 +35,8 @@
 - **Wave 9.31 implementation:** `5c504cdb4`
 - **Wave 9.31 FleetDB contract:** `e9c185b`
 - **Wave 9.32 implementation:** `06609d6ca`
+- **Wave 9.33 implementation:** `cad1c8b31`
+- **Wave 9.34 implementation:** `280ef5435`
 - **Stacked branches:** `modular-monolith-phase9-01-types-ratchet`, then
   `modular-monolith-phase9-02-shallow-seams`, then
   `modular-monolith-phase9-03-legacy-planes`, then
@@ -66,7 +68,9 @@
   `modular-monolith-phase9-29-workitems-backend-deletion`, then
   `modular-monolith-phase9-30-workitems-lifecycle-query-deletion`, then
   `modular-monolith-phase9-31-fleet-compatibility-deletion`, then
-  `modular-monolith-phase9-32-workitems-create-fallback-deletion`
+  `modular-monolith-phase9-32-workitems-create-fallback-deletion`, then
+  `modular-monolith-phase9-33-workitems-query-deletion`, then
+  `modular-monolith-phase9-34-workitems-query-ports`
 - **Purpose:** Reduce the residual package surface toward 160 production Go
   packages without weakening capability ownership, consumer-owned ports, or
   independently replaceable adapters.
@@ -1608,6 +1612,49 @@ consumers from `IssueBackend` DTOs to narrow Work Items ports, while preserving
 the dedicated relevance-ranked search semantics at the owning boundary. The
 19-method horizontal interface is still an intermediate deletion target, not
 the intended architecture.
+
+## Wave 9.34 result
+
+Wave 9.34 moves relevance-ranked search from the horizontal `IssueBackend`
+contract to the Work Items-owned `SearchQueries` port. The Loom API and FleetDB
+adapters implement that owner projection directly. FleetDB still calls its
+dedicated `/issues/search` endpoint, and the Loom API still uses its dedicated
+`q` query path; neither adapter can silently substitute an ordinary paginated
+list or substring filter.
+
+The Work Items composition requires the owner port and fails closed with
+`ErrUnavailable` when it is absent. The lazy workspace proxy, unavailable
+backend, tracing decorator, and test doubles expose the same narrow port, while
+the trace span moves from `service.IssueBackend.SearchIssues` to
+`service.WorkItems.Search`. A cannot-return ratchet rejects the deleted
+`SearchIssues` method throughout backend, adapter, and CLI production roots.
+
+The broad interface contracts from 19 methods to 18. Implementation commit
+`280ef5435` changes 21 files with 226 insertions and 113 deletions. This wave is
+net additive because adapters now construct the owner projection directly and
+the cutover adds fail-closed and dedicated-endpoint regression coverage; it
+does not create a compatibility facade or production package. Exact package
+shape remains `159 / 15 / 144 / 42 / 60`.
+
+## Wave 9.34 validation
+
+| Check | Result |
+|---|---|
+| Work Items owner behavior | PASS: query normalization, persisted-ID validation, result cloning, owner-port dispatch, and fail-closed absence are covered |
+| API and FleetDB search adapters | PASS: focused tests preserve query escaping, limits, validation, empty results, error mapping, and FleetDB's dedicated ranked endpoint |
+| CLI proxy, unavailable backend, tracing, and mocks | PASS: all consumers compile against `SearchQueries`; search text remains excluded from trace attributes |
+| Cannot-return architecture ratchet | PASS: `TestUnusedIssueBackendCompatibilityOperationsCannotReturn` rejects `SearchIssues` |
+| Repository compile graph | PASS: every Go package compiled after the interface contraction |
+| Loom `make gate` | PASS: all Go and frontend quality gates against paired FleetDB source `e9c185b` and its exact binary, with four Go OS threads, two Go package workers, one Vitest worker, and a 2 GiB Go soft memory limit |
+
+The aggregate gate completed its exhaustive tagged architecture scan without a
+memory spike; the observed architecture process remained below 100 MiB RSS.
+No test, threshold, profile, or owner rule was disabled.
+
+Phase 9 remains incomplete. `IssueBackend` still carries 18 lifecycle, query,
+and command methods plus duplicate DTOs and transitional composition/proxy
+machinery. Subsequent waves continue moving real consumers to owner ports and
+delete the horizontal plane only after its final consumer is gone.
 
 ---
 
