@@ -1699,6 +1699,55 @@ and command methods plus duplicate issue/detail/comment/event DTOs and
 transitional composition/proxy machinery. Those are deletion targets, not
 accepted compatibility architecture.
 
+## Wave 9.36 result
+
+Wave 9.36 moves the canonical blocked-work view from the horizontal
+`IssueBackend` contract to the Work Items-owned `BlockedQueries` port. The
+Loom API and FleetDB adapters now return `workitems.IssueSummary` directly;
+WebUI composition, CLI data and monitor commands, epic snapshots, the lazy
+workspace proxy, unavailable backend, tracing decorator, and test doubles all
+require that narrow owner port and fail closed when it is absent.
+
+The duplicate `backend.BlockedOpts` DTO, FleetDB's flat `blockedIssueWire`
+dialect, its blocker wire DTO, and the dual-response decoder are deleted. The
+FleetDB adapter accepts only the canonical nested issue-plus-blockers response;
+the retired flat bridge shape fails visibly. Both adapters also reject owner
+filters they cannot evaluate instead of silently returning partially filtered
+results. FleetDB retains client-side filtering only for fields present in the
+canonical projection.
+
+The broad interface contracts from 17 methods to 16. Implementation commit
+`5a5df111c` changes 46 files with 524 insertions and 267 deletions. The wave is
+net additive because it adds direct owner projections, explicit fail-closed
+filter coverage, and removes a second horizontal dependency discovered by the
+gate: Driver no longer imports desktop settings to read one optional model.
+The existing serve adapter now injects that non-secret projection, deleting
+`internal/driver/runner_settings.go` and keeping Driver's import fanout at 18
+without an exception. Exact package shape remains `159 / 15 / 144 / 42 / 60`.
+
+## Wave 9.36 validation
+
+| Check | Result |
+|---|---|
+| Repository compile graph | PASS: every Go package compiles after removing `IssueBackend.Blocked` and `backend.BlockedOpts` |
+| API and FleetDB blocked adapters | PASS: canonical projection, nested blocker response, explicit blocked status, client-side supported filters, unsupported-filter rejection, and retired flat-response rejection are covered |
+| CLI, monitor, epic snapshot, WebUI composition, proxy, and tracing consumers | PASS: focused suites use `BlockedQueries`, including fail-closed missing-port behavior |
+| Cannot-return architecture ratchet | PASS: `TestUnusedIssueBackendCompatibilityOperationsCannotReturn` rejects `BlockedOpts`; retired FleetDB wire helpers have no production definitions |
+| Dependency topology | PASS: Driver fanout remains 18 after moving desktop-settings projection to the existing serve adapter; no exception or threshold was raised |
+| Loom `make gate` | PASS: all Go and frontend quality gates against paired FleetDB source `e9c185b` and its exact binary, with four Go OS threads, two Go package workers, one Vitest worker, and a 2 GiB Go soft memory limit |
+
+The complete gate passed FleetDB compatibility, lint, exact package and import
+ratchets, the measured architecture sweep, repository-wide race tests, and
+coverage. No test, threshold, profile, owner rule, or compatibility exception
+was disabled.
+
+Phase 9 remains incomplete. `IssueBackend` still carries 16 lifecycle, query,
+and command methods plus duplicate issue/detail/comment/event DTOs and
+transitional composition/proxy machinery. The next wave continues with the
+remaining availability query surface; final success still requires deleting
+the horizontal interface and duplicate DTO plane rather than preserving them
+as a compatibility facade.
+
 ---
 
 [Migration overview](README.md) · [Phase 8 consolidation](15-phase-8-consolidation-and-evidence.md)
