@@ -64,7 +64,7 @@ func (c *Collector) Finalize(taskID, epicID string, startedAt, endedAt time.Time
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	u := SessionUsage{
+	return SessionUsage{
 		AgentName:        c.agentName,
 		Backend:          c.backend,
 		TaskID:           taskID,
@@ -77,8 +77,4 @@ func (c *Collector) Finalize(taskID, epicID string, startedAt, endedAt time.Time
 		EndedAt:          endedAt,
 		ExitCode:         exitCode,
 	}
-
-	tier := ResolvePricing(c.backend)
-	u.EstimatedCostUSD = EstimateCost(tier, u)
-	return u
 }

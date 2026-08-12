@@ -144,6 +144,15 @@ func (s *Supervisor) recordTaskExitForQuarantine(ap *AgentProcess, exitCode int)
 	}
 	snap := snapshotTaskExit(ap, lockInfo, exitCode)
 	q := s.qrec()
+	// An incomplete run (exit 0, claim never released) is deliberately NOT
+	// clean: classifyAgentExit gives it a LastError, so snap.clean is false and
+	// the record survives. Evicting on that shape is what made this spiral
+	// invisible — a task could alternate real kills with unfinished turns and
+	// the ledger reset to zero on every one of them, so the threshold was never
+	// reached. It still does not INCREMENT: IncompleteRun is a domain outcome
+	// and QuarantineEligible rejects those, which is right — a turn that ran out
+	// is a coordination signal, not a task-fault kill, and counting it would
+	// quarantine tasks whose agents are progressing without committing.
 	if snap.clean || commitProgressed(ap.WorktreePath, snap.beforeRef) {
 		q.evict(taskID)
 		return

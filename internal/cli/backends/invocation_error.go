@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"strings"
 
+	"github.com/olesho/harness-wrapper/pkg/chat"
 	"github.com/olesho/harness-wrapper/pkg/wrapper"
 
 	"github.com/tysonthomas9/loomcli/internal/agenterr"
@@ -135,6 +136,46 @@ func agentLaunchFailedInvocationError(reason, outputTail string) *InvocationErro
 		// failure where the binary exists but cannot be exec'd.
 		OutputTail: evidence,
 		ExitCode:   126,
+	}
+}
+
+// terminalTurnInvocationError returns the canonical InvocationError for a turn
+// the HARNESS declared terminal, carrying the marker that lets the outer
+// classifier act on the harness's verdict instead of re-deriving it from prose.
+//
+// It is used for the two blameless reasons harness-wrapper reports
+// categorically — an expired login and an exhausted quota window. Everything
+// else keeps the plain errored path: the marker means "the harness told us
+// what this is", and inventing one for a reason it did not name would recreate
+// the guessing this removes.
+//
+// Returns nil when the reason is not one of the two, so callers can fall
+// through to their existing handling with a single nil check.
+func terminalTurnInvocationError(reason, outputTail string) *InvocationError {
+	var marker string
+	switch {
+	case strings.Contains(reason, chat.ReasonAuthRequired):
+		marker = agenterr.AuthRequiredMarker
+	case strings.Contains(reason, chat.ReasonUsageLimited):
+		marker = agenterr.UsageLimitedMarker
+	default:
+		return nil
+	}
+
+	combined := marker + ": " + strings.TrimSpace(reason)
+	evidence := strings.TrimSpace(outputTail)
+	if evidence == "" {
+		evidence = combined
+	} else if !strings.Contains(evidence, combined) {
+		evidence = combined + "\n" + evidence
+	}
+	return &InvocationError{
+		Err:        errors.New(combined),
+		OutputTail: evidence,
+		// The marker text is the signal the outer classifier reads; the exit
+		// code only has to be non-zero so the run is not mistaken for a clean
+		// one. 1 keeps it uniform with the ordinary errored-turn path.
+		ExitCode: 1,
 	}
 }
 

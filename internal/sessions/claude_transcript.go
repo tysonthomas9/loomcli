@@ -46,17 +46,39 @@ func (s *Store) SyncLatestClaudeTranscript(sessionID, workDir, claudeUUID string
 	return srcPath, nil
 }
 
-// claudeProjectDir returns ~/.claude/projects/<encoded-cwd> for workDir, or ""
-// if the home dir cannot be resolved or workDir is empty.
+// claudeProjectDir returns <claude-config-dir>/projects/<encoded-cwd> for
+// workDir, or "" if the config dir cannot be resolved or workDir is empty.
 func claudeProjectDir(workDir string) string {
 	if workDir == "" {
 		return ""
+	}
+	root := ClaudeConfigDir()
+	if root == "" {
+		return ""
+	}
+	return filepath.Join(root, "projects", encodeClaudeCWD(workDir))
+}
+
+// ClaudeConfigDir resolves Claude Code's config directory, honoring the
+// CLAUDE_CONFIG_DIR override before falling back to ~/.claude.
+//
+// The override is load-bearing, not cosmetic: Claude Code writes its session
+// transcripts under <config dir>/projects/, and the backend's own auth check
+// (backends.claudeAuthFilePath) already honors it. Resolving only from $HOME
+// here made the two disagree, so an operator who set the override — which the
+// container and smoke-test paths do — got passing auth checks and a transcript
+// lookup that never found anything. Downstream that is not a missing nicety:
+// the comment completion hook needs the final assistant reply, so it fails,
+// the run is demoted, and the owned task reopens on every attempt.
+func ClaudeConfigDir() string {
+	if dir := strings.TrimSpace(os.Getenv("CLAUDE_CONFIG_DIR")); dir != "" {
+		return dir
 	}
 	home, err := os.UserHomeDir()
 	if err != nil || home == "" {
 		return ""
 	}
-	return filepath.Join(home, ".claude", "projects", encodeClaudeCWD(workDir))
+	return filepath.Join(home, ".claude")
 }
 
 // claudeCWDSanitize matches every character Claude Code rewrites when it names

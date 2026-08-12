@@ -160,45 +160,63 @@ func monitorAgentStatuses(
 		if assignment == nil {
 			continue
 		}
-		var taskID, sessionID string
-		if session := latestSessions[assignment.Name]; session != nil {
-			taskID = session.TaskID
-			sessionID = session.SessionID
-		}
-		var orchID string
-		if sess := orchestrationByAgent[assignment.Name]; sess != nil {
-			orchID = sess.SessionID
-		}
-		inboxSummary := inboxByAgent[assignment.Name]
-		agents = append(agents, monitor.AgentStatus{
-			Name:                  assignment.Name,
-			Branch:                monitorBranchFromAgent(workspaceData, assignment),
-			Status:                monitorStatusFromAgentState(assignment.State),
-			Role:                  assignment.RoleName,
-			RoleKind:              string(domain.ResolveRoleKind(rolesByName[assignment.RoleName], assignment.RoleName)),
-			Repo:                  monitorRepoFromAgent(assignment),
-			Workspace:             wsName,
-			DaemonManaged:         assignment.Auto,
-			Parent:                assignment.Parent,
-			DeliveryState:         monitorLeadDeliveryState(assignment, orchestrationByAgent[assignment.Name]),
-			InboxQueuedCount:      inboxSummary.QueuedCount,
-			InboxFailedCount:      inboxSummary.FailedCount,
-			InboxLatestMessage:    inboxSummary.LatestMessage,
-			OrchestratorSessionID: orchID,
-			TaskID:                taskID,
-			SessionID:             sessionID,
-			Mode:                  string(assignment.Mode),
-			DesiredState:          string(assignment.DesiredState),
-			// Carry fleet-db's derived liveness through unchanged. The lock-derived
-			// Status above never advances to "working" on the store-only serve path,
-			// so the UI reads live_status to flip a provably-working agent off "idle".
-			LiveStatus:     string(assignment.LiveStatus),
-			ActiveTaskID:   assignment.ActiveTaskID,
-			ActivePhase:    assignment.ActivePhase,
-			LastErrorClass: assignment.LastErrorClass,
-		})
+		agents = append(agents, monitorAgentStatus(
+			assignment, rolesByName, workspaceData,
+			latestSessions[assignment.Name], orchestrationByAgent,
+			inboxByAgent[assignment.Name], wsName,
+		))
 	}
 	return agents
+}
+
+func monitorAgentStatus(
+	assignment *domain.Agent,
+	rolesByName map[string]*domain.Role,
+	workspaceData *ops.WorkspaceData,
+	latestSession *domain.AgentSession,
+	orchestrationByAgent map[string]*domain.AgentSession,
+	inboxSummary agentInboxSummary,
+	wsName string,
+) monitor.AgentStatus {
+	var taskID, sessionID string
+	if latestSession != nil {
+		taskID = latestSession.TaskID
+		sessionID = latestSession.SessionID
+	}
+	var orchID string
+	if sess := orchestrationByAgent[assignment.Name]; sess != nil {
+		orchID = sess.SessionID
+	}
+	displayName, roleLabel := prReviewerDisplayFields(assignment)
+	return monitor.AgentStatus{
+		Name:                  assignment.Name,
+		Branch:                monitorBranchFromAgent(workspaceData, assignment),
+		Status:                monitorStatusFromAgentState(assignment.State),
+		Role:                  assignment.RoleName,
+		RoleKind:              string(domain.ResolveRoleKind(rolesByName[assignment.RoleName], assignment.RoleName)),
+		RoleLabel:             roleLabel,
+		DisplayName:           displayName,
+		Repo:                  monitorRepoFromAgent(assignment),
+		Workspace:             wsName,
+		DaemonManaged:         assignment.Auto,
+		Parent:                assignment.Parent,
+		DeliveryState:         monitorLeadDeliveryState(assignment, orchestrationByAgent[assignment.Name]),
+		InboxQueuedCount:      inboxSummary.QueuedCount,
+		InboxFailedCount:      inboxSummary.FailedCount,
+		InboxLatestMessage:    inboxSummary.LatestMessage,
+		OrchestratorSessionID: orchID,
+		TaskID:                taskID,
+		SessionID:             sessionID,
+		Mode:                  string(assignment.Mode),
+		DesiredState:          string(assignment.DesiredState),
+		// Carry fleet-db's derived liveness through unchanged. The lock-derived
+		// Status above never advances to "working" on the store-only serve path,
+		// so the UI reads live_status to flip a provably-working agent off "idle".
+		LiveStatus:     string(assignment.LiveStatus),
+		ActiveTaskID:   assignment.ActiveTaskID,
+		ActivePhase:    assignment.ActivePhase,
+		LastErrorClass: assignment.LastErrorClass,
+	}
 }
 
 func monitorRolesByName(ctx context.Context, st store.Store, wsKey string) map[string]*domain.Role {

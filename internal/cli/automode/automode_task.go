@@ -33,7 +33,7 @@ func createAutoSession(ctx *autoLoopCtx, prompt string) *sessions.Session {
 	return sess
 }
 
-func finalizeAutoSession(ctx *autoLoopCtx, sess *sessions.Session, beforeRef string, err error, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens int64, estimatedCostUSD float64) {
+func finalizeAutoSession(ctx *autoLoopCtx, sess *sessions.Session, beforeRef string, err error, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens int64) {
 	if sess == nil {
 		return
 	}
@@ -58,7 +58,6 @@ func finalizeAutoSession(ctx *autoLoopCtx, sess *sessions.Session, beforeRef str
 		OutputTokens:     outputTokens,
 		CacheReadTokens:  cacheReadTokens,
 		CacheWriteTokens: cacheWriteTokens,
-		EstimatedCostUSD: estimatedCostUSD,
 	})
 	backends.ClearActiveSessionEnv()
 	go sessions.NotifyWebUI(cmdstore.RootContext(), backends.ResolveWebUIURL(), taskID, sess.SessionID(), sess.Meta.Status, backends.ResolveNotifyToken())

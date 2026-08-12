@@ -66,3 +66,39 @@ func TestCodexThreadWithTurnsUnmarshalAndPlainText(t *testing.T) {
 		t.Fatalf("unknown PlainText() = %q, want empty", got)
 	}
 }
+
+func TestCodexTurnItemToolFieldsUnmarshal(t *testing.T) {
+	raw := []byte(`{
+		"type": "commandExecution",
+		"id": "cmd-1",
+		"command": "rg foo",
+		"cwd": "/tmp/repo",
+		"status": "completed",
+		"aggregatedOutput": "match",
+		"exitCode": 0
+	}`)
+	var item CodexTurnItem
+	if err := json.Unmarshal(raw, &item); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if item.Type != "commandExecution" || item.Command != "rg foo" || item.AggregatedOutput != "match" {
+		t.Fatalf("item = %+v", item)
+	}
+
+	mcpRaw := []byte(`{
+		"type": "mcpToolCall",
+		"id": "mcp-1",
+		"server": "github",
+		"tool": "get_pr",
+		"status": "completed",
+		"arguments": {"number": 7},
+		"result": {"title": "hi"}
+	}`)
+	var mcp CodexTurnItem
+	if err := json.Unmarshal(mcpRaw, &mcp); err != nil {
+		t.Fatalf("unmarshal mcp: %v", err)
+	}
+	if mcp.Server != "github" || mcp.Tool != "get_pr" || string(mcp.Arguments) == "" || string(mcp.Result) == "" {
+		t.Fatalf("mcp = %+v", mcp)
+	}
+}

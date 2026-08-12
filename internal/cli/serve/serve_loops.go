@@ -283,9 +283,18 @@ func triggerCronInterval() time.Duration {
 }
 
 // driverStaleTaskMaxAge reads the stale TaskRun heartbeat threshold in
-// seconds from LOOM_DRIVER_STALE_TASK_MAX_AGE (default 300s, capped at one
-// day).
+// seconds from LOOM_DRIVER_STALE_TASK_MAX_AGE (capped at one day). Unset
+// returns 0, which defers to the sweeper's own default
+// (driver.defaultStaleTaskRunMaxAge, 20 min — sized for sandbox
+// provision+clone+agent runs). Returning a non-zero serve-side default here
+// used to shadow that constant entirely: MaxAge > 0 always wins in
+// StaleTaskSweeper.maxAge(), so the old 300s value re-created exactly the
+// live-run sweep the 20-minute default was raised to prevent (a real daytona
+// run was observed killed at 11.3m).
 func driverStaleTaskMaxAge() time.Duration {
+	if strings.TrimSpace(os.Getenv(envLoomDriverStaleTaskMaxAge)) == "" {
+		return 0
+	}
 	return time.Duration(boundedIntEnv(envLoomDriverStaleTaskMaxAge, 300, 86400)) * time.Second
 }
 

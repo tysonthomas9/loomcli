@@ -175,7 +175,15 @@ func clearStaleLock(worktreePath string, pid int) {
 // RecoverWorktree provides a non-interactive recovery path for daemon use:
 // force-release locks, kill processes, reset orphaned tasks, clean files.
 // On clean exit (code 0) trusts agent's task status; on non-zero resets tasks.
-func RecoverWorktree(worktreePath, agentName string, exitCode int) error {
+//
+// incomplete marks the third case: the agent exited 0 but never released its
+// claim, so the turn ended before the task did (see ClaimStillHeld). Recovery
+// then behaves as it does for a crash where it matters — the task goes back on
+// the queue — but must NOT run the destructive cleanup, because the run's
+// uncommitted work is the thing the next attempt continues from. Callers that
+// have no exit to classify (pre-flight cold recovery) pass false: that path is
+// deliberately destructive.
+func RecoverWorktree(worktreePath, agentName string, exitCode int, incomplete bool) error {
 	deps := &cli.Deps{}
 	*deps = *cli.GetDeps(nil)
 	deps.IssueBackend = cli.DefaultIssueBackend()
@@ -208,15 +216,26 @@ func RecoverWorktree(worktreePath, agentName string, exitCode int) error {
 			// and other agents get spurious claim conflicts.
 			releaseFleetIssueLock(deps, agentName, lockInfo.TaskID)
 
-			if exitCode == 0 {
+			switch {
+			case exitCode != 0:
+				fmt.Printf("[recover] Agent %s exited with code %d, resetting task %s\n",
+					agentName, exitCode, lockInfo.TaskID)
+				resetTask(deps, lockInfo.TaskID)
+			case incomplete:
+				// Exited 0 but the claim was never released, so there is no
+				// agent-set status to trust here — the task is still sitting in
+				// in_progress with nobody working it. Put it back on the queue
+				// so another agent (or this one on its next cycle) can carry it
+				// forward. resetTask still no-ops on review/closed/blocked, so
+				// a status the agent DID set is never stomped.
+				fmt.Printf("[recover] Agent %s exited cleanly (code 0) without releasing its claim, returning task %s to the queue\n",
+					agentName, lockInfo.TaskID)
+				resetTask(deps, lockInfo.TaskID)
+			default:
 				// Clean exit: trust the agent updated task status correctly.
 				// Do NOT reset — the agent may have set status to review/closed.
 				fmt.Printf("[recover] Agent %s exited cleanly (code 0), trusting agent's task status for %s\n",
 					agentName, lockInfo.TaskID)
-			} else {
-				fmt.Printf("[recover] Agent %s exited with code %d, resetting task %s\n",
-					agentName, exitCode, lockInfo.TaskID)
-				resetTask(deps, lockInfo.TaskID)
 			}
 		}
 	}
@@ -228,8 +247,17 @@ func RecoverWorktree(worktreePath, agentName string, exitCode int) error {
 	}
 	resetOrphanedAgentTasks(deps, worktreePath, agentName, lockTaskID, false)
 
-	// 6. Clean untracked files (force=true, no prompting)
-	cleanUntrackedFiles(worktreePath, true)
+	// 6. Clean untracked files (force=true, no prompting).
+	//
+	// Skipped for an incomplete run. `git clean` here excludes only
+	// cli.ProtectedRuntimePaths, so everything the turn produced but had not
+	// committed yet — new files, scratch notes, generated fixtures — is exactly
+	// what it deletes. That is correct after a crash we are abandoning; it is
+	// destruction of live work when the agent simply ran out of turn and the
+	// next cycle is meant to continue from where it stopped.
+	if !incomplete {
+		cleanUntrackedFiles(worktreePath, true)
+	}
 
 	return nil
 }

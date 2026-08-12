@@ -42,12 +42,21 @@ function createSession(overrides: Partial<SessionRecord> = {}): SessionRecord {
   };
 }
 
+const emptySummary = {
+  count: 0,
+  totalTokens: 0,
+  totalCost: 0,
+  activeSessions: 0,
+  failedSessions: 0,
+};
+
 describe("SessionTimeline", () => {
   const defaultProps = {
     sessions: [] as SessionRecord[],
     selectedId: null as string | null,
     onSelect: vi.fn(),
     isLoading: false,
+    summary: emptySummary,
   };
 
   beforeEach(() => {
@@ -104,12 +113,67 @@ describe("SessionTimeline", () => {
           status: "failed",
           error_class: "AuthFailure",
           backend: "codex",
+          phase: "implementation",
         }),
       ];
-      render(<SessionTimeline {...defaultProps} sessions={sessions} />);
+      render(
+        <SessionTimeline
+          {...defaultProps}
+          sessions={sessions}
+          summary={{
+            ...emptySummary,
+            count: 1,
+            failedSessions: 1,
+          }}
+        />,
+      );
       expect(screen.getByText("Failed")).toBeInTheDocument();
       expect(screen.getByText("AuthFailure")).toBeInTheDocument();
-      expect(screen.getByText("codex")).toBeInTheDocument();
+      expect(screen.getByText("implementation")).toBeInTheDocument();
+    });
+
+    it("renders aggregate summary in the timeline header", () => {
+      const sessions = [createSession()];
+      render(
+        <SessionTimeline
+          {...defaultProps}
+          sessions={sessions}
+          summary={{
+            count: 3,
+            totalTokens: 739900,
+            totalCost: 1.98,
+            activeSessions: 0,
+            failedSessions: 1,
+          }}
+        />,
+      );
+      const header = screen.getByTestId("timeline-summary");
+      expect(header).toHaveTextContent("Runs");
+      expect(header).toHaveTextContent("3");
+      expect(header).toHaveTextContent("739.9K tok");
+      expect(header).toHaveTextContent("$1.98");
+      expect(header).toHaveTextContent("1 failed");
+    });
+
+    it("omits cost from the header when totalCost is zero", () => {
+      const sessions = [createSession({ estimated_cost_usd: 0 })];
+      render(
+        <SessionTimeline
+          {...defaultProps}
+          sessions={sessions}
+          summary={{
+            count: 1,
+            totalTokens: 8000,
+            totalCost: 0,
+            activeSessions: 0,
+            failedSessions: 0,
+          }}
+        />,
+      );
+      const header = screen.getByTestId("timeline-summary");
+      expect(header).toHaveTextContent("1");
+      expect(header).toHaveTextContent("8.0K tok");
+      expect(header).not.toHaveTextContent("$");
     });
   });
 

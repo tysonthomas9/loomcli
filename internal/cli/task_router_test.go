@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
+	"github.com/tysonthomas9/loomcli/internal/domain"
 )
 
 // --- MergeRoleConstraints tests ---
@@ -891,7 +892,49 @@ func TestBuildRouterTaskCheck_SourceReposOnlyConstraint(t *testing.T) {
 	}
 }
 
-// --- Label routing tests ---
+// --- input policy env reconstruction ---
+
+// The env→RoleConfig hop for the structured knob. Every "unset" shape has to
+// land on nil, which DispositionFor reads as deny-everything: an agent spawned
+// by a daemon that never set the variable, or one whose variable got mangled,
+// must auto-answer no harness prompt rather than every one of them.
+func TestRoleConfigFromEnv_InputPolicyFailsClosed(t *testing.T) {
+	for _, tt := range []struct{ name, value string }{
+		{name: "absent", value: ""},
+		{name: "malformed json", value: "{not json"},
+		{name: "not an object", value: `["allow"]`},
+		{name: "disposition outside the vocabulary", value: `{"kinds":{"trust_prompt":"yes"}}`},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("LOOM_ROLE_INPUT_POLICY", tt.value)
+			rc := RoleConfigFromEnv()
+			if rc.InputPolicy != nil {
+				t.Fatalf("InputPolicy = %+v, want nil", rc.InputPolicy)
+			}
+			if got := rc.InputPolicy.DispositionFor("trust_prompt"); got != domain.RoleInputDeny {
+				t.Fatalf("resolved to %q, want %q", got, domain.RoleInputDeny)
+			}
+		})
+	}
+}
+
+func TestRoleConfigFromEnv_InputPolicyDecoded(t *testing.T) {
+	t.Setenv("LOOM_ROLE_INPUT_POLICY", `{"default":"deny","kinds":{"trust_prompt":"allow"}}`)
+	rc := RoleConfigFromEnv()
+	if rc.InputPolicy == nil {
+		t.Fatal("InputPolicy = nil, want the decoded policy")
+	}
+	if got := rc.InputPolicy.DispositionFor("trust_prompt"); got != domain.RoleInputAllow {
+		t.Errorf("DispositionFor(trust_prompt) = %q, want allow", got)
+	}
+	if got := rc.InputPolicy.DispositionFor("confirm"); got != domain.RoleInputDeny {
+		t.Errorf("DispositionFor(confirm) = %q, want deny", got)
+	}
+	// ...and it survives the merge into RoleConstraints.
+	if got := MergeRoleConstraints(rc, AgentEntry{}).InputPolicy.DispositionFor("trust_prompt"); got != domain.RoleInputAllow {
+		t.Errorf("after MergeRoleConstraints DispositionFor(trust_prompt) = %q, want allow", got)
+	}
+}
 
 func TestMatchTask_RequiredLabelPresent(t *testing.T) {
 	issue := backend.IssueData{
@@ -1157,8 +1200,6 @@ func TestBuildRouterTaskCheck_ExcludeLabelsOnlyConstraint(t *testing.T) {
 	}
 }
 
-// --- HasRoutingConstraints tests ---
-
 func TestHasRoutingConstraints_Skills(t *testing.T) {
 	c := RoleConstraints{Skills: []string{"go"}}
 	if !c.HasRoutingConstraints("") {
@@ -1213,5 +1254,61 @@ func TestHasRoutingConstraints_AllEmpty(t *testing.T) {
 	c := RoleConstraints{}
 	if c.HasRoutingConstraints("") {
 		t.Error("HasRoutingConstraints() = true, want false when nothing is set")
+	}
+}
+
+// A label-gated pipeline is the whole point of label constraints: stage 1
+// claims issues that carry its input label and not yet its output label, stamps
+// the output label, and stage 2 claims what stage 1 produced. Every other label
+// test stops at MatchTask; this one drives SelectBestTask, which is the
+// function the supervisor's claim preflight actually calls, over a mixed queue.
+//
+// It pins both halves of the story: exactly the eligible issue is selected out
+// of a queue whose other entries are only distinguishable by label, and once
+// the stage has drained its input the same role gets nil instead of re-claiming
+// its own output -- the termination property the re-claim loop lacked.
+func TestSelectBestTask_LabelRoutedPipeline(t *testing.T) {
+	reviewer := RoleConstraints{
+		TaskFilter:    "has_design",
+		Labels:        []string{"plan-ready"},
+		ExcludeLabels: []string{"plan-reviewed"},
+	}
+
+	queue := []backend.IssueData{
+		// The reviewer's own output: must not come back around.
+		{ID: "T-1", Status: "open", IssueType: "task", Priority: 0, Design: "plan",
+			Labels: []string{"plan-ready", "plan-reviewed"}},
+		// Never entered the pipeline: missing the required stage label.
+		{ID: "T-2", Status: "open", IssueType: "task", Priority: 0, Design: "plan",
+			Labels: []string{"backlog"}},
+		// The one piece of work for this stage. Worst priority of the three, so
+		// it can only be selected by being the sole surviving candidate.
+		{ID: "T-3", Status: "open", IssueType: "task", Priority: 3, Design: "plan",
+			Labels: []string{"plan-ready"}},
+	}
+
+	got := SelectBestTask(queue, reviewer)
+	if got == nil {
+		t.Fatal("SelectBestTask() = nil, want the one eligible issue")
+	}
+	if got.Issue.ID != "T-3" {
+		t.Fatalf("selected %q, want %q -- the label gate did not survive selection", got.Issue.ID, "T-3")
+	}
+
+	// The downstream stage consumes exactly what this one stamped.
+	downstream := RoleConstraints{TaskFilter: "has_design", Labels: []string{"plan-reviewed"}}
+	next := SelectBestTask(queue, downstream)
+	if next == nil {
+		t.Fatal("downstream stage selected nothing, want T-1")
+	}
+	if next.Issue.ID != "T-1" {
+		t.Fatalf("downstream stage selected %q, want %q", next.Issue.ID, "T-1")
+	}
+
+	// Stage 1 after stamping T-3: its input is drained, so it must idle rather
+	// than loop on its own output.
+	queue[2].Labels = append(queue[2].Labels, "plan-reviewed")
+	if drained := SelectBestTask(queue, reviewer); drained != nil {
+		t.Fatalf("SelectBestTask() = %q, want nil once the stage drained its input", drained.Issue.ID)
 	}
 }

@@ -1,3 +1,4 @@
+import type React from "react";
 import { useCallback } from "react";
 
 import {
@@ -29,6 +30,10 @@ export interface SortableAgentListProps {
   selectedAgentName?: string | null | undefined;
   agentTasks?: Record<string, { title: string }> | undefined;
   listClassName?: string | undefined;
+  onArchive?: ((agentName: string) => void) | undefined;
+  onAgentContextMenu?:
+    | ((event: React.MouseEvent, agentName: string) => void)
+    | undefined;
 }
 
 export function SortableAgentList({
@@ -39,6 +44,8 @@ export function SortableAgentList({
   selectedAgentName = null,
   agentTasks,
   listClassName,
+  onArchive,
+  onAgentContextMenu,
 }: SortableAgentListProps): JSX.Element | null {
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
@@ -88,6 +95,8 @@ export function SortableAgentList({
                 selectedAgentName != null &&
                 agent.name.toLowerCase() === selectedAgentName.toLowerCase()
               }
+              onArchive={onArchive}
+              onContextMenu={onAgentContextMenu}
             />
           ))}
         </div>

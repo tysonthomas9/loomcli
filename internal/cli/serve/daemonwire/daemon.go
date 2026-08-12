@@ -51,6 +51,60 @@ func BuildAgentControlFn() agentcontrol.AgentControlFn {
 	}
 }
 
+// BuildAgentInputFn returns a callback that reads and answers pending
+// interactive prompts over the daemon control socket. Same resolution and
+// failure contract as BuildAgentControlFn.
+func BuildAgentInputFn() agentcontrol.AgentInputFn {
+	projectDir, err := os.Getwd()
+	if err != nil {
+		return nil
+	}
+	return func(op, agentName string, args json.RawMessage) (*agentcontrol.AgentControlResult, error) {
+		socketPath := resolveControlSocketPath(projectDir)
+		return sendControlRequestArgs(socketPath, op, agentName, args, 10*time.Second)
+	}
+}
+
+// sendControlRequestArgs is sendControlRequest for operations that carry an
+// operation-specific args body instead of the force flag.
+func sendControlRequestArgs(socketPath, op, agentName string, args json.RawMessage, readDeadline time.Duration) (*agentcontrol.AgentControlResult, error) {
+	conn, err := net.DialTimeout("unix", socketPath, 5*time.Second)
+	if err != nil {
+		return nil, fmt.Errorf("daemon is not running (no control socket at %s)", socketPath)
+	}
+	defer func() { _ = conn.Close() }()
+
+	reqData, err := json.Marshal(struct {
+		Operation string          `json:"operation"`
+		AgentName string          `json:"agent_name,omitempty"`
+		Args      json.RawMessage `json:"args,omitempty"`
+	}{Operation: op, AgentName: agentName, Args: args})
+	if err != nil {
+		return nil, fmt.Errorf("marshal request: %w", err)
+	}
+	reqData = append(reqData, '\n')
+
+	_ = conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
+	if _, err := conn.Write(reqData); err != nil {
+		return nil, fmt.Errorf("send request: %w", err)
+	}
+
+	_ = conn.SetReadDeadline(time.Now().Add(readDeadline))
+	scanner := bufio.NewScanner(conn)
+	if !scanner.Scan() {
+		if scanErr := scanner.Err(); scanErr != nil {
+			return nil, fmt.Errorf("read response: %w", scanErr)
+		}
+		return nil, fmt.Errorf("empty response from daemon")
+	}
+
+	var result agentcontrol.AgentControlResult
+	if err := json.Unmarshal(scanner.Bytes(), &result); err != nil {
+		return nil, fmt.Errorf("unmarshal response: %w", err)
+	}
+	return &result, nil
+}
+
 // resolveControlSocketPath returns the daemon control socket path for the
 // given project directory. Re-resolves on each call because the daemon may
 // restart with a different config.
@@ -266,6 +320,7 @@ func roleConfigFromDomain(r *domain.Role) config.RoleConfig {
 		Effort:         r.Effort,
 		PathPatterns:   append([]string(nil), r.PathPatterns...),
 		Skills:         append([]string(nil), r.Skills...),
+		InputPolicy:    r.InputPolicy.Clone(),
 		Labels:         append([]string(nil), r.Labels...),
 		ExcludeLabels:  append([]string(nil), r.ExcludeLabels...),
 		MaxPriority:    cloneIntPtr(r.MaxPriority),
@@ -274,6 +329,7 @@ func roleConfigFromDomain(r *domain.Role) config.RoleConfig {
 		AllowedTools:   append([]string(nil), r.AllowedTools...),
 		DeniedTools:    append([]string(nil), r.DeniedTools...),
 		MaxBudgetUSD:   cloneFloatPtr(r.MaxBudgetUSD),
+		MaxRunDuration: cloneIntPtr(r.MaxRunDuration),
 	}
 }
 
@@ -292,6 +348,7 @@ func agentEntryFromDomain(a *domain.Agent) config.AgentEntry {
 		CrossRepo:        a.CrossRepo,
 		Parent:           a.Parent,
 		DesiredState:     a.DesiredState,
+		Hooks:            a.Hooks.Clone(),
 	}
 }
 

@@ -71,8 +71,10 @@ func TestClaudeBackend_InspectCapabilities(t *testing.T) {
 	if !caps.HasSessions {
 		t.Error("expected HasSessions=true")
 	}
-	if caps.HasToolControl {
-		t.Error("expected HasToolControl=false")
+	if !caps.HasToolControl {
+		// claude enforces --allowedTools/--disallowedTools; the capability now
+		// reports the real per-backend table, not a never-implemented interface.
+		t.Error("expected HasToolControl=true")
 	}
 	if caps.HasConfig {
 		t.Error("expected HasConfig=false")
