@@ -5,8 +5,14 @@ import (
 	"log/slog"
 
 	"github.com/tysonthomas9/loomcli/internal/backend/fleet"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 	"github.com/tysonthomas9/loomcli/internal/webui/coordinator"
 )
+
+type workspaceWorkItemsResource struct {
+	*workitems.Service
+	workitems.MutationStream
+}
 
 // FleetBackendHook implements coordinator.LifecycleHook for per-workspace fleet
 // backend lifecycle. On workspace registration, it creates a FleetBackend scoped
@@ -60,8 +66,14 @@ func (h *FleetBackendHook) OnRegister(ctx *coordinator.RegistrationContext) erro
 	if err != nil {
 		return fmt.Errorf("create fleet backend for %q: %w", id, err)
 	}
+	api, err := workitems.New(fb)
+	if err != nil {
+		return fmt.Errorf("compose Work Items for %q: %w", id, err)
+	}
 
-	ctx.Provide(coordinator.ResourceKeyFleetBackend, fb)
+	ctx.Provide(coordinator.ResourceKeyFleetBackend, workspaceWorkItemsResource{
+		Service: api, MutationStream: fb,
+	})
 	h.logger.Info("created fleet backend for workspace", "workspace", id)
 	return nil
 }

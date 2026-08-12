@@ -7,16 +7,16 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tysonthomas9/loomcli/internal/backend"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 )
 
 var hexKeyRe = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
 // runCreate executes `loom data create` against the stub and returns the
 // recorded CreateParams.
-func runCreate(t *testing.T, stub *localBackendStub, args ...string) backend.CreateParams {
+func runCreate(t *testing.T, stub *localBackendStub, args ...string) workitems.CreateCommand {
 	t.Helper()
-	var params backend.CreateParams
+	var params workitems.CreateCommand
 	withLocalBackend(t, stub, func() {
 		outputFormat = "text"
 		cmd := newCreateCmd()
@@ -27,15 +27,15 @@ func runCreate(t *testing.T, stub *localBackendStub, args ...string) backend.Cre
 		if len(stub.calls) == 0 || stub.calls[len(stub.calls)-1].method != "Create" {
 			t.Fatalf("calls = %#v, want Create", stub.calls)
 		}
-		params = stub.calls[len(stub.calls)-1].args.(backend.CreateParams)
+		params = stub.calls[len(stub.calls)-1].args.(workitems.CreateCommand)
 	})
 	return params
 }
 
 func TestCreateCommand_DefaultIdempotencyKey(t *testing.T) {
 	args := []string{"--title", "dup me", "--type", "bug", "--description", "same"}
-	p1 := runCreate(t, &localBackendStub{createItem: &backend.IssueData{ID: "x-1"}}, args...)
-	p2 := runCreate(t, &localBackendStub{createItem: &backend.IssueData{ID: "x-2"}}, args...)
+	p1 := runCreate(t, &localBackendStub{createItem: &workitems.IssueSummary{ID: "x-1"}}, args...)
+	p2 := runCreate(t, &localBackendStub{createItem: &workitems.IssueSummary{ID: "x-2"}}, args...)
 
 	if !hexKeyRe.MatchString(p1.IdempotencyKey) {
 		t.Fatalf("default key = %q, want 64-char hex", p1.IdempotencyKey)
@@ -45,7 +45,7 @@ func TestCreateCommand_DefaultIdempotencyKey(t *testing.T) {
 	}
 
 	// A different persisted field must change the key…
-	p3 := runCreate(t, &localBackendStub{createItem: &backend.IssueData{ID: "x-3"}},
+	p3 := runCreate(t, &localBackendStub{createItem: &workitems.IssueSummary{ID: "x-3"}},
 		"--title", "dup me", "--type", "bug", "--description", "DIFFERENT")
 	if p3.IdempotencyKey == p1.IdempotencyKey {
 		t.Error("different description must produce a different key")
@@ -53,7 +53,7 @@ func TestCreateCommand_DefaultIdempotencyKey(t *testing.T) {
 
 	// external_ref is persisted in the fleet create body, so it MUST change
 	// the key — it distinguishes the created issue.
-	pExtRef := runCreate(t, &localBackendStub{createItem: &backend.IssueData{ID: "x-4"}},
+	pExtRef := runCreate(t, &localBackendStub{createItem: &workitems.IssueSummary{ID: "x-4"}},
 		append(args, "--external-ref", "gh-42")...)
 	if pExtRef.IdempotencyKey == p1.IdempotencyKey {
 		t.Error("persisted external_ref must differentiate the idempotency key")
@@ -61,7 +61,7 @@ func TestCreateCommand_DefaultIdempotencyKey(t *testing.T) {
 
 	// …but fields fleet-db drops from the create body (e.g. estimated-minutes)
 	// must NOT — they persist identically, so they must dedup identically.
-	pDropped := runCreate(t, &localBackendStub{createItem: &backend.IssueData{ID: "x-5"}},
+	pDropped := runCreate(t, &localBackendStub{createItem: &workitems.IssueSummary{ID: "x-5"}},
 		append(args, "--estimated-minutes", "45")...)
 	if pDropped.IdempotencyKey != p1.IdempotencyKey {
 		t.Error("fleet-db-dropped fields must not differentiate the idempotency key")
@@ -71,17 +71,17 @@ func TestCreateCommand_DefaultIdempotencyKey(t *testing.T) {
 func TestCreateCommand_IdempotencyFlags(t *testing.T) {
 	base := []string{"--title", "t"}
 
-	if p := runCreate(t, &localBackendStub{createItem: &backend.IssueData{ID: "x"}},
+	if p := runCreate(t, &localBackendStub{createItem: &workitems.IssueSummary{ID: "x"}},
 		append(base, "--no-idempotency")...); p.IdempotencyKey != "" {
 		t.Errorf("--no-idempotency must clear the key, got %q", p.IdempotencyKey)
 	}
 
-	if p := runCreate(t, &localBackendStub{createItem: &backend.IssueData{ID: "x"}},
+	if p := runCreate(t, &localBackendStub{createItem: &workitems.IssueSummary{ID: "x"}},
 		append(base, "--idempotency-key", "my-key")...); p.IdempotencyKey != "my-key" {
 		t.Errorf("--idempotency-key override = %q, want my-key", p.IdempotencyKey)
 	}
 
-	p := runCreate(t, &localBackendStub{createItem: &backend.IssueData{ID: "x"}},
+	p := runCreate(t, &localBackendStub{createItem: &workitems.IssueSummary{ID: "x"}},
 		append(base, "--force")...)
 	if !p.Force {
 		t.Error("--force must set CreateParams.Force")
@@ -92,7 +92,7 @@ func TestCreateCommand_IdempotencyFlags(t *testing.T) {
 }
 
 func TestCreateCommand_JSONStreamSplit(t *testing.T) {
-	stub := &localBackendStub{createItem: &backend.IssueData{ID: "loom-7", Title: "t"}}
+	stub := &localBackendStub{createItem: &workitems.IssueSummary{ID: "loom-7", Title: "t"}}
 	withLocalBackend(t, stub, func() {
 		outputFormat = "json"
 		cmd := newCreateCmd()
@@ -143,7 +143,7 @@ func runClose(t *testing.T, stub *localBackendStub, id string) (string, error) {
 }
 
 func TestCloseCommand_AlreadyClosedIsSuccess(t *testing.T) {
-	stub := &localBackendStub{closeErr: backend.ErrConflict("Close", "issue is already closed")}
+	stub := &localBackendStub{closeErr: workitems.AdapterConflict("Close", "issue is already closed")}
 	out, err := runClose(t, stub, "loom-9")
 	if err != nil {
 		t.Fatalf("double-close must exit 0, got %v", err)
@@ -154,7 +154,7 @@ func TestCloseCommand_AlreadyClosedIsSuccess(t *testing.T) {
 }
 
 func TestCloseCommand_BlockerConflictStillFails(t *testing.T) {
-	stub := &localBackendStub{closeErr: backend.ErrConflict("Close", "issue has open blockers")}
+	stub := &localBackendStub{closeErr: workitems.AdapterConflict("Close", "issue has open blockers")}
 	if _, err := runClose(t, stub, "loom-9"); err == nil {
 		t.Fatal("blocker conflicts must keep failing")
 	}
@@ -165,11 +165,11 @@ func TestIsAlreadyClosedConflict(t *testing.T) {
 		err  error
 		want bool
 	}{
-		{backend.ErrConflict("Close", "issue is already closed"), true},
-		{backend.ErrConflict("Close", "issue is closed"), true},
-		{backend.ErrConflict("Close", "issue has open blockers"), false},
-		{backend.ErrConflict("Close", "blocked by dependency"), false},
-		{backend.ErrNotFound("Close", "issue is already closed"), false}, // wrong kind
+		{workitems.AdapterConflict("Close", "issue is already closed"), true},
+		{workitems.AdapterConflict("Close", "issue is closed"), true},
+		{workitems.AdapterConflict("Close", "issue has open blockers"), false},
+		{workitems.AdapterConflict("Close", "blocked by dependency"), false},
+		{workitems.AdapterNotFound("Close", "issue is already closed"), false}, // wrong kind
 		{nil, false},
 	}
 	for _, tc := range cases {

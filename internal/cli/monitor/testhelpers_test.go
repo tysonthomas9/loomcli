@@ -14,6 +14,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/cli/testdata/clitest"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -27,20 +28,28 @@ func commandWithContext(t *testing.T) *cobra.Command {
 type CommandResult = cli.CommandResult
 type LockInfo = cli.LockInfo
 type MockExecRunner = clitest.MockExecRunner
-type MockIssueBackend = clitest.MockIssueBackend
+type MockWorkItems = clitest.MockWorkItems
 type MockGitRunner = clitest.MockGitRunner
 type MockFileSystem = clitest.MockFileSystem
 type ExecBridgeGitRunner = clitest.ExecBridgeGitRunner
 
 var ResetWorkspaceRuntimeDirCache = cli.ResetWorkspaceRuntimeDirCache
-var resetDefaultIssueBackend = cli.ResetDefaultIssueBackend
-var setDefaultIssueBackend = cli.SetDefaultIssueBackend
+var resetDefaultWorkItems = cli.ResetDefaultWorkItems
+var setDefaultWorkItems = cli.SetDefaultWorkItems
 
-func NewTestDeps(t *testing.T) (*cli.Deps, *clitest.MockGitRunner, *clitest.MockExecRunner, *clitest.MockFileSystem, *clitest.MockIssueBackend) {
+func NewTestDeps(t *testing.T) (*cli.Deps, *clitest.MockGitRunner, *clitest.MockExecRunner, *clitest.MockFileSystem, *clitest.MockWorkItems) {
 	return clitest.NewTestDeps(t)
 }
 
-func NewMockIssueBackend() *clitest.MockIssueBackend { return clitest.NewMockIssueBackend() }
+func NewMockWorkItems() *clitest.MockWorkItems { return clitest.NewMockWorkItems() }
+
+func listResultFromSummaries(summaries []workitems.IssueSummary) *workitems.ListResult {
+	items := make([]workitems.ListItem, len(summaries))
+	for index := range summaries {
+		items[index] = workitems.ListItem{IssueSummary: summaries[index]}
+	}
+	return &workitems.ListResult{Issues: items}
+}
 
 func installExecMock(t *testing.T, m *clitest.MockExecRunner) {
 	t.Helper()

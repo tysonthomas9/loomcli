@@ -6,21 +6,20 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 )
 
 // --- Unsupported filter validation ---
 
 // checkFleetUnsupportedFilters returns an error wrapping
-// backend.ErrFilterNotSupported if any ListOpts fields are set that the
+// workitems.ErrFilterNotSupported if any list fields are set that the
 // fleet-db server cannot evaluate server-side. This prevents returning
 // unfiltered results when the caller expects filters to be applied.
 //
 // Fleet-db supported fields: Status, IssueType, Assignee, Labels,
 // SourceRepos, ParentID, UpdatedAfter, UpdatedBefore, Limit.
 // All others are unsupported (tracked in fleet-qx9c).
-func checkFleetUnsupportedFilters(opts backend.ListOpts) error {
+func checkFleetUnsupportedFilters(opts workitems.ListFilter) error {
 	var unsupported []string
 	checkUnsupportedCore(&unsupported, opts)
 	checkUnsupportedSearch(&unsupported, opts)
@@ -28,35 +27,26 @@ func checkFleetUnsupportedFilters(opts backend.ListOpts) error {
 	checkUnsupportedAdvanced(&unsupported, opts)
 	if len(unsupported) > 0 {
 		return fmt.Errorf("fleet-db: unsupported filters [%s]: %w",
-			strings.Join(unsupported, ", "), backend.ErrFilterNotSupported)
+			strings.Join(unsupported, ", "), workitems.ErrFilterNotSupported)
 	}
 	return nil
 }
 
-func checkUnsupportedCore(out *[]string, opts backend.ListOpts) {
+func checkUnsupportedCore(out *[]string, opts workitems.ListFilter) {
 	if opts.Priority != nil {
 		*out = append(*out, "Priority")
 	}
 	if len(opts.LabelsAny) > 0 {
 		*out = append(*out, "LabelsAny")
 	}
-	if len(opts.IDs) > 0 {
-		*out = append(*out, "IDs")
-	}
 	// ExternalRef is not yet applied server-side (the reverse PR->card list
 	// filter is deferred); fail loud rather than silently returning all issues.
 	if opts.ExternalRef != "" {
 		*out = append(*out, "ExternalRef")
 	}
-	if opts.PriorityMin != nil {
-		*out = append(*out, "PriorityMin")
-	}
-	if opts.PriorityMax != nil {
-		*out = append(*out, "PriorityMax")
-	}
 }
 
-func checkUnsupportedSearch(out *[]string, opts backend.ListOpts) {
+func checkUnsupportedSearch(out *[]string, opts workitems.ListFilter) {
 	if opts.Query != "" {
 		*out = append(*out, "Query")
 	}
@@ -71,34 +61,16 @@ func checkUnsupportedSearch(out *[]string, opts backend.ListOpts) {
 	}
 }
 
-func checkUnsupportedDates(out *[]string, opts backend.ListOpts) {
+func checkUnsupportedDates(out *[]string, opts workitems.ListFilter) {
 	if opts.CreatedAfter != "" {
 		*out = append(*out, "CreatedAfter")
 	}
 	if opts.CreatedBefore != "" {
 		*out = append(*out, "CreatedBefore")
 	}
-	if opts.ClosedAfter != "" {
-		*out = append(*out, "ClosedAfter")
-	}
-	if opts.ClosedBefore != "" {
-		*out = append(*out, "ClosedBefore")
-	}
-	if opts.DeferAfter != "" {
-		*out = append(*out, "DeferAfter")
-	}
-	if opts.DeferBefore != "" {
-		*out = append(*out, "DeferBefore")
-	}
-	if opts.DueAfter != "" {
-		*out = append(*out, "DueAfter")
-	}
-	if opts.DueBefore != "" {
-		*out = append(*out, "DueBefore")
-	}
 }
 
-func checkUnsupportedAdvanced(out *[]string, opts backend.ListOpts) {
+func checkUnsupportedAdvanced(out *[]string, opts workitems.ListFilter) {
 	if opts.EmptyDescription {
 		*out = append(*out, "EmptyDescription")
 	}
@@ -111,35 +83,11 @@ func checkUnsupportedAdvanced(out *[]string, opts backend.ListOpts) {
 	if opts.Pinned != nil {
 		*out = append(*out, "Pinned")
 	}
-	if opts.IncludeTemplates {
-		*out = append(*out, "IncludeTemplates")
-	}
-	if opts.Ephemeral != nil {
-		*out = append(*out, "Ephemeral")
-	}
-	if opts.MolType != "" {
-		*out = append(*out, "MolType")
-	}
-	if len(opts.ExcludeStatus) > 0 {
-		*out = append(*out, "ExcludeStatus")
-	}
-	if len(opts.ExcludeTypes) > 0 {
-		*out = append(*out, "ExcludeTypes")
-	}
-	if opts.Deferred {
-		*out = append(*out, "Deferred")
-	}
-	if opts.Overdue {
-		*out = append(*out, "Overdue")
-	}
-	if opts.AllowStale {
-		*out = append(*out, "AllowStale")
-	}
 }
 
 // --- Query parameter builders ---
 
-func listOptsToQuery(opts backend.ListOpts) string {
+func listFilterToQuery(opts workitems.ListFilter) string {
 	q := url.Values{}
 	addListCoreFilters(q, opts)
 	addListSearchFilters(q, opts)
@@ -148,7 +96,7 @@ func listOptsToQuery(opts backend.ListOpts) string {
 	return q.Encode()
 }
 
-func listServerOpts(opts backend.ListOpts) backend.ListOpts {
+func listServerOpts(opts workitems.ListFilter) workitems.ListFilter {
 	server := opts
 	if len(opts.Labels) > 1 {
 		server.Labels = nil
@@ -162,11 +110,11 @@ func listServerOpts(opts backend.ListOpts) backend.ListOpts {
 	return server
 }
 
-func needsListClientFilter(opts backend.ListOpts) bool {
+func needsListClientFilter(opts workitems.ListFilter) bool {
 	return len(opts.Labels) > 1 || len(opts.SourceRepos) > 1
 }
 
-func addListCoreFilters(q url.Values, opts backend.ListOpts) {
+func addListCoreFilters(q url.Values, opts workitems.ListFilter) {
 	setNonEmpty(q, "status", opts.Status)
 	setOptInt(q, "priority", opts.Priority)
 	// fleet-db's listIssues endpoint expects "type", not "issue_type"
@@ -182,47 +130,30 @@ func addListCoreFilters(q url.Values, opts backend.ListOpts) {
 	if opts.Limit > 0 {
 		q.Set("limit", strconv.Itoa(opts.Limit))
 	}
-	addAll(q, "ids", opts.IDs)
 }
 
-func addListSearchFilters(q url.Values, opts backend.ListOpts) {
+func addListSearchFilters(q url.Values, opts workitems.ListFilter) {
 	setNonEmpty(q, "query", opts.Query)
 	setNonEmpty(q, "title_contains", opts.TitleContains)
 	setNonEmpty(q, "description_contains", opts.DescriptionContains)
 	setNonEmpty(q, "notes_contains", opts.NotesContains)
 }
 
-func addListDateFilters(q url.Values, opts backend.ListOpts) {
+func addListDateFilters(q url.Values, opts workitems.ListFilter) {
 	setNonEmpty(q, "created_after", opts.CreatedAfter)
 	setNonEmpty(q, "created_before", opts.CreatedBefore)
 	setNonEmpty(q, "updated_after", opts.UpdatedAfter)
 	setNonEmpty(q, "updated_before", opts.UpdatedBefore)
-	setNonEmpty(q, "closed_after", opts.ClosedAfter)
-	setNonEmpty(q, "closed_before", opts.ClosedBefore)
-	setNonEmpty(q, "defer_after", opts.DeferAfter)
-	setNonEmpty(q, "defer_before", opts.DeferBefore)
-	setNonEmpty(q, "due_after", opts.DueAfter)
-	setNonEmpty(q, "due_before", opts.DueBefore)
 }
 
-func addListAdvancedFilters(q url.Values, opts backend.ListOpts) {
+func addListAdvancedFilters(q url.Values, opts workitems.ListFilter) {
 	setBoolIfTrue(q, "empty_description", opts.EmptyDescription)
 	setBoolIfTrue(q, "no_assignee", opts.NoAssignee)
 	setBoolIfTrue(q, "no_labels", opts.NoLabels)
-	setOptInt(q, "priority_min", opts.PriorityMin)
-	setOptInt(q, "priority_max", opts.PriorityMax)
 	setOptBool(q, "pinned", opts.Pinned)
-	setOptBool(q, "ephemeral", opts.Ephemeral)
-	setBoolIfTrue(q, "include_templates", opts.IncludeTemplates)
-	setNonEmpty(q, "mol_type", opts.MolType)
-	addAll(q, "exclude_status", opts.ExcludeStatus)
-	addAll(q, "exclude_types", opts.ExcludeTypes)
-	setBoolIfTrue(q, "deferred", opts.Deferred)
-	setBoolIfTrue(q, "overdue", opts.Overdue)
 	if len(opts.SourceRepos) > 0 {
 		q.Set("repo", opts.SourceRepos[0])
 	}
-	setBoolIfTrue(q, "allow_stale", opts.AllowStale)
 }
 
 func readyQueryToQuery(opts workitems.AvailabilityQuery) string {
@@ -279,7 +210,7 @@ func blockedServerQuery(opts workitems.AvailabilityQuery) workitems.Availability
 	return server
 }
 
-// updateParamsToPatchRequest converts backend.UpdateParams to the PATCH request
+// patchCommandToRequest converts the owner command to FleetDB's PATCH request
 // format expected by the fleet server (UpdateIssueRequest shape).
 //
 // fleet-db uses strict JSON validation (disallowUnknownFields); fields not
@@ -288,7 +219,7 @@ func blockedServerQuery(opts workitems.AvailabilityQuery) workitems.Availability
 // (status / claim / labels go through dedicated endpoints), so we drop
 // loom-only fields here. If the caller relies on a dropped field landing,
 // the corresponding dedicated endpoint should be called instead.
-func updateParamsToPatchRequest(params backend.UpdateParams) map[string]interface{} {
+func patchCommandToRequest(params workitems.PatchCommand) map[string]interface{} {
 	req := make(map[string]interface{})
 	setStrField(req, "title", params.Title)
 	setStrField(req, "description", params.Description)
@@ -297,7 +228,7 @@ func updateParamsToPatchRequest(params backend.UpdateParams) map[string]interfac
 	setStrField(req, "design_format", params.DesignFormat)
 	setStrField(req, "notes", params.Notes)
 	setStrField(req, "owner", params.Owner)
-	// Field rename: loom's IssueBackend uses "issue_type"; fleet-db's
+	// Field rename: Work Items uses "issue_type"; fleet-db's
 	// UpdateIssueRequest names the same field "type".
 	setStrField(req, "type", params.IssueType)
 	setStrField(req, "due_at", params.DueAt)
@@ -305,18 +236,13 @@ func updateParamsToPatchRequest(params backend.UpdateParams) map[string]interfac
 	return req
 }
 
-// createParamsToBody converts backend.CreateParams to the POST /issues body
-// shape fleet-db's CreateIssueRequest expects. The projection itself lives on
-// backend.CreateParams (FleetCreateBody) because the CLI hashes the identical
-// bytes into the default X-Idempotency-Key -- cli/data may not import this
-// package (depguard data-isolation), so the shared source of truth sits in
-// the backend package.
+// createCommandToBody converts the owner command to FleetDB's canonical body.
 //
 // Dependencies are intentionally absent here too: they are not part of the
 // create body. Create composes them after the issue exists via the dedicated
 // POST /issues/{id}/deps endpoint (see addCreateDependencies).
-func createParamsToBody(params backend.CreateParams) map[string]interface{} {
-	return params.FleetCreateBody()
+func createCommandToBody(command workitems.CreateCommand) map[string]interface{} {
+	return command.DurableCreateFields()
 }
 
 // --- Helpers ---

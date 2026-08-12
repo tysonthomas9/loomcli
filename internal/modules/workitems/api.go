@@ -1,6 +1,9 @@
 package workitems
 
-import "context"
+import (
+	"context"
+	"time"
+)
 
 // API is the Work Items-owned lifecycle, comment, event, and dependency
 // surface. Commands use aggregate-specific inputs; callers never receive a
@@ -83,6 +86,17 @@ type CommentCommands interface {
 type DependencyCommands interface {
 	AddDependency(context.Context, AddDependencyCommand) error
 	RemoveDependency(context.Context, RemoveDependencyCommand) error
+}
+
+// ClaimLeaseCommands is the operational claim-fencing port used by workers
+// and supervisors. It is separate from the lifecycle API because actor-scoped
+// lease renewal and lock-only release are not user-level Work Item commands.
+type ClaimLeaseCommands interface {
+	ClaimAsActor(context.Context, string, time.Duration, string) error
+	RenewClaimAsActor(context.Context, string, time.Duration, string) error
+	ReleaseIssueLock(context.Context, string, string) error
+	ReleaseIssueAsActor(context.Context, string, string) error
+	ReleaseClaim(context.Context, string, string) error
 }
 
 type ListQuery struct {

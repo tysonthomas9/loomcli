@@ -10,7 +10,6 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 
-	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 )
 
@@ -55,7 +54,7 @@ var updateCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		ib, err := getIssueBackend(ctx)
+		itemsAPI, err := getWorkItems(ctx)
 		if err != nil {
 			return err
 		}
@@ -65,14 +64,15 @@ var updateCmd = &cobra.Command{
 		// validation error surfaces.
 		depsChanged := len(updateAddDeps) > 0 || len(updateRemoveDeps) > 0
 		if fieldsChanged || !depsChanged {
-			if err := enforceBlockReason(ctx, ib, args[0], params); err != nil {
+			params.IssueID = args[0]
+			if err := enforceBlockReason(ctx, itemsAPI, params); err != nil {
 				return err
 			}
-			if err := ib.Update(ctx, args[0], params); err != nil {
+			if _, err := itemsAPI.Patch(ctx, params); err != nil {
 				return err
 			}
 		}
-		if err := applyDependencyFlags(ctx, ib, args[0]); err != nil {
+		if err := applyDependencyFlags(ctx, itemsAPI, args[0]); err != nil {
 			return err
 		}
 		return printMessageResult(os.Stdout, "updated "+args[0], outputFormat)
@@ -114,16 +114,16 @@ func taskRunDesignUpdateFromFlags(cmd *cobra.Command) (string, *string, error) {
 // updateParamsFromFlags builds UpdateParams from the changed field flags. The
 // boolean reports whether any field-level flag was set; dependency flags are
 // handled separately (see applyDependencyFlags).
-func updateParamsFromFlags(cmd *cobra.Command) (backend.UpdateParams, bool, error) {
+func updateParamsFromFlags(cmd *cobra.Command) (workitems.PatchCommand, bool, error) {
 	descFromFlag := cmd.Flags().Changed("description")
 	descFromFile := cmd.Flags().Changed("description-from-file")
 	if descFromFlag && descFromFile {
-		return backend.UpdateParams{}, false, fmt.Errorf("--description and --description-from-file are mutually exclusive")
+		return workitems.PatchCommand{}, false, fmt.Errorf("--description and --description-from-file are mutually exclusive")
 	}
-	params := backend.UpdateParams{}
+	params := workitems.PatchCommand{}
 	changed := applyDirectUpdateFlags(cmd, &params)
 	if applied, err := applyDesignFormatFlag(cmd, &params); err != nil {
-		return backend.UpdateParams{}, false, err
+		return workitems.PatchCommand{}, false, err
 	} else if applied {
 		changed = true
 	}
@@ -134,7 +134,7 @@ func updateParamsFromFlags(cmd *cobra.Command) (backend.UpdateParams, bool, erro
 	if descFromFile {
 		body, err := readDescriptionFile(updateDescFile, cmd.InOrStdin())
 		if err != nil {
-			return backend.UpdateParams{}, false, err
+			return workitems.PatchCommand{}, false, err
 		}
 		params.Description = &body
 		changed = true
@@ -142,7 +142,7 @@ func updateParamsFromFlags(cmd *cobra.Command) (backend.UpdateParams, bool, erro
 	return params, changed, nil
 }
 
-func applyDirectUpdateFlags(cmd *cobra.Command, params *backend.UpdateParams) bool {
+func applyDirectUpdateFlags(cmd *cobra.Command, params *workitems.PatchCommand) bool {
 	changed := false
 	if cmd.Flags().Changed("status") {
 		params.Status = &updateStatus
@@ -183,7 +183,7 @@ func applyDirectUpdateFlags(cmd *cobra.Command, params *backend.UpdateParams) bo
 	return changed
 }
 
-func applyDesignFormatFlag(cmd *cobra.Command, params *backend.UpdateParams) (bool, error) {
+func applyDesignFormatFlag(cmd *cobra.Command, params *workitems.PatchCommand) (bool, error) {
 	if !cmd.Flags().Changed("design-format") {
 		return false, nil
 	}
@@ -211,14 +211,14 @@ func validateDesignFormat(format string) error {
 // fetched to check existing notes, the update proceeds: this is best-effort
 // guidance for the agent/human CLI path, not a hard gate that should break a
 // legitimate update on a transient read error.
-func enforceBlockReason(ctx context.Context, ib backend.IssueBackend, id string, params backend.UpdateParams) error {
+func enforceBlockReason(ctx context.Context, itemsAPI workitems.API, params workitems.PatchCommand) error {
 	if params.Status == nil || *params.Status != "blocked" {
 		return nil
 	}
 	if params.Notes != nil && strings.TrimSpace(*params.Notes) != "" {
 		return nil
 	}
-	cur, err := ib.Get(ctx, id)
+	cur, err := itemsAPI.Get(ctx, workitems.GetQuery{IssueID: params.IssueID})
 	if err != nil || cur == nil {
 		return nil // can't verify existing notes; don't block a legitimate update
 	}
@@ -228,25 +228,21 @@ func enforceBlockReason(ctx context.Context, ib backend.IssueBackend, id string,
 	return fmt.Errorf(
 		"refusing to set %s to blocked without a reason: pass --notes \"BLOCKED: <why + what unblocks it>\" "+
 			"(or set notes first) so a human can see why it's blocked and what clears it — a bare blocked issue gives no signal on the board",
-		id)
+		params.IssueID)
 }
 
 // applyDependencyFlags adds/removes dependency edges for the update command.
 // Dependencies are not part of the issue PATCH schema — they are a separate
 // resource with dedicated endpoints — so the update command composes the
 // Work Items dependency-command port implemented by both real transports.
-func applyDependencyFlags(ctx context.Context, ib backend.IssueBackend, id string) error {
-	dependencies, ok := ib.(workitems.DependencyCommands)
-	if !ok {
-		return backend.ErrUnavailable("UpdateDependencies", "work items dependency commands unavailable", nil)
-	}
+func applyDependencyFlags(ctx context.Context, itemsAPI workitems.API, id string) error {
 	for _, dep := range updateAddDeps {
-		if err := dependencies.AddDependency(ctx, workitems.AddDependencyCommand{IssueID: id, DependsOnID: dep, Type: "blocks"}); err != nil {
+		if err := itemsAPI.AddDependency(ctx, workitems.AddDependencyCommand{IssueID: id, DependsOnID: dep, Type: "blocks"}); err != nil {
 			return err
 		}
 	}
 	for _, dep := range updateRemoveDeps {
-		if err := dependencies.RemoveDependency(ctx, workitems.RemoveDependencyCommand{IssueID: id, DependsOnID: dep, Type: "blocks"}); err != nil {
+		if err := itemsAPI.RemoveDependency(ctx, workitems.RemoveDependencyCommand{IssueID: id, DependsOnID: dep, Type: "blocks"}); err != nil {
 			return err
 		}
 	}

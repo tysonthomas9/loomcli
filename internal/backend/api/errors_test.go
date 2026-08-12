@@ -6,7 +6,7 @@ import (
 	"net"
 	"testing"
 
-	"github.com/tysonthomas9/loomcli/internal/backend"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 )
 
 func TestClassifyHTTPError_Success(t *testing.T) {
@@ -20,14 +20,14 @@ func TestClassifyHTTPError_2xxSuccessFalse(t *testing.T) {
 	tests := []struct {
 		name     string
 		body     apiResponse
-		wantKind backend.ErrorKind
+		wantKind workitems.ErrorKind
 	}{
-		{"not found", apiResponse{Success: false, Error: "issue not found"}, backend.KindNotFound},
-		{"already claimed", apiResponse{Success: false, Error: "task already claimed by another"}, backend.KindConflict},
-		{"validation", apiResponse{Success: false, Error: "validation failed"}, backend.KindValidation},
-		{"invalid", apiResponse{Success: false, Error: "invalid input"}, backend.KindValidation},
-		{"unknown", apiResponse{Success: false, Error: "something unexpected"}, backend.KindInternal},
-		{"empty error", apiResponse{Success: false}, backend.KindInternal},
+		{"not found", apiResponse{Success: false, Error: "issue not found"}, workitems.KindNotFound},
+		{"already claimed", apiResponse{Success: false, Error: "task already claimed by another"}, workitems.KindConflict},
+		{"validation", apiResponse{Success: false, Error: "validation failed"}, workitems.KindValidation},
+		{"invalid", apiResponse{Success: false, Error: "invalid input"}, workitems.KindValidation},
+		{"unknown", apiResponse{Success: false, Error: "something unexpected"}, workitems.KindInternal},
+		{"empty error", apiResponse{Success: false}, workitems.KindInternal},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -35,7 +35,7 @@ func TestClassifyHTTPError_2xxSuccessFalse(t *testing.T) {
 			if err == nil {
 				t.Fatal("expected error, got nil")
 			}
-			var be *backend.BackendError
+			var be *workitems.OperationError
 			if !errors.As(err, &be) {
 				t.Fatalf("expected *BackendError, got %T", err)
 			}
@@ -51,19 +51,19 @@ func TestClassifyHTTPError_StatusCodes(t *testing.T) {
 		name       string
 		statusCode int
 		body       apiResponse
-		wantKind   backend.ErrorKind
+		wantKind   workitems.ErrorKind
 	}{
-		{"400 validation", 400, apiResponse{Error: "bad input"}, backend.KindValidation},
-		{"401 auth", 401, apiResponse{Error: "unauthorized"}, backend.KindUnavailable},
-		{"403 forbidden", 403, apiResponse{Error: "forbidden"}, backend.KindUnavailable},
-		{"404 not found", 404, apiResponse{Error: "issue not found"}, backend.KindNotFound},
-		{"409 conflict", 409, apiResponse{Error: "already claimed"}, backend.KindConflict},
-		{"429 rate limit", 429, apiResponse{Error: "too many requests"}, backend.KindUnavailable},
-		{"500 internal", 500, apiResponse{Error: "server error"}, backend.KindInternal},
-		{"502 bad gateway", 502, apiResponse{Error: "bad gateway"}, backend.KindInternal},
-		{"503 unavailable", 503, apiResponse{Error: "maintenance"}, backend.KindUnavailable},
-		{"504 timeout", 504, apiResponse{Error: "gateway timeout"}, backend.KindTimeout},
-		{"418 teapot", 418, apiResponse{Error: "teapot"}, backend.KindInternal},
+		{"400 validation", 400, apiResponse{Error: "bad input"}, workitems.KindValidation},
+		{"401 auth", 401, apiResponse{Error: "unauthorized"}, workitems.KindUnavailable},
+		{"403 forbidden", 403, apiResponse{Error: "forbidden"}, workitems.KindUnavailable},
+		{"404 not found", 404, apiResponse{Error: "issue not found"}, workitems.KindNotFound},
+		{"409 conflict", 409, apiResponse{Error: "already claimed"}, workitems.KindConflict},
+		{"429 rate limit", 429, apiResponse{Error: "too many requests"}, workitems.KindUnavailable},
+		{"500 internal", 500, apiResponse{Error: "server error"}, workitems.KindInternal},
+		{"502 bad gateway", 502, apiResponse{Error: "bad gateway"}, workitems.KindInternal},
+		{"503 unavailable", 503, apiResponse{Error: "maintenance"}, workitems.KindUnavailable},
+		{"504 timeout", 504, apiResponse{Error: "gateway timeout"}, workitems.KindTimeout},
+		{"418 teapot", 418, apiResponse{Error: "teapot"}, workitems.KindInternal},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -71,7 +71,7 @@ func TestClassifyHTTPError_StatusCodes(t *testing.T) {
 			if err == nil {
 				t.Fatal("expected error, got nil")
 			}
-			var be *backend.BackendError
+			var be *workitems.OperationError
 			if !errors.As(err, &be) {
 				t.Fatalf("expected *BackendError, got %T", err)
 			}
@@ -87,12 +87,12 @@ func TestClassifyHTTPError_AuthMessagePrefix(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error")
 	}
-	var be *backend.BackendError
+	var be *workitems.OperationError
 	if !errors.As(err, &be) {
 		t.Fatalf("expected BackendError, got %T", err)
 	}
-	if be.Kind != backend.KindUnavailable {
-		t.Errorf("Kind = %s, want %s", be.Kind, backend.KindUnavailable)
+	if be.Kind != workitems.KindUnavailable {
+		t.Errorf("Kind = %s, want %s", be.Kind, workitems.KindUnavailable)
 	}
 	if got := be.Error(); got == "" {
 		t.Error("empty error message")
@@ -104,7 +104,7 @@ func TestClassifyHTTPError_EmptyError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error")
 	}
-	if !backend.IsKind(err, backend.KindInternal) {
+	if !workitems.IsKind(err, workitems.KindInternal) {
 		t.Errorf("Kind = %v, want KindInternal", err)
 	}
 }
@@ -113,14 +113,14 @@ func TestClassifyErrorString(t *testing.T) {
 	tests := []struct {
 		name     string
 		msg      string
-		wantKind backend.ErrorKind
+		wantKind workitems.ErrorKind
 	}{
-		{"not found lowercase", "issue not found", backend.KindNotFound},
-		{"not found uppercase", "ISSUE NOT FOUND", backend.KindNotFound},
-		{"already claimed", "task already claimed", backend.KindConflict},
-		{"validation", "validation failed", backend.KindValidation},
-		{"invalid", "INVALID input", backend.KindValidation},
-		{"other", "mystery error", backend.KindInternal},
+		{"not found lowercase", "issue not found", workitems.KindNotFound},
+		{"not found uppercase", "ISSUE NOT FOUND", workitems.KindNotFound},
+		{"already claimed", "task already claimed", workitems.KindConflict},
+		{"validation", "validation failed", workitems.KindValidation},
+		{"invalid", "INVALID input", workitems.KindValidation},
+		{"other", "mystery error", workitems.KindInternal},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -128,7 +128,7 @@ func TestClassifyErrorString(t *testing.T) {
 			if err == nil {
 				t.Fatal("expected error, got nil")
 			}
-			if !backend.IsKind(err, tt.wantKind) {
+			if !workitems.IsKind(err, tt.wantKind) {
 				t.Fatalf("expected kind %s, got %v", tt.wantKind, err)
 			}
 		})
@@ -139,17 +139,17 @@ func TestClassifyTransportError(t *testing.T) {
 	tests := []struct {
 		name     string
 		err      error
-		wantKind backend.ErrorKind
+		wantKind workitems.ErrorKind
 	}{
 		{"nil", nil, ""},
-		{"context canceled", context.Canceled, backend.KindCanceled},
-		{"deadline exceeded", context.DeadlineExceeded, backend.KindTimeout},
+		{"context canceled", context.Canceled, workitems.KindCanceled},
+		{"deadline exceeded", context.DeadlineExceeded, workitems.KindTimeout},
 		{
 			"net error",
 			&net.OpError{Op: "dial", Net: "tcp", Err: &net.DNSError{Name: "example.com", Err: "no such host"}},
-			backend.KindUnavailable,
+			workitems.KindUnavailable,
 		},
-		{"other error", errors.New("unexpected"), backend.KindUnavailable},
+		{"other error", errors.New("unexpected"), workitems.KindUnavailable},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -163,7 +163,7 @@ func TestClassifyTransportError(t *testing.T) {
 			if result == nil {
 				t.Fatal("expected error, got nil")
 			}
-			var be *backend.BackendError
+			var be *workitems.OperationError
 			if !errors.As(result, &be) {
 				t.Fatalf("expected *BackendError, got %T", result)
 			}

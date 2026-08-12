@@ -297,7 +297,7 @@ func countSkillMatches(labels []string, skills []string) int {
 
 // FetchReadyIssues fetches issues ready for work.
 func FetchReadyIssues(ctx context.Context, parentID string, repoLabel string) ([]workitems.IssueSummary, error) {
-	ib := DefaultIssueBackend()
+	itemsAPI := DefaultWorkItems()
 	// Limit 10000: ready queues include open + review + in_progress, and review items
 	// can crowd out the few truly-workable open tasks past a small cutoff,
 	// causing agents to starve. See monitor_collect.go for the same pattern.
@@ -308,11 +308,7 @@ func FetchReadyIssues(ctx context.Context, parentID string, repoLabel string) ([
 	if sourceRepos := os.Getenv("LOOM_SOURCE_REPOS"); sourceRepos != "" {
 		opts.SourceRepos = strings.Split(sourceRepos, ",")
 	}
-	ready, ok := ib.(workitems.ReadyQueries)
-	if !ok {
-		return nil, fmt.Errorf("ready query unavailable: %w", workitems.ErrUnavailable)
-	}
-	issues, err := ready.Ready(ctx, opts)
+	issues, err := itemsAPI.Ready(ctx, opts)
 	if err != nil {
 		return nil, fmt.Errorf("failed to check ready tasks: %w", err)
 	}

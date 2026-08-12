@@ -25,7 +25,7 @@ const taskReadyReconcileEventIDPrefix = "task-ready-reconcile-v1-"
 const taskReadyReconcileActor = "system:task-ready-reconcile"
 
 // TaskReadySnapshot is the narrow, consumer-owned projection needed to emit a
-// current task.ready state without importing the issue backend into trigger.
+// current task.ready state without importing Work Items into trigger.
 // UpdatedAt is the ready-generation anchor. SourceRepo is explicit (including
 // empty), while RepositoryRequired separately captures whether that empty value
 // is invalid for this workspace; single-repo fallback remains valid.

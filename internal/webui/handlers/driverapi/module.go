@@ -749,7 +749,7 @@ func (m *Module) deliverAgentMessage(ctx context.Context, ws string, id driverId
 	return result, nil
 }
 
-// --- issue (card) ops (P0-1): thin IssueBackend pass-throughs so a workflow can
+// --- issue (card) ops (P0-1): thin Work Items pass-throughs so a workflow can
 // read and mutate a fleet-db card. Auth is the run token via verifyParent; the
 // actor is derived from the parent run (as in claimReady/releaseTask). The
 // loom.issue.* SDK surface is generated from sdk/op-spec.mjs.

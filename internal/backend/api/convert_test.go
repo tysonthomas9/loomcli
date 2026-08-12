@@ -10,7 +10,7 @@ import (
 
 func timePtr(t time.Time) *time.Time { return &t }
 
-// --- issueToData ---
+// --- issueToSummary ---
 
 func TestIssueToData_AllNilPointers(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
@@ -21,7 +21,7 @@ func TestIssueToData_AllNilPointers(t *testing.T) {
 		CreatedAt: now,
 		UpdatedAt: now,
 	}
-	d := issueToData(issue)
+	d := issueToSummary(issue)
 	if d.ID != "a" || d.Title != "A" || d.Priority != 3 {
 		t.Errorf("basic fields mismatch: %+v", d)
 	}
@@ -90,7 +90,7 @@ func TestIssueToData_AllFieldsSet(t *testing.T) {
 		DueAt:      &due,
 		DeferUntil: &defer_,
 	}
-	d := issueToData(issue)
+	d := issueToSummary(issue)
 	if d.Status != "open" {
 		t.Errorf("Status = %q", d.Status)
 	}
@@ -123,7 +123,7 @@ func TestIssueToData_AllFieldsSet(t *testing.T) {
 	}
 }
 
-// --- issueResponseToData ---
+// --- issueResponseToSummary ---
 
 func TestIssueResponseToData_Minimal(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
@@ -139,7 +139,7 @@ func TestIssueResponseToData_Minimal(t *testing.T) {
 		DependencyCount: 3,
 		DependentCount:  2,
 	}
-	d := issueResponseToData(r)
+	d := issueResponseToSummary(r)
 	if d.ID != "loom-1" || d.Title != "Title" {
 		t.Errorf("basic: %+v", d)
 	}
@@ -186,7 +186,7 @@ func TestIssueResponseToData_AllFields(t *testing.T) {
 		DueAt:      &due,
 		DeferUntil: &defer_,
 	}
-	d := issueResponseToData(r)
+	d := issueResponseToSummary(r)
 	if d.Assignee != "a" || d.Owner != "o" || d.SourceRepo != "r" {
 		t.Errorf("string ptrs: %+v", d)
 	}
@@ -204,7 +204,7 @@ func TestIssueResponseToData_AllFields(t *testing.T) {
 	}
 }
 
-// --- issueResponseToDetailData ---
+// --- issueResponseToDetail ---
 
 func TestIssueResponseToDetailData_AllFields(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
@@ -241,7 +241,7 @@ func TestIssueResponseToDetailData_AllFields(t *testing.T) {
 			{Id: 10, Author: "alice", Text: "hi", CreatedAt: now},
 		},
 	}
-	detail := issueResponseToDetailData(r)
+	detail := issueResponseToDetail(r)
 	if detail.ID != "loom-3" {
 		t.Errorf("ID = %q", detail.ID)
 	}
@@ -263,13 +263,13 @@ func TestIssueResponseToDetailData_AllFields(t *testing.T) {
 	if len(detail.Dependencies) != 1 {
 		t.Errorf("Dependencies len = %d", len(detail.Dependencies))
 	}
-	if detail.Dependencies[0].IssueID != "loom-3" || detail.Dependencies[0].DependsOnID != "dep-1" {
+	if detail.Dependencies[0].ID != "dep-1" {
 		t.Errorf("dep direction: %+v", detail.Dependencies[0])
 	}
 	if len(detail.Dependents) != 1 {
 		t.Errorf("Dependents len = %d", len(detail.Dependents))
 	}
-	if detail.Dependents[0].IssueID != "dep-2" || detail.Dependents[0].DependsOnID != "loom-3" {
+	if detail.Dependents[0].ID != "dep-2" {
 		t.Errorf("dependent direction: %+v", detail.Dependents[0])
 	}
 	if len(detail.Comments) != 1 {
@@ -290,7 +290,7 @@ func TestIssueResponseToDetailData_NilOptionalFields(t *testing.T) {
 		CreatedAt: now,
 		UpdatedAt: now,
 	}
-	detail := issueResponseToDetailData(r)
+	detail := issueResponseToDetail(r)
 	if detail.Description != "" || detail.AcceptanceCriteria != "" || detail.Notes != "" {
 		t.Errorf("content should be empty: %+v", detail)
 	}
@@ -311,25 +311,22 @@ func TestIssueResponseToDetailData_NilOptionalFields(t *testing.T) {
 	}
 }
 
-// --- dependencyRefsToData ---
+// --- dependencyRefs ---
 
 func TestDependencyRefsToData_Outgoing(t *testing.T) {
 	refs := []gen.DependencyRef{
 		{Id: "dep-1", Type: "blocks", Title: "T1", Status: "open", Priority: 1, IssueType: "task"},
 		{Id: "dep-2", Type: "blocks", Title: "T2", Status: "closed", Priority: 2, IssueType: "bug"},
 	}
-	out := dependencyRefsToData("parent", refs, true)
+	out := dependencyRefs(refs)
 	if len(out) != 2 {
 		t.Fatalf("len = %d", len(out))
 	}
 	for i, d := range out {
-		if d.IssueID != "parent" {
-			t.Errorf("[%d] IssueID = %q, want parent", i, d.IssueID)
+		if d.ID != refs[i].Id {
+			t.Errorf("[%d] ID = %q", i, d.ID)
 		}
-		if d.DependsOnID != refs[i].Id {
-			t.Errorf("[%d] DependsOnID = %q", i, d.DependsOnID)
-		}
-		if d.Type != refs[i].Type {
+		if d.DependencyType != refs[i].Type {
 			t.Errorf("[%d] Type", i)
 		}
 	}
@@ -339,20 +336,17 @@ func TestDependencyRefsToData_Incoming(t *testing.T) {
 	refs := []gen.DependencyRef{
 		{Id: "dep-1", Type: "blocks", Title: "T", Status: "open", Priority: 1, IssueType: "task"},
 	}
-	out := dependencyRefsToData("parent", refs, false)
+	out := dependencyRefs(refs)
 	if len(out) != 1 {
 		t.Fatalf("len = %d", len(out))
 	}
-	if out[0].IssueID != "dep-1" {
-		t.Errorf("IssueID = %q, want dep-1", out[0].IssueID)
-	}
-	if out[0].DependsOnID != "parent" {
-		t.Errorf("DependsOnID = %q, want parent", out[0].DependsOnID)
+	if out[0].ID != "dep-1" {
+		t.Errorf("ID = %q, want dep-1", out[0].ID)
 	}
 }
 
 func TestDependencyRefsToData_Empty(t *testing.T) {
-	out := dependencyRefsToData("p", nil, true)
+	out := dependencyRefs(nil)
 	if out == nil {
 		t.Errorf("should be non-nil empty")
 	}
@@ -361,21 +355,17 @@ func TestDependencyRefsToData_Empty(t *testing.T) {
 	}
 }
 
-// --- commentResponseToData ---
+// --- commentResponse ---
 
 func TestCommentResponseToData(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
-	edited := now.Add(time.Hour)
-	parentID := int64(99)
 	c := gen.CommentResponse{
 		Id:        42,
 		Author:    "alice",
 		Text:      "hello",
 		CreatedAt: now,
-		EditedAt:  &edited,
-		ParentId:  &parentID,
 	}
-	d := commentResponseToData(c, "loom-1")
+	d := commentResponse(c, "loom-1")
 	if d.ID != 42 {
 		t.Errorf("ID = %d", d.ID)
 	}
@@ -385,22 +375,16 @@ func TestCommentResponseToData(t *testing.T) {
 	if d.Author != "alice" || d.Text != "hello" {
 		t.Errorf("fields: %+v", d)
 	}
-	if d.EditedAt == nil || !d.EditedAt.Equal(edited) {
-		t.Errorf("EditedAt: %v", d.EditedAt)
-	}
-	if d.ParentID == nil || *d.ParentID != 99 {
-		t.Errorf("ParentID: %v", d.ParentID)
+	if !d.CreatedAt.Equal(now) {
+		t.Errorf("CreatedAt: %v", d.CreatedAt)
 	}
 }
 
 func TestCommentResponseToData_NilOptional(t *testing.T) {
 	c := gen.CommentResponse{Id: 1, Author: "a", Text: "t", CreatedAt: time.Now()}
-	d := commentResponseToData(c, "i")
-	if d.EditedAt != nil {
-		t.Errorf("EditedAt should be nil")
-	}
-	if d.ParentID != nil {
-		t.Errorf("ParentID should be nil")
+	d := commentResponse(c, "i")
+	if d.IssueID != "i" {
+		t.Errorf("IssueID = %q", d.IssueID)
 	}
 }
 

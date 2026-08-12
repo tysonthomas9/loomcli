@@ -102,7 +102,7 @@ func (app *Server) buildInfraModules() {
 	if app.fleetRegistry != nil {
 		app.wsModules = append(app.wsModules,
 			NewFleetModule(app.fleetRegistry, app.tokenCfg,
-				app.config.IssueBackendFn, app.claimMetrics, app.fleetRegCfg))
+				app.config.WorkItemsFn, app.claimMetrics, app.fleetRegCfg))
 	}
 
 	if app.diffSvc != nil {

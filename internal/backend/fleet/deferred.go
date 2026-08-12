@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 )
 
@@ -67,10 +66,10 @@ func checkProjectedAvailabilityQuerySupported(view string, query workitems.Avail
 		return nil
 	}
 	return fmt.Errorf("fleet-db: unsupported %s filters [%s]: %w",
-		view, strings.Join(unsupported, ", "), backend.ErrFilterNotSupported)
+		view, strings.Join(unsupported, ", "), workitems.ErrFilterNotSupported)
 }
 
-func filterListIssues(issues []backend.IssueData, opts backend.ListOpts) []backend.IssueData {
+func filterListIssues(issues []workitems.IssueSummary, opts workitems.ListFilter) []workitems.IssueSummary {
 	return filterIssueData(issues, issueDataFilter{
 		Assignee:    opts.Assignee,
 		Type:        opts.IssueType,
@@ -93,11 +92,11 @@ type issueDataFilter struct {
 	Limit       int
 }
 
-func filterIssueData(issues []backend.IssueData, opts issueDataFilter) []backend.IssueData {
+func filterIssueData(issues []workitems.IssueSummary, opts issueDataFilter) []workitems.IssueSummary {
 	if !opts.needsFilter() {
 		return issues
 	}
-	out := make([]backend.IssueData, 0, len(issues))
+	out := make([]workitems.IssueSummary, 0, len(issues))
 	for _, issue := range issues {
 		if !issueDataMatches(issue, opts) {
 			continue
@@ -115,7 +114,7 @@ func (opts issueDataFilter) needsFilter() bool {
 		len(opts.Labels) > 0 || len(opts.LabelsAny) > 0 || len(opts.SourceRepos) > 0 || opts.Limit > 0
 }
 
-func issueDataMatches(issue backend.IssueData, opts issueDataFilter) bool {
+func issueDataMatches(issue workitems.IssueSummary, opts issueDataFilter) bool {
 	return opts.matches(issue.Assignee, issue.Priority, issue.IssueType, issue.Parent, issue.Labels, issue.SourceRepo)
 }
 

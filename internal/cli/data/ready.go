@@ -21,7 +21,7 @@ var readyCmd = &cobra.Command{
 	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
-		ib, err := getIssueBackend(ctx)
+		itemsAPI, err := getWorkItems(ctx)
 		if err != nil {
 			return err
 		}
@@ -31,11 +31,7 @@ var readyCmd = &cobra.Command{
 			IssueType: readyType,
 			ParentID:  readyParent,
 		}
-		ready, ok := ib.(workitems.ReadyQueries)
-		if !ok {
-			return workitems.ErrUnavailable
-		}
-		items, err := ready.Ready(ctx, opts)
+		items, err := itemsAPI.Ready(ctx, opts)
 		if err != nil {
 			return err
 		}

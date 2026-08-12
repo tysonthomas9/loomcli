@@ -6,7 +6,6 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 
-	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/cli/testdata/clitest"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
@@ -14,16 +13,24 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
+func listResultFromSummaries(summaries []workitems.IssueSummary) *workitems.ListResult {
+	items := make([]workitems.ListItem, len(summaries))
+	for index := range summaries {
+		items[index] = workitems.ListItem{IssueSummary: summaries[index]}
+	}
+	return &workitems.ListResult{Issues: items}
+}
+
 func TestLoadEpicSnapshotCountsOnlyOpenChildren(t *testing.T) {
-	ib := clitest.NewMockIssueBackend()
+	ib := clitest.NewMockWorkItems()
 	ib.ReadyResult = []workitems.IssueSummary{{ID: "TASK-1", Title: "Ready", Status: "open", Parent: "EPIC-1"}}
 	ib.BlockedResult = []workitems.IssueSummary{{ID: "TASK-2", Title: "Blocked", Status: "blocked", Parent: "EPIC-1", BlockedBy: []string{"TASK-0"}, BlockedByCount: 1}}
-	ib.ListResult = []backend.IssueData{
+	ib.ListResult = listResultFromSummaries([]workitems.IssueSummary{
 		{ID: "TASK-1", Status: "open", Parent: "EPIC-1"},
 		{ID: "TASK-2", Status: "blocked", Parent: "EPIC-1"},
 		{ID: "TASK-3", Status: "closed", Parent: "EPIC-1"},
 		{ID: "TASK-4", Status: "deferred", Parent: "EPIC-1"},
-	}
+	})
 
 	got, err := LoadEpicSnapshot(context.Background(), ib, EpicSnapshotOptions{EpicID: "EPIC-1"})
 	if err != nil {

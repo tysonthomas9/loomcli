@@ -4,10 +4,7 @@ package cli
 // Used by automode.go (agent task selection) and monitor.go (dashboard counts).
 // Frontend equivalent: frontend/src/utils/issueCategory.ts
 
-import (
-	"github.com/tysonthomas9/loomcli/internal/backend"
-	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
-)
+import "github.com/tysonthomas9/loomcli/internal/modules/workitems"
 
 // NeedsRevisionLabel is added when a plan review is rejected.
 // Issues with this label are treated as needing re-planning even if they have a design.
@@ -76,31 +73,6 @@ func IsWorkableTask(issue workitems.IssueSummary) bool {
 }
 
 // --- Level 3: Agent predicates ---
-
-// isDirectBlocker is the task-selection policy for dependency edges. It is the
-// sole live consumer of this classification; parent-child only propagates an
-// existing block and does not itself create one.
-func isDirectBlocker(dependencyType string) bool {
-	switch dependencyType {
-	case "blocks", "conditional-blocks", "waits-for":
-		return true
-	default:
-		return false
-	}
-}
-
-// HasUnclosedBlockers returns true if any blocking dependency is still unclosed.
-// unclosedIDs is a set of issue IDs that have NOT been closed yet.
-// A blocker is only considered resolved when its issue is closed.
-// Kept for callers that have full dependency data. Not used by IsAvailableFor* predicates.
-func HasUnclosedBlockers(deps []backend.DependencyData, unclosedIDs map[string]bool) bool {
-	for _, dep := range deps {
-		if isDirectBlocker(dep.Type) && unclosedIDs[dep.DependsOnID] {
-			return true
-		}
-	}
-	return false
-}
 
 // IsAvailableForPlanning returns true if the issue should be picked up by a
 // planning agent: workable and needs a plan. Ready issues are pre-filtered

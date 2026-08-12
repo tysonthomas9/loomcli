@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tysonthomas9/loomcli/internal/backend"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 )
 
 func TestCreateExternalRefUsesCanonicalSinglePost(t *testing.T) {
@@ -58,7 +58,7 @@ func TestCreateExternalRefFailureDoesNotRetry(t *testing.T) {
 	if issue != nil {
 		t.Fatalf("issue = %#v, want nil", issue)
 	}
-	if !backend.IsKind(err, backend.KindValidation) {
+	if !workitems.IsKind(err, workitems.KindValidation) {
 		t.Fatalf("error = %v, want KindValidation", err)
 	}
 	if posts != 1 {
@@ -66,8 +66,8 @@ func TestCreateExternalRefFailureDoesNotRetry(t *testing.T) {
 	}
 }
 
-func externalRefCreateParams() backend.CreateParams {
-	return backend.CreateParams{
+func externalRefCreateParams() workitems.CreateCommand {
+	return workitems.CreateCommand{
 		Title:       "Review PR",
 		IssueType:   "task",
 		ExternalRef: "https://github.com/acme/api/pull/7",

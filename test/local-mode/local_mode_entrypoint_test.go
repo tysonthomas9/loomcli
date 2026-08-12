@@ -1,7 +1,6 @@
 package localmode_test
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -14,9 +13,8 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/tysonthomas9/loomcli/internal/backend"
 	fleetbackend "github.com/tysonthomas9/loomcli/internal/backend/fleet"
-	webuiapp "github.com/tysonthomas9/loomcli/internal/webui/app"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 	issuehandlers "github.com/tysonthomas9/loomcli/internal/webui/handlers/issues"
 )
 
@@ -354,9 +352,7 @@ func TestLocalModeEntrypointTitleLookupUsesFleetSearchBeyondFirstPage(t *testing
 		t.Fatalf("create fleet backend: %v", err)
 	}
 
-	workItems, err := webuiapp.NewWorkItems(func(context.Context) backend.IssueBackend {
-		return fleetIssueBackend
-	})
+	workItems, err := workitems.New(fleetIssueBackend)
 	if err != nil {
 		t.Fatalf("compose Work Items: %v", err)
 	}

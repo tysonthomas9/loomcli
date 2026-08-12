@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/backend"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 )
 
 func TestBlockRepositoryRequired_UsesAtomicCommandAndReturnsCanonicalIssue(t *testing.T) {
@@ -86,7 +86,7 @@ func TestSetIssueRepository_UsesAtomicCommandAndReturnsCanonicalIssue(t *testing
 	})
 	defer ts.Close()
 
-	issue, err := fb.SetIssueRepository(context.Background(), "task-11", " hello-world ")
+	issue, err := fb.AssignRepository(context.Background(), workitems.AssignRepositoryCommand{IssueID: "task-11", Repository: " hello-world "})
 	if err != nil {
 		t.Fatalf("SetIssueRepository: %v", err)
 	}
@@ -103,14 +103,14 @@ func TestSetIssueRepositoryRejectsNonCanonicalWrappedIssue(t *testing.T) {
 	})
 	defer ts.Close()
 
-	issue, err := fb.SetIssueRepository(context.Background(), "task-11", "hello-world")
+	issue, err := fb.AssignRepository(context.Background(), workitems.AssignRepositoryCommand{IssueID: "task-11", Repository: "hello-world"})
 	if err == nil {
 		t.Fatal("SetIssueRepository error = nil, want canonical-shape rejection")
 	}
 	if issue != nil {
 		t.Fatalf("issue = %+v, want nil", issue)
 	}
-	if !backend.IsKind(err, backend.KindInternal) {
+	if !workitems.IsKind(err, workitems.KindInternal) {
 		t.Fatalf("error = %v, want KindInternal", err)
 	}
 }
@@ -121,11 +121,11 @@ func TestRepositoryRequirementCommands_ValidateInput(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := fb.BlockRepositoryRequired(context.Background(), ""); !backend.IsKind(err, backend.KindValidation) {
+	if _, err := fb.BlockRepositoryRequired(context.Background(), ""); !workitems.IsKind(err, workitems.KindValidation) {
 		t.Fatalf("block error = %v", err)
 	}
 	for _, args := range [][2]string{{"", "hello-world"}, {"task-11", ""}} {
-		if _, err := fb.SetIssueRepository(context.Background(), args[0], args[1]); !backend.IsKind(err, backend.KindValidation) {
+		if _, err := fb.AssignRepository(context.Background(), workitems.AssignRepositoryCommand{IssueID: args[0], Repository: args[1]}); !workitems.IsKind(err, workitems.KindValidation) {
 			t.Fatalf("set args = %q, error = %v", args, err)
 		}
 	}

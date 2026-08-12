@@ -149,9 +149,9 @@ func TestHasAvailablePlanningTasks(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			resetDefaultIssueBackend()
-			t.Cleanup(resetDefaultIssueBackend)
-			mock := NewMockIssueBackend()
+			resetDefaultWorkItems()
+			t.Cleanup(resetDefaultWorkItems)
+			mock := NewMockWorkItems()
 			var issues []workitems.IssueSummary
 			if tt.readyOutput != "" {
 				json.Unmarshal([]byte(tt.readyOutput), &issues)
@@ -161,7 +161,7 @@ func TestHasAvailablePlanningTasks(t *testing.T) {
 			} else {
 				mock.ReadyResult = issues
 			}
-			setDefaultIssueBackend(mock)
+			setDefaultWorkItems(mock)
 
 			got, err := HasAvailablePlanningTasks(t.Context(), "", "")
 			if (err != nil) != tt.wantErr {
@@ -264,9 +264,9 @@ func TestHasAvailableImplementationTasks(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			resetDefaultIssueBackend()
-			t.Cleanup(resetDefaultIssueBackend)
-			mock := NewMockIssueBackend()
+			resetDefaultWorkItems()
+			t.Cleanup(resetDefaultWorkItems)
+			mock := NewMockWorkItems()
 			var issues []workitems.IssueSummary
 			if tt.readyOutput != "" {
 				json.Unmarshal([]byte(tt.readyOutput), &issues)
@@ -276,7 +276,7 @@ func TestHasAvailableImplementationTasks(t *testing.T) {
 			} else {
 				mock.ReadyResult = issues
 			}
-			setDefaultIssueBackend(mock)
+			setDefaultWorkItems(mock)
 
 			got, err := HasAvailableImplementationTasks(t.Context(), "", "")
 			if (err != nil) != tt.wantErr {

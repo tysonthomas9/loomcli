@@ -8,7 +8,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 )
 
@@ -178,7 +177,7 @@ func TestBlockedRejectsUnsupportedOwnerFiltersBeforeRequest(t *testing.T) {
 	defer ts.Close()
 
 	_, err := fb.Blocked(context.Background(), workitems.AvailabilityQuery{SortPolicy: "priority"})
-	if !errors.Is(err, backend.ErrFilterNotSupported) {
+	if !errors.Is(err, workitems.ErrFilterNotSupported) {
 		t.Fatalf("Blocked error = %v, want unsupported filter", err)
 	}
 }

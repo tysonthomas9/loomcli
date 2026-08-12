@@ -24,6 +24,18 @@ var _ StatsQueries = (*Service)(nil)
 var _ BlockedQueries = (*Service)(nil)
 var _ SearchQueries = (*Service)(nil)
 
+// BackendName exposes adapter identity for diagnostics without exposing the
+// adapter itself or adding transport metadata to the product API.
+func (s *Service) BackendName() string {
+	if s == nil {
+		return ""
+	}
+	if named, ok := s.store.(interface{ BackendName() string }); ok {
+		return named.BackendName()
+	}
+	return ""
+}
+
 func New(store Store) (*Service, error) {
 	if store == nil {
 		return nil, fmt.Errorf("compose Work Items: durable port is required: %w", ErrUnavailable)

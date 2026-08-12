@@ -36,7 +36,16 @@ type LoomConfig = config.LoomConfig
 type RepoConfig = config.RepoConfig
 type WorkspaceConfig = config.WorkspaceConfig
 type MockExecRunner = clitest.MockExecRunner
-type MockIssueBackend = clitest.MockIssueBackend
+type MockWorkItems = clitest.MockWorkItems
+
+func listResultFromSummaries(summaries []workitems.IssueSummary) *workitems.ListResult {
+	items := make([]workitems.ListItem, len(summaries))
+	for index := range summaries {
+		items[index] = workitems.ListItem{IssueSummary: summaries[index]}
+	}
+	return &workitems.ListResult{Issues: items}
+}
+
 type MockGitRunner = clitest.MockGitRunner
 type MockFileSystem = clitest.MockFileSystem
 type MockAgentInvoker = clitest.MockAgentInvoker
@@ -54,11 +63,11 @@ var (
 	GetAvailableImplementationTasks = automode.GetAvailableImplementationTasks
 )
 
-func NewTestDeps(t *testing.T) (*cli.Deps, *clitest.MockGitRunner, *clitest.MockExecRunner, *clitest.MockFileSystem, *clitest.MockIssueBackend) {
+func NewTestDeps(t *testing.T) (*cli.Deps, *clitest.MockGitRunner, *clitest.MockExecRunner, *clitest.MockFileSystem, *clitest.MockWorkItems) {
 	return clitest.NewTestDeps(t)
 }
 
-func NewMockIssueBackend() *clitest.MockIssueBackend { return clitest.NewMockIssueBackend() }
+func NewMockWorkItems() *clitest.MockWorkItems { return clitest.NewMockWorkItems() }
 
 func mustJSON(v interface{}) string { return clitest.MustJSON(v) }
 
@@ -66,22 +75,31 @@ func installExecMock(t *testing.T, m *clitest.MockExecRunner) {
 	t.Helper()
 	dd := cli.TestingGetDefaultDeps()
 	orig := dd.Exec
-	origIssueBackend := dd.IssueBackend
+	origWorkItems := dd.WorkItems
 	dd.Exec = m
-	dd.IssueBackend = newExecReadyIssueBackend(m)
-	cli.ResetDefaultIssueBackend()
+	dd.WorkItems = newExecReadyWorkItems(m)
+	cli.ResetDefaultWorkItems()
 	t.Cleanup(func() {
 		dd.Exec = orig
-		dd.IssueBackend = origIssueBackend
-		cli.ResetDefaultIssueBackend()
+		dd.WorkItems = origWorkItems
+		cli.ResetDefaultWorkItems()
 	})
 }
 
+func setDefaultWorkItems(api workitems.API) {
+	cli.SetDefaultWorkItems(api)
+	leases, _ := api.(workitems.ClaimLeaseCommands)
+	cli.TestingGetDefaultDeps().ClaimLeases = leases
+}
+
+func resetDefaultWorkItems() {
+	cli.ResetDefaultWorkItems()
+	cli.TestingGetDefaultDeps().ClaimLeases = nil
+}
+
 var (
-	resetDefaultIssueBackend = cli.ResetDefaultIssueBackend
-	setDefaultIssueBackend   = cli.SetDefaultIssueBackend
-	RegisterBackend          = cli.RegisterBackend
-	SetBackend               = cli.SetBackend
+	RegisterBackend = cli.RegisterBackend
+	SetBackend      = cli.SetBackend
 )
 
 func resetBackendState(t *testing.T) {
@@ -252,23 +270,23 @@ func (m *CommandMock) Install() {
 func (m *CommandMock) InstallOn(deps *cli.Deps) {
 	origExec := deps.Exec
 	origGit := deps.Git
-	origIssueBackend := deps.IssueBackend
+	origWorkItems := deps.WorkItems
 	deps.Exec = m
 	deps.Git = &clitest.ExecBridgeGitRunner{Exec: m}
 	if deps == cli.TestingGetDefaultDeps() {
 		if m.hasReadyStubs() {
-			deps.IssueBackend = newCommandReadyIssueBackend(m)
-		} else if _, ok := origIssueBackend.(*clitest.MockIssueBackend); !ok {
-			deps.IssueBackend = clitest.NewMockIssueBackend()
+			deps.WorkItems = newCommandReadyWorkItems(m)
+		} else if _, ok := origWorkItems.(*clitest.MockWorkItems); !ok {
+			deps.WorkItems = clitest.NewMockWorkItems()
 		}
 	}
-	cli.ResetDefaultIssueBackend()
+	cli.ResetDefaultWorkItems()
 	m.t.Cleanup(func() {
 		m.Verify()
 		deps.Exec = origExec
 		deps.Git = origGit
-		deps.IssueBackend = origIssueBackend
-		cli.ResetDefaultIssueBackend()
+		deps.WorkItems = origWorkItems
+		cli.ResetDefaultWorkItems()
 	})
 }
 
@@ -281,27 +299,27 @@ func (m *CommandMock) hasReadyStubs() bool {
 	return false
 }
 
-type commandReadyIssueBackend struct {
-	*clitest.MockIssueBackend
+type commandReadyWorkItems struct {
+	*clitest.MockWorkItems
 	run func(dir, name string, args ...string) cli.CommandResult
 }
 
-func newCommandReadyIssueBackend(m *CommandMock) *commandReadyIssueBackend {
-	return &commandReadyIssueBackend{
-		MockIssueBackend: clitest.NewMockIssueBackend(),
-		run:              m.Run,
+func newCommandReadyWorkItems(m *CommandMock) *commandReadyWorkItems {
+	return &commandReadyWorkItems{
+		MockWorkItems: clitest.NewMockWorkItems(),
+		run:           m.Run,
 	}
 }
 
-func newExecReadyIssueBackend(m *clitest.MockExecRunner) *commandReadyIssueBackend {
-	return &commandReadyIssueBackend{
-		MockIssueBackend: clitest.NewMockIssueBackend(),
-		run:              m.Run,
+func newExecReadyWorkItems(m *clitest.MockExecRunner) *commandReadyWorkItems {
+	return &commandReadyWorkItems{
+		MockWorkItems: clitest.NewMockWorkItems(),
+		run:           m.Run,
 	}
 }
 
-func (b *commandReadyIssueBackend) Ready(ctx context.Context, opts workitems.AvailabilityQuery) ([]workitems.IssueSummary, error) {
-	b.MockIssueBackend.Ready(ctx, opts)
+func (b *commandReadyWorkItems) Ready(ctx context.Context, opts workitems.AvailabilityQuery) ([]workitems.IssueSummary, error) {
+	b.MockWorkItems.Ready(ctx, opts)
 	result := b.run(cli.GetWorkspaceRuntimeDir(), "issue-store", readyArgs(opts)...)
 	if result.Err != nil {
 		return nil, result.Err

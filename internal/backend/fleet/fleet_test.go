@@ -11,7 +11,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 )
 
@@ -207,7 +206,7 @@ func TestGet_HappyPath(t *testing.T) {
 	})
 	defer ts.Close()
 
-	result, err := fb.Get(context.Background(), "issue-1")
+	result, err := fb.Get(context.Background(), workitems.GetQuery{IssueID: "issue-1"})
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
@@ -237,11 +236,11 @@ func TestGet_NotFound(t *testing.T) {
 	})
 	defer ts.Close()
 
-	_, err := fb.Get(context.Background(), "nonexistent")
+	_, err := fb.Get(context.Background(), workitems.GetQuery{IssueID: "nonexistent"})
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
-	if !backend.IsKind(err, backend.KindNotFound) {
+	if !workitems.IsKind(err, workitems.KindNotFound) {
 		t.Fatalf("expected KindNotFound, got %v", err)
 	}
 }
@@ -252,11 +251,11 @@ func TestGet_ServerError(t *testing.T) {
 	})
 	defer ts.Close()
 
-	_, err := fb.Get(context.Background(), "issue-1")
+	_, err := fb.Get(context.Background(), workitems.GetQuery{IssueID: "issue-1"})
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
-	if !backend.IsKind(err, backend.KindInternal) {
+	if !workitems.IsKind(err, workitems.KindInternal) {
 		t.Fatalf("expected KindInternal, got %v", err)
 	}
 }
@@ -283,7 +282,7 @@ func TestList_HappyPath(t *testing.T) {
 	})
 	defer ts.Close()
 
-	result, err := fb.List(context.Background(), backend.ListOpts{Status: "open", Limit: 10})
+	result, err := fb.List(context.Background(), workitems.ListFilter{Status: "open", Limit: 10})
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
@@ -305,7 +304,7 @@ func TestList_QueryParams(t *testing.T) {
 
 	// Only fleet-db-supported fields: Status, IssueType, Assignee, Labels,
 	// SourceRepos, ParentID, UpdatedAfter, UpdatedBefore, Limit.
-	_, _ = fb.List(context.Background(), backend.ListOpts{
+	_, _ = fb.List(context.Background(), workitems.ListFilter{
 		Status:       "open",
 		Limit:        5,
 		Assignee:     "agent-1",
@@ -337,7 +336,7 @@ func TestList_ClientFiltersMultipleReposWithoutServerLimit(t *testing.T) {
 	})
 	defer ts.Close()
 
-	result, err := fb.List(context.Background(), backend.ListOpts{
+	result, err := fb.List(context.Background(), workitems.ListFilter{
 		SourceRepos: []string{"repo-b", "repo-c"},
 		Limit:       1,
 	})
@@ -360,14 +359,14 @@ func TestList_UnsupportedFilter_Single(t *testing.T) {
 	defer ts.Close()
 
 	p := 2
-	_, err := fb.List(context.Background(), backend.ListOpts{
+	_, err := fb.List(context.Background(), workitems.ListFilter{
 		Status:   "open",
 		Priority: &p,
 	})
 	if err == nil {
 		t.Fatal("expected error for unsupported filter Priority")
 	}
-	if !errors.Is(err, backend.ErrFilterNotSupported) {
+	if !errors.Is(err, workitems.ErrFilterNotSupported) {
 		t.Errorf("expected ErrFilterNotSupported, got %v", err)
 	}
 	if !strings.Contains(err.Error(), "Priority") {
@@ -383,19 +382,18 @@ func TestList_UnsupportedFilter_Multiple(t *testing.T) {
 	defer ts.Close()
 
 	p := 1
-	_, err := fb.List(context.Background(), backend.ListOpts{
+	_, err := fb.List(context.Background(), workitems.ListFilter{
 		Query:    "test",
 		Priority: &p,
-		Overdue:  true,
 	})
 	if err == nil {
 		t.Fatal("expected error for unsupported filters")
 	}
-	if !errors.Is(err, backend.ErrFilterNotSupported) {
+	if !errors.Is(err, workitems.ErrFilterNotSupported) {
 		t.Errorf("expected ErrFilterNotSupported, got %v", err)
 	}
 	errMsg := err.Error()
-	for _, field := range []string{"Query", "Priority", "Overdue"} {
+	for _, field := range []string{"Query", "Priority"} {
 		if !strings.Contains(errMsg, field) {
 			t.Errorf("error should mention %q, got %q", field, errMsg)
 		}
@@ -408,7 +406,7 @@ func TestList_EmptyOpts_NoError(t *testing.T) {
 	})
 	defer ts.Close()
 
-	_, err := fb.List(context.Background(), backend.ListOpts{})
+	_, err := fb.List(context.Background(), workitems.ListFilter{})
 	if err != nil {
 		t.Errorf("empty ListOpts should not error, got %v", err)
 	}
@@ -435,7 +433,7 @@ func TestList_ParentFilter_HappyPath(t *testing.T) {
 	})
 	defer ts.Close()
 
-	result, err := fb.List(context.Background(), backend.ListOpts{ParentID: "epic-1"})
+	result, err := fb.List(context.Background(), workitems.ListFilter{ParentID: "epic-1"})
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
@@ -455,7 +453,7 @@ func TestList_ParentFilter_Empty(t *testing.T) {
 		respondOK(w, []*testIssueWithCounts{})
 	})
 	defer ts.Close()
-	result, err := fb.List(context.Background(), backend.ListOpts{ParentID: "epic-1"})
+	result, err := fb.List(context.Background(), workitems.ListFilter{ParentID: "epic-1"})
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
@@ -512,7 +510,7 @@ func TestSearch_EmptyQuery(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error")
 	}
-	if !backend.IsKind(err, backend.KindValidation) {
+	if !workitems.IsKind(err, workitems.KindValidation) {
 		t.Errorf("expected KindValidation, got %v", err)
 	}
 }
@@ -526,7 +524,7 @@ func TestSearch_NegativeLimit(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error")
 	}
-	if !backend.IsKind(err, backend.KindValidation) {
+	if !workitems.IsKind(err, workitems.KindValidation) {
 		t.Errorf("expected KindValidation, got %v", err)
 	}
 }
@@ -555,37 +553,20 @@ func TestCheckFleetUnsupportedFilters_EachField(t *testing.T) {
 
 	tests := []struct {
 		name string
-		opts backend.ListOpts
+		opts workitems.ListFilter
 	}{
-		{"Query", backend.ListOpts{Query: "search"}},
-		{"Priority", backend.ListOpts{Priority: &intVal}},
-		{"LabelsAny", backend.ListOpts{LabelsAny: []string{"a"}}},
-		{"IDs", backend.ListOpts{IDs: []string{"id-1"}}},
-		{"TitleContains", backend.ListOpts{TitleContains: "title"}},
-		{"DescriptionContains", backend.ListOpts{DescriptionContains: "desc"}},
-		{"NotesContains", backend.ListOpts{NotesContains: "note"}},
-		{"CreatedAfter", backend.ListOpts{CreatedAfter: "2026-01-01"}},
-		{"CreatedBefore", backend.ListOpts{CreatedBefore: "2026-12-31"}},
-		{"ClosedAfter", backend.ListOpts{ClosedAfter: "2026-01-01"}},
-		{"ClosedBefore", backend.ListOpts{ClosedBefore: "2026-12-31"}},
-		{"EmptyDescription", backend.ListOpts{EmptyDescription: true}},
-		{"NoAssignee", backend.ListOpts{NoAssignee: true}},
-		{"NoLabels", backend.ListOpts{NoLabels: true}},
-		{"PriorityMin", backend.ListOpts{PriorityMin: &intVal}},
-		{"PriorityMax", backend.ListOpts{PriorityMax: &intVal}},
-		{"Pinned", backend.ListOpts{Pinned: &boolTrue}},
-		{"IncludeTemplates", backend.ListOpts{IncludeTemplates: true}},
-		{"Ephemeral", backend.ListOpts{Ephemeral: &boolTrue}},
-		{"MolType", backend.ListOpts{MolType: "molecule"}},
-		{"ExcludeStatus", backend.ListOpts{ExcludeStatus: []string{"closed"}}},
-		{"ExcludeTypes", backend.ListOpts{ExcludeTypes: []string{"epic"}}},
-		{"Deferred", backend.ListOpts{Deferred: true}},
-		{"DeferAfter", backend.ListOpts{DeferAfter: "2026-01-01"}},
-		{"DeferBefore", backend.ListOpts{DeferBefore: "2026-12-31"}},
-		{"DueAfter", backend.ListOpts{DueAfter: "2026-01-01"}},
-		{"DueBefore", backend.ListOpts{DueBefore: "2026-12-31"}},
-		{"Overdue", backend.ListOpts{Overdue: true}},
-		{"AllowStale", backend.ListOpts{AllowStale: true}},
+		{"Query", workitems.ListFilter{Query: "search"}},
+		{"Priority", workitems.ListFilter{Priority: &intVal}},
+		{"LabelsAny", workitems.ListFilter{LabelsAny: []string{"a"}}},
+		{"TitleContains", workitems.ListFilter{TitleContains: "title"}},
+		{"DescriptionContains", workitems.ListFilter{DescriptionContains: "desc"}},
+		{"NotesContains", workitems.ListFilter{NotesContains: "note"}},
+		{"CreatedAfter", workitems.ListFilter{CreatedAfter: "2026-01-01"}},
+		{"CreatedBefore", workitems.ListFilter{CreatedBefore: "2026-12-31"}},
+		{"EmptyDescription", workitems.ListFilter{EmptyDescription: true}},
+		{"NoAssignee", workitems.ListFilter{NoAssignee: true}},
+		{"NoLabels", workitems.ListFilter{NoLabels: true}},
+		{"Pinned", workitems.ListFilter{Pinned: &boolTrue}},
 	}
 
 	for _, tt := range tests {
@@ -594,7 +575,7 @@ func TestCheckFleetUnsupportedFilters_EachField(t *testing.T) {
 			if err == nil {
 				t.Fatalf("expected error for unsupported field %s, got nil", tt.name)
 			}
-			if !errors.Is(err, backend.ErrFilterNotSupported) {
+			if !errors.Is(err, workitems.ErrFilterNotSupported) {
 				t.Errorf("expected error wrapping ErrFilterNotSupported, got %v", err)
 			}
 			if !strings.Contains(err.Error(), tt.name) {
@@ -607,7 +588,7 @@ func TestCheckFleetUnsupportedFilters_EachField(t *testing.T) {
 // TestCheckFleetUnsupportedFilters_SupportedFieldsOnly verifies that setting
 // only supported fields does not trigger an error.
 func TestCheckFleetUnsupportedFilters_SupportedFieldsOnly(t *testing.T) {
-	opts := backend.ListOpts{
+	opts := workitems.ListFilter{
 		Status:        "open",
 		IssueType:     "task",
 		Assignee:      "agent-1",
@@ -645,7 +626,7 @@ func TestCreate_HappyPath(t *testing.T) {
 	})
 	defer ts.Close()
 
-	result, err := fb.Create(context.Background(), backend.CreateParams{
+	result, err := fb.Create(context.Background(), workitems.CreateCommand{
 		Title:     "New Issue",
 		Status:    "deferred",
 		IssueType: "task",
@@ -674,8 +655,8 @@ func TestCreateParentNotFoundIsValidation(t *testing.T) {
 	})
 	defer ts.Close()
 
-	_, err := fb.Create(context.Background(), backend.CreateParams{Title: "Child", Parent: "missing"})
-	if !backend.IsKind(err, backend.KindValidation) {
+	_, err := fb.Create(context.Background(), workitems.CreateCommand{Title: "Child", Parent: "missing"})
+	if !workitems.IsKind(err, workitems.KindValidation) {
 		t.Fatalf("Create error = %v, want validation", err)
 	}
 }
@@ -698,7 +679,7 @@ func TestUpdate_HappyPath(t *testing.T) {
 	defer ts.Close()
 
 	title := "Updated Title"
-	err := fb.Update(context.Background(), "test-1", backend.UpdateParams{
+	err := fb.Patch(context.Background(), workitems.PatchCommand{IssueID: "test-1",
 		Title: &title,
 	})
 	if err != nil {
@@ -706,46 +687,6 @@ func TestUpdate_HappyPath(t *testing.T) {
 	}
 	if gotBody["title"] != "Updated Title" {
 		t.Errorf("title = %v, want %q", gotBody["title"], "Updated Title")
-	}
-}
-
-func TestUpdate_ClaimRejected(t *testing.T) {
-	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
-		t.Fatal("server should not be called when Claim=true")
-	})
-	defer ts.Close()
-
-	err := fb.Update(context.Background(), "test-1", backend.UpdateParams{
-		Claim: true,
-	})
-	if err == nil {
-		t.Fatal("expected error for Claim=true")
-	}
-	var be *backend.BackendError
-	if !errors.As(err, &be) {
-		t.Fatalf("expected *backend.BackendError, got %T", err)
-	}
-	if be.Kind != backend.KindValidation {
-		t.Errorf("Kind = %v, want KindValidation", be.Kind)
-	}
-	if !strings.Contains(be.Message, "ClaimIssue") {
-		t.Errorf("Message = %q, want it to mention ClaimIssue", be.Message)
-	}
-}
-
-func TestUpdate_ClaimFalseAllowed(t *testing.T) {
-	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
-		respondOK(w, json.RawMessage(`{}`))
-	})
-	defer ts.Close()
-
-	title := "Some Title"
-	err := fb.Update(context.Background(), "test-1", backend.UpdateParams{
-		Claim: false,
-		Title: &title,
-	})
-	if err != nil {
-		t.Fatalf("Update with Claim=false should succeed, got: %v", err)
 	}
 }
 
@@ -768,7 +709,7 @@ func TestUpdate_StatusInProgressWithAssigneeClaimsAsAssignee(t *testing.T) {
 
 	status := "in_progress"
 	assignee := "[H] Tyson"
-	err := fb.Update(context.Background(), "test-1", backend.UpdateParams{
+	err := fb.Patch(context.Background(), workitems.PatchCommand{IssueID: "test-1",
 		Status:   &status,
 		Assignee: &assignee,
 	})
@@ -816,7 +757,7 @@ func TestUpdate_StatusOpenClearsAssigneeOnAlreadyOpenIssue(t *testing.T) {
 	defer ts.Close()
 
 	status := "open"
-	if err := fb.Update(context.Background(), "test-1", backend.UpdateParams{Status: &status}); err != nil {
+	if err := fb.Patch(context.Background(), workitems.PatchCommand{IssueID: "test-1", Status: &status}); err != nil {
 		t.Fatalf("Update: %v", err)
 	}
 	if !gotAssign {
@@ -864,7 +805,7 @@ func TestUpdate_StatusOpenAfterReopenClearsAssignee(t *testing.T) {
 	defer ts.Close()
 
 	status := "open"
-	if err := fb.Update(context.Background(), "test-1", backend.UpdateParams{Status: &status}); err != nil {
+	if err := fb.Patch(context.Background(), workitems.PatchCommand{IssueID: "test-1", Status: &status}); err != nil {
 		t.Fatalf("Update: %v", err)
 	}
 	if !sawReopen {
@@ -891,7 +832,7 @@ func TestUpdate_AssigneeOnlyUsesAssignEndpoint(t *testing.T) {
 	defer ts.Close()
 
 	assignee := "alice"
-	err := fb.Update(context.Background(), "test-1", backend.UpdateParams{Assignee: &assignee})
+	err := fb.Patch(context.Background(), workitems.PatchCommand{IssueID: "test-1", Assignee: &assignee})
 	if err != nil {
 		t.Fatalf("Update: %v", err)
 	}
@@ -928,7 +869,7 @@ func TestUpdate_LabelOnlyUsesLabelEndpoint(t *testing.T) {
 	})
 	defer ts.Close()
 
-	err := fb.Update(context.Background(), "test-1", backend.UpdateParams{AddLabels: []string{"frontend"}})
+	err := fb.Patch(context.Background(), workitems.PatchCommand{IssueID: "test-1", AddLabels: []string{"frontend"}})
 	if err != nil {
 		t.Fatalf("Update: %v", err)
 	}
@@ -953,7 +894,7 @@ func TestClaimIssue_HappyPath(t *testing.T) {
 	})
 	defer ts.Close()
 
-	err := fb.ClaimIssue(context.Background(), "test-1", 0)
+	err := fb.ClaimAsActor(context.Background(), "test-1", 0, "test-agent")
 	if err != nil {
 		t.Fatalf("ClaimIssue: %v", err)
 	}
@@ -971,7 +912,7 @@ func TestClaimIssueAsActor_OverridesActorHeader(t *testing.T) {
 	})
 	defer ts.Close()
 
-	if err := fb.ClaimIssueAsActor(context.Background(), "test-1", 0, "desktopqa"); err != nil {
+	if err := fb.ClaimAsActor(context.Background(), "test-1", 0, "desktopqa"); err != nil {
 		t.Fatalf("ClaimIssueAsActor: %v", err)
 	}
 }
@@ -991,7 +932,7 @@ func TestClaimIssueAsActor_UsesDelegationForServiceCredential(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := fb.ClaimIssueAsActor(context.Background(), "test-1", 0, "planner"); err != nil {
+	if err := fb.ClaimAsActor(context.Background(), "test-1", 0, "planner"); err != nil {
 		t.Fatalf("ClaimIssueAsActor: %v", err)
 	}
 	if gotActor != "loom-local-service" || gotDelegated != "planner" {
@@ -1020,7 +961,7 @@ func TestRenewIssueClaimAsActor_SendsRenewOnly(t *testing.T) {
 	})
 	defer ts.Close()
 
-	if err := fb.RenewIssueClaimAsActor(context.Background(), "test-1", 0, "desktopqa"); err != nil {
+	if err := fb.RenewClaimAsActor(context.Background(), "test-1", 0, "desktopqa"); err != nil {
 		t.Fatalf("RenewIssueClaimAsActor: %v", err)
 	}
 }
@@ -1043,7 +984,7 @@ func TestClaimIssue_ForwardsLockTTL(t *testing.T) {
 	})
 	defer ts.Close()
 
-	if err := fb.ClaimIssue(context.Background(), "test-1", 5*time.Minute); err != nil {
+	if err := fb.ClaimAsActor(context.Background(), "test-1", 5*time.Minute, "test-agent"); err != nil {
 		t.Fatalf("ClaimIssue: %v", err)
 	}
 }
@@ -1063,18 +1004,18 @@ func TestClaimIssue_RoundsPositiveSubsecondTTL(t *testing.T) {
 	})
 	defer ts.Close()
 
-	if err := fb.ClaimIssue(context.Background(), "test-1", time.Millisecond); err != nil {
+	if err := fb.ClaimAsActor(context.Background(), "test-1", time.Millisecond, "test-agent"); err != nil {
 		t.Fatalf("ClaimIssue: %v", err)
 	}
 }
 
 func TestClaimIssue_EmptyID(t *testing.T) {
 	fb, _ := New(Config{BaseURL: "http://x", WorkspaceID: "ws"})
-	err := fb.ClaimIssue(context.Background(), "", 0)
+	err := fb.ClaimAsActor(context.Background(), "", 0, "test-agent")
 	if err == nil {
 		t.Fatal("expected error for empty ID")
 	}
-	if !backend.IsKind(err, backend.KindValidation) {
+	if !workitems.IsKind(err, workitems.KindValidation) {
 		t.Fatalf("expected KindValidation, got %v", err)
 	}
 }
@@ -1085,11 +1026,11 @@ func TestClaimIssue_NegativeTTL(t *testing.T) {
 	})
 	defer ts.Close()
 
-	err := fb.ClaimIssue(context.Background(), "test-1", -time.Second)
+	err := fb.ClaimAsActor(context.Background(), "test-1", -time.Second, "test-agent")
 	if err == nil {
 		t.Fatal("expected error for negative TTL")
 	}
-	if !backend.IsKind(err, backend.KindValidation) {
+	if !workitems.IsKind(err, workitems.KindValidation) {
 		t.Fatalf("expected KindValidation, got %v", err)
 	}
 }
@@ -1100,11 +1041,11 @@ func TestClaimIssue_Conflict(t *testing.T) {
 	})
 	defer ts.Close()
 
-	err := fb.ClaimIssue(context.Background(), "test-1", 0)
+	err := fb.ClaimAsActor(context.Background(), "test-1", 0, "test-agent")
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
-	if !backend.IsKind(err, backend.KindConflict) {
+	if !workitems.IsKind(err, workitems.KindConflict) {
 		t.Fatalf("expected KindConflict, got %v", err)
 	}
 }
@@ -1184,7 +1125,7 @@ func TestClose_HappyPath(t *testing.T) {
 	})
 	defer ts.Close()
 
-	result, err := fb.Close(context.Background(), "test-1", backend.CloseParams{Reason: "done", Session: "session-1", SuggestNext: true, Force: true})
+	result, err := fb.Close(context.Background(), workitems.CloseCommand{IssueID: "test-1", Reason: "done", Session: "session-1", SuggestNext: true, Force: true})
 	if err != nil {
 		t.Fatalf("Close: %v", err)
 	}
@@ -1209,7 +1150,7 @@ func TestClose_NoUnblockedIssues(t *testing.T) {
 	})
 	defer ts.Close()
 
-	result, err := fb.Close(context.Background(), "T-10", backend.CloseParams{Reason: "done"})
+	result, err := fb.Close(context.Background(), workitems.CloseCommand{IssueID: "T-10", Reason: "done"})
 	if err != nil {
 		t.Fatalf("Close: %v", err)
 	}
@@ -1234,7 +1175,7 @@ func TestClose_BareIssueResponse(t *testing.T) {
 	})
 	defer ts.Close()
 
-	result, err := fb.Close(context.Background(), "T-11", backend.CloseParams{Reason: "done"})
+	result, err := fb.Close(context.Background(), workitems.CloseCommand{IssueID: "T-11", Reason: "done"})
 	if err != nil {
 		t.Fatalf("Close: %v", err)
 	}
@@ -1252,14 +1193,14 @@ func TestClose_ServerError(t *testing.T) {
 	})
 	defer ts.Close()
 
-	result, err := fb.Close(context.Background(), "test-1", backend.CloseParams{})
+	result, err := fb.Close(context.Background(), workitems.CloseCommand{IssueID: "test-1"})
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
 	if result != nil {
 		t.Errorf("result = %v, want nil on error", result)
 	}
-	if !backend.IsKind(err, backend.KindConflict) {
+	if !workitems.IsKind(err, workitems.KindConflict) {
 		t.Errorf("expected KindConflict, got %v", err)
 	}
 }
@@ -1271,7 +1212,7 @@ func TestClose_EmptyResponse(t *testing.T) {
 	})
 	defer ts.Close()
 
-	result, err := fb.Close(context.Background(), "test-1", backend.CloseParams{})
+	result, err := fb.Close(context.Background(), workitems.CloseCommand{IssueID: "test-1"})
 	if err == nil {
 		t.Fatal("expected error for empty response data, got nil")
 	}
@@ -1290,7 +1231,7 @@ func TestClose_UnmarshalError(t *testing.T) {
 	})
 	defer ts.Close()
 
-	result, err := fb.Close(context.Background(), "test-1", backend.CloseParams{})
+	result, err := fb.Close(context.Background(), workitems.CloseCommand{IssueID: "test-1"})
 	if err == nil {
 		t.Fatal("expected unmarshal error, got nil")
 	}
@@ -1314,32 +1255,35 @@ func TestDelete_HappyPath(t *testing.T) {
 	})
 	defer ts.Close()
 
-	err := fb.Delete(context.Background(), backend.DeleteParams{IDs: []string{"a", "b"}})
+	result, err := fb.Delete(context.Background(), workitems.DeleteCommand{IssueID: "a"})
 	if err != nil {
 		t.Fatalf("Delete: %v", err)
 	}
-	if len(deletedIDs) != 2 {
-		t.Errorf("deletedIDs = %v, want [a b]", deletedIDs)
+	if len(deletedIDs) != 1 || deletedIDs[0] != "a" || result.DeletedCount != 1 {
+		t.Errorf("deletedIDs = %v result=%+v, want [a] and one deletion", deletedIDs, result)
 	}
 }
 
 func TestDelete_EmptyIDs(t *testing.T) {
 	fb, _ := New(Config{BaseURL: "http://x", WorkspaceID: "ws"})
-	err := fb.Delete(context.Background(), backend.DeleteParams{})
-	if !backend.IsKind(err, backend.KindValidation) {
+	_, err := fb.Delete(context.Background(), workitems.DeleteCommand{})
+	if !workitems.IsKind(err, workitems.KindValidation) {
 		t.Fatalf("expected KindValidation, got %v", err)
 	}
 }
 
-func TestDelete_ForceSkipsNotFound(t *testing.T) {
+func TestDelete_IsIdempotentWhenMissing(t *testing.T) {
 	fb, ts := newTestServer(t, func(w http.ResponseWriter, _ *http.Request) {
 		respondErr(w, 404, "not found")
 	})
 	defer ts.Close()
 
-	err := fb.Delete(context.Background(), backend.DeleteParams{IDs: []string{"gone"}, Force: true})
+	result, err := fb.Delete(context.Background(), workitems.DeleteCommand{IssueID: "gone"})
 	if err != nil {
-		t.Fatalf("expected nil with Force, got %v", err)
+		t.Fatalf("expected idempotent nil, got %v", err)
+	}
+	if result.DeletedCount != 1 {
+		t.Fatalf("result = %+v, want canonical deletion result", result)
 	}
 }
 
@@ -1349,8 +1293,8 @@ func TestDelete_ActiveClaimConflict(t *testing.T) {
 	})
 	defer ts.Close()
 
-	err := fb.Delete(context.Background(), backend.DeleteParams{IDs: []string{"active"}})
-	if !backend.IsKind(err, backend.KindConflict) {
+	_, err := fb.Delete(context.Background(), workitems.DeleteCommand{IssueID: "active"})
+	if !workitems.IsKind(err, workitems.KindConflict) {
 		t.Fatalf("Delete() error = %v, want KindConflict", err)
 	}
 }
@@ -1603,7 +1547,7 @@ func TestConnectionRefused(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
-	if !backend.IsKind(err, backend.KindUnavailable) && !backend.IsKind(err, backend.KindTimeout) {
+	if !workitems.IsKind(err, workitems.KindUnavailable) && !workitems.IsKind(err, workitems.KindTimeout) {
 		t.Fatalf("expected KindUnavailable or KindTimeout, got %v", err)
 	}
 }
@@ -1623,7 +1567,7 @@ func TestNonJSONResponse(t *testing.T) {
 		t.Fatal("expected error, got nil")
 	}
 	// Non-JSON response is classified as a transport error (parse failure).
-	if !backend.IsKind(err, backend.KindUnavailable) {
+	if !workitems.IsKind(err, workitems.KindUnavailable) {
 		t.Fatalf("expected KindUnavailable, got %v", err)
 	}
 }
@@ -1674,7 +1618,7 @@ func TestReopen_HappyPath(t *testing.T) {
 	})
 	defer ts.Close()
 
-	err := fb.Reopen(context.Background(), "test-1", backend.ReopenParams{Reason: "need more work"})
+	err := fb.Reopen(context.Background(), workitems.ReopenCommand{IssueID: "test-1", Reason: "need more work"})
 	if err != nil {
 		t.Fatalf("Reopen: %v", err)
 	}
@@ -1691,8 +1635,8 @@ func TestReopen_HappyPath(t *testing.T) {
 
 func TestReopen_EmptyID(t *testing.T) {
 	fb, _ := New(Config{BaseURL: "http://x", WorkspaceID: "ws"})
-	err := fb.Reopen(context.Background(), "", backend.ReopenParams{})
-	if !backend.IsKind(err, backend.KindValidation) {
+	err := fb.Reopen(context.Background(), workitems.ReopenCommand{})
+	if !workitems.IsKind(err, workitems.KindValidation) {
 		t.Fatalf("expected KindValidation, got %v", err)
 	}
 }
@@ -1817,7 +1761,7 @@ func TestDeferred_RejectsUnprojectableFilters(t *testing.T) {
 	defer ts.Close()
 
 	_, err := fb.Deferred(context.Background(), workitems.AvailabilityQuery{MolType: "work"})
-	if !errors.Is(err, backend.ErrFilterNotSupported) {
+	if !errors.Is(err, workitems.ErrFilterNotSupported) {
 		t.Fatalf("Deferred error = %v, want unsupported filter", err)
 	}
 }

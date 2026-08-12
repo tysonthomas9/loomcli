@@ -48,16 +48,16 @@ type WorkspaceConfig = config.WorkspaceConfig
 
 type MockExecRunner = clitest.MockExecRunner
 type MockAgentInvoker = clitest.MockAgentInvoker
-type MockIssueBackend = clitest.MockIssueBackend
+type MockWorkItems = clitest.MockWorkItems
 type MockFileSystem = clitest.MockFileSystem
 type MockGitRunner = clitest.MockGitRunner
 type ExecBridgeGitRunner = clitest.ExecBridgeGitRunner
 
-func NewTestDeps(t *testing.T) (*cli.Deps, *clitest.MockGitRunner, *clitest.MockExecRunner, *clitest.MockFileSystem, *clitest.MockIssueBackend) {
+func NewTestDeps(t *testing.T) (*cli.Deps, *clitest.MockGitRunner, *clitest.MockExecRunner, *clitest.MockFileSystem, *clitest.MockWorkItems) {
 	return clitest.NewTestDeps(t)
 }
 
-func NewMockIssueBackend() *clitest.MockIssueBackend { return clitest.NewMockIssueBackend() }
+func NewMockWorkItems() *clitest.MockWorkItems { return clitest.NewMockWorkItems() }
 
 // --- testutil helpers ---
 

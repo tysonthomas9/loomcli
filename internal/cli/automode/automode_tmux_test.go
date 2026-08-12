@@ -34,9 +34,9 @@ func TestGetAnyAvailableTasks_WithParentID(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			resetDefaultIssueBackend()
-			t.Cleanup(resetDefaultIssueBackend)
-			mock := NewMockIssueBackend()
+			resetDefaultWorkItems()
+			t.Cleanup(resetDefaultWorkItems)
+			mock := NewMockWorkItems()
 			issues := []workitems.IssueSummary{{ID: "T-3", Title: "Any task", Status: "open", Design: ""}}
 			mock.ReadyResult = issues
 			var capturedOpts workitems.AvailabilityQuery
@@ -44,7 +44,7 @@ func TestGetAnyAvailableTasks_WithParentID(t *testing.T) {
 				capturedOpts = opts
 				return issues, nil
 			}
-			setDefaultIssueBackend(mock)
+			setDefaultWorkItems(mock)
 
 			_, err := GetAnyAvailableTasks(t.Context(), tt.parentID, "")
 			if err != nil {
@@ -83,9 +83,9 @@ func TestHasAvailablePlanningTasks_WithParentID(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			resetDefaultIssueBackend()
-			t.Cleanup(resetDefaultIssueBackend)
-			mock := NewMockIssueBackend()
+			resetDefaultWorkItems()
+			t.Cleanup(resetDefaultWorkItems)
+			mock := NewMockWorkItems()
 			issues := []workitems.IssueSummary{{ID: "T-1", Title: "Task", Status: "open", Design: ""}}
 			mock.ReadyResult = issues
 			var capturedOpts workitems.AvailabilityQuery
@@ -93,7 +93,7 @@ func TestHasAvailablePlanningTasks_WithParentID(t *testing.T) {
 				capturedOpts = opts
 				return issues, nil
 			}
-			setDefaultIssueBackend(mock)
+			setDefaultWorkItems(mock)
 
 			got, err := HasAvailablePlanningTasks(t.Context(), tt.parentID, "")
 			if err != nil {
@@ -133,9 +133,9 @@ func TestHasAvailableImplementationTasks_WithParentID(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			resetDefaultIssueBackend()
-			t.Cleanup(resetDefaultIssueBackend)
-			mock := NewMockIssueBackend()
+			resetDefaultWorkItems()
+			t.Cleanup(resetDefaultWorkItems)
+			mock := NewMockWorkItems()
 			issues := []workitems.IssueSummary{{ID: "T-2", Title: "Task with design", Status: "open", Design: "Implementation plan"}}
 			mock.ReadyResult = issues
 			var capturedOpts workitems.AvailabilityQuery
@@ -143,7 +143,7 @@ func TestHasAvailableImplementationTasks_WithParentID(t *testing.T) {
 				capturedOpts = opts
 				return issues, nil
 			}
-			setDefaultIssueBackend(mock)
+			setDefaultWorkItems(mock)
 
 			got, err := HasAvailableImplementationTasks(t.Context(), tt.parentID, "")
 			if err != nil {
@@ -183,9 +183,9 @@ func TestHasAnyAvailableTasks_WithParentID(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			resetDefaultIssueBackend()
-			t.Cleanup(resetDefaultIssueBackend)
-			mock := NewMockIssueBackend()
+			resetDefaultWorkItems()
+			t.Cleanup(resetDefaultWorkItems)
+			mock := NewMockWorkItems()
 			issues := []workitems.IssueSummary{{ID: "T-3", Title: "Any task", Status: "open", Design: ""}}
 			mock.ReadyResult = issues
 			var capturedOpts workitems.AvailabilityQuery
@@ -193,7 +193,7 @@ func TestHasAnyAvailableTasks_WithParentID(t *testing.T) {
 				capturedOpts = opts
 				return issues, nil
 			}
-			setDefaultIssueBackend(mock)
+			setDefaultWorkItems(mock)
 
 			got, err := HasAnyAvailableTasks(t.Context(), tt.parentID, "")
 			if err != nil {
@@ -286,15 +286,15 @@ func TestStartTmuxSession_WithParentID(t *testing.T) {
 }
 
 // ============================================================================
-// fetchReadyIssues Tests (via MockIssueBackend)
+// fetchReadyIssues Tests (via MockWorkItems)
 // ============================================================================
 
 func TestFetchReadyIssues_EmptyResult(t *testing.T) {
-	resetDefaultIssueBackend()
-	t.Cleanup(resetDefaultIssueBackend)
-	mock := NewMockIssueBackend()
+	resetDefaultWorkItems()
+	t.Cleanup(resetDefaultWorkItems)
+	mock := NewMockWorkItems()
 	mock.ReadyResult = []workitems.IssueSummary{}
-	setDefaultIssueBackend(mock)
+	setDefaultWorkItems(mock)
 
 	issues, err := fetchReadyIssues(t.Context(), "", "")
 	if err != nil {
@@ -306,15 +306,15 @@ func TestFetchReadyIssues_EmptyResult(t *testing.T) {
 }
 
 func TestFetchReadyIssues_ReturnsTrackerResult(t *testing.T) {
-	resetDefaultIssueBackend()
-	t.Cleanup(resetDefaultIssueBackend)
-	mock := NewMockIssueBackend()
+	resetDefaultWorkItems()
+	t.Cleanup(resetDefaultWorkItems)
+	mock := NewMockWorkItems()
 	mock.ReadyResult = []workitems.IssueSummary{
 		{ID: "T-1", Title: "First", Status: "open"},
 		{ID: "T-2", Title: "Second", Status: "open", Design: "plan"},
 		{ID: "T-3", Title: "Third", Status: "open", IssueType: "epic"},
 	}
-	setDefaultIssueBackend(mock)
+	setDefaultWorkItems(mock)
 
 	issues, err := fetchReadyIssues(t.Context(), "", "")
 	if err != nil {
@@ -329,11 +329,11 @@ func TestFetchReadyIssues_ReturnsTrackerResult(t *testing.T) {
 }
 
 func TestFetchReadyIssues_TrackerError(t *testing.T) {
-	resetDefaultIssueBackend()
-	t.Cleanup(resetDefaultIssueBackend)
-	mock := NewMockIssueBackend()
+	resetDefaultWorkItems()
+	t.Cleanup(resetDefaultWorkItems)
+	mock := NewMockWorkItems()
 	mock.ReadyErr = fmt.Errorf("command failed")
-	setDefaultIssueBackend(mock)
+	setDefaultWorkItems(mock)
 
 	_, err := fetchReadyIssues(t.Context(), "", "")
 	if err == nil {
@@ -345,15 +345,15 @@ func TestFetchReadyIssues_TrackerError(t *testing.T) {
 }
 
 func TestFetchReadyIssues_PassesParentID(t *testing.T) {
-	resetDefaultIssueBackend()
-	t.Cleanup(resetDefaultIssueBackend)
-	mock := NewMockIssueBackend()
+	resetDefaultWorkItems()
+	t.Cleanup(resetDefaultWorkItems)
+	mock := NewMockWorkItems()
 	var capturedOpts workitems.AvailabilityQuery
 	mock.ReadyFn = func(_ context.Context, opts workitems.AvailabilityQuery) ([]workitems.IssueSummary, error) {
 		capturedOpts = opts
 		return nil, nil
 	}
-	setDefaultIssueBackend(mock)
+	setDefaultWorkItems(mock)
 
 	_, err := fetchReadyIssues(t.Context(), "epic-123", "")
 	if err != nil {
@@ -365,19 +365,19 @@ func TestFetchReadyIssues_PassesParentID(t *testing.T) {
 }
 
 // ============================================================================
-// fetchReadyIssues - Repo Label Filtering Tests (via MockIssueBackend)
+// fetchReadyIssues - Repo Label Filtering Tests (via MockWorkItems)
 // ============================================================================
 
 func TestFetchReadyIssues_PassesRepoLabel(t *testing.T) {
-	resetDefaultIssueBackend()
-	t.Cleanup(resetDefaultIssueBackend)
-	mock := NewMockIssueBackend()
+	resetDefaultWorkItems()
+	t.Cleanup(resetDefaultWorkItems)
+	mock := NewMockWorkItems()
 	var capturedOpts workitems.AvailabilityQuery
 	mock.ReadyFn = func(_ context.Context, opts workitems.AvailabilityQuery) ([]workitems.IssueSummary, error) {
 		capturedOpts = opts
 		return nil, nil
 	}
-	setDefaultIssueBackend(mock)
+	setDefaultWorkItems(mock)
 
 	_, err := fetchReadyIssues(t.Context(), "", "frontend")
 	if err != nil {
@@ -389,15 +389,15 @@ func TestFetchReadyIssues_PassesRepoLabel(t *testing.T) {
 }
 
 func TestFetchReadyIssues_NoRepoLabel(t *testing.T) {
-	resetDefaultIssueBackend()
-	t.Cleanup(resetDefaultIssueBackend)
-	mock := NewMockIssueBackend()
+	resetDefaultWorkItems()
+	t.Cleanup(resetDefaultWorkItems)
+	mock := NewMockWorkItems()
 	var capturedOpts workitems.AvailabilityQuery
 	mock.ReadyFn = func(_ context.Context, opts workitems.AvailabilityQuery) ([]workitems.IssueSummary, error) {
 		capturedOpts = opts
 		return nil, nil
 	}
-	setDefaultIssueBackend(mock)
+	setDefaultWorkItems(mock)
 
 	_, err := fetchReadyIssues(t.Context(), "", "")
 	if err != nil {
@@ -409,15 +409,15 @@ func TestFetchReadyIssues_NoRepoLabel(t *testing.T) {
 }
 
 func TestFetchReadyIssues_PassesBothFilters(t *testing.T) {
-	resetDefaultIssueBackend()
-	t.Cleanup(resetDefaultIssueBackend)
-	mock := NewMockIssueBackend()
+	resetDefaultWorkItems()
+	t.Cleanup(resetDefaultWorkItems)
+	mock := NewMockWorkItems()
 	var capturedOpts workitems.AvailabilityQuery
 	mock.ReadyFn = func(_ context.Context, opts workitems.AvailabilityQuery) ([]workitems.IssueSummary, error) {
 		capturedOpts = opts
 		return nil, nil
 	}
-	setDefaultIssueBackend(mock)
+	setDefaultWorkItems(mock)
 
 	_, err := fetchReadyIssues(t.Context(), "E-1", "backend")
 	if err != nil {
@@ -432,19 +432,19 @@ func TestFetchReadyIssues_PassesBothFilters(t *testing.T) {
 }
 
 // ============================================================================
-// fetchReadyIssues - Source Repos Filtering Tests (via MockIssueBackend)
+// fetchReadyIssues - Source Repos Filtering Tests (via MockWorkItems)
 // ============================================================================
 
 func TestFetchReadyIssues_PassesSourceRepos(t *testing.T) {
-	resetDefaultIssueBackend()
-	t.Cleanup(resetDefaultIssueBackend)
-	mock := NewMockIssueBackend()
+	resetDefaultWorkItems()
+	t.Cleanup(resetDefaultWorkItems)
+	mock := NewMockWorkItems()
 	var capturedOpts workitems.AvailabilityQuery
 	mock.ReadyFn = func(_ context.Context, opts workitems.AvailabilityQuery) ([]workitems.IssueSummary, error) {
 		capturedOpts = opts
 		return nil, nil
 	}
-	setDefaultIssueBackend(mock)
+	setDefaultWorkItems(mock)
 	t.Setenv("LOOM_SOURCE_REPOS", "repo-a,repo-b")
 
 	_, err := fetchReadyIssues(t.Context(), "", "")
@@ -457,15 +457,15 @@ func TestFetchReadyIssues_PassesSourceRepos(t *testing.T) {
 }
 
 func TestFetchReadyIssues_SourceReposWithParent(t *testing.T) {
-	resetDefaultIssueBackend()
-	t.Cleanup(resetDefaultIssueBackend)
-	mock := NewMockIssueBackend()
+	resetDefaultWorkItems()
+	t.Cleanup(resetDefaultWorkItems)
+	mock := NewMockWorkItems()
 	var capturedOpts workitems.AvailabilityQuery
 	mock.ReadyFn = func(_ context.Context, opts workitems.AvailabilityQuery) ([]workitems.IssueSummary, error) {
 		capturedOpts = opts
 		return nil, nil
 	}
-	setDefaultIssueBackend(mock)
+	setDefaultWorkItems(mock)
 	t.Setenv("LOOM_SOURCE_REPOS", "repo-a")
 
 	_, err := fetchReadyIssues(t.Context(), "epic-123", "")
@@ -481,15 +481,15 @@ func TestFetchReadyIssues_SourceReposWithParent(t *testing.T) {
 }
 
 func TestFetchReadyIssues_NoSourceRepos(t *testing.T) {
-	resetDefaultIssueBackend()
-	t.Cleanup(resetDefaultIssueBackend)
-	mock := NewMockIssueBackend()
+	resetDefaultWorkItems()
+	t.Cleanup(resetDefaultWorkItems)
+	mock := NewMockWorkItems()
 	var capturedOpts workitems.AvailabilityQuery
 	mock.ReadyFn = func(_ context.Context, opts workitems.AvailabilityQuery) ([]workitems.IssueSummary, error) {
 		capturedOpts = opts
 		return nil, nil
 	}
-	setDefaultIssueBackend(mock)
+	setDefaultWorkItems(mock)
 	t.Setenv("LOOM_SOURCE_REPOS", "")
 
 	_, err := fetchReadyIssues(t.Context(), "", "")
@@ -501,7 +501,7 @@ func TestFetchReadyIssues_NoSourceRepos(t *testing.T) {
 	}
 }
 
-// fetchUnclosedIssueIDs tests removed: function was removed in IssueBackend migration.
+// fetchUnclosedIssueIDs tests removed: function was removed in WorkItems migration.
 // The backend now pre-filters blocked issues in Ready/Blocked endpoints.
 
 // ============================================================================

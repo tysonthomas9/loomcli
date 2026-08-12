@@ -7,7 +7,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 )
 
@@ -17,25 +16,26 @@ func strptr(s string) *string { return &s }
 // "blocked" without a reason — so a blocked card always carries a human-readable
 // note the board surfaces (isBlockedWithNotes), instead of a silent blocked chip.
 func TestEnforceBlockReason(t *testing.T) {
-	withNotes := &backend.IssueDetailData{IssueData: backend.IssueData{Notes: "prev reason"}}
-	noNotes := &backend.IssueDetailData{}
+	withNotes := &workitems.IssueDetail{Notes: "prev reason"}
+	noNotes := &workitems.IssueDetail{}
 	cases := []struct {
 		name    string
-		params  backend.UpdateParams
-		detail  *backend.IssueDetailData
+		params  workitems.PatchCommand
+		detail  *workitems.IssueDetail
 		wantErr bool
 	}{
-		{"non-block status is ignored", backend.UpdateParams{Status: strptr("open")}, noNotes, false},
-		{"block with inline notes ok", backend.UpdateParams{Status: strptr("blocked"), Notes: strptr("BLOCKED: x")}, noNotes, false},
-		{"block with existing notes ok", backend.UpdateParams{Status: strptr("blocked")}, withNotes, false},
-		{"block with empty inline notes + none existing errors", backend.UpdateParams{Status: strptr("blocked"), Notes: strptr("  ")}, noNotes, true},
-		{"bare block, no reason errors", backend.UpdateParams{Status: strptr("blocked")}, noNotes, true},
-		{"bare block, issue not found fails open", backend.UpdateParams{Status: strptr("blocked")}, nil, false},
+		{"non-block status is ignored", workitems.PatchCommand{Status: strptr("open")}, noNotes, false},
+		{"block with inline notes ok", workitems.PatchCommand{Status: strptr("blocked"), Notes: strptr("BLOCKED: x")}, noNotes, false},
+		{"block with existing notes ok", workitems.PatchCommand{Status: strptr("blocked")}, withNotes, false},
+		{"block with empty inline notes + none existing errors", workitems.PatchCommand{Status: strptr("blocked"), Notes: strptr("  ")}, noNotes, true},
+		{"bare block, no reason errors", workitems.PatchCommand{Status: strptr("blocked")}, noNotes, true},
+		{"bare block, issue not found fails open", workitems.PatchCommand{Status: strptr("blocked")}, nil, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			stub := &localBackendStub{detail: tc.detail}
-			err := enforceBlockReason(context.Background(), stub, "WEB-1", tc.params)
+			tc.params.IssueID = "WEB-1"
+			err := enforceBlockReason(context.Background(), stub, tc.params)
 			if (err != nil) != tc.wantErr {
 				t.Fatalf("enforceBlockReason err=%v, wantErr=%v", err, tc.wantErr)
 			}
@@ -62,10 +62,10 @@ func TestDataUpdate_TitleAndDescriptionFlags(t *testing.T) {
 		if !strings.Contains(out, "updated loom-99") {
 			t.Fatalf("update output = %q, want success message", out)
 		}
-		if len(stub.calls) != 1 || stub.calls[0].method != "Update" {
-			t.Fatalf("calls = %#v, want one Update call", stub.calls)
+		if len(stub.calls) != 1 || stub.calls[0].method != "Patch" {
+			t.Fatalf("calls = %#v, want one Patch call", stub.calls)
 		}
-		params := stub.calls[0].args.(backend.UpdateParams)
+		params := stub.calls[0].args.(workitems.PatchCommand)
 		if params.Title == nil || *params.Title != "new title" {
 			t.Fatalf("Update title = %#v, want %q", params.Title, "new title")
 		}
@@ -98,7 +98,7 @@ func TestDataUpdate_DescriptionFromFile(t *testing.T) {
 		if len(stub.calls) != 1 {
 			t.Fatalf("calls = %#v, want one call", stub.calls)
 		}
-		params := stub.calls[0].args.(backend.UpdateParams)
+		params := stub.calls[0].args.(workitems.PatchCommand)
 		if params.Description == nil || *params.Description != body {
 			t.Fatalf("Update description = %#v, want %q", params.Description, body)
 		}
@@ -125,7 +125,7 @@ func TestDataUpdate_DescriptionFromStdin(t *testing.T) {
 		if len(stub.calls) != 1 {
 			t.Fatalf("calls = %#v, want one call", stub.calls)
 		}
-		params := stub.calls[0].args.(backend.UpdateParams)
+		params := stub.calls[0].args.(workitems.PatchCommand)
 		if params.Description == nil || *params.Description != body {
 			t.Fatalf("Update description = %#v, want %q", params.Description, body)
 		}
@@ -173,7 +173,7 @@ func TestDataUpdate_EmptyDescriptionClearsField(t *testing.T) {
 		if len(stub.calls) != 1 {
 			t.Fatalf("calls = %#v, want one call", stub.calls)
 		}
-		params := stub.calls[0].args.(backend.UpdateParams)
+		params := stub.calls[0].args.(workitems.PatchCommand)
 		if params.Description == nil {
 			t.Fatalf("Update description = nil, want non-nil pointer to empty string")
 		}
@@ -196,10 +196,10 @@ func TestDataUpdate_ExternalRefFlag(t *testing.T) {
 		}); err != nil {
 			t.Fatalf("update: %v", err)
 		}
-		if len(stub.calls) != 1 || stub.calls[0].method != "Update" {
-			t.Fatalf("calls = %#v, want one Update call", stub.calls)
+		if len(stub.calls) != 1 || stub.calls[0].method != "Patch" {
+			t.Fatalf("calls = %#v, want one Patch call", stub.calls)
 		}
-		params := stub.calls[0].args.(backend.UpdateParams)
+		params := stub.calls[0].args.(workitems.PatchCommand)
 		if params.ExternalRef == nil || *params.ExternalRef != updateExternalRef {
 			t.Fatalf("Update external ref = %#v, want %q", params.ExternalRef, updateExternalRef)
 		}
@@ -224,10 +224,10 @@ func TestDataUpdate_LabelFlags(t *testing.T) {
 		}); err != nil {
 			t.Fatalf("update: %v", err)
 		}
-		if len(stub.calls) != 1 || stub.calls[0].method != "Update" {
-			t.Fatalf("calls = %#v, want one Update call", stub.calls)
+		if len(stub.calls) != 1 || stub.calls[0].method != "Patch" {
+			t.Fatalf("calls = %#v, want one Patch call", stub.calls)
 		}
-		params := stub.calls[0].args.(backend.UpdateParams)
+		params := stub.calls[0].args.(workitems.PatchCommand)
 		if len(params.AddLabels) != 2 || params.AddLabels[0] != "triaged" || params.AddLabels[1] != "calculator" {
 			t.Fatalf("AddLabels = %#v", params.AddLabels)
 		}
@@ -268,7 +268,7 @@ func TestDataUpdate_DependsOnOnly_SkipsFieldUpdate(t *testing.T) {
 			t.Fatalf("update output = %q, want success message", out)
 		}
 		if len(stub.calls) != 2 {
-			t.Fatalf("calls = %#v, want exactly two AddDependency calls (no field Update)", stub.calls)
+			t.Fatalf("calls = %#v, want exactly two AddDependency calls (no field Patch)", stub.calls)
 		}
 		for i, wantDep := range []string{"dep-1", "dep-2"} {
 			call := stub.calls[i]
@@ -304,10 +304,10 @@ func TestDataUpdate_FieldsAndDependencyFlags_BothApplied(t *testing.T) {
 			t.Fatalf("update: %v", err)
 		}
 		if len(stub.calls) != 3 {
-			t.Fatalf("calls = %#v, want Update + AddDependency + RemoveDependency", stub.calls)
+			t.Fatalf("calls = %#v, want Patch + AddDependency + RemoveDependency", stub.calls)
 		}
-		if stub.calls[0].method != "Update" {
-			t.Fatalf("calls[0].method = %q, want Update (fields apply before dependency edges)", stub.calls[0].method)
+		if stub.calls[0].method != "Patch" {
+			t.Fatalf("calls[0].method = %q, want Patch (fields apply before dependency edges)", stub.calls[0].method)
 		}
 		if got := stub.calls[1]; got.method != "AddDependency" || got.args.(workitems.AddDependencyCommand).DependsOnID != "dep-3" {
 			t.Fatalf("calls[1] = %#v, want AddDependency dep-3", got)

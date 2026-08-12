@@ -10,13 +10,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/backend/api/gen"
 	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 )
 
 // Compile-time interface assertion.
-var _ backend.IssueBackend = (*APIBackend)(nil)
+var _ workitems.API = (*APIBackend)(nil)
 
 // newTestServer creates a mock API server and returns an APIBackend pointing at it.
 func newTestServer(t *testing.T, handler http.HandlerFunc) (*APIBackend, *httptest.Server) {
@@ -131,7 +130,7 @@ func TestWorkspaceURLConstruction(t *testing.T) {
 	})
 	defer ts.Close()
 
-	_, _ = ab.Get(context.Background(), "loom-1")
+	_, _ = ab.Get(context.Background(), workitems.GetQuery{IssueID: "loom-1"})
 	if !strings.HasPrefix(gotPath, "/api/workspaces/test-ws/") {
 		t.Errorf("path = %q, want prefix /api/workspaces/test-ws/", gotPath)
 	}
@@ -161,7 +160,7 @@ func TestGet_HappyPath(t *testing.T) {
 	})
 	defer ts.Close()
 
-	result, err := ab.Get(context.Background(), "loom-1")
+	result, err := ab.Get(context.Background(), workitems.GetQuery{IssueID: "loom-1"})
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
@@ -179,11 +178,11 @@ func TestGet_NotFound(t *testing.T) {
 	})
 	defer ts.Close()
 
-	_, err := ab.Get(context.Background(), "missing")
+	_, err := ab.Get(context.Background(), workitems.GetQuery{IssueID: "missing"})
 	if err == nil {
 		t.Fatal("expected error")
 	}
-	if !backend.IsKind(err, backend.KindNotFound) {
+	if !workitems.IsKind(err, workitems.KindNotFound) {
 		t.Errorf("expected KindNotFound, got %v", err)
 	}
 }
@@ -194,11 +193,11 @@ func TestGet_NullData(t *testing.T) {
 	})
 	defer ts.Close()
 
-	_, err := ab.Get(context.Background(), "x")
+	_, err := ab.Get(context.Background(), workitems.GetQuery{IssueID: "x"})
 	if err == nil {
 		t.Fatal("expected error for null data")
 	}
-	if !backend.IsKind(err, backend.KindNotFound) {
+	if !workitems.IsKind(err, workitems.KindNotFound) {
 		t.Errorf("expected KindNotFound for null data, got %v", err)
 	}
 }
@@ -210,7 +209,7 @@ func TestGet_InvalidJSON(t *testing.T) {
 	})
 	defer ts.Close()
 
-	_, err := ab.Get(context.Background(), "x")
+	_, err := ab.Get(context.Background(), workitems.GetQuery{IssueID: "x"})
 	if err == nil {
 		t.Fatal("expected error for non-JSON")
 	}
@@ -233,15 +232,15 @@ func TestList_HappyPath(t *testing.T) {
 	})
 	defer ts.Close()
 
-	result, err := ab.List(context.Background(), backend.ListOpts{Status: "open", Limit: 10})
+	result, err := ab.List(context.Background(), workitems.ListQuery{Filter: workitems.ListFilter{Status: "open", Limit: 10}})
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
-	if len(result) != 2 {
-		t.Fatalf("len = %d, want 2", len(result))
+	if len(result.Issues) != 2 {
+		t.Fatalf("len = %d, want 2", len(result.Issues))
 	}
-	if result[0].ID != "a" || result[1].ID != "b" {
-		t.Errorf("IDs: %q %q", result[0].ID, result[1].ID)
+	if result.Issues[0].ID != "a" || result.Issues[1].ID != "b" {
+		t.Errorf("IDs: %q %q", result.Issues[0].ID, result.Issues[1].ID)
 	}
 }
 
@@ -253,11 +252,11 @@ func TestList_QueryParamsPropagated(t *testing.T) {
 	})
 	defer ts.Close()
 
-	_, _ = ab.List(context.Background(), backend.ListOpts{
+	_, _ = ab.List(context.Background(), workitems.ListQuery{Filter: workitems.ListFilter{
 		Status:   "open",
 		Assignee: "alice",
 		Limit:    5,
-	})
+	}})
 	for _, want := range []string{"status=open", "assignee=alice", "limit=5"} {
 		if !strings.Contains(gotQuery, want) {
 			t.Errorf("query %q missing %q", gotQuery, want)
@@ -270,12 +269,12 @@ func TestList_EmptyResult(t *testing.T) {
 		respondOK(w, []gen.Issue{})
 	})
 	defer ts.Close()
-	result, err := ab.List(context.Background(), backend.ListOpts{})
+	result, err := ab.List(context.Background(), workitems.ListQuery{})
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
-	if len(result) != 0 {
-		t.Errorf("expected 0, got %d", len(result))
+	if len(result.Issues) != 0 {
+		t.Errorf("expected 0, got %d", len(result.Issues))
 	}
 }
 
@@ -284,15 +283,15 @@ func TestList_NullDataEmpty(t *testing.T) {
 		respondEnvelopeNullData(w)
 	})
 	defer ts.Close()
-	result, err := ab.List(context.Background(), backend.ListOpts{})
+	result, err := ab.List(context.Background(), workitems.ListQuery{})
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
 	if result == nil {
 		t.Errorf("expected non-nil empty slice")
 	}
-	if len(result) != 0 {
-		t.Errorf("expected 0, got %d", len(result))
+	if len(result.Issues) != 0 {
+		t.Errorf("expected 0, got %d", len(result.Issues))
 	}
 }
 
@@ -301,11 +300,11 @@ func TestList_ServerError(t *testing.T) {
 		respondErr(w, 500, "boom")
 	})
 	defer ts.Close()
-	_, err := ab.List(context.Background(), backend.ListOpts{})
+	_, err := ab.List(context.Background(), workitems.ListQuery{})
 	if err == nil {
 		t.Fatal("expected error")
 	}
-	if !backend.IsKind(err, backend.KindInternal) {
+	if !workitems.IsKind(err, workitems.KindInternal) {
 		t.Errorf("expected KindInternal, got %v", err)
 	}
 }
@@ -412,7 +411,7 @@ func TestBlockedRejectsUnsupportedOwnerFiltersBeforeRequest(t *testing.T) {
 	defer ts.Close()
 
 	_, err := ab.Blocked(context.Background(), workitems.AvailabilityQuery{LabelsAny: []string{"urgent"}})
-	if !errors.Is(err, backend.ErrFilterNotSupported) {
+	if !errors.Is(err, workitems.ErrFilterNotSupported) {
 		t.Fatalf("Blocked error = %v, want unsupported filter", err)
 	}
 }
@@ -469,7 +468,7 @@ func TestStats_ServerError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error")
 	}
-	if !backend.IsKind(err, backend.KindInternal) {
+	if !workitems.IsKind(err, workitems.KindInternal) {
 		t.Errorf("expected KindInternal, got %v", err)
 	}
 }
@@ -525,7 +524,7 @@ func TestSearch_EmptyQuery(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error")
 	}
-	if !backend.IsKind(err, backend.KindValidation) {
+	if !workitems.IsKind(err, workitems.KindValidation) {
 		t.Errorf("expected KindValidation, got %v", err)
 	}
 }
@@ -539,7 +538,7 @@ func TestSearch_NegativeLimit(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error")
 	}
-	if !backend.IsKind(err, backend.KindValidation) {
+	if !workitems.IsKind(err, workitems.KindValidation) {
 		t.Errorf("expected KindValidation, got %v", err)
 	}
 }
@@ -553,7 +552,7 @@ func TestSearch_ServerError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error")
 	}
-	if !backend.IsKind(err, backend.KindInternal) {
+	if !workitems.IsKind(err, workitems.KindInternal) {
 		t.Errorf("expected KindInternal, got %v", err)
 	}
 }
@@ -568,19 +567,23 @@ func TestSearch_UnmarshalError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected unmarshal error")
 	}
-	if !backend.IsKind(err, backend.KindInternal) {
+	if !workitems.IsKind(err, workitems.KindInternal) {
 		t.Errorf("expected KindInternal, got %v", err)
 	}
 }
 
 func TestClaimIssue_Success(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
-	var gotMethod, gotPath string
+	var claimed bool
 	ab, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
-		gotMethod = r.Method
-		gotPath = r.URL.Path
-		if r.ContentLength > 0 {
-			t.Errorf("zero TTL should omit request body; content length = %d", r.ContentLength)
+		if strings.HasSuffix(r.URL.Path, "/issues/abc/claim") {
+			claimed = true
+			if r.Method != http.MethodPost {
+				t.Errorf("method = %s, want POST", r.Method)
+			}
+			if r.ContentLength > 0 {
+				t.Errorf("claim should omit request body; content length = %d", r.ContentLength)
+			}
 		}
 		respondOK(w, gen.IssueResponse{
 			Id:        "abc",
@@ -595,54 +598,33 @@ func TestClaimIssue_Success(t *testing.T) {
 	})
 	defer ts.Close()
 
-	if err := ab.ClaimIssue(context.Background(), "abc", 0); err != nil {
+	if _, err := ab.Claim(context.Background(), workitems.ClaimCommand{IssueID: "abc"}); err != nil {
 		t.Fatalf("ClaimIssue: %v", err)
 	}
-	if gotMethod != http.MethodPost {
-		t.Errorf("method = %s, want POST", gotMethod)
-	}
-	if !strings.HasSuffix(gotPath, "/issues/abc/claim") {
-		t.Errorf("path = %q, want suffix /issues/abc/claim", gotPath)
+	if !claimed {
+		t.Fatal("claim endpoint was not called")
 	}
 }
 
 func TestClaimIssue_ForwardsLockTTL(t *testing.T) {
-	ab, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
-		var body struct {
-			LockTTL int `json:"lock_ttl"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			t.Fatalf("decode request body: %v", err)
-		}
-		if body.LockTTL != 300 {
-			t.Errorf("lock_ttl = %d, want 300", body.LockTTL)
-		}
-		respondOK(w, gen.IssueResponse{Id: "abc"})
-	})
-	defer ts.Close()
-
-	if err := ab.ClaimIssue(context.Background(), "abc", 5*time.Minute); err != nil {
-		t.Fatalf("ClaimIssue: %v", err)
+	body, err := claimIssueBody(5 * time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, _ := json.Marshal(body)
+	if !strings.Contains(string(encoded), `"lock_ttl":300`) {
+		t.Fatalf("body = %s, want lock_ttl 300", encoded)
 	}
 }
 
 func TestClaimIssue_RoundsPositiveSubsecondTTL(t *testing.T) {
-	ab, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
-		var body struct {
-			LockTTL int `json:"lock_ttl"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			t.Fatalf("decode request body: %v", err)
-		}
-		if body.LockTTL != 1 {
-			t.Errorf("lock_ttl = %d, want 1", body.LockTTL)
-		}
-		respondOK(w, gen.IssueResponse{Id: "abc"})
-	})
-	defer ts.Close()
-
-	if err := ab.ClaimIssue(context.Background(), "abc", time.Millisecond); err != nil {
-		t.Fatalf("ClaimIssue: %v", err)
+	body, err := claimIssueBody(time.Millisecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, _ := json.Marshal(body)
+	if !strings.Contains(string(encoded), `"lock_ttl":1`) {
+		t.Fatalf("body = %s, want lock_ttl 1", encoded)
 	}
 }
 
@@ -652,11 +634,11 @@ func TestClaimIssue_AlreadyClaimed(t *testing.T) {
 	})
 	defer ts.Close()
 
-	err := ab.ClaimIssue(context.Background(), "abc", 0)
+	_, err := ab.Claim(context.Background(), workitems.ClaimCommand{IssueID: "abc"})
 	if err == nil {
 		t.Fatal("expected error")
 	}
-	if !backend.IsKind(err, backend.KindConflict) {
+	if !workitems.IsKind(err, workitems.KindConflict) {
 		t.Errorf("expected KindConflict, got %v", err)
 	}
 	if !strings.Contains(err.Error(), "already claimed") {
@@ -670,11 +652,11 @@ func TestClaimIssue_NotFound(t *testing.T) {
 	})
 	defer ts.Close()
 
-	err := ab.ClaimIssue(context.Background(), "abc", 0)
+	_, err := ab.Claim(context.Background(), workitems.ClaimCommand{IssueID: "abc"})
 	if err == nil {
 		t.Fatal("expected error")
 	}
-	if !backend.IsKind(err, backend.KindNotFound) {
+	if !workitems.IsKind(err, workitems.KindNotFound) {
 		t.Errorf("expected KindNotFound, got %v", err)
 	}
 }
@@ -685,26 +667,21 @@ func TestClaimIssue_EmptyID(t *testing.T) {
 	})
 	defer ts.Close()
 
-	err := ab.ClaimIssue(context.Background(), "", 0)
+	_, err := ab.Claim(context.Background(), workitems.ClaimCommand{})
 	if err == nil {
 		t.Fatal("expected error")
 	}
-	if !backend.IsKind(err, backend.KindValidation) {
+	if !workitems.IsKind(err, workitems.KindValidation) {
 		t.Errorf("expected KindValidation, got %v", err)
 	}
 }
 
 func TestClaimIssue_NegativeTTL(t *testing.T) {
-	ab, ts := newTestServer(t, func(_ http.ResponseWriter, _ *http.Request) {
-		t.Fatal("server should not be contacted for negative TTL")
-	})
-	defer ts.Close()
-
-	err := ab.ClaimIssue(context.Background(), "abc", -1*time.Second)
+	_, err := claimIssueBody(-1 * time.Second)
 	if err == nil {
 		t.Fatal("expected error")
 	}
-	if !backend.IsKind(err, backend.KindValidation) {
+	if !workitems.IsKind(err, workitems.KindValidation) {
 		t.Errorf("expected KindValidation, got %v", err)
 	}
 }
@@ -736,7 +713,7 @@ func TestCreate_HappyPath(t *testing.T) {
 	})
 	defer ts.Close()
 
-	result, err := ab.Create(context.Background(), backend.CreateParams{
+	result, err := ab.Create(context.Background(), workitems.CreateCommand{
 		Title:      "New",
 		IssueType:  "task",
 		Priority:   2,
@@ -771,21 +748,22 @@ func TestCreate_ValidationError(t *testing.T) {
 	})
 	defer ts.Close()
 
-	_, err := ab.Create(context.Background(), backend.CreateParams{})
+	_, err := ab.Create(context.Background(), workitems.CreateCommand{})
 	if err == nil {
 		t.Fatal("expected error")
 	}
-	if !backend.IsKind(err, backend.KindValidation) {
+	if !workitems.IsKind(err, workitems.KindValidation) {
 		t.Errorf("expected KindValidation, got %v", err)
 	}
 }
 
-// --- Update ---
+// --- Patch ---
 
 func TestUpdate_HappyPath(t *testing.T) {
-	var gotMethod, gotPath string
+	var methods []string
+	var gotPath string
 	ab, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
-		gotMethod = r.Method
+		methods = append(methods, r.Method)
 		gotPath = r.URL.Path
 		respondOK(w, gen.IssueResponse{
 			Id: "loom-1", Title: "t", Status: "open", IssueType: "task",
@@ -795,29 +773,15 @@ func TestUpdate_HappyPath(t *testing.T) {
 	defer ts.Close()
 
 	newTitle := "Updated"
-	err := ab.Update(context.Background(), "loom-1", backend.UpdateParams{Title: &newTitle})
+	_, err := ab.Patch(context.Background(), workitems.PatchCommand{IssueID: "loom-1", Title: &newTitle})
 	if err != nil {
-		t.Fatalf("Update: %v", err)
+		t.Fatalf("Patch: %v", err)
 	}
-	if gotMethod != http.MethodPatch {
-		t.Errorf("method = %s, want PATCH", gotMethod)
+	if len(methods) != 2 || methods[0] != http.MethodPatch || methods[1] != http.MethodGet {
+		t.Errorf("methods = %v, want [PATCH GET]", methods)
 	}
 	if !strings.HasSuffix(gotPath, "/issues/loom-1") {
 		t.Errorf("path = %q", gotPath)
-	}
-}
-
-func TestUpdate_ClaimRejected(t *testing.T) {
-	ab, err := New(Config{BaseURL: "http://x", WorkspaceID: "ws"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	err = ab.Update(context.Background(), "loom-1", backend.UpdateParams{Claim: true})
-	if err == nil {
-		t.Fatal("expected error")
-	}
-	if !backend.IsKind(err, backend.KindValidation) {
-		t.Errorf("expected KindValidation, got %v", err)
 	}
 }
 
@@ -831,7 +795,7 @@ func TestClose_HappyPath(t *testing.T) {
 	})
 	defer ts.Close()
 
-	result, err := ab.Close(context.Background(), "loom-1", backend.CloseParams{Reason: "done"})
+	result, err := ab.Close(context.Background(), workitems.CloseCommand{IssueID: "loom-1", Reason: "done"})
 	if err != nil {
 		t.Fatalf("Close: %v", err)
 	}
@@ -858,7 +822,7 @@ func TestReopen_HappyPath(t *testing.T) {
 	})
 	defer ts.Close()
 
-	err := ab.Reopen(context.Background(), "loom-1", backend.ReopenParams{})
+	err := ab.Reopen(context.Background(), workitems.ReopenCommand{IssueID: "loom-1"})
 	if err != nil {
 		t.Fatalf("Reopen: %v", err)
 	}
@@ -881,7 +845,7 @@ func TestReopen_WithReason(t *testing.T) {
 	})
 	defer ts.Close()
 
-	err := ab.Reopen(context.Background(), "loom-1", backend.ReopenParams{Reason: "need more work"})
+	err := ab.Reopen(context.Background(), workitems.ReopenCommand{IssueID: "loom-1", Reason: "need more work"})
 	if err != nil {
 		t.Fatalf("Reopen: %v", err)
 	}
@@ -898,11 +862,11 @@ func TestReopen_EmptyID(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = ab.Reopen(context.Background(), "", backend.ReopenParams{})
+	err = ab.Reopen(context.Background(), workitems.ReopenCommand{})
 	if err == nil {
 		t.Fatal("expected error")
 	}
-	if !backend.IsKind(err, backend.KindValidation) {
+	if !workitems.IsKind(err, workitems.KindValidation) {
 		t.Errorf("expected KindValidation, got %v", err)
 	}
 }
@@ -921,9 +885,16 @@ func TestDelete_HappyPath(t *testing.T) {
 	})
 	defer ts.Close()
 
-	err := ab.Delete(context.Background(), backend.DeleteParams{IDs: []string{"a", "b"}})
+	first, err := ab.Delete(context.Background(), workitems.DeleteCommand{IssueID: "a"})
 	if err != nil {
 		t.Fatalf("Delete: %v", err)
+	}
+	second, err := ab.Delete(context.Background(), workitems.DeleteCommand{IssueID: "b"})
+	if err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+	if first.DeletedCount != 1 || second.DeletedCount != 1 {
+		t.Fatalf("delete results = %+v %+v", first, second)
 	}
 	if !deleted["a"] || !deleted["b"] {
 		t.Errorf("deleted = %v", deleted)
@@ -935,39 +906,24 @@ func TestDelete_EmptyIDs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = ab.Delete(context.Background(), backend.DeleteParams{})
+	_, err = ab.Delete(context.Background(), workitems.DeleteCommand{})
 	if err == nil {
 		t.Fatal("expected error")
 	}
-	if !backend.IsKind(err, backend.KindValidation) {
+	if !workitems.IsKind(err, workitems.KindValidation) {
 		t.Errorf("expected KindValidation, got %v", err)
 	}
 }
 
-func TestDelete_ForceIgnores404(t *testing.T) {
+func TestDelete_NotFoundIsIdempotent(t *testing.T) {
 	ab, ts := newTestServer(t, func(w http.ResponseWriter, _ *http.Request) {
 		respondErr(w, 404, "issue not found")
 	})
 	defer ts.Close()
 
-	err := ab.Delete(context.Background(), backend.DeleteParams{IDs: []string{"ghost"}, Force: true})
+	_, err := ab.Delete(context.Background(), workitems.DeleteCommand{IssueID: "ghost"})
 	if err != nil {
-		t.Errorf("Force should ignore 404, got %v", err)
-	}
-}
-
-func TestDelete_NoForceSurfaces404(t *testing.T) {
-	ab, ts := newTestServer(t, func(w http.ResponseWriter, _ *http.Request) {
-		respondErr(w, 404, "issue not found")
-	})
-	defer ts.Close()
-
-	err := ab.Delete(context.Background(), backend.DeleteParams{IDs: []string{"ghost"}, Force: false})
-	if err == nil {
-		t.Fatal("expected error")
-	}
-	if !backend.IsKind(err, backend.KindNotFound) {
-		t.Errorf("expected KindNotFound, got %v", err)
+		t.Errorf("delete should be idempotent for a missing item, got %v", err)
 	}
 }
 
@@ -1142,11 +1098,11 @@ func TestTransportError_ConnectionRefused(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
-	_, err = ab.Get(ctx, "loom-1")
+	_, err = ab.Get(ctx, workitems.GetQuery{IssueID: "loom-1"})
 	if err == nil {
 		t.Fatal("expected error")
 	}
-	if !backend.IsKind(err, backend.KindUnavailable) {
+	if !workitems.IsKind(err, workitems.KindUnavailable) {
 		t.Errorf("expected KindUnavailable, got %v", err)
 	}
 }

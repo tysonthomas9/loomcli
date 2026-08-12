@@ -20,7 +20,7 @@ var blockedCmd = &cobra.Command{
 	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
-		ib, err := getIssueBackend(ctx)
+		itemsAPI, err := getWorkItems(ctx)
 		if err != nil {
 			return err
 		}
@@ -29,11 +29,7 @@ var blockedCmd = &cobra.Command{
 			IssueType: blockedType,
 			ParentID:  blockedParent,
 		}
-		blocked, ok := ib.(workitems.BlockedQueries)
-		if !ok {
-			return workitems.ErrUnavailable
-		}
-		items, err := blocked.Blocked(ctx, query)
+		items, err := itemsAPI.Blocked(ctx, query)
 		if err != nil {
 			return err
 		}

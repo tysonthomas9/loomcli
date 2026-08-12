@@ -5,20 +5,20 @@ import (
 	"net/url"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/backend"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 )
 
 // Actor-scoped claim/release operations. Split out of fleet.go to keep that
 // file under the 1000-line LOC ceiling after the release features landed.
 
-// ClaimIssueAsActor atomically claims an issue while overriding the configured
+// ClaimAsActor atomically claims an issue while overriding the configured
 // FleetDB actor for this request.
-func (b *FleetBackend) ClaimIssueAsActor(ctx context.Context, id string, lockTTL time.Duration, actor string) error {
+func (b *FleetBackend) ClaimAsActor(ctx context.Context, id string, lockTTL time.Duration, actor string) error {
 	if id == "" {
-		return backend.ErrValidation("ClaimIssue", "id must not be empty")
+		return workitems.AdapterInvalid("Claim", "id must not be empty")
 	}
 	if actor == "" {
-		return backend.ErrValidation("ClaimIssue", "actor must not be empty")
+		return workitems.AdapterInvalid("Claim", "actor must not be empty")
 	}
 	body, err := claimIssueBody(lockTTL)
 	if err != nil {
@@ -27,14 +27,14 @@ func (b *FleetBackend) ClaimIssueAsActor(ctx context.Context, id string, lockTTL
 	return b.execAsActor(ctx, "ClaimIssue", "/issues/"+url.PathEscape(id)+"/claim", body, actor)
 }
 
-// RenewIssueClaimAsActor refreshes the actor's existing issue claim without
+// RenewClaimAsActor refreshes the actor's existing issue claim without
 // allowing the heartbeat to change issue status or assignee.
-func (b *FleetBackend) RenewIssueClaimAsActor(ctx context.Context, id string, lockTTL time.Duration, actor string) error {
+func (b *FleetBackend) RenewClaimAsActor(ctx context.Context, id string, lockTTL time.Duration, actor string) error {
 	if id == "" {
-		return backend.ErrValidation("RenewIssueClaim", "id must not be empty")
+		return workitems.AdapterInvalid("RenewClaim", "id must not be empty")
 	}
 	if actor == "" {
-		return backend.ErrValidation("RenewIssueClaim", "actor must not be empty")
+		return workitems.AdapterInvalid("RenewClaim", "actor must not be empty")
 	}
 	body, err := renewIssueClaimBody(lockTTL)
 	if err != nil {
@@ -55,7 +55,7 @@ func (b *FleetBackend) ReleaseIssueLock(ctx context.Context, id, actor string) e
 
 func (b *FleetBackend) releaseIssueLock(ctx context.Context, op, id, actor string, useConfiguredActor bool) error {
 	if id == "" {
-		return backend.ErrValidation(op, "id must not be empty")
+		return workitems.AdapterInvalid(op, "id must not be empty")
 	}
 	if actor == "" && useConfiguredActor {
 		b.mu.RLock()
@@ -63,7 +63,7 @@ func (b *FleetBackend) releaseIssueLock(ctx context.Context, op, id, actor strin
 		b.mu.RUnlock()
 	}
 	if actor == "" {
-		return backend.ErrValidation(op, "actor must not be empty")
+		return workitems.AdapterInvalid(op, "actor must not be empty")
 	}
 	return b.execAsActor(ctx, op, "/issues/"+url.PathEscape(id)+"/release-lock", nil, actor)
 }
@@ -78,7 +78,7 @@ func (b *FleetBackend) ReleaseIssueAsActor(ctx context.Context, id string, actor
 
 func claimIssueBody(lockTTL time.Duration) (interface{}, error) {
 	if lockTTL < 0 {
-		return nil, backend.ErrValidation("ClaimIssue", "lockTTL must not be negative")
+		return nil, workitems.AdapterInvalid("Claim", "lockTTL must not be negative")
 	}
 	if lockTTL == 0 {
 		return nil, nil
@@ -91,7 +91,7 @@ func claimIssueBody(lockTTL time.Duration) (interface{}, error) {
 
 func renewIssueClaimBody(lockTTL time.Duration) (interface{}, error) {
 	if lockTTL < 0 {
-		return nil, backend.ErrValidation("RenewIssueClaim", "lockTTL must not be negative")
+		return nil, workitems.AdapterInvalid("RenewClaim", "lockTTL must not be negative")
 	}
 	seconds := 0
 	if lockTTL > 0 {

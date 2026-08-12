@@ -11,21 +11,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 	"github.com/tysonthomas9/loomcli/internal/usage"
 )
-
-func TestHasOpenBlockers(t *testing.T) {
-	unclosedIDs := map[string]bool{"T-0": true}
-	got := HasUnclosedBlockers(
-		[]backend.DependencyData{{IssueID: "T-1", DependsOnID: "T-0", Type: "blocks"}},
-		unclosedIDs,
-	)
-	if !got {
-		t.Error("expected unclosed blocker to be detected")
-	}
-}
 
 // ============================================================================
 // AutoModeOptions Custom Fields Tests
@@ -355,9 +343,9 @@ func TestGetAvailablePlanningTasks(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			resetDefaultIssueBackend()
-			t.Cleanup(resetDefaultIssueBackend)
-			mock := NewMockIssueBackend()
+			resetDefaultWorkItems()
+			t.Cleanup(resetDefaultWorkItems)
+			mock := NewMockWorkItems()
 			var issues []workitems.IssueSummary
 			if tt.readyOutput != "" {
 				json.Unmarshal([]byte(tt.readyOutput), &issues)
@@ -367,7 +355,7 @@ func TestGetAvailablePlanningTasks(t *testing.T) {
 			} else {
 				mock.ReadyResult = issues
 			}
-			setDefaultIssueBackend(mock)
+			setDefaultWorkItems(mock)
 
 			got, err := GetAvailablePlanningTasks(t.Context(), "", "")
 			if (err != nil) != tt.wantErr {
@@ -487,9 +475,9 @@ func TestGetAvailableImplementationTasks(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			resetDefaultIssueBackend()
-			t.Cleanup(resetDefaultIssueBackend)
-			mock := NewMockIssueBackend()
+			resetDefaultWorkItems()
+			t.Cleanup(resetDefaultWorkItems)
+			mock := NewMockWorkItems()
 			var issues []workitems.IssueSummary
 			if tt.readyOutput != "" {
 				json.Unmarshal([]byte(tt.readyOutput), &issues)
@@ -499,7 +487,7 @@ func TestGetAvailableImplementationTasks(t *testing.T) {
 			} else {
 				mock.ReadyResult = issues
 			}
-			setDefaultIssueBackend(mock)
+			setDefaultWorkItems(mock)
 
 			got, err := GetAvailableImplementationTasks(t.Context(), "", "")
 			if (err != nil) != tt.wantErr {
@@ -619,9 +607,9 @@ func TestGetAnyAvailableTasks(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			resetDefaultIssueBackend()
-			t.Cleanup(resetDefaultIssueBackend)
-			mock := NewMockIssueBackend()
+			resetDefaultWorkItems()
+			t.Cleanup(resetDefaultWorkItems)
+			mock := NewMockWorkItems()
 			var issues []workitems.IssueSummary
 			if tt.readyOutput != "" {
 				json.Unmarshal([]byte(tt.readyOutput), &issues)
@@ -631,7 +619,7 @@ func TestGetAnyAvailableTasks(t *testing.T) {
 			} else {
 				mock.ReadyResult = issues
 			}
-			setDefaultIssueBackend(mock)
+			setDefaultWorkItems(mock)
 
 			got, err := GetAnyAvailableTasks(t.Context(), "", "")
 			if (err != nil) != tt.wantErr {
@@ -660,15 +648,15 @@ func TestGetAnyAvailableTasks(t *testing.T) {
 }
 
 func TestHasAvailableDelegatesToGet(t *testing.T) {
-	resetDefaultIssueBackend()
-	t.Cleanup(resetDefaultIssueBackend)
+	resetDefaultWorkItems()
+	t.Cleanup(resetDefaultWorkItems)
 	issues := []workitems.IssueSummary{
 		{ID: "T-1", Title: "No design", Status: "open", Design: ""},
 		{ID: "T-2", Title: "Has design", Status: "open", Design: "Plan"},
 	}
-	mock := NewMockIssueBackend()
+	mock := NewMockWorkItems()
 	mock.ReadyResult = issues
-	setDefaultIssueBackend(mock)
+	setDefaultWorkItems(mock)
 
 	// HasAvailablePlanningTasks should return true (T-1 has no design)
 	hasPlan, err := HasAvailablePlanningTasks(t.Context(), "", "")
@@ -1155,9 +1143,9 @@ func TestGetAvailablePlanningTasks_WithParentID(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			resetDefaultIssueBackend()
-			t.Cleanup(resetDefaultIssueBackend)
-			mock := NewMockIssueBackend()
+			resetDefaultWorkItems()
+			t.Cleanup(resetDefaultWorkItems)
+			mock := NewMockWorkItems()
 			issues := []workitems.IssueSummary{{ID: "T-1", Title: "Task", Status: "open", Design: ""}}
 			mock.ReadyResult = issues
 			var capturedOpts workitems.AvailabilityQuery
@@ -1165,7 +1153,7 @@ func TestGetAvailablePlanningTasks_WithParentID(t *testing.T) {
 				capturedOpts = opts
 				return issues, nil
 			}
-			setDefaultIssueBackend(mock)
+			setDefaultWorkItems(mock)
 
 			_, err := GetAvailablePlanningTasks(t.Context(), tt.parentID, "")
 			if err != nil {
@@ -1204,9 +1192,9 @@ func TestGetAvailableImplementationTasks_WithParentID(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			resetDefaultIssueBackend()
-			t.Cleanup(resetDefaultIssueBackend)
-			mock := NewMockIssueBackend()
+			resetDefaultWorkItems()
+			t.Cleanup(resetDefaultWorkItems)
+			mock := NewMockWorkItems()
 			issues := []workitems.IssueSummary{{ID: "T-2", Title: "Task with design", Status: "open", Design: "Implementation plan"}}
 			mock.ReadyResult = issues
 			var capturedOpts workitems.AvailabilityQuery
@@ -1214,7 +1202,7 @@ func TestGetAvailableImplementationTasks_WithParentID(t *testing.T) {
 				capturedOpts = opts
 				return issues, nil
 			}
-			setDefaultIssueBackend(mock)
+			setDefaultWorkItems(mock)
 
 			_, err := GetAvailableImplementationTasks(t.Context(), tt.parentID, "")
 			if err != nil {

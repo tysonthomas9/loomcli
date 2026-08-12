@@ -122,9 +122,9 @@ func init() {
 		// --server have been mirrored into the env. The eager
 		// `var defaultDeps = DefaultDeps()` in deps.go runs at process
 		// load time, before Cobra has parsed any flags, so its cached
-		// IssueBackend would otherwise be locked to whatever env was
-		// inherited from the shell. resolveDirectIssueBackend() reads
-		// defaultDeps.IssueBackend, so refresh it here before any
+		// The Work Items adapter would otherwise be locked to whatever env was
+		// inherited from the shell. Direct resolution reads defaultDeps.WorkItems,
+		// so refresh it here before any
 		// subcommand runs.
 		deps := DefaultDeps(cmd.Context())
 		defaultDeps = deps
@@ -141,8 +141,8 @@ func init() {
 
 // PrepareStandaloneHTTPCommand is a PersistentPreRunE hook for commands that
 // use an explicitly configured Loom HTTP endpoint and do not consume the
-// process-wide IssueBackend or Deps container. It preserves logging and global
-// flag-to-environment behavior while deliberately skipping eager issue-backend
+// process-wide Work Items adapter or Deps container. It preserves logging and global
+// flag-to-environment behavior while deliberately skipping eager Work Items
 // construction (and its separate /api/config auth discovery).
 func PrepareStandaloneHTTPCommand(_ *cobra.Command, _ []string) error {
 	return prepareCommandEnvironment()
@@ -287,7 +287,7 @@ func resolveCLIServiceName() string {
 var pendingCmds []*cobra.Command
 
 // PreBackendCommandGuard validates a parsed command after global flags have
-// been mirrored into the environment but before any issue backend or default
+// been mirrored into the environment but before any Work Items adapter or default
 // dependency container is resolved.
 type PreBackendCommandGuard func(*cobra.Command) error
 

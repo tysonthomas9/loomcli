@@ -16,12 +16,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/cli/serve/serveadapter"
 	driverexecutor "github.com/tysonthomas9/loomcli/internal/driver"
 	trigger "github.com/tysonthomas9/loomcli/internal/infra/automationruntime"
 	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
 	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui"
 )
@@ -322,25 +322,21 @@ func taskReadyRepositoryRequired(issueType, sourceRepo string, repoCount int) bo
 // overwrite a concurrent claim or repository assignment.
 func blockRepositoryRequiredTask(
 	ctx context.Context,
-	issueBackend backend.IssueBackend,
+	items workitems.API,
 	issueID string,
 ) (trigger.TaskReadyRepositoryRequiredResult, error) {
-	repositoryBackend, ok := issueBackend.(backend.RepositoryRequirementBackend)
-	if !ok {
-		return trigger.TaskReadyRepositoryRequiredResult{}, backend.ErrNotImplemented(
-			"BlockRepositoryRequired",
-			"issue backend does not support atomic repository-required admission",
-		)
+	if items == nil {
+		return trigger.TaskReadyRepositoryRequiredResult{}, workitems.ErrUnavailable
 	}
-	result, err := repositoryBackend.BlockRepositoryRequired(ctx, issueID)
+	result, err := items.BlockRepositoryRequired(ctx, workitems.BlockRepositoryRequiredCommand{IssueID: issueID})
 	if err != nil {
-		if backend.IsKind(err, backend.KindNotFound) {
+		if errors.Is(err, workitems.ErrNotFound) {
 			return trigger.TaskReadyRepositoryRequiredResult{}, nil
 		}
 		return trigger.TaskReadyRepositoryRequiredResult{}, fmt.Errorf("move repository-required task to blocked: %w", err)
 	}
 	if result == nil {
-		return trigger.TaskReadyRepositoryRequiredResult{}, backend.ErrInternal(
+		return trigger.TaskReadyRepositoryRequiredResult{}, workitems.AdapterInternal(
 			"BlockRepositoryRequired",
 			"atomic repository-required admission returned no result",
 			nil,
@@ -368,9 +364,9 @@ func blockRepositoryRequiredTask(
 	return trigger.TaskReadyRepositoryRequiredResult{DispatchReady: canonical}, nil
 }
 
-func repositoryRequiredDispatchSnapshot(result *backend.RepositoryRequirementResult) (*trigger.TaskReadySnapshot, error) {
+func repositoryRequiredDispatchSnapshot(result *workitems.RepositoryAdmissionResult) (*trigger.TaskReadySnapshot, error) {
 	if result.Issue == nil || strings.TrimSpace(result.Issue.ID) == "" {
-		return nil, backend.ErrInternal(
+		return nil, workitems.AdapterInternal(
 			"BlockRepositoryRequired",
 			"dispatch-ready result is missing the canonical issue",
 			nil,

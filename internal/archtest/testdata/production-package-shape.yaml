@@ -14,9 +14,9 @@ semantics:
     - vendor
     - worktrees
 ceilings:
-  total_packages: 159
+  total_packages: 158
   module_packages: 15
-  outside_module_packages: 144
+  outside_module_packages: 143
   one_file_packages: 42
   one_or_two_file_packages: 60
 packages:
@@ -35,7 +35,6 @@ packages:
   - internal/app/workitemmove
   - internal/archtest
   - internal/atomicfile
-  - internal/backend
   - internal/backend/api
   - internal/backend/api/gen
   - internal/backend/fleet

@@ -5,7 +5,7 @@ import (
 	"net"
 	"testing"
 
-	"github.com/tysonthomas9/loomcli/internal/backend"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 )
 
 func TestClassifyHTTPError_Success(t *testing.T) {
@@ -20,18 +20,18 @@ func TestClassifyHTTPError_StatusCodes(t *testing.T) {
 		name       string
 		statusCode int
 		body       apiResponse
-		wantKind   backend.ErrorKind
+		wantKind   workitems.ErrorKind
 	}{
-		{"400 validation", 400, apiResponse{Error: "bad input"}, backend.KindValidation},
-		{"422 validation", 422, apiResponse{Error: "parent issue not found"}, backend.KindValidation},
-		{"401 auth", 401, apiResponse{Error: "unauthorized"}, backend.KindUnavailable},
-		{"403 forbidden", 403, apiResponse{Error: "forbidden"}, backend.KindUnavailable},
-		{"404 not found", 404, apiResponse{Error: "issue not found"}, backend.KindNotFound},
-		{"409 conflict", 409, apiResponse{Error: "already claimed"}, backend.KindConflict},
-		{"429 rate limit", 429, apiResponse{Error: "too many requests"}, backend.KindUnavailable},
-		{"500 internal", 500, apiResponse{Error: "server error"}, backend.KindInternal},
-		{"503 unavailable", 503, apiResponse{Error: "maintenance"}, backend.KindUnavailable},
-		{"504 timeout", 504, apiResponse{Error: "gateway timeout"}, backend.KindTimeout},
+		{"400 validation", 400, apiResponse{Error: "bad input"}, workitems.KindValidation},
+		{"422 validation", 422, apiResponse{Error: "parent issue not found"}, workitems.KindValidation},
+		{"401 auth", 401, apiResponse{Error: "unauthorized"}, workitems.KindUnavailable},
+		{"403 forbidden", 403, apiResponse{Error: "forbidden"}, workitems.KindUnavailable},
+		{"404 not found", 404, apiResponse{Error: "issue not found"}, workitems.KindNotFound},
+		{"409 conflict", 409, apiResponse{Error: "already claimed"}, workitems.KindConflict},
+		{"429 rate limit", 429, apiResponse{Error: "too many requests"}, workitems.KindUnavailable},
+		{"500 internal", 500, apiResponse{Error: "server error"}, workitems.KindInternal},
+		{"503 unavailable", 503, apiResponse{Error: "maintenance"}, workitems.KindUnavailable},
+		{"504 timeout", 504, apiResponse{Error: "gateway timeout"}, workitems.KindTimeout},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -39,7 +39,7 @@ func TestClassifyHTTPError_StatusCodes(t *testing.T) {
 			if err == nil {
 				t.Fatal("expected error, got nil")
 			}
-			if !backend.IsKind(err, tt.wantKind) {
+			if !workitems.IsKind(err, tt.wantKind) {
 				t.Fatalf("expected kind %s, got %v", tt.wantKind, err)
 			}
 		})
@@ -50,15 +50,15 @@ func TestClassifyHTTPErrorUsesStructuredCode(t *testing.T) {
 	tests := []struct {
 		name     string
 		body     apiResponse
-		wantKind backend.ErrorKind
+		wantKind workitems.ErrorKind
 	}{
-		{"validation", apiResponse{Code: "validation_failed", Error: "parent issue not found"}, backend.KindValidation},
-		{"conflict", apiResponse{Code: "not_claimable", Error: "issue cannot be claimed"}, backend.KindConflict},
+		{"validation", apiResponse{Code: "validation_failed", Error: "parent issue not found"}, workitems.KindValidation},
+		{"conflict", apiResponse{Code: "not_claimable", Error: "issue cannot be claimed"}, workitems.KindConflict},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			err := classifyHTTPError("Create", 422, tt.body)
-			if !backend.IsKind(err, tt.wantKind) {
+			if !workitems.IsKind(err, tt.wantKind) {
 				t.Fatalf("expected kind %s, got %v", tt.wantKind, err)
 			}
 		})
@@ -79,15 +79,15 @@ func TestClassifyHTTPError_SuccessFalseStringMatching(t *testing.T) {
 	tests := []struct {
 		name     string
 		body     apiResponse
-		wantKind backend.ErrorKind
+		wantKind workitems.ErrorKind
 	}{
-		{"not found", apiResponse{Error: "issue not found"}, backend.KindNotFound},
-		{"already claimed", apiResponse{Error: "task already claimed by another"}, backend.KindConflict},
-		{"already closed", apiResponse{Error: "issue is already closed"}, backend.KindConflict},
-		{"is closed", apiResponse{Error: "issue loom-x-01 is closed"}, backend.KindConflict},
-		{"validation", apiResponse{Error: "validation failed"}, backend.KindValidation},
-		{"invalid", apiResponse{Error: "invalid input"}, backend.KindValidation},
-		{"other", apiResponse{Error: "something unexpected"}, backend.KindInternal},
+		{"not found", apiResponse{Error: "issue not found"}, workitems.KindNotFound},
+		{"already claimed", apiResponse{Error: "task already claimed by another"}, workitems.KindConflict},
+		{"already closed", apiResponse{Error: "issue is already closed"}, workitems.KindConflict},
+		{"is closed", apiResponse{Error: "issue loom-x-01 is closed"}, workitems.KindConflict},
+		{"validation", apiResponse{Error: "validation failed"}, workitems.KindValidation},
+		{"invalid", apiResponse{Error: "invalid input"}, workitems.KindValidation},
+		{"other", apiResponse{Error: "something unexpected"}, workitems.KindInternal},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -95,7 +95,7 @@ func TestClassifyHTTPError_SuccessFalseStringMatching(t *testing.T) {
 			if err == nil {
 				t.Fatal("expected error, got nil")
 			}
-			if !backend.IsKind(err, tt.wantKind) {
+			if !workitems.IsKind(err, tt.wantKind) {
 				t.Fatalf("expected kind %s, got %v", tt.wantKind, err)
 			}
 		})
@@ -116,7 +116,7 @@ func TestClassifyHTTPError_AlreadyClosed_IsConflict(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
-	if !backend.IsKind(err, backend.KindConflict) {
+	if !workitems.IsKind(err, workitems.KindConflict) {
 		t.Fatalf("expected KindConflict, got %v", err)
 	}
 }
@@ -125,15 +125,15 @@ func TestClassifyTransportError(t *testing.T) {
 	tests := []struct {
 		name     string
 		err      error
-		wantKind backend.ErrorKind
+		wantKind workitems.ErrorKind
 	}{
 		{"nil", nil, ""},
-		{"context canceled", context.Canceled, backend.KindCanceled},
-		{"deadline exceeded", context.DeadlineExceeded, backend.KindTimeout},
+		{"context canceled", context.Canceled, workitems.KindCanceled},
+		{"deadline exceeded", context.DeadlineExceeded, workitems.KindTimeout},
 		{
 			"net error",
 			&net.OpError{Op: "dial", Net: "tcp", Err: &net.DNSError{Name: "example.com", Err: "no such host"}},
-			backend.KindUnavailable,
+			workitems.KindUnavailable,
 		},
 	}
 	for _, tt := range tests {
@@ -148,7 +148,7 @@ func TestClassifyTransportError(t *testing.T) {
 			if result == nil {
 				t.Fatal("expected error, got nil")
 			}
-			if !backend.IsKind(result, tt.wantKind) {
+			if !workitems.IsKind(result, tt.wantKind) {
 				t.Fatalf("expected kind %s, got %v", tt.wantKind, result)
 			}
 		})

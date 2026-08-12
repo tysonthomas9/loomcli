@@ -62,7 +62,7 @@ func TestGet_HydratesDependencyIssueMetadata(t *testing.T) {
 	})
 	defer ts.Close()
 
-	result, err := fb.Get(context.Background(), "issue-1")
+	result, err := fb.Get(context.Background(), workitems.GetQuery{IssueID: "issue-1"})
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}

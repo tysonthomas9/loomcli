@@ -3,7 +3,7 @@ package data
 import (
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/backend"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 )
 
 // computeCreateKey derives the default X-Idempotency-Key for a create:
@@ -20,8 +20,8 @@ import (
 // The date bucket bounds false dedup: identical creates on different days
 // never collapse. Workspace and actor scoping happen server-side, where the
 // authenticated actor is actually known.
-func computeCreateKey(params backend.CreateParams) (string, error) {
-	return params.FleetCreateIdempotencyKey(time.Now())
+func computeCreateKey(params workitems.CreateCommand) (string, error) {
+	return params.DefaultIdempotencyKey(time.Now())
 }
 
 // isAlreadyClosedConflict reports whether err is the "issue is already
@@ -29,5 +29,5 @@ func computeCreateKey(params backend.CreateParams) (string, error) {
 // already true. Other KindConflict closes (open blockers, dependencies)
 // must keep failing.
 func isAlreadyClosedConflict(err error) bool {
-	return backend.IsAlreadyClosedConflict(err)
+	return workitems.IsAlreadyClosedConflict(err)
 }

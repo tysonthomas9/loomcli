@@ -3,7 +3,6 @@ package cli
 import (
 	"testing"
 
-	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 )
 
@@ -211,71 +210,6 @@ func TestIsWorkableTask(t *testing.T) {
 }
 
 // --- Level 3: Agent predicates ---
-
-func TestHasUnclosedBlockers(t *testing.T) {
-	tests := []struct {
-		name        string
-		deps        []backend.DependencyData
-		unclosedIDs map[string]bool
-		want        bool
-	}{
-		{"nil deps", nil, nil, false},
-		{"empty deps", []backend.DependencyData{}, nil, false},
-		{"only parent-child deps", []backend.DependencyData{
-			{Type: "parent-child", DependsOnID: "B-1"},
-		}, map[string]bool{"B-1": true}, false},
-		{"blocks dep with unclosed blocker", []backend.DependencyData{
-			{Type: "blocks", DependsOnID: "B-1"},
-		}, map[string]bool{"B-1": true}, true},
-		{"blocks dep with closed blocker", []backend.DependencyData{
-			{Type: "blocks", DependsOnID: "B-1"},
-		}, map[string]bool{"B-2": true}, false},
-		{"blocker in_progress (unclosed)", []backend.DependencyData{
-			{Type: "blocks", DependsOnID: "B-1"},
-		}, map[string]bool{"B-1": true, "B-2": true}, true},
-		{"mixed deps one unclosed blocker", []backend.DependencyData{
-			{Type: "parent-child", DependsOnID: "B-1"},
-			{Type: "blocks", DependsOnID: "B-2"},
-		}, map[string]bool{"B-2": true}, true},
-		{"blocks dep resolved but parent-child still open", []backend.DependencyData{
-			{Type: "parent-child", DependsOnID: "B-1"},
-			{Type: "blocks", DependsOnID: "B-2"},
-		}, map[string]bool{"B-1": true}, false},
-		{"conditional-blocks dep unclosed", []backend.DependencyData{
-			{Type: "conditional-blocks", DependsOnID: "B-1"},
-		}, map[string]bool{"B-1": true}, true},
-		{"waits-for dep unclosed", []backend.DependencyData{
-			{Type: "waits-for", DependsOnID: "B-1"},
-		}, map[string]bool{"B-1": true}, true},
-		{"related dep unclosed (non-blocking)", []backend.DependencyData{
-			{Type: "related", DependsOnID: "B-1"},
-		}, map[string]bool{"B-1": true}, false},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := HasUnclosedBlockers(tt.deps, tt.unclosedIDs); got != tt.want {
-				t.Errorf("HasUnclosedBlockers() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
-func TestIsDirectBlocker(t *testing.T) {
-	for _, dependencyType := range []string{"blocks", "conditional-blocks", "waits-for"} {
-		if !isDirectBlocker(dependencyType) {
-			t.Errorf("isDirectBlocker(%q) = false, want true", dependencyType)
-		}
-	}
-	for _, dependencyType := range []string{
-		"parent-child", "related", "discovered-from", "replies-to", "relates-to",
-		"duplicates", "supersedes", "authored-by", "assigned-to", "approved-by",
-		"attests", "tracks", "until", "caused-by", "validates", "delegated-from", "",
-	} {
-		if isDirectBlocker(dependencyType) {
-			t.Errorf("isDirectBlocker(%q) = true, want false", dependencyType)
-		}
-	}
-}
 
 func TestIsAvailableForPlanning(t *testing.T) {
 	tests := []struct {

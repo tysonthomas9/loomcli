@@ -3,27 +3,9 @@ package api
 import (
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/backend/api/gen"
 	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 )
-
-// issueToData converts a generated Issue (slim list projection) to
-// backend.IssueData. Handles the pointer-heavy shape of the generated type.
-func issueToData(issue gen.Issue) backend.IssueData {
-	summary := issueToSummary(issue)
-	labels := make([]string, len(summary.Labels))
-	copy(labels, summary.Labels)
-	return backend.IssueData{
-		ID: summary.ID, Title: summary.Title, Status: summary.Status, Priority: summary.Priority,
-		IssueType: summary.IssueType, Assignee: summary.Assignee, Owner: summary.Owner,
-		Labels: labels, SourceRepo: summary.SourceRepo,
-		Parent: summary.Parent, Design: summary.Design, DesignArtifactID: summary.DesignArtifactID,
-		DesignFormat: summary.DesignFormat, HasDesign: summary.HasDesign,
-		ExternalRef: summary.ExternalRef, CreatedAt: summary.CreatedAt, UpdatedAt: summary.UpdatedAt,
-		DueAt: summary.DueAt, DeferUntil: summary.DeferUntil,
-	}
-}
 
 func issueToSummary(issue gen.Issue) workitems.IssueSummary {
 	d := workitems.IssueSummary{
@@ -75,12 +57,9 @@ func issueToSummary(issue gen.Issue) workitems.IssueSummary {
 	return d
 }
 
-// issueResponseToData converts a generated IssueResponse (rich single-issue
-// projection) into a backend.IssueData (slim projection). This is used when
-// mutation endpoints return an IssueResponse but the caller only needs the
-// slim shape (e.g., Create).
-func issueResponseToData(r gen.IssueResponse) backend.IssueData {
-	d := backend.IssueData{
+// issueResponseToSummary converts a generated detail response to the owner summary.
+func issueResponseToSummary(r gen.IssueResponse) workitems.IssueSummary {
+	d := workitems.IssueSummary{
 		ID:              r.Id,
 		Title:           r.Title,
 		Status:          string(r.Status),
@@ -100,6 +79,7 @@ func issueResponseToData(r gen.IssueResponse) backend.IssueData {
 	}
 	if r.SourceRepo != nil {
 		d.SourceRepo = *r.SourceRepo
+		d.Repo = *r.SourceRepo
 	}
 	if r.Parent != nil {
 		d.Parent = *r.Parent
@@ -128,11 +108,17 @@ func issueResponseToData(r gen.IssueResponse) backend.IssueData {
 	return d
 }
 
-// issueResponseToDetailData converts a generated IssueResponse to the richer
-// backend.IssueDetailData. Used for the Get endpoint.
-func issueResponseToDetailData(r gen.IssueResponse) backend.IssueDetailData {
-	detail := backend.IssueDetailData{
-		IssueData: issueResponseToData(r),
+// issueResponseToDetail converts a generated response to the owner detail.
+func issueResponseToDetail(r gen.IssueResponse) workitems.IssueDetail {
+	summary := issueResponseToSummary(r)
+	detail := workitems.IssueDetail{
+		ID: summary.ID, Title: summary.Title, Status: summary.Status, Priority: summary.Priority,
+		IssueType: summary.IssueType, Assignee: summary.Assignee, Owner: summary.Owner,
+		Labels: append([]string(nil), summary.Labels...), SourceRepo: summary.SourceRepo, Repo: summary.Repo,
+		Parent: summary.Parent, Design: summary.Design, DesignArtifactID: summary.DesignArtifactID,
+		DesignFormat: summary.DesignFormat, HasDesign: summary.HasDesign,
+		CreatedAt: summary.CreatedAt, UpdatedAt: summary.UpdatedAt,
+		ExternalRef: summary.ExternalRef, DueAt: summary.DueAt, DeferUntil: summary.DeferUntil,
 	}
 	if r.Description != nil {
 		detail.Description = *r.Description
@@ -155,60 +141,42 @@ func issueResponseToDetailData(r gen.IssueResponse) backend.IssueDetailData {
 		detail.EstimatedMinutes = &v
 	}
 
-	detail.Dependencies = dependencyRefsToData(r.Id, r.Dependencies, true)
-	detail.Dependents = dependencyRefsToData(r.Id, r.Dependents, false)
+	detail.Dependencies = dependencyRefs(r.Dependencies)
+	detail.Dependents = dependencyRefs(r.Dependents)
 
-	comments := make([]backend.CommentData, 0, len(r.Comments))
+	comments := make([]*workitems.Comment, 0, len(r.Comments))
 	for _, c := range r.Comments {
-		comments = append(comments, commentResponseToData(c, r.Id))
+		comments = append(comments, commentResponse(c, r.Id))
 	}
 	detail.Comments = comments
 
 	return detail
 }
 
-// dependencyRefsToData converts a slice of generated DependencyRef into
-// backend.DependencyData. The asOutgoing flag determines which side of the
-// relation the parent issue sits on: for Dependencies (outgoing), the parent
-// issue depends on each ref; for Dependents (incoming), each ref depends on
-// the parent.
-func dependencyRefsToData(parentID string, refs []gen.DependencyRef, asOutgoing bool) []backend.DependencyData {
-	out := make([]backend.DependencyData, 0, len(refs))
+func dependencyRefs(refs []gen.DependencyRef) []workitems.Dependency {
+	out := make([]workitems.Dependency, 0, len(refs))
 	for _, ref := range refs {
-		d := backend.DependencyData{
-			Type:      ref.Type,
-			Title:     ref.Title,
-			Status:    ref.Status,
-			Priority:  ref.Priority,
-			IssueType: ref.IssueType,
-		}
-		if asOutgoing {
-			d.IssueID = parentID
-			d.DependsOnID = ref.Id
-		} else {
-			d.IssueID = ref.Id
-			d.DependsOnID = parentID
+		d := workitems.Dependency{
+			ID:             ref.Id,
+			DependencyType: ref.Type,
+			Title:          ref.Title,
+			Status:         ref.Status,
+			Priority:       ref.Priority,
+			IssueType:      ref.IssueType,
 		}
 		out = append(out, d)
 	}
 	return out
 }
 
-// commentResponseToData converts gen.CommentResponse to backend.CommentData.
-func commentResponseToData(c gen.CommentResponse, issueID string) backend.CommentData {
-	d := backend.CommentData{
+func commentResponse(c gen.CommentResponse, issueID string) *workitems.Comment {
+	return &workitems.Comment{
 		ID:        c.Id,
 		IssueID:   issueID,
 		Author:    c.Author,
 		Text:      c.Text,
 		CreatedAt: c.CreatedAt,
 	}
-	if c.ParentId != nil {
-		v := *c.ParentId
-		d.ParentID = &v
-	}
-	d.EditedAt = cloneTimePtr(c.EditedAt)
-	return d
 }
 
 // commentToWorkItem converts a basic generated comment into the Work Items

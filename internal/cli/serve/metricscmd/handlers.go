@@ -12,11 +12,11 @@ import (
 
 	"go.opentelemetry.io/otel/attribute"
 
-	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/monitor"
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/storeadapter"
@@ -107,15 +107,15 @@ type StatusResponse struct {
 	Timestamp        time.Time                   `json:"timestamp"`
 }
 
-type IssueBackendFn func(ctx context.Context) backend.IssueBackend
+type WorkItemsFn func(ctx context.Context) workitems.API
 
 // HandleStatus returns an HTTP handler for the full status endpoint.
 func HandleStatus(collectDataFn CollectDataFn, st store.Store) http.HandlerFunc {
-	return HandleStatusWithBackend(collectDataFn, st, nil)
+	return HandleStatusWithWorkItems(collectDataFn, st, nil)
 }
 
-func HandleStatusWithBackend(collectDataFn CollectDataFn, st store.Store, backendFn IssueBackendFn) http.HandlerFunc {
-	return HandleStatusWithDataSource(NewMonitorDataSource(collectDataFn, backendFn), st)
+func HandleStatusWithWorkItems(collectDataFn CollectDataFn, st store.Store, workItemsFn WorkItemsFn) http.HandlerFunc {
+	return HandleStatusWithDataSource(NewMonitorDataSource(collectDataFn, workItemsFn), st)
 }
 
 func HandleStatusWithDataSource(dataSource *MonitorDataSource, st store.Store) http.HandlerFunc {
@@ -161,11 +161,11 @@ func HandleStatusWithSources(dataSource *MonitorDataSource, storeDataSource *Mon
 
 // HandleAgents returns an HTTP handler for the agents endpoint.
 func HandleAgents(collectDataFn CollectDataFn, st store.Store) http.HandlerFunc {
-	return HandleAgentsWithBackend(collectDataFn, st, nil)
+	return HandleAgentsWithWorkItems(collectDataFn, st, nil)
 }
 
-func HandleAgentsWithBackend(collectDataFn CollectDataFn, st store.Store, backendFn IssueBackendFn) http.HandlerFunc {
-	return HandleAgentsWithDataSource(NewMonitorDataSource(collectDataFn, backendFn), st)
+func HandleAgentsWithWorkItems(collectDataFn CollectDataFn, st store.Store, workItemsFn WorkItemsFn) http.HandlerFunc {
+	return HandleAgentsWithDataSource(NewMonitorDataSource(collectDataFn, workItemsFn), st)
 }
 
 func HandleAgentsWithDataSource(dataSource *MonitorDataSource, st store.Store) http.HandlerFunc {
@@ -205,11 +205,11 @@ func HandleAgentsWithSources(dataSource *MonitorDataSource, storeDataSource *Mon
 
 // HandleTasks returns an HTTP handler for the tasks endpoint.
 func HandleTasks(collectDataFn CollectDataFn) http.HandlerFunc {
-	return HandleTasksWithBackend(collectDataFn, nil)
+	return HandleTasksWithWorkItems(collectDataFn, nil)
 }
 
-func HandleTasksWithBackend(collectDataFn CollectDataFn, backendFn IssueBackendFn) http.HandlerFunc {
-	return HandleTasksWithDataSource(NewMonitorDataSource(collectDataFn, backendFn))
+func HandleTasksWithWorkItems(collectDataFn CollectDataFn, workItemsFn WorkItemsFn) http.HandlerFunc {
+	return HandleTasksWithDataSource(NewMonitorDataSource(collectDataFn, workItemsFn))
 }
 
 func HandleTasksWithDataSource(dataSource *MonitorDataSource) http.HandlerFunc {
@@ -248,11 +248,11 @@ func HandleTasksWithDataSource(dataSource *MonitorDataSource) http.HandlerFunc {
 
 // HandleStats returns an HTTP handler for the stats endpoint.
 func HandleStats(collectDataFn CollectDataFn) http.HandlerFunc {
-	return HandleStatsWithBackend(collectDataFn, nil)
+	return HandleStatsWithWorkItems(collectDataFn, nil)
 }
 
-func HandleStatsWithBackend(collectDataFn CollectDataFn, backendFn IssueBackendFn) http.HandlerFunc {
-	return HandleStatsWithDataSource(NewMonitorDataSource(collectDataFn, backendFn))
+func HandleStatsWithWorkItems(collectDataFn CollectDataFn, workItemsFn WorkItemsFn) http.HandlerFunc {
+	return HandleStatsWithDataSource(NewMonitorDataSource(collectDataFn, workItemsFn))
 }
 
 func HandleStatsWithDataSource(dataSource *MonitorDataSource) http.HandlerFunc {
@@ -269,10 +269,6 @@ func HandleStatsWithDataSource(dataSource *MonitorDataSource) http.HandlerFunc {
 			Timestamp: data.Timestamp,
 		})
 	}
-}
-
-func monitorDataForRequest(r *http.Request, collectDataFn CollectDataFn, backendFn IssueBackendFn) *monitor.MonitorData {
-	return NewMonitorDataSource(collectDataFn, backendFn).Resolve(r)
 }
 
 // HandleSync returns an HTTP handler for the sync endpoint.

@@ -25,7 +25,7 @@ type RoleConfig = config.RoleConfig
 type MockExecRunner = clitest.MockExecRunner
 type MockGitRunner = clitest.MockGitRunner
 type MockFileSystem = clitest.MockFileSystem
-type MockIssueBackend = clitest.MockIssueBackend
+type MockWorkItems = clitest.MockWorkItems
 type AgentStatus = monitor.AgentStatus
 type MonitorData = monitor.MonitorData
 type MonitorStats = monitor.MonitorStats
@@ -41,11 +41,11 @@ var (
 	GetWorktreesDir               = cli.GetWorktreesDir
 )
 
-func NewTestDeps(t *testing.T) (*cli.Deps, *clitest.MockGitRunner, *clitest.MockExecRunner, *clitest.MockFileSystem, *clitest.MockIssueBackend) {
+func NewTestDeps(t *testing.T) (*cli.Deps, *clitest.MockGitRunner, *clitest.MockExecRunner, *clitest.MockFileSystem, *clitest.MockWorkItems) {
 	return clitest.NewTestDeps(t)
 }
 
-func NewMockIssueBackend() *clitest.MockIssueBackend { return clitest.NewMockIssueBackend() }
+func NewMockWorkItems() *clitest.MockWorkItems { return clitest.NewMockWorkItems() }
 
 func slicesEqual(a, b []string) bool { return clitest.SlicesEqual(a, b) }
 

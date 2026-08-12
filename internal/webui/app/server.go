@@ -58,7 +58,10 @@ type Server struct {
 	connectorSealer     connectorsmodule.CredentialSealer
 
 	// Service layer
-	workItems        *workitems.Service
+	workItems interface {
+		workitems.API
+		workitems.StatsQueries
+	}
 	workspaceCatalog workspace.API
 	workspaceStore   store.WorkspaceStore
 	workItemMover    workitemmove.Commands
@@ -161,7 +164,7 @@ func (app *Server) buildHandlers() {
 		TerminalGraceMS:    graceMS,
 		TerminalIdleMS:     idleMS,
 		TerminalMaxSession: maxSess,
-		IssueBackendFn:     app.config.IssueBackendFn,
+		WorkItemsFn:        app.config.WorkItemsFn,
 	})
 }
 

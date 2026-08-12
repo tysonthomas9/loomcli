@@ -57,7 +57,7 @@ type GraphResponse struct {
 func HandleBlocked(queries WorkItemQueries) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if !serveBlocked(w, r, queries) {
-			handler.WriteJSON(w, http.StatusServiceUnavailable, BlockedResponse{Success: false, Error: "issue backend not configured"})
+			handler.WriteJSON(w, http.StatusServiceUnavailable, BlockedResponse{Success: false, Error: "Work Items service not configured"})
 		}
 	}
 }
@@ -65,7 +65,7 @@ func HandleBlocked(queries WorkItemQueries) http.HandlerFunc {
 func HandleGraph(queries WorkItemQueries) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if !serveGraph(w, r, queries) {
-			handler.WriteJSON(w, http.StatusServiceUnavailable, GraphResponse{Success: false, Error: "issue backend not configured"})
+			handler.WriteJSON(w, http.StatusServiceUnavailable, GraphResponse{Success: false, Error: "Work Items service not configured"})
 		}
 	}
 }

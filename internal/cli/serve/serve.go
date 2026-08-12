@@ -219,23 +219,23 @@ func runServe(cmd *cobra.Command, args []string) {
 		log.Fatalf("failed to open fleet-db store: %v", storeErr)
 	}
 	defer func() { _ = storeHandle.Close() }()
-	issueBackendFn := cli.WorkspaceAwareIssueBackendForConfig(
+	workItemsFn := cli.WorkspaceAwareWorkItemsForConfig(
 		storeHandle.URL(),
 		storeHandle.FleetDBClientAPIKey(),
 		fleetState.clientCfg.Actor,
 	)
 	taskReadyCallbacks := buildTaskReadyBridgeCallbacks(
 		storeHandle.Store.Repos(),
-		issueBackendFn,
+		workItemsFn,
 	)
 	monitorDefaultWorkspace := resolveMonitorCollectorWorkspace(storeHandle.Store, fleetState.clientCfg.Workspace)
-	collectDataFn := buildMonitorCollectDataFn(monitorDefaultWorkspace, issueBackendFn)
+	collectDataFn := buildMonitorCollectDataFn(monitorDefaultWorkspace, workItemsFn)
 	monitorStoreDataSource := metricscmd.NewMonitorStoreDataSource(storeHandle.Store)
 	monitorHandlers := buildMonitorHandlers(
 		collectDataFn,
 		staleDetectorHandler,
 		storeHandle.Store,
-		issueBackendFn,
+		workItemsFn,
 		monitorDefaultWorkspace,
 		monitorStoreDataSource,
 	)
@@ -326,12 +326,12 @@ func configureServeLocalRuntimeMode() {
 	_ = os.Setenv(envLocalRuntimeMode, localRuntimeModeHeadless)
 }
 
-func buildMonitorCollectDataFn(workspaceHint string, issueBackendFn metricscmd.IssueBackendFn) metricscmd.CollectDataFn {
+func buildMonitorCollectDataFn(workspaceHint string, workItemsFn metricscmd.WorkItemsFn) metricscmd.CollectDataFn {
 	// Refresh monitor data only when the UI asks for it. The frontend performs
 	// one initial fetch and then uses workspace SSE mutations to trigger
 	// additional refreshes, so an unconditional server-side warmer just creates
 	// idle fleet-db fanout and OTEL spans.
-	return buildCollectDataFn(workspaceHint, issueBackendFn, monitorCollectionCacheTTL)
+	return buildCollectDataFn(workspaceHint, workItemsFn, monitorCollectionCacheTTL)
 }
 
 func resolveMonitorCollectorWorkspace(st store.Store, fallbackWorkspace string) string {
@@ -603,12 +603,12 @@ func buildMonitorHandlers(
 	collectDataFn metricscmd.CollectDataFn,
 	staleDetectorHandler http.HandlerFunc,
 	st store.Store,
-	issueBackendFn metricscmd.IssueBackendFn,
+	workItemsFn metricscmd.WorkItemsFn,
 	defaultWorkspace string,
 	monitorStoreDataSource *metricscmd.MonitorStoreDataSource,
 ) webui.MonitorHandlers {
 	return composeMonitorHandlers(
-		collectDataFn, staleDetectorHandler, issueBackendFn, defaultWorkspace, usageHandler,
+		collectDataFn, staleDetectorHandler, workItemsFn, defaultWorkspace, usageHandler,
 		monitorStoreDataSource, metricscmd.HandleWorkspaces(st), st.DriverRuns(),
 	)
 }
@@ -629,7 +629,7 @@ func applyStoreHandleServerConfig(
 	gitOps.WithStore(storeHandle.Store)
 	if url := storeHandle.URL(); url != "" {
 		fleetAPIKey := storeHandle.FleetDBClientAPIKey()
-		cfg.IssueBackendFn = cli.WorkspaceAwareIssueBackendForConfig(
+		cfg.WorkItemsFn = cli.WorkspaceAwareWorkItemsForConfig(
 			url,
 			fleetAPIKey,
 			fs.clientCfg.Actor,
@@ -821,18 +821,17 @@ func buildCoreServerConfig(monitorHandlers webui.MonitorHandlers, gitOps *opsimp
 		LocalSettingsDir:     bootstrap.LoomDir(),
 		Logger:               slog.Default(),
 		SentryDSN:            serveSentryDSN,
-		// Wire the active IssueBackend (fleet / fleet-db / api) into
-		// the webui service layer so the migrated CRUD endpoints don't
-		// hardcode a retired transport path. The closure lets the backend resolve
+		// Wire the active Work Items capability (FleetDB or remote API) into
+		// the web application. The closure resolves lazily,
 		// lazily — important because in fleet mode the backend is created on
 		// first call, after the serve command has finished its early-startup
 		// configuration.
 		//
 		// Cloud mode (LOOM_FLEET_DB_URL set) takes the workspace ID from the
-		// request context and constructs a per-workspace fleet-db backend so
+		// request context and constructs a per-workspace Work Items service so
 		// /api/workspaces/{ws}/issues stays scoped. Local mode uses the
 		// process-global fleet-db backend.
-		IssueBackendFn: cli.WorkspaceAwareIssueBackend(),
+		WorkItemsFn: cli.WorkspaceAwareWorkItems(),
 	}
 }
 

@@ -5,7 +5,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/tysonthomas9/loomcli/internal/backend"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 )
 
 var (
@@ -20,16 +20,17 @@ var closeCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
-		ib, err := getIssueBackend(ctx)
+		itemsAPI, err := getWorkItems(ctx)
 		if err != nil {
 			return err
 		}
-		params := backend.CloseParams{
+		params := workitems.CloseCommand{
+			IssueID: args[0],
 			Reason:  closeReason,
 			Session: closeSession,
 			Force:   closeForce,
 		}
-		if _, err := ib.Close(ctx, args[0], params); err != nil {
+		if _, err := itemsAPI.Close(ctx, params); err != nil {
 			// Idempotent close: already-closed means the desired state is
 			// true — succeed quietly (a doubled close must not exit 1 or
 			// spray ERROR logs). Other conflicts (blockers, dependencies)

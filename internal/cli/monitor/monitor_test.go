@@ -10,7 +10,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 )
 
@@ -791,11 +790,11 @@ func TestCollectStatistics(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			deps, _, _, _, _ := NewTestDeps(t)
-			mock := NewMockIssueBackend()
+			mock := NewMockWorkItems()
 			mock.StatsResult = tt.statsResult
 			mock.StatsErr = tt.statsErr
-			mock.ListResult = make([]backend.IssueData, tt.reviewCount)
-			deps.IssueBackend = mock
+			mock.ListResult = listResultFromSummaries(make([]workitems.IssueSummary, tt.reviewCount))
+			deps.WorkItems = mock
 
 			stats := collectStatisticsDeps(t.Context(), deps)
 
@@ -893,13 +892,13 @@ func TestCollectTaskStatus(t *testing.T) {
 		name                    string
 		readyIssues             []workitems.IssueSummary
 		readyErr                error
-		inProgressIssues        []backend.IssueData
+		inProgressIssues        []workitems.IssueSummary
 		inProgressErr           error
-		reviewIssues            []backend.IssueData
+		reviewIssues            []workitems.IssueSummary
 		reviewErr               error
 		backlogIssues           []workitems.IssueSummary
 		backlogErr              error
-		closedIssues            []backend.IssueData
+		closedIssues            []workitems.IssueSummary
 		closedErr               error
 		wantNeedsPlanning       int
 		wantReadyToImplement    int
@@ -932,7 +931,7 @@ func TestCollectTaskStatus(t *testing.T) {
 		},
 		{
 			name: "tasks with review status go to NeedReview",
-			reviewIssues: []backend.IssueData{
+			reviewIssues: []workitems.IssueSummary{
 				{ID: "T-1", Title: "Review this task", Status: "review"},
 			},
 			wantNeedReview:     1,
@@ -940,7 +939,7 @@ func TestCollectTaskStatus(t *testing.T) {
 		},
 		{
 			name: "in_progress tasks populate InProgressTasks and agentTasks",
-			inProgressIssues: []backend.IssueData{
+			inProgressIssues: []workitems.IssueSummary{
 				{ID: "T-1", Title: "In progress task", Status: "in_progress", Assignee: "falcon"},
 			},
 			wantInProgress:         1,
@@ -1014,7 +1013,7 @@ func TestCollectTaskStatus(t *testing.T) {
 		},
 		{
 			name: "closed tasks are collected",
-			closedIssues: []backend.IssueData{
+			closedIssues: []workitems.IssueSummary{
 				{ID: "T-1", Title: "Done task", Status: "closed", Priority: 2},
 				{ID: "T-2", Title: "Also done", Status: "closed", Priority: 3},
 			},
@@ -1026,7 +1025,7 @@ func TestCollectTaskStatus(t *testing.T) {
 		},
 		{
 			name: "multiple agents with tasks",
-			inProgressIssues: []backend.IssueData{
+			inProgressIssues: []workitems.IssueSummary{
 				{ID: "T-1", Title: "Task 1", Status: "in_progress", Assignee: "falcon"},
 				{ID: "T-2", Title: "Task 2", Status: "in_progress", Assignee: "nova"},
 				{ID: "T-3", Title: "Task 3", Status: "in_progress", Assignee: ""},
@@ -1041,23 +1040,23 @@ func TestCollectTaskStatus(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			deps, _, _, _, _ := NewTestDeps(t)
-			mock := NewMockIssueBackend()
+			mock := NewMockWorkItems()
 			mock.ReadyResult = tt.readyIssues
 			mock.ReadyErr = tt.readyErr
-			mock.ListFn = func(_ context.Context, opts backend.ListOpts) ([]backend.IssueData, error) {
-				switch opts.Status {
+			mock.ListFn = func(_ context.Context, query workitems.ListQuery) (*workitems.ListResult, error) {
+				switch query.Filter.Status {
 				case "in_progress":
-					return tt.inProgressIssues, tt.inProgressErr
+					return listResultFromSummaries(tt.inProgressIssues), tt.inProgressErr
 				case "review":
-					return tt.reviewIssues, tt.reviewErr
+					return listResultFromSummaries(tt.reviewIssues), tt.reviewErr
 				case "closed":
-					return tt.closedIssues, tt.closedErr
+					return listResultFromSummaries(tt.closedIssues), tt.closedErr
 				}
-				return nil, nil
+				return &workitems.ListResult{}, nil
 			}
 			mock.BlockedResult = tt.backlogIssues
 			mock.BlockedErr = tt.backlogErr
-			deps.IssueBackend = mock
+			deps.WorkItems = mock
 
 			summary, needsPlanningTasks, readyToImplementTasks, reviewTasks, inProgressTasks, backlogTasks, closedTasks, agentTasks := collectTaskStatusDeps(t.Context(), deps, 100)
 
@@ -1105,16 +1104,16 @@ func TestCollectTaskStatusReadyCommandArgs(t *testing.T) {
 	t.Parallel()
 	// This test verifies that Ready() is called with the passed readyLimit
 	deps, _, _, _, _ := NewTestDeps(t)
-	mock := NewMockIssueBackend()
+	mock := NewMockWorkItems()
 	var capturedOpts workitems.AvailabilityQuery
 	mock.ReadyFn = func(_ context.Context, opts workitems.AvailabilityQuery) ([]workitems.IssueSummary, error) {
 		capturedOpts = opts
 		return nil, nil
 	}
-	mock.ListFn = func(_ context.Context, opts backend.ListOpts) ([]backend.IssueData, error) {
-		return nil, nil
+	mock.ListFn = func(_ context.Context, query workitems.ListQuery) (*workitems.ListResult, error) {
+		return &workitems.ListResult{}, nil
 	}
-	deps.IssueBackend = mock
+	deps.WorkItems = mock
 
 	collectTaskStatusDeps(t.Context(), deps, 100)
 
@@ -1424,13 +1423,13 @@ func TestCollectMonitorData(t *testing.T) {
 	}}
 	deps.Git = &execBridgeGitRunner{Exec: deps.Exec}
 
-	mock := NewMockIssueBackend()
+	mock := NewMockWorkItems()
 	mock.ReadyResult = []workitems.IssueSummary{
 		{ID: "T-1", Title: "Task 1", Status: "open", Design: ""},
 		{ID: "T-2", Title: "Task 2", Status: "open", Design: "plan"},
 	}
 	mock.StatsResult = &workitems.Stats{TotalIssues: 10, OpenIssues: 3, ClosedIssues: 7}
-	deps.IssueBackend = mock
+	deps.WorkItems = mock
 
 	data := collectMonitorDataDeps(t.Context(), deps, 100, "")
 
@@ -1471,7 +1470,7 @@ func TestCollectMonitorData(t *testing.T) {
 // ===========================================================================
 
 func TestCollectMonitorDataExported(t *testing.T) {
-	// not parallel: uses os.Chdir, defaultResolver, installExecMock, setDefaultIssueBackend
+	// not parallel: uses os.Chdir, defaultResolver, installExecMock, setDefaultWorkItems
 	origDir, err := os.Getwd()
 	if err != nil {
 		t.Fatal(err)
@@ -1505,10 +1504,10 @@ func TestCollectMonitorDataExported(t *testing.T) {
 		return CommandResult{}
 	}})
 
-	mock := NewMockIssueBackend()
+	mock := NewMockWorkItems()
 	mock.StatsResult = &workitems.Stats{TotalIssues: 5, OpenIssues: 2, ClosedIssues: 3}
-	setDefaultIssueBackend(mock)
-	t.Cleanup(func() { resetDefaultIssueBackend() })
+	setDefaultWorkItems(mock)
+	t.Cleanup(func() { resetDefaultWorkItems() })
 
 	data := CollectMonitorData(t.Context(), 0, "")
 	if data == nil {
@@ -1573,7 +1572,7 @@ func TestCollectAgentStatusOnlyExported(t *testing.T) {
 // counts blocked issues. Issues returned by Ready are trusted as unblocked
 // (no redundant HasUnclosedBlockers re-pass in the monitor).
 func TestBacklogAccumulatesReadyWithBlockersAndBlocked(t *testing.T) {
-	// not parallel: uses os.Chdir, defaultResolver, installExecMock, setDefaultIssueBackend
+	// not parallel: uses os.Chdir, defaultResolver, installExecMock, setDefaultWorkItems
 	origDir, err := os.Getwd()
 	if err != nil {
 		t.Fatal(err)
@@ -1609,7 +1608,7 @@ func TestBacklogAccumulatesReadyWithBlockersAndBlocked(t *testing.T) {
 	// T-BLOCKER is unclosed (in ready output), so T-BLOCKED-READY has an unclosed blocker.
 	// T-LOOM-BLOCKED comes from the blocked list.
 	// Both should count toward Backlog, giving Backlog=2.
-	mock := NewMockIssueBackend()
+	mock := NewMockWorkItems()
 	mock.ReadyResult = []workitems.IssueSummary{
 		{ID: "T-BLOCKER", Title: "Open blocker", Status: "open", Design: "plan"},
 		{ID: "T-BLOCKED-READY", Title: "Blocked in ready", Status: "open", Design: "plan"},
@@ -1619,8 +1618,8 @@ func TestBacklogAccumulatesReadyWithBlockersAndBlocked(t *testing.T) {
 		{ID: "T-LOOM-BLOCKED", Title: "Blocked by dependency", Status: "open"},
 	}
 	mock.StatsResult = &workitems.Stats{TotalIssues: 20, OpenIssues: 10, ClosedIssues: 5}
-	setDefaultIssueBackend(mock)
-	t.Cleanup(func() { resetDefaultIssueBackend() })
+	setDefaultWorkItems(mock)
+	t.Cleanup(func() { resetDefaultWorkItems() })
 
 	data := collectMonitorData(t.Context(), 100, "")
 
@@ -1644,7 +1643,7 @@ func TestBacklogAccumulatesReadyWithBlockersAndBlocked(t *testing.T) {
 // issues from Ready are counted separately while aggregate stats remain the
 // backend projection used by workspace stats.
 func TestEpicsExcludedFromWorkQueueButStatsRemainCanonical(t *testing.T) {
-	// not parallel: uses os.Chdir, defaultResolver, installExecMock, setDefaultIssueBackend
+	// not parallel: uses os.Chdir, defaultResolver, installExecMock, setDefaultWorkItems
 	origDir, err := os.Getwd()
 	if err != nil {
 		t.Fatal(err)
@@ -1677,15 +1676,15 @@ func TestEpicsExcludedFromWorkQueueButStatsRemainCanonical(t *testing.T) {
 		return CommandResult{}
 	}})
 
-	mock := NewMockIssueBackend()
+	mock := NewMockWorkItems()
 	mock.ReadyResult = []workitems.IssueSummary{
 		{ID: "T-1", Title: "Normal task", Status: "open", Design: "plan"},
 		{ID: "T-EPIC", Title: "Epic task", Status: "open", IssueType: "epic"},
 		{ID: "T-2", Title: "Needs planning", Status: "open", Design: ""},
 	}
 	mock.StatsResult = &workitems.Stats{TotalIssues: 10, OpenIssues: 5, ClosedIssues: 3}
-	setDefaultIssueBackend(mock)
-	t.Cleanup(func() { resetDefaultIssueBackend() })
+	setDefaultWorkItems(mock)
+	t.Cleanup(func() { resetDefaultWorkItems() })
 
 	data := collectMonitorData(t.Context(), 100, "")
 
@@ -1711,7 +1710,7 @@ func TestEpicsExcludedFromWorkQueueButStatsRemainCanonical(t *testing.T) {
 // TestMonitorStatsPreserveBackendTotals verifies that monitor status does not
 // overwrite canonical backend stats with work-queue subtotals.
 func TestMonitorStatsPreserveBackendTotals(t *testing.T) {
-	// not parallel: uses os.Chdir, defaultResolver, installExecMock, setDefaultIssueBackend
+	// not parallel: uses os.Chdir, defaultResolver, installExecMock, setDefaultWorkItems
 	origDir, err := os.Getwd()
 	if err != nil {
 		t.Fatal(err)
@@ -1744,33 +1743,33 @@ func TestMonitorStatsPreserveBackendTotals(t *testing.T) {
 		return CommandResult{}
 	}})
 
-	mock := NewMockIssueBackend()
+	mock := NewMockWorkItems()
 	mock.ReadyResult = []workitems.IssueSummary{
 		{ID: "T-1", Title: "Plan me", Status: "open", Design: ""},
 		{ID: "T-2", Title: "Implement me", Status: "open", Design: "plan"},
 	}
-	mock.ListFn = func(_ context.Context, opts backend.ListOpts) ([]backend.IssueData, error) {
-		switch opts.Status {
+	mock.ListFn = func(_ context.Context, query workitems.ListQuery) (*workitems.ListResult, error) {
+		switch query.Filter.Status {
 		case "in_progress":
-			return []backend.IssueData{
+			return listResultFromSummaries([]workitems.IssueSummary{
 				{ID: "T-3", Title: "Active work", Status: "in_progress", Assignee: "agent1"},
-			}, nil
+			}), nil
 		case "review":
-			return []backend.IssueData{
+			return listResultFromSummaries([]workitems.IssueSummary{
 				{ID: "T-4", Title: "Review me", Status: "review"},
 				{ID: "T-5", Title: "Review me too", Status: "review"},
-			}, nil
+			}), nil
 		case "closed":
-			return nil, nil
+			return &workitems.ListResult{}, nil
 		}
-		return nil, nil
+		return &workitems.ListResult{}, nil
 	}
 	mock.BlockedResult = []workitems.IssueSummary{
 		{ID: "T-6", Title: "Blocked task", Status: "open"},
 	}
 	mock.StatsResult = &workitems.Stats{TotalIssues: 50, OpenIssues: 8, ClosedIssues: 40}
-	setDefaultIssueBackend(mock)
-	t.Cleanup(func() { resetDefaultIssueBackend() })
+	setDefaultWorkItems(mock)
+	t.Cleanup(func() { resetDefaultWorkItems() })
 
 	data := collectMonitorData(t.Context(), 100, "")
 
@@ -1804,7 +1803,7 @@ func TestMonitorStatsPreserveBackendTotals(t *testing.T) {
 }
 
 func TestRunMonitorOneShot(t *testing.T) {
-	// not parallel: uses os.Chdir, defaultResolver, installExecMock, setDefaultIssueBackend, monitorNoWatch global, os.Stdout capture
+	// not parallel: uses os.Chdir, defaultResolver, installExecMock, setDefaultWorkItems, monitorNoWatch global, os.Stdout capture
 	origDir, err := os.Getwd()
 	if err != nil {
 		t.Fatal(err)
@@ -1838,9 +1837,9 @@ func TestRunMonitorOneShot(t *testing.T) {
 		return CommandResult{}
 	}})
 
-	mock := NewMockIssueBackend()
-	setDefaultIssueBackend(mock)
-	t.Cleanup(func() { resetDefaultIssueBackend() })
+	mock := NewMockWorkItems()
+	setDefaultWorkItems(mock)
+	t.Cleanup(func() { resetDefaultWorkItems() })
 
 	// Save and set monitorNoWatch
 	oldNoWatch := monitorNoWatch
@@ -2171,7 +2170,7 @@ func TestGetWorktreeGitSyncStatusCustomBranch(t *testing.T) {
 }
 
 func TestCollectAgentStatusLockFallback(t *testing.T) {
-	// not parallel: subtests use os.Chdir, defaultResolver, installExecMock, setDefaultIssueBackend
+	// not parallel: subtests use os.Chdir, defaultResolver, installExecMock, setDefaultWorkItems
 	tests := []struct {
 		name         string
 		lockCommand  string // "plan" or "task"
@@ -2244,13 +2243,13 @@ func TestCollectAgentStatusLockFallback(t *testing.T) {
 			os.WriteFile(filepath.Join(wtDir, ".agent.lock"), lockData, 0644)
 
 			// Mock IssueTracker for getTaskStatus
-			mockTracker := &MockIssueBackend{
-				GetFn: func(ctx context.Context, id string) (*backend.IssueDetailData, error) {
-					return &backend.IssueDetailData{IssueData: backend.IssueData{ID: id, Title: "Test Task", Status: tt.rawStatus}}, nil
+			mockTracker := &MockWorkItems{
+				GetFn: func(ctx context.Context, query workitems.GetQuery) (*workitems.IssueDetail, error) {
+					return &workitems.IssueDetail{ID: query.IssueID, Title: "Test Task", Status: tt.rawStatus}, nil
 				},
 			}
-			setDefaultIssueBackend(mockTracker)
-			t.Cleanup(func() { setDefaultIssueBackend(nil) })
+			setDefaultWorkItems(mockTracker)
+			t.Cleanup(func() { setDefaultWorkItems(nil) })
 
 			installExecMock(t, &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
 				if name == "git" && len(args) > 0 && args[0] == "branch" {
@@ -2659,18 +2658,18 @@ func TestRenderAgentLine(t *testing.T) {
 // TestCollectTaskStatusReadyCommandArgs tests limit=100 (monitor default);
 // this test covers limit=50 (serve default).
 func TestCollectTaskStatusReadyLimitParam(t *testing.T) {
-	// not parallel: uses setDefaultIssueBackend
-	mock := NewMockIssueBackend()
+	// not parallel: uses setDefaultWorkItems
+	mock := NewMockWorkItems()
 	var capturedOpts workitems.AvailabilityQuery
 	mock.ReadyFn = func(_ context.Context, opts workitems.AvailabilityQuery) ([]workitems.IssueSummary, error) {
 		capturedOpts = opts
 		return nil, nil
 	}
-	mock.ListFn = func(_ context.Context, opts backend.ListOpts) ([]backend.IssueData, error) {
-		return nil, nil
+	mock.ListFn = func(_ context.Context, query workitems.ListQuery) (*workitems.ListResult, error) {
+		return &workitems.ListResult{}, nil
 	}
-	setDefaultIssueBackend(mock)
-	defer resetDefaultIssueBackend()
+	setDefaultWorkItems(mock)
+	defer resetDefaultWorkItems()
 
 	collectTaskStatus(t.Context(), 50)
 
@@ -2683,8 +2682,8 @@ func TestCollectTaskStatusReadyLimitParam(t *testing.T) {
 // collectReadyTasksByPriority passes the readyLimit parameter through to
 // Ready() (limit=50, matching the serve use case).
 func TestCollectReadyTasksByPriorityReadyLimitParam(t *testing.T) {
-	// not parallel: uses setDefaultIssueBackend
-	mock := NewMockIssueBackend()
+	// not parallel: uses setDefaultWorkItems
+	mock := NewMockWorkItems()
 	var capturedOpts workitems.AvailabilityQuery
 	mock.ReadyFn = func(_ context.Context, opts workitems.AvailabilityQuery) ([]workitems.IssueSummary, error) {
 		capturedOpts = opts
@@ -2693,8 +2692,8 @@ func TestCollectReadyTasksByPriorityReadyLimitParam(t *testing.T) {
 			{ID: "T-2", Title: "P2 task", Status: "open", Priority: 2, Design: ""},
 		}, nil
 	}
-	setDefaultIssueBackend(mock)
-	defer resetDefaultIssueBackend()
+	setDefaultWorkItems(mock)
+	defer resetDefaultWorkItems()
 
 	counts := collectReadyTasksByPriority(t.Context(), 50)
 

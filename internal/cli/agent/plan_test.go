@@ -24,15 +24,15 @@ func newPlanCmd(deps *Deps) *cobra.Command {
 	return cmd
 }
 
-// setupPlanTracker configures deps.IssueBackend with the given issues and installs
+// setupPlanTracker configures deps.WorkItems with the given issues and installs
 // it as the global default tracker. Cleanup restores the original tracker.
 func setupPlanTracker(t *testing.T, deps *Deps, issues []workitems.IssueSummary) {
 	t.Helper()
-	tracker := deps.IssueBackend.(*MockIssueBackend)
+	tracker := deps.WorkItems.(*MockWorkItems)
 	tracker.ReadyResult = issues
-	resetDefaultIssueBackend()
-	setDefaultIssueBackend(tracker)
-	t.Cleanup(resetDefaultIssueBackend)
+	resetDefaultWorkItems()
+	setDefaultWorkItems(tracker)
+	t.Cleanup(resetDefaultWorkItems)
 }
 
 func TestRunPlan_SingleTask_NoTasksAvailable(t *testing.T) {

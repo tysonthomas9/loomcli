@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/fleet"
@@ -54,7 +55,7 @@ type ServerConfig struct {
 	FleetEnabled        bool // Register fleet API routes (requires Redis coordination)
 	// FleetClient is true when this loom server is a fleet-db CLIENT (not a
 	// fleet API server itself). In this mode there is no local issue daemon to
-	// talk to — the IssueBackend is fleet-db over HTTP. Drives the
+	// talk to — Work Items uses FleetDB over HTTP. Drives the
 	// /api/health handler choice so a missing daemon is reported as the
 	// expected steady state, not a degraded one.
 	FleetClient           bool
@@ -114,18 +115,17 @@ type ServerConfig struct {
 	ArtifactsCapability ArtifactsCapability   // Active owner-fenced Artifact lifecycle; nil fails artifact mutations closed
 	Logger              *slog.Logger          // Structured logger (optional; nil falls back to slog.Default())
 	SentryDSN           string                // Sentry/GlitchTip DSN for error tracking (optional; empty disables)
-	// IssueBackendFn returns the active backend.IssueBackend wrapped at server
-	// composition by the Work Items capability's narrow durable adapter. When
+	// WorkItemsFn returns the active workspace-scoped Work Items capability. When
 	// nil, Work Items HTTP and onboarding routes remain unavailable.
 	//
-	// Threaded as a closure rather than a backend.IssueBackend field so the
+	// Threaded as a closure rather than an API field so the
 	// cli wiring can resolve the backend lazily without webui depending on
 	// internal/cli (which would create an import cycle).
 	//
 	// The ctx carries the per-request workspace ID via middleware.WithWorkspace,
-	// allowing the closure to construct a per-workspace fleet-db backend in
-	// cloud mode. Local wirings return the process-global fleet-db backend.
-	IssueBackendFn func(ctx context.Context) IssueBackend
+	// allowing the closure to resolve a per-workspace capability in cloud mode.
+	// Local wirings return the process-global Work Items capability.
+	WorkItemsFn workitems.Provider
 }
 
 // WorkspaceIDResolverFn resolves a workspace name to its stable UUID.

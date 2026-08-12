@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/backend/api"
 	"github.com/tysonthomas9/loomcli/internal/backend/api/gen"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 )
 
 func issueListServer(t *testing.T, payload []gen.Issue, captureQuery *string) *httptest.Server {
@@ -28,7 +28,7 @@ func issueListServer(t *testing.T, payload []gen.Issue, captureQuery *string) *h
 	return httptest.NewServer(mux)
 }
 
-func runList(t *testing.T, srvURL string, opts backend.ListOpts, format string) (string, error) {
+func runList(t *testing.T, srvURL string, opts workitems.ListFilter, format string) (string, error) {
 	t.Helper()
 	resetClient()
 	serverURL = srvURL
@@ -48,12 +48,16 @@ func runList(t *testing.T, srvURL string, opts backend.ListOpts, format string) 
 	if err != nil {
 		return "", err
 	}
-	items, err := ab.List(ctx, opts)
+	result, err := ab.List(ctx, workitems.ListQuery{Filter: opts})
 	if err != nil {
 		return "", err
 	}
+	items := make([]workitems.IssueSummary, len(result.Issues))
+	for index := range result.Issues {
+		items[index] = result.Issues[index].IssueSummary
+	}
 	var buf bytes.Buffer
-	if err := printIssueList(&buf, items, format); err != nil {
+	if err := printWorkItemSummaries(&buf, items, format); err != nil {
 		return "", err
 	}
 	return buf.String(), nil
@@ -73,7 +77,7 @@ func TestListAll(t *testing.T) {
 
 	withDataClientState(t, func() {
 		t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
-		out, err := runList(t, srv.URL, backend.ListOpts{}, "text")
+		out, err := runList(t, srv.URL, workitems.ListFilter{}, "text")
 		if err != nil {
 			t.Fatalf("runList: %v", err)
 		}
@@ -90,7 +94,7 @@ func TestListEmptyText(t *testing.T) {
 	defer srv.Close()
 	withDataClientState(t, func() {
 		t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
-		out, err := runList(t, srv.URL, backend.ListOpts{}, "text")
+		out, err := runList(t, srv.URL, workitems.ListFilter{}, "text")
 		if err != nil {
 			t.Fatalf("runList: %v", err)
 		}
@@ -105,7 +109,7 @@ func TestListEmptyJSON(t *testing.T) {
 	defer srv.Close()
 	withDataClientState(t, func() {
 		t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
-		out, err := runList(t, srv.URL, backend.ListOpts{}, "json")
+		out, err := runList(t, srv.URL, workitems.ListFilter{}, "json")
 		if err != nil {
 			t.Fatalf("runList: %v", err)
 		}
@@ -128,7 +132,7 @@ func TestListStatusFilter(t *testing.T) {
 
 	withDataClientState(t, func() {
 		t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
-		_, err := runList(t, srv.URL, backend.ListOpts{Status: "open"}, "text")
+		_, err := runList(t, srv.URL, workitems.ListFilter{Status: "open"}, "text")
 		if err != nil {
 			t.Fatalf("runList: %v", err)
 		}

@@ -290,7 +290,7 @@ func (s *Store) TryClaim(ctx context.Context, taskID, workerID string) (bool, er
 }
 
 // ExtendClaimTTL extends the TTL on a claimed task key.
-// This should be called after the issue backend confirms the claim to keep it alive longer.
+// This should be called after Work Items confirms the claim to keep it alive longer.
 func (s *Store) ExtendClaimTTL(ctx context.Context, taskID string, timeoutMin int) error {
 	if err := validateID(taskID, "taskID"); err != nil {
 		return err

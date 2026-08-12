@@ -9,12 +9,12 @@ import (
 
 	workspacemodule "github.com/tysonthomas9/loomcli/internal/modules/workspace"
 
-	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/backend/fleet"
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	driverpkg "github.com/tysonthomas9/loomcli/internal/driver"
 	stackstore "github.com/tysonthomas9/loomcli/internal/infra/sourcecontrolstackstore"
 	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 )
 
 // epicStackID is the deterministic stack id for an epic. The publisher
@@ -140,7 +140,7 @@ type EpicStackProjection struct {
 	Lineage    map[string]driverpkg.TaskLineage
 }
 
-// projectEpicStack reads an epic's child-task DAG from the issue backend and
+// projectEpicStack reads an epic's child-task DAG from Work Items and
 // asks Source Control to reconcile it as a forest of linear chains. It is
 // idempotent: re-running keeps every existing node's stable OutputBranch
 // (never re-AddNode), only repointing a base via SetBase when lineage changed.
@@ -150,19 +150,19 @@ type EpicStackProjection struct {
 // scopes lineage lookups per repo); rootBase is the branch chain roots build on.
 //
 //nolint:cyclop,funlen,gocognit // Projection combines backend snapshot normalization with stackstore upsert ordering.
-func projectEpicStack(ctx context.Context, ib backend.IssueBackend, stacks sourcecontrol.StackLifecycle, ws, epicID, repoName, rootBase string) (*EpicStackProjection, error) {
+func projectEpicStack(ctx context.Context, items driverpkg.EpicWorkItems, stacks sourcecontrol.StackLifecycle, ws, epicID, repoName, rootBase string) (*EpicStackProjection, error) {
 	ws = strings.TrimSpace(ws)
 	epicID = strings.TrimSpace(epicID)
 	repoName = strings.TrimSpace(repoName)
 	rootBase = strings.TrimSpace(rootBase)
-	if ib == nil || stacks == nil {
-		return nil, fmt.Errorf("issue backend and Source Control stack lifecycle are required")
+	if items == nil || stacks == nil {
+		return nil, fmt.Errorf("work items projection and source control stack lifecycle required")
 	}
 	if ws == "" || epicID == "" || repoName == "" || rootBase == "" {
 		return nil, fmt.Errorf("workspace, epic id, repo name, and root base are required")
 	}
 
-	snapshot, err := driverpkg.LoadEpicSnapshot(ctx, ib, driverpkg.EpicSnapshotOptions{EpicID: epicID})
+	snapshot, err := driverpkg.LoadEpicSnapshot(ctx, items, driverpkg.EpicSnapshotOptions{EpicID: epicID})
 	if err != nil {
 		return nil, fmt.Errorf("load epic snapshot: %w", err)
 	}
@@ -226,7 +226,7 @@ func projectEpicStack(ctx context.Context, ib backend.IssueBackend, stacks sourc
 }
 
 // projectEpicStackForRun is the `loom epic run` wiring for stacked mode: it
-// builds the fleet-db issue backend, resolves the repo + root base the stack is
+// builds the FleetDB Work Items adapter, resolves the repo + root base the stack is
 // scoped to, and projects the epic DAG into the per-user stackstore — the same
 // store the worktree resolver reads via DefaultStackLineageLookup, so a stacked
 // task's worktree base comes from this projection.
@@ -242,14 +242,18 @@ func projectEpicStackForRun(ctx context.Context, handle *bootstrap.StoreHandle, 
 	}
 	repoName := selected.Name
 	originURL := strings.TrimSpace(selected.RemoteURL)
-	ib, err := fleet.New(fleet.Config{
+	store, err := fleet.New(fleet.Config{
 		BaseURL:     handle.URL(),
 		WorkspaceID: ws,
 		APIKey:      handle.FleetDBClientAPIKey(),
 		Actor:       driverpkg.DriverRunActor(runID),
 	})
 	if err != nil {
-		return nil, fmt.Errorf("create fleet-db issue backend: %w", err)
+		return nil, fmt.Errorf("create FleetDB Work Items adapter: %w", err)
+	}
+	items, err := workitems.New(store)
+	if err != nil {
+		return nil, fmt.Errorf("compose Work Items: %w", err)
 	}
 	sstore, err := stackstore.Default()
 	if err != nil {
@@ -259,7 +263,7 @@ func projectEpicStackForRun(ctx context.Context, handle *bootstrap.StoreHandle, 
 	if err != nil {
 		return nil, err
 	}
-	proj, err := projectEpicStack(ctx, ib, stacks, ws, epicID, repoName, rootBase)
+	proj, err := projectEpicStack(ctx, items, stacks, ws, epicID, repoName, rootBase)
 	if err != nil {
 		return nil, err
 	}

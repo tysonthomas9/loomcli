@@ -13,7 +13,6 @@ import (
 
 	workspacemodule "github.com/tysonthomas9/loomcli/internal/modules/workspace"
 
-	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli/monitor"
 	"github.com/tysonthomas9/loomcli/internal/cli/testdata/clitest"
@@ -368,12 +367,12 @@ func TestHandleStatusWithBackend_UsesWorkspaceScopedIssueBackend(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	scopedBackend := clitest.NewMockIssueBackend()
+	scopedBackend := clitest.NewMockWorkItems()
 	scopedBackend.ReadyResult = []workitems.IssueSummary{
 		{ID: "T-1", Title: "Scoped task", Status: "open", Design: ""},
 	}
 	scopedBackend.StatsResult = &workitems.Stats{TotalIssues: 7, OpenIssues: 6, ClosedIssues: 1}
-	backendFn := func(ctx context.Context) backend.IssueBackend {
+	backendFn := func(ctx context.Context) workitems.API {
 		if got := middleware.WorkspaceFromContext(ctx); got != "WS2" {
 			t.Fatalf("workspace context = %q, want WS2", got)
 		}
@@ -386,7 +385,7 @@ func TestHandleStatusWithBackend_UsesWorkspaceScopedIssueBackend(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/monitor/status?workspace=WS2", nil)
 	rr := httptest.NewRecorder()
-	HandleStatusWithBackend(func(context.Context) *monitor.MonitorData { return cachedData }, st, backendFn).ServeHTTP(rr, req)
+	HandleStatusWithWorkItems(func(context.Context) *monitor.MonitorData { return cachedData }, st, backendFn).ServeHTTP(rr, req)
 
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rr.Code)
@@ -423,14 +422,14 @@ func TestMonitorDataSource_CachesWorkspaceCollectionAcrossEndpoints(t *testing.T
 		t.Fatal(err)
 	}
 
-	scopedBackend := clitest.NewMockIssueBackend()
+	scopedBackend := clitest.NewMockWorkItems()
 	scopedBackend.ReadyResult = []workitems.IssueSummary{
 		{ID: "T-1", Title: "Scoped task", Status: "open", Design: ""},
 	}
 	scopedBackend.StatsResult = &workitems.Stats{TotalIssues: 7, OpenIssues: 6, ClosedIssues: 1}
 
 	backendFnCalls := 0
-	backendFn := func(ctx context.Context) backend.IssueBackend {
+	backendFn := func(ctx context.Context) workitems.API {
 		backendFnCalls++
 		if got := middleware.WorkspaceFromContext(ctx); got != "WS2" {
 			t.Fatalf("workspace context = %q, want WS2", got)
@@ -472,7 +471,7 @@ func TestMonitorDataSource_DefaultWorkspaceUsesWarmCollector(t *testing.T) {
 	dataSource := NewMonitorDataSourceWithDefaultWorkspace(func(context.Context) *monitor.MonitorData {
 		collectCalls++
 		return &monitor.MonitorData{Timestamp: time.Unix(1, 0).UTC()}
-	}, func(ctx context.Context) backend.IssueBackend {
+	}, func(ctx context.Context) workitems.API {
 		backendFnCalls++
 		return nil
 	}, "WS2")

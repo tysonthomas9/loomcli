@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/backend/api/gen"
 	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 )
@@ -22,8 +21,8 @@ func writeJSON(w io.Writer, v interface{}) error {
 	return enc.Encode(v)
 }
 
-// printIssueDetail renders a backend.IssueDetailData in the requested format.
-func printIssueDetail(w io.Writer, d *backend.IssueDetailData, format string) error {
+// printIssueDetail renders a Work Items detail in the requested format.
+func printIssueDetail(w io.Writer, d *workitems.IssueDetail, format string) error {
 	if d == nil {
 		return fmt.Errorf("issue detail is nil")
 	}
@@ -67,21 +66,6 @@ func printIssueDetail(w io.Writer, d *backend.IssueDetailData, format string) er
 	return nil
 }
 
-// printIssueList renders a slice of backend.IssueData in the requested format.
-// An empty list prints `(no issues)` in text mode and `[]` in JSON mode so
-// shell pipelines never see "null".
-func printIssueList(w io.Writer, items []backend.IssueData, format string) error {
-	if items == nil {
-		items = []backend.IssueData{}
-	}
-	if format == formatJSON {
-		return writeJSON(w, items)
-	}
-	return printIssueRows(w, items, func(item backend.IssueData) issueListRow {
-		return issueListRow{item.ID, item.Title, item.Status, item.IssueType, item.Priority}
-	})
-}
-
 func printWorkItemSummaries(w io.Writer, items []workitems.IssueSummary, format string) error {
 	if items == nil {
 		items = []workitems.IssueSummary{}
@@ -123,7 +107,7 @@ func printIssueRows[T any](w io.Writer, items []T, project func(T) issueListRow)
 //     stdout line;
 //   - JSON mode: stdout stays pure JSON (the issue object); "CREATED <id>"
 //     goes to errW (stderr) so `... | jq .` keeps working.
-func printCreatedIssue(w, errW io.Writer, issue *backend.IssueData, format string) error {
+func printCreatedIssue(w, errW io.Writer, issue *workitems.IssueSummary, format string) error {
 	if issue == nil {
 		return fmt.Errorf("created issue is nil")
 	}
@@ -134,7 +118,7 @@ func printCreatedIssue(w, errW io.Writer, issue *backend.IssueData, format strin
 		fmt.Fprintf(errW, "CREATED %s\n", issue.ID)
 		return nil
 	}
-	if err := printIssueList(w, []backend.IssueData{*issue}, format); err != nil {
+	if err := printWorkItemSummaries(w, []workitems.IssueSummary{*issue}, format); err != nil {
 		return err
 	}
 	fmt.Fprintf(w, "CREATED %s\n", issue.ID)

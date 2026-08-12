@@ -66,7 +66,7 @@ func serveStats(w http.ResponseWriter, r *http.Request, queries workitems.StatsQ
 	if queries == nil {
 		handler.WriteJSON(w, http.StatusServiceUnavailable, StatsResponse{
 			Success: false,
-			Error:   "issue backend not configured",
+			Error:   "Work Items service not configured",
 		})
 		return
 	}
@@ -74,7 +74,7 @@ func serveStats(w http.ResponseWriter, r *http.Request, queries workitems.StatsQ
 	defer cancel()
 	data, err := queries.Stats(ctx)
 	if err != nil || data == nil {
-		message := "issue backend returned no statistics"
+		message := "Work Items service returned no statistics"
 		if err != nil {
 			message = err.Error()
 		}

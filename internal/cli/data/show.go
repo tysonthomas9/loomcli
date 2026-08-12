@@ -4,6 +4,8 @@ import (
 	"os"
 
 	"github.com/spf13/cobra"
+
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 )
 
 var showCmd = &cobra.Command{
@@ -23,11 +25,11 @@ var showCmd = &cobra.Command{
 			}
 			return printIssueDetail(os.Stdout, detail, outputFormat)
 		}
-		ib, err := getIssueBackend(ctx)
+		itemsAPI, err := getWorkItems(ctx)
 		if err != nil {
 			return err
 		}
-		detail, err := ib.Get(ctx, args[0])
+		detail, err := itemsAPI.Get(ctx, workitems.GetQuery{IssueID: args[0]})
 		if err != nil {
 			return err
 		}

@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 )
 
@@ -61,7 +60,7 @@ func (b *FleetBackend) ListEvents(ctx context.Context, query workitems.ListEvent
 		} `json:"history"`
 	}
 	if err := json.Unmarshal(resp.Data, &history); err != nil {
-		return nil, backend.ErrInternal("ListEvents", "unmarshal response", err)
+		return nil, workitems.AdapterInternal("ListEvents", "unmarshal response", err)
 	}
 	result := make([]*workitems.Event, 0, len(history.History))
 	for _, event := range history.History {
@@ -137,7 +136,7 @@ func (b *FleetBackend) getMutationsAfter(ctx context.Context, op, cursor string,
 	}
 	var fleetResponse fleetMutationsResponse
 	if err := json.Unmarshal(resp.Data, &fleetResponse); err != nil {
-		return nil, backend.ErrInternal(op, "unmarshal response", err)
+		return nil, workitems.AdapterInternal(op, "unmarshal response", err)
 	}
 	return fleetEventsToMutations(fleetResponse.Events), nil
 }

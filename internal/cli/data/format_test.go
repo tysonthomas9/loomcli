@@ -7,20 +7,20 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/backend/api/gen"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 )
 
 func TestPrintIssueDetailTextIncludesDesign(t *testing.T) {
 	var out bytes.Buffer
-	detail := &backend.IssueDetailData{
-		IssueData: backend.IssueData{
-			ID:       "TASK-1",
-			Title:    "Implement fixture",
-			Status:   "open",
-			Priority: 1,
-			Design:   "Approved design text",
-		},
+	detail := &workitems.IssueDetail{
+
+		ID:       "TASK-1",
+		Title:    "Implement fixture",
+		Status:   "open",
+		Priority: 1,
+		Design:   "Approved design text",
+
 		Description: "Task description",
 	}
 
@@ -37,20 +37,20 @@ func TestPrintIssueDetailTextIncludesDesign(t *testing.T) {
 func TestPrintIssueDetailTextIncludesOptionalFields(t *testing.T) {
 	var out bytes.Buffer
 	createdAt := time.Date(2026, 5, 13, 9, 30, 0, 0, time.UTC)
-	detail := &backend.IssueDetailData{
-		IssueData: backend.IssueData{
-			ID:        "TASK-2",
-			Title:     "Cover optional fields",
-			Status:    "review",
-			Priority:  2,
-			IssueType: "task",
-			Assignee:  "builder",
-			Owner:     "planner",
-			Parent:    "EPIC-1",
-			Labels:    []string{"coverage", "cli"},
-		},
+	detail := &workitems.IssueDetail{
+
+		ID:        "TASK-2",
+		Title:     "Cover optional fields",
+		Status:    "review",
+		Priority:  2,
+		IssueType: "task",
+		Assignee:  "builder",
+		Owner:     "planner",
+		Parent:    "EPIC-1",
+		Labels:    []string{"coverage", "cli"},
+
 		AcceptanceCriteria: "All optional fields render",
-		Comments: []backend.CommentData{{
+		Comments: []*workitems.Comment{{
 			Author:    "reviewer",
 			Text:      "Looks covered",
 			CreatedAt: createdAt,

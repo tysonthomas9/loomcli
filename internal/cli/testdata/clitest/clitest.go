@@ -264,22 +264,23 @@ func (m *MockFileSystem) Remove(path string) error {
 // --- NewTestDeps ---
 
 // NewTestDeps returns a *cli.Deps with all fields set to mock implementations.
-func NewTestDeps(t *testing.T) (*cli.Deps, *MockGitRunner, *MockExecRunner, *MockFileSystem, *MockIssueBackend) {
+func NewTestDeps(t *testing.T) (*cli.Deps, *MockGitRunner, *MockExecRunner, *MockFileSystem, *MockWorkItems) {
 	t.Helper()
 	git := &MockGitRunner{}
 	execR := &MockExecRunner{}
 	fs := NewMockFileSystem()
-	tracker := NewMockIssueBackend()
+	tracker := NewMockWorkItems()
 	deps := &cli.Deps{
-		Git:          git,
-		Exec:         execR,
-		FS:           fs,
-		Logger:       slog.Default(),
-		IssueBackend: tracker,
-		Clock:        func() time.Time { return time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC) },
-		LookPath:     func(file string) (string, error) { return "/usr/bin/" + file, nil },
-		ExecCtx:      &MockExecContextRunner{},
-		Agent:        &MockAgentInvoker{},
+		Git:         git,
+		Exec:        execR,
+		FS:          fs,
+		Logger:      slog.Default(),
+		WorkItems:   tracker,
+		ClaimLeases: tracker,
+		Clock:       func() time.Time { return time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC) },
+		LookPath:    func(file string) (string, error) { return "/usr/bin/" + file, nil },
+		ExecCtx:     &MockExecContextRunner{},
+		Agent:       &MockAgentInvoker{},
 	}
 	return deps, git, execR, fs, tracker
 }

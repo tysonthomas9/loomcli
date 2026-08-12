@@ -7,9 +7,9 @@ import (
 	"os"
 	"sync"
 
-	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/backend/api"
 	"github.com/tysonthomas9/loomcli/internal/httpclient"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 )
 
 // Package-level HTTP client state. The client is lazily constructed on the
@@ -29,16 +29,16 @@ var (
 	rawHC       *httpclient.Client //nolint:unused // kept for future direct Do() access (e.g. SSE)
 	resolvedURL string
 
-	providerMu                sync.Mutex
-	localIssueBackendProvider func(context.Context) backend.IssueBackend
+	providerMu             sync.Mutex
+	localWorkItemsProvider func(context.Context) workitems.API
 )
 
-// SetLocalIssueBackendProvider wires the non-HTTP backend used by issue
+// SetLocalWorkItemsProvider wires the non-HTTP Work Items capability used by issue
 // commands when no --server/LOOM_SERVER_URL is configured.
-func SetLocalIssueBackendProvider(provider func(context.Context) backend.IssueBackend) {
+func SetLocalWorkItemsProvider(provider func(context.Context) workitems.API) {
 	providerMu.Lock()
 	defer providerMu.Unlock()
-	localIssueBackendProvider = provider
+	localWorkItemsProvider = provider
 }
 
 // getHTTPClient returns the lazily-initialized *http.Client that wraps
@@ -81,19 +81,19 @@ func configuredServerURL() string {
 	return os.Getenv("LOOM_SERVER_URL")
 }
 
-func getIssueBackend(ctx context.Context) (backend.IssueBackend, error) {
+func getWorkItems(ctx context.Context) (workitems.API, error) {
 	if configuredServerURL() == "" {
 		providerMu.Lock()
-		provider := localIssueBackendProvider
+		provider := localWorkItemsProvider
 		providerMu.Unlock()
 		if provider == nil {
-			return nil, fmt.Errorf("loom data issue commands require --server/LOOM_SERVER_URL or a local backend provider")
+			return nil, fmt.Errorf("loom data commands require --server/LOOM_SERVER_URL or a local Work Items provider")
 		}
-		ib := provider(ctx)
-		if ib == nil {
-			return nil, fmt.Errorf("local issue backend provider returned nil")
+		items := provider(ctx)
+		if items == nil {
+			return nil, fmt.Errorf("local Work Items provider returned nil")
 		}
-		return ib, nil
+		return items, nil
 	}
 	cli, url, err := getHTTPClient()
 	if err != nil {

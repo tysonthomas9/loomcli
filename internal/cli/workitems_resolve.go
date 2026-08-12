@@ -6,42 +6,43 @@ import (
 	"os"
 	"sync"
 
-	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/backend/api"
 	"github.com/tysonthomas9/loomcli/internal/httpclient"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 )
 
-// Issue backend type constants.
+// Work Items adapter type constants. The LOOM_ISSUE_BACKEND environment key
+// remains a stable operator-facing configuration contract.
 const (
-	IssueBackendFleetDB = "fleetdb"
-	IssueBackendFleet   = "fleet"
-	IssueBackendAPI     = "api"
+	WorkItemsAdapterFleetDB = "fleetdb"
+	WorkItemsAdapterFleet   = "fleet"
+	WorkItemsAdapterAPI     = "api"
 )
 
-// validIssueBackends is the set of accepted values for daemon.issue_backend.
-var validIssueBackends = map[string]bool{
-	IssueBackendFleetDB: true,
-	IssueBackendFleet:   true,
-	IssueBackendAPI:     true,
+// validWorkItemsAdapters is the set of accepted values for daemon.issue_backend.
+var validWorkItemsAdapters = map[string]bool{
+	WorkItemsAdapterFleetDB: true,
+	WorkItemsAdapterFleet:   true,
+	WorkItemsAdapterAPI:     true,
 }
 
-// resolveIssueBackendType returns the active issue backend type based on precedence:
+// resolveWorkItemsAdapterType returns the active Work Items adapter type based on precedence:
 //  1. LOOM_ISSUE_BACKEND env var (highest — if set and valid)
 //  2. LOOM_SERVER_URL env var (remote HTTP API mode)
 //  3. Default: "fleetdb"
-func ResolveIssueBackendType() string {
-	if v := resolveIssueBackendFromEnv(); v != "" {
+func ResolveWorkItemsAdapterType() string {
+	if v := resolveWorkItemsAdapterFromEnv(); v != "" {
 		return v
 	}
-	return IssueBackendFleetDB
+	return WorkItemsAdapterFleetDB
 }
 
-// resolveIssueBackendFromEnv checks environment variables for issue backend selection.
+// resolveWorkItemsAdapterFromEnv checks environment variables for Work Items adapter selection.
 // Returns "" if no env var determines the backend.
-func resolveIssueBackendFromEnv() string {
+func resolveWorkItemsAdapterFromEnv() string {
 	// 1. LOOM_ISSUE_BACKEND env var (highest precedence)
 	if v, ok := os.LookupEnv("LOOM_ISSUE_BACKEND"); ok && v != "" {
-		if validIssueBackends[v] {
+		if validWorkItemsAdapters[v] {
 			return v
 		}
 		slog.Warn("invalid LOOM_ISSUE_BACKEND value; ignoring", "value", v)
@@ -51,7 +52,7 @@ func resolveIssueBackendFromEnv() string {
 	// The --server flag on rootCmd writes into this env var in PersistentPreRun
 	// so both paths converge here.
 	if v, ok := os.LookupEnv("LOOM_SERVER_URL"); ok && v != "" {
-		return IssueBackendAPI
+		return WorkItemsAdapterAPI
 	}
 
 	return ""
@@ -59,30 +60,29 @@ func resolveIssueBackendFromEnv() string {
 
 // isFleetActive returns true if the fleet backend (remote fleet server) is active.
 func IsFleetActive() bool {
-	return ResolveIssueBackendType() == IssueBackendFleet
+	return ResolveWorkItemsAdapterType() == WorkItemsAdapterFleet
 }
 
 // isFleetDBActive returns true if the fleet-db backend is active.
 func IsFleetDBActive() bool {
-	return ResolveIssueBackendType() == IssueBackendFleetDB
+	return ResolveWorkItemsAdapterType() == WorkItemsAdapterFleetDB
 }
 
 // IsAPIActive returns true if the remote HTTP API backend is active
 // (i.e., --server or LOOM_SERVER_URL is set).
 func IsAPIActive() bool {
-	return ResolveIssueBackendType() == IssueBackendAPI
+	return ResolveWorkItemsAdapterType() == WorkItemsAdapterAPI
 }
 
-// --- Package-level IssueBackend state (merged from issue_backend.go) ---
+// --- Package-level Work Items interface state ---
 
 var (
 	trackerMu   sync.RWMutex
-	trackerInst backend.IssueBackend
+	trackerInst workitems.API
 )
 
-// defaultIssueBackend returns the package-level IssueBackend, lazily initializing
-// from defaultDeps.IssueBackend if not explicitly set.
-func DefaultIssueBackend() backend.IssueBackend {
+// DefaultWorkItems returns the package-level owner interface.
+func DefaultWorkItems() workitems.API {
 	trackerMu.RLock()
 	t := trackerInst
 	trackerMu.RUnlock()
@@ -92,37 +92,35 @@ func DefaultIssueBackend() backend.IssueBackend {
 	trackerMu.Lock()
 	defer trackerMu.Unlock()
 	if trackerInst == nil {
-		trackerInst = resolveDirectIssueBackend()
+		trackerInst = resolveWorkItems()
 	}
 	return trackerInst
 }
 
-// setDefaultIssueBackend overrides the package-level IssueBackend (for testing).
-func SetDefaultIssueBackend(ib backend.IssueBackend) {
+func SetDefaultWorkItems(api workitems.API) {
 	trackerMu.Lock()
 	defer trackerMu.Unlock()
-	trackerInst = ib
+	trackerInst = api
 }
 
-// ResetDefaultIssueBackend clears the override so DefaultIssueBackend() re-initializes.
-func ResetDefaultIssueBackend() {
+func ResetDefaultWorkItems() {
 	trackerMu.Lock()
 	defer trackerMu.Unlock()
 	trackerInst = nil
 }
 
-// resolveDirectIssueBackend returns the configured issue backend without any
-// legacy daemon IPC decoration.
-func resolveDirectIssueBackend() backend.IssueBackend {
-	if t := ensureDefaultDeps().IssueBackend; t != nil {
+func resolveWorkItems() workitems.API {
+	if t := ensureDefaultDeps().WorkItems; t != nil {
 		return t
 	}
-	return newFleetDBIssueBackend()
+	store := newFleetDBWorkItemsAdapter()
+	api, _ := workitems.New(store)
+	return api
 }
 
 // --- API backend factory (remote --server mode) ---
 
-// createAPIIssueBackend constructs an api.Backend for remote HTTP mode. It
+// createAPIWorkItems constructs the remote HTTP Work Items adapter. It
 // resolves the server URL from --server / LOOM_SERVER_URL and the workspace
 // ID from --workspace / LOOM_WORKSPACE.
 //
@@ -130,7 +128,7 @@ func resolveDirectIssueBackend() backend.IssueBackend {
 // cannot be resolved, or if http client construction fails. On success, the
 // returned backend uses httpclient.Client for auth (OIDC device flow + token
 // cache) transparently via api.AuthTransport.
-func createAPIIssueBackend() (backend.IssueBackend, error) {
+func createAPIWorkItems() (*api.APIBackend, error) {
 	serverURL := os.Getenv("LOOM_SERVER_URL")
 	if serverFlag != "" {
 		serverURL = serverFlag
@@ -168,6 +166,6 @@ func createAPIIssueBackend() (backend.IssueBackend, error) {
 		return nil, fmt.Errorf("api backend construction: %w", err)
 	}
 
-	slog.Info("api issue backend created", "url", serverURL, "workspace", workspaceID)
+	slog.Info("remote Work Items adapter created", "url", serverURL, "workspace", workspaceID)
 	return ab, nil
 }

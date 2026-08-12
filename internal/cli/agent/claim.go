@@ -12,6 +12,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/events"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 )
 
 var claimCmd = &cobra.Command{
@@ -47,7 +48,7 @@ func runClaim(cmd *cobra.Command, args []string) {
 		cli.ExitWithFlush(1)
 	}
 
-	// Resolve the task title through the active issue backend.
+	// Resolve the task title through the active Work Items capability.
 	taskTitle := getTaskTitle(cmd.Context(), taskID)
 
 	// Update the lock file. Best-effort: the lock file is bookkeeping for
@@ -101,7 +102,7 @@ func emitTaskClaimedEvent(ctx context.Context, taskID, taskTitle string) {
 func getTaskTitle(parent context.Context, taskID string) string {
 	ctx, cancel := cmdstore.SignalContext(parent)
 	defer cancel()
-	detail, err := cli.DefaultIssueBackend().Get(ctx, taskID)
+	detail, err := cli.DefaultWorkItems().Get(ctx, workitems.GetQuery{IssueID: taskID})
 	if err != nil || detail == nil {
 		return ""
 	}

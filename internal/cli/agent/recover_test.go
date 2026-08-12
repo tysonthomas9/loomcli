@@ -11,9 +11,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/lockfile"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 )
 
 func TestForceReleaseLock_RemovesLockFile(t *testing.T) {
@@ -61,9 +61,9 @@ func TestCloseTask_Success(t *testing.T) {
 	t.Parallel()
 	deps, _, _, _, tracker := NewTestDeps(t)
 
-	tracker.CloseFn = func(ctx context.Context, id string, params backend.CloseParams) (*backend.CloseResult, error) {
-		if id != "task-123" {
-			t.Errorf("CloseIssue id = %q, want task-123", id)
+	tracker.CloseFn = func(ctx context.Context, params workitems.CloseCommand) (*workitems.CloseResult, error) {
+		if params.IssueID != "task-123" {
+			t.Errorf("CloseIssue id = %q, want task-123", params.IssueID)
 		}
 		wantReason := "Completed (verified by recovery analysis): Tests pass"
 		if params.Reason != wantReason {
@@ -93,10 +93,10 @@ func TestResetTask_Success(t *testing.T) {
 	t.Parallel()
 	deps, _, _, _, tracker := NewTestDeps(t)
 
-	tracker.GetResult = &backend.IssueDetailData{IssueData: backend.IssueData{ID: "task-789", Status: "in_progress"}}
-	tracker.UpdateFn = func(ctx context.Context, id string, opts backend.UpdateParams) error {
-		if id != "task-789" {
-			t.Errorf("UpdateIssue id = %q, want task-789", id)
+	tracker.GetResult = &workitems.IssueDetail{ID: "task-789", Status: "in_progress"}
+	tracker.PatchFn = func(ctx context.Context, opts workitems.PatchCommand) (*workitems.IssueDetail, error) {
+		if opts.IssueID != "task-789" {
+			t.Errorf("Patch id = %q, want task-789", opts.IssueID)
 		}
 		if opts.Status == nil || *opts.Status != "open" {
 			t.Errorf("UpdateIssue status = %v, want pointer to open", opts.Status)
@@ -104,7 +104,7 @@ func TestResetTask_Success(t *testing.T) {
 		if opts.Assignee == nil || *opts.Assignee != "" {
 			t.Errorf("UpdateIssue assignee should be pointer to empty string (clear)")
 		}
-		return nil
+		return tracker.GetResult, nil
 	}
 
 	resetTask(t.Context(), deps, "task-789")
@@ -112,8 +112,8 @@ func TestResetTask_Success(t *testing.T) {
 	if !tracker.Called("Get") {
 		t.Error("GetIssue was not called")
 	}
-	if !tracker.Called("Update") {
-		t.Error("UpdateIssue was not called")
+	if !tracker.Called("Patch") {
+		t.Error("Patch was not called")
 	}
 }
 
@@ -121,8 +121,8 @@ func TestResetTask_Failure(t *testing.T) {
 	t.Parallel()
 	deps, _, _, _, tracker := NewTestDeps(t)
 
-	tracker.GetResult = &backend.IssueDetailData{IssueData: backend.IssueData{ID: "task-789", Status: "in_progress"}}
-	tracker.UpdateErr = errors.New("invalid task")
+	tracker.GetResult = &workitems.IssueDetail{ID: "task-789", Status: "in_progress"}
+	tracker.PatchErr = errors.New("invalid task")
 
 	// resetTask prints warning and manual instructions but doesn't panic
 	resetTask(t.Context(), deps, "task-789")
@@ -132,12 +132,12 @@ func TestResetTask_AlreadyReview(t *testing.T) {
 	t.Parallel()
 	deps, _, _, _, tracker := NewTestDeps(t)
 
-	tracker.GetResult = &backend.IssueDetailData{IssueData: backend.IssueData{ID: "task-789", Status: "review"}}
+	tracker.GetResult = &workitems.IssueDetail{ID: "task-789", Status: "review"}
 
 	resetTask(t.Context(), deps, "task-789")
 
-	if tracker.Called("Update") {
-		t.Error("UpdateIssue should not be called when task is already in review")
+	if tracker.Called("Patch") {
+		t.Error("Patch should not be called when task is already in review")
 	}
 }
 
@@ -145,11 +145,11 @@ func TestResetTask_AlreadyClosed(t *testing.T) {
 	t.Parallel()
 	deps, _, _, _, tracker := NewTestDeps(t)
 
-	tracker.GetResult = &backend.IssueDetailData{IssueData: backend.IssueData{ID: "task-789", Status: "closed"}}
+	tracker.GetResult = &workitems.IssueDetail{ID: "task-789", Status: "closed"}
 
 	resetTask(t.Context(), deps, "task-789")
 
-	if tracker.Called("Update") {
+	if tracker.Called("Patch") {
 		t.Error("UpdateIssue should not be called when task is already closed")
 	}
 }
@@ -158,11 +158,11 @@ func TestResetTask_SkipsBlocked(t *testing.T) {
 	t.Parallel()
 	deps, _, _, _, tracker := NewTestDeps(t)
 
-	tracker.GetResult = &backend.IssueDetailData{IssueData: backend.IssueData{ID: "task-789", Status: "blocked"}}
+	tracker.GetResult = &workitems.IssueDetail{ID: "task-789", Status: "blocked"}
 
 	resetTask(t.Context(), deps, "task-789")
 
-	if tracker.Called("Update") {
+	if tracker.Called("Patch") {
 		t.Error("UpdateIssue should not be called for a blocked task (daemon quarantine / human block must not be flipped back to open)")
 	}
 }
@@ -176,7 +176,7 @@ func TestResetTask_GetIssueFails(t *testing.T) {
 	// When GetIssue fails, resetTask should still attempt UpdateIssue
 	resetTask(t.Context(), deps, "task-789")
 
-	if !tracker.Called("Update") {
+	if !tracker.Called("Patch") {
 		t.Error("UpdateIssue should still be called when GetIssue fails")
 	}
 }
@@ -185,31 +185,31 @@ func TestResetTaskOwnedByAgent_RequiresExactCurrentState(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
 		name       string
-		detail     *backend.IssueDetailData
+		detail     *workitems.IssueDetail
 		getErr     error
 		wantUpdate bool
 		wantErr    bool
 	}{
 		{
 			name:       "current agent still owns in progress task",
-			detail:     &backend.IssueDetailData{IssueData: backend.IssueData{ID: "task-1", Status: "in_progress", Assignee: "agent-a"}},
+			detail:     &workitems.IssueDetail{ID: "task-1", Status: "in_progress", Assignee: "agent-a"},
 			wantUpdate: true,
 		},
 		{
 			name:   "task was reassigned",
-			detail: &backend.IssueDetailData{IssueData: backend.IssueData{ID: "task-1", Status: "in_progress", Assignee: "agent-b"}},
+			detail: &workitems.IssueDetail{ID: "task-1", Status: "in_progress", Assignee: "agent-b"},
 		},
 		{
 			name:   "task is already open",
-			detail: &backend.IssueDetailData{IssueData: backend.IssueData{ID: "task-1", Status: "open", Assignee: "agent-a"}},
+			detail: &workitems.IssueDetail{ID: "task-1", Status: "open", Assignee: "agent-a"},
 		},
 		{
 			name:   "task reached review",
-			detail: &backend.IssueDetailData{IssueData: backend.IssueData{ID: "task-1", Status: "review", Assignee: "agent-a"}},
+			detail: &workitems.IssueDetail{ID: "task-1", Status: "review", Assignee: "agent-a"},
 		},
 		{
 			name:   "deleted task is an idempotent no-op",
-			getErr: backend.ErrNotFound("Get", "task not found"),
+			getErr: workitems.AdapterNotFound("Get", "task not found"),
 		},
 		{
 			name:    "unknown read failure aborts",
@@ -229,7 +229,7 @@ func TestResetTaskOwnedByAgent_RequiresExactCurrentState(t *testing.T) {
 			if (err != nil) != tc.wantErr {
 				t.Fatalf("resetTaskOwnedByAgent error = %v, wantErr=%v", err, tc.wantErr)
 			}
-			if got := tracker.Called("Update"); got != tc.wantUpdate {
+			if got := tracker.Called("Patch"); got != tc.wantUpdate {
 				t.Fatalf("Update called = %v, want %v; calls=%#v", got, tc.wantUpdate, tracker.Calls)
 			}
 		})
@@ -240,7 +240,7 @@ func TestAnalyzeTaskCompletion_Completed(t *testing.T) {
 	t.Parallel()
 	deps, _, _, _, tracker := NewTestDeps(t)
 
-	tracker.GetResult = &backend.IssueDetailData{IssueData: backend.IssueData{Title: "Implement feature X\nStatus: in_progress", Status: "in_progress"}}
+	tracker.GetResult = &workitems.IssueDetail{Title: "Implement feature X\nStatus: in_progress", Status: "in_progress"}
 
 	mock := NewCommandMock(t, []CommandStub{
 		{
@@ -268,7 +268,7 @@ func TestAnalyzeTaskCompletion_Incomplete(t *testing.T) {
 	t.Parallel()
 	deps, _, _, _, tracker := NewTestDeps(t)
 
-	tracker.GetResult = &backend.IssueDetailData{IssueData: backend.IssueData{Title: "Add unit tests\nStatus: in_progress", Status: "in_progress"}}
+	tracker.GetResult = &workitems.IssueDetail{Title: "Add unit tests\nStatus: in_progress", Status: "in_progress"}
 
 	mock := NewCommandMock(t, []CommandStub{
 		{
@@ -312,7 +312,7 @@ func TestAnalyzeTaskCompletion_ClaudeFails(t *testing.T) {
 	t.Parallel()
 	deps, _, _, _, tracker := NewTestDeps(t)
 
-	tracker.GetResult = &backend.IssueDetailData{IssueData: backend.IssueData{Title: "Some task", Status: "in_progress"}}
+	tracker.GetResult = &workitems.IssueDetail{Title: "Some task", Status: "in_progress"}
 
 	mock := NewCommandMock(t, []CommandStub{
 		{
@@ -340,7 +340,7 @@ func TestAnalyzeTaskCompletion_ParsesMultilineResponse(t *testing.T) {
 	t.Parallel()
 	deps, _, _, _, tracker := NewTestDeps(t)
 
-	tracker.GetResult = &backend.IssueDetailData{IssueData: backend.IssueData{Title: "Multiline test", Status: "in_progress"}}
+	tracker.GetResult = &workitems.IssueDetail{Title: "Multiline test", Status: "in_progress"}
 
 	mock := NewCommandMock(t, []CommandStub{
 		{
@@ -368,7 +368,7 @@ func TestAnalyzeTaskCompletion_CaseInsensitive(t *testing.T) {
 	t.Parallel()
 	deps, _, _, _, tracker := NewTestDeps(t)
 
-	tracker.GetResult = &backend.IssueDetailData{IssueData: backend.IssueData{Title: "Case test", Status: "in_progress"}}
+	tracker.GetResult = &workitems.IssueDetail{Title: "Case test", Status: "in_progress"}
 
 	mock := NewCommandMock(t, []CommandStub{
 		{
@@ -396,7 +396,7 @@ func TestAnalyzeTaskCompletion_ReasonWithColons(t *testing.T) {
 	t.Parallel()
 	deps, _, _, _, tracker := NewTestDeps(t)
 
-	tracker.GetResult = &backend.IssueDetailData{IssueData: backend.IssueData{Title: "Colon test", Status: "in_progress"}}
+	tracker.GetResult = &workitems.IssueDetail{Title: "Colon test", Status: "in_progress"}
 
 	mock := NewCommandMock(t, []CommandStub{
 		{
@@ -425,7 +425,7 @@ func TestAnalyzeTaskCompletion_UnparseableResponse(t *testing.T) {
 	t.Parallel()
 	deps, _, _, _, tracker := NewTestDeps(t)
 
-	tracker.GetResult = &backend.IssueDetailData{IssueData: backend.IssueData{Title: "Unparse test", Status: "in_progress"}}
+	tracker.GetResult = &workitems.IssueDetail{Title: "Unparse test", Status: "in_progress"}
 
 	mock := NewCommandMock(t, []CommandStub{
 		{
@@ -453,7 +453,7 @@ func TestHandleOrphanedTask_AnalyzeComplete(t *testing.T) {
 	t.Parallel()
 	deps, _, _, _, tracker := NewTestDeps(t)
 
-	tracker.GetResult = &backend.IssueDetailData{IssueData: backend.IssueData{Title: "Orphan complete", Status: "in_progress"}}
+	tracker.GetResult = &workitems.IssueDetail{Title: "Orphan complete", Status: "in_progress"}
 
 	mock := NewCommandMock(t, []CommandStub{
 		{
@@ -478,7 +478,7 @@ func TestHandleOrphanedTask_AnalyzeIncomplete(t *testing.T) {
 	t.Parallel()
 	deps, _, _, _, tracker := NewTestDeps(t)
 
-	tracker.GetResult = &backend.IssueDetailData{IssueData: backend.IssueData{ID: "task-orphan2", Title: "Orphan incomplete", Status: "in_progress"}}
+	tracker.GetResult = &workitems.IssueDetail{ID: "task-orphan2", Title: "Orphan incomplete", Status: "in_progress"}
 
 	mock := NewCommandMock(t, []CommandStub{
 		{
@@ -494,7 +494,7 @@ func TestHandleOrphanedTask_AnalyzeIncomplete(t *testing.T) {
 
 	handleOrphanedTask(t.Context(), deps, "/test/worktree", "task-orphan2", true)
 
-	if !tracker.Called("Update") {
+	if !tracker.Called("Patch") {
 		t.Error("UpdateIssue should be called for incomplete task")
 	}
 }
@@ -503,13 +503,13 @@ func TestHandleOrphanedTask_NoAnalyze(t *testing.T) {
 	t.Parallel()
 	deps, _, _, _, tracker := NewTestDeps(t)
 
-	tracker.GetResult = &backend.IssueDetailData{IssueData: backend.IssueData{ID: "task-orphan3", Status: "in_progress"}}
+	tracker.GetResult = &workitems.IssueDetail{ID: "task-orphan3", Status: "in_progress"}
 
 	handleOrphanedTask(t.Context(), deps, "/test/worktree", "task-orphan3", false)
 
 	// Get is called by resetTask to check current status before resetting,
 	// but GetIssueText (now removed) should not be called for analysis.
-	if !tracker.Called("Update") {
+	if !tracker.Called("Patch") {
 		t.Error("UpdateIssue should be called to reset task")
 	}
 }
@@ -700,11 +700,11 @@ func TestResetOrphanedAgentTasks_FindsAndResetsMultiple(t *testing.T) {
 	t.Parallel()
 	deps, _, _, _, tracker := NewTestDeps(t)
 
-	tracker.ListResult = []backend.IssueData{
+	tracker.ListResult = listResultFromSummaries([]workitems.IssueSummary{
 		{ID: "task-1", Title: "First task"},
 		{ID: "task-2", Title: "Second task"},
-	}
-	tracker.GetResult = &backend.IssueDetailData{IssueData: backend.IssueData{Status: "in_progress", Assignee: "falcon"}}
+	})
+	tracker.GetResult = &workitems.IssueDetail{Status: "in_progress", Assignee: "falcon"}
 
 	resetOrphanedAgentTasks(t.Context(), deps, "/test/worktree", "falcon", "", false)
 
@@ -714,8 +714,8 @@ func TestResetOrphanedAgentTasks_FindsAndResetsMultiple(t *testing.T) {
 	if tracker.CallCount("Get") != 2 {
 		t.Errorf("GetIssue should be called twice, got %d", tracker.CallCount("Get"))
 	}
-	if tracker.CallCount("Update") != 2 {
-		t.Errorf("UpdateIssue should be called twice, got %d", tracker.CallCount("Update"))
+	if tracker.CallCount("Patch") != 2 {
+		t.Errorf("UpdateIssue should be called twice, got %d", tracker.CallCount("Patch"))
 	}
 }
 
@@ -723,11 +723,11 @@ func TestResetOrphanedAgentTasks_SkipsAlreadyHandled(t *testing.T) {
 	t.Parallel()
 	deps, _, _, _, tracker := NewTestDeps(t)
 
-	tracker.ListResult = []backend.IssueData{
+	tracker.ListResult = listResultFromSummaries([]workitems.IssueSummary{
 		{ID: "task-1", Title: "Already handled"},
 		{ID: "task-2", Title: "Orphaned task"},
-	}
-	tracker.GetResult = &backend.IssueDetailData{IssueData: backend.IssueData{Status: "in_progress", Assignee: "ember"}}
+	})
+	tracker.GetResult = &workitems.IssueDetail{Status: "in_progress", Assignee: "ember"}
 
 	resetOrphanedAgentTasks(t.Context(), deps, "/test/worktree", "ember", "task-1", false)
 
@@ -735,8 +735,8 @@ func TestResetOrphanedAgentTasks_SkipsAlreadyHandled(t *testing.T) {
 	if tracker.CallCount("Get") != 1 {
 		t.Errorf("GetIssue should be called once (only for task-2), got %d", tracker.CallCount("Get"))
 	}
-	if tracker.CallCount("Update") != 1 {
-		t.Errorf("UpdateIssue should be called once (only for task-2), got %d", tracker.CallCount("Update"))
+	if tracker.CallCount("Patch") != 1 {
+		t.Errorf("UpdateIssue should be called once (only for task-2), got %d", tracker.CallCount("Patch"))
 	}
 }
 
@@ -744,7 +744,7 @@ func TestResetOrphanedAgentTasks_NoOrphanedTasks(t *testing.T) {
 	t.Parallel()
 	deps, _, _, _, tracker := NewTestDeps(t)
 
-	tracker.ListResult = []backend.IssueData{}
+	tracker.ListResult = listResultFromSummaries([]workitems.IssueSummary{})
 
 	resetOrphanedAgentTasks(t.Context(), deps, "/test/worktree", "falcon", "", false)
 
@@ -776,13 +776,13 @@ func TestResetOrphanedAgentTasks_EmptyAgentName(t *testing.T) {
 
 func TestRecoverWorktree_NoLock(t *testing.T) {
 	// RecoverWorktree uses defaultDeps internally; must use global mocks.
-	resetDefaultIssueBackend()
-	t.Cleanup(resetDefaultIssueBackend)
+	resetDefaultWorkItems()
+	t.Cleanup(resetDefaultWorkItems)
 	tmpDir := t.TempDir()
 
-	tracker := NewMockIssueBackend()
-	tracker.ListResult = []backend.IssueData{}
-	setDefaultIssueBackend(tracker)
+	tracker := NewMockWorkItems()
+	tracker.ListResult = listResultFromSummaries([]workitems.IssueSummary{})
+	setDefaultWorkItems(tracker)
 
 	// No lock file in tmpDir, so CheckLock returns (nil, false, nil).
 	// RecoverWorktree should call resetOrphanedAgentTasks (List) and cleanUntrackedFiles (git clean -fdn).
@@ -804,8 +804,8 @@ func TestRecoverWorktree_NoLock(t *testing.T) {
 }
 
 func TestRecoverWorktree_StaleLock(t *testing.T) {
-	resetDefaultIssueBackend()
-	t.Cleanup(resetDefaultIssueBackend)
+	resetDefaultWorkItems()
+	t.Cleanup(resetDefaultWorkItems)
 	tmpDir := t.TempDir()
 
 	// Create a lock file with a non-existent PID so CheckLock returns (info, false, nil)
@@ -815,9 +815,9 @@ func TestRecoverWorktree_StaleLock(t *testing.T) {
 		t.Fatalf("failed to create lock file: %v", err)
 	}
 
-	tracker := NewMockIssueBackend()
-	tracker.GetResult = &backend.IssueDetailData{IssueData: backend.IssueData{ID: "task-123", Status: "in_progress", Assignee: "test-agent"}}
-	tracker.ListResult = []backend.IssueData{}
+	tracker := NewMockWorkItems()
+	tracker.GetResult = &workitems.IssueDetail{ID: "task-123", Status: "in_progress", Assignee: "test-agent"}
+	tracker.ListResult = listResultFromSummaries([]workitems.IssueSummary{})
 
 	// RecoverWorktree should:
 	// 1. CheckLock -> lock exists, not running
@@ -837,7 +837,7 @@ func TestRecoverWorktree_StaleLock(t *testing.T) {
 	mock.Install()
 	// CommandMock.Install resets the package backend override while installing
 	// its Exec/Git fakes, so install the recovery backend afterwards.
-	setDefaultIssueBackend(tracker)
+	setDefaultWorkItems(tracker)
 
 	err := RecoverWorktree(t.Context(), tmpDir, "test-agent", -1)
 	if err != nil {
@@ -947,8 +947,8 @@ func TestAnalyzeTaskCompletion_WorkspaceMode(t *testing.T) {
 	// In workspace mode, analyzeTaskCompletion should search git logs across
 	// all repos discovered by the resolver, aggregating with repo name labels.
 	// Uses defaultResolver (global) and DiscoverWorktrees (global deps), so not parallel-safe.
-	resetDefaultIssueBackend()
-	t.Cleanup(resetDefaultIssueBackend)
+	resetDefaultWorkItems()
+	t.Cleanup(resetDefaultWorkItems)
 
 	tmpDir := t.TempDir()
 	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
@@ -974,12 +974,12 @@ func TestAnalyzeTaskCompletion_WorkspaceMode(t *testing.T) {
 	cli.TestingSetDefaultResolver(&cli.Resolver{Mode: cli.ModeWorkspace, Config: cfg, Workspace: "testws"})
 	defer func() { cli.TestingSetDefaultResolver(old) }()
 
-	tracker := NewMockIssueBackend()
-	tracker.GetResult = &backend.IssueDetailData{IssueData: backend.IssueData{Title: "Cross-repo feature\nStatus: in_progress", Status: "in_progress"}}
-	setDefaultIssueBackend(tracker)
-	origTracker := defaultDeps.IssueBackend
-	defaultDeps.IssueBackend = tracker
-	t.Cleanup(func() { defaultDeps.IssueBackend = origTracker })
+	tracker := NewMockWorkItems()
+	tracker.GetResult = &workitems.IssueDetail{Title: "Cross-repo feature\nStatus: in_progress", Status: "in_progress"}
+	setDefaultWorkItems(tracker)
+	origTracker := defaultDeps.WorkItems
+	defaultDeps.WorkItems = tracker
+	t.Cleanup(func() { defaultDeps.WorkItems = origTracker })
 
 	mock := NewCommandMock(t, []CommandStub{
 		// DiscoverWorktrees calls GetCurrentBranch for each repo
@@ -1019,8 +1019,8 @@ func TestAnalyzeTaskCompletion_WorkspaceMode_NoCommitsInAnyRepo(t *testing.T) {
 	// When workspace mode finds no commits across any repo, the fallback
 	// single-repo search also runs. Either way, claude receives empty git logs.
 	// Uses defaultResolver (global) and DiscoverWorktrees (global deps), so not parallel-safe.
-	resetDefaultIssueBackend()
-	t.Cleanup(resetDefaultIssueBackend)
+	resetDefaultWorkItems()
+	t.Cleanup(resetDefaultWorkItems)
 
 	tmpDir := t.TempDir()
 	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
@@ -1043,12 +1043,12 @@ func TestAnalyzeTaskCompletion_WorkspaceMode_NoCommitsInAnyRepo(t *testing.T) {
 	cli.TestingSetDefaultResolver(&cli.Resolver{Mode: cli.ModeWorkspace, Config: cfg, Workspace: "testws"})
 	defer func() { cli.TestingSetDefaultResolver(old) }()
 
-	tracker := NewMockIssueBackend()
-	tracker.GetResult = &backend.IssueDetailData{IssueData: backend.IssueData{Title: "Nothing done\nStatus: in_progress", Status: "in_progress"}}
-	setDefaultIssueBackend(tracker)
-	origTracker := defaultDeps.IssueBackend
-	defaultDeps.IssueBackend = tracker
-	t.Cleanup(func() { defaultDeps.IssueBackend = origTracker })
+	tracker := NewMockWorkItems()
+	tracker.GetResult = &workitems.IssueDetail{Title: "Nothing done\nStatus: in_progress", Status: "in_progress"}
+	setDefaultWorkItems(tracker)
+	origTracker := defaultDeps.WorkItems
+	defaultDeps.WorkItems = tracker
+	t.Cleanup(func() { defaultDeps.WorkItems = origTracker })
 
 	mock := NewCommandMock(t, []CommandStub{
 		// DiscoverWorktrees: GetCurrentBranch for repo1
@@ -1077,8 +1077,8 @@ func TestAnalyzeTaskCompletion_WorkspaceMode_PartialResults(t *testing.T) {
 	// Only some repos have matching commits; the aggregated output
 	// should include only those repos with results.
 	// Uses defaultResolver (global) and DiscoverWorktrees (global deps), so not parallel-safe.
-	resetDefaultIssueBackend()
-	t.Cleanup(resetDefaultIssueBackend)
+	resetDefaultWorkItems()
+	t.Cleanup(resetDefaultWorkItems)
 
 	tmpDir := t.TempDir()
 	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
@@ -1104,12 +1104,12 @@ func TestAnalyzeTaskCompletion_WorkspaceMode_PartialResults(t *testing.T) {
 	cli.TestingSetDefaultResolver(&cli.Resolver{Mode: cli.ModeWorkspace, Config: cfg, Workspace: "testws"})
 	defer func() { cli.TestingSetDefaultResolver(old) }()
 
-	tracker := NewMockIssueBackend()
-	tracker.GetResult = &backend.IssueDetailData{IssueData: backend.IssueData{Title: "Partial work\nStatus: in_progress", Status: "in_progress"}}
-	setDefaultIssueBackend(tracker)
-	origTracker := defaultDeps.IssueBackend
-	defaultDeps.IssueBackend = tracker
-	t.Cleanup(func() { defaultDeps.IssueBackend = origTracker })
+	tracker := NewMockWorkItems()
+	tracker.GetResult = &workitems.IssueDetail{Title: "Partial work\nStatus: in_progress", Status: "in_progress"}
+	setDefaultWorkItems(tracker)
+	origTracker := defaultDeps.WorkItems
+	defaultDeps.WorkItems = tracker
+	t.Cleanup(func() { defaultDeps.WorkItems = origTracker })
 
 	mock := NewCommandMock(t, []CommandStub{
 		// DiscoverWorktrees: GetCurrentBranch for each repo
@@ -1285,8 +1285,8 @@ func TestCleanUntrackedFiles_WorkspaceMode_PartialUntracked(t *testing.T) {
 
 func TestRecoverWorktree_WorkspaceStaleLock(t *testing.T) {
 	// Full RecoverWorktree flow in workspace mode: lock at repo dir (per-worktree).
-	resetDefaultIssueBackend()
-	t.Cleanup(resetDefaultIssueBackend)
+	resetDefaultWorkItems()
+	t.Cleanup(resetDefaultWorkItems)
 
 	wsDir := t.TempDir()
 	wsDir, _ = filepath.EvalSymlinks(wsDir)
@@ -1315,9 +1315,9 @@ func TestRecoverWorktree_WorkspaceStaleLock(t *testing.T) {
 		t.Fatalf("failed to create lock file: %v", err)
 	}
 
-	tracker := NewMockIssueBackend()
-	tracker.GetResult = &backend.IssueDetailData{IssueData: backend.IssueData{ID: "task-ws", Status: "in_progress", Assignee: "test-agent"}}
-	tracker.ListResult = []backend.IssueData{}
+	tracker := NewMockWorkItems()
+	tracker.GetResult = &workitems.IssueDetail{ID: "task-ws", Status: "in_progress", Assignee: "test-agent"}
+	tracker.ListResult = listResultFromSummaries([]workitems.IssueSummary{})
 
 	mock := NewCommandMock(t, []CommandStub{
 		// cleanUntrackedFiles: DiscoverWorktrees calls GetCurrentBranch
@@ -1328,7 +1328,7 @@ func TestRecoverWorktree_WorkspaceStaleLock(t *testing.T) {
 	mock.Install()
 	// CommandMock.Install resets the package backend override while installing
 	// its Exec/Git fakes, so install the recovery backend afterwards.
-	setDefaultIssueBackend(tracker)
+	setDefaultWorkItems(tracker)
 
 	// Pass repoDir as worktreePath -- lock is at repoDir (per-worktree)
 	err := RecoverWorktree(t.Context(), repoDir, "test-agent", -1)
@@ -1353,7 +1353,7 @@ func TestAnalyzeTaskCompletion_TruncatesLongTaskDetails(t *testing.T) {
 	// Generate task details output exceeding 4000 chars
 	longTaskOutput := strings.Repeat("A", 5000)
 
-	tracker.GetResult = &backend.IssueDetailData{IssueData: backend.IssueData{Title: "Long task", Status: "in_progress"}, Description: longTaskOutput}
+	tracker.GetResult = &workitems.IssueDetail{Title: "Long task", Status: "in_progress", Description: longTaskOutput}
 
 	mock := NewCommandMock(t, []CommandStub{
 		{
@@ -1396,7 +1396,7 @@ func TestAnalyzeTaskCompletion_TruncatesLongGitOutput(t *testing.T) {
 	// Generate git log output exceeding 4000 chars
 	longGitOutput := strings.Repeat("B", 5000)
 
-	tracker.GetResult = &backend.IssueDetailData{IssueData: backend.IssueData{Title: "Short task", Status: "in_progress"}}
+	tracker.GetResult = &workitems.IssueDetail{Title: "Short task", Status: "in_progress"}
 
 	mock := NewCommandMock(t, []CommandStub{
 		{
@@ -1441,7 +1441,7 @@ func TestAnalyzeTaskCompletion_XMLDelimitersInPrompt(t *testing.T) {
 	t.Parallel()
 	deps, _, _, _, tracker := NewTestDeps(t)
 
-	tracker.GetResult = &backend.IssueDetailData{IssueData: backend.IssueData{Title: "XML delimiter test\nStatus: in_progress", Status: "in_progress"}}
+	tracker.GetResult = &workitems.IssueDetail{Title: "XML delimiter test\nStatus: in_progress", Status: "in_progress"}
 
 	mock := NewCommandMock(t, []CommandStub{
 		{
@@ -1515,7 +1515,7 @@ func TestAnalyzeTaskCompletion_AntiInjectionInstruction(t *testing.T) {
 	t.Parallel()
 	deps, _, _, _, tracker := NewTestDeps(t)
 
-	tracker.GetResult = &backend.IssueDetailData{IssueData: backend.IssueData{Title: "Anti-injection test", Status: "in_progress"}}
+	tracker.GetResult = &workitems.IssueDetail{Title: "Anti-injection test", Status: "in_progress"}
 
 	mock := NewCommandMock(t, []CommandStub{
 		{

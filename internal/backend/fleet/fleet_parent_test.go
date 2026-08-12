@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 )
 
 // TestGet_PopulatesParent verifies fleet-db's parent_id (returned on /issues/{id})
@@ -35,7 +37,7 @@ func TestGet_PopulatesParent(t *testing.T) {
 	})
 	defer ts.Close()
 
-	result, err := fb.Get(context.Background(), "child-1")
+	result, err := fb.Get(context.Background(), workitems.GetQuery{IssueID: "child-1"})
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}

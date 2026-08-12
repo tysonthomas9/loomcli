@@ -7,7 +7,7 @@ import (
 
 	"golang.org/x/time/rate"
 
-	"github.com/tysonthomas9/loomcli/internal/backend"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 	"github.com/tysonthomas9/loomcli/internal/webui/fleet"
 	healthhandlers "github.com/tysonthomas9/loomcli/internal/webui/handlers/health"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/misc"
@@ -49,15 +49,15 @@ type HandlerDeps struct {
 	TerminalGraceMS    int64               // 0 = disabled
 	TerminalIdleMS     int64               // 0 = disabled
 	TerminalMaxSession int                 // 0 = unknown
-	// IssueBackendFn returns the active backend.IssueBackend. Threaded
-	// into /api/config so clients can see which backend the server is
+	// WorkItemsFn returns the active Work Items capability. Threaded into
+	// /api/config so clients can see which adapter the server is
 	// talking to without peeking at LOOM_ISSUE_BACKEND on the host. Nil
 	// is safe and produces an empty label.
 	//
 	// ctx carries the per-request workspace ID so cloud-mode wirings can
 	// route to a per-workspace fleet-db backend; /api/config callers pass
 	// context.Background() since the response is workspace-agnostic.
-	IssueBackendFn func(ctx context.Context) backend.IssueBackend
+	WorkItemsFn workitems.Provider
 }
 
 // BuildHandlers constructs all top-level HTTP handlers.
@@ -71,7 +71,7 @@ func BuildHandlers(deps HandlerDeps) *Handlers {
 		Health:       healthhandlers.HandleHealth(),
 		APIHealth:    healthhandlers.HandleAPIHealth(),
 		ClientErrors: misc.HandleClientErrors(clientErrLimiter),
-		AuthConfig:   misc.HandleAuthConfig(deps.ExtAuthURL, authCfgLimiter, backendNameProvider(deps.IssueBackendFn)),
+		AuthConfig:   misc.HandleAuthConfig(deps.ExtAuthURL, authCfgLimiter, workItemsBackendNameProvider(deps.WorkItemsFn)),
 		Metrics:      healthhandlers.HandleMetrics(deps.Hub, deps.FleetTimeoutsFn, deps.ClaimMetrics),
 		GetTerminalConfig: hterminal.HandleGetTerminalConfig(hterminal.TerminalLifecycleConfig{
 			GracePeriodMS: deps.TerminalGraceMS,
@@ -92,15 +92,18 @@ func BuildHandlers(deps HandlerDeps) *Handlers {
 	return h
 }
 
-func backendNameProvider(provider func(context.Context) backend.IssueBackend) misc.BackendNameFn {
+func workItemsBackendNameProvider(provider workitems.Provider) misc.BackendNameFn {
 	if provider == nil {
 		return nil
 	}
 	return func(ctx context.Context) string {
-		issueBackend := provider(ctx)
-		if issueBackend == nil {
+		items := provider(ctx)
+		if items == nil {
 			return ""
 		}
-		return issueBackend.BackendName()
+		if named, ok := items.(interface{ BackendName() string }); ok {
+			return named.BackendName()
+		}
+		return ""
 	}
 }

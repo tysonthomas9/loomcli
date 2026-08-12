@@ -7,8 +7,8 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/backend/api/gen"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 )
 
 // TestCreate_SendsIdempotencyHeaders verifies the CLI→serve hop carries the
@@ -24,7 +24,7 @@ func TestCreate_SendsIdempotencyHeaders(t *testing.T) {
 	})
 	defer ts.Close()
 
-	params := backend.CreateParams{
+	params := workitems.CreateCommand{
 		Title:          "t",
 		IdempotencyKey: "key-abc",
 		Force:          true,
@@ -56,7 +56,7 @@ func TestCreate_NoHeadersWhenUnset(t *testing.T) {
 	})
 	defer ts.Close()
 
-	if _, err := ab.Create(context.Background(), backend.CreateParams{Title: "t"}); err != nil {
+	if _, err := ab.Create(context.Background(), workitems.CreateCommand{Title: "t"}); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 	if sawKey || sawForce {

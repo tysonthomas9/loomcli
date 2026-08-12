@@ -40,7 +40,7 @@ func checkPrerequisites(deps *cli.Deps) bool {
 		}
 	}
 
-	fmt.Println("✓ fleet-db issue backend active")
+	fmt.Println("✓ FleetDB Work Items adapter active")
 
 	return true
 }

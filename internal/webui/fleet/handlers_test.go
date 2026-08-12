@@ -14,14 +14,13 @@ import (
 	"github.com/alicebob/miniredis/v2"
 	"github.com/redis/go-redis/v9"
 
-	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 )
 
 type claimTestBackend struct {
-	backend.IssueBackend
+	workitems.API
 	ready      []workitems.IssueSummary
-	details    map[string]*backend.IssueDetailData
+	details    map[string]*workitems.IssueDetail
 	claimErr   map[string]error
 	claimCalls []string
 }
@@ -30,28 +29,25 @@ func (b *claimTestBackend) Ready(_ context.Context, _ workitems.AvailabilityQuer
 	return b.ready, nil
 }
 
-func (b *claimTestBackend) ClaimIssue(_ context.Context, id string, _ time.Duration) error {
-	b.claimCalls = append(b.claimCalls, id)
-	return b.claimErr[id]
-}
-
-func (b *claimTestBackend) Get(_ context.Context, id string) (*backend.IssueDetailData, error) {
-	return b.details[id], nil
+func (b *claimTestBackend) Claim(_ context.Context, command workitems.ClaimCommand) (*workitems.IssueDetail, error) {
+	b.claimCalls = append(b.claimCalls, command.IssueID)
+	if err := b.claimErr[command.IssueID]; err != nil {
+		return nil, err
+	}
+	return b.details[command.IssueID], nil
 }
 
 func TestFleetClaim_DirectBackendExplicitIssue(t *testing.T) {
-	be := &claimTestBackend{details: map[string]*backend.IssueDetailData{
+	be := &claimTestBackend{details: map[string]*workitems.IssueDetail{
 		"TASK-1": {
-			IssueData: backend.IssueData{
-				ID:          "TASK-1",
-				Title:       "Direct claim",
-				Status:      "in_progress",
-				IssueType:   "task",
-				Labels:      []string{"phase6"},
-				SourceRepo:  "loomcli",
-				ExternalRef: "local-branch:phase9@abc123",
-			},
-			Description: "claimed through IssueBackend",
+			ID:          "TASK-1",
+			Title:       "Direct claim",
+			Status:      "in_progress",
+			IssueType:   "task",
+			Labels:      []string{"phase6"},
+			SourceRepo:  "loomcli",
+			ExternalRef: "local-branch:phase9@abc123",
+			Description: "claimed through Work Items",
 		},
 	}}
 	metrics := NewClaimMetrics()
@@ -59,7 +55,7 @@ func TestFleetClaim_DirectBackendExplicitIssue(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/fleet/claim", body)
 	w := httptest.NewRecorder()
 
-	handleFleetClaim(func(context.Context) backend.IssueBackend { return be }, metrics).ServeHTTP(w, req)
+	handleFleetClaim(func(context.Context) workitems.API { return be }, metrics).ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d; body = %s", w.Code, http.StatusOK, w.Body.String())
@@ -75,7 +71,7 @@ func TestFleetClaim_DirectBackendExplicitIssue(t *testing.T) {
 	if got := response.Payload.Issue.ID; got != "TASK-1" {
 		t.Fatalf("issue ID = %q, want TASK-1", got)
 	}
-	if got := response.Payload.Issue.Description; got != "claimed through IssueBackend" {
+	if got := response.Payload.Issue.Description; got != "claimed through Work Items" {
 		t.Fatalf("description = %q", got)
 	}
 	var raw map[string]any
@@ -103,18 +99,18 @@ func TestFleetClaim_DirectBackendExplicitIssue(t *testing.T) {
 func TestFleetClaim_DirectBackendSkipsContendedReadyIssue(t *testing.T) {
 	be := &claimTestBackend{
 		ready: []workitems.IssueSummary{{ID: "TASK-1"}, {ID: "TASK-2"}},
-		details: map[string]*backend.IssueDetailData{
-			"TASK-2": {IssueData: backend.IssueData{ID: "TASK-2", Title: "Winner", Status: "in_progress", IssueType: "task"}},
+		details: map[string]*workitems.IssueDetail{
+			"TASK-2": {ID: "TASK-2", Title: "Winner", Status: "in_progress", IssueType: "task"},
 		},
 		claimErr: map[string]error{
-			"TASK-1": backend.ErrConflict("ClaimIssue", "already claimed"),
+			"TASK-1": workitems.AdapterConflict("Claim", "already claimed"),
 		},
 	}
 	metrics := NewClaimMetrics()
 	req := httptest.NewRequest(http.MethodPost, "/api/fleet/claim", nil)
 	w := httptest.NewRecorder()
 
-	handleFleetClaim(func(context.Context) backend.IssueBackend { return be }, metrics).ServeHTTP(w, req)
+	handleFleetClaim(func(context.Context) workitems.API { return be }, metrics).ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d; body = %s", w.Code, http.StatusOK, w.Body.String())
@@ -136,12 +132,12 @@ func TestFleetClaim_DirectBackendSkipsContendedReadyIssue(t *testing.T) {
 
 func TestFleetClaim_DirectBackendExplicitConflict(t *testing.T) {
 	be := &claimTestBackend{claimErr: map[string]error{
-		"TASK-1": backend.ErrConflict("ClaimIssue", "already claimed"),
+		"TASK-1": workitems.AdapterConflict("Claim", "already claimed"),
 	}}
 	req := httptest.NewRequest(http.MethodPost, "/api/fleet/claim", bytes.NewBufferString(`{"issue_id":"TASK-1"}`))
 	w := httptest.NewRecorder()
 
-	handleFleetClaim(func(context.Context) backend.IssueBackend { return be }, nil).ServeHTTP(w, req)
+	handleFleetClaim(func(context.Context) workitems.API { return be }, nil).ServeHTTP(w, req)
 
 	if w.Code != http.StatusConflict {
 		t.Fatalf("status = %d, want %d; body = %s", w.Code, http.StatusConflict, w.Body.String())

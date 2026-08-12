@@ -12,6 +12,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/backend/api"
 	"github.com/tysonthomas9/loomcli/internal/backend/api/gen"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 )
 
 // canned envelope mirroring api.apiResponse — re-declared here because it is
@@ -90,7 +91,7 @@ func runShow(t *testing.T, srvURL, id, format string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	detail, err := ab.Get(ctx, id)
+	detail, err := ab.Get(ctx, workitems.GetQuery{IssueID: id})
 	if err != nil {
 		return "", err
 	}

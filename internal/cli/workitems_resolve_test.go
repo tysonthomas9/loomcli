@@ -4,11 +4,11 @@ import (
 	"testing"
 )
 
-func TestResolveIssueBackendType(t *testing.T) {
+func TestResolveWorkItemsAdapterType(t *testing.T) {
 	t.Run("defaults to fleetdb", func(t *testing.T) {
-		got := resolveIssueBackendType()
+		got := resolveWorkItemsAdapterType()
 		if got != "fleetdb" {
-			t.Errorf("resolveIssueBackendType() = %q, want %q", got, "fleetdb")
+			t.Errorf("resolveWorkItemsAdapterType() = %q, want %q", got, "fleetdb")
 		}
 	})
 }
@@ -21,20 +21,20 @@ func TestIsFleetDBActive(t *testing.T) {
 	})
 }
 
-func TestResolveIssueBackendType_FleetEnvVar(t *testing.T) {
+func TestResolveWorkItemsAdapterType_FleetEnvVar(t *testing.T) {
 	t.Setenv("LOOM_ISSUE_BACKEND", "fleet")
-	got := resolveIssueBackendType()
+	got := resolveWorkItemsAdapterType()
 	if got != "fleet" {
-		t.Errorf("resolveIssueBackendType() = %q, want %q", got, "fleet")
+		t.Errorf("resolveWorkItemsAdapterType() = %q, want %q", got, "fleet")
 	}
 }
 
-func TestResolveIssueBackendType_InvalidEnvVar(t *testing.T) {
+func TestResolveWorkItemsAdapterType_InvalidEnvVar(t *testing.T) {
 	t.Setenv("LOOM_ISSUE_BACKEND", "postgres")
-	got := resolveIssueBackendType()
+	got := resolveWorkItemsAdapterType()
 	// Invalid value is ignored (with a warning log); falls through to default "fleetdb"
 	if got != "fleetdb" {
-		t.Errorf("resolveIssueBackendType() = %q, want %q (invalid LOOM_ISSUE_BACKEND should fall through to default)", got, "fleetdb")
+		t.Errorf("resolveWorkItemsAdapterType() = %q, want %q (invalid LOOM_ISSUE_BACKEND should fall through to default)", got, "fleetdb")
 	}
 }
 

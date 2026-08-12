@@ -34,12 +34,12 @@ func boolPtr(v bool) *bool { return config.BoolPtr(v) }
 var validateAgentRepos = config.ValidateAgentRepos
 var resolveAgentRepos = config.ResolveAgentRepos
 var fetchReadyIssues = FetchReadyIssues
-var setDefaultIssueBackend = SetDefaultIssueBackend
+var setDefaultWorkItems = SetDefaultWorkItems
 var isFleetMode = IsFleetMode
 var isFleetModeFromEnv = IsFleetModeFromEnv
-var resolveIssueBackendType = ResolveIssueBackendType
-var defaultIssueBackend = DefaultIssueBackend
-var resetDefaultIssueBackend = ResetDefaultIssueBackend
+var resolveWorkItemsAdapterType = ResolveWorkItemsAdapterType
+var defaultWorkItems = DefaultWorkItems
+var resetDefaultWorkItems = ResetDefaultWorkItems
 var isFleetActive = IsFleetActive
 var isFleetDBActive = IsFleetDBActive
 var ensureSignalDir = EnsureSignalDir

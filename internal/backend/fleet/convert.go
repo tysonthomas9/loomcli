@@ -5,12 +5,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 )
 
 // fleetIssueWire mirrors fleet-db's wire shape and projects directly to the
-// canonical backend representation consumed by the Work Items adapter.
+// Work Items-owned representation.
 type fleetIssueWire struct {
 	ID               string     `json:"id,omitempty"`
 	Title            string     `json:"title,omitempty"`
@@ -41,22 +40,6 @@ type fleetIssueWire struct {
 	CloseReason      string     `json:"close_reason,omitempty"`
 }
 
-func (w fleetIssueWire) toIssueData() backend.IssueData {
-	summary := w.toIssueSummary()
-	labels := make([]string, len(summary.Labels))
-	copy(labels, summary.Labels)
-	return backend.IssueData{
-		ID: summary.ID, Title: summary.Title, Status: summary.Status, Priority: summary.Priority,
-		IssueType: summary.IssueType, Assignee: summary.Assignee, Owner: summary.Owner,
-		Labels: labels, SourceRepo: summary.SourceRepo,
-		Parent: summary.Parent, Design: summary.Design, DesignArtifactID: summary.DesignArtifactID,
-		DesignFormat: summary.DesignFormat, HasDesign: summary.HasDesign, Notes: summary.Notes,
-		CreatedBy: summary.CreatedBy, CreatedAt: summary.CreatedAt, UpdatedAt: summary.UpdatedAt,
-		ClosedAt: summary.ClosedAt, CloseReason: summary.CloseReason, ExternalRef: summary.ExternalRef,
-		DueAt: summary.DueAt, DeferUntil: summary.DeferUntil,
-	}
-}
-
 func (w fleetIssueWire) toIssueSummary() workitems.IssueSummary {
 	labels := append([]string(nil), w.Labels...)
 	if labels == nil {
@@ -75,14 +58,19 @@ func (w fleetIssueWire) toIssueSummary() workitems.IssueSummary {
 	}
 }
 
-func (w fleetIssueWire) toIssueDetailData() backend.IssueDetailData {
-	return backend.IssueDetailData{
-		IssueData:          w.toIssueData(),
-		Description:        w.Description,
-		AcceptanceCriteria: w.Acceptance,
-		Dependencies:       []backend.DependencyData{},
-		Dependents:         []backend.DependencyData{},
-		Comments:           []backend.CommentData{},
+func (w fleetIssueWire) toIssueDetail() workitems.IssueDetail {
+	summary := w.toIssueSummary()
+	return workitems.IssueDetail{
+		ID: summary.ID, Title: summary.Title, Status: summary.Status, Priority: summary.Priority,
+		IssueType: summary.IssueType, Assignee: summary.Assignee, Owner: summary.Owner,
+		Labels: append([]string(nil), summary.Labels...), SourceRepo: summary.SourceRepo, Repo: summary.Repo,
+		Parent: summary.Parent, Design: summary.Design, DesignArtifactID: summary.DesignArtifactID,
+		DesignFormat: summary.DesignFormat, HasDesign: summary.HasDesign,
+		Description: w.Description, AcceptanceCriteria: w.Acceptance, Notes: summary.Notes,
+		CreatedBy: summary.CreatedBy, CreatedAt: summary.CreatedAt, UpdatedAt: summary.UpdatedAt,
+		ClosedAt: summary.ClosedAt, CloseReason: summary.CloseReason, ExternalRef: summary.ExternalRef,
+		DueAt: summary.DueAt, DeferUntil: summary.DeferUntil,
+		Dependencies: []workitems.Dependency{}, Dependents: []workitems.Dependency{}, Comments: []*workitems.Comment{},
 	}
 }
 
@@ -105,15 +93,6 @@ type fleetIssueWithCountsWire struct {
 	fleetIssueWire
 	DependencyCount int `json:"dependency_count,omitempty"`
 	DependentCount  int `json:"dependent_count,omitempty"`
-}
-
-// toIssueData projects the fleet wire shape directly to the backend adapter
-// representation with counts populated.
-func (w fleetIssueWithCountsWire) toIssueData() backend.IssueData {
-	d := w.fleetIssueWire.toIssueData()
-	d.DependencyCount = w.DependencyCount
-	d.DependentCount = w.DependentCount
-	return d
 }
 
 func (w fleetIssueWithCountsWire) toIssueSummary() workitems.IssueSummary {
@@ -162,29 +141,6 @@ type closeResultJSON struct {
 	Unblocked []*fleetIssueWire `json:"unblocked,omitempty"`
 }
 
-// commentToData converts workitems.Comment to backend.CommentData.
-func commentToData(c *workitems.Comment) backend.CommentData {
-	return backend.CommentData{
-		ID:        c.ID,
-		IssueID:   c.IssueID,
-		Author:    c.Author,
-		Text:      c.Text,
-		CreatedAt: c.CreatedAt,
-	}
-}
-
-// commentsToData is the temporary issue-detail translation. It disappears
-// with IssueDetailData; comment operations already use Work Items models.
-func commentsToData(comments []*workitems.Comment) []backend.CommentData {
-	result := make([]backend.CommentData, 0, len(comments))
-	for _, comment := range comments {
-		if comment != nil {
-			result = append(result, commentToData(comment))
-		}
-	}
-	return result
-}
-
 // availabilityIssuesToSummaries converts a FleetDB availability response to
 // the Work Items owner projection.
 func availabilityIssuesToSummaries(issues []*readyIssueWithParent) []workitems.IssueSummary {
@@ -215,7 +171,7 @@ func availabilityIssuesToSummaries(issues []*readyIssueWithParent) []workitems.I
 func unmarshalBlockedIssueList(data []byte, op string) ([]workitems.IssueSummary, error) {
 	nested, ok := unmarshalNativeBlockedIssues(data)
 	if !ok {
-		return nil, backend.ErrInternal(op, "unmarshal canonical blocked response", nil)
+		return nil, workitems.AdapterInternal(op, "unmarshal canonical blocked response", nil)
 	}
 	return blockedIssueResponsesToSummaries(nested), nil
 }
@@ -270,18 +226,18 @@ func blockedIssueResponsesToSummaries(issues []blockedIssueResponseWire) []worki
 	return result
 }
 
-// closeResultJSONToData converts the close endpoint's JSON response to backend.CloseResult.
-func closeResultJSONToData(cr *closeResultJSON) *backend.CloseResult {
-	result := &backend.CloseResult{
-		Unblocked: make([]backend.IssueData, 0),
+// closeResultJSONToResult converts the close endpoint response to the owner model.
+func closeResultJSONToResult(cr *closeResultJSON) *workitems.CloseResult {
+	result := &workitems.CloseResult{
+		Unblocked: make([]workitems.IssueSummary, 0),
 	}
 	if cr.Closed != nil {
-		closed := cr.Closed.toIssueData()
+		closed := cr.Closed.toIssueSummary()
 		result.Closed = &closed
 	}
 	for _, u := range cr.Unblocked {
 		if u != nil {
-			result.Unblocked = append(result.Unblocked, u.toIssueData())
+			result.Unblocked = append(result.Unblocked, u.toIssueSummary())
 		}
 	}
 	return result

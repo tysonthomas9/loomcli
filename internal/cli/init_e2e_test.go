@@ -79,7 +79,7 @@ func TestE2E_InitNonInteractive(t *testing.T) {
 		"🔧 Loom Setup Wizard",
 		"Step 1: Prerequisites",
 		"✓ git repository detected",
-		"✓ fleet-db issue backend active",
+		"✓ FleetDB Work Items adapter active",
 		"Step 2: Issue storage",
 		"Step 3: Create worktrees directory",
 		"Step 4: Create agent worktrees",

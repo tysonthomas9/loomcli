@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 )
 
 // TestGet_EpicChildrenAreDependentsNotSelfReferences reproduces the
@@ -92,7 +94,7 @@ func TestGet_EpicChildrenAreDependentsNotSelfReferences(t *testing.T) {
 	})
 	defer ts.Close()
 
-	result, err := fb.Get(context.Background(), epic)
+	result, err := fb.Get(context.Background(), workitems.GetQuery{IssueID: epic})
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
@@ -108,16 +110,16 @@ func TestGet_EpicChildrenAreDependentsNotSelfReferences(t *testing.T) {
 		t.Fatalf("Dependents = %d, want %d", len(result.Dependents), len(children))
 	}
 
-	// Each dependent must carry the real child id (in IssueID), NOT the epic,
+	// Each dependent must carry the real child ID, NOT the epic,
 	// and its own metadata (title) rather than the epic's.
 	got := map[string]bool{}
 	for _, d := range result.Dependents {
-		if d.IssueID == epic {
-			t.Errorf("dependent IssueID is the epic itself (%q) — self-reference bug", epic)
+		if d.ID == epic {
+			t.Errorf("dependent ID is the epic itself (%q) — self-reference bug", epic)
 		}
-		got[d.IssueID] = true
-		if d.Title != childTitle[d.IssueID] {
-			t.Errorf("dependent %q title = %q, want %q", d.IssueID, d.Title, childTitle[d.IssueID])
+		got[d.ID] = true
+		if d.Title != childTitle[d.ID] {
+			t.Errorf("dependent %q title = %q, want %q", d.ID, d.Title, childTitle[d.ID])
 		}
 	}
 	for _, c := range children {

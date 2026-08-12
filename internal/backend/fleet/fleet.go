@@ -1,7 +1,5 @@
-// Package fleet implements backend.IssueBackend as an HTTP REST client against
-// the fleet server's workspace-scoped API endpoints. It translates IssueBackend
-// method calls into HTTP requests, parses the JSON response envelopes, and
-// converts server-side types to backend wire types.
+// Package fleet implements Work Items durable ports as an HTTP REST adapter
+// against FleetDB's workspace-scoped endpoints.
 package fleet
 
 import (
@@ -18,7 +16,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/fleethttp"
 	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 )
@@ -26,8 +23,7 @@ import (
 // maxResponseBody limits response body reads to 50MB to prevent OOM.
 const maxResponseBody = 50 << 20
 
-// FleetBackend implements backend.IssueBackend by forwarding calls to a fleet
-// server's REST API. It is safe for concurrent use.
+// FleetBackend is safe for concurrent use.
 type FleetBackend struct {
 	client           *http.Client
 	baseWorkspaceURL string // e.g., "http://host/api/v1/ws1"
@@ -40,7 +36,7 @@ type FleetBackend struct {
 }
 
 // Compile-time interface check.
-var _ backend.IssueBackend = (*FleetBackend)(nil)
+var _ workitems.Store = (*FleetBackend)(nil)
 var _ workitems.ReadyQueries = (*FleetBackend)(nil)
 var _ workitems.DeferredQueries = (*FleetBackend)(nil)
 var _ workitems.BlockedQueries = (*FleetBackend)(nil)
@@ -51,8 +47,7 @@ var _ workitems.CommentQueries = (*FleetBackend)(nil)
 var _ workitems.CommentCommands = (*FleetBackend)(nil)
 var _ workitems.DependencyCommands = (*FleetBackend)(nil)
 var _ workitems.MutationStream = (*FleetBackend)(nil)
-var _ backend.ClaimReleaser = (*FleetBackend)(nil)
-var _ backend.RepositoryRequirementBackend = (*FleetBackend)(nil)
+var _ workitems.ClaimLeaseCommands = (*FleetBackend)(nil)
 
 // apiResponse is the generic JSON envelope returned by fleet server endpoints.
 type apiResponse struct {
@@ -122,7 +117,7 @@ func (b *FleetBackend) doRequestURL(ctx context.Context, method, rawURL string, 
 }
 
 // SetAuthToken updates the bearer token for subsequent requests.
-// Safe to call concurrently with IssueBackend method calls.
+// Safe to call concurrently with Work Items calls.
 func (b *FleetBackend) SetAuthToken(token string) {
 	b.mu.Lock()
 	b.authToken = token
@@ -130,7 +125,7 @@ func (b *FleetBackend) SetAuthToken(token string) {
 }
 
 // SetAPIKey updates the API key for subsequent requests.
-// Safe to call concurrently with IssueBackend method calls.
+// Safe to call concurrently with Work Items calls.
 func (b *FleetBackend) SetAPIKey(key string) {
 	b.mu.Lock()
 	b.apiKey = key
@@ -300,21 +295,21 @@ func hasData(resp *apiResponse) bool {
 }
 
 // unmarshalIssueList unmarshals FleetDB issue rows and converts them to
-// []backend.IssueData. Used by List.
+// Work Items summaries. Used by List.
 //
 // fleet-db list endpoints may return a bare array or {"issues": [...]}.
 //
 // Try the bare array first; on a JSON unmarshal type mismatch, fall back
 // to the wrapper. Anything else is a real parse failure.
-func unmarshalIssueList(resp *apiResponse, op string) ([]backend.IssueData, error) {
+func unmarshalIssueList(resp *apiResponse, op string) ([]workitems.IssueSummary, error) {
 	if !hasData(resp) {
-		return []backend.IssueData{}, nil
+		return []workitems.IssueSummary{}, nil
 	}
 	wires, err := unmarshalListOrWrapper[fleetIssueWithCountsWire](resp.Data, op)
 	if err != nil {
 		return nil, err
 	}
-	return wireIssuesToData(wires), nil
+	return wireIssuesToSummaries(wires), nil
 }
 
 // unmarshalListOrWrapper handles fleet-db's two list dialects (bare array
@@ -329,46 +324,44 @@ func unmarshalListOrWrapper[T any](data []byte, op string) ([]T, error) {
 	} else {
 		var ute *json.UnmarshalTypeError
 		if !errors.As(err, &ute) {
-			return nil, backend.ErrInternal(op, "unmarshal response", err)
+			return nil, workitems.AdapterInternal(op, "unmarshal response", err)
 		}
 	}
 	var wrapper struct {
 		Issues []T `json:"issues"`
 	}
 	if err := json.Unmarshal(data, &wrapper); err != nil {
-		return nil, backend.ErrInternal(op, "unmarshal response", err)
+		return nil, workitems.AdapterInternal(op, "unmarshal response", err)
 	}
 	return wrapper.Issues, nil
 }
 
-// wireIssuesToData converts a slice of the fleet-db wire shape into the
-// backend.IssueData projection downstream code consumes.
-func wireIssuesToData(wires []fleetIssueWithCountsWire) []backend.IssueData {
-	out := make([]backend.IssueData, 0, len(wires))
+// wireIssuesToSummaries converts FleetDB rows to the owner projection.
+func wireIssuesToSummaries(wires []fleetIssueWithCountsWire) []workitems.IssueSummary {
+	out := make([]workitems.IssueSummary, 0, len(wires))
 	for _, w := range wires {
-		out = append(out, w.toIssueData())
+		out = append(out, w.toIssueSummary())
 	}
 	return out
 }
 
 // --- Query operations ---
 
-func (b *FleetBackend) Get(ctx context.Context, id string) (*backend.IssueDetailData, error) {
+func (b *FleetBackend) Get(ctx context.Context, query workitems.GetQuery) (*workitems.IssueDetail, error) {
+	id := query.IssueID
 	resp, err := b.exec(ctx, "Get", "GET", "/issues/"+url.PathEscape(id), nil)
 	if err != nil {
 		return nil, err
 	}
 	if !hasData(resp) {
-		return nil, backend.ErrNotFound("Get", "issue not found")
+		return nil, workitems.AdapterNotFound("Get", "issue not found")
 	}
 	var wire fleetIssueWithCountsWire
 	if err := json.Unmarshal(resp.Data, &wire); err != nil {
-		return nil, backend.ErrInternal("Get", "unmarshal response", err)
+		return nil, workitems.AdapterInternal("Get", "unmarshal response", err)
 	}
-	result := wire.fleetIssueWire.toIssueDetailData()
-	result.IssueData.Labels = append([]string(nil), wire.Labels...)
-	result.IssueData.DependencyCount = wire.DependencyCount
-	result.IssueData.DependentCount = wire.DependentCount
+	result := wire.fleetIssueWire.toIssueDetail()
+	result.Labels = append([]string(nil), wire.Labels...)
 
 	// fleet-db's GET /issues/{id} response is the slim issue record. Fetch
 	// related data via dedicated list endpoints so IssueDetailData is fully
@@ -380,18 +373,18 @@ func (b *FleetBackend) Get(ctx context.Context, id string) (*backend.IssueDetail
 		result.Dependents = dependents
 	}
 	if comments, err := b.ListComments(ctx, workitems.ListCommentsQuery{IssueID: id}); err == nil {
-		result.Comments = commentsToData(comments)
+		result.Comments = comments
 	}
 
 	return &result, nil
 }
 
-func (b *FleetBackend) List(ctx context.Context, opts backend.ListOpts) ([]backend.IssueData, error) {
+func (b *FleetBackend) List(ctx context.Context, opts workitems.ListFilter) ([]workitems.IssueSummary, error) {
 	if err := checkFleetUnsupportedFilters(opts); err != nil {
 		return nil, err
 	}
 	serverOpts := listServerOpts(opts)
-	path := "/issues?" + listOptsToQuery(serverOpts)
+	path := "/issues?" + listFilterToQuery(serverOpts)
 	resp, err := b.exec(ctx, "List", "GET", path, nil)
 	if err != nil {
 		return nil, err
@@ -429,11 +422,11 @@ func (b *FleetBackend) Stats(ctx context.Context) (*workitems.Stats, error) {
 		return nil, err
 	}
 	if !hasData(resp) {
-		return nil, backend.ErrInternal("Stats", "nil response from CountIssues", nil)
+		return nil, workitems.AdapterInternal("Stats", "nil response from CountIssues", nil)
 	}
 	var countResp countIssuesResponse
 	if err := json.Unmarshal(resp.Data, &countResp); err != nil {
-		return nil, backend.ErrInternal("Stats", "unmarshal response", err)
+		return nil, workitems.AdapterInternal("Stats", "unmarshal response", err)
 	}
 	groups := countResp.Groups
 	blocked, err := b.Blocked(ctx, workitems.AvailabilityQuery{})
@@ -469,10 +462,10 @@ func (b *FleetBackend) Stats(ctx context.Context) (*workitems.Stats, error) {
 // sending query= there silently returns an unfiltered first page.
 func (b *FleetBackend) Search(ctx context.Context, query workitems.SearchQuery) ([]workitems.IssueSummary, error) {
 	if query.Query == "" {
-		return nil, backend.ErrValidation("Search", "query must not be empty")
+		return nil, workitems.AdapterInvalid("Search", "query must not be empty")
 	}
 	if query.Limit < 0 {
-		return nil, backend.ErrValidation("Search", "limit must not be negative")
+		return nil, workitems.AdapterInvalid("Search", "limit must not be negative")
 	}
 	path := "/issues/search?q=" + url.QueryEscape(query.Query)
 	if query.Limit > 0 {
@@ -498,7 +491,7 @@ func (b *FleetBackend) Search(ctx context.Context, query workitems.SearchQuery) 
 
 // --- Mutation operations ---
 
-func (b *FleetBackend) Create(ctx context.Context, params backend.CreateParams) (*backend.IssueData, error) {
+func (b *FleetBackend) Create(ctx context.Context, params workitems.CreateCommand) (*workitems.IssueSummary, error) {
 	result, err := b.createIssueOnce(ctx, params)
 	if err != nil {
 		return result, err
@@ -511,8 +504,8 @@ func (b *FleetBackend) Create(ctx context.Context, params backend.CreateParams) 
 	return result, nil
 }
 
-func (b *FleetBackend) createIssueOnce(ctx context.Context, params backend.CreateParams) (*backend.IssueData, error) {
-	body := createParamsToBody(params)
+func (b *FleetBackend) createIssueOnce(ctx context.Context, params workitems.CreateCommand) (*workitems.IssueSummary, error) {
+	body := createCommandToBody(params)
 	apiResp, statusCode, respHeaders, err := b.doRequestHeaders(ctx, "POST", "/issues", body, params.IdempotencyHeaders())
 	if err != nil {
 		return nil, classifyTransportError("Create", err)
@@ -521,14 +514,14 @@ func (b *FleetBackend) createIssueOnce(ctx context.Context, params backend.Creat
 		return nil, cerr
 	}
 	if !hasData(apiResp) {
-		return nil, backend.ErrInternal("Create", "empty response from server", nil)
+		return nil, workitems.AdapterInternal("Create", "empty response from server", nil)
 	}
 	var issue fleetIssueWire
 	if err := json.Unmarshal(apiResp.Data, &issue); err != nil {
-		return nil, backend.ErrInternal("Create", "unmarshal response", err)
+		return nil, workitems.AdapterInternal("Create", "unmarshal response", err)
 	}
 	logIdempotencyResponse(respHeaders, issue.ID)
-	result := issue.toIssueData()
+	result := issue.toIssueSummary()
 	return &result, nil
 }
 
@@ -537,24 +530,22 @@ func (b *FleetBackend) createIssueOnce(ctx context.Context, params backend.Creat
 // is released as the current assignee inside applyStatusUpdate, so the assign is
 // deferred to keep that identity intact (LOOM-1); for every other status target
 // the assign is safe to apply first.
-func shouldAssignBeforeStatus(params backend.UpdateParams) bool {
+func shouldAssignBeforeStatus(params workitems.PatchCommand) bool {
 	return params.Assignee != nil && params.Status != nil &&
 		*params.Status != "in_progress" && *params.Status != "open" &&
 		*params.Status != "review" && *params.Status != "blocked"
 }
 
-func (b *FleetBackend) Update(ctx context.Context, id string, params backend.UpdateParams) error {
-	if params.Claim {
-		return backend.ErrValidation("Update", "Claim field is not supported in FleetBackend.Update; use ClaimIssue instead")
-	}
+func (b *FleetBackend) Patch(ctx context.Context, params workitems.PatchCommand) error {
+	id := params.IssueID
 	if id == "" {
-		return backend.ErrValidation("Update", "id must not be empty")
+		return workitems.AdapterInvalid("Patch", "id must not be empty")
 	}
 	handled := false
 
-	req := updateParamsToPatchRequest(params)
+	req := patchCommandToRequest(params)
 	if len(req) > 0 {
-		if _, err := b.exec(ctx, "Update", "PATCH", "/issues/"+url.PathEscape(id), req); err != nil {
+		if _, err := b.exec(ctx, "Patch", "PATCH", "/issues/"+url.PathEscape(id), req); err != nil {
 			return err
 		}
 		handled = true
@@ -597,21 +588,21 @@ func (b *FleetBackend) Update(ctx context.Context, id string, params backend.Upd
 	}
 
 	if !handled {
-		return backend.ErrValidation("Update", "no FleetDB-supported fields were provided")
+		return workitems.AdapterInvalid("Patch", "no FleetDB-supported fields were provided")
 	}
 	return nil
 }
 
-func (b *FleetBackend) applyStatusUpdate(ctx context.Context, id string, params backend.UpdateParams) (bool, error) {
+func (b *FleetBackend) applyStatusUpdate(ctx context.Context, id string, params workitems.PatchCommand) (bool, error) {
 	if params.Status == nil {
 		return false, nil
 	}
 	target := strings.TrimSpace(*params.Status)
 	if target == "" {
-		return false, backend.ErrValidation("Update", "status must not be empty")
+		return false, workitems.AdapterInvalid("Patch", "status must not be empty")
 	}
 
-	current, err := b.Get(ctx, id)
+	current, err := b.Get(ctx, workitems.GetQuery{IssueID: id})
 	if err != nil {
 		return false, err
 	}
@@ -627,7 +618,7 @@ func (b *FleetBackend) applyStatusUpdate(ctx context.Context, id string, params 
 	case "in_progress":
 		actor := b.claimActor(params.Assignee, current)
 		if actor == "" {
-			return false, backend.ErrValidation("Update", "assignee or configured actor is required to claim an issue")
+			return false, workitems.AdapterInvalid("Patch", "assignee or configured actor is required to claim an issue")
 		}
 		return true, b.execAsActor(ctx, "Update", "/issues/"+url.PathEscape(id)+"/claim", nil, actor)
 	case "open":
@@ -647,7 +638,7 @@ func (b *FleetBackend) applyStatusUpdate(ctx context.Context, id string, params 
 	case "blocked", "review":
 		return false, b.transitionToBlockedOrReview(ctx, id, target, current)
 	default:
-		return false, backend.ErrValidation("Update", "unsupported status for FleetDB workflow: "+target)
+		return false, workitems.AdapterInvalid("Patch", "unsupported status for FleetDB workflow: "+target)
 	}
 }
 
@@ -661,12 +652,12 @@ func (b *FleetBackend) applyStatusUpdate(ctx context.Context, id string, params 
 // newer agent's active lock after the old lock expires and the task is reclaimed.
 func (b *FleetBackend) ReleaseClaim(ctx context.Context, id, actor string) error {
 	if id == "" {
-		return backend.ErrValidation("ReleaseClaim", "id must not be empty")
+		return workitems.AdapterInvalid("ReleaseClaim", "id must not be empty")
 	}
 	if actor == "" {
-		return backend.ErrValidation("ReleaseClaim", "actor must not be empty")
+		return workitems.AdapterInvalid("ReleaseClaim", "actor must not be empty")
 	}
-	current, err := b.Get(ctx, id)
+	current, err := b.Get(ctx, workitems.GetQuery{IssueID: id})
 	if err != nil {
 		return err
 	}
@@ -687,7 +678,7 @@ func (b *FleetBackend) ReleaseClaim(ctx context.Context, id, actor string) error
 // apply any requested assignee change (the caller returns false: assignee not
 // handled here). We release as current.Assignee (the lock holder); the assign is
 // deferred (see shouldAssignBeforeStatus) so that identity is still intact here.
-func (b *FleetBackend) transitionToBlockedOrReview(ctx context.Context, id, target string, current *backend.IssueDetailData) error {
+func (b *FleetBackend) transitionToBlockedOrReview(ctx context.Context, id, target string, current *workitems.IssueDetail) error {
 	if current != nil && current.Status == "in_progress" && current.Assignee != "" {
 		if err := b.releaseIssueLock(ctx, "Update", id, current.Assignee, false); err != nil {
 			return err
@@ -699,9 +690,9 @@ func (b *FleetBackend) transitionToBlockedOrReview(ctx context.Context, id, targ
 	return nil
 }
 
-func (b *FleetBackend) transitionToOpen(ctx context.Context, id string, current *backend.IssueDetailData, clearAssignee bool) error {
+func (b *FleetBackend) transitionToOpen(ctx context.Context, id string, current *workitems.IssueDetail, clearAssignee bool) error {
 	if current == nil {
-		return backend.ErrNotFound("Update", "issue not found")
+		return workitems.AdapterNotFound("Patch", "issue not found")
 	}
 	clearAfterTransition := clearAssignee && current.Assignee != "" && current.Status != "in_progress"
 	var err error
@@ -727,7 +718,7 @@ func (b *FleetBackend) transitionToOpen(ctx context.Context, id string, current 
 	return nil
 }
 
-func (b *FleetBackend) claimActor(assignee *string, current *backend.IssueDetailData) string {
+func (b *FleetBackend) claimActor(assignee *string, current *workitems.IssueDetail) string {
 	if assignee != nil && *assignee != "" {
 		return *assignee
 	}
@@ -777,28 +768,32 @@ func parseOptionalFleetTime(raw *string) (time.Time, error) {
 	if t, err := time.Parse(time.RFC3339, *raw); err == nil {
 		return t, nil
 	}
-	return time.Time{}, backend.ErrValidation("Update", "defer_until must be RFC3339")
+	return time.Time{}, workitems.AdapterInvalid("Patch", "defer_until must be RFC3339")
 }
 
-// ClaimIssue atomically claims an issue via the fleet claim endpoint.
+// Claim atomically claims an issue and returns the canonical owner projection.
 //
 // fleet-db's claim endpoint is per-issue: POST /issues/{id}/claim with an
 // optional {"lock_ttl": seconds} body. A zero TTL asks the server to use its
 // default; positive sub-second TTLs round up to one second because the wire
 // contract is second-granular.
-func (b *FleetBackend) ClaimIssue(ctx context.Context, id string, lockTTL time.Duration) error {
+func (b *FleetBackend) Claim(ctx context.Context, command workitems.ClaimCommand) (*workitems.IssueDetail, error) {
+	id := command.IssueID
 	if id == "" {
-		return backend.ErrValidation("ClaimIssue", "id must not be empty")
+		return nil, workitems.AdapterInvalid("Claim", "id must not be empty")
 	}
-	body, err := claimIssueBody(lockTTL)
+	body, err := claimIssueBody(0)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	_, err = b.exec(ctx, "ClaimIssue", "POST", "/issues/"+url.PathEscape(id)+"/claim", body)
-	return err
+	if _, err = b.exec(ctx, "Claim", "POST", "/issues/"+url.PathEscape(id)+"/claim", body); err != nil {
+		return nil, err
+	}
+	return b.Get(ctx, workitems.GetQuery{IssueID: id})
 }
 
-func (b *FleetBackend) Close(ctx context.Context, id string, params backend.CloseParams) (*backend.CloseResult, error) {
+func (b *FleetBackend) Close(ctx context.Context, params workitems.CloseCommand) (*workitems.CloseResult, error) {
+	id := params.IssueID
 	type closeReq struct {
 		Reason string `json:"reason,omitempty"`
 	}
@@ -817,25 +812,26 @@ func (b *FleetBackend) Close(ctx context.Context, id string, params backend.Clos
 	// TODO(fleet-q6ox): fleet-db does not yet return unblocked issues on close;
 	// Unblocked will be empty until fleet-db adds unblocked-on-close support.
 	if !hasData(resp) {
-		return nil, backend.ErrInternal("Close", "empty response from server", nil)
+		return nil, workitems.AdapterInternal("Close", "empty response from server", nil)
 	}
 	var cr closeResultJSON
 	if err := json.Unmarshal(resp.Data, &cr); err != nil {
-		return nil, backend.ErrInternal("Close", "unmarshal response", err)
+		return nil, workitems.AdapterInternal("Close", "unmarshal response", err)
 	}
 	if cr.Closed == nil && len(cr.Unblocked) == 0 {
 		var issue fleetIssueWire
 		if err := json.Unmarshal(resp.Data, &issue); err == nil && issue.ID != "" {
-			closed := issue.toIssueData()
-			return &backend.CloseResult{Closed: &closed, Unblocked: []backend.IssueData{}}, nil
+			closed := issue.toIssueSummary()
+			return &workitems.CloseResult{Closed: &closed, Unblocked: []workitems.IssueSummary{}}, nil
 		}
 	}
-	return closeResultJSONToData(&cr), nil
+	return closeResultJSONToResult(&cr), nil
 }
 
-func (b *FleetBackend) Reopen(ctx context.Context, id string, params backend.ReopenParams) error {
+func (b *FleetBackend) Reopen(ctx context.Context, params workitems.ReopenCommand) error {
+	id := params.IssueID
 	if id == "" {
-		return backend.ErrValidation("Reopen", "id must not be empty")
+		return workitems.AdapterInvalid("Reopen", "id must not be empty")
 	}
 	// fleet-db has a dedicated reopen route (see internal/api/issues.go:49);
 	// previous implementation used PATCH status=open, but fleet-db's
@@ -848,7 +844,7 @@ func (b *FleetBackend) Reopen(ctx context.Context, id string, params backend.Reo
 	if err != nil {
 		return err
 	}
-	// Record reason as a comment per the IssueBackend interface contract.
+	// Record the reopen reason as a Work Items comment.
 	// Best-effort: the status transition already succeeded.
 	if params.Reason != "" {
 		type commentReq struct {
@@ -864,19 +860,13 @@ func (b *FleetBackend) Reopen(ctx context.Context, id string, params backend.Reo
 	return nil
 }
 
-func (b *FleetBackend) Delete(ctx context.Context, params backend.DeleteParams) error {
-	if len(params.IDs) == 0 {
-		return backend.ErrValidation("Delete", "IDs must not be empty")
+func (b *FleetBackend) Delete(ctx context.Context, params workitems.DeleteCommand) (workitems.DeleteResult, error) {
+	id := params.IssueID
+	if id == "" {
+		return workitems.DeleteResult{}, workitems.AdapterInvalid("Delete", "id must not be empty")
 	}
-	// The server's DELETE endpoint handles single issue. Delete each one.
-	for _, id := range params.IDs {
-		_, err := b.exec(ctx, "Delete", "DELETE", "/issues/"+url.PathEscape(id), nil)
-		if err != nil {
-			if params.Force && backend.IsKind(err, backend.KindNotFound) {
-				continue
-			}
-			return err
-		}
+	if _, err := b.exec(ctx, "Delete", "DELETE", "/issues/"+url.PathEscape(id), nil); err != nil && !workitems.IsKind(err, workitems.KindNotFound) {
+		return workitems.DeleteResult{}, err
 	}
-	return nil
+	return workitems.DeleteResult{DeletedCount: 1, DeletedIDs: []string{id}}, nil
 }

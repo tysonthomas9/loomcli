@@ -7,7 +7,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 )
 
@@ -95,7 +94,7 @@ func (b *FleetBackend) ListComments(ctx context.Context, query workitems.ListCom
 	}
 	var bare []fleetCommentWire
 	if err := json.Unmarshal(resp.Data, &bare); err != nil {
-		return nil, backend.ErrInternal("ListComments", "unmarshal response", err)
+		return nil, workitems.AdapterInternal("ListComments", "unmarshal response", err)
 	}
 	out := make([]*workitems.Comment, 0, len(bare))
 	for _, w := range bare {
@@ -128,11 +127,11 @@ func (b *FleetBackend) AddComment(ctx context.Context, command workitems.AddComm
 		return nil, err
 	}
 	if !hasData(resp) {
-		return nil, backend.ErrInternal("AddComment", "empty response from server", nil)
+		return nil, workitems.AdapterInternal("AddComment", "empty response from server", nil)
 	}
 	var wire fleetCommentWire
 	if err := json.Unmarshal(resp.Data, &wire); err != nil {
-		return nil, backend.ErrInternal("AddComment", "unmarshal response", err)
+		return nil, workitems.AdapterInternal("AddComment", "unmarshal response", err)
 	}
 	comment := wire.toTypesComment()
 	if comment.IssueID == "" {

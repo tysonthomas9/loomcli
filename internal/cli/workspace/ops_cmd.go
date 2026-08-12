@@ -319,7 +319,7 @@ func buildLocalRuntime(runtime *local.RuntimeStatusSnapshot, runtimeErr error) *
 	if cli.IsFleetActive() || cli.IsAPIActive() {
 		return &WorkspaceOpsLocalRuntime{
 			Applicable: false,
-			Reason:     "remote issue backend active — local desktop runtime not required",
+			Reason:     "remote Work Items adapter active — local desktop runtime not required",
 		}
 	}
 	if strings.TrimSpace(os.Getenv(bootstrap.EnvFleetDBURL)) != "" {

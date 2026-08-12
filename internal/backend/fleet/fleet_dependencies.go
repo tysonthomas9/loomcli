@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 )
 
@@ -27,6 +26,17 @@ type fleetDepWire struct {
 	CreatedBy   string    `json:"created_by,omitempty"`
 }
 
+func (b *FleetBackend) ListDependencies(ctx context.Context, query workitems.ListDependenciesQuery) ([]workitems.Dependency, error) {
+	dependencies, _, err := b.fetchDependencies(ctx, query.IssueID)
+	if err != nil {
+		return nil, err
+	}
+	if dependencies == nil {
+		dependencies = []workitems.Dependency{}
+	}
+	return dependencies, nil
+}
+
 // addCreateDependencies adds the requested blocks-edges for a freshly created
 // issue. fleet-db's CreateIssueRequest has no inline dependencies field, so
 // Create composes the dedicated POST /issues/{id}/deps calls after the issue
@@ -39,19 +49,19 @@ func (b *FleetBackend) addCreateDependencies(ctx context.Context, id string, dep
 		if err == nil {
 			continue
 		}
-		kind := backend.KindInternal
-		var be *backend.BackendError
+		kind := workitems.KindInternal
+		var be *workitems.OperationError
 		if errors.As(err, &be) {
 			kind = be.Kind
 		}
-		return backend.NewBackendError(kind, "Create",
+		return workitems.NewOperationError(kind, "Create",
 			fmt.Sprintf("issue %s was created, but adding its dependency on %s failed", id, depID), err)
 	}
 	return nil
 }
 
 // fetchDependencies calls fleet-db's GET /issues/{id}/deps and projects the
-// native payload into backend.DependencyData, split by perspective relative to
+// native payload into the Work Items dependency projection, split by perspective relative to
 // id:
 //   - deps:       rows where the viewed issue depends on the other issue
 //     (issue_id == id). The related issue is depends_on_id.
@@ -62,7 +72,7 @@ func (b *FleetBackend) addCreateDependencies(ctx context.Context, id string, dep
 // The single /deps endpoint returns both kinds (fleet-db stores parent-child
 // rows on the child's side), so we must classify each row rather than assume
 // every row is a dependency.
-func (b *FleetBackend) fetchDependencies(ctx context.Context, id string) (deps, dependents []backend.DependencyData, err error) {
+func (b *FleetBackend) fetchDependencies(ctx context.Context, id string) (deps, dependents []workitems.Dependency, err error) {
 	resp, err := b.exec(ctx, "Get", "GET", "/issues/"+url.PathEscape(id)+"/deps", nil)
 	if err != nil {
 		return nil, nil, err
@@ -92,23 +102,22 @@ func (b *FleetBackend) fetchDependencies(ctx context.Context, id string) (deps, 
 // dependency (viewID depends on the other issue). Missing display fields are
 // hydrated from the *related* issue's summary — the side that is not viewID —
 // so an epic's children carry their own metadata rather than the epic's.
-func (b *FleetBackend) depWireToData(ctx context.Context, d fleetDepWire, viewID string) (backend.DependencyData, bool) {
-	dep := backend.DependencyData{
-		IssueID:     d.IssueID,
-		DependsOnID: d.DependsOnID,
-		Type:        d.Type,
-		Title:       d.Title,
-		Status:      d.Status,
-		Priority:    d.Priority,
-		IssueType:   d.IssueType,
-		CreatedAt:   d.CreatedAt,
-		CreatedBy:   d.CreatedBy,
-	}
+func (b *FleetBackend) depWireToData(ctx context.Context, d fleetDepWire, viewID string) (workitems.Dependency, bool) {
 	relatedID := d.DependsOnID
 	isDependent := false
 	if d.DependsOnID == viewID && d.IssueID != "" {
 		relatedID = d.IssueID
 		isDependent = true
+	}
+	dep := workitems.Dependency{
+		ID:             relatedID,
+		DependencyType: d.Type,
+		Title:          d.Title,
+		Status:         d.Status,
+		Priority:       d.Priority,
+		IssueType:      d.IssueType,
+		CreatedAt:      d.CreatedAt,
+		CreatedBy:      d.CreatedBy,
 	}
 	if dep.Title == "" {
 		if issue, err := b.fetchIssueSummary(ctx, relatedID); err == nil && issue != nil {
@@ -118,29 +127,29 @@ func (b *FleetBackend) depWireToData(ctx context.Context, d fleetDepWire, viewID
 	return dep, isDependent
 }
 
-func (b *FleetBackend) fetchIssueSummary(ctx context.Context, id string) (*backend.IssueData, error) {
+func (b *FleetBackend) fetchIssueSummary(ctx context.Context, id string) (*workitems.IssueSummary, error) {
 	if strings.TrimSpace(id) == "" {
-		return nil, backend.ErrValidation("GetDependency", "depends_on_id is required")
+		return nil, workitems.AdapterInvalid("GetDependency", "depends_on_id is required")
 	}
 	resp, err := b.exec(ctx, "GetDependency", "GET", "/issues/"+url.PathEscape(id), nil)
 	if err != nil {
 		return nil, err
 	}
 	if !hasData(resp) {
-		return nil, backend.ErrNotFound("GetDependency", "issue not found")
+		return nil, workitems.AdapterNotFound("GetDependency", "issue not found")
 	}
 	var wire fleetIssueWithCountsWire
 	if err := json.Unmarshal(resp.Data, &wire); err != nil {
-		return nil, backend.ErrInternal("GetDependency", "unmarshal response", err)
+		return nil, workitems.AdapterInternal("GetDependency", "unmarshal response", err)
 	}
-	data := wire.toIssueData()
+	data := wire.toIssueSummary()
 	data.Labels = append([]string(nil), wire.Labels...)
 	return &data, nil
 }
 
-func hydrateDependencyData(dep *backend.DependencyData, issue backend.IssueData) {
-	if dep.DependsOnID == "" {
-		dep.DependsOnID = issue.ID
+func hydrateDependencyData(dep *workitems.Dependency, issue workitems.IssueSummary) {
+	if dep.ID == "" {
+		dep.ID = issue.ID
 	}
 	if dep.Title == "" {
 		dep.Title = issue.Title
@@ -170,7 +179,7 @@ func (b *FleetBackend) waitForDependencyState(ctx context.Context, op, fromID, t
 
 	var lastErr error
 	for {
-		detail, err := b.Get(ctx, fromID)
+		detail, err := b.Get(ctx, workitems.GetQuery{IssueID: fromID})
 		if err == nil && detail != nil && containsDependency(detail.Dependencies, toID) == wantPresent {
 			return nil
 		}
@@ -180,16 +189,16 @@ func (b *FleetBackend) waitForDependencyState(ctx context.Context, op, fromID, t
 
 		select {
 		case <-ctx.Done():
-			return backend.ErrTimeout(op, "dependency projection did not settle", ctx.Err())
+			return workitems.AdapterTimeout(op, "dependency projection did not settle", ctx.Err())
 		case <-timeout.C:
-			return backend.ErrTimeout(op, "dependency projection did not settle", lastErr)
+			return workitems.AdapterTimeout(op, "dependency projection did not settle", lastErr)
 		case <-ticker.C:
 		}
 	}
 }
 
 func (b *FleetBackend) clearBlockedStatusAfterDependencyRemoval(ctx context.Context, id string) error {
-	detail, err := b.Get(ctx, id)
+	detail, err := b.Get(ctx, workitems.GetQuery{IssueID: id})
 	if err != nil {
 		return err
 	}
@@ -202,9 +211,9 @@ func (b *FleetBackend) clearBlockedStatusAfterDependencyRemoval(ctx context.Cont
 	return err
 }
 
-func containsDependency(values []backend.DependencyData, toID string) bool {
+func containsDependency(values []workitems.Dependency, toID string) bool {
 	for _, value := range values {
-		if value.DependsOnID == toID {
+		if value.ID == toID {
 			return true
 		}
 	}

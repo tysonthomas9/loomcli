@@ -17,7 +17,6 @@ import (
 
 	appserve "github.com/tysonthomas9/loomcli/internal/app/serve"
 	"github.com/tysonthomas9/loomcli/internal/app/workfloweventing"
-	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	driverpkg "github.com/tysonthomas9/loomcli/internal/driver"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
@@ -32,15 +31,15 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/testutil"
 )
 
-// fakeIssueBackend embeds the interface so only the methods the driver ops
+// fakeWorkItems embeds the interface so only the methods the driver ops
 // touch need real implementations; anything else panics loudly.
-type fakeIssueBackend struct {
-	backend.IssueBackend
+type fakeWorkItems struct {
+	workitems.API
 	ready                 []workitems.IssueSummary
 	readyOpts             []workitems.AvailabilityQuery
 	blocked               []workitems.IssueSummary
-	children              []backend.IssueData
-	epic                  *backend.IssueDetailData
+	children              []workitems.IssueSummary
+	epic                  *workitems.IssueDetail
 	actor                 string
 	claimed               []string
 	releases              []fakeRelease
@@ -50,11 +49,9 @@ type fakeIssueBackend struct {
 	typedClaimErrors      map[string]error
 	typedClaimItems       map[string]*execution.DriverRunWorkItem
 	repositoryBlocks      []string
-	repositoryBlockResult *backend.RepositoryRequirementResult
+	repositoryBlockResult *workitems.RepositoryAdmissionResult
 	repositoryBlockErr    error
 }
-
-type testWorkItems struct{ backend *fakeIssueBackend }
 
 type testAutomationQueries struct{ store store.Store }
 
@@ -158,119 +155,6 @@ func testAutomationError(err error) error {
 	}
 }
 
-func (items testWorkItems) Get(ctx context.Context, query workitems.GetQuery) (*workitems.IssueDetail, error) {
-	value, err := items.backend.Get(ctx, query.IssueID)
-	if err != nil {
-		return nil, testWorkItemError(err)
-	}
-	if value == nil {
-		return nil, workitems.ErrNotFound
-	}
-	return &workitems.IssueDetail{
-		ID: value.ID, Title: value.Title, Status: value.Status, Priority: value.Priority,
-		IssueType: value.IssueType, Assignee: value.Assignee, Labels: append([]string(nil), value.Labels...),
-		SourceRepo: value.SourceRepo, Parent: value.Parent, ExternalRef: value.ExternalRef,
-		UpdatedAt: value.UpdatedAt,
-	}, nil
-}
-
-func (items testWorkItems) List(ctx context.Context, query workitems.ListQuery) (*workitems.ListResult, error) {
-	values, err := items.backend.List(ctx, backend.ListOpts{
-		ExternalRef: query.Filter.ExternalRef, Status: query.Filter.Status, IssueType: query.Filter.IssueType,
-		ParentID: query.Filter.ParentID, Limit: query.Filter.Limit,
-	})
-	if err != nil {
-		return nil, testWorkItemError(err)
-	}
-	out := make([]workitems.ListItem, 0, len(values))
-	for _, value := range values {
-		out = append(out, workitems.ListItem{IssueSummary: testWorkItemSummary(value)})
-	}
-	return &workitems.ListResult{Issues: out}, nil
-}
-
-func (items testWorkItems) Ready(ctx context.Context, query workitems.AvailabilityQuery) ([]workitems.IssueSummary, error) {
-	values, err := items.backend.Ready(ctx, workitems.AvailabilityQuery{
-		ParentID: query.ParentID, IssueType: query.IssueType, SourceRepos: query.SourceRepos, Limit: query.Limit,
-	})
-	if err != nil {
-		return nil, testWorkItemError(err)
-	}
-	return values, nil
-}
-
-func (items testWorkItems) Blocked(ctx context.Context, query workitems.AvailabilityQuery) ([]workitems.IssueSummary, error) {
-	values, err := items.backend.Blocked(ctx, query)
-	if err != nil {
-		return nil, testWorkItemError(err)
-	}
-	return values, nil
-}
-
-func (items testWorkItems) Patch(context.Context, workitems.PatchCommand) (*workitems.IssueDetail, error) {
-	return nil, workitems.ErrNotImplemented
-}
-
-func (items testWorkItems) AddComment(context.Context, workitems.AddCommentCommand) (*workitems.Comment, error) {
-	return nil, workitems.ErrNotImplemented
-}
-
-func (items testWorkItems) ListComments(context.Context, workitems.ListCommentsQuery) ([]*workitems.Comment, error) {
-	return nil, workitems.ErrNotImplemented
-}
-
-func (items testWorkItems) BlockRepositoryRequired(
-	ctx context.Context,
-	command workitems.BlockRepositoryRequiredCommand,
-) (*workitems.RepositoryAdmissionResult, error) {
-	value, err := items.backend.BlockRepositoryRequired(ctx, command.IssueID)
-	if err != nil {
-		return nil, testWorkItemError(err)
-	}
-	out := &workitems.RepositoryAdmissionResult{
-		Changed: value.Changed, Replayed: value.Replayed, DispatchReady: value.DispatchReady,
-		Blocked: value.Blocked, Reopened: value.Reopened, Outcome: value.Outcome,
-	}
-	if value.Issue != nil {
-		issue := testWorkItemSummary(*value.Issue)
-		out.Issue = &issue
-	}
-	return out, nil
-}
-
-func testWorkItemSummaries(values []backend.IssueData) []workitems.IssueSummary {
-	out := make([]workitems.IssueSummary, 0, len(values))
-	for _, value := range values {
-		out = append(out, testWorkItemSummary(value))
-	}
-	return out
-}
-
-func testWorkItemSummary(value backend.IssueData) workitems.IssueSummary {
-	return workitems.IssueSummary{
-		ID: value.ID, Title: value.Title, Status: value.Status, Priority: value.Priority,
-		IssueType: value.IssueType, Assignee: value.Assignee, Labels: append([]string(nil), value.Labels...),
-		SourceRepo: value.SourceRepo, Parent: value.Parent, ExternalRef: value.ExternalRef,
-		BlockedByCount: value.BlockedByCount, BlockedBy: append([]string(nil), value.BlockedBy...),
-		UpdatedAt: value.UpdatedAt,
-	}
-}
-
-func testWorkItemError(err error) error {
-	switch {
-	case backend.IsKind(err, backend.KindValidation):
-		return fmt.Errorf("%s: %w", err, workitems.ErrInvalid)
-	case backend.IsKind(err, backend.KindNotFound):
-		return fmt.Errorf("%s: %w", err, workitems.ErrNotFound)
-	case backend.IsKind(err, backend.KindConflict):
-		return fmt.Errorf("%s: %w", err, workitems.ErrConflict)
-	case backend.IsKind(err, backend.KindUnavailable):
-		return fmt.Errorf("%s: %w", err, workitems.ErrUnavailable)
-	default:
-		return err
-	}
-}
-
 type fakeRelease struct {
 	id    string
 	actor string
@@ -304,59 +188,78 @@ func (testEventAdmission) AdmitEvent(_ context.Context, _ automation.EventAuthor
 	}, nil
 }
 
-func (f *fakeIssueBackend) Ready(_ context.Context, opts workitems.AvailabilityQuery) ([]workitems.IssueSummary, error) {
+func (f *fakeWorkItems) Ready(_ context.Context, opts workitems.AvailabilityQuery) ([]workitems.IssueSummary, error) {
 	f.readyOpts = append(f.readyOpts, opts)
 	return f.ready, nil
 }
 
-func (f *fakeIssueBackend) ReleaseIssueAsActor(_ context.Context, id, actor string) error {
+func (f *fakeWorkItems) ReleaseIssueAsActor(_ context.Context, id, actor string) error {
 	f.releases = append(f.releases, fakeRelease{id: id, actor: actor})
 	return nil
 }
 
-func (f *fakeIssueBackend) Blocked(_ context.Context, _ workitems.AvailabilityQuery) ([]workitems.IssueSummary, error) {
+func (f *fakeWorkItems) Blocked(_ context.Context, _ workitems.AvailabilityQuery) ([]workitems.IssueSummary, error) {
 	return f.blocked, nil
 }
 
-func (f *fakeIssueBackend) List(_ context.Context, _ backend.ListOpts) ([]backend.IssueData, error) {
-	return f.children, nil
+func (f *fakeWorkItems) List(_ context.Context, _ workitems.ListQuery) (*workitems.ListResult, error) {
+	items := make([]workitems.ListItem, len(f.children))
+	for index := range f.children {
+		items[index] = workitems.ListItem{IssueSummary: f.children[index]}
+	}
+	return &workitems.ListResult{Issues: items}, nil
 }
 
-func (f *fakeIssueBackend) ClaimIssue(_ context.Context, id string, _ time.Duration) error {
-	f.claimed = append(f.claimed, id)
-	return nil
+func (f *fakeWorkItems) Claim(_ context.Context, command workitems.ClaimCommand) (*workitems.IssueDetail, error) {
+	f.claimed = append(f.claimed, command.IssueID)
+	return f.epic, nil
 }
 
-func (f *fakeIssueBackend) ClaimIssueAsActor(_ context.Context, id string, _ time.Duration, actor string) error {
+func (f *fakeWorkItems) ClaimAsActor(_ context.Context, id string, _ time.Duration, actor string) error {
 	f.claimed = append(f.claimed, id)
 	f.actor = actor
 	return nil
 }
 
-func (f *fakeIssueBackend) Get(_ context.Context, _ string) (*backend.IssueDetailData, error) {
+func (f *fakeWorkItems) Get(_ context.Context, _ workitems.GetQuery) (*workitems.IssueDetail, error) {
+	if f.epic == nil {
+		return nil, workitems.ErrNotFound
+	}
 	return f.epic, nil
 }
 
-func (f *fakeIssueBackend) BlockRepositoryRequired(_ context.Context, id string) (*backend.RepositoryRequirementResult, error) {
-	f.repositoryBlocks = append(f.repositoryBlocks, id)
+func (f *fakeWorkItems) Patch(context.Context, workitems.PatchCommand) (*workitems.IssueDetail, error) {
+	return nil, workitems.ErrNotImplemented
+}
+
+func (f *fakeWorkItems) AddComment(context.Context, workitems.AddCommentCommand) (*workitems.Comment, error) {
+	return nil, workitems.ErrNotImplemented
+}
+
+func (f *fakeWorkItems) ListComments(context.Context, workitems.ListCommentsQuery) ([]*workitems.Comment, error) {
+	return nil, workitems.ErrNotImplemented
+}
+
+func (f *fakeWorkItems) BlockRepositoryRequired(_ context.Context, command workitems.BlockRepositoryRequiredCommand) (*workitems.RepositoryAdmissionResult, error) {
+	f.repositoryBlocks = append(f.repositoryBlocks, command.IssueID)
 	if f.repositoryBlockErr != nil {
 		return nil, f.repositoryBlockErr
 	}
 	if f.repositoryBlockResult != nil {
 		return f.repositoryBlockResult, nil
 	}
-	return &backend.RepositoryRequirementResult{Changed: true}, nil
+	return &workitems.RepositoryAdmissionResult{Changed: true}, nil
 }
 
-func (f *fakeIssueBackend) SetIssueRepository(_ context.Context, id, repo string) (*backend.IssueData, error) {
-	return &backend.IssueData{ID: id, SourceRepo: repo}, nil
+func (f *fakeWorkItems) AssignRepository(_ context.Context, command workitems.AssignRepositoryCommand) (*workitems.IssueSummary, error) {
+	return &workitems.IssueSummary{ID: command.IssueID, SourceRepo: command.Repository}, nil
 }
 
 type testHarness struct {
 	server      *httptest.Server
 	store       *memstore.Store
 	module      *Module
-	backend     *fakeIssueBackend
+	backend     *fakeWorkItems
 	runID       string
 	nodeID      string
 	leaseID     string
@@ -450,7 +353,7 @@ func testCanonicalAgent(value *domain.AgentService) *agents.Agent {
 type testDriverRunExecution struct {
 	execution.DriverRunAPI
 	store  store.Store
-	issues *fakeIssueBackend
+	issues *fakeWorkItems
 }
 
 // testNoOpTerminalWorkRecoveryExecution supplies the atomic Fleet-only
@@ -899,7 +802,7 @@ func newTestHarness(t *testing.T) *testHarness {
 	if err != nil {
 		t.Fatalf("Claim driver run: %v", err)
 	}
-	fake := &fakeIssueBackend{}
+	fake := &fakeWorkItems{}
 	// Every harness carries a run-token signing key; every request authenticates
 	// through the same token-only seam as a workflow runtime.
 	runTokenKey := bytes.Repeat([]byte{0x42}, 32)
@@ -942,7 +845,7 @@ func newTestHarness(t *testing.T) *testHarness {
 		TaskRunQueries:        executionCapability.TaskRunQueries(),
 		TaskRunAuthorities:    executionCapability.TaskRunAuthorityResolver(),
 		WorkflowCatalog:       testWorkflowCatalog{store: st},
-		WorkItems:             testWorkItems{backend: fake},
+		WorkItems:             fake,
 		Repositories:          testRepositoryQueries{store: st.Repos()},
 		OrchestrationSessions: testOrchestrationSessionQueries{store: st},
 	})
@@ -1191,8 +1094,8 @@ func TestDriverAPIUnknownOp(t *testing.T) {
 
 func TestDriverAPIBlocksRepositoryRequiredIssueThroughAtomicBackend(t *testing.T) {
 	h := newTestHarness(t)
-	h.backend.repositoryBlockResult = &backend.RepositoryRequirementResult{
-		Issue:   &backend.IssueData{ID: "TASK-REPO", Status: "blocked"},
+	h.backend.repositoryBlockResult = &workitems.RepositoryAdmissionResult{
+		Issue:   &workitems.IssueSummary{ID: "TASK-REPO", Status: "blocked"},
 		Changed: true,
 	}
 	resp, decoded := h.do(t, opRequest{
@@ -1212,7 +1115,7 @@ func TestDriverAPIBlocksRepositoryRequiredIssueThroughAtomicBackend(t *testing.T
 
 func TestDriverAPIRepositoryBlockMapsBackendUnavailable(t *testing.T) {
 	h := newTestHarness(t)
-	h.backend.repositoryBlockErr = backend.ErrUnavailable("BlockRepositoryRequired", "fleet unavailable", nil)
+	h.backend.repositoryBlockErr = workitems.AdapterUnavailable("BlockRepositoryRequired", "fleet unavailable", nil)
 	resp, decoded := h.do(t, opRequest{
 		op: "issue-block-repository-required", body: map[string]any{"issueId": "TASK-REPO"}, headers: h.ownerHeaders(t),
 	})
@@ -1284,7 +1187,7 @@ func TestDriverAPIClaimReady(t *testing.T) {
 		t.Fatalf("typed claims = %+v, want exact parent owner/request envelope", h.backend.typedClaims)
 	}
 	if len(h.backend.claimed) != 0 {
-		t.Fatalf("generic IssueBackend claim was called: %v", h.backend.claimed)
+		t.Fatalf("generic Work Items claim was called: %v", h.backend.claimed)
 	}
 }
 
@@ -1405,7 +1308,7 @@ func TestDriverAPIReleaseTaskIgnoresBodyActor(t *testing.T) {
 		t.Fatalf("typed releases = %+v, want exact owner and claim action", h.backend.typedReleases)
 	}
 	if len(h.backend.releases) != 0 {
-		t.Fatalf("generic IssueBackend release was called: %+v", h.backend.releases)
+		t.Fatalf("generic Work Items release was called: %+v", h.backend.releases)
 	}
 }
 
@@ -1575,7 +1478,7 @@ func TestTaskRunRequestMetadataRetainedClaimIsServerOwned(t *testing.T) {
 
 func TestDriverAPIEpicGet(t *testing.T) {
 	h := newTestHarness(t)
-	h.backend.epic = &backend.IssueDetailData{IssueData: backend.IssueData{ID: "EPIC-1", Title: "epic"}}
+	h.backend.epic = &workitems.IssueDetail{ID: "EPIC-1", Title: "epic"}
 
 	resp, decoded := h.do(t, opRequest{op: "epic-get", headers: h.ownerHeaders(t)})
 	if resp.StatusCode != http.StatusOK {

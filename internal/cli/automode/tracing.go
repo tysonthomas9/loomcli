@@ -19,7 +19,7 @@ const automodeTracerName = "github.com/tysonthomas9/loomcli/internal/cli/automod
 // configured repo set).
 //
 // Caller is responsible for calling span.End(); typically done via defer.
-// Returns the new ctx so descendant operations (e.g., the IssueBackend
+// Returns the new ctx so descendant operations (e.g., the Work Items
 // Ready call) inherit the span as parent.
 func startPollSpan(ctx context.Context, parentID, repoLabel string) (context.Context, trace.Span) {
 	tracer := otel.GetTracerProvider().Tracer(automodeTracerName)

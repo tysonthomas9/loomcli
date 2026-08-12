@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/backend"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 	"github.com/tysonthomas9/loomcli/internal/webui/coordinator"
 	"github.com/tysonthomas9/loomcli/internal/webui/fleet"
 	"github.com/tysonthomas9/loomcli/internal/webui/hooks"
@@ -262,6 +262,6 @@ type PTYHook = hooks.PTYHook
 type FleetModule = fleet.Module
 
 // NewFleetModule creates a new fleet workspace-scoped module.
-func NewFleetModule(registry *FleetStoreRegistry, tokenCfg *FleetTokenConfig, issueBackendFn func(context.Context) backend.IssueBackend, claimMetrics *FleetClaimMetrics, regCfg *FleetRegisterConfig) *FleetModule {
-	return fleet.NewModule(registry.Get, tokenCfg, issueBackendFn, claimMetrics, regCfg)
+func NewFleetModule(registry *FleetStoreRegistry, tokenCfg *FleetTokenConfig, workItemsFn workitems.Provider, claimMetrics *FleetClaimMetrics, regCfg *FleetRegisterConfig) *FleetModule {
+	return fleet.NewModule(registry.Get, tokenCfg, workItemsFn, claimMetrics, regCfg)
 }

@@ -176,7 +176,7 @@ func buildStatusData(runtime RuntimeInfo, mon *monitor.MonitorData) StatusData {
 	data := StatusData{
 		Runtime:      runtime,
 		Backend:      collectBackendInfo(),
-		IssueBackend: cli.ResolveIssueBackendType(),
+		IssueBackend: cli.ResolveWorkItemsAdapterType(),
 		Redis:        collectRedisStatus(),
 	}
 

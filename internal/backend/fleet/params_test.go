@@ -4,11 +4,10 @@ import (
 	"net/url"
 	"testing"
 
-	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 )
 
-// --- updateParamsToPatchRequest tests ---
+// --- patchCommandToRequest tests ---
 //
 // These exercise the loom→fleet-db field mapping. fleet-db's
 // UpdateIssueRequest schema is intentionally narrower than loom's
@@ -20,7 +19,7 @@ import (
 
 func TestUpdateParamsToPatchRequest_DropsAgentState(t *testing.T) {
 	state := "running"
-	req := updateParamsToPatchRequest(backend.UpdateParams{AgentState: &state})
+	req := patchCommandToRequest(workitems.PatchCommand{AgentState: &state})
 	if _, ok := req["agent_state"]; ok {
 		t.Error("agent_state must be dropped — fleet-db rejects unknown fields")
 	}
@@ -28,7 +27,7 @@ func TestUpdateParamsToPatchRequest_DropsAgentState(t *testing.T) {
 
 func TestUpdateParamsToPatchRequest_DropsStatus(t *testing.T) {
 	status := "in_progress"
-	req := updateParamsToPatchRequest(backend.UpdateParams{Status: &status})
+	req := patchCommandToRequest(workitems.PatchCommand{Status: &status})
 	if _, ok := req["status"]; ok {
 		t.Error("status must be dropped — use Close/Reopen/Claim instead")
 	}
@@ -36,7 +35,7 @@ func TestUpdateParamsToPatchRequest_DropsStatus(t *testing.T) {
 
 func TestUpdateParamsToPatchRequest_RenamesIssueTypeToType(t *testing.T) {
 	it := "epic"
-	req := updateParamsToPatchRequest(backend.UpdateParams{IssueType: &it})
+	req := patchCommandToRequest(workitems.PatchCommand{IssueType: &it})
 	if _, ok := req["issue_type"]; ok {
 		t.Error("issue_type key must be dropped — fleet-db expects 'type'")
 	}
@@ -49,7 +48,7 @@ func TestUpdateParamsToPatchRequest_KeepsSupportedFields(t *testing.T) {
 	title := "new title"
 	owner := "alice"
 	prio := 1
-	req := updateParamsToPatchRequest(backend.UpdateParams{
+	req := patchCommandToRequest(workitems.PatchCommand{
 		Title:    &title,
 		Owner:    &owner,
 		Priority: &prio,
@@ -67,16 +66,16 @@ func TestUpdateParamsToPatchRequest_KeepsSupportedFields(t *testing.T) {
 
 func TestUpdateParamsToPatchRequest_KeepsExternalRef(t *testing.T) {
 	ref := "https://github.com/owner/repo/pull/42"
-	req := updateParamsToPatchRequest(backend.UpdateParams{ExternalRef: &ref})
+	req := patchCommandToRequest(workitems.PatchCommand{ExternalRef: &ref})
 	if got, ok := req["external_ref"]; !ok || got != ref {
 		t.Errorf("external_ref = %v, want %q", got, ref)
 	}
 }
 
-// --- createParamsToBody tests ---
+// --- createCommandToBody tests ---
 
 func TestCreateParamsToBody_RenamesFields(t *testing.T) {
-	req := createParamsToBody(backend.CreateParams{
+	req := createCommandToBody(workitems.CreateCommand{
 		Title:      "T",
 		IssueType:  "task",
 		Status:     "deferred",
@@ -121,7 +120,7 @@ func TestCreateParamsToBody_RenamesFields(t *testing.T) {
 
 func TestCreateParamsToBody_DropsLoomOnlyFields(t *testing.T) {
 	estim := 30
-	req := createParamsToBody(backend.CreateParams{
+	req := createCommandToBody(workitems.CreateCommand{
 		Title:              "T",
 		IssueType:          "task",
 		ID:                 "explicit-id",
@@ -142,7 +141,7 @@ func TestCreateParamsToBody_DropsLoomOnlyFields(t *testing.T) {
 
 func TestCreateParamsToBody_KeepsExternalRef(t *testing.T) {
 	ref := "https://github.com/owner/repo/pull/42"
-	req := createParamsToBody(backend.CreateParams{
+	req := createCommandToBody(workitems.CreateCommand{
 		Title:       "T",
 		IssueType:   "task",
 		ExternalRef: ref,
@@ -153,7 +152,7 @@ func TestCreateParamsToBody_KeepsExternalRef(t *testing.T) {
 }
 
 func TestCreateParamsToBody_OmitsZeroValues(t *testing.T) {
-	req := createParamsToBody(backend.CreateParams{Title: "only"})
+	req := createCommandToBody(workitems.CreateCommand{Title: "only"})
 	for _, k := range []string{"description", "status", "type", "assignee", "owner", "labels", "parent_id", "repo", "design", "notes", "defer_until", "due_at", "priority"} {
 		if _, ok := req[k]; ok {
 			t.Errorf("zero-value field %q should not appear in body", k)
@@ -161,7 +160,7 @@ func TestCreateParamsToBody_OmitsZeroValues(t *testing.T) {
 	}
 }
 
-// --- listOptsToQuery tests ---
+// --- listFilterToQuery tests ---
 //
 // fleet-db's listIssues endpoint expects ?type=<kind>, not ?issue_type=<kind>
 // (see fleet-db/api/openapi.yaml). loomcli sending "issue_type" caused the
@@ -169,7 +168,7 @@ func TestCreateParamsToBody_OmitsZeroValues(t *testing.T) {
 // tasks.
 
 func TestListOptsToQuery_UsesTypeNotIssueType(t *testing.T) {
-	q := listOptsToQuery(backend.ListOpts{IssueType: "epic"})
+	q := listFilterToQuery(workitems.ListFilter{IssueType: "epic"})
 	v := parseQueryValues(t, q)
 	if _, has := v["issue_type"]; has {
 		t.Errorf("query contains issue_type=%q; fleet-db's listIssues silently ignores it", v.Get("issue_type"))
@@ -180,7 +179,7 @@ func TestListOptsToQuery_UsesTypeNotIssueType(t *testing.T) {
 }
 
 func TestListOptsToQuery_UsesFleetLabelAndRepoParams(t *testing.T) {
-	q := listOptsToQuery(backend.ListOpts{
+	q := listFilterToQuery(workitems.ListFilter{
 		Labels:      []string{"urgent"},
 		SourceRepos: []string{"repo-a"},
 	})

@@ -237,7 +237,7 @@ func handleWorkspaces(w http.ResponseWriter, r *http.Request) {
 
 type CommandResult = cli.CommandResult
 
-func NewTestDeps(t testing.TB) (*cli.Deps, *clitest.MockGitRunner, *clitest.MockExecRunner, *clitest.MockFileSystem, *clitest.MockIssueBackend) {
+func NewTestDeps(t testing.TB) (*cli.Deps, *clitest.MockGitRunner, *clitest.MockExecRunner, *clitest.MockFileSystem, *clitest.MockWorkItems) {
 	return clitest.NewTestDeps(t.(*testing.T))
 }
 

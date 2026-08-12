@@ -5,12 +5,19 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/cli/testdata/clitest"
 	stackstore "github.com/tysonthomas9/loomcli/internal/infra/sourcecontrolstackstore"
 	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
 	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 )
+
+func listResultFromSummaries(summaries []workitems.IssueSummary) *workitems.ListResult {
+	items := make([]workitems.ListItem, len(summaries))
+	for index := range summaries {
+		items[index] = workitems.ListItem{IssueSummary: summaries[index]}
+	}
+	return &workitems.ListResult{Issues: items}
+}
 
 // baseOf returns the planned BaseTaskID for a task, or "<absent>" if the task
 // is not in the plan.
@@ -121,14 +128,14 @@ func TestProjectEpicStack_BuildsForestAndIsIdempotent(t *testing.T) {
 	ctx := context.Background()
 	const ws, epicID, repo, root = "WS", "EPIC-1", "acme/widgets", "main"
 
-	ib := clitest.NewMockIssueBackend()
+	ib := clitest.NewMockWorkItems()
 	// List(parent) returns the full open universe with dependency edges.
-	ib.ListResult = []backend.IssueData{
+	ib.ListResult = listResultFromSummaries([]workitems.IssueSummary{
 		{ID: "T-A", Status: "open", Parent: epicID},
 		{ID: "T-B", Status: "open", Parent: epicID, BlockedBy: []string{"T-A"}, BlockedByCount: 1},
 		{ID: "T-C", Status: "open", Parent: epicID, BlockedBy: []string{"T-B"}, BlockedByCount: 1},
 		{ID: "T-X", Status: "closed", Parent: epicID}, // closed → excluded from the universe
-	}
+	})
 	ib.ReadyResult = []workitems.IssueSummary{{ID: "T-A", Status: "open", Parent: epicID}}
 	ib.BlockedResult = []workitems.IssueSummary{
 		{ID: "T-B", Status: "blocked", Parent: epicID, BlockedBy: []string{"T-A"}, BlockedByCount: 1},
@@ -216,11 +223,11 @@ func TestProjectEpicStack_MidChainReparent(t *testing.T) {
 	sstore := stackstore.New(t.TempDir())
 	stacks := mustStackLifecycle(t, sstore)
 
-	ib := clitest.NewMockIssueBackend()
-	ib.ListResult = []backend.IssueData{
+	ib := clitest.NewMockWorkItems()
+	ib.ListResult = listResultFromSummaries([]workitems.IssueSummary{
 		{ID: "T-A", Status: "open", Parent: epicID},
 		{ID: "T-B", Status: "open", Parent: epicID, BlockedBy: []string{"T-A"}, BlockedByCount: 1},
-	}
+	})
 	if _, err := projectEpicStack(ctx, ib, stacks, ws, epicID, repo, root); err != nil {
 		t.Fatalf("initial projection: %v", err)
 	}
@@ -235,10 +242,10 @@ func TestProjectEpicStack_MidChainReparent(t *testing.T) {
 	}
 
 	// The DAG changes: T-B no longer depends on T-A (becomes an independent root).
-	ib.ListResult = []backend.IssueData{
+	ib.ListResult = listResultFromSummaries([]workitems.IssueSummary{
 		{ID: "T-A", Status: "open", Parent: epicID},
 		{ID: "T-B", Status: "open", Parent: epicID},
-	}
+	})
 	proj, err := projectEpicStack(ctx, ib, stacks, ws, epicID, repo, root)
 	if err != nil {
 		t.Fatalf("re-projection: %v", err)

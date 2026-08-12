@@ -798,13 +798,13 @@ func (m AnalysisMatrix) Validate() error {
 		"linux-arm64":  {goos: "linux", goarch: "arm64"},
 	}
 	wantTagged := map[string]profileTuple{
-		"container":        {goos: "linux", goarch: "amd64", tags: []string{"container"}},
-		"e2e":              {goos: "linux", goarch: "amd64", tags: []string{"e2e"}},
-		"integration":      {goos: "linux", goarch: "amd64", tags: []string{"integration"}},
-		"issuebackend-e2e": {goos: "linux", goarch: "amd64", tags: []string{"issuebackend_e2e"}},
-		"playground":       {goos: "linux", goarch: "amd64", tags: []string{"playground"}},
-		"race":             {goos: "linux", goarch: "amd64", race: true},
-		"testbackend":      {goos: "linux", goarch: "amd64", tags: []string{"testbackend"}},
+		"container":     {goos: "linux", goarch: "amd64", tags: []string{"container"}},
+		"e2e":           {goos: "linux", goarch: "amd64", tags: []string{"e2e"}},
+		"integration":   {goos: "linux", goarch: "amd64", tags: []string{"integration"}},
+		"workitems-e2e": {goos: "linux", goarch: "amd64", tags: []string{"workitems_e2e"}},
+		"playground":    {goos: "linux", goarch: "amd64", tags: []string{"playground"}},
+		"race":          {goos: "linux", goarch: "amd64", race: true},
+		"testbackend":   {goos: "linux", goarch: "amd64", tags: []string{"testbackend"}},
 	}
 	if err := validateProfiles("release", m.Release, wantRelease); err != nil {
 		return err

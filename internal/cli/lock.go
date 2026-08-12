@@ -16,6 +16,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/atomicfile"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/lockfile"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 )
 
 // LockFileName is the name of the lock file in each worktree
@@ -480,12 +481,12 @@ func GetLockStatus(ctx context.Context, worktreePath string) string {
 // Returns "needs_review", "closed", "in_progress", "open", or ""
 func getTaskStatus(ctx context.Context, taskID string) string {
 	d := *ensureDefaultDeps()
-	d.IssueBackend = DefaultIssueBackend()
+	d.WorkItems = DefaultWorkItems()
 	return GetTaskStatusDeps(ctx, &d, taskID)
 }
 
 func GetTaskStatusDeps(ctx context.Context, deps *Deps, taskID string) string {
-	detail, err := deps.IssueBackend.Get(ctx, taskID)
+	detail, err := deps.WorkItems.Get(ctx, workitems.GetQuery{IssueID: taskID})
 	if err != nil || detail == nil {
 		return ""
 	}

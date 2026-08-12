@@ -48,12 +48,12 @@ analysis_profiles:
   - darwin-arm64
   - e2e
   - integration
-  - issuebackend-e2e
   - linux-amd64
   - linux-arm64
   - playground
   - race
   - testbackend
+  - workitems-e2e
 classification_policy: default-deny
 candidate_receiver_suffixes: [Repository, Store]
 persistence_packages:
@@ -1138,6 +1138,18 @@ function_surfaces:
     function: VersionApproved
     access: read-only
     capability_owner: workflowcatalog
+  - package: github.com/tysonthomas9/loomcli/internal/modules/workitems
+    function: AdapterInternal
+    access: read-only
+    capability_owner: workitems
+  - package: github.com/tysonthomas9/loomcli/internal/modules/workitems
+    function: AdapterUnavailable
+    access: read-only
+    capability_owner: workitems
+  - package: github.com/tysonthomas9/loomcli/internal/modules/workitems
+    function: IsAlreadyClosedConflict
+    access: read-only
+    capability_owner: workitems
   - package: github.com/tysonthomas9/loomcli/internal/modules/workitems
     function: New
     access: read-only

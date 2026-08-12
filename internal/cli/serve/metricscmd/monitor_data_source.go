@@ -17,37 +17,37 @@ const (
 
 // MonitorDataSource resolves monitor data for a request. Workspace-scoped
 // requests use a per-workspace cached collector so adjacent monitor endpoints
-// share one expensive issue-backend collection.
+// share one expensive Work Items collection.
 type MonitorDataSource struct {
 	collectDataFn    CollectDataFn
-	backendFn        IssueBackendFn
+	workItemsFn      WorkItemsFn
 	defaultWorkspace string
 	workspace        *workspaceMonitorDataCache
 }
 
 // NewMonitorDataSource returns a request-aware monitor data source.
-func NewMonitorDataSource(collectDataFn CollectDataFn, backendFn IssueBackendFn) *MonitorDataSource {
-	return NewMonitorDataSourceWithTTL(collectDataFn, backendFn, defaultWorkspaceMonitorCacheTTL)
+func NewMonitorDataSource(collectDataFn CollectDataFn, workItemsFn WorkItemsFn) *MonitorDataSource {
+	return NewMonitorDataSourceWithTTL(collectDataFn, workItemsFn, defaultWorkspaceMonitorCacheTTL)
 }
 
 // NewMonitorDataSourceWithDefaultWorkspace returns a data source that reuses
 // the pre-warmed collector for requests targeting the same default workspace.
-func NewMonitorDataSourceWithDefaultWorkspace(collectDataFn CollectDataFn, backendFn IssueBackendFn, defaultWorkspace string) *MonitorDataSource {
-	ds := NewMonitorDataSourceWithTTL(collectDataFn, backendFn, defaultWorkspaceMonitorCacheTTL)
+func NewMonitorDataSourceWithDefaultWorkspace(collectDataFn CollectDataFn, workItemsFn WorkItemsFn, defaultWorkspace string) *MonitorDataSource {
+	ds := NewMonitorDataSourceWithTTL(collectDataFn, workItemsFn, defaultWorkspaceMonitorCacheTTL)
 	ds.defaultWorkspace = defaultWorkspace
 	return ds
 }
 
 // NewMonitorDataSourceWithTTL returns a request-aware monitor data source with
 // a configurable workspace cache TTL for tests and focused callers.
-func NewMonitorDataSourceWithTTL(collectDataFn CollectDataFn, backendFn IssueBackendFn, ttl time.Duration) *MonitorDataSource {
+func NewMonitorDataSourceWithTTL(collectDataFn CollectDataFn, workItemsFn WorkItemsFn, ttl time.Duration) *MonitorDataSource {
 	if ttl <= 0 {
 		ttl = defaultWorkspaceMonitorCacheTTL
 	}
 	return &MonitorDataSource{
 		collectDataFn: collectDataFn,
-		backendFn:     backendFn,
-		workspace:     newWorkspaceMonitorDataCache(collectDataFn, backendFn, ttl),
+		workItemsFn:   workItemsFn,
+		workspace:     newWorkspaceMonitorDataCache(collectDataFn, workItemsFn, ttl),
 	}
 }
 
@@ -57,7 +57,7 @@ func (s *MonitorDataSource) Resolve(r *http.Request) *monitor.MonitorData {
 		return nil
 	}
 	workspaceHint := r.URL.Query().Get("workspace")
-	if workspaceHint == "" || s.backendFn == nil {
+	if workspaceHint == "" || s.workItemsFn == nil {
 		return s.collectDataFn(r.Context())
 	}
 	if s.defaultWorkspace != "" && workspaceHint == s.defaultWorkspace {
@@ -69,17 +69,17 @@ func (s *MonitorDataSource) Resolve(r *http.Request) *monitor.MonitorData {
 type workspaceMonitorDataCache struct {
 	ttl           time.Duration
 	collectDataFn CollectDataFn
-	backendFn     IssueBackendFn
+	workItemsFn   WorkItemsFn
 
 	mu         sync.Mutex
 	collectors map[string]*cachedCollector
 }
 
-func newWorkspaceMonitorDataCache(collectDataFn CollectDataFn, backendFn IssueBackendFn, ttl time.Duration) *workspaceMonitorDataCache {
+func newWorkspaceMonitorDataCache(collectDataFn CollectDataFn, workItemsFn WorkItemsFn, ttl time.Duration) *workspaceMonitorDataCache {
 	return &workspaceMonitorDataCache{
 		ttl:           ttl,
 		collectDataFn: collectDataFn,
-		backendFn:     backendFn,
+		workItemsFn:   workItemsFn,
 		collectors:    make(map[string]*cachedCollector),
 	}
 }
@@ -106,8 +106,8 @@ func (c *workspaceMonitorDataCache) get(ctx context.Context, workspaceHint strin
 
 func (c *workspaceMonitorDataCache) collectWorkspace(parent context.Context, workspaceHint string) *monitor.MonitorData {
 	ctx := middleware.WithWorkspace(parent, workspaceHint)
-	if be := c.backendFn(ctx); be != nil {
-		return monitor.CollectMonitorDataWithIssueBackend(ctx, be, 10000, "")
+	if items := c.workItemsFn(ctx); items != nil {
+		return monitor.CollectMonitorDataWithWorkItems(ctx, items, 10000, "")
 	}
 	return c.collectDataFn(ctx)
 }

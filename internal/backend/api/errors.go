@@ -6,11 +6,11 @@ import (
 	"net"
 	"strings"
 
-	"github.com/tysonthomas9/loomcli/internal/backend"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 )
 
 // classifyHTTPError maps an HTTP status code and response body to a
-// *backend.BackendError. For 2xx responses with success=false, the error
+// *workitems.OperationError. For 2xx responses with success=false, the error
 // string in the body is matched against known patterns.
 func classifyHTTPError(op string, statusCode int, body apiResponse) error {
 	// 2xx with success=true: no error.
@@ -30,22 +30,22 @@ func classifyHTTPError(op string, statusCode int, body apiResponse) error {
 
 	switch statusCode {
 	case 400:
-		return backend.ErrValidation(op, msg)
+		return workitems.AdapterInvalid(op, msg)
 	case 401, 403:
-		return backend.ErrUnavailable(op, "authentication failed: "+msg, nil)
+		return workitems.AdapterUnavailable(op, "authentication failed: "+msg, nil)
 	case 404:
-		return backend.ErrNotFound(op, msg)
+		return workitems.AdapterNotFound(op, msg)
 	case 409:
-		return backend.ErrConflict(op, msg)
+		return workitems.AdapterConflict(op, msg)
 	case 429:
-		return backend.ErrUnavailable(op, "rate limited: "+msg, nil)
+		return workitems.AdapterUnavailable(op, "rate limited: "+msg, nil)
 	case 503:
-		return backend.ErrUnavailable(op, msg, nil)
+		return workitems.AdapterUnavailable(op, msg, nil)
 	case 504:
-		return backend.ErrTimeout(op, msg, nil)
+		return workitems.AdapterTimeout(op, msg, nil)
 	default:
 		if statusCode >= 400 {
-			return backend.ErrInternal(op, msg, nil)
+			return workitems.AdapterInternal(op, msg, nil)
 		}
 		return nil
 	}
@@ -56,31 +56,31 @@ func classifyErrorString(op, msg string) error {
 	lower := strings.ToLower(msg)
 	switch {
 	case strings.Contains(lower, "not found"):
-		return backend.ErrNotFound(op, msg)
+		return workitems.AdapterNotFound(op, msg)
 	case strings.Contains(lower, "already claimed"):
-		return backend.ErrConflict(op, msg)
+		return workitems.AdapterConflict(op, msg)
 	case strings.Contains(lower, "validation") || strings.Contains(lower, "invalid"):
-		return backend.ErrValidation(op, msg)
+		return workitems.AdapterInvalid(op, msg)
 	default:
-		return backend.ErrInternal(op, msg, nil)
+		return workitems.AdapterInternal(op, msg, nil)
 	}
 }
 
-// classifyTransportError maps Go HTTP transport errors to BackendError.
+// classifyTransportError maps Go HTTP transport errors to Work Items errors.
 func classifyTransportError(op string, err error) error {
 	if err == nil {
 		return nil
 	}
 	if errors.Is(err, context.Canceled) {
-		return backend.ErrCanceled(op, "operation canceled", err)
+		return workitems.AdapterCanceled(op, "operation canceled", err)
 	}
 	if errors.Is(err, context.DeadlineExceeded) {
-		return backend.ErrTimeout(op, "operation timed out", err)
+		return workitems.AdapterTimeout(op, "operation timed out", err)
 	}
 	// Check for network errors (connection refused, DNS, etc.)
 	var netErr *net.OpError
 	if errors.As(err, &netErr) {
-		return backend.ErrUnavailable(op, "server unreachable: "+netErr.Error(), err)
+		return workitems.AdapterUnavailable(op, "server unreachable: "+netErr.Error(), err)
 	}
-	return backend.ErrUnavailable(op, "server communication failed: "+err.Error(), err)
+	return workitems.AdapterUnavailable(op, "server communication failed: "+err.Error(), err)
 }

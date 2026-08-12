@@ -14,7 +14,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/app/webhookingestion"
 	"github.com/tysonthomas9/loomcli/internal/app/workflowbinding"
 	"github.com/tysonthomas9/loomcli/internal/app/workfloweventing"
-	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/modules/agents"
 	"github.com/tysonthomas9/loomcli/internal/modules/artifacts"
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
@@ -108,7 +107,6 @@ type ArtifactsCapability interface {
 // Exact module aliases keep ServerConfig's public field types source
 // compatible while preserving the capability-owned contracts.
 type (
-	IssueBackend                             = backend.IssueBackend
 	DaytonaProviderBroker                    = execution.DaytonaProviderBroker
 	ArtifactQueryAPI                         = artifacts.QueryAPI
 	SourceControlMaterializer                = sourcecontrol.Materializer

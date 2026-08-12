@@ -6,7 +6,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 )
 
@@ -14,10 +13,14 @@ func intPtr(v int) *int       { return &v }
 func boolPtr(v bool) *bool    { return &v }
 func strPtr(v string) *string { return &v }
 
-// --- listOptsToQuery ---
+func listFilterToQuery(filter workitems.ListFilter) string {
+	return listQueryToQuery(workitems.ListQuery{Filter: filter})
+}
+
+// --- listQueryToQuery ---
 
 func TestListOptsToQuery_Empty(t *testing.T) {
-	q := listOptsToQuery(backend.ListOpts{})
+	q := listFilterToQuery(workitems.ListFilter{})
 	if q != "" {
 		t.Errorf("empty opts yielded %q, want empty", q)
 	}
@@ -25,7 +28,7 @@ func TestListOptsToQuery_Empty(t *testing.T) {
 
 func TestListOptsToQuery_CoreFilters(t *testing.T) {
 	p := 2
-	opts := backend.ListOpts{
+	opts := workitems.ListFilter{
 		Status:      "open",
 		Priority:    &p,
 		IssueType:   "task",
@@ -35,7 +38,7 @@ func TestListOptsToQuery_CoreFilters(t *testing.T) {
 		SourceRepos: []string{"repo-a", "repo-b"},
 		Limit:       25,
 	}
-	q := listOptsToQuery(opts)
+	q := listFilterToQuery(opts)
 	values, err := url.ParseQuery(q)
 	if err != nil {
 		t.Fatalf("parse query: %v", err)
@@ -58,7 +61,7 @@ func TestListOptsToQuery_CoreFilters(t *testing.T) {
 }
 
 func TestListOptsToQuery_SearchAndDates(t *testing.T) {
-	opts := backend.ListOpts{
+	opts := workitems.ListFilter{
 		Query:               "hello",
 		TitleContains:       "foo",
 		DescriptionContains: "bar",
@@ -68,7 +71,7 @@ func TestListOptsToQuery_SearchAndDates(t *testing.T) {
 		UpdatedAfter:        "2026-02-01",
 		UpdatedBefore:       "2026-11-30",
 	}
-	q := listOptsToQuery(opts)
+	q := listFilterToQuery(opts)
 	values, _ := url.ParseQuery(q)
 	for k, want := range map[string]string{
 		"q":                    "hello",
@@ -88,14 +91,13 @@ func TestListOptsToQuery_SearchAndDates(t *testing.T) {
 
 func TestListOptsToQuery_AdvancedFilters(t *testing.T) {
 	truePinned := true
-	opts := backend.ListOpts{
+	opts := workitems.ListFilter{
 		EmptyDescription: true,
 		NoAssignee:       true,
 		NoLabels:         true,
 		Pinned:           &truePinned,
-		ExcludeStatus:    []string{"closed", "tombstone"},
 	}
-	q := listOptsToQuery(opts)
+	q := listQueryToQuery(workitems.ListQuery{Filter: opts, ExcludeStatus: []string{"closed", "tombstone"}})
 	values, _ := url.ParseQuery(q)
 	if values.Get("empty_description") != "true" {
 		t.Errorf("empty_description missing")
@@ -115,7 +117,7 @@ func TestListOptsToQuery_AdvancedFilters(t *testing.T) {
 }
 
 func TestListOptsToQuery_NilPointerFieldsOmitted(t *testing.T) {
-	q := listOptsToQuery(backend.ListOpts{Status: "open"})
+	q := listFilterToQuery(workitems.ListFilter{Status: "open"})
 	if strings.Contains(q, "priority") {
 		t.Errorf("nil priority should not appear: %q", q)
 	}
@@ -126,7 +128,7 @@ func TestListOptsToQuery_NilPointerFieldsOmitted(t *testing.T) {
 
 func TestListOptsToQuery_PinnedFalse(t *testing.T) {
 	f := false
-	q := listOptsToQuery(backend.ListOpts{Pinned: &f})
+	q := listFilterToQuery(workitems.ListFilter{Pinned: &f})
 	values, _ := url.ParseQuery(q)
 	if values.Get("pinned") != "false" {
 		t.Errorf("pinned = %q, want false", values.Get("pinned"))
@@ -134,7 +136,7 @@ func TestListOptsToQuery_PinnedFalse(t *testing.T) {
 }
 
 func TestListOptsToQuery_BoolFalseOmitted(t *testing.T) {
-	q := listOptsToQuery(backend.ListOpts{EmptyDescription: false, NoAssignee: false})
+	q := listFilterToQuery(workitems.ListFilter{EmptyDescription: false, NoAssignee: false})
 	if strings.Contains(q, "empty_description") || strings.Contains(q, "no_assignee") {
 		t.Errorf("false bools should be omitted: %q", q)
 	}
@@ -227,16 +229,16 @@ func TestCheckBlockedQuerySupportedFailsClosed(t *testing.T) {
 		{MolType: "work"},
 	}
 	for _, query := range tests {
-		if err := checkBlockedQuerySupported(query); !errors.Is(err, backend.ErrFilterNotSupported) {
+		if err := checkBlockedQuerySupported(query); !errors.Is(err, workitems.ErrFilterNotSupported) {
 			t.Fatalf("query %#v error = %v, want unsupported filter", query, err)
 		}
 	}
 }
 
-// --- updateParamsToPatchRequest ---
+// --- patchCommandToRequest ---
 
 func TestUpdateParamsToPatchRequest_Empty(t *testing.T) {
-	req := updateParamsToPatchRequest(backend.UpdateParams{})
+	req := patchCommandToRequest(workitems.PatchCommand{})
 	if req.Title != nil {
 		t.Errorf("Title should be nil")
 	}
@@ -265,13 +267,13 @@ func TestUpdateParamsToPatchRequest_SetPointers(t *testing.T) {
 	status := "in_progress"
 	agentState := "working"
 	priority := 1
-	params := backend.UpdateParams{
+	params := workitems.PatchCommand{
 		Title:      &title,
 		Status:     &status,
 		AgentState: &agentState,
 		Priority:   &priority,
 	}
-	req := updateParamsToPatchRequest(params)
+	req := patchCommandToRequest(params)
 	if req.Title == nil || *req.Title != title {
 		t.Errorf("Title = %v, want %q", req.Title, title)
 	}
@@ -287,12 +289,12 @@ func TestUpdateParamsToPatchRequest_SetPointers(t *testing.T) {
 }
 
 func TestUpdateParamsToPatchRequest_Labels(t *testing.T) {
-	params := backend.UpdateParams{
+	params := workitems.PatchCommand{
 		AddLabels:    []string{"a", "b"},
 		RemoveLabels: []string{"c"},
 		SetLabels:    []string{"d", "e", "f"},
 	}
-	req := updateParamsToPatchRequest(params)
+	req := patchCommandToRequest(params)
 	if req.AddLabels == nil || len(*req.AddLabels) != 2 {
 		t.Errorf("AddLabels = %v", req.AddLabels)
 	}
@@ -305,7 +307,7 @@ func TestUpdateParamsToPatchRequest_Labels(t *testing.T) {
 }
 
 func TestUpdateParamsToPatchRequest_EmptyLabelSlicesOmitted(t *testing.T) {
-	req := updateParamsToPatchRequest(backend.UpdateParams{
+	req := patchCommandToRequest(workitems.PatchCommand{
 		AddLabels:    []string{},
 		RemoveLabels: nil,
 		SetLabels:    []string{},
@@ -324,11 +326,11 @@ func TestUpdateParamsToPatchRequest_EmptyLabelSlicesOmitted(t *testing.T) {
 func TestUpdateParamsToPatchRequest_PlainFields(t *testing.T) {
 	desc := "desc"
 	assignee := "alice"
-	params := backend.UpdateParams{
+	params := workitems.PatchCommand{
 		Description: &desc,
 		Assignee:    &assignee,
 	}
-	req := updateParamsToPatchRequest(params)
+	req := patchCommandToRequest(params)
 	if req.Description == nil || *req.Description != desc {
 		t.Errorf("Description = %v", req.Description)
 	}
@@ -337,11 +339,11 @@ func TestUpdateParamsToPatchRequest_PlainFields(t *testing.T) {
 	}
 }
 
-// --- createParamsToCreateRequest ---
+// --- createCommandToRequest ---
 
 func TestCreateParamsToCreateRequest_AllFields(t *testing.T) {
 	est := 30
-	params := backend.CreateParams{
+	params := workitems.CreateCommand{
 		ID:                 "loom-123",
 		Parent:             "epic-1",
 		Title:              "Do the thing",
@@ -363,7 +365,7 @@ func TestCreateParamsToCreateRequest_AllFields(t *testing.T) {
 		DueAt:              "2026-06-01",
 		DeferUntil:         "2026-05-01",
 	}
-	req := createParamsToCreateRequest(params)
+	req := createCommandToRequest(params)
 	if req.Title != "Do the thing" {
 		t.Errorf("Title = %q", req.Title)
 	}
@@ -427,12 +429,12 @@ func TestCreateParamsToCreateRequest_AllFields(t *testing.T) {
 }
 
 func TestCreateParamsToCreateRequest_MinimalFields(t *testing.T) {
-	params := backend.CreateParams{
+	params := workitems.CreateCommand{
 		Title:     "Minimal",
 		IssueType: "bug",
 		Priority:  0,
 	}
-	req := createParamsToCreateRequest(params)
+	req := createCommandToRequest(params)
 	if req.Title != "Minimal" {
 		t.Errorf("Title = %q", req.Title)
 	}

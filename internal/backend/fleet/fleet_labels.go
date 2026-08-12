@@ -7,10 +7,10 @@ import (
 	"context"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/backend"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 )
 
-func (b *FleetBackend) applyLabelUpdates(ctx context.Context, id string, params backend.UpdateParams) error {
+func (b *FleetBackend) applyLabelUpdates(ctx context.Context, id string, params workitems.PatchCommand) error {
 	for _, label := range params.AddLabels {
 		if err := b.addLabel(ctx, id, label); err != nil {
 			return err
@@ -30,7 +30,7 @@ func (b *FleetBackend) applyLabelUpdates(ctx context.Context, id string, params 
 	if len(params.SetLabels) == 0 {
 		return nil
 	}
-	current, err := b.Get(ctx, id)
+	current, err := b.Get(ctx, workitems.GetQuery{IssueID: id})
 	if err != nil {
 		return err
 	}
@@ -65,7 +65,7 @@ func (b *FleetBackend) waitForLabelState(ctx context.Context, id, label string, 
 
 	var lastErr error
 	for {
-		detail, err := b.Get(ctx, id)
+		detail, err := b.Get(ctx, workitems.GetQuery{IssueID: id})
 		if err == nil && detail != nil && containsString(detail.Labels, label) == wantPresent {
 			return nil
 		}
@@ -75,15 +75,15 @@ func (b *FleetBackend) waitForLabelState(ctx context.Context, id, label string, 
 
 		select {
 		case <-ctx.Done():
-			return backend.ErrTimeout("Update", "label projection did not settle", ctx.Err())
+			return workitems.AdapterTimeout("Patch", "label projection did not settle", ctx.Err())
 		case <-timeout.C:
-			return backend.ErrTimeout("Update", "label projection did not settle", lastErr)
+			return workitems.AdapterTimeout("Patch", "label projection did not settle", lastErr)
 		case <-ticker.C:
 		}
 	}
 }
 
-func hasLabelUpdate(params backend.UpdateParams) bool {
+func hasLabelUpdate(params workitems.PatchCommand) bool {
 	return len(params.AddLabels) > 0 || len(params.RemoveLabels) > 0 || len(params.SetLabels) > 0
 }
 

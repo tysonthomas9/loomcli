@@ -6,7 +6,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 	"github.com/tysonthomas9/loomcli/internal/store"
@@ -64,9 +63,18 @@ type ActiveTaskRuns struct {
 	TaskRuns     []TaskRunRequestResult `json:"taskRuns,omitempty"`
 }
 
-func LoadEpicSnapshot(ctx context.Context, issueBackend backend.IssueBackend, opts EpicSnapshotOptions) (*EpicSnapshot, error) {
-	if issueBackend == nil {
-		return nil, fmt.Errorf("issue backend required: %w", domain.ErrInvalid)
+// EpicWorkItems is the exact Work Items projection needed to assemble an epic
+// snapshot. The driver owns this consumer port; it does not depend on a
+// horizontal repository abstraction.
+type EpicWorkItems interface {
+	List(context.Context, workitems.ListQuery) (*workitems.ListResult, error)
+	Ready(context.Context, workitems.AvailabilityQuery) ([]workitems.IssueSummary, error)
+	Blocked(context.Context, workitems.AvailabilityQuery) ([]workitems.IssueSummary, error)
+}
+
+func LoadEpicSnapshot(ctx context.Context, items EpicWorkItems, opts EpicSnapshotOptions) (*EpicSnapshot, error) {
+	if items == nil {
+		return nil, fmt.Errorf("work items projection required: %w", domain.ErrInvalid)
 	}
 	epicID := strings.TrimSpace(opts.EpicID)
 	if epicID == "" {
@@ -84,20 +92,21 @@ func LoadEpicSnapshot(ctx context.Context, issueBackend backend.IssueBackend, op
 	if openLimit <= 0 {
 		openLimit = defaultEpicSnapshotOpenLimit
 	}
-	ready, err := loadReadyEpicTasks(ctx, issueBackend, epicID, readyLimit)
+	ready, err := items.Ready(ctx, workitems.AvailabilityQuery{ParentID: epicID, Limit: readyLimit})
 	if err != nil {
 		return nil, fmt.Errorf("ready query: %w", err)
 	}
-	blocked, err := loadBlockedEpicTasks(ctx, issueBackend, epicID, blockedLimit)
+	blocked, err := items.Blocked(ctx, workitems.AvailabilityQuery{ParentID: epicID, Limit: blockedLimit})
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("blocked query: %w", err)
 	}
-	children, err := issueBackend.List(ctx, backend.ListOpts{ParentID: epicID, Limit: openLimit})
+	listed, err := items.List(ctx, workitems.ListQuery{Filter: workitems.ListFilter{ParentID: epicID, Limit: openLimit}})
 	if err != nil {
 		return nil, fmt.Errorf("list child work: %w", err)
 	}
-	openChildren := make([]backend.IssueData, 0, len(children))
-	for _, child := range children {
+	openChildren := make([]workitems.IssueSummary, 0, len(listed.Issues))
+	for _, item := range listed.Issues {
+		child := item.IssueSummary
 		if child.Status == "closed" || child.Status == "deferred" {
 			continue
 		}
@@ -108,34 +117,10 @@ func LoadEpicSnapshot(ctx context.Context, issueBackend backend.IssueBackend, op
 		ReadyCount:        len(ready),
 		BlockedCount:      len(blocked),
 		OpenChildrenCount: len(openChildren),
-		Ready:             availabilityTaskSummaries(ready),
-		Blocked:           availabilityTaskSummaries(blocked),
+		Ready:             epicTaskSummaries(ready),
+		Blocked:           epicTaskSummaries(blocked),
 		OpenChildren:      epicTaskSummaries(openChildren),
 	}, nil
-}
-
-func loadReadyEpicTasks(ctx context.Context, issueBackend backend.IssueBackend, epicID string, limit int) ([]workitems.IssueSummary, error) {
-	queries, ok := issueBackend.(workitems.ReadyQueries)
-	if !ok {
-		return nil, fmt.Errorf("ready query unavailable: %w", workitems.ErrUnavailable)
-	}
-	ready, err := queries.Ready(ctx, workitems.AvailabilityQuery{ParentID: epicID, Limit: limit})
-	if err != nil {
-		return nil, fmt.Errorf("ready query: %w", err)
-	}
-	return ready, nil
-}
-
-func loadBlockedEpicTasks(ctx context.Context, issueBackend backend.IssueBackend, epicID string, limit int) ([]workitems.IssueSummary, error) {
-	queries, ok := issueBackend.(workitems.BlockedQueries)
-	if !ok {
-		return nil, fmt.Errorf("blocked query unavailable: %w", workitems.ErrUnavailable)
-	}
-	blocked, err := queries.Blocked(ctx, workitems.AvailabilityQuery{ParentID: epicID, Limit: limit})
-	if err != nil {
-		return nil, fmt.Errorf("blocked query: %w", err)
-	}
-	return blocked, nil
 }
 
 type taskRunListStore interface {
@@ -186,7 +171,7 @@ func ListActiveTaskRuns(ctx context.Context, s taskRunListStore, opts ActiveTask
 	}, nil
 }
 
-func epicTaskSummaries(issues []backend.IssueData) []EpicTaskSummary {
+func epicTaskSummaries(issues []workitems.IssueSummary) []EpicTaskSummary {
 	if len(issues) == 0 {
 		return nil
 	}
@@ -204,19 +189,6 @@ func epicTaskSummaries(issues []backend.IssueData) []EpicTaskSummary {
 			Parent:         issue.Parent,
 			BlockedByCount: issue.BlockedByCount,
 			BlockedBy:      append([]string(nil), issue.BlockedBy...),
-		})
-	}
-	return out
-}
-
-func availabilityTaskSummaries(issues []workitems.IssueSummary) []EpicTaskSummary {
-	out := make([]EpicTaskSummary, 0, len(issues))
-	for _, issue := range issues {
-		out = append(out, EpicTaskSummary{
-			ID: issue.ID, Title: issue.Title, Status: issue.Status, Priority: issue.Priority,
-			IssueType: issue.IssueType, Assignee: issue.Assignee, Labels: append([]string(nil), issue.Labels...),
-			SourceRepo: issue.SourceRepo, Parent: issue.Parent,
-			BlockedByCount: issue.BlockedByCount, BlockedBy: append([]string(nil), issue.BlockedBy...),
 		})
 	}
 	return out

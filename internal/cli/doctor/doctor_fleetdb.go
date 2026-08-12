@@ -9,12 +9,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	cfgpkg "github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/cli/monitor"
 	"github.com/tysonthomas9/loomcli/internal/kv"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 )
 
 // checkOrphanedFleetLocks scans all in_progress issues and warns when the
@@ -23,19 +23,23 @@ import (
 // `loom recover <worktree>` (which releases the fleet-db lock) or wait for
 // the TTL to expire.
 //
-// Report-only. Returns an empty CheckResult (skipped) when no IssueBackend is
+// Report-only. Returns an empty CheckResult (skipped) when Work Items is not
 // configured, when listing fails, or when no in_progress issues exist.
 func checkOrphanedFleetLocks(parent context.Context, deps *cli.Deps) CheckResult {
-	if deps == nil || deps.IssueBackend == nil {
+	if deps == nil || deps.WorkItems == nil {
 		return CheckResult{}
 	}
 
 	ctx, cancel := context.WithTimeout(parent, 3*time.Second)
 	defer cancel()
 
-	issues, err := deps.IssueBackend.List(ctx, backend.ListOpts{Status: "in_progress"})
+	result, err := deps.WorkItems.List(ctx, workitems.ListQuery{Filter: workitems.ListFilter{Status: "in_progress"}})
 	if err != nil {
 		return CheckResult{}
+	}
+	issues := make([]workitems.IssueSummary, 0, len(result.Issues))
+	for _, item := range result.Issues {
+		issues = append(issues, item.IssueSummary)
 	}
 	if len(issues) == 0 {
 		return CheckResult{}
@@ -72,7 +76,7 @@ func activeFleetAgentNames(ctx context.Context) map[string]struct{} {
 	return active
 }
 
-func orphanedFleetLocks(issues []backend.IssueData, active map[string]struct{}) []string {
+func orphanedFleetLocks(issues []workitems.IssueSummary, active map[string]struct{}) []string {
 	orphans := make([]string, 0)
 	for _, issue := range issues {
 		if issue.Assignee == "" {

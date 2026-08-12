@@ -54,19 +54,19 @@ func (p *adaptivePoller) hadNoActivity() {
 	p.currentInterval = newInterval
 }
 
-// fetchReadyIssues returns parsed ready issues via the IssueBackend.
+// fetchReadyIssues returns parsed ready issues via the Work Items capability.
 // When parentID is non-empty, filters to tasks under that epic.
 // When repoLabel is non-empty, filters to tasks labeled repo:<name>.
 //
 // One span per call (`automode.poll.cycle`) — one cycle of the poller, even
 // when the result set is empty. The span ends when this function returns;
-// downstream IssueBackend calls inherit it as parent.
+// downstream Work Items calls inherit it as parent.
 func fetchReadyIssues(parent context.Context, parentID string, repoLabel string) ([]workitems.IssueSummary, error) {
 	cycleStart := time.Now()
 	ctx, span := startPollSpan(parent, parentID, repoLabel)
 	defer span.End()
 
-	ib := cli.DefaultIssueBackend()
+	items := cli.DefaultWorkItems()
 	// Limit 10000: ready queues include open + review + in_progress; a small limit
 	// can push the few truly-workable open tasks past the cutoff, starving
 	// auto-mode planners/implementers. Same pattern as monitor_collect.go.
@@ -77,13 +77,7 @@ func fetchReadyIssues(parent context.Context, parentID string, repoLabel string)
 	if sourceRepos := os.Getenv("LOOM_SOURCE_REPOS"); sourceRepos != "" {
 		opts.SourceRepos = strings.Split(sourceRepos, ",")
 	}
-	ready, ok := ib.(workitems.ReadyQueries)
-	if !ok {
-		err := workitems.ErrUnavailable
-		recordPollErr(span, err)
-		return nil, err
-	}
-	issues, err := ready.Ready(ctx, opts)
+	issues, err := items.Ready(ctx, opts)
 	if err != nil {
 		recordPollErr(span, err)
 		span.SetAttributes(

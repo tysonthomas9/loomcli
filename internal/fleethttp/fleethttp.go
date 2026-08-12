@@ -1,5 +1,5 @@
 // Package fleethttp shares low-level HTTP plumbing between the two
-// fleet-db client callers: internal/backend/fleet (IssueBackend
+// fleet-db client callers: internal/backend/fleet (Work Items adapter
 // implementation) and internal/infra/fleetdb (Store implementation).
 // Both target the same fleet-db API and previously duplicated the
 // request-building, auth-header, and error-extraction code.
@@ -9,9 +9,9 @@
 // extraction.
 //
 // What's not shared: status→sentinel mapping. The two callers map
-// errors to different domains (backend.BackendError vs
-// domain.Err{NotFound,AlreadyExists,Invalid,Conflict}), so the
-// classification stays local.
+// errors to different domains (Work Items operation errors versus
+// domain.Err{NotFound,AlreadyExists,Invalid,Conflict}), so classification
+// stays local.
 package fleethttp
 
 import (

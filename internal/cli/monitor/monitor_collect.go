@@ -7,25 +7,24 @@ import (
 	"sync"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 )
 
 func CollectMonitorData(ctx context.Context, readyLimit int, branch string) *MonitorData {
-	// Copy cli.GetDeps(nil) and override IssueBackend with the global backend
-	// (respects setDefaultIssueBackend used by tests).
+	// Copy cli.GetDeps(nil) and override WorkItems with the process-wide
+	// capability (tests can replace the same explicit dependency).
 	d := *cli.GetDeps(nil)
-	d.IssueBackend = cli.DefaultIssueBackend()
+	d.WorkItems = cli.DefaultWorkItems()
 	return collectMonitorDataDeps(ctx, &d, readyLimit, branch)
 }
 
-func CollectMonitorDataWithIssueBackend(ctx context.Context, issueBackend backend.IssueBackend, readyLimit int, branch string) *MonitorData {
+func CollectMonitorDataWithWorkItems(ctx context.Context, items workitems.API, readyLimit int, branch string) *MonitorData {
 	d := *cli.GetDeps(nil)
-	if issueBackend != nil {
-		d.IssueBackend = issueBackend
+	if items != nil {
+		d.WorkItems = items
 	} else {
-		d.IssueBackend = cli.DefaultIssueBackend()
+		d.WorkItems = cli.DefaultWorkItems()
 	}
 	return collectMonitorDataDeps(ctx, &d, readyLimit, branch)
 }
@@ -79,7 +78,7 @@ func collectMonitorDataDeps(ctx context.Context, deps *cli.Deps, readyLimit int,
 
 func collectAgentStatus(ctx context.Context, agentTasks map[string]TaskInfo, branch string) ([]AgentStatus, map[string][]string) {
 	d := *cli.GetDeps(nil)
-	d.IssueBackend = cli.DefaultIssueBackend()
+	d.WorkItems = cli.DefaultWorkItems()
 	return collectAgentStatusDeps(ctx, &d, agentTasks, branch)
 }
 
@@ -342,14 +341,14 @@ func collectAgentCommits(deps *cli.Deps, wt cli.WorktreeInfo, agentBranch, defau
 
 func collectTaskStatus(ctx context.Context, readyLimit int) (TaskSummary, []TaskInfo, []TaskInfo, []TaskInfo, []TaskInfo, []TaskInfo, []TaskInfo, map[string]TaskInfo) {
 	d := *cli.GetDeps(nil)
-	d.IssueBackend = cli.DefaultIssueBackend()
+	d.WorkItems = cli.DefaultWorkItems()
 	return collectTaskStatusDeps(ctx, &d, readyLimit)
 }
 
 // taskQueryResults holds the raw results from parallel issue queries.
 type taskQueryResults struct {
 	readyIssues, backlogIssues                                []workitems.IssueSummary
-	inProgressIssues, reviewIssues, closedIssues              []backend.IssueData
+	inProgressIssues, reviewIssues, closedIssues              []workitems.IssueSummary
 	readyErr, inProgressErr, reviewErr, backlogErr, closedErr error
 }
 
@@ -381,44 +380,52 @@ func collectTaskStatusDeps(ctx context.Context, deps *cli.Deps, readyLimit int) 
 func runParallelTaskQueries(ctx context.Context, deps *cli.Deps, readyLimit int) taskQueryResults {
 	var qr taskQueryResults
 	var wg sync.WaitGroup
-	ib := deps.IssueBackend
+	items := deps.WorkItems
 
 	wg.Add(5)
 	go func() {
 		defer wg.Done()
-		ready, ok := ib.(workitems.ReadyQueries)
-		if !ok {
-			qr.readyErr = workitems.ErrUnavailable
-			return
-		}
-		qr.readyIssues, qr.readyErr = ready.Ready(ctx, workitems.AvailabilityQuery{Limit: readyLimit})
+		qr.readyIssues, qr.readyErr = items.Ready(ctx, workitems.AvailabilityQuery{Limit: readyLimit})
 	}()
 	// Pass an explicit large limit so the monitor counts and displayed slices
 	// reflect the full queue.
 	go func() {
 		defer wg.Done()
-		qr.inProgressIssues, qr.inProgressErr = ib.List(ctx, backend.ListOpts{Status: "in_progress", Limit: 10000})
+		qr.inProgressIssues, qr.inProgressErr = listIssueSummaries(ctx, items, workitems.ListFilter{Status: "in_progress", Limit: 10000})
 	}()
 	go func() {
 		defer wg.Done()
-		qr.reviewIssues, qr.reviewErr = ib.List(ctx, backend.ListOpts{Status: "review", Limit: 10000})
+		qr.reviewIssues, qr.reviewErr = listIssueSummaries(ctx, items, workitems.ListFilter{Status: "review", Limit: 10000})
 	}()
 	go func() {
 		defer wg.Done()
-		blocked, ok := ib.(workitems.BlockedQueries)
-		if !ok {
-			qr.backlogErr = workitems.ErrUnavailable
-			return
-		}
-		qr.backlogIssues, qr.backlogErr = blocked.Blocked(ctx, workitems.AvailabilityQuery{})
+		qr.backlogIssues, qr.backlogErr = items.Blocked(ctx, workitems.AvailabilityQuery{})
 	}()
 	go func() {
 		defer wg.Done()
-		qr.closedIssues, qr.closedErr = ib.List(ctx, backend.ListOpts{Status: "closed", Limit: 50})
+		qr.closedIssues, qr.closedErr = listIssueSummaries(ctx, items, workitems.ListFilter{Status: "closed", Limit: 50})
 	}()
 	wg.Wait()
 
 	return qr
+}
+
+func listIssueSummaries(ctx context.Context, items workitems.API, filter workitems.ListFilter) ([]workitems.IssueSummary, error) {
+	if items == nil {
+		return nil, workitems.ErrUnavailable
+	}
+	result, err := items.List(ctx, workitems.ListQuery{Filter: filter})
+	if err != nil {
+		return nil, err
+	}
+	if result == nil {
+		return nil, workitems.ErrInvalidPersistedState
+	}
+	issues := make([]workitems.IssueSummary, 0, len(result.Issues))
+	for _, item := range result.Issues {
+		issues = append(issues, item.IssueSummary)
+	}
+	return issues, nil
 }
 
 func processReadyIssues(issues []workitems.IssueSummary, err error, summary *TaskSummary, blockedIDs map[string]bool) ([]TaskInfo, []TaskInfo) {
@@ -458,7 +465,7 @@ func processReadyIssues(issues []workitems.IssueSummary, err error, summary *Tas
 	return needsPlanning, readyToImpl
 }
 
-func processInProgressIssues(issues []backend.IssueData, err error, summary *TaskSummary, agentTasks map[string]TaskInfo) []TaskInfo {
+func processInProgressIssues(issues []workitems.IssueSummary, err error, summary *TaskSummary, agentTasks map[string]TaskInfo) []TaskInfo {
 	if err != nil {
 		return nil
 	}
@@ -474,7 +481,7 @@ func processInProgressIssues(issues []backend.IssueData, err error, summary *Tas
 	return tasks
 }
 
-func processReviewIssues(issues []backend.IssueData, err error, summary *TaskSummary) []TaskInfo {
+func processReviewIssues(issues []workitems.IssueSummary, err error, summary *TaskSummary) []TaskInfo {
 	if err != nil {
 		return nil
 	}
@@ -504,7 +511,7 @@ func processBacklogIssues(issues []workitems.IssueSummary, err error, summary *T
 	return tasks
 }
 
-func processClosedIssues(issues []backend.IssueData, err error) []TaskInfo {
+func processClosedIssues(issues []workitems.IssueSummary, err error) []TaskInfo {
 	if err != nil {
 		return nil
 	}
@@ -561,14 +568,14 @@ func collectSyncStatus(agents []AgentStatus) SyncInfo {
 
 func collectStatistics(ctx context.Context) MonitorStats {
 	d := *cli.GetDeps(nil)
-	d.IssueBackend = cli.DefaultIssueBackend()
+	d.WorkItems = cli.DefaultWorkItems()
 	return collectStatisticsDeps(ctx, &d)
 }
 
 func collectStatisticsDeps(ctx context.Context, deps *cli.Deps) MonitorStats {
 	var stats MonitorStats
 
-	statsQueries, ok := deps.IssueBackend.(workitems.StatsQueries)
+	statsQueries, ok := deps.WorkItems.(workitems.StatsQueries)
 	if !ok {
 		return stats
 	}
@@ -589,7 +596,7 @@ func collectStatisticsDeps(ctx context.Context, deps *cli.Deps) MonitorStats {
 			stats.Remaining = 0
 		}
 
-		review, listErr := deps.IssueBackend.List(ctx, backend.ListOpts{Status: "review", Limit: 10000})
+		review, listErr := listIssueSummaries(ctx, deps.WorkItems, workitems.ListFilter{Status: "review", Limit: 10000})
 		if listErr == nil {
 			stats.Review = len(review)
 		}
@@ -608,12 +615,7 @@ func CollectReadyTasksByPriority(ctx context.Context, readyLimit int) map[int]in
 		counts[i] = 0
 	}
 
-	backend := cli.DefaultIssueBackend()
-	ready, ok := backend.(workitems.ReadyQueries)
-	if !ok {
-		return counts
-	}
-	issues, err := ready.Ready(ctx, workitems.AvailabilityQuery{Limit: readyLimit})
+	issues, err := cli.DefaultWorkItems().Ready(ctx, workitems.AvailabilityQuery{Limit: readyLimit})
 	if err != nil {
 		return counts
 	}

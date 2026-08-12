@@ -7,7 +7,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/tysonthomas9/loomcli/internal/backend"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 )
 
 type createIssueFlags struct {
@@ -66,11 +66,11 @@ real failure, so success is checkable from the exit code alone.`,
 				return err
 			}
 			ctx := cmd.Context()
-			ib, err := getIssueBackend(ctx)
+			itemsAPI, err := getWorkItems(ctx)
 			if err != nil {
 				return err
 			}
-			created, err := ib.Create(ctx, params)
+			created, err := itemsAPI.Create(ctx, params)
 			if err != nil {
 				return err
 			}
@@ -107,12 +107,12 @@ func registerCreateFlags(cmd *cobra.Command, flags *createIssueFlags) {
 	cmd.Flags().BoolVar(&flags.force, "force", false, "Bypass the soft-duplicate guard only; identical duplicates also need --no-idempotency")
 }
 
-func createParamsFromFlags(cmd *cobra.Command, flags createIssueFlags) (backend.CreateParams, error) {
+func createParamsFromFlags(cmd *cobra.Command, flags createIssueFlags) (workitems.CreateCommand, error) {
 	flags.title = strings.TrimSpace(flags.title)
 	if flags.title == "" {
-		return backend.CreateParams{}, fmt.Errorf("--title is required")
+		return workitems.CreateCommand{}, fmt.Errorf("--title is required")
 	}
-	params := backend.CreateParams{
+	params := workitems.CreateCommand{
 		Parent:             flags.parent,
 		Title:              flags.title,
 		Description:        flags.description,

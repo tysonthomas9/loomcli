@@ -7,12 +7,12 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/tysonthomas9/loomcli/internal/backend"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 )
 
-func sampleCreateParams() backend.CreateParams {
+func sampleCreateParams() workitems.CreateCommand {
 	est := 45
-	return backend.CreateParams{
+	return workitems.CreateCommand{
 		Title:       "dup me",
 		Description: "desc",
 		IssueType:   "bug",
@@ -68,7 +68,7 @@ func TestCreate_IdempotencyHeadersAndWireBody(t *testing.T) {
 
 	// Wire bytes == the projection the CLI hashes. Compare via re-marshal of
 	// the request's JSON (BuildJSONRequest may append a newline).
-	wantBytes, err := json.Marshal(params.FleetCreateBody())
+	wantBytes, err := json.Marshal(createCommandToBody(params))
 	if err != nil {
 		t.Fatalf("marshal projection: %v", err)
 	}

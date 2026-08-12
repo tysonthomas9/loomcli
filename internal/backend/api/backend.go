@@ -1,7 +1,5 @@
-// Package api implements backend.IssueBackend as an HTTP REST client against
-// a loom server's workspace-scoped API endpoints. It is the remote-mode
-// counterpart to the local FleetDB backend: when a CLI command is run with
-// --server URL, it dispatches issue operations through this backend.
+// Package api implements the Work Items interface as an HTTP REST adapter
+// against a Loom server's workspace-scoped endpoints.
 //
 // Unlike the fleet backend (which talks to a dedicated fleet coordinator),
 // api.Backend talks to the regular loom server and uses types generated from
@@ -22,7 +20,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/backend/api/gen"
 	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 
@@ -33,8 +30,7 @@ import (
 // pathological responses.
 const maxResponseBody = 50 << 20
 
-// APIBackend implements backend.IssueBackend by forwarding calls to a loom
-// server's REST API. It is safe for concurrent use.
+// APIBackend is safe for concurrent use.
 type APIBackend struct {
 	client      *http.Client
 	baseURL     string // e.g., "http://localhost:8080" (no trailing slash)
@@ -42,7 +38,7 @@ type APIBackend struct {
 }
 
 // Compile-time interface check.
-var _ backend.IssueBackend = (*APIBackend)(nil)
+var _ workitems.API = (*APIBackend)(nil)
 var _ workitems.ReadyQueries = (*APIBackend)(nil)
 var _ workitems.BlockedQueries = (*APIBackend)(nil)
 var _ workitems.SearchQueries = (*APIBackend)(nil)
@@ -177,30 +173,13 @@ func hasData(resp *apiResponse) bool {
 	return resp != nil && resp.Data != nil && string(resp.Data) != "null"
 }
 
-// unmarshalIssueList unmarshals a []gen.Issue response and converts to
-// []backend.IssueData. Used by List.
-func unmarshalIssueList(resp *apiResponse, op string) ([]backend.IssueData, error) {
-	if !hasData(resp) {
-		return []backend.IssueData{}, nil
-	}
-	var issues []gen.Issue
-	if err := json.Unmarshal(resp.Data, &issues); err != nil {
-		return nil, backend.ErrInternal(op, "unmarshal response", err)
-	}
-	result := make([]backend.IssueData, 0, len(issues))
-	for _, i := range issues {
-		result = append(result, issueToData(i))
-	}
-	return result, nil
-}
-
 func unmarshalIssueSummaries(resp *apiResponse, op string) ([]workitems.IssueSummary, error) {
 	if !hasData(resp) {
 		return []workitems.IssueSummary{}, nil
 	}
 	var issues []gen.Issue
 	if err := json.Unmarshal(resp.Data, &issues); err != nil {
-		return nil, backend.ErrInternal(op, "unmarshal response", err)
+		return nil, workitems.AdapterInternal(op, "unmarshal response", err)
 	}
 	result := make([]workitems.IssueSummary, 0, len(issues))
 	for _, issue := range issues {
@@ -211,32 +190,45 @@ func unmarshalIssueSummaries(resp *apiResponse, op string) ([]workitems.IssueSum
 
 // --- Query operations ---
 
-func (b *APIBackend) Get(ctx context.Context, id string) (*backend.IssueDetailData, error) {
+func (b *APIBackend) Get(ctx context.Context, query workitems.GetQuery) (*workitems.IssueDetail, error) {
+	id := query.IssueID
 	resp, err := b.exec(ctx, "Get", http.MethodGet, "/issues/"+url.PathEscape(id), nil)
 	if err != nil {
 		return nil, err
 	}
 	if !hasData(resp) {
-		return nil, backend.ErrNotFound("Get", "issue not found")
+		return nil, workitems.AdapterNotFound("Get", "issue not found")
 	}
 	var issue gen.IssueResponse
 	if err := json.Unmarshal(resp.Data, &issue); err != nil {
-		return nil, backend.ErrInternal("Get", "unmarshal response", err)
+		return nil, workitems.AdapterInternal("Get", "unmarshal response", err)
 	}
-	result := issueResponseToDetailData(issue)
+	result := issueResponseToDetail(issue)
 	return &result, nil
 }
 
-func (b *APIBackend) List(ctx context.Context, opts backend.ListOpts) ([]backend.IssueData, error) {
+func (b *APIBackend) List(ctx context.Context, query workitems.ListQuery) (*workitems.ListResult, error) {
 	path := "/issues"
-	if q := listOptsToQuery(opts); q != "" {
+	if q := listQueryToQuery(query); q != "" {
 		path += "?" + q
 	}
 	resp, err := b.exec(ctx, "List", http.MethodGet, path, nil)
 	if err != nil {
 		return nil, err
 	}
-	return unmarshalIssueList(resp, "List")
+	summaries, err := unmarshalIssueSummaries(resp, "List")
+	if err != nil {
+		return nil, err
+	}
+	items := make([]workitems.ListItem, len(summaries))
+	for index := range summaries {
+		items[index] = workitems.ListItem{IssueSummary: summaries[index]}
+	}
+	return &workitems.ListResult{Issues: items}, nil
+}
+
+func (b *APIBackend) Deferred(context.Context, workitems.AvailabilityQuery) ([]workitems.IssueSummary, error) {
+	return nil, workitems.AdapterNotImplemented("Deferred", "remote Loom API does not expose a standalone deferred projection")
 }
 
 func (b *APIBackend) Ready(ctx context.Context, query workitems.AvailabilityQuery) ([]workitems.IssueSummary, error) {
@@ -268,7 +260,7 @@ func (b *APIBackend) Blocked(ctx context.Context, query workitems.AvailabilityQu
 	}
 	var issues []gen.BlockedIssue
 	if err := json.Unmarshal(resp.Data, &issues); err != nil {
-		return nil, backend.ErrInternal("Blocked", "unmarshal response", err)
+		return nil, workitems.AdapterInternal("Blocked", "unmarshal response", err)
 	}
 	result := make([]workitems.IssueSummary, 0, len(issues))
 	for _, i := range issues {
@@ -286,7 +278,7 @@ func (b *APIBackend) Stats(ctx context.Context) (*workitems.Stats, error) {
 	fullURL := b.baseURL + b.workspaceBasePath() + "/stats"
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fullURL, nil)
 	if err != nil {
-		return nil, backend.ErrInternal("Stats", "create request", err)
+		return nil, workitems.AdapterInternal("Stats", "create request", err)
 	}
 	req.Header.Set("Accept", "application/json")
 	resp, err := b.client.Do(req)
@@ -296,14 +288,14 @@ func (b *APIBackend) Stats(ctx context.Context) (*workitems.Stats, error) {
 	defer resp.Body.Close()
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBody))
 	if err != nil {
-		return nil, backend.ErrInternal("Stats", "read response body", err)
+		return nil, workitems.AdapterInternal("Stats", "read response body", err)
 	}
 	if resp.StatusCode >= 400 {
 		return nil, classifyHTTPError("Stats", resp.StatusCode, apiResponse{Error: string(body)})
 	}
 	var stats gen.Statistics
 	if err := json.Unmarshal(body, &stats); err != nil {
-		return nil, backend.ErrInternal("Stats", "unmarshal response", err)
+		return nil, workitems.AdapterInternal("Stats", "unmarshal response", err)
 	}
 	result := statisticsToStats(stats)
 	return &result, nil
@@ -315,10 +307,10 @@ func (b *APIBackend) Stats(ctx context.Context) (*workitems.Stats, error) {
 // internal/backend/api/params.go addListSearchFilters.
 func (b *APIBackend) Search(ctx context.Context, query workitems.SearchQuery) ([]workitems.IssueSummary, error) {
 	if query.Query == "" {
-		return nil, backend.ErrValidation("Search", "query must not be empty")
+		return nil, workitems.AdapterInvalid("Search", "query must not be empty")
 	}
 	if query.Limit < 0 {
-		return nil, backend.ErrValidation("Search", "limit must not be negative")
+		return nil, workitems.AdapterInvalid("Search", "limit must not be negative")
 	}
 	path := "/issues?q=" + url.QueryEscape(query.Query)
 	if query.Limit > 0 {
@@ -333,7 +325,7 @@ func (b *APIBackend) Search(ctx context.Context, query workitems.SearchQuery) ([
 	}
 	var issues []gen.Issue
 	if err := json.Unmarshal(resp.Data, &issues); err != nil {
-		return nil, backend.ErrInternal("Search", "unmarshal response", err)
+		return nil, workitems.AdapterInternal("Search", "unmarshal response", err)
 	}
 	result := make([]workitems.IssueSummary, 0, len(issues))
 	for _, issue := range issues {
@@ -344,30 +336,29 @@ func (b *APIBackend) Search(ctx context.Context, query workitems.SearchQuery) ([
 
 // --- Mutation operations ---
 
-func (b *APIBackend) Create(ctx context.Context, params backend.CreateParams) (*backend.IssueData, error) {
-	req := createParamsToCreateRequest(params)
+func (b *APIBackend) Create(ctx context.Context, params workitems.CreateCommand) (*workitems.IssueSummary, error) {
+	req := createCommandToRequest(params)
 	resp, err := b.execHeaders(ctx, "Create", http.MethodPost, "/issues", req, params.IdempotencyHeaders())
 	if err != nil {
 		return nil, err
 	}
 	if !hasData(resp) {
-		return nil, backend.ErrInternal("Create", "empty response from server", nil)
+		return nil, workitems.AdapterInternal("Create", "empty response from server", nil)
 	}
 	var issue gen.IssueResponse
 	if err := json.Unmarshal(resp.Data, &issue); err != nil {
-		return nil, backend.ErrInternal("Create", "unmarshal response", err)
+		return nil, workitems.AdapterInternal("Create", "unmarshal response", err)
 	}
-	result := issueResponseToData(issue)
+	result := issueResponseToSummary(issue)
 	return &result, nil
 }
 
-func (b *APIBackend) Update(ctx context.Context, id string, params backend.UpdateParams) error {
-	if params.Claim {
-		return backend.ErrValidation("Update", "Claim field is not supported in APIBackend.Update; use APIBackend.ClaimIssue instead")
+func (b *APIBackend) Patch(ctx context.Context, params workitems.PatchCommand) (*workitems.IssueDetail, error) {
+	req := patchCommandToRequest(params)
+	if _, err := b.exec(ctx, "Patch", http.MethodPatch, "/issues/"+url.PathEscape(params.IssueID), req); err != nil {
+		return nil, err
 	}
-	req := updateParamsToPatchRequest(params)
-	_, err := b.exec(ctx, "Update", http.MethodPatch, "/issues/"+url.PathEscape(id), req)
-	return err
+	return b.Get(ctx, workitems.GetQuery{IssueID: params.IssueID})
 }
 
 // ClaimIssue atomically claims an issue via POST /issues/{id}/claim. A zero
@@ -375,17 +366,20 @@ func (b *APIBackend) Update(ctx context.Context, id string, params backend.Updat
 // second-granular lock_ttl values. Returns KindConflict when the issue is
 // already claimed by a different agent and KindNotFound when it does not
 // exist.
-func (b *APIBackend) ClaimIssue(ctx context.Context, id string, lockTTL time.Duration) error {
+func (b *APIBackend) Claim(ctx context.Context, command workitems.ClaimCommand) (*workitems.IssueDetail, error) {
+	id := command.IssueID
 	if id == "" {
-		return backend.ErrValidation("ClaimIssue", "id must not be empty")
+		return nil, workitems.AdapterInvalid("Claim", "id must not be empty")
 	}
-	body, err := claimIssueBody(lockTTL)
+	body, err := claimIssueBody(0)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	path := "/issues/" + url.PathEscape(id) + "/claim"
-	_, err = b.exec(ctx, "ClaimIssue", http.MethodPost, path, body)
-	return err
+	if _, err = b.exec(ctx, "Claim", http.MethodPost, path, body); err != nil {
+		return nil, err
+	}
+	return b.Get(ctx, workitems.GetQuery{IssueID: id})
 }
 
 // ReleaseIssueLock releases only the operational lock on the issue. The
@@ -393,12 +387,12 @@ func (b *APIBackend) ClaimIssue(ctx context.Context, id string, lockTTL time.Dur
 // release endpoint, so this returns KindNotImplemented and lets callers fall
 // back to TTL expiry. Use the fleet backend for explicit lock release.
 func (b *APIBackend) ReleaseIssueLock(_ context.Context, _, _ string) error {
-	return backend.ErrNotImplemented("ReleaseIssueLock", "APIBackend does not support explicit lock release; rely on TTL expiry")
+	return workitems.AdapterNotImplemented("ReleaseIssueLock", "remote Loom API does not support explicit lock release")
 }
 
 func claimIssueBody(lockTTL time.Duration) (any, error) {
 	if lockTTL < 0 {
-		return nil, backend.ErrValidation("ClaimIssue", "lockTTL must not be negative")
+		return nil, workitems.AdapterInvalid("Claim", "lockTTL must not be negative")
 	}
 	if lockTTL == 0 {
 		return nil, nil
@@ -409,7 +403,8 @@ func claimIssueBody(lockTTL time.Duration) (any, error) {
 	}{LockTTL: seconds}, nil
 }
 
-func (b *APIBackend) Close(ctx context.Context, id string, params backend.CloseParams) (*backend.CloseResult, error) {
+func (b *APIBackend) Close(ctx context.Context, params workitems.CloseCommand) (*workitems.CloseResult, error) {
+	id := params.IssueID
 	req := gen.CloseRequest{}
 	if params.Reason != "" {
 		req.Reason = &params.Reason
@@ -430,16 +425,17 @@ func (b *APIBackend) Close(ctx context.Context, id string, params backend.CloseP
 	// The close endpoint returns an opaque data object; the server does not
 	// expose unblocked issues in the response. Return a minimal CloseResult
 	// with just the closed ID populated so callers see a non-nil result.
-	closed := backend.IssueData{ID: id}
-	return &backend.CloseResult{
+	closed := workitems.IssueSummary{ID: id}
+	return &workitems.CloseResult{
 		Closed:    &closed,
-		Unblocked: []backend.IssueData{},
+		Unblocked: []workitems.IssueSummary{},
 	}, nil
 }
 
-func (b *APIBackend) Reopen(ctx context.Context, id string, params backend.ReopenParams) error {
+func (b *APIBackend) Reopen(ctx context.Context, params workitems.ReopenCommand) error {
+	id := params.IssueID
 	if id == "" {
-		return backend.ErrValidation("Reopen", "id must not be empty")
+		return workitems.AdapterInvalid("Reopen", "id must not be empty")
 	}
 	status := gen.PatchIssueRequestStatus("open")
 	req := gen.PatchIssueRequest{Status: &status}
@@ -447,7 +443,7 @@ func (b *APIBackend) Reopen(ctx context.Context, id string, params backend.Reope
 	if err != nil {
 		return err
 	}
-	// Record reason as a comment per the IssueBackend contract. Best-effort:
+	// Record reason as a comment after the lifecycle transition. Best-effort:
 	// the status transition already succeeded.
 	if params.Reason != "" {
 		_, _ = b.exec(ctx, "Reopen", http.MethodPost, "/issues/"+url.PathEscape(id)+"/comments", gen.CommentRequest{Text: params.Reason})
@@ -455,20 +451,38 @@ func (b *APIBackend) Reopen(ctx context.Context, id string, params backend.Reope
 	return nil
 }
 
-func (b *APIBackend) Delete(ctx context.Context, params backend.DeleteParams) error {
-	if len(params.IDs) == 0 {
-		return backend.ErrValidation("Delete", "IDs must not be empty")
+func (b *APIBackend) Delete(ctx context.Context, params workitems.DeleteCommand) (workitems.DeleteResult, error) {
+	id := params.IssueID
+	if id == "" {
+		return workitems.DeleteResult{}, workitems.AdapterInvalid("Delete", "id must not be empty")
 	}
-	for _, id := range params.IDs {
-		_, err := b.exec(ctx, "Delete", http.MethodDelete, "/issues/"+url.PathEscape(id), nil)
-		if err != nil {
-			if params.Force && backend.IsKind(err, backend.KindNotFound) {
-				continue
-			}
-			return err
-		}
+	if _, err := b.exec(ctx, "Delete", http.MethodDelete, "/issues/"+url.PathEscape(id), nil); err != nil && !workitems.IsKind(err, workitems.KindNotFound) {
+		return workitems.DeleteResult{}, err
 	}
-	return nil
+	return workitems.DeleteResult{DeletedCount: 1, DeletedIDs: []string{id}}, nil
+}
+
+func (b *APIBackend) BlockRepositoryRequired(context.Context, workitems.BlockRepositoryRequiredCommand) (*workitems.RepositoryAdmissionResult, error) {
+	return nil, workitems.AdapterNotImplemented("BlockRepositoryRequired", "remote Loom API does not expose repository-admission repair")
+}
+
+func (b *APIBackend) AssignRepository(ctx context.Context, command workitems.AssignRepositoryCommand) (*workitems.IssueSummary, error) {
+	body := struct {
+		Repo string `json:"repo"`
+	}{Repo: command.Repository}
+	resp, err := b.exec(ctx, "AssignRepository", http.MethodPut, "/issues/"+url.PathEscape(command.IssueID)+"/repository", body)
+	if err != nil {
+		return nil, err
+	}
+	if !hasData(resp) {
+		return nil, workitems.AdapterInternal("AssignRepository", "empty response from server", nil)
+	}
+	var issue gen.IssueResponse
+	if err := json.Unmarshal(resp.Data, &issue); err != nil {
+		return nil, workitems.AdapterInternal("AssignRepository", "unmarshal response", err)
+	}
+	result := issueResponseToSummary(issue)
+	return &result, nil
 }
 
 // --- Dependency operations ---
@@ -490,10 +504,18 @@ func (b *APIBackend) RemoveDependency(ctx context.Context, command workitems.Rem
 	return err
 }
 
+func (b *APIBackend) ListDependencies(ctx context.Context, query workitems.ListDependenciesQuery) ([]workitems.Dependency, error) {
+	detail, err := b.Get(ctx, workitems.GetQuery(query))
+	if err != nil {
+		return nil, err
+	}
+	return append([]workitems.Dependency(nil), detail.Dependencies...), nil
+}
+
 // --- Comment operations ---
 
 func (b *APIBackend) ListComments(ctx context.Context, query workitems.ListCommentsQuery) ([]*workitems.Comment, error) {
-	detail, err := b.Get(ctx, query.IssueID)
+	detail, err := b.Get(ctx, workitems.GetQuery(query))
 	if err != nil {
 		return nil, err
 	}
@@ -502,10 +524,10 @@ func (b *APIBackend) ListComments(ctx context.Context, query workitems.ListComme
 	}
 	result := make([]*workitems.Comment, 0, len(detail.Comments))
 	for _, comment := range detail.Comments {
-		result = append(result, &workitems.Comment{
-			ID: comment.ID, IssueID: comment.IssueID, Author: comment.Author,
-			Text: comment.Text, CreatedAt: comment.CreatedAt,
-		})
+		if comment != nil {
+			copy := *comment
+			result = append(result, &copy)
+		}
 	}
 	return result, nil
 }
@@ -517,11 +539,11 @@ func (b *APIBackend) AddComment(ctx context.Context, command workitems.AddCommen
 		return nil, err
 	}
 	if !hasData(resp) {
-		return nil, backend.ErrInternal("AddComment", "empty response from server", nil)
+		return nil, workitems.AdapterInternal("AddComment", "empty response from server", nil)
 	}
 	var comment gen.Comment
 	if err := json.Unmarshal(resp.Data, &comment); err != nil {
-		return nil, backend.ErrInternal("AddComment", "unmarshal response", err)
+		return nil, workitems.AdapterInternal("AddComment", "unmarshal response", err)
 	}
 	result := commentToWorkItem(comment)
 	// Server may not populate IssueID in the response; ensure we pass it
@@ -548,7 +570,7 @@ func (b *APIBackend) ListEvents(ctx context.Context, query workitems.ListEventsQ
 	}
 	var events []gen.IssueEvent
 	if err := json.Unmarshal(resp.Data, &events); err != nil {
-		return nil, backend.ErrInternal("ListEvents", "unmarshal response", err)
+		return nil, workitems.AdapterInternal("ListEvents", "unmarshal response", err)
 	}
 	result := make([]*workitems.Event, 0, len(events))
 	for _, e := range events {

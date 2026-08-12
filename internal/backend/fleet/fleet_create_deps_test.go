@@ -9,7 +9,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 )
 
@@ -83,7 +82,7 @@ func TestCreate_WithDependencies_ComposesDepsCalls(t *testing.T) {
 	})
 	defer ts.Close()
 
-	result, err := fb.Create(context.Background(), backend.CreateParams{
+	result, err := fb.Create(context.Background(), workitems.CreateCommand{
 		Title:        "Milestone 1",
 		IssueType:    "task",
 		Priority:     2,
@@ -140,7 +139,7 @@ func TestCreate_DependencyAddFails_ErrorNamesCreatedIssue(t *testing.T) {
 	})
 	defer ts.Close()
 
-	result, err := fb.Create(context.Background(), backend.CreateParams{
+	result, err := fb.Create(context.Background(), workitems.CreateCommand{
 		Title:        "Milestone 2",
 		IssueType:    "task",
 		Dependencies: []string{"ghost-9"},
@@ -154,7 +153,7 @@ func TestCreate_DependencyAddFails_ErrorNamesCreatedIssue(t *testing.T) {
 	if !strings.Contains(err.Error(), "ghost-9") {
 		t.Errorf("error %q should name the failed dependency", err)
 	}
-	if !backend.IsKind(err, backend.KindNotFound) {
+	if !workitems.IsKind(err, workitems.KindNotFound) {
 		t.Errorf("error kind = %v, want KindNotFound preserved from the deps call", err)
 	}
 	if result == nil || result.ID != "new-2" {

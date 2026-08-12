@@ -8,7 +8,6 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 	"github.com/tysonthomas9/loomcli/internal/webui/coordinator"
 )
@@ -46,14 +45,18 @@ func TestFleetBackendHook_OnRegister_CreatesBackend(t *testing.T) {
 	if !ok {
 		t.Fatal("expected ResourceKeyFleetBackend to be provided after OnRegister")
 	}
-	be, ok := res.(backend.IssueBackend)
+	be, ok := res.(workitems.API)
 	if !ok {
-		t.Fatal("expected resource to implement backend.IssueBackend")
+		t.Fatal("expected resource to implement workitems.API")
 	}
 	if be == nil {
 		t.Fatal("expected non-nil backend")
 	}
-	if got := be.BackendName(); got != "fleet" {
+	named, ok := be.(interface{ BackendName() string })
+	if !ok {
+		t.Fatal("fleet adapter does not expose its diagnostic name")
+	}
+	if got := named.BackendName(); got != "fleet" {
 		t.Errorf("BackendName() = %q, want %q", got, "fleet")
 	}
 }
@@ -80,7 +83,7 @@ func TestFleetBackendHook_OnRegisterScopesBackendToRegisteredWorkspace(t *testin
 	if !ok {
 		t.Fatal("expected fleet backend resource")
 	}
-	be := res.(backend.IssueBackend)
+	be := res.(workitems.API)
 	ready, ok := be.(workitems.ReadyQueries)
 	if !ok {
 		t.Fatal("expected Work Items ready queries")
@@ -209,9 +212,9 @@ func TestFleetBackendHook_MultipleWorkspaces(t *testing.T) {
 			t.Errorf("expected resource for %q", ws.id)
 			continue
 		}
-		be, ok := res.(backend.IssueBackend)
+		be, ok := res.(workitems.API)
 		if !ok || be == nil {
-			t.Errorf("expected non-nil backend.IssueBackend for %q", ws.id)
+			t.Errorf("expected non-nil workitems.API for %q", ws.id)
 		}
 	}
 

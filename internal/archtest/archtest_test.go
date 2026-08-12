@@ -1291,7 +1291,7 @@ func TestRetiredBackendMutationPlaneCannotReturn(t *testing.T) {
 	}
 }
 
-func TestUnusedIssueBackendCompatibilityOperationsCannotReturn(t *testing.T) {
+func TestRetiredWorkItemsCompatibilityOperationsCannotReturn(t *testing.T) {
 	root, err := filepath.Abs(filepath.Join("..", ".."))
 	if err != nil {
 		t.Fatal(err)
@@ -1341,6 +1341,46 @@ func TestUnusedIssueBackendCompatibilityOperationsCannotReturn(t *testing.T) {
 				}
 				return true
 			})
+		}
+	}
+}
+
+func TestRootBackendFacadeCannotReturn(t *testing.T) {
+	root, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	files, err := filepath.Glob(filepath.Join(root, "internal", "backend", "*.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) != 0 {
+		t.Fatalf("retired root backend facade returned: %v", files)
+	}
+
+	retiredImport := strings.Join([]string{
+		"github.com/tysonthomas9/loomcli/internal/",
+		"backend\"",
+	}, "")
+	for _, sourceRoot := range []string{"cmd", "internal"} {
+		err = filepath.Walk(filepath.Join(root, sourceRoot), func(path string, info os.FileInfo, walkErr error) error {
+			if walkErr != nil {
+				return walkErr
+			}
+			if info.IsDir() || filepath.Ext(path) != ".go" {
+				return nil
+			}
+			content, readErr := os.ReadFile(path)
+			if readErr != nil {
+				return readErr
+			}
+			if strings.Contains(string(content), retiredImport) {
+				t.Errorf("retired root backend import returned in %s", path)
+			}
+			return nil
+		})
+		if err != nil {
+			t.Fatal(err)
 		}
 	}
 }

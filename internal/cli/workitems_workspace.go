@@ -6,39 +6,39 @@ import (
 	"os"
 	"sync"
 
-	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/backend/fleet"
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
 
-// WorkspaceAwareIssueBackend returns an IssueBackend factory that picks a
+// WorkspaceAwareWorkItems returns a Work Items provider that picks a
 // backend based on the workspace ID carried on ctx. In cloud mode
 // (LOOM_FLEET_DB_URL set) it builds (and caches) a fleet-db backend per
 // workspace so /api/workspaces/{ws}/... handlers see workspace-scoped data
 // instead of the process-global default backend. Falls back to
-// DefaultIssueBackend when ctx has no workspace or the env var is unset.
-func WorkspaceAwareIssueBackend() func(ctx context.Context) backend.IssueBackend {
-	return WorkspaceAwareIssueBackendForURL(os.Getenv(bootstrap.EnvFleetDBURL), os.Getenv(bootstrap.EnvFleetDBActor))
+// DefaultWorkItems when ctx has no workspace or the env var is unset.
+func WorkspaceAwareWorkItems() func(ctx context.Context) workitems.API {
+	return WorkspaceAwareWorkItemsForURL(os.Getenv(bootstrap.EnvFleetDBURL), os.Getenv(bootstrap.EnvFleetDBActor))
 }
 
-// WorkspaceAwareIssueBackendForURL returns an IssueBackend factory scoped to a
+// WorkspaceAwareWorkItemsForURL returns a Work Items provider scoped to a
 // concrete fleet-db base URL. Serve uses this for embedded local mode, where
 // fleet-db is running but LOOM_FLEET_DB_URL intentionally remains unset.
-func WorkspaceAwareIssueBackendForURL(fleetURL, actor string) func(ctx context.Context) backend.IssueBackend {
-	return WorkspaceAwareIssueBackendForConfig(fleetURL, os.Getenv(bootstrap.EnvFleetDBAPIKey), actor)
+func WorkspaceAwareWorkItemsForURL(fleetURL, actor string) func(ctx context.Context) workitems.API {
+	return WorkspaceAwareWorkItemsForConfig(fleetURL, os.Getenv(bootstrap.EnvFleetDBAPIKey), actor)
 }
 
-// WorkspaceAwareIssueBackendForConfig returns an IssueBackend factory scoped
+// WorkspaceAwareWorkItemsForConfig returns a Work Items provider scoped
 // to a concrete FleetDB connection. The API key is captured in process memory;
 // it is never copied into environment state or emitted to logs. Serve uses this
 // path for embedded local mode because its service credential is intentionally
 // absent from the parent process environment.
-func WorkspaceAwareIssueBackendForConfig(fleetURL, apiKey, actor string) func(ctx context.Context) backend.IssueBackend {
+func WorkspaceAwareWorkItemsForConfig(fleetURL, apiKey, actor string) func(ctx context.Context) workitems.API {
 	if fleetURL == "" {
 		// Local mode: ctx-aware factory degenerates to the global backend.
-		return func(_ context.Context) backend.IssueBackend {
-			return DefaultIssueBackend()
+		return func(_ context.Context) workitems.API {
+			return DefaultWorkItems()
 		}
 	}
 
@@ -50,12 +50,12 @@ func WorkspaceAwareIssueBackendForConfig(fleetURL, apiKey, actor string) func(ct
 	}
 	var (
 		mu    sync.Mutex
-		cache = make(map[string]backend.IssueBackend)
+		cache = make(map[string]workitems.API)
 	)
-	return func(ctx context.Context) backend.IssueBackend {
+	return func(ctx context.Context) workitems.API {
 		wsID := middleware.WorkspaceFromContext(ctx)
 		if wsID == "" {
-			return DefaultIssueBackend()
+			return DefaultWorkItems()
 		}
 
 		mu.Lock()
@@ -71,9 +71,13 @@ func WorkspaceAwareIssueBackendForConfig(fleetURL, apiKey, actor string) func(ct
 		})
 		if err != nil {
 			slog.Error("workspace fleet backend construction failed", "ws", wsID, "err", err)
-			return newUnavailableIssueBackend(IssueBackendFleetDB, err)
+			return newUnavailableWorkItems(WorkItemsAdapterFleetDB, err)
 		}
-		cache[wsID] = fb
-		return fb
+		api, err := workitems.New(fb)
+		if err != nil {
+			return newUnavailableWorkItems(WorkItemsAdapterFleetDB, err)
+		}
+		cache[wsID] = api
+		return api
 	}
 }

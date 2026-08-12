@@ -75,7 +75,7 @@ func TestFleetIssueWireProjectsDirectlyToBackend(t *testing.T) {
 		DependentCount:  1,
 	}
 
-	got := wire.toIssueData()
+	got := wire.toIssueSummary()
 	if got.ID != "PARITY-1" || got.IssueType != "bug" || got.SourceRepo != "repo" || got.Parent != "EPIC-1" {
 		t.Fatalf("identity projection = %#v", got)
 	}
@@ -89,18 +89,18 @@ func TestFleetIssueWireProjectsDirectlyToBackend(t *testing.T) {
 		t.Fatalf("schedule projection = %#v", got)
 	}
 
-	detail := wire.fleetIssueWire.toIssueDetailData()
+	detail := wire.fleetIssueWire.toIssueDetail()
 	if detail.Description != "desc" || detail.Dependencies == nil || detail.Dependents == nil || detail.Comments == nil {
 		t.Fatalf("detail projection = %#v", detail)
 	}
 }
 
 func TestFleetIssueWireNormalizesCollectionsAndAliases(t *testing.T) {
-	got := (fleetIssueWire{Repo: "org/repo"}).toIssueData()
+	got := (fleetIssueWire{Repo: "org/repo"}).toIssueSummary()
 	if got.SourceRepo != "org/repo" || got.Labels == nil {
 		t.Fatalf("normalized issue = %#v", got)
 	}
-	if fallback := (fleetIssueWire{SourceRepo: "fallback"}).toIssueData(); fallback.SourceRepo != "fallback" {
+	if fallback := (fleetIssueWire{SourceRepo: "fallback"}).toIssueSummary(); fallback.SourceRepo != "fallback" {
 		t.Fatalf("source repo fallback = %#v", fallback)
 	}
 }
@@ -110,7 +110,7 @@ func TestFleetIssueWireArtifactDesignReference(t *testing.T) {
 	if err := json.Unmarshal([]byte(`{"id":"FLEET-1","title":"Artifact design","type":"task","has_design":true,"design_artifact_id":"design-fleet-1-hash","design_format":"html"}`), &wire); err != nil {
 		t.Fatal(err)
 	}
-	got := wire.toIssueData()
+	got := wire.toIssueSummary()
 	if got.Design != "" || !got.HasDesign || got.DesignArtifactID != "design-fleet-1-hash" || got.DesignFormat != "html" {
 		t.Fatalf("artifact design projection = %#v", got)
 	}
@@ -123,14 +123,6 @@ func TestCountIssuesResponse_ZeroValueGroups(t *testing.T) {
 	}
 	if response.Total != 5 || response.Groups["open"] != 3 || response.Groups["in_progress"] != 0 {
 		t.Fatalf("count response = %#v", response)
-	}
-}
-
-func TestWorkItemProjectionHelpers(t *testing.T) {
-	now := time.Now().UTC().Truncate(time.Second)
-	comments := commentsToData([]*workitems.Comment{{ID: 42, IssueID: "TASK-1", Author: "user", Text: "hello", CreatedAt: now}})
-	if len(comments) != 1 || comments[0].ID != 42 || comments[0].Text != "hello" {
-		t.Fatalf("comment projections = %#v", comments)
 	}
 }
 
@@ -153,14 +145,14 @@ func TestReadyAndBlockedIssueProjections(t *testing.T) {
 }
 
 func TestCloseResultProjectsFleetWire(t *testing.T) {
-	result := closeResultJSONToData(&closeResultJSON{
+	result := closeResultJSONToResult(&closeResultJSON{
 		Closed:    &fleetIssueWire{ID: "TASK-1", Status: string(workitems.StatusClosed)},
 		Unblocked: []*fleetIssueWire{{ID: "TASK-2", Status: string(workitems.StatusOpen)}},
 	})
 	if result.Closed == nil || result.Closed.ID != "TASK-1" || len(result.Unblocked) != 1 || result.Unblocked[0].ID != "TASK-2" {
 		t.Fatalf("close result = %#v", result)
 	}
-	empty := closeResultJSONToData(&closeResultJSON{})
+	empty := closeResultJSONToResult(&closeResultJSON{})
 	if empty.Closed != nil || empty.Unblocked == nil {
 		t.Fatalf("empty close result = %#v", empty)
 	}

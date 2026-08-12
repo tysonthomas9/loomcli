@@ -8,7 +8,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 )
 
@@ -188,7 +187,7 @@ func TestReleaseClaim_PropagatesServerError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error from /release-lock 409, got nil")
 	}
-	if !backend.IsKind(err, backend.KindConflict) {
+	if !workitems.IsKind(err, workitems.KindConflict) {
 		t.Errorf("expected KindConflict, got %v", err)
 	}
 }
@@ -201,7 +200,7 @@ func TestReleaseClaim_EmptyIDValidationError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for empty ID")
 	}
-	if !backend.IsKind(err, backend.KindValidation) {
+	if !workitems.IsKind(err, workitems.KindValidation) {
 		t.Fatalf("expected KindValidation, got %v", err)
 	}
 }
@@ -268,9 +267,10 @@ func TestUpdate_ReviewOrBlockedFromInProgress_ReleasesClaim(t *testing.T) {
 
 			status := target
 			empty := ""
-			if err := fb.Update(context.Background(), "test-1",
-				backend.UpdateParams{Status: &status, Assignee: &empty}); err != nil {
-				t.Fatalf("Update: %v", err)
+			if err := fb.Patch(context.Background(), workitems.PatchCommand{
+				IssueID: "test-1", Status: &status, Assignee: &empty,
+			}); err != nil {
+				t.Fatalf("Patch: %v", err)
 			}
 			if !sawReleaseLock {
 				t.Error("expected /release-lock to be called to drop the claim lock")
@@ -326,9 +326,10 @@ func TestUpdate_ReviewFromInProgress_NoAssigneeChange_PreservesAssignee(t *testi
 	defer ts.Close()
 
 	status := "review"
-	if err := fb.Update(context.Background(), "test-1",
-		backend.UpdateParams{Status: &status}); err != nil {
-		t.Fatalf("Update: %v", err)
+	if err := fb.Patch(context.Background(), workitems.PatchCommand{
+		IssueID: "test-1", Status: &status,
+	}); err != nil {
+		t.Fatalf("Patch: %v", err)
 	}
 	if !sawReleaseLock {
 		t.Error("expected /release-lock to drop the claim lock")
@@ -374,7 +375,7 @@ func TestUpdate_ReviewFromOpen_NoRelease(t *testing.T) {
 	defer ts.Close()
 
 	status := "review"
-	if err := fb.Update(context.Background(), "test-1", backend.UpdateParams{Status: &status}); err != nil {
+	if err := fb.Patch(context.Background(), workitems.PatchCommand{IssueID: "test-1", Status: &status}); err != nil {
 		t.Fatalf("Update: %v", err)
 	}
 	if sawReleaseLock {
@@ -460,7 +461,7 @@ func TestUpdate_QuarantineShape_OpenToBlockedWithLabelAndUnassign(t *testing.T) 
 
 	blocked := "blocked"
 	empty := ""
-	if err := fb.Update(context.Background(), "test-q1", backend.UpdateParams{
+	if err := fb.Patch(context.Background(), workitems.PatchCommand{IssueID: "test-q1",
 		Status:    &blocked,
 		Assignee:  &empty,
 		AddLabels: []string{"loom:quarantined"},

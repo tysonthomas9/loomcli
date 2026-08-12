@@ -159,7 +159,7 @@ func HandleAuthConfig(extAuthURL string, limiter *AuthConfigLimiter, backendName
 		// reflect in the response. Most of the time this is a simple pointer
 		// load and never-nil — cost is negligible vs the rate limiter above.
 		resp := baseResp
-		resp.IssueBackend = resolveIssueBackendLabel(r.Context(), backendNameFn)
+		resp.IssueBackend = resolveWorkItemsAdapterLabel(r.Context(), backendNameFn)
 
 		// SECURITY: no-store prevents caching that could enable downgrade attacks.
 		// An attacker who poisons a cached response with mode:"open" would bypass
@@ -169,11 +169,11 @@ func HandleAuthConfig(extAuthURL string, limiter *AuthConfigLimiter, backendName
 	}
 }
 
-// resolveIssueBackendLabel returns the normalized issue backend family name
+// resolveWorkItemsAdapterLabel returns the normalized Work Items adapter family name
 // ("fleet", "fleetdb", "api", "agent-ipc") for /api/config. The
 // normalization collapses backend-specific suffixes (e.g. "fleet-db" ->
 // "fleet") so the frontend can switch on a small set of stable labels.
-func resolveIssueBackendLabel(ctx context.Context, backendNameFn BackendNameFn) string {
+func resolveWorkItemsAdapterLabel(ctx context.Context, backendNameFn BackendNameFn) string {
 	if backendNameFn != nil {
 		if name := backendNameFn(ctx); name != "" {
 			return normalizeBackendName(name)

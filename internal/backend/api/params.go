@@ -6,7 +6,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/backend/api/gen"
 	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 )
@@ -35,22 +34,22 @@ func checkBlockedQuerySupported(query workitems.AvailabilityQuery) error {
 		return nil
 	}
 	return fmt.Errorf("loom API: unsupported blocked filters [%s]: %w",
-		strings.Join(unsupported, ", "), backend.ErrFilterNotSupported)
+		strings.Join(unsupported, ", "), workitems.ErrFilterNotSupported)
 }
 
-// listOptsToQuery builds the query string for GET /issues from ListOpts.
-// Only filters supported by the loom server are sent; unsupported fields
-// are silently dropped.
-func listOptsToQuery(opts backend.ListOpts) string {
+// listQueryToQuery builds the canonical query string for GET /issues.
+func listQueryToQuery(query workitems.ListQuery) string {
 	q := url.Values{}
+	opts := query.Filter
 	addListCoreFilters(q, opts)
 	addListSearchFilters(q, opts)
 	addListDateFilters(q, opts)
 	addListAdvancedFilters(q, opts)
+	joinCSV(q, "exclude_status", query.ExcludeStatus)
 	return q.Encode()
 }
 
-func addListCoreFilters(q url.Values, opts backend.ListOpts) {
+func addListCoreFilters(q url.Values, opts workitems.ListFilter) {
 	setNonEmpty(q, "status", opts.Status)
 	setOptInt(q, "priority", opts.Priority)
 	setNonEmpty(q, "type", opts.IssueType)
@@ -63,26 +62,25 @@ func addListCoreFilters(q url.Values, opts backend.ListOpts) {
 	}
 }
 
-func addListSearchFilters(q url.Values, opts backend.ListOpts) {
+func addListSearchFilters(q url.Values, opts workitems.ListFilter) {
 	setNonEmpty(q, "q", opts.Query)
 	setNonEmpty(q, "title_contains", opts.TitleContains)
 	setNonEmpty(q, "description_contains", opts.DescriptionContains)
 	setNonEmpty(q, "notes_contains", opts.NotesContains)
 }
 
-func addListDateFilters(q url.Values, opts backend.ListOpts) {
+func addListDateFilters(q url.Values, opts workitems.ListFilter) {
 	setNonEmpty(q, "created_after", opts.CreatedAfter)
 	setNonEmpty(q, "created_before", opts.CreatedBefore)
 	setNonEmpty(q, "updated_after", opts.UpdatedAfter)
 	setNonEmpty(q, "updated_before", opts.UpdatedBefore)
 }
 
-func addListAdvancedFilters(q url.Values, opts backend.ListOpts) {
+func addListAdvancedFilters(q url.Values, opts workitems.ListFilter) {
 	setBoolIfTrue(q, "empty_description", opts.EmptyDescription)
 	setBoolIfTrue(q, "no_assignee", opts.NoAssignee)
 	setBoolIfTrue(q, "no_labels", opts.NoLabels)
 	setOptBool(q, "pinned", opts.Pinned)
-	joinCSV(q, "exclude_status", opts.ExcludeStatus)
 }
 
 // readyQueryToQuery builds the query string for GET /ready.
@@ -118,11 +116,11 @@ func blockedQueryToQuery(opts workitems.AvailabilityQuery) string {
 	return q.Encode()
 }
 
-// updateParamsToPatchRequest converts backend.UpdateParams to a generated
+// patchCommandToRequest converts a Work Items command to a generated
 // PatchIssueRequest, using pointer semantics to distinguish "set" from
 // "leave alone". The Claim field is rejected at the caller level since the
 // server does not yet expose a per-issue claim field (see task loomcli-j7qcq).
-func updateParamsToPatchRequest(params backend.UpdateParams) gen.PatchIssueRequest {
+func patchCommandToRequest(params workitems.PatchCommand) gen.PatchIssueRequest {
 	req := gen.PatchIssueRequest{
 		Title:              params.Title,
 		Description:        params.Description,
@@ -163,9 +161,9 @@ func updateParamsToPatchRequest(params backend.UpdateParams) gen.PatchIssueReque
 	return req
 }
 
-// createParamsToCreateRequest converts backend.CreateParams to a generated
+// createCommandToRequest converts a Work Items command to a generated
 // CreateIssueRequest.
-func createParamsToCreateRequest(params backend.CreateParams) gen.CreateIssueRequest {
+func createCommandToRequest(params workitems.CreateCommand) gen.CreateIssueRequest {
 	req := gen.CreateIssueRequest{
 		Title:     params.Title,
 		IssueType: gen.CreateIssueRequestIssueType(params.IssueType),
@@ -189,7 +187,7 @@ func createParamsToCreateRequest(params backend.CreateParams) gen.CreateIssueReq
 // setCreateStringFields copies the optional string-typed fields from
 // CreateParams into the generated CreateIssueRequest. Extracted from
 // createParamsToCreateRequest to keep funlen happy.
-func setCreateStringFields(req *gen.CreateIssueRequest, params backend.CreateParams) {
+func setCreateStringFields(req *gen.CreateIssueRequest, params workitems.CreateCommand) {
 	if params.ID != "" {
 		req.Id = &params.ID
 	}

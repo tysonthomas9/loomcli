@@ -12,6 +12,7 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	"github.com/tysonthomas9/loomcli/internal/app/workitemmove"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 	"github.com/tysonthomas9/loomcli/internal/webui"
 	"github.com/tysonthomas9/loomcli/internal/webui/agentcoord"
 	"github.com/tysonthomas9/loomcli/internal/webui/filecoord"
@@ -74,7 +75,7 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 
 	// Log configuration
 	logger.Info("starting web UI server", "port", config.Port, "bind_address", config.BindAddress)
-	logger.Info("workflow catalog issue backend enabled")
+	logger.Info("workflow catalog Work Items adapter enabled")
 	if app.corsConfig.Enabled {
 		logger.Info("CORS enabled", "origins", app.corsConfig.AllowedOrigins)
 	}
@@ -110,10 +111,7 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 
 	app.initialWorkspaceID = config.InitialWorkspaceID
 
-	app.workItems, err = NewWorkItems(config.IssueBackendFn)
-	if err != nil {
-		return nil, fmt.Errorf("compose Work Items capability: %w", err)
-	}
+	app.workItems = workitems.Route(config.WorkItemsFn)
 	if config.Store != nil {
 		app.workspaceStore = config.Store.Workspaces()
 		app.workspaceCatalog = config.WorkspaceCatalog
@@ -376,7 +374,7 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 
 	// Initialize diff service layer (requires ops.GitOps)
 	if config.GitOps != nil {
-		app.diffSvc = sourcecontrolcoord.NewDiffService(config.GitOps, config.IssueBackendFn, middleware.WithWorkspace)
+		app.diffSvc = sourcecontrolcoord.NewDiffService(config.GitOps, config.WorkItemsFn, middleware.WithWorkspace)
 	}
 
 	// Initialize file service layer (requires ops.FileOps)

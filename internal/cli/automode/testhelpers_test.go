@@ -31,15 +31,14 @@ const (
 )
 
 var (
-	AcquireLock         = cli.AcquireLock
-	ReleaseLock         = cli.ReleaseLock
-	UpdateLockTask      = cli.UpdateLockTask
-	ClearLockTaskID     = cli.ClearLockTaskID
-	ReadLockFile        = cli.ReadLockFile
-	GetSignalFilePath   = cli.GetSignalFilePath
-	HasUnclosedBlockers = cli.HasUnclosedBlockers
-	RegisterBackend     = cli.RegisterBackend
-	SetBackend          = cli.SetBackend
+	AcquireLock       = cli.AcquireLock
+	ReleaseLock       = cli.ReleaseLock
+	UpdateLockTask    = cli.UpdateLockTask
+	ClearLockTaskID   = cli.ClearLockTaskID
+	ReadLockFile      = cli.ReadLockFile
+	GetSignalFilePath = cli.GetSignalFilePath
+	RegisterBackend   = cli.RegisterBackend
+	SetBackend        = cli.SetBackend
 )
 
 func generateTestPlanPrompt(agentName string) string {
@@ -50,10 +49,10 @@ func generateTestTaskPrompt(agentName string) string {
 	return "test-task-prompt-for-" + agentName
 }
 
-func NewMockIssueBackend() *clitest.MockIssueBackend { return clitest.NewMockIssueBackend() }
+func NewMockWorkItems() *clitest.MockWorkItems { return clitest.NewMockWorkItems() }
 
-var resetDefaultIssueBackend = cli.ResetDefaultIssueBackend
-var setDefaultIssueBackend = cli.SetDefaultIssueBackend
+var resetDefaultWorkItems = cli.ResetDefaultWorkItems
+var setDefaultWorkItems = cli.SetDefaultWorkItems
 
 func resetBackendState(t *testing.T) {
 	t.Helper()
@@ -64,31 +63,31 @@ func installExecMock(t *testing.T, m *clitest.MockExecRunner) {
 	t.Helper()
 	dd := cli.TestingGetDefaultDeps()
 	orig := dd.Exec
-	origIssueBackend := dd.IssueBackend
+	origWorkItems := dd.WorkItems
 	dd.Exec = m
-	dd.IssueBackend = newExecReadyIssueBackend(m)
-	cli.ResetDefaultIssueBackend()
+	dd.WorkItems = newExecReadyWorkItems(m)
+	cli.ResetDefaultWorkItems()
 	t.Cleanup(func() {
 		dd.Exec = orig
-		dd.IssueBackend = origIssueBackend
-		cli.ResetDefaultIssueBackend()
+		dd.WorkItems = origWorkItems
+		cli.ResetDefaultWorkItems()
 	})
 }
 
-type execReadyIssueBackend struct {
-	*clitest.MockIssueBackend
+type execReadyWorkItems struct {
+	*clitest.MockWorkItems
 	run func(dir, name string, args ...string) cli.CommandResult
 }
 
-func newExecReadyIssueBackend(m *clitest.MockExecRunner) *execReadyIssueBackend {
-	return &execReadyIssueBackend{
-		MockIssueBackend: clitest.NewMockIssueBackend(),
-		run:              m.Run,
+func newExecReadyWorkItems(m *clitest.MockExecRunner) *execReadyWorkItems {
+	return &execReadyWorkItems{
+		MockWorkItems: clitest.NewMockWorkItems(),
+		run:           m.Run,
 	}
 }
 
-func (b *execReadyIssueBackend) Ready(ctx context.Context, opts workitems.AvailabilityQuery) ([]workitems.IssueSummary, error) {
-	b.MockIssueBackend.Ready(ctx, opts)
+func (b *execReadyWorkItems) Ready(ctx context.Context, opts workitems.AvailabilityQuery) ([]workitems.IssueSummary, error) {
+	b.MockWorkItems.Ready(ctx, opts)
 	result := b.run(cli.GetWorkspaceRuntimeDir(), "issue-store", readyArgs(opts)...)
 	if result.Err != nil {
 		return nil, result.Err
