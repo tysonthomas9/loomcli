@@ -34,6 +34,7 @@
 - **Wave 9.30 implementation:** `962b65d63`
 - **Wave 9.31 implementation:** `5c504cdb4`
 - **Wave 9.31 FleetDB contract:** `e9c185b`
+- **Wave 9.32 implementation:** `06609d6ca`
 - **Stacked branches:** `modular-monolith-phase9-01-types-ratchet`, then
   `modular-monolith-phase9-02-shallow-seams`, then
   `modular-monolith-phase9-03-legacy-planes`, then
@@ -64,7 +65,8 @@
   `modular-monolith-phase9-28-shallow-composition-deletion`, then
   `modular-monolith-phase9-29-workitems-backend-deletion`, then
   `modular-monolith-phase9-30-workitems-lifecycle-query-deletion`, then
-  `modular-monolith-phase9-31-fleet-compatibility-deletion`
+  `modular-monolith-phase9-31-fleet-compatibility-deletion`, then
+  `modular-monolith-phase9-32-workitems-create-fallback-deletion`
 - **Purpose:** Reduce the residual package surface toward 160 production Go
   packages without weakening capability ownership, consumer-owned ports, or
   independently replaceable adapters.
@@ -1512,9 +1514,10 @@ its support-probing helpers, and the dual repository-response decoder. Package
 shape remains `159 / 15 / 144 / 42 / 60`; this wave removes behavior rather
 than disguising it as a renamed package.
 
-Phase 9 remains incomplete. The 20-method `IssueBackend` lifecycle/query/command
-plane and its duplicate DTOs still exist, and Work Items still has one explicit
-post-create summary fallback. Those are the next deletion targets.
+At the Wave 9.31 boundary, Phase 9 remains incomplete: the 20-method
+`IssueBackend` lifecycle/query/command plane and its duplicate DTOs still exist,
+and Work Items still has one explicit post-create summary fallback. Wave 9.32
+deletes that fallback; the backend plane remains the next deletion target.
 
 ## Wave 9.31 validation
 
@@ -1532,6 +1535,38 @@ architecture-profile compilation; archcheck's measured peak remained 1.23 GiB,
 below its 2 GiB limit. After clearing only this wave's generated Go caches, the
 unchanged tree passed the complete pinned gate. No rule, profile, or threshold
 was disabled.
+
+## Wave 9.32 result
+
+Wave 9.32 deletes Work Items' last create-result compatibility path. `Create`
+now returns exactly one owner-owned `IssueSummary`; the `CreatedIssue` union,
+custom JSON marshaler, optional detail branch, optional summary branch, and
+consumer-side `createdIssueID` helpers are gone. The service returns the
+canonical projection produced by the durable create and, when required, the
+repository-admission command. It no longer performs a post-create read whose
+failure could turn durable success into an ambiguous error.
+
+The implementation and cannot-return guard change ten files with 77 insertions
+and 106 deletions, a net removal of 29 lines. The guard rejects the union type,
+its fallback documentation, and result-branch helper from Work Items and its
+two production consumers. Package shape and the 20-method `IssueBackend`
+contract remain unchanged; the next wave migrates actual query consumers away
+from that horizontal plane.
+
+## Wave 9.32 validation
+
+| Check | Result |
+|---|---|
+| Work Items create policy | PASS: repository admission, canonical projection cloning, and absence of post-create reads are covered |
+| Create consumers | PASS: cross-workspace move, onboarding first-task, and issue HTTP handler tests compile and pass with the single result type |
+| Cannot-return architecture ratchet | PASS: `TestRetiredWorkItemCreateProjectionFallbackCannotReturn` |
+| Loom `make gate` | PASS: all Go and frontend gates against paired FleetDB source `e9c185b` and its exact binary, with four Go OS threads, two Go package workers, one Vitest worker, and a 2 GiB Go soft memory limit |
+
+Two unchanged aggregate attempts exhausted the temporary volume during isolated
+profile and race-test linking. After clearing only verified-inactive generated
+Go caches from older archcheck runs, the identical tree passed the complete
+pinned gate. The successful architecture pass peaked at 1.16 GiB RSS under its
+2 GiB limit; no test, threshold, or profile was skipped.
 
 ---
 
