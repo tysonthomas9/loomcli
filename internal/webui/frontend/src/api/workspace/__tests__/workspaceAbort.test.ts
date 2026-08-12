@@ -62,9 +62,7 @@ function createMockWorkspaceData(
 
 describe("fetchWorkspaceApi", () => {
   let fetchWorkspaceApi: typeof import("../workspace").fetchWorkspaceApi;
-  let createWorkspaceAgent: typeof import("../workspace").createWorkspaceAgent;
   let mockApiGet: ReturnType<typeof vi.fn>;
-  let mockPost: ReturnType<typeof vi.fn>;
 
   beforeEach(async () => {
     vi.clearAllMocks();
@@ -72,11 +70,9 @@ describe("fetchWorkspaceApi", () => {
 
     const clientMod = await import("@/api/common");
     mockApiGet = vi.mocked(clientMod.api.GET);
-    mockPost = vi.mocked(clientMod.post);
 
     const workspaceMod = await import("../workspace");
     fetchWorkspaceApi = workspaceMod.fetchWorkspaceApi;
-    createWorkspaceAgent = workspaceMod.createWorkspaceAgent;
   });
 
   it("always makes a network request (no caching)", async () => {
@@ -153,45 +149,6 @@ describe("fetchWorkspaceApi", () => {
 
     expect(mockApiGet).toHaveBeenCalledWith("/api/workspaces/{ws}", {
       params: { path: { ws: "ws with spaces" } },
-    });
-  });
-
-  it("normalizes missing agent scope arrays in workspace responses", async () => {
-    const wsData = createMockWorkspaceData({
-      agents: [{ name: "lead" } as WorkspaceData["agents"][number]],
-    });
-    mockApiGet.mockResolvedValueOnce({
-      data: { success: true, data: wsData },
-      error: undefined,
-      response: new Response(),
-    } as never);
-
-    const workspace = await fetchWorkspaceApi("ws-1");
-
-    expect(workspace.agents).toEqual([
-      { name: "lead", repos: [], repo_groups: [], cross_repo: false },
-    ]);
-  });
-
-  it("normalizes missing scope fields in optimistic agent creation responses", async () => {
-    mockPost.mockResolvedValueOnce({
-      name: "lead-epic-1",
-      role_name: "lead",
-      repos: ["repo-a"],
-    });
-
-    const agent = await createWorkspaceAgent("ws-1", {
-      name: "lead-epic-1",
-      role_name: "lead",
-      repos: ["repo-a"],
-    });
-
-    expect(agent).toEqual({
-      name: "lead-epic-1",
-      role_name: "lead",
-      repos: ["repo-a"],
-      repo_groups: [],
-      cross_repo: false,
     });
   });
 });

@@ -2983,6 +2983,7 @@ type WorkspaceAgentInfo struct {
 	Name       string   `json:"name"`
 	RepoGroups []string `json:"repo_groups"`
 	Repos      []string `json:"repos"`
+	RoleName   *string  `json:"role_name,omitempty"`
 }
 
 // WorkspaceBackendPatchRequest defines model for WorkspaceBackendPatchRequest.

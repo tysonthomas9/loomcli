@@ -2922,6 +2922,7 @@ export interface components {
     };
     WorkspaceAgentInfo: {
       name: string;
+      role_name?: string;
       /** @default [] */
       repos: string[];
       /** @default [] */

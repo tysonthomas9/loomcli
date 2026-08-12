@@ -8,6 +8,7 @@ import (
 
 	"go.opentelemetry.io/otel/attribute"
 
+	"github.com/tysonthomas9/loomcli/internal/backend/api/gen"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/dto"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
@@ -87,10 +88,10 @@ func HandleCreate(agentSvc service.AgentService, hub *realtime.Hub) http.Handler
 	}
 }
 
-func workspaceAgentInfo(agent *domain.Agent) dto.WorkspaceAgentInfo {
-	return dto.WorkspaceAgentInfo{
+func workspaceAgentInfo(agent *domain.Agent) gen.WorkspaceAgentInfo {
+	return gen.WorkspaceAgentInfo{
 		Name:       agent.Name,
-		RoleName:   agent.RoleName,
+		RoleName:   &agent.RoleName,
 		Repos:      append([]string{}, agent.Repos...),
 		RepoGroups: append([]string{}, agent.RepoGroups...),
 		CrossRepo:  agent.CrossRepo,

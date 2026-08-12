@@ -15,6 +15,7 @@ import {
 } from "@/api/common";
 import { createIssue } from "@/api/issues";
 import type { Issue } from "@/types";
+import type { components, paths } from "@/types/generated/openapi";
 
 // ============= Types =============
 
@@ -33,27 +34,11 @@ export interface RepoInfo {
 
 export type TaskDeliveryRequirement = "working_copy" | "pull_request";
 
-export interface WorkspaceAgentInfo {
-  name: string;
-  repos: string[];
-  repo_groups: string[];
-  cross_repo: boolean;
-  role_name?: string;
-  backend?: string;
-}
+export type WorkspaceAgentInfo = components["schemas"]["WorkspaceAgentInfo"];
 
-export interface CreateAgentRequest {
-  name: string;
-  role_name: string;
-  kind?: string;
-  prompt?: string;
-  prompt_file?: string;
-  auto?: boolean;
-  backend?: string;
-  repos?: string[];
-  repo_groups?: string[];
-  cross_repo?: boolean;
-}
+export type CreateAgentRequest = NonNullable<
+  paths["/api/workspaces/{ws}/agents"]["post"]["requestBody"]
+>["content"]["application/json"];
 
 export interface InteractivePromptInfo {
   id: string;
@@ -114,26 +99,6 @@ export interface WorkspaceData {
   task_delivery_requirement?: TaskDeliveryRequirement;
 }
 
-function normalizeWorkspaceAgentInfo(
-  agent: WorkspaceAgentInfo,
-): WorkspaceAgentInfo {
-  return {
-    ...agent,
-    repos: Array.isArray(agent.repos) ? agent.repos : [],
-    repo_groups: Array.isArray(agent.repo_groups) ? agent.repo_groups : [],
-    cross_repo: agent.cross_repo === true,
-  };
-}
-
-function normalizeWorkspaceData(data: WorkspaceData): WorkspaceData {
-  return {
-    ...data,
-    agents: Array.isArray(data.agents)
-      ? data.agents.map(normalizeWorkspaceAgentInfo)
-      : [],
-  };
-}
-
 // ============= Response Types =============
 
 interface ApiSuccess<T> {
@@ -183,15 +148,11 @@ export async function fetchWorkspaceApi(
       params: { path: { ws: workspaceId } },
     });
     if (error) throw apiErrorFromResponse(error, response);
-    return normalizeWorkspaceData(
-      unwrap(data as unknown as ApiResult<WorkspaceData>, response),
-    );
+    return unwrap(data as unknown as ApiResult<WorkspaceData>, response);
   }
   const { data, error, response } = await api.GET("/api/workspaces/active");
   if (error) throw apiErrorFromResponse(error, response);
-  return normalizeWorkspaceData(
-    unwrap(data as unknown as ApiResult<WorkspaceData>, response),
-  );
+  return unwrap(data as unknown as ApiResult<WorkspaceData>, response);
 }
 
 /**
@@ -351,12 +312,10 @@ export async function createWorkspaceAgent(
   workspaceId: string,
   req: CreateAgentRequest,
 ): Promise<WorkspaceAgentInfo> {
-  return normalizeWorkspaceAgentInfo(
-    await post<WorkspaceAgentInfo>(
-      `/api/workspaces/${encodeURIComponent(workspaceId)}/agents`,
-      req,
-      { timeout: 120_000 },
-    ),
+  return post<WorkspaceAgentInfo>(
+    `/api/workspaces/${encodeURIComponent(workspaceId)}/agents`,
+    req,
+    { timeout: 120_000 },
   );
 }
 

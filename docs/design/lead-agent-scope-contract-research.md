@@ -7,24 +7,24 @@ agent creation and the agent-detail File Explorer
 
 ## Executive conclusion
 
-PR #365 fixes the immediate defect at the two correct fault-containment seams:
-the server stops serializing `domain.Agent` as the create response, and the
-browser normalizes older partial responses before putting them into workspace
-state. That is a valid production fix, not a UI-only band-aid.
+The product decision is an atomic strict-contract migration with **no legacy
+compatibility decoder**. The server must stop serializing `domain.Agent` as the
+create response, and the frontend must consume the same generated OpenAPI
+contract. Malformed or stale responses fail visibly at the API boundary rather
+than being silently repaired into application state.
 
 It is not yet the strongest long-term shape. The same HTTP model currently has
 four independently maintained definitions (OpenAPI, generated Go, handwritten
 Go DTO/ops types, and a handwritten TypeScript interface), and adjacent agent
-routes still serialize `domain.Agent` directly. The better fix is to make the
+routes still serialize `domain.Agent` directly. The fix is to make the
 OpenAPI-generated `WorkspaceAgentInfo` the representation used at the create
-HTTP boundary and in the frontend, while retaining a single compatibility
-decoder at the frontend API boundary. Follow that with a separate, explicitly
+HTTP boundary and in the frontend. Follow that with a separate, explicitly
 scoped cleanup of list/update route contracts.
 
 In short:
 
-1. Keep the server-side projection and compatibility normalization from #365.
-2. Replace their handwritten output types with the model generated from
+1. Keep the server-side projection from #365.
+2. Replace the handwritten output types with the model generated from
    `api/openapi.yaml`.
 3. Add `role_name` to the OpenAPI projection because it is already emitted and
    consumed.
@@ -163,12 +163,10 @@ The failing sequence was:
 4. File Explorer iterates `repo_groups`; a response produced from raw
    `domain.Agent` omitted the property, violating the TypeScript invariant.
 
-#365 now normalizes both workspace GET data and create responses at the API
-boundary ([source](../../internal/webui/frontend/src/api/workspace/workspace.ts#L117-L135),
-[source](../../internal/webui/frontend/src/api/workspace/workspace.ts#L350-L360)).
-This is the right place for rolling-version/older-server compatibility. Moving
-defaults into File Explorer would spread wire-format repair into every
-consumer.
+#365 initially normalized both workspace GET data and create responses at the
+API boundary. The strict-contract decision removes that decoder: the producer
+and consumer move together, and File Explorer continues to rely on required
+generated fields instead of repairing wire data.
 
 ### 5. Git history confirms this is a repeated contract-boundary failure
 
@@ -217,8 +215,8 @@ silently decided by the serialization fix.
 - It uses a narrow workspace projection instead of exposing every
   `domain.Agent` field.
 - `append([]string{}, values...)` guarantees JSON `[]` for nil and empty input.
-- It normalizes at the frontend API ingress, so old/partial server payloads do
-  not poison typed application state.
+- It fixes the frontend ingress and server producer together, so application
+  state receives only the canonical generated shape.
 - Its tests assert exact wire values (`[]`, `[]`, and `false`), not only Go
   zero values ([source](../../internal/webui/handlers/agents/handlers_test.go#L75-L103)).
 
@@ -226,9 +224,8 @@ silently decided by the serialization fix.
 
 - The server mapper returns handwritten `dto.WorkspaceAgentInfo`, while the
   published source of truth already generates `gen.WorkspaceAgentInfo`.
-- The frontend normalizer accepts a value already asserted to satisfy the full
-  interface. Its implementation is defensive, but its input type hides that it
-  is decoding an untrusted/legacy wire value.
+- The frontend initially retained a handwritten normalizer, duplicating
+  required defaults already owned by OpenAPI.
 - `role_name` is preserved by the Go DTO and required by product behavior but
   absent from OpenAPI-generated clients.
 - The list/update routes can still leak `domain.Agent`, so the unsafe pattern
@@ -238,12 +235,12 @@ silently decided by the serialization fix.
 
 ## Design alternatives
 
-| Design | Depth | Locality | Compatibility | Migration risk | Testability | Verdict |
+| Design | Depth | Locality | Contract strictness | Migration risk | Testability | Verdict |
 |---|---|---|---|---|---|---|
 | A. Remove `omitempty` from `domain.Agent` scope fields | Low | Poor: changes domain/persistence JSON to satisfy one HTTP projection | Risky for CLI/FleetDB consumers; still permits `null` slices | Medium and broad | Easy wire test, weak architectural guard | Reject |
-| B. Keep #365 exactly as-is | Medium | Good around the failing route and frontend ingress | Strong for old servers | Low | Good regression coverage | Safe now, but retains type drift |
-| C. Normalize in workspace store and every UI consumer | Low | Poor: repair is downstream from the violation | Strong tolerance | Low initially; maintenance grows with consumers | Many repetitive tests | Reject as primary fix |
-| D. Generated HTTP projection + one compatibility decoder | High | Best: contract owner is OpenAPI; conversion stays at HTTP/API seams | Strong; decoder accepts legacy omission while new server is strict | Moderate, localized | Compile-time generated types plus exact wire tests | **Recommend** |
+| B. Keep #365 exactly as-is | Medium | Good around the failing route and frontend ingress | Weak: handwritten types and silent repair remain | Low | Good regression coverage | Reject: retains type drift |
+| C. Normalize in workspace store and every UI consumer | Low | Poor: repair is downstream from the violation | Weak: malformed data becomes valid-looking state | Low initially; maintenance grows with consumers | Many repetitive tests | Reject |
+| D. Generated HTTP projection, atomic producer/consumer update | High | Best: contract owner is OpenAPI; conversion stays at HTTP seam | Strong: one schema, no silent repair | Moderate, localized | Compile-time generated types plus exact wire tests | **Recommend** |
 | E. Redesign all agent CRUD/list/control APIs into one resource | Highest | Potentially excellent | Needs an explicit version/migration plan because store-backed and daemon-only modes currently differ | High | Excellent after migration | Follow-up, not part of crash fix |
 | F. Strictly migrate every workspace HTTP response to generated models now | Highest | Excellent after completion | Requires changing the `{success,data}` envelope contract and all clients together | High and cross-cutting | Excellent | Valuable migration, but too broad for #365 |
 
@@ -279,23 +276,16 @@ silently decided by the serialization fix.
      components["schemas"]["WorkspaceAgentInfo"];
    ```
 
-   Keep a private legacy wire type such as
-   `Partial<WorkspaceAgentInfo> & Pick<WorkspaceAgentInfo, "name">`. Make the
-   normalizer accept that wire type (or `unknown` with a small shape check) and
-   return the strict generated type. This makes the compatibility policy
-   truthful in the type system.
-
    Keep the existing generic `post<T>` only if the 120-second timeout cannot be
    expressed through `openapi-fetch`; otherwise switch create-agent to the
    generated `api.POST` operation. Do not convert workspace GETs to strict
    endpoint inference in this PR, because their OpenAPI envelope is currently
    wrong and fixing it requires a coordinated server/client migration.
 
-4. **Normalize exactly once on ingress.** Apply that decoder to workspace GET
-   agents and create-agent responses, as #365 already does. Keep
-   `treeRoots.ts` strict. If malformed data can reach the store through another
-   public store action, normalize inside `upsertAgent` by importing the same
-   decoder; do not create a second defaulting implementation.
+4. **Remove compatibility normalization.** Return workspace GET data and
+   create-agent responses as the generated type. Keep `treeRoots.ts` strict.
+   Missing required fields are a producer/schema violation and must not be
+   defaulted in the API module, store, or consumer.
 
 5. **Add contract-focused tests.** Keep the exact create-handler wire test and
    add:
@@ -306,10 +296,9 @@ silently decided by the serialization fix.
      `openapi.yaml` with the repository's existing `gopkg.in/yaml.v3` and
      asserts that the create 201 references `WorkspaceAgentInfo` and that its
      required fields are exactly present;
-   - frontend tests for a current payload and a legacy payload missing all
-     three scope fields;
-   - a store test proving `upsertAgent` cannot insert a partial wire object if
-     that function remains externally callable.
+   - frontend tests for the current generated payload;
+   - compile-time use of `WorkspaceAgentInfo` at every public workspace-agent
+     API boundary.
 
 6. **Run generated-type gates.** The repository already checks Go and
    TypeScript generated files for staleness
@@ -366,10 +355,10 @@ decision and should not ride along with JSON-shape changes.
 - `repos` and `repo_groups` are always JSON arrays and `cross_repo` is always a
   JSON boolean.
 - `role_name` exists in OpenAPI and generated clients.
-- No frontend application state can receive an unnormalized legacy workspace
-  agent through public API functions.
-- A legacy payload with only `{ "name": "lead" }` renders agent detail without
-  error.
+- Frontend public API functions expose the generated workspace-agent type
+  without handwritten defaulting or compatibility normalization.
+- A payload missing required scope fields is not normalized into application
+  state.
 - A current payload preserves explicit repos, groups, `cross_repo`, and role.
 - Generated Go/TypeScript staleness checks pass.
 - The real browser hard-navigation reproduction remains green.
@@ -379,10 +368,11 @@ decision and should not ride along with JSON-shape changes.
 
 Do not replace #365 with a domain-tag tweak. Amend it (or stack one focused PR
 above it) so the server and frontend use OpenAPI-generated
-`WorkspaceAgentInfo`, publish `role_name`, and make the compatibility decoder's
-legacy input explicit. Then take the raw list/update responses and repo-affinity
-semantic inconsistency as two separate follow-ups.
+`WorkspaceAgentInfo` and publish `role_name`. Per the subsequent product
+decision, update producer and consumer atomically and remove the compatibility
+decoder. Then take the raw list/update responses and repo-affinity semantic
+inconsistency as two separate follow-ups.
 
 That gives the crash fix the right long-term ownership: domain objects remain
-domain objects, the API owns its projection, generated clients share that
-projection, and compatibility logic remains confined to one ingress seam.
+domain objects, the API owns its projection, and generated clients share that
+projection without a second compatibility contract.
