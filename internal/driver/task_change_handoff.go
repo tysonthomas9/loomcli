@@ -275,6 +275,19 @@ func validateImmutableReviewRoot(ctx context.Context, root TaskRoot) (map[string
 	return metadata, nil
 }
 
+func validateReviewVerdict(root TaskRoot, metadata map[string]string) error {
+	for _, repository := range root.Repositories {
+		key := "review.repository." + repository.Name + ".verdict"
+		if metadata[key] != "pass" {
+			return fmt.Errorf("review repository %q did not report pass", repository.Name)
+		}
+	}
+	if metadata["review_verdict"] != "pass" {
+		return fmt.Errorf("aggregate review verdict must be pass")
+	}
+	return nil
+}
+
 func taskChangeGit(ctx context.Context, directory string, args ...string) (string, error) {
 	command := exec.CommandContext(ctx, "git", args...) //nolint:gosec // fixed binary and argv-only invocation.
 	command.Dir = directory

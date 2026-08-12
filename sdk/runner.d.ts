@@ -1,3 +1,14 @@
+import type * as TaskRepositoryContext from "./task-repository-context.gen.js";
+
+export type TaskRun = TaskRepositoryContext.TaskRun;
+export type TaskRunPlacement = TaskRepositoryContext.TaskRunPlacement;
+export type TaskRunExecutionClass = TaskRepositoryContext.TaskRunExecutionClass;
+export type TaskRunRootState = TaskRepositoryContext.TaskRunRootState;
+export type TaskBranch = TaskRepositoryContext.TaskBranch;
+export type TaskChangeSet = TaskRepositoryContext.TaskChangeSet;
+export type TaskChangeSetEntry = TaskRepositoryContext.TaskChangeSetEntry;
+export type TaskChangePublicationStatus = TaskRepositoryContext.TaskChangePublicationStatus;
+
 export declare const RunnerEnv: Readonly<{
   apiUrl: "LOOM_TASK_RUN_API_URL";
   baseUrl: "LOOM_FLEET_DB_URL";
@@ -57,52 +68,6 @@ export interface TaskRunClientOptions {
   leaseToken?: string;
   fencingToken?: string | number;
   requestJson?: string;
-}
-
-export interface TaskRun {
-  workspace_key?: string;
-  task_run_id: string;
-  driver_run_id?: string;
-  driver_step_id?: string;
-  task_id: string;
-  execution_class: "implementation" | "review" | "correction";
-  repository_set: string[];
-  change_set_version?: number;
-  root_generation: number;
-  root_state: "pending" | "provisioning" | "ready" | "retained" | "released" | "failed";
-  root_node_id?: string;
-  root_fencing_token: number;
-  backend_kind?: string;
-  backend_session_ref?: string;
-  worker_profile_id?: string;
-  runner?: string;
-  runner_ref?: string;
-  runner_kind?: string;
-  runner_entrypoint?: string;
-  runner_driver_version_id?: string;
-  provider_profile?: string;
-  status: string;
-  node_id?: string;
-  lease_id?: string;
-  fencing_token?: number;
-  runner_placement?: TaskRunPlacement;
-  sandbox_placement?: TaskRunPlacement;
-  [key: string]: unknown;
-}
-
-export interface TaskRunPlacement {
-  provider?: string;
-  node_id?: string;
-  runner_id?: string;
-  process_ref?: string;
-  sandbox_id?: string;
-  image_or_snapshot?: string;
-  cwd?: string;
-  repo_ref?: string;
-  cleanup_policy?: string;
-  started_at?: string;
-  heartbeat_at?: string;
-  retained_until?: string | null;
 }
 
 export interface Issue {

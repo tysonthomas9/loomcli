@@ -81,6 +81,7 @@ test("npm pack golden: tarball contains exactly the pinned files", () => {
     "runner.js",
     "runtime-adapters.d.ts",
     "runtime-adapters.js",
+    "task-repository-context.gen.d.ts",
   ];
   assert.deepEqual(got, want);
   assert.equal(report.name, pkg.name);

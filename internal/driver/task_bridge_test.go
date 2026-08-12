@@ -169,9 +169,9 @@ func TestHostBridgeReviewUsesFreshSessionAndRejectsChangedImmutableRoot(t *testi
 			if err := os.WriteFile(manifest, []byte(`{"version":1}`), 0o600); err != nil {
 				t.Fatal(err)
 			}
-			command := `case "$LOOM_TASK_RUN_REQUEST_JSON" in *backend_session_ref*) exit 12;; esac; printf '%s\n' '{"status":"completed","exit_code":0,"session_id":"review-session"}'`
+			command := `case "$LOOM_TASK_RUN_REQUEST_JSON" in *backend_session_ref*) exit 12;; esac; printf '%s\n' '{"status":"completed","exit_code":0,"session_id":"review-session","runtime_metadata":{"review_verdict":"pass","review.repository.repo-a.verdict":"pass"}}'`
 			if mutate {
-				command = `printf 'review mutation\n' > repo-a/README.md; printf '%s\n' '{"status":"completed","exit_code":0,"session_id":"review-session"}'`
+				command = `printf 'review mutation\n' > repo-a/README.md; printf '%s\n' '{"status":"completed","exit_code":0,"session_id":"review-session","runtime_metadata":{"review_verdict":"pass","review.repository.repo-a.verdict":"pass"}}'`
 			}
 			executor := HostBridgeTaskExecutor{Store: memstore.New(), WorktreePath: t.TempDir(), Command: []string{"sh", "-c", command},
 				RootResolver: fixedTaskRootResolver{root: TaskRoot{Path: root, ManifestPath: manifest, Repositories: []TaskRootRepository{{Name: "repo-a", Path: repo, BaseSHA: head, Detached: true}}}},

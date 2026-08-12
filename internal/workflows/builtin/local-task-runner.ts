@@ -273,7 +273,7 @@ export async function run(ctx = {}) {
   const streamFailure = streamFailureMessage(backend, stdout);
 	const sessionRef = backendSessionReference(backend, stdout) || backendSessionRef;
 
-  const metadata = stringMetadata({
+	const metadata = stringMetadata({
     task_runner: "local-task-runner",
     runtime_strategy: "local-cli-" + backend,
     runner: request.runner || request.runner_ref || "local-task-runner",
@@ -290,8 +290,15 @@ export async function run(ctx = {}) {
     files_changed: String(patchInfo.filesChanged),
     lines_added: String(patchInfo.linesAdded),
     lines_removed: String(patchInfo.linesRemoved),
-    cli_exit_code: String(exitCode),
-  });
+		cli_exit_code: String(exitCode),
+	});
+	if (stringValue(request.execution_class || request.executionClass) === "review") {
+		const review = reviewVerdict(stdout, taskRootManifest);
+		if (review.aggregate) metadata.review_verdict = review.aggregate;
+		for (const [repo, verdict] of Object.entries(review.repositories)) {
+			metadata[`review.repository.${repo}.verdict`] = verdict;
+		}
+	}
   if (streamFailure) {
     metadata.stream_error = streamFailure;
   }
@@ -1638,7 +1645,8 @@ function buildPrompt(request, task, worktree, taskRootManifest = "") {
 			"Task Change Set version: " + stringValue(request.change_set_version || request.changeSetVersion),
 			"",
 			"Read the manifest and review every repository at its exact checked-out head. Do not modify files, create commits, push, or reuse an implementation session.",
-			"Report findings keyed by repository, then give one aggregate pass or fail conclusion. Run read-only validation where useful.",
+			"Report findings keyed by repository and run read-only validation where useful.",
+			"Finish with exactly one line per repository in the form LOOM_REVIEW_REPOSITORY: <repo-name> PASS|FAIL, followed by exactly one aggregate line LOOM_REVIEW_VERDICT: PASS|FAIL. Aggregate PASS is allowed only when every repository passes.",
 			"Task context:",
 			JSON.stringify(task || { task_id: request.task_id || request.taskId }, null, 2),
 		].join("\n");
@@ -1661,6 +1669,35 @@ function buildPrompt(request, task, worktree, taskRootManifest = "") {
     "Before finishing, run relevant validation commands if they are available.",
     "Return a concise summary of files changed and validation results.",
   ].join("\n");
+}
+
+function reviewVerdict(stdout, manifestPath) {
+	const allowed = taskRootRepositoryNames(manifestPath);
+	const repositories = {};
+	const repoPattern = /LOOM_REVIEW_REPOSITORY:\s*([^\s"\\]+)\s+(PASS|FAIL)/gi;
+	for (const match of String(stdout || "").matchAll(repoPattern)) {
+		const name = stringValue(match[1]);
+		if (allowed.has(name)) repositories[name] = String(match[2]).toLowerCase();
+	}
+	const aggregateMatches = [...String(stdout || "").matchAll(/LOOM_REVIEW_VERDICT:\s*(PASS|FAIL)/gi)];
+	let aggregate = aggregateMatches.length ? String(aggregateMatches[aggregateMatches.length - 1][1]).toLowerCase() : "";
+	if (allowed.size === 0 || Object.keys(repositories).length !== allowed.size) aggregate = "";
+	for (const name of allowed) {
+		if (!repositories[name] || repositories[name] === "fail") {
+			if (repositories[name] === "fail") aggregate = "fail";
+			else aggregate = "";
+		}
+	}
+	return { aggregate, repositories };
+}
+
+function taskRootRepositoryNames(manifestPath) {
+	try {
+		const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+		return new Set((Array.isArray(manifest.repositories) ? manifest.repositories : []).map((repo) => stringValue(repo && repo.name)).filter(Boolean));
+	} catch {
+		return new Set();
+	}
 }
 
 function backendSessionReference(backend, stdout) {

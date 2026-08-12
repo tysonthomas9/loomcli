@@ -41,6 +41,7 @@
     "driver.d.ts",
     "runner.js",
     "runner.d.ts",
+    "task-repository-context.gen.d.ts",
     "runtime-adapters.js",
     "runtime-adapters.d.ts",
     "api-surface.v1.json",

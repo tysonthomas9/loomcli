@@ -375,6 +375,11 @@ func (e HostBridgeTaskExecutor) ExecuteTask(ctx context.Context, req TaskExecReq
 				result.ExitCode = 1
 				result.ErrorClass = "review_head_mismatch"
 				result.ErrorMessage = reviewErr.Error()
+			} else if reviewErr = validateReviewVerdict(resolvedRoot, result.RuntimeMetadata); reviewErr != nil {
+				result.Status = domain.TaskRunFailed
+				result.ExitCode = 1
+				result.ErrorClass = "review_verdict_invalid"
+				result.ErrorMessage = reviewErr.Error()
 			} else {
 				result.RuntimeMetadata = mergeStringMaps(result.RuntimeMetadata, reviewMetadata)
 			}
