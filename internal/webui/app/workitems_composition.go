@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strconv"
 	"strings"
 	"time"
 
@@ -357,19 +356,15 @@ func (s *workItemsBackendStore) ListEvents(ctx context.Context, query workitems.
 	}
 	ctx, cancel := context.WithTimeout(ctx, workItemOperationTimeout)
 	defer cancel()
-	values, err := be.ListEvents(ctx, query.IssueID, query.Limit)
+	events, ok := be.(workitems.EventQueries)
+	if !ok {
+		return nil, workitems.ErrUnavailable
+	}
+	values, err := events.ListEvents(ctx, query)
 	if err != nil {
 		return nil, translateWorkItemsBackendError(err)
 	}
-	out := make([]*workitems.Event, 0, len(values))
-	for _, value := range values {
-		id, _ := strconv.ParseInt(value.ID, 10, 64)
-		out = append(out, &workitems.Event{
-			ID: id, IssueID: value.IssueID, EventType: workitems.EventType(value.Kind),
-			Actor: value.Actor, CreatedAt: value.CreatedAt,
-		})
-	}
-	return out, nil
+	return values, nil
 }
 
 func (s *workItemsBackendStore) AddComment(ctx context.Context, command workitems.AddCommentCommand) (*workitems.Comment, error) {
@@ -379,14 +374,18 @@ func (s *workItemsBackendStore) AddComment(ctx context.Context, command workitem
 	}
 	ctx, cancel := context.WithTimeout(ctx, workItemOperationTimeout)
 	defer cancel()
-	value, err := be.AddComment(ctx, backend.CommentAddParams{IssueID: command.IssueID, Author: command.Author, Text: command.Text})
+	comments, ok := be.(workitems.CommentCommands)
+	if !ok {
+		return nil, workitems.ErrUnavailable
+	}
+	value, err := comments.AddComment(ctx, command)
 	if err != nil {
 		return nil, translateWorkItemsBackendError(err)
 	}
 	if value == nil {
 		return nil, workitems.ErrInvalidPersistedState
 	}
-	return &workitems.Comment{ID: value.ID, IssueID: value.IssueID, Author: value.Author, Text: value.Text, CreatedAt: value.CreatedAt}, nil
+	return value, nil
 }
 
 func (s *workItemsBackendStore) ListComments(ctx context.Context, query workitems.ListCommentsQuery) ([]*workitems.Comment, error) {
@@ -396,15 +395,15 @@ func (s *workItemsBackendStore) ListComments(ctx context.Context, query workitem
 	}
 	ctx, cancel := context.WithTimeout(ctx, workItemOperationTimeout)
 	defer cancel()
-	values, err := be.ListComments(ctx, query.IssueID)
+	comments, ok := be.(workitems.CommentQueries)
+	if !ok {
+		return nil, workitems.ErrUnavailable
+	}
+	values, err := comments.ListComments(ctx, query)
 	if err != nil {
 		return nil, translateWorkItemsBackendError(err)
 	}
-	out := make([]*workitems.Comment, 0, len(values))
-	for _, value := range values {
-		out = append(out, &workitems.Comment{ID: value.ID, IssueID: value.IssueID, Author: value.Author, Text: value.Text, CreatedAt: value.CreatedAt})
-	}
-	return out, nil
+	return values, nil
 }
 
 func (s *workItemsBackendStore) AddDependency(ctx context.Context, command workitems.AddDependencyCommand) error {
@@ -414,7 +413,11 @@ func (s *workItemsBackendStore) AddDependency(ctx context.Context, command worki
 	}
 	ctx, cancel := context.WithTimeout(ctx, workItemOperationTimeout)
 	defer cancel()
-	return translateWorkItemsBackendError(be.AddDependency(ctx, backend.DepAddParams{FromID: command.IssueID, ToID: command.DependsOnID, DepType: command.Type}))
+	dependencies, ok := be.(workitems.DependencyCommands)
+	if !ok {
+		return workitems.ErrUnavailable
+	}
+	return translateWorkItemsBackendError(dependencies.AddDependency(ctx, command))
 }
 
 func (s *workItemsBackendStore) RemoveDependency(ctx context.Context, command workitems.RemoveDependencyCommand) error {
@@ -424,7 +427,11 @@ func (s *workItemsBackendStore) RemoveDependency(ctx context.Context, command wo
 	}
 	ctx, cancel := context.WithTimeout(ctx, workItemOperationTimeout)
 	defer cancel()
-	return translateWorkItemsBackendError(be.RemoveDependency(ctx, backend.DepRemoveParams{FromID: command.IssueID, ToID: command.DependsOnID, DepType: command.Type}))
+	dependencies, ok := be.(workitems.DependencyCommands)
+	if !ok {
+		return workitems.ErrUnavailable
+	}
+	return translateWorkItemsBackendError(dependencies.RemoveDependency(ctx, command))
 }
 
 func (s *workItemsBackendStore) ListDependencies(ctx context.Context, query workitems.ListDependenciesQuery) ([]workitems.Dependency, error) {

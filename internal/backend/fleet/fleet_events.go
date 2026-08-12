@@ -40,17 +40,17 @@ func (w fleetCommentWire) toTypesComment() workitems.Comment {
 	}
 }
 
-func (b *FleetBackend) ListEvents(ctx context.Context, id string, limit int) ([]backend.EventData, error) {
-	path := "/issues/" + url.PathEscape(id) + "/history"
-	if limit > 0 {
-		path += "?limit=" + strconv.Itoa(limit)
+func (b *FleetBackend) ListEvents(ctx context.Context, query workitems.ListEventsQuery) ([]*workitems.Event, error) {
+	path := "/issues/" + url.PathEscape(query.IssueID) + "/history"
+	if query.Limit > 0 {
+		path += "?limit=" + strconv.Itoa(query.Limit)
 	}
 	resp, err := b.exec(ctx, "ListEvents", "GET", path, nil)
 	if err != nil {
 		return nil, err
 	}
 	if !hasData(resp) {
-		return []backend.EventData{}, nil
+		return []*workitems.Event{}, nil
 	}
 	var history struct {
 		History []struct {
@@ -63,12 +63,13 @@ func (b *FleetBackend) ListEvents(ctx context.Context, id string, limit int) ([]
 	if err := json.Unmarshal(resp.Data, &history); err != nil {
 		return nil, backend.ErrInternal("ListEvents", "unmarshal response", err)
 	}
-	result := make([]backend.EventData, 0, len(history.History))
+	result := make([]*workitems.Event, 0, len(history.History))
 	for _, event := range history.History {
-		result = append(result, backend.EventData{
-			ID:        event.ID,
-			IssueID:   id,
-			Kind:      event.Action,
+		id, _ := strconv.ParseInt(event.ID, 10, 64)
+		result = append(result, &workitems.Event{
+			ID:        id,
+			IssueID:   query.IssueID,
+			EventType: workitems.EventType(event.Action),
 			Actor:     event.Actor,
 			CreatedAt: event.Timestamp,
 		})

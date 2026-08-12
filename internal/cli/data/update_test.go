@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 )
 
 func strptr(s string) *string { return &s }
@@ -274,8 +275,8 @@ func TestDataUpdate_DependsOnOnly_SkipsFieldUpdate(t *testing.T) {
 			if call.method != "AddDependency" {
 				t.Fatalf("calls[%d].method = %q, want AddDependency", i, call.method)
 			}
-			params := call.args.(backend.DepAddParams)
-			if params.FromID != "loom-7" || params.ToID != wantDep || params.DepType != "blocks" {
+			params := call.args.(workitems.AddDependencyCommand)
+			if params.IssueID != "loom-7" || params.DependsOnID != wantDep || params.Type != "blocks" {
 				t.Errorf("calls[%d] params = %#v, want loom-7 -> %s (blocks)", i, params, wantDep)
 			}
 		}
@@ -308,15 +309,15 @@ func TestDataUpdate_FieldsAndDependencyFlags_BothApplied(t *testing.T) {
 		if stub.calls[0].method != "Update" {
 			t.Fatalf("calls[0].method = %q, want Update (fields apply before dependency edges)", stub.calls[0].method)
 		}
-		if got := stub.calls[1]; got.method != "AddDependency" || got.args.(backend.DepAddParams).ToID != "dep-3" {
+		if got := stub.calls[1]; got.method != "AddDependency" || got.args.(workitems.AddDependencyCommand).DependsOnID != "dep-3" {
 			t.Fatalf("calls[1] = %#v, want AddDependency dep-3", got)
 		}
 		rm := stub.calls[2]
 		if rm.method != "RemoveDependency" {
 			t.Fatalf("calls[2].method = %q, want RemoveDependency", rm.method)
 		}
-		rmParams := rm.args.(backend.DepRemoveParams)
-		if rmParams.FromID != "loom-8" || rmParams.ToID != "dep-4" {
+		rmParams := rm.args.(workitems.RemoveDependencyCommand)
+		if rmParams.IssueID != "loom-8" || rmParams.DependsOnID != "dep-4" {
 			t.Errorf("RemoveDependency params = %#v, want loom-8 -> dep-4", rmParams)
 		}
 	})

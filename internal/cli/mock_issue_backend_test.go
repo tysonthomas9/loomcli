@@ -12,6 +12,10 @@ import (
 
 // Compile-time interface check.
 var _ backend.IssueBackend = (*MockIssueBackend)(nil)
+var _ workitems.EventQueries = (*MockIssueBackend)(nil)
+var _ workitems.CommentQueries = (*MockIssueBackend)(nil)
+var _ workitems.CommentCommands = (*MockIssueBackend)(nil)
+var _ workitems.DependencyCommands = (*MockIssueBackend)(nil)
 
 // MockBackendCall records a single method invocation on MockIssueBackend.
 type MockBackendCall struct {
@@ -88,26 +92,26 @@ type MockIssueBackend struct {
 
 	// AddDependency
 	AddDependencyErr error
-	AddDependencyFn  func(ctx context.Context, params backend.DepAddParams) error
+	AddDependencyFn  func(ctx context.Context, command workitems.AddDependencyCommand) error
 
 	// RemoveDependency
 	RemoveDependencyErr error
-	RemoveDependencyFn  func(ctx context.Context, params backend.DepRemoveParams) error
+	RemoveDependencyFn  func(ctx context.Context, command workitems.RemoveDependencyCommand) error
 
 	// ListComments
-	ListCommentsResult []backend.CommentData
+	ListCommentsResult []*workitems.Comment
 	ListCommentsErr    error
-	ListCommentsFn     func(ctx context.Context, id string) ([]backend.CommentData, error)
+	ListCommentsFn     func(ctx context.Context, query workitems.ListCommentsQuery) ([]*workitems.Comment, error)
 
 	// AddComment
-	AddCommentResult *backend.CommentData
+	AddCommentResult *workitems.Comment
 	AddCommentErr    error
-	AddCommentFn     func(ctx context.Context, params backend.CommentAddParams) (*backend.CommentData, error)
+	AddCommentFn     func(ctx context.Context, command workitems.AddCommentCommand) (*workitems.Comment, error)
 
 	// ListEvents
-	ListEventsResult []backend.EventData
+	ListEventsResult []*workitems.Event
 	ListEventsErr    error
-	ListEventsFn     func(ctx context.Context, id string, limit int) ([]backend.EventData, error)
+	ListEventsFn     func(ctx context.Context, query workitems.ListEventsQuery) ([]*workitems.Event, error)
 
 	// BackendName
 	BackendNameResult string
@@ -298,66 +302,66 @@ func (m *MockIssueBackend) Delete(ctx context.Context, params backend.DeletePara
 }
 
 // AddDependency implements backend.IssueBackend.
-func (m *MockIssueBackend) AddDependency(ctx context.Context, params backend.DepAddParams) error {
+func (m *MockIssueBackend) AddDependency(ctx context.Context, command workitems.AddDependencyCommand) error {
 	m.mu.Lock()
-	m.record("AddDependency", params)
+	m.record("AddDependency", command)
 	fn := m.AddDependencyFn
 	resultErr := m.AddDependencyErr
 	m.mu.Unlock()
 	if fn != nil {
-		return fn(ctx, params)
+		return fn(ctx, command)
 	}
 	return resultErr
 }
 
 // RemoveDependency implements backend.IssueBackend.
-func (m *MockIssueBackend) RemoveDependency(ctx context.Context, params backend.DepRemoveParams) error {
+func (m *MockIssueBackend) RemoveDependency(ctx context.Context, command workitems.RemoveDependencyCommand) error {
 	m.mu.Lock()
-	m.record("RemoveDependency", params)
+	m.record("RemoveDependency", command)
 	fn := m.RemoveDependencyFn
 	resultErr := m.RemoveDependencyErr
 	m.mu.Unlock()
 	if fn != nil {
-		return fn(ctx, params)
+		return fn(ctx, command)
 	}
 	return resultErr
 }
 
 // ListComments implements backend.IssueBackend.
-func (m *MockIssueBackend) ListComments(ctx context.Context, id string) ([]backend.CommentData, error) {
+func (m *MockIssueBackend) ListComments(ctx context.Context, query workitems.ListCommentsQuery) ([]*workitems.Comment, error) {
 	m.mu.Lock()
-	m.record("ListComments", id)
+	m.record("ListComments", query)
 	fn := m.ListCommentsFn
 	result, resultErr := m.ListCommentsResult, m.ListCommentsErr
 	m.mu.Unlock()
 	if fn != nil {
-		return fn(ctx, id)
+		return fn(ctx, query)
 	}
 	return result, resultErr
 }
 
 // AddComment implements backend.IssueBackend.
-func (m *MockIssueBackend) AddComment(ctx context.Context, params backend.CommentAddParams) (*backend.CommentData, error) {
+func (m *MockIssueBackend) AddComment(ctx context.Context, command workitems.AddCommentCommand) (*workitems.Comment, error) {
 	m.mu.Lock()
-	m.record("AddComment", params)
+	m.record("AddComment", command)
 	fn := m.AddCommentFn
 	result, resultErr := m.AddCommentResult, m.AddCommentErr
 	m.mu.Unlock()
 	if fn != nil {
-		return fn(ctx, params)
+		return fn(ctx, command)
 	}
 	return result, resultErr
 }
 
 // ListEvents implements backend.IssueBackend.
-func (m *MockIssueBackend) ListEvents(ctx context.Context, id string, limit int) ([]backend.EventData, error) {
+func (m *MockIssueBackend) ListEvents(ctx context.Context, query workitems.ListEventsQuery) ([]*workitems.Event, error) {
 	m.mu.Lock()
-	m.record("ListEvents", id, limit)
+	m.record("ListEvents", query)
 	fn := m.ListEventsFn
 	result, resultErr := m.ListEventsResult, m.ListEventsErr
 	m.mu.Unlock()
 	if fn != nil {
-		return fn(ctx, id, limit)
+		return fn(ctx, query)
 	}
 	return result, resultErr
 }

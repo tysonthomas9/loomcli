@@ -47,6 +47,10 @@ var _ workitems.ReadyQueries = (*APIBackend)(nil)
 var _ workitems.BlockedQueries = (*APIBackend)(nil)
 var _ workitems.SearchQueries = (*APIBackend)(nil)
 var _ workitems.StatsQueries = (*APIBackend)(nil)
+var _ workitems.EventQueries = (*APIBackend)(nil)
+var _ workitems.CommentQueries = (*APIBackend)(nil)
+var _ workitems.CommentCommands = (*APIBackend)(nil)
+var _ workitems.DependencyCommands = (*APIBackend)(nil)
 
 // apiResponse is the JSON envelope returned by loom server endpoints that
 // follow the { success, data, error } convention.
@@ -469,39 +473,46 @@ func (b *APIBackend) Delete(ctx context.Context, params backend.DeleteParams) er
 
 // --- Dependency operations ---
 
-func (b *APIBackend) AddDependency(ctx context.Context, params backend.DepAddParams) error {
+func (b *APIBackend) AddDependency(ctx context.Context, command workitems.AddDependencyCommand) error {
 	req := gen.AddDependencyRequest{
-		DependsOnId: params.ToID,
+		DependsOnId: command.DependsOnID,
 	}
-	if params.DepType != "" {
-		req.DepType = &params.DepType
+	if command.Type != "" {
+		req.DepType = &command.Type
 	}
-	_, err := b.exec(ctx, "AddDependency", http.MethodPost, "/issues/"+url.PathEscape(params.FromID)+"/dependencies", req)
+	_, err := b.exec(ctx, "AddDependency", http.MethodPost, "/issues/"+url.PathEscape(command.IssueID)+"/dependencies", req)
 	return err
 }
 
-func (b *APIBackend) RemoveDependency(ctx context.Context, params backend.DepRemoveParams) error {
-	path := "/issues/" + url.PathEscape(params.FromID) + "/dependencies/" + url.PathEscape(params.ToID)
+func (b *APIBackend) RemoveDependency(ctx context.Context, command workitems.RemoveDependencyCommand) error {
+	path := "/issues/" + url.PathEscape(command.IssueID) + "/dependencies/" + url.PathEscape(command.DependsOnID)
 	_, err := b.exec(ctx, "RemoveDependency", http.MethodDelete, path, nil)
 	return err
 }
 
 // --- Comment operations ---
 
-func (b *APIBackend) ListComments(ctx context.Context, id string) ([]backend.CommentData, error) {
-	detail, err := b.Get(ctx, id)
+func (b *APIBackend) ListComments(ctx context.Context, query workitems.ListCommentsQuery) ([]*workitems.Comment, error) {
+	detail, err := b.Get(ctx, query.IssueID)
 	if err != nil {
 		return nil, err
 	}
 	if detail.Comments == nil {
-		return []backend.CommentData{}, nil
+		return []*workitems.Comment{}, nil
 	}
-	return detail.Comments, nil
+	result := make([]*workitems.Comment, 0, len(detail.Comments))
+	for _, comment := range detail.Comments {
+		result = append(result, &workitems.Comment{
+			ID: comment.ID, IssueID: comment.IssueID, Author: comment.Author,
+			Text: comment.Text, CreatedAt: comment.CreatedAt,
+		})
+	}
+	return result, nil
 }
 
-func (b *APIBackend) AddComment(ctx context.Context, params backend.CommentAddParams) (*backend.CommentData, error) {
-	req := gen.CommentRequest{Text: params.Text}
-	resp, err := b.exec(ctx, "AddComment", http.MethodPost, "/issues/"+url.PathEscape(params.IssueID)+"/comments", req)
+func (b *APIBackend) AddComment(ctx context.Context, command workitems.AddCommentCommand) (*workitems.Comment, error) {
+	req := gen.CommentRequest{Text: command.Text}
+	resp, err := b.exec(ctx, "AddComment", http.MethodPost, "/issues/"+url.PathEscape(command.IssueID)+"/comments", req)
 	if err != nil {
 		return nil, err
 	}
@@ -512,36 +523,36 @@ func (b *APIBackend) AddComment(ctx context.Context, params backend.CommentAddPa
 	if err := json.Unmarshal(resp.Data, &comment); err != nil {
 		return nil, backend.ErrInternal("AddComment", "unmarshal response", err)
 	}
-	result := commentToData(comment)
+	result := commentToWorkItem(comment)
 	// Server may not populate IssueID in the response; ensure we pass it
 	// through from the params.
 	if result.IssueID == "" {
-		result.IssueID = params.IssueID
+		result.IssueID = command.IssueID
 	}
-	return &result, nil
+	return result, nil
 }
 
 // --- Event operations ---
 
-func (b *APIBackend) ListEvents(ctx context.Context, id string, limit int) ([]backend.EventData, error) {
-	path := "/issues/" + url.PathEscape(id) + "/events"
-	if limit > 0 {
-		path += "?limit=" + strconv.Itoa(limit)
+func (b *APIBackend) ListEvents(ctx context.Context, query workitems.ListEventsQuery) ([]*workitems.Event, error) {
+	path := "/issues/" + url.PathEscape(query.IssueID) + "/events"
+	if query.Limit > 0 {
+		path += "?limit=" + strconv.Itoa(query.Limit)
 	}
 	resp, err := b.exec(ctx, "ListEvents", http.MethodGet, path, nil)
 	if err != nil {
 		return nil, err
 	}
 	if !hasData(resp) {
-		return []backend.EventData{}, nil
+		return []*workitems.Event{}, nil
 	}
 	var events []gen.IssueEvent
 	if err := json.Unmarshal(resp.Data, &events); err != nil {
 		return nil, backend.ErrInternal("ListEvents", "unmarshal response", err)
 	}
-	result := make([]backend.EventData, 0, len(events))
+	result := make([]*workitems.Event, 0, len(events))
 	for _, e := range events {
-		result = append(result, eventToData(e))
+		result = append(result, eventToWorkItem(e))
 	}
 	return result, nil
 }

@@ -46,6 +46,10 @@ var _ workitems.DeferredQueries = (*FleetBackend)(nil)
 var _ workitems.BlockedQueries = (*FleetBackend)(nil)
 var _ workitems.SearchQueries = (*FleetBackend)(nil)
 var _ workitems.StatsQueries = (*FleetBackend)(nil)
+var _ workitems.EventQueries = (*FleetBackend)(nil)
+var _ workitems.CommentQueries = (*FleetBackend)(nil)
+var _ workitems.CommentCommands = (*FleetBackend)(nil)
+var _ workitems.DependencyCommands = (*FleetBackend)(nil)
 var _ workitems.MutationStream = (*FleetBackend)(nil)
 var _ backend.ClaimReleaser = (*FleetBackend)(nil)
 var _ backend.RepositoryRequirementBackend = (*FleetBackend)(nil)
@@ -375,8 +379,8 @@ func (b *FleetBackend) Get(ctx context.Context, id string) (*backend.IssueDetail
 		result.Dependencies = deps
 		result.Dependents = dependents
 	}
-	if comments, err := b.ListComments(ctx, id); err == nil {
-		result.Comments = comments
+	if comments, err := b.ListComments(ctx, workitems.ListCommentsQuery{IssueID: id}); err == nil {
+		result.Comments = commentsToData(comments)
 	}
 
 	return &result, nil

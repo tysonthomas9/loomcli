@@ -194,9 +194,9 @@ func TestMockIssueBackendDefaultPaths(t *testing.T) {
 	m.SearchResult = []workitems.IssueSummary{{ID: "search"}}
 	m.CreateResult = &backend.IssueData{ID: "created"}
 	m.CloseResult = &backend.CloseResult{}
-	m.ListCommentsResult = []backend.CommentData{{ID: 1}}
-	m.AddCommentResult = &backend.CommentData{ID: 2}
-	m.ListEventsResult = []backend.EventData{{ID: "event"}}
+	m.ListCommentsResult = []*workitems.Comment{{ID: 1}}
+	m.AddCommentResult = &workitems.Comment{ID: 2}
+	m.ListEventsResult = []*workitems.Event{{ID: 3}}
 	m.BackendNameResult = "mock-backend"
 
 	callDefaults(t, ctx, m)
@@ -285,15 +285,15 @@ func callDefaults(t *testing.T, ctx context.Context, m *MockIssueBackend) {
 	}
 	mustNoErr("Reopen", m.Reopen(ctx, "id", backend.ReopenParams{}))
 	mustNoErr("Delete", m.Delete(ctx, backend.DeleteParams{}))
-	mustNoErr("AddDependency", m.AddDependency(ctx, backend.DepAddParams{}))
-	mustNoErr("RemoveDependency", m.RemoveDependency(ctx, backend.DepRemoveParams{}))
-	if _, err := m.ListComments(ctx, "id"); err != nil {
+	mustNoErr("AddDependency", m.AddDependency(ctx, workitems.AddDependencyCommand{}))
+	mustNoErr("RemoveDependency", m.RemoveDependency(ctx, workitems.RemoveDependencyCommand{}))
+	if _, err := m.ListComments(ctx, workitems.ListCommentsQuery{IssueID: "id"}); err != nil {
 		t.Fatalf("ListComments returned error: %v", err)
 	}
-	if _, err := m.AddComment(ctx, backend.CommentAddParams{}); err != nil {
+	if _, err := m.AddComment(ctx, workitems.AddCommentCommand{}); err != nil {
 		t.Fatalf("AddComment returned error: %v", err)
 	}
-	if _, err := m.ListEvents(ctx, "id", 10); err != nil {
+	if _, err := m.ListEvents(ctx, workitems.ListEventsQuery{IssueID: "id", Limit: 10}); err != nil {
 		t.Fatalf("ListEvents returned error: %v", err)
 	}
 	if got := m.BackendName(); got != "mock-backend" {

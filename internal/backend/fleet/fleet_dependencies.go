@@ -35,7 +35,7 @@ type fleetDepWire struct {
 // the create itself succeeded and which edge was lost.
 func (b *FleetBackend) addCreateDependencies(ctx context.Context, id string, deps []string) error {
 	for _, depID := range deps {
-		err := b.AddDependency(ctx, backend.DepAddParams{FromID: id, ToID: depID, DepType: "blocks"})
+		err := b.AddDependency(ctx, workitems.AddDependencyCommand{IssueID: id, DependsOnID: depID, Type: "blocks"})
 		if err == nil {
 			continue
 		}

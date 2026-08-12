@@ -75,34 +75,6 @@ type IssueBackend interface {
 	// (unless Force is true).
 	Delete(ctx context.Context, params DeleteParams) error
 
-	// --- Dependency operations ---
-
-	// AddDependency creates a dependency relationship between two issues.
-	// Returns KindNotFound if either issue does not exist, KindConflict if
-	// the dependency already exists.
-	AddDependency(ctx context.Context, params DepAddParams) error
-
-	// RemoveDependency removes a dependency relationship between two issues.
-	// Returns KindNotFound if the dependency does not exist.
-	RemoveDependency(ctx context.Context, params DepRemoveParams) error
-
-	// --- Comment operations ---
-
-	// ListComments returns all comments for an issue, ordered by creation time.
-	// Returns KindNotFound if the issue does not exist.
-	ListComments(ctx context.Context, id string) ([]CommentData, error)
-
-	// AddComment adds a comment to an issue and returns the created comment.
-	// Returns KindNotFound if the issue does not exist.
-	AddComment(ctx context.Context, params CommentAddParams) (*CommentData, error)
-
-	// --- Event operations ---
-
-	// ListEvents returns the most recent events for an issue, up to limit.
-	// If limit is 0, the backend uses its default. Returns KindNotFound if
-	// the issue does not exist.
-	ListEvents(ctx context.Context, id string, limit int) ([]EventData, error)
-
 	// --- Metadata ---
 
 	// BackendName returns a string identifying this backend implementation

@@ -60,6 +60,31 @@ type SearchQueries interface {
 	Search(context.Context, SearchQuery) ([]IssueSummary, error)
 }
 
+// EventQueries is the narrow immutable activity projection consumed by Work
+// Items delivery. Event storage dialects remain private to their adapters.
+type EventQueries interface {
+	ListEvents(context.Context, ListEventsQuery) ([]*Event, error)
+}
+
+// CommentQueries is the narrow immutable comment projection consumed by Work
+// Items delivery and issue-detail assembly.
+type CommentQueries interface {
+	ListComments(context.Context, ListCommentsQuery) ([]*Comment, error)
+}
+
+// CommentCommands is the narrow comment mutation port. Validation and default
+// author policy remain in the Work Items module.
+type CommentCommands interface {
+	AddComment(context.Context, AddCommentCommand) (*Comment, error)
+}
+
+// DependencyCommands is the narrow dependency mutation port. The adapter owns
+// transport translation; callers use only Work Items commands.
+type DependencyCommands interface {
+	AddDependency(context.Context, AddDependencyCommand) error
+	RemoveDependency(context.Context, RemoveDependencyCommand) error
+}
+
 type ListQuery struct {
 	Filter         ListFilter
 	ExcludeStatus  []string

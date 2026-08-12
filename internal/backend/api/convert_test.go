@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/backend/api/gen"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 )
 
 func timePtr(t time.Time) *time.Time { return &t }
@@ -403,12 +404,12 @@ func TestCommentResponseToData_NilOptional(t *testing.T) {
 	}
 }
 
-// --- commentToData ---
+// --- commentToWorkItem ---
 
-func TestCommentToData(t *testing.T) {
+func TestCommentToWorkItem(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
 	c := gen.Comment{Id: 7, IssueId: "loom-1", Author: "bob", Text: "t", CreatedAt: now}
-	d := commentToData(c)
+	d := commentToWorkItem(c)
 	if d.ID != 7 || d.IssueID != "loom-1" || d.Author != "bob" || d.Text != "t" {
 		t.Errorf("mismatch: %+v", d)
 	}
@@ -417,9 +418,9 @@ func TestCommentToData(t *testing.T) {
 	}
 }
 
-// --- eventToData ---
+// --- eventToWorkItem ---
 
-func TestEventToData(t *testing.T) {
+func TestEventToWorkItem(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
 	e := gen.IssueEvent{
 		Id:        123,
@@ -428,11 +429,11 @@ func TestEventToData(t *testing.T) {
 		Actor:     "alice",
 		CreatedAt: now,
 	}
-	d := eventToData(e)
-	if d.ID != "123" {
-		t.Errorf("ID = %q", d.ID)
+	d := eventToWorkItem(e)
+	if d.ID != 123 {
+		t.Errorf("ID = %d", d.ID)
 	}
-	if d.IssueID != "loom-1" || d.Kind != "status_change" || d.Actor != "alice" {
+	if d.IssueID != "loom-1" || d.EventType != workitems.EventType("status_change") || d.Actor != "alice" {
 		t.Errorf("fields: %+v", d)
 	}
 	if !d.CreatedAt.Equal(now) {

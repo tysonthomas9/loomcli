@@ -1397,10 +1397,10 @@ func TestAddDependency(t *testing.T) {
 	})
 	defer ts.Close()
 
-	err := fb.AddDependency(context.Background(), backend.DepAddParams{
-		FromID:  "a",
-		ToID:    "b",
-		DepType: "blocks",
+	err := fb.AddDependency(context.Background(), workitems.AddDependencyCommand{
+		IssueID:     "a",
+		DependsOnID: "b",
+		Type:        "blocks",
 	})
 	if err != nil {
 		t.Fatalf("AddDependency: %v", err)
@@ -1440,7 +1440,7 @@ func TestRemoveDependency(t *testing.T) {
 	})
 	defer ts.Close()
 
-	err := fb.RemoveDependency(context.Background(), backend.DepRemoveParams{FromID: "a", ToID: "b"})
+	err := fb.RemoveDependency(context.Background(), workitems.RemoveDependencyCommand{IssueID: "a", DependsOnID: "b"})
 	if err != nil {
 		t.Fatalf("RemoveDependency: %v", err)
 	}
@@ -1524,7 +1524,7 @@ func TestAddComment_HappyPath(t *testing.T) {
 	})
 	defer ts.Close()
 
-	result, err := fb.AddComment(context.Background(), backend.CommentAddParams{
+	result, err := fb.AddComment(context.Background(), workitems.AddCommentCommand{
 		IssueID: "test-1",
 		Author:  "user",
 		Text:    "hello",
@@ -1561,15 +1561,15 @@ func TestListEvents_HappyPath(t *testing.T) {
 	})
 	defer ts.Close()
 
-	result, err := fb.ListEvents(context.Background(), "test-1", 10)
+	result, err := fb.ListEvents(context.Background(), workitems.ListEventsQuery{IssueID: "test-1", Limit: 10})
 	if err != nil {
 		t.Fatalf("ListEvents: %v", err)
 	}
 	if len(result) != 1 {
 		t.Fatalf("len = %d, want 1", len(result))
 	}
-	if result[0].Kind != "issue.created" {
-		t.Errorf("Kind = %q, want %q", result[0].Kind, "issue.created")
+	if result[0].EventType != workitems.EventCreated {
+		t.Errorf("EventType = %q, want %q", result[0].EventType, workitems.EventCreated)
 	}
 }
 
@@ -1867,7 +1867,7 @@ func TestListComments_HappyPath(t *testing.T) {
 		Dependencies: []*testIssueWithDependencyMetadata{},
 		Dependents:   []*testIssueWithDependencyMetadata{},
 		Comments: []*workitems.Comment{
-			{ID: 2, IssueID: "test-1", Author: "user2", Text: "c2", CreatedAt: now.Add(time.Second)},
+			{ID: 2, IssueID: "test-1", Author: "user2", Text: "c2", CreatedAt: now},
 			{ID: 1, IssueID: "test-1", Author: "user", Text: "c1", CreatedAt: now},
 		},
 	}
@@ -1877,7 +1877,7 @@ func TestListComments_HappyPath(t *testing.T) {
 	})
 	defer ts.Close()
 
-	result, err := fb.ListComments(context.Background(), "test-1")
+	result, err := fb.ListComments(context.Background(), workitems.ListCommentsQuery{IssueID: "test-1"})
 	if err != nil {
 		t.Fatalf("ListComments: %v", err)
 	}
@@ -1910,7 +1910,7 @@ func TestListComments_NoComments(t *testing.T) {
 	})
 	defer ts.Close()
 
-	result, err := fb.ListComments(context.Background(), "test-1")
+	result, err := fb.ListComments(context.Background(), workitems.ListCommentsQuery{IssueID: "test-1"})
 	if err != nil {
 		t.Fatalf("ListComments: %v", err)
 	}

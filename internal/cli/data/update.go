@@ -11,6 +11,7 @@ import (
 	"github.com/spf13/pflag"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 )
 
 var (
@@ -233,16 +234,19 @@ func enforceBlockReason(ctx context.Context, ib backend.IssueBackend, id string,
 // applyDependencyFlags adds/removes dependency edges for the update command.
 // Dependencies are not part of the issue PATCH schema — they are a separate
 // resource with dedicated endpoints — so the update command composes the
-// backend's Add/RemoveDependency calls, which both the direct fleet-db and
-// the serve-API transports implement.
+// Work Items dependency-command port implemented by both real transports.
 func applyDependencyFlags(ctx context.Context, ib backend.IssueBackend, id string) error {
+	dependencies, ok := ib.(workitems.DependencyCommands)
+	if !ok {
+		return backend.ErrUnavailable("UpdateDependencies", "work items dependency commands unavailable", nil)
+	}
 	for _, dep := range updateAddDeps {
-		if err := ib.AddDependency(ctx, backend.DepAddParams{FromID: id, ToID: dep, DepType: "blocks"}); err != nil {
+		if err := dependencies.AddDependency(ctx, workitems.AddDependencyCommand{IssueID: id, DependsOnID: dep, Type: "blocks"}); err != nil {
 			return err
 		}
 	}
 	for _, dep := range updateRemoveDeps {
-		if err := ib.RemoveDependency(ctx, backend.DepRemoveParams{FromID: id, ToID: dep, DepType: "blocks"}); err != nil {
+		if err := dependencies.RemoveDependency(ctx, workitems.RemoveDependencyCommand{IssueID: id, DependsOnID: dep, Type: "blocks"}); err != nil {
 			return err
 		}
 	}

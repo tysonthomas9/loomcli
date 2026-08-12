@@ -2,7 +2,6 @@ package fleet
 
 import (
 	"encoding/json"
-	"strconv"
 	"strings"
 	"time"
 
@@ -174,15 +173,16 @@ func commentToData(c *workitems.Comment) backend.CommentData {
 	}
 }
 
-// eventToData converts workitems.Event to backend.EventData.
-func eventToData(e *workitems.Event) backend.EventData {
-	return backend.EventData{
-		ID:        strconv.FormatInt(e.ID, 10),
-		IssueID:   e.IssueID,
-		Kind:      string(e.EventType),
-		Actor:     e.Actor,
-		CreatedAt: e.CreatedAt,
+// commentsToData is the temporary issue-detail translation. It disappears
+// with IssueDetailData; comment operations already use Work Items models.
+func commentsToData(comments []*workitems.Comment) []backend.CommentData {
+	result := make([]backend.CommentData, 0, len(comments))
+	for _, comment := range comments {
+		if comment != nil {
+			result = append(result, commentToData(comment))
+		}
 	}
+	return result
 }
 
 // availabilityIssuesToSummaries converts a FleetDB availability response to

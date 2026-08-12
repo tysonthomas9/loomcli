@@ -42,11 +42,12 @@ func TestWrapIssueBackendWithTracing_Smoke(t *testing.T) {
 	_, _ = wrapped.Close(ctx, "id-1", backend.CloseParams{})
 	_ = wrapped.Reopen(ctx, "id-1", backend.ReopenParams{})
 	_ = wrapped.Delete(ctx, backend.DeleteParams{IDs: []string{"id-1"}})
-	_ = wrapped.AddDependency(ctx, backend.DepAddParams{FromID: "a", ToID: "b"})
-	_ = wrapped.RemoveDependency(ctx, backend.DepRemoveParams{FromID: "a", ToID: "b"})
-	_, _ = wrapped.ListComments(ctx, "id-1")
-	_, _ = wrapped.AddComment(ctx, backend.CommentAddParams{IssueID: "id-1", Text: "hi"})
-	_, _ = wrapped.ListEvents(ctx, "id-1", 10)
+	dependencies := wrapped.(workitems.DependencyCommands)
+	_ = dependencies.AddDependency(ctx, workitems.AddDependencyCommand{IssueID: "a", DependsOnID: "b"})
+	_ = dependencies.RemoveDependency(ctx, workitems.RemoveDependencyCommand{IssueID: "a", DependsOnID: "b"})
+	_, _ = wrapped.(workitems.CommentQueries).ListComments(ctx, workitems.ListCommentsQuery{IssueID: "id-1"})
+	_, _ = wrapped.(workitems.CommentCommands).AddComment(ctx, workitems.AddCommentCommand{IssueID: "id-1", Text: "hi"})
+	_, _ = wrapped.(workitems.EventQueries).ListEvents(ctx, workitems.ListEventsQuery{IssueID: "id-1", Limit: 10})
 }
 
 func TestWrapIssueBackendWithTracing_Nil(t *testing.T) {

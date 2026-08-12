@@ -57,18 +57,18 @@ type MockIssueBackend struct {
 	DeleteErr           error
 	DeleteFn            func(ctx context.Context, params backend.DeleteParams) error
 	AddDependencyErr    error
-	AddDependencyFn     func(ctx context.Context, params backend.DepAddParams) error
+	AddDependencyFn     func(ctx context.Context, command workitems.AddDependencyCommand) error
 	RemoveDependencyErr error
-	RemoveDependencyFn  func(ctx context.Context, params backend.DepRemoveParams) error
-	ListCommentsResult  []backend.CommentData
+	RemoveDependencyFn  func(ctx context.Context, command workitems.RemoveDependencyCommand) error
+	ListCommentsResult  []*workitems.Comment
 	ListCommentsErr     error
-	ListCommentsFn      func(ctx context.Context, id string) ([]backend.CommentData, error)
-	AddCommentResult    *backend.CommentData
+	ListCommentsFn      func(ctx context.Context, query workitems.ListCommentsQuery) ([]*workitems.Comment, error)
+	AddCommentResult    *workitems.Comment
 	AddCommentErr       error
-	AddCommentFn        func(ctx context.Context, params backend.CommentAddParams) (*backend.CommentData, error)
-	ListEventsResult    []backend.EventData
+	AddCommentFn        func(ctx context.Context, command workitems.AddCommentCommand) (*workitems.Comment, error)
+	ListEventsResult    []*workitems.Event
 	ListEventsErr       error
-	ListEventsFn        func(ctx context.Context, id string, limit int) ([]backend.EventData, error)
+	ListEventsFn        func(ctx context.Context, query workitems.ListEventsQuery) ([]*workitems.Event, error)
 	BackendNameResult   string
 	BackendNameFn       func() string
 }
@@ -208,53 +208,53 @@ func (m *MockIssueBackend) Delete(ctx context.Context, params backend.DeletePara
 	}
 	return e
 }
-func (m *MockIssueBackend) AddDependency(ctx context.Context, params backend.DepAddParams) error {
+func (m *MockIssueBackend) AddDependency(ctx context.Context, command workitems.AddDependencyCommand) error {
 	m.mu.Lock()
-	m.record("AddDependency", params)
+	m.record("AddDependency", command)
 	fn, e := m.AddDependencyFn, m.AddDependencyErr
 	m.mu.Unlock()
 	if fn != nil {
-		return fn(ctx, params)
+		return fn(ctx, command)
 	}
 	return e
 }
-func (m *MockIssueBackend) RemoveDependency(ctx context.Context, params backend.DepRemoveParams) error {
+func (m *MockIssueBackend) RemoveDependency(ctx context.Context, command workitems.RemoveDependencyCommand) error {
 	m.mu.Lock()
-	m.record("RemoveDependency", params)
+	m.record("RemoveDependency", command)
 	fn, e := m.RemoveDependencyFn, m.RemoveDependencyErr
 	m.mu.Unlock()
 	if fn != nil {
-		return fn(ctx, params)
+		return fn(ctx, command)
 	}
 	return e
 }
-func (m *MockIssueBackend) ListComments(ctx context.Context, id string) ([]backend.CommentData, error) {
+func (m *MockIssueBackend) ListComments(ctx context.Context, query workitems.ListCommentsQuery) ([]*workitems.Comment, error) {
 	m.mu.Lock()
-	m.record("ListComments", id)
+	m.record("ListComments", query)
 	fn, r, e := m.ListCommentsFn, m.ListCommentsResult, m.ListCommentsErr
 	m.mu.Unlock()
 	if fn != nil {
-		return fn(ctx, id)
+		return fn(ctx, query)
 	}
 	return r, e
 }
-func (m *MockIssueBackend) AddComment(ctx context.Context, params backend.CommentAddParams) (*backend.CommentData, error) {
+func (m *MockIssueBackend) AddComment(ctx context.Context, command workitems.AddCommentCommand) (*workitems.Comment, error) {
 	m.mu.Lock()
-	m.record("AddComment", params)
+	m.record("AddComment", command)
 	fn, r, e := m.AddCommentFn, m.AddCommentResult, m.AddCommentErr
 	m.mu.Unlock()
 	if fn != nil {
-		return fn(ctx, params)
+		return fn(ctx, command)
 	}
 	return r, e
 }
-func (m *MockIssueBackend) ListEvents(ctx context.Context, id string, limit int) ([]backend.EventData, error) {
+func (m *MockIssueBackend) ListEvents(ctx context.Context, query workitems.ListEventsQuery) ([]*workitems.Event, error) {
 	m.mu.Lock()
-	m.record("ListEvents", id, limit)
+	m.record("ListEvents", query)
 	fn, r, e := m.ListEventsFn, m.ListEventsResult, m.ListEventsErr
 	m.mu.Unlock()
 	if fn != nil {
-		return fn(ctx, id, limit)
+		return fn(ctx, query)
 	}
 	return r, e
 }

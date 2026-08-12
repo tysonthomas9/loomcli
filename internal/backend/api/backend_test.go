@@ -984,8 +984,8 @@ func TestAddDependency_HappyPath(t *testing.T) {
 	})
 	defer ts.Close()
 
-	err := ab.AddDependency(context.Background(), backend.DepAddParams{
-		FromID: "a", ToID: "b", DepType: "blocks",
+	err := ab.AddDependency(context.Background(), workitems.AddDependencyCommand{
+		IssueID: "a", DependsOnID: "b", Type: "blocks",
 	})
 	if err != nil {
 		t.Fatalf("AddDependency: %v", err)
@@ -1013,7 +1013,7 @@ func TestRemoveDependency_HappyPath(t *testing.T) {
 	})
 	defer ts.Close()
 
-	err := ab.RemoveDependency(context.Background(), backend.DepRemoveParams{FromID: "a", ToID: "b"})
+	err := ab.RemoveDependency(context.Background(), workitems.RemoveDependencyCommand{IssueID: "a", DependsOnID: "b"})
 	if err != nil {
 		t.Fatalf("RemoveDependency: %v", err)
 	}
@@ -1041,7 +1041,7 @@ func TestListComments_ViaGet(t *testing.T) {
 	})
 	defer ts.Close()
 
-	result, err := ab.ListComments(context.Background(), "loom-1")
+	result, err := ab.ListComments(context.Background(), workitems.ListCommentsQuery{IssueID: "loom-1"})
 	if err != nil {
 		t.Fatalf("ListComments: %v", err)
 	}
@@ -1065,7 +1065,7 @@ func TestAddComment_HappyPath(t *testing.T) {
 	})
 	defer ts.Close()
 
-	result, err := ab.AddComment(context.Background(), backend.CommentAddParams{
+	result, err := ab.AddComment(context.Background(), workitems.AddCommentCommand{
 		IssueID: "loom-1", Text: "hello",
 	})
 	if err != nil {
@@ -1094,15 +1094,15 @@ func TestListEvents_HappyPath(t *testing.T) {
 	})
 	defer ts.Close()
 
-	result, err := ab.ListEvents(context.Background(), "loom-1", 0)
+	result, err := ab.ListEvents(context.Background(), workitems.ListEventsQuery{IssueID: "loom-1"})
 	if err != nil {
 		t.Fatalf("ListEvents: %v", err)
 	}
 	if len(result) != 2 {
 		t.Fatalf("len = %d", len(result))
 	}
-	if result[0].ID != "1" {
-		t.Errorf("ID = %q", result[0].ID)
+	if result[0].ID != 1 {
+		t.Errorf("ID = %d", result[0].ID)
 	}
 	if strings.Contains(gotPath, "limit=") {
 		t.Errorf("limit should not appear when 0: %q", gotPath)
@@ -1117,7 +1117,7 @@ func TestListEvents_WithLimit(t *testing.T) {
 	})
 	defer ts.Close()
 
-	_, err := ab.ListEvents(context.Background(), "loom-1", 50)
+	_, err := ab.ListEvents(context.Background(), workitems.ListEventsQuery{IssueID: "loom-1", Limit: 50})
 	if err != nil {
 		t.Fatalf("ListEvents: %v", err)
 	}

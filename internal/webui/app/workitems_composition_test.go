@@ -174,3 +174,34 @@ func TestWorkItemsSearchFailsClosedWithoutOwnerPort(t *testing.T) {
 		t.Fatalf("search error = %v, want unavailable", err)
 	}
 }
+
+func TestWorkItemsActivityFailsClosedWithoutOwnerPorts(t *testing.T) {
+	store := &workItemsBackendStore{provider: func(context.Context) backend.IssueBackend { return &claimOnlyBackend{} }}
+	tests := map[string]func() error{
+		"events": func() error {
+			_, err := store.ListEvents(context.Background(), workitems.ListEventsQuery{IssueID: "TASK-1"})
+			return err
+		},
+		"list comments": func() error {
+			_, err := store.ListComments(context.Background(), workitems.ListCommentsQuery{IssueID: "TASK-1"})
+			return err
+		},
+		"add comment": func() error {
+			_, err := store.AddComment(context.Background(), workitems.AddCommentCommand{IssueID: "TASK-1", Text: "hello"})
+			return err
+		},
+		"add dependency": func() error {
+			return store.AddDependency(context.Background(), workitems.AddDependencyCommand{IssueID: "TASK-1", DependsOnID: "TASK-2"})
+		},
+		"remove dependency": func() error {
+			return store.RemoveDependency(context.Background(), workitems.RemoveDependencyCommand{IssueID: "TASK-1", DependsOnID: "TASK-2"})
+		},
+	}
+	for name, run := range tests {
+		t.Run(name, func(t *testing.T) {
+			if err := run(); !errors.Is(err, workitems.ErrUnavailable) {
+				t.Fatalf("error = %v, want unavailable", err)
+			}
+		})
+	}
+}

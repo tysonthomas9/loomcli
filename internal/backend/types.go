@@ -115,17 +115,6 @@ type CommentData struct {
 	EditedAt  *time.Time `json:"edited_at,omitempty"`
 }
 
-// EventData represents an event/history entry for an issue.
-type EventData struct {
-	ID        string    `json:"id"`
-	IssueID   string    `json:"issue_id"`
-	Kind      string    `json:"kind"`
-	Actor     string    `json:"actor,omitempty"`
-	Target    string    `json:"target,omitempty"`
-	Payload   string    `json:"payload,omitempty"`
-	CreatedAt time.Time `json:"created_at"`
-}
-
 // CloseResult is returned by Close. It contains the closed issue
 // and any issues that became unblocked as a result.
 type CloseResult struct {
@@ -393,25 +382,4 @@ type DeleteParams struct {
 	Reason  string   `json:"reason,omitempty"`
 	Force   bool     `json:"force,omitempty"`
 	Cascade bool     `json:"cascade,omitempty"`
-}
-
-// DepAddParams contains fields for adding a dependency between issues.
-type DepAddParams struct {
-	FromID  string `json:"from_id"`
-	ToID    string `json:"to_id"`
-	DepType string `json:"dep_type"`
-}
-
-// DepRemoveParams contains fields for removing a dependency between issues.
-type DepRemoveParams struct {
-	FromID  string `json:"from_id"`
-	ToID    string `json:"to_id"`
-	DepType string `json:"dep_type,omitempty"`
-}
-
-// CommentAddParams contains fields for adding a comment to an issue.
-type CommentAddParams struct {
-	IssueID string `json:"issue_id"`
-	Author  string `json:"author"`
-	Text    string `json:"text"`
 }

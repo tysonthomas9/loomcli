@@ -6,6 +6,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 )
 
 var commentAuthor string
@@ -20,12 +21,16 @@ var commentCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		params := backend.CommentAddParams{
+		comments, ok := ib.(workitems.CommentCommands)
+		if !ok {
+			return backend.ErrUnavailable("AddComment", "work items comment commands unavailable", nil)
+		}
+		command := workitems.AddCommentCommand{
 			IssueID: args[0],
 			Author:  commentAuthor,
 			Text:    args[1],
 		}
-		if _, err := ib.AddComment(ctx, params); err != nil {
+		if _, err := comments.AddComment(ctx, command); err != nil {
 			return err
 		}
 		return printMessageResult(os.Stdout, "comment added to "+args[0], outputFormat)

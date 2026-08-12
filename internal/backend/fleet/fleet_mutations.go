@@ -4,21 +4,23 @@ import (
 	"context"
 	"encoding/json"
 	"net/url"
+	"sort"
 	"strings"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 )
 
 // --- Dependency operations ---
 
-func (b *FleetBackend) AddDependency(ctx context.Context, params backend.DepAddParams) error {
-	if err := b.postDependency(ctx, params); err != nil {
+func (b *FleetBackend) AddDependency(ctx context.Context, command workitems.AddDependencyCommand) error {
+	if err := b.postDependency(ctx, command); err != nil {
 		return err
 	}
-	return b.waitForDependencyState(ctx, "AddDependency", params.FromID, params.ToID, true)
+	return b.waitForDependencyState(ctx, "AddDependency", command.IssueID, command.DependsOnID, true)
 }
 
-func (b *FleetBackend) postDependency(ctx context.Context, params backend.DepAddParams) error {
+func (b *FleetBackend) postDependency(ctx context.Context, command workitems.AddDependencyCommand) error {
 	// fleet-db mounts dependency routes at /issues/{id}/deps (abbreviated)
 	// and its AddDependencyRequest names the dep kind "type" (not
 	// "dep_type"). Path + body tweaked to match.
@@ -27,31 +29,31 @@ func (b *FleetBackend) postDependency(ctx context.Context, params backend.DepAdd
 		Type        string `json:"type,omitempty"`
 	}
 	req := depReq{
-		DependsOnID: params.ToID,
-		Type:        params.DepType,
+		DependsOnID: command.DependsOnID,
+		Type:        command.Type,
 	}
-	if _, err := b.exec(ctx, "AddDependency", "POST", "/issues/"+url.PathEscape(params.FromID)+"/deps", req); err != nil {
+	if _, err := b.exec(ctx, "AddDependency", "POST", "/issues/"+url.PathEscape(command.IssueID)+"/deps", req); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (b *FleetBackend) RemoveDependency(ctx context.Context, params backend.DepRemoveParams) error {
+func (b *FleetBackend) RemoveDependency(ctx context.Context, command workitems.RemoveDependencyCommand) error {
 	// fleet-db delete route is /issues/{id}/deps/{depends_on_id}; abbreviated
 	// to match the add route. The server also requires the dependency type so
 	// it can distinguish multiple edge kinds between the same issues.
-	depType := strings.TrimSpace(params.DepType)
+	depType := strings.TrimSpace(command.Type)
 	if depType == "" {
 		depType = "blocks"
 	}
-	path := "/issues/" + url.PathEscape(params.FromID) + "/deps/" + url.PathEscape(params.ToID) + "?type=" + url.QueryEscape(depType)
+	path := "/issues/" + url.PathEscape(command.IssueID) + "/deps/" + url.PathEscape(command.DependsOnID) + "?type=" + url.QueryEscape(depType)
 	if _, err := b.exec(ctx, "RemoveDependency", "DELETE", path, nil); err != nil {
 		return err
 	}
-	if err := b.waitForDependencyState(ctx, "RemoveDependency", params.FromID, params.ToID, false); err != nil {
+	if err := b.waitForDependencyState(ctx, "RemoveDependency", command.IssueID, command.DependsOnID, false); err != nil {
 		return err
 	}
-	return b.clearBlockedStatusAfterDependencyRemoval(ctx, params.FromID)
+	return b.clearBlockedStatusAfterDependencyRemoval(ctx, command.IssueID)
 }
 
 func (b *FleetBackend) addLabel(ctx context.Context, id string, label string) error {
@@ -69,42 +71,51 @@ func (b *FleetBackend) removeLabel(ctx context.Context, id string, label string)
 
 // --- Comment operations ---
 
-func (b *FleetBackend) ListComments(ctx context.Context, id string) ([]backend.CommentData, error) {
+func (b *FleetBackend) ListComments(ctx context.Context, query workitems.ListCommentsQuery) ([]*workitems.Comment, error) {
 	// fleet-db exposes GET /issues/{id}/comments as a first-class endpoint.
-	resp, err := b.exec(ctx, "ListComments", "GET", "/issues/"+url.PathEscape(id)+"/comments", nil)
+	resp, err := b.exec(ctx, "ListComments", "GET", "/issues/"+url.PathEscape(query.IssueID)+"/comments", nil)
 	if err != nil {
 		return nil, err
 	}
 	if !hasData(resp) {
-		return []backend.CommentData{}, nil
+		return []*workitems.Comment{}, nil
 	}
 	// Try native wrapper {"comments":[...]} first, then bare array.
 	var wrap struct {
 		Comments []fleetCommentWire `json:"comments"`
 	}
 	if json.Unmarshal(resp.Data, &wrap) == nil && wrap.Comments != nil {
-		out := make([]backend.CommentData, 0, len(wrap.Comments))
+		out := make([]*workitems.Comment, 0, len(wrap.Comments))
 		for _, w := range wrap.Comments {
 			c := w.toTypesComment()
-			out = append(out, commentToData(&c))
+			out = append(out, &c)
 		}
-		backend.SortCommentsByCreation(out)
+		sortCommentsByCreation(out)
 		return out, nil
 	}
 	var bare []fleetCommentWire
 	if err := json.Unmarshal(resp.Data, &bare); err != nil {
 		return nil, backend.ErrInternal("ListComments", "unmarshal response", err)
 	}
-	out := make([]backend.CommentData, 0, len(bare))
+	out := make([]*workitems.Comment, 0, len(bare))
 	for _, w := range bare {
 		c := w.toTypesComment()
-		out = append(out, commentToData(&c))
+		out = append(out, &c)
 	}
-	backend.SortCommentsByCreation(out)
+	sortCommentsByCreation(out)
 	return out, nil
 }
 
-func (b *FleetBackend) AddComment(ctx context.Context, params backend.CommentAddParams) (*backend.CommentData, error) {
+func sortCommentsByCreation(comments []*workitems.Comment) {
+	sort.SliceStable(comments, func(i, j int) bool {
+		if comments[i].CreatedAt.Equal(comments[j].CreatedAt) {
+			return comments[i].ID < comments[j].ID
+		}
+		return comments[i].CreatedAt.Before(comments[j].CreatedAt)
+	})
+}
+
+func (b *FleetBackend) AddComment(ctx context.Context, command workitems.AddCommentCommand) (*workitems.Comment, error) {
 	// Response body: fleet-db returns a "body" field + string ID; loom's
 	// canonical workitems.Comment has "text" + int64 ID. Unmarshal into a
 	// local struct that mirrors fleet-db's wire shape, then project to
@@ -112,7 +123,7 @@ func (b *FleetBackend) AddComment(ctx context.Context, params backend.CommentAdd
 	type commentReq struct {
 		Body string `json:"body"`
 	}
-	resp, err := b.exec(ctx, "AddComment", "POST", "/issues/"+url.PathEscape(params.IssueID)+"/comments", commentReq{Body: params.Text})
+	resp, err := b.exec(ctx, "AddComment", "POST", "/issues/"+url.PathEscape(command.IssueID)+"/comments", commentReq{Body: command.Text})
 	if err != nil {
 		return nil, err
 	}
@@ -124,6 +135,8 @@ func (b *FleetBackend) AddComment(ctx context.Context, params backend.CommentAdd
 		return nil, backend.ErrInternal("AddComment", "unmarshal response", err)
 	}
 	comment := wire.toTypesComment()
-	result := commentToData(&comment)
-	return &result, nil
+	if comment.IssueID == "" {
+		comment.IssueID = command.IssueID
+	}
+	return &comment, nil
 }

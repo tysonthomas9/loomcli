@@ -111,22 +111,22 @@ func (b *localBackendStub) Reopen(context.Context, string, backend.ReopenParams)
 	return nil
 }
 func (b *localBackendStub) Delete(context.Context, backend.DeleteParams) error { return nil }
-func (b *localBackendStub) AddDependency(_ context.Context, params backend.DepAddParams) error {
-	b.record("AddDependency", params.FromID, params)
+func (b *localBackendStub) AddDependency(_ context.Context, command workitems.AddDependencyCommand) error {
+	b.record("AddDependency", command.IssueID, command)
 	return nil
 }
-func (b *localBackendStub) RemoveDependency(_ context.Context, params backend.DepRemoveParams) error {
-	b.record("RemoveDependency", params.FromID, params)
+func (b *localBackendStub) RemoveDependency(_ context.Context, command workitems.RemoveDependencyCommand) error {
+	b.record("RemoveDependency", command.IssueID, command)
 	return nil
 }
-func (b *localBackendStub) ListComments(context.Context, string) ([]backend.CommentData, error) {
+func (b *localBackendStub) ListComments(context.Context, workitems.ListCommentsQuery) ([]*workitems.Comment, error) {
 	return nil, nil
 }
-func (b *localBackendStub) AddComment(_ context.Context, params backend.CommentAddParams) (*backend.CommentData, error) {
-	b.record("AddComment", params.IssueID, params)
-	return &backend.CommentData{IssueID: params.IssueID, Author: params.Author, Text: params.Text}, nil
+func (b *localBackendStub) AddComment(_ context.Context, command workitems.AddCommentCommand) (*workitems.Comment, error) {
+	b.record("AddComment", command.IssueID, command)
+	return &workitems.Comment{IssueID: command.IssueID, Author: command.Author, Text: command.Text}, nil
 }
-func (b *localBackendStub) ListEvents(context.Context, string, int) ([]backend.EventData, error) {
+func (b *localBackendStub) ListEvents(context.Context, workitems.ListEventsQuery) ([]*workitems.Event, error) {
 	return nil, nil
 }
 func (b *localBackendStub) BackendName() string { return "local-stub" }
@@ -420,7 +420,7 @@ func TestDataComment_NoServerUsesLocalBackend(t *testing.T) {
 		if len(stub.calls) != 1 || stub.calls[0].method != "AddComment" || stub.calls[0].id != "loom-2" {
 			t.Fatalf("calls = %#v, want one AddComment call", stub.calls)
 		}
-		params := stub.calls[0].args.(backend.CommentAddParams)
+		params := stub.calls[0].args.(workitems.AddCommentCommand)
 		if params.IssueID != "loom-2" || params.Author != "planner" || params.Text != "ship it" {
 			t.Fatalf("Comment params = %#v", params)
 		}

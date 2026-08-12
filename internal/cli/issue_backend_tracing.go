@@ -41,6 +41,10 @@ type tracedIssueBackend struct {
 var _ workitems.StatsQueries = (*tracedIssueBackend)(nil)
 var _ workitems.BlockedQueries = (*tracedIssueBackend)(nil)
 var _ workitems.ReadyQueries = (*tracedIssueBackend)(nil)
+var _ workitems.EventQueries = (*tracedIssueBackend)(nil)
+var _ workitems.CommentQueries = (*tracedIssueBackend)(nil)
+var _ workitems.CommentCommands = (*tracedIssueBackend)(nil)
+var _ workitems.DependencyCommands = (*tracedIssueBackend)(nil)
 
 // wrapIssueBackendWithTracing returns a tracing-decorated IssueBackend.
 // nil-safe: passing nil returns nil so callers can wrap unconditionally.
@@ -334,27 +338,45 @@ func (t *tracedIssueBackend) Delete(ctx context.Context, params backend.DeletePa
 
 // --- Dependency operations ---
 
-func (t *tracedIssueBackend) AddDependency(ctx context.Context, params backend.DepAddParams) error {
-	ctx, span := t.startSpan(ctx, "AddDependency")
-	err := t.inner.AddDependency(ctx, params)
+func (t *tracedIssueBackend) AddDependency(ctx context.Context, command workitems.AddDependencyCommand) error {
+	ctx, span := t.startServiceSpan(ctx, "WorkItems", "AddDependency")
+	dependencies, ok := t.inner.(workitems.DependencyCommands)
+	if !ok {
+		err := backend.ErrUnavailable("AddDependency", "work items dependency commands unavailable", nil)
+		endSpan(span, err)
+		return err
+	}
+	err := dependencies.AddDependency(ctx, command)
 	endSpan(span, err)
 	return err
 }
 
-func (t *tracedIssueBackend) RemoveDependency(ctx context.Context, params backend.DepRemoveParams) error {
-	ctx, span := t.startSpan(ctx, "RemoveDependency")
-	err := t.inner.RemoveDependency(ctx, params)
+func (t *tracedIssueBackend) RemoveDependency(ctx context.Context, command workitems.RemoveDependencyCommand) error {
+	ctx, span := t.startServiceSpan(ctx, "WorkItems", "RemoveDependency")
+	dependencies, ok := t.inner.(workitems.DependencyCommands)
+	if !ok {
+		err := backend.ErrUnavailable("RemoveDependency", "work items dependency commands unavailable", nil)
+		endSpan(span, err)
+		return err
+	}
+	err := dependencies.RemoveDependency(ctx, command)
 	endSpan(span, err)
 	return err
 }
 
 // --- Comment operations ---
 
-func (t *tracedIssueBackend) ListComments(ctx context.Context, id string) ([]backend.CommentData, error) {
-	ctx, span := t.startSpan(ctx, "ListComments",
-		attribute.String("loom.task_id", id),
+func (t *tracedIssueBackend) ListComments(ctx context.Context, query workitems.ListCommentsQuery) ([]*workitems.Comment, error) {
+	ctx, span := t.startServiceSpan(ctx, "WorkItems", "ListComments",
+		attribute.String("loom.task_id", query.IssueID),
 	)
-	out, err := t.inner.ListComments(ctx, id)
+	comments, ok := t.inner.(workitems.CommentQueries)
+	if !ok {
+		err := backend.ErrUnavailable("ListComments", "work items comment queries unavailable", nil)
+		endSpan(span, err)
+		return nil, err
+	}
+	out, err := comments.ListComments(ctx, query)
 	if err == nil {
 		span.SetAttributes(attribute.Int("result.count", len(out)))
 	}
@@ -362,26 +384,38 @@ func (t *tracedIssueBackend) ListComments(ctx context.Context, id string) ([]bac
 	return out, err
 }
 
-func (t *tracedIssueBackend) AddComment(ctx context.Context, params backend.CommentAddParams) (*backend.CommentData, error) {
+func (t *tracedIssueBackend) AddComment(ctx context.Context, command workitems.AddCommentCommand) (*workitems.Comment, error) {
 	// NB: per §6, comment bodies are PII-sensitive — only their length is
 	// recorded, never the raw text.
-	ctx, span := t.startSpan(ctx, "AddComment",
-		attribute.String("loom.task_id", params.IssueID),
-		attribute.Int("comment.bytes", len(params.Text)),
+	ctx, span := t.startServiceSpan(ctx, "WorkItems", "AddComment",
+		attribute.String("loom.task_id", command.IssueID),
+		attribute.Int("comment.bytes", len(command.Text)),
 	)
-	out, err := t.inner.AddComment(ctx, params)
+	comments, ok := t.inner.(workitems.CommentCommands)
+	if !ok {
+		err := backend.ErrUnavailable("AddComment", "work items comment commands unavailable", nil)
+		endSpan(span, err)
+		return nil, err
+	}
+	out, err := comments.AddComment(ctx, command)
 	endSpan(span, err)
 	return out, err
 }
 
 // --- Event operations ---
 
-func (t *tracedIssueBackend) ListEvents(ctx context.Context, id string, limit int) ([]backend.EventData, error) {
-	ctx, span := t.startSpan(ctx, "ListEvents",
-		attribute.String("loom.task_id", id),
-		attribute.Int("limit", limit),
+func (t *tracedIssueBackend) ListEvents(ctx context.Context, query workitems.ListEventsQuery) ([]*workitems.Event, error) {
+	ctx, span := t.startServiceSpan(ctx, "WorkItems", "ListEvents",
+		attribute.String("loom.task_id", query.IssueID),
+		attribute.Int("limit", query.Limit),
 	)
-	out, err := t.inner.ListEvents(ctx, id, limit)
+	events, ok := t.inner.(workitems.EventQueries)
+	if !ok {
+		err := backend.ErrUnavailable("ListEvents", "work items event queries unavailable", nil)
+		endSpan(span, err)
+		return nil, err
+	}
+	out, err := events.ListEvents(ctx, query)
 	if err == nil {
 		span.SetAttributes(attribute.Int("result.count", len(out)))
 	}

@@ -264,6 +264,10 @@ var _ backend.ClaimReleaser = (*fleetDBIssueBackend)(nil)
 var _ workitems.ReadyQueries = (*fleetDBIssueBackend)(nil)
 var _ workitems.BlockedQueries = (*fleetDBIssueBackend)(nil)
 var _ workitems.StatsQueries = (*fleetDBIssueBackend)(nil)
+var _ workitems.EventQueries = (*fleetDBIssueBackend)(nil)
+var _ workitems.CommentQueries = (*fleetDBIssueBackend)(nil)
+var _ workitems.CommentCommands = (*fleetDBIssueBackend)(nil)
+var _ workitems.DependencyCommands = (*fleetDBIssueBackend)(nil)
 
 func newFleetDBIssueBackend() backend.IssueBackend {
 	return &fleetDBIssueBackend{}
@@ -483,43 +487,63 @@ func (b *fleetDBIssueBackend) Delete(ctx context.Context, params backend.DeleteP
 	})
 }
 
-func (b *fleetDBIssueBackend) AddDependency(ctx context.Context, params backend.DepAddParams) error {
+func (b *fleetDBIssueBackend) AddDependency(ctx context.Context, command workitems.AddDependencyCommand) error {
 	return b.withBackend(ctx, "AddDependency", func(ib backend.IssueBackend) error {
-		return ib.AddDependency(ctx, params)
+		dependencies, ok := ib.(workitems.DependencyCommands)
+		if !ok {
+			return backend.ErrUnavailable("AddDependency", "work items dependency commands unavailable", nil)
+		}
+		return dependencies.AddDependency(ctx, command)
 	})
 }
 
-func (b *fleetDBIssueBackend) RemoveDependency(ctx context.Context, params backend.DepRemoveParams) error {
+func (b *fleetDBIssueBackend) RemoveDependency(ctx context.Context, command workitems.RemoveDependencyCommand) error {
 	return b.withBackend(ctx, "RemoveDependency", func(ib backend.IssueBackend) error {
-		return ib.RemoveDependency(ctx, params)
+		dependencies, ok := ib.(workitems.DependencyCommands)
+		if !ok {
+			return backend.ErrUnavailable("RemoveDependency", "work items dependency commands unavailable", nil)
+		}
+		return dependencies.RemoveDependency(ctx, command)
 	})
 }
 
-func (b *fleetDBIssueBackend) ListComments(ctx context.Context, id string) ([]backend.CommentData, error) {
-	var out []backend.CommentData
+func (b *fleetDBIssueBackend) ListComments(ctx context.Context, query workitems.ListCommentsQuery) ([]*workitems.Comment, error) {
+	var out []*workitems.Comment
 	err := b.withBackend(ctx, "ListComments", func(ib backend.IssueBackend) error {
+		comments, ok := ib.(workitems.CommentQueries)
+		if !ok {
+			return backend.ErrUnavailable("ListComments", "work items comment queries unavailable", nil)
+		}
 		var err error
-		out, err = ib.ListComments(ctx, id)
+		out, err = comments.ListComments(ctx, query)
 		return err
 	})
 	return out, err
 }
 
-func (b *fleetDBIssueBackend) AddComment(ctx context.Context, params backend.CommentAddParams) (*backend.CommentData, error) {
-	var out *backend.CommentData
+func (b *fleetDBIssueBackend) AddComment(ctx context.Context, command workitems.AddCommentCommand) (*workitems.Comment, error) {
+	var out *workitems.Comment
 	err := b.withBackend(ctx, "AddComment", func(ib backend.IssueBackend) error {
+		comments, ok := ib.(workitems.CommentCommands)
+		if !ok {
+			return backend.ErrUnavailable("AddComment", "work items comment commands unavailable", nil)
+		}
 		var err error
-		out, err = ib.AddComment(ctx, params)
+		out, err = comments.AddComment(ctx, command)
 		return err
 	})
 	return out, err
 }
 
-func (b *fleetDBIssueBackend) ListEvents(ctx context.Context, id string, limit int) ([]backend.EventData, error) {
-	var out []backend.EventData
+func (b *fleetDBIssueBackend) ListEvents(ctx context.Context, query workitems.ListEventsQuery) ([]*workitems.Event, error) {
+	var out []*workitems.Event
 	err := b.withBackend(ctx, "ListEvents", func(ib backend.IssueBackend) error {
+		events, ok := ib.(workitems.EventQueries)
+		if !ok {
+			return backend.ErrUnavailable("ListEvents", "work items event queries unavailable", nil)
+		}
 		var err error
-		out, err = ib.ListEvents(ctx, id, limit)
+		out, err = events.ListEvents(ctx, query)
 		return err
 	})
 	return out, err
@@ -536,6 +560,10 @@ var _ backend.IssueBackend = (*unavailableIssueBackend)(nil)
 var _ workitems.ReadyQueries = (*unavailableIssueBackend)(nil)
 var _ workitems.BlockedQueries = (*unavailableIssueBackend)(nil)
 var _ workitems.StatsQueries = (*unavailableIssueBackend)(nil)
+var _ workitems.EventQueries = (*unavailableIssueBackend)(nil)
+var _ workitems.CommentQueries = (*unavailableIssueBackend)(nil)
+var _ workitems.CommentCommands = (*unavailableIssueBackend)(nil)
+var _ workitems.DependencyCommands = (*unavailableIssueBackend)(nil)
 
 func newUnavailableIssueBackend(name string, err error) backend.IssueBackend {
 	return &unavailableIssueBackend{name: name, err: err}
@@ -584,19 +612,19 @@ func (b *unavailableIssueBackend) Reopen(context.Context, string, backend.Reopen
 func (b *unavailableIssueBackend) Delete(context.Context, backend.DeleteParams) error {
 	return b.unavailable("Delete")
 }
-func (b *unavailableIssueBackend) AddDependency(context.Context, backend.DepAddParams) error {
+func (b *unavailableIssueBackend) AddDependency(context.Context, workitems.AddDependencyCommand) error {
 	return b.unavailable("AddDependency")
 }
-func (b *unavailableIssueBackend) RemoveDependency(context.Context, backend.DepRemoveParams) error {
+func (b *unavailableIssueBackend) RemoveDependency(context.Context, workitems.RemoveDependencyCommand) error {
 	return b.unavailable("RemoveDependency")
 }
-func (b *unavailableIssueBackend) ListComments(context.Context, string) ([]backend.CommentData, error) {
+func (b *unavailableIssueBackend) ListComments(context.Context, workitems.ListCommentsQuery) ([]*workitems.Comment, error) {
 	return nil, b.unavailable("ListComments")
 }
-func (b *unavailableIssueBackend) AddComment(context.Context, backend.CommentAddParams) (*backend.CommentData, error) {
+func (b *unavailableIssueBackend) AddComment(context.Context, workitems.AddCommentCommand) (*workitems.Comment, error) {
 	return nil, b.unavailable("AddComment")
 }
-func (b *unavailableIssueBackend) ListEvents(context.Context, string, int) ([]backend.EventData, error) {
+func (b *unavailableIssueBackend) ListEvents(context.Context, workitems.ListEventsQuery) ([]*workitems.Event, error) {
 	return nil, b.unavailable("ListEvents")
 }
 func (b *unavailableIssueBackend) BackendName() string { return b.name + "-unavailable" }

@@ -128,13 +128,9 @@ func TestCountIssuesResponse_ZeroValueGroups(t *testing.T) {
 
 func TestWorkItemProjectionHelpers(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
-	comment := commentToData(&workitems.Comment{ID: 42, IssueID: "TASK-1", Author: "user", Text: "hello", CreatedAt: now})
-	if comment.ID != 42 || comment.Text != "hello" {
-		t.Fatalf("comment projection = %#v", comment)
-	}
-	event := eventToData(&workitems.Event{ID: 99, IssueID: "TASK-1", EventType: workitems.EventCreated, Actor: "user", CreatedAt: now})
-	if event.ID != "99" || event.Kind != "issue.created" {
-		t.Fatalf("event projection = %#v", event)
+	comments := commentsToData([]*workitems.Comment{{ID: 42, IssueID: "TASK-1", Author: "user", Text: "hello", CreatedAt: now}})
+	if len(comments) != 1 || comments[0].ID != 42 || comments[0].Text != "hello" {
+		t.Fatalf("comment projections = %#v", comments)
 	}
 }
 

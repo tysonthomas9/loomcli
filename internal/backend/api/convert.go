@@ -1,7 +1,6 @@
 package api
 
 import (
-	"strconv"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
@@ -212,9 +211,10 @@ func commentResponseToData(c gen.CommentResponse, issueID string) backend.Commen
 	return d
 }
 
-// commentToData converts a basic gen.Comment to backend.CommentData.
-func commentToData(c gen.Comment) backend.CommentData {
-	return backend.CommentData{
+// commentToWorkItem converts a basic generated comment into the Work Items
+// owner projection.
+func commentToWorkItem(c gen.Comment) *workitems.Comment {
+	return &workitems.Comment{
 		ID:        c.Id,
 		IssueID:   c.IssueId,
 		Author:    c.Author,
@@ -223,12 +223,13 @@ func commentToData(c gen.Comment) backend.CommentData {
 	}
 }
 
-// eventToData converts gen.IssueEvent to backend.EventData.
-func eventToData(e gen.IssueEvent) backend.EventData {
-	return backend.EventData{
-		ID:        strconv.FormatInt(e.Id, 10),
+// eventToWorkItem converts a generated event into the Work Items owner
+// projection.
+func eventToWorkItem(e gen.IssueEvent) *workitems.Event {
+	return &workitems.Event{
+		ID:        e.Id,
 		IssueID:   e.IssueId,
-		Kind:      e.EventType,
+		EventType: workitems.EventType(e.EventType),
 		Actor:     e.Actor,
 		CreatedAt: e.CreatedAt,
 	}
