@@ -3,8 +3,10 @@ package driver
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -93,8 +95,12 @@ func TestRequestTaskRunCreatesExecutesAndFinishesChild(t *testing.T) {
 		t.Fatalf("final usage = %+v, want executor usage", final)
 	}
 	result := TaskRunResultFromOutcome(outcome)
-	if result.LeaseToken == "" {
-		t.Fatal("result lease token is empty, want scoped token for deferred task completion")
+	wire, err := json.Marshal(result)
+	if err != nil {
+		t.Fatalf("marshal public task-run result: %v", err)
+	}
+	if strings.Contains(string(wire), "leaseToken") || strings.Contains(string(wire), "lease_token") {
+		t.Fatalf("public task-run result exposed lease credential: %s", wire)
 	}
 	if result.DriverStepID != "step-1" {
 		t.Fatalf("result driver step id = %q, want step-1", result.DriverStepID)
@@ -161,7 +167,7 @@ func TestEnqueueTaskRunResolvesRunnerFromDriverVersionManifest(t *testing.T) {
 		ParentNodeID:  run.NodeID,
 		ParentLeaseID: run.LeaseID,
 		ParentFence:   run.FencingToken,
-	}, HostBridgeTaskExecutor{Command: []string{"task-runner-stub"}})
+	}, HostBridgeTaskExecutor{APIBaseURL: testTaskRunAPIURL, Command: []string{"task-runner-stub"}})
 	if err != nil {
 		t.Fatalf("EnqueueTaskRunWithResult: %v", err)
 	}
@@ -191,7 +197,7 @@ func TestEnqueueTaskRunRejectsUnknownRunner(t *testing.T) {
 		ParentNodeID:  run.NodeID,
 		ParentLeaseID: run.LeaseID,
 		ParentFence:   run.FencingToken,
-	}, HostBridgeTaskExecutor{Command: []string{"task-runner-stub"}})
+	}, HostBridgeTaskExecutor{APIBaseURL: testTaskRunAPIURL, Command: []string{"task-runner-stub"}})
 	if !errors.Is(err, domain.ErrInvalid) {
 		t.Fatalf("EnqueueTaskRunWithResult unknown runner err = %v, want ErrInvalid", err)
 	}
@@ -254,7 +260,7 @@ func TestEnqueueTaskRunWithResultCreatesQueuedChildWithoutExecuting(t *testing.T
 		WorkerProfileID:    "worker-profile-1",
 		RunnerPlacement:    domain.TaskRunPlacement{Provider: "custom-runner"},
 		SandboxPlacement:   domain.TaskRunPlacement{CWD: "/workspace"},
-	}, HostBridgeTaskExecutor{Command: []string{"unused"}})
+	}, HostBridgeTaskExecutor{APIBaseURL: testTaskRunAPIURL, Command: []string{"unused"}})
 	if err != nil {
 		t.Fatalf("EnqueueTaskRunWithResult: %v", err)
 	}
@@ -307,7 +313,7 @@ func TestEnqueueTaskRunWithResultFailsUnschedulableBeforeChildCreation(t *testin
 		ParentLeaseID:      run.LeaseID,
 		ParentFence:        run.FencingToken,
 		SandboxPlacement:   domain.TaskRunPlacement{Provider: "browser-sandbox"},
-	}, HostBridgeTaskExecutor{Command: []string{"unused"}})
+	}, HostBridgeTaskExecutor{APIBaseURL: testTaskRunAPIURL, Command: []string{"unused"}})
 	if !errors.Is(err, domain.ErrUnschedulable) {
 		t.Fatalf("EnqueueTaskRunWithResult err = %v, want ErrUnschedulable", err)
 	}
@@ -495,7 +501,8 @@ func TestRequestTaskRunUnsupportedProviderFailsBeforeChildCreation(t *testing.T)
 func TestRequestTaskRunHostBridgeMapsFlueDaytonaBeforeClaim(t *testing.T) {
 	ctx, st, run := setupRunningDriverRun(t)
 	executor := HostBridgeTaskExecutor{
-		Command: []string{"sh", "-c", "printf '%s\n' '{\"status\":\"completed\",\"exit_code\":0}'"},
+		APIBaseURL: testTaskRunAPIURL,
+		Command:    []string{"sh", "-c", "printf '%s\n' '{\"status\":\"completed\",\"exit_code\":0}'"},
 	}
 
 	final, err := RequestTaskRun(ctx, st, TaskRunRequestOptions{
@@ -522,7 +529,8 @@ func TestRequestTaskRunHostBridgeMapsFlueDaytonaBeforeClaim(t *testing.T) {
 func TestRequestTaskRunHostBridgeCustomProviderRequiresExplicitBackend(t *testing.T) {
 	ctx, st, run := setupRunningDriverRun(t)
 	executor := HostBridgeTaskExecutor{
-		Command: []string{"sh", "-c", "printf '%s\n' '{\"status\":\"completed\",\"exit_code\":0}'"},
+		APIBaseURL: testTaskRunAPIURL,
+		Command:    []string{"sh", "-c", "printf '%s\n' '{\"status\":\"completed\",\"exit_code\":0}'"},
 	}
 
 	if _, err := RequestTaskRun(ctx, st, TaskRunRequestOptions{

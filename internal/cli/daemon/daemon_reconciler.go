@@ -178,10 +178,17 @@ func (d *Daemon) hasLiveEphemeralStartCommand(ctx context.Context, agentName str
 	if d.store.AgentCommands() == nil {
 		return false, nil
 	}
-	cmds, err := d.store.AgentCommands().List(ctx, d.sup.WorkspaceID, store.AgentCommandFilter{
-		TargetAgentID: agentName,
-		Limit:         100,
-	})
+	cmds, err := listAgentCommandsByStatuses(
+		ctx,
+		d.store.AgentCommands(),
+		d.sup.WorkspaceID,
+		store.AgentCommandFilter{TargetAgentID: agentName},
+		recoverableAgentCommandStatuses,
+		func(cmd *domain.AgentCommand) bool {
+			return d.agentCommandBelongsToThisDaemon(cmd)
+		},
+		0,
+	)
 	if err != nil {
 		return false, err
 	}
@@ -220,7 +227,7 @@ func (d *Daemon) hasLiveEphemeralTaskSession(ctx context.Context, agentName stri
 
 func liveAgentCommandStatus(status domain.AgentCommandStatus) bool {
 	switch status {
-	case "", domain.AgentCommandQueued, domain.AgentCommandAcked, domain.AgentCommandRunning:
+	case domain.AgentCommandQueued, domain.AgentCommandAcked, domain.AgentCommandRunning:
 		return true
 	default:
 		return false
@@ -239,10 +246,62 @@ func liveAgentSessionStatus(status domain.AgentSessionStatus) bool {
 // drainAgents stops a list of agents, logging errors.
 func (d *Daemon) drainAgents(entries []config.AgentEntry, label string) {
 	for _, entry := range entries {
-		if err := d.sup.DrainAgent(entry.Worktree); err != nil {
+		force := false
+		if entry.DesiredState == domain.AgentDesiredDraining {
+			var err error
+			force, err = d.hasLiveForceStopCommand(entry.Worktree)
+			if err != nil {
+				// Do not silently turn an explicit force request into a
+				// cooperative drain when its durable intent cannot be read.
+				// The command poller can still execute the queued request.
+				slog.Warn("deferring desired-state drain while force intent is unavailable",
+					"worktree", entry.Worktree, "err", err)
+				continue
+			}
+		}
+
+		var err error
+		if force {
+			err = d.sup.DrainAgentForceful(entry.Worktree, supervisor.StopReasonManualStop)
+		} else {
+			err = d.sup.DrainAgent(entry.Worktree)
+		}
+		if err != nil {
 			slog.Error("failed to drain "+label+" agent", "worktree", entry.Worktree, "err", err)
 		}
 	}
+}
+
+func (d *Daemon) hasLiveForceStopCommand(agentName string) (bool, error) {
+	if d.store == nil || d.sup == nil || d.sup.WorkspaceID == "" || d.store.AgentCommands() == nil {
+		return false, nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	cmds, err := listAgentCommandsByStatuses(
+		ctx,
+		d.store.AgentCommands(),
+		d.sup.WorkspaceID,
+		store.AgentCommandFilter{TargetAgentID: agentName},
+		recoverableAgentCommandStatuses,
+		func(cmd *domain.AgentCommand) bool {
+			return d.agentCommandBelongsToThisDaemon(cmd)
+		},
+		0,
+	)
+	if err != nil {
+		return false, err
+	}
+	for _, cmd := range cmds {
+		if cmd == nil || cmd.Type != "stop" || cmd.Payload["force"] != "true" {
+			continue
+		}
+		if liveAgentCommandStatus(cmd.Status) {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // addNewAgents starts agents, skipping those manually stopped.

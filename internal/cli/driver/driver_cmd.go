@@ -12,6 +12,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
+	"github.com/tysonthomas9/loomcli/internal/cli/managementapi"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	driverpkg "github.com/tysonthomas9/loomcli/internal/driver"
 )
@@ -60,8 +61,9 @@ generate a Flue project or adapter source.`,
 }
 
 var driverRunCmd = &cobra.Command{
-	Use:   "run <driver_id>",
-	Short: "Record a queued DriverRun for a published driver",
+	Use:               "run <driver_id>",
+	Short:             "Record a queued DriverRun for a published driver",
+	PersistentPreRunE: cli.PrepareStandaloneHTTPCommand,
 	Long: `Record a queued DriverRun for a published driver.
 
 The run is pinned to the driver's active DriverVersion. Driver execution is
@@ -171,33 +173,32 @@ func driverRegisterTrust() (domain.DriverTrustLevel, error) {
 	return domain.DriverTrustUntrusted, nil
 }
 
-func runDriverRun(_ *cobra.Command, args []string) error {
-	return cmdstore.WithActiveWorkspace(func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error {
-		payload, err := parseDriverRunPayload(driverRunInput, driverRunEpic)
-		if err != nil {
-			return err
-		}
-		run, err := driverpkg.CreateDriverRun(ctx, h.Store, driverpkg.RunOptions{
-			WorkspaceKey:   ws,
-			DriverID:       args[0],
-			EpicID:         driverRunEpic,
-			RunID:          driverRunID,
-			IdempotencyKey: driverRunIdempotencyKey,
-			Entrypoint:     driverRunEntrypoint,
-			Payload:        payload,
-		})
-		if err != nil {
-			return fmt.Errorf("create driver run: %w", err)
-		}
-		if driverRunJSON {
-			return cmdstore.WriteJSON(run)
-		}
-		fmt.Printf("Recorded driver run %s (%s)\n", run.RunID, run.Status)
-		fmt.Printf("Driver: %s version %s\n", run.DriverID, run.DriverVersionID)
-		fmt.Printf("Epic: %s\n", run.EpicID)
-		fmt.Println("Execution pending: start a driver executor/runtime to claim queued runs.")
-		return nil
+func runDriverRun(cmd *cobra.Command, args []string) error {
+	payload, err := parseDriverRunPayload(driverRunInput, driverRunEpic)
+	if err != nil {
+		return err
+	}
+	ctx := cmd.Context()
+	client, err := managementapi.New(ctx, "loom driver run")
+	if err != nil {
+		return err
+	}
+	run, err := client.SubmitDriverRun(ctx, managementapi.SubmitDriverRunRequest{
+		CLICommand: "driver-run", DriverRef: args[0], RunID: driverRunID, IdempotencyKey: driverRunIdempotencyKey,
+		Entrypoint: driverRunEntrypoint,
+		EpicID:     driverRunEpic, Payload: payload,
 	})
+	if err != nil {
+		return fmt.Errorf("create driver run: %w", err)
+	}
+	if driverRunJSON {
+		return cmdstore.WriteJSON(run)
+	}
+	fmt.Printf("Recorded driver run %s (%s)\n", run.RunID, run.Status)
+	fmt.Printf("Driver: %s version %s\n", run.DriverID, run.DriverVersionID)
+	fmt.Printf("Epic: %s\n", run.EpicID)
+	fmt.Println("Execution pending: start a driver executor/runtime to claim queued runs.")
+	return nil
 }
 
 func parseDriverRunPayload(values []string, epicID string) (json.RawMessage, error) {

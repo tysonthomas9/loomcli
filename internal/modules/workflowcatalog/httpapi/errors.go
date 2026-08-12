@@ -46,7 +46,6 @@ func classifyError(err error) (int, string, string) {
 	switch {
 	case errors.Is(err, ErrUnauthenticated),
 		errors.Is(err, authority.ErrInvalidPrincipal),
-		errors.Is(err, authority.ErrInvalidOperatorToken),
 		errors.Is(err, authority.ErrPrincipalExpired),
 		errors.Is(err, authority.ErrOpaqueAuthority):
 		return http.StatusUnauthorized, errorCodeUnauthenticated, "authentication required"

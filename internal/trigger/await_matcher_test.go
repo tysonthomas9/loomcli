@@ -113,6 +113,15 @@ func pendingAwaits(t *testing.T, s *memstore.Store, pattern string) []*domain.Aw
 	return awaits
 }
 
+func newAwaitMatcher(t testing.TB, st store.Store) *trigger.AwaitMatcher {
+	t.Helper()
+	resolver, ok := st.Awaits().(store.AtomicAwaitStore)
+	if !ok {
+		t.Fatalf("await store %T does not implement store.AtomicAwaitStore", st.Awaits())
+	}
+	return trigger.NewAwaitMatcherWithResolver(st.Awaits(), st.DriverRuns(), resolver)
+}
+
 type atomicFailureStore struct {
 	store.Store
 	awaits *atomicFailureAwaitStore
@@ -171,7 +180,7 @@ func TestAwaitMatcherDispatchResolvesAndResumes(t *testing.T) {
 	pattern := domain.AwaitEventKey("pull_request", "acme/widgets#7")
 	key := newSuspendedAwaitRun(t, s, "run-a", pattern, nil)
 
-	matcher := &trigger.AwaitMatcher{Store: s}
+	matcher := newAwaitMatcher(t, s)
 	payload := json.RawMessage(`{"action":"opened"}`)
 	result, err := matcher.Dispatch(t.Context(), matcherWS, trigger.AwaitDispatchEvent{
 		EventID: "evt-1", EventType: "pull_request", SubjectRef: "acme/widgets#7",
@@ -202,12 +211,35 @@ func TestAwaitMatcherDispatchResolvesAndResumes(t *testing.T) {
 	}
 }
 
+func TestAwaitMatcherWithoutExplicitResolverFailsClosed(t *testing.T) {
+	s := memstore.New()
+	seedAwaitMatcherCatalog(t, s)
+	pattern := domain.AwaitEventKey("approval.granted", "deploy-no-resolver")
+	key := newSuspendedAwaitRun(t, s, "run-no-resolver", pattern, []string{"alice"})
+
+	matcher := &trigger.AwaitMatcher{AwaitStore: s.Awaits(), DriverRunStore: s.DriverRuns()}
+	result, err := matcher.Dispatch(t.Context(), matcherWS, trigger.AwaitDispatchEvent{
+		EventID: "evt-no-resolver", EventType: "approval.granted",
+		SubjectRef: "deploy-no-resolver", ActorRef: "alice",
+	})
+	if err == nil || result.Resolved() != 0 || len(result.Records) != 1 ||
+		result.Records[0].Outcome != trigger.AwaitMatchFailed {
+		t.Fatalf("Dispatch = %+v, %v; want one failed record", result, err)
+	}
+	if got := pendingAwaits(t, s, pattern); len(got) != 1 || got[0].InstanceKey != key {
+		t.Fatalf("pending awaits = %+v, want %s untouched", got, key)
+	}
+	if run := runStatus(t, s, "run-no-resolver"); run.Status != domain.DriverRunSuspendedAwaitingEvent {
+		t.Fatalf("run status = %s, want suspended", run.Status)
+	}
+}
+
 func TestAwaitMatcherAtomicPreCommitFailureRedispatchConverges(t *testing.T) {
 	s := memstore.New()
 	seedAwaitMatcherCatalog(t, s)
 	pattern := domain.AwaitEventKey("approval.granted", "deploy-atomic-pre")
 	key := newSuspendedAwaitRun(t, s, "run-atomic-pre", pattern, []string{"alice"})
-	matcher := &trigger.AwaitMatcher{Store: newAtomicFailureStore(s, "pre_commit")}
+	matcher := newAwaitMatcher(t, newAtomicFailureStore(s, "pre_commit"))
 	event := trigger.AwaitDispatchEvent{
 		EventID: "evt-atomic-pre", EventType: "approval.granted", SubjectRef: "deploy-atomic-pre", ActorRef: "alice",
 	}
@@ -237,7 +269,7 @@ func TestAwaitMatcherAtomicLostResponseIsAlreadyConverged(t *testing.T) {
 	seedAwaitMatcherCatalog(t, s)
 	pattern := domain.AwaitEventKey("approval.granted", "deploy-atomic-post")
 	key := newSuspendedAwaitRun(t, s, "run-atomic-post", pattern, []string{"alice"})
-	matcher := &trigger.AwaitMatcher{Store: newAtomicFailureStore(s, "post_commit")}
+	matcher := newAwaitMatcher(t, newAtomicFailureStore(s, "post_commit"))
 	event := trigger.AwaitDispatchEvent{
 		EventID: "evt-atomic-post", EventType: "approval.granted", SubjectRef: "deploy-atomic-post", ActorRef: "alice",
 	}
@@ -285,7 +317,7 @@ func TestAwaitMatcherExactKeyNearMisses(t *testing.T) {
 			seedAwaitMatcherCatalog(t, s)
 			key := newSuspendedAwaitRun(t, s, "run-miss", tt.pattern, nil)
 
-			matcher := &trigger.AwaitMatcher{Store: s}
+			matcher := newAwaitMatcher(t, s)
 			result, err := matcher.Dispatch(t.Context(), matcherWS, trigger.AwaitDispatchEvent{
 				EventID: "evt-near", EventType: tt.eventType, SubjectRef: tt.subjct, ActorRef: "octocat",
 			})
@@ -323,7 +355,7 @@ func TestAwaitMatcherActorPredicate(t *testing.T) {
 			seedAwaitMatcherCatalog(t, s)
 			key := newSuspendedAwaitRun(t, s, "run-actor", pattern, tt.actorAllow)
 
-			matcher := &trigger.AwaitMatcher{Store: s}
+			matcher := newAwaitMatcher(t, s)
 			result, err := matcher.Dispatch(t.Context(), matcherWS, trigger.AwaitDispatchEvent{
 				EventID: "evt-act", EventType: "approval.granted", SubjectRef: "deploy-42",
 				ActorRef: tt.actor, Payload: json.RawMessage(`{"approved":true}`),
@@ -364,7 +396,7 @@ func TestAwaitMatcherReservedRunFinishedProvenanceIsNoOpAndLaterGenuineEventWins
 	seedAwaitMatcherCatalog(t, s)
 	pattern := domain.AwaitEventKey(eventpolicy.RunFinishedEventType, "child-1")
 	key := newSuspendedAwaitRun(t, s, "run-parent", pattern, []string{eventpolicy.RunFinishedActorRef})
-	matcher := &trigger.AwaitMatcher{Store: s}
+	matcher := newAwaitMatcher(t, s)
 
 	for _, forged := range []trigger.AwaitDispatchEvent{
 		{
@@ -413,7 +445,7 @@ func TestAwaitMatcherRejectsReservedActorOnOrdinaryNonSystemEvent(t *testing.T) 
 	seedAwaitMatcherCatalog(t, s)
 	pattern := domain.AwaitEventKey("approval.granted", "deploy-reserved")
 	newSuspendedAwaitRun(t, s, "run-reserved-actor", pattern, []string{"system:approver"})
-	result, err := (&trigger.AwaitMatcher{Store: s}).Dispatch(t.Context(), matcherWS, trigger.AwaitDispatchEvent{
+	result, err := newAwaitMatcher(t, s).Dispatch(t.Context(), matcherWS, trigger.AwaitDispatchEvent{
 		EventID: "approval-1", EventType: "approval.granted", SourceKind: "github",
 		Origin: domain.TriggerEventOriginExternal, SubjectRef: "deploy-reserved", ActorRef: "system:approver",
 	})
@@ -434,7 +466,7 @@ func TestAwaitMatcherMultiWaiter(t *testing.T) {
 	newSuspendedAwaitRun(t, s, "run-w1", pattern, nil)
 	newSuspendedAwaitRun(t, s, "run-w2", pattern, nil)
 
-	matcher := &trigger.AwaitMatcher{Store: s}
+	matcher := newAwaitMatcher(t, s)
 	result, err := matcher.Dispatch(t.Context(), matcherWS, trigger.AwaitDispatchEvent{
 		EventID: "evt-multi", EventType: "issue.closed", SubjectRef: "issue#9", ActorRef: "alice",
 	})
@@ -459,7 +491,7 @@ func TestAwaitMatcherConcurrentEventRace(t *testing.T) {
 	pattern := domain.AwaitEventKey("pr.merged", "acme/widgets#3")
 	key := newSuspendedAwaitRun(t, s, "run-race", pattern, nil)
 
-	matcher := &trigger.AwaitMatcher{Store: s}
+	matcher := newAwaitMatcher(t, s)
 	results := make([]*trigger.AwaitDispatchResult, 2)
 	var wg sync.WaitGroup
 	for i, eventID := range []string{"evt-race-a", "evt-race-b"} {
@@ -508,7 +540,7 @@ func TestAwaitMatcherTimeoutWinnerStands(t *testing.T) {
 		t.Fatalf("ResumeAwaiting(timeout): %v", err)
 	}
 
-	matcher := &trigger.AwaitMatcher{Store: s}
+	matcher := newAwaitMatcher(t, s)
 	result, err := matcher.Dispatch(t.Context(), matcherWS, trigger.AwaitDispatchEvent{
 		EventID: "evt-late", EventType: "review.submitted", SubjectRef: "acme/widgets#5", ActorRef: "alice",
 	})
@@ -542,7 +574,7 @@ func TestAwaitMatcherPendingSuspendWindowRetry(t *testing.T) {
 	run := createClaimedRun(t, s, "run-window")
 	key := registerPendingAwait(t, s, "run-window", pattern, nil) // run still RUNNING
 
-	matcher := &trigger.AwaitMatcher{Store: s}
+	matcher := newAwaitMatcher(t, s)
 	result, err := matcher.Dispatch(t.Context(), matcherWS, trigger.AwaitDispatchEvent{
 		EventID: "evt-window", EventType: "build.finished", SubjectRef: "build-7", ActorRef: "ci",
 	})
@@ -577,7 +609,7 @@ func TestAwaitMatcherResumeInvalidKeepsResolution(t *testing.T) {
 		t.Fatalf("Finish: %v", err)
 	}
 
-	matcher := &trigger.AwaitMatcher{Store: s}
+	matcher := newAwaitMatcher(t, s)
 	result, err := matcher.Dispatch(t.Context(), matcherWS, trigger.AwaitDispatchEvent{
 		EventID: "evt-term", EventType: "external.signal", SubjectRef: "sig-1", ActorRef: "alice",
 	})
@@ -609,7 +641,7 @@ func TestAwaitMatcherPayloadCap(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal oversized payload: %v", err)
 	}
-	matcher := &trigger.AwaitMatcher{Store: s}
+	matcher := newAwaitMatcher(t, s)
 	result, err := matcher.Dispatch(t.Context(), matcherWS, trigger.AwaitDispatchEvent{
 		EventID: "evt-big", EventType: "bulk.imported", SubjectRef: "batch-1", ActorRef: "alice", Payload: big,
 	})
@@ -628,7 +660,7 @@ func TestAwaitMatcherPayloadCap(t *testing.T) {
 // key, structurally unmatched.
 func TestAwaitMatcherSkipsSubjectlessEvents(t *testing.T) {
 	s := memstore.New()
-	matcher := &trigger.AwaitMatcher{Store: s}
+	matcher := newAwaitMatcher(t, s)
 	result, err := matcher.Dispatch(t.Context(), matcherWS, trigger.AwaitDispatchEvent{
 		EventID: "evt-bare", EventType: "ping",
 	})
@@ -646,7 +678,7 @@ func TestInternalSourceEmitResolvesAwait(t *testing.T) {
 	seedAwaitMatcherCatalog(t, s)
 	key := newSuspendedAwaitRun(t, s, "run-loop", domain.AwaitEventKey("issue.created", "issue#42"), nil)
 
-	src := &trigger.InternalSource{Store: s}
+	src := &trigger.InternalSource{Store: s, AwaitResolver: s.Awaits().(store.AtomicAwaitStore)}
 	payload := json.RawMessage(`{"issueId":"42"}`)
 	if _, err := src.Emit(t.Context(), matcherWS, trigger.InternalEvent{
 		EventID: "emit-await-1", EventType: "issue.create", SubjectRef: "issue#42",
@@ -674,7 +706,9 @@ func TestCronTickResolvesAwait(t *testing.T) {
 	seedAwaitMatcherCatalog(t, s)
 	key := newSuspendedAwaitRun(t, s, "run-cron", domain.AwaitEventKey(trigger.CronEventType, "cron-nightly"), nil)
 
-	sched := &trigger.CronScheduler{Store: s, WorkspaceKey: matcherWS}
+	sched := &trigger.CronScheduler{
+		Store: s, AwaitResolver: s.Awaits().(store.AtomicAwaitStore), WorkspaceKey: matcherWS,
+	}
 	base := time.Now().UTC().Truncate(time.Minute)
 	if _, err := sched.RunOnce(t.Context(), base); err != nil { // primes the window
 		t.Fatalf("RunOnce(prime): %v", err)

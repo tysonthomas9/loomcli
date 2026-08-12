@@ -179,6 +179,7 @@ func TestDriverAPIAwaitEventReplayAfterResume(t *testing.T) {
 		HeaderDriverRunID:        reclaimed.RunID,
 		HeaderDriverNodeID:       reclaimed.NodeID,
 		HeaderDriverLeaseID:      reclaimed.LeaseID,
+		HeaderDriverLeaseToken:   "driver-test-token",
 		HeaderDriverFencingToken: fmt.Sprintf("%d", reclaimed.FencingToken),
 	}
 

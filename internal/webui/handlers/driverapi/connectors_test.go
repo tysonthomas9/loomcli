@@ -116,13 +116,18 @@ func newConnectorHarness(t *testing.T) *connectorHarness {
 	if err := registry.Register(domain.ConnectorSourceGitHub, provider); err != nil {
 		t.Fatalf("Register provider: %v", err)
 	}
-	module := NewModule(Config{Store: st, Dispatcher: &connector.Dispatcher{
-		Connectors: st.Connectors(),
-		Grants:     st.ConnectorGrants(),
-		Audit:      st.ConnectorCalls(),
-		Vault:      vault,
-		Providers:  registry,
-	}})
+	module := NewModule(Config{
+		Store:                st,
+		Execution:            testDriverRunExecution{store: st},
+		ExecutionAuthorities: testDriverRunAuthorityResolver{},
+		Dispatcher: &connector.Dispatcher{
+			Connectors: st.Connectors(),
+			Grants:     st.ConnectorGrants(),
+			Audit:      st.ConnectorCalls(),
+			Vault:      vault,
+			Providers:  registry,
+		},
+	})
 	mux := http.NewServeMux()
 	module.Register(mux)
 	server := httptest.NewServer(mux)

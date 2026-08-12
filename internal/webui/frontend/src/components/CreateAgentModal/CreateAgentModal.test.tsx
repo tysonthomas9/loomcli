@@ -12,9 +12,14 @@ import { CreateAgentModal } from "./CreateAgentModal";
 const mockCreateAgent = vi.fn();
 const mockEnsureRole = vi.fn().mockResolvedValue({ name: "bug-triage" });
 const mockListWorkspaceRoles = vi.fn();
+const mockGetWorkspaceRole = vi.fn();
 const mockCreateBinding = vi.fn();
+const mockUpdateBinding = vi.fn();
+const mockSetEnabled = vi.fn();
+const mockPreflightCredential = vi.fn();
 const mockEnsureConnector = vi.fn();
 const mockAddGrant = vi.fn();
+const mockReplaceGrants = vi.fn();
 
 vi.mock("@/hooks/agents", () => ({
   useCreateWorkspaceAgent: () => mockCreateAgent,
@@ -29,17 +34,33 @@ vi.mock("@/hooks/agents", () => ({
   }),
 }));
 vi.mock("@/api/workspace", () => ({
+  getWorkspaceRole: (...args: unknown[]) => mockGetWorkspaceRole(...args),
   listWorkspaceRoles: (...args: unknown[]) => mockListWorkspaceRoles(...args),
 }));
 vi.mock("@/hooks/workspace", () => ({
   GITHUB_CONNECTOR_ID: "github",
-  useAutomations: () => ({ createBinding: mockCreateBinding }),
+  useAutomations: () => ({
+    createBinding: mockCreateBinding,
+    updateBinding: mockUpdateBinding,
+    setEnabled: mockSetEnabled,
+  }),
   useBackends: () => ({
-    backends: [{ name: "codex", displayName: "codex" }],
+    backends: [
+      {
+        name: "codex",
+        displayName: "Codex",
+        available: true,
+        installed: true,
+      },
+    ],
+    isLoading: false,
+    error: null,
   }),
   useConnectorProvisioning: () => ({
+    preflightCredential: mockPreflightCredential,
     ensureConnector: mockEnsureConnector,
     addGrant: mockAddGrant,
+    replaceGrants: mockReplaceGrants,
   }),
   useLocalSettings: () => ({
     settings: { runtime_credentials: { github: { configured: true } } },
@@ -60,6 +81,7 @@ describe("CreateAgentModal", () => {
   beforeEach(() => {
     mockCreateAgent.mockReset();
     mockListWorkspaceRoles.mockReset();
+    mockGetWorkspaceRole.mockReset();
     mockListWorkspaceRoles.mockResolvedValue([]);
     mockCreateAgent.mockResolvedValue({
       name: "lead-nova",
@@ -90,9 +112,10 @@ describe("CreateAgentModal", () => {
     });
     fireEvent.click(screen.getByTestId("create-agent-template-lead"));
     expect(screen.queryByText(/^Lead agent$/i)).not.toBeInTheDocument();
-    // The first repo chip is pre-selected; deselect it so the lead gets
-    // workspace-wide scope (empty selection = cross_repo).
-    fireEvent.click(screen.getByRole("button", { name: /hello-world/ }));
+    expect(screen.getByTestId("create-agent-repo-chips")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /hello-world/i }),
+    ).toHaveAttribute("aria-pressed", "true");
 
     fireEvent.click(screen.getByRole("button", { name: /create agent/i }));
 
@@ -101,8 +124,8 @@ describe("CreateAgentModal", () => {
         name: "lead-nova",
         role_name: "lead",
         auto: false,
-        cross_repo: true,
-        repos: [],
+        cross_repo: false,
+        repos: ["hello-world"],
         backend: "codex",
       });
     });
@@ -113,6 +136,7 @@ describe("CreateAgentModal", () => {
       repos: [],
       repo_groups: [],
       cross_repo: false,
+      kind: "interactive",
     });
   });
 });

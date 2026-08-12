@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
+	"github.com/tysonthomas9/loomcli/internal/workspaceerrors"
 )
 
 func TestHandleListWorkspaces(t *testing.T) {
@@ -133,5 +135,118 @@ func TestHandleGetWorkspace_EmptyID(t *testing.T) {
 
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d", rec.Code)
+	}
+}
+
+func TestHandleAddWorkspaceRepos_RemoteCloneReturnsAcceptedWithoutSynchronousMutation(t *testing.T) {
+	syncCalled := false
+	svc := &mockWorkspaceService{
+		addWorkspaceReposFn: func(_ context.Context, _ service.WorkspaceAddReposRequest) (*ops.WorkspaceData, error) {
+			syncCalled = true
+			return nil, nil
+		},
+		startAsyncAddReposFn: func(_ context.Context, req service.WorkspaceAddReposRequest) (string, error) {
+			if req.WorkspaceID != "ALLAGENTS" {
+				t.Fatalf("workspace ID = %q, want ALLAGENTS", req.WorkspaceID)
+			}
+			if len(req.CloneURLs) != 1 || req.CloneURLs[0] != "https://github.com/acme/slow.git" {
+				t.Fatalf("clone URLs = %#v", req.CloneURLs)
+			}
+			return "add-repos-job-123", nil
+		},
+	}
+
+	handler := HandleAddWorkspaceRepos(svc)
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/api/workspaces/ALLAGENTS/repos",
+		strings.NewReader(`{"clone_urls":["https://github.com/acme/slow.git"]}`),
+	)
+	req.SetPathValue("ws", "ALLAGENTS")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("expected 202, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if syncCalled {
+		t.Fatal("remote clone must not run in the request-bound synchronous path")
+	}
+	var body struct {
+		Success bool   `json:"success"`
+		JobID   string `json:"job_id"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if !body.Success || body.JobID != "add-repos-job-123" {
+		t.Fatalf("response = %#v, want accepted job", body)
+	}
+}
+
+func TestHandleAddWorkspaceRepos_LocalPathRemainsSynchronous(t *testing.T) {
+	asyncCalled := false
+	want := &ops.WorkspaceData{ID: "ALLAGENTS"}
+	svc := &mockWorkspaceService{
+		addWorkspaceReposFn: func(_ context.Context, req service.WorkspaceAddReposRequest) (*ops.WorkspaceData, error) {
+			if len(req.Repos) != 1 || req.Repos[0] != "/workspace/source-repo" {
+				t.Fatalf("repos = %#v", req.Repos)
+			}
+			return want, nil
+		},
+		startAsyncAddReposFn: func(_ context.Context, _ service.WorkspaceAddReposRequest) (string, error) {
+			asyncCalled = true
+			return "", nil
+		},
+	}
+
+	handler := HandleAddWorkspaceRepos(svc)
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/api/workspaces/ALLAGENTS/repos",
+		strings.NewReader(`{"repos":["/workspace/source-repo"]}`),
+	)
+	req.SetPathValue("ws", "ALLAGENTS")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if asyncCalled {
+		t.Fatal("local path attachment should remain synchronous")
+	}
+}
+
+func TestHandleAddWorkspaceRepos_NameCollisionReturnsConflict(t *testing.T) {
+	const message = `repository name "source-repo" is already registered; repository names must be unique across workspaces`
+	svc := service.NewWorkspaceService(service.WorkspaceServiceConfig{
+		AddReposFn: func(_ context.Context, _ service.WorkspaceAddReposRequest) (service.WorkspaceCreateResult, error) {
+			return service.WorkspaceCreateResult{}, workspaceerrors.New(workspaceerrors.AlreadyExists, message, nil)
+		},
+	})
+
+	handler := HandleAddWorkspaceRepos(svc)
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/api/workspaces/ALLAGENTS/repos",
+		strings.NewReader(`{"repos":["/workspace/source-repo"]}`),
+	)
+	req.SetPathValue("ws", "ALLAGENTS")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("expected 409, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		Error string `json:"error"`
+		Kind  string `json:"kind"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body.Error != message || body.Kind != "conflict" {
+		t.Fatalf("response = %#v, want conflict with actionable repository collision message", body)
 	}
 }

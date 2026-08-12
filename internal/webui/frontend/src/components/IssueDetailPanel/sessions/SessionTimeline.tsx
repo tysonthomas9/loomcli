@@ -4,10 +4,12 @@
  */
 
 import type { SessionRecord } from "@/types/agent";
+import type { TaskWorkflowRun } from "@/api/workflows";
 import { formatCost, formatTokens } from "@/utils/sessionUsage";
 
 import { SessionTimelineRow } from "./SessionTimelineRow";
-import styles from "./SessionsTab.module.css";
+import { WorkflowRunTimelineRow } from "./WorkflowRunTimelineRow";
+import styles from "@/styles/SessionRunDetail.module.css";
 
 export interface RunRailSummary {
   count: number;
@@ -22,6 +24,9 @@ export interface SessionTimelineProps {
   selectedId: string | null;
   onSelect: (id: string) => void;
   isLoading: boolean;
+  workflowRuns?: TaskWorkflowRun[];
+  selectedWorkflowRunId?: string | null;
+  onSelectWorkflowRun?: (id: string) => void;
   summary: RunRailSummary;
 }
 
@@ -30,9 +35,12 @@ export function SessionTimeline({
   selectedId,
   onSelect,
   isLoading,
+  workflowRuns = [],
+  selectedWorkflowRunId = null,
+  onSelectWorkflowRun,
   summary,
 }: SessionTimelineProps): JSX.Element {
-  if (isLoading && sessions.length === 0) {
+  if (isLoading && sessions.length === 0 && workflowRuns.length === 0) {
     return (
       <div className={styles.timeline}>
         <div className={styles.timelineHeader}>
@@ -47,10 +55,21 @@ export function SessionTimeline({
     );
   }
 
-  // Sort newest-first by started_at
-  const sorted = [...sessions].sort(
-    (a, b) =>
-      new Date(b.started_at).getTime() - new Date(a.started_at).getTime(),
+  const sorted = [
+    ...sessions.map((session) => ({
+      kind: "session" as const,
+      id: session.session_id,
+      timestamp: session.started_at,
+      session,
+    })),
+    ...workflowRuns.map((run) => ({
+      kind: "workflow" as const,
+      id: run.run_id,
+      timestamp: run.started_at || run.created_at,
+      run,
+    })),
+  ].sort(
+    (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime(),
   );
 
   const summaryParts = [
@@ -80,16 +99,23 @@ export function SessionTimeline({
           ))}
         </span>
       </div>
-      <div className={styles.timelineList}>
-        {sorted.map((session) => (
+      {sorted.map((item) =>
+        item.kind === "session" ? (
           <SessionTimelineRow
-            key={session.session_id}
-            session={session}
-            isSelected={selectedId === session.session_id}
-            onClick={() => onSelect(session.session_id)}
+            key={`session:${item.id}`}
+            session={item.session}
+            isSelected={selectedId === item.id}
+            onClick={() => onSelect(item.id)}
           />
-        ))}
-      </div>
+        ) : (
+          <WorkflowRunTimelineRow
+            key={`workflow:${item.id}`}
+            run={item.run}
+            isSelected={selectedWorkflowRunId === item.id}
+            onClick={() => onSelectWorkflowRun?.(item.id)}
+          />
+        ),
+      )}
     </div>
   );
 }

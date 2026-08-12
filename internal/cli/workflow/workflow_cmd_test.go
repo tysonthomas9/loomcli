@@ -13,11 +13,9 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
-	"github.com/tysonthomas9/loomcli/internal/cli/backends"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	driverpkg "github.com/tysonthomas9/loomcli/internal/driver"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
-	"github.com/tysonthomas9/loomcli/internal/runtimepreflight"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/workflows"
 )
@@ -103,8 +101,8 @@ func TestWorkflowReadyzJSONReportsLocalRoots(t *testing.T) {
 }
 
 func TestWorkflowManagementAndStoreLaneCommandsJSON(t *testing.T) {
-	ctx, st := setupWorkflowCommandStore(t)
-	withWorkflowCommandStore(t, st)
+	resetWorkflowCommandGlobals()
+	t.Cleanup(resetWorkflowCommandGlobals)
 	setupWorkflowManagementFixture(t)
 
 	workflowVersionID = "version-1"
@@ -216,9 +214,6 @@ func TestWorkflowManagementAndStoreLaneCommandsJSON(t *testing.T) {
 		t.Fatalf("active version count = %d, want 1", activeCount)
 	}
 
-	if _, err := st.DriverRuns().Get(ctx, "TEST", run.RunID); err != nil {
-		t.Fatalf("preview run was not persisted: %v", err)
-	}
 }
 
 func TestWorkflowApproveUnknownVersionReturnsError(t *testing.T) {
@@ -237,8 +232,9 @@ func TestWorkflowApproveUnknownVersionReturnsError(t *testing.T) {
 }
 
 func TestWorkflowRunInvalidInputReturnsErrorWithoutCreatingRun(t *testing.T) {
-	ctx, st := setupWorkflowCommandStore(t)
-	withWorkflowCommandStore(t, st)
+	resetWorkflowCommandGlobals()
+	t.Cleanup(resetWorkflowCommandGlobals)
+	fixture := setupWorkflowManagementFixture(t)
 	workflowRunInput = []string{"missing-equals"}
 	workflowRunJSON = true
 
@@ -248,37 +244,35 @@ func TestWorkflowRunInvalidInputReturnsErrorWithoutCreatingRun(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "input must be key=value") {
 		t.Fatalf("runWorkflowRun err = %v, want key=value validation error", err)
 	}
-	runs, listErr := st.DriverRuns().List(ctx, "TEST", store.DriverRunFilter{})
-	if listErr != nil {
-		t.Fatalf("list runs: %v", listErr)
-	}
-	if len(runs) != 0 {
-		t.Fatalf("runs = %+v, want no persisted run after invalid input", runs)
+	if got := fixture.paths(); len(got) != 0 {
+		t.Fatalf("management requests = %v, want none after invalid input", got)
 	}
 }
 
-func TestWorkflowRunLocalRunnerPreflightFailureDoesNotCreateRun(t *testing.T) {
-	ctx, st := setupWorkflowCommandStore(t)
-	withWorkflowCommandStore(t, st)
-	restore := runtimepreflight.SetHealthCheckerForTest(func(name string) (backends.HealthStatus, bool) {
-		return backends.HealthStatus{Installed: false, APIKeySet: false, Healthy: false, Message: "missing test backend"}, true
-	})
-	t.Cleanup(restore)
+func TestWorkflowRunUsesManagementAPIWithoutOpeningStore(t *testing.T) {
+	resetWorkflowCommandGlobals()
+	t.Cleanup(resetWorkflowCommandGlobals)
+	fixture := setupWorkflowManagementFixture(t)
+	openedStore := false
+	original := workflowWithActiveWorkspace
+	workflowWithActiveWorkspace = func(func(context.Context, *bootstrap.StoreHandle, string) error) error {
+		openedStore = true
+		return nil
+	}
+	t.Cleanup(func() { workflowWithActiveWorkspace = original })
 	workflowRunEpic = "EPIC-1"
 	workflowRunJSON = true
 
-	_, err := captureWorkflowStdout(t, func() error {
+	if _, err := captureWorkflowStdout(t, func() error {
 		return runWorkflowRun(&cobra.Command{}, []string{workflows.BuiltinEpicRunnerWorkflowName})
-	})
-	if err == nil || !strings.Contains(err.Error(), "local_backend_unavailable") {
-		t.Fatalf("runWorkflowRun err = %v, want local backend preflight failure", err)
+	}); err != nil {
+		t.Fatalf("runWorkflowRun: %v", err)
 	}
-	runs, listErr := st.DriverRuns().List(ctx, "TEST", store.DriverRunFilter{})
-	if listErr != nil {
-		t.Fatalf("list runs: %v", listErr)
+	if openedStore {
+		t.Fatal("workflow run opened a Store")
 	}
-	if len(runs) != 0 {
-		t.Fatalf("runs = %+v, want no persisted run after preflight failure", runs)
+	if paths := strings.Join(fixture.paths(), "\n"); !strings.Contains(paths, "POST /api/workspaces/TEST/execution/driver-runs") {
+		t.Fatalf("management paths =\n%s", paths)
 	}
 }
 
@@ -426,51 +420,6 @@ func setupWorkflowCommandStore(t *testing.T) (context.Context, store.Store) {
 		}
 	}
 	return ctx, st
-}
-
-// A manual `loom workflow run` resolves its connector-authz binding by DRIVER
-// (stamping that binding's route_key as SourceRef), not a magic shared route —
-// so it keeps working now that cron route_keys are derived per-binding.
-func TestManualRunSourceRef(t *testing.T) {
-	ctx := context.Background()
-	st := memstore.New()
-	const ws, drv, ver = "WS", "drv-1", "v-1"
-	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: ws, Name: ws}); err != nil {
-		t.Fatalf("create ws: %v", err)
-	}
-	if _, err := st.Drivers().Create(ctx, store.DriverCreate{
-		WorkspaceKey: ws, DriverID: drv, Name: "bug-fix-agent",
-		Status: domain.DriverStatusActive, ActiveVersionID: ver,
-	}); err != nil {
-		t.Fatalf("create driver: %v", err)
-	}
-	if _, err := st.DriverVersions().Create(ctx, store.DriverVersionCreate{
-		WorkspaceKey: ws, VersionID: ver, DriverID: drv, Version: 1,
-		SourceDigest: "sha256:s", BundleDigest: "sha256:b",
-		ValidationStatus: domain.DriverVersionValidationPassed,
-	}); err != nil {
-		t.Fatalf("create version: %v", err)
-	}
-
-	// No binding for the driver yet -> a plain fallback label (connector actions
-	// are then correctly ungranted).
-	if got := manualRunSourceRef(ctx, st, ws, drv); got != "loom workflow run" {
-		t.Fatalf("no-binding SourceRef = %q, want the fallback label", got)
-	}
-
-	// Register a cron binding for the driver; the store derives its route_key.
-	if _, err := st.TriggerBindings().Create(ctx, store.TriggerBindingCreate{
-		WorkspaceKey: ws, BindingID: "s1-bug-fix", Name: "s1-bug-fix",
-		SourceKind: store.CronSourceKind, DriverID: drv, DriverVersionID: ver,
-		Schedule: "*/10 * * * *", Enabled: true,
-	}); err != nil {
-		t.Fatalf("create binding: %v", err)
-	}
-	// Now a manual run stamps that binding's derived route_key, so its connector
-	// actions resolve the binding's grants (via GetByRouteKey).
-	if got := manualRunSourceRef(ctx, st, ws, drv); got != "cron:s1-bug-fix" {
-		t.Fatalf("SourceRef = %q, want cron:s1-bug-fix (the binding's derived route)", got)
-	}
 }
 
 func withWorkflowCommandStore(t *testing.T, st store.Store) {

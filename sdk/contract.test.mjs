@@ -74,7 +74,16 @@ test("contract: every op sends only frozen camelCase wire fields to its frozen p
     // `type` narrows the ready queue server-side; `actor` is accepted for
     // wire-compat but ignored server-side (the lock is keyed by the run's
     // derived actor — see the driverapi actor-lock security fix).
-    await client.tasks.claimReady({ actor: "lead", limit: 5, type: "bug" });
+    await client.tasks.claimReady({ actor: "lead", limit: 5, type: "bug", sourceRepo: "alpha" });
+    await client.tasks.claimReview({ taskId: "TASK-1" });
+    await client.tasks.handoffReview({
+      taskId: "TASK-1",
+      taskRunId: "task-run-1",
+      status: "review",
+      priority: 2,
+      labels: ["bug", "reviewed"],
+      commentBody: "Automated bug triage completed.",
+    });
     await client.epics.get({});
     await client.epics.snapshot({});
     await client.agents.list();
@@ -93,6 +102,8 @@ test("contract: every op sends only frozen camelCase wire fields to its frozen p
       driverStepId: "step-1",
       capabilities: ["git"],
       leaseToken: "lt-1",
+      closeTask: false,
+      retainWorkItemClaim: true,
     });
     await client.taskRuns.get({ taskRunId: "task-run-1" });
     await client.taskRuns.active({ limit: 2 });
@@ -113,6 +124,7 @@ test("contract: every op sends only frozen camelCase wire fields to its frozen p
       artifactIds: ["art-1"],
     });
     await client.tasks.release({ taskId: "TASK-1", actor: "lead" });
+    await client.tasks.releaseReview({ taskId: "TASK-1" });
     await client.tasks.claim({ taskId: "TASK-1", actor: "lead", epicId: "EPIC-1", limit: 5 });
     await client.tasks.diff({ taskId: "TASK-1" });
     await client.connectors.dispatch({
@@ -130,6 +142,7 @@ test("contract: every op sends only frozen camelCase wire fields to its frozen p
     await client.issues.listComments({ issueId: "ISSUE-1" });
     await client.issues.comment({ issueId: "ISSUE-1", body: "looks good" });
     await client.issues.update({ issueId: "ISSUE-1", status: "open", priority: 1, labels: ["review-cycle:1"], assignee: "agent", externalRef: "octo/hello#1" });
+    await client.issues.blockRepositoryRequired({ issueId: "ISSUE-1" });
     await client.issues.addLabel({ issueId: "ISSUE-1", label: "review-cycle:1" });
     await client.issues.removeLabel({ issueId: "ISSUE-1", label: "review-cycle:1" });
     await client.roles.get({ name: "docs-assistant" });

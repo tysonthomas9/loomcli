@@ -28,12 +28,89 @@ const (
 	// Phase 3 Automation core, ingress workflows, and runtime components. The
 	// running FleetDB advertises it only for a backend with full contract parity.
 	AutomationTriggerAdmissionCapability = "automation.trigger_admission.v1"
+	// WorkItemsRepositoryRequirementCapability certifies the conditional
+	// repository-required block and repository-assignment recovery commands.
+	// Loom has no safe generic-update fallback for these race-sensitive state
+	// transitions.
+	WorkItemsRepositoryRequirementCapability = "work_items.repository_requirement.v1"
 	// ExecutionAwaitAtomicResumeCapability is required by every Loom serve
 	// profile. Await dispatch and run-outcome reconciliation must never fall
 	// back to separate resolve/resume writes, even when the Catalog and
 	// Automation slices are disabled.
 	ExecutionAwaitAtomicResumeCapability = "execution.await_atomic_resume.v1"
+	// ExecutionTaskRunLeaseFencingCapability certifies atomic TaskRun claim,
+	// generic-Lease creation/release, and monotonic owner fencing across the
+	// running backend. Phase 4 Execution has no unfenced compatibility path.
+	ExecutionTaskRunLeaseFencingCapability = "execution.task_run_lease_fencing.v1"
+	// ExecutionIssueClaimTaskRunStartCapability certifies the coordinating
+	// command that claims one Work Item and starts its TaskRun in the same
+	// Redis transaction or PostgreSQL transaction, including replay fencing.
+	ExecutionIssueClaimTaskRunStartCapability     = "execution.issue_claim_task_run_start.v1"
+	ExecutionIssueClaimNextTaskRunStartCapability = "execution.issue_claim_next_task_run_start.v1"
+	ExecutionDriverStepTerminalRepairCapability   = "execution.driver_step_terminal_repair.v1"
+	ExecutionTaskRunRequestCapability             = "execution.task_run_request.v1"
+	ExecutionTaskRunRequeueCapability             = "execution.task_run_requeue.v1"
+	ExecutionTaskRunRetryExhaustionCapability     = "execution.task_run_retry_exhaustion.v1"
+	// ExecutionTaskRunWorkItemDesignCapability certifies the exact TaskRun
+	// owner-fenced command that derives run.TaskID and persists its Work Item
+	// design in the same backend transaction as lease/fence validation.
+	ExecutionTaskRunWorkItemDesignCapability              = "execution.task_run_work_item_design.v1"
+	ExecutionTaskRunTerminalConvergenceCapability         = "execution.task_run_terminal_convergence.v1"
+	ExecutionDriverRunChildStartCapability                = "execution.driver_run_child_start.v1"
+	ExecutionDriverRunChildCascadeCapability              = "execution.driver_run_child_cascade.v1"
+	ExecutionTerminalDriverRunWorkRecoveryCapability      = "execution.terminal_driver_run_work_recovery.v1"
+	ExecutionTerminalDriverRunWorkRecoveryQueueCapability = "execution.terminal_driver_run_work_recovery_queue.v1"
+	ExecutionDriverRunLeaseFencingCapability              = "execution.driver_run_lease_fencing.v1"
+	ExecutionDriverRunWorkItemClaimCapability             = "execution.driver_run_work_item_claim.v1"
+	// ExecutionDriverRunReviewWorkItemHandoffCapability certifies the atomic
+	// completed-child handoff that validates retained claim generation and
+	// retires it while publishing lifecycle, immutable Review evidence, and the
+	// narrow self-trigger policy in one transaction. V2 prevents a new Loom
+	// from sending those strict fields to a V1 Fleet that cannot decode them.
+	ExecutionDriverRunReviewWorkItemHandoffCapability = "execution.driver_run_review_work_item_handoff.v2"
+	ExecutionTaskRunLogIdempotencyCapability          = "execution.task_run_log_idempotency.v1"
+	// AgentsLifecycleCommandFencingCapability certifies client-ID Create
+	// recovery, atomic node/stable-owner Ack binding, and owner-fenced,
+	// idempotent command completion. Loom has no unfenced fallback.
+	AgentsLifecycleCommandFencingCapability = "agents.lifecycle_command_fencing.v1"
+	// AgentsLifecycleCommandOwnershipFencingCapability certifies that every
+	// lifecycle Ack/Complete is bound to the current logical-agent ownership
+	// generation, with only the documented no-live convergence exceptions.
+	AgentsLifecycleCommandOwnershipFencingCapability = "agents.lifecycle_command_ownership_fencing.v1"
+	// ArtifactsOwnerFencedLifecycleCapability certifies owner-fenced,
+	// idempotent Artifact create/upload/finalize/reference commands.
+	ArtifactsOwnerFencedLifecycleCapability = "artifacts.owner_fenced_lifecycle.v1"
 )
+
+// Phase4FoundationCapabilities is the complete indivisible
+// Agents/Execution/Artifacts/Work Items deployment profile. Await atomic resume
+// is an older always-on invariant and is intentionally required separately by
+// serve.
+func Phase4FoundationCapabilities() []string {
+	return []string{
+		AgentsLifecycleCommandFencingCapability,
+		AgentsLifecycleCommandOwnershipFencingCapability,
+		ArtifactsOwnerFencedLifecycleCapability,
+		WorkItemsRepositoryRequirementCapability,
+		ExecutionIssueClaimTaskRunStartCapability,
+		ExecutionTaskRunLeaseFencingCapability,
+		ExecutionIssueClaimNextTaskRunStartCapability,
+		ExecutionDriverStepTerminalRepairCapability,
+		ExecutionTaskRunRequestCapability,
+		ExecutionTaskRunRequeueCapability,
+		ExecutionTaskRunRetryExhaustionCapability,
+		ExecutionTaskRunWorkItemDesignCapability,
+		ExecutionTaskRunTerminalConvergenceCapability,
+		ExecutionDriverRunChildStartCapability,
+		ExecutionDriverRunChildCascadeCapability,
+		ExecutionTerminalDriverRunWorkRecoveryCapability,
+		ExecutionTerminalDriverRunWorkRecoveryQueueCapability,
+		ExecutionDriverRunLeaseFencingCapability,
+		ExecutionDriverRunWorkItemClaimCapability,
+		ExecutionDriverRunReviewWorkItemHandoffCapability,
+		ExecutionTaskRunLogIdempotencyCapability,
+	}
+}
 
 // CapabilityIncompatibilityKind identifies why the running FleetDB deployment
 // cannot satisfy the capabilities required by the enabled Loom slices.

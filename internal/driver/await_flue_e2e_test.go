@@ -14,6 +14,7 @@
 package driver_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -128,8 +129,12 @@ func runRealFlueAwaitSmoke(t *testing.T, flueCommand []string, workflow, source 
 	if err != nil {
 		t.Fatalf("RegisterFlueDriver after real Flue build %q: %v", strings.Join(flueCommand, " "), err)
 	}
-	server := newAwaitFlowsServer(t, st)
-	h := &awaitFlows{ctx: ctx, st: st, ws: ws, root: root, api: server, driverID: registered.Driver.DriverID}
+	runTokenKey := bytes.Repeat([]byte{0x5a}, 32)
+	server, executionCapability := newAwaitFlowsServer(t, st, runTokenKey)
+	h := &awaitFlows{
+		ctx: ctx, st: st, ws: ws, root: root, api: server,
+		driverID: registered.Driver.DriverID, execution: executionCapability, runTokenKey: runTokenKey,
+	}
 	const runID = "run-flue-gate"
 	h.createRun(t, runID)
 
@@ -137,7 +142,9 @@ func runRealFlueAwaitSmoke(t *testing.T, flueCommand []string, workflow, source 
 		result, err := (&driver.Executor{
 			Store: st, WorkspaceKey: ws, RunID: runID, WorkDir: root,
 			NodeID: node, LeaseID: node + "-lease", APIBaseURL: server.URL,
-			HeartbeatInterval: -1,
+			HeartbeatInterval: -1, RunTokenKey: runTokenKey,
+			Execution: executionCapability.DriverRunAPI(), ExecutionWorkers: executionCapability.TaskRunWorkerAPI(),
+			ExecutionAuthorities: executionCapability.DriverRunAuthorityResolver(), SystemAuthorities: executionCapability.SystemAuthorityResolver(),
 		}).RunOnce(ctx)
 		if err != nil {
 			t.Fatalf("RunOnce on %s: %v", node, err)

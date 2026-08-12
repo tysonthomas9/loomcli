@@ -15,18 +15,20 @@ export interface UseBackendsReturn {
 /**
  * Hook that reads backend health data from backendsStore
  * and merges each entry with known brand defaults via toBackendInfo().
+ * `enabled` gates the mount fetch for persistently mounted hidden surfaces.
  */
-export function useBackends(): UseBackendsReturn {
+export function useBackends(enabled = true): UseBackendsReturn {
   const rawBackends = useStore(backendsStore, (s) => s.backends);
   const isLoading = useStore(backendsStore, (s) => s.isLoading);
   const error = useStore(backendsStore, (s) => s.error);
 
   useEffect(() => {
+    if (!enabled) return;
     backendsStore
       .getState()
       .fetchBackends()
       .catch(() => {});
-  }, []);
+  }, [enabled]);
 
   const backends = useMemo(
     () =>

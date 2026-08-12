@@ -140,6 +140,13 @@ func (a *Admission) RequireOperator(action Action, workspace string, authority O
 	return a.Admit(action, workspace, authority)
 }
 
+// RequireExecution applies admission to a concrete ExecutionAuthority. The
+// capability must additionally compare ResourceKind/ResourceID and the owner
+// tuple with its command or freshly loaded durable record.
+func (a *Admission) RequireExecution(action Action, workspace string, authority ExecutionAuthority) error {
+	return a.Admit(action, workspace, authority)
+}
+
 // RequireSystem applies admission to a concrete SystemAuthority. Keeping this
 // method typed prevents internal capability APIs from treating system callers
 // as a generic superuser or accepting another authority class accidentally.

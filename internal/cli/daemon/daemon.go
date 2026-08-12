@@ -57,8 +57,9 @@ type Daemon struct {
 
 	// store is the fleet-db backed source of agent assignments and daemon
 	// profile data.
-	store       store.Store
-	storeHandle *bootstrap.StoreHandle
+	store                  store.Store
+	storeHandle            *bootstrap.StoreHandle
+	agentCommandDispatcher agentCommandDispatcher
 
 	// inputs holds each agent's outstanding interactive prompt so an operator
 	// can see and answer it (see daemon_input.go).

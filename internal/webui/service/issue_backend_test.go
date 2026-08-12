@@ -21,45 +21,52 @@ type fakeIssueBackend struct {
 	mu sync.Mutex
 
 	// Per-method canned returns and capture slots.
-	getResult           *backend.IssueDetailData
-	getErr              error
-	getCalls            []string
-	listResult          []backend.IssueData
-	listErr             error
-	listCalls           []backend.ListOpts
-	readyResult         []backend.IssueData
-	readyErr            error
-	readyCalls          []backend.ReadyOpts
-	blockedResult       []backend.IssueData
-	blockedErr          error
-	blockedCalls        []backend.BlockedOpts
-	deferredResult      []backend.IssueData
-	deferredErr         error
-	deferredCalls       []backend.DeferredOpts
-	createResult        *backend.IssueData
-	createErr           error
-	createParams        []backend.CreateParams
-	updateErr           error
-	updateCalls         []updateCall
-	closeResult         *backend.CloseResult
-	closeErr            error
-	closeCalls          []closeCall
-	deleteErr           error
-	deleteCalls         []backend.DeleteParams
-	addCommentResult    *backend.CommentData
-	addCommentErr       error
-	addCommentParams    []backend.CommentAddParams
-	addDepErr           error
-	addDepParams        []backend.DepAddParams
-	removeDepErr        error
-	removeDepParams     []backend.DepRemoveParams
-	listEventsResult    []backend.EventData
-	listEventsErr       error
-	listEventsCalls     []listEventsCall
-	claimErr            error
-	claimCalls          []claimCall
-	postClaimUpdateErr  error
-	overrideUpdateClaim bool
+	getResult             *backend.IssueDetailData
+	getErr                error
+	getCalls              []string
+	listResult            []backend.IssueData
+	listErr               error
+	listCalls             []backend.ListOpts
+	readyResult           []backend.IssueData
+	readyErr              error
+	readyCalls            []backend.ReadyOpts
+	blockedResult         []backend.IssueData
+	blockedErr            error
+	blockedCalls          []backend.BlockedOpts
+	deferredResult        []backend.IssueData
+	deferredErr           error
+	deferredCalls         []backend.DeferredOpts
+	createResult          *backend.IssueData
+	createErr             error
+	createParams          []backend.CreateParams
+	repositoryBlockResult *backend.RepositoryRequirementResult
+	repositoryBlockErr    error
+	repositoryBlockCalls  []string
+	repositoryBlockFunc   func(id string, call int) (*backend.RepositoryRequirementResult, error)
+	updateErr             error
+	updateCalls           []updateCall
+	closeResult           *backend.CloseResult
+	closeErr              error
+	closeCalls            []closeCall
+	deleteErr             error
+	deleteCalls           []backend.DeleteParams
+	addCommentResult      *backend.CommentData
+	addCommentErr         error
+	addCommentParams      []backend.CommentAddParams
+	addDepErr             error
+	addDepParams          []backend.DepAddParams
+	removeDepErr          error
+	removeDepParams       []backend.DepRemoveParams
+	listEventsResult      []backend.EventData
+	listEventsErr         error
+	listEventsCalls       []listEventsCall
+	claimErr              error
+	claimCalls            []claimCall
+	postClaimUpdateErr    error
+	overrideUpdateClaim   bool
+	setRepoResult         *backend.IssueData
+	setRepoErr            error
+	setRepoCalls          []setRepoCall
 }
 
 type updateCall struct {
@@ -80,6 +87,11 @@ type listEventsCall struct {
 type claimCall struct {
 	id      string
 	lockTTL time.Duration
+}
+
+type setRepoCall struct {
+	id   string
+	repo string
 }
 
 type testWorkspaceValidator struct {
@@ -232,10 +244,103 @@ func (f *fakeIssueBackend) WaitForMutations(_ context.Context, _, _ int64) ([]ba
 }
 func (f *fakeIssueBackend) BackendName() string { return "fake" }
 
+func (f *fakeIssueBackend) BlockRepositoryRequired(_ context.Context, id string) (*backend.RepositoryRequirementResult, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.repositoryBlockCalls = append(f.repositoryBlockCalls, id)
+	if f.repositoryBlockFunc != nil {
+		return f.repositoryBlockFunc(id, len(f.repositoryBlockCalls))
+	}
+	if f.repositoryBlockResult != nil || f.repositoryBlockErr != nil {
+		return f.repositoryBlockResult, f.repositoryBlockErr
+	}
+	// Most service tests are not about repository policy. Default to the
+	// command's single-repository/no-op shape so those tests exercise the new
+	// call without each fixture having to restate an admission result.
+	return &backend.RepositoryRequirementResult{
+		Issue:         f.createResult,
+		DispatchReady: true,
+		Outcome:       "not_required",
+	}, nil
+}
+
+func (f *fakeIssueBackend) SetIssueRepository(_ context.Context, id, repo string) (*backend.IssueData, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.setRepoCalls = append(f.setRepoCalls, setRepoCall{id: id, repo: repo})
+	return f.setRepoResult, f.setRepoErr
+}
+
 // newServiceWithFake constructs an issueServiceImpl wired to a fake backend
 // (no daemon pool). Pool-using paths (ListIssues, MoveIssue) are unaffected.
 func newServiceWithFake(fb *fakeIssueBackend) IssueService {
 	return NewIssueServiceWithBackend(nil, nil, nil, func(_ context.Context) backend.IssueBackend { return fb })
+}
+
+func TestSetIssueRepository_ReturnsCanonicalBackendIssue(t *testing.T) {
+	now := time.Now().UTC()
+	fb := &fakeIssueBackend{
+		setRepoResult: &backend.IssueData{
+			ID:         "task-11",
+			Title:      "Recovered task",
+			Status:     "open",
+			Priority:   2,
+			IssueType:  "task",
+			SourceRepo: "hello-world",
+			CreatedAt:  now,
+			UpdatedAt:  now,
+		},
+	}
+	svc := newServiceWithFake(fb).(IssueRepositoryService)
+
+	raw, err := svc.SetIssueRepository(context.Background(), SetIssueRepositoryParams{
+		IssueID: "task-11",
+		Repo:    " hello-world ",
+	})
+	if err != nil {
+		t.Fatalf("SetIssueRepository: %v", err)
+	}
+	if len(fb.setRepoCalls) != 1 || fb.setRepoCalls[0] != (setRepoCall{id: "task-11", repo: "hello-world"}) {
+		t.Fatalf("backend calls = %+v", fb.setRepoCalls)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatalf("unmarshal result: %v", err)
+	}
+	if got["status"] != "open" || got["source_repo"] != "hello-world" || got["repo"] != "hello-world" {
+		t.Fatalf("canonical result = %+v", got)
+	}
+}
+
+func TestSetIssueRepository_UnsupportedBackend(t *testing.T) {
+	fb := &fakeIssueBackend{}
+	coreOnly := struct{ backend.IssueBackend }{IssueBackend: fb}
+	svc := NewIssueServiceWithBackend(nil, nil, nil, func(context.Context) backend.IssueBackend {
+		return coreOnly
+	}).(IssueRepositoryService)
+
+	_, err := svc.SetIssueRepository(context.Background(), SetIssueRepositoryParams{IssueID: "task-11", Repo: "hello-world"})
+	var svcErr *ServiceError
+	if !errors.As(err, &svcErr) || svcErr.Kind != KindNotImplemented {
+		t.Fatalf("error = %v, want not implemented", err)
+	}
+}
+
+func TestSetIssueRepository_ValidatesInputBeforeBackend(t *testing.T) {
+	fb := &fakeIssueBackend{}
+	svc := newServiceWithFake(fb).(IssueRepositoryService)
+
+	for _, params := range []SetIssueRepositoryParams{
+		{Repo: "hello-world"},
+		{IssueID: "task-11"},
+	} {
+		if _, err := svc.SetIssueRepository(context.Background(), params); err == nil {
+			t.Fatalf("params = %+v, want validation error", params)
+		}
+	}
+	if len(fb.setRepoCalls) != 0 {
+		t.Fatalf("backend called on invalid input: %+v", fb.setRepoCalls)
+	}
 }
 
 // --- ListEvents ---
@@ -869,6 +974,158 @@ func TestCreateIssue_Backend_Success_ReturnsIssueShape(t *testing.T) {
 	}
 	if fb.createParams[0].Title != "New" || fb.createParams[0].IssueType != "task" || fb.createParams[0].Status != "deferred" || fb.createParams[0].SourceRepo != "repo-a" {
 		t.Errorf("unexpected backend params: %+v", fb.createParams[0])
+	}
+}
+
+func TestCreateIssue_Backend_RepositorylessTaskReturnsAtomicBlockedProjection(t *testing.T) {
+	now := time.Now().UTC()
+	createdAt := now.Add(-time.Second)
+	fb := &fakeIssueBackend{
+		createResult: &backend.IssueData{
+			ID: "loom-x-blocked", Title: "Choose a repository", Status: "open", Priority: 2,
+			IssueType: "task", CreatedAt: createdAt, UpdatedAt: createdAt,
+		},
+		repositoryBlockResult: &backend.RepositoryRequirementResult{
+			Issue: &backend.IssueData{
+				ID: "loom-x-blocked", Title: "Choose a repository", Status: "blocked", Priority: 2,
+				IssueType: "task", CreatedAt: createdAt, UpdatedAt: now,
+			},
+			Changed: true,
+			Blocked: true,
+			Outcome: "applied",
+		},
+		// Deliberately model a lagging follow-up read. The admission command's
+		// canonical IssueData must win while detail-only fields survive.
+		getResult: &backend.IssueDetailData{
+			IssueData: backend.IssueData{
+				ID: "loom-x-blocked", Title: "Choose a repository", Status: "open", Priority: 2,
+				IssueType: "task", CreatedAt: createdAt, UpdatedAt: createdAt,
+			},
+			Description: "The operator must select a checkout",
+		},
+	}
+	svc := newServiceWithFake(fb)
+
+	raw, err := svc.CreateIssue(context.Background(), CreateIssueParams{
+		Title: "Choose a repository", IssueType: "task", Priority: 2,
+	})
+	if err != nil {
+		t.Fatalf("CreateIssue: %v", err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if got["status"] != "blocked" {
+		t.Fatalf("status = %v, want atomic command status blocked; response=%+v", got["status"], got)
+	}
+	if got["description"] != "The operator must select a checkout" {
+		t.Fatalf("description = %v, want detail field preserved", got["description"])
+	}
+	if len(fb.repositoryBlockCalls) != 1 || fb.repositoryBlockCalls[0] != "loom-x-blocked" {
+		t.Fatalf("repository admission calls = %+v, want [loom-x-blocked]", fb.repositoryBlockCalls)
+	}
+}
+
+func TestCreateIssue_Backend_RepositoryAdmissionLostResponseReplaysCanonicalResult(t *testing.T) {
+	now := time.Now().UTC()
+	created := &backend.IssueData{
+		ID: "loom-x-replay", Title: "Choose a repository", Status: "open", Priority: 2,
+		IssueType: "task", CreatedAt: now, UpdatedAt: now,
+	}
+	blocked := *created
+	blocked.Status = "blocked"
+	fb := &fakeIssueBackend{
+		createResult: created,
+		getResult:    &backend.IssueDetailData{IssueData: blocked},
+		repositoryBlockFunc: func(_ string, call int) (*backend.RepositoryRequirementResult, error) {
+			if call == 1 {
+				// This is indistinguishable from Fleet committing the command and
+				// losing the HTTP response. The replay-safe command must be retried.
+				return nil, backend.ErrUnavailable("BlockRepositoryRequired", "response lost", errors.New("EOF"))
+			}
+			return &backend.RepositoryRequirementResult{
+				Issue: &blocked, Replayed: true, Blocked: true, Outcome: "already_applied",
+			}, nil
+		},
+	}
+	svc := newServiceWithFake(fb)
+
+	raw, err := svc.CreateIssue(context.Background(), CreateIssueParams{
+		Title: "Choose a repository", IssueType: "task", Priority: 2,
+	})
+	if err != nil {
+		t.Fatalf("CreateIssue: %v", err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if got["status"] != "blocked" || len(fb.repositoryBlockCalls) != 2 {
+		t.Fatalf("response/calls = %+v/%+v, want blocked after one replay", got, fb.repositoryBlockCalls)
+	}
+}
+
+func TestCreateIssue_Backend_RepositoryAdmissionPersistentFailureStaysFailClosed(t *testing.T) {
+	now := time.Now().UTC()
+	fb := &fakeIssueBackend{
+		createResult: &backend.IssueData{
+			ID: "loom-x-recover", Title: "Choose a repository", Status: "open", Priority: 2,
+			IssueType: "task", CreatedAt: now, UpdatedAt: now,
+		},
+		repositoryBlockErr: backend.ErrUnavailable("BlockRepositoryRequired", "fleet unavailable", errors.New("connection reset")),
+	}
+	svc := newServiceWithFake(fb)
+
+	_, err := svc.CreateIssue(context.Background(), CreateIssueParams{
+		Title: "Choose a repository", IssueType: "task", Priority: 2,
+	})
+	var svcErr *ServiceError
+	if !errors.As(err, &svcErr) || svcErr.Kind != KindUnavailable {
+		t.Fatalf("error = %v, want unavailable", err)
+	}
+	if len(fb.repositoryBlockCalls) != 2 {
+		t.Fatalf("repository admission calls = %+v, want one bounded replay", fb.repositoryBlockCalls)
+	}
+}
+
+func TestCreateIssue_Backend_RepositoryAdmissionUnsupportedFailsBeforeMint(t *testing.T) {
+	fb := &fakeIssueBackend{}
+	coreOnly := struct{ backend.IssueBackend }{IssueBackend: fb}
+	svc := NewIssueServiceWithBackend(nil, nil, nil, func(context.Context) backend.IssueBackend {
+		return coreOnly
+	})
+
+	_, err := svc.CreateIssue(context.Background(), CreateIssueParams{
+		Title: "Choose a repository", IssueType: "task", Priority: 2,
+	})
+	var svcErr *ServiceError
+	if !errors.As(err, &svcErr) || svcErr.Kind != KindNotImplemented {
+		t.Fatalf("error = %v, want not implemented", err)
+	}
+	if len(fb.createParams) != 0 {
+		t.Fatalf("backend Create called before admission capability check: %+v", fb.createParams)
+	}
+}
+
+func TestCreateNeedsRepositoryAdmission(t *testing.T) {
+	tests := []struct {
+		name   string
+		params CreateIssueParams
+		want   bool
+	}{
+		{name: "default open task", params: CreateIssueParams{IssueType: "task"}, want: true},
+		{name: "explicit open feature", params: CreateIssueParams{IssueType: "feature", Status: "open"}, want: true},
+		{name: "explicit repository", params: CreateIssueParams{IssueType: "task", SourceRepo: "repo-a"}},
+		{name: "deferred", params: CreateIssueParams{IssueType: "task", Status: "deferred"}},
+		{name: "epic", params: CreateIssueParams{IssueType: "epic"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := createNeedsRepositoryAdmission(tt.params); got != tt.want {
+				t.Fatalf("createNeedsRepositoryAdmission(%+v) = %v, want %v", tt.params, got, tt.want)
+			}
+		})
 	}
 }
 

@@ -2,6 +2,7 @@ package leadcontrol
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -33,7 +34,11 @@ const (
 	harnessStatusPollInterval  = 2 * time.Second
 	harnessSessionIDPollFloor  = 5 * time.Second
 	harnessWedgedTurnLogWindow = 5 * time.Minute
+	harnessTranscriptMTimeSlop = time.Second
 )
+
+var harnessConversationCloseTimeout = 5 * time.Second
+var harnessRuntimeNow = func() time.Time { return time.Now().UTC() }
 
 // HarnessLeadRuntimeConfig configures a controlled lead session supervised by
 // harness-wrapper. The human keeps the harness TUI (PTY passthrough); the
@@ -96,21 +101,16 @@ func HarnessNameForBackend(backend string) string {
 func RunHarnessLeadRuntime(ctx context.Context, cfg HarnessLeadRuntimeConfig) error {
 	cfg = normalizeHarnessLeadRuntimeConfig(cfg)
 
+	// Capture freshness before launch. Claude can create a rotated transcript
+	// while chat.Open is still negotiating its TUI, before runtime metadata is
+	// persisted.
+	runtimeStartedAt := harnessRuntimeNow().UTC()
 	conv, err := openHarnessLeadConversation(ctx, cfg)
 	if err != nil {
 		return err
 	}
 
-	runtime := HarnessRuntimeMetadata{
-		Provider:         cfg.Backend,
-		HarnessName:      cfg.HarnessName,
-		ChatSessionID:    conv.ChatSessionID(),
-		HarnessSessionID: cfg.HarnessSessionID,
-		PID:              conv.PID(),
-		Status:           RuntimeStatusStarting,
-		Controlled:       true,
-		StartedAt:        time.Now().UTC(),
-	}
+	runtime := newHarnessRuntimeMetadata(cfg, conv, runtimeStartedAt)
 	if err := UpdateHarnessRuntimeMetadata(ctx, cfg.Store, cfg.Workspace, cfg.SessionID, runtime); err != nil {
 		cfg.Logger.Warn("failed to persist harness runtime metadata", "err", err)
 	}
@@ -119,8 +119,14 @@ func RunHarnessLeadRuntime(ctx context.Context, cfg HarnessLeadRuntimeConfig) er
 	defer unregister()
 
 	_, _ = fmt.Fprintf(cfg.Stdout, "Launching controlled %s lead session...\n\n", cfg.Backend)
-	detach := conv.AttachOutput(cfg.Stdout)
-	defer detach()
+	transcriptOutput := newBoundedHarnessOutput(harnessOutputCaptureLimit)
+	// Keep human rendering and transcript capture on independent fanout sinks.
+	// A blocked terminal writer can fill and drop its own queue without also
+	// dropping bytes before the bounded transcript writer sees them.
+	detachStdout := conv.AttachOutput(cfg.Stdout)
+	defer detachStdout()
+	detachTranscript := conv.AttachOutput(transcriptOutput)
+	defer detachTranscript()
 	restoreTerminal := forwardHarnessStdin(ctx, cfg, conv)
 	defer restoreTerminal()
 	stopResize := func() {}
@@ -131,19 +137,43 @@ func RunHarnessLeadRuntime(ctx context.Context, cfg HarnessLeadRuntimeConfig) er
 
 	watchCtx, cancelWatch := context.WithCancel(ctx)
 	defer cancelWatch()
-	go watchHarnessLeadRuntime(watchCtx, cfg, conv, handle, runtime)
+	watchDone := make(chan struct{})
+	go watchHarnessLeadRuntime(watchCtx, cfg, conv, handle, runtime, watchDone)
 	drainCtx, cancelDrain := context.WithCancel(ctx)
 	defer cancelDrain()
 	go drainLeadMessageQueue(drainCtx, cfg.Store, cfg.Workspace, cfg.LeadName, cfg.Logger)
 
 	result, waitErr := conv.Wait()
 
+	// Drain the transcript sink before snapshotting its bounded fallback. The
+	// wrapper fanout is asynchronous, so Wait alone does not guarantee the
+	// final queued PTY bytes have reached the attached writer. The independent
+	// human-output sink is left attached until return and cannot delay capture.
+	detachTranscript()
 	stopResize()
 	cancelWatch()
+	<-watchDone
 	cancelDrain()
 	unregister()
 	restoreTerminal()
-	return finalizeHarnessLeadRuntime(cfg, conv, runtime, result, waitErr)
+	return finalizeHarnessLeadRuntime(cfg, conv, runtime, transcriptOutput, result, waitErr)
+}
+
+func newHarnessRuntimeMetadata(
+	cfg HarnessLeadRuntimeConfig,
+	conv harnessConversation,
+	startedAt time.Time,
+) HarnessRuntimeMetadata {
+	return HarnessRuntimeMetadata{
+		Provider:         cfg.Backend,
+		HarnessName:      cfg.HarnessName,
+		ChatSessionID:    conv.ChatSessionID(),
+		HarnessSessionID: cfg.HarnessSessionID,
+		PID:              conv.PID(),
+		Status:           RuntimeStatusStarting,
+		Controlled:       true,
+		StartedAt:        startedAt.UTC(),
+	}
 }
 
 // openHarnessLeadConversation starts the harness under harness-wrapper PTY
@@ -172,12 +202,39 @@ func openHarnessLeadConversation(ctx context.Context, cfg HarnessLeadRuntimeConf
 
 // finalizeHarnessLeadRuntime closes the conversation, marks the runtime
 // disconnected, and maps the harness exit into the runtime's return error.
-func finalizeHarnessLeadRuntime(cfg HarnessLeadRuntimeConfig, conv harnessConversation, runtime HarnessRuntimeMetadata, result wrapper.Result, waitErr error) error {
-	closeCtx, cancelClose := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancelClose()
-	if err := conv.Close(closeCtx); err != nil {
-		cfg.Logger.Debug("harness conversation close failed", "err", err)
+func finalizeHarnessLeadRuntime(
+	cfg HarnessLeadRuntimeConfig,
+	conv harnessConversation,
+	runtime HarnessRuntimeMetadata,
+	transcriptOutput *boundedHarnessOutput,
+	result wrapper.Result,
+	waitErr error,
+) error {
+	closeCtx, cancelClose := context.WithTimeout(
+		context.Background(),
+		harnessConversationCloseTimeout,
+	)
+	closeErr := closeAndDrainHarnessConversation(closeCtx, conv)
+	cancelClose()
+	resolvedHarnessSessionID := resolvePostCloseHarnessSessionID(
+		context.Background(),
+		cfg,
+		conv,
+		runtime,
+	)
+	cfg.HarnessSessionID = resolvedHarnessSessionID
+	runtime.HarnessSessionID = resolvedHarnessSessionID
+
+	unavailableSourceCause := ""
+	if closeErr != nil {
+		cfg.Logger.Warn(
+			"harness conversation close/drain failed; persisting bounded best-effort transcript",
+			"err",
+			closeErr,
+		)
+		unavailableSourceCause = transcriptSourceCauseHarnessCloseDrainUnavailable
 	}
+	captureFinalHarnessTranscript(cfg, conv, transcriptOutput, unavailableSourceCause)
 	runtime.Status = RuntimeStatusDisconnected
 	_ = UpdateHarnessRuntimeMetadata(context.Background(), cfg.Store, cfg.Workspace, cfg.SessionID, runtime)
 	if waitErr != nil {
@@ -187,6 +244,102 @@ func finalizeHarnessLeadRuntime(cfg HarnessLeadRuntimeConfig, conv harnessConver
 		return fmt.Errorf("%s exited with status %d", cfg.BinaryPath, result.ExitCode)
 	}
 	return nil
+}
+
+func captureFinalHarnessTranscript(
+	cfg HarnessLeadRuntimeConfig,
+	conv harnessConversation,
+	transcriptOutput *boundedHarnessOutput,
+	unavailableSourceCause string,
+) {
+	captureCtx, cancelCapture := context.WithTimeout(
+		context.Background(),
+		harnessTranscriptCaptureTimeout,
+	)
+	if err := captureHarnessInteractiveTranscriptWithUnavailableSource(
+		captureCtx,
+		cfg,
+		conv,
+		transcriptOutput,
+		unavailableSourceCause,
+	); err != nil {
+		cfg.Logger.Warn("failed to persist harness transcript", "err", err)
+	}
+	cancelCapture()
+}
+
+func resolvePostCloseHarnessSessionID(
+	ctx context.Context,
+	cfg HarnessLeadRuntimeConfig,
+	conv harnessConversation,
+	runtime HarnessRuntimeMetadata,
+) string {
+	pinned := strings.TrimSpace(runtime.HarnessSessionID)
+	extracted := strings.TrimSpace(conv.HarnessSessionID())
+	if extracted == "" || extracted == pinned {
+		return pinned
+	}
+	if pinned == "" {
+		return extracted
+	}
+	if cfg.HarnessName != HarnessNameClaudeCode || runtime.StartedAt.IsZero() {
+		return pinned
+	}
+
+	_, pinnedErr := nativeHarnessTranscriptPath(
+		ctx,
+		HarnessNameClaudeCode,
+		pinned,
+		cfg.WorkDir,
+		cfg.Env,
+	)
+	if pinnedErr == nil || !errors.Is(pinnedErr, os.ErrNotExist) {
+		return pinned
+	}
+	extractedPath, err := nativeHarnessTranscriptPath(
+		ctx,
+		HarnessNameClaudeCode,
+		extracted,
+		cfg.WorkDir,
+		cfg.Env,
+	)
+	if err != nil {
+		return pinned
+	}
+	info, err := os.Stat(extractedPath)
+	// Some filesystems expose only second-level mtimes. The extracted session
+	// ID already ties the candidate to this process, so a one-second freshness
+	// slop avoids rejecting a transcript created just after the pre-launch
+	// baseline but rounded down by the filesystem.
+	freshnessFloor := runtime.StartedAt.Add(-harnessTranscriptMTimeSlop)
+	if err != nil || info.ModTime().Before(freshnessFloor) {
+		return pinned
+	}
+	return extracted
+}
+
+func closeAndDrainHarnessConversation(ctx context.Context, conv harnessConversation) error {
+	closeErr := conv.Close(ctx)
+	// Channel closure is a stabilization barrier for History, not a lossless
+	// delivery guarantee. harness-wrapper may discard a source event while its
+	// watcher is closing, so store-backed captures remain terminal-best-effort.
+	for {
+		select {
+		case _, ok := <-conv.Events():
+			if ok {
+				continue
+			}
+			if closeErr != nil {
+				return fmt.Errorf("close harness conversation: %w", closeErr)
+			}
+			return nil
+		case <-ctx.Done():
+			return errors.Join(
+				closeErr,
+				fmt.Errorf("drain harness conversation events: %w", ctx.Err()),
+			)
+		}
+	}
 }
 
 func normalizeHarnessLeadRuntimeConfig(cfg HarnessLeadRuntimeConfig) HarnessLeadRuntimeConfig {
@@ -327,7 +480,9 @@ func watchHarnessLeadRuntime(
 	conv harnessConversation,
 	handle *leadConversationHandle,
 	runtime HarnessRuntimeMetadata,
+	done chan<- struct{},
 ) {
+	defer close(done)
 	w := &harnessLeadRuntimeWatcher{
 		cfg:        cfg,
 		conv:       conv,

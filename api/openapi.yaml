@@ -837,6 +837,63 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /api/workspaces/{ws}/issues/{id}/repository:
+    put:
+      operationId: setIssueRepository
+      tags: [issues]
+      summary: Assign an issue's canonical source repository
+      description: |
+        Atomically assigns the workspace repository and conditionally restores
+        a repository-required blocked issue to open. The response is FleetDB's
+        authoritative post-command issue projection; clients must not issue a
+        separate reopen mutation.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/IssueId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [repo]
+              additionalProperties: false
+              properties:
+                repo:
+                  type: string
+                  minLength: 1
+      responses:
+        "200":
+          description: Repository assigned and canonical issue returned
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    $ref: "#/components/schemas/Issue"
+        "400":
+          description: Invalid issue or repository
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Issue or repository not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Issue changed concurrently or repository assignment conflicts
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /api/workspaces/{ws}/issues/{id}/move:
     post:
       operationId: moveIssue
@@ -1350,6 +1407,38 @@ paths:
                         items:
                           $ref: "#/components/schemas/SessionResponse"
 
+  /api/workspaces/{ws}/tasks/{taskId}/workflow-runs:
+    get:
+      operationId: listTaskWorkflowRuns
+      tags: [workflows]
+      summary: List task workflow runs not represented by an agent session
+      description: >-
+        Returns trigger-admitted DriverRuns joined to the task by the exact
+        immutable TriggerEvent subject_ref. Runs that already created an
+        AgentSession row for this task are excluded because they are already
+        represented by the task sessions endpoint. A TaskRun without an
+        AgentSession remains visible here.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: taskId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Task workflow run list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskWorkflowRunsResponse"
+        "400":
+          description: Invalid task identifier
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /api/workspaces/{ws}/tasks/{taskId}/sessions/{sessionId}:
     get:
       operationId: getSession
@@ -1406,22 +1495,31 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                required: [success]
-                properties:
-                  success:
-                    type: boolean
-                  data:
-                    type: object
-                    properties:
-                      session_id:
-                        type: string
-                      entries:
-                        type: array
-                        items:
-                          $ref: "#/components/schemas/TranscriptEntry"
+                $ref: "#/components/schemas/TranscriptResponse"
+        "400":
+          description: Invalid task or session identifier
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TranscriptResponse"
         "404":
           description: Session not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TranscriptResponse"
+        "500":
+          description: Session transcript retrieval failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TranscriptResponse"
+        "503":
+          description: Session transcript service unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TranscriptResponse"
 
   /api/workspaces/{ws}/tasks/{taskId}/sessions/{sessionId}/diff:
     get:
@@ -2412,8 +2510,13 @@ paths:
       summary: Update one unified agent entry
       description: |
         The accepted fields depend on the stored kind. Supervised assignments
-        use assignment fields; prompt/scripted records use identity and
-        behavior fields; legacy binding entries only support `name`.
+        use assignment fields; prompt/scripted records accept mutable record
+        fields, while their behavior role is immutable after creation. A
+        prompt/scripted cron record also accepts an exact
+        attached `binding_id` with `schedule` and/or `schedule_timezone`;
+        schedule fields cannot be combined with record fields
+        in one request so a failed PATCH never commits a cross-aggregate prefix.
+        legacy binding entries only support `name`.
       parameters:
         - $ref: "#/components/parameters/WorkspaceId"
         - $ref: "#/components/parameters/AgentName"
@@ -2622,7 +2725,7 @@ paths:
     get:
       operationId: listAgentRuns
       tags: [agent-control]
-      summary: List runs attributed to a durable agent record
+      summary: List run or session history attributed to an agent
       parameters:
         - $ref: "#/components/parameters/WorkspaceId"
         - $ref: "#/components/parameters/AgentId"
@@ -2639,13 +2742,13 @@ paths:
               schema:
                 $ref: "#/components/schemas/AgentRunsResponse"
         "400":
-          description: Unsupported agent kind or invalid limit
+          description: Invalid limit
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/AgentErrorResponse"
         "404":
-          description: Agent record not found
+          description: Agent not found
           content:
             application/json:
               schema:
@@ -2669,15 +2772,69 @@ paths:
               schema:
                 $ref: "#/components/schemas/AgentErrorResponse"
 
+  /api/workspaces/{ws}/agents/{id}/sessions/{session_id}/transcript:
+    get:
+      operationId: getAgentSessionTranscript
+      tags: [agent-control, sessions]
+      summary: Get an agent-owned session transcript
+      description: >-
+        Returns the canonical transcript for a session owned by the selected
+        agent. This route supports interactive sessions that do not have a task
+        identifier. A session owned by another agent is reported as not found.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/AgentId"
+        - name: session_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Canonical transcript
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TranscriptResponse"
+        "400":
+          description: Invalid agent or session identifier
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TranscriptResponse"
+        "404":
+          description: Session or transcript not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TranscriptResponse"
+        "500":
+          description: Agent session transcript retrieval failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TranscriptResponse"
+        "503":
+          description: Agent session transcript service unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TranscriptResponse"
+
   /api/workspaces/{ws}/agents/{name}/stop:
     post:
       operationId: stopAgent
       tags: [agent-control]
-      summary: Stop an agent (yield by default, force with body)
+      summary: Stop an agent using its runtime owner
       description: |
-        Without `force` (or empty body): sends `agent_yield` to the daemon,
-        returns 202 Accepted. With `{"force": true}`: sends `agent_stop(force=true)`,
-        returns 200.
+        In store-backed mode, supervised workers durably queue a stop command
+        for their daemon and return 202 while desired_state is draining. A
+        direct local-daemon deployment waits for the daemon's semantic result
+        and returns 200 only after the stop completes. By default the daemon
+        requests a cooperative yield before keeping the worker stopped;
+        `{"force": true}` skips that yield and terminates directly. Interactive
+        agents are owned by the web terminal runtime, so Stop terminates their
+        PTY synchronously and returns 200 without enqueueing a daemon command.
       parameters:
         - $ref: "#/components/parameters/WorkspaceId"
         - $ref: "#/components/parameters/AgentName"
@@ -2688,17 +2845,17 @@ paths:
               $ref: "#/components/schemas/StopAgentRequest"
       responses:
         "200":
-          description: Agent force-stopped
+          description: Interactive or direct local-daemon agent stopped synchronously
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/MessageResponse"
+                $ref: "#/components/schemas/AgentLifecycleResponse"
         "202":
-          description: Yield signal sent (graceful stop in progress)
+          description: Supervised worker stop queued for its runtime owner
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/MessageResponse"
+                $ref: "#/components/schemas/AgentLifecycleResponse"
         "400":
           description: Invalid lifecycle request
           content:
@@ -2735,6 +2892,10 @@ paths:
       operationId: startAgent
       tags: [agent-control]
       summary: Start an agent
+      description: |
+        Store-backed supervised workers return 202 after durably queueing the
+        start command. Interactive agents and direct local-daemon deployments
+        return 200 only after their runtime owner accepts the start.
       parameters:
         - $ref: "#/components/parameters/WorkspaceId"
         - $ref: "#/components/parameters/AgentName"
@@ -2745,11 +2906,17 @@ paths:
               $ref: "#/components/schemas/AgentLifecycleRequest"
       responses:
         "200":
-          description: Agent started
+          description: Interactive or direct local-daemon agent started synchronously
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/MessageResponse"
+                $ref: "#/components/schemas/AgentLifecycleResponse"
+        "202":
+          description: Supervised worker start durably queued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentLifecycleResponse"
         "400":
           description: Invalid lifecycle request
           content:
@@ -2786,6 +2953,13 @@ paths:
       operationId: restartAgent
       tags: [agent-control]
       summary: Restart an agent
+      description: |
+        Store-backed supervised workers return 202 after durably queueing the
+        restart command. A direct local-daemon deployment waits through the
+        configured cooperative-yield and SIGTERM escalation and returns 200
+        only after the daemon reports completion. Interactive agents return
+        200 after synchronously terminating the current PTY so a fresh
+        terminal can attach.
       parameters:
         - $ref: "#/components/parameters/WorkspaceId"
         - $ref: "#/components/parameters/AgentName"
@@ -2796,11 +2970,17 @@ paths:
               $ref: "#/components/schemas/AgentLifecycleRequest"
       responses:
         "200":
-          description: Agent restarted
+          description: Interactive or direct local-daemon restart completed synchronously
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/MessageResponse"
+                $ref: "#/components/schemas/AgentLifecycleResponse"
+        "202":
+          description: Supervised worker restart durably queued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentLifecycleResponse"
         "400":
           description: Invalid lifecycle request
           content:
@@ -2837,6 +3017,10 @@ paths:
       operationId: yieldAgent
       tags: [agent-control]
       summary: Yield an agent (graceful stop at next safe point)
+      description: |
+        Store-backed supervised workers return 202 after durably queueing the
+        yield command. A direct local-daemon deployment returns 200 after the
+        yield marker is written. Interactive agents reject Yield; use Stop.
       parameters:
         - $ref: "#/components/parameters/WorkspaceId"
         - $ref: "#/components/parameters/AgentName"
@@ -2846,12 +3030,18 @@ paths:
             schema:
               $ref: "#/components/schemas/AgentLifecycleRequest"
       responses:
-        "202":
-          description: Yield signal sent
+        "200":
+          description: Direct local-daemon yield request completed synchronously
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/MessageResponse"
+                $ref: "#/components/schemas/AgentLifecycleResponse"
+        "202":
+          description: Supervised worker yield durably queued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentLifecycleResponse"
         "400":
           description: Invalid lifecycle request
           content:
@@ -2878,6 +3068,56 @@ paths:
                 $ref: "#/components/schemas/AgentErrorResponse"
         "503":
           description: Agent service unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentErrorResponse"
+
+  /api/workspaces/{ws}/agents/{name}/lifecycle-commands/{command_id}:
+    get:
+      operationId: getAgentLifecycleCommand
+      tags: [agent-control]
+      summary: Get durable lifecycle command status
+      description: |
+        Returns the durable status of a lifecycle request. The command must
+        belong to the agent named in the route; cross-agent command IDs are
+        reported as not found.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/AgentName"
+        - name: command_id
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 1
+      responses:
+        "200":
+          description: Durable lifecycle command status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentLifecycleCommandResponse"
+        "400":
+          description: Invalid agent name or command ID
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentErrorResponse"
+        "404":
+          description: Lifecycle command not found for this agent
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentErrorResponse"
+        "500":
+          description: Agent command store operation failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentErrorResponse"
+        "503":
+          description: Agent command store unavailable
           content:
             application/json:
               schema:
@@ -4762,7 +5002,7 @@ components:
       name: id
       in: path
       required: true
-      description: Durable agent record identifier
+      description: Unified agent, supervised assignment, or legacy binding identifier
       schema:
         type: string
 
@@ -6150,6 +6390,49 @@ components:
         task_id:
           type: string
 
+    AgentLifecycleResponse:
+      type: object
+      required: [message, pending, command_id, status]
+      properties:
+        message:
+          type: string
+        pending:
+          type: boolean
+          description: True when a supervised runtime owner accepted the command for asynchronous execution.
+        command_id:
+          type: string
+          description: Durable lifecycle command ID when pending; empty for a synchronous transition.
+        status:
+          type: string
+          enum: [queued, acked, running, succeeded, failed, cancelled]
+
+    AgentLifecycleCommandResponse:
+      type: object
+      required: [command_id, action, status, result, error_class, created_at, updated_at, acked_at]
+      properties:
+        command_id:
+          type: string
+        action:
+          type: string
+          enum: [start, stop, restart, yield]
+        status:
+          type: string
+          enum: [queued, acked, running, succeeded, failed, cancelled]
+        result:
+          type: string
+        error_class:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        acked_at:
+          type: string
+          format: date-time
+          nullable: true
+
     StopAgentRequest:
       allOf:
         - $ref: "#/components/schemas/AgentLifecycleRequest"
@@ -6629,17 +6912,22 @@ components:
       additionalProperties: false
       description: |
         Kind-sensitive partial update. Durable records accept `name`,
-        `behavior`, and `budget_policy`; legacy binding entries accept only
+        `budget_policy`, and agent-owned cron schedule fields; their behavior
+        role is immutable after creation. Legacy binding entries accept only
         `name`; supervised assignments accept the remaining assignment fields.
       properties:
         name:
           type: string
-        behavior:
-          type: object
-          properties:
-            role_name:
-              type: string
         budget_policy:
+          type: string
+        binding_id:
+          type: string
+          description: >-
+            Exact attached managed binding; required for cron schedule updates.
+            Schedule updates cannot be combined with mutable record fields.
+        schedule:
+          type: string
+        schedule_timezone:
           type: string
         role_name:
           type: string
@@ -6703,9 +6991,107 @@ components:
 
     AgentRunsResponse:
       type: object
-      required: [agent_id, runs]
+      required: [agent_id, runs, sessions]
       properties:
         agent_id:
+          type: string
+        runs:
+          type: array
+          items:
+            $ref: "#/components/schemas/DriverRun"
+        sessions:
+          type: array
+          description: >-
+            Task, terminal, and orchestration sessions for supervised or
+            interactive agents. Durable record and workflow-binding agents
+            return an empty array and use runs instead.
+          items:
+            $ref: "#/components/schemas/AgentHistorySession"
+
+    AgentHistorySession:
+      type: object
+      required:
+        [workspace_key, session_id, agent_id, kind, status, created_at, updated_at]
+      properties:
+        workspace_key:
+          type: string
+        session_id:
+          type: string
+        agent_id:
+          type: string
+        node_id:
+          type: string
+        kind:
+          type: string
+          enum: [task, orchestration, terminal, maintenance, ad_hoc]
+        task_id:
+          type: string
+        terminal_id:
+          type: string
+        parent_session_id:
+          type: string
+        status:
+          type: string
+          enum:
+            [queued, leased, starting, running, idle, yielded, completed, failed, cancelled, expired]
+        phase:
+          type: string
+        attempt:
+          type: integer
+        started_at:
+          type: string
+          format: date-time
+        last_heartbeat:
+          type: string
+          format: date-time
+        finished_at:
+          type: [string, "null"]
+          format: date-time
+        summary:
+          type: string
+        error_class:
+          type: string
+        exit_code:
+          type: [integer, "null"]
+        metadata:
+          type: object
+          additionalProperties: false
+          description: Allowlisted, non-sensitive execution metadata.
+          properties:
+            backend:
+              type: string
+            runtime_strategy:
+              type: string
+            delivery:
+              type: string
+            patch_back_status:
+              type: string
+            local_branch:
+              type: string
+            head_sha:
+              type: string
+            github_head_sha:
+              type: string
+            patch_back_head_sha:
+              type: string
+            github_branch:
+              type: string
+            github_pr_url:
+              type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    TaskWorkflowRunsResponse:
+      type: object
+      required: [task_id, subject_ref, runs]
+      properties:
+        task_id:
+          type: string
+        subject_ref:
           type: string
         runs:
           type: array
@@ -6885,15 +7271,53 @@ components:
           type: boolean
         last_error:
           type: string
+        runtime_strategy:
+          type: string
+        delivery:
+          type: string
+        patch_back_status:
+          type: string
+        logs_ref:
+          type: string
+        local_branch:
+          type: string
+        head_sha:
+          type: string
+        github_branch:
+          type: string
+        github_pr_url:
+          type: string
+
+    TranscriptResponse:
+      type: object
+      required: [success]
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: "#/components/schemas/TranscriptData"
+        error:
+          type: string
+
+    TranscriptData:
+      type: object
+      required: [session_id, entries]
+      properties:
+        session_id:
+          type: string
+        entries:
+          type: array
+          items:
+            $ref: "#/components/schemas/TranscriptEntry"
 
     TranscriptEntry:
       type: object
       description: Single transcript entry from a session
-      required: [seq, ts, role, type]
+      required: [seq, timestamp, role, type]
       properties:
         seq:
           type: integer
-        ts:
+        timestamp:
           type: string
           format: date-time
         role:
@@ -6901,14 +7325,18 @@ components:
           enum: [user, assistant, system, tool]
         type:
           type: string
-          enum: [text, tool_use, tool_result]
-        content:
+          enum: [text, reasoning, tool_use, tool_result, result, session_meta]
+        text:
           type: string
         tool_name:
           type: string
-        tool_input:
+        tool_use_id:
           type: string
-        raw:
+        tool_input:
+          description: Backend-specific tool arguments.
+        output:
+          type: string
+        uuid:
           type: string
 
     SessionHistoryRecord:

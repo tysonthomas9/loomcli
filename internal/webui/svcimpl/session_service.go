@@ -1,13 +1,9 @@
 package svcimpl
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"io"
-	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -25,8 +21,14 @@ import (
 
 // Compile-time check.
 var _ service.SessionService = (*sessionServiceImpl)(nil)
+var _ service.AgentSessionTranscriptService = (*sessionServiceImpl)(nil)
 
 var userHomeDir = os.UserHomeDir
+
+// errNoUsableSessionStores distinguishes an absent or unreadable local session
+// store from unrelated control-plane failures. Transcript and diff reads may
+// recover from this condition through their durable control-plane artifacts.
+var errNoUsableSessionStores = errors.New("no usable local session stores")
 
 // sessionServiceImpl is the concrete implementation of SessionService.
 type sessionServiceImpl struct {
@@ -50,49 +52,141 @@ func NewSessionServiceWithRuntimeDir(st store.Store, histStore *sessionhistory.S
 // Agent worktrees store sessions in their own directories, so we need to
 // search across all repos to find sessions for a given task.
 func (s *sessionServiceImpl) storesForWorkspace(ctx context.Context, wsID string) ([]*sessions.Store, error) {
-	var stores []*sessions.Store
-	seen := make(map[string]struct{})
-	addStore := func(runtimeDir string) {
-		if runtimeDir == "" {
-			return
-		}
-		key := filepath.Clean(runtimeDir)
-		if abs, err := filepath.Abs(runtimeDir); err == nil {
-			key = filepath.Clean(abs)
-		}
-		if _, ok := seen[key]; ok {
-			return
-		}
-		seen[key] = struct{}{}
-		if st, err := sessions.NewStore(runtimeDir); err == nil {
-			stores = append(stores, st)
-		}
+	collection := newSessionStoreCollection()
+	s.addRuntimeSessionStoreCandidates(wsID, collection)
+	if err := s.addWorkspaceSessionStores(ctx, wsID, collection); err != nil {
+		return nil, err
 	}
+	if len(collection.stores) == 0 {
+		return nil, service.ErrInternal("no session stores available", errNoUsableSessionStores)
+	}
+	return collection.stores, nil
+}
 
-	addStore(s.runtimeDir)
+type sessionStoreCollection struct {
+	stores []*sessions.Store
+	seen   map[string]struct{}
+}
 
-	if s.store != nil {
-		wsData, err := storeadapter.BuildWorkspaceDataForKey(ctx, s.store, wsID)
-		if err != nil || wsData == nil {
-			if len(stores) == 0 {
-				return nil, service.ErrNotFound("workspace not found")
-			}
-		} else {
-			// Include workspace root.
-			addStore(wsData.Path)
-			// Include each repo (agent worktrees may have their own sessions dir).
-			for _, repo := range wsData.Repos {
-				addStore(repo.Path)
-			}
+func newSessionStoreCollection() *sessionStoreCollection {
+	return &sessionStoreCollection{seen: make(map[string]struct{})}
+}
+
+func (c *sessionStoreCollection) add(runtimeDir string) {
+	if runtimeDir == "" {
+		return
+	}
+	key := filepath.Clean(runtimeDir)
+	if abs, err := filepath.Abs(runtimeDir); err == nil {
+		key = filepath.Clean(abs)
+	}
+	if _, ok := c.seen[key]; ok {
+		return
+	}
+	c.seen[key] = struct{}{}
+	st, err := sessions.NewStore(runtimeDir)
+	if err != nil {
+		logger.Warn("failed to open local session store", "runtime_dir", runtimeDir, "err", err)
+		return
+	}
+	c.stores = append(c.stores, st)
+}
+
+// addExistingRuntimeDir adds the server-configured runtime directory only when
+// it already exists and is a directory. Session reads must not create an
+// arbitrary directory from configuration while resolving a user-supplied
+// session ID. sessions.Store validates and bounds the session ID beneath its
+// sessions directory before it reads metadata.
+func (c *sessionStoreCollection) addExistingRuntimeDir(runtimeDir string) {
+	if runtimeDir == "" {
+		return
+	}
+	absRuntimeDir, err := filepath.Abs(runtimeDir)
+	if err != nil {
+		logger.Warn("failed to resolve local session runtime directory", "runtime_dir", runtimeDir, "err", err)
+		return
+	}
+	info, err := os.Stat(absRuntimeDir)
+	if err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			logger.Warn("failed to inspect local session runtime directory", "runtime_dir", absRuntimeDir, "err", err)
 		}
-	} else if len(stores) == 0 {
-		return nil, service.ErrUnavailable("session store not available")
+		return
 	}
+	if !info.IsDir() {
+		logger.Warn("local session runtime path is not a directory", "runtime_dir", absRuntimeDir)
+		return
+	}
+	c.add(absRuntimeDir)
+}
 
-	if len(stores) == 0 {
-		return nil, service.ErrInternal("no session stores available", nil)
+// addRuntimeSessionStoreCandidates adds the active runtime and, only for the
+// conventional <root>/workspaces/<workspace> layout, the requested workspace's
+// direct sibling. This lets a local serve running in LOCALMODE read a session
+// owned by another local workspace without asking FleetDB to enumerate the
+// workspace topology.
+func (s *sessionServiceImpl) addRuntimeSessionStoreCandidates(wsID string, collection *sessionStoreCollection) {
+	collection.addExistingRuntimeDir(s.runtimeDir)
+	if siblingRuntimeDir, ok := siblingWorkspaceRuntimeDir(s.runtimeDir, wsID); ok {
+		collection.addExistingRuntimeDir(siblingRuntimeDir)
 	}
-	return stores, nil
+}
+
+// siblingWorkspaceRuntimeDir returns <runtime parent>/<wsID> only when the
+// runtime's parent is literally named "workspaces" and wsID is one safe path
+// component. It must not turn a workspace key into an arbitrary filesystem
+// path.
+func siblingWorkspaceRuntimeDir(runtimeDir, wsID string) (string, bool) {
+	if runtimeDir == "" || wsID == "" || wsID == "." || wsID == ".." ||
+		filepath.Clean(wsID) != wsID || filepath.Base(wsID) != wsID ||
+		strings.ContainsAny(wsID, "/\\") {
+		return "", false
+	}
+	absRuntimeDir, err := filepath.Abs(runtimeDir)
+	if err != nil {
+		return "", false
+	}
+	workspacesDir := filepath.Dir(absRuntimeDir)
+	if filepath.Base(workspacesDir) != "workspaces" {
+		return "", false
+	}
+	return filepath.Join(workspacesDir, wsID), true
+}
+
+func (s *sessionServiceImpl) addWorkspaceSessionStores(
+	ctx context.Context,
+	wsID string,
+	collection *sessionStoreCollection,
+) error {
+	if s.store == nil {
+		if len(collection.stores) == 0 {
+			return service.ErrUnavailable("session store not available")
+		}
+		return nil
+	}
+	wsData, err := storeadapter.BuildWorkspaceDataForKey(ctx, s.store, wsID)
+	if err != nil {
+		if len(collection.stores) > 0 {
+			return nil
+		}
+		if errors.Is(err, domain.ErrNotFound) {
+			return service.ErrNotFound("workspace not found")
+		}
+		return service.ErrInternal("failed to resolve session stores", err)
+	}
+	if wsData == nil {
+		if len(collection.stores) == 0 {
+			return service.ErrNotFound("workspace not found")
+		}
+		return nil
+	}
+	// Include the workspace root and every repo, since agent worktrees may have
+	// their own sessions directory.
+	collection.add(wsData.Path)
+	for _, repo := range wsData.Repos {
+		collection.add(repo.Path)
+	}
+	return nil
 }
 
 // storeOwningSession returns the first store whose metadata exists for
@@ -108,6 +202,18 @@ func storeOwningSession(stores []*sessions.Store, sessionID string) *sessions.St
 
 // findStoreForSession returns the first store that has metadata for the given session.
 func (s *sessionServiceImpl) findStoreForSession(ctx context.Context, wsID, sessionID string) (*sessions.Store, error) {
+	// The active runtime or requested workspace's sibling runtime can own the
+	// session even when FleetDB is unavailable or its workspace topology is
+	// stale. Check those local candidates first so loading a transcript, diff,
+	// or detail does not depend on a control-plane fanout.
+	if validSessionID.MatchString(sessionID) {
+		collection := newSessionStoreCollection()
+		s.addRuntimeSessionStoreCandidates(wsID, collection)
+		if st := storeOwningSession(collection.stores, sessionID); st != nil {
+			return st, nil
+		}
+	}
+
 	stores, err := s.storesForWorkspace(ctx, wsID)
 	if err != nil {
 		return nil, err
@@ -282,6 +388,7 @@ func (s *sessionServiceImpl) controlPlaneTaskSessions(ctx context.Context, wsID,
 			SessionRecord: sessionRecordFromAgentSession(rec),
 			IsActive:      isActiveAgentSession(rec.Status),
 		}
+		fillExecutionEvidence(&item, rec.Metadata)
 		fillControlPlaneArtifactFlags(&item, stores, rec)
 		items = append(items, item)
 	}
@@ -289,6 +396,20 @@ func (s *sessionServiceImpl) controlPlaneTaskSessions(ctx context.Context, wsID,
 		return items[i].StartedAt.After(items[j].StartedAt)
 	})
 	return items, nil
+}
+
+func fillExecutionEvidence(item *service.SessionListItem, metadata map[string]string) {
+	if item == nil || metadata == nil {
+		return
+	}
+	item.RuntimeStrategy = metadata["runtime_strategy"]
+	item.DeliveryMode = metadata["delivery"]
+	item.PatchBackStatus = metadata["patch_back_status"]
+	item.LogsRef = metadata["logs_ref"]
+	item.LocalBranch = metadata["local_branch"]
+	item.HeadSHA = firstNonEmptySessionValue(metadata["head_sha"], metadata["github_head_sha"], metadata["patch_back_head_sha"])
+	item.GitHubBranch = metadata["github_branch"]
+	item.GitHubPRURL = metadata["github_pr_url"]
 }
 
 // fillControlPlaneArtifactFlags sets HasTranscript/HasDiff from on-disk truth when a
@@ -426,6 +547,7 @@ func (s *sessionServiceImpl) controlPlaneSessionRecord(ctx context.Context, wsID
 		if errors.Is(err, domain.ErrNotFound) {
 			return nil, service.ErrNotFound("session not found")
 		}
+		logger.Error("failed to load control-plane session", "workspace_id", wsID, "task_id", taskID, "session_id", sessionID, "err", err)
 		return nil, service.ErrInternal("failed to load session", err)
 	}
 	if rec.TaskID != taskID && (rec.Metadata == nil || rec.Metadata["task_id"] != taskID) {
@@ -451,7 +573,7 @@ func (s *sessionServiceImpl) controlPlaneSession(ctx context.Context, wsID, task
 func (s *sessionServiceImpl) GetSessionTranscript(ctx context.Context, wsID, taskID, sessionID string) ([]transcript.Event, error) {
 	store, _, err := s.authorizedSessionStore(ctx, wsID, taskID, sessionID)
 	if err != nil {
-		if !serviceErrorNotFound(err) {
+		if !sessionStoreAllowsControlPlaneFallback(err) {
 			return nil, err
 		}
 		return s.controlPlaneSessionTranscript(ctx, wsID, taskID, sessionID)
@@ -467,11 +589,12 @@ func (s *sessionServiceImpl) GetSessionTranscript(ctx context.Context, wsID, tas
 		if cpErr == nil {
 			return cpEvents, nil
 		}
-		// If the control plane knows the content is simply gone (a not-found),
-		// surface THAT clean signal rather than the native reader's generic
-		// failure — the UI shows "no longer available" instead of a 500.
+		// Preserve the control plane's actionable failure kind rather than
+		// collapsing managed-content absence/outage into the native reader's
+		// generic failure.
 		var svcErr *service.ServiceError
-		if errors.As(cpErr, &svcErr) && svcErr.Kind == service.KindNotFound {
+		if errors.As(cpErr, &svcErr) &&
+			(svcErr.Kind == service.KindNotFound || svcErr.Kind == service.KindUnavailable) {
 			return nil, cpErr
 		}
 		logger.Error("failed to load native transcript", "session_id", sessionID, "err", loadErr)
@@ -483,146 +606,13 @@ func (s *sessionServiceImpl) GetSessionTranscript(ctx context.Context, wsID, tas
 	return events, nil
 }
 
-func (s *sessionServiceImpl) controlPlaneSessionTranscript(ctx context.Context, wsID, taskID, sessionID string) ([]transcript.Event, error) {
-	rec, err := s.controlPlaneSessionRecord(ctx, wsID, taskID, sessionID)
-	if err != nil {
-		return nil, err
-	}
-	transcriptRef := ""
-	if rec.Metadata != nil {
-		transcriptRef = strings.TrimSpace(rec.Metadata["transcript_ref"])
-	}
-	if transcriptRef == "" {
-		return nil, service.ErrNotFound("transcript not found")
-	}
-	data, err := s.readTranscriptRef(ctx, wsID, transcriptRef)
-	if err != nil {
-		// The artifact record survives in the control plane but its content
-		// blob is gone (e.g. a run predating the durable-artifact volume, whose
-		// local content dir was wiped). Report it honestly as gone — a clean
-		// not-found — rather than a generic internal failure, so the UI renders
-		// "transcript content is no longer available" instead of a doubled 500.
-		if errors.Is(err, os.ErrNotExist) || errors.Is(err, domain.ErrNotFound) {
-			return nil, service.ErrNotFound("transcript content is no longer available")
-		}
-		return nil, service.ErrInternal("failed to load transcript", err)
-	}
-	events, err := parseCanonicalTranscriptBytes(data)
-	if err != nil {
-		return nil, service.ErrInternal("failed to parse transcript", err)
-	}
-	if events == nil {
-		events = []transcript.Event{}
-	}
-	return events, nil
-}
-
-const maxControlPlaneTranscriptBytes = 16 << 20
-
-func (s *sessionServiceImpl) readTranscriptRef(ctx context.Context, wsID, ref string) ([]byte, error) {
-	ref = strings.TrimSpace(ref)
-	if ref == "" {
-		return nil, errors.New("empty transcript ref")
-	}
-	if strings.HasPrefix(ref, "artifact://") {
-		artifactID := strings.TrimSpace(strings.TrimPrefix(ref, "artifact://"))
-		if artifactID == "" {
-			return nil, errors.New("empty artifact transcript ref")
-		}
-		if s.store == nil {
-			return nil, errors.New("artifact store unavailable")
-		}
-		if reader, ok := s.store.Artifacts().(store.ArtifactContentReader); ok {
-			data, err := reader.ReadContent(ctx, wsID, artifactID)
-			if err == nil {
-				return data, nil
-			}
-			if !errors.Is(err, domain.ErrNotFound) {
-				return nil, err
-			}
-		}
-		artifact, err := s.store.Artifacts().Get(ctx, wsID, artifactID)
-		if err != nil {
-			return nil, err
-		}
-		return readTranscriptURI(ctx, artifact.URI)
-	}
-	return readTranscriptURI(ctx, ref)
-}
-
-func readTranscriptURI(ctx context.Context, rawURI string) ([]byte, error) {
-	rawURI = strings.TrimSpace(rawURI)
-	switch {
-	case strings.HasPrefix(rawURI, "file://"):
-		parsed, err := url.Parse(rawURI)
-		if err != nil {
-			return nil, err
-		}
-		path := parsed.Path
-		if path == "" {
-			path = parsed.Host
-		}
-		if path == "" {
-			return nil, errors.New("empty file transcript ref")
-		}
-		return os.ReadFile(path) //nolint:gosec // refs are emitted by the trusted runner/control-plane path.
-	case strings.HasPrefix(rawURI, "http://"), strings.HasPrefix(rawURI, "https://"):
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURI, nil)
-		if err != nil {
-			return nil, err
-		}
-		resp, err := http.DefaultClient.Do(req)
-		if err != nil {
-			return nil, err
-		}
-		defer resp.Body.Close()
-		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-			return nil, errors.New("transcript ref returned non-success status")
-		}
-		body, err := io.ReadAll(io.LimitReader(resp.Body, maxControlPlaneTranscriptBytes+1))
-		if err != nil {
-			return nil, err
-		}
-		if len(body) > maxControlPlaneTranscriptBytes {
-			return nil, errors.New("transcript is too large")
-		}
-		return body, nil
-	default:
-		return nil, errors.New("unsupported transcript ref")
-	}
-}
-
-func parseCanonicalTranscriptBytes(data []byte) ([]transcript.Event, error) {
-	trimmed := bytes.TrimSpace(data)
-	if len(trimmed) == 0 {
-		return []transcript.Event{}, nil
-	}
-	if trimmed[0] == '[' {
-		var events []transcript.Event
-		if err := json.Unmarshal(trimmed, &events); err != nil {
-			return nil, err
-		}
-		return events, nil
-	}
-	lines := bytes.Split(trimmed, []byte("\n"))
-	events := make([]transcript.Event, 0, len(lines))
-	for _, line := range lines {
-		line = bytes.TrimSpace(line)
-		if len(line) == 0 {
-			continue
-		}
-		var event transcript.Event
-		if err := json.Unmarshal(line, &event); err != nil {
-			return nil, err
-		}
-		events = append(events, event)
-	}
-	return events, nil
-}
-
 func serviceErrorNotFound(err error) bool {
 	var svcErr *service.ServiceError
 	return errors.As(err, &svcErr) && svcErr.Kind == service.KindNotFound
+}
+
+func sessionStoreAllowsControlPlaneFallback(err error) bool {
+	return serviceErrorNotFound(err) || errors.Is(err, errNoUsableSessionStores)
 }
 
 func (s *sessionServiceImpl) ListSessionSubagents(ctx context.Context, wsID, taskID, sessionID string) ([]string, error) {
@@ -721,7 +711,7 @@ func (s *sessionServiceImpl) authorizedSessionStore(ctx context.Context, wsID, t
 func (s *sessionServiceImpl) GetSessionDiff(ctx context.Context, wsID, taskID, sessionID string) (string, error) {
 	store, _, err := s.authorizedSessionStore(ctx, wsID, taskID, sessionID)
 	if err != nil {
-		if !serviceErrorNotFound(err) {
+		if !sessionStoreAllowsControlPlaneFallback(err) {
 			return "", err
 		}
 		return s.controlPlaneSessionDiff(ctx, wsID, taskID, sessionID)
@@ -768,14 +758,17 @@ func (s *sessionServiceImpl) controlPlaneSessionDiff(ctx context.Context, wsID, 
 	if artifactID == "" {
 		return "", service.ErrNotFound("diff not found")
 	}
-	diff, err := s.readControlPlaneArtifactText(ctx, wsID, artifactID)
+	data, err := s.readOwnedTaskRunArtifact(ctx, wsID, rec, artifactID, "patch")
 	if err != nil {
 		if errors.Is(err, domain.ErrNotFound) {
 			return "", service.ErrNotFound("diff not found")
 		}
+		if errors.Is(err, store.ErrArtifactContentUnavailable) {
+			return "", service.ErrUnavailable("diff content is temporarily unavailable")
+		}
 		return "", service.ErrInternal("failed to read diff", err)
 	}
-	return diff, nil
+	return string(data), nil
 }
 
 func controlPlaneDiffArtifactRef(metadata map[string]string) string {
@@ -819,48 +812,6 @@ func (s *sessionServiceImpl) diffArtifactIDForTaskRun(ctx context.Context, wsID,
 		}
 	}
 	return "", nil
-}
-
-func (s *sessionServiceImpl) readControlPlaneArtifactText(ctx context.Context, wsID, artifactID string) (string, error) {
-	artifactID = normalizeArtifactRef(artifactID)
-	if artifactID == "" {
-		return "", errors.New("empty artifact ref")
-	}
-	if isSupportedControlPlaneURI(artifactID) {
-		data, err := readTranscriptURI(ctx, artifactID)
-		if err != nil {
-			return "", err
-		}
-		return string(data), nil
-	}
-	if s.store == nil {
-		return "", errors.New("artifact store unavailable")
-	}
-	if reader, ok := s.store.Artifacts().(store.ArtifactContentReader); ok {
-		data, err := reader.ReadContent(ctx, wsID, artifactID)
-		if err == nil {
-			return string(data), nil
-		}
-		if !errors.Is(err, domain.ErrNotFound) {
-			return "", err
-		}
-	}
-	artifact, err := s.store.Artifacts().Get(ctx, wsID, artifactID)
-	if err != nil {
-		return "", err
-	}
-	if strings.TrimSpace(artifact.URI) == "" {
-		return "", domain.ErrNotFound
-	}
-	data, err := readTranscriptURI(ctx, artifact.URI)
-	if err != nil {
-		return "", err
-	}
-	return string(data), nil
-}
-
-func isSupportedControlPlaneURI(ref string) bool {
-	return strings.HasPrefix(ref, "file://") || strings.HasPrefix(ref, "http://") || strings.HasPrefix(ref, "https://")
 }
 
 func (s *sessionServiceImpl) ListSessionHistory(ctx context.Context, wsID, issueID string) ([]sessionhistory.SessionRecord, error) {

@@ -16,10 +16,72 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui"
 	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
+	"github.com/tysonthomas9/loomcli/internal/webui/handlers/agentcontrol"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 	"github.com/tysonthomas9/loomcli/internal/webui/svcimpl"
 )
+
+func TestStorelessAgentLifecycleRoutesReturnUnifiedReceipt(t *testing.T) {
+	var calls []string
+	multiPool := daemon.NewMultiPool(middleware.WorkspaceFromContext, 1)
+	t.Cleanup(func() { _ = multiPool.Close() })
+	app := &Server{
+		multiPool: multiPool,
+		config: webui.ServerConfig{
+			AgentControlFn: func(op, agentName string, _ bool) (*agentcontrol.AgentControlResult, error) {
+				calls = append(calls, op+":"+agentName)
+				return &agentcontrol.AgentControlResult{Success: true}, nil
+			},
+		},
+		wsExistsFn: func(id string) bool { return id == "LOCAL" },
+	}
+	setupTestRoutes(t, app)
+
+	for _, action := range []string{"start", "stop", "restart", "yield"} {
+		t.Run(action, func(t *testing.T) {
+			req := httptest.NewRequest(
+				http.MethodPost,
+				"/api/workspaces/LOCAL/agents/direct-agent/"+action,
+				nil,
+			)
+			rr := httptest.NewRecorder()
+			app.mux.ServeHTTP(rr, req)
+
+			if rr.Code != http.StatusOK {
+				t.Fatalf("%s status = %d, body = %s", action, rr.Code, rr.Body.String())
+			}
+			var receipt struct {
+				Message   string `json:"message"`
+				Pending   bool   `json:"pending"`
+				CommandID string `json:"command_id"`
+				Status    string `json:"status"`
+			}
+			if err := json.Unmarshal(rr.Body.Bytes(), &receipt); err != nil {
+				t.Fatalf("%s response JSON: %v", action, err)
+			}
+			if receipt.Message == "" || receipt.Pending || receipt.CommandID != "" || receipt.Status != "succeeded" {
+				t.Fatalf("%s receipt = %+v, want synchronous succeeded receipt", action, receipt)
+			}
+			var fields map[string]json.RawMessage
+			if err := json.Unmarshal(rr.Body.Bytes(), &fields); err != nil {
+				t.Fatalf("%s response fields: %v", action, err)
+			}
+			if len(fields) != 4 {
+				t.Fatalf("%s response fields = %v, want exact lifecycle contract", action, fields)
+			}
+			for _, key := range []string{"message", "pending", "command_id", "status"} {
+				if _, ok := fields[key]; !ok {
+					t.Fatalf("%s response missing %q: %s", action, key, rr.Body.String())
+				}
+			}
+		})
+	}
+
+	if len(calls) != 4 {
+		t.Fatalf("daemon control calls = %v, want one per lifecycle action", calls)
+	}
+}
 
 func TestFleetDBAgentRoutesUseStoreInsteadOfDaemonControl(t *testing.T) {
 	ctx := t.Context()
@@ -120,14 +182,14 @@ func TestFleetDBAgentRoutesUseStoreInsteadOfDaemonControl(t *testing.T) {
 	if err := json.Unmarshal(rr.Body.Bytes(), &list); err != nil {
 		t.Fatalf("list after stop JSON: %v", err)
 	}
-	if got := list.Data[0]; got.State != "idle" || got.DesiredState != "draining" {
-		t.Fatalf("unexpected gracefully stopping agent state: %+v", got)
+	if got := list.Data[0]; got.State != "active" || got.DesiredState != "" {
+		t.Fatalf("request-side lifecycle path mutated the durable agent projection: %+v", got)
 	}
 
 	req = httptest.NewRequest(http.MethodPost, "/api/workspaces/PARITY/agents/worker-one/start", nil)
 	rr = httptest.NewRecorder()
 	app.mux.ServeHTTP(rr, req)
-	if rr.Code != http.StatusOK {
+	if rr.Code != http.StatusAccepted {
 		t.Fatalf("start agent status = %d, body = %s", rr.Code, rr.Body.String())
 	}
 	req = httptest.NewRequest(http.MethodPost, "/api/workspaces/PARITY/agents/worker-one/yield", nil)
@@ -139,7 +201,7 @@ func TestFleetDBAgentRoutesUseStoreInsteadOfDaemonControl(t *testing.T) {
 	req = httptest.NewRequest(http.MethodPost, "/api/workspaces/PARITY/agents/worker-one/restart", nil)
 	rr = httptest.NewRecorder()
 	app.mux.ServeHTTP(rr, req)
-	if rr.Code != http.StatusOK {
+	if rr.Code != http.StatusAccepted {
 		t.Fatalf("restart agent status = %d, body = %s", rr.Code, rr.Body.String())
 	}
 

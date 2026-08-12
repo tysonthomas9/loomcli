@@ -12,6 +12,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
+	"github.com/tysonthomas9/loomcli/internal/gitauth"
 	"github.com/tysonthomas9/loomcli/internal/gitbranch"
 	"github.com/tysonthomas9/loomcli/internal/localworkspace"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
@@ -162,11 +163,26 @@ func resolveRepoPaths(repoPaths []string) ([]resolvedRepo, error) {
 type createdWorktree struct {
 	origRepoPath string
 	worktreePath string
-	branch       string
+	// branch is non-empty only when this operation created the branch. Existing
+	// healthy branches are checked out detached and must never be deleted by a
+	// later rollback.
+	branch string
 }
 
 // addWorktrees creates git worktrees for each resolved repo in the workspace directory.
 func addWorktrees(ctx context.Context, resolved []resolvedRepo, wsDir, branch string) ([]createdWorktree, []config.RepoConfig, error) {
+	return addWorktreesWithRepoDefault(ctx, resolved, wsDir, branch, branch)
+}
+
+// addWorktreesWithRepoDefault keeps the workspace checkout branch separate
+// from the repository's integration branch. A blank override auto-detects the
+// source repository branch; this is the UI Add Repo path, where the workspace
+// branch remains an isolation branch but task diffing must use the source base.
+func addWorktreesWithRepoDefault(
+	ctx context.Context,
+	resolved []resolvedRepo,
+	wsDir, worktreeBranch, defaultBranchOverride string,
+) ([]createdWorktree, []config.RepoConfig, error) {
 	var created []createdWorktree
 	var repos []config.RepoConfig
 
@@ -175,14 +191,20 @@ func addWorktrees(ctx context.Context, resolved []resolvedRepo, wsDir, branch st
 			return created, nil, ctx.Err()
 		}
 		worktreePath := filepath.Join(wsDir, repo.name)
-		repoConfig := worktreeRepoConfig(repo, worktreePath, branch)
-		worktree, err := createWorkspaceWorktree(repo, worktreePath, branch)
+		repoConfig, err := worktreeRepoConfig(repo, worktreePath, defaultBranchOverride)
+		if err != nil {
+			return created, nil, workspaceerrors.New(
+				workspaceerrors.GitFailed,
+				fmt.Sprintf("detect default branch for local repo %q", repo.name),
+				err,
+			)
+		}
+		worktree, err := createWorkspaceWorktree(repo, worktreePath, worktreeBranch)
 		if err != nil {
 			if errors.Is(err, gitbranch.ErrRepositoryNotUsable) {
 				return created, nil, workspaceerrors.New(workspaceerrors.GitFailed, fmt.Sprintf("source repo is not usable for %s", repo.name), err)
 			}
 			warnSkippedWorktree(ctx, repo.name, worktreePath, err)
-			repos = append(repos, repoConfig)
 			continue
 		}
 		created = append(created, worktree)
@@ -191,14 +213,22 @@ func addWorktrees(ctx context.Context, resolved []resolvedRepo, wsDir, branch st
 	return created, repos, nil
 }
 
-func worktreeRepoConfig(repo resolvedRepo, worktreePath, branch string) config.RepoConfig {
+func worktreeRepoConfig(repo resolvedRepo, worktreePath, defaultBranchOverride string) (config.RepoConfig, error) {
+	defaultBranch := strings.TrimSpace(defaultBranchOverride)
+	if defaultBranch == "" {
+		var err error
+		defaultBranch, err = detectRepoDefaultBranch(repo.path)
+		if err != nil {
+			return config.RepoConfig{}, err
+		}
+	}
 	return config.RepoConfig{
 		Name:          repo.name,
 		Path:          worktreePath,
 		Remote:        "origin",
-		DefaultBranch: branch,
+		DefaultBranch: defaultBranch,
 		SourceRepoID:  repo.name,
-	}
+	}, nil
 }
 
 func createWorkspaceWorktree(repo resolvedRepo, worktreePath, branch string) (createdWorktree, error) {
@@ -207,6 +237,7 @@ func createWorkspaceWorktree(repo resolvedRepo, worktreePath, branch string) (cr
 		return createdWorktree{}, err
 	}
 	baseRef := ""
+	createBranch := info.State != gitbranch.StateHealthy
 	if info.State == gitbranch.StateBroken {
 		recoveryBase := workspaceWorktreeRecoveryBase(repo.path, branch)
 		recovery, err := gitbranch.Recover(repo.path, branch, recoveryBase, info)
@@ -214,11 +245,35 @@ func createWorkspaceWorktree(repo resolvedRepo, worktreePath, branch string) (cr
 			return createdWorktree{}, err
 		}
 		baseRef = recovery.BaseSHA
+	} else if info.State == gitbranch.StateHealthy {
+		// A local repo is commonly attached while its default branch is checked
+		// out in the source checkout. Git correctly refuses to check the same
+		// branch out in two worktrees. The workspace checkout is only a safe,
+		// machine-local base for isolated task worktrees, so detach it at the
+		// exact healthy branch tip instead of weakening Git's branch lock.
+		baseRef = info.BaseSHA
 	}
-	if err := addWorkspaceWorktree(repo.path, worktreePath, branch, baseRef); err != nil {
+	createdBranch := ""
+	if createBranch {
+		args := []string{"branch", branch}
+		if baseRef != "" {
+			args = append(args, baseRef)
+		}
+		if _, err := cli.RunGitCommand(repo.path, args...); err != nil {
+			return createdWorktree{}, err
+		}
+		createdBranch = branch
+	}
+	if err := addWorkspaceWorktree(repo.path, worktreePath, branch, baseRef, createBranch); err != nil {
+		// Delete only a branch whose creation just succeeded in this operation.
+		// If another process checked it out in the meantime, Git refuses the
+		// deletion, preserving the concurrent owner's branch.
+		if createdBranch != "" {
+			_, _ = cli.RunGitCommand(repo.path, "branch", "-D", createdBranch)
+		}
 		return createdWorktree{}, err
 	}
-	return createdWorktree{origRepoPath: repo.path, worktreePath: worktreePath, branch: branch}, nil
+	return createdWorktree{origRepoPath: repo.path, worktreePath: worktreePath, branch: createdBranch}, nil
 }
 
 func workspaceWorktreeRecoveryBase(repoPath, targetBranch string) string {
@@ -233,10 +288,15 @@ func workspaceWorktreeRecoveryBase(repoPath, targetBranch string) string {
 	return base
 }
 
-func addWorkspaceWorktree(repoPath, worktreePath, branch, baseRef string) error {
-	args := []string{"worktree", "add", worktreePath, "-b", branch}
-	if baseRef != "" {
-		args = append(args, baseRef)
+func addWorkspaceWorktree(repoPath, worktreePath, branch, baseRef string, createBranch bool) error {
+	args := []string{"worktree", "add"}
+	if createBranch {
+		args = append(args, worktreePath, branch)
+	} else {
+		args = append(args, "--detach", worktreePath)
+		if baseRef != "" {
+			args = append(args, baseRef)
+		}
 	}
 	_, err := cli.RunGitCommand(repoPath, args...)
 	return err
@@ -348,10 +408,29 @@ func normalizeRepoName(name string) string {
 
 // cloneRepos clones each URL into the workspace directory, deduplicating names.
 func cloneRepos(ctx context.Context, cloneURLs []string, wsDir string) ([]config.RepoConfig, error) {
-	return cloneReposWithSeen(ctx, cloneURLs, wsDir, make(map[string]bool))
+	return cloneReposWithCredentials(ctx, cloneURLs, wsDir, nil)
 }
 
 func cloneReposWithSeen(ctx context.Context, cloneURLs []string, wsDir string, seenNames map[string]bool) ([]config.RepoConfig, error) {
+	return cloneReposWithSeenCredentials(ctx, cloneURLs, wsDir, seenNames, nil)
+}
+
+func cloneReposWithCredentials(
+	ctx context.Context,
+	cloneURLs []string,
+	wsDir string,
+	credentials gitauth.Source,
+) ([]config.RepoConfig, error) {
+	return cloneReposWithSeenCredentials(ctx, cloneURLs, wsDir, make(map[string]bool), credentials)
+}
+
+func cloneReposWithSeenCredentials(
+	ctx context.Context,
+	cloneURLs []string,
+	wsDir string,
+	seenNames map[string]bool,
+	credentials gitauth.Source,
+) ([]config.RepoConfig, error) {
 	var repos []config.RepoConfig
 	if seenNames == nil {
 		seenNames = make(map[string]bool)
@@ -367,19 +446,111 @@ func cloneReposWithSeen(ctx context.Context, cloneURLs []string, wsDir string, s
 		seenNames[repoName] = true
 
 		clonePath := filepath.Join(wsDir, repoName)
-		if err := localworkspace.CloneRepoTo(ctx, cloneURL, clonePath); err != nil {
+		if err := localworkspace.CloneRepoToWithCredentials(ctx, cloneURL, clonePath, credentials); err != nil {
 			cleanupClonedRepos(repos)
 			return nil, workspaceerrors.New(workspaceerrors.GitFailed, err.Error(), err)
 		}
+		defaultBranch, err := detectRepoDefaultBranch(clonePath)
+		if err != nil {
+			_ = os.RemoveAll(clonePath)
+			cleanupClonedRepos(repos)
+			return nil, workspaceerrors.New(
+				workspaceerrors.GitFailed,
+				fmt.Sprintf("detect default branch for cloned repo %q", repoName),
+				err,
+			)
+		}
 
 		repos = append(repos, config.RepoConfig{
-			Name:         repoName,
-			Path:         clonePath,
-			Remote:       "origin",
-			SourceRepoID: repoName,
+			Name:          repoName,
+			Path:          clonePath,
+			Remote:        "origin",
+			DefaultBranch: defaultBranch,
+			SourceRepoID:  repoName,
 		})
 	}
 	return repos, nil
+}
+
+// detectRepoDefaultBranch resolves the repository's integration branch.
+// Prefer the remote's symbolic HEAD because it is the repository contract.
+// Older local-mode fixtures may omit that symbolic ref while still carrying a
+// conventional fetched main/master branch, so accept those deterministically.
+// A configured remote with no advertised or conventional base fails closed;
+// only a repo with no remote may use its checkout's symbolic HEAD.
+func detectRepoDefaultBranch(repoPath string) (string, error) {
+	const remote = "origin"
+	remotePrefix := "refs/remotes/" + remote + "/"
+	remoteHead := remotePrefix + "HEAD"
+	if out, err := cli.RunGitCommand(repoPath, "symbolic-ref", "--quiet", remoteHead); err == nil {
+		target := strings.TrimSpace(out)
+		branch := strings.TrimPrefix(target, remotePrefix)
+		if target != branch && branch != "" && branch != "HEAD" && gitRefResolvesToCommit(repoPath, target) {
+			return branch, nil
+		}
+	}
+	for _, branch := range []string{"main", "master"} {
+		ref := remotePrefix + branch
+		if gitRefIsDirect(repoPath, ref) && gitRefResolvesToCommit(repoPath, ref) {
+			return branch, nil
+		}
+	}
+	if out, err := cli.RunGitCommand(repoPath, "remote", "get-url", remote); err == nil && strings.TrimSpace(out) != "" {
+		return "", fmt.Errorf("remote %q does not advertise a resolvable committed default branch; specify one explicitly", remote)
+	}
+	const localPrefix = "refs/heads/"
+	if out, err := cli.RunGitCommand(repoPath, "symbolic-ref", "--quiet", "HEAD"); err == nil {
+		target := strings.TrimSpace(out)
+		branch := strings.TrimPrefix(target, localPrefix)
+		if target != branch && branch != "" && gitRefResolvesToCommit(repoPath, target) {
+			return branch, nil
+		}
+	}
+	return "", fmt.Errorf("remote %q and repository HEAD do not resolve to a committed branch", remote)
+}
+
+func gitRefIsDirect(repoPath, ref string) bool {
+	out, err := cli.RunGitCommand(repoPath, "for-each-ref", "--format=%(symref)", "--count=1", ref)
+	return err == nil && strings.TrimSpace(out) == ""
+}
+
+func gitRefResolvesToCommit(repoPath, ref string) bool {
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		return false
+	}
+	_, err := cli.RunGitCommand(repoPath, "rev-parse", "--verify", "--quiet", ref+"^{commit}")
+	return err == nil
+}
+
+// applyRequestedCloneBranch validates an explicit branch against every cloned
+// repository. With no explicit branch, each clone keeps its independently
+// detected remote HEAD. This prevents one shared workspace default from
+// corrupting mixed-repository metadata.
+func applyRequestedCloneBranch(repos []config.RepoConfig, requested string) error {
+	requested = strings.TrimSpace(requested)
+	if requested == "" {
+		return nil
+	}
+	for i := range repos {
+		repo := &repos[i]
+		if _, err := cli.RunGitCommand(repo.Path, "check-ref-format", "--branch", requested); err != nil {
+			return fmt.Errorf("invalid default branch %q for repo %q: %w", requested, repo.Name, err)
+		}
+		remote := strings.TrimSpace(repo.Remote)
+		if remote == "" {
+			remote = "origin"
+		}
+		remoteRef := "refs/remotes/" + remote + "/" + requested + "^{commit}"
+		localRef := "refs/heads/" + requested + "^{commit}"
+		if _, err := cli.RunGitCommand(repo.Path, "rev-parse", "--verify", "--quiet", remoteRef); err != nil {
+			if _, localErr := cli.RunGitCommand(repo.Path, "rev-parse", "--verify", "--quiet", localRef); localErr != nil {
+				return fmt.Errorf("default branch %q does not exist in cloned repo %q", requested, repo.Name)
+			}
+		}
+		repo.DefaultBranch = requested
+	}
+	return nil
 }
 
 func cleanupClonedRepos(repos []config.RepoConfig) {

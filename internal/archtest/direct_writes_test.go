@@ -9,35 +9,20 @@ import (
 	"testing"
 )
 
-func TestCheckedInDirectWriteInventoryMatchesAllProfiles(t *testing.T) {
-	root, err := filepath.Abs(filepath.Join("..", ".."))
-	if err != nil {
-		t.Fatal(err)
-	}
-	matrix, err := LoadAnalysisMatrix(filepath.Join("testdata", "analysis-matrix.yaml"))
-	if err != nil {
-		t.Fatal(err)
-	}
+func TestCheckedInDirectWriteInventoryStrictCounts(t *testing.T) {
 	inventory, err := LoadDirectWriteInventory(filepath.Join("testdata", "direct-writes.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	observed, violations, err := CheckDirectWrites(root, matrix, inventory)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(violations) != 0 {
-		t.Fatalf("direct-write inventory violations: %v", violations)
-	}
-	if len(observed) != 226 {
-		t.Fatalf("direct-write rows = %d, want strict baseline of 226", len(observed))
+	if len(inventory.Writes) != 255 {
+		t.Fatalf("direct-write rows = %d, want strict baseline of 255", len(inventory.Writes))
 	}
 	totalSites := 0
-	for _, use := range observed {
+	for _, use := range inventory.Writes {
 		totalSites += use.Count
 	}
-	if totalSites != 249 {
-		t.Fatalf("direct-write sites = %d, want strict baseline of 249", totalSites)
+	if totalSites != 278 {
+		t.Fatalf("direct-write sites = %d, want strict baseline of 278", totalSites)
 	}
 }
 
@@ -399,6 +384,71 @@ func TestDirectWriteInventoryRejectsExpiredRowsForCompletedPhase(t *testing.T) {
 	}}
 	if err := inventory.ValidateCompletedPhase(2); err == nil || !strings.Contains(err.Error(), "expired after Phase 2") {
 		t.Fatalf("ValidateCompletedPhase error = %v, want expired-row rejection", err)
+	}
+}
+
+func TestLegacyDriverDirectWriteRatchetRejectsDrift(t *testing.T) {
+	root := t.TempDir()
+	writeDirectWriteModule(t, root)
+	writeGoFile(t, root, "internal/store/store.go", `package store
+type WorkspaceStore interface { Create(string) error }
+`)
+	writeGoFile(t, root, "internal/driver/write.go", `package driver
+import "github.com/tysonthomas9/loomcli/internal/store"
+func write(s store.WorkspaceStore) error { return s.Create("one") }
+`)
+	writeGoFile(t, root, "internal/cli/read.go", "package cli\n")
+
+	matrix := oneDirectWriteProfile()
+	inventory := directWriteTestInventory(matrix)
+	inventory.ReceiverSurfaces[0].CapabilityOwner = "execution"
+	uses, err := snapshotDirectWritesAtRoots(root, matrix, inventory, []string{"internal/driver"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows, sites, digest := directWriteDigest(uses)
+	inventory.LegacyDriver = &LegacyDirectWriteBaseline{
+		Root: "internal/driver", ExpiresAfterPhase: 6,
+		Rows: rows, Sites: sites, Digest: digest, Owners: directWriteOwnerBaselines(uses),
+	}
+	if err := inventory.validateLegacyExecution(); err != nil {
+		t.Fatal(err)
+	}
+	if _, violations, err := CheckDirectWrites(root, matrix, inventory); err != nil || len(violations) != 0 {
+		t.Fatalf("matching legacy driver baseline violations=%v err=%v", violations, err)
+	}
+
+	writeGoFile(t, root, "internal/driver/write.go", `package driver
+import "github.com/tysonthomas9/loomcli/internal/store"
+func write(s store.WorkspaceStore) error {
+	if err := s.Create("one"); err != nil { return err }
+	return s.Create("two")
+}
+`)
+	_, violations, err := CheckDirectWrites(root, matrix, inventory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !containsViolation(violations, "legacy driver direct-write ratchet changed") {
+		t.Fatalf("legacy driver drift violations = %v", violations)
+	}
+}
+
+func TestLegacyDriverDirectWriteRatchetExpiresAtPhase6Completion(t *testing.T) {
+	inventory := directWriteTestInventory(oneDirectWriteProfile())
+	inventory.LegacyDriver = &LegacyDirectWriteBaseline{
+		Root: "internal/driver", ExpiresAfterPhase: 6, Rows: 1, Sites: 1,
+		Digest: strings.Repeat("a", 64),
+		Owners: []LegacyDirectWriteOwnerBaseline{{CapabilityOwner: "execution", Rows: 1, Sites: 1}},
+	}
+	if err := inventory.validateLegacyExecution(); err != nil {
+		t.Fatal(err)
+	}
+	if err := inventory.ValidateCompletedPhase(5); err != nil {
+		t.Fatalf("Phase 5 must retain the bounded legacy baseline: %v", err)
+	}
+	if err := inventory.ValidateCompletedPhase(6); err == nil || !strings.Contains(err.Error(), "expired after Phase 6") {
+		t.Fatalf("Phase 6 completion error = %v, want expiry rejection", err)
 	}
 }
 

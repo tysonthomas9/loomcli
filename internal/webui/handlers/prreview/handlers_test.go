@@ -132,8 +132,9 @@ func (g *fakeGitHub) handle(w http.ResponseWriter, r *http.Request) {
 		})
 	case r.Method == http.MethodPost && r.URL.Path == "/repos/octocat/hello/pulls/7/reviews":
 		writeUpstreamJSON(w, http.StatusCreated, map[string]any{
-			"id":    101,
-			"state": "APPROVED",
+			"id":       101,
+			"state":    "APPROVED",
+			"html_url": "https://github.com/octocat/hello/pull/7#pullrequestreview-101",
 		})
 	default:
 		writeUpstreamJSON(w, http.StatusNotFound, map[string]any{"message": "Not Found"})

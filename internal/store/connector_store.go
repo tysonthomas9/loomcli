@@ -41,6 +41,9 @@ type ConnectorFilter struct {
 type ConnectorSecretRotation struct {
 	NewInboundSecret         string
 	PreviousSecretValidUntil time.Time
+	// ExpectedUpdatedAt, when non-zero, makes rotation an atomic
+	// compare-and-swap against the connector generation.
+	ExpectedUpdatedAt time.Time
 	// NewOutboundCredentialSealed, when non-nil, replaces the sealed
 	// outbound credential (already ciphertext — see ConnectorCreate). Nil
 	// leaves the existing credential in place.

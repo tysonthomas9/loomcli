@@ -23,11 +23,129 @@ import {
   post,
   wsUrl,
 } from "@/api/common";
-import { localOperatorRequestOptions } from "@/api/workflows/localOperatorSession";
+import type { WorkflowRun } from "@/api/workflows";
+import type { components } from "@/types/generated/openapi";
 
 function monitorPath(path: string, workspaceId?: string): string {
   if (!workspaceId) return path;
   return `${path}?workspace=${encodeURIComponent(workspaceId)}`;
+}
+
+export type AgentLifecycleAction = "start" | "stop" | "restart" | "yield";
+
+export type AgentLifecycleCommandStatus =
+  | "queued"
+  | "acked"
+  | "running"
+  | "succeeded"
+  | "failed"
+  | "cancelled";
+
+export interface AgentLifecycleRequestResult {
+  message: string;
+  pending: boolean;
+  command_id?: string;
+  status?: AgentLifecycleCommandStatus;
+}
+
+export interface AgentLifecycleCommandResult {
+  command_id: string;
+  action: AgentLifecycleAction;
+  status: AgentLifecycleCommandStatus;
+  result?: string;
+  error_class?: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+const agentLifecycleCommandStatuses = new Set<AgentLifecycleCommandStatus>([
+  "queued",
+  "acked",
+  "running",
+  "succeeded",
+  "failed",
+  "cancelled",
+]);
+
+function parseAgentLifecycleCommandStatus(
+  value: unknown,
+): AgentLifecycleCommandStatus | undefined {
+  return typeof value === "string" &&
+    agentLifecycleCommandStatuses.has(value as AgentLifecycleCommandStatus)
+    ? (value as AgentLifecycleCommandStatus)
+    : undefined;
+}
+
+function parseAgentLifecycleRequestResult(
+  value: unknown,
+): AgentLifecycleRequestResult {
+  if (value == null || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("Invalid agent lifecycle response");
+  }
+  const response = value as Record<string, unknown>;
+  if (
+    typeof response.message !== "string" ||
+    typeof response.pending !== "boolean"
+  ) {
+    throw new Error("Invalid agent lifecycle response");
+  }
+  const commandID =
+    typeof response.command_id === "string" && response.command_id.trim() !== ""
+      ? response.command_id
+      : undefined;
+  if (response.pending && commandID == null) {
+    throw new Error(
+      "Invalid agent lifecycle response: pending command_id is missing",
+    );
+  }
+  const status = parseAgentLifecycleCommandStatus(response.status);
+  if (response.status != null && status == null) {
+    throw new Error("Invalid agent lifecycle response: unknown status");
+  }
+  return {
+    message: response.message,
+    pending: response.pending,
+    ...(commandID != null && { command_id: commandID }),
+    ...(status != null && { status }),
+  };
+}
+
+function parseAgentLifecycleCommandResult(
+  value: unknown,
+): AgentLifecycleCommandResult {
+  if (value == null || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("Invalid agent lifecycle command response");
+  }
+  const response = value as Record<string, unknown>;
+  const commandID =
+    typeof response.command_id === "string" ? response.command_id.trim() : "";
+  const action = response.action;
+  const status = parseAgentLifecycleCommandStatus(response.status);
+  if (
+    commandID === "" ||
+    (action !== "start" &&
+      action !== "stop" &&
+      action !== "restart" &&
+      action !== "yield") ||
+    status == null
+  ) {
+    throw new Error("Invalid agent lifecycle command response");
+  }
+  const optionalString = (key: string): string | undefined =>
+    typeof response[key] === "string" ? response[key] : undefined;
+  const result = optionalString("result");
+  const errorClass = optionalString("error_class");
+  const createdAt = optionalString("created_at");
+  const updatedAt = optionalString("updated_at");
+  return {
+    command_id: commandID,
+    action,
+    status,
+    ...(result != null && { result }),
+    ...(errorClass != null && { error_class: errorClass }),
+    ...(createdAt != null && { created_at: createdAt }),
+    ...(updatedAt != null && { updated_at: updatedAt }),
+  };
 }
 
 /**
@@ -71,41 +189,80 @@ export async function startAgent(
   workspaceId: string,
   agentName: string,
   options?: { taskId?: string },
-): Promise<void> {
-  await post<unknown>(
-    wsUrl(workspaceId, `/agents/${encodeURIComponent(agentName)}/start`),
-    options?.taskId ? { payload: { task_id: options.taskId } } : undefined,
+): Promise<AgentLifecycleRequestResult> {
+  const { data, error, response } = await api.POST(
+    "/api/workspaces/{ws}/agents/{name}/start",
+    {
+      params: { path: { ws: workspaceId, name: agentName } },
+      ...(options?.taskId
+        ? { body: { payload: { task_id: options.taskId } } }
+        : {}),
+    },
   );
+  if (error) throw apiErrorFromResponse(error, response);
+  return parseAgentLifecycleRequestResult(data);
 }
 
 /**
  * Request that a running workspace agent stops. Without `force` the backend
- * sends a graceful yield (202, poll GET /agents to see it wind down); with
- * `force: true` it hard-stops the agent (200). Mirrors the agentcontrol HTTP
- * surface (internal/webui/handlers/agentcontrol).
+ * drains active work cooperatively before keeping the agent stopped; with
+ * `force: true` it skips the cooperative yield and terminates directly.
  */
 export async function stopAgent(
   workspaceId: string,
   agentName: string,
   options?: { force?: boolean },
-): Promise<void> {
-  await post<unknown>(
-    wsUrl(workspaceId, `/agents/${encodeURIComponent(agentName)}/stop`),
-    options?.force ? { force: true } : undefined,
+): Promise<AgentLifecycleRequestResult> {
+  const { data, error, response } = await api.POST(
+    "/api/workspaces/{ws}/agents/{name}/stop",
+    {
+      params: { path: { ws: workspaceId, name: agentName } },
+      ...(options?.force ? { body: { force: true } } : {}),
+    },
   );
+  if (error) throw apiErrorFromResponse(error, response);
+  return parseAgentLifecycleRequestResult(data);
 }
 
 /**
- * Request that a workspace agent restarts (stop + start in one daemon call).
+ * Request that a workspace agent restarts. Supervised runtimes complete the
+ * stop + start asynchronously after accepting the request.
  */
 export async function restartAgent(
   workspaceId: string,
   agentName: string,
-): Promise<void> {
-  await post<unknown>(
-    wsUrl(workspaceId, `/agents/${encodeURIComponent(agentName)}/restart`),
-    undefined,
+): Promise<AgentLifecycleRequestResult> {
+  const { data, error, response } = await api.POST(
+    "/api/workspaces/{ws}/agents/{name}/restart",
+    {
+      params: { path: { ws: workspaceId, name: agentName } },
+    },
   );
+  if (error) throw apiErrorFromResponse(error, response);
+  return parseAgentLifecycleRequestResult(data);
+}
+
+/**
+ * Read the authoritative lifecycle command state for one supervised agent.
+ * This route is intentionally called through the handwritten helper until the
+ * next generated OpenAPI refresh lands.
+ */
+export async function getAgentLifecycleCommand(
+  workspaceId: string,
+  agentName: string,
+  commandID: string,
+  options?: { signal?: AbortSignal },
+): Promise<AgentLifecycleCommandResult> {
+  const result = await get<unknown>(
+    wsUrl(
+      workspaceId,
+      `/agents/${encodeURIComponent(
+        agentName,
+      )}/lifecycle-commands/${encodeURIComponent(commandID)}`,
+    ),
+    options?.signal == null ? undefined : { signal: options.signal },
+  );
+  return parseAgentLifecycleCommandResult(result);
 }
 
 /**
@@ -127,15 +284,7 @@ export interface AgentRecordBehavior {
   driver_version_id?: string;
 }
 
-export interface AgentRecordBinding {
-  binding_id: string;
-  name?: string;
-  source_kind?: string;
-  event_type_patterns?: string[];
-  schedule?: string;
-  schedule_timezone?: string;
-  enabled?: boolean;
-}
+export type AgentRecordBinding = components["schemas"]["AgentRecordBinding"];
 
 export interface AgentRecord {
   id: string;
@@ -145,12 +294,22 @@ export interface AgentRecord {
   behavior: AgentRecordBehavior;
   workspace_key: string;
   bindings?: AgentRecordBinding[];
+  budget_policy?: string;
+  last_run_status?: string;
+  consecutive_failures?: number;
+  next_fire_at?: string;
+  metadata?: Record<string, string>;
   created_at?: string;
   updated_at?: string;
 }
 
-/** Identity fields shared by prompt/scripted records in the unified list. */
-export type AgentRecordSummary = Pick<AgentRecord, "id" | "name" | "kind">;
+/**
+ * Prompt/scripted records in the unified list already carry their complete
+ * record state. Keep that state instead of reducing the response to identity
+ * fields: record routes and orphan recovery cannot infer desired state,
+ * behavior, or aggregate health from a trigger binding that may not exist.
+ */
+export type AgentRecordSummary = AgentRecord;
 
 export interface PromptRoleCreateInput {
   prompt?: string;
@@ -187,10 +346,11 @@ export interface CreatePromptAgentRecordRequest {
 /** Mutable fields on a durable prompt/scripted AgentService record. */
 export interface UpdateAgentRecordRequest {
   name?: string;
-  behavior?: {
-    role_name?: string;
-  };
   budget_policy?: string;
+  /** Exact attached managed binding whose cron configuration is changing. */
+  binding_id?: string;
+  schedule?: string;
+  schedule_timezone?: string;
 }
 
 /** Result of archiving an AgentService and deleting all attached bindings. */
@@ -200,6 +360,15 @@ export interface DeleteAgentRecordResult {
   bindings_deleted: number;
   grants_revoked: number;
 }
+
+export type AgentHistorySession = components["schemas"]["AgentHistorySession"];
+export type AgentHistorySessionStatus = AgentHistorySession["status"];
+export type AgentRunsResponse = Omit<
+  components["schemas"]["AgentRunsResponse"],
+  "runs"
+> & {
+  runs: WorkflowRun[];
+};
 
 interface UnifiedAgentListResponse {
   success: boolean;
@@ -309,7 +478,6 @@ export async function setAgentRecordEnabled(
       `/agents/${encodeURIComponent(agentId)}/${enabled ? "enable" : "disable"}`,
     ),
     undefined,
-    localOperatorRequestOptions(workspaceId),
   );
 }
 
@@ -330,6 +498,23 @@ export async function listAgentRecords(
   );
 }
 
+/** List one agent's durable workflow runs or supervised session history. */
+export async function listAgentRuns(
+  workspaceId: string,
+  agentId: string,
+  opts?: { limit?: number },
+): Promise<AgentRunsResponse> {
+  const params = new URLSearchParams();
+  if (opts?.limit !== undefined) params.set("limit", String(opts.limit));
+  const query = params.toString();
+  return get<AgentRunsResponse>(
+    wsUrl(
+      workspaceId,
+      `/agents/${encodeURIComponent(agentId)}/runs${query ? `?${query}` : ""}`,
+    ),
+  );
+}
+
 /**
  * Update the durable AgentService identity behind an attached prompt/scripted
  * binding. Identity fields such as name belong to the agent record, not to one
@@ -343,7 +528,6 @@ export async function updateAgentRecord(
   return patch<AgentRecord>(
     wsUrl(workspaceId, `/agents/${encodeURIComponent(agentId)}`),
     req,
-    localOperatorRequestOptions(workspaceId),
   );
 }
 
@@ -358,7 +542,6 @@ export async function deleteAgentRecord(
 ): Promise<DeleteAgentRecordResult> {
   return del<DeleteAgentRecordResult>(
     wsUrl(workspaceId, `/agents/${encodeURIComponent(agentId)}`),
-    localOperatorRequestOptions(workspaceId),
   );
 }
 
@@ -370,9 +553,7 @@ export async function createPromptAgentRecord(
   workspaceId: string,
   req: CreatePromptAgentRecordRequest,
 ): Promise<AgentRecord> {
-  return post<AgentRecord>(
-    wsUrl(workspaceId, "/agents"),
-    req,
-    localOperatorRequestOptions(workspaceId, { timeout: 120_000 }),
-  );
+  return post<AgentRecord>(wsUrl(workspaceId, "/agents"), req, {
+    timeout: 120_000,
+  });
 }

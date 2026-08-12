@@ -8,10 +8,11 @@ Run the proof entrypoint from the repository root:
 make test-supervisor-disabled
 ```
 
-The checked-in Phase 1 execution row is deliberately **RED**. The target
-reports its owner and blocker, does not run setup or verification, and exits
-nonzero. A declared-red row can never count as proof. Schema-only validation is
-available for ordinary development checks and does not provision Compose:
+The checked-in Phase 4 Execution row is **green**. Running
+`make test-supervisor-disabled` provisions its isolated Compose project and
+must satisfy every declared positive and negative assertion; schema-only
+validation remains available for ordinary development checks and does not
+provision Compose:
 
 ```sh
 go run ./scripts/supervisordisabled --validate
@@ -32,10 +33,11 @@ deterministic planner/coder completion; and planner/coder transcript plus coder
 diff evidence. The coordinates make the proof's depth, realness, provisioning,
 polarity, and target explicit.
 
-The current setup commands describe the intended fresh Compose lane. Its
-existing `local-mode-verify` command covers task freshness, planner design and
-review, coder completion, sessions, transcripts, and diff evidence, but it does
-not yet cover the negative daemon assertions or prompt-agent seeding. Keep the
-row red until one deterministic verification path proves every listed
-assertion, then remove its blocker and change `state` to `green` in the same
-change.
+The setup and verifier own one fresh checkout-scoped Compose lane. Verification
+covers task freshness, public-API plan/task agent creation, planner design and
+review, coder completion, sessions, transcripts, diff evidence, and the
+negative zero-agentdef/zero-daemon-process/zero-daemon-socket assertions. A
+green row counts only when the runner executes that verifier successfully; the
+manifest label alone is not evidence. This Execution row does not authorize
+supervisor deletion: Phase 6 still requires the complete Agents/Interaction
+parity matrix with no skipped or disabled rows.

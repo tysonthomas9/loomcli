@@ -2,6 +2,7 @@
 package localsettings
 
 import (
+	"bytes"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
@@ -113,6 +114,7 @@ type SanitizedRuntimeCredentialSet struct {
 // SanitizedRuntimeCredential is safe to return to the browser.
 type SanitizedRuntimeCredential struct {
 	Configured bool   `json:"configured"`
+	Usable     bool   `json:"usable"`
 	UpdatedAt  string `json:"updated_at,omitempty"`
 }
 
@@ -176,12 +178,28 @@ func Save(dataDir string, settings Settings) error {
 		return fmt.Errorf("marshal local settings: %w", err)
 	}
 	path := Path(dataDir)
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0600); err != nil { //nolint:gosec // contains local Redis credential
+	temp, err := os.CreateTemp(dataDir, ".settings.json.publish-*")
+	if err != nil {
+		return fmt.Errorf("create local settings temp file: %w", err)
+	}
+	tempPath := temp.Name()
+	defer func() { _ = os.Remove(tempPath) }()
+	if err := temp.Chmod(0600); err != nil {
+		_ = temp.Close()
+		return fmt.Errorf("chmod local settings temp file: %w", err)
+	}
+	if _, err := temp.Write(data); err != nil { //nolint:gosec // contains local Redis credential
+		_ = temp.Close()
 		return fmt.Errorf("write local settings: %w", err)
 	}
-	if err := os.Rename(tmp, path); err != nil {
-		_ = os.Remove(tmp)
+	if err := temp.Sync(); err != nil {
+		_ = temp.Close()
+		return fmt.Errorf("sync local settings: %w", err)
+	}
+	if err := temp.Close(); err != nil {
+		return fmt.Errorf("close local settings: %w", err)
+	}
+	if err := os.Rename(tempPath, path); err != nil {
 		return fmt.Errorf("rename local settings: %w", err)
 	}
 	_ = os.Chmod(path, 0600)
@@ -234,6 +252,50 @@ func Sanitize(settings Settings) SanitizedSettings {
 			GitHub:  sanitizeRuntimeCredential(settings.RuntimeCredentials.GitHub),
 		},
 	}
+}
+
+// SanitizeWithRuntimeCredentialReadiness returns UI-safe settings and verifies
+// that each configured credential can actually be opened with the current
+// local vault key. It never exposes plaintext or the unseal error to callers.
+func SanitizeWithRuntimeCredentialReadiness(dataDir string, settings Settings) SanitizedSettings {
+	out := Sanitize(settings)
+	out.RuntimeCredentials.Daytona = RuntimeCredentialReadiness(
+		dataDir,
+		settings,
+		RuntimeCredentialProviderDaytona,
+	)
+	out.RuntimeCredentials.GitHub = RuntimeCredentialReadiness(
+		dataDir,
+		settings,
+		RuntimeCredentialProviderGitHub,
+	)
+	return out
+}
+
+// RuntimeCredentialReadiness reports whether a credential is present and
+// usable with the current local vault key without returning secret material.
+func RuntimeCredentialReadiness(dataDir string, settings Settings, provider string) SanitizedRuntimeCredential {
+	provider = normalizeRuntimeCredentialProvider(provider)
+	var credential RuntimeCredentialConfig
+	switch provider {
+	case RuntimeCredentialProviderDaytona:
+		credential = settings.RuntimeCredentials.Daytona
+	case RuntimeCredentialProviderGitHub:
+		credential = settings.RuntimeCredentials.GitHub
+	default:
+		return SanitizedRuntimeCredential{}
+	}
+
+	out := sanitizeRuntimeCredential(credential)
+	if !out.Configured {
+		return out
+	}
+	plaintext, err := UnsealRuntimeCredentialBytes(dataDir, settings, provider)
+	if err == nil {
+		zeroRuntimeCredentialBytes(plaintext)
+		out.Usable = true
+	}
+	return out
 }
 
 // ValidateAgentRuntime rejects unknown runtime defaults.
@@ -303,6 +365,18 @@ func SealRuntimeCredential(dataDir, provider, plaintext string, now time.Time) (
 
 // UnsealRuntimeCredential resolves a sealed local runtime credential.
 func UnsealRuntimeCredential(dataDir string, settings Settings, provider string) (string, error) {
+	plain, err := UnsealRuntimeCredentialBytes(dataDir, settings, provider)
+	if err != nil {
+		return "", err
+	}
+	defer zeroRuntimeCredentialBytes(plain)
+	return string(plain), nil
+}
+
+// UnsealRuntimeCredentialBytes resolves a sealed local runtime credential
+// without materializing an immutable string. Callers must overwrite the
+// returned slice as soon as the credential has been consumed.
+func UnsealRuntimeCredentialBytes(dataDir string, settings Settings, provider string) ([]byte, error) {
 	provider = normalizeRuntimeCredentialProvider(provider)
 	var credential RuntimeCredentialConfig
 	switch provider {
@@ -311,24 +385,40 @@ func UnsealRuntimeCredential(dataDir string, settings Settings, provider string)
 	case RuntimeCredentialProviderGitHub:
 		credential = settings.RuntimeCredentials.GitHub
 	default:
-		return "", fmt.Errorf("runtime credential provider %q is not supported", provider)
+		return nil, fmt.Errorf("runtime credential provider %q is not supported", provider)
 	}
 	if strings.TrimSpace(credential.Sealed) == "" {
-		return "", fmt.Errorf("%s runtime credential is not configured", provider)
+		return nil, fmt.Errorf("%s runtime credential is not configured", provider)
 	}
 	sealed, err := base64.StdEncoding.DecodeString(credential.Sealed)
 	if err != nil {
-		return "", fmt.Errorf("decode %s runtime credential: %w", provider, err)
+		return nil, fmt.Errorf("decode %s runtime credential: %w", provider, err)
 	}
 	vault, err := runtimeCredentialVault(dataDir)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	plain, err := vault.Unseal(sealed, runtimeCredentialAAD(provider))
 	if err != nil {
-		return "", fmt.Errorf("unseal %s runtime credential: %w", provider, err)
+		return nil, fmt.Errorf("unseal %s runtime credential: %w", provider, err)
 	}
-	return string(plain), nil
+	plaintext := bytes.TrimSpace(plain)
+	if len(plaintext) == 0 {
+		zeroRuntimeCredentialBytes(plain)
+		return nil, fmt.Errorf("%s runtime credential is empty", provider)
+	}
+	if len(plaintext) != len(plain) {
+		trimmed := append([]byte(nil), plaintext...)
+		zeroRuntimeCredentialBytes(plain)
+		return trimmed, nil
+	}
+	return plain, nil
+}
+
+func zeroRuntimeCredentialBytes(value []byte) {
+	for i := range value {
+		value[i] = 0
+	}
 }
 
 func normalizeRuntimeCredentialProvider(provider string) string {
@@ -359,29 +449,84 @@ func runtimeCredentialKey(dataDir string) ([]byte, error) {
 	}
 	_ = os.Chmod(dataDir, 0700) //nolint:gosec // dataDir is a private directory; execute bit is required for traversal
 	path := filepath.Join(dataDir, runtimeCredentialKeyFileName)
-	if data, err := os.ReadFile(path); err == nil { //nolint:gosec // path is dataDir joined with a fixed local credential-key filename
-		key, err := base64.StdEncoding.DecodeString(strings.TrimSpace(string(data)))
-		if err != nil {
-			return nil, fmt.Errorf("decode runtime credential key: %w", err)
-		}
+	if key, err := readRuntimeCredentialKey(path); err == nil {
 		return key, nil
 	} else if !os.IsNotExist(err) {
 		return nil, fmt.Errorf("read runtime credential key: %w", err)
 	}
+
 	key := make([]byte, 32)
 	if _, err := rand.Read(key); err != nil {
 		return nil, fmt.Errorf("generate runtime credential key: %w", err)
 	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, []byte(base64.StdEncoding.EncodeToString(key)+"\n"), 0600); err != nil {
-		return nil, fmt.Errorf("write runtime credential key: %w", err)
+	published, err := publishRuntimeCredentialKey(dataDir, path, key)
+	if err != nil {
+		zeroRuntimeCredentialBytes(key)
+		return nil, err
 	}
-	if err := os.Rename(tmp, path); err != nil {
-		_ = os.Remove(tmp)
-		return nil, fmt.Errorf("rename runtime credential key: %w", err)
+	if published {
+		return key, nil
 	}
-	_ = os.Chmod(path, 0600)
-	return key, nil
+
+	// Another process won the no-replace publication race. Discard this
+	// candidate and return the exact persisted winner.
+	zeroRuntimeCredentialBytes(key)
+	winner, err := readRuntimeCredentialKey(path)
+	if err != nil {
+		return nil, fmt.Errorf("read concurrently published runtime credential key: %w", err)
+	}
+	return winner, nil
+}
+
+func publishRuntimeCredentialKey(dataDir, path string, key []byte) (bool, error) {
+	temp, err := os.CreateTemp(dataDir, "."+runtimeCredentialKeyFileName+".publish-*")
+	if err != nil {
+		return false, fmt.Errorf("create runtime credential key temp file: %w", err)
+	}
+	tempPath := temp.Name()
+	defer func() { _ = os.Remove(tempPath) }()
+	if err := temp.Chmod(0600); err != nil {
+		_ = temp.Close()
+		return false, fmt.Errorf("chmod runtime credential key temp file: %w", err)
+	}
+	encoded := make([]byte, base64.StdEncoding.EncodedLen(len(key))+1)
+	defer zeroRuntimeCredentialBytes(encoded)
+	base64.StdEncoding.Encode(encoded, key)
+	encoded[len(encoded)-1] = '\n'
+	if _, err := temp.Write(encoded); err != nil {
+		_ = temp.Close()
+		return false, fmt.Errorf("write runtime credential key: %w", err)
+	}
+	if err := temp.Sync(); err != nil {
+		_ = temp.Close()
+		return false, fmt.Errorf("sync runtime credential key: %w", err)
+	}
+	if err := temp.Close(); err != nil {
+		return false, fmt.Errorf("close runtime credential key: %w", err)
+	}
+	if err := os.Link(tempPath, path); err == nil {
+		_ = os.Chmod(path, 0600)
+		return true, nil
+	} else if !errors.Is(err, os.ErrExist) {
+		return false, fmt.Errorf("publish runtime credential key: %w", err)
+	}
+	return false, nil
+}
+
+func readRuntimeCredentialKey(path string) ([]byte, error) {
+	data, err := os.ReadFile(path) //nolint:gosec // fixed filename under the private settings directory
+	if err != nil {
+		return nil, err
+	}
+	defer zeroRuntimeCredentialBytes(data)
+	encoded := bytes.TrimSpace(data)
+	key := make([]byte, base64.StdEncoding.DecodedLen(len(encoded)))
+	n, err := base64.StdEncoding.Decode(key, encoded)
+	if err != nil {
+		zeroRuntimeCredentialBytes(key)
+		return nil, fmt.Errorf("decode runtime credential key: %w", err)
+	}
+	return key[:n], nil
 }
 
 func runtimeCredentialAAD(provider string) []byte {

@@ -7,14 +7,17 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/driver"
 	platformruntime "github.com/tysonthomas9/loomcli/internal/platform/runtime"
 	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/webui"
 )
 
-// AutomationRuntimeContributor is the only lifecycle surface serve accepts
-// from Automation composition. Registration is complete before Host.Start;
-// neither the CLI nor web server learns the Automation command API.
-type AutomationRuntimeContributor interface {
+// RuntimeContributor is the only lifecycle surface serve accepts from a
+// capability. Registration is complete before Host.Start; neither the CLI nor
+// web server learns a capability's command API.
+type RuntimeContributor interface {
 	RuntimeRegistrations() []platformruntime.Registration
 }
+
+type AutomationRuntimeContributor = RuntimeContributor
 
 // BuildServeRuntimeHost composes the always-on Execution recovery components
 // with optional Automation registrations behind one CLI adapter boundary.
@@ -25,26 +28,37 @@ func BuildServeRuntimeHost(
 	workspaces store.WorkspaceStore,
 	runOutcomes driver.RunOutcomePublisher,
 	workspace string,
+	executionCapability webui.ExecutionCapability,
+	execution RuntimeContributor,
 	automation AutomationRuntimeContributor,
 ) (*platformruntime.Host, error) {
 	if driverRuns == nil || awaits == nil || events == nil || workspaces == nil {
 		return nil, fmt.Errorf("compose serve runtime host: required stores are unavailable")
 	}
-	runOutcomeRegistration, err := appserve.NewRunOutcomeRuntimeRegistration(
-		driverRuns, awaits, events, workspaces, runOutcomes, workspace,
+	if executionCapability == nil || executionCapability.DriverRunAPI() == nil ||
+		executionCapability.AwaitEventNotificationAPI() == nil || executionCapability.DriverRunOutcomeAPI() == nil ||
+		executionCapability.TerminalDriverRunWorkRecoveryQueueAPI() == nil ||
+		executionCapability.SystemAuthorityResolver() == nil {
+		return nil, fmt.Errorf("compose serve runtime host: Execution await capability is unavailable")
+	}
+	runOutcomeRegistration, err := appserve.NewRunOutcomeRuntimeRegistrationWithExecution(
+		awaits, events, workspaces, runOutcomes, workspace,
+		executionCapability.DriverRunAPI(), executionCapability.DriverRunOutcomeAPI(),
+		executionCapability.TerminalDriverRunWorkRecoveryQueueAPI(), executionCapability.SystemAuthorityResolver(),
 	)
 	if err != nil {
 		return nil, err
 	}
-	awaitEventRegistration, err := appserve.NewAwaitEventRuntimeRegistration(
-		events, awaits, driverRuns, workspaces, workspace,
+	awaitEventRegistration, err := appserve.NewAwaitEventRuntimeRegistrationWithExecution(
+		awaits, driverRuns, workspaces, workspace,
+		executionCapability.DriverRunAPI(), executionCapability.AwaitEventNotificationAPI(), executionCapability.SystemAuthorityResolver(),
 	)
 	if err != nil {
 		return nil, err
 	}
 	return BuildPlatformRuntimeHost(
 		[]platformruntime.Registration{runOutcomeRegistration, awaitEventRegistration},
-		automation,
+		execution, automation,
 	)
 }
 
@@ -54,7 +68,7 @@ func BuildServeRuntimeHost(
 // disabled with Workflow Catalog or Automation.
 func BuildPlatformRuntimeHost(
 	required []platformruntime.Registration,
-	contributors ...AutomationRuntimeContributor,
+	contributors ...RuntimeContributor,
 ) (*platformruntime.Host, error) {
 	host := platformruntime.NewHost(platformruntime.Options{})
 	if len(required) == 0 {

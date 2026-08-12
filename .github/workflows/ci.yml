@@ -45,6 +45,23 @@ jobs:
       - name: make check-go
         run: make check-go
 
+  # Separate budget proof so the ordinary quality gate does not hide a
+  # repository-analyzer RSS regression inside a later aggregate test run.
+  archcheck-memory-budget:
+    name: Archcheck Memory Budget
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: 'go.mod'
+
+      - name: Enforce process-tree RSS ceiling
+        run: make check-architecture-memory
+
   # Frontend-only quality gate — installs Node toolchain only, no Go.
   frontend-quality-gate:
     name: Frontend Quality Gate

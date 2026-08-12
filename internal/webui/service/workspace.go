@@ -25,9 +25,10 @@ func ValidWorkspaceDesignFormat(format string) bool {
 	return format == WorkspaceDesignFormatMarkdown || format == WorkspaceDesignFormatHTML
 }
 
-// JobStore is implemented by WorkspaceJobStore for async workspace creation.
+// JobStore is implemented by WorkspaceJobStore for async workspace mutations.
 type JobStore interface {
 	Start(req WorkspaceCreateRequest, createFn WorkspaceCreateFn) string
+	StartAddRepos(req WorkspaceAddReposRequest, addReposFn WorkspaceAddReposFn) string
 	Get(id string) *WorkspaceJob
 }
 
@@ -51,6 +52,11 @@ type WorkspaceService interface {
 
 	// AddWorkspaceRepos attaches one or more local git repos to an existing workspace.
 	AddWorkspaceRepos(ctx context.Context, req WorkspaceAddReposRequest) (*ops.WorkspaceData, error)
+
+	// StartAsyncAddRepos starts an async repo-attachment job when cloning a
+	// remote repository. Returns the job ID after validating the request.
+	// Returns ServiceError{Kind: Unavailable} if job storage is unavailable.
+	StartAsyncAddRepos(ctx context.Context, req WorkspaceAddReposRequest) (string, error)
 
 	// StartAsyncCreate starts an async workspace creation job for clone workspaces.
 	// Returns the job ID. Validates the request before starting.

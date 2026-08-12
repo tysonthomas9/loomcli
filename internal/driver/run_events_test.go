@@ -353,7 +353,7 @@ func TestExecutorFinishPublishesOutcomeAndIgnoresPublisherFailure(t *testing.T) 
 		t.Fatal(err)
 	}
 	publisher := &recordingRunOutcomePublisher{err: errors.New("automation unavailable")}
-	result, err := (&Executor{
+	result, err := testExecutor(st, Executor{
 		Store: st, WorkspaceKey: "TEST", WorkDir: root, NodeID: "node-1", LeaseID: "lease-1",
 		Runner:            &recordingRunner{result: RunResult{Status: domain.DriverRunCancelled, Summary: "operator cancelled"}},
 		HeartbeatInterval: -1, RunOutcomes: publisher,
@@ -384,7 +384,7 @@ func TestExecutorStaleRecoveryPublishesOutcome(t *testing.T) {
 		t.Fatal(err)
 	}
 	publisher := &recordingRunOutcomePublisher{}
-	executor := &Executor{Store: st, WorkspaceKey: "TEST", RunOutcomes: publisher}
+	executor := testExecutor(st, Executor{Store: st, WorkspaceKey: "TEST", RunOutcomes: publisher})
 	result, err := executor.recoverStaleWorkspace(ctx, "TEST", store.StaleDriverRunRecovery{
 		StaleBefore: time.Now().UTC().Add(time.Minute), Summary: "driver executor heartbeat expired",
 	})

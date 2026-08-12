@@ -22,11 +22,8 @@ type RuntimeStatus = {
   error?: string;
 };
 
-type BrowserSessionInfo = {
-  runtime_url: string;
-  workspace: string;
-  launch_code: string;
-  expires_at: string;
+type WorkspaceRecovery = {
+  route: string;
 };
 
 type StageMode = "starting" | "ready" | "error";
@@ -102,7 +99,7 @@ let bootInFlight = false;
 let startupRelocationChecked = false;
 let lastRuntimeStatus: RuntimeStatus | null = null;
 let lastRuntimeUrl = "";
-let pendingRecoveryRoute = "";
+let pendingRecovery: WorkspaceRecovery | null = null;
 
 function setStage(mode: StageMode, title: string, detail: string) {
   document.body.dataset.mode = mode;
@@ -214,85 +211,38 @@ function workspaceEntryUrl(runtimeUrl: string, route = "/") {
   return route.startsWith("/") ? `${base}${route}` : `${base}/${route}`;
 }
 
-function routeMatchesWorkspace(entry: URL, workspace: string) {
-  const segments = entry.pathname.split("/");
-  if (segments[1] !== "ws") {
-    return true;
-  }
-  try {
-    return (
-      Boolean(segments[2]) && decodeURIComponent(segments[2]) === workspace
-    );
-  } catch {
-    return false;
-  }
-}
-
-async function trustedWorkspaceEntryUrl(runtimeUrl: string, route = "/") {
-  // The durable mode-0600 operator token stays in the sidecar. Desktop receives
-  // only a 30-second, single-use launch code and places it in the fragment so
-  // it is never sent in the initial HTTP request or retained in server logs.
-  const result = await runLoom(["local", "browser-session"]);
-  if (result.code !== 0) {
-    throw new Error(
-      result.stderr || "Could not create a trusted browser session.",
-    );
-  }
-  let session: BrowserSessionInfo;
-  try {
-    session = JSON.parse(result.stdout) as BrowserSessionInfo;
-  } catch {
-    throw new Error("Loom returned an invalid trusted browser session.");
-  }
-  if (
-    !session.workspace?.trim() ||
-    !/^[0-9a-f]{64}$/.test(session.launch_code ?? "")
-  ) {
-    throw new Error("Loom returned an incomplete trusted browser session.");
-  }
-
-  let entry = new URL(workspaceEntryUrl(runtimeUrl, route));
-  const issuedFor = new URL(session.runtime_url);
-  if (entry.origin !== issuedFor.origin) {
+function localWorkspaceEntry(
+  runtimeUrl: string,
+  route = "/",
+) {
+  const entry = new URL(workspaceEntryUrl(runtimeUrl, route));
+  if (entry.origin !== new URL(runtimeUrl).origin) {
     throw new Error("The local runtime changed while opening the workspace.");
   }
-  // A crash-recovery route may describe a window from the previously active
-  // workspace. Never pair that route with a launch code minted for a different
-  // workspace: recover at the runtime root and let the normal workspace route
-  // selection use the launch authority instead.
-  if (!routeMatchesWorkspace(entry, session.workspace)) {
-    entry = new URL(workspaceEntryUrl(runtimeUrl));
-  }
-  const fragment = new URLSearchParams(
-    entry.hash.startsWith("#") ? entry.hash.slice(1) : entry.hash,
-  );
-  fragment.set("loom_launch", session.launch_code);
-  fragment.set("loom_workspace", session.workspace);
-  entry.hash = fragment.toString();
   return entry.toString();
 }
 
 async function openWorkspaceWindow(
   runtimeUrl: string,
-  options: { forceNew?: boolean; route?: string } = {},
+  options: { forceNew?: boolean; recovery?: WorkspaceRecovery } = {},
 ) {
   setStage("starting", "Opening Workspace", "Loading the workspace window.");
-  const entryUrl = await trustedWorkspaceEntryUrl(runtimeUrl, options.route);
+  const entry = localWorkspaceEntry(runtimeUrl, options.recovery?.route);
   await invoke("open_workspace_window", {
-    runtimeUrl: entryUrl,
+    runtimeUrl: entry,
     forceNew: Boolean(options.forceNew),
   });
 }
 
-async function readPendingRecoveryRoute() {
-  if (pendingRecoveryRoute) {
-    return pendingRecoveryRoute;
+async function readPendingRecovery() {
+  if (pendingRecovery) {
+    return pendingRecovery;
   }
-  const route = await invoke<string | null>("take_workspace_recovery_path");
-  if (route) {
-    pendingRecoveryRoute = route;
+  const recovery = await invoke<string | null>("take_workspace_recovery");
+  if (recovery) {
+    pendingRecovery = { route: recovery };
   }
-  return pendingRecoveryRoute;
+  return pendingRecovery;
 }
 
 async function focusExistingWorkspaceWindow() {
@@ -356,9 +306,9 @@ async function boot(
 
     actions.hidden = true;
     openWorkspaceBtn.disabled = !lastRuntimeUrl;
-    const recoveryRoute = options.forceNew
-      ? ""
-      : await readPendingRecoveryRoute();
+    // Fresh additional launchers have no pending entry; recovered additional
+    // windows do. Always ask native state so every window retains its binding.
+    const recovery = await readPendingRecovery();
 
     const status = await ensureRuntime();
     const runtimeUrl = status.runtime?.url;
@@ -368,10 +318,10 @@ async function boot(
     setStage("ready", "Opening Workspace", "Loom is ready.");
     await openWorkspaceWindow(runtimeUrl, {
       ...options,
-      route: recoveryRoute || "/",
+      recovery: recovery ?? undefined,
     });
     if (!options.forceNew) {
-      pendingRecoveryRoute = "";
+      pendingRecovery = null;
     }
   } catch (err) {
     showFailure(err);

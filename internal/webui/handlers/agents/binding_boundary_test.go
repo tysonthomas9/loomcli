@@ -83,7 +83,7 @@ func TestLegacyBindingPatchRejectsWrongWorkspaceAuthority(t *testing.T) {
 
 func TestManagedBindingLifecycleUsesExactActions(t *testing.T) {
 	st := newAgentRecordStore(t)
-	seedRole(t, st, "docs")
+	seedPromptAgentRole(t, st, "docs")
 	bindings := &testBindingOperations{store: st}
 	var actions []authority.Action
 	module := New(Config{

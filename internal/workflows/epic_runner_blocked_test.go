@@ -25,7 +25,6 @@ func TestBuiltinEpicRunnerWorkflowBlocksFailedChildrenAndContinues(t *testing.T)
 		{name: "blocked failure guard", want: "if (blockedFailures.length > 0) {"},
 		{name: "blocked task error class", want: `errorClass: "epic_tasks_blocked",`},
 		{name: "blocked task summary helper", want: "summarizeBlockedTasks(entries)"},
-		{name: "idempotent completion id", want: `completionId: "complete-" + taskRunId,`},
 		{name: "blocked guard kept", want: `errorClass: "epic_blocked",`},
 		{name: "no-progress guard kept", want: `errorClass: "epic_no_progress",`},
 	}
@@ -38,11 +37,10 @@ func TestBuiltinEpicRunnerWorkflowBlocksFailedChildrenAndContinues(t *testing.T)
 	}
 }
 
-// Terminal-failed children must not be released by the workflow (the server
-// block transition already released the claim and blocked the issue): the only
-// remaining safeRelease call site is the pre-execution request failure, plus
-// the helper definition itself.
-func TestBuiltinEpicRunnerWorkflowReleasesOnlyOnPreExecutionFailure(t *testing.T) {
+// Terminal-failed children and ambiguous TaskRun request failures must not be
+// released by the workflow. The only remaining safeRelease call site is a
+// certified pre-commit rejection, plus the helper definition itself.
+func TestBuiltinEpicRunnerWorkflowReleasesOnlyOnCertifiedPreExecutionFailure(t *testing.T) {
 	spec, ok := BuiltinWorkflow(BuiltinEpicRunnerWorkflowName)
 	if !ok {
 		t.Fatal("built-in epic-runner workflow missing")
@@ -53,6 +51,9 @@ func TestBuiltinEpicRunnerWorkflowReleasesOnlyOnPreExecutionFailure(t *testing.T
 	}
 	if !strings.Contains(source, "await safeRelease(loom, task.id);") {
 		t.Fatal("built-in epic-runner source no longer releases the claim on pre-execution request failure")
+	}
+	if !strings.Contains(source, "if (!isAmbiguousTaskRunRequestError(err)) {") {
+		t.Fatal("built-in epic-runner no longer preserves claims after ambiguous TaskRun request responses")
 	}
 	if !strings.Contains(source, `errorClass: "child_task_request_failed",`) {
 		t.Fatal("built-in epic-runner source no longer records pre-execution request failures")

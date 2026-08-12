@@ -14,6 +14,7 @@ type mockWorkspaceService struct {
 	getWorkspaceFn               func(ctx context.Context, wsID string) (*ops.WorkspaceData, error)
 	createWorkspaceFn            func(ctx context.Context, req service.WorkspaceCreateRequest) (*ops.WorkspaceData, []string, error)
 	addWorkspaceReposFn          func(ctx context.Context, req service.WorkspaceAddReposRequest) (*ops.WorkspaceData, error)
+	startAsyncAddReposFn         func(ctx context.Context, req service.WorkspaceAddReposRequest) (string, error)
 	startAsyncCreateFn           func(ctx context.Context, req service.WorkspaceCreateRequest) (string, error)
 	getWorkspaceJobFn            func(ctx context.Context, jobID string) (*service.WorkspaceJob, error)
 	deleteWorkspaceFn            func(ctx context.Context, wsID string) (*ops.WorkspaceData, error)
@@ -59,6 +60,13 @@ func (m *mockWorkspaceService) AddWorkspaceRepos(ctx context.Context, req servic
 		return m.addWorkspaceReposFn(ctx, req)
 	}
 	return nil, service.ErrUnavailable("not available")
+}
+
+func (m *mockWorkspaceService) StartAsyncAddRepos(ctx context.Context, req service.WorkspaceAddReposRequest) (string, error) {
+	if m.startAsyncAddReposFn != nil {
+		return m.startAsyncAddReposFn(ctx, req)
+	}
+	return "", service.ErrUnavailable("not available")
 }
 
 func (m *mockWorkspaceService) StartAsyncCreate(ctx context.Context, req service.WorkspaceCreateRequest) (string, error) {

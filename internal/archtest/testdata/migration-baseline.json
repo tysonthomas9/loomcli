@@ -394,6 +394,336 @@
             "artifact_paths": ["docs/migrations/modular-monolith/08-phase-3-decisions-and-evidence.md"]
           }
         ]
+      },
+      {
+        "id": "phase4-execution-precommit-1353e2faf",
+        "loom_head": "1353e2faf14ae121c93fe5eb92f779b56a2ad7ae",
+        "fleetdb_head": "f1c4e11199c2c7cdab52cce55899af4df328fbcb",
+        "openapi_sha256": "136a7722b628163c9d6f612ce6ce6be74bf7290d171bc63d54c263b30a122725",
+        "recorded_at": "2026-07-16",
+        "runs": [
+          {
+            "id": "architecture-check",
+            "repository": "loom",
+            "command": ["go", "run", "./scripts/archcheck", "check"],
+            "environment": {
+              "set": ["GOCACHE=/tmp/go-build-cache", "GOMODCACHE=/tmp/go-mod-cache"],
+              "unset": [],
+              "notes": "Provisional historical capture measured from Loom base 1353e2faf14a plus its then-current Phase 4 pre-commit diff; retained append-only and superseded for current-source status by a fresh architecture check. No self-referential final commit identity is implied."
+            },
+            "expected_skips": [],
+            "result": {"status": "pass", "summary": "Provisional pre-commit capture: all 11 profiles and the all-files AST pass accepted four active roots, 53 mutations, Store 82/71, 90 handler exceptions, 243 primary direct-write rows across 265 sites plus the separate 10-row/11-site legacy-driver ratchet, 86 runtime components, 103 goroutine definitions, six measured performance records, and zero pending decisions. These measured values are historical and are not the final Phase 4 snapshot."},
+            "artifact_paths": ["docs/migrations/modular-monolith/09-phase-4-decisions-and-evidence.md"]
+          },
+          {
+            "id": "architecture-tests",
+            "repository": "loom",
+            "command": ["go", "test", "./internal/archtest", "-count=1"],
+            "environment": {
+              "set": ["GOCACHE=/tmp/go-build-cache", "GOMODCACHE=/tmp/go-mod-cache"],
+              "unset": [],
+              "notes": "Provisional historical architecture-test run against the same then-current Phase 4 source and manifests; retained append-only and not promoted to final Phase 4 evidence."
+            },
+            "expected_skips": [],
+            "result": {"status": "pass", "summary": "Provisional pre-commit capture: the full architecture package passed in 213.562 seconds, including exact direct-write, legacy-driver digest, runtime, capability, mutation-ledger, replay-classification, and expiry tests. The duration and source binding remain historical rather than final Phase 4 evidence."},
+            "artifact_paths": ["docs/migrations/modular-monolith/09-phase-4-decisions-and-evidence.md"]
+          },
+          {
+            "id": "contract-snapshot-match",
+            "repository": "cross-repo",
+            "command": ["shasum", "-a", "256", "fleet-db-modular-monolith-phase4/api/openapi.yaml", "loomcli-modular-monolith-phase4/internal/infra/fleetdb/testdata/fleetdb-openapi.yaml"],
+            "environment": {"set": [], "unset": [], "notes": "Provisional historical run from the rc-2 multi-repository workspace against the then-current paired Phase 4 pre-commit sources; retained append-only and superseded for final contract status."},
+            "expected_skips": [],
+            "result": {"status": "pass", "summary": "Provisional pre-commit capture: FleetDB source and Loom vendored OpenAPI were byte-identical at SHA-256 136a7722b628163c9d6f612ce6ce6be74bf7290d171bc63d54c263b30a122725. This historical hash is not the final paired Phase 4 contract result."},
+            "artifact_paths": ["docs/migrations/modular-monolith/09-phase-4-decisions-and-evidence.md"]
+          }
+        ]
+      },
+      {
+        "id": "phase4-execution-validation-53cbe2577",
+        "loom_head": "53cbe257715d55770c77d508c23620389b9c9de1",
+        "fleetdb_head": "afb6887682f777b0e7093b5dcdff0a5e236777f9",
+        "openapi_sha256": "26ed930bc527c3815742c8b4c7a0ba5267bdc91c585ddc9f78483d9373303482",
+        "recorded_at": "2026-07-18",
+        "runs": [
+          {
+            "id": "architecture-check",
+            "repository": "loom",
+            "command": ["go", "run", "./scripts/archcheck", "check"],
+            "environment": {
+              "set": ["GOCACHE=/tmp/go-build-cache", "GOMODCACHE=/tmp/go-mod-cache"],
+              "unset": [],
+              "notes": "Final check against validated product head 53cbe257715d55770c77d508c23620389b9c9de1 plus the documentation-only append-only evidence diff."
+            },
+            "expected_skips": [],
+            "result": {"status": "pass", "summary": "All 11 build profiles and the all-files AST pass accepted four active roots, 56 command-ID namespaces, Store 82/71, 90 handler exceptions, 243 primary direct-write rows across 265 sites, the separate 10-row/11-site legacy-driver ratchet, 86 runtime components, 103 goroutine definitions, six measured performance records, and zero pending decisions."},
+            "artifact_paths": ["docs/migrations/modular-monolith/09-phase-4-decisions-and-evidence.md"]
+          },
+          {
+            "id": "architecture-tests",
+            "repository": "loom",
+            "command": ["go", "test", "./internal/archtest", "-count=1"],
+            "environment": {
+              "set": ["GOCACHE=/tmp/go-build-cache", "GOMODCACHE=/tmp/go-mod-cache"],
+              "unset": [],
+              "notes": "Final architecture-package run after appending this immutable snapshot."
+            },
+            "expected_skips": [],
+            "result": {"status": "pass", "summary": "The full architecture suite passed with the final snapshot, including source-bound capability, mutation, direct-write, legacy-driver, runtime, performance, ordering, and evidence-schema checks."},
+            "artifact_paths": ["docs/migrations/modular-monolith/09-phase-4-decisions-and-evidence.md"]
+          },
+          {
+            "id": "contract-snapshot-match",
+            "repository": "cross-repo",
+            "command": ["shasum", "-a", "256", "fleet-db-modular-monolith-phase4/api/openapi.yaml", "loomcli-modular-monolith-phase4/internal/infra/fleetdb/testdata/fleetdb-openapi.yaml"],
+            "environment": {"set": [], "unset": [], "notes": "Run from the rc-2 multi-repository workspace against the final paired Phase 4 sources."},
+            "expected_skips": [],
+            "result": {"status": "pass", "summary": "FleetDB source and the Loom vendored OpenAPI snapshot were byte-identical at SHA-256 26ed930bc527c3815742c8b4c7a0ba5267bdc91c585ddc9f78483d9373303482."},
+            "artifact_paths": ["docs/migrations/modular-monolith/09-phase-4-decisions-and-evidence.md"]
+          },
+          {
+            "id": "desktop-backend-unavailable",
+            "repository": "loom",
+            "command": ["Computer Use", "packaged Loom Agents.app", "unavailable Claude epic journey"],
+            "environment": {
+              "set": [],
+              "unset": [],
+              "notes": "Actual packaged Desktop interaction at build 53cbe2577. Claude was selected and saved through Settings, epic PHASE4-TERRA-FRESH-20260718-6 was run through the UI, and Codex was then restored and saved as default. Agent-browser did not perform product actions."
+            },
+            "expected_skips": [],
+            "result": {"status": "pass", "summary": "The packaged UI reported local_backend_unavailable because the Claude CLI was not installed, recorded no agent runs or worktree, left the attached repository clean, and showed Codex restored as installed, authenticated, and default."},
+            "artifact_paths": ["docs/migrations/modular-monolith/09-phase-4-decisions-and-evidence.md"]
+          },
+          {
+            "id": "desktop-terra-positive",
+            "repository": "loom",
+            "command": ["Computer Use", "packaged Loom Agents.app", "GPT-5.6 Terra task journey"],
+            "environment": {
+              "set": [],
+              "unset": [],
+              "notes": "Actual packaged Desktop interaction at build 53cbe2577 with the real authenticated Codex CLI forced by a transparent test wrapper to model gpt-5.6-terra. Local screenshots 20-23 and 31 plus the versioned 15-entry wrapper log remain untracked; this checked-in evidence record is their portable provenance."
+            },
+            "expected_skips": [],
+            "result": {"status": "pass", "summary": "Task PHASE4-TERRA-FRESH-20260718-9 completed planner and coder runs at exit zero, persisted an artifact-backed design, applied exactly one 67-byte one-line patch-back file, and reached terminal Closed. The wrapper recorded exactly two real Terra exec invocations; no delivery branch, commit, push, or PR is claimed."},
+            "artifact_paths": ["docs/migrations/modular-monolith/09-phase-4-decisions-and-evidence.md"]
+          },
+          {
+            "id": "fleetdb-gate",
+            "repository": "fleetdb",
+            "command": ["make", "gate"],
+            "environment": {
+              "set": ["GOCACHE=/tmp/go-build-cache"],
+              "unset": [],
+              "notes": "Final companion Phase 4 implementation head afb6887682f777b0e7093b5dcdff0a5e236777f9."
+            },
+            "expected_skips": [],
+            "result": {"status": "pass", "summary": "The complete FleetDB gate passed, including race, Redis/Postgres parity and security contracts, container E2E, harness evaluation, and 82.7 percent overall coverage."},
+            "artifact_paths": ["docs/migrations/modular-monolith/09-phase-4-decisions-and-evidence.md"]
+          },
+          {
+            "id": "loom-gate",
+            "repository": "loom",
+            "command": ["make", "gate"],
+            "environment": {
+              "set": ["FLEET_DB_BIN=<exact-packaged-afb688768-sidecar>", "FLEET_DB_REPO=<paired-phase4-fleetdb-worktree>", "GOCACHE=/tmp/go-build-cache", "GOMAXPROCS=4", "GOMEMLIMIT=3GiB", "GOMODCACHE=/tmp/go-mod-cache", "VITEST_MAX_WORKERS=1"],
+              "unset": [],
+              "notes": "Final uncontended run against Loom product head 53cbe257715d55770c77d508c23620389b9c9de1 plus documentation-only evidence changes. GOMAXPROCS and the Go soft memory limit bound the race-instrumented repository analyzers, while one Vitest fork preserved every frontend check and coverage threshold without competing with the Go lane. An earlier attempt is excluded because a separate checkout concurrently wrote the fixed global coverage profile and created a sparse NUL region after all preceding Go stages passed."
+            },
+            "expected_skips": [
+              {
+                "name": "frontend-suite-existing-skip",
+                "owner": "frontend-test-suite",
+                "reason": "MarkdownRenderer table rendering remains intentionally skipped because remark-gfm is not configured."
+              }
+            ],
+            "result": {"status": "pass", "summary": "The aggregate Loom target passed Go format, vet, build, lint, structural and architecture gates, characterization, supervisor-disabled validation, generated-code staleness, serialized race and coverage, SDK checks, and frontend format, type, lint, tests, boundaries, and production build. The frontend suite reported 8,572 passing and one expected skipped test (8,573 discovered)."},
+            "artifact_paths": ["docs/migrations/modular-monolith/09-phase-4-decisions-and-evidence.md"]
+          },
+          {
+            "id": "supervisor-disabled",
+            "repository": "cross-repo",
+            "command": ["make", "test-supervisor-disabled"],
+            "environment": {
+              "set": ["LOCAL_MODE_FLEETDB_SOURCE_ROOT=<paired-phase4-fleetdb-worktree>", "SUPERVISOR_DISABLED_API_PORT=8482", "SUPERVISOR_DISABLED_FLEETDB_PORT=8480", "SUPERVISOR_DISABLED_UI_PORT=8483"],
+              "unset": [],
+              "notes": "Source-bound Execution row on a free isolated port tuple because another local stack owned the default proof ports."
+            },
+            "expected_skips": [],
+            "result": {"status": "pass", "summary": "The deterministic planner/coder row produced fresh tasks, persisted design, transcripts and one patch, asserted zero automatic agent definitions, daemon processes, and daemon sockets, and completed clean teardown."},
+            "artifact_paths": ["docs/migrations/modular-monolith/09-phase-4-decisions-and-evidence.md"]
+          },
+          {
+            "id": "task-run-design-performance",
+            "repository": "cross-repo",
+            "command": ["go", "test", "-tags=e2e", "./internal/webui/handlers/workflows", "-run", "^TestE2E_TaskRunPhase4WorkItemDesignPerformance$", "-count=1", "-v"],
+            "environment": {
+              "set": ["FLEET_DB_BIN=<paired-afb688768-binary>", "FLEET_DB_REPO=<paired-phase4-fleetdb-worktree>", "GOCACHE=/tmp/go-build-cache", "GOMODCACHE=/tmp/go-mod-cache"],
+              "unset": [],
+              "notes": "Thirty real-process artifact-backed TaskRun design samples through Loom serve and a counting proxy, with fixture setup and final durability reads excluded from timing and request counts."
+            },
+            "expected_skips": [],
+            "result": {"status": "pass", "summary": "Nearest-rank p50 was 11.796 ms and p95 was 14.784 ms, within 35 ms and 75 ms budgets; every sample made exactly three Loom-to-FleetDB requests, within the three-request budget."},
+            "artifact_paths": ["docs/migrations/modular-monolith/09-phase-4-decisions-and-evidence.md"]
+          }
+        ]
+      },
+      {
+        "id": "phase4-reliability-validation-67c45972f",
+        "loom_head": "67c45972f286f2f6c111fde9306720728dc6c4b4",
+        "fleetdb_head": "9ffa69f6028969c03913c08c1159910fc772bd8b",
+        "openapi_sha256": "ebf2ec68fd5751fbb59747c7b3db7b66fe4f7f80f30cb7eead9b6b3fd35ccb9e",
+        "recorded_at": "2026-07-21",
+        "runs": [
+          {
+            "id": "architecture-check",
+            "repository": "loom",
+            "command": ["go", "run", "./scripts/archcheck", "check"],
+            "environment": {
+              "set": ["GOCACHE=/tmp/go-build-cache", "GOMODCACHE=/tmp/go-mod-cache"],
+              "unset": [],
+              "notes": "Final exact-head check after appending this immutable validation snapshot."
+            },
+            "expected_skips": [],
+            "result": {"status": "pass", "summary": "All 11 profiles plus the all-files AST pass accepted four active roots, Store 82/71, 90 handler exceptions, 251 primary direct-write rows across 273 sites, 60 required mutation-command namespaces, 86 runtime components, 103 goroutine definitions, six of six measured performance records, and zero pending decisions."},
+            "artifact_paths": ["docs/migrations/modular-monolith/09-phase-4-decisions-and-evidence.md"]
+          },
+          {
+            "id": "architecture-tests",
+            "repository": "loom",
+            "command": ["go", "test", "./internal/archtest", "-count=1", "-timeout=15m"],
+            "environment": {
+              "set": ["GOCACHE=/tmp/go-build-cache", "GOMODCACHE=/tmp/go-mod-cache"],
+              "unset": [],
+              "notes": "The full package first ran after the snapshot append, then reran after the final Loom-gate row was promoted to pass."
+            },
+            "expected_skips": [],
+            "result": {"status": "pass", "summary": "The full architecture package passed in 47.768 seconds after the snapshot append and again in 46.926 seconds after final Loom-gate promotion, including source binding, ordering, capability, mutation, direct-write, runtime, performance, and evidence-schema checks."},
+            "artifact_paths": ["docs/migrations/modular-monolith/09-phase-4-decisions-and-evidence.md"]
+          },
+          {
+            "id": "backend-focused-workspace-tests",
+            "repository": "loom",
+            "command": ["go", "test", "./internal/webui/service", "./internal/webui/handlers/workspace", "-count=1"],
+            "environment": {
+              "set": ["GOCACHE=/tmp/go-build-cache", "GOMODCACHE=/tmp/go-mod-cache"],
+              "unset": [],
+              "notes": "Focused backend regression check after the repository-free workspace frontend change."
+            },
+            "expected_skips": [],
+            "result": {"status": "pass", "summary": "The workspace service and handler packages passed against the exact Loom source named by this snapshot."},
+            "artifact_paths": ["docs/migrations/modular-monolith/09-phase-4-decisions-and-evidence.md"]
+          },
+          {
+            "id": "contract-snapshot-match",
+            "repository": "cross-repo",
+            "command": ["shasum", "-a", "256", "fleet-db-modular-monolith-phase4/api/openapi.yaml", "loomcli-modular-monolith-phase4/internal/infra/fleetdb/testdata/fleetdb-openapi.yaml"],
+            "environment": {"set": [], "unset": [], "notes": "Run from the rc-2 multi-repository workspace against the exact paired reliability-hardening sources."},
+            "expected_skips": [],
+            "result": {"status": "pass", "summary": "FleetDB source and the Loom vendored OpenAPI snapshot were byte-identical at SHA-256 ebf2ec68fd5751fbb59747c7b3db7b66fe4f7f80f30cb7eead9b6b3fd35ccb9e."},
+            "artifact_paths": ["docs/migrations/modular-monolith/09-phase-4-decisions-and-evidence.md"]
+          },
+          {
+            "id": "desktop-repository-recovery-terra",
+            "repository": "loom",
+            "command": ["Computer Use", "packaged Loom Agents.app", "repository-admission and GPT-5.6 Terra coder journey"],
+            "environment": {
+              "set": [],
+              "unset": [],
+              "notes": "Actual packaged Desktop interaction at Loom build 67c45972f. A transparent Codex wrapper forced only the autonomous coder exec to model gpt-5.6-terra; the legacy planner used its ordinary configured Codex model and is not claimed as Terra. Ignored local screenshots, read-only API captures, and the wrapper log were retained during validation; this checked-in evidence record is their portable provenance."
+            },
+            "expected_skips": [],
+            "result": {"status": "pass", "summary": "Fresh workspace PHASE4-RELIABILITY-67C45972F was created without a repository; its task began Blocked with zero runs. After public Hello-World admission and explicit hello-world selection it moved Open, the planner persisted design and reached Review, and the Terra coder completed exit zero in 58.566574 seconds through local-cli-codex with transcript, exact one-file plus-one-line diff, applied patch-back in the durable task worktree at head 7fd1a60b01f9, and terminal Closed state."},
+            "artifact_paths": ["docs/migrations/modular-monolith/09-phase-4-decisions-and-evidence.md"]
+          },
+          {
+            "id": "fleetdb-gate",
+            "repository": "fleetdb",
+            "command": ["make", "gate"],
+            "environment": {
+              "set": ["GOCACHE=/tmp/go-build-cache", "GOMODCACHE=/tmp/go-mod-cache"],
+              "unset": [],
+              "notes": "Final companion reliability-hardening head 9ffa69f6028969c03913c08c1159910fc772bd8b."
+            },
+            "expected_skips": [],
+            "result": {"status": "pass", "summary": "The complete FleetDB gate passed static analysis, race/unit, Redis/Postgres integration and storage contracts, Postgres API integration, container E2E, harness evaluation, and 81.4 percent aggregate coverage with every enforced package above its floor."},
+            "artifact_paths": ["docs/migrations/modular-monolith/09-phase-4-decisions-and-evidence.md"]
+          },
+          {
+            "id": "frontend-build",
+            "repository": "loom",
+            "command": ["npm", "run", "build"],
+            "environment": {"set": [], "unset": [], "notes": "Run from internal/webui/frontend against the exact Loom source named by this snapshot."},
+            "expected_skips": [],
+            "result": {"status": "pass", "summary": "The authoritative frontend TypeScript typecheck and production Vite build passed after the repository-free workspace change."},
+            "artifact_paths": ["docs/migrations/modular-monolith/09-phase-4-decisions-and-evidence.md"]
+          },
+          {
+            "id": "frontend-eslint",
+            "repository": "loom",
+            "command": ["npx", "eslint", "src/components/CreateWorkspaceModal/CreateWorkspaceModal.tsx", "src/components/CreateWorkspaceModal/__tests__/CreateWorkspaceModal.test.tsx", "tests/e2e/create-workspace-modal.spec.ts"],
+            "environment": {"set": [], "unset": [], "notes": "Run from internal/webui/frontend over every changed TypeScript/TSX file."},
+            "expected_skips": [],
+            "result": {"status": "pass", "summary": "Changed-file frontend lint passed with no findings."},
+            "artifact_paths": ["docs/migrations/modular-monolith/09-phase-4-decisions-and-evidence.md"]
+          },
+          {
+            "id": "frontend-focused-tests",
+            "repository": "loom",
+            "command": ["npx", "vitest", "run", "src/components/CreateWorkspaceModal/__tests__/CreateWorkspaceModal.test.tsx"],
+            "environment": {"set": [], "unset": [], "notes": "Run from internal/webui/frontend against the repository-free and repository-clone workspace cases."},
+            "expected_skips": [],
+            "result": {"status": "pass", "summary": "The focused CreateWorkspaceModal unit suite passed all 32 tests."},
+            "artifact_paths": ["docs/migrations/modular-monolith/09-phase-4-decisions-and-evidence.md"]
+          },
+          {
+            "id": "frontend-playwright",
+            "repository": "loom",
+            "command": ["npx", "playwright", "test", "tests/e2e/create-workspace-modal.spec.ts"],
+            "environment": {"set": [], "unset": [], "notes": "Run from internal/webui/frontend against the workspace creation modal."},
+            "expected_skips": [],
+            "result": {"status": "pass", "summary": "Both targeted Playwright cases passed, including repository-free workspace creation and the retained clone journey."},
+            "artifact_paths": ["docs/migrations/modular-monolith/09-phase-4-decisions-and-evidence.md"]
+          },
+          {
+            "id": "loom-gate",
+            "repository": "loom",
+            "command": ["make", "gate"],
+            "environment": {
+              "set": ["FLEET_DB_BIN=<exact-paired-9ffa69f-sidecar>", "FLEET_DB_REPO=<paired-phase4-fleetdb-worktree>", "GOCACHE=/tmp/go-build-cache", "GOMAXPROCS=4", "GOMEMLIMIT=3GiB", "GOMODCACHE=/tmp/go-mod-cache", "HOME=<isolated-temporary-home>", "VITEST_MAX_WORKERS=1"],
+              "unset": ["LOOM_AGENT_NAME", "LOOM_AGENT_ROLE", "LOOM_AGENT_TERMINAL_ID", "LOOM_CONFIG_DIR", "LOOM_DESKTOP_DATA_DIR", "LOOM_FRONTEND_DIR", "LOOM_LOCAL_RUNTIME", "LOOM_NOTIFY_TOKEN", "LOOM_SESSION_ID", "LOOM_WEBUI_URL", "LOOM_WORKSPACE", "LOOM_WORKSPACE_RUNTIME_DIR"],
+              "notes": "Final aggregate rerun against the exact paired FleetDB source and sidecar with an isolated HOME. GOMAXPROCS, the Go soft memory limit, and one Vitest worker bounded the parallel Go/frontend lanes. The first sandboxed attempt is excluded because the architecture RSS monitor could not invoke read-only /bin/ps; the identical rerun with process inspection permitted passed."
+            },
+            "expected_skips": [],
+            "result": {"status": "pass", "summary": "The aggregate Loom gate passed both parallel lanes: FleetDB compatibility, Go format, vet, build, lint and structural guards, exact architecture and characterization checks, supervisor-disabled validation, generated-code staleness, race and coverage, plus frontend format, typecheck, lint, architecture, generated-code staleness, and unit coverage."},
+            "artifact_paths": ["docs/migrations/modular-monolith/09-phase-4-decisions-and-evidence.md"]
+          },
+          {
+            "id": "podman-codex-workflows-verify",
+            "repository": "cross-repo",
+            "command": ["make", "local-mode-codex-verify"],
+            "environment": {
+              "set": ["FLUE_SRC=<pinned-flue-worktree>", "LOCAL_MODE_API_PORT=8582", "LOCAL_MODE_API_URL=http://127.0.0.1:8582", "LOCAL_MODE_CODEX_CLI_VERSION=0.144.4", "LOCAL_MODE_COMPOSE_PROJECT=loomcli-phase4-raw-workflows-67c45972f286-20260722t061455z", "LOCAL_MODE_FLEETDB_PORT=8580", "LOCAL_MODE_FLEETDB_SOURCE_ROOT=<paired-phase4-fleetdb-worktree>", "LOCAL_MODE_RUN_ID=phase4-raw-workflows-67c45972f286-20260722t061455z", "LOCAL_MODE_UI_PORT=8583", "LOOM_LOCAL_MODE_PLANE=ts"],
+              "unset": [],
+              "notes": "Supported make local-mode-codex-workflows-up stack with Flue 492bf47b9f3d6c379d00471523987b8fe9511f7d and the configured live Codex home. The model used by this raw Podman journey was not independently attested as Terra."
+            },
+            "expected_skips": [],
+            "result": {"status": "pass", "summary": "The verifier observed the exact fresh planner task in Review with released ownership, persisted design, a completed Codex exit-zero session and transcript; the coder task reached Closed with a completed Codex exit-zero session, transcript, and exact local-mode-agent-output.txt diff. It also asserted zero automatic agent definitions, daemon processes, and daemon control sockets under the TS execution plane."},
+            "artifact_paths": ["docs/migrations/modular-monolith/09-phase-4-decisions-and-evidence.md"]
+          },
+          {
+            "id": "raw-browser-local-ui",
+            "repository": "loom",
+            "command": ["agent-browser", "--session", "phase4-raw-workflows-67c45972f286-20260722t061455z", "snapshot", "-i"],
+            "environment": {
+              "set": ["LOCAL_MODE_UI_PORT=8583"],
+              "unset": [],
+              "notes": "Raw loopback browser against the same checkout-scoped Podman run; no launch-code or operator credential was supplied. Ignored local screenshots and the run manifest were retained during validation; this checked-in evidence record is their portable provenance."
+            },
+            "expected_skips": [],
+            "result": {"status": "pass", "summary": "The raw browser rendered the fresh board, planner design and transcript, and coder transcript and exact diff. Browser console and page error inspection were empty."},
+            "artifact_paths": ["docs/migrations/modular-monolith/09-phase-4-decisions-and-evidence.md"]
+          }
+        ]
       }
     ]
   },
@@ -408,8 +738,8 @@
   },
   "ratchets": {
     "composite_store": {
-      "max_production_files": 88,
-      "max_outside_composition": 77,
+      "max_production_files": 82,
+      "max_outside_composition": 71,
       "composition_prefixes": [
         "internal/cli/serve/",
         "internal/infra/",
@@ -433,7 +763,6 @@
         "internal/cli/daemon/supervisor/supervisor.go",
         "internal/cli/daemonregistry/daemonregistry.go",
         "internal/cli/driver/agent_cmd.go",
-        "internal/cli/epic/run.go",
         "internal/cli/serve/daemonwire/daemon.go",
         "internal/cli/serve/metricscmd/handlers.go",
         "internal/cli/serve/metricscmd/monitor_store_data_source.go",
@@ -443,12 +772,9 @@
         "internal/cli/serve/serveadapter/serveadapter.go",
         "internal/cli/serve/workspacemgr/agent_identity_migration.go",
         "internal/cli/serve/workspacemgr/workspace_store.go",
-        "internal/cli/workflow/workflow_cmd.go",
         "internal/cli/workspace/ops_cmd.go",
         "internal/cli/workspace/workspacev2_cmd.go",
-        "internal/driver/await_op.go",
         "internal/driver/await_reconcilers.go",
-        "internal/driver/composition.go",
         "internal/driver/epic_snapshot.go",
         "internal/driver/executor.go",
         "internal/driver/global_runner.go",
@@ -457,9 +783,7 @@
         "internal/driver/stale_task_sweeper.go",
         "internal/driver/task_bridge.go",
         "internal/driver/task_bridge_session.go",
-        "internal/driver/task_events.go",
         "internal/driver/task_request.go",
-        "internal/driver/task_retry.go",
         "internal/driver/task_scheduling.go",
         "internal/driver/task_worker.go",
         "internal/driver/task_worktree_resolver.go",
@@ -477,7 +801,7 @@
         "internal/trigger/delivery_sweeper.go",
         "internal/trigger/internal_source.go",
         "internal/trigger/issue_journal_bridge.go",
-        "internal/webui/agentmodules/agentmodules.go",
+        "internal/webui/agentmodules/routecontracts/deps.go",
         "internal/webui/app/server_workspace.go",
         "internal/webui/handlers/agents/module.go",
         "internal/webui/handlers/agents/record_dto.go",
@@ -547,7 +871,6 @@
         {"file": "internal/webui/handlers/prreview/stream.go", "import": "github.com/tysonthomas9/loomcli/internal/store"},
         {"file": "internal/webui/handlers/roles/module.go", "import": "github.com/tysonthomas9/loomcli/internal/store"},
         {"file": "internal/webui/handlers/runhistory/runhistory.go", "import": "github.com/tysonthomas9/loomcli/internal/store"},
-        {"file": "internal/webui/handlers/taskrunapi/artifacts.go", "import": "github.com/tysonthomas9/loomcli/internal/store"},
         {"file": "internal/webui/handlers/taskrunapi/module.go", "import": "github.com/tysonthomas9/loomcli/internal/backend"},
         {"file": "internal/webui/handlers/taskrunapi/module.go", "import": "github.com/tysonthomas9/loomcli/internal/backend/fleet"},
         {"file": "internal/webui/handlers/taskrunapi/module.go", "import": "github.com/tysonthomas9/loomcli/internal/store"},
@@ -688,11 +1011,11 @@
   ],
   "decisions": [
     {"id": "MM-1", "status": "approved", "owner": "architecture-review", "rationale": "Adopt the ten coarse capability owners and the documented Workspace versus Source Control and Artifacts boundaries.", "reviewed_by": "phase-1-completion-directive", "reviewed_at": "2026-07-15"},
-    {"id": "MM-2", "status": "approved", "owner": "architecture-review", "rationale": "Local operator mutations require a server-issued 256-bit credential stored in a mode-0600 runtime file; loopback location alone grants no authority.", "reviewed_by": "phase-1-completion-directive", "reviewed_at": "2026-07-15"},
+    {"id": "MM-2", "status": "approved", "owner": "architecture-review", "rationale": "Local open mode derives exact workspace/action-scoped typed operator authority server-side without a client credential; shared and cloud deployments retain OIDC identity and workspace-role authorization.", "reviewed_by": "local-open-mode-product-direction", "reviewed_at": "2026-07-20"},
     {"id": "MM-3", "status": "approved", "owner": "architecture-review", "rationale": "A capability key is advertised only with Redis and Postgres parity for the active deployment; missing support fails readiness without fallback.", "reviewed_by": "phase-1-completion-directive", "reviewed_at": "2026-07-15"},
     {"id": "MM-4", "status": "approved", "owner": "architecture-review", "rationale": "Workflow Catalog approve, unapprove, and activate is the first complete backend pilot after a behavior-neutral read seam.", "reviewed_by": "phase-1-completion-directive", "reviewed_at": "2026-07-15"},
     {"id": "MM-5", "status": "approved", "owner": "architecture-review", "rationale": "Capability public roots live at internal/modules/<capability>; optional subpackages remain owner-private.", "reviewed_by": "phase-1-completion-directive", "reviewed_at": "2026-07-15"},
     {"id": "MM-6", "status": "approved", "owner": "architecture-review", "rationale": "Compatibility facades expire after at most two migration waves unless an explicit reviewed owner and extension decision is recorded.", "reviewed_by": "phase-1-completion-directive", "reviewed_at": "2026-07-15"},
-    {"id": "MM-7", "status": "approved", "owner": "architecture-review", "rationale": "Mutating CLI commands discover an explicit configured management endpoint, never start a host implicitly, fail closed when unavailable, authenticate locally, and migrate family by family with output and exit-code compatibility.", "reviewed_by": "phase-1-completion-directive", "reviewed_at": "2026-07-15"}
+    {"id": "MM-7", "status": "approved", "owner": "architecture-review", "rationale": "Mutating CLI commands discover an explicit configured management endpoint, never start a host implicitly, fail closed when unavailable, use the server's configured open or OIDC trust mode, and migrate family by family with output and exit-code compatibility.", "reviewed_by": "local-open-mode-product-direction", "reviewed_at": "2026-07-20"}
   ]
 }

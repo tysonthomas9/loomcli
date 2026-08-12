@@ -8,7 +8,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 
 import { HtmlDesignRenderer } from "./HtmlDesignRenderer";
-import { MarkdownRenderer } from "./MarkdownRenderer";
+import { MarkdownRenderer } from "@/components/MarkdownRenderer";
 import styles from "./DesignPanel.module.css";
 
 export interface DesignPanelProps {

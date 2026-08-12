@@ -69,6 +69,13 @@ export const generatedNamespaces = [
         ],
       },
       {
+        method: "blockRepositoryRequired",
+        op: "issue-block-repository-required",
+        httpMethod: "POST",
+        result: "Record<string, unknown> | null",
+        fields: [{ name: "issueId", type: "string", required: true }],
+      },
+      {
         method: "addLabel",
         op: "issue-add-label",
         httpMethod: "POST",

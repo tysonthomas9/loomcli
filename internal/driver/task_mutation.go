@@ -8,7 +8,6 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
 type TaskCompleteOptions struct {
@@ -61,57 +60,6 @@ func CompleteTask(ctx context.Context, issueBackend backend.IssueBackend, opts T
 	return &TaskMutationResult{ID: taskID, Status: status, Reason: reason}, nil
 }
 
-// DriverTaskRunCompletionOptions parameterizes the fenced completion of a
-// deferred TaskRun through the TaskRun store (driver complete-task).
-type DriverTaskRunCompletionOptions struct {
-	TaskID       string
-	CompletionID string
-	LeaseToken   string
-	ArtifactIDs  []string
-	LogsRef      string
-	ArtifactsRef string
-	Reason       string
-}
-
-// CompleteDriverTaskRun finalizes a deferred TaskRun via the fenced
-// TaskRunStore Complete path, closing the underlying FleetDB task. Shared by
-// the driver CLI complete-task subcommand and the driver-op HTTP API.
-func CompleteDriverTaskRun(ctx context.Context, taskRuns store.TaskRunStore, ws, taskRunID string, opts DriverTaskRunCompletionOptions) (*TaskMutationResult, error) {
-	taskRun, err := taskRuns.Get(ctx, ws, taskRunID)
-	if err != nil {
-		return nil, fmt.Errorf("get task run: %w", err)
-	}
-	if opts.TaskID != "" && taskRun.TaskID != opts.TaskID {
-		return nil, fmt.Errorf("task run %q belongs to task %q, not %q: %w", taskRunID, taskRun.TaskID, opts.TaskID, domain.ErrInvalid)
-	}
-	completionID := strings.TrimSpace(opts.CompletionID)
-	if completionID == "" {
-		completionID = "complete-" + taskRunID
-	}
-	reason := strings.TrimSpace(opts.Reason)
-	if reason == "" {
-		reason = "completed by driver"
-	}
-	completed, err := taskRuns.Complete(ctx, ws, taskRunID, store.TaskRunComplete{
-		CompletionID:        completionID,
-		NodeID:              taskRun.NodeID,
-		LeaseID:             taskRun.LeaseID,
-		LeaseToken:          opts.LeaseToken,
-		FencingToken:        taskRun.FencingToken,
-		Status:              domain.TaskRunCompleted,
-		LogsRef:             opts.LogsRef,
-		ArtifactsRef:        opts.ArtifactsRef,
-		RequiredArtifactIDs: opts.ArtifactIDs,
-		RequireArtifacts:    len(opts.ArtifactIDs) > 0,
-		CloseTask:           true,
-		CloseReason:         reason,
-	})
-	if err != nil {
-		return nil, err
-	}
-	return &TaskMutationResult{ID: completed.TaskID, Status: string(completed.Status), Reason: reason}, nil
-}
-
 func ReleaseTask(ctx context.Context, issueBackend backend.IssueBackend, opts TaskReleaseOptions) (*TaskMutationResult, error) {
 	if issueBackend == nil {
 		return nil, fmt.Errorf("issue backend required: %w", domain.ErrInvalid)
@@ -151,14 +99,24 @@ const claimByIDReadyScanDepth = 10000
 
 const blockedIssueStatus = "blocked"
 
+func oneNonEmptyString(value string) []string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil
+	}
+	return []string{value}
+}
+
 type TaskClaimOptions struct {
 	EpicID string
 	Actor  string
 	// Type optionally narrows the ready view to a single issue type (e.g.
 	// "bug"), filtered server-side via ReadyOpts.Type. Empty means no filter.
-	Type    string
-	Limit   int
-	LockTTL time.Duration
+	Type string
+	// SourceRepo optionally narrows ready work to one workspace repository.
+	SourceRepo string
+	Limit      int
+	LockTTL    time.Duration
 	// ExcludeLabels skips ready tasks carrying ANY of these labels.
 	//
 	// The epic-runner claims label-blind: any open, unblocked child of the
@@ -174,17 +132,21 @@ type TaskClaimOptions struct {
 }
 
 type ClaimedTask struct {
-	ID         string    `json:"id"`
-	Title      string    `json:"title,omitempty"`
-	Status     string    `json:"status,omitempty"`
-	Priority   int       `json:"priority,omitempty"`
-	IssueType  string    `json:"issueType,omitempty"`
-	Assignee   string    `json:"assignee,omitempty"`
-	Labels     []string  `json:"labels,omitempty"`
-	SourceRepo string    `json:"sourceRepo,omitempty"`
-	Parent     string    `json:"parent,omitempty"`
-	ClaimedBy  string    `json:"claimedBy,omitempty"`
-	ClaimedAt  time.Time `json:"claimedAt,omitempty"`
+	ID     string `json:"id"`
+	Title  string `json:"title,omitempty"`
+	Status string `json:"status,omitempty"`
+	// Priority is never omitted: zero is the authoritative P0 value, not
+	// absence. Workflows use this claim-committed value for fenced handoffs and
+	// must not fall back to a stale pre-claim projection when it is P0.
+	Priority      int       `json:"priority"`
+	IssueType     string    `json:"issueType,omitempty"`
+	Assignee      string    `json:"assignee,omitempty"`
+	Labels        []string  `json:"labels,omitempty"`
+	SourceRepo    string    `json:"sourceRepo,omitempty"`
+	Parent        string    `json:"parent,omitempty"`
+	ClaimedBy     string    `json:"claimedBy,omitempty"`
+	ClaimedAt     time.Time `json:"claimedAt,omitempty"`
+	ClaimActionID string    `json:"claimActionId,omitempty"`
 }
 
 type actorClaimer interface {
@@ -192,6 +154,28 @@ type actorClaimer interface {
 }
 
 func ClaimReadyTask(ctx context.Context, issueBackend backend.IssueBackend, opts TaskClaimOptions) (*ClaimedTask, error) {
+	ready, err := ReadyTaskCandidates(ctx, issueBackend, opts)
+	if err != nil {
+		return nil, err
+	}
+	actor := strings.TrimSpace(opts.Actor)
+	for _, issue := range ready {
+		err := claimIssue(ctx, issueBackend, issue.ID, opts.LockTTL, actor)
+		if err == nil {
+			return ClaimedTaskFromIssue(issue, actor, "", time.Now().UTC()), nil
+		}
+		if backend.IsKind(err, backend.KindConflict) {
+			continue
+		}
+		return nil, fmt.Errorf("claim ready task %q: %w", issue.ID, err)
+	}
+	return nil, nil
+}
+
+// ReadyTaskCandidates is the read-only readiness gate shared by legacy task
+// claim helpers and the typed DriverRun Work Item claim path. It never mutates
+// an IssueBackend.
+func ReadyTaskCandidates(ctx context.Context, issueBackend backend.IssueBackend, opts TaskClaimOptions) ([]backend.IssueData, error) {
 	if issueBackend == nil {
 		return nil, fmt.Errorf("issue backend required: %w", domain.ErrInvalid)
 	}
@@ -200,37 +184,26 @@ func ClaimReadyTask(ctx context.Context, issueBackend backend.IssueBackend, opts
 		limit = defaultClaimReadyLimit
 	}
 	ready, err := issueBackend.Ready(ctx, backend.ReadyOpts{
-		ParentID: strings.TrimSpace(opts.EpicID),
-		Type:     strings.TrimSpace(opts.Type),
-		Limit:    limit,
+		ParentID:    strings.TrimSpace(opts.EpicID),
+		Type:        strings.TrimSpace(opts.Type),
+		SourceRepos: oneNonEmptyString(opts.SourceRepo),
+		Limit:       limit,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("list ready tasks: %w", err)
 	}
-	actor := strings.TrimSpace(opts.Actor)
+	filtered := make([]backend.IssueData, 0, len(ready))
 	excluded := normalizeLabelSet(opts.ExcludeLabels)
 	for _, issue := range ready {
-		if strings.TrimSpace(issue.ID) == "" {
+		if strings.TrimSpace(issue.ID) == "" || strings.EqualFold(strings.TrimSpace(issue.Status), blockedIssueStatus) {
 			continue
 		}
 		if hasAnyLabel(issue.Labels, excluded) {
 			continue
 		}
-		// Blocked issues are excluded server-side from the ready view; skip
-		// them here too in case a backend still returns them.
-		if strings.EqualFold(strings.TrimSpace(issue.Status), blockedIssueStatus) {
-			continue
-		}
-		err := claimIssue(ctx, issueBackend, issue.ID, opts.LockTTL, actor)
-		if err == nil {
-			return claimedTaskFromIssue(issue, actor), nil
-		}
-		if backend.IsKind(err, backend.KindConflict) {
-			continue
-		}
-		return nil, fmt.Errorf("claim ready task %q: %w", issue.ID, err)
+		filtered = append(filtered, issue)
 	}
-	return nil, nil
+	return filtered, nil
 }
 
 // TaskClaimByIDOptions parameterizes a targeted claim of one specific ready
@@ -258,6 +231,24 @@ type TaskClaimByIDOptions struct {
 // (backend.KindConflict). A non-existent task also surfaces as a conflict: it
 // is simply never in the ready view.
 func ClaimTask(ctx context.Context, issueBackend backend.IssueBackend, opts TaskClaimByIDOptions) (*ClaimedTask, error) {
+	target, err := ReadyTaskByID(ctx, issueBackend, opts)
+	if err != nil {
+		return nil, err
+	}
+	actor := strings.TrimSpace(opts.Actor)
+	if err := claimIssue(ctx, issueBackend, target.ID, opts.LockTTL, actor); err != nil {
+		if backend.IsKind(err, backend.KindConflict) {
+			return nil, fmt.Errorf("task %q is already claimed: %w", target.ID, domain.ErrConflict)
+		}
+		return nil, fmt.Errorf("claim task %q: %w", target.ID, err)
+	}
+	return ClaimedTaskFromIssue(*target, actor, "", time.Now().UTC()), nil
+}
+
+// ReadyTaskByID finds one exact task in the canonical ready view without
+// mutating it. Absence, blocked state, and an already-held claim all share the
+// existing conflict-class contract.
+func ReadyTaskByID(ctx context.Context, issueBackend backend.IssueBackend, opts TaskClaimByIDOptions) (*backend.IssueData, error) {
 	if issueBackend == nil {
 		return nil, fmt.Errorf("issue backend required: %w", domain.ErrInvalid)
 	}
@@ -265,9 +256,6 @@ func ClaimTask(ctx context.Context, issueBackend backend.IssueBackend, opts Task
 	if taskID == "" {
 		return nil, fmt.Errorf("task id required: %w", domain.ErrInvalid)
 	}
-	// Default to a router-scale scan so a crowded ready view cannot hide a
-	// genuinely-ready target past the small claim-ready cutoff (false 409). An
-	// explicit caller limit still narrows the scan.
 	limit := opts.Limit
 	if limit <= 0 {
 		limit = claimByIDReadyScanDepth
@@ -276,28 +264,13 @@ func ClaimTask(ctx context.Context, issueBackend backend.IssueBackend, opts Task
 	if err != nil {
 		return nil, fmt.Errorf("list ready tasks: %w", err)
 	}
-	var target *backend.IssueData
 	for i := range ready {
-		if strings.TrimSpace(ready[i].ID) == taskID {
-			target = &ready[i]
-			break
+		if strings.TrimSpace(ready[i].ID) == taskID && !strings.EqualFold(strings.TrimSpace(ready[i].Status), blockedIssueStatus) {
+			issue := ready[i]
+			return &issue, nil
 		}
 	}
-	// Not in the ready view — or explicitly blocked (some backends still list
-	// blocked issues) — means not claimable right now: not ready or already
-	// claimed. Fail conflict-class so the caller can distinguish it from a
-	// transport error.
-	if target == nil || strings.EqualFold(strings.TrimSpace(target.Status), blockedIssueStatus) {
-		return nil, fmt.Errorf("task %q is not ready or already claimed: %w", taskID, domain.ErrConflict)
-	}
-	actor := strings.TrimSpace(opts.Actor)
-	if err := claimIssue(ctx, issueBackend, target.ID, opts.LockTTL, actor); err != nil {
-		if backend.IsKind(err, backend.KindConflict) {
-			return nil, fmt.Errorf("task %q is already claimed: %w", taskID, domain.ErrConflict)
-		}
-		return nil, fmt.Errorf("claim task %q: %w", taskID, err)
-	}
-	return claimedTaskFromIssue(*target, actor), nil
+	return nil, fmt.Errorf("task %q is not ready or already claimed: %w", taskID, domain.ErrConflict)
 }
 
 // normalizeLabelSet lowercases and trims a label list into a lookup set,
@@ -337,18 +310,25 @@ func claimIssue(ctx context.Context, issueBackend backend.IssueBackend, issueID 
 	return issueBackend.ClaimIssue(ctx, issueID, lockTTL)
 }
 
-func claimedTaskFromIssue(issue backend.IssueData, actor string) *ClaimedTask {
+// ClaimedTaskFromIssue builds the stable driver wire response after a typed
+// owner-fenced claim has committed. claimedAt should come from the committed
+// issue/action envelope, not the caller's body.
+func ClaimedTaskFromIssue(issue backend.IssueData, actor, claimActionID string, claimedAt time.Time) *ClaimedTask {
+	if claimedAt.IsZero() {
+		claimedAt = time.Now().UTC()
+	}
 	return &ClaimedTask{
-		ID:         issue.ID,
-		Title:      issue.Title,
-		Status:     "in_progress",
-		Priority:   issue.Priority,
-		IssueType:  issue.IssueType,
-		Assignee:   issue.Assignee,
-		Labels:     append([]string(nil), issue.Labels...),
-		SourceRepo: issue.SourceRepo,
-		Parent:     issue.Parent,
-		ClaimedBy:  actor,
-		ClaimedAt:  time.Now().UTC(),
+		ID:            issue.ID,
+		Title:         issue.Title,
+		Status:        "in_progress",
+		Priority:      issue.Priority,
+		IssueType:     issue.IssueType,
+		Assignee:      issue.Assignee,
+		Labels:        append([]string(nil), issue.Labels...),
+		SourceRepo:    issue.SourceRepo,
+		Parent:        issue.Parent,
+		ClaimedBy:     actor,
+		ClaimedAt:     claimedAt,
+		ClaimActionID: claimActionID,
 	}
 }

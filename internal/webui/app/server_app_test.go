@@ -12,6 +12,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/webui"
+	"github.com/tysonthomas9/loomcli/internal/webui/tabmeta"
 	"github.com/tysonthomas9/loomcli/internal/webui/terminal"
 )
 
@@ -441,5 +442,31 @@ func TestServer_ConfigDefaults_ExplicitValuesPreserved(t *testing.T) {
 	}
 	if config.BindAddress != "0.0.0.0" {
 		t.Errorf("BindAddress = %q, want %q (explicit)", config.BindAddress, "0.0.0.0")
+	}
+}
+
+func TestInteractiveRuntimeTabSourceMapsTerminalMetadata(t *testing.T) {
+	source := interactiveRuntimeTabSource{terminalService: &stubTerminalService{
+		tabs: []tabmeta.TabMetadata{{
+			SessionName: "lead-a",
+			Kind:        "agent",
+			AgentID:     "agent-a",
+			PTYAlive:    true,
+			Label:       "not part of the ownership boundary",
+		}},
+	}}
+
+	tabs, err := source.ListInteractiveRuntimeTabs(context.Background(), "TEST2")
+	if err != nil {
+		t.Fatalf("ListInteractiveRuntimeTabs: %v", err)
+	}
+	if len(tabs) != 1 {
+		t.Fatalf("tabs = %+v, want one tab", tabs)
+	}
+	if tabs[0].SessionName != "lead-a" ||
+		tabs[0].Kind != "agent" ||
+		tabs[0].AgentID != "agent-a" ||
+		!tabs[0].PTYAlive {
+		t.Fatalf("mapped tab = %+v", tabs[0])
 	}
 }

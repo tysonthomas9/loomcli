@@ -115,6 +115,25 @@ function renderPanel(
 }
 
 describe("AgentDetailPanel", () => {
+  describe("closed overlay hit testing", () => {
+    it("does not intercept pointer input while the close animation is pending", () => {
+      const agent = makeAgent();
+      render(
+        <AgentDetailPanel
+          isOpen={false}
+          agentName={null}
+          agents={[agent]}
+          agentTasks={{}}
+          onClose={vi.fn()}
+        />,
+      );
+
+      expect(screen.getByTestId("agent-detail-overlay").className).toMatch(
+        /closed/i,
+      );
+    });
+  });
+
   describe("path field in Agent Info section", () => {
     it("renders Path when agent has a path", () => {
       renderPanel({ path: "worktrees/cobalt" });

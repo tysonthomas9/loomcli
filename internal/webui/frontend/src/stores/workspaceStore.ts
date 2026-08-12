@@ -200,22 +200,31 @@ export function createWorkspaceStore(): StoreApi<WorkspaceStore> {
     };
 
     const upsertAgent = (agent: WorkspaceData["agents"][number]): void => {
-      if (agent.name) {
-        pendingAgents.set(agent.name, agent);
+      // Unified create responses include supervised, prompt, scripted, and
+      // binding-backed records. Older and non-supervised shapes may omit the
+      // workspace model's collection fields, so normalize at this runtime
+      // boundary before File Explorer and repo-scope consumers iterate them.
+      const normalizedAgent: WorkspaceData["agents"][number] = {
+        ...agent,
+        repos: Array.isArray(agent.repos) ? agent.repos : [],
+        repo_groups: Array.isArray(agent.repo_groups) ? agent.repo_groups : [],
+      };
+      if (normalizedAgent.name) {
+        pendingAgents.set(normalizedAgent.name, normalizedAgent);
       }
 
       const current = get().workspace;
-      if (!current || !agent.name) return;
+      if (!current || !normalizedAgent.name) return;
 
       const agents = current.agents ?? [];
       const existingIndex = agents.findIndex(
-        (item) => item.name === agent.name,
+        (item) => item.name === normalizedAgent.name,
       );
       const nextAgents =
         existingIndex === -1
-          ? [...agents, agent]
+          ? [...agents, normalizedAgent]
           : agents.map((item, index) =>
-              index === existingIndex ? { ...item, ...agent } : item,
+              index === existingIndex ? { ...item, ...normalizedAgent } : item,
             );
 
       set({

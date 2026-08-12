@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"strings"
@@ -8,7 +9,9 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/cli"
+	"github.com/tysonthomas9/loomcli/internal/cli/agent/tsruntime"
 	"github.com/tysonthomas9/loomcli/internal/cli/automode"
 	"github.com/tysonthomas9/loomcli/internal/cli/backends"
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
@@ -46,7 +49,7 @@ Required Flags:
   -p, --prompt    Path to prompt template file
 
 Optional Flags:
-  -f, --task-filter   Task filter: needs_design, has_design, or any (default: any)
+  -f, --task-filter   Task filter: needs_design, has_design, or any (bug is supervisor-daemon only)
   -a, --auto          Enable continuous mode (process multiple tasks)
   -i, --interval      Polling interval in seconds when no tasks (default: 30)
   -m, --max-tasks     Maximum tasks to process before exiting (0 = unlimited)
@@ -79,7 +82,7 @@ Examples:
 func init() {
 	agentCmd.Flags().StringVarP(&agentPromptFile, "prompt", "p", "", "Path to prompt template file")
 	_ = agentCmd.MarkFlagRequired("prompt")
-	agentCmd.Flags().StringVarP(&agentTaskFilter, "task-filter", "f", "any", "Task filter: needs_design, has_design, or any")
+	agentCmd.Flags().StringVarP(&agentTaskFilter, "task-filter", "f", "any", "Task filter: needs_design, has_design, or any (bug requires supervisor daemon)")
 	agentCmd.Flags().BoolVarP(&agentAutoMode, "auto", "a", false, "Enable continuous mode (process multiple tasks)")
 	agentCmd.Flags().BoolVar(&agentDaemonMode, "daemon-mode", false, "Internal: single task mode for daemon")
 	_ = agentCmd.Flags().MarkHidden("daemon-mode")
@@ -91,9 +94,14 @@ func init() {
 }
 
 func runAgent(cmd *cobra.Command, args []string) {
+	deps := cli.GetDeps(cmd)
 	argName := args[0]
 	validatePromptFile(agentPromptFile)
 
+	if err := validateTaskFilterExecutionMode(agentTaskFilter, agentDaemonMode); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		cli.ExitWithFlush(1)
+	}
 	taskCheckFn, err := mapTaskFilter(agentTaskFilter, agentParentID)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
@@ -122,7 +130,10 @@ func runAgent(cmd *cobra.Command, args []string) {
 	promptGen := makeCustomPromptGen(agentPromptFile)
 
 	if agentDaemonMode {
-		runAgentDaemon(worktreePath, agentName, promptGen)
+		if err := runAgentDaemon(deps, worktreePath, agentName, promptGen); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			cli.ExitWithFlush(1)
+		}
 		return
 	}
 
@@ -147,12 +158,13 @@ func validatePromptFile(path string) {
 	}
 }
 
-// runAgentDaemon handles daemon mode: single task execution inside a tmux session.
-// The daemon manages its own lock; the parent reads the lock after exit.
-func runAgentDaemon(worktreePath, agentName string, promptGen func(string, *config.WorkspaceConfig) string) {
+// runAgentDaemon handles daemon mode for a custom-role agent. It mirrors the
+// built-in plan/task leaf contract: bind the supervisor-assigned task to the
+// lock and prompt, invoke headlessly, emit task lifecycle events, and finalize
+// the task-bound session.
+func runAgentDaemon(deps *cli.Deps, worktreePath, agentName string, promptGen func(string, *config.WorkspaceConfig) string) error {
 	if err := cli.AcquireLock(worktreePath, "agent", agentName); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		cli.ExitWithFlush(1)
+		return err
 	}
 	// Lock intentionally NOT released here. Parent (RunAutoModeTmux)
 	// reads the lock after daemon exit to detect task claims, then
@@ -162,41 +174,170 @@ func runAgentDaemon(worktreePath, agentName string, promptGen func(string, *conf
 		fmt.Fprintf(os.Stderr, "Warning: could not update lock state: %v\n", err)
 	}
 
+	assignedTaskID := strings.TrimSpace(os.Getenv("LOOM_ASSIGNED_TASK_ID"))
+	if err := prepareCustomDaemonAssignment(
+		cmdstore.RootContext(),
+		deps.IssueBackend,
+		worktreePath,
+		assignedTaskID,
+		agentTaskFilter,
+		os.Getenv("LOOM_READ_ONLY") == "1",
+	); err != nil {
+		return err
+	}
+
 	ws, _ := config.ResolveActiveWorkspace()
-	prompt := promptGen(agentName, ws)
-	// Adopt the parent-created session (daemon spawn) or create our own, exactly
-	// like runTaskDaemon/runPlanDaemon. This replaces an inline copy of only the
-	// adopt half, which left no session handle to finalize — so a custom role's
-	// self-started run recorded nothing at all: no diff stats, no transcript
-	// mirror, no tokens, no cost. Under a supervisor spawn the session is
-	// inherited and the supervisor owns the finalize; this covers every other way
-	// --daemon-mode is entered. Phase is "implementation" rather than a third
-	// value so the local record agrees with the phase the supervisor stamps on
-	// the control-plane session for any non-plan role.
+	prompt := bindCustomDaemonTask(promptGen(agentName, ws), assignedTaskID, agentTaskFilter)
 	sess := adoptOrCreateSession(agentName, agentParentID, prompt, "implementation")
 	defer backends.ClearActiveSessionEnv()
 
+	emitTaskClaimedFromEnv(agentName, assignedTaskID)
+
 	beforeRef := automode.CaptureHEADRef(worktreePath)
 	startedAt := time.Now()
-
-	// Daemon-spawned subprocesses have no controlling TTY. InvokeAgent's
-	// interactive path inherits the daemon's stdin/stdout, which makes backend
-	// TUIs render nothing — the supervisor watchdog then times the silent run
-	// out at 15 min (same failure the built-in roles route around in
-	// runTaskDaemon/runPlanDaemon). Use the wrapper-backed non-interactive
-	// path: PTY + stream-json, retry policy, and liveness ticks.
 	shutdown := automode.SetupSignalHandler()
 	collector := usage.NewCollector(cli.GetBackendName(), agentName)
-	invokeErr := cli.InvokeAgentNonInteractive(worktreePath, prompt, agentName, shutdown, collector)
+	invokeErr := tsruntime.Invoker(deps.Agent).InvokeNonInteractive(worktreePath, prompt, agentName, shutdown, collector)
+	if invokeErr == nil {
+		invokeErr = validateBugDaemonReviewHandoff(
+			cmdstore.RootContext(),
+			deps.IssueBackend,
+			assignedTaskID,
+			agentTaskFilter,
+		)
+	}
+	if invokeErr == nil {
+		clearDaemonResumeOnSuccess(worktreePath)
+	}
 
-	// Finalize BEFORE the error exit: a failed run's tokens were still spent, and
-	// ExitWithFlush never returns, so an exit-first ordering would drop them.
+	emitTaskLifecycleResult(agentName, worktreePath, startedAt, invokeErr)
 	finalizeAgentSession(sess, worktreePath, beforeRef, invokeErr, collector, startedAt, agentParentID)
 
-	if invokeErr != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", invokeErr)
-		cli.ExitWithFlush(1)
+	return invokeErr
+}
+
+// prepareCustomDaemonAssignment establishes the leaf's task identity. The
+// resume decision MUST observe the carried lock before this run overwrites its
+// task ID; otherwise a session from task A could be resumed while processing
+// task B. Persisting before the remaining preflight checks keeps a rejected
+// assignment attributable to the supervisor for recovery.
+func prepareCustomDaemonAssignment(
+	ctx context.Context,
+	issueBackend backend.IssueBackend,
+	worktreePath, taskID, taskFilter string,
+	readOnly bool,
+) error {
+	maybeResumeDaemonSession(worktreePath, taskID)
+	persistAssignedTaskToLock(worktreePath, taskID)
+	return validateAssignedTaskFilter(ctx, issueBackend, taskID, taskFilter, readOnly)
+}
+
+// validateAssignedTaskFilter is the daemon leaf's final fail-closed guard.
+// Supervisor routing is authoritative for selection, but the leaf re-reads a
+// bug-filtered assignment before emitting task-claimed or invoking an AI
+// backend so stale/malformed assignment data cannot spend on non-bug work.
+func validateAssignedTaskFilter(
+	ctx context.Context,
+	issueBackend backend.IssueBackend,
+	taskID, taskFilter string,
+	readOnly bool,
+) error {
+	if strings.TrimSpace(taskFilter) != "bug" {
+		return nil
 	}
+	if !readOnly {
+		return fmt.Errorf("bug task filter requires read-only execution")
+	}
+	taskID = strings.TrimSpace(taskID)
+	if taskID == "" {
+		return fmt.Errorf("bug task filter requires a supervisor-assigned task")
+	}
+	if issueBackend == nil {
+		return fmt.Errorf("bug task filter cannot verify assigned task %s: issue backend is unavailable", taskID)
+	}
+	issue, err := issueBackend.Get(ctx, taskID)
+	if err != nil {
+		return fmt.Errorf("bug task filter cannot verify assigned task %s: %w", taskID, err)
+	}
+	if issue == nil {
+		return fmt.Errorf("bug task filter cannot verify assigned task %s: issue was not returned", taskID)
+	}
+	if !strings.EqualFold(strings.TrimSpace(issue.IssueType), "bug") {
+		return fmt.Errorf(
+			"bug task filter rejected assigned task %s with issue type %q",
+			taskID, strings.TrimSpace(issue.IssueType),
+		)
+	}
+	return nil
+}
+
+// validateBugDaemonReviewHandoff makes the bug-triage terminal state a
+// host-verified contract rather than trusting a clean model exit. A bug worker
+// that exits without moving its assigned card to Review is failed so the
+// supervisor can recover/retry it, and its carried resume state is retained.
+func validateBugDaemonReviewHandoff(
+	ctx context.Context,
+	issueBackend backend.IssueBackend,
+	taskID, taskFilter string,
+) error {
+	if strings.TrimSpace(taskFilter) != "bug" {
+		return nil
+	}
+	taskID = strings.TrimSpace(taskID)
+	if taskID == "" {
+		return fmt.Errorf("bug task filter cannot verify Review handoff without an assigned task")
+	}
+	if issueBackend == nil {
+		return fmt.Errorf("bug task filter cannot verify Review handoff for %s: issue backend is unavailable", taskID)
+	}
+	issue, err := issueBackend.Get(ctx, taskID)
+	if err != nil {
+		return fmt.Errorf("bug task filter cannot verify Review handoff for %s: %w", taskID, err)
+	}
+	if issue == nil {
+		return fmt.Errorf("bug task filter cannot verify Review handoff for %s: issue was not returned", taskID)
+	}
+	if status := issue.Status; status != "review" {
+		return fmt.Errorf(
+			"bug task filter run for %s exited successfully with task status %q; expected %q",
+			taskID, status, "review",
+		)
+	}
+	return nil
+}
+
+// validateTaskFilterExecutionMode keeps the strict issue-type filter out of
+// legacy unbound execution. Only the daemon leaf receives a supervisor-selected
+// task ID that it can verify before model invocation.
+func validateTaskFilterExecutionMode(taskFilter string, daemonMode bool) error {
+	if strings.TrimSpace(taskFilter) == "bug" && !daemonMode {
+		return fmt.Errorf("bug task filter requires a supervisor-assigned daemon run")
+	}
+	return nil
+}
+
+// bindCustomDaemonTask makes the supervisor's claim authoritative for custom
+// prompts. Custom role bodies can describe how to process work, but they must
+// not run their own ready/claim loop after the supervisor has fenced one task.
+func bindCustomDaemonTask(prompt, taskID, taskFilter string) string {
+	taskID = strings.TrimSpace(taskID)
+	if taskID == "" {
+		return prompt
+	}
+	handoff := `When the role's handoff is complete, run 'loom complete' and exit.`
+	if strings.TrimSpace(taskFilter) == "bug" {
+		handoff = `Follow the custom role's status handoff exactly. Leave the bug in
+Review and do NOT run 'loom complete' because that would close it. Exit after
+the Review handoff.`
+	}
+	return fmt.Sprintf(`## Supervisor-assigned task
+
+Your one task for this run is %s. The supervisor has already claimed it for
+this agent. Load it with 'loom data show %s --output json' and perform the
+custom role below only for that task. Do NOT claim or select another task, and
+do NOT run 'loom data ready'. %s
+
+%s`, taskID, taskID, handoff, prompt)
 }
 
 // agentAutoOpts builds the common AutoModeOptions for auto mode invocations.
@@ -284,10 +425,16 @@ func mapTaskFilter(filter, parentID string) (func() (bool, error), error) {
 		return func() (bool, error) { return automode.HasAvailablePlanningTasks(parentID, repoLabel) }, nil
 	case "has_design":
 		return func() (bool, error) { return automode.HasAvailableImplementationTasks(parentID, repoLabel) }, nil
+	case "bug":
+		return cli.BuildRouterTaskCheck(
+			config.RoleConfig{TaskFilter: "bug"},
+			config.AgentEntry{Repo: repoLabel},
+			parentID,
+		), nil
 	case "any", "":
 		return func() (bool, error) { return automode.HasAnyAvailableTasks(parentID, repoLabel) }, nil
 	default:
-		return nil, fmt.Errorf("invalid task filter: %s (must be needs_design, has_design, or any)", filter)
+		return nil, fmt.Errorf("invalid task filter: %s (must be needs_design, has_design, bug, or any)", filter)
 	}
 }
 
@@ -300,24 +447,6 @@ func mapTaskFilter(filter, parentID string) (func() (bool, error), error) {
 // preamble (which predates this and is applied exactly once) — a custom role
 // gets total prompt control, and the template variables are how it opts pieces
 // of the built-in context back in.
-func makeCustomPromptGen(promptFile string) func(string, *config.WorkspaceConfig) string {
-	return func(agentName string, workspace *config.WorkspaceConfig) string {
-		prompt, err := loadPromptTemplateWith(promptFile, func(refs promptFieldRefs) PromptData {
-			return buildCustomPromptData(agentName, workspace, refs)
-		})
-		if err != nil {
-			// Log warning, try reading raw file
-			fmt.Fprintf(os.Stderr, "Warning: template parsing failed: %v\n", err)
-			content, readErr := os.ReadFile(promptFile)
-			if readErr != nil {
-				return fmt.Sprintf("Error: could not load prompt file %s: %v", promptFile, err)
-			}
-			return withReadOnlyPreamble(string(content))
-		}
-		return withReadOnlyPreamble(prompt)
-	}
-}
-
 // buildCustomPromptData assembles the template context for a custom-role prompt.
 //
 // Identity is unconditional — it is arguments and environment reads. The
@@ -327,6 +456,45 @@ func makeCustomPromptGen(promptFile string) func(string, *config.WorkspaceConfig
 // agent spawn, and CheckpointBlock stats and reads the worktree lock
 // directory. A read-only critic whose prompt wants nothing but {{.TaskID}}
 // must not be billed for either.
+// customRoleName resolves what {{.Role}} renders as. LOOM_ROLE carries the
+// REAL role name the daemon spawned this agent under ("reviewer", "critic",
+// ...); the literal "custom" this used to hardcode told the prompt nothing it
+// did not already know and made role-conditional templates impossible. Outside
+// the daemon (a hand-run `loom agent`) there is no role record, so "custom"
+// stays as the fallback.
+func customRoleName() string {
+	if role := strings.TrimSpace(os.Getenv("LOOM_ROLE")); role != "" {
+		return role
+	}
+	return "custom"
+}
+
+// customTaskDetailText renders the assigned task as prompt text. Called only
+// when the template references {{.TaskDetail}} — this is the one field that
+// costs an issue-backend round trip.
+//
+// Returns "" when there is no pre-claimed task (one-shot/auto mode) or the
+// fetch fails. Failing the whole render would take the agent down over context
+// it merely asked for, and the warning on stderr is enough for the operator to
+// see why the section came out empty.
+func customTaskDetailText(taskID string) string {
+	if taskID == "" {
+		return ""
+	}
+	ctx, cancel := cmdstore.SignalContext()
+	defer cancel()
+	detail, err := cli.DefaultIssueBackend().Get(ctx, taskID)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: could not load task %s for {{.TaskDetail}}: %v\n", taskID, err)
+		return ""
+	}
+	if detail == nil {
+		fmt.Fprintf(os.Stderr, "Warning: task %s not found; {{.TaskDetail}} will be empty\n", taskID)
+		return ""
+	}
+	return FormatIssueText(detail)
+}
+
 func buildCustomPromptData(agentName string, workspace *config.WorkspaceConfig, refs promptFieldRefs) PromptData {
 	// A task IS already claimed before this prompt is rendered in daemon mode:
 	// the supervisor's pre-flight claims for any role with a task_filter, not
@@ -367,51 +535,28 @@ func buildCustomPromptData(agentName string, workspace *config.WorkspaceConfig, 
 	return data
 }
 
-// customRoleName resolves what {{.Role}} renders as. LOOM_ROLE carries the
-// REAL role name the daemon spawned this agent under ("reviewer", "critic",
-// ...); the literal "custom" this used to hardcode told the prompt nothing it
-// did not already know and made role-conditional templates impossible. Outside
-// the daemon (a hand-run `loom agent`) there is no role record, so "custom"
-// stays as the fallback.
-func customRoleName() string {
-	if role := strings.TrimSpace(os.Getenv("LOOM_ROLE")); role != "" {
-		return role
+func makeCustomPromptGen(promptFile string) func(string, *config.WorkspaceConfig) string {
+	return func(agentName string, workspace *config.WorkspaceConfig) string {
+		prompt, err := loadPromptTemplateWith(promptFile, func(refs promptFieldRefs) PromptData {
+			return buildCustomPromptData(agentName, workspace, refs)
+		})
+		if err != nil {
+			// Log warning, try reading raw file
+			fmt.Fprintf(os.Stderr, "Warning: template parsing failed: %v\n", err)
+			content, readErr := os.ReadFile(promptFile)
+			if readErr != nil {
+				return fmt.Sprintf("Error: could not load prompt file %s: %v", promptFile, err)
+			}
+			return prependReadOnlyPolicy(string(content))
+		}
+		return prependReadOnlyPolicy(prompt)
 	}
-	return "custom"
 }
 
-// customTaskDetailText renders the assigned task as prompt text. Called only
-// when the template references {{.TaskDetail}} — this is the one field that
-// costs an issue-backend round trip.
-//
-// Returns "" when there is no pre-claimed task (one-shot/auto mode) or the
-// fetch fails. Failing the whole render would take the agent down over context
-// it merely asked for, and the warning on stderr is enough for the operator to
-// see why the section came out empty.
-func customTaskDetailText(taskID string) string {
-	if taskID == "" {
-		return ""
+func prependReadOnlyPolicy(prompt string) string {
+	preamble := ReadOnlyPreamble()
+	if preamble == "" {
+		return prompt
 	}
-	ctx, cancel := cmdstore.SignalContext()
-	defer cancel()
-	detail, err := cli.DefaultIssueBackend().Get(ctx, taskID)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: could not load task %s for {{.TaskDetail}}: %v\n", taskID, err)
-		return ""
-	}
-	if detail == nil {
-		fmt.Fprintf(os.Stderr, "Warning: task %s not found; {{.TaskDetail}} will be empty\n", taskID)
-		return ""
-	}
-	return FormatIssueText(detail)
-}
-
-// withReadOnlyPreamble prepends the read-only notice for read_only roles —
-// the soft companion to the backend-level tool denial, so the model explains
-// rather than fights denied writes.
-func withReadOnlyPreamble(prompt string) string {
-	if preamble := ReadOnlyPreamble(); preamble != "" {
-		return preamble + "\n\n" + prompt
-	}
-	return prompt
+	return preamble + "\n\n" + prompt
 }

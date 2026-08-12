@@ -83,6 +83,21 @@ describe("useBackends", () => {
 
       await flushPromises();
     });
+
+    it("does not fetch until an explicitly disabled consumer becomes active", async () => {
+      mockFetchBackends.mockResolvedValueOnce([createMockHealthData()]);
+
+      const { rerender } = renderHook(
+        ({ enabled }: { enabled: boolean }) => useBackends(enabled),
+        { initialProps: { enabled: false } },
+      );
+      await flushPromises();
+      expect(mockFetchBackends).not.toHaveBeenCalled();
+
+      rerender({ enabled: true });
+      await flushPromises();
+      expect(mockFetchBackends).toHaveBeenCalledTimes(1);
+    });
   });
 
   describe("successful fetch with toBackendInfo mapping", () => {

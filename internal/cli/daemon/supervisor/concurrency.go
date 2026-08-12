@@ -42,31 +42,72 @@ func NewConcurrencyTracker(roles map[string]config.RoleConfig) *ConcurrencyTrack
 // Returns true if acquired, false if the tracker was closed (shutdown).
 // Roles with no limit (0) always acquire immediately. Safe on nil receiver.
 func (ct *ConcurrencyTracker) Acquire(role string) bool {
+	return ct.acquire(role, nil)
+}
+
+// AcquireUntil blocks until a concurrency slot is available or stop is
+// closed. Unlike a plain Acquire, a per-agent Stop can therefore interrupt a
+// worker queued behind another agent's role limit.
+func (ct *ConcurrencyTracker) AcquireUntil(role string, stop <-chan struct{}) bool {
+	return ct.acquire(role, stop)
+}
+
+func (ct *ConcurrencyTracker) acquire(role string, stop <-chan struct{}) bool {
 	if ct == nil {
-		return true
+		return !channelClosed(stop)
 	}
 	ct.mu.Lock()
 	defer ct.mu.Unlock()
 
 	limit := ct.limits[role]
 	if limit == 0 {
-		if ct.closed {
+		if ct.closed || channelClosed(stop) {
 			return false
 		}
 		ct.counts[role]++
 		return true
 	}
 
-	for ct.counts[role] >= limit && !ct.closed {
+	// Wake the condition when this agent alone is stopped. Taking ct.mu before
+	// Broadcast closes the check-to-Wait race: if stop closes after the loop
+	// check, the notifier cannot broadcast until Cond.Wait atomically releases
+	// the mutex.
+	waitDone := make(chan struct{})
+	if stop != nil {
+		go func() {
+			select {
+			case <-stop:
+				ct.mu.Lock()
+				ct.cond.Broadcast()
+				ct.mu.Unlock()
+			case <-waitDone:
+			}
+		}()
+		defer close(waitDone)
+	}
+
+	for ct.counts[role] >= limit && !ct.closed && !channelClosed(stop) {
 		ct.cond.Wait()
 	}
 
-	if ct.closed {
+	if ct.closed || channelClosed(stop) {
 		return false
 	}
 
 	ct.counts[role]++
 	return true
+}
+
+func channelClosed(ch <-chan struct{}) bool {
+	if ch == nil {
+		return false
+	}
+	select {
+	case <-ch:
+		return true
+	default:
+		return false
+	}
 }
 
 // TryAcquire attempts a non-blocking acquire. Returns false if at limit. Safe on nil receiver.

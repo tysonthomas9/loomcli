@@ -30,7 +30,7 @@ type localModeCompose struct {
 	Services map[string]composeService `yaml:"services"`
 }
 
-func TestLocalModeComposeUsesAuthenticatedAuthorizedFleetDB(t *testing.T) {
+func TestLocalModeComposeUsesAuthenticatedFleetDBAndLoopbackPublishedUI(t *testing.T) {
 	raw, err := os.ReadFile("docker-compose.yml")
 	if err != nil {
 		t.Fatalf("read local-mode compose file: %v", err)
@@ -49,6 +49,7 @@ func TestLocalModeComposeUsesAuthenticatedAuthorizedFleetDB(t *testing.T) {
 		"FLEET_AUTH_ENABLED":                         "true",
 		"FLEET_AUTH_DEV_MODE":                        "false",
 		"FLEET_AUTHZ_ENABLED":                        "true",
+		"FLEET_RATE_LIMIT_ENABLED":                   "false",
 		"FLEET_AUTOMATION_TRIGGER_ADMISSION_ENABLED": "true",
 		"FLEET_AUTH_BOOTSTRAP_ADMIN_ACTOR":           localModeEnv("LOCAL_MODE_FLEETDB_ADMIN_ACTOR", localModeAdminActor),
 		"FLEET_AUTH_BOOTSTRAP_ADMIN_KEY":             localModeEnv("LOCAL_MODE_FLEETDB_API_KEY", localModeAdminKey),
@@ -84,6 +85,17 @@ func TestLocalModeComposeUsesAuthenticatedAuthorizedFleetDB(t *testing.T) {
 	}
 	if got := loom.Environment["LOOM_AUTOMATION_ENABLED"]; got != "true" {
 		t.Errorf("LOOM_AUTOMATION_ENABLED = %q, want true", got)
+	}
+	if !slices.Contains(loom.Ports, "127.0.0.1:${LOCAL_MODE_API_PORT:-8282}:8080") {
+		t.Errorf("loom-local ports are not constrained to host loopback: %v", loom.Ports)
+	}
+
+	ui, ok := cfg.Services["ui-local"]
+	if !ok {
+		t.Fatal("ui-local service is missing")
+	}
+	if !slices.Contains(ui.Ports, "127.0.0.1:${LOCAL_MODE_UI_PORT:-8283}:8080") {
+		t.Errorf("ui-local ports are not constrained to host loopback: %v", ui.Ports)
 	}
 }
 

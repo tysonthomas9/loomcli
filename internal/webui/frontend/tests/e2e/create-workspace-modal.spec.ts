@@ -620,7 +620,7 @@ test.describe("CreateWorkspaceModal", () => {
       ).toBeDisabled();
     });
 
-    test("submit disabled when clone type and no URLs added", async ({
+    test("submit enabled when no repository URL is provided", async ({
       page,
     }) => {
       await setupMocks(page);
@@ -628,10 +628,11 @@ test.describe("CreateWorkspaceModal", () => {
       await openCreateWorkspaceModal(page);
 
       await page.getByTestId("create-workspace-name").fill("test-workspace");
+      await page.getByTestId("create-workspace-clone-url").fill("");
 
       await expect(
         page.getByTestId("create-workspace-submit"),
-      ).toBeDisabled();
+      ).toBeEnabled();
     });
 
     test("submit enabled with name + pending URL text", async ({ page }) => {
@@ -700,6 +701,27 @@ test.describe("CreateWorkspaceModal", () => {
   });
 
   test.describe("Form Submission - Clone Type", () => {
+    test("submits repository-free workspace with empty type", async ({
+      page,
+    }) => {
+      const { postCalls } = await setupMocks(page);
+      await navigateToApp(page);
+      await openCreateWorkspaceModal(page);
+
+      await page.getByTestId("create-workspace-name").fill("empty-workspace");
+      await page.getByTestId("create-workspace-clone-url").fill("");
+
+      const postPromise = waitForCreatePost(page);
+      await page.getByTestId("create-workspace-submit").click();
+      await postPromise;
+
+      expect(postCalls).toHaveLength(1);
+      expect(postCalls[0].body).toEqual({
+        name: "empty-workspace",
+        type: "empty",
+      });
+    });
+
     test("submits with correct body", async ({ page }) => {
       const { postCalls } = await setupMocks(page);
       await navigateToApp(page);

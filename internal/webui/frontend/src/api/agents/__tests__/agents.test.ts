@@ -9,7 +9,7 @@
  * task status categories from the loom server API.
  */
 
-import { afterEach, describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 
 import type { LoomTaskLists } from "@/types";
 
@@ -22,16 +22,16 @@ import {
   checkLoomHealth,
   createPromptAgentRecord,
   deleteAgentRecord,
+  getAgentLifecycleCommand,
+  restartAgent,
   startAgent,
+  stopAgent,
+  listAgentRuns,
   listAgentRecords,
   setAgentRecordEnabled,
   updateAgentRecord,
   type FetchStatusResult,
 } from "../agents";
-import {
-  clearLocalWorkflowLifecycleSession,
-  exchangeLocalOperatorLaunch,
-} from "../../workflows/localOperatorSession";
 
 vi.mock("@/api/common", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/api/common")>();
@@ -53,13 +53,11 @@ vi.mock("@/api/common", async (importOriginal) => {
 });
 
 const mockApiGet = vi.mocked(api.GET);
+const mockApiPost = vi.mocked(api.POST);
 const mockGet = vi.mocked(get);
 const mockPost = vi.mocked(post);
 const mockPatch = vi.mocked(patch);
 const mockDel = vi.mocked(del);
-
-beforeEach(() => clearLocalWorkflowLifecycleSession());
-afterEach(() => clearLocalWorkflowLifecycleSession());
 
 describe("durable agent record lifecycle", () => {
   beforeEach(() => {
@@ -70,8 +68,27 @@ describe("durable agent record lifecycle", () => {
     mockGet.mockResolvedValueOnce({
       success: true,
       data: [
-        { id: "prompt-1", name: "Prompt agent", kind: "prompt" },
-        { id: "scripted-1", name: "Scripted agent", kind: "scripted" },
+        {
+          id: "prompt-1",
+          name: "Prompt agent",
+          kind: "prompt",
+          enabled: false,
+          behavior: { role_name: "documentation" },
+          workspace_key: "TEAM A",
+          budget_policy: "conservative",
+          last_run_status: "failed",
+          consecutive_failures: 2,
+          next_fire_at: "2026-07-29T09:00:00Z",
+          metadata: { owner: "docs" },
+        },
+        {
+          id: "scripted-1",
+          name: "Scripted agent",
+          kind: "scripted",
+          enabled: true,
+          behavior: { driver_id: "review-loop-agent" },
+          workspace_key: "TEAM A",
+        },
         { id: "lead", name: "lead", kind: "supervised" },
         { id: "legacy", name: "Legacy binding", kind: "binding" },
       ],
@@ -79,10 +96,55 @@ describe("durable agent record lifecycle", () => {
     });
 
     await expect(listAgentRecords("TEAM A")).resolves.toEqual([
-      { id: "prompt-1", name: "Prompt agent", kind: "prompt" },
-      { id: "scripted-1", name: "Scripted agent", kind: "scripted" },
+      {
+        id: "prompt-1",
+        name: "Prompt agent",
+        kind: "prompt",
+        enabled: false,
+        behavior: { role_name: "documentation" },
+        workspace_key: "TEAM A",
+        budget_policy: "conservative",
+        last_run_status: "failed",
+        consecutive_failures: 2,
+        next_fire_at: "2026-07-29T09:00:00Z",
+        metadata: { owner: "docs" },
+      },
+      {
+        id: "scripted-1",
+        name: "Scripted agent",
+        kind: "scripted",
+        enabled: true,
+        behavior: { driver_id: "review-loop-agent" },
+        workspace_key: "TEAM A",
+      },
     ]);
     expect(mockGet).toHaveBeenCalledWith("/api/workspaces/TEAM%20A/agents");
+  });
+
+  it("lists encoded agent history with an optional limit", async () => {
+    const response = {
+      agent_id: "agent/one",
+      runs: [],
+      sessions: [
+        {
+          workspace_key: "TEAM A",
+          session_id: "session-1",
+          agent_id: "agent/one",
+          kind: "task" as const,
+          status: "completed" as const,
+          created_at: "2026-07-25T00:00:00Z",
+          updated_at: "2026-07-25T00:01:00Z",
+        },
+      ],
+    };
+    mockGet.mockResolvedValueOnce(response);
+
+    await expect(
+      listAgentRuns("TEAM A", "agent/one", { limit: 7 }),
+    ).resolves.toEqual(response);
+    expect(mockGet).toHaveBeenCalledWith(
+      "/api/workspaces/TEAM%20A/agents/agent%2Fone/runs?limit=7",
+    );
   });
 
   it("patches the record id rather than an attached binding id", async () => {
@@ -102,7 +164,6 @@ describe("durable agent record lifecycle", () => {
     expect(mockPatch).toHaveBeenCalledWith(
       "/api/workspaces/TEAM%20A/agents/agent%2Fone",
       { name: "Renamed agent" },
-      undefined,
     );
   });
 
@@ -118,28 +179,10 @@ describe("durable agent record lifecycle", () => {
 
     expect(mockDel).toHaveBeenCalledWith(
       "/api/workspaces/TEAM%20A/agents/agent%2Fone",
-      undefined,
     );
   });
 
-  it("attaches local operator authority to every record mutation", async () => {
-    const launchCode = "ab".repeat(32);
-    const accessToken = "cd".repeat(32);
-    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
-      new Response(
-        JSON.stringify({
-          access_token: accessToken,
-          token_type: "Bearer",
-          workspace: "TEAM A",
-          expires_at: new Date(Date.now() + 60_000).toISOString(),
-        }),
-        { status: 200, headers: { "Content-Type": "application/json" } },
-      ),
-    );
-    await exchangeLocalOperatorLaunch({
-      launchCode,
-      workspace: "TEAM A",
-    });
+  it("sends record mutations without a local operator credential", async () => {
     mockPost.mockResolvedValue({});
     mockPatch.mockResolvedValue({});
     mockDel.mockResolvedValue({});
@@ -154,27 +197,23 @@ describe("durable agent record lifecycle", () => {
     };
     await createPromptAgentRecord("TEAM A", create);
 
-    const localAuth = { headers: { Authorization: `Bearer ${accessToken}` } };
     expect(mockPost).toHaveBeenNthCalledWith(
       1,
       "/api/workspaces/TEAM%20A/agents/agent%2Fone/enable",
       undefined,
-      localAuth,
     );
     expect(mockPatch).toHaveBeenCalledWith(
       "/api/workspaces/TEAM%20A/agents/agent%2Fone",
       { name: "Renamed" },
-      localAuth,
     );
     expect(mockDel).toHaveBeenCalledWith(
       "/api/workspaces/TEAM%20A/agents/agent%2Fone",
-      localAuth,
     );
     expect(mockPost).toHaveBeenNthCalledWith(
       2,
       "/api/workspaces/TEAM%20A/agents",
       create,
-      { ...localAuth, timeout: 120_000 },
+      { timeout: 120_000 },
     );
   });
 });
@@ -374,32 +413,221 @@ describe("startAgent", () => {
     vi.clearAllMocks();
   });
 
-  it("posts to the workspace-scoped start endpoint", async () => {
-    mockPost.mockResolvedValueOnce({ message: "agent started" });
+  it("returns pending when the workspace-scoped start endpoint accepts the command", async () => {
+    mockApiPost.mockResolvedValueOnce({
+      data: {
+        message: "agent start requested",
+        pending: true,
+        command_id: "agent-lifecycle-start-1",
+        status: "queued",
+      },
+      error: undefined,
+      response: new Response(null, { status: 202 }),
+    } as never);
 
-    await startAgent("TEST 2", "nova");
+    await expect(startAgent("TEST 2", "nova")).resolves.toEqual({
+      message: "agent start requested",
+      pending: true,
+      command_id: "agent-lifecycle-start-1",
+      status: "queued",
+    });
 
-    expect(mockPost).toHaveBeenCalledWith(
-      "/api/workspaces/TEST%202/agents/nova/start",
-      undefined,
+    expect(mockApiPost).toHaveBeenCalledWith(
+      "/api/workspaces/{ws}/agents/{name}/start",
+      { params: { path: { ws: "TEST 2", name: "nova" } } },
     );
   });
 
-  it("can include a requested task id", async () => {
-    mockPost.mockResolvedValueOnce({ message: "agent started" });
+  it("returns settled and can include a requested task id", async () => {
+    mockApiPost.mockResolvedValueOnce({
+      data: {
+        message: "agent started",
+        pending: false,
+        status: "succeeded",
+      },
+      error: undefined,
+      response: new Response(null, { status: 200 }),
+    } as never);
 
-    await startAgent("TEST 2", "nova", { taskId: "TEST-1" });
+    await expect(
+      startAgent("TEST 2", "nova", { taskId: "TEST-1" }),
+    ).resolves.toEqual({
+      message: "agent started",
+      pending: false,
+      status: "succeeded",
+    });
 
-    expect(mockPost).toHaveBeenCalledWith(
-      "/api/workspaces/TEST%202/agents/nova/start",
-      { payload: { task_id: "TEST-1" } },
+    expect(mockApiPost).toHaveBeenCalledWith(
+      "/api/workspaces/{ws}/agents/{name}/start",
+      {
+        params: { path: { ws: "TEST 2", name: "nova" } },
+        body: { payload: { task_id: "TEST-1" } },
+      },
     );
   });
 
   it("throws on start errors", async () => {
-    mockPost.mockRejectedValueOnce(new ApiError(404, "Not Found"));
+    mockApiPost.mockResolvedValueOnce({
+      data: undefined,
+      error: { error: "not found" },
+      response: new Response(null, { status: 404, statusText: "Not Found" }),
+    });
 
     await expect(startAgent("TEST", "missing")).rejects.toThrow(ApiError);
+  });
+
+  it("rejects a pending response without an authoritative command id", async () => {
+    mockApiPost.mockResolvedValueOnce({
+      data: { message: "agent start requested", pending: true },
+      error: undefined,
+      response: new Response(null, { status: 202 }),
+    } as never);
+
+    await expect(startAgent("TEST", "nova")).rejects.toThrow(
+      "pending command_id is missing",
+    );
+  });
+});
+
+describe("stopAgent", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("reports asynchronous acceptance instead of waiting for lifecycle completion", async () => {
+    mockApiPost.mockResolvedValueOnce({
+      data: {
+        message: "agent stop requested",
+        pending: true,
+        command_id: "agent-lifecycle-stop-1",
+      },
+      error: undefined,
+      response: new Response(null, { status: 202 }),
+    } as never);
+
+    await expect(stopAgent("TEST 2", "nova")).resolves.toEqual({
+      message: "agent stop requested",
+      pending: true,
+      command_id: "agent-lifecycle-stop-1",
+    });
+
+    expect(mockApiPost).toHaveBeenCalledWith(
+      "/api/workspaces/{ws}/agents/{name}/stop",
+      { params: { path: { ws: "TEST 2", name: "nova" } } },
+    );
+  });
+
+  it("reports synchronous force completion and forwards the force flag", async () => {
+    mockApiPost.mockResolvedValueOnce({
+      data: { message: "agent force-stopped", pending: false },
+      error: undefined,
+      response: new Response(null, { status: 200 }),
+    } as never);
+
+    await expect(stopAgent("TEST 2", "nova", { force: true })).resolves.toEqual(
+      {
+        message: "agent force-stopped",
+        pending: false,
+      },
+    );
+
+    expect(mockApiPost).toHaveBeenCalledWith(
+      "/api/workspaces/{ws}/agents/{name}/stop",
+      {
+        params: { path: { ws: "TEST 2", name: "nova" } },
+        body: { force: true },
+      },
+    );
+  });
+});
+
+describe("restartAgent", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("reports asynchronous acceptance instead of waiting for lifecycle completion", async () => {
+    mockApiPost.mockResolvedValueOnce({
+      data: {
+        message: "agent restart requested",
+        pending: true,
+        command_id: "agent-lifecycle-restart-1",
+        status: "acked",
+      },
+      error: undefined,
+      response: new Response(null, { status: 202 }),
+    } as never);
+
+    await expect(restartAgent("TEST 2", "nova")).resolves.toEqual({
+      message: "agent restart requested",
+      pending: true,
+      command_id: "agent-lifecycle-restart-1",
+      status: "acked",
+    });
+
+    expect(mockApiPost).toHaveBeenCalledWith(
+      "/api/workspaces/{ws}/agents/{name}/restart",
+      { params: { path: { ws: "TEST 2", name: "nova" } } },
+    );
+  });
+});
+
+describe("getAgentLifecycleCommand", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("fetches and validates the authoritative command by encoded identity", async () => {
+    const controller = new AbortController();
+    mockGet.mockResolvedValueOnce({
+      command_id: "command/1",
+      action: "restart",
+      status: "running",
+      created_at: "2026-07-24T12:00:00Z",
+    });
+
+    await expect(
+      getAgentLifecycleCommand("TEAM A", "review/one", "command/1", {
+        signal: controller.signal,
+      }),
+    ).resolves.toEqual({
+      command_id: "command/1",
+      action: "restart",
+      status: "running",
+      created_at: "2026-07-24T12:00:00Z",
+    });
+    expect(mockGet).toHaveBeenCalledWith(
+      "/api/workspaces/TEAM%20A/agents/review%2Fone/lifecycle-commands/command%2F1",
+      { signal: controller.signal },
+    );
+  });
+
+  it("rejects unknown command statuses instead of guessing convergence", async () => {
+    mockGet.mockResolvedValueOnce({
+      command_id: "command-1",
+      action: "restart",
+      status: "lost",
+    });
+
+    await expect(
+      getAgentLifecycleCommand("TEAM", "review", "command-1"),
+    ).rejects.toThrow("Invalid agent lifecycle command response");
+  });
+
+  it("accepts the yield action exposed by the lifecycle command contract", async () => {
+    mockGet.mockResolvedValueOnce({
+      command_id: "command-yield-1",
+      action: "yield",
+      status: "succeeded",
+    });
+
+    await expect(
+      getAgentLifecycleCommand("TEAM", "review", "command-yield-1"),
+    ).resolves.toEqual({
+      command_id: "command-yield-1",
+      action: "yield",
+      status: "succeeded",
+    });
   });
 });
 

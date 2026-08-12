@@ -521,6 +521,7 @@ function App() {
   const [showCreateIssue, setShowCreateIssue] = useState(false);
   const [showCreateWorkspace, setShowCreateWorkspace] = useState(false);
   const [showCreateAgent, setShowCreateAgent] = useState(false);
+  const [prefillOnboardingAgent, setPrefillOnboardingAgent] = useState(false);
   const [onboardingDismissed, setOnboardingDismissed] = useState(false);
   const [onboardingAction, setOnboardingAction] =
     useState<OnboardingAction | null>(null);
@@ -645,6 +646,8 @@ function App() {
   // the route does not carry the issue id — fall back to the panel's issue id.
   const activePanelRef = useRef(activePanel);
   activePanelRef.current = activePanel;
+  const pendingPanelRef = useRef(pendingPanel);
+  pendingPanelRef.current = pendingPanel;
 
   // Copy link handler: copies a clean shareable URL to clipboard.
   // For an open issue (route or overlay panel), the link always points at the
@@ -700,6 +703,14 @@ function App() {
     // Clear issue details after close animation completes
     setTimeout(() => {
       if (!mountedRef.current) return;
+      // A card may be reopened before this close animation finishes. Do not
+      // let the stale close timer cancel or erase that newer detail fetch.
+      if (
+        activePanelRef.current?.type === "issue" ||
+        pendingPanelRef.current?.type === "issue"
+      ) {
+        return;
+      }
       clearIssue();
     }, 300);
   }, [closePanel, clearIssue]);
@@ -709,6 +720,7 @@ function App() {
     async (issue: Issue) => {
       try {
         const reviewType = getReviewType(issue);
+        let approvedStatus: Status | undefined;
 
         if (reviewType === "code") {
           // Code review: Close the issue (PR was reviewed and approved)
@@ -718,16 +730,26 @@ function App() {
             "PR approved after code review",
           );
           await refetch();
+          approvedStatus = "closed";
         } else if (reviewType === "plan") {
           // Plan review: Move to open (ready for implementation)
           await updateIssueStatus(issue.id, "open");
+          approvedStatus = "open";
         } else if (reviewType === "help") {
           // Needs help: Move to in_progress (unblock)
           await updateIssueStatus(issue.id, "in_progress");
+          approvedStatus = "in_progress";
         }
 
-        // Close the detail panel and clean up after successful approve
-        handlePanelClose();
+        if (isPanelOpen) {
+          // Overlay approval keeps its existing close-and-clear behavior.
+          handlePanelClose();
+        } else if (approvedStatus) {
+          // A direct issue-detail route stays mounted after approval. Keep its
+          // independently-fetched detail state valid even when the issue is
+          // outside the active list projection.
+          updateIssueDetails({ ...issue, status: approvedStatus });
+        }
       } catch (err) {
         // updateIssueStatus errors are handled by useOptimisticUpdate rollback
         // Only show toast for non-updateIssueStatus errors (e.g., closeIssue)
@@ -740,7 +762,15 @@ function App() {
         }
       }
     },
-    [workspaceId, updateIssueStatus, refetch, handlePanelClose, showToast],
+    [
+      workspaceId,
+      updateIssueStatus,
+      refetch,
+      isPanelOpen,
+      handlePanelClose,
+      updateIssueDetails,
+      showToast,
+    ],
   );
 
   // Handle reject button submission on review cards
@@ -759,16 +789,38 @@ function App() {
           add_labels: ["needs-revision"],
         });
 
-        // Refetch to reflect label/status changes and close panel
+        // Refetch to reflect label/status changes.
         await refetch();
-        handlePanelClose();
+
+        if (isPanelOpen) {
+          // Overlay rejection keeps its existing close-and-clear behavior.
+          handlePanelClose();
+        } else {
+          // A direct issue-detail route has no overlay to close. Keep its
+          // independently-fetched detail state mounted with the committed
+          // status and label instead of clearing it after the panel timer.
+          updateIssueDetails({
+            ...issue,
+            status: "open",
+            labels: Array.from(
+              new Set([...(issue.labels ?? []), "needs-revision"]),
+            ),
+          });
+        }
       } catch (err) {
         if (!mountedRef.current) return;
         const message = err instanceof Error ? err.message : "Failed to reject";
         showToast(message, { type: "error" });
       }
     },
-    [workspaceId, refetch, handlePanelClose, showToast],
+    [
+      workspaceId,
+      refetch,
+      isPanelOpen,
+      handlePanelClose,
+      updateIssueDetails,
+      showToast,
+    ],
   );
 
   // Close all panels synchronously (no animation) for workspace switch
@@ -1011,6 +1063,7 @@ function App() {
         actionDisabled: onboardingAction !== null,
         onAction: () => {
           setOnboardingActionError(null);
+          setPrefillOnboardingAgent(true);
           setShowCreateAgent(true);
         },
       },
@@ -1107,6 +1160,18 @@ function App() {
     window.setTimeout(refetchWorkspace, 750);
     window.setTimeout(refetchWorkspace, 2000);
   }, [refetchWorkspace]);
+
+  const refetchAgentStatusAfterAgentCreate = useCallback(() => {
+    // The sidebar reads workspace assignments, while /agents/:name resolves
+    // from the live monitor store. Refresh both timelines so clicking a newly
+    // created row cannot land on an empty detail page until the 30s poll.
+    const refetchAgentStatus = () => {
+      void agentStore.getState().fetchData();
+    };
+    refetchAgentStatus();
+    window.setTimeout(refetchAgentStatus, 750);
+    window.setTimeout(refetchAgentStatus, 2000);
+  }, [agentStore]);
 
   // Focus search input (for Cmd/Ctrl+K shortcut in single-repo mode)
   const handleSearchFocus = useCallback(() => {
@@ -1355,7 +1420,10 @@ function App() {
       onAgentClick={handleAgentClick}
       selectedAgentName={sidebarSelectedAgentName}
       agentTasks={agentTasks}
-      onAddClick={() => setShowCreateAgent(true)}
+      onAddClick={() => {
+        setPrefillOnboardingAgent(false);
+        setShowCreateAgent(true);
+      }}
       onAddWorkspaceClick={() => setShowCreateWorkspace(true)}
       connectionState={connectionState}
       connectionLost={isConnectionLost}
@@ -1532,24 +1600,33 @@ function App() {
         workspaceId={workspaceId}
         repos={workspaceRepos}
         defaultBackend={agentDefaultBackend}
-        {...(shouldPrefillOnboardingAgent
+        {...(prefillOnboardingAgent && shouldPrefillOnboardingAgent
           ? {
               defaultName: ONBOARDING_AGENT_NAME,
               supervisedRole: ONBOARDING_AGENT_ROLE,
             }
           : {})}
-        onClose={() => setShowCreateAgent(false)}
+        onClose={() => {
+          setShowCreateAgent(false);
+          setPrefillOnboardingAgent(false);
+        }}
         onSuccess={(agent) => {
           setShowCreateAgent(false);
+          setPrefillOnboardingAgent(false);
           upsertWorkspaceAgent?.(agent);
+          refetchAgentStatusAfterAgentCreate();
           showToast(`Agent "${agent.name}" created`, { type: "success" });
-          // A lead is an interactive terminal agent — drop the user straight
-          // into its terminal rather than leaving them on the board. plan/task
-          // workers run under daemon supervision and need no terminal.
-          if (isLeadRole(agent.role_name)) {
+          // Interactive agents are browser-launched, so open their Terminal
+          // immediately. Keep the legacy role-name fallback for older modal
+          // and server responses that predate the explicit kind.
+          if (agent.kind === "interactive" || isLeadRole(agent.role_name)) {
             handleAgentClick(agent.name);
           }
-          if (shouldPrefillOnboardingIssue) {
+          if (
+            prefillOnboardingAgent &&
+            shouldPrefillOnboardingAgent &&
+            shouldPrefillOnboardingIssue
+          ) {
             setOnboardingAction("confirming-agent");
             setOnboardingActionError(null);
             void (async () => {
@@ -1571,10 +1648,12 @@ function App() {
         }}
         onOpenSettings={() => {
           setShowCreateAgent(false);
+          setPrefillOnboardingAgent(false);
           navigateToView("settings");
         }}
         onWorkflowActivated={(result) => {
           setShowCreateAgent(false);
+          setPrefillOnboardingAgent(false);
           showToast(`Activated ${result.workflow} on a schedule`, {
             type: "success",
           });

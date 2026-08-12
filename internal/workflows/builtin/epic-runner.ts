@@ -48,8 +48,8 @@ function toJsonResult(value) {
 // recovery is owned by the server-side sweeper.
 //
 // The loop is naive + re-entrant: deterministic task run ids and the watch
-// handshake snapshot re-derive in-flight state after a restart, and
-// completionId keeps re-completion idempotent.
+// handshake snapshot re-derive in-flight state after a restart. TaskRun
+// completion and Work Item disposition are owned by the server worker.
 export async function run(ctx) {
   const input = ctx.payload || {};
   const loom = createLoomDriverClient({ input });
@@ -160,12 +160,10 @@ async function runEpicWatchLoop(loom, input, epicId, started) {
     const taskId = stringValue(data.taskID);
     switch (stringValue(data.type)) {
       case "taskRunCompleted": {
-        const completion = await completeChildTask(loom, data);
-        if (completion.ok) {
-          completed.push(taskId);
-        } else {
-          blockedFailures.push(completion.blocked);
-        }
+        // Terminal journal entries are observations emitted only after the
+        // server-owned fenced completion has committed. The workflow records
+        // progress; it never receives or replays a worker lease credential.
+        completed.push(taskId);
         break;
       }
       case "taskRunFailed":
@@ -301,9 +299,13 @@ async function enqueueChildTask(loom, task, defaults) {
     if (isConflictError(err)) {
       return { ok: true, taskRunId };
     }
-    // Pre-execution request failure: nothing is running, so release the
-    // claim instead of stranding the task until the lock TTL expires.
-    await safeRelease(loom, task.id);
+    // Release only after a certified pre-commit rejection. A timeout,
+    // disconnect, or invalid internal response may follow a committed durable
+    // TaskRun receipt; releasing then would create an open card with a queued
+    // child. The SDK already replayed the exact request once before this path.
+    if (!isAmbiguousTaskRunRequestError(err)) {
+      await safeRelease(loom, task.id);
+    }
     return {
       ok: false,
       blocked: {
@@ -316,7 +318,7 @@ async function enqueueChildTask(loom, task, defaults) {
   }
 }
 
-function childTaskInputDefaults(input) {
+export function childTaskInputDefaults(input) {
   const out = {};
   const nested = input && input.childInput && typeof input.childInput === "object" && !Array.isArray(input.childInput)
     ? input.childInput
@@ -333,6 +335,7 @@ function childTaskInputDefaults(input) {
     "repositoryUrl",
     "baseBranch",
     "targetBranch",
+    "deliveryMode",
     "openPullRequest",
     "stackedPullRequests",
     "refreshCodexAuth",
@@ -404,47 +407,22 @@ function normalizeLineage(value) {
   };
 }
 
-// completeChildTask finalizes a completed run observed on the watch stream.
-// The serve task worker completes-and-closes successful runs itself, so a
-// conflict here means the work is already done; completionId keeps genuine
-// deferred completions idempotent across replays.
-async function completeChildTask(loom, data) {
-  const taskId = stringValue(data.taskID);
-  const taskRunId = stringValue(data.taskRunID);
-  try {
-    await loom.tasks.complete({
-      taskId,
-      taskRunId,
-      completionId: "complete-" + taskRunId,
-      leaseToken: stringValue(data.leaseToken),
-      logsRef: stringValue(data.logsRef),
-      artifactsRef: stringValue(data.artifactsRef),
-      reason: "completed by epic-runner workflow",
-    });
-    return { ok: true };
-  } catch (err) {
-    if (isConflictError(err)) {
-      return { ok: true };
-    }
-    return {
-      ok: false,
-      blocked: {
-        taskId,
-        taskRunId,
-        errorClass: "child_task_completion_failed",
-        summary: "Task completion failed: " + taskId + " - " + errorMessage(err),
-        logsRef: stringValue(data.logsRef),
-        artifactsRef: stringValue(data.artifactsRef),
-      },
-    };
-  }
-}
-
 function isConflictError(err) {
   switch (stringValue(err && err.code)) {
     case "conflict":
     case "already_exists":
     case "invalid_transition":
+      return true;
+    default:
+      return false;
+  }
+}
+
+function isAmbiguousTaskRunRequestError(err) {
+  switch (stringValue(err && err.code)) {
+    case "timeout":
+    case "unavailable":
+    case "internal":
       return true;
     default:
       return false;

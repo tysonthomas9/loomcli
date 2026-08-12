@@ -1,4 +1,5 @@
 export {
+  AgentRecordRunsPane,
   WorkflowAgentActionBar,
   WorkflowAgentHeader,
   WorkflowAgentInfoPane,
@@ -11,3 +12,9 @@ export type {
   WorkflowAgentDetailProps,
   WorkflowAgentDetailState,
 } from "./WorkflowAgentDetail";
+export { AgentSessionRunsPane } from "./AgentSessionRunsPane";
+export {
+  AgentRecordActionBar,
+  AgentRecordHeader,
+  AgentRecordInfoPane,
+} from "./AgentRecordDetail";

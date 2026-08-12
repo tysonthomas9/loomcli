@@ -5,15 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/localworkspace"
+	"github.com/tysonthomas9/loomcli/internal/driver/taskworktree"
 	"github.com/tysonthomas9/loomcli/internal/stacklineage"
 	"github.com/tysonthomas9/loomcli/internal/stackstore"
 	"github.com/tysonthomas9/loomcli/internal/store"
@@ -293,6 +290,10 @@ func recordStackOutput(ctx context.Context, store stackstore.Store, workspaceKey
 
 type LocalTaskWorktreeResolver struct {
 	Store store.Store
+	// LocalSettingsDir is passed to the taskworktree boundary, which resolves
+	// private HTTPS credentials just in time for clone and fetch. Empty
+	// preserves anonymous/SSH/local git behavior.
+	LocalSettingsDir string
 	// Lineage is optional. When nil (the two pre-stacking construction sites and
 	// all tests), the worktree base stays the repo default branch. When set, the
 	// per-task worktree is cut from the task's lineage base so each stacked task
@@ -313,12 +314,9 @@ func (r LocalTaskWorktreeResolver) ResolveTaskWorktree(ctx context.Context, req 
 	if taskRunID == "" {
 		return TaskWorktree{}, fmt.Errorf("task run id required: %w", domain.ErrInvalid)
 	}
-	local, err := loadWorkspaceLocalState(workspaceKey)
+	local, err := taskworktree.OpenWithLocalSettings(workspaceKey, r.LocalSettingsDir)
 	if err != nil {
 		return TaskWorktree{}, err
-	}
-	if strings.TrimSpace(local.Path) == "" {
-		return TaskWorktree{}, fmt.Errorf("workspace %q has no local path in loom state", workspaceKey)
 	}
 
 	repos, err := r.Store.Repos().List(ctx, workspaceKey)
@@ -334,17 +332,11 @@ func (r LocalTaskWorktreeResolver) ResolveTaskWorktree(ctx context.Context, req 
 	if err != nil {
 		return TaskWorktree{}, err
 	}
-	repoPath, err := r.ensureRepoCheckout(ctx, workspaceKey, local, selected)
+	target, err := local.Prepare(ctx, selected, taskRunID, func() string {
+		return r.baseBranchForTask(ctx, workspaceKey, selected, req)
+	})
 	if err != nil {
 		return TaskWorktree{}, err
-	}
-	target, err := localworkspace.TaskRunWorktreePath(local.Path, selected.Name, taskRunID)
-	if err != nil {
-		return TaskWorktree{}, err
-	}
-	baseBranch := r.baseBranchForTask(ctx, workspaceKey, selected, req)
-	if err := localworkspace.EnsureDetachedGitWorktreeFromBranch(repoPath, target, repoRemote(selected), baseBranch); err != nil {
-		return TaskWorktree{}, fmt.Errorf("ensure task run worktree for repo %q: %w", selected.Name, err)
 	}
 	return TaskWorktree{
 		Path:         target,
@@ -353,40 +345,69 @@ func (r LocalTaskWorktreeResolver) ResolveTaskWorktree(ctx context.Context, req 
 	}, nil
 }
 
-func loadWorkspaceLocalState(workspaceKey string) (bootstrap.WorkspaceLocalState, error) {
-	sc, err := bootstrap.LoadStateCache()
-	if err != nil {
-		return bootstrap.WorkspaceLocalState{}, fmt.Errorf("load local workspace state: %w", err)
-	}
-	if sc == nil || sc.Workspaces == nil {
-		return bootstrap.WorkspaceLocalState{}, fmt.Errorf("workspace %q has no local state", workspaceKey)
-	}
-	local, ok := sc.Workspaces[workspaceKey]
-	if !ok {
-		return bootstrap.WorkspaceLocalState{}, fmt.Errorf("workspace %q has no local state", workspaceKey)
-	}
-	return local, nil
-}
-
 func (r LocalTaskWorktreeResolver) selectRepo(ctx context.Context, workspaceKey string, repos []*domain.Repo, req TaskExecRequest) (*domain.Repo, error) {
-	selectors := taskWorktreeRepoSelectors(req)
+	taskSelectors := taskWorktreeRepoSelectors(req)
+	var profileSelectors []string
 	if req.WorkerProfileID != "" {
-		if profile, err := r.Store.WorkerProfiles().Get(ctx, workspaceKey, req.WorkerProfileID); err == nil && profile != nil {
-			selectors = append(selectors, profile.Repos...)
+		if r.Store == nil {
+			return nil, fmt.Errorf("worker profile store required for repo scope: %w", domain.ErrInvalid)
+		}
+		profile, err := r.Store.WorkerProfiles().Get(ctx, workspaceKey, req.WorkerProfileID)
+		if err != nil {
+			return nil, fmt.Errorf("get worker profile %q for repo scope: %w", req.WorkerProfileID, err)
+		}
+		if profile != nil {
+			profileSelectors = normalizeStringList(profile.Repos)
 		}
 	}
-	for _, selector := range selectors {
+
+	// Task/run placement is the selector; WorkerProfile.Repos is an allowed
+	// scope, not an ordered fallback. Combining them used to make a repo-less
+	// task with profile scope [alpha,beta] silently choose alpha.
+	for _, selector := range taskSelectors {
 		if repo := findRepoBySelector(repos, selector); repo != nil {
+			if len(profileSelectors) > 0 {
+				inScope := false
+				for _, profileSelector := range profileSelectors {
+					if repoMatchesExactSelector(repo, profileSelector) {
+						inScope = true
+						break
+					}
+				}
+				if !inScope {
+					return nil, fmt.Errorf("task repo selector %q is outside worker profile %q repo scope", selector, req.WorkerProfileID)
+				}
+			}
 			return repo, nil
+		}
+	}
+	if len(taskSelectors) > 0 {
+		return nil, fmt.Errorf("no workspace repo matches task repo selector %q", strings.Join(taskSelectors, ", "))
+	}
+
+	if len(profileSelectors) > 0 {
+		matches := make([]*domain.Repo, 0, len(repos))
+		for _, repo := range repos {
+			for _, selector := range profileSelectors {
+				if repoMatchesExactSelector(repo, selector) {
+					matches = append(matches, repo)
+					break
+				}
+			}
+		}
+		switch len(matches) {
+		case 0:
+			return nil, fmt.Errorf("no workspace repo matches worker profile %q repo scope %q", req.WorkerProfileID, strings.Join(profileSelectors, ", "))
+		case 1:
+			return matches[0], nil
+		default:
+			return nil, fmt.Errorf("task repo selector required: worker profile %q scope matches %d workspace repos", req.WorkerProfileID, len(matches))
 		}
 	}
 	if len(repos) == 1 {
 		return repos[0], nil
 	}
-	if len(selectors) > 0 {
-		return nil, fmt.Errorf("no workspace repo matches task repo selector %q", strings.Join(selectors, ", "))
-	}
-	return repos[0], nil
+	return nil, fmt.Errorf("task repo selector required: workspace %q has %d repos", workspaceKey, len(repos))
 }
 
 func taskWorktreeRepoSelectors(req TaskExecRequest) []string {
@@ -444,6 +465,23 @@ func findRepoBySelector(repos []*domain.Repo, selector string) *domain.Repo {
 	}
 	want := normalizedRepoToken(selector)
 	wantBase := normalizedRepoToken(repoBasename(selector))
+	var exact []*domain.Repo
+	for _, repo := range repos {
+		if repoMatchesExactSelector(repo, want) {
+			exact = append(exact, repo)
+		}
+	}
+	if len(exact) == 1 {
+		return exact[0]
+	}
+	if len(exact) > 1 {
+		return nil
+	}
+
+	// Backward-compatible basename fallback is allowed only when it identifies
+	// exactly one workspace repo. Qualified selectors such as org-a/app must
+	// never silently select org-b/app just because both basenames are "app".
+	var fallback []*domain.Repo
 	for _, repo := range repos {
 		if repo == nil {
 			continue
@@ -452,16 +490,67 @@ func findRepoBySelector(repos []*domain.Repo, selector string) *domain.Repo {
 			repo.Name,
 			firstNonEmpty(repo.SourceRepoID, repo.Name),
 			repo.RemoteURL,
+			repo.Remote,
 			repoBasename(repo.RemoteURL),
+			repoBasename(repo.Remote),
 		}
 		for _, candidate := range candidates {
 			got := normalizedRepoToken(candidate)
-			if got != "" && (got == want || got == wantBase) {
-				return repo
+			if got != "" && got == wantBase {
+				fallback = append(fallback, repo)
+				break
 			}
 		}
 	}
+	if len(fallback) == 1 {
+		return fallback[0]
+	}
 	return nil
+}
+
+func repoMatchesExactSelector(repo *domain.Repo, selector string) bool {
+	if repo == nil {
+		return false
+	}
+	want := normalizedRepoToken(selector)
+	if want == "" {
+		return false
+	}
+	for _, candidate := range []string{
+		repo.Name,
+		firstNonEmpty(repo.SourceRepoID, repo.Name),
+		repo.RemoteURL,
+		repo.Remote,
+		repoRemotePath(repo.RemoteURL),
+		repoRemotePath(repo.Remote),
+	} {
+		if got := normalizedRepoToken(candidate); got != "" && got == want {
+			return true
+		}
+	}
+	return false
+}
+
+func repoRemotePath(value string) string {
+	value = strings.TrimSpace(strings.TrimSuffix(value, ".git"))
+	value = strings.TrimRight(value, "/")
+	if value == "" {
+		return ""
+	}
+	if scheme := strings.Index(value, "://"); scheme >= 0 {
+		rest := value[scheme+3:]
+		if slash := strings.Index(rest, "/"); slash >= 0 {
+			return rest[slash+1:]
+		}
+		return ""
+	}
+	if colon := strings.Index(value, ":"); colon >= 0 && !strings.Contains(value[:colon], "/") {
+		return value[colon+1:]
+	}
+	if slash := strings.Index(value, "/"); slash >= 0 && strings.Contains(value[:slash], ".") {
+		return value[slash+1:]
+	}
+	return value
 }
 
 func normalizedRepoToken(value string) string {
@@ -482,48 +571,6 @@ func repoBasename(value string) string {
 		return value[idx+1:]
 	}
 	return value
-}
-
-func (r LocalTaskWorktreeResolver) ensureRepoCheckout(ctx context.Context, workspaceKey string, local bootstrap.WorkspaceLocalState, repo *domain.Repo) (string, error) {
-	if repo == nil {
-		return "", fmt.Errorf("repo required: %w", domain.ErrInvalid)
-	}
-	repoPath := strings.TrimSpace(localworkspace.RepoPath(local, repo.Name))
-	if repoPath == "" {
-		var err error
-		repoPath, err = localworkspace.RepoCheckoutPath(local.Path, repo.Name)
-		if err != nil {
-			return "", err
-		}
-	}
-	if isGitCheckout(repoPath) {
-		return repoPath, nil
-	}
-	if _, err := os.Stat(repoPath); err == nil {
-		return "", fmt.Errorf("repo %q path %s is not a git checkout", repo.Name, repoPath)
-	} else if !os.IsNotExist(err) {
-		return "", fmt.Errorf("stat repo %q path %s: %w", repo.Name, repoPath, err)
-	}
-	if strings.TrimSpace(repo.RemoteURL) == "" {
-		return "", fmt.Errorf("repo %q has no local checkout at %s and no remote URL to clone", repo.Name, repoPath)
-	}
-	if err := localworkspace.CloneRepoTo(ctx, repo.RemoteURL, repoPath); err != nil {
-		return "", err
-	}
-	if err := localworkspace.RememberRepoPath(workspaceKey, repo.Name, repoPath); err != nil {
-		return "", fmt.Errorf("remember repo path: %w", err)
-	}
-	return repoPath, nil
-}
-
-func isGitCheckout(path string) bool {
-	if strings.TrimSpace(path) == "" {
-		return false
-	}
-	if _, err := os.Stat(filepath.Join(path, ".git")); err == nil {
-		return true
-	}
-	return false
 }
 
 // baseBranchForTask returns the git ref the task's worktree should be cut from.
@@ -558,13 +605,6 @@ func (r LocalTaskWorktreeResolver) baseBranchForTask(ctx context.Context, worksp
 		return strings.TrimSpace(ref)
 	}
 	return fallback
-}
-
-func repoRemote(repo *domain.Repo) string {
-	if repo == nil || strings.TrimSpace(repo.Remote) == "" {
-		return "origin"
-	}
-	return strings.TrimSpace(repo.Remote)
 }
 
 func repoDefaultBranch(repo *domain.Repo) string {

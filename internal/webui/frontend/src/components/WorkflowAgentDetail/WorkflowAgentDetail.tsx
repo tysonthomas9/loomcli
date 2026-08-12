@@ -15,6 +15,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { SessionRunDetail } from "@/components/SessionRunDetail/SessionRunDetail";
 import { WorkflowSourceModal } from "@/components/WorkflowSourceModal";
+import { useAgentHistory } from "@/hooks/agents";
 import { useTaskSessions } from "@/hooks/terminal";
 import {
   useWorkflowAgentDetail,
@@ -27,6 +28,7 @@ import {
   isTerminalWorkflowRunStatus,
   promptAgentRoleName,
   updateWorkspaceRole,
+  type AgentRecordSummary,
   type TriggerBinding,
   type UpdateTriggerBindingRequest,
   type WorkflowRun,
@@ -40,6 +42,7 @@ import {
   bindingDisplayName,
   bindingHealth,
   bindingKindLabel,
+  bindingRunNowUnavailableReason,
   describeCronSchedule,
   formatFireTime,
 } from "@/utils/bindingDisplay";
@@ -47,9 +50,11 @@ import {
   linkedRunSessionKey,
   linkedSessionsForRun,
   mergeWorkflowRun,
+  workedTaskIdsForRun,
   type LinkedRunSession,
 } from "@/utils/workflowRunDetail";
 
+import { TaskLink } from "./TaskLink";
 import styles from "./WorkflowAgentDetail.module.css";
 
 /**
@@ -128,6 +133,7 @@ export interface WorkflowAgentDetailState {
   showSource: boolean;
   setShowSource: (show: boolean) => void;
   busy: boolean;
+  runNowUnavailableReason: string | null;
   handleRunNow: () => Promise<void>;
   handleToggleEnabled: () => Promise<void>;
   promptRoleName: string;
@@ -178,6 +184,9 @@ export function useWorkflowAgentDetailState({
   const health = binding
     ? bindingHealth(binding)
     : ({ state: "idle", label: "Idle", tooltip: "" } as BindingHealth);
+  const runNowUnavailableReason = binding
+    ? bindingRunNowUnavailableReason(binding)
+    : null;
 
   // Focus the selected run, else the newest (runs are newest-first).
   const focusRun = useMemo<WorkflowRun | null>(() => {
@@ -194,7 +203,7 @@ export function useWorkflowAgentDetailState({
   }, [bindingId]);
 
   const handleRunNow = useCallback(async () => {
-    if (!binding) return;
+    if (!binding || runNowUnavailableReason) return;
     setBusy(true);
     try {
       // Config-by-reference: the binding-scoped run-now endpoint stamps the
@@ -212,7 +221,7 @@ export function useWorkflowAgentDetailState({
     } finally {
       setBusy(false);
     }
-  }, [binding, onRunBinding, refresh, showToast]);
+  }, [binding, onRunBinding, refresh, runNowUnavailableReason, showToast]);
 
   const handleToggleEnabled = useCallback(async () => {
     if (!binding) return;
@@ -251,6 +260,7 @@ export function useWorkflowAgentDetailState({
     cadence,
     nextFire,
     health,
+    runNowUnavailableReason,
   };
 }
 
@@ -300,15 +310,25 @@ export function WorkflowAgentActionBar({
 }): JSX.Element {
   return (
     <div className={styles.buttonBar}>
-      <button
-        type="button"
-        className={styles.btnPrimary}
-        onClick={() => void detail.handleRunNow()}
-        disabled={detail.busy}
-        data-testid="workflow-agent-run-now"
-      >
-        Run now
-      </button>
+      {detail.runNowUnavailableReason ? (
+        <span
+          className={styles.runNowHint}
+          title={detail.runNowUnavailableReason}
+          data-testid="workflow-agent-run-now-hint"
+        >
+          {detail.runNowUnavailableReason}
+        </span>
+      ) : (
+        <button
+          type="button"
+          className={styles.btnPrimary}
+          onClick={() => void detail.handleRunNow()}
+          disabled={detail.busy}
+          data-testid="workflow-agent-run-now"
+        >
+          Run now
+        </button>
+      )}
       <button
         type="button"
         className={styles.btn}
@@ -334,10 +354,14 @@ export function WorkflowAgentRunsPane({
   workspaceId,
   binding,
   detail,
+  active = true,
+  onOpenTask,
 }: {
   workspaceId: string;
   binding: TriggerBinding;
   detail: WorkflowAgentDetailState;
+  active?: boolean;
+  onOpenTask?: ((taskId: string) => void) | undefined;
 }): JSX.Element {
   return (
     <RunsTab
@@ -349,8 +373,65 @@ export function WorkflowAgentRunsPane({
       nextFire={detail.nextFire}
       cadence={detail.cadence}
       focusRun={detail.focusRun}
+      active={active}
       selectedRunId={detail.selectedRunId}
       onSelectRun={detail.setSelectedRunId}
+      onOpenTask={onOpenTask}
+    />
+  );
+}
+
+/**
+ * Record-scoped run history. The durable agent endpoint aggregates runs from
+ * every trigger binding attached to the AgentService, while binding-id routes
+ * continue to use WorkflowAgentRunsPane for trigger-specific inspection.
+ */
+export function AgentRecordRunsPane({
+  workspaceId,
+  record,
+  bindings,
+  active = true,
+  onOpenTask,
+}: {
+  workspaceId: string;
+  record: AgentRecordSummary;
+  bindings: TriggerBinding[];
+  active?: boolean;
+  onOpenTask?: ((taskId: string) => void) | undefined;
+}): JSX.Element {
+  const { runs, isLoading, error } = useAgentHistory(
+    workspaceId,
+    record.id,
+    active,
+  );
+  const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
+  useEffect(() => setSelectedRunId(null), [record.id, workspaceId]);
+  const selectedRun = runs.find((run) => run.run_id === selectedRunId) ?? null;
+  const focusRun = selectedRun ?? runs[0] ?? null;
+  const onlyBinding = bindings.length === 1 ? bindings[0] : undefined;
+  const cadence =
+    bindings.length === 0
+      ? "a trigger to be configured"
+      : onlyBinding
+        ? bindingCadenceLabel(onlyBinding)
+        : `one of ${bindings.length} configured triggers`;
+
+  return (
+    <RunsTab
+      workspaceId={workspaceId}
+      runs={runs}
+      loading={isLoading}
+      error={error?.message ?? null}
+      enabled={record.enabled}
+      nextFire={formatFireTime(
+        record.next_fire_at ?? onlyBinding?.next_fire_at,
+      )}
+      cadence={cadence}
+      focusRun={focusRun}
+      active={active}
+      selectedRunId={selectedRun?.run_id ?? focusRun?.run_id ?? null}
+      onSelectRun={setSelectedRunId}
+      onOpenTask={onOpenTask}
     />
   );
 }
@@ -417,8 +498,10 @@ function RunsTab({
   nextFire,
   cadence,
   focusRun,
+  active,
   selectedRunId,
   onSelectRun,
+  onOpenTask,
 }: {
   workspaceId: string;
   runs: WorkflowRun[];
@@ -428,8 +511,10 @@ function RunsTab({
   nextFire: string;
   cadence: string;
   focusRun: WorkflowRun | null;
+  active: boolean;
   selectedRunId: string | null;
   onSelectRun: (runId: string) => void;
+  onOpenTask?: ((taskId: string) => void) | undefined;
 }): JSX.Element {
   return (
     <div className={styles.scroll}>
@@ -441,8 +526,12 @@ function RunsTab({
           : "Disabled — this agent will not run until enabled"}
       </div>
 
-      {focusRun ? (
-        <RunDetailCard workspaceId={workspaceId} run={focusRun} />
+      {focusRun && active ? (
+        <RunDetailCard
+          workspaceId={workspaceId}
+          run={focusRun}
+          onOpenTask={onOpenTask}
+        />
       ) : null}
 
       <section className={styles.card}>
@@ -474,15 +563,18 @@ function RunsTab({
               const started = formatFireTime(run.started_at);
               const finished = formatFireTime(run.finished_at);
               return (
-                <li key={run.run_id}>
+                <li
+                  key={run.run_id}
+                  className={styles.runRow}
+                  data-selected={
+                    (selectedRunId
+                      ? run.run_id === selectedRunId
+                      : run.run_id === focusRun?.run_id) || undefined
+                  }
+                >
                   <button
                     type="button"
-                    className={styles.runRow}
-                    data-selected={
-                      (selectedRunId
-                        ? run.run_id === selectedRunId
-                        : run.run_id === focusRun?.run_id) || undefined
-                    }
+                    className={styles.runRowSelect}
                     onClick={() => onSelectRun(run.run_id)}
                   >
                     <span
@@ -525,9 +617,11 @@ function RunsTab({
 export function RunDetailCard({
   workspaceId,
   run,
+  onOpenTask,
 }: {
   workspaceId: string;
   run: WorkflowRun;
+  onOpenTask?: ((taskId: string) => void) | undefined;
 }): JSX.Element {
   const [detailRun, setDetailRun] = useState(run);
   const [detailLoadError, setDetailLoadError] = useState<string | null>(null);
@@ -574,6 +668,10 @@ export function RunDetailCard({
     () => linkedSessionsForRun(displayedRun),
     [displayedRun],
   );
+  const taskIds = useMemo(
+    () => workedTaskIdsForRun(displayedRun),
+    [displayedRun],
+  );
   const linkedSession = useMemo(
     () =>
       linkedSessions.find(
@@ -594,13 +692,24 @@ export function RunDetailCard({
     isLoading: sessionsLoading,
     error: sessionsError,
   } = useTaskSessions(linkedSession?.taskId || null);
-  const session = useMemo(() => {
-    if (!linkedSession?.taskId || !linkedSession.sessionId) return null;
-    return (
-      sessions.find((s) => s.session_id === linkedSession.sessionId) ??
-      fallbackSessionFromRun(displayedRun, linkedSession)
+  const resolvedSession = useMemo(() => {
+    if (!linkedSession?.taskId || !linkedSession.sessionId) {
+      return { session: null, isFallback: false };
+    }
+    const persisted = sessions.find(
+      (candidate) => candidate.session_id === linkedSession.sessionId,
     );
+    return persisted
+      ? { session: persisted, isFallback: false }
+      : {
+          session: fallbackSessionFromRun(displayedRun, linkedSession),
+          isFallback: true,
+        };
   }, [displayedRun, linkedSession, sessions]);
+  const { session, isFallback: isFallbackSession } = resolvedSession;
+  const terminalWithoutChild =
+    isTerminalWorkflowRunStatus(displayedRun.status) &&
+    linkedSessions.length === 0;
 
   // Zero-time (unset) instants format to "" and render as "—" / are omitted.
   const started = formatFireTime(displayedRun.started_at);
@@ -646,6 +755,22 @@ export function RunDetailCard({
           <div>
             <dt>Error</dt>
             <dd className={styles.runErr}>{displayedRun.error_class}</dd>
+          </div>
+        ) : null}
+        {taskIds.length > 0 ? (
+          <div>
+            <dt>{taskIds.length === 1 ? "Task" : "Tasks"}</dt>
+            <dd className={styles.detailTaskLinks}>
+              {taskIds.map((taskId) => (
+                <TaskLink
+                  key={taskId}
+                  workspaceId={workspaceId}
+                  taskId={taskId}
+                  className={styles.taskLink}
+                  onOpenTask={onOpenTask}
+                />
+              ))}
+            </dd>
           </div>
         ) : null}
       </dl>
@@ -701,7 +826,13 @@ export function RunDetailCard({
 
       <div className={styles.runTranscript}>
         {linkedSession?.taskId && session ? (
-          <SessionRunDetail taskId={linkedSession.taskId} session={session} />
+          <SessionRunDetail
+            taskId={linkedSession.taskId}
+            session={session}
+            retryTranscriptUnavailable={isFallbackSession && !live}
+            exitCodeKnown={!isFallbackSession}
+            telemetryKnown={!isFallbackSession}
+          />
         ) : linkedSession?.taskRunId ? (
           <div className={styles.transcriptEmpty}>
             Transcript link pending for task run{" "}
@@ -715,7 +846,9 @@ export function RunDetailCard({
           <div className={styles.transcriptEmpty}>Loading transcript…</div>
         ) : (
           <div className={styles.transcriptEmpty}>
-            No task-run transcript linked to this run yet.
+            {terminalWithoutChild
+              ? "This workflow run did not create a child task or invoke a model, so there is no transcript. A completed run usually means no eligible task was available."
+              : "No task-run transcript linked to this run yet."}
           </div>
         )}
       </div>
@@ -738,7 +871,9 @@ function fallbackSessionFromRun(
     ended_at: run.finished_at ?? null,
     duration_s: 0,
     status: sessionStatus,
-    exit_code: sessionStatus === "failed" ? 1 : 0,
+    // Required presentation placeholders; SessionRunDetail hides them until
+    // the canonical task session supplies exit and usage evidence.
+    exit_code: 0,
     input_tokens: 0,
     output_tokens: 0,
     cache_read_tokens: 0,
@@ -919,7 +1054,7 @@ function InfoTab({
  * It seeds its edit state from the binding and re-seeds when the binding's
  * identity/name/schedule change (e.g. after a save re-pulls the list).
  */
-function ManageCard({
+export function ManageCard({
   binding,
   isCron,
   onEditConfig,
@@ -963,34 +1098,36 @@ function ManageCard({
   const nameChanged = name.trim() !== binding.name && name.trim() !== "";
   const scheduleChanged =
     isCron && resolvedCron !== "" && resolvedCron !== (binding.schedule ?? "");
-  const canSave = !busy && (nameChanged || scheduleChanged);
 
-  const handleSave = useCallback(async () => {
+  const handleSaveName = useCallback(async () => {
     setEditError(null);
-    const req: UpdateTriggerBindingRequest = {};
-    if (nameChanged) req.name = name.trim();
-    if (scheduleChanged) req.schedule = resolvedCron;
-    if (req.name === undefined && req.schedule === undefined) return;
+    if (!nameChanged) return;
     setBusy(true);
     try {
-      await onUpdate(binding.binding_id, req);
-      showToast("Agent updated", { type: "success" });
+      await onUpdate(binding.binding_id, { name: name.trim() });
+      showToast("Agent name updated", { type: "success" });
     } catch (err) {
-      // A bad custom cron surfaces here as the server's parse error (400) —
-      // we never re-implement cron validation client-side.
       setEditError((err as Error).message || "Failed to update agent");
     } finally {
       setBusy(false);
     }
-  }, [
-    binding.binding_id,
-    name,
-    nameChanged,
-    resolvedCron,
-    scheduleChanged,
-    onUpdate,
-    showToast,
-  ]);
+  }, [binding.binding_id, name, nameChanged, onUpdate, showToast]);
+
+  const handleSaveSchedule = useCallback(async () => {
+    setEditError(null);
+    if (!scheduleChanged) return;
+    setBusy(true);
+    try {
+      await onUpdate(binding.binding_id, { schedule: resolvedCron });
+      showToast("Agent cadence updated", { type: "success" });
+    } catch (err) {
+      // A bad custom cron surfaces here as the server's parse error (400) —
+      // we never re-implement cron validation client-side.
+      setEditError((err as Error).message || "Failed to update agent cadence");
+    } finally {
+      setBusy(false);
+    }
+  }, [binding.binding_id, resolvedCron, scheduleChanged, onUpdate, showToast]);
 
   const handleDelete = useCallback(async () => {
     setBusy(true);
@@ -1070,12 +1207,23 @@ function ManageCard({
         <button
           type="button"
           className={styles.btnPrimary}
-          onClick={handleSave}
-          disabled={!canSave}
-          data-testid="workflow-agent-save-edit"
+          onClick={handleSaveName}
+          disabled={busy || !nameChanged}
+          data-testid="workflow-agent-save-name"
         >
-          Save changes
+          Save name
         </button>
+        {isCron && (
+          <button
+            type="button"
+            className={styles.btnPrimary}
+            onClick={handleSaveSchedule}
+            disabled={busy || !scheduleChanged}
+            data-testid="workflow-agent-save-schedule"
+          >
+            Save cadence
+          </button>
+        )}
         <button
           type="button"
           className={styles.btn}

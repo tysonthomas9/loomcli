@@ -6,11 +6,15 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
+	pathpkg "path"
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
 )
@@ -60,6 +64,18 @@ const githubAPIVersion = "2022-11-28"
 // leaves headroom; successful bodies are immediately slimmed by pullSummary,
 // so the additional peak memory is transient.
 const maxResponseBytes = 4 << 20
+
+const (
+	// Review payload limits bound workflow-controlled egress before JSON
+	// encoding. The built-in review agents cap findings below these ceilings;
+	// the provider keeps the same trust boundary for custom workflows.
+	maxGitHubReviewComments         = 50
+	maxGitHubReviewPathBytes        = 4096
+	maxGitHubReviewBodyBytes        = 64 << 10
+	maxGitHubReviewCommentBodyBytes = 64 << 10
+	maxGitHubReviewURLBytes         = 4096
+	maxGitHubReviewLine             = 1<<31 - 1
+)
 
 // GitHub is the Provider adapter for the GitHub REST API. The base URL is
 // injectable for tests; the zero values fall back to the public API and
@@ -178,20 +194,15 @@ func (g *GitHub) reviewPost(ctx context.Context, spec CallSpec) (CallResult, err
 	if err != nil {
 		return CallResult{Decision: domain.ConnectorCallUpstreamError}, err
 	}
-	event, ok := stringArg(spec.Args, "event")
-	if !ok {
-		return CallResult{Decision: domain.ConnectorCallUpstreamError},
-			fmt.Errorf("%s requires args.event: %w", spec.Action, domain.ErrInvalid)
+	payload, err := githubReviewPayload(spec)
+	if err != nil {
+		return CallResult{Decision: domain.ConnectorCallUpstreamError}, err
 	}
 
 	if result, err := g.reviewLivenessCheck(ctx, spec, owner, repo, number); err != nil {
 		return result, err
 	}
 
-	payload := map[string]any{"event": event}
-	if body, ok := stringArg(spec.Args, "body"); ok {
-		payload["body"] = body
-	}
 	res, err := g.do(ctx, spec, http.MethodPost,
 		fmt.Sprintf("/repos/%s/%s/pulls/%d/reviews", owner, repo, number), nil, payload)
 	if err != nil {
@@ -205,11 +216,293 @@ func (g *GitHub) reviewPost(ctx context.Context, spec CallSpec) (CallResult, err
 	if err != nil {
 		return CallResult{Status: res.status, Decision: domain.ConnectorCallUpstreamError}, err
 	}
+	body, err := githubReviewResult(spec, res.status, obj)
+	if err != nil {
+		return CallResult{Status: res.status, Decision: domain.ConnectorCallUpstreamError}, err
+	}
 	return CallResult{
 		Status:   res.status,
-		Body:     map[string]any{"id": obj["id"], "state": obj["state"]},
+		Body:     body,
 		Decision: domain.ConnectorCallGranted,
 	}, nil
+}
+
+// githubReviewPayload validates and projects workflow-controlled review
+// arguments onto GitHub's documented create-review shape. The projection is
+// intentionally closed: custom workflows cannot smuggle arbitrary fields into
+// the upstream request. Validation runs before the liveness GET, so malformed
+// output causes no provider egress at all.
+func githubReviewPayload(spec CallSpec) (map[string]any, error) {
+	rawEvent, present := spec.Args["event"]
+	event, ok := rawEvent.(string)
+	if !present || !ok || event == "" {
+		return nil, fmt.Errorf("%s requires string args.event: %w", spec.Action, domain.ErrInvalid)
+	}
+	switch event {
+	case "APPROVE", "REQUEST_CHANGES", "COMMENT":
+	default:
+		return nil, fmt.Errorf("%s args.event must be APPROVE, REQUEST_CHANGES, or COMMENT: %w",
+			spec.Action, domain.ErrInvalid)
+	}
+
+	payload := map[string]any{
+		"event":     event,
+		"commit_id": spec.Preconditions.ExpectedHeadSha,
+	}
+	rawBody, bodyPresent := spec.Args["body"]
+	body := ""
+	if bodyPresent {
+		body, ok = rawBody.(string)
+		if !ok {
+			return nil, fmt.Errorf("%s args.body must be a string: %w", spec.Action, domain.ErrInvalid)
+		}
+		if err := validateGitHubReviewText("args.body", body, maxGitHubReviewBodyBytes, true); err != nil {
+			return nil, fmt.Errorf("%s %w", spec.Action, err)
+		}
+	}
+	if (event == "COMMENT" || event == "REQUEST_CHANGES") &&
+		(!bodyPresent || body == "") {
+		return nil, fmt.Errorf("%s requires non-empty args.body for event %s: %w",
+			spec.Action, event, domain.ErrInvalid)
+	}
+
+	unanchored, err := githubReviewFindings(spec.Args)
+	if err != nil {
+		return nil, fmt.Errorf("%s %w", spec.Action, err)
+	}
+	body, err = appendUnanchoredGitHubReviewFindings(body, unanchored)
+	if err != nil {
+		return nil, fmt.Errorf("%s %w", spec.Action, err)
+	}
+	if body != "" {
+		payload["body"] = body
+	}
+	return payload, nil
+}
+
+// githubReviewFindings accepts the built-in review agents' public
+// {path,line?,body} finding shape. A positive model-supplied line is only a
+// locator hint: it does not prove that the path and line belong to a RIGHT-side
+// hunk at the pinned commit. GitHub rejects the entire create-review request
+// when even one inline anchor is invalid, so this provider deliberately keeps
+// every uncertified finding in the top-level review body. Inline comments can
+// be restored later only with provider-owned exact-diff certification.
+func githubReviewFindings(args map[string]any) ([]githubReviewFinding, error) {
+	raw, present := args["comments"]
+	if !present {
+		return nil, nil
+	}
+	entries, ok := raw.([]any)
+	if !ok {
+		return nil, fmt.Errorf("args.comments must be an array: %w", domain.ErrInvalid)
+	}
+	if len(entries) > maxGitHubReviewComments {
+		return nil, fmt.Errorf("args.comments exceeds %d entries: %w",
+			maxGitHubReviewComments, domain.ErrInvalid)
+	}
+
+	findings := make([]githubReviewFinding, 0, len(entries))
+	for i, rawEntry := range entries {
+		finding, err := githubReviewFindingFromValue(i, rawEntry)
+		if err != nil {
+			return nil, err
+		}
+		findings = append(findings, finding)
+	}
+	return findings, nil
+}
+
+func githubReviewFindingFromValue(index int, raw any) (githubReviewFinding, error) {
+	entry, ok := raw.(map[string]any)
+	if !ok {
+		return githubReviewFinding{}, fmt.Errorf(
+			"args.comments[%d] must be an object: %w", index, domain.ErrInvalid,
+		)
+	}
+	for key := range entry {
+		switch key {
+		case "path", "line", "body":
+		default:
+			return githubReviewFinding{}, fmt.Errorf(
+				"args.comments[%d] contains unsupported fields: %w", index, domain.ErrInvalid,
+			)
+		}
+	}
+
+	commentPath, ok := entry["path"].(string)
+	if !ok || commentPath == "" {
+		return githubReviewFinding{}, fmt.Errorf(
+			"args.comments[%d].path must be a non-empty string: %w", index, domain.ErrInvalid,
+		)
+	}
+	if err := validateGitHubReviewPath(commentPath); err != nil {
+		return githubReviewFinding{}, fmt.Errorf("args.comments[%d].path %w", index, err)
+	}
+
+	commentBody, ok := entry["body"].(string)
+	if !ok || commentBody == "" {
+		return githubReviewFinding{}, fmt.Errorf(
+			"args.comments[%d].body must be a non-empty string: %w", index, domain.ErrInvalid,
+		)
+	}
+	if err := validateGitHubReviewText(
+		"body", commentBody, maxGitHubReviewCommentBodyBytes, true,
+	); err != nil {
+		return githubReviewFinding{}, fmt.Errorf("args.comments[%d].%w", index, err)
+	}
+
+	finding := githubReviewFinding{path: commentPath, body: commentBody}
+	if line, err := githubReviewLine(entry["line"]); err == nil {
+		finding.line = line
+	}
+	return finding, nil
+}
+
+type githubReviewFinding struct {
+	path string
+	line int
+	body string
+}
+
+func appendUnanchoredGitHubReviewFindings(
+	body string,
+	findings []githubReviewFinding,
+) (string, error) {
+	if len(findings) == 0 {
+		return body, nil
+	}
+
+	var rendered strings.Builder
+	rendered.WriteString(body)
+	if body != "" {
+		rendered.WriteString("\n\n")
+	}
+	rendered.WriteString("Unanchored review findings:")
+	for _, finding := range findings {
+		rendered.WriteString("\n- file ")
+		rendered.WriteString(strconv.Quote(finding.path))
+		if finding.line > 0 {
+			rendered.WriteString(", unverified line ")
+			rendered.WriteString(strconv.Itoa(finding.line))
+		}
+		rendered.WriteString(": ")
+		rendered.WriteString(finding.body)
+	}
+
+	result := rendered.String()
+	if err := validateGitHubReviewText(
+		"args.body", result, maxGitHubReviewBodyBytes, true,
+	); err != nil {
+		return "", fmt.Errorf("cannot preserve unanchored args.comments in review body: %w", err)
+	}
+	return result, nil
+}
+
+func githubReviewLine(raw any) (int, error) {
+	var line int64
+	switch value := raw.(type) {
+	case int:
+		line = int64(value)
+	case int64:
+		line = value
+	case float64:
+		if value != float64(int64(value)) {
+			return 0, fmt.Errorf("must be an integer: %w", domain.ErrInvalid)
+		}
+		line = int64(value)
+	default:
+		return 0, fmt.Errorf("must be an integer: %w", domain.ErrInvalid)
+	}
+	if line < 1 || line > maxGitHubReviewLine {
+		return 0, fmt.Errorf("must be between 1 and %d: %w", maxGitHubReviewLine, domain.ErrInvalid)
+	}
+	return int(line), nil
+}
+
+func validateGitHubReviewPath(value string) error {
+	if !utf8.ValidString(value) {
+		return fmt.Errorf("must be valid UTF-8: %w", domain.ErrInvalid)
+	}
+	if len(value) > maxGitHubReviewPathBytes {
+		return fmt.Errorf("exceeds %d bytes: %w", maxGitHubReviewPathBytes, domain.ErrInvalid)
+	}
+	if pathpkg.IsAbs(value) || pathpkg.Clean(value) != value || value == "." ||
+		value == ".." || strings.HasPrefix(value, "../") {
+		return fmt.Errorf("must be a normalized repository-relative path: %w", domain.ErrInvalid)
+	}
+	for _, r := range value {
+		if unicode.IsControl(r) {
+			return fmt.Errorf("contains a control character: %w", domain.ErrInvalid)
+		}
+	}
+	return nil
+}
+
+func validateGitHubReviewText(field, value string, maxBytes int, allowWhitespaceControls bool) error {
+	if !utf8.ValidString(value) {
+		return fmt.Errorf("%s must be valid UTF-8: %w", field, domain.ErrInvalid)
+	}
+	if len(value) > maxBytes {
+		return fmt.Errorf("%s exceeds %d bytes: %w", field, maxBytes, domain.ErrInvalid)
+	}
+	for _, r := range value {
+		if unicode.IsControl(r) &&
+			!(allowWhitespaceControls && (r == '\n' || r == '\r' || r == '\t')) {
+			return fmt.Errorf("%s contains an unsafe control character: %w", field, domain.ErrInvalid)
+		}
+	}
+	return nil
+}
+
+// githubReviewResult keeps the provider response closed and camelCase. A
+// successful GitHub create-review response always carries a browser-facing
+// html_url; malformed success bodies are upstream failures, not granted calls
+// with an unusable review link.
+func githubReviewResult(spec CallSpec, status int, obj map[string]any) (map[string]any, error) {
+	id, ok := obj["id"].(float64)
+	if !ok || id < 1 || math.Trunc(id) != id {
+		return nil, malformedGitHubReviewResult(spec, status, "missing positive integer id")
+	}
+	state, ok := obj["state"].(string)
+	if !ok || state == "" {
+		return nil, malformedGitHubReviewResult(spec, status, "missing string state")
+	}
+	if err := validateGitHubReviewText("state", state, 64, false); err != nil {
+		return nil, malformedGitHubReviewResult(spec, status, "invalid state")
+	}
+	htmlURL, ok := obj["html_url"].(string)
+	if !ok || htmlURL == "" {
+		return nil, malformedGitHubReviewResult(spec, status, "missing string html_url")
+	}
+	if err := validateGitHubReviewURL(htmlURL); err != nil {
+		return nil, malformedGitHubReviewResult(spec, status, "invalid html_url")
+	}
+	return map[string]any{
+		"id":      id,
+		"state":   state,
+		"htmlUrl": htmlURL,
+	}, nil
+}
+
+func validateGitHubReviewURL(value string) error {
+	if err := validateGitHubReviewText("html_url", value, maxGitHubReviewURLBytes, false); err != nil {
+		return err
+	}
+	parsed, err := url.ParseRequestURI(value)
+	if err != nil || parsed.Host == "" || parsed.User != nil ||
+		(parsed.Scheme != "https" && parsed.Scheme != "http") {
+		return fmt.Errorf("html_url must be an absolute HTTP(S) URL: %w", domain.ErrInvalid)
+	}
+	return nil
+}
+
+func malformedGitHubReviewResult(spec CallSpec, status int, reason string) error {
+	return &UpstreamError{
+		Action:  spec.Action,
+		Class:   ClassServerError,
+		Status:  status,
+		Summary: "invalid create-review response: " + reason,
+	}
 }
 
 // reviewLivenessCheck is reviewPost's pre-egress liveness read: it GETs the

@@ -483,10 +483,23 @@ type fakeHarnessConversation struct {
 	sendErr               error
 	sendBlocksUntilCancel bool
 	harnessSessionID      string
+	history               []chat.Turn
+	historyErr            error
+	historyCalls          int
+	boundedHistory        boundedHarnessHistory
+	boundedHistoryErr     error
+	boundedHistoryCalls   int
+	boundedHistorySession string
+	detachOutput          []byte
+	attachedOutputCount   int
+	detachedOutputCount   int
 	events                chan chat.ConversationEvent
 	waitCh                chan struct{}
 	waitResult            wrapper.Result
 	closed                bool
+	closeErr              error
+	closeLeavesEventsOpen bool
+	closeOnce             sync.Once
 }
 
 func newFakeHarnessConversation() *fakeHarnessConversation {
@@ -576,7 +589,25 @@ func (f *fakeHarnessConversation) WriteStdin(p []byte) (int, error) {
 	return len(p), nil
 }
 
-func (f *fakeHarnessConversation) AttachOutput(io.Writer) func() { return func() {} }
+func (f *fakeHarnessConversation) AttachOutput(w io.Writer) func() {
+	f.mu.Lock()
+	f.attachedOutputCount++
+	f.mu.Unlock()
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			f.mu.Lock()
+			pending := append([]byte{}, f.detachOutput...)
+			f.mu.Unlock()
+			if len(pending) > 0 {
+				_, _ = w.Write(pending)
+			}
+			f.mu.Lock()
+			f.detachedOutputCount++
+			f.mu.Unlock()
+		})
+	}
+}
 
 func (f *fakeHarnessConversation) Resize(cols, rows uint16) error {
 	f.mu.Lock()
@@ -606,6 +637,27 @@ func (f *fakeHarnessConversation) HarnessSessionID() string {
 	return f.harnessSessionID
 }
 
+func (f *fakeHarnessConversation) History(context.Context) ([]chat.Turn, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.historyCalls++
+	return append([]chat.Turn{}, f.history...), f.historyErr
+}
+
+func (f *fakeHarnessConversation) HistoryWithinRawLimit(
+	_ context.Context,
+	harnessSessionID string,
+	_ int,
+) (boundedHarnessHistory, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.boundedHistoryCalls++
+	f.boundedHistorySession = harnessSessionID
+	result := f.boundedHistory
+	result.turns = append([]chat.Turn{}, result.turns...)
+	return result, f.boundedHistoryErr
+}
+
 func (f *fakeHarnessConversation) Events() <-chan chat.ConversationEvent { return f.events }
 
 func (f *fakeHarnessConversation) Wait() (wrapper.Result, error) {
@@ -616,8 +668,17 @@ func (f *fakeHarnessConversation) Wait() (wrapper.Result, error) {
 }
 
 func (f *fakeHarnessConversation) Close(context.Context) error {
+	f.closeOnce.Do(func() {
+		f.mu.Lock()
+		f.closed = true
+		events := f.events
+		leaveEventsOpen := f.closeLeavesEventsOpen
+		f.mu.Unlock()
+		if !leaveEventsOpen {
+			close(events)
+		}
+	})
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.closed = true
-	return nil
+	return f.closeErr
 }

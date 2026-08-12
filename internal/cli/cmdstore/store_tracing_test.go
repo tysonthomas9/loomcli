@@ -175,8 +175,13 @@ func TestWrapStoreWithTracing_Smoke(t *testing.T) {
 	_, _ = cmds.Create(ctx, store.AgentCommandCreate{WorkspaceKey: "TEST", CommandID: "cmd-1", TargetAgentID: "agent", Type: "noop"})
 	_, _ = cmds.Get(ctx, "TEST", "cmd-1")
 	_, _ = cmds.List(ctx, "TEST", store.AgentCommandFilter{})
-	_, _ = cmds.Ack(ctx, "TEST", "cmd-1")
-	_, _ = cmds.Complete(ctx, "TEST", "cmd-1", store.AgentCommandComplete{Status: domain.AgentCommandSucceeded})
+	_, _ = cmds.Ack(ctx, "TEST", "cmd-1", store.AgentCommandAck{
+		NodeID:  "node-1",
+		OwnerID: "owner-1",
+	})
+	_, _ = cmds.Complete(ctx, "TEST", "cmd-1", store.AgentCommandComplete{
+		NodeID: "node-1", OwnerID: "owner-1", Status: domain.AgentCommandSucceeded,
+	})
 
 	drivers := wrapped.Drivers()
 	_, _ = drivers.Create(ctx, store.DriverCreate{WorkspaceKey: "TEST", DriverID: "driver-1", Name: "epic-runner", OwnerType: domain.DriverOwnerSystem, Status: domain.DriverStatusActive})

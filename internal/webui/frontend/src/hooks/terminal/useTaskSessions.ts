@@ -29,40 +29,79 @@ const POLL_INTERVAL_NORMAL = 10_000;
 /** Fast polling interval when any session is active (ms). */
 const POLL_INTERVAL_ACTIVE = 3_000;
 
+interface TaskSessionsState {
+  requestKey: string;
+  sessions: SessionRecord[];
+  isLoading: boolean;
+  error: Error | null;
+}
+
 export function useTaskSessions(taskId: string | null): UseTaskSessionsResult {
   const { workspaceId } = useWorkspaceContext();
-  const [sessions, setSessions] = useState<SessionRecord[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<Error | null>(null);
-
+  // Preserve the local/unscoped compatibility path where WorkspaceContext
+  // intentionally supplies an empty workspace ID. Task identity still gates
+  // the request, while workspace ID remains part of the generation fence.
+  const requestKey = taskId ? JSON.stringify([workspaceId, taskId]) : "";
+  const [state, setState] = useState<TaskSessionsState>({
+    requestKey: "",
+    sessions: [],
+    isLoading: false,
+    error: null,
+  });
   const mountedRef = useRef(true);
-  const fetchInProgressRef = useRef(false);
-  const sessionsRef = useRef(sessions);
-  sessionsRef.current = sessions; // always keep ref in sync with latest state
+  const activeRequestKeyRef = useRef(requestKey);
+  const generationRef = useRef(0);
+  const inFlightGenerationRef = useRef<number | null>(null);
+  const sessionsRef = useRef<SessionRecord[]>([]);
+  activeRequestKeyRef.current = requestKey;
 
   const fetchData = useCallback(async () => {
-    if (!taskId) return;
-    if (fetchInProgressRef.current) return;
-    fetchInProgressRef.current = true;
-    setIsLoading(true);
+    if (!requestKey || !taskId) return;
+    const generation = generationRef.current;
+    // A new route generation may read immediately while an old visit drains,
+    // but never overlap reads for the same visible task generation.
+    if (inFlightGenerationRef.current === generation) return;
+    inFlightGenerationRef.current = generation;
+    setState((current) => ({
+      requestKey,
+      sessions: current.requestKey === requestKey ? current.sessions : [],
+      isLoading: true,
+      error: current.requestKey === requestKey ? current.error : null,
+    }));
 
     try {
       const result = await getTaskSessions(workspaceId, taskId);
-      if (mountedRef.current) {
-        setSessions(result);
-        setError(null);
+      if (
+        mountedRef.current &&
+        generation === generationRef.current &&
+        activeRequestKeyRef.current === requestKey
+      ) {
+        setState({
+          requestKey,
+          sessions: result,
+          isLoading: false,
+          error: null,
+        });
       }
     } catch (err) {
-      if (mountedRef.current) {
-        setError(err instanceof Error ? err : new Error(String(err)));
+      if (
+        mountedRef.current &&
+        generation === generationRef.current &&
+        activeRequestKeyRef.current === requestKey
+      ) {
+        setState((current) => ({
+          requestKey,
+          sessions: current.requestKey === requestKey ? current.sessions : [],
+          isLoading: false,
+          error: err instanceof Error ? err : new Error(String(err)),
+        }));
       }
     } finally {
-      if (mountedRef.current) {
-        setIsLoading(false);
+      if (inFlightGenerationRef.current === generation) {
+        inFlightGenerationRef.current = null;
       }
-      fetchInProgressRef.current = false;
     }
-  }, [workspaceId, taskId]);
+  }, [workspaceId, taskId, requestKey]);
 
   const refetch = useCallback(() => {
     void fetchData();
@@ -86,37 +125,58 @@ export function useTaskSessions(taskId: string | null): UseTaskSessionsResult {
 
   useEffect(() => {
     mountedRef.current = true;
+    generationRef.current += 1;
 
-    if (!taskId) {
-      setSessions([]);
-      setError(null);
+    setState({
+      requestKey,
+      sessions: [],
+      isLoading: Boolean(requestKey),
+      error: null,
+    });
+    if (!requestKey) {
       return;
     }
-
-    void fetchData();
 
     const hasActive = () => sessionsRef.current.some((s) => s.is_active);
 
     const getPollInterval = () =>
       hasActive() ? POLL_INTERVAL_ACTIVE : POLL_INTERVAL_NORMAL;
 
-    // Use setTimeout chain so interval adapts to active state changes
+    // Chain each poll from request completion so slow reads never overlap, and
+    // recompute the interval after every response as active state changes.
+    let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | null = null;
-
-    const scheduleNext = () => {
-      if (!mountedRef.current) return;
-      timer = setTimeout(() => {
-        void fetchData().then(scheduleNext);
-      }, getPollInterval());
+    const poll = async () => {
+      await fetchData();
+      if (cancelled) return;
+      timer = setTimeout(() => void poll(), getPollInterval());
     };
-
-    scheduleNext();
+    void poll();
 
     return () => {
+      cancelled = true;
       mountedRef.current = false;
       if (timer) clearTimeout(timer);
     };
-  }, [workspaceId, taskId, fetchData]);
+  }, [requestKey, fetchData]);
 
-  return { sessions, isLoading, error, refetch };
+  // Effects reset state after commit. Mask a prior task's response during the
+  // intervening render so it cannot populate the newly selected task detail.
+  const visible =
+    requestKey && state.requestKey === requestKey
+      ? state
+      : {
+          requestKey,
+          sessions: [],
+          isLoading: Boolean(requestKey),
+          error: null,
+        };
+  sessionsRef.current = visible.sessions;
+
+  return {
+    sessions: visible.sessions,
+    isLoading: visible.isLoading,
+    error: visible.error,
+    refetch,
+  };
 }

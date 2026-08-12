@@ -1,4 +1,4 @@
-import { ApiError, get, patch } from "./client";
+import { ApiError, get, patch, post } from "./client";
 
 export interface LocalRedisSettings {
   enabled: boolean;
@@ -28,6 +28,7 @@ export interface LocalTaskRunnerSettings {
 
 export interface RuntimeCredentialStatus {
   configured: boolean;
+  usable?: boolean;
   updated_at?: string;
 }
 
@@ -70,6 +71,20 @@ interface LocalSettingsEnvelope {
   data?: LocalSettingsData;
   error?: string;
   message?: string;
+}
+
+export type RuntimeCredentialProvider = "daytona" | "github";
+
+export interface RuntimeCredentialReadiness {
+  provider: RuntimeCredentialProvider;
+  configured: boolean;
+  usable: boolean;
+}
+
+interface RuntimeCredentialPreflightEnvelope {
+  success: boolean;
+  data?: RuntimeCredentialReadiness;
+  error?: string;
 }
 
 export async function getLocalSettings(): Promise<LocalSettingsData> {
@@ -133,6 +148,26 @@ export async function updateRuntimeCredentialsSettings(
       0,
       response.error ?? "Failed to save runtime credentials",
     );
+  }
+  return response.data;
+}
+
+/**
+ * Verify that a configured credential can be opened by the current server
+ * without returning credential material to the browser.
+ */
+export async function preflightRuntimeCredential(
+  provider: RuntimeCredentialProvider,
+): Promise<RuntimeCredentialReadiness> {
+  const response = await post<RuntimeCredentialPreflightEnvelope>(
+    "/api/local/settings/runtime-credentials/preflight",
+    { provider },
+  );
+  if (!response.success || !response.data) {
+    const message = response.error ?? "Failed to verify runtime credential";
+    throw new ApiError(0, "Runtime credential preflight failed", {
+      error: message,
+    });
   }
   return response.data;
 }

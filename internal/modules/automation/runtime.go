@@ -447,26 +447,20 @@ func (s *Service) RetryDeliveries(ctx context.Context, auth authority.SystemAuth
 		return nil, err
 	}
 	result := &RetryDeliveriesResult{Claimed: len(batch.candidates)}
-	seen := make(map[string]struct{}, len(batch.candidates))
-	var errs []error
-	for _, candidate := range batch.candidates {
+	partition := partitionDeliveryRetryCandidates(ctx, batch, result)
+	errs := partition.errs
+	for _, groupKey := range partition.repositoryGroupOrder {
 		if err := ctx.Err(); err != nil {
 			errs = append(errs, err)
 			break
 		}
-		if err := validateRetryCandidate(candidate, batch.workspace, batch.now, batch.claimUntil); err != nil {
-			result.Failed++
+		errs = append(errs, s.retryRepositoryRequiredPromptGroup(ctx, batch, result, partition.repositoryGroups[groupKey])...)
+	}
+	for _, candidate := range partition.ordinary {
+		if err := ctx.Err(); err != nil {
 			errs = append(errs, err)
-			continue
+			break
 		}
-		key := candidate.Delivery.WorkspaceKey + "\x00" + candidate.Delivery.DeliveryID
-		if _, duplicate := seen[key]; duplicate {
-			result.Failed++
-			errs = append(errs, fmt.Errorf("duplicate retry candidate %q: %w", candidate.Delivery.DeliveryID, ErrInvalidPersistedState))
-			continue
-		}
-		seen[key] = struct{}{}
-
 		updated, retryErr := s.retryDelivery(ctx, candidate, batch.now)
 		if retryErr != nil {
 			result.Failed++
@@ -476,6 +470,221 @@ func (s *Service) RetryDeliveries(ctx context.Context, auth authority.SystemAuth
 		classifyRetryResult(result, updated)
 	}
 	return result, errors.Join(errs...)
+}
+
+type deliveryRetryPartition struct {
+	ordinary             []RetryCandidate
+	repositoryGroups     map[string][]RetryCandidate
+	repositoryGroupOrder []string
+	errs                 []error
+}
+
+func partitionDeliveryRetryCandidates(
+	ctx context.Context,
+	batch *deliveryRetryBatch,
+	result *RetryDeliveriesResult,
+) deliveryRetryPartition {
+	partition := deliveryRetryPartition{
+		ordinary:         make([]RetryCandidate, 0, len(batch.candidates)),
+		repositoryGroups: make(map[string][]RetryCandidate),
+	}
+	seen := make(map[string]struct{}, len(batch.candidates))
+	for _, candidate := range batch.candidates {
+		if err := ctx.Err(); err != nil {
+			partition.errs = append(partition.errs, err)
+			break
+		}
+		if err := validateRetryCandidate(candidate, batch.workspace, batch.now, batch.claimUntil); err != nil {
+			result.Failed++
+			partition.errs = append(partition.errs, err)
+			continue
+		}
+		key := candidate.Delivery.WorkspaceKey + "\x00" + candidate.Delivery.DeliveryID
+		if _, duplicate := seen[key]; duplicate {
+			result.Failed++
+			partition.errs = append(partition.errs, fmt.Errorf("duplicate retry candidate %q: %w", candidate.Delivery.DeliveryID, ErrInvalidPersistedState))
+			continue
+		}
+		seen[key] = struct{}{}
+		if repositoryRequiredPromptRetryCandidate(candidate) {
+			groupKey := candidate.Event.WorkspaceKey + "\x00" + candidate.Event.EventID
+			if _, exists := partition.repositoryGroups[groupKey]; !exists {
+				partition.repositoryGroupOrder = append(partition.repositoryGroupOrder, groupKey)
+			}
+			partition.repositoryGroups[groupKey] = append(partition.repositoryGroups[groupKey], candidate)
+			continue
+		}
+		partition.ordinary = append(partition.ordinary, candidate)
+	}
+	return partition
+}
+
+func (s *Service) retryRepositoryRequiredPromptGroup(
+	ctx context.Context,
+	batch *deliveryRetryBatch,
+	result *RetryDeliveriesResult,
+	candidates []RetryCandidate,
+) []error {
+	canonicalDeliveryID, err := s.repositoryRequiredPromptRetryCanonical(ctx, batch.workspace, candidates)
+	if err != nil {
+		result.Failed += len(candidates)
+		return []error{err}
+	}
+	sort.Slice(candidates, func(i, j int) bool {
+		return candidates[i].Delivery.TriggerBindingID < candidates[j].Delivery.TriggerBindingID
+	})
+	canonicalIndex := -1
+	var errs []error
+	for index, candidate := range candidates {
+		if candidate.Delivery.DeliveryID == canonicalDeliveryID {
+			canonicalIndex = index
+			continue
+		}
+		if _, err := s.markRepositoryRequiredPromptAgentDeliveryDuplicate(ctx, candidate.Delivery, candidate.Target); err != nil {
+			result.Failed++
+			errs = append(errs, err)
+		} else {
+			result.Deduplicated++
+		}
+	}
+	if len(errs) != 0 {
+		// Do not dispatch the winner unless every claimed sibling is durably
+		// terminal; otherwise a later retry could still create a second run.
+		if canonicalIndex >= 0 {
+			result.Failed++
+		}
+		return errs
+	}
+	if canonicalIndex < 0 {
+		// The globally canonical leg was not part of this claim batch. Every
+		// claimed sibling is now duplicate; the canonical leg remains eligible
+		// for its own later claim, so split batches cannot each create a run.
+		return nil
+	}
+	updated, retryErr := s.retryDelivery(ctx, candidates[canonicalIndex], batch.now)
+	if retryErr != nil {
+		result.Failed++
+		return []error{retryErr}
+	}
+	classifyRetryResult(result, updated)
+	return nil
+}
+
+func repositoryRequiredPromptRetryCandidate(candidate RetryCandidate) bool {
+	return candidate.Delivery != nil && candidate.Target != nil && candidate.Event != nil &&
+		candidate.Delivery.DriverID == promptAgentDriverID && candidate.Target.DriverID == promptAgentDriverID &&
+		repositoryRequiredTaskReadyEvent(candidate.Event, retryCandidatePayload(candidate))
+}
+
+func (s *Service) repositoryRequiredPromptRetryCanonical(
+	ctx context.Context,
+	workspace string,
+	candidates []RetryCandidate,
+) (string, error) {
+	if s == nil || s.deliveries == nil || len(candidates) == 0 || candidates[0].Event == nil {
+		return "", ErrUnavailable
+	}
+	eventID := candidates[0].Event.EventID
+	deliveries, err := s.deliveries.ListDeliveries(ctx, workspace, DeliveryFilter{EventID: eventID})
+	if err != nil {
+		return "", fmt.Errorf("list repository-required retry deliveries for event %q: %w", eventID, err)
+	}
+	byID, canonicalDeliveryID, err := indexRepositoryRequiredPromptRetryDeliveries(workspace, eventID, deliveries)
+	if err != nil {
+		return "", err
+	}
+	if err := validateRepositoryRequiredPromptRetryCandidates(eventID, candidates, byID); err != nil {
+		return "", err
+	}
+	return canonicalDeliveryID, nil
+}
+
+func indexRepositoryRequiredPromptRetryDeliveries(
+	workspace, eventID string,
+	deliveries []*Delivery,
+) (map[string]*Delivery, string, error) {
+	byID := make(map[string]*Delivery, len(deliveries))
+	seenPromptBindings := make(map[string]struct{})
+	canonicalBindingID, canonicalDeliveryID := "", ""
+	canonicalPriority := 2
+	existingRunID := ""
+	for _, delivery := range deliveries {
+		if err := validatePersistedDelivery(delivery, workspace, "", eventID); err != nil {
+			return nil, "", err
+		}
+		if _, duplicate := byID[delivery.DeliveryID]; duplicate {
+			return nil, "", ErrInvalidPersistedState
+		}
+		byID[delivery.DeliveryID] = delivery
+		priority, eligible := repositoryRequiredPromptRetryPriority(delivery)
+		if !eligible {
+			continue
+		}
+		if _, duplicate := seenPromptBindings[delivery.TriggerBindingID]; duplicate {
+			return nil, "", ErrInvalidPersistedState
+		}
+		seenPromptBindings[delivery.TriggerBindingID] = struct{}{}
+		if priority == 0 {
+			runID := strings.TrimSpace(delivery.DriverRunID)
+			if runID == "" || runID != delivery.DriverRunID || existingRunID != "" && runID != existingRunID {
+				return nil, "", ErrInvalidPersistedState
+			}
+			existingRunID = runID
+		}
+		if priority < canonicalPriority ||
+			(priority == canonicalPriority && (canonicalBindingID == "" || delivery.TriggerBindingID < canonicalBindingID)) {
+			canonicalPriority = priority
+			canonicalBindingID, canonicalDeliveryID = delivery.TriggerBindingID, delivery.DeliveryID
+		}
+	}
+	if canonicalDeliveryID == "" {
+		return nil, "", ErrInvalidPersistedState
+	}
+	return byID, canonicalDeliveryID, nil
+}
+
+func validateRepositoryRequiredPromptRetryCandidates(
+	eventID string,
+	candidates []RetryCandidate,
+	byID map[string]*Delivery,
+) error {
+	for _, candidate := range candidates {
+		if candidate.Event == nil || candidate.Event.EventID != eventID ||
+			!repositoryRequiredTaskReadyEvent(candidate.Event, retryCandidatePayload(candidate)) {
+			return ErrInvalidPersistedState
+		}
+		current := byID[candidate.Delivery.DeliveryID]
+		if current == nil || !sameDeliveryImmutableIdentity(candidate.Delivery, current) ||
+			current.Status != candidate.Delivery.Status || current.Attempt != candidate.Delivery.Attempt ||
+			!deliveryMatchesTarget(current, candidate.Target) {
+			return ErrInvalidPersistedState
+		}
+	}
+	return nil
+}
+
+func repositoryRequiredPromptRetryPriority(delivery *Delivery) (int, bool) {
+	if delivery == nil || delivery.DriverID != promptAgentDriverID {
+		return 0, false
+	}
+	if delivery.DriverRunID != "" || delivery.Status == DeliveryDispatched ||
+		delivery.Status == DeliverySuperseded || delivery.Status == DeliveryReplayed {
+		return 0, true
+	}
+	switch delivery.Status {
+	case DeliveryFailed:
+		return 1, delivery.ErrorClass != DeliveryErrorRetriesExhausted
+	case DeliveryHeld:
+		return 1, true
+	case DeliveryAccepted:
+		// Retry claims never carry Accepted. Ignoring an unclaimed crash
+		// receipt lets a claimed Failed/Held leg make progress; a later
+		// admission replay observes that owner and deduplicates the stale
+		// Accepted leg before it can dispatch.
+		return 0, false
+	default:
+		return 0, false
+	}
 }
 
 func (s *Service) claimDeliveryRetries(ctx context.Context, auth authority.SystemAuthority, command RetryDeliveriesCommand) (*deliveryRetryBatch, error) {
@@ -524,10 +733,7 @@ func (s *Service) retryDelivery(ctx context.Context, candidate RetryCandidate, n
 }
 
 func retryExecutionRequest(candidate RetryCandidate) ExecutionDispatchRequest {
-	payload := candidate.Payload
-	if payload == nil {
-		payload = candidate.Event.Payload
-	}
+	payload := retryCandidatePayload(candidate)
 	attrs := candidate.SubjectAttrs
 	if attrs == nil {
 		attrs = candidate.Event.SubjectAttrs
@@ -538,7 +744,7 @@ func retryExecutionRequest(candidate RetryCandidate) ExecutionDispatchRequest {
 	}
 	return ExecutionDispatchRequest{
 		WorkspaceKey:            candidate.Event.WorkspaceKey,
-		IdempotencyKey:          candidate.Event.IdempotencyKey + "#" + candidate.Delivery.TriggerBindingID,
+		IdempotencyKey:          deliveryDispatchIdempotencyKey(candidate.Event.IdempotencyKey, candidate.Delivery.TriggerBindingID),
 		ExpectedDeliveryStatus:  candidate.Delivery.Status,
 		ExpectedDeliveryAttempt: candidate.Delivery.Attempt,
 		DriverID:                candidate.Target.DriverID,
@@ -561,6 +767,16 @@ func retryExecutionRequest(candidate RetryCandidate) ExecutionDispatchRequest {
 		Payload:                 cloneRawMessage(payload),
 		SubjectAttrs:            cloneStringMap(attrs),
 	}
+}
+
+func retryCandidatePayload(candidate RetryCandidate) json.RawMessage {
+	if candidate.Payload != nil {
+		return candidate.Payload
+	}
+	if candidate.Event == nil {
+		return nil
+	}
+	return candidate.Event.Payload
 }
 
 func cronClaimIdempotencyKey(workspace string, before, claimUntil time.Time, limit int) string {

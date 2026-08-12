@@ -51,6 +51,17 @@ type SessionResponse struct {
 
 	// Detail-only field — omitted in list view
 	LastError string `json:"last_error,omitempty"`
+
+	// Execution evidence promoted from TaskRun/AgentSession metadata so the UI
+	// can prove runtime and delivery outcomes without inspecting raw storage.
+	RuntimeStrategy string `json:"runtime_strategy,omitempty"`
+	DeliveryMode    string `json:"delivery,omitempty"`
+	PatchBackStatus string `json:"patch_back_status,omitempty"`
+	LogsRef         string `json:"logs_ref,omitempty"`
+	LocalBranch     string `json:"local_branch,omitempty"`
+	HeadSHA         string `json:"head_sha,omitempty"`
+	GitHubBranch    string `json:"github_branch,omitempty"`
+	GitHubPRURL     string `json:"github_pr_url,omitempty"`
 }
 
 // TranscriptEntry is the API representation of a single transcript entry.

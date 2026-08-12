@@ -12,8 +12,6 @@ import {
   type WorkflowVersionActionResult,
   type WorkflowVersionsResponse,
 } from "@/api/workflows";
-import { getAuthToken } from "@/api/common";
-import { hasLocalWorkflowLifecycleSession } from "@/api/workflows/localOperatorSession";
 
 export interface SaveWorkflowSourceInput {
   files: Record<string, string>;
@@ -23,8 +21,6 @@ export interface SaveWorkflowSourceInput {
 }
 
 export interface UseWorkflowSourceReturn {
-  /** Whether this browser has external JWT or trusted Desktop lifecycle authority. */
-  canManageVersions: boolean;
   /** Load a builtin workflow's TS source. Rejects with `ApiError` 404 when none. */
   getSource: (name: string) => Promise<WorkflowSource>;
   /** List built driver versions for a workflow. */
@@ -63,8 +59,6 @@ export interface UseWorkflowSourceReturn {
 export function useWorkflowSource(
   workspaceId: string,
 ): UseWorkflowSourceReturn {
-  const canManageVersions =
-    hasLocalWorkflowLifecycleSession(workspaceId) || getAuthToken() !== null;
   const getSource = useCallback(
     (name: string): Promise<WorkflowSource> =>
       getWorkflowSource(workspaceId, name),
@@ -110,7 +104,6 @@ export function useWorkflowSource(
 
   return useMemo(
     () => ({
-      canManageVersions,
       getSource,
       listVersions,
       saveSource,
@@ -125,7 +118,6 @@ export function useWorkflowSource(
       approveVersion,
       unapproveVersion,
       activateVersion,
-      canManageVersions,
     ],
   );
 }

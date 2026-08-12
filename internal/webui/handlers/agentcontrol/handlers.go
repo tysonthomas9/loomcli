@@ -11,8 +11,10 @@ import (
 )
 
 // handleAgentStop handles POST /api/workspaces/{ws}/agents/{name}/stop.
-// Without force (or empty body): sends agent_yield, returns 202.
-// With {"force": true}: sends agent_stop(force=true), returns 200.
+// Without force (or empty body), the daemon first requests a cooperative yield
+// and then records the agent as stopped. With {"force": true}, it skips yield
+// and sends SIGTERM directly. This local-socket fallback waits for the daemon's
+// semantic result, so a success response means the stop completed.
 func handleAgentStop(controlFn AgentControlFn) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		name := r.PathValue("name")
@@ -36,13 +38,11 @@ func handleAgentStop(controlFn AgentControlFn) http.HandlerFunc {
 				writeControlError(w, result)
 				return
 			}
-			handler.WriteJSON(w, http.StatusOK,
-				dto.NewMessageResponse(fmt.Sprintf("agent %q force-stopped", name)))
+			writeLifecycleSuccess(w, fmt.Sprintf("agent %q force-stopped", name))
 			return
 		}
 
-		// Non-force: send yield and return 202.
-		result, err := controlFn("agent_yield", name, false)
+		result, err := controlFn("agent_stop", name, false)
 		if err != nil {
 			writeDaemonError(w, err)
 			return
@@ -51,8 +51,7 @@ func handleAgentStop(controlFn AgentControlFn) http.HandlerFunc {
 			writeControlError(w, result)
 			return
 		}
-		handler.WriteJSON(w, http.StatusAccepted,
-			dto.NewMessageResponse(fmt.Sprintf("yield requested for agent %q; poll GET /agents to track status", name)))
+		writeLifecycleSuccess(w, fmt.Sprintf("agent %q stopped", name))
 	}
 }
 
@@ -69,8 +68,7 @@ func handleAgentStart(controlFn AgentControlFn) http.HandlerFunc {
 			writeControlError(w, result)
 			return
 		}
-		handler.WriteJSON(w, http.StatusOK,
-			dto.NewMessageResponse(fmt.Sprintf("agent %q started", name)))
+		writeLifecycleSuccess(w, fmt.Sprintf("agent %q started", name))
 	}
 }
 
@@ -87,8 +85,7 @@ func handleAgentRestart(controlFn AgentControlFn) http.HandlerFunc {
 			writeControlError(w, result)
 			return
 		}
-		handler.WriteJSON(w, http.StatusOK,
-			dto.NewMessageResponse(fmt.Sprintf("agent %q restarted", name)))
+		writeLifecycleSuccess(w, fmt.Sprintf("agent %q restarted", name))
 	}
 }
 
@@ -105,9 +102,20 @@ func handleAgentYield(controlFn AgentControlFn) http.HandlerFunc {
 			writeControlError(w, result)
 			return
 		}
-		handler.WriteJSON(w, http.StatusOK,
-			dto.NewMessageResponse(fmt.Sprintf("yield requested for agent %q", name)))
+		writeLifecycleSuccess(w, fmt.Sprintf("yield requested for agent %q", name))
 	}
+}
+
+// writeLifecycleSuccess returns the same lifecycle receipt shape as the
+// store-backed handler. Direct daemon operations are synchronous, so there is
+// no durable command ID to poll and the command is already terminal.
+func writeLifecycleSuccess(w http.ResponseWriter, message string) {
+	handler.WriteJSON(w, http.StatusOK, dto.AgentLifecycleResponse{
+		Message:   message,
+		Pending:   false,
+		CommandID: "",
+		Status:    "succeeded",
+	})
 }
 
 // handleAgentList serves GET /api/workspaces/{ws}/agents. Used by the

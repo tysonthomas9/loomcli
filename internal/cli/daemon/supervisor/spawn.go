@@ -114,6 +114,9 @@ func buildAgentExecCmd(ap *AgentProcess, backend, epicID string) (*exec.Cmd, err
 		return exec.Command(loomPath, args...), nil //nolint:gosec // G204: intentional loom subprocess launch
 	}
 
+	if strings.TrimSpace(ap.RoleConfig.TaskFilter) == "bug" && !ap.RoleConfig.ReadOnly {
+		return nil, fmt.Errorf("custom role %q task_filter %q requires read_only=true", ap.Entry.Role, "bug")
+	}
 	promptFile := strings.TrimSpace(ap.RoleConfig.PromptFile)
 	if promptFile == "" {
 		return nil, fmt.Errorf("custom role %q missing prompt_file", ap.Entry.Role)
@@ -133,6 +136,17 @@ func buildAgentExecCmd(ap *AgentProcess, backend, epicID string) (*exec.Cmd, err
 
 // appendRoleEnv adds role constraint env vars (allowed/denied tools, read-only, repo).
 func appendRoleEnv(env []string, ap *AgentProcess) []string {
+	// Role configuration is authoritative. Do not let a daemon-level
+	// LOOM_READ_ONLY value leak into a role that was created or edited as
+	// writable.
+	filtered := env[:0]
+	for _, entry := range env {
+		if !strings.HasPrefix(entry, "LOOM_READ_ONLY=") {
+			filtered = append(filtered, entry)
+		}
+	}
+	env = filtered
+
 	if ap.Entry.Repo != "" {
 		env = append(env, fmt.Sprintf("LOOM_AGENT_REPO=%s", ap.Entry.Repo))
 	}

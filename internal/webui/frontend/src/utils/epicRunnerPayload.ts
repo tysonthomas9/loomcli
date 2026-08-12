@@ -5,6 +5,7 @@ export interface EpicRunnerRuntimePayload {
   runner?: string;
   repoUrl?: string;
   baseBranch?: string;
+  deliveryMode: "patch-back" | "pull-request";
   openPullRequest?: boolean;
   stackedPullRequests?: boolean;
 }
@@ -46,6 +47,7 @@ export function epicRunnerRuntimePayload({
     // closed if the desktop GitHub credential is not configured.
     return {
       runner: "local-task-runner",
+      deliveryMode: repo.repoUrl ? "pull-request" : "patch-back",
       ...(repo.repoUrl
         ? {
             repoUrl: repo.repoUrl,
@@ -62,6 +64,7 @@ export function epicRunnerRuntimePayload({
   }
   return {
     runner: "daytona-task-runner",
+    deliveryMode: "pull-request",
     repoUrl: repo.repoUrl,
     baseBranch: repo.baseBranch,
     openPullRequest: true,

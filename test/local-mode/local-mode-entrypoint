@@ -35,6 +35,17 @@ case "$AGENT_BACKEND" in
 esac
 PLAN_AGENT="${LOOM_LOCAL_MODE_PLAN_AGENT:-$DEFAULT_PLAN_AGENT}"
 CODE_AGENT="${LOOM_LOCAL_MODE_CODE_AGENT:-$DEFAULT_CODE_AGENT}"
+TS_PLAN_AGENT_NAME="${LOOM_LOCAL_MODE_TS_PLAN_AGENT_NAME:-Local mode TS planner}"
+TS_CODE_AGENT_NAME="${LOOM_LOCAL_MODE_TS_CODE_AGENT_NAME:-Local mode TS coder}"
+TS_PLAN_ROLE="${LOOM_LOCAL_MODE_TS_PLAN_ROLE:-local-mode-ts-plan}"
+TS_CODE_ROLE="${LOOM_LOCAL_MODE_TS_CODE_ROLE:-local-mode-ts-task}"
+TS_PLAN_BINDING="${LOOM_LOCAL_MODE_TS_PLAN_BINDING:-local-mode-ts-planner}"
+TS_CODE_BINDING="${LOOM_LOCAL_MODE_TS_CODE_BINDING:-local-mode-ts-coder}"
+PLAN_AGENT_RECORD_ID=""
+CODE_AGENT_RECORD_ID=""
+FLEET_API_BASE="${LOOM_FLEET_DB_URL:-http://fleet-db:8080}"
+FLEET_API_KEY="${LOOM_FLEET_DB_API_KEY:-}"
+FLEET_API_ACTOR="${LOOM_FLEET_DB_ACTOR:-local-mode-harness@fixture.local}"
 PLAN_TASK_ID=""
 CODE_TASK_ID=""
 PLAN_TASK_TITLE="${LOOM_LOCAL_MODE_PLAN_TASK_TITLE:-Local mode planner dogfood} [run:${RUN_ID}]"
@@ -187,6 +198,33 @@ http_post_json() {
   wget -qO- --timeout=5 --tries=1 --header="Content-Type: application/json" --post-data="$body" "$url"
 }
 
+http_request_json() {
+  method="$1"
+  url="$2"
+  body="${3:-}"
+  args=(-fsS --max-time 180 -X "$method" -H "Accept: application/json" -H "Content-Type: application/json")
+  if [ "$body" != "" ]; then
+    args+=(--data "$body")
+  fi
+  curl "${args[@]}" "$url"
+}
+
+fleet_request_json() {
+  method="$1"
+  url="$2"
+  body="${3:-}"
+  if [ "$FLEET_API_KEY" = "" ]; then
+    echo "[local-mode] FATAL: LOOM_FLEET_DB_API_KEY is required for authenticated FleetDB setup" >&2
+    return 1
+  fi
+  args=(-fsS --max-time 180 -X "$method" -H "Accept: application/json" -H "Content-Type: application/json"
+    -H "Authorization: Bearer ${FLEET_API_KEY}" -H "X-API-Key: ${FLEET_API_KEY}" -H "X-Actor: ${FLEET_API_ACTOR}")
+  if [ "$body" != "" ]; then
+    args+=(--data "$body")
+  fi
+  curl "${args[@]}" "$url"
+}
+
 wait_for_url() {
   url="$1"
   label="$2"
@@ -259,6 +297,16 @@ create_workspace() {
   push_current_branch "$WORKSPACE_REPO"
 }
 
+prepare_ts_patchback_repo() {
+  # prompt-agent asks coder runs for local-branch delivery. This deterministic
+  # execution proof needs the persisted diff/patch-back artifact instead, so the
+  # disposable TS-plane fixture deliberately has no publish remote. The runner's
+  # explicit fallback then returns a patch for the host bridge to apply and audit.
+  if git -C "$WORKSPACE_REPO" remote get-url origin >/dev/null 2>&1; then
+    git -C "$WORKSPACE_REPO" remote remove origin
+  fi
+}
+
 create_agent_worktree() {
   agent="$1"
   path="${WORKSPACE_ROOT}/worktrees/source-repo/${agent}"
@@ -309,7 +357,11 @@ register_agents() {
   loom daemon profile set issue_backend fleetdb
   loom daemon profile set log_dir "${WORKSPACE_ROOT}/.loom/daemon-logs"
   loom daemon profile set events_dir "${WORKSPACE_ROOT}/.loom/events"
-  loom daemon profile set max_agents 2
+  # The UI reliability proof deliberately creates every available legacy
+  # agent template in one workspace. Keep the local-mode profile aligned with
+  # Loom's default so those valid assignments do not brick daemon startup
+  # merely because the deterministic seed begins with two workers.
+  loom daemon profile set max_agents 20
   loom daemon profile set startup_timeout 30
 
   if [ "$AGENT_BACKEND" != "localdogfood" ]; then
@@ -406,6 +458,86 @@ prepare_daytona_credentials() {
 
 issues_api() {
   printf 'http://127.0.0.1:%s/api/workspaces/%s' "$LOOM_PORT" "$WORKSPACE"
+}
+
+prompt_agent_by_name() {
+  name="$1"
+  http_get "$(issues_api)/agents" |
+    jq -c --arg name "$name" '[.data[]? | select(.kind == "prompt" and .name == $name)] | if length == 1 then .[0] else empty end'
+}
+
+seed_prompt_agent() {
+  name="$1"
+  role="$2"
+  binding="$3"
+  task_filter="$4"
+  prompt="$5"
+
+  record="$(prompt_agent_by_name "$name")"
+  if [ "$record" = "" ]; then
+    body="$(jq -cn \
+      --arg name "$name" \
+      --arg backend "$AGENT_BACKEND" \
+      --arg role "$role" \
+      --arg binding "$binding" \
+      --arg task_filter "$task_filter" \
+      --arg prompt "$prompt" \
+      '{kind:"prompt",name:$name,backend:$backend,behavior:{role_name:$role,role_create:{description:"Deterministic supervisor-disabled execution proof",prompt:$prompt,prompt_filename:($role + ".md"),task_filter:$task_filter,backend:$backend}},trigger:{source_kind:"internal",binding_id:$binding,event_type_patterns:["internal.task.ready"]},enabled:true}')"
+    record="$(http_request_json POST "$(issues_api)/agents" "$body")" || {
+      echo "[local-mode] FATAL: public API failed to create prompt agent ${name}" >&2
+      return 1
+    }
+    echo "[local-mode] public API created prompt agent ${name}" >&2
+  else
+    echo "[local-mode] public API prompt agent ${name} already exists" >&2
+  fi
+
+  if ! printf '%s' "$record" | jq -e \
+    --arg role "$role" --arg binding "$binding" '
+      .kind == "prompt" and .enabled == true and .behavior.role_name == $role and
+      any(.bindings[]?; .binding_id == $binding and .source_kind == "internal" and
+        .enabled == true and (.event_type_patterns | index("internal.task.ready") != null))
+    ' >/dev/null; then
+    echo "[local-mode] FATAL: prompt agent ${name} does not match its requested role/binding" >&2
+    printf '%s\n' "$record" >&2
+    return 1
+  fi
+  SEED_AGENT_ID="$(printf '%s' "$record" | jq -r '.id // empty')"
+  if [ "$SEED_AGENT_ID" = "" ]; then
+    echo "[local-mode] FATAL: prompt agent ${name} response omitted id" >&2
+    return 1
+  fi
+}
+
+seed_ts_prompt_agents() {
+  # The task-run host resolves the local runner backend from the durable
+  # workspace profile. Configure that profile through FleetDB's authenticated
+  # public API: localdogfood is a harness-only backend and is intentionally not
+  # added to the production backend dropdown accepted by Loom's UI endpoint.
+  # A daemon profile is configuration data only; this does not launch a daemon
+  # or create any PID/socket/control artifact (the negative verifier proves it).
+  backend_body="$(jq -cn --arg backend "$AGENT_BACKEND" '{agent_backend:$backend}')"
+  backend_profile="$(fleet_request_json PATCH "${FLEET_API_BASE%/}/api/v1/${WORKSPACE}/daemon" "$backend_body")" || {
+    echo "[local-mode] FATAL: public FleetDB API failed to configure workspace backend ${AGENT_BACKEND}" >&2
+    return 1
+  }
+  if ! printf '%s' "$backend_profile" | jq -e --arg workspace "$WORKSPACE" --arg backend "$AGENT_BACKEND" \
+    '.workspace_key == $workspace and .agent_backend == $backend' >/dev/null; then
+    echo "[local-mode] FATAL: public FleetDB API returned an invalid workspace backend profile" >&2
+    printf '%s\n' "$backend_profile" >&2
+    return 1
+  fi
+  echo "[local-mode] public FleetDB API configured workspace backend ${AGENT_BACKEND}" >&2
+
+  seed_prompt_agent "$TS_PLAN_AGENT_NAME" "$TS_PLAN_ROLE" "$TS_PLAN_BINDING" "needs_plan" \
+    'LOOM_LOCALDOGFOOD_PHASE=plan
+Write an approved implementation design for the assigned task and make no repository changes. Do not change status or assignee; the workflow host moves it to review after the terminal receipt.'
+  PLAN_AGENT_RECORD_ID="$SEED_AGENT_ID"
+  seed_prompt_agent "$TS_CODE_AGENT_NAME" "$TS_CODE_ROLE" "$TS_CODE_BINDING" "has_design" \
+    'LOOM_LOCALDOGFOOD_PHASE=task
+Implement the approved task by changing and committing local-mode-agent-output.txt. Do not close or release the task; the workflow host owns terminalization.'
+  CODE_AGENT_RECORD_ID="$SEED_AGENT_ID"
+  echo "[local-mode] TS prompt agents are active before task creation: ${PLAN_AGENT_RECORD_ID}, ${CODE_AGENT_RECORD_ID}"
 }
 
 issue_json_field() {
@@ -573,19 +705,24 @@ seed_tasks() {
   link_parent_child "$PLAN_TASK_ID" "$epic_id"
   link_parent_child "$CODE_TASK_ID" "$epic_id"
 
-  # Extra board fixtures so the kanban shows multiple columns under the epic lane.
-  seed_issue_by_title_if_missing "Document local-mode runbook" \
-    "$(printf '{"title":"Document local-mode runbook","issue_type":"task","priority":2,"parent":"%s","source_repo":"source-repo","owner":"local-mode","description":"Add troubleshooting notes for Podman machine failures."}' "$epic_id")"
-  seed_issue_by_title_if_missing "Exercise epic swimlane UI" \
-    "$(printf '{"title":"Exercise epic swimlane UI","issue_type":"task","priority":2,"parent":"%s","source_repo":"source-repo","assignee":"%s","owner":"local-mode","description":"Verify epic grouping on the kanban board."}' "$epic_id" "$PLAN_AGENT")"
-  seed_issue_by_title_if_missing "Backlog grooming placeholder" \
-    "$(printf '{"title":"Backlog grooming placeholder","issue_type":"task","priority":4,"parent":"%s","status":"deferred","source_repo":"source-repo","owner":"local-mode","description":"Deferred task for backlog column demo."}' "$epic_id")"
+  # The deterministic TS proof creates only its two manifest-owned tasks. Extra
+  # ready fixtures would correctly fan out through both bindings but add unrelated
+  # DriverRuns to the acceptance evidence. Keep the richer board on the legacy
+  # supervised profile where it already belongs.
+  if ! plane_is_ts; then
+    seed_issue_by_title_if_missing "Document local-mode runbook" \
+      "$(printf '{"title":"Document local-mode runbook","issue_type":"task","priority":2,"parent":"%s","source_repo":"source-repo","owner":"local-mode","description":"Add troubleshooting notes for Podman machine failures."}' "$epic_id")"
+    seed_issue_by_title_if_missing "Exercise epic swimlane UI" \
+      "$(printf '{"title":"Exercise epic swimlane UI","issue_type":"task","priority":2,"parent":"%s","source_repo":"source-repo","assignee":"%s","owner":"local-mode","description":"Verify epic grouping on the kanban board."}' "$epic_id" "$PLAN_AGENT")"
+    seed_issue_by_title_if_missing "Backlog grooming placeholder" \
+      "$(printf '{"title":"Backlog grooming placeholder","issue_type":"task","priority":4,"parent":"%s","status":"deferred","source_repo":"source-repo","owner":"local-mode","description":"Deferred task for backlog column demo."}' "$epic_id")"
 
-  swim_id="$(find_issue_id_by_title "Exercise epic swimlane UI" "task")"
-  if [ -n "$swim_id" ] && [ "$(issue_json_field "$swim_id" status)" = "open" ]; then
-    if command -v curl >/dev/null 2>&1; then
-      curl -fsS --max-time 5 -X PATCH -H "Content-Type: application/json" \
-        --data '{"status":"in_progress"}' "$(issues_api)/issues/${swim_id}" >/dev/null 2>&1 || true
+    swim_id="$(find_issue_id_by_title "Exercise epic swimlane UI" "task")"
+    if [ -n "$swim_id" ] && [ "$(issue_json_field "$swim_id" status)" = "open" ]; then
+      if command -v curl >/dev/null 2>&1; then
+        curl -fsS --max-time 5 -X PATCH -H "Content-Type: application/json" \
+          --data '{"status":"in_progress"}' "$(issues_api)/issues/${swim_id}" >/dev/null 2>&1 || true
+      fi
     fi
   fi
 }
@@ -611,11 +748,20 @@ write_run_manifest() {
     --arg started_at "$RUN_STARTED_AT" \
     --arg workspace "$WORKSPACE" \
     --arg backend "$AGENT_BACKEND" \
+    --arg plane "$LOCAL_MODE_PLANE" \
+    --arg plan_agent_record_id "$PLAN_AGENT_RECORD_ID" \
+    --arg code_agent_record_id "$CODE_AGENT_RECORD_ID" \
+    --arg plan_agent_name "$TS_PLAN_AGENT_NAME" \
+    --arg code_agent_name "$TS_CODE_AGENT_NAME" \
+    --arg plan_agent_role "$TS_PLAN_ROLE" \
+    --arg code_agent_role "$TS_CODE_ROLE" \
+    --arg plan_binding_id "$TS_PLAN_BINDING" \
+    --arg code_binding_id "$TS_CODE_BINDING" \
     --arg plan_task_id "$PLAN_TASK_ID" \
     --arg code_task_id "$CODE_TASK_ID" \
     --arg plan_task_title "$PLAN_TASK_TITLE" \
     --arg code_task_title "$CODE_TASK_TITLE" \
-    '{checkout_id:$checkout_id,source_root:$source_root,compose_project:$compose_project,run_id:$run_id,started_at:$started_at,workspace:$workspace,backend:$backend,plan_task_id:$plan_task_id,code_task_id:$code_task_id,plan_task_title:$plan_task_title,code_task_title:$code_task_title}' \
+    '{checkout_id:$checkout_id,source_root:$source_root,compose_project:$compose_project,run_id:$run_id,started_at:$started_at,workspace:$workspace,backend:$backend,plane:$plane,plan_agent_record_id:$plan_agent_record_id,code_agent_record_id:$code_agent_record_id,plan_agent_name:$plan_agent_name,code_agent_name:$code_agent_name,plan_agent_role:$plan_agent_role,code_agent_role:$code_agent_role,plan_binding_id:$plan_binding_id,code_binding_id:$code_binding_id,plan_task_id:$plan_task_id,code_task_id:$code_task_id,plan_task_title:$plan_task_title,code_task_title:$code_task_title}' \
     > "$manifest_tmp"
   chmod 600 "$manifest_tmp"
   mv "$manifest_tmp" "$RUN_MANIFEST"
@@ -631,21 +777,67 @@ start_serve() {
 
 workspace_daemon_pid() {
   ws_path="$1"
+  proc_root="${2:-/proc}"
   pid_file="${ws_path}/.loom/daemon.pid"
   if [ ! -f "$pid_file" ]; then
     return 1
   fi
 
-  pid="$(tr -dc '0-9' < "$pid_file" || true)"
-  if [ "$pid" = "" ]; then
+  raw_pid="$(cat "$pid_file" 2>/dev/null || true)"
+  if [[ ! "$raw_pid" =~ ^[[:space:]]*([1-9][0-9]*)[[:space:]]*$ ]]; then
     return 1
   fi
-  if kill -0 "$pid" >/dev/null 2>&1; then
-    printf '%s\n' "$pid"
-    return 0
+  pid="${BASH_REMATCH[1]}"
+  if ! kill -0 "$pid" >/dev/null 2>&1; then
+    return 1
   fi
-  return 1
+  if ! workspace_daemon_process_matches "$pid" "$ws_path" "$proc_root"; then
+    return 1
+  fi
+
+  printf '%s\n' "$pid"
 }
+
+# workspace_daemon_process_matches prevents a preserved daemon.pid from
+# mistaking a reused PID for the workspace daemon. The local-mode manager runs
+# inside Linux, where /proc gives us both the exact argv and cwd. Fail closed
+# when either identity surface cannot be inspected: starting a replacement
+# daemon is safer than suppressing supervision because an unrelated process
+# happens to own the old PID.
+workspace_daemon_process_matches() {
+  pid="$1"
+  ws_path="$2"
+  proc_root="$3"
+  cmdline_file="${proc_root}/${pid}/cmdline"
+  cwd_path="${proc_root}/${pid}/cwd"
+  exe_path="${proc_root}/${pid}/exe"
+
+  if [ ! -r "$cmdline_file" ] || [ ! -e "$exe_path" ]; then
+    return 1
+  fi
+
+  loom_executable="$(command -v loom 2>/dev/null || true)"
+  if [ "$loom_executable" = "" ] || [ ! "$exe_path" -ef "$loom_executable" ]; then
+    return 1
+  fi
+  subcommand="$(LC_ALL=C tr '\000' '\n' < "$cmdline_file" | sed -n '2p')"
+  if [ "$subcommand" != "daemon" ]; then
+    return 1
+  fi
+
+  expected_cwd="$(cd "$ws_path" 2>/dev/null && pwd -P)" || return 1
+  actual_cwd="$(cd "$cwd_path" 2>/dev/null && pwd -P)" || return 1
+  [ "$actual_cwd" = "$expected_cwd" ]
+}
+
+if [ "${1:-}" = "--workspace-daemon-pid-only" ]; then
+  if [ "${2:-}" = "" ] || [ "${3:-}" = "" ]; then
+    echo "workspace path and proc root are required" >&2
+    exit 2
+  fi
+  workspace_daemon_pid "$2" "$3"
+  exit $?
+fi
 
 workspace_has_auto_agents() {
   ws_key="$1"
@@ -721,11 +913,19 @@ stop_workspace_daemons() {
     jq -r '.[] | select((.path // "") != "") | .path' 2>/dev/null |
     while read -r ws_path; do
       pid="$(workspace_daemon_pid "$ws_path" || true)"
-      if [ "$pid" != "" ]; then
+      # Re-check identity immediately before signaling. The daemon may exit
+      # and its PID may be reused while workspace enumeration is in progress.
+      verified_pid="$(workspace_daemon_pid "$ws_path" || true)"
+      if [ "$pid" != "" ] && [ "$verified_pid" = "$pid" ]; then
         kill "$pid" >/dev/null 2>&1 || true
       fi
     done
 }
+
+if [ "${1:-}" = "--stop-workspace-daemons-only" ]; then
+  stop_workspace_daemons
+  exit 0
+fi
 
 cleanup() {
   stop_workspace_daemons || true
@@ -752,6 +952,7 @@ create_source_repo
 create_workspace
 if plane_is_ts; then
   echo "[local-mode] plane=ts: skipping Go role-agent seeding (${PLAN_AGENT}/${CODE_AGENT}) and their worktrees; the TS/workflow plane owns the task queue"
+  prepare_ts_patchback_repo
 else
   create_agent_worktree "$PLAN_AGENT"
   create_agent_worktree "$CODE_AGENT"
@@ -760,6 +961,7 @@ trust_codex_local_mode_paths
 plane_is_ts || register_agents
 start_serve
 capture_run_started_at
+plane_is_ts && seed_ts_prompt_agents
 seed_tasks
 write_run_manifest
 
@@ -770,4 +972,9 @@ echo "[local-mode] epic lane:    $(find_epic_id)"
 echo "[local-mode] planner task: ${PLAN_TASK_ID}"
 echo "[local-mode] coder task:   ${CODE_TASK_ID}"
 
-run_daemon_manager
+if plane_is_ts; then
+  echo "[local-mode] plane=ts: daemon manager disabled; waiting on loom serve"
+  wait "$serve_pid"
+else
+  run_daemon_manager
+fi

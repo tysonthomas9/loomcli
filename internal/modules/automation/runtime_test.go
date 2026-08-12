@@ -7,6 +7,7 @@ import (
 	"errors"
 	"reflect"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -446,6 +447,40 @@ func seedRuntimeTestDelivery(h *testHarness, candidate RetryCandidate) {
 	h.persistence.deliveries[deliveryMapKey(candidate.Delivery.WorkspaceKey, candidate.Delivery.DeliveryID)] = cloneDelivery(candidate.Delivery)
 }
 
+func repositoryRequiredRuntimeCandidate(bindingID, deliveryID string) RetryCandidate {
+	candidate := runtimeTestCandidate(DeliveryFailed, 2, 5, 30*time.Second)
+	sourceEventID := "task-ready-reconcile-v1-" + strings.Repeat("a", 64)
+	candidate.Event.EventID = "event-task-ready-reconcile"
+	candidate.Event.TriggerBindingID = bindingID
+	candidate.Event.SourceKind = SourceKindInternal
+	candidate.Event.SourceEventID = sourceEventID
+	candidate.Event.EventType = taskReadyEventType
+	candidate.Event.RouteKey = taskReadyRouteKey
+	candidate.Event.SubjectRef = "issue:PHASE4-TERRA-FRESH-20260718-10"
+	candidate.Event.ActorRef = "subject-system"
+	candidate.Event.Origin = EventOriginSystem
+	candidate.Event.IdempotencyKey = internalEventIdempotencyKey("ws", sourceEventID)
+	candidate.Event.SignatureStatus = SignatureStatusInternal
+	candidate.Event.Payload = json.RawMessage(`{"taskId":"PHASE4-TERRA-FRESH-20260718-10","repositoryRequired":true}`)
+	candidate.Delivery.DeliveryID = deliveryID
+	candidate.Delivery.TriggerEventID = candidate.Event.EventID
+	candidate.Delivery.TriggerBindingID = bindingID
+	candidate.Delivery.SubjectKey = bindingID + "|issue:PHASE4-TERRA-FRESH-20260718-10"
+	candidate.Delivery.DriverID = promptAgentDriverID
+	candidate.Delivery.DriverVersionID = "prompt-version"
+	candidate.Delivery.TargetAgentServiceID = "agent-" + bindingID
+	candidate.Delivery.SourceKind = SourceKindInternal
+	candidate.Delivery.ConcurrencyPolicy = ConcurrencyOneActivePerEpic
+	candidate.Target.DriverID = promptAgentDriverID
+	candidate.Target.DriverVersionID = "prompt-version"
+	candidate.Target.TargetAgentServiceID = candidate.Delivery.TargetAgentServiceID
+	candidate.Target.SourceKind = SourceKindInternal
+	candidate.Target.BindingID = bindingID
+	candidate.Target.ConcurrencyPolicy = ConcurrencyOneActivePerEpic
+	candidate.Payload = cloneRawMessage(candidate.Event.Payload)
+	return candidate
+}
+
 func TestRetryDeliveriesUsesImmutableSnapshotAndCommittedDispatch(t *testing.T) {
 	h := newTestHarness(t)
 	candidate := runtimeTestCandidate(DeliveryFailed, 2, 5, 30*time.Second)
@@ -485,6 +520,132 @@ func TestRetryDeliveriesUsesImmutableSnapshotAndCommittedDispatch(t *testing.T) 
 	if stored.Status != DeliveryDispatched || stored.Attempt != 2 || stored.DriverRunID != "run-binding-a" {
 		t.Fatalf("committed delivery = %+v", stored)
 	}
+}
+
+func TestRetryDeliveriesDeduplicatesRepositoryRequiredPromptFanoutGlobally(t *testing.T) {
+	const (
+		bindingA = "agent-binding-a-00000000000000000000000000000000"
+		bindingZ = "agent-binding-z-00000000000000000000000000000000"
+	)
+	newPair := func() (RetryCandidate, RetryCandidate) {
+		return repositoryRequiredRuntimeCandidate(bindingA, "delivery-a"),
+			repositoryRequiredRuntimeCandidate(bindingZ, "delivery-z")
+	}
+
+	t.Run("same claim dispatches one and duplicates sibling", func(t *testing.T) {
+		h := newTestHarness(t)
+		winner, sibling := newPair()
+		seedRuntimeTestDelivery(h, winner)
+		seedRuntimeTestDelivery(h, sibling)
+		retryPort := &runtimeTestRetryPort{candidates: []RetryCandidate{sibling, winner}}
+		WithRuntimePorts(nil, retryPort)(h.service)
+
+		result, err := h.service.RetryDeliveries(t.Context(), h.issueSystem(ActionRetryDeliveries), RetryDeliveriesCommand{WorkspaceKey: "ws"})
+		if err != nil || result == nil || result.Claimed != 2 || result.Dispatched != 1 ||
+			result.Deduplicated != 1 || result.Failed != 0 {
+			t.Fatalf("RetryDeliveries = %+v, %v", result, err)
+		}
+		if got := callBindingIDs(h.execution.calls); !reflect.DeepEqual(got, []string{bindingA}) {
+			t.Fatalf("repository-required retry dispatches = %v", got)
+		}
+		if key := h.execution.calls[0].IdempotencyKey; !strings.HasPrefix(key, deliveryDispatchHashPrefix) ||
+			len(key) > maxDeliveryDispatchIdempotencyKeyLen {
+			t.Fatalf("retry dispatch key = %q (%d)", key, len(key))
+		}
+		storedWinner := h.persistence.deliveries[deliveryMapKey("ws", winner.Delivery.DeliveryID)]
+		storedSibling := h.persistence.deliveries[deliveryMapKey("ws", sibling.Delivery.DeliveryID)]
+		if storedWinner.Status != DeliveryDispatched || storedWinner.DriverRunID == "" ||
+			storedSibling.Status != DeliveryDuplicate || storedSibling.DriverRunID != "" {
+			t.Fatalf("retry fanout = winner:%+v sibling:%+v", storedWinner, storedSibling)
+		}
+		if len(h.persistence.transitionCalls) != 1 {
+			t.Fatalf("duplicate transitions = %+v", h.persistence.transitionCalls)
+		}
+		transition := h.persistence.transitionCalls[0]
+		if transition.DeliveryID != sibling.Delivery.DeliveryID || transition.ExpectedStatus != DeliveryFailed ||
+			transition.ExpectedAttempt != 2 || transition.Status != DeliveryDuplicate {
+			t.Fatalf("sibling duplicate transition = %+v", transition)
+		}
+	})
+
+	t.Run("split claims elect against all event deliveries", func(t *testing.T) {
+		h := newTestHarness(t)
+		winner, sibling := newPair()
+		seedRuntimeTestDelivery(h, winner)
+		seedRuntimeTestDelivery(h, sibling)
+		retryPort := &runtimeTestRetryPort{candidates: []RetryCandidate{sibling}}
+		WithRuntimePorts(nil, retryPort)(h.service)
+
+		first, err := h.service.RetryDeliveries(t.Context(), h.issueSystem(ActionRetryDeliveries), RetryDeliveriesCommand{WorkspaceKey: "ws", Limit: 1})
+		if err != nil || first == nil || first.Claimed != 1 || first.Deduplicated != 1 || len(h.execution.calls) != 0 ||
+			h.persistence.deliveries[deliveryMapKey("ws", sibling.Delivery.DeliveryID)].Status != DeliveryDuplicate {
+			t.Fatalf("noncanonical split claim = %+v, %v calls=%d", first, err, len(h.execution.calls))
+		}
+
+		retryPort.candidates = []RetryCandidate{winner}
+		second, err := h.service.RetryDeliveries(t.Context(), h.issueSystem(ActionRetryDeliveries), RetryDeliveriesCommand{WorkspaceKey: "ws", Limit: 1})
+		if err != nil || second == nil || second.Dispatched != 1 ||
+			!reflect.DeepEqual(callBindingIDs(h.execution.calls), []string{bindingA}) {
+			t.Fatalf("canonical split claim = %+v, %v calls=%v", second, err, callBindingIDs(h.execution.calls))
+		}
+	})
+
+	t.Run("existing later owner suppresses earlier failed leg", func(t *testing.T) {
+		h := newTestHarness(t)
+		failed, owner := newPair()
+		owner.Delivery.Status = DeliveryDispatched
+		owner.Delivery.DriverRunID = "run-existing"
+		owner.Delivery.NextRetryAt = nil
+		seedRuntimeTestDelivery(h, failed)
+		seedRuntimeTestDelivery(h, owner)
+		retryPort := &runtimeTestRetryPort{candidates: []RetryCandidate{failed}}
+		WithRuntimePorts(nil, retryPort)(h.service)
+
+		result, err := h.service.RetryDeliveries(t.Context(), h.issueSystem(ActionRetryDeliveries), RetryDeliveriesCommand{WorkspaceKey: "ws"})
+		if err != nil || result == nil || len(h.execution.calls) != 0 ||
+			h.persistence.deliveries[deliveryMapKey("ws", failed.Delivery.DeliveryID)].Status != DeliveryDuplicate {
+			t.Fatalf("existing-owner retry = %+v, %v calls=%d", result, err, len(h.execution.calls))
+		}
+	})
+
+	t.Run("distinct existing run owners fail closed", func(t *testing.T) {
+		h := newTestHarness(t)
+		failed, ownerZ := newPair()
+		ownerY := repositoryRequiredRuntimeCandidate("agent-binding-y-00000000000000000000000000000000", "delivery-y")
+		for candidate, runID := range map[*RetryCandidate]string{&ownerY: "run-existing-y", &ownerZ: "run-existing-z"} {
+			candidate.Delivery.Status = DeliveryDispatched
+			candidate.Delivery.DriverRunID = runID
+			candidate.Delivery.NextRetryAt = nil
+		}
+		seedRuntimeTestDelivery(h, failed)
+		seedRuntimeTestDelivery(h, ownerY)
+		seedRuntimeTestDelivery(h, ownerZ)
+		retryPort := &runtimeTestRetryPort{candidates: []RetryCandidate{failed}}
+		WithRuntimePorts(nil, retryPort)(h.service)
+
+		result, err := h.service.RetryDeliveries(t.Context(), h.issueSystem(ActionRetryDeliveries), RetryDeliveriesCommand{WorkspaceKey: "ws"})
+		if !errors.Is(err, ErrInvalidPersistedState) || result == nil || len(h.execution.calls) != 0 ||
+			len(h.persistence.transitionCalls) != 0 {
+			t.Fatalf("multiple-owner retry = %+v, %v calls=%d transitions=%d",
+				result, err, len(h.execution.calls), len(h.persistence.transitionCalls))
+		}
+	})
+
+	t.Run("sibling transition failure prevents winner dispatch", func(t *testing.T) {
+		h := newTestHarness(t)
+		winner, sibling := newPair()
+		seedRuntimeTestDelivery(h, winner)
+		seedRuntimeTestDelivery(h, sibling)
+		h.persistence.forceStaleTransition = true
+		retryPort := &runtimeTestRetryPort{candidates: []RetryCandidate{winner, sibling}}
+		WithRuntimePorts(nil, retryPort)(h.service)
+
+		result, err := h.service.RetryDeliveries(t.Context(), h.issueSystem(ActionRetryDeliveries), RetryDeliveriesCommand{WorkspaceKey: "ws"})
+		if err == nil || result == nil || len(h.execution.calls) != 0 ||
+			h.persistence.deliveries[deliveryMapKey("ws", winner.Delivery.DeliveryID)].Status != DeliveryFailed {
+			t.Fatalf("failed sibling dedup = %+v, %v calls=%d", result, err, len(h.execution.calls))
+		}
+	})
 }
 
 func TestRetryDeliveriesBacksOffHoldsAndExhausts(t *testing.T) {

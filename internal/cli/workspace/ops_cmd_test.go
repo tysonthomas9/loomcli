@@ -452,7 +452,10 @@ func TestBuildLocalRuntimeDesktopModeReadErrorSurfacesAsError(t *testing.T) {
 }
 
 func TestWorkspaceOpsAgentStatusFlagsUnknownRole(t *testing.T) {
-	roleNames := map[string]struct{}{"plan": {}, "task": {}}
+	rolesByName := map[string]*domain.Role{
+		"plan": {Name: "plan"},
+		"task": {Name: "task"},
+	}
 	agent := &domain.Agent{
 		Name:         "rogue",
 		RoleName:     "missing",
@@ -460,7 +463,7 @@ func TestWorkspaceOpsAgentStatusFlagsUnknownRole(t *testing.T) {
 		DesiredState: domain.AgentDesiredRunning,
 	}
 
-	item, problems := workspaceOpsAgentStatus(bootstrap.WorkspaceLocalState{}, nil, roleNames, agent)
+	item, problems := workspaceOpsAgentStatus(bootstrap.WorkspaceLocalState{}, nil, rolesByName, agent)
 
 	if item.Runnable {
 		t.Error("Runnable = true, want false (unknown role forces non-runnable)")
@@ -480,7 +483,7 @@ func TestWorkspaceOpsAgentStatusFlagsUnknownRole(t *testing.T) {
 }
 
 func TestWorkspaceOpsAgentStatusFlagsMissingWorktree(t *testing.T) {
-	roleNames := map[string]struct{}{"plan": {}}
+	rolesByName := map[string]*domain.Role{"plan": {Name: "plan"}}
 	localState := bootstrap.WorkspaceLocalState{
 		Path: "/some/workspace",
 		Agents: map[string]bootstrap.AgentLocalState{
@@ -494,7 +497,7 @@ func TestWorkspaceOpsAgentStatusFlagsMissingWorktree(t *testing.T) {
 		DesiredState: domain.AgentDesiredRunning,
 	}
 
-	item, problems := workspaceOpsAgentStatus(localState, nil, roleNames, agent)
+	item, problems := workspaceOpsAgentStatus(localState, nil, rolesByName, agent)
 
 	if !item.Runnable {
 		t.Error("Runnable = false; want true (role exists, desired running)")
@@ -510,6 +513,36 @@ func TestWorkspaceOpsAgentStatusFlagsMissingWorktree(t *testing.T) {
 	}
 	if problems[0].Code != "agent_missing_worktree" || problems[0].Severity != "error" {
 		t.Errorf("problem = %+v, want code=agent_missing_worktree severity=error", problems[0])
+	}
+}
+
+func TestWorkspaceOpsAgentStatusDoesNotRequireInteractiveWorktree(t *testing.T) {
+	rolesByName := map[string]*domain.Role{
+		"pr-review": {
+			Name: "pr-review",
+			Kind: domain.RoleKindInteractive,
+		},
+	}
+	localState := bootstrap.WorkspaceLocalState{Path: "/some/workspace"}
+	agent := &domain.Agent{
+		Name:         "reviewer",
+		RoleName:     "pr-review",
+		State:        domain.AgentStateActive,
+		DesiredState: domain.AgentDesiredRunning,
+	}
+
+	item, problems := workspaceOpsAgentStatus(localState, nil, rolesByName, agent)
+
+	if !item.Runnable {
+		t.Error("Runnable = false; want true for interactive agent")
+	}
+	if item.Reason == "missing_local_worktree" {
+		t.Fatalf("Reason = %q, interactive agents run from workspace root", item.Reason)
+	}
+	for _, problem := range problems {
+		if problem.Code == "agent_missing_worktree" {
+			t.Fatalf("interactive agent got false-positive worktree problem: %+v", problem)
+		}
 	}
 }
 

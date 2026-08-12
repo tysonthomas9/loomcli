@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -48,6 +49,22 @@ type ConnectorCompatibility interface {
 	RevokeBindingGrants(ctx context.Context, workspaceKey, bindingID string) (int, error)
 }
 
+// UnattachedBindingIdentityChecker prevents an ordinary trigger binding from
+// occupying an identifier already owned by either supervised-agent
+// representation. Managed bindings attached to an AgentService bypass this
+// HTTP create path and retain their existing aggregate-owned lifecycle.
+//
+// Agent and TriggerBinding identities live in separate FleetDB namespaces, so
+// this check cannot reserve a name atomically. The HTTP adapter therefore
+// checks before and after create and compensates a failed post-check through
+// Automation's fenced disable/delete commands. Another process can still
+// create an Agent after the final successful check; eliminating that last
+// interval requires a FleetDB identity-reservation transaction shared by both
+// aggregate create paths.
+type UnattachedBindingIdentityChecker interface {
+	CheckUnattachedBindingID(ctx context.Context, workspaceKey, bindingID string) error
+}
+
 // Config contains only the public Automation ports and narrow compatibility
 // reads needed by this transport.
 type Config struct {
@@ -59,6 +76,7 @@ type Config struct {
 	WorkspaceFromContext func(context.Context) string
 	Runs                 RunQueries
 	Connectors           ConnectorCompatibility
+	AgentIdentities      UnattachedBindingIdentityChecker
 }
 
 type Module struct {
@@ -70,6 +88,7 @@ type Module struct {
 	workspaceFromContext func(context.Context) string
 	runs                 RunQueries
 	connectors           ConnectorCompatibility
+	agentIdentities      UnattachedBindingIdentityChecker
 	active               bool
 }
 
@@ -80,7 +99,7 @@ func New(config Config) *Module {
 		createWorkflow: config.CreateWorkflow,
 		commands:       config.Commands, queries: config.Queries, manualDispatch: config.ManualDispatch,
 		operatorAuthority: config.OperatorAuthority, workspaceFromContext: config.WorkspaceFromContext,
-		runs: config.Runs, connectors: config.Connectors, active: true,
+		runs: config.Runs, connectors: config.Connectors, agentIdentities: config.AgentIdentities, active: true,
 	}
 }
 
@@ -270,7 +289,7 @@ func (m *Module) createBinding(w http.ResponseWriter, r *http.Request) { //nolin
 	if !ok {
 		return
 	}
-	if m.createWorkflow == nil || m.queries == nil {
+	if m.createWorkflow == nil || m.commands == nil || m.queries == nil {
 		writeAutomationError(w, automation.ErrUnavailable, "create trigger binding failed")
 		return
 	}
@@ -279,7 +298,7 @@ func (m *Module) createBinding(w http.ResponseWriter, r *http.Request) { //nolin
 		handler.RespondError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
-	sourceKind := strings.TrimSpace(request.SourceKind)
+	sourceKind := strings.ToLower(strings.TrimSpace(request.SourceKind))
 	if sourceKind == "" {
 		sourceKind = "github"
 	}
@@ -319,6 +338,12 @@ func (m *Module) createBinding(w http.ResponseWriter, r *http.Request) { //nolin
 	if bindingID == "" {
 		bindingID = "binding-" + strings.ReplaceAll(routeKey, ".", "-")
 	}
+	driverID := strings.TrimSpace(request.DriverID)
+	workflowName := strings.TrimSpace(request.Workflow)
+	if driverID == "" && workflowName == "" {
+		writeAutomationError(w, fmt.Errorf("one of workflow or driver_id is required: %w", automation.ErrInvalid), "create trigger binding failed")
+		return
+	}
 	if existing, err := m.queries.GetBinding(r.Context(), workspace, bindingID); err == nil {
 		if existing == nil {
 			writeAutomationError(w, automation.ErrInvalidPersistedState, "get trigger binding failed")
@@ -332,6 +357,14 @@ func (m *Module) createBinding(w http.ResponseWriter, r *http.Request) { //nolin
 			writeAutomationError(w, fmt.Errorf("trigger binding %q already exists: %w", bindingID, automation.ErrConflict), "create trigger binding failed")
 			return
 		}
+		if err := m.checkUnattachedBindingID(r.Context(), workspace, bindingID); err != nil {
+			writeAutomationError(w, err, "check trigger binding identifier failed")
+			return
+		}
+		if err := m.validateEnsureIdentity(r.Context(), workspace, request, existing, sourceKind, routeKey, driverID, workflowName); err != nil {
+			writeAutomationError(w, err, "create trigger binding failed")
+			return
+		}
 		if !m.configureSecret(w, r, workspace, existing.BindingID, existing.SourceKind, secret) {
 			return
 		}
@@ -341,10 +374,8 @@ func (m *Module) createBinding(w http.ResponseWriter, r *http.Request) { //nolin
 		writeAutomationError(w, err, "get trigger binding failed")
 		return
 	}
-	driverID := strings.TrimSpace(request.DriverID)
-	workflowName := strings.TrimSpace(request.Workflow)
-	if driverID == "" && workflowName == "" {
-		writeAutomationError(w, fmt.Errorf("one of workflow or driver_id is required: %w", automation.ErrInvalid), "create trigger binding failed")
+	if err := m.checkUnattachedBindingID(r.Context(), workspace, bindingID); err != nil {
+		writeAutomationError(w, err, "check trigger binding identifier failed")
 		return
 	}
 	binding, err := m.createWorkflow.Create(r.Context(), auth, workflowbinding.CreateRequest{
@@ -369,10 +400,134 @@ func (m *Module) createBinding(w http.ResponseWriter, r *http.Request) { //nolin
 		writeAutomationError(w, automation.ErrInvalidPersistedState, "create trigger binding failed")
 		return
 	}
+	if identityErr := m.checkUnattachedBindingID(r.Context(), workspace, binding.BindingID); identityErr != nil {
+		if rollbackErr := m.rollbackCreatedBinding(r, workspace, binding); rollbackErr != nil {
+			writeAutomationError(
+				w,
+				fmt.Errorf(
+					"post-create identity check failed (%v) and compensating delete failed (%v): %w",
+					identityErr, rollbackErr, automation.ErrInvalidPersistedState,
+				),
+				"trigger binding identity validation and rollback failed",
+			)
+			return
+		}
+		writeAutomationError(w, identityErr, "check created trigger binding identifier failed")
+		return
+	}
 	if !m.configureSecret(w, r, workspace, binding.BindingID, binding.SourceKind, secret) {
 		return
 	}
 	handler.WriteJSON(w, http.StatusCreated, binding)
+}
+
+func (m *Module) checkUnattachedBindingID(ctx context.Context, workspace, bindingID string) error {
+	if m == nil || m.agentIdentities == nil {
+		return automation.ErrUnavailable
+	}
+	return m.agentIdentities.CheckUnattachedBindingID(ctx, workspace, bindingID)
+}
+
+// rollbackCreatedBinding removes only the unmanaged binding just returned by
+// Automation. Disable/Delete each re-read and compare the persisted snapshot,
+// so a concurrent mutation fails closed instead of deleting somebody else's
+// newer state. Cleanup deliberately ignores client cancellation because the
+// durable create may already have committed.
+func (m *Module) rollbackCreatedBinding(r *http.Request, workspace string, binding *automation.Binding) error {
+	if m == nil || r == nil || binding == nil || m.commands == nil || m.operatorAuthority == nil {
+		return automation.ErrUnavailable
+	}
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 5*time.Second)
+	defer cancel()
+	command := automation.BindingCommand{
+		WorkspaceKey: strings.TrimSpace(workspace),
+		BindingID:    strings.TrimSpace(binding.BindingID),
+	}
+	if binding.Enabled {
+		disableAuth, err := m.operatorAuthority.ResolveOperatorAuthority(r, workspace, automation.ActionDisableBinding)
+		if err != nil {
+			return fmt.Errorf("resolve disable authority: %w", err)
+		}
+		if _, err := m.commands.DisableBinding(cleanupCtx, disableAuth, command); err != nil {
+			return fmt.Errorf("disable created binding: %w", err)
+		}
+	}
+	deleteAuth, err := m.operatorAuthority.ResolveOperatorAuthority(r, workspace, automation.ActionDeleteBinding)
+	if err != nil {
+		return fmt.Errorf("resolve delete authority: %w", err)
+	}
+	if err := m.commands.DeleteBinding(cleanupCtx, deleteAuth, command); err != nil {
+		return fmt.Errorf("delete created binding: %w", err)
+	}
+	return nil
+}
+
+// validateEnsureIdentity makes POST's browser-oriented ensure semantics safe:
+// a stable binding id may reconcile mutable display/schedule/run-input fields
+// later, but it must never alias a different source or execution target.
+func (m *Module) validateEnsureIdentity(
+	ctx context.Context,
+	workspace string,
+	request createBindingRequest,
+	existing *automation.Binding,
+	sourceKind, routeKey, driverID, workflowName string,
+) error {
+	requestedVersionID := strings.TrimSpace(request.DriverVersionID)
+	if driverID == "" {
+		target, err := m.createWorkflow.ResolveTarget(ctx, workspace, workflowName)
+		if err != nil {
+			return err
+		}
+		driverID = target.DriverID
+		if requestedVersionID != "" && requestedVersionID != target.DriverVersionID {
+			return bindingEnsureConflict(existing.BindingID, "workflow driver_version_id", target.DriverVersionID, requestedVersionID)
+		}
+		requestedVersionID = target.DriverVersionID
+	} else if requestedVersionID == "" {
+		return bindingEnsureConflict(existing.BindingID, "driver_version_id", existing.DriverVersionID, "<unspecified>")
+	}
+	if routeKey == "" {
+		switch sourceKind {
+		case automation.SourceKindCron:
+			routeKey = "cron:" + existing.BindingID
+		case automation.SourceKindInternal:
+			routeKey = "internal:" + existing.BindingID
+		}
+	}
+	requestedPatterns := normalizeEnsurePatterns(request.EventTypePatterns)
+	switch {
+	case existing.SourceKind != sourceKind:
+		return bindingEnsureConflict(existing.BindingID, "source_kind", existing.SourceKind, sourceKind)
+	case existing.RouteKey != routeKey:
+		return bindingEnsureConflict(existing.BindingID, "route_key", existing.RouteKey, routeKey)
+	case !slices.Equal(existing.EventTypePatterns, requestedPatterns):
+		return bindingEnsureConflict(existing.BindingID, "event_type_patterns", strings.Join(existing.EventTypePatterns, ","), strings.Join(requestedPatterns, ","))
+	case existing.DriverID != driverID:
+		return bindingEnsureConflict(existing.BindingID, "driver_id", existing.DriverID, driverID)
+	case requestedVersionID != "" && existing.DriverVersionID != requestedVersionID:
+		return bindingEnsureConflict(existing.BindingID, "driver_version_id", existing.DriverVersionID, requestedVersionID)
+	case existing.TargetEntrypoint != strings.TrimSpace(request.Entrypoint):
+		return bindingEnsureConflict(existing.BindingID, "entrypoint", existing.TargetEntrypoint, strings.TrimSpace(request.Entrypoint))
+	default:
+		return nil
+	}
+}
+
+func normalizeEnsurePatterns(patterns []string) []string {
+	normalized := make([]string, 0, len(patterns))
+	for _, pattern := range patterns {
+		if pattern = strings.TrimSpace(pattern); pattern != "" {
+			normalized = append(normalized, pattern)
+		}
+	}
+	return normalized
+}
+
+func bindingEnsureConflict(bindingID, field, existing, requested string) error {
+	return fmt.Errorf(
+		"trigger binding %q has %s %q, not requested %q: %w",
+		bindingID, field, existing, requested, automation.ErrConflict,
+	)
 }
 
 func (m *Module) configureSecret(w http.ResponseWriter, r *http.Request, workspace, bindingID, sourceKind, secret string) bool {
@@ -539,6 +694,7 @@ type updateBindingRequest struct {
 	EventTypePatterns   *[]string                            `json:"event_type_patterns,omitempty"`
 	Schedule            *string                              `json:"schedule,omitempty"`
 	ScheduleTimezone    *string                              `json:"schedule_timezone,omitempty"`
+	RunInput            json.RawMessage                      `json:"run_input,omitempty"`
 }
 
 func (m *Module) patchBinding(w http.ResponseWriter, r *http.Request) {
@@ -648,10 +804,19 @@ func buildBindingPatch(w http.ResponseWriter, existing *automation.Binding, requ
 		}
 		patch.ScheduleTimezone = &timezone
 	}
+	if request.RunInput != nil {
+		raw := strings.TrimSpace(string(request.RunInput))
+		var object map[string]json.RawMessage
+		if raw == "" || json.Unmarshal([]byte(raw), &object) != nil || object == nil {
+			handler.RespondError(w, http.StatusBadRequest, "run_input must be a JSON object")
+			return patch, false
+		}
+		patch.SourceConfigRef = &raw
+	}
 	if patch.Name == nil && patch.SubjectKeyTemplate == nil && patch.ConcurrencyPolicy == nil &&
 		patch.ActorFilter == nil && !patch.ClearActorFilter && patch.RetryMaxAttempts == nil &&
 		patch.RetryBackoffSeconds == nil && patch.EventTypePatterns == nil &&
-		patch.Schedule == nil && patch.ScheduleTimezone == nil {
+		patch.Schedule == nil && patch.ScheduleTimezone == nil && patch.SourceConfigRef == nil {
 		handler.RespondError(w, http.StatusBadRequest, "no fields to update")
 		return patch, false
 	}
@@ -764,7 +929,7 @@ func (m *Module) resolveOperator(w http.ResponseWriter, r *http.Request, workspa
 
 func writeAutomationError(w http.ResponseWriter, err error, fallback string) {
 	switch {
-	case errors.Is(err, workflowcataloghttp.ErrUnauthenticated), errors.Is(err, authority.ErrInvalidOperatorToken),
+	case errors.Is(err, workflowcataloghttp.ErrUnauthenticated),
 		errors.Is(err, authority.ErrInvalidPrincipal), errors.Is(err, authority.ErrPrincipalExpired):
 		handler.RespondError(w, http.StatusUnauthorized, "authentication required")
 	case errors.Is(err, authority.ErrWorkspaceMismatch), errors.Is(err, authority.ErrActionNotAllowed),

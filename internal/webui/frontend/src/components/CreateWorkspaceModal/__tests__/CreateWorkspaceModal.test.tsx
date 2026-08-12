@@ -138,7 +138,14 @@ describe("CreateWorkspaceModal", () => {
       expect(
         screen.getByTestId("create-workspace-clone-url"),
       ).toBeInTheDocument();
-      expect(screen.getByLabelText("Repository URL")).toBeInTheDocument();
+      expect(
+        screen.getByLabelText("Repository URL (optional)"),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByText(
+          "You can add a repository after creating the workspace.",
+        ),
+      ).toBeInTheDocument();
       expect(screen.getByTestId("create-workspace-cancel")).toBeInTheDocument();
       expect(screen.getByTestId("create-workspace-submit")).toBeInTheDocument();
 
@@ -203,7 +210,7 @@ describe("CreateWorkspaceModal", () => {
       expect(screen.getByTestId("create-workspace-submit")).toBeEnabled();
     });
 
-    it("submit button is disabled when type is clone and clone URL is empty", () => {
+    it("submit button is enabled when the name is valid and repository URL is empty", () => {
       render(
         <CreateWorkspaceModal
           isOpen={true}
@@ -216,7 +223,7 @@ describe("CreateWorkspaceModal", () => {
         target: { value: "my-workspace" },
       });
 
-      expect(screen.getByTestId("create-workspace-submit")).toBeDisabled();
+      expect(screen.getByTestId("create-workspace-submit")).toBeEnabled();
     });
 
     it("submit button is enabled when type is clone and both name and URL are filled", () => {
@@ -358,6 +365,36 @@ describe("CreateWorkspaceModal", () => {
   });
 
   describe("form submission", () => {
+    it("creates an empty workspace when no repository URL is provided", async () => {
+      mockCreateWorkspace.mockResolvedValue(MOCK_CREATE_RESULT);
+
+      render(
+        <CreateWorkspaceModal
+          isOpen={true}
+          onClose={onClose}
+          onSuccess={onSuccess}
+        />,
+      );
+
+      fireEvent.change(screen.getByTestId("create-workspace-name"), {
+        target: { value: "empty-ws" },
+      });
+      fireEvent.click(screen.getByTestId("create-workspace-submit"));
+
+      await waitFor(() => {
+        expect(mockCreateWorkspace).toHaveBeenCalledWith({
+          name: "empty-ws",
+          type: "empty",
+        });
+      });
+      expect(onSuccess).toHaveBeenCalledWith(
+        MOCK_WORKSPACE_DATA,
+        "empty-ws",
+        undefined,
+      );
+      expect(onClose).toHaveBeenCalledTimes(1);
+    });
+
     it("calls onSuccess and onClose after successful clone submission", async () => {
       mockCreateWorkspace.mockResolvedValue(MOCK_CREATE_RESULT);
 

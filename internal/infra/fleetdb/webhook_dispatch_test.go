@@ -49,6 +49,9 @@ func TestTriggerRouteDispatchAndAudit(t *testing.T) {
 			if got := r.URL.Query().Get("source_kind"); got != "github" {
 				t.Fatalf("source_kind filter = %q", got)
 			}
+			if got := r.URL.Query().Get("subject_ref"); got != "issue:TASK-1" {
+				t.Fatalf("subject_ref filter = %q", got)
+			}
 			writeJSON(t, w, map[string]any{"trigger_events": []domain.TriggerEvent{{WorkspaceKey: "WS", EventID: "event-1", SourceKind: "github", EventType: "pull_request", SignatureStatus: "verified"}}})
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/WS/trigger-events/event-1":
 			writeJSON(t, w, domain.TriggerEvent{WorkspaceKey: "WS", EventID: "event-1", SourceKind: "github"})
@@ -79,7 +82,9 @@ func TestTriggerRouteDispatchAndAudit(t *testing.T) {
 		t.Fatalf("DispatchTriggerRoute = %+v err=%v", run, err)
 	}
 
-	events, err := client.TriggerEvents().List(t.Context(), "WS", store.TriggerEventFilter{SourceKind: "github"})
+	events, err := client.TriggerEvents().List(t.Context(), "WS", store.TriggerEventFilter{
+		SourceKind: "github", SubjectRef: "issue:TASK-1",
+	})
 	if err != nil || len(events) != 1 || events[0].EventID != "event-1" {
 		t.Fatalf("TriggerEvents.List = %+v err=%v", events, err)
 	}

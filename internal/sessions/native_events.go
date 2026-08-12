@@ -62,11 +62,12 @@ func (s *Store) LoadNativeEvents(sessionID string) ([]transcript.Event, error) {
 }
 
 // decodeCanonicalEvents decodes already-read agent_transcript.jsonl bytes that are
-// themselves a stream of canonical transcript.Event objects (one per line). Returns
-// nil unless EVERY non-blank line is a canonical event (known type + role) — so a
-// raw backend transcript that merely parsed to zero events (e.g. codex
-// "response_item" lines) can never be misread as canonical. Seq is reassigned to
-// file order so a session_meta head stays at index 0 regardless of the source's seq.
+// themselves a stream of canonical transcript.Event objects (one per line).
+// Returns nil unless EVERY non-blank line has a known type and role plus a
+// non-zero timestamp — so a raw backend transcript that merely parsed to zero
+// events (e.g. codex "response_item" lines) can never be misread as canonical.
+// Seq is reassigned to file order so a session_meta head stays at index 0
+// regardless of the source's seq.
 func decodeCanonicalEvents(data []byte) []transcript.Event {
 	var events []transcript.Event
 	for _, line := range bytes.Split(data, []byte("\n")) {
@@ -78,7 +79,7 @@ func decodeCanonicalEvents(data []byte) []transcript.Event {
 		if err := json.Unmarshal(line, &ev); err != nil {
 			return nil
 		}
-		if !transcript.KnownEventTypes[ev.Type] || !transcript.KnownRoles[ev.Role] {
+		if transcript.ValidateCanonicalEvent(ev) != nil {
 			return nil
 		}
 		ev.Seq = len(events)

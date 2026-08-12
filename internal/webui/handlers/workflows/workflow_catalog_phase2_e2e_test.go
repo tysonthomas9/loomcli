@@ -36,8 +36,6 @@ func TestE2E_WorkflowCatalogPhase2RealFleetDBLoomHTTPAndCLI(t *testing.T) {
 	e2e.startFleetDB()
 	e2e.seedPrerequisites()
 	e2e.startLoomServe()
-	token := e2e.readLocalOperatorToken()
-	browserToken := e2e.mintBrowserSession(token)
 
 	list := e2e.listDriversHTTP()
 	assertWorkflowCatalogDriverListed(t, list, e2e.driverID, 1)
@@ -63,17 +61,14 @@ func TestE2E_WorkflowCatalogPhase2RealFleetDBLoomHTTPAndCLI(t *testing.T) {
 	}
 
 	mutationPath := e2e.lifecyclePath(e2e.workspace, "approve")
-	e2e.doLoomJSON(http.MethodPost, mutationPath, map[string]uint64{"expected_revision": 1}, "", http.StatusUnauthorized, nil)
-	e2e.doLoomJSON(http.MethodPost, e2e.lifecyclePath("OTHER", "approve"), map[string]uint64{"expected_revision": 1}, browserToken, http.StatusForbidden, nil)
-
 	var approved workflowCatalogHTTPAction
-	e2e.doLoomJSON(http.MethodPost, mutationPath, map[string]uint64{"expected_revision": 1}, browserToken, http.StatusOK, &approved)
+	e2e.doLoomJSON(http.MethodPost, mutationPath, map[string]uint64{"expected_revision": 1}, "", http.StatusOK, &approved)
 	if approved.Action != "approve" || approved.Driver == nil || approved.Version == nil || approved.Driver.Revision != 2 || !workflowcatalog.VersionApproved(approved.Driver, approved.Version) {
 		t.Fatalf("HTTP approve = %+v, want approved revision 2", approved)
 	}
 
 	var stale workflowCatalogHTTPError
-	e2e.doLoomJSON(http.MethodPost, e2e.lifecyclePath(e2e.workspace, "activate"), map[string]uint64{"expected_revision": 1}, browserToken, http.StatusConflict, &stale)
+	e2e.doLoomJSON(http.MethodPost, e2e.lifecyclePath(e2e.workspace, "activate"), map[string]uint64{"expected_revision": 1}, "", http.StatusConflict, &stale)
 	if stale.Code != "stale_revision" {
 		t.Fatalf("stale activate error = %+v, want stale_revision", stale)
 	}
@@ -152,17 +147,6 @@ type workflowCatalogHTTPError struct {
 	Code  string `json:"code"`
 }
 
-type workflowCatalogBrowserLaunch struct {
-	LaunchCode string `json:"launch_code"`
-	Workspace  string `json:"workspace"`
-}
-
-type workflowCatalogBrowserSession struct {
-	AccessToken string `json:"access_token"`
-	TokenType   string `json:"token_type"`
-	Workspace   string `json:"workspace"`
-}
-
 type workflowCatalogCLIList = workflowCatalogHTTPList
 
 type workflowCatalogCLIVersions struct {
@@ -230,7 +214,12 @@ func (e *workflowCatalogPhase2E2E) startFleetDB() {
 	e.t.Helper()
 	e.t.Setenv(bootstrap.EnvFleetDBBin, e.fleetDBBin)
 	e.t.Setenv("FLEET_RATE_LIMIT_ENABLED", "false")
-	e.t.Setenv("FLEETDB_ISSUE_DESIGN_STORAGE", "inline")
+	// Preserve an explicit mode for later capability E2Es that reuse this real
+	// process harness. Phase 2 itself has no design behavior and retains its
+	// faster inline default when the caller does not select a mode.
+	if strings.TrimSpace(os.Getenv("FLEETDB_ISSUE_DESIGN_STORAGE")) == "" {
+		e.t.Setenv("FLEETDB_ISSUE_DESIGN_STORAGE", "inline")
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	e.t.Cleanup(cancel)
@@ -372,48 +361,6 @@ func (e *workflowCatalogPhase2E2E) startLoomServe() {
 		time.Sleep(100 * time.Millisecond)
 	}
 	e.t.Fatalf("loom serve did not become healthy at %s\nstdout:\n%s\nstderr:\n%s", e.loomURL, stdout.String(), stderr.String())
-}
-
-func (e *workflowCatalogPhase2E2E) readLocalOperatorToken() string {
-	e.t.Helper()
-	dir := filepath.Join(e.runtimeDir, ".loom", "operator")
-	dirInfo, err := os.Stat(dir)
-	if err != nil || dirInfo.Mode().Perm() != 0o700 {
-		e.t.Fatalf("operator credential dir mode = %v err=%v, want 0700", modeOrZero(dirInfo), err)
-	}
-	path := filepath.Join(dir, authority.LocalOperatorTokenFileName)
-	info, err := os.Stat(path)
-	if err != nil || info.Mode().Perm() != 0o600 {
-		e.t.Fatalf("operator token mode = %v err=%v, want 0600", modeOrZero(info), err)
-	}
-	token, err := authority.ReadLocalOperatorToken(dir)
-	if err != nil {
-		e.t.Fatalf("read local operator token: %v", err)
-	}
-	return token
-}
-
-func (e *workflowCatalogPhase2E2E) mintBrowserSession(durableToken string) string {
-	e.t.Helper()
-	base := "/api/workspaces/" + e.workspace + "/operator-sessions/"
-	var launch workflowCatalogBrowserLaunch
-	e.doLoomJSON(http.MethodPost, base+"launch", nil, durableToken, http.StatusCreated, &launch)
-	if launch.Workspace != e.workspace || strings.TrimSpace(launch.LaunchCode) == "" {
-		e.t.Fatalf("browser launch = %+v, want workspace-scoped one-time code", launch)
-	}
-	var session workflowCatalogBrowserSession
-	e.doLoomJSON(http.MethodPost, base+"exchange", map[string]string{"launch_code": launch.LaunchCode}, "", http.StatusOK, &session)
-	if session.Workspace != e.workspace || session.TokenType != "Bearer" || strings.TrimSpace(session.AccessToken) == "" {
-		e.t.Fatalf("browser session = %+v, want workspace-scoped bearer", session)
-	}
-	return session.AccessToken
-}
-
-func modeOrZero(info os.FileInfo) os.FileMode {
-	if info == nil {
-		return 0
-	}
-	return info.Mode().Perm()
 }
 
 func (e *workflowCatalogPhase2E2E) listDriversHTTP() workflowCatalogHTTPList {

@@ -9,7 +9,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { WorkflowSourceModal } from "../WorkflowSourceModal";
 
 const workflow = vi.hoisted(() => ({
-  canManageVersions: false,
   getSource: vi.fn(),
   listVersions: vi.fn(),
   saveSource: vi.fn(),
@@ -39,7 +38,6 @@ const version = {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  workflow.canManageVersions = false;
   workflow.getSource.mockResolvedValue({
     files: { "workflow.ts": "export default {};" },
     entrypoint: "workflow.ts",
@@ -95,7 +93,7 @@ describe("WorkflowSourceModal Workflow Catalog boundary", () => {
     });
   });
 
-  it("keeps lifecycle controls unavailable in a raw loopback browser", async () => {
+  it("exposes lifecycle controls in a raw loopback browser", async () => {
     render(
       <WorkflowSourceModal
         isOpen
@@ -107,18 +105,15 @@ describe("WorkflowSourceModal Workflow Catalog boundary", () => {
 
     expect(await screen.findByTestId("workflow-source-versions")).toBeVisible();
     expect(
-      screen.getByText(
-        /lifecycle controls are unavailable in a raw loopback browser/,
-      ),
-    ).toBeVisible();
-    expect(screen.getByRole("button", { name: "Approve" })).toBeDisabled();
+      screen.queryByTestId("workflow-lifecycle-desktop-required"),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Approve" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "Activate" })).toBeDisabled();
     expect(workflow.approveVersion).not.toHaveBeenCalled();
     expect(workflow.activateVersion).not.toHaveBeenCalled();
   });
 
   it("does not present a malformed approval marker as approved", async () => {
-    workflow.canManageVersions = true;
     workflow.listVersions.mockResolvedValue({
       driver: {
         driver_id: "driver-1",
@@ -144,8 +139,7 @@ describe("WorkflowSourceModal Workflow Catalog boundary", () => {
     expect(screen.getByRole("button", { name: "Activate" })).toBeDisabled();
   });
 
-  it("preserves the authenticated approve then activate journey", async () => {
-    workflow.canManageVersions = true;
+  it("preserves the approve then activate journey", async () => {
     workflow.approveVersion.mockResolvedValue({
       action: "approve",
       driver: { driver_id: "driver-1" },

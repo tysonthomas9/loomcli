@@ -77,10 +77,20 @@ Redis configuration changes require restarting `loom serve` — there is no hot-
 ### Process Security
 
 - Environment variables are visible to the same user via `/proc/<pid>/environ` but not to other users (requires root or same UID).
-- When binding `loom serve` to a non-localhost address (`--bind 0.0.0.0`), a warning is logged. Ensure this is intentional and that appropriate network controls are in place.
-- Use `--auth-url` to point at an external auth service for JWT-based authentication. Always enable external auth in production.
+- Open mode is the zero-configuration, single-operator local mode. It has no
+  browser launch code or operator credential: any client that can reach the
+  management endpoint can perform registered operator actions. Native startup
+  defaults to loopback, and shipped container profiles publish UI/API ports on
+  host loopback even though Loom listens on the private container network.
+- When binding `loom serve` to a non-localhost address (`--bind 0.0.0.0`), a
+  warning is logged. Do not expose that listener to an untrusted LAN, reverse
+  proxy, or port-forward in open mode.
+- Use `--auth-url` to point at the external OIDC service for JWT-based
+  authentication and workspace-role authorization. Always enable it for
+  production, cloud, shared-host, or otherwise untrusted network deployment.
 - Use `--fleet-api-key` (or `LOOM_FLEET_API_KEY` env var) to authenticate fleet worker registration.
-- API key auth has been removed. Authentication is handled exclusively via external OIDC (`--auth-url`) or open mode.
+- API key auth has been removed. User authentication is handled by external
+  OIDC (`--auth-url`); open mode deliberately trusts endpoint reachability.
 
 ## Agent IPC Security
 

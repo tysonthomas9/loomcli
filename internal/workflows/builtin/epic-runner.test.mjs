@@ -46,6 +46,14 @@ after(() => {
 });
 
 describe("epic-runner stacked lineage payload", () => {
+  it("propagates an explicit delivery mode into every child request", () => {
+    const defaults = mod.childTaskInputDefaults({
+      runner: "local-task-runner",
+      deliveryMode: "patch-back",
+    });
+    assert.equal(defaults.deliveryMode, "patch-back");
+  });
+
   it("injects the projected lineage carrier for the claimed child task", () => {
     const input = mod.childTaskInput(
       { openPullRequest: true, repoUrl: "https://github.com/acme/widgets.git" },

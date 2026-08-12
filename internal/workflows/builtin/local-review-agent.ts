@@ -35,9 +35,12 @@ export async function run(ctx) {
   const input = ctx.payload || {};
   const loom = createLoomDriverClient({ input });
   const cap = Number(input.cap) > 0 ? Number(input.cap) : DEFAULT_CAP;
+  const targetRepo = stringValue(input.targetRepo);
 
   const cards = await loom.issues.list({ status: "review", limit: numberValue(input.limit, 50) });
-  const linked = (Array.isArray(cards) ? cards : []).filter((c) => localBranchSubject(stringValue(c && c.external_ref)));
+  const linked = (Array.isArray(cards) ? cards : []).filter((card) =>
+    localBranchSubject(stringValue(card && card.external_ref))
+      && (!targetRepo || stringValue(card && card.source_repo) === targetRepo));
 
   const reviewed = [];
   const approved = [];
@@ -55,11 +58,11 @@ export async function run(ctx) {
     if (cycles >= cap) {
       const noted = labelList(card.labels).includes(CAP_NOTED_LABEL);
       if (!noted) {
-        await loom.issues.comment({
-          issueId,
-          body: "Local review reached the configured cap (" + cap + "). Leaving this card in review for human attention.",
-        });
-        await loom.issues.addLabel({ issueId, label: CAP_NOTED_LABEL });
+        const noteFailure = await noteReviewCapOrFail(loom, issueId, cap, cycles);
+        if (isWorkflowResult(noteFailure)) {
+          skipped.push(failureSkip(issueId, subject.branch, "cap_note_failed", noteFailure));
+          continue;
+        }
       }
       skipped.push({ issueId, branch: subject.branch, reason: "cap_reached", cycles });
       continue;
@@ -70,29 +73,36 @@ export async function run(ctx) {
     // (too-large diff, pruned branch, transient dispatch failure) must not
     // starve every sibling review card behind it — one poisoned card would
     // otherwise block the whole lane on every sweep, silently. Mirror the cap
-    // path: record the reason, move on; the next sweep retries transient
-    // classes naturally.
+    // path: record the reason, move on. Definitive pre-child failures restore
+    // review atomically for a later sweep; ambiguous ownership stays fenced
+    // until terminal/stale recovery makes a retry safe.
     const diffResult = await acquireDiffOrFail(loom, issueId, externalRef);
     if (isWorkflowResult(diffResult)) {
       skipped.push({ issueId, branch: subject.branch, reason: "diff_failed", errorClass: stringValue(diffResult.errorClass), detail: stringValue(diffResult.summary) });
       continue;
     }
+    const claimed = await claimReviewOrFail(loom, issueId);
+    if (isWorkflowResult(claimed)) {
+      skipped.push(failureSkip(issueId, subject.branch, "claim_failed", claimed));
+      continue;
+    }
     const findings = await runReviewOrFail(loom, issueId, subject, diffResult, cycle, numberValue(input.timeoutMs, 10 * 60 * 1000));
     if (isWorkflowResult(findings)) {
-      skipped.push({ issueId, branch: subject.branch, reason: "review_failed", errorClass: stringValue(findings.errorClass), detail: stringValue(findings.summary) });
+      skipped.push(failureSkip(issueId, subject.branch, "review_failed", findings));
+      continue;
+    }
+
+    const handoffFailure = await persistReviewOutcomeOrFail(loom, issueId, subject, diffResult, findings, cycle);
+    if (isWorkflowResult(handoffFailure)) {
+      skipped.push(failureSkip(issueId, subject.branch, "handoff_failed", handoffFailure));
       continue;
     }
 
     if (findings.comments.length > 0) {
-      await loom.issues.comment({ issueId, body: blockingReviewComment(findings, cycle, subject, diffResult) });
-      await loom.issues.addLabel({ issueId, label: "review-cycle:" + cycle });
-      await loom.issues.update({ issueId, status: "open" });
       reviewed.push({ issueId, branch: subject.branch, headSha: subject.sha, cycle, findings: findings.comments.length });
       continue;
     }
 
-    await loom.issues.comment({ issueId, body: approvalComment(findings, cycle, subject, diffResult) });
-    await loom.issues.update({ issueId, status: "closed" });
     approved.push({ issueId, branch: subject.branch, headSha: subject.sha, cycle });
   }
 
@@ -104,6 +114,84 @@ export async function run(ctx) {
     approved,
     skipped,
   };
+}
+
+function failureSkip(issueId, branch, reason, failure) {
+  const skipped = {
+    issueId,
+    branch,
+    reason,
+    errorClass: stringValue(failure && failure.errorClass),
+    detail: stringValue(failure && failure.summary),
+  };
+  const taskRunId = stringValue(failure && failure.taskRunId);
+  if (taskRunId) skipped.taskRunId = taskRunId;
+  const mutation = stringValue(failure && failure.mutation);
+  if (mutation) skipped.mutation = mutation;
+  const cycles = Number(failure && failure.cycles);
+  if (Number.isFinite(cycles)) skipped.cycles = cycles;
+  if (failure && failure.claimRetained === true) skipped.claimRetained = true;
+  return skipped;
+}
+
+async function noteReviewCapOrFail(loom, issueId, cap, cycles) {
+  try {
+    await loom.issues.comment({
+      issueId,
+      body: "Local review reached the configured cap (" + cap + "). Leaving this card in review for human attention.",
+    });
+  } catch (err) {
+    return mutationFail("cap_comment", issueId, err, { cycles });
+  }
+  try {
+    await loom.issues.addLabel({ issueId, label: CAP_NOTED_LABEL });
+  } catch (err) {
+    return mutationFail("cap_label", issueId, err, { cycles });
+  }
+  return null;
+}
+
+async function persistReviewOutcomeOrFail(loom, issueId, subject, diffResult, findings, cycle) {
+  const blocking = findings.comments.length > 0;
+  try {
+    await loom.issues.comment({
+      issueId,
+      body: blocking
+        ? blockingReviewComment(findings, cycle, subject, diffResult)
+        : approvalComment(findings, cycle, subject, diffResult),
+    });
+  } catch (err) {
+    return mutationFail("result_comment", issueId, err, { cycle, taskRunId: findings.taskRunId, claimRetained: true });
+  }
+
+  if (blocking) {
+    // Commit the cycle marker before lifecycle publication while the retained
+    // exact claim still excludes every successor cadence.
+    try {
+      await loom.issues.addLabel({ issueId, label: "review-cycle:" + cycle });
+    } catch (err) {
+      return mutationFail("result_label", issueId, err, { cycle, taskRunId: findings.taskRunId, claimRetained: true });
+    }
+  }
+  try {
+    await loom.tasks.handoffReview({
+      taskId: issueId,
+      taskRunId: findings.taskRunId,
+      status: blocking ? "open" : "closed",
+      reason: blocking ? "local review found blocking changes" : "local review approved",
+    });
+  } catch (err) {
+    return mutationFail("result_handoff", issueId, err, { cycle, taskRunId: findings.taskRunId, claimRetained: true });
+  }
+  return null;
+}
+
+function mutationFail(mutation, issueId, err, extra) {
+  return fail(
+    "local_review_" + mutation + "_" + errorCode(err),
+    "local-review: failed " + mutation.replace(/_/g, " ") + " mutation for " + issueId + ": " + errorMessage(err),
+    { issueId, mutation, ...(extra || {}) },
+  );
 }
 
 async function acquireDiffOrFail(loom, issueId, externalRef) {
@@ -124,14 +212,55 @@ async function acquireDiffOrFail(loom, issueId, externalRef) {
   }
 }
 
+async function claimReviewOrFail(loom, issueId) {
+  try {
+    const claimed = await loom.tasks.claimReview({ taskId: issueId });
+    if (!claimed) {
+      return fail(
+        "local_review_claim_not_acquired",
+        "local-review: review claim was not acquired for " + issueId,
+        { issueId },
+      );
+    }
+    const claimedID = stringValue(claimed.id || claimed.ID);
+    const claimActionID = stringValue(claimed.claimActionId || claimed.claim_action_id);
+    if (claimedID !== issueId || !claimActionID) {
+      // A malformed/misdirected success may follow a committed claim. Do not
+      // guess which Work Item is owned and do not dispatch or release another
+      // card; parent-run recovery is the safe authority for this impossible
+      // response shape.
+      return fail(
+        "local_review_claim_receipt_invalid",
+        "local-review: review claim for " + issueId + " returned an invalid ownership receipt"
+          + " (ownership retained for recovery)",
+        { issueId, claimedIssueId: claimedID, claimRetained: true },
+      );
+    }
+    return claimed;
+  } catch (err) {
+    if (isWorkflowResult(err)) return err;
+    const ambiguous = isAmbiguousOwnershipError(err);
+    return fail(
+      ambiguous ? "local_review_claim_ambiguous" : "local_review_claim_" + errorCode(err),
+      "local-review: failed to claim review card " + issueId + ": " + errorMessage(err)
+        + (ambiguous ? " (ownership may have committed; retained for recovery)" : ""),
+      { issueId, claimRetained: ambiguous },
+    );
+  }
+}
+
 async function runReviewOrFail(loom, issueId, subject, diffResult, cycle, timeoutMs) {
-  const taskRunId = "local-review-" + safeID(issueId) + "-c" + cycle;
+  // TaskRun identity is deterministic for replay inside this DriverRun, while
+  // the parent component prevents a later cadence from colliding with the
+  // workspace-global TaskRun created by an earlier review attempt.
+  const taskRunId = "local-review-" + safeID(loom.driverRunId || "run") + "-" + safeID(issueId) + "-c" + cycle;
   try {
     await loom.taskRuns.request({
       taskId: issueId,
       taskRunId,
       runner: "github-review-task-runner",
       closeTask: false,
+      retainWorkItemClaim: true,
       input: {
         kind: "local_branch_review",
         taskId: issueId,
@@ -145,27 +274,71 @@ async function runReviewOrFail(loom, issueId, subject, diffResult, cycle, timeou
       },
     });
   } catch (err) {
-    if (!isConflictError(err)) {
-      return fail("local_review_task_dispatch_failed", "local-review: failed to dispatch review task for " + issueId + ": " + errorMessage(err), { issueId, taskRunId });
+    if (isAmbiguousOwnershipError(err)) {
+      // timeout/unavailable/internal may follow a committed immutable TaskRun
+      // receipt. Releasing would expose a ready review card beside a live
+      // child, so retain the exact review claim for terminal/stale recovery.
+      return fail(
+        "local_review_task_dispatch_ambiguous",
+        "local-review: review task request for " + issueId + " had an ambiguous result: "
+          + errorMessage(err) + " (claim retained for recovery)",
+        { issueId, taskRunId, claimRetained: true },
+      );
     }
-    // Deterministic taskRunId: a resumed workflow may re-issue the same request.
-    // The task-run exists, so continue to await it rather than double-enqueue.
+    // Exact durable request replay is resolved inside the SDK/service and
+    // returns the certified child as a successful response. Any surfaced 409
+    // is therefore a real lineage/envelope conflict, not evidence that this
+    // deterministic ID exists. Restore the exact review claim and never await
+    // a phantom TaskRun.
+    const restored = await restoreReviewClaimOrFail(loom, issueId, taskRunId, err);
+    if (restored) return restored;
+    return fail(
+      "local_review_task_dispatch_failed",
+      "local-review: failed to dispatch review task for " + issueId + ": " + errorMessage(err),
+      { issueId, taskRunId },
+    );
   }
 
   let runResult;
   try {
     runResult = await loom.taskRuns.await({ taskRunId, timeoutMs });
   } catch (err) {
-    return fail("local_review_task_await_failed", "local-review: failed awaiting review task " + taskRunId + ": " + errorMessage(err), { issueId, taskRunId });
+    // request() returned a certified receipt, so a child exists even when its
+    // read/await path is temporarily unavailable. Keep the review claim fenced
+    // to that child; terminal or stale recovery owns the eventual release.
+    return fail(
+      "local_review_task_await_failed",
+      "local-review: failed awaiting review task " + taskRunId + ": " + errorMessage(err)
+        + " (claim retained for child recovery)",
+      { issueId, taskRunId, claimRetained: true },
+    );
   }
   if (stringValue(runResult && runResult.status) !== "completed") {
     return fail("local_review_task_" + (stringValue(runResult && runResult.status) || "unknown"), "local-review: review task " + taskRunId + " ended " + stringValue(runResult && runResult.status), { issueId, taskRunId });
   }
   const parsed = parseFindings(extractFindings(runResult));
   if (!parsed.ok) {
-    return fail("local_review_findings_invalid", "local-review: review task " + taskRunId + " did not return valid findings JSON", { issueId, taskRunId });
+    return fail(
+      "local_review_findings_invalid",
+      "local-review: review task " + taskRunId + " did not return valid findings JSON (claim retained for parent recovery)",
+      { issueId, taskRunId, claimRetained: true },
+    );
   }
-  return validateFindings(parsed.value);
+  return { ...validateFindings(parsed.value), taskRunId };
+}
+
+async function restoreReviewClaimOrFail(loom, issueId, taskRunId, originalError) {
+  try {
+    await loom.tasks.releaseReview({ taskId: issueId });
+    return null;
+  } catch (releaseError) {
+    return fail(
+      "local_review_claim_restore_failed",
+      "local-review: failed to dispatch review task for " + issueId + " (" + errorMessage(originalError)
+        + ") and atomic review release also failed: " + errorMessage(releaseError),
+      { issueId, taskRunId, claimRetained: true },
+    );
+  }
 }
 
 function fail(errorClass, summary, extra) {
@@ -280,8 +453,15 @@ function labelList(labels) {
   return labels.map((l) => stringValue(l));
 }
 
-function isConflictError(e) {
-  return e && (e.code === "conflict" || String(e.message || "").includes("conflict"));
+function isAmbiguousOwnershipError(e) {
+  switch (stringValue(e && e.code)) {
+    case "timeout":
+    case "unavailable":
+    case "internal":
+      return true;
+    default:
+      return false;
+  }
 }
 
 function errorCode(err) {

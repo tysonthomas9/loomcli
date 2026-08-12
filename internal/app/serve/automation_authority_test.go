@@ -131,6 +131,7 @@ func TestAutomationExecutionAuthorityProviderBindsVerifiedFencedRun(t *testing.T
 		t.Fatalf("AuthorityForVerifiedRun: %v", err)
 	}
 	if value.Subject() != parent.RunID || value.Workspace() != parent.WorkspaceKey || value.Action() != automation.ActionAdmitEvent ||
+		value.ResourceKind() != authority.ExecutionResourceDriverRun || value.ResourceID() != parent.RunID ||
 		value.NodeID() != parent.NodeID || value.LeaseID() != parent.LeaseID || value.FencingToken() != parent.FencingToken {
 		t.Fatalf("authority = subject:%q workspace:%q action:%q", value.Subject(), value.Workspace(), value.Action())
 	}

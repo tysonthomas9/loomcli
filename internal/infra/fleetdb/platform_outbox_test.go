@@ -36,12 +36,12 @@ func outboxTestServer(t *testing.T) *httptest.Server {
 		switch {
 		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/WS/task-run-events":
 			var req struct {
-				EventID    string `json:"event_id"`
-				TaskRunID  string `json:"task_run_id"`
-				Type       string `json:"type"`
-				Status     string `json:"status"`
-				Attempt    int    `json:"attempt"`
-				LeaseToken string `json:"lease_token"`
+				EventID    string  `json:"event_id"`
+				TaskRunID  string  `json:"task_run_id"`
+				Type       string  `json:"type"`
+				Status     string  `json:"status"`
+				Attempt    int     `json:"attempt"`
+				LeaseToken *string `json:"lease_token"`
 			}
 			decodeJSONBody(t, r, &req)
 			if req.EventID != "task-run-1#1#taskRunQueued" || req.TaskRunID != "task-run-1" || req.Attempt != 1 {
@@ -49,6 +49,9 @@ func outboxTestServer(t *testing.T) *httptest.Server {
 			}
 			if req.Type != "task_run_queued" || req.Status != "queued" {
 				t.Errorf("append event wire enums = type %q status %q, want snake_case type", req.Type, req.Status)
+			}
+			if req.LeaseToken != nil {
+				t.Errorf("append event exposed lease_token = %q", *req.LeaseToken)
 			}
 			w.WriteHeader(http.StatusCreated)
 			writeJSON(t, w, map[string]any{
@@ -59,7 +62,6 @@ func outboxTestServer(t *testing.T) *httptest.Server {
 				"type":          "task_run_queued",
 				"status":        "queued",
 				"attempt":       req.Attempt,
-				"lease_token":   req.LeaseToken,
 				"occurred_at":   now,
 				"created_at":    now,
 			})
@@ -170,7 +172,6 @@ func TestPlatformOutboxClientTaskRunEventRoutes(t *testing.T) {
 		Type:         domain.TaskRunEventQueued,
 		Status:       domain.TaskRunQueued,
 		Attempt:      1,
-		LeaseToken:   "lease-token-1",
 		OccurredAt:   now,
 	})
 	if err != nil {

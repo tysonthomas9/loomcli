@@ -172,6 +172,20 @@ type ReopenIssueParams struct {
 	Reason  string
 }
 
+// SetIssueRepositoryParams identifies the issue and canonical workspace repo
+// selected by the operator for repository-required recovery.
+type SetIssueRepositoryParams struct {
+	IssueID string
+	Repo    string
+}
+
+// IssueRepositoryService is the optional service surface for the fleet-owned
+// repository assignment/recovery command. It stays separate from IssueService
+// so non-fleet tests and legacy backends are not forced to claim support.
+type IssueRepositoryService interface {
+	SetIssueRepository(ctx context.Context, params SetIssueRepositoryParams) (json.RawMessage, error)
+}
+
 // IssueService defines the business logic operations for issues.
 type IssueService interface {
 	GetIssue(ctx context.Context, issueID string) (json.RawMessage, error)

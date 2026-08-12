@@ -1,8 +1,5 @@
 export declare const RunnerEnv: Readonly<{
   apiUrl: "LOOM_TASK_RUN_API_URL";
-  baseUrl: "LOOM_FLEET_DB_URL";
-  apiKey: "LOOM_FLEET_DB_API_KEY";
-  actor: "LOOM_FLEET_DB_ACTOR";
   agentName: "LOOM_AGENT_NAME";
   workspace: "LOOM_WORKSPACE";
   taskRunId: "LOOM_TASK_RUN_ID";
@@ -39,15 +36,11 @@ export type FetchLike = (input: string, init?: {
 
 export interface TaskRunClientOptions {
   /**
-   * loom serve task-run API base URL (LOOM_TASK_RUN_API_URL). When set, all
-   * operations use the serve transport authenticated by the per-task-run
-   * lease token alone; baseUrl/apiKey (direct fleet-db) are not required.
+   * Required loom serve task-run API base URL (LOOM_TASK_RUN_API_URL). All
+   * operations use this facade with the per-task-run lease token; direct
+   * FleetDB transport is intentionally unsupported.
    */
   apiUrl?: string;
-  baseUrl?: string;
-  apiKey?: string;
-  actor?: string;
-  authToken?: string;
   fetch?: FetchLike;
   workspace?: string;
   taskRunId?: string;
@@ -106,11 +99,18 @@ export interface Issue {
   [key: string]: unknown;
 }
 
-export interface LogAppendInput {
+export type LogAppendInput = {
   stream?: "stdout" | "stderr" | string;
   text: string;
-  timestamp?: string | Date;
-}
+  /**
+   * Immutable timestamp for this logical append. Reuse it with the same
+   * request identity after a timeout or lost response.
+   */
+  timestamp: string | Date;
+} & (
+  | { requestId: string; request_id?: never }
+  | { request_id: string; requestId?: never }
+);
 
 export interface ArtifactDeclareInput {
   id?: string;
@@ -244,7 +244,9 @@ export declare class TaskRunClient {
   static fromEnv(env?: NodeJS.ProcessEnv | Record<string, string | undefined>, options?: TaskRunClientOptions): TaskRunClient;
 
   readonly apiUrl: string;
-  readonly serveMode: boolean;
+  /** @deprecated Always true; the direct FleetDB transport was removed. */
+  readonly serveMode: true;
+  /** @deprecated Alias of apiUrl retained for source compatibility. */
   readonly baseUrl: string;
   readonly workspace: string;
   readonly taskRunId: string;

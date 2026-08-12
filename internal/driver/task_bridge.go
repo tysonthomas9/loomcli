@@ -13,6 +13,8 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	runtimesettings "github.com/tysonthomas9/loomcli/internal/localsettings"
+	artifactsmodule "github.com/tysonthomas9/loomcli/internal/modules/artifacts"
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 	"github.com/tysonthomas9/loomcli/internal/sessions/transcript"
 	"github.com/tysonthomas9/loomcli/internal/stackstore"
 	"github.com/tysonthomas9/loomcli/internal/store"
@@ -45,14 +47,18 @@ func isLocalTaskRunner(req TaskExecRequest) bool {
 }
 
 type HostBridgeTaskExecutor struct {
-	Store        store.Store
-	WorktreePath string
-	Command      []string
-	// APIBaseURL, when set, is exported to the spawned task runner as
+	Store store.Store
+	// Artifacts is the sole production mutation surface for task-run artifacts.
+	// Store remains for session, worktree, and other documented read paths; a
+	// missing Artifacts API fails artifact-producing execution closed.
+	Artifacts           artifactsmodule.API
+	ArtifactAuthorities execution.TaskRunAuthorityResolver
+	WorktreePath        string
+	Command             []string
+	// APIBaseURL is required and exported to the spawned task runner as
 	// LOOM_TASK_RUN_API_URL: the serve-hosted task-run API the runner SDK
-	// targets with its per-task-run lease token instead of dialing fleet-db
-	// with deployment credentials (the bridge env already blocks
-	// LOOM_FLEET_DB_* inheritance; this gives runners the sanctioned path).
+	// targets with its per-task-run lease token. Direct FleetDB runner access
+	// is intentionally unsupported.
 	APIBaseURL string
 	// LocalSettingsDir points at the desktop-local settings directory. When set,
 	// only local-task-runner receives non-secret local runner settings and the
@@ -170,6 +176,9 @@ type flueTaskSession struct {
 }
 
 func (e HostBridgeTaskExecutor) PreflightTaskProvider(ctx context.Context, opts TaskRunRequestOptions) (TaskRunRequestOptions, error) {
+	if !taskProviderIsNoop(opts.ProviderProfile) && strings.TrimSpace(e.APIBaseURL) == "" {
+		return opts, fmt.Errorf("task runner requires the loom serve task-run API URL: %w", domain.ErrInvalid)
+	}
 	if taskRunHasNamedRunner(opts) {
 		if err := refuseUntrustedTaskRunnerPreflight(opts); err != nil {
 			return opts, err
@@ -204,8 +213,21 @@ func (e HostBridgeTaskExecutor) ExecuteTask(ctx context.Context, req TaskExecReq
 	if taskProviderIsNoop(req.ProviderProfile) {
 		return LocalTaskExecutor{}.ExecuteTask(ctx, req)
 	}
+	if strings.TrimSpace(e.APIBaseURL) == "" {
+		return TaskExecResult{}, fmt.Errorf("task runner requires the loom serve task-run API URL: %w", domain.ErrInvalid)
+	}
 	if result, refused := refuseUntrustedTaskRunnerExecution(req); refused {
 		return result, nil
+	}
+	if isLocalTaskRunner(req) {
+		if _, _, policyErr := localTaskRunnerAgentPolicyFromInput(req.Input); policyErr != nil {
+			return TaskExecResult{
+				Status:       domain.TaskRunFailed,
+				ExitCode:     2,
+				ErrorClass:   "managed_agent_policy_invalid",
+				ErrorMessage: policyErr.Error(),
+			}, nil
+		}
 	}
 	resolvedWorktree, worktreeFailure, failed := e.resolveLocalTaskWorktree(ctx, req)
 	if failed {
@@ -302,6 +324,22 @@ func (e HostBridgeTaskExecutor) ExecuteTask(ctx context.Context, req TaskExecReq
 	return e.finalizeAndApplyPatch(ctx, req, runnerResult, patch, result)
 }
 
+// localTaskRunnerPublishedDelivery reports whether the trusted bundled runner
+// has already delivered a completed change through a durable published ref.
+// Only that runner may suppress patch-back from result metadata: other runners
+// cannot self-assert "pull_request" to bypass their configured delivery path.
+func localTaskRunnerPublishedDelivery(req TaskExecRequest, result TaskExecResult) bool {
+	if !isLocalTaskRunner(req) || result.Status != domain.TaskRunCompleted {
+		return false
+	}
+	switch strings.TrimSpace(result.RuntimeMetadata["delivery"]) {
+	case "local_branch", "stack_branch", "pull_request":
+		return true
+	default:
+		return false
+	}
+}
+
 func (e HostBridgeTaskExecutor) bridgeRunner(ctx context.Context, req TaskExecRequest) (func() (bridgeTaskRunnerResult, error), error) {
 	command, err := e.command()
 	if err != nil {
@@ -364,7 +402,7 @@ func (e HostBridgeTaskExecutor) runBuiltInFlueWorkflow(ctx context.Context, req 
 	}
 	defer cleanup()
 
-	cmd := exec.CommandContext(ctx, "node", launcherPath) //nolint:gosec // fixed local runtime for bundled Flue workflow runners.
+	cmd := exec.CommandContext(ctx, processNodePath(""), launcherPath) //nolint:gosec // resolved packaged/operator Node runtime; launcherPath is a temp file.
 	if worktree := strings.TrimSpace(e.WorktreePath); worktree != "" {
 		cmd.Dir = worktree
 	}
@@ -700,7 +738,10 @@ func (e HostBridgeTaskExecutor) taskRunnerEnv(req TaskExecRequest, requestJSON s
 	}
 	env = append(env, e.taskRunnerBundleEnv(req)...)
 	if isLocalTaskRunner(req) {
-		env = append(env, TaskRunnerBackendEnv+"="+e.resolveTaskRunnerBackend(req))
+		agentPolicy, _, _ := localTaskRunnerAgentPolicyFromInput(req.Input)
+		backend := e.resolveTaskRunnerBackend(req, agentPolicy)
+		env = append(env, TaskRunnerBackendEnv+"="+backend)
+		env = append(env, localTaskRunnerRoleEnv(agentPolicy, backend)...)
 		existing := env
 		if len(inherited) > 0 && len(inherited[0]) > 0 {
 			existing = append(append([]string{}, inherited[0]...), env...)
@@ -720,7 +761,8 @@ func (e HostBridgeTaskExecutor) localTaskRunnerSettingsEnv(existing []string) []
 		return nil
 	}
 	out := make([]string, 0, 2)
-	if model := strings.TrimSpace(settings.LocalTaskRunner.OpenCodeModel); model != "" {
+	if model := strings.TrimSpace(settings.LocalTaskRunner.OpenCodeModel); model != "" &&
+		!envHasAny(existing, "LOOM_OPENCODE_MODEL") {
 		out = append(out, "LOOM_OPENCODE_MODEL="+model)
 	}
 	if !envHasAny(existing, "GITHUB_TOKEN", "GH_TOKEN") {
@@ -745,31 +787,6 @@ func envHasAny(env []string, names ...string) bool {
 		}
 	}
 	return false
-}
-
-// resolveTaskRunnerBackend resolves the backend CLI for the local task runner,
-// mirroring service.GetWorkspaceBackend precedence (§4.3): a per-agent override
-// (the worker's agent row Backend) wins, else DaemonProfile.AgentBackend, else
-// the default codex. The store is consulted best-effort; any lookup failure
-// falls through to the next source so the runner always receives a backend.
-func (e HostBridgeTaskExecutor) resolveTaskRunnerBackend(req TaskExecRequest) string {
-	if e.Store == nil {
-		return defaultTaskRunnerBackend
-	}
-	ctx := context.Background()
-	if worker := strings.TrimSpace(req.WorkerProfileID); worker != "" {
-		if agent, err := e.Store.Agents().Get(ctx, req.WorkspaceKey, worker); err == nil && agent != nil {
-			if backend := strings.TrimSpace(agent.Backend); backend != "" {
-				return backend
-			}
-		}
-	}
-	if profile, err := e.Store.Daemon().Get(ctx, req.WorkspaceKey); err == nil && profile != nil {
-		if backend := strings.TrimSpace(profile.AgentBackend); backend != "" {
-			return backend
-		}
-	}
-	return defaultTaskRunnerBackend
 }
 
 func (e HostBridgeTaskExecutor) taskRunnerBundleEnv(req TaskExecRequest) []string {
@@ -840,6 +857,9 @@ func (e HostBridgeTaskExecutor) finalizeAndApplyPatch(ctx context.Context, req T
 	}
 	result.RuntimeMetadata["patch_artifact_id"] = finalized.ArtifactID
 	result.RuntimeMetadata["patch_content_hash"] = finalized.ContentHash
+	if localTaskRunnerPublishedDelivery(req, result) {
+		return result, nil
+	}
 	if strings.TrimSpace(e.WorktreePath) == "" || strings.TrimSpace(baseRef) == "" {
 		result.Status = domain.TaskRunFailed
 		if result.ExitCode == 0 {
@@ -851,58 +871,6 @@ func (e HostBridgeTaskExecutor) finalizeAndApplyPatch(ctx context.Context, req T
 		return result, nil
 	}
 	return e.applyPatchBack(ctx, baseRef, patch, result)
-}
-
-func (e HostBridgeTaskExecutor) createPatchArtifact(ctx context.Context, req TaskExecRequest, runner bridgeTaskRunnerResult, patch []byte) (*domain.Artifact, string, error) {
-	artifactID := firstNonEmpty(runner.PatchArtifactID, runner.PatchArtifactIDCamel)
-	if artifactID == "" {
-		artifactID = "patch-" + req.TaskRunID
-	}
-	summary := firstNonEmpty(runner.PatchSummary, runner.PatchSummaryCamel, "task patch")
-	mimeType := firstNonEmpty(runner.PatchMIMEType, runner.PatchMIMETypeCamel, "text/x-diff")
-	baseRef := firstNonEmpty(runner.PatchBaseRef, runner.PatchBaseRefCamel, runner.BaseRef, runner.BaseRefCamel)
-	metadata := map[string]string{
-		"driver_run_id":            req.DriverRunID,
-		"runner":                   req.Runner,
-		"runner_ref":               req.RunnerRef,
-		"runner_kind":              req.RunnerKind,
-		"runner_entrypoint":        req.RunnerEntrypoint,
-		"runner_driver_version_id": req.RunnerVersionID,
-		"provider_profile":         req.ProviderProfile,
-	}
-	if baseRef != "" {
-		metadata["patch_base_ref"] = baseRef
-	}
-	if _, err := e.Store.Artifacts().Create(ctx, store.ArtifactCreate{
-		WorkspaceKey:    req.WorkspaceKey,
-		ArtifactID:      artifactID,
-		TaskID:          req.TaskID,
-		OwnerType:       "task_run",
-		OwnerID:         req.TaskRunID,
-		Type:            "patch",
-		Summary:         summary,
-		MIMEType:        mimeType,
-		Visibility:      firstNonEmpty(runner.PatchVisibility, runner.PatchVisibilityCamel),
-		RedactionStatus: firstNonEmpty(runner.PatchRedactionStatus, runner.PatchRedactionStatusAlt),
-		DurableStatus:   "declared",
-		Metadata:        metadata,
-	}); err != nil {
-		return nil, "", fmt.Errorf("create patch artifact: %w", err)
-	}
-	uploaded, err := e.Store.Artifacts().UploadContent(ctx, req.WorkspaceKey, artifactID, store.ArtifactContentUpload{
-		Body:     bytes.NewReader(patch),
-		MIMEType: mimeType,
-	})
-	if err != nil {
-		return nil, "", fmt.Errorf("upload patch artifact: %w", err)
-	}
-	finalized, err := e.Store.Artifacts().Finalize(ctx, req.WorkspaceKey, artifactID, store.ArtifactFinalize{
-		ContentHash: &uploaded.ContentHash,
-	})
-	if err != nil {
-		return nil, "", fmt.Errorf("finalize patch artifact: %w", err)
-	}
-	return finalized, baseRef, nil
 }
 
 func (e HostBridgeTaskExecutor) applyPatchBack(ctx context.Context, baseRef string, patch []byte, result TaskExecResult) (TaskExecResult, error) {

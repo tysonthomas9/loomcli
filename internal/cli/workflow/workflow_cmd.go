@@ -15,10 +15,9 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
+	"github.com/tysonthomas9/loomcli/internal/cli/managementapi"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	driverpkg "github.com/tysonthomas9/loomcli/internal/driver"
-	"github.com/tysonthomas9/loomcli/internal/runtimepreflight"
-	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/workflows"
 )
 
@@ -91,10 +90,11 @@ var workflowActivateCmd = &cobra.Command{
 }
 
 var workflowRunCmd = &cobra.Command{
-	Use:   "run <workflow>",
-	Short: "Create a DriverRun for a workflow",
-	Args:  cobra.ExactArgs(1),
-	RunE:  runWorkflowRun,
+	Use:               "run <workflow>",
+	Short:             "Create a DriverRun for a workflow",
+	Args:              cobra.ExactArgs(1),
+	PersistentPreRunE: cli.PrepareStandaloneHTTPCommand,
+	RunE:              runWorkflowRun,
 }
 
 var workflowListCmd = &cobra.Command{
@@ -320,57 +320,30 @@ func workflowActionTitle(action string) string {
 	return strings.ToUpper(action[:1]) + action[1:]
 }
 
-// manualRunSourceRef picks the SourceRef for a manual `loom workflow run` so its
-// connector actions resolve grants via the workflow's own trigger binding.
-// Connector authz resolves a run's binding by matching SourceRef to a binding's
-// route_key (GetByRouteKey), so it stamps the route_key of the (first) binding
-// registered for this driver rather than a magic shared string. With no binding
-// the run keeps a plain label and its connector actions are (correctly)
-// ungranted. This replaces the old reliance on a binding hard-coded to route_key
-// "loom workflow run", which no longer exists now that cron routes are derived.
-func manualRunSourceRef(ctx context.Context, s store.Store, ws, driverID string) string {
-	bindings, err := s.TriggerBindings().List(ctx, ws, store.TriggerBindingFilter{DriverID: driverID, Limit: 1})
-	if err == nil && len(bindings) > 0 && bindings[0] != nil && bindings[0].RouteKey != "" {
-		return bindings[0].RouteKey
+func runWorkflowRun(cmd *cobra.Command, args []string) error {
+	payload, err := workflowPayload(workflowRunInput, workflowRunEpic)
+	if err != nil {
+		return err
 	}
-	return "loom workflow run"
-}
-
-func runWorkflowRun(_ *cobra.Command, args []string) error {
-	return workflowWithActiveWorkspace(func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error {
-		driverID, err := workflows.ResolveDriverID(ctx, h.Store, ws, args[0])
-		if err != nil {
-			return fmt.Errorf("resolve workflow driver: %w", err)
-		}
-		payload, err := workflowPayload(workflowRunInput, workflowRunEpic)
-		if err != nil {
-			return err
-		}
-		if workflowRunRequiresLocalPreflight(driverID, payload) {
-			if err := runtimepreflight.PreflightLocalTaskRunner(ctx, h.Store, ws); err != nil {
-				return err
-			}
-		}
-		run, err := driverpkg.CreateDriverRun(ctx, h.Store, driverpkg.RunOptions{
-			WorkspaceKey:    ws,
-			DriverID:        driverID,
-			DriverVersionID: workflowRunVersion,
-			EpicID:          workflowRunEpic,
-			Entrypoint:      driverpkg.EntrypointRun,
-			SourceKind:      "cli",
-			SourceRef:       manualRunSourceRef(ctx, h.Store, ws, driverID),
-			Payload:         payload,
-		})
-		if err != nil {
-			return fmt.Errorf("create workflow run: %w", err)
-		}
-		if workflowRunJSON {
-			return cmdstore.WriteJSON(run)
-		}
-		fmt.Printf("Recorded workflow run %s (%s)\n", run.RunID, run.Status)
-		fmt.Printf("Workflow: %s version %s\n", run.DriverID, run.DriverVersionID)
-		return nil
+	ctx := workflowCommandContext(cmd)
+	client, err := managementapi.New(ctx, "loom workflow run")
+	if err != nil {
+		return err
+	}
+	run, err := client.SubmitDriverRun(ctx, managementapi.SubmitDriverRunRequest{
+		CLICommand: "workflow-run", DriverRef: args[0], DriverVersionID: workflowRunVersion,
+		Entrypoint: driverpkg.EntrypointRun,
+		EpicID:     workflowRunEpic, Payload: payload,
 	})
+	if err != nil {
+		return fmt.Errorf("create workflow run: %w", err)
+	}
+	if workflowRunJSON {
+		return cmdstore.WriteJSON(run)
+	}
+	fmt.Printf("Recorded workflow run %s (%s)\n", run.RunID, run.Status)
+	fmt.Printf("Workflow: %s version %s\n", run.DriverID, run.DriverVersionID)
+	return nil
 }
 
 func runWorkflowList(cmd *cobra.Command, _ []string) error {
@@ -550,27 +523,6 @@ func workflowMissingPrerequisites(source *workflows.LocalSource) []string {
 		}
 	}
 	return missing
-}
-
-func workflowRunRequiresLocalPreflight(driverID string, payload json.RawMessage) bool {
-	if strings.TrimSpace(driverID) != workflows.BuiltinEpicRunnerWorkflowName {
-		return false
-	}
-	runner := strings.TrimSpace(payloadRunner(payload))
-	return runner == "" || runner == runtimepreflight.LocalTaskRunnerEntrypoint
-}
-
-func payloadRunner(payload json.RawMessage) string {
-	if len(payload) == 0 {
-		return ""
-	}
-	var fields struct {
-		Runner string `json:"runner"`
-	}
-	if err := json.Unmarshal(payload, &fields); err != nil {
-		return ""
-	}
-	return fields.Runner
 }
 
 func workflowPayload(values []string, epicID string) (json.RawMessage, error) {

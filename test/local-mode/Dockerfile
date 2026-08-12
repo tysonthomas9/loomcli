@@ -48,7 +48,8 @@ ENV SHELL=/bin/bash
 COPY --from=builder /out/loom /usr/local/bin/loom
 COPY test/local-mode/local-mode-entrypoint /usr/local/bin/local-mode-entrypoint
 COPY test/local-mode/loom-backend-localdogfood /usr/local/bin/loom-backend-localdogfood
-RUN chmod +x /usr/local/bin/local-mode-entrypoint /usr/local/bin/loom-backend-localdogfood \
+COPY test/local-mode/verify-supervisor-disabled.sh /usr/local/bin/verify-supervisor-disabled
+RUN chmod +x /usr/local/bin/local-mode-entrypoint /usr/local/bin/loom-backend-localdogfood /usr/local/bin/verify-supervisor-disabled \
     && ln -sf /usr/local/bin/loom-backend-localdogfood /usr/local/bin/localdogfood
 
 WORKDIR /workspace

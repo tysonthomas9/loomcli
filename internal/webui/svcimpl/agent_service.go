@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/localworkspace"
@@ -22,10 +23,11 @@ var _ service.AgentService = (*agentServiceImpl)(nil)
 
 // agentServiceImpl is the concrete implementation of AgentService.
 type agentServiceImpl struct {
-	gitOps   ops.GitOps
-	termMgr  *terminal.AgentTmuxManager
-	termAuth *realtime.TerminalAuth
-	store    store.Store // fleet-db backed store; nil disables CRUD endpoints
+	gitOps             ops.GitOps
+	termMgr            *terminal.AgentTmuxManager
+	termAuth           *realtime.TerminalAuth
+	interactiveRuntime InteractiveRuntimeController
+	store              store.Store // fleet-db backed store; nil disables CRUD endpoints
 }
 
 // NewAgentService creates a new AgentService implementation.
@@ -36,11 +38,26 @@ type agentServiceImpl struct {
 // truth for agent CRUD endpoints. When nil, ListAgents / CreateAgent /
 // UpdateAgent / DeleteAgent return service.ErrUnavailable.
 func NewAgentService(gitOps ops.GitOps, termMgr *terminal.AgentTmuxManager, termAuth *realtime.TerminalAuth, st store.Store) service.AgentService {
+	return NewAgentServiceWithInteractiveRuntime(gitOps, termMgr, termAuth, st, nil)
+}
+
+// NewAgentServiceWithInteractiveRuntime creates an AgentService with the
+// process-local controller that owns UI-launched interactive PTYs. The
+// compatibility constructor above remains available for consumers that do not
+// serve interactive terminals.
+func NewAgentServiceWithInteractiveRuntime(
+	gitOps ops.GitOps,
+	termMgr *terminal.AgentTmuxManager,
+	termAuth *realtime.TerminalAuth,
+	st store.Store,
+	interactiveRuntime InteractiveRuntimeController,
+) service.AgentService {
 	return &agentServiceImpl{
-		gitOps:   gitOps,
-		termMgr:  termMgr,
-		termAuth: termAuth,
-		store:    st,
+		gitOps:             gitOps,
+		termMgr:            termMgr,
+		termAuth:           termAuth,
+		interactiveRuntime: interactiveRuntime,
+		store:              st,
 	}
 }
 
@@ -360,7 +377,8 @@ func (s *agentServiceImpl) CreateAgent(ctx context.Context, in service.AgentCrea
 	if err := validateAgentCreateInput(in); err != nil {
 		return nil, err
 	}
-	if err := s.ensureAgentRole(ctx, in.WorkspaceKey, in.RoleName, in.Kind, in.Prompt, in.PromptFile); err != nil {
+	roleReceipt, err := s.ensureAgentRole(ctx, in.WorkspaceKey, in.RoleName, in.Kind, in.Prompt, in.PromptFile)
+	if err != nil {
 		return nil, err
 	}
 	created, err := s.store.Agents().Create(ctx, store.AgentCreate{
@@ -377,10 +395,16 @@ func (s *agentServiceImpl) CreateAgent(ctx context.Context, in service.AgentCrea
 		DesiredState:     in.DesiredState,
 	})
 	if err != nil {
+		s.compensateAgentRole(ctx, roleReceipt)
 		return nil, classifyStoreError("create agent", err)
 	}
 	if err := s.ensureLocalAgentWorktrees(ctx, *created); err != nil {
-		_ = s.store.Agents().Delete(ctx, created.WorkspaceKey, created.Name)
+		if deleteErr := s.store.Agents().Delete(context.WithoutCancel(ctx), created.WorkspaceKey, created.Name); deleteErr != nil {
+			logger.Warn("agent create: assignment compensation failed",
+				"workspace", created.WorkspaceKey, "agent", created.Name, "err", deleteErr)
+		} else {
+			s.compensateAgentRole(context.WithoutCancel(ctx), roleReceipt)
+		}
 		return nil, err
 	}
 	return created, nil
@@ -405,28 +429,17 @@ func (s *agentServiceImpl) ensureLocalAgentWorktrees(ctx context.Context, agent 
 		// have workspace paths.
 		return nil
 	}
-	localRepos := make([]localworkspace.Repo, 0, len(ws.Repos))
-	for _, repo := range ws.Repos {
-		localRepos = append(localRepos, localworkspace.Repo{
-			Name:   repo.Name,
-			Path:   repo.Path,
-			Groups: append([]string(nil), repo.Groups...),
-		})
-	}
-	repos, err := localworkspace.SelectAgentRepos(localRepos, agent)
+	repos, err := selectLocalAgentRepos(ws.Repos, agent)
 	if err != nil {
-		return service.ErrValidation(err.Error())
-	}
-	if len(repos) == 0 {
-		return service.ErrValidation("workspace has no repos for agent")
+		return err
 	}
 	createdPaths := make(map[string]string, len(repos))
 	for _, repo := range repos {
-		if repo.Path == "" {
-			return service.ErrValidation(fmt.Sprintf("repo %q has no local path on this machine", repo.Name))
-		}
 		target := localworkspace.AgentWorktreePath(ws.Path, repo.Name, agent.Name)
 		if err := localworkspace.EnsureGitWorktree(repo.Path, target, agent.Name); err != nil {
+			// Keep earlier worktrees. They may already have been adopted, and
+			// path-based force removal cannot be fenced against concurrent
+			// edits. The stable path/branch makes them safe for an exact retry.
 			return service.ErrInternal(fmt.Sprintf("create worktree for repo %q", repo.Name), err)
 		}
 		createdPaths[repo.Name] = target
@@ -435,6 +448,30 @@ func (s *agentServiceImpl) ensureLocalAgentWorktrees(ctx context.Context, agent 
 		return service.ErrInternal("update local agent state", err)
 	}
 	return nil
+}
+
+func selectLocalAgentRepos(workspaceRepos []ops.WorkspaceRepo, agent domain.Agent) ([]localworkspace.Repo, error) {
+	localRepos := make([]localworkspace.Repo, 0, len(workspaceRepos))
+	for _, repo := range workspaceRepos {
+		localRepos = append(localRepos, localworkspace.Repo{
+			Name:   repo.Name,
+			Path:   repo.Path,
+			Groups: append([]string(nil), repo.Groups...),
+		})
+	}
+	repos, err := localworkspace.SelectAgentRepos(localRepos, agent)
+	if err != nil {
+		return nil, service.ErrValidation(err.Error())
+	}
+	if len(repos) == 0 {
+		return nil, service.ErrValidation("workspace has no repos for agent")
+	}
+	for _, repo := range repos {
+		if repo.Path == "" {
+			return nil, service.ErrValidation(fmt.Sprintf("repo %q has no local path on this machine", repo.Name))
+		}
+	}
+	return repos, nil
 }
 
 func (s *agentServiceImpl) loadAgentRoleForKind(ctx context.Context, workspaceKey, roleName string) (*domain.Role, error) {
@@ -448,43 +485,63 @@ func (s *agentServiceImpl) loadAgentRoleForKind(ctx context.Context, workspaceKe
 	return role, nil
 }
 
-func (s *agentServiceImpl) ensureAgentRole(ctx context.Context, workspaceKey, roleName, kind, prompt, promptFile string) error {
+type agentRoleCreateReceipt struct {
+	role    *domain.Role
+	created bool
+}
+
+func (s *agentServiceImpl) ensureAgentRole(
+	ctx context.Context,
+	workspaceKey, roleName, kind, prompt, promptFile string,
+) (agentRoleCreateReceipt, error) {
 	if existing, err := s.store.Roles().Get(ctx, workspaceKey, roleName); err == nil {
-		return reconcileExistingAgentRole(existing, roleName, kind, prompt, promptFile)
+		return agentRoleCreateReceipt{}, reconcileExistingAgentRole(existing, roleName, kind, prompt, promptFile)
 	} else if !errors.Is(err, domain.ErrNotFound) {
-		return service.ErrInternal("load agent role", err)
+		return agentRoleCreateReceipt{}, service.ErrInternal("load agent role", err)
 	}
 
 	resolved := domain.ResolveRoleKind(&domain.Role{Kind: domain.RoleKind(kind)}, roleName)
 	if kind == string(domain.RoleKindWorker) {
-		return service.ErrValidation(fmt.Sprintf("role %q must exist before creating a worker agent", roleName))
+		return agentRoleCreateReceipt{}, service.ErrValidation(fmt.Sprintf("role %q must exist before creating a worker agent", roleName))
 	}
 	if resolved != domain.RoleKindInteractive {
-		return nil
+		return agentRoleCreateReceipt{}, nil
 	}
 
 	description := "Interactive terminal agent"
 	if isLeadAgentRole(roleName) {
 		description = "Lead/orchestrator interactive"
 	}
-	if _, err := s.store.Roles().Create(ctx, store.RoleCreate{
+	created, err := s.store.Roles().Create(ctx, store.RoleCreate{
 		WorkspaceKey: workspaceKey,
 		Name:         roleName,
 		Kind:         string(domain.RoleKindInteractive),
 		Description:  description,
 		Prompt:       prompt,
 		PromptFile:   promptFile,
-	}); err != nil {
+	})
+	if err != nil {
 		if !errors.Is(err, domain.ErrAlreadyExists) {
-			return classifyStoreError("create agent role", err)
+			return agentRoleCreateReceipt{}, classifyStoreError("create agent role", err)
 		}
 		existing, getErr := s.store.Roles().Get(ctx, workspaceKey, roleName)
 		if getErr != nil {
-			return classifyStoreError("load concurrently created agent role", getErr)
+			return agentRoleCreateReceipt{}, classifyStoreError("load concurrently created agent role", getErr)
 		}
-		return reconcileExistingAgentRole(existing, roleName, kind, prompt, promptFile)
+		return agentRoleCreateReceipt{}, reconcileExistingAgentRole(existing, roleName, kind, prompt, promptFile)
 	}
-	return nil
+	return agentRoleCreateReceipt{role: created, created: true}, nil
+}
+
+func (s *agentServiceImpl) compensateAgentRole(ctx context.Context, receipt agentRoleCreateReceipt) {
+	if !receipt.created || receipt.role == nil {
+		return
+	}
+	// Keep the role as retryable scaffolding. RoleStore has no conditional
+	// delete, so check-then-delete could remove a concurrently edited,
+	// recreated, or newly adopted role.
+	logger.DebugContext(ctx, "agent create: retaining role after later failure",
+		"workspace", receipt.role.WorkspaceKey, "role", receipt.role.Name)
 }
 
 // reconcileExistingAgentRole guards against silently launching an interactive
@@ -554,38 +611,165 @@ func (s *agentServiceImpl) UpdateAgent(ctx context.Context, wsKey, name string, 
 	return updated, nil
 }
 
-// RequestAgentLifecycle updates FleetDB state and creates a queued command for
-// the daemon poller that owns this workspace.
-func (s *agentServiceImpl) RequestAgentLifecycle(ctx context.Context, wsKey, name string, in service.AgentLifecycleInput) (*domain.Agent, error) {
-	if s.store == nil {
-		return nil, service.ErrUnavailable("fleet-db store not configured")
+func (s *agentServiceImpl) requestInteractiveAgentLifecycle(
+	ctx context.Context,
+	wsKey string,
+	agent *domain.Agent,
+	in service.AgentLifecycleInput,
+) (*domain.Agent, error) {
+	unlock := terminal.LockAgentLifecycle(wsKey, agent.Name)
+	defer unlock()
+
+	var ownedKeys []terminal.SessionKey
+	switch in.CommandType {
+	case "yield":
+		return nil, service.ErrValidation("interactive agents do not support yield; use stop")
+	case "stop", "restart":
+		var err error
+		ownedKeys, err = s.terminateInteractiveRuntime(ctx, wsKey, agent)
+		if err != nil {
+			return nil, err
+		}
+	case "start":
+		// Interactive Start is placement-local: marking the assignment active
+		// allows the terminal-session endpoint to launch or attach the PTY.
+		// There is intentionally no daemon command.
+	default:
+		return nil, service.ErrValidation("invalid interactive agent lifecycle action")
 	}
-	name = normalizeStoredAgentName(name)
-	if err := validateStoredAgentName(name); err != nil {
-		return nil, err
-	}
-	if err := validateAgentCommandType(in.CommandType); err != nil {
-		return nil, err
-	}
-	updated, err := s.UpdateAgent(ctx, wsKey, name, service.AgentUpdateInput{
+
+	updated, err := s.UpdateAgent(ctx, wsKey, agent.Name, service.AgentUpdateInput{
 		State:        &in.State,
 		DesiredState: &in.DesiredState,
 	})
 	if err != nil {
 		return nil, err
 	}
-	if s.store.AgentCommands() == nil {
-		return updated, nil
-	}
-	if _, err := s.store.AgentCommands().Create(ctx, store.AgentCommandCreate{
-		WorkspaceKey:  wsKey,
-		TargetAgentID: name,
-		Type:          in.CommandType,
-		Payload:       in.Payload,
-	}); err != nil {
-		return nil, classifyStoreError("create agent command", err)
+	if in.CommandType == "stop" {
+		// The shared lifecycle boundary prevents terminal creation or attach
+		// between the ownership snapshot and the durable stopped-state update.
+		// Preserve the second idempotent kill as defense in depth for runtime
+		// implementations outside that boundary.
+		if err := s.killInteractiveRuntimeKeys(ownedKeys); err != nil {
+			return nil, err
+		}
 	}
 	return updated, nil
+}
+
+func (s *agentServiceImpl) terminateInteractiveRuntime(
+	ctx context.Context,
+	wsKey string,
+	agent *domain.Agent,
+) ([]terminal.SessionKey, error) {
+	if s.interactiveRuntime == nil {
+		return nil, service.ErrUnavailable("interactive terminal runtime is not configured")
+	}
+	ownedByKey, ownedKeys, err := s.interactiveRuntimeOwnership(ctx, wsKey, agent.Name)
+	if err != nil {
+		return nil, err
+	}
+	active, err := s.activeOwnedInteractiveSessions(ctx, wsKey, agent.Name, ownedByKey)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.killInteractiveRuntimeKeys(ownedKeys); err != nil {
+		return nil, err
+	}
+	if err := s.cancelInteractiveAgentSessions(ctx, wsKey, active); err != nil {
+		return nil, err
+	}
+	return ownedKeys, nil
+}
+
+func (s *agentServiceImpl) interactiveRuntimeOwnership(
+	ctx context.Context,
+	wsKey string,
+	agentName string,
+) (map[terminal.SessionKey]struct{}, []terminal.SessionKey, error) {
+	owned, err := s.interactiveRuntime.OwnedAgentSessions(ctx, wsKey, agentName)
+	if err != nil {
+		return nil, nil, err
+	}
+	ownedByKey := make(map[terminal.SessionKey]struct{}, len(owned))
+	ownedKeys := make([]terminal.SessionKey, 0, len(owned))
+	for _, runtimeSession := range owned {
+		ownedByKey[runtimeSession.Key] = struct{}{}
+		ownedKeys = append(ownedKeys, runtimeSession.Key)
+	}
+	return ownedByKey, ownedKeys, nil
+}
+
+func (s *agentServiceImpl) activeOwnedInteractiveSessions(
+	ctx context.Context,
+	wsKey string,
+	agentName string,
+	ownedByKey map[terminal.SessionKey]struct{},
+) ([]*domain.AgentSession, error) {
+	sessions, err := s.store.AgentSessions().List(ctx, wsKey, store.AgentSessionFilter{
+		AgentID: agentName,
+		Kind:    domain.AgentSessionKindOrchestration,
+		Limit:   100,
+	})
+	if err != nil {
+		return nil, service.ErrInternal("list interactive agent sessions", err)
+	}
+	active := make([]*domain.AgentSession, 0, len(sessions))
+	for _, session := range sessions {
+		if !isActiveInteractiveSession(session) {
+			continue
+		}
+		if session.TerminalID == "" {
+			return nil, service.ErrConflict("interactive runtime is not owned by a web terminal")
+		}
+		key := terminal.SessionKey{Workspace: wsKey, Name: session.TerminalID}
+		if _, processOwned := ownedByKey[key]; !processOwned {
+			return nil, service.ErrConflict("interactive runtime is not owned by this agent on this server")
+		}
+		active = append(active, session)
+	}
+	return active, nil
+}
+
+func (s *agentServiceImpl) cancelInteractiveAgentSessions(
+	ctx context.Context,
+	wsKey string,
+	active []*domain.AgentSession,
+) error {
+	status := domain.AgentSessionCancelled
+	finishedAtValue := time.Now().UTC()
+	finishedAt := &finishedAtValue
+	for _, session := range active {
+		if _, err := s.store.AgentSessions().Update(ctx, wsKey, session.SessionID, store.AgentSessionUpdate{
+			Status:     &status,
+			FinishedAt: &finishedAt,
+		}); err != nil {
+			return service.ErrInternal("terminalize interactive agent session", err)
+		}
+	}
+	return nil
+}
+
+func (s *agentServiceImpl) killInteractiveRuntimeKeys(keys []terminal.SessionKey) error {
+	for _, key := range keys {
+		if err := s.interactiveRuntime.Kill(key); err != nil {
+			return service.ErrInternal("stop interactive terminal runtime", err)
+		}
+	}
+	return nil
+}
+
+func isActiveInteractiveSession(session *domain.AgentSession) bool {
+	if session == nil || session.FinishedAt != nil {
+		return false
+	}
+	switch session.Status {
+	case "", domain.AgentSessionLeased, domain.AgentSessionStarting,
+		domain.AgentSessionRunning, domain.AgentSessionIdle, domain.AgentSessionYielded:
+		return true
+	default:
+		return false
+	}
 }
 
 // DeleteAgent removes an agent assignment from the fleet-db store.

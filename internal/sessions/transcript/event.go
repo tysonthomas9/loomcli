@@ -2,8 +2,15 @@ package transcript
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"time"
 )
+
+// MaxCanonicalEvents is the shared producer/consumer bound for a durable
+// canonical transcript. Producers must reserve one event for truncation
+// evidence when the source exceeds this limit.
+const MaxCanonicalEvents = 100_000
 
 // Event is the canonical, backend-agnostic representation of a single
 // moment in an agent session's transcript. Per-backend adapters
@@ -61,4 +68,19 @@ var KnownRoles = map[string]bool{
 	RoleAssistant: true,
 	RoleTool:      true,
 	RoleSystem:    true,
+}
+
+// ValidateCanonicalEvent rejects events that cannot satisfy the canonical
+// transcript wire contract shared by local and durable transcript readers.
+func ValidateCanonicalEvent(event Event) error {
+	if !KnownRoles[event.Role] {
+		return fmt.Errorf("transcript event has unknown role %q", event.Role)
+	}
+	if !KnownEventTypes[event.Type] {
+		return fmt.Errorf("transcript event has unknown type %q", event.Type)
+	}
+	if event.Timestamp.IsZero() {
+		return errors.New("transcript event timestamp is required")
+	}
+	return nil
 }

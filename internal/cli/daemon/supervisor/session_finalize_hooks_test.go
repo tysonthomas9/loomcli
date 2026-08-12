@@ -433,14 +433,14 @@ func hookSessionRuntime(t *testing.T) *sessions.Store {
 
 // canonicalReplyTranscript is what the TS leaf writes before it exits: every
 // UUID empty, the final prose after the last tool cycle.
-const canonicalReplyTranscript = `{"seq":0,"role":"system","type":"session_meta","text":"start"}
-{"seq":1,"role":"user","type":"text","text":"review the plan"}
-{"seq":2,"role":"assistant","type":"text","text":"reading the design"}
-{"seq":3,"role":"assistant","type":"tool_use","tool_name":"Read"}
-{"seq":4,"role":"tool","type":"tool_result","output":"the design"}
-{"seq":5,"role":"assistant","type":"text","text":"PLAN CRITIQUE:"}
-{"seq":6,"role":"assistant","type":"text","text":"The ordering invariant is unenforced."}
-{"seq":7,"role":"system","type":"result","output":"{\"cost_usd\":1}"}
+const canonicalReplyTranscript = `{"timestamp":"2026-07-28T12:00:00Z","seq":0,"role":"system","type":"session_meta","text":"start"}
+{"timestamp":"2026-07-28T12:00:01Z","seq":1,"role":"user","type":"text","text":"review the plan"}
+{"timestamp":"2026-07-28T12:00:02Z","seq":2,"role":"assistant","type":"text","text":"reading the design"}
+{"timestamp":"2026-07-28T12:00:03Z","seq":3,"role":"assistant","type":"tool_use","tool_name":"Read"}
+{"timestamp":"2026-07-28T12:00:04Z","seq":4,"role":"tool","type":"tool_result","output":"the design"}
+{"timestamp":"2026-07-28T12:00:05Z","seq":5,"role":"assistant","type":"text","text":"PLAN CRITIQUE:"}
+{"timestamp":"2026-07-28T12:00:06Z","seq":6,"role":"assistant","type":"text","text":"The ordering invariant is unenforced."}
+{"timestamp":"2026-07-28T12:00:07Z","seq":7,"role":"system","type":"result","output":"{\"cost_usd\":1}"}
 `
 
 const wantFinalReply = "PLAN CRITIQUE:\n\nThe ordering invariant is unenforced."

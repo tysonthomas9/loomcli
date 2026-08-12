@@ -286,7 +286,7 @@ func (b *fleetDBIssueBackend) withBackend(ctx context.Context, op string, fn fun
 	fb, err := fleet.New(fleet.Config{
 		BaseURL:     handle.URL(),
 		WorkspaceID: ws,
-		APIKey:      os.Getenv(bootstrap.EnvFleetDBAPIKey),
+		APIKey:      handle.FleetDBClientAPIKey(),
 		Actor:       fleetDBActor(),
 	})
 	if err != nil {

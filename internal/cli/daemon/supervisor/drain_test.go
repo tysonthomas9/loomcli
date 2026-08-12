@@ -286,6 +286,235 @@ func TestDrainWithGrace_RequestYieldFails(t *testing.T) {
 	}
 }
 
+func TestBeginAgentStartTransition_StopWinsBeforeClaim(t *testing.T) {
+	s := newDrainTestSupervisor(&config.DaemonConfig{})
+	ap := &AgentProcess{
+		Entry:        config.AgentEntry{Worktree: "stop-wins"},
+		WorktreePath: t.TempDir(),
+		StopCh:       make(chan struct{}),
+		Done:         make(chan struct{}),
+	}
+	s.Agents = []*AgentProcess{ap}
+
+	drainDone := make(chan error, 1)
+	go func() {
+		drainDone <- s.DrainAgentWithReason(ap.Entry.Worktree, StopReasonManualStop)
+	}()
+
+	select {
+	case <-ap.StopCh:
+	case <-time.After(5 * time.Second):
+		t.Fatal("stop did not close StopCh")
+	}
+
+	if s.beginAgentStartTransition(ap) {
+		s.endAgentStartTransition(ap)
+		t.Fatal("start transition began after Stop won the barrier")
+	}
+	close(ap.Done)
+
+	select {
+	case err := <-drainDone:
+		if err != nil {
+			t.Fatalf("DrainAgentWithReason: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("drain did not finish")
+	}
+	if len(s.Agents) != 0 {
+		t.Fatalf("agents after drain = %d, want 0", len(s.Agents))
+	}
+}
+
+func TestDrainAgentWithReason_InterruptsConcurrencyWait(t *testing.T) {
+	maxConcurrency := 1
+	role := "plan"
+	tracker := NewConcurrencyTracker(map[string]config.RoleConfig{
+		role: {MaxConcurrency: &maxConcurrency},
+	})
+	if !tracker.Acquire(role) {
+		t.Fatal("failed to occupy setup concurrency slot")
+	}
+	t.Cleanup(func() { tracker.Release(role) })
+
+	s := newDrainTestSupervisor(&config.DaemonConfig{})
+	s.Concurrency = tracker
+	ap := &AgentProcess{
+		Entry:        config.AgentEntry{Worktree: "queued-stop", Role: role},
+		WorktreePath: t.TempDir(),
+		StopCh:       make(chan struct{}),
+		Done:         make(chan struct{}),
+	}
+	s.Agents = []*AgentProcess{ap}
+	s.Wg.Add(1)
+	go s.supervisedAgentBody(GoroutineAgentPrefix+ap.Entry.Worktree, ap)
+
+	drainDone := make(chan error, 1)
+	go func() {
+		drainDone <- s.DrainAgentWithReason(ap.Entry.Worktree, StopReasonManualStop)
+	}()
+
+	select {
+	case err := <-drainDone:
+		if err != nil {
+			t.Fatalf("DrainAgentWithReason: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("per-agent stop did not interrupt the concurrency wait")
+	}
+	s.Wg.Wait()
+	if got := tracker.ActiveCount(role); got != 1 {
+		t.Fatalf("active concurrency count = %d, want only the setup slot", got)
+	}
+}
+
+func TestDrainAgentWithReason_StartTransitionPublishesPIDBeforeStop(t *testing.T) {
+	yieldTimeout := 5
+	s := newDrainTestSupervisor(&config.DaemonConfig{
+		Daemon: config.DaemonSettings{RestartPolicy: config.RestartPolicy{
+			YieldTimeout: &yieldTimeout,
+		}},
+	})
+	dir := t.TempDir()
+	ap := &AgentProcess{
+		Entry:        config.AgentEntry{Worktree: "claim-wins"},
+		WorktreePath: dir,
+		StopCh:       make(chan struct{}),
+		Done:         make(chan struct{}),
+	}
+	s.Agents = []*AgentProcess{ap}
+
+	if !s.beginAgentStartTransition(ap) {
+		t.Fatal("start transition unexpectedly rejected")
+	}
+
+	drainDone := make(chan error, 1)
+	go func() {
+		drainDone <- s.DrainAgentWithReason(ap.Entry.Worktree, StopReasonManualStop)
+	}()
+
+	cmd := exec.Command("bash", "-c", //nolint:norawexec
+		`while [ ! -f "`+filepath.Join(dir, YieldFileName)+`" ]; do sleep 0.05; done; exit 0`)
+	cmd.Dir = dir
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	if err := cmd.Start(); err != nil {
+		s.endAgentStartTransition(ap)
+		t.Fatalf("start helper process: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+	})
+
+	ap.Mu.Lock()
+	ap.Cmd = cmd
+	ap.Pid = cmd.Process.Pid
+	ap.Mu.Unlock()
+
+	exitCode := make(chan int, 1)
+	go func() {
+		exitCode <- s.waitForAgent(ap)
+		close(ap.Done)
+	}()
+	s.endAgentStartTransition(ap)
+
+	select {
+	case err := <-drainDone:
+		if err != nil {
+			t.Fatalf("DrainAgentWithReason: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("drain did not finish")
+	}
+
+	select {
+	case code := <-exitCode:
+		if code != 0 {
+			t.Fatalf("helper exit code = %d, want 0 from cooperative yield", code)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("waitForAgent did not finish")
+	}
+	if IsYieldRequested(dir) {
+		t.Fatal("yield marker remained after graceful stop")
+	}
+	if len(s.Agents) != 0 {
+		t.Fatalf("agents after drain = %d, want 0", len(s.Agents))
+	}
+}
+
+func TestSupervisorStop_WaitsForStartTransitionBeforeDrain(t *testing.T) {
+	yieldTimeout := 5
+	s := newDrainTestSupervisor(&config.DaemonConfig{
+		Daemon: config.DaemonSettings{RestartPolicy: config.RestartPolicy{
+			YieldTimeout: &yieldTimeout,
+		}},
+	})
+	s.Concurrency = NewConcurrencyTracker(nil)
+	dir := t.TempDir()
+	ap := &AgentProcess{
+		Entry:        config.AgentEntry{Worktree: "shutdown-transition"},
+		WorktreePath: dir,
+		StopCh:       make(chan struct{}),
+		Done:         make(chan struct{}),
+	}
+	s.Agents = []*AgentProcess{ap}
+
+	if !s.beginAgentStartTransition(ap) {
+		t.Fatal("start transition unexpectedly rejected")
+	}
+	stopDone := make(chan struct{})
+	go func() {
+		s.Stop()
+		close(stopDone)
+	}()
+
+	select {
+	case <-s.Shutdown:
+	case <-time.After(5 * time.Second):
+		s.endAgentStartTransition(ap)
+		t.Fatal("Supervisor.Stop did not signal shutdown")
+	}
+
+	cmd := exec.Command("bash", "-c", //nolint:norawexec
+		`while [ ! -f "`+filepath.Join(dir, YieldFileName)+`" ]; do sleep 0.05; done; exit 0`)
+	cmd.Dir = dir
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	if err := cmd.Start(); err != nil {
+		s.endAgentStartTransition(ap)
+		t.Fatalf("start helper process: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+	})
+
+	ap.Mu.Lock()
+	ap.Cmd = cmd
+	ap.Pid = cmd.Process.Pid
+	ap.Mu.Unlock()
+	exitCode := make(chan int, 1)
+	go func() {
+		exitCode <- s.waitForAgent(ap)
+	}()
+	s.endAgentStartTransition(ap)
+
+	select {
+	case <-stopDone:
+	case <-time.After(10 * time.Second):
+		t.Fatal("Supervisor.Stop did not drain the process published by the start transition")
+	}
+	select {
+	case code := <-exitCode:
+		if code != 0 {
+			t.Fatalf("helper exit code = %d, want 0 from shutdown yield", code)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("waitForAgent did not observe shutdown drain")
+	}
+	if IsYieldRequested(dir) {
+		t.Fatal("yield marker remained after shutdown drain")
+	}
+}
+
 // ---------------------------------------------------------------------------
 // GetSigtermTimeout tests
 // ---------------------------------------------------------------------------
@@ -348,5 +577,21 @@ func TestGetSigtermTimeout_One(t *testing.T) {
 	want := 1 * time.Second
 	if got != want {
 		t.Errorf("GetSigtermTimeout(1) = %v, want %v", got, want)
+	}
+}
+
+func TestAddAgentRejectedAfterShutdown(t *testing.T) {
+	s := newDrainTestSupervisor(&config.DaemonConfig{})
+	close(s.Shutdown)
+
+	err := s.AddAgent(config.AgentEntry{
+		Worktree: t.TempDir(),
+		Role:     "task",
+	})
+	if err == nil {
+		t.Fatal("AddAgent returned nil after shutdown")
+	}
+	if got := s.AgentCount(); got != 0 {
+		t.Fatalf("AgentCount = %d after rejected add, want 0", got)
 	}
 }

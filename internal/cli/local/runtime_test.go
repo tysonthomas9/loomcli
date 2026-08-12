@@ -285,6 +285,67 @@ func TestStopRuntimeProcessesStopsServiceAndServePIDs(t *testing.T) {
 	}
 }
 
+func TestReuseRunningRuntimeIgnoresReusedPIDFromDifferentExecutable(t *testing.T) {
+	if runtime.GOOS == "windows" || !processExecutableInspectionSupported {
+		t.Skip("requires POSIX process executable inspection")
+	}
+
+	unrelated := startSleepProcess(t)
+	dataDir := t.TempDir()
+	info := &runtimeInfo{
+		PID:        unrelated.Process.Pid,
+		Executable: "/Applications/Loom.app/Contents/MacOS/loom",
+		Status:     "running",
+	}
+	if err := writeRuntime(dataDir, info); err != nil {
+		t.Fatalf("writeRuntime() error = %v", err)
+	}
+
+	original := processExecutablePathFn
+	processExecutablePathFn = func(pid int) (string, error) {
+		if pid != unrelated.Process.Pid {
+			t.Fatalf("processExecutablePathFn pid = %d, want %d", pid, unrelated.Process.Pid)
+		}
+		return "/bin/sleep", nil
+	}
+	t.Cleanup(func() { processExecutablePathFn = original })
+
+	result, err := reuseRunningRuntime(dataDir, true)
+	if err != nil {
+		t.Fatalf("reuseRunningRuntime() error = %v", err)
+	}
+	if result != nil {
+		t.Fatalf("reuseRunningRuntime() result = %#v, want nil so caller starts a fresh runtime", result)
+	}
+	if !processRunning(unrelated.Process.Pid) {
+		t.Fatalf("unrelated reused pid %d was stopped", unrelated.Process.Pid)
+	}
+}
+
+func TestStopRuntimeProcessesSkipsPIDWhenExecutableCannotBeVerified(t *testing.T) {
+	if runtime.GOOS == "windows" || !processExecutableInspectionSupported {
+		t.Skip("requires POSIX process executable inspection")
+	}
+
+	unrelated := startSleepProcess(t)
+	info := &runtimeInfo{
+		PID:        unrelated.Process.Pid,
+		Executable: "/Applications/Loom.app/Contents/MacOS/loom",
+	}
+	original := processExecutablePathFn
+	processExecutablePathFn = func(int) (string, error) {
+		return "", os.ErrPermission
+	}
+	t.Cleanup(func() { processExecutablePathFn = original })
+
+	if err := stopRuntimeProcesses(info, 50*time.Millisecond); err != nil {
+		t.Fatalf("stopRuntimeProcesses() error = %v", err)
+	}
+	if !processRunning(unrelated.Process.Pid) {
+		t.Fatalf("unverified pid %d was stopped", unrelated.Process.Pid)
+	}
+}
+
 func startSleepProcess(t *testing.T) *exec.Cmd {
 	t.Helper()
 	cmd := exec.Command("/bin/sleep", "30") //nolint:norawexec // intentional child process for cleanup assertions.

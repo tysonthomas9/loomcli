@@ -215,6 +215,11 @@ func (s *issueServiceImpl) CreateIssue(ctx context.Context, params CreateIssuePa
 		return nil, svcErr
 	}
 
+	repositoryAdmission, err := resolveCreateRepositoryAdmission(be, params)
+	if err != nil {
+		return nil, err
+	}
+
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
@@ -227,6 +232,60 @@ func (s *issueServiceImpl) CreateIssue(ctx context.Context, params CreateIssuePa
 		return nil, ErrInternal("backend returned nil issue after create", nil)
 	}
 
+	canonical, admitted, err := applyCreatedIssueRepositoryAdmission(ctx, repositoryAdmission, created)
+	if err != nil {
+		return nil, err
+	}
+	return marshalCreatedIssueResponse(ctx, be, created, canonical, admitted)
+}
+
+func resolveCreateRepositoryAdmission(
+	be backend.IssueBackend,
+	params CreateIssueParams,
+) (backend.RepositoryRequirementBackend, error) {
+	// An otherwise-runnable non-epic card with no repository must pass the Work
+	// Items owner's atomic admission command before this request reports success.
+	if !createNeedsRepositoryAdmission(params) {
+		return nil, nil
+	}
+	repositoryAdmission, ok := be.(backend.RepositoryRequirementBackend)
+	if !ok {
+		// Fail before minting the issue; an error after Create would leave the
+		// caller uncertain whether an unkeyed retry could create a duplicate.
+		return nil, ErrNotImplemented("issue backend does not support atomic repository-required admission")
+	}
+	return repositoryAdmission, nil
+}
+
+func applyCreatedIssueRepositoryAdmission(
+	ctx context.Context,
+	repositoryAdmission backend.RepositoryRequirementBackend,
+	created *backend.IssueData,
+) (*backend.IssueData, bool, error) {
+	if repositoryAdmission == nil {
+		return created, false, nil
+	}
+	result, err := admitCreatedIssueRepository(ctx, repositoryAdmission, created.ID)
+	if err != nil {
+		slog.Error("backend error in CreateIssue repository admission", "issue_id", created.ID, "err", err)
+		return nil, false, translateBackendError(err)
+	}
+	if result == nil || result.Issue == nil {
+		return nil, false, ErrInternal("repository admission returned no canonical issue", nil)
+	}
+	if result.Issue.ID != created.ID {
+		return nil, false, ErrInternal("repository admission returned a different issue", nil)
+	}
+	return result.Issue, true, nil
+}
+
+func marshalCreatedIssueResponse(
+	ctx context.Context,
+	be backend.IssueBackend,
+	created, canonical *backend.IssueData,
+	admitted bool,
+) (json.RawMessage, error) {
+
 	// backend.IssueData is the slim projection; the previous direct-RPC
 	// path returned the full types.Issue (with description / design /
 	// acceptance_criteria / notes / external_ref / created_by / etc.) and
@@ -234,6 +293,9 @@ func (s *issueServiceImpl) CreateIssue(ctx context.Context, params CreateIssuePa
 	// Fetch the full detail post-create to preserve that contract.
 	detail, getErr := be.Get(ctx, created.ID)
 	if getErr == nil && detail != nil {
+		if admitted {
+			mergeCanonicalCreatedIssue(detail, canonical)
+		}
 		out, err := json.Marshal(issueDetailDataToWire(detail))
 		if err != nil {
 			return nil, ErrInternal("failed to marshal created issue", err)
@@ -248,11 +310,55 @@ func (s *issueServiceImpl) CreateIssue(ctx context.Context, params CreateIssuePa
 	// Fall back to the slim projection if the follow-up Get fails — the
 	// create itself succeeded so we still return success rather than
 	// surface the read failure as a create failure.
-	out, err := json.Marshal(issueDataToWire(created))
+	out, err := json.Marshal(issueDataToWire(canonical))
 	if err != nil {
 		return nil, ErrInternal("failed to marshal created issue", err)
 	}
 	return out, nil
+}
+
+func mergeCanonicalCreatedIssue(detail *backend.IssueDetailData, canonical *backend.IssueData) {
+	// The atomic command result owns the admission generation. Preserve the
+	// relationship projections from Get while replacing every canonical field.
+	dependencyCount, dependentCount := detail.DependencyCount, detail.DependentCount
+	blockedByCount, blockedBy := detail.BlockedByCount, detail.BlockedBy
+	detail.IssueData = *canonical
+	detail.DependencyCount, detail.DependentCount = dependencyCount, dependentCount
+	detail.BlockedByCount, detail.BlockedBy = blockedByCount, blockedBy
+}
+
+// admitCreatedIssueRepository makes one bounded replay of the Fleet-owned
+// command when its result is ambiguous because of a transport failure or
+// timeout. The command is explicitly replay-safe: if the first call committed
+// and only its response was lost, the replay returns the same canonical
+// blocked Issue; if it did not commit, the replay may apply it. A persistent
+// failure remains fail-closed and the durable issue-journal lane will retry
+// admission for the already-created card.
+func admitCreatedIssueRepository(
+	ctx context.Context,
+	repositoryAdmission backend.RepositoryRequirementBackend,
+	issueID string,
+) (*backend.RepositoryRequirementResult, error) {
+	result, err := repositoryAdmission.BlockRepositoryRequired(ctx, issueID)
+	if err == nil || ctx.Err() != nil ||
+		(!backend.IsKind(err, backend.KindUnavailable) && !backend.IsKind(err, backend.KindTimeout)) {
+		return result, err
+	}
+	slog.Warn("CreateIssue: repository admission result ambiguous; replaying atomic command",
+		"issue_id", issueID, "err", err)
+	return repositoryAdmission.BlockRepositoryRequired(ctx, issueID)
+}
+
+// createNeedsRepositoryAdmission identifies create requests that can enter
+// the ready queue without a deterministic checkout. The atomic command still
+// rechecks all of these facts, including repository cardinality and ownership,
+// at commit time; this predicate only avoids a needless command for epics,
+// deferred cards, and cards with an explicit repository.
+func createNeedsRepositoryAdmission(params CreateIssueParams) bool {
+	status := strings.ToLower(strings.TrimSpace(params.Status))
+	return (status == "" || status == string(types.StatusOpen)) &&
+		!strings.EqualFold(strings.TrimSpace(params.IssueType), "epic") &&
+		strings.TrimSpace(params.SourceRepo) == ""
 }
 
 func (s *issueServiceImpl) PatchIssue(ctx context.Context, params PatchIssueParams) error {

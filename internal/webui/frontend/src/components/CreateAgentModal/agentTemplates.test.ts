@@ -1,0 +1,64 @@
+import { describe, expect, it } from "vitest";
+
+import {
+  AGENT_TEMPLATES,
+  NEW_ROLE_TEMPLATE,
+  SCRIPTED_WORKFLOW_TEMPLATES,
+  customRoleTemplate,
+  roleTriggerForTaskFilter,
+  roleTriggerOption,
+} from "./agentTemplates";
+
+describe("agent template role defaults", () => {
+  it("creates new prompt-agent roles in the safe coder phase", () => {
+    expect(NEW_ROLE_TEMPLATE.roleCreate?.taskFilter).toBe("has_design");
+    expect(
+      AGENT_TEMPLATES.find((template) => template.id === "role-new")?.roleCreate
+        ?.taskFilter,
+    ).toBe("has_design");
+  });
+
+  it("maps typed role triggers to their task filter and internal event", () => {
+    expect(roleTriggerOption("ready")).toMatchObject({
+      taskFilter: "has_design",
+      eventTypePattern: "internal.task.ready",
+    });
+    expect(roleTriggerOption("review")).toMatchObject({
+      taskFilter: "review",
+      eventTypePattern: "internal.task.review",
+    });
+  });
+
+  it("projects a persisted review role with its review trigger", () => {
+    expect(roleTriggerForTaskFilter("review")).toBe("review");
+    expect(
+      customRoleTemplate({
+        name: "documentation",
+        task_filter: "review",
+      }),
+    ).toMatchObject({
+      roleTrigger: "review",
+      description: "Runs the documentation role when a task enters Review.",
+    });
+  });
+
+  it("restricts the advanced bug-triage worker to bug cards", () => {
+    expect(
+      AGENT_TEMPLATES.find((template) => template.id === "legacy-bug-triage")
+        ?.customRole?.taskFilter,
+    ).toBe("bug");
+  });
+
+  it("pins review workflows to Codex while bug-fix stays workspace-resolved", () => {
+    const workflows = new Map(
+      SCRIPTED_WORKFLOW_TEMPLATES.map((template) => [
+        template.id,
+        template.workflow,
+      ]),
+    );
+
+    expect(workflows.get("review-loop-agent")?.requiredBackend).toBe("codex");
+    expect(workflows.get("local-review-agent")?.requiredBackend).toBe("codex");
+    expect(workflows.get("bug-fix-agent")?.requiredBackend).toBeUndefined();
+  });
+});

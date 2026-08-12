@@ -73,14 +73,26 @@ export async function exerciseLoomDriverClientSurface(): Promise<void> {
   await client.agents.message({ agent: "lead", message: "hello" });
 
   // tasks + taskRuns
-  await client.tasks.claimReady({ epicId: "EPIC-1" });
-  await client.tasks.claim({ taskId: "TASK-1", epicId: "EPIC-1", limit: 5 });
+  expectType<Record<string, unknown> | null>(await client.tasks.claimReady({ epicId: "EPIC-1", sourceRepo: "alpha" }));
+  expectType<Record<string, unknown> | null>(await client.tasks.claim({ taskId: "TASK-1", epicId: "EPIC-1", limit: 5 }));
+  expectType<Record<string, unknown> | null>(await client.tasks.claimReview({ taskId: "TASK-1" }));
+  expectType<Record<string, unknown> | null>(await client.tasks.handoffReview({
+    taskId: "TASK-1", taskRunId: "task-run-1", status: "open", reason: "changes requested",
+  }));
+  expectType<Record<string, unknown> | null>(await client.tasks.handoffReview({
+    taskId: "TASK-2", taskRunId: "task-run-2", status: "review",
+    priority: 2, labels: ["bug", "reviewed"], commentBody: "Automated bug triage completed.",
+    externalRef: "local-branch:loom/TASK-2@aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  }));
   await client.tasks.complete({ taskId: "TASK-1", taskRunId: "task-run-1", artifactIds: ["a1"] });
   await client.tasks.release({ taskId: "TASK-1" });
+  await client.tasks.releaseReview({ taskId: "TASK-1" });
   expectType<Record<string, unknown>>(await client.taskRuns.request({
     taskId: "TASK-1",
     runner: "local-task-runner",
     capabilities: ["git"],
+    closeTask: false,
+    retainWorkItemClaim: true,
     // Optional task-run payload (diff+rubric) delivered verbatim to the runner.
     input: { kind: "github-review", diff: "patch", rubric: { mustPass: ["builds"] } },
   }));
@@ -177,7 +189,7 @@ export function exerciseErrorAndSuspendTypes(): void {
 }
 
 export async function exerciseRunnerSurface(): Promise<void> {
-  const runner: TaskRunClient = TaskRunClient.fromEnv({ LOOM_FLEET_DB_URL: "http://localhost:8080" });
+  const runner: TaskRunClient = TaskRunClient.fromEnv({ LOOM_TASK_RUN_API_URL: "http://localhost:8080" });
   expectType<string>(runner.taskRunId);
   expectType<number | string>(runner.fencingToken);
   expectType<Record<string, unknown>>(runner.request());
@@ -186,21 +198,23 @@ export async function exerciseRunnerSurface(): Promise<void> {
   expectType<string>(run.task_run_id);
   expectType<string | undefined>(run.runner);
   await runner.heartbeat({ runtimeMetadata: { step: "build" } });
-  await runner.appendLog({ text: "line", stream: "stdout" });
-  await runner.logs.append({ text: "line" });
+  await runner.appendLog({ requestId: "log-1", text: "line", stream: "stdout", timestamp: new Date() });
+  await runner.logs.append({ request_id: "log-2", text: "line", timestamp: "2026-07-16T20:31:00Z" });
+  // @ts-expect-error append replay identity is required
+  await runner.logs.append({ text: "line", timestamp: new Date() });
+  // @ts-expect-error immutable append timestamp is required
+  await runner.logs.append({ requestId: "log-3", text: "line" });
   const handle: ArtifactHandle = await runner.declareArtifact({ type: "diff", summary: "patch" });
   await handle.upload("content", { mimeType: "text/plain" });
   await handle.finalize({ summary: "done" });
   await runner.artifacts.list({ type: "diff", limit: 10 });
   const completion: CompleteRunResponse = await runner.completeRun({ status: "completed", exitCode: 0 });
   expectType<TaskRun | undefined>(completion.task_run);
-  expectType<"LOOM_FLEET_DB_URL">(RunnerEnv.baseUrl);
   expectType<"LOOM_TASK_RUN_API_URL">(RunnerEnv.apiUrl);
   expectType<"LOOM_TASK_RUN_REQUEST_JSON">(RunnerEnv.requestJson);
 
-  // Serve transport: apiUrl alone is a sufficient endpoint config.
+  // The serve facade is the only supported endpoint config.
   const serveRunner: TaskRunClient = TaskRunClient.fromEnv({}, { apiUrl: "http://127.0.0.1:8080" });
-  expectType<boolean>(serveRunner.serveMode);
   expectType<string>(serveRunner.apiUrl);
 }
 

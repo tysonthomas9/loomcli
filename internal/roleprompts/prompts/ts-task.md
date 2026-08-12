@@ -23,14 +23,20 @@ in every `loom data` command below (shown as `$LOOM_TASK_ID`).
   new constants, different patterns), follow the **intent** of the design and
   adapt to the conventions actually present in the code.
 - If a conflict is so fundamental the design's approach cannot work, do NOT
-  force it: document the flaw and a concrete corrective direction, then flag the
-  task for re-planning:
+  force it: document the flaw and a concrete corrective direction, add the
+  needs-revision label, then write the trusted runner's typed outcome file:
   ```
   loom data update "$LOOM_TASK_ID" --notes "NEEDS-REVISION: <what's wrong + concrete next-iteration direction + evidence>"
-  loom data update "$LOOM_TASK_ID" --status open --labels +needs-revision
+  loom data update "$LOOM_TASK_ID" --labels +needs-revision
+  printf '%s\n' '{"version":1,"disposition":"needs_revision","summary":"<concise reason the design must be revised>"}' > "$LOOM_TASK_OUTCOME_FILE"
   ```
-  Commit any salvageable infrastructure with feature flags OFF, then return a
-  summary and EXIT.
+  `LOOM_TASK_OUTCOME_FILE` is a runner-owned, per-run channel outside the repo.
+  Write it only after BOTH Loom updates above succeed; if either update fails,
+  do not write the outcome file. Do not invent another disposition or add
+  fields. Commit any salvageable
+  infrastructure with feature flags OFF, then return a summary and EXIT. The
+  workflow host applies open/unassigned only after the typed TaskRun terminal
+  receipt retires your live claim; you must not mutate status or assignee.
 
 ### Step 3: Implement
 - Follow the design's intent. Keep the change minimal and focused ONLY on this

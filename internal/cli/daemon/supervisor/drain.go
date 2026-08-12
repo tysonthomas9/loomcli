@@ -136,6 +136,16 @@ func (s *Supervisor) drainAllWithGrace(agents []*AgentProcess) {
 		stopWg.Add(1)
 		go func(agent *AgentProcess) {
 			defer stopWg.Done()
+			// Shutdown is already closed, so no later transition can begin.
+			// Wait for an in-flight claim-to-spawn transition to publish Cmd/Pid
+			// before DrainWithGrace inspects the process.
+			agent.StartStopMu.Lock()
+			agent.Mu.Lock()
+			publishedPID := agent.Pid
+			agent.Mu.Unlock()
+			agent.StartStopMu.Unlock()
+			slog.Debug("agent start transition settled before shutdown drain",
+				"worktree", agent.Entry.Worktree, "pid", publishedPID)
 			s.DrainWithGrace(agent, "shutdown", yieldTimeout, sigtermTimeout)
 		}(ap)
 	}
@@ -166,6 +176,11 @@ func (s *Supervisor) DrainAgent(name string) error {
 		return nil
 	}
 
+	// Linearize Stop with the supervisor's claim-to-spawn transition. If the
+	// transition already won, this waits until Cmd/Pid are published; if Stop
+	// wins, the under-lock StopCh check prevents a new claim.
+	target.StartStopMu.Lock()
+
 	// Set stop reason before signaling (superviseAgent reads it after seeing StopCh closed)
 	target.Mu.Lock()
 	target.StopReason = StopReasonConfigRemoved
@@ -177,6 +192,7 @@ func (s *Supervisor) DrainAgent(name string) error {
 	target.StopOnce.Do(func() {
 		close(target.StopCh)
 	})
+	target.StartStopMu.Unlock()
 
 	// Yield -> wait -> SIGTERM -> SIGKILL
 	s.DrainWithGrace(target, "config_removed", s.GetYieldTimeout(), s.GetSigtermTimeout())
@@ -220,6 +236,8 @@ func (s *Supervisor) DrainAgentWithReason(name string, reason StopReason) error 
 		return nil
 	}
 
+	target.StartStopMu.Lock()
+
 	// Set stop reason before signaling
 	target.Mu.Lock()
 	target.StopReason = reason
@@ -231,6 +249,7 @@ func (s *Supervisor) DrainAgentWithReason(name string, reason StopReason) error 
 	target.StopOnce.Do(func() {
 		close(target.StopCh)
 	})
+	target.StartStopMu.Unlock()
 
 	// Yield -> wait -> SIGTERM -> SIGKILL
 	s.DrainWithGrace(target, string(reason), s.GetYieldTimeout(), s.GetSigtermTimeout())
@@ -276,6 +295,8 @@ func (s *Supervisor) DrainAgentForceful(name string, reason StopReason) error {
 		return nil
 	}
 
+	target.StartStopMu.Lock()
+
 	// Set stop reason before signaling
 	target.Mu.Lock()
 	target.StopReason = reason
@@ -285,6 +306,7 @@ func (s *Supervisor) DrainAgentForceful(name string, reason StopReason) error {
 	target.StopOnce.Do(func() {
 		close(target.StopCh)
 	})
+	target.StartStopMu.Unlock()
 
 	// Stop the subprocess directly: SIGTERM -> SIGKILL (no yield)
 	s.StopAgent(target, s.GetSigtermTimeout())
@@ -315,22 +337,50 @@ func (s *Supervisor) AddAgent(entry config.AgentEntry) error {
 // AddAgentForTask creates and starts a new agent with an optional first task
 // requested by the control plane.
 func (s *Supervisor) AddAgentForTask(entry config.AgentEntry, taskID string, parentSessionIDs ...string) error {
-	if entry.Mode == domain.AgentModeEphemeral && taskID == "" {
-		return fmt.Errorf("ephemeral agent %q requires a task_id", entry.Worktree)
+	_, err := s.addAgentForTask(entry, taskID, firstParentSessionID(parentSessionIDs), false)
+	return err
+}
+
+// AddAgentWithOwnershipReservation starts a fresh lifecycle generation whose
+// first ownership lease cannot be released until the caller durably completes
+// the Restart command. The returned process exposes an explicit
+// OwnershipAcquired signal; callers must release the reservation on every
+// terminal path.
+func (s *Supervisor) AddAgentWithOwnershipReservation(entry config.AgentEntry) (*AgentProcess, error) {
+	return s.addAgentForTask(entry, "", "", true)
+}
+
+// AddAgentForTaskWithOwnershipReservation is the task-aware Start-command
+// counterpart to AddAgentWithOwnershipReservation.
+func (s *Supervisor) AddAgentForTaskWithOwnershipReservation(
+	entry config.AgentEntry,
+	taskID,
+	parentSessionID string,
+) (*AgentProcess, error) {
+	return s.addAgentForTask(entry, taskID, parentSessionID, true)
+}
+
+func (s *Supervisor) addAgentForTask(
+	entry config.AgentEntry,
+	taskID string,
+	parentSessionID string,
+	reserveOwnership bool,
+) (*AgentProcess, error) {
+	if channelClosed(s.Shutdown) {
+		return nil, fmt.Errorf("cannot add agent %q: supervisor is shutting down", entry.Worktree)
 	}
-	parentSessionID := ""
-	if len(parentSessionIDs) > 0 {
-		parentSessionID = strings.TrimSpace(parentSessionIDs[0])
+	if entry.Mode == domain.AgentModeEphemeral && taskID == "" {
+		return nil, fmt.Errorf("ephemeral agent %q requires a task_id", entry.Worktree)
 	}
 
 	if err := s.checkDuplicateAgent(entry.Worktree); err != nil {
-		return err
+		return nil, err
 	}
 
 	// Resolve worktree path (outside lock — may do I/O)
 	target, err := workspace.ResolveAgentTarget(entry.Worktree, entry.Repo)
 	if err != nil {
-		return fmt.Errorf("agent %q worktree: %w", entry.Worktree, err)
+		return nil, fmt.Errorf("agent %q worktree: %w", entry.Worktree, err)
 	}
 
 	s.AgentsMu.RLock()
@@ -338,42 +388,64 @@ func (s *Supervisor) AddAgentForTask(entry config.AgentEntry, taskID string, par
 	s.AgentsMu.RUnlock()
 	roleConfig, err := s.resolveRoleConfig(entry.Role, agentCount)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	ap := s.newRuntimeAgentProcess(entry, roleConfig, target.WorkDir, taskID, parentSessionID)
+	ap.ownershipCommandReserved = reserveOwnership
 
-	// Authoritative duplicate check + slice append + WaitGroup increment under
-	// a single write lock so Wg.Add can't race with Stop()'s Wg.Wait.
-	s.AgentsMu.Lock()
-	for _, existing := range s.Agents {
-		if existing.Entry.Worktree == entry.Worktree {
-			s.AgentsMu.Unlock()
-			return fmt.Errorf("agent %q already exists", entry.Worktree)
-		}
+	if err := s.registerRuntimeAgent(ap); err != nil {
+		return nil, err
 	}
-	s.Agents = append(s.Agents, ap)
-	s.Wg.Add(1)
-	s.AgentsMu.Unlock()
 
 	name := GoroutineAgentPrefix + ap.Entry.Worktree
 	s.RegisterTick(name)
 	go s.supervisedAgentBody(name, ap)
 
 	slog.Info("agent added and started", "worktree", entry.Worktree, "role", entry.Role)
+	return ap, nil
+}
+
+func (s *Supervisor) registerRuntimeAgent(ap *AgentProcess) error {
+	// Authoritative duplicate check + slice append + WaitGroup increment under
+	// a single write lock so Wg.Add can't race with Stop()'s snapshot and Wait.
+	// Shutdown closes before Stop takes the same lock for its snapshot: an add
+	// that wins this lock is included in that snapshot, while one that loses is
+	// rejected and cannot outlive Stop.
+	s.AgentsMu.Lock()
+	defer s.AgentsMu.Unlock()
+	if channelClosed(s.Shutdown) {
+		return fmt.Errorf("cannot add agent %q: supervisor is shutting down", ap.Entry.Worktree)
+	}
+	for _, existing := range s.Agents {
+		if existing.Entry.Worktree == ap.Entry.Worktree {
+			return fmt.Errorf("agent %q already exists", ap.Entry.Worktree)
+		}
+	}
+	s.Agents = append(s.Agents, ap)
+	s.Wg.Add(1)
 	return nil
+}
+
+func firstParentSessionID(parentSessionIDs []string) string {
+	if len(parentSessionIDs) == 0 {
+		return ""
+	}
+	return strings.TrimSpace(parentSessionIDs[0])
 }
 
 func (s *Supervisor) newRuntimeAgentProcess(entry config.AgentEntry, roleConfig config.RoleConfig, workDir, taskID, parentSessionID string) *AgentProcess {
 	return &AgentProcess{
-		Entry:           entry,
-		RoleConfig:      roleConfig,
-		WorktreePath:    workDir,
-		RepoConfig:      s.FindRepoConfig(entry.Repo),
-		RequestedTaskID: taskID,
-		ParentSessionID: parentSessionID,
-		StopCh:          make(chan struct{}),
-		Done:            make(chan struct{}),
+		Entry:                 entry,
+		RoleConfig:            roleConfig,
+		WorktreePath:          workDir,
+		RepoConfig:            s.FindRepoConfig(entry.Repo),
+		LifecycleGenerationAt: time.Now().UTC(),
+		OwnershipAcquired:     make(chan struct{}),
+		RequestedTaskID:       taskID,
+		ParentSessionID:       parentSessionID,
+		StopCh:                make(chan struct{}),
+		Done:                  make(chan struct{}),
 	}
 }
 

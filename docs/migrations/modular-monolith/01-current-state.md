@@ -1,6 +1,6 @@
 # Current-State Evidence
 
-- **Status:** Reviewed historical Phase 1 baseline with current Phase 3 ratchets appended
+- **Status:** Phase 4 complete — historical validation remains immutable; the current reliability hardening has refreshed packaged Desktop, Podman/raw-browser, exact-head architecture, and aggregate Loom gate proof at Loom `67c45972f` with FleetDB `9ffa69f60`; Phase 5 has not started
 - **Snapshot:** 2026-07-15, pre-guardrail Loom code head `122d4d79` after refreshing `origin/v5`
 - **Migration:** [Modular Monolith Migration](README.md)
 
@@ -66,16 +66,26 @@ The result does not prove modularity. Global domain, Store, orchestration, servi
 | Enable/pause or change role | Agent desired state and attached binding configuration update separately |
 | Delete binding/agent | Binding/grant ordering can leave authority drift after partial failure |
 | Approve workflow | Driver metadata is read/replaced without an operator check or explicit revision/CAS |
-| Trigger dispatch | Idempotency, hop depth, and actor filtering live in different places; actor filtering is not enforced |
+| Trigger dispatch | Idempotency and hop depth still span layers; `internal.issue.*` binding create/update now requires workflow-actor exclusion and legacy unsafe bindings fail closed at dispatch |
 | Claim/run/finish | Issue state, TaskRun, locks, and fencing cross record families |
 
 Transport-only authorization cannot fix these paths because CLI and internal callers reach the same capabilities. The migration must establish typed authority at every module command boundary and atomic fleet-db commands or recoverable process managers for cross-record writes.
+
+The current Phase 4 hardening closes three concrete failure modes without
+claiming the wider migration is complete. A healthy DriverRun now performs
+exact-parent-owner-fenced stale-child TaskRun recovery and drains that loop
+before parent finalization. First-class Repo lifecycle commands commit the Repo,
+audit event, and workspace admission mapping atomically and reject updates or
+deletes that would orphan Issue or TaskRun placement, including deletion of a
+sole implicit fallback while repo-less work is ready. Internal issue-event
+bindings must exclude workflow-origin actors, so a workflow cannot retrigger
+itself through its own Issue mutation.
 
 Two fleet-db mechanisms also defeat a simplistic “one table equals one module” split. `ActionLedger` records run-side-effect actions across task status/comments, PR creation/merge, and TaskRun start (`fleet-db/internal/models/platform.go:770-865`). The generic Lease record covers `agent_service`, `driver_run`, `task_run`, `terminal`, and `artifact_upload` (`fleet-db/internal/models/control_plane.go:435-492`). The target must assign ActionLedger coordination and each Lease instance to one owner without inventing a global shared business module.
 
 ## Runtime ownership is also distributed
 
-The Phase 1 runtime inventory replaced the old scalar loop estimates. That historical snapshot named 83 lifecycle component definitions across `cmd`, `internal`, and `sdk`: 58 exact `time.NewTicker` AST sites plus 25 additional boot or long-lived components. A separate default-deny AST ledger ratcheted all 108 in-scope non-test source goroutine launch definitions. Phase 3's current inventory names 85 components, 56 ticker sites, 58 managed components, and 107 goroutine launch definitions. Each launch still records its callee and either resolves to lifecycle-component IDs or carries an explicit bounded, request, command, or helper disposition with a reason. These are source-definition ratchets, not counts of simultaneously running product loops.
+The Phase 1 runtime inventory replaced the old scalar loop estimates. That historical snapshot named 83 lifecycle component definitions across `cmd`, `internal`, and `sdk`: 58 exact `time.NewTicker` AST sites plus 25 additional boot or long-lived components. A separate default-deny AST ledger ratcheted all 108 in-scope non-test source goroutine launch definitions. Phase 3 named 85 components, 56 ticker sites, 58 managed components, and 107 goroutine launch definitions. The final Phase 4 tree names 86 components, 53 ticker sites, 58 managed components, four foreground command-poll components, and 103 goroutine launch definitions. Each launch still records its callee and either resolves to lifecycle-component IDs or carries an explicit bounded, request, command, or helper disposition with a reason. These are source-definition ratchets, not counts of simultaneously running product loops.
 
 Phase 1 also removed the stale-task policy mismatch: `serve` now sources the same twenty-minute default as `StaleTaskSweeper`. The sweeper uses the earlier of a monotonic projection and the current wall clock: forward jumps cannot mass-age persisted heartbeats, while a backward jump conservatively protects fresh post-jump heartbeats and recovery resumes as the new clock advances. Standalone lead sessions, serve-hosted task sessions, and supervisor-owned AgentSession/AgentLease records have explicit heartbeat coverage; terminal finalization drains in-flight session heartbeats before writing completion.
 
@@ -120,8 +130,8 @@ git merge-base --is-ancestor origin/main HEAD
 shasum -a 256 api/openapi.yaml
 ```
 
-The Phase 1 architecture tooling generated and continues to validate capability edges, Store consumers, direct adapter writes, runtime components, performance records, and authority/transaction specifications. The frozen pre-extraction values remain zero capability module roots, 93 composite-Store files, 82 outside composition, and 233 direct-write rows. The Phase 3 pre-commit base-plus-diff snapshot has two active module roots, 88 composite-Store files, 77 outside composition, and 226 direct-write rows across 249 call sites. The historical table above is therefore not presented as the Phase 3 source state; a separate post-commit audit snapshot binds the measured result to Loom `7f95b9bf1` and FleetDB `f1c4e1119` without changing the original measurement.
+The Phase 1 architecture tooling generated and continues to validate capability edges, Store consumers, direct adapter writes, runtime components, performance records, and authority/transaction specifications. The frozen pre-extraction values remain zero capability module roots, 93 composite-Store files, 82 outside composition, and 233 direct-write rows. The Phase 3 pre-commit base-plus-diff snapshot has two active module roots, 88 composite-Store files, 77 outside composition, and 226 direct-write rows across 249 call sites. The immutable Phase 4 validation check has four active roots, 82 composite-Store files, 71 outside composition, 90 legacy handler-import exceptions, and 243 primary direct-write rows across 265 call sites. The current exact-head reliability-hardening architecture check retains the same four roots, Store `82/71`, and 90 handler exceptions while ratcheting 251 primary direct-write rows across 273 sites, 60 command namespaces, 86 runtime components, and 103 goroutine definitions across all 11 profiles plus the all-files AST pass. A separate content-addressed `internal/driver` ratchet freezes its remaining 10 rows across 11 sites until Phase 6 completion. The historical table above is therefore not presented as current source state. Immutable Phase 2 and Phase 3 snapshots preserve their provenance; the retained Phase 4 pre-commit snapshot remains explicitly provisional and `phase4-execution-validation-53cbe2577` remains immutable evidence for its exact source. The appended `phase4-reliability-validation-67c45972f` record binds the current packaged Desktop, Podman, raw-browser, focused-source, FleetDB-gate, paired-contract, exact-head architecture, and aggregate Loom gate proof.
 
 ---
 
-[All migrations](../README.md) · [Migration overview](README.md) · Next: [Target architecture](02-target-architecture.md) · [Phase 3 evidence](08-phase-3-decisions-and-evidence.md)
+[All migrations](../README.md) · [Migration overview](README.md) · Next: [Target architecture](02-target-architecture.md) · [Phase 4 evidence](09-phase-4-decisions-and-evidence.md)

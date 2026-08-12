@@ -1,7 +1,6 @@
 package driver
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"strings"
@@ -9,11 +8,10 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	driverpkg "github.com/tysonthomas9/loomcli/internal/driver"
-	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 )
 
 var (
@@ -45,7 +43,6 @@ var (
 	driverCompleteTaskTaskID       string
 	driverCompleteTaskTaskRunID    string
 	driverCompleteTaskCompletionID string
-	driverCompleteTaskLeaseToken   string
 	driverCompleteTaskArtifactIDs  []string
 	driverCompleteTaskLogsRef      string
 	driverCompleteTaskArtifactsRef string
@@ -143,7 +140,6 @@ func bindDriverCompleteTaskFlags(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&driverCompleteTaskTaskID, "task-id", "", "FleetDB task ID")
 	cmd.Flags().StringVar(&driverCompleteTaskTaskRunID, "task-run-id", "", "TaskRun ID to complete through FleetDB CompleteRun")
 	cmd.Flags().StringVar(&driverCompleteTaskCompletionID, "completion-id", "", "Completion idempotency key (default: complete-<task-run-id>)")
-	cmd.Flags().StringVar(&driverCompleteTaskLeaseToken, "lease-token", "", "TaskRun lease token (default: LOOM_TASK_RUN_LEASE_TOKEN or LOOM_RUNNER_LEASE_TOKEN)")
 	cmd.Flags().StringArrayVar(&driverCompleteTaskArtifactIDs, "artifact-id", nil, "Required artifact ID; may be repeated")
 	cmd.Flags().StringVar(&driverCompleteTaskLogsRef, "logs-ref", "", "Logs artifact/ref for CompleteRun")
 	cmd.Flags().StringVar(&driverCompleteTaskArtifactsRef, "artifacts-ref", "", "Artifact bundle/ref for CompleteRun")
@@ -173,167 +169,146 @@ func bindDriverRecoverStaleTasksFlags(cmd *cobra.Command) {
 	cmd.Flags().BoolVar(&driverRecoverStaleJSON, "json", false, "JSON output")
 }
 
-func runDriverClaimReady(_ *cobra.Command, _ []string) error {
-	return cmdstore.WithStore(func(ctx context.Context, h *bootstrap.StoreHandle) error {
-		ws, parent, err := resolveRunningDriverRun(ctx, h, driverClaimReadyWorkspaceKey, driverClaimReadyDriverRunID, driverClaimReadyNodeID, driverClaimReadyLeaseID, driverClaimReadyFence)
-		if err != nil {
-			return err
-		}
-		epicID := firstNonEmpty(driverClaimReadyEpicID, parent.EpicID, driverRunPayloadEpicID(parent.Payload))
-		actor := firstNonEmpty(driverClaimReadyActor, driverRunActor(parent.RunID))
-		issueBackend, err := newDriverIssueBackend(h, ws, actor)
-		if err != nil {
-			return err
-		}
-		claimed, err := driverpkg.ClaimReadyTask(ctx, issueBackend, driverpkg.TaskClaimOptions{
-			EpicID:        epicID,
-			Actor:         actor,
-			Limit:         driverClaimReadyLimit,
-			ExcludeLabels: driverClaimReadyExcludeLabel,
-		})
-		if err != nil {
-			return fmt.Errorf("claim ready task: %w", err)
-		}
-		if driverClaimReadyJSON {
-			return cmdstore.WriteJSON(claimed)
-		}
-		if claimed == nil {
-			fmt.Println("No ready task claimed")
-			return nil
-		}
-		fmt.Printf("Claimed task %s for %s\n", claimed.ID, actor)
-		return nil
+func runDriverClaimReady(cmd *cobra.Command, _ []string) error {
+	client, err := newDriverRuntimeClient(driverRuntimeClientOptions{
+		WorkspaceKey: driverClaimReadyWorkspaceKey, DriverRunID: driverClaimReadyDriverRunID,
+		NodeID: driverClaimReadyNodeID, LeaseID: driverClaimReadyLeaseID, FencingToken: driverClaimReadyFence,
 	})
+	if err != nil {
+		return err
+	}
+	params := map[string]any{
+		"epicId": driverClaimReadyEpicID, "actor": driverClaimReadyActor, "limit": driverClaimReadyLimit,
+		"excludeLabels": driverClaimReadyExcludeLabel,
+	}
+	var claimed *driverpkg.ClaimedTask
+	if err := client.call(cmd.Context(), "claim-ready", params, &claimed); err != nil {
+		return fmt.Errorf("claim ready task: %w", err)
+	}
+	if driverClaimReadyJSON {
+		return cmdstore.WriteJSON(claimed)
+	}
+	if claimed == nil {
+		fmt.Println("No ready task claimed")
+		return nil
+	}
+	fmt.Printf("Claimed task %s for %s\n", claimed.ID, firstNonEmpty(claimed.ClaimedBy, "driver runtime"))
+	return nil
 }
 
-func runDriverActiveTaskRuns(_ *cobra.Command, _ []string) error {
-	return cmdstore.WithStore(func(ctx context.Context, h *bootstrap.StoreHandle) error {
-		ws, parent, err := resolveRunningDriverRun(ctx, h, driverActiveTaskRunsWorkspaceKey, driverActiveTaskRunsDriverRunID, driverActiveTaskRunsNodeID, driverActiveTaskRunsLeaseID, driverActiveTaskRunsFence)
-		if err != nil {
-			return err
-		}
-		epicID := firstNonEmpty(driverActiveTaskRunsEpicID, parent.EpicID, driverRunPayloadEpicID(parent.Payload))
-		active, err := driverpkg.ListActiveTaskRuns(ctx, h.Store, driverpkg.ActiveTaskRunsOptions{
-			WorkspaceKey: ws,
-			DriverRunID:  parent.RunID,
-			EpicID:       epicID,
-			Limit:        driverActiveTaskRunsLimit,
-		})
-		if err != nil {
-			return fmt.Errorf("list active task runs: %w", err)
-		}
-		if driverActiveTaskRunsJSON {
-			return cmdstore.WriteJSON(active)
-		}
-		fmt.Printf("Driver run %s has %d active child task run(s)\n", active.DriverRunID, active.ActiveCount)
-		return nil
+func runDriverActiveTaskRuns(cmd *cobra.Command, _ []string) error {
+	client, err := newDriverRuntimeClient(driverRuntimeClientOptions{
+		WorkspaceKey: driverActiveTaskRunsWorkspaceKey, DriverRunID: driverActiveTaskRunsDriverRunID,
+		NodeID: driverActiveTaskRunsNodeID, LeaseID: driverActiveTaskRunsLeaseID, FencingToken: driverActiveTaskRunsFence,
 	})
+	if err != nil {
+		return err
+	}
+	params := map[string]any{"epicId": driverActiveTaskRunsEpicID, "limit": driverActiveTaskRunsLimit}
+	var active driverpkg.ActiveTaskRuns
+	if err := client.call(cmd.Context(), "active-task-runs", params, &active); err != nil {
+		return fmt.Errorf("list active task runs: %w", err)
+	}
+	if driverActiveTaskRunsJSON {
+		return cmdstore.WriteJSON(&active)
+	}
+	fmt.Printf("Driver run %s has %d active child task run(s)\n", active.DriverRunID, active.ActiveCount)
+	return nil
 }
 
-func runDriverCompleteTask(_ *cobra.Command, _ []string) error {
-	return cmdstore.WithStore(func(ctx context.Context, h *bootstrap.StoreHandle) error {
-		ws, _, err := resolveRunningDriverRun(ctx, h, driverCompleteTaskWorkspaceKey, driverCompleteTaskDriverRunID, driverCompleteTaskNodeID, driverCompleteTaskLeaseID, driverCompleteTaskFence)
-		if err != nil {
-			return err
-		}
-		taskRunID := strings.TrimSpace(driverCompleteTaskTaskRunID)
-		if taskRunID == "" {
-			return fmt.Errorf("--task-run-id is required for fenced driver completion: %w", domain.ErrInvalid)
-		}
-		result, err := completeDriverTaskRun(ctx, h.Store.TaskRuns(), ws, taskRunID, driverTaskRunCompletionOptions{
-			TaskID:       driverCompleteTaskTaskID,
-			CompletionID: driverCompleteTaskCompletionID,
-			LeaseToken:   resolveDriverCompleteTaskLeaseToken(),
-			ArtifactIDs:  driverCompleteTaskArtifactIDs,
-			LogsRef:      driverCompleteTaskLogsRef,
-			ArtifactsRef: driverCompleteTaskArtifactsRef,
-			Reason:       driverCompleteTaskReason,
-		})
-		if err != nil {
-			return fmt.Errorf("complete task run: %w", err)
-		}
-		if driverCompleteTaskJSON {
-			return cmdstore.WriteJSON(result)
-		}
-		fmt.Printf("Completed task %s\n", result.ID)
-		return nil
+func runDriverCompleteTask(cmd *cobra.Command, _ []string) error {
+	taskRunID := strings.TrimSpace(driverCompleteTaskTaskRunID)
+	if taskRunID == "" {
+		return fmt.Errorf("--task-run-id is required for fenced driver completion: %w", domain.ErrInvalid)
+	}
+	client, err := newDriverRuntimeClient(driverRuntimeClientOptions{
+		WorkspaceKey: driverCompleteTaskWorkspaceKey, DriverRunID: driverCompleteTaskDriverRunID,
+		NodeID: driverCompleteTaskNodeID, LeaseID: driverCompleteTaskLeaseID, FencingToken: driverCompleteTaskFence,
 	})
-}
-
-type driverTaskRunCompletionOptions = driverpkg.DriverTaskRunCompletionOptions
-
-func completeDriverTaskRun(ctx context.Context, taskRuns store.TaskRunStore, ws, taskRunID string, opts driverTaskRunCompletionOptions) (*driverpkg.TaskMutationResult, error) {
-	return driverpkg.CompleteDriverTaskRun(ctx, taskRuns, ws, taskRunID, opts)
+	if err != nil {
+		return err
+	}
+	params := map[string]any{
+		"taskId": driverCompleteTaskTaskID, "taskRunId": taskRunID,
+		"completionId": driverCompleteTaskCompletionID, "leaseToken": resolveDriverCompleteTaskLeaseToken(),
+		"artifactIds": driverCompleteTaskArtifactIDs, "logsRef": driverCompleteTaskLogsRef,
+		"artifactsRef": driverCompleteTaskArtifactsRef, "reason": driverCompleteTaskReason,
+	}
+	var result driverpkg.TaskMutationResult
+	if err := client.call(cmd.Context(), "complete-task", params, &result); err != nil {
+		return fmt.Errorf("complete task run: %w", err)
+	}
+	if driverCompleteTaskJSON {
+		return cmdstore.WriteJSON(&result)
+	}
+	fmt.Printf("Completed task %s\n", result.ID)
+	return nil
 }
 
 func resolveDriverCompleteTaskLeaseToken() string {
-	return firstNonEmpty(driverCompleteTaskLeaseToken, os.Getenv("LOOM_TASK_RUN_LEASE_TOKEN"), os.Getenv("LOOM_RUNNER_LEASE_TOKEN"))
+	return firstNonEmpty(os.Getenv("LOOM_TASK_RUN_LEASE_TOKEN"), os.Getenv("LOOM_RUNNER_LEASE_TOKEN"))
 }
 
-func runDriverReleaseTask(_ *cobra.Command, _ []string) error {
-	return cmdstore.WithStore(func(ctx context.Context, h *bootstrap.StoreHandle) error {
-		ws, parent, err := resolveRunningDriverRun(ctx, h, driverReleaseTaskWorkspaceKey, driverReleaseTaskDriverRunID, driverReleaseTaskNodeID, driverReleaseTaskLeaseID, driverReleaseTaskFence)
-		if err != nil {
-			return err
-		}
-		actor := firstNonEmpty(driverReleaseTaskActor, driverRunActor(parent.RunID))
-		issueBackend, err := newDriverIssueBackend(h, ws, actor)
-		if err != nil {
-			return err
-		}
-		result, err := driverpkg.ReleaseTask(ctx, issueBackend, driverpkg.TaskReleaseOptions{
-			TaskID: driverReleaseTaskTaskID,
-			Actor:  actor,
-		})
-		if err != nil {
-			return fmt.Errorf("release task: %w", err)
-		}
-		if driverReleaseTaskJSON {
-			return cmdstore.WriteJSON(result)
-		}
-		fmt.Printf("Released task %s\n", result.ID)
-		return nil
+func runDriverReleaseTask(cmd *cobra.Command, _ []string) error {
+	client, err := newDriverRuntimeClient(driverRuntimeClientOptions{
+		WorkspaceKey: driverReleaseTaskWorkspaceKey, DriverRunID: driverReleaseTaskDriverRunID,
+		NodeID: driverReleaseTaskNodeID, LeaseID: driverReleaseTaskLeaseID, FencingToken: driverReleaseTaskFence,
 	})
+	if err != nil {
+		return err
+	}
+	params := map[string]any{"taskId": driverReleaseTaskTaskID, "actor": driverReleaseTaskActor}
+	var result driverpkg.TaskMutationResult
+	if err := client.call(cmd.Context(), "release-task", params, &result); err != nil {
+		return fmt.Errorf("release task: %w", err)
+	}
+	if driverReleaseTaskJSON {
+		return cmdstore.WriteJSON(&result)
+	}
+	fmt.Printf("Released task %s\n", result.ID)
+	return nil
 }
 
-func runDriverRecoverStaleTasks(_ *cobra.Command, args []string) error {
-	return cmdstore.WithStore(func(ctx context.Context, h *bootstrap.StoreHandle) error {
-		ws, err := resolveDriverWorkspace(ctx, h, driverRecoverStaleWorkspaceKey)
-		if err != nil {
-			return err
-		}
-		runID := resolveDriverRunID(driverRecoverStaleDriverRunID)
-		if len(args) > 0 {
-			runID = firstNonEmpty(args[0], runID)
-		}
-		if runID == "" {
-			return fmt.Errorf("driver-run-id required: %w", domain.ErrInvalid)
-		}
-		staleBefore, err := parseDriverRecoverStaleBefore(driverRecoverStaleBefore)
-		if err != nil {
-			return err
-		}
-		result, err := h.Store.DriverRuns().RecoverStaleTaskRuns(ctx, ws, runID, store.StaleTaskRunRecovery{
-			StaleBefore:   staleBefore,
-			MaxAgeSeconds: driverRecoverStaleMaxAgeSeconds,
-			ErrorClass:    driverRecoverStaleErrorClass,
-			ErrorMessage:  driverRecoverStaleErrorMessage,
-		})
-		if err != nil {
-			return fmt.Errorf("recover stale task runs: %w", err)
-		}
-		if driverRecoverStaleJSON {
-			return cmdstore.WriteJSON(result)
-		}
-		fmt.Printf("Recovered %d stale task run(s) for driver run %s\n", result.Recovered, result.DriverRunID)
-		if result.Released > 0 {
-			fmt.Printf("Released %d task claim(s)\n", result.Released)
-		}
-		if result.SkippedFresh > 0 || result.SkippedActorMismatch > 0 || result.SkippedIssueNotFound > 0 {
-			fmt.Printf("Skipped fresh=%d actor_mismatch=%d issue_not_found=%d\n", result.SkippedFresh, result.SkippedActorMismatch, result.SkippedIssueNotFound)
-		}
-		return nil
+func runDriverRecoverStaleTasks(cmd *cobra.Command, args []string) error {
+	runID := resolveDriverRunID(driverRecoverStaleDriverRunID)
+	if len(args) > 0 {
+		runID = firstNonEmpty(args[0], runID)
+	}
+	if runID == "" {
+		return fmt.Errorf("driver-run-id required: %w", domain.ErrInvalid)
+	}
+	staleBefore, err := parseDriverRecoverStaleBefore(driverRecoverStaleBefore)
+	if err != nil {
+		return err
+	}
+	client, err := newDriverRuntimeClient(driverRuntimeClientOptions{
+		WorkspaceKey: driverRecoverStaleWorkspaceKey, DriverRunID: runID,
 	})
+	if err != nil {
+		return err
+	}
+	params := map[string]any{
+		"staleBefore": staleBefore.Format(time.RFC3339), "maxAgeSeconds": driverRecoverStaleMaxAgeSeconds,
+		"errorClass": driverRecoverStaleErrorClass, "errorMessage": driverRecoverStaleErrorMessage,
+	}
+	if staleBefore.IsZero() {
+		delete(params, "staleBefore")
+	}
+	var result execution.RecoverStaleTaskRunsResult
+	if err := client.call(cmd.Context(), "recover-stale-tasks", params, &result); err != nil {
+		return fmt.Errorf("recover stale task runs: %w", err)
+	}
+	if driverRecoverStaleJSON {
+		return cmdstore.WriteJSON(&result)
+	}
+	fmt.Printf("Recovered %d stale task run(s) for driver run %s\n", result.Recovered, runID)
+	if result.Released > 0 {
+		fmt.Printf("Released %d task claim(s)\n", result.Released)
+	}
+	if result.SkippedFresh > 0 {
+		fmt.Printf("Skipped fresh=%d\n", result.SkippedFresh)
+	}
+	return nil
 }
 
 func parseDriverRecoverStaleBefore(raw string) (time.Time, error) {

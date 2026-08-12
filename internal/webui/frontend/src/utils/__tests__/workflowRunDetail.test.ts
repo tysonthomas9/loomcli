@@ -5,6 +5,7 @@ import {
   linkedSessionsForRun,
   mergeWorkflowRun,
   mergeWorkflowRunPage,
+  workedTaskIdsForRun,
 } from "@/utils/workflowRunDetail";
 
 function run(overrides: Partial<WorkflowRun> = {}): WorkflowRun {
@@ -122,5 +123,46 @@ describe("linkedSessionsForRun", () => {
         sessionId: "custom-session-2",
       },
     ]);
+  });
+});
+
+describe("workedTaskIdsForRun", () => {
+  it("preserves canonical step order and deduplicates task IDs", () => {
+    expect(
+      workedTaskIdsForRun(
+        run({
+          payload: { event: { taskId: "TASK-3" } },
+          output: { issueId: "TASK-2" },
+          steps: [
+            {
+              id: "step-1",
+              step_kind: "task_run",
+              task_run_id: "task-run-1",
+              task_id: "TASK-1",
+              status: "completed",
+            },
+            {
+              id: "step-duplicate",
+              step_kind: "task_run",
+              task_run_id: "task-run-2",
+              task_id: "TASK-1",
+              status: "completed",
+            },
+          ],
+        }),
+      ),
+    ).toEqual(["TASK-1"]);
+  });
+
+  it("does not misattribute trigger targets, output aliases, or summaries as worked tasks", () => {
+    expect(
+      workedTaskIdsForRun(
+        run({
+          payload: { input: { issue_id: "TASK-INPUT" } },
+          output: { task_id: "TASK-OUTPUT" },
+          summary: "completed TASK-SUMMARY",
+        }),
+      ),
+    ).toEqual([]);
   });
 });

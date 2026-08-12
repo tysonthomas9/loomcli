@@ -28,7 +28,7 @@ func TestCreateWorkflowRunPreflightFailsClosedForLocalRunner(t *testing.T) {
 	defer restore()
 
 	mux := http.NewServeMux()
-	NewModule(st).Register(mux)
+	newWorkflowTestModule(st).Register(mux)
 
 	// Absent runner field => UI "Locally" default => local-task-runner.
 	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/TEST/workflows/"+BuiltinEpicRunnerWorkflowName, stringsReader(`{"epicId":"EPIC-1","requestedBy":"ui"}`))
@@ -64,7 +64,7 @@ func TestCreateWorkflowRunPreflightPassesWhenHealthy(t *testing.T) {
 	defer restore()
 
 	mux := http.NewServeMux()
-	NewModule(st).Register(mux)
+	newWorkflowTestModule(st).Register(mux)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/TEST/workflows/"+BuiltinEpicRunnerWorkflowName, stringsReader(`{"epicId":"EPIC-1","requestedBy":"ui"}`))
 	rec := httptest.NewRecorder()
@@ -90,7 +90,7 @@ func TestCreateWorkflowRunPreflightSkipsExplicitNonLocalRunner(t *testing.T) {
 	defer restore()
 
 	mux := http.NewServeMux()
-	NewModule(st).Register(mux)
+	newWorkflowTestModule(st).Register(mux)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/TEST/workflows/"+BuiltinEpicRunnerWorkflowName, stringsReader(`{"epicId":"EPIC-1","runner":"daytona-task-runner"}`))
 	rec := httptest.NewRecorder()

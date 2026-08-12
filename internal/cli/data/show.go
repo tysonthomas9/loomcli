@@ -12,6 +12,17 @@ var showCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
+		taskRunClient, active, err := taskRunDataClientFromEnv()
+		if err != nil {
+			return err
+		}
+		if active {
+			detail, err := taskRunClient.getTask(ctx, args[0])
+			if err != nil {
+				return err
+			}
+			return printIssueDetail(os.Stdout, detail, outputFormat)
+		}
 		ib, err := getIssueBackend(ctx)
 		if err != nil {
 			return err

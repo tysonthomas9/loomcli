@@ -52,6 +52,7 @@ describe("epicRunnerRuntimePayload", () => {
     });
     expect(payload).toEqual({
       runner: "local-task-runner",
+      deliveryMode: "pull-request",
       repoUrl: "https://github.com/acme/widgets.git",
       baseBranch: "main",
       openPullRequest: true,
@@ -64,7 +65,10 @@ describe("epicRunnerRuntimePayload", () => {
       repos: [],
       currentRepo: null,
     });
-    expect(payload).toEqual({ runner: "local-task-runner" });
+    expect(payload).toEqual({
+      runner: "local-task-runner",
+      deliveryMode: "patch-back",
+    });
   });
 
   it("never returns an empty payload for the local path", () => {
@@ -86,6 +90,7 @@ describe("epicRunnerRuntimePayload", () => {
     });
     expect(payload).toEqual({
       runner: "daytona-task-runner",
+      deliveryMode: "pull-request",
       repoUrl: "https://github.com/acme/widgets.git",
       baseBranch: "main",
       openPullRequest: true,

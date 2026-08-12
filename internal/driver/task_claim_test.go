@@ -23,10 +23,11 @@ func TestClaimReadyTaskClaimsFirstAvailableAsActor(t *testing.T) {
 	}
 
 	claimed, err := ClaimReadyTask(ctx, fake, TaskClaimOptions{
-		EpicID:  "EPIC-1",
-		Actor:   "driver-run:run-1",
-		Limit:   10,
-		LockTTL: time.Minute,
+		EpicID:     "EPIC-1",
+		Actor:      "driver-run:run-1",
+		SourceRepo: "core",
+		Limit:      10,
+		LockTTL:    time.Minute,
 	})
 	if err != nil {
 		t.Fatalf("ClaimReadyTask: %v", err)
@@ -34,8 +35,10 @@ func TestClaimReadyTaskClaimsFirstAvailableAsActor(t *testing.T) {
 	if claimed == nil || claimed.ID != "TEST-2" || claimed.Status != "in_progress" || claimed.Parent != "EPIC-1" || claimed.ClaimedBy != "driver-run:run-1" {
 		t.Fatalf("claimed = %+v, want TEST-2 claimed by driver-run", claimed)
 	}
-	if len(fake.readyCalls) != 1 || fake.readyCalls[0].ParentID != "EPIC-1" || fake.readyCalls[0].Limit != 10 {
-		t.Fatalf("ready calls = %+v, want parent EPIC-1 limit 10", fake.readyCalls)
+	if len(fake.readyCalls) != 1 || fake.readyCalls[0].ParentID != "EPIC-1" ||
+		len(fake.readyCalls[0].SourceRepos) != 1 || fake.readyCalls[0].SourceRepos[0] != "core" ||
+		fake.readyCalls[0].Limit != 10 {
+		t.Fatalf("ready calls = %+v, want parent EPIC-1 repo core limit 10", fake.readyCalls)
 	}
 	if len(fake.actorClaims) != 2 {
 		t.Fatalf("actor claims = %+v, want two attempts", fake.actorClaims)

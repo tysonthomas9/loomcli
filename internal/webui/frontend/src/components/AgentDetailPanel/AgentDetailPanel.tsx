@@ -144,7 +144,7 @@ export function AgentDetailPanel({
   const hasDiffStat =
     diffStat !== null && (diffStat.added > 0 || diffStat.removed > 0);
 
-  const rootClassName = [styles.overlay, isOpen && styles.open]
+  const rootClassName = [styles.overlay, isOpen ? styles.open : styles.closed]
     .filter(Boolean)
     .join(" ");
 

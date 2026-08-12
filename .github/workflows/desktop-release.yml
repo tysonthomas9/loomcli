@@ -49,15 +49,52 @@ jobs:
           path: fleet-db
           token: ${{ secrets.FLEET_DB_TOKEN || github.token }}
 
+      - name: Read pinned flue commit
+        id: flue-pin
+        run: |
+          set -euo pipefail
+          sha="$(tr -d '[:space:]' < internal/workflows/FLUE_COMMIT)"
+          if ! printf '%s' "$sha" | grep -Eq '^[0-9a-f]{40}$'; then
+            echo "ERROR: FLUE_COMMIT is not a 40-char hex SHA: '$sha'" >&2
+            exit 1
+          fi
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout pinned flue build toolchain
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ vars.FLUE_REPOSITORY || 'withastro/flue' }}
+          ref: ${{ steps.flue-pin.outputs.sha }}
+          path: flue
+
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
           go-version-file: 'go.mod'
 
+      - name: Read pinned Node.js version
+        id: node-pin
+        run: |
+          set -euo pipefail
+          version="$(tr -d '[:space:]' < desktop/NODE_VERSION)"
+          if ! printf '%s' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "ERROR: invalid desktop/NODE_VERSION: '$version'" >&2
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: ${{ steps.node-pin.outputs.version }}
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: '11.1.1'
+
+      - name: Build pinned flue toolchain
+        run: cd flue && pnpm install --frozen-lockfile && pnpm --filter @flue/runtime --filter @flue/cli build
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
@@ -83,14 +120,42 @@ jobs:
           printf '%s' "$APPLE_API_KEY_P8" > "${RUNNER_TEMP}/asc/AuthKey.p8"
           chmod 600 "${RUNNER_TEMP}/asc/AuthKey.p8"
 
+      # prepare-sidecar signs the Node resource before Tauri's bundle-signing
+      # phase. Import the certificate here rather than relying on tauri-action's
+      # later internal import, otherwise the beforeBuildCommand cannot resolve
+      # APPLE_SIGNING_IDENTITY.
+      - name: Import Developer ID certificate
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+        run: |
+          set -euo pipefail
+          keychain="${RUNNER_TEMP}/loom-signing.keychain-db"
+          keychain_password="$(openssl rand -hex 32)"
+          certificate="${RUNNER_TEMP}/loom-signing.p12"
+          printf '%s' "$APPLE_CERTIFICATE" | base64 --decode > "$certificate"
+          security create-keychain -p "$keychain_password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$keychain_password" "$keychain"
+          security import "$certificate" -k "$keychain" \
+            -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s \
+            -k "$keychain_password" "$keychain"
+          security list-keychains -d user -s "$keychain"
+          security default-keychain -d user -s "$keychain"
+          security find-identity -v -p codesigning "$keychain" \
+            | grep -F "$APPLE_SIGNING_IDENTITY"
+          rm -f "$certificate"
+
       - name: Build, sign, notarize & release DMG
         uses: tauri-apps/tauri-action@v0
         env:
-          # Sidecar build: point prepare-sidecar.sh at the fleet-db checkout.
+          # Sidecar build: point prepare-sidecar.sh at paired runtime inputs.
           FLEET_DB_REPO: ${{ github.workspace }}/fleet-db
-          # Code signing (imported into a temp keychain by tauri-action).
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          FLUE_REPO: ${{ github.workspace }}/flue
+          # The preceding step imports the identity early enough for Node's
+          # beforeBuildCommand signing; Tauri reuses that unlocked keychain.
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
           # Notarization via App Store Connect API key.
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
@@ -107,3 +172,20 @@ jobs:
           # tauri-action's beforeBuildCommand (prepare-sidecar) builds the Go
           # sidecars; this just selects the bundle targets.
           args: --bundles app,dmg
+
+      - name: Verify signed packaged Node.js runtime
+        run: |
+          set -euo pipefail
+          app="desktop/src-tauri/target/release/bundle/macos/Loom Agents.app"
+          node="$app/Contents/Resources/runtime/node"
+          test -x "$node"
+          test -f "$app/Contents/Resources/licenses/node-LICENSE"
+          test "$("$node" --version)" = "v${{ steps.node-pin.outputs.version }}"
+          "$node" -e 'if (new Function("return 42")() !== 42) process.exit(1)'
+          codesign --verify --strict --verbose=2 "$node"
+          codesign -d --entitlements - "$node" 2>&1 | grep -q 'com.apple.security.cs.allow-jit'
+          codesign --verify --deep --strict --verbose=2 "$app"
+          node_team="$(codesign -dv --verbose=4 "$node" 2>&1 | awk -F= '/^TeamIdentifier=/{print $2}')"
+          app_team="$(codesign -dv --verbose=4 "$app" 2>&1 | awk -F= '/^TeamIdentifier=/{print $2}')"
+          test -n "$node_team"
+          test "$node_team" = "$app_team"

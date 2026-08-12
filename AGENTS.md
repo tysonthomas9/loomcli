@@ -79,8 +79,8 @@ bearer token (`LOOM_RUN_TOKEN`, minted at claim). At deploy:
   (`/api/workspaces/{ws}/task-run/{op}`) with their per-task-run lease token;
   serve exports `LOOM_TASK_RUN_API_URL` to bridge-spawned runners
   automatically. Stop provisioning `LOOM_FLEET_DB_URL`/`LOOM_FLEET_DB_API_KEY`
-  to task runner wrappers — the SDK only falls back to direct fleet-db when
-  the serve URL is absent.
+  to task runner wrappers — the SDK fails closed when the serve URL is absent
+  and never sends TaskRun mutations directly to fleet-db.
 
 ## Workflow Sandbox (loom-dev deploy notes)
 

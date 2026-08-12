@@ -26,10 +26,10 @@ import (
 
 // scriptedOwnershipLeaseStore is a purpose-built fake with per-call
 // programmable results. The shared memstore is deliberately NOT used for
-// these tests: its ownership implementation collapses missing/wrong-token/
-// expired heartbeat failures into a single ErrConflict and does not model
-// fleet-db's acquire semantics (CLAIMED vs same-owner-live token
-// preservation) — exactly the distinctions under test here.
+// these tests: although it models same-owner generation rotation, its
+// ownership implementation intentionally collapses missing/wrong-token/
+// expired heartbeat failures into a single ErrConflict. These tests need
+// each FleetDB verdict independently scriptable.
 type scriptedOwnershipLeaseStore struct {
 	mu sync.Mutex
 
@@ -826,7 +826,7 @@ func TestHeartbeatFailure_DoesNotAdvanceOwnershipRenewedAt(t *testing.T) {
 
 func TestAcquireSuccess_SetsOwnershipRenewedAt(t *testing.T) {
 	fake := &scriptedOwnershipLeaseStore{
-		acquireResults: []scriptedAcquireResult{{lease: freshOwnershipLease("TOKEN_FIRST", 1)}},
+		acquireResults: []scriptedAcquireResult{{lease: freshOwnershipLease("TOKEN_SECOND", 2)}},
 	}
 	s := newOwnershipVerifyTestSupervisor(fake)
 	ap := newOwnershipVerifyAgent()
@@ -850,7 +850,7 @@ func TestAcquireAgentOwnership_TriStateOutcomes(t *testing.T) {
 		result scriptedAcquireResult
 		want   ownershipAcquireOutcome
 	}{
-		{"success", scriptedAcquireResult{lease: freshOwnershipLease("TOKEN_FIRST", 1)}, ownershipAcquired},
+		{"success", scriptedAcquireResult{lease: freshOwnershipLease("TOKEN_SECOND", 2)}, ownershipAcquired},
 		{"held by other (already exists)", scriptedAcquireResult{err: wrappedSentinel(domain.ErrAlreadyExists)}, ownershipHeldByOther},
 		{"held by other (conflict)", scriptedAcquireResult{err: wrappedSentinel(domain.ErrConflict)}, ownershipHeldByOther},
 		{"network error", scriptedAcquireResult{err: errors.New("dial tcp: i/o timeout")}, ownershipAcquireInconclusive},

@@ -28,14 +28,18 @@ import {
   ONBOARDING_ISSUE_DESCRIPTION,
   ONBOARDING_ISSUE_TITLE,
 } from "@/utils/onboardingDefaults";
-import type { Issue, Status } from "@/types";
+import type { Issue, IssueDetails, Status } from "@/types";
+import { createIssueStore } from "@/stores/issueStore";
 
 import App from "../App";
 
 // Mock react-router-dom
 const mockNavigate = vi.fn();
+const mockUseParams = vi.hoisted(() =>
+  vi.fn(() => ({ workspaceId: "test-ws-id" })),
+);
 vi.mock("react-router-dom", () => ({
-  useParams: vi.fn(() => ({ workspaceId: "test-ws-id" })),
+  useParams: mockUseParams,
   useNavigate: vi.fn(() => mockNavigate),
   useSearchParams: vi.fn(() => [new URLSearchParams(), vi.fn()]),
   useLocation: vi.fn(() => ({
@@ -52,11 +56,13 @@ vi.mock("react-router-dom", () => ({
 }));
 
 // Create hoisted mocks for @/api functions used by handleApprove/handleReject
-const { mockCloseIssue, mockUpdateIssue, mockAddComment } = vi.hoisted(() => ({
-  mockCloseIssue: vi.fn(),
-  mockUpdateIssue: vi.fn(),
-  mockAddComment: vi.fn(),
-}));
+const { mockCloseIssue, mockUpdateIssue, mockAddComment, mockGetIssue } =
+  vi.hoisted(() => ({
+    mockCloseIssue: vi.fn(),
+    mockUpdateIssue: vi.fn(),
+    mockAddComment: vi.fn(),
+    mockGetIssue: vi.fn(),
+  }));
 
 const { mockStartAgent } = vi.hoisted(() => ({
   mockStartAgent: vi.fn(),
@@ -124,6 +130,15 @@ vi.mock("@/api", async (importOriginal) => {
     startAgent: mockStartAgent,
     getIssueEvents: vi.fn().mockImplementation(() => new Promise(() => {})),
     getTaskLogPhases: vi.fn().mockResolvedValue([]),
+  };
+});
+
+vi.mock("@/api/issues", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/api/issues")>();
+  return {
+    ...actual,
+    getIssue: mockGetIssue,
+    updateIssue: mockUpdateIssue,
   };
 });
 
@@ -723,6 +738,7 @@ interface MockStoreStateOverrides {
   agents: any[];
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   agentTasks: Record<string, any>;
+  fetchData: () => Promise<void>;
   retryNow: () => void;
 }
 
@@ -767,6 +783,7 @@ function createMockUseIssuesReturn(
     // Agent store fields (shared mockStoreState — useStore ignores store arg)
     agents: [],
     agentTasks: {},
+    fetchData: vi.fn().mockResolvedValue(undefined),
     retryNow: vi.fn(),
     stats: {
       open: 0,
@@ -941,6 +958,7 @@ vi.mock("@/components/WorkspaceTree/AgentSection", () => ({
 describe("App", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockUseParams.mockReturnValue({ workspaceId: "test-ws-id" });
     mockCreateWorkspaceAgent.mockResolvedValue({
       name: "planner",
       role_name: "plan",
@@ -2320,6 +2338,67 @@ describe("App", () => {
       expect(fetchIssue).toHaveBeenCalledTimes(2);
       expect(fetchIssue).toHaveBeenCalledWith("issue-2");
     });
+
+    it("does not clear a newly reopened issue when the prior panel close animation finishes", async () => {
+      const clearIssue = vi.fn();
+      const issueDetails = {
+        id: "issue-1",
+        title: "Reopened Issue",
+        priority: 2,
+        status: "open" as const,
+        issue_type: "task" as const,
+        created_at: "2024-01-01T00:00:00Z",
+        updated_at: "2024-01-01T00:00:00Z",
+      };
+      mockStoreState = createMockUseIssuesReturn({
+        issues: [createMockIssue(issueDetails)],
+      });
+      mockUseIssueDetail.mockReturnValue(
+        createMockUseIssueDetailReturn({ issueDetails, clearIssue }),
+      );
+      mockUsePanelManager.mockReturnValue({
+        activePanel: { type: "issue", id: issueDetails.id },
+        pendingPanel: null,
+        openPanel: mockOpenPanel,
+        closePanel: mockClosePanel,
+        isOpen: mockIsOpen,
+      });
+
+      const { rerender } = render(<App />);
+      clearIssue.mockClear();
+
+      fireEvent.click(screen.getByRole("button", { name: "Close panel" }));
+      expect(mockClosePanel).toHaveBeenCalledTimes(1);
+
+      // Simulate the user clicking the card again during the 300ms close
+      // animation. The panel manager has reopened it before the old cleanup
+      // callback fires.
+      mockUsePanelManager.mockReturnValue({
+        activePanel: null,
+        pendingPanel: null,
+        openPanel: mockOpenPanel,
+        closePanel: mockClosePanel,
+        isOpen: mockIsOpen,
+      });
+      rerender(<App />);
+      mockUsePanelManager.mockReturnValue({
+        activePanel: { type: "issue", id: issueDetails.id },
+        pendingPanel: null,
+        openPanel: mockOpenPanel,
+        closePanel: mockClosePanel,
+        isOpen: mockIsOpen,
+      });
+      rerender(<App />);
+
+      await act(
+        () =>
+          new Promise((resolve) => {
+            window.setTimeout(resolve, 350);
+          }),
+      );
+
+      expect(clearIssue).not.toHaveBeenCalled();
+    });
   });
 
   describe("fetchIssues mode parameter based on activeView", () => {
@@ -2551,6 +2630,106 @@ describe("App", () => {
   });
 
   describe("lead agent creation opens the terminal", () => {
+    it("opens the Terminal and refreshes status after creating a custom interactive agent", async () => {
+      localStorage.clear();
+      const fetchData = vi.fn().mockResolvedValue(undefined);
+      mockCreateWorkspaceAgent.mockResolvedValue({
+        name: "custom-review",
+        role_name: "custom-review",
+        repos: ["Hello-World"],
+        repo_groups: [],
+        cross_repo: false,
+      });
+      mockStoreState = createMockUseIssuesReturn({
+        issues: [createMockIssue({ id: "T-1" })],
+        fetchData,
+      });
+      mockHelloWorldWorkspaceContext({
+        agents: [{ name: "existing-planner", role_name: "plan" }],
+      });
+
+      render(<App />);
+
+      fireEvent.click(screen.getByRole("button", { name: "+ Add agent" }));
+      const dialog = await screen.findByRole("dialog", { name: "New Agent" });
+      fireEvent.click(
+        within(dialog).getByTestId("create-agent-template-custom-prompt"),
+      );
+      fireEvent.change(within(dialog).getByLabelText("Name"), {
+        target: { value: "custom-review" },
+      });
+      fireEvent.change(
+        within(dialog).getByTestId("create-agent-interactive-prompt"),
+        {
+          target: { value: "Review changes and wait." },
+        },
+      );
+      mockNavigate.mockClear();
+      fireEvent.click(
+        within(dialog).getByRole("button", { name: "Create Agent" }),
+      );
+
+      await waitFor(() => {
+        expect(mockCreateWorkspaceAgent).toHaveBeenCalled();
+        expect(fetchData).toHaveBeenCalled();
+      });
+      await waitFor(() => {
+        expect(mockNavigate).toHaveBeenCalledWith(
+          expect.stringContaining("/agents/custom-review"),
+        );
+      });
+    });
+
+    it("opens the Terminal after creating a PR Review agent", async () => {
+      localStorage.clear();
+      mockCreateWorkspaceAgent.mockResolvedValue({
+        name: "pr-review-nova",
+        role_name: "pr-review",
+        repos: ["Hello-World"],
+        repo_groups: [],
+        cross_repo: false,
+      });
+      mockStoreState = createMockUseIssuesReturn({
+        issues: [createMockIssue({ id: "T-1" })],
+      });
+      mockHelloWorldWorkspaceContext({
+        agents: [{ name: "existing-planner", role_name: "plan" }],
+      });
+
+      render(<App />);
+
+      fireEvent.click(screen.getByRole("button", { name: "+ Add agent" }));
+      const dialog = await screen.findByRole("dialog", { name: "New Agent" });
+      fireEvent.click(
+        within(dialog).getByTestId(
+          "create-agent-template-interactive-pr-review",
+        ),
+      );
+      fireEvent.change(within(dialog).getByLabelText("Name"), {
+        target: { value: "pr-review-nova" },
+      });
+      mockNavigate.mockClear();
+      fireEvent.click(
+        within(dialog).getByRole("button", { name: "Create Agent" }),
+      );
+
+      await waitFor(() => {
+        expect(mockCreateWorkspaceAgent).toHaveBeenCalledWith(
+          "test-ws-id",
+          expect.objectContaining({
+            name: "pr-review-nova",
+            role_name: "pr-review",
+            kind: "interactive",
+          }),
+        );
+      });
+      await waitFor(() => {
+        expect(mockNavigate).toHaveBeenCalledWith(
+          expect.stringContaining("/agents/pr-review-nova"),
+        );
+      });
+    });
+
     it("navigates to the lead's terminal after creating a Lead", async () => {
       localStorage.clear();
       mockCreateWorkspaceAgent.mockResolvedValue({
@@ -2564,11 +2743,9 @@ describe("App", () => {
       mockStoreState = createMockUseIssuesReturn({
         issues: [createMockIssue({ id: "T-1" })],
       });
-      // Keep this on the normal creation path; an empty Hello-World workspace
-      // intentionally opens the constrained onboarding-planner flow.
-      mockHelloWorldWorkspaceContext({
-        agents: [{ name: "existing-planner", role_name: "plan" }],
-      });
+      // The sidebar action must stay on the full gallery even while the
+      // onboarding planner action is available.
+      mockHelloWorldWorkspaceContext({ agents: [] });
 
       render(<App />);
 
@@ -2633,6 +2810,62 @@ describe("App", () => {
   });
 
   describe("onboarding issue creation", () => {
+    it("keeps the full gallery available from the sidebar in a new workspace", async () => {
+      localStorage.clear();
+      mockStoreState = createMockUseIssuesReturn({ issues: [] });
+      mockHelloWorldWorkspaceContext({ agents: [] });
+
+      render(<App />);
+
+      fireEvent.click(screen.getByRole("button", { name: "+ Add agent" }));
+      const dialog = await screen.findByRole("dialog", {
+        name: "New Agent",
+      });
+
+      expect(
+        within(dialog).queryByTestId("create-agent-supervised-mode"),
+      ).not.toBeInTheDocument();
+      expect(
+        within(dialog).getByTestId("create-agent-template-planner"),
+      ).toBeInTheDocument();
+      expect(
+        within(dialog).getByTestId("create-agent-template-lead"),
+      ).toBeInTheDocument();
+      expect(
+        within(dialog).getByTestId("create-agent-template-local-review"),
+      ).toBeInTheDocument();
+    });
+
+    it("clears onboarding mode before a later sidebar opening", async () => {
+      localStorage.clear();
+      mockStoreState = createMockUseIssuesReturn({ issues: [] });
+      mockHelloWorldWorkspaceContext({ agents: [] });
+
+      render(<App />);
+
+      fireEvent.click(screen.getByRole("button", { name: "Create Agent" }));
+      const onboardingDialog = await screen.findByRole("dialog", {
+        name: "New Agent",
+      });
+      expect(
+        within(onboardingDialog).getByTestId("create-agent-supervised-mode"),
+      ).toBeInTheDocument();
+      fireEvent.click(
+        within(onboardingDialog).getByRole("button", { name: "Cancel" }),
+      );
+
+      fireEvent.click(screen.getByRole("button", { name: "+ Add agent" }));
+      const galleryDialog = await screen.findByRole("dialog", {
+        name: "New Agent",
+      });
+      expect(
+        within(galleryDialog).queryByTestId("create-agent-supervised-mode"),
+      ).not.toBeInTheDocument();
+      expect(
+        within(galleryDialog).getByTestId("create-agent-template-lead"),
+      ).toBeInTheDocument();
+    });
+
     it("does not open the issue modal as a side effect of onboarding agent creation", async () => {
       localStorage.clear();
       const refetchWorkspace = vi.fn();
@@ -3352,6 +3585,132 @@ describe("App", () => {
       expect(mockCloseIssue).not.toHaveBeenCalled();
     });
 
+    it("keeps a direct detail route rendered after approving an issue outside the list projection", async () => {
+      const detailIssue: IssueDetails = {
+        id: "detail-only-plan",
+        title: "Direct Detail Plan Review",
+        priority: 2,
+        status: "review",
+        issue_type: "task",
+        design: "Approved implementation plan",
+        created_at: "2024-01-01T00:00:00Z",
+        updated_at: "2024-01-01T00:00:00Z",
+      };
+      const realStore = createIssueStore();
+      const realUpdateIssueStatus = realStore.getState().updateIssueStatus;
+
+      expect(realStore.getState().issuesMap.has(detailIssue.id)).toBe(false);
+      mockStoreState = createMockUseIssuesReturn({
+        issues: [],
+        issuesMap: new Map(),
+        updateIssueStatus: realUpdateIssueStatus,
+      });
+      mockUseParams.mockReturnValue({
+        workspaceId: "test-ws-id",
+        issueId: detailIssue.id,
+      });
+      mockUseRouteView.mockReturnValue(createViewStateReturn("issue-detail"));
+      mockGetIssue.mockResolvedValue(detailIssue);
+      mockUpdateIssue.mockResolvedValue({
+        ...detailIssue,
+        status: "open",
+        updated_at: "2024-01-01T00:01:00Z",
+      });
+
+      const actualIssueDetail = await vi.importActual<
+        typeof import("@/hooks/issues/useIssueDetail")
+      >("@/hooks/issues/useIssueDetail");
+      mockUseIssueDetail.mockImplementation(actualIssueDetail.useIssueDetail);
+
+      render(<App />);
+
+      expect(await screen.findByTestId("detail-title")).toHaveTextContent(
+        "Direct Detail Plan Review",
+      );
+      fireEvent.click(screen.getByTestId("detail-approve-button"));
+
+      await waitFor(() => {
+        expect(mockUpdateIssue).toHaveBeenCalledWith(
+          "test-ws-id",
+          detailIssue.id,
+          { status: "open" },
+        );
+      });
+
+      await act(
+        () =>
+          new Promise((resolve) => {
+            window.setTimeout(resolve, 350);
+          }),
+      );
+
+      expect(screen.queryByText("Issue not found")).not.toBeInTheDocument();
+      expect(screen.getByTestId("detail-title")).toHaveTextContent(
+        "Direct Detail Plan Review",
+      );
+      expect(
+        screen.queryByTestId("detail-approve-button"),
+      ).not.toBeInTheDocument();
+      expect(mockClosePanel).not.toHaveBeenCalled();
+    });
+
+    it("still closes the issue overlay after a successful plan approval", async () => {
+      const clearIssue = vi.fn();
+      const updateIssueStatus = vi.fn().mockResolvedValue(undefined);
+      mockStoreState = createMockUseIssuesReturn({ updateIssueStatus });
+      mockUseIssueDetail.mockReturnValue(
+        createMockUseIssueDetailReturn({
+          issueDetails: {
+            id: "overlay-plan",
+            title: "Overlay Plan Review",
+            priority: 2,
+            status: "review",
+            issue_type: "task",
+            created_at: "2024-01-01T00:00:00Z",
+            updated_at: "2024-01-01T00:00:00Z",
+          },
+          clearIssue,
+        }),
+      );
+      mockUsePanelManager.mockReturnValue({
+        activePanel: { type: "issue", id: "overlay-plan" },
+        pendingPanel: null,
+        openPanel: mockOpenPanel,
+        closePanel: mockClosePanel,
+        isOpen: mockIsOpen,
+      });
+
+      const { rerender } = render(<App />);
+      clearIssue.mockClear();
+      fireEvent.click(screen.getByTestId("panel-approve-button"));
+
+      await waitFor(() => {
+        expect(updateIssueStatus).toHaveBeenCalledWith(
+          "overlay-plan",
+          "open",
+          "test-ws-id",
+        );
+      });
+      expect(mockClosePanel).toHaveBeenCalledTimes(1);
+
+      mockUsePanelManager.mockReturnValue({
+        activePanel: null,
+        pendingPanel: null,
+        openPanel: mockOpenPanel,
+        closePanel: mockClosePanel,
+        isOpen: mockIsOpen,
+      });
+      rerender(<App />);
+
+      await act(
+        () =>
+          new Promise((resolve) => {
+            window.setTimeout(resolve, 350);
+          }),
+      );
+      expect(clearIssue).toHaveBeenCalledTimes(1);
+    });
+
     it("help approve calls updateIssueStatus with in_progress status", async () => {
       const updateIssueStatus = vi.fn().mockResolvedValue(undefined);
       const refetch = vi.fn().mockResolvedValue(undefined);
@@ -3446,45 +3805,53 @@ describe("App", () => {
       expect(updateIssueStatus).not.toHaveBeenCalled();
     });
 
-    it("reject calls addComment, updateIssue, refetch and closes panel", async () => {
-      const updateIssueStatus = vi.fn().mockResolvedValue(undefined);
-      const refetch = vi.fn().mockResolvedValue(undefined);
-      const mockReturn = createMockUseIssuesReturn({
-        updateIssueStatus,
-        refetch,
+    it("keeps a direct detail route rendered after rejecting an issue outside the list projection", async () => {
+      const detailIssue: IssueDetails = {
+        id: "detail-only-reject",
+        title: "Direct Detail Reject Review",
+        priority: 2,
+        status: "review",
+        issue_type: "task",
+        labels: ["existing"],
+        created_at: "2024-01-01T00:00:00Z",
+        updated_at: "2024-01-01T00:00:00Z",
+      };
+
+      mockStoreState = createMockUseIssuesReturn({
+        issues: [],
+        issuesMap: new Map(),
       });
-      mockStoreState = mockReturn;
-      vi.mocked(useIssueDetail).mockReturnValue(
-        createMockUseIssueDetailReturn({
-          issueDetails: {
-            id: "reject-issue",
-            title: "Reject Review Issue",
-            priority: 2,
-            status: "review",
-            issue_type: "task",
-            created_at: "2024-01-01T00:00:00Z",
-            updated_at: "2024-01-01T00:00:00Z",
-          },
-        }),
-      );
-      // Render in issue-detail view
-      vi.mocked(useRouteView).mockReturnValue(
-        createViewStateReturn("issue-detail"),
-      );
+      mockUseParams.mockReturnValue({
+        workspaceId: "test-ws-id",
+        issueId: detailIssue.id,
+      });
+      mockUseRouteView.mockReturnValue(createViewStateReturn("issue-detail"));
+      mockGetIssue.mockResolvedValue(detailIssue);
+      mockUpdateIssue.mockResolvedValue({
+        ...detailIssue,
+        status: "open",
+        labels: ["existing", "needs-revision"],
+        updated_at: "2024-01-01T00:01:00Z",
+      });
+
+      const actualIssueDetail = await vi.importActual<
+        typeof import("@/hooks/issues/useIssueDetail")
+      >("@/hooks/issues/useIssueDetail");
+      mockUseIssueDetail.mockImplementation(actualIssueDetail.useIssueDetail);
 
       render(<App />);
 
-      // Click the reject button in IssueDetailView to show the reject form
+      expect(await screen.findByTestId("detail-title")).toHaveTextContent(
+        "Direct Detail Reject Review",
+      );
       const rejectButton = screen.getByTestId("detail-reject-button");
       fireEvent.click(rejectButton);
 
-      // Fill in the reject comment
       const textarea = screen.getByTestId("detail-reject-comment");
       fireEvent.change(textarea, {
         target: { value: "Needs more work on the design" },
       });
 
-      // Submit the reject form
       const submitButton = screen.getByTestId("detail-reject-submit");
       fireEvent.click(submitButton);
 
@@ -3492,7 +3859,7 @@ describe("App", () => {
         expect(mockAddComment).toHaveBeenCalledTimes(1);
         expect(mockAddComment).toHaveBeenCalledWith(
           "test-ws-id",
-          "reject-issue",
+          detailIssue.id,
           "FEEDBACK: Needs more work on the design",
         );
       });
@@ -3501,7 +3868,7 @@ describe("App", () => {
         expect(mockUpdateIssue).toHaveBeenCalledTimes(1);
         expect(mockUpdateIssue).toHaveBeenCalledWith(
           "test-ws-id",
-          "reject-issue",
+          detailIssue.id,
           {
             status: "open",
             add_labels: ["needs-revision"],
@@ -3509,9 +3876,21 @@ describe("App", () => {
         );
       });
 
-      await waitFor(() => {
-        expect(refetch).toHaveBeenCalledTimes(1);
-      });
+      await act(
+        () =>
+          new Promise((resolve) => {
+            window.setTimeout(resolve, 350);
+          }),
+      );
+
+      expect(screen.queryByText("Issue not found")).not.toBeInTheDocument();
+      expect(screen.getByTestId("detail-title")).toHaveTextContent(
+        "Direct Detail Reject Review",
+      );
+      expect(
+        screen.queryByTestId("detail-reject-button"),
+      ).not.toBeInTheDocument();
+      expect(mockClosePanel).not.toHaveBeenCalled();
     });
 
     it("code review reject uses CODE REVIEW prefix in comment", async () => {

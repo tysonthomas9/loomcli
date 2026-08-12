@@ -433,6 +433,29 @@ describe("workspaceStore", () => {
       ]);
     });
 
+    it("normalizes omitted repo collections from a unified create response", async () => {
+      mockFetchWorkspaceApi.mockResolvedValueOnce(
+        makeWorkspace({ agents: [] }),
+      );
+      await store.getState().fetchWorkspace("ws-1");
+
+      store.getState().upsertAgent({
+        name: "lead",
+        role_name: "lead",
+        cross_repo: false,
+      } as WorkspaceData["agents"][number]);
+
+      expect(store.getState().workspace?.agents).toEqual([
+        {
+          name: "lead",
+          role_name: "lead",
+          repos: [],
+          repo_groups: [],
+          cross_repo: false,
+        },
+      ]);
+    });
+
     it("updates an existing optimistic agent instead of duplicating it", async () => {
       const ws = makeWorkspace({
         agents: [

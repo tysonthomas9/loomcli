@@ -14,6 +14,20 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/trigger"
 )
 
+func testAtomicAwaitResolver(t testing.TB, st store.Store) store.AtomicAwaitStore {
+	t.Helper()
+	resolver, ok := st.Awaits().(store.AtomicAwaitStore)
+	if !ok {
+		t.Fatalf("await store %T does not implement store.AtomicAwaitStore", st.Awaits())
+	}
+	return resolver
+}
+
+func testAwaitMatcher(t testing.TB, st store.Store) *trigger.AwaitMatcher {
+	t.Helper()
+	return trigger.NewAwaitMatcherWithResolver(st.Awaits(), st.DriverRuns(), testAtomicAwaitResolver(t, st))
+}
+
 // newAwaitSweepStore builds a memstore with the given workspaces, each
 // seeded with the awaiter driver catalog.
 func newAwaitSweepStore(t *testing.T, workspaces ...string) *memstore.Store {
@@ -77,6 +91,14 @@ func futureClock(ahead time.Duration) func() time.Time {
 	return func() time.Time { return time.Now().UTC().Add(ahead) }
 }
 
+func TestAwaitTimeoutSweeperRequiresExplicitResolver(t *testing.T) {
+	st := newAwaitSweepStore(t, "WS")
+	result, err := (&AwaitTimeoutSweeper{Store: st}).RunOnce(t.Context())
+	if err == nil || result != nil {
+		t.Fatalf("RunOnce = %+v, %v; want fail-closed resolver error", result, err)
+	}
+}
+
 // TestAwaitTimeoutSweeperResumesDueAwait is the RULE 5 happy path: a
 // past-deadline instance — with a restrictive allow-list, proving the
 // system:timeout carve-out — resolves timed_out and its run re-queues with
@@ -85,7 +107,7 @@ func TestAwaitTimeoutSweeperResumesDueAwait(t *testing.T) {
 	ctx := context.Background()
 	st := newAwaitSweepStore(t, "WS")
 	key := suspendAwaitingRun(t, st, "WS", "run-1", "pr.merged:pr#7", []string{"alice"}, time.Hour)
-	sweeper := &AwaitTimeoutSweeper{Store: st, Now: futureClock(2 * time.Hour)}
+	sweeper := &AwaitTimeoutSweeper{Store: st, Resolver: testAtomicAwaitResolver(t, st), Now: futureClock(2 * time.Hour)}
 
 	result, err := sweeper.RunOnce(ctx)
 	if err != nil {
@@ -137,7 +159,7 @@ func TestAwaitTimeoutSweeperTargetsOnlyDueInstance(t *testing.T) {
 	st := newAwaitSweepStore(t, "WS")
 	dueKey := suspendAwaitingRun(t, st, "WS", "run-due", "pr.merged:pr#7", nil, time.Hour)
 	lateKey := suspendAwaitingRun(t, st, "WS", "run-late", "pr.merged:pr#7", nil, 10*time.Hour)
-	sweeper := &AwaitTimeoutSweeper{Store: st, Now: futureClock(2 * time.Hour)}
+	sweeper := &AwaitTimeoutSweeper{Store: st, Resolver: testAtomicAwaitResolver(t, st), Now: futureClock(2 * time.Hour)}
 
 	result, err := sweeper.RunOnce(ctx)
 	if err != nil {
@@ -163,7 +185,7 @@ func TestAwaitTimeoutSweeperRaceAlreadySatisfied(t *testing.T) {
 	ctx := context.Background()
 	st := newAwaitSweepStore(t, "WS")
 	key := suspendAwaitingRun(t, st, "WS", "run-1", "pr.merged:pr#7", nil, time.Hour)
-	sweeper := &AwaitTimeoutSweeper{Store: st, Now: futureClock(2 * time.Hour)}
+	sweeper := &AwaitTimeoutSweeper{Store: st, Resolver: testAtomicAwaitResolver(t, st), Now: futureClock(2 * time.Hour)}
 
 	// Snapshot the due instance the way RunOnce's scan would.
 	due, err := st.Awaits().ListDueAwaitDeadlines(ctx, "WS", time.Now().UTC().Add(2*time.Hour), 10)
@@ -175,7 +197,7 @@ func TestAwaitTimeoutSweeperRaceAlreadySatisfied(t *testing.T) {
 		EventID: "evt-real", EventType: "pr.merged", SubjectRef: "pr#7",
 		ActorRef: "alice", Payload: []byte(`{"won":"race"}`),
 	}
-	if res, err := (&trigger.AwaitMatcher{Store: st}).Dispatch(ctx, "WS", realEvent); err != nil || res.Resolved() != 1 {
+	if res, err := testAwaitMatcher(t, st).Dispatch(ctx, "WS", realEvent); err != nil || res.Resolved() != 1 {
 		t.Fatalf("real event dispatch = %+v, %v; want resolved", res, err)
 	}
 
@@ -204,7 +226,7 @@ func TestAwaitTimeoutSweeperWorkspaceScope(t *testing.T) {
 	suspendAwaitingRun(t, st, "WS1", "run-a", "pr.merged:pr#1", nil, time.Hour)
 	suspendAwaitingRun(t, st, "WS2", "run-b", "pr.merged:pr#2", nil, time.Hour)
 
-	scoped := &AwaitTimeoutSweeper{Store: st, WorkspaceKey: "WS1", Now: futureClock(2 * time.Hour)}
+	scoped := &AwaitTimeoutSweeper{Store: st, Resolver: testAtomicAwaitResolver(t, st), WorkspaceKey: "WS1", Now: futureClock(2 * time.Hour)}
 	result, err := scoped.RunOnce(ctx)
 	if err != nil || result.TimedOut != 1 {
 		t.Fatalf("scoped RunOnce = %+v, %v; want one timed out in WS1 only", result, err)
@@ -214,7 +236,7 @@ func TestAwaitTimeoutSweeperWorkspaceScope(t *testing.T) {
 		t.Fatalf("WS2 run = %+v, %v; want untouched by the scoped sweep", other, err)
 	}
 
-	unscoped := &AwaitTimeoutSweeper{Store: st, Now: futureClock(2 * time.Hour)}
+	unscoped := &AwaitTimeoutSweeper{Store: st, Resolver: testAtomicAwaitResolver(t, st), Now: futureClock(2 * time.Hour)}
 	result, err = unscoped.RunOnce(ctx)
 	if err != nil || result.TimedOut != 1 {
 		t.Fatalf("unscoped RunOnce = %+v, %v; want the WS2 backlog drained", result, err)
@@ -230,7 +252,7 @@ func TestAwaitTimeoutSweeperDrainsBacklog(t *testing.T) {
 	for i, runID := range []string{"run-1", "run-2", "run-3"} {
 		suspendAwaitingRun(t, st, "WS", runID, "pr.merged:pr#7", nil, time.Duration(i+1)*time.Hour)
 	}
-	sweeper := &AwaitTimeoutSweeper{Store: st, BatchLimit: 1, Now: futureClock(5 * time.Hour)}
+	sweeper := &AwaitTimeoutSweeper{Store: st, Resolver: testAtomicAwaitResolver(t, st), BatchLimit: 1, Now: futureClock(5 * time.Hour)}
 
 	result, err := sweeper.RunOnce(ctx)
 	if err != nil {
@@ -269,7 +291,7 @@ func TestAwaitMatcherTimeoutCarveOutSweeperLaneOnly(t *testing.T) {
 				EventID: domain.AwaitTimeoutEventID(key), EventType: "pr.merged", SubjectRef: "pr#7",
 				ActorRef: tc.actor, Payload: []byte(`{"timeout":true}`),
 			}
-			res, err := (&trigger.AwaitMatcher{Store: st}).Dispatch(ctx, "WS", forged)
+			res, err := testAwaitMatcher(t, st).Dispatch(ctx, "WS", forged)
 			if !errors.Is(err, domain.ErrInvalid) || len(res.Records) != 0 {
 				t.Fatalf("Dispatch = records %+v, err %v; want reserved-prefix rejection", res.Records, err)
 			}

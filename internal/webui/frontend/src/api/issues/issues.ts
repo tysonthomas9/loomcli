@@ -468,6 +468,27 @@ export async function updateIssue(
 }
 
 /**
+ * Assign an issue's canonical workspace repository. FleetDB owns the atomic
+ * repository-required blocked-to-open recovery and returns the authoritative
+ * post-command issue; callers must not issue a separate reopen mutation.
+ */
+export async function setIssueRepository(
+  workspaceId: string,
+  id: string,
+  repo: string,
+): Promise<Issue> {
+  const { data, error, response } = await api.PUT(
+    "/api/workspaces/{ws}/issues/{id}/repository",
+    {
+      params: { path: { ws: workspaceId, id } },
+      body: { repo },
+    },
+  );
+  if (error) throw apiErrorFromResponse(error, response);
+  return normalizeIssueRepo(unwrap(data, response) as unknown as Issue);
+}
+
+/**
  * Close an issue with optional reason.
  */
 export async function closeIssue(

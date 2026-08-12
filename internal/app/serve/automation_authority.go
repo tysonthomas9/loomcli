@@ -106,9 +106,9 @@ func (provider *automationSystemAuthorityProvider) AuthorityForVerifiedSource(
 	return provider.issuer.IssueSystem(principal, workspace, automation.ActionAdmitEvent, reason)
 }
 
-// automationOperatorActions is the exact subset delegated to an authenticated
-// operator or local browser session. Ingestion and runtime actions are never
-// delegated through the operator credential mechanism.
+// automationOperatorActions is the exact subset delegated through the external
+// operator resolver or the loopback-only local open-mode resolver. Ingestion
+// and runtime actions are never delegated through either operator path.
 func automationOperatorActions() []authority.Action {
 	return []authority.Action{
 		automation.ActionCreateBinding,
@@ -176,6 +176,7 @@ func (provider *automationExecutionAuthorityProvider) AuthorityForVerifiedRun(
 		return authority.ExecutionAuthority{}, err
 	}
 	return provider.issuer.IssueExecutionForOwner(principal, workspace, automation.ActionAdmitEvent, authority.ExecutionOwner{
+		ResourceKind: authority.ExecutionResourceDriverRun, ResourceID: runID,
 		NodeID: parent.NodeID, LeaseID: parent.LeaseID, FencingToken: parent.FencingToken,
 	})
 }

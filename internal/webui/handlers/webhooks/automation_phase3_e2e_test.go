@@ -15,7 +15,6 @@ import (
 	"net/http/httptest"
 	"net/http/httputil"
 	"net/url"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"sort"
@@ -28,7 +27,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
-	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -55,30 +53,15 @@ func TestE2E_AutomationPhase3RealFleetDBLoomHTTPAndCLI(t *testing.T) {
 	e2e.seedAutomationPhase3Target()
 	e2e.startLoomServe()
 
-	operatorToken := e2e.readAutomationPhase3OperatorToken()
 	createBody := e2e.automationPhase3CreateBindingBody()
+	var created domain.TriggerBinding
 	e2e.doAutomationPhase3LoomJSON(
 		http.MethodPost,
 		"/api/workspaces/"+e2e.workspace+"/trigger-bindings?create_only=true",
 		createBody,
 		"",
-		http.StatusUnauthorized,
-		nil,
-	)
-
-	var created domain.TriggerBinding
-	e2e.runAutomationPhase3CLIJSON(&created,
-		"trigger", "bindings", "create",
-		"--binding-id", automationPhase3BindingID,
-		"--name", "Phase 3 GitHub PR review",
-		"--source", "github",
-		"--route-key", "github.pull_request.opened",
-		"--driver", automationPhase3DriverID,
-		"--driver-version", automationPhase3VersionID,
-		"--entrypoint", "run",
-		"--secret", automationPhase3WebhookSecret,
-		"--concurrency-policy", "allow",
-		"--json",
+		http.StatusCreated,
+		&created,
 	)
 	assertAutomationPhase3Binding(t, &created, automationPhase3BindingID, domain.TriggerBindingConcurrencyAllow)
 	if created.WebhookSecret != "" {
@@ -151,12 +134,6 @@ func TestE2E_AutomationPhase3RealFleetDBLoomHTTPAndCLI(t *testing.T) {
 	}
 	e2e.assertAutomationPhase3BindingDeleted(automationPhase3BindingID)
 
-	// The durable operator token is accepted only because the CLI discovered
-	// this exact loopback host. The direct HTTP denial above proves the same
-	// mutation is not anonymously reachable.
-	if strings.TrimSpace(operatorToken) == "" {
-		t.Fatal("local operator token was empty")
-	}
 }
 
 // TestE2E_AutomationPhase3WebhookPerformance retains 30 real signed webhook
@@ -299,32 +276,6 @@ func (e *githubWebhookE2E) automationPhase3CreateBindingBody() map[string]any {
 		"secret":            automationPhase3WebhookSecret,
 		"enabled":           enabled,
 	}
-}
-
-func (e *githubWebhookE2E) readAutomationPhase3OperatorToken() string {
-	e.t.Helper()
-	dir := filepath.Join(e.phase3RuntimeDir(), ".loom", "operator")
-	dirInfo, err := os.Stat(dir)
-	if err != nil || dirInfo.Mode().Perm() != 0o700 {
-		e.t.Fatalf("operator credential dir mode = %v err=%v, want 0700", automationPhase3ModeOrZero(dirInfo), err)
-	}
-	path := filepath.Join(dir, authority.LocalOperatorTokenFileName)
-	info, err := os.Stat(path)
-	if err != nil || info.Mode().Perm() != 0o600 {
-		e.t.Fatalf("operator token mode = %v err=%v, want 0600", automationPhase3ModeOrZero(info), err)
-	}
-	token, err := authority.ReadLocalOperatorToken(dir)
-	if err != nil {
-		e.t.Fatalf("read local operator token: %v", err)
-	}
-	return token
-}
-
-func automationPhase3ModeOrZero(info os.FileInfo) os.FileMode {
-	if info == nil {
-		return 0
-	}
-	return info.Mode().Perm()
 }
 
 func (e *githubWebhookE2E) runAutomationPhase3CLIJSON(output any, args ...string) {

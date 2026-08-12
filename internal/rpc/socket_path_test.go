@@ -136,6 +136,31 @@ func TestMaxUnixSocketPath_Constant(t *testing.T) {
 	}
 }
 
+func TestIsManagedTempSocketDir(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		dir  string
+		want bool
+	}{
+		{name: "generated direct child", dir: "/tmp/loom-0123456789abcdef", want: true},
+		{name: "test direct child", dir: "/tmp/loom-test-cleanup-123", want: true},
+		{name: "nested workspace runtime", dir: "/tmp/loom-parent/workspace/.loom", want: false},
+		{name: "nested loom child", dir: "/tmp/loom-parent/loom-child", want: false},
+		{name: "wrong basename", dir: "/tmp/not-loom", want: false},
+		{name: "wrong parent", dir: "/var/tmp/loom-0123456789abcdef", want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := isManagedTempSocketDir(tt.dir); got != tt.want {
+				t.Errorf("isManagedTempSocketDir(%q) = %t, want %t", tt.dir, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestEnsureSocketDir(t *testing.T) {
 	t.Parallel()
 
@@ -416,23 +441,53 @@ func TestEnsureSocketDir_LstatNonNotExistError(t *testing.T) {
 	}
 }
 
-func TestEnsureSocketDir_MkdirNonExistError(t *testing.T) {
-	// Test the path where Mkdir fails with an error other than os.IsExist.
-	// Use a nested path under a non-existent parent so Lstat returns IsNotExist
-	// (triggering the Mkdir attempt) but Mkdir also fails (parent doesn't exist).
-	uniqueParent := "loom-noparent-" + strings.ReplaceAll(t.Name(), "/", "-")
-	dir := filepath.Join("/tmp", uniqueParent, "nested")
-	socketPath := filepath.Join(dir, "loom.sock")
+func TestNestedTmpWorkspaceSocketDirIsNotManaged(t *testing.T) {
+	parentName := fmt.Sprintf("loom-parent-%d-%s", os.Getpid(), strings.ReplaceAll(t.Name(), "/", "-"))
+	parentDir := filepath.Join(tmpDir, parentName)
+	runtimeDir := filepath.Join(parentDir, "workspace", ".loom")
+	socketPath := filepath.Join(runtimeDir, "loom.sock")
 
-	os.RemoveAll(filepath.Join("/tmp", uniqueParent))
-	t.Cleanup(func() { os.RemoveAll(filepath.Join("/tmp", uniqueParent)) })
-
-	_, err := EnsureSocketDir(socketPath)
-	if err == nil {
-		t.Fatal("EnsureSocketDir() should return error when parent doesn't exist")
+	if err := os.RemoveAll(parentDir); err != nil {
+		t.Fatalf("remove stale parent: %v", err)
 	}
-	if !strings.Contains(err.Error(), "failed to create socket directory") {
-		t.Errorf("error should contain 'failed to create socket directory', got: %v", err)
+	t.Cleanup(func() { _ = os.RemoveAll(parentDir) })
+	if err := os.MkdirAll(runtimeDir, 0755); err != nil {
+		t.Fatalf("create nested runtime directory: %v", err)
+	}
+	if err := os.Chmod(runtimeDir, 0755); err != nil {
+		t.Fatalf("set nested runtime permissions: %v", err)
+	}
+
+	result, err := EnsureSocketDir(socketPath)
+	if err != nil {
+		t.Fatalf("EnsureSocketDir() error: %v", err)
+	}
+	if result != socketPath {
+		t.Fatalf("EnsureSocketDir() = %q, want %q", result, socketPath)
+	}
+	fi, err := os.Stat(runtimeDir)
+	if err != nil {
+		t.Fatalf("stat nested runtime directory: %v", err)
+	}
+	if fi.Mode().Perm() != 0755 {
+		t.Fatalf("nested runtime permissions = %o, want unchanged 0755", fi.Mode().Perm())
+	}
+
+	if err := os.WriteFile(socketPath, []byte{}, 0600); err != nil {
+		t.Fatalf("create socket placeholder: %v", err)
+	}
+	if err := CleanupSocketDir(socketPath); err != nil {
+		t.Fatalf("CleanupSocketDir() error: %v", err)
+	}
+	if _, err := os.Stat(socketPath); !os.IsNotExist(err) {
+		t.Fatalf("socket path still exists after cleanup: %v", err)
+	}
+	fi, err = os.Stat(runtimeDir)
+	if err != nil {
+		t.Fatalf("nested runtime directory was removed: %v", err)
+	}
+	if fi.Mode().Perm() != 0755 {
+		t.Errorf("nested runtime permissions after cleanup = %o, want unchanged 0755", fi.Mode().Perm())
 	}
 }
 

@@ -73,12 +73,8 @@ func New(config Config) *Module {
 // must use New before enabling these routes.
 //
 // Deprecated: use New.
-func NewModule(st store.Store) *Module {
-	var awaits AwaitDispatcher
-	if st != nil {
-		awaits = &trigger.AwaitMatcher{Store: st}
-	}
-	return New(Config{Awaits: awaits})
+func NewModule(_ store.Store) *Module {
+	return New(Config{})
 }
 
 func (m *Module) Register(mux *http.ServeMux) {

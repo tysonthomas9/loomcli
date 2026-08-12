@@ -8,7 +8,7 @@ import (
 )
 
 // HandleGetWorkspaceJob returns a handler that polls the status of an async
-// workspace creation job.
+// workspace mutation job.
 func HandleGetWorkspaceJob(svc service.WorkspaceService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id := r.PathValue("id")

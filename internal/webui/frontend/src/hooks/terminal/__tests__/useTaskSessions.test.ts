@@ -136,6 +136,118 @@ describe("useTaskSessions", () => {
       expect(mockGetSessions).toHaveBeenLastCalledWith("test-ws-id", "task-2");
     });
 
+    it("lets a new task fetch while rejecting the previous task's late response", async () => {
+      let resolveFirst!: (value: SessionRecord[]) => void;
+      let resolveSecond!: (value: SessionRecord[]) => void;
+      mockGetSessions
+        .mockImplementationOnce(
+          () =>
+            new Promise<SessionRecord[]>((resolve) => {
+              resolveFirst = resolve;
+            }),
+        )
+        .mockImplementationOnce(
+          () =>
+            new Promise<SessionRecord[]>((resolve) => {
+              resolveSecond = resolve;
+            }),
+        );
+
+      const { result, rerender } = renderHook(
+        ({ taskId }: { taskId: string }) => useTaskSessions(taskId),
+        { initialProps: { taskId: "task-1" } },
+      );
+      await flushPromises();
+
+      rerender({ taskId: "task-2" });
+      await flushPromises();
+
+      expect(mockGetSessions).toHaveBeenCalledTimes(2);
+      expect(mockGetSessions).toHaveBeenLastCalledWith("test-ws-id", "task-2");
+      expect(result.current.sessions).toEqual([]);
+      expect(result.current.isLoading).toBe(true);
+
+      const current = [
+        createMockSession({ session_id: "current", task_id: "task-2" }),
+      ];
+      await act(async () => {
+        resolveSecond(current);
+        await Promise.resolve();
+      });
+      expect(result.current.sessions).toEqual(current);
+
+      await act(async () => {
+        resolveFirst([
+          createMockSession({ session_id: "stale", task_id: "task-1" }),
+        ]);
+        await Promise.resolve();
+      });
+      expect(result.current.sessions).toEqual(current);
+    });
+
+    it("fences an A to B to A route cycle by visit generation", async () => {
+      let resolveFirstA!: (value: SessionRecord[]) => void;
+      let resolveB!: (value: SessionRecord[]) => void;
+      let resolveSecondA!: (value: SessionRecord[]) => void;
+      mockGetSessions
+        .mockImplementationOnce(
+          () =>
+            new Promise<SessionRecord[]>((resolve) => {
+              resolveFirstA = resolve;
+            }),
+        )
+        .mockImplementationOnce(
+          () =>
+            new Promise<SessionRecord[]>((resolve) => {
+              resolveB = resolve;
+            }),
+        )
+        .mockImplementationOnce(
+          () =>
+            new Promise<SessionRecord[]>((resolve) => {
+              resolveSecondA = resolve;
+            }),
+        );
+
+      const { result, rerender } = renderHook(
+        ({ taskId }: { taskId: string }) => useTaskSessions(taskId),
+        { initialProps: { taskId: "task-a" } },
+      );
+      await flushPromises();
+
+      rerender({ taskId: "task-b" });
+      await flushPromises();
+      rerender({ taskId: "task-a" });
+      await flushPromises();
+
+      expect(mockGetSessions).toHaveBeenCalledTimes(3);
+      expect(mockGetSessions.mock.calls).toEqual([
+        ["test-ws-id", "task-a"],
+        ["test-ws-id", "task-b"],
+        ["test-ws-id", "task-a"],
+      ]);
+
+      const current = [
+        createMockSession({ session_id: "current-a", task_id: "task-a" }),
+      ];
+      await act(async () => {
+        resolveSecondA(current);
+        await Promise.resolve();
+      });
+      expect(result.current.sessions).toEqual(current);
+
+      await act(async () => {
+        resolveB([
+          createMockSession({ session_id: "stale-b", task_id: "task-b" }),
+        ]);
+        resolveFirstA([
+          createMockSession({ session_id: "stale-a", task_id: "task-a" }),
+        ]);
+        await Promise.resolve();
+      });
+      expect(result.current.sessions).toEqual(current);
+    });
+
     it("clears sessions when taskId changes to null", async () => {
       mockGetSessions.mockResolvedValueOnce([
         createMockSession({ session_id: "s1" }),

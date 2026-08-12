@@ -20,6 +20,39 @@ func TestClassifyHTTPError_GoneMapsToErrGone(t *testing.T) {
 	}
 }
 
+func TestClassifyHTTPError_RateLimitRemainsRetryable(t *testing.T) {
+	t.Parallel()
+	err := classifyHTTPError(
+		http.MethodPost,
+		"/api/v1/WS/driver-runs/run-1/task-runs/request",
+		http.StatusTooManyRequests,
+		[]byte(`{"error":{"code":"rate_limit_exceeded","message":"try again"}}`),
+	)
+	if !errors.Is(err, ErrRateLimited) {
+		t.Fatalf("err = %v, want errors.Is ErrRateLimited", err)
+	}
+	if errors.Is(err, domain.ErrAlreadyExists) || errors.Is(err, domain.ErrConflict) {
+		t.Fatalf("err = %v, must not satisfy a deterministic conflict", err)
+	}
+	mapped := mapExecutionTransportError("request TaskRun", err)
+	if !errors.Is(mapped, ErrExecutionUnavailable) || errors.Is(mapped, ErrExecutionConflict) {
+		t.Fatalf("execution mapping = %v, want unavailable and not conflict", mapped)
+	}
+}
+
+func TestClassifyHTTPError_AgentCommandForbiddenMapsToNotOwner(t *testing.T) {
+	t.Parallel()
+	err := classifyHTTPError(
+		http.MethodPost,
+		"/api/v1/WS/agent-commands/cmd-1/complete",
+		http.StatusForbidden,
+		[]byte(`{"error":{"code":"forbidden","message":"ownership proof rejected"}}`),
+	)
+	if !errors.Is(err, domain.ErrNotOwner) {
+		t.Fatalf("err = %v, want errors.Is ErrNotOwner", err)
+	}
+}
+
 // The pre-410 mappings must be unchanged (back-compat matrix).
 func TestClassifyHTTPError_ExistingMappingsUnchanged(t *testing.T) {
 	t.Parallel()

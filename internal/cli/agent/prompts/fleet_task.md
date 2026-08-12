@@ -115,7 +115,8 @@ the planner is cheaper to re-engage than a human, and 8b is non-terminal
 - If the gate or manual test fails, fix ALL failures and re-run until it passes
 - Do NOT commit or push with failing tests
 - Stage and commit: git add <files> && git commit -m "<brief description> (<task-id>)"
-- Publish through Loom stacked PR delivery (MANDATORY):
+- Prefer Loom stacked PR delivery when the configured GitHub repository and
+  credential permit it:
   - Determine the stack id: use `epic:<epic-id>` for child tasks; use `task:<task-id>` for standalone tasks.
   - Determine the repo name and base branch from the task `source_repo`, the parent epic, or the workspace repo table. If they are ambiguous, add task notes explaining the missing stack inputs, do not close the task, and run `loom complete`.
   - Ensure the stack exists:
@@ -129,8 +130,26 @@ the planner is cheaper to re-engage than a human, and 8b is non-terminal
     `loom stack publish <stack-id> --repo-path <repo-path> --dry-run --json`
   - If the dry-run succeeds, publish:
     `loom stack publish <stack-id> --repo-path <repo-path> --json`
-  - Do not use direct integration or direct branch pushes as the completion path.
-- Run 'loom data close <id> --reason "Completed with tests and code review"'
+  - If both commands succeed, run:
+    `loom data close <id> --reason "Completed with tests and code review"`
+  - If either publish command cannot use GitHub (including missing/invalid
+    credentials, insufficient repository permission, a non-GitHub origin, or
+    unavailable GitHub), PR delivery is unavailable.
+    This is a supported local review handoff, NOT an external blocker.
+    Do NOT use Step 8a. Do NOT mark the task blocked. Do NOT close it. The
+    output branch already points at the committed HEAD in the workspace
+    repository. Record that immutable local branch and leave the card in
+    Review:
+    ```
+    head_sha=$(git rev-parse HEAD)
+    loom data update <id> --status review --assignee="" \
+      --external-ref "local-branch:<output-branch>@${head_sha}"
+    ```
+    Then run `loom complete` and EXIT. Do not attempt a direct push. The human
+    or Local Review agent owns the next decision.
+  - A failed quality gate, commit, stack setup, or branch materialization is
+    not a delivery-capability fallback; handle those failures through Step 8.
+- Do not use direct integration or direct branch pushes as the completion path.
 - Signal completion: loom complete
 
 ### CRITICAL: STOP

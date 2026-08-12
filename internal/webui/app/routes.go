@@ -49,6 +49,10 @@ func (app *Server) registerCoreAPIRoutes(h *handlermux.Handlers) {
 		settingsHandlers := modbuilder.NewLocalSettingsHandlers(app.config.LocalSettingsDir, app.prReviewCredentialSeeds)
 		app.mux.HandleFunc("GET /api/local/settings", settingsHandlers.Get)
 		app.mux.HandleFunc("PATCH /api/local/settings", settingsHandlers.Patch)
+		app.mux.HandleFunc(
+			"POST /api/local/settings/runtime-credentials/preflight",
+			settingsHandlers.RuntimeCredentialPreflight,
+		)
 	}
 	if h.GetBackendsHealth != nil {
 		app.mux.HandleFunc("GET /api/backends", h.GetBackendsHealth)

@@ -60,7 +60,7 @@ func TestAutomationExecutionPortReloadsFencedEmissionContext(t *testing.T) {
 	}}
 	port := &automationExecutionPort{runs: runs}
 	auth := issueAutomationExecutionAuthority(t, authority.NewIssuer(), "TEST", "run-1", automation.ActionAdmitEvent,
-		authority.ExecutionOwner{NodeID: "node-1", LeaseID: "lease-1", FencingToken: 42})
+		authority.ExecutionOwner{ResourceKind: authority.ExecutionResourceDriverRun, ResourceID: "run-1", NodeID: "node-1", LeaseID: "lease-1", FencingToken: 42})
 	contextValue, err := port.EmissionContext(context.Background(), auth)
 	if err != nil {
 		t.Fatalf("EmissionContext: %v", err)
@@ -82,7 +82,7 @@ func TestAutomationExecutionPortRejectsWrongActionAndStaleRun(t *testing.T) {
 		NodeID: "node", LeaseID: "lease", FencingToken: 1,
 	}}
 	port := &automationExecutionPort{runs: runs}
-	owner := authority.ExecutionOwner{NodeID: "node", LeaseID: "lease", FencingToken: 1}
+	owner := authority.ExecutionOwner{ResourceKind: authority.ExecutionResourceDriverRun, ResourceID: "run-1", NodeID: "node", LeaseID: "lease", FencingToken: 1}
 	wrong := issueAutomationExecutionAuthority(t, issuer, "TEST", "run-1", automation.ActionSweepCron, owner)
 	if _, err := port.EmissionContext(context.Background(), wrong); !errors.Is(err, authority.ErrAdmissionDenied) {
 		t.Fatalf("wrong-action error = %v, want admission denial", err)

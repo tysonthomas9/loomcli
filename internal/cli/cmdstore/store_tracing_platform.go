@@ -255,10 +255,22 @@ type tracedDriverRunOutcomeStore struct {
 	outcomes store.DriverRunOutcomeStore
 }
 
+type tracedDriverRunOutcomeAndTerminalRecoveryStore struct {
+	*tracedDriverRunOutcomeStore
+	terminalWorkRecoveries store.TerminalDriverRunWorkRecoveryQueueStore
+}
+
 func wrapTracedDriverRunStore(inner store.DriverRunStore) store.DriverRunStore {
 	base := &tracedDriverRunStore{inner: inner}
 	if outcomes, ok := inner.(store.DriverRunOutcomeStore); ok {
-		return &tracedDriverRunOutcomeStore{tracedDriverRunStore: base, outcomes: outcomes}
+		outcomeStore := &tracedDriverRunOutcomeStore{tracedDriverRunStore: base, outcomes: outcomes}
+		if terminalWorkRecoveries, ok := inner.(store.TerminalDriverRunWorkRecoveryQueueStore); ok {
+			return &tracedDriverRunOutcomeAndTerminalRecoveryStore{
+				tracedDriverRunOutcomeStore: outcomeStore,
+				terminalWorkRecoveries:      terminalWorkRecoveries,
+			}
+		}
+		return outcomeStore
 	}
 	return base
 }
@@ -268,6 +280,8 @@ func wrapTracedDriverRunStore(inner store.DriverRunStore) store.DriverRunStore {
 // drop it and the consumer's comma-ok type assertion would fail silently.
 var _ store.DriverRunEventsReader = (*tracedDriverRunStore)(nil)
 var _ store.DriverRunOutcomeStore = (*tracedDriverRunOutcomeStore)(nil)
+var _ store.DriverRunOutcomeStore = (*tracedDriverRunOutcomeAndTerminalRecoveryStore)(nil)
+var _ store.TerminalDriverRunWorkRecoveryQueueStore = (*tracedDriverRunOutcomeAndTerminalRecoveryStore)(nil)
 
 func (t *tracedDriverRunStore) Create(ctx context.Context, in store.DriverRunCreate) (*domain.DriverRun, error) {
 	return traced(ctx, "DriverRuns", "Create", func(ctx context.Context) (*domain.DriverRun, error) {
@@ -411,6 +425,33 @@ func (t *tracedDriverRunOutcomeStore) CompleteDriverRunOutcome(ctx context.Conte
 func (t *tracedDriverRunOutcomeStore) RetryDriverRunOutcome(ctx context.Context, retry store.DriverRunOutcomeRetry) error {
 	return tracedErr(ctx, "DriverRuns", func(ctx context.Context) error {
 		return t.outcomes.RetryDriverRunOutcome(ctx, retry)
+	}, attribute.String("loom.workspace", retry.WorkspaceKey), attribute.String("loom.driver_run", retry.RunID))
+}
+
+func (t *tracedDriverRunOutcomeAndTerminalRecoveryStore) ClaimTerminalDriverRunWorkRecoveries(
+	ctx context.Context,
+	claim store.TerminalDriverRunWorkRecoveryClaim,
+) ([]store.DriverRunOutcome, error) {
+	return tracedList(ctx, "DriverRuns", "ClaimTerminalWorkRecoveries", func(ctx context.Context) ([]store.DriverRunOutcome, error) {
+		return t.terminalWorkRecoveries.ClaimTerminalDriverRunWorkRecoveries(ctx, claim)
+	}, attribute.String("loom.workspace", claim.WorkspaceKey))
+}
+
+func (t *tracedDriverRunOutcomeAndTerminalRecoveryStore) CompleteTerminalDriverRunWorkRecovery(
+	ctx context.Context,
+	completion store.TerminalDriverRunWorkRecoveryCompletion,
+) error {
+	return tracedErr(ctx, "DriverRuns", func(ctx context.Context) error {
+		return t.terminalWorkRecoveries.CompleteTerminalDriverRunWorkRecovery(ctx, completion)
+	}, attribute.String("loom.workspace", completion.WorkspaceKey), attribute.String("loom.driver_run", completion.RunID))
+}
+
+func (t *tracedDriverRunOutcomeAndTerminalRecoveryStore) RetryTerminalDriverRunWorkRecovery(
+	ctx context.Context,
+	retry store.TerminalDriverRunWorkRecoveryRetry,
+) error {
+	return tracedErr(ctx, "DriverRuns", func(ctx context.Context) error {
+		return t.terminalWorkRecoveries.RetryTerminalDriverRunWorkRecovery(ctx, retry)
 	}, attribute.String("loom.workspace", retry.WorkspaceKey), attribute.String("loom.driver_run", retry.RunID))
 }
 
@@ -569,6 +610,8 @@ func (t *tracedDriverStepStore) Update(ctx context.Context, ws, stepID string, u
 
 type tracedTaskRunStore struct{ inner store.TaskRunStore }
 
+var _ store.TaskRunTerminalConvergenceStore = (*tracedTaskRunStore)(nil)
+
 func (t *tracedTaskRunStore) Create(ctx context.Context, in store.TaskRunCreate) (*domain.TaskRun, error) {
 	return traced(ctx, "TaskRuns", "Create", func(ctx context.Context) (*domain.TaskRun, error) {
 		return t.inner.Create(ctx, in)
@@ -599,6 +642,32 @@ func (t *tracedTaskRunStore) List(ctx context.Context, ws string, filter store.T
 	},
 		attribute.String("loom.workspace", ws),
 	)
+}
+
+func (t *tracedTaskRunStore) ListTaskRunTerminalConvergenceCandidates(
+	ctx context.Context,
+	query store.TaskRunTerminalConvergenceQuery,
+) (store.TaskRunTerminalConvergencePage, error) {
+	checkpoints, ok := t.inner.(store.TaskRunTerminalConvergenceStore)
+	if !ok {
+		return store.TaskRunTerminalConvergencePage{}, fmt.Errorf("TaskRuns.ListTaskRunTerminalConvergenceCandidates: %w", errors.ErrUnsupported)
+	}
+	return traced(ctx, "TaskRuns", "ListTaskRunTerminalConvergenceCandidates", func(ctx context.Context) (store.TaskRunTerminalConvergencePage, error) {
+		return checkpoints.ListTaskRunTerminalConvergenceCandidates(ctx, query)
+	}, attribute.String("loom.workspace", query.WorkspaceKey))
+}
+
+func (t *tracedTaskRunStore) CompleteTaskRunTerminalConvergence(
+	ctx context.Context,
+	command store.TaskRunTerminalConvergenceComplete,
+) (*store.TaskRunTerminalConvergenceResult, error) {
+	checkpoints, ok := t.inner.(store.TaskRunTerminalConvergenceStore)
+	if !ok {
+		return nil, fmt.Errorf("TaskRuns.CompleteTaskRunTerminalConvergence: %w", errors.ErrUnsupported)
+	}
+	return traced(ctx, "TaskRuns", "CompleteTaskRunTerminalConvergence", func(ctx context.Context) (*store.TaskRunTerminalConvergenceResult, error) {
+		return checkpoints.CompleteTaskRunTerminalConvergence(ctx, command)
+	}, attribute.String("loom.workspace", command.WorkspaceKey))
 }
 
 func (t *tracedTaskRunStore) Heartbeat(ctx context.Context, ws, taskRunID string, heartbeat store.TaskRunHeartbeat) (*domain.TaskRun, error) {

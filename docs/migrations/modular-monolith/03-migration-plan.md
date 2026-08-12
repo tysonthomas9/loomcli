@@ -1,6 +1,6 @@
 # Migration Plan
 
-- **Status:** Reviewed — Phase 3 implementation and paired validation complete; Terra export not recorded
+- **Status:** Phase 4 complete; Phase 5 has not started
 - **Strategy:** Incremental vertical extraction aligned with active product work; no standalone big-bang reorganization
 - **Migration:** [Modular Monolith Migration](README.md)
 
@@ -57,7 +57,7 @@ This phase is a hard gate.
 
 Store the commands, environment, expected skips, commit SHAs, spec checksum, results, and artifact paths in a checked-in baseline manifest. The historical `docs/design/2026-07-03-unified-agent-ui-test-matrix.tsv` is evidence, not an executable gate.
 
-The Phase 0 snapshot had no clean-checkout supervisor-disabled matrix and correctly recorded **RED / harness absent**. Phase 1 now checks in `test/modular-monolith/supervisor-disabled-matrix.yaml` plus `make test-supervisor-disabled`. Its stable `deterministic-plan-coder` row defines setup, verification, teardown, and the required positive/negative assertions, but remains intentionally **RED** under `execution-reliability-lane` because the deterministic TS leaf, ordered public-API seeding, and daemon-free local-mode path do not yet exist. The target reports that blocker and exits nonzero without provisioning; it cannot count as proof. Later phases add interactive, custom-driver, cron/webhook, and per-PR reviewer rows.
+The Phase 0 snapshot had no clean-checkout supervisor-disabled matrix and correctly recorded **RED / harness absent**. Phase 1 checked in `test/modular-monolith/supervisor-disabled-matrix.yaml` plus `make test-supervisor-disabled`; at that milestone its stable `deterministic-plan-coder` row remained intentionally **RED** under `execution-reliability-lane`. Phase 4 supplies the deterministic TS leaf, ordered public-API seeding, daemon-free local-mode path, and zero-daemon assertions needed to turn that one row green. It remains an Execution-lane proof, not the Phase 6 full supervisor-deletion matrix.
 
 Documentation and test design were refined before this phase. The first committed code change was the base integration, followed only by the compatibility fix required to make the merged runtime pass; no pre-merge “mechanical” package move was made.
 
@@ -150,25 +150,49 @@ awaits explicit informed approval; this is not a product failure.
 - Keep Workflow Catalog immutable-version/trust policy separate from Automation matching/delivery policy.
 - Close the generic await split-commit hazard with one Execution-owned
   resolve-and-resume command, Redis/Postgres parity, and an always-required
-  `execution.await_atomic_resume.v1` readiness key. Exact replay must converge
-  a suspended parent after a lost response; no legacy resolve-then-resume
-  fallback is allowed.
+  `execution.await_atomic_resume.v1` readiness key. Stable Await/event
+  identities must converge a suspended parent after a lost response; no legacy
+  resolve-then-resume fallback is allowed.
 
 ## Phase 4 — Execution replacement and supervisor-disabled operation
 
-- Extract the minimal Artifacts create/finalize/reference API before Execution starts writing through it; leave unrelated artifact UI/query scope for Phase 7.
+**Complete:** Execution and the minimal Artifacts lifecycle are active in the
+capability graph. The architecture check, byte-identical paired OpenAPI
+contract, FleetDB and Loom aggregate gates, source-bound supervisor-disabled
+rerun, measured artifact-backed design path, and exact packaged Desktop
+positive/fail-closed journeys pass at validated product heads Loom
+`53cbe2577` and FleetDB `afb688768`. The original Phase 4 pre-commit snapshot
+remains an immutable provisional historical record and
+`phase4-execution-validation-53cbe2577` remains immutable for the source it
+names. The appended `phase4-reliability-validation-67c45972f` snapshot binds
+the later recovery/repository hardening to refreshed packaged Desktop,
+Podman/raw-browser, paired-contract, FleetDB-gate, focused-source, and
+exact-head architecture proof at Loom `67c45972f` with FleetDB `9ffa69f60`;
+its aggregate Loom gate also passes under the bounded-memory profile. Phase 5
+has not started.
+See the
+[Phase 4 record](09-phase-4-decisions-and-evidence.md).
+
+- Extract the minimal Artifacts `Create`, `Upload`, `Finalize`, `Reference`, `Get`, `List`, and composed `CreateContent` API before Execution starts writing through it; leave unrelated artifact UI/query scope for Phase 7.
 - Establish intent-oriented ports for preflight, claim, launch, classify, recover, and finalize.
 - Move DriverRun, DriverStep, TaskRun, worker, lease, await, and recovery invariants behind Execution commands.
-- Normalize task-run fencing before exposing a common Lease vocabulary.
+- Keep backend-assigned DriverRun and TaskRun fences monotonic but in distinct namespaces; do not expose one interchangeable cross-resource Lease vocabulary.
+- Bind DriverRun Work Item claim, TaskRun request, liveness, release, and terminal transitions to the exact immutable `ClaimActionID` generation. A stale TaskRun may never clear or rewrite a successor generation.
+- Apply the typed terminal policy in the same FleetDB transition as the TaskRun, Lease, and owned Work Item mutation: close intent closes/unassigns; successful non-close completion moves to review/unassigned; cancelled or non-blocking failed completion opens/unassigns; retry exhaustion or explicit block leaves blocked/unassigned. DriverStep repair and terminal TaskRun-event convergence remain separate durable convergence paths.
 - Register session/lease heartbeats for every launch path.
 - Preserve the shipped SB3/SB4 sandbox gates while closing specifically named host-exec credential and placement gaps in separate behavior-change PRs.
-- Port required supervisor restart/backoff, exit classification, concurrency, resume, and `AgentCommand` behavior into the new owners.
+- Port required supervisor restart/backoff, exit classification, concurrency, and resume behavior into the new owners. Do not move `AgentCommand` wholesale into Execution: batch ready-task dispatch bypasses it, while retained lead/session/interactive command delivery remains transitional Interaction scope through Phase 6.
 - Run the Execution-tagged rows of `make test-supervisor-disabled`; the full matrix remains a Phase 6 gate after Agents/Interaction land.
-- Retire or contain `@loom/sdk/runner`'s direct-fleet-db mutation fallback: the preferred target requires `LOOM_TASK_RUN_API_URL`; any retained fallback must call an equivalent lease-fenced fleet-db owner command and pass the same authority/contract tests.
+- Remove `@loom/sdk/runner`'s direct-FleetDB mutation fallback. Phase 4 requires `LOOM_TASK_RUN_API_URL`; absence of the Loom owner facade fails closed rather than accepting FleetDB credentials or choosing a second mutation topology.
+- Preserve Fleet owner fencing during recovery. A healthy DriverRun uses its owner-fenced stale-child command; a stale or crashed DriverRun is failed by system DriverRun recovery and its durable outcome cascade converges descendants. Phase 4 does not add a tokenless global TaskRun recovery sweep.
+- Treat `needs_revision` as a typed runner outcome, not a magic stdout phrase. The backend may write only the exact versioned JSON disposition to the runner-owned `LOOM_TASK_OUTCOME_FILE`; after a clean exit the host records a cancelled, non-retryable TaskRun with `task_outcome=needs_revision`, adds the `needs-revision` label, and leaves the Work Item open/unassigned for another planning pass. Malformed outcomes fail closed, and a nonzero exit or fatal stream error takes precedence.
 
 Do not move the supervisor into `internal/modules`. Characterize it, implement replacements in Execution/Interaction/runtime, and prove supervisor-disabled operation. Physical deletion waits for Phase 6.
 
 ## Phase 5 — Agents and Interaction
+
+**Not started.** Phase 4 completion does not activate or partially claim this
+phase.
 
 Begin only after the post-`v5` identity/Role model is stable. First establish the minimal Source Control materialization API and Connectors credential-broker API needed by this phase; leave their remaining UI/query/provider scope for Phase 7.
 
@@ -265,10 +289,10 @@ The migration completes when:
 - supervisor code is deleted;
 - compile-time import and synchronous command/query graphs are default-deny and cycle-free; any durable-event cycle is explicitly declared, bounded, and idempotent;
 - every cross-capability write is atomic or recoverable;
-- direct SDK/fleet-db mutation fallbacks are retired or proved equivalent to the Execution owner command and authority contract;
+- direct SDK/FleetDB mutation fallbacks are removed and missing Loom owner facades fail closed;
 - frontend feature boundaries are enforced;
 - the validation requirements in [04-enforcement-and-gates.md](04-enforcement-and-gates.md) are green.
 
 ---
 
-[All migrations](../README.md) · [Migration overview](README.md) · Previous: [Target architecture](02-target-architecture.md) · Next: [Enforcement and gates](04-enforcement-and-gates.md) · [Phase 1 evidence](06-phase-1-decisions-and-evidence.md)
+[All migrations](../README.md) · [Migration overview](README.md) · Previous: [Target architecture](02-target-architecture.md) · Next: [Enforcement and gates](04-enforcement-and-gates.md) · [Phase 4 evidence](09-phase-4-decisions-and-evidence.md)

@@ -7,9 +7,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
-	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -17,7 +14,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
-	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 	"github.com/tysonthomas9/loomcli/internal/workflows"
@@ -25,7 +21,6 @@ import (
 
 const (
 	workflowManagementTestWorkspace = "TEST"
-	workflowManagementTestToken     = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 )
 
 type workflowManagementFixture struct {
@@ -41,10 +36,21 @@ type workflowManagementFixture struct {
 	rejectedClass   authority.Class
 }
 
+type workflowManagementRunRequest struct {
+	CLICommand      string          `json:"cli_command"`
+	DriverRef       string          `json:"driver_ref"`
+	DriverVersionID string          `json:"driver_version_id,omitempty"`
+	RunID           string          `json:"run_id,omitempty"`
+	IdempotencyKey  string          `json:"idempotency_key,omitempty"`
+	Entrypoint      string          `json:"entrypoint,omitempty"`
+	EpicID          string          `json:"epic_id,omitempty"`
+	Payload         json.RawMessage `json:"payload"`
+}
+
 func setupWorkflowManagementFixture(t *testing.T) *workflowManagementFixture {
 	t.Helper()
 	fixture := &workflowManagementFixture{
-		expectedBearer: "Bearer " + workflowManagementTestToken,
+		expectedBearer: "",
 		driver: &domain.Driver{
 			WorkspaceKey:    workflowManagementTestWorkspace,
 			DriverID:        workflows.BuiltinEpicRunnerWorkflowName,
@@ -82,28 +88,14 @@ func setupWorkflowManagementFixture(t *testing.T) *workflowManagementFixture {
 	}
 	fixture.server = httptest.NewServer(http.HandlerFunc(fixture.serveHTTP))
 	t.Cleanup(fixture.server.Close)
-	configureWorkflowManagementClient(t, fixture.server.URL, workflowManagementTestWorkspace, workflowManagementTestToken)
+	configureWorkflowManagementClient(t, fixture.server.URL, workflowManagementTestWorkspace)
 	return fixture
 }
 
-func configureWorkflowManagementClient(t *testing.T, serverURL, workspace, token string) {
+func configureWorkflowManagementClient(t *testing.T, serverURL, workspace string) {
 	t.Helper()
-	runtimeDir := t.TempDir()
-	credentialDir := filepath.Join(runtimeDir, ".loom", "operator")
-	if err := os.MkdirAll(credentialDir, 0o700); err != nil {
-		t.Fatalf("create operator credential directory: %v", err)
-	}
-	if err := os.Chmod(credentialDir, 0o700); err != nil {
-		t.Fatalf("chmod operator credential directory: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(credentialDir, authority.LocalOperatorTokenFileName), []byte(token), 0o600); err != nil {
-		t.Fatalf("write operator token: %v", err)
-	}
 	t.Setenv("LOOM_SERVER_URL", serverURL)
 	t.Setenv("LOOM_WORKSPACE", workspace)
-	t.Setenv("LOOM_WORKSPACE_RUNTIME_DIR", runtimeDir)
-	cli.ResetWorkspaceRuntimeDirCache()
-	t.Cleanup(cli.ResetWorkspaceRuntimeDirCache)
 }
 
 func (f *workflowManagementFixture) serveHTTP(w http.ResponseWriter, r *http.Request) {
@@ -137,6 +129,36 @@ func (f *workflowManagementFixture) serveHTTP(w http.ResponseWriter, r *http.Req
 	}
 
 	switch {
+	case r.Method == http.MethodPost && r.URL.Path == workspacePrefix+"/execution/driver-runs":
+		var request workflowManagementRunRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			writeWorkflowManagementTestJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request"})
+			return
+		}
+		if request.DriverRef != f.driver.DriverID {
+			writeWorkflowManagementTestJSON(w, http.StatusNotFound, map[string]string{"error": "workflow not found"})
+			return
+		}
+		versionID := strings.TrimSpace(request.DriverVersionID)
+		if versionID == "" {
+			versionID = f.driver.ActiveVersionID
+		}
+		if f.versions[versionID] == nil {
+			writeWorkflowManagementTestJSON(w, http.StatusNotFound, map[string]string{"error": "version not found"})
+			return
+		}
+		runID := strings.TrimSpace(request.RunID)
+		if runID == "" {
+			runID = "run-management-1"
+		}
+		writeWorkflowManagementTestJSON(w, http.StatusAccepted, &domain.DriverRun{
+			WorkspaceKey: workflowManagementTestWorkspace, RunID: runID,
+			DriverID: f.driver.DriverID, DriverVersionID: versionID,
+			Entrypoint: request.Entrypoint, SourceKind: "cli", SourceRef: "loom workflow run",
+			EpicID: request.EpicID, IdempotencyKey: request.IdempotencyKey,
+			Status: domain.DriverRunQueued, Payload: append(json.RawMessage(nil), request.Payload...),
+		})
+		return
 	case r.Method == http.MethodGet && r.URL.Path == workspacePrefix+"/workflow-catalog/drivers":
 		if f.listBareDriver {
 			writeWorkflowManagementTestJSON(w, http.StatusOK, map[string]any{"drivers": []*domain.Driver{f.driver}})
@@ -302,7 +324,7 @@ func TestWorkflowManagementUnavailableHostFailsClosedWithoutImplicitStartup(t *t
 	}
 }
 
-func TestWorkflowManagementCommandsNeverOpenStoreAndUseLocalBearer(t *testing.T) {
+func TestWorkflowManagementCommandsNeverOpenStoreAndSendNoOpenModeCredential(t *testing.T) {
 	fixture := setupWorkflowManagementFixture(t)
 	openedStore := false
 	original := workflowWithActiveWorkspace
@@ -326,8 +348,8 @@ func TestWorkflowManagementCommandsNeverOpenStoreAndUseLocalBearer(t *testing.T)
 	if openedStore {
 		t.Fatal("standalone workflow management command opened a Store")
 	}
-	if got := fixture.lastAuthorization(); got != fixture.expectedBearer {
-		t.Fatalf("Authorization = %q, want local operator bearer", got)
+	if got := fixture.lastAuthorization(); got != "" {
+		t.Fatalf("Authorization = %q, want no open-mode credential", got)
 	}
 	paths := strings.Join(fixture.paths(), "\n")
 	for _, want := range []string{
@@ -354,61 +376,17 @@ func TestWorkflowManagementClientReusesAuthenticatedClientDiscovery(t *testing.T
 	}
 }
 
-func TestWorkflowManagementOpenModeFailsClosedWithoutOperatorCredential(t *testing.T) {
+func TestWorkflowManagementOpenModeWorksWithoutOperatorCredential(t *testing.T) {
 	fixture := setupWorkflowManagementFixture(t)
-	credentialPath := filepath.Join(cli.GetWorkspaceRuntimeDir(), ".loom", "operator", authority.LocalOperatorTokenFileName)
-	if err := os.Remove(credentialPath); err != nil {
-		t.Fatalf("remove operator credential: %v", err)
+	if err := runWorkflowList(&cobra.Command{}, nil); err != nil {
+		t.Fatalf("runWorkflowList without local credential: %v", err)
 	}
-
-	err := runWorkflowList(&cobra.Command{}, nil)
-	if err == nil || !strings.Contains(err.Error(), "local authentication") || !strings.Contains(err.Error(), "operator.token") {
-		t.Fatalf("runWorkflowList error = %v, want missing local operator credential", err)
-	}
-	if got := fixture.paths(); len(got) != 0 {
-		t.Fatalf("management requests = %v, want no unauthenticated catalog request", got)
+	if got := fixture.paths(); len(got) == 0 {
+		t.Fatal("open-mode command sent no management request")
 	}
 }
 
-func TestWorkflowManagementOpenModeRejectsNonLoopbackEndpointBeforeCredentialUse(t *testing.T) {
-	tests := []struct {
-		name      string
-		serverURL string
-	}{
-		{name: "remote IP", serverURL: "http://192.0.2.10:8080"},
-		{name: "remote DNS", serverURL: "http://loom.example.com:8080"},
-		{name: "localhost alias", serverURL: "http://localhost:8080"},
-		{name: "implicit port", serverURL: "http://127.0.0.1"},
-		{name: "embedded credentials", serverURL: "http://user@127.0.0.1:8080"},
-		{name: "path prefix", serverURL: "http://127.0.0.1:8080/loom"},
-		{name: "query", serverURL: "http://127.0.0.1:8080?mode=open"},
-		{name: "fragment", serverURL: "http://127.0.0.1:8080#open"},
-		{name: "TLS", serverURL: "https://127.0.0.1:8443"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			parsed, err := url.Parse(tt.serverURL)
-			if err != nil {
-				t.Fatalf("url.Parse: %v", err)
-			}
-			if err := validateOpenWorkflowManagementEndpoint(parsed); err == nil {
-				t.Fatalf("validateOpenWorkflowManagementEndpoint(%q) succeeded, want fail-closed rejection", tt.serverURL)
-			}
-		})
-	}
-
-	for _, serverURL := range []string{"http://127.0.0.1:8080", "http://[::1]:8080"} {
-		parsed, err := url.Parse(serverURL)
-		if err != nil {
-			t.Fatalf("url.Parse: %v", err)
-		}
-		if err := validateOpenWorkflowManagementEndpoint(parsed); err != nil {
-			t.Fatalf("validateOpenWorkflowManagementEndpoint(%q): %v", serverURL, err)
-		}
-	}
-}
-
-func TestWorkflowManagementBearerNeverFollowsRedirect(t *testing.T) {
+func TestWorkflowManagementRequestNeverFollowsRedirect(t *testing.T) {
 	var (
 		leakMu   sync.Mutex
 		leakAuth []string
@@ -429,7 +407,7 @@ func TestWorkflowManagementBearerNeverFollowsRedirect(t *testing.T) {
 		http.Redirect(w, r, leak.URL+"/capture", http.StatusTemporaryRedirect)
 	}))
 	t.Cleanup(front.Close)
-	configureWorkflowManagementClient(t, front.URL, workflowManagementTestWorkspace, workflowManagementTestToken)
+	configureWorkflowManagementClient(t, front.URL, workflowManagementTestWorkspace)
 	workflowListJSON = true
 	t.Cleanup(func() { workflowListJSON = false })
 

@@ -107,6 +107,10 @@ func NextFire(schedule, timezone string, after time.Time) (time.Time, error) {
 // observation) only primes its window and never fires historical ticks.
 type CronScheduler struct {
 	Store store.Store
+	// AwaitResolver is the explicitly injected Execution mutation port used by
+	// the legacy cron await fast path. Nil keeps cron dispatch available but
+	// makes await resolution fail closed.
+	AwaitResolver store.AtomicAwaitStore
 	// WorkspaceKey scopes the sweep to one workspace. Empty sweeps every
 	// known workspace (mirrors OutboxDispatcher/StaleTaskSweeper).
 	WorkspaceKey string
@@ -269,7 +273,7 @@ func (s *CronScheduler) dispatchTick(ctx context.Context, ws string, binding *do
 // so matcher errors are logged, never returned (the next sweep's idempotent
 // re-dispatch retries naturally while the window has not advanced past it).
 func (s *CronScheduler) dispatchTickAwaits(ctx context.Context, ws, bindingID, tickKey string, payload json.RawMessage) {
-	matcher := &AwaitMatcher{Store: s.Store}
+	matcher := &AwaitMatcher{Store: s.Store, AtomicResolver: s.AwaitResolver}
 	if _, err := matcher.Dispatch(ctx, ws, AwaitDispatchEvent{
 		EventID:    tickKey,
 		EventType:  CronEventType,

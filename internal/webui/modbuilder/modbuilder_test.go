@@ -18,6 +18,9 @@ func (s *credentialSeedInvalidatorSpy) InvalidateCredentialSeeds() {
 func TestNewLocalSettingsHandlersWiresCredentialInvalidator(t *testing.T) {
 	invalidator := &credentialSeedInvalidatorSpy{}
 	handlers := NewLocalSettingsHandlers(t.TempDir(), invalidator)
+	if handlers.RuntimeCredentialPreflight == nil {
+		t.Fatal("runtime credential preflight handler was not wired")
+	}
 	req := httptest.NewRequest(http.MethodPatch, "/api/local/settings", strings.NewReader(
 		`{"runtime_credentials":{"github":{"token":"gh-new"}}}`,
 	))

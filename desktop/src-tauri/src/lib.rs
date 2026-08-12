@@ -1,4 +1,5 @@
 use std::{
+    collections::HashMap,
     io::{Read, Write},
     net::{SocketAddr, TcpStream},
     path::Path,
@@ -24,7 +25,7 @@ const STALE_RUNTIME_HEALTH_TIMEOUT: Duration = Duration::from_millis(300);
 
 #[derive(Default)]
 struct WorkspaceRecoveryState {
-    pending_route: Mutex<Option<String>>,
+    pending: Mutex<HashMap<String, String>>,
 }
 
 /// True when macOS is running this bundle from a read-only/randomized location
@@ -64,7 +65,7 @@ pub fn run() {
             open_workspace_window,
             pick_folder,
             needs_relocation,
-            take_workspace_recovery_path
+            take_workspace_recovery
         ])
         .menu(build_menu)
         .on_menu_event(|app, event| match event.id().as_ref() {
@@ -104,12 +105,21 @@ fn open_workspace_window<R: Runtime>(
 }
 
 #[tauri::command]
-fn take_workspace_recovery_path(state: tauri::State<'_, WorkspaceRecoveryState>) -> Option<String> {
-    state
-        .pending_route
+fn take_workspace_recovery<R: Runtime>(
+    app: AppHandle<R>,
+    caller: WebviewWindow<R>,
+    state: tauri::State<'_, WorkspaceRecoveryState>,
+) -> Result<Option<String>, String> {
+    let caller_url = caller.url().map_err(|err| err.to_string())?;
+    let launcher = launcher_url(&app).map_err(|err| err.to_string())?;
+    if caller_url != launcher {
+        return Err("workspace recovery must originate from bundled launcher content".to_string());
+    }
+    Ok(state
+        .pending
         .lock()
         .ok()
-        .and_then(|mut pending| pending.take())
+        .and_then(|mut pending| pending.remove(caller.label())))
 }
 
 #[tauri::command]
@@ -213,10 +223,25 @@ fn find_submenu_by_text<R: Runtime>(
 }
 
 fn show_primary_window<R: Runtime>(app: &AppHandle<R>) {
-    if let Some(window) = app.get_webview_window(PRIMARY_WORKSPACE_WINDOW_LABEL) {
-        if matches!(recover_stale_workspace_window(app, &window), Ok(true)) {
-            return;
+    let mut primary_recovered = false;
+    for window in app.webview_windows().values() {
+        if window.label() != PRIMARY_WORKSPACE_WINDOW_LABEL
+            && !window
+                .label()
+                .starts_with(ADDITIONAL_WORKSPACE_WINDOW_PREFIX)
+        {
+            continue;
         }
+        if matches!(recover_stale_workspace_window(app, window), Ok(true))
+            && window.label() == PRIMARY_WORKSPACE_WINDOW_LABEL
+        {
+            primary_recovered = true;
+        }
+    }
+    if primary_recovered {
+        return;
+    }
+    if let Some(window) = app.get_webview_window(PRIMARY_WORKSPACE_WINDOW_LABEL) {
         reveal_window(app, &window);
         return;
     }
@@ -280,9 +305,13 @@ fn recover_stale_workspace_window<R: Runtime>(
         return Ok(false);
     }
 
-    if let Ok(mut pending) = app.state::<WorkspaceRecoveryState>().pending_route.lock() {
-        *pending = Some(workspace_recovery_route(&url));
-    }
+    let state = app.state::<WorkspaceRecoveryState>();
+    let route = workspace_recovery_route(&url);
+    state
+        .pending
+        .lock()
+        .map_err(|_| invalid_workspace_url("workspace recovery state is unavailable"))?
+        .insert(window.label().to_string(), route);
 
     window.navigate(launcher)?;
     reveal_window(app, window);
@@ -309,32 +338,11 @@ fn workspace_recovery_route(url: &Url) -> String {
         route.push('?');
         route.push_str(query);
     }
-    if let Some(fragment) = sanitized_workspace_fragment(url.fragment()) {
+    if let Some(fragment) = url.fragment().filter(|value| !value.trim().is_empty()) {
         route.push('#');
-        route.push_str(&fragment);
+        route.push_str(fragment);
     }
     route
-}
-
-fn sanitized_workspace_fragment(fragment: Option<&str>) -> Option<String> {
-    let fragment = fragment?.trim();
-    if fragment.is_empty() {
-        return None;
-    }
-    let retained = fragment
-        .split('&')
-        .filter(|part| !part.is_empty())
-        .filter(|part| {
-            let key = url::form_urlencoded::parse(part.as_bytes())
-                .next()
-                .map(|(key, _)| key);
-            !matches!(key.as_deref(), Some("loom_launch" | "loom_workspace"))
-        })
-        .collect::<Vec<_>>();
-    if retained.is_empty() {
-        return None;
-    }
-    Some(retained.join("&"))
 }
 
 fn runtime_health_probe(url: &Url, timeout: Duration) -> bool {
@@ -433,12 +441,24 @@ fn open_workspace_window_native<R: Runtime>(
     force_new: bool,
 ) -> tauri::Result<()> {
     let url = workspace_entry_url(runtime_url)?;
-
-    // A user-created additional window starts as bundled launcher content so
-    // it can ask the sidecar for its own one-time browser launch code. Reuse
-    // that exact invoking launcher only after verifying it has not already
-    // navigated to runtime content. This prevents cloning an existing URL (and
-    // its consumed launch fragment) into another workspace window.
+    if caller.url()? != launcher_url(app)? {
+        return Err(invalid_workspace_url(
+            "workspace navigation must originate from bundled launcher content",
+        ));
+    }
+    if (!force_new && caller.label() != PRIMARY_WORKSPACE_WINDOW_LABEL)
+        || (force_new
+            && !caller
+                .label()
+                .starts_with(ADDITIONAL_WORKSPACE_WINDOW_PREFIX))
+    {
+        return Err(invalid_workspace_url(
+            "workspace navigation caller does not match the target window",
+        ));
+    }
+    // A user-created additional window starts as bundled launcher content.
+    // Reuse that exact invoking launcher only after verifying it has not
+    // already navigated to runtime content.
     if force_new {
         if !is_additional_workspace_launcher(app, caller)? {
             return Err(tauri::Error::InvalidWebviewUrl(
@@ -471,6 +491,10 @@ fn open_workspace_window_native<R: Runtime>(
     .build()?;
     reveal_window(app, &window);
     Ok(())
+}
+
+fn invalid_workspace_url(message: &'static str) -> tauri::Error {
+    tauri::Error::InvalidWebviewUrl(message)
 }
 
 fn open_additional_workspace_window<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
@@ -575,21 +599,16 @@ mod tests {
     }
 
     #[test]
-    fn additional_workspace_launcher_requests_fresh_browser_authority() {
+    fn additional_workspace_launcher_stays_on_bundled_content() {
         let script = additional_workspace_launcher_init_script();
         assert!(script.contains("__LOOM_OPEN_ADDITIONAL_WORKSPACE_WINDOW__ = true"));
-        assert!(!script.contains("loom_launch"));
-        assert!(!script.contains("loom_workspace"));
         assert!(!script.contains("http://"));
     }
 
     #[test]
     fn only_bundled_additional_launcher_can_reuse_its_window() {
         let launcher = Url::parse("tauri://localhost").unwrap();
-        let runtime = Url::parse(
-            "http://127.0.0.1:4567/ws/DESKTOP#loom_launch=consumed&loom_workspace=DESKTOP",
-        )
-        .unwrap();
+        let runtime = Url::parse("http://127.0.0.1:4567/ws/DESKTOP").unwrap();
 
         assert!(is_additional_workspace_launcher_url(
             "workspace-1-1",
@@ -637,32 +656,6 @@ mod tests {
         assert_eq!(
             workspace_recovery_route(&url),
             "/ws/DESKTOP/list?search=abc#section"
-        );
-    }
-
-    #[test]
-    fn recovery_strips_one_time_browser_authority() {
-        let url = Url::parse(
-			"http://127.0.0.1:4567/ws/DESKTOP/list?search=abc#section=versions&loom_launch=secret&loom_workspace=DESKTOP",
-		)
-		.unwrap();
-        assert_eq!(
-            workspace_recovery_route(&url),
-            "/ws/DESKTOP/list?search=abc#section=versions"
-        );
-        let only_secret = Url::parse(
-            "http://127.0.0.1:4567/ws/DESKTOP#loom_launch=secret&loom_workspace=DESKTOP",
-        )
-        .unwrap();
-        assert_eq!(workspace_recovery_route(&only_secret), "/ws/DESKTOP");
-
-        let encoded_secret = Url::parse(
-            "http://127.0.0.1:4567/ws/DESKTOP#section&loom%5Flaunch=secret&loom%5Fworkspace=DESKTOP",
-        )
-        .unwrap();
-        assert_eq!(
-            workspace_recovery_route(&encoded_secret),
-            "/ws/DESKTOP#section"
         );
     }
 

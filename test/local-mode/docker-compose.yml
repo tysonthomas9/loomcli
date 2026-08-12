@@ -66,6 +66,9 @@ services:
       FLEET_AUTH_ENABLED: "true"
       FLEET_AUTH_DEV_MODE: "false"
       FLEET_AUTHZ_ENABLED: "true"
+      # Local-mode workers share one container IP, so the production IP rate
+      # bucket would self-throttle this disposable loopback-only stack.
+      FLEET_RATE_LIMIT_ENABLED: "false"
       # Phase 3 local-mode proof must advertise and exercise the complete
       # Automation contract; Loom composes this slice by default alongside
       # Workflow Catalog and fails readiness when Fleet leaves it disabled.
@@ -148,7 +151,7 @@ services:
       com.loom.local-mode.run-id: "${LOCAL_MODE_RUN_ID:?LOCAL_MODE_RUN_ID is required}"
     networks: [local-mode]
     ports:
-      - "${LOCAL_MODE_API_PORT:-8282}:8080"
+      - "127.0.0.1:${LOCAL_MODE_API_PORT:-8282}:8080"
     volumes:
       - loom-data:/root/.loom
       - loom-workspace:/workspace
@@ -168,7 +171,7 @@ services:
       FRONTEND_PORT: "8080"
       LOOM_UPSTREAM: http://loom-local:8080
     ports:
-      - "${LOCAL_MODE_UI_PORT:-8283}:8080"
+      - "127.0.0.1:${LOCAL_MODE_UI_PORT:-8283}:8080"
     networks: [local-mode]
     volumes:
       - ../fleetdb/Caddyfile:/etc/caddy/Caddyfile:ro

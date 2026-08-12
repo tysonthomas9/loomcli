@@ -124,6 +124,10 @@ type Supervisor struct {
 	// process can atomically re-acquire its own agent-ownership leases.
 	ownershipOwnerMu sync.Mutex
 	ownershipOwnerID string
+	// ownershipOwnerDurable distinguishes the persisted workspace identity
+	// from the process-scoped fail-closed fallback used by ownership leases.
+	// Lifecycle command claiming requires this bit in production.
+	ownershipOwnerDurable bool
 
 	// backendRecheckInterval is the fixed delay computeBackoff returns for a
 	// BackendUnavailable block (agent's backend CLI missing from PATH). Zero
@@ -156,10 +160,12 @@ func (s *Supervisor) NewAgent(entry config.AgentEntry, idx int) (*AgentProcess, 
 	}
 
 	ap := &AgentProcess{
-		Entry:        entry,
-		RoleConfig:   roleConfig,
-		WorktreePath: target.WorkDir,
-		RepoConfig:   s.FindRepoConfig(repoName),
+		Entry:                 entry,
+		RoleConfig:            roleConfig,
+		WorktreePath:          target.WorkDir,
+		RepoConfig:            s.FindRepoConfig(repoName),
+		LifecycleGenerationAt: time.Now().UTC(),
+		OwnershipAcquired:     make(chan struct{}),
 	}
 	return ap, nil
 }
@@ -294,9 +300,11 @@ func (s *Supervisor) superviseAgent(ap *AgentProcess) {
 		// before preflight/spawn. Acquiring ownership before this wait lets its
 		// heartbeat fail and stop silently while no process exists, after which
 		// the queued agent could still launch alongside the new owner.
-		if !s.Concurrency.Acquire(ap.Entry.Role) {
-			slog.Info("concurrency tracker closed, exiting", "worktree", ap.Entry.Worktree)
-			s.setShutdownStopReason(ap)
+		if !s.Concurrency.AcquireUntil(ap.Entry.Role, ap.StopCh) {
+			slog.Info("concurrency wait interrupted, exiting", "worktree", ap.Entry.Worktree)
+			if !s.checkAgentStopSignals(ap) {
+				s.setShutdownStopReason(ap)
+			}
 			return
 		}
 
@@ -313,31 +321,30 @@ func (s *Supervisor) superviseAgent(ap *AgentProcess) {
 			s.releaseAgentOwnership(ap)
 		}
 
-		if !s.preFlightSetup(ap) {
+		var startDecision agentStartDecision
+		stopOwnershipHeartbeat, startDecision = s.prepareAgentStartTransition(ap, stopOwnershipHeartbeat)
+		switch startDecision {
+		case agentStartStopped:
 			s.Concurrency.Release(ap.Entry.Role)
 			releaseOwnership()
-			s.postExitCleanup(ap)
-			if !s.shouldRestart(ap) {
-				return
-			}
-			if !s.sleepBeforeRestart(ap) {
-				return
-			}
-			continue
-		}
-
-		var keepRunning bool
-		stopOwnershipHeartbeat, keepRunning = s.refreshAgentOwnershipBeforeSpawn(ap, stopOwnershipHeartbeat)
-		switch {
-		case stopOwnershipHeartbeat != nil:
-			// Ownership is current and its replacement heartbeat is live.
-		case keepRunning:
-			continue
-		default:
 			return
+		case agentStartPreflightRetry:
+			if !s.retryAfterPreflightFailure(ap, releaseOwnership) {
+				return
+			}
+			continue
+		case agentStartOwnershipRetry:
+			if !s.sleepBeforeOwnershipRetry(ap) {
+				return
+			}
+			continue
+		case agentStartReady:
+			// StartStopMu remains held until spawnAgent publishes Cmd/Pid.
 		}
 
-		s.spawnAndWait(ap)
+		spawnErr := s.spawnAgent(ap)
+		s.endAgentStartTransition(ap)
+		s.finishSpawnAndWait(ap, spawnErr)
 		s.recordResumeOutcome(ap) // resume-failure accounting (resume-first / cold-start fallback)
 
 		releaseOwnership()
@@ -365,30 +372,6 @@ func (s *Supervisor) superviseAgent(ap *AgentProcess) {
 			return
 		}
 	}
-}
-
-// clearAgentSessionState resets session state between supervision cycles.
-func (s *Supervisor) clearAgentSessionState(ap *AgentProcess) {
-	ap.SessionHeartbeatMu.Lock()
-	defer ap.SessionHeartbeatMu.Unlock()
-	ap.Mu.Lock()
-	ap.Session = nil
-	ap.AgentSessionID = ""
-	ap.AgentLeaseID = ""
-	ap.AgentLeaseToken = ""
-	ap.TranscriptPath = ""
-	ap.BeforeRef = ""
-	ap.AssignedTaskID = ""
-	ap.ResumeTaskID = ""          // per-cycle; re-detected in preFlightSetup (ResumeFailures persists)
-	ap.RecoveryMode = recoverCold // per-cycle; re-classified in preFlightSetup
-	ap.LastActivity = time.Time{}
-	// A child that died while parked on an interactive prompt never sends its
-	// "end", so the in-flight count must not survive into the next cycle: a
-	// stale pending count would suspend the output-timeout watchdog for an
-	// agent that is no longer waiting on anything.
-	ap.InputWaitPending = 0
-	ap.InputWaitSince = time.Time{}
-	ap.Mu.Unlock()
 }
 
 // preFlightSetup verifies the backend is spawnable, then runs recovery,
@@ -702,7 +685,7 @@ func (s *Supervisor) completeControlPlaneAgentSession(ap *AgentProcess, input ag
 	// session completion. Own context so it can't eat the Update's timeout budget.
 	if len(input.transcriptData) > 0 {
 		upCtx, upCancel := context.WithTimeout(context.Background(), controlPlaneOperationTimeout)
-		if ref := s.uploadTranscriptArtifact(upCtx, input.sessionID, input.taskID, backend, input.transcriptData); ref != "" {
+		if ref := s.uploadTranscriptArtifact(upCtx, ap.Entry.Worktree, input.sessionID, input.taskID, backend, input.transcriptData); ref != "" {
 			metadata["transcript_ref"] = ref
 		}
 		upCancel()
@@ -734,16 +717,17 @@ func (s *Supervisor) completeControlPlaneAgentSession(ap *AgentProcess, input ag
 // stable per session so a retried finalize reuses it (UploadContentArtifact is
 // idempotent). Owner is the agent session — the daemon leaf has no task_run, which
 // is the driver's owner type.
-func (s *Supervisor) uploadTranscriptArtifact(ctx context.Context, sessionID, taskID, backend string, data []byte) string {
+func (s *Supervisor) uploadTranscriptArtifact(ctx context.Context, agentID, sessionID, taskID, backend string, data []byte) string {
 	if s.ControlStore == nil {
 		return ""
 	}
 	finalized, err := store.UploadContentArtifact(ctx, s.ControlStore.Artifacts(), store.ArtifactCreate{
 		WorkspaceKey:  s.WorkspaceID,
 		ArtifactID:    "transcript-" + sessionID,
+		AgentID:       agentID,
 		SessionID:     sessionID,
 		TaskID:        taskID,
-		OwnerType:     "session", // fleet-db's valid owner type for a session-owned artifact (OwnerID=sessionID)
+		OwnerType:     "session",
 		OwnerID:       sessionID,
 		Type:          "transcript",
 		Summary:       "agent session transcript",
@@ -780,7 +764,16 @@ func (s *Supervisor) deregisterWorker(ap *AgentProcess) {
 // restart decision — shouldRestart + sleepBeforeRestart — owns counting and
 // backoff for both real exits and spawn failures.
 func (s *Supervisor) spawnAndWait(ap *AgentProcess) {
-	if err := s.spawnAgent(ap); err != nil {
+	s.finishSpawnAndWait(ap, s.spawnAgent(ap))
+}
+
+// finishSpawnAndWait owns the lifecycle after a spawn attempt. superviseAgent
+// calls spawnAgent while holding AgentProcess.StartStopMu, releases the
+// transition barrier once Cmd/Pid are published, then enters this function so
+// Stop never waits behind the subprocess's unbounded lifetime.
+func (s *Supervisor) finishSpawnAndWait(ap *AgentProcess, spawnErr error) {
+	if spawnErr != nil {
+		err := spawnErr
 		if errors.Is(err, ErrBackendUnavailable) {
 			// gateBackendAvailable already set the BackendUnavailable state/error.
 			// The normal pre-flight gate runs before task claim, but this spawn-time
@@ -979,14 +972,4 @@ func (s *Supervisor) GetAgents() []SupervisedAgentStatus {
 		result[i].RemoteBranch = ap.ResolveRemoteBranch()
 	}
 	return result
-}
-
-// resolveRoleConfig looks up a role by name, supporting both built-in and custom roles.
-func (s *Supervisor) resolveRoleConfig(roleName string, agentIndex int) (config.RoleConfig, error) {
-	cfg := s.ConfigSnapshot()
-	rc, err := ResolveRoleConfigStatic(roleName, cfg, s.ProjectDir)
-	if err != nil {
-		return config.RoleConfig{}, fmt.Errorf("agent[%d]: %w", agentIndex, err)
-	}
-	return rc, nil
 }

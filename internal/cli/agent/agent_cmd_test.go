@@ -1,16 +1,20 @@
 package agent
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"text/template"
+	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/backends"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
+	"github.com/tysonthomas9/loomcli/internal/sessions"
+	"github.com/tysonthomas9/loomcli/internal/usage"
 )
 
 func TestMapTaskFilter(t *testing.T) {
@@ -34,6 +38,10 @@ func TestMapTaskFilter(t *testing.T) {
 			filter: "any",
 		},
 		{
+			name:   "bug returns a function",
+			filter: "bug",
+		},
+		{
 			name:   "empty string defaults to any",
 			filter: "",
 		},
@@ -47,7 +55,7 @@ func TestMapTaskFilter(t *testing.T) {
 			name:        "unknown filter returns error",
 			filter:      "foo_bar",
 			wantErr:     true,
-			errContains: "must be needs_design, has_design, or any",
+			errContains: "must be needs_design, has_design, bug, or any",
 		},
 	}
 
@@ -79,6 +87,43 @@ func TestMapTaskFilter(t *testing.T) {
 			// Can't compare functions directly, but we can verify they're not nil
 			// and that the right function type is returned
 		})
+	}
+}
+
+func TestValidateTaskFilterExecutionMode(t *testing.T) {
+	for _, tt := range []struct {
+		name       string
+		filter     string
+		daemonMode bool
+		wantErr    string
+	}{
+		{name: "bug daemon", filter: "bug", daemonMode: true},
+		{name: "bug unbound", filter: "bug", wantErr: "supervisor-assigned daemon run"},
+		{name: "existing unbound filter", filter: "has_design"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateTaskFilterExecutionMode(tt.filter, tt.daemonMode)
+			if tt.wantErr == "" && err != nil {
+				t.Fatalf("validation: %v", err)
+			}
+			if tt.wantErr != "" && (err == nil || !strings.Contains(err.Error(), tt.wantErr)) {
+				t.Fatalf("validation error = %v, want %q", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestBindCustomDaemonTask_BugPreservesReviewHandoff(t *testing.T) {
+	got := bindCustomDaemonTask("triage this bug", "BUG-42", "bug")
+	for _, want := range []string{"BUG-42", "Leave the bug in\nReview", "do NOT run 'loom complete'", "triage this bug"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("bug daemon prompt missing %q:\n%s", want, got)
+		}
+	}
+
+	regular := bindCustomDaemonTask("implement this task", "TASK-42", "has_design")
+	if !strings.Contains(regular, "run 'loom complete' and exit") {
+		t.Fatalf("regular custom daemon lost completion handoff:\n%s", regular)
 	}
 }
 
@@ -136,6 +181,13 @@ func TestMapTaskFilter_WithParentID(t *testing.T) {
 			expectedResult: true,
 		},
 		{
+			name:           "bug with parent ID",
+			filter:         "bug",
+			parentID:       "EPIC-BUGS",
+			expectedArgs:   []string{"issue-store", "ready", "--json", "--limit", "10000", "--parent", "EPIC-BUGS"},
+			expectedResult: true,
+		},
+		{
 			name:           "empty filter defaults to any with parent ID",
 			filter:         "",
 			parentID:       "EPIC-444",
@@ -167,6 +219,8 @@ func TestMapTaskFilter_WithParentID(t *testing.T) {
 					mockIssue = backend.IssueData{ID: "T-1", Title: "Task", Status: "open", Design: ""}
 				} else if tt.filter == "has_design" {
 					mockIssue = backend.IssueData{ID: "T-2", Title: "Task with design", Status: "open", Design: "Implementation plan"}
+				} else if tt.filter == "bug" {
+					mockIssue = backend.IssueData{ID: "BUG-1", Title: "Bug", Status: "open", IssueType: "bug"}
 				} else {
 					mockIssue = backend.IssueData{ID: "T-3", Title: "Any task", Status: "open", Design: ""}
 				}
@@ -205,6 +259,64 @@ func TestMapTaskFilter_WithParentID(t *testing.T) {
 					t.Errorf("mapTaskFilter(%q, %q) closure arg[%d] = %q, want %q\nGot: %v\nWant: %v",
 						tt.filter, tt.parentID, i, capturedArgs[i], arg, capturedArgs, tt.expectedArgs)
 				}
+			}
+		})
+	}
+}
+
+func TestValidateAssignedTaskFilter(t *testing.T) {
+	t.Run("preserves existing filters without a read", func(t *testing.T) {
+		if err := validateAssignedTaskFilter(context.Background(), nil, "", "has_design", false); err != nil {
+			t.Fatalf("non-bug preflight: %v", err)
+		}
+	})
+
+	t.Run("accepts a verified bug assignment", func(t *testing.T) {
+		issueBackend := NewMockIssueBackend()
+		issueBackend.GetResult = &backend.IssueDetailData{
+			IssueData: backend.IssueData{ID: "BUG-1", IssueType: "bug"},
+		}
+		if err := validateAssignedTaskFilter(context.Background(), issueBackend, "BUG-1", "bug", true); err != nil {
+			t.Fatalf("bug preflight: %v", err)
+		}
+		if len(issueBackend.Calls) != 1 || issueBackend.Calls[0].Method != "Get" {
+			t.Fatalf("backend calls = %+v, want one Get", issueBackend.Calls)
+		}
+	})
+
+	for _, tt := range []struct {
+		name      string
+		taskID    string
+		issue     *backend.IssueDetailData
+		backendOK bool
+		readOnly  bool
+		want      string
+	}{
+		{name: "writable role", taskID: "BUG-1", backendOK: true, want: "requires read-only execution"},
+		{name: "missing assignment", backendOK: true, readOnly: true, want: "requires a supervisor-assigned task"},
+		{name: "missing backend", taskID: "BUG-1", readOnly: true, want: "backend is unavailable"},
+		{name: "missing card", taskID: "BUG-1", backendOK: true, readOnly: true, want: "issue was not returned"},
+		{
+			name: "non-bug assignment", taskID: "TASK-1", backendOK: true, readOnly: true,
+			issue: &backend.IssueDetailData{IssueData: backend.IssueData{ID: "TASK-1", IssueType: "task"}},
+			want:  `issue type "task"`,
+		},
+		{
+			name: "missing issue type", taskID: "TASK-2", backendOK: true, readOnly: true,
+			issue: &backend.IssueDetailData{IssueData: backend.IssueData{ID: "TASK-2"}},
+			want:  `issue type ""`,
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			var issueBackend backend.IssueBackend
+			if tt.backendOK {
+				mock := NewMockIssueBackend()
+				mock.GetResult = tt.issue
+				issueBackend = mock
+			}
+			err := validateAssignedTaskFilter(context.Background(), issueBackend, tt.taskID, "bug", tt.readOnly)
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("preflight error = %v, want %q", err, tt.want)
 			}
 		})
 	}
@@ -311,6 +423,247 @@ Do the work!`
 				t.Errorf("expected result to contain %q, got: %s", want, result)
 			}
 		})
+	}
+}
+
+func TestMakeCustomPromptGen_PrependsReadOnlyPolicy(t *testing.T) {
+	t.Setenv("LOOM_READ_ONLY", "1")
+	promptFile := filepath.Join(t.TempDir(), "read-only-prompt.txt")
+	if err := os.WriteFile(promptFile, []byte("Inspect {{.WorktreeName}}."), 0600); err != nil {
+		t.Fatalf("write prompt: %v", err)
+	}
+
+	result := makeCustomPromptGen(promptFile)("falcon", nil)
+
+	if !strings.HasPrefix(result, "IMPORTANT: You are running in READ-ONLY mode.") {
+		t.Fatalf("custom role prompt missing read-only preamble: %q", result)
+	}
+	if !strings.Contains(result, "Inspect falcon.") {
+		t.Fatalf("custom role prompt missing role body: %q", result)
+	}
+}
+
+func TestRunAgentDaemon_BindsAssignedTaskAndFinalizesHeadlessSession(t *testing.T) {
+	// Not parallel: the daemon path owns process-wide backend/session env and
+	// leaves its lock for the supervisor to inspect.
+	worktree := t.TempDir()
+	createGitRepo(t, worktree)
+	writeLockInfo(t, worktree, cli.LockInfo{
+		PID:             -1,
+		Command:         "agent",
+		AgentName:       "triage-agent",
+		TaskID:          "BUG-OLD",
+		TaskStartedAt:   time.Now(),
+		ClaudeSessionID: "session-for-old-task",
+		RunID:           "run-old",
+	})
+	runtimeDir := t.TempDir()
+	t.Setenv("LOOM_WORKSPACE_RUNTIME_DIR", runtimeDir)
+	t.Setenv("LOOM_SESSION_ID", "")
+	t.Setenv("LOOM_ASSIGNED_TASK_ID", "BUG-42")
+	t.Setenv("LOOM_DAEMON_LEAF", "")
+	t.Setenv("LOOM_BACKEND", "gemini")
+	t.Setenv("LOOM_READ_ONLY", "1")
+	ResetWorkspaceRuntimeDirCache()
+	t.Cleanup(ResetWorkspaceRuntimeDirCache)
+	backends.ClearResumeSessionID()
+	t.Cleanup(backends.ClearResumeSessionID)
+
+	oldTaskFilter, oldParentID := agentTaskFilter, agentParentID
+	agentTaskFilter, agentParentID = "bug", ""
+	t.Cleanup(func() {
+		agentTaskFilter, agentParentID = oldTaskFilter, oldParentID
+	})
+
+	deps, _, _, _, issueBackend := NewTestDeps(t)
+	status := "in_progress"
+	issueBackend.GetFn = func(context.Context, string) (*backend.IssueDetailData, error) {
+		return &backend.IssueDetailData{IssueData: backend.IssueData{
+			ID: "BUG-42", IssueType: "bug", Status: status,
+		}}, nil
+	}
+	recorder := SetupMockAgentInvokerOn(t, deps, nil)
+	resumeAtInvoke := ""
+	recorder.NonInteractiveFunc = func(string, string, string, <-chan struct{}, *usage.Collector) error {
+		resumeAtInvoke = backends.GetResumeSessionID()
+		status = "review"
+		return nil
+	}
+
+	err := runAgentDaemon(deps, worktree, "triage-agent", func(string, *WorkspaceConfig) string {
+		return "Investigate the assigned bug and post a triage comment."
+	})
+	if err != nil {
+		t.Fatalf("runAgentDaemon: %v", err)
+	}
+
+	if len(recorder.NonInteractiveCalls) != 1 {
+		t.Fatalf("non-interactive calls = %d, want 1", len(recorder.NonInteractiveCalls))
+	}
+	if len(recorder.InteractiveCalls) != 0 {
+		t.Fatalf("interactive calls = %d, want 0", len(recorder.InteractiveCalls))
+	}
+	if resumeAtInvoke != "" {
+		t.Fatalf("task B resumed task A session %q", resumeAtInvoke)
+	}
+	gotPrompt := recorder.NonInteractiveCalls[0].Prompt
+	for _, want := range []string{
+		"BUG-42",
+		"already claimed",
+		"Do NOT claim or select another task",
+		"Investigate the assigned bug and post a triage comment.",
+	} {
+		if !strings.Contains(gotPrompt, want) {
+			t.Errorf("daemon prompt missing %q:\n%s", want, gotPrompt)
+		}
+	}
+
+	info, err := cli.ReadLockFile(worktree)
+	if err != nil {
+		t.Fatalf("read daemon lock: %v", err)
+	}
+	if info.TaskID != "BUG-42" {
+		t.Fatalf("lock task ID = %q, want BUG-42", info.TaskID)
+	}
+
+	store, err := sessions.NewStore(runtimeDir)
+	if err != nil {
+		t.Fatalf("open session store: %v", err)
+	}
+	records, err := store.SessionsByTask("BUG-42")
+	if err != nil {
+		t.Fatalf("query task sessions: %v", err)
+	}
+	if len(records) != 1 {
+		t.Fatalf("task session count = %d, want 1", len(records))
+	}
+	if records[0].Status != sessions.StatusCompleted || records[0].ExitCode != 0 {
+		t.Fatalf("session outcome = (%s, %d), want (completed, 0)", records[0].Status, records[0].ExitCode)
+	}
+	if records[0].Phase != "implementation" {
+		t.Fatalf("session phase = %q, want implementation", records[0].Phase)
+	}
+}
+
+func TestRunAgentDaemon_BugFilterRejectsWritableRoleBeforeInvocation(t *testing.T) {
+	// Not parallel: this path owns process-wide daemon flags and session env.
+	worktree := t.TempDir()
+	createGitRepo(t, worktree)
+	runtimeDir := t.TempDir()
+	t.Setenv("LOOM_WORKSPACE_RUNTIME_DIR", runtimeDir)
+	t.Setenv("LOOM_SESSION_ID", "")
+	t.Setenv("LOOM_ASSIGNED_TASK_ID", "BUG-WRITABLE")
+	t.Setenv("LOOM_DAEMON_LEAF", "")
+	t.Setenv("LOOM_BACKEND", "gemini")
+	t.Setenv("LOOM_READ_ONLY", "")
+	ResetWorkspaceRuntimeDirCache()
+	t.Cleanup(ResetWorkspaceRuntimeDirCache)
+
+	oldTaskFilter, oldParentID := agentTaskFilter, agentParentID
+	agentTaskFilter, agentParentID = "bug", ""
+	t.Cleanup(func() {
+		agentTaskFilter, agentParentID = oldTaskFilter, oldParentID
+	})
+
+	deps, _, _, _, issueBackend := NewTestDeps(t)
+	issueBackend.GetFn = func(context.Context, string) (*backend.IssueDetailData, error) {
+		t.Fatal("writable bug role must fail before reading or invoking")
+		return nil, nil
+	}
+	recorder := SetupMockAgentInvokerOn(t, deps, nil)
+
+	err := runAgentDaemon(deps, worktree, "writable-triage-agent", func(string, *WorkspaceConfig) string {
+		return "This prompt must not execute."
+	})
+	if err == nil || !strings.Contains(err.Error(), "requires read-only execution") {
+		t.Fatalf("runAgentDaemon error = %v, want read-only guard", err)
+	}
+	if len(recorder.NonInteractiveCalls) != 0 || len(recorder.InteractiveCalls) != 0 {
+		t.Fatalf(
+			"model calls = non-interactive:%d interactive:%d, want zero",
+			len(recorder.NonInteractiveCalls), len(recorder.InteractiveCalls),
+		)
+	}
+	info, lockErr := cli.ReadLockFile(worktree)
+	if lockErr != nil {
+		t.Fatalf("read daemon lock: %v", lockErr)
+	}
+	if info.TaskID != "BUG-WRITABLE" {
+		t.Fatalf("rejected assignment lock task = %q, want BUG-WRITABLE", info.TaskID)
+	}
+}
+
+func TestRunAgentDaemon_BugNoOpFailsSessionAndRetainsResume(t *testing.T) {
+	// Not parallel: this path owns process-wide daemon flags and session env.
+	worktree := t.TempDir()
+	createGitRepo(t, worktree)
+	writeLockInfo(t, worktree, cli.LockInfo{
+		PID:             -1,
+		Command:         "agent",
+		AgentName:       "triage-agent",
+		TaskID:          "BUG-NOOP",
+		TaskStartedAt:   time.Now(),
+		ClaudeSessionID: "resume-noop",
+		RunID:           "run-noop",
+	})
+	runtimeDir := t.TempDir()
+	t.Setenv("LOOM_WORKSPACE_RUNTIME_DIR", runtimeDir)
+	t.Setenv("LOOM_SESSION_ID", "")
+	t.Setenv("LOOM_ASSIGNED_TASK_ID", "BUG-NOOP")
+	t.Setenv("LOOM_DAEMON_LEAF", "")
+	t.Setenv("LOOM_BACKEND", "gemini")
+	t.Setenv("LOOM_READ_ONLY", "1")
+	ResetWorkspaceRuntimeDirCache()
+	t.Cleanup(ResetWorkspaceRuntimeDirCache)
+	backends.ClearResumeSessionID()
+	t.Cleanup(backends.ClearResumeSessionID)
+
+	oldTaskFilter, oldParentID := agentTaskFilter, agentParentID
+	agentTaskFilter, agentParentID = "bug", ""
+	t.Cleanup(func() {
+		agentTaskFilter, agentParentID = oldTaskFilter, oldParentID
+	})
+
+	deps, _, _, _, issueBackend := NewTestDeps(t)
+	issueBackend.GetResult = &backend.IssueDetailData{IssueData: backend.IssueData{
+		ID: "BUG-NOOP", IssueType: "bug", Status: "in_progress",
+	}}
+	recorder := SetupMockAgentInvokerOn(t, deps, nil)
+
+	err := runAgentDaemon(deps, worktree, "triage-agent", func(string, *WorkspaceConfig) string {
+		return "Exit without performing the required handoff."
+	})
+	if err == nil || !strings.Contains(err.Error(), `task status "in_progress"; expected "review"`) {
+		t.Fatalf("runAgentDaemon error = %v, want missing Review handoff", err)
+	}
+	if len(recorder.NonInteractiveCalls) != 1 {
+		t.Fatalf("non-interactive calls = %d, want 1", len(recorder.NonInteractiveCalls))
+	}
+
+	info, lockErr := cli.ReadLockFile(worktree)
+	if lockErr != nil {
+		t.Fatalf("read daemon lock: %v", lockErr)
+	}
+	if info.ClaudeSessionID != "resume-noop" {
+		t.Fatalf("failed run cleared resume session = %q, want resume-noop", info.ClaudeSessionID)
+	}
+
+	store, storeErr := sessions.NewStore(runtimeDir)
+	if storeErr != nil {
+		t.Fatalf("open session store: %v", storeErr)
+	}
+	records, recordsErr := store.SessionsByTask("BUG-NOOP")
+	if recordsErr != nil {
+		t.Fatalf("query task sessions: %v", recordsErr)
+	}
+	if len(records) != 1 {
+		t.Fatalf("task session count = %d, want 1", len(records))
+	}
+	if records[0].Status != sessions.StatusFailed || records[0].ExitCode == 0 {
+		t.Fatalf(
+			"session outcome = (%s, %d), want failed with non-zero exit",
+			records[0].Status, records[0].ExitCode,
+		)
 	}
 }
 

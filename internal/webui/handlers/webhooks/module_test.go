@@ -144,6 +144,10 @@ func (testAuthorityProvider) AuthorityForVerifiedWebhook(context.Context, webhoo
 
 func newServer(st store.Store) *http.ServeMux {
 	mux := http.NewServeMux()
+	resolver, ok := st.Awaits().(store.AtomicAwaitStore)
+	if !ok {
+		panic("webhook test store lacks atomic await resolution")
+	}
 	workflow, err := webhookingestion.New(
 		NewCompatibilityVerifier(CompatibilityVerifierConfig{
 			Bindings: st.TriggerBindings(), Connectors: st.Connectors(),
@@ -155,7 +159,7 @@ func newServer(st store.Store) *http.ServeMux {
 	}
 	New(Config{
 		Workflow: workflow, Automation: legacyQueries{st: st},
-		Awaits: &trigger.AwaitMatcher{Store: st},
+		Awaits: trigger.NewAwaitMatcherWithResolver(st.Awaits(), st.DriverRuns(), resolver),
 	}).Register(mux)
 	return mux
 }

@@ -117,7 +117,7 @@ func TestClaimAndExecuteTaskRunEmitsLifecycleEvents(t *testing.T) {
 			taskRunID := "task-run-events-claim"
 			createQueuedEventTaskRun(t, ctx, st, run.RunID, taskRunID)
 
-			outcome, err := ClaimAndExecuteTaskRunWithResult(ctx, st, TaskRunWorkerOptions{
+			_, err := ClaimAndExecuteTaskRunWithResult(ctx, st, TaskRunWorkerOptions{
 				WorkspaceKey:       "TEST",
 				TaskRunID:          taskRunID,
 				NodeID:             "node-1",
@@ -136,9 +136,6 @@ func TestClaimAndExecuteTaskRunEmitsLifecycleEvents(t *testing.T) {
 			for i, want := range tc.wantTypes {
 				if events[i].Type != want {
 					t.Fatalf("event[%d].Type = %q, want %q", i, events[i].Type, want)
-				}
-				if events[i].LeaseToken != outcome.LeaseToken || events[i].LeaseToken == "" {
-					t.Fatalf("event[%d].LeaseToken = %q, want claim lease token %q", i, events[i].LeaseToken, outcome.LeaseToken)
 				}
 				if events[i].EpicID != "TEST-EPIC" || events[i].TaskRunID != taskRunID {
 					t.Fatalf("event[%d] = %+v, want epic-bound event for %q", i, events[i], taskRunID)
@@ -213,10 +210,7 @@ func TestEmitTerminalTaskRunEventsIsIdempotent(t *testing.T) {
 
 	// Re-running the terminal emission path (e.g. a replayed completion)
 	// must not double-append events or double-create outbox rows.
-	emitTerminalTaskRunEvents(ctx, st, outcome.Run, taskExecCompletion{Status: domain.TaskRunCompleted}, taskRunEventContext{
-		EpicID:     "TEST-EPIC",
-		LeaseToken: outcome.LeaseToken,
-	})
+	emitTerminalTaskRunEvents(ctx, st, outcome.Run, taskExecCompletion{Status: domain.TaskRunCompleted}, taskRunEventContext{EpicID: "TEST-EPIC"})
 
 	events := listTaskRunEvents(t, ctx, st)
 	if len(events) != 2 {

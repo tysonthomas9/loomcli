@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/connector"
+	"github.com/tysonthomas9/loomcli/internal/gitauth"
 	"github.com/tysonthomas9/loomcli/internal/leadcontrol"
 	"github.com/tysonthomas9/loomcli/internal/localworkspace"
 	"github.com/tysonthomas9/loomcli/internal/store"
@@ -34,6 +35,7 @@ type Module struct {
 	terminalSvc             service.TerminalService
 	localSettingsDir        string
 	checkoutReviewerPRHead  reviewerCheckoutFunc
+	recordReviewerPRContext reviewerRecordContextFunc
 	dialCodex               func(ctx context.Context, endpoint string) (codexThreadReader, error)
 	streamPollInterval      time.Duration
 	streamHeartbeatInterval time.Duration
@@ -64,13 +66,32 @@ func NewModule(
 	terminalSvc service.TerminalService,
 	localSettingsDir string,
 ) *Module {
+	gitCredentials := gitauth.NewLocalSettingsSource(localSettingsDir)
 	return &Module{
-		store:                   st,
-		dispatcher:              disp,
-		agentSvc:                agentSvc,
-		terminalSvc:             terminalSvc,
-		localSettingsDir:        strings.TrimSpace(localSettingsDir),
-		checkoutReviewerPRHead:  localworkspace.EnsureDetachedGitWorktreeAtPRHead,
+		store:            st,
+		dispatcher:       disp,
+		agentSvc:         agentSvc,
+		terminalSvc:      terminalSvc,
+		localSettingsDir: strings.TrimSpace(localSettingsDir),
+		checkoutReviewerPRHead: func(
+			ctx context.Context,
+			repoPath, targetPath, remoteName string,
+			prNumber int,
+			headSHA string,
+		) (string, error) {
+			return localworkspace.EnsureDetachedGitWorktreeAtPRHeadWithCredentials(
+				ctx, repoPath, targetPath, remoteName, prNumber, headSHA, gitCredentials,
+			)
+		},
+		recordReviewerPRContext: func(
+			ctx context.Context,
+			worktreePath, remoteName, baseRef string,
+			meta map[string]string,
+		) (string, error) {
+			return localworkspace.RecordPRReviewContextWithCredentials(
+				ctx, worktreePath, remoteName, baseRef, meta, gitCredentials,
+			)
+		},
 		streamPollInterval:      reviewerStreamPollInterval,
 		streamHeartbeatInterval: reviewerStreamHeartbeatInterval,
 		dialCodex: func(ctx context.Context, endpoint string) (codexThreadReader, error) {

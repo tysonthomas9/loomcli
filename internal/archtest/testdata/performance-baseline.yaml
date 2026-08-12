@@ -184,8 +184,8 @@ production_background_loops:
       variants such as testbackend, and the fake-harness helper; it is not a
       simultaneous product-runtime instance count.
     evidence:
-      source_sha: 9a5b30516f88e74d315cf54c7ed693cc93f8e5b5
-      measured_at: 2026-07-15T17:33:00Z
+      source_sha: 1353e2faf14ae121c93fe5eb92f779b56a2ad7ae
+      measured_at: 2026-07-17T05:58:05Z
       evidence_source: internal/archtest/testdata/runtime-components.yaml with exact AST parity enforced by internal/archtest/runtime_inventory_test.go
       command:
         - go
@@ -217,12 +217,12 @@ production_background_loops:
           - internal/archtest/testdata/runtime-components.yaml
   result:
     inventory_path: internal/archtest/testdata/runtime-components.yaml
-    total_components: 85
-    ticker_sites: 56
+    total_components: 88
+    ticker_sites: 53
     goroutine_launch_sites: 107
     managed: 58
-    command_poll: 3
-    request_scoped: 15
+    command_poll: 4
+    request_scoped: 17
     startup_wait: 9
     background_loop_count: 58
     count_rule: classification equals managed
@@ -231,10 +231,10 @@ full_build_gate_duration:
   record:
     status: measured
     rationale: >-
-      The immutable integration ledger contains the latest complete successful
-      full Loom gate timing. It is an approximate historical baseline at its
-      explicit source SHA and must be refreshed on the current source before
-      approving the first pilot.
+      The immutable integration ledger contains the complete successful Phase
+      0 Loom gate timing. It remains an approximate historical baseline at its
+      explicit source SHA; later source-bound gate comparisons are retained in
+      their phase validation snapshots instead of overwriting this value.
     evidence:
       source_sha: 09f071d0af6c3493eff724f32dab656c05f10cdf
       measured_at: 2026-07-14
@@ -272,8 +272,9 @@ full_build_gate_duration:
       procedure: >-
         Run the recorded clean-environment command from source 09f071d0 and
         measure wall-clock time around the complete aggregate Go and frontend
-        gate. The source ledger records approximately 188 seconds; it does not
-        claim sub-second precision or silently re-label a partial current run.
+        gate. The source ledger records approximately 188 seconds; later phase
+        snapshots record their own source and duration and do not silently
+        re-label a partial current run as this historical measurement.
       environment:
         operating_system: not captured in source evidence
         architecture: not captured in source evidence

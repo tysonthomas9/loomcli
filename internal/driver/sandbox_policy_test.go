@@ -142,7 +142,7 @@ func setupTrustPolicyExecutorRun(t *testing.T, trust domain.DriverTrustLevel) (c
 
 func TestExecutorRefusesUntrustedRunOnDefaultProcessLauncher(t *testing.T) {
 	ctx, st, root := setupTrustPolicyExecutorRun(t, domain.DriverTrustUntrusted)
-	result, err := (&Executor{
+	result, err := testExecutor(st, Executor{
 		Store:             st,
 		WorkspaceKey:      "TEST",
 		WorkDir:           root,
@@ -174,7 +174,7 @@ func TestExecutorLaunchesUntrustedRunThroughIsolatingLauncher(t *testing.T) {
 		stubSandboxLauncher: stubSandboxLauncher{process: completedStubProcess("isolated ok")},
 		isolates:            true,
 	}
-	result, err := (&Executor{
+	result, err := testExecutor(st, Executor{
 		Store:             st,
 		WorkspaceKey:      "TEST",
 		WorkDir:           root,

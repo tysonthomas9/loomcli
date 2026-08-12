@@ -1,17 +1,15 @@
 package driver
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"strings"
 
 	"github.com/spf13/cobra"
 
-	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	driverpkg "github.com/tysonthomas9/loomcli/internal/driver"
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 )
 
 var (
@@ -117,56 +115,35 @@ func bindDriverWorkTaskRunFlags(cmd *cobra.Command) {
 	cmd.Flags().BoolVar(&driverWorkTaskJSON, "json", false, "JSON output")
 }
 
-func runDriverExecTask(_ *cobra.Command, _ []string) error {
-	return cmdstore.WithStore(func(ctx context.Context, h *bootstrap.StoreHandle) error {
-		rc, err := resolveDriverRunContext(ctx, h, driverExecTaskWorkspaceKey, driverExecTaskDriverRunID, driverExecTaskNodeID, driverExecTaskLeaseID, driverExecTaskFencingToken)
-		if err != nil {
-			return err
-		}
-		fencingToken, err := rc.FencingToken()
-		if err != nil {
-			return err
-		}
-		driverStepID := firstNonEmpty(driverExecTaskDriverStepID, os.Getenv("LOOM_DRIVER_STEP_ID"))
-		outcome, err := driverpkg.RequestTaskRunWithResult(ctx, h.Store, driverpkg.TaskRunRequestOptions{
-			WorkspaceKey:       rc.WorkspaceKey,
-			DriverRunID:        rc.DriverRunID,
-			DriverStepID:       driverStepID,
-			TaskRunID:          driverExecTaskTaskRunID,
-			TaskID:             driverExecTaskTaskID,
-			WorkerProfileID:    driverExecTaskWorkerProfileID,
-			ProviderProfile:    driverExecTaskProviderProfile,
-			ParentSessionID:    firstNonEmpty(driverExecTaskParentSessionID, os.Getenv("LOOM_PARENT_SESSION_ID"), os.Getenv("LOOM_TASK_RUN_PARENT_SESSION_ID")),
-			ParentNodeID:       rc.NodeID,
-			ParentLeaseID:      rc.LeaseID,
-			ParentFence:        fencingToken,
-			NodeID:             rc.NodeID,
-			RunnerID:           driverExecTaskRunnerID,
-			LeaseToken:         firstNonEmpty(os.Getenv("LOOM_TASK_RUN_LEASE_TOKEN"), os.Getenv("LOOM_RUNNER_LEASE_TOKEN")),
-			SupportedProviders: driverExecTaskSupportedProviders,
-			Capabilities:       driverExecTaskCapabilities,
-			SandboxPlacement: domain.TaskRunPlacement{
-				Provider:  driverExecTaskSandboxProvider,
-				SandboxID: driverExecTaskSandboxID,
-				CWD:       driverExecTaskSandboxCWD,
-				RepoRef:   driverExecTaskSandboxRepoRef,
-			},
-			DeferCompletion: driverExecTaskDeferCompletion,
-		}, driverpkg.HostBridgeTaskExecutor{
-			Store:            h.Store,
-			WorktreePath:     currentWorkingDir(),
-			WorktreeResolver: driverpkg.LocalTaskWorktreeResolver{Store: h.Store, Lineage: driverpkg.DefaultStackLineageLookup()},
-			StackStore:       driverpkg.DefaultStackStore(),
-		})
-		if err != nil {
-			return fmt.Errorf("exec task: %w", err)
-		}
-		return writeTaskRunOutcome(outcome, driverExecTaskJSON)
+func runDriverExecTask(cmd *cobra.Command, _ []string) error {
+	client, err := newDriverRuntimeClient(driverRuntimeClientOptions{
+		WorkspaceKey: driverExecTaskWorkspaceKey, DriverRunID: driverExecTaskDriverRunID,
+		NodeID: driverExecTaskNodeID, LeaseID: driverExecTaskLeaseID, FencingToken: driverExecTaskFencingToken,
 	})
+	if err != nil {
+		return err
+	}
+	params := map[string]any{
+		"taskId": driverExecTaskTaskID, "taskRunId": driverExecTaskTaskRunID,
+		"driverStepId":    firstNonEmpty(driverExecTaskDriverStepID, os.Getenv("LOOM_DRIVER_STEP_ID")),
+		"workerProfileId": driverExecTaskWorkerProfileID, "providerProfile": driverExecTaskProviderProfile,
+		"parentSessionId": firstNonEmpty(driverExecTaskParentSessionID, os.Getenv("LOOM_PARENT_SESSION_ID"), os.Getenv("LOOM_TASK_RUN_PARENT_SESSION_ID")),
+		"nodeId":          driverExecTaskNodeID, "runnerId": driverExecTaskRunnerID,
+		"supportedProviders": driverExecTaskSupportedProviders, "capabilities": driverExecTaskCapabilities,
+		"sandboxPlacement": map[string]string{
+			"provider": driverExecTaskSandboxProvider, "sandboxId": driverExecTaskSandboxID,
+			"cwd": driverExecTaskSandboxCWD, "repoRef": driverExecTaskSandboxRepoRef,
+		},
+		"deferCompletion": driverExecTaskDeferCompletion, "enqueueOnly": true,
+	}
+	var result driverpkg.TaskRunRequestResult
+	if err := client.call(cmd.Context(), "exec-task", params, &result); err != nil {
+		return fmt.Errorf("exec task: %w", err)
+	}
+	return writeTaskRunResult(result, driverExecTaskJSON)
 }
 
-func writeTaskRunOutcome(outcome *driverpkg.TaskRunRequestOutcome, asJSON bool) error {
-	result := driverpkg.TaskRunResultFromOutcome(outcome)
+func writeTaskRunResult(result driverpkg.TaskRunRequestResult, asJSON bool) error {
 	if asJSON {
 		return cmdstore.WriteJSON(result)
 	}
@@ -178,51 +155,17 @@ func writeTaskRunOutcome(outcome *driverpkg.TaskRunRequestOutcome, asJSON bool) 
 }
 
 func runDriverWorkTaskRun(_ *cobra.Command, _ []string) error {
-	return cmdstore.WithStore(func(ctx context.Context, h *bootstrap.StoreHandle) error {
-		ws, err := resolveWorkerWorkspace(ctx, h, driverWorkTaskWorkspaceKey)
-		if err != nil {
-			return err
-		}
-		nodeID := firstNonEmpty(driverWorkTaskNodeID, os.Getenv("LOOM_WORKER_NODE_ID"), os.Getenv("LOOM_DRIVER_NODE_ID"), defaultWorkerNodeID())
-		if nodeID == "" {
-			return fmt.Errorf("worker node id required: %w", domain.ErrInvalid)
-		}
-		runnerID := firstNonEmpty(driverWorkTaskRunnerID, os.Getenv("LOOM_WORKER_RUNNER_ID"), os.Getenv("LOOM_DRIVER_RUNNER_ID"))
-		outcome, err := driverpkg.ClaimAndExecuteTaskRunWithResult(ctx, h.Store, driverpkg.TaskRunWorkerOptions{
-			WorkspaceKey:       ws,
-			TaskRunID:          driverWorkTaskTaskRunID,
-			NodeID:             nodeID,
-			RunnerID:           runnerID,
-			LeaseID:            driverWorkTaskLeaseID,
-			LeaseToken:         firstNonEmpty(driverWorkTaskLeaseToken, os.Getenv("LOOM_TASK_RUN_LEASE_TOKEN"), os.Getenv("LOOM_RUNNER_LEASE_TOKEN")),
-			SupportedProviders: driverWorkTaskSupportedProviders,
-			Capabilities:       driverWorkTaskCapabilities,
-			WorkerProfileIDs:   driverWorkTaskWorkerProfileIDs,
-			RunnerPlacement: domain.TaskRunPlacement{
-				Provider:   driverWorkTaskRunnerProvider,
-				NodeID:     nodeID,
-				RunnerID:   runnerID,
-				ProcessRef: driverWorkTaskRunnerProcessRef,
-			},
-			SandboxPlacement: domain.TaskRunPlacement{
-				Provider:        driverWorkTaskSandboxProvider,
-				SandboxID:       driverWorkTaskSandboxID,
-				CWD:             driverWorkTaskSandboxCWD,
-				RepoRef:         driverWorkTaskSandboxRepoRef,
-				ImageOrSnapshot: driverWorkTaskSandboxImage,
-			},
-			DeferCompletion: driverWorkTaskDeferCompletion,
-		}, driverpkg.HostBridgeTaskExecutor{
-			Store:            h.Store,
-			WorktreePath:     currentWorkingDir(),
-			WorktreeResolver: driverpkg.LocalTaskWorktreeResolver{Store: h.Store, Lineage: driverpkg.DefaultStackLineageLookup()},
-			StackStore:       driverpkg.DefaultStackStore(),
-		})
-		if err != nil {
-			return fmt.Errorf("work task run: %w", err)
-		}
-		return writeTaskRunOutcome(outcome, driverWorkTaskJSON)
-	})
+	return fmt.Errorf(
+		"standalone work-task-run cannot mint Execution system authority; use loom serve's configured TaskWorker runtime: %w",
+		execution.ErrUnavailable,
+	)
+}
+
+// taskRunAPIBaseURL resolves the serve HTTP endpoint used by the runner SDK.
+// Driver runtimes receive LOOM_DRIVER_API_URL from the parent executor; an
+// explicit task-run URL wins when the two transports are routed separately.
+func taskRunAPIBaseURL() string {
+	return firstNonEmpty(os.Getenv("LOOM_TASK_RUN_API_URL"), os.Getenv("LOOM_DRIVER_API_URL"))
 }
 
 func currentWorkingDir() string {

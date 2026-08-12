@@ -5,8 +5,8 @@
  * loads the TS source via GET /workflows/{name}/source into an editor and lets
  * the user rebuild it into a new driver version via POST .../versions. It can
  * also list versions and preserve the approval/activation journey. In local
- * mode the durable operator credential never enters browser code: Loom Desktop
- * delegates only a short-lived, action-limited in-memory lifecycle bearer.
+ * mode the loopback server is the trusted single-user boundary; shared/cloud
+ * deployments continue to enforce OIDC authorization server-side.
  *
  * HONESTY: a rebuild runs the flue toolchain on the serve host and can fail. We
  * surface `build_diagnostics` verbatim. HTTP-built versions are inactive and
@@ -46,7 +46,6 @@ export function WorkflowSourceModal({
     saveSource,
     approveVersion,
     activateVersion,
-    canManageVersions,
   } = useWorkflowSource(workspaceId);
   const { showToast } = useToast();
 
@@ -194,7 +193,6 @@ export function WorkflowSourceModal({
     [approveVersion, activateVersion, workflowName, showToast, refreshVersions],
   );
 
-  const lifecycleAuthorized = canManageVersions;
   const busy = saving || actioningId !== null;
 
   return (
@@ -341,16 +339,6 @@ export function WorkflowSourceModal({
               </p>
             ) : (
               <>
-                {!lifecycleAuthorized && (
-                  <p
-                    className={styles.emptyHint}
-                    data-testid="workflow-lifecycle-desktop-required"
-                  >
-                    Open this workspace through Loom Desktop to approve or
-                    activate versions. Those lifecycle controls are unavailable
-                    in a raw loopback browser.
-                  </p>
-                )}
                 <div
                   className={styles.versionList}
                   data-testid="workflow-source-versions"
@@ -401,7 +389,6 @@ export function WorkflowSourceModal({
                           }
                           disabled={
                             busy ||
-                            !lifecycleAuthorized ||
                             isApproved ||
                             v.validation_status !== "passed"
                           }
@@ -419,12 +406,7 @@ export function WorkflowSourceModal({
                           onClick={() =>
                             runVersionAction(v.version_id, "activate")
                           }
-                          disabled={
-                            busy ||
-                            !lifecycleAuthorized ||
-                            isActive ||
-                            !isApproved
-                          }
+                          disabled={busy || isActive || !isApproved}
                           data-testid={`workflow-version-activate-${v.version_id}`}
                         >
                           {isActive ? "Active" : "Activate"}

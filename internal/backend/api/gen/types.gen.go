@@ -18,6 +18,159 @@ const (
 	WorkerTokenScopes = "WorkerToken.Scopes"
 )
 
+// Defines values for AgentHistorySessionKind.
+const (
+	AgentHistorySessionKindAdHoc         AgentHistorySessionKind = "ad_hoc"
+	AgentHistorySessionKindMaintenance   AgentHistorySessionKind = "maintenance"
+	AgentHistorySessionKindOrchestration AgentHistorySessionKind = "orchestration"
+	AgentHistorySessionKindTask          AgentHistorySessionKind = "task"
+	AgentHistorySessionKindTerminal      AgentHistorySessionKind = "terminal"
+)
+
+// Valid indicates whether the value is a known member of the AgentHistorySessionKind enum.
+func (e AgentHistorySessionKind) Valid() bool {
+	switch e {
+	case AgentHistorySessionKindAdHoc:
+		return true
+	case AgentHistorySessionKindMaintenance:
+		return true
+	case AgentHistorySessionKindOrchestration:
+		return true
+	case AgentHistorySessionKindTask:
+		return true
+	case AgentHistorySessionKindTerminal:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AgentHistorySessionStatus.
+const (
+	AgentHistorySessionStatusCancelled AgentHistorySessionStatus = "cancelled"
+	AgentHistorySessionStatusCompleted AgentHistorySessionStatus = "completed"
+	AgentHistorySessionStatusExpired   AgentHistorySessionStatus = "expired"
+	AgentHistorySessionStatusFailed    AgentHistorySessionStatus = "failed"
+	AgentHistorySessionStatusIdle      AgentHistorySessionStatus = "idle"
+	AgentHistorySessionStatusLeased    AgentHistorySessionStatus = "leased"
+	AgentHistorySessionStatusQueued    AgentHistorySessionStatus = "queued"
+	AgentHistorySessionStatusRunning   AgentHistorySessionStatus = "running"
+	AgentHistorySessionStatusStarting  AgentHistorySessionStatus = "starting"
+	AgentHistorySessionStatusYielded   AgentHistorySessionStatus = "yielded"
+)
+
+// Valid indicates whether the value is a known member of the AgentHistorySessionStatus enum.
+func (e AgentHistorySessionStatus) Valid() bool {
+	switch e {
+	case AgentHistorySessionStatusCancelled:
+		return true
+	case AgentHistorySessionStatusCompleted:
+		return true
+	case AgentHistorySessionStatusExpired:
+		return true
+	case AgentHistorySessionStatusFailed:
+		return true
+	case AgentHistorySessionStatusIdle:
+		return true
+	case AgentHistorySessionStatusLeased:
+		return true
+	case AgentHistorySessionStatusQueued:
+		return true
+	case AgentHistorySessionStatusRunning:
+		return true
+	case AgentHistorySessionStatusStarting:
+		return true
+	case AgentHistorySessionStatusYielded:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AgentLifecycleCommandResponseAction.
+const (
+	Restart AgentLifecycleCommandResponseAction = "restart"
+	Start   AgentLifecycleCommandResponseAction = "start"
+	Stop    AgentLifecycleCommandResponseAction = "stop"
+	Yield   AgentLifecycleCommandResponseAction = "yield"
+)
+
+// Valid indicates whether the value is a known member of the AgentLifecycleCommandResponseAction enum.
+func (e AgentLifecycleCommandResponseAction) Valid() bool {
+	switch e {
+	case Restart:
+		return true
+	case Start:
+		return true
+	case Stop:
+		return true
+	case Yield:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AgentLifecycleCommandResponseStatus.
+const (
+	AgentLifecycleCommandResponseStatusAcked     AgentLifecycleCommandResponseStatus = "acked"
+	AgentLifecycleCommandResponseStatusCancelled AgentLifecycleCommandResponseStatus = "cancelled"
+	AgentLifecycleCommandResponseStatusFailed    AgentLifecycleCommandResponseStatus = "failed"
+	AgentLifecycleCommandResponseStatusQueued    AgentLifecycleCommandResponseStatus = "queued"
+	AgentLifecycleCommandResponseStatusRunning   AgentLifecycleCommandResponseStatus = "running"
+	AgentLifecycleCommandResponseStatusSucceeded AgentLifecycleCommandResponseStatus = "succeeded"
+)
+
+// Valid indicates whether the value is a known member of the AgentLifecycleCommandResponseStatus enum.
+func (e AgentLifecycleCommandResponseStatus) Valid() bool {
+	switch e {
+	case AgentLifecycleCommandResponseStatusAcked:
+		return true
+	case AgentLifecycleCommandResponseStatusCancelled:
+		return true
+	case AgentLifecycleCommandResponseStatusFailed:
+		return true
+	case AgentLifecycleCommandResponseStatusQueued:
+		return true
+	case AgentLifecycleCommandResponseStatusRunning:
+		return true
+	case AgentLifecycleCommandResponseStatusSucceeded:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AgentLifecycleResponseStatus.
+const (
+	AgentLifecycleResponseStatusAcked     AgentLifecycleResponseStatus = "acked"
+	AgentLifecycleResponseStatusCancelled AgentLifecycleResponseStatus = "cancelled"
+	AgentLifecycleResponseStatusFailed    AgentLifecycleResponseStatus = "failed"
+	AgentLifecycleResponseStatusQueued    AgentLifecycleResponseStatus = "queued"
+	AgentLifecycleResponseStatusRunning   AgentLifecycleResponseStatus = "running"
+	AgentLifecycleResponseStatusSucceeded AgentLifecycleResponseStatus = "succeeded"
+)
+
+// Valid indicates whether the value is a known member of the AgentLifecycleResponseStatus enum.
+func (e AgentLifecycleResponseStatus) Valid() bool {
+	switch e {
+	case AgentLifecycleResponseStatusAcked:
+		return true
+	case AgentLifecycleResponseStatusCancelled:
+		return true
+	case AgentLifecycleResponseStatusFailed:
+		return true
+	case AgentLifecycleResponseStatusQueued:
+		return true
+	case AgentLifecycleResponseStatusRunning:
+		return true
+	case AgentLifecycleResponseStatusSucceeded:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for AgentStatusResponseAgentState.
 const (
 	AgentStatusResponseAgentStateDead     AgentStatusResponseAgentState = "dead"
@@ -1022,14 +1175,23 @@ func (e TranscriptEntryRole) Valid() bool {
 
 // Defines values for TranscriptEntryType.
 const (
-	Text       TranscriptEntryType = "text"
-	ToolResult TranscriptEntryType = "tool_result"
-	ToolUse    TranscriptEntryType = "tool_use"
+	Reasoning   TranscriptEntryType = "reasoning"
+	Result      TranscriptEntryType = "result"
+	SessionMeta TranscriptEntryType = "session_meta"
+	Text        TranscriptEntryType = "text"
+	ToolResult  TranscriptEntryType = "tool_result"
+	ToolUse     TranscriptEntryType = "tool_use"
 )
 
 // Valid indicates whether the value is a known member of the TranscriptEntryType enum.
 func (e TranscriptEntryType) Valid() bool {
 	switch e {
+	case Reasoning:
+		return true
+	case Result:
+		return true
+	case SessionMeta:
+		return true
 	case Text:
 		return true
 	case ToolResult:
@@ -1043,34 +1205,34 @@ func (e TranscriptEntryType) Valid() bool {
 
 // Defines values for TreeNodeAgentState.
 const (
-	Dead     TreeNodeAgentState = "dead"
-	Done     TreeNodeAgentState = "done"
-	Idle     TreeNodeAgentState = "idle"
-	Running  TreeNodeAgentState = "running"
-	Spawning TreeNodeAgentState = "spawning"
-	Stopped  TreeNodeAgentState = "stopped"
-	Stuck    TreeNodeAgentState = "stuck"
-	Working  TreeNodeAgentState = "working"
+	TreeNodeAgentStateDead     TreeNodeAgentState = "dead"
+	TreeNodeAgentStateDone     TreeNodeAgentState = "done"
+	TreeNodeAgentStateIdle     TreeNodeAgentState = "idle"
+	TreeNodeAgentStateRunning  TreeNodeAgentState = "running"
+	TreeNodeAgentStateSpawning TreeNodeAgentState = "spawning"
+	TreeNodeAgentStateStopped  TreeNodeAgentState = "stopped"
+	TreeNodeAgentStateStuck    TreeNodeAgentState = "stuck"
+	TreeNodeAgentStateWorking  TreeNodeAgentState = "working"
 )
 
 // Valid indicates whether the value is a known member of the TreeNodeAgentState enum.
 func (e TreeNodeAgentState) Valid() bool {
 	switch e {
-	case Dead:
+	case TreeNodeAgentStateDead:
 		return true
-	case Done:
+	case TreeNodeAgentStateDone:
 		return true
-	case Idle:
+	case TreeNodeAgentStateIdle:
 		return true
-	case Running:
+	case TreeNodeAgentStateRunning:
 		return true
-	case Spawning:
+	case TreeNodeAgentStateSpawning:
 		return true
-	case Stopped:
+	case TreeNodeAgentStateStopped:
 		return true
-	case Stuck:
+	case TreeNodeAgentStateStuck:
 		return true
-	case Working:
+	case TreeNodeAgentStateWorking:
 		return true
 	default:
 		return false
@@ -1583,25 +1745,25 @@ func (e GetGraphParamsStatus) Valid() bool {
 
 // Defines values for ListReadyParamsType.
 const (
-	ListReadyParamsTypeBug     ListReadyParamsType = "bug"
-	ListReadyParamsTypeChore   ListReadyParamsType = "chore"
-	ListReadyParamsTypeEpic    ListReadyParamsType = "epic"
-	ListReadyParamsTypeFeature ListReadyParamsType = "feature"
-	ListReadyParamsTypeTask    ListReadyParamsType = "task"
+	Bug     ListReadyParamsType = "bug"
+	Chore   ListReadyParamsType = "chore"
+	Epic    ListReadyParamsType = "epic"
+	Feature ListReadyParamsType = "feature"
+	Task    ListReadyParamsType = "task"
 )
 
 // Valid indicates whether the value is a known member of the ListReadyParamsType enum.
 func (e ListReadyParamsType) Valid() bool {
 	switch e {
-	case ListReadyParamsTypeBug:
+	case Bug:
 		return true
-	case ListReadyParamsTypeChore:
+	case Chore:
 		return true
-	case ListReadyParamsTypeEpic:
+	case Epic:
 		return true
-	case ListReadyParamsTypeFeature:
+	case Feature:
 		return true
-	case ListReadyParamsTypeTask:
+	case Task:
 		return true
 	default:
 		return false
@@ -1701,11 +1863,86 @@ type AgentErrorResponse struct {
 	Kind  *string `json:"kind,omitempty"`
 }
 
+// AgentHistorySession defines model for AgentHistorySession.
+type AgentHistorySession struct {
+	AgentId       string                  `json:"agent_id"`
+	Attempt       *int                    `json:"attempt,omitempty"`
+	CreatedAt     time.Time               `json:"created_at"`
+	ErrorClass    *string                 `json:"error_class,omitempty"`
+	ExitCode      *int                    `json:"exit_code,omitempty"`
+	FinishedAt    *time.Time              `json:"finished_at,omitempty"`
+	Kind          AgentHistorySessionKind `json:"kind"`
+	LastHeartbeat *time.Time              `json:"last_heartbeat,omitempty"`
+
+	// Metadata Allowlisted, non-sensitive execution metadata.
+	Metadata *struct {
+		Backend          *string `json:"backend,omitempty"`
+		Delivery         *string `json:"delivery,omitempty"`
+		GithubBranch     *string `json:"github_branch,omitempty"`
+		GithubHeadSha    *string `json:"github_head_sha,omitempty"`
+		GithubPrUrl      *string `json:"github_pr_url,omitempty"`
+		HeadSha          *string `json:"head_sha,omitempty"`
+		LocalBranch      *string `json:"local_branch,omitempty"`
+		PatchBackHeadSha *string `json:"patch_back_head_sha,omitempty"`
+		PatchBackStatus  *string `json:"patch_back_status,omitempty"`
+		RuntimeStrategy  *string `json:"runtime_strategy,omitempty"`
+	} `json:"metadata,omitempty"`
+	NodeId          *string                   `json:"node_id,omitempty"`
+	ParentSessionId *string                   `json:"parent_session_id,omitempty"`
+	Phase           *string                   `json:"phase,omitempty"`
+	SessionId       string                    `json:"session_id"`
+	StartedAt       *time.Time                `json:"started_at,omitempty"`
+	Status          AgentHistorySessionStatus `json:"status"`
+	Summary         *string                   `json:"summary,omitempty"`
+	TaskId          *string                   `json:"task_id,omitempty"`
+	TerminalId      *string                   `json:"terminal_id,omitempty"`
+	UpdatedAt       time.Time                 `json:"updated_at"`
+	WorkspaceKey    string                    `json:"workspace_key"`
+}
+
+// AgentHistorySessionKind defines model for AgentHistorySession.Kind.
+type AgentHistorySessionKind string
+
+// AgentHistorySessionStatus defines model for AgentHistorySession.Status.
+type AgentHistorySessionStatus string
+
+// AgentLifecycleCommandResponse defines model for AgentLifecycleCommandResponse.
+type AgentLifecycleCommandResponse struct {
+	AckedAt    *time.Time                          `json:"acked_at"`
+	Action     AgentLifecycleCommandResponseAction `json:"action"`
+	CommandId  string                              `json:"command_id"`
+	CreatedAt  time.Time                           `json:"created_at"`
+	ErrorClass string                              `json:"error_class"`
+	Result     string                              `json:"result"`
+	Status     AgentLifecycleCommandResponseStatus `json:"status"`
+	UpdatedAt  time.Time                           `json:"updated_at"`
+}
+
+// AgentLifecycleCommandResponseAction defines model for AgentLifecycleCommandResponse.Action.
+type AgentLifecycleCommandResponseAction string
+
+// AgentLifecycleCommandResponseStatus defines model for AgentLifecycleCommandResponse.Status.
+type AgentLifecycleCommandResponseStatus string
+
 // AgentLifecycleRequest defines model for AgentLifecycleRequest.
 type AgentLifecycleRequest struct {
 	Payload *map[string]string `json:"payload,omitempty"`
 	TaskId  *string            `json:"task_id,omitempty"`
 }
+
+// AgentLifecycleResponse defines model for AgentLifecycleResponse.
+type AgentLifecycleResponse struct {
+	// CommandId Durable lifecycle command ID when pending; empty for a synchronous transition.
+	CommandId string `json:"command_id"`
+	Message   string `json:"message"`
+
+	// Pending True when a supervised runtime owner accepted the command for asynchronous execution.
+	Pending bool                         `json:"pending"`
+	Status  AgentLifecycleResponseStatus `json:"status"`
+}
+
+// AgentLifecycleResponseStatus defines model for AgentLifecycleResponse.Status.
+type AgentLifecycleResponseStatus string
 
 // AgentRecordBase defines model for AgentRecordBase.
 type AgentRecordBase struct {
@@ -1767,6 +2004,9 @@ type AgentRecordBinding struct {
 type AgentRunsResponse struct {
 	AgentId string      `json:"agent_id"`
 	Runs    []DriverRun `json:"runs"`
+
+	// Sessions Task, terminal, and orchestration sessions for supervised or interactive agents. Durable record and workflow-binding agents return an empty array and use runs instead.
+	Sessions []AgentHistorySession `json:"sessions"`
 }
 
 // AgentStatusResponse Agent entity from dto.AgentStatusResponse
@@ -2947,14 +3187,15 @@ type PatchIssueRequestDesignFormat string
 type PatchIssueRequestStatus string
 
 // PatchUnifiedAgentRequest Kind-sensitive partial update. Durable records accept `name`,
-// `behavior`, and `budget_policy`; legacy binding entries accept only
+// `budget_policy`, and agent-owned cron schedule fields; their behavior
+// role is immutable after creation. Legacy binding entries accept only
 // `name`; supervised assignments accept the remaining assignment fields.
 type PatchUnifiedAgentRequest struct {
-	Auto     *bool   `json:"auto,omitempty"`
-	Backend  *string `json:"backend,omitempty"`
-	Behavior *struct {
-		RoleName *string `json:"role_name,omitempty"`
-	} `json:"behavior,omitempty"`
+	Auto    *bool   `json:"auto,omitempty"`
+	Backend *string `json:"backend,omitempty"`
+
+	// BindingId Exact attached managed binding; required for cron schedule updates. Schedule updates cannot be combined with mutable record fields.
+	BindingId        *string   `json:"binding_id,omitempty"`
 	BudgetPolicy     *string   `json:"budget_policy,omitempty"`
 	CrossRepo        *bool     `json:"cross_repo,omitempty"`
 	DesiredState     *string   `json:"desired_state,omitempty"`
@@ -2964,6 +3205,8 @@ type PatchUnifiedAgentRequest struct {
 	RepoGroups       *[]string `json:"repo_groups,omitempty"`
 	Repos            *[]string `json:"repos,omitempty"`
 	RoleName         *string   `json:"role_name,omitempty"`
+	Schedule         *string   `json:"schedule,omitempty"`
+	ScheduleTimezone *string   `json:"schedule_timezone,omitempty"`
 	State            *string   `json:"state,omitempty"`
 }
 
@@ -3174,6 +3417,7 @@ type SessionResponse struct {
 	Backend          string     `json:"backend"`
 	CacheReadTokens  int64      `json:"cache_read_tokens"`
 	CacheWriteTokens int64      `json:"cache_write_tokens"`
+	Delivery         *string    `json:"delivery,omitempty"`
 	DurationS        *float64   `json:"duration_s,omitempty"`
 	EndedAt          *time.Time `json:"ended_at,omitempty"`
 	EpicId           *string    `json:"epic_id,omitempty"`
@@ -3182,16 +3426,23 @@ type SessionResponse struct {
 	ExitCode         int        `json:"exit_code"`
 	FilesChanged     int        `json:"files_changed"`
 	FilesTouched     *[]string  `json:"files_touched,omitempty"`
+	GithubBranch     *string    `json:"github_branch,omitempty"`
+	GithubPrUrl      *string    `json:"github_pr_url,omitempty"`
 	HasDiff          bool       `json:"has_diff"`
 	HasTranscript    bool       `json:"has_transcript"`
+	HeadSha          *string    `json:"head_sha,omitempty"`
 	InputTokens      int64      `json:"input_tokens"`
 	IsActive         bool       `json:"is_active"`
 	LastError        *string    `json:"last_error,omitempty"`
 	LinesAdded       int        `json:"lines_added"`
 	LinesRemoved     int        `json:"lines_removed"`
+	LocalBranch      *string    `json:"local_branch,omitempty"`
+	LogsRef          *string    `json:"logs_ref,omitempty"`
 	Model            *string    `json:"model,omitempty"`
 	OutputTokens     int64      `json:"output_tokens"`
+	PatchBackStatus  *string    `json:"patch_back_status,omitempty"`
 	Phase            *string    `json:"phase,omitempty"`
+	RuntimeStrategy  *string    `json:"runtime_strategy,omitempty"`
 	SessionId        string     `json:"session_id"`
 	StartedAt        time.Time  `json:"started_at"`
 	Status           string     `json:"status"`
@@ -3305,6 +3556,13 @@ type TabPutRequest struct {
 	SortOrder int    `json:"sort_order"`
 }
 
+// TaskWorkflowRunsResponse defines model for TaskWorkflowRunsResponse.
+type TaskWorkflowRunsResponse struct {
+	Runs       []DriverRun `json:"runs"`
+	SubjectRef string      `json:"subject_ref"`
+	TaskId     string      `json:"task_id"`
+}
+
 // TerminalSessionInfo defines model for TerminalSessionInfo.
 type TerminalSessionInfo struct {
 	// Created Unix timestamp
@@ -3328,16 +3586,26 @@ type TerminalSpawnRequest struct {
 	SessionName string `json:"session_name"`
 }
 
+// TranscriptData defines model for TranscriptData.
+type TranscriptData struct {
+	Entries   []TranscriptEntry `json:"entries"`
+	SessionId string            `json:"session_id"`
+}
+
 // TranscriptEntry Single transcript entry from a session
 type TranscriptEntry struct {
-	Content   *string             `json:"content,omitempty"`
-	Raw       *string             `json:"raw,omitempty"`
+	Output    *string             `json:"output,omitempty"`
 	Role      TranscriptEntryRole `json:"role"`
 	Seq       int                 `json:"seq"`
-	ToolInput *string             `json:"tool_input,omitempty"`
+	Text      *string             `json:"text,omitempty"`
+	Timestamp time.Time           `json:"timestamp"`
+
+	// ToolInput Backend-specific tool arguments.
+	ToolInput interface{}         `json:"tool_input,omitempty"`
 	ToolName  *string             `json:"tool_name,omitempty"`
-	Ts        time.Time           `json:"ts"`
+	ToolUseId *string             `json:"tool_use_id,omitempty"`
 	Type      TranscriptEntryType `json:"type"`
+	Uuid      *string             `json:"uuid,omitempty"`
 }
 
 // TranscriptEntryRole defines model for TranscriptEntry.Role.
@@ -3345,6 +3613,13 @@ type TranscriptEntryRole string
 
 // TranscriptEntryType defines model for TranscriptEntry.Type.
 type TranscriptEntryType string
+
+// TranscriptResponse defines model for TranscriptResponse.
+type TranscriptResponse struct {
+	Data    *TranscriptData `json:"data,omitempty"`
+	Error   *string         `json:"error,omitempty"`
+	Success bool            `json:"success"`
+}
 
 // TreeNode defines model for TreeNode.
 type TreeNode struct {
@@ -3972,6 +4247,11 @@ type GetGraphParams struct {
 // GetGraphParamsStatus defines parameters for GetGraph.
 type GetGraphParamsStatus string
 
+// SetIssueRepositoryJSONBody defines parameters for SetIssueRepository.
+type SetIssueRepositoryJSONBody struct {
+	Repo string `json:"repo"`
+}
+
 // SaveIssueTabsJSONBody defines parameters for SaveIssueTabs.
 type SaveIssueTabsJSONBody struct {
 	ActiveTabId string     `json:"active_tab_id"`
@@ -4161,6 +4441,9 @@ type AddDependencyJSONRequestBody = AddDependencyRequest
 
 // MoveIssueJSONRequestBody defines body for MoveIssue for application/json ContentType.
 type MoveIssueJSONRequestBody = MoveIssueRequest
+
+// SetIssueRepositoryJSONRequestBody defines body for SetIssueRepository for application/json ContentType.
+type SetIssueRepositoryJSONRequestBody SetIssueRepositoryJSONBody
 
 // SaveIssueTabsJSONRequestBody defines body for SaveIssueTabs for application/json ContentType.
 type SaveIssueTabsJSONRequestBody SaveIssueTabsJSONBody

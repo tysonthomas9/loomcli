@@ -45,17 +45,16 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
-// AwaitMatcherStore is the legacy narrow repository view used by existing
-// trigger adapters. New composition should prefer NewAwaitMatcher so it can
-// pass the two owned ports directly instead of a composite repository.
+// AwaitMatcherStore is the legacy narrow query view used by existing trigger
+// adapters. Mutation authority is never derived from this repository.
 type AwaitMatcherStore interface {
 	Awaits() store.AwaitStore
 	DriverRuns() store.DriverRunStore
 }
 
-// AwaitMatcher resolves pending awaits against admitted router events. The
-// zero value plus Store is ready to use; safe for concurrent use (it holds no
-// state of its own).
+// AwaitMatcher resolves pending awaits against admitted router events. Reads
+// may use the legacy Store view, but mutation requires an explicitly injected
+// AtomicResolver. It is safe for concurrent use (it holds no state of its own).
 type AwaitMatcher struct {
 	Store AwaitMatcherStore
 	// AwaitStore and DriverRunStore are the preferred narrow composition
@@ -63,6 +62,7 @@ type AwaitMatcher struct {
 	// that have not yet completed their later-phase extraction.
 	AwaitStore     store.AwaitStore
 	DriverRunStore store.DriverRunStore
+	AtomicResolver store.AtomicAwaitStore
 	// Logger receives audit records (actor rejections, deferred resumes);
 	// slog.Default when nil.
 	Logger *slog.Logger
@@ -76,10 +76,12 @@ type AwaitMatcher struct {
 	SystemTimeoutLane bool
 }
 
-// NewAwaitMatcher composes the Execution matcher from its two persistence
-// ports without exposing the platform-wide composite store.
-func NewAwaitMatcher(awaits store.AwaitStore, driverRuns store.DriverRunStore) *AwaitMatcher {
-	return &AwaitMatcher{AwaitStore: awaits, DriverRunStore: driverRuns}
+func NewAwaitMatcherWithResolver(
+	awaits store.AwaitStore,
+	driverRuns store.DriverRunStore,
+	resolver store.AtomicAwaitStore,
+) *AwaitMatcher {
+	return &AwaitMatcher{AwaitStore: awaits, DriverRunStore: driverRuns, AtomicResolver: resolver}
 }
 
 // AwaitDispatchEvent is the router-output view of one admitted event — the
@@ -220,9 +222,9 @@ func (m *AwaitMatcher) dispatchOne(ctx context.Context, ws string, ev AwaitDispa
 		m.auditActorRejected(ws, ev, inst)
 		return record, nil
 	}
-	resolver, ok := awaits.(store.AtomicAwaitStore)
-	if !ok {
-		err := fmt.Errorf("await store lacks atomic resolve-and-resume: %w", errors.ErrUnsupported)
+	resolver := m.AtomicResolver
+	if resolver == nil {
+		err := fmt.Errorf("execution await resolver is unavailable: %w", errors.ErrUnsupported)
 		record.Outcome, record.Reason = AwaitMatchFailed, err.Error()
 		return record, fmt.Errorf("await dispatch: resolve and resume %q by event %q: %w", inst.InstanceKey, ev.EventID, err)
 	}

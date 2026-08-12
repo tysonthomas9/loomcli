@@ -114,7 +114,6 @@ type taskRunEventWire struct {
 	ErrorMessage   string               `json:"error_message"`
 	LogsRef        string               `json:"logs_ref"`
 	ArtifactsRef   string               `json:"artifacts_ref"`
-	LeaseToken     string               `json:"lease_token"`
 	OccurredAt     time.Time            `json:"occurred_at"`
 }
 
@@ -135,7 +134,6 @@ func (w *taskRunEventWire) toDomain() *domain.TaskRunEvent {
 		ErrorMessage:   w.ErrorMessage,
 		LogsRef:        w.LogsRef,
 		ArtifactsRef:   w.ArtifactsRef,
-		LeaseToken:     w.LeaseToken,
 		OccurredAt:     w.OccurredAt,
 	}
 }
@@ -210,7 +208,6 @@ func (s *taskRunEventStore) Append(ctx context.Context, in store.TaskRunEventApp
 		"error_message":   in.ErrorMessage,
 		"logs_ref":        in.LogsRef,
 		"artifacts_ref":   in.ArtifactsRef,
-		"lease_token":     in.LeaseToken,
 		"occurred_at":     in.OccurredAt,
 	}
 	var out taskRunEventWire

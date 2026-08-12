@@ -35,14 +35,14 @@ func TestHandleRunFirstTaskCreatesClaimableTaskAndQueuesAgentStart(t *testing.T)
 	}
 	agentSvc := &stubAgentService{
 		agents: []*domain.Agent{{Name: "planner", RoleName: "plan"}},
-		lifecycleFunc: func(_ context.Context, wsKey, name string, in service.AgentLifecycleInput) (*domain.Agent, error) {
+		lifecycleFunc: func(_ context.Context, wsKey, name string, in service.AgentLifecycleInput) (*service.AgentLifecycleResult, error) {
 			if wsKey != "HELLO-WORLD" || name != "planner" {
 				t.Fatalf("lifecycle target = %s/%s", wsKey, name)
 			}
 			if in.CommandType != "start" || in.Payload["task_id"] != "task-1" {
 				t.Fatalf("lifecycle input = %#v", in)
 			}
-			return &domain.Agent{Name: name}, nil
+			return &service.AgentLifecycleResult{Agent: &domain.Agent{Name: name}, Pending: true}, nil
 		},
 	}
 
@@ -86,8 +86,8 @@ func TestHandleRunFirstTaskKeepsTaskClaimableForDaemon(t *testing.T) {
 	}
 	agentSvc := &stubAgentService{
 		agents: []*domain.Agent{{Name: "planner", RoleName: "plan"}},
-		lifecycleFunc: func(context.Context, string, string, service.AgentLifecycleInput) (*domain.Agent, error) {
-			return &domain.Agent{Name: "planner"}, nil
+		lifecycleFunc: func(context.Context, string, string, service.AgentLifecycleInput) (*service.AgentLifecycleResult, error) {
+			return &service.AgentLifecycleResult{Agent: &domain.Agent{Name: "planner"}, Pending: true}, nil
 		},
 	}
 
@@ -122,7 +122,7 @@ func TestHandleRunFirstTaskDeletesCreatedIssueWhenStartFails(t *testing.T) {
 	}
 	agentSvc := &stubAgentService{
 		agents: []*domain.Agent{{Name: "planner", RoleName: "plan"}},
-		lifecycleFunc: func(context.Context, string, string, service.AgentLifecycleInput) (*domain.Agent, error) {
+		lifecycleFunc: func(context.Context, string, string, service.AgentLifecycleInput) (*service.AgentLifecycleResult, error) {
 			return nil, service.ErrUnavailable("daemon unavailable")
 		},
 	}
@@ -165,7 +165,7 @@ func TestHandleRunFirstTaskCleanupRunsWithLiveContextWhenClientDisconnects(t *te
 	}
 	agentSvc := &stubAgentService{
 		agents: []*domain.Agent{{Name: "planner", RoleName: "plan"}},
-		lifecycleFunc: func(context.Context, string, string, service.AgentLifecycleInput) (*domain.Agent, error) {
+		lifecycleFunc: func(context.Context, string, string, service.AgentLifecycleInput) (*service.AgentLifecycleResult, error) {
 			return nil, service.ErrUnavailable("daemon unavailable")
 		},
 	}
@@ -285,7 +285,7 @@ func (s *stubIssueService) SearchIssues(context.Context, service.SearchIssuesPar
 
 type stubAgentService struct {
 	agents        []*domain.Agent
-	lifecycleFunc func(context.Context, string, string, service.AgentLifecycleInput) (*domain.Agent, error)
+	lifecycleFunc func(context.Context, string, string, service.AgentLifecycleInput) (*service.AgentLifecycleResult, error)
 }
 
 func (s *stubAgentService) GetTerminalInfo(context.Context, string, string) (*service.AgentTerminalInfoResult, error) {
@@ -338,11 +338,14 @@ func (s *stubAgentService) CreateAgent(context.Context, service.AgentCreateInput
 func (s *stubAgentService) UpdateAgent(context.Context, string, string, service.AgentUpdateInput) (*domain.Agent, error) {
 	return nil, service.ErrNotImplemented("not implemented")
 }
-func (s *stubAgentService) RequestAgentLifecycle(ctx context.Context, wsKey, name string, in service.AgentLifecycleInput) (*domain.Agent, error) {
+func (s *stubAgentService) RequestAgentLifecycle(ctx context.Context, wsKey, name string, in service.AgentLifecycleInput) (*service.AgentLifecycleResult, error) {
 	if s.lifecycleFunc != nil {
 		return s.lifecycleFunc(ctx, wsKey, name, in)
 	}
-	return &domain.Agent{Name: name}, nil
+	return &service.AgentLifecycleResult{Agent: &domain.Agent{Name: name}}, nil
+}
+func (s *stubAgentService) GetAgentLifecycleCommand(context.Context, string, string, string) (*service.AgentLifecycleCommandResult, error) {
+	return nil, service.ErrNotImplemented("not implemented")
 }
 func (s *stubAgentService) DeleteAgent(context.Context, string, string) error {
 	return service.ErrNotImplemented("not implemented")

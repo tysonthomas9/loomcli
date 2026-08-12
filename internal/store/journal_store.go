@@ -9,7 +9,8 @@ import (
 // JournalEvent is one entry of fleet-db's issue mutation journal as the
 // bridge reads it (chunk A4). It is a deliberately narrow projection of
 // fleet-db's GET /api/v1/{ws}/events/mutations event shape: the bridge polls
-// issue lifecycle (entity_type=issue) and only needs the post-mutation state.
+// issue lifecycle (entity_type=issue) and retains the pre- and post-mutation
+// states needed to prove lifecycle transitions.
 //
 // ID is the stream position — the opaque cursor token for this event
 // (immutable, monotonically increasing, e.g. "1707001234567-0"). Callers
@@ -17,17 +18,17 @@ import (
 // afterCursor argument; fleet-db echoes the batch's last position via the
 // response Cursor field, which ListIssueEvents returns as nextCursor.
 //
-// After carries the post-mutation entity state as raw JSON (fleet-db
-// serializes it as a JSON-encoded string on the wire; the reader unwraps
-// that into the JSON value here). Before is deliberately dropped: the bridge
-// reacts to the current state and the prior snapshot would only inflate the
-// payload. After is nil when the event carried no after-state.
+// Before and After carry the pre- and post-mutation entity states as raw JSON
+// (fleet-db serializes each as a JSON-encoded string on the wire; the reader
+// unwraps those into JSON values here). Either is nil when the event omitted
+// that state or carried malformed JSON.
 type JournalEvent struct {
 	ID        string
 	Action    string
 	Actor     string
 	EntityID  string
 	Timestamp time.Time
+	Before    json.RawMessage
 	After     json.RawMessage
 	Metadata  map[string]string
 }

@@ -1,5 +1,4 @@
 import { del, get, patch, post, wsUrl } from "@/api/common";
-import { localOperatorRequestOptions } from "./localOperatorSession";
 
 export const EPIC_RUNNER_WORKFLOW_NAME = "epic-runner";
 
@@ -61,10 +60,11 @@ export async function startWorkflowRun(
   workflowName: string,
   payload: unknown,
 ): Promise<WorkflowRun> {
-  return post<WorkflowRun>(
-    wsUrl(workspaceId, `/workflows/${encodeURIComponent(workflowName)}`),
-    payload,
+  const path = wsUrl(
+    workspaceId,
+    `/workflows/${encodeURIComponent(workflowName)}`,
   );
+  return post<WorkflowRun>(path, payload);
 }
 
 export async function getWorkflowRun(
@@ -257,11 +257,7 @@ export async function createTriggerBinding(
   workspaceId: string,
   req: CreateTriggerBindingRequest,
 ): Promise<TriggerBinding> {
-  return post<TriggerBinding>(
-    wsUrl(workspaceId, `/trigger-bindings`),
-    req,
-    localOperatorRequestOptions(workspaceId),
-  );
+  return post<TriggerBinding>(wsUrl(workspaceId, `/trigger-bindings`), req);
 }
 
 /**
@@ -281,7 +277,6 @@ export async function runTriggerBinding(
       `/trigger-bindings/${encodeURIComponent(bindingId)}/run`,
     ),
     {},
-    localOperatorRequestOptions(workspaceId),
   );
 }
 
@@ -315,7 +310,6 @@ export async function setTriggerBindingEnabled(
       }`,
     ),
     {},
-    localOperatorRequestOptions(workspaceId),
   );
 }
 
@@ -326,6 +320,8 @@ export interface UpdateTriggerBindingRequest {
   schedule?: string;
   /** IANA timezone — only valid on a cron binding. */
   schedule_timezone?: string;
+  /** Replace the per-binding workflow input object (including an empty object). */
+  run_input?: Record<string, unknown>;
 }
 
 /**
@@ -341,7 +337,6 @@ export async function updateTriggerBinding(
   return patch<TriggerBinding>(
     wsUrl(workspaceId, `/trigger-bindings/${encodeURIComponent(bindingId)}`),
     req,
-    localOperatorRequestOptions(workspaceId),
   );
 }
 
@@ -367,7 +362,6 @@ export async function deleteTriggerBinding(
 ): Promise<DeleteTriggerBindingResult> {
   return del<DeleteTriggerBindingResult>(
     wsUrl(workspaceId, `/trigger-bindings/${encodeURIComponent(bindingId)}`),
-    localOperatorRequestOptions(workspaceId),
   );
 }
 
@@ -521,7 +515,6 @@ export async function approveWorkflowVersion(
       `/workflows/${encodeURIComponent(name)}/versions/${encodeURIComponent(versionId)}/approve`,
     ),
     {},
-    localOperatorRequestOptions(workspaceId),
   );
 }
 
@@ -537,7 +530,6 @@ export async function unapproveWorkflowVersion(
       `/workflows/${encodeURIComponent(name)}/versions/${encodeURIComponent(versionId)}/unapprove`,
     ),
     {},
-    localOperatorRequestOptions(workspaceId),
   );
 }
 
@@ -556,6 +548,5 @@ export async function activateWorkflowVersion(
       `/workflows/${encodeURIComponent(name)}/versions/${encodeURIComponent(versionId)}/activate`,
     ),
     {},
-    localOperatorRequestOptions(workspaceId),
   );
 }

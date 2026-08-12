@@ -192,7 +192,8 @@ func (m *Module) ensureReviewer(w http.ResponseWriter, r *http.Request) {
 		ctx: gitCtx, ws: ws, agentName: agentName, params: params,
 		repoPath: repoPath, remote: remote, repoName: repoName, wsPath: wsPath,
 		headSHA: headSHA, title: title, baseRef: baseRef,
-		checkoutPRHead: m.checkoutReviewerPRHead,
+		checkoutPRHead:  m.checkoutReviewerPRHead,
+		recordPRContext: m.recordReviewerPRContext,
 	})
 	if !ok {
 		return
@@ -258,19 +259,26 @@ type reviewerCheckoutFunc func(
 	headSHA string,
 ) (string, error)
 
+type reviewerRecordContextFunc func(
+	ctx context.Context,
+	worktreePath, remoteName, baseRef string,
+	meta map[string]string,
+) (string, error)
+
 type reviewerCheckoutSpec struct {
-	ctx            context.Context
-	ws             string
-	agentName      string
-	params         pullRequestPath
-	repoPath       string
-	remote         string
-	repoName       string
-	wsPath         string
-	headSHA        string
-	title          string
-	baseRef        string
-	checkoutPRHead reviewerCheckoutFunc
+	ctx             context.Context
+	ws              string
+	agentName       string
+	params          pullRequestPath
+	repoPath        string
+	remote          string
+	repoName        string
+	wsPath          string
+	headSHA         string
+	title           string
+	baseRef         string
+	checkoutPRHead  reviewerCheckoutFunc
+	recordPRContext reviewerRecordContextFunc
 }
 
 // prepareReviewerCheckout stands up the reviewer's PR-head worktree, records
@@ -323,7 +331,11 @@ func prepareReviewerCheckout(w http.ResponseWriter, spec reviewerCheckoutSpec) (
 	// is the backend CLI's positional first turn (codex and every harness
 	// backend alike), so the reviewer auto-reviews on boot — no delivered seed
 	// to dedupe (which is what broke re-opened reviewers on a fresh thread).
-	if _, err := localworkspace.RecordPRReviewContext(spec.ctx, target, spec.remote, spec.baseRef, map[string]string{
+	recordPRContext := spec.recordPRContext
+	if recordPRContext == nil {
+		recordPRContext = localworkspace.RecordPRReviewContext
+	}
+	if _, err := recordPRContext(spec.ctx, target, spec.remote, spec.baseRef, map[string]string{
 		"Pr":    strconv.Itoa(spec.params.number),
 		"Title": spec.title,
 		"Url":   fmt.Sprintf("https://github.com/%s/%s/pull/%d", spec.params.owner, spec.params.repo, spec.params.number),

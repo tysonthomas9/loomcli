@@ -13,8 +13,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	"github.com/tysonthomas9/loomcli/internal/roleprompts"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/triggerbindings"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
@@ -117,6 +119,21 @@ func TestUnifiedLegacyBindingFallbackSupportsDetailRenameAndDelete(t *testing.T)
 	decodeJSON(t, rec.Body.Bytes(), &got)
 	if got.ID != "legacy-review" || got.Kind != agentRecordKindBinding || got.Name != "Legacy review" {
 		t.Fatalf("legacy GET = %+v", got)
+	}
+
+	rec = doAgentRequest(
+		t,
+		mux,
+		http.MethodPatch,
+		"/api/workspaces/WS/agents/legacy-review",
+		`{"name":"Must not persist","backend":"claude"}`,
+	)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("legacy foreign-kind PATCH status = %d body=%s, want 400", rec.Code, rec.Body.String())
+	}
+	unchanged, err := st.TriggerBindings().Get(ctx, agentRecordTestWS, "legacy-review")
+	if err != nil || unchanged.Name != "Legacy review" {
+		t.Fatalf("legacy foreign-kind PATCH mutated binding = %+v err=%v", unchanged, err)
 	}
 
 	rec = doAgentRequest(t, mux, http.MethodPatch, "/api/workspaces/WS/agents/legacy-review", `{"name":"Renamed review"}`)
@@ -345,7 +362,12 @@ func TestPromptAgentCreateTransactionCreatesRecordBindingAndRole(t *testing.T) {
 		"kind":"prompt",
 		"name":"Docs assistant",
 		"backend":"codex",
-		"behavior":{"role_name":"docs-assistant","role_create":{"description":"Docs","task_filter":"docs"}},
+		"behavior":{"role_name":"docs-assistant","role_create":{
+			"description":"Docs",
+			"prompt":"Review and update the documentation.",
+			"prompt_filename":"docs-assistant.md",
+			"task_filter":"has_design"
+		}},
 		"trigger":{"source_kind":"internal","event_type_patterns":["internal.task.ready"]},
 		"enabled":true
 	}`
@@ -365,8 +387,12 @@ func TestPromptAgentCreateTransactionCreatesRecordBindingAndRole(t *testing.T) {
 		t.Fatalf("created bindings = %+v", created.Bindings)
 	}
 	role, err := st.Roles().Get(context.Background(), agentRecordTestWS, "docs-assistant")
-	if err != nil || role.Description != "Docs" || role.TaskFilter != "docs" {
+	if err != nil || role.Description != "Docs" || role.TaskFilter != "has_design" {
 		t.Fatalf("ensured role = %+v err=%v", role, err)
+	}
+	prompt, err := os.ReadFile(role.PromptFile)
+	if err != nil || string(prompt) != "Review and update the documentation." {
+		t.Fatalf("ensured role prompt = %q path=%q err=%v", string(prompt), role.PromptFile, err)
 	}
 	var runInput map[string]string
 	if err := json.Unmarshal([]byte(created.Bindings[0].SourceConfigRef), &runInput); err != nil {
@@ -374,6 +400,181 @@ func TestPromptAgentCreateTransactionCreatesRecordBindingAndRole(t *testing.T) {
 	}
 	if runInput["roleName"] != "docs-assistant" || runInput["backend"] != "codex" {
 		t.Fatalf("run input = %+v", runInput)
+	}
+	record, err := st.AgentServices().Get(context.Background(), agentRecordTestWS, created.ID)
+	if err != nil || record.Metadata["backend"] != "codex" {
+		t.Fatalf("agent backend provenance = %+v err=%v", record, err)
+	}
+}
+
+func TestPromptAgentCreateTransactionAcceptsReviewRoleAndDedicatedTrigger(t *testing.T) {
+	st := newAgentRecordStore(t)
+	body := `{
+		"kind":"prompt",
+		"name":"Documentation agent",
+		"backend":"codex",
+		"behavior":{"role_name":"documentation","role_create":{
+			"prompt":"Update repository documentation for the task under review.",
+			"prompt_filename":"documentation.md",
+			"task_filter":"review"
+		}},
+		"trigger":{"source_kind":"internal","event_type_patterns":["internal.task.review"]},
+		"enabled":true
+	}`
+	rec := doAgentRequest(t, newAgentsMux(st), http.MethodPost, "/api/workspaces/WS/agents", body)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("POST /agents status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	var created agentRecordDTO
+	decodeJSON(t, rec.Body.Bytes(), &created)
+	if len(created.Bindings) != 1 ||
+		len(created.Bindings[0].EventTypePatterns) != 1 ||
+		created.Bindings[0].EventTypePatterns[0] != "internal.task.review" {
+		t.Fatalf("created bindings = %+v, want dedicated internal.task.review", created.Bindings)
+	}
+	role, err := st.Roles().Get(context.Background(), agentRecordTestWS, "documentation")
+	if err != nil || role.TaskFilter != "review" {
+		t.Fatalf("ensured review role = %+v err=%v", role, err)
+	}
+}
+
+func TestPromptAgentCreateAcceptsReadOnlyBugFilter(t *testing.T) {
+	st := newAgentRecordStore(t)
+	body := `{
+		"kind":"prompt",
+		"name":"Bug triage",
+		"behavior":{"role_name":"bug-triage","role_create":{
+			"description":"Triage bugs without writing code.",
+			"prompt":"Investigate the assigned bug and post evidence.",
+			"prompt_filename":"bug-triage.md",
+			"task_filter":"bug",
+			"read_only":true
+		}},
+		"trigger":{"source_kind":"internal","event_type_patterns":["internal.task.ready"]},
+		"enabled":true
+	}`
+	rec := doAgentRequest(t, newAgentsMux(st), http.MethodPost, "/api/workspaces/WS/agents", body)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("POST /agents status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	role, err := st.Roles().Get(context.Background(), agentRecordTestWS, "bug-triage")
+	if err != nil {
+		t.Fatalf("get ensured role: %v", err)
+	}
+	if role.TaskFilter != "bug" || !role.ReadOnly {
+		t.Fatalf("ensured bug role = %+v, want task_filter=bug read_only=true", role)
+	}
+}
+
+func TestPromptAgentCreateRejectsUnreadyRoleBeforeAgentArtifacts(t *testing.T) {
+	tests := []struct {
+		name       string
+		role       store.RoleCreate
+		body       string
+		wantError  string
+		wantNoRole bool
+	}{
+		{
+			name: "existing role without prompt",
+			role: store.RoleCreate{
+				WorkspaceKey: agentRecordTestWS, Name: "docs-assistant", TaskFilter: "has_design",
+			},
+			body:      `{"kind":"prompt","name":"Docs","behavior":{"role_name":"docs-assistant"},"trigger":{"source_kind":"internal"},"enabled":true}`,
+			wantError: "non-empty prompt",
+		},
+		{
+			name: "existing role with unsupported filter",
+			role: store.RoleCreate{
+				WorkspaceKey: agentRecordTestWS, Name: "docs-assistant", Prompt: "Do the work.", TaskFilter: "docs",
+			},
+			body:      `{"kind":"prompt","name":"Docs","behavior":{"role_name":"docs-assistant"},"trigger":{"source_kind":"internal"},"enabled":true}`,
+			wantError: "unsupported",
+		},
+		{
+			name:       "new role definition without prompt",
+			body:       `{"kind":"prompt","name":"Docs","behavior":{"role_name":"docs-assistant","role_create":{"task_filter":"has_design"}},"trigger":{"source_kind":"internal"},"enabled":true}`,
+			wantError:  "non-empty prompt",
+			wantNoRole: true,
+		},
+		{
+			name:       "new mutating bug-filter role",
+			body:       `{"kind":"prompt","name":"Unsafe triage","behavior":{"role_name":"docs-assistant","role_create":{"prompt":"Triage bugs.","task_filter":"bug","read_only":false}},"trigger":{"source_kind":"internal"},"enabled":true}`,
+			wantError:  "read_only=true",
+			wantNoRole: true,
+		},
+		{
+			name:       "new read-only review role",
+			body:       `{"kind":"prompt","name":"Unrunnable docs audit","behavior":{"role_name":"docs-assistant","role_create":{"prompt":"Audit docs.","task_filter":"review","read_only":true}},"trigger":{"source_kind":"internal","event_type_patterns":["internal.task.review"]},"enabled":true}`,
+			wantError:  "read_only=false",
+			wantNoRole: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			st := newAgentRecordStore(t)
+			if strings.TrimSpace(tt.role.Name) != "" {
+				if _, err := st.Roles().Create(context.Background(), tt.role); err != nil {
+					t.Fatalf("seed role: %v", err)
+				}
+			}
+
+			rec := doAgentRequest(t, newAgentsMux(st), http.MethodPost, "/api/workspaces/WS/agents", tt.body)
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("POST /agents status = %d body=%s, want 400", rec.Code, rec.Body.String())
+			}
+			if !strings.Contains(rec.Body.String(), tt.wantError) {
+				t.Fatalf("POST /agents body = %s, want %q", rec.Body.String(), tt.wantError)
+			}
+			assertNoPromptAgentArtifacts(t, st)
+			if tt.wantNoRole {
+				if _, err := st.Roles().Get(context.Background(), agentRecordTestWS, "docs-assistant"); !errors.Is(err, domain.ErrNotFound) {
+					t.Fatalf("invalid role definition was persisted: %v", err)
+				}
+			}
+		})
+	}
+}
+
+func TestPromptAgentCreateRejectsIncompatibleRoleCollisionBeforeAgentArtifacts(t *testing.T) {
+	st := newAgentRecordStore(t)
+	ctx := context.Background()
+	if _, err := st.Roles().Create(ctx, store.RoleCreate{
+		WorkspaceKey: agentRecordTestWS,
+		Name:         "bug-triage",
+		Description:  "Triage bugs",
+		Prompt:       "Existing mutating prompt.",
+		TaskFilter:   "any",
+		ReadOnly:     false,
+	}); err != nil {
+		t.Fatalf("seed role: %v", err)
+	}
+	body := `{
+		"kind":"prompt",
+		"name":"Bug triage",
+		"behavior":{"role_name":"bug-triage","role_create":{
+			"description":"Triage bugs",
+			"prompt":"Requested read-only prompt.",
+			"prompt_filename":"bug-triage.md",
+			"task_filter":"any",
+			"read_only":true
+		}},
+		"trigger":{"source_kind":"internal"},
+		"enabled":true
+	}`
+	rec := doAgentRequest(t, newAgentsMux(st), http.MethodPost, "/api/workspaces/WS/agents", body)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("POST /agents status = %d body=%s, want 409", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "prompt") || !strings.Contains(rec.Body.String(), "read_only") {
+		t.Fatalf("POST /agents collision does not identify policy fields: %s", rec.Body.String())
+	}
+	assertNoPromptAgentArtifacts(t, st)
+	role, err := st.Roles().Get(ctx, agentRecordTestWS, "bug-triage")
+	if err != nil {
+		t.Fatalf("get role: %v", err)
+	}
+	if role.Prompt != "Existing mutating prompt." || role.ReadOnly {
+		t.Fatalf("colliding role was mutated: %+v", role)
 	}
 }
 
@@ -498,7 +699,7 @@ func configureMissingRolldownBuild(t *testing.T) {
 func TestPromptAgentCreateBindingFailureDeletesAgentRecord(t *testing.T) {
 	st := newAgentRecordStore(t)
 	ctx := context.Background()
-	seedRole(t, st, "docs-assistant")
+	seedPromptAgentRole(t, st, "docs-assistant")
 	driver, err := st.Drivers().Get(ctx, agentRecordTestWS, workflowdefs.BuiltinPromptAgentWorkflowName)
 	if err != nil {
 		t.Fatalf("get prompt-agent driver: %v", err)
@@ -528,6 +729,72 @@ func TestPromptAgentCreateBindingFailureDeletesAgentRecord(t *testing.T) {
 	}
 	if len(records) != 0 {
 		t.Fatalf("agent records after compensated failure = %+v, want none", records)
+	}
+}
+
+func TestPromptAgentCreateBindingFailureRetainsRetryableRoleAndPrompt(t *testing.T) {
+	for _, preexisting := range []bool{false, true} {
+		name := "new role and prompt retained"
+		if preexisting {
+			name = "pre-existing role and prompt preserved"
+		}
+		t.Run(name, func(t *testing.T) {
+			st := newAgentRecordStore(t)
+			ctx := context.Background()
+			driver, err := st.Drivers().Get(ctx, agentRecordTestWS, workflowdefs.BuiltinPromptAgentWorkflowName)
+			if err != nil {
+				t.Fatalf("get prompt-agent driver: %v", err)
+			}
+			if _, err := st.TriggerBindings().Create(ctx, store.TriggerBindingCreate{
+				WorkspaceKey: agentRecordTestWS, BindingID: "taken", Name: "Taken",
+				SourceKind: store.InternalSourceKind, DriverID: driver.DriverID, DriverVersionID: driver.ActiveVersionID,
+				Enabled: true,
+			}); err != nil {
+				t.Fatalf("seed taken binding: %v", err)
+			}
+
+			cache, err := bootstrap.LoadStateCache()
+			if err != nil {
+				t.Fatalf("load state cache: %v", err)
+			}
+			const prompt = "Review the documentation."
+			filename := roleprompts.ImmutablePromptFilename("transactional-reviewer", "reviewer.md", prompt)
+			promptPath := filepath.Join(cache.Workspaces[agentRecordTestWS].Path, ".loom", "prompts", filename)
+			if preexisting {
+				if _, err := roleprompts.EnsurePromptFile(
+					cache.Workspaces[agentRecordTestWS].Path, "transactional-reviewer", filename, prompt,
+				); err != nil {
+					t.Fatalf("seed prompt: %v", err)
+				}
+				if _, err := st.Roles().Create(ctx, store.RoleCreate{
+					WorkspaceKey: agentRecordTestWS, Name: "transactional-reviewer",
+					PromptFile: promptPath, TaskFilter: "has_design",
+				}); err != nil {
+					t.Fatalf("seed role: %v", err)
+				}
+			}
+
+			body := `{
+				"kind":"prompt",
+				"name":"Transactional reviewer",
+				"behavior":{"role_name":"transactional-reviewer","role_create":{
+					"prompt":"Review the documentation.",
+					"prompt_filename":"reviewer.md",
+					"task_filter":"has_design"
+				}},
+				"trigger":{"source_kind":"internal","binding_id":"taken"},
+				"enabled":true
+			}`
+			rec := doAgentRequest(t, newAgentsMux(st), http.MethodPost, "/api/workspaces/WS/agents", body)
+			if rec.Code != http.StatusConflict {
+				t.Fatalf("POST /agents status = %d body=%s, want 409", rec.Code, rec.Body.String())
+			}
+			_, roleErr := st.Roles().Get(ctx, agentRecordTestWS, "transactional-reviewer")
+			_, promptErr := os.Stat(promptPath)
+			if roleErr != nil || promptErr != nil {
+				t.Fatalf("retryable resources removed: role=%v prompt=%v preexisting=%v", roleErr, promptErr, preexisting)
+			}
+		})
 	}
 }
 
@@ -695,8 +962,123 @@ func TestAgentRunsNewestFirstAndExcludesUnattributedRuns(t *testing.T) {
 	}
 }
 
+func TestAgentRunsReturnsSupervisedSessionsNewestFirst(t *testing.T) {
+	st := newAgentRecordStore(t)
+	ctx := context.Background()
+	if _, err := st.Agents().Create(ctx, store.AgentCreate{
+		WorkspaceKey: agentRecordTestWS,
+		Name:         "falcon",
+		RoleName:     "task",
+		Backend:      "codex",
+	}); err != nil {
+		t.Fatalf("create supervised agent: %v", err)
+	}
+	if _, err := st.AgentSessions().Create(ctx, store.AgentSessionCreate{
+		WorkspaceKey: agentRecordTestWS,
+		SessionID:    "session-old",
+		AgentID:      "falcon",
+		Kind:         domain.AgentSessionKindTask,
+		TaskID:       "TASK-1",
+		Status:       domain.AgentSessionCompleted,
+	}); err != nil {
+		t.Fatalf("create old session: %v", err)
+	}
+	time.Sleep(time.Millisecond)
+	if _, err := st.AgentSessions().Create(ctx, store.AgentSessionCreate{
+		WorkspaceKey: agentRecordTestWS,
+		SessionID:    "session-new",
+		AgentID:      "falcon",
+		Kind:         domain.AgentSessionKindTask,
+		TaskID:       "TASK-2",
+		Status:       domain.AgentSessionRunning,
+		Metadata: map[string]string{
+			"backend":         "codex",
+			"transcript_path": "/tmp/private-session.jsonl",
+		},
+	}); err != nil {
+		t.Fatalf("create new session: %v", err)
+	}
+
+	rec := doAgentRequest(t, newAgentsMux(st), http.MethodGet, "/api/workspaces/WS/agents/falcon/runs", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("supervised runs status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	var out agentRunsResponse
+	decodeJSON(t, rec.Body.Bytes(), &out)
+	if out.AgentID != "falcon" || len(out.Runs) != 0 {
+		t.Fatalf("supervised history envelope = %+v", out)
+	}
+	if len(out.Sessions) != 2 || out.Sessions[0].SessionID != "session-new" || out.Sessions[1].SessionID != "session-old" {
+		t.Fatalf("supervised sessions = %+v, want newest then oldest", out.Sessions)
+	}
+	if out.Sessions[0].StartedAt != nil {
+		t.Fatalf("zero started_at must be omitted, got %v", out.Sessions[0].StartedAt)
+	}
+	if len(out.Sessions[0].Metadata) != 1 || out.Sessions[0].Metadata["backend"] != "codex" {
+		t.Fatalf("public session metadata = %#v, want backend only", out.Sessions[0].Metadata)
+	}
+	if strings.Contains(rec.Body.String(), "private-session") || strings.Contains(rec.Body.String(), "transcript_path") {
+		t.Fatalf("agent history leaked internal metadata: %s", rec.Body.String())
+	}
+
+	rec = doAgentRequest(t, newAgentsMux(st), http.MethodGet, "/api/workspaces/WS/agents/falcon/runs?limit=1", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("limited supervised runs status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	out = agentRunsResponse{}
+	decodeJSON(t, rec.Body.Bytes(), &out)
+	if len(out.Sessions) != 1 || out.Sessions[0].SessionID != "session-new" {
+		t.Fatalf("limited supervised sessions = %+v", out.Sessions)
+	}
+}
+
+func TestAgentRunsReturnsLegacyBindingRuns(t *testing.T) {
+	st := newAgentRecordStore(t)
+	ctx := context.Background()
+	seedDriverVersion(t, st, "legacy-driver", "legacy-version")
+	if _, err := st.TriggerBindings().Create(ctx, store.TriggerBindingCreate{
+		WorkspaceKey:    agentRecordTestWS,
+		BindingID:       "legacy-review",
+		Name:            "Legacy review",
+		SourceKind:      store.CronSourceKind,
+		DriverID:        "legacy-driver",
+		DriverVersionID: "legacy-version",
+		Schedule:        "*/10 * * * *",
+		Enabled:         true,
+	}); err != nil {
+		t.Fatalf("create legacy binding: %v", err)
+	}
+	if _, err := st.DriverRuns().Create(ctx, store.DriverRunCreate{
+		WorkspaceKey:     agentRecordTestWS,
+		RunID:            "legacy-run",
+		DriverID:         "legacy-driver",
+		DriverVersionID:  "legacy-version",
+		TriggerBindingID: "legacy-review",
+	}); err != nil {
+		t.Fatalf("create legacy run: %v", err)
+	}
+
+	rec := doAgentRequest(t, newAgentsMux(st), http.MethodGet, "/api/workspaces/WS/agents/legacy-review/runs", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("legacy binding runs status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	var out agentRunsResponse
+	decodeJSON(t, rec.Body.Bytes(), &out)
+	if out.AgentID != "legacy-review" || len(out.Sessions) != 0 || len(out.Runs) != 1 || out.Runs[0].RunID != "legacy-run" {
+		t.Fatalf("legacy binding history = %+v", out)
+	}
+}
+
 func newAgentRecordStore(t *testing.T) *memstore.Store {
 	t.Helper()
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+	workspacePath := t.TempDir()
+	if err := bootstrap.MutateWorkspaceLocalState(agentRecordTestWS, func(local *bootstrap.WorkspaceLocalState) error {
+		local.Path = workspacePath
+		return nil
+	}); err != nil {
+		t.Fatalf("seed workspace local path: %v", err)
+	}
 	st := memstore.New()
 	if _, err := st.Workspaces().Create(context.Background(), store.WorkspaceCreate{Key: agentRecordTestWS, Name: "Test Workspace"}); err != nil {
 		t.Fatalf("create workspace: %v", err)
@@ -715,6 +1097,18 @@ func seedRole(t *testing.T, st store.Store, name string) {
 	t.Helper()
 	if _, err := st.Roles().Create(context.Background(), store.RoleCreate{WorkspaceKey: agentRecordTestWS, Name: name}); err != nil {
 		t.Fatalf("create role %s: %v", name, err)
+	}
+}
+
+func seedPromptAgentRole(t *testing.T, st store.Store, name string) {
+	t.Helper()
+	if _, err := st.Roles().Create(context.Background(), store.RoleCreate{
+		WorkspaceKey: agentRecordTestWS,
+		Name:         name,
+		Prompt:       "Complete the assigned task.",
+		TaskFilter:   "has_design",
+	}); err != nil {
+		t.Fatalf("create prompt-agent role %s: %v", name, err)
 	}
 }
 
@@ -741,7 +1135,7 @@ func seedPromptAgentDriver(t *testing.T, st store.Store) {
 
 func createPromptAgentForTest(t *testing.T, mux *http.ServeMux) agentRecordDTO {
 	t.Helper()
-	body := `{"kind":"prompt","name":"Docs assistant","backend":"codex","behavior":{"role_name":"docs-assistant","role_create":{"description":"Docs"}},"trigger":{"source_kind":"internal"},"enabled":true}`
+	body := `{"kind":"prompt","name":"Docs assistant","backend":"codex","behavior":{"role_name":"docs-assistant","role_create":{"description":"Docs","prompt":"Complete the assigned documentation task.","task_filter":"has_design"}},"trigger":{"source_kind":"internal"},"enabled":true}`
 	rec := doAgentRequest(t, mux, http.MethodPost, "/api/workspaces/WS/agents", body)
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("create prompt agent status = %d body=%s", rec.Code, rec.Body.String())
@@ -749,6 +1143,19 @@ func createPromptAgentForTest(t *testing.T, mux *http.ServeMux) agentRecordDTO {
 	var created agentRecordDTO
 	decodeJSON(t, rec.Body.Bytes(), &created)
 	return created
+}
+
+func assertNoPromptAgentArtifacts(t *testing.T, st store.Store) {
+	t.Helper()
+	ctx := context.Background()
+	records, err := st.AgentServices().List(ctx, agentRecordTestWS, store.AgentServiceFilter{IncludeDeleted: true})
+	if err != nil || len(records) != 0 {
+		t.Fatalf("agent records after rejected create = %+v err=%v, want none", records, err)
+	}
+	bindings, err := st.TriggerBindings().List(ctx, agentRecordTestWS, store.TriggerBindingFilter{})
+	if err != nil || len(bindings) != 0 {
+		t.Fatalf("bindings after rejected create = %+v err=%v, want none", bindings, err)
+	}
 }
 
 func doAgentRequest(t *testing.T, mux *http.ServeMux, method, path, body string) *httptest.ResponseRecorder {

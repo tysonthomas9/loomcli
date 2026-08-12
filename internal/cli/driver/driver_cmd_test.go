@@ -65,8 +65,24 @@ func TestDriverCommandContainsSubcommands(t *testing.T) {
 			t.Fatalf("complete-task command should not register removed compatibility flag %q", flag)
 		}
 	}
+	if driverCompleteTaskCmd.Flags().Lookup("lease-token") != nil {
+		t.Fatal("complete-task command should not expose a caller-controlled lease-token flag")
+	}
 	if driverExecTaskCmd.Flags().Lookup("defer-completion") == nil {
 		t.Fatal("exec-task command missing defer-completion flag")
+	}
+}
+
+func TestTaskRunAPIBaseURL(t *testing.T) {
+	t.Setenv("LOOM_TASK_RUN_API_URL", " https://tasks.example.test ")
+	t.Setenv("LOOM_DRIVER_API_URL", "https://driver.example.test")
+	if got := taskRunAPIBaseURL(); got != "https://tasks.example.test" {
+		t.Fatalf("taskRunAPIBaseURL with explicit task URL = %q", got)
+	}
+
+	t.Setenv("LOOM_TASK_RUN_API_URL", "")
+	if got := taskRunAPIBaseURL(); got != "https://driver.example.test" {
+		t.Fatalf("taskRunAPIBaseURL fallback = %q, want driver API URL", got)
 	}
 }
 
@@ -137,101 +153,16 @@ func TestDeliverAgentMessageForDriverQueuesGenericMessage(t *testing.T) {
 	}
 }
 
-func TestCompleteDriverTaskRunUsesChildLeaseCredentials(t *testing.T) {
-	taskRuns := &fakeDriverTaskRunStore{run: &domain.TaskRun{
-		WorkspaceKey: "WS",
-		TaskRunID:    "task-run-1",
-		TaskID:       "task-1",
-		Status:       domain.TaskRunRunning,
-		NodeID:       "child-node",
-		LeaseID:      "child-lease",
-		FencingToken: 42,
-		ArtifactsRef: "",
-		ErrorClass:   "",
-		ErrorMessage: "",
-	}}
-
-	result, err := completeDriverTaskRun(context.Background(), taskRuns, "WS", "task-run-1", driverTaskRunCompletionOptions{
-		TaskID:       "task-1",
-		CompletionID: "completion-1",
-		LeaseToken:   "task-run-token",
-		ArtifactIDs:  []string{"artifact-1"},
-		LogsRef:      "logs://task-run-1",
-		ArtifactsRef: "artifacts://task-run-1",
-		Reason:       "done",
-	})
-	if err != nil {
-		t.Fatalf("completeDriverTaskRun: %v", err)
-	}
-	if result.ID != "task-1" || result.Status != string(domain.TaskRunCompleted) || result.Reason != "done" {
-		t.Fatalf("result = %+v, want completed task-1", result)
-	}
-	if taskRuns.completeCalls != 1 || taskRuns.completedWorkspace != "WS" || taskRuns.completedTaskRunID != "task-run-1" {
-		t.Fatalf("complete call = %d %q/%q, want one call for WS/task-run-1", taskRuns.completeCalls, taskRuns.completedWorkspace, taskRuns.completedTaskRunID)
-	}
-	got := taskRuns.complete
-	if got.NodeID != "child-node" || got.LeaseID != "child-lease" || got.FencingToken != 42 || got.LeaseToken != "task-run-token" {
-		t.Fatalf("complete owner credentials = node:%q lease:%q fence:%d token:%q, want child credentials/token", got.NodeID, got.LeaseID, got.FencingToken, got.LeaseToken)
-	}
-	if got.CompletionID != "completion-1" || !got.CloseTask || !got.RequireArtifacts || got.LogsRef != "logs://task-run-1" || got.ArtifactsRef != "artifacts://task-run-1" {
-		t.Fatalf("complete payload = %+v, want completion/close/artifact refs", got)
-	}
-}
-
-func TestCompleteDriverTaskRunRejectsTaskIDMismatch(t *testing.T) {
-	taskRuns := &fakeDriverTaskRunStore{run: &domain.TaskRun{
-		WorkspaceKey: "WS",
-		TaskRunID:    "task-run-1",
-		TaskID:       "task-actual",
-		Status:       domain.TaskRunRunning,
-		NodeID:       "child-node",
-		LeaseID:      "child-lease",
-	}}
-
-	_, err := completeDriverTaskRun(context.Background(), taskRuns, "WS", "task-run-1", driverTaskRunCompletionOptions{TaskID: "task-requested"})
-	if !errors.Is(err, domain.ErrInvalid) {
-		t.Fatalf("completeDriverTaskRun mismatch err = %v, want ErrInvalid", err)
-	}
-	if taskRuns.completeCalls != 0 {
-		t.Fatalf("complete calls = %d, want none after task mismatch", taskRuns.completeCalls)
-	}
-}
-
-func TestCompleteDriverTaskRunAllowsTaskRunIDWithoutTaskID(t *testing.T) {
-	taskRuns := &fakeDriverTaskRunStore{run: &domain.TaskRun{
-		WorkspaceKey: "WS",
-		TaskRunID:    "task-run-1",
-		TaskID:       "task-1",
-		Status:       domain.TaskRunRunning,
-		NodeID:       "child-node",
-		LeaseID:      "child-lease",
-	}}
-
-	result, err := completeDriverTaskRun(context.Background(), taskRuns, "WS", "task-run-1", driverTaskRunCompletionOptions{})
-	if err != nil {
-		t.Fatalf("completeDriverTaskRun: %v", err)
-	}
-	if result.ID != "task-1" || result.Reason != "completed by driver" {
-		t.Fatalf("result = %+v, want task-run completion defaults", result)
-	}
-	if taskRuns.complete.CompletionID != "complete-task-run-1" || taskRuns.complete.CloseReason != "completed by driver" {
-		t.Fatalf("complete defaults = %+v, want default completion id/reason", taskRuns.complete)
-	}
-}
-
 func TestResolveDriverCompleteTaskLeaseToken(t *testing.T) {
-	orig := driverCompleteTaskLeaseToken
-	t.Cleanup(func() { driverCompleteTaskLeaseToken = orig })
 	t.Setenv("LOOM_TASK_RUN_LEASE_TOKEN", "task-token")
 	t.Setenv("LOOM_RUNNER_LEASE_TOKEN", "runner-token")
 
-	driverCompleteTaskLeaseToken = ""
 	if got := resolveDriverCompleteTaskLeaseToken(); got != "task-token" {
 		t.Fatalf("resolve token from env = %q, want task-token", got)
 	}
-	driverCompleteTaskLeaseToken = "flag-token"
-	if got := resolveDriverCompleteTaskLeaseToken(); got != "flag-token" {
-		t.Fatalf("resolve token from flag = %q, want flag-token", got)
+	t.Setenv("LOOM_TASK_RUN_LEASE_TOKEN", "")
+	if got := resolveDriverCompleteTaskLeaseToken(); got != "runner-token" {
+		t.Fatalf("resolve runner token fallback = %q, want runner-token", got)
 	}
 }
 
@@ -254,66 +185,4 @@ func TestParseDriverRecoverStaleBefore(t *testing.T) {
 	if _, err := parseDriverRecoverStaleBefore("not-a-time"); err == nil {
 		t.Fatal("parse invalid stale before succeeded")
 	}
-}
-
-type fakeDriverTaskRunStore struct {
-	run                *domain.TaskRun
-	completedWorkspace string
-	completedTaskRunID string
-	complete           store.TaskRunComplete
-	completeCalls      int
-}
-
-func (s *fakeDriverTaskRunStore) Create(context.Context, store.TaskRunCreate) (*domain.TaskRun, error) {
-	panic("unexpected Create")
-}
-
-func (s *fakeDriverTaskRunStore) ClaimQueued(context.Context, string, store.TaskRunClaim) (*domain.TaskRun, error) {
-	panic("unexpected ClaimQueued")
-}
-
-func (s *fakeDriverTaskRunStore) Get(_ context.Context, workspaceKey, taskRunID string) (*domain.TaskRun, error) {
-	if s.run == nil || s.run.WorkspaceKey != workspaceKey || s.run.TaskRunID != taskRunID {
-		return nil, domain.ErrNotFound
-	}
-	run := *s.run
-	return &run, nil
-}
-
-func (s *fakeDriverTaskRunStore) List(context.Context, string, store.TaskRunFilter) ([]*domain.TaskRun, error) {
-	panic("unexpected List")
-}
-
-func (s *fakeDriverTaskRunStore) Heartbeat(context.Context, string, string, store.TaskRunHeartbeat) (*domain.TaskRun, error) {
-	panic("unexpected Heartbeat")
-}
-
-func (s *fakeDriverTaskRunStore) Finish(context.Context, string, string, store.TaskRunFinish) (*domain.TaskRun, error) {
-	panic("unexpected Finish")
-}
-
-func (s *fakeDriverTaskRunStore) Requeue(context.Context, string, string, store.TaskRunRequeue) (*domain.TaskRun, error) {
-	panic("unexpected Requeue")
-}
-
-func (s *fakeDriverTaskRunStore) Complete(_ context.Context, workspaceKey, taskRunID string, complete store.TaskRunComplete) (*domain.TaskRun, error) {
-	s.completeCalls++
-	s.completedWorkspace = workspaceKey
-	s.completedTaskRunID = taskRunID
-	s.complete = complete
-	run := *s.run
-	run.Status = complete.Status
-	run.LogsRef = complete.LogsRef
-	run.ArtifactsRef = complete.ArtifactsRef
-	run.ErrorClass = complete.ErrorClass
-	run.ErrorMessage = complete.ErrorMessage
-	return &run, nil
-}
-
-func (s *fakeDriverTaskRunStore) AppendLog(context.Context, string, string, store.TaskRunLogAppend) (*domain.TaskRunLogEntry, error) {
-	panic("unexpected AppendLog")
-}
-
-func (s *fakeDriverTaskRunStore) ListLogs(context.Context, string, string, store.TaskRunLogFilter) ([]*domain.TaskRunLogEntry, error) {
-	panic("unexpected ListLogs")
 }

@@ -31,10 +31,12 @@
     "targets": ["app", "dmg"],
     "externalBin": ["binaries/loom", "binaries/fleet-db"],
     "resources": {
-      "resources/webui/": "webui/"
+      "resources/webui/": "webui/",
+      "resources/licenses/node-LICENSE": "licenses/node-LICENSE",
+      "resources/runtime/node": "runtime/node"
     },
     "macOS": {
-      "minimumSystemVersion": "12.0"
+      "minimumSystemVersion": "13.5"
     }
   }
 }

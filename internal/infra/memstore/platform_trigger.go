@@ -64,6 +64,9 @@ func (s *triggerEventStore) List(_ context.Context, ws string, filter store.Trig
 		if filter.TriggerBindingID != "" && event.TriggerBindingID != filter.TriggerBindingID {
 			continue
 		}
+		if filter.SubjectRef != "" && event.SubjectRef != filter.SubjectRef {
+			continue
+		}
 		clone := *event
 		out = append(out, &clone)
 	}

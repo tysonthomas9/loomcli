@@ -111,6 +111,31 @@ func TestCreateWorkflowPreservesRequestedVersionForAutomationValidation(t *testi
 	}
 }
 
+func TestResolveTargetPreparesWithoutCreatingBinding(t *testing.T) {
+	preparer := &targetPreparerStub{target: WorkflowTarget{
+		DriverID: " driver-1 ", DriverVersionID: " version-7 ",
+	}}
+	creator := &bindingCreatorStub{}
+	workflow, err := New(preparer, creator)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	target, err := workflow.ResolveTarget(t.Context(), " WS ", " github-review-agent ")
+	if err != nil {
+		t.Fatalf("ResolveTarget: %v", err)
+	}
+	if target.DriverID != "driver-1" || target.DriverVersionID != "version-7" {
+		t.Fatalf("target = %+v", target)
+	}
+	if preparer.calls != 1 || preparer.ws != "WS" || preparer.name != "github-review-agent" {
+		t.Fatalf("preparer = %+v", preparer)
+	}
+	if creator.calls != 0 {
+		t.Fatalf("creator calls = %d, want 0", creator.calls)
+	}
+}
+
 func TestCreatePreparationFailureStopsBeforeAutomation(t *testing.T) {
 	prepErr := errors.New("builtin build unavailable")
 	preparer := &targetPreparerStub{err: prepErr}

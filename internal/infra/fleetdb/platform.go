@@ -595,6 +595,7 @@ func (s *taskRunStore) Create(ctx context.Context, in store.TaskRunCreate) (*dom
 		"runner_entrypoint":        in.RunnerEntrypoint,
 		"runner_driver_version_id": in.RunnerVersionID,
 		"provider_profile":         in.ProviderProfile,
+		"target_node_id":           in.TargetNodeID,
 		"status":                   in.Status,
 		"node_id":                  in.NodeID,
 		"lease_id":                 in.LeaseID,
@@ -766,6 +767,9 @@ func (s *taskRunStore) Complete(ctx context.Context, ws, taskRunID string, compl
 		"close_task":            complete.CloseTask,
 		"close_reason":          complete.CloseReason,
 	}
+	if !complete.FinishedAt.IsZero() {
+		body["finished_at"] = complete.FinishedAt.UTC()
+	}
 	var resp struct {
 		TaskRun *domain.TaskRun `json:"task_run"`
 	}
@@ -782,6 +786,7 @@ func (s *taskRunStore) Complete(ctx context.Context, ws, taskRunID string, compl
 
 func (s *taskRunStore) AppendLog(ctx context.Context, ws, taskRunID string, appendLog store.TaskRunLogAppend) (*domain.TaskRunLogEntry, error) {
 	body := map[string]any{
+		"request_id":    appendLog.RequestID,
 		"node_id":       appendLog.NodeID,
 		"lease_id":      appendLog.LeaseID,
 		"fencing_token": appendLog.FencingToken,

@@ -27,6 +27,7 @@ func newDriverStepStore(parent *driverRunStore) *driverStepStore {
 }
 
 var _ store.DriverStepStore = (*driverStepStore)(nil)
+var _ store.TerminalDriverStepRepairStore = (*driverStepStore)(nil)
 
 func (s *driverStepStore) Create(ctx context.Context, in store.DriverStepCreate) (*domain.DriverStep, error) {
 	return s.create(ctx, in)
@@ -133,6 +134,68 @@ func (s *driverStepStore) Update(ctx context.Context, ws, stepID string, update 
 	}
 	applyDriverStepUpdateMem(step, update, time.Now().UTC())
 	return cloneDriverStep(step), nil
+}
+
+func (s *driverStepStore) RepairTerminalDriverStep(ctx context.Context, repair store.TerminalDriverStepRepair) (*domain.DriverStep, bool, error) {
+	if !terminalDriverStepRepairValid(repair) {
+		return nil, false, fmt.Errorf("terminal DriverStep repair: %w", domain.ErrInvalid)
+	}
+	taskRun, err := s.taskRuns.Get(ctx, repair.WorkspaceKey, repair.TaskRunID)
+	if err != nil {
+		return nil, false, err
+	}
+	if !taskRun.Status.IsTerminal() || taskRun.DriverRunID != repair.DriverRunID || taskRun.DriverStepID != repair.DriverStepID {
+		return nil, false, fmt.Errorf("terminal DriverStep repair TaskRun linkage mismatch: %w", domain.ErrInvalidTransition)
+	}
+	wantStatus := terminalDriverStepStatusForTaskRun(taskRun.Status)
+	if repair.Status != wantStatus {
+		return nil, false, fmt.Errorf("terminal DriverStep repair status %q does not match TaskRun status %q: %w", repair.Status, taskRun.Status, domain.ErrInvalidTransition)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	step, ok := s.items[repair.WorkspaceKey][repair.DriverStepID]
+	if !ok {
+		return nil, false, fmt.Errorf("driver step %q in workspace %q: %w", repair.DriverStepID, repair.WorkspaceKey, domain.ErrNotFound)
+	}
+	if step.DriverRunID != repair.DriverRunID || (step.TaskRunID != "" && step.TaskRunID != repair.TaskRunID) {
+		return nil, false, fmt.Errorf("terminal DriverStep repair linkage conflict: %w", domain.ErrConflict)
+	}
+	if step.Status.IsTerminal() {
+		if step.Status != repair.Status || step.TaskRunID != repair.TaskRunID || step.OutputRef != repair.OutputRef {
+			return nil, false, fmt.Errorf("terminal DriverStep repair conflicts with existing terminal projection: %w", domain.ErrConflict)
+		}
+		return cloneDriverStep(step), true, nil
+	}
+	now := repair.RepairedAt
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	step.Status = repair.Status
+	step.TaskRunID = repair.TaskRunID
+	step.OutputRef = repair.OutputRef
+	step.EndedAt = &now
+	step.UpdatedAt = now
+	return cloneDriverStep(step), false, nil
+}
+
+func terminalDriverStepRepairValid(repair store.TerminalDriverStepRepair) bool {
+	for _, value := range []string{repair.RequestID, repair.WorkspaceKey, repair.DriverRunID, repair.DriverStepID, repair.TaskRunID} {
+		if strings.TrimSpace(value) == "" {
+			return false
+		}
+	}
+	return repair.Status.IsTerminal()
+}
+
+func terminalDriverStepStatusForTaskRun(status domain.TaskRunStatus) domain.DriverStepStatus {
+	switch status {
+	case domain.TaskRunCompleted:
+		return domain.DriverStepCompleted
+	case domain.TaskRunCancelled:
+		return domain.DriverStepSkipped
+	default:
+		return domain.DriverStepFailed
+	}
 }
 
 func (s *driverStepStore) validateDriverStepUpdateMem(ctx context.Context, ws, stepID string, step *domain.DriverStep, update store.DriverStepUpdate) error {

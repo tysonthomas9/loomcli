@@ -18,11 +18,14 @@ package driverapi
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	driverpkg "github.com/tysonthomas9/loomcli/internal/driver"
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
+	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 )
 
 // workflowsStartParams is the camelCase workflows/start request body.
@@ -45,9 +48,43 @@ type workflowsStartResponse struct {
 	ParentRunID  string `json:"parentRunId"`
 }
 
+func normalizedWorkflowStartPayload(input json.RawMessage) (json.RawMessage, error) {
+	payload := append(json.RawMessage(nil), input...)
+	if len(payload) == 0 {
+		payload = json.RawMessage(`{}`)
+	}
+	if !json.Valid(payload) {
+		return nil, fmt.Errorf("child input must be valid JSON: %w", domain.ErrInvalid)
+	}
+	return payload, nil
+}
+
+func workflowStartOwner(parent *domain.DriverRun, id driverIdentity) (execution.Owner, error) {
+	fence, err := id.FencingToken()
+	if err != nil {
+		return execution.Owner{}, err
+	}
+	return execution.Owner{
+		ResourceKind: execution.ResourceDriverRun, ResourceID: parent.RunID,
+		NodeID: id.NodeID, LeaseID: id.LeaseID, LeaseToken: id.LeaseToken, FencingToken: fence,
+	}, nil
+}
+
+func decodeWorkflowsStartParams(body []byte) (workflowsStartParams, string, error) {
+	params, err := decodeParams[workflowsStartParams](body)
+	if err != nil {
+		return workflowsStartParams{}, "", err
+	}
+	workflowName := strings.TrimSpace(params.WorkflowName)
+	if workflowName == "" {
+		return workflowsStartParams{}, "", fmt.Errorf("workflowName required: %w", domain.ErrInvalid)
+	}
+	return params, workflowName, nil
+}
+
 // workflowsStart is the workflows/start handler.
 func (m *Module) workflowsStart(ctx context.Context, ws string, id driverIdentity, body []byte) (any, error) {
-	params, err := decodeParams[workflowsStartParams](body)
+	params, workflowName, err := decodeWorkflowsStartParams(body)
 	if err != nil {
 		return nil, err
 	}
@@ -55,14 +92,38 @@ func (m *Module) workflowsStart(ctx context.Context, ws string, id driverIdentit
 	if err != nil {
 		return nil, err
 	}
-	child, err := driverpkg.StartChildWorkflow(ctx, m.store, driverpkg.StartChildWorkflowOptions{
-		WorkspaceKey:   ws,
-		ParentRunID:    parent.RunID,
-		WorkflowName:   strings.TrimSpace(params.WorkflowName),
-		Input:          params.Input,
-		IdempotencyKey: params.IdempotencyKey,
-		StartIndex:     params.StartIndex,
+	if m.execution == nil || m.executionAuthorities == nil {
+		return nil, fmt.Errorf("execution child-run API is unavailable: %w", execution.ErrUnavailable)
+	}
+	childKey, err := driverpkg.ResolveChildWorkflowStartKey(params.IdempotencyKey, params.StartIndex)
+	if err != nil {
+		return nil, err
+	}
+	target, version, err := m.resolveWorkflowStartTarget(ctx, ws, workflowName)
+	if err != nil {
+		return nil, err
+	}
+	payload, err := normalizedWorkflowStartPayload(params.Input)
+	if err != nil {
+		return nil, err
+	}
+	owner, err := workflowStartOwner(parent, id)
+	if err != nil {
+		return nil, err
+	}
+	auth, err := m.executionAuthorities.ResolveDriverRunAuthority(ctx, ws, execution.ActionStartChildDriverRun, owner)
+	if err != nil {
+		return nil, err
+	}
+	childSnapshot, err := m.execution.StartChildDriverRun(ctx, auth, execution.StartChildDriverRunCommand{
+		WorkspaceKey: ws, RequestID: execution.ChildDriverRunRequestID(parent.RunID, childKey), Owner: owner,
+		ChildKey: childKey, DriverID: target.DriverID, DriverVersionID: version.VersionID,
+		Payload: payload, MaxDepth: driverpkg.ResolveCompositionMaxDepth(),
 	})
+	if err != nil {
+		return nil, err
+	}
+	child, err := driverpkg.LegacyDriverRunSnapshot(childSnapshot)
 	if err != nil {
 		return nil, err
 	}
@@ -72,6 +133,33 @@ func (m *Module) workflowsStart(ctx context.Context, ws string, id driverIdentit
 		Status:       string(child.Status),
 		ParentRunID:  child.ParentRunID,
 	}, nil
+}
+
+func (m *Module) resolveWorkflowStartTarget(
+	ctx context.Context,
+	workspace, workflowName string,
+) (*workflowcatalog.Driver, *workflowcatalog.DriverVersion, error) {
+	if m.workflowCatalog == nil {
+		return nil, nil, fmt.Errorf("workflow catalog query API is unavailable: %w", execution.ErrUnavailable)
+	}
+	target, err := m.workflowCatalog.GetDriver(ctx, workspace, workflowName)
+	if err != nil {
+		return nil, nil, err
+	}
+	if target == nil {
+		return nil, nil, fmt.Errorf("workflow %q was not found: %w", workflowName, domain.ErrNotFound)
+	}
+	if strings.TrimSpace(target.ActiveVersionID) == "" {
+		return nil, nil, fmt.Errorf("workflow %q has no active version: %w", workflowName, domain.ErrInvalid)
+	}
+	version, err := m.workflowCatalog.GetVersion(ctx, workspace, target.ActiveVersionID)
+	if err != nil {
+		return nil, nil, err
+	}
+	if version == nil || version.DriverID != target.DriverID || version.ValidationStatus != workflowcatalog.DriverVersionValidationPassed {
+		return nil, nil, fmt.Errorf("workflow %q active version %q is not passed: %w", workflowName, target.ActiveVersionID, domain.ErrInvalid)
+	}
+	return target, version, nil
 }
 
 // workflowsAwaitParams is the camelCase workflows/await request body.
@@ -110,25 +198,34 @@ func (m *Module) workflowsAwait(ctx context.Context, ws string, id driverIdentit
 	if err != nil {
 		return nil, err
 	}
-	fence, err := id.FencingToken()
+	childRunID := strings.TrimSpace(params.ChildRunID)
+	if childRunID == "" {
+		return nil, fmt.Errorf("childRunId required: %w", domain.ErrInvalid)
+	}
+	child, err := m.store.DriverRuns().Get(ctx, ws, childRunID)
 	if err != nil {
 		return nil, err
 	}
-	outcome, child, err := driverpkg.AwaitChildWorkflow(ctx, m.store, driverpkg.AwaitChildWorkflowOptions{
-		WorkspaceKey: ws,
-		RunID:        parent.RunID,
-		NodeID:       id.NodeID,
-		LeaseID:      id.LeaseID,
-		FencingToken: fence,
-		ChildRunID:   params.ChildRunID,
-		TimeoutMs:    params.TimeoutMs,
-		AwaitIndex:   params.AwaitIndex,
-	})
+	if child.ParentRunID == "" || child.ParentRunID != parent.RunID {
+		return nil, fmt.Errorf("run %s is not a child of run %s: %w", childRunID, parent.RunID, domain.ErrNotOwner)
+	}
+	outcome, err := m.awaitDriverRun(
+		ctx, ws, id, parent, driverpkg.RunFinishedSubjectKey(childRunID),
+		[]string{driverpkg.RunFinishedActor}, params.TimeoutMs, params.AwaitIndex,
+	)
 	if err != nil {
 		return nil, err
 	}
-	resp := workflowsAwaitResponse{awaitEventResponse: m.awaitEventResponse(ctx, ws, outcome)}
-	if outcome.Status != driverpkg.AwaitOutcomeSuspended {
+	resp := workflowsAwaitResponse{awaitEventResponse: m.executionAwaitEventResponse(ctx, ws, outcome)}
+	if outcome.Status != execution.DriverAwaitOutcomeSuspended {
+		if fresh, getErr := m.store.DriverRuns().Get(ctx, ws, childRunID); getErr == nil {
+			child = fresh
+		}
+		if outcome.Instance != nil && outcome.Instance.Status == execution.DriverAwaitSatisfied {
+			if err := driverpkg.ValidateSatisfiedChildAwait(ctx, legacyExecutionAwaitInstance(outcome.Instance), child); err != nil {
+				return nil, err
+			}
+		}
 		resp.Child = m.workflowsAwaitChild(ctx, ws, child)
 	}
 	return resp, nil

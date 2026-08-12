@@ -4,12 +4,8 @@ suite: supervisor-disabled
 rows:
   - id: deterministic-plan-coder
     phase: execution
-    state: red
+    state: green
     owner: execution-reliability-lane
-    blocker: >-
-      The TS prompt-agent execution leaf does not yet have a deterministic
-      local backend, public-API prompt-agent seeding is not ordered before task
-      creation, and local mode still enters the workspace daemon manager.
     coordinates:
       depth: end-to-end
       realness: deterministic

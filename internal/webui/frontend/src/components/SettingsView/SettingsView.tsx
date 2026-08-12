@@ -676,7 +676,10 @@ export function SettingsView({
               data-testid="github-token-input"
             />
             <p className={styles.description}>
-              {runtimeCredentials?.github.configured && "Credential saved. "}
+              {runtimeCredentials?.github.configured &&
+                (runtimeCredentials.github.usable === false
+                  ? "Saved credential cannot be opened. Re-save it. "
+                  : "Credential saved. ")}
               <span>
                 Used for GitHub PR review and remote runtime provisioning.
               </span>

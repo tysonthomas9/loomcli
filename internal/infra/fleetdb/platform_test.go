@@ -15,6 +15,7 @@ import (
 func TestPlatformClientDriverRunLifecycleRoutesAndErrors(t *testing.T) {
 	var claimCount int
 	recoveryBefore := time.Date(2026, 6, 6, 12, 34, 56, 0, time.UTC)
+	logTimestamp := recoveryBefore.Add(time.Second)
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/WS/drivers":
@@ -298,14 +299,16 @@ func TestPlatformClientDriverRunLifecycleRoutesAndErrors(t *testing.T) {
 			writeJSON(t, w, domain.TaskRun{WorkspaceKey: "WS", TaskRunID: "task-run-1", Status: domain.TaskRunRunning, NodeID: req.NodeID, LeaseID: req.LeaseID, FencingToken: req.FencingToken, LogsRef: req.LogsRef})
 		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/WS/task-runs/task-run-1/logs":
 			var req struct {
-				NodeID       string `json:"node_id"`
-				LeaseID      string `json:"lease_id"`
-				FencingToken int64  `json:"fencing_token"`
-				Stream       string `json:"stream"`
-				Text         string `json:"text"`
+				RequestID    string    `json:"request_id"`
+				NodeID       string    `json:"node_id"`
+				LeaseID      string    `json:"lease_id"`
+				FencingToken int64     `json:"fencing_token"`
+				Stream       string    `json:"stream"`
+				Text         string    `json:"text"`
+				Timestamp    time.Time `json:"timestamp"`
 			}
 			decodeJSONBody(t, r, &req)
-			if req.NodeID != "node-1" || req.LeaseID != "task-lease-1" || req.FencingToken != 42 || req.Stream != "stdout" || req.Text != "starting\n" {
+			if req.RequestID != "task-run-log-1" || req.NodeID != "node-1" || req.LeaseID != "task-lease-1" || req.FencingToken != 42 || req.Stream != "stdout" || req.Text != "starting\n" || !req.Timestamp.Equal(logTimestamp) {
 				t.Fatalf("task log append body = %+v", req)
 			}
 			if r.Header.Get("X-Lease-Token") != "task-run-token" {
@@ -333,9 +336,10 @@ func TestPlatformClientDriverRunLifecycleRoutesAndErrors(t *testing.T) {
 				EstimatedCostUSD    float64              `json:"estimated_cost_usd"`
 				CloseTask           bool                 `json:"close_task"`
 				CloseReason         string               `json:"close_reason"`
+				FinishedAt          time.Time            `json:"finished_at"`
 			}
 			decodeJSONBody(t, r, &req)
-			if req.CompletionID != "completion-1" || req.NodeID != "node-1" || req.LeaseID != "task-lease-1" || req.FencingToken != 42 || req.Status != domain.TaskRunCompleted || !req.RequireArtifacts || !req.CloseTask || len(req.RequiredArtifactIDs) != 1 || req.RequiredArtifactIDs[0] != "artifact-1" {
+			if req.CompletionID != "completion-1" || req.NodeID != "node-1" || req.LeaseID != "task-lease-1" || req.FencingToken != 42 || req.Status != domain.TaskRunCompleted || !req.RequireArtifacts || !req.CloseTask || len(req.RequiredArtifactIDs) != 1 || req.RequiredArtifactIDs[0] != "artifact-1" || !req.FinishedAt.Equal(logTimestamp) {
 				t.Fatalf("task complete body = %+v", req)
 			}
 			if req.InputTokens != 23 || req.OutputTokens != 19 || req.CacheReadTokens != 13 || req.CacheWriteTokens != 2 || req.EstimatedCostUSD != 0.25 {
@@ -468,7 +472,7 @@ func TestPlatformClientDriverRunLifecycleRoutesAndErrors(t *testing.T) {
 	if heartbeat, err := client.TaskRuns().Heartbeat(t.Context(), "WS", "task-run-1", store.TaskRunHeartbeat{NodeID: taskRun.NodeID, LeaseID: taskRun.LeaseID, LeaseToken: "task-run-token", FencingToken: taskRun.FencingToken, LogsRef: "logs://task-run-1", RuntimeMetadata: map[string]string{"phase": "running"}}); err != nil || heartbeat.Status != domain.TaskRunRunning {
 		t.Fatalf("Heartbeat task run = %+v err=%v, want running", heartbeat, err)
 	}
-	if entry, err := client.TaskRuns().AppendLog(t.Context(), "WS", "task-run-1", store.TaskRunLogAppend{NodeID: taskRun.NodeID, LeaseID: taskRun.LeaseID, LeaseToken: "task-run-token", FencingToken: taskRun.FencingToken, Stream: "stdout", Text: "starting\n"}); err != nil || entry.Sequence != 1 {
+	if entry, err := client.TaskRuns().AppendLog(t.Context(), "WS", "task-run-1", store.TaskRunLogAppend{RequestID: "task-run-log-1", NodeID: taskRun.NodeID, LeaseID: taskRun.LeaseID, LeaseToken: "task-run-token", FencingToken: taskRun.FencingToken, Stream: "stdout", Text: "starting\n", Timestamp: logTimestamp}); err != nil || entry.Sequence != 1 {
 		t.Fatalf("AppendLog = %+v err=%v, want sequence 1", entry, err)
 	}
 	if logs, err := client.TaskRuns().ListLogs(t.Context(), "WS", "task-run-1", store.TaskRunLogFilter{AfterSequence: 1, Limit: 10}); err != nil || len(logs) != 1 || logs[0].Sequence != 2 {
@@ -479,7 +483,7 @@ func TestPlatformClientDriverRunLifecycleRoutesAndErrors(t *testing.T) {
 	} else if finished.InputTokens != 11 || finished.OutputTokens != 7 || finished.CacheReadTokens != 5 || finished.CacheWriteTokens != 3 || finished.EstimatedCostUSD != 0.125 {
 		t.Fatalf("Finish task run usage = %+v, want response usage", finished)
 	}
-	if completed, err := client.TaskRuns().Complete(t.Context(), "WS", "task-run-1", store.TaskRunComplete{CompletionID: "completion-1", NodeID: taskRun.NodeID, LeaseID: taskRun.LeaseID, LeaseToken: "task-run-token", FencingToken: taskRun.FencingToken, Status: domain.TaskRunCompleted, RequiredArtifactIDs: []string{"artifact-1"}, RequireArtifacts: true, InputTokens: 23, OutputTokens: 19, CacheReadTokens: 13, CacheWriteTokens: 2, EstimatedCostUSD: 0.25, CloseTask: true, CloseReason: "done"}); err != nil || completed.Status != domain.TaskRunCompleted {
+	if completed, err := client.TaskRuns().Complete(t.Context(), "WS", "task-run-1", store.TaskRunComplete{CompletionID: "completion-1", NodeID: taskRun.NodeID, LeaseID: taskRun.LeaseID, LeaseToken: "task-run-token", FencingToken: taskRun.FencingToken, Status: domain.TaskRunCompleted, RequiredArtifactIDs: []string{"artifact-1"}, RequireArtifacts: true, InputTokens: 23, OutputTokens: 19, CacheReadTokens: 13, CacheWriteTokens: 2, EstimatedCostUSD: 0.25, CloseTask: true, CloseReason: "done", FinishedAt: logTimestamp}); err != nil || completed.Status != domain.TaskRunCompleted {
 		t.Fatalf("Complete task run = %+v err=%v, want completed", completed, err)
 	} else if completed.InputTokens != 23 || completed.OutputTokens != 19 || completed.CacheReadTokens != 13 || completed.CacheWriteTokens != 2 || completed.EstimatedCostUSD != 0.25 {
 		t.Fatalf("Complete task run usage = %+v, want response usage", completed)

@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
 )
@@ -22,6 +23,7 @@ var (
 	updateTitle        string
 	updateDescription  string
 	updateDescFile     string
+	updateExternalRef  string
 	updateAddDeps      []string
 	updateRemoveDeps   []string
 	updateAddLabels    []string
@@ -33,11 +35,25 @@ var updateCmd = &cobra.Command{
 	Short: "Update issue fields",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := cmd.Context()
+		taskRunClient, active, err := taskRunDataClientFromEnv()
+		if err != nil {
+			return err
+		}
+		if active {
+			design, format, err := taskRunDesignUpdateFromFlags(cmd)
+			if err != nil {
+				return err
+			}
+			if err := taskRunClient.updateDesign(ctx, args[0], design, format); err != nil {
+				return err
+			}
+			return printMessageResult(os.Stdout, "updated "+args[0], outputFormat)
+		}
 		params, fieldsChanged, err := updateParamsFromFlags(cmd)
 		if err != nil {
 			return err
 		}
-		ctx := cmd.Context()
 		ib, err := getIssueBackend(ctx)
 		if err != nil {
 			return err
@@ -62,6 +78,38 @@ var updateCmd = &cobra.Command{
 	},
 }
 
+// taskRunDesignUpdateFromFlags admits only the one Work Item mutation exposed
+// to a model-controlled TaskRun. Inspecting local flags (rather than enumerating
+// today's other fields) makes future update flags fail closed automatically.
+func taskRunDesignUpdateFromFlags(cmd *cobra.Command) (string, *string, error) {
+	var forbidden []string
+	cmd.LocalNonPersistentFlags().VisitAll(func(flag *pflag.Flag) {
+		if flag.Changed && flag.Name != "design" && flag.Name != "design-format" {
+			forbidden = append(forbidden, "--"+flag.Name)
+		}
+	})
+	if len(forbidden) > 0 {
+		return "", nil, fmt.Errorf("task-run data update only permits --design and optional --design-format; rejected %s", strings.Join(forbidden, ", "))
+	}
+	if !cmd.Flags().Changed("design") {
+		return "", nil, fmt.Errorf("task-run data update requires --design")
+	}
+	if strings.TrimSpace(updateDesign) == "" {
+		return "", nil, fmt.Errorf("task-run data update requires a nonblank --design")
+	}
+	var format *string
+	if cmd.Flags().Changed("design-format") {
+		value := strings.TrimSpace(updateDesignFormat)
+		if value != "" {
+			if err := validateDesignFormat(value); err != nil {
+				return "", nil, err
+			}
+			format = &value
+		}
+	}
+	return updateDesign, format, nil
+}
+
 // updateParamsFromFlags builds UpdateParams from the changed field flags. The
 // boolean reports whether any field-level flag was set; dependency flags are
 // handled separately (see applyDependencyFlags).
@@ -72,6 +120,24 @@ func updateParamsFromFlags(cmd *cobra.Command) (backend.UpdateParams, bool, erro
 		return backend.UpdateParams{}, false, fmt.Errorf("--description and --description-from-file are mutually exclusive")
 	}
 	params := backend.UpdateParams{}
+	changed := applyDirectUpdateFlags(cmd, &params)
+	if applied, err := applyDesignFormatFlag(cmd, &params); err != nil {
+		return backend.UpdateParams{}, false, err
+	} else if applied {
+		changed = true
+	}
+	if applyLabelFlags(cmd, &params) {
+		changed = true
+	}
+	if applied, err := applyDescriptionFlags(cmd, &params, descFromFlag, descFromFile); err != nil {
+		return backend.UpdateParams{}, false, err
+	} else if applied {
+		changed = true
+	}
+	return params, changed, nil
+}
+
+func applyDirectUpdateFlags(cmd *cobra.Command, params *backend.UpdateParams) bool {
 	changed := false
 	if cmd.Flags().Changed("status") {
 		params.Status = &updateStatus
@@ -89,11 +155,6 @@ func updateParamsFromFlags(cmd *cobra.Command) (backend.UpdateParams, bool, erro
 		params.Design = &updateDesign
 		changed = true
 	}
-	if applied, err := applyDesignFormatFlag(cmd, &params); err != nil {
-		return backend.UpdateParams{}, false, err
-	} else if applied {
-		changed = true
-	}
 	if cmd.Flags().Changed("priority") {
 		params.Priority = &updatePriority
 		changed = true
@@ -102,15 +163,11 @@ func updateParamsFromFlags(cmd *cobra.Command) (backend.UpdateParams, bool, erro
 		params.Title = &updateTitle
 		changed = true
 	}
-	if applyLabelFlags(cmd, &params) {
+	if cmd.Flags().Changed("external-ref") {
+		params.ExternalRef = &updateExternalRef
 		changed = true
 	}
-	if applied, err := applyDescriptionFlags(cmd, &params, descFromFlag, descFromFile); err != nil {
-		return backend.UpdateParams{}, false, err
-	} else if applied {
-		changed = true
-	}
-	return params, changed, nil
+	return changed
 }
 
 // applyDescriptionFlags resolves --description / --description-from-file into
@@ -232,6 +289,7 @@ func init() {
 	updateCmd.Flags().StringVar(&updateTitle, "title", "", "Set title")
 	updateCmd.Flags().StringVar(&updateDescription, "description", "", "Set description")
 	updateCmd.Flags().StringVar(&updateDescFile, "description-from-file", "", "Read description from file (use - for stdin)")
+	updateCmd.Flags().StringVar(&updateExternalRef, "external-ref", "", "Set external reference")
 	updateCmd.Flags().StringArrayVar(&updateAddDeps, "depends-on", nil, "Add dependency on issue ID (repeatable)")
 	updateCmd.Flags().StringArrayVar(&updateRemoveDeps, "remove-depends-on", nil, "Remove dependency on issue ID (repeatable)")
 	updateCmd.Flags().StringArrayVar(&updateAddLabels, "add-label", nil, "Add label (repeatable); other labels are preserved")

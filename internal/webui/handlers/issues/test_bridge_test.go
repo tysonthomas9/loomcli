@@ -175,6 +175,7 @@ type mockIssueService struct {
 	listEventsFunc       func(ctx context.Context, params service.EventListParams) ([]*types.Event, error)
 	moveIssueFunc        func(ctx context.Context, params service.MoveIssueParams) (*service.MoveIssueResult, error)
 	searchIssuesFunc     func(ctx context.Context, params service.SearchIssuesParams) (json.RawMessage, error)
+	setRepoFunc          func(ctx context.Context, params service.SetIssueRepositoryParams) (json.RawMessage, error)
 }
 
 func (m *mockIssueService) GetIssue(ctx context.Context, issueID string) (json.RawMessage, error) {
@@ -270,6 +271,12 @@ func (m *mockIssueService) MoveIssue(ctx context.Context, params service.MoveIss
 func (m *mockIssueService) SearchIssues(ctx context.Context, params service.SearchIssuesParams) (json.RawMessage, error) {
 	if m.searchIssuesFunc != nil {
 		return m.searchIssuesFunc(ctx, params)
+	}
+	return nil, nil
+}
+func (m *mockIssueService) SetIssueRepository(ctx context.Context, params service.SetIssueRepositoryParams) (json.RawMessage, error) {
+	if m.setRepoFunc != nil {
+		return m.setRepoFunc(ctx, params)
 	}
 	return nil, nil
 }
