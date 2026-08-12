@@ -56,57 +56,58 @@ func SumTranscriptUsage(transcriptPath string) (TokenUsage, error) {
 	}
 	defer func() { _ = f.Close() }()
 
-	type msgUsage struct {
-		input      int64
-		output     int64
-		cacheRead  int64
-		cacheWrite int64
-	}
-	seen := make(map[string]msgUsage)
+	seen := make(map[string]TokenUsage)
 
 	scanner := bufio.NewScanner(f)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1*1024*1024) // 1MB buffer matching existing pattern
 	for scanner.Scan() {
-		line := scanner.Bytes()
-		if len(line) == 0 {
-			continue
-		}
-
-		var entry claudeTranscriptEntry
-		if err := json.Unmarshal(line, &entry); err != nil {
-			continue // skip corrupt lines gracefully
-		}
-
-		if entry.Type != "assistant" {
-			continue
-		}
-
-		msgID := entry.Message.ID
-		if msgID == "" {
-			continue
-		}
-
-		u := entry.Message.Usage
-		seen[msgID] = msgUsage{
-			input:      u.InputTokens,
-			output:     u.OutputTokens,
-			cacheRead:  u.CacheReadInputTokens,
-			cacheWrite: u.CacheCreationInputTokens,
-		}
+		accumulateClaudeUsage(seen, scanner.Bytes())
 	}
 
-	var total TokenUsage
-	for _, u := range seen {
-		total.InputTokens += u.input
-		total.OutputTokens += u.output
-		total.CacheReadTokens += u.cacheRead
-		total.CacheWriteTokens += u.cacheWrite
-	}
-
+	total := sumClaudeUsage(seen)
 	if err := scanner.Err(); err != nil {
 		recordErr(span, err)
 		return total, fmt.Errorf("scan transcript: %w", err)
 	}
 
 	return total, nil
+}
+
+// accumulateClaudeUsage parses one Claude transcript line and, when it is an
+// assistant message carrying a message ID, records that message's usage keyed by
+// ID. Last write wins: Claude emits snapshot updates with increasing counts for
+// the same message, so the final line for an ID holds its total. Non-assistant,
+// ID-less, and unparseable lines are ignored. Shared by the streaming
+// SumTranscriptUsage (hook path) and the in-memory extractClaudeMessageUsage
+// (finalize recovery) so both agree on how raw Claude usage is summed.
+func accumulateClaudeUsage(seen map[string]TokenUsage, line []byte) {
+	if len(line) == 0 {
+		return
+	}
+	var entry claudeTranscriptEntry
+	if err := json.Unmarshal(line, &entry); err != nil {
+		return // skip corrupt lines gracefully
+	}
+	if entry.Type != "assistant" || entry.Message.ID == "" {
+		return
+	}
+	u := entry.Message.Usage
+	seen[entry.Message.ID] = TokenUsage{
+		InputTokens:      u.InputTokens,
+		OutputTokens:     u.OutputTokens,
+		CacheReadTokens:  u.CacheReadInputTokens,
+		CacheWriteTokens: u.CacheCreationInputTokens,
+	}
+}
+
+// sumClaudeUsage totals the per-message usage collected by accumulateClaudeUsage.
+func sumClaudeUsage(seen map[string]TokenUsage) TokenUsage {
+	var total TokenUsage
+	for _, u := range seen {
+		total.InputTokens += u.InputTokens
+		total.OutputTokens += u.OutputTokens
+		total.CacheReadTokens += u.CacheReadTokens
+		total.CacheWriteTokens += u.CacheWriteTokens
+	}
+	return total
 }

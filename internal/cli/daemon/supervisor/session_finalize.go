@@ -22,11 +22,8 @@ import (
 // TS leaf's terminal `result.output`; fall back to Codex rollout token_count /
 // turn.completed events for the Go leaf.
 type leafUsage struct {
-	InputTokens      int64
-	OutputTokens     int64
-	CacheReadTokens  int64
-	CacheWriteTokens int64
-	CostUSD          float64
+	sessions.TokenUsage
+	CostUSD float64
 }
 
 // readLeafTranscript reads the session's on-disk native transcript ONCE so the
@@ -54,13 +51,7 @@ func (s *Supervisor) readLeafTranscript(sessionID string) (data []byte, usage le
 // tokens=0.
 func extractLeafUsage(data []byte) leafUsage {
 	u, cost := sessions.ExtractTranscriptUsageWithCost(data)
-	return leafUsage{
-		InputTokens:      u.InputTokens,
-		OutputTokens:     u.OutputTokens,
-		CacheReadTokens:  u.CacheReadTokens,
-		CacheWriteTokens: u.CacheWriteTokens,
-		CostUSD:          cost,
-	}
+	return leafUsage{TokenUsage: u, CostUSD: cost}
 }
 
 func (s *Supervisor) completeBackendUnavailableCleanup(ap *AgentProcess) {

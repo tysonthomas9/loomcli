@@ -112,6 +112,51 @@ export function prReviewRefFromAgent(
   return null;
 }
 
+/**
+ * Resolve the PRs-page `review-pr` ref for a clicked agent name. Prefers the
+ * live agent store, but falls back to the workspace-config agent list so a
+ * PR reviewer that is configured-but-not-running (and therefore absent from the
+ * live store, present only as a placeholder) still deep-links to its PR instead
+ * of the generic `/agents/<name>` page. Config agents carry `role_name`/`repos`;
+ * normalize them to the `role`/`repo` shape prReviewRefFromAgent expects.
+ * Returns null for non-reviewer agents or when the name resolves to neither list.
+ */
+// ReviewerAgentLike is the structural subset both agent shapes satisfy: the live
+// store's LoomAgentStatus (role/repo/display_name) and the workspace-config
+// WorkspaceAgentInfo (role_name/repos). Kept standalone so callers can pass
+// either without a cast.
+type ReviewerAgentLike = {
+  name: string;
+  role?: string | null;
+  display_name?: string | null;
+  repo?: string | null;
+  role_name?: string | null;
+  repos?: readonly string[] | null;
+};
+
+export function resolvePRReviewRef(
+  agentName: string,
+  liveAgents: readonly ReviewerAgentLike[],
+  configAgents: readonly ReviewerAgentLike[],
+): string | null {
+  const lname = agentName.trim().toLowerCase();
+  const match =
+    liveAgents.find((a) => a.name.toLowerCase() === lname) ??
+    configAgents.find((a) => a.name.toLowerCase() === lname);
+  if (!match) return null;
+  // Live agents carry role/repo; config placeholders carry role_name/repos.
+  // Normalize to the role/repo shape prReviewRefFromAgent expects, omitting
+  // absent keys (exactOptionalPropertyTypes forbids explicit undefined).
+  const role = match.role ?? match.role_name;
+  const repo = match.repo ?? match.repos?.[0];
+  return prReviewRefFromAgent({
+    name: match.name,
+    ...(role != null ? { role } : {}),
+    ...(match.display_name != null ? { display_name: match.display_name } : {}),
+    ...(repo != null ? { repo } : {}),
+  });
+}
+
 export function isPRReviewerAgent(
   agent: Pick<LoomAgentStatus, "role"> | undefined,
 ): boolean {
