@@ -2608,6 +2608,8 @@ export interface components {
       external_ref?: string | null;
       source_system?: string;
       source_repo?: string;
+      primary_repository?: string;
+      selected_repositories?: string[];
       labels?: string[];
       dependencies?: components["schemas"]["Dependency"][];
       comments?: components["schemas"]["Comment"][];
@@ -2796,6 +2798,9 @@ export interface components {
       estimated_minutes?: number | null;
       labels?: string[];
       dependencies?: string[];
+      source_repo?: string;
+      primary_repository?: string;
+      selected_repositories?: string[];
       due_at?: string;
       defer_until?: string;
     };

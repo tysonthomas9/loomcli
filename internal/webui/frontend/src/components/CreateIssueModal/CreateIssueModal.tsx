@@ -55,6 +55,7 @@ export function CreateIssueModal({
   const [title, setTitle] = useState("");
   const [issueType, setIssueType] = useState<IssueType>("task");
   const [sourceRepo, setSourceRepo] = useState("");
+  const [selectedRepositories, setSelectedRepositories] = useState<string[]>([]);
   const [parentEpic, setParentEpic] = useState("");
   const [status, setStatus] = useState<"open" | "deferred">("open");
   const [assignee, setAssignee] = useState("");
@@ -79,7 +80,8 @@ export function CreateIssueModal({
       repos
         .map((repo) => ({
           label: repo.name,
-          value: repo.source_repo_id || repo.name,
+          value: repo.name,
+          sourceRepo: repo.source_repo_id || repo.name,
         }))
         .filter((repo) => Boolean(repo.label) && Boolean(repo.value)),
     [repos],
@@ -99,6 +101,7 @@ export function CreateIssueModal({
     setTitle(initialValues?.title ?? "");
     setIssueType(initialValues?.issueType ?? "task");
     setSourceRepo(initialValues?.sourceRepo ?? "");
+    setSelectedRepositories([]);
     setParentEpic("");
     setStatus("open");
     setAssignee("");
@@ -146,7 +149,12 @@ export function CreateIssueModal({
         req.description = description.trim();
       }
       if (sourceRepo) {
-        req.source_repo = sourceRepo;
+        const selected = repoOptions.find((repo) => repo.value === sourceRepo);
+        req.source_repo = selected?.sourceRepo ?? sourceRepo;
+        req.primary_repository = sourceRepo;
+      }
+      if (selectedRepositories.length > 0) {
+        req.selected_repositories = [...selectedRepositories].sort();
       }
       // Design's New Issue modal: file straight into an epic, a starting
       // status, and an assignee — all native create-request fields.
@@ -193,6 +201,8 @@ export function CreateIssueModal({
       issueType,
       initialValues?.priority,
       sourceRepo,
+      selectedRepositories,
+      repoOptions,
       parentEpic,
       status,
       assignee,
@@ -327,7 +337,13 @@ export function CreateIssueModal({
                   id="issue-source-repo"
                   className={styles.select}
                   value={sourceRepo}
-                  onChange={(e) => setSourceRepo(e.target.value)}
+                  onChange={(e) => {
+                    const next = e.target.value;
+                    setSourceRepo(next);
+                    setSelectedRepositories((current) =>
+                      current.filter((repo) => repo !== next),
+                    );
+                  }}
                   disabled={isSubmitting || showSingleRepo}
                   data-testid="create-issue-source-repo"
                 >
@@ -364,6 +380,37 @@ export function CreateIssueModal({
               </select>
             </div>
           </div>
+
+          {showRepoSelector && sourceRepo && (
+            <fieldset className={styles.repositorySet}>
+              <legend className={styles.label}>Additional repositories</legend>
+              <p className={styles.hint}>
+                The task agent starts with exactly these repositories plus the primary repository.
+              </p>
+              <div className={styles.repositoryOptions}>
+                {repoOptions
+                  .filter((repo) => repo.value !== sourceRepo)
+                  .map((repo) => (
+                    <label className={styles.repositoryOption} key={repo.value}>
+                      <input
+                        type="checkbox"
+                        checked={selectedRepositories.includes(repo.value)}
+                        onChange={(event) =>
+                          setSelectedRepositories((current) =>
+                            event.target.checked
+                              ? [...current, repo.value]
+                              : current.filter((value) => value !== repo.value),
+                          )
+                        }
+                        disabled={isSubmitting}
+                        data-testid={`create-issue-selected-repo-${repo.value}`}
+                      />
+                      {repo.label}
+                    </label>
+                  ))}
+              </div>
+            </fieldset>
+          )}
 
           <div className={styles.fieldGroup}>
             <label className={styles.label} htmlFor="issue-description">

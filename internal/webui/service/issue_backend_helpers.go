@@ -24,28 +24,30 @@ import (
 // workspaces so FleetDB can persist the issue against the selected repo.
 func createParamsToBackend(p *CreateIssueParams) backend.CreateParams {
 	return backend.CreateParams{
-		ID:                 p.ID,
-		Parent:             p.Parent,
-		Title:              p.Title,
-		Description:        p.Description,
-		Status:             p.Status,
-		IssueType:          p.IssueType,
-		Priority:           p.Priority,
-		Design:             p.Design,
-		AcceptanceCriteria: p.AcceptanceCriteria,
-		Notes:              p.Notes,
-		Assignee:           p.Assignee,
-		Owner:              p.Owner,
-		CreatedBy:          p.CreatedBy,
-		ExternalRef:        p.ExternalRef,
-		EstimatedMinutes:   p.EstimatedMinutes,
-		Labels:             p.Labels,
-		Dependencies:       p.Dependencies,
-		SourceRepo:         p.SourceRepo,
-		DueAt:              p.DueAt,
-		DeferUntil:         p.DeferUntil,
-		IdempotencyKey:     p.IdempotencyKey,
-		Force:              p.Force,
+		ID:                   p.ID,
+		Parent:               p.Parent,
+		Title:                p.Title,
+		Description:          p.Description,
+		Status:               p.Status,
+		IssueType:            p.IssueType,
+		Priority:             p.Priority,
+		Design:               p.Design,
+		AcceptanceCriteria:   p.AcceptanceCriteria,
+		Notes:                p.Notes,
+		Assignee:             p.Assignee,
+		Owner:                p.Owner,
+		CreatedBy:            p.CreatedBy,
+		ExternalRef:          p.ExternalRef,
+		EstimatedMinutes:     p.EstimatedMinutes,
+		Labels:               p.Labels,
+		Dependencies:         p.Dependencies,
+		SourceRepo:           p.SourceRepo,
+		PrimaryRepository:    p.PrimaryRepository,
+		SelectedRepositories: append([]string(nil), p.SelectedRepositories...),
+		DueAt:                p.DueAt,
+		DeferUntil:           p.DeferUntil,
+		IdempotencyKey:       p.IdempotencyKey,
+		Force:                p.Force,
 	}
 }
 
@@ -124,6 +126,12 @@ func addOptionalIssueFields(out map[string]any, d *backend.IssueData) {
 	if d.SourceRepo != "" {
 		out["source_repo"] = d.SourceRepo
 		out["repo"] = d.SourceRepo
+	}
+	if d.PrimaryRepository != "" {
+		out["primary_repository"] = d.PrimaryRepository
+	}
+	if len(d.SelectedRepositories) > 0 {
+		out["selected_repositories"] = append([]string(nil), d.SelectedRepositories...)
 	}
 	if d.Parent != "" {
 		out["parent"] = d.Parent

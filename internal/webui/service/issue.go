@@ -81,26 +81,28 @@ type ClaimIssueParams struct {
 
 // CreateIssueParams mirrors IssueCreateRequest but is not HTTP-bound.
 type CreateIssueParams struct {
-	Title              string
-	IssueType          string
-	Priority           int
-	ID                 string
-	Parent             string
-	Description        string
-	Status             string
-	Design             string
-	AcceptanceCriteria string
-	Notes              string
-	Assignee           string
-	Owner              string
-	CreatedBy          string
-	ExternalRef        string
-	EstimatedMinutes   *int
-	Labels             []string
-	Dependencies       []string
-	DueAt              string
-	DeferUntil         string
-	SourceRepo         string
+	Title                string
+	IssueType            string
+	Priority             int
+	ID                   string
+	Parent               string
+	Description          string
+	Status               string
+	Design               string
+	AcceptanceCriteria   string
+	Notes                string
+	Assignee             string
+	Owner                string
+	CreatedBy            string
+	ExternalRef          string
+	EstimatedMinutes     *int
+	Labels               []string
+	Dependencies         []string
+	DueAt                string
+	DeferUntil           string
+	SourceRepo           string
+	PrimaryRepository    string
+	SelectedRepositories []string
 	// IdempotencyKey / Force arrive as X-Idempotency-Key / X-Idempotency-Force
 	// request headers and are forwarded header-only to fleet-db (its strict
 	// JSON decode rejects unknown body fields).
