@@ -30,7 +30,7 @@ func New(store Store) (*Service, error) {
 	return &Service{store: store}, nil
 }
 
-func (s *Service) Create(ctx context.Context, command CreateCommand) (*CreatedIssue, error) {
+func (s *Service) Create(ctx context.Context, command CreateCommand) (*IssueSummary, error) {
 	command.Title = CanonicalTitle(command.Title)
 	if err := validateCreate(command); err != nil {
 		return nil, err
@@ -61,12 +61,8 @@ func (s *Service) Create(ctx context.Context, command CreateCommand) (*CreatedIs
 		}
 		canonical = cloneIssueSummary(*admission.Issue)
 	}
-	detail, getErr := s.store.Get(ctx, GetQuery{IssueID: created.ID})
-	if getErr == nil && detail != nil && detail.ID == created.ID {
-		mergeCanonicalSummary(detail, canonical)
-		return &CreatedIssue{Detail: cloneIssueDetail(detail)}, nil
-	}
-	return &CreatedIssue{Summary: &canonical}, nil
+	result := cloneIssueSummary(canonical)
+	return &result, nil
 }
 
 //nolint:funlen // Kanban projection joins ready, blocked, deferred, and canonical issue state in one read workflow.
@@ -676,34 +672,4 @@ func cloneIssueDetail(value *IssueDetail) *IssueDetail {
 		copy.DeferUntil = &deferUntil
 	}
 	return &copy
-}
-
-func mergeCanonicalSummary(detail *IssueDetail, summary IssueSummary) {
-	if detail == nil {
-		return
-	}
-	detail.ID = summary.ID
-	detail.Title = summary.Title
-	detail.Status = summary.Status
-	detail.Priority = summary.Priority
-	detail.IssueType = summary.IssueType
-	detail.Assignee = summary.Assignee
-	detail.Owner = summary.Owner
-	detail.Labels = append([]string(nil), summary.Labels...)
-	detail.SourceRepo = summary.SourceRepo
-	detail.Repo = summary.Repo
-	detail.Parent = summary.Parent
-	detail.Design = summary.Design
-	detail.DesignArtifactID = summary.DesignArtifactID
-	detail.DesignFormat = summary.DesignFormat
-	detail.HasDesign = summary.HasDesign
-	detail.Notes = summary.Notes
-	detail.CreatedBy = summary.CreatedBy
-	detail.CreatedAt = summary.CreatedAt
-	detail.UpdatedAt = summary.UpdatedAt
-	detail.ClosedAt = summary.ClosedAt
-	detail.CloseReason = summary.CloseReason
-	detail.ExternalRef = summary.ExternalRef
-	detail.DueAt = summary.DueAt
-	detail.DeferUntil = summary.DeferUntil
 }

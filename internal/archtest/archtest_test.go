@@ -1396,6 +1396,52 @@ func TestRetiredFleetWorkItemFallbacksCannotReturn(t *testing.T) {
 	}
 }
 
+func TestRetiredWorkItemCreateProjectionFallbackCannotReturn(t *testing.T) {
+	root, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, relative := range []string{
+		"internal/modules/workitems",
+		"internal/app/workitemmove",
+		"internal/webui/handlers/onboarding",
+	} {
+		files, globErr := filepath.Glob(filepath.Join(root, filepath.FromSlash(relative), "*.go"))
+		if globErr != nil {
+			t.Fatal(globErr)
+		}
+		for _, path := range files {
+			if strings.HasSuffix(path, "_test.go") {
+				continue
+			}
+			source, readErr := os.ReadFile(path)
+			if readErr != nil {
+				t.Fatal(readErr)
+			}
+			for _, retiredText := range []string{
+				"CreatedIssue",
+				"post-create read is unavailable",
+				"Summary remains a valid fallback",
+			} {
+				if strings.Contains(string(source), retiredText) {
+					t.Errorf("retired Work Items create fallback %q returned in %s", retiredText, path)
+				}
+			}
+			parsed, parseErr := parser.ParseFile(token.NewFileSet(), path, source, 0)
+			if parseErr != nil {
+				t.Fatal(parseErr)
+			}
+			ast.Inspect(parsed, func(node ast.Node) bool {
+				declaration, ok := node.(*ast.FuncDecl)
+				if ok && declaration.Name.Name == "createdIssueID" {
+					t.Errorf("retired Work Items create-result branch returned in %s", path)
+				}
+				return true
+			})
+		}
+	}
+}
+
 func TestHandwrittenProductionAPIsDoNotRemainDeprecated(t *testing.T) {
 	root, err := filepath.Abs(filepath.Join("..", ".."))
 	if err != nil {

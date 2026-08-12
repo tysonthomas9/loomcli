@@ -162,10 +162,7 @@ func createAndQueueFirstTask(
 	if err != nil {
 		return nil, err
 	}
-	issueID, err := createdIssueID(created)
-	if err != nil {
-		return nil, err
-	}
+	issueID := created.ID
 	if err := queueFirstTask(ctx, agents, auth, agent, issueID); err != nil {
 		deleteCreatedFirstTask(workItems, issueID)
 		return nil, err
@@ -193,19 +190,6 @@ func queueFirstTask(
 		IdempotencyKey:       "onboarding-first-task:" + issueID,
 	})
 	return err
-}
-
-func createdIssueID(created *workitems.CreatedIssue) (string, error) {
-	if created == nil {
-		return "", fmt.Errorf("created issue response was empty: %w", workitems.ErrInvalidPersistedState)
-	}
-	if created.Detail != nil && strings.TrimSpace(created.Detail.ID) != "" {
-		return created.Detail.ID, nil
-	}
-	if created.Summary != nil && strings.TrimSpace(created.Summary.ID) != "" {
-		return created.Summary.ID, nil
-	}
-	return "", fmt.Errorf("created issue response did not include an id: %w", workitems.ErrInvalidPersistedState)
 }
 
 func deleteCreatedFirstTask(workItems workitems.API, issueID string) {

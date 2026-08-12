@@ -6,7 +6,7 @@ import "context"
 // surface. Commands use aggregate-specific inputs; callers never receive a
 // generic issue updater.
 type API interface {
-	Create(context.Context, CreateCommand) (*CreatedIssue, error)
+	Create(context.Context, CreateCommand) (*IssueSummary, error)
 	List(context.Context, ListQuery) (*ListResult, error)
 	Ready(context.Context, AvailabilityQuery) ([]IssueSummary, error)
 	Blocked(context.Context, AvailabilityQuery) ([]IssueSummary, error)

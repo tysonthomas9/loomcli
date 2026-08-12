@@ -1,25 +1,6 @@
 package workitems
 
-import (
-	"encoding/json"
-	"time"
-)
-
-// CreatedIssue preserves create's durable-success behavior: a canonical full
-// projection is preferred, while Summary remains a valid fallback when the
-// post-create read is unavailable. Its JSON representation is the selected
-// issue itself, not a migration wrapper.
-type CreatedIssue struct {
-	Detail  *IssueDetail
-	Summary *IssueSummary
-}
-
-func (r CreatedIssue) MarshalJSON() ([]byte, error) {
-	if r.Detail != nil {
-		return json.Marshal(r.Detail)
-	}
-	return json.Marshal(r.Summary)
-}
+import "time"
 
 // IssueSummary is the Work Items-owned list/search projection. Repo mirrors
 // SourceRepo for the existing Web UI wire contract while callers migrate.
