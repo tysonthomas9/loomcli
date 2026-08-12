@@ -46,6 +46,14 @@ type BlockedQueries interface {
 	Blocked(context.Context, AvailabilityQuery) ([]IssueSummary, error)
 }
 
+// SearchQueries is the narrow relevance-ranked query projection consumed by
+// search delivery. It is deliberately separate from List: adapters must use
+// their dedicated search endpoint rather than silently degrading to substring
+// filtering over an arbitrary page.
+type SearchQueries interface {
+	Search(context.Context, SearchQuery) ([]IssueSummary, error)
+}
+
 type ListQuery struct {
 	Filter         ListFilter
 	ExcludeStatus  []string

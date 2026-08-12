@@ -11,6 +11,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 	"github.com/tysonthomas9/loomcli/internal/observability/tracing"
 )
 
@@ -53,8 +54,12 @@ func wrapIssueBackendWithTracing(inner backend.IssueBackend) backend.IssueBacken
 // Recording-gated: skips attribute construction when the global tracer
 // is no-op (the common disabled path).
 func (t *tracedIssueBackend) startSpan(ctx context.Context, method string, attrs ...attribute.KeyValue) (context.Context, trace.Span) {
+	return t.startServiceSpan(ctx, "IssueBackend", method, attrs...)
+}
+
+func (t *tracedIssueBackend) startServiceSpan(ctx context.Context, service, method string, attrs ...attribute.KeyValue) (context.Context, trace.Span) {
 	tracer := tracing.Tracer(issueBackendTracerName)
-	ctx, span := tracer.Start(ctx, "service.IssueBackend."+method)
+	ctx, span := tracer.Start(ctx, "service."+service+"."+method)
 	if span.IsRecording() {
 		span.SetAttributes(t.backendAttr)
 		if len(attrs) > 0 {
@@ -146,14 +151,19 @@ func (t *tracedIssueBackend) Stats(ctx context.Context) (*backend.StatsData, err
 	return out, err
 }
 
-func (t *tracedIssueBackend) SearchIssues(ctx context.Context, query string, limit int) ([]backend.IssueData, error) {
+func (t *tracedIssueBackend) Search(ctx context.Context, query workitems.SearchQuery) ([]workitems.IssueSummary, error) {
 	// NB: per §6, query content is PII-sensitive — only its length is
 	// recorded as an attribute, never the raw string.
-	ctx, span := t.startSpan(ctx, "SearchIssues",
-		attribute.Int("query.bytes", len(query)),
-		attribute.Int("limit", limit),
+	ctx, span := t.startServiceSpan(ctx, "WorkItems", "Search",
+		attribute.Int("query.bytes", len(query.Query)),
+		attribute.Int("limit", query.Limit),
 	)
-	out, err := t.inner.SearchIssues(ctx, query, limit)
+	search, ok := t.inner.(workitems.SearchQueries)
+	if !ok {
+		endSpan(span, workitems.ErrUnavailable)
+		return nil, workitems.ErrUnavailable
+	}
+	out, err := search.Search(ctx, query)
 	if err == nil {
 		span.SetAttributes(attribute.Int("result.count", len(out)))
 	}

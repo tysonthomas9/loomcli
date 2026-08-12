@@ -41,6 +41,7 @@ type FleetBackend struct {
 
 // Compile-time interface check.
 var _ backend.IssueBackend = (*FleetBackend)(nil)
+var _ workitems.SearchQueries = (*FleetBackend)(nil)
 var _ workitems.MutationStream = (*FleetBackend)(nil)
 var _ backend.ClaimReleaser = (*FleetBackend)(nil)
 var _ backend.RepositoryRequirementBackend = (*FleetBackend)(nil)
@@ -291,7 +292,7 @@ func hasData(resp *apiResponse) bool {
 }
 
 // unmarshalIssueList unmarshals FleetDB issue rows and converts them to
-// []backend.IssueData. Used by List and SearchIssues.
+// []backend.IssueData. Used by List.
 //
 // fleet-db list endpoints may return a bare array or {"issues": [...]}.
 //
@@ -455,25 +456,36 @@ func (b *FleetBackend) Stats(ctx context.Context) (*backend.StatsData, error) {
 	}, nil
 }
 
-// SearchIssues performs a full-text search through fleet-db's dedicated search
+// Search performs a full-text search through fleet-db's dedicated search
 // endpoint. The ordinary list endpoint does not support a text-query filter;
 // sending query= there silently returns an unfiltered first page.
-func (b *FleetBackend) SearchIssues(ctx context.Context, query string, limit int) ([]backend.IssueData, error) {
-	if query == "" {
-		return nil, backend.ErrValidation("SearchIssues", "query must not be empty")
+func (b *FleetBackend) Search(ctx context.Context, query workitems.SearchQuery) ([]workitems.IssueSummary, error) {
+	if query.Query == "" {
+		return nil, backend.ErrValidation("Search", "query must not be empty")
 	}
-	if limit < 0 {
-		return nil, backend.ErrValidation("SearchIssues", "limit must not be negative")
+	if query.Limit < 0 {
+		return nil, backend.ErrValidation("Search", "limit must not be negative")
 	}
-	path := "/issues/search?q=" + url.QueryEscape(query)
-	if limit > 0 {
-		path += "&limit=" + strconv.Itoa(limit)
+	path := "/issues/search?q=" + url.QueryEscape(query.Query)
+	if query.Limit > 0 {
+		path += "&limit=" + strconv.Itoa(query.Limit)
 	}
-	resp, err := b.exec(ctx, "SearchIssues", "GET", path, nil)
+	resp, err := b.exec(ctx, "Search", "GET", path, nil)
 	if err != nil {
 		return nil, err
 	}
-	return unmarshalIssueList(resp, "SearchIssues")
+	if !hasData(resp) {
+		return []workitems.IssueSummary{}, nil
+	}
+	wires, err := unmarshalListOrWrapper[fleetIssueWithCountsWire](resp.Data, "Search")
+	if err != nil {
+		return nil, err
+	}
+	out := make([]workitems.IssueSummary, 0, len(wires))
+	for _, wire := range wires {
+		out = append(out, wire.toIssueSummary())
+	}
+	return out, nil
 }
 
 // --- Mutation operations ---

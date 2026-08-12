@@ -22,6 +22,7 @@ type Service struct {
 var _ API = (*Service)(nil)
 var _ StatsQueries = (*Service)(nil)
 var _ BlockedQueries = (*Service)(nil)
+var _ SearchQueries = (*Service)(nil)
 
 func New(store Store) (*Service, error) {
 	if store == nil {

@@ -6,17 +6,30 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/backend/api/gen"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 )
 
 // issueToData converts a generated Issue (slim list projection) to
 // backend.IssueData. Handles the pointer-heavy shape of the generated type.
 func issueToData(issue gen.Issue) backend.IssueData {
-	d := backend.IssueData{
-		ID:        issue.Id,
-		Title:     issue.Title,
-		Priority:  issue.Priority,
-		CreatedAt: issue.CreatedAt,
-		UpdatedAt: issue.UpdatedAt,
+	summary := issueToSummary(issue)
+	labels := make([]string, len(summary.Labels))
+	copy(labels, summary.Labels)
+	return backend.IssueData{
+		ID: summary.ID, Title: summary.Title, Status: summary.Status, Priority: summary.Priority,
+		IssueType: summary.IssueType, Assignee: summary.Assignee, Owner: summary.Owner,
+		Labels: labels, SourceRepo: summary.SourceRepo,
+		Parent: summary.Parent, Design: summary.Design, DesignArtifactID: summary.DesignArtifactID,
+		DesignFormat: summary.DesignFormat, HasDesign: summary.HasDesign,
+		ExternalRef: summary.ExternalRef, CreatedAt: summary.CreatedAt, UpdatedAt: summary.UpdatedAt,
+		DueAt: summary.DueAt, DeferUntil: summary.DeferUntil,
+	}
+}
+
+func issueToSummary(issue gen.Issue) workitems.IssueSummary {
+	d := workitems.IssueSummary{
+		ID: issue.Id, Title: issue.Title, Priority: issue.Priority,
+		CreatedAt: issue.CreatedAt, UpdatedAt: issue.UpdatedAt,
 	}
 	if issue.Status != nil {
 		d.Status = string(*issue.Status)
@@ -37,6 +50,7 @@ func issueToData(issue gen.Issue) backend.IssueData {
 	}
 	if issue.SourceRepo != nil {
 		d.SourceRepo = *issue.SourceRepo
+		d.Repo = *issue.SourceRepo
 	}
 	if issue.Parent != nil {
 		d.Parent = *issue.Parent

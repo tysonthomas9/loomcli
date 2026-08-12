@@ -221,7 +221,7 @@ func TestSpanNames_KnownNamesMatchAllowlist(t *testing.T) {
 		"service.IssueService.Claim",
 		"workspacecoord.WorkspaceService.List",
 		"service.IssueBackend.Get",
-		"service.IssueBackend.SearchIssues",
+		"service.WorkItems.Search",
 		"service.IssueBackend.WaitForMutations",
 
 		// Projector.

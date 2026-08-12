@@ -43,14 +43,31 @@ type fleetIssueWire struct {
 }
 
 func (w fleetIssueWire) toIssueData() backend.IssueData {
+	summary := w.toIssueSummary()
+	labels := make([]string, len(summary.Labels))
+	copy(labels, summary.Labels)
+	return backend.IssueData{
+		ID: summary.ID, Title: summary.Title, Status: summary.Status, Priority: summary.Priority,
+		IssueType: summary.IssueType, Assignee: summary.Assignee, Owner: summary.Owner,
+		Labels: labels, SourceRepo: summary.SourceRepo,
+		Parent: summary.Parent, Design: summary.Design, DesignArtifactID: summary.DesignArtifactID,
+		DesignFormat: summary.DesignFormat, HasDesign: summary.HasDesign, Notes: summary.Notes,
+		CreatedBy: summary.CreatedBy, CreatedAt: summary.CreatedAt, UpdatedAt: summary.UpdatedAt,
+		ClosedAt: summary.ClosedAt, CloseReason: summary.CloseReason, ExternalRef: summary.ExternalRef,
+		DueAt: summary.DueAt, DeferUntil: summary.DeferUntil,
+	}
+}
+
+func (w fleetIssueWire) toIssueSummary() workitems.IssueSummary {
 	labels := append([]string(nil), w.Labels...)
 	if labels == nil {
 		labels = []string{}
 	}
-	return backend.IssueData{
+	sourceRepo := w.sourceRepo()
+	return workitems.IssueSummary{
 		ID: w.ID, Title: w.Title, Status: w.Status, Priority: w.Priority,
 		IssueType: w.Type, Assignee: w.Assignee, Owner: w.Owner, Labels: labels,
-		SourceRepo: w.sourceRepo(), Parent: w.parent(), Design: w.Design,
+		SourceRepo: sourceRepo, Repo: sourceRepo, Parent: w.parent(), Design: w.Design,
 		DesignArtifactID: w.DesignArtifactID, DesignFormat: w.DesignFormat,
 		HasDesign: w.HasDesign || w.Design != "", Notes: w.Notes,
 		CreatedBy: w.CreatedBy, CreatedAt: w.CreatedAt, UpdatedAt: w.UpdatedAt,
@@ -98,6 +115,13 @@ func (w fleetIssueWithCountsWire) toIssueData() backend.IssueData {
 	d.DependencyCount = w.DependencyCount
 	d.DependentCount = w.DependentCount
 	return d
+}
+
+func (w fleetIssueWithCountsWire) toIssueSummary() workitems.IssueSummary {
+	summary := w.fleetIssueWire.toIssueSummary()
+	summary.DependencyCount = w.DependencyCount
+	summary.DependentCount = w.DependentCount
+	return summary
 }
 
 // readyIssueWithParent mirrors webui.ReadyIssueWithParent for JSON parsing.

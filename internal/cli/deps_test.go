@@ -18,6 +18,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 	"github.com/tysonthomas9/loomcli/internal/usage"
 )
@@ -598,8 +599,8 @@ func TestUnavailableIssueBackend_AllMethodsFailClosed(t *testing.T) {
 	assertUnavailable("Blocked", err)
 	_, err = ib.Stats(ctx)
 	assertUnavailable("Stats", err)
-	_, err = ib.SearchIssues(ctx, "query", 10)
-	assertUnavailable("SearchIssues", err)
+	_, err = ib.(workitems.SearchQueries).Search(ctx, workitems.SearchQuery{Query: "query", Limit: 10})
+	assertUnavailable("Search", err)
 	_, err = ib.Create(ctx, backend.CreateParams{})
 	assertUnavailable("Create", err)
 	assertUnavailable("Update", ib.Update(ctx, "T-1", backend.UpdateParams{}))
@@ -761,8 +762,8 @@ func TestFleetDBIssueBackend_FailsClosedWhenStoreUnavailable(t *testing.T) {
 	assertUnavailable("Blocked", err)
 	_, err = ib.Stats(ctx)
 	assertUnavailable("Stats", err)
-	_, err = ib.SearchIssues(ctx, "query", 10)
-	assertUnavailable("SearchIssues", err)
+	_, err = ib.(workitems.SearchQueries).Search(ctx, workitems.SearchQuery{Query: "query", Limit: 10})
+	assertUnavailable("Search", err)
 	_, err = ib.Create(ctx, backend.CreateParams{})
 	assertUnavailable("Create", err)
 	assertUnavailable("Update", ib.Update(ctx, "T-1", backend.UpdateParams{}))

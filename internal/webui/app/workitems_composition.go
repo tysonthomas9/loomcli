@@ -201,15 +201,15 @@ func (s *workItemsBackendStore) Search(ctx context.Context, query workitems.Sear
 	}
 	ctx, cancel := context.WithTimeout(ctx, workItemOperationTimeout)
 	defer cancel()
-	values, err := be.SearchIssues(ctx, query.Query, query.Limit)
+	search, ok := be.(workitems.SearchQueries)
+	if !ok {
+		return nil, workitems.ErrUnavailable
+	}
+	values, err := search.Search(ctx, query)
 	if err != nil {
 		return nil, translateWorkItemsBackendError(err)
 	}
-	out := make([]workitems.IssueSummary, 0, len(values))
-	for index := range values {
-		out = append(out, workItemSummary(values[index]))
-	}
-	return out, nil
+	return values, nil
 }
 
 func (s *workItemsBackendStore) Get(ctx context.Context, query workitems.GetQuery) (*workitems.IssueDetail, error) {

@@ -13,6 +13,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/backend/fleet"
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 	"github.com/tysonthomas9/loomcli/internal/usage"
 )
 
@@ -352,11 +353,15 @@ func (b *fleetDBIssueBackend) Stats(ctx context.Context) (*backend.StatsData, er
 	return out, err
 }
 
-func (b *fleetDBIssueBackend) SearchIssues(ctx context.Context, query string, limit int) ([]backend.IssueData, error) {
-	var out []backend.IssueData
-	err := b.withBackend(ctx, "SearchIssues", func(ib backend.IssueBackend) error {
+func (b *fleetDBIssueBackend) Search(ctx context.Context, query workitems.SearchQuery) ([]workitems.IssueSummary, error) {
+	var out []workitems.IssueSummary
+	err := b.withBackend(ctx, "Search", func(ib backend.IssueBackend) error {
+		search, ok := ib.(workitems.SearchQueries)
+		if !ok {
+			return workitems.ErrUnavailable
+		}
 		var err error
-		out, err = ib.SearchIssues(ctx, query, limit)
+		out, err = search.Search(ctx, query)
 		return err
 	})
 	return out, err
@@ -537,8 +542,8 @@ func (b *unavailableIssueBackend) Blocked(context.Context, backend.BlockedOpts) 
 func (b *unavailableIssueBackend) Stats(context.Context) (*backend.StatsData, error) {
 	return nil, b.unavailable("Stats")
 }
-func (b *unavailableIssueBackend) SearchIssues(context.Context, string, int) ([]backend.IssueData, error) {
-	return nil, b.unavailable("SearchIssues")
+func (b *unavailableIssueBackend) Search(context.Context, workitems.SearchQuery) ([]workitems.IssueSummary, error) {
+	return nil, b.unavailable("Search")
 }
 func (b *unavailableIssueBackend) Create(context.Context, backend.CreateParams) (*backend.IssueData, error) {
 	return nil, b.unavailable("Create")

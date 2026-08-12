@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 )
 
 // Compile-time interface check.
@@ -50,10 +51,10 @@ type MockIssueBackend struct {
 	StatsErr    error
 	StatsFn     func(ctx context.Context) (*backend.StatsData, error)
 
-	// SearchIssues
-	SearchIssuesResult []backend.IssueData
-	SearchIssuesErr    error
-	SearchIssuesFn     func(ctx context.Context, query string, limit int) ([]backend.IssueData, error)
+	// Search
+	SearchResult []workitems.IssueSummary
+	SearchErr    error
+	SearchFn     func(ctx context.Context, query workitems.SearchQuery) ([]workitems.IssueSummary, error)
 
 	// Create
 	CreateResult *backend.IssueData
@@ -192,16 +193,15 @@ func (m *MockIssueBackend) Stats(ctx context.Context) (*backend.StatsData, error
 	return result, resultErr
 }
 
-// Count implements backend.IssueBackend.
-// SearchIssues implements backend.IssueBackend.
-func (m *MockIssueBackend) SearchIssues(ctx context.Context, query string, limit int) ([]backend.IssueData, error) {
+// Search implements workitems.SearchQueries.
+func (m *MockIssueBackend) Search(ctx context.Context, query workitems.SearchQuery) ([]workitems.IssueSummary, error) {
 	m.mu.Lock()
-	m.record("SearchIssues", query, limit)
-	fn := m.SearchIssuesFn
-	result, resultErr := m.SearchIssuesResult, m.SearchIssuesErr
+	m.record("Search", query)
+	fn := m.SearchFn
+	result, resultErr := m.SearchResult, m.SearchErr
 	m.mu.Unlock()
 	if fn != nil {
-		return fn(ctx, query, limit)
+		return fn(ctx, query)
 	}
 	return result, resultErr
 }

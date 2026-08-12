@@ -464,9 +464,9 @@ func TestList_ParentFilter_Empty(t *testing.T) {
 	}
 }
 
-// --- SearchIssues ---
+// --- Search ---
 
-func TestSearchIssues_HappyPath(t *testing.T) {
+func TestSearch_HappyPath(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
 	issues := []*testIssueWithCounts{
 		{testIssue: &testIssue{ID: "s1", Title: "Auth bug in login", Status: workitems.StatusOpen, CreatedAt: now, UpdatedAt: now}},
@@ -485,9 +485,9 @@ func TestSearchIssues_HappyPath(t *testing.T) {
 	})
 	defer ts.Close()
 
-	result, err := fb.SearchIssues(context.Background(), "auth bug", 10)
+	result, err := fb.Search(context.Background(), workitems.SearchQuery{Query: "auth bug", Limit: 10})
 	if err != nil {
-		t.Fatalf("SearchIssues: %v", err)
+		t.Fatalf("Search: %v", err)
 	}
 	if !strings.HasSuffix(gotPath, "/issues/search") {
 		t.Errorf("path = %q, want suffix /issues/search", gotPath)
@@ -503,12 +503,12 @@ func TestSearchIssues_HappyPath(t *testing.T) {
 	}
 }
 
-func TestSearchIssues_EmptyQuery(t *testing.T) {
+func TestSearch_EmptyQuery(t *testing.T) {
 	fb, err := New(Config{BaseURL: "http://x", WorkspaceID: "ws"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = fb.SearchIssues(context.Background(), "", 10)
+	_, err = fb.Search(context.Background(), workitems.SearchQuery{Limit: 10})
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -517,12 +517,12 @@ func TestSearchIssues_EmptyQuery(t *testing.T) {
 	}
 }
 
-func TestSearchIssues_NegativeLimit(t *testing.T) {
+func TestSearch_NegativeLimit(t *testing.T) {
 	fb, err := New(Config{BaseURL: "http://x", WorkspaceID: "ws"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = fb.SearchIssues(context.Background(), "q", -1)
+	_, err = fb.Search(context.Background(), workitems.SearchQuery{Query: "q", Limit: -1})
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -531,14 +531,14 @@ func TestSearchIssues_NegativeLimit(t *testing.T) {
 	}
 }
 
-func TestSearchIssues_Empty(t *testing.T) {
+func TestSearch_Empty(t *testing.T) {
 	fb, ts := newTestServer(t, func(w http.ResponseWriter, _ *http.Request) {
 		respondOK(w, []*testIssueWithCounts{})
 	})
 	defer ts.Close()
-	result, err := fb.SearchIssues(context.Background(), "nothing", 10)
+	result, err := fb.Search(context.Background(), workitems.SearchQuery{Query: "nothing", Limit: 10})
 	if err != nil {
-		t.Fatalf("SearchIssues: %v", err)
+		t.Fatalf("Search: %v", err)
 	}
 	if len(result) != 0 {
 		t.Errorf("expected 0, got %d", len(result))

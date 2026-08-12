@@ -10,6 +10,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/cli"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 	"github.com/tysonthomas9/loomcli/internal/usage"
 )
 
@@ -190,7 +191,7 @@ func TestMockIssueBackendDefaultPaths(t *testing.T) {
 	m.ReadyResult = []backend.IssueData{{ID: "ready"}}
 	m.BlockedResult = []backend.IssueData{{ID: "blocked"}}
 	m.StatsResult = &backend.StatsData{}
-	m.SearchIssuesResult = []backend.IssueData{{ID: "search"}}
+	m.SearchResult = []workitems.IssueSummary{{ID: "search"}}
 	m.CreateResult = &backend.IssueData{ID: "created"}
 	m.CloseResult = &backend.CloseResult{}
 	m.ListCommentsResult = []backend.CommentData{{ID: 1}}
@@ -201,7 +202,7 @@ func TestMockIssueBackendDefaultPaths(t *testing.T) {
 	callDefaults(t, ctx, m)
 
 	wantMethods := []string{
-		"Get", "List", "Ready", "Blocked", "Stats", "SearchIssues",
+		"Get", "List", "Ready", "Blocked", "Stats", "Search",
 		"Create", "Update", "ClaimIssue", "Close", "Reopen", "Delete",
 		"AddDependency", "RemoveDependency", "ListComments", "AddComment", "ListEvents",
 		"BackendName",
@@ -271,8 +272,8 @@ func callDefaults(t *testing.T, ctx context.Context, m *MockIssueBackend) {
 	if _, err := m.Stats(ctx); err != nil {
 		t.Fatalf("Stats returned error: %v", err)
 	}
-	if _, err := m.SearchIssues(ctx, "query", 10); err != nil {
-		t.Fatalf("SearchIssues returned error: %v", err)
+	if _, err := m.Search(ctx, workitems.SearchQuery{Query: "query", Limit: 10}); err != nil {
+		t.Fatalf("Search returned error: %v", err)
 	}
 	if created, err := m.Create(ctx, backend.CreateParams{}); err != nil || created.ID != "created" {
 		t.Fatalf("Create returned %+v, %v", created, err)

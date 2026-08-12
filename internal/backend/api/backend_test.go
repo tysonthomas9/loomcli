@@ -11,6 +11,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/backend/api/gen"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 )
 
 // Compile-time interface assertion.
@@ -460,9 +461,9 @@ func TestStats_ServerError(t *testing.T) {
 	}
 }
 
-// --- Count / ClaimIssue / Search ---
+// --- Search ---
 
-func TestSearchIssues_HappyPath(t *testing.T) {
+func TestSearch_HappyPath(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
 	var gotPath string
 	var gotQuery string
@@ -481,9 +482,9 @@ func TestSearchIssues_HappyPath(t *testing.T) {
 	})
 	defer ts.Close()
 
-	result, err := ab.SearchIssues(context.Background(), "auth bug", 10)
+	result, err := ab.Search(context.Background(), workitems.SearchQuery{Query: "auth bug", Limit: 10})
 	if err != nil {
-		t.Fatalf("SearchIssues: %v", err)
+		t.Fatalf("Search: %v", err)
 	}
 	if !strings.HasSuffix(gotPath, "/issues") {
 		t.Errorf("path = %q, want suffix /issues", gotPath)
@@ -502,12 +503,12 @@ func TestSearchIssues_HappyPath(t *testing.T) {
 	}
 }
 
-func TestSearchIssues_EmptyQuery(t *testing.T) {
+func TestSearch_EmptyQuery(t *testing.T) {
 	ab, err := New(Config{BaseURL: "http://x", WorkspaceID: "ws"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = ab.SearchIssues(context.Background(), "", 10)
+	_, err = ab.Search(context.Background(), workitems.SearchQuery{Limit: 10})
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -516,12 +517,12 @@ func TestSearchIssues_EmptyQuery(t *testing.T) {
 	}
 }
 
-func TestSearchIssues_NegativeLimit(t *testing.T) {
+func TestSearch_NegativeLimit(t *testing.T) {
 	ab, err := New(Config{BaseURL: "http://x", WorkspaceID: "ws"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = ab.SearchIssues(context.Background(), "q", -1)
+	_, err = ab.Search(context.Background(), workitems.SearchQuery{Query: "q", Limit: -1})
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -530,12 +531,12 @@ func TestSearchIssues_NegativeLimit(t *testing.T) {
 	}
 }
 
-func TestSearchIssues_ServerError(t *testing.T) {
+func TestSearch_ServerError(t *testing.T) {
 	ab, ts := newTestServer(t, func(w http.ResponseWriter, _ *http.Request) {
 		respondErr(w, 500, "search index unavailable")
 	})
 	defer ts.Close()
-	_, err := ab.SearchIssues(context.Background(), "q", 0)
+	_, err := ab.Search(context.Background(), workitems.SearchQuery{Query: "q"})
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -544,13 +545,13 @@ func TestSearchIssues_ServerError(t *testing.T) {
 	}
 }
 
-func TestSearchIssues_UnmarshalError(t *testing.T) {
+func TestSearch_UnmarshalError(t *testing.T) {
 	ab, ts := newTestServer(t, func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"success":true,"data":"not-an-array"}`))
 	})
 	defer ts.Close()
-	_, err := ab.SearchIssues(context.Background(), "q", 0)
+	_, err := ab.Search(context.Background(), workitems.SearchQuery{Query: "q"})
 	if err == nil {
 		t.Fatal("expected unmarshal error")
 	}

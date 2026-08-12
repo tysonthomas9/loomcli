@@ -18,6 +18,12 @@ type claimOnlyBackend struct {
 
 type statsOnlyBackend struct{ backend.IssueBackend }
 
+type searchOnlyBackend struct{ backend.IssueBackend }
+
+func (*searchOnlyBackend) Search(_ context.Context, query workitems.SearchQuery) ([]workitems.IssueSummary, error) {
+	return []workitems.IssueSummary{{ID: "SEARCH-1", Title: query.Query}}, nil
+}
+
 func (*statsOnlyBackend) Stats(context.Context) (*backend.StatsData, error) {
 	return &backend.StatsData{TotalIssues: 9, ReadyIssues: 2}, nil
 }
@@ -100,5 +106,30 @@ func TestWorkItemsStatsMapsBackendProjectionAtComposition(t *testing.T) {
 	}
 	if stats == nil || stats.TotalIssues != 9 || stats.ReadyIssues != 2 {
 		t.Fatalf("stats = %+v", stats)
+	}
+}
+
+func TestWorkItemsSearchUsesOwnerPort(t *testing.T) {
+	api, err := NewWorkItems(func(context.Context) backend.IssueBackend { return &searchOnlyBackend{} })
+	if err != nil {
+		t.Fatal(err)
+	}
+	values, err := api.Search(context.Background(), workitems.SearchQuery{Query: " ranked ", Limit: 3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(values) != 1 || values[0].ID != "SEARCH-1" || values[0].Title != "ranked" {
+		t.Fatalf("search values = %#v", values)
+	}
+}
+
+func TestWorkItemsSearchFailsClosedWithoutOwnerPort(t *testing.T) {
+	api, err := NewWorkItems(func(context.Context) backend.IssueBackend { return &statsOnlyBackend{} })
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = api.Search(context.Background(), workitems.SearchQuery{Query: "ranked"})
+	if !errors.Is(err, workitems.ErrUnavailable) {
+		t.Fatalf("search error = %v, want unavailable", err)
 	}
 }

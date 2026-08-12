@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 	"github.com/tysonthomas9/loomcli/internal/usage"
 )
 
@@ -31,7 +32,8 @@ func TestWrapIssueBackendWithTracing_Smoke(t *testing.T) {
 	_, _ = wrapped.Ready(ctx, backend.ReadyOpts{Limit: 10})
 	_, _ = wrapped.Blocked(ctx, backend.BlockedOpts{Limit: 10})
 	_, _ = wrapped.Stats(ctx)
-	_, _ = wrapped.SearchIssues(ctx, "query", 10)
+	search := wrapped.(workitems.SearchQueries)
+	_, _ = search.Search(ctx, workitems.SearchQuery{Query: "query", Limit: 10})
 	_, _ = wrapped.Create(ctx, backend.CreateParams{Title: "t"})
 	_ = wrapped.Update(ctx, "id-1", backend.UpdateParams{})
 	_ = wrapped.ClaimIssue(ctx, "id-1", time.Minute)

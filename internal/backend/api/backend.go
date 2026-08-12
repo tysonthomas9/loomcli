@@ -24,6 +24,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/backend/api/gen"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
@@ -42,6 +43,7 @@ type APIBackend struct {
 
 // Compile-time interface check.
 var _ backend.IssueBackend = (*APIBackend)(nil)
+var _ workitems.SearchQueries = (*APIBackend)(nil)
 
 // apiResponse is the JSON envelope returned by loom server endpoints that
 // follow the { success, data, error } convention.
@@ -169,7 +171,7 @@ func hasData(resp *apiResponse) bool {
 }
 
 // unmarshalIssueList unmarshals a []gen.Issue response and converts to
-// []backend.IssueData. Used by List, Ready, and SearchIssues.
+// []backend.IssueData. Used by List and Ready.
 func unmarshalIssueList(resp *apiResponse, op string) ([]backend.IssueData, error) {
 	if !hasData(resp) {
 		return []backend.IssueData{}, nil
@@ -282,26 +284,37 @@ func (b *APIBackend) Stats(ctx context.Context) (*backend.StatsData, error) {
 	return &result, nil
 }
 
-// SearchIssues performs a full-text search via the /issues endpoint using the
+// Search performs a full-text search via the /issues endpoint using the
 // q query parameter. Returns an empty slice if no results match.
 // Note: the loom server uses "q" (not "query") for its search param — see
 // internal/backend/api/params.go addListSearchFilters.
-func (b *APIBackend) SearchIssues(ctx context.Context, query string, limit int) ([]backend.IssueData, error) {
-	if query == "" {
-		return nil, backend.ErrValidation("SearchIssues", "query must not be empty")
+func (b *APIBackend) Search(ctx context.Context, query workitems.SearchQuery) ([]workitems.IssueSummary, error) {
+	if query.Query == "" {
+		return nil, backend.ErrValidation("Search", "query must not be empty")
 	}
-	if limit < 0 {
-		return nil, backend.ErrValidation("SearchIssues", "limit must not be negative")
+	if query.Limit < 0 {
+		return nil, backend.ErrValidation("Search", "limit must not be negative")
 	}
-	path := "/issues?q=" + url.QueryEscape(query)
-	if limit > 0 {
-		path += "&limit=" + strconv.Itoa(limit)
+	path := "/issues?q=" + url.QueryEscape(query.Query)
+	if query.Limit > 0 {
+		path += "&limit=" + strconv.Itoa(query.Limit)
 	}
-	resp, err := b.exec(ctx, "SearchIssues", http.MethodGet, path, nil)
+	resp, err := b.exec(ctx, "Search", http.MethodGet, path, nil)
 	if err != nil {
 		return nil, err
 	}
-	return unmarshalIssueList(resp, "SearchIssues")
+	if !hasData(resp) {
+		return []workitems.IssueSummary{}, nil
+	}
+	var issues []gen.Issue
+	if err := json.Unmarshal(resp.Data, &issues); err != nil {
+		return nil, backend.ErrInternal("Search", "unmarshal response", err)
+	}
+	result := make([]workitems.IssueSummary, 0, len(issues))
+	for _, issue := range issues {
+		result = append(result, issueToSummary(issue))
+	}
+	return result, nil
 }
 
 // --- Mutation operations ---
