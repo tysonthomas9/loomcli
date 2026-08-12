@@ -1883,6 +1883,53 @@ machinery are still deletion targets. The next wave moves lifecycle commands
 and detail/list projections to Work Items owner ports, then deletes
 `IssueBackend` rather than preserving it as a compatibility facade.
 
+## Wave 9.40 result
+
+Wave 9.40 completes that deletion. The residual ten-method
+`internal/backend.IssueBackend`, its duplicate issue/detail/comment/dependency
+DTO and error plane, the 562-line WebUI composition proxy, the driver task
+mutation facade, compatibility tracing, and their compatibility mocks are
+removed. There is no replacement umbrella interface, alias, call-through
+fallback, or legacy package.
+
+The Work Items owner now exposes the consumer-facing lifecycle, list, detail,
+claim-lease, comment, event, and dependency ports. The real FleetDB and Loom HTTP
+adapters implement those ports directly, while CLI, runtime, driver, and WebUI
+consumers depend on the owner contracts. Claim leasing remains an explicit
+`ClaimLeaseCommands` capability instead of being hidden inside the general
+store. Workspace routing is centralized in the owner-owned `ContextAPI`, and
+create identity is owner vocabulary rather than a backend DTO.
+
+The behavioral conformance suite was restored against the canonical Work Items
+contracts under the `workitems_e2e` profile. It exercises local FleetDB, remote
+FleetDB, direct FleetDB, and Loom HTTP API paths with real processes. The
+external `issue_backend` JSON/configuration name is deliberately retained as a
+stable operator and wire contract; it no longer corresponds to an internal
+runtime interface or fallback implementation.
+
+Implementation commit `5a7fdb799` changes 188 files with 4,429 insertions and
+8,199 deletions, a net removal of 3,770 lines. Exact package shape falls to
+`158 / 15 / 143 / 42 / 60`. Import fanout also falls from 39 to 38 for
+`internal/webui/app` and from 27 to 26 for `internal/cli/serve`; both exact
+ratchets were tightened to the lower counts.
+
+## Wave 9.40 validation
+
+| Check | Result |
+|---|---|
+| Real adapter conformance | PASS: the `workitems_e2e` suite exercises local FleetDB, remote FleetDB, direct FleetDB, and Loom HTTP API adapters with real processes |
+| Focused owner and consumer tests | PASS: Work Items, API and Fleet adapters, CLI data/agent/automode/epic/monitor/serve, driver, WebUI app/hooks/routes, and local-mode composition |
+| Retired plane and cannot-return guard | PASS: the root backend Go package, `IssueBackend`, duplicate DTOs/errors, WebUI proxy, driver facade, compatibility tracing, and old mocks are absent; the architecture guard rejects their return |
+| Measured architecture guard | PASS: 11/11 profiles, 10 capability roots, zero legacy handler imports, 90 direct-write rows, 107 reviewed mutation commands, 70 runtime components, 79 goroutine launches, zero pending decisions, and 1,130.2 MiB peak process-tree RSS under 2,048 MiB |
+| Loom aggregate `make gate` | PASS: all Go and frontend quality gates, repository-wide race and coverage checks, generated-contract checks, and the paired FleetDB source/binary at `e9c185b`; the separately measured architecture run was not duplicated in this aggregate invocation |
+
+No test, profile, threshold, architecture rule, or compatibility exception was
+disabled. The horizontal IssueBackend migration is complete. The remaining
+`internal/backend/api` and `internal/backend/fleet` packages are concrete
+outbound adapters, not legacy facades; the final Phase 9 audit will decide their
+owner-local placement without collapsing distinct external transports into the
+Work Items core.
+
 ---
 
 [Migration overview](README.md) · [Phase 8 consolidation](15-phase-8-consolidation-and-evidence.md)

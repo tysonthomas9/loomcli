@@ -1,7 +1,7 @@
 # Modular Monolith Migration
 
-- **Status:** Phase 9 package consolidation in progress; through Wave 9.39 the
-  modular monolith is ratcheted to 159 production packages
+- **Status:** Phase 9 package consolidation in progress; through Wave 9.40 the
+  modular monolith is ratcheted to 158 production packages
 - **Date:** 2026-08-12
 - **Scope:** `loom serve`, the operator CLI entry surfaces, the Vite frontend counterpart, and the fleet-db contracts those capabilities depend on
 - **Provenance:** [Phase 0 integration baseline](00-phase-0-baseline.md), final [Phase 1 evidence](06-phase-1-decisions-and-evidence.md) at Loom `7e8a6dd2`, [Phase 2 evidence](07-phase-2-decisions-and-evidence.md) at Loom `84cccb761` with FleetDB `430dce8d9`, [Phase 3 evidence](08-phase-3-decisions-and-evidence.md) at core implementation commits Loom `7f95b9bf1` and FleetDB `f1c4e1119`, final [Phase 4 evidence](09-phase-4-decisions-and-evidence.md) at Loom `53cbe2577` with FleetDB `afb688768`, and the appended reliability-validation record at Loom `67c45972f` with FleetDB `9ffa69f60`
@@ -29,7 +29,7 @@ from that exact shape toward 160 packages by deleting residual horizontal
 models, repositories, and shallow composition seams without merging capability
 owners.
 
-Through Wave 9.39, Phase 9 has retired the residual `internal/types` plane,
+Through Wave 9.40, Phase 9 has retired the residual `internal/types` plane,
 duplicate Connectors and Artifacts repository/model layers, forwarding-only
 owner adapters, runtime and authentication compatibility paths, horizontal
 handler dependencies, three shallow vocabulary packages, and the ambient
@@ -41,13 +41,14 @@ Wave 9.16 deletes the forwarding-only local-session store adapter, replaces its
 persistence-shaped calls with Sessions-owned archive intents, and folds the
 nested event-store package into that implementation. Subsequent waves remove
 more runtime compatibility, handler persistence access, and shallow
-composition. The exact current shape is 159 production packages: 15 under
-`internal/modules`, 144 outside module roots, 42 one-file packages, and 60
-one-or-two-file packages. Work Items queue, statistics, search, comment, event,
-and dependency traffic now crosses owner-defined ports rather than the broad
-horizontal issue backend. The remaining issue lifecycle/detail model and
-repository compatibility plane is unfinished work, not accepted target
-architecture.
+composition. Wave 9.40 moves the remaining lifecycle, detail, list, claim,
+comment, event, and dependency behavior behind Work Items-owned ports, then
+deletes the horizontal `IssueBackend`, its duplicate projections and errors,
+and its WebUI and driver proxy layers. The exact current shape is 158 production
+packages: 15 under `internal/modules`, 143 outside module roots, 42 one-file
+packages, and 60 one-or-two-file packages. The external `issue_backend` JSON and
+configuration key remains a stable operator contract; it no longer names an
+internal runtime interface or compatibility facade.
 
 ## Reading order
 
