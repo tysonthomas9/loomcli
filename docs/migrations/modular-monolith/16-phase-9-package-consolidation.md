@@ -1568,6 +1568,47 @@ Go caches from older archcheck runs, the identical tree passed the complete
 pinned gate. The successful architecture pass peaked at 1.16 GiB RSS under its
 2 GiB limit; no test, threshold, or profile was skipped.
 
+## Wave 9.33 result
+
+Wave 9.33 deletes the generic `Count` query from the horizontal
+`IssueBackend` plane. Its only production consumer asked for the number of
+review issues in the CLI monitor, so that consumer now derives the value from
+the existing canonical filtered `List` query. No replacement count facade or
+adapter is introduced.
+
+The deletion removes `CountOpts`, including its unused generic filtering and
+grouping surface, plus the API no-op, FleetDB query translation and validation,
+lazy-workspace proxy, unavailable stub, tracing decorator, mocks, and adapter
+tests. FleetDB's private status-count response remains solely behind `Stats`,
+where grouped lifecycle statistics are actually consumed. A cannot-return
+ratchet rejects both `Count` and `CountOpts` across the backend, adapter, and
+CLI roots.
+
+The broad interface contracts from 20 methods to 19. The implementation and
+enforcement commit `cad1c8b31` changes 19 files with 13 insertions and 344
+deletions, a net removal of 331 lines. Exact package shape remains
+`159 / 15 / 144 / 42 / 60`; this wave removes a query operation and its DTO
+rather than adding another package or compatibility layer.
+
+## Wave 9.33 validation
+
+| Check | Result |
+|---|---|
+| Focused query, adapter, monitor, proxy, tracing, mock, and architecture regressions | PASS across backend, API, FleetDB, CLI, monitor, test helper, WebUI hook, and archtest packages |
+| Cannot-return architecture ratchet | PASS: `TestUnusedIssueBackendCompatibilityOperationsCannotReturn` rejects `Count` and `CountOpts` |
+| Loom `make gate` | PASS: all Go and frontend quality gates against paired FleetDB source `e9c185b` and its exact rebuilt binary, with four Go OS threads, two Go package workers, one Vitest worker, and a 2 GiB Go soft memory limit |
+
+The aggregate gate rebuilt its isolated architecture package graph before the
+repository-wide race and coverage pass. The architecture process tree stayed
+well below the 2 GiB guard; no test, threshold, profile, or owner rule was
+disabled.
+
+Phase 9 remains incomplete. The next wave moves the remaining real query
+consumers from `IssueBackend` DTOs to narrow Work Items ports, while preserving
+the dedicated relevance-ranked search semantics at the owning boundary. The
+19-method horizontal interface is still an intermediate deletion target, not
+the intended architecture.
+
 ---
 
 [Migration overview](README.md) · [Phase 8 consolidation](15-phase-8-consolidation-and-evidence.md)
