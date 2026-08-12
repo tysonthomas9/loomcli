@@ -262,6 +262,63 @@ Real Codex execution may consume paid service capacity and requires the normal
 configured Codex authentication. This must be disclosed before running the
 proof.
 
+### Completion evidence (2026-08-12)
+
+Task 1 is complete in the isolated desktop workspace `TASK1-PROOF-V5`, using
+the packaged Loom build `e635a460e` and FleetDB build `6bace72c5`.
+
+#### Implementation
+
+- Task `TASK1-PROOF-V5-2` persisted `loomcli` as its Primary Repository and
+  `fleet-db` as its Selected Repository.
+- Implementation TaskRun
+  `task-run-run-1786576907572771000-task1-proof-v5-2` completed with the exact
+  repository set `["fleet-db", "loomcli"]`.
+- Its composite manifest admitted FleetDB at
+  `bde36173f5515297394b7ae128bbdded5245b568` and Loom at
+  `0fb4401f4fa57c97653fb495e8312b8590654776`, with one stable Task Branch per
+  repository.
+- Native Codex session `019ff848-45a0-7a83-90ee-ec9279ad8c49` authored and
+  committed the requested marker independently in each repository:
+  - FleetDB: `cff89d3cbcc1201e0dd292ca6cef29c6be3757b4`;
+  - Loom: `05960f07464f8e02e89fb7544086249ecb3f6120`.
+- The transcript artifact
+  `transcript-task-run-run-1786576907572771000-task1-proof-v5-2` records the
+  composite manifest, both `git commit` operations, clean worktrees, and that
+  the backend did not push.
+- Loom's credential-bearing proxy pushed both branches and independently
+  confirmed those exact GitHub remote heads.
+
+#### Immutable handoff and review
+
+- FleetDB created Task Change Set version 1 only after both entries reached
+  `publication_status: confirmed`.
+- Review TaskRun
+  `task-run-run-1786576907572771000-task1-proof-v5-2-review-v1` used a distinct
+  root with both repositories detached at the immutable Change Set heads.
+- Its native Codex session `019ff849-3839-7733-9d9c-e28b4c761b92` is distinct
+  from the implementation session.
+- The review transcript artifact
+  `transcript-task-run-run-1786576907572771000-task1-proof-v5-2-review-v1`
+  recorded no findings and emitted:
+  - `review.repository.fleet-db.verdict: pass`;
+  - `review.repository.loomcli.verdict: pass`;
+  - `review_verdict: pass`.
+- Both successful roots were released through the Root Manager; their child
+  worktrees and Git registrations were removed.
+
+#### Regression coverage
+
+- Loom focused repository-context, root lifecycle, retry fencing, optional
+  store capability, implementation continuation, and immutable review tests
+  pass.
+- The full Loom driver suite passes.
+- FleetDB API, service, Redis storage, PostgreSQL storage, and migration suites
+  pass with localhost test servers enabled.
+- The final desktop UI evidence is retained under
+  `/tmp/loom-task1-proof-v5/` for the selection, submitted task, started epic,
+  and two completed runs.
+
 ### Explicit exclusions
 
 Task 1 does not include:
@@ -301,4 +358,3 @@ contract, and the converted path contains none of the forbidden fallbacks.
 The next task should add runtime Repository Acquisition to the same TaskRun and
 Root Manager seams; it should not introduce a second provisioning or runner
 contract.
-
