@@ -187,10 +187,19 @@ export function useSessionSeeding({
         `Failed to resolve agent terminal ${pendingAgentName}:`,
         err,
       );
-      setAgentResolutionState("idle");
-      setAgentResolutionError(null);
+      // A non-transient resolve failure must NOT silently revert to idle: doing
+      // so leaves the previously-selected agent's live terminal mounted, so
+      // keystrokes land on the wrong lead. Surface it as a failed resolution
+      // (with the server's reason) and keep pendingAgentName so the failure
+      // overlay renders in place of any other agent's terminal. Mirrors the
+      // retry-exhaustion branch below; selecting another agent clears it.
+      const message =
+        err instanceof Error && err.message.trim()
+          ? err.message
+          : "Lead terminal could not be opened. Try opening the agent again.";
+      setAgentResolutionState("failed");
+      setAgentResolutionError(message);
       consumedAgentKeyRef.current = requestKey;
-      onAgentNameConsumedRef.current?.();
     };
 
     const resolveAgent = () => {

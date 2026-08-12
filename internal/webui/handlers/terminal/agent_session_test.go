@@ -457,8 +457,12 @@ func TestLatestActiveDaytonaLeadPlacementReportsProvisioning(t *testing.T) {
 	createDaytonaLeadPlacement(t, st, "E2E", "nova", "placement-1", "", 1, domain.PlacementStateProvisioning, "")
 
 	_, err := latestActiveDaytonaLeadPlacement(ctx, st, "E2E", "nova")
-	if err == nil || !strings.Contains(err.Error(), "lead sandbox is still provisioning") {
-		t.Fatalf("latestActiveDaytonaLeadPlacement = %v, want provisioning error", err)
+	var svcErr *service.ServiceError
+	if !errors.As(err, &svcErr) || svcErr.Kind != service.KindStarting {
+		t.Fatalf("latestActiveDaytonaLeadPlacement = %v, want starting-kind provisioning error", err)
+	}
+	if !strings.Contains(svcErr.Error(), "lead sandbox is still provisioning") {
+		t.Fatalf("provisioning error message = %q, want still-provisioning", svcErr.Error())
 	}
 }
 
@@ -468,8 +472,12 @@ func TestLatestActiveDaytonaLeadPlacementReportsFailedLatestState(t *testing.T) 
 	createDaytonaLeadPlacement(t, st, "E2E", "nova", "placement-1", "sandbox-1", 1, domain.PlacementStateReleased, "create sandbox denied")
 
 	_, err := latestActiveDaytonaLeadPlacement(ctx, st, "E2E", "nova")
-	if err == nil || !strings.Contains(err.Error(), "lead sandbox provisioning failed: create sandbox denied") {
-		t.Fatalf("latestActiveDaytonaLeadPlacement = %v, want failed placement error", err)
+	var svcErr *service.ServiceError
+	if !errors.As(err, &svcErr) || svcErr.Kind != service.KindValidation {
+		t.Fatalf("latestActiveDaytonaLeadPlacement = %v, want validation-kind failed error", err)
+	}
+	if !strings.Contains(svcErr.Error(), "lead sandbox provisioning failed: create sandbox denied") {
+		t.Fatalf("failed error message = %q, want provisioning-failed", svcErr.Error())
 	}
 }
 

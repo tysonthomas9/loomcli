@@ -248,7 +248,7 @@ describe("useSessionSeeding", () => {
     expect(result.current.agentResolutionState).toBe("idle");
   });
 
-  it("does not retry a bare 503 without starting kind", async () => {
+  it("fails visibly without consuming the agent on a non-starting error", async () => {
     vi.useFakeTimers();
     vi.spyOn(console, "error").mockImplementation(() => {});
     const onAgentNameConsumed = vi.fn();
@@ -265,9 +265,14 @@ describe("useSessionSeeding", () => {
       await vi.runOnlyPendingTimersAsync();
     });
 
+    // A non-starting failure must not retry and must not silently consume the
+    // pending agent — consuming it would leave a previously-selected lead's live
+    // terminal attached. Instead it surfaces a failed resolution carrying the
+    // server's reason, so the failure overlay renders in place of any terminal.
     expect(mockHooksApi.ensureAgentTerminalSession).toHaveBeenCalledTimes(1);
-    expect(onAgentNameConsumed).toHaveBeenCalledTimes(1);
-    expect(result.current.agentResolutionState).toBe("idle");
+    expect(onAgentNameConsumed).not.toHaveBeenCalled();
+    expect(result.current.agentResolutionState).toBe("failed");
+    expect(result.current.agentResolutionError).toBe("unavailable");
   });
 
   it("does not retry early when tab state churns during waking", async () => {

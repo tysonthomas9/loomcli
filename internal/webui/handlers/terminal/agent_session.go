@@ -461,7 +461,16 @@ func latestActiveDaytonaLeadPlacement(ctx context.Context, st store.Store, works
 		// Attach-time revive only applies to active placements. Replacement
 		// provisioning remains owned by agent-create, so surface the latest state.
 		if latestAnyState != nil {
-			return nil, service.ErrValidation(daytonaLeadPlacementAttachError(latestAnyState))
+			msg := daytonaLeadPlacementAttachError(latestAnyState)
+			// A still-provisioning placement is transient: report it as "starting"
+			// so the client waits and retries (and the UI shows a waking state)
+			// rather than treating it as a hard failure — which is what leaves a
+			// different lead's terminal attached. Terminal states (released/lost/
+			// releasing) stay validation errors so the UI shows the failure.
+			if latestAnyState.Placement != nil && latestAnyState.Placement.State == domain.PlacementStateProvisioning {
+				return nil, service.ErrStarting(msg)
+			}
+			return nil, service.ErrValidation(msg)
 		}
 		return nil, service.ErrValidation("Daytona lead has no active placement to attach")
 	}
