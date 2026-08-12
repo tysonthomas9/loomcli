@@ -32,6 +32,13 @@ export const ALLOWLIST = [
     source: "src/components/AppLayout/AppLayout.tsx",
     target: "@/components/LiveRegion/LiveRegion",
   },
+  // The SessionRunDetail barrel participates in the IssueDetailPanel session
+  // graph. Importing its concrete module here avoids a Rollup circular-chunk
+  // edge while keeping the exception explicit and checked.
+  {
+    source: "src/components/WorkflowAgentDetail/WorkflowAgentDetail.tsx",
+    target: "@/components/SessionRunDetail/SessionRunDetail",
+  },
 ];
 
 /**

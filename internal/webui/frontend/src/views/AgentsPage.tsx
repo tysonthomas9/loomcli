@@ -33,6 +33,15 @@ import { useStore } from "zustand";
 
 import { ErrorBoundary, LoadingSkeleton } from "@/components";
 import { AgentDetailMain } from "@/components/AgentDetailMain/AgentDetailMain";
+import { AgentConfigModal } from "@/components/AgentConfigModal";
+import {
+  WorkflowAgentActionBar,
+  WorkflowAgentHeader,
+  WorkflowAgentInfoPane,
+  WorkflowAgentRunsPane,
+  WorkflowAgentSourceModal,
+  useWorkflowAgentDetailState,
+} from "@/components/WorkflowAgentDetail";
 import { GitTab } from "@/components/AgentDetailPanel";
 import { AgentWorkPanel } from "@/components/AgentWorkPanel/AgentWorkPanel";
 import { PanelWidthResizeHandle } from "@/components/AgentWorkPanel/PanelWidthResizeHandle";
@@ -52,7 +61,11 @@ import {
   useWorkspaceViewData,
 } from "@/contexts/WorkspaceViewContext";
 import { useAgentStoreInstance } from "@/hooks";
-import { useLocalSettings, useWorkspaceContext } from "@/hooks/workspace";
+import {
+  useAutomations,
+  useLocalSettings,
+  useWorkspaceContext,
+} from "@/hooks/workspace";
 import {
   OPEN_QUEUE_PANEL_MAX_WIDTH,
   OPEN_QUEUE_PANEL_MIN_WIDTH,
@@ -68,6 +81,7 @@ import {
   epicRunnerRuntimePayload,
   issueRepoName,
 } from "@/utils/epicRunnerPayload";
+import { isCustomRole, isInteractiveAgent } from "@/utils/agentRole";
 import { formatStatusLabel } from "@/utils/issue";
 import type { TerminalInputRequest } from "@/components/TerminalView/TerminalView";
 
@@ -76,7 +90,12 @@ import {
   saveAgentWorkPanelView,
 } from "@/utils/agentWorkPanelStorage";
 
-import { AgentEditorGroups, type AgentEditorTab } from "./AgentEditorGroups";
+import {
+  AgentEditorGroups,
+  agentTabsForCapabilities,
+  type AgentCapabilities,
+  type AgentEditorTab,
+} from "./AgentEditorGroups";
 import styles from "./AgentsPage.module.css";
 
 // Heavy tabs (CodeMirror/diff) are code-split, mirroring AgentDetailPanel.
@@ -149,8 +168,57 @@ function AgentsPageInner(): JSX.Element {
     [agents, agentName],
   );
 
+  // Route resolution (Decision: agent-store name first, then binding id). When
+  // the URL segment is not a role agent, it may be a trigger-binding "agent";
+  // resolve it from the automations list and render the workflow-agent detail.
+  const {
+    bindings,
+    initialized: bindingsInitialized,
+    setEnabled: setBindingEnabled,
+    updateBinding,
+    deleteBinding,
+    runBinding,
+  } = useAutomations(workspaceId, !!workspaceId);
+  const selectedBinding = useMemo(
+    () =>
+      agentName && !selected
+        ? bindings.find((b) => b.binding_id === agentName)
+        : undefined,
+    [agentName, selected, bindings],
+  );
+  const agentCapabilities = useMemo<AgentCapabilities>(() => {
+    if (selectedBinding) {
+      return { worktree: false, pty: false, runs: true, config: true };
+    }
+    if (selected) {
+      const hasWorktree = Boolean(
+        selected.worktree_path ||
+        selected.path ||
+        selected.branch ||
+        selected.repo,
+      );
+      return { worktree: hasWorktree, pty: true, runs: false, config: true };
+    }
+    return { worktree: false, pty: false, runs: false, config: true };
+  }, [selected, selectedBinding]);
+  const agentTabs = useMemo(
+    () => agentTabsForCapabilities(agentCapabilities),
+    [agentCapabilities],
+  );
+  const workflowDetail = useWorkflowAgentDetailState({
+    workspaceId,
+    binding: selectedBinding,
+    onSetEnabled: setBindingEnabled,
+    onRunBinding: runBinding,
+  });
+  // While the URL points at an unknown name and bindings have not yet loaded,
+  // hold the shell (don't flash the role terminal for a name that is a binding).
+  const resolvingBinding =
+    !!agentName && !selected && !selectedBinding && !bindingsInitialized;
+
   // Inline task-detail selection, restored per agent from scoped storage.
   const [selectedTask, setSelectedTask] = useState<Issue | null>(null);
+  const [showAgentConfig, setShowAgentConfig] = useState(false);
   const [pendingTerminalInput, setPendingTerminalInput] = useState<
     TerminalInputRequest | undefined
   >(undefined);
@@ -321,6 +389,10 @@ function AgentsPageInner(): JSX.Element {
     [persistSelectedTaskId],
   );
 
+  const handleBindingDeleted = useCallback(() => {
+    navigate(`/ws/${workspaceId}/kanban`);
+  }, [navigate, workspaceId]);
+
   const inlinePanelIssue = useMemo(() => {
     if (!selectedTask) return null;
     if (issueDetails?.id === selectedTask.id) return issueDetails;
@@ -372,13 +444,43 @@ function AgentsPageInner(): JSX.Element {
 
   const statusType = parseLoomStatus(selected?.status ?? "").type;
   const roleName = selected?.role ?? statusType;
+  // The agent's actual role (no status fallback) — gates the Phase B edit surface.
+  const selectedRole = (selected?.role ?? "").trim();
+  // The current Role editor only mutates file-backed worker prompts. Inline
+  // interactive roles require kind/prompt-aware CRUD before they can use it.
+  const canEditConfig =
+    selected !== undefined &&
+    !isInteractiveAgent(selected) &&
+    isCustomRole(selectedRole);
   const selColor = getAvatarColor(selected?.name ?? "agent");
   const selText = shouldUseWhiteText(selColor) ? "#fff" : "#171717";
 
   const renderAgentPane = useCallback(
     (tab: AgentEditorTab, isActive: boolean) => {
       switch (tab) {
+        case "runs":
+          if (!selectedBinding) {
+            return (
+              <div className={styles.tabFallback}>
+                This agent has no run history.
+              </div>
+            );
+          }
+          return (
+            <WorkflowAgentRunsPane
+              workspaceId={workspaceId}
+              binding={selectedBinding}
+              detail={workflowDetail}
+            />
+          );
         case "terminal":
+          if (!agentCapabilities.pty) {
+            return (
+              <div className={styles.tabFallback}>
+                This agent has no live terminal.
+              </div>
+            );
+          }
           return (
             <div className={styles.realTabBody}>
               <AgentDetailMain
@@ -391,6 +493,18 @@ function AgentsPageInner(): JSX.Element {
             </div>
           );
         case "info":
+          if (selectedBinding) {
+            return (
+              <WorkflowAgentInfoPane
+                workspaceId={workspaceId}
+                binding={selectedBinding}
+                detail={workflowDetail}
+                onUpdate={updateBinding}
+                onDelete={deleteBinding}
+                onDeleted={handleBindingDeleted}
+              />
+            );
+          }
           if (!selected) {
             return (
               <div className={styles.tabFallback}>
@@ -463,10 +577,22 @@ function AgentsPageInner(): JSX.Element {
                   ) : null}
                 </dl>
               </section>
+              {canEditConfig && (
+                <section className={styles.card}>
+                  <button
+                    type="button"
+                    className={styles.configButton}
+                    data-testid="agents-page-edit-config"
+                    onClick={() => setShowAgentConfig(true)}
+                  >
+                    Edit configuration
+                  </button>
+                </section>
+              )}
             </div>
           );
         case "git":
-          if (!selected) {
+          if (!selected || !agentCapabilities.worktree) {
             return (
               <div className={styles.tabFallback}>
                 Select an agent to view git.
@@ -481,7 +607,7 @@ function AgentsPageInner(): JSX.Element {
             </div>
           );
         case "diff":
-          if (!selected) {
+          if (!selected || !agentCapabilities.worktree) {
             return (
               <div className={styles.tabFallback}>
                 Select an agent to view diff.
@@ -500,7 +626,7 @@ function AgentsPageInner(): JSX.Element {
             </div>
           );
         case "files":
-          if (!selected) {
+          if (!selected || !agentCapabilities.worktree) {
             return (
               <div className={styles.tabFallback}>
                 Select an agent to browse files.
@@ -528,25 +654,66 @@ function AgentsPageInner(): JSX.Element {
     },
     [
       agentName,
+      workspaceId,
       pendingTerminalInput,
       selected,
+      selectedBinding,
+      workflowDetail,
+      updateBinding,
+      deleteBinding,
+      handleBindingDeleted,
+      agentCapabilities.pty,
+      agentCapabilities.worktree,
       selColor,
       selText,
       roleName,
       infoStats,
       statusType,
+      canEditConfig,
     ],
   );
+
+  if (resolvingBinding) {
+    return (
+      <div className={styles.page} data-testid="agents-page">
+        <section className={styles.main} aria-label="Agent details">
+          <div className={styles.tabFallback}>Loading agent…</div>
+        </section>
+      </div>
+    );
+  }
 
   return (
     <div className={styles.page} data-testid="agents-page">
       {/* Main panel: Aether tab strip over the live agent surfaces */}
       <section className={styles.main} aria-label="Agent details">
-        <AgentEditorGroups resetKey={agentName} renderPane={renderAgentPane} />
+        {selectedBinding ? (
+          <>
+            <WorkflowAgentHeader
+              binding={selectedBinding}
+              detail={workflowDetail}
+            />
+            <WorkflowAgentActionBar
+              binding={selectedBinding}
+              detail={workflowDetail}
+            />
+          </>
+        ) : null}
+        <AgentEditorGroups
+          resetKey={agentName}
+          tabs={agentTabs}
+          renderPane={renderAgentPane}
+        />
+        <WorkflowAgentSourceModal
+          isOpen={workflowDetail.showSource}
+          workspaceId={workspaceId}
+          binding={selectedBinding}
+          onClose={() => workflowDetail.setShowSource(false)}
+        />
       </section>
 
       {/* Right column: epic-runner Open Queue or inline task detail */}
-      {selectedTask ? (
+      {selectedBinding ? null : selectedTask ? (
         <div className={styles.inlineDetail} style={{ width: openQueueWidth }}>
           <PanelWidthResizeHandle
             width={openQueueWidth}
@@ -581,6 +748,19 @@ function AgentsPageInner(): JSX.Element {
           onTaskClick={handleTaskClick}
           onRunEpic={handleRunEpic}
           onAgentClick={handleAgentClick}
+        />
+      )}
+      {selected && canEditConfig && (
+        <AgentConfigModal
+          isOpen={showAgentConfig}
+          workspaceId={workspaceId}
+          agentName={selected.name}
+          roleName={selectedRole}
+          onClose={() => setShowAgentConfig(false)}
+          onDeleted={() => {
+            setShowAgentConfig(false);
+            navigate(`/ws/${workspaceId}/agents`);
+          }}
         />
       )}
     </div>

@@ -2,131 +2,15 @@ package driver
 
 import (
 	"context"
-	"encoding/json"
+	"errors"
 	"fmt"
-	"os"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
-
-// NoopTaskProviderEnvVar gates the test-only noop/local-noop provider profile
-// (§4.5). When it is not set to "1" a noop provider fails closed with
-// provider_unsupported in both preflight and execute — production must never
-// auto-complete a task run without real execution evidence.
-const NoopTaskProviderEnvVar = "LOOM_DRIVER_ENABLE_TEST_NOOP_PROVIDER"
-
-// testNoopProviderEnabled reports whether the test-only noop provider gate is
-// explicitly enabled. Default (unset) is fail-closed.
-func testNoopProviderEnabled() bool {
-	return strings.TrimSpace(os.Getenv(NoopTaskProviderEnvVar)) == "1"
-}
-
-type TaskRunRequestOptions struct {
-	WorkspaceKey       string
-	DriverRunID        string
-	DriverStepID       string
-	TaskRunID          string
-	TaskID             string
-	WorkerProfileID    string
-	Runner             string
-	RunnerRef          string
-	RunnerKind         string
-	RunnerEntrypoint   string
-	RunnerVersionID    string
-	RunnerTrustLevel   domain.DriverTrustLevel
-	ProviderProfile    string
-	ParentSessionID    string
-	ParentNodeID       string
-	ParentLeaseID      string
-	ParentFence        int64
-	NodeID             string
-	RunnerID           string
-	LeaseID            string
-	LeaseToken         string
-	SupportedProviders []string
-	Capabilities       []string
-	WorkerProfileIDs   []string
-	RunnerPlacement    domain.TaskRunPlacement
-	SandboxPlacement   domain.TaskRunPlacement
-	HeartbeatInterval  time.Duration
-	DeferCompletion    bool
-	// Input is the optional task-run payload (e.g. a review diff+rubric)
-	// persisted on the run and delivered to the runner.
-	Input json.RawMessage
-}
-
-type TaskRunWorkerOptions struct {
-	WorkspaceKey       string
-	TaskRunID          string
-	NodeID             string
-	RunnerID           string
-	LeaseID            string
-	LeaseToken         string
-	SupportedProviders []string
-	Capabilities       []string
-	WorkerProfileIDs   []string
-	RunnerPlacement    domain.TaskRunPlacement
-	SandboxPlacement   domain.TaskRunPlacement
-	HeartbeatInterval  time.Duration
-	DeferCompletion    bool
-	CloseTaskOnSuccess bool
-	MaxAttempts        int
-	// Now is a clock seam for tests; nil uses time.Now.
-	Now func() time.Time
-}
-
-type TaskExecRequest struct {
-	WorkspaceKey     string                  `json:"workspace_key"`
-	DriverRunID      string                  `json:"driver_run_id"`
-	DriverStepID     string                  `json:"driver_step_id,omitempty"`
-	TaskRunID        string                  `json:"task_run_id"`
-	TaskID           string                  `json:"task_id"`
-	WorkerProfileID  string                  `json:"worker_profile_id,omitempty"`
-	Runner           string                  `json:"runner,omitempty"`
-	RunnerRef        string                  `json:"runner_ref,omitempty"`
-	RunnerKind       string                  `json:"runner_kind,omitempty"`
-	RunnerEntrypoint string                  `json:"runner_entrypoint,omitempty"`
-	RunnerVersionID  string                  `json:"runner_driver_version_id,omitempty"`
-	RunnerTrustLevel domain.DriverTrustLevel `json:"runner_trust_level,omitempty"`
-	ProviderProfile  string                  `json:"provider_profile,omitempty"`
-	ParentSessionID  string                  `json:"parent_session_id,omitempty"`
-	NodeID           string                  `json:"node_id,omitempty"`
-	LeaseID          string                  `json:"lease_id,omitempty"`
-	LeaseToken       string                  `json:"lease_token,omitempty"`
-	FencingToken     int64                   `json:"fencing_token,omitempty"`
-	RunnerPlacement  domain.TaskRunPlacement `json:"runner_placement,omitempty"`
-	SandboxPlacement domain.TaskRunPlacement `json:"sandbox_placement,omitempty"`
-	// Input is the task-run payload delivered verbatim to the runner via
-	// LOOM_TASK_RUN_REQUEST_JSON. Optional (omitempty) for back-compat.
-	Input json.RawMessage `json:"input,omitempty"`
-}
-
-type TaskExecResult struct {
-	Status           domain.TaskRunStatus
-	ExitCode         int
-	LogsRef          string
-	ArtifactsRef     string
-	ArtifactIDs      []string
-	InputTokens      int64
-	OutputTokens     int64
-	CacheReadTokens  int64
-	CacheWriteTokens int64
-	EstimatedCostUSD float64
-	RuntimeMetadata  map[string]string
-	ErrorClass       string
-	ErrorMessage     string
-}
-
-type TaskExecutor interface {
-	ExecuteTask(ctx context.Context, req TaskExecRequest) (TaskExecResult, error)
-}
-
-type TaskProviderPreflighter interface {
-	PreflightTaskProvider(ctx context.Context, opts TaskRunRequestOptions) (TaskRunRequestOptions, error)
-}
 
 type LocalTaskExecutor struct{}
 
@@ -458,14 +342,46 @@ func resolveTaskRunRequestRunner(ctx context.Context, s store.Store, opts TaskRu
 		return opts, fmt.Errorf("runner manifest version %q belongs to driver %q, run wants %q: %w", version.VersionID, version.DriverID, parent.DriverID, domain.ErrInvalid)
 	}
 	resolved, err := applyResolvedRunner(opts, parent, version)
+	if err == nil {
+		driver, derr := s.Drivers().Get(ctx, opts.WorkspaceKey, parent.DriverID)
+		if derr != nil {
+			return opts, fmt.Errorf("load driver %q for runner trust policy: %w", parent.DriverID, derr)
+		}
+		resolved.RunnerTrustLevel = DriverVersionEffectiveTrust(driver, version)
+		return resolved, nil
+	}
+	// The caller's own version does not declare this runner. Fall back to the
+	// workspace-global BUILTIN task-runner registry (GAP A). This is what lets a
+	// custom/untrusted workflow driver dispatch a blessed builtin runner (e.g.
+	// local-task-runner) it never bundled. Any OTHER resolve failure (malformed
+	// manifest, OpenShell guard) fails closed with no fallback.
+	if !errors.Is(err, ErrRunnerNotDeclared) {
+		return opts, err
+	}
+	if globalResolved, gErr := resolveGlobalRunnerRequest(ctx, s, opts, parent); gErr == nil {
+		return globalResolved, nil
+	}
+	// Global resolution also failed: return the ORIGINAL not-declared error so an
+	// unknown runner name fails exactly as it did before this fallback existed.
+	return opts, err
+}
+
+// resolveGlobalRunnerRequest resolves opts.Runner against the trusted builtin
+// registry and pins the request onto the runner's OWNING (builtin) version: its
+// version id, ref, kind and entrypoint — so the host loads the builtin's bundle
+// — and its trust level — so the runner executes under its own trust, never the
+// (possibly untrusted) caller's. See global_runner.go for the security
+// reasoning.
+func resolveGlobalRunnerRequest(ctx context.Context, s store.Store, opts TaskRunRequestOptions, parent *domain.DriverRun) (TaskRunRequestOptions, error) {
+	res, err := resolveGlobalRunner(ctx, s, opts.WorkspaceKey, opts.Runner)
 	if err != nil {
 		return opts, err
 	}
-	driver, err := s.Drivers().Get(ctx, opts.WorkspaceKey, parent.DriverID)
+	resolved, err := applyResolvedRunner(opts, parent, res.Version)
 	if err != nil {
-		return opts, fmt.Errorf("load driver %q for runner trust policy: %w", parent.DriverID, err)
+		return opts, err
 	}
-	resolved.RunnerTrustLevel = DriverVersionEffectiveTrust(driver, version)
+	resolved.RunnerTrustLevel = DriverVersionEffectiveTrust(res.Driver, res.Version)
 	return resolved, nil
 }
 
@@ -534,6 +450,11 @@ func createQueuedTaskRun(ctx context.Context, s store.Store, opts TaskRunRequest
 	}
 	if opts.ParentSessionID != "" {
 		runtimeMetadata["parent_session_id"] = opts.ParentSessionID
+	}
+	if opts.CloseTaskOnSuccess != nil {
+		// Persist the per-request override so the worker (which claims any queued
+		// run) can honor it after claim. Absent => worker default preserved.
+		runtimeMetadata[TaskRunCloseOnSuccessMetaKey] = strconv.FormatBool(*opts.CloseTaskOnSuccess)
 	}
 	return s.TaskRuns().Create(ctx, store.TaskRunCreate{
 		WorkspaceKey:     opts.WorkspaceKey,
@@ -657,7 +578,11 @@ func executeClaimedTaskRunWithResult(ctx context.Context, s store.Store, claimed
 	if opts.DeferCompletion && completion.Status == domain.TaskRunCompleted {
 		return deferClaimedTaskRunCompletion(ctx, s, claimed, opts, execResult, completion, metadata)
 	}
-	if opts.CloseTaskOnSuccess && completion.Status == domain.TaskRunCompleted {
+	// The per-request CloseTaskOnSuccess override (persisted on the queued run's
+	// RuntimeMetadata) wins over the caller's default when present, so an
+	// enqueued planner run leaves its card in design+review instead of closing.
+	closeTaskOnSuccess := resolveCloseTaskOnSuccess(opts.CloseTaskOnSuccess, claimed.RuntimeMetadata)
+	if closeTaskOnSuccess && completion.Status == domain.TaskRunCompleted {
 		return completeAndCloseClaimedTaskRun(ctx, s, claimed, opts, refs, execResult, completion, metadata, evctx)
 	}
 	if retryTaskRun := taskRunRetryDecision(claimed, opts, completion); retryTaskRun.Retry {

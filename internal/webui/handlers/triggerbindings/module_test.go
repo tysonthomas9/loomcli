@@ -1,0 +1,653 @@
+package triggerbindings
+
+import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	"github.com/tysonthomas9/loomcli/internal/store"
+)
+
+// seededMux returns a mux wired to a memstore that already has a workflow
+// driver ("driver-1") with a validated active version ("version-1").
+func seededMux(t *testing.T) (*http.ServeMux, store.Store) {
+	t.Helper()
+	s := memstore.New()
+	ctx := context.Background()
+	if _, err := s.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "WS", Name: "WS"}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if _, err := s.Drivers().Create(ctx, store.DriverCreate{
+		WorkspaceKey: "WS",
+		DriverID:     "driver-1",
+		Name:         "epic-runner",
+		OwnerType:    domain.DriverOwnerSystem,
+		Status:       domain.DriverStatusActive,
+	}); err != nil {
+		t.Fatalf("create driver: %v", err)
+	}
+	if _, err := s.DriverVersions().Create(ctx, store.DriverVersionCreate{
+		WorkspaceKey:     "WS",
+		VersionID:        "version-1",
+		DriverID:         "driver-1",
+		Version:          1,
+		SourceDigest:     "sha256:source",
+		BundleDigest:     "sha256:bundle",
+		ValidationStatus: domain.DriverVersionValidationPassed,
+	}); err != nil {
+		t.Fatalf("create driver version: %v", err)
+	}
+	mux := http.NewServeMux()
+	NewModule(s).Register(mux)
+	return mux, s
+}
+
+func do(t *testing.T, mux *http.ServeMux, method, path, body string) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(method, path, strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	return rec
+}
+
+func TestCreateBinding_CreatesThenDisables(t *testing.T) {
+	mux, _ := seededMux(t)
+
+	rec := do(t, mux, http.MethodPost, "/api/workspaces/WS/trigger-bindings",
+		`{"driver_id":"driver-1","driver_version_id":"version-1","route_key":"epics.runs.create","source_kind":"http","name":"epic-runner-binding","enabled":true}`)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create status = %d, want 201; body=%s", rec.Code, rec.Body.String())
+	}
+	var binding domain.TriggerBinding
+	if err := json.Unmarshal(rec.Body.Bytes(), &binding); err != nil {
+		t.Fatalf("decode binding: %v", err)
+	}
+	if binding.RouteKey != "epics.runs.create" || binding.DriverID != "driver-1" || !binding.Enabled {
+		t.Fatalf("unexpected binding: %+v", binding)
+	}
+
+	// Disabling flips Enabled without a request body.
+	rec2 := do(t, mux, http.MethodPost,
+		"/api/workspaces/WS/trigger-bindings/"+binding.BindingID+"/disable", "")
+	if rec2.Code != http.StatusOK {
+		t.Fatalf("disable status = %d, want 200; body=%s", rec2.Code, rec2.Body.String())
+	}
+	var disabled domain.TriggerBinding
+	if err := json.Unmarshal(rec2.Body.Bytes(), &disabled); err != nil {
+		t.Fatalf("decode disabled: %v", err)
+	}
+	if disabled.Enabled {
+		t.Fatalf("binding should be disabled after /disable")
+	}
+}
+
+func TestSetEnabledRejectsAgentManagedBinding(t *testing.T) {
+	mux, st := seededMux(t)
+	ctx := context.Background()
+	if _, err := st.Roles().Create(ctx, store.RoleCreate{WorkspaceKey: "WS", Name: "docs-assistant"}); err != nil {
+		t.Fatalf("create role: %v", err)
+	}
+	if _, err := st.AgentServices().Create(ctx, store.AgentServiceCreate{
+		WorkspaceKey: "WS", ServiceID: "agt-docs", Name: "Docs",
+		Kind: domain.AgentServiceKindEvent, DesiredState: domain.AgentServiceDesiredRunning, RoleName: "docs-assistant",
+	}); err != nil {
+		t.Fatalf("create agent service: %v", err)
+	}
+	if _, err := st.TriggerBindings().Create(ctx, store.TriggerBindingCreate{
+		WorkspaceKey: "WS", BindingID: "agt-docs-1", Name: "Docs",
+		SourceKind: store.InternalSourceKind, DriverID: "driver-1", DriverVersionID: "version-1",
+		TargetAgentServiceID: "agt-docs", Enabled: false,
+	}); err != nil {
+		t.Fatalf("create attached binding: %v", err)
+	}
+
+	rec := do(t, mux, http.MethodPost, "/api/workspaces/WS/trigger-bindings/agt-docs-1/enable", "")
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("enable status = %d, want 409; body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "managed by agent agt-docs") {
+		t.Fatalf("enable body = %s, want managed-by-agent message", rec.Body.String())
+	}
+	binding, err := st.TriggerBindings().Get(ctx, "WS", "agt-docs-1")
+	if err != nil {
+		t.Fatalf("get binding: %v", err)
+	}
+	if binding.Enabled {
+		t.Fatalf("binding enabled despite guard: %+v", binding)
+	}
+}
+
+// TestCreateBinding_IsIdempotent pins the ensure contract the create-agent
+// gallery relies on: re-activating the same template (same binding_id) returns
+// 200 with the existing binding rather than a 409 that would fail activation
+// before it reaches the connector/grant steps.
+func TestCreateBinding_IsIdempotent(t *testing.T) {
+	mux, _ := seededMux(t)
+	body := `{"driver_id":"driver-1","driver_version_id":"version-1","route_key":"epics.runs.create","source_kind":"http","binding_id":"b-fixed","enabled":true}`
+
+	rec := do(t, mux, http.MethodPost, "/api/workspaces/WS/trigger-bindings", body)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("first create status = %d, want 201; body=%s", rec.Code, rec.Body.String())
+	}
+
+	rec2 := do(t, mux, http.MethodPost, "/api/workspaces/WS/trigger-bindings", body)
+	if rec2.Code != http.StatusOK {
+		t.Fatalf("re-create status = %d, want 200 ensure; body=%s", rec2.Code, rec2.Body.String())
+	}
+	var binding domain.TriggerBinding
+	if err := json.Unmarshal(rec2.Body.Bytes(), &binding); err != nil {
+		t.Fatalf("decode ensure binding: %v", err)
+	}
+	if binding.BindingID != "b-fixed" {
+		t.Fatalf("ensure returned binding_id = %q, want b-fixed", binding.BindingID)
+	}
+}
+
+// TestCreateBinding_CronDerivesRouteKey pins the Phase-A fix: a cron binding
+// needs no route_key — it is derived from the unique binding_id — so two
+// scheduled workflows coexist in one workspace instead of colliding on a shared
+// hand-picked route string.
+func TestCreateBinding_CronDerivesRouteKey(t *testing.T) {
+	mux, _ := seededMux(t)
+	base := `"driver_id":"driver-1","driver_version_id":"version-1","source_kind":"cron","schedule":"*/10 * * * *","enabled":true`
+
+	rec := do(t, mux, http.MethodPost, "/api/workspaces/WS/trigger-bindings",
+		`{`+base+`,"binding_id":"s1-bug-fix"}`)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("cron create status = %d, want 201; body=%s", rec.Code, rec.Body.String())
+	}
+	var b domain.TriggerBinding
+	if err := json.Unmarshal(rec.Body.Bytes(), &b); err != nil {
+		t.Fatalf("decode binding: %v", err)
+	}
+	if b.RouteKey != "cron:s1-bug-fix" {
+		t.Fatalf("derived route_key = %q, want cron:s1-bug-fix", b.RouteKey)
+	}
+
+	// A second scheduled workflow (different binding_id, no route_key) must
+	// coexist — distinct derived routes, no 409 on the shared route.
+	rec2 := do(t, mux, http.MethodPost, "/api/workspaces/WS/trigger-bindings",
+		`{`+base+`,"binding_id":"s2-review-loop"}`)
+	if rec2.Code != http.StatusCreated {
+		t.Fatalf("second cron create status = %d, want 201 (coexist); body=%s", rec2.Code, rec2.Body.String())
+	}
+
+	// Neither binding_id nor route_key is a 400 (nothing to address the binding).
+	rec3 := do(t, mux, http.MethodPost, "/api/workspaces/WS/trigger-bindings", `{`+base+`}`)
+	if rec3.Code != http.StatusBadRequest {
+		t.Fatalf("cron without binding_id status = %d, want 400; body=%s", rec3.Code, rec3.Body.String())
+	}
+}
+
+// TestCreateBinding_InternalDerivesRouteKey pins the WS2a fix: an internal-event
+// binding needs no route_key — like cron it derives a unique 1:1 address from its
+// binding_id — so several prompt-agent bindings can pattern-match the SAME event
+// route (internal.task.ready) via event_type_patterns without colliding on the
+// exact-owner route slot.
+func TestCreateBinding_InternalDerivesRouteKey(t *testing.T) {
+	mux, _ := seededMux(t)
+	base := `"driver_id":"driver-1","driver_version_id":"version-1","source_kind":"internal","event_type_patterns":["internal.task.ready"],"enabled":true`
+
+	rec := do(t, mux, http.MethodPost, "/api/workspaces/WS/trigger-bindings",
+		`{`+base+`,"binding_id":"ts-planner","run_input":{"roleName":"plan","backend":"codex"}}`)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("internal create status = %d, want 201; body=%s", rec.Code, rec.Body.String())
+	}
+	var b domain.TriggerBinding
+	if err := json.Unmarshal(rec.Body.Bytes(), &b); err != nil {
+		t.Fatalf("decode binding: %v", err)
+	}
+	if b.RouteKey != "internal:ts-planner" {
+		t.Fatalf("derived route_key = %q, want internal:ts-planner", b.RouteKey)
+	}
+	if len(b.EventTypePatterns) != 1 || b.EventTypePatterns[0] != "internal.task.ready" {
+		t.Fatalf("event_type_patterns = %v, want [internal.task.ready]", b.EventTypePatterns)
+	}
+
+	// A second prompt-agent binding on the SAME event route (different binding_id,
+	// no route_key) must coexist — distinct derived routes, no 409 on the shared
+	// event pattern.
+	rec2 := do(t, mux, http.MethodPost, "/api/workspaces/WS/trigger-bindings",
+		`{`+base+`,"binding_id":"ts-coder","run_input":{"roleName":"task","backend":"codex"}}`)
+	if rec2.Code != http.StatusCreated {
+		t.Fatalf("second internal create status = %d, want 201 (coexist); body=%s", rec2.Code, rec2.Body.String())
+	}
+
+	// Neither binding_id nor route_key is a 400 (nothing to address the binding).
+	rec3 := do(t, mux, http.MethodPost, "/api/workspaces/WS/trigger-bindings", `{`+base+`}`)
+	if rec3.Code != http.StatusBadRequest {
+		t.Fatalf("internal without binding_id/route_key status = %d, want 400; body=%s", rec3.Code, rec3.Body.String())
+	}
+
+	// An explicit route_key still wins (exact-owner opt-in), unchanged.
+	rec4 := do(t, mux, http.MethodPost, "/api/workspaces/WS/trigger-bindings",
+		`{`+base+`,"binding_id":"ts-exact","route_key":"internal.task.ready"}`)
+	if rec4.Code != http.StatusCreated {
+		t.Fatalf("internal explicit-route create status = %d, want 201; body=%s", rec4.Code, rec4.Body.String())
+	}
+	var b4 domain.TriggerBinding
+	if err := json.Unmarshal(rec4.Body.Bytes(), &b4); err != nil {
+		t.Fatalf("decode binding: %v", err)
+	}
+	if b4.RouteKey != "internal.task.ready" {
+		t.Fatalf("explicit route_key = %q, want internal.task.ready (not overridden by derivation)", b4.RouteKey)
+	}
+}
+
+// TestCreateBinding_RunInputStoredOnSourceConfigRef pins ITEM D's plumbing: a
+// prompt-agent binding created with a run_input object stores it on the binding's
+// source_config_ref, where the dispatch source (CronScheduler) merges it into the
+// fired run payload.
+func TestCreateBinding_RunInputStoredOnSourceConfigRef(t *testing.T) {
+	mux, _ := seededMux(t)
+	rec := do(t, mux, http.MethodPost, "/api/workspaces/WS/trigger-bindings",
+		`{"driver_id":"driver-1","driver_version_id":"version-1","source_kind":"cron","schedule":"*/10 * * * *","binding_id":"docs-agent","enabled":true,"run_input":{"roleName":"docs-assistant","backend":"codex"}}`)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create status = %d, want 201; body=%s", rec.Code, rec.Body.String())
+	}
+	var b domain.TriggerBinding
+	if err := json.Unmarshal(rec.Body.Bytes(), &b); err != nil {
+		t.Fatalf("decode binding: %v", err)
+	}
+	var runInput map[string]string
+	if err := json.Unmarshal([]byte(b.SourceConfigRef), &runInput); err != nil {
+		t.Fatalf("source_config_ref %q is not the run-input JSON: %v", b.SourceConfigRef, err)
+	}
+	if runInput["roleName"] != "docs-assistant" || runInput["backend"] != "codex" {
+		t.Fatalf("run-input round-trip = %v, want roleName+backend", runInput)
+	}
+}
+
+// TestListBindings_NextFireAt pins the Phase-1 computed field: an enabled cron
+// binding carries a future next_fire_at, while disabled cron and non-cron
+// bindings omit it.
+func TestListBindings_NextFireAt(t *testing.T) {
+	mux, _ := seededMux(t)
+
+	create := func(body string) {
+		t.Helper()
+		if rec := do(t, mux, http.MethodPost, "/api/workspaces/WS/trigger-bindings", body); rec.Code != http.StatusCreated {
+			t.Fatalf("create status = %d; body=%s", rec.Code, rec.Body.String())
+		}
+	}
+	create(`{"driver_id":"driver-1","driver_version_id":"version-1","source_kind":"cron","schedule":"*/5 * * * *","binding_id":"cron-enabled","enabled":true}`)
+	create(`{"driver_id":"driver-1","driver_version_id":"version-1","source_kind":"cron","schedule":"*/5 * * * *","binding_id":"cron-disabled","enabled":false}`)
+	create(`{"driver_id":"driver-1","driver_version_id":"version-1","route_key":"github.pr.opened","source_kind":"http","binding_id":"http-enabled","enabled":true}`)
+
+	rec := do(t, mux, http.MethodGet, "/api/workspaces/WS/trigger-bindings", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("list status = %d; body=%s", rec.Code, rec.Body.String())
+	}
+	var resp struct {
+		Bindings []struct {
+			BindingID  string     `json:"binding_id"`
+			NextFireAt *time.Time `json:"next_fire_at"`
+		} `json:"bindings"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode list: %v", err)
+	}
+	byID := map[string]*time.Time{}
+	for _, b := range resp.Bindings {
+		byID[b.BindingID] = b.NextFireAt
+	}
+	if len(byID) != 3 {
+		t.Fatalf("listed bindings = %d, want 3 (%+v)", len(byID), resp.Bindings)
+	}
+	if next := byID["cron-enabled"]; next == nil || !next.After(time.Now()) {
+		t.Fatalf("cron-enabled next_fire_at = %v, want a future instant", next)
+	}
+	if next := byID["cron-disabled"]; next != nil {
+		t.Fatalf("cron-disabled next_fire_at = %v, want absent", next)
+	}
+	if next := byID["http-enabled"]; next != nil {
+		t.Fatalf("http-enabled next_fire_at = %v, want absent", next)
+	}
+}
+
+func TestCreateBinding_RequiresRouteKey(t *testing.T) {
+	mux, _ := seededMux(t)
+	rec := do(t, mux, http.MethodPost, "/api/workspaces/WS/trigger-bindings",
+		`{"driver_id":"driver-1","driver_version_id":"version-1"}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestCreateBinding_GithubRequiresSecret(t *testing.T) {
+	mux, _ := seededMux(t)
+	// Enabled github binding with no secret must be rejected before it is stored.
+	rec := do(t, mux, http.MethodPost, "/api/workspaces/WS/trigger-bindings",
+		`{"workflow":"github-review-agent","route_key":"github.pull_request.opened","source_kind":"github","enabled":true}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "secret") {
+		t.Fatalf("expected secret-required error, got %s", rec.Body.String())
+	}
+}
+
+func TestListBindingRuns_FiltersToBindingRuns(t *testing.T) {
+	mux, st := seededMux(t)
+	ctx := context.Background()
+	seedBindingRecord(t, st, "agent-a")
+	seedBindingRecord(t, st, "agent-b")
+	seedDriverRun(t, st, "run-agent-a-1", "agent-a")
+	seedDriverRun(t, st, "run-agent-b-1", "agent-b")
+	seedDriverRun(t, st, "run-bare-1", "")
+	seedDriverRun(t, st, "run-agent-a-2", "agent-a")
+
+	rec := do(t, mux, http.MethodGet, "/api/workspaces/WS/trigger-bindings/agent-a/runs", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("list binding runs status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	var out struct {
+		BindingID string             `json:"binding_id"`
+		Runs      []domain.DriverRun `json:"runs"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decode binding runs: %v", err)
+	}
+	// Envelope is deliberately NOT driver-rooted (agent identity design §4.3):
+	// binding_id + runs only; driver identity is per-run provenance.
+	if out.BindingID != "agent-a" {
+		t.Fatalf("metadata = %+v, want binding agent-a", out)
+	}
+	if len(out.Runs) != 2 {
+		t.Fatalf("runs = %d (%+v), want only agent-a's 2 runs", len(out.Runs), out.Runs)
+	}
+	for _, run := range out.Runs {
+		if run.TriggerBindingID != "agent-a" {
+			t.Fatalf("run %s trigger_binding_id = %q, want agent-a", run.RunID, run.TriggerBindingID)
+		}
+	}
+	if _, err := st.DriverRuns().Get(ctx, "WS", "run-bare-1"); err != nil {
+		t.Fatalf("bare run setup vanished: %v", err)
+	}
+}
+
+func TestListBindingRuns_UnknownBinding404(t *testing.T) {
+	mux, _ := seededMux(t)
+	rec := do(t, mux, http.MethodGet, "/api/workspaces/WS/trigger-bindings/missing/runs", "")
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("missing binding status = %d, want 404; body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestListBindingRuns_LimitHonored(t *testing.T) {
+	mux, st := seededMux(t)
+	seedBindingRecord(t, st, "agent-limited")
+	seedDriverRun(t, st, "run-limited-1", "agent-limited")
+	seedDriverRun(t, st, "run-limited-2", "agent-limited")
+	seedDriverRun(t, st, "run-limited-3", "agent-limited")
+
+	rec := do(t, mux, http.MethodGet, "/api/workspaces/WS/trigger-bindings/agent-limited/runs?limit=2", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("limited list status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	var out struct {
+		Runs []domain.DriverRun `json:"runs"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decode limited runs: %v", err)
+	}
+	if len(out.Runs) != 2 {
+		t.Fatalf("runs = %d (%+v), want limit 2", len(out.Runs), out.Runs)
+	}
+}
+
+func seedBindingRecord(t *testing.T, st store.Store, bindingID string) {
+	t.Helper()
+	if _, err := st.TriggerBindings().Create(context.Background(), store.TriggerBindingCreate{
+		WorkspaceKey:     "WS",
+		BindingID:        bindingID,
+		Name:             bindingID,
+		SourceKind:       store.CronSourceKind,
+		RouteKey:         "cron:" + bindingID,
+		DriverID:         "driver-1",
+		DriverVersionID:  "version-1",
+		Enabled:          true,
+		Schedule:         "*/10 * * * *",
+		ScheduleTimezone: "UTC",
+	}); err != nil {
+		t.Fatalf("seed binding %s: %v", bindingID, err)
+	}
+}
+
+func seedDriverRun(t *testing.T, st store.Store, runID, bindingID string) {
+	t.Helper()
+	if _, err := st.DriverRuns().Create(context.Background(), store.DriverRunCreate{
+		WorkspaceKey:     "WS",
+		RunID:            runID,
+		DriverID:         "driver-1",
+		DriverVersionID:  "version-1",
+		TriggerBindingID: bindingID,
+		SourceKind:       "test",
+		SourceRef:        "test:" + runID,
+		IdempotencyKey:   "",
+		Payload:          nil,
+	}); err != nil {
+		t.Fatalf("seed run %s: %v", runID, err)
+	}
+}
+
+// --- Phase 3: PATCH / DELETE / failure health ---
+
+// createCronBinding is a test helper that creates an enabled cron binding under
+// driver-1 and returns its id.
+func createCronBinding(t *testing.T, mux *http.ServeMux, bindingID, schedule string) {
+	t.Helper()
+	body := `{"driver_id":"driver-1","driver_version_id":"version-1","source_kind":"cron","schedule":"` +
+		schedule + `","binding_id":"` + bindingID + `","name":"` + bindingID + `","enabled":true}`
+	if rec := do(t, mux, http.MethodPost, "/api/workspaces/WS/trigger-bindings", body); rec.Code != http.StatusCreated {
+		t.Fatalf("create cron binding %s: status = %d; body=%s", bindingID, rec.Code, rec.Body.String())
+	}
+}
+
+// TestPatchBinding_RenameAndReschedule pins the PATCH happy path: name +
+// schedule change apply, and next_fire_at is recomputed from the new schedule.
+func TestPatchBinding_RenameAndReschedule(t *testing.T) {
+	mux, _ := seededMux(t)
+	createCronBinding(t, mux, "s1", "*/10 * * * *")
+
+	rec := do(t, mux, http.MethodPatch, "/api/workspaces/WS/trigger-bindings/s1",
+		`{"name":"renamed","schedule":"0 9 * * *","schedule_timezone":"UTC"}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("patch status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	var out struct {
+		Name       string     `json:"name"`
+		Schedule   string     `json:"schedule"`
+		NextFireAt *time.Time `json:"next_fire_at"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if out.Name != "renamed" || out.Schedule != "0 9 * * *" {
+		t.Fatalf("patch did not apply: %+v", out)
+	}
+	if out.NextFireAt == nil || !out.NextFireAt.After(time.Now()) {
+		t.Fatalf("next_fire_at not recomputed to a future instant: %v", out.NextFireAt)
+	}
+}
+
+// TestPatchBinding_ScheduleOnNonCron400 rejects a schedule change on a non-cron
+// binding: an http binding fires by route, not schedule.
+func TestPatchBinding_ScheduleOnNonCron400(t *testing.T) {
+	mux, _ := seededMux(t)
+	if rec := do(t, mux, http.MethodPost, "/api/workspaces/WS/trigger-bindings",
+		`{"driver_id":"driver-1","driver_version_id":"version-1","route_key":"github.pr.opened","source_kind":"http","binding_id":"h1","enabled":true}`); rec.Code != http.StatusCreated {
+		t.Fatalf("create http binding: %d; body=%s", rec.Code, rec.Body.String())
+	}
+	rec := do(t, mux, http.MethodPatch, "/api/workspaces/WS/trigger-bindings/h1", `{"schedule":"*/5 * * * *"}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("patch schedule on http binding status = %d, want 400; body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestPatchBinding_InvalidSchedule400 rejects a malformed cron expression.
+func TestPatchBinding_InvalidSchedule400(t *testing.T) {
+	mux, _ := seededMux(t)
+	createCronBinding(t, mux, "s1", "*/10 * * * *")
+	rec := do(t, mux, http.MethodPatch, "/api/workspaces/WS/trigger-bindings/s1", `{"schedule":"not a cron"}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("patch invalid schedule status = %d, want 400; body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestPatchBinding_Errors covers the not-found and empty-patch guards.
+func TestPatchBinding_Errors(t *testing.T) {
+	mux, _ := seededMux(t)
+	createCronBinding(t, mux, "s1", "*/10 * * * *")
+
+	if rec := do(t, mux, http.MethodPatch, "/api/workspaces/WS/trigger-bindings/missing", `{"name":"x"}`); rec.Code != http.StatusNotFound {
+		t.Fatalf("patch missing binding status = %d, want 404; body=%s", rec.Code, rec.Body.String())
+	}
+	if rec := do(t, mux, http.MethodPatch, "/api/workspaces/WS/trigger-bindings/s1", `{}`); rec.Code != http.StatusBadRequest {
+		t.Fatalf("empty patch status = %d, want 400; body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestDeleteBinding_GoneAndGrantsRevoked pins Decision 6: deleting a binding
+// removes it AND revokes its connector grants (no orphaned credentials).
+func TestDeleteBinding_GoneAndGrantsRevoked(t *testing.T) {
+	mux, st := seededMux(t)
+	ctx := context.Background()
+	createCronBinding(t, mux, "s2", "*/10 * * * *")
+
+	// Seed two active grants for the binding (memstore grants need no connector FK).
+	for i, action := range []string{"github.pull_request.read", "github.compare.read"} {
+		if _, err := st.ConnectorGrants().Create(ctx, store.ConnectorGrantCreate{
+			WorkspaceKey:    "WS",
+			GrantID:         "grant-" + string(rune('a'+i)),
+			ConnectorID:     "github",
+			BindingID:       "s2",
+			Action:          action,
+			ResourcePattern: "repo:o/r",
+		}); err != nil {
+			t.Fatalf("seed grant %d: %v", i, err)
+		}
+	}
+
+	rec := do(t, mux, http.MethodDelete, "/api/workspaces/WS/trigger-bindings/s2", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("delete status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	var out struct {
+		Deleted       bool `json:"deleted"`
+		GrantsRevoked int  `json:"grants_revoked"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decode delete: %v", err)
+	}
+	if !out.Deleted || out.GrantsRevoked != 2 {
+		t.Fatalf("unexpected delete result: %+v", out)
+	}
+	// Binding is gone.
+	if _, err := st.TriggerBindings().Get(ctx, "WS", "s2"); err == nil {
+		t.Fatalf("binding s2 still present after delete")
+	}
+	// Grants are revoked (ListByBinding excludes revoked grants).
+	grants, err := st.ConnectorGrants().ListByBinding(ctx, "WS", "s2")
+	if err != nil {
+		t.Fatalf("list grants: %v", err)
+	}
+	if len(grants) != 0 {
+		t.Fatalf("expected 0 active grants after delete, got %d", len(grants))
+	}
+}
+
+// TestDeleteBinding_NotFound404 returns 404 for a missing binding.
+func TestDeleteBinding_NotFound404(t *testing.T) {
+	mux, _ := seededMux(t)
+	rec := do(t, mux, http.MethodDelete, "/api/workspaces/WS/trigger-bindings/missing", "")
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("delete missing status = %d, want 404; body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestListBindings_FailureHealth pins Decision 7 inputs: consecutive_failures
+// counts failed runs from newest until a clean run, skipping in-flight runs,
+// and last_run_status is the newest run's status. Health is computed from the
+// runs stamped with the binding's id (trigger-dispatch provenance), NOT from
+// every run of the binding's driver — a second binding sharing driver-1 must
+// not absorb s1's failures.
+func TestListBindings_FailureHealth(t *testing.T) {
+	mux, st := seededMux(t)
+	ctx := context.Background()
+	createCronBinding(t, mux, "s1", "*/10 * * * *")
+	createCronBinding(t, mux, "s2-shares-driver", "*/20 * * * *")
+
+	// Claim order stamps strictly increasing StartedAt, so newest-first is
+	// D(running) > C(failed) > B(failed) > A(completed).
+	seed := func(runID, bindingID string, status domain.DriverRunStatus, finish bool) {
+		t.Helper()
+		if _, err := st.DriverRuns().Create(ctx, store.DriverRunCreate{
+			WorkspaceKey: "WS", RunID: runID, DriverID: "driver-1", DriverVersionID: "version-1",
+			TriggerBindingID: bindingID,
+		}); err != nil {
+			t.Fatalf("create run %s: %v", runID, err)
+		}
+		run, err := st.DriverRuns().Claim(ctx, "WS", runID, "node-1", "lease-"+runID)
+		if err != nil {
+			t.Fatalf("claim run %s: %v", runID, err)
+		}
+		if !finish {
+			return
+		}
+		if _, err := st.DriverRuns().Finish(ctx, "WS", runID, store.DriverRunFinish{
+			NodeID: run.NodeID, LeaseID: run.LeaseID, FencingToken: run.FencingToken, Status: status,
+		}); err != nil {
+			t.Fatalf("finish run %s: %v", runID, err)
+		}
+	}
+	seed("A", "s1", domain.DriverRunCompleted, true)
+	seed("B", "s1", domain.DriverRunFailed, true)
+	seed("C", "s1", domain.DriverRunFailed, true)
+	seed("D", "s1", domain.DriverRunRunning, false) // in-flight, must be skipped
+
+	rec := do(t, mux, http.MethodGet, "/api/workspaces/WS/trigger-bindings", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("list status = %d; body=%s", rec.Code, rec.Body.String())
+	}
+	var resp struct {
+		Bindings []struct {
+			BindingID           string `json:"binding_id"`
+			LastRunStatus       string `json:"last_run_status"`
+			ConsecutiveFailures int    `json:"consecutive_failures"`
+		} `json:"bindings"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	var foundS1, foundS2 bool
+	for _, b := range resp.Bindings {
+		switch b.BindingID {
+		case "s1":
+			foundS1 = true
+			if b.ConsecutiveFailures != 2 {
+				t.Fatalf("consecutive_failures = %d, want 2 (D running skipped, C+B failed, A completed breaks)", b.ConsecutiveFailures)
+			}
+			if b.LastRunStatus != string(domain.DriverRunRunning) {
+				t.Fatalf("last_run_status = %q, want running", b.LastRunStatus)
+			}
+		case "s2-shares-driver":
+			foundS2 = true
+			// Shares driver-1 but owns none of the seeded runs: health must not
+			// bleed across bindings that share a driver.
+			if b.LastRunStatus != "" || b.ConsecutiveFailures != 0 {
+				t.Fatalf("s2-shares-driver health = (%q, %d), want empty — driver-mates must not bleed metrics", b.LastRunStatus, b.ConsecutiveFailures)
+			}
+		}
+	}
+	if !foundS1 || !foundS2 {
+		t.Fatalf("bindings missing from list response: s1=%v s2-shares-driver=%v", foundS1, foundS2)
+	}
+}

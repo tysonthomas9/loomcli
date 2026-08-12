@@ -32,6 +32,18 @@ export function isWorkerRole(role: string | undefined): boolean {
 }
 
 /**
+ * A custom role is any workspace role that is neither a builtin lead/orchestrator
+ * nor a builtin plan/task worker. Only custom roles expose an editable
+ * prompt/config surface and may be deleted — the backend refuses to delete the
+ * builtin plan/task roles. Used to gate the Phase B agent-config affordance.
+ */
+export function isCustomRole(role: string | undefined): boolean {
+  const normalized = (role ?? "").trim();
+  if (normalized === "") return false;
+  return !isLeadRole(normalized) && !isWorkerRole(normalized);
+}
+
+/**
  * Background agents are daemon-supervised auto workers (plan/task). Lead agents
  * stay in the regular section because they run interactively in a terminal.
  */

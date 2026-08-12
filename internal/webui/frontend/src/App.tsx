@@ -28,6 +28,7 @@ import {
 import type { IssueContext } from "@/api/terminal";
 import { buildShareUrl } from "@/utils/buildShareUrl";
 import { getReviewType } from "@/utils/issue";
+import { isLeadRole } from "@/utils/agentRole";
 import { resolvePRReviewRef } from "@/utils/agentDisplay";
 import { ViewSubSwitcher } from "@/components/ViewSubSwitcher/ViewSubSwitcher";
 import {
@@ -937,7 +938,6 @@ function App() {
     refetch,
     refetchWorkspace,
     showToast,
-    workspace?.agents,
     onboardingPlannerName,
     workspaceId,
     workspaceRepos,
@@ -1535,7 +1535,7 @@ function App() {
         {...(shouldPrefillOnboardingAgent
           ? {
               defaultName: ONBOARDING_AGENT_NAME,
-              defaultRoleName: ONBOARDING_AGENT_ROLE,
+              supervisedRole: ONBOARDING_AGENT_ROLE,
             }
           : {})}
         onClose={() => setShowCreateAgent(false)}
@@ -1543,6 +1543,12 @@ function App() {
           setShowCreateAgent(false);
           upsertWorkspaceAgent?.(agent);
           showToast(`Agent "${agent.name}" created`, { type: "success" });
+          // A lead is an interactive terminal agent — drop the user straight
+          // into its terminal rather than leaving them on the board. plan/task
+          // workers run under daemon supervision and need no terminal.
+          if (isLeadRole(agent.role_name)) {
+            handleAgentClick(agent.name);
+          }
           if (shouldPrefillOnboardingIssue) {
             setOnboardingAction("confirming-agent");
             setOnboardingActionError(null);
@@ -1562,6 +1568,16 @@ function App() {
           } else {
             refetchWorkspaceAfterAgentCreate();
           }
+        }}
+        onOpenSettings={() => {
+          setShowCreateAgent(false);
+          navigateToView("settings");
+        }}
+        onWorkflowActivated={(result) => {
+          setShowCreateAgent(false);
+          showToast(`Activated ${result.workflow} on a schedule`, {
+            type: "success",
+          });
         }}
       />
     </KeyboardShortcutProvider>

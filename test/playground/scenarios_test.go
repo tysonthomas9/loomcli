@@ -939,6 +939,7 @@ func TestScenarioTaskQuarantine(t *testing.T) {
 		"--type", "task",
 		"--priority", "1",
 		"--status", "open",
+		"--source-repo", "repo",
 		"--design", "Task-quarantine verification: this backend stalls silently",
 	)
 	runLoom(t, scenario,
@@ -947,6 +948,7 @@ func TestScenarioTaskQuarantine(t *testing.T) {
 		"--type", "task",
 		"--priority", "2",
 		"--status", "open",
+		"--source-repo", "repo",
 		"--design", "Task-quarantine verification: happy path",
 	)
 

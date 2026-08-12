@@ -738,6 +738,22 @@ main() {
   [[ -n "${LOOM_OPENCODE_MODEL:-}" ]] && podman_args+=(-e "LOOM_OPENCODE_MODEL=${LOOM_OPENCODE_MODEL}")
   [[ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]] && podman_args+=(-e "CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN}")
 
+  # Flag-gated serve behaviors (unified-agents): LOOM_TASK_READY_EVENTS opts the
+  # issue-journal bridge into task.ready internal events (serve_loops.go, default off);
+  # LOOM_DRIVER_EXECUTOR_WORKSPACE scopes/unscopes the driver automation loops
+  # (serve.go). Forwarded only when set so the default stack env is unchanged.
+  [[ -n "${LOOM_TASK_READY_EVENTS:-}" ]] && podman_args+=(-e "LOOM_TASK_READY_EVENTS=${LOOM_TASK_READY_EVENTS}")
+  [[ -n "${LOOM_DRIVER_EXECUTOR_WORKSPACE:-}" ]] && podman_args+=(-e "LOOM_DRIVER_EXECUTOR_WORKSPACE=${LOOM_DRIVER_EXECUTOR_WORKSPACE}")
+
+  # Server-side workflow-build toolchain (register builtin/custom workflow versions over HTTP):
+  # serve resolves @loom/sdk via LOOM_SDK_ROOT, @flue/runtime via FLUE_RUNTIME_ROOT, and the flue
+  # CLI via LOOM_REAL_FLUE_CMD_JSON (internal/workflows/workflows.go). The deploy image bakes these
+  # (Containerfile.loom-serve /opt/loom-sdk); this dev stack forwards them only when the caller
+  # stages the toolchain (e.g. aether's unified-agents suite), leaving the default env unchanged.
+  [[ -n "${LOOM_SDK_ROOT:-}" ]] && podman_args+=(-e "LOOM_SDK_ROOT=${LOOM_SDK_ROOT}")
+  [[ -n "${FLUE_RUNTIME_ROOT:-}" ]] && podman_args+=(-e "FLUE_RUNTIME_ROOT=${FLUE_RUNTIME_ROOT}")
+  [[ -n "${LOOM_REAL_FLUE_CMD_JSON:-}" ]] && podman_args+=(-e "LOOM_REAL_FLUE_CMD_JSON=${LOOM_REAL_FLUE_CMD_JSON}")
+
   # Standalone fleet-db: put serve (and the inherited `loom` execs) into CLOUD mode against the
   # external fleet-db, and join the harness network so the in-container client can resolve it by name.
   if truthy "$STANDALONE_FLEET_DB"; then

@@ -124,6 +124,22 @@ type IssueJournalBridge struct {
 	// BatchLimit bounds ListIssueEvents per workspace per pass; zero or
 	// negative falls back to DefaultIssueJournalBatchLimit.
 	BatchLimit int
+	// EmitTaskReady turns on the flag-gated task-ready lane: in addition to the
+	// normal allowlisted re-emission, an entry that marks a task becoming ready
+	// (issue.create / issue.update to an open status) also emits a task.ready
+	// internal event carrying the task id, so a prompt-agent binding on
+	// internal.task.ready can claim THAT task. Default false — wired from
+	// LOOM_TASK_READY_EVENTS in serve so default behavior is unchanged. See
+	// issue_journal_bridge_task_ready.go.
+	EmitTaskReady bool
+	// IssueLookup resolves the CURRENT design/labels/type of an issue for
+	// task.ready payload enrichment. It is needed because an issue.update
+	// journal entry's After snapshot is a DELTA (only the changed fields): an
+	// absent design key there means UNKNOWN, not "no design" — emitting a
+	// false hasDesign mis-routes the planner/coder phase gate both ways (the
+	// 2026-07-07 approve-transition bug). Nil disables lookup; the payload then
+	// OMITS unknowable keys so the claim gate falls back to claim-then-check.
+	IssueLookup func(ctx context.Context, workspace, issueID string) (design string, labels []string, issueType string, err error)
 	// WorkspaceKey scopes the sweep to one workspace. Empty sweeps every known
 	// workspace (mirrors DeliverySweeper/CronScheduler).
 	WorkspaceKey string
@@ -153,6 +169,9 @@ type IssueJournalSweepResult struct {
 	Emitted int
 	// Skipped counts entries passed over by the action allowlist.
 	Skipped int
+	// TaskReadyEmitted counts task.ready events emitted by the flag-gated
+	// task-ready lane (EmitTaskReady); zero when the flag is off.
+	TaskReadyEmitted int
 	// FastForwarded counts workspaces bootstrapped to the journal tail without
 	// emitting (first observation, replay disabled).
 	FastForwarded int
@@ -241,27 +260,58 @@ func (b *IssueJournalBridge) journalTail(ctx context.Context, ws string) (string
 }
 
 // drainFrom pages the journal from the cursor, emitting allowed entries until
-// the reader reports no more. The cursor advances per-event only after Emit
-// durably handled the entry (success or dispatch-dedup), so a mid-batch Emit
-// failure resumes exactly there on the next pass without re-emitting handled
-// entries or skipping unhandled ones.
+// the reader reaches the journal tail. On a fully-handled page the cursor
+// advances to the reader's own resume position (nextCursor) — not merely the
+// last EMITTED entry — so a page that filtered out ENTIRELY still makes forward
+// progress. On a mid-batch Emit failure the cursor advances only per-event (past
+// durably-handled entries), so the failed entry is retried exactly there next
+// pass without re-emitting handled entries or skipping unhandled ones.
+//
+// WHY nextCursor, NOT the last emitted id. ListIssueEvents filters to
+// entity_type=issue at the reader/fleet-db boundary, so a page can return ZERO
+// issue events while its raw window held a run of non-issue mutations
+// (driver_run/task_run/role churn dominates a busy stream). fleet-db reports
+// has_more against the POST-FILTER count, so such a page arrives as
+// {events:[], nextCursor:<advanced>, hasMore:false}. Advancing only by the last
+// emitted id (empty here) and stopping on !hasMore would pin the cursor forever,
+// re-reading the same all-filtered page and never reaching later issue events.
+// Advancing to nextCursor and continuing while the cursor still moves keeps the
+// bridge draining past non-issue runs; the loop terminates at the tail, where
+// the reader echoes the asked-for cursor (no forward movement).
 func (b *IssueJournalBridge) drainFrom(ctx context.Context, ws, cursor string, out *IssueJournalSweepResult) error {
 	for {
-		events, _, hasMore, err := b.Reader.ListIssueEvents(ctx, ws, cursor, b.batchLimit())
+		events, nextCursor, hasMore, err := b.Reader.ListIssueEvents(ctx, ws, cursor, b.batchLimit())
 		if err != nil {
 			b.recordFailure(ws)
 			return fmt.Errorf("poll issue journal in workspace %q: %w", ws, err)
 		}
 		b.recordSuccess(ws)
-		next, perr := b.emitBatch(ctx, ws, events, out)
-		if next != "" {
-			cursor = next
-			b.saveCursor(ws, cursor)
-		}
+		emitted, perr := b.emitBatch(ctx, ws, events, out)
 		if perr != nil {
+			// Mid-batch Emit failure: advance only past durably-handled entries so
+			// the failed entry is retried next pass — never skip ahead to nextCursor.
+			if emitted != "" {
+				cursor = emitted
+				b.saveCursor(ws, cursor)
+			}
 			return perr
 		}
-		if !hasMore {
+		// Whole page handled: jump to the reader's resume position so an
+		// all-filtered page still advances (fall back to the last emitted id if the
+		// reader reported no cursor).
+		prev := cursor
+		if nextCursor != "" {
+			cursor = nextCursor
+		} else if emitted != "" {
+			cursor = emitted
+		}
+		if cursor != prev {
+			b.saveCursor(ws, cursor)
+		}
+		// Stop only at the tail: nothing more AND the cursor stopped moving. A
+		// forward-moving cursor keeps draining even when a filtered page reports
+		// has_more=false (that flag counts post-filter matches, not raw tail depth).
+		if !hasMore && cursor == prev {
 			return nil
 		}
 		if ctx.Err() != nil {
@@ -273,22 +323,30 @@ func (b *IssueJournalBridge) drainFrom(ctx context.Context, ws, cursor string, o
 // emitBatch processes one page oldest-first. It returns the cursor to persist
 // (the stream id of the last durably-handled event, "" when none advanced) and
 // the first non-terminal Emit error, which stops the drain so the unhandled
-// entry is retried next pass.
+// entry is retried next pass. Each entry may emit up to two events: the normal
+// allowlisted re-emission and, when the flag-gated task-ready lane is on, an
+// additional task.ready event; the cursor advances only after BOTH are durably
+// handled, so a failure in either resumes exactly at this entry next pass.
 func (b *IssueJournalBridge) emitBatch(ctx context.Context, ws string, events []store.JournalEvent, out *IssueJournalSweepResult) (string, error) {
 	advanced := ""
 	for _, ev := range events {
 		if ctx.Err() != nil {
 			return advanced, ctx.Err()
 		}
-		if !b.actionAllowed(ev.Action) {
+		if b.actionAllowed(ev.Action) {
+			if err := b.emitOne(ctx, ws, ev); err != nil {
+				return advanced, err
+			}
+			out.Emitted++
+		} else {
 			out.Skipped++
-			advanced = ev.ID
-			continue
 		}
-		if err := b.emitOne(ctx, ws, ev); err != nil {
-			return advanced, err
+		if b.EmitTaskReady && isTaskReadyEntry(ev) {
+			if err := b.emitTaskReady(ctx, ws, ev); err != nil {
+				return advanced, err
+			}
+			out.TaskReadyEmitted++
 		}
-		out.Emitted++
 		advanced = ev.ID
 	}
 	return advanced, nil

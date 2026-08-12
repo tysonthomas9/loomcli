@@ -1,0 +1,643 @@
+/**
+ * WorkflowAgentDetail — binding-agent detail rendered inside the AgentsPage
+ * main panel. Mirrors the visual language of AgentsPage (cards, stat grid,
+ * config grid) so a workflow agent reads like any other agent.
+ */
+
+.root {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--color-bg-secondary);
+  color: var(--color-text-primary);
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  flex-shrink: 0;
+  padding: 12px var(--space-6);
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-chrome);
+}
+
+.avatar {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.875rem;
+  font-weight: 900;
+  letter-spacing: -0.02em;
+  flex-shrink: 0;
+}
+
+.headText {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+}
+
+.title {
+  margin: 0;
+  font-size: var(--font-size-base);
+  font-weight: 900;
+  color: var(--color-text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sub {
+  margin: 3px 0 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+}
+
+.statusPill {
+  flex-shrink: 0;
+  padding: 3px 10px;
+  border-radius: var(--radius-full);
+  font-size: 11px;
+  font-weight: 800;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-active);
+  color: var(--color-text-secondary);
+}
+
+.statusPill[data-enabled="true"] {
+  border-color: color-mix(in srgb, var(--color-success) 40%, transparent);
+  background: color-mix(in srgb, var(--color-success) 12%, transparent);
+  color: var(--color-success);
+}
+/* Failure health (Decision 7): amber on 1 failed run, red on 2+. data-state
+   wins over data-enabled since it is set last / more specific here. */
+.statusPill[data-state="warn"] {
+  border-color: color-mix(in srgb, var(--color-warning) 45%, transparent);
+  background: color-mix(in srgb, var(--color-warning) 14%, transparent);
+  color: var(--color-warning);
+}
+.statusPill[data-state="failing"] {
+  border-color: color-mix(in srgb, var(--color-danger) 45%, transparent);
+  background: color-mix(in srgb, var(--color-danger) 14%, transparent);
+  color: var(--color-danger);
+}
+
+/* ---- button bar ---- */
+.buttonBar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-shrink: 0;
+  padding: var(--space-3) var(--space-6);
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-surface-subtle);
+}
+
+.btn,
+.btnPrimary {
+  padding: 7px 14px;
+  font-size: 13px;
+  font-weight: 700;
+  border-radius: var(--radius-sm, 8px);
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-card);
+  color: var(--color-text-primary);
+  cursor: pointer;
+  transition:
+    border-color var(--transition-fast),
+    color var(--transition-fast),
+    background-color var(--transition-fast);
+}
+
+.btn:hover:not(:disabled) {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+
+.btnPrimary {
+  border-color: var(--color-warning);
+  background: var(--color-warning);
+  color: #171717;
+}
+
+.btnPrimary:hover:not(:disabled) {
+  filter: brightness(1.05);
+}
+
+.btn:disabled,
+.btnPrimary:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+/* ---- tab strip ---- */
+.tabStrip {
+  display: flex;
+  align-items: stretch;
+  height: 40px;
+  flex-shrink: 0;
+  padding-left: var(--space-6);
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-surface-subtle);
+}
+
+.tab {
+  height: 100%;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 var(--space-4);
+  border: none;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  font-weight: 700;
+  cursor: pointer;
+  transition: color var(--transition-fast);
+}
+
+.tab:hover {
+  color: var(--color-text-primary);
+}
+
+.tab[data-active] {
+  border-bottom-color: var(--color-warning);
+  color: var(--color-text-primary);
+  font-weight: 900;
+}
+
+/* ---- body ---- */
+.body {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--space-6);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+
+.idleBanner {
+  padding: 10px 14px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-card);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+}
+
+.card {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-bg-card);
+  padding: var(--space-5);
+}
+
+.cardLabel {
+  margin: 0 0 var(--space-4);
+  font-size: 10px;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  color: var(--color-text-tertiary);
+}
+
+.emptyText,
+.errorText {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  line-height: 1.5;
+}
+
+.errorText {
+  color: var(--color-danger);
+}
+
+/* ---- run list ---- */
+.runList {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.runRow {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  width: 100%;
+  padding: 10px 12px;
+  border: none;
+  border-radius: var(--radius-md);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color var(--transition-fast);
+}
+
+.runRow:hover {
+  background: var(--color-bg-hover);
+}
+
+.runRow[data-selected] {
+  background: var(--color-bg-active);
+}
+
+.runDot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  margin-top: 4px;
+  flex-shrink: 0;
+}
+
+.runDot[data-live] {
+  box-shadow: 0 0 0 3px
+    color-mix(in srgb, var(--color-warning) 30%, transparent);
+}
+
+.runMain {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  flex: 1;
+}
+
+.runStatus {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--font-size-sm);
+  font-weight: 800;
+  color: var(--color-text-primary);
+}
+
+.liveTag {
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--color-warning) 18%, transparent);
+  color: var(--color-warning);
+  font-size: 9px;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.runMeta {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+}
+
+.runSummary {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-tertiary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.runErr {
+  font-family: var(--font-family-mono);
+  font-size: 11px;
+  color: var(--color-danger);
+}
+
+/* ---- run detail card ---- */
+.runDetailHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: var(--space-4);
+}
+
+.runDetailStatus {
+  font-size: var(--font-size-sm);
+  font-weight: 900;
+  color: var(--color-text-primary);
+}
+
+.runId {
+  margin-left: auto;
+  font-family: var(--font-family-mono);
+  font-size: 11px;
+  color: var(--color-text-secondary);
+  background: transparent;
+  padding: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 45%;
+}
+
+.detailGrid {
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: var(--space-4);
+}
+
+.detailGrid dt {
+  font-size: 10px;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--color-text-tertiary);
+}
+
+.detailGrid dd {
+  margin: 4px 0 0;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-primary);
+}
+
+.detailSummary {
+  margin: var(--space-4) 0 0;
+  font-size: var(--font-size-sm);
+  line-height: 1.5;
+  color: var(--color-text-secondary);
+  white-space: pre-wrap;
+}
+
+.detailLoadError {
+  margin-top: var(--space-4);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid color-mix(in srgb, var(--color-danger) 40%, transparent);
+  border-radius: var(--radius-sm, 8px);
+  color: var(--color-danger);
+  font-size: var(--font-size-sm);
+}
+
+.sessionSelector {
+  display: flex;
+  gap: 2px;
+  margin-top: var(--space-4);
+  overflow-x: auto;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.sessionTab {
+  flex: 0 0 auto;
+  padding: 8px 12px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.sessionTab[aria-selected="true"] {
+  border-bottom-color: var(--color-primary);
+  color: var(--color-text-primary);
+}
+
+.runTranscript {
+  margin-top: var(--space-4);
+  min-height: 420px;
+  height: min(62vh, 720px);
+  display: flex;
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-panel-bg, var(--color-bg-secondary));
+}
+
+.sessionSelector + .runTranscript {
+  margin-top: 0;
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+  border-top: 0;
+}
+
+.transcriptEmpty {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-5);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  text-align: center;
+}
+
+.transcriptEmpty code {
+  margin: 0 4px;
+  font-family: var(--font-family-mono);
+  font-size: 11px;
+  color: var(--color-text-primary);
+  background: transparent;
+  padding: 0;
+}
+
+/* ---- info: config grid ---- */
+.configGrid {
+  margin: 0;
+  display: grid;
+  gap: var(--space-3);
+  font-size: var(--font-size-sm);
+}
+
+.configGrid div {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+
+.configGrid dt {
+  color: var(--color-text-secondary);
+}
+
+.configGrid dd {
+  margin: 0;
+  color: var(--color-text-primary);
+  text-align: right;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.inlineCode {
+  margin-left: 8px;
+  font-family: var(--font-family-mono);
+  font-size: 11px;
+  color: var(--color-text-secondary);
+  background: transparent;
+  padding: 0;
+}
+
+/* ---- info: stat grid (mirrors AgentsPage) ---- */
+.statGrid {
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--space-3);
+}
+
+.statCard {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-bg-secondary);
+  padding: var(--space-4);
+}
+
+.statLabel {
+  margin: 0;
+  font-size: 10px;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  color: var(--color-text-tertiary);
+}
+
+.statValue {
+  margin: 10px 0 0;
+  font-size: 1.25rem;
+  font-weight: 900;
+  color: var(--color-text-primary);
+}
+
+.statValue[data-tone="success"] {
+  color: var(--color-success);
+}
+.statValue[data-tone="danger"] {
+  color: var(--color-danger);
+}
+.statValue[data-tone="warning"] {
+  color: var(--color-warning);
+}
+.statValue[data-tone="info"] {
+  color: var(--color-primary);
+}
+
+/* ---- Manage card (rename / reschedule / delete) ---- */
+.manageGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: var(--space-3);
+}
+
+.manageField {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.manageLabel {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-text-tertiary);
+}
+
+.manageInput {
+  padding: 7px 10px;
+  font-size: 13px;
+  font-family: inherit;
+  border-radius: var(--radius-sm, 8px);
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-card);
+  color: var(--color-text-primary);
+}
+.manageInput:focus {
+  outline: none;
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px
+    color-mix(in srgb, var(--color-primary) 25%, transparent);
+}
+
+.manageActions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-top: var(--space-4);
+}
+
+/* ---- danger zone ---- */
+.dangerZone {
+  margin-top: var(--space-4);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--color-border);
+}
+
+.btnDanger,
+.btnDangerOutline {
+  padding: 7px 14px;
+  font-size: 13px;
+  font-weight: 700;
+  border-radius: var(--radius-sm, 8px);
+  cursor: pointer;
+  transition:
+    border-color var(--transition-fast),
+    color var(--transition-fast),
+    background-color var(--transition-fast);
+}
+
+.btnDangerOutline {
+  border: 1px solid color-mix(in srgb, var(--color-danger) 45%, transparent);
+  background: transparent;
+  color: var(--color-danger);
+}
+.btnDangerOutline:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--color-danger) 12%, transparent);
+}
+
+.btnDanger {
+  border: 1px solid var(--color-danger);
+  background: var(--color-danger);
+  color: #fff;
+}
+.btnDanger:hover:not(:disabled) {
+  filter: brightness(1.05);
+}
+.btnDanger:disabled,
+.btnDangerOutline:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.confirmRow {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.confirmText {
+  font-size: 13px;
+  color: var(--color-text-secondary);
+}
+
+.confirmActions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}

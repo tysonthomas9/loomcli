@@ -2,9 +2,13 @@ package supervisor
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
+	"strings"
 	"time"
 
 	"github.com/olesho/harness-wrapper/pkg/wrapper"
@@ -14,7 +18,108 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
-const defaultOwnershipRetryInterval = 5 * time.Second
+const (
+	defaultOwnershipRetryInterval = 5 * time.Second
+	ownershipOwnerIDDir           = ".loom"
+	ownershipOwnerIDFile          = "supervisor-owner-id"
+	ownershipOwnerIDPrefix        = "loom-supervisor-owner-"
+)
+
+// resolveOwnershipOwnerID returns the durable identity used as OwnerID on
+// agent-ownership leases. NodeID deliberately includes the daemon PID and is
+// therefore an execution-instance identity; using it as OwnerID strands every
+// lease until TTL after a daemon or container restart. The owner id lives in
+// the workspace runtime, next to the daemon's already-exclusive .loom state,
+// so a replacement daemon re-acquires as the same logical owner while a
+// different runtime remains fenced as a different owner.
+func (s *Supervisor) resolveOwnershipOwnerID() string {
+	s.ownershipOwnerMu.Lock()
+	defer s.ownershipOwnerMu.Unlock()
+	if s.ownershipOwnerID != "" {
+		return s.ownershipOwnerID
+	}
+
+	// Unit-test and legacy single-process callers without a project directory
+	// retain the prior safe identity. Production daemon construction always
+	// supplies ProjectDir.
+	if strings.TrimSpace(s.ProjectDir) == "" {
+		s.ownershipOwnerID = s.resolveNodeID()
+		return s.ownershipOwnerID
+	}
+
+	id, err := loadOrCreateOwnershipOwnerID(s.ProjectDir)
+	if err != nil {
+		// Fail closed: a process-specific owner cannot accidentally collapse two
+		// independent runtimes into one owner. This only forfeits fast restart.
+		s.ownershipOwnerID = s.resolveNodeID()
+		slog.Warn("durable supervisor ownership identity unavailable; restart recovery will wait for lease expiry",
+			"project_dir", s.ProjectDir, "err", err)
+		return s.ownershipOwnerID
+	}
+	s.ownershipOwnerID = id
+	return id
+}
+
+func loadOrCreateOwnershipOwnerID(projectDir string) (string, error) {
+	root, err := os.OpenRoot(projectDir)
+	if err != nil {
+		return "", fmt.Errorf("open project root: %w", err)
+	}
+	defer func() { _ = root.Close() }()
+
+	path := ownershipOwnerIDDir + "/" + ownershipOwnerIDFile
+	if data, err := root.ReadFile(path); err == nil {
+		return parseOwnershipOwnerID(data)
+	} else if !os.IsNotExist(err) {
+		return "", fmt.Errorf("read %s: %w", path, err)
+	}
+
+	if err := root.MkdirAll(ownershipOwnerIDDir, 0o700); err != nil {
+		return "", fmt.Errorf("create ownership identity dir: %w", err)
+	}
+	random := make([]byte, 16)
+	if _, err := rand.Read(random); err != nil {
+		return "", fmt.Errorf("generate ownership identity: %w", err)
+	}
+	id := ownershipOwnerIDPrefix + hex.EncodeToString(random)
+
+	// Atomic rename avoids leaving a partial identity after a crash. Daemon
+	// workspace/cwd flocking serializes writers across processes; the mutex in
+	// resolveOwnershipOwnerID serializes all agent goroutines in this process.
+	tmpPath := ownershipOwnerIDDir + "/.supervisor-owner-id-" + hex.EncodeToString(random)
+	tmp, err := root.OpenFile(tmpPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return "", fmt.Errorf("create ownership identity temp file: %w", err)
+	}
+	defer func() { _ = root.Remove(tmpPath) }()
+	if _, err := tmp.WriteString(id + "\n"); err != nil {
+		_ = tmp.Close()
+		return "", fmt.Errorf("write ownership identity: %w", err)
+	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		return "", fmt.Errorf("sync ownership identity: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return "", fmt.Errorf("close ownership identity: %w", err)
+	}
+	if err := root.Rename(tmpPath, path); err != nil {
+		return "", fmt.Errorf("publish ownership identity: %w", err)
+	}
+	return id, nil
+}
+
+func parseOwnershipOwnerID(data []byte) (string, error) {
+	id := strings.TrimSpace(string(data))
+	hexPart := strings.TrimPrefix(id, ownershipOwnerIDPrefix)
+	if hexPart == id || len(hexPart) != 32 {
+		return "", fmt.Errorf("invalid durable supervisor ownership identity")
+	}
+	if _, err := hex.DecodeString(hexPart); err != nil {
+		return "", fmt.Errorf("invalid durable supervisor ownership identity: %w", err)
+	}
+	return id, nil
+}
 
 // ownershipAcquireOutcome classifies an ownership acquire attempt so callers
 // can distinguish "someone else verifiably holds it" from "could not tell"
@@ -37,20 +142,21 @@ func (s *Supervisor) acquireAgentOwnership(ap *AgentProcess) ownershipAcquireOut
 	if nodeID == "" {
 		nodeID = s.resolveNodeID()
 	}
-	ttl := defaultLeaseTTL
+	ownerID := s.resolveOwnershipOwnerID()
+	ttl := s.ownershipTTL()
 	ctx, cancel := context.WithTimeout(context.Background(), controlPlaneOperationTimeout)
 	defer cancel()
 	sentAt := time.Now()
 	lease, err := s.ControlStore.AgentOwnershipLeases().Acquire(ctx, store.AgentOwnershipLeaseAcquire{
 		WorkspaceKey:    s.WorkspaceID,
 		AgentID:         ap.Entry.Worktree,
-		OwnerID:         nodeID,
+		OwnerID:         ownerID,
 		RuntimeProvider: domain.RuntimeProviderLocal,
 		NodeID:          nodeID,
 		TTL:             ttl,
 	})
 	if err != nil {
-		if errors.Is(err, domain.ErrAlreadyExists) || errors.Is(err, domain.ErrConflict) {
+		if errors.Is(err, domain.ErrAlreadyClaimed) || errors.Is(err, domain.ErrAlreadyExists) || errors.Is(err, domain.ErrConflict) {
 			slog.Info("agent ownership held by another daemon", "worktree", ap.Entry.Worktree, "workspace", s.WorkspaceID, "err", err)
 			return ownershipHeldByOther
 		}
@@ -69,8 +175,20 @@ func (s *Supervisor) acquireAgentOwnership(ap *AgentProcess) ownershipAcquireOut
 	ap.OwnershipLastHeartbeat = lease.LastHeartbeat // server-derived: display/telemetry only
 	ap.OwnershipRenewedAt = sentAt                  // local-clock anchor: drives the fail-open validity window
 	ap.Mu.Unlock()
-	slog.Debug("agent ownership acquired", "worktree", ap.Entry.Worktree, "workspace", s.WorkspaceID, "node_id", nodeID, "fencing_token", lease.FencingToken)
+	slog.Debug("agent ownership acquired", "worktree", ap.Entry.Worktree, "workspace", s.WorkspaceID,
+		"owner_id", ownerID, "node_id", nodeID, "fencing_token", lease.FencingToken)
 	return ownershipAcquired
+}
+
+// ownershipTTL intentionally follows node liveness rather than the much
+// longer task-session lease. If durable owner state is unavailable, a crashed
+// daemon therefore blocks a replacement only until its node would be declared
+// stale, not for the full duration of a paid agent turn.
+func (s *Supervisor) ownershipTTL() time.Duration {
+	if s.NodeTTL > 0 {
+		return s.NodeTTL
+	}
+	return defaultNodeTTL
 }
 
 func clearAgentOwnershipLeaseState(ap *AgentProcess) {
@@ -116,7 +234,7 @@ func (s *Supervisor) startOwnershipHeartbeat(ap *AgentProcess) func() {
 		return func() {}
 	}
 
-	ttl := defaultLeaseTTL
+	ttl := s.ownershipTTL()
 	interval := ownershipHeartbeatBaseInterval(ttl)
 	stop := make(chan struct{})
 	done := make(chan struct{})
@@ -142,6 +260,24 @@ func (s *Supervisor) startOwnershipHeartbeat(ap *AgentProcess) func() {
 		close(stop)
 		<-done
 	}
+}
+
+// refreshAgentOwnershipBeforeSpawn closes the potentially nontrivial preflight
+// window with a synchronous server arbitration. The old heartbeat is stopped
+// first so a concurrent heartbeat failure cannot silently exit after this
+// acquire and leave the new subprocess unguarded. A non-nil returned stopper
+// means ownership is current and a replacement heartbeat is live; nil means
+// the caller must either retry (keepRunning=true) or exit.
+func (s *Supervisor) refreshAgentOwnershipBeforeSpawn(ap *AgentProcess, stopHeartbeat func()) (stopper func(), keepRunning bool) {
+	stopHeartbeat()
+	if s.acquireAgentOwnership(ap) == ownershipAcquired {
+		return s.startOwnershipHeartbeat(ap), true
+	}
+	s.completePreSpawnCleanup(ap, "ownership_lost")
+	s.Concurrency.Release(ap.Entry.Role)
+	s.releaseAgentOwnership(ap)
+	s.postExitCleanup(ap)
+	return nil, s.sleepBeforeOwnershipRetry(ap)
 }
 
 func (s *Supervisor) heartbeatAgentOwnership(ap *AgentProcess, ttl time.Duration) bool {
@@ -328,6 +464,7 @@ func ownershipWithinValidity(renewedAt time.Time, ttl time.Duration) bool {
 func isTypedDomainError(err error) bool {
 	return errors.Is(err, domain.ErrGone) ||
 		errors.Is(err, domain.ErrNotFound) ||
+		errors.Is(err, domain.ErrAlreadyClaimed) ||
 		errors.Is(err, domain.ErrAlreadyExists) ||
 		errors.Is(err, domain.ErrConflict) ||
 		errors.Is(err, domain.ErrInvalid)

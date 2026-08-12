@@ -226,6 +226,15 @@ func (t *tracedTriggerBindingStore) Update(ctx context.Context, ws, bindingID st
 	)
 }
 
+func (t *tracedTriggerBindingStore) Delete(ctx context.Context, ws, bindingID string) error {
+	return tracedErr(ctx, "TriggerBindings", func(ctx context.Context) error {
+		return t.inner.Delete(ctx, ws, bindingID)
+	},
+		attribute.String("loom.workspace", ws),
+		attribute.String("loom.binding", bindingID),
+	)
+}
+
 func (t *tracedTriggerBindingStore) ResolveWebhookSecret(ctx context.Context, ws, bindingID string) (string, error) {
 	return traced(ctx, "TriggerBindings", "ResolveWebhookSecret", func(ctx context.Context) (string, error) {
 		return t.inner.ResolveWebhookSecret(ctx, ws, bindingID)

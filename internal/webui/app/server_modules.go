@@ -9,12 +9,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/appinfra"
 	"github.com/tysonthomas9/loomcli/internal/webui/appstores"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlermux"
-	"github.com/tysonthomas9/loomcli/internal/webui/handlers/agents"
-	"github.com/tysonthomas9/loomcli/internal/webui/handlers/driverapi"
 	githandlers "github.com/tysonthomas9/loomcli/internal/webui/handlers/git"
-	"github.com/tysonthomas9/loomcli/internal/webui/handlers/onboarding"
-	"github.com/tysonthomas9/loomcli/internal/webui/handlers/webhooks"
-	"github.com/tysonthomas9/loomcli/internal/webui/handlers/workflows"
 	"github.com/tysonthomas9/loomcli/internal/webui/modbuilder"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/storeadapter"
@@ -124,26 +119,17 @@ func (app *Server) buildInfraModules() {
 
 	if storeBacked {
 		app.connectorDispatcher = app.buildConnectorDispatcher()
-		app.wsModules = append(app.wsModules, agents.NewModule(app.agentSvc, app.hub))
-		app.wsModules = append(app.wsModules, onboarding.NewModule(app.issueSvc, app.agentSvc))
-		app.wsModules = append(app.wsModules, workflows.NewModule(app.config.Store))
-		app.wsModules = append(app.wsModules, webhooks.NewModule(app.config.Store))
+		app.wsModules = append(app.wsModules, modbuilder.NewUnifiedAgentModules(modbuilder.UnifiedAgentModuleDeps{
+			Store: app.config.Store, AgentSvc: app.agentSvc, IssueSvc: app.issueSvc, Hub: app.hub,
+			FleetBaseURL: app.config.FleetDBBaseURL, DriverAPIBaseURL: app.config.DriverAPIBaseURL,
+			DriverAPIToken: app.config.DriverAPIToken, DriverRunTokenKey: app.config.DriverRunTokenKey,
+			LocalSettingsDir: app.config.LocalSettingsDir, Dispatcher: app.connectorDispatcher,
+		})...)
 		prReviewModule := modbuilder.NewPRReviewModule(
 			app.config.Store, app.connectorDispatcher, app.agentSvc, app.termSvc, app.config.LocalSettingsDir,
 		)
 		app.prReviewCredentialSeeds = prReviewModule
 		app.wsModules = append(app.wsModules, prReviewModule)
-		app.wsModules = append(app.wsModules, modbuilder.NewApprovalsModule(app.config.Store))
-		app.wsModules = append(app.wsModules, modbuilder.NewTaskRunAPIModule(app.config.Store, app.config.FleetDBBaseURL, app.config.LocalSettingsDir))
-		app.wsModules = append(app.wsModules, driverapi.NewModule(driverapi.Config{
-			Store:            app.config.Store,
-			FleetBaseURL:     app.config.FleetDBBaseURL,
-			APIBaseURL:       app.config.DriverAPIBaseURL,
-			APIToken:         app.config.DriverAPIToken,
-			RunTokenKey:      app.config.DriverRunTokenKey,
-			LocalSettingsDir: app.config.LocalSettingsDir,
-			Dispatcher:       app.connectorDispatcher,
-		}))
 	} else {
 		// Without a store there is no connector-backed prreview module, so
 		// keep the gh-backed pull-request list route available.

@@ -233,6 +233,7 @@ func newTriggerBindingStore(versions *driverVersionStore, services *agentService
 var _ store.TriggerBindingStore = (*triggerBindingStore)(nil)
 
 func (s *triggerBindingStore) Create(_ context.Context, in store.TriggerBindingCreate) (*domain.TriggerBinding, error) {
+	in = in.WithDerivedRoute()
 	if err := s.validateTriggerBindingCreate(in); err != nil {
 		return nil, err
 	}
@@ -401,6 +402,20 @@ func (s *triggerBindingStore) Update(_ context.Context, ws, bindingID string, pa
 	updated.UpdatedAt = time.Now().UTC()
 	s.items[ws][bindingID] = updated
 	return redactedTriggerBinding(updated), nil
+}
+
+// Delete removes a binding. Connector-grant revocation is the caller's
+// responsibility (Decision 6) — grants are standalone records keyed by
+// binding_id, not fields on the binding, so deleting the binding here never
+// touches them. A missing binding wraps domain.ErrNotFound.
+func (s *triggerBindingStore) Delete(_ context.Context, ws, bindingID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.items[ws][bindingID]; !ok {
+		return fmt.Errorf("trigger binding %q in workspace %q: %w", bindingID, ws, domain.ErrNotFound)
+	}
+	delete(s.items[ws], bindingID)
+	return nil
 }
 
 func (s *triggerBindingStore) getForValidation(ws, bindingID string) (*domain.TriggerBinding, bool) {

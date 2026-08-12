@@ -9,8 +9,9 @@ import {
   useFocusTrap,
   useFocusReturn,
 } from "@/hooks/ui";
-import { useWorkspaceContext } from "@/hooks/workspace";
+import { useAutomations, useWorkspaceContext } from "@/hooks/workspace";
 import type { Issue, IssueType, Priority } from "@/types";
+import { bindingDisplayName } from "@/utils/bindingDisplay";
 import styles from "./CreateIssueModal.module.css";
 
 export interface CreateIssueModalProps {
@@ -52,6 +53,12 @@ export function CreateIssueModal({
   initialValues,
 }: CreateIssueModalProps): JSX.Element | null {
   const { workspaceId, repos, agents = [] } = useWorkspaceContext();
+  // Trigger-binding "agents" (autonomous / workflow-plane) are eligible
+  // assignees too. Assignee on a TS agent is advisory metadata only — the
+  // binding does not claim the task by being assigned; claims are lease-driven
+  // (a run claims a task at dispatch). It records intent + shows provenance.
+  const { bindings } = useAutomations(workspaceId, !!workspaceId);
+  const hasAssignable = agents.length > 0 || bindings.length > 0;
   const [title, setTitle] = useState("");
   const [issueType, setIssueType] = useState<IssueType>("task");
   const [sourceRepo, setSourceRepo] = useState("");
@@ -350,17 +357,26 @@ export function CreateIssueModal({
                 className={styles.select}
                 value={assignee}
                 onChange={(e) => setAssignee(e.target.value)}
-                disabled={isSubmitting || agents.length === 0}
+                disabled={isSubmitting || !hasAssignable}
                 data-testid="create-issue-assignee"
               >
                 <option value="">
-                  {agents.length === 0 ? "No agents yet" : "Unassigned"}
+                  {hasAssignable ? "Unassigned" : "No agents yet"}
                 </option>
                 {agents.map((agent) => (
                   <option key={agent.name} value={agent.name}>
                     {agent.name}
                   </option>
                 ))}
+                {bindings.length > 0 && (
+                  <optgroup label="Autonomous agents">
+                    {bindings.map((b) => (
+                      <option key={b.binding_id} value={bindingDisplayName(b)}>
+                        {bindingDisplayName(b)}
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
               </select>
             </div>
           </div>

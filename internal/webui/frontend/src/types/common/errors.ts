@@ -41,6 +41,15 @@ function deriveMessage(
 }
 
 /**
+ * The server-supplied message for an ApiError (e.g. "role name is taken"), or
+ * `fallback` for any other thrown value. Lets UI catch blocks surface actionable
+ * API errors while degrading gracefully for unexpected throwables.
+ */
+export function apiErrorMessage(err: unknown, fallback: string): string {
+  return err instanceof ApiError ? err.message : fallback;
+}
+
+/**
  * Error raised by app-config bootstrap (GET /api/config). Indicates the
  * server is unreachable or returned an invalid auth configuration.
  */

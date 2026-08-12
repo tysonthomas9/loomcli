@@ -47,8 +47,8 @@
 }
 
 .templateList {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   gap: 8px;
 }
 
@@ -137,9 +137,31 @@
 }
 
 .templateTitle {
+  min-width: 0;
   font-size: 13px;
   font-weight: 600;
   color: var(--color-text-primary);
+  overflow-wrap: anywhere;
+}
+
+.templateMeta {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex: 0 0 auto;
+  gap: 6px;
+}
+
+.templateTag {
+  flex: 0 0 auto;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+  background: var(--color-bg-tertiary);
 }
 
 .templateSelectedMark {
@@ -158,6 +180,46 @@
   font-size: 12px;
   line-height: 1.5;
   color: var(--color-text-muted);
+}
+
+.advancedGroup {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--color-border-light);
+}
+
+.advancedSummary {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  cursor: pointer;
+  list-style-position: outside;
+}
+
+.advancedSummary + .templateList {
+  margin-top: 10px;
+}
+
+.automationsLink {
+  margin-top: 4px;
+  padding: 8px 10px;
+  width: 100%;
+  text-align: left;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--color-text-muted);
+  background: transparent;
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition:
+    border-color var(--transition-fast),
+    color var(--transition-fast);
+}
+
+.automationsLink:hover {
+  border-color: var(--color-primary);
+  color: var(--color-text-primary);
 }
 
 .configRow {
@@ -219,6 +281,25 @@
 .textarea::placeholder {
   color: var(--color-text-muted);
   opacity: 0.65;
+}
+
+.readOnlyField {
+  width: 100%;
+  padding: 8px 10px;
+  font-size: 13px;
+  line-height: 1.45;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-border-light);
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-muted);
+  box-sizing: border-box;
+}
+
+.fieldError {
+  margin: 5px 0 0;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--color-danger);
 }
 
 .repoChips {
@@ -293,6 +374,16 @@
   font-size: 12px;
   font-style: italic;
   color: var(--color-text-muted);
+}
+
+.settingsLink {
+  padding: 0;
+  font: inherit;
+  color: var(--color-primary);
+  background: none;
+  border: none;
+  text-decoration: underline;
+  cursor: pointer;
 }
 
 .error {

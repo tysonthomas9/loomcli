@@ -742,6 +742,7 @@ paths:
       operationId: deleteIssue
       tags: [issues]
       summary: Delete an issue (tombstone)
+      description: Returns 409 while a live agent holds the issue claim.
       parameters:
         - $ref: "#/components/parameters/WorkspaceId"
         - $ref: "#/components/parameters/IssueId"
@@ -754,6 +755,12 @@ paths:
                 $ref: "#/components/schemas/MessageResponse"
         "404":
           description: Issue not found
+        "409":
+          description: Issue is actively claimed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 
   /api/workspaces/{ws}/issues/{id}/close:
     post:
@@ -2268,30 +2275,52 @@ paths:
     get:
       operationId: listAgents
       tags: [agent-control]
-      summary: List agents via daemon control socket
+      summary: List the unified agent collection
+      description: |
+        Returns supervised role assignments, durable prompt-backed and
+        scripted agent records, and unattached legacy trigger bindings in one
+        collection. The `kind` discriminator selects the response shape.
       parameters:
         - $ref: "#/components/parameters/WorkspaceId"
+        - name: include
+          in: query
+          description: Set to `archived` to include archived durable agent records.
+          schema:
+            type: string
+            enum: [archived]
       responses:
         "200":
-          description: Agent list
+          description: Unified agent list
           content:
             application/json:
               schema:
-                type: object
-                required: [success, data]
-                properties:
-                  success:
-                    type: boolean
-                  data:
-                    type: array
-                    items:
-                      $ref: "#/components/schemas/AgentControlEntry"
+                $ref: "#/components/schemas/UnifiedAgentListResponse"
+        "409":
+          description: An identifier resolves to more than one agent kind
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentErrorResponse"
+        "500":
+          description: Agent store or service operation failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentErrorResponse"
         "503":
-          description: Daemon unavailable
+          description: Agent store or service unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentErrorResponse"
     post:
       operationId: createAgent
       tags: [agent-control]
-      summary: Create an agent assignment
+      summary: Create a supervised or prompt-backed agent
+      description: |
+        Creates either a legacy supervised role assignment or a durable
+        prompt-backed record with its initial trigger binding. Scripted records
+        and unattached binding entries are currently read-only on this route.
       parameters:
         - $ref: "#/components/parameters/WorkspaceId"
       requestBody:
@@ -2299,59 +2328,346 @@ paths:
         content:
           application/json:
             schema:
-              type: object
-              required: [name, role_name]
-              properties:
-                workspace_key:
-                  type: string
-                name:
-                  type: string
-                role_name:
-                  type: string
-                kind:
-                  type: string
-                  description: Optional role kind for creating an interactive role.
-                prompt:
-                  type: string
-                  description: Literal inline prompt text for interactive roles.
-                prompt_file:
-                  type: string
-                  description: Custom or builtin prompt selector for interactive roles.
-                auto:
-                  type: boolean
-                backend:
-                  type: string
-                fallback_backends:
-                  type: array
-                  items:
-                    type: string
-                repos:
-                  type: array
-                  items:
-                    type: string
-                repo_groups:
-                  type: array
-                  items:
-                    type: string
-                cross_repo:
-                  type: boolean
-                parent:
-                  type: string
-                desired_state:
-                  type: string
+              $ref: "#/components/schemas/CreateUnifiedAgentRequest"
       responses:
         "201":
           description: Agent created
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/WorkspaceAgentInfo"
+                $ref: "#/components/schemas/CreatedUnifiedAgent"
         "400":
           description: Invalid agent create request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentErrorResponse"
         "409":
           description: Agent already exists
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentErrorResponse"
+        "413":
+          description: Request body exceeds the 1 MiB limit
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentErrorResponse"
+        "500":
+          description: Agent store or service operation failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentErrorResponse"
         "503":
           description: Agent service unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentErrorResponse"
+
+  /api/workspaces/{ws}/agents/{name}:
+    get:
+      operationId: getAgent
+      tags: [agent-control]
+      summary: Get one unified agent entry
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/AgentName"
+      responses:
+        "200":
+          description: Agent entry
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UnifiedAgent"
+        "404":
+          description: Agent not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentErrorResponse"
+        "409":
+          description: The identifier resolves to more than one agent kind
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentErrorResponse"
+        "500":
+          description: Agent store operation failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentErrorResponse"
+        "503":
+          description: Agent store unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentErrorResponse"
+    patch:
+      operationId: patchAgent
+      tags: [agent-control]
+      summary: Update one unified agent entry
+      description: |
+        The accepted fields depend on the stored kind. Supervised assignments
+        use assignment fields; prompt/scripted records use identity and
+        behavior fields; legacy binding entries only support `name`.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/AgentName"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PatchUnifiedAgentRequest"
+      responses:
+        "200":
+          description: Updated agent entry
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UnifiedAgent"
+        "400":
+          description: Invalid update for the stored agent kind
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentErrorResponse"
+        "404":
+          description: Agent not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentErrorResponse"
+        "409":
+          description: The identifier is ambiguous or the update conflicts with stored state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentErrorResponse"
+        "413":
+          description: Request body exceeds the 1 MiB limit
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentErrorResponse"
+        "500":
+          description: Agent store or service operation failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentErrorResponse"
+        "503":
+          description: Agent store or service unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentErrorResponse"
+    delete:
+      operationId: deleteAgent
+      tags: [agent-control]
+      summary: Delete or archive one unified agent entry
+      description: |
+        Deletes supervised assignments and unattached legacy bindings. Durable
+        prompt/scripted records are archived after their bindings are deleted
+        and connector grants are revoked.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/AgentName"
+      responses:
+        "200":
+          description: Agent deleted or archived
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeleteUnifiedAgentResponse"
+        "404":
+          description: Agent not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentErrorResponse"
+        "409":
+          description: The identifier is ambiguous or deletion conflicts with stored state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentErrorResponse"
+        "500":
+          description: Agent store or service operation failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentErrorResponse"
+        "503":
+          description: Agent store or service unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentErrorResponse"
+
+  /api/workspaces/{ws}/agents/{name}/queue:
+    get:
+      operationId: getAgentQueue
+      tags: [agent-control]
+      summary: Get an agent-specific queue
+      description: This compatibility route is not implemented in fleet-db store mode.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/AgentName"
+      responses:
+        "501":
+          description: Agent-specific queue is not available
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentErrorResponse"
+
+  /api/workspaces/{ws}/agents/{id}/enable:
+    post:
+      operationId: enableAgentRecord
+      tags: [agent-control]
+      summary: Enable a durable agent record and its attached bindings
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/AgentId"
+      responses:
+        "200":
+          description: Enabled agent record
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DurableAgentRecord"
+        "400":
+          description: Supervised assignments use lifecycle actions instead
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentErrorResponse"
+        "404":
+          description: Agent record not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentErrorResponse"
+        "409":
+          description: Agent record is archived or the identifier is ambiguous
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentErrorResponse"
+        "500":
+          description: Agent store operation failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentErrorResponse"
+        "503":
+          description: Agent store unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentErrorResponse"
+
+  /api/workspaces/{ws}/agents/{id}/disable:
+    post:
+      operationId: disableAgentRecord
+      tags: [agent-control]
+      summary: Disable a durable agent record and its attached bindings
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/AgentId"
+      responses:
+        "200":
+          description: Disabled agent record
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DurableAgentRecord"
+        "400":
+          description: Supervised assignments use lifecycle actions instead
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentErrorResponse"
+        "404":
+          description: Agent record not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentErrorResponse"
+        "409":
+          description: Agent record is archived or the identifier is ambiguous
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentErrorResponse"
+        "500":
+          description: Agent store operation failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentErrorResponse"
+        "503":
+          description: Agent store unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentErrorResponse"
+
+  /api/workspaces/{ws}/agents/{id}/runs:
+    get:
+      operationId: listAgentRuns
+      tags: [agent-control]
+      summary: List runs attributed to a durable agent record
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/AgentId"
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        "200":
+          description: Agent run history, newest first
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentRunsResponse"
+        "400":
+          description: Unsupported agent kind or invalid limit
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentErrorResponse"
+        "404":
+          description: Agent record not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentErrorResponse"
+        "409":
+          description: The identifier resolves to more than one agent kind
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentErrorResponse"
+        "500":
+          description: Agent store operation failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentErrorResponse"
+        "503":
+          description: Agent store unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentErrorResponse"
 
   /api/workspaces/{ws}/agents/{name}/stop:
     post:
@@ -2369,11 +2685,7 @@ paths:
         content:
           application/json:
             schema:
-              type: object
-              properties:
-                force:
-                  type: boolean
-                  default: false
+              $ref: "#/components/schemas/StopAgentRequest"
       responses:
         "200":
           description: Agent force-stopped
@@ -2387,8 +2699,36 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/MessageResponse"
+        "400":
+          description: Invalid lifecycle request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentErrorResponse"
+        "404":
+          description: Supervised agent not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentErrorResponse"
+        "409":
+          description: Lifecycle update conflicts with stored state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentErrorResponse"
+        "500":
+          description: Agent service operation failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentErrorResponse"
         "503":
-          description: Daemon unavailable
+          description: Agent service unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentErrorResponse"
 
   /api/workspaces/{ws}/agents/{name}/start:
     post:
@@ -2398,6 +2738,11 @@ paths:
       parameters:
         - $ref: "#/components/parameters/WorkspaceId"
         - $ref: "#/components/parameters/AgentName"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AgentLifecycleRequest"
       responses:
         "200":
           description: Agent started
@@ -2405,8 +2750,36 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/MessageResponse"
+        "400":
+          description: Invalid lifecycle request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentErrorResponse"
+        "404":
+          description: Supervised agent not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentErrorResponse"
+        "409":
+          description: Lifecycle update conflicts with stored state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentErrorResponse"
+        "500":
+          description: Agent service operation failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentErrorResponse"
         "503":
-          description: Daemon unavailable
+          description: Agent service unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentErrorResponse"
 
   /api/workspaces/{ws}/agents/{name}/restart:
     post:
@@ -2416,6 +2789,11 @@ paths:
       parameters:
         - $ref: "#/components/parameters/WorkspaceId"
         - $ref: "#/components/parameters/AgentName"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AgentLifecycleRequest"
       responses:
         "200":
           description: Agent restarted
@@ -2423,8 +2801,36 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/MessageResponse"
+        "400":
+          description: Invalid lifecycle request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentErrorResponse"
+        "404":
+          description: Supervised agent not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentErrorResponse"
+        "409":
+          description: Lifecycle update conflicts with stored state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentErrorResponse"
+        "500":
+          description: Agent service operation failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentErrorResponse"
         "503":
-          description: Daemon unavailable
+          description: Agent service unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentErrorResponse"
 
   /api/workspaces/{ws}/agents/{name}/yield:
     post:
@@ -2434,6 +2840,11 @@ paths:
       parameters:
         - $ref: "#/components/parameters/WorkspaceId"
         - $ref: "#/components/parameters/AgentName"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AgentLifecycleRequest"
       responses:
         "202":
           description: Yield signal sent
@@ -2441,8 +2852,36 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/MessageResponse"
+        "400":
+          description: Invalid lifecycle request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentErrorResponse"
+        "404":
+          description: Supervised agent not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentErrorResponse"
+        "409":
+          description: Lifecycle update conflicts with stored state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentErrorResponse"
+        "500":
+          description: Agent service operation failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentErrorResponse"
         "503":
-          description: Daemon unavailable
+          description: Agent service unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentErrorResponse"
 
   # ── Git Operations ──────────────────────────────────────────────────────
   /api/workspaces/{ws}/agents/{name}/git/status:
@@ -4315,7 +4754,15 @@ components:
       name: name
       in: path
       required: true
-      description: Agent worktree name
+      description: Unified agent identifier or supervised assignment name
+      schema:
+        type: string
+
+    AgentId:
+      name: id
+      in: path
+      required: true
+      description: Durable agent record identifier
       schema:
         type: string
 
@@ -4336,6 +4783,18 @@ components:
           type: boolean
         details:
           type: object
+
+    AgentErrorResponse:
+      type: object
+      description: |
+        Error envelope emitted by the unified agent handlers. Store-direct
+        errors contain only `error`; service-layer errors also include `kind`.
+      required: [error]
+      properties:
+        error:
+          type: string
+        kind:
+          type: string
 
     MessageResponse:
       type: object
@@ -5360,6 +5819,9 @@ components:
           type: array
           items:
             type: string
+        source_repo:
+          type: string
+          description: Stable source repository identifier for multi-repo workspaces
         due_at:
           type: string
         defer_until:
@@ -5663,6 +6125,664 @@ components:
           items:
             type: string
           default: []
+
+    UnifiedAgentListResponse:
+      type: object
+      required: [success, data, total]
+      properties:
+        success:
+          type: boolean
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/UnifiedAgent"
+        total:
+          type: integer
+          minimum: 0
+
+    AgentLifecycleRequest:
+      type: object
+      properties:
+        payload:
+          type: object
+          additionalProperties:
+            type: string
+        task_id:
+          type: string
+
+    StopAgentRequest:
+      allOf:
+        - $ref: "#/components/schemas/AgentLifecycleRequest"
+        - type: object
+          properties:
+            force:
+              type: boolean
+              default: false
+
+    UnifiedAgent:
+      oneOf:
+        - $ref: "#/components/schemas/SupervisedAgent"
+        - $ref: "#/components/schemas/PromptAgentRecord"
+        - $ref: "#/components/schemas/ScriptedAgentRecord"
+        - $ref: "#/components/schemas/LegacyBindingAgent"
+      discriminator:
+        propertyName: kind
+        mapping:
+          supervised: "#/components/schemas/SupervisedAgent"
+          prompt: "#/components/schemas/PromptAgentRecord"
+          scripted: "#/components/schemas/ScriptedAgentRecord"
+          binding: "#/components/schemas/LegacyBindingAgent"
+
+    CreatedUnifiedAgent:
+      description: Agent kinds accepted by the collection create route.
+      oneOf:
+        - $ref: "#/components/schemas/SupervisedAgent"
+        - $ref: "#/components/schemas/PromptAgentRecord"
+      discriminator:
+        propertyName: kind
+        mapping:
+          supervised: "#/components/schemas/SupervisedAgent"
+          prompt: "#/components/schemas/PromptAgentRecord"
+
+    DurableAgentRecord:
+      description: Durable prompt-backed or scripted AgentService identity.
+      oneOf:
+        - $ref: "#/components/schemas/PromptAgentRecord"
+        - $ref: "#/components/schemas/ScriptedAgentRecord"
+      discriminator:
+        propertyName: kind
+        mapping:
+          prompt: "#/components/schemas/PromptAgentRecord"
+          scripted: "#/components/schemas/ScriptedAgentRecord"
+
+    SupervisedAgent:
+      type: object
+      description: Long-lived role assignment supervised by the Loom daemon.
+      required: [id, kind, workspace_key, name, role_name, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          description: Stable collection identifier; equal to `name` for supervised assignments.
+        kind:
+          type: string
+          const: supervised
+        workspace_key:
+          type: string
+        name:
+          type: string
+        role_name:
+          type: string
+        auto:
+          type: boolean
+        backend:
+          type: string
+        fallback_backends:
+          type: array
+          items:
+            type: string
+        repos:
+          type: array
+          items:
+            type: string
+        repo_groups:
+          type: array
+          items:
+            type: string
+        cross_repo:
+          type: boolean
+        parent:
+          type: string
+        state:
+          type: string
+        mode:
+          type: string
+        task_filter:
+          type: string
+        max_concurrency:
+          type: integer
+        budget_policy:
+          type: string
+        desired_state:
+          type: string
+        live_status:
+          type: string
+        active_task_id:
+          type: string
+        active_phase:
+          type: string
+        last_error_class:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    AgentRecordBase:
+      type: object
+      required: [id, name, enabled, workspace_key, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          description: Durable AgentService identifier.
+        name:
+          type: string
+        enabled:
+          type: boolean
+          description: True when the record desired state is `running`.
+        budget_policy:
+          type: string
+        workspace_key:
+          type: string
+        bindings:
+          type: array
+          items:
+            $ref: "#/components/schemas/AgentRecordBinding"
+        last_run_status:
+          type: string
+        consecutive_failures:
+          type: integer
+          minimum: 0
+        next_fire_at:
+          type: string
+          format: date-time
+        metadata:
+          type: object
+          additionalProperties:
+            type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    PromptAgentRecord:
+      allOf:
+        - $ref: "#/components/schemas/AgentRecordBase"
+        - type: object
+          required: [kind, behavior]
+          properties:
+            kind:
+              type: string
+              const: prompt
+            behavior:
+              $ref: "#/components/schemas/PromptAgentBehavior"
+
+    ScriptedAgentRecord:
+      allOf:
+        - $ref: "#/components/schemas/AgentRecordBase"
+        - type: object
+          required: [kind, behavior]
+          properties:
+            kind:
+              type: string
+              const: scripted
+            behavior:
+              $ref: "#/components/schemas/ScriptedAgentBehavior"
+
+    PromptAgentBehavior:
+      type: object
+      required: [role_name]
+      properties:
+        role_name:
+          type: string
+
+    ScriptedAgentBehavior:
+      type: object
+      required: [driver_id, driver_version_id]
+      properties:
+        driver_id:
+          type: string
+        driver_version_id:
+          type: string
+
+    LegacyBindingAgent:
+      description: Unattached trigger binding exposed as a compatibility agent entry.
+      allOf:
+        - $ref: "#/components/schemas/TriggerBinding"
+        - type: object
+          required: [id, kind]
+          properties:
+            id:
+              type: string
+              description: Stable collection identifier; equal to `binding_id`.
+            kind:
+              type: string
+              const: binding
+            next_fire_at:
+              type: string
+              format: date-time
+            last_run_status:
+              type: string
+            consecutive_failures:
+              type: integer
+              minimum: 0
+
+    AgentRecordBinding:
+      allOf:
+        - $ref: "#/components/schemas/TriggerBinding"
+        - type: object
+          properties:
+            next_fire_at:
+              type: string
+              format: date-time
+            last_run_status:
+              type: string
+            consecutive_failures:
+              type: integer
+              minimum: 0
+
+    TriggerBinding:
+      type: object
+      required:
+        - workspace_key
+        - binding_id
+        - name
+        - source_kind
+        - driver_id
+        - driver_version_id
+        - concurrency_policy
+        - enabled
+        - created_at
+        - updated_at
+      properties:
+        workspace_key:
+          type: string
+        binding_id:
+          type: string
+        name:
+          type: string
+        source_kind:
+          type: string
+        source_ref:
+          type: string
+        source_config_ref:
+          type: string
+        route_key:
+          type: string
+        method:
+          type: string
+        path_template:
+          type: string
+        topic:
+          type: string
+        event_type_patterns:
+          type: array
+          items:
+            type: string
+        filter_ref:
+          type: string
+        driver_id:
+          type: string
+        driver_version_id:
+          type: string
+        target_entrypoint:
+          type: string
+        target_agent_service_id:
+          type: string
+        concurrency_policy:
+          type: string
+        idempotency_policy:
+          type: string
+        auth_policy:
+          type: string
+        subject_key_template:
+          type: string
+        actor_filter:
+          $ref: "#/components/schemas/TriggerActorFilter"
+        retry_max_attempts:
+          type: integer
+        retry_backoff_seconds:
+          type: integer
+        schedule:
+          type: string
+        schedule_timezone:
+          type: string
+        permissions:
+          type: array
+          items:
+            type: string
+        enabled:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    TriggerActorFilter:
+      type: object
+      properties:
+        exclude_actor_kinds:
+          type: array
+          items:
+            type: string
+        allow_actors:
+          type: array
+          items:
+            type: string
+
+    CreateUnifiedAgentRequest:
+      description: |
+        Create either a supervised assignment or a prompt-backed record.
+        This request union intentionally has no discriminator because legacy
+        supervised clients omit `kind`; the supervised branch constrains every
+        supported non-prompt kind so the two branches remain exclusive.
+      oneOf:
+        - $ref: "#/components/schemas/CreateSupervisedAgentRequest"
+        - $ref: "#/components/schemas/CreatePromptAgentRequest"
+
+    CreateSupervisedAgentRequest:
+      type: object
+      required: [name, role_name]
+      properties:
+        workspace_key:
+          type: string
+        name:
+          type: string
+        role_name:
+          type: string
+        kind:
+          type: string
+          enum: [supervised, interactive, worker]
+          description: |
+            `interactive` and `worker` select a role kind. `supervised` is the
+            unified collection discriminator and leaves role-kind inference to
+            the referenced role. The field may be omitted for legacy clients.
+        prompt:
+          type: string
+          description: Literal inline prompt text for an interactive role.
+        prompt_file:
+          type: string
+          description: Custom path or `builtin:<id>` selector for an interactive role.
+        auto:
+          type: boolean
+        backend:
+          type: string
+        fallback_backends:
+          type: array
+          items:
+            type: string
+        repos:
+          type: array
+          items:
+            type: string
+        repo_groups:
+          type: array
+          items:
+            type: string
+        cross_repo:
+          type: boolean
+        parent:
+          type: string
+        desired_state:
+          type: string
+
+    CreatePromptAgentRequest:
+      type: object
+      required: [kind, behavior]
+      properties:
+        kind:
+          type: string
+          const: prompt
+        name:
+          type: string
+          description: Defaults to `behavior.role_name` when omitted.
+        backend:
+          type: string
+        behavior:
+          $ref: "#/components/schemas/CreatePromptAgentBehavior"
+        trigger:
+          $ref: "#/components/schemas/CreatePromptAgentTrigger"
+        grants:
+          type: array
+          items:
+            $ref: "#/components/schemas/CreatePromptAgentGrant"
+        enabled:
+          type: boolean
+          description: Defaults to true when omitted.
+        budget_policy:
+          type: string
+
+    CreatePromptAgentBehavior:
+      type: object
+      required: [role_name]
+      properties:
+        role_name:
+          type: string
+        role_create:
+          $ref: "#/components/schemas/CreatePromptRole"
+
+    CreatePromptRole:
+      type: object
+      properties:
+        prompt:
+          type: string
+        prompt_filename:
+          type: string
+        description:
+          type: string
+        task_filter:
+          type: string
+        model:
+          type: string
+        backend:
+          type: string
+        effort:
+          type: string
+        read_only:
+          type: boolean
+        allowed_tools:
+          type: array
+          items:
+            type: string
+        denied_tools:
+          type: array
+          items:
+            type: string
+        skills:
+          type: array
+          items:
+            type: string
+
+    CreatePromptAgentTrigger:
+      type: object
+      properties:
+        source_kind:
+          type: string
+          enum: [internal, cron]
+          description: Defaults to `internal` when omitted.
+        route_key:
+          type: string
+        binding_id:
+          type: string
+        event_type_patterns:
+          type: array
+          items:
+            type: string
+        schedule:
+          type: string
+        schedule_timezone:
+          type: string
+        entrypoint:
+          type: string
+
+    CreatePromptAgentGrant:
+      type: object
+      required: [connector_id, action, resource_pattern]
+      properties:
+        connector_id:
+          type: string
+        action:
+          type: string
+        resource_pattern:
+          type: string
+        grant_id:
+          type: string
+
+    PatchUnifiedAgentRequest:
+      type: object
+      minProperties: 1
+      additionalProperties: false
+      description: |
+        Kind-sensitive partial update. Durable records accept `name`,
+        `behavior`, and `budget_policy`; legacy binding entries accept only
+        `name`; supervised assignments accept the remaining assignment fields.
+      properties:
+        name:
+          type: string
+        behavior:
+          type: object
+          properties:
+            role_name:
+              type: string
+        budget_policy:
+          type: string
+        role_name:
+          type: string
+        auto:
+          type: boolean
+        backend:
+          type: string
+        fallback_backends:
+          type: array
+          items:
+            type: string
+        repos:
+          type: array
+          items:
+            type: string
+        repo_groups:
+          type: array
+          items:
+            type: string
+        cross_repo:
+          type: boolean
+        parent:
+          type: string
+        state:
+          type: string
+        desired_state:
+          type: string
+
+    DeleteUnifiedAgentResponse:
+      oneOf:
+        - $ref: "#/components/schemas/MessageResponse"
+        - $ref: "#/components/schemas/DeleteAgentRecordResponse"
+        - $ref: "#/components/schemas/DeleteLegacyBindingResponse"
+
+    DeleteAgentRecordResponse:
+      type: object
+      required: [agent, archived, bindings_deleted, grants_revoked]
+      properties:
+        agent:
+          $ref: "#/components/schemas/DurableAgentRecord"
+        archived:
+          type: boolean
+        bindings_deleted:
+          type: integer
+          minimum: 0
+        grants_revoked:
+          type: integer
+          minimum: 0
+
+    DeleteLegacyBindingResponse:
+      type: object
+      required: [binding_id, deleted, grants_revoked]
+      properties:
+        binding_id:
+          type: string
+        deleted:
+          type: boolean
+        grants_revoked:
+          type: integer
+          minimum: 0
+
+    AgentRunsResponse:
+      type: object
+      required: [agent_id, runs]
+      properties:
+        agent_id:
+          type: string
+        runs:
+          type: array
+          items:
+            $ref: "#/components/schemas/DriverRun"
+
+    DriverRun:
+      type: object
+      required: [workspace_key, run_id, driver_id, driver_version_id, status, created_at, updated_at]
+      properties:
+        workspace_key:
+          type: string
+        run_id:
+          type: string
+        driver_id:
+          type: string
+        driver_version_id:
+          type: string
+        entrypoint:
+          type: string
+        source_kind:
+          type: string
+        source_ref:
+          type: string
+        epic_id:
+          type: string
+        trigger_binding_id:
+          type: string
+        agent_service_id:
+          type: string
+        status:
+          type: string
+        node_id:
+          type: string
+        lease_id:
+          type: string
+        fencing_token:
+          type: integer
+          format: int64
+        idempotency_key:
+          type: string
+        payload: {}
+        output:
+          type: object
+          additionalProperties:
+            type: string
+        summary:
+          type: string
+        error_class:
+          type: string
+        started_at:
+          type: string
+          format: date-time
+        last_heartbeat:
+          type: string
+          format: date-time
+        finished_at:
+          type: [string, "null"]
+          format: date-time
+        parent_run_id:
+          type: string
+        suspended_at:
+          type: [string, "null"]
+          format: date-time
+        cancel_requested_at:
+          type: [string, "null"]
+          format: date-time
+        cancel_requested_reason:
+          type: string
+        resume_source_event_id:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
 
     AgentControlEntry:
       type: object

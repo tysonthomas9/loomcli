@@ -107,6 +107,10 @@ func (w *TaskWorker) runOnceInWorkspace(ctx context.Context, ws, workDir string)
 		RunnerPlacement:    w.runnerPlacement(nodeID),
 		SandboxPlacement:   w.SandboxPlacement,
 		HeartbeatInterval:  w.HeartbeatInterval,
+		// Default close-on-success. The worker claims any queued run without
+		// knowing its id in advance, so a per-request override (a planner's
+		// closeTask=false) is persisted on the run's RuntimeMetadata and wins
+		// after claim — see resolveCloseTaskOnSuccess in executeClaimedTaskRun.
 		CloseTaskOnSuccess: true,
 		MaxAttempts:        w.maxAttempts(),
 		Now:                w.Now,

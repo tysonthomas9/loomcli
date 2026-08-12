@@ -33,7 +33,7 @@ func startStaleTaskSweeper(ctx context.Context, st store.Store) {
 	}
 	sweeper := &driverexecutor.StaleTaskSweeper{
 		Store:        st,
-		WorkspaceKey: os.Getenv(bootstrap.EnvWorkspace),
+		WorkspaceKey: driverAutomationWorkspaceScope(),
 		MaxAge:       driverStaleTaskMaxAge(),
 	}
 	slog.Info("Stale task sweeper enabled", "workspace", sweeper.WorkspaceKey, "max_age", sweeper.MaxAge)
@@ -66,7 +66,7 @@ func startOutboxDispatcher(ctx context.Context, st store.Store) {
 	}
 	dispatcher := &driverexecutor.OutboxDispatcher{
 		Store:        st,
-		WorkspaceKey: os.Getenv(bootstrap.EnvWorkspace),
+		WorkspaceKey: driverAutomationWorkspaceScope(),
 	}
 	slog.Info("Outbox dispatcher enabled", "workspace", dispatcher.WorkspaceKey)
 	go func() {
@@ -100,7 +100,7 @@ func startTriggerCronScheduler(ctx context.Context, st store.Store) {
 	}
 	scheduler := &trigger.CronScheduler{
 		Store:        st,
-		WorkspaceKey: os.Getenv(bootstrap.EnvWorkspace),
+		WorkspaceKey: driverAutomationWorkspaceScope(),
 	}
 	interval := triggerCronInterval()
 	slog.Info("Trigger cron scheduler enabled", "workspace", scheduler.WorkspaceKey, "interval", interval)
@@ -143,7 +143,7 @@ func startTriggerDeliverySweeper(ctx context.Context, st store.Store) {
 	)
 	sweeper := &trigger.DeliverySweeper{
 		Store:        st,
-		WorkspaceKey: os.Getenv(bootstrap.EnvWorkspace),
+		WorkspaceKey: driverAutomationWorkspaceScope(),
 		BatchLimit:   boundedIntEnv(envLoomTriggerSweepBatch, trigger.DefaultDeliverySweepBatch, 500),
 	}
 	interval := time.Duration(boundedIntEnv(envLoomTriggerSweepInterval, 15, 3600)) * time.Second
@@ -184,7 +184,7 @@ func startAwaitTimeoutSweeper(ctx context.Context, st store.Store) {
 	)
 	sweeper := &driverexecutor.AwaitTimeoutSweeper{
 		Store:        st,
-		WorkspaceKey: os.Getenv(bootstrap.EnvWorkspace),
+		WorkspaceKey: driverAutomationWorkspaceScope(),
 		BatchLimit:   boundedIntEnv(envLoomAwaitSweepBatch, driverexecutor.DefaultAwaitTimeoutSweepBatch, 500),
 	}
 	interval := time.Duration(boundedIntEnv(envLoomAwaitSweepInterval, 30, 3600)) * time.Second
@@ -231,7 +231,7 @@ func startAwaitTimeoutSweeper(ctx context.Context, st store.Store) {
 // matching the sweepers, capped at one hour); LOOM_ISSUE_BRIDGE_STATE_PATH
 // overrides the cursor file; LOOM_ISSUE_BRIDGE_REPLAY=1 opts into
 // replay-from-zero on first observation (handled inside the bridge).
-func startIssueJournalBridge(ctx context.Context, st store.Store) {
+func startIssueJournalBridge(ctx context.Context, st store.Store, issueLookup func(ctx context.Context, workspace, issueID string) (string, []string, string, error)) {
 	if st == nil {
 		return
 	}
@@ -250,11 +250,19 @@ func startIssueJournalBridge(ctx context.Context, st store.Store) {
 		return
 	}
 	bridge := &trigger.IssueJournalBridge{
-		Store:        st,
-		Source:       &trigger.InternalSource{Store: st},
-		Reader:       reader,
-		WorkspaceKey: os.Getenv(bootstrap.EnvWorkspace),
-		Cursors:      cursors,
+		Store:  st,
+		Source: &trigger.InternalSource{Store: st},
+		Reader: reader,
+		// Resolve via the SHARED driver-automation scope, like the cron scheduler
+		// and the run executor. The bridge feeds task.ready events that fire prompt-
+		// agent bindings whose runs the executor must then claim; if the bridge
+		// ingested in a workspace the executor won't run in, those runs queue
+		// forever (the SANDBOX-vs-LOCALMODE bug). Keeps the env-override pattern:
+		// LOOM_DRIVER_EXECUTOR_WORKSPACE overrides, "*" unscopes to all workspaces.
+		WorkspaceKey:  driverAutomationWorkspaceScope(),
+		Cursors:       cursors,
+		EmitTaskReady: taskReadyEventsEnabled(),
+		IssueLookup:   issueLookup,
 	}
 	interval := issueBridgeInterval()
 	slog.Info("Issue journal bridge enabled", "workspace", bridge.WorkspaceKey, "interval", interval, "state_path", issueBridgeStatePath())
@@ -309,6 +317,18 @@ func issueBridgeInterval() time.Duration {
 // out (1/true/yes/on).
 func issueBridgeDisabled() bool {
 	switch strings.ToLower(strings.TrimSpace(os.Getenv(envLoomIssueBridgeDisabled))) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
+}
+
+// taskReadyEventsEnabled reports whether LOOM_TASK_READY_EVENTS opts the
+// issue-journal bridge into the flag-gated task.ready lane (1/true/yes/on).
+// Default off so the bridge's default behavior is unchanged.
+func taskReadyEventsEnabled() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(envLoomTaskReadyEvents))) {
 	case "1", "true", "yes", "on":
 		return true
 	default:

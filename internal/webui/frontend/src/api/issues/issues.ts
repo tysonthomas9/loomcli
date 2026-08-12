@@ -137,10 +137,14 @@ function mapWorkFilterToQueryParams(
 export async function getIssue(
   workspaceId: string,
   id: string,
+  requestOptions?: { signal?: AbortSignal },
 ): Promise<IssueDetails> {
   const { data, error, response } = await api.GET(
     "/api/workspaces/{ws}/issues/{id}",
-    { params: { path: { ws: workspaceId, id } } },
+    {
+      params: { path: { ws: workspaceId, id } },
+      ...(requestOptions?.signal ? { signal: requestOptions.signal } : {}),
+    },
   );
   if (error) throw apiErrorFromResponse(error, response);
   return normalizeIssueRepo(unwrap(data, response) as unknown as IssueDetails);

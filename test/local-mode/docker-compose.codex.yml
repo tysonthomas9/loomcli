@@ -15,11 +15,13 @@ services:
       LOOM_LOCAL_MODE_BACKEND: codex
       LOOM_LOCAL_MODE_PLAN_AGENT: codex-planner
       LOOM_LOCAL_MODE_CODE_AGENT: codex-coder
-      LOOM_LOCAL_MODE_PLAN_TASK_ID: LOCALMODE-2
-      LOOM_LOCAL_MODE_CODE_TASK_ID: LOCALMODE-3
       # Phase U (opt-in): route the daemon execution leaf through the bundled TS
       # runner. Default empty = the Go path. Enable with:
       #   LOOM_DAEMON_LEAF=ts make local-mode-codex-up
       LOOM_DAEMON_LEAF: "${LOOM_DAEMON_LEAF:-}"
+      # WS2c (opt-in): suppress Go role-agent seeding so the TS/workflow plane
+      # owns the queue. Default empty = seed the Go plane. Enable with:
+      #   LOOM_LOCAL_MODE_PLANE=ts make local-mode-codex-up
+      LOOM_LOCAL_MODE_PLANE: "${LOOM_LOCAL_MODE_PLANE:-}"
     volumes:
       - ${LOCAL_MODE_CODEX_HOME:-${HOME}/.codex}:/codex-host:ro

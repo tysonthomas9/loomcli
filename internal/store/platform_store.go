@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
@@ -134,6 +135,8 @@ type AgentServiceCreate struct {
 	Kind            domain.AgentServiceKind
 	DesiredState    domain.AgentServiceDesiredState
 	RoleName        string
+	DriverID        string
+	DriverVersionID string
 	ProfileName     string
 	ScheduleID      string
 	EventSources    []string
@@ -149,11 +152,12 @@ type AgentServiceCreate struct {
 }
 
 type AgentServiceFilter struct {
-	Kind         domain.AgentServiceKind
-	DesiredState domain.AgentServiceDesiredState
-	RoleName     string
-	ProfileName  string
-	Limit        int
+	Kind           domain.AgentServiceKind
+	DesiredState   domain.AgentServiceDesiredState
+	RoleName       string
+	ProfileName    string
+	IncludeDeleted bool
+	Limit          int
 }
 
 type AgentServiceUpdate struct {
@@ -161,6 +165,8 @@ type AgentServiceUpdate struct {
 	Kind            *domain.AgentServiceKind
 	DesiredState    *domain.AgentServiceDesiredState
 	RoleName        *string
+	DriverID        *string
+	DriverVersionID *string
 	ProfileName     *string
 	ScheduleID      *string
 	EventSources    *[]string
@@ -214,6 +220,52 @@ type TriggerBindingCreate struct {
 	Enabled              bool
 }
 
+// CronSourceKind is the trigger-binding source kind swept by the cron scheduler
+// (trigger.CronSourceKind aliases it). Its bindings fire by schedule, not by an
+// external event route.
+const CronSourceKind = "cron"
+
+// InternalSourceKind is the trigger-binding source kind that fires off loopback
+// internal events (the issue-journal bridge's internal.task.ready, run.finished,
+// etc.). Like cron it has no external route the caller must supply: it matches
+// events by event_type_patterns, so its route_key is a derived, unique 1:1
+// address (WithDerivedRoute) rather than a shared event route — otherwise two
+// pattern-matched siblings on the same event (e.g. a planner and a coder both
+// bound to internal.task.ready) would collide on the exact-owner route slot.
+const InternalSourceKind = "internal"
+
+// DefaultBindingID derives a binding's id from its route key when the caller
+// did not pick one. The id is wire-visible (a cron binding's derived route is
+// "cron:<binding_id>"), so every create surface (CLI, webui) must share this
+// derivation.
+func DefaultBindingID(routeKey string) string {
+	return "binding-" + strings.ReplaceAll(routeKey, ".", "-")
+}
+
+// WithDerivedRoute fills a cron or internal binding's route_key from its
+// (unique) binding_id when the caller left it empty. route_key is a binding's
+// internal 1:1 routing address — the scheduler stamps it on each cron.tick and
+// the router resolves it via GetByRouteKey — but neither a scheduled binding
+// (fires by schedule) nor an internal-event binding (matches by
+// event_type_patterns) has an external route to own, so deriving it from
+// binding_id keeps every such binding's address unique without callers
+// hand-picking a shared, collision-prone route string. The prefix records the
+// source kind ("cron:" / "internal:") and never collides with a real event route
+// (those use dots, e.g. internal.task.ready). Applied by every store Create so
+// all callers (webui, CLI) get it uniformly.
+func (in TriggerBindingCreate) WithDerivedRoute() TriggerBindingCreate {
+	if in.RouteKey != "" || in.BindingID == "" {
+		return in
+	}
+	switch in.SourceKind {
+	case CronSourceKind:
+		in.RouteKey = "cron:" + in.BindingID
+	case InternalSourceKind:
+		in.RouteKey = "internal:" + in.BindingID
+	}
+	return in
+}
+
 type TriggerBindingFilter struct {
 	SourceKind           string
 	RouteKey             string
@@ -260,6 +312,10 @@ type TriggerBindingStore interface {
 	GetByRouteKey(ctx context.Context, workspaceKey, routeKey string) (*domain.TriggerBinding, error)
 	List(ctx context.Context, workspaceKey string, filter TriggerBindingFilter) ([]*domain.TriggerBinding, error)
 	Update(ctx context.Context, workspaceKey, bindingID string, patch TriggerBindingUpdate) (*domain.TriggerBinding, error)
+	// Delete removes a binding. Deleting is deliberately separate from grant
+	// revocation (Decision 6): the caller revokes the binding's connector grants
+	// so no credentials outlive it. A missing binding wraps domain.ErrNotFound.
+	Delete(ctx context.Context, workspaceKey, bindingID string) error
 	// ResolveWebhookSecret fetches a binding's plaintext webhook signing secret.
 	// Read/Get/List return the binding with the secret redacted; this is the
 	// privileged path the webhook verifier uses to check inbound signatures.
@@ -439,9 +495,13 @@ type DriverRunCreate struct {
 	// (Phase D composition). Empty means detached/root — no cancel cascade.
 	// Orthogonal to EpicID: a run may carry an epic, a parent, both, or
 	// neither.
-	ParentRunID    string
-	IdempotencyKey string
-	Payload        json.RawMessage
+	ParentRunID string
+	// TriggerBindingID stamps the run with the binding whose trigger-dispatch
+	// leg admitted it (mirrors fleet-db's dispatchTriggerRouteLeg). Empty for
+	// manually-created runs, which belong to no binding.
+	TriggerBindingID string
+	IdempotencyKey   string
+	Payload          json.RawMessage
 }
 
 type DriverRunFilter struct {
@@ -449,8 +509,16 @@ type DriverRunFilter struct {
 	DriverVersionID string
 	EpicID          string
 	NodeID          string
-	Status          domain.DriverRunStatus
-	Limit           int
+	// BindingID filters to runs a trigger-dispatch leg stamped with this
+	// binding id (domain.DriverRun.TriggerBindingID), sent to fleet-db as the
+	// trigger_binding_id query param. Empty means no binding constraint.
+	BindingID string
+	// AgentServiceID filters to runs fleet-db stamped with this agent service
+	// at dispatch, sent as the agent_service_id query param. Empty means no
+	// agent-service constraint.
+	AgentServiceID string
+	Status         domain.DriverRunStatus
+	Limit          int
 }
 
 type DriverRunFinish struct {

@@ -20,6 +20,12 @@ volumes:
     driver: local
   loom-workspace:
     driver: local
+  # Durable artifact-content blobs (transcripts, logs, patches). fleet-db's
+  # filesystem content store writes here; without a volume the blobs die on
+  # container rebuild while their redis metadata survives, so a run's transcript
+  # 500s "failed to load" after any fleet-db rebuild (#30).
+  fleetdb-artifacts:
+    driver: local
 
 services:
   redis:
@@ -42,12 +48,17 @@ services:
     depends_on:
       redis:
         condition: service_healthy
+    # Run as root in local-mode ONLY so the artifact-content volume below is
+    # writable (the distroless image is nonroot UID 65532; a named volume is
+    # root-owned and docker-compose does not honor podman's :U chown). The
+    # explicit content dir removes any dependency on $HOME/UserCacheDir.
+    user: "0:0"
     environment:
       # fleet-db requires an explicit artifact content backend when issue-design
       # storage is artifact-backed (v5 DYNAMIC-WORKFLOWS-18). local keeps the
       # dogfood stack self-contained; without it fleet-db exits on startup.
       FLEETDB_ARTIFACT_CONTENT_BACKEND: local
-      FLEETDB_ARTIFACT_CONTENT_DIR: /tmp/fleet-db-artifacts
+      FLEETDB_ARTIFACT_CONTENT_DIR: /var/lib/fleetdb/artifacts
     command:
       - "--redis-addr"
       - "redis:6379"
@@ -56,6 +67,8 @@ services:
       - "--auth-dev-mode"
       - "--authz-enabled=false"
     networks: [local-mode]
+    volumes:
+      - fleetdb-artifacts:/var/lib/fleetdb/artifacts
     ports:
       - "${LOCAL_MODE_FLEETDB_PORT:-8280}:8080"
 
@@ -71,6 +84,11 @@ services:
       HOME: /root
       LOOM_CONFIG_DIR: /root/.loom
       LOOM_WORKSPACE: LOCALMODE
+      # Unscope the driver-run executor + task worker from LOOM_WORKSPACE so they
+      # claim queued runs in EVERY workspace (e.g. SANDBOX cron fires), matching
+      # the always-unscoped CronScheduler. "*" is the documented sentinel; unset
+      # would inherit LOOM_WORKSPACE and leave SANDBOX runs queued forever.
+      LOOM_DRIVER_EXECUTOR_WORKSPACE: "*"
       LOOM_ISSUE_BACKEND: fleetdb
       LOOM_FLEET_DB_URL: http://fleet-db:8080
       LOOM_FLEET_URL: http://fleet-db:8080
@@ -82,6 +100,10 @@ services:
       LOOM_WEBUI_URL: http://127.0.0.1:8080
       LOCAL_MODE_API_URL: "http://localhost:${LOCAL_MODE_API_PORT:-8282}"
       LOCAL_MODE_UI_URL: "http://localhost:${LOCAL_MODE_UI_PORT:-8283}"
+      LOCAL_MODE_CHECKOUT_ID: "${LOCAL_MODE_CHECKOUT_ID:?LOCAL_MODE_CHECKOUT_ID is required}"
+      LOCAL_MODE_SOURCE_ROOT: "${LOCAL_MODE_SOURCE_ROOT:?LOCAL_MODE_SOURCE_ROOT is required}"
+      LOCAL_MODE_COMPOSE_PROJECT: "${LOCAL_MODE_COMPOSE_PROJECT:?LOCAL_MODE_COMPOSE_PROJECT is required}"
+      LOCAL_MODE_RUN_ID: "${LOCAL_MODE_RUN_ID:?LOCAL_MODE_RUN_ID is required}"
       # File-browser routes fail closed unless the loopback frontend origin
       # is explicitly allowed; Caddy preserves the browser's Host header. The
       # Vite dev-server origins (`make dev` on :3000, and :3100 when :3000 is
@@ -91,6 +113,19 @@ services:
       LOOM_LOCAL_MODE_PLAN_TASK_ID: LOCALMODE-2
       LOOM_LOCAL_MODE_CODE_TASK_ID: LOCALMODE-3
       LOOM_LOCAL_MODE_STEP_DELAY: "2"
+      # Emit task.ready internal events when a task becomes ready, so a
+      # prompt-agent binding on internal.task.ready fires on task creation
+      # (Phase 4 prompt-agent packaging, ITEM E). Default-off elsewhere.
+      LOOM_TASK_READY_EVENTS: "1"
+      # Agent-plane selector (WS2c, Decision 5 — OPT-IN, default unchanged).
+      # Unset seeds the Go role agents (planner/coder). Set to run the TS/workflow
+      # plane uncontested (interim two-plane arbitration):
+      #   LOOM_LOCAL_MODE_PLANE=ts make local-mode-up
+      LOOM_LOCAL_MODE_PLANE: "${LOOM_LOCAL_MODE_PLANE:-}"
+    labels:
+      com.loom.local-mode.checkout-id: "${LOCAL_MODE_CHECKOUT_ID:?LOCAL_MODE_CHECKOUT_ID is required}"
+      com.loom.local-mode.project: "${LOCAL_MODE_COMPOSE_PROJECT:?LOCAL_MODE_COMPOSE_PROJECT is required}"
+      com.loom.local-mode.run-id: "${LOCAL_MODE_RUN_ID:?LOCAL_MODE_RUN_ID is required}"
     networks: [local-mode]
     ports:
       - "${LOCAL_MODE_API_PORT:-8282}:8080"

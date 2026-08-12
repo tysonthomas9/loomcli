@@ -12,6 +12,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/roleprompts"
 	storepkg "github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 	"github.com/tysonthomas9/loomcli/internal/workspaceerrors"
@@ -110,7 +111,7 @@ func createStoreBackedEmptyWorkspace(ctx context.Context, s storepkg.Store, req 
 			slog.Warn("failed to rollback store workspace create", "workspace", key, "err", err)
 		}
 	}
-	if err := seedBuiltInRoles(ctx, s, key); err != nil {
+	if err := seedBuiltInRoles(ctx, s, key, wsDir); err != nil {
 		rollbackStore()
 		cleanupWorktrees(wsPlan, created)
 		return service.WorkspaceCreateResult{}, fmt.Errorf("seed built-in roles: %w", err)
@@ -411,7 +412,7 @@ func createStoreBackedCloneWorkspace(ctx context.Context, s storepkg.Store, req 
 			slog.Warn("failed to rollback store clone workspace create", "workspace", key, "err", err)
 		}
 	}
-	if err := seedBuiltInRoles(ctx, s, key); err != nil {
+	if err := seedBuiltInRoles(ctx, s, key, wsDir); err != nil {
 		rollbackStore()
 		return service.WorkspaceCreateResult{}, fmt.Errorf("seed built-in roles: %w", err)
 	}
@@ -476,12 +477,21 @@ func updateStoreWorkspaceState(ctx context.Context, s storepkg.Store, key string
 	return err
 }
 
-func seedBuiltInRoles(ctx context.Context, s storepkg.Store, key string) error {
+// seedBuiltInRoles creates the domain.BuiltinRoleNames set — the two lists
+// must stay in step, since delete guards consult the domain list. The
+// task-running roles (plan/task) are seeded with a TS-contract prompt body on
+// disk so the prompt-agent → local-task-runner lane can reuse them by name
+// (without a body, role-get returns "" and prompt-agent fails closed with
+// prompt_agent_missing_prompt). Writing the prompt file is best-effort: a write
+// failure logs and leaves PromptFile empty, and EnsureBuiltinRolePrompts
+// materializes it at the next serve start.
+func seedBuiltInRoles(ctx context.Context, s storepkg.Store, key, wsDir string) error {
 	roles := []storepkg.RoleCreate{
 		{
 			WorkspaceKey: key,
 			Name:         "plan",
 			Description:  "Planning agent",
+			PromptFile:   seedRolePromptFile(wsDir, "plan"),
 			TaskFilter:   "needs_plan",
 			ReadOnly:     true,
 		},
@@ -489,6 +499,7 @@ func seedBuiltInRoles(ctx context.Context, s storepkg.Store, key string) error {
 			WorkspaceKey: key,
 			Name:         "task",
 			Description:  "Task implementation agent",
+			PromptFile:   seedRolePromptFile(wsDir, "task"),
 			TaskFilter:   "has_design",
 		},
 		{
@@ -504,6 +515,79 @@ func seedBuiltInRoles(ctx context.Context, s storepkg.Store, key string) error {
 		}
 	}
 	return nil
+}
+
+// seedRolePromptFile materializes the default TS-contract prompt body for a
+// builtin role into the workspace and returns its absolute path (empty on
+// failure or for a role with no default body — the caller then seeds the role
+// with no PromptFile and the serve-start backfill retries).
+func seedRolePromptFile(wsDir, roleName string) string {
+	body, ok := roleprompts.DefaultPromptBody(roleName)
+	if !ok {
+		return ""
+	}
+	path, err := roleprompts.WritePromptFile(wsDir, roleName, "", body)
+	if err != nil {
+		slog.Warn("failed to seed builtin role prompt; backfill will retry", "role", roleName, "workspace_dir", wsDir, "err", err)
+		return ""
+	}
+	return path
+}
+
+// EnsureBuiltinRolePrompts backfills the TS-contract prompt body for the builtin
+// task-running roles (plan/task) in every locally-materialized workspace. It is
+// idempotent and NON-destructive: it materializes the default body ONLY when the
+// role's PromptFile is empty, so an operator-customized prompt is never
+// clobbered. Run once at serve start. Best-effort: a workspace without a local
+// path, a missing role, or a write/update failure is logged and skipped without
+// aborting the sweep.
+func EnsureBuiltinRolePrompts(ctx context.Context, s storepkg.Store) error {
+	if s == nil {
+		return nil
+	}
+	workspaces, err := s.Workspaces().List(ctx)
+	if err != nil {
+		return fmt.Errorf("list workspaces for role prompt backfill: %w", err)
+	}
+	for _, ws := range workspaces {
+		if ws == nil || strings.TrimSpace(ws.Key) == "" {
+			continue
+		}
+		wsDir, err := localWorkspacePath(ws.Key)
+		if err != nil || strings.TrimSpace(wsDir) == "" {
+			// Not open on this machine — nothing to write to; skip quietly.
+			continue
+		}
+		for _, roleName := range roleprompts.BuiltinPromptRoleNames() {
+			ensureBuiltinRolePrompt(ctx, s, ws.Key, wsDir, roleName)
+		}
+	}
+	return nil
+}
+
+// ensureBuiltinRolePrompt materializes one builtin role's default prompt body
+// when (and only when) its PromptFile is empty.
+func ensureBuiltinRolePrompt(ctx context.Context, s storepkg.Store, key, wsDir, roleName string) {
+	role, err := s.Roles().Get(ctx, key, roleName)
+	if err != nil {
+		// Role not seeded (older workspace shape); leave it to seedBuiltInRoles.
+		return
+	}
+	if strings.TrimSpace(role.PromptFile) != "" {
+		return // never clobber an operator-customized (or already-seeded) prompt
+	}
+	body, ok := roleprompts.DefaultPromptBody(roleName)
+	if !ok {
+		return
+	}
+	path, err := roleprompts.WritePromptFile(wsDir, roleName, "", body)
+	if err != nil {
+		slog.Warn("failed to backfill builtin role prompt", "role", roleName, "workspace", key, "err", err)
+		return
+	}
+	if _, err := s.Roles().Update(ctx, key, roleName, storepkg.RoleUpdate{PromptFile: &path}); err != nil {
+		slog.Warn("failed to set builtin role PromptFile after backfill write", "role", roleName, "workspace", key, "err", err)
+	}
 }
 
 func saveLocalWorkspaceState(key, wsDir string, repos []config.RepoConfig, makeActive bool) error {

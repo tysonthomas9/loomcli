@@ -43,6 +43,42 @@ func TestCreateWorkflowRunPassesRawPayload(t *testing.T) {
 	}
 }
 
+func TestGetWorkflowSourceReturnsBuiltinFiles(t *testing.T) {
+	mux := http.NewServeMux()
+	NewModule(memstore.New()).Register(mux)
+
+	req := httptest.NewRequest(http.MethodGet,
+		"/api/workspaces/WS/workflows/"+workflowdefs.BuiltinBugFixAgentWorkflowName+"/source", nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("source status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	var got struct {
+		Name       string            `json:"name"`
+		Builtin    bool              `json:"builtin"`
+		Entrypoint string            `json:"entrypoint"`
+		Files      map[string]string `json:"files"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode source: %v", err)
+	}
+	if !got.Builtin || got.Entrypoint == "" || len(got.Files) == 0 {
+		t.Fatalf("unexpected source response: %+v", got)
+	}
+}
+
+func TestGetWorkflowSourceUnknownIs404(t *testing.T) {
+	mux := http.NewServeMux()
+	NewModule(memstore.New()).Register(mux)
+	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/WS/workflows/not-a-workflow/source", nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("unknown source status = %d, want 404; body=%s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestCreateWorkflowRunRegistersBuiltinEpicRunner(t *testing.T) {
 	ctx := context.Background()
 	st := memstore.New()
@@ -312,6 +348,70 @@ func TestGetRunEventsReturnsDriverRunEvents(t *testing.T) {
 	}
 	if len(page.Events) != 1 || page.Events[0].EntityID != "run-1" || page.Events[0].EntityType != "driver_run" {
 		t.Fatalf("events page = %+v, want one driver_run event", page)
+	}
+}
+
+func TestGetRunEmbedsDriverSteps(t *testing.T) {
+	ctx := context.Background()
+	st := seededWorkflowStore(t, ctx)
+	run, err := st.DriverRuns().Create(ctx, store.DriverRunCreate{
+		WorkspaceKey:    "TEST",
+		RunID:           "run-with-steps",
+		DriverID:        "demo",
+		DriverVersionID: "version-1",
+	})
+	if err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	if _, err := st.DriverSteps().Create(ctx, store.DriverStepCreate{
+		WorkspaceKey: "TEST",
+		StepID:       "step-1",
+		DriverRunID:  run.RunID,
+		StepKind:     "exec_task",
+		Status:       domain.DriverStepRunning,
+		TaskRunID:    "task-run-1",
+	}); err != nil {
+		t.Fatalf("create driver step: %v", err)
+	}
+	if _, err := st.TaskRuns().Create(ctx, store.TaskRunCreate{
+		WorkspaceKey: "TEST",
+		TaskRunID:    "task-run-1",
+		DriverRunID:  run.RunID,
+		DriverStepID: "step-1",
+		TaskID:       "TASK-1",
+		Status:       domain.TaskRunRunning,
+	}); err != nil {
+		t.Fatalf("create task run: %v", err)
+	}
+
+	mux := http.NewServeMux()
+	NewModule(st).Register(mux)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/TEST/runs/"+run.RunID, nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s, want 200", rec.Code, rec.Body.String())
+	}
+	var out struct {
+		RunID string `json:"run_id"`
+		Steps []struct {
+			ID        string `json:"id"`
+			StepKind  string `json:"step_kind"`
+			TaskRunID string `json:"task_run_id"`
+			TaskID    string `json:"task_id"`
+			Status    string `json:"status"`
+		} `json:"steps"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decode run detail: %v", err)
+	}
+	if out.RunID != run.RunID || len(out.Steps) != 1 {
+		t.Fatalf("run detail = %+v, want run with one step", out)
+	}
+	step := out.Steps[0]
+	if step.ID != "step-1" || step.StepKind != "exec_task" || step.TaskRunID != "task-run-1" || step.TaskID != "TASK-1" || step.Status != "running" {
+		t.Fatalf("step summary = %+v, want step/task-run linkage", step)
 	}
 }
 

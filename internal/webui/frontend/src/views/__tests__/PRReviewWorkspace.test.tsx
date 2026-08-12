@@ -4,7 +4,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { GitPullRequest } from "@/api/workspace";
+import type { GitPullRequest, WorkspaceAgentInfo } from "@/api/workspace";
 import type { Issue, LoomAgentStatus } from "@/types";
 
 import {
@@ -22,6 +22,7 @@ const mocks = vi.hoisted(() => ({
   startAgent: vi.fn(),
   getPullRequestDetail: vi.fn(),
   diffRefreshKeys: [] as Array<number | undefined>,
+  createAgentModalProps: null as null | { supervisedRole?: string },
   data: {
     agents: [] as unknown[],
     issues: [] as unknown[],
@@ -69,7 +70,32 @@ vi.mock("@/contexts/WorkspaceViewContext", () => ({
 }));
 
 vi.mock("@/components/CreateAgentModal/CreateAgentModal", () => ({
-  CreateAgentModal: () => <div data-testid="create-agent-modal" />,
+  CreateAgentModal: (props: {
+    isOpen: boolean;
+    supervisedRole?: string;
+    onSuccess: (agent: WorkspaceAgentInfo) => void;
+  }) => {
+    mocks.createAgentModalProps = {
+      ...(props.supervisedRole ? { supervisedRole: props.supervisedRole } : {}),
+    };
+    return props.isOpen ? (
+      <button
+        type="button"
+        data-testid="create-agent-modal-success"
+        onClick={() =>
+          props.onSuccess({
+            name: "review-worker",
+            repos: [],
+            repo_groups: [],
+            cross_repo: true,
+            role_name: "task",
+          })
+        }
+      >
+        Complete agent creation
+      </button>
+    ) : null;
+  },
 }));
 
 vi.mock("@/components/PRDiscussionPanel", () => ({
@@ -190,6 +216,7 @@ describe("PRReviewWorkspace", () => {
     mocks.data.agents = [];
     mocks.data.issues = [];
     mocks.diffRefreshKeys.length = 0;
+    mocks.createAgentModalProps = null;
     mocks.workspaceContext.workspaceId = "WS";
     mocks.getPullRequestDetail.mockResolvedValue({
       number: 7,
@@ -203,7 +230,75 @@ describe("PRReviewWorkspace", () => {
     });
     mocks.createIssue.mockResolvedValue(makeIssue({ id: "TASK-99" }));
     mocks.updateIssue.mockResolvedValue(makeIssue({ id: "TASK-99" }));
+    mocks.startAgent.mockResolvedValue(undefined);
     mocks.actions.updateIssueStatus.mockResolvedValue(undefined);
+  });
+
+  it("creates a constrained supervised reviewer, then assigns and starts it", async () => {
+    renderWorkspace();
+
+    fireEvent.click(screen.getByTestId("review-agent-button"));
+    fireEvent.click(screen.getByTestId("new-review-agent"));
+
+    expect(
+      await screen.findByTestId("create-agent-modal-success"),
+    ).toBeInTheDocument();
+    expect(mocks.createAgentModalProps).toEqual({ supervisedRole: "task" });
+
+    fireEvent.click(screen.getByTestId("create-agent-modal-success"));
+
+    await waitFor(() => {
+      expect(mocks.updateIssue).toHaveBeenCalledWith("WS", "TASK-1", {
+        assignee: "review-worker",
+      });
+      expect(mocks.startAgent).toHaveBeenCalledWith("WS", "review-worker", {
+        taskId: "TASK-1",
+      });
+    });
+  });
+
+  it("offers only daemon-startable workers in the reviewer chooser", () => {
+    mocks.data.agents = [
+      makeAgent({
+        name: "task-worker",
+        role: "task",
+        role_kind: "worker",
+        daemon_managed: true,
+      }),
+      makeAgent({
+        name: "interactive-reviewer",
+        role: "pr-review",
+        role_kind: "interactive",
+        daemon_managed: false,
+      }),
+      makeAgent({
+        name: "custom-worker",
+        role: "bug-triage",
+        role_kind: "worker",
+        daemon_managed: false,
+      }),
+      makeAgent({
+        name: "untyped-custom-agent",
+        role: "legacy-custom",
+        daemon_managed: false,
+      }),
+    ];
+
+    renderWorkspace();
+    fireEvent.click(screen.getByTestId("review-agent-button"));
+
+    expect(
+      screen.getByRole("menuitem", { name: "task-worker" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("menuitem", { name: "interactive-reviewer" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("menuitem", { name: "custom-worker" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("menuitem", { name: "untyped-custom-agent" }),
+    ).not.toBeInTheDocument();
   });
 
   it("toggles the PR discussion panel", async () => {

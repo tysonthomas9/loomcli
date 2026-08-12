@@ -463,8 +463,16 @@ func (s *sessionServiceImpl) GetSessionTranscript(ctx context.Context, wsID, tas
 	}
 	events, loadErr := store.LoadNativeEvents(sessionID)
 	if loadErr != nil {
-		if cpEvents, cpErr := s.controlPlaneSessionTranscript(ctx, wsID, taskID, sessionID); cpErr == nil {
+		cpEvents, cpErr := s.controlPlaneSessionTranscript(ctx, wsID, taskID, sessionID)
+		if cpErr == nil {
 			return cpEvents, nil
+		}
+		// If the control plane knows the content is simply gone (a not-found),
+		// surface THAT clean signal rather than the native reader's generic
+		// failure — the UI shows "no longer available" instead of a 500.
+		var svcErr *service.ServiceError
+		if errors.As(cpErr, &svcErr) && svcErr.Kind == service.KindNotFound {
+			return nil, cpErr
 		}
 		logger.Error("failed to load native transcript", "session_id", sessionID, "err", loadErr)
 		return nil, service.ErrInternal("failed to load transcript", loadErr)
@@ -489,6 +497,14 @@ func (s *sessionServiceImpl) controlPlaneSessionTranscript(ctx context.Context, 
 	}
 	data, err := s.readTranscriptRef(ctx, wsID, transcriptRef)
 	if err != nil {
+		// The artifact record survives in the control plane but its content
+		// blob is gone (e.g. a run predating the durable-artifact volume, whose
+		// local content dir was wiped). Report it honestly as gone — a clean
+		// not-found — rather than a generic internal failure, so the UI renders
+		// "transcript content is no longer available" instead of a doubled 500.
+		if errors.Is(err, os.ErrNotExist) || errors.Is(err, domain.ErrNotFound) {
+			return nil, service.ErrNotFound("transcript content is no longer available")
+		}
 		return nil, service.ErrInternal("failed to load transcript", err)
 	}
 	events, err := parseCanonicalTranscriptBytes(data)

@@ -1,0 +1,36 @@
+# Overlay that gives the default (localdogfood) local-mode stack the on-demand
+# workflow-driver build toolchain — node + a local @loom/sdk + @flue/runtime +
+# the flue CLI — so registering built-in workflows (bug-fix-agent, review-loop-
+# agent, …) from the UI succeeds. Keeps LOOM_BACKEND=localdogfood (no codex, no
+# real LLM spend); only the flue BUILD path needs node.
+#
+# Usage:
+#   make local-mode-codex-workflows-up
+# or, for the deterministic backend:
+#   LOCAL_MODE_COMPOSE_FILES=test/local-mode/docker-compose.workflow-build.yml \
+#   LOCAL_MODE_COMPOSE_UP_FLAGS='--build -d' make local-mode-up
+
+services:
+  loom-local:
+    build:
+      args:
+        # The Dockerfile installs Node (needed by flue) only inside the
+        # INSTALL_CODEX/INSTALL_CLAUDE branch; enable it purely for node. The
+        # codex CLI it also installs stays unused while LOOM_BACKEND=localdogfood.
+        INSTALL_CODEX: "true"
+    environment:
+      LOOM_SDK_ROOT: /loom-sdk
+      FLUE_REPO: /flue-src
+      LOOM_REAL_FLUE_CMD_JSON: '["node","/flue-src/packages/cli/bin/flue.mjs"]'
+      # Connector vault key (AES-256, base64 32 bytes): the review-loop connector
+      # seals the Settings GitHub token under it, and its egress unseals with it.
+      # Stable default so sealed credentials survive container recreates; override
+      # with LOOM_CONNECTOR_VAULT_KEY. Local-mode test key only, not a secret.
+      LOOM_CONNECTOR_VAULT_KEY: ${LOOM_CONNECTOR_VAULT_KEY:-td8F43WPBP7SxY4PAfSH4sfclZPVCHlYz1iz5DSMeJA=}
+    volumes:
+      # Relative paths resolve against the project directory (test/local-mode,
+      # where the base compose file lives). The flue checkout sits outside this
+      # repo, so its default assumes the sibling-checkout layout; override with
+      # FLUE_SRC when yours lives elsewhere.
+      - ../../sdk:/loom-sdk
+      - ${FLUE_SRC:-../../../../dynamic-workflows/flue}:/flue-src

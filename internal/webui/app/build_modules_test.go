@@ -14,9 +14,8 @@ import (
 )
 
 // TestServer_BuildModules_ZeroValue verifies that calling buildModules on a
-// zero-value Server populates wsModules with exactly the 4 always-constructed
-// modules (IssueModule, WorkspaceOpsModule, LogModule, SessionModule) and does
-// not panic.
+// zero-value Server populates wsModules with the 4 always-constructed modules
+// plus the non-store pull-request-list fallback, and does not panic.
 func TestServer_BuildModules_ZeroValue(t *testing.T) {
 	var app Server
 	app.buildModules()
@@ -44,7 +43,7 @@ func TestServer_BuildModules_ZeroValue(t *testing.T) {
 }
 
 // TestServer_BuildModules_AllDeps verifies that when every optional dependency
-// is non-nil, buildModules produces all 11 modules (4 always + 7 conditional).
+// is non-nil without a store, buildModules produces the non-store module set.
 func TestServer_BuildModules_AllDeps(t *testing.T) {
 	hub := realtime.NewHub()
 	go hub.Run()
@@ -76,8 +75,8 @@ func TestServer_BuildModules_StoreBacked(t *testing.T) {
 
 	app.buildModules()
 
-	if got := len(app.wsModules); got != 12 {
-		t.Fatalf("len(wsModules) = %d, want 12", got)
+	if got := len(app.wsModules); got != 15 {
+		t.Fatalf("len(wsModules) = %d, want 15", got)
 	}
 	wantTypes := []string{
 		"*handlermux.WorkspaceOpsModule",
@@ -88,10 +87,13 @@ func TestServer_BuildModules_StoreBacked(t *testing.T) {
 		"*onboarding.Module",
 		"*workflows.Module",
 		"*webhooks.Module",
-		"*prreview.Module",
+		"*roles.Module",
+		"*triggerbindings.Module",
+		"*connectors.Module",
 		"*approvals.Module",
 		"*taskrunapi.Module",
 		"*driverapi.Module",
+		"*prreview.Module",
 	}
 	for i, mod := range app.wsModules {
 		got := fmt.Sprintf("%T", mod)

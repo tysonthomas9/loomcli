@@ -85,6 +85,16 @@ var bindingsShowCmd = &cobra.Command{
 	RunE:    runBindingsShow,
 }
 
+var bindDeleteJSON bool
+
+var bindingsDeleteCmd = &cobra.Command{
+	Use:     "delete <binding-id>",
+	Aliases: []string{"rm"},
+	Short:   "Delete a trigger binding and revoke its connector grants",
+	Args:    cobra.ExactArgs(1),
+	RunE:    runBindingsDelete,
+}
+
 // routerBindingFlags groups the Router v2 binding flags shared by the create
 // and update commands. Each command binds its own instance so create/update
 // flag state never aliases.
@@ -283,15 +293,22 @@ func intPtrIfChanged(flags *pflag.FlagSet, name string, val int) *int {
 }
 
 func runBindingsCreate(cmd *cobra.Command, _ []string) error {
+	source := firstNonEmpty(strings.TrimSpace(bindCreateSource), "github")
 	routeKey := strings.TrimSpace(bindCreateRouteKey)
-	if routeKey == "" {
+	// A cron binding fires by schedule and has no external route — the store
+	// derives its route_key from the (unique) binding_id — so it needs a
+	// --binding-id but not a --route-key. Event sources need an explicit route.
+	if source == store.CronSourceKind {
+		if routeKey == "" && strings.TrimSpace(bindCreateBindingID) == "" {
+			return fmt.Errorf("--binding-id is required for a cron trigger binding")
+		}
+	} else if routeKey == "" {
 		return fmt.Errorf("--route-key is required")
 	}
 	driverRef := strings.TrimSpace(firstNonEmpty(bindCreateDriver, bindCreateWorkflow))
 	if driverRef == "" {
 		return fmt.Errorf("one of --driver or --workflow is required")
 	}
-	source := firstNonEmpty(strings.TrimSpace(bindCreateSource), "github")
 	// An enabled github binding with no secret rejects every signed webhook
 	// (HMAC verification fails on an empty secret), so refuse to create one.
 	if source == "github" && !bindCreateDisabled && strings.TrimSpace(bindCreateSecret) == "" {
@@ -331,10 +348,13 @@ func createBindingInWorkspace(ctx context.Context, cmd *cobra.Command, h *bootst
 }
 
 func newBindingCreateInput(ws, routeKey, source, driverID, versionID string) store.TriggerBindingCreate {
+	bindingID := firstNonEmpty(strings.TrimSpace(bindCreateBindingID), store.DefaultBindingID(routeKey))
 	return store.TriggerBindingCreate{
-		WorkspaceKey:        ws,
-		BindingID:           firstNonEmpty(strings.TrimSpace(bindCreateBindingID), defaultBindingID(routeKey)),
-		Name:                firstNonEmpty(strings.TrimSpace(bindCreateName), routeKey),
+		WorkspaceKey: ws,
+		BindingID:    bindingID,
+		// Name falls back to binding_id (cron leaves route_key empty for the store
+		// to derive, so it can't seed the name).
+		Name:                firstNonEmpty(strings.TrimSpace(bindCreateName), routeKey, bindingID),
 		SourceKind:          source,
 		RouteKey:            routeKey,
 		EventTypePatterns:   bindCreateRouter.patterns,
@@ -368,6 +388,38 @@ func runBindingsUpdate(cmd *cobra.Command, args []string) error {
 		}
 		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Updated trigger binding %s (policy=%s, enabled=%t)\n",
 			binding.BindingID, binding.ConcurrencyPolicy, binding.Enabled)
+		return nil
+	})
+}
+
+// runBindingsDelete deletes a binding and revokes its connector grants
+// (Decision 6: no orphaned credentials), mirroring the HTTP DELETE semantics.
+// Delete is the gating action — a store that cannot delete fails with no side
+// effects; grants are revoked only once the binding is gone.
+func runBindingsDelete(cmd *cobra.Command, args []string) error {
+	bindingID := strings.TrimSpace(args[0])
+	return cmdstore.WithActiveWorkspace(func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error {
+		if err := h.Store.TriggerBindings().Delete(ctx, ws, bindingID); err != nil {
+			return fmt.Errorf("delete trigger binding: %w", err)
+		}
+		revoked := 0
+		grants, err := h.Store.ConnectorGrants().ListByBinding(ctx, ws, bindingID)
+		if err != nil {
+			return fmt.Errorf("binding deleted but listing connector grants failed: %w", err)
+		}
+		for _, g := range grants {
+			if g == nil {
+				continue
+			}
+			if err := h.Store.ConnectorGrants().Revoke(ctx, ws, g.GrantID); err != nil {
+				return fmt.Errorf("binding deleted but revoking grant %q failed: %w", g.GrantID, err)
+			}
+			revoked++
+		}
+		if bindDeleteJSON {
+			return cmdstore.WriteJSON(map[string]any{"binding_id": bindingID, "deleted": true, "grants_revoked": revoked})
+		}
+		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Deleted trigger binding %s (grants revoked=%d)\n", bindingID, revoked)
 		return nil
 	})
 }
@@ -573,10 +625,6 @@ func resolveDriver(ctx context.Context, st store.Store, ws, ref string) (*domain
 	return drivers[0], nil
 }
 
-func defaultBindingID(routeKey string) string {
-	return "binding-" + strings.ReplaceAll(routeKey, ".", "-")
-}
-
 func firstNonEmpty(values ...string) string {
 	for _, v := range values {
 		if trimmed := strings.TrimSpace(v); trimmed != "" {
@@ -607,7 +655,9 @@ func init() {
 	bindingsListCmd.Flags().BoolVar(&bindListEnabled, "enabled", false, "filter by enabled state (only applied when set)")
 	bindingsListCmd.Flags().BoolVar(&bindListJSON, "json", false, "JSON output")
 
-	bindingsCmd.AddCommand(bindingsCreateCmd, bindingsUpdateCmd, bindingsListCmd, bindingsShowCmd)
+	bindingsDeleteCmd.Flags().BoolVar(&bindDeleteJSON, "json", false, "JSON output")
+
+	bindingsCmd.AddCommand(bindingsCreateCmd, bindingsUpdateCmd, bindingsListCmd, bindingsShowCmd, bindingsDeleteCmd)
 
 	eventsListCmd.Flags().StringVar(&eventsListSource, "source-kind", "", "filter by source kind")
 	eventsListCmd.Flags().IntVar(&eventsListLimit, "limit", 0, "max results")

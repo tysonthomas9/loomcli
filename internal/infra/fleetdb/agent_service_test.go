@@ -5,12 +5,14 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
 func TestAgentServiceClientRoutesBodiesAndQueries(t *testing.T) {
+	deletedAt := time.Date(2026, 7, 8, 12, 0, 0, 0, time.UTC)
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/WS/agent-services":
@@ -20,6 +22,8 @@ func TestAgentServiceClientRoutesBodiesAndQueries(t *testing.T) {
 				Kind            domain.AgentServiceKind         `json:"kind"`
 				DesiredState    domain.AgentServiceDesiredState `json:"desired_state"`
 				RoleName        string                          `json:"role_name"`
+				DriverID        string                          `json:"driver_id"`
+				DriverVersionID string                          `json:"driver_version_id"`
 				ProfileName     string                          `json:"profile_name"`
 				EventSources    []string                        `json:"event_sources"`
 				TriggerRefs     []string                        `json:"trigger_refs"`
@@ -32,6 +36,13 @@ func TestAgentServiceClientRoutesBodiesAndQueries(t *testing.T) {
 				Metadata        map[string]string               `json:"metadata"`
 			}
 			decodeAgentServiceJSONBody(t, r, &req)
+			if req.ServiceID == "scripted" {
+				if req.RoleName != "" || req.DriverID != "driver-1" || req.DriverVersionID != "version-1" {
+					t.Fatalf("scripted create body behavior = %+v", req)
+				}
+				writeJSON(t, w, domain.AgentService{WorkspaceKey: "WS", ServiceID: req.ServiceID, Name: req.Name, Kind: req.Kind, DesiredState: req.DesiredState, DriverID: req.DriverID, DriverVersionID: req.DriverVersionID, CreatedBy: "tester", DeletedAt: &deletedAt, MaxInstances: req.MaxInstances})
+				return
+			}
 			if req.ServiceID != "lead" || req.Kind != domain.AgentServiceKindLead || req.DesiredState != domain.AgentServiceDesiredRunning || req.RoleName != "lead" || req.ProfileName != "falcon" {
 				t.Fatalf("create body identity = %+v", req)
 			}
@@ -41,15 +52,15 @@ func TestAgentServiceClientRoutesBodiesAndQueries(t *testing.T) {
 			if len(req.EventSources) != 1 || req.EventSources[0] != "github:issues" || len(req.TriggerRefs) != 1 || req.TriggerRefs[0] != "binding-1" || len(req.Permissions) != 1 || req.Permissions[0] != "task_run.create" || req.Metadata["tier"] != "gold" {
 				t.Fatalf("create body collections = %+v", req)
 			}
-			writeJSON(t, w, domain.AgentService{WorkspaceKey: "WS", ServiceID: req.ServiceID, Name: req.Name, Kind: req.Kind, DesiredState: req.DesiredState, RoleName: req.RoleName, ProfileName: req.ProfileName, MaxInstances: req.MaxInstances})
+			writeJSON(t, w, domain.AgentService{WorkspaceKey: "WS", ServiceID: req.ServiceID, Name: req.Name, Kind: req.Kind, DesiredState: req.DesiredState, RoleName: req.RoleName, ProfileName: req.ProfileName, CreatedBy: "tester", MaxInstances: req.MaxInstances})
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/WS/agent-services":
 			q := r.URL.Query()
-			if q.Get("kind") != "lead" || q.Get("desired_state") != "running" || q.Get("role_name") != "lead" || q.Get("profile_name") != "falcon" || q.Get("limit") != "3" {
+			if q.Get("kind") != "lead" || q.Get("desired_state") != "running" || q.Get("role_name") != "lead" || q.Get("profile_name") != "falcon" || q.Get("include_deleted") != "true" || q.Get("limit") != "3" {
 				t.Fatalf("list query = %s", r.URL.RawQuery)
 			}
-			writeJSON(t, w, map[string]any{"agent_services": []*domain.AgentService{{WorkspaceKey: "WS", ServiceID: "lead", Kind: domain.AgentServiceKindLead, DesiredState: domain.AgentServiceDesiredRunning, RoleName: "lead", ProfileName: "falcon", MaxInstances: 2}}, "count": 1})
+			writeJSON(t, w, map[string]any{"agent_services": []*domain.AgentService{{WorkspaceKey: "WS", ServiceID: "lead", Kind: domain.AgentServiceKindLead, DesiredState: domain.AgentServiceDesiredRunning, RoleName: "lead", ProfileName: "falcon", CreatedBy: "tester", MaxInstances: 2}}, "count": 1})
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/WS/agent-services/lead":
-			writeJSON(t, w, domain.AgentService{WorkspaceKey: "WS", ServiceID: "lead", Kind: domain.AgentServiceKindLead, DesiredState: domain.AgentServiceDesiredRunning, RoleName: "lead", ProfileName: "falcon", MaxInstances: 2})
+			writeJSON(t, w, domain.AgentService{WorkspaceKey: "WS", ServiceID: "lead", Kind: domain.AgentServiceKindLead, DesiredState: domain.AgentServiceDesiredRunning, RoleName: "lead", ProfileName: "falcon", CreatedBy: "tester", MaxInstances: 2})
 		case r.Method == http.MethodPatch && r.URL.Path == "/api/v1/WS/agent-services/lead":
 			var req struct {
 				DesiredState *domain.AgentServiceDesiredState `json:"desired_state"`
@@ -97,8 +108,28 @@ func TestAgentServiceClientRoutesBodiesAndQueries(t *testing.T) {
 	if created.ServiceID != "lead" || created.MaxInstances != 2 {
 		t.Fatalf("created = %+v, want lead", created)
 	}
+	if created.CreatedBy != "tester" {
+		t.Fatalf("created_by = %q, want tester", created.CreatedBy)
+	}
 
-	services, err := client.AgentServices().List(t.Context(), "WS", store.AgentServiceFilter{Kind: domain.AgentServiceKindLead, DesiredState: domain.AgentServiceDesiredRunning, RoleName: "lead", ProfileName: "falcon", Limit: 3})
+	scripted, err := client.AgentServices().Create(t.Context(), store.AgentServiceCreate{
+		WorkspaceKey:    "WS",
+		ServiceID:       "scripted",
+		Name:            "Scripted",
+		Kind:            domain.AgentServiceKindEvent,
+		DesiredState:    domain.AgentServiceDesiredRunning,
+		DriverID:        "driver-1",
+		DriverVersionID: "version-1",
+		MaxInstances:    1,
+	})
+	if err != nil {
+		t.Fatalf("Create scripted agent service: %v", err)
+	}
+	if scripted.RoleName != "" || scripted.DriverID != "driver-1" || scripted.DriverVersionID != "version-1" || scripted.CreatedBy != "tester" || scripted.DeletedAt == nil {
+		t.Fatalf("scripted = %+v, want driver fields, created_by, deleted_at", scripted)
+	}
+
+	services, err := client.AgentServices().List(t.Context(), "WS", store.AgentServiceFilter{Kind: domain.AgentServiceKindLead, DesiredState: domain.AgentServiceDesiredRunning, RoleName: "lead", ProfileName: "falcon", IncludeDeleted: true, Limit: 3})
 	if err != nil {
 		t.Fatalf("List agent services: %v", err)
 	}

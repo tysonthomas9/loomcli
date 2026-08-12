@@ -13,17 +13,31 @@ import {
 
 import styles from "./AgentEditorGroups.module.css";
 
-export type AgentEditorTab = "terminal" | "info" | "git" | "diff" | "files";
+export type AgentEditorTab =
+  | "runs"
+  | "terminal"
+  | "info"
+  | "git"
+  | "diff"
+  | "files";
 
-const ALL_TABS: AgentEditorTab[] = ["terminal", "info", "git", "diff", "files"];
+export interface AgentCapabilities {
+  worktree: boolean;
+  pty: boolean;
+  runs: boolean;
+  config: boolean;
+}
 
 const TAB_LABELS: Record<AgentEditorTab, string> = {
+  runs: "Runs",
   terminal: "Terminal",
   info: "Info",
   git: "Git",
   diff: "Diff",
   files: "Files",
 };
+
+const FALLBACK_TABS: AgentEditorTab[] = ["info"];
 
 type EditorGroup = {
   tabs: AgentEditorTab[];
@@ -35,21 +49,105 @@ type DragPayload = {
   tab: AgentEditorTab;
 };
 
-function fallbackGroup(): EditorGroup {
-  return { tabs: ["terminal"], active: "terminal" };
+export function agentTabsForCapabilities(
+  capabilities: AgentCapabilities,
+): AgentEditorTab[] {
+  const tabs: AgentEditorTab[] = [];
+  if (capabilities.runs) tabs.push("runs");
+  if (capabilities.pty) tabs.push("terminal");
+  if (capabilities.config) tabs.push("info");
+  if (capabilities.worktree) tabs.push("git", "diff", "files");
+  return tabs.length > 0 ? tabs : [...FALLBACK_TABS];
 }
 
-function normalizeGroups(groups: EditorGroup[]): EditorGroup[] {
-  const kept = groups.filter((g) => g.tabs.length > 0);
-  if (kept.length === 0) return [fallbackGroup()];
-  return kept.map((g) => ({
-    tabs: g.tabs,
-    active: g.tabs.includes(g.active) ? g.active : g.tabs[0]!,
-  }));
+function storageKeyFor(resetKey: string | undefined): string | null {
+  return resetKey ? `loom.agentEditorGroups.${resetKey}` : null;
 }
 
-function initialGroups(): EditorGroup[] {
-  return [{ tabs: [...ALL_TABS], active: "terminal" }];
+function isAgentEditorTab(value: unknown): value is AgentEditorTab {
+  return typeof value === "string" && value in TAB_LABELS;
+}
+
+function deserializeGroups(value: string | null): EditorGroup[] | null {
+  if (!value) return null;
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (!Array.isArray(parsed)) return null;
+    const groups: EditorGroup[] = [];
+    for (const group of parsed) {
+      if (group == null || typeof group !== "object") continue;
+      const maybeGroup = group as { tabs?: unknown; active?: unknown };
+      if (!Array.isArray(maybeGroup.tabs)) continue;
+      const tabs = maybeGroup.tabs.filter(isAgentEditorTab);
+      const active = isAgentEditorTab(maybeGroup.active)
+        ? maybeGroup.active
+        : tabs[0];
+      if (!active) continue;
+      groups.push({ tabs, active });
+    }
+    return groups;
+  } catch {
+    return null;
+  }
+}
+
+function fallbackGroup(availableTabs: AgentEditorTab[]): EditorGroup {
+  const tabs = availableTabs.length > 0 ? availableTabs : FALLBACK_TABS;
+  return { tabs: [...tabs], active: tabs[0]! };
+}
+
+function normalizeGroups(
+  groups: EditorGroup[],
+  availableTabs: AgentEditorTab[],
+): EditorGroup[] {
+  const allowed = new Set(availableTabs);
+  const seen = new Set<AgentEditorTab>();
+  const normalized = groups
+    .map((group) => {
+      const tabs = group.tabs.filter((tab) => {
+        if (!allowed.has(tab) || seen.has(tab)) return false;
+        seen.add(tab);
+        return true;
+      });
+      return {
+        tabs,
+        active: tabs.includes(group.active) ? group.active : tabs[0]!,
+      };
+    })
+    .filter((group) => group.tabs.length > 0);
+
+  const missing = availableTabs.filter((tab) => !seen.has(tab));
+  if (normalized.length === 0) {
+    return [fallbackGroup(availableTabs)];
+  }
+  if (missing.length > 0) {
+    const first = normalized[0]!;
+    normalized[0] = {
+      ...first,
+      tabs: [...first.tabs, ...missing],
+      active: first.tabs.includes(first.active) ? first.active : first.tabs[0]!,
+    };
+  }
+  return normalized;
+}
+
+function initialGroups(availableTabs: AgentEditorTab[]): EditorGroup[] {
+  return normalizeGroups(
+    [{ tabs: [...availableTabs], active: availableTabs[0] ?? "info" }],
+    availableTabs,
+  );
+}
+
+function loadInitialGroups(
+  resetKey: string | undefined,
+  availableTabs: AgentEditorTab[],
+): EditorGroup[] {
+  const storageKey = storageKeyFor(resetKey);
+  if (storageKey && typeof window !== "undefined") {
+    const stored = deserializeGroups(window.localStorage.getItem(storageKey));
+    if (stored) return normalizeGroups(stored, availableTabs);
+  }
+  return initialGroups(availableTabs);
 }
 
 /** Aether wireframe "columns" icon — split active tab into a right editor group. */
@@ -76,20 +174,31 @@ function SplitEditorRightIcon(): JSX.Element {
 export interface AgentEditorGroupsProps {
   /** Resets layout when the selected agent changes. */
   resetKey: string | undefined;
+  tabs: AgentEditorTab[];
   renderPane: (tab: AgentEditorTab, isActive: boolean) => ReactNode;
 }
 
 export function AgentEditorGroups({
   resetKey,
+  tabs,
   renderPane,
 }: AgentEditorGroupsProps): JSX.Element {
-  const [groups, setGroups] = useState<EditorGroup[]>(initialGroups);
+  const tabsKey = tabs.join("|");
+  const [groups, setGroups] = useState<EditorGroup[]>(() =>
+    loadInitialGroups(resetKey, tabs),
+  );
   const dragRef = useRef<DragPayload | null>(null);
   const isSplit = groups.length > 1;
 
   useEffect(() => {
-    setGroups(initialGroups());
-  }, [resetKey]);
+    setGroups(loadInitialGroups(resetKey, tabs));
+  }, [resetKey, tabsKey, tabs]);
+
+  useEffect(() => {
+    const storageKey = storageKeyFor(resetKey);
+    if (!storageKey || typeof window === "undefined") return;
+    window.localStorage.setItem(storageKey, JSON.stringify(groups));
+  }, [groups, resetKey]);
 
   const activate = useCallback((groupIndex: number, tab: AgentEditorTab) => {
     setGroups((prev) =>
@@ -113,32 +222,37 @@ export function AgentEditorGroups({
     });
   }, []);
 
-  const moveTab = useCallback((toGroup: number) => {
-    const payload = dragRef.current;
-    if (!payload) return;
-    const { fromGroup, tab } = payload;
-    if (fromGroup === toGroup) return;
+  const moveTab = useCallback(
+    (toGroup: number) => {
+      const payload = dragRef.current;
+      if (!payload) return;
+      const { fromGroup, tab } = payload;
+      if (fromGroup === toGroup) return;
 
-    setGroups((prev) =>
-      normalizeGroups(
-        prev.map((g, i) => {
-          if (i === fromGroup) {
-            const tabs = g.tabs.filter((t) => t !== tab);
-            const active = g.active === tab ? (tabs[0] ?? g.active) : g.active;
-            return { tabs, active };
-          }
-          if (i === toGroup) {
-            if (g.tabs.includes(tab)) {
-              return { ...g, active: tab };
+      setGroups((prev) =>
+        normalizeGroups(
+          prev.map((g, i) => {
+            if (i === fromGroup) {
+              const tabs = g.tabs.filter((t) => t !== tab);
+              const active =
+                g.active === tab ? (tabs[0] ?? g.active) : g.active;
+              return { tabs, active };
             }
-            return { tabs: [...g.tabs, tab], active: tab };
-          }
-          return g;
-        }),
-      ),
-    );
-    dragRef.current = null;
-  }, []);
+            if (i === toGroup) {
+              if (g.tabs.includes(tab)) {
+                return { ...g, active: tab };
+              }
+              return { tabs: [...g.tabs, tab], active: tab };
+            }
+            return g;
+          }),
+          tabs,
+        ),
+      );
+      dragRef.current = null;
+    },
+    [tabs],
+  );
 
   const handleDragStart = useCallback(
     (fromGroup: number, tab: AgentEditorTab) => {

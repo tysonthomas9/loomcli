@@ -22,7 +22,7 @@ import (
 // external webhook event.
 const (
 	// CronSourceKind is the TriggerBinding source kind the scheduler sweeps.
-	CronSourceKind = "cron"
+	CronSourceKind = store.CronSourceKind
 	// CronEventType is the event type stamped on scheduler-fired events.
 	CronEventType = "cron.tick"
 	// CronActorRef identifies the scheduler as the acting principal.
@@ -69,6 +69,23 @@ func loadScheduleLocation(tz string) (*time.Location, error) {
 		return nil, fmt.Errorf("%w: timezone %q: %v", ErrInvalidSchedule, tz, err)
 	}
 	return loc, nil
+}
+
+// NextFire returns the first schedule instant strictly after `after`, evaluated
+// in the schedule's timezone (empty timezone means UTC). It reuses the same
+// cron grammar the scheduler and API validation share, so a schedule accepted
+// at binding-write time always resolves here. A malformed schedule or timezone
+// returns an error wrapping ErrInvalidSchedule.
+func NextFire(schedule, timezone string, after time.Time) (time.Time, error) {
+	sched, err := parseCronSchedule(schedule)
+	if err != nil {
+		return time.Time{}, err
+	}
+	loc, err := loadScheduleLocation(timezone)
+	if err != nil {
+		return time.Time{}, err
+	}
+	return sched.Next(after.In(loc)), nil
 }
 
 // CronScheduler is the built-in cron event source for `loom serve`. Each
@@ -210,8 +227,23 @@ func (s *CronScheduler) sweepBinding(ctx context.Context, ws string, binding *do
 // dispatchTick feeds one cron tick into the normal router path. Tick-level
 // dedup rides the trigger-event idempotency key, so re-dispatch of the same
 // fire instant (overlapping schedulers, retried sweeps) is a no-op replay.
+//
+// LEGACY-COMPAT (config-by-reference is canonical). The dispatched run's payload
+// is the binding's run-input (parsed from source_config_ref — see
+// binding_run_input.go) with the cron tick merged on top. This dispatch-time
+// merge is now LEGACY: config-by-reference (the binding-config driver op) is the
+// canonical way a run learns its binding's config — the run reads it from its own
+// provenance at start rather than receiving it copied into the payload. The merge
+// is retained for older stamped runs and for explicit-input compatibility (a
+// binding whose source_config_ref carries non-role run-input still delivers it),
+// and is deleted after migration. Cron is 1:1 (a unique route key per binding),
+// so the per-binding merge stays correct meanwhile. A binding with no run-input
+// dispatches the exact tick-only payload.
 func (s *CronScheduler) dispatchTick(ctx context.Context, ws string, binding *domain.TriggerBinding, fire time.Time) error {
-	payload, err := json.Marshal(map[string]string{"tick": fire.UTC().Format(time.RFC3339)})
+	payload, err := MergeRunInputPayload(
+		BindingRunInput(binding),
+		map[string]any{"tick": fire.UTC().Format(time.RFC3339)},
+	)
 	if err != nil {
 		return fmt.Errorf("encode cron tick payload for binding %q: %w", binding.BindingID, err)
 	}

@@ -384,6 +384,51 @@ func setupWorkflowCommandStore(t *testing.T) (context.Context, store.Store) {
 	return ctx, st
 }
 
+// A manual `loom workflow run` resolves its connector-authz binding by DRIVER
+// (stamping that binding's route_key as SourceRef), not a magic shared route —
+// so it keeps working now that cron route_keys are derived per-binding.
+func TestManualRunSourceRef(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	const ws, drv, ver = "WS", "drv-1", "v-1"
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: ws, Name: ws}); err != nil {
+		t.Fatalf("create ws: %v", err)
+	}
+	if _, err := st.Drivers().Create(ctx, store.DriverCreate{
+		WorkspaceKey: ws, DriverID: drv, Name: "bug-fix-agent",
+		Status: domain.DriverStatusActive, ActiveVersionID: ver,
+	}); err != nil {
+		t.Fatalf("create driver: %v", err)
+	}
+	if _, err := st.DriverVersions().Create(ctx, store.DriverVersionCreate{
+		WorkspaceKey: ws, VersionID: ver, DriverID: drv, Version: 1,
+		SourceDigest: "sha256:s", BundleDigest: "sha256:b",
+		ValidationStatus: domain.DriverVersionValidationPassed,
+	}); err != nil {
+		t.Fatalf("create version: %v", err)
+	}
+
+	// No binding for the driver yet -> a plain fallback label (connector actions
+	// are then correctly ungranted).
+	if got := manualRunSourceRef(ctx, st, ws, drv); got != "loom workflow run" {
+		t.Fatalf("no-binding SourceRef = %q, want the fallback label", got)
+	}
+
+	// Register a cron binding for the driver; the store derives its route_key.
+	if _, err := st.TriggerBindings().Create(ctx, store.TriggerBindingCreate{
+		WorkspaceKey: ws, BindingID: "s1-bug-fix", Name: "s1-bug-fix",
+		SourceKind: store.CronSourceKind, DriverID: drv, DriverVersionID: ver,
+		Schedule: "*/10 * * * *", Enabled: true,
+	}); err != nil {
+		t.Fatalf("create binding: %v", err)
+	}
+	// Now a manual run stamps that binding's derived route_key, so its connector
+	// actions resolve the binding's grants (via GetByRouteKey).
+	if got := manualRunSourceRef(ctx, st, ws, drv); got != "cron:s1-bug-fix" {
+		t.Fatalf("SourceRef = %q, want cron:s1-bug-fix (the binding's derived route)", got)
+	}
+}
+
 func withWorkflowCommandStore(t *testing.T, st store.Store) {
 	t.Helper()
 	resetWorkflowCommandGlobals()

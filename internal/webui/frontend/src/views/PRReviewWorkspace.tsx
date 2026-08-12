@@ -32,6 +32,7 @@ import { useWorkspaceContext } from "@/hooks/workspace";
 import type { GitPullRequest } from "@/api/workspace";
 import type { Issue, LoomAgentStatus } from "@/types";
 import { parseLoomStatus } from "@/types";
+import { isInteractiveAgent, isWorkerRole } from "@/utils/agentRole";
 import { isPRUrl } from "@/utils/issue";
 import { getAvatarColor, shouldUseWhiteText } from "@/utils/colorUtils";
 
@@ -90,6 +91,16 @@ export function resolveDiffAgentForIssue(
   if (openable) return openable;
 
   return linked[0];
+}
+
+/** Only supervised worker roles can accept an immediate task start. */
+export function isReviewAgentStartable(agent: LoomAgentStatus): boolean {
+  if (isInteractiveAgent(agent)) return false;
+  const roleKind = (agent.role_kind ?? "").trim().toLowerCase();
+  if (roleKind !== "") return roleKind === "worker";
+  // Older monitor payloads did not expose role_kind. Retain the builtin
+  // plan/task fallback without guessing that an arbitrary role is startable.
+  return isWorkerRole(agent.role);
 }
 
 interface PullRequestRepoRef {
@@ -179,6 +190,11 @@ export function PRReviewWorkspace({
     }
     return m;
   }, [issues, issue?.id]);
+
+  const reviewAgents = useMemo(
+    () => agents.filter(isReviewAgentStartable),
+    [agents],
+  );
 
   const prUrl =
     pullRequest?.url ||
@@ -337,7 +353,7 @@ export function PRReviewWorkspace({
   };
 
   const canDiscussPR = Boolean(pullRequestRepo && prNumber);
-  const freeAgents = agents.filter((a) => !busyAgentTask.has(a.name));
+  const freeAgents = reviewAgents.filter((a) => !busyAgentTask.has(a.name));
   const showDiscussion =
     discussOpen &&
     pullRequestRepo &&
@@ -434,7 +450,7 @@ export function PRReviewWorkspace({
                     <div className={styles.agentMenuHead}>
                       ASSIGN A REVIEW AGENT
                     </div>
-                    {agents.map((a) => {
+                    {reviewAgents.map((a) => {
                       const busyOn = busyAgentTask.get(a.name);
                       return (
                         <button
@@ -455,7 +471,7 @@ export function PRReviewWorkspace({
                         </button>
                       );
                     })}
-                    {agents.length > 0 && freeAgents.length === 0 && (
+                    {reviewAgents.length > 0 && freeAgents.length === 0 && (
                       <p className={styles.agentEmpty}>
                         All agents are busy — create a fresh one.
                       </p>
@@ -576,7 +592,7 @@ export function PRReviewWorkspace({
           workspaceId={workspaceId}
           repos={repos}
           defaultName={`review-${issue.id.toLowerCase()}`}
-          defaultRoleName="task"
+          supervisedRole="task"
           onClose={() => setCreateOpen(false)}
           onSuccess={(agent) => {
             setCreateOpen(false);

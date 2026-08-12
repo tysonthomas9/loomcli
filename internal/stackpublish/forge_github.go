@@ -26,6 +26,8 @@ type GitHubForge struct {
 
 var _ Forge = (*GitHubForge)(nil)
 
+func (*GitHubForge) SupportsPullRequests() bool { return true }
+
 // NewGitHubForge builds a forge. A nil client uses a 30s-timeout default; an
 // empty baseURL uses the public API.
 func NewGitHubForge(token string, client *http.Client, baseURL string) *GitHubForge {

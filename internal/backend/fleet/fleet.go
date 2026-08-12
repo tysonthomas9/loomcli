@@ -505,11 +505,9 @@ func (b *FleetBackend) GetChildren(ctx context.Context, id string) ([]backend.Is
 	return unmarshalIssueList(resp, "GetChildren")
 }
 
-// SearchIssues performs a full-text search via the fleet-db list endpoint with
-// the query parameter set. Future fleet-db work can route this to a dedicated
-// FT.SEARCH endpoint.
-// Note: fleet-db uses "query" (not "q") for its search param — see
-// internal/backend/fleet/params.go addListSearchFilters.
+// SearchIssues performs a full-text search through fleet-db's dedicated search
+// endpoint. The ordinary list endpoint does not support a text-query filter;
+// sending query= there silently returns an unfiltered first page.
 func (b *FleetBackend) SearchIssues(ctx context.Context, query string, limit int) ([]backend.IssueData, error) {
 	if query == "" {
 		return nil, backend.ErrValidation("SearchIssues", "query must not be empty")
@@ -517,7 +515,7 @@ func (b *FleetBackend) SearchIssues(ctx context.Context, query string, limit int
 	if limit < 0 {
 		return nil, backend.ErrValidation("SearchIssues", "limit must not be negative")
 	}
-	path := "/issues?query=" + url.QueryEscape(query)
+	path := "/issues/search?q=" + url.QueryEscape(query)
 	if limit > 0 {
 		path += "&limit=" + strconv.Itoa(limit)
 	}

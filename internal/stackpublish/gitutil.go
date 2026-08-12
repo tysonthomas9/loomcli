@@ -3,8 +3,10 @@ package stackpublish
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -29,15 +31,99 @@ func runGit(ctx context.Context, dir string, env []string, args ...string) (stri
 
 var repoSlugRe = regexp.MustCompile(`github\.com[:/]+([^/]+)/([^/\s]+?)(?:\.git)?/?$`)
 
-// repoSlug parses owner/repo from the repo's origin remote URL (ssh or https).
-func repoSlug(ctx context.Context, dir string) (owner, repo string, err error) {
+type OriginKind string
+
+const (
+	OriginKindGitHub OriginKind = "github"
+	OriginKindLocal  OriginKind = "local"
+)
+
+type Origin struct {
+	Kind  OriginKind
+	URL   string
+	Owner string
+	Repo  string
+}
+
+// RepoOriginURL returns the repo's configured origin URL.
+func RepoOriginURL(ctx context.Context, dir string) (string, error) {
 	out, err := runGit(ctx, dir, nil, "remote", "get-url", "origin")
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(out), nil
+}
+
+func cannotParseOrigin(raw string) error {
+	return fmt.Errorf("stackpublish: cannot parse owner/repo from origin %q", strings.TrimSpace(raw))
+}
+
+// ClassifyOriginURL identifies the only origins stackpublish knows how to use:
+// GitHub remotes, or local filesystem origins expressed as absolute paths or
+// local file:// URLs. Everything else fails closed.
+func ClassifyOriginURL(raw string) (Origin, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return Origin{}, cannotParseOrigin(raw)
+	}
+	if m := repoSlugRe.FindStringSubmatch(raw); m != nil {
+		return Origin{Kind: OriginKindGitHub, URL: raw, Owner: m[1], Repo: m[2]}, nil
+	}
+	if filepath.IsAbs(raw) {
+		return Origin{Kind: OriginKindLocal, URL: raw}, nil
+	}
+	if u, err := url.Parse(raw); err == nil && u.Scheme == "file" && u.RawQuery == "" && u.Fragment == "" {
+		if u.Host != "" && u.Host != "localhost" {
+			return Origin{}, cannotParseOrigin(raw)
+		}
+		if filepath.IsAbs(u.Path) {
+			return Origin{Kind: OriginKindLocal, URL: raw}, nil
+		}
+	}
+	return Origin{}, cannotParseOrigin(raw)
+}
+
+// NewForgeForOrigin constructs the forge allowed for originURL.
+func NewForgeForOrigin(originURL, token string) (Forge, Origin, error) {
+	origin, err := ClassifyOriginURL(originURL)
+	if err != nil {
+		return nil, Origin{}, err
+	}
+	switch origin.Kind {
+	case OriginKindGitHub:
+		return NewGitHubForge(token, nil, ""), origin, nil
+	case OriginKindLocal:
+		return NewLocalForge(origin.URL), origin, nil
+	default:
+		return nil, Origin{}, cannotParseOrigin(originURL)
+	}
+}
+
+// NewForgeForRepo reads repoPath's origin and constructs the matching forge.
+func NewForgeForRepo(ctx context.Context, repoPath, token string) (Forge, Origin, error) {
+	originURL, err := RepoOriginURL(ctx, repoPath)
+	if err != nil {
+		return nil, Origin{}, err
+	}
+	return NewForgeForOrigin(originURL, token)
+}
+
+// repoSlug parses owner/repo from the repo's GitHub origin remote URL (ssh or https).
+func repoSlug(ctx context.Context, dir string) (owner, repo string, err error) {
+	raw, err := RepoOriginURL(ctx, dir)
 	if err != nil {
 		return "", "", err
 	}
-	m := repoSlugRe.FindStringSubmatch(strings.TrimSpace(out))
+	origin, err := ClassifyOriginURL(raw)
+	if err != nil {
+		return "", "", err
+	}
+	if origin.Kind != OriginKindGitHub {
+		return "", "", cannotParseOrigin(raw)
+	}
+	m := repoSlugRe.FindStringSubmatch(raw)
 	if m == nil {
-		return "", "", fmt.Errorf("stackpublish: cannot parse owner/repo from origin %q", strings.TrimSpace(out))
+		return "", "", cannotParseOrigin(raw)
 	}
 	return m[1], m[2], nil
 }

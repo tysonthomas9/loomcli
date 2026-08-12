@@ -7,6 +7,7 @@ export interface AgentTemplateCardProps {
   description: string;
   glyph: string;
   accentColor: string;
+  tag?: string | undefined;
   selected: boolean;
   disabled?: boolean;
   ariaLabel: string;
@@ -19,6 +20,7 @@ export function AgentTemplateCard({
   description,
   glyph,
   accentColor,
+  tag,
   selected,
   disabled = false,
   ariaLabel,
@@ -47,11 +49,14 @@ export function AgentTemplateCard({
       <span className={styles.templateBody}>
         <span className={styles.templateTitleRow}>
           <span className={styles.templateTitle}>{title}</span>
-          {selected ? (
-            <span className={styles.templateSelectedMark} aria-hidden="true">
-              Selected
-            </span>
-          ) : null}
+          <span className={styles.templateMeta}>
+            {tag ? <span className={styles.templateTag}>{tag}</span> : null}
+            {selected ? (
+              <span className={styles.templateSelectedMark} aria-hidden="true">
+                Selected
+              </span>
+            ) : null}
+          </span>
         </span>
         <span className={styles.templateDescription}>{description}</span>
       </span>

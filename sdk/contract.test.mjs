@@ -71,7 +71,10 @@ test("contract: every op sends only frozen camelCase wire fields to its frozen p
     return {};
   }, async ({ apiUrl, calls }) => {
     const client = newClient(apiUrl);
-    await client.tasks.claimReady({ actor: "lead", limit: 5 });
+    // `type` narrows the ready queue server-side; `actor` is accepted for
+    // wire-compat but ignored server-side (the lock is keyed by the run's
+    // derived actor — see the driverapi actor-lock security fix).
+    await client.tasks.claimReady({ actor: "lead", limit: 5, type: "bug" });
     await client.epics.get({});
     await client.epics.snapshot({});
     await client.agents.list();
@@ -110,6 +113,8 @@ test("contract: every op sends only frozen camelCase wire fields to its frozen p
       artifactIds: ["art-1"],
     });
     await client.tasks.release({ taskId: "TASK-1", actor: "lead" });
+    await client.tasks.claim({ taskId: "TASK-1", actor: "lead", epicId: "EPIC-1", limit: 5 });
+    await client.tasks.diff({ taskId: "TASK-1" });
     await client.connectors.dispatch({
       action: "github.pull_request.read",
       connectorId: "conn-1",
@@ -120,6 +125,17 @@ test("contract: every op sends only frozen camelCase wire fields to its frozen p
     await client.events.list();
     await client.workflows.start({ workflow: "child-flow", idempotencyKey: "key-1", input: { a: 1 } });
     await client.workflows.await({ childRunId: "child-1", timeoutMs: 1000 });
+    await client.issues.get({ issueId: "ISSUE-1" });
+    await client.issues.list({ externalRef: "octo/hello#1", type: "bug", status: "open", limit: 10 });
+    await client.issues.listComments({ issueId: "ISSUE-1" });
+    await client.issues.comment({ issueId: "ISSUE-1", body: "looks good" });
+    await client.issues.update({ issueId: "ISSUE-1", status: "open", priority: 1, labels: ["review-cycle:1"], assignee: "agent", externalRef: "octo/hello#1" });
+    await client.issues.addLabel({ issueId: "ISSUE-1", label: "review-cycle:1" });
+    await client.issues.removeLabel({ issueId: "ISSUE-1", label: "review-cycle:1" });
+    await client.roles.get({ name: "docs-assistant" });
+    // binding.config takes NO input: the binding is resolved server-side from
+    // the calling run's provenance (a body binding id would be ignored).
+    await client.binding.config();
 
     const exercised = new Set();
     for (const call of calls) {

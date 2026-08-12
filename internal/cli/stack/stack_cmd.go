@@ -238,10 +238,22 @@ func statusCmd() *cobra.Command {
 			path, _ := resolveRepoPath(ws, stack.RepoName, repoPath)
 			token := resolveGitHubToken(cmd.Context())
 			rp := ""
-			if path != "" && token != "" {
-				rp = path
+			forge := stackpublish.Forge(stackpublish.NewGitHubForge(token, nil, ""))
+			if path != "" {
+				selected, origin, ferr := stackpublish.NewForgeForRepo(cmd.Context(), path, token)
+				if ferr != nil {
+					// Read-only status must not fail on an exotic (non-GitHub,
+					// non-filesystem) origin: degrade to the local-only view,
+					// exactly the pre-classifier behavior. Publish stays strict.
+					forge = stackpublish.NewLocalForge("")
+				} else {
+					forge = selected
+					if origin.Kind == stackpublish.OriginKindGitHub && token != "" {
+						rp = path
+					}
+				}
 			}
-			rec := &stackpublish.Reconciler{Store: st, Forge: stackpublish.NewGitHubForge(token, nil, "")}
+			rec := &stackpublish.Reconciler{Store: st, Forge: forge}
 			report, err := rec.StackStatus(cmd.Context(), ws, id, rp)
 			if err != nil {
 				return err
@@ -502,12 +514,16 @@ func publishCmd() *cobra.Command {
 				return err
 			}
 			token := resolveGitHubToken(cmd.Context())
-			if token == "" && !dryRun {
+			forge, origin, err := stackpublish.NewForgeForRepo(cmd.Context(), path, token)
+			if err != nil {
+				return err
+			}
+			if origin.Kind == stackpublish.OriginKindGitHub && token == "" && !dryRun {
 				return errors.New("no GitHub token (set GITHUB_TOKEN/GH_TOKEN or run `gh auth login`)")
 			}
 			rec := &stackpublish.Reconciler{
 				Store: st,
-				Forge: stackpublish.NewGitHubForge(token, nil, ""),
+				Forge: forge,
 			}
 			opts := stackpublish.Options{DryRun: dryRun}
 			// Seed PR titles/bodies from issue metadata when available; the
@@ -537,9 +553,13 @@ func publishCmd() *cobra.Command {
 			if dryRun {
 				verb = "plan"
 			}
-			fmt.Printf("%s: created=%d reparented=%d skipped=%d closed=%d merged=%d empty=%d\n",
-				verb, len(report.Created), len(report.Reparented), len(report.Skipped),
-				len(report.Closed), len(report.Merged), len(report.Empty))
+			if report.Message != "" {
+				fmt.Printf("%s: %s pushed=%d empty=%d\n", verb, report.Message, len(report.Pushed), len(report.Empty))
+			} else {
+				fmt.Printf("%s: created=%d reparented=%d skipped=%d closed=%d merged=%d empty=%d\n",
+					verb, len(report.Created), len(report.Reparented), len(report.Skipped),
+					len(report.Closed), len(report.Merged), len(report.Empty))
+			}
 			for task, url := range report.PRURLs {
 				fmt.Printf("  %s  %s\n", task, url)
 			}

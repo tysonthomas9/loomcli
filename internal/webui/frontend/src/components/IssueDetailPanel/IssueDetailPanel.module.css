@@ -5,7 +5,14 @@
 
 .overlay {
   position: fixed;
-  top: var(--unified-header-height);
+  /* Start the drawer BELOW the board toolbar strip, not just below the top
+     unified header. The toolbar (App.module.css .boardToolbar, min-height
+     48px) carries the "+ New Issue" button in its top-right; a drawer anchored
+     at --unified-header-height covered that button (and the drawer's own
+     maximize/close icons collided with it in the same top-right band). Offset
+     by the toolbar height so both stay visible and clickable while the drawer
+     is open. --board-toolbar-height falls back to the 48px min-height. */
+  top: calc(var(--unified-header-height) + var(--board-toolbar-height, 48px));
   left: var(--nav-rail-width);
   right: 0;
   bottom: 0;

@@ -4,10 +4,12 @@ package driver
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
+	"github.com/tysonthomas9/loomcli/internal/domain"
 )
 
 func TestClaimReadyTaskClaimsFirstAvailableAsActor(t *testing.T) {
@@ -111,6 +113,118 @@ func TestClaimReadyTaskReturnsNonConflictClaimError(t *testing.T) {
 	}
 }
 
+func TestClaimTaskClaimsSpecificReadyTaskByID(t *testing.T) {
+	fake := &fakeReadyIssueBackend{ready: []backend.IssueData{
+		{ID: "TEST-1", Parent: "EPIC-1"},
+		{ID: "TEST-2", Title: "target", Parent: "EPIC-1", Labels: []string{"repo:core"}},
+	}}
+
+	claimed, err := ClaimTask(context.Background(), fake, TaskClaimByIDOptions{
+		TaskID:  "TEST-2",
+		Actor:   "driver-run:run-1",
+		EpicID:  "EPIC-1",
+		LockTTL: time.Minute,
+	})
+	if err != nil {
+		t.Fatalf("ClaimTask: %v", err)
+	}
+	if claimed == nil || claimed.ID != "TEST-2" || claimed.Status != "in_progress" || claimed.ClaimedBy != "driver-run:run-1" {
+		t.Fatalf("claimed = %+v, want TEST-2 in_progress claimed by driver-run", claimed)
+	}
+	// Targeted: exactly ONE claim attempt, on the target — not queue order.
+	if len(fake.actorClaims) != 1 || fake.actorClaims[0].id != "TEST-2" || fake.actorClaims[0].actor != "driver-run:run-1" || fake.actorClaims[0].ttl != time.Minute {
+		t.Fatalf("actor claims = %+v, want one targeted claim on TEST-2 with actor+ttl", fake.actorClaims)
+	}
+	if len(fake.readyCalls) != 1 || fake.readyCalls[0].ParentID != "EPIC-1" {
+		t.Fatalf("ready calls = %+v, want one scoped to EPIC-1", fake.readyCalls)
+	}
+}
+
+// TestClaimTaskScansPastClaimReadyDefaultLimit is the ITEM 2 regression: a
+// crowded ready view where the target sits well past the small claim-ready
+// cutoff (defaultClaimReadyLimit=100) must still resolve to a successful
+// targeted claim. Before the fix ClaimTask scanned only the first 100 entries,
+// turning a genuinely-ready task into a false 409 indistinguishable from a race.
+func TestClaimTaskScansPastClaimReadyDefaultLimit(t *testing.T) {
+	ready := make([]backend.IssueData, 0, 200)
+	for i := 0; i < 200; i++ {
+		ready = append(ready, backend.IssueData{ID: fmt.Sprintf("TASK-%03d", i)})
+	}
+	target := ready[150].ID // position 150: past the 100-entry claim-ready cutoff
+	fake := &fakeReadyIssueBackend{ready: ready}
+
+	claimed, err := ClaimTask(context.Background(), fake, TaskClaimByIDOptions{
+		TaskID: target,
+		Actor:  "driver-run:run-1",
+	})
+	if err != nil {
+		t.Fatalf("ClaimTask past default cutoff: %v", err)
+	}
+	if claimed == nil || claimed.ID != target {
+		t.Fatalf("claimed = %+v, want %q found past the 100-entry cutoff", claimed, target)
+	}
+	if len(fake.readyCalls) != 1 || fake.readyCalls[0].Limit <= defaultClaimReadyLimit {
+		t.Fatalf("ready scan limit = %+v, want a router-scale depth above the claim-ready default", fake.readyCalls)
+	}
+}
+
+func TestClaimTaskNotReadyIsConflict(t *testing.T) {
+	// The target is not in the ready view (not ready / already claimed elsewhere).
+	fake := &fakeReadyIssueBackend{ready: []backend.IssueData{{ID: "TEST-1"}}}
+
+	_, err := ClaimTask(context.Background(), fake, TaskClaimByIDOptions{TaskID: "TEST-404", Actor: "a"})
+	if !errors.Is(err, domain.ErrConflict) {
+		t.Fatalf("ClaimTask non-ready err = %v, want domain.ErrConflict", err)
+	}
+	if len(fake.actorClaims)+len(fake.claims) != 0 {
+		t.Fatalf("claim attempts = %d, want 0 (never claim a task absent from the ready view)", len(fake.actorClaims)+len(fake.claims))
+	}
+}
+
+func TestClaimTaskBlockedTargetIsConflict(t *testing.T) {
+	fake := &fakeReadyIssueBackend{ready: []backend.IssueData{{ID: "TEST-1", Status: "blocked"}}}
+
+	_, err := ClaimTask(context.Background(), fake, TaskClaimByIDOptions{TaskID: "TEST-1"})
+	if !errors.Is(err, domain.ErrConflict) {
+		t.Fatalf("ClaimTask blocked err = %v, want domain.ErrConflict", err)
+	}
+	if len(fake.actorClaims)+len(fake.claims) != 0 {
+		t.Fatalf("claim attempts = %d, want 0 (never claim a blocked task)", len(fake.actorClaims)+len(fake.claims))
+	}
+}
+
+func TestClaimTaskDoubleClaimIsConflict(t *testing.T) {
+	// The target is ready but a racing owner wins the claim (backend conflict).
+	fake := &fakeReadyIssueBackend{
+		ready:     []backend.IssueData{{ID: "TEST-1"}},
+		claimErrs: map[string]error{"TEST-1": backend.ErrConflict("ClaimIssue", "already claimed")},
+	}
+
+	_, err := ClaimTask(context.Background(), fake, TaskClaimByIDOptions{TaskID: "TEST-1", Actor: "a"})
+	if !errors.Is(err, domain.ErrConflict) {
+		t.Fatalf("ClaimTask racing claim err = %v, want domain.ErrConflict", err)
+	}
+}
+
+// claim-by-id takes the SAME actor-scoped lease claim-ready takes, so the
+// existing run-failure release path (ReleaseTask) frees it symmetrically.
+func TestClaimTaskLeaseReleasablePerExistingSemantics(t *testing.T) {
+	fake := &fakeReadyIssueBackend{ready: []backend.IssueData{{ID: "TEST-1"}}}
+
+	if _, err := ClaimTask(context.Background(), fake, TaskClaimByIDOptions{TaskID: "TEST-1", Actor: "driver-run:run-1", LockTTL: time.Minute}); err != nil {
+		t.Fatalf("ClaimTask: %v", err)
+	}
+	if len(fake.actorClaims) != 1 || fake.actorClaims[0].id != "TEST-1" || fake.actorClaims[0].actor != "driver-run:run-1" {
+		t.Fatalf("actor claims = %+v, want the same actor-scoped lease as claim-ready", fake.actorClaims)
+	}
+	if _, err := ReleaseTask(context.Background(), fake, TaskReleaseOptions{TaskID: "TEST-1", Actor: "driver-run:run-1"}); err != nil {
+		t.Fatalf("ReleaseTask: %v", err)
+	}
+	if len(fake.actorReleases) != 1 || fake.actorReleases[0].id != "TEST-1" || fake.actorReleases[0].actor != "driver-run:run-1" {
+		t.Fatalf("actor releases = %+v, want the claimed lease freed via existing actor-scoped release", fake.actorReleases)
+	}
+}
+
 func TestCompleteTaskClosesIssue(t *testing.T) {
 	fake := &fakeReadyIssueBackend{}
 
@@ -179,7 +293,13 @@ type releaseCall struct {
 
 func (f *fakeReadyIssueBackend) Ready(_ context.Context, opts backend.ReadyOpts) ([]backend.IssueData, error) {
 	f.readyCalls = append(f.readyCalls, opts)
-	return append([]backend.IssueData(nil), f.ready...), nil
+	out := append([]backend.IssueData(nil), f.ready...)
+	// Honor the scan bound like a real backend so tests can prove the effective
+	// scan depth (e.g. the claim-by-id crowding fix).
+	if opts.Limit > 0 && len(out) > opts.Limit {
+		out = out[:opts.Limit]
+	}
+	return out, nil
 }
 
 func (f *fakeReadyIssueBackend) ClaimIssue(_ context.Context, id string, ttl time.Duration) error {

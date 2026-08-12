@@ -172,7 +172,7 @@ fields:
 - `lines_removed`
 - `files_touched`
 
-The task Sessions tab should load sessions by querying FleetDB
+The task Runs tab should load sessions by querying FleetDB
 `/api/v1/{workspace}/agent-sessions?task_id={task}` through Loom's shared
 store interface. Server-visible local files may be used to open transcripts
 or diffs only when FleetDB already points to those artifacts. The UI should
@@ -196,7 +196,7 @@ The dogfood harness should be a single command that:
    Loom issue API backed by FleetDB.
 5. Runs the planner and coder through the same daemon/session path used by
    distributed mode.
-6. Leaves visible data in the Kanban board, agent sidebar, task Sessions tab,
+6. Leaves visible data in the Kanban board, agent sidebar, task Runs tab,
    logs, diffs, and FleetDB session/artifact APIs.
 
 This harness is a product acceptance test, not a separate architecture. Any
@@ -205,12 +205,13 @@ the shared distributed contract.
 
 Current dogfood proof for this contract:
 
-- `LOCALMODE-1` is planned and moved to review.
-- `LOCALMODE-2` is implemented and closed.
-- FleetDB stores completed `local-planner` and `local-coder` sessions with
-  `task_id`.
-- The task Sessions tab shows the completed `local-coder` run, transcript
-  availability, and diff summary.
+- The live run manifest owns unique, run-tagged planner and coder task IDs.
+- The manifest-owned planner is moved to review with a design; the coder is
+  implemented and closed with the expected local-mode artifact in its diff.
+- FleetDB stores completed `codex-planner` and `codex-coder` sessions with the
+  exact manifest task IDs.
+- The task Runs tab shows both completed runs, transcript availability, and the
+  coder diff summary.
 
 ## Supported Launch Paths
 
@@ -281,7 +282,7 @@ Before launch, local mode should check:
 5. Process starts.
 6. Agent claims a task needing design.
 7. Task card shows claimed agent.
-8. Sessions tab shows running session.
+8. Runs tab shows the running session.
 9. Design is written.
 10. Run completes and session is finalized.
 
@@ -297,7 +298,7 @@ Before launch, local mode should check:
 
 - Direct and daemon-launched runs share one session list.
 - Agent sidebar shows idle configured agents and active local runs.
-- Task Sessions tab populates during local agent execution.
+- Task Runs tab populates during local agent execution.
 - Run completion records exit code, error class, and artifacts.
 - Preflight failure is visible in task detail if a task was selected.
 - FleetDB exposes every control-plane resource the local UI/daemon path
@@ -318,7 +319,7 @@ Before launch, local mode should check:
 ## Acceptance Criteria
 
 - Local planner started from UI appears in agent sidebar within 2 seconds.
-- Direct `loom task` run appears in task Sessions tab.
+- Direct `loom task` run appears in the task Runs tab.
 - Killing the process finalizes the run as failed or aborted.
 - Completed sessions survive server restart.
 - The UI shows actionable messages for missing auth, tools, gate command,

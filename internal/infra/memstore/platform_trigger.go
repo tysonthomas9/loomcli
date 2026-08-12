@@ -549,16 +549,17 @@ func (s *triggerRouteStore) dispatchTriggerRouteLeg(ctx context.Context, ws stri
 		return outcome, err
 	}
 	run, err := s.runs.Create(ctx, store.DriverRunCreate{
-		WorkspaceKey:    ws,
-		RunID:           leg.RunID,
-		DriverID:        binding.DriverID,
-		DriverVersionID: binding.DriverVersionID,
-		Entrypoint:      binding.TargetEntrypoint,
-		SourceKind:      binding.SourceKind,
-		SourceRef:       event.EventID,
-		EpicID:          in.EpicID,
-		IdempotencyKey:  leg.IdempotencyKey,
-		Payload:         in.Payload,
+		WorkspaceKey:     ws,
+		RunID:            leg.RunID,
+		DriverID:         binding.DriverID,
+		DriverVersionID:  binding.DriverVersionID,
+		Entrypoint:       binding.TargetEntrypoint,
+		SourceKind:       binding.SourceKind,
+		SourceRef:        event.EventID,
+		EpicID:           in.EpicID,
+		TriggerBindingID: binding.BindingID,
+		IdempotencyKey:   leg.IdempotencyKey,
+		Payload:          in.Payload,
 	})
 	if err != nil {
 		return nil, err

@@ -74,6 +74,7 @@ export async function exerciseLoomDriverClientSurface(): Promise<void> {
 
   // tasks + taskRuns
   await client.tasks.claimReady({ epicId: "EPIC-1" });
+  await client.tasks.claim({ taskId: "TASK-1", epicId: "EPIC-1", limit: 5 });
   await client.tasks.complete({ taskId: "TASK-1", taskRunId: "task-run-1", artifactIds: ["a1"] });
   await client.tasks.release({ taskId: "TASK-1" });
   expectType<Record<string, unknown>>(await client.taskRuns.request({
@@ -87,6 +88,11 @@ export async function exerciseLoomDriverClientSurface(): Promise<void> {
   await client.taskRuns.await({ taskRunId: "task-run-1", pollMs: 500, timeoutMs: 60_000 });
   await client.taskRuns.active({ epicId: "EPIC-1", limit: 5 });
   await client.taskRuns.recoverStale({ maxAgeSeconds: 300, errorClass: "stale" });
+
+  // roles (read-only prompt materialization for prompt agents)
+  expectType<{ role: Record<string, unknown> | null; prompt: string } | null>(
+    await client.roles.get({ name: "docs-assistant" }),
+  );
 
   // connectors
   const granted: LoomConnectorCallResult = await client.connectors.github.merge({ expectedHeadSha: "sha-1" });

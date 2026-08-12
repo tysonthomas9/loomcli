@@ -2,8 +2,30 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { defineAgent, defineWorkflow } from "@flue/runtime";
 
 const CODEX = process.env.LOOM_CODEX_BIN || "codex";
+
+// Flue HEAD requires every workflow module to default-export defineWorkflow();
+// keep the named run export (invoker/shim path) AND add the flue-native default
+// export so the bundled-runner dispatch (fork server.mjs, FLUE_CLI_NAME) works.
+export default defineWorkflow({
+  agent: defineAgent(() => ({ model: false })),
+  run: async () => toJsonResult(await run({ payload: builtinInvokePayload() })),
+});
+
+function builtinInvokePayload() {
+  const raw = process.env.LOOM_FLUE_INVOKE_PAYLOAD || process.env.LOOM_TASK_RUN_REQUEST_JSON || "{}";
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return {};
+  }
+}
+
+function toJsonResult(value) {
+  return value === undefined ? null : JSON.parse(JSON.stringify(value));
+}
 
 export async function run(ctx = {}) {
   const request = requestPayload(ctx);

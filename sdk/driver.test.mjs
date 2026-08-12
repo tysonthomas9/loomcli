@@ -135,6 +135,62 @@ test("LoomDriverClient.taskRuns.request omits input from the wire when none is g
 
     assert.equal(calls.length, 1);
     assert.equal(Object.hasOwn(calls[0].body, "input"), false, "no input key when caller omits it");
+    assert.equal(Object.hasOwn(calls[0].body, "closeTask"), false, "no closeTask key when caller omits it");
+  });
+});
+
+test("LoomDriverClient.taskRuns.request forwards closeTask=false verbatim (planner close-suppression)", async () => {
+  await withDriverServer(async (call) => {
+    if (call.url === "/api/workspaces/WS/driver/exec-task") {
+      return { id: "task-run-1", taskRunId: "task-run-1", taskId: "TASK-1", status: "queued" };
+    }
+    return notFound();
+  }, async ({ apiUrl, calls }) => {
+    const client = createLoomDriverClient({
+      input: { epicId: "EPIC-1" },
+      env: { LOOM_DRIVER_WORKSPACE: "WS", LOOM_DRIVER_RUN_ID: "run-1", LOOM_DRIVER_API_URL: apiUrl },
+    });
+
+    await client.taskRuns.request({ taskId: "TASK-1", runner: "local-task-runner", closeTask: false });
+
+    assert.equal(calls.length, 1);
+    // A boolean false must survive to the wire (not dropped by compaction) so
+    // the server suppresses the worker's close-on-success for a planner run.
+    assert.equal(calls[0].body.closeTask, false);
+  });
+});
+
+test("LoomDriverClient.tasks.diff calls task-diff with taskId", async () => {
+  await withDriverServer(async (call) => {
+    if (call.url === "/api/workspaces/WS/driver/task-diff") {
+      return {
+        taskId: call.body.taskId,
+        externalRef: "local-branch:loom/TASK-1@abcdef1",
+        branch: "loom/TASK-1",
+        headSha: "abcdef1",
+        resolvedHead: "abcdef1234567890",
+        baseRef: "main",
+        baseSha: "1234567890abcdef",
+        diff: "diff --git a/x b/x\n",
+        sizeBytes: 19,
+        limitBytes: 524288,
+        egressMechanism: "filesystem-origin",
+      };
+    }
+    return notFound();
+  }, async ({ apiUrl, calls }) => {
+    const client = createLoomDriverClient({
+      input: { epicId: "EPIC-1" },
+      env: { LOOM_DRIVER_WORKSPACE: "WS", LOOM_DRIVER_RUN_ID: "run-1", LOOM_DRIVER_API_URL: apiUrl },
+    });
+
+    const result = await client.tasks.diff("TASK-1");
+
+    assert.equal(result.taskId, "TASK-1");
+    assert.equal(result.diff, "diff --git a/x b/x\n");
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].url, "/api/workspaces/WS/driver/task-diff");
+    assert.deepEqual(calls[0].body, { taskId: "TASK-1" });
   });
 });
 

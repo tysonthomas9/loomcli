@@ -139,6 +139,7 @@ type triggerBindingStore struct{ client *Client }
 var _ store.TriggerBindingStore = (*triggerBindingStore)(nil)
 
 func (s *triggerBindingStore) Create(ctx context.Context, in store.TriggerBindingCreate) (*domain.TriggerBinding, error) {
+	in = in.WithDerivedRoute()
 	body := map[string]any{
 		"binding_id":              in.BindingID,
 		"name":                    in.Name,
@@ -238,6 +239,15 @@ func (s *triggerBindingStore) Update(ctx context.Context, ws, bindingID string, 
 	return &out, nil
 }
 
+// Delete issues DELETE /api/v1/{ws}/trigger-bindings/{id} to fleet-db.
+// The server registers this route (204 on success, 404 for a missing
+// binding), and the contract guard (contract_guard_test.go) pins the
+// operation's presence in fleet-db's OpenAPI spec so a client-vs-server verb
+// gap like the pre-route 405 era cannot recur silently.
+func (s *triggerBindingStore) Delete(ctx context.Context, ws, bindingID string) error {
+	return s.client.do(ctx, "DELETE", "/api/v1/"+pathEscape(ws)+"/trigger-bindings/"+pathEscape(bindingID), nil, nil)
+}
+
 func (s *triggerBindingStore) ResolveWebhookSecret(ctx context.Context, ws, bindingID string) (string, error) {
 	var out struct {
 		WebhookSecret string `json:"webhook_secret"`
@@ -261,6 +271,13 @@ func (s *driverRunStore) Create(ctx context.Context, in store.DriverRunCreate) (
 		"parent_run_id":     in.ParentRunID,
 		"idempotency_key":   in.IdempotencyKey,
 		"payload":           in.Payload,
+	}
+	// Only send trigger_binding_id when set: a binding-scoped run (the run-now
+	// endpoint) stamps it, but a plain run has no binding, and older fleet-db
+	// servers that predate the field strict-reject an unknown key. Omitting it
+	// when empty keeps run creation working across the version skew.
+	if in.TriggerBindingID != "" {
+		body["trigger_binding_id"] = in.TriggerBindingID
 	}
 	var out domain.DriverRun
 	if err := s.client.do(ctx, "POST", "/api/v1/"+pathEscape(in.WorkspaceKey)+"/driver-runs", body, &out); err != nil {
@@ -327,6 +344,12 @@ func (s *driverRunStore) List(ctx context.Context, ws string, filter store.Drive
 	}
 	if filter.NodeID != "" {
 		q.Set("node_id", filter.NodeID)
+	}
+	if filter.BindingID != "" {
+		q.Set("trigger_binding_id", filter.BindingID)
+	}
+	if filter.AgentServiceID != "" {
+		q.Set("agent_service_id", filter.AgentServiceID)
 	}
 	if filter.Status != "" {
 		q.Set("status", string(filter.Status))

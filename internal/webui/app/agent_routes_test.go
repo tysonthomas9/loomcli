@@ -106,7 +106,7 @@ func TestFleetDBAgentRoutesUseStoreInsteadOfDaemonControl(t *testing.T) {
 	req = httptest.NewRequest(http.MethodPost, "/api/workspaces/PARITY/agents/worker-one/stop", nil)
 	rr = httptest.NewRecorder()
 	app.mux.ServeHTTP(rr, req)
-	if rr.Code != http.StatusOK {
+	if rr.Code != http.StatusAccepted {
 		t.Fatalf("stop agent status = %d, body = %s", rr.Code, rr.Body.String())
 	}
 	req = httptest.NewRequest(http.MethodGet, "/api/workspaces/PARITY/agents", nil)
@@ -118,8 +118,8 @@ func TestFleetDBAgentRoutesUseStoreInsteadOfDaemonControl(t *testing.T) {
 	if err := json.Unmarshal(rr.Body.Bytes(), &list); err != nil {
 		t.Fatalf("list after stop JSON: %v", err)
 	}
-	if got := list.Data[0]; got.State != "stopped" || got.DesiredState != "stopped" {
-		t.Fatalf("unexpected stopped agent state: %+v", got)
+	if got := list.Data[0]; got.State != "idle" || got.DesiredState != "draining" {
+		t.Fatalf("unexpected gracefully stopping agent state: %+v", got)
 	}
 
 	req = httptest.NewRequest(http.MethodPost, "/api/workspaces/PARITY/agents/worker-one/start", nil)
@@ -137,7 +137,7 @@ func TestFleetDBAgentRoutesUseStoreInsteadOfDaemonControl(t *testing.T) {
 	req = httptest.NewRequest(http.MethodPost, "/api/workspaces/PARITY/agents/worker-one/restart", nil)
 	rr = httptest.NewRecorder()
 	app.mux.ServeHTTP(rr, req)
-	if rr.Code != http.StatusAccepted {
+	if rr.Code != http.StatusOK {
 		t.Fatalf("restart agent status = %d, body = %s", rr.Code, rr.Body.String())
 	}
 
@@ -182,7 +182,7 @@ func TestFleetDBAgentRoutesBroadcastMonitorRefresh(t *testing.T) {
 	serveAgentRequest(t, app, http.MethodPatch, "/api/workspaces/PARITY/agents/worker-one", `{"state":"active"}`, http.StatusOK)
 	expectAgentRefresh(t, client.Send(), "PARITY", "worker-one")
 
-	serveAgentRequest(t, app, http.MethodPost, "/api/workspaces/PARITY/agents/worker-one/stop", "", http.StatusOK)
+	serveAgentRequest(t, app, http.MethodPost, "/api/workspaces/PARITY/agents/worker-one/stop", "", http.StatusAccepted)
 	expectAgentRefresh(t, client.Send(), "PARITY", "worker-one")
 
 	serveAgentRequest(t, app, http.MethodDelete, "/api/workspaces/PARITY/agents/worker-one", "", http.StatusOK)

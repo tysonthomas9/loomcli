@@ -27,7 +27,18 @@ func HandleList(agentSvc service.AgentService) http.HandlerFunc {
 			handler.HandleServiceError(w, err)
 			return
 		}
-		handler.WriteJSON(w, http.StatusOK, dto.NewListResponse(agents, len(agents)))
+		items := make([]supervisedAgentDTO, 0, len(agents))
+		for _, agent := range agents {
+			if agent == nil {
+				continue
+			}
+			items = append(items, supervisedAgentDTO{
+				Agent: agent,
+				ID:    agent.Name,
+				Kind:  agentRecordKindSupervised,
+			})
+		}
+		handler.WriteJSON(w, http.StatusOK, dto.NewListResponse(items, len(items)))
 	}
 }
 
@@ -83,7 +94,11 @@ func HandleCreate(agentSvc service.AgentService, hub *realtime.Hub) http.Handler
 			return
 		}
 		broadcastAgentRefresh(hub, ws, created.Name, r.Header.Get("X-Actor"))
-		handler.WriteJSON(w, http.StatusCreated, created)
+		handler.WriteJSON(w, http.StatusCreated, supervisedAgentDTO{
+			Agent: created,
+			ID:    created.Name,
+			Kind:  agentRecordKindSupervised,
+		})
 	}
 }
 
@@ -109,7 +124,11 @@ func HandleUpdate(agentSvc service.AgentService, hub *realtime.Hub) http.Handler
 			return
 		}
 		broadcastAgentRefresh(hub, ws, updated.Name, r.Header.Get("X-Actor"))
-		handler.WriteJSON(w, http.StatusOK, updated)
+		handler.WriteJSON(w, http.StatusOK, supervisedAgentDTO{
+			Agent: updated,
+			ID:    updated.Name,
+			Kind:  agentRecordKindSupervised,
+		})
 	}
 }
 
@@ -151,8 +170,8 @@ func HandleRestart(agentSvc service.AgentService, hub *realtime.Hub) http.Handle
 		state:       domain.AgentStateActive,
 		desired:     domain.AgentDesiredRunning,
 		commandType: "restart",
-		status:      http.StatusAccepted,
-		message:     "restart requested",
+		status:      http.StatusOK,
+		message:     "restarted",
 	})
 }
 
@@ -182,48 +201,83 @@ type lifecyclePatch struct {
 type lifecycleRequest struct {
 	Payload map[string]string `json:"payload,omitempty"`
 	TaskID  string            `json:"task_id,omitempty"`
+	Force   bool              `json:"force,omitempty"`
 }
 
 func handleLifecycle(agentSvc service.AgentService, hub *realtime.Hub, patch lifecyclePatch) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ws := requestWorkspaceID(r)
 		name := r.PathValue("name")
-		payload := patch.payload
+		var req lifecycleRequest
 		if r.Body != nil && r.ContentLength != 0 {
-			var req lifecycleRequest
 			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 				handler.HandleServiceError(w, service.ErrValidation("invalid request body"))
 				return
 			}
-			if len(req.Payload) > 0 {
-				payload = map[string]string{}
-				for k, v := range patch.payload {
-					payload[k] = v
-				}
-				for k, v := range req.Payload {
-					payload[k] = v
-				}
-			}
-			if req.TaskID != "" {
-				if payload == nil {
-					payload = map[string]string{}
-				}
-				payload["task_id"] = req.TaskID
-			}
 		}
-		updated, err := agentSvc.RequestAgentLifecycle(r.Context(), ws, name, service.AgentLifecycleInput{
-			State:        patch.state,
-			DesiredState: patch.desired,
-			CommandType:  patch.commandType,
-			Payload:      payload,
-		})
+
+		effective, input := resolveLifecycleRequest(patch, req)
+		updated, err := agentSvc.RequestAgentLifecycle(r.Context(), ws, name, input)
 		if err != nil {
 			handler.HandleServiceError(w, err)
 			return
 		}
 		broadcastAgentRefresh(hub, ws, updated.Name, r.Header.Get("X-Actor"))
-		handler.WriteJSON(w, patch.status, dto.NewMessageResponse(fmt.Sprintf("agent %q %s", updated.Name, patch.message)))
+		handler.WriteJSON(w, effective.status, dto.NewMessageResponse(fmt.Sprintf("agent %q %s", updated.Name, effective.message)))
 	}
+}
+
+func resolveLifecycleRequest(patch lifecyclePatch, req lifecycleRequest) (lifecyclePatch, service.AgentLifecycleInput) {
+	effective := patch
+	if patch.commandType == "stop" {
+		if req.Force {
+			effective.payload = map[string]string{"force": "true"}
+			effective.message = "force-stopped"
+		} else {
+			effective = lifecyclePatch{
+				state:       domain.AgentStateIdle,
+				desired:     domain.AgentDesiredDraining,
+				commandType: "yield",
+				status:      http.StatusAccepted,
+				message:     "yield requested",
+			}
+		}
+	}
+
+	payload := cloneLifecyclePayload(effective.payload)
+	for key, value := range req.Payload {
+		if payload == nil {
+			payload = map[string]string{}
+		}
+		payload[key] = value
+	}
+	if req.TaskID != "" {
+		if payload == nil {
+			payload = map[string]string{}
+		}
+		payload["task_id"] = req.TaskID
+	}
+	if patch.commandType == "stop" && req.Force {
+		payload["force"] = "true"
+	}
+
+	return effective, service.AgentLifecycleInput{
+		State:        effective.state,
+		DesiredState: effective.desired,
+		CommandType:  effective.commandType,
+		Payload:      payload,
+	}
+}
+
+func cloneLifecyclePayload(in map[string]string) map[string]string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(in))
+	for key, value := range in {
+		out[key] = value
+	}
+	return out
 }
 
 func requestWorkspaceID(r *http.Request) string {

@@ -32,7 +32,8 @@ import type {
   TerminalSplitControls,
 } from "@/components/TerminalView";
 import { useAgentStoreInstance } from "@/hooks";
-import { wsUrl } from "@/hooks/api";
+import { restartAgent, startAgent, stopAgent, wsUrl } from "@/hooks/api";
+import { useToast } from "@/hooks/ui/useToast";
 import { type LoomAgentStatus, parseLoomStatus } from "@/types";
 import { isInteractiveAgent, isLeadRole } from "@/utils/agentRole";
 import {
@@ -127,7 +128,13 @@ export function AgentDetailMain({
         minHeight: 0,
       }}
     >
-      <Header agent={agent} agentName={agentName} />
+      <Header
+        agent={agent}
+        agentName={agentName}
+        onRefresh={() => {
+          void agentStore.getState().fetchData();
+        }}
+      />
       <div
         style={{
           flex: 1,
@@ -392,9 +399,11 @@ function EphemeralWorkerSummary({
 function Header({
   agent,
   agentName,
+  onRefresh,
 }: {
   agent: LoomAgentStatus | undefined;
   agentName: string;
+  onRefresh: () => void;
 }): JSX.Element {
   const parsed = useMemo(
     () => parseLoomStatus(agent?.status ?? ""),
@@ -597,6 +606,106 @@ function Header({
           ))}
         </div>
       </div>
+      <AgentLifecycleControls agent={agent} onChanged={onRefresh} />
+    </div>
+  );
+}
+
+/**
+ * Stop / Start / Restart controls for a Go role agent, shown in the agent
+ * header (parity with the workflow-agent detail's Enable/Disable bar). Backed
+ * by the agentcontrol HTTP surface. Hidden for daemon-owned ephemeral workers
+ * (rendered read-only elsewhere) and when the workspace key is unknown.
+ */
+function AgentLifecycleControls({
+  agent,
+  onChanged,
+}: {
+  agent: LoomAgentStatus | undefined;
+  onChanged: () => void;
+}): JSX.Element | null {
+  const { showToast } = useToast();
+  const [busy, setBusy] = useState(false);
+
+  if (!agent || isEphemeralWorker(agent)) return null;
+  const ws = (agent.workspace ?? "").trim();
+  if (ws === "") return null;
+
+  const stopped = isTerminalUnavailable(agent);
+
+  const runControl = async (
+    label: string,
+    action: () => Promise<void>,
+  ): Promise<void> => {
+    setBusy(true);
+    try {
+      await action();
+      showToast(`${label} requested for ${agent.name}`, { type: "success" });
+      // Optimistic refresh; the status poll then reflects the settled state.
+      onChanged();
+    } catch (err) {
+      showToast(`${label} failed: ${(err as Error).message}`, {
+        type: "error",
+      });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const buttonStyle: CSSProperties = {
+    minHeight: 28,
+    padding: "0 12px",
+    border: "1px solid var(--color-border, #ddd)",
+    borderRadius: 4,
+    background: "var(--color-bg, #fdfcf8)",
+    color: "var(--color-text-primary, #333)",
+    fontSize: 12,
+    fontWeight: 600,
+    cursor: busy ? "not-allowed" : "pointer",
+    opacity: busy ? 0.6 : 1,
+  };
+
+  return (
+    <div
+      style={{ display: "flex", gap: 6, flexShrink: 0, marginLeft: "auto" }}
+      data-testid="agent-lifecycle-controls"
+    >
+      {stopped ? (
+        <button
+          type="button"
+          style={buttonStyle}
+          disabled={busy}
+          data-testid="agent-start-button"
+          onClick={() =>
+            void runControl("Start", () => startAgent(ws, agent.name))
+          }
+        >
+          Start
+        </button>
+      ) : (
+        <button
+          type="button"
+          style={buttonStyle}
+          disabled={busy}
+          data-testid="agent-stop-button"
+          onClick={() =>
+            void runControl("Stop", () => stopAgent(ws, agent.name))
+          }
+        >
+          Stop
+        </button>
+      )}
+      <button
+        type="button"
+        style={buttonStyle}
+        disabled={busy || stopped}
+        data-testid="agent-restart-button"
+        onClick={() =>
+          void runControl("Restart", () => restartAgent(ws, agent.name))
+        }
+      >
+        Restart
+      </button>
     </div>
   );
 }

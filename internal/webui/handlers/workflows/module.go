@@ -16,11 +16,17 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/driver"
 	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/webui/handlers/runhistory"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	workflowdefs "github.com/tysonthomas9/loomcli/internal/workflows"
 )
 
 const maxRunPayloadBytes = 4 << 20
+
+const (
+	defaultRunsLimit = runhistory.DefaultRunsLimit
+	maxRunsLimit     = runhistory.MaxRunsLimit
+)
 
 type Module struct {
 	store store.Store
@@ -31,11 +37,206 @@ func NewModule(st store.Store) *Module {
 }
 
 func (m *Module) Register(mux *http.ServeMux) {
+	mux.HandleFunc("GET /api/workspaces/{ws}/workflows", m.listWorkflows)
 	mux.HandleFunc("POST /api/workspaces/{ws}/workflows/{name}/versions", m.createWorkflowVersion)
+	// Phase B: read a builtin workflow's TS source (to seed an in-UI editor) and
+	// manage its versions (list + approve→trusted + activate an existing one).
+	// The build+register path (createWorkflowVersion above) already exists; these
+	// close the version-lifecycle gaps that were CLI-only.
+	mux.HandleFunc("GET /api/workspaces/{ws}/workflows/{name}/source", m.getWorkflowSource)
+	mux.HandleFunc("GET /api/workspaces/{ws}/workflows/{name}/versions", m.listWorkflowVersions)
+	// Run history for a workflow: a thin, read-only view over DriverRunStore.List
+	// so the UI can show past/active runs (Phase 1). Unlike the run/version
+	// mutation paths it must not self-heal a driver, so it uses ResolveDriver.
+	mux.HandleFunc("GET /api/workspaces/{ws}/workflows/{name}/runs", m.listWorkflowRuns)
+	mux.HandleFunc("POST /api/workspaces/{ws}/workflows/{name}/versions/{versionId}/approve", m.approveWorkflowVersion)
+	mux.HandleFunc("POST /api/workspaces/{ws}/workflows/{name}/versions/{versionId}/activate", m.activateWorkflowVersion)
 	mux.HandleFunc("POST /api/workspaces/{ws}/workflows/{name}", m.createWorkflowRun)
 	mux.HandleFunc("GET /api/workspaces/{ws}/runs/{runId}", m.getRun)
 	mux.HandleFunc("GET /api/workspaces/{ws}/runs/{runId}/events", m.getRunEvents)
 	mux.HandleFunc("GET /api/workspaces/{ws}/runs/{runId}/stream", m.streamRunEvents)
+}
+
+type workflowSummary struct {
+	Name    string `json:"name"`
+	Builtin bool   `json:"builtin"`
+}
+
+// listWorkflows returns the workflows that can be started or bound to a
+// trigger. Today that is the built-in catalog (epic-runner, github-review-agent,
+// …); exposing it de-hardcodes the frontend, which previously only knew the
+// epic-runner name.
+func (m *Module) listWorkflows(w http.ResponseWriter, r *http.Request) {
+	names := workflowdefs.BuiltinWorkflowNames()
+	out := make([]workflowSummary, 0, len(names))
+	for _, name := range names {
+		out = append(out, workflowSummary{Name: name, Builtin: true})
+	}
+	handler.WriteJSON(w, http.StatusOK, map[string]any{"workflows": out})
+}
+
+// getWorkflowSource returns a builtin workflow's TS source files so the UI can
+// show/seed an editor. Only builtins are available: custom driver versions
+// persist a bundle + digest, not source text, so a non-builtin name is a 404
+// rather than a fake empty editor.
+func (m *Module) getWorkflowSource(w http.ResponseWriter, r *http.Request) {
+	name := strings.TrimSpace(r.PathValue("name"))
+	if name == "" {
+		handler.RespondError(w, http.StatusBadRequest, "workflow name is required")
+		return
+	}
+	spec, ok := workflowdefs.BuiltinWorkflow(name)
+	if !ok {
+		handler.RespondError(w, http.StatusNotFound, "no builtin source available for workflow "+name)
+		return
+	}
+	handler.WriteJSON(w, http.StatusOK, map[string]any{
+		"name":       name,
+		"builtin":    true,
+		"entrypoint": spec.Entrypoint,
+		"files":      spec.Files,
+	})
+}
+
+// listWorkflowVersions lists the driver versions built for a workflow, newest
+// state first, so the UI can show version history and drive approve/activate. A
+// workflow with no registered driver yet is a 404.
+func (m *Module) listWorkflowVersions(w http.ResponseWriter, r *http.Request) {
+	ws := strings.TrimSpace(r.PathValue("ws"))
+	name := strings.TrimSpace(r.PathValue("name"))
+	if ws == "" || name == "" {
+		handler.RespondError(w, http.StatusBadRequest, "workspace and workflow name are required")
+		return
+	}
+	drv, err := workflowdefs.ResolveDriver(r.Context(), m.store, ws, name)
+	if err != nil {
+		handler.WriteDomainError(w, err, "resolve workflow driver failed")
+		return
+	}
+	versions, err := m.store.DriverVersions().List(r.Context(), ws, store.DriverVersionFilter{DriverID: drv.DriverID})
+	if err != nil {
+		handler.WriteDomainError(w, err, "list workflow versions failed")
+		return
+	}
+	handler.WriteJSON(w, http.StatusOK, map[string]any{
+		"driver_id":         drv.DriverID,
+		"active_version_id": drv.ActiveVersionID,
+		"versions":          versions,
+	})
+}
+
+// listWorkflowRuns returns a workflow's run history, newest first, over
+// DriverRunStore.List. It resolves the workflow with ResolveDriver (never
+// EnsureAndResolveDriver): listing runs is a read and must not self-heal or
+// register a driver as a side effect, so an unregistered workflow is a 404.
+func (m *Module) listWorkflowRuns(w http.ResponseWriter, r *http.Request) {
+	ws := strings.TrimSpace(r.PathValue("ws"))
+	name := strings.TrimSpace(r.PathValue("name"))
+	if ws == "" || name == "" {
+		writeError(w, http.StatusBadRequest, "workspace and workflow name are required")
+		return
+	}
+	status, ok := parseRunStatusFilter(w, r)
+	if !ok {
+		return
+	}
+	limit, ok := runhistory.ParseRunLimit(w, r)
+	if !ok {
+		return
+	}
+	drv, err := workflowdefs.ResolveDriver(r.Context(), m.store, ws, name)
+	if err != nil {
+		writeDomainError(w, err, "resolve workflow driver failed")
+		return
+	}
+	// Both backends now order newest-first by StartedAt BEFORE applying the
+	// limit (fleet-db server-side; memstore in store.DriverRuns().List), so the
+	// limit can be pushed down — it returns the newest-by-StartedAt window
+	// rather than dropping runs that belong in it. The client-side sort/truncate
+	// below stays as defense in depth against an unordered backend.
+	runs, err := m.store.DriverRuns().List(r.Context(), ws, store.DriverRunFilter{
+		DriverID: drv.DriverID,
+		Status:   status,
+		Limit:    limit,
+	})
+	if err != nil {
+		writeDomainError(w, err, "list workflow runs failed")
+		return
+	}
+	runs = runhistory.SortAndTrim(runs, limit)
+	handler.WriteJSON(w, http.StatusOK, map[string]any{
+		"driver_id":         drv.DriverID,
+		"active_version_id": drv.ActiveVersionID,
+		"runs":              runs,
+	})
+}
+
+// parseRunStatusFilter reads the optional ?status= filter and validates it
+// against the known DriverRunStatus values. On an unknown status it writes a
+// 400 and returns ok=false; an empty filter is allowed (no status constraint).
+func parseRunStatusFilter(w http.ResponseWriter, r *http.Request) (domain.DriverRunStatus, bool) {
+	raw := strings.TrimSpace(r.URL.Query().Get("status"))
+	if raw == "" {
+		return "", true
+	}
+	status := domain.DriverRunStatus(raw)
+	if !isKnownRunStatus(status) {
+		writeError(w, http.StatusBadRequest, "invalid status: "+raw)
+		return "", false
+	}
+	return status, true
+}
+
+func isKnownRunStatus(s domain.DriverRunStatus) bool {
+	switch s {
+	case domain.DriverRunQueued, domain.DriverRunRunning, domain.DriverRunCompleted,
+		domain.DriverRunFailed, domain.DriverRunNeedsReview, domain.DriverRunCancelled,
+		domain.DriverRunSuspendedAwaitingEvent:
+		return true
+	default:
+		return false
+	}
+}
+
+// approveWorkflowVersion / activateWorkflowVersion expose the operator actions
+// that were CLI-only (driver.ApproveDriverVersion / ActivateDriverVersion) — both
+// are pure driver-metadata updates (no build). Approve flips an
+// HTTP-built-untrusted version to trusted so it can actually run; activate points
+// the driver at an existing version without a rebuild.
+func (m *Module) approveWorkflowVersion(w http.ResponseWriter, r *http.Request) {
+	m.workflowVersionAction(w, r, "approve", driver.ApproveDriverVersion)
+}
+
+func (m *Module) activateWorkflowVersion(w http.ResponseWriter, r *http.Request) {
+	m.workflowVersionAction(w, r, "activate", driver.ActivateDriverVersion)
+}
+
+// workflowVersionAction runs one driver-version operation (approve/activate);
+// action is only the label used in response and error text.
+func (m *Module) workflowVersionAction(
+	w http.ResponseWriter,
+	r *http.Request,
+	action string,
+	apply func(context.Context, store.Store, string, string, string) (*domain.Driver, *domain.DriverVersion, error),
+) {
+	ws := strings.TrimSpace(r.PathValue("ws"))
+	name := strings.TrimSpace(r.PathValue("name"))
+	versionID := strings.TrimSpace(r.PathValue("versionId"))
+	if ws == "" || name == "" || versionID == "" {
+		handler.RespondError(w, http.StatusBadRequest, "workspace, workflow name and version id are required")
+		return
+	}
+	driverID, err := workflowdefs.ResolveDriverID(r.Context(), m.store, ws, name)
+	if err != nil {
+		handler.WriteDomainError(w, err, "resolve workflow driver failed")
+		return
+	}
+	drv, ver, err := apply(r.Context(), m.store, ws, driverID, versionID)
+	if err != nil {
+		handler.WriteDomainError(w, err, action+" workflow version failed")
+		return
+	}
+	handler.WriteJSON(w, http.StatusOK, map[string]any{"action": action, "driver": drv, "version": ver})
 }
 
 type createWorkflowVersionRequest struct {
@@ -170,40 +371,68 @@ func (m *Module) createWorkflowRun(w http.ResponseWriter, r *http.Request) {
 }
 
 func (m *Module) resolveWorkflowDriverID(ctx context.Context, ws, name string) (string, error) {
-	if isBuiltinWorkflowName(name) {
-		if err := workflowdefs.EnsureBuiltinWorkflow(ctx, m.store, ws, name); err != nil {
-			return "", err
-		}
-	}
-	driverID, err := workflowdefs.ResolveDriverID(ctx, m.store, ws, name)
-	if err == nil {
-		return driverID, nil
-	}
-	if !errors.Is(err, domain.ErrNotFound) {
+	drv, err := workflowdefs.EnsureAndResolveDriver(ctx, m.store, ws, name)
+	if err != nil {
 		return "", err
 	}
-	if err := workflowdefs.EnsureBuiltinWorkflow(ctx, m.store, ws, name); err != nil {
-		return "", err
-	}
-	return workflowdefs.ResolveDriverID(ctx, m.store, ws, name)
-}
-
-func isBuiltinWorkflowName(name string) bool {
-	for _, builtin := range workflowdefs.BuiltinWorkflowNames() {
-		if builtin == name {
-			return true
-		}
-	}
-	return false
+	return drv.DriverID, nil
 }
 
 func (m *Module) getRun(w http.ResponseWriter, r *http.Request) {
-	run, err := m.store.DriverRuns().Get(r.Context(), r.PathValue("ws"), r.PathValue("runId"))
+	ws := r.PathValue("ws")
+	run, err := m.store.DriverRuns().Get(r.Context(), ws, r.PathValue("runId"))
 	if err != nil {
 		writeDomainError(w, err, "run not found")
 		return
 	}
-	handler.WriteJSON(w, http.StatusOK, run)
+	steps, err := m.runStepSummaries(r.Context(), ws, run.RunID)
+	if err != nil {
+		writeDomainError(w, err, "run steps unavailable")
+		return
+	}
+	handler.WriteJSON(w, http.StatusOK, runDetailResponse{DriverRun: run, Steps: steps})
+}
+
+type runDetailResponse struct {
+	*domain.DriverRun
+	Steps []runStepSummary `json:"steps,omitempty"`
+}
+
+type runStepSummary struct {
+	ID        string                  `json:"id"`
+	StepKind  string                  `json:"step_kind"`
+	TaskRunID string                  `json:"task_run_id,omitempty"`
+	TaskID    string                  `json:"task_id,omitempty"`
+	Status    domain.DriverStepStatus `json:"status"`
+}
+
+func (m *Module) runStepSummaries(ctx context.Context, ws, runID string) ([]runStepSummary, error) {
+	steps, err := m.store.DriverSteps().ListForRun(ctx, ws, runID, store.DriverStepFilter{})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]runStepSummary, 0, len(steps))
+	for _, step := range steps {
+		if step == nil {
+			continue
+		}
+		summary := runStepSummary{
+			ID:        step.StepID,
+			StepKind:  step.StepKind,
+			TaskRunID: step.TaskRunID,
+			Status:    step.Status,
+		}
+		if step.TaskRunID != "" {
+			// Task IDs are best-effort enrichment: older or partial stores may have
+			// the step before the task-run row is readable, but the step link itself
+			// should still reach the UI.
+			if taskRun, err := m.store.TaskRuns().Get(ctx, ws, step.TaskRunID); err == nil && taskRun != nil {
+				summary.TaskID = taskRun.TaskID
+			}
+		}
+		out = append(out, summary)
+	}
+	return out, nil
 }
 
 func (m *Module) getRunEvents(w http.ResponseWriter, r *http.Request) {
@@ -310,15 +539,12 @@ func writeError(w http.ResponseWriter, status int, message string) {
 	handler.WriteJSON(w, status, map[string]string{"error": message})
 }
 
+// writeDomainError handles this package's one extra sentinel (event reads on a
+// store without event support → 501), then defers to the shared domain mapper.
 func writeDomainError(w http.ResponseWriter, err error, fallback string) {
-	switch {
-	case errors.Is(err, domain.ErrNotFound):
-		writeError(w, http.StatusNotFound, fallback)
-	case errors.Is(err, domain.ErrInvalid):
-		writeError(w, http.StatusBadRequest, err.Error())
-	case errors.Is(err, store.ErrDriverRunEventsUnavailable):
+	if errors.Is(err, store.ErrDriverRunEventsUnavailable) {
 		writeError(w, http.StatusNotImplemented, err.Error())
-	default:
-		writeError(w, http.StatusInternalServerError, fallback)
+		return
 	}
+	handler.WriteDomainError(w, err, fallback)
 }

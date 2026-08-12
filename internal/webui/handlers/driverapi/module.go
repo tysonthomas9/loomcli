@@ -38,6 +38,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/leadcontrol"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/trigger"
+	"github.com/tysonthomas9/loomcli/internal/webui/handlers/roles"
 )
 
 // maxDriverOpBodyBytes caps inbound driver-op payloads.
@@ -119,7 +120,7 @@ type Module struct {
 
 // NewModule constructs the driver API module. Returns nil-safe behavior: with
 // a nil store, Register registers nothing.
-func NewModule(cfg Config) *Module {
+func NewModule(cfg Config) *Module { //nolint:funlen // Operation registration is an explicit capability table.
 	m := &Module{
 		store:            cfg.Store,
 		apiToken:         strings.TrimSpace(cfg.APIToken),
@@ -140,6 +141,9 @@ func NewModule(cfg Config) *Module {
 	}
 	m.ops = map[string]opHandler{
 		"claim-ready":                 m.claimReady,
+		"claim-task":                  m.claimTask,
+		"binding-config":              m.bindingConfig,
+		"role-get":                    m.roleGet,
 		"epic-get":                    m.epicGet,
 		"epic-snapshot":               m.epicSnapshot,
 		"list-agents":                 m.listAgents,
@@ -152,9 +156,17 @@ func NewModule(cfg Config) *Module {
 		"active-task-runs":            m.activeTaskRuns,
 		"recover-stale-tasks":         m.recoverStaleTasks,
 		"complete-task":               m.completeTask,
+		"task-diff":                   m.taskDiff,
 		"release-task":                m.releaseTask,
 		"connector-dispatch":          m.connectorDispatch,
 		"emit-event":                  m.emitEvent,
+		"issue-get":                   m.issueGet,
+		"issue-list":                  m.issueList,
+		"issue-list-comments":         m.issueListComments,
+		"issue-comment":               m.issueComment,
+		"issue-update":                m.issueUpdate,
+		"issue-add-label":             m.issueAddLabel,
+		"issue-remove-label":          m.issueRemoveLabel,
 	}
 	if m.worktreePath == "" {
 		if wd, err := os.Getwd(); err == nil {
@@ -291,10 +303,21 @@ func decodeParams[T any](body []byte) (T, error) {
 
 func (m *Module) claimReady(ctx context.Context, ws string, id driverIdentity, body []byte) (any, error) {
 	params, err := decodeParams[struct {
-		EpicID        string   `json:"epicId"`
-		Actor         string   `json:"actor"`
-		Limit         int      `json:"limit"`
+		EpicID string `json:"epicId"`
+		// Actor is accepted for wire-compat but IGNORED (non-authoritative).
+		// SECURITY: the task lock is keyed by the server-derived run actor
+		// below, never by caller input — otherwise a run could present a
+		// victim's actor label and claim/release under its lease (cross-agent
+		// lock takeover in one op call). See releaseTask/claimTask for the
+		// symmetric derivation that keeps failure-recovery ownership matched.
+		Actor string `json:"actor"`
+		// Type optionally narrows the ready queue to one issue type (e.g.
+		// "bug"), applied server-side by the ready view.
+		Type string `json:"type"`
+		// ExcludeLabels skips ready tasks carrying ANY of these labels, keeping
+		// mid-flight tasks in a label-routed pipeline out of an epic drain.
 		ExcludeLabels []string `json:"excludeLabels"`
+		Limit         int      `json:"limit"`
 	}](body)
 	if err != nil {
 		return nil, err
@@ -304,7 +327,7 @@ func (m *Module) claimReady(ctx context.Context, ws string, id driverIdentity, b
 		return nil, err
 	}
 	epicID := firstNonEmpty(params.EpicID, parent.EpicID, driverpkg.DriverRunPayloadEpicID(parent.Payload))
-	actor := firstNonEmpty(params.Actor, driverpkg.DriverRunActor(parent.RunID))
+	actor := driverpkg.DriverRunActor(parent.RunID)
 	issueBackend, err := m.issueBackends(ws, actor)
 	if err != nil {
 		return nil, err
@@ -313,13 +336,88 @@ func (m *Module) claimReady(ctx context.Context, ws string, id driverIdentity, b
 	claimed, err := driverpkg.ClaimReadyTask(ctx, issueBackend, driverpkg.TaskClaimOptions{
 		EpicID:        epicID,
 		Actor:         actor,
-		Limit:         params.Limit,
+		Type:          strings.TrimSpace(params.Type),
 		ExcludeLabels: params.ExcludeLabels,
+		Limit:         params.Limit,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("claim ready task: %w", err)
 	}
 	return claimed, nil
+}
+
+// claimTask claims one SPECIFIC ready task by id (GAP B): the event-driven
+// counterpart to claim-ready, which pulls in queue order. taskId is the caller's
+// legitimate target; every other input follows the claim-ready auth/provenance
+// model — the parent run is proven via the run token (verifyParent) and the
+// claim actor is ALWAYS derived server-side from that run. SECURITY: a body
+// actor is NOT honored for the lock (it is decoded for wire-compat but ignored)
+// — the lock is keyed by DriverRunActor(parent.RunID) so a run can only ever
+// claim under its own lease, never a victim's actor label. epicId is an OPTIONAL
+// narrowing hint the caller may pass; it is NOT defaulted from the parent run so
+// a task under any epic can be targeted. Not-ready / already-claimed surfaces as
+// a conflict (409).
+func (m *Module) claimTask(ctx context.Context, ws string, id driverIdentity, body []byte) (any, error) {
+	params, err := decodeParams[struct {
+		TaskID string `json:"taskId"`
+		// Actor: accepted for wire-compat, IGNORED. See the security note above.
+		Actor  string `json:"actor"`
+		EpicID string `json:"epicId"`
+		Limit  int    `json:"limit"`
+	}](body)
+	if err != nil {
+		return nil, err
+	}
+	parent, err := m.verifyParent(ctx, ws, id)
+	if err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(params.TaskID) == "" {
+		return nil, fmt.Errorf("taskId required: %w", domain.ErrInvalid)
+	}
+	actor := driverpkg.DriverRunActor(parent.RunID)
+	issueBackend, err := m.issueBackends(ws, actor)
+	if err != nil {
+		return nil, err
+	}
+	claimed, err := driverpkg.ClaimTask(ctx, issueBackend, driverpkg.TaskClaimByIDOptions{
+		TaskID: params.TaskID,
+		Actor:  actor,
+		EpicID: strings.TrimSpace(params.EpicID),
+		Limit:  params.Limit,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("claim task: %w", err)
+	}
+	return claimed, nil
+}
+
+// roleGet returns a Role (behavior-config) record plus its prompt body (GAP C):
+// the read-only surface a prompt agent uses to materialize its role's prompt at
+// dispatch time, so "one prompt edit updates every agent" without passing the
+// prompt as raw input. Workspace-scoped, run-token authenticated like the other
+// driverapi reads (verifyParent). The prompt body is loaded through the roles
+// module's shared loader (roles.ReadPromptBody) — the one place role prompts are
+// read from <workspace>/.loom/prompts.
+func (m *Module) roleGet(ctx context.Context, ws string, id driverIdentity, body []byte) (any, error) {
+	params, err := decodeParams[struct {
+		Name string `json:"name"`
+	}](body)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := m.verifyParent(ctx, ws, id); err != nil {
+		return nil, err
+	}
+	name := strings.TrimSpace(params.Name)
+	if name == "" {
+		return nil, fmt.Errorf("name required: %w", domain.ErrInvalid)
+	}
+	role, err := m.store.Roles().Get(ctx, ws, name)
+	if err != nil {
+		return nil, fmt.Errorf("get role: %w", err)
+	}
+	return map[string]any{"role": role, "prompt": roles.ReadPromptBody(role)}, nil
 }
 
 func (m *Module) epicGet(ctx context.Context, ws string, id driverIdentity, body []byte) (any, error) {
@@ -530,6 +628,11 @@ type execTaskParams struct {
 	} `json:"sandboxPlacement"`
 	DeferCompletion bool `json:"deferCompletion"`
 	EnqueueOnly     bool `json:"enqueueOnly"`
+	// CloseTask optionally overrides whether the serve task worker closes the
+	// underlying task issue on success. Pointer so an absent field preserves the
+	// worker default (true) byte-for-byte; a planner run passes false to leave
+	// the card in design+review. Precedent: taskrunapi completeParams.CloseTask.
+	CloseTask *bool `json:"closeTask,omitempty"`
 	// Input is the optional task-run payload (camelCase driver wire). It is
 	// persisted on the run and delivered verbatim to the runner.
 	Input json.RawMessage `json:"input,omitempty"`
@@ -555,6 +658,7 @@ func (p execTaskParams) requestOptions(ws string, id driverIdentity, fencingToke
 		SupportedProviders: p.SupportedProviders,
 		Capabilities:       p.Capabilities,
 		DeferCompletion:    p.DeferCompletion,
+		CloseTaskOnSuccess: p.CloseTask,
 		Input:              p.Input,
 		SandboxPlacement: domain.TaskRunPlacement{
 			Provider:  p.SandboxPlacement.Provider,
@@ -583,6 +687,30 @@ func (m *Module) execTask(ctx context.Context, ws string, id driverIdentity, bod
 		return nil, err
 	}
 	opts := params.requestOptions(ws, id, fencingToken)
+	// Auto-create the run→task-run linkage step when the caller supplied none.
+	// The DriverStep is the STRUCTURED edge the unified agent detail resolves a
+	// run's transcript through (getRun embeds steps; the workflow's own JSON
+	// result is buried as a string in output.flue_stdout_tail, so without a
+	// step a bare exec-task dispatch is invisible to the UI). fleet-db requires
+	// a client-minted step_id and fences creation to the run's owner, so the
+	// id is deterministic per (run, task) — a durable-resume re-dispatch hits
+	// already-exists and REUSES the same step instead of duplicating it.
+	// Best-effort beyond that: a step-create failure must never block the
+	// dispatch — the linkage degrades, the work proceeds.
+	if strings.TrimSpace(opts.DriverStepID) == "" {
+		stepID := "step-" + id.RunID + "-" + strings.TrimSpace(params.TaskID)
+		_, stepErr := m.store.DriverSteps().CreateForRun(ctx, ws, id.RunID, store.DriverStepCreate{
+			StepID:       stepID,
+			StepKind:     "task_run",
+			Status:       domain.DriverStepQueued,
+			NodeID:       id.NodeID,
+			LeaseID:      id.LeaseID,
+			FencingToken: fencingToken,
+		})
+		if stepErr == nil || errors.Is(stepErr, domain.ErrConflict) || errors.Is(stepErr, domain.ErrAlreadyExists) {
+			opts.DriverStepID = stepID
+		}
+	}
 	executor := driverpkg.HostBridgeTaskExecutor{
 		Store:            m.store,
 		WorktreePath:     m.worktreePath,
@@ -738,7 +866,14 @@ func (m *Module) completeTask(ctx context.Context, ws string, id driverIdentity,
 func (m *Module) releaseTask(ctx context.Context, ws string, id driverIdentity, body []byte) (any, error) {
 	params, err := decodeParams[struct {
 		TaskID string `json:"taskId"`
-		Actor  string `json:"actor"`
+		// Actor: accepted for wire-compat, IGNORED. SECURITY: the release
+		// ownership check is keyed by the server-derived run actor below, never
+		// by caller input — otherwise a run could present a victim's actor and
+		// release a lock it never held (cross-agent task theft). The claim path
+		// derives the SAME actor from the SAME run, so a run releases exactly
+		// the leases it took; cross-run recovery relies on lock TTL, not on a
+		// caller-supplied actor.
+		Actor string `json:"actor"`
 	}](body)
 	if err != nil {
 		return nil, err
@@ -750,7 +885,7 @@ func (m *Module) releaseTask(ctx context.Context, ws string, id driverIdentity, 
 	if strings.TrimSpace(params.TaskID) == "" {
 		return nil, fmt.Errorf("taskId required: %w", domain.ErrInvalid)
 	}
-	actor := firstNonEmpty(params.Actor, driverpkg.DriverRunActor(parent.RunID))
+	actor := driverpkg.DriverRunActor(parent.RunID)
 	issueBackend, err := m.issueBackends(ws, actor)
 	if err != nil {
 		return nil, err
@@ -764,6 +899,11 @@ func (m *Module) releaseTask(ctx context.Context, ws string, id driverIdentity, 
 	}
 	return result, nil
 }
+
+// --- issue (card) ops (P0-1): thin IssueBackend pass-throughs so a workflow can
+// read and mutate a fleet-db card. Auth is the run token via verifyParent; the
+// actor is derived from the parent run (as in claimReady/releaseTask). The
+// loom.issue.* SDK surface is generated from sdk/op-spec.mjs.
 
 func firstNonEmpty(values ...string) string {
 	for _, value := range values {
@@ -808,6 +948,11 @@ func writeDomainOpError(w http.ResponseWriter, err error) {
 		return
 	}
 	if writeAwaitOpError(w, err) {
+		return
+	}
+	var coded *codedOpError
+	if errors.As(err, &coded) {
+		writeOpErrorDetails(w, coded.status, coded.code, coded.Error(), coded.retryable, coded.details)
 		return
 	}
 	switch {

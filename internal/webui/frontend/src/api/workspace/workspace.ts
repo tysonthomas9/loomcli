@@ -11,6 +11,7 @@ import {
   patch,
   put,
   del,
+  wsUrl,
   ApiError,
 } from "@/api/common";
 import { createIssue } from "@/api/issues";
@@ -328,6 +329,164 @@ export async function createWorkspaceAgent(
     req,
     { timeout: 120_000 },
   );
+}
+
+export interface WorkspaceRole {
+  workspace_key: string;
+  name: string;
+  kind?: "interactive" | "worker";
+  description?: string;
+  prompt?: string;
+  prompt_file?: string;
+  model?: string;
+  task_filter?: string;
+  backend?: string;
+  effort?: string;
+  path_patterns?: string[];
+  skills?: string[];
+  max_priority?: number;
+  max_concurrency?: number;
+  read_only?: boolean;
+  allowed_tools?: string[];
+  denied_tools?: string[];
+  max_budget_usd?: number;
+  created_at?: string;
+  updated_at?: string;
+}
+
+/**
+ * GET/PATCH single-role response: the stored role plus its current prompt-file
+ * body (empty string for builtins that carry no prompt file).
+ */
+export interface RoleWithPrompt {
+  role: WorkspaceRole;
+  prompt: string;
+}
+
+/**
+ * Partial role update — every field is optional so the UI can PATCH just the
+ * prompt without resending the whole role. Sending `prompt` rewrites the
+ * role's prompt file (reusing its existing filename when `prompt_filename` is
+ * omitted). Changes take effect on the agent's NEXT start/restart; a running
+ * agent keeps the prompt it read at launch.
+ */
+export interface UpdateRoleRequest {
+  description?: string;
+  prompt?: string;
+  prompt_filename?: string;
+  model?: string;
+  task_filter?: string;
+  backend?: string;
+  effort?: string;
+  read_only?: boolean;
+  allowed_tools?: string[];
+  denied_tools?: string[];
+  skills?: string[];
+}
+
+/** Duplicate an existing role (config + prompt) under a new name. */
+export interface CloneRoleRequest {
+  target_name: string;
+  description?: string;
+}
+
+export interface CreateRoleRequest {
+  name: string;
+  description?: string;
+  /** Prompt body; the backend writes it to disk and records the path. */
+  prompt?: string;
+  prompt_filename?: string;
+  model?: string;
+  task_filter?: string;
+  backend?: string;
+  effort?: string;
+  read_only?: boolean;
+  allowed_tools?: string[];
+  denied_tools?: string[];
+  skills?: string[];
+}
+
+/**
+ * Ensure a custom agent Role exists (idempotent). Used by the create-agent
+ * gallery to provision custom supervised templates (e.g. bug triage) before
+ * the agent row is created with that role.
+ */
+export async function createWorkspaceRole(
+  workspaceId: string,
+  req: CreateRoleRequest,
+): Promise<WorkspaceRole> {
+  return post<WorkspaceRole>(wsUrl(workspaceId, "/roles"), req, {
+    timeout: 60_000,
+  });
+}
+
+/**
+ * List every role in the workspace (builtins + custom). Used by the prompt-agent
+ * create path to offer a dropdown of existing roles to wear. Returns the raw
+ * role records (no prompt body — fetch that per-role with getWorkspaceRole).
+ */
+export async function listWorkspaceRoles(
+  workspaceId: string,
+): Promise<WorkspaceRole[]> {
+  return get<WorkspaceRole[]>(wsUrl(workspaceId, "/roles"));
+}
+
+/**
+ * Read a single role plus its current prompt body so the UI can populate an
+ * editor. 404 when the role does not exist.
+ */
+export async function getWorkspaceRole(
+  workspaceId: string,
+  name: string,
+): Promise<RoleWithPrompt> {
+  return get<RoleWithPrompt>(
+    wsUrl(workspaceId, `/roles/${encodeURIComponent(name)}`),
+  );
+}
+
+/**
+ * Apply a partial edit to a role. Returns the updated role plus its (possibly
+ * rewritten) prompt body. Sending `prompt` rewrites the prompt file; the change
+ * takes effect on the agent's next start/restart, not on a running agent.
+ */
+export async function updateWorkspaceRole(
+  workspaceId: string,
+  name: string,
+  req: UpdateRoleRequest,
+): Promise<RoleWithPrompt> {
+  return patch<RoleWithPrompt>(
+    wsUrl(workspaceId, `/roles/${encodeURIComponent(name)}`),
+    req,
+    { timeout: 60_000 },
+  );
+}
+
+/**
+ * Clone a role (config + prompt) under a new name. Throws `ApiError` with
+ * status 409 when the target name is already taken, 400 for an empty/self
+ * target, 404 when the source role is missing.
+ */
+export async function cloneWorkspaceRole(
+  workspaceId: string,
+  name: string,
+  req: CloneRoleRequest,
+): Promise<WorkspaceRole> {
+  return post<WorkspaceRole>(
+    wsUrl(workspaceId, `/roles/${encodeURIComponent(name)}/clone`),
+    req,
+    { timeout: 60_000 },
+  );
+}
+
+/**
+ * Delete a custom role. Throws `ApiError` with status 400 for a builtin
+ * (plan/task) refusal, 404 when the role is missing.
+ */
+export async function deleteWorkspaceRole(
+  workspaceId: string,
+  name: string,
+): Promise<void> {
+  await del<void>(wsUrl(workspaceId, `/roles/${encodeURIComponent(name)}`));
 }
 
 export async function fetchInteractivePrompts(

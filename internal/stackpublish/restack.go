@@ -47,6 +47,13 @@ func slideSafe(ctx context.Context, repoPath, rootBase, predBranch, nodeBranch s
 // the descendant carrying its predecessor's commits. It is idempotent: chains
 // that are already safe (merge-commit, or already rebased) are skipped.
 func (r *Reconciler) Restack(ctx context.Context, ws string, id sl.StackID, repoPath string, resolver ConflictResolver) (*RestackReport, error) {
+	// Defensive: restack semantics (rebase descendants of MERGED units) are
+	// meaningless without pull requests; every current caller is GitHub-gated,
+	// but fail closed rather than hitting a PR method's runtime error if a
+	// future caller hands us a branches-only forge.
+	if !forgeSupportsPullRequests(r.Forge) {
+		return nil, fmt.Errorf("stackpublish: restack requires a pull-request-capable forge")
+	}
 	stack, err := r.Store.GetStack(ctx, ws, id)
 	if err != nil {
 		return nil, err

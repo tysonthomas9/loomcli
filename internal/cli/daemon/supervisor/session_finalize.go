@@ -55,10 +55,16 @@ func extractLeafUsage(data []byte) leafUsage {
 }
 
 func (s *Supervisor) completeBackendUnavailableCleanup(ap *AgentProcess) {
+	s.completePreSpawnCleanup(ap, "backend_unavailable")
+}
+
+// completePreSpawnCleanup unwinds task/session/worker state created by
+// preFlightSetup when the subprocess cannot safely be started.
+func (s *Supervisor) completePreSpawnCleanup(ap *AgentProcess, errClass string) {
 	state := takeAgentSessionForFinalize(ap)
 	taskID := s.taskIDForLifecycle(ap, nil)
 	if state.session != nil {
-		_ = state.session.Finalize(sessions.FinalizeOptions{ExitCode: -1, ErrorClass: "backend_unavailable"})
+		_ = state.session.Finalize(sessions.FinalizeOptions{ExitCode: -1, ErrorClass: errClass})
 	}
 	if state.sessionID != "" {
 		s.completeControlPlaneAgentSession(ap, agentSessionCompletionInput{
@@ -66,7 +72,7 @@ func (s *Supervisor) completeBackendUnavailableCleanup(ap *AgentProcess) {
 			leaseID:    state.leaseID,
 			leaseToken: state.leaseToken,
 			exitCode:   -1,
-			errClass:   "backend_unavailable",
+			errClass:   errClass,
 			taskID:     taskID,
 		})
 		return

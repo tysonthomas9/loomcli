@@ -31,6 +31,8 @@ type Options struct {
 // Report summarizes what a publish run did (or would do, for DryRun).
 type Report struct {
 	DryRun     bool              `json:"dryRun"`
+	Message    string            `json:"message,omitempty"`
+	Pushed     []string          `json:"pushed,omitempty"`     // task IDs (branches-only local publish)
 	Created    []string          `json:"created,omitempty"`    // task IDs
 	Reparented []string          `json:"reparented,omitempty"` // task IDs
 	Skipped    []string          `json:"skipped,omitempty"`    // task IDs (already correct)
@@ -165,10 +167,6 @@ func (r *Reconciler) Publish(ctx context.Context, ws string, id sl.StackID, repo
 	if err != nil {
 		return nil, fmt.Errorf("invalid lineage: %w", err)
 	}
-	owner, repo, err := repoSlug(ctx, repoPath)
-	if err != nil {
-		return nil, err
-	}
 	byTask := sl.ByTask(ordered)
 
 	// Emptiness: a unit whose branch adds no commits over its lineage base. Only
@@ -186,6 +184,15 @@ func (r *Reconciler) Publish(ctx context.Context, ws string, id sl.StackID, repo
 		if cnt == 0 {
 			empty[n.OutputBranch] = true
 		}
+	}
+
+	if !forgeSupportsPullRequests(r.Forge) {
+		return r.publishBranchesOnly(ctx, ws, id, repoPath, ordered, empty, opts)
+	}
+
+	owner, repo, err := repoSlug(ctx, repoPath)
+	if err != nil {
+		return nil, err
 	}
 
 	prefix := sl.StackBranchPrefix(id)
@@ -386,6 +393,45 @@ func (r *Reconciler) Publish(ctx context.Context, ws string, id sl.StackID, repo
 			if err := r.Forge.UpdatePRBody(ctx, owner, repo, pr.Number, desired); err != nil {
 				return report, fmt.Errorf("phase5 body #%d: %w", pr.Number, err)
 			}
+		}
+	}
+	return report, nil
+}
+
+func (r *Reconciler) publishBranchesOnly(ctx context.Context, ws string, id sl.StackID, repoPath string, ordered []sl.Node, empty map[string]bool, opts Options) (*Report, error) {
+	message := "pushed branches to local origin (no PRs)"
+	if opts.DryRun {
+		message = "would push branches to local origin (no PRs)"
+	}
+	report := &Report{DryRun: opts.DryRun, Message: message, PRURLs: map[string]string{}}
+
+	var toPush []BranchPush
+	for _, n := range ordered {
+		if empty[n.OutputBranch] {
+			report.Empty = append(report.Empty, n.TaskID)
+			continue
+		}
+		report.Pushed = append(report.Pushed, n.TaskID)
+		toPush = append(toPush, BranchPush{Branch: n.OutputBranch, ExpectedSHA: n.OutputSHA})
+	}
+	if opts.DryRun {
+		return report, nil
+	}
+	if err := r.Forge.PushBranches(ctx, repoPath, toPush); err != nil {
+		return report, fmt.Errorf("phase2 push: %w", err)
+	}
+	for _, n := range ordered {
+		if empty[n.OutputBranch] {
+			if err := r.Store.UpdateNode(ctx, ws, id, n.TaskID, func(node *sl.Node) error {
+				node.State = sl.NodeStateEmpty
+				return nil
+			}); err != nil {
+				return report, fmt.Errorf("mark branch empty %s: %w", n.TaskID, err)
+			}
+			continue
+		}
+		if err := r.markPublished(ctx, ws, id, action{TaskID: n.TaskID, Branch: n.OutputBranch}, repoPath, PR{}); err != nil {
+			return report, fmt.Errorf("mark branch published %s: %w", n.TaskID, err)
 		}
 	}
 	return report, nil

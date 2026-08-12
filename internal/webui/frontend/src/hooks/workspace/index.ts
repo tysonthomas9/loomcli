@@ -16,6 +16,15 @@ export type { UseLocalSettingsReturn } from "./useLocalSettings";
 export { useBackends } from "./useBackends";
 export type { UseBackendsReturn } from "./useBackends";
 
+export { dispatchBindingsChanged, useAutomations } from "./useAutomations";
+export type { UseAutomationsReturn } from "./useAutomations";
+
+export {
+  GITHUB_CONNECTOR_ID,
+  useConnectorProvisioning,
+} from "./useConnectorProvisioning";
+export type { UseConnectorProvisioningReturn } from "./useConnectorProvisioning";
+
 export { useWorkspaceHealth } from "./useWorkspaceHealth";
 export type {
   WorkspaceConnectionMode,
@@ -96,6 +105,16 @@ export type {
 
 export { useWorkspaceTree } from "./useWorkspaceTree";
 export type { EpicWithTasks, UseWorkspaceTreeReturn } from "./useWorkspaceTree";
+
+export {
+  ACTIVE_ISSUE_LOOKUP_RETRY_MS,
+  ACTIVE_ISSUE_LOOKUP_TIMEOUT_MS,
+  useActiveIssueLookups,
+} from "./useActiveIssueLookups";
+export type {
+  ActiveIssueLookup,
+  UseActiveIssueLookupsReturn,
+} from "./useActiveIssueLookups";
 
 export { useRunEpicWorkflow } from "./useRunEpicWorkflow";
 export type { UseRunEpicWorkflowOptions } from "./useRunEpicWorkflow";

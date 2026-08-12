@@ -29,7 +29,10 @@ const maxResumeFailures = 2
 // failure count to decide how this supervise cycle should recover: RESUME the
 // interrupted task's Claude session, retry the same task with CHECKPOINT
 // injection (resume-first / checkpoint-fallback), or COLD-start a fresh task. It
-// returns the task id to re-claim ("" for cold) and the mode.
+// returns the task id to re-claim for resume/checkpoint. In cold mode a
+// non-empty task id means the surviving lock owns an abandoned task that must
+// be reset before a fresh task is selected; an empty id means there is no
+// lock-owned task to clean up.
 //
 // The lock is deliberately NOT mutated here; the resume/checkpoint paths decide
 // what to preserve vs clear. A resume needs a carried Claude session id; a
@@ -37,14 +40,31 @@ const maxResumeFailures = 2
 // saved checkpoint + worktree diff).
 func (s *Supervisor) detectRecovery(ap *AgentProcess) (string, recoveryMode) {
 	info, running, err := cli.CheckLock(ap.WorktreePath)
-	if err != nil || info == nil || running || info.TaskID == "" {
-		return "", recoverCold // no crash remnant / agent still alive / no task to recover
+	if err != nil || info == nil || info.TaskID == "" {
+		return "", recoverCold // no usable lock-owned task
 	}
-	if ttl := agent.ResumeTTL(); ttl > 0 && !info.TaskStartedAt.IsZero() && time.Since(info.TaskStartedAt) > ttl {
+	if running {
+		// Destructive cold recovery will stop the orphan process. Preserve the
+		// task id as a cleanup signal so that same operation also resets the task
+		// instead of trusting an interrupted in_progress state.
+		return info.TaskID, recoverCold
+	}
+	recoveryStartedAt := info.TaskStartedAt
+	if recoveryStartedAt.IsZero() {
+		// Legacy locks predate the per-task clock. Their process start still gives
+		// us a conservative upper bound on the interrupted task's age.
+		recoveryStartedAt = info.StartedAt
+	}
+	if recoveryStartedAt.IsZero() {
+		slog.Info("interrupted task has no recovery timestamp; cold-starting",
+			"worktree", ap.Entry.Worktree, "task_id", info.TaskID)
+		return info.TaskID, recoverCold
+	}
+	if ttl := agent.ResumeTTL(); ttl > 0 && time.Since(recoveryStartedAt) > ttl {
 		slog.Info("interrupted task too old to recover; cold-starting",
 			"worktree", ap.Entry.Worktree, "task_id", info.TaskID,
-			"age", time.Since(info.TaskStartedAt).Round(time.Second))
-		return "", recoverCold
+			"age", time.Since(recoveryStartedAt).Round(time.Second))
+		return info.TaskID, recoverCold
 	}
 	ap.Mu.Lock()
 	fails := ap.ResumeFailures
@@ -55,16 +75,21 @@ func (s *Supervisor) detectRecovery(ap *AgentProcess) (string, recoveryMode) {
 		// retrying this task and claim a fresh one.
 		slog.Warn("recovery exhausted; cold-starting a fresh task",
 			"worktree", ap.Entry.Worktree, "task_id", info.TaskID, "failures", fails)
-		return "", recoverCold
+		return info.TaskID, recoverCold
 	case fails == maxResumeFailures:
 		// `--resume` kept failing → one checkpoint retry of the SAME task.
 		return info.TaskID, recoverCheckpoint
 	case info.ClaudeSessionID != "":
 		return info.TaskID, recoverResume
 	default:
-		// A task remnant with no captured session can't be `--resume`d; that is
-		// out of scope for resume-recovery — cold-start.
-		return "", recoverCold
+		// Not every backend captures a resumable Claude session id. In
+		// particular, Codex crash remnants still carry the task/run identity but
+		// leave ClaudeSessionID empty. Re-claim the SAME task and cold-start it
+		// through the checkpoint path. Treating this as an ordinary cold cycle
+		// would call recoverAgent with exitCode=0, trust the interrupted task's
+		// in_progress status, and then search only the ready queue -- where that
+		// task can never appear.
+		return info.TaskID, recoverCheckpoint
 	}
 }
 
@@ -82,12 +107,13 @@ func (s *Supervisor) prepareResume(ap *AgentProcess, taskID string) {
 	slog.Info("resuming interrupted task", "worktree", ap.Entry.Worktree, "task_id", taskID)
 }
 
-// prepareCheckpointRetry sets up a CHECKPOINT cycle after `--resume` is
-// exhausted: re-claim the SAME task but CLEAR the carried Claude session id so
-// the agent cold-starts (no `--resume`) and injectCheckpointIfNotResuming
-// re-derives the prior attempt's WIP from the saved checkpoint. The worktree
-// (and its diff) is preserved — recoverAgent is skipped — so the checkpoint has
-// content.
+// prepareCheckpointRetry sets up a CHECKPOINT cycle when `--resume` is either
+// unavailable or exhausted: re-claim the SAME task but CLEAR any carried Claude
+// session id so the agent cold-starts (no `--resume`) and
+// injectCheckpointIfNotResuming re-derives the prior attempt's WIP from the
+// saved checkpoint when one exists. The worktree (and its diff) is preserved --
+// recoverAgent is skipped -- so even a backend without resumable sessions can
+// safely continue its interrupted task.
 func (s *Supervisor) prepareCheckpointRetry(ap *AgentProcess, taskID string) {
 	s.sweepWorktreeBackends(ap)
 	// Drop the carried session so maybeResumeDaemonSession won't arm `--resume`;
@@ -99,7 +125,7 @@ func (s *Supervisor) prepareCheckpointRetry(ap *AgentProcess, taskID string) {
 	ap.Mu.Lock()
 	ap.ResumeTaskID = taskID
 	ap.Mu.Unlock()
-	slog.Info("resume exhausted; retrying task with checkpoint",
+	slog.Info("cold-starting interrupted task with checkpoint fallback",
 		"worktree", ap.Entry.Worktree, "task_id", taskID)
 }
 

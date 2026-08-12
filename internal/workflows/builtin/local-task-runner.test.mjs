@@ -890,6 +890,26 @@ describe("local-task-runner pull-request delivery gating", () => {
     return dir;
   }
 
+  function createBareOrigin(remoteName = "origin") {
+    const origin = path.join(tmpRoot, remoteName + ".git");
+    execFileSync("git", ["init", "-q", "--bare", origin]);
+    execFileSync("git", ["remote", "add", "origin", origin], { cwd: worktree });
+    return origin;
+  }
+
+  function refSha(origin, ref) {
+    return execFileSync("git", ["--git-dir", origin, "rev-parse", "--verify", ref]).toString().trim();
+  }
+
+  function refExists(origin, ref) {
+    try {
+      execFileSync("git", ["--git-dir", origin, "show-ref", "--verify", "--quiet", ref]);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   it("default (no openPullRequest) returns a top-level patch + base_ref and delivery=patch_back", async () => {
     process.env.LOOM_TASK_RUNNER_BACKEND = "codex";
     process.env.LOOM_WORKTREE_PATH = worktree;
@@ -905,6 +925,155 @@ describe("local-task-runner pull-request delivery gating", () => {
     assert.equal(out.patch_base_ref, out.base_ref);
     // No PR metadata in the default path.
     assert.equal(out.runtimeMetadata.github_pr_url, undefined);
+  });
+
+  it("deliveryMode=local-branch pushes loom/<task> to a filesystem origin and suppresses patch-back", async () => {
+    const origin = createBareOrigin();
+    process.env.LOOM_TASK_RUNNER_BACKEND = "codex";
+    process.env.LOOM_WORKTREE_PATH = worktree;
+    process.env.LOOM_CODEX_BIN = fakeBin;
+    process.env.FAKE_EXIT_CODE = "0";
+    process.env.FAKE_WRITE_FILE = "local-branch.txt";
+    process.env.LOOM_TASK_RUN_REQUEST_JSON = JSON.stringify({
+      task_run_id: "tr-local",
+      task_id: "T-LOCAL",
+      runner: "local-task-runner",
+      workspace_key: "ws",
+      input: { title: "Local branch thing", deliveryMode: "local-branch" },
+    });
+
+    const out = await run();
+    assert.equal(out.status, "completed");
+    assert.equal(out.runtimeMetadata.delivery, "local_branch");
+    assert.equal(out.runtimeMetadata.local_branch, "loom/T-LOCAL");
+    assert.equal(out.runtimeMetadata.head_sha, refSha(origin, "refs/heads/loom/T-LOCAL"));
+    assert.equal(out.patch, undefined, "local branch is the deliverable, so patch-back must be skipped");
+    assert.equal(out.base_ref, undefined);
+    const files = execFileSync("git", ["--git-dir", origin, "ls-tree", "-r", "--name-only", out.runtimeMetadata.head_sha]).toString();
+    assert.ok(files.includes("local-branch.txt"), "pushed branch should contain the backend change");
+  });
+
+  it("filesystem origin without deliveryMode stays on patch-back", async () => {
+    createBareOrigin("explicit-only-origin");
+    process.env.LOOM_TASK_RUNNER_BACKEND = "codex";
+    process.env.LOOM_WORKTREE_PATH = worktree;
+    process.env.LOOM_CODEX_BIN = fakeBin;
+    process.env.FAKE_EXIT_CODE = "0";
+    process.env.FAKE_WRITE_FILE = "explicit-only-patch.txt";
+
+    const out = await run();
+    assert.equal(out.status, "completed");
+    assert.equal(out.runtimeMetadata.delivery, "patch_back");
+    assert.ok(out.patch.includes("explicit-only-patch.txt"), "filesystem origins require explicit local-branch deliveryMode");
+    assert.equal(out.runtimeMetadata.local_branch, undefined);
+  });
+
+  it("deliveryMode=local-branch with no changes skips the push and returns patch-back shape", async () => {
+    const origin = createBareOrigin("empty-origin");
+    process.env.LOOM_TASK_RUNNER_BACKEND = "codex";
+    process.env.LOOM_WORKTREE_PATH = worktree;
+    process.env.LOOM_CODEX_BIN = fakeBin;
+    process.env.FAKE_EXIT_CODE = "0";
+    delete process.env.FAKE_WRITE_FILE;
+    process.env.LOOM_TASK_RUN_REQUEST_JSON = JSON.stringify({
+      task_run_id: "tr-empty-local",
+      task_id: "T-EMPTY",
+      runner: "local-task-runner",
+      workspace_key: "ws",
+      input: { title: "Empty local branch thing", deliveryMode: "local-branch" },
+    });
+
+    const out = await run();
+    assert.equal(out.status, "completed");
+    assert.equal(out.runtimeMetadata.delivery, "patch_back");
+    assert.equal(out.runtimeMetadata.files_changed, "0");
+    assert.equal(out.patch, "");
+    assert.ok(out.base_ref && out.base_ref.length > 0);
+    assert.equal(refExists(origin, "refs/heads/loom/T-EMPTY"), false);
+  });
+
+  it("deliveryMode=local-branch force-pushes rework to the same task branch", async () => {
+    const origin = createBareOrigin("rework-origin");
+    process.env.LOOM_TASK_RUNNER_BACKEND = "codex";
+    process.env.LOOM_WORKTREE_PATH = worktree;
+    process.env.LOOM_CODEX_BIN = fakeBin;
+    process.env.FAKE_EXIT_CODE = "0";
+
+    process.env.FAKE_WRITE_FILE = "first-rework.txt";
+    process.env.LOOM_TASK_RUN_REQUEST_JSON = JSON.stringify({
+      task_run_id: "tr-rework-1",
+      task_id: "T-REWORK",
+      runner: "local-task-runner",
+      workspace_key: "ws",
+      input: { title: "First rework", deliveryMode: "local-branch" },
+    });
+    const first = await run();
+    assert.equal(first.status, "completed");
+    assert.equal(first.runtimeMetadata.delivery, "local_branch");
+    assert.equal(first.runtimeMetadata.head_sha, refSha(origin, "refs/heads/loom/T-REWORK"));
+
+    process.env.FAKE_WRITE_FILE = "second-rework.txt";
+    process.env.LOOM_TASK_RUN_REQUEST_JSON = JSON.stringify({
+      task_run_id: "tr-rework-2",
+      task_id: "T-REWORK",
+      runner: "local-task-runner",
+      workspace_key: "ws",
+      input: { title: "Second rework", deliveryMode: "local-branch" },
+    });
+    const second = await run();
+    assert.equal(second.status, "completed");
+    assert.equal(second.runtimeMetadata.delivery, "local_branch");
+    assert.equal(second.runtimeMetadata.local_branch, "loom/T-REWORK");
+    assert.equal(second.runtimeMetadata.head_sha, refSha(origin, "refs/heads/loom/T-REWORK"));
+    assert.notEqual(second.runtimeMetadata.head_sha, first.runtimeMetadata.head_sha, "rework should replace the previous branch head");
+    const files = execFileSync("git", ["--git-dir", origin, "ls-tree", "-r", "--name-only", second.runtimeMetadata.head_sha]).toString();
+    assert.ok(files.includes("second-rework.txt"), "second push should win");
+    assert.ok(!files.includes("first-rework.txt"), "old divergent branch content should be replaced");
+  });
+
+  it("local-branch delivery fails closed when pushing to the filesystem origin fails", async () => {
+    const missingOrigin = path.join(tmpRoot, "missing-origin.git");
+    execFileSync("git", ["remote", "add", "origin", missingOrigin], { cwd: worktree });
+    process.env.LOOM_TASK_RUNNER_BACKEND = "codex";
+    process.env.LOOM_WORKTREE_PATH = worktree;
+    process.env.LOOM_CODEX_BIN = fakeBin;
+    process.env.FAKE_EXIT_CODE = "0";
+    process.env.FAKE_WRITE_FILE = "unpushable.txt";
+    process.env.LOOM_TASK_RUN_REQUEST_JSON = JSON.stringify({
+      task_run_id: "tr-local-fail",
+      task_id: "T-LOCAL-FAIL",
+      runner: "local-task-runner",
+      workspace_key: "ws",
+      input: { title: "Unpushable", deliveryMode: "local-branch" },
+    });
+
+    const out = await run();
+    assert.equal(out.status, "failed");
+    assert.equal(out.errorClass, "local_branch_push_failed");
+    assert.equal(out.exitCode, 1);
+  });
+
+  it("deliveryMode=local-branch never activates for GitHub/http origins (keeps patch-back)", async () => {
+    execFileSync("git", ["remote", "add", "origin", "https://github.com/owner/repo.git"], { cwd: worktree });
+    process.env.LOOM_TASK_RUNNER_BACKEND = "codex";
+    process.env.LOOM_WORKTREE_PATH = worktree;
+    process.env.LOOM_CODEX_BIN = fakeBin;
+    process.env.FAKE_EXIT_CODE = "0";
+    process.env.FAKE_WRITE_FILE = "github-origin-patch.txt";
+    process.env.LOOM_TASK_RUN_REQUEST_JSON = JSON.stringify({
+      task_run_id: "tr-github-origin",
+      task_id: "T-GH",
+      runner: "local-task-runner",
+      workspace_key: "ws",
+      input: { title: "GitHub origin guard", deliveryMode: "local-branch" },
+    });
+
+    const out = await run();
+    assert.equal(out.status, "completed");
+    assert.equal(out.runtimeMetadata.delivery, "patch_back");
+    assert.ok(out.patch.includes("github-origin-patch.txt"), "GitHub origins must keep patch-back behavior");
+    assert.ok(out.base_ref && out.base_ref.length > 0);
+    assert.equal(out.runtimeMetadata.local_branch, undefined);
   });
 
   it("openPullRequest with no credential and gh unavailable fails closed (github_credentials_missing)", async () => {

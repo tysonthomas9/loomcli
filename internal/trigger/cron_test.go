@@ -75,6 +75,70 @@ func TestValidateScheduleTimezone(t *testing.T) {
 	}
 }
 
+func TestNextFire(t *testing.T) {
+	tests := []struct {
+		name     string
+		schedule string
+		timezone string
+		after    time.Time
+		want     time.Time
+		wantErr  bool
+	}{
+		{
+			name:     "every five minutes rounds up in UTC",
+			schedule: "*/5 * * * *",
+			after:    time.Date(2026, 6, 11, 10, 2, 30, 0, time.UTC),
+			want:     time.Date(2026, 6, 11, 10, 5, 0, 0, time.UTC),
+		},
+		{
+			name:     "strictly after a boundary instant",
+			schedule: "*/5 * * * *",
+			after:    time.Date(2026, 6, 11, 10, 5, 0, 0, time.UTC),
+			want:     time.Date(2026, 6, 11, 10, 10, 0, 0, time.UTC),
+		},
+		{
+			name:     "daily nine am evaluated in America/New_York",
+			schedule: "0 9 * * *",
+			timezone: "America/New_York",
+			after:    time.Date(2026, 6, 11, 12, 0, 0, 0, time.UTC), // 08:00 EDT
+			want:     time.Date(2026, 6, 11, 13, 0, 0, 0, time.UTC), // 09:00 EDT
+		},
+		{
+			name:     "invalid schedule",
+			schedule: "not-a-cron",
+			after:    time.Date(2026, 6, 11, 10, 0, 0, 0, time.UTC),
+			wantErr:  true,
+		},
+		{
+			name:     "invalid timezone",
+			schedule: "* * * * *",
+			timezone: "Mars/Olympus_Mons",
+			after:    time.Date(2026, 6, 11, 10, 0, 0, 0, time.UTC),
+			wantErr:  true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := trigger.NextFire(tt.schedule, tt.timezone, tt.after)
+			if tt.wantErr {
+				if !errors.Is(err, trigger.ErrInvalidSchedule) {
+					t.Fatalf("NextFire(%q, %q) err = %v, want ErrInvalidSchedule", tt.schedule, tt.timezone, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("NextFire(%q, %q) err = %v, want nil", tt.schedule, tt.timezone, err)
+			}
+			if !got.Equal(tt.want) {
+				t.Fatalf("NextFire(%q, %q, %s) = %s, want %s", tt.schedule, tt.timezone, tt.after.UTC(), got.UTC(), tt.want.UTC())
+			}
+			if !got.After(tt.after) {
+				t.Fatalf("NextFire returned %s, want an instant strictly after %s", got.UTC(), tt.after.UTC())
+			}
+		})
+	}
+}
+
 // cronBinding is one binding fixture row for the scheduler tests.
 type cronBinding struct {
 	bindingID  string
@@ -362,24 +426,37 @@ func TestCronSchedulerInvalidBindings(t *testing.T) {
 
 // TestCronSchedulerMissingRouteKey: a cron binding without a route key cannot
 // feed the router; it is skipped with ErrInvalid and retried (not advanced).
-func TestCronSchedulerMissingRouteKey(t *testing.T) {
+// A cron binding created without an explicit route_key gets one derived from its
+// binding_id by the store (TriggerBindingCreate.WithDerivedRoute), so it is a
+// valid 1:1 routing address and the scheduler fires it normally. The old
+// "keyless cron binding" the scheduler used to reject is no longer creatable
+// through the store — the derivation is what lets two scheduled workflows coexist
+// without a shared hand-picked route.
+func TestCronSchedulerDerivesRouteKey(t *testing.T) {
 	st := memstore.New()
 	setupCronBindings(t, st, []cronBinding{
-		{bindingID: "cron-keyless", schedule: "* * * * *"},
+		{bindingID: "cron-derived", schedule: "* * * * *"}, // no routeKey supplied
 	})
-	scheduler := &trigger.CronScheduler{Store: st, WorkspaceKey: "WS"}
+	b, err := st.TriggerBindings().Get(t.Context(), "WS", "cron-derived")
+	if err != nil {
+		t.Fatalf("Get binding: %v", err)
+	}
+	if b.RouteKey != "cron:cron-derived" {
+		t.Fatalf("derived route_key = %q, want cron:cron-derived", b.RouteKey)
+	}
 
+	scheduler := &trigger.CronScheduler{Store: st, WorkspaceKey: "WS"}
 	t0 := time.Date(2026, 6, 11, 10, 0, 30, 0, time.UTC)
-	runSweep(t, scheduler, t0)
-	result, err := scheduler.RunOnce(t.Context(), t0.Add(2*time.Minute))
-	if !errors.Is(err, domain.ErrInvalid) {
-		t.Fatalf("RunOnce error = %v, want domain.ErrInvalid", err)
+	if result := runSweep(t, scheduler, t0); result.Fired != 0 || result.Skipped != 0 {
+		t.Fatalf("priming sweep = %+v, want nothing fired", result)
 	}
-	if result == nil || result.Fired != 0 || result.Skipped != 1 {
-		t.Fatalf("result = %+v, want 0 fired / 1 skipped", result)
+	t1 := t0.Add(45 * time.Second) // 10:01:15, one tick due at 10:01:00
+	result := runSweep(t, scheduler, t1)
+	if result.Fired != 1 || result.Skipped != 0 {
+		t.Fatalf("due sweep = %+v, want 1 fired / 0 skipped (the derived route is valid)", result)
 	}
-	if events, _, _ := cronStoreState(t, st); events != 0 {
-		t.Fatalf("events = %d, want none", events)
+	if events, runs, deliveries := cronStoreState(t, st); events != 1 || runs != 1 || deliveries != 1 {
+		t.Fatalf("state after fire: events=%d runs=%d deliveries=%d, want 1/1/1", events, runs, deliveries)
 	}
 }
 

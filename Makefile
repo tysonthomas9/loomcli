@@ -1,14 +1,38 @@
 # Makefile for loomcli project
 
-.PHONY: all build build-frontend build-all test test-builtin-workflows test-integration test-all test-playground test-fleetdb-embedded test-fleetdb-supervisor test-fleetdb-ui test-fleetdb-empty-cli fleetdb-empty-up fleetdb-empty-down fleetdb-regression-up fleetdb-regression-down test-env-up test-env-down test-env-status ensure-frontend-dist ensure-frontend-deps local-mode-frontend-dist local-mode-up local-mode-codex-up local-mode-claude-up local-mode-daytona-up local-mode-down local-mode-logs local-mode-verify local-mode-codex-verify test-local-mode-harness test-distributed-smoke lint lint-frontend test-frontend e2e test-e2e test-e2e-api test-e2e-api-local test-e2e-real-smoke test-e2e-real-smoke-local test-e2e-real-regression test-e2e-real-regression-local test-e2e-integration test-e2e-integration-local test-e2e-integration-full clean install help frontend check check-go check-frontend gate gate-e2e gate-e2e-full hooks ensure-hooks dev dev-check dev-loom dev-vite check-loc check-loc-stale check-control-plane-paths check-no-raw-exec check-no-beads-prod test-coverage test-forkwatch test-frontend-coverage test-race-cover test-integration-race-cover gen-go-api check-go-api-staleness local-mode-webhook-verify test-e2e-github-webhook test-e2e-github-webhook-live
+.PHONY: all build build-frontend build-all test test-builtin-workflows test-integration test-all test-playground test-fleetdb-embedded test-fleetdb-supervisor test-fleetdb-ui test-fleetdb-empty-cli fleetdb-empty-up fleetdb-empty-down local-mode-frontend-dist local-mode-info local-mode-up local-mode-codex-up local-mode-codex-workflows-up local-mode-workflow-build-check local-mode-claude-up local-mode-daytona-up local-mode-down local-mode-logs local-mode-verify local-mode-codex-verify test-local-mode-harness test-distributed-smoke lint lint-frontend test-frontend e2e test-e2e-api test-e2e-api-local test-e2e-real-smoke test-e2e-real-smoke-local test-e2e-real-regression test-e2e-real-regression-local test-e2e-integration test-e2e-integration-local test-e2e-integration-full clean install help frontend check check-go check-frontend gate gate-e2e gate-e2e-full hooks ensure-hooks dev dev-check dev-loom dev-vite check-loc check-loc-stale check-control-plane-paths check-no-raw-exec check-no-beads-prod test-coverage test-forkwatch test-frontend-coverage test-race-cover test-integration-race-cover gen-go-api check-go-api-staleness local-mode-webhook-verify test-e2e-github-webhook test-e2e-github-webhook-live fleetdb-regression-up fleetdb-regression-down test-env-up test-env-down test-env-status ensure-frontend-dist ensure-frontend-deps test-e2e
 
 # Default target
 all: build
 
-LOCAL_MODE_COMPOSE_PROJECT ?= loomcli-local-mode
+_LOCAL_MODE_SOURCE_ROOT_ORIGIN := $(origin LOCAL_MODE_SOURCE_ROOT)
+LOCAL_MODE_SOURCE_ROOT ?= $(shell pwd -P)
+# Hash either the physical working directory or an environment override
+# without interpolating the path into shell syntax. GNU Make 3.81 does not put
+# command-line/file assignments in the environment used by $(shell ...), so
+# those less common override forms must provide the identity as a pair.
+ifeq ($(_LOCAL_MODE_SOURCE_ROOT_ORIGIN),undefined)
+LOCAL_MODE_CHECKOUT_ID ?= $(shell pwd -P | git hash-object --stdin | cut -c1-12)
+else ifneq ($(filter environment environment override,$(_LOCAL_MODE_SOURCE_ROOT_ORIGIN)),)
+LOCAL_MODE_CHECKOUT_ID ?= $(shell printf '%s\n' "$$LOCAL_MODE_SOURCE_ROOT" | git hash-object --stdin | cut -c1-12)
+else
+ifeq ($(filter command line override file,$(origin LOCAL_MODE_CHECKOUT_ID)),)
+$(error LOCAL_MODE_SOURCE_ROOT passed after make requires LOCAL_MODE_CHECKOUT_ID; prefer setting LOCAL_MODE_SOURCE_ROOT in the environment before make)
+endif
+endif
+LOCAL_MODE_COMPOSE_PROJECT ?= loomcli-local-mode-$(LOCAL_MODE_CHECKOUT_ID)
+LOCAL_MODE_RUN_ID ?= $(shell sh -c 'printf "%s-%s\n" "$$(date -u +%Y%m%dT%H%M%SZ)" "$$$$"')
+LOCAL_MODE_SOURCE_ROOT := $(LOCAL_MODE_SOURCE_ROOT)
+LOCAL_MODE_CHECKOUT_ID := $(LOCAL_MODE_CHECKOUT_ID)
+LOCAL_MODE_COMPOSE_PROJECT := $(LOCAL_MODE_COMPOSE_PROJECT)
+LOCAL_MODE_RUN_ID := $(LOCAL_MODE_RUN_ID)
 LOCAL_MODE_COMPOSE ?=
 LOCAL_MODE_COMPOSE_FILES ?=
 LOCAL_MODE_COMPOSE_UP_FLAGS ?= --build
+FLUE_SRC ?= $(abspath test/local-mode/../../../../dynamic-workflows/flue)
+# The local-mode image is Debian/glibc and normally uses the host CPU
+# architecture. Override this only when Compose is targeting another CPU.
+LOCAL_MODE_CONTAINER_ARCH ?= $(shell uname -m)
 LOCAL_MODE_FLEETDB_IMAGE ?= $(LOCAL_MODE_COMPOSE_PROJECT)-fleet-db:latest
 LOCAL_MODE_LOOM_IMAGE ?= $(LOCAL_MODE_COMPOSE_PROJECT)-loom:latest
 LOCAL_MODE_LOOM_CODEX_IMAGE ?= $(LOCAL_MODE_COMPOSE_PROJECT)-loom-codex:latest
@@ -16,12 +40,19 @@ LOCAL_MODE_LOOM_CLAUDE_IMAGE ?= $(LOCAL_MODE_COMPOSE_PROJECT)-loom-claude:latest
 LOCAL_MODE_COMPOSE_EXTRA := $(foreach file,$(LOCAL_MODE_COMPOSE_FILES),-f $(file))
 LOCAL_MODE_COMPOSE_ARGS = -p $(LOCAL_MODE_COMPOSE_PROJECT) -f test/local-mode/docker-compose.yml $(LOCAL_MODE_COMPOSE_EXTRA)
 LOCAL_MODE_CODEX_COMPOSE_ARGS = -p $(LOCAL_MODE_COMPOSE_PROJECT) -f test/local-mode/docker-compose.yml -f test/local-mode/docker-compose.codex.yml $(LOCAL_MODE_COMPOSE_EXTRA)
+LOCAL_MODE_CODEX_WORKFLOW_COMPOSE_ARGS = -p $(LOCAL_MODE_COMPOSE_PROJECT) -f test/local-mode/docker-compose.yml -f test/local-mode/docker-compose.codex.yml -f test/local-mode/docker-compose.workflow-build.yml $(LOCAL_MODE_COMPOSE_EXTRA)
 LOCAL_MODE_CLAUDE_COMPOSE_ARGS = -p $(LOCAL_MODE_COMPOSE_PROJECT) -f test/local-mode/docker-compose.yml -f test/local-mode/docker-compose.claude.yml $(LOCAL_MODE_COMPOSE_EXTRA)
 LOCAL_MODE_DAYTONA_COMPOSE_ARGS = -p $(LOCAL_MODE_COMPOSE_PROJECT) -f test/local-mode/docker-compose.yml -f test/local-mode/docker-compose.daytona.yml $(LOCAL_MODE_COMPOSE_EXTRA)
 export LOCAL_MODE_FLEETDB_IMAGE
 export LOCAL_MODE_LOOM_IMAGE
 export LOCAL_MODE_LOOM_CODEX_IMAGE
 export LOCAL_MODE_LOOM_CLAUDE_IMAGE
+export LOCAL_MODE_SOURCE_ROOT
+export LOCAL_MODE_CHECKOUT_ID
+export LOCAL_MODE_COMPOSE_PROJECT
+export LOCAL_MODE_RUN_ID
+export LOCAL_MODE_EXPECTED_BACKEND
+export FLUE_SRC
 LOCAL_MODE_COMPOSE_SELECT = \
 	if [ "$(strip $(LOCAL_MODE_COMPOSE))" != "" ]; then \
 	  compose="$(LOCAL_MODE_COMPOSE)"; \
@@ -168,6 +199,10 @@ ensure-frontend-dist:
 	  $(MAKE) build-frontend; \
 	fi
 
+local-mode-info:
+	@echo "source_root=$(LOCAL_MODE_SOURCE_ROOT)"
+	@echo "checkout_id=$(LOCAL_MODE_CHECKOUT_ID)"
+	@echo "compose_project=$(LOCAL_MODE_COMPOSE_PROJECT)"
 # Guard for every target that shells into the frontend toolchain. npm scripts
 # resolve binaries out of node_modules/.bin, which is gitignored and therefore
 # absent in a fresh clone and in any new git worktree (worktrees do not inherit
@@ -260,6 +295,64 @@ local-mode-codex-up: local-mode-frontend-dist
 	$(LOCAL_MODE_COMPOSE_SELECT); \
 	$$compose $(LOCAL_MODE_CODEX_COMPOSE_ARGS) up $(LOCAL_MODE_COMPOSE_UP_FLAGS)
 
+# Full unified-agent authoring profile: Codex plus the pinned local Flue
+# toolchain needed to materialize embedded prompt/scripted workflow drivers.
+local-mode-workflow-build-check:
+	@set -e; \
+	missing=""; \
+	for rel in packages/cli/bin/flue.mjs packages/cli/dist/flue.js packages/runtime/package.json packages/runtime/dist/node/index.mjs packages/runtime/node_modules/@hono/node-server packages/runtime/node_modules/hono; do \
+	  if [ ! -e "$(FLUE_SRC)/$$rel" ]; then missing="$$missing $$rel"; fi; \
+	done; \
+	if [ "$$missing" != "" ]; then \
+	  echo "Flue workflow build toolchain is incomplete at $(FLUE_SRC)." >&2; \
+	  echo "Missing:$$missing" >&2; \
+	  echo "Install/build the pinned Flue checkout (pnpm install --frozen-lockfile && pnpm build) or set FLUE_SRC=/path/to/flue." >&2; \
+	  exit 1; \
+	fi; \
+	container_arch="$(LOCAL_MODE_CONTAINER_ARCH)"; \
+	case "$$container_arch" in \
+	  arm64|aarch64) pnpm_cpu="arm64" ;; \
+	  amd64|x86_64) pnpm_cpu="x64" ;; \
+	  *) \
+	    echo "Unsupported local-mode container architecture '$$container_arch'." >&2; \
+	    echo "Set LOCAL_MODE_CONTAINER_ARCH to arm64/aarch64 or amd64/x86_64 to match the Compose target." >&2; \
+	    exit 1 ;; \
+	esac; \
+	binding="linux-$$pnpm_cpu-gnu"; \
+	rolldown_count=0; \
+	missing_binding=""; \
+	for rolldown_pkg in "$(FLUE_SRC)"/node_modules/.pnpm/rolldown@*/node_modules/rolldown; do \
+	  if [ ! -d "$$rolldown_pkg" ]; then continue; fi; \
+	  rolldown_count=$$((rolldown_count + 1)); \
+	  dep_root="$${rolldown_pkg%/rolldown}"; \
+	  candidate="$$dep_root/@rolldown/binding-$$binding/rolldown-binding.$$binding.node"; \
+	  if [ ! -f "$$candidate" ]; then missing_binding="$$candidate"; break; fi; \
+	done; \
+	if [ "$$rolldown_count" -eq 0 ] || [ "$$missing_binding" != "" ]; then \
+	  echo "Flue cannot load Rolldown inside the Linux/$$pnpm_cpu/glibc local-mode container." >&2; \
+	  echo "Missing @rolldown/binding-$$binding (rolldown-binding.$$binding.node) under $(FLUE_SRC)/node_modules/.pnpm." >&2; \
+	  echo "pnpm likely installed optional native dependencies only for the host platform." >&2; \
+	  echo "From the pinned Flue checkout, install both current-host and Linux-container dependencies:" >&2; \
+	  echo "  export XDG_CONFIG_HOME=\"\$${TMPDIR:-/tmp}/loom-flue-pnpm-$$binding\"" >&2; \
+	  echo "  pnpm config set --global supportedArchitectures '{\"os\":[\"current\",\"linux\"],\"cpu\":[\"current\",\"$$pnpm_cpu\"],\"libc\":[\"current\",\"glibc\"]}'" >&2; \
+	  echo "  pnpm install --frozen-lockfile --force --filter @flue/cli... --filter @flue/runtime..." >&2; \
+	  echo "Then rerun make local-mode-codex-workflows-up." >&2; \
+	  exit 1; \
+	fi; \
+	expected="$$(tr -d '[:space:]' < internal/workflows/FLUE_COMMIT)"; \
+	actual="$$(git -C "$(FLUE_SRC)" rev-parse HEAD 2>/dev/null || true)"; \
+	if [ "$$actual" != "$$expected" ]; then \
+	  echo "Flue checkout $$actual does not match Loom's pinned commit $$expected." >&2; \
+	  echo "Check out the pin at $(FLUE_SRC), or set FLUE_SRC to a matching checkout." >&2; \
+	  exit 1; \
+	fi
+
+local-mode-codex-workflows-up: local-mode-frontend-dist local-mode-workflow-build-check
+	@echo "Starting local-mode Codex + workflow-authoring stack ($(LOCAL_MODE_COMPOSE_PROJECT)) on http://localhost:$${LOCAL_MODE_UI_PORT:-8283}/ws/LOCALMODE/kanban..."
+	@set -e; \
+	$(LOCAL_MODE_COMPOSE_SELECT); \
+	$$compose $(LOCAL_MODE_CODEX_WORKFLOW_COMPOSE_ARGS) up $(LOCAL_MODE_COMPOSE_UP_FLAGS)
+
 local-mode-claude-up: local-mode-frontend-dist
 	@echo "Starting local-mode Claude dogfood stack ($(LOCAL_MODE_COMPOSE_PROJECT)) on http://localhost:$${LOCAL_MODE_UI_PORT:-8283}/ws/LOCALMODE/kanban..."
 	@set -e; \
@@ -277,6 +370,7 @@ local-mode-daytona-up: local-mode-frontend-dist
 	$$compose $(LOCAL_MODE_DAYTONA_COMPOSE_ARGS) up $(LOCAL_MODE_COMPOSE_UP_FLAGS)
 
 local-mode-down:
+	@echo "Removing local-mode project $(LOCAL_MODE_COMPOSE_PROJECT), including its named volumes..."
 	@set -e; \
 	$(LOCAL_MODE_COMPOSE_SELECT); \
 	$$compose $(LOCAL_MODE_COMPOSE_ARGS) down -v --remove-orphans
@@ -287,7 +381,10 @@ local-mode-logs:
 	$$compose $(LOCAL_MODE_COMPOSE_ARGS) logs -f loom-local ui-local
 
 local-mode-verify:
-	@test/local-mode/verify-local-mode.sh
+	@set -e; \
+	$(LOCAL_MODE_COMPOSE_SELECT); \
+	manifest="$$( $$compose $(LOCAL_MODE_COMPOSE_ARGS) exec -T loom-local sh -c 'cat "$${LOCAL_MODE_RUN_MANIFEST:-/tmp/loom-local-mode-run.json}"' )"; \
+	LOCAL_MODE_RUN_MANIFEST_JSON="$$manifest" test/local-mode/verify-local-mode.sh
 
 # Verify role-based task routing for UI-registered plan/task agents against a
 # running stack: seeds a no-design task (must go to the plan agent) and a
@@ -305,9 +402,7 @@ local-mode-webhook-verify:
 	@test/local-mode/verify-webhook.sh
 
 local-mode-codex-verify:
-	@LOOM_LOCAL_MODE_PLAN_TASK_ID="$${LOOM_LOCAL_MODE_PLAN_TASK_ID:-LOCALMODE-2}" \
-	  LOOM_LOCAL_MODE_CODE_TASK_ID="$${LOOM_LOCAL_MODE_CODE_TASK_ID:-LOCALMODE-3}" \
-	  test/local-mode/verify-local-mode.sh
+	@$(MAKE) --no-print-directory LOCAL_MODE_EXPECTED_BACKEND=codex local-mode-verify
 
 test-local-mode-harness: local-mode-verify
 
@@ -701,6 +796,7 @@ help:
 	@echo "                            Use this, not the live stack on :3011, for anything that writes"
 	@echo "  make local-mode-up      - Run local-mode Podman/Docker stack"
 	@echo "  make local-mode-codex-up - Run local-mode stack with Codex agents"
+	@echo "  make local-mode-codex-workflows-up - Run Codex stack with prompt/scripted workflow authoring"
 	@echo "  make local-mode-verify  - Verify deterministic local-mode stack"
 	@echo "  make local-mode-codex-verify - Verify Codex local-mode stack"
 	@echo "  make local-mode-logs    - Tail selected local-mode stack logs"

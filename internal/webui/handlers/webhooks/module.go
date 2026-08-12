@@ -16,6 +16,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/trigger"
+	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 )
 
 // maxWebhookPayloadBytes caps the inbound webhook body. GitHub deliveries are
@@ -103,7 +104,7 @@ func (m *Module) receiveWebhook(w http.ResponseWriter, r *http.Request) {
 func (m *Module) authorizeWebhook(w http.ResponseWriter, r *http.Request, adapter Adapter, ws string, event NormalizedEvent, body []byte) bool {
 	binding, err := m.store.TriggerBindings().GetByRouteKey(r.Context(), ws, event.RouteKey)
 	if err != nil {
-		writeDomainError(w, err, fmt.Sprintf("no trigger binding for route %q", event.RouteKey))
+		handler.WriteDomainError(w, err, fmt.Sprintf("no trigger binding for route %q", event.RouteKey))
 		return false
 	}
 	if !binding.Enabled {
@@ -141,7 +142,7 @@ func (m *Module) dispatchWebhook(w http.ResponseWriter, r *http.Request, ws, nam
 		SubjectAttrs:     event.SubjectAttrs,
 	})
 	if err != nil {
-		writeDomainError(w, err, "dispatch webhook failed")
+		handler.WriteDomainError(w, err, "dispatch webhook failed")
 		return
 	}
 	// Dispatch-time await matching (AW7) runs after the durable fan-out so a
@@ -194,7 +195,7 @@ func (m *Module) listTriggerEvents(w http.ResponseWriter, r *http.Request) {
 		Limit:            limit,
 	})
 	if err != nil {
-		writeDomainError(w, err, "list trigger events failed")
+		handler.WriteDomainError(w, err, "list trigger events failed")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"trigger_events": events, "count": len(events)})
@@ -203,7 +204,7 @@ func (m *Module) listTriggerEvents(w http.ResponseWriter, r *http.Request) {
 func (m *Module) getTriggerEvent(w http.ResponseWriter, r *http.Request) {
 	event, err := m.store.TriggerEvents().Get(r.Context(), r.PathValue("ws"), r.PathValue("eventId"))
 	if err != nil {
-		writeDomainError(w, err, "trigger event not found")
+		handler.WriteDomainError(w, err, "trigger event not found")
 		return
 	}
 	writeJSON(w, http.StatusOK, event)
@@ -222,7 +223,7 @@ func (m *Module) listTriggerDeliveries(w http.ResponseWriter, r *http.Request) {
 		Limit:            limit,
 	})
 	if err != nil {
-		writeDomainError(w, err, "list trigger deliveries failed")
+		handler.WriteDomainError(w, err, "list trigger deliveries failed")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"trigger_deliveries": deliveries, "count": len(deliveries)})
@@ -231,7 +232,7 @@ func (m *Module) listTriggerDeliveries(w http.ResponseWriter, r *http.Request) {
 func (m *Module) getTriggerDelivery(w http.ResponseWriter, r *http.Request) {
 	delivery, err := m.store.TriggerDeliveries().Get(r.Context(), r.PathValue("ws"), r.PathValue("deliveryId"))
 	if err != nil {
-		writeDomainError(w, err, "trigger delivery not found")
+		handler.WriteDomainError(w, err, "trigger delivery not found")
 		return
 	}
 	writeJSON(w, http.StatusOK, delivery)
@@ -271,17 +272,4 @@ func writeAdapterError(w http.ResponseWriter, err error) {
 		return
 	}
 	writeError(w, http.StatusBadRequest, err.Error())
-}
-
-func writeDomainError(w http.ResponseWriter, err error, fallback string) {
-	switch {
-	case errors.Is(err, domain.ErrNotFound):
-		writeError(w, http.StatusNotFound, fallback)
-	case errors.Is(err, domain.ErrInvalid):
-		writeError(w, http.StatusBadRequest, err.Error())
-	case errors.Is(err, domain.ErrConflict), errors.Is(err, domain.ErrAlreadyExists):
-		writeError(w, http.StatusConflict, err.Error())
-	default:
-		writeError(w, http.StatusInternalServerError, fallback)
-	}
 }

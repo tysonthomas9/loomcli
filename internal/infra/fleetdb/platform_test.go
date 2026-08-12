@@ -101,10 +101,10 @@ func TestPlatformClientDriverRunLifecycleRoutesAndErrors(t *testing.T) {
 			}
 			writeJSON(t, w, domain.DriverRun{WorkspaceKey: "WS", RunID: req.RunID, DriverID: req.DriverID, DriverVersionID: req.DriverVersionID, EpicID: req.EpicID, Status: domain.DriverRunQueued})
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/WS/driver-runs":
-			if r.URL.Query().Get("status") != "queued" || r.URL.Query().Get("epic_id") != "WS-1" {
+			if r.URL.Query().Get("status") != "queued" || r.URL.Query().Get("epic_id") != "WS-1" || r.URL.Query().Get("agent_service_id") != "agent-1" {
 				t.Fatalf("driver run list query = %s", r.URL.RawQuery)
 			}
-			writeJSON(t, w, map[string]any{"driver_runs": []domain.DriverRun{{WorkspaceKey: "WS", RunID: "run-1", Status: domain.DriverRunQueued}}})
+			writeJSON(t, w, map[string]any{"driver_runs": []domain.DriverRun{{WorkspaceKey: "WS", RunID: "run-1", AgentServiceID: "agent-1", Status: domain.DriverRunQueued}}})
 		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/WS/driver-runs/run-1/claim":
 			var req struct {
 				NodeID  string `json:"node_id"`
@@ -410,7 +410,7 @@ func TestPlatformClientDriverRunLifecycleRoutesAndErrors(t *testing.T) {
 	if _, err := client.DriverRuns().Create(t.Context(), store.DriverRunCreate{WorkspaceKey: "WS", RunID: "run-1", DriverID: "driver-1", DriverVersionID: "version-1", EpicID: "WS-1", Payload: json.RawMessage(`{"epicId":"WS-1"}`)}); err != nil {
 		t.Fatalf("Create driver run: %v", err)
 	}
-	if runs, err := client.DriverRuns().List(t.Context(), "WS", store.DriverRunFilter{EpicID: "WS-1", Status: domain.DriverRunQueued}); err != nil || len(runs) != 1 {
+	if runs, err := client.DriverRuns().List(t.Context(), "WS", store.DriverRunFilter{EpicID: "WS-1", AgentServiceID: "agent-1", Status: domain.DriverRunQueued}); err != nil || len(runs) != 1 || runs[0].AgentServiceID != "agent-1" {
 		t.Fatalf("List driver runs = %+v err=%v, want one", runs, err)
 	}
 	if _, err := client.DriverRuns().Claim(t.Context(), "WS", "run-1", "node-1", "lease-1"); err != nil {

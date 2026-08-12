@@ -24,7 +24,17 @@ const (
 	BuiltinEpicRunnerWorkflowName        = "epic-runner"
 	BuiltinGitHubReviewAgentWorkflowName = "github-review-agent"
 	BuiltinGitHubReviewTaskRunnerName    = "github-review-task-runner"
+	BuiltinBugFixAgentWorkflowName       = "bug-fix-agent"
+	BuiltinReviewLoopAgentWorkflowName   = "review-loop-agent"
+	BuiltinLocalReviewAgentWorkflowName  = "local-review-agent"
+	BuiltinPromptAgentWorkflowName       = "prompt-agent"
 )
+
+// ErrBuildToolchainUnavailable distinguishes a deployment/profile that cannot
+// materialize a workflow bundle from a malformed workflow or a store failure.
+// Callers such as the unified agent API can map this operator-fixable condition
+// to 503 instead of reporting an opaque internal error.
+var ErrBuildToolchainUnavailable = errors.New("workflow build toolchain unavailable")
 
 //go:embed builtin/epic-runner.ts
 var builtinEpicRunnerWorkflowSource string
@@ -43,6 +53,18 @@ var builtinGitHubReviewAgentWorkflowSource string
 
 //go:embed builtin/github-review-task-runner.ts
 var builtinGitHubReviewTaskRunnerWorkflowSource string
+
+//go:embed builtin/bug-fix-agent.ts
+var builtinBugFixAgentWorkflowSource string
+
+//go:embed builtin/review-loop-agent.ts
+var builtinReviewLoopAgentWorkflowSource string
+
+//go:embed builtin/local-review-agent.ts
+var builtinLocalReviewAgentWorkflowSource string
+
+//go:embed builtin/prompt-agent.ts
+var builtinPromptAgentWorkflowSource string
 
 type Spec struct {
 	Entrypoint string
@@ -79,6 +101,10 @@ var builtinMu sync.Mutex
 var builtinWorkflows = map[string]Spec{
 	BuiltinEpicRunnerWorkflowName:        builtinEpicRunnerSpec(),
 	BuiltinGitHubReviewAgentWorkflowName: builtinGitHubReviewAgentSpec(),
+	BuiltinBugFixAgentWorkflowName:       builtinBugFixAgentSpec(),
+	BuiltinReviewLoopAgentWorkflowName:   builtinReviewLoopAgentSpec(),
+	BuiltinLocalReviewAgentWorkflowName:  builtinLocalReviewAgentSpec(),
+	BuiltinPromptAgentWorkflowName:       builtinPromptAgentSpec(),
 }
 
 // builtinSpec builds the single-entrypoint Spec for an embedded source-tree
@@ -106,6 +132,48 @@ func builtinGitHubReviewAgentSpec() Spec {
 	return spec
 }
 
+// builtinBugFixAgentSpec bundles the bug-fix workflow with the local + daytona
+// task runners it dispatches codex through (P1, golden scenario S1).
+func builtinBugFixAgentSpec() Spec {
+	spec := builtinSpec(BuiltinBugFixAgentWorkflowName, builtinBugFixAgentWorkflowSource)
+	spec.Files["workflows/local-task-runner.ts"] = builtinLocalTaskRunnerWorkflowSource
+	spec.Files["workflows/daytona-task-runner.ts"] = builtinDaytonaTaskRunnerWorkflowSource
+	return spec
+}
+
+// builtinReviewLoopAgentSpec is the code-review loop (P2, golden scenario S2). It
+// performs the review INLINE (no child workflow) — a child run inherits no trigger
+// binding, so its connector actions would be unauthorizable — dispatching a
+// github-review-task-runner task-run for the codex review. It bundles that runner
+// as a sibling (mirroring how bug-fix bundles local-task-runner) so the driver
+// version manifest declares it and resolveDriverRunner can find it.
+func builtinReviewLoopAgentSpec() Spec {
+	spec := builtinSpec(BuiltinReviewLoopAgentWorkflowName, builtinReviewLoopAgentWorkflowSource)
+	spec.Files["workflows/"+BuiltinGitHubReviewTaskRunnerName+".ts"] = builtinGitHubReviewTaskRunnerWorkflowSource
+	return spec
+}
+
+// builtinLocalReviewAgentSpec is the local-branch review loop. It has no
+// GitHub connector dependency, but it still uses the trusted review task-runner
+// as a diff-as-data code-review brain, so it declares the runner as a sibling.
+func builtinLocalReviewAgentSpec() Spec {
+	spec := builtinSpec(BuiltinLocalReviewAgentWorkflowName, builtinLocalReviewAgentWorkflowSource)
+	spec.Files["workflows/"+BuiltinGitHubReviewTaskRunnerName+".ts"] = builtinGitHubReviewTaskRunnerWorkflowSource
+	return spec
+}
+
+// builtinPromptAgentSpec bundles the prompt-agent workflow with the local
+// task runner it dispatches the backend CLI through (Phase 4 prompt-agent
+// spike). Bundling local-task-runner as a sibling (mirroring bug-fix-agent) is
+// what lets DeriveRunners declare it in the version manifest so
+// resolveDriverRunner can find it when the workflow calls
+// taskRuns.request({ runner: "local-task-runner" }).
+func builtinPromptAgentSpec() Spec {
+	spec := builtinSpec(BuiltinPromptAgentWorkflowName, builtinPromptAgentWorkflowSource)
+	spec.Files["workflows/local-task-runner.ts"] = builtinLocalTaskRunnerWorkflowSource
+	return spec
+}
+
 // BuiltinWorkflowNames returns the registered built-in workflow names sorted,
 // so callers (EnsureBuiltinWorkflow loops, registration round-trip tests) get
 // a stable list independent of map iteration order.
@@ -129,6 +197,13 @@ func BuiltinWorkflow(name string) (Spec, bool) {
 	}
 	spec.Files = files
 	return spec, true
+}
+
+// IsBuiltinWorkflow reports whether name is a registered built-in workflow. It
+// is a direct map lookup, unlike scanning the sorted BuiltinWorkflowNames slice.
+func IsBuiltinWorkflow(name string) bool {
+	_, ok := BuiltinWorkflow(name)
+	return ok
 }
 
 func EnsureBuiltinWorkflow(ctx context.Context, st store.Store, ws, name string) error {
@@ -311,7 +386,7 @@ func BuildBuiltinBundle(ctx context.Context, name, destDir string) (string, stri
 	output = RedactBuildDiagnostics(output)
 	if err != nil {
 		if output != "" {
-			return "", output, fmt.Errorf("flue build failed: %s", output)
+			return "", output, redactedFlueBuildError(err, output)
 		}
 		return "", "", err
 	}
@@ -369,7 +444,7 @@ func BuildAndRegister(ctx context.Context, st store.Store, opts BuildAndRegister
 	if err != nil {
 		redacted := RedactBuildDiagnostics(output)
 		if redacted != "" {
-			return nil, redacted, fmt.Errorf("flue build failed: %s", redacted)
+			return nil, redacted, redactedFlueBuildError(err, redacted)
 		}
 		return nil, "", err
 	}
@@ -514,25 +589,51 @@ func manifestMissingFreshRunners(manifest map[string]string, fresh map[string]st
 	return missing
 }
 
-func ResolveDriverID(ctx context.Context, st store.Store, ws, name string) (string, error) {
+// EnsureAndResolveDriver self-heals a builtin workflow (registering or
+// refreshing its driver on demand) and then resolves the workflow name to its
+// driver record. It is the shared resolve path for every HTTP surface that
+// accepts a workflow name (workflow runs, trigger bindings); non-builtin names
+// skip the heal and resolve directly.
+func EnsureAndResolveDriver(ctx context.Context, st store.Store, ws, name string) (*domain.Driver, error) {
+	if IsBuiltinWorkflow(name) {
+		if err := EnsureBuiltinWorkflow(ctx, st, ws, name); err != nil {
+			return nil, err
+		}
+	}
+	return ResolveDriver(ctx, st, ws, name)
+}
+
+// ResolveDriver resolves a workflow name (or driver id) to its full driver
+// record. It does not self-heal builtins — use EnsureAndResolveDriver for
+// that. Callers that need more than the id (e.g. ActiveVersionID) should use
+// this instead of ResolveDriverID followed by a second Drivers().Get.
+func ResolveDriver(ctx context.Context, st store.Store, ws, name string) (*domain.Driver, error) {
 	if name == "" {
-		return "", fmt.Errorf("workflow name is required: %w", domain.ErrInvalid)
+		return nil, fmt.Errorf("workflow name is required: %w", domain.ErrInvalid)
 	}
 	driverRecord, err := st.Drivers().Get(ctx, ws, name)
 	if err == nil {
-		return driverRecord.DriverID, nil
+		return driverRecord, nil
 	}
 	if !errors.Is(err, domain.ErrNotFound) {
-		return "", err
+		return nil, err
 	}
 	drivers, err := st.Drivers().List(ctx, ws, store.DriverFilter{Name: name, Limit: 1})
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	if len(drivers) == 0 {
-		return "", domain.ErrNotFound
+		return nil, domain.ErrNotFound
 	}
-	return drivers[0].DriverID, nil
+	return drivers[0], nil
+}
+
+func ResolveDriverID(ctx context.Context, st store.Store, ws, name string) (string, error) {
+	driver, err := ResolveDriver(ctx, st, ws, name)
+	if err != nil {
+		return "", err
+	}
+	return driver.DriverID, nil
 }
 
 func ValidateWorkflowEntrypoint(name, entrypoint string) error {
@@ -658,7 +759,7 @@ func linkFlueBuildDependencies(root string) error {
 	}
 	for rel, target := range links {
 		if _, err := os.Stat(target); err != nil {
-			return fmt.Errorf("resolve Flue build dependency %s: %w", target, err)
+			return fmt.Errorf("%w: resolve Flue build dependency %s: %v", ErrBuildToolchainUnavailable, target, err)
 		}
 		link := filepath.Join(root, rel)
 		if err := os.MkdirAll(filepath.Dir(link), 0o755); err != nil {
@@ -673,7 +774,10 @@ func linkFlueBuildDependencies(root string) error {
 
 func loomSDKRoot() (string, error) {
 	if root := strings.TrimSpace(os.Getenv("LOOM_SDK_ROOT")); root != "" {
-		return root, nil
+		if _, err := os.Stat(filepath.Join(root, "package.json")); err == nil {
+			return root, nil
+		}
+		return "", fmt.Errorf("%w: local @loom/sdk package not found at LOOM_SDK_ROOT=%s", ErrBuildToolchainUnavailable, root)
 	}
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -683,7 +787,7 @@ func loomSDKRoot() (string, error) {
 	if _, err := os.Stat(filepath.Join(candidate, "package.json")); err == nil {
 		return candidate, nil
 	}
-	return "", fmt.Errorf("local @loom/sdk package not found; set LOOM_SDK_ROOT")
+	return "", fmt.Errorf("%w: local @loom/sdk package not found; set LOOM_SDK_ROOT", ErrBuildToolchainUnavailable)
 }
 
 func flueRuntimeRoot() (string, error) {
@@ -706,7 +810,7 @@ func flueRuntimeRoot() (string, error) {
 			return candidate, nil
 		}
 	}
-	return "", fmt.Errorf("local @flue/runtime package not found; set LOOM_FLUE_RUNTIME_ROOT, FLUE_RUNTIME_ROOT, or FLUE_REPO")
+	return "", fmt.Errorf("%w: local @flue/runtime package not found; set LOOM_FLUE_RUNTIME_ROOT, FLUE_RUNTIME_ROOT, or FLUE_REPO", ErrBuildToolchainUnavailable)
 }
 
 func daytonaSDKRoot() (string, error) {
@@ -743,12 +847,50 @@ func runFlueBuild(ctx context.Context, root, outputDir string) (string, error) {
 		if output == "" {
 			output = err.Error()
 		}
-		return output, fmt.Errorf("flue build failed: %s", output)
+		return output, classifyFlueBuildError(err, output)
 	}
 	if _, err := os.Stat(filepath.Join(outputDir, "server.mjs")); err != nil {
 		return output, fmt.Errorf("flue build missing dist/server.mjs: %w", err)
 	}
 	return output, nil
+}
+
+// classifyFlueBuildError keeps malformed workflow source failures distinct
+// from deployment profiles whose Flue installation cannot start its bundler.
+// Rolldown ships its native executable as a platform-specific optional
+// dependency, so a host-installed node_modules mounted into another platform
+// can have a working Flue CLI while still being unable to build anything.
+func classifyFlueBuildError(cause error, output string) error {
+	if errors.Is(cause, exec.ErrNotFound) || errors.Is(cause, os.ErrNotExist) || isMissingRolldownNativeBinding(output) {
+		return fmt.Errorf("%w: flue build failed: %s", ErrBuildToolchainUnavailable, output)
+	}
+	return fmt.Errorf("flue build failed: %s", output)
+}
+
+// redactedFlueBuildError preserves the typed operator-facing classification
+// after replacing raw build output with diagnostics safe for API callers and
+// persisted build records.
+func redactedFlueBuildError(err error, redacted string) error {
+	if errors.Is(err, ErrBuildToolchainUnavailable) {
+		return fmt.Errorf("%w: flue build failed: %s", ErrBuildToolchainUnavailable, redacted)
+	}
+	return fmt.Errorf("flue build failed: %s", redacted)
+}
+
+func isMissingRolldownNativeBinding(output string) bool {
+	normalized := strings.ToLower(output)
+	if !strings.Contains(normalized, "rolldown") {
+		return false
+	}
+	bindingReference := strings.Contains(normalized, "@rolldown/binding-") ||
+		strings.Contains(normalized, "rolldown-binding.") ||
+		strings.Contains(normalized, "native binding")
+	missingOrUnloadable := strings.Contains(normalized, "cannot find module") ||
+		strings.Contains(normalized, "module not found") ||
+		strings.Contains(normalized, "failed to load native binding") ||
+		strings.Contains(normalized, "could not load native binding") ||
+		strings.Contains(normalized, "native binding not found")
+	return bindingReference && missingOrUnloadable
 }
 
 func flueCommand() ([]string, error) {
@@ -767,7 +909,7 @@ func flueCommand() ([]string, error) {
 	}
 	path, err := exec.LookPath("flue")
 	if err != nil {
-		return nil, fmt.Errorf("flue not found on PATH; set LOOM_REAL_FLUE_CMD_JSON or LOOM_REAL_FLUE_CMD")
+		return nil, fmt.Errorf("%w: flue not found on PATH; set LOOM_REAL_FLUE_CMD_JSON or LOOM_REAL_FLUE_CMD", ErrBuildToolchainUnavailable)
 	}
 	return []string{path}, nil
 }

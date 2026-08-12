@@ -42,6 +42,11 @@ func checkUnsupportedCore(out *[]string, opts backend.ListOpts) {
 	if len(opts.IDs) > 0 {
 		*out = append(*out, "IDs")
 	}
+	// ExternalRef is not yet applied server-side (the reverse PR->card list
+	// filter is deferred); fail loud rather than silently returning all issues.
+	if opts.ExternalRef != "" {
+		*out = append(*out, "ExternalRef")
+	}
 	if opts.PriorityMin != nil {
 		*out = append(*out, "PriorityMin")
 	}

@@ -190,15 +190,16 @@ type CursorMutationBackend interface {
 // server; FleetBackend.List returns ErrFilterNotSupported if they are set.
 type ListOpts struct {
 	// Basic filters.
-	Status    string   `json:"status,omitempty"`
-	Priority  *int     `json:"priority,omitempty"` // fleet-db: unsupported (fleet-qx9c)
-	IssueType string   `json:"issue_type,omitempty"`
-	Assignee  string   `json:"assignee,omitempty"`
-	Labels    []string `json:"labels,omitempty"`
-	LabelsAny []string `json:"labels_any,omitempty"` // fleet-db: unsupported (fleet-qx9c)
-	IDs       []string `json:"ids,omitempty"`        // fleet-db: unsupported (fleet-qx9c)
-	ParentID  string   `json:"parent_id,omitempty"`
-	Limit     int      `json:"limit,omitempty"`
+	Status      string   `json:"status,omitempty"`
+	Priority    *int     `json:"priority,omitempty"` // fleet-db: unsupported (fleet-qx9c)
+	IssueType   string   `json:"issue_type,omitempty"`
+	ExternalRef string   `json:"external_ref,omitempty"` // reverse PR->card lookup; fleet-db query wired in P0-3
+	Assignee    string   `json:"assignee,omitempty"`
+	Labels      []string `json:"labels,omitempty"`
+	LabelsAny   []string `json:"labels_any,omitempty"` // fleet-db: unsupported (fleet-qx9c)
+	IDs         []string `json:"ids,omitempty"`        // fleet-db: unsupported (fleet-qx9c)
+	ParentID    string   `json:"parent_id,omitempty"`
+	Limit       int      `json:"limit,omitempty"`
 
 	// Full-text search.
 	Query               string `json:"query,omitempty"`                // fleet-db: unsupported (fleet-qx9c)

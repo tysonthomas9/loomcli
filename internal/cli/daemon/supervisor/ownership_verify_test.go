@@ -14,6 +14,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/backend"
+	"github.com/tysonthomas9/loomcli/internal/cli"
+	"github.com/tysonthomas9/loomcli/internal/cli/clitest"
 	cfgpkg "github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/events"
@@ -104,6 +107,370 @@ type ownershipStoreOverride struct {
 
 func (s *ownershipStoreOverride) AgentOwnershipLeases() store.AgentOwnershipLeaseStore {
 	return s.ownership
+}
+
+// transferableOwnershipLeaseStore models a lease moving to another daemon
+// while this daemon is queued on its local concurrency limit.
+type transferableOwnershipLeaseStore struct {
+	store.AgentOwnershipLeaseStore
+
+	mu               sync.Mutex
+	ownerID          string
+	token            string
+	fencingToken     int64
+	acquireCalls     int
+	acquireAttempted chan struct{}
+}
+
+func newTransferableOwnershipLeaseStore() *transferableOwnershipLeaseStore {
+	return &transferableOwnershipLeaseStore{acquireAttempted: make(chan struct{}, 8)}
+}
+
+func (f *transferableOwnershipLeaseStore) Acquire(_ context.Context, in store.AgentOwnershipLeaseAcquire) (*domain.AgentOwnershipLease, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.acquireCalls++
+	select {
+	case f.acquireAttempted <- struct{}{}:
+	default:
+	}
+	if f.ownerID != "" && f.ownerID != in.OwnerID {
+		return nil, fmt.Errorf("ownership held by %s: %w", f.ownerID, domain.ErrAlreadyClaimed)
+	}
+	if f.token == "" {
+		f.token = "queued-owner-token"
+	}
+	f.ownerID = in.OwnerID
+	f.fencingToken++
+	return f.leaseLocked(in.WorkspaceKey, in.AgentID, in.NodeID, in.TTL), nil
+}
+
+func (f *transferableOwnershipLeaseStore) Heartbeat(_ context.Context, workspaceKey, agentID, token string, ttl time.Duration) (*domain.AgentOwnershipLease, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if token == "" || token != f.token {
+		return nil, fmt.Errorf("ownership token is no longer current: %w", domain.ErrGone)
+	}
+	return f.leaseLocked(workspaceKey, agentID, "", ttl), nil
+}
+
+func (f *transferableOwnershipLeaseStore) Release(_ context.Context, workspaceKey, agentID, token string) (*domain.AgentOwnershipLease, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if token == "" || token != f.token {
+		return nil, fmt.Errorf("ownership token is no longer current: %w", domain.ErrConflict)
+	}
+	lease := f.leaseLocked(workspaceKey, agentID, "", 0)
+	lease.Status = domain.AgentLeaseReleased
+	f.ownerID = ""
+	f.token = ""
+	return lease, nil
+}
+
+func (f *transferableOwnershipLeaseStore) leaseLocked(workspaceKey, agentID, nodeID string, ttl time.Duration) *domain.AgentOwnershipLease {
+	now := time.Now().UTC()
+	return &domain.AgentOwnershipLease{
+		WorkspaceKey:  workspaceKey,
+		AgentID:       agentID,
+		LeaseID:       "queued-owner-lease",
+		OwnerID:       f.ownerID,
+		NodeID:        nodeID,
+		Token:         f.token,
+		FencingToken:  f.fencingToken,
+		Status:        domain.AgentLeaseActive,
+		LastHeartbeat: now,
+		ExpiresAt:     now.Add(ttl),
+		CreatedAt:     now,
+		UpdatedAt:     now,
+	}
+}
+
+func (f *transferableOwnershipLeaseStore) transferToOtherDaemon() {
+	f.mu.Lock()
+	f.ownerID = "other-daemon"
+	f.token = "other-daemon-token"
+	f.fencingToken++
+	f.mu.Unlock()
+}
+
+func (f *transferableOwnershipLeaseStore) snapshot() (int, string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.acquireCalls, f.ownerID
+}
+
+type transferOnClaimIssueBackend struct {
+	*clitest.MockIssueBackend
+	ownership *transferableOwnershipLeaseStore
+
+	mu       sync.Mutex
+	releases int
+}
+
+func (b *transferOnClaimIssueBackend) ClaimIssueAsActor(ctx context.Context, id string, ttl time.Duration, _ string) error {
+	if err := b.ClaimIssue(ctx, id, ttl); err != nil {
+		return err
+	}
+	b.ownership.transferToOtherDaemon()
+	return nil
+}
+
+func (b *transferOnClaimIssueBackend) ReleaseIssueAsActor(ctx context.Context, id, actor string) error {
+	b.mu.Lock()
+	b.releases++
+	b.mu.Unlock()
+	return b.ReleaseIssueLock(ctx, id, actor)
+}
+
+func (b *transferOnClaimIssueBackend) releaseCount() int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.releases
+}
+
+// condWaitNotifier closes waiting when sync.Cond.Wait has released the
+// tracker mutex. That gives the lifecycle test a deterministic proof that the
+// agent is queued, without sleeps or production-only test hooks.
+type condWaitNotifier struct {
+	sync.Locker
+	once    sync.Once
+	waiting chan struct{}
+}
+
+func (l *condWaitNotifier) Unlock() {
+	l.once.Do(func() { close(l.waiting) })
+	l.Locker.Unlock()
+}
+
+func TestSuperviseAgent_AcquiresOwnershipAfterConcurrencyWait(t *testing.T) {
+	runtimeDir := t.TempDir()
+	t.Setenv("LOOM_WORKSPACE_RUNTIME_DIR", runtimeDir)
+	cli.ResetWorkspaceRuntimeDirCache()
+	t.Cleanup(cli.ResetWorkspaceRuntimeDirCache)
+
+	maxConcurrency := 1
+	role := "plan"
+	tracker := NewConcurrencyTracker(map[string]cfgpkg.RoleConfig{
+		role: {MaxConcurrency: &maxConcurrency},
+	})
+	if !tracker.Acquire(role) {
+		t.Fatal("pre-acquire concurrency slot")
+	}
+	waiting := make(chan struct{})
+	tracker.cond = sync.NewCond(&condWaitNotifier{Locker: &tracker.mu, waiting: waiting})
+
+	fake := newTransferableOwnershipLeaseStore()
+	base := memstore.New()
+	spawned := make(chan struct{}, 1)
+	s := &Supervisor{
+		ConfigSnapshot: func() *cfgpkg.DaemonConfig {
+			return &cfgpkg.DaemonConfig{
+				Daemon: cfgpkg.DaemonSettings{RestartPolicy: cfgpkg.RestartPolicy{
+					MaxRetries: cfgpkg.IntPtr(0),
+				}},
+			}
+		},
+		ProjectDir:    t.TempDir(),
+		WorkspaceID:   "WS",
+		NodeID:        "queued-daemon",
+		NodeTTL:       time.Hour,
+		ControlStore:  &ownershipStoreOverride{Store: base, ownership: fake},
+		Shutdown:      make(chan struct{}),
+		Concurrency:   tracker,
+		StoppedAgents: make(map[string]struct{}),
+		Agents:        make([]*AgentProcess, 0),
+		EmitEvent: func(event events.Event) {
+			if event.Type == events.AgentStarted {
+				select {
+				case spawned <- struct{}{}:
+				default:
+				}
+			}
+		},
+	}
+	ap := &AgentProcess{
+		Entry:        cfgpkg.AgentEntry{Worktree: "queued-agent", Role: role},
+		WorktreePath: t.TempDir(),
+		StopCh:       make(chan struct{}),
+	}
+	done := make(chan struct{})
+	go func() {
+		s.superviseAgent(ap)
+		close(done)
+	}()
+
+	var stopOnce sync.Once
+	stop := func() {
+		stopOnce.Do(func() { close(ap.StopCh) })
+		tracker.Close()
+	}
+	defer func() {
+		stop()
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			t.Errorf("superviseAgent did not stop during test cleanup")
+		}
+	}()
+
+	select {
+	case <-waiting:
+	case <-time.After(5 * time.Second):
+		t.Fatal("agent did not block on the occupied concurrency slot")
+	}
+	acquiresWhileQueued, _ := fake.snapshot()
+
+	// Model expiry plus acquisition by a second daemon while this agent is
+	// queued. Once the local slot opens, this daemon must arbitrate ownership
+	// against that current owner before it can run preflight or spawn.
+	fake.transferToOtherDaemon()
+	tracker.Release(role)
+	select {
+	case <-fake.acquireAttempted:
+	case <-time.After(5 * time.Second):
+		t.Fatal("agent did not arbitrate ownership after the concurrency slot opened")
+	}
+	stopOnce.Do(func() { close(ap.StopCh) })
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("agent did not stop after ownership was held by another daemon")
+	}
+
+	if acquiresWhileQueued != 0 {
+		t.Errorf("ownership acquire calls while queued = %d, want 0", acquiresWhileQueued)
+	}
+	select {
+	case <-spawned:
+		t.Error("agent spawned after ownership transferred to another daemon")
+	default:
+	}
+	ap.Mu.Lock()
+	cmd, pid := ap.Cmd, ap.Pid
+	ap.Mu.Unlock()
+	if cmd != nil || pid != 0 {
+		t.Errorf("agent process after ownership transfer = cmd %v pid %d, want no process", cmd, pid)
+	}
+	if got := tracker.ActiveCount(role); got != 0 {
+		t.Errorf("active concurrency count = %d, want 0", got)
+	}
+	_, ownerID := fake.snapshot()
+	if ownerID != "other-daemon" {
+		t.Errorf("ownership after rejected spawn = %q, want other-daemon", ownerID)
+	}
+}
+
+func TestSuperviseAgent_RechecksOwnershipAfterPreflightBeforeSpawn(t *testing.T) {
+	runtimeDir := t.TempDir()
+	t.Setenv("LOOM_WORKSPACE_RUNTIME_DIR", runtimeDir)
+	cli.ResetWorkspaceRuntimeDirCache()
+	t.Cleanup(cli.ResetWorkspaceRuntimeDirCache)
+
+	fake := newTransferableOwnershipLeaseStore()
+	issues := &transferOnClaimIssueBackend{
+		MockIssueBackend: clitest.NewMockIssueBackend(),
+		ownership:        fake,
+	}
+	issues.ReadyResult = []backend.IssueData{
+		{ID: "task-1", IssueType: "task", Status: "open", Title: "Ready", Design: "approved"},
+	}
+	tracker := NewConcurrencyTracker(nil)
+	spawned := make(chan struct{}, 1)
+	s := &Supervisor{
+		ConfigSnapshot: func() *cfgpkg.DaemonConfig {
+			return &cfgpkg.DaemonConfig{
+				Daemon: cfgpkg.DaemonSettings{RestartPolicy: cfgpkg.RestartPolicy{
+					MaxRetries: cfgpkg.IntPtr(0),
+				}},
+			}
+		},
+		ProjectDir:    t.TempDir(),
+		WorkspaceID:   "WS",
+		NodeID:        "preflight-daemon",
+		NodeTTL:       time.Hour,
+		ControlStore:  &ownershipStoreOverride{Store: memstore.New(), ownership: fake},
+		IssueBackend:  issues,
+		Shutdown:      make(chan struct{}),
+		Concurrency:   tracker,
+		StoppedAgents: make(map[string]struct{}),
+		Agents:        make([]*AgentProcess, 0),
+		EmitEvent: func(event events.Event) {
+			if event.Type == events.AgentStarted {
+				select {
+				case spawned <- struct{}{}:
+				default:
+				}
+			}
+		},
+	}
+	ap := &AgentProcess{
+		Entry:        cfgpkg.AgentEntry{Worktree: "preflight-agent", Role: "task"},
+		RoleConfig:   cfgpkg.RoleConfig{TaskFilter: "has_design"},
+		WorktreePath: t.TempDir(),
+		StopCh:       make(chan struct{}),
+	}
+	done := make(chan struct{})
+	go func() {
+		s.superviseAgent(ap)
+		close(done)
+	}()
+
+	var stopOnce sync.Once
+	stop := func() {
+		stopOnce.Do(func() { close(ap.StopCh) })
+		tracker.Close()
+	}
+	defer func() {
+		stop()
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			t.Errorf("superviseAgent did not stop during test cleanup")
+		}
+	}()
+
+	// The first acquire precedes preflight. ClaimIssueAsActor then transfers
+	// the lease, so a second acquire is the mandatory pre-spawn arbitration.
+	for attempt := 1; attempt <= 2; attempt++ {
+		select {
+		case <-fake.acquireAttempted:
+		case <-time.After(5 * time.Second):
+			t.Fatalf("ownership acquire attempt %d did not occur", attempt)
+		}
+	}
+	stopOnce.Do(func() { close(ap.StopCh) })
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("agent did not stop after the pre-spawn ownership check failed")
+	}
+
+	if calls, ownerID := fake.snapshot(); calls != 2 || ownerID != "other-daemon" {
+		t.Errorf("ownership after pre-spawn arbitration = calls %d owner %q, want 2 and other-daemon", calls, ownerID)
+	}
+	if got := issues.releaseCount(); got != 1 {
+		t.Errorf("task claim releases = %d, want 1", got)
+	}
+	select {
+	case <-spawned:
+		t.Error("agent spawned without ownership after preflight")
+	default:
+	}
+	ap.Mu.Lock()
+	cmd, pid := ap.Cmd, ap.Pid
+	sessionID, leaseID, leaseToken := ap.AgentSessionID, ap.AgentLeaseID, ap.AgentLeaseToken
+	ap.Mu.Unlock()
+	if cmd != nil || pid != 0 {
+		t.Errorf("agent process after failed pre-spawn ownership check = cmd %v pid %d, want no process", cmd, pid)
+	}
+	if sessionID != "" || leaseID != "" || leaseToken != "" {
+		t.Errorf("pre-spawn session state not cleared: session=%q lease=%q token=%q", sessionID, leaseID, leaseToken)
+	}
+	if got := tracker.ActiveCount("task"); got != 0 {
+		t.Errorf("active concurrency count = %d, want 0", got)
+	}
 }
 
 func newOwnershipVerifyTestSupervisor(fake *scriptedOwnershipLeaseStore) *Supervisor {

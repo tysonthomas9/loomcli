@@ -3,9 +3,21 @@ package domain
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 )
+
+// BuiltinRoleNames are the roles auto-seeded on workspace creation
+// (workspacemgr.seedBuiltInRoles) and assumed to exist by supervisors and the
+// web UI. Every guard against mutating/deleting a builtin role must consult
+// this list so it cannot drift from what is actually seeded.
+var BuiltinRoleNames = []string{"plan", "task", "lead"}
+
+// IsBuiltinRole reports whether name is one of the auto-seeded builtin roles.
+func IsBuiltinRole(name string) bool {
+	return slices.Contains(BuiltinRoleNames, name)
+}
 
 type RoleKind string
 
@@ -165,7 +177,7 @@ func ValidateRoleInputPolicy(p *RoleInputPolicy) error {
 // Role is the configuration shared by all Agents that take this role —
 // prompt template, AI backend, tool allowlist, concurrency cap, etc.
 // Workspace-scoped: every Workspace gets its own Role definitions
-// (built-in "plan" and "task" are auto-seeded on workspace creation).
+// (the BuiltinRoleNames set is auto-seeded on workspace creation).
 type Role struct {
 	WorkspaceKey string   `json:"workspace_key"`
 	Name         string   `json:"name"`

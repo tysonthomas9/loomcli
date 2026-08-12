@@ -56,7 +56,27 @@ export type DriverApiErrorCode =
   | "await_instance_key_malformed"
   | "await_actor_forbidden"
   | "driver_run_already_resumed"
-  | "composition_depth_exceeded";
+  | "composition_depth_exceeded"
+  // Local review diff source.
+  | "task_diff_task_id_required"
+  | "task_diff_external_ref_missing"
+  | "task_diff_external_ref_unsupported"
+  | "task_diff_external_ref_invalid"
+  | "task_diff_sha_invalid"
+  | "task_diff_repo_missing"
+  | "task_diff_repo_ambiguous"
+  | "task_diff_origin_missing"
+  | "task_diff_origin_invalid"
+  | "task_diff_origin_not_filesystem"
+  | "task_diff_origin_not_git"
+  | "task_diff_branch_invalid"
+  | "task_diff_branch_missing"
+  | "task_diff_sha_mismatch"
+  | "task_diff_default_branch_missing"
+  | "task_diff_base_missing"
+  | "task_diff_too_large"
+  | "task_diff_git_failed"
+  | "task_diff_git_timeout";
 
 export interface LoomDriverResult {
   status: LoomDriverResultStatus;
@@ -78,6 +98,55 @@ export interface LoomTaskSelector {
   logsRef?: string;
   artifactsRef?: string;
   artifactIds?: string[];
+}
+
+export interface LoomTaskClaimInput {
+  /** The specific task (issue/card) id to claim. Required. */
+  taskId: string;
+  /**
+   * Non-authoritative label. IGNORED server-side: the task lock is always keyed
+   * by the run's derived actor (run-token provenance), never caller input, so a
+   * run cannot claim under another run's actor. Retained for wire-compat only.
+   */
+  actor?: string;
+  /** Optional ready-view narrowing hint; NOT defaulted from the run's epic. */
+  epicId?: string;
+  /** Ready-view scan bound (defaults to a router-scale depth for claim-by-id). */
+  limit?: number;
+}
+
+export interface LoomTaskClaimReadyInput extends LoomEpicInput {
+  /**
+   * Ready-queue type filter (e.g. "bug"): narrows the claimable view to one
+   * issue type server-side. Empty/omitted means no type filter.
+   */
+  type?: string;
+  /** Skip ready tasks carrying ANY of these labels. Use it to keep tasks that
+   *  are mid-flight in a label-routed pipeline out of an epic drain. */
+  excludeLabels?: readonly string[];
+  /**
+   * Non-authoritative label. IGNORED server-side: the task lock is always keyed
+   * by the run's derived actor, never caller input. Retained for wire-compat.
+   */
+  actor?: string;
+  /** Ready-view scan bound (defaults to the server's claim-ready limit). */
+  limit?: number;
+}
+
+export interface LoomTaskDiffResult {
+  taskId: string;
+  externalRef: string;
+  repoName: string;
+  sourceRepo?: string;
+  branch: string;
+  headSha: string;
+  resolvedHead: string;
+  baseRef: string;
+  baseSha: string;
+  diff: string;
+  sizeBytes: number;
+  limitBytes: number;
+  egressMechanism: "filesystem-origin" | string;
 }
 
 export interface LoomTaskRunRequest {
@@ -109,15 +178,17 @@ export interface LoomTaskRunRequest {
    * Passed verbatim (not compacted).
    */
   input?: unknown;
+  /**
+   * Optional override of whether the serve task worker closes the underlying
+   * task issue on success. Omitted => worker default (true, close on success);
+   * pass false to leave the card open (e.g. a planner run that hands off a
+   * design to review instead of closing the task).
+   */
+  closeTask?: boolean;
 }
 
-export interface LoomClaimReadyInput extends LoomEpicInput {
-  /** Skip ready tasks carrying ANY of these labels. Use it to keep tasks that
-   *  are mid-flight in a label-routed pipeline out of an epic drain. */
-  readonly excludeLabels?: readonly string[];
-  readonly actor?: string;
-  readonly limit?: number;
-}
+/** @deprecated Renamed to LoomTaskClaimReadyInput; kept for wire-compat. */
+export type LoomClaimReadyInput = LoomTaskClaimReadyInput;
 
 export interface LoomEpicInput {
   epicId?: string;
@@ -418,7 +489,11 @@ export declare class LoomDriverClient {
     message(input?: LoomAgentMessageInput): Promise<Record<string, unknown> | null>;
   };
   readonly tasks: {
-    claimReady(input?: LoomClaimReadyInput): Promise<Record<string, unknown> | null>;
+    claimReady(input?: LoomTaskClaimReadyInput): Promise<Record<string, unknown> | null>;
+    /** Claim one SPECIFIC ready task by id; rejects DriverApiError code "conflict" when not ready or already claimed. */
+    claim(input: LoomTaskClaimInput | string): Promise<Record<string, unknown> | null>;
+    /** Bounded diff for a review card stamped external_ref="local-branch:<branch>@<sha>". */
+    diff(input: LoomTaskSelector | string): Promise<LoomTaskDiffResult | null>;
     complete(input?: LoomTaskSelector | string): Promise<Record<string, unknown> | null>;
     release(input?: LoomTaskSelector | string): Promise<Record<string, unknown> | null>;
   };
@@ -446,6 +521,26 @@ export declare class LoomDriverClient {
     /** Throws WorkflowSuspended when the run suspends; shares the awaitIndex counter with events.await. */
     await(input: LoomWorkflowAwaitInput): Promise<LoomWorkflowAwaitResult>;
   };
+  // <gen:namespaces> — generated by sdk/gen.mjs from sdk/op-spec.mjs (do not edit by hand)
+  /** Fleet-db card read/write for workflows (thin IssueBackend pass-throughs). */
+  readonly issues: {
+    get(input: { issueId: string }): Promise<Record<string, unknown> | null>;
+    list(input?: { externalRef?: string; type?: string; status?: string; limit?: number }): Promise<Record<string, unknown>[] | null>;
+    listComments(input: { issueId: string }): Promise<Record<string, unknown>[] | null>;
+    comment(input: { issueId: string; body: string }): Promise<Record<string, unknown> | null>;
+    update(input: { issueId: string; status?: string; priority?: number; labels?: string[]; assignee?: string; externalRef?: string }): Promise<Record<string, unknown> | null>;
+    addLabel(input: { issueId: string; label: string }): Promise<Record<string, unknown> | null>;
+    removeLabel(input: { issueId: string; label: string }): Promise<Record<string, unknown> | null>;
+  };
+  /** Read-only Role (behavior-config) records + prompt body for prompt agents. */
+  readonly roles: {
+    get(input: { name: string }): Promise<{ role: Record<string, unknown> | null; prompt: string } | null>;
+  };
+  /** Config-by-reference: the CALLING run's trigger-binding config (run-input fields like roleName, plus bindingId/sourceKind/schedule), resolved server-side from run provenance. Takes no input — a body binding id is ignored. */
+  readonly binding: {
+    config(input?: Record<string, unknown>): Promise<Record<string, unknown> | null>;
+  };
+  // </gen:namespaces>
 
   completed(input?: { summary?: string }): LoomDriverResult;
   failed(input?: { summary?: string; errorClass?: string }): LoomDriverResult;
@@ -456,7 +551,8 @@ export declare class LoomDriverClient {
     logsRef?: string;
     artifactsRef?: string;
   }): LoomDriverResult;
-  claimReady(input?: LoomClaimReadyInput): Promise<Record<string, unknown> | null>;
+  claimReady(input?: LoomTaskClaimReadyInput): Promise<Record<string, unknown> | null>;
+  claimTask(input?: LoomTaskClaimInput | string): Promise<Record<string, unknown> | null>;
   getEpic(input?: LoomEpicInput): Promise<Record<string, unknown> | null>;
   epicSnapshot(input?: LoomEpicInput): Promise<Record<string, unknown> | null>;
   watchEpic(input?: LoomEpicWatchInput): AsyncGenerator<LoomEpicWatchEvent, void, undefined>;

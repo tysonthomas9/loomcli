@@ -920,26 +920,33 @@ func TestWaitForMutations_NotImplemented(t *testing.T) {
 func TestCreate_HappyPath(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
 	var gotMethod, gotPath string
+	var gotBody map[string]json.RawMessage
+	sourceRepo := "loomcli"
 	ab, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		gotMethod = r.Method
 		gotPath = r.URL.Path
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Errorf("decode create request: %v", err)
+		}
 		respondOK(w, gen.IssueResponse{
-			Id:        "new-1",
-			Title:     "New",
-			Status:    gen.IssueResponseStatus("open"),
-			IssueType: gen.IssueResponseIssueType("task"),
-			Priority:  2,
-			CreatedAt: now,
-			UpdatedAt: now,
-			Labels:    []string{},
+			Id:         "new-1",
+			Title:      "New",
+			Status:     gen.IssueResponseStatus("open"),
+			IssueType:  gen.IssueResponseIssueType("task"),
+			Priority:   2,
+			CreatedAt:  now,
+			UpdatedAt:  now,
+			Labels:     []string{},
+			SourceRepo: &sourceRepo,
 		})
 	})
 	defer ts.Close()
 
 	result, err := ab.Create(context.Background(), backend.CreateParams{
-		Title:     "New",
-		IssueType: "task",
-		Priority:  2,
+		Title:      "New",
+		IssueType:  "task",
+		Priority:   2,
+		SourceRepo: sourceRepo,
 	})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -950,8 +957,17 @@ func TestCreate_HappyPath(t *testing.T) {
 	if !strings.HasSuffix(gotPath, "/issues") {
 		t.Errorf("path = %q", gotPath)
 	}
+	var requestSourceRepo string
+	if err := json.Unmarshal(gotBody["source_repo"], &requestSourceRepo); err != nil {
+		t.Errorf("decode request source_repo: %v (body=%v)", err, gotBody)
+	} else if requestSourceRepo != sourceRepo {
+		t.Errorf("request source_repo = %q, want %q", requestSourceRepo, sourceRepo)
+	}
 	if result.ID != "new-1" {
 		t.Errorf("ID = %q", result.ID)
+	}
+	if result.SourceRepo != sourceRepo {
+		t.Errorf("result SourceRepo = %q, want %q", result.SourceRepo, sourceRepo)
 	}
 }
 

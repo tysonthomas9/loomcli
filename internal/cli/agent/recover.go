@@ -113,31 +113,31 @@ func runRecover(cmd *cobra.Command, args []string) {
 	fmt.Println("=========================================")
 }
 
-// releaseFleetIssueLock issues a best-effort release of the fleet-db lock for
-// the given task held by agentName. Logs success/failure but never returns an
-// error: the agent has already exited and recovery should not abort if the
-// fleet-db server is briefly unreachable. Idempotent on the server side: a
-// missing or already-released lock returns nil.
-func releaseFleetIssueLock(deps *cli.Deps, agentName, taskID string) {
+// releaseFleetIssueLock releases the fleet-db lock held by agentName. A missing
+// lock is an idempotent success. KindNotImplemented is also accepted for legacy
+// backends without distributed locks; callers must still verify task ownership
+// immediately before any destructive status/assignee reset.
+func releaseFleetIssueLock(deps *cli.Deps, agentName, taskID string) error {
 	if deps == nil || deps.IssueBackend == nil || agentName == "" || taskID == "" {
-		return
+		return nil
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := deps.IssueBackend.ReleaseIssueLock(ctx, taskID, agentName); err != nil {
 		if backend.IsKind(err, backend.KindNotFound) || backend.IsKind(err, backend.KindNotImplemented) {
-			return
+			return nil
 		}
 		if errors.Is(err, context.DeadlineExceeded) {
 			fmt.Printf("[recover] WARN: timed out releasing fleet-db lock for %s (actor=%s)\n",
 				taskID, agentName)
-			return
+			return err
 		}
 		fmt.Printf("[recover] WARN: failed to release fleet-db lock for %s (actor=%s): %v\n",
 			taskID, agentName, err)
-		return
+		return err
 	}
 	fmt.Printf("[recover] released fleet-db lock issue=%s actor=%s\n", taskID, agentName)
+	return nil
 }
 
 // handleRunningAgent prompts to kill a running agent process. Returns true if
@@ -202,25 +202,29 @@ func RecoverWorktree(worktreePath, agentName string, exitCode int, incomplete bo
 			}
 		}
 
-		// 3. Clear stale lock (fatal if removal fails, unlike interactive runRecover which warns)
-		if err := forceReleaseLock(worktreePath); err != nil && !os.IsNotExist(err) {
-			return fmt.Errorf("failed to clear lock: %w", err)
-		}
-
-		// 4. Handle orphaned task from lock
+		// 3. Handle the distributed claim before removing the local recovery
+		// marker. If another actor now owns the task, fleet-db returns a conflict;
+		// fail closed so this stale agent cannot reset/unassign the new owner's
+		// task. Keeping the local lock lets a later cold-recovery attempt retry the
+		// same guarded operation instead of forgetting which task was interrupted.
 		if lockInfo.TaskID != "" {
-			// Always release the fleet-db issue lock on every exit path.
+			// Release the fleet-db issue lock on every exit path.
 			// Status mutations the agent already performed (review/closed/
 			// open via Update or Close) do NOT release the lock server-side,
 			// so without this call the lock survives until its TTL expires
 			// and other agents get spurious claim conflicts.
-			releaseFleetIssueLock(deps, agentName, lockInfo.TaskID)
+			releaseErr := releaseFleetIssueLock(deps, agentName, lockInfo.TaskID)
+			if releaseErr != nil {
+				return fmt.Errorf("release task %s before recovery mutations: %w", lockInfo.TaskID, releaseErr)
+			}
 
 			switch {
 			case exitCode != 0:
 				fmt.Printf("[recover] Agent %s exited with code %d, resetting task %s\n",
 					agentName, exitCode, lockInfo.TaskID)
-				resetTask(deps, lockInfo.TaskID)
+				if err := resetTaskOwnedByAgent(deps, lockInfo.TaskID, agentName); err != nil {
+					return fmt.Errorf("reset interrupted task %s: %w", lockInfo.TaskID, err)
+				}
 			case incomplete:
 				// Exited 0 but the claim was never released, so there is no
 				// agent-set status to trust here — the task is still sitting in
@@ -237,6 +241,12 @@ func RecoverWorktree(worktreePath, agentName string, exitCode int, incomplete bo
 				fmt.Printf("[recover] Agent %s exited cleanly (code 0), trusting agent's task status for %s\n",
 					agentName, lockInfo.TaskID)
 			}
+		}
+
+		// 4. Clear stale lock only after the guarded backend mutation finishes
+		// (fatal if removal fails, unlike interactive runRecover which warns).
+		if err := forceReleaseLock(worktreePath); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("failed to clear lock: %w", err)
 		}
 	}
 

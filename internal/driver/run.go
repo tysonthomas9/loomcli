@@ -32,7 +32,12 @@ type RunOptions struct {
 	Entrypoint      string
 	SourceKind      string
 	SourceRef       string
-	Payload         json.RawMessage
+	// TriggerBindingID stamps the run with the binding it belongs to (the
+	// binding-scoped run-now endpoint). Config-by-reference then resolves the
+	// binding directly from the run's provenance (binding-config op). Empty for
+	// generic runs that belong to no binding.
+	TriggerBindingID string
+	Payload          json.RawMessage
 }
 
 func CreateDriverRun(ctx context.Context, s store.Store, opts RunOptions) (*domain.DriverRun, error) {
@@ -70,16 +75,17 @@ func CreateDriverRun(ctx context.Context, s store.Store, opts RunOptions) (*doma
 		sourceRef = "loom driver run"
 	}
 	return s.DriverRuns().Create(ctx, store.DriverRunCreate{
-		WorkspaceKey:    opts.WorkspaceKey,
-		RunID:           runID,
-		DriverID:        driver.DriverID,
-		DriverVersionID: version.VersionID,
-		Entrypoint:      entrypoint,
-		SourceKind:      sourceKind,
-		SourceRef:       sourceRef,
-		EpicID:          opts.EpicID,
-		IdempotencyKey:  opts.IdempotencyKey,
-		Payload:         payload,
+		WorkspaceKey:     opts.WorkspaceKey,
+		RunID:            runID,
+		DriverID:         driver.DriverID,
+		DriverVersionID:  version.VersionID,
+		Entrypoint:       entrypoint,
+		SourceKind:       sourceKind,
+		SourceRef:        sourceRef,
+		EpicID:           opts.EpicID,
+		TriggerBindingID: opts.TriggerBindingID,
+		IdempotencyKey:   opts.IdempotencyKey,
+		Payload:          payload,
 	})
 }
 
