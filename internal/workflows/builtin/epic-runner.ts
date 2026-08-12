@@ -85,6 +85,7 @@ async function runEpicWatchLoop(loom, input, epicId, started) {
     workerProfileId: stringValue(input.workerProfileId),
     targetNodeId: stringValue(input.targetNodeId),
     parentSessionId: started.orchestratorSessionId || stringValue(input.parentSessionId),
+    excludeLabels: stringListValue(input.excludeLabels),
     childInput: childTaskInputDefaults(input),
     stackLineage: stackLineageDefaults(input),
   };
@@ -96,7 +97,7 @@ async function runEpicWatchLoop(loom, input, epicId, started) {
   // in-flight set reaches maxConcurrency or the ready queue is empty.
   async function topUp() {
     while (inFlight.size < maxConcurrency) {
-      const task = await loom.tasks.claimReady({ epicId });
+      const task = await loom.tasks.claimReady({ epicId, excludeLabels: requestDefaults.excludeLabels });
       if (!task) {
         return;
       }
@@ -624,6 +625,13 @@ function summarizeBlockedTasks(blocked) {
 
 function slug(value) {
   return stringValue(value).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "item";
+}
+
+function stringListValue(value) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.map((v) => stringValue(v)).filter((v) => v !== "");
 }
 
 function stringValue(value) {

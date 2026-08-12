@@ -172,6 +172,7 @@ export class LoomDriverClient {
       type: input.type || "",
       sourceRepo: input.sourceRepo || "",
       limit: input.limit || "",
+      excludeLabels: input.excludeLabels || [],
     });
   }
 

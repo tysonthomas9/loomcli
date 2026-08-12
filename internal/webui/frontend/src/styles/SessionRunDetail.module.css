@@ -20,32 +20,36 @@
   overflow: hidden;
 }
 
-/* ============= Cost Summary Bar ============= */
+/* ============= Timeline header summary ============= */
 
-.costSummary {
+.timelineHeader {
   display: flex;
-  align-items: center;
-  gap: 16px;
-  padding: 8px 14px;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 14px 10px;
   border-bottom: 1px solid var(--color-border-light);
   background: var(--color-panel-bg);
   flex-shrink: 0;
 }
 
-.summaryItem {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 12px;
+.timelineTitle {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text-primary);
 }
 
-.summaryLabel {
+.timelineSummary {
+  font-size: 12px;
   color: var(--color-text-tertiary);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
 }
 
 .summaryValue {
-  color: var(--color-text-primary);
-  font-weight: 600;
+  color: var(--color-text-secondary);
+  font-weight: 500;
 }
 
 .activeBadge {
@@ -105,11 +109,20 @@
 
 .timeline {
   width: 35%;
-  min-width: 200px;
-  max-width: 340px;
+  min-width: 220px;
+  max-width: 300px;
   border-right: 1px solid var(--color-border-light);
-  overflow-y: auto;
+  overflow: hidden;
   flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--color-panel-bg);
+}
+
+.timelineList {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .timelineSkeleton {
@@ -140,11 +153,11 @@
 
 .row {
   display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 12px;
+  align-items: stretch;
+  padding: 12px 14px;
   cursor: pointer;
   border-bottom: 1px solid var(--color-border-light);
+  border-left: 2px solid transparent;
   transition: background-color var(--transition-fast);
 }
 
@@ -154,8 +167,7 @@
 
 .row.selected {
   background-color: var(--color-bg-selected, rgba(59, 130, 246, 0.08));
-  border-left: 3px solid var(--color-primary);
-  padding-left: 9px;
+  border-left-color: var(--color-primary);
 }
 
 .rowMain {
@@ -163,13 +175,13 @@
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 6px;
 }
 
 .rowTop {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
 }
 
 .agentName {
@@ -179,6 +191,22 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  min-width: 0;
+  flex: 1;
+}
+
+.rowWhen {
+  font-size: 11px;
+  color: var(--color-text-tertiary);
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+}
+
+.rowPills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
 }
 
 .phaseBadge {
@@ -201,35 +229,28 @@
   color: #16a34a;
 }
 
-.backendBadge {
+.statusPill {
   font-size: 10px;
   font-weight: 600;
-  font-family: var(--font-mono);
-  color: var(--color-text-secondary);
+  padding: 1px 6px;
+  border-radius: 999px;
+  white-space: nowrap;
   background: var(--color-bg-hover);
-  border: 1px solid var(--color-border-light);
-  border-radius: var(--radius-sm);
-  padding: 1px 5px;
-  white-space: nowrap;
-}
-
-.statusLabel {
-  margin-left: auto;
-  font-size: 11px;
-  font-weight: 600;
-  white-space: nowrap;
   color: var(--color-text-tertiary);
 }
 
-.statusLabel[data-status="completed"] {
+.statusPill[data-status="completed"] {
+  background-color: rgba(34, 197, 94, 0.12);
   color: #16a34a;
 }
 
-.statusLabel[data-status="failed"] {
+.statusPill[data-status="failed"] {
+  background-color: rgba(239, 68, 68, 0.12);
   color: #dc2626;
 }
 
-.statusLabel[data-status="running"] {
+.statusPill[data-status="running"] {
+  background-color: rgba(250, 204, 21, 0.15);
   color: #ca8a04;
 }
 
@@ -272,6 +293,7 @@
   height: 8px;
   border-radius: 50%;
   flex-shrink: 0;
+  align-self: center;
 }
 
 .statusDot[data-status="completed"] {
@@ -320,7 +342,7 @@
 .rowBottom {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   font-size: 11px;
   color: var(--color-text-tertiary);
 }
@@ -496,6 +518,13 @@
   color: var(--color-text-secondary);
   font-size: 12px;
   line-height: 1.5;
+
+.filesStat {
+  white-space: nowrap;
+}
+
+.filesDelta {
+  color: var(--color-text-tertiary);
 }
 
 /* ============= Detail View (right column) ============= */
@@ -537,9 +566,12 @@
   margin-bottom: 10px;
 }
 
-.agentName {
+.mastheadHeader .agentName {
   font-weight: 600;
   color: var(--color-text-primary);
+  flex: none;
+  overflow: visible;
+  text-overflow: unset;
 }
 
 .agentBackend {
@@ -568,48 +600,6 @@
   color: var(--color-text-primary);
   font-weight: 500;
   font-size: 12px;
-}
-
-/* Prompt block — initial user kickoff surfaced once in masthead */
-.promptBlock {
-  margin: 0 0 10px;
-  padding: 8px 12px;
-  background: rgba(59, 130, 246, 0.06);
-  border-left: 3px solid #3b82f6;
-  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
-}
-
-[data-theme="light"] .promptBlock {
-  background: #eff6ff;
-}
-
-.promptLabel {
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: #3b82f6;
-  margin-bottom: 2px;
-}
-
-.promptBody {
-  word-break: break-word;
-  max-height: 4rem;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  padding-right: 4px;
-  scrollbar-gutter: stable;
-}
-
-/* Tighten the shared MarkdownRenderer padding inside the compact prompt block,
-   and preserve the prompt body's original primary-text typography (the shared
-   .markdown defaults are dimmer/secondary). */
-.promptBody.promptBody {
-  padding-top: 0;
-  padding-bottom: 0;
-  font-size: 13px;
-  line-height: 1.5;
-  color: var(--color-text-primary);
 }
 
 .runErrorBanner {
@@ -824,6 +814,48 @@
   background: var(--color-panel-bg);
 }
 
+.promptBlock {
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--color-border-light);
+  background: var(--color-bg-subtle);
+}
+
+.promptSummary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.promptSummary::-webkit-details-marker {
+  display: none;
+}
+
+.promptSummary::before {
+  content: "▸";
+  color: var(--color-text-muted);
+}
+
+.promptBlock[open] .promptSummary::before {
+  content: "▾";
+}
+
+.promptLabel {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-text-secondary);
+}
+
+.promptBody.promptBody {
+  padding: 8px 0 0 16px;
+  color: var(--color-text-primary);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
 /* Turn — a single assistant response (may contain text + tool calls) */
 .turn {
   padding: 14px;
@@ -867,7 +899,8 @@
 
 .msg {
   word-break: break-word;
-  max-width: 72ch;
+  width: 100%;
+  min-width: 0;
 }
 
 /* Drop the shared MarkdownRenderer block padding so transcript turn spacing
@@ -882,6 +915,9 @@
   color: var(--color-text-primary);
 }
 
+/* Rhythm between adjacent transcript blocks. The tool pill's own styling lives
+   in components/ToolPill; .toolBlock here is the class the transcript hands it
+   so these sibling rules can reach it. */
 .msg + .msg,
 .msg + .toolBlock,
 .toolBlock + .msg,
@@ -925,122 +961,6 @@
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: #3b82f6;
-}
-
-/* Tool call — inline collapsible pill */
-.toolBlock {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-}
-
-.toolPill {
-  display: inline-flex;
-  align-items: stretch;
-  align-self: flex-start;
-  font-family: var(--font-mono);
-  font-size: 12px;
-  background: var(--color-bg-card);
-  border: 1px solid var(--color-border-light);
-  border-radius: var(--radius-md);
-  cursor: pointer;
-  transition:
-    border-color var(--transition-fast),
-    background var(--transition-fast);
-  color: var(--color-text-primary);
-  text-align: left;
-  padding: 0;
-}
-
-.toolPill:hover {
-  border-color: var(--color-text-muted);
-  background: var(--color-bg-hover);
-}
-
-.toolPillOpen {
-  border-color: #ea580c;
-}
-
-.toolPillIcon {
-  padding: 6px 10px;
-  background: rgba(234, 88, 12, 0.12);
-  color: #ea580c;
-  border-right: 1px solid var(--color-border-light);
-  border-radius: var(--radius-md) 0 0 var(--radius-md);
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  font-size: 11.5px;
-}
-
-[data-theme="light"] .toolPillIcon {
-  background: #fff1e6;
-}
-
-.toolPillArg {
-  padding: 6px 10px;
-  color: var(--color-text-secondary);
-  max-width: 420px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.toolPillCaret {
-  padding: 6px 10px;
-  color: var(--color-text-muted);
-  border-left: 1px solid var(--color-border-light);
-  display: flex;
-  align-items: center;
-}
-
-.toolPillOpen .toolPillCaret {
-  color: #ea580c;
-}
-
-/* Tool body — expanded JSON + result */
-.toolBody {
-  margin-top: 8px;
-  padding-left: 12px;
-  border-left: 2px solid #ea580c;
-  width: 100%;
-  min-width: 0;
-}
-
-.toolInput,
-.toolOutput {
-  font-family: var(--font-mono);
-  font-size: 12px;
-  line-height: 1.55;
-  background: var(--color-bg-card);
-  border: 1px solid var(--color-border-light);
-  border-radius: var(--radius-md);
-  padding: 10px 12px;
-  margin: 0;
-  white-space: pre;
-  overflow-x: auto;
-  color: var(--color-text-primary);
-}
-
-.toolOutput {
-  color: var(--color-text-secondary);
-}
-
-.toolResultLabel {
-  font-size: 10px;
-  font-weight: 500;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--color-text-tertiary);
-  margin: 10px 0 4px;
-  display: flex;
-  gap: 8px;
-  align-items: baseline;
-}
-
-.toolResultLabel .ts {
-  font-weight: 400;
-  text-transform: none;
-  letter-spacing: 0;
 }
 
 .toolInputToggle {

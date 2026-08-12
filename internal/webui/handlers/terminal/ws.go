@@ -90,8 +90,8 @@ type workspacePTYEnsurer interface {
 // HandleTerminalWS returns a WebSocket handler for terminal relay. It upgrades
 // the HTTP connection to a WebSocket, attaches to (or creates) the persistent
 // session identified by the (workspace, session) pair, and bridges
-// stdin/stdout bidirectionally using the wterm wire format: binary output
-// frames and a \x1b[RESIZE:cols;rows] escape for resize.
+// stdin/stdout bidirectionally using binary output frames and text input
+// frames, with a \x1b[RESIZE:cols;rows] control message for resize.
 //
 // Unlike the previous PTY-per-WS model, the session outlives the WebSocket:
 // on disconnect the PTY and child process stay alive for a grace period so a

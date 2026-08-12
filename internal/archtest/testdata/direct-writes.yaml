@@ -149,7 +149,7 @@ method_sets:
     read_only: [Prune, ReplayFromFile, Snapshot]
     mutating: []
   - name: session
-    read_only: [SessionID]
+    read_only: [SessionID, TranscriptUsage]
     mutating: [Finalize, SyncLatestClaudeTranscript, SyncLatestCodexRollout]
   - name: session_event_store
     read_only: [HasTranscript, Path, Read]
@@ -158,6 +158,7 @@ method_sets:
     read_only:
       - CountIndexEntries
       - Dir
+      - FinalAssistantReply
       - ListSubagentTranscripts
       - LoadMetadata
       - LoadNativeEvents
@@ -574,7 +575,19 @@ function_surfaces:
     access: read-only
     capability_owner: workflowcatalog
   - package: github.com/tysonthomas9/loomcli/internal/sessions
+    function: ClaudeConfigDir
+    access: read-only
+    capability_owner: interaction
+  - package: github.com/tysonthomas9/loomcli/internal/sessions
+    function: CodexSessionsRoot
+    access: read-only
+    capability_owner: interaction
+  - package: github.com/tysonthomas9/loomcli/internal/sessions
     function: EncodeDiffStatsMetadata
+    access: read-only
+    capability_owner: interaction
+  - package: github.com/tysonthomas9/loomcli/internal/sessions
+    function: ExtractTranscriptUsageWithCost
     access: read-only
     capability_owner: interaction
   - package: github.com/tysonthomas9/loomcli/internal/sessions
@@ -915,6 +928,12 @@ writes:
     aggregate_owner: agents
     expires_after_phase: 7
   - file: internal/cli/agentdef/agentdef_cmd.go
+    receiver: github.com/tysonthomas9/loomcli/internal/store.AgentStore
+    method: Update
+    count: 1
+    aggregate_owner: agents
+    expires_after_phase: 7
+  - file: internal/cli/agentdef/agentdef_hooks.go
     receiver: github.com/tysonthomas9/loomcli/internal/store.AgentStore
     method: Update
     count: 1
@@ -1671,9 +1690,21 @@ writes:
     aggregate_owner: interaction
     expires_after_phase: 7
   - file: internal/cli/daemon/supervisor/session_finalize.go
+    receiver: "*github.com/tysonthomas9/loomcli/internal/sessions.Session"
+    method: SyncLatestClaudeTranscript
+    count: 1
+    aggregate_owner: interaction
+    expires_after_phase: 7
+  - file: internal/cli/daemon/supervisor/session_finalize.go
+    receiver: "*github.com/tysonthomas9/loomcli/internal/sessions.Session"
+    method: SyncLatestCodexRollout
+    count: 1
+    aggregate_owner: interaction
+    expires_after_phase: 7
+  - file: internal/cli/daemon/supervisor/session_finalize.go
     receiver: github.com/tysonthomas9/loomcli/internal/sessions
     method: NewStore
-    count: 1
+    count: 2
     aggregate_owner: interaction
     expires_after_phase: 7
   - file: internal/cli/daemon/supervisor/supervisor.go
@@ -1836,6 +1867,12 @@ writes:
     receiver: github.com/tysonthomas9/loomcli/internal/store.RepoStore
     method: Delete
     count: 2
+    aggregate_owner: workspace
+    expires_after_phase: 7
+  - file: internal/cli/repo/repo_set.go
+    receiver: github.com/tysonthomas9/loomcli/internal/store.RepoStore
+    method: Update
+    count: 1
     aggregate_owner: workspace
     expires_after_phase: 7
   - file: internal/cli/role/role_cmd.go
@@ -2099,7 +2136,7 @@ writes:
   - file: internal/webui/handlers/prreview/reviewer.go
     receiver: github.com/tysonthomas9/loomcli/internal/store.AgentStore
     method: Update
-    count: 1
+    count: 2
     aggregate_owner: agents
     expires_after_phase: 7
   - file: internal/webui/handlers/prreview/reviewer.go

@@ -16,7 +16,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/mattn/go-runewidth v0.0.23
 	github.com/oapi-codegen/runtime v1.1.1
-	github.com/olesho/harness-wrapper v0.5.3
+	github.com/olesho/harness-wrapper v0.7.7
 	github.com/prometheus/client_golang v1.23.2
 	github.com/redis/go-redis/v9 v9.17.3
 	github.com/robfig/cron/v3 v3.0.1

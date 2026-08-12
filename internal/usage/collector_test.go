@@ -125,16 +125,16 @@ func TestCollector_ThreadSafety_DuplicateIDs(t *testing.T) {
 	}
 }
 
-func TestCollector_Finalize_CostEstimation(t *testing.T) {
+func TestCollector_Finalize_LeavesCostUnset(t *testing.T) {
 	c := NewCollector("claude", "agent")
 	c.Accumulate("msg-1", 1_000_000, 1_000_000, 0, 0)
 
 	now := time.Now()
 	u := c.Finalize("task", "epic", now, now.Add(time.Hour), 1)
 
-	// $3 input + $15 output = $18
-	if u.EstimatedCostUSD < 17.9 || u.EstimatedCostUSD > 18.1 {
-		t.Errorf("EstimatedCostUSD = %f, want ~18.0", u.EstimatedCostUSD)
+	// Collector no longer fabricates cost from tokens.
+	if u.EstimatedCostUSD != 0 {
+		t.Errorf("EstimatedCostUSD = %f, want 0", u.EstimatedCostUSD)
 	}
 	if u.ExitCode != 1 {
 		t.Errorf("ExitCode = %d, want 1", u.ExitCode)

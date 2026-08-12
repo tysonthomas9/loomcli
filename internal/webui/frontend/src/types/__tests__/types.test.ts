@@ -96,14 +96,16 @@ describe("Status type guards", () => {
 });
 
 describe("Status constants", () => {
+  // Order is Go's (types.BuiltinStatuses) and the Go-side parity test enforces
+  // it, so this list is written in that order too rather than a second opinion.
   it("KNOWN_STATUSES contains all expected statuses", () => {
     expect(KNOWN_STATUSES).toEqual([
       "open",
       "in_progress",
       "blocked",
       "deferred",
-      "closed",
       "review",
+      "closed",
       "tombstone",
       "pinned",
       "hooked",
@@ -119,8 +121,8 @@ describe("Status constants", () => {
     expect(StatusInProgress).toBe("in_progress");
     expect(StatusBlocked).toBe("blocked");
     expect(StatusDeferred).toBe("deferred");
-    expect(StatusClosed).toBe("closed");
     expect(StatusReview).toBe("review");
+    expect(StatusClosed).toBe("closed");
     expect(StatusTombstone).toBe("tombstone");
     expect(StatusPinned).toBe("pinned");
     expect(StatusHooked).toBe("hooked");

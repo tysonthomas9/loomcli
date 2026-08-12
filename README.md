@@ -306,6 +306,14 @@ loom agentdef add falcon --role reviewer --repo frontend
 loom agentdef update falcon --auto
 loom agentdef list
 
+# Post-run completion hooks: the DAEMON, not the agent's prompt, does the
+# bookkeeping after a successful run. Writes happen in order, and a failed
+# write reopens the task instead of leaving it half-finished.
+loom agentdef add critic --role plan-critic \
+  --on-complete-comment-reply \
+  --on-complete-add-label criticized
+loom agentdef update critic --clear-on-complete
+
 # Daemon profile (one per workspace)
 loom daemon profile set --max-agents=20 --log-level=debug
 loom daemon profile show

@@ -38,8 +38,7 @@ var openCodeNonInteractiveInvoker func(workDir, prompt, agentName string, shutdo
 // buildOpenCodeInteractiveCmd constructs the exec.Cmd for interactive OpenCode invocation.
 // Extracted for testability — callers can inspect the returned cmd without execution.
 func buildOpenCodeInteractiveCmd(workDir, prompt, agentName string) *exec.Cmd {
-	args := append([]string{"run", "--dir", workDir}, openCodeModelArgs()...)
-	args = append(args, prompt)
+	args := append(openCodeInteractiveArgs(), "--prompt", prompt)
 	cmd := exec.Command("opencode", args...)
 	cmd.Dir = workDir
 	cmd.Env = buildBackendEnv(workDir, agentName)
@@ -49,7 +48,17 @@ func buildOpenCodeInteractiveCmd(workDir, prompt, agentName string) *exec.Cmd {
 	return cmd
 }
 
+// openCodeInteractiveArgs is shared by plain and controlled interactive
+// launches so the two paths cannot drift onto different OpenCode CLI flags.
+// The interactive command is OpenCode's root TUI; cmd.Dir supplies the project.
+func openCodeInteractiveArgs() []string {
+	return openCodeModelArgs()
+}
+
 func defaultOpenCodeInvoker(workDir, prompt, agentName string) error {
+	if err := validateSafetyKnobsFromEnv("opencode"); err != nil {
+		return err
+	}
 	cmd := buildOpenCodeInteractiveCmd(workDir, prompt, agentName)
 
 	fmt.Println("Launching OpenCode agent...")
@@ -59,6 +68,9 @@ func defaultOpenCodeInvoker(workDir, prompt, agentName string) error {
 }
 
 func defaultOpenCodeNonInteractiveInvoker(workDir, prompt, agentName string, shutdown <-chan struct{}, collector *usage.Collector) error {
+	if err := validateSafetyKnobsFromEnv("opencode"); err != nil {
+		return err
+	}
 	args := append([]string{"run", "--format", "json", "--dir", workDir}, openCodeModelArgs()...)
 
 	fmt.Println("Launching OpenCode agent (non-interactive)...")
@@ -139,6 +151,9 @@ func init() {
 
 func openCodeModelArgs() []string {
 	model := strings.TrimSpace(os.Getenv("LOOM_OPENCODE_MODEL"))
+	if model == "" {
+		model = resolveAgentModel()
+	}
 	if model == "" {
 		return nil
 	}

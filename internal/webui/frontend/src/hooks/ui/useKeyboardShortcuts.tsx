@@ -103,17 +103,9 @@ function isTerminalFocused(event: KeyboardEvent): boolean {
   const target = event.target as HTMLElement | null;
   if (!(target instanceof HTMLElement)) return false;
 
-  if (target.closest(".wterm")) return true;
+  if (target.closest("[data-terminal-input]")) return true;
+  if (target.closest(".xterm")) return true;
   if (target.closest('[role="textbox"][aria-label="Terminal"]')) return true;
-
-  // wterm focuses a hidden textarea while keeping the visible terminal marked
-  // as focused. Treat that event as terminal input too.
-  if (
-    target.tagName === "TEXTAREA" &&
-    document.querySelector(".wterm.focused")
-  ) {
-    return true;
-  }
 
   return false;
 }

@@ -21,6 +21,7 @@ var (
 	driverClaimReadyLeaseID      string
 	driverClaimReadyFence        int64
 	driverClaimReadyEpicID       string
+	driverClaimReadyExcludeLabel []string
 	driverClaimReadyActor        string
 	driverClaimReadyLimit        int
 	driverClaimReadyJSON         bool
@@ -114,6 +115,7 @@ func bindDriverClaimReadyFlags(cmd *cobra.Command) {
 	cmd.Flags().Int64Var(&driverClaimReadyFence, "fencing-token", 0, "Parent DriverRun fencing token")
 	cmd.Flags().StringVar(&driverClaimReadyEpicID, "epic-id", "", "Epic ID to scope ready tasks (default: parent DriverRun epic)")
 	cmd.Flags().StringVar(&driverClaimReadyActor, "actor", "", "Claim actor (default: driver-run:<driver-run-id>)")
+	cmd.Flags().StringArrayVar(&driverClaimReadyExcludeLabel, "exclude-label", nil, "Skip ready tasks carrying this label (repeatable); keeps mid-pipeline work out of an epic drain")
 	cmd.Flags().IntVar(&driverClaimReadyLimit, "limit", 100, "Maximum ready tasks to inspect")
 	cmd.Flags().BoolVar(&driverClaimReadyJSON, "json", false, "JSON output")
 }
@@ -177,6 +179,7 @@ func runDriverClaimReady(cmd *cobra.Command, _ []string) error {
 	}
 	params := map[string]any{
 		"epicId": driverClaimReadyEpicID, "actor": driverClaimReadyActor, "limit": driverClaimReadyLimit,
+		"excludeLabels": driverClaimReadyExcludeLabel,
 	}
 	var claimed *driverpkg.ClaimedTask
 	if err := client.call(cmd.Context(), "claim-ready", params, &claimed); err != nil {

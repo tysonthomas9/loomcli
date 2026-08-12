@@ -26,6 +26,8 @@ var (
 	updateExternalRef  string
 	updateAddDeps      []string
 	updateRemoveDeps   []string
+	updateAddLabels    []string
+	updateRemoveLabels []string
 )
 
 var updateCmd = &cobra.Command{
@@ -124,16 +126,12 @@ func updateParamsFromFlags(cmd *cobra.Command) (backend.UpdateParams, bool, erro
 	} else if applied {
 		changed = true
 	}
-	if descFromFlag {
-		params.Description = &updateDescription
+	if applyLabelFlags(cmd, &params) {
 		changed = true
 	}
-	if descFromFile {
-		body, err := readDescriptionFile(updateDescFile, cmd.InOrStdin())
-		if err != nil {
-			return backend.UpdateParams{}, false, err
-		}
-		params.Description = &body
+	if applied, err := applyDescriptionFlags(cmd, &params, descFromFlag, descFromFile); err != nil {
+		return backend.UpdateParams{}, false, err
+	} else if applied {
 		changed = true
 	}
 	return params, changed, nil
@@ -167,6 +165,48 @@ func applyDirectUpdateFlags(cmd *cobra.Command, params *backend.UpdateParams) bo
 	}
 	if cmd.Flags().Changed("external-ref") {
 		params.ExternalRef = &updateExternalRef
+		changed = true
+	}
+	return changed
+}
+
+// applyDescriptionFlags resolves --description / --description-from-file into
+// params.Description, reporting whether either was given. The caller rejects
+// the two as mutually exclusive before this runs, so at most one applies.
+func applyDescriptionFlags(cmd *cobra.Command, params *backend.UpdateParams, fromFlag, fromFile bool) (bool, error) {
+	if fromFlag {
+		params.Description = &updateDescription
+		return true, nil
+	}
+	if !fromFile {
+		return false, nil
+	}
+	body, err := readDescriptionFile(updateDescFile, cmd.InOrStdin())
+	if err != nil {
+		return false, err
+	}
+	params.Description = &body
+	return true, nil
+}
+
+// applyLabelFlags copies the repeatable --add-label/--remove-label occurrences
+// into the label deltas on params, reporting whether either flag was given.
+// Labels are deltas, not a replacement: additions and removals name individual
+// labels and leave every other label on the issue untouched, so SetLabels is
+// never populated and the current label set is never read back first.
+//
+// The reported bool must feed updateParamsFromFlags' changed result: RunE only
+// calls Update when fieldsChanged || !depsChanged, so a label flag combined
+// with a dependency flag would otherwise skip Update, silently dropping the
+// label while still reporting success.
+func applyLabelFlags(cmd *cobra.Command, params *backend.UpdateParams) bool {
+	changed := false
+	if cmd.Flags().Changed("add-label") {
+		params.AddLabels = updateAddLabels
+		changed = true
+	}
+	if cmd.Flags().Changed("remove-label") {
+		params.RemoveLabels = updateRemoveLabels
 		changed = true
 	}
 	return changed
@@ -252,6 +292,8 @@ func init() {
 	updateCmd.Flags().StringVar(&updateExternalRef, "external-ref", "", "Set external reference")
 	updateCmd.Flags().StringArrayVar(&updateAddDeps, "depends-on", nil, "Add dependency on issue ID (repeatable)")
 	updateCmd.Flags().StringArrayVar(&updateRemoveDeps, "remove-depends-on", nil, "Remove dependency on issue ID (repeatable)")
+	updateCmd.Flags().StringArrayVar(&updateAddLabels, "add-label", nil, "Add label (repeatable); other labels are preserved")
+	updateCmd.Flags().StringArrayVar(&updateRemoveLabels, "remove-label", nil, "Remove label (repeatable); other labels are preserved")
 }
 
 func readDescriptionFile(path string, stdin io.Reader) (string, error) {

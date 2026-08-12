@@ -84,6 +84,13 @@ bearer token (`LOOM_RUN_TOKEN`, minted at claim). At deploy:
 
 ## Workflow Sandbox (loom-dev deploy notes)
 
+**Scope first: this sandbox contains the workflow bundle, not the agent.**
+Loom executes code at three levels and only this one — the DriverRun bundle —
+can be containerized. The TaskRun leaf that runs the LLM and edits code, and
+daemon-supervised agents, run as host processes with the backend CLI's own
+sandbox switched off. Read `docs/design/execution-isolation.md` before treating
+any of the knobs below, or `read_only`/`allowed_tools`, as a security boundary.
+
 `LOOM_DRIVER_SANDBOX=container` runs workflow bundles in rootless containers
 (podman first, docker fallback; podman install is part of the loom-dev deploy
 requirements). Default stays `process`, but the SB3 trust placement policy is

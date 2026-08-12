@@ -6,10 +6,16 @@
  * links to the same detail route and are non-sortable for now.
  */
 
+import type React from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useStore } from "zustand";
 
-import { useAgentStoreInstance, useWorkspaceContext } from "@/hooks";
+import {
+  useAgentStoreInstance,
+  useDeleteWorkspaceAgent,
+  useWorkspaceContext,
+} from "@/hooks";
+import { useToast } from "@/hooks/ui";
 import { useAutomations } from "@/hooks/workspace";
 import type { LoomAgentStatus } from "@/types";
 import {
@@ -20,6 +26,7 @@ import {
 } from "@/utils/agentSectionOrder";
 import { splitAgentsByRuntime } from "@/utils/agentRole";
 import { mergeAgentRoster } from "@/utils/agentRoster";
+import { isPRReviewerAgent } from "@/utils/agentDisplay";
 import {
   bindingCadenceLabel,
   bindingDisplayName,
@@ -29,6 +36,7 @@ import {
 import { wsGet, wsSet } from "@/utils/scopedStorage";
 
 import styles from "./AgentSection.module.css";
+import { AgentContextMenu } from "./menus/AgentContextMenu";
 import { SortableAgentList } from "./SortableAgentList";
 import {
   buildAgentAutomationRows,
@@ -43,6 +51,14 @@ export interface AgentSectionProps {
   selectedAgentName?: string | null | undefined;
   agentTasks?: Record<string, { title: string }> | undefined;
   onAddClick?: (() => void) | undefined;
+  /** When "prs", only PR review agents are shown and Add agent is hidden. */
+  activeView?: string | undefined;
+}
+
+interface AgentMenuState {
+  name: string;
+  x: number;
+  y: number;
 }
 
 export function AgentSection({
@@ -50,6 +66,7 @@ export function AgentSection({
   selectedAgentName = null,
   agentTasks,
   onAddClick,
+  activeView,
 }: AgentSectionProps): JSX.Element {
   const agentStore = useAgentStoreInstance();
   const fleetAgents = useStore(agentStore, (s) => s.agents);
@@ -57,8 +74,14 @@ export function AgentSection({
     agents: workspaceConfigAgents,
     workspace,
     workspaceId,
+    refetch,
   } = useWorkspaceContext();
+  const { showToast } = useToast();
+  const deleteAgent = useDeleteWorkspaceAgent();
   const [agentOrder, setAgentOrder] = useState<string[]>([]);
+  const [contextMenu, setContextMenu] = useState<AgentMenuState | null>(null);
+  const prsView = activeView === "prs";
+  const addClick = prsView ? undefined : onAddClick;
 
   // Durable records own attached trigger bindings and therefore own the rail
   // identity. Render each record once, including records with zero bindings;
@@ -73,15 +96,15 @@ export function AgentSection({
     [bindings, selectedAgentName],
   );
 
-  const agents = useMemo<LoomAgentStatus[]>(
-    () =>
-      mergeAgentRoster(
-        fleetAgents,
-        workspaceConfigAgents,
-        workspace?.name ?? "",
-      ),
-    [fleetAgents, workspaceConfigAgents, workspace?.name],
-  );
+  const agents = useMemo<LoomAgentStatus[]>(() => {
+    const merged = mergeAgentRoster(
+      fleetAgents,
+      workspaceConfigAgents,
+      workspace?.name ?? "",
+    );
+    if (!prsView) return merged;
+    return merged.filter(isPRReviewerAgent);
+  }, [fleetAgents, workspaceConfigAgents, workspace?.name, prsView]);
 
   const agentNames = useMemo(() => agents.map((agent) => agent.name), [agents]);
   const agentNamesKey = agentNames.join("\0");
@@ -130,23 +153,56 @@ export function AgentSection({
   const showInteractiveHeader = hasInteractive && hasAutonomous;
   const showAutonomousHeader = hasAutonomous;
 
+  const handleArchive = useCallback(
+    async (name: string) => {
+      if (!workspaceId) return;
+      setContextMenu(null);
+      try {
+        await deleteAgent(workspaceId, name);
+        showToast(`Agent ${name} archived`, { type: "success" });
+        refetch();
+      } catch {
+        showToast("Failed to archive agent", { type: "error" });
+      }
+    },
+    [deleteAgent, refetch, showToast, workspaceId],
+  );
+
+  const handleAgentContextMenu = useCallback(
+    (event: React.MouseEvent, name: string) => {
+      if (!workspaceId) return;
+      setContextMenu({ name, x: event.clientX, y: event.clientY });
+    },
+    [workspaceId],
+  );
+
+  const closeContextMenu = useCallback(() => {
+    setContextMenu(null);
+  }, []);
+
   if (
     agents.length === 0 &&
     durableRecords.length === 0 &&
     legacyBindings.length === 0 &&
-    !onAddClick
+    !addClick
   )
     return <></>;
+
+  const listProps = {
+    fullOrder: agentOrder,
+    onReorder: persistAgentOrder,
+    onAgentClick,
+    selectedAgentName,
+    agentTasks,
+    onArchive: workspaceId ? handleArchive : undefined,
+    onAgentContextMenu: workspaceId ? handleAgentContextMenu : undefined,
+  };
 
   const interactiveList = (
     <SortableAgentList
       agents={interactive}
-      fullOrder={agentOrder}
-      onReorder={persistAgentOrder}
-      onAgentClick={onAgentClick}
-      selectedAgentName={selectedAgentName}
-      agentTasks={agentTasks}
       listClassName={styles.sortableList}
+      {...listProps}
     />
   );
 
@@ -178,12 +234,8 @@ export function AgentSection({
             {background.length > 0 && (
               <SortableAgentList
                 agents={background}
-                fullOrder={agentOrder}
-                onReorder={persistAgentOrder}
-                onAgentClick={onAgentClick}
-                selectedAgentName={selectedAgentName}
-                agentTasks={agentTasks}
                 listClassName={styles.sortableList}
+                {...listProps}
               />
             )}
             {durableRecords.map((row) => {
@@ -245,11 +297,22 @@ export function AgentSection({
           </div>
         )}
       </div>
-      {onAddClick && (
-        <button type="button" className={styles.addButton} onClick={onAddClick}>
+      {addClick && (
+        <button type="button" className={styles.addButton} onClick={addClick}>
           + Add agent
         </button>
       )}
+      <AgentContextMenu
+        isOpen={contextMenu != null}
+        position={{
+          x: contextMenu?.x ?? 0,
+          y: contextMenu?.y ?? 0,
+        }}
+        onArchive={() => {
+          if (contextMenu) void handleArchive(contextMenu.name);
+        }}
+        onClose={closeContextMenu}
+      />
     </div>
   );
 }

@@ -43,6 +43,7 @@ var (
 	runBaseBranch      string
 	runOpenPR          bool
 	runStackedPRs      bool
+	runExcludeLabels   []string
 )
 
 var epicCmd = &cobra.Command{
@@ -94,6 +95,7 @@ func init() {
 	epicRunCmd.Flags().BoolVar(&runStackedPRs, "stacked-pull-requests", false, "Ask compatible task runners to stack child pull requests")
 	epicRunCmd.Flags().BoolVar(&runDetach, "detach", false, "Queue the workflow run and return without executing it in this process")
 	epicRunCmd.Flags().BoolVar(&runDryRun, "dry-run", false, "Print what would be spawned but don't actually create agents")
+	epicRunCmd.Flags().StringArrayVar(&runExcludeLabels, "exclude-label", nil, "Skip child tasks carrying this label (repeatable). Use it when the epic's children are mid-flight in a label-routed pipeline, so a drain does not dispatch half-reviewed work to a generic implementer")
 
 	epicCmd.AddCommand(epicRunCmd)
 	cli.RegisterCommand(epicCmd)
@@ -233,6 +235,9 @@ func workflowPayload(stackProj *EpicStackProjection) (json.RawMessage, error) {
 	}
 	if runStackedPRs {
 		payload["stackedPullRequests"] = true
+	}
+	if len(runExcludeLabels) > 0 {
+		payload["excludeLabels"] = runExcludeLabels
 	}
 	if stackProj != nil && len(stackProj.Lineage) > 0 {
 		payload["stackLineage"] = stackProj.Lineage

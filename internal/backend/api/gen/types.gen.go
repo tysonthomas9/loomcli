@@ -2884,6 +2884,9 @@ type MonitorAgentStatus struct {
 	// DesiredState Requested daemon state for the agent.
 	DesiredState *string `json:"desired_state,omitempty"`
 
+	// DisplayName Optional short UI title. When present, clients prefer this over name (e.g. review-…-pr-222 → "loomcli#222").
+	DisplayName *string `json:"display_name,omitempty"`
+
 	// LastActivityAt Most recent PTY-output observation from the agent's supervised backend (claude/codex/gemini), forwarded over IPC. Compare to "now" to detect stuck agents. Zero/absent when no observation yet or agent isn't daemon-managed.
 	LastActivityAt *time.Time `json:"last_activity_at,omitempty"`
 
@@ -2905,6 +2908,9 @@ type MonitorAgentStatus struct {
 	Repo     *string                     `json:"repo,omitempty"`
 	Role     *string                     `json:"role,omitempty"`
 	RoleKind *MonitorAgentStatusRoleKind `json:"role_kind,omitempty"`
+
+	// RoleLabel Optional short UI role label. When present, clients prefer this over capitalizing role (e.g. pr-reviewer → "Review").
+	RoleLabel *string `json:"role_label,omitempty"`
 
 	// SessionId Latest control-plane session associated with this agent.
 	SessionId *string `json:"session_id,omitempty"`
@@ -3296,13 +3302,28 @@ type ReviewerEnsureResult struct {
 
 // ReviewerMessage defines model for ReviewerMessage.
 type ReviewerMessage struct {
-	ItemId string  `json:"item_id"`
-	Phase  *string `json:"phase,omitempty"`
+	ItemId string `json:"item_id"`
+
+	// Kind text | tool_use. Omitted or empty means a normal chat bubble (text). tool_use is rendered as a collapsed pill; tool_result is paired into tool_result rather than emitted as its own message.
+	Kind  *string `json:"kind,omitempty"`
+	Phase *string `json:"phase,omitempty"`
 
 	// Role user | assistant
-	Role   string `json:"role"`
-	Text   string `json:"text"`
-	TurnId string `json:"turn_id"`
+	Role string `json:"role"`
+	Text string `json:"text"`
+
+	// ToolInput Tool arguments as JSON text or a plain command/path preview.
+	ToolInput *string `json:"tool_input,omitempty"`
+
+	// ToolName Tool name when kind is tool_use.
+	ToolName *string `json:"tool_name,omitempty"`
+
+	// ToolResult Paired tool output when available.
+	ToolResult *string `json:"tool_result,omitempty"`
+
+	// ToolUseId Native tool-call id used to pair results (when available).
+	ToolUseId *string `json:"tool_use_id,omitempty"`
+	TurnId    string  `json:"turn_id"`
 }
 
 // ReviewerMessageRequest defines model for ReviewerMessageRequest.

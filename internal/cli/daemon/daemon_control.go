@@ -46,6 +46,8 @@ const (
 	ctrlOpAgentRestart = "agent_restart"
 	ctrlOpAgentList    = "agent_list"
 	ctrlOpAgentYield   = "agent_yield"
+	ctrlOpInputGet     = "agent_input_get"
+	ctrlOpInputAnswer  = "agent_input_answer"
 )
 
 // startControlServer creates a Unix domain socket listener for per-agent control.
@@ -130,6 +132,10 @@ func (d *Daemon) handleControlConnection(conn net.Conn) {
 		resp = d.handleAgentControlList()
 	case ctrlOpAgentYield:
 		resp = d.handleAgentControlYield(req.AgentName)
+	case ctrlOpInputGet:
+		resp = d.handleAgentInputGet(req.AgentName)
+	case ctrlOpInputAnswer:
+		resp = d.handleAgentInputAnswer(req.AgentName, req.Args)
 	case ctrlOpGetMutations:
 		resp = d.handleControlGetMutations(req.Args)
 	case ctrlOpWaitForMutations:

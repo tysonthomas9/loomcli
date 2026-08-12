@@ -1,14 +1,18 @@
 # Dockerfile.seed — tiny seeder image carrying fdb.
 #
-# Built in-place by docker-compose.regression.yml. Multi-stage copies the
-# fdb CLI from the fleet-db image so seed.sh can use it directly
-# instead of hand-rolling curl + JSON. (fdb is the user-facing
-# fleet-db client; using it here also exercises the real CLI path.)
+# Built in-place by docker-compose.regression.yml. Copies the fdb CLI out of
+# the fleet-db image so seed.sh can use it directly instead of hand-rolling
+# curl + JSON. (fdb is the user-facing fleet-db client; using it here also
+# exercises the real CLI path.)
 #
-# Stage 1: pick fdb out of the fleet-db image.
-FROM loomcli-fleetdb-regression-fleet-db:latest AS fdb-source
-
-# Stage 2: minimal seeder runtime.
+# `fdb-source` is supplied by compose as a named build context
+# (`additional_contexts: fdb-source: "service:fleet-db"`), which makes the
+# fleet-db image an explicit build-time dependency. Naming the built tag
+# directly does not work: compose builds services in parallel, so the tag is
+# not guaranteed to exist locally yet and BuildKit falls through to a registry
+# pull that fails with `pull access denied`. depends_on does not help — it
+# orders startup, not builds. Consequently this image builds only via compose,
+# not via a bare `docker build`.
 FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates curl jq git \

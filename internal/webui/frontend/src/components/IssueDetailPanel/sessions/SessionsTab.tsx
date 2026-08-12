@@ -9,8 +9,9 @@ import { useMemo, useState } from "react";
 import { useTaskSessions, useTaskWorkflowRuns } from "@/hooks/terminal";
 
 import type { SessionRecord } from "@/types/agent";
+import { sessionTotalTokens } from "@/utils/sessionUsage";
 
-import { SessionTimeline } from "./SessionTimeline";
+import { SessionTimeline, type RunRailSummary } from "./SessionTimeline";
 import { SessionDetailView } from "./SessionDetailView";
 import { WorkflowRunDetail } from "./WorkflowRunDetail";
 import styles from "@/styles/SessionRunDetail.module.css";
@@ -80,41 +81,10 @@ export function SessionsTab({ taskId }: SessionsTabProps): JSX.Element {
 
   return (
     <div className={styles.outerContainer} data-testid="sessions-tab">
-      <div className={styles.costSummary}>
-        <span className={styles.summaryItem}>
-          <span className={styles.summaryLabel}>Runs</span>
-          <span className={styles.summaryValue}>{summary.count}</span>
-        </span>
-        <span className={styles.summaryItem}>
-          <span className={styles.summaryLabel}>Tokens</span>
-          <span className={styles.summaryValue}>
-            {formatTokensShort(summary.totalTokens)}
-          </span>
-        </span>
-        <span className={styles.summaryItem}>
-          <span className={styles.summaryLabel}>Cost</span>
-          <span className={styles.summaryValue}>
-            {formatCostUSD(summary.totalCost)}
-          </span>
-        </span>
-        {summary.activeSessions > 0 && (
-          <span className={styles.summaryItem}>
-            <span className={styles.activeBadge}>
-              {summary.activeSessions} active
-            </span>
-          </span>
-        )}
-        {summary.failedSessions > 0 && (
-          <span className={styles.summaryItem}>
-            <span className={styles.failedBadge}>
-              {summary.failedSessions} failed
-            </span>
-          </span>
-        )}
-      </div>
       <div className={styles.container}>
         <SessionTimeline
           sessions={sessions}
+          summary={summary}
           selectedId={selectedSessionId}
           onSelect={(id) => {
             setSelectedSessionId(id);
@@ -140,25 +110,19 @@ export function SessionsTab({ taskId }: SessionsTabProps): JSX.Element {
   );
 }
 
-interface CostSummary {
-  count: number;
-  totalTokens: number;
-  totalCost: number;
-  activeSessions: number;
-  failedSessions: number;
-}
-
 function computeCostSummary(
   sessions: SessionRecord[],
   workflowRuns: Array<{ status: string }>,
-): CostSummary {
+): RunRailSummary {
   let totalTokens = 0;
   let totalCost = 0;
   let activeSessions = 0;
   let failedSessions = 0;
   for (const s of sessions) {
-    totalTokens += s.input_tokens + s.output_tokens;
-    totalCost += s.estimated_cost_usd;
+    totalTokens += sessionTotalTokens(s);
+    if (s.estimated_cost_usd > 0) {
+      totalCost += s.estimated_cost_usd;
+    }
     if (s.is_active) activeSessions++;
     if (s.status === "failed") failedSessions++;
   }
@@ -179,16 +143,4 @@ function computeCostSummary(
     activeSessions,
     failedSessions,
   };
-}
-
-function formatTokensShort(count: number): string {
-  if (count >= 1_000_000) return `${(count / 1_000_000).toFixed(1)}M`;
-  if (count >= 1_000) return `${(count / 1_000).toFixed(1)}K`;
-  return String(count);
-}
-
-function formatCostUSD(usd: number): string {
-  if (usd === 0) return "$0.00";
-  if (usd < 0.01) return "<$0.01";
-  return `$${usd.toFixed(2)}`;
 }

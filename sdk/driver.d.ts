@@ -122,6 +122,9 @@ export interface LoomTaskClaimReadyInput extends LoomEpicInput {
   type?: string;
   /** Optional workspace repository name used to isolate a workflow target. */
   sourceRepo?: string;
+  /** Skip ready tasks carrying ANY of these labels. Use it to keep tasks that
+   *  are mid-flight in a label-routed pipeline out of an epic drain. */
+  excludeLabels?: readonly string[];
   /**
    * Non-authoritative label. IGNORED server-side: the task lock is always keyed
    * by the run's derived actor, never caller input. Retained for wire-compat.
@@ -208,6 +211,8 @@ export interface LoomTaskRunRequest {
   retainWorkItemClaim?: boolean;
 }
 
+/** @deprecated Renamed to LoomTaskClaimReadyInput; kept for wire-compat. */
+export type LoomClaimReadyInput = LoomTaskClaimReadyInput;
 export type LoomReviewHandoffInput = LoomTaskSelector & {
   taskRunId: string;
   reason?: string;

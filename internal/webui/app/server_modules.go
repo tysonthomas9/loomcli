@@ -176,6 +176,6 @@ func (app *Server) buildStorelessInfraModules() {
 	// keep the gh-backed pull-request list route available.
 	app.wsModules = append(app.wsModules, githandlers.NewPullRequestListModule(app.agentSvc))
 	if app.config.AgentControlFn != nil {
-		app.wsModules = append(app.wsModules, webui.NewAgentControlModule(app.config.AgentControlFn))
+		app.wsModules = append(app.wsModules, webui.NewAgentControlModule(app.config.AgentControlFn, app.config.AgentInputFn))
 	}
 }

@@ -626,6 +626,12 @@ func (s *Supervisor) clearAgentSessionState(ap *AgentProcess) {
 	ap.ResumeTaskID = ""          // per-cycle; re-detected in preFlightSetup (ResumeFailures persists)
 	ap.RecoveryMode = recoverCold // per-cycle; re-classified in preFlightSetup
 	ap.LastActivity = time.Time{}
+	// A child that died while parked on an interactive prompt never sends its
+	// "end", so the in-flight count must not survive into the next cycle: a
+	// stale pending count would suspend the output-timeout watchdog for an
+	// agent that is no longer waiting on anything.
+	ap.InputWaitPending = 0
+	ap.InputWaitSince = time.Time{}
 	ap.Mu.Unlock()
 }
 

@@ -6,11 +6,13 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"text/template"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/backends"
+	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/sessions"
 	"github.com/tysonthomas9/loomcli/internal/usage"
 )
@@ -374,9 +376,17 @@ func TestMapTaskFilter_ParentIDCapturedInClosure(t *testing.T) {
 	}
 }
 
+// TestMakeCustomPromptGen_ValidTemplate covers the identity fields.
+//
+// {{.Role}} used to be the hardcoded literal "custom" — a value that told the
+// prompt nothing it did not already know, and that made a role-conditional
+// template impossible to write. It now renders the REAL role name the daemon
+// spawned this agent under (LOOM_ROLE), so the assertion below asserts the
+// role name rather than "custom". The "custom" literal survives only as the
+// fallback for a hand-run `loom agent`, which has no role record; the
+// LOOM_ROLE-unset case below pins that.
 func TestMakeCustomPromptGen_ValidTemplate(t *testing.T) {
-	t.Parallel()
-	// Create a temporary template file
+	// not parallel: drives LOOM_ROLE through t.Setenv.
 	tmpDir := t.TempDir()
 	promptFile := filepath.Join(tmpDir, "test-prompt.txt")
 	templateContent := `You are agent {{.AgentName}} working in {{.WorktreeName}}.
@@ -386,18 +396,33 @@ Do the work!`
 		t.Fatalf("failed to create test file: %v", err)
 	}
 
-	gen := makeCustomPromptGen(promptFile)
-	result := gen("falcon", nil)
+	tests := []struct {
+		name     string
+		role     string // LOOM_ROLE
+		wantRole string
+	}{
+		{name: "daemon-spawned role reaches the template", role: "inspect-reviewer", wantRole: "inspect-reviewer"},
+		{name: "no role record falls back to custom", role: "", wantRole: "custom"},
+	}
 
-	// Verify template interpolation
-	if !strings.Contains(result, "You are agent falcon") {
-		t.Errorf("expected result to contain 'You are agent falcon', got: %s", result)
-	}
-	if !strings.Contains(result, "working in falcon") {
-		t.Errorf("expected result to contain 'working in falcon', got: %s", result)
-	}
-	if !strings.Contains(result, "Your role is custom") {
-		t.Errorf("expected result to contain 'Your role is custom', got: %s", result)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("LOOM_ROLE", tt.role)
+
+			gen := makeCustomPromptGen(promptFile)
+			result := gen("falcon", nil)
+
+			// Verify template interpolation
+			if !strings.Contains(result, "You are agent falcon") {
+				t.Errorf("expected result to contain 'You are agent falcon', got: %s", result)
+			}
+			if !strings.Contains(result, "working in falcon") {
+				t.Errorf("expected result to contain 'working in falcon', got: %s", result)
+			}
+			if want := "Your role is " + tt.wantRole; !strings.Contains(result, want) {
+				t.Errorf("expected result to contain %q, got: %s", want, result)
+			}
+		})
 	}
 }
 
@@ -722,5 +747,354 @@ Worktree: {{.WorktreeName}}`
 	}
 	if !strings.Contains(result, "Worktree: ember") {
 		t.Errorf("expected 'Worktree: ember', got: %s", result)
+	}
+	// A workspace being present is not consent to have its table injected —
+	// this template never asked for {{.WorkspaceBlock}}.
+	if strings.Contains(result, "Multi-Repo Environment") {
+		t.Errorf("workspace block leaked into a prompt that never referenced it, got: %s", result)
+	}
+}
+
+// --- Custom prompt context vocabulary (T3/D6) ---
+
+// writeCustomPrompt writes a prompt template into a temp dir and returns its path.
+func writeCustomPrompt(t *testing.T, body string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "custom-prompt.md")
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatalf("write prompt file: %v", err)
+	}
+	return path
+}
+
+// setAgentParentID points the package-level --parent flag var at id for the
+// duration of the test. buildCustomPromptData reads that var directly, the
+// same way runAgent does.
+func setAgentParentID(t *testing.T, id string) {
+	t.Helper()
+	orig := agentParentID
+	agentParentID = id
+	t.Cleanup(func() { agentParentID = orig })
+}
+
+// installMockIssueBackend makes cli.DefaultIssueBackend() resolve to a
+// recording mock, so a test can assert on the calls a prompt render made —
+// or, more importantly, on the calls it did not make.
+func installMockIssueBackend(t *testing.T, detail *backend.IssueDetailData) *MockIssueBackend {
+	t.Helper()
+	mock := NewMockIssueBackend()
+	mock.GetResult = detail
+	setDefaultIssueBackend(mock)
+	t.Cleanup(resetDefaultIssueBackend)
+	return mock
+}
+
+// TestMakeCustomPromptGen_TaskID pins the defect this change fixes: {{.TaskID}}
+// was declared but never populated, so a custom role could not even name the
+// task it had already been handed.
+func TestMakeCustomPromptGen_TaskID(t *testing.T) {
+	// not parallel: drives LOOM_ASSIGNED_TASK_ID through t.Setenv.
+	promptFile := writeCustomPrompt(t, `Task: [{{.TaskID}}]`)
+	gen := makeCustomPromptGen(promptFile)
+
+	// Daemon mode: pre-flight claims a task for custom roles too (any role
+	// with a task_filter goes through the same claim path as the built-ins)
+	// and exports LOOM_ASSIGNED_TASK_ID role-agnostically.
+	t.Setenv("LOOM_ASSIGNED_TASK_ID", "loomcli-487")
+	if got := gen("falcon", nil); !strings.Contains(got, "Task: [loomcli-487]") {
+		t.Errorf("daemon mode: expected the assigned task ID in the prompt, got: %s", got)
+	}
+
+	// One-shot / auto mode: there is no pre-claim, the agent selects and
+	// claims its own task mid-turn, so no ID exists at render time. It must
+	// come out empty rather than invented.
+	t.Setenv("LOOM_ASSIGNED_TASK_ID", "")
+	if got := gen("falcon", nil); !strings.Contains(got, "Task: []") {
+		t.Errorf("one-shot mode: expected an empty task ID, got: %s", got)
+	}
+}
+
+// TestMakeCustomPromptGen_OptInBlocks checks that every new variable actually
+// renders when the template names it. The inverse — that it costs nothing when
+// unnamed — is TestMakeCustomPromptGen_NothingIsForced and
+// TestMakeCustomPromptGen_NoIssueFetchUnlessTaskDetailReferenced.
+func TestMakeCustomPromptGen_OptInBlocks(t *testing.T) {
+	// not parallel: env vars, the --parent package var, and the global backend.
+	wt := t.TempDir()
+	t.Setenv("LOOM_WORKTREE_PATH", wt)
+	t.Setenv("LOOM_ASSIGNED_TASK_ID", "loomcli-487")
+	setAgentParentID(t, "EPIC-9")
+	backends.ClearResumeSessionID()
+
+	if err := config.SaveCheckpoint(cli.ResolveLockDir(wt), &config.Checkpoint{
+		AgentName: "falcon", TaskID: "loomcli-487", GitDiff: "+prior work", ExitCode: 1,
+	}); err != nil {
+		t.Fatalf("SaveCheckpoint: %v", err)
+	}
+	installMockIssueBackend(t, &backend.IssueDetailData{
+		IssueData:          backend.IssueData{ID: "loomcli-487", Title: "Populate the prompt context", Status: "in_progress"},
+		AcceptanceCriteria: "TaskID is populated",
+	})
+
+	workspace := &WorkspaceConfig{
+		Path:  "/test/workspace",
+		Repos: []RepoConfig{{Name: "api", Path: "api"}, {Name: "web", Path: "web"}},
+	}
+
+	tests := []struct {
+		name      string
+		body      string
+		wantParts []string
+	}{
+		{
+			name:      "EpicID",
+			body:      "Epic: {{.EpicID}}",
+			wantParts: []string{"Epic: EPIC-9"},
+		},
+		{
+			name:      "WorkspaceBlock",
+			body:      "{{.WorkspaceBlock}}",
+			wantParts: []string{"Workspace Mode: Multi-Repo Environment", "| api | ./api | main |"},
+		},
+		{
+			name:      "EpicScope",
+			body:      "{{.EpicScope}}",
+			wantParts: []string{"**Epic scope: EPIC-9**", "Do not work on tasks from other epics"},
+		},
+		{
+			name:      "SafetyBlock",
+			body:      "{{.SafetyBlock}}",
+			wantParts: []string{"Multi-Agent Safety Rules", "Do not switch branches"},
+		},
+		{
+			name:      "CheckpointBlock",
+			body:      "{{.CheckpointBlock}}",
+			wantParts: []string{"PREVIOUS ATTEMPT CONTEXT", "loomcli-487", "+prior work"},
+		},
+		{
+			name:      "TaskDetail",
+			body:      "{{.TaskDetail}}",
+			wantParts: []string{"ID: loomcli-487", "Title: Populate the prompt context", "TaskID is populated"},
+		},
+		{
+			name: "blocks compose inside conditionals",
+			body: "{{if .TaskID}}## Task {{.TaskID}}\n{{.TaskDetail}}{{end}}{{.SafetyBlock}}",
+			wantParts: []string{
+				"## Task loomcli-487", "Title: Populate the prompt context", "Multi-Agent Safety Rules",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := makeCustomPromptGen(writeCustomPrompt(t, tt.body))("falcon", workspace)
+			for _, part := range tt.wantParts {
+				if !strings.Contains(got, part) {
+					t.Errorf("{{.%s}} render missing %q, got:\n%s", tt.name, part, got)
+				}
+			}
+		})
+	}
+}
+
+// TestMakeCustomPromptGen_NoIssueFetchUnlessTaskDetailReferenced is the
+// load-bearing test for the whole opt-in design.
+//
+// TaskDetail is the only variable that leaves the process — an issue-backend
+// Get, which under the fleet backend is a network round trip on every agent
+// spawn. "Opt in" therefore has to mean something stronger than "renders
+// empty": a prompt that never names it must never trigger the call. The
+// recording mock makes that observable.
+//
+// The prose case is why detection walks the parse tree instead of scanning the
+// raw file for field names: a prompt whose instructions merely say the word
+// "TaskDetail" is not a reference, and a string scan could not tell.
+func TestMakeCustomPromptGen_NoIssueFetchUnlessTaskDetailReferenced(t *testing.T) {
+	// not parallel: env vars and the global issue backend.
+	t.Setenv("LOOM_ASSIGNED_TASK_ID", "loomcli-487")
+	setAgentParentID(t, "EPIC-9")
+	mock := installMockIssueBackend(t, &backend.IssueDetailData{
+		IssueData: backend.IssueData{ID: "loomcli-487", Title: "Must never be fetched"},
+	})
+
+	quiet := []struct {
+		name string
+		body string
+	}{
+		{"no template actions at all", "Read the code and report."},
+		{"identity fields only", "Agent {{.AgentName}} ({{.Role}}) on task {{.TaskID}} in epic {{.EpicID}}."},
+		{"every other block", "{{.SafetyBlock}}{{.WorkspaceBlock}}{{.EpicScope}}{{.CheckpointBlock}}"},
+		{"the field name appears only as prose", "Never ask for TaskDetail. The .TaskDetail idea is out of scope."},
+		{"unparseable template falls back to the raw file", "Broken {{.TaskDetail"},
+	}
+
+	for _, tt := range quiet {
+		t.Run(tt.name, func(t *testing.T) {
+			mock.Calls = nil
+			makeCustomPromptGen(writeCustomPrompt(t, tt.body))("falcon", nil)
+			if len(mock.Calls) != 0 {
+				t.Errorf("expected zero issue-backend calls for a template that never references "+
+					"{{.TaskDetail}}, got %d: %+v", len(mock.Calls), mock.Calls)
+			}
+		})
+	}
+
+	// Control: naming it does fetch, exactly once. Without this the test above
+	// would pass on a backend that was simply never wired up.
+	t.Run("referencing it fetches once", func(t *testing.T) {
+		mock.Calls = nil
+		got := makeCustomPromptGen(writeCustomPrompt(t, "{{.TaskDetail}}"))("falcon", nil)
+		if len(mock.Calls) != 1 || mock.Calls[0].Method != "Get" {
+			t.Fatalf("expected exactly one Get, got %+v", mock.Calls)
+		}
+		if !strings.Contains(got, "Must never be fetched") {
+			t.Errorf("fetched detail did not reach the prompt, got: %s", got)
+		}
+	})
+}
+
+// TestMakeCustomPromptGen_NothingIsForced is the other half of the contract:
+// with every block available — a claimed task, an epic, a workspace, a
+// checkpoint on disk — a prompt that opts into none of them must render
+// byte-identically to its own file.
+func TestMakeCustomPromptGen_NothingIsForced(t *testing.T) {
+	// not parallel: env vars, the --parent package var, and the global backend.
+	wt := t.TempDir()
+	t.Setenv("LOOM_WORKTREE_PATH", wt)
+	t.Setenv("LOOM_ASSIGNED_TASK_ID", "loomcli-487")
+	t.Setenv("LOOM_READ_ONLY", "")
+	setAgentParentID(t, "EPIC-9")
+	backends.ClearResumeSessionID()
+	if err := config.SaveCheckpoint(cli.ResolveLockDir(wt), &config.Checkpoint{
+		AgentName: "falcon", TaskID: "loomcli-487", GitDiff: "+prior work", ExitCode: 1,
+	}); err != nil {
+		t.Fatalf("SaveCheckpoint: %v", err)
+	}
+	installMockIssueBackend(t, &backend.IssueDetailData{
+		IssueData: backend.IssueData{ID: "loomcli-487", Title: "Unwanted"},
+	})
+
+	workspace := &WorkspaceConfig{
+		Path:  "/test/workspace",
+		Repos: []RepoConfig{{Name: "api", Path: "api"}},
+	}
+
+	const body = "You are a reviewer. Read the diff and comment. Nothing else.\n"
+	got := makeCustomPromptGen(writeCustomPrompt(t, body))("falcon", workspace)
+	if got != body {
+		t.Errorf("prompt was not left alone:\n got: %q\nwant: %q", got, body)
+	}
+}
+
+// TestMakeCustomPromptGen_ReadOnlyPreambleAppliedOnce guards the
+// double-preamble trap: renderPrompt and withReadOnlyPreamble both prepend
+// ReadOnlyPreamble, so a custom prompt must go through exactly one of them.
+func TestMakeCustomPromptGen_ReadOnlyPreambleAppliedOnce(t *testing.T) {
+	// not parallel: drives LOOM_READ_ONLY through t.Setenv.
+	t.Setenv("LOOM_READ_ONLY", "1")
+	t.Setenv("LOOM_ASSIGNED_TASK_ID", "loomcli-487")
+
+	for _, body := range []string{
+		"Review only.",
+		"Review only.\n{{.SafetyBlock}}\n{{.TaskID}}",
+	} {
+		got := makeCustomPromptGen(writeCustomPrompt(t, body))("falcon", nil)
+		if n := strings.Count(got, readOnlyPreamble); n != 1 {
+			t.Errorf("read-only preamble appeared %d times, want 1, in:\n%s", n, got)
+		}
+		if !strings.HasPrefix(got, readOnlyPreamble) {
+			t.Errorf("read-only preamble should lead the prompt, got:\n%s", got)
+		}
+	}
+}
+
+// TestReferencedPromptFields covers the detector directly, including the two
+// cases that motivate walking the parse tree rather than scanning the source
+// (prose mentions are not references) and the one documented gap (a template
+// that renders the context wholesale names no field).
+func TestReferencedPromptFields(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		src     string
+		want    []string
+		notWant []string
+	}{
+		{
+			name:    "prose is not a reference",
+			src:     "Do not use TaskDetail or .SafetyBlock here.",
+			notWant: []string{"TaskDetail", "SafetyBlock"},
+		},
+		{
+			name: "direct reference",
+			src:  "{{.TaskDetail}}",
+			want: []string{"TaskDetail"},
+		},
+		{
+			name: "inside an if body",
+			src:  "{{if .TaskID}}{{.TaskDetail}}{{end}}",
+			want: []string{"TaskID", "TaskDetail"},
+		},
+		{
+			name: "inside an else body",
+			src:  "{{if .TaskID}}x{{else}}{{.SafetyBlock}}{{end}}",
+			want: []string{"TaskID", "SafetyBlock"},
+		},
+		{
+			name: "inside a with body",
+			src:  "{{with .EpicID}}{{.}}{{end}}{{.EpicScope}}",
+			want: []string{"EpicID", "EpicScope"},
+		},
+		{
+			name: "inside a range body",
+			src:  "{{range .TaskDetail}}{{.}}{{end}}",
+			want: []string{"TaskDetail"},
+		},
+		{
+			name: "as a pipeline argument",
+			src:  `{{printf "%s" .WorkspaceBlock}}`,
+			want: []string{"WorkspaceBlock"},
+		},
+		{
+			name: "through a pipe",
+			src:  "{{.CheckpointBlock | printf \"%s\"}}",
+			want: []string{"CheckpointBlock"},
+		},
+		{
+			name: "inside an associated define block",
+			src:  `{{define "extra"}}{{.TaskDetail}}{{end}}{{template "extra" .}}`,
+			want: []string{"TaskDetail"},
+		},
+		{
+			name: "only the first hop of a chain names a field",
+			src:  "{{.TaskDetail.Whatever}}",
+			want: []string{"TaskDetail"},
+		},
+		{
+			name:    "bare dot names nothing (documented gap)",
+			src:     "{{.}}",
+			notWant: []string{"TaskDetail", "SafetyBlock"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			tmpl, err := template.New("t").Parse(tt.src)
+			if err != nil {
+				t.Fatalf("parse %q: %v", tt.src, err)
+			}
+			refs := referencedPromptFields(tmpl)
+			for _, field := range tt.want {
+				if !refs.has(field) {
+					t.Errorf("expected %q to be detected in %q, got %v", field, tt.src, refs)
+				}
+			}
+			for _, field := range tt.notWant {
+				if refs.has(field) {
+					t.Errorf("did not expect %q to be detected in %q, got %v", field, tt.src, refs)
+				}
+			}
+		})
 	}
 }

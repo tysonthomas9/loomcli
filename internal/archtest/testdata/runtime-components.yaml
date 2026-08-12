@@ -26,6 +26,7 @@ goroutine_launches:
   - {file: "internal/cli/automode/automode_tmux_util.go", function: "listenForAttachKey", site: "go#1", callee: "<anonymous>", disposition: component, component_ids: [automode-attach-input]}
   - {file: "internal/cli/backend_echo_testbackend.go", function: "EchoBackend.InvokeNonInteractive", site: "go#1", callee: "<anonymous>", disposition: bounded, reason: "testbackend pipe writer is drained and joined before the invocation returns"}
   - {file: "internal/cli/backend_echo_testbackend.go", function: "EchoBackend.InvokeStreaming", site: "go#1", callee: "<anonymous>", disposition: helper, reason: "testbackend-only pipe writer is owned by the returned reader and excluded from product runtime counts"}
+  - {file: "internal/cli/backends/backend_claude_conversation.go", function: "runConversationTurn", site: "go#1", callee: "answerSurfacedRequest", disposition: component, component_ids: [claude-input-request-answerer]}
   - {file: "internal/cli/backends/backend_wrapper.go", function: "contextFromShutdown", site: "go#1", callee: "<anonymous>", disposition: helper, reason: "bridges one legacy shutdown channel to one invocation context and exits with either side"}
   - {file: "internal/cli/backends/backend_wrapper.go", function: "runHarness", site: "go#1", callee: "<anonymous>", disposition: bounded, reason: "the harness output scanner is explicitly awaited through scanDone"}
   - {file: "internal/cli/daemon/daemon_cmd.go", function: "runDaemonMainLoop", site: "go#1", callee: "<anonymous>", disposition: bounded, reason: "shutdown worker is awaited with a thirty-second process-exit bound"}
@@ -86,6 +87,7 @@ goroutine_launches:
   - {file: "internal/leadcontrol/codex_runtime.go", function: "RunCodexLeadRuntime", site: "go#1", callee: "discoverCodexLeadThread", disposition: component, component_ids: [codex-lead-thread-discovery]}
   - {file: "internal/leadcontrol/codex_runtime.go", function: "RunCodexLeadRuntime", site: "go#2", callee: "drainLeadMessageQueue", disposition: component, component_ids: [lead-message-delivery-drain]}
   - {file: "internal/leadcontrol/codex_runtime.go", function: "startCodexAppServer", site: "go#1", callee: "<anonymous>", disposition: component, component_ids: [codex-app-server-process-reaper]}
+  - {file: "internal/leadcontrol/harness_resize.go", function: "startHarnessResizeForwarder", site: "go#1", callee: "<anonymous>", disposition: component, component_ids: [harness-resize-forwarder]}
   - {file: "internal/leadcontrol/harness_runtime.go", function: "RunHarnessLeadRuntime", site: "go#1", callee: "watchHarnessLeadRuntime", disposition: component, component_ids: [harness-lead-runtime-watch]}
   - {file: "internal/leadcontrol/harness_runtime.go", function: "RunHarnessLeadRuntime", site: "go#2", callee: "drainLeadMessageQueue", disposition: component, component_ids: [lead-message-delivery-drain]}
   - {file: "internal/leadcontrol/harness_runtime.go", function: "forwardHarnessStdin", site: "go#1", callee: "<anonymous>", disposition: component, component_ids: [harness-stdin-forwarder]}
@@ -1215,6 +1217,32 @@ components:
     cancellation: "outer dispatcher observes shutdown; a blocked stdin read ends only when stdin or the process closes"
     readiness_health: "not readiness-bearing; Enter requests attachment to the active tmux session"
     retry_backoff: "continues after ignored keys; read errors terminate the input component"
+    classification: request-scoped
+
+  - id: harness-resize-forwarder
+    kind: component
+    file: internal/leadcontrol/harness_resize.go
+    function: startHarnessResizeForwarder
+    site: component:resize-forwarder
+    capability: interaction
+    owner: controlled harness lead runtime
+    cadence: "event driven by SIGWINCH terminal resize signals"
+    cancellation: "resize context cancelled by the forwarder's stop func; signal subscription is released with it"
+    readiness_health: "not readiness-bearing; forwarding stops with the session"
+    retry_backoff: "no retry; a failed resize is superseded by the next SIGWINCH"
+    classification: request-scoped
+
+  - id: claude-input-request-answerer
+    kind: component
+    file: internal/cli/backends/backend_claude_conversation.go
+    function: runConversationTurn
+    site: component:input-request-answerer
+    capability: interaction
+    owner: claude backend conversation
+    cadence: "event driven by harness input requests within a turn"
+    cancellation: "turn context; the human wait runs beside the event pump so it cannot block it"
+    readiness_health: "not readiness-bearing; an unanswered request ends with the turn"
+    retry_backoff: "no retry; each input request is answered at most once"
     classification: request-scoped
 
   - id: harness-stdin-forwarder

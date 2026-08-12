@@ -74,6 +74,65 @@ func (c *AgentIPCClient) Heartbeat(at time.Time) error {
 	return ipcResponseToError(resp, "ipc.heartbeat")
 }
 
+// InputWait tells the daemon this agent has parked on an interactive prompt
+// (phase IPCInputWaitBegin) or that the prompt is resolved (IPCInputWaitEnd),
+// so the daemon can suspend — and later resume — its output-timeout idle kill.
+//
+// It rides the heartbeat operation: the daemon reads the phase off the request
+// exactly as it already reads LastActivityAt off every op, so no new operation,
+// socket or lease fence is involved.
+//
+// It deliberately does NOT invent an activity timestamp. The whole premise of
+// the signal is that the agent is producing no output; claiming otherwise would
+// corrupt the liveness tier the watchdog reads. The daemon stamps the edge with
+// its own clock instead.
+func (c *AgentIPCClient) InputWait(phase string) error {
+	req := AgentIPCRequest{
+		Operation:      IPCOpHeartbeat,
+		AgentName:      c.AgentName,
+		SessionID:      c.SessionID,
+		LeaseID:        c.LeaseID,
+		LeaseToken:     c.LeaseToken,
+		LastActivityAt: c.snapshotActivity(),
+		InputWait:      phase,
+	}
+	resp, err := sendAgentIPCRequest(c.SocketPath, req)
+	if err != nil {
+		return err
+	}
+	return ipcResponseToError(resp, "ipc.input_wait")
+}
+
+// inputOp sends a pending-input operation (open/close) and returns any error.
+func (c *AgentIPCClient) inputOp(op string, args json.RawMessage) error {
+	_, err := c.inputOpData(op, args)
+	return err
+}
+
+// inputOpData sends a pending-input operation and returns the response body.
+// Ops ride the same one-shot request shape as everything else; the piggybacked
+// LastActivityAt is deliberately included so a long poll loop keeps liveness
+// fresh even though the harness itself is silent at a dialog.
+func (c *AgentIPCClient) inputOpData(op string, args json.RawMessage) (json.RawMessage, error) {
+	req := AgentIPCRequest{
+		Operation:      op,
+		AgentName:      c.AgentName,
+		SessionID:      c.SessionID,
+		LeaseID:        c.LeaseID,
+		LeaseToken:     c.LeaseToken,
+		LastActivityAt: c.snapshotActivity(),
+		Args:           args,
+	}
+	resp, err := sendAgentIPCRequest(c.SocketPath, req)
+	if err != nil {
+		return nil, err
+	}
+	if err := ipcResponseToError(resp, "ipc."+op); err != nil {
+		return nil, err
+	}
+	return resp.Data, nil
+}
+
 // Claim atomically claims an issue for this agent. Pass lockTTL=0 to use the
 // server's default TTL. Returns *backend.BackendError with KindConflict if
 // already claimed, KindNotFound if issue missing.

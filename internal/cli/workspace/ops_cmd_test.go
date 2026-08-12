@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
+	"github.com/tysonthomas9/loomcli/internal/cli/backends"
 	"github.com/tysonthomas9/loomcli/internal/cli/local"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
@@ -23,6 +24,47 @@ func clearRuntimeRoutingEnv(t *testing.T) {
 	t.Setenv("LOOM_SERVER_URL", "")
 	t.Setenv("LOOM_FLEET_DB_URL", "")
 	t.Setenv(envLocalRuntimeMode, "")
+}
+
+// TestWorkspaceOpsEnsureTimeoutOutlastsTheBackendVersionProbe covers the
+// collision this default exists to avoid: the flag default used to be 20s
+// and the backend `<binary> --version` probe is bounded at 20s, so one
+// cold probe could consume the whole budget and ensure-runtime would fail
+// without ever having waited for the daemon. The probe builds its own
+// context, so widening this deadline is the only lever available.
+func TestWorkspaceOpsEnsureTimeoutOutlastsTheBackendVersionProbe(t *testing.T) {
+	prev := workspaceOpsTimeoutSec
+	t.Cleanup(func() { workspaceOpsTimeoutSec = prev })
+
+	flag := workspaceOpsEnsureRuntimeCmd.Flags().Lookup("timeout")
+	if flag == nil {
+		t.Fatal("ensure-runtime has no --timeout flag")
+	}
+	wantDefault := strconv.Itoa(int(defaultEnsureRuntimeTimeout / time.Second))
+	if flag.DefValue != wantDefault {
+		t.Fatalf("--timeout default = %s, want %s (flag default and fallback must stay in step)", flag.DefValue, wantDefault)
+	}
+
+	workspaceOpsTimeoutSec = 0
+	if got := workspaceOpsEnsureTimeout(); got != defaultEnsureRuntimeTimeout {
+		t.Fatalf("workspaceOpsEnsureTimeout() = %s with no flag value, want %s", got, defaultEnsureRuntimeTimeout)
+	}
+
+	if defaultEnsureRuntimeTimeout <= backends.VersionProbeTimeout {
+		t.Fatalf("default ensure-runtime deadline %s does not outlast the backend version probe (%s); "+
+			"a single cold probe can consume the entire budget",
+			defaultEnsureRuntimeTimeout, backends.VersionProbeTimeout)
+	}
+}
+
+func TestWorkspaceOpsEnsureTimeoutPrefersTheFlag(t *testing.T) {
+	prev := workspaceOpsTimeoutSec
+	t.Cleanup(func() { workspaceOpsTimeoutSec = prev })
+
+	workspaceOpsTimeoutSec = 5
+	if got := workspaceOpsEnsureTimeout(); got != 5*time.Second {
+		t.Fatalf("workspaceOpsEnsureTimeout() = %s, want 5s (an explicit --timeout wins)", got)
+	}
 }
 
 func TestWaitForWorkspaceOpsDaemonUsesCallerContext(t *testing.T) {

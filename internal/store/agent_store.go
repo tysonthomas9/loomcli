@@ -28,6 +28,7 @@ type AgentCreate struct {
 	MaxConcurrency int
 	BudgetPolicy   string
 	DesiredState   domain.AgentDesiredState
+	Hooks          *domain.AgentHooks
 }
 
 // AgentUpdate is the partial-update payload for agents.
@@ -47,6 +48,9 @@ type AgentUpdate struct {
 	MaxConcurrency *int
 	BudgetPolicy   *string
 	DesiredState   *domain.AgentDesiredState
+	// Hooks replaces the whole completion pipeline. Nil leaves it untouched;
+	// a non-nil empty value clears it.
+	Hooks *domain.AgentHooks
 }
 
 // AgentStore is the persistence interface for Agent assignments.

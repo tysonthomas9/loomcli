@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -445,4 +446,71 @@ func TestAgentIPCClient_Release_Conflict(t *testing.T) {
 	if !backend.IsKind(err, backend.KindConflict) {
 		t.Errorf("expected KindConflict, got: %v", err)
 	}
+}
+
+// The input-wait edges must carry the lease-fence fields (they ride the
+// heartbeat op, which the daemon validates) and must NOT fabricate an activity
+// timestamp — the whole premise of the signal is that the agent is silent.
+func TestAgentIPCClient_InputWait_RidesHeartbeatWithoutFakingActivity(t *testing.T) {
+	tmpDir := shortSocketDir(t)
+	socketPath := filepath.Join(tmpDir, "ipc.sock")
+
+	var captured []AgentIPCRequest
+	var mu sync.Mutex
+	startTestIPCServer(t, socketPath, func(req AgentIPCRequest) AgentIPCResponse {
+		mu.Lock()
+		captured = append(captured, req)
+		mu.Unlock()
+		return AgentIPCResponse{Success: true}
+	})
+
+	client := NewAgentIPCClient(socketPath, "falcon")
+	client.SessionID = "sess-1"
+	client.LeaseID = "lease-1"
+	client.LeaseToken = "token-1"
+
+	if err := client.InputWait(IPCInputWaitBegin); err != nil {
+		t.Fatalf("InputWait(begin) error = %v", err)
+	}
+	if err := client.InputWait(IPCInputWaitEnd); err != nil {
+		t.Fatalf("InputWait(end) error = %v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(captured) != 2 {
+		t.Fatalf("captured %d requests, want 2", len(captured))
+	}
+	for i, want := range []string{IPCInputWaitBegin, IPCInputWaitEnd} {
+		req := captured[i]
+		if req.Operation != IPCOpHeartbeat {
+			t.Errorf("request %d Operation = %q, want %q", i, req.Operation, IPCOpHeartbeat)
+		}
+		if req.InputWait != want {
+			t.Errorf("request %d InputWait = %q, want %q", i, req.InputWait, want)
+		}
+		if !req.LastActivityAt.IsZero() {
+			t.Errorf("request %d LastActivityAt = %v, want zero (must not invent PTY output)", i, req.LastActivityAt)
+		}
+		if req.SessionID != "sess-1" || req.LeaseID != "lease-1" || req.LeaseToken != "token-1" {
+			t.Errorf("request %d lease fields = session %q lease %q token %q, want sess-1/lease-1/token-1",
+				i, req.SessionID, req.LeaseID, req.LeaseToken)
+		}
+	}
+}
+
+// Outside daemon supervision there is no watchdog to suspend, so both halves
+// must be no-ops rather than errors.
+func TestBeginDaemonInputWait_NoDaemonIsANoop(t *testing.T) {
+	SetDefaultIssueBackend(nil)
+	t.Cleanup(ResetDefaultIssueBackend)
+	t.Setenv("LOOM_DAEMON_SOCKET", "")
+	ResetDefaultIssueBackend()
+
+	release := BeginDaemonInputWait()
+	if release == nil {
+		t.Fatal("BeginDaemonInputWait() = nil, want a no-op release func")
+	}
+	release()
+	release() // idempotent
 }

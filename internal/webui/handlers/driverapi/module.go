@@ -431,7 +431,10 @@ func (m *Module) claimReady(ctx context.Context, ws string, id driverIdentity, b
 		// "bug"), applied server-side by the ready view.
 		Type       string `json:"type"`
 		SourceRepo string `json:"sourceRepo"`
-		Limit      int    `json:"limit"`
+		// ExcludeLabels skips ready tasks carrying ANY of these labels, keeping
+		// mid-flight tasks in a label-routed pipeline out of an epic drain.
+		ExcludeLabels []string `json:"excludeLabels"`
+		Limit         int      `json:"limit"`
 	}](body)
 	if err != nil {
 		return nil, err
@@ -448,7 +451,8 @@ func (m *Module) claimReady(ctx context.Context, ws string, id driverIdentity, b
 	}
 	ready, err := driverpkg.ReadyTaskCandidates(ctx, issueBackend, driverpkg.TaskClaimOptions{
 		EpicID: epicID, Type: strings.TrimSpace(params.Type),
-		SourceRepo: strings.TrimSpace(params.SourceRepo), Limit: params.Limit,
+		SourceRepo:    strings.TrimSpace(params.SourceRepo),
+		ExcludeLabels: params.ExcludeLabels, Limit: params.Limit,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("list ready tasks: %w", err)
