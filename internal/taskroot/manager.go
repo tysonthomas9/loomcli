@@ -174,8 +174,11 @@ func matchingManifest(ctx context.Context, rootPath string, spec RootSpec, repos
 	if err := json.Unmarshal(data, &manifest); err != nil {
 		return RootManifest{}, true, fmt.Errorf("decode existing TaskRun Root Manifest: %w", err)
 	}
-	if manifest.Version != ManifestVersion || manifest.TaskRunID != spec.TaskRunID || manifest.Generation != spec.Generation || manifest.FencingToken != spec.FencingToken {
+	if manifest.Version != ManifestVersion || manifest.TaskRunID != spec.TaskRunID || manifest.Generation != spec.Generation {
 		return RootManifest{}, true, fmt.Errorf("existing TaskRun Root identity does not match requested lease")
+	}
+	if manifest.FencingToken > spec.FencingToken {
+		return RootManifest{}, true, fmt.Errorf("existing TaskRun Root fence %d is newer than requested fence %d: %w", manifest.FencingToken, spec.FencingToken, ErrStaleLease)
 	}
 	if len(manifest.Repositories) != len(repositories) {
 		return RootManifest{}, true, fmt.Errorf("existing TaskRun Root repository set does not match request")
@@ -194,6 +197,12 @@ func matchingManifest(ctx context.Context, rootPath string, spec RootSpec, repos
 		branch, err := runGit(ctx, existing.Path, "branch", "--show-current")
 		if err != nil || (!requested.Detached && branch != requested.BranchName) || (requested.Detached && branch != "") {
 			return RootManifest{}, true, fmt.Errorf("existing TaskRun Root repository %q branch changed", requested.Name)
+		}
+	}
+	if manifest.FencingToken < spec.FencingToken {
+		manifest.FencingToken = spec.FencingToken
+		if err := publishManifest(rootPath, manifest); err != nil {
+			return RootManifest{}, true, fmt.Errorf("re-fence existing TaskRun Root: %w", err)
 		}
 	}
 	return manifest, true, nil

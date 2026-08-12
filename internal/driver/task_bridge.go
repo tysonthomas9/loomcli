@@ -423,7 +423,7 @@ func (e HostBridgeTaskExecutor) ExecuteTask(ctx context.Context, req TaskExecReq
 	if rooted && result.Status == domain.TaskRunCompleted && req.ExecutionClass != domain.TaskRunExecutionReview && len(commitInspection.Repositories) > 0 {
 		finalizer := e.CompletionFinalizer
 		if finalizer == nil {
-			recorder, ok := e.Store.(store.TaskChangeHandoffStore)
+			recorder, ok := store.ResolveTaskChangeHandoffStore(e.Store)
 			if !ok {
 				result.Status = domain.TaskRunFailed
 				result.ExitCode = 1
@@ -489,7 +489,7 @@ func (e HostBridgeTaskExecutor) enqueueTaskChangeReview(ctx context.Context, req
 }
 
 func (e HostBridgeTaskExecutor) recordTaskRunExecutionContext(ctx context.Context, req TaskExecRequest, state domain.TaskRunRootState, backendSessionRef, backendKind string) error {
-	lifecycle, ok := e.Store.(store.TaskRunExecutionContextStore)
+	lifecycle, ok := store.ResolveTaskRunExecutionContextStore(e.Store)
 	if !ok {
 		return nil
 	}

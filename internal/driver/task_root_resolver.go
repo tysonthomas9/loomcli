@@ -53,7 +53,7 @@ func (r LocalTaskRootResolver) ResolveTaskRoot(ctx context.Context, req TaskExec
 	if len(req.RepositorySet) == 0 {
 		return TaskRoot{}, fmt.Errorf("TaskRun repository_set is required: %w", domain.ErrInvalid)
 	}
-	if lifecycle, ok := r.Store.(store.TaskRunExecutionContextStore); ok {
+	if lifecycle, ok := store.ResolveTaskRunExecutionContextStore(r.Store); ok {
 		if _, err := lifecycle.UpdateTaskRunExecutionContext(ctx, workspaceKey, req.TaskRunID, store.TaskRunExecutionContextUpdate{
 			RootState: domain.TaskRunRootProvisioning, RootNodeID: req.NodeID, RootFencingToken: req.FencingToken, BackendKind: req.ProviderProfile,
 		}); err != nil {
@@ -71,7 +71,7 @@ func (r LocalTaskRootResolver) ResolveTaskRoot(ctx context.Context, req TaskExec
 	names := append([]string(nil), req.RepositorySet...)
 	changeSetHeads := map[string]domain.TaskChangeSetEntry{}
 	if req.ExecutionClass == domain.TaskRunExecutionReview {
-		handoff, ok := r.Store.(store.TaskChangeHandoffStore)
+		handoff, ok := store.ResolveTaskChangeHandoffStore(r.Store)
 		if !ok {
 			return TaskRoot{}, fmt.Errorf("Task Change Set store required for review: %w", domain.ErrInvalid)
 		}
@@ -145,14 +145,14 @@ func (r LocalTaskRootResolver) ResolveTaskRoot(ctx context.Context, req TaskExec
 		Repositories: specs,
 	})
 	if err != nil {
-		if lifecycle, ok := r.Store.(store.TaskRunExecutionContextStore); ok {
+		if lifecycle, ok := store.ResolveTaskRunExecutionContextStore(r.Store); ok {
 			_, _ = lifecycle.UpdateTaskRunExecutionContext(ctx, workspaceKey, req.TaskRunID, store.TaskRunExecutionContextUpdate{
 				RootState: domain.TaskRunRootFailed, RootNodeID: req.NodeID, RootFencingToken: req.FencingToken, BackendKind: req.ProviderProfile,
 			})
 		}
 		return TaskRoot{}, err
 	}
-	if lifecycle, ok := r.Store.(store.TaskRunExecutionContextStore); ok {
+	if lifecycle, ok := store.ResolveTaskRunExecutionContextStore(r.Store); ok {
 		if _, err := lifecycle.UpdateTaskRunExecutionContext(ctx, workspaceKey, req.TaskRunID, store.TaskRunExecutionContextUpdate{
 			RootState: domain.TaskRunRootReady, RootNodeID: req.NodeID, RootFencingToken: req.FencingToken, BackendKind: req.ProviderProfile,
 		}); err != nil {

@@ -160,6 +160,61 @@ func TestLocalGitManagerPrepareReusesMatchingTaskRunRoot(t *testing.T) {
 	}
 }
 
+func TestLocalGitManagerPrepareRefencesMatchingTaskRunRootForRetry(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	workspace := t.TempDir()
+	repo, sha := createRepository(t, workspace, "repo-a")
+	manager := taskroot.NewLocalGitManager(workspace)
+	firstSpec := taskroot.RootSpec{
+		TaskRunID: "task-run-refence", Generation: 1, FencingToken: 41,
+		Repositories: []taskroot.RepositorySpec{{Name: "repo-a", SourcePath: repo, BranchName: "loom/task-refence/repo-a", BaseSHA: sha}},
+	}
+	first, err := manager.Prepare(ctx, firstSpec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(first.Repositories[0].Path, "retry-marker.txt")
+	if err := os.WriteFile(marker, []byte("preserve retry state\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	retrySpec := firstSpec
+	retrySpec.FencingToken = 42
+	retried, err := manager.Prepare(ctx, retrySpec)
+	if err != nil {
+		t.Fatalf("Prepare with newer retry fence: %v", err)
+	}
+	if retried.RootPath != first.RootPath || retried.FencingToken != 42 {
+		t.Fatalf("retried manifest = %+v, want same root with fence 42", retried)
+	}
+	if got, err := os.ReadFile(marker); err != nil || string(got) != "preserve retry state\n" {
+		t.Fatalf("retry marker = %q, %v; want preserved", got, err)
+	}
+	if err := manager.Release(ctx, taskroot.RootLease{TaskRunID: firstSpec.TaskRunID, Generation: 1, FencingToken: 41}, taskroot.RetentionPolicy{}); !errors.Is(err, taskroot.ErrStaleLease) {
+		t.Fatalf("old owner Release error = %v, want ErrStaleLease", err)
+	}
+}
+
+func TestLocalGitManagerPrepareRejectsOlderRetryFence(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	workspace := t.TempDir()
+	repo, sha := createRepository(t, workspace, "repo-a")
+	manager := taskroot.NewLocalGitManager(workspace)
+	spec := taskroot.RootSpec{
+		TaskRunID: "task-run-stale-retry", Generation: 1, FencingToken: 51,
+		Repositories: []taskroot.RepositorySpec{{Name: "repo-a", SourcePath: repo, BranchName: "loom/task-stale-retry/repo-a", BaseSHA: sha}},
+	}
+	if _, err := manager.Prepare(ctx, spec); err != nil {
+		t.Fatal(err)
+	}
+	spec.FencingToken = 50
+	if _, err := manager.Prepare(ctx, spec); !errors.Is(err, taskroot.ErrStaleLease) {
+		t.Fatalf("Prepare with older fence error = %v, want ErrStaleLease", err)
+	}
+}
+
 func TestLocalGitManagerPersistsRetentionAndRetryReactivatesSameRoot(t *testing.T) {
 	ctx := t.Context()
 	workspace := t.TempDir()

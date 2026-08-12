@@ -101,6 +101,11 @@ type tracedStore struct {
 	connectorCalls       *tracedConnectorAuditStore
 }
 
+// UnwrapStore preserves optional capabilities implemented by the concrete
+// store without making the tracing decorator claim capabilities it cannot
+// provide itself.
+func (t *tracedStore) UnwrapStore() store.Store { return t.inner }
+
 func (t *tracedStore) Workspaces() store.WorkspaceStore       { return t.workspaces }
 func (t *tracedStore) Repos() store.RepoStore                 { return t.repos }
 func (t *tracedStore) Agents() store.AgentStore               { return t.agents }
