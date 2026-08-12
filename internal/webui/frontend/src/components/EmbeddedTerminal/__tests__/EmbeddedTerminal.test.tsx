@@ -64,10 +64,12 @@ vi.mock("@/components/TerminalView/instances/TerminalInstance", () => ({
     ({
       sessionName,
       isActive,
+      backendName,
       onConnectionStateChange,
     }: {
       sessionName: string;
       isActive: boolean;
+      backendName?: string;
       onConnectionStateChange?: (state: ConnectionState) => void;
     }) => {
       hoisted.capturedOnConnectionStateChange = onConnectionStateChange;
@@ -76,6 +78,7 @@ vi.mock("@/components/TerminalView/instances/TerminalInstance", () => ({
           data-testid="terminal-instance"
           data-session-name={sessionName}
           data-is-active={String(isActive)}
+          data-backend-name={backendName}
         />
       );
     },
@@ -132,6 +135,7 @@ describe("EmbeddedTerminal", () => {
     expect(instance).toBeInTheDocument();
     expect(instance).toHaveAttribute("data-session-name", "sess-abc");
     expect(instance).toHaveAttribute("data-is-active", "true");
+    expect(instance).toHaveAttribute("data-backend-name", "claude");
   });
 
   it("passes isActive=false through to TerminalInstance", () => {
@@ -146,6 +150,7 @@ describe("EmbeddedTerminal", () => {
 
     const instance = screen.getByTestId("terminal-instance");
     expect(instance).toHaveAttribute("data-is-active", "false");
+    expect(instance).toHaveAttribute("data-backend-name", "codex");
   });
 
   it("updates connection state dot when onConnectionStateChange fires", () => {

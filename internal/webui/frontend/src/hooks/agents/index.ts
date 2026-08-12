@@ -35,3 +35,10 @@ export type {
 
 export { useUsage } from "./useUsage";
 export type { UseUsageOptions, UseUsageResult } from "./useUsage";
+
+export { usePendingInput } from "./usePendingInput";
+export type {
+  PendingAnswerBody,
+  PendingInput,
+  UsePendingInputReturn,
+} from "./usePendingInput";

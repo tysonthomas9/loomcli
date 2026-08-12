@@ -16,6 +16,11 @@ import (
 // (no PTY supervision, no queued message delivery).
 const envLeadControlled = "LOOM_LEAD_CONTROLLED"
 
+// Claude's fullscreen renderer only advertises mouse tracking when its
+// virtualized scrollback mode is enabled. Keep this scoped to controlled
+// interactive leads; background Claude workers do not render in web xterm.
+const claudeVirtualScrollEnv = "CLAUDE_CODE_NO_FLICKER=1"
+
 func leadControlDisabled() bool {
 	switch strings.ToLower(strings.TrimSpace(os.Getenv(envLeadControlled))) {
 	case "0", "false", "no", "off":
@@ -54,6 +59,14 @@ func RunControlledLeadRuntime(
 	if !ok {
 		return false, nil
 	}
+	// Same defense-in-depth re-validation the other invokers do: a knob the
+	// resolved backend cannot apply refuses the launch rather than dropping
+	// the restriction. Returning (true, err) is deliberate — the caller must
+	// NOT fall back to a plain interactive launch, which is precisely the
+	// unrestricted run this refuses.
+	if err := validateSafetyKnobsFromEnv(backend); err != nil {
+		return true, err
+	}
 	return true, runHarnessLead(ctx, leadcontrol.HarnessLeadRuntimeConfig{
 		Store:            st,
 		Workspace:        workspace,
@@ -64,6 +77,7 @@ func RunControlledLeadRuntime(
 		Backend:          backend,
 		BinaryPath:       inv.binary,
 		Args:             inv.args,
+		PromptFlag:       inv.promptFlag,
 		Env:              inv.env,
 		HarnessSessionID: inv.harnessSessionID,
 	})
@@ -78,6 +92,7 @@ type harnessLeadLaunch struct {
 	binary           string
 	args             []string
 	env              []string
+	promptFlag       string
 	harnessSessionID string
 }
 
@@ -88,23 +103,41 @@ var newHarnessSessionID = uuid.NewString
 // harnessLeadInvocation mirrors each backend's InvokeInteractive command
 // construction (binary, args, env) for use under harness-wrapper supervision.
 // The prompt is appended by the runtime as the final positional argument.
+//
+// "Mirrors" is load-bearing and has been wrong once: this builder used to
+// hardcode each backend's permissive flag and never consult the role safety
+// knobs, so an interactive role carrying read_only or a tool list got the
+// restriction on the daemon and agent invoker paths and silently lost it when
+// the same role launched through RunControlledLeadRuntime. The knobs are
+// resolved through the same helpers the other builders use — keep it that way,
+// and add new backends by calling a helper rather than writing the flag out.
 func harnessLeadInvocation(backend, workDir string) (harnessLeadLaunch, bool) {
 	switch backend {
 	case "claude":
 		sessionID := newHarnessSessionID()
+		env := append(buildClaudeEnv(workDir, ""), claudeVirtualScrollEnv)
 		return harnessLeadLaunch{
 			binary:           "claude",
-			args:             []string{"--session-id", sessionID, "--dangerously-skip-permissions"},
-			env:              buildClaudeEnv(workDir, ""),
+			args:             appendClaudeSafetyArgs([]string{"--session-id", sessionID, "--dangerously-skip-permissions"}),
+			env:              env,
 			harnessSessionID: sessionID,
 		}, true
 	case "gemini":
-		return harnessLeadLaunch{binary: "gemini", args: []string{"--approval-mode=yolo"}, env: buildBackendEnv(workDir, "")}, true
+		return harnessLeadLaunch{binary: "gemini", args: []string{geminiApprovalModeArg()}, env: buildBackendEnv(workDir, "")}, true
 	case "opencode":
-		args := append([]string{"run", "--dir", workDir, "--dangerously-skip-permissions"}, openCodeModelArgs()...)
-		return harnessLeadLaunch{binary: "opencode", args: args, env: buildBackendEnv(workDir, "")}, true
+		return harnessLeadLaunch{
+			binary:     "opencode",
+			args:       openCodeInteractiveArgs(),
+			promptFlag: "--prompt",
+			env:        buildBackendEnv(workDir, ""),
+		}, true
 	case "cursor":
 		// the headless agent CLI is `cursor-agent`; `cursor` is the IDE launcher.
+		// --force is cursor-agent's permission bypass and has no read_only
+		// counterpart, which is why cursor is outside SupportsHardReadOnly:
+		// read_only on cursor is the prompt preamble and nothing more, and the
+		// supervisor says so at spawn. A tool list on cursor never reaches
+		// here — ValidateSafetyKnobs refuses the run first.
 		return harnessLeadLaunch{binary: "cursor-agent", args: []string{"--force"}, env: buildBackendEnv(workDir, "")}, true
 	default:
 		return harnessLeadLaunch{}, false

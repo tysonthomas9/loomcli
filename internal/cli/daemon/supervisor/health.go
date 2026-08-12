@@ -135,7 +135,12 @@ func waitForProcessExit(ap *AgentProcess, pid int, timeout time.Duration) bool {
 	return false
 }
 
-// checkWatchdog kills the agent if no liveness signal is newer than
+// checkWatchdog applies the two per-run ceilings the supervisor owns.
+//
+// The first is the run-duration cap: a wall-clock bound on how long a single
+// run may last, measured from lastStart. See run_duration.go.
+//
+// The second is the idle kill, which fires if no liveness signal is newer than
 // outputTimeout seconds. It considers three signals and uses the freshest:
 //
 //   - ap.LastActivity: live PTY-output heartbeat from the agent's wrapper,
@@ -145,7 +150,28 @@ func waitForProcessExit(ap *AgentProcess, pid int, timeout time.Duration) bool {
 //     "silent" and is wrongly killed at the timeout.
 //   - session transcript mtime (updated by hooks on every turn, when installed).
 //   - stdout log file mtime.
+//
+// Silence is only evidence of a hang when nobody asked the agent to be quiet:
+// applyIdleKill suspends the kill (and only the kill) while an interactive
+// prompt is outstanding. See input_wait.go.
 func (s *Supervisor) checkWatchdog(ap *AgentProcess, outputTimeout int, logPath string, lastStart time.Time, worktreeName string) {
+	// Age first, and on its own terms. Everything below is about what the agent
+	// has said lately, and the duration cap must not inherit any of it: not the
+	// activitySource early return (a run that produced no signal at all is the
+	// one most in need of a ceiling), and not the input-wait suspension.
+	if s.applyRunDurationKill(ap, lastStart, worktreeName) {
+		return
+	}
+
+	// output_timeout <= 0 opts out of the SILENCE check only. The two ceilings
+	// are gated separately because they answer different questions: an operator
+	// who disables the idle kill for a backend with long quiet stretches is not
+	// asking for unbounded runs, and until the cap above existed that setting
+	// left the daemon with no ceiling whatsoever.
+	if outputTimeout <= 0 {
+		return
+	}
+
 	var lastActivity time.Time
 	activitySource := "none"
 	// consider records t as the activity signal when it is the newest seen.
@@ -183,21 +209,97 @@ func (s *Supervisor) checkWatchdog(ap *AgentProcess, outputTimeout int, logPath 
 	}
 
 	// Apply timeout if we found any activity signal
-	if activitySource != "none" {
-		// Use lastStart if activity signal predates agent spawn
-		if lastActivity.Before(lastStart) {
-			lastActivity = lastStart
-		}
-		silent := time.Since(lastActivity)
-		threshold := time.Duration(outputTimeout) * time.Second
-		if silent > threshold {
-			slog.Error("killing hung process, no activity detected",
-				"worktree", worktreeName, "silent_duration", silent.Truncate(time.Second),
-				"threshold_sec", outputTimeout, "source", activitySource)
-			s.setStopReasonDefault(ap, StopReasonWatchdog)
-			s.StopAgent(ap, 10*time.Second)
-		}
+	if activitySource == "none" {
+		return
 	}
+	// Use lastStart if activity signal predates agent spawn
+	if lastActivity.Before(lastStart) {
+		lastActivity = lastStart
+	}
+	s.applyIdleKill(ap, time.Since(lastActivity), outputTimeout, activitySource, worktreeName)
+}
+
+// applyIdleKill kills the agent when it has been silent past outputTimeout,
+// unless an outstanding interactive prompt explains the silence.
+//
+// The decision this function makes is exactly:
+//
+//	idle := silent > threshold && !(pending > 0)
+//
+// and the negated term is the whole of the change. A harness parked on a dialog
+// emits no PTY output by design, so "no output" stops being evidence of a hang
+// for as long as loom knows an answer is outstanding — and only for that long,
+// because inputWaitHoldsOff refuses to keep suspending once the wait exceeds its
+// bound. Nothing else is suspended: shutdown, drain and manual stop never
+// consult the counter, so a waiting agent can always be stopped immediately.
+// See input_wait.go for why the signal is a counter rather than a flag.
+func (s *Supervisor) applyIdleKill(ap *AgentProcess, silent time.Duration, outputTimeout int, activitySource, worktreeName string) {
+	threshold := time.Duration(outputTimeout) * time.Second
+	holdOff, pending, expired := inputWaitHoldsOff(ap, s.GetInputWaitMax())
+	idle := silent > threshold && !holdOff
+
+	if !idle {
+		if silent > threshold {
+			slog.Info("watchdog idle kill suspended, agent is waiting on interactive input",
+				"worktree", worktreeName, "silent_duration", silent.Truncate(time.Second),
+				"threshold_sec", outputTimeout, "input_wait_pending", pending)
+		}
+		return
+	}
+
+	// input_wait_expired distinguishes "nothing was pending, this really is a
+	// hang" from "a human never answered and the wait outlived its bound".
+	slog.Error("killing hung process, no activity detected",
+		"worktree", worktreeName, "silent_duration", silent.Truncate(time.Second),
+		"threshold_sec", outputTimeout, "source", activitySource,
+		"input_wait_pending", pending, "input_wait_expired", expired)
+	s.setStopReasonDefault(ap, StopReasonWatchdog)
+	s.StopAgent(ap, 10*time.Second)
+}
+
+// applyRunDurationKill stops the agent when its current run has outlived the
+// configured wall-clock cap, and reports whether it did.
+//
+// The decision has the same shape as the idle branch above:
+//
+//	over := maxRun > 0 && time.Since(lastStart) > maxRun
+//
+// with one deliberate asymmetry — it does not consult the input-wait counter.
+// That is not an oversight in the ordering, it IS the ordering. applyIdleKill
+// suspends the silence kill for as long as a prompt is outstanding, so during a
+// wait this cap is the only bound left standing over the run; suspending it too
+// would rebuild, one layer up, exactly the open-ended hold-off that
+// inputWaitMax exists to prevent. A question nobody has answered in four hours
+// is not about to be answered, and the worker slot is not free while they think
+// about it. The pending count is logged rather than obeyed, so an operator
+// reading the kill line can see the wait it fired through.
+//
+// Ordering also matters against the shutdown path: a duration kill sets the stop
+// reason via setStopReasonDefault, which never overwrites, so a manual stop or
+// drain that already claimed the agent keeps its own reason.
+func (s *Supervisor) applyRunDurationKill(ap *AgentProcess, lastStart time.Time, worktreeName string) bool {
+	maxRun := s.maxRunDurationFor(ap)
+	// A zero lastStart means the spawn time was never recorded, not that the run
+	// began at the epoch — time.Since would read it as decades and kill on the
+	// first tick. Absent evidence of age, leave the run alone.
+	if maxRun <= 0 || lastStart.IsZero() {
+		return false
+	}
+	ran := time.Since(lastStart)
+	if ran <= maxRun {
+		return false
+	}
+
+	ap.Mu.Lock()
+	pending := ap.InputWaitPending
+	ap.Mu.Unlock()
+
+	slog.Error("killing agent, run exceeded its maximum duration",
+		"worktree", worktreeName, "ran", ran.Truncate(time.Second),
+		"max_run_duration", maxRun, "input_wait_pending", pending)
+	s.setStopReasonDefault(ap, StopReasonRunDurationExceeded)
+	s.StopAgent(ap, 10*time.Second)
+	return true
 }
 
 // healthChecker runs periodic health checks in a goroutine.
@@ -255,10 +357,12 @@ func (s *Supervisor) checkAgentHealth() {
 			slog.Warn("stale lock detected", "worktree", worktreeName)
 		}
 
-		// Watchdog: kill agent if no activity for outputTimeout seconds.
-		if outputTimeout > 0 {
-			s.checkWatchdog(ap, outputTimeout, logPath, lastStart, worktreeName)
-		}
+		// Watchdog: kill the agent if it has gone silent past outputTimeout, or
+		// if the run itself has outlived its wall-clock cap. The outputTimeout
+		// gate lives inside checkWatchdog now — the two ceilings are switched
+		// off independently, so disabling the idle kill must not also disable
+		// the duration cap.
+		s.checkWatchdog(ap, outputTimeout, logPath, lastStart, worktreeName)
 	}
 
 	// Emit health_check summary event

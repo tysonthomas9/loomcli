@@ -125,8 +125,13 @@ services:
       LOCAL_MODE_COMPOSE_PROJECT: "${LOCAL_MODE_COMPOSE_PROJECT:?LOCAL_MODE_COMPOSE_PROJECT is required}"
       LOCAL_MODE_RUN_ID: "${LOCAL_MODE_RUN_ID:?LOCAL_MODE_RUN_ID is required}"
       # File-browser routes fail closed unless the loopback frontend origin
-      # is explicitly allowed; Caddy preserves the browser's Host header.
-      LOOM_FRONTEND_URL: "http://localhost:${LOCAL_MODE_UI_PORT:-8283},http://127.0.0.1:${LOCAL_MODE_UI_PORT:-8283}"
+      # is explicitly allowed; Caddy preserves the browser's Host header. The
+      # Vite dev-server origins (`make dev` on :3000, and :3100 when :3000 is
+      # taken) are allowed too so the file browser works when testing the
+      # HMR frontend against this stack instead of the baked dist on :8283.
+      LOOM_FRONTEND_URL: "http://localhost:${LOCAL_MODE_UI_PORT:-8283},http://127.0.0.1:${LOCAL_MODE_UI_PORT:-8283},http://localhost:3000,http://127.0.0.1:3000,http://localhost:3100,http://127.0.0.1:3100"
+      LOOM_LOCAL_MODE_PLAN_TASK_ID: LOCALMODE-2
+      LOOM_LOCAL_MODE_CODE_TASK_ID: LOCALMODE-3
       LOOM_LOCAL_MODE_STEP_DELAY: "2"
       # Emit task.ready internal events when a task becomes ready, so a
       # prompt-agent binding on internal.task.ready fires on task creation

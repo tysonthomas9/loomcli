@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/tysonthomas9/loomcli/internal/types"
 )
 
 // Issue represents a trackable work item.
@@ -221,31 +223,51 @@ func (i *Issue) GetConstituents() []BondRef {
 	return i.BondedFrom
 }
 
-// IssueStatus represents the current state of an issue.
-type IssueStatus string
+// IssueStatus represents the current state of an issue. It is types.Status under
+// a domain-local name: the same nine values, spelled the same way on the wire.
+// Declaring it in terms of types.Status keeps one vocabulary in the repo, so a
+// tenth status is added in exactly one place.
+type IssueStatus types.Status
 
-// Issue status constants.
+// Issue status constants, derived from the canonical vocabulary rather than
+// respelled, so the two names cannot drift apart.
 const (
-	StatusOpen       IssueStatus = "open"
-	StatusInProgress IssueStatus = "in_progress"
-	StatusBlocked    IssueStatus = "blocked"
-	StatusDeferred   IssueStatus = "deferred"
-	StatusReview     IssueStatus = "review"
-	StatusClosed     IssueStatus = "closed"
-	StatusTombstone  IssueStatus = "tombstone"
-	StatusPinned     IssueStatus = "pinned"
-	StatusHooked     IssueStatus = "hooked"
+	StatusOpen       = IssueStatus(types.StatusOpen)
+	StatusInProgress = IssueStatus(types.StatusInProgress)
+	StatusBlocked    = IssueStatus(types.StatusBlocked)
+	StatusDeferred   = IssueStatus(types.StatusDeferred)
+	StatusReview     = IssueStatus(types.StatusReview)
+	StatusClosed     = IssueStatus(types.StatusClosed)
+	StatusTombstone  = IssueStatus(types.StatusTombstone)
+	StatusPinned     = IssueStatus(types.StatusPinned)
+	StatusHooked     = IssueStatus(types.StatusHooked)
 )
+
+// builtinStatuses mirrors types.builtinStatuses, in the same order. It exists so
+// the parity test can walk entity's side of the vocabulary instead of re-listing
+// it and then quietly missing the next status somebody adds here by hand.
+var builtinStatuses = [...]IssueStatus{
+	StatusOpen, StatusInProgress, StatusBlocked, StatusDeferred,
+	StatusReview, StatusClosed, StatusTombstone, StatusPinned, StatusHooked,
+}
 
 // IsValid checks if the status value is valid (built-in statuses only).
 // Empty string is considered valid (caller handles defaulting).
+//
+// That empty arm is the one deliberate difference from types.Status.IsValid,
+// which rejects "" — do not "fix" it away in either direction. An entity value
+// is a domain record mid-construction: JSONL import and the DTO layer both build
+// an Issue before SetDefaults fills the status in, so "" means "not stated yet"
+// and Validate has to let it through. types.Status guards the fleet wire path and
+// whitelists built on top of it, most of all types.ValidateSettableStatus, where
+// "" is a caller mistake — a whitelist that admitted it would pass the validity
+// guard, match no case, and report the empty status as settable.
+//
+// The nine real values are checked by types.Status.IsValid, not by a second
+// switch here, so this stays one visible line of divergence instead of a copy
+// that can rot.
 func (s IssueStatus) IsValid() bool {
-	switch s {
-	case StatusOpen, StatusInProgress, StatusBlocked, StatusDeferred, StatusReview,
-		StatusClosed, StatusTombstone, StatusPinned, StatusHooked, "":
-		return true
-	}
-	return false
+	return s == "" || types.Status(s).IsValid()
 }
 
 // IsValidWithCustom checks if the status is valid, including custom statuses.

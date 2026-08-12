@@ -319,8 +319,11 @@ func (m *Module) claimReady(ctx context.Context, ws string, id driverIdentity, b
 		Actor string `json:"actor"`
 		// Type optionally narrows the ready queue to one issue type (e.g.
 		// "bug"), applied server-side by the ready view.
-		Type  string `json:"type"`
-		Limit int    `json:"limit"`
+		Type string `json:"type"`
+		// ExcludeLabels skips ready tasks carrying ANY of these labels, keeping
+		// mid-flight tasks in a label-routed pipeline out of an epic drain.
+		ExcludeLabels []string `json:"excludeLabels"`
+		Limit         int      `json:"limit"`
 	}](body)
 	if err != nil {
 		return nil, err
@@ -337,10 +340,11 @@ func (m *Module) claimReady(ctx context.Context, ws string, id driverIdentity, b
 	}
 	// ClaimReadyTask defaults a non-positive limit itself.
 	claimed, err := driverpkg.ClaimReadyTask(ctx, issueBackend, driverpkg.TaskClaimOptions{
-		EpicID: epicID,
-		Actor:  actor,
-		Type:   strings.TrimSpace(params.Type),
-		Limit:  params.Limit,
+		EpicID:        epicID,
+		Actor:         actor,
+		Type:          strings.TrimSpace(params.Type),
+		ExcludeLabels: params.ExcludeLabels,
+		Limit:         params.Limit,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("claim ready task: %w", err)

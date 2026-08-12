@@ -116,6 +116,7 @@ type ServerConfig struct {
 	SessionRuntimeDir    string                                               // Runtime dir searched for local agent sessions; empty = workspace/repo stores only
 	LocalSettingsDir     string                                               // Desktop-local settings directory; empty disables /api/local/settings
 	AgentControlFn       agentcontrol.AgentControlFn                          // Sends agent lifecycle commands to the daemon control socket; nil in fleet mode or --no-daemon
+	AgentInputFn         agentcontrol.AgentInputFn                            // Reads/answers pending interactive prompts over the same socket; nil disables the answer routes
 	DaemonSupervisorFn   func() (*DaemonSupervisorData, error)                // Returns daemon supervisor state from state file; nil = endpoint unavailable
 	DaemonConfigFn       func() (json.RawMessage, error)                      // Returns effective merged daemon config as JSON; nil = endpoint unavailable
 	AgentQueueFn         func(agentName string) ([]AgentQueueEntry, error)    // Returns scored work queue for named agent; nil = endpoint unavailable

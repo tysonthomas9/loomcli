@@ -1,6 +1,7 @@
 package agentcontrol
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -15,7 +16,10 @@ func TestModule_RegisterRoutes(t *testing.T) {
 	mockFn := func(op, agentName string, force bool) (*AgentControlResult, error) {
 		return &AgentControlResult{Success: true}, nil
 	}
-	mod := NewModule(mockFn)
+	mockInputFn := func(op, agentName string, args json.RawMessage) (*AgentControlResult, error) {
+		return &AgentControlResult{Success: true, Data: json.RawMessage("[]")}, nil
+	}
+	mod := NewModule(mockFn, mockInputFn)
 
 	mux := http.NewServeMux()
 	mod.Register(mux)
@@ -28,6 +32,8 @@ func TestModule_RegisterRoutes(t *testing.T) {
 		{"POST", "/api/workspaces/test-ws/agents/falcon/start"},
 		{"POST", "/api/workspaces/test-ws/agents/falcon/restart"},
 		{"POST", "/api/workspaces/test-ws/agents/falcon/yield"},
+		{"GET", "/api/workspaces/test-ws/pending-inputs"},
+		{"GET", "/api/workspaces/test-ws/agents/falcon/input"},
 		{"GET", "/api/workspaces/test-ws/agents"},
 	}
 
@@ -49,7 +55,10 @@ func TestModule_WrongMethod_Returns405(t *testing.T) {
 	mockFn := func(op, agentName string, force bool) (*AgentControlResult, error) {
 		return &AgentControlResult{Success: true}, nil
 	}
-	mod := NewModule(mockFn)
+	mockInputFn := func(op, agentName string, args json.RawMessage) (*AgentControlResult, error) {
+		return &AgentControlResult{Success: true, Data: json.RawMessage("[]")}, nil
+	}
+	mod := NewModule(mockFn, mockInputFn)
 
 	mux := http.NewServeMux()
 	mod.Register(mux)

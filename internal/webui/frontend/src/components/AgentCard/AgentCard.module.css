@@ -113,6 +113,10 @@
   line-height: 1.2;
 }
 
+.nameLiteral {
+  text-transform: none;
+}
+
 .role {
   font-size: 0.74rem;
   color: var(--color-text-tertiary);
@@ -142,6 +146,8 @@
   flex-direction: column;
   align-items: flex-end;
   gap: 2px;
+  max-width: 42%;
+  min-width: 0;
 }
 
 .statusLine {
@@ -151,6 +157,11 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   line-height: 1.3;
+  max-width: 100%;
+}
+
+.statusLine[data-task="true"] {
+  color: var(--color-text-tertiary);
 }
 
 .statusLine[data-error="true"] {

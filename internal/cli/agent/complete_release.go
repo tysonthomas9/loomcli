@@ -45,3 +45,52 @@ func releaseClaimOnComplete(worktreePath string) {
 			info.TaskID, err)
 	}
 }
+
+// ClaimStillHeld reports whether taskID is STILL claimed by actor — the
+// observable inverse of releaseClaimOnComplete having run.
+//
+// It is the discriminator between "the agent finished" and "the agent's turn
+// ended": both exit 0, and both leave a task id on the worktree lock, so exit
+// status alone cannot tell them apart. `loom complete` can: every terminal path
+// in the worker prompts runs it — closed, review, blocked, needs-revision, and
+// the give-up paths alike — and it calls ReleaseClaim, which drops a still
+// in_progress claim back to open/unassigned. A task that is in_progress under
+// this actor's name after the process is gone is therefore one whose agent
+// never signaled completion.
+//
+// Claim state is not on the worktree lock and not on the AgentProcess, so this
+// costs one GET. There is no cheaper sound signal: the completion marker file
+// `loom complete` writes is keyed by worktree rather than by run, is never
+// consumed on the daemon path, and would read a previous cycle's completion as
+// this one's.
+//
+// POSITIVE EVIDENCE ONLY. A nil backend, a failed GET, an unreadable status, a
+// claim held by somebody else (a sibling already re-claimed it) — all return
+// false. Callers use a true answer to take a LESS destructive path, so an
+// ambiguous answer must keep the established behavior rather than manufacture
+// an incomplete run out of a backend blip.
+func ClaimStillHeld(ctx context.Context, ib backend.IssueBackend, taskID, actor string) bool {
+	if ib == nil || taskID == "" || actor == "" {
+		return false
+	}
+	detail, err := ib.Get(ctx, taskID)
+	if err != nil || detail == nil {
+		return false
+	}
+	return detail.Status == "in_progress" && detail.Assignee == actor
+}
+
+// claimStillHeldForWorktree answers ClaimStillHeld for the task recorded on the
+// worktree's own lock, resolving the actor the same way releaseClaimOnComplete
+// does (the lock's AgentName is the identity the claim was taken under). Used
+// by the in-process worker, which — unlike the supervisor — has no handle on
+// the issue backend beyond the process default.
+func claimStillHeldForWorktree(worktreePath string) bool {
+	info, err := cli.ReadLockFile(worktreePath)
+	if err != nil || info == nil || info.TaskID == "" || info.AgentName == "" {
+		return false
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), releaseClaimTimeout)
+	defer cancel()
+	return ClaimStillHeld(ctx, cli.DefaultIssueBackend(), info.TaskID, info.AgentName)
+}

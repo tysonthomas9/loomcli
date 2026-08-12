@@ -371,6 +371,21 @@ prepare_claude_credentials() {
     return 1
   fi
   claude --version || true
+
+  # Claude Code keeps interactive onboarding state in ~/.claude.json, separate
+  # from ~/.claude/.credentials.json. A valid OAuth credential makes
+  # `claude auth status` report logged in, but the TUI still opens the login
+  # chooser until hasCompletedOnboarding is true. Preserve any existing state
+  # and initialize only that flag inside the container.
+  claude_state=/root/.claude.json
+  claude_state_tmp="${claude_state}.tmp.$$"
+  if [ -s "$claude_state" ] && jq -e 'type == "object"' "$claude_state" >/dev/null 2>&1; then
+    jq '.hasCompletedOnboarding = true' "$claude_state" > "$claude_state_tmp"
+  else
+    printf '{"hasCompletedOnboarding":true}\n' > "$claude_state_tmp"
+  fi
+  chmod 600 "$claude_state_tmp"
+  mv "$claude_state_tmp" "$claude_state"
 }
 
 prepare_daytona_credentials() {

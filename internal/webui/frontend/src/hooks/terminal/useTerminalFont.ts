@@ -20,7 +20,7 @@ export interface TerminalFontChangeDetail {
   fontSize: number;
 }
 
-/** CSS custom properties consumed by TerminalInstance / wterm. */
+/** CSS custom properties consumed by the shared xterm renderer. */
 export const TERMINAL_FONT_FAMILY_VAR = "--terminal-font-family";
 export const TERMINAL_FONT_SIZE_VAR = "--terminal-font-size";
 
@@ -69,7 +69,7 @@ function getStoredFontSize(): number | null {
   return null;
 }
 
-/** Push stored terminal font prefs onto :root for wterm CSS vars. */
+/** Push stored terminal font prefs onto :root for the xterm renderer. */
 export function applyTerminalFont(
   family: string = getStoredFontFamily() ?? DEFAULT_FONT_FAMILY,
   size: number = getStoredFontSize() ?? DEFAULT_FONT_SIZE,

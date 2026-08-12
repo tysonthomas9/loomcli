@@ -4,15 +4,10 @@
  * Follows MoreFiltersMenu pattern for positioning and lifecycle.
  */
 
-import {
-  useEffect,
-  useLayoutEffect,
-  useRef,
-  useCallback,
-  type KeyboardEvent,
-} from "react";
+import { useCallback, type KeyboardEvent } from "react";
 
 import styles from "./WorkspaceContextMenu.module.css";
+import { useContextMenuLifecycle } from "./useContextMenuLifecycle";
 
 export interface WorkspaceContextMenuProps {
   /** Whether the menu is open */
@@ -34,50 +29,7 @@ export function WorkspaceContextMenu({
   onRemove,
   onClose,
 }: WorkspaceContextMenuProps): JSX.Element | null {
-  const menuRef = useRef<HTMLDivElement>(null);
-
-  // Close on outside click
-  useEffect(() => {
-    if (!isOpen) return;
-
-    function handleClickOutside(event: MouseEvent) {
-      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
-        onClose();
-      }
-    }
-
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, [isOpen, onClose]);
-
-  // Close on Escape
-  useEffect(() => {
-    if (!isOpen) return;
-
-    function handleKeyDown(event: globalThis.KeyboardEvent) {
-      if (event.key === "Escape") {
-        onClose();
-      }
-    }
-
-    document.addEventListener("keydown", handleKeyDown);
-    return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [isOpen, onClose]);
-
-  // Clamp menu to viewport edges (useLayoutEffect to avoid flicker)
-  useLayoutEffect(() => {
-    if (!isOpen || !menuRef.current) return;
-
-    const rect = menuRef.current.getBoundingClientRect();
-    const el = menuRef.current;
-
-    if (rect.right > window.innerWidth) {
-      el.style.left = `${position.x - rect.width}px`;
-    }
-    if (rect.bottom > window.innerHeight) {
-      el.style.top = `${position.y - rect.height}px`;
-    }
-  }, [isOpen, position]);
+  const menuRef = useContextMenuLifecycle(isOpen, position, onClose);
 
   const handleRenameClick = useCallback(() => {
     onRename();

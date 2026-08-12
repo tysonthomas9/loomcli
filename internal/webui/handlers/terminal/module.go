@@ -18,8 +18,8 @@ import (
 //
 // All tmux-specific session lifecycle routes (spawn, kill, restart, seed,
 // lead-session, export, scrollback, close-all, list-sessions,
-// session-status) are gone — each WebSocket now owns a fresh PTY with
-// wterm-style wire, so there are no persistent sessions to manage.
+// session-status) are gone — each WebSocket now owns a fresh PTY using the
+// terminal wire protocol, so there are no persistent sessions to manage.
 type Module struct {
 	termSvc         service.TerminalService
 	agentSvc        service.AgentService // may be nil — agent routes skipped
@@ -82,7 +82,7 @@ func (m *Module) Register(mux *http.ServeMux) {
 		mux.HandleFunc("GET /api/workspaces/{ws}/agents/{name}/terminal/ws", HandleAgentTerminalWS(m.agentTmuxMgr, m.termAuth, m.allowedOrigins))
 	}
 
-	// Main web terminal (PTY-backed, wterm wire format).
+	// Main web terminal (PTY-backed terminal wire protocol).
 	if m.termAuth != nil {
 		mux.HandleFunc("GET /api/workspaces/{ws}/terminal/token", HandleTerminalToken(m.termSvc))
 	}
