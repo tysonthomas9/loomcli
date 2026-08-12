@@ -28,6 +28,7 @@
 - **Wave 9.24 implementation:** `015ff85ef`
 - **Wave 9.25 implementation:** `9caddc7e5`
 - **Wave 9.26 implementation:** `cfe542420`
+- **Wave 9.27 implementation:** `14f4ee9ac`
 - **Stacked branches:** `modular-monolith-phase9-01-types-ratchet`, then
   `modular-monolith-phase9-02-shallow-seams`, then
   `modular-monolith-phase9-03-legacy-planes`, then
@@ -53,7 +54,8 @@
   `modular-monolith-phase9-23-connector-inbound-secrets`, then
   `modular-monolith-phase9-24-shallow-package-deletion`, then
   `modular-monolith-phase9-25-legacy-package-deletion`, then
-  `modular-monolith-phase9-26-runtime-legacy-deletion`
+  `modular-monolith-phase9-26-runtime-legacy-deletion`, then
+  `modular-monolith-phase9-27-handler-port-deletion`
 - **Purpose:** Reduce the residual package surface toward 160 production Go
   packages without weakening capability ownership, consumer-owned ports, or
   independently replaceable adapters.
@@ -1294,6 +1296,59 @@ report was added to the source tree.
 Later waves must continue deleting executable legacy model, projection, and
 Store fallback paths. Reaching 160 packages is a progress metric, not the Phase
 9 completion criterion.
+
+## Wave 9.27 result
+
+Wave 9.27 removes the remaining WebUI-handler access to the horizontal Store,
+backend, and FleetDB planes. Agents, Roles, TaskRun, Driver API, Terminal, and
+Workflows now consume exact capability or presentation ports. Application
+composition supplies the real adapters; handler tests supply consumer-local
+adapters through the same interfaces. There is no handler fallback to the old
+persistence path.
+
+Execution now owns the TaskRun and DriverRun queries and mutations used by
+serve and the Driver/TaskRun handlers. Work Items owns blocked-state and
+repository-required projections. Agents owns Role and Agent records. Workspace
+owns workspace identity and path lookup. Terminal's four-method state query is
+consumer-owned because it combines those owners with the orchestration-session
+store at the composition seam; it does not expose a repository interface to
+the handler.
+
+The deleted surfaces include the old Driver task-scheduling implementation and
+the prompt-agent create response compatibility layer. The characterization
+matrix no longer points at deleted Driver or Automation-runtime tests: Workflow
+Catalog directly proves version-scoped approval, while Automation directly
+proves authority-derived event identity, hop-depth rejection, and replay after
+an Execution owner handoff.
+
+Package shape remains exactly `160 / 15 / 145 / 42 / 61` because the handler,
+capability, and composition packages are still real modules. The measurable
+ownership surface tightens instead: composite Store files fall from 15 to 14;
+production handler legacy imports fall from 16 to 0; direct persistence falls
+from `94 / 112` to `90 / 108`; named runtime components fall from 71 to 70;
+and in-scope goroutine launch definitions fall from 80 to 79. All ten
+capability roots and all 107 reviewed mutation commands remain enforced. The
+implementation changes 96 files with 2,390 insertions and 1,674 deletions; the
+added code is typed capability/presentation contracts, composition adapters,
+and boundary tests, not a renamed compatibility implementation.
+
+## Wave 9.27 validation
+
+| Check | Result |
+|---|---|
+| Handler legacy-import and composition ratchets | PASS: zero production imports of `internal/store`, `internal/backend`, or `internal/fleet` below `internal/webui/handlers`; composite Store `14 / 14`; outside-composition Store `0 / 0` |
+| Capability-owned characterization matrix | PASS: all 6 authoritative rows, including Workflow Catalog approval and Automation admission/replay/hop-cap proofs |
+| Exact topology, package-shape, direct-write, runtime, LOC, package-size, and import-fanout guards | PASS: shape `160 / 15 / 145 / 42 / 61`; writes `90 / 108`; runtime `70 / 79`; no exception increased |
+| Measured architecture guard in the pre-final aggregate attempt | PASS: 11/11 profiles, ten capability roots, 107 reviewed mutation commands, all six performance records measured, zero pending decisions, and 1,188.7 MiB peak process-tree RSS under 2,048 MiB |
+| Aggregate `make gate` | PASS with FleetDB source `9c1859a` and a freshly built binary from that exact checkout pinned explicitly, `GOMAXPROCS=4`, two Go package workers, one Vitest worker, and a 2 GiB Go soft memory limit |
+
+The first aggregate run reached the race suite and correctly rejected the stale
+112-site direct-write assertion plus an unrelated generic sibling FleetDB spec.
+After lowering the source-backed ratchet to 108 and pinning the paired source,
+the next run rejected the older globally installed FleetDB binary. The final
+run pinned both paired source and freshly built paired binary and passed every
+Go and frontend quality gate. No contract snapshot, architecture exception, or
+compatibility path was changed to make the gate pass.
 
 ---
 

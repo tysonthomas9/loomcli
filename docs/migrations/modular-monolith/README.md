@@ -342,8 +342,17 @@ Catalog authoring, journal-only task dispatch, in-memory cursor substitution,
 the executable-sibling Node layout, and repository-basename alias matching. It
 deletes 41 files and 12,639 net lines without creating a replacement package;
 the exact shape stays 160 and all architecture and aggregate gates pass against
-paired FleetDB `9c1859a`. The remaining waves delete the other horizontal
-handler/store edges and residual shallow packages; an empty
+paired FleetDB `9c1859a`. Wave 9.27 removes the remaining handler imports of
+the horizontal Store, backend, and FleetDB planes across Agents, Roles,
+TaskRun, Driver API, Terminal, and Workflows. Those handlers now consume exact
+capability or presentation ports with real adapters composed once at the
+application seam and no persistence fallback. Handler legacy imports fall from
+16 to 0, composite Store files from 15 to 14, direct persistence from
+`94 / 112` to `90 / 108`, and runtime inventory from `71 / 80` to `70 / 79`;
+the exact package shape remains `160 / 15 / 145 / 42 / 61`. The fully pinned
+aggregate gate passes against FleetDB source and binary `9c1859a`. The
+remaining waves delete residual horizontal model/projection planes and shallow
+packages; an empty
 capability-graph `legacy_paths` list alone is not completion proof. See the
 [Phase 9 plan](16-phase-9-package-consolidation.md).
 
