@@ -30,6 +30,7 @@
 - **Wave 9.26 implementation:** `cfe542420`
 - **Wave 9.27 implementation:** `14f4ee9ac`
 - **Wave 9.28 implementation:** `a6856f943`
+- **Wave 9.29 implementation:** `eb0fd856b`
 - **Stacked branches:** `modular-monolith-phase9-01-types-ratchet`, then
   `modular-monolith-phase9-02-shallow-seams`, then
   `modular-monolith-phase9-03-legacy-planes`, then
@@ -57,7 +58,8 @@
   `modular-monolith-phase9-25-legacy-package-deletion`, then
   `modular-monolith-phase9-26-runtime-legacy-deletion`, then
   `modular-monolith-phase9-27-handler-port-deletion`, then
-  `modular-monolith-phase9-28-shallow-composition-deletion`
+  `modular-monolith-phase9-28-shallow-composition-deletion`, then
+  `modular-monolith-phase9-29-workitems-backend-deletion`
 - **Purpose:** Reduce the residual package surface toward 160 production Go
   packages without weakening capability ownership, consumer-owned ports, or
   independently replaceable adapters.
@@ -1392,6 +1394,53 @@ The next consolidation target is the residual horizontal Work Items backend
 model/repository plane. It spans CLI, subscription, and FleetDB adapter
 consumers, so it must be replaced as one coherent owner migration; retaining a
 partial backend wrapper would recreate the legacy plane under a new name.
+
+## Wave 9.29 result
+
+Wave 9.29 deletes the realtime mutation sub-plane from the horizontal
+`internal/backend` contract. `MutationData`, `CursorMutationBackend`, the
+timestamp-based `GetMutations` and `WaitForMutations` methods, their API
+not-implemented stubs, FleetDB timestamp adapters, CLI forwarders, and the
+unregistered-workspace SSE fallback are gone. Work Items now owns the durable
+`Mutation` projection and narrow `MutationStream` port, while FleetDB remains
+the real external adapter behind that port.
+
+The WebUI subscription runtime is now `WorkItemMutationSubscriber`; its source,
+constructor, runtime component, logs, tests, and catch-up conversion all use the
+owner vocabulary. It accepts only an exact Work Items mutation stream and only
+registered workspace composition can activate it. Opaque FleetDB cursors are
+round-tripped without the retired millisecond conversion, eliminating the
+same-millisecond duplicate-or-skip compatibility trade. A cannot-return guard
+rejects every retired type, method, fallback function, activation reason, and
+API no-op implementation.
+
+This is a net deletion of 687 lines across 35 implementation and enforcement
+files: 812 insertions and 1,499 deletions. Exact package shape remains
+`159 / 15 / 144 / 42 / 60`, direct persistence remains `90 / 108`, production
+handler legacy imports remain zero, and runtime inventory remains `70 / 79`;
+the managed component was renamed and re-owned rather than added. Phase 9 is
+still incomplete because the lifecycle/query/command portions of
+`internal/backend.IssueBackend` and their duplicate DTO plane remain.
+
+## Wave 9.29 validation
+
+| Check | Result |
+|---|---|
+| Work Items mutation owner and realtime behavior | PASS: `internal/modules/workitems`, `internal/webui/subscription`, `internal/webui/server/realtime`, and `internal/webui/hooks` suites, including opaque cursor advancement, reconnect catch-up, retry, cancellation, and wire projection |
+| FleetDB and API adapter behavior | PASS: complete `internal/backend`, `internal/backend/api`, and `internal/backend/fleet` suites with loopback test servers |
+| Retired-plane and runtime inventory ratchets | PASS: `TestRetiredBackendMutationPlaneCannotReturn` and `TestCheckedInRuntimeInventoryMatchesRepository`; all internal packages compile |
+| Aggregate `make gate` | PASS: all Go and frontend quality gates against paired FleetDB source `9c1859ab1` and a freshly built binary, with four Go OS threads, two Go package workers, one Vitest worker, and a 2 GiB Go soft memory limit |
+
+The first aggregate attempt correctly rejected the stale runtime inventory and
+then exhausted disk while compiling all architecture profiles and frontend
+coverage. After re-owning the component entry and clearing only the generated
+Go caches from that run, the exact pinned gate passed. No architecture
+exception, compatibility path, or coverage threshold was weakened.
+
+The next deletion slice migrates the remaining Work Items lifecycle and query
+consumers to capability-owned ports and models, then deletes the corresponding
+`IssueBackend` methods and backend DTOs. The broad interface is not an accepted
+endpoint.
 
 ---
 
