@@ -3268,6 +3268,14 @@ export interface components {
       path: string;
       repos: string[];
     };
+    MonitorRuntimePlacement: {
+      sandbox_id: string;
+      placement_id: string;
+      /** @enum {string} */
+      state: "provisioning" | "active" | "releasing" | "released" | "lost";
+      /** Format: int64 */
+      generation: number;
+    };
     MonitorAgentStatus: {
       name: string;
       branch: string;
@@ -3301,6 +3309,19 @@ export interface components {
        * @description Most recent PTY-output observation from the agent's supervised backend (claude/codex/gemini), forwarded over IPC. Compare to "now" to detect stuck agents. Zero/absent when no observation yet or agent isn't daemon-managed.
        */
       last_activity_at?: string;
+      /**
+       * @description Effective provider for interactive remote runtimes.
+       * @enum {string}
+       */
+      runtime_provider?:
+        | "local"
+        | "e2b"
+        | "kubernetes"
+        | "daytona"
+        | "ci"
+        | "other";
+      /** @description Newest matching store placement by generation, then update time. */
+      runtime_placement?: components["schemas"]["MonitorRuntimePlacement"];
       /** @description Fleet-db's DERIVED liveness signal ("working" or "idle"), computed server-side from the running-session + fresh-lease join (never re-derived by loom). "working" means the agent has a live session right now. Absent when liveness was not computed (no fleet-db store). The UI prefers this over the lock-derived status, which stays "idle" for a provably-working agent on serve-only deployments. */
       live_status?: string;
       /** @description Task id of the agent's live session, set only when live_status == "working". */

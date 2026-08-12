@@ -495,6 +495,42 @@
   color: var(--color-text-primary);
 }
 
+.runtimeIdButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  max-width: min(420px, 55vw);
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--color-text-primary);
+  cursor: pointer;
+}
+
+.runtimeIdButton code {
+  overflow: hidden;
+  font-family: var(--font-family-mono);
+  color: inherit;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.runtimeCopyIcon {
+  flex: 0 0 auto;
+  color: var(--color-text-tertiary);
+}
+
+.runtimeIdButton:hover .runtimeCopyIcon {
+  color: var(--color-text-secondary);
+}
+
+.runtimeIdButton:focus-visible {
+  outline: 2px solid var(--color-focus-ring);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
 .activity {
   margin: var(--space-4) 0 0;
   padding: 0;

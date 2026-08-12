@@ -32,32 +32,41 @@ type FileChange struct {
 	Path   string `json:"path"`
 }
 
+type RuntimePlacement struct {
+	SandboxID   string `json:"sandbox_id"`
+	PlacementID string `json:"placement_id"`
+	State       string `json:"state"`
+	Generation  int64  `json:"generation"`
+}
+
 // AgentStatus represents a single agent/worktree status
 type AgentStatus struct {
-	Name                  string         `json:"name"`
-	Branch                string         `json:"branch"`
-	Status                string         `json:"status"`                            // "ready", "3 changes", "running (plan, 5m ago)"
-	Ahead                 int            `json:"ahead"`                             // commits ahead of integration branch
-	Behind                int            `json:"behind"`                            // commits behind integration branch
-	Role                  string         `json:"role,omitempty"`                    // role from daemon config (e.g., "plan", "task")
-	RoleKind              string         `json:"role_kind,omitempty"`               // resolved role kind ("interactive" or "worker")
-	Repo                  string         `json:"repo,omitempty"`                    // repository this agent is assigned to (multi-repo)
-	Workspace             string         `json:"workspace"`                         // workspace name
-	DaemonManaged         bool           `json:"daemon_managed,omitempty"`          // true if under daemon supervision
-	Parent                string         `json:"parent,omitempty"`                  // active epic for leads/workers
-	DeliveryState         string         `json:"delivery_state,omitempty"`          // lead assignment delivery state
-	InboxQueuedCount      int            `json:"inbox_queued_count,omitempty"`      // queued agent inbox messages
-	InboxFailedCount      int            `json:"inbox_failed_count,omitempty"`      // failed agent inbox messages
-	InboxLatestMessage    string         `json:"inbox_latest_message,omitempty"`    // newest queued/failed inbox message body
-	OrchestratorSessionID string         `json:"orchestrator_session_id,omitempty"` // lead/orchestrator session attribution
-	TaskID                string         `json:"task_id,omitempty"`                 // latest task session associated with this agent
-	SessionID             string         `json:"session_id,omitempty"`              // latest control-plane session for this agent
-	Mode                  string         `json:"mode,omitempty"`                    // persistent/ephemeral assignment mode
-	DesiredState          string         `json:"desired_state,omitempty"`           // requested daemon state
-	Commits               []CommitDetail `json:"commits,omitempty"`                 // recent commits ahead of integration branch
-	Changes               []FileChange   `json:"changes,omitempty"`                 // uncommitted file changes
-	CurrentTaskID         string         `json:"current_task_id,omitempty"`         // task this daemon-managed agent has claimed; empty between tasks
-	LastActivityAt        *time.Time     `json:"last_activity_at,omitempty"`        // most recent PTY-output observation from the agent's supervised backend; nil when not reported (a zero time.Time would serialize as "0001-01-01T00:00:00Z" and the UI would render it as a bogus "last seen" age)
+	Name                  string            `json:"name"`
+	Branch                string            `json:"branch"`
+	Status                string            `json:"status"`                            // "ready", "3 changes", "running (plan, 5m ago)"
+	Ahead                 int               `json:"ahead"`                             // commits ahead of integration branch
+	Behind                int               `json:"behind"`                            // commits behind integration branch
+	Role                  string            `json:"role,omitempty"`                    // role from daemon config (e.g., "plan", "task")
+	RoleKind              string            `json:"role_kind,omitempty"`               // resolved role kind ("interactive" or "worker")
+	Repo                  string            `json:"repo,omitempty"`                    // repository this agent is assigned to (multi-repo)
+	Workspace             string            `json:"workspace"`                         // workspace name
+	DaemonManaged         bool              `json:"daemon_managed,omitempty"`          // true if under daemon supervision
+	Parent                string            `json:"parent,omitempty"`                  // active epic for leads/workers
+	DeliveryState         string            `json:"delivery_state,omitempty"`          // lead assignment delivery state
+	InboxQueuedCount      int               `json:"inbox_queued_count,omitempty"`      // queued agent inbox messages
+	InboxFailedCount      int               `json:"inbox_failed_count,omitempty"`      // failed agent inbox messages
+	InboxLatestMessage    string            `json:"inbox_latest_message,omitempty"`    // newest queued/failed inbox message body
+	OrchestratorSessionID string            `json:"orchestrator_session_id,omitempty"` // lead/orchestrator session attribution
+	TaskID                string            `json:"task_id,omitempty"`                 // latest task session associated with this agent
+	SessionID             string            `json:"session_id,omitempty"`              // latest control-plane session for this agent
+	Mode                  string            `json:"mode,omitempty"`                    // persistent/ephemeral assignment mode
+	DesiredState          string            `json:"desired_state,omitempty"`           // requested daemon state
+	Commits               []CommitDetail    `json:"commits,omitempty"`                 // recent commits ahead of integration branch
+	Changes               []FileChange      `json:"changes,omitempty"`                 // uncommitted file changes
+	CurrentTaskID         string            `json:"current_task_id,omitempty"`         // task this daemon-managed agent has claimed; empty between tasks
+	LastActivityAt        *time.Time        `json:"last_activity_at,omitempty"`        // most recent PTY-output observation from the agent's supervised backend; nil when not reported (a zero time.Time would serialize as "0001-01-01T00:00:00Z" and the UI would render it as a bogus "last seen" age)
+	RuntimeProvider       string            `json:"runtime_provider,omitempty"`
+	RuntimePlacement      *RuntimePlacement `json:"runtime_placement,omitempty"`
 	// LiveStatus/ActiveTaskID/ActivePhase are fleet-db's DERIVED liveness signal
 	// (computed there from the running-session+fresh-lease join), carried through
 	// from the store agent record — never re-derived here. LiveStatus is "working"

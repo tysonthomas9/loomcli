@@ -26,6 +26,13 @@ const mocks = vi.hoisted(() => {
       status?: string;
       branch?: string;
       cross_repo?: boolean;
+      runtime_provider?: string;
+      runtime_placement?: {
+        sandbox_id: string;
+        placement_id: string;
+        state: string;
+        generation: number;
+      };
     }>,
     agentStore: {
       getState: () => ({ fetchData }),
@@ -292,6 +299,32 @@ describe("AgentsPage", () => {
           .getAttribute("data-active"),
       ).toBe("true");
     });
+  });
+
+  it("renders the Daytona sandbox ID in the Info tab", async () => {
+    mocks.agents = [
+      {
+        name: "lead-1",
+        role: "lead",
+        repo: "loomcli",
+        status: "ready",
+        branch: "agent/lead-1",
+        runtime_provider: "daytona",
+        runtime_placement: {
+          sandbox_id: "sandbox-123",
+          placement_id: "placement-456",
+          state: "active",
+          generation: 7,
+        },
+      },
+    ];
+
+    render(<AgentsPage />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Info" }));
+
+    expect(await screen.findByText("Sandbox ID")).toBeTruthy();
+    expect(screen.getByText("sandbox-123")).toBeTruthy();
   });
 
   it("does not leave the retired legacy file editor module in source", () => {

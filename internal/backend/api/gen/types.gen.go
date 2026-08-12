@@ -587,6 +587,63 @@ func (e MonitorAgentStatusRoleKind) Valid() bool {
 	}
 }
 
+// Defines values for MonitorAgentStatusRuntimeProvider.
+const (
+	MonitorAgentStatusRuntimeProviderCi         MonitorAgentStatusRuntimeProvider = "ci"
+	MonitorAgentStatusRuntimeProviderDaytona    MonitorAgentStatusRuntimeProvider = "daytona"
+	MonitorAgentStatusRuntimeProviderE2b        MonitorAgentStatusRuntimeProvider = "e2b"
+	MonitorAgentStatusRuntimeProviderKubernetes MonitorAgentStatusRuntimeProvider = "kubernetes"
+	MonitorAgentStatusRuntimeProviderLocal      MonitorAgentStatusRuntimeProvider = "local"
+	MonitorAgentStatusRuntimeProviderOther      MonitorAgentStatusRuntimeProvider = "other"
+)
+
+// Valid indicates whether the value is a known member of the MonitorAgentStatusRuntimeProvider enum.
+func (e MonitorAgentStatusRuntimeProvider) Valid() bool {
+	switch e {
+	case MonitorAgentStatusRuntimeProviderCi:
+		return true
+	case MonitorAgentStatusRuntimeProviderDaytona:
+		return true
+	case MonitorAgentStatusRuntimeProviderE2b:
+		return true
+	case MonitorAgentStatusRuntimeProviderKubernetes:
+		return true
+	case MonitorAgentStatusRuntimeProviderLocal:
+		return true
+	case MonitorAgentStatusRuntimeProviderOther:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for MonitorRuntimePlacementState.
+const (
+	MonitorRuntimePlacementStateActive       MonitorRuntimePlacementState = "active"
+	MonitorRuntimePlacementStateLost         MonitorRuntimePlacementState = "lost"
+	MonitorRuntimePlacementStateProvisioning MonitorRuntimePlacementState = "provisioning"
+	MonitorRuntimePlacementStateReleased     MonitorRuntimePlacementState = "released"
+	MonitorRuntimePlacementStateReleasing    MonitorRuntimePlacementState = "releasing"
+)
+
+// Valid indicates whether the value is a known member of the MonitorRuntimePlacementState enum.
+func (e MonitorRuntimePlacementState) Valid() bool {
+	switch e {
+	case MonitorRuntimePlacementStateActive:
+		return true
+	case MonitorRuntimePlacementStateLost:
+		return true
+	case MonitorRuntimePlacementStateProvisioning:
+		return true
+	case MonitorRuntimePlacementStateReleased:
+		return true
+	case MonitorRuntimePlacementStateReleasing:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for MonitorWorkspaceInfoMode.
 const (
 	MonitorWorkspaceInfoModeWorkspace MonitorWorkspaceInfoMode = "workspace"
@@ -862,16 +919,16 @@ func (e SessionHistoryRecordLauncher) Valid() bool {
 
 // Defines values for SessionHistoryRecordStatus.
 const (
-	Active    SessionHistoryRecordStatus = "active"
-	Completed SessionHistoryRecordStatus = "completed"
+	SessionHistoryRecordStatusActive    SessionHistoryRecordStatus = "active"
+	SessionHistoryRecordStatusCompleted SessionHistoryRecordStatus = "completed"
 )
 
 // Valid indicates whether the value is a known member of the SessionHistoryRecordStatus enum.
 func (e SessionHistoryRecordStatus) Valid() bool {
 	switch e {
-	case Active:
+	case SessionHistoryRecordStatusActive:
 		return true
-	case Completed:
+	case SessionHistoryRecordStatusCompleted:
 		return true
 	default:
 		return false
@@ -1072,28 +1129,28 @@ func (e WorkspaceResponseDesignFormat) Valid() bool {
 
 // Defines values for CreateAgentJSONBodyRuntimeProvider.
 const (
-	Ci         CreateAgentJSONBodyRuntimeProvider = "ci"
-	Daytona    CreateAgentJSONBodyRuntimeProvider = "daytona"
-	E2b        CreateAgentJSONBodyRuntimeProvider = "e2b"
-	Kubernetes CreateAgentJSONBodyRuntimeProvider = "kubernetes"
-	Local      CreateAgentJSONBodyRuntimeProvider = "local"
-	Other      CreateAgentJSONBodyRuntimeProvider = "other"
+	CreateAgentJSONBodyRuntimeProviderCi         CreateAgentJSONBodyRuntimeProvider = "ci"
+	CreateAgentJSONBodyRuntimeProviderDaytona    CreateAgentJSONBodyRuntimeProvider = "daytona"
+	CreateAgentJSONBodyRuntimeProviderE2b        CreateAgentJSONBodyRuntimeProvider = "e2b"
+	CreateAgentJSONBodyRuntimeProviderKubernetes CreateAgentJSONBodyRuntimeProvider = "kubernetes"
+	CreateAgentJSONBodyRuntimeProviderLocal      CreateAgentJSONBodyRuntimeProvider = "local"
+	CreateAgentJSONBodyRuntimeProviderOther      CreateAgentJSONBodyRuntimeProvider = "other"
 )
 
 // Valid indicates whether the value is a known member of the CreateAgentJSONBodyRuntimeProvider enum.
 func (e CreateAgentJSONBodyRuntimeProvider) Valid() bool {
 	switch e {
-	case Ci:
+	case CreateAgentJSONBodyRuntimeProviderCi:
 		return true
-	case Daytona:
+	case CreateAgentJSONBodyRuntimeProviderDaytona:
 		return true
-	case E2b:
+	case CreateAgentJSONBodyRuntimeProviderE2b:
 		return true
-	case Kubernetes:
+	case CreateAgentJSONBodyRuntimeProviderKubernetes:
 		return true
-	case Local:
+	case CreateAgentJSONBodyRuntimeProviderLocal:
 		return true
-	case Other:
+	case CreateAgentJSONBodyRuntimeProviderOther:
 		return true
 	default:
 		return false
@@ -2270,10 +2327,14 @@ type MonitorAgentStatus struct {
 	OrchestratorSessionId *string `json:"orchestrator_session_id,omitempty"`
 
 	// Parent Active epic assignment for lead/workers.
-	Parent   *string                     `json:"parent,omitempty"`
-	Repo     *string                     `json:"repo,omitempty"`
-	Role     *string                     `json:"role,omitempty"`
-	RoleKind *MonitorAgentStatusRoleKind `json:"role_kind,omitempty"`
+	Parent           *string                     `json:"parent,omitempty"`
+	Repo             *string                     `json:"repo,omitempty"`
+	Role             *string                     `json:"role,omitempty"`
+	RoleKind         *MonitorAgentStatusRoleKind `json:"role_kind,omitempty"`
+	RuntimePlacement *MonitorRuntimePlacement    `json:"runtime_placement,omitempty"`
+
+	// RuntimeProvider Effective provider for interactive remote runtimes.
+	RuntimeProvider *MonitorAgentStatusRuntimeProvider `json:"runtime_provider,omitempty"`
 
 	// SessionId Latest control-plane session associated with this agent.
 	SessionId *string `json:"session_id,omitempty"`
@@ -2286,6 +2347,9 @@ type MonitorAgentStatus struct {
 
 // MonitorAgentStatusRoleKind defines model for MonitorAgentStatus.RoleKind.
 type MonitorAgentStatusRoleKind string
+
+// MonitorAgentStatusRuntimeProvider Effective provider for interactive remote runtimes.
+type MonitorAgentStatusRuntimeProvider string
 
 // MonitorAgentsResponse defines model for MonitorAgentsResponse.
 type MonitorAgentsResponse struct {
@@ -2309,6 +2373,17 @@ type MonitorFileChange struct {
 	// Status "M", "A", "D", "??", "R"
 	Status string `json:"status"`
 }
+
+// MonitorRuntimePlacement defines model for MonitorRuntimePlacement.
+type MonitorRuntimePlacement struct {
+	Generation  int64                        `json:"generation"`
+	PlacementId string                       `json:"placement_id"`
+	SandboxId   string                       `json:"sandbox_id"`
+	State       MonitorRuntimePlacementState `json:"state"`
+}
+
+// MonitorRuntimePlacementState defines model for MonitorRuntimePlacement.State.
+type MonitorRuntimePlacementState string
 
 // MonitorStats defines model for MonitorStats.
 type MonitorStats struct {
