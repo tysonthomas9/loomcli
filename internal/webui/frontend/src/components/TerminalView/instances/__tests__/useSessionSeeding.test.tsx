@@ -43,6 +43,45 @@ describe("useSessionSeeding", () => {
     mockHooksApi.ensureAgentTerminalSession.mockReset();
   });
 
+  it("resolves a pending agent after terminal initialization becomes ready", async () => {
+    mockHooksApi.ensureAgentTerminalSession.mockResolvedValueOnce({
+      session_name: "term_ready",
+      label: "agent-lead-ui-e2e",
+      notes: "",
+      sort_order: 0,
+      pinned: false,
+      kind: "agent",
+      agent_id: "lead-ui-e2e",
+      role: "lead",
+      backend: "codex",
+      writable: true,
+      pty_alive: true,
+      attached_clients: 0,
+      created_at: "2026-05-11T00:00:00Z",
+      updated_at: "2026-05-11T00:00:00Z",
+    });
+    const initializedRef = {
+      current: false,
+    } as React.MutableRefObject<boolean>;
+    const args = makeArgs({
+      pendingAgentName: "lead-ui-e2e",
+      initializedRef,
+    });
+
+    const { rerender } = renderHook(() => useSessionSeeding(args));
+    expect(mockHooksApi.ensureAgentTerminalSession).not.toHaveBeenCalled();
+
+    initializedRef.current = true;
+    rerender();
+
+    await waitFor(() => {
+      expect(mockHooksApi.ensureAgentTerminalSession).toHaveBeenCalledWith(
+        "E2E",
+        "lead-ui-e2e",
+      );
+    });
+  });
+
   it("resolves pending agent names even when a stale restored tab exists", async () => {
     const existingTab: TabState = {
       id: "term_123",

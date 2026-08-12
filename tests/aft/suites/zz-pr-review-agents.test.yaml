@@ -182,7 +182,7 @@ tests:
         intent: "Wait until the PR Review agent terminal view is ready"
       - wait:
           fn: >-
-            !!document.querySelector('[data-testid=terminal-wrapper] .wterm')
+            !!document.querySelector('[data-testid=terminal-wrapper][data-terminal-renderer=xterm] .xterm')
         intent: "Wait until the PR Review terminal grid mounts"
       - run: |
           set -e
@@ -300,7 +300,7 @@ tests:
       - open: /ws/E2E-WS-PRR/agents/prrbad-${RUN_ID:-local}
       - wait:
           fn: >-
-            !!document.querySelector('[data-testid=terminal-wrapper] .wterm')
+            !!document.querySelector('[data-testid=terminal-wrapper][data-terminal-renderer=xterm] .xterm')
         intent: "Wait until the bad-prompt agent terminal grid mounts"
       - wait:
           fn: >-

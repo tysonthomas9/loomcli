@@ -144,6 +144,18 @@ type TaskClaimOptions struct {
 	Actor   string
 	Limit   int
 	LockTTL time.Duration
+	// ExcludeLabels skips ready tasks carrying ANY of these labels.
+	//
+	// The epic-runner claims label-blind: any open, unblocked child of the
+	// epic is fair game. That is correct for a fan-out of independent tasks
+	// and wrong for an epic whose children are mid-flight in a
+	// label-routed daemon pipeline — a task stamped by one stage and waiting
+	// for the next is still "ready", so a Run Epic dispatches it to a generic
+	// implementer and closes it, skipping the remaining stages.
+	//
+	// Filtering here rather than in the ready query is deliberate: the server
+	// ready view has no exclusion filter, and the set is already in hand.
+	ExcludeLabels []string
 }
 
 type ClaimedTask struct {
@@ -177,8 +189,12 @@ func ClaimReadyTask(ctx context.Context, issueBackend backend.IssueBackend, opts
 		return nil, fmt.Errorf("list ready tasks: %w", err)
 	}
 	actor := strings.TrimSpace(opts.Actor)
+	excluded := normalizeLabelSet(opts.ExcludeLabels)
 	for _, issue := range ready {
 		if strings.TrimSpace(issue.ID) == "" {
+			continue
+		}
+		if hasAnyLabel(issue.Labels, excluded) {
 			continue
 		}
 		// Blocked issues are excluded server-side from the ready view; skip
@@ -196,6 +212,34 @@ func ClaimReadyTask(ctx context.Context, issueBackend backend.IssueBackend, opts
 		return nil, fmt.Errorf("claim ready task %q: %w", issue.ID, err)
 	}
 	return nil, nil
+}
+
+// normalizeLabelSet lowercases and trims a label list into a lookup set,
+// dropping blanks. Labels compare case-insensitively so a pipeline label
+// configured as "Criticized" still guards a task stamped "criticized".
+func normalizeLabelSet(labels []string) map[string]struct{} {
+	if len(labels) == 0 {
+		return nil
+	}
+	out := make(map[string]struct{}, len(labels))
+	for _, l := range labels {
+		if l = strings.ToLower(strings.TrimSpace(l)); l != "" {
+			out[l] = struct{}{}
+		}
+	}
+	return out
+}
+
+func hasAnyLabel(labels []string, set map[string]struct{}) bool {
+	if len(set) == 0 {
+		return false
+	}
+	for _, l := range labels {
+		if _, ok := set[strings.ToLower(strings.TrimSpace(l))]; ok {
+			return true
+		}
+	}
+	return false
 }
 
 func claimIssue(ctx context.Context, issueBackend backend.IssueBackend, issueID string, lockTTL time.Duration, actor string) error {

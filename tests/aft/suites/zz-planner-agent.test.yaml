@@ -381,7 +381,8 @@ tests:
           fn: >-
             (() => {
               const el = document.querySelector("[aria-label='Agent: planner-${RUN_ID:-local}']");
-              return !!el && /plan(?=[A-Z\s]|$)/.test(el.textContent) && el.textContent.includes('Idle');
+              const text = el?.textContent || '';
+              return !!el && text.includes('Plan') && text.includes('Idle');
             })()
         intent: "Wait until the Planner card renders its Plan role and Idle status"
       - expect: { attr: { selector: "[aria-label='Agent: planner-${RUN_ID:-local}']", name: data-status, equals: "idle" } }
@@ -499,9 +500,9 @@ tests:
               exists: false
         intent: "An operator confirms no planning session was recorded for the untouched task"
 
-  # covers: PLN-D9; metricscmd planning status synthesis; AgentCard Planning badge; panel assignee chip
-  - name: assigned in-progress planner renders planning rail and assignee chip
-    intent: An orchestration client assigns an in-progress task to the Planner and an operator sees the agent report Planning on that task while the detail panel names the assignee
+  # covers: PLN-D9; metricscmd planning status synthesis; AgentCard active-task badge; panel assignee chip
+  - name: assigned in-progress planner renders active task states and assignee chip
+    intent: An orchestration client assigns in-progress tasks and an operator sees planning and working states with active-task identity while the detail panel names the Planner assignee
     steps:
       - api:
           method: "POST"
@@ -585,10 +586,12 @@ tests:
             (() => {
               const planner = document.querySelector("[aria-label='Agent: planner-${RUN_ID:-local}']");
               const task = document.querySelector("[aria-label='Agent: planner-task-${RUN_ID:-local}']");
-              return !!planner && planner.getAttribute('data-status') === 'planning' && planner.textContent.includes('Planning') &&
-                !!task && task.getAttribute('data-status') === 'working' && task.textContent.includes('Working');
+              const plannerTask = planner?.querySelector('[data-task=true]');
+              const taskTask = task?.querySelector('[data-task=true]');
+              return !!planner && planner.getAttribute('data-status') === 'planning' && !!plannerTask?.textContent?.trim() &&
+                !!task && task.getAttribute('data-status') === 'working' && !!taskTask?.textContent?.trim();
             })()
-        intent: "Wait until metrics synthesis renders Planning for plan and Working for task"
+        intent: "Wait until metrics synthesis renders planning and working states with active-task badges"
       - expect: { attr: { selector: "[aria-label='Agent: planner-${RUN_ID:-local}']", name: data-status, equals: "planning" } }
       - expect: { attr: { selector: "[aria-label='Agent: planner-task-${RUN_ID:-local}']", name: data-status, equals: "working" } }
       - open: /ws/E2E-WS-PLAN/kanban

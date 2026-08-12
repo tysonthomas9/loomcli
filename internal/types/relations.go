@@ -67,8 +67,14 @@ type DependencyType string
 // Dependency type constants
 const (
 	// Workflow types (affect ready work calculation)
-	DepBlocks            DependencyType = "blocks"
-	DepParentChild       DependencyType = "parent-child"
+	DepBlocks      DependencyType = "blocks"
+	DepParentChild DependencyType = "parent-child"
+	// NOT STORABLE IN FLEET-DB. These two describe semantics no storage
+	// backend implements; fleet-db's vocabulary is blocks / parent-child /
+	// related / duplicate-of / superseded-by, and it rejects anything else.
+	// The fleet backend validates against that set (validateFleetDepType), so
+	// creating either of these fails at the call site rather than at the
+	// server. Kept as in-process vocabulary only.
 	DepConditionalBlocks DependencyType = "conditional-blocks" // B runs only if A fails
 	DepWaitsFor          DependencyType = "waits-for"          // Fanout gate: wait for dynamic children
 

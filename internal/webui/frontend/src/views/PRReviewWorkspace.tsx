@@ -45,6 +45,8 @@ export interface PRReviewWorkspaceProps {
   /** Return to the PR list. */
   onBack: () => void;
   onLinkedTicket?: (issueId: string) => void;
+  /** Open the Discuss PR panel on mount (e.g. sidebar agent click). */
+  initialDiscussOpen?: boolean | undefined;
 }
 
 /** Agents linked to a task issue (worker, status/task_id match, assignee). */
@@ -133,6 +135,7 @@ export function PRReviewWorkspace({
   pullRequest,
   onBack,
   onLinkedTicket,
+  initialDiscussOpen = false,
 }: PRReviewWorkspaceProps): JSX.Element {
   const navigate = useNavigate();
   const { agents, issues } = useWorkspaceViewData();
@@ -150,7 +153,7 @@ export function PRReviewWorkspace({
   const [stale, setStale] = useState(false);
   const [diffRefreshKey, setDiffRefreshKey] = useState(0);
   const [creatingTicket, setCreatingTicket] = useState(false);
-  const [discussOpen, setDiscussOpen] = useState(false);
+  const [discussOpen, setDiscussOpen] = useState(initialDiscussOpen);
 
   const diffAgent = useMemo(
     () => (issue ? resolveDiffAgentForIssue(issue, agents) : undefined),
@@ -312,10 +315,10 @@ export function PRReviewWorkspace({
         priority: 3,
       });
       try {
-        await updateIssue(workspaceId, created.issue.id, { status: "review" });
+        await updateIssue(workspaceId, created.id, { status: "review" });
       } catch {
         showToast(
-          `Ticket ${created.issue.id} created, but moving it to Review failed — set it manually`,
+          `Ticket ${created.id} created, but moving it to Review failed — set it manually`,
           { type: "warning" },
         );
       }
@@ -324,8 +327,8 @@ export function PRReviewWorkspace({
       // App.handleCreateIssueSuccess). Without this the review gate misses the
       // not-yet-loaded issue and bounces back to the PR queue.
       await refetch();
-      showToast(`Created ${created.issue.id} for this pull request`);
-      onLinkedTicket?.(created.issue.id);
+      showToast(`Created ${created.id} for this pull request`);
+      onLinkedTicket?.(created.id);
     } catch (err) {
       showToast(
         err instanceof Error ? err.message : "Failed to create ticket",

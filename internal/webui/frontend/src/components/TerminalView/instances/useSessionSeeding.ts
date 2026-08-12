@@ -59,6 +59,10 @@ export function useSessionSeeding({
     promise: ReturnType<typeof ensureAgentTerminalSession>;
   } | null>(null);
   const consumedAgentKeyRef = useRef<string | null>(null);
+  // A ref object has stable identity, so depending on initializedRef itself
+  // does not retrigger these effects when terminal initialization flips its
+  // value. Capture the boolean on each render and depend on that value.
+  const isInitialized = initializedRef.current;
 
   const mergeExistingAgentTab = useCallback(
     (existing: TabState, metadataTab: TabState): TabState => {
@@ -83,7 +87,7 @@ export function useSessionSeeding({
 
   // Handle pending issue context: create or switch to issue tab.
   useEffect(() => {
-    if (!pendingIssueContext || !initializedRef.current) return;
+    if (!pendingIssueContext || !isInitialized) return;
 
     const sessionName = `issue-${sanitizeSessionName(pendingIssueContext.issue_id)}`;
 
@@ -114,7 +118,7 @@ export function useSessionSeeding({
     tabs,
     createTab,
     onIssueContextConsumed,
-    initializedRef,
+    isInitialized,
     setTabs,
     setActiveTabId,
     config,
@@ -122,7 +126,7 @@ export function useSessionSeeding({
 
   // Handle pending agent name: resolve or switch to the agent's PTY terminal.
   useEffect(() => {
-    if (!pendingAgentName || !initializedRef.current) return;
+    if (!pendingAgentName || !isInitialized) return;
 
     const existingTab = tabs.find((t) => t.agentName === pendingAgentName);
     if (!existingTab && tabs.length >= MAX_TABS) {
@@ -206,7 +210,7 @@ export function useSessionSeeding({
     pendingAgentName,
     tabs,
     onAgentNameConsumed,
-    initializedRef,
+    isInitialized,
     setTabs,
     setActiveTabId,
     workspaceIdRef,

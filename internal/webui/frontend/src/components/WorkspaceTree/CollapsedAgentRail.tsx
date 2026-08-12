@@ -14,6 +14,7 @@ import {
 import { CompactRailHost } from "@/components/CompactRail";
 import { useAgentStoreInstance, useWorkspaceContext } from "@/hooks";
 import type { LoomAgentStatus } from "@/types";
+import { isPRReviewerAgent } from "@/utils/agentDisplay";
 
 import styles from "./CollapsedAgentRail.module.css";
 
@@ -21,16 +22,21 @@ export interface CollapsedAgentRailProps {
   onAgentClick?: ((agentName: string) => void) | undefined;
   selectedAgentName?: string | null | undefined;
   onAddClick?: (() => void) | undefined;
+  /** When "prs", only PR review agents are shown and Add agent is hidden. */
+  activeView?: string | undefined;
 }
 
 export function CollapsedAgentRail({
   onAgentClick,
   selectedAgentName = null,
   onAddClick,
+  activeView,
 }: CollapsedAgentRailProps): JSX.Element {
   const agentStore = useAgentStoreInstance();
   const fleetAgents = useStore(agentStore, (s) => s.agents);
   const { agents: workspaceConfigAgents, workspace } = useWorkspaceContext();
+  const prsView = activeView === "prs";
+  const addClick = prsView ? undefined : onAddClick;
 
   const agents = useMemo<LoomAgentStatus[]>(() => {
     const merged: LoomAgentStatus[] = [...fleetAgents];
@@ -48,13 +54,16 @@ export function CollapsedAgentRail({
           cross_repo: ca.cross_repo,
         };
         if (ca.repos?.[0]) entry.repo = ca.repos[0];
+        if (ca.role_name) entry.role = ca.role_name;
         merged.push(entry);
       }
     }
-    return orderAgentsForEpicRunner(merged).filter(
+    const ordered = orderAgentsForEpicRunner(merged).filter(
       (agent) => agent.status === "configured" || isLiveAgentRailVisible(agent),
     );
-  }, [fleetAgents, workspaceConfigAgents, workspace?.name]);
+    if (!prsView) return ordered;
+    return ordered.filter(isPRReviewerAgent);
+  }, [fleetAgents, workspaceConfigAgents, workspace?.name, prsView]);
 
   return (
     <nav
@@ -80,13 +89,13 @@ export function CollapsedAgentRail({
           />
         ))
       )}
-      {onAddClick ? (
+      {addClick ? (
         <CompactRailHost
           as="button"
           type="button"
           label="Add agent"
           className={styles.addButton}
-          onClick={onAddClick}
+          onClick={addClick}
         >
           +
         </CompactRailHost>

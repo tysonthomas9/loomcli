@@ -9,6 +9,14 @@ import { RepoBadge } from "@/components/RepoBadge";
 import { getCompactAvatarInitials } from "@/utils/compactAvatarInitials";
 import { getAvatarColor, shouldUseWhiteText } from "@/utils/colorUtils";
 import { getStatusDotColor, getStatusLabel } from "@/utils/agent";
+import {
+  agentCompactAvatarLabel,
+  agentDisplayRoleLabel,
+  agentDisplayTitle,
+  agentUsesLiteralTitle,
+  isPRReviewerAgent,
+} from "@/utils/agentDisplay";
+import { isLeadRole } from "@/utils/agentRole";
 
 import styles from "./AgentCard.module.css";
 
@@ -40,6 +48,20 @@ function normalizeCardStatus(agent: LoomAgentStatus): string {
   return status;
 }
 
+function pickedUpTaskLabel(
+  agent: LoomAgentStatus,
+  taskTitle: string | undefined,
+  parsedTaskId: string | undefined,
+): string {
+  const title = taskTitle?.trim();
+  if (title) return title;
+  const active = agent.active_task_id?.trim();
+  if (active) return active;
+  const current = agent.current_task_id?.trim();
+  if (current) return current;
+  return parsedTaskId?.trim() ?? "";
+}
+
 /**
  * AgentCard displays a single agent's status in a compact row with circular avatar.
  */
@@ -63,9 +85,27 @@ export function AgentCard({
       ? [agent.active_task_id, agent.active_phase].filter(Boolean).join(" · ")
       : "";
   const isError = parsed.type === "error";
-  const initial = getCompactAvatarInitials(agent.name);
+  const initial =
+    agentCompactAvatarLabel(agent) || getCompactAvatarInitials(agent.name);
   const textColor = shouldUseWhiteText(avatarColor) ? "#fff" : "#1f2937";
-  const roleLabel = agent.role?.trim() ? agent.role : "Agent";
+  const title = agentDisplayTitle(agent);
+  const roleLabel = agentDisplayRoleLabel(agent);
+  const taskLabel = pickedUpTaskLabel(agent, taskTitle, parsed.taskId);
+  // Prefer the assigned task over git dirtiness ("1 change") / Ready noise.
+  // Status still shows on the avatar dot; hide change/dirty text entirely.
+  const metaLabel =
+    taskLabel ||
+    (parsed.type === "changes" || parsed.type === "dirty" ? "" : statusLabel);
+  const showStatusLine =
+    Boolean(metaLabel) &&
+    !isPRReviewerAgent(agent) &&
+    !(isLeadRole(agent.role) && parsed.type === "idle");
+  const nameClassName = [
+    styles.name,
+    agentUsesLiteralTitle(agent) ? styles.nameLiteral : undefined,
+  ]
+    .filter(Boolean)
+    .join(" ");
 
   const rootClassName = [styles.card, compact && styles.compact, className]
     .filter(Boolean)
@@ -79,7 +119,7 @@ export function AgentCard({
       onClick={onClick}
       role={onClick ? "button" : undefined}
       tabIndex={onClick ? 0 : undefined}
-      aria-label={onClick ? `Agent: ${agent.name}` : undefined}
+      aria-label={onClick ? `Agent: ${title}` : undefined}
       aria-current={onClick && selected ? "page" : undefined}
       onKeyDown={
         onClick
@@ -108,8 +148,8 @@ export function AgentCard({
       </div>
 
       <div className={styles.info}>
-        <span className={styles.name} title={agent.name}>
-          {agent.name}
+        <span className={nameClassName} title={agent.name}>
+          {title}
         </span>
         <span className={styles.role}>{roleLabel}</span>
         {agent.repo && showRepoBadge && (
@@ -128,15 +168,18 @@ export function AgentCard({
         )}
       </div>
 
-      <div className={styles.meta}>
-        <span
-          className={styles.statusLine}
-          data-error={isError || undefined}
-          title={taskTitle || liveDetail || statusLabel}
-        >
-          {statusLabel}
-        </span>
-      </div>
+      {showStatusLine && (
+        <div className={styles.meta}>
+          <span
+            className={styles.statusLine}
+            data-error={isError && !taskLabel ? true : undefined}
+            data-task={taskLabel ? true : undefined}
+            title={taskLabel || liveDetail || statusLabel}
+          >
+            {metaLabel}
+          </span>
+        </div>
+      )}
     </div>
   );
 }

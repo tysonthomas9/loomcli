@@ -50,7 +50,7 @@ tests:
           post_agent() {
             stem="$1"
             curl -sS -o "$AFT_WORK_DIR/${stem}.resp.json" -w "%{http_code}" \
-              -X POST "$AFT_BASE_URL/api/workspaces/E2E-WS-CUSTOM-SURF/agents" \
+              -X POST "$AFT_API_URL/api/workspaces/E2E-WS-CUSTOM-SURF/agents" \
               -H "Content-Type: application/json" \
               --data-binary @"$AFT_WORK_DIR/${stem}.json"
           }

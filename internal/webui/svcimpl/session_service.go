@@ -180,8 +180,9 @@ func (s *sessionServiceImpl) ListTaskSessions(ctx context.Context, wsID, taskID 
 			item := service.SessionListItem{
 				SessionRecord: rec,
 				IsActive:      rec.Status == sessions.StatusRunning,
-				Evidence:      sessionEvidence(rec, nil),
 			}
+			enrichSessionUsageFromTranscript(sessStore, &item.SessionRecord)
+			item.Evidence = sessionEvidence(item.SessionRecord, nil)
 			if info, err := os.Stat(sessStore.NativeTranscriptPath(rec.SessionID)); err == nil && info.Size() > 0 {
 				item.HasTranscript = true
 			}
@@ -211,6 +212,7 @@ func (s *sessionServiceImpl) enrichSessionListItemsFromFileStores(ctx context.Co
 			}
 			conflicts := append([]service.SessionEvidenceConflict{}, item.Evidence.Conflicts...)
 			conflicts = append(conflicts, enrichSessionRecordFromLocal(&item.SessionRecord, meta.SessionRecord)...)
+			enrichSessionUsageFromTranscript(sessStore, &item.SessionRecord)
 			item.Evidence = sessionEvidence(item.SessionRecord, conflicts)
 			if info, err := os.Stat(sessStore.NativeTranscriptPath(item.SessionID)); err == nil && info.Size() > 0 {
 				item.HasTranscript = true
@@ -223,6 +225,30 @@ func (s *sessionServiceImpl) enrichSessionListItemsFromFileStores(ctx context.Co
 	}
 }
 
+// enrichSessionUsageFromTranscript backfills token fields from the on-disk native
+// transcript when session metadata still has zeros (common for completed Go Codex
+// daemon runs whose collector finalize never persisted usage).
+func enrichSessionUsageFromTranscript(store *sessions.Store, rec *sessions.SessionRecord) {
+	if sessionRecordHasUsage(*rec) {
+		return
+	}
+	u := store.TranscriptUsage(rec.SessionID)
+	if u.IsZero() {
+		return
+	}
+	rec.InputTokens = u.InputTokens
+	rec.OutputTokens = u.OutputTokens
+	rec.CacheReadTokens = u.CacheReadTokens
+	rec.CacheWriteTokens = u.CacheWriteTokens
+}
+
+func sessionRecordHasUsage(rec sessions.SessionRecord) bool {
+	return rec.InputTokens != 0 ||
+		rec.OutputTokens != 0 ||
+		rec.CacheReadTokens != 0 ||
+		rec.CacheWriteTokens != 0 ||
+		rec.EstimatedCostUSD != 0
+}
 func firstNonEmptySessionValue(values ...string) string {
 	for _, value := range values {
 		if strings.TrimSpace(value) != "" {

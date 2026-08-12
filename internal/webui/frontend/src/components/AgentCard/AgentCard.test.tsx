@@ -118,17 +118,75 @@ describe("AgentCard", () => {
         "planner-1785391718",
       );
     });
+
+    it("prefers display_name when present", () => {
+      render(
+        <AgentCard
+          agent={makeAgent({
+            name: "review-loomcli-3a8e1ebe-pr-222",
+            display_name: "loomcli#222",
+            role: "pr-reviewer",
+          })}
+        />,
+      );
+
+      expect(screen.getByText("loomcli#222")).toBeInTheDocument();
+      expect(
+        screen.queryByText("review-loomcli-3a8e1ebe-pr-222"),
+      ).not.toBeInTheDocument();
+    });
+
+    it("derives short PR title from name when display_name is missing", () => {
+      render(
+        <AgentCard
+          agent={makeAgent({
+            name: "review-tysonthomas9-loomcli-3a8e1ebe-pr-220",
+            role: "pr-reviewer",
+          })}
+        />,
+      );
+
+      expect(screen.getByText("loomcli#220")).toBeInTheDocument();
+      expect(
+        screen.queryByText("review-tysonthomas9-loomcli-3a8e1ebe-pr-220"),
+      ).not.toBeInTheDocument();
+    });
   });
 
   describe("role label", () => {
-    it("shows raw role id when agent has role", () => {
+    it("shows capitalized role when agent has role", () => {
       render(<AgentCard agent={makeAgent({ role: "plan" })} />);
-      expect(screen.getByText("plan")).toBeInTheDocument();
+      expect(screen.getByText("Plan")).toBeInTheDocument();
     });
 
-    it('shows raw "task" role id', () => {
+    it("prefers role_label when present", () => {
+      render(
+        <AgentCard
+          agent={makeAgent({
+            role: "pr-reviewer",
+            role_label: "Review",
+          })}
+        />,
+      );
+      expect(screen.getByText("Review")).toBeInTheDocument();
+      expect(screen.queryByText("Pr-reviewer")).not.toBeInTheDocument();
+    });
+
+    it('maps pr-reviewer to "Review" when role_label is missing', () => {
+      render(
+        <AgentCard
+          agent={makeAgent({
+            name: "review-hello-pr-7",
+            role: "pr-reviewer",
+          })}
+        />,
+      );
+      expect(screen.getByText("Review")).toBeInTheDocument();
+    });
+
+    it('shows "Task" for task role', () => {
       render(<AgentCard agent={makeAgent({ role: "task" })} />);
-      expect(screen.getByText("task")).toBeInTheDocument();
+      expect(screen.getByText("Task")).toBeInTheDocument();
     });
 
     it('shows "Agent" fallback when role is undefined', () => {
@@ -150,7 +208,7 @@ describe("AgentCard", () => {
       expect(screen.getByText("Ready")).toBeInTheDocument();
     });
 
-    it('shows "Idle" for lead agents', () => {
+    it('hides "Idle" for lead agents', () => {
       render(
         <AgentCard
           agent={makeAgent({
@@ -161,10 +219,26 @@ describe("AgentCard", () => {
         />,
       );
 
-      expect(screen.getByText("Idle")).toBeInTheDocument();
+      expect(screen.queryByText("Idle")).not.toBeInTheDocument();
     });
 
-    it('still shows "Working" for idle lead agents with live working status', () => {
+    it("hides status for PR review agents", () => {
+      render(
+        <AgentCard
+          agent={makeAgent({
+            name: "review-tysonthomas9-loomcli-3a8e1ebe-pr-220",
+            role: "pr-reviewer",
+            display_name: "loomcli#220",
+            status: "ready",
+          })}
+        />,
+      );
+
+      expect(screen.queryByText("Ready")).not.toBeInTheDocument();
+      expect(screen.getByText("Review")).toBeInTheDocument();
+    });
+
+    it("shows the active task for idle lead agents with live working status", () => {
       render(
         <AgentCard
           agent={makeAgent({
@@ -177,7 +251,8 @@ describe("AgentCard", () => {
         />,
       );
 
-      expect(screen.getByText("Working")).toBeInTheDocument();
+      expect(screen.getByText("loom-42")).toBeInTheDocument();
+      expect(screen.queryByText("Working")).not.toBeInTheDocument();
     });
 
     it('shows "Idle" for idle status', () => {
@@ -206,14 +281,16 @@ describe("AgentCard", () => {
       expect(screen.getByText("Working")).toBeInTheDocument();
     });
 
-    it('shows "Working" for working with task ID', () => {
-      render(
+    it("shows the task id for working with task ID", () => {
+      const { container } = render(
         <AgentCard
           agent={makeAgent({ status: "working: loom-123 (5m)", branch: "b" })}
         />,
       );
 
-      expect(screen.getByText("Working")).toBeInTheDocument();
+      expect(screen.getByText("loom-123")).toBeInTheDocument();
+      expect(container.firstChild).toHaveAttribute("data-status", "working");
+      expect(screen.queryByText("Working")).not.toBeInTheDocument();
     });
 
     it('shows "Planning" for planning status', () => {
@@ -224,20 +301,22 @@ describe("AgentCard", () => {
       expect(screen.getByText("Planning")).toBeInTheDocument();
     });
 
-    it('shows "Planning" for planning with task ID', () => {
-      render(
+    it("shows the task id for planning with task ID", () => {
+      const { container } = render(
         <AgentCard
           agent={makeAgent({ status: "planning: loom-456 (2m)", branch: "b" })}
         />,
       );
 
-      expect(screen.getByText("Planning")).toBeInTheDocument();
+      expect(screen.getByText("loom-456")).toBeInTheDocument();
+      expect(container.firstChild).toHaveAttribute("data-status", "planning");
+      expect(screen.queryByText("Planning")).not.toBeInTheDocument();
     });
 
-    it('shows "Working" from live_status when the lock-derived status reads idle', () => {
+    it("shows active task from live_status when the lock-derived status reads idle", () => {
       // Serve-only deployments: the monitor status stays "idle", but fleet-db's
       // live_status proves the agent is working. The badge must flip.
-      render(
+      const { container } = render(
         <AgentCard
           agent={makeAgent({
             status: "idle",
@@ -248,11 +327,12 @@ describe("AgentCard", () => {
         />,
       );
 
-      expect(screen.getByText("Working")).toBeInTheDocument();
+      expect(screen.getByText("loom-42")).toBeInTheDocument();
+      expect(container.firstChild).toHaveAttribute("data-status", "working");
     });
 
-    it('shows "Planning" from live_status for a plan-role agent that reads idle', () => {
-      render(
+    it("shows active task from live_status for a plan-role agent that reads idle", () => {
+      const { container } = render(
         <AgentCard
           agent={makeAgent({
             status: "idle",
@@ -264,7 +344,8 @@ describe("AgentCard", () => {
         />,
       );
 
-      expect(screen.getByText("Planning")).toBeInTheDocument();
+      expect(screen.getByText("loom-43")).toBeInTheDocument();
+      expect(container.firstChild).toHaveAttribute("data-status", "planning");
     });
 
     it('keeps "Idle" when live_status is idle', () => {
@@ -284,7 +365,7 @@ describe("AgentCard", () => {
     it("does not let live_status override a more specific status (review)", () => {
       // live_status="working" must not mask a meaningful lock-derived status:
       // a review badge wins (the override only applies to idle-like statuses).
-      render(
+      const { container } = render(
         <AgentCard
           agent={makeAgent({
             status: "review: loom-50 (3m)",
@@ -295,7 +376,8 @@ describe("AgentCard", () => {
         />,
       );
 
-      expect(screen.getByText("Review")).toBeInTheDocument();
+      expect(screen.getByText("loom-50")).toBeInTheDocument();
+      expect(container.firstChild).toHaveAttribute("data-status", "review");
       expect(screen.queryByText("Working")).not.toBeInTheDocument();
     });
 
@@ -319,26 +401,56 @@ describe("AgentCard", () => {
       expect(screen.getByText("Error")).toBeInTheDocument();
     });
 
-    it('shows "Uncommitted changes" for dirty status', () => {
+    it('hides "Uncommitted changes" for dirty status', () => {
       render(<AgentCard agent={makeAgent({ status: "dirty", branch: "b" })} />);
 
-      expect(screen.getByText("Uncommitted changes")).toBeInTheDocument();
+      expect(screen.queryByText("Uncommitted changes")).not.toBeInTheDocument();
     });
 
-    it('shows "2 changes" for changes status', () => {
+    it('hides "2 changes" for changes status', () => {
       render(
         <AgentCard agent={makeAgent({ status: "2 changes", branch: "b" })} />,
       );
 
-      expect(screen.getByText("2 changes")).toBeInTheDocument();
+      expect(screen.queryByText("2 changes")).not.toBeInTheDocument();
     });
 
-    it('shows "1 change" (singular) for single change', () => {
+    it('hides "1 change" for single change', () => {
       render(
         <AgentCard agent={makeAgent({ status: "1 change", branch: "b" })} />,
       );
 
-      expect(screen.getByText("1 change")).toBeInTheDocument();
+      expect(screen.queryByText("1 change")).not.toBeInTheDocument();
+    });
+
+    it("shows the picked-up task title instead of change count", () => {
+      render(
+        <AgentCard
+          agent={makeAgent({
+            status: "1 change",
+            active_task_id: "loom-42",
+            branch: "b",
+          })}
+          taskTitle="Backlog grooming"
+        />,
+      );
+
+      expect(screen.getByText("Backlog grooming")).toBeInTheDocument();
+      expect(screen.queryByText("1 change")).not.toBeInTheDocument();
+    });
+
+    it("falls back to active_task_id when task title is missing", () => {
+      render(
+        <AgentCard
+          agent={makeAgent({
+            status: "1 change",
+            active_task_id: "loom-42",
+            branch: "b",
+          })}
+        />,
+      );
+
+      expect(screen.getByText("loom-42")).toBeInTheDocument();
     });
   });
 
@@ -487,7 +599,7 @@ describe("AgentCard", () => {
   });
 
   describe("taskTitle prop", () => {
-    it("uses taskTitle as title attribute on status line when provided", () => {
+    it("shows taskTitle on the status line when provided", () => {
       render(
         <AgentCard
           agent={makeAgent({ status: "working: loom-123 (5m)", branch: "b" })}
@@ -495,7 +607,9 @@ describe("AgentCard", () => {
         />,
       );
 
+      expect(screen.getByText("Fix the login bug")).toBeInTheDocument();
       expect(screen.getByTitle("Fix the login bug")).toBeInTheDocument();
+      expect(screen.queryByText("Working")).not.toBeInTheDocument();
     });
 
     it("uses status line text as title when taskTitle is not provided", () => {

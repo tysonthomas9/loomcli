@@ -22,11 +22,17 @@ vi.mock("zustand", () => ({
 
 vi.mock("@/hooks", () => ({
   useAgentStoreInstance: () => ({}),
+  useDeleteWorkspaceAgent: () => vi.fn(),
   useWorkspaceContext: () => ({
     agents: mocks.workspaceAgents,
     workspace: null,
     workspaceId: "ws-alpha",
+    refetch: vi.fn(),
   }),
+}));
+
+vi.mock("@/hooks/ui", () => ({
+  useToast: () => ({ showToast: vi.fn() }),
 }));
 
 vi.mock("../SortableAgentList", () => ({

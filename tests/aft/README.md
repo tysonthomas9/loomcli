@@ -130,7 +130,7 @@ casually — every run consumes the respective account's rate/usage window.
 
 `make test-aft-terminal` proves the agents-page Logs tab's live-tmux path:
 `AgentLogsTab` detects a real auto-mode tmux session, mounts
-`EmbeddedTerminal`, and renders non-empty real codex output through wterm. It
+`EmbeddedTerminal`, and renders non-empty real codex output through xterm. It
 requires the normal real-codex preflight (a real `codex` on `PATH` and a logged-in
 `~/.codex/auth.json`) plus `tmux` on `PATH`.
 

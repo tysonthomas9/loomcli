@@ -51,12 +51,17 @@ func WithWorktree(sess *sessions.Session, opts WithWorktreeOptions) (WithWorktre
 	if sess == nil {
 		return result, nil
 	}
-	if sess.Meta.Backend == backendnames.Codex {
+	switch sess.Meta.Backend {
+	case backendnames.Codex:
 		_, _ = sess.SyncLatestCodexRollout(opts.WorktreePath, sess.Meta.StartedAt)
-	}
-	if sess.Meta.Backend == backendnames.Claude {
+	case backendnames.Claude:
 		_, _ = sess.SyncLatestClaudeTranscript(opts.WorktreePath, opts.ClaudeSessionID, sess.Meta.StartedAt)
 	}
+	// Go-leaf daemon finalize often arrives with zeros because the worker was
+	// reaped before collector finalize. Recover usage from the synced native
+	// transcript; the helper self-guards when usage is already present or nothing
+	// is recoverable, so it is safe to call for every backend.
+	opts = recoverUsageFromNativeTranscript(sess, opts)
 	return result, sess.Finalize(sessions.FinalizeOptions{
 		TaskID:       opts.TaskID,
 		ExitCode:     opts.ExitCode,
@@ -71,4 +76,20 @@ func WithWorktree(sess *sessions.Session, opts WithWorktreeOptions) (WithWorktre
 		CacheWriteTokens: opts.CacheWriteTokens,
 		EstimatedCostUSD: opts.EstimatedCostUSD,
 	})
+}
+
+func recoverUsageFromNativeTranscript(sess *sessions.Session, opts WithWorktreeOptions) WithWorktreeOptions {
+	if opts.InputTokens != 0 || opts.OutputTokens != 0 ||
+		opts.CacheReadTokens != 0 || opts.CacheWriteTokens != 0 {
+		return opts
+	}
+	u := sess.TranscriptUsage()
+	if u.IsZero() {
+		return opts
+	}
+	opts.InputTokens = u.InputTokens
+	opts.OutputTokens = u.OutputTokens
+	opts.CacheReadTokens = u.CacheReadTokens
+	opts.CacheWriteTokens = u.CacheWriteTokens
+	return opts
 }

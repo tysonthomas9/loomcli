@@ -133,7 +133,7 @@ tests:
             (() => {
               const active = document.querySelector('[role=tabpanel][aria-hidden="false"]');
               const text = active ? (active.textContent || '') : '';
-              const terminal = active?.querySelector('[data-testid=terminal-wrapper] .wterm');
+              const terminal = active?.querySelector('[data-testid=terminal-wrapper][data-terminal-renderer=xterm] .xterm');
               return !!active && !!terminal && !text.includes('Starting LEAD mode');
             })()
         intent: "Wait until the active shell pane renders a terminal grid and proves it is not rendering the lead startup banner"
@@ -602,13 +602,13 @@ tests:
         intent: "Wait until the lead detail page is ready"
       - wait:
           fn: >-
-            !!document.querySelector('[data-testid=terminal-wrapper] .wterm')
-        intent: "Wait until the lead terminal mounts the wterm grid"
+            !!document.querySelector('[data-testid=terminal-wrapper][data-terminal-renderer=xterm] .xterm')
+        intent: "Wait until the lead terminal mounts the xterm grid"
       - wait:
           fn: >-
             (() => {
               const wrapper = document.querySelector('[data-testid=terminal-wrapper]');
-              const rows = wrapper ? Array.from(wrapper.querySelectorAll('.term-row')).map((r) => r.textContent || '').join('\n') : '';
+              const rows = wrapper?.querySelector('.xterm-rows')?.textContent || '';
               return rows.includes('Starting LEAD mode');
             })()
         intent: "Wait until the lead runtime startup banner reaches the browser terminal"
@@ -729,7 +729,7 @@ tests:
       - open: /ws/E2E-WS-LEAD/agents/atlas-${RUN_ID:-local}
       - wait:
           fn: >-
-            !!document.querySelector('[data-testid=terminal-wrapper] .wterm')
+            !!document.querySelector('[data-testid=terminal-wrapper][data-terminal-renderer=xterm] .xterm')
         intent: "Wait until the returning lead detail page reattaches a terminal"
       - run: |
           set -e
@@ -856,7 +856,7 @@ tests:
       - open: /ws/E2E-WS-LEAD/agents/doomed-${RUN_ID:-local}
       - wait:
           fn: >-
-            !!document.querySelector('[data-testid=terminal-wrapper] .wterm')
+            !!document.querySelector('[data-testid=terminal-wrapper][data-terminal-renderer=xterm] .xterm')
         intent: "Wait until the disposable lead terminal is attached"
       - run: |
           set -e

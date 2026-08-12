@@ -135,6 +135,12 @@ describe("SessionDetailView", () => {
       expect(screen.getByText("Cost")).toBeInTheDocument();
     });
 
+    it("omits Cost when estimated_cost_usd is zero", () => {
+      const session = createSession({ estimated_cost_usd: 0 });
+      render(<SessionDetailView taskId="task-1" session={session} />);
+      expect(screen.queryByText("Cost")).not.toBeInTheDocument();
+    });
+
     it("shows non-zero exit code as a plain number", () => {
       const session = createSession({ exit_code: 1 });
       render(<SessionDetailView taskId="task-1" session={session} />);
@@ -198,7 +204,7 @@ describe("SessionDetailView", () => {
       expect(screen.getByText("active")).toBeInTheDocument();
     });
 
-    it("surfaces the initial user text as a Prompt block", () => {
+    it("surfaces the kickoff user text as the transcript prompt", () => {
       mockUseSessionTranscript.mockReturnValue({
         entries: [
           createEntry({
@@ -215,18 +221,25 @@ describe("SessionDetailView", () => {
       render(<SessionDetailView taskId="task-1" session={defaultSession} />);
       expect(screen.getByText("Prompt")).toBeInTheDocument();
       expect(screen.getByText("do the thing")).toBeInTheDocument();
+      expect(screen.getByText("ok")).toBeInTheDocument();
     });
 
-    it("renders the prompt as formatted Markdown (heading + inline code), not literal source", () => {
+    it("renders mid-run user text as formatted Markdown (heading + inline code)", () => {
       mockUseSessionTranscript.mockReturnValue({
         entries: [
           createEntry({
             seq: 1,
             role: "user",
             type: "text",
+            text: "kickoff",
+          }),
+          createEntry({
+            seq: 2,
+            role: "user",
+            type: "text",
             text: "## WORKFLOW\n\nCall `foo.bar()` now.",
           }),
-          createEntry({ seq: 2, role: "assistant", text: "ok" }),
+          createEntry({ seq: 3, role: "assistant", text: "ok" }),
         ],
         isLoading: false,
         error: null,
@@ -244,16 +257,6 @@ describe("SessionDetailView", () => {
       // No literal markdown syntax survives in the DOM text
       expect(container.textContent).not.toContain("## WORKFLOW");
       expect(container.textContent).not.toContain("`foo.bar()`");
-    });
-
-    it("does not render a Prompt block when no user text exists", () => {
-      mockUseSessionTranscript.mockReturnValue({
-        entries: [createEntry({ seq: 1, role: "assistant", text: "hi" })],
-        isLoading: false,
-        error: null,
-      });
-      render(<SessionDetailView taskId="task-1" session={defaultSession} />);
-      expect(screen.queryByText("Prompt")).not.toBeInTheDocument();
     });
   });
 
@@ -528,7 +531,28 @@ describe("SessionDetailView", () => {
       expect(screen.getByText("File created")).toBeInTheDocument();
     });
 
-    it("renders subsequent user text as a user-message interjection", () => {
+    it("uses tool_use.output when no paired tool_result exists", () => {
+      mockUseSessionTranscript.mockReturnValue({
+        entries: [
+          createEntry({
+            seq: 1,
+            role: "assistant",
+            type: "tool_use",
+            tool_name: "Read",
+            tool_input: { file_path: "/tmp/a" },
+            tool_use_id: "tu-embed",
+            output: "embedded result body",
+          }),
+        ],
+        isLoading: false,
+        error: null,
+      });
+      render(<SessionDetailView taskId="task-1" session={defaultSession} />);
+      fireEvent.click(screen.getByTestId("tool-pill"));
+      expect(screen.getByText("embedded result body")).toBeInTheDocument();
+    });
+
+    it("renders the first real user text as a prompt and later text as an interjection", () => {
       mockUseSessionTranscript.mockReturnValue({
         entries: [
           createEntry({ seq: 1, role: "user", type: "text", text: "first" }),
@@ -539,12 +563,78 @@ describe("SessionDetailView", () => {
         error: null,
       });
       render(<SessionDetailView taskId="task-1" session={defaultSession} />);
-      // First user text → Prompt (masthead)
+      expect(screen.getByText("Prompt")).toBeInTheDocument();
       expect(screen.getByText("first")).toBeInTheDocument();
-      // Second user text → interjection
+      // Subsequent user text → interjection
       expect(screen.getByTestId("transcript-interjection")).toBeInTheDocument();
       expect(screen.getByText("User message")).toBeInTheDocument();
       expect(screen.getByText("second")).toBeInTheDocument();
+    });
+
+    it("filters known injected context before preserving the real prompt", () => {
+      mockUseSessionTranscript.mockReturnValue({
+        entries: [
+          createEntry({
+            seq: 1,
+            role: "user",
+            type: "text",
+            text: "# AGENTS.md instructions for /repo\n<INSTRUCTIONS>rules</INSTRUCTIONS>",
+          }),
+          createEntry({
+            seq: 2,
+            role: "user",
+            type: "text",
+            text: "Implement the requested change",
+          }),
+          createEntry({ seq: 3, role: "assistant", text: "Done" }),
+        ],
+        isLoading: false,
+        error: null,
+      });
+      render(<SessionDetailView taskId="task-1" session={defaultSession} />);
+      expect(
+        screen.queryByText(/AGENTS\.md instructions/),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.getByText("Implement the requested change"),
+      ).toBeInTheDocument();
+    });
+
+    it("filters the current Codex plugin and environment envelope before the real prompt", () => {
+      mockUseSessionTranscript.mockReturnValue({
+        entries: [
+          createEntry({
+            seq: 1,
+            role: "user",
+            type: "text",
+            text: "<recommended_plugins>\n- Atlassian Rovo\n</recommended_plugins>",
+          }),
+          createEntry({
+            seq: 2,
+            role: "user",
+            type: "text",
+            text: "<environment_context>\n<cwd>/repo</cwd>\n</environment_context>",
+          }),
+          createEntry({
+            seq: 3,
+            role: "user",
+            type: "text",
+            text: "Implement the requested change",
+          }),
+          createEntry({ seq: 4, role: "assistant", text: "Done" }),
+        ],
+        isLoading: false,
+        error: null,
+      });
+      render(<SessionDetailView taskId="task-1" session={defaultSession} />);
+      expect(screen.queryByText(/recommended_plugins/)).not.toBeInTheDocument();
+      expect(screen.queryByText(/Atlassian Rovo/)).not.toBeInTheDocument();
+      expect(
+        screen.getByText("Implement the requested change"),
+      ).toBeInTheDocument();
+      expect(
+        screen.queryByTestId("transcript-interjection"),
+      ).not.toBeInTheDocument();
     });
 
     it("does not render tool_result entries as their own turns", () => {

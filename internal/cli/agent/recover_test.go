@@ -742,7 +742,7 @@ func TestRecoverWorktree_NoLock(t *testing.T) {
 	})
 	mock.Install()
 
-	err := RecoverWorktree(tmpDir, "test-agent", -1)
+	err := RecoverWorktree(tmpDir, "test-agent", -1, false)
 	if err != nil {
 		t.Errorf("expected nil error, got: %v", err)
 	}
@@ -782,7 +782,7 @@ func TestRecoverWorktree_StaleLock(t *testing.T) {
 	})
 	mock.Install()
 
-	err := RecoverWorktree(tmpDir, "test-agent", -1)
+	err := RecoverWorktree(tmpDir, "test-agent", -1, false)
 	if err != nil {
 		t.Errorf("expected nil error, got: %v", err)
 	}
@@ -808,7 +808,7 @@ func TestRecoverWorktree_LockCheckError(t *testing.T) {
 	mock := NewCommandMock(t, []CommandStub{})
 	mock.Install()
 
-	err := RecoverWorktree(tmpDir, "test-agent", -1)
+	err := RecoverWorktree(tmpDir, "test-agent", -1, false)
 	if err == nil {
 		t.Error("expected error when CheckLock fails, got nil")
 	}
@@ -832,7 +832,7 @@ func TestRecoverWorktree_EmptyAgentName(t *testing.T) {
 	})
 	mock.Install()
 
-	err := RecoverWorktree(tmpDir, "", -1)
+	err := RecoverWorktree(tmpDir, "", -1, false)
 	if err != nil {
 		t.Errorf("expected nil error, got: %v", err)
 	}
@@ -1272,7 +1272,7 @@ func TestRecoverWorktree_WorkspaceStaleLock(t *testing.T) {
 	mock.Install()
 
 	// Pass repoDir as worktreePath -- lock is at repoDir (per-worktree)
-	err := RecoverWorktree(repoDir, "test-agent", -1)
+	err := RecoverWorktree(repoDir, "test-agent", -1, false)
 	if err != nil {
 		t.Errorf("expected nil error, got: %v", err)
 	}

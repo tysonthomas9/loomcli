@@ -4825,6 +4825,24 @@ components:
           type: string
         phase:
           type: string
+        kind:
+          type: string
+          description: >
+            text | tool_use. Omitted or empty means a normal chat bubble (text).
+            tool_use is rendered as a collapsed pill; tool_result is paired into
+            tool_result rather than emitted as its own message.
+        tool_name:
+          type: string
+          description: Tool name when kind is tool_use.
+        tool_use_id:
+          type: string
+          description: Native tool-call id used to pair results (when available).
+        tool_input:
+          type: string
+          description: Tool arguments as JSON text or a plain command/path preview.
+        tool_result:
+          type: string
+          description: Paired tool output when available.
 
     ReviewerConversation:
       type: object
@@ -6274,6 +6292,16 @@ components:
         role_kind:
           type: string
           enum: [interactive, worker]
+        role_label:
+          type: string
+          description: >-
+            Optional short UI role label. When present, clients prefer this over
+            capitalizing role (e.g. pr-reviewer → "Review").
+        display_name:
+          type: string
+          description: >-
+            Optional short UI title. When present, clients prefer this over name
+            (e.g. review-…-pr-222 → "loomcli#222").
         repo:
           type: string
         workspace:

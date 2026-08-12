@@ -1332,11 +1332,6 @@ function DefaultContent({
   const canRunEpicWorkflow =
     issue.issue_type === "epic" && issue.status !== "closed";
 
-  // Auto-collapse logic for Notes (collapse if long, but keep expanded for review items)
-  const shouldCollapseNotes =
-    issue.notes &&
-    (issue.notes.length > 200 || issue.notes.split("\n").length > 5);
-
   return (
     <>
       {/* Sticky Header Wrapper */}
@@ -1651,11 +1646,11 @@ function DefaultContent({
               />
             )}
 
-            {/* Notes (collapsible) */}
+            {/* Notes — always shown expanded, still toggleable */}
             {issue.notes && (
               <CollapsibleSection
                 title="Notes"
-                defaultExpanded={!shouldCollapseNotes}
+                defaultExpanded={true}
                 testId="notes-section"
               >
                 <MarkdownRenderer content={issue.notes} />

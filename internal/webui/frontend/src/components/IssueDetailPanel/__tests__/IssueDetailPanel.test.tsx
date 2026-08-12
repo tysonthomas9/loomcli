@@ -786,8 +786,31 @@ describe("IssueDetailPanel", () => {
       render(
         <IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />,
       );
-      expect(screen.getByTestId("notes-section")).toBeInTheDocument();
+      const notesSection = screen.getByTestId("notes-section");
+      expect(notesSection).toBeInTheDocument();
       expect(screen.getByText("Notes")).toBeInTheDocument();
+      expect(screen.getByText("Some notes content")).toBeInTheDocument();
+      expect(
+        within(notesSection).getByRole("button", { name: /Notes/i }),
+      ).toHaveAttribute("aria-expanded", "true");
+    });
+
+    it("keeps long notes expanded by default and allows toggling", () => {
+      const longNotes = `${"Line of notes\n".repeat(8)}${"x".repeat(220)}`;
+      const mockIssue = createTestIssueDetails({ notes: longNotes });
+      render(
+        <IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />,
+      );
+      const notesSection = screen.getByTestId("notes-section");
+      const toggle = within(notesSection).getByRole("button", {
+        name: /Notes/i,
+      });
+      expect(toggle).toHaveAttribute("aria-expanded", "true");
+      expect(screen.getByText(/Line of notes/)).toBeInTheDocument();
+
+      fireEvent.click(toggle);
+      expect(toggle).toHaveAttribute("aria-expanded", "false");
+      expect(screen.queryByText(/Line of notes/)).not.toBeInTheDocument();
     });
   });
 

@@ -117,6 +117,10 @@
   white-space: nowrap;
 }
 
+.nameLiteral {
+  text-transform: none;
+}
+
 .role {
   font-size: 0.74rem;
   color: var(--color-text-tertiary);
@@ -149,8 +153,8 @@
   flex-direction: column;
   align-items: flex-end;
   gap: 2px;
-  flex: 0 0 auto;
-  min-width: max-content;
+  flex: 0 1 42%;
+  min-width: 0;
   max-width: 7rem;
 }
 
@@ -168,6 +172,11 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   line-height: 1.3;
+  max-width: 100%;
+}
+
+.statusLine[data-task="true"] {
+  color: var(--color-text-tertiary);
 }
 
 .statusLine[data-error="true"] {

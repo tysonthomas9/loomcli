@@ -28,6 +28,7 @@ import {
 import type { IssueContext } from "@/api/terminal";
 import { buildShareUrl } from "@/utils/buildShareUrl";
 import { getReviewType } from "@/utils/issue";
+import { resolvePRReviewRef } from "@/utils/agentDisplay";
 import { ViewSubSwitcher } from "@/components/ViewSubSwitcher/ViewSubSwitcher";
 import {
   isOnboardingRepo,
@@ -180,6 +181,7 @@ function App() {
     sourceReposFilter,
     refetch: refetchWorkspace,
     upsertAgent: upsertWorkspaceAgent,
+    agents: workspaceConfigAgents,
   } = useWorkspaceContext();
   const {
     backends: aiBackends,
@@ -794,17 +796,32 @@ function App() {
     clearIssue();
   }, [closePanel, clearIssue]);
 
-  // Handle agent click (sidebar, monitor, etc.) — one consistent destination:
-  // the agents view with that agent selected (/agents/<name>), instead of the
-  // legacy minimal AgentDetailPanel slide-over.
+  // Handle agent click (sidebar, monitor, etc.). PR reviewers open that PR's
+  // review workspace with the Discuss panel; everyone else goes to /agents/<name>.
   const handleAgentClick = useCallback(
     (agentName: string) => {
       closeAllPanels();
+      // Resolve from the live store first, then the workspace-config agents so a
+      // configured-but-not-running PR reviewer still deep-links to its PR.
+      const reviewRef = resolvePRReviewRef(
+        agentName,
+        agents,
+        workspaceConfigAgents,
+      );
+      if (reviewRef) {
+        navigate(
+          `/ws/${encodeURIComponent(workspaceId)}/prs?${new URLSearchParams({
+            "review-pr": reviewRef,
+            discuss: "1",
+          }).toString()}`,
+        );
+        return;
+      }
       navigate(
         `/ws/${encodeURIComponent(workspaceId)}/agents/${encodeURIComponent(agentName)}`,
       );
     },
-    [navigate, workspaceId, closeAllPanels],
+    [navigate, workspaceId, closeAllPanels, agents, workspaceConfigAgents],
   );
 
   useEffect(() => {

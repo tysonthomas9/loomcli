@@ -1,0 +1,18 @@
+# Per-package file-count allowances (see check-package-size.sh).
+# Format: <package dir> <max non-test files>
+#
+# Grandfathered ceilings, not targets. The supervisor package hosts the
+# daemon's orchestration seams — the input-wait/watchdog, run-duration-cap and
+# e2e-hardening work each added a file, crossing the global 25. The right end
+# state is sub-packaging (inputwait / runcap / ...); until that split happens,
+# this records the ceiling. Shrink or remove the entry when the package is
+# split; do not raise it without recording why here.
+internal/cli/daemon/supervisor 28
+# internal/cli gained the daemon input-await seam (agent_input_await.go) with
+# the human answer path; 26th file, same sub-split end state applies.
+internal/cli 26
+# The AFT harness keeps its daemon-only seed commands isolated by capability,
+# while current v5 also carries the input/answer control path in this package.
+# Move the seed commands behind a seed subpackage when the command wiring is
+# split; until then, this records the post-merge ceiling rather than hiding it.
+internal/cli/daemon 26
