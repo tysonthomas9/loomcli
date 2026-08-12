@@ -33,6 +33,12 @@ type ReadyQueries interface {
 	Ready(context.Context, AvailabilityQuery) ([]IssueSummary, error)
 }
 
+// DeferredQueries is the narrow deferred-work projection consumed by queue
+// composition and aggregate statistics. It does not expose mutation authority.
+type DeferredQueries interface {
+	Deferred(context.Context, AvailabilityQuery) ([]IssueSummary, error)
+}
+
 // StatsQueries is the narrow aggregate projection consumed by health and
 // readiness delivery adapters.
 type StatsQueries interface {

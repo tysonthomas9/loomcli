@@ -142,6 +142,14 @@ func TestWorkItemsReadyFailsClosedWithoutOwnerPort(t *testing.T) {
 	}
 }
 
+func TestWorkItemsDeferredFailsClosedWithoutOwnerPort(t *testing.T) {
+	store := &workItemsBackendStore{provider: func(context.Context) backend.IssueBackend { return &claimOnlyBackend{} }}
+	_, err := store.Deferred(context.Background(), workitems.AvailabilityQuery{})
+	if !errors.Is(err, workitems.ErrUnavailable) {
+		t.Fatalf("deferred error = %v, want unavailable", err)
+	}
+}
+
 func TestWorkItemsSearchUsesOwnerPort(t *testing.T) {
 	api, err := NewWorkItems(func(context.Context) backend.IssueBackend { return &searchOnlyBackend{} })
 	if err != nil {

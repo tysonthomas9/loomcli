@@ -42,6 +42,7 @@ type FleetBackend struct {
 // Compile-time interface check.
 var _ backend.IssueBackend = (*FleetBackend)(nil)
 var _ workitems.ReadyQueries = (*FleetBackend)(nil)
+var _ workitems.DeferredQueries = (*FleetBackend)(nil)
 var _ workitems.BlockedQueries = (*FleetBackend)(nil)
 var _ workitems.SearchQueries = (*FleetBackend)(nil)
 var _ workitems.StatsQueries = (*FleetBackend)(nil)
@@ -412,7 +413,7 @@ func (b *FleetBackend) Ready(ctx context.Context, query workitems.AvailabilityQu
 	if err != nil {
 		return nil, err
 	}
-	return filterReadySummaries(readyIssuesToSummaries(issues), query), nil
+	return filterAvailabilitySummaries(availabilityIssuesToSummaries(issues), query), nil
 }
 
 // Stats builds lifecycle counts from fleet-db's status count endpoint and
@@ -435,7 +436,7 @@ func (b *FleetBackend) Stats(ctx context.Context) (*workitems.Stats, error) {
 	if err != nil {
 		return nil, err
 	}
-	deferred, err := b.Deferred(ctx, backend.DeferredOpts{})
+	deferred, err := b.Deferred(ctx, workitems.AvailabilityQuery{})
 	if err != nil {
 		return nil, err
 	}

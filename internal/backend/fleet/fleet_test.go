@@ -1774,7 +1774,7 @@ func TestDeferred_HappyPath(t *testing.T) {
 	})
 	defer ts.Close()
 
-	result, err := fb.Deferred(context.Background(), backend.DeferredOpts{ParentID: parent, Type: "task"})
+	result, err := fb.Deferred(context.Background(), workitems.AvailabilityQuery{ParentID: parent, IssueType: "task"})
 	if err != nil {
 		t.Fatalf("Deferred: %v", err)
 	}
@@ -1783,6 +1783,42 @@ func TestDeferred_HappyPath(t *testing.T) {
 	}
 	if result[0].ID != "d-1" || result[0].Parent != parent || result[0].Status != string(workitems.StatusOpen) {
 		t.Fatalf("deferred result = %+v", result[0])
+	}
+}
+
+func TestDeferred_AppliesOwnerProjectionFilters(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second)
+	repoA, repoB := "repo-a", "repo-b"
+	fb, ts := newTestServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		respondOK(w, struct {
+			Issues []*readyIssueWithParent `json:"issues"`
+		}{Issues: []*readyIssueWithParent{
+			{fleetIssueWire: fleetIssueWire{ID: "d-a", Type: "task", Assignee: "agent", Labels: []string{"other"}, CreatedAt: now, UpdatedAt: now}, Repo: &repoA},
+			{fleetIssueWire: fleetIssueWire{ID: "d-b", Type: "task", Labels: []string{"urgent"}, CreatedAt: now, UpdatedAt: now}, Repo: &repoB},
+		}})
+	})
+	defer ts.Close()
+
+	result, err := fb.Deferred(context.Background(), workitems.AvailabilityQuery{
+		Unassigned: true, LabelsAny: []string{"urgent"}, SourceRepos: []string{"repo-b"}, Limit: 1,
+	})
+	if err != nil {
+		t.Fatalf("Deferred: %v", err)
+	}
+	if len(result) != 1 || result[0].ID != "d-b" || result[0].SourceRepo != repoB || result[0].Repo != repoB {
+		t.Fatalf("deferred result = %#v, want owner projection d-b", result)
+	}
+}
+
+func TestDeferred_RejectsUnprojectableFilters(t *testing.T) {
+	fb, ts := newTestServer(t, func(http.ResponseWriter, *http.Request) {
+		t.Fatal("unsupported filter must not issue a request")
+	})
+	defer ts.Close()
+
+	_, err := fb.Deferred(context.Background(), workitems.AvailabilityQuery{MolType: "work"})
+	if !errors.Is(err, backend.ErrFilterNotSupported) {
+		t.Fatalf("Deferred error = %v, want unsupported filter", err)
 	}
 }
 

@@ -141,7 +141,7 @@ func TestWorkItemProjectionHelpers(t *testing.T) {
 func TestReadyAndBlockedIssueProjections(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
 	parent := "EPIC-1"
-	ready := readyIssuesToSummaries([]*readyIssueWithParent{
+	ready := availabilityIssuesToSummaries([]*readyIssueWithParent{
 		{fleetIssueWire: fleetIssueWire{ID: "TASK-1", Status: string(workitems.StatusOpen), CreatedAt: now}, Parent: &parent},
 		nil,
 	})

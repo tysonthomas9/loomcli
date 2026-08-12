@@ -185,9 +185,9 @@ func eventToData(e *workitems.Event) backend.EventData {
 	}
 }
 
-// readyIssuesToSummaries converts the ready endpoint's response to the Work
-// Items owner projection.
-func readyIssuesToSummaries(issues []*readyIssueWithParent) []workitems.IssueSummary {
+// availabilityIssuesToSummaries converts a FleetDB availability response to
+// the Work Items owner projection.
+func availabilityIssuesToSummaries(issues []*readyIssueWithParent) []workitems.IssueSummary {
 	result := make([]workitems.IssueSummary, 0, len(issues))
 	for _, riwp := range issues {
 		if riwp == nil {
@@ -205,27 +205,6 @@ func readyIssuesToSummaries(issues []*readyIssueWithParent) []workitems.IssueSum
 			d.Repo = *riwp.Repo
 		}
 		result = append(result, d)
-	}
-	return result
-}
-
-func deferredIssuesToData(issues []*readyIssueWithParent) []backend.IssueData {
-	result := make([]backend.IssueData, 0, len(issues))
-	for _, issue := range issues {
-		if issue == nil {
-			continue
-		}
-		data := issue.fleetIssueWire.toIssueData()
-		if parent := issue.fleetIssueWire.parent(); parent != "" {
-			data.Parent = parent
-		}
-		if issue.Parent != nil {
-			data.Parent = *issue.Parent
-		}
-		if issue.Repo != nil {
-			data.SourceRepo = *issue.Repo
-		}
-		result = append(result, data)
 	}
 	return result
 }

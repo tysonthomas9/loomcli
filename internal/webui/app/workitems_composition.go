@@ -179,21 +179,17 @@ func (s *workItemsBackendStore) Deferred(ctx context.Context, query workitems.Av
 	if err != nil {
 		return nil, err
 	}
-	deferred, ok := be.(backend.DeferredIssueBackend)
+	deferred, ok := be.(workitems.DeferredQueries)
 	if !ok {
-		return []workitems.IssueSummary{}, nil
+		return nil, workitems.ErrUnavailable
 	}
 	ctx, cancel := context.WithTimeout(ctx, workItemOperationTimeout)
 	defer cancel()
-	values, err := deferred.Deferred(ctx, backend.DeferredOpts{
-		ParentID: query.ParentID, Assignee: query.Assignee, Priority: query.Priority,
-		Type: query.IssueType, Labels: query.Labels, SourceRepos: query.SourceRepos,
-		Limit: query.Limit,
-	})
+	values, err := deferred.Deferred(ctx, query)
 	if err != nil {
 		return nil, translateWorkItemsBackendError(err)
 	}
-	return workItemSummaries(values), nil
+	return values, nil
 }
 
 func (s *workItemsBackendStore) Search(ctx context.Context, query workitems.SearchQuery) ([]workitems.IssueSummary, error) {

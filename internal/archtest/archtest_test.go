@@ -1300,6 +1300,7 @@ func TestUnusedIssueBackendCompatibilityOperationsCannotReturn(t *testing.T) {
 		"BatchOp": {}, "BatchResult": {}, "Batch": {}, "GetChildren": {},
 		"DeferIssue": {}, "UndeferIssue": {}, "AddLabel": {}, "RemoveLabel": {},
 		"CountOpts": {}, "Count": {}, "SearchIssues": {}, "StatsData": {}, "BlockedOpts": {}, "ReadyOpts": {},
+		"DeferredOpts": {}, "DeferredIssueBackend": {},
 	}
 	for _, relative := range []string{
 		"internal/backend",

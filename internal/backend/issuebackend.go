@@ -110,12 +110,6 @@ type IssueBackend interface {
 	BackendName() string
 }
 
-// DeferredIssueBackend is an optional extension for backends that expose the
-// canonical deferred view: explicit deferred status or a future defer_until.
-type DeferredIssueBackend interface {
-	Deferred(ctx context.Context, opts DeferredOpts) ([]IssueData, error)
-}
-
 // ClaimReleaser is an optional interface implemented by backends that maintain
 // an explicit claim lock distinct from issue status (e.g., the fleet-db
 // backend). Callers type-assert to release a completed agent's claim using the

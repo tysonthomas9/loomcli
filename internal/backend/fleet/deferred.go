@@ -2,39 +2,32 @@ package fleet
 
 import (
 	"context"
+	"fmt"
+	"strings"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 )
 
-func (b *FleetBackend) Deferred(ctx context.Context, opts backend.DeferredOpts) ([]backend.IssueData, error) {
+func (b *FleetBackend) Deferred(ctx context.Context, query workitems.AvailabilityQuery) ([]workitems.IssueSummary, error) {
+	if err := checkProjectedAvailabilityQuerySupported("deferred", query); err != nil {
+		return nil, err
+	}
 	resp, err := b.exec(ctx, "Deferred", "GET", "/issues/deferred", nil)
 	if err != nil {
 		return nil, err
 	}
 	if !hasData(resp) {
-		return []backend.IssueData{}, nil
+		return []workitems.IssueSummary{}, nil
 	}
 	issues, err := unmarshalListOrWrapper[*readyIssueWithParent](resp.Data, "Deferred")
 	if err != nil {
 		return nil, err
 	}
-	return filterDeferredIssues(deferredIssuesToData(issues), opts), nil
+	return filterAvailabilitySummaries(availabilityIssuesToSummaries(issues), query), nil
 }
 
-func filterDeferredIssues(issues []backend.IssueData, opts backend.DeferredOpts) []backend.IssueData {
-	return filterIssueData(issues, issueDataFilter{
-		Assignee:    opts.Assignee,
-		Priority:    opts.Priority,
-		Type:        opts.Type,
-		ParentID:    opts.ParentID,
-		Labels:      opts.Labels,
-		SourceRepos: opts.SourceRepos,
-		Limit:       opts.Limit,
-	})
-}
-
-func filterReadySummaries(issues []workitems.IssueSummary, opts workitems.AvailabilityQuery) []workitems.IssueSummary {
+func filterAvailabilitySummaries(issues []workitems.IssueSummary, opts workitems.AvailabilityQuery) []workitems.IssueSummary {
 	filter := issueDataFilter{
 		Assignee:    opts.Assignee,
 		Unassigned:  opts.Unassigned,
@@ -62,32 +55,19 @@ func filterReadySummaries(issues []workitems.IssueSummary, opts workitems.Availa
 	return out
 }
 
-func filterBlockedSummaries(issues []workitems.IssueSummary, opts workitems.AvailabilityQuery) []workitems.IssueSummary {
-	filter := issueDataFilter{
-		Assignee:    opts.Assignee,
-		Unassigned:  opts.Unassigned,
-		Priority:    opts.Priority,
-		Type:        opts.IssueType,
-		ParentID:    opts.ParentID,
-		Labels:      opts.Labels,
-		LabelsAny:   opts.LabelsAny,
-		SourceRepos: opts.SourceRepos,
-		Limit:       opts.Limit,
+func checkProjectedAvailabilityQuerySupported(view string, query workitems.AvailabilityQuery) error {
+	var unsupported []string
+	if query.SortPolicy != "" {
+		unsupported = append(unsupported, "SortPolicy")
 	}
-	if !filter.needsFilter() {
-		return issues
+	if query.MolType != "" {
+		unsupported = append(unsupported, "MolType")
 	}
-	out := make([]workitems.IssueSummary, 0, len(issues))
-	for _, issue := range issues {
-		if !filter.matches(issue.Assignee, issue.Priority, issue.IssueType, issue.Parent, issue.Labels, issue.SourceRepo) {
-			continue
-		}
-		out = append(out, issue)
-		if filter.Limit > 0 && len(out) >= filter.Limit {
-			break
-		}
+	if len(unsupported) == 0 {
+		return nil
 	}
-	return out
+	return fmt.Errorf("fleet-db: unsupported %s filters [%s]: %w",
+		view, strings.Join(unsupported, ", "), backend.ErrFilterNotSupported)
 }
 
 func filterListIssues(issues []backend.IssueData, opts backend.ListOpts) []backend.IssueData {
