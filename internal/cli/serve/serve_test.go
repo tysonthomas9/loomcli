@@ -21,6 +21,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/placement"
+	"github.com/tysonthomas9/loomcli/internal/placement/daytona"
 	"github.com/tysonthomas9/loomcli/internal/testutil"
 	"github.com/tysonthomas9/loomcli/internal/webui"
 	"github.com/tysonthomas9/loomcli/internal/webui/fleet"
@@ -162,6 +163,34 @@ func TestBuildLeadProvisionerRequiresBroker(t *testing.T) {
 	}
 	if got := buildLeadProvisioner(st, broker); got == nil {
 		t.Fatal("buildLeadProvisioner(with broker) = nil, want provisioner")
+	}
+}
+
+func TestLeadSnapshotRef(t *testing.T) {
+	original, wasSet := os.LookupEnv(envLoomLeadSnapshot)
+	if err := os.Unsetenv(envLoomLeadSnapshot); err != nil {
+		t.Fatalf("Unsetenv(%s): %v", envLoomLeadSnapshot, err)
+	}
+	t.Cleanup(func() {
+		if wasSet {
+			_ = os.Setenv(envLoomLeadSnapshot, original)
+		} else {
+			_ = os.Unsetenv(envLoomLeadSnapshot)
+		}
+	})
+
+	if got := leadSnapshotRef(); got != daytona.DefaultSnapshotName {
+		t.Fatalf("leadSnapshotRef() unset = %q, want %q", got, daytona.DefaultSnapshotName)
+	}
+
+	t.Setenv(envLoomLeadSnapshot, " loom-lead-poc-v3 ")
+	if got := leadSnapshotRef(); got != "loom-lead-poc-v3" {
+		t.Fatalf("leadSnapshotRef() override = %q, want %q", got, "loom-lead-poc-v3")
+	}
+
+	t.Setenv(envLoomLeadSnapshot, " \t\n ")
+	if got := leadSnapshotRef(); got != daytona.DefaultSnapshotName {
+		t.Fatalf("leadSnapshotRef() whitespace-only = %q, want %q", got, daytona.DefaultSnapshotName)
 	}
 }
 

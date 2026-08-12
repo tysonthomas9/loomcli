@@ -56,6 +56,7 @@ const envLoomLeadMaxVCPU = "LOOM_LEAD_MAX_VCPU"
 const envLoomLeadMaxMemGiB = "LOOM_LEAD_MAX_MEM_GIB"
 const envLoomLeadAllowlist = "LOOM_LEAD_ALLOWLIST"
 const envLoomLeadAPIBaseURL = "LOOM_LEAD_API_BASE_URL"
+const envLoomLeadSnapshot = "LOOM_LEAD_SNAPSHOT"
 
 const monitorCollectionCacheTTL = 10 * time.Second
 
@@ -520,6 +521,18 @@ func leadAPIBaseURL() string {
 	return strings.TrimSpace(os.Getenv(envLoomLeadAPIBaseURL))
 }
 
+// leadSnapshotRef resolves the snapshot every brokered lead sandbox boots
+// from. LOOM_LEAD_SNAPSHOT accepts a Daytona snapshot name or ID and lets an
+// operator switch to a rebuilt snapshot without a code change; unset falls
+// back to the pinned default. The ref rides ProvisionRequest.SnapshotRef, so
+// it need not touch the provider's own name/ID pin.
+func leadSnapshotRef() string {
+	if ref := strings.TrimSpace(os.Getenv(envLoomLeadSnapshot)); ref != "" {
+		return ref
+	}
+	return daytona.DefaultSnapshotName
+}
+
 func buildLeadProvisioner(st store.Store, broker *placement.Broker) *leadprovision.Provisioner {
 	if st == nil || broker == nil {
 		return nil
@@ -529,7 +542,7 @@ func buildLeadProvisioner(st store.Store, broker *placement.Broker) *leadprovisi
 		st,
 		bootstrap.LoomDir(),
 		leadAllowlist(),
-		daytona.DefaultSnapshotName,
+		leadSnapshotRef(),
 		leadprovision.DefaultResource(),
 	)
 }
