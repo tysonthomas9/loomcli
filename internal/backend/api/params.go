@@ -85,13 +85,13 @@ func addListAdvancedFilters(q url.Values, opts backend.ListOpts) {
 	joinCSV(q, "exclude_status", opts.ExcludeStatus)
 }
 
-// readyOptsToQuery builds the query string for GET /ready from ReadyOpts.
-func readyOptsToQuery(opts backend.ReadyOpts) string {
+// readyQueryToQuery builds the query string for GET /ready.
+func readyQueryToQuery(opts workitems.AvailabilityQuery) string {
 	q := url.Values{}
 	setNonEmpty(q, "assignee", opts.Assignee)
 	setBoolIfTrue(q, "unassigned", opts.Unassigned)
 	setOptInt(q, "priority", opts.Priority)
-	setNonEmpty(q, "type", opts.Type)
+	setNonEmpty(q, "type", opts.IssueType)
 	setNonEmpty(q, "parent_id", opts.ParentID)
 	if opts.Limit > 0 {
 		q.Set("limit", strconv.Itoa(opts.Limit))

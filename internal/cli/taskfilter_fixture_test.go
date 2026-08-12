@@ -5,7 +5,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/tysonthomas9/loomcli/internal/backend"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 )
 
 func TestPlanStatusParity_JSONFixtureCases(t *testing.T) {
@@ -33,7 +33,7 @@ func TestPlanStatusParity_JSONFixtureCases(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.ID, func(t *testing.T) {
-			issue := backend.IssueData{Design: c.Issue.Design, DesignArtifactID: c.Issue.DesignArtifactID, HasDesign: c.Issue.HasDesign, Labels: c.Issue.Labels}
+			issue := workitems.IssueSummary{Design: c.Issue.Design, DesignArtifactID: c.Issue.DesignArtifactID, HasDesign: c.Issue.HasDesign, Labels: c.Issue.Labels}
 			if got := HasNeedsRevision(issue); got != c.Expected.HasNeedsRevision {
 				t.Errorf("HasNeedsRevision()=%v, want %v", got, c.Expected.HasNeedsRevision)
 			}

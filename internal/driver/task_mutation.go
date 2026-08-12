@@ -8,6 +8,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 )
 
 type TaskCompleteOptions struct {
@@ -111,7 +112,7 @@ type TaskClaimOptions struct {
 	EpicID string
 	Actor  string
 	// Type optionally narrows the ready view to a single issue type (e.g.
-	// "bug"), filtered server-side via ReadyOpts.Type. Empty means no filter.
+	// "bug"), filtered by the Work Items ready query. Empty means no filter.
 	Type string
 	// SourceRepo optionally narrows ready work to one workspace repository.
 	SourceRepo string
@@ -160,10 +161,10 @@ func ClaimReadyTask(ctx context.Context, issueBackend backend.IssueBackend, opts
 	return nil, nil
 }
 
-// ReadyTaskCandidates is the read-only readiness gate shared by legacy task
-// claim helpers and the typed DriverRun Work Item claim path. It never mutates
-// an IssueBackend.
-func ReadyTaskCandidates(ctx context.Context, issueBackend backend.IssueBackend, opts TaskClaimOptions) ([]backend.IssueData, error) {
+// ReadyTaskCandidates is the read-only readiness gate shared by task claim
+// helpers and the typed DriverRun Work Item claim path. It never mutates the
+// supplied backend.
+func ReadyTaskCandidates(ctx context.Context, issueBackend backend.IssueBackend, opts TaskClaimOptions) ([]workitems.IssueSummary, error) {
 	if issueBackend == nil {
 		return nil, fmt.Errorf("issue backend required: %w", domain.ErrInvalid)
 	}
@@ -171,16 +172,20 @@ func ReadyTaskCandidates(ctx context.Context, issueBackend backend.IssueBackend,
 	if limit <= 0 {
 		limit = defaultClaimReadyLimit
 	}
-	ready, err := issueBackend.Ready(ctx, backend.ReadyOpts{
+	queries, ok := issueBackend.(workitems.ReadyQueries)
+	if !ok {
+		return nil, fmt.Errorf("ready query unavailable: %w", workitems.ErrUnavailable)
+	}
+	ready, err := queries.Ready(ctx, workitems.AvailabilityQuery{
 		ParentID:    strings.TrimSpace(opts.EpicID),
-		Type:        strings.TrimSpace(opts.Type),
+		IssueType:   strings.TrimSpace(opts.Type),
 		SourceRepos: oneNonEmptyString(opts.SourceRepo),
 		Limit:       limit,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("list ready tasks: %w", err)
 	}
-	filtered := make([]backend.IssueData, 0, len(ready))
+	filtered := make([]workitems.IssueSummary, 0, len(ready))
 	for _, issue := range ready {
 		if strings.TrimSpace(issue.ID) == "" || strings.EqualFold(strings.TrimSpace(issue.Status), blockedIssueStatus) {
 			continue
@@ -232,7 +237,7 @@ func ClaimTask(ctx context.Context, issueBackend backend.IssueBackend, opts Task
 // ReadyTaskByID finds one exact task in the canonical ready view without
 // mutating it. Absence, blocked state, and an already-held claim all share the
 // existing conflict-class contract.
-func ReadyTaskByID(ctx context.Context, issueBackend backend.IssueBackend, opts TaskClaimByIDOptions) (*backend.IssueData, error) {
+func ReadyTaskByID(ctx context.Context, issueBackend backend.IssueBackend, opts TaskClaimByIDOptions) (*workitems.IssueSummary, error) {
 	if issueBackend == nil {
 		return nil, fmt.Errorf("issue backend required: %w", domain.ErrInvalid)
 	}
@@ -244,7 +249,11 @@ func ReadyTaskByID(ctx context.Context, issueBackend backend.IssueBackend, opts 
 	if limit <= 0 {
 		limit = claimByIDReadyScanDepth
 	}
-	ready, err := issueBackend.Ready(ctx, backend.ReadyOpts{ParentID: strings.TrimSpace(opts.EpicID), Limit: limit})
+	queries, ok := issueBackend.(workitems.ReadyQueries)
+	if !ok {
+		return nil, fmt.Errorf("ready query unavailable: %w", workitems.ErrUnavailable)
+	}
+	ready, err := queries.Ready(ctx, workitems.AvailabilityQuery{ParentID: strings.TrimSpace(opts.EpicID), Limit: limit})
 	if err != nil {
 		return nil, fmt.Errorf("list ready tasks: %w", err)
 	}
@@ -269,7 +278,7 @@ func claimIssue(ctx context.Context, issueBackend backend.IssueBackend, issueID 
 // ClaimedTaskFromIssue builds the stable driver wire response after a typed
 // owner-fenced claim has committed. claimedAt should come from the committed
 // issue/action envelope, not the caller's body.
-func ClaimedTaskFromIssue(issue backend.IssueData, actor, claimActionID string, claimedAt time.Time) *ClaimedTask {
+func ClaimedTaskFromIssue(issue workitems.IssueSummary, actor, claimActionID string, claimedAt time.Time) *ClaimedTask {
 	if claimedAt.IsZero() {
 		claimedAt = time.Now().UTC()
 	}

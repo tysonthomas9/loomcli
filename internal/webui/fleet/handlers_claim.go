@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 )
 
@@ -105,7 +106,13 @@ func handleFleetClaim(backendFn IssueBackendFn, claimMetrics *ClaimMetrics) http
 			claimIssueWithBackend(w, ctx, be, req.IssueID, claimMetrics, true)
 			return
 		}
-		ready, err := be.Ready(ctx, backend.ReadyOpts{Type: req.IssueType, Priority: req.MaxPriority, Limit: 10})
+		queries, ok := be.(workitems.ReadyQueries)
+		if !ok {
+			recordClaim(claimMetrics, ClaimResultTimeout)
+			handler.WriteJSON(w, http.StatusServiceUnavailable, FleetClaimResponse{Error: "issue backend unavailable"})
+			return
+		}
+		ready, err := queries.Ready(ctx, workitems.AvailabilityQuery{IssueType: req.IssueType, Priority: req.MaxPriority, Limit: 10})
 		if err != nil {
 			recordClaim(claimMetrics, ClaimResultTimeout)
 			handler.WriteJSON(w, http.StatusServiceUnavailable, FleetClaimResponse{Error: "issue backend unavailable"})

@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 )
 
 // --- updateParamsToPatchRequest tests ---
@@ -198,8 +199,8 @@ func TestListOptsToQuery_UsesFleetLabelAndRepoParams(t *testing.T) {
 	}
 }
 
-func TestReadyOptsToQuery_UsesFleetLabelParams(t *testing.T) {
-	q := readyOptsToQuery(backend.ReadyOpts{
+func TestReadyQueryToQuery_UsesFleetLabelParams(t *testing.T) {
+	q := readyQueryToQuery(workitems.AvailabilityQuery{
 		Labels:    []string{"urgent", "frontend"},
 		LabelsAny: []string{"bug", "design"},
 	})

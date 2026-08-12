@@ -10,7 +10,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/tysonthomas9/loomcli/internal/backend"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 )
 
 // newPlanCmd creates a fresh cobra.Command wired to runPlan with given deps.
@@ -26,11 +26,10 @@ func newPlanCmd(deps *Deps) *cobra.Command {
 
 // setupPlanTracker configures deps.IssueBackend with the given issues and installs
 // it as the global default tracker. Cleanup restores the original tracker.
-func setupPlanTracker(t *testing.T, deps *Deps, issues []backend.IssueData) {
+func setupPlanTracker(t *testing.T, deps *Deps, issues []workitems.IssueSummary) {
 	t.Helper()
 	tracker := deps.IssueBackend.(*MockIssueBackend)
 	tracker.ReadyResult = issues
-	tracker.ListResult = issues
 	resetDefaultIssueBackend()
 	setDefaultIssueBackend(tracker)
 	t.Cleanup(resetDefaultIssueBackend)
@@ -73,7 +72,7 @@ func TestRunPlan_SingleTask_Success(t *testing.T) {
 	os.MkdirAll(filepath.Join(tmpDir, ".git"), 0755)
 
 	deps, _, _, _, _ := NewTestDeps(t)
-	setupPlanTracker(t, deps, []backend.IssueData{
+	setupPlanTracker(t, deps, []workitems.IssueSummary{
 		{ID: "loom-123", Status: "open", IssueType: "task", Title: "Test task"},
 	})
 
@@ -114,7 +113,7 @@ func TestRunPlan_SkipsEpics(t *testing.T) {
 	os.MkdirAll(filepath.Join(tmpDir, ".git"), 0755)
 
 	deps, _, _, _, _ := NewTestDeps(t)
-	setupPlanTracker(t, deps, []backend.IssueData{
+	setupPlanTracker(t, deps, []workitems.IssueSummary{
 		{ID: "loom-123", Status: "open", IssueType: "epic", Title: "Test epic"},
 	})
 
@@ -144,7 +143,7 @@ func TestRunPlan_SkipsInProgress(t *testing.T) {
 	os.MkdirAll(filepath.Join(tmpDir, ".git"), 0755)
 
 	deps, _, _, _, _ := NewTestDeps(t)
-	setupPlanTracker(t, deps, []backend.IssueData{
+	setupPlanTracker(t, deps, []workitems.IssueSummary{
 		{ID: "loom-123", Status: "in_progress", IssueType: "task", Title: "Test task"},
 	})
 

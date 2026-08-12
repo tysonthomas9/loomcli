@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 	workspacemodule "github.com/tysonthomas9/loomcli/internal/modules/workspace"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
@@ -121,7 +122,12 @@ func buildTaskReadyIssueLookup(
 
 func buildTaskReadySnapshotLister(repositories taskReadyRepositoryLister, issueBackendFn metricscmd.IssueBackendFn) trigger.TaskReadySnapshotLister {
 	return func(ctx context.Context, ws string) ([]trigger.TaskReadySnapshot, error) {
-		issues, err := issueBackendFn(middleware.WithWorkspace(ctx, ws)).Ready(ctx, backend.ReadyOpts{
+		backend := issueBackendFn(middleware.WithWorkspace(ctx, ws))
+		queries, ok := backend.(workitems.ReadyQueries)
+		if !ok {
+			return nil, workitems.ErrUnavailable
+		}
+		issues, err := queries.Ready(ctx, workitems.AvailabilityQuery{
 			Unassigned: true,
 			// Reconciliation is exhaustive; a cap would strand later tasks.
 			Limit: 0,
@@ -151,7 +157,7 @@ func taskReadyReconciliationRepoCount(
 	ctx context.Context,
 	repositories taskReadyRepositoryLister,
 	ws string,
-	issues []backend.IssueData,
+	issues []workitems.IssueSummary,
 ) (int, error) {
 	for _, issue := range issues {
 		if !strings.EqualFold(strings.TrimSpace(issue.IssueType), "epic") && strings.TrimSpace(issue.SourceRepo) == "" {

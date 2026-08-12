@@ -36,8 +36,8 @@ import (
 // touch need real implementations; anything else panics loudly.
 type fakeIssueBackend struct {
 	backend.IssueBackend
-	ready                 []backend.IssueData
-	readyOpts             []backend.ReadyOpts
+	ready                 []workitems.IssueSummary
+	readyOpts             []workitems.AvailabilityQuery
 	blocked               []workitems.IssueSummary
 	children              []backend.IssueData
 	epic                  *backend.IssueDetailData
@@ -190,13 +190,13 @@ func (items testWorkItems) List(ctx context.Context, query workitems.ListQuery) 
 }
 
 func (items testWorkItems) Ready(ctx context.Context, query workitems.AvailabilityQuery) ([]workitems.IssueSummary, error) {
-	values, err := items.backend.Ready(ctx, backend.ReadyOpts{
-		ParentID: query.ParentID, Type: query.IssueType, SourceRepos: query.SourceRepos, Limit: query.Limit,
+	values, err := items.backend.Ready(ctx, workitems.AvailabilityQuery{
+		ParentID: query.ParentID, IssueType: query.IssueType, SourceRepos: query.SourceRepos, Limit: query.Limit,
 	})
 	if err != nil {
 		return nil, testWorkItemError(err)
 	}
-	return testWorkItemSummaries(values), nil
+	return values, nil
 }
 
 func (items testWorkItems) Blocked(ctx context.Context, query workitems.AvailabilityQuery) ([]workitems.IssueSummary, error) {
@@ -304,7 +304,7 @@ func (testEventAdmission) AdmitEvent(_ context.Context, _ automation.EventAuthor
 	}, nil
 }
 
-func (f *fakeIssueBackend) Ready(_ context.Context, opts backend.ReadyOpts) ([]backend.IssueData, error) {
+func (f *fakeIssueBackend) Ready(_ context.Context, opts workitems.AvailabilityQuery) ([]workitems.IssueSummary, error) {
 	f.readyOpts = append(f.readyOpts, opts)
 	return f.ready, nil
 }
@@ -508,7 +508,7 @@ func (adapter testDriverRunExecution) ClaimDriverRunWorkItem(
 	if err := adapter.issues.typedClaimErrors[command.WorkItemID]; err != nil {
 		return execution.DriverRunWorkItemMutationResult{}, err
 	}
-	var source backend.IssueData
+	var source workitems.IssueSummary
 	for _, issue := range adapter.issues.ready {
 		if issue.ID == command.WorkItemID {
 			source = issue
@@ -1262,7 +1262,7 @@ func TestDriverAPIRecoverStaleTasksRequiresOwnership(t *testing.T) {
 
 func TestDriverAPIClaimReady(t *testing.T) {
 	h := newTestHarness(t)
-	h.backend.ready = []backend.IssueData{{ID: "TASK-7", Title: "do the thing"}}
+	h.backend.ready = []workitems.IssueSummary{{ID: "TASK-7", Title: "do the thing"}}
 
 	resp, decoded := h.do(t, opRequest{op: "claim-ready", headers: h.ownerHeaders(t)})
 	if resp.StatusCode != http.StatusOK {
@@ -1290,7 +1290,7 @@ func TestDriverAPIClaimReady(t *testing.T) {
 
 func TestDriverAPIClaimReadyReturnsOnlyCommittedWorkItemMetadata(t *testing.T) {
 	h := newTestHarness(t)
-	h.backend.ready = []backend.IssueData{{
+	h.backend.ready = []workitems.IssueSummary{{
 		ID: "TASK-7", Title: "stale title", Priority: 9, IssueType: "stale", Labels: []string{"stale"},
 		SourceRepo: "stale/repo", Parent: "STALE-EPIC",
 	}}
@@ -1318,7 +1318,7 @@ func TestDriverAPIClaimReadyReturnsOnlyCommittedWorkItemMetadata(t *testing.T) {
 
 func TestDriverAPIClaimReadyScansPastTypedClaimConflict(t *testing.T) {
 	h := newTestHarness(t)
-	h.backend.ready = []backend.IssueData{{ID: "TASK-1"}, {ID: "TASK-2"}}
+	h.backend.ready = []workitems.IssueSummary{{ID: "TASK-1"}, {ID: "TASK-2"}}
 	h.backend.typedClaimErrors = map[string]error{"TASK-1": execution.ErrConflict}
 
 	resp, decoded := h.do(t, opRequest{op: "claim-ready", headers: h.ownerHeaders(t)})
@@ -1332,10 +1332,10 @@ func TestDriverAPIClaimReadyScansPastTypedClaimConflict(t *testing.T) {
 
 // TestDriverAPIClaimReadyThreadsTypeFilter proves the claim-ready `type` param
 // reaches the ready view server-side (ITEM 3): the op decodes it and threads it
-// into ReadyOpts.Type so a caller can claim only, e.g., bugs.
+// into AvailabilityQuery.Type so a caller can claim only, e.g., bugs.
 func TestDriverAPIClaimReadyThreadsTypeFilter(t *testing.T) {
 	h := newTestHarness(t)
-	h.backend.ready = []backend.IssueData{{ID: "BUG-1", IssueType: "bug"}}
+	h.backend.ready = []workitems.IssueSummary{{ID: "BUG-1", IssueType: "bug"}}
 
 	resp, decoded := h.do(t, opRequest{
 		op:      "claim-ready",
@@ -1348,7 +1348,7 @@ func TestDriverAPIClaimReadyThreadsTypeFilter(t *testing.T) {
 	if decoded["id"] != "BUG-1" {
 		t.Fatalf("claimed id = %v, want BUG-1", decoded["id"])
 	}
-	if len(h.backend.readyOpts) != 1 || h.backend.readyOpts[0].Type != "bug" {
+	if len(h.backend.readyOpts) != 1 || h.backend.readyOpts[0].IssueType != "bug" {
 		t.Fatalf("ready opts = %+v, want the type=bug filter threaded to the ready view", h.backend.readyOpts)
 	}
 }
@@ -1359,7 +1359,7 @@ func TestDriverAPIClaimReadyThreadsTypeFilter(t *testing.T) {
 // can only ever claim under its own lease — no cross-agent lock takeover.
 func TestDriverAPIClaimTaskIgnoresBodyActor(t *testing.T) {
 	h := newTestHarness(t)
-	h.backend.ready = []backend.IssueData{{ID: "TASK-7"}}
+	h.backend.ready = []workitems.IssueSummary{{ID: "TASK-7"}}
 
 	resp, decoded := h.do(t, opRequest{
 		op:      "claim-task",

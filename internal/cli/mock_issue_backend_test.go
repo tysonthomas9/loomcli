@@ -37,9 +37,9 @@ type MockIssueBackend struct {
 	ListFn     func(ctx context.Context, opts backend.ListOpts) ([]backend.IssueData, error)
 
 	// Ready
-	ReadyResult []backend.IssueData
+	ReadyResult []workitems.IssueSummary
 	ReadyErr    error
-	ReadyFn     func(ctx context.Context, opts backend.ReadyOpts) ([]backend.IssueData, error)
+	ReadyFn     func(ctx context.Context, opts workitems.AvailabilityQuery) ([]workitems.IssueSummary, error)
 
 	// Blocked
 	BlockedResult []workitems.IssueSummary
@@ -120,7 +120,7 @@ func NewMockIssueBackend() *MockIssueBackend {
 }
 
 // MockBackendWithReady returns a MockIssueBackend pre-configured with Ready results.
-func MockBackendWithReady(issues []backend.IssueData) *MockIssueBackend {
+func MockBackendWithReady(issues []workitems.IssueSummary) *MockIssueBackend {
 	return &MockIssueBackend{ReadyResult: issues}
 }
 
@@ -155,7 +155,7 @@ func (m *MockIssueBackend) List(ctx context.Context, opts backend.ListOpts) ([]b
 }
 
 // Ready implements backend.IssueBackend.
-func (m *MockIssueBackend) Ready(ctx context.Context, opts backend.ReadyOpts) ([]backend.IssueData, error) {
+func (m *MockIssueBackend) Ready(ctx context.Context, opts workitems.AvailabilityQuery) ([]workitems.IssueSummary, error) {
 	m.mu.Lock()
 	m.record("Ready", opts)
 	fn := m.ReadyFn
@@ -402,7 +402,7 @@ func TestMockIssueBackend_RecordsCalls(t *testing.T) {
 	m := NewMockIssueBackend()
 	ctx := context.Background()
 
-	_, _ = m.Ready(ctx, backend.ReadyOpts{Limit: 10})
+	_, _ = m.Ready(ctx, workitems.AvailabilityQuery{Limit: 10})
 	_, _ = m.Get(ctx, "task-1")
 	_, _ = m.Close(ctx, "task-1", backend.CloseParams{Reason: "done"})
 	_ = m.Reopen(ctx, "task-1", backend.ReopenParams{Reason: "regression"})
@@ -436,14 +436,14 @@ func TestMockIssueBackend_RecordsCalls(t *testing.T) {
 }
 
 func TestMockIssueBackend_ReturnsConfiguredResults(t *testing.T) {
-	issues := []backend.IssueData{{ID: "t-1", Title: "Test"}}
+	issues := []workitems.IssueSummary{{ID: "t-1", Title: "Test"}}
 	m := MockBackendWithReady(issues)
 	m.GetResult = &backend.IssueDetailData{IssueData: backend.IssueData{ID: "t-2", Title: "Detail"}}
 	m.BackendNameResult = "test-backend"
 
 	ctx := context.Background()
 
-	got, err := m.Ready(ctx, backend.ReadyOpts{})
+	got, err := m.Ready(ctx, workitems.AvailabilityQuery{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -466,13 +466,13 @@ func TestMockIssueBackend_ReturnsConfiguredResults(t *testing.T) {
 
 func TestMockIssueBackend_FuncOverride(t *testing.T) {
 	m := NewMockIssueBackend()
-	m.ReadyResult = []backend.IssueData{{ID: "static"}}
-	m.ReadyFn = func(_ context.Context, opts backend.ReadyOpts) ([]backend.IssueData, error) {
-		return []backend.IssueData{{ID: "dynamic", Title: opts.ParentID}}, nil
+	m.ReadyResult = []workitems.IssueSummary{{ID: "static"}}
+	m.ReadyFn = func(_ context.Context, opts workitems.AvailabilityQuery) ([]workitems.IssueSummary, error) {
+		return []workitems.IssueSummary{{ID: "dynamic", Title: opts.ParentID}}, nil
 	}
 
 	ctx := context.Background()
-	got, err := m.Ready(ctx, backend.ReadyOpts{ParentID: "parent-1"})
+	got, err := m.Ready(ctx, workitems.AvailabilityQuery{ParentID: "parent-1"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -488,8 +488,8 @@ func TestMockIssueBackend_CallCount(t *testing.T) {
 	m := NewMockIssueBackend()
 	ctx := context.Background()
 
-	_, _ = m.Ready(ctx, backend.ReadyOpts{})
-	_, _ = m.Ready(ctx, backend.ReadyOpts{})
+	_, _ = m.Ready(ctx, workitems.AvailabilityQuery{})
+	_, _ = m.Ready(ctx, workitems.AvailabilityQuery{})
 	_, _ = m.List(ctx, backend.ListOpts{})
 
 	if m.CallCount("Ready") != 2 {

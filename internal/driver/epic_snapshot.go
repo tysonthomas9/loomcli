@@ -84,7 +84,7 @@ func LoadEpicSnapshot(ctx context.Context, issueBackend backend.IssueBackend, op
 	if openLimit <= 0 {
 		openLimit = defaultEpicSnapshotOpenLimit
 	}
-	ready, err := issueBackend.Ready(ctx, backend.ReadyOpts{ParentID: epicID, Limit: readyLimit})
+	ready, err := loadReadyEpicTasks(ctx, issueBackend, epicID, readyLimit)
 	if err != nil {
 		return nil, fmt.Errorf("ready query: %w", err)
 	}
@@ -108,10 +108,22 @@ func LoadEpicSnapshot(ctx context.Context, issueBackend backend.IssueBackend, op
 		ReadyCount:        len(ready),
 		BlockedCount:      len(blocked),
 		OpenChildrenCount: len(openChildren),
-		Ready:             epicTaskSummaries(ready),
-		Blocked:           blockedTaskSummaries(blocked),
+		Ready:             availabilityTaskSummaries(ready),
+		Blocked:           availabilityTaskSummaries(blocked),
 		OpenChildren:      epicTaskSummaries(openChildren),
 	}, nil
+}
+
+func loadReadyEpicTasks(ctx context.Context, issueBackend backend.IssueBackend, epicID string, limit int) ([]workitems.IssueSummary, error) {
+	queries, ok := issueBackend.(workitems.ReadyQueries)
+	if !ok {
+		return nil, fmt.Errorf("ready query unavailable: %w", workitems.ErrUnavailable)
+	}
+	ready, err := queries.Ready(ctx, workitems.AvailabilityQuery{ParentID: epicID, Limit: limit})
+	if err != nil {
+		return nil, fmt.Errorf("ready query: %w", err)
+	}
+	return ready, nil
 }
 
 func loadBlockedEpicTasks(ctx context.Context, issueBackend backend.IssueBackend, epicID string, limit int) ([]workitems.IssueSummary, error) {
@@ -197,7 +209,7 @@ func epicTaskSummaries(issues []backend.IssueData) []EpicTaskSummary {
 	return out
 }
 
-func blockedTaskSummaries(issues []workitems.IssueSummary) []EpicTaskSummary {
+func availabilityTaskSummaries(issues []workitems.IssueSummary) []EpicTaskSummary {
 	out := make([]EpicTaskSummary, 0, len(issues))
 	for _, issue := range issues {
 		out = append(out, EpicTaskSummary{

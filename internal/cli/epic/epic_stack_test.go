@@ -129,7 +129,7 @@ func TestProjectEpicStack_BuildsForestAndIsIdempotent(t *testing.T) {
 		{ID: "T-C", Status: "open", Parent: epicID, BlockedBy: []string{"T-B"}, BlockedByCount: 1},
 		{ID: "T-X", Status: "closed", Parent: epicID}, // closed → excluded from the universe
 	}
-	ib.ReadyResult = []backend.IssueData{{ID: "T-A", Status: "open", Parent: epicID}}
+	ib.ReadyResult = []workitems.IssueSummary{{ID: "T-A", Status: "open", Parent: epicID}}
 	ib.BlockedResult = []workitems.IssueSummary{
 		{ID: "T-B", Status: "blocked", Parent: epicID, BlockedBy: []string{"T-A"}, BlockedByCount: 1},
 		{ID: "T-C", Status: "blocked", Parent: epicID, BlockedBy: []string{"T-B"}, BlockedByCount: 1},

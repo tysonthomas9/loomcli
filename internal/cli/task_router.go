@@ -9,8 +9,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 )
 
 // RoleConstraints holds the resolved routing constraints from a config.RoleConfig
@@ -29,7 +29,7 @@ type RoleConstraints struct {
 
 // TaskMatch represents the result of matching a single issue against role constraints.
 type TaskMatch struct {
-	Issue  backend.IssueData
+	Issue  workitems.IssueSummary
 	Score  int    // 0 = rejected, 10 = fallback, 100+ = matched
 	Reason string // human-readable explanation of the score
 }
@@ -66,7 +66,7 @@ func MergeRoleConstraints(rc config.RoleConfig, ae config.AgentEntry) RoleConstr
 // MatchTask scores a single issue against the given constraints.
 // Ready issues are pre-filtered by the backend to exclude blocked issues.
 // Returns a TaskMatch with Score=0 for rejected issues.
-func MatchTask(issue backend.IssueData, constraints RoleConstraints) TaskMatch {
+func MatchTask(issue workitems.IssueSummary, constraints RoleConstraints) TaskMatch {
 	// Reject epics
 	if IsEpic(issue) {
 		return TaskMatch{Issue: issue, Score: 0, Reason: "epic"}
@@ -139,7 +139,7 @@ func MatchTask(issue backend.IssueData, constraints RoleConstraints) TaskMatch {
 // SelectBestTask picks the highest-scoring task from a list of candidates.
 // Returns nil if no candidates pass filters (Score > 0).
 // Ties are broken by: higher score > lower priority number > alphabetical ID.
-func SelectBestTask(issues []backend.IssueData, constraints RoleConstraints) *TaskMatch {
+func SelectBestTask(issues []workitems.IssueSummary, constraints RoleConstraints) *TaskMatch {
 	var matches []TaskMatch
 	for _, issue := range issues {
 		m := MatchTask(issue, constraints)
@@ -228,7 +228,7 @@ func AgentEntryFromEnv() config.AgentEntry {
 
 // applyTaskFilter checks if the issue passes the given task filter.
 // Returns an empty string if the issue passes, or a rejection reason.
-func applyTaskFilter(issue backend.IssueData, filter string) string {
+func applyTaskFilter(issue workitems.IssueSummary, filter string) string {
 	if filter == "" {
 		filter = "has_design"
 	}
@@ -296,19 +296,23 @@ func countSkillMatches(labels []string, skills []string) int {
 }
 
 // FetchReadyIssues fetches issues ready for work.
-func FetchReadyIssues(ctx context.Context, parentID string, repoLabel string) ([]backend.IssueData, error) {
+func FetchReadyIssues(ctx context.Context, parentID string, repoLabel string) ([]workitems.IssueSummary, error) {
 	ib := DefaultIssueBackend()
 	// Limit 10000: ready queues include open + review + in_progress, and review items
 	// can crowd out the few truly-workable open tasks past a small cutoff,
 	// causing agents to starve. See monitor_collect.go for the same pattern.
-	opts := backend.ReadyOpts{Limit: 10000, ParentID: parentID}
+	opts := workitems.AvailabilityQuery{Limit: 10000, ParentID: parentID}
 	if repoLabel != "" {
 		opts.Labels = []string{"repo:" + repoLabel}
 	}
 	if sourceRepos := os.Getenv("LOOM_SOURCE_REPOS"); sourceRepos != "" {
 		opts.SourceRepos = strings.Split(sourceRepos, ",")
 	}
-	issues, err := ib.Ready(ctx, opts)
+	ready, ok := ib.(workitems.ReadyQueries)
+	if !ok {
+		return nil, fmt.Errorf("ready query unavailable: %w", workitems.ErrUnavailable)
+	}
+	issues, err := ready.Ready(ctx, opts)
 	if err != nil {
 		return nil, fmt.Errorf("failed to check ready tasks: %w", err)
 	}

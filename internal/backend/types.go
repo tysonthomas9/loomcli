@@ -222,21 +222,6 @@ type ListOpts struct {
 	AllowStale bool `json:"allow_stale,omitempty"` // fleet-db: unsupported (fleet-qx9c)
 }
 
-// ReadyOpts configures the canonical Ready query.
-type ReadyOpts struct {
-	Assignee    string   `json:"assignee,omitempty"`
-	Unassigned  bool     `json:"unassigned,omitempty"`
-	Priority    *int     `json:"priority,omitempty"`
-	Type        string   `json:"type,omitempty"`
-	ParentID    string   `json:"parent_id,omitempty"`
-	Limit       int      `json:"limit,omitempty"`
-	SortPolicy  string   `json:"sort_policy,omitempty"`
-	Labels      []string `json:"labels,omitempty"`
-	LabelsAny   []string `json:"labels_any,omitempty"`
-	MolType     string   `json:"mol_type,omitempty"`
-	SourceRepos []string `json:"source_repos,omitempty"`
-}
-
 // DeferredOpts configures the canonical Deferred query. Backends may apply
 // narrowing filters client-side when the upstream deferred view is unfiltered.
 type DeferredOpts struct {

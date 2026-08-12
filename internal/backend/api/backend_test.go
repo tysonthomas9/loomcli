@@ -323,7 +323,7 @@ func TestReady_HappyPath(t *testing.T) {
 	})
 	defer ts.Close()
 
-	result, err := ab.Ready(context.Background(), backend.ReadyOpts{Limit: 5})
+	result, err := ab.Ready(context.Background(), workitems.AvailabilityQuery{Limit: 5})
 	if err != nil {
 		t.Fatalf("Ready: %v", err)
 	}

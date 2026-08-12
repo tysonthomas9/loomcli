@@ -81,7 +81,11 @@ func TestFleetBackendHook_OnRegisterScopesBackendToRegisteredWorkspace(t *testin
 		t.Fatal("expected fleet backend resource")
 	}
 	be := res.(backend.IssueBackend)
-	if _, err := be.Ready(context.Background(), backend.ReadyOpts{}); err != nil {
+	ready, ok := be.(workitems.ReadyQueries)
+	if !ok {
+		t.Fatal("expected Work Items ready queries")
+	}
+	if _, err := ready.Ready(context.Background(), workitems.AvailabilityQuery{}); err != nil {
 		t.Fatalf("Ready returned error: %v", err)
 	}
 	if gotPath != "/api/v1/DEMO-WS/issues/ready" {

@@ -63,12 +63,16 @@ func runReadyAndBlockedAgreeOnUnblockedIssue(t *testing.T, ib backend.IssueBacke
 	ctx := suiteContext(t)
 	created := createIssue(t, ctx, ib, "ready")
 
-	ready, err := ib.Ready(ctx, backend.ReadyOpts{Limit: 100})
+	readyQueries, ok := ib.(workitems.ReadyQueries)
+	if !ok {
+		t.Fatal("backend does not implement Work Items ready queries")
+	}
+	ready, err := readyQueries.Ready(ctx, workitems.AvailabilityQuery{Limit: 100})
 	if err != nil {
 		t.Fatalf("Ready: %v", err)
 	}
-	if !containsIssueID(ready, created.ID) {
-		t.Fatalf("Ready did not include unblocked issue %q; got ids %v", created.ID, issueIDs(ready))
+	if !containsIssueSummaryID(ready, created.ID) {
+		t.Fatalf("Ready did not include unblocked issue %q; got ids %v", created.ID, issueSummaryIDs(ready))
 	}
 
 	blockedQueries, ok := ib.(workitems.BlockedQueries)
@@ -222,6 +226,23 @@ func containsIssueID(items []backend.IssueData, id string) bool {
 }
 
 func issueIDs(items []backend.IssueData) []string {
+	ids := make([]string, 0, len(items))
+	for _, item := range items {
+		ids = append(ids, item.ID)
+	}
+	return ids
+}
+
+func containsIssueSummaryID(items []workitems.IssueSummary, id string) bool {
+	for _, item := range items {
+		if item.ID == id {
+			return true
+		}
+	}
+	return false
+}
+
+func issueSummaryIDs(items []workitems.IssueSummary) []string {
 	ids := make([]string, 0, len(items))
 	for _, item := range items {
 		ids = append(ids, item.ID)

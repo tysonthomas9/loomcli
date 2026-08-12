@@ -1715,7 +1715,7 @@ func TestReady_HappyPath(t *testing.T) {
 	})
 	defer ts.Close()
 
-	result, err := fb.Ready(context.Background(), backend.ReadyOpts{Limit: 10})
+	result, err := fb.Ready(context.Background(), workitems.AvailabilityQuery{Limit: 10})
 	if err != nil {
 		t.Fatalf("Ready: %v", err)
 	}
@@ -1741,7 +1741,7 @@ func TestReady_ClientFiltersSourceReposWithoutServerLimit(t *testing.T) {
 	})
 	defer ts.Close()
 
-	result, err := fb.Ready(context.Background(), backend.ReadyOpts{
+	result, err := fb.Ready(context.Background(), workitems.AvailabilityQuery{
 		SourceRepos: []string{"repo-b"},
 		Limit:       1,
 	})

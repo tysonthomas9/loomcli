@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 )
 
 // --- Level 1: Simple predicates ---
@@ -22,7 +23,7 @@ func TestIsEpic(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			issue := backend.IssueData{IssueType: tt.typ}
+			issue := workitems.IssueSummary{IssueType: tt.typ}
 			if got := IsEpic(issue); got != tt.want {
 				t.Errorf("IsEpic() = %v, want %v", got, tt.want)
 			}
@@ -45,7 +46,7 @@ func TestIsOpen(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			issue := backend.IssueData{Status: tt.status}
+			issue := workitems.IssueSummary{Status: tt.status}
 			if got := IsOpen(issue); got != tt.want {
 				t.Errorf("IsOpen() = %v, want %v", got, tt.want)
 			}
@@ -66,7 +67,7 @@ func TestHasDesign(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			issue := backend.IssueData{Design: tt.design, HasDesign: tt.hasDesign}
+			issue := workitems.IssueSummary{Design: tt.design, HasDesign: tt.hasDesign}
 			if got := HasDesign(issue); got != tt.want {
 				t.Errorf("HasDesign() = %v, want %v", got, tt.want)
 			}
@@ -88,7 +89,7 @@ func TestHasNeedsRevision(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			issue := backend.IssueData{Labels: tt.labels}
+			issue := workitems.IssueSummary{Labels: tt.labels}
 			if got := HasNeedsRevision(issue); got != tt.want {
 				t.Errorf("HasNeedsRevision() = %v, want %v", got, tt.want)
 			}
@@ -120,7 +121,7 @@ func TestIsNonWorkType(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			issue := backend.IssueData{IssueType: tt.typ}
+			issue := workitems.IssueSummary{IssueType: tt.typ}
 			if got := IsNonWorkType(issue); got != tt.want {
 				t.Errorf("IsNonWorkType() = %v, want %v", got, tt.want)
 			}
@@ -146,7 +147,7 @@ func TestNeedsPlan(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			issue := backend.IssueData{Design: tt.design, Labels: tt.labels}
+			issue := workitems.IssueSummary{Design: tt.design, Labels: tt.labels}
 			if got := NeedsPlan(issue); got != tt.want {
 				t.Errorf("NeedsPlan() = %v, want %v", got, tt.want)
 			}
@@ -169,7 +170,7 @@ func TestReadyToImplement(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			issue := backend.IssueData{Design: tt.design, Labels: tt.labels}
+			issue := workitems.IssueSummary{Design: tt.design, Labels: tt.labels}
 			if got := ReadyToImplement(issue); got != tt.want {
 				t.Errorf("ReadyToImplement() = %v, want %v", got, tt.want)
 			}
@@ -201,7 +202,7 @@ func TestIsWorkableTask(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			issue := backend.IssueData{Status: tt.status, IssueType: tt.issueType}
+			issue := workitems.IssueSummary{Status: tt.status, IssueType: tt.issueType}
 			if got := IsWorkableTask(issue); got != tt.want {
 				t.Errorf("IsWorkableTask() = %v, want %v", got, tt.want)
 			}
@@ -279,14 +280,14 @@ func TestIsDirectBlocker(t *testing.T) {
 func TestIsAvailableForPlanning(t *testing.T) {
 	tests := []struct {
 		name  string
-		issue backend.IssueData
+		issue workitems.IssueSummary
 		want  bool
 	}{
-		{"open task no design", backend.IssueData{ID: "T-1", Status: "open", IssueType: "task"}, true},
-		{"open task with needs-revision", backend.IssueData{ID: "T-3", Status: "open", IssueType: "task", Design: "plan", Labels: []string{"needs-revision"}}, true},
-		{"open task with design (ready to implement)", backend.IssueData{ID: "T-2", Status: "open", IssueType: "task", Design: "plan"}, false},
-		{"epic", backend.IssueData{ID: "E-1", Status: "open", IssueType: "epic"}, false},
-		{"in_progress", backend.IssueData{ID: "T-4", Status: "in_progress", IssueType: "task"}, false},
+		{"open task no design", workitems.IssueSummary{ID: "T-1", Status: "open", IssueType: "task"}, true},
+		{"open task with needs-revision", workitems.IssueSummary{ID: "T-3", Status: "open", IssueType: "task", Design: "plan", Labels: []string{"needs-revision"}}, true},
+		{"open task with design (ready to implement)", workitems.IssueSummary{ID: "T-2", Status: "open", IssueType: "task", Design: "plan"}, false},
+		{"epic", workitems.IssueSummary{ID: "E-1", Status: "open", IssueType: "epic"}, false},
+		{"in_progress", workitems.IssueSummary{ID: "T-4", Status: "in_progress", IssueType: "task"}, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -300,13 +301,13 @@ func TestIsAvailableForPlanning(t *testing.T) {
 func TestIsAvailableForImplementation(t *testing.T) {
 	tests := []struct {
 		name  string
-		issue backend.IssueData
+		issue workitems.IssueSummary
 		want  bool
 	}{
-		{"open task with design", backend.IssueData{ID: "T-2", Status: "open", IssueType: "task", Design: "plan"}, true},
-		{"open task no design", backend.IssueData{ID: "T-1", Status: "open", IssueType: "task"}, false},
-		{"open task with needs-revision", backend.IssueData{ID: "T-3", Status: "open", IssueType: "task", Design: "plan", Labels: []string{"needs-revision"}}, false},
-		{"epic with design", backend.IssueData{ID: "E-1", Status: "open", IssueType: "epic", Design: "plan"}, false},
+		{"open task with design", workitems.IssueSummary{ID: "T-2", Status: "open", IssueType: "task", Design: "plan"}, true},
+		{"open task no design", workitems.IssueSummary{ID: "T-1", Status: "open", IssueType: "task"}, false},
+		{"open task with needs-revision", workitems.IssueSummary{ID: "T-3", Status: "open", IssueType: "task", Design: "plan", Labels: []string{"needs-revision"}}, false},
+		{"epic with design", workitems.IssueSummary{ID: "E-1", Status: "open", IssueType: "epic", Design: "plan"}, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -320,14 +321,14 @@ func TestIsAvailableForImplementation(t *testing.T) {
 func TestIsAvailableForAny(t *testing.T) {
 	tests := []struct {
 		name  string
-		issue backend.IssueData
+		issue workitems.IssueSummary
 		want  bool
 	}{
-		{"open task no design", backend.IssueData{ID: "T-1", Status: "open", IssueType: "task"}, true},
-		{"open task with design", backend.IssueData{ID: "T-2", Status: "open", IssueType: "task", Design: "plan"}, true},
-		{"open task with needs-revision", backend.IssueData{ID: "T-3", Status: "open", IssueType: "task", Labels: []string{"needs-revision"}}, true},
-		{"epic", backend.IssueData{ID: "E-1", Status: "open", IssueType: "epic"}, false},
-		{"in_progress", backend.IssueData{ID: "T-4", Status: "in_progress", IssueType: "task"}, false},
+		{"open task no design", workitems.IssueSummary{ID: "T-1", Status: "open", IssueType: "task"}, true},
+		{"open task with design", workitems.IssueSummary{ID: "T-2", Status: "open", IssueType: "task", Design: "plan"}, true},
+		{"open task with needs-revision", workitems.IssueSummary{ID: "T-3", Status: "open", IssueType: "task", Labels: []string{"needs-revision"}}, true},
+		{"epic", workitems.IssueSummary{ID: "E-1", Status: "open", IssueType: "epic"}, false},
+		{"in_progress", workitems.IssueSummary{ID: "T-4", Status: "in_progress", IssueType: "task"}, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

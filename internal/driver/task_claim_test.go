@@ -10,12 +10,13 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 )
 
 func TestClaimReadyTaskClaimsFirstAvailableAsActor(t *testing.T) {
 	ctx := context.Background()
 	fake := &fakeReadyIssueBackend{
-		ready: []backend.IssueData{
+		ready: []workitems.IssueSummary{
 			{ID: "TEST-1", Title: "already claimed", Parent: "EPIC-1"},
 			{ID: "TEST-2", Title: "available", Priority: 2, Parent: "EPIC-1", Labels: []string{"repo:core"}},
 		},
@@ -51,13 +52,13 @@ func TestClaimReadyTaskClaimsFirstAvailableAsActor(t *testing.T) {
 func TestClaimReadyTaskSkipsBlockedIssues(t *testing.T) {
 	cases := []struct {
 		name       string
-		ready      []backend.IssueData
+		ready      []workitems.IssueSummary
 		wantClaim  string
 		wantClaims int
 	}{
 		{
 			name: "blocked issue is skipped in favor of open issue",
-			ready: []backend.IssueData{
+			ready: []workitems.IssueSummary{
 				{ID: "TEST-BLOCKED", Status: "blocked", Parent: "EPIC-1"},
 				{ID: "TEST-OPEN", Status: "open", Parent: "EPIC-1"},
 			},
@@ -66,7 +67,7 @@ func TestClaimReadyTaskSkipsBlockedIssues(t *testing.T) {
 		},
 		{
 			name: "only blocked issues yields no claim",
-			ready: []backend.IssueData{
+			ready: []workitems.IssueSummary{
 				{ID: "TEST-BLOCKED", Status: "blocked", Parent: "EPIC-1"},
 			},
 		},
@@ -107,7 +108,7 @@ func TestClaimReadyTaskReturnsNilWhenNoReadyTasks(t *testing.T) {
 
 func TestClaimReadyTaskReturnsNonConflictClaimError(t *testing.T) {
 	fake := &fakeReadyIssueBackend{
-		ready:     []backend.IssueData{{ID: "TEST-1"}},
+		ready:     []workitems.IssueSummary{{ID: "TEST-1"}},
 		claimErrs: map[string]error{"TEST-1": errors.New("network down")},
 	}
 
@@ -117,7 +118,7 @@ func TestClaimReadyTaskReturnsNonConflictClaimError(t *testing.T) {
 }
 
 func TestClaimTaskClaimsSpecificReadyTaskByID(t *testing.T) {
-	fake := &fakeReadyIssueBackend{ready: []backend.IssueData{
+	fake := &fakeReadyIssueBackend{ready: []workitems.IssueSummary{
 		{ID: "TEST-1", Parent: "EPIC-1"},
 		{ID: "TEST-2", Title: "target", Parent: "EPIC-1", Labels: []string{"repo:core"}},
 	}}
@@ -149,9 +150,9 @@ func TestClaimTaskClaimsSpecificReadyTaskByID(t *testing.T) {
 // targeted claim. Before the fix ClaimTask scanned only the first 100 entries,
 // turning a genuinely-ready task into a false 409 indistinguishable from a race.
 func TestClaimTaskScansPastClaimReadyDefaultLimit(t *testing.T) {
-	ready := make([]backend.IssueData, 0, 200)
+	ready := make([]workitems.IssueSummary, 0, 200)
 	for i := 0; i < 200; i++ {
-		ready = append(ready, backend.IssueData{ID: fmt.Sprintf("TASK-%03d", i)})
+		ready = append(ready, workitems.IssueSummary{ID: fmt.Sprintf("TASK-%03d", i)})
 	}
 	target := ready[150].ID // position 150: past the 100-entry claim-ready cutoff
 	fake := &fakeReadyIssueBackend{ready: ready}
@@ -173,7 +174,7 @@ func TestClaimTaskScansPastClaimReadyDefaultLimit(t *testing.T) {
 
 func TestClaimTaskNotReadyIsConflict(t *testing.T) {
 	// The target is not in the ready view (not ready / already claimed elsewhere).
-	fake := &fakeReadyIssueBackend{ready: []backend.IssueData{{ID: "TEST-1"}}}
+	fake := &fakeReadyIssueBackend{ready: []workitems.IssueSummary{{ID: "TEST-1"}}}
 
 	_, err := ClaimTask(context.Background(), fake, TaskClaimByIDOptions{TaskID: "TEST-404", Actor: "a"})
 	if !errors.Is(err, domain.ErrConflict) {
@@ -185,7 +186,7 @@ func TestClaimTaskNotReadyIsConflict(t *testing.T) {
 }
 
 func TestClaimTaskBlockedTargetIsConflict(t *testing.T) {
-	fake := &fakeReadyIssueBackend{ready: []backend.IssueData{{ID: "TEST-1", Status: "blocked"}}}
+	fake := &fakeReadyIssueBackend{ready: []workitems.IssueSummary{{ID: "TEST-1", Status: "blocked"}}}
 
 	_, err := ClaimTask(context.Background(), fake, TaskClaimByIDOptions{TaskID: "TEST-1"})
 	if !errors.Is(err, domain.ErrConflict) {
@@ -199,7 +200,7 @@ func TestClaimTaskBlockedTargetIsConflict(t *testing.T) {
 func TestClaimTaskDoubleClaimIsConflict(t *testing.T) {
 	// The target is ready but a racing owner wins the claim (backend conflict).
 	fake := &fakeReadyIssueBackend{
-		ready:     []backend.IssueData{{ID: "TEST-1"}},
+		ready:     []workitems.IssueSummary{{ID: "TEST-1"}},
 		claimErrs: map[string]error{"TEST-1": backend.ErrConflict("ClaimIssue", "already claimed")},
 	}
 
@@ -212,7 +213,7 @@ func TestClaimTaskDoubleClaimIsConflict(t *testing.T) {
 // claim-by-id takes the SAME actor-scoped lease claim-ready takes, so the
 // existing run-failure release path (ReleaseTask) frees it symmetrically.
 func TestClaimTaskLeaseReleasablePerExistingSemantics(t *testing.T) {
-	fake := &fakeReadyIssueBackend{ready: []backend.IssueData{{ID: "TEST-1"}}}
+	fake := &fakeReadyIssueBackend{ready: []workitems.IssueSummary{{ID: "TEST-1"}}}
 
 	if _, err := ClaimTask(context.Background(), fake, TaskClaimByIDOptions{TaskID: "TEST-1", Actor: "driver-run:run-1", LockTTL: time.Minute}); err != nil {
 		t.Fatalf("ClaimTask: %v", err)
@@ -268,8 +269,8 @@ func TestReleaseTaskUsesActorScopedRelease(t *testing.T) {
 
 type fakeReadyIssueBackend struct {
 	backend.IssueBackend
-	ready         []backend.IssueData
-	readyCalls    []backend.ReadyOpts
+	ready         []workitems.IssueSummary
+	readyCalls    []workitems.AvailabilityQuery
 	claims        []claimCall
 	actorClaims   []claimCall
 	closeCalls    []closeCall
@@ -294,9 +295,9 @@ type releaseCall struct {
 	actor string
 }
 
-func (f *fakeReadyIssueBackend) Ready(_ context.Context, opts backend.ReadyOpts) ([]backend.IssueData, error) {
+func (f *fakeReadyIssueBackend) Ready(_ context.Context, opts workitems.AvailabilityQuery) ([]workitems.IssueSummary, error) {
 	f.readyCalls = append(f.readyCalls, opts)
-	out := append([]backend.IssueData(nil), f.ready...)
+	out := append([]workitems.IssueSummary(nil), f.ready...)
 	// Honor the scan bound like a real backend so tests can prove the effective
 	// scan depth (e.g. the claim-by-id crowding fix).
 	if opts.Limit > 0 && len(out) > opts.Limit {

@@ -188,7 +188,7 @@ func TestMockIssueBackendDefaultPaths(t *testing.T) {
 	m := NewMockIssueBackend()
 	m.GetResult = &backend.IssueDetailData{}
 	m.ListResult = []backend.IssueData{{ID: "list"}}
-	m.ReadyResult = []backend.IssueData{{ID: "ready"}}
+	m.ReadyResult = []workitems.IssueSummary{{ID: "ready"}}
 	m.BlockedResult = []workitems.IssueSummary{{ID: "blocked"}}
 	m.StatsResult = &workitems.Stats{}
 	m.SearchResult = []workitems.IssueSummary{{ID: "search"}}
@@ -263,7 +263,7 @@ func callDefaults(t *testing.T, ctx context.Context, m *MockIssueBackend) {
 	if _, err := m.List(ctx, backend.ListOpts{}); err != nil {
 		t.Fatalf("List returned error: %v", err)
 	}
-	if _, err := m.Ready(ctx, backend.ReadyOpts{}); err != nil {
+	if _, err := m.Ready(ctx, workitems.AvailabilityQuery{}); err != nil {
 		t.Fatalf("Ready returned error: %v", err)
 	}
 	if _, err := m.Blocked(ctx, workitems.AvailabilityQuery{}); err != nil {

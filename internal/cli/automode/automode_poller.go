@@ -9,9 +9,9 @@ import (
 
 	"go.opentelemetry.io/otel/attribute"
 
-	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 )
 
 // useFixedPolling allows reverting to fixed 200ms polling via environment variable
@@ -61,7 +61,7 @@ func (p *adaptivePoller) hadNoActivity() {
 // One span per call (`automode.poll.cycle`) — one cycle of the poller, even
 // when the result set is empty. The span ends when this function returns;
 // downstream IssueBackend calls inherit it as parent.
-func fetchReadyIssues(parent context.Context, parentID string, repoLabel string) ([]backend.IssueData, error) {
+func fetchReadyIssues(parent context.Context, parentID string, repoLabel string) ([]workitems.IssueSummary, error) {
 	cycleStart := time.Now()
 	ctx, span := startPollSpan(parent, parentID, repoLabel)
 	defer span.End()
@@ -70,14 +70,20 @@ func fetchReadyIssues(parent context.Context, parentID string, repoLabel string)
 	// Limit 10000: ready queues include open + review + in_progress; a small limit
 	// can push the few truly-workable open tasks past the cutoff, starving
 	// auto-mode planners/implementers. Same pattern as monitor_collect.go.
-	opts := backend.ReadyOpts{Limit: 10000, ParentID: parentID}
+	opts := workitems.AvailabilityQuery{Limit: 10000, ParentID: parentID}
 	if repoLabel != "" {
 		opts.Labels = []string{"repo:" + repoLabel}
 	}
 	if sourceRepos := os.Getenv("LOOM_SOURCE_REPOS"); sourceRepos != "" {
 		opts.SourceRepos = strings.Split(sourceRepos, ",")
 	}
-	issues, err := ib.Ready(ctx, opts)
+	ready, ok := ib.(workitems.ReadyQueries)
+	if !ok {
+		err := workitems.ErrUnavailable
+		recordPollErr(span, err)
+		return nil, err
+	}
+	issues, err := ready.Ready(ctx, opts)
 	if err != nil {
 		recordPollErr(span, err)
 		span.SetAttributes(
@@ -97,13 +103,13 @@ func fetchReadyIssues(parent context.Context, parentID string, repoLabel string)
 // (ready tasks without a design OR with needs-revision label, excluding epics)
 // When parentID is non-empty, only tasks under that epic are returned.
 // When repoLabel is non-empty, only tasks labeled repo:<name> are returned.
-func GetAvailablePlanningTasks(ctx context.Context, parentID string, repoLabel string) ([]backend.IssueData, error) {
+func GetAvailablePlanningTasks(ctx context.Context, parentID string, repoLabel string) ([]workitems.IssueSummary, error) {
 	candidates, err := fetchReadyIssues(ctx, parentID, repoLabel)
 	if err != nil {
 		return nil, err
 	}
 
-	var result []backend.IssueData
+	var result []workitems.IssueSummary
 	for _, issue := range candidates {
 		if cli.IsAvailableForPlanning(issue) {
 			result = append(result, issue)
@@ -126,13 +132,13 @@ func HasAvailablePlanningTasks(ctx context.Context, parentID string, repoLabel s
 // (ready tasks WITH an approved design, excluding tasks with needs-revision label and epics)
 // When parentID is non-empty, only tasks under that epic are returned.
 // When repoLabel is non-empty, only tasks labeled repo:<name> are returned.
-func GetAvailableImplementationTasks(ctx context.Context, parentID string, repoLabel string) ([]backend.IssueData, error) {
+func GetAvailableImplementationTasks(ctx context.Context, parentID string, repoLabel string) ([]workitems.IssueSummary, error) {
 	candidates, err := fetchReadyIssues(ctx, parentID, repoLabel)
 	if err != nil {
 		return nil, err
 	}
 
-	var result []backend.IssueData
+	var result []workitems.IssueSummary
 	for _, issue := range candidates {
 		if cli.IsAvailableForImplementation(issue) {
 			result = append(result, issue)
@@ -155,13 +161,13 @@ func HasAvailableImplementationTasks(ctx context.Context, parentID string, repoL
 // Used by custom roles with task_filter=any.
 // When parentID is non-empty, only tasks under that epic are returned.
 // When repoLabel is non-empty, only tasks labeled repo:<name> are returned.
-func GetAnyAvailableTasks(ctx context.Context, parentID string, repoLabel string) ([]backend.IssueData, error) {
+func GetAnyAvailableTasks(ctx context.Context, parentID string, repoLabel string) ([]workitems.IssueSummary, error) {
 	candidates, err := fetchReadyIssues(ctx, parentID, repoLabel)
 	if err != nil {
 		return nil, err
 	}
 
-	var result []backend.IssueData
+	var result []workitems.IssueSummary
 	for _, issue := range candidates {
 		if cli.IsAvailableForAny(issue) {
 			result = append(result, issue)

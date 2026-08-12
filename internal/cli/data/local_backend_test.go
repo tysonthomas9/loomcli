@@ -43,9 +43,15 @@ func (b *localBackendStub) List(_ context.Context, opts backend.ListOpts) ([]bac
 	return b.readyItems, nil
 }
 
-func (b *localBackendStub) Ready(_ context.Context, opts backend.ReadyOpts) ([]backend.IssueData, error) {
+func (b *localBackendStub) Ready(_ context.Context, opts workitems.AvailabilityQuery) ([]workitems.IssueSummary, error) {
 	b.record("Ready", "", opts)
-	return b.readyItems, nil
+	out := make([]workitems.IssueSummary, 0, len(b.readyItems))
+	for _, issue := range b.readyItems {
+		out = append(out, workitems.IssueSummary{
+			ID: issue.ID, Title: issue.Title, Status: issue.Status, Priority: issue.Priority, IssueType: issue.IssueType,
+		})
+	}
+	return out, nil
 }
 
 func (b *localBackendStub) Blocked(_ context.Context, query workitems.AvailabilityQuery) ([]workitems.IssueSummary, error) {
@@ -188,8 +194,8 @@ func TestDataReady_NoServerUsesLocalBackend(t *testing.T) {
 		if len(stub.calls) != 1 || stub.calls[0].method != "Ready" {
 			t.Fatalf("calls = %#v, want one Ready call", stub.calls)
 		}
-		opts := stub.calls[0].args.(backend.ReadyOpts)
-		if opts.Limit != 3 || opts.Assignee != "agent-1" || opts.Type != "task" || opts.ParentID != "epic-1" {
+		opts := stub.calls[0].args.(workitems.AvailabilityQuery)
+		if opts.Limit != 3 || opts.Assignee != "agent-1" || opts.IssueType != "task" || opts.ParentID != "epic-1" {
 			t.Fatalf("Ready opts = %#v", opts)
 		}
 	})

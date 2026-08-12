@@ -163,16 +163,15 @@ func (s *workItemsBackendStore) Ready(ctx context.Context, query workitems.Avail
 	}
 	ctx, cancel := context.WithTimeout(ctx, workItemOperationTimeout)
 	defer cancel()
-	values, err := be.Ready(ctx, backend.ReadyOpts{
-		ParentID: query.ParentID, Assignee: query.Assignee, Unassigned: query.Unassigned,
-		Priority: query.Priority, Type: query.IssueType, Labels: query.Labels,
-		LabelsAny: query.LabelsAny, SourceRepos: query.SourceRepos, Limit: query.Limit,
-		SortPolicy: query.SortPolicy, MolType: query.MolType,
-	})
+	ready, ok := be.(workitems.ReadyQueries)
+	if !ok {
+		return nil, workitems.ErrUnavailable
+	}
+	values, err := ready.Ready(ctx, query)
 	if err != nil {
 		return nil, translateWorkItemsBackendError(err)
 	}
-	return workItemSummaries(values), nil
+	return values, nil
 }
 
 func (s *workItemsBackendStore) Deferred(ctx context.Context, query workitems.AvailabilityQuery) ([]workitems.IssueSummary, error) {

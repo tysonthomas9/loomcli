@@ -29,7 +29,7 @@ func TestWrapIssueBackendWithTracing_Smoke(t *testing.T) {
 	ctx := context.Background()
 	_, _ = wrapped.Get(ctx, "id-1")
 	_, _ = wrapped.List(ctx, backend.ListOpts{Limit: 10})
-	_, _ = wrapped.Ready(ctx, backend.ReadyOpts{Limit: 10})
+	_, _ = wrapped.(workitems.ReadyQueries).Ready(ctx, workitems.AvailabilityQuery{Limit: 10})
 	blocked := wrapped.(workitems.BlockedQueries)
 	_, _ = blocked.Blocked(ctx, workitems.AvailabilityQuery{Limit: 10})
 	stats := wrapped.(workitems.StatsQueries)

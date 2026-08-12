@@ -28,10 +28,6 @@ type IssueBackend interface {
 	// An empty ListOpts returns all issues up to the backend's default limit.
 	List(ctx context.Context, opts ListOpts) ([]IssueData, error)
 
-	// Ready returns the canonical ready availability view, matching the given
-	// narrowing filters.
-	Ready(ctx context.Context, opts ReadyOpts) ([]IssueData, error)
-
 	// --- Mutation operations ---
 
 	// Create creates a new issue and returns the slim projection of the

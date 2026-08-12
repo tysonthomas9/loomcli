@@ -19,7 +19,7 @@ func (b *FleetBackend) Deferred(ctx context.Context, opts backend.DeferredOpts) 
 	if err != nil {
 		return nil, err
 	}
-	return filterDeferredIssues(readyIssuesToData(issues), opts), nil
+	return filterDeferredIssues(deferredIssuesToData(issues), opts), nil
 }
 
 func filterDeferredIssues(issues []backend.IssueData, opts backend.DeferredOpts) []backend.IssueData {
@@ -34,17 +34,32 @@ func filterDeferredIssues(issues []backend.IssueData, opts backend.DeferredOpts)
 	})
 }
 
-func filterReadyIssues(issues []backend.IssueData, opts backend.ReadyOpts) []backend.IssueData {
-	return filterIssueData(issues, issueDataFilter{
+func filterReadySummaries(issues []workitems.IssueSummary, opts workitems.AvailabilityQuery) []workitems.IssueSummary {
+	filter := issueDataFilter{
 		Assignee:    opts.Assignee,
+		Unassigned:  opts.Unassigned,
 		Priority:    opts.Priority,
-		Type:        opts.Type,
+		Type:        opts.IssueType,
 		ParentID:    opts.ParentID,
 		Labels:      opts.Labels,
 		LabelsAny:   opts.LabelsAny,
 		SourceRepos: opts.SourceRepos,
 		Limit:       opts.Limit,
-	})
+	}
+	if !filter.needsFilter() {
+		return issues
+	}
+	out := make([]workitems.IssueSummary, 0, len(issues))
+	for _, issue := range issues {
+		if !filter.matches(issue.Assignee, issue.Priority, issue.IssueType, issue.Parent, issue.Labels, issue.SourceRepo) {
+			continue
+		}
+		out = append(out, issue)
+		if filter.Limit > 0 && len(out) >= filter.Limit {
+			break
+		}
+	}
+	return out
 }
 
 func filterBlockedSummaries(issues []workitems.IssueSummary, opts workitems.AvailabilityQuery) []workitems.IssueSummary {

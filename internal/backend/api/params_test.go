@@ -140,21 +140,21 @@ func TestListOptsToQuery_BoolFalseOmitted(t *testing.T) {
 	}
 }
 
-// --- readyOptsToQuery ---
+// --- readyQueryToQuery ---
 
-func TestReadyOptsToQuery_Empty(t *testing.T) {
-	if q := readyOptsToQuery(backend.ReadyOpts{}); q != "" {
+func TestReadyQueryToQuery_Empty(t *testing.T) {
+	if q := readyQueryToQuery(workitems.AvailabilityQuery{}); q != "" {
 		t.Errorf("empty = %q", q)
 	}
 }
 
-func TestReadyOptsToQuery_AllFields(t *testing.T) {
+func TestReadyQueryToQuery_AllFields(t *testing.T) {
 	p := 3
-	opts := backend.ReadyOpts{
+	opts := workitems.AvailabilityQuery{
 		Assignee:    "alice",
 		Unassigned:  true,
 		Priority:    &p,
-		Type:        "task",
+		IssueType:   "task",
 		ParentID:    "epic-1",
 		Limit:       10,
 		SortPolicy:  "priority",
@@ -163,7 +163,7 @@ func TestReadyOptsToQuery_AllFields(t *testing.T) {
 		MolType:     "atom",
 		SourceRepos: []string{"r1"},
 	}
-	q := readyOptsToQuery(opts)
+	q := readyQueryToQuery(opts)
 	values, _ := url.ParseQuery(q)
 	checks := map[string]string{
 		"assignee":     "alice",

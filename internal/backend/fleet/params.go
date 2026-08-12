@@ -225,12 +225,12 @@ func addListAdvancedFilters(q url.Values, opts backend.ListOpts) {
 	setBoolIfTrue(q, "allow_stale", opts.AllowStale)
 }
 
-func readyOptsToQuery(opts backend.ReadyOpts) string {
+func readyQueryToQuery(opts workitems.AvailabilityQuery) string {
 	q := url.Values{}
 	setNonEmpty(q, "assignee", opts.Assignee)
 	setBoolIfTrue(q, "unassigned", opts.Unassigned)
 	setOptInt(q, "priority", opts.Priority)
-	setNonEmpty(q, "type", opts.Type)
+	setNonEmpty(q, "type", opts.IssueType)
 	setNonEmpty(q, "parent_id", opts.ParentID)
 	if opts.Limit > 0 {
 		q.Set("limit", strconv.Itoa(opts.Limit))
@@ -246,7 +246,7 @@ func readyOptsToQuery(opts backend.ReadyOpts) string {
 	return q.Encode()
 }
 
-func readyServerOpts(opts backend.ReadyOpts) backend.ReadyOpts {
+func readyServerQuery(opts workitems.AvailabilityQuery) workitems.AvailabilityQuery {
 	server := opts
 	server.SourceRepos = nil
 	if len(opts.SourceRepos) > 0 {

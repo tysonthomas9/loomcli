@@ -348,8 +348,8 @@ func collectTaskStatus(ctx context.Context, readyLimit int) (TaskSummary, []Task
 
 // taskQueryResults holds the raw results from parallel issue queries.
 type taskQueryResults struct {
-	readyIssues, inProgressIssues, reviewIssues, closedIssues []backend.IssueData
-	backlogIssues                                             []workitems.IssueSummary
+	readyIssues, backlogIssues                                []workitems.IssueSummary
+	inProgressIssues, reviewIssues, closedIssues              []backend.IssueData
 	readyErr, inProgressErr, reviewErr, backlogErr, closedErr error
 }
 
@@ -386,7 +386,12 @@ func runParallelTaskQueries(ctx context.Context, deps *cli.Deps, readyLimit int)
 	wg.Add(5)
 	go func() {
 		defer wg.Done()
-		qr.readyIssues, qr.readyErr = ib.Ready(ctx, backend.ReadyOpts{Limit: readyLimit})
+		ready, ok := ib.(workitems.ReadyQueries)
+		if !ok {
+			qr.readyErr = workitems.ErrUnavailable
+			return
+		}
+		qr.readyIssues, qr.readyErr = ready.Ready(ctx, workitems.AvailabilityQuery{Limit: readyLimit})
 	}()
 	// Pass an explicit large limit so the monitor counts and displayed slices
 	// reflect the full queue.
@@ -416,7 +421,7 @@ func runParallelTaskQueries(ctx context.Context, deps *cli.Deps, readyLimit int)
 	return qr
 }
 
-func processReadyIssues(issues []backend.IssueData, err error, summary *TaskSummary, blockedIDs map[string]bool) ([]TaskInfo, []TaskInfo) {
+func processReadyIssues(issues []workitems.IssueSummary, err error, summary *TaskSummary, blockedIDs map[string]bool) ([]TaskInfo, []TaskInfo) {
 	if err != nil {
 		return nil, nil
 	}
@@ -603,7 +608,12 @@ func CollectReadyTasksByPriority(ctx context.Context, readyLimit int) map[int]in
 		counts[i] = 0
 	}
 
-	issues, err := cli.DefaultIssueBackend().Ready(ctx, backend.ReadyOpts{Limit: readyLimit})
+	backend := cli.DefaultIssueBackend()
+	ready, ok := backend.(workitems.ReadyQueries)
+	if !ok {
+		return counts
+	}
+	issues, err := ready.Ready(ctx, workitems.AvailabilityQuery{Limit: readyLimit})
 	if err != nil {
 		return counts
 	}

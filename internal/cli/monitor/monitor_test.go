@@ -891,7 +891,7 @@ func TestCollectTaskStatus(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name                    string
-		readyIssues             []backend.IssueData
+		readyIssues             []workitems.IssueSummary
 		readyErr                error
 		inProgressIssues        []backend.IssueData
 		inProgressErr           error
@@ -916,7 +916,7 @@ func TestCollectTaskStatus(t *testing.T) {
 	}{
 		{
 			name: "tasks with design go to ReadyToImplement",
-			readyIssues: []backend.IssueData{
+			readyIssues: []workitems.IssueSummary{
 				{ID: "T-1", Title: "Task with design", Status: "open", Design: "## Design\nSome plan"},
 			},
 			wantReadyToImplement:    1,
@@ -924,7 +924,7 @@ func TestCollectTaskStatus(t *testing.T) {
 		},
 		{
 			name: "tasks without design go to NeedsPlanning",
-			readyIssues: []backend.IssueData{
+			readyIssues: []workitems.IssueSummary{
 				{ID: "T-1", Title: "Task without design", Status: "open", Design: ""},
 			},
 			wantNeedsPlanning:    1,
@@ -958,7 +958,7 @@ func TestCollectTaskStatus(t *testing.T) {
 		},
 		{
 			name: "epics are skipped",
-			readyIssues: []backend.IssueData{
+			readyIssues: []workitems.IssueSummary{
 				{ID: "E-1", Title: "Epic task", Status: "open", IssueType: "epic", Design: ""},
 				{ID: "T-1", Title: "Regular task", Status: "open", Design: ""},
 			},
@@ -967,7 +967,7 @@ func TestCollectTaskStatus(t *testing.T) {
 		},
 		{
 			name: "needs-revision label tasks go to NeedsPlanning",
-			readyIssues: []backend.IssueData{
+			readyIssues: []workitems.IssueSummary{
 				{ID: "T-1", Title: "Task needing revision", Status: "open", Design: "existing plan", Labels: []string{"needs-revision"}},
 				{ID: "T-2", Title: "Regular task with design", Status: "open", Design: "plan"},
 			},
@@ -978,7 +978,7 @@ func TestCollectTaskStatus(t *testing.T) {
 		},
 		{
 			name: "in_progress tasks skipped in ready output",
-			readyIssues: []backend.IssueData{
+			readyIssues: []workitems.IssueSummary{
 				{ID: "T-1", Title: "In progress skip", Status: "in_progress", Design: ""},
 				{ID: "T-2", Title: "Regular task", Status: "open", Design: ""},
 			},
@@ -987,7 +987,7 @@ func TestCollectTaskStatus(t *testing.T) {
 		},
 		{
 			name: "top 5 limit for NeedsPlanning",
-			readyIssues: []backend.IssueData{
+			readyIssues: []workitems.IssueSummary{
 				{ID: "T-1", Title: "Task 1", Status: "open", Design: ""},
 				{ID: "T-2", Title: "Task 2", Status: "open", Design: ""},
 				{ID: "T-3", Title: "Task 3", Status: "open", Design: ""},
@@ -1001,7 +1001,7 @@ func TestCollectTaskStatus(t *testing.T) {
 		},
 		{
 			name: "top 5 limit for ReadyToImplement",
-			readyIssues: []backend.IssueData{
+			readyIssues: []workitems.IssueSummary{
 				{ID: "T-1", Title: "Task 1", Status: "open", Design: "plan"},
 				{ID: "T-2", Title: "Task 2", Status: "open", Design: "plan"},
 				{ID: "T-3", Title: "Task 3", Status: "open", Design: "plan"},
@@ -1106,8 +1106,8 @@ func TestCollectTaskStatusReadyCommandArgs(t *testing.T) {
 	// This test verifies that Ready() is called with the passed readyLimit
 	deps, _, _, _, _ := NewTestDeps(t)
 	mock := NewMockIssueBackend()
-	var capturedOpts backend.ReadyOpts
-	mock.ReadyFn = func(_ context.Context, opts backend.ReadyOpts) ([]backend.IssueData, error) {
+	var capturedOpts workitems.AvailabilityQuery
+	mock.ReadyFn = func(_ context.Context, opts workitems.AvailabilityQuery) ([]workitems.IssueSummary, error) {
 		capturedOpts = opts
 		return nil, nil
 	}
@@ -1425,7 +1425,7 @@ func TestCollectMonitorData(t *testing.T) {
 	deps.Git = &execBridgeGitRunner{Exec: deps.Exec}
 
 	mock := NewMockIssueBackend()
-	mock.ReadyResult = []backend.IssueData{
+	mock.ReadyResult = []workitems.IssueSummary{
 		{ID: "T-1", Title: "Task 1", Status: "open", Design: ""},
 		{ID: "T-2", Title: "Task 2", Status: "open", Design: "plan"},
 	}
@@ -1610,7 +1610,7 @@ func TestBacklogAccumulatesReadyWithBlockersAndBlocked(t *testing.T) {
 	// T-LOOM-BLOCKED comes from the blocked list.
 	// Both should count toward Backlog, giving Backlog=2.
 	mock := NewMockIssueBackend()
-	mock.ReadyResult = []backend.IssueData{
+	mock.ReadyResult = []workitems.IssueSummary{
 		{ID: "T-BLOCKER", Title: "Open blocker", Status: "open", Design: "plan"},
 		{ID: "T-BLOCKED-READY", Title: "Blocked in ready", Status: "open", Design: "plan"},
 		{ID: "T-NORMAL", Title: "Normal task", Status: "open", Design: "plan"},
@@ -1678,7 +1678,7 @@ func TestEpicsExcludedFromWorkQueueButStatsRemainCanonical(t *testing.T) {
 	}})
 
 	mock := NewMockIssueBackend()
-	mock.ReadyResult = []backend.IssueData{
+	mock.ReadyResult = []workitems.IssueSummary{
 		{ID: "T-1", Title: "Normal task", Status: "open", Design: "plan"},
 		{ID: "T-EPIC", Title: "Epic task", Status: "open", IssueType: "epic"},
 		{ID: "T-2", Title: "Needs planning", Status: "open", Design: ""},
@@ -1745,7 +1745,7 @@ func TestMonitorStatsPreserveBackendTotals(t *testing.T) {
 	}})
 
 	mock := NewMockIssueBackend()
-	mock.ReadyResult = []backend.IssueData{
+	mock.ReadyResult = []workitems.IssueSummary{
 		{ID: "T-1", Title: "Plan me", Status: "open", Design: ""},
 		{ID: "T-2", Title: "Implement me", Status: "open", Design: "plan"},
 	}
@@ -2661,8 +2661,8 @@ func TestRenderAgentLine(t *testing.T) {
 func TestCollectTaskStatusReadyLimitParam(t *testing.T) {
 	// not parallel: uses setDefaultIssueBackend
 	mock := NewMockIssueBackend()
-	var capturedOpts backend.ReadyOpts
-	mock.ReadyFn = func(_ context.Context, opts backend.ReadyOpts) ([]backend.IssueData, error) {
+	var capturedOpts workitems.AvailabilityQuery
+	mock.ReadyFn = func(_ context.Context, opts workitems.AvailabilityQuery) ([]workitems.IssueSummary, error) {
 		capturedOpts = opts
 		return nil, nil
 	}
@@ -2685,10 +2685,10 @@ func TestCollectTaskStatusReadyLimitParam(t *testing.T) {
 func TestCollectReadyTasksByPriorityReadyLimitParam(t *testing.T) {
 	// not parallel: uses setDefaultIssueBackend
 	mock := NewMockIssueBackend()
-	var capturedOpts backend.ReadyOpts
-	mock.ReadyFn = func(_ context.Context, opts backend.ReadyOpts) ([]backend.IssueData, error) {
+	var capturedOpts workitems.AvailabilityQuery
+	mock.ReadyFn = func(_ context.Context, opts workitems.AvailabilityQuery) ([]workitems.IssueSummary, error) {
 		capturedOpts = opts
-		return []backend.IssueData{
+		return []workitems.IssueSummary{
 			{ID: "T-1", Title: "P1 task", Status: "open", Priority: 1, Design: "plan"},
 			{ID: "T-2", Title: "P2 task", Status: "open", Priority: 2, Design: ""},
 		}, nil
@@ -2852,7 +2852,7 @@ func TestCompleteSyncStatusDetails(t *testing.T) {
 func TestProcessReadyIssuesSkipsBlockedIDs(t *testing.T) {
 	t.Parallel()
 
-	issues := []backend.IssueData{
+	issues := []workitems.IssueSummary{
 		{ID: "T-1", Title: "Ready task", Status: "open", Design: "plan", IssueType: "task"},
 		{ID: "T-2", Title: "Blocked task", Status: "open", Design: "plan", IssueType: "task"},
 		{ID: "T-3", Title: "Also ready", Status: "open", Design: "plan", IssueType: "task"},
@@ -2883,7 +2883,7 @@ func TestProcessReadyIssuesSkipsBlockedIDs(t *testing.T) {
 func TestProcessReadyIssuesNilBlockedIDs(t *testing.T) {
 	t.Parallel()
 
-	issues := []backend.IssueData{
+	issues := []workitems.IssueSummary{
 		{ID: "T-1", Title: "Task 1", Status: "open", Design: "plan", IssueType: "task"},
 		{ID: "T-2", Title: "Task 2", Status: "open", Design: "plan", IssueType: "task"},
 	}

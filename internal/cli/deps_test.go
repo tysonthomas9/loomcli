@@ -377,11 +377,11 @@ func TestFetchReadyIssues_UsesTracker(t *testing.T) {
 	t.Cleanup(resetDefaultIssueBackend)
 
 	mock := NewMockIssueBackend()
-	mock.ReadyResult = []backend.IssueData{
+	mock.ReadyResult = []workitems.IssueSummary{
 		{ID: "test-1", Title: "Test task", Status: "open"},
 	}
-	var capturedOpts backend.ReadyOpts
-	mock.ReadyFn = func(_ context.Context, opts backend.ReadyOpts) ([]backend.IssueData, error) {
+	var capturedOpts workitems.AvailabilityQuery
+	mock.ReadyFn = func(_ context.Context, opts workitems.AvailabilityQuery) ([]workitems.IssueSummary, error) {
 		capturedOpts = opts
 		return mock.ReadyResult, nil
 	}
@@ -407,8 +407,8 @@ func TestFetchReadyIssues_NoParentViaTracker(t *testing.T) {
 	t.Cleanup(resetDefaultIssueBackend)
 
 	mock := NewMockIssueBackend()
-	var capturedOpts backend.ReadyOpts
-	mock.ReadyFn = func(_ context.Context, opts backend.ReadyOpts) ([]backend.IssueData, error) {
+	var capturedOpts workitems.AvailabilityQuery
+	mock.ReadyFn = func(_ context.Context, opts workitems.AvailabilityQuery) ([]workitems.IssueSummary, error) {
 		capturedOpts = opts
 		return nil, nil
 	}
@@ -552,7 +552,7 @@ func TestDefaultDeps_FleetConstructionFailureFailsClosed(t *testing.T) {
 	if got := d.IssueBackend.BackendName(); got != "fleet-unavailable" {
 		t.Fatalf("DefaultDeps IssueBackend = %q, want fleet-unavailable", got)
 	}
-	_, err := d.IssueBackend.Ready(context.Background(), backend.ReadyOpts{})
+	_, err := d.IssueBackend.(workitems.ReadyQueries).Ready(context.Background(), workitems.AvailabilityQuery{})
 	if !backend.IsKind(err, backend.KindUnavailable) {
 		t.Fatalf("Ready error = %v, want unavailable", err)
 	}
@@ -566,7 +566,7 @@ func TestDefaultDeps_APIConstructionFailureFailsClosed(t *testing.T) {
 	if got := d.IssueBackend.BackendName(); got != "api-unavailable" {
 		t.Fatalf("DefaultDeps IssueBackend = %q, want api-unavailable", got)
 	}
-	_, err := d.IssueBackend.Ready(context.Background(), backend.ReadyOpts{})
+	_, err := d.IssueBackend.(workitems.ReadyQueries).Ready(context.Background(), workitems.AvailabilityQuery{})
 	if !backend.IsKind(err, backend.KindUnavailable) {
 		t.Fatalf("Ready error = %v, want unavailable", err)
 	}
@@ -593,7 +593,7 @@ func TestUnavailableIssueBackend_AllMethodsFailClosed(t *testing.T) {
 	assertUnavailable("Get", err)
 	_, err = ib.List(ctx, backend.ListOpts{})
 	assertUnavailable("List", err)
-	_, err = ib.Ready(ctx, backend.ReadyOpts{})
+	_, err = ib.(workitems.ReadyQueries).Ready(ctx, workitems.AvailabilityQuery{})
 	assertUnavailable("Ready", err)
 	_, err = ib.(workitems.BlockedQueries).Blocked(ctx, workitems.AvailabilityQuery{})
 	assertUnavailable("Blocked", err)
@@ -756,7 +756,7 @@ func TestFleetDBIssueBackend_FailsClosedWhenStoreUnavailable(t *testing.T) {
 	assertUnavailable("Get", err)
 	_, err = ib.List(ctx, backend.ListOpts{})
 	assertUnavailable("List", err)
-	_, err = ib.Ready(ctx, backend.ReadyOpts{})
+	_, err = ib.(workitems.ReadyQueries).Ready(ctx, workitems.AvailabilityQuery{})
 	assertUnavailable("Ready", err)
 	_, err = ib.(workitems.BlockedQueries).Blocked(ctx, workitems.AvailabilityQuery{})
 	assertUnavailable("Blocked", err)

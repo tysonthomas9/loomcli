@@ -15,17 +15,18 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 )
 
 type claimTestBackend struct {
 	backend.IssueBackend
-	ready      []backend.IssueData
+	ready      []workitems.IssueSummary
 	details    map[string]*backend.IssueDetailData
 	claimErr   map[string]error
 	claimCalls []string
 }
 
-func (b *claimTestBackend) Ready(_ context.Context, _ backend.ReadyOpts) ([]backend.IssueData, error) {
+func (b *claimTestBackend) Ready(_ context.Context, _ workitems.AvailabilityQuery) ([]workitems.IssueSummary, error) {
 	return b.ready, nil
 }
 
@@ -101,7 +102,7 @@ func TestFleetClaim_DirectBackendExplicitIssue(t *testing.T) {
 
 func TestFleetClaim_DirectBackendSkipsContendedReadyIssue(t *testing.T) {
 	be := &claimTestBackend{
-		ready: []backend.IssueData{{ID: "TASK-1"}, {ID: "TASK-2"}},
+		ready: []workitems.IssueSummary{{ID: "TASK-1"}, {ID: "TASK-2"}},
 		details: map[string]*backend.IssueDetailData{
 			"TASK-2": {IssueData: backend.IssueData{ID: "TASK-2", Title: "Winner", Status: "in_progress", IssueType: "task"}},
 		},

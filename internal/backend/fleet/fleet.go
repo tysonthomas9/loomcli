@@ -41,6 +41,7 @@ type FleetBackend struct {
 
 // Compile-time interface check.
 var _ backend.IssueBackend = (*FleetBackend)(nil)
+var _ workitems.ReadyQueries = (*FleetBackend)(nil)
 var _ workitems.BlockedQueries = (*FleetBackend)(nil)
 var _ workitems.SearchQueries = (*FleetBackend)(nil)
 var _ workitems.StatsQueries = (*FleetBackend)(nil)
@@ -397,21 +398,21 @@ func (b *FleetBackend) List(ctx context.Context, opts backend.ListOpts) ([]backe
 	return filterListIssues(issues, opts), nil
 }
 
-func (b *FleetBackend) Ready(ctx context.Context, opts backend.ReadyOpts) ([]backend.IssueData, error) {
-	serverOpts := readyServerOpts(opts)
-	path := "/issues/ready?" + readyOptsToQuery(serverOpts)
+func (b *FleetBackend) Ready(ctx context.Context, query workitems.AvailabilityQuery) ([]workitems.IssueSummary, error) {
+	serverQuery := readyServerQuery(query)
+	path := "/issues/ready?" + readyQueryToQuery(serverQuery)
 	resp, err := b.exec(ctx, "Ready", "GET", path, nil)
 	if err != nil {
 		return nil, err
 	}
 	if !hasData(resp) {
-		return []backend.IssueData{}, nil
+		return []workitems.IssueSummary{}, nil
 	}
 	issues, err := unmarshalListOrWrapper[*readyIssueWithParent](resp.Data, "Ready")
 	if err != nil {
 		return nil, err
 	}
-	return filterReadyIssues(readyIssuesToData(issues), opts), nil
+	return filterReadySummaries(readyIssuesToSummaries(issues), query), nil
 }
 
 // Stats builds lifecycle counts from fleet-db's status count endpoint and
@@ -438,7 +439,7 @@ func (b *FleetBackend) Stats(ctx context.Context) (*workitems.Stats, error) {
 	if err != nil {
 		return nil, err
 	}
-	ready, err := b.Ready(ctx, backend.ReadyOpts{})
+	ready, err := b.Ready(ctx, workitems.AvailabilityQuery{})
 	if err != nil {
 		return nil, err
 	}

@@ -12,11 +12,11 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/automode"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/cli/testdata/clitest"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 	"github.com/tysonthomas9/loomcli/internal/testutil"
 	"github.com/tysonthomas9/loomcli/internal/usage"
 )
@@ -300,7 +300,7 @@ func newExecReadyIssueBackend(m *clitest.MockExecRunner) *commandReadyIssueBacke
 	}
 }
 
-func (b *commandReadyIssueBackend) Ready(ctx context.Context, opts backend.ReadyOpts) ([]backend.IssueData, error) {
+func (b *commandReadyIssueBackend) Ready(ctx context.Context, opts workitems.AvailabilityQuery) ([]workitems.IssueSummary, error) {
 	b.MockIssueBackend.Ready(ctx, opts)
 	result := b.run(cli.GetWorkspaceRuntimeDir(), "issue-store", readyArgs(opts)...)
 	if result.Err != nil {
@@ -309,7 +309,7 @@ func (b *commandReadyIssueBackend) Ready(ctx context.Context, opts backend.Ready
 	return parseReadyIssues(result.Stdout)
 }
 
-func readyArgs(opts backend.ReadyOpts) []string {
+func readyArgs(opts workitems.AvailabilityQuery) []string {
 	limit := opts.Limit
 	if limit <= 0 {
 		limit = 10000
@@ -321,18 +321,18 @@ func readyArgs(opts backend.ReadyOpts) []string {
 	return args
 }
 
-func parseReadyIssues(stdout string) ([]backend.IssueData, error) {
+func parseReadyIssues(stdout string) ([]workitems.IssueSummary, error) {
 	type issueWire struct {
-		backend.IssueData
+		workitems.IssueSummary
 		Type string `json:"type,omitempty"`
 	}
 	var wire []issueWire
 	if err := json.Unmarshal([]byte(stdout), &wire); err != nil {
 		return nil, err
 	}
-	issues := make([]backend.IssueData, len(wire))
+	issues := make([]workitems.IssueSummary, len(wire))
 	for i, item := range wire {
-		issues[i] = item.IssueData
+		issues[i] = item.IssueSummary
 		if issues[i].IssueType == "" {
 			issues[i].IssueType = item.Type
 		}

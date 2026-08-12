@@ -25,7 +25,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/serve/workspacemgr"
 	driverexecutor "github.com/tysonthomas9/loomcli/internal/driver"
 	infrafleetdb "github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
-	"github.com/tysonthomas9/loomcli/internal/infra/workspacecatalog"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui"
 	webuiapp "github.com/tysonthomas9/loomcli/internal/webui/app"
@@ -676,7 +675,7 @@ func buildServerConfig(
 		}
 	}
 	if cfg.Store != nil {
-		workspaceCapability, workspaceErr := workspacecatalog.New(cfg.Store.Workspaces(), cfg.Store.Repos())
+		workspaceCapability, workspaceErr := webuiapp.NewWorkspaceCapability(cfg.Store.Workspaces(), cfg.Store.Repos())
 		if workspaceErr != nil {
 			return webui.ServerConfig{}, serveCapabilitySet{}, fmt.Errorf("compose Workspace capability: %w", workspaceErr)
 		}

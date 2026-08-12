@@ -50,7 +50,7 @@ type TaskReadySnapshot struct {
 type TaskReadyIssueLookup func(context.Context, string, string) (TaskReadySnapshot, error)
 
 // TaskReadySnapshotLister returns the canonical current Ready view for one
-// workspace. Serve adapts IssueBackend.Ready to this consumer-owned port.
+// workspace. Serve supplies the Work Items owner's consumer-facing ready port.
 type TaskReadySnapshotLister func(context.Context, string) ([]TaskReadySnapshot, error)
 
 // TaskReadyRepositoryRequiredResult is the consumer-owned outcome of the Work

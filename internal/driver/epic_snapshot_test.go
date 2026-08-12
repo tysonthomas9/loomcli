@@ -16,7 +16,7 @@ import (
 
 func TestLoadEpicSnapshotCountsOnlyOpenChildren(t *testing.T) {
 	ib := clitest.NewMockIssueBackend()
-	ib.ReadyResult = []backend.IssueData{{ID: "TASK-1", Title: "Ready", Status: "open", Parent: "EPIC-1"}}
+	ib.ReadyResult = []workitems.IssueSummary{{ID: "TASK-1", Title: "Ready", Status: "open", Parent: "EPIC-1"}}
 	ib.BlockedResult = []workitems.IssueSummary{{ID: "TASK-2", Title: "Blocked", Status: "blocked", Parent: "EPIC-1", BlockedBy: []string{"TASK-0"}, BlockedByCount: 1}}
 	ib.ListResult = []backend.IssueData{
 		{ID: "TASK-1", Status: "open", Parent: "EPIC-1"},

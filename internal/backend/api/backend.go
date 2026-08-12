@@ -43,6 +43,7 @@ type APIBackend struct {
 
 // Compile-time interface check.
 var _ backend.IssueBackend = (*APIBackend)(nil)
+var _ workitems.ReadyQueries = (*APIBackend)(nil)
 var _ workitems.BlockedQueries = (*APIBackend)(nil)
 var _ workitems.SearchQueries = (*APIBackend)(nil)
 var _ workitems.StatsQueries = (*APIBackend)(nil)
@@ -173,7 +174,7 @@ func hasData(resp *apiResponse) bool {
 }
 
 // unmarshalIssueList unmarshals a []gen.Issue response and converts to
-// []backend.IssueData. Used by List and Ready.
+// []backend.IssueData. Used by List.
 func unmarshalIssueList(resp *apiResponse, op string) ([]backend.IssueData, error) {
 	if !hasData(resp) {
 		return []backend.IssueData{}, nil
@@ -185,6 +186,21 @@ func unmarshalIssueList(resp *apiResponse, op string) ([]backend.IssueData, erro
 	result := make([]backend.IssueData, 0, len(issues))
 	for _, i := range issues {
 		result = append(result, issueToData(i))
+	}
+	return result, nil
+}
+
+func unmarshalIssueSummaries(resp *apiResponse, op string) ([]workitems.IssueSummary, error) {
+	if !hasData(resp) {
+		return []workitems.IssueSummary{}, nil
+	}
+	var issues []gen.Issue
+	if err := json.Unmarshal(resp.Data, &issues); err != nil {
+		return nil, backend.ErrInternal(op, "unmarshal response", err)
+	}
+	result := make([]workitems.IssueSummary, 0, len(issues))
+	for _, issue := range issues {
+		result = append(result, issueToSummary(issue))
 	}
 	return result, nil
 }
@@ -219,16 +235,16 @@ func (b *APIBackend) List(ctx context.Context, opts backend.ListOpts) ([]backend
 	return unmarshalIssueList(resp, "List")
 }
 
-func (b *APIBackend) Ready(ctx context.Context, opts backend.ReadyOpts) ([]backend.IssueData, error) {
+func (b *APIBackend) Ready(ctx context.Context, query workitems.AvailabilityQuery) ([]workitems.IssueSummary, error) {
 	path := "/ready"
-	if q := readyOptsToQuery(opts); q != "" {
+	if q := readyQueryToQuery(query); q != "" {
 		path += "?" + q
 	}
 	resp, err := b.exec(ctx, "Ready", http.MethodGet, path, nil)
 	if err != nil {
 		return nil, err
 	}
-	return unmarshalIssueList(resp, "Ready")
+	return unmarshalIssueSummaries(resp, "Ready")
 }
 
 func (b *APIBackend) Blocked(ctx context.Context, query workitems.AvailabilityQuery) ([]workitems.IssueSummary, error) {

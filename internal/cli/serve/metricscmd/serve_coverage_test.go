@@ -369,7 +369,7 @@ func TestHandleStatusWithBackend_UsesWorkspaceScopedIssueBackend(t *testing.T) {
 	}
 
 	scopedBackend := clitest.NewMockIssueBackend()
-	scopedBackend.ReadyResult = []backend.IssueData{
+	scopedBackend.ReadyResult = []workitems.IssueSummary{
 		{ID: "T-1", Title: "Scoped task", Status: "open", Design: ""},
 	}
 	scopedBackend.StatsResult = &workitems.Stats{TotalIssues: 7, OpenIssues: 6, ClosedIssues: 1}
@@ -424,7 +424,7 @@ func TestMonitorDataSource_CachesWorkspaceCollectionAcrossEndpoints(t *testing.T
 	}
 
 	scopedBackend := clitest.NewMockIssueBackend()
-	scopedBackend.ReadyResult = []backend.IssueData{
+	scopedBackend.ReadyResult = []workitems.IssueSummary{
 		{ID: "T-1", Title: "Scoped task", Status: "open", Design: ""},
 	}
 	scopedBackend.StatsResult = &workitems.Stats{TotalIssues: 7, OpenIssues: 6, ClosedIssues: 1}
