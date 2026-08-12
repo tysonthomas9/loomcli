@@ -1797,6 +1797,46 @@ transitional composition/proxy machinery. The next wave deletes the Deferred
 query and its DTO; completion still requires removing `IssueBackend` itself and
 the remaining horizontal model/proxy plane.
 
+## Wave 9.38 result
+
+Wave 9.38 deletes the optional horizontal `DeferredIssueBackend` extension and
+its duplicate `backend.DeferredOpts` DTO. FleetDB now implements the Work
+Items-owned `DeferredQueries` port and returns `workitems.IssueSummary`
+directly. Work Items composition requires that port and fails closed when it is
+absent; the former behavior that silently converted a missing deferred
+capability into an empty queue is gone.
+
+Ready, blocked, and deferred FleetDB views now share one owner-projection
+converter, one availability-filter implementation, and one fail-closed check
+for filters absent from the projection. The temporary deferred-to-`IssueData`
+converter from the independently green Ready wave is deleted. Deferred
+filtering now supports every projected availability field, including
+unassigned, any-label, and repository filters, while rejecting `MolType` and
+`SortPolicy` before issuing a request because the deferred projection cannot
+prove them.
+
+Implementation commit `3ef2fcfd6` changes 12 files with 85 insertions and 107
+deletions, a net removal of 22 lines. Exact package shape remains
+`159 / 15 / 144 / 42 / 60`; no facade, alias, fallback, production package, or
+import exception was added. `IssueBackend` remains at 15 methods because the
+deleted deferred contract was a separate optional interface.
+
+## Wave 9.38 validation
+
+| Check | Result |
+|---|---|
+| Repository compile graph | PASS: every Go package compiles after deleting `DeferredIssueBackend` and `backend.DeferredOpts` |
+| FleetDB deferred owner adapter | PASS: canonical owner projection, parent/repository mapping, projected filters, empty results, and unsupported-filter rejection are covered |
+| Work Items composition | PASS: deferred queries use `DeferredQueries`; missing support returns `workitems.ErrUnavailable` rather than an empty result |
+| Retired symbols and topology | PASS: the cannot-return ratchet rejects both deleted symbols; focused lint, build-tag compilation, diff checks, and exact import fanout pass |
+| Loom `make gate` | PASS: all Go and frontend quality gates, measured architecture profiles, repository-wide race tests, and coverage against paired FleetDB source `e9c185b` and its exact binary, with four Go OS threads, two Go package workers, one Vitest worker, and a 2 GiB Go soft memory limit |
+
+No test, profile, threshold, architecture rule, or compatibility exception was
+disabled. Phase 9 remains incomplete: the 15-method `IssueBackend`, duplicate
+issue/detail/comment/event models, and their proxy/composition machinery are
+still deletion targets. The next wave moves a lifecycle-owned slice rather
+than retaining another optional repository extension.
+
 ---
 
 [Migration overview](README.md) · [Phase 8 consolidation](15-phase-8-consolidation-and-evidence.md)
