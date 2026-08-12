@@ -617,25 +617,30 @@ type DriverStepStore interface {
 }
 
 type TaskRunCreate struct {
-	WorkspaceKey     string
-	TaskRunID        string
-	DriverRunID      string
-	DriverStepID     string
-	TaskID           string
-	WorkerProfileID  string
-	Runner           string
-	RunnerRef        string
-	RunnerKind       string
-	RunnerEntrypoint string
-	RunnerVersionID  string
-	ProviderProfile  string
-	Status           domain.TaskRunStatus
-	NodeID           string
-	LeaseID          string
-	FencingToken     int64
-	RunnerPlacement  domain.TaskRunPlacement
-	SandboxPlacement domain.TaskRunPlacement
-	RuntimeMetadata  map[string]string
+	WorkspaceKey      string
+	TaskRunID         string
+	DriverRunID       string
+	DriverStepID      string
+	TaskID            string
+	ExecutionClass    domain.TaskRunExecutionClass
+	ChangeSetVersion  int
+	RootGeneration    int64
+	BackendKind       string
+	BackendSessionRef string
+	WorkerProfileID   string
+	Runner            string
+	RunnerRef         string
+	RunnerKind        string
+	RunnerEntrypoint  string
+	RunnerVersionID   string
+	ProviderProfile   string
+	Status            domain.TaskRunStatus
+	NodeID            string
+	LeaseID           string
+	FencingToken      int64
+	RunnerPlacement   domain.TaskRunPlacement
+	SandboxPlacement  domain.TaskRunPlacement
+	RuntimeMetadata   map[string]string
 	// Input is the optional task-run payload persisted on the run and
 	// delivered to the runner (omitempty / back-compat).
 	Input json.RawMessage
@@ -770,4 +775,23 @@ type TaskRunStore interface {
 	Complete(ctx context.Context, workspaceKey, taskRunID string, complete TaskRunComplete) (*domain.TaskRun, error)
 	AppendLog(ctx context.Context, workspaceKey, taskRunID string, appendLog TaskRunLogAppend) (*domain.TaskRunLogEntry, error)
 	ListLogs(ctx context.Context, workspaceKey, taskRunID string, filter TaskRunLogFilter) ([]*domain.TaskRunLogEntry, error)
+}
+
+type TaskChangeHandoffStore interface {
+	PutTaskBranch(ctx context.Context, branch domain.TaskBranch) (*domain.TaskBranch, error)
+	GetTaskBranch(ctx context.Context, workspaceKey, taskID, repoName string) (*domain.TaskBranch, error)
+	CreateTaskChangeSet(ctx context.Context, changeSet domain.TaskChangeSet) (*domain.TaskChangeSet, error)
+	GetTaskChangeSet(ctx context.Context, workspaceKey, taskID string, version int) (*domain.TaskChangeSet, error)
+}
+
+type TaskRunExecutionContextUpdate struct {
+	RootState         domain.TaskRunRootState
+	RootNodeID        string
+	RootFencingToken  int64
+	BackendKind       string
+	BackendSessionRef string
+}
+
+type TaskRunExecutionContextStore interface {
+	UpdateTaskRunExecutionContext(ctx context.Context, workspaceKey, taskRunID string, update TaskRunExecutionContextUpdate) (*domain.TaskRun, error)
 }

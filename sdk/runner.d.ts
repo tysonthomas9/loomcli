@@ -65,6 +65,15 @@ export interface TaskRun {
   driver_run_id?: string;
   driver_step_id?: string;
   task_id: string;
+  execution_class: "implementation" | "review" | "correction";
+  repository_set: string[];
+  change_set_version?: number;
+  root_generation: number;
+  root_state: "pending" | "provisioning" | "ready" | "retained" | "released" | "failed";
+  root_node_id?: string;
+  root_fencing_token: number;
+  backend_kind?: string;
+  backend_session_ref?: string;
   worker_profile_id?: string;
   runner?: string;
   runner_ref?: string;

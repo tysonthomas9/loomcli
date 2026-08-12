@@ -96,6 +96,8 @@ export async function run(ctx = {}) {
   }
 
   const headBefore = await gitHead(worktree);
+	const taskRootManifest = stringValue(process.env.LOOM_TASK_ROOT_MANIFEST);
+	const compositeRoot = taskRootManifest && fileExists(taskRootManifest);
 
   // Run the CLI in an ISOLATED git worktree checked out at HEAD so the host
   // worktree (LOOM_WORKTREE_PATH) stays clean — the driver host-bridge applies
@@ -114,7 +116,7 @@ export async function run(ctx = {}) {
   const stackBaseRef = stringValue(process.env.LOOM_TASK_RUN_BASE_REF);
   const stackId = stringValue(process.env.LOOM_TASK_RUN_STACK_ID);
 
-  const isolated = stacked ? null : await setupIsolatedWorktree(worktree, taskRunId, logs);
+	const isolated = (stacked || compositeRoot) ? null : await setupIsolatedWorktree(worktree, taskRunId, logs);
   const execWorktree = isolated ? isolated.path : worktree;
   const baseRef = stacked ? stackBaseRef : (isolated ? isolated.base : "");
   if (stacked) {
@@ -126,11 +128,13 @@ export async function run(ctx = {}) {
   // daemon execution leaf, which builds role-specific planning/task prompts) deliver
   // it verbatim, instead of this runner's generic buildPrompt — so routing the daemon
   // leaf through this runner (Phase U) preserves the leaf's exact prompt.
-  const promptOverride = process.env.LOOM_TASK_RUN_PROMPT;
-  const prompt = typeof promptOverride === "string" && promptOverride.trim() !== ""
-    ? promptOverride
-    : buildPrompt(request, task, execWorktree);
-  const args = backendArgs(backend, execWorktree, prompt);
+	const continuationPrompt = stringValue(request.continuation_prompt || request.continuationPrompt);
+	const promptOverride = continuationPrompt || process.env.LOOM_TASK_RUN_PROMPT;
+	const prompt = typeof promptOverride === "string" && promptOverride.trim() !== ""
+	  ? promptOverride
+	  : buildPrompt(request, task, execWorktree, taskRootManifest);
+	const backendSessionRef = stringValue(request.backend_session_ref || request.backendSessionRef);
+	const args = backendArgs(backend, execWorktree, prompt, backendSessionRef, compositeRoot);
   const usesStdinPrompt = backendUsesStdinPrompt(backend);
 
   const openPR = booleanValue(inputValue(request, "openPullRequest"));
@@ -171,7 +175,9 @@ export async function run(ctx = {}) {
       logs.push("stderr:\n" + textTail(stderr, 2000));
     }
 
-    patchInfo = await capturePatch(execWorktree, baseRef);
+		patchInfo = compositeRoot
+		  ? { head: "", patch: "", filesChanged: 0, linesAdded: 0, linesRemoved: 0 }
+		  : await capturePatch(execWorktree, baseRef);
 
     // Stacked delivery: commit in place and push the canonical branch on the
     // predecessor base. No PR is opened here — the post-drain reconcile does it.
@@ -265,6 +271,7 @@ export async function run(ctx = {}) {
   // For the backends that expose no cost we leave estimated_cost_usd unset (unknown)
   // rather than fabricate a token x rate guess for an unknown/unpriceable model.
   const streamFailure = streamFailureMessage(backend, stdout);
+	const sessionRef = backendSessionReference(backend, stdout) || backendSessionRef;
 
   const metadata = stringMetadata({
     task_runner: "local-task-runner",
@@ -339,9 +346,10 @@ export async function run(ctx = {}) {
     logsRef: "logs://" + taskRunId,
     ...taskUsage,
     transcript_entries: transcriptEntries,
+		session_id: sessionRef,
     runtimeMetadata: metadata,
   };
-  if (prInfo || stackInfo || stacked) {
+	if (prInfo || stackInfo || stacked || compositeRoot) {
     // PR / stacked mode: the pull request or pushed branch IS the delivery (and
     // stacked mode runs in place, so there is nothing to patch-back) — return no
     // top-level patch so the driver host-bridge skips patch-back.
@@ -416,6 +424,14 @@ function dirExists(filePath) {
   }
 }
 
+function fileExists(filePath) {
+	try {
+		return fs.statSync(filePath).isFile();
+	} catch {
+		return false;
+	}
+}
+
 // DefaultMaxBudgetUSD mirrors internal/cli/backends/backend_claude.go.
 const DEFAULT_MAX_BUDGET_USD = 50.0;
 
@@ -446,14 +462,17 @@ function resolveAgentEffort() {
 // backendArgs mirrors the non-interactive argument lists built in
 // internal/cli/backends/backend_<backend>.go. Keep these in sync with those
 // builders so the local runner invokes each CLI exactly as loom's agent path does.
-export function backendArgs(backend, worktree, prompt) {
+export function backendArgs(backend, worktree, prompt, sessionRef = "", compositeRoot = false) {
   switch (backend) {
     case "codex":
       // Headless (no-PTY) codex: trailing "-" => read the prompt from stdin
       // (mirrors github-review-task-runner.ts). The Go path passes the prompt
       // positionally because it runs under a PTY; without a PTY codex blocks on
       // an open stdin pipe, so we deliver the prompt over stdin instead.
-      return ["exec", "--json", "--dangerously-bypass-approvals-and-sandbox", "-"];
+		  if (sessionRef) {
+			  return ["exec", "resume", "--json", "--dangerously-bypass-approvals-and-sandbox", ...(compositeRoot ? ["--skip-git-repo-check"] : []), sessionRef, "-"];
+		  }
+		  return ["exec", "--json", "--dangerously-bypass-approvals-and-sandbox", ...(compositeRoot ? ["--skip-git-repo-check"] : []), "-"];
     case "claude": {
       // buildClaudeNonInteractiveArgs: -p --verbose --output-format stream-json
       // --dangerously-skip-permissions [--max-budget-usd N] [--effort E]; prompt last.
@@ -1609,7 +1628,21 @@ function minimalTranscript(backend, label, prompt, stdout) {
 
 // buildPrompt mirrors daytona-task-runner.ts buildPrompt (default mode): a
 // focused instruction to implement the single child task in the worktree.
-function buildPrompt(request, task, worktree) {
+function buildPrompt(request, task, worktree, taskRootManifest = "") {
+	if (stringValue(request.execution_class || request.executionClass) === "review") {
+		return [
+			"You are independently reviewing an immutable Loom Task Change Set.",
+			"TaskRun Root: " + worktree,
+			"TaskRun Root Manifest: " + taskRootManifest,
+			"Task run: " + stringValue(request.task_run_id || request.taskRunId),
+			"Task Change Set version: " + stringValue(request.change_set_version || request.changeSetVersion),
+			"",
+			"Read the manifest and review every repository at its exact checked-out head. Do not modify files, create commits, push, or reuse an implementation session.",
+			"Report findings keyed by repository, then give one aggregate pass or fail conclusion. Run read-only validation where useful.",
+			"Task context:",
+			JSON.stringify(task || { task_id: request.task_id || request.taskId }, null, 2),
+		].join("\n");
+	}
   return [
     "You are implementing one child task from a Loom epic runner workflow.",
     "Repository cwd: " + worktree,
@@ -1620,11 +1653,32 @@ function buildPrompt(request, task, worktree) {
     JSON.stringify(task || { task_id: request.task_id || request.taskId }, null, 2),
     "",
     "Work directly in the repository. Keep the change focused on this task.",
+		taskRootManifest
+		  ? "This is a composite TaskRun Root. Read " + taskRootManifest + " for the exact repositories. Work only in those repository child directories. Before finishing, author commits for every changed repository on its already-checked-out Task Branch. Do not push and do not create pull requests; Loom owns publication."
+		  : "",
     "Do not update or close Loom issues yourself; the workflow driver records task completion.",
     "Do not print environment variables or credentials.",
     "Before finishing, run relevant validation commands if they are available.",
     "Return a concise summary of files changed and validation results.",
   ].join("\n");
+}
+
+function backendSessionReference(backend, stdout) {
+	for (const line of String(stdout || "").split("\n")) {
+		try {
+			const event = JSON.parse(line);
+			if (backend === "codex" && event && event.type === "thread.started") {
+				return stringValue(event.thread_id || event.threadId);
+			}
+			if (backend === "claude") {
+				const session = stringValue(event && (event.session_id || event.sessionId));
+				if (session) return session;
+			}
+		} catch {
+			// Ignore non-JSON output; transcript parsing follows the same rule.
+		}
+	}
+	return "";
 }
 
 // loadTask resolves task context via @loom/sdk/runner when available, falling

@@ -45,6 +45,17 @@ type fixedTaskRootResolver struct {
 	root TaskRoot
 }
 
+type successfulTaskChangePublisher struct{}
+
+func (successfulTaskChangePublisher) Finalize(_ context.Context, claim CompletionClaim) (CompletionOutcome, error) {
+	req, inspection := claim.Request, claim.Inspection
+	entries := make([]domain.TaskChangeSetEntry, 0, len(inspection.Repositories))
+	for _, repository := range inspection.Repositories {
+		entries = append(entries, changeSetEntry(repository, nil))
+	}
+	return CompletionOutcome{Outcome: changeHandoffReadyToReview, ChangeSet: &domain.TaskChangeSet{WorkspaceKey: req.WorkspaceKey, TaskID: req.TaskID, Version: 1, Entries: entries}}, nil
+}
+
 func (r fixedTaskRootResolver) ResolveTaskRoot(context.Context, TaskExecRequest) (TaskRoot, error) {
 	return r.root, nil
 }
@@ -94,7 +105,99 @@ func TestHostBridgeTaskExecutorStartsLocalRunnerInCompositeTaskRoot(t *testing.T
 	}
 }
 
-func TestLocalTaskRunnerSettingsDoNotOverrideInheritedGitHubToken(t *testing.T) {
+func TestHostBridgeContinuesSameBackendSessionUntilCompositeChangesAreCommitted(t *testing.T) {
+	root := t.TempDir()
+	repoA := filepath.Join(root, "repo-a")
+	repoB := filepath.Join(root, "repo-b")
+	newGitWorktree(t, repoA)
+	newGitWorktree(t, repoB)
+	baseA := strings.TrimSpace(testGitOutput(t, repoA, "rev-parse", "HEAD"))
+	baseB := strings.TrimSpace(testGitOutput(t, repoB, "rev-parse", "HEAD"))
+	branchA := stableTaskBranch("TEST-1", "repo-a")
+	branchB := stableTaskBranch("TEST-1", "repo-b")
+	gitCmd(t, repoA, "checkout", "-b", branchA)
+	gitCmd(t, repoB, "checkout", "-b", branchB)
+	manifest := filepath.Join(root, "manifest.json")
+	if err := os.WriteFile(manifest, []byte(`{"version":1}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	command := `case "$LOOM_TASK_RUN_REQUEST_JSON" in
+  *backend_session_ref*) git -C repo-a -c user.name=Backend -c user.email=backend@example.test add README.md && git -C repo-a -c user.name=Backend -c user.email=backend@example.test commit -m 'backend commit' >/dev/null ;;
+  *) printf 'changed\n' > repo-a/README.md ;;
+esac
+printf '%s\n' '{"status":"completed","exit_code":0,"session_id":"session-1"}'`
+	executor := HostBridgeTaskExecutor{
+		Store: memstore.New(), WorktreePath: t.TempDir(),
+		RootResolver: fixedTaskRootResolver{root: TaskRoot{
+			Path: root, ManifestPath: manifest,
+			Repositories: []TaskRootRepository{
+				{Name: "repo-a", Path: repoA, BranchName: branchA, BaseSHA: baseA},
+				{Name: "repo-b", Path: repoB, BranchName: branchB, BaseSHA: baseB},
+			},
+		}},
+		Command:             []string{"sh", "-c", command},
+		CompletionFinalizer: successfulTaskChangePublisher{},
+	}
+	req := hostBridgeTaskExecRequest()
+	req.TaskID = "TEST-1"
+	req.RunnerEntrypoint = LocalTaskRunnerEntrypoint
+	req.RunnerTrustLevel = domain.DriverTrustTrusted
+	req.RepositorySet = []string{"repo-a", "repo-b"}
+	result, err := executor.ExecuteTask(t.Context(), req)
+	if err != nil {
+		t.Fatalf("ExecuteTask: %v", err)
+	}
+	if result.Status != domain.TaskRunCompleted || result.RuntimeMetadata["backend_session_ref"] != "session-1" || result.RuntimeMetadata["backend_continuation_count"] != "1" || result.RuntimeMetadata["review_task_run_id"] != req.TaskRunID+"-review-v1" {
+		t.Fatalf("continued result = %+v", result)
+	}
+	if status := strings.TrimSpace(testGitOutput(t, repoA, "status", "--porcelain")); status != "" {
+		t.Fatalf("repo-a remains dirty: %q", status)
+	}
+	if head := strings.TrimSpace(testGitOutput(t, repoA, "rev-parse", "HEAD")); head == baseA {
+		t.Fatalf("repo-a HEAD = admitted base after completion")
+	}
+}
+
+func TestHostBridgeReviewUsesFreshSessionAndRejectsChangedImmutableRoot(t *testing.T) {
+	for _, mutate := range []bool{false, true} {
+		t.Run(map[bool]string{false: "passes exact heads", true: "rejects mutation"}[mutate], func(t *testing.T) {
+			root := t.TempDir()
+			repo := filepath.Join(root, "repo-a")
+			newGitWorktree(t, repo)
+			head := strings.TrimSpace(testGitOutput(t, repo, "rev-parse", "HEAD"))
+			manifest := filepath.Join(root, "manifest.json")
+			if err := os.WriteFile(manifest, []byte(`{"version":1}`), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			command := `case "$LOOM_TASK_RUN_REQUEST_JSON" in *backend_session_ref*) exit 12;; esac; printf '%s\n' '{"status":"completed","exit_code":0,"session_id":"review-session"}'`
+			if mutate {
+				command = `printf 'review mutation\n' > repo-a/README.md; printf '%s\n' '{"status":"completed","exit_code":0,"session_id":"review-session"}'`
+			}
+			executor := HostBridgeTaskExecutor{Store: memstore.New(), WorktreePath: t.TempDir(), Command: []string{"sh", "-c", command},
+				RootResolver: fixedTaskRootResolver{root: TaskRoot{Path: root, ManifestPath: manifest, Repositories: []TaskRootRepository{{Name: "repo-a", Path: repo, BaseSHA: head, Detached: true}}}},
+			}
+			req := hostBridgeTaskExecRequest()
+			req.ExecutionClass = domain.TaskRunExecutionReview
+			req.ChangeSetVersion = 1
+			req.RepositorySet = []string{"repo-a"}
+			req.RunnerEntrypoint = LocalTaskRunnerEntrypoint
+			req.RunnerTrustLevel = domain.DriverTrustTrusted
+			result, err := executor.ExecuteTask(t.Context(), req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if mutate {
+				if result.Status != domain.TaskRunFailed || result.ErrorClass != "review_head_mismatch" {
+					t.Fatalf("mutated review result = %+v", result)
+				}
+			} else if result.Status != domain.TaskRunCompleted || result.RuntimeMetadata["review.repository.repo-a.observed_head_sha"] != head {
+				t.Fatalf("exact review result = %+v", result)
+			}
+		})
+	}
+}
+
+func TestLocalTaskRunnerSettingsNeverExposeGitHubToken(t *testing.T) {
 	settingsDir := t.TempDir()
 	credential, err := runtimesettings.SealRuntimeCredential(settingsDir, runtimesettings.RuntimeCredentialProviderGitHub, "settings-token", time.Now())
 	if err != nil {
@@ -112,21 +215,21 @@ func TestLocalTaskRunnerSettingsDoNotOverrideInheritedGitHubToken(t *testing.T) 
 	executor := HostBridgeTaskExecutor{WorktreePath: "/wt", LocalSettingsDir: settingsDir}
 
 	env := executor.taskRunnerEnv(req, "{}", []string{"PATH=/bin", "GITHUB_TOKEN=host-token"})
-	if envContains(env, "GITHUB_TOKEN=settings-token") {
-		t.Fatalf("settings GitHub token overrode inherited GITHUB_TOKEN: %v", env)
+	if envHasAny(env, "GITHUB_TOKEN", "GH_TOKEN") {
+		t.Fatalf("local backend received a GitHub credential: %v", env)
 	}
 	if !envContains(env, "LOOM_OPENCODE_MODEL=opencode/model") {
 		t.Fatalf("non-secret local task runner setting was not exported: %v", env)
 	}
 
 	env = executor.taskRunnerEnv(req, "{}", []string{"PATH=/bin", "GH_TOKEN=host-token"})
-	if envContains(env, "GITHUB_TOKEN=settings-token") {
-		t.Fatalf("settings GitHub token overrode inherited GH_TOKEN: %v", env)
+	if envHasAny(env, "GITHUB_TOKEN", "GH_TOKEN") {
+		t.Fatalf("local backend received inherited GH_TOKEN: %v", env)
 	}
 
 	env = executor.taskRunnerEnv(req, "{}", []string{"PATH=/bin"})
-	if !envContains(env, "GITHUB_TOKEN=settings-token") {
-		t.Fatalf("settings GitHub token was not exported when inherited env had no GitHub token: %v", env)
+	if envHasAny(env, "GITHUB_TOKEN", "GH_TOKEN") {
+		t.Fatalf("local backend received sealed GitHub credential: %v", env)
 	}
 }
 

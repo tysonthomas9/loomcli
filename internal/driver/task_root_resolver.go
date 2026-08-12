@@ -27,10 +27,15 @@ type TaskRootRepository struct {
 	Path       string
 	BranchName string
 	BaseSHA    string
+	Detached   bool
 }
 
 type TaskRootResolver interface {
 	ResolveTaskRoot(ctx context.Context, req TaskExecRequest) (TaskRoot, error)
+}
+
+type TaskRootReleaser interface {
+	ReleaseTaskRoot(ctx context.Context, req TaskExecRequest, policy taskroot.RetentionPolicy) error
 }
 
 type LocalTaskRootResolver struct {
@@ -48,6 +53,13 @@ func (r LocalTaskRootResolver) ResolveTaskRoot(ctx context.Context, req TaskExec
 	if len(req.RepositorySet) == 0 {
 		return TaskRoot{}, fmt.Errorf("TaskRun repository_set is required: %w", domain.ErrInvalid)
 	}
+	if lifecycle, ok := r.Store.(store.TaskRunExecutionContextStore); ok {
+		if _, err := lifecycle.UpdateTaskRunExecutionContext(ctx, workspaceKey, req.TaskRunID, store.TaskRunExecutionContextUpdate{
+			RootState: domain.TaskRunRootProvisioning, RootNodeID: req.NodeID, RootFencingToken: req.FencingToken, BackendKind: req.ProviderProfile,
+		}); err != nil {
+			return TaskRoot{}, fmt.Errorf("record TaskRun Root provisioning: %w", err)
+		}
+	}
 	local, err := loadWorkspaceLocalState(workspaceKey)
 	if err != nil {
 		return TaskRoot{}, err
@@ -57,6 +69,22 @@ func (r LocalTaskRootResolver) ResolveTaskRoot(ctx context.Context, req TaskExec
 	}
 
 	names := append([]string(nil), req.RepositorySet...)
+	changeSetHeads := map[string]domain.TaskChangeSetEntry{}
+	if req.ExecutionClass == domain.TaskRunExecutionReview {
+		handoff, ok := r.Store.(store.TaskChangeHandoffStore)
+		if !ok {
+			return TaskRoot{}, fmt.Errorf("Task Change Set store required for review: %w", domain.ErrInvalid)
+		}
+		changeSet, err := handoff.GetTaskChangeSet(ctx, workspaceKey, req.TaskID, req.ChangeSetVersion)
+		if err != nil {
+			return TaskRoot{}, fmt.Errorf("get Task Change Set version %d: %w", req.ChangeSetVersion, err)
+		}
+		names = names[:0]
+		for _, entry := range changeSet.Entries {
+			changeSetHeads[entry.RepoName] = entry
+			names = append(names, entry.RepoName)
+		}
+	}
 	sort.Strings(names)
 	seen := make(map[string]struct{}, len(names))
 	specs := make([]taskroot.RepositorySpec, 0, len(names))
@@ -73,15 +101,37 @@ func (r LocalTaskRootResolver) ResolveTaskRoot(ctx context.Context, req TaskExec
 		if err != nil {
 			return TaskRoot{}, err
 		}
-		baseSHA, err := resolveRepositoryBase(ctx, repoPath, repository)
-		if err != nil {
-			return TaskRoot{}, fmt.Errorf("resolve TaskRun repository %q base: %w", name, err)
+		baseSHA := ""
+		detached := req.ExecutionClass == domain.TaskRunExecutionReview
+		branchName := stableTaskBranch(req.TaskID, name)
+		if detached {
+			entry, ok := changeSetHeads[name]
+			if !ok {
+				return TaskRoot{}, fmt.Errorf("review repository %q is absent from Task Change Set", name)
+			}
+			if hasGitRemote(ctx, repoPath, entry.RemoteName) {
+				if _, err := driverGit(ctx, repoPath, "fetch", entry.RemoteName, "refs/heads/"+entry.BranchName); err != nil {
+					return TaskRoot{}, fmt.Errorf("fetch review repository %q: %w", name, err)
+				}
+			}
+			baseSHA = entry.HeadSHA
+			branchName = ""
+			if resolved, err := driverGit(ctx, repoPath, "rev-parse", baseSHA+"^{commit}"); err != nil || resolved != baseSHA {
+				return TaskRoot{}, fmt.Errorf("review repository %q head %s is unavailable", name, baseSHA)
+			}
+		} else {
+			var err error
+			baseSHA, err = resolveRepositoryBase(ctx, repoPath, repository)
+			if err != nil {
+				return TaskRoot{}, fmt.Errorf("resolve TaskRun repository %q base: %w", name, err)
+			}
 		}
 		specs = append(specs, taskroot.RepositorySpec{
 			Name:       name,
 			SourcePath: repoPath,
-			BranchName: stableTaskBranch(req.TaskID, name),
+			BranchName: branchName,
 			BaseSHA:    baseSHA,
+			Detached:   detached,
 		})
 	}
 	generation := req.RootGeneration
@@ -95,7 +145,19 @@ func (r LocalTaskRootResolver) ResolveTaskRoot(ctx context.Context, req TaskExec
 		Repositories: specs,
 	})
 	if err != nil {
+		if lifecycle, ok := r.Store.(store.TaskRunExecutionContextStore); ok {
+			_, _ = lifecycle.UpdateTaskRunExecutionContext(ctx, workspaceKey, req.TaskRunID, store.TaskRunExecutionContextUpdate{
+				RootState: domain.TaskRunRootFailed, RootNodeID: req.NodeID, RootFencingToken: req.FencingToken, BackendKind: req.ProviderProfile,
+			})
+		}
 		return TaskRoot{}, err
+	}
+	if lifecycle, ok := r.Store.(store.TaskRunExecutionContextStore); ok {
+		if _, err := lifecycle.UpdateTaskRunExecutionContext(ctx, workspaceKey, req.TaskRunID, store.TaskRunExecutionContextUpdate{
+			RootState: domain.TaskRunRootReady, RootNodeID: req.NodeID, RootFencingToken: req.FencingToken, BackendKind: req.ProviderProfile,
+		}); err != nil {
+			return TaskRoot{}, fmt.Errorf("record TaskRun Root ready: %w", err)
+		}
 	}
 	resolved := TaskRoot{
 		Path:         manifest.RootPath,
@@ -108,9 +170,20 @@ func (r LocalTaskRootResolver) ResolveTaskRoot(ctx context.Context, req TaskExec
 			Path:       repository.Path,
 			BranchName: repository.BranchName,
 			BaseSHA:    repository.BaseSHA,
+			Detached:   repository.Detached,
 		})
 	}
 	return resolved, nil
+}
+
+func (r LocalTaskRootResolver) ReleaseTaskRoot(ctx context.Context, req TaskExecRequest, policy taskroot.RetentionPolicy) error {
+	local, err := loadWorkspaceLocalState(req.WorkspaceKey)
+	if err != nil {
+		return err
+	}
+	return taskroot.NewLocalGitManager(local.Path).Release(ctx, taskroot.RootLease{
+		TaskRunID: req.TaskRunID, Generation: req.RootGeneration, FencingToken: req.FencingToken,
+	}, policy)
 }
 
 func stableTaskBranch(taskID, repositoryName string) string {

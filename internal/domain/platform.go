@@ -495,27 +495,53 @@ func (s TaskRunStatus) IsTerminal() bool {
 	}
 }
 
+type TaskRunExecutionClass string
+
+const (
+	TaskRunExecutionImplementation TaskRunExecutionClass = "implementation"
+	TaskRunExecutionReview         TaskRunExecutionClass = "review"
+	TaskRunExecutionCorrection     TaskRunExecutionClass = "correction"
+)
+
+type TaskRunRootState string
+
+const (
+	TaskRunRootPending      TaskRunRootState = "pending"
+	TaskRunRootProvisioning TaskRunRootState = "provisioning"
+	TaskRunRootReady        TaskRunRootState = "ready"
+	TaskRunRootRetained     TaskRunRootState = "retained"
+	TaskRunRootReleased     TaskRunRootState = "released"
+	TaskRunRootFailed       TaskRunRootState = "failed"
+)
+
 type TaskRun struct {
-	WorkspaceKey     string           `json:"workspace_key"`
-	TaskRunID        string           `json:"task_run_id"`
-	DriverRunID      string           `json:"driver_run_id,omitempty"`
-	DriverStepID     string           `json:"driver_step_id,omitempty"`
-	TaskID           string           `json:"task_id"`
-	RepositorySet    []string         `json:"repository_set"`
-	RootGeneration   int64            `json:"root_generation,omitempty"`
-	WorkerProfileID  string           `json:"worker_profile_id,omitempty"`
-	Runner           string           `json:"runner,omitempty"`
-	RunnerRef        string           `json:"runner_ref,omitempty"`
-	RunnerKind       string           `json:"runner_kind,omitempty"`
-	RunnerEntrypoint string           `json:"runner_entrypoint,omitempty"`
-	RunnerVersionID  string           `json:"runner_driver_version_id,omitempty"`
-	ProviderProfile  string           `json:"provider_profile,omitempty"`
-	Status           TaskRunStatus    `json:"status"`
-	NodeID           string           `json:"node_id,omitempty"`
-	LeaseID          string           `json:"lease_id,omitempty"`
-	FencingToken     int64            `json:"fencing_token,omitempty"`
-	RunnerPlacement  TaskRunPlacement `json:"runner_placement,omitempty"`
-	SandboxPlacement TaskRunPlacement `json:"sandbox_placement,omitempty"`
+	WorkspaceKey      string                `json:"workspace_key"`
+	TaskRunID         string                `json:"task_run_id"`
+	DriverRunID       string                `json:"driver_run_id,omitempty"`
+	DriverStepID      string                `json:"driver_step_id,omitempty"`
+	TaskID            string                `json:"task_id"`
+	ExecutionClass    TaskRunExecutionClass `json:"execution_class"`
+	RepositorySet     []string              `json:"repository_set"`
+	ChangeSetVersion  int                   `json:"change_set_version,omitempty"`
+	RootGeneration    int64                 `json:"root_generation"`
+	RootState         TaskRunRootState      `json:"root_state"`
+	RootNodeID        string                `json:"root_node_id,omitempty"`
+	RootFencingToken  int64                 `json:"root_fencing_token"`
+	BackendKind       string                `json:"backend_kind,omitempty"`
+	BackendSessionRef string                `json:"backend_session_ref,omitempty"`
+	WorkerProfileID   string                `json:"worker_profile_id,omitempty"`
+	Runner            string                `json:"runner,omitempty"`
+	RunnerRef         string                `json:"runner_ref,omitempty"`
+	RunnerKind        string                `json:"runner_kind,omitempty"`
+	RunnerEntrypoint  string                `json:"runner_entrypoint,omitempty"`
+	RunnerVersionID   string                `json:"runner_driver_version_id,omitempty"`
+	ProviderProfile   string                `json:"provider_profile,omitempty"`
+	Status            TaskRunStatus         `json:"status"`
+	NodeID            string                `json:"node_id,omitempty"`
+	LeaseID           string                `json:"lease_id,omitempty"`
+	FencingToken      int64                 `json:"fencing_token,omitempty"`
+	RunnerPlacement   TaskRunPlacement      `json:"runner_placement,omitempty"`
+	SandboxPlacement  TaskRunPlacement      `json:"sandbox_placement,omitempty"`
 	// Input is the optional task-run payload supplied by the requester
 	// (e.g. a github-review-agent's diff+rubric). It is persisted verbatim
 	// and delivered to the runner so the task harness can act on it.
@@ -538,6 +564,40 @@ type TaskRun struct {
 	ErrorMessage     string            `json:"error_message,omitempty"`
 	CreatedAt        time.Time         `json:"created_at"`
 	UpdatedAt        time.Time         `json:"updated_at"`
+}
+
+type TaskBranch struct {
+	WorkspaceKey           string    `json:"workspace_key"`
+	TaskID                 string    `json:"task_id"`
+	RepoName               string    `json:"repo_name"`
+	BranchName             string    `json:"branch_name"`
+	AdmittedBaseSHA        string    `json:"admitted_base_sha"`
+	ExpectedRemoteHeadSHA  string    `json:"expected_remote_head_sha,omitempty"`
+	ConfirmedRemoteHeadSHA string    `json:"confirmed_remote_head_sha,omitempty"`
+	CreatedAt              time.Time `json:"created_at"`
+	UpdatedAt              time.Time `json:"updated_at"`
+}
+
+type TaskChangePublicationStatus string
+
+const TaskChangePublicationConfirmed TaskChangePublicationStatus = "confirmed"
+
+type TaskChangeSetEntry struct {
+	RepoName          string                      `json:"repo_name"`
+	BaseSHA           string                      `json:"base_sha"`
+	HeadSHA           string                      `json:"head_sha"`
+	BranchName        string                      `json:"branch_name"`
+	RemoteName        string                      `json:"remote_name"`
+	PublicationStatus TaskChangePublicationStatus `json:"publication_status"`
+	ArtifactRefs      []string                    `json:"artifact_refs"`
+}
+
+type TaskChangeSet struct {
+	WorkspaceKey string               `json:"workspace_key"`
+	TaskID       string               `json:"task_id"`
+	Version      int                  `json:"version"`
+	Entries      []TaskChangeSetEntry `json:"entries"`
+	CreatedAt    time.Time            `json:"created_at"`
 }
 
 type TaskRunPlacement struct {

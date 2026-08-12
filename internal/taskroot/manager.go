@@ -40,6 +40,7 @@ type RepositorySpec struct {
 	SourcePath string `json:"source_path"`
 	BranchName string `json:"branch_name"`
 	BaseSHA    string `json:"base_sha"`
+	Detached   bool   `json:"detached,omitempty"`
 }
 
 type RootManifest struct {
@@ -51,6 +52,7 @@ type RootManifest struct {
 	State        string               `json:"state"`
 	Repositories []RepositoryManifest `json:"repositories"`
 	CreatedAt    time.Time            `json:"created_at"`
+	RetainUntil  *time.Time           `json:"retain_until,omitempty"`
 }
 
 type RepositoryManifest struct {
@@ -59,6 +61,7 @@ type RepositoryManifest struct {
 	Path       string `json:"path"`
 	BranchName string `json:"branch_name"`
 	BaseSHA    string `json:"base_sha"`
+	Detached   bool   `json:"detached,omitempty"`
 }
 
 type RootLease struct {
@@ -92,6 +95,13 @@ func (m *LocalGitManager) Prepare(ctx context.Context, spec RootSpec) (RootManif
 		return RootManifest{}, err
 	}
 	if existing, found, err := matchingManifest(ctx, rootPath, spec, repositories); found || err != nil {
+		if err == nil && found && existing.State == "retained" {
+			existing.State = "ready"
+			existing.RetainUntil = nil
+			if err := publishManifest(rootPath, existing); err != nil {
+				return RootManifest{}, err
+			}
+		}
 		return existing, err
 	}
 	if err := os.MkdirAll(rootPath, 0o700); err != nil {
@@ -115,6 +125,7 @@ func (m *LocalGitManager) Prepare(ctx context.Context, spec RootSpec) (RootManif
 			Path:       filepath.Join(rootPath, repository.Name),
 			BranchName: repository.BranchName,
 			BaseSHA:    repository.BaseSHA,
+			Detached:   repository.Detached,
 		})
 	}
 	journal := manifest
@@ -171,7 +182,7 @@ func matchingManifest(ctx context.Context, rootPath string, spec RootSpec, repos
 	}
 	for index, requested := range repositories {
 		existing := manifest.Repositories[index]
-		if existing.Name != requested.Name || existing.SourcePath != requested.SourcePath || existing.BranchName != requested.BranchName || existing.BaseSHA != requested.BaseSHA {
+		if existing.Name != requested.Name || existing.SourcePath != requested.SourcePath || existing.BranchName != requested.BranchName || existing.BaseSHA != requested.BaseSHA || existing.Detached != requested.Detached {
 			return RootManifest{}, true, fmt.Errorf("existing TaskRun Root repository %q does not match request", requested.Name)
 		}
 		if existing.Path != filepath.Join(rootPath, requested.Name) || !pathContains(rootPath, existing.Path) {
@@ -181,7 +192,7 @@ func matchingManifest(ctx context.Context, rootPath string, spec RootSpec, repos
 			return RootManifest{}, true, fmt.Errorf("existing TaskRun Root repository %q is unavailable: %w", requested.Name, err)
 		}
 		branch, err := runGit(ctx, existing.Path, "branch", "--show-current")
-		if err != nil || branch != requested.BranchName {
+		if err != nil || (!requested.Detached && branch != requested.BranchName) || (requested.Detached && branch != "") {
 			return RootManifest{}, true, fmt.Errorf("existing TaskRun Root repository %q branch changed", requested.Name)
 		}
 	}
@@ -243,7 +254,10 @@ func (m *LocalGitManager) Release(ctx context.Context, lease RootLease, policy R
 		return ErrStaleLease
 	}
 	if policy.RetainUntil.After(time.Now()) {
-		return nil
+		retainUntil := policy.RetainUntil.UTC()
+		manifest.State = "retained"
+		manifest.RetainUntil = &retainUntil
+		return publishManifest(rootPath, manifest)
 	}
 	for index := len(manifest.Repositories) - 1; index >= 0; index-- {
 		repository := manifest.Repositories[index]
@@ -287,6 +301,12 @@ func (m *LocalGitManager) Reconcile(ctx context.Context) error {
 			manifest, err := readManifest(manifestPath)
 			if err != nil {
 				return err
+			}
+			if manifest.State == "retained" && manifest.RetainUntil != nil && !manifest.RetainUntil.After(time.Now()) {
+				if err := m.Release(ctx, RootLease{TaskRunID: manifest.TaskRunID, Generation: manifest.Generation, FencingToken: manifest.FencingToken}, RetentionPolicy{}); err != nil {
+					return err
+				}
+				continue
 			}
 			for _, repository := range manifest.Repositories {
 				if _, err := runGit(ctx, repository.SourcePath, "worktree", "prune"); err != nil {
@@ -357,8 +377,8 @@ func (m *LocalGitManager) validateAndResolve(spec RootSpec) (string, []Repositor
 			return "", nil, fmt.Errorf("repository name %q is duplicated", repository.Name)
 		}
 		seen[repository.Name] = struct{}{}
-		if strings.TrimSpace(repository.SourcePath) == "" || strings.TrimSpace(repository.BranchName) == "" || strings.TrimSpace(repository.BaseSHA) == "" {
-			return "", nil, fmt.Errorf("repository %q source_path, branch_name, and base_sha are required", repository.Name)
+		if strings.TrimSpace(repository.SourcePath) == "" || strings.TrimSpace(repository.BaseSHA) == "" || (!repository.Detached && strings.TrimSpace(repository.BranchName) == "") {
+			return "", nil, fmt.Errorf("repository %q source_path, base_sha, and writer branch_name are required", repository.Name)
 		}
 	}
 	return rootPath, repositories, nil
@@ -384,7 +404,9 @@ func addWorktree(ctx context.Context, repository RepositorySpec, targetPath stri
 	}
 	_, branchErr := runGit(ctx, repository.SourcePath, "show-ref", "--verify", "--quiet", "refs/heads/"+repository.BranchName)
 	args := []string{"worktree", "add"}
-	if branchErr == nil {
+	if repository.Detached {
+		args = append(args, "--detach", targetPath, repository.BaseSHA)
+	} else if branchErr == nil {
 		args = append(args, targetPath, repository.BranchName)
 	} else {
 		args = append(args, "-b", repository.BranchName, targetPath, repository.BaseSHA)

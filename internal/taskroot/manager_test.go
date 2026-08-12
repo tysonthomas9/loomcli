@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/taskroot"
 )
@@ -66,6 +67,28 @@ func TestLocalGitManagerPreparePublishesAtomicTwoRepositoryManifest(t *testing.T
 	}
 	if inventory.Roots != 1 || inventory.Worktrees != 2 {
 		t.Fatalf("Inventory = %#v, want one root and two worktrees", inventory)
+	}
+}
+
+func TestLocalGitManagerPrepareReviewRootDetachedAtImmutableHead(t *testing.T) {
+	ctx := t.Context()
+	workspace := t.TempDir()
+	repo, sha := createRepository(t, workspace, "repo-a")
+	gitOutput(t, repo, "branch", "loom/task/TEST-1/repo-a")
+	writerPath := filepath.Join(workspace, "writer")
+	gitOutput(t, repo, "worktree", "add", writerPath, "loom/task/TEST-1/repo-a")
+
+	manager := taskroot.NewLocalGitManager(workspace)
+	manifest, err := manager.Prepare(ctx, taskroot.RootSpec{
+		TaskRunID: "review-run-1", Generation: 1, FencingToken: 9,
+		Repositories: []taskroot.RepositorySpec{{Name: "repo-a", SourcePath: repo, BaseSHA: sha, Detached: true}},
+	})
+	if err != nil {
+		t.Fatalf("Prepare detached review root while writer branch is checked out: %v", err)
+	}
+	entry := manifest.Repositories[0]
+	if !entry.Detached || gitOutput(t, entry.Path, "branch", "--show-current") != "" || gitOutput(t, entry.Path, "rev-parse", "HEAD") != sha {
+		t.Fatalf("review entry = %+v branch=%q head=%q", entry, gitOutput(t, entry.Path, "branch", "--show-current"), gitOutput(t, entry.Path, "rev-parse", "HEAD"))
 	}
 }
 
@@ -134,6 +157,41 @@ func TestLocalGitManagerPrepareReusesMatchingTaskRunRoot(t *testing.T) {
 	}
 	if got := gitOutput(t, repoA, "worktree", "list", "--porcelain"); count(got, first.Repositories[0].Path) != 1 {
 		t.Fatalf("retry created duplicate worktree registration:\n%s", got)
+	}
+}
+
+func TestLocalGitManagerPersistsRetentionAndRetryReactivatesSameRoot(t *testing.T) {
+	ctx := t.Context()
+	workspace := t.TempDir()
+	repo, sha := createRepository(t, workspace, "repo-a")
+	spec := taskroot.RootSpec{TaskRunID: "task-run-retained", Generation: 1, FencingToken: 29,
+		Repositories: []taskroot.RepositorySpec{{Name: "repo-a", SourcePath: repo, BranchName: "loom/task-retained/repo-a", BaseSHA: sha}}}
+	manager := taskroot.NewLocalGitManager(workspace)
+	manifest, err := manager.Prepare(ctx, spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	retainUntil := time.Now().UTC().Add(time.Hour)
+	if err := manager.Release(ctx, taskroot.RootLease{TaskRunID: spec.TaskRunID, Generation: 1, FencingToken: 29}, taskroot.RetentionPolicy{RetainUntil: retainUntil}); err != nil {
+		t.Fatal(err)
+	}
+	retainedBytes, err := os.ReadFile(filepath.Join(manifest.RootPath, "manifest.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var retained taskroot.RootManifest
+	if err := json.Unmarshal(retainedBytes, &retained); err != nil {
+		t.Fatal(err)
+	}
+	if retained.State != "retained" || retained.RetainUntil == nil || retained.RetainUntil.Before(retainUntil.Add(-time.Second)) {
+		t.Fatalf("retained manifest = %+v", retained)
+	}
+	retried, err := manager.Prepare(ctx, spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if retried.RootPath != manifest.RootPath || retried.State != "ready" || retried.RetainUntil != nil {
+		t.Fatalf("retried manifest = %+v, want same ready root", retried)
 	}
 }
 

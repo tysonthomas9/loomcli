@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"time"
 
@@ -16,6 +18,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/sessions/transcript"
 	"github.com/tysonthomas9/loomcli/internal/stackstore"
 	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/taskroot"
 )
 
 const (
@@ -64,6 +67,10 @@ type HostBridgeTaskExecutor struct {
 	// RootResolver maps repository-set TaskRuns onto a composite root. It owns
 	// the new multi-repository path and takes precedence over WorktreeResolver.
 	RootResolver TaskRootResolver
+	// ChangePublisher pushes backend-authored commits and records the immutable
+	// FleetDB handoff. Nil selects the credential-bearing local Git proxy when
+	// the concrete Store implements TaskChangeHandoffStore.
+	CompletionFinalizer TaskCompletionFinalizer
 	// StackStore is the finalize-barrier seam: after a stacked task completes
 	// (branch pushed, result reported) the executor records the task's stack node
 	// state/SHA here BEFORE returning — i.e. before the worker closes the task and
@@ -214,6 +221,33 @@ func (e HostBridgeTaskExecutor) ExecuteTask(ctx context.Context, req TaskExecReq
 	if rootFailure.ErrorClass != "" {
 		return rootFailure, nil
 	}
+	if rooted {
+		defer func() {
+			state := domain.TaskRunRootRetained
+			if releaser, ok := e.RootResolver.(TaskRootReleaser); ok {
+				if err == nil && result.Status == domain.TaskRunCompleted {
+					if releaseErr := releaser.ReleaseTaskRoot(ctx, req, taskroot.RetentionPolicy{}); releaseErr != nil {
+						result.Status = domain.TaskRunFailed
+						result.ExitCode = 1
+						result.ErrorClass = "task_root_release_failed"
+						result.ErrorMessage = releaseErr.Error()
+						state = domain.TaskRunRootRetained
+					} else {
+						state = domain.TaskRunRootReleased
+					}
+				} else if retainErr := releaser.ReleaseTaskRoot(ctx, req, taskroot.RetentionPolicy{RetainUntil: time.Now().UTC().Add(24 * time.Hour)}); retainErr != nil {
+					state = domain.TaskRunRootFailed
+				}
+			}
+			if lifecycleErr := e.recordTaskRunExecutionContext(ctx, req, state, "", ""); lifecycleErr != nil && err == nil {
+				err = lifecycleErr
+				result.Status = domain.TaskRunFailed
+				result.ExitCode = 1
+				result.ErrorClass = "task_root_state_failed"
+				result.ErrorMessage = lifecycleErr.Error()
+			}
+		}()
+	}
 	resolvedWorktree, worktreeFailure, failed := e.resolveLocalTaskWorktree(ctx, req)
 	if failed {
 		return worktreeFailure, nil
@@ -270,17 +304,84 @@ func (e HostBridgeTaskExecutor) ExecuteTask(ctx context.Context, req TaskExecReq
 	if err != nil {
 		return TaskExecResult{}, err
 	}
-	runner = &runnerResult
 	// Pre-persist validation gate (§4.2): the decoded runner result must be a
 	// non-empty terminal result with a zero exit when completed. An invalid
 	// result fails closed (invalid_task_result, exit 1) and NEVER reaches the
 	// artifact/patch/log/transcript persistence below — we must not stamp real
 	// evidence onto a run the runner did not actually finish.
 	if reason, ok := validateBridgeTaskRunnerResult(runnerResult); !ok {
+		runner = &runnerResult
 		result = invalidBridgeTaskExecResult(runnerResult, reason)
 		return result, nil
 	}
+	continuationCount := 0
+	var commitInspection compositeCommitInspection
+	for rooted && req.ExecutionClass != domain.TaskRunExecutionReview && runnerResult.Status == domain.TaskRunCompleted && len(resolvedRoot.Repositories) > 0 {
+		commitInspection, err = inspectCompositeCommits(ctx, resolvedRoot)
+		if err != nil {
+			return TaskExecResult{}, err
+		}
+		if commitInspection.Outcome != changeHandoffContinuationRequired {
+			break
+		}
+		sessionRef := firstNonEmpty(runnerResult.SessionID, runnerResult.SessionIDCamel, req.BackendSessionRef)
+		if sessionRef == "" || continuationCount >= 2 {
+			failure := runnerResult.taskExecResult()
+			failure.Status = domain.TaskRunFailed
+			failure.ExitCode = 1
+			failure.ErrorClass = "backend_commit_required"
+			failure.ErrorMessage = "backend completion left uncommitted changes in: " + strings.Join(commitInspection.DirtyRepositories, ", ")
+			failure.RuntimeMetadata = mergeStringMaps(failure.RuntimeMetadata, map[string]string{
+				"change_handoff_outcome":     string(commitInspection.Outcome),
+				"backend_continuation_count": strconv.Itoa(continuationCount),
+			})
+			runner = &runnerResult
+			return failure, nil
+		}
+		continuationCount++
+		continuationReq := req
+		continuationReq.BackendSessionRef = sessionRef
+		continuationReq.ContinuationPrompt = compositeCommitContinuationPrompt(commitInspection.DirtyRepositories)
+		continueBridge, bridgeErr := e.bridgeRunner(ctx, continuationReq)
+		if bridgeErr != nil {
+			return TaskExecResult{}, bridgeErr
+		}
+		continued, continueErr := continueBridge()
+		if continueErr != nil {
+			return TaskExecResult{}, continueErr
+		}
+		if reason, ok := validateBridgeTaskRunnerResult(continued); !ok {
+			runner = &continued
+			result = invalidBridgeTaskExecResult(continued, reason)
+			return result, nil
+		}
+		runnerResult = mergeBridgeContinuation(runnerResult, continued)
+	}
+	runner = &runnerResult
+	backendKind := firstNonEmpty(
+		runnerResult.RuntimeMetadata["backend"],
+		runnerResult.RuntimeMetadataCamel["backend"],
+		e.resolveTaskRunnerBackend(req),
+	)
+	if lifecycleErr := e.recordTaskRunExecutionContext(ctx, req, domain.TaskRunRootReady, firstNonEmpty(runnerResult.SessionID, runnerResult.SessionIDCamel), backendKind); lifecycleErr != nil {
+		return TaskExecResult{}, lifecycleErr
+	}
 	result = runnerResult.taskExecResult()
+	if rooted && len(resolvedRoot.Repositories) > 0 {
+		if req.ExecutionClass == domain.TaskRunExecutionReview && result.Status == domain.TaskRunCompleted {
+			reviewMetadata, reviewErr := validateImmutableReviewRoot(ctx, resolvedRoot)
+			if reviewErr != nil {
+				result.Status = domain.TaskRunFailed
+				result.ExitCode = 1
+				result.ErrorClass = "review_head_mismatch"
+				result.ErrorMessage = reviewErr.Error()
+			} else {
+				result.RuntimeMetadata = mergeStringMaps(result.RuntimeMetadata, reviewMetadata)
+			}
+		} else {
+			result.RuntimeMetadata = mergeStringMaps(result.RuntimeMetadata, compositeCommitMetadata(commitInspection, runnerResult, continuationCount))
+		}
+	}
 	if resolvedWorktree.Path != "" {
 		result.RuntimeMetadata = mergeStringMaps(result.RuntimeMetadata, map[string]string{
 			"worktree_path":   resolvedWorktree.Path,
@@ -306,6 +407,44 @@ func (e HostBridgeTaskExecutor) ExecuteTask(ctx context.Context, req TaskExecReq
 	if err != nil {
 		return TaskExecResult{}, err
 	}
+	if rooted && result.Status == domain.TaskRunCompleted && req.ExecutionClass != domain.TaskRunExecutionReview && len(commitInspection.Repositories) > 0 {
+		finalizer := e.CompletionFinalizer
+		if finalizer == nil {
+			recorder, ok := e.Store.(store.TaskChangeHandoffStore)
+			if !ok {
+				result.Status = domain.TaskRunFailed
+				result.ExitCode = 1
+				result.ErrorClass = "change_handoff_unavailable"
+				result.ErrorMessage = "Task Change Set recorder is unavailable"
+				return result, nil
+			}
+			finalizer = GitPushProxy{Recorder: recorder, LocalSettingsDir: e.LocalSettingsDir}
+		}
+		completionOutcome, publishErr := finalizer.Finalize(ctx, CompletionClaim{Request: req, Inspection: commitInspection, ArtifactRefs: result.ArtifactIDs})
+		if publishErr != nil {
+			result.Status = domain.TaskRunFailed
+			result.ExitCode = 1
+			result.ErrorClass = "git_push_failed"
+			result.ErrorMessage = publishErr.Error()
+			result.RuntimeMetadata = mergeStringMaps(result.RuntimeMetadata, map[string]string{"change_handoff_outcome": "failed"})
+			return result, nil
+		}
+		if changeSet := completionOutcome.ChangeSet; changeSet != nil {
+			result.RuntimeMetadata = mergeStringMaps(result.RuntimeMetadata, map[string]string{
+				"change_set_version":     strconv.Itoa(changeSet.Version),
+				"change_handoff_outcome": "ready_to_review",
+			})
+			reviewTaskRunID, enqueueErr := e.enqueueTaskChangeReview(ctx, req, changeSet.Version)
+			if enqueueErr != nil {
+				result.Status = domain.TaskRunFailed
+				result.ExitCode = 1
+				result.ErrorClass = "review_enqueue_failed"
+				result.ErrorMessage = enqueueErr.Error()
+				return result, nil
+			}
+			result.RuntimeMetadata["review_task_run_id"] = reviewTaskRunID
+		}
+	}
 	patch, err := e.readPatch(ctx, runnerResult)
 	if err != nil {
 		return TaskExecResult{}, err
@@ -314,6 +453,44 @@ func (e HostBridgeTaskExecutor) ExecuteTask(ctx context.Context, req TaskExecReq
 		return result, nil
 	}
 	return e.finalizeAndApplyPatch(ctx, req, runnerResult, patch, result)
+}
+
+func (e HostBridgeTaskExecutor) enqueueTaskChangeReview(ctx context.Context, req TaskExecRequest, version int) (string, error) {
+	if e.Store == nil {
+		return "", fmt.Errorf("store required to enqueue review: %w", domain.ErrInvalid)
+	}
+	taskRunID := req.TaskRunID + "-review-v" + strconv.Itoa(version)
+	_, err := e.Store.TaskRuns().Create(ctx, store.TaskRunCreate{
+		WorkspaceKey: req.WorkspaceKey, TaskRunID: taskRunID, TaskID: req.TaskID,
+		ExecutionClass: domain.TaskRunExecutionReview, ChangeSetVersion: version, RootGeneration: 1,
+		WorkerProfileID: req.WorkerProfileID, Runner: req.Runner, RunnerRef: req.RunnerRef,
+		RunnerKind: req.RunnerKind, RunnerEntrypoint: req.RunnerEntrypoint, RunnerVersionID: req.RunnerVersionID,
+		ProviderProfile: req.ProviderProfile, BackendKind: req.ProviderProfile, Status: domain.TaskRunQueued,
+		RuntimeMetadata: map[string]string{"review_of_task_run_id": req.TaskRunID, "change_set_version": strconv.Itoa(version)},
+		Input:           req.Input,
+	})
+	if err != nil && !errors.Is(err, domain.ErrAlreadyExists) {
+		return "", fmt.Errorf("enqueue review TaskRun %s: %w", taskRunID, err)
+	}
+	return taskRunID, nil
+}
+
+func (e HostBridgeTaskExecutor) recordTaskRunExecutionContext(ctx context.Context, req TaskExecRequest, state domain.TaskRunRootState, backendSessionRef, backendKind string) error {
+	lifecycle, ok := e.Store.(store.TaskRunExecutionContextStore)
+	if !ok {
+		return nil
+	}
+	if backendKind == "" {
+		backendKind = e.resolveTaskRunnerBackend(req)
+	}
+	_, err := lifecycle.UpdateTaskRunExecutionContext(ctx, req.WorkspaceKey, req.TaskRunID, store.TaskRunExecutionContextUpdate{
+		RootState: state, RootNodeID: req.NodeID, RootFencingToken: req.FencingToken,
+		BackendKind: backendKind, BackendSessionRef: backendSessionRef,
+	})
+	if err != nil {
+		return fmt.Errorf("persist TaskRun execution context: %w", err)
+	}
+	return nil
 }
 
 func (e HostBridgeTaskExecutor) bridgeRunner(ctx context.Context, req TaskExecRequest) (func() (bridgeTaskRunnerResult, error), error) {
@@ -736,15 +913,9 @@ func (e HostBridgeTaskExecutor) localTaskRunnerSettingsEnv(existing []string) []
 	if err != nil {
 		return nil
 	}
-	out := make([]string, 0, 2)
+	out := make([]string, 0, 1)
 	if model := strings.TrimSpace(settings.LocalTaskRunner.OpenCodeModel); model != "" {
 		out = append(out, "LOOM_OPENCODE_MODEL="+model)
-	}
-	if !envHasAny(existing, "GITHUB_TOKEN", "GH_TOKEN") {
-		token, err := runtimesettings.UnsealRuntimeCredential(dir, settings, runtimesettings.RuntimeCredentialProviderGitHub)
-		if err == nil && strings.TrimSpace(token) != "" {
-			out = append(out, "GITHUB_TOKEN="+strings.TrimSpace(token))
-		}
 	}
 	return out
 }

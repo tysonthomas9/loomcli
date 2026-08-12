@@ -30,6 +30,8 @@ type TaskRunRequestOptions struct {
 	DriverStepID       string
 	TaskRunID          string
 	TaskID             string
+	ExecutionClass     domain.TaskRunExecutionClass
+	ChangeSetVersion   int
 	WorkerProfileID    string
 	Runner             string
 	RunnerRef          string
@@ -79,28 +81,32 @@ type TaskRunWorkerOptions struct {
 }
 
 type TaskExecRequest struct {
-	WorkspaceKey     string                  `json:"workspace_key"`
-	DriverRunID      string                  `json:"driver_run_id"`
-	DriverStepID     string                  `json:"driver_step_id,omitempty"`
-	TaskRunID        string                  `json:"task_run_id"`
-	TaskID           string                  `json:"task_id"`
-	RepositorySet    []string                `json:"repository_set"`
-	RootGeneration   int64                   `json:"root_generation,omitempty"`
-	WorkerProfileID  string                  `json:"worker_profile_id,omitempty"`
-	Runner           string                  `json:"runner,omitempty"`
-	RunnerRef        string                  `json:"runner_ref,omitempty"`
-	RunnerKind       string                  `json:"runner_kind,omitempty"`
-	RunnerEntrypoint string                  `json:"runner_entrypoint,omitempty"`
-	RunnerVersionID  string                  `json:"runner_driver_version_id,omitempty"`
-	RunnerTrustLevel domain.DriverTrustLevel `json:"runner_trust_level,omitempty"`
-	ProviderProfile  string                  `json:"provider_profile,omitempty"`
-	ParentSessionID  string                  `json:"parent_session_id,omitempty"`
-	NodeID           string                  `json:"node_id,omitempty"`
-	LeaseID          string                  `json:"lease_id,omitempty"`
-	LeaseToken       string                  `json:"lease_token,omitempty"`
-	FencingToken     int64                   `json:"fencing_token,omitempty"`
-	RunnerPlacement  domain.TaskRunPlacement `json:"runner_placement,omitempty"`
-	SandboxPlacement domain.TaskRunPlacement `json:"sandbox_placement,omitempty"`
+	WorkspaceKey       string                       `json:"workspace_key"`
+	DriverRunID        string                       `json:"driver_run_id"`
+	DriverStepID       string                       `json:"driver_step_id,omitempty"`
+	TaskRunID          string                       `json:"task_run_id"`
+	TaskID             string                       `json:"task_id"`
+	ExecutionClass     domain.TaskRunExecutionClass `json:"execution_class"`
+	ChangeSetVersion   int                          `json:"change_set_version,omitempty"`
+	RepositorySet      []string                     `json:"repository_set"`
+	RootGeneration     int64                        `json:"root_generation,omitempty"`
+	BackendSessionRef  string                       `json:"backend_session_ref,omitempty"`
+	ContinuationPrompt string                       `json:"continuation_prompt,omitempty"`
+	WorkerProfileID    string                       `json:"worker_profile_id,omitempty"`
+	Runner             string                       `json:"runner,omitempty"`
+	RunnerRef          string                       `json:"runner_ref,omitempty"`
+	RunnerKind         string                       `json:"runner_kind,omitempty"`
+	RunnerEntrypoint   string                       `json:"runner_entrypoint,omitempty"`
+	RunnerVersionID    string                       `json:"runner_driver_version_id,omitempty"`
+	RunnerTrustLevel   domain.DriverTrustLevel      `json:"runner_trust_level,omitempty"`
+	ProviderProfile    string                       `json:"provider_profile,omitempty"`
+	ParentSessionID    string                       `json:"parent_session_id,omitempty"`
+	NodeID             string                       `json:"node_id,omitempty"`
+	LeaseID            string                       `json:"lease_id,omitempty"`
+	LeaseToken         string                       `json:"lease_token,omitempty"`
+	FencingToken       int64                        `json:"fencing_token,omitempty"`
+	RunnerPlacement    domain.TaskRunPlacement      `json:"runner_placement,omitempty"`
+	SandboxPlacement   domain.TaskRunPlacement      `json:"sandbox_placement,omitempty"`
 	// Input is the task-run payload delivered verbatim to the runner via
 	// LOOM_TASK_RUN_REQUEST_JSON. Optional (omitempty) for back-compat.
 	Input json.RawMessage `json:"input,omitempty"`
@@ -537,12 +543,20 @@ func createQueuedTaskRun(ctx context.Context, s store.Store, opts TaskRunRequest
 	if opts.ParentSessionID != "" {
 		runtimeMetadata["parent_session_id"] = opts.ParentSessionID
 	}
+	executionClass := opts.ExecutionClass
+	if executionClass == "" {
+		executionClass = domain.TaskRunExecutionImplementation
+	}
 	return s.TaskRuns().Create(ctx, store.TaskRunCreate{
 		WorkspaceKey:     opts.WorkspaceKey,
 		TaskRunID:        refs.TaskRunID,
 		DriverRunID:      opts.DriverRunID,
 		DriverStepID:     opts.DriverStepID,
 		TaskID:           opts.TaskID,
+		ExecutionClass:   executionClass,
+		ChangeSetVersion: opts.ChangeSetVersion,
+		RootGeneration:   1,
+		BackendKind:      opts.ProviderProfile,
 		WorkerProfileID:  opts.WorkerProfileID,
 		Runner:           opts.Runner,
 		RunnerRef:        opts.RunnerRef,
@@ -659,7 +673,8 @@ func executeClaimedTaskRunWithResult(ctx context.Context, s store.Store, claimed
 	if opts.DeferCompletion && completion.Status == domain.TaskRunCompleted {
 		return deferClaimedTaskRunCompletion(ctx, s, claimed, opts, execResult, completion, metadata)
 	}
-	if opts.CloseTaskOnSuccess && completion.Status == domain.TaskRunCompleted {
+	closeTaskOnSuccess := opts.CloseTaskOnSuccess && taskRunMayCloseTask(claimed, execResult)
+	if closeTaskOnSuccess && completion.Status == domain.TaskRunCompleted {
 		return completeAndCloseClaimedTaskRun(ctx, s, claimed, opts, refs, execResult, completion, metadata, evctx)
 	}
 	if retryTaskRun := taskRunRetryDecision(claimed, opts, completion); retryTaskRun.Retry {
@@ -687,6 +702,13 @@ func executeClaimedTaskRunWithResult(ctx context.Context, s store.Store, claimed
 		return nil, err
 	}
 	return &TaskRunRequestOutcome{Run: final, LeaseToken: opts.LeaseToken, ArtifactIDs: normalizeArtifactIDs(execResult.ArtifactIDs)}, nil
+}
+
+func taskRunMayCloseTask(run *domain.TaskRun, result TaskExecResult) bool {
+	if run == nil || run.ExecutionClass == "" || run.ExecutionClass == domain.TaskRunExecutionReview {
+		return true
+	}
+	return run.ExecutionClass == domain.TaskRunExecutionImplementation && result.RuntimeMetadata["change_handoff_outcome"] == string(changeHandoffNoChange)
 }
 
 type claimedTaskRunRefs struct {
@@ -747,29 +769,32 @@ func startClaimedTaskRunHeartbeat(ctx context.Context, s store.Store, claimed *d
 
 func taskExecRequest(claimed *domain.TaskRun, opts executeClaimedTaskRunOptions, refs claimedTaskRunRefs) TaskExecRequest {
 	return TaskExecRequest{
-		WorkspaceKey:     refs.WorkspaceKey,
-		DriverRunID:      refs.DriverRunID,
-		DriverStepID:     refs.DriverStepID,
-		TaskRunID:        claimed.TaskRunID,
-		TaskID:           refs.TaskID,
-		RepositorySet:    append([]string(nil), claimed.RepositorySet...),
-		RootGeneration:   claimed.RootGeneration,
-		WorkerProfileID:  claimed.WorkerProfileID,
-		Runner:           refs.Runner,
-		RunnerRef:        refs.RunnerRef,
-		RunnerKind:       refs.RunnerKind,
-		RunnerEntrypoint: refs.RunnerEntrypoint,
-		RunnerVersionID:  refs.RunnerVersionID,
-		RunnerTrustLevel: refs.RunnerTrustLevel,
-		ProviderProfile:  refs.ProviderProfile,
-		ParentSessionID:  refs.ParentSessionID,
-		NodeID:           claimed.NodeID,
-		LeaseID:          claimed.LeaseID,
-		LeaseToken:       opts.LeaseToken,
-		FencingToken:     claimed.FencingToken,
-		RunnerPlacement:  claimed.RunnerPlacement,
-		SandboxPlacement: claimed.SandboxPlacement,
-		Input:            claimed.Input,
+		WorkspaceKey:      refs.WorkspaceKey,
+		DriverRunID:       refs.DriverRunID,
+		DriverStepID:      refs.DriverStepID,
+		TaskRunID:         claimed.TaskRunID,
+		TaskID:            refs.TaskID,
+		ExecutionClass:    claimed.ExecutionClass,
+		ChangeSetVersion:  claimed.ChangeSetVersion,
+		RepositorySet:     append([]string(nil), claimed.RepositorySet...),
+		RootGeneration:    claimed.RootGeneration,
+		BackendSessionRef: claimed.BackendSessionRef,
+		WorkerProfileID:   claimed.WorkerProfileID,
+		Runner:            refs.Runner,
+		RunnerRef:         refs.RunnerRef,
+		RunnerKind:        refs.RunnerKind,
+		RunnerEntrypoint:  refs.RunnerEntrypoint,
+		RunnerVersionID:   refs.RunnerVersionID,
+		RunnerTrustLevel:  refs.RunnerTrustLevel,
+		ProviderProfile:   refs.ProviderProfile,
+		ParentSessionID:   refs.ParentSessionID,
+		NodeID:            claimed.NodeID,
+		LeaseID:           claimed.LeaseID,
+		LeaseToken:        opts.LeaseToken,
+		FencingToken:      claimed.FencingToken,
+		RunnerPlacement:   claimed.RunnerPlacement,
+		SandboxPlacement:  claimed.SandboxPlacement,
+		Input:             claimed.Input,
 	}
 }
 
