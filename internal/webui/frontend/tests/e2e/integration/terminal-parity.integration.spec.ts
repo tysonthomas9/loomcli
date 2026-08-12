@@ -273,11 +273,11 @@ test.describe("Deterministic Terminal Parity", () => {
       const talkTerminal = terminalView.getByTestId("terminal-wrapper").first();
       await forceTerminalViewportSize(talkTerminal);
       await page.waitForTimeout(LAYOUT_SETTLE_MS);
-      await expect(talkTerminal.locator(".wterm")).toHaveCount(1);
+      await expect(talkTerminal.locator(".xterm")).toHaveCount(1);
       await expect(
         talkTerminal.locator('[class*="transcriptOverlay"]'),
       ).toHaveCount(0);
-      await expect(talkTerminal.locator(".wterm")).not.toContainText("?2004");
+      await expect(talkTerminal.locator(".xterm")).not.toContainText("?2004");
       const talkShot = await talkTerminal.screenshot({
         animations: "disabled",
       });
@@ -309,7 +309,7 @@ test.describe("Deterministic Terminal Parity", () => {
         .getByTestId("terminal-wrapper");
       await forceTerminalViewportSize(emberTerminal);
       await page.waitForTimeout(LAYOUT_SETTLE_MS);
-      await expect(emberTerminal.locator(".wterm")).toHaveCount(1);
+      await expect(emberTerminal.locator(".xterm")).toHaveCount(1);
       const emberShot = await emberTerminal.screenshot({
         animations: "disabled",
       });

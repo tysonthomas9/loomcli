@@ -20,12 +20,25 @@ vi.mock("../SessionTimeline", () => ({
     sessions,
     selectedId,
     onSelect,
+    summary,
   }: {
     sessions: SessionRecord[];
     selectedId: string | null;
     onSelect: (id: string) => void;
+    summary: {
+      count: number;
+      totalTokens: number;
+      totalCost: number;
+      activeSessions: number;
+      failedSessions: number;
+    };
   }) => (
     <div data-testid="session-timeline-mock">
+      <div data-testid="timeline-summary-mock">
+        {summary.count} runs
+        {summary.failedSessions > 0 && ` · ${summary.failedSessions} failed`}
+        {summary.activeSessions > 0 && ` · ${summary.activeSessions} active`}
+      </div>
       {sessions.map((s) => (
         <button
           key={s.session_id}
@@ -247,7 +260,9 @@ describe("SessionsTab", () => {
         refetch: vi.fn(),
       });
       render(<SessionsTab taskId="task-1" />);
-      expect(screen.getByText("1 failed")).toBeInTheDocument();
+      expect(screen.getByTestId("timeline-summary-mock")).toHaveTextContent(
+        "1 failed",
+      );
     });
   });
 

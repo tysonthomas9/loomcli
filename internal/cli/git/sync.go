@@ -58,11 +58,16 @@ func runFullSync(cmd *cobra.Command, args []string) error {
 		os.Exit(1)
 	}
 
-	runWorkspaceSync(deps, pushOnly, pullOnly, ws)
-	return nil
+	return runWorkspaceSync(deps, pushOnly, pullOnly, ws)
 }
 
-func runWorkspaceSync(deps *cli.Deps, pushOnly, pullOnly bool, ws string) {
+// runWorkspaceSync returns a non-nil error when any workspace failed to sync.
+// The failures are printed as they happen — a multi-workspace sync should not
+// abandon the remaining workspaces because one of them is broken — but they
+// must still reach the exit code. Swallowing them printed "Full sync complete!"
+// and exited 0 over a workspace whose repos were never discovered, which is
+// indistinguishable from success to anything scripting this command.
+func runWorkspaceSync(deps *cli.Deps, pushOnly, pullOnly bool, ws string) error {
 	resolver, err := cli.NewResolver()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error creating resolver: %v\n", err)
@@ -76,15 +81,14 @@ func runWorkspaceSync(deps *cli.Deps, pushOnly, pullOnly bool, ws string) {
 			fmt.Fprintf(os.Stderr, "Error: workspace %q not found. Available: %v\n", ws, available)
 			os.Exit(1)
 		}
-		syncSingleWorkspace(deps, resolver, pushOnly, pullOnly)
-		return
+		return syncSingleWorkspace(deps, resolver, pushOnly, pullOnly)
 	}
 
 	// Sync all workspaces
 	wsNames := resolver.WorkspaceNames()
 	if len(wsNames) == 0 {
 		fmt.Println("No workspaces found.")
-		return
+		return nil
 	}
 
 	fmt.Println("=========================================")
@@ -92,31 +96,45 @@ func runWorkspaceSync(deps *cli.Deps, pushOnly, pullOnly bool, ws string) {
 	fmt.Println("=========================================")
 	fmt.Println("")
 
+	var failed []string
 	for _, wsName := range wsNames {
 		fmt.Printf("=== Workspace: %s ===\n", wsName)
 		if err := resolver.SetWorkspace(wsName); err != nil {
 			fmt.Fprintf(os.Stderr, "Error setting workspace %s: %v\n", wsName, err)
+			failed = append(failed, wsName)
 			continue
 		}
-		syncSingleWorkspace(deps, resolver, pushOnly, pullOnly)
+		if err := syncSingleWorkspace(deps, resolver, pushOnly, pullOnly); err != nil {
+			failed = append(failed, wsName)
+		}
 		fmt.Println("")
 	}
 
 	fmt.Println("=========================================")
+	if len(failed) > 0 {
+		fmt.Fprintf(os.Stderr, "Sync failed for %d workspace(s): %v\n", len(failed), failed)
+		fmt.Println("=========================================")
+		return fmt.Errorf("sync failed for %d workspace(s): %v", len(failed), failed)
+	}
 	fmt.Println("Full sync complete!")
 	fmt.Println("=========================================")
+	return nil
 }
 
-func syncSingleWorkspace(deps *cli.Deps, resolver *cli.Resolver, pushOnly, pullOnly bool) {
+// syncSingleWorkspace returns an error only for failures that mean the sync did
+// not happen. A push phase that completed with per-repo errors is reported but
+// not fatal — that is the pre-existing contract of pushWorkspaceWorktrees, and
+// changing it belongs to a different change than this one.
+func syncSingleWorkspace(deps *cli.Deps, resolver *cli.Resolver, pushOnly, pullOnly bool) error {
 	worktrees, err := resolver.DiscoverWorktrees()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error discovering repos: %v\n", err)
-		return
+		return fmt.Errorf("discover repos in workspace %s: %w", resolver.WorkspaceName(), err)
 	}
 
 	if len(worktrees) == 0 {
 		fmt.Printf("No repos found in workspace %s\n", resolver.WorkspaceName())
-		return
+		return nil
 	}
 
 	// Phase 1: Push (unless pull-only)
@@ -134,4 +152,5 @@ func syncSingleWorkspace(deps *cli.Deps, resolver *cli.Resolver, pushOnly, pullO
 		fmt.Println("--- Phase 2: Pull ---")
 		pullWorkspaceWorktrees(deps, worktrees, "")
 	}
+	return nil
 }

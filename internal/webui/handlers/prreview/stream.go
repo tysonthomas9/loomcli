@@ -47,11 +47,16 @@ type reviewerStreamStatus struct {
 }
 
 type reviewerStreamMessage struct {
-	TurnID string `json:"turn_id"`
-	ItemID string `json:"item_id"`
-	Role   string `json:"role"`
-	Text   string `json:"text"`
-	Phase  string `json:"phase,omitempty"`
+	TurnID     string `json:"turn_id"`
+	ItemID     string `json:"item_id"`
+	Role       string `json:"role"`
+	Text       string `json:"text"`
+	Phase      string `json:"phase,omitempty"`
+	Kind       string `json:"kind,omitempty"` // text | tool_use
+	ToolName   string `json:"tool_name,omitempty"`
+	ToolUseID  string `json:"tool_use_id,omitempty"`
+	ToolInput  string `json:"tool_input,omitempty"`
+	ToolResult string `json:"tool_result,omitempty"`
 }
 
 func (m *Module) streamReviewer(w http.ResponseWriter, r *http.Request) {
@@ -150,6 +155,8 @@ func (m *Module) readReviewerSnapshot(ctx context.Context, session reviewerStrea
 	}
 	for i := range snap.messages {
 		snap.messages[i].Text = redact.String(snap.messages[i].Text)
+		snap.messages[i].ToolInput = redact.String(snap.messages[i].ToolInput)
+		snap.messages[i].ToolResult = redact.String(snap.messages[i].ToolResult)
 	}
 	return snap, nil
 }
@@ -165,9 +172,17 @@ func (m *Module) readCodexReviewerSnapshot(ctx context.Context, sess *domain.Age
 	if err != nil {
 		return reviewerSnapshot{state: "reconnecting"}
 	}
+	// Prefer the on-disk rollout: thread/read only returns summary chat items,
+	// while tool calls (custom_tool_call*) live in the rollout JSONL. Flattening
+	// the thread payload is the fallback, so it is only paid when there is no
+	// readable rollout.
+	messages, ok := m.rollouts.messagesFor(rt.ThreadID)
+	if !ok {
+		messages = flattenReviewerMessages(thread)
+	}
 	return reviewerSnapshot{
 		state:    reviewerThreadState(thread),
-		messages: flattenReviewerMessages(thread),
+		messages: messages,
 	}
 }
 
@@ -271,21 +286,17 @@ func flattenReviewerMessages(thread *leadcontrol.CodexThread) []reviewerStreamMe
 // Kept in sync with pr-review.md's first line.
 const reviewerPromptMarker = "## READ-ONLY PR REVIEWER"
 
-// trimReviewerPreamble drops the leading prompt bubble so the chat opens on the
-// actual review. It only skips leading `user` messages matching the prompt
-// marker and stops at the first non-match (in particular the first assistant
-// reply), so a real user message is never hidden.
+// trimReviewerPreamble drops the kickoff prompt bubble (and anything injected
+// before it — AGENTS.md / environment_context in Codex rollouts) so the chat
+// opens on the actual review. Real follow-up user messages after the prompt
+// stay visible.
 func trimReviewerPreamble(msgs []reviewerStreamMessage) []reviewerStreamMessage {
-	i := 0
-	for i < len(msgs) {
-		m := msgs[i]
+	for i, m := range msgs {
 		if m.Role == "user" && strings.HasPrefix(strings.TrimSpace(m.Text), reviewerPromptMarker) {
-			i++
-			continue
+			return msgs[i+1:]
 		}
-		break
 	}
-	return msgs[i:]
+	return msgs
 }
 
 func reviewerMessageFromItem(turnID string, item leadcontrol.CodexTurnItem) *reviewerStreamMessage {
@@ -300,6 +311,14 @@ func reviewerMessageFromItem(turnID string, item leadcontrol.CodexTurnItem) *rev
 		msg.Role = "user"
 	case "agentMessage":
 		msg.Role = "assistant"
+	case "commandExecution", "mcpToolCall", "fileChange", "webSearch", "dynamicToolCall":
+		tool := codexItemAsTool(item)
+		if tool == nil {
+			return nil
+		}
+		tool.TurnID = turnID
+		tool.ItemID = item.ID
+		return tool
 	default:
 		return nil
 	}
@@ -308,4 +327,84 @@ func reviewerMessageFromItem(turnID string, item leadcontrol.CodexTurnItem) *rev
 		return nil
 	}
 	return &msg
+}
+
+// codexItemAsTool maps Codex turn items that represent tool work into a
+// collapsed tool_use chat message. Unknown or empty items return nil.
+func codexItemAsTool(item leadcontrol.CodexTurnItem) *reviewerStreamMessage {
+	msg := &reviewerStreamMessage{
+		Role:      "assistant",
+		Kind:      "tool_use",
+		ToolUseID: item.ID,
+	}
+	switch item.Type {
+	case "commandExecution":
+		msg.ToolName = "exec"
+		msg.ToolInput = strings.TrimSpace(item.Command)
+		msg.ToolResult = item.AggregatedOutput
+	case "mcpToolCall":
+		name := strings.TrimSpace(item.Tool)
+		if item.Server != "" && name != "" {
+			name = item.Server + "/" + name
+		} else if name == "" {
+			name = strings.TrimSpace(item.Server)
+		}
+		if name == "" {
+			name = "mcp"
+		}
+		msg.ToolName = name
+		msg.ToolInput = rawJSONOrEmpty(item.Arguments)
+		if msg.ToolResult = rawJSONOrEmpty(item.Result); msg.ToolResult == "" {
+			msg.ToolResult = rawJSONOrEmpty(item.Error)
+		}
+	case "dynamicToolCall":
+		name := strings.TrimSpace(item.Tool)
+		if name == "" {
+			name = "tool"
+		}
+		msg.ToolName = name
+		msg.ToolInput = rawJSONOrEmpty(item.Arguments)
+		msg.ToolResult = rawJSONOrEmpty(item.Result)
+	case "fileChange":
+		msg.ToolName = "fileChange"
+		msg.ToolInput = codexFileChangeSummary(item.Changes)
+		msg.ToolResult = item.Status
+	case "webSearch":
+		msg.ToolName = "webSearch"
+		msg.ToolInput = strings.TrimSpace(item.Query)
+	default:
+		return nil
+	}
+	if strings.TrimSpace(msg.ToolName) == "" {
+		return nil
+	}
+	// The pill's label is its tool name for every kind above.
+	msg.Text = msg.ToolName
+	return msg
+}
+
+func rawJSONOrEmpty(raw json.RawMessage) string {
+	if len(raw) == 0 || string(raw) == "null" {
+		return ""
+	}
+	return string(raw)
+}
+
+func codexFileChangeSummary(changes []leadcontrol.CodexFileChange) string {
+	if len(changes) == 0 {
+		return ""
+	}
+	paths := make([]string, 0, len(changes))
+	for _, c := range changes {
+		p := strings.TrimSpace(c.Path)
+		if p == "" {
+			continue
+		}
+		if k := strings.TrimSpace(c.Kind); k != "" {
+			paths = append(paths, k+":"+p)
+			continue
+		}
+		paths = append(paths, p)
+	}
+	return strings.Join(paths, "\n")
 }

@@ -116,6 +116,39 @@
   outline-offset: -2px;
 }
 
+.archiveButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  align-self: center;
+  width: 1.25rem;
+  height: 1.25rem;
+  margin-right: 0.125rem;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm, 4px);
+  color: var(--color-text-tertiary);
+  background: transparent;
+  cursor: pointer;
+  opacity: 0;
+  transition:
+    opacity 0.15s ease,
+    color 0.15s ease,
+    background 0.15s ease;
+}
+
+.agentRow:hover .archiveButton,
+.archiveButton:focus-visible {
+  opacity: 1;
+}
+
+.archiveButton:hover,
+.archiveButton:focus-visible {
+  color: var(--color-danger, #dc2626);
+  background: color-mix(in srgb, var(--color-danger, #dc2626) 10%, transparent);
+}
+
 .dragHandle {
   display: flex;
   align-items: center;

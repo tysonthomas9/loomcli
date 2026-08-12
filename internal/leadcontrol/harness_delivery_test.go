@@ -142,6 +142,54 @@ func TestHarnessDeliveryWaitsForTurnInFlightThenDrains(t *testing.T) {
 	}
 }
 
+func TestHarnessDeliveryWaitsForInputRequestThenDrains(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	createHarnessLeadSession(t, st)
+	setHarnessRuntimeMetadata(t, st, RuntimeStatusWaitingUserInput)
+	fake := newFakeHarnessConversation()
+	fake.setInputPending(true)
+	handle := installFakeHarnessConversation(t, "lead-session", fake)
+	handle.observeConversationEvent(chat.ConversationEvent{
+		Type:  chat.EventInputRequest,
+		Input: &chat.InputRequest{ID: "trust-1", Kind: "trust_prompt"},
+	})
+
+	const message = "Task TASK-1 completed."
+	result, err := DeliverLeadMessage(ctx, st, "WS", "nova", message)
+	if err != nil {
+		t.Fatalf("DeliverLeadMessage() error = %v", err)
+	}
+	if result.State != DeliveryStatePending {
+		t.Fatalf("delivery state = %q, want pending", result.State)
+	}
+	if !strings.Contains(result.Reason, "interactive input") {
+		t.Fatalf("reason = %q, want interactive-input detail", result.Reason)
+	}
+	if got := fake.stdinBytes(); len(got) != 0 {
+		t.Fatalf("stdin while input request pending = %q, want no staged bytes", got)
+	}
+	if got := fake.sentTexts(); len(got) != 0 {
+		t.Fatalf("unexpected send while input request pending: %#v", got)
+	}
+
+	handle.observeConversationEvent(chat.ConversationEvent{
+		Type:  chat.EventInputResolved,
+		Input: &chat.InputRequest{ID: "trust-1"},
+	})
+	fake.setInputPending(false)
+	result, err = DeliverPendingLeadMessages(ctx, st, "WS", "nova")
+	if err != nil {
+		t.Fatalf("DeliverPendingLeadMessages() error = %v", err)
+	}
+	if result.State != DeliveryStateDelivered {
+		t.Fatalf("delivery state = %q, want delivered (reason: %s)", result.State, result.Reason)
+	}
+	if got := string(fake.stdinBytes()); got != message {
+		t.Fatalf("staged stdin after input resolution = %q, want queued message", got)
+	}
+}
+
 func TestHarnessDeliveryQuietGateHoldsRecentOutput(t *testing.T) {
 	ctx := context.Background()
 	st := memstore.New()
@@ -331,6 +379,38 @@ func TestLeadConversationHandleInFlightOverride(t *testing.T) {
 	}
 }
 
+func TestLeadConversationHandleTracksInputWithoutChangingTurnState(t *testing.T) {
+	fake := newFakeHarnessConversation()
+	handle := &leadConversationHandle{conv: fake}
+
+	// Populate Turn deliberately: the event discriminator, rather than a
+	// zero-value payload, must decide whether bookkeeping changes.
+	handle.observeConversationEvent(chat.ConversationEvent{
+		Type:  chat.EventInputRequest,
+		Input: &chat.InputRequest{ID: "trust-1"},
+		Turn:  chat.Turn{Role: chat.RoleAssistant, State: chat.TurnStatePending},
+	})
+	if handle.turnInFlight() {
+		t.Fatal("input request marked a turn in flight")
+	}
+	if !handle.hasPendingInput() {
+		t.Fatal("input request did not pause delivery")
+	}
+
+	handle.markTurnStarted()
+	handle.observeConversationEvent(chat.ConversationEvent{
+		Type:  chat.EventInputResolved,
+		Input: &chat.InputRequest{ID: "trust-1"},
+		Turn:  chat.Turn{Role: chat.RoleAssistant, State: chat.TurnStateComplete},
+	})
+	if !handle.turnInFlight() {
+		t.Fatal("input resolution completed the in-flight turn")
+	}
+	if handle.hasPendingInput() {
+		t.Fatal("input resolution did not resume delivery")
+	}
+}
+
 // --- helpers and fakes ---
 
 func createHarnessLeadSession(t *testing.T, st store.Store) {
@@ -396,11 +476,14 @@ type fakeHarnessConversation struct {
 	mu                    sync.Mutex
 	sends                 []string
 	stdin                 []byte
+	resizes               [][2]uint16
+	resizeErrs            []error
 	snapshot              wrapper.Snapshot
+	inputPending          bool
 	sendErr               error
 	sendBlocksUntilCancel bool
 	harnessSessionID      string
-	events                chan chat.TurnEvent
+	events                chan chat.ConversationEvent
 	waitCh                chan struct{}
 	waitResult            wrapper.Result
 	closed                bool
@@ -410,7 +493,7 @@ func newFakeHarnessConversation() *fakeHarnessConversation {
 	return &fakeHarnessConversation{
 		// Default: quiet long ago, unclassified — deliverable.
 		snapshot: wrapper.Snapshot{LastOutputAt: time.Now().Add(-time.Minute)},
-		events:   make(chan chat.TurnEvent, 8),
+		events:   make(chan chat.ConversationEvent, 8),
 		waitCh:   make(chan struct{}),
 	}
 }
@@ -433,8 +516,32 @@ func (f *fakeHarnessConversation) stdinBytes() []byte {
 	return append([]byte{}, f.stdin...)
 }
 
+func (f *fakeHarnessConversation) resizeCalls() [][2]uint16 {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([][2]uint16{}, f.resizes...)
+}
+
+func (f *fakeHarnessConversation) enqueueResizeErrors(errs ...error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.resizeErrs = append(f.resizeErrs, errs...)
+}
+
 func (f *fakeHarnessConversation) AcquireControl(context.Context) (func(), error) {
 	return func() {}, nil
+}
+
+func (f *fakeHarnessConversation) InputPending(context.Context) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.inputPending, nil
+}
+
+func (f *fakeHarnessConversation) setInputPending(pending bool) {
+	f.mu.Lock()
+	f.inputPending = pending
+	f.mu.Unlock()
 }
 
 func (f *fakeHarnessConversation) Send(ctx context.Context, text string) (string, error) {
@@ -471,7 +578,17 @@ func (f *fakeHarnessConversation) WriteStdin(p []byte) (int, error) {
 
 func (f *fakeHarnessConversation) AttachOutput(io.Writer) func() { return func() {} }
 
-func (f *fakeHarnessConversation) Resize(uint16, uint16) error { return nil }
+func (f *fakeHarnessConversation) Resize(cols, rows uint16) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.resizes = append(f.resizes, [2]uint16{cols, rows})
+	if len(f.resizeErrs) == 0 {
+		return nil
+	}
+	err := f.resizeErrs[0]
+	f.resizeErrs = f.resizeErrs[1:]
+	return err
+}
 
 func (f *fakeHarnessConversation) Snapshot() wrapper.Snapshot {
 	f.mu.Lock()
@@ -489,7 +606,7 @@ func (f *fakeHarnessConversation) HarnessSessionID() string {
 	return f.harnessSessionID
 }
 
-func (f *fakeHarnessConversation) Events() <-chan chat.TurnEvent { return f.events }
+func (f *fakeHarnessConversation) Events() <-chan chat.ConversationEvent { return f.events }
 
 func (f *fakeHarnessConversation) Wait() (wrapper.Result, error) {
 	<-f.waitCh

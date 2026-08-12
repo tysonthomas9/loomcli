@@ -36,6 +36,11 @@ import { restartAgent, startAgent, stopAgent, wsUrl } from "@/hooks/api";
 import { useToast } from "@/hooks/ui/useToast";
 import { type LoomAgentStatus, parseLoomStatus } from "@/types";
 import { isInteractiveAgent, isLeadRole } from "@/utils/agentRole";
+import {
+  agentDisplayRoleLabel,
+  agentDisplayTitle,
+  agentUsesLiteralTitle,
+} from "@/utils/agentDisplay";
 import { getCompactAvatarInitials } from "@/utils/compactAvatarInitials";
 import { getAvatarColor, shouldUseWhiteText } from "@/utils/colorUtils";
 
@@ -391,12 +396,6 @@ function EphemeralWorkerSummary({
   );
 }
 
-function formatHeaderRoleLabel(role: string): string {
-  const trimmed = role.trim();
-  if (!trimmed) return "";
-  return trimmed.charAt(0).toUpperCase() + trimmed.slice(1).toLowerCase();
-}
-
 function Header({
   agent,
   agentName,
@@ -431,7 +430,16 @@ function Header({
         ? `${failedInbox} failed message${failedInbox === 1 ? "" : "s"}`
         : "";
   const hideIdleLeadStatus = isLead && parsed.type === "idle";
-  const roleLabel = formatHeaderRoleLabel(role);
+  const titleAgent = agent ?? {
+    name: agentName,
+    branch: "",
+    status: "",
+    ahead: 0,
+    behind: 0,
+  };
+  const roleLabel = role ? agentDisplayRoleLabel(titleAgent) : "";
+  const title = agentDisplayTitle(titleAgent);
+  const literalTitle = agentUsesLiteralTitle(titleAgent);
   const metaSegments: Array<{ key: string; node: ReactNode }> = [];
 
   if (!hideIdleLeadStatus) {
@@ -576,10 +584,10 @@ function Header({
           style={{
             fontSize: 14,
             fontWeight: 700,
-            textTransform: "capitalize",
+            textTransform: literalTitle ? "none" : "capitalize",
           }}
         >
-          {agentName}
+          {title}
         </div>
         <div
           style={{
