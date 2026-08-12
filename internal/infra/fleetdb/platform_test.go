@@ -525,6 +525,43 @@ func TestPlatformClientFinishesDriverRunWithNeedsReviewStatus(t *testing.T) {
 	}
 }
 
+func TestPlatformClientDecodesTaskRunRepositorySet(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/api/v1/WS/task-runs/task-run-1" {
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.String())
+		}
+		writeJSON(t, w, map[string]any{
+			"workspace_key":  "WS",
+			"task_run_id":    "task-run-1",
+			"task_id":        "WS-1",
+			"status":         "running",
+			"repository_set": []string{"loom", "fleet-db"},
+		})
+	}))
+	defer ts.Close()
+
+	client, err := New(Config{BaseURL: ts.URL, Actor: "tester"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err := client.TaskRuns().Get(t.Context(), "WS", "task-run-1")
+	if err != nil {
+		t.Fatalf("Get task run: %v", err)
+	}
+
+	encoded, err := json.Marshal(run)
+	if err != nil {
+		t.Fatalf("marshal task run: %v", err)
+	}
+	var wire map[string]json.RawMessage
+	if err := json.Unmarshal(encoded, &wire); err != nil {
+		t.Fatalf("decode task run wire form: %v", err)
+	}
+	if got := string(wire["repository_set"]); got != `["loom","fleet-db"]` {
+		t.Fatalf("repository_set = %s, want %s", got, `["loom","fleet-db"]`)
+	}
+}
+
 func decodeJSONBody(t *testing.T, r *http.Request, out any) {
 	t.Helper()
 	if err := json.NewDecoder(r.Body).Decode(out); err != nil {

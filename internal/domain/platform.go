@@ -501,6 +501,7 @@ type TaskRun struct {
 	DriverRunID      string           `json:"driver_run_id,omitempty"`
 	DriverStepID     string           `json:"driver_step_id,omitempty"`
 	TaskID           string           `json:"task_id"`
+	RepositorySet    []string         `json:"repository_set"`
 	WorkerProfileID  string           `json:"worker_profile_id,omitempty"`
 	Runner           string           `json:"runner,omitempty"`
 	RunnerRef        string           `json:"runner_ref,omitempty"`

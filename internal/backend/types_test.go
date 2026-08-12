@@ -66,6 +66,27 @@ func TestIssueData_JSONRoundTrip(t *testing.T) {
 	}
 }
 
+func TestCreateParamsFleetCreateBodyIncludesSelectedRepositories(t *testing.T) {
+	body := (CreateParams{
+		Title:                "Cross-repository task",
+		IssueType:            "task",
+		SourceRepo:           "legacy-source-id",
+		PrimaryRepository:    "loom",
+		SelectedRepositories: []string{"fleet-db"},
+	}).FleetCreateBody()
+	if got := body["primary_repository"]; got != "loom" {
+		t.Fatalf("primary_repository = %#v, want loom", got)
+	}
+
+	encoded, err := json.Marshal(body["selected_repositories"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := string(encoded); got != `["fleet-db"]` {
+		t.Fatalf("selected_repositories = %s, want %s", got, `["fleet-db"]`)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Section 2: Priority zero-value must serialize (no omitempty)
 // ---------------------------------------------------------------------------
