@@ -88,6 +88,7 @@ export function TerminalPane({
         ref={instanceRef}
         sessionName={tab.sessionName}
         isActive={isActive}
+        backendName={tab.backendName}
         onConnectionStateChange={onConnectionStateChange}
         onReconnectStateChange={onReconnectStateChange}
         onOutput={onOutput}

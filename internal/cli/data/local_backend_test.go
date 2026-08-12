@@ -26,6 +26,7 @@ type localBackendStub struct {
 	createItem  *backend.IssueData
 	closeResult *backend.CloseResult
 	closeErr    error
+	updateErr   error
 }
 
 func (b *localBackendStub) record(method, id string, args interface{}) {
@@ -80,7 +81,7 @@ func (b *localBackendStub) Create(_ context.Context, params backend.CreateParams
 }
 func (b *localBackendStub) Update(_ context.Context, id string, params backend.UpdateParams) error {
 	b.record("Update", id, params)
-	return nil
+	return b.updateErr
 }
 
 func (b *localBackendStub) ClaimIssue(_ context.Context, id string, lockTTL time.Duration) error {

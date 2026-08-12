@@ -20,7 +20,15 @@ const mocks = vi.hoisted(() => {
     startWorkflowRun: vi.fn(),
     localSettings: { settings: null },
     workspaceContext: { repos: [] },
-    agents: [] as Array<Record<string, unknown>>,
+    agents: [] as Array<{
+      name: string;
+      role?: string;
+      repo?: string;
+      status?: string;
+      branch?: string;
+      cross_repo?: boolean;
+      worktree_path?: string;
+    }>,
     agentStore: {
       getState: () => ({ fetchData }),
     },

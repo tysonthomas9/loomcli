@@ -1,17 +1,12 @@
 /**
  * TerminalInstance component styles.
- * wterm-backed terminal pane filling its parent container.
+ * Terminal renderer pane filling its parent container.
  *
  * Layout comes from the flex chain:
  *   .terminalsContainer (flex column, min-height:0)
  *     → .terminalPane (display:flex, height:100%)
  *       → .wrapper (flex:1, min-height:0)
- *         → .container / .wterm (height:100%)
- *
- * We keep the `.wterm` element as a stable scroll container from the start
- * instead of waiting for wterm's `.has-scrollback` toggle. That avoids
- * viewport churn when a session first accumulates scrollback and makes
- * restored tabs behave consistently with fresh shells.
+ *         → .xtermContainer (height:100%)
  */
 
 .wrapper {
@@ -20,65 +15,39 @@
   position: relative;
 }
 
-.container {
+.xtermContainer {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  background: var(--terminal-bg);
+  overflow: hidden;
+}
+
+.xtermContainer :global(.xterm),
+.xtermContainer :global(.xterm-screen) {
   width: 100%;
   height: 100%;
 }
 
-/* Override wterm's opinionated chrome and map its theme vars onto loom's
- * --terminal-* tokens so the terminal follows :root / [data-theme="light"]
- * automatically. */
-.container:global(.wterm) {
-  box-sizing: border-box;
-  padding: 4px 0 10px;
-  border-radius: 0;
-  box-shadow: none;
-  background: var(--terminal-bg);
-  color: var(--terminal-fg);
-  overflow-x: hidden;
-  overflow-y: auto;
+.xtermContainer :global(.xterm-viewport) {
   overscroll-behavior: contain;
-  scrollbar-gutter: auto;
-  scrollbar-width: none;
-
-  --term-bg: var(--terminal-bg);
-  --term-fg: var(--terminal-fg);
-  --term-cursor: var(--terminal-cursor);
-  --term-selection-bg: var(--terminal-selection);
-  --term-font-family: var(--terminal-font-family, var(--font-family-mono));
-  --term-font-size: var(--terminal-font-size, 12px);
-  --term-line-height: 1.2;
-  --term-row-height: calc(var(--term-font-size) * var(--term-line-height));
+  scrollbar-width: thin;
+  scrollbar-color: var(--terminal-scrollbar-thumb) var(--terminal-bg);
 }
 
-.container:global(.wterm) ::selection {
-  background: var(--terminal-selection);
+.xtermContainer :global(.xterm-viewport)::-webkit-scrollbar {
+  width: 8px;
 }
 
-.container:global(.wterm.has-scrollback) {
-  overflow-y: auto;
-}
-
-.container:global(.wterm) :global(.term-grid),
-.container:global(.wterm) :global(.term-row) {
-  contain: none;
-  will-change: auto;
-}
-
-.container:global(.wterm)::-webkit-scrollbar {
-  width: 0;
-  height: 0;
-}
-
-.container:global(.wterm)::-webkit-scrollbar-track {
+.xtermContainer :global(.xterm-viewport)::-webkit-scrollbar-track {
   background: var(--terminal-bg);
 }
 
-.container:global(.wterm)::-webkit-scrollbar-thumb {
+.xtermContainer :global(.xterm-viewport)::-webkit-scrollbar-thumb {
   background: var(--terminal-scrollbar-thumb);
   border-radius: 4px;
 }
 
-.container:global(.wterm)::-webkit-scrollbar-thumb:hover {
+.xtermContainer :global(.xterm-viewport)::-webkit-scrollbar-thumb:hover {
   background: var(--terminal-scrollbar-thumb-hover);
 }

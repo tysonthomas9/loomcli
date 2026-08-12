@@ -109,16 +109,35 @@ describe("KeyboardShortcutProvider", () => {
       expect(onWorkspaceSwitcher).toHaveBeenCalledTimes(1);
     });
 
-    it("does not steal Ctrl+K from wterm input", () => {
+    it("does not steal Ctrl+K from xterm input", () => {
       const onWorkspaceSwitcher = vi.fn();
 
       render(
         <KeyboardShortcutProvider onWorkspaceSwitcher={onWorkspaceSwitcher}>
-          <div className="wterm" data-testid="terminal-target" />
+          <div className="xterm" data-testid="terminal-target" />
         </KeyboardShortcutProvider>,
       );
 
       fireEvent.keyDown(screen.getByTestId("terminal-target"), {
+        key: "k",
+        ctrlKey: true,
+      });
+
+      expect(onWorkspaceSwitcher).not.toHaveBeenCalled();
+    });
+
+    it("does not steal Ctrl+K from the renderer-neutral terminal surface", () => {
+      const onWorkspaceSwitcher = vi.fn();
+
+      render(
+        <KeyboardShortcutProvider onWorkspaceSwitcher={onWorkspaceSwitcher}>
+          <div data-terminal-input>
+            <textarea data-testid="xterm-input" />
+          </div>
+        </KeyboardShortcutProvider>,
+      );
+
+      fireEvent.keyDown(screen.getByTestId("xterm-input"), {
         key: "k",
         ctrlKey: true,
       });
@@ -239,14 +258,14 @@ describe("KeyboardShortcutProvider", () => {
       expect(onWorkspacePositionalSwitch).toHaveBeenCalledWith(1);
     });
 
-    it("does not steal positional shortcuts from wterm input", () => {
+    it("does not steal positional shortcuts from xterm input", () => {
       const onWorkspacePositionalSwitch = vi.fn();
 
       render(
         <KeyboardShortcutProvider
           onWorkspacePositionalSwitch={onWorkspacePositionalSwitch}
         >
-          <div className="wterm" data-testid="terminal-target" />
+          <div className="xterm" data-testid="terminal-target" />
         </KeyboardShortcutProvider>,
       );
 
@@ -297,12 +316,12 @@ describe("KeyboardShortcutProvider", () => {
       expect(onWorkspacePositionalSwitch).not.toHaveBeenCalled();
     });
 
-    it("plain digit keys do not switch views from wterm input", () => {
+    it("plain digit keys do not switch views from xterm input", () => {
       const onViewChange = vi.fn();
 
       render(
         <KeyboardShortcutProvider onViewChange={onViewChange}>
-          <div className="wterm" data-testid="terminal-target" />
+          <div className="xterm" data-testid="terminal-target" />
         </KeyboardShortcutProvider>,
       );
 

@@ -26,7 +26,7 @@ export { gitPushAll } from "@/api/workspace";
 
 // Terminal sub-module functions not in the @/api barrel.
 // Most tmux-era terminal APIs (spawn, restart, kill, seed, lead-session,
-// close-all, export, scrollback) were removed with the wterm migration.
+// close-all, export, scrollback) were removed during terminal simplification.
 export {
   patchTerminalState,
   deleteTabMetadata,

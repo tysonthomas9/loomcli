@@ -2,6 +2,7 @@ package leadcontrol
 
 import (
 	"context"
+	"errors"
 	"io"
 
 	"github.com/olesho/harness-wrapper/pkg/chat"
@@ -13,6 +14,7 @@ import (
 // an interface so tests can inject fakes, mirroring dialCodexAppServerClient.
 type harnessConversation interface {
 	AcquireControl(ctx context.Context) (release func(), err error)
+	InputPending(ctx context.Context) (bool, error)
 	Send(ctx context.Context, text string) (turnID string, err error)
 	WriteStdin(p []byte) (int, error)
 	AttachOutput(w io.Writer) func()
@@ -21,7 +23,7 @@ type harnessConversation interface {
 	PID() int
 	ChatSessionID() string
 	HarnessSessionID() string
-	Events() <-chan chat.TurnEvent
+	Events() <-chan chat.ConversationEvent
 	Wait() (wrapper.Result, error)
 	Close(ctx context.Context) error
 }
@@ -47,6 +49,31 @@ func (c *chatHarnessConversation) AcquireControl(ctx context.Context) (func(), e
 	return c.conv.AcquireControl(ctx)
 }
 
+// harnessInputStateProbeID cannot collide with the supported adapters' input
+// IDs (fixed-width printable hashes). Conversation.Answer checks the request ID
+// before translating an answer into keystrokes, so this is a side-effect-free,
+// authoritative pending-input probe while the caller holds the control token.
+const harnessInputStateProbeID = "\x00loom-input-state-probe\x00"
+
+func (c *chatHarnessConversation) InputPending(ctx context.Context) (bool, error) {
+	return inputPendingFromProbeError(c.conv.Answer(ctx, harnessInputStateProbeID, chat.InputAnswer{}))
+}
+
+func inputPendingFromProbeError(err error) (bool, error) {
+	switch {
+	case errors.Is(err, chat.ErrNoInputPending):
+		return false, nil
+	case errors.Is(err, chat.ErrStaleInputRequest):
+		return true, nil
+	case err != nil:
+		return false, err
+	default:
+		// Reaching this would mean an adapter emitted the reserved probe ID and
+		// accepted an empty answer. Fail closed at the Loom boundary.
+		return true, nil
+	}
+}
+
 func (c *chatHarnessConversation) Send(ctx context.Context, text string) (string, error) {
 	return c.conv.Send(ctx, text)
 }
@@ -60,7 +87,7 @@ func (c *chatHarnessConversation) AttachOutput(w io.Writer) func() {
 }
 
 func (c *chatHarnessConversation) Resize(cols, rows uint16) error {
-	return c.conv.Wrapper().Resize(cols, rows)
+	return c.conv.Resize(cols, rows)
 }
 
 func (c *chatHarnessConversation) Snapshot() wrapper.Snapshot {
@@ -82,7 +109,7 @@ func (c *chatHarnessConversation) HarnessSessionID() string {
 	return sess.HarnessSessionID
 }
 
-func (c *chatHarnessConversation) Events() <-chan chat.TurnEvent { return c.conv.Events() }
+func (c *chatHarnessConversation) Events() <-chan chat.ConversationEvent { return c.conv.Events() }
 
 func (c *chatHarnessConversation) Wait() (wrapper.Result, error) { return c.conv.Wrapper().Wait() }
 
