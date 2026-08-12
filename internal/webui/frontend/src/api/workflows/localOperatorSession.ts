@@ -118,6 +118,33 @@ export function hasLocalWorkflowLifecycleSession(workspace: string): boolean {
   return getLocalWorkflowLifecycleBearer(workspace) !== null;
 }
 
+export interface LocalOperatorRequestOptions {
+  headers?: Record<string, string>;
+  timeout?: number;
+}
+
+/**
+ * Add the process-local, workspace-bound operator bearer to an explicitly
+ * operator-gated mutation. The bearer is never installed as global API auth:
+ * reads and non-operator mutations therefore cannot receive it accidentally.
+ */
+export function localOperatorRequestOptions(
+  workspace: string,
+  base: LocalOperatorRequestOptions = {},
+): LocalOperatorRequestOptions | undefined {
+  const bearer = getLocalWorkflowLifecycleBearer(workspace);
+  if (!bearer) {
+    return Object.keys(base).length > 0 ? base : undefined;
+  }
+  return {
+    ...base,
+    headers: {
+      ...base.headers,
+      Authorization: `Bearer ${bearer}`,
+    },
+  };
+}
+
 export function clearLocalWorkflowLifecycleSession(): void {
   lifecycleBearer = null;
   lifecycleWorkspace = null;

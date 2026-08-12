@@ -30,6 +30,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/serve/workspacemgr"
 	driverexecutor "github.com/tysonthomas9/loomcli/internal/driver"
 	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/trigger"
 	"github.com/tysonthomas9/loomcli/internal/webui"
 	webuiapp "github.com/tysonthomas9/loomcli/internal/webui/app"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
@@ -50,7 +51,6 @@ const driverExecutorAllWorkspaces = "*"
 const envLoomDriverTaskWorkerConcurrency = "LOOM_DRIVER_TASK_WORKER_CONCURRENCY"
 const envLoomDriverTaskRunMaxAttempts = "LOOM_DRIVER_TASK_RUN_MAX_ATTEMPTS"
 const envLoomDriverStaleTaskMaxAge = "LOOM_DRIVER_STALE_TASK_MAX_AGE"
-const envLoomTriggerCronInterval = "LOOM_TRIGGER_CRON_INTERVAL"
 const envLoomIssueBridgeInterval = "LOOM_ISSUE_BRIDGE_INTERVAL"
 const envLoomIssueBridgeDisabled = "LOOM_ISSUE_BRIDGE_DISABLED"
 const envLoomIssueBridgeStatePath = "LOOM_ISSUE_BRIDGE_STATE_PATH"
@@ -130,7 +130,6 @@ ENVIRONMENT VARIABLES
   LOOM_DRIVER_EXECUTOR_WORKSPACE  Scope for serve's driver-run automation loops (cron scheduler, outbox/delivery/stale/await sweepers, run executor + task worker): unset inherits LOOM_WORKSPACE; "*" spans every workspace; a name scopes to that workspace
   LOOM_DRIVER_TASK_WORKER_CONCURRENCY  Local TaskRun worker loops (default: 2)
   LOOM_DRIVER_TASK_RUN_MAX_ATTEMPTS     TaskRun attempts before blocking failed (default: 2)
-  LOOM_TRIGGER_CRON_INTERVAL            Cron trigger sweep interval in seconds (default: 30)
   LOOM_ISSUE_BRIDGE_INTERVAL            Issue-journal bridge poll interval in seconds (default: 2)
   LOOM_ISSUE_BRIDGE_DISABLED            Disable the issue-journal bridge loop (set 1/true)
   LOOM_ISSUE_BRIDGE_STATE_PATH          Bridge cursor state file (default: <state dir>/issue-bridge-cursor.json)
@@ -188,7 +187,7 @@ func registerServeAuthFlags() {
 	serveCmd.Flags().BoolVar(&serveAuthAllowInsecure, "auth-allow-insecure", false, "Allow HTTP for non-loopback --auth-url (INSECURE, for Docker internal networks only)")
 }
 
-//nolint:funlen // Serve startup wires process-wide dependencies in a fixed order.
+//nolint:cyclop,funlen // Serve startup wires process-wide dependencies and shutdown branches in a fixed order.
 func runServe(cmd *cobra.Command, args []string) {
 	configureServeLocalRuntimeMode()
 
@@ -197,6 +196,7 @@ func runServe(cmd *cobra.Command, args []string) {
 
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
+	defer signal.Stop(stop)
 
 	daemonWeStarted := ensureIssueBackend()
 	if daemonWeStarted {
@@ -245,11 +245,8 @@ func runServe(cmd *cobra.Command, args []string) {
 	if err := workspacemgr.EnsurePromptAgentIdentityRecords(ctx, storeHandle.Store); err != nil {
 		slog.Warn("prompt-agent identity backfill failed", "err", err)
 	}
-	startDriverExecutorIfEnabled(ctx, storeHandle.Store)
 	startStaleTaskSweeper(ctx, storeHandle.Store)
 	startOutboxDispatcher(ctx, storeHandle.Store)
-	startTriggerCronScheduler(ctx, storeHandle.Store)
-	startTriggerDeliverySweeper(ctx, storeHandle.Store)
 	startAwaitTimeoutSweeper(ctx, storeHandle.Store)
 	issueBackendFn := cli.WorkspaceAwareIssueBackendForConfig(
 		storeHandle.URL(),
@@ -259,7 +256,7 @@ func runServe(cmd *cobra.Command, args []string) {
 	// task.ready payload enrichment: an issue.update journal delta can't say
 	// whether the card has a design, so the bridge looks the live card up
 	// through the same per-workspace issue backend the monitor uses.
-	startIssueJournalBridge(ctx, storeHandle.Store, func(lctx context.Context, ws, issueID string) (string, []string, string, error) {
+	issueLookup := func(lctx context.Context, ws, issueID string) (string, []string, string, error) {
 		detail, err := issueBackendFn(middleware.WithWorkspace(lctx, ws)).Get(lctx, issueID)
 		if err != nil {
 			return "", nil, "", err
@@ -268,23 +265,59 @@ func runServe(cmd *cobra.Command, args []string) {
 			return "", nil, "", fmt.Errorf("issue %q not found in workspace %q", issueID, ws)
 		}
 		return detail.Design, detail.Labels, detail.IssueType, nil
-	})
+	}
 	monitorDefaultWorkspace := resolveMonitorCollectorWorkspace(storeHandle.Store, fleetState.clientCfg.Workspace)
 	collectDataFn := buildMonitorCollectDataFn(monitorDefaultWorkspace, issueBackendFn)
 	monitorHandlers := buildMonitorHandlers(collectDataFn, staleDetectorHandler, storeHandle.Store, issueBackendFn, monitorDefaultWorkspace)
+	cfg, automationCapability, err := buildServerConfig(monitorHandlers, fleetState, storeHandle)
+	if err != nil {
+		log.Fatalf("failed to compose serve capabilities: %v", err)
+	}
+	var issueJournalSource trigger.InternalEventEmitter
+	if automationCapability != nil {
+		issueJournalSource = serveadapter.NewAutomationIssueJournalEmitter(
+			automationCapability.IssueJournalEmitter(),
+			&trigger.AwaitMatcher{Store: storeHandle.Store},
+		)
+	}
+	var runOutcomes driverexecutor.RunOutcomePublisher
+	if automationCapability != nil {
+		runOutcomes = automationCapability.RunOutcomePublisher()
+	}
+	startDriverExecutorIfEnabled(ctx, storeHandle.Store, runOutcomes)
+	startIssueJournalBridge(ctx, storeHandle.Store, issueLookup, issueJournalSource)
+	runtimeHost, err := serveadapter.BuildServeRuntimeHost(
+		storeHandle.Store.DriverRuns(), storeHandle.Store.Awaits(),
+		storeHandle.Store.TriggerEvents(), storeHandle.Store.Workspaces(),
+		runOutcomes, driverAutomationWorkspaceScope(), automationCapability,
+	)
+	if err != nil {
+		log.Fatalf("failed to compose platform runtime: %v", err)
+	}
+	if err := runtimeHost.Start(ctx); err != nil {
+		log.Fatalf("failed to start platform runtime: %v", err)
+	}
 
 	webuiErr := make(chan error, 1)
 	go func() {
-		cfg, err := buildServerConfig(monitorHandlers, fleetState, storeHandle)
-		if err != nil {
-			webuiErr <- err
-			return
-		}
 		webuiErr <- webuiapp.StartServer(ctx, cfg)
 	}()
 
 	logServerStartup()
-	awaitShutdown(cmd, stop, webuiErr, cancel)
+	serveErr := awaitShutdown(stop, webuiErr, cancel)
+	stopContext, stopCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	if err := runtimeHost.Stop(stopContext); err != nil {
+		slog.Error("platform runtime did not stop cleanly", "err", err)
+	}
+	stopCancel()
+	if serveErr != nil {
+		cmd.PrintErrf("Server error: %v\n", serveErr)
+		_ = storeHandle.Close()
+		if daemonWeStarted {
+			stopIssueBackend()
+		}
+		os.Exit(1)
+	}
 }
 
 func configureServeLocalRuntimeMode() {
@@ -339,7 +372,7 @@ func openServeStore(ctx context.Context, fs fleetState) (*bootstrap.StoreHandle,
 	return cmdstore.OpenStoreWithCapabilities(ctx, required)
 }
 
-func startDriverExecutorIfEnabled(ctx context.Context, st store.Store) {
+func startDriverExecutorIfEnabled(ctx context.Context, st store.Store, runOutcomes driverexecutor.RunOutcomePublisher) {
 	if !driverExecutorEnabled() || st == nil {
 		return
 	}
@@ -348,7 +381,7 @@ func startDriverExecutorIfEnabled(ctx context.Context, st store.Store) {
 		slog.Error("driver executor disabled: cannot resolve work dir", "err", err)
 		return
 	}
-	executor, ok := buildDriverExecutor(st, workDir)
+	executor, ok := buildDriverExecutor(st, workDir, runOutcomes)
 	if !ok {
 		return
 	}
@@ -396,7 +429,7 @@ func startDriverExecutorIfEnabled(ctx context.Context, st store.Store) {
 // workflow bundles in rootless containers; the default stays the local
 // node-process launcher. An invalid sandbox configuration disables the
 // executor (fail closed) rather than silently degrading isolation.
-func buildDriverExecutor(st store.Store, workDir string) (*driverexecutor.Executor, bool) {
+func buildDriverExecutor(st store.Store, workDir string, runOutcomes driverexecutor.RunOutcomePublisher) (*driverexecutor.Executor, bool) {
 	sandboxLauncher, err := driverexecutor.ResolveSandboxLauncher()
 	if err != nil {
 		slog.Error("driver executor disabled: invalid sandbox configuration", "err", err)
@@ -420,6 +453,7 @@ func buildDriverExecutor(st store.Store, workDir string) (*driverexecutor.Execut
 		APIToken:        driverAPIToken(),
 		RunTokenKey:     driverRunTokenKey(),
 		SandboxLauncher: sandboxLauncher,
+		RunOutcomes:     runOutcomes,
 	}
 	workspaceScope := executor.WorkspaceKey
 	if workspaceScope == "" {
@@ -686,7 +720,17 @@ func buildMonitorHandlers(collectDataFn metricscmd.CollectDataFn, staleDetectorH
 	}
 }
 
-func buildServerConfig(monitorHandlers webui.MonitorHandlers, fs fleetState, storeHandle *bootstrap.StoreHandle) (webui.ServerConfig, error) {
+// automationWebCapabilityView deliberately narrows the concrete serve
+// capability before it crosses into the web application. Embedding the web
+// interface (rather than the concrete pointer) means its promoted method set
+// cannot be type-asserted back to issue-journal, run-outcome, or runtime ports.
+type automationWebCapabilityView struct{ webui.AutomationCapability }
+
+func buildServerConfig(
+	monitorHandlers webui.MonitorHandlers,
+	fs fleetState,
+	storeHandle *bootstrap.StoreHandle,
+) (webui.ServerConfig, *serveadapter.AutomationCapability, error) {
 	gitOps := opsimpl.NewGitOps()
 	resolvedBackend := cli.ResolveBackendName()
 	log.Printf("Terminal backend: %s", resolvedBackend)
@@ -710,26 +754,43 @@ func buildServerConfig(monitorHandlers webui.MonitorHandlers, fs fleetState, sto
 	}
 	applyFleetConfig(&cfg, fs)
 	applyWorkspaceConfig(&cfg)
+	module, err := buildServeWorkflowCatalogModule(cfg, storeHandle)
+	if err != nil {
+		return webui.ServerConfig{}, nil, err
+	}
+	var automationCapability *serveadapter.AutomationCapability
+	if module != nil {
+		cfg.WorkflowCatalogModule = module
+		automationCapability = module.AutomationCapability()
+		if automationCapability != nil {
+			cfg.AutomationCapability = automationWebCapabilityView{AutomationCapability: automationCapability}
+		}
+	}
+	applyCORSConfig(&cfg)
+	return cfg, automationCapability, nil
+}
+
+func buildServeWorkflowCatalogModule(
+	cfg webui.ServerConfig,
+	storeHandle *bootstrap.StoreHandle,
+) (*serveadapter.WorkflowCatalogModule, error) {
 	enabled, err := serveadapter.WorkflowCatalogEnabled(cfg.ExtAuthURL != "", cfg.WorkspaceRoleResolver != nil)
 	if err != nil {
-		return webui.ServerConfig{}, fmt.Errorf("configure Workflow Catalog: %w", err)
+		return nil, fmt.Errorf("configure Workflow Catalog: %w", err)
 	}
-	module, err := serveadapter.BuildWorkflowCatalogModule(serveadapter.WorkflowCatalogConfig{
+	automationEnabled, err := serveadapter.AutomationEnabled(cfg.ExtAuthURL != "", cfg.WorkspaceRoleResolver != nil)
+	if err != nil {
+		return nil, fmt.Errorf("configure Automation: %w", err)
+	}
+	return serveadapter.BuildWorkflowCatalogModule(serveadapter.WorkflowCatalogConfig{
 		Enabled:               enabled,
+		AutomationEnabled:     automationEnabled,
 		StoreHandle:           storeHandle,
 		RuntimeDir:            cli.GetWorkspaceRuntimeDir(),
-		Workspace:             cfg.InitialWorkspaceID,
+		Workspace:             driverAutomationWorkspaceScope(),
 		ExternalAuth:          cfg.ExtAuthURL != "",
 		WorkspaceRoleResolver: cfg.WorkspaceRoleResolver,
 	})
-	if err != nil {
-		return webui.ServerConfig{}, err
-	}
-	if module != nil {
-		cfg.WorkflowCatalogModule = module
-	}
-	applyCORSConfig(&cfg)
-	return cfg, nil
 }
 
 func buildCoreServerConfig(monitorHandlers webui.MonitorHandlers, gitOps *opsimpl.GitOpsImpl, backend string) webui.ServerConfig {
@@ -893,24 +954,23 @@ func logServerStartup() {
 	}
 }
 
-func awaitShutdown(cmd *cobra.Command, stop chan os.Signal, webuiErr chan error, cancel context.CancelFunc) {
+func awaitShutdown(stop chan os.Signal, webuiErr chan error, cancel context.CancelFunc) error {
 	select {
 	case <-stop:
 		log.Println("Shutting down server...")
 	case err := <-webuiErr:
-		if err != nil {
-			cmd.PrintErrf("Server error: %v\n", err)
-			cancel()
-			os.Exit(1)
-		}
+		cancel()
+		return err
 	}
 
 	cancel()
 
 	select {
-	case <-webuiErr:
+	case err := <-webuiErr:
+		return err
 	case <-time.After(10 * time.Second):
 		log.Printf("Warning: server did not shut down within timeout")
+		return nil
 	}
 }
 

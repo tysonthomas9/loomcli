@@ -1,6 +1,6 @@
 # Migration Plan
 
-- **Status:** Reviewed — Phase 2 complete; Phase 3 is next
+- **Status:** Reviewed — Phase 3 implementation and paired validation complete; Terra export not recorded
 - **Strategy:** Incremental vertical extraction aligned with active product work; no standalone big-bang reorganization
 - **Migration:** [Modular Monolith Migration](README.md)
 
@@ -130,12 +130,29 @@ Agents is deliberately not first: it currently sits at the collision point of in
 
 ## Phase 3 — Automation and custom-driver lanes
 
+**Architecture activated:** The public Automation root, its 14 mutation
+contracts, named ingestion/event workflows, durable FleetDB operations, and
+runtime-host components are implemented and the graph is ratcheted to
+`completed_phase: 3`. Architecture checks, focused suites, public E2Es,
+performance sampling, the contract checksum, and checkout-scoped generic plus
+webhook local-mode verifiers and the authenticated browser
+create/activate/manual-run/history journey pass. The final post-correction
+FleetDB and Loom aggregate gates also pass; see the [Phase 3 evidence](08-phase-3-decisions-and-evidence.md).
+Source activation alone is not a substitute for that proof. GPT-5.6 Terra review is
+not recorded because exporting the local screenshots to an external model
+awaits explicit informed approval; this is not a product failure.
+
 - Extract TriggerBinding, Event, Delivery, cron, and webhook application APIs.
 - Centralize actor filtering, hop depth, and idempotency in one admission command.
 - Register Automation schedules and retry components with the runtime host.
-- Adopt the resumable SSE mutation direction in a separate behavior-change PR with version-skew and rollback proof; do not introduce another event bus.
+- Resumable SSE is not implemented, validated, or claimed by Phase 3. Existing SSE behavior remains unchanged. The work is assigned to a separately reviewed behavior-changing follow-up branch/PR that must define reconnect and replay semantics, persistence and offset ownership, version skew, rollback, and end-to-end proof. Partial SSE plumbing does not count toward Phase 3 completion.
 - Deliver new custom-driver lanes through the module API rather than pausing product work for a directory rewrite.
 - Keep Workflow Catalog immutable-version/trust policy separate from Automation matching/delivery policy.
+- Close the generic await split-commit hazard with one Execution-owned
+  resolve-and-resume command, Redis/Postgres parity, and an always-required
+  `execution.await_atomic_resume.v1` readiness key. Exact replay must converge
+  a suspended parent after a lost response; no legacy resolve-then-resume
+  fallback is allowed.
 
 ## Phase 4 — Execution replacement and supervisor-disabled operation
 

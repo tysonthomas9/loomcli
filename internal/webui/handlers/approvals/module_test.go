@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/driver"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
@@ -96,6 +97,43 @@ func (h *approvalsHarness) suspendedRun(t *testing.T, runID, pattern string, act
 	return key
 }
 
+// pendingCompositionAwait creates a real parent/child run pair and drives
+// workflows/await through its pending suspension path.
+func (h *approvalsHarness) pendingCompositionAwait(t *testing.T, parentRunID, childRunID string) string {
+	t.Helper()
+	ctx := context.Background()
+	if _, err := h.store.DriverRuns().Create(ctx, store.DriverRunCreate{
+		WorkspaceKey: approvalsTestWS, RunID: parentRunID, DriverID: "approval-gate",
+		DriverVersionID: "v1", Entrypoint: "run",
+	}); err != nil {
+		t.Fatalf("Create composition parent: %v", err)
+	}
+	parent, err := h.store.DriverRuns().Claim(ctx, approvalsTestWS, parentRunID, "node-parent", "lease-"+parentRunID)
+	if err != nil {
+		t.Fatalf("Claim composition parent: %v", err)
+	}
+	if _, err := h.store.DriverRuns().Create(ctx, store.DriverRunCreate{
+		WorkspaceKey: approvalsTestWS, RunID: childRunID, DriverID: "approval-gate",
+		DriverVersionID: "v1", Entrypoint: "run", SourceKind: driver.ChildRunSourceKind,
+		SourceRef: parentRunID, ParentRunID: parentRunID,
+	}); err != nil {
+		t.Fatalf("Create composition child: %v", err)
+	}
+	outcome, _, err := driver.AwaitChildWorkflow(ctx, h.store, driver.AwaitChildWorkflowOptions{
+		WorkspaceKey: approvalsTestWS, RunID: parent.RunID, NodeID: parent.NodeID,
+		LeaseID: parent.LeaseID, FencingToken: parent.FencingToken,
+		ChildRunID: childRunID, TimeoutMs: time.Minute.Milliseconds(), AwaitIndex: 1,
+	})
+	if err != nil || outcome == nil || outcome.Status != driver.AwaitOutcomeSuspended {
+		t.Fatalf("AwaitChildWorkflow = %+v, %v; want suspended", outcome, err)
+	}
+	if outcome.Instance == nil || len(outcome.Instance.ActorAllow) != 1 ||
+		outcome.Instance.ActorAllow[0] != driver.RunFinishedActor {
+		t.Fatalf("composition await = %+v, want actorAllow [%q]", outcome.Instance, driver.RunFinishedActor)
+	}
+	return domain.AwaitInstanceKey(parentRunID, 1)
+}
+
 type approvalCall struct {
 	user  string
 	email string
@@ -161,6 +199,8 @@ func TestApprovalValidation(t *testing.T) {
 		{name: "blank subject", body: map[string]any{"subjectRef": "   "}},
 		{name: "bad decision", body: map[string]any{"subjectRef": "acme/widgets#7@shaA", "decision": "maybe"}},
 		{name: "blank event type renders unscoped", body: map[string]any{"subjectRef": " ", "eventType": " "}},
+		{name: "reserved lifecycle event type", body: map[string]any{"subjectRef": "run-child", "eventType": driver.RunFinishedEventType}},
+		{name: "custom non-approval event type", body: map[string]any{"subjectRef": "deploy-1", "eventType": "approval.granted"}},
 	}
 	h := newApprovalsHarness(t)
 	for _, tc := range cases {
@@ -173,6 +213,79 @@ func TestApprovalValidation(t *testing.T) {
 	}
 	if events := h.journalEvents(t); len(events) != 0 {
 		t.Fatalf("journal = %d events after rejected validations, want none", len(events))
+	}
+}
+
+func TestApprovalRejectsReservedSystemSessionActors(t *testing.T) {
+	h := newApprovalsHarness(t)
+	for _, actor := range []string{"system", "system:cron"} {
+		t.Run(actor, func(t *testing.T) {
+			resp, decoded := h.post(t, approvalCall{
+				user: actor,
+				body: map[string]any{"subjectRef": "deploy-1"},
+			})
+			errorBody, _ := decoded["error"].(map[string]any)
+			if resp.StatusCode != http.StatusForbidden || errorBody["code"] != "reserved_actor_ref" {
+				t.Fatalf("response = %d %v, want 403 reserved_actor_ref", resp.StatusCode, decoded)
+			}
+		})
+	}
+	if events := h.journalEvents(t); len(events) != 0 {
+		t.Fatalf("journal = %d events after reserved session actors, want none", len(events))
+	}
+}
+
+// A session identity colliding with the internal system actor cannot plant a
+// run.finished event before a future composition await is registered.
+func TestApprovalCannotPreseedFutureCompositionAwait(t *testing.T) {
+	h := newApprovalsHarness(t)
+	const parentRunID, childRunID = "run-future-parent", "run-future-child"
+	resp, decoded := h.post(t, approvalCall{
+		user: "system",
+		body: map[string]any{"subjectRef": childRunID, "eventType": driver.RunFinishedEventType},
+	})
+	errorBody, _ := decoded["error"].(map[string]any)
+	if resp.StatusCode != http.StatusForbidden || errorBody["code"] != "reserved_actor_ref" {
+		t.Fatalf("preseed response = %d %v, want 403 reserved_actor_ref", resp.StatusCode, decoded)
+	}
+	if events := h.journalEvents(t); len(events) != 0 {
+		t.Fatalf("journal = %d events after rejected preseed, want none", len(events))
+	}
+
+	key := h.pendingCompositionAwait(t, parentRunID, childRunID)
+	pending, err := h.store.Awaits().ListAwaitsByPattern(
+		context.Background(), approvalsTestWS, driver.RunFinishedSubjectKey(childRunID))
+	if err != nil || len(pending) != 1 || pending[0].InstanceKey != key {
+		t.Fatalf("pending composition await = %+v, %v; rejected preseed must not satisfy it", pending, err)
+	}
+}
+
+// The same actor collision cannot resume an already-suspended parent through
+// the public approvals endpoint's eventType field.
+func TestApprovalCannotResumePendingCompositionAwait(t *testing.T) {
+	h := newApprovalsHarness(t)
+	const parentRunID, childRunID = "run-pending-parent", "run-pending-child"
+	key := h.pendingCompositionAwait(t, parentRunID, childRunID)
+
+	resp, decoded := h.post(t, approvalCall{
+		user: "system",
+		body: map[string]any{"subjectRef": childRunID, "eventType": driver.RunFinishedEventType},
+	})
+	errorBody, _ := decoded["error"].(map[string]any)
+	if resp.StatusCode != http.StatusForbidden || errorBody["code"] != "reserved_actor_ref" {
+		t.Fatalf("resume spoof response = %d %v, want 403 reserved_actor_ref", resp.StatusCode, decoded)
+	}
+	if events := h.journalEvents(t); len(events) != 0 {
+		t.Fatalf("journal = %d events after rejected resume spoof, want none", len(events))
+	}
+	run, err := h.store.DriverRuns().Get(context.Background(), approvalsTestWS, parentRunID)
+	if err != nil || run.Status != domain.DriverRunSuspendedAwaitingEvent || run.ResumeSourceEventID != "" {
+		t.Fatalf("parent = %+v, %v; want still suspended", run, err)
+	}
+	pending, err := h.store.Awaits().ListAwaitsByPattern(
+		context.Background(), approvalsTestWS, driver.RunFinishedSubjectKey(childRunID))
+	if err != nil || len(pending) != 1 || pending[0].InstanceKey != key {
+		t.Fatalf("pending composition await = %+v, %v; want untouched %s", pending, err, key)
 	}
 }
 
@@ -253,6 +366,32 @@ func TestApprovalIneligibleActorRefusedAndNothingEmitted(t *testing.T) {
 	}
 }
 
+func TestApprovalRejectsOversizedResumePayloadBeforeJournal(t *testing.T) {
+	h := newApprovalsHarness(t)
+	pattern := domain.AwaitEventKey(DefaultApprovalEventType, "deploy-large")
+	h.suspendedRun(t, "run-large-approval", pattern, []string{"alice@example.com"})
+
+	resp, decoded := h.post(t, approvalCall{
+		user: "user-alice", email: "alice@example.com",
+		body: map[string]any{"subjectRef": "deploy-large", "note": strings.Repeat("x", domain.DefaultAwaitResumePayloadCap)},
+	})
+	errorBody, _ := decoded["error"].(map[string]any)
+	if resp.StatusCode != http.StatusRequestEntityTooLarge || errorBody["code"] != "await_payload_too_large" {
+		t.Fatalf("response = %d %v, want 413 await_payload_too_large", resp.StatusCode, decoded)
+	}
+	if events := h.journalEvents(t); len(events) != 0 {
+		t.Fatalf("journal = %d events after oversized approval, want none", len(events))
+	}
+	run, err := h.store.DriverRuns().Get(context.Background(), approvalsTestWS, "run-large-approval")
+	if err != nil || run.Status != domain.DriverRunSuspendedAwaitingEvent || run.ResumeSourceEventID != "" {
+		t.Fatalf("run = %+v, %v; want still suspended", run, err)
+	}
+	pending, err := h.store.Awaits().ListAwaitsByPattern(context.Background(), approvalsTestWS, pattern)
+	if err != nil || len(pending) != 1 {
+		t.Fatalf("pending = %+v, %v; want one untouched await", pending, err)
+	}
+}
+
 // RULE 2 through the endpoint: an approval granted BEFORE any await exists
 // is journaled, and a later registration on the same key satisfies inline
 // from the scan — provided the registering await admits the recorded actor.
@@ -275,6 +414,14 @@ func TestApprovalBeforeRegistrationSatisfiesLaterAwaitInline(t *testing.T) {
 	})
 	if err != nil || !res.Satisfied || res.Instance.SatisfiedByEventID != eventID {
 		t.Fatalf("registration = %+v, %v; want inline satisfaction by %s", res, err, eventID)
+	}
+	var replay approvalPayload
+	if err := json.Unmarshal(res.Instance.SatisfiedPayload, &replay); err != nil {
+		t.Fatalf("decode replay payload %q: %v", res.Instance.SatisfiedPayload, err)
+	}
+	if replay.Decision != DecisionApproved || replay.ApprovedBy != "alice@example.com" ||
+		replay.SubjectRef != "acme/widgets#9@shaB" {
+		t.Fatalf("replay payload = %+v, want approved decision by alice for subject", replay)
 	}
 
 	// The same pre-granted approval does NOT satisfy a registration whose

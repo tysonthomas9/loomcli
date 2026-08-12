@@ -3,14 +3,21 @@ package triggerbindings
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/app/workflowbinding"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	"github.com/tysonthomas9/loomcli/internal/modules/automation"
+	workflowcataloghttp "github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog/httpapi"
+	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -43,8 +50,20 @@ func seededMux(t *testing.T) (*http.ServeMux, store.Store) {
 	}); err != nil {
 		t.Fatalf("create driver version: %v", err)
 	}
+	automationAPI := &testAutomationAPI{store: s}
+	createWorkflow, err := workflowbinding.New(&testWorkflowTargetPreparer{
+		target: workflowbinding.WorkflowTarget{DriverID: "driver-1", DriverVersionID: "version-1"},
+	}, automationAPI)
+	if err != nil {
+		t.Fatalf("new workflow binding: %v", err)
+	}
 	mux := http.NewServeMux()
-	NewModule(s).Register(mux)
+	New(Config{
+		CreateWorkflow: createWorkflow,
+		Commands:       automationAPI, Queries: automationAPI, ManualDispatch: automationAPI,
+		OperatorAuthority: testOperatorResolver{}, WorkspaceFromContext: func(context.Context) string { return "WS" },
+		Runs: s.DriverRuns(), Connectors: &testConnectorCompatibility{store: s},
+	}).Register(mux)
 	return mux, s
 }
 
@@ -52,9 +71,259 @@ func do(t *testing.T, mux *http.ServeMux, method, path, body string) *httptest.R
 	t.Helper()
 	req := httptest.NewRequest(method, path, strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer test-operator")
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 	return rec
+}
+
+type testOperatorResolver struct{}
+
+func (testOperatorResolver) ResolveOperatorAuthority(r *http.Request, _ string, _ authority.Action) (authority.OperatorAuthority, error) {
+	if r == nil || strings.TrimSpace(r.Header.Get("Authorization")) == "" {
+		return authority.OperatorAuthority{}, workflowcataloghttp.ErrUnauthenticated
+	}
+	return authority.OperatorAuthority{}, nil
+}
+
+type testWorkflowTargetPreparer struct {
+	target    workflowbinding.WorkflowTarget
+	err       error
+	calls     int
+	workspace string
+	workflow  string
+	prepare   func(context.Context, string, string) error
+}
+
+func (preparer *testWorkflowTargetPreparer) PrepareWorkflowTarget(
+	ctx context.Context,
+	workspace, workflow string,
+) (workflowbinding.WorkflowTarget, error) {
+	preparer.calls++
+	preparer.workspace = workspace
+	preparer.workflow = workflow
+	if preparer.prepare != nil {
+		if err := preparer.prepare(ctx, workspace, workflow); err != nil {
+			return workflowbinding.WorkflowTarget{}, err
+		}
+	}
+	return preparer.target, preparer.err
+}
+
+// testAutomationAPI is a test-only adapter that keeps the pre-migration HTTP
+// behavior fixtures intact while the production module is verified against
+// Automation's public interfaces. Direct store writes are intentionally
+// confined to test setup, never the HTTP adapter.
+type testAutomationAPI struct {
+	store store.Store
+	mu    sync.Mutex
+	runs  int
+}
+
+func (a *testAutomationAPI) CreateBinding(ctx context.Context, _ authority.OperatorAuthority, command automation.CreateBindingCommand) (*automation.Binding, error) {
+	definition := command.Definition
+	versionID := strings.TrimSpace(definition.DriverVersionID)
+	if versionID == "" {
+		versionID = "version-1"
+	}
+	created, err := a.store.TriggerBindings().Create(ctx, store.TriggerBindingCreate{
+		WorkspaceKey: command.WorkspaceKey, BindingID: definition.BindingID, Name: definition.Name,
+		SourceKind: definition.SourceKind, SourceRef: definition.SourceRef, SourceConfigRef: definition.SourceConfigRef,
+		RouteKey: definition.RouteKey, EventTypePatterns: definition.EventTypePatterns,
+		DriverID: definition.DriverID, DriverVersionID: versionID, TargetEntrypoint: definition.TargetEntrypoint,
+		ConcurrencyPolicy:  definition.ConcurrencyPolicy,
+		SubjectKeyTemplate: definition.SubjectKeyTemplate, ActorFilter: definition.ActorFilter,
+		RetryMaxAttempts: definition.RetryMaxAttempts, RetryBackoffSeconds: definition.RetryBackoffSeconds,
+		Schedule: definition.Schedule, ScheduleTimezone: definition.ScheduleTimezone, Enabled: definition.Enabled,
+	})
+	if err != nil {
+		return nil, mapTestAutomationError(err)
+	}
+	return automationBinding(created), nil
+}
+
+func (a *testAutomationAPI) UpdateBinding(ctx context.Context, _ authority.OperatorAuthority, command automation.UpdateBindingCommand) (*automation.Binding, error) {
+	existing, err := a.store.TriggerBindings().Get(ctx, command.WorkspaceKey, command.BindingID)
+	if err != nil {
+		return nil, mapTestAutomationError(err)
+	}
+	if strings.TrimSpace(existing.TargetAgentServiceID) != "" {
+		return nil, automation.ErrManagedBinding
+	}
+	patch := store.TriggerBindingUpdate{
+		Name: command.Patch.Name, Schedule: command.Patch.Schedule, ScheduleTimezone: command.Patch.ScheduleTimezone,
+		EventTypePatterns:   command.Patch.EventTypePatterns,
+		ConcurrencyPolicy:   command.Patch.ConcurrencyPolicy,
+		SubjectKeyTemplate:  command.Patch.SubjectKeyTemplate,
+		RetryMaxAttempts:    command.Patch.RetryMaxAttempts,
+		RetryBackoffSeconds: command.Patch.RetryBackoffSeconds,
+	}
+	if command.Patch.ClearActorFilter {
+		patch.ActorFilter = &domain.TriggerActorFilter{}
+	} else {
+		patch.ActorFilter = command.Patch.ActorFilter
+	}
+	updated, err := a.store.TriggerBindings().Update(ctx, command.WorkspaceKey, command.BindingID, patch)
+	if err != nil {
+		return nil, mapTestAutomationError(err)
+	}
+	return automationBinding(updated), nil
+}
+
+func (a *testAutomationAPI) EnableBinding(ctx context.Context, _ authority.OperatorAuthority, command automation.BindingCommand) (*automation.Binding, error) {
+	return a.setEnabled(ctx, command, true)
+}
+
+func (a *testAutomationAPI) DisableBinding(ctx context.Context, _ authority.OperatorAuthority, command automation.BindingCommand) (*automation.Binding, error) {
+	return a.setEnabled(ctx, command, false)
+}
+
+func (a *testAutomationAPI) setEnabled(ctx context.Context, command automation.BindingCommand, enabled bool) (*automation.Binding, error) {
+	existing, err := a.store.TriggerBindings().Get(ctx, command.WorkspaceKey, command.BindingID)
+	if err != nil {
+		return nil, mapTestAutomationError(err)
+	}
+	if strings.TrimSpace(existing.TargetAgentServiceID) != "" {
+		return nil, automation.ErrManagedBinding
+	}
+	updated, err := a.store.TriggerBindings().Update(ctx, command.WorkspaceKey, command.BindingID, store.TriggerBindingUpdate{Enabled: &enabled})
+	if err != nil {
+		return nil, mapTestAutomationError(err)
+	}
+	return automationBinding(updated), nil
+}
+
+func (a *testAutomationAPI) DeleteBinding(ctx context.Context, _ authority.OperatorAuthority, command automation.BindingCommand) error {
+	existing, err := a.store.TriggerBindings().Get(ctx, command.WorkspaceKey, command.BindingID)
+	if err != nil {
+		return mapTestAutomationError(err)
+	}
+	if strings.TrimSpace(existing.TargetAgentServiceID) != "" {
+		return automation.ErrManagedBinding
+	}
+	if existing.Enabled {
+		return automation.ErrBindingEnabled
+	}
+	return mapTestAutomationError(a.store.TriggerBindings().Delete(ctx, command.WorkspaceKey, command.BindingID))
+}
+
+func (a *testAutomationAPI) GetBinding(ctx context.Context, workspace, bindingID string) (*automation.Binding, error) {
+	binding, err := a.store.TriggerBindings().Get(ctx, workspace, bindingID)
+	if err != nil {
+		return nil, mapTestAutomationError(err)
+	}
+	return automationBinding(binding), nil
+}
+
+func (a *testAutomationAPI) ListBindings(ctx context.Context, workspace string, filter automation.BindingFilter) ([]*automation.Binding, error) {
+	bindings, err := a.store.TriggerBindings().List(ctx, workspace, store.TriggerBindingFilter{
+		SourceKind: filter.SourceKind, RouteKey: filter.RouteKey, DriverID: filter.DriverID,
+		TargetAgentServiceID: filter.TargetAgentServiceID, Enabled: filter.Enabled, Limit: filter.Limit,
+	})
+	if err != nil {
+		return nil, mapTestAutomationError(err)
+	}
+	out := make([]*automation.Binding, 0, len(bindings))
+	for _, binding := range bindings {
+		out = append(out, automationBinding(binding))
+	}
+	return out, nil
+}
+
+func (a *testAutomationAPI) DispatchBinding(ctx context.Context, _ authority.OperatorAuthority, command automation.DispatchBindingCommand) (*automation.DispatchBindingResult, error) {
+	binding, err := a.store.TriggerBindings().Get(ctx, command.WorkspaceKey, command.BindingID)
+	if err != nil {
+		return nil, mapTestAutomationError(err)
+	}
+	a.mu.Lock()
+	a.runs++
+	runID := fmt.Sprintf("manual-run-%d", a.runs)
+	a.mu.Unlock()
+	run, err := a.store.DriverRuns().Create(ctx, store.DriverRunCreate{
+		WorkspaceKey: command.WorkspaceKey, RunID: runID, DriverID: binding.DriverID,
+		DriverVersionID: binding.DriverVersionID, TriggerBindingID: binding.BindingID,
+		SourceKind: "binding-run", SourceRef: firstNonEmpty(binding.RouteKey, binding.BindingID),
+		IdempotencyKey: command.IdempotencyKey,
+	})
+	if err != nil {
+		return nil, mapTestAutomationError(err)
+	}
+	snapshot, err := json.Marshal(run)
+	if err != nil {
+		return nil, err
+	}
+	return &automation.DispatchBindingResult{BindingID: binding.BindingID, RunID: run.RunID, RunSnapshot: snapshot}, nil
+}
+
+func automationBinding(binding *domain.TriggerBinding) *automation.Binding {
+	if binding == nil {
+		return nil
+	}
+	return &automation.Binding{
+		WorkspaceKey: binding.WorkspaceKey, BindingID: binding.BindingID, Name: binding.Name,
+		SourceKind: binding.SourceKind, SourceRef: binding.SourceRef, SourceConfigRef: binding.SourceConfigRef,
+		RouteKey: binding.RouteKey, EventTypePatterns: append([]string(nil), binding.EventTypePatterns...),
+		DriverID: binding.DriverID, DriverVersionID: binding.DriverVersionID,
+		TargetEntrypoint: binding.TargetEntrypoint, TargetAgentServiceID: binding.TargetAgentServiceID,
+		ConcurrencyPolicy:  binding.ConcurrencyPolicy,
+		SubjectKeyTemplate: binding.SubjectKeyTemplate, ActorFilter: binding.ActorFilter,
+		RetryMaxAttempts: binding.RetryMaxAttempts, RetryBackoffSeconds: binding.RetryBackoffSeconds,
+		Schedule: binding.Schedule, ScheduleTimezone: binding.ScheduleTimezone, Enabled: binding.Enabled,
+		CreatedAt: binding.CreatedAt, UpdatedAt: binding.UpdatedAt,
+	}
+}
+
+func mapTestAutomationError(err error) error {
+	if err == nil {
+		return nil
+	}
+	switch {
+	case errors.Is(err, domain.ErrNotFound):
+		return errors.Join(automation.ErrNotFound, err)
+	case errors.Is(err, domain.ErrInvalid):
+		return errors.Join(automation.ErrInvalid, err)
+	case errors.Is(err, domain.ErrConflict), errors.Is(err, domain.ErrAlreadyExists):
+		return errors.Join(automation.ErrConflict, err)
+	default:
+		return err
+	}
+}
+
+type testConnectorCompatibility struct {
+	store   store.Store
+	mu      sync.Mutex
+	secrets map[string]string
+}
+
+func (c *testConnectorCompatibility) ConfigureBindingSecret(_ context.Context, workspace, bindingID, _ string, secret string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.secrets == nil {
+		c.secrets = make(map[string]string)
+	}
+	c.secrets[workspace+"/"+bindingID] = secret
+	return nil
+}
+
+func (c *testConnectorCompatibility) RevokeBindingGrants(ctx context.Context, workspace, bindingID string) (int, error) {
+	grants, err := c.store.ConnectorGrants().ListByBinding(ctx, workspace, bindingID)
+	if err != nil {
+		return 0, err
+	}
+	revoked := 0
+	for _, grant := range grants {
+		if grant == nil {
+			continue
+		}
+		if err := c.store.ConnectorGrants().Revoke(ctx, workspace, grant.GrantID); err != nil {
+			if errors.Is(err, domain.ErrGrantRevoked) {
+				continue
+			}
+			return revoked, err
+		}
+		revoked++
+	}
+	return revoked, nil
 }
 
 func TestCreateBinding_CreatesThenDisables(t *testing.T) {
@@ -85,6 +354,49 @@ func TestCreateBinding_CreatesThenDisables(t *testing.T) {
 	}
 	if disabled.Enabled {
 		t.Fatalf("binding should be disabled after /disable")
+	}
+}
+
+func TestCreateAndPatchBindingPreserveRouterV2Fields(t *testing.T) {
+	mux, _ := seededMux(t)
+	created := do(t, mux, http.MethodPost, "/api/workspaces/WS/trigger-bindings", `{
+		"driver_id":"driver-1","driver_version_id":"version-1","source_kind":"internal",
+		"binding_id":"router-v2","event_type_patterns":["internal.task.ready"],
+		"subject_key_template":"{{subject_ref}}","concurrency_policy":"queue",
+		"actor_filter":{"exclude_actor_kinds":["workflow"]},
+		"retry_max_attempts":7,"retry_backoff_seconds":33,"enabled":true
+	}`)
+	if created.Code != http.StatusCreated {
+		t.Fatalf("create status = %d; body=%s", created.Code, created.Body.String())
+	}
+	var binding automation.Binding
+	if err := json.Unmarshal(created.Body.Bytes(), &binding); err != nil {
+		t.Fatalf("decode create: %v", err)
+	}
+	if binding.SubjectKeyTemplate != "{{subject_ref}}" || binding.ConcurrencyPolicy != automation.ConcurrencyQueue ||
+		binding.ActorFilter == nil || len(binding.ActorFilter.ExcludeActorKinds) != 1 ||
+		binding.RetryMaxAttempts != 7 || binding.RetryBackoffSeconds != 33 ||
+		len(binding.EventTypePatterns) != 1 || binding.EventTypePatterns[0] != "internal.task.ready" {
+		t.Fatalf("created Router v2 fields = %+v", binding)
+	}
+
+	updated := do(t, mux, http.MethodPatch, "/api/workspaces/WS/trigger-bindings/router-v2", `{
+		"subject_key_template":"{{event_type}}","concurrency_policy":"forbid",
+		"actor_filter":{"exclude_actor_kinds":["external"]},
+		"retry_max_attempts":9,"retry_backoff_seconds":45,
+		"event_type_patterns":["internal.run.finished"]
+	}`)
+	if updated.Code != http.StatusOK {
+		t.Fatalf("patch status = %d; body=%s", updated.Code, updated.Body.String())
+	}
+	if err := json.Unmarshal(updated.Body.Bytes(), &binding); err != nil {
+		t.Fatalf("decode patch: %v", err)
+	}
+	if binding.SubjectKeyTemplate != "{{event_type}}" || binding.ConcurrencyPolicy != automation.ConcurrencyForbid ||
+		binding.ActorFilter == nil || len(binding.ActorFilter.ExcludeActorKinds) != 1 || binding.ActorFilter.ExcludeActorKinds[0] != "external" ||
+		binding.RetryMaxAttempts != 9 || binding.RetryBackoffSeconds != 45 ||
+		len(binding.EventTypePatterns) != 1 || binding.EventTypePatterns[0] != "internal.run.finished" {
+		t.Fatalf("updated Router v2 fields = %+v", binding)
 	}
 }
 
@@ -147,6 +459,86 @@ func TestCreateBinding_IsIdempotent(t *testing.T) {
 	}
 	if binding.BindingID != "b-fixed" {
 		t.Fatalf("ensure returned binding_id = %q, want b-fixed", binding.BindingID)
+	}
+}
+
+// A gallery/scheduled-workflow activation starts from a workspace with no
+// builtin Driver rows. The application workflow prepares that target before
+// Automation creates the binding; a repeated browser ensure returns the same
+// response shape with 200 and does not prepare or write again.
+func TestCreateBinding_WorkflowTargetFreshStoreReturns201Then200(t *testing.T) {
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(t.Context(), store.WorkspaceCreate{Key: "WS", Name: "WS"}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	automationAPI := &testAutomationAPI{store: st}
+	preparer := &testWorkflowTargetPreparer{
+		target: workflowbinding.WorkflowTarget{DriverID: "builtin-review", DriverVersionID: "builtin-review-v1"},
+		prepare: func(ctx context.Context, workspace, workflow string) error {
+			if workspace != "WS" || workflow != "github-review-agent" {
+				return fmt.Errorf("unexpected target %s/%s", workspace, workflow)
+			}
+			if _, err := st.Drivers().Create(ctx, store.DriverCreate{
+				WorkspaceKey: workspace, DriverID: "builtin-review", Name: workflow,
+				OwnerType: domain.DriverOwnerSystem, Status: domain.DriverStatusActive,
+				ActiveVersionID: "builtin-review-v1",
+			}); err != nil {
+				return err
+			}
+			_, err := st.DriverVersions().Create(ctx, store.DriverVersionCreate{
+				WorkspaceKey: workspace, VersionID: "builtin-review-v1", DriverID: "builtin-review",
+				Version: 1, SourceDigest: "sha256:builtin", BundleDigest: "sha256:bundle",
+				ValidationStatus: domain.DriverVersionValidationPassed,
+			})
+			return err
+		},
+	}
+	createWorkflow, err := workflowbinding.New(preparer, automationAPI)
+	if err != nil {
+		t.Fatalf("new workflow binding: %v", err)
+	}
+	mux := http.NewServeMux()
+	New(Config{
+		CreateWorkflow: createWorkflow,
+		Commands:       automationAPI, Queries: automationAPI, ManualDispatch: automationAPI,
+		OperatorAuthority: testOperatorResolver{}, WorkspaceFromContext: func(context.Context) string { return "WS" },
+		Runs: st.DriverRuns(), Connectors: &testConnectorCompatibility{store: st},
+	}).Register(mux)
+	body := `{"workflow":"github-review-agent","source_kind":"cron","schedule":"*/10 * * * *","binding_id":"fresh-review","enabled":true}`
+
+	first := do(t, mux, http.MethodPost, "/api/workspaces/WS/trigger-bindings", body)
+	if first.Code != http.StatusCreated {
+		t.Fatalf("fresh workflow create status = %d, want 201; body=%s", first.Code, first.Body.String())
+	}
+	second := do(t, mux, http.MethodPost, "/api/workspaces/WS/trigger-bindings", body)
+	if second.Code != http.StatusOK {
+		t.Fatalf("workflow ensure status = %d, want 200; body=%s", second.Code, second.Body.String())
+	}
+	if preparer.calls != 1 {
+		t.Fatalf("preparer calls = %d, want exactly one", preparer.calls)
+	}
+
+	var created, ensured automation.Binding
+	if err := json.Unmarshal(first.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode created binding: %v", err)
+	}
+	if err := json.Unmarshal(second.Body.Bytes(), &ensured); err != nil {
+		t.Fatalf("decode ensured binding: %v", err)
+	}
+	if created.BindingID != "fresh-review" || created.DriverID != "builtin-review" || created.DriverVersionID != "builtin-review-v1" ||
+		ensured.BindingID != created.BindingID || ensured.DriverID != created.DriverID || ensured.DriverVersionID != created.DriverVersionID {
+		t.Fatalf("created=%+v ensured=%+v", created, ensured)
+	}
+}
+
+func TestCreateBinding_CreateOnlyPreservesCLIDuplicateConflict(t *testing.T) {
+	mux, _ := seededMux(t)
+	body := `{"driver_id":"driver-1","driver_version_id":"version-1","route_key":"epics.runs.create","source_kind":"http","binding_id":"b-strict","enabled":true}`
+	if rec := do(t, mux, http.MethodPost, "/api/workspaces/WS/trigger-bindings?create_only=true", body); rec.Code != http.StatusCreated {
+		t.Fatalf("first strict create status = %d, want 201; body=%s", rec.Code, rec.Body.String())
+	}
+	if rec := do(t, mux, http.MethodPost, "/api/workspaces/WS/trigger-bindings?create_only=true", body); rec.Code != http.StatusConflict {
+		t.Fatalf("duplicate strict create status = %d, want 409; body=%s", rec.Code, rec.Body.String())
 	}
 }
 
@@ -562,14 +954,39 @@ func TestDeleteBinding_GoneAndGrantsRevoked(t *testing.T) {
 	if len(grants) != 0 {
 		t.Fatalf("expected 0 active grants after delete, got %d", len(grants))
 	}
+	// A lost 200 response is safe to retry after the binding is already gone.
+	rec = do(t, mux, http.MethodDelete, "/api/workspaces/WS/trigger-bindings/s2", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("retry delete status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decode retry delete: %v", err)
+	}
+	if !out.Deleted || out.GrantsRevoked != 0 {
+		t.Fatalf("unexpected retry delete result: %+v", out)
+	}
 }
 
-// TestDeleteBinding_NotFound404 returns 404 for a missing binding.
-func TestDeleteBinding_NotFound404(t *testing.T) {
-	mux, _ := seededMux(t)
+// TestDeleteBinding_MissingConverges pins idempotent DELETE semantics even
+// when the caller cannot distinguish an original miss from a lost response.
+func TestDeleteBinding_MissingConverges(t *testing.T) {
+	mux, st := seededMux(t)
+	if _, err := st.ConnectorGrants().Create(t.Context(), store.ConnectorGrantCreate{
+		WorkspaceKey: "WS", GrantID: "orphan-grant", ConnectorID: "github", BindingID: "missing",
+		Action: "github.pull_request.read", ResourcePattern: "repo:o/r",
+	}); err != nil {
+		t.Fatalf("seed orphan grant: %v", err)
+	}
 	rec := do(t, mux, http.MethodDelete, "/api/workspaces/WS/trigger-bindings/missing", "")
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("delete missing status = %d, want 404; body=%s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusOK {
+		t.Fatalf("delete missing status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	var out DeleteBindingResult
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decode missing delete: %v", err)
+	}
+	if !out.Deleted || out.GrantsRevoked != 1 {
+		t.Fatalf("missing delete result = %+v, want deleted with orphan revoked", out)
 	}
 }
 

@@ -2,9 +2,12 @@ package archtest
 
 import (
 	"errors"
+	"go/parser"
+	"go/token"
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -18,17 +21,17 @@ func TestCheckedInManifestsAndRepository(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, want := len(report.CompositeStoreFiles), 92; got != want {
+	if got, want := len(report.CompositeStoreFiles), 88; got != want {
 		t.Fatalf("composite Store file count = %d, want %d; files = %v", got, want, report.CompositeStoreFiles)
 	}
-	if got, want := len(report.CompositeStoreOutside), 81; got != want {
+	if got, want := len(report.CompositeStoreOutside), 77; got != want {
 		t.Fatalf("outside-composition Store file count = %d, want %d", got, want)
 	}
 	if got, want := len(report.LegacyHandlerImports), 91; got != want {
 		t.Fatalf("legacy handler imports = %d, want %d", got, want)
 	}
-	if got, want := report.ModuleRoots, []string{"workflowcatalog"}; !slices.Equal(got, want) {
-		t.Fatalf("module roots = %v, want active Phase 2 extraction %v", got, want)
+	if got, want := report.ModuleRoots, []string{"automation", "workflowcatalog"}; !slices.Equal(got, want) {
+		t.Fatalf("module roots = %v, want active Phase 3 extractions %v", got, want)
 	}
 	if got, want := len(report.PendingDecisions), 0; got != want {
 		t.Fatalf("pending decisions = %d, want %d", got, want)
@@ -36,13 +39,13 @@ func TestCheckedInManifestsAndRepository(t *testing.T) {
 	if got, want := report.AnalysisProfilesEnforced, 11; got != want {
 		t.Fatalf("enforced analysis profiles = %d, want %d", got, want)
 	}
-	if got, want := report.MutationCommands, 3; got != want {
+	if got, want := report.MutationCommands, 17; got != want {
 		t.Fatalf("mutation commands = %d, want %d", got, want)
 	}
-	if got, want := report.RuntimeComponents, 83; got != want {
+	if got, want := report.RuntimeComponents, 85; got != want {
 		t.Fatalf("runtime components = %d, want %d", got, want)
 	}
-	if got, want := report.RuntimeGoroutineLaunches, 108; got != want {
+	if got, want := report.RuntimeGoroutineLaunches, 107; got != want {
 		t.Fatalf("runtime goroutine launches = %d, want %d", got, want)
 	}
 	if got, want := report.PerformanceMetrics, 6; got != want {
@@ -87,14 +90,100 @@ func TestBaselineRequiresEveryPhase1InventoryComplete(t *testing.T) {
 	}
 }
 
-func TestMutationLedgerRequiresEveryWorkflowCatalogPilotCommand(t *testing.T) {
+func TestMutationLedgerRequiresEveryMigratedCommand(t *testing.T) {
 	ledger, err := LoadMutationLedger(filepath.Join("testdata", "mutation-ledger.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	ledger.Commands = ledger.Commands[1:]
-	if err := ledger.Validate(); err == nil || !strings.Contains(err.Error(), "missing required pilot command workflowcatalog.activate-version") {
-		t.Fatalf("Validate error = %v, want missing-pilot-command rejection", err)
+	if err := ledger.Validate(); err == nil || !strings.Contains(err.Error(), "missing required migrated command automation.admit-event") {
+		t.Fatalf("Validate error = %v, want missing-migrated-command rejection", err)
+	}
+}
+
+func TestCheckedInPhase3ArchitectureContracts(t *testing.T) {
+	graph, err := LoadCapabilityGraph(filepath.Join("testdata", "capability-graph.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if graph.CompletedPhase != 3 {
+		t.Fatalf("completed phase = %d, want 3", graph.CompletedPhase)
+	}
+	statusByCapability := make(map[string]string, len(graph.Capabilities))
+	for _, capability := range graph.Capabilities {
+		statusByCapability[capability.Name] = capability.Status
+	}
+	if statusByCapability["automation"] != "active" || statusByCapability["workflowcatalog"] != "active" {
+		t.Fatalf("active capability statuses = automation:%q workflowcatalog:%q", statusByCapability["automation"], statusByCapability["workflowcatalog"])
+	}
+
+	ledger, err := LoadMutationLedger(filepath.Join("testdata", "mutation-ledger.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ledger.Commands) != 17 {
+		t.Fatalf("mutation commands = %d, want 17", len(ledger.Commands))
+	}
+}
+
+func TestLegacyWorkflowsExtensionMatchesCurrentCallers(t *testing.T) {
+	graph, err := LoadCapabilityGraph(filepath.Join("testdata", "capability-graph.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var legacy LegacyPath
+	for _, candidate := range graph.LegacyPaths {
+		if candidate.Path == "internal/workflows" {
+			legacy = candidate
+			break
+		}
+	}
+	if legacy.Extension == nil || legacy.ExpiresAfterPhase != 5 {
+		t.Fatalf("internal/workflows extension = %+v, want reviewed Phase 5 expiry", legacy)
+	}
+
+	root, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var observed []string
+	err = filepath.WalkDir(filepath.Join(root, "internal"), func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() || !strings.HasSuffix(path, ".go") {
+			return nil
+		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		rel = filepath.ToSlash(rel)
+		if strings.HasPrefix(rel, legacy.Path+"/") {
+			return nil
+		}
+		parsed, err := parser.ParseFile(token.NewFileSet(), path, nil, parser.ImportsOnly)
+		if err != nil {
+			return err
+		}
+		for _, imported := range parsed.Imports {
+			path, err := strconv.Unquote(imported.Path.Value)
+			if err != nil {
+				return err
+			}
+			if path == "github.com/tysonthomas9/loomcli/internal/workflows" {
+				observed = append(observed, rel)
+				break
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	slices.Sort(observed)
+	if !slices.Equal(observed, legacy.Extension.RemainingCallSites) {
+		t.Fatalf("internal/workflows callers = %v, want reviewed extension list %v", observed, legacy.Extension.RemainingCallSites)
 	}
 }
 
@@ -400,6 +489,14 @@ func TestCapabilityGraphRejectsExpiredLegacyPath(t *testing.T) {
 	graph.CompletedPhase = graph.LegacyPaths[0].ExpiresAfterPhase
 	if err := graph.Validate(); err == nil || !strings.Contains(err.Error(), "expired after Phase") {
 		t.Fatalf("Validate error = %v, want completed-phase expiry rejection", err)
+	}
+}
+
+func TestCapabilityGraphRejectsIncompleteLegacyPathExtension(t *testing.T) {
+	graph := validGraph()
+	graph.LegacyPaths[0].Extension = &LegacyPathExtension{ReviewedBy: "reviewer"}
+	if err := graph.Validate(); err == nil || !strings.Contains(err.Error(), "extension requires reviewer, date, rationale, replacement APIs, and remaining call sites") {
+		t.Fatalf("Validate error = %v, want incomplete-extension rejection", err)
 	}
 }
 

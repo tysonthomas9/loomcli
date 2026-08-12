@@ -16,11 +16,11 @@
 // TestAwaitFlowsE2EFleetDB runs the same scenarios against an ephemeral
 // embedded fleet-db behind the LOOM_RUN_EMBEDDED_SMOKE gate (the
 // round-trip-suite convention — it needs a freshly built fleet-db binary on
-// PATH). Subcases that depend on a CLIENT-SIDE trigger-event journal append
-// (approval-before-registration, child-terminal-before-await) skip on
-// backends without store.TriggerEventAppender: fleet-db journals admitted
-// events server-side, and the journal path for unrouted internal events is
-// the AW7/AW8 noted gap.
+// PATH). Approval-before-registration still depends on a client-side event
+// journal append and skips on backends without store.TriggerEventAppender.
+// Child-terminal-before-await no longer does: workflows/await registers and
+// atomically re-checks child state through the durable AwaitStore contract,
+// so the Fleet-backed suite proves that ordering even with no listener.
 package driver_test
 
 import (
@@ -758,10 +758,9 @@ func testCompositionFlow(t *testing.T, h *awaitFlows) {
 }
 
 // testCompositionInlineResolve: a child that reaches terminal BEFORE the
-// parent registers its await resolves inline from the journaled run.finished
-// (RULE 2 for composition) — the parent never suspends on the child.
+// parent registers its await resolves inline from terminal child state (RULE
+// 2 for composition) — the parent never suspends on the child.
 func testCompositionInlineResolve(t *testing.T, h *awaitFlows) {
-	requireJournalAppender(t, h)
 	gate := domain.AwaitEventKey("gate.event", "parent2-go")
 	var childIDs []string
 	suspendedOnChild := false
@@ -793,8 +792,8 @@ func testCompositionInlineResolve(t *testing.T, h *awaitFlows) {
 	}
 	childID := childIDs[0]
 
-	// The child finishes (journaling its run.finished) while the parent is
-	// still suspended on the unrelated gate.
+	// The child finishes while the parent is still suspended on the unrelated
+	// gate. No internal.run.finished binding is configured.
 	if res := h.runExecutorOnce(t, "node-c1", childID, h.childRunner()); res.Final.Status != domain.DriverRunCompleted {
 		t.Fatalf("child final = %+v, want completed", res.Final)
 	}
@@ -803,8 +802,8 @@ func testCompositionInlineResolve(t *testing.T, h *awaitFlows) {
 		t.Fatalf("gate dispatch records = %+v, want one resolved", records)
 	}
 
-	// Re-entry: the child await satisfies INLINE from the registration scan
-	// and the parent completes in this same pass.
+	// Re-entry: the child await registers, re-checks terminal child state, and
+	// satisfies INLINE; the parent completes in this same pass.
 	res2 := h.runExecutorOnce(t, "node-p2", "run-parent2", parent)
 	if res2.Final.Status != domain.DriverRunCompleted || res2.Final.Summary != "inline-child=completed" {
 		t.Fatalf("parent final = %+v, want completed inline", res2.Final)
@@ -814,7 +813,7 @@ func testCompositionInlineResolve(t *testing.T, h *awaitFlows) {
 	}
 	inst, err := h.st.Awaits().GetSatisfiedAwait(h.ctx, h.ws, domain.AwaitInstanceKey("run-parent2", 2))
 	if err != nil || inst.SatisfiedByEventID != driver.RunFinishedEventID(childID, domain.DriverRunCompleted) {
-		t.Fatalf("child await row = %+v, %v; want satisfied by the journaled run.finished", inst, err)
+		t.Fatalf("child await row = %+v, %v; want satisfied by deterministic run.finished", inst, err)
 	}
 }
 

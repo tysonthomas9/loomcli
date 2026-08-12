@@ -273,6 +273,8 @@ func (s *CronScheduler) dispatchTickAwaits(ctx context.Context, ws, bindingID, t
 	if _, err := matcher.Dispatch(ctx, ws, AwaitDispatchEvent{
 		EventID:    tickKey,
 		EventType:  CronEventType,
+		SourceKind: "cron",
+		Origin:     domain.TriggerEventOriginSystem,
 		SubjectRef: bindingID,
 		ActorRef:   CronActorRef,
 		Payload:    payload,

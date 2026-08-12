@@ -153,10 +153,21 @@ type AggregateOwnership struct {
 }
 
 type LegacyPath struct {
-	Path              string `yaml:"path"`
-	Owner             string `yaml:"owner"`
-	RemovalIssue      string `yaml:"removal_issue"`
-	ExpiresAfterPhase int    `yaml:"expires_after_phase"`
+	Path              string               `yaml:"path"`
+	Owner             string               `yaml:"owner"`
+	RemovalIssue      string               `yaml:"removal_issue"`
+	ExpiresAfterPhase int                  `yaml:"expires_after_phase"`
+	Extension         *LegacyPathExtension `yaml:"extension,omitempty"`
+}
+
+// LegacyPathExtension makes an expiry extension reviewable instead of letting
+// a caller move the milestone number without recording the remaining work.
+type LegacyPathExtension struct {
+	ReviewedBy         string   `yaml:"reviewed_by"`
+	ReviewedAt         string   `yaml:"reviewed_at"`
+	Rationale          string   `yaml:"rationale"`
+	ReplacementAPIs    []string `yaml:"replacement_apis"`
+	RemainingCallSites []string `yaml:"remaining_call_sites"`
 }
 
 type DurableEventPolicy struct {
@@ -739,9 +750,40 @@ func validateLegacyPaths(values []LegacyPath, completedPhase int) error {
 		if value.ExpiresAfterPhase <= completedPhase {
 			return fmt.Errorf("legacy path %s expired after Phase %d but completed_phase is %d", value.Path, value.ExpiresAfterPhase, completedPhase)
 		}
+		if err := validateLegacyPathExtension(value); err != nil {
+			return err
+		}
 		paths = append(paths, value.Path)
 	}
 	return validateSortedUnique("legacy path", paths)
+}
+
+func validateLegacyPathExtension(value LegacyPath) error {
+	if value.Extension == nil {
+		return nil
+	}
+	extension := value.Extension
+	if extension.ReviewedBy == "" || extension.ReviewedAt == "" || extension.Rationale == "" ||
+		len(extension.ReplacementAPIs) == 0 || len(extension.RemainingCallSites) == 0 {
+		return fmt.Errorf("legacy path %s extension requires reviewer, date, rationale, replacement APIs, and remaining call sites", value.Path)
+	}
+	if err := validateSortedUnique("legacy path "+value.Path+" replacement API", extension.ReplacementAPIs); err != nil {
+		return err
+	}
+	for _, replacement := range extension.ReplacementAPIs {
+		if !safeInternalRoot(replacement) {
+			return fmt.Errorf("legacy path %s replacement API %q must be a safe internal path", value.Path, replacement)
+		}
+	}
+	if err := validateSortedUnique("legacy path "+value.Path+" remaining call site", extension.RemainingCallSites); err != nil {
+		return err
+	}
+	for _, caller := range extension.RemainingCallSites {
+		if !validRequiredGoSource(caller) {
+			return fmt.Errorf("legacy path %s remaining call site %q must be a clean relative Go source path", value.Path, caller)
+		}
+	}
+	return nil
 }
 
 func (m AnalysisMatrix) Validate() error {

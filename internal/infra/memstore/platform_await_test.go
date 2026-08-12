@@ -3,12 +3,15 @@ package memstore
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/driver/eventpolicy"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/store/storetest"
 )
@@ -160,6 +163,173 @@ func TestMemstoreAwaitRegisterAppendRace(t *testing.T) {
 	}
 }
 
+func TestMemstoreAwaitEventBeforeRegistrationPersistsPayload(t *testing.T) {
+	s := New()
+	ctx := t.Context()
+	const ws = "WS"
+	payload := json.RawMessage(`{"approved":true}`)
+	now := time.Now().UTC()
+	event, deduped := s.events.create(&domain.TriggerEvent{
+		WorkspaceKey:  ws,
+		SourceKind:    "test",
+		SourceEventID: "approval-delivery-123",
+		EventType:     "approval.granted",
+		SubjectRef:    "pr/123",
+		ActorRef:      "alice",
+		Payload:       payload,
+		Origin:        domain.TriggerEventOriginExternal,
+		OccurredAt:    now,
+		ReceivedAt:    now,
+	})
+	if deduped {
+		t.Fatal("event unexpectedly deduped")
+	}
+
+	result, err := s.Awaits().RegisterAwaitAndCheck(ctx, ws, store.AwaitRegistration{
+		InstanceKey: domain.AwaitInstanceKey("run-1", 1),
+		RunID:       "run-1",
+		Pattern:     "approval.granted:pr/123",
+		ActorAllow:  []string{"alice"},
+		Deadline:    time.Now().Add(time.Hour).UTC(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Satisfied || result.Instance.SatisfiedByEventID != "approval-delivery-123" ||
+		result.Instance.SatisfiedActor != "alice" ||
+		string(result.Instance.SatisfiedPayload) != string(payload) {
+		t.Fatalf("immediate result = %+v, want source event identity and payload %s (stored event %q)",
+			result.Instance, payload, event.EventID)
+	}
+}
+
+func TestMemstoreAwaitRegistrationSkipsHistoricalForgedRunFinished(t *testing.T) {
+	s := New()
+	ctx := t.Context()
+	const ws = "WS"
+	now := time.Now().UTC()
+
+	appendEvent := func(eventID, sourceEventID, subject, sourceKind string, origin domain.TriggerEventOrigin, receivedAt time.Time) {
+		t.Helper()
+		if _, deduped := s.events.create(&domain.TriggerEvent{
+			WorkspaceKey: ws, EventID: eventID, SourceEventID: sourceEventID,
+			SourceKind: sourceKind, EventType: eventpolicy.RunFinishedEventType,
+			SubjectRef: subject, ActorRef: eventpolicy.RunFinishedActorRef, Origin: origin,
+			OccurredAt: receivedAt, ReceivedAt: receivedAt,
+			Payload: json.RawMessage(`{"runId":"` + subject + `","status":"completed"}`),
+		}); deduped {
+			t.Fatalf("event %s unexpectedly deduped", eventID)
+		}
+	}
+
+	appendEvent("stored-forged-only", eventpolicy.RunFinishedSourceEventIDPrefix+"child-forged:completed",
+		"child-forged", "github", domain.TriggerEventOriginExternal, now)
+	forgedOnly, err := s.Awaits().RegisterAwaitAndCheck(ctx, ws, store.AwaitRegistration{
+		InstanceKey: domain.AwaitInstanceKey("parent-forged", 1), RunID: "parent-forged",
+		Pattern:    domain.AwaitEventKey(eventpolicy.RunFinishedEventType, "child-forged"),
+		ActorAllow: []string{eventpolicy.RunFinishedActorRef}, Deadline: now.Add(time.Hour),
+	})
+	if err != nil || forgedOnly.Satisfied || forgedOnly.Instance.Status != domain.AwaitPending {
+		t.Fatalf("forged-only registration = %+v, %v; want pending", forgedOnly, err)
+	}
+
+	appendEvent("stored-forged-first", eventpolicy.RunFinishedSourceEventIDPrefix+"child-valid:failed",
+		"child-valid", "github", domain.TriggerEventOriginExternal, now.Add(time.Second))
+	validID := eventpolicy.RunFinishedSourceEventIDPrefix + "child-valid:completed"
+	appendEvent("stored-genuine-later", validID, "child-valid", eventpolicy.SourceKindExecution,
+		domain.TriggerEventOriginSystem, now.Add(2*time.Second))
+	genuine, err := s.Awaits().RegisterAwaitAndCheck(ctx, ws, store.AwaitRegistration{
+		InstanceKey: domain.AwaitInstanceKey("parent-valid", 1), RunID: "parent-valid",
+		Pattern:    domain.AwaitEventKey(eventpolicy.RunFinishedEventType, "child-valid"),
+		ActorAllow: []string{eventpolicy.RunFinishedActorRef}, Deadline: now.Add(time.Hour),
+	})
+	if err != nil || !genuine.Satisfied || genuine.Instance.SatisfiedByEventID != validID {
+		t.Fatalf("registration after forged then genuine = %+v, %v; want %s", genuine, err, validID)
+	}
+}
+
+func TestMemstoreAwaitRegistrationRejectsHistoricalReservedActorOnOrdinaryEvent(t *testing.T) {
+	s := New()
+	now := time.Now().UTC()
+	if _, deduped := s.events.create(&domain.TriggerEvent{
+		WorkspaceKey: "WS", EventID: "stored-reserved-actor", SourceEventID: "approval-reserved-1",
+		SourceKind: "github", EventType: "approval.granted", SubjectRef: "deploy-1",
+		ActorRef: "system:approver", Origin: domain.TriggerEventOriginExternal,
+		OccurredAt: now, ReceivedAt: now,
+	}); deduped {
+		t.Fatal("reserved actor event unexpectedly deduped")
+	}
+	result, err := s.Awaits().RegisterAwaitAndCheck(t.Context(), "WS", store.AwaitRegistration{
+		InstanceKey: domain.AwaitInstanceKey("parent-reserved", 1), RunID: "parent-reserved",
+		Pattern: "approval.granted:deploy-1", ActorAllow: []string{"system:approver"},
+		Deadline: now.Add(time.Hour),
+	})
+	if err != nil || result.Satisfied || result.Instance.Status != domain.AwaitPending {
+		t.Fatalf("reserved actor registration = %+v, %v; want pending", result, err)
+	}
+}
+
+func TestMemstoreAwaitEventBeforeRegistrationRejectsReservedSourceEventID(t *testing.T) {
+	s := New()
+	ctx := t.Context()
+	const ws = "WS"
+	instanceKey := domain.AwaitInstanceKey("run-1", 1)
+	now := time.Now().UTC()
+	if _, deduped := s.events.create(&domain.TriggerEvent{
+		WorkspaceKey: ws, SourceKind: "test", SourceEventID: domain.AwaitTimeoutEventID(instanceKey),
+		EventType: "approval.granted", SubjectRef: "pr/123", ActorRef: "alice",
+		Origin: domain.TriggerEventOriginExternal, OccurredAt: now, ReceivedAt: now,
+	}); deduped {
+		t.Fatal("event unexpectedly deduped")
+	}
+	result, err := s.Awaits().RegisterAwaitAndCheck(ctx, ws, store.AwaitRegistration{
+		InstanceKey: instanceKey, RunID: "run-1", Pattern: "approval.granted:pr/123",
+		Deadline: time.Now().Add(time.Hour).UTC(),
+	})
+	if err != nil || result.Satisfied || result.Instance.Status != domain.AwaitPending {
+		t.Fatalf("registration = %+v, %v; want pending after reserved source event id", result, err)
+	}
+}
+
+func TestMemstoreAwaitEventBeforeRegistrationSkipsOversizedPayload(t *testing.T) {
+	s := New()
+	ctx := t.Context()
+	const ws = "WS"
+	now := time.Now().UTC()
+	if _, deduped := s.events.create(&domain.TriggerEvent{
+		WorkspaceKey: ws,
+		SourceKind:   "test",
+		EventType:    "approval.granted",
+		SubjectRef:   "pr/123",
+		ActorRef:     "alice",
+		Payload:      json.RawMessage(strings.Repeat("x", domain.DefaultAwaitResumePayloadCap+1)),
+		Origin:       domain.TriggerEventOriginExternal,
+		OccurredAt:   now,
+		ReceivedAt:   now,
+	}); deduped {
+		t.Fatal("event unexpectedly deduped")
+	}
+	validPayload := json.RawMessage(`{"approved":true}`)
+	if _, deduped := s.events.create(&domain.TriggerEvent{
+		WorkspaceKey: ws, SourceKind: "test", SourceEventID: "valid-after-oversized",
+		EventType: "approval.granted", SubjectRef: "pr/123", ActorRef: "alice", Payload: validPayload,
+		Origin: domain.TriggerEventOriginExternal, OccurredAt: now.Add(time.Second), ReceivedAt: now.Add(time.Second),
+	}); deduped {
+		t.Fatal("valid event unexpectedly deduped")
+	}
+	instanceKey := domain.AwaitInstanceKey("run-1", 1)
+	result, err := s.Awaits().RegisterAwaitAndCheck(ctx, ws, store.AwaitRegistration{
+		InstanceKey: instanceKey,
+		RunID:       "run-1",
+		Pattern:     "approval.granted:pr/123",
+		Deadline:    time.Now().Add(time.Hour).UTC(),
+	})
+	if err != nil || !result.Satisfied || result.Instance.SatisfiedByEventID != "valid-after-oversized" ||
+		string(result.Instance.SatisfiedPayload) != string(validPayload) {
+		t.Fatalf("registration = %+v, %v; want later valid event after oversized candidate", result, err)
+	}
+}
+
 // TestMemstoreAwaitResolveTimeoutRace races a real-event resolution against
 // the deadline sweeper's synthetic timeout resolution for the same await:
 // exactly one wins (Resume=true) and the persisted row matches the winner.
@@ -233,5 +403,285 @@ func assertSingleAwaitWinner(t *testing.T, ctx context.Context, s *Store, ws, in
 	if row.Status != wantStatus {
 		t.Fatalf("iteration %d: status %q for winner event %q, want %q",
 			iteration, row.Status, row.SatisfiedByEventID, wantStatus)
+	}
+}
+
+func TestResolveRunOutcomeAwaitAndResumeAtomicAndReplay(t *testing.T) {
+	ctx := t.Context()
+	const ws = "WS"
+	s := New()
+	createAwaitRunCatalog(t, ctx, s, ws)
+	run, instanceKey := createPendingAwaitRun(t, ctx, s, ws, "parent", nil)
+	if _, err := s.runs.Suspend(ctx, ws, run.RunID, "node", "lease", run.FencingToken, instanceKey); err != nil {
+		t.Fatal(err)
+	}
+	resolver := s.Awaits().(store.RunOutcomeAwaitStore)
+	eventID := "run-finished:child:completed"
+	payload := json.RawMessage(`{"runId":"child","status":"completed"}`)
+	if err := resolver.ResolveRunOutcomeAwaitAndResume(ctx, ws, instanceKey, eventID, payload); err != nil {
+		t.Fatal(err)
+	}
+	assertAtomicAwaitResume(t, ctx, s, ws, run.RunID, instanceKey, eventID, payload)
+	if err := resolver.ResolveRunOutcomeAwaitAndResume(ctx, ws, instanceKey, eventID, payload); err != nil {
+		t.Fatalf("same-event replay: %v", err)
+	}
+	assertAtomicAwaitResume(t, ctx, s, ws, run.RunID, instanceKey, eventID, payload)
+}
+
+func TestResolveAwaitAndResumeDelayedOldReplayPreservesNewerMarker(t *testing.T) {
+	ctx := t.Context()
+	const ws = "WS"
+	s := New()
+	createAwaitRunCatalog(t, ctx, s, ws)
+	run, firstKey := createPendingAwaitRun(t, ctx, s, ws, "parent", nil)
+	if _, err := s.runs.Suspend(ctx, ws, run.RunID, "node", "lease", run.FencingToken, firstKey); err != nil {
+		t.Fatal(err)
+	}
+	firstEvent := "run-finished:first:completed"
+	outcomes := s.Awaits().(store.RunOutcomeAwaitStore)
+	if err := outcomes.ResolveRunOutcomeAwaitAndResume(ctx, ws, firstKey, firstEvent, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.runs.Claim(ctx, ws, run.RunID, "node-2", "lease-2"); err != nil {
+		t.Fatal(err)
+	}
+	secondKey := domain.AwaitInstanceKey(run.RunID, 2)
+	if _, err := s.Awaits().RegisterAwaitAndCheck(ctx, ws, store.AwaitRegistration{
+		InstanceKey: secondKey, RunID: run.RunID, Pattern: "approval.granted:second",
+		Deadline: time.Now().Add(time.Hour).UTC(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	atomic := s.Awaits().(store.AtomicAwaitStore)
+	if err := atomic.ResolveAwaitAndResume(ctx, ws, secondKey, "event-second", nil, "alice"); err != nil {
+		t.Fatal(err)
+	}
+	if err := outcomes.ResolveRunOutcomeAwaitAndResume(ctx, ws, firstKey, firstEvent, nil); err != nil {
+		t.Fatalf("delayed first replay: %v", err)
+	}
+	progressed, err := s.DriverRuns().Get(ctx, ws, run.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if progressed.Status != domain.DriverRunRunning || progressed.AwaitInstanceKey != secondKey ||
+		progressed.ResumeSourceEventID != "event-second" {
+		t.Fatalf("run after delayed old replay = %+v", progressed)
+	}
+}
+
+func TestResolveAwaitAndResumeDoesNotDeadlockConcurrentFinish(t *testing.T) {
+	const ws = "WS"
+	for i := range 50 {
+		s := New()
+		ctx := context.Background()
+		createAwaitRunCatalog(t, ctx, s, ws)
+		sourceEventID := fmt.Sprintf("source-%d", i)
+		now := time.Now().UTC()
+		if _, deduped := s.events.create(&domain.TriggerEvent{
+			WorkspaceKey: ws,
+			EventID:      sourceEventID,
+			SourceKind:   "test",
+			EventType:    "source.created",
+			SubjectRef:   sourceEventID,
+			ActorRef:     "system",
+			Origin:       domain.TriggerEventOriginExternal,
+			OccurredAt:   now,
+			ReceivedAt:   now,
+		}); deduped {
+			t.Fatalf("iteration %d: source event deduped", i)
+		}
+		runID := fmt.Sprintf("finish-race-%d", i)
+		created, err := s.DriverRuns().Create(ctx, store.DriverRunCreate{
+			WorkspaceKey: ws, RunID: runID, DriverID: "driver-await", DriverVersionID: "version-await",
+			SourceRef: sourceEventID,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		claimed, err := s.DriverRuns().Claim(ctx, ws, created.RunID, "node", "lease")
+		if err != nil {
+			t.Fatal(err)
+		}
+		instanceKey := domain.AwaitInstanceKey(runID, 1)
+		if _, err := s.Awaits().RegisterAwaitAndCheck(ctx, ws, store.AwaitRegistration{
+			InstanceKey: instanceKey,
+			RunID:       runID,
+			Pattern:     "approval.granted:finish-race",
+			Deadline:    time.Now().Add(time.Hour),
+		}); err != nil {
+			t.Fatal(err)
+		}
+
+		start := make(chan struct{})
+		errCh := make(chan error, 2)
+		go func() {
+			<-start
+			resolver := s.Awaits().(store.AtomicAwaitStore)
+			errCh <- resolver.ResolveAwaitAndResume(ctx, ws, instanceKey, "approval-race", nil, "alice")
+		}()
+		go func() {
+			<-start
+			_, finishErr := s.DriverRuns().Finish(ctx, ws, runID, store.DriverRunFinish{
+				NodeID: claimed.NodeID, LeaseID: claimed.LeaseID, FencingToken: claimed.FencingToken,
+				Status: domain.DriverRunCompleted,
+			})
+			errCh <- finishErr
+		}()
+		close(start)
+		for n := 0; n < 2; n++ {
+			select {
+			case err := <-errCh:
+				if err != nil {
+					t.Fatalf("iteration %d: concurrent operation: %v", i, err)
+				}
+			case <-time.After(2 * time.Second):
+				t.Fatalf("iteration %d: concurrent Finish/ResolveAwaitAndResume deadlocked", i)
+			}
+		}
+	}
+}
+
+func TestResolveRunOutcomeAwaitAndResumeWinsPendingSuspendWindow(t *testing.T) {
+	ctx := t.Context()
+	const ws = "WS"
+	s := New()
+	createAwaitRunCatalog(t, ctx, s, ws)
+	run, instanceKey := createPendingAwaitRun(t, ctx, s, ws, "parent", nil)
+	eventID := "run-finished:child:completed"
+	resolver := s.Awaits().(store.RunOutcomeAwaitStore)
+	if err := resolver.ResolveRunOutcomeAwaitAndResume(ctx, ws, instanceKey, eventID, nil); err != nil {
+		t.Fatal(err)
+	}
+	marked, err := s.DriverRuns().Get(ctx, ws, run.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if marked.Status != domain.DriverRunRunning || marked.AwaitInstanceKey != instanceKey || marked.ResumeSourceEventID != eventID {
+		t.Fatalf("pending-resume marker = %+v", marked)
+	}
+	if _, err := s.runs.Suspend(ctx, ws, run.RunID, "node", "lease", run.FencingToken, instanceKey); !errors.Is(err, domain.ErrDriverRunAlreadyResumed) {
+		t.Fatalf("Suspend error = %v, want %v", err, domain.ErrDriverRunAlreadyResumed)
+	}
+}
+
+func TestSuspendClearsPreviousAwaitCycleResumeMarker(t *testing.T) {
+	ctx := t.Context()
+	const ws = "WS"
+	s := New()
+	createAwaitRunCatalog(t, ctx, s, ws)
+	run, firstKey := createPendingAwaitRun(t, ctx, s, ws, "parent", nil)
+	if _, err := s.runs.Suspend(ctx, ws, run.RunID, "node", "lease", run.FencingToken, firstKey); err != nil {
+		t.Fatal(err)
+	}
+	resolver := s.Awaits().(store.RunOutcomeAwaitStore)
+	if err := resolver.ResolveRunOutcomeAwaitAndResume(ctx, ws, firstKey, "run-finished:child:completed", nil); err != nil {
+		t.Fatal(err)
+	}
+	reclaimed, err := s.runs.Claim(ctx, ws, run.RunID, "node-2", "lease-2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondKey := domain.AwaitInstanceKey(run.RunID, 2)
+	suspended, err := s.runs.Suspend(ctx, ws, run.RunID, "node-2", "lease-2", reclaimed.FencingToken, secondKey)
+	if err != nil {
+		t.Fatalf("second await cycle suspend: %v", err)
+	}
+	if suspended.Status != domain.DriverRunSuspendedAwaitingEvent || suspended.AwaitInstanceKey != secondKey {
+		t.Fatalf("second await cycle run = %+v", suspended)
+	}
+	if suspended.ResumeSourceEventID != "" {
+		t.Fatalf("second await cycle resume source event = %q, want cleared", suspended.ResumeSourceEventID)
+	}
+}
+
+func TestResolveRunOutcomeAwaitAndResumeSkipsActorRejectedMixedWaiters(t *testing.T) {
+	ctx := t.Context()
+	const ws = "WS"
+	s := New()
+	createAwaitRunCatalog(t, ctx, s, ws)
+	rejected, rejectedKey := createPendingAwaitRun(t, ctx, s, ws, "rejected", []string{"operator"})
+	allowed, allowedKey := createPendingAwaitRun(t, ctx, s, ws, "allowed", []string{"system"})
+	for _, item := range []struct {
+		run *domain.DriverRun
+		key string
+	}{{rejected, rejectedKey}, {allowed, allowedKey}} {
+		if _, err := s.runs.Suspend(ctx, ws, item.run.RunID, "node", "lease", item.run.FencingToken, item.key); err != nil {
+			t.Fatal(err)
+		}
+	}
+	resolver := s.Awaits().(store.RunOutcomeAwaitStore)
+	rows, err := s.Awaits().ListAwaitsByPattern(ctx, ws, "run.finished:child")
+	if err != nil {
+		t.Fatal(err)
+	}
+	eventID := "run-finished:child:completed"
+	for _, row := range rows {
+		if err := resolver.ResolveRunOutcomeAwaitAndResume(ctx, ws, row.InstanceKey, eventID, nil); err != nil {
+			t.Fatalf("resolve %s: %v", row.InstanceKey, err)
+		}
+	}
+	rejectedRun, _ := s.DriverRuns().Get(ctx, ws, rejected.RunID)
+	allowedRun, _ := s.DriverRuns().Get(ctx, ws, allowed.RunID)
+	if rejectedRun.Status != domain.DriverRunSuspendedAwaitingEvent {
+		t.Fatalf("actor-rejected run status = %s, want suspended", rejectedRun.Status)
+	}
+	if _, err := s.Awaits().GetSatisfiedAwait(ctx, ws, rejectedKey); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("actor-rejected await error = %v, want pending/not found", err)
+	}
+	if allowedRun.Status != domain.DriverRunQueued || allowedRun.ResumeSourceEventID != eventID {
+		t.Fatalf("allowed run = %+v", allowedRun)
+	}
+}
+
+func createPendingAwaitRun(
+	t *testing.T,
+	ctx context.Context,
+	s *Store,
+	ws, runID string,
+	actorAllow []string,
+) (*domain.DriverRun, string) {
+	t.Helper()
+	created, err := s.DriverRuns().Create(ctx, store.DriverRunCreate{
+		WorkspaceKey: ws, RunID: runID, DriverID: "driver-await", DriverVersionID: "version-await",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	claimed, err := s.DriverRuns().Claim(ctx, ws, created.RunID, "node", "lease")
+	if err != nil {
+		t.Fatal(err)
+	}
+	instanceKey := domain.AwaitInstanceKey(runID, 1)
+	if _, err := s.Awaits().RegisterAwaitAndCheck(ctx, ws, store.AwaitRegistration{
+		InstanceKey: instanceKey, RunID: runID, Pattern: "run.finished:child",
+		ActorAllow: actorAllow, Deadline: time.Now().Add(time.Hour).UTC(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return claimed, instanceKey
+}
+
+func assertAtomicAwaitResume(
+	t *testing.T,
+	ctx context.Context,
+	s *Store,
+	ws, runID, instanceKey, eventID string,
+	payload json.RawMessage,
+) {
+	t.Helper()
+	run, err := s.DriverRuns().Get(ctx, ws, runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.Status != domain.DriverRunQueued || run.ResumeSourceEventID != eventID || run.AwaitInstanceKey != instanceKey {
+		t.Fatalf("resumed run = %+v", run)
+	}
+	await, err := s.Awaits().GetSatisfiedAwait(ctx, ws, instanceKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if await.SatisfiedByEventID != eventID || await.SatisfiedActor == "" ||
+		string(await.SatisfiedPayload) != string(payload) {
+		t.Fatalf("satisfied await = %+v", await)
 	}
 }

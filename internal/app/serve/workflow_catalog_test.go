@@ -16,10 +16,15 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/tysonthomas9/loomcli/internal/domain"
 	infrafleetdb "github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
+	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	"github.com/tysonthomas9/loomcli/internal/modules/automation"
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 	catalogfleetdb "github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog/fleetdb"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
+	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/webui/handlers/webhooks"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
 
@@ -36,6 +41,69 @@ func TestNewWorkflowCatalogModuleDisabledConstructsNothing(t *testing.T) {
 		t.Fatalf("disabled module = %#v, want nil", module)
 	}
 	assertPathDoesNotExist(t, filepath.Join(runtimeDir, ".loom", "operator"))
+}
+
+func TestNewWorkflowCatalogModuleRejectsAutomationWithoutCatalog(t *testing.T) {
+	module, err := NewWorkflowCatalogModule(WorkflowCatalogConfig{AutomationEnabled: true})
+	if module != nil || err == nil || !strings.Contains(err.Error(), "Workflow Catalog is disabled") {
+		t.Fatalf("module = %#v, error = %v", module, err)
+	}
+}
+
+func TestWorkflowCatalogComposesProductionAutomationCapability(t *testing.T) {
+	client, _ := newCatalogFleetClient(t)
+	state := memstore.New()
+	module, err := NewWorkflowCatalogModule(WorkflowCatalogConfig{
+		Enabled: true, AutomationEnabled: true, FleetDBClient: client,
+		AutomationDriverRuns: state.DriverRuns(), AutomationWorkspaces: state.Workspaces(),
+		AutomationWebhookVerifier: webhooks.NewCompatibilityVerifier(webhooks.CompatibilityVerifierConfig{
+			Bindings: state.TriggerBindings(), Connectors: state.Connectors(),
+		}),
+		AutomationAwaits: state.Awaits(), WorkflowTargetCatalog: state,
+		RuntimeDir: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("NewWorkflowCatalogModule: %v", err)
+	}
+	capability := module.AutomationCapability()
+	if capability == nil || capability.BindingOperations() == nil ||
+		capability.WebhookWorkflow() == nil || capability.WorkflowEventing() == nil ||
+		capability.WorkflowBinding() == nil ||
+		capability.IssueJournalEmitter() == nil || capability.RunOutcomePublisher() == nil {
+		t.Fatalf("Automation capability = %#v", capability)
+	}
+	registrations := capability.RuntimeRegistrations()
+	if len(registrations) != 2 || registrations[0].Component.ID() != automation.CronSchedulerComponentID ||
+		registrations[1].Component.ID() != automation.DeliverySweeperComponentID {
+		t.Fatalf("runtime registrations = %#v", registrations)
+	}
+}
+
+func TestLegacyWorkflowTargetPreparerProjectsActivatedTarget(t *testing.T) {
+	state := memstore.New()
+	if _, err := state.Drivers().Create(t.Context(), store.DriverCreate{
+		WorkspaceKey: "TEST", DriverID: "driver-1", Name: "custom-workflow",
+		OwnerType: domain.DriverOwnerSystem, Status: domain.DriverStatusActive, ActiveVersionID: "version-2",
+	}); err != nil {
+		t.Fatalf("create driver: %v", err)
+	}
+	preparer := newLegacyWorkflowTargetPreparer(state)
+	if preparer == nil {
+		t.Fatal("legacy preparer is nil")
+	}
+	target, err := preparer.PrepareWorkflowTarget(t.Context(), "TEST", "custom-workflow")
+	if err != nil {
+		t.Fatalf("PrepareWorkflowTarget: %v", err)
+	}
+	if target.DriverID != "driver-1" || target.DriverVersionID != "version-2" {
+		t.Fatalf("target = %+v", target)
+	}
+	if newLegacyWorkflowTargetPreparer(nil) != nil {
+		t.Fatal("nil Store constructed a legacy preparer")
+	}
+	if _, err := preparer.PrepareWorkflowTarget(t.Context(), "TEST", "missing"); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("missing workflow error = %v, want domain.ErrNotFound", err)
+	}
 }
 
 func TestNewWorkflowCatalogModuleRejectsNilSharedFleetDBClient(t *testing.T) {
@@ -294,6 +362,41 @@ func TestLocalWorkflowCatalogBrowserLaunchIsSingleUseAndActionScoped(t *testing.
 	assertCatalogStatus(t, mux, "TEST", "Bearer "+session.AccessToken, nil, http.StatusOK)
 	if calls := fleet.Calls(); len(calls) != 4 {
 		t.Fatalf("browser-authorized request FleetDB calls = %v, want four", calls)
+	}
+}
+
+func TestLocalBrowserBrokerDelegatesEnabledAutomationOperatorActionsOnly(t *testing.T) {
+	runtimeDir := filepath.Join(t.TempDir(), "runtime")
+	_, _, browserSession, err := composeWorkflowCatalogAuthority(WorkflowCatalogConfig{
+		Enabled: true, RuntimeDir: runtimeDir, Workspace: "TEST", AutomationEnabled: true,
+	}, authority.NewIssuer())
+	if err != nil {
+		t.Fatalf("composeWorkflowCatalogAuthority: %v", err)
+	}
+	if browserSession == nil {
+		t.Fatal("local browser session broker is nil")
+	}
+	token, err := authority.ReadLocalOperatorToken(filepath.Join(runtimeDir, ".loom", "operator"))
+	if err != nil {
+		t.Fatalf("ReadLocalOperatorToken: %v", err)
+	}
+	launch, err := browserSession.MintLaunchCode("Bearer "+token, "TEST")
+	if err != nil {
+		t.Fatalf("MintLaunchCode: %v", err)
+	}
+	session, err := browserSession.ExchangeLaunchCode(launch.Code, "TEST")
+	if err != nil {
+		t.Fatalf("ExchangeLaunchCode: %v", err)
+	}
+	value, err := browserSession.IssueOperator(session.Bearer, "TEST", automation.ActionCreateBinding)
+	if err != nil {
+		t.Fatalf("IssueOperator create binding: %v", err)
+	}
+	if value.Workspace() != "TEST" || value.Action() != automation.ActionCreateBinding {
+		t.Fatalf("automation operator authority = workspace:%q action:%q", value.Workspace(), value.Action())
+	}
+	if _, err := browserSession.IssueOperator(session.Bearer, "TEST", automation.ActionAdmitEvent); !errors.Is(err, authority.ErrActionNotAllowed) {
+		t.Fatalf("browser event-ingestion authority error = %v, want %v", err, authority.ErrActionNotAllowed)
 	}
 }
 

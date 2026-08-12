@@ -10,7 +10,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/trigger"
 )
 
@@ -313,17 +312,19 @@ func TestRouterBindingFlagsPatch(t *testing.T) {
 		if err != nil {
 			t.Fatalf("patch() error = %v", err)
 		}
-		if patch.ActorFilter == nil || !patch.ActorFilter.IsZero() {
-			t.Fatalf("ActorFilter = %+v, want non-nil zero filter (clears server-side)", patch.ActorFilter)
+		if !patch.ClearActorFilter || patch.ActorFilter != nil {
+			t.Fatalf("ClearActorFilter = %t ActorFilter = %+v, want explicit clear", patch.ClearActorFilter, patch.ActorFilter)
 		}
 	})
 }
 
-func TestNewBindingCreateInputCarriesRouterFields(t *testing.T) {
-	// newBindingCreateInput reads the package-level create flag state; set it
+func TestNewBindingCreateRequestCarriesRouterFields(t *testing.T) {
+	// newBindingCreateRequest reads the package-level create flag state; set it
 	// directly and restore afterwards so other tests see clean state.
-	saved := bindCreateRouter
-	t.Cleanup(func() { bindCreateRouter = saved })
+	savedRouter, savedDriver, savedVersion, savedDisabled := bindCreateRouter, bindCreateDriver, bindCreateVersion, bindCreateDisabled
+	t.Cleanup(func() {
+		bindCreateRouter, bindCreateDriver, bindCreateVersion, bindCreateDisabled = savedRouter, savedDriver, savedVersion, savedDisabled
+	})
 	bindCreateRouter = routerBindingFlags{
 		subjectKeyTemplate: " {{subject_ref}} ",
 		concurrencyPolicy:  "queue",
@@ -334,9 +335,12 @@ func TestNewBindingCreateInputCarriesRouterFields(t *testing.T) {
 		scheduleTimezone:   " UTC ",
 		patterns:           []string{"github.pull_request.*"},
 	}
-	in := newBindingCreateInput("ws-1", "github.pull_request.opened", "github", "drv-1", "ver-1")
-	want := store.TriggerBindingCreate{
-		WorkspaceKey:        "ws-1",
+	bindCreateDriver = "drv-1"
+	bindCreateVersion = "ver-1"
+	bindCreateDisabled = false
+	in := newBindingCreateRequest("github.pull_request.opened", "github")
+	enabled := true
+	want := triggerBindingCreateRequest{
 		BindingID:           "binding-github-pull_request-opened",
 		Name:                "github.pull_request.opened",
 		SourceKind:          "github",
@@ -350,7 +354,7 @@ func TestNewBindingCreateInputCarriesRouterFields(t *testing.T) {
 		RetryBackoffSeconds: 45,
 		Schedule:            "*/10 * * * *",
 		ScheduleTimezone:    "UTC",
-		Enabled:             true,
+		Enabled:             &enabled,
 	}
 	if in.ActorFilter == nil || len(in.ActorFilter.ExcludeActorKinds) != 1 || in.ActorFilter.ExcludeActorKinds[0] != "workflow" {
 		t.Fatalf("ActorFilter = %+v, want exclude [workflow]", in.ActorFilter)
@@ -361,7 +365,7 @@ func TestNewBindingCreateInputCarriesRouterFields(t *testing.T) {
 	}
 	in.EventTypePatterns, want.EventTypePatterns = nil, nil
 	if !reflect.DeepEqual(in, want) {
-		t.Fatalf("newBindingCreateInput =\n%+v\nwant\n%+v", in, want)
+		t.Fatalf("newBindingCreateRequest =\n%+v\nwant\n%+v", in, want)
 	}
 }
 

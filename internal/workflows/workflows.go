@@ -96,6 +96,13 @@ type BuildAndRegisterOptions struct {
 	Trust domain.DriverTrustLevel
 }
 
+// DriverCatalog is the only persistence capability builtin preparation,
+// workflow-name resolution, and Driver registration require.
+type DriverCatalog interface {
+	Drivers() store.DriverStore
+	DriverVersions() store.DriverVersionStore
+}
+
 var builtinMu sync.Mutex
 
 var builtinWorkflows = map[string]Spec{
@@ -206,7 +213,7 @@ func IsBuiltinWorkflow(name string) bool {
 	return ok
 }
 
-func EnsureBuiltinWorkflow(ctx context.Context, st store.Store, ws, name string) error {
+func EnsureBuiltinWorkflow(ctx context.Context, st DriverCatalog, ws, name string) error {
 	spec, ok := BuiltinWorkflow(name)
 	if !ok {
 		return domain.ErrNotFound
@@ -290,7 +297,7 @@ func EnsureBuiltinWorkflow(ctx context.Context, st store.Store, ws, name string)
 //
 // registeredDigest is the active version's recorded source_digest (empty when
 // there is no active version), so the caller can log digest drift on reuse.
-func builtinReuseDecision(ctx context.Context, st store.Store, ws, name string, fresh map[string]struct{}) (reuse bool, registeredDigest string, missing []string, err error) {
+func builtinReuseDecision(ctx context.Context, st DriverCatalog, ws, name string, fresh map[string]struct{}) (reuse bool, registeredDigest string, missing []string, err error) {
 	driverID, err := ResolveDriverID(ctx, st, ws, name)
 	if err != nil {
 		if errors.Is(err, domain.ErrNotFound) {
@@ -311,7 +318,7 @@ func builtinReuseDecision(ctx context.Context, st store.Store, ws, name string, 
 	return true, current, nil, nil
 }
 
-func activeBuiltInWorkflowState(ctx context.Context, st store.Store, ws, driverID string) (string, bool, map[string]string, error) {
+func activeBuiltInWorkflowState(ctx context.Context, st DriverCatalog, ws, driverID string) (string, bool, map[string]string, error) {
 	driverRecord, err := st.Drivers().Get(ctx, ws, driverID)
 	if err != nil {
 		return "", false, nil, fmt.Errorf("get built-in workflow driver %q: %w", driverID, err)
@@ -409,7 +416,7 @@ func submissionTrust(trust domain.DriverTrustLevel) domain.DriverTrustLevel {
 }
 
 //nolint:funlen // Ordered build staging, diagnostics redaction, and registration share error context.
-func BuildAndRegister(ctx context.Context, st store.Store, opts BuildAndRegisterOptions) (*driver.RegisterFlueResult, string, error) {
+func BuildAndRegister(ctx context.Context, st DriverCatalog, opts BuildAndRegisterOptions) (*driver.RegisterFlueResult, string, error) {
 	if opts.SourceDigest == "" {
 		opts.SourceDigest = SourceDigest(opts.Files)
 	}
@@ -594,7 +601,7 @@ func manifestMissingFreshRunners(manifest map[string]string, fresh map[string]st
 // driver record. It is the shared resolve path for every HTTP surface that
 // accepts a workflow name (workflow runs, trigger bindings); non-builtin names
 // skip the heal and resolve directly.
-func EnsureAndResolveDriver(ctx context.Context, st store.Store, ws, name string) (*domain.Driver, error) {
+func EnsureAndResolveDriver(ctx context.Context, st DriverCatalog, ws, name string) (*domain.Driver, error) {
 	if IsBuiltinWorkflow(name) {
 		if err := EnsureBuiltinWorkflow(ctx, st, ws, name); err != nil {
 			return nil, err
@@ -607,7 +614,7 @@ func EnsureAndResolveDriver(ctx context.Context, st store.Store, ws, name string
 // record. It does not self-heal builtins — use EnsureAndResolveDriver for
 // that. Callers that need more than the id (e.g. ActiveVersionID) should use
 // this instead of ResolveDriverID followed by a second Drivers().Get.
-func ResolveDriver(ctx context.Context, st store.Store, ws, name string) (*domain.Driver, error) {
+func ResolveDriver(ctx context.Context, st DriverCatalog, ws, name string) (*domain.Driver, error) {
 	if name == "" {
 		return nil, fmt.Errorf("workflow name is required: %w", domain.ErrInvalid)
 	}
@@ -628,7 +635,7 @@ func ResolveDriver(ctx context.Context, st store.Store, ws, name string) (*domai
 	return drivers[0], nil
 }
 
-func ResolveDriverID(ctx context.Context, st store.Store, ws, name string) (string, error) {
+func ResolveDriverID(ctx context.Context, st DriverCatalog, ws, name string) (string, error) {
 	driver, err := ResolveDriver(ctx, st, ws, name)
 	if err != nil {
 		return "", err

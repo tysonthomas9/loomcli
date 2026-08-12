@@ -28,6 +28,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/app/workfloweventing"
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/backend/fleet"
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
@@ -36,8 +37,8 @@ import (
 	driverpkg "github.com/tysonthomas9/loomcli/internal/driver"
 	"github.com/tysonthomas9/loomcli/internal/epicrunner"
 	"github.com/tysonthomas9/loomcli/internal/leadcontrol"
+	"github.com/tysonthomas9/loomcli/internal/modules/automation"
 	"github.com/tysonthomas9/loomcli/internal/store"
-	"github.com/tysonthomas9/loomcli/internal/trigger"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/roles"
 )
 
@@ -89,6 +90,13 @@ type Config struct {
 	// Nil means connector egress is unconfigured and fails closed (see
 	// connectors.go).
 	Dispatcher *connector.Dispatcher
+	// WorkflowEventing is the named application workflow behind emit-event.
+	// Nil leaves that mutation inert; there is no legacy InternalSource or
+	// direct Store fallback.
+	WorkflowEventing *workfloweventing.Workflow
+	// EventAwaits preserves the post-admission AW7 notification through a
+	// narrow port while await ownership remains in the legacy trigger package.
+	EventAwaits WorkflowEventAwaitDispatcher
 }
 
 // Module serves the workspace-scoped driver-op routes.
@@ -101,11 +109,9 @@ type Module struct {
 	localSettingsDir string
 	issueBackends    IssueBackendFactory
 	dispatcher       *connector.Dispatcher
+	workflowEventing *workfloweventing.Workflow
+	eventAwaits      WorkflowEventAwaitDispatcher
 	ops              map[string]opHandler
-
-	// internalEvents is the C14 internal-event loopback ingress backing the
-	// emit-event op (see internal/trigger/internal_source.go).
-	internalEvents *trigger.InternalSource
 
 	// Watch stream cadence (see watch.go). Defaults set in NewModule;
 	// overridden in tests.
@@ -130,14 +136,14 @@ func NewModule(cfg Config) *Module { //nolint:funlen // Operation registration i
 		localSettingsDir: strings.TrimSpace(cfg.LocalSettingsDir),
 		issueBackends:    cfg.IssueBackends,
 		dispatcher:       cfg.Dispatcher,
+		workflowEventing: cfg.WorkflowEventing,
+		eventAwaits:      cfg.EventAwaits,
 
 		watchPollInterval:      defaultWatchPollInterval,
 		watchHeartbeatInterval: defaultWatchHeartbeatInterval,
 		watchReconcileInterval: defaultWatchReconcileInterval,
 
 		deliverAssignment: leadcontrol.DeliverCurrentAssignment,
-
-		internalEvents: &trigger.InternalSource{Store: cfg.Store},
 	}
 	m.ops = map[string]opHandler{
 		"claim-ready":                 m.claimReady,
@@ -956,6 +962,14 @@ func writeDomainOpError(w http.ResponseWriter, err error) {
 		return
 	}
 	switch {
+	case errors.Is(err, workfloweventing.ErrInvalidRequest), errors.Is(err, automation.ErrInvalid), errors.Is(err, automation.ErrWrongWorkspace):
+		writeOpError(w, http.StatusBadRequest, "invalid", err.Error(), false)
+	case errors.Is(err, automation.ErrNotFound), errors.Is(err, automation.ErrNoMatchingBinding), errors.Is(err, automation.ErrParentEventNotFound):
+		writeOpError(w, http.StatusNotFound, "not_found", err.Error(), false)
+	case errors.Is(err, automation.ErrConflict):
+		writeOpError(w, http.StatusConflict, "conflict", err.Error(), false)
+	case errors.Is(err, workfloweventing.ErrUnavailable), errors.Is(err, automation.ErrUnavailable):
+		writeOpError(w, http.StatusServiceUnavailable, "unavailable", err.Error(), true)
 	case errors.Is(err, domain.ErrNotFound):
 		writeOpError(w, http.StatusNotFound, "not_found", err.Error(), false)
 	case errors.Is(err, domain.ErrNotOwner):

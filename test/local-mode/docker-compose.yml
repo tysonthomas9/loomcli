@@ -66,6 +66,10 @@ services:
       FLEET_AUTH_ENABLED: "true"
       FLEET_AUTH_DEV_MODE: "false"
       FLEET_AUTHZ_ENABLED: "true"
+      # Phase 3 local-mode proof must advertise and exercise the complete
+      # Automation contract; Loom composes this slice by default alongside
+      # Workflow Catalog and fails readiness when Fleet leaves it disabled.
+      FLEET_AUTOMATION_TRIGGER_ADMISSION_ENABLED: "true"
       FLEET_AUTH_BOOTSTRAP_ADMIN_ACTOR: "${LOCAL_MODE_FLEETDB_ADMIN_ACTOR:-local-mode-harness@fixture.local}"
       FLEET_AUTH_BOOTSTRAP_ADMIN_KEY: "${LOCAL_MODE_FLEETDB_API_KEY:-loom-local-mode-test-only-admin-key-v1}"
     command:
@@ -110,6 +114,7 @@ services:
       # This profile is the product proof for the Workflow Catalog slice; do
       # not make auth migration pass by disabling the capability.
       LOOM_WORKFLOW_CATALOG_ENABLED: "true"
+      LOOM_AUTOMATION_ENABLED: "true"
       LOOM_BACKEND: localdogfood
       LOOM_SERVER_URL: http://127.0.0.1:8080
       LOOM_WEBUI_URL: http://127.0.0.1:8080

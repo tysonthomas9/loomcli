@@ -13,10 +13,11 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/tysonthomas9/loomcli/internal/app/webhookingestion"
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/modules/automation"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/trigger"
-	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 )
 
 // maxWebhookPayloadBytes caps the inbound webhook body. GitHub deliveries are
@@ -26,21 +27,62 @@ const maxWebhookPayloadBytes = 8 << 20
 // Module serves the inbound webhook ingestion route plus read-only listing of
 // the persisted TriggerEvent / TriggerDelivery audit trail.
 type Module struct {
-	store    store.Store
-	adapters registry
+	workflow   *webhookingestion.Workflow
+	automation AutomationQueries
+	adapters   registry
 	// awaits is the dispatch-time await matcher (AW7): admitted events are
 	// matched against pending await instances right after durable dispatch.
-	awaits *trigger.AwaitMatcher
+	awaits AwaitDispatcher
 }
 
-// NewModule constructs the webhooks module backed by the given store. Returns
-// nil-safe behavior: with a nil store, Register registers nothing.
+// AutomationQueries is the read-only Automation surface exposed by the
+// trigger-event and trigger-delivery HTTP routes.
+type AutomationQueries interface {
+	automation.EventQueries
+	automation.DeliveryQueries
+}
+
+// AwaitDispatcher is the narrow compatibility seam for AW7. Await ownership
+// moves to Execution in a later phase; webhook transport does not need the
+// composite Store to notify it.
+type AwaitDispatcher interface {
+	Dispatch(context.Context, string, trigger.AwaitDispatchEvent) (*trigger.AwaitDispatchResult, error)
+}
+
+// Config composes webhook transport over the named application workflow and
+// Automation's public query APIs.
+type Config struct {
+	Workflow   *webhookingestion.Workflow
+	Automation AutomationQueries
+	Awaits     AwaitDispatcher
+}
+
+// New constructs the composition-friendly webhook module. Missing ports fail
+// closed at request time while all established routes remain registered.
+func New(config Config) *Module {
+	return &Module{
+		workflow: config.Workflow, automation: config.Automation,
+		adapters: defaultRegistry(), awaits: config.Awaits,
+	}
+}
+
+// NewModule is a temporary source-compatibility bridge for composition and
+// old tests that have not moved to Config. It is intentionally inert for
+// webhook mutation and Automation queries: it MUST NOT fall back to Store's
+// legacy TriggerRoutes/TriggerEvents/TriggerDeliveries paths. Serve composition
+// must use New before enabling these routes.
+//
+// Deprecated: use New.
 func NewModule(st store.Store) *Module {
-	return &Module{store: st, adapters: defaultRegistry(), awaits: &trigger.AwaitMatcher{Store: st}}
+	var awaits AwaitDispatcher
+	if st != nil {
+		awaits = &trigger.AwaitMatcher{Store: st}
+	}
+	return New(Config{Awaits: awaits})
 }
 
 func (m *Module) Register(mux *http.ServeMux) {
-	if m.store == nil {
+	if m == nil || mux == nil {
 		return
 	}
 	mux.HandleFunc("POST /api/workspaces/{ws}/webhooks/{name}", m.receiveWebhook)
@@ -58,8 +100,8 @@ func (m *Module) receiveWebhook(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, fmt.Sprintf("no webhook adapter registered for %q", name))
 		return
 	}
-	if m.store.TriggerRoutes() == nil {
-		writeError(w, http.StatusNotImplemented, "trigger dispatch is unavailable for this store")
+	if m.workflow == nil {
+		writeError(w, http.StatusServiceUnavailable, "webhook ingestion is unavailable")
 		return
 	}
 
@@ -82,72 +124,22 @@ func (m *Module) receiveWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 2-3. Resolve the enabled binding and verify the signature BEFORE dispatch.
-	if !m.authorizeWebhook(w, r, adapter, ws, event, body) {
-		return
-	}
-	// 4-5. Dispatch durably and respond.
-	m.dispatchWebhook(w, r, ws, name, event, body)
-}
-
-// authorizeWebhook resolves the enabled binding for the event's route key,
-// resolves the inbound signing secret(s), and verifies the request signature.
-// It writes the appropriate error and returns false on any failure.
-//
-// Signature model (step-7 connectors): verification resolves the per-source
-// connector's inbound secret — one rotation point per source — accepting the
-// previous secret inside the dual-secret rotation window (stale matches emit
-// an audit signal). Bindings whose source kind has no connector yet keep
-// verifying against the exact-RouteKey binding's secret (back-compat, no flag
-// day). Pattern-matched fan-out bindings need no secrets of their own —
-// verification happens here at ingress, before dispatch.
-func (m *Module) authorizeWebhook(w http.ResponseWriter, r *http.Request, adapter Adapter, ws string, event NormalizedEvent, body []byte) bool {
-	binding, err := m.store.TriggerBindings().GetByRouteKey(r.Context(), ws, event.RouteKey)
-	if err != nil {
-		handler.WriteDomainError(w, err, fmt.Sprintf("no trigger binding for route %q", event.RouteKey))
-		return false
-	}
-	if !binding.Enabled {
-		writeError(w, http.StatusNotFound, fmt.Sprintf("trigger binding for route %q is disabled", event.RouteKey))
-		return false
-	}
-	if err := m.verifyInboundSignature(r, adapter, ws, binding, body); err != nil {
-		writeAdapterError(w, err)
-		return false
-	}
-	return true
-}
-
-// dispatchWebhook normalizes the payload to valid JSON, hands off to the durable
-// idempotent fan-out dispatch path (redelivery heals each leg independently),
-// and writes the 202 response. The handler still only persists + enqueues —
-// it never executes work inline.
-func (m *Module) dispatchWebhook(w http.ResponseWriter, r *http.Request, ws, name string, event NormalizedEvent, body []byte) {
-	if len(strings.TrimSpace(string(body))) == 0 {
-		body = []byte("{}")
-	} else if !json.Valid(body) {
-		writeError(w, http.StatusBadRequest, "webhook payload must be valid JSON")
-		return
-	}
 	idempotencyKey := name + ":" + event.DeliveryID
-	result, err := m.store.TriggerRoutes().DispatchTriggerRouteV2(r.Context(), ws, event.RouteKey, store.TriggerRouteDispatch{
-		IdempotencyKey:   idempotencyKey,
-		SourceEventID:    event.DeliveryID,
-		EventType:        event.EventType,
-		SubjectRef:       event.SubjectRef,
-		ActorRef:         event.ActorRef,
-		SignatureStatus:  "verified",
-		RawPayloadDigest: payloadDigest(body),
-		Payload:          json.RawMessage(body),
-		SubjectAttrs:     event.SubjectAttrs,
+	result, err := m.workflow.Ingest(r.Context(), webhookingestion.IngestRequest{
+		WorkspaceKey: ws, SourceKind: name, RouteKey: event.RouteKey,
+		SourceEventID: event.DeliveryID, EventType: event.EventType,
+		SubjectRef: event.SubjectRef, ActorRef: event.ActorRef,
+		RawPayloadDigest: payloadDigest(normalizedPayload(body)),
+		Payload:          json.RawMessage(body), SubjectAttrs: event.SubjectAttrs,
+		PresentedSignature: adapter.PresentedSignature(r),
 	})
 	if err != nil {
-		handler.WriteDomainError(w, err, "dispatch webhook failed")
+		writeIngestionError(w, err)
 		return
 	}
 	// Dispatch-time await matching (AW7) runs after the durable fan-out so a
 	// matcher failure can never lose an admitted delivery.
-	m.notifyAwaits(r.Context(), ws, event, body)
+	m.notifyAwaits(r.Context(), ws, name, event, normalizedPayload(body))
 	// BREAKING router-v2 wire (locked decision): the 202 body carries
 	// deliveries[] only — no top-level driver_run_id / driver_run. loom-dev
 	// consumers update at redeploy; callers that need the run body fetch it
@@ -156,7 +148,7 @@ func (m *Module) dispatchWebhook(w http.ResponseWriter, r *http.Request, ws, nam
 		"status":          "accepted",
 		"route_key":       event.RouteKey,
 		"idempotency_key": idempotencyKey,
-		"deliveries":      result.Deliveries,
+		"deliveries":      deliveryResponses(result.Deliveries),
 	})
 }
 
@@ -166,13 +158,15 @@ func (m *Module) dispatchWebhook(w http.ResponseWriter, r *http.Request, ws, nam
 // after durable dispatch — a matcher error must not turn an accepted
 // delivery into a webhook failure (redelivery and the deadline machinery
 // converge); it is logged with the event identity instead.
-func (m *Module) notifyAwaits(ctx context.Context, ws string, event NormalizedEvent, body []byte) {
+func (m *Module) notifyAwaits(ctx context.Context, ws, sourceKind string, event NormalizedEvent, body []byte) {
 	if m.awaits == nil {
 		return
 	}
 	if _, err := m.awaits.Dispatch(ctx, ws, trigger.AwaitDispatchEvent{
 		EventID:    event.DeliveryID,
 		EventType:  event.EventType,
+		SourceKind: sourceKind,
+		Origin:     domain.TriggerEventOriginExternal,
 		SubjectRef: event.SubjectRef,
 		ActorRef:   event.ActorRef,
 		Payload:    json.RawMessage(body),
@@ -184,55 +178,69 @@ func (m *Module) notifyAwaits(ctx context.Context, ws string, event NormalizedEv
 }
 
 func (m *Module) listTriggerEvents(w http.ResponseWriter, r *http.Request) {
+	if m.automation == nil {
+		writeError(w, http.StatusServiceUnavailable, "automation queries are unavailable")
+		return
+	}
 	limit, err := parseLimit(r)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	events, err := m.store.TriggerEvents().List(r.Context(), r.PathValue("ws"), store.TriggerEventFilter{
-		SourceKind:       strings.TrimSpace(r.URL.Query().Get("source_kind")),
-		TriggerBindingID: strings.TrimSpace(r.URL.Query().Get("trigger_binding_id")),
-		Limit:            limit,
+	events, err := m.automation.ListEvents(r.Context(), r.PathValue("ws"), automation.EventFilter{
+		SourceKind: strings.TrimSpace(r.URL.Query().Get("source_kind")),
+		BindingID:  strings.TrimSpace(r.URL.Query().Get("trigger_binding_id")), Limit: limit,
 	})
 	if err != nil {
-		handler.WriteDomainError(w, err, "list trigger events failed")
+		writeAutomationError(w, err, "list trigger events failed")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"trigger_events": events, "count": len(events)})
 }
 
 func (m *Module) getTriggerEvent(w http.ResponseWriter, r *http.Request) {
-	event, err := m.store.TriggerEvents().Get(r.Context(), r.PathValue("ws"), r.PathValue("eventId"))
+	if m.automation == nil {
+		writeError(w, http.StatusServiceUnavailable, "automation queries are unavailable")
+		return
+	}
+	event, err := m.automation.GetEvent(r.Context(), r.PathValue("ws"), r.PathValue("eventId"))
 	if err != nil {
-		handler.WriteDomainError(w, err, "trigger event not found")
+		writeAutomationError(w, err, "trigger event not found")
 		return
 	}
 	writeJSON(w, http.StatusOK, event)
 }
 
 func (m *Module) listTriggerDeliveries(w http.ResponseWriter, r *http.Request) {
+	if m.automation == nil {
+		writeError(w, http.StatusServiceUnavailable, "automation queries are unavailable")
+		return
+	}
 	limit, err := parseLimit(r)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	deliveries, err := m.store.TriggerDeliveries().List(r.Context(), r.PathValue("ws"), store.TriggerDeliveryFilter{
-		TriggerEventID:   strings.TrimSpace(r.URL.Query().Get("trigger_event_id")),
-		TriggerBindingID: strings.TrimSpace(r.URL.Query().Get("trigger_binding_id")),
-		Status:           domain.TriggerDeliveryStatus(strings.TrimSpace(r.URL.Query().Get("status"))),
-		Limit:            limit,
+	deliveries, err := m.automation.ListDeliveries(r.Context(), r.PathValue("ws"), automation.DeliveryFilter{
+		EventID:   strings.TrimSpace(r.URL.Query().Get("trigger_event_id")),
+		BindingID: strings.TrimSpace(r.URL.Query().Get("trigger_binding_id")),
+		Status:    automation.DeliveryStatus(strings.TrimSpace(r.URL.Query().Get("status"))), Limit: limit,
 	})
 	if err != nil {
-		handler.WriteDomainError(w, err, "list trigger deliveries failed")
+		writeAutomationError(w, err, "list trigger deliveries failed")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"trigger_deliveries": deliveries, "count": len(deliveries)})
 }
 
 func (m *Module) getTriggerDelivery(w http.ResponseWriter, r *http.Request) {
-	delivery, err := m.store.TriggerDeliveries().Get(r.Context(), r.PathValue("ws"), r.PathValue("deliveryId"))
+	if m.automation == nil {
+		writeError(w, http.StatusServiceUnavailable, "automation queries are unavailable")
+		return
+	}
+	delivery, err := m.automation.GetDelivery(r.Context(), r.PathValue("ws"), r.PathValue("deliveryId"))
 	if err != nil {
-		handler.WriteDomainError(w, err, "trigger delivery not found")
+		writeAutomationError(w, err, "trigger delivery not found")
 		return
 	}
 	writeJSON(w, http.StatusOK, delivery)
@@ -255,6 +263,38 @@ func payloadDigest(body []byte) string {
 	return "sha256:" + hex.EncodeToString(sum[:])
 }
 
+func normalizedPayload(body []byte) []byte {
+	if strings.TrimSpace(string(body)) == "" {
+		return []byte("{}")
+	}
+	return body
+}
+
+// deliveryResponse pins the existing webhook deliveries[] wire while the
+// underlying model is now owned by Automation.
+type deliveryResponse struct {
+	DeliveryID      string                    `json:"delivery_id"`
+	BindingID       string                    `json:"trigger_binding_id"`
+	RunID           string                    `json:"driver_run_id"`
+	Status          automation.DeliveryStatus `json:"status"`
+	RejectionReason string                    `json:"rejection_reason,omitempty"`
+}
+
+func deliveryResponses(deliveries []*automation.Delivery) []deliveryResponse {
+	out := make([]deliveryResponse, 0, len(deliveries))
+	for _, delivery := range deliveries {
+		if delivery == nil {
+			continue
+		}
+		out = append(out, deliveryResponse{
+			DeliveryID: delivery.DeliveryID, BindingID: delivery.TriggerBindingID,
+			RunID: delivery.DriverRunID, Status: delivery.Status,
+			RejectionReason: delivery.RejectionReason,
+		})
+	}
+	return out
+}
+
 func writeJSON(w http.ResponseWriter, status int, value any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
@@ -272,4 +312,36 @@ func writeAdapterError(w http.ResponseWriter, err error) {
 		return
 	}
 	writeError(w, http.StatusBadRequest, err.Error())
+}
+
+func writeIngestionError(w http.ResponseWriter, err error) {
+	var ae *adapterError
+	if errors.As(err, &ae) {
+		writeError(w, ae.status, ae.message)
+		return
+	}
+	if errors.Is(err, webhookingestion.ErrInvalidRequest) || errors.Is(err, automation.ErrInvalid) {
+		message := err.Error()
+		if strings.Contains(message, "webhook payload must be valid JSON") {
+			message = "webhook payload must be valid JSON"
+		}
+		writeError(w, http.StatusBadRequest, message)
+		return
+	}
+	writeAutomationError(w, err, "dispatch webhook failed")
+}
+
+func writeAutomationError(w http.ResponseWriter, err error, fallback string) {
+	switch {
+	case errors.Is(err, automation.ErrNotFound), errors.Is(err, automation.ErrNoMatchingBinding):
+		writeError(w, http.StatusNotFound, fallback)
+	case errors.Is(err, automation.ErrInvalid), errors.Is(err, automation.ErrWrongWorkspace):
+		writeError(w, http.StatusBadRequest, err.Error())
+	case errors.Is(err, automation.ErrConflict):
+		writeError(w, http.StatusConflict, err.Error())
+	case errors.Is(err, automation.ErrUnavailable):
+		writeError(w, http.StatusServiceUnavailable, fallback)
+	default:
+		writeError(w, http.StatusInternalServerError, fallback)
+	}
 }

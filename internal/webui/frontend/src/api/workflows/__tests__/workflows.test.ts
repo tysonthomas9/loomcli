@@ -1,17 +1,22 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { ApiError, get, post } from "@/api/common";
+import { ApiError, del, get, patch, post } from "@/api/common";
 
 import {
   EPIC_RUNNER_WORKFLOW_NAME,
   activateWorkflowVersion,
   approveWorkflowVersion,
+  createTriggerBinding,
   createWorkflowVersion,
+  deleteTriggerBinding,
   getWorkflowRun,
   isTerminalWorkflowRunStatus,
   listWorkflowVersions,
+  runTriggerBinding,
+  setTriggerBindingEnabled,
   startWorkflowRun,
   unapproveWorkflowVersion,
+  updateTriggerBinding,
 } from "../workflows";
 import {
   clearLocalWorkflowLifecycleSession,
@@ -23,11 +28,15 @@ vi.mock("@/api/common", async (importOriginal) => {
   return {
     ...actual,
     get: vi.fn(),
+    del: vi.fn(),
+    patch: vi.fn(),
     post: vi.fn(),
   };
 });
 
 const mockGet = vi.mocked(get);
+const mockDel = vi.mocked(del);
+const mockPatch = vi.mocked(patch);
 const mockPost = vi.mocked(post);
 
 describe("workflows API", () => {
@@ -109,7 +118,7 @@ describe("workflows API", () => {
     expect(isTerminalWorkflowRunStatus("running")).toBe(false);
   });
 
-  it("attaches a local Desktop bearer only to lifecycle mutations", async () => {
+  it("attaches a local Desktop bearer to workflow-version lifecycle mutations only", async () => {
     const launchCode = "ab".repeat(32);
     const accessToken = "cd".repeat(32);
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
@@ -164,6 +173,62 @@ describe("workflows API", () => {
       "/api/workspaces/TEST/workflows/demo/versions",
       expect.any(Object),
       { timeout: 300_000 },
+    );
+  });
+
+  it("attaches the local operator bearer to every binding mutation", async () => {
+    const launchCode = "ab".repeat(32);
+    const accessToken = "cd".repeat(32);
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          access_token: accessToken,
+          token_type: "Bearer",
+          workspace: "TEST",
+          expires_at: new Date(Date.now() + 60_000).toISOString(),
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+    await exchangeLocalOperatorLaunch({ launchCode, workspace: "TEST" });
+    mockPost.mockResolvedValue({});
+    mockPatch.mockResolvedValue({});
+    mockDel.mockResolvedValue({});
+
+    const create = { workflow: "bug-fix", source_kind: "cron" };
+    await createTriggerBinding("TEST", create);
+    await runTriggerBinding("TEST", "binding/one");
+    await setTriggerBindingEnabled("TEST", "binding/one", false);
+    await updateTriggerBinding("TEST", "binding/one", { name: "Renamed" });
+    await deleteTriggerBinding("TEST", "binding/one");
+
+    const localAuth = { headers: { Authorization: `Bearer ${accessToken}` } };
+    expect(mockPost).toHaveBeenNthCalledWith(
+      1,
+      "/api/workspaces/TEST/trigger-bindings",
+      create,
+      localAuth,
+    );
+    expect(mockPost).toHaveBeenNthCalledWith(
+      2,
+      "/api/workspaces/TEST/trigger-bindings/binding%2Fone/run",
+      {},
+      localAuth,
+    );
+    expect(mockPost).toHaveBeenNthCalledWith(
+      3,
+      "/api/workspaces/TEST/trigger-bindings/binding%2Fone/disable",
+      {},
+      localAuth,
+    );
+    expect(mockPatch).toHaveBeenCalledWith(
+      "/api/workspaces/TEST/trigger-bindings/binding%2Fone",
+      { name: "Renamed" },
+      localAuth,
+    );
+    expect(mockDel).toHaveBeenCalledWith(
+      "/api/workspaces/TEST/trigger-bindings/binding%2Fone",
+      localAuth,
     );
   });
 

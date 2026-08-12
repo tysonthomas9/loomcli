@@ -1,0 +1,425 @@
+package driver
+
+import (
+	"context"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/binary"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"time"
+	"unicode/utf8"
+
+	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/driver/eventpolicy"
+	"github.com/tysonthomas9/loomcli/internal/store"
+)
+
+const (
+	runOutcomeJournalEventIDPrefix  = "execution-await-event:"
+	runFinishedSummaryPayloadLimit  = 16 * 1024
+	runFinishedErrorPayloadLimit    = 4 * 1024
+	runFinishedIdentityPayloadLimit = 8 * 1024
+)
+
+// RunOutcome is Execution's immutable terminal-outcome event. EventID is the
+// deterministic idempotency anchor; actor and parent provenance are derived
+// from trusted DriverRun state rather than request content.
+type RunOutcome struct {
+	WorkspaceKey  string
+	EventID       string
+	EventType     string
+	RunID         string
+	Status        domain.DriverRunStatus
+	ActorRef      string
+	ParentEventID string
+	EpicID        string
+	OccurredAt    time.Time
+	Payload       json.RawMessage
+}
+
+// RunOutcomeJournalEventID is the deterministic durable identity of
+// Execution's base event-journal record. It is intentionally distinct from
+// Automation's admission identity while SourceEventID remains the shared
+// canonical run.finished identity used by await resolution.
+func RunOutcomeJournalEventID(workspace, sourceEventID string) string {
+	sum := sha256.Sum256([]byte(workspace + "\x00" + sourceEventID))
+	return runOutcomeJournalEventIDPrefix + hex.EncodeToString(sum[:16])
+}
+
+func runOutcomeJournalIdempotencyKey(workspace, sourceEventID string) string {
+	sum := sha256.Sum256([]byte(workspace + "\x00" + sourceEventID))
+	return "execution-await:" + hex.EncodeToString(sum[:])
+}
+
+func runOutcomeJournalEvent(outcome RunOutcome) *domain.TriggerEvent {
+	return &domain.TriggerEvent{
+		WorkspaceKey: outcome.WorkspaceKey,
+		EventID:      RunOutcomeJournalEventID(outcome.WorkspaceKey, outcome.EventID),
+		SourceKind:   eventpolicy.SourceKindExecution, SourceEventID: outcome.EventID,
+		EventType: outcome.EventType, SubjectRef: outcome.RunID, ActorRef: outcome.ActorRef,
+		EpicID:     outcome.EpicID,
+		Origin:     domain.TriggerEventOriginSystem,
+		OccurredAt: outcome.OccurredAt.UTC(), ReceivedAt: outcome.OccurredAt.UTC(),
+		IdempotencyKey:  runOutcomeJournalIdempotencyKey(outcome.WorkspaceKey, outcome.EventID),
+		SignatureStatus: "internal",
+		Payload:         append(json.RawMessage(nil), outcome.Payload...),
+	}
+}
+
+// marshalBoundedRunFinishedPayload keeps base Execution outcomes eligible for
+// await delivery even when terminal summaries contain arbitrarily large or
+// escape-heavy output. It preserves useful bounded detail, then
+// deterministically sheds optional fields before finally hashing an absurdly
+// large run identity. Status and the truncation marker always survive.
+func marshalBoundedRunFinishedPayload(
+	runID string,
+	status domain.DriverRunStatus,
+	summary, errorClass, parentRunID string,
+) (json.RawMessage, error) {
+	boundedRunID, runIDTruncated := boundedRunFinishedText(runID, runFinishedIdentityPayloadLimit)
+	boundedParent, parentTruncated := boundedRunFinishedText(parentRunID, runFinishedIdentityPayloadLimit)
+	boundedSummary, summaryTruncated := boundedRunFinishedText(summary, runFinishedSummaryPayloadLimit)
+	boundedError, errorTruncated := boundedRunFinishedText(errorClass, runFinishedErrorPayloadLimit)
+	payload := runFinishedPayload{
+		RunID: boundedRunID, Status: string(status), Summary: boundedSummary,
+		ErrorClass: boundedError, ParentRunID: boundedParent,
+		Truncated: runIDTruncated || parentTruncated || summaryTruncated || errorTruncated,
+	}
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+	if len(encoded) <= domain.DefaultAwaitResumePayloadCap {
+		return encoded, nil
+	}
+	payload.Summary, payload.ErrorClass, payload.Truncated = "", "", true
+	encoded, err = json.Marshal(payload)
+	if err != nil || len(encoded) <= domain.DefaultAwaitResumePayloadCap {
+		return encoded, err
+	}
+	payload.ParentRunID = ""
+	encoded, err = json.Marshal(payload)
+	if err != nil || len(encoded) <= domain.DefaultAwaitResumePayloadCap {
+		return encoded, err
+	}
+	sum := sha256.Sum256([]byte(runID))
+	payload.RunID = "h:" + hex.EncodeToString(sum[:])
+	return json.Marshal(payload)
+}
+
+func boundedRunFinishedText(value string, limit int) (string, bool) {
+	valid := strings.ToValidUTF8(value, "\uFFFD")
+	changed := valid != value
+	if limit < 1 || len(valid) <= limit {
+		return valid, changed
+	}
+	end := limit
+	for end > 0 && !utf8.ValidString(valid[:end]) {
+		end--
+	}
+	return valid[:end], true
+}
+
+// RunOutcomePublisher is Execution's only cross-capability outcome port.
+// Implementations must be idempotent by WorkspaceKey+EventID. A publication
+// error is observable but cannot invalidate the committed DriverRun terminal
+// transition.
+type RunOutcomePublisher interface {
+	PublishRunOutcome(context.Context, RunOutcome) error
+}
+
+// runOutcomeLocks close the only in-process race that cannot be delegated to
+// the AwaitStore: a child terminal transition can overlap its parent's await
+// registration. The bounded stripes serialize only the child's local outcome
+// notification with that registration/re-check; durable await state remains
+// the source of truth and cross-process correctness uses the same atomic
+// register/resolve APIs.
+var runOutcomeLocks [64]sync.Mutex
+
+func lockRunOutcome(workspace, runID string) func() {
+	sum := sha256.Sum256([]byte(workspace + "\x00" + runID))
+	index := binary.LittleEndian.Uint64(sum[:8]) % uint64(len(runOutcomeLocks))
+	runOutcomeLocks[index].Lock()
+	return runOutcomeLocks[index].Unlock
+}
+
+// RunOutcomeAwaitNotifier is the Execution-owned durable composition leg. It
+// is independent of Automation bindings and idempotent by outcome EventID.
+type RunOutcomeAwaitNotifier interface {
+	NotifyRunOutcomeAwaits(context.Context, RunOutcome) error
+}
+
+type storeRunOutcomeAwaitNotifier struct {
+	awaits   store.AwaitStore
+	resolver store.RunOutcomeAwaitStore
+}
+
+func NewRunOutcomeAwaitNotifier(awaits store.AwaitStore) (RunOutcomeAwaitNotifier, error) {
+	if awaits == nil {
+		return nil, fmt.Errorf("run outcome await store is required")
+	}
+	resolver, ok := awaits.(store.RunOutcomeAwaitStore)
+	if !ok {
+		return nil, fmt.Errorf("await store lacks atomic run outcome resolve-and-resume capability")
+	}
+	return &storeRunOutcomeAwaitNotifier{awaits: awaits, resolver: resolver}, nil
+}
+
+func (notifier *storeRunOutcomeAwaitNotifier) NotifyRunOutcomeAwaits(ctx context.Context, outcome RunOutcome) error {
+	if notifier == nil || notifier.awaits == nil || notifier.resolver == nil {
+		return fmt.Errorf("run outcome await notifier is unavailable")
+	}
+	candidates, err := notifier.awaits.ListAwaitsByPattern(
+		ctx,
+		outcome.WorkspaceKey,
+		RunFinishedSubjectKey(outcome.RunID),
+	)
+	if err != nil {
+		return fmt.Errorf("list run outcome awaits for %q: %w", outcome.EventID, err)
+	}
+	for _, candidate := range candidates {
+		if candidate == nil {
+			return fmt.Errorf("run outcome await candidate for %q is nil", outcome.EventID)
+		}
+		if err := notifier.resolver.ResolveRunOutcomeAwaitAndResume(
+			ctx,
+			outcome.WorkspaceKey,
+			candidate.InstanceKey,
+			outcome.EventID,
+			outcome.Payload,
+		); err != nil {
+			return fmt.Errorf("resolve run outcome await %q by %q: %w", candidate.InstanceKey, outcome.EventID, err)
+		}
+	}
+	return nil
+}
+
+const (
+	DefaultRunOutcomeReconcileLimit = 50
+	RunOutcomeClaimLease            = time.Minute
+	runOutcomeRetryInitial          = time.Second
+	runOutcomeRetryMaximum          = 5 * time.Minute
+	runOutcomeErrorLimit            = 1024
+)
+
+type RunOutcomeWorkspaceLister interface {
+	ListWorkspaceKeys(context.Context) ([]string, error)
+}
+
+// RunOutcomeReconciler drains Execution's durable terminal-outcome outbox.
+// Atomic composition notification always runs first; optional Automation
+// publication is at-least-once, and RunFinishedEventID makes its admission
+// idempotent across crashes after publish but before completion.
+type RunOutcomeReconciler struct {
+	outbox       store.DriverRunOutcomeStore
+	awaits       RunOutcomeAwaitNotifier
+	journal      store.TriggerEventAppender
+	publisher    RunOutcomePublisher
+	workspace    string
+	workspaces   RunOutcomeWorkspaceLister
+	claimPrefix  string
+	claimCounter atomic.Uint64
+	limit        int
+}
+
+func NewRunOutcomeReconciler(
+	outbox store.DriverRunOutcomeStore,
+	awaits RunOutcomeAwaitNotifier,
+	journal store.TriggerEventAppender,
+	publisher RunOutcomePublisher,
+	workspace string,
+	workspaces RunOutcomeWorkspaceLister,
+) (*RunOutcomeReconciler, error) {
+	if outbox == nil || awaits == nil || journal == nil {
+		return nil, fmt.Errorf("run outcome outbox, await notifier, and base event journal are required")
+	}
+	workspace = strings.TrimSpace(workspace)
+	if workspace == "" && workspaces == nil {
+		return nil, fmt.Errorf("run outcome workspace lister is required for an unscoped reconciler")
+	}
+	return &RunOutcomeReconciler{
+		outbox: outbox, awaits: awaits, journal: journal, publisher: publisher, workspace: workspace, workspaces: workspaces,
+		claimPrefix: newRunOutcomeClaimPrefix(), limit: DefaultRunOutcomeReconcileLimit,
+	}, nil
+}
+
+func (reconciler *RunOutcomeReconciler) RunOnce(ctx context.Context, now time.Time) error {
+	_, err := reconciler.DrainOnce(ctx, now)
+	return err
+}
+
+// DrainOnce performs one bounded pass and returns how many durable rows were
+// claimed for runtime observability and opportunistic-drain accounting.
+func (reconciler *RunOutcomeReconciler) DrainOnce(ctx context.Context, now time.Time) (int, error) {
+	if reconciler == nil || reconciler.outbox == nil || reconciler.awaits == nil || reconciler.journal == nil {
+		return 0, fmt.Errorf("run outcome reconciler is unavailable")
+	}
+	if now.IsZero() {
+		now = time.Now().UTC()
+	} else {
+		now = now.UTC()
+	}
+	workspaces, err := reconciler.workspaceKeys(ctx)
+	if err != nil {
+		return 0, err
+	}
+	var errs []error
+	claimed := 0
+	for _, workspace := range workspaces {
+		if err := ctx.Err(); err != nil {
+			errs = append(errs, err)
+			break
+		}
+		count, err := reconciler.runWorkspace(ctx, workspace, now)
+		claimed += count
+		if err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return claimed, errors.Join(errs...)
+}
+
+func (reconciler *RunOutcomeReconciler) workspaceKeys(ctx context.Context) ([]string, error) {
+	if reconciler.workspace != "" {
+		return []string{reconciler.workspace}, nil
+	}
+	values, err := reconciler.workspaces.ListWorkspaceKeys(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list run outcome workspaces: %w", err)
+	}
+	return values, nil
+}
+
+func (reconciler *RunOutcomeReconciler) runWorkspace(ctx context.Context, workspace string, now time.Time) (int, error) {
+	claimID := fmt.Sprintf("%s-%d", reconciler.claimPrefix, reconciler.claimCounter.Add(1))
+	claimed, err := reconciler.outbox.ClaimDriverRunOutcomes(ctx, store.DriverRunOutcomeClaim{
+		WorkspaceKey: workspace, ClaimID: claimID, Before: now,
+		ClaimUntil: now.Add(RunOutcomeClaimLease), Limit: reconciler.limit,
+	})
+	if err != nil {
+		return 0, fmt.Errorf("claim run outcomes in %q: %w", workspace, err)
+	}
+	var errs []error
+	for _, persisted := range claimed {
+		outcome, mapErr := persistedRunOutcome(persisted)
+		if mapErr != nil {
+			errs = append(errs, mapErr)
+			if retryErr := reconciler.retry(ctx, workspace, claimID, persisted, now, mapErr); retryErr != nil {
+				errs = append(errs, retryErr)
+			}
+			continue
+		}
+		if _, journalErr := reconciler.journal.AppendTriggerEvent(ctx, runOutcomeJournalEvent(outcome)); journalErr != nil {
+			errs = append(errs, fmt.Errorf("journal base run outcome %q: %w", outcome.EventID, journalErr))
+			if retryErr := reconciler.retry(ctx, workspace, claimID, persisted, now, journalErr); retryErr != nil {
+				errs = append(errs, retryErr)
+			}
+			continue
+		}
+		if notifyErr := reconciler.awaits.NotifyRunOutcomeAwaits(ctx, outcome); notifyErr != nil {
+			errs = append(errs, fmt.Errorf("notify run outcome awaits %q: %w", outcome.EventID, notifyErr))
+			if retryErr := reconciler.retry(ctx, workspace, claimID, persisted, now, notifyErr); retryErr != nil {
+				errs = append(errs, retryErr)
+			}
+			continue
+		}
+		if reconciler.publisher != nil {
+			if publishErr := reconciler.publisher.PublishRunOutcome(ctx, outcome); publishErr != nil {
+				errs = append(errs, fmt.Errorf("publish run outcome %q: %w", outcome.EventID, publishErr))
+				if retryErr := reconciler.retry(ctx, workspace, claimID, persisted, now, publishErr); retryErr != nil {
+					errs = append(errs, retryErr)
+				}
+				continue
+			}
+		}
+		if completeErr := reconciler.outbox.CompleteDriverRunOutcome(ctx, store.DriverRunOutcomeCompletion{
+			WorkspaceKey: workspace, RunID: persisted.RunID, ClaimID: claimID, CompletedAt: now,
+		}); completeErr != nil {
+			errs = append(errs, fmt.Errorf("complete run outcome %q: %w", outcome.EventID, completeErr))
+		}
+	}
+	return len(claimed), errors.Join(errs...)
+}
+
+func (reconciler *RunOutcomeReconciler) retry(
+	ctx context.Context,
+	workspace, claimID string,
+	persisted store.DriverRunOutcome,
+	now time.Time,
+	cause error,
+) error {
+	retryAt := now.Add(runOutcomeRetryDelay(persisted.Attempt))
+	if err := reconciler.outbox.RetryDriverRunOutcome(ctx, store.DriverRunOutcomeRetry{
+		WorkspaceKey: workspace, RunID: persisted.RunID, ClaimID: claimID,
+		AvailableAt: retryAt, Error: boundedRunOutcomeError(cause),
+	}); err != nil {
+		return fmt.Errorf("schedule run outcome %q retry: %w", persisted.RunID, err)
+	}
+	return nil
+}
+
+func persistedRunOutcome(persisted store.DriverRunOutcome) (RunOutcome, error) {
+	if persisted.WorkspaceKey == "" || persisted.RunID == "" || !persisted.Status.IsTerminal() || persisted.OccurredAt.IsZero() {
+		return RunOutcome{}, fmt.Errorf("invalid persisted run outcome for %q", persisted.RunID)
+	}
+	payload, err := marshalBoundedRunFinishedPayload(
+		persisted.RunID, persisted.Status, persisted.Summary, persisted.ErrorClass, persisted.ParentRunID,
+	)
+	if err != nil {
+		return RunOutcome{}, fmt.Errorf("encode persisted run outcome %q: %w", persisted.RunID, err)
+	}
+	return RunOutcome{
+		WorkspaceKey:  persisted.WorkspaceKey,
+		EventID:       RunFinishedEventID(persisted.RunID, persisted.Status),
+		EventType:     RunFinishedEventType,
+		RunID:         persisted.RunID,
+		Status:        persisted.Status,
+		ActorRef:      RunFinishedActor,
+		ParentEventID: persisted.ParentEventID,
+		EpicID:        persisted.EpicID,
+		OccurredAt:    persisted.OccurredAt.UTC(),
+		Payload:       payload,
+	}, nil
+}
+
+func runOutcomeRetryDelay(attempt int) time.Duration {
+	if attempt < 1 {
+		attempt = 1
+	}
+	delay := runOutcomeRetryInitial
+	for current := 1; current < attempt && delay < runOutcomeRetryMaximum; current++ {
+		if delay > runOutcomeRetryMaximum/2 {
+			return runOutcomeRetryMaximum
+		}
+		delay *= 2
+	}
+	if delay > runOutcomeRetryMaximum {
+		return runOutcomeRetryMaximum
+	}
+	return delay
+}
+
+func boundedRunOutcomeError(err error) string {
+	if err == nil {
+		return ""
+	}
+	value := err.Error()
+	if len(value) > runOutcomeErrorLimit {
+		return value[:runOutcomeErrorLimit]
+	}
+	return value
+}
+
+func newRunOutcomeClaimPrefix() string {
+	var bytes [8]byte
+	if _, err := rand.Read(bytes[:]); err == nil {
+		return "run-outcome-" + hex.EncodeToString(bytes[:])
+	}
+	return fmt.Sprintf("run-outcome-%d", time.Now().UTC().UnixNano())
+}

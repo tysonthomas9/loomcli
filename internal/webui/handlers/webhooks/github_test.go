@@ -229,11 +229,15 @@ func TestGithubNormalizeMalformedBodyStillRoutes(t *testing.T) {
 func TestGithubVerify(t *testing.T) {
 	secret := "s3cr3t"
 	body := []byte(`{"action":"opened"}`)
+	verify := func(r *http.Request, payload []byte, secret string) error {
+		adapter := githubAdapter{}
+		return adapter.VerifySignature(payload, adapter.PresentedSignature(r), secret)
+	}
 
 	t.Run("valid signature", func(t *testing.T) {
 		r := githubRequest(t, "pull_request", "d", body)
 		r.Header.Set(githubSignatureHeader, githubSignature(secret, body))
-		if err := (githubAdapter{}).Verify(r, body, secret); err != nil {
+		if err := verify(r, body, secret); err != nil {
 			t.Fatalf("Verify rejected valid signature: %v", err)
 		}
 	})
@@ -241,7 +245,7 @@ func TestGithubVerify(t *testing.T) {
 	t.Run("wrong secret", func(t *testing.T) {
 		r := githubRequest(t, "pull_request", "d", body)
 		r.Header.Set(githubSignatureHeader, githubSignature("other", body))
-		if err := (githubAdapter{}).Verify(r, body, secret); err == nil {
+		if err := verify(r, body, secret); err == nil {
 			t.Fatal("Verify accepted signature from wrong secret")
 		}
 	})
@@ -249,14 +253,14 @@ func TestGithubVerify(t *testing.T) {
 	t.Run("tampered body", func(t *testing.T) {
 		r := githubRequest(t, "pull_request", "d", body)
 		r.Header.Set(githubSignatureHeader, githubSignature(secret, body))
-		if err := (githubAdapter{}).Verify(r, []byte(`{"action":"closed"}`), secret); err == nil {
+		if err := verify(r, []byte(`{"action":"closed"}`), secret); err == nil {
 			t.Fatal("Verify accepted signature for tampered body")
 		}
 	})
 
 	t.Run("missing header", func(t *testing.T) {
 		r := githubRequest(t, "pull_request", "d", body)
-		if err := (githubAdapter{}).Verify(r, body, secret); err == nil {
+		if err := verify(r, body, secret); err == nil {
 			t.Fatal("Verify accepted missing signature")
 		}
 	})
@@ -264,7 +268,7 @@ func TestGithubVerify(t *testing.T) {
 	t.Run("empty secret", func(t *testing.T) {
 		r := githubRequest(t, "pull_request", "d", body)
 		r.Header.Set(githubSignatureHeader, githubSignature("", body))
-		if err := (githubAdapter{}).Verify(r, body, ""); err == nil {
+		if err := verify(r, body, ""); err == nil {
 			t.Fatal("Verify accepted empty secret")
 		}
 	})
@@ -272,7 +276,7 @@ func TestGithubVerify(t *testing.T) {
 	t.Run("non-sha256 prefix", func(t *testing.T) {
 		r := githubRequest(t, "pull_request", "d", body)
 		r.Header.Set(githubSignatureHeader, "sha1=deadbeef")
-		if err := (githubAdapter{}).Verify(r, body, secret); err == nil {
+		if err := verify(r, body, secret); err == nil {
 			t.Fatal("Verify accepted non-sha256 signature prefix")
 		}
 	})

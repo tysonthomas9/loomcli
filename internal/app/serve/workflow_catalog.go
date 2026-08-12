@@ -4,6 +4,7 @@
 package serve
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -11,17 +12,59 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/app/webhookingestion"
+	"github.com/tysonthomas9/loomcli/internal/app/workflowbinding"
+	"github.com/tysonthomas9/loomcli/internal/driver"
 	infrafleetdb "github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
+	automationfleetdb "github.com/tysonthomas9/loomcli/internal/modules/automation/fleetdb"
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 	catalogfleetdb "github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog/fleetdb"
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog/httpapi"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 	authorityhttp "github.com/tysonthomas9/loomcli/internal/platform/authority/httpapi"
+	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	workflowdefs "github.com/tysonthomas9/loomcli/internal/workflows"
 )
 
 const externalOperatorAuthorityTTL = time.Minute
+
+// legacyWorkflowTargetPreparer is the temporary composition adapter around
+// the mixed legacy workflow registration package. It stays in this already-
+// reviewed legacy importer so the migration does not widen that exception.
+// The application workflow sees only WorkflowTargetPreparer; neither the HTTP
+// adapter nor Automation inherits this Store dependency or builtin self-heal.
+type legacyWorkflowTargetPreparer struct {
+	catalog workflowdefs.DriverCatalog
+}
+
+var _ workflowbinding.WorkflowTargetPreparer = (*legacyWorkflowTargetPreparer)(nil)
+
+func newLegacyWorkflowTargetPreparer(catalog workflowdefs.DriverCatalog) workflowbinding.WorkflowTargetPreparer {
+	if catalog == nil {
+		return nil
+	}
+	return &legacyWorkflowTargetPreparer{catalog: catalog}
+}
+
+func (preparer *legacyWorkflowTargetPreparer) PrepareWorkflowTarget(
+	ctx context.Context,
+	workspace, workflow string,
+) (workflowbinding.WorkflowTarget, error) {
+	driver, err := workflowdefs.EnsureAndResolveDriver(ctx, preparer.catalog, workspace, workflow)
+	if err != nil {
+		if errors.Is(err, workflowdefs.ErrBuildToolchainUnavailable) {
+			return workflowbinding.WorkflowTarget{}, fmt.Errorf("%w: %w", workflowbinding.ErrUnavailable, err)
+		}
+		return workflowbinding.WorkflowTarget{}, err
+	}
+	if driver == nil {
+		return workflowbinding.WorkflowTarget{}, nil
+	}
+	return workflowbinding.WorkflowTarget{
+		DriverID: strings.TrimSpace(driver.DriverID), DriverVersionID: strings.TrimSpace(driver.ActiveVersionID),
+	}, nil
+}
 
 // RouteModule is the only value the web server needs from capability
 // composition. Keeping this interface here prevents webui from learning about
@@ -45,9 +88,12 @@ func (modules routeModules) Register(mux *http.ServeMux) {
 // composition can receive the narrow active-version resolver and a same-seal,
 // exact-purpose SystemAuthority without receiving the full Issuer.
 type WorkflowCatalogCapability struct {
-	routes  RouteModule
-	catalog workflowcatalog.API
-	issuer  *authority.Issuer
+	routes           RouteModule
+	catalog          workflowcatalog.API
+	issuer           *authority.Issuer
+	operatorResolver httpapi.OperatorAuthorityResolver
+	browserSession   *authority.LocalBrowserSessionBroker
+	automation       *AutomationCapability
 }
 
 func (c *WorkflowCatalogCapability) Register(mux *http.ServeMux) {
@@ -68,6 +114,16 @@ func (c *WorkflowCatalogCapability) RequestedVersionResolver() workflowcatalog.R
 		return nil
 	}
 	return c.catalog
+}
+
+// AutomationCapability returns the fully composed Phase 3 capability handle.
+// It is nil when Automation is disabled; callers receive no lower-level
+// adapter, issuer, or Store through this accessor.
+func (c *WorkflowCatalogCapability) AutomationCapability() *AutomationCapability {
+	if c == nil {
+		return nil
+	}
+	return c.automation
 }
 
 // issueEffectiveVersionAuthority issues only the system action needed by a
@@ -92,24 +148,64 @@ func (c *WorkflowCatalogCapability) issueEffectiveVersionAuthority(workspace str
 	return c.issuer.IssueSystem(principal, workspace, workflowcatalog.ActionResolveEffectiveVersion, reason)
 }
 
+// issueAutomationEffectiveVersionAuthority is the composition-only seam used
+// by Automation's narrow EffectiveVersionAuthorityProvider. Automation is a
+// request-driven capability consumer as well as a runtime contributor, so it
+// must not masquerade as one particular scheduler component. Keeping this
+// method private prevents callers from obtaining a general Catalog authority
+// factory while still giving every Automation ingress lane the same exact
+// resolve-effective-version permission.
+func (c *WorkflowCatalogCapability) issueAutomationEffectiveVersionAuthority(workspace, reason string) (authority.SystemAuthority, error) {
+	if c == nil || c.issuer == nil {
+		return authority.SystemAuthority{}, authority.ErrInvalidIssuer
+	}
+	principal, err := c.issuer.DeriveVerifiedPrincipal(authority.PrincipalClaims{
+		Subject: "automation", Class: authority.ClassSystem,
+		Workspace: strings.TrimSpace(workspace),
+		Actions:   []authority.Action{workflowcatalog.ActionResolveEffectiveVersion},
+		ExpiresAt: time.Now().Add(externalOperatorAuthorityTTL),
+	})
+	if err != nil {
+		return authority.SystemAuthority{}, err
+	}
+	return c.issuer.IssueSystem(principal, workspace, workflowcatalog.ActionResolveEffectiveVersion, reason)
+}
+
 // WorkflowCatalogConfig contains only server-derived composition inputs.
 type WorkflowCatalogConfig struct {
 	Enabled       bool
 	FleetDBClient *infrafleetdb.Client
 	RuntimeDir    string
-	// Workspace is a legacy startup hint retained for composition-call
-	// compatibility. Authority is derived from the canonical per-request
-	// workspace so an unscoped Desktop runtime can start before workspace
-	// selection and can switch workspaces without reusing an authority value.
+	// Workspace is Automation's optional fixed runtime scope. Empty means the
+	// runtime lists current workspaces on every pass. Request authority remains
+	// derived from the canonical per-request workspace in either mode.
 	Workspace             string
 	ExternalAuth          bool
 	WorkspaceRoleResolver middleware.WorkspaceRoleResolver
+	// AutomationEnabled extends the one platform browser-session broker with
+	// Automation's exact operator-only actions. Callers cannot supply arbitrary
+	// actions or create a second broker/credential namespace.
+	AutomationEnabled bool
+	// These narrow stores are used only by composition-time compatibility
+	// adapters whose owner capabilities land in later phases. Automation core
+	// never receives the composite Store or any of these repository types.
+	AutomationDriverRuns      store.DriverRunStore
+	AutomationAwaits          store.AwaitStore
+	AutomationWorkspaces      store.WorkspaceStore
+	AutomationWebhookVerifier webhookingestion.Verifier
+	// WorkflowTargetCatalog is held only by the temporary composition adapter
+	// around workflows.EnsureAndResolveDriver. It never enters Automation or an
+	// HTTP handler and exposes only Driver/DriverVersion repositories.
+	WorkflowTargetCatalog workflowdefs.DriverCatalog
 }
 
 // NewWorkflowCatalogModule composes one Workflow Catalog core over the shared
 // FleetDB client. Disabled slices construct nothing and expose no routes.
 func NewWorkflowCatalogModule(config WorkflowCatalogConfig) (*WorkflowCatalogCapability, error) {
 	if !config.Enabled {
+		if config.AutomationEnabled {
+			return nil, fmt.Errorf("compose automation: Workflow Catalog is disabled")
+		}
 		return nil, nil
 	}
 	if config.ExternalAuth && config.WorkspaceRoleResolver == nil {
@@ -128,14 +224,60 @@ func NewWorkflowCatalogModule(config WorkflowCatalogConfig) (*WorkflowCatalogCap
 
 	catalog := workflowcatalog.New(adapter, adapter, admission)
 	catalogHTTP := httpapi.New(catalog, resolver, middleware.WorkspaceFromContext, workflowdefs.IsBuiltinWorkflow)
+	var capability *WorkflowCatalogCapability
 	if browserSession == nil {
-		return &WorkflowCatalogCapability{routes: catalogHTTP, catalog: catalog, issuer: issuer}, nil
+		capability = &WorkflowCatalogCapability{
+			routes: catalogHTTP, catalog: catalog, issuer: issuer,
+			operatorResolver: resolver,
+		}
+	} else {
+		routes := routeModules{
+			catalogHTTP,
+			authorityhttp.New(browserSession, middleware.WorkspaceFromContext),
+		}
+		capability = &WorkflowCatalogCapability{
+			routes: routes, catalog: catalog, issuer: issuer,
+			operatorResolver: resolver, browserSession: browserSession,
+		}
 	}
-	routes := routeModules{
-		catalogHTTP,
-		authorityhttp.New(browserSession, middleware.WorkspaceFromContext),
+	if !config.AutomationEnabled {
+		return capability, nil
 	}
-	return &WorkflowCatalogCapability{routes: routes, catalog: catalog, issuer: issuer}, nil
+	if err := composeWorkflowCatalogAutomation(config, capability); err != nil {
+		return nil, err
+	}
+	return capability, nil
+}
+
+func composeWorkflowCatalogAutomation(config WorkflowCatalogConfig, capability *WorkflowCatalogCapability) error {
+	if config.AutomationDriverRuns == nil || config.AutomationAwaits == nil || config.AutomationWorkspaces == nil || config.AutomationWebhookVerifier == nil || config.WorkflowTargetCatalog == nil {
+		return fmt.Errorf("compose automation compatibility adapters: required narrow stores are unavailable")
+	}
+	automationAdapter, err := automationfleetdb.New(newAutomationFleetDBTransport(config.FleetDBClient))
+	if err != nil {
+		return fmt.Errorf("compose automation FleetDB adapter: %w", err)
+	}
+	workspaceLister := newAutomationWorkspaceLister(config.AutomationWorkspaces)
+	awaitNotifier, err := driver.NewAutomationAwaitEventNotifier(config.AutomationAwaits, config.AutomationDriverRuns)
+	if err != nil {
+		return err
+	}
+	automationCapability, err := composeAutomationCapability(automationCapabilityConfig{
+		enabled: true, workspaceKey: strings.TrimSpace(config.Workspace), catalog: capability,
+	}, automationCapabilityDependencies{
+		bindings: automationAdapter, unmanagedBindings: automationAdapter, managedBindings: automationAdapter,
+		matcher: automationAdapter, events: automationAdapter,
+		deliveries: automationAdapter, admissions: automationAdapter,
+		execution: newAutomationExecutionPort(config.AutomationDriverRuns, newAutomationFleetExecutionDispatch(config.FleetDBClient)),
+		cron:      automationAdapter, retries: automationAdapter, awaits: awaitNotifier,
+		workspaces: workspaceLister, webhookVerifier: config.AutomationWebhookVerifier,
+		workflowTargets: newLegacyWorkflowTargetPreparer(config.WorkflowTargetCatalog),
+	})
+	if err != nil {
+		return err
+	}
+	capability.automation = automationCapability
+	return nil
 }
 
 func composeWorkflowCatalogAuthority(config WorkflowCatalogConfig, issuer *authority.Issuer) (*authority.Admission, httpapi.OperatorAuthorityResolver, *authority.LocalBrowserSessionBroker, error) {
@@ -156,12 +298,11 @@ func composeWorkflowCatalogAuthority(config WorkflowCatalogConfig, issuer *autho
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("compose workflow catalog admission: %w", err)
 	}
-	browserSession, err := authority.NewLocalBrowserSessionBroker(
-		localIssuer,
-		workflowcatalog.ActionApproveVersion,
-		workflowcatalog.ActionUnapproveVersion,
-		workflowcatalog.ActionActivateVersion,
-	)
+	browserActions := workflowCatalogOperatorActions()
+	if config.AutomationEnabled {
+		browserActions = append(browserActions, automationOperatorActions()...)
+	}
+	browserSession, err := authority.NewLocalBrowserSessionBroker(localIssuer, browserActions...)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("compose workflow catalog browser authority: %w", err)
 	}
@@ -184,6 +325,14 @@ func workflowCatalogOperationRules() []authority.OperationRule {
 		authority.OperatorOnly(workflowcatalog.ActionApproveVersion),
 		authority.OperatorOnly(workflowcatalog.ActionUnapproveVersion),
 		authority.OperatorOnly(workflowcatalog.ActionActivateVersion),
+	}
+}
+
+func workflowCatalogOperatorActions() []authority.Action {
+	return []authority.Action{
+		workflowcatalog.ActionApproveVersion,
+		workflowcatalog.ActionUnapproveVersion,
+		workflowcatalog.ActionActivateVersion,
 	}
 }
 

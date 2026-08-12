@@ -44,6 +44,7 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/driver/eventpolicy"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/trigger"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
@@ -52,9 +53,11 @@ import (
 // maxApprovalBodyBytes caps the inbound approval payload.
 const maxApprovalBodyBytes = 1 << 20
 
-// DefaultApprovalEventType is the event type an approval emits when the
-// request does not name one; awaits register patterns like
-// "approval:{subject}".
+var errApprovalPayloadTooLarge = errors.New("approval payload exceeds await resume limit")
+
+// DefaultApprovalEventType is the only event type the approval endpoint may
+// emit. Keeping this surface approval-scoped prevents a browser session from
+// forging reserved lifecycle events such as run.finished.
 const DefaultApprovalEventType = "approval"
 
 // approvalSourceKind marks journal records produced by this endpoint.
@@ -143,6 +146,12 @@ func (m *Module) postApproval(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "unauthenticated", "approval requires a verified session identity")
 		return
 	}
+	if eventpolicy.IsReservedSystemActorRef(actor) {
+		m.auditReservedActor(ws, actor, userID)
+		writeError(w, http.StatusForbidden, "reserved_actor_ref",
+			fmt.Sprintf("session identity cannot use reserved internal actor %q", actor))
+		return
+	}
 	params, err := decodeApproval(w, r)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid", err.Error())
@@ -166,6 +175,10 @@ func (m *Module) postApproval(w http.ResponseWriter, r *http.Request) {
 	}
 	eventID, payload, err := m.emitApproval(r.Context(), ws, params, actor, userID)
 	if err != nil {
+		if errors.Is(err, errApprovalPayloadTooLarge) {
+			writeError(w, http.StatusRequestEntityTooLarge, "await_payload_too_large", err.Error())
+			return
+		}
 		writeError(w, http.StatusInternalServerError, "internal", err.Error())
 		return
 	}
@@ -201,6 +214,9 @@ func decodeApproval(w http.ResponseWriter, r *http.Request) (approvalParams, err
 	params.EventType = strings.TrimSpace(params.EventType)
 	if params.EventType == "" {
 		params.EventType = DefaultApprovalEventType
+	}
+	if params.EventType != DefaultApprovalEventType {
+		return params, fmt.Errorf("eventType must be %q on the approval endpoint", DefaultApprovalEventType)
 	}
 	params.Decision = strings.TrimSpace(params.Decision)
 	if params.Decision == "" {
@@ -243,9 +259,9 @@ func actorEligible(pending []*domain.AwaitInstance, actor string) bool {
 }
 
 // emitApproval journals the approval event (journal-first, RULE 2) and
-// returns its id plus the marshaled decision payload. Backends without the
-// appender capability journal server-side in their dispatch wiring; the
-// matcher dispatch still runs (documented registration-scan gap).
+// returns its id plus the marshaled decision payload. The appender is required:
+// returning success without a durable event would reopen the registration
+// race this endpoint exists to close.
 func (m *Module) emitApproval(ctx context.Context, ws string, params approvalParams, actor, userID string) (string, json.RawMessage, error) {
 	eventID, err := newApprovalEventID()
 	if err != nil {
@@ -260,11 +276,13 @@ func (m *Module) emitApproval(ctx context.Context, ws string, params approvalPar
 	if err != nil {
 		return "", nil, fmt.Errorf("encode approval payload: %w", err)
 	}
+	if len(payload) > domain.DefaultAwaitResumePayloadCap {
+		return "", nil, fmt.Errorf("%w: %d bytes exceeds %d",
+			errApprovalPayloadTooLarge, len(payload), domain.DefaultAwaitResumePayloadCap)
+	}
 	appender, ok := m.store.TriggerEvents().(store.TriggerEventAppender)
 	if !ok {
-		m.logger.Debug("approval journal append skipped: backend journals server-side",
-			"workspace", ws, "event_id", eventID)
-		return eventID, payload, nil
+		return "", nil, fmt.Errorf("approval trigger event journal is unavailable")
 	}
 	if _, err := appender.AppendTriggerEvent(ctx, &domain.TriggerEvent{
 		WorkspaceKey:    ws,
@@ -274,6 +292,7 @@ func (m *Module) emitApproval(ctx context.Context, ws string, params approvalPar
 		EventType:       params.EventType,
 		SubjectRef:      params.SubjectRef,
 		ActorRef:        actor,
+		Payload:         append(json.RawMessage(nil), payload...),
 		Origin:          domain.TriggerEventOriginExternal,
 		OccurredAt:      now,
 		ReceivedAt:      now,
@@ -293,6 +312,8 @@ func (m *Module) dispatchApproval(ctx context.Context, ws string, params approva
 	result, err := m.awaits.Dispatch(ctx, ws, trigger.AwaitDispatchEvent{
 		EventID:    eventID,
 		EventType:  params.EventType,
+		SourceKind: approvalSourceKind,
+		Origin:     domain.TriggerEventOriginExternal,
 		SubjectRef: params.SubjectRef,
 		ActorRef:   actor,
 		Payload:    payload,
@@ -320,6 +341,16 @@ func (m *Module) auditIneligible(ws, subjectKey, actor, userID string, pending i
 		"actor_ref", actor,
 		"user_id", userID,
 		"pending_awaits", pending,
+	)
+}
+
+// auditReservedActor records an authenticated session that collided with the
+// server-owned actor namespace before any approval event was journaled.
+func (m *Module) auditReservedActor(ws, actor, userID string) {
+	m.logger.Warn("approval refused: session actor uses reserved internal identity",
+		"workspace", ws,
+		"actor_ref", actor,
+		"user_id", userID,
 	)
 }
 

@@ -22,16 +22,18 @@ import (
 // idempotency key the same way fleet-db's storage layer does: a create with a
 // previously-seen key returns the existing event instead of inserting again.
 type triggerEventStore struct {
-	mu     sync.RWMutex
-	items  map[string]map[string]*domain.TriggerEvent // ws -> eventID -> event
-	idempo map[string]map[string]string               // ws -> idempotencyKey -> eventID
-	seq    int64
+	mu            sync.RWMutex
+	items         map[string]map[string]*domain.TriggerEvent // ws -> eventID -> event
+	idempo        map[string]map[string]string               // ws -> idempotencyKey -> eventID
+	notifications map[string]map[string]*awaitEventNotificationRow
+	seq           int64
 }
 
 func newTriggerEventStore() *triggerEventStore {
 	return &triggerEventStore{
-		items:  make(map[string]map[string]*domain.TriggerEvent),
-		idempo: make(map[string]map[string]string),
+		items:         make(map[string]map[string]*domain.TriggerEvent),
+		idempo:        make(map[string]map[string]string),
+		notifications: make(map[string]map[string]*awaitEventNotificationRow),
 	}
 }
 
@@ -84,6 +86,10 @@ func (s *triggerEventStore) AppendTriggerEvent(_ context.Context, event *domain.
 	if event == nil || event.WorkspaceKey == "" || event.EventID == "" || event.EventType == "" {
 		return nil, fmt.Errorf("trigger event append requires workspace, event id and event type: %w", domain.ErrInvalid)
 	}
+	canonicalID, canonical := event.CanonicalEventID()
+	if !canonical || domain.IsAwaitTimeoutEventID(canonicalID) {
+		return nil, fmt.Errorf("trigger event append requires a canonical non-reserved identity: %w", domain.ErrInvalid)
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.items[event.WorkspaceKey] == nil {
@@ -102,6 +108,7 @@ func (s *triggerEventStore) AppendTriggerEvent(_ context.Context, event *domain.
 	}
 	stored := *event
 	s.items[event.WorkspaceKey][event.EventID] = &stored
+	s.enqueueAwaitEventNotificationLocked(&stored)
 	if event.IdempotencyKey != "" {
 		s.idempo[event.WorkspaceKey][event.IdempotencyKey] = event.EventID
 	}
@@ -128,6 +135,7 @@ func (s *triggerEventStore) create(event *domain.TriggerEvent) (*domain.TriggerE
 	event.EventID = fmt.Sprintf("event-%d", s.seq)
 	stored := *event
 	s.items[event.WorkspaceKey][event.EventID] = &stored
+	s.enqueueAwaitEventNotificationLocked(&stored)
 	if event.IdempotencyKey != "" {
 		s.idempo[event.WorkspaceKey][event.IdempotencyKey] = event.EventID
 	}

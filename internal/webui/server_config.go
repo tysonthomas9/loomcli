@@ -11,7 +11,12 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/app/webhookingestion"
+	"github.com/tysonthomas9/loomcli/internal/app/workflowbinding"
+	"github.com/tysonthomas9/loomcli/internal/app/workfloweventing"
 	"github.com/tysonthomas9/loomcli/internal/backend"
+	"github.com/tysonthomas9/loomcli/internal/modules/automation"
+	workflowcataloghttp "github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog/httpapi"
 	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/fleet"
@@ -19,6 +24,18 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
+
+// AutomationCapability is the narrow composition handle consumed by the web
+// application and the serve lifecycle root. It exposes no issuer, persistence
+// transport, or process-wide Store.
+type AutomationCapability interface {
+	BindingOperations() automation.BindingOperations
+	AuditQueries() automation.AuditQueries
+	WebhookWorkflow() *webhookingestion.Workflow
+	WorkflowBinding() *workflowbinding.Workflow
+	WorkflowEventing() *workfloweventing.Workflow
+	OperatorAuthorityResolver() workflowcataloghttp.OperatorAuthorityResolver
+}
 
 const (
 	DefaultPort            = 8080
@@ -78,6 +95,7 @@ type ServerConfig struct {
 	// module. Web UI composition only registers it; it never receives the
 	// capability's persistence adapter or low-level FleetDB client.
 	WorkflowCatalogModule   interface{ Register(*http.ServeMux) }
+	AutomationCapability    AutomationCapability
 	MonitorHandlers         MonitorHandlers             // Pre-built handlers for monitor/metrics endpoints (injected by cli)
 	GitOps                  ops.GitOps                  // Git operations interface (optional; nil disables git endpoints)
 	FileOps                 ops.FileOps                 // File operations interface (optional; nil disables file endpoints)

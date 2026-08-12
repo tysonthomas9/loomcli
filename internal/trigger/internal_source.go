@@ -12,6 +12,7 @@ import (
 	"sync"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/driver/eventpolicy"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -166,6 +167,17 @@ type InternalEmitResult struct {
 	Dispatch   *store.TriggerRouteDispatchResult
 }
 
+// InternalEventEmitter is the narrow compatibility seam used by legacy
+// runtime producers while Automation owns admission. InternalSource remains
+// the in-memory/store-backed conformance implementation; production serve
+// composition can supply an adapter backed by Automation without exposing a
+// TriggerRoute dispatcher to the producer.
+type InternalEventEmitter interface {
+	Emit(context.Context, string, InternalEvent) (*InternalEmitResult, error)
+}
+
+var _ InternalEventEmitter = (*InternalSource)(nil)
+
 // InternalSource is the single loopback ingress on loom serve. Zero value
 // plus Store is ready to use; safe for concurrent use.
 type InternalSource struct {
@@ -245,7 +257,7 @@ func (s *InternalSource) Emit(ctx context.Context, ws string, ev InternalEvent) 
 		return nil, fmt.Errorf("dispatch internal trigger route %q in workspace %q: %w", routeKey, ws, err)
 	}
 	s.recordHopDepth(idempotencyKey, hopDepth)
-	s.dispatchAwaits(ctx, ws, eventID, eventType, ev)
+	s.dispatchAwaits(ctx, ws, eventID, eventType, origin, ev)
 	return &InternalEmitResult{
 		EventType: eventType,
 		RouteKey:  routeKey,
@@ -279,11 +291,13 @@ func marshalInternalEnvelope(origin domain.TriggerEventOrigin, hopDepth int, ev 
 // Events the guard dropped or that found no binding never reach this point;
 // the run.finished lifecycle lane runs its own journal-anchored matcher pass
 // (internal/driver) so composition is independent of binding configuration.
-func (s *InternalSource) dispatchAwaits(ctx context.Context, ws, eventID, eventType string, ev InternalEvent) {
+func (s *InternalSource) dispatchAwaits(ctx context.Context, ws, eventID, eventType string, origin domain.TriggerEventOrigin, ev InternalEvent) {
 	matcher := &AwaitMatcher{Store: s.Store, Logger: s.Logger}
 	if _, err := matcher.Dispatch(ctx, ws, AwaitDispatchEvent{
 		EventID:    eventID,
 		EventType:  eventType,
+		SourceKind: eventpolicy.SourceKindInternal,
+		Origin:     origin,
 		SubjectRef: ev.SubjectRef,
 		ActorRef:   ev.ActorRef,
 		Payload:    ev.Payload,

@@ -74,12 +74,26 @@ func validateMutationCommands(commands []MutationCommand) error {
 		}
 	}
 	for _, required := range []string{
+		"automation.admit-event",
+		"automation.create-binding",
+		"automation.create-managed-binding",
+		"automation.delete-binding",
+		"automation.delete-managed-binding",
+		"automation.disable-binding",
+		"automation.disable-managed-binding",
+		"automation.dispatch-binding",
+		"automation.enable-binding",
+		"automation.enable-managed-binding",
+		"automation.retry-deliveries",
+		"automation.sweep-cron",
+		"automation.update-binding",
+		"automation.update-managed-binding",
 		"workflowcatalog.activate-version",
 		"workflowcatalog.approve-version",
 		"workflowcatalog.unapprove-version",
 	} {
 		if !slices.Contains(ids, required) {
-			return fmt.Errorf("mutation ledger is missing required pilot command %s", required)
+			return fmt.Errorf("mutation ledger is missing required migrated command %s", required)
 		}
 	}
 	return nil

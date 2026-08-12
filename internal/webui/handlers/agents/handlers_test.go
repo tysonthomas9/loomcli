@@ -111,7 +111,7 @@ func TestModuleListWithoutRecordStoreUsesUnifiedSupervisedShape(t *testing.T) {
 	}
 	agentSvc := svcimpl.NewAgentService(nil, nil, nil, st)
 	mux := http.NewServeMux()
-	NewModule(agentSvc, nil, nil).Register(mux)
+	newTestAgentsModule(agentSvc, nil, nil, "TEST2").Register(mux)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/TEST2/agents", nil)
 	rr := httptest.NewRecorder()
@@ -146,7 +146,7 @@ func TestModuleCreateRoutesInteractiveKindToAgentService(t *testing.T) {
 	}
 	agentSvc := svcimpl.NewAgentService(nil, nil, nil, st)
 	mux := http.NewServeMux()
-	NewModule(agentSvc, st, nil).Register(mux)
+	newTestAgentsModule(agentSvc, st, nil, "TEST2").Register(mux)
 	body := []byte(`{
 		"name":"review-nova",
 		"role_name":"pr-review",
@@ -257,7 +257,7 @@ func TestModuleCreateDispatchesSupportedKindNamespaces(t *testing.T) {
 			}
 			agentSvc := svcimpl.NewAgentService(nil, nil, nil, st)
 			mux := http.NewServeMux()
-			NewModule(agentSvc, st, nil).Register(mux)
+			newTestAgentsModule(agentSvc, st, nil, "TEST2").Register(mux)
 			req := httptest.NewRequest(http.MethodPost, "/api/workspaces/TEST2/agents", bytes.NewBufferString(tt.body))
 			rr := httptest.NewRecorder()
 
@@ -311,7 +311,7 @@ func TestModuleLifecycleHonorsStopAndRestartContract(t *testing.T) {
 	}
 	agentSvc := svcimpl.NewAgentService(nil, nil, nil, st)
 	mux := http.NewServeMux()
-	NewModule(agentSvc, st, nil).Register(mux)
+	newTestAgentsModule(agentSvc, st, nil, "TEST2").Register(mux)
 
 	gracefulReq := httptest.NewRequest(http.MethodPost, "/api/workspaces/TEST2/agents/falcon/stop", nil)
 	gracefulRR := httptest.NewRecorder()

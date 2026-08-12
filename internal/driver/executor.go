@@ -16,7 +16,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/driver/runtypes"
 	"github.com/tysonthomas9/loomcli/internal/driver/sandbox"
 	"github.com/tysonthomas9/loomcli/internal/store"
-	"github.com/tysonthomas9/loomcli/internal/trigger"
 )
 
 var ErrNoQueuedRun = errors.New("driver executor: no queued run")
@@ -91,11 +90,12 @@ type Executor struct {
 	// keeps the default local node-process launcher. Ignored when Runner is
 	// set explicitly.
 	SandboxLauncher SandboxLauncher
-	// InternalEvents, when set, is the shared C14 loopback the run.finished
-	// lifecycle emission rides (AW6) — sharing keeps the hop-depth ledger
-	// warm across emissions. Nil is fine: emission falls back to a
-	// zero-config loopback over Store.
-	InternalEvents *trigger.InternalSource
+	// RunOutcomes is Execution's narrow outbound outcome port. Terminal run
+	// state is authoritative even when publication fails: the publisher is
+	// retried by lifecycle recovery/replay and must be idempotent by EventID.
+	// Nil disables cross-capability fan-out while retaining composition-await
+	// notification, which is owned by Execution and remains store-backed.
+	RunOutcomes RunOutcomePublisher
 }
 
 type ExecutionResult struct {
@@ -262,8 +262,8 @@ func (e *Executor) recoverStaleWorkspace(ctx context.Context, ws string, recover
 				"workspace", ws, "runID", runID, "error", getErr)
 			continue
 		}
-		emitRunFinishedEvent(ctx, e.Store, e.InternalEvents, run)
-		cascadeCancelChildren(ctx, e.Store, e.InternalEvents, run, 0)
+		emitRunFinishedEvent(ctx, e.Store, e.RunOutcomes, run)
+		cascadeCancelChildren(ctx, e.Store, e.RunOutcomes, run, 0)
 	}
 	return result, nil
 }
@@ -368,10 +368,10 @@ func (e *Executor) finish(ctx context.Context, claimed *domain.DriverRun, result
 	// Every server-side terminal transition publishes run.finished (AW6):
 	// completed, failed, needs_review and cancelled all land here (a
 	// cancelled runner reports DriverRunCancelled through the same finish).
-	emitRunFinishedEvent(ctx, e.Store, e.InternalEvents, final)
+	emitRunFinishedEvent(ctx, e.Store, e.RunOutcomes, final)
 	// Composition cascade (AW10): a terminal parent cancels its queued
 	// children and cancel-requests its running ones.
-	cascadeCancelChildren(ctx, e.Store, e.InternalEvents, final, 0)
+	cascadeCancelChildren(ctx, e.Store, e.RunOutcomes, final, 0)
 	return final, nil
 }
 

@@ -1,6 +1,202 @@
 schema_version: 1
 status: reviewed
 commands:
+  - id: automation.admit-event
+    phase: 3
+    aggregate_owner: automation
+    coordinating_owner: automation
+    mechanism_discriminator: trigger_event_and_delivery
+    instance_owner: automation
+    accepted_authority: [execution, system, webhook]
+    durable_commands: [fleetdb.dispatch_automation_delivery.v1, fleetdb.reserve_automation_admission.v1, fleetdb.transition_automation_delivery.v1]
+    transaction_or_saga_boundary: One FleetDB reservation atomically validates the binding-set and Catalog snapshots and persists the Event plus every Delivery; each reserved Delivery then advances through idempotent dispatch and CAS transitions as a restartable process.
+    idempotency_key: external=source_kind:source_event_id;internal=internal:workspace_id:source_event_id;cron=occurrence_id
+    semantic_events_or_read_models: [automation.delivery.v1, automation.event.v1, execution.driver_run.v1]
+    retry_restart_behavior: Exact reservation replay returns the immutable original match set; Delivery records retain target, attempt, and transition state so restart resumes without rematching or selecting a new Catalog version.
+    negative_tests: [actor_excluded, expired_authority, hop_depth_exceeded, idempotency_conflict, inactive_catalog_version, missing_parent_event, stale_binding_snapshot, unauthenticated, wrong_action, wrong_workspace]
+    fault_injection_tests: [duplicate_request, lost_dispatch_response, process_stop_after_reservation, transition_conflict]
+  - id: automation.create-binding
+    phase: 3
+    aggregate_owner: automation
+    coordinating_owner: automation
+    mechanism_discriminator: trigger_binding
+    instance_owner: automation
+    accepted_authority: [operator]
+    durable_commands: [fleetdb.create_trigger_binding.v1]
+    transaction_or_saga_boundary: Automation validates the complete definition and effective Catalog target before one FleetDB create reserves the workspace binding ID and route identity.
+    idempotency_key: workspace_id:binding_id:create
+    semantic_events_or_read_models: [automation.binding.v1]
+    retry_restart_behavior: A committed duplicate is observed through the existing binding identity; management HTTP may ensure the same definition while create-only CLI requests preserve duplicate conflict semantics.
+    negative_tests: [expired_operator, managed_binding_authority, secret_in_automation_payload, unauthenticated, wrong_action, wrong_workspace]
+    fault_injection_tests: [duplicate_request, persistence_failure, response_validation]
+  - id: automation.create-managed-binding
+    phase: 3
+    aggregate_owner: automation
+    coordinating_owner: agents
+    mechanism_discriminator: trigger_binding:agent_service
+    instance_owner: automation
+    accepted_authority: [operator]
+    durable_commands: [fleetdb.create_trigger_binding.v1]
+    transaction_or_saga_boundary: Agents supplies the exact owning AgentService ID; Automation verifies that identity and the Catalog target before one FleetDB binding create.
+    idempotency_key: workspace_id:agent_service_id:binding_id:create
+    semantic_events_or_read_models: [automation.binding.v1]
+    retry_restart_behavior: The stable binding ID and exact AgentService owner make retries converge or return a duplicate conflict without allowing an ordinary binding command to take ownership.
+    negative_tests: [expired_operator, mismatched_agent_service_owner, ordinary_binding_authority, unauthenticated, wrong_action, wrong_workspace]
+    fault_injection_tests: [duplicate_request, persistence_failure, response_validation]
+  - id: automation.delete-binding
+    phase: 3
+    aggregate_owner: automation
+    coordinating_owner: automation
+    mechanism_discriminator: trigger_binding
+    instance_owner: automation
+    accepted_authority: [operator]
+    durable_commands: [fleetdb.delete_trigger_binding.v1]
+    transaction_or_saga_boundary: Automation rejects enabled or managed bindings before one FleetDB delete; the HTTP retirement workflow durably disables first and revokes connector grants before invoking this command.
+    idempotency_key: workspace_id:binding_id:disabled_delete
+    semantic_events_or_read_models: [automation.binding.v1]
+    retry_restart_behavior: Failure before delete leaves a durable disabled binding and idempotent grant revocation can resume; an already-absent authenticated HTTP retirement converges to deleted=true so a lost final response is safe to retry.
+    negative_tests: [enabled_binding, expired_operator, managed_binding_authority, unauthenticated, wrong_action, wrong_workspace]
+    fault_injection_tests: [connector_failure_before_delete, delete_failure_after_disable, lost_response_after_delete, retry_from_disabled]
+  - id: automation.delete-managed-binding
+    phase: 3
+    aggregate_owner: automation
+    coordinating_owner: agents
+    mechanism_discriminator: trigger_binding:agent_service
+    instance_owner: automation
+    accepted_authority: [operator]
+    durable_commands: [fleetdb.delete_trigger_binding.v1]
+    transaction_or_saga_boundary: Automation verifies the exact AgentService owner and requires the binding to be disabled before one FleetDB delete; Agents coordinates grant revocation and record archival around it.
+    idempotency_key: workspace_id:agent_service_id:binding_id:disabled_delete
+    semantic_events_or_read_models: [automation.binding.v1]
+    retry_restart_behavior: A failure before delete leaves the disabled managed binding available for an owner-matched retry; an ordinary delete command remains forbidden.
+    negative_tests: [enabled_binding, expired_operator, mismatched_agent_service_owner, ordinary_binding_authority, unauthenticated, wrong_action, wrong_workspace]
+    fault_injection_tests: [grant_revocation_failure, persistence_failure, retry_from_disabled]
+  - id: automation.disable-binding
+    phase: 3
+    aggregate_owner: automation
+    coordinating_owner: automation
+    mechanism_discriminator: trigger_binding
+    instance_owner: automation
+    accepted_authority: [operator]
+    durable_commands: [fleetdb.update_trigger_binding.v1]
+    transaction_or_saga_boundary: Automation verifies ordinary ownership and writes the disabled state through one FleetDB binding update before any retirement side effect.
+    idempotency_key: workspace_id:binding_id:enabled=false
+    semantic_events_or_read_models: [automation.binding.v1]
+    retry_restart_behavior: An already-disabled binding returns its durable snapshot without another write, making pre-delete restart safe.
+    negative_tests: [expired_operator, managed_binding_authority, unauthenticated, wrong_action, wrong_workspace]
+    fault_injection_tests: [duplicate_request, persistence_failure]
+  - id: automation.disable-managed-binding
+    phase: 3
+    aggregate_owner: automation
+    coordinating_owner: agents
+    mechanism_discriminator: trigger_binding:agent_service
+    instance_owner: automation
+    accepted_authority: [operator]
+    durable_commands: [fleetdb.update_trigger_binding.v1]
+    transaction_or_saga_boundary: Automation verifies the exact AgentService owner and writes the disabled state through one FleetDB binding update.
+    idempotency_key: workspace_id:agent_service_id:binding_id:enabled=false
+    semantic_events_or_read_models: [automation.binding.v1]
+    retry_restart_behavior: An already-disabled owner-matched binding returns its durable snapshot; mismatched owners cannot resume or mutate it.
+    negative_tests: [expired_operator, mismatched_agent_service_owner, ordinary_binding_authority, unauthenticated, wrong_action, wrong_workspace]
+    fault_injection_tests: [duplicate_request, persistence_failure]
+  - id: automation.dispatch-binding
+    phase: 3
+    aggregate_owner: execution
+    coordinating_owner: automation
+    mechanism_discriminator: driver_run:manual_binding
+    instance_owner: execution
+    accepted_authority: [operator]
+    durable_commands: [fleetdb.dispatch_automation_binding.v1]
+    transaction_or_saga_boundary: One FleetDB transaction locks the binding and concurrency-policy scope, revalidates the effective Catalog snapshot, and creates, reuses, supersedes, or reports the Execution-owned DriverRun atomically.
+    idempotency_key: workspace_id:binding_id:caller_idempotency_key
+    semantic_events_or_read_models: [automation.binding_run.v1, execution.driver_run.v1]
+    retry_restart_behavior: Loom retries one ambiguous response with the same key; FleetDB replays the committed run and never falls back to generic DriverRun creation.
+    negative_tests: [catalog_snapshot_conflict, expired_operator, inactive_binding, malformed_payload, unauthenticated, wrong_action, wrong_workspace]
+    fault_injection_tests: [concurrent_forbid_policy, duplicate_request, lost_response_after_commit]
+  - id: automation.enable-binding
+    phase: 3
+    aggregate_owner: automation
+    coordinating_owner: automation
+    mechanism_discriminator: trigger_binding
+    instance_owner: automation
+    accepted_authority: [operator]
+    durable_commands: [fleetdb.update_trigger_binding.v1]
+    transaction_or_saga_boundary: Automation verifies ordinary ownership and writes the enabled state through one FleetDB binding update.
+    idempotency_key: workspace_id:binding_id:enabled=true
+    semantic_events_or_read_models: [automation.binding.v1]
+    retry_restart_behavior: An already-enabled binding returns its durable snapshot without another write.
+    negative_tests: [expired_operator, managed_binding_authority, unauthenticated, wrong_action, wrong_workspace]
+    fault_injection_tests: [duplicate_request, persistence_failure]
+  - id: automation.enable-managed-binding
+    phase: 3
+    aggregate_owner: automation
+    coordinating_owner: agents
+    mechanism_discriminator: trigger_binding:agent_service
+    instance_owner: automation
+    accepted_authority: [operator]
+    durable_commands: [fleetdb.update_trigger_binding.v1]
+    transaction_or_saga_boundary: Automation verifies the exact AgentService owner and writes the enabled state through one FleetDB binding update.
+    idempotency_key: workspace_id:agent_service_id:binding_id:enabled=true
+    semantic_events_or_read_models: [automation.binding.v1]
+    retry_restart_behavior: An already-enabled owner-matched binding returns its durable snapshot; mismatched owners remain rejected.
+    negative_tests: [expired_operator, mismatched_agent_service_owner, ordinary_binding_authority, unauthenticated, wrong_action, wrong_workspace]
+    fault_injection_tests: [duplicate_request, persistence_failure]
+  - id: automation.retry-deliveries
+    phase: 3
+    aggregate_owner: automation
+    coordinating_owner: automation
+    mechanism_discriminator: trigger_delivery_retry
+    instance_owner: automation
+    accepted_authority: [system]
+    durable_commands: [fleetdb.claim_due_automation_deliveries.v1, fleetdb.dispatch_automation_delivery.v1, fleetdb.transition_automation_delivery.v1]
+    transaction_or_saga_boundary: FleetDB atomically claims due Delivery attempts with a reclaimable lease; each immutable target is dispatched and finalized by expected-status and expected-attempt CAS.
+    idempotency_key: event_idempotency_key:binding_id:delivery_attempt
+    semantic_events_or_read_models: [automation.delivery.v1, execution.driver_run.v1]
+    retry_restart_behavior: A crash leaves a reclaimable durable attempt; repeated dispatch replays the same run intent and transition CAS prevents double advancement or target reselection.
+    negative_tests: [expired_system_authority, malformed_candidate, stale_attempt, unauthenticated, wrong_action, wrong_component, wrong_workspace]
+    fault_injection_tests: [dispatch_failure, duplicate_claim, lost_dispatch_response, process_stop_after_claim, transition_conflict]
+  - id: automation.sweep-cron
+    phase: 3
+    aggregate_owner: automation
+    coordinating_owner: automation
+    mechanism_discriminator: cron_occurrence
+    instance_owner: automation
+    accepted_authority: [system]
+    durable_commands: [fleetdb.claim_due_automation_cron.v1, fleetdb.complete_automation_cron.v1, fleetdb.reserve_automation_admission.v1]
+    transaction_or_saga_boundary: FleetDB atomically claims stable due occurrences with a reclaimable lease; Automation admits each occurrence through the one admission command and records idempotent completion before advancing the durable cursor.
+    idempotency_key: claim=workspace_id:before:claim_until:limit;occurrence=cron:binding_id:scheduled_unix
+    semantic_events_or_read_models: [automation.cron_cursor.v1, automation.event.v1]
+    retry_restart_behavior: Exact claim replay and stable occurrence IDs prevent duplicate fires; a failed or abandoned claim becomes reclaimable without advancing the schedule window.
+    negative_tests: [expired_system_authority, invalid_schedule, malformed_occurrence, unauthenticated, wrong_action, wrong_component, wrong_workspace]
+    fault_injection_tests: [completion_failure, duplicate_claim, process_stop_after_claim, restart_reclaim]
+  - id: automation.update-binding
+    phase: 3
+    aggregate_owner: automation
+    coordinating_owner: automation
+    mechanism_discriminator: trigger_binding
+    instance_owner: automation
+    accepted_authority: [operator]
+    durable_commands: [fleetdb.update_trigger_binding.v1]
+    transaction_or_saga_boundary: Automation loads the ordinary binding, applies the typed patch, re-resolves a changed Catalog target, preserves enablement and identity, and writes one FleetDB binding update.
+    idempotency_key: workspace_id:binding_id:canonical_binding_state
+    semantic_events_or_read_models: [automation.binding.v1]
+    retry_restart_behavior: Repeating an identical patch converges on the same definition; managed bindings and immutable IDs remain rejected.
+    negative_tests: [expired_operator, immutable_binding_id, managed_binding_authority, unauthenticated, wrong_action, wrong_workspace]
+    fault_injection_tests: [duplicate_request, persistence_failure, response_validation]
+  - id: automation.update-managed-binding
+    phase: 3
+    aggregate_owner: automation
+    coordinating_owner: agents
+    mechanism_discriminator: trigger_binding:agent_service
+    instance_owner: automation
+    accepted_authority: [operator]
+    durable_commands: [fleetdb.update_trigger_binding.v1]
+    transaction_or_saga_boundary: Automation verifies the exact AgentService owner before and after applying the typed patch, re-resolves a changed Catalog target, and writes one FleetDB binding update without allowing ownership transfer.
+    idempotency_key: workspace_id:agent_service_id:binding_id:canonical_binding_state
+    semantic_events_or_read_models: [automation.binding.v1]
+    retry_restart_behavior: Repeating an identical owner-matched patch converges; an owner change or ordinary binding command fails closed.
+    negative_tests: [expired_operator, immutable_binding_id, mismatched_agent_service_owner, ordinary_binding_authority, unauthenticated, wrong_action, wrong_workspace]
+    fault_injection_tests: [duplicate_request, persistence_failure, response_validation]
   - id: workflowcatalog.activate-version
     phase: 2B
     aggregate_owner: workflowcatalog

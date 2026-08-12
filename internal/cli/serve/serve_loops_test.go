@@ -10,6 +10,7 @@ import (
 	driverexecutor "github.com/tysonthomas9/loomcli/internal/driver"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/trigger"
 )
 
 // readerCapableEvents satisfies store.TriggerEventStore AND the optional
@@ -53,10 +54,11 @@ func TestStartIssueJournalBridge_MemstoreGatedNoLoop(t *testing.T) {
 
 	// memstore does not implement store.IssueJournalReader, so the bridge must
 	// not start: no cursor state file is ever created.
-	startIssueJournalBridge(ctx, memstore.New(), nil)
+	mem := memstore.New()
+	startIssueJournalBridge(ctx, mem, nil, &trigger.InternalSource{Store: mem})
 
 	// Also a nil store is a clean no-op.
-	startIssueJournalBridge(ctx, nil, nil)
+	startIssueJournalBridge(ctx, nil, nil, nil)
 
 	if _, err := os.Stat(statePath); !os.IsNotExist(err) {
 		t.Fatalf("cursor state file created for memstore-gated serve: stat err = %v", err)
@@ -74,7 +76,8 @@ func TestStartIssueJournalBridge_DisabledFlagHonored(t *testing.T) {
 
 	// Even with a reader-capable store the disabled flag wins: no loop, no
 	// cursor file.
-	startIssueJournalBridge(ctx, readerCapableStore{Store: memstore.New()}, nil)
+	mem := memstore.New()
+	startIssueJournalBridge(ctx, readerCapableStore{Store: mem}, nil, &trigger.InternalSource{Store: mem})
 
 	if _, err := os.Stat(statePath); !os.IsNotExist(err) {
 		t.Fatalf("cursor state file created while bridge disabled: stat err = %v", err)
@@ -98,7 +101,7 @@ func TestStartIssueJournalBridge_EnabledLoopWritesCursorState(t *testing.T) {
 	// A reader-capable store passes the gate; the first pass fast-forwards the
 	// seeded workspace to the (empty) journal tail and persists its cursor, so
 	// the state file appears.
-	startIssueJournalBridge(ctx, readerCapableStore{Store: mem}, nil)
+	startIssueJournalBridge(ctx, readerCapableStore{Store: mem}, nil, &trigger.InternalSource{Store: mem})
 
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {

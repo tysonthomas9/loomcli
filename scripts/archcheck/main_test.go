@@ -36,7 +36,7 @@ func TestRunChecksRepository(t *testing.T) {
 	if !strings.Contains(output.String(), "Architecture guardrails passed") {
 		t.Fatalf("unexpected output: %s", output.String())
 	}
-	if !strings.Contains(output.String(), "in-scope non-test goroutine launch definitions: 108") {
+	if !strings.Contains(output.String(), "in-scope non-test goroutine launch definitions: 107") {
 		t.Fatalf("runtime launch count missing from output: %s", output.String())
 	}
 }

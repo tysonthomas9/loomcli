@@ -122,12 +122,21 @@ func (app *Server) buildInfraModules() {
 
 	if storeBacked {
 		app.connectorDispatcher = app.buildConnectorDispatcher()
-		app.wsModules = append(app.wsModules, modbuilder.NewUnifiedAgentModules(modbuilder.UnifiedAgentModuleDeps{
+		unifiedDeps := modbuilder.UnifiedAgentModuleDeps{
 			Store: app.config.Store, AgentSvc: app.agentSvc, IssueSvc: app.issueSvc, Hub: app.hub,
 			FleetBaseURL: app.config.FleetDBBaseURL, DriverAPIBaseURL: app.config.DriverAPIBaseURL,
 			DriverAPIToken: app.config.DriverAPIToken, DriverRunTokenKey: app.config.DriverRunTokenKey,
 			LocalSettingsDir: app.config.LocalSettingsDir, Dispatcher: app.connectorDispatcher,
-		})...)
+		}
+		if capability := app.config.AutomationCapability; capability != nil {
+			unifiedDeps.AutomationBindings = capability.BindingOperations()
+			unifiedDeps.WorkflowBinding = capability.WorkflowBinding()
+			unifiedDeps.AutomationAudit = capability.AuditQueries()
+			unifiedDeps.AutomationWebhook = capability.WebhookWorkflow()
+			unifiedDeps.AutomationEventing = capability.WorkflowEventing()
+			unifiedDeps.AutomationOperator = capability.OperatorAuthorityResolver()
+		}
+		app.wsModules = append(app.wsModules, modbuilder.NewUnifiedAgentModules(unifiedDeps)...)
 		prReviewModule := modbuilder.NewPRReviewModule(
 			app.config.Store, app.connectorDispatcher, app.agentSvc, app.termSvc, app.config.LocalSettingsDir,
 		)

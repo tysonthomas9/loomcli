@@ -29,15 +29,15 @@ func TestCheckedInDirectWriteInventoryMatchesAllProfiles(t *testing.T) {
 	if len(violations) != 0 {
 		t.Fatalf("direct-write inventory violations: %v", violations)
 	}
-	if len(observed) != 233 {
-		t.Fatalf("direct-write rows = %d, want strict baseline of 233", len(observed))
+	if len(observed) != 226 {
+		t.Fatalf("direct-write rows = %d, want strict baseline of 226", len(observed))
 	}
 	totalSites := 0
 	for _, use := range observed {
 		totalSites += use.Count
 	}
-	if totalSites != 258 {
-		t.Fatalf("direct-write sites = %d, want strict baseline of 258", totalSites)
+	if totalSites != 249 {
+		t.Fatalf("direct-write sites = %d, want strict baseline of 249", totalSites)
 	}
 }
 

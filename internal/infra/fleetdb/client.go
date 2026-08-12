@@ -85,6 +85,7 @@ type Client struct {
 	drivers    *driverStore
 	versions   *driverVersionStore
 	catalog    *workflowCatalogStore
+	automation *automationStore
 	profiles   *workerProfileStore
 	services   *agentServiceStore
 	bindings   *triggerBindingStore
@@ -138,6 +139,7 @@ func New(cfg Config) (*Client, error) {
 	c.drivers = &driverStore{client: c}
 	c.versions = &driverVersionStore{client: c}
 	c.catalog = &workflowCatalogStore{client: c}
+	c.automation = &automationStore{client: c}
 	c.profiles = &workerProfileStore{client: c}
 	c.services = &agentServiceStore{client: c}
 	c.bindings = &triggerBindingStore{client: c}
@@ -203,6 +205,11 @@ func (c *Client) DriverVersions() store.DriverVersionStore { return c.versions }
 // connection pool; composition must not construct a second FleetDB client for
 // the capability.
 func (c *Client) WorkflowCatalog() WorkflowCatalogTransport { return c.catalog }
+
+// Automation exposes the narrow low-level transport used by Automation's
+// capability-local FleetDB adapter. It reuses this Client's credentials,
+// tracing, retry policy, and connection pool.
+func (c *Client) Automation() AutomationTransport { return c.automation }
 
 func (c *Client) WorkerProfiles() store.WorkerProfileStore { return c.profiles }
 
@@ -386,9 +393,11 @@ func (c *Client) doRequest(req *http.Request, method, path string, out any) erro
 // classifyHTTPError maps an HTTP status + body into the appropriate
 // domain sentinel + descriptive wrap.
 func classifyHTTPError(method, path string, status int, body []byte) error {
-	msg := extractErrorMessage(body)
 	code := extractErrorCode(body)
-	prefix := formatHTTPErrorPrefix(method, path, status, msg)
+	prefix := formatHTTPErrorPrefix(method, path, status, extractErrorMessage(body))
+	if sentinel := automationHTTPErrorSentinel(code); sentinel != nil {
+		return fmt.Errorf("%s: %w", prefix, sentinel)
+	}
 	switch status {
 	case http.StatusNotFound:
 		return fmt.Errorf("%s: %w", prefix, domain.ErrNotFound)
@@ -416,7 +425,7 @@ func classifyHTTPError(method, path string, status int, body []byte) error {
 			return fmt.Errorf("%s: %w", prefix, domain.ErrNotOwner)
 		}
 		return fmt.Errorf("%s: %w", prefix, domain.ErrConflict)
-	case http.StatusBadRequest, http.StatusUnprocessableEntity:
+	case http.StatusBadRequest, http.StatusUnprocessableEntity, http.StatusRequestEntityTooLarge:
 		switch code {
 		case "workflow_catalog_version_ownership":
 			return fmt.Errorf("%s: %w", prefix, ErrWorkflowCatalogVersionOwnership)
@@ -441,6 +450,33 @@ func classifyHTTPError(method, path string, status int, body []byte) error {
 	}
 	return errors.New(prefix)
 }
+
+var automationHTTPErrorSentinels = map[string]error{
+	"automation_idempotency_required":              ErrAutomationInvalid,
+	"automation_invalid_admission":                 ErrAutomationInvalid,
+	"automation_route_not_found":                   ErrAutomationRouteNotFound,
+	"automation_parent_run_not_found":              ErrAutomationParentRunNotFound,
+	"automation_execution_owner_conflict":          ErrAutomationExecutionOwnerConflict,
+	"automation_idempotency_conflict":              ErrAutomationIdempotencyConflict,
+	"automation_binding_snapshot_conflict":         ErrAutomationBindingSnapshotConflict,
+	"automation_catalog_snapshot_conflict":         ErrAutomationCatalogSnapshotConflict,
+	"automation_hop_depth_exceeded":                ErrAutomationHopDepthExceeded,
+	"automation_catalog_version_unavailable":       ErrAutomationCatalogUnavailable,
+	"automation_fanout_limit_exceeded":             ErrAutomationFanoutLimitExceeded,
+	"automation_admission_unavailable":             ErrAutomationAdmissionUnavailable,
+	"automation_delivery_not_found":                ErrAutomationDeliveryNotFound,
+	"automation_delivery_not_dispatchable":         ErrAutomationDeliveryNotDispatchable,
+	"automation_delivery_transition_conflict":      ErrAutomationDeliveryTransitionConflict,
+	"automation_payload_digest_mismatch":           ErrAutomationPayloadDigestMismatch,
+	"automation_binding_not_found":                 ErrAutomationBindingNotFound,
+	"automation_binding_dispatch_replay_not_found": ErrAutomationBindingDispatchReplayNotFound,
+	"automation_admission_replay_not_found":        ErrAutomationAdmissionReplayNotFound,
+	"automation_cron_occurrence_not_found":         ErrAutomationCronOccurrenceNotFound,
+	"automation_cron_completion_conflict":          ErrAutomationCronCompletionConflict,
+	"automation_managed_binding_conflict":          ErrAutomationManagedBindingConflict,
+}
+
+func automationHTTPErrorSentinel(code string) error { return automationHTTPErrorSentinels[code] }
 
 func formatHTTPErrorPrefix(method, path string, status int, message string) string {
 	prefix := fmt.Sprintf("fleetdb: %s %s: HTTP %d", method, path, status)
