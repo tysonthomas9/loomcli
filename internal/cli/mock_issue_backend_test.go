@@ -139,16 +139,6 @@ type MockIssueBackend struct {
 	BatchErr    error
 	BatchFn     func(ctx context.Context, ops []backend.BatchOp) ([]backend.BatchResult, error)
 
-	// GetMutations
-	GetMutationsResult []backend.MutationData
-	GetMutationsErr    error
-	GetMutationsFn     func(ctx context.Context, sinceMs int64) ([]backend.MutationData, error)
-
-	// WaitForMutations
-	WaitForMutationsResult []backend.MutationData
-	WaitForMutationsErr    error
-	WaitForMutationsFn     func(ctx context.Context, sinceMs int64, timeoutMs int64) ([]backend.MutationData, error)
-
 	// BackendName
 	BackendNameResult string
 	BackendNameFn     func() string
@@ -489,32 +479,6 @@ func (m *MockIssueBackend) Batch(ctx context.Context, ops []backend.BatchOp) ([]
 	m.mu.Unlock()
 	if fn != nil {
 		return fn(ctx, ops)
-	}
-	return result, resultErr
-}
-
-// GetMutations implements backend.IssueBackend.
-func (m *MockIssueBackend) GetMutations(ctx context.Context, sinceMs int64) ([]backend.MutationData, error) {
-	m.mu.Lock()
-	m.record("GetMutations", sinceMs)
-	fn := m.GetMutationsFn
-	result, resultErr := m.GetMutationsResult, m.GetMutationsErr
-	m.mu.Unlock()
-	if fn != nil {
-		return fn(ctx, sinceMs)
-	}
-	return result, resultErr
-}
-
-// WaitForMutations implements backend.IssueBackend.
-func (m *MockIssueBackend) WaitForMutations(ctx context.Context, sinceMs int64, timeoutMs int64) ([]backend.MutationData, error) {
-	m.mu.Lock()
-	m.record("WaitForMutations", sinceMs, timeoutMs)
-	fn := m.WaitForMutationsFn
-	result, resultErr := m.WaitForMutationsResult, m.WaitForMutationsErr
-	m.mu.Unlock()
-	if fn != nil {
-		return fn(ctx, sinceMs, timeoutMs)
 	}
 	return result, resultErr
 }

@@ -887,34 +887,6 @@ func TestBatch_NotImplemented(t *testing.T) {
 	}
 }
 
-func TestGetMutations_NotImplemented(t *testing.T) {
-	ab, err := New(Config{BaseURL: "http://x", WorkspaceID: "ws"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = ab.GetMutations(context.Background(), 0)
-	if err == nil {
-		t.Fatal("expected error")
-	}
-	if !backend.IsKind(err, backend.KindNotImplemented) {
-		t.Errorf("expected KindNotImplemented, got %v", err)
-	}
-}
-
-func TestWaitForMutations_NotImplemented(t *testing.T) {
-	ab, err := New(Config{BaseURL: "http://x", WorkspaceID: "ws"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = ab.WaitForMutations(context.Background(), 0, 1000)
-	if err == nil {
-		t.Fatal("expected error")
-	}
-	if !backend.IsKind(err, backend.KindNotImplemented) {
-		t.Errorf("expected KindNotImplemented, got %v", err)
-	}
-}
-
 // --- Create ---
 
 func TestCreate_HappyPath(t *testing.T) {

@@ -1230,6 +1230,67 @@ func TestRetiredHandlerBackendCompatibilityCannotReturn(t *testing.T) {
 	}
 }
 
+func TestRetiredBackendMutationPlaneCannotReturn(t *testing.T) {
+	root, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	forbiddenNames := map[string]struct{}{
+		"MutationData": {}, "CursorMutationBackend": {},
+		"GetMutations": {}, "WaitForMutations": {},
+		"ensureStoreBackedSSESubscriber": {}, "ActivationReasonLegacy": {},
+	}
+	for _, relative := range []string{
+		"internal/backend",
+		"internal/backend/api",
+		"internal/backend/fleet",
+		"internal/cli",
+		"internal/webui/app",
+		"internal/webui/subscription",
+	} {
+		files, globErr := filepath.Glob(filepath.Join(root, filepath.FromSlash(relative), "*.go"))
+		if globErr != nil {
+			t.Fatal(globErr)
+		}
+		for _, path := range files {
+			if strings.HasSuffix(path, "_test.go") {
+				continue
+			}
+			parsed, parseErr := parser.ParseFile(token.NewFileSet(), path, nil, 0)
+			if parseErr != nil {
+				t.Fatal(parseErr)
+			}
+			ast.Inspect(parsed, func(node ast.Node) bool {
+				switch declaration := node.(type) {
+				case *ast.TypeSpec:
+					if _, forbidden := forbiddenNames[declaration.Name.Name]; forbidden {
+						t.Errorf("retired backend mutation type %s returned in %s", declaration.Name.Name, path)
+					}
+				case *ast.FuncDecl:
+					if _, forbidden := forbiddenNames[declaration.Name.Name]; forbidden {
+						t.Errorf("retired backend mutation function %s returned in %s", declaration.Name.Name, path)
+					}
+				case *ast.Field:
+					for _, name := range declaration.Names {
+						if _, forbidden := forbiddenNames[name.Name]; forbidden {
+							t.Errorf("retired backend mutation method %s returned in %s", name.Name, path)
+						}
+					}
+				}
+				return true
+			})
+		}
+	}
+
+	apiBackend, err := os.ReadFile(filepath.Join(root, "internal", "backend", "api", "backend.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(apiBackend), "does not implement SSE subscription") {
+		t.Error("retired API backend mutation fallback returned")
+	}
+}
+
 func TestHandwrittenProductionAPIsDoNotRemainDeprecated(t *testing.T) {
 	root, err := filepath.Abs(filepath.Join("..", ".."))
 	if err != nil {

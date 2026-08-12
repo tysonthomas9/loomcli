@@ -163,17 +163,6 @@ type IssueBackend interface {
 	// individual operation failures are in each BatchResult.
 	Batch(ctx context.Context, ops []BatchOp) ([]BatchResult, error)
 
-	// --- Mutation polling ---
-
-	// GetMutations returns mutation events that occurred after sinceMs
-	// (milliseconds since epoch). Used for polling-based real-time updates.
-	GetMutations(ctx context.Context, sinceMs int64) ([]MutationData, error)
-
-	// WaitForMutations blocks until new mutations occur after sinceMs or the
-	// timeout (in milliseconds) expires. Used by the SSE hub for long-polling.
-	// Returns an empty slice on timeout (not an error).
-	WaitForMutations(ctx context.Context, sinceMs int64, timeoutMs int64) ([]MutationData, error)
-
 	// --- Metadata ---
 
 	// BackendName returns a string identifying this backend implementation

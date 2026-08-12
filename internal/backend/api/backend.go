@@ -580,13 +580,3 @@ func (b *APIBackend) ListEvents(ctx context.Context, id string, limit int) ([]ba
 func (b *APIBackend) Batch(_ context.Context, _ []backend.BatchOp) ([]backend.BatchResult, error) {
 	return nil, backend.ErrNotImplemented("Batch", "server has no batch endpoint")
 }
-
-// --- Mutation polling ---
-
-func (b *APIBackend) GetMutations(_ context.Context, _ int64) ([]backend.MutationData, error) {
-	return nil, backend.ErrNotImplemented("GetMutations", "api backend does not implement SSE subscription; use the SSE endpoint directly")
-}
-
-func (b *APIBackend) WaitForMutations(_ context.Context, _ int64, _ int64) ([]backend.MutationData, error) {
-	return nil, backend.ErrNotImplemented("WaitForMutations", "api backend does not implement SSE subscription; use the SSE endpoint directly")
-}

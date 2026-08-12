@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 	"github.com/tysonthomas9/loomcli/internal/webui/coordinator"
 )
 
@@ -117,9 +118,9 @@ func TestFleetBackendHook_V2MutationWaitCarriesAPIKey(t *testing.T) {
 	if !ok {
 		t.Fatal("expected FleetBackend resource")
 	}
-	cursorBackend, ok := resource.(backend.CursorMutationBackend)
+	cursorBackend, ok := resource.(workitems.MutationStream)
 	if !ok {
-		t.Fatalf("resource %T does not implement CursorMutationBackend", resource)
+		t.Fatalf("resource %T does not implement workitems.MutationStream", resource)
 	}
 	if _, err := cursorBackend.WaitForMutationsAfter(context.Background(), "0", 1); err != nil {
 		t.Fatalf("WaitForMutationsAfter: %v", err)

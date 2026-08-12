@@ -134,12 +134,6 @@ func (b *localBackendStub) ListEvents(context.Context, string, int) ([]backend.E
 func (b *localBackendStub) Batch(context.Context, []backend.BatchOp) ([]backend.BatchResult, error) {
 	return nil, nil
 }
-func (b *localBackendStub) GetMutations(context.Context, int64) ([]backend.MutationData, error) {
-	return nil, nil
-}
-func (b *localBackendStub) WaitForMutations(context.Context, int64, int64) ([]backend.MutationData, error) {
-	return nil, nil
-}
 func (b *localBackendStub) BackendName() string { return "local-stub" }
 
 func withLocalBackend(t *testing.T, stub *localBackendStub, fn func()) {

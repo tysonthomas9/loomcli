@@ -149,37 +149,6 @@ type CloseResult struct {
 	Unblocked []IssueData `json:"unblocked,omitempty"`
 }
 
-// MutationData represents a mutation event for real-time subscriptions.
-// Used by GetMutations and WaitForMutations.
-//
-// MutationData is the backend-agnostic durable mutation projection. Backends
-// produce it directly and the realtime adapter maps it to the SSE wire shape.
-type MutationData struct {
-	Cursor     string    `json:"cursor,omitempty"`
-	Type       string    `json:"type"`
-	EntityType string    `json:"entity_type,omitempty"`
-	EntityID   string    `json:"entity_id,omitempty"`
-	Action     string    `json:"action,omitempty"`
-	IssueID    string    `json:"issue_id,omitempty"`
-	Title      string    `json:"title,omitempty"`
-	Assignee   string    `json:"assignee,omitempty"`
-	Actor      string    `json:"actor,omitempty"`
-	Timestamp  time.Time `json:"timestamp"`
-	OldStatus  string    `json:"old_status,omitempty"`
-	NewStatus  string    `json:"new_status,omitempty"`
-	ParentID   string    `json:"parent_id,omitempty"`
-	SourceRepo string    `json:"source_repo,omitempty"`
-	StepCount  int       `json:"step_count,omitempty"`
-}
-
-// CursorMutationBackend is an optional IssueBackend extension for durable
-// stream cursors. Backends that implement it can round-trip opaque event IDs
-// instead of lossy millisecond timestamps for reconnect catch-up.
-type CursorMutationBackend interface {
-	GetMutationsAfter(ctx context.Context, since string) ([]MutationData, error)
-	WaitForMutationsAfter(ctx context.Context, since string, timeoutMs int64) ([]MutationData, error)
-}
-
 // RepositoryRequirementResult is the canonical outcome of atomically moving
 // a repository-less task to the repository-required blocked state.
 type RepositoryRequirementResult struct {
@@ -557,21 +526,3 @@ type BatchResult struct {
 	Data    json.RawMessage `json:"data,omitempty"`
 	Error   string          `json:"error,omitempty"`
 }
-
-// ---------------------------------------------------------------------------
-// Section 4: Mutation type constants
-// ---------------------------------------------------------------------------
-
-// Mutation event type constants shared by backend adapters.
-const (
-	MutationCreate        = "create"
-	MutationUpdate        = "update"
-	MutationDelete        = "delete"
-	MutationComment       = "comment"
-	MutationBonded        = "bonded"
-	MutationSquashed      = "squashed"
-	MutationBurned        = "burned"
-	MutationStatus        = "status"
-	MutationRefresh       = "refresh"
-	MutationSessionChange = "session_change"
-)

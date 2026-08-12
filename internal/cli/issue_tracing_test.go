@@ -50,8 +50,6 @@ func TestWrapIssueBackendWithTracing_Smoke(t *testing.T) {
 	_, _ = wrapped.AddComment(ctx, backend.CommentAddParams{IssueID: "id-1", Text: "hi"})
 	_, _ = wrapped.ListEvents(ctx, "id-1", 10)
 	_, _ = wrapped.Batch(ctx, []backend.BatchOp{})
-	_, _ = wrapped.GetMutations(ctx, 0)
-	_, _ = wrapped.WaitForMutations(ctx, 0, 100)
 }
 
 func TestWrapIssueBackendWithTracing_Nil(t *testing.T) {

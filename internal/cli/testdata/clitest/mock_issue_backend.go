@@ -21,78 +21,72 @@ type MockIssueBackend struct {
 	mu    sync.Mutex
 	Calls []MockBackendCall
 
-	GetResult              *backend.IssueDetailData
-	GetErr                 error
-	GetFn                  func(ctx context.Context, id string) (*backend.IssueDetailData, error)
-	ListResult             []backend.IssueData
-	ListErr                error
-	ListFn                 func(ctx context.Context, opts backend.ListOpts) ([]backend.IssueData, error)
-	ReadyResult            []backend.IssueData
-	ReadyErr               error
-	ReadyFn                func(ctx context.Context, opts backend.ReadyOpts) ([]backend.IssueData, error)
-	BlockedResult          []backend.IssueData
-	BlockedErr             error
-	BlockedFn              func(ctx context.Context, opts backend.BlockedOpts) ([]backend.IssueData, error)
-	StatsResult            *backend.StatsData
-	StatsErr               error
-	StatsFn                func(ctx context.Context) (*backend.StatsData, error)
-	CountResult            int
-	CountErr               error
-	CountFn                func(ctx context.Context, opts backend.CountOpts) (int, error)
-	GetChildrenResult      []backend.IssueData
-	GetChildrenErr         error
-	GetChildrenFn          func(ctx context.Context, id string) ([]backend.IssueData, error)
-	SearchIssuesResult     []backend.IssueData
-	SearchIssuesErr        error
-	SearchIssuesFn         func(ctx context.Context, query string, limit int) ([]backend.IssueData, error)
-	CreateResult           *backend.IssueData
-	CreateErr              error
-	CreateFn               func(ctx context.Context, params backend.CreateParams) (*backend.IssueData, error)
-	UpdateErr              error
-	UpdateFn               func(ctx context.Context, id string, params backend.UpdateParams) error
-	ClaimIssueErr          error
-	ClaimIssueFn           func(ctx context.Context, id string, lockTTL time.Duration) error
-	ReleaseIssueLockErr    error
-	ReleaseIssueLockFn     func(ctx context.Context, id, actor string) error
-	DeferIssueErr          error
-	DeferIssueFn           func(ctx context.Context, id string, until time.Time) error
-	UndeferIssueErr        error
-	UndeferIssueFn         func(ctx context.Context, id string) error
-	CloseResult            *backend.CloseResult
-	CloseErr               error
-	CloseFn                func(ctx context.Context, id string, params backend.CloseParams) (*backend.CloseResult, error)
-	ReopenErr              error
-	ReopenFn               func(ctx context.Context, id string, params backend.ReopenParams) error
-	DeleteErr              error
-	DeleteFn               func(ctx context.Context, params backend.DeleteParams) error
-	AddDependencyErr       error
-	AddDependencyFn        func(ctx context.Context, params backend.DepAddParams) error
-	RemoveDependencyErr    error
-	RemoveDependencyFn     func(ctx context.Context, params backend.DepRemoveParams) error
-	AddLabelErr            error
-	AddLabelFn             func(ctx context.Context, id string, label string) error
-	RemoveLabelErr         error
-	RemoveLabelFn          func(ctx context.Context, id string, label string) error
-	ListCommentsResult     []backend.CommentData
-	ListCommentsErr        error
-	ListCommentsFn         func(ctx context.Context, id string) ([]backend.CommentData, error)
-	AddCommentResult       *backend.CommentData
-	AddCommentErr          error
-	AddCommentFn           func(ctx context.Context, params backend.CommentAddParams) (*backend.CommentData, error)
-	ListEventsResult       []backend.EventData
-	ListEventsErr          error
-	ListEventsFn           func(ctx context.Context, id string, limit int) ([]backend.EventData, error)
-	BatchResult            []backend.BatchResult
-	BatchErr               error
-	BatchFn                func(ctx context.Context, ops []backend.BatchOp) ([]backend.BatchResult, error)
-	GetMutationsResult     []backend.MutationData
-	GetMutationsErr        error
-	GetMutationsFn         func(ctx context.Context, sinceMs int64) ([]backend.MutationData, error)
-	WaitForMutationsResult []backend.MutationData
-	WaitForMutationsErr    error
-	WaitForMutationsFn     func(ctx context.Context, sinceMs int64, timeoutMs int64) ([]backend.MutationData, error)
-	BackendNameResult      string
-	BackendNameFn          func() string
+	GetResult           *backend.IssueDetailData
+	GetErr              error
+	GetFn               func(ctx context.Context, id string) (*backend.IssueDetailData, error)
+	ListResult          []backend.IssueData
+	ListErr             error
+	ListFn              func(ctx context.Context, opts backend.ListOpts) ([]backend.IssueData, error)
+	ReadyResult         []backend.IssueData
+	ReadyErr            error
+	ReadyFn             func(ctx context.Context, opts backend.ReadyOpts) ([]backend.IssueData, error)
+	BlockedResult       []backend.IssueData
+	BlockedErr          error
+	BlockedFn           func(ctx context.Context, opts backend.BlockedOpts) ([]backend.IssueData, error)
+	StatsResult         *backend.StatsData
+	StatsErr            error
+	StatsFn             func(ctx context.Context) (*backend.StatsData, error)
+	CountResult         int
+	CountErr            error
+	CountFn             func(ctx context.Context, opts backend.CountOpts) (int, error)
+	GetChildrenResult   []backend.IssueData
+	GetChildrenErr      error
+	GetChildrenFn       func(ctx context.Context, id string) ([]backend.IssueData, error)
+	SearchIssuesResult  []backend.IssueData
+	SearchIssuesErr     error
+	SearchIssuesFn      func(ctx context.Context, query string, limit int) ([]backend.IssueData, error)
+	CreateResult        *backend.IssueData
+	CreateErr           error
+	CreateFn            func(ctx context.Context, params backend.CreateParams) (*backend.IssueData, error)
+	UpdateErr           error
+	UpdateFn            func(ctx context.Context, id string, params backend.UpdateParams) error
+	ClaimIssueErr       error
+	ClaimIssueFn        func(ctx context.Context, id string, lockTTL time.Duration) error
+	ReleaseIssueLockErr error
+	ReleaseIssueLockFn  func(ctx context.Context, id, actor string) error
+	DeferIssueErr       error
+	DeferIssueFn        func(ctx context.Context, id string, until time.Time) error
+	UndeferIssueErr     error
+	UndeferIssueFn      func(ctx context.Context, id string) error
+	CloseResult         *backend.CloseResult
+	CloseErr            error
+	CloseFn             func(ctx context.Context, id string, params backend.CloseParams) (*backend.CloseResult, error)
+	ReopenErr           error
+	ReopenFn            func(ctx context.Context, id string, params backend.ReopenParams) error
+	DeleteErr           error
+	DeleteFn            func(ctx context.Context, params backend.DeleteParams) error
+	AddDependencyErr    error
+	AddDependencyFn     func(ctx context.Context, params backend.DepAddParams) error
+	RemoveDependencyErr error
+	RemoveDependencyFn  func(ctx context.Context, params backend.DepRemoveParams) error
+	AddLabelErr         error
+	AddLabelFn          func(ctx context.Context, id string, label string) error
+	RemoveLabelErr      error
+	RemoveLabelFn       func(ctx context.Context, id string, label string) error
+	ListCommentsResult  []backend.CommentData
+	ListCommentsErr     error
+	ListCommentsFn      func(ctx context.Context, id string) ([]backend.CommentData, error)
+	AddCommentResult    *backend.CommentData
+	AddCommentErr       error
+	AddCommentFn        func(ctx context.Context, params backend.CommentAddParams) (*backend.CommentData, error)
+	ListEventsResult    []backend.EventData
+	ListEventsErr       error
+	ListEventsFn        func(ctx context.Context, id string, limit int) ([]backend.EventData, error)
+	BatchResult         []backend.BatchResult
+	BatchErr            error
+	BatchFn             func(ctx context.Context, ops []backend.BatchOp) ([]backend.BatchResult, error)
+	BackendNameResult   string
+	BackendNameFn       func() string
 }
 
 func NewMockIssueBackend() *MockIssueBackend { return &MockIssueBackend{} }
@@ -347,26 +341,6 @@ func (m *MockIssueBackend) Batch(ctx context.Context, ops []backend.BatchOp) ([]
 	m.mu.Unlock()
 	if fn != nil {
 		return fn(ctx, ops)
-	}
-	return r, e
-}
-func (m *MockIssueBackend) GetMutations(ctx context.Context, sinceMs int64) ([]backend.MutationData, error) {
-	m.mu.Lock()
-	m.record("GetMutations", sinceMs)
-	fn, r, e := m.GetMutationsFn, m.GetMutationsResult, m.GetMutationsErr
-	m.mu.Unlock()
-	if fn != nil {
-		return fn(ctx, sinceMs)
-	}
-	return r, e
-}
-func (m *MockIssueBackend) WaitForMutations(ctx context.Context, sinceMs int64, timeoutMs int64) ([]backend.MutationData, error) {
-	m.mu.Lock()
-	m.record("WaitForMutations", sinceMs, timeoutMs)
-	fn, r, e := m.WaitForMutationsFn, m.WaitForMutationsResult, m.WaitForMutationsErr
-	m.mu.Unlock()
-	if fn != nil {
-		return fn(ctx, sinceMs, timeoutMs)
 	}
 	return r, e
 }

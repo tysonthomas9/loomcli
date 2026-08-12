@@ -559,26 +559,6 @@ func (b *fleetDBIssueBackend) Batch(ctx context.Context, ops []backend.BatchOp) 
 	return out, err
 }
 
-func (b *fleetDBIssueBackend) GetMutations(ctx context.Context, sinceMs int64) ([]backend.MutationData, error) {
-	var out []backend.MutationData
-	err := b.withBackend(ctx, "GetMutations", func(ib backend.IssueBackend) error {
-		var err error
-		out, err = ib.GetMutations(ctx, sinceMs)
-		return err
-	})
-	return out, err
-}
-
-func (b *fleetDBIssueBackend) WaitForMutations(ctx context.Context, sinceMs int64, timeoutMs int64) ([]backend.MutationData, error) {
-	var out []backend.MutationData
-	err := b.withBackend(ctx, "WaitForMutations", func(ib backend.IssueBackend) error {
-		var err error
-		out, err = ib.WaitForMutations(ctx, sinceMs, timeoutMs)
-		return err
-	})
-	return out, err
-}
-
 func (b *fleetDBIssueBackend) BackendName() string { return "fleet-db" }
 
 type unavailableIssueBackend struct {
@@ -670,11 +650,5 @@ func (b *unavailableIssueBackend) ListEvents(context.Context, string, int) ([]ba
 }
 func (b *unavailableIssueBackend) Batch(context.Context, []backend.BatchOp) ([]backend.BatchResult, error) {
 	return nil, b.unavailable("Batch")
-}
-func (b *unavailableIssueBackend) GetMutations(context.Context, int64) ([]backend.MutationData, error) {
-	return nil, b.unavailable("GetMutations")
-}
-func (b *unavailableIssueBackend) WaitForMutations(context.Context, int64, int64) ([]backend.MutationData, error) {
-	return nil, b.unavailable("WaitForMutations")
 }
 func (b *unavailableIssueBackend) BackendName() string { return b.name + "-unavailable" }

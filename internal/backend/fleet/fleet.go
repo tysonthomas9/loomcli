@@ -41,7 +41,7 @@ type FleetBackend struct {
 
 // Compile-time interface check.
 var _ backend.IssueBackend = (*FleetBackend)(nil)
-var _ backend.CursorMutationBackend = (*FleetBackend)(nil)
+var _ workitems.MutationStream = (*FleetBackend)(nil)
 var _ backend.ClaimReleaser = (*FleetBackend)(nil)
 var _ backend.RepositoryRequirementBackend = (*FleetBackend)(nil)
 

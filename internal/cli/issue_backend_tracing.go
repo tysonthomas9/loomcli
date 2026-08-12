@@ -439,30 +439,6 @@ func (t *tracedIssueBackend) Batch(ctx context.Context, ops []backend.BatchOp) (
 	return out, err
 }
 
-// --- Mutation polling ---
-
-func (t *tracedIssueBackend) GetMutations(ctx context.Context, sinceMs int64) ([]backend.MutationData, error) {
-	ctx, span := t.startSpan(ctx, "GetMutations")
-	out, err := t.inner.GetMutations(ctx, sinceMs)
-	if err == nil {
-		span.SetAttributes(attribute.Int("result.count", len(out)))
-	}
-	endSpan(span, err)
-	return out, err
-}
-
-func (t *tracedIssueBackend) WaitForMutations(ctx context.Context, sinceMs int64, timeoutMs int64) ([]backend.MutationData, error) {
-	ctx, span := t.startSpan(ctx, "WaitForMutations",
-		attribute.Int64("timeout_ms", timeoutMs),
-	)
-	out, err := t.inner.WaitForMutations(ctx, sinceMs, timeoutMs)
-	if err == nil {
-		span.SetAttributes(attribute.Int("result.count", len(out)))
-	}
-	endSpan(span, err)
-	return out, err
-}
-
 // --- Metadata ---
 
 func (t *tracedIssueBackend) BackendName() string { return t.inner.BackendName() }

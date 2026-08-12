@@ -5,100 +5,21 @@ import (
 	"errors"
 	"log/slog"
 	"testing"
-	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/backend"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 	"github.com/tysonthomas9/loomcli/internal/webui/coordinator"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 )
 
-// stubFleetBackend is a minimal backend.IssueBackend used by FleetSubscriberHook
-// tests. It returns errors from polling so the BackendMutationSubscriber's
-// loop retries safely without producing real broadcasts. All other methods
-// return errors. We only need a handful for the hook tests; the hook never
-// inspects the backend beyond passing it to MultiWorkspaceSubscriber.
+// stubFleetBackend is the minimal Work Items mutation stream used by the hook tests.
 type stubFleetBackend struct{}
 
-func (stubFleetBackend) WaitForMutations(_ context.Context, _ int64, _ int64) ([]backend.MutationData, error) {
+func (stubFleetBackend) WaitForMutationsAfter(_ context.Context, _ string, _ int64) ([]workitems.Mutation, error) {
 	return nil, errors.New("stub: not configured")
 }
-func (stubFleetBackend) GetMutations(_ context.Context, _ int64) ([]backend.MutationData, error) {
+func (stubFleetBackend) GetMutationsAfter(_ context.Context, _ string) ([]workitems.Mutation, error) {
 	return nil, errors.New("stub: not configured")
 }
-func (stubFleetBackend) Get(_ context.Context, _ string) (*backend.IssueDetailData, error) {
-	return nil, errors.New("stub")
-}
-func (stubFleetBackend) List(_ context.Context, _ backend.ListOpts) ([]backend.IssueData, error) {
-	return nil, errors.New("stub")
-}
-func (stubFleetBackend) Ready(_ context.Context, _ backend.ReadyOpts) ([]backend.IssueData, error) {
-	return nil, errors.New("stub")
-}
-func (stubFleetBackend) Blocked(_ context.Context, _ backend.BlockedOpts) ([]backend.IssueData, error) {
-	return nil, errors.New("stub")
-}
-func (stubFleetBackend) Stats(_ context.Context) (*backend.StatsData, error) {
-	return nil, errors.New("stub")
-}
-func (stubFleetBackend) Count(_ context.Context, _ backend.CountOpts) (int, error) {
-	return 0, errors.New("stub")
-}
-func (stubFleetBackend) GetChildren(_ context.Context, _ string) ([]backend.IssueData, error) {
-	return nil, errors.New("stub")
-}
-func (stubFleetBackend) SearchIssues(_ context.Context, _ string, _ int) ([]backend.IssueData, error) {
-	return nil, errors.New("stub")
-}
-func (stubFleetBackend) Create(_ context.Context, _ backend.CreateParams) (*backend.IssueData, error) {
-	return nil, errors.New("stub")
-}
-func (stubFleetBackend) Update(_ context.Context, _ string, _ backend.UpdateParams) error {
-	return errors.New("stub")
-}
-func (stubFleetBackend) ClaimIssue(_ context.Context, _ string, _ time.Duration) error {
-	return errors.New("stub")
-}
-func (stubFleetBackend) ReleaseIssueLock(_ context.Context, _, _ string) error {
-	return errors.New("stub")
-}
-func (stubFleetBackend) DeferIssue(_ context.Context, _ string, _ time.Time) error {
-	return errors.New("stub")
-}
-func (stubFleetBackend) UndeferIssue(_ context.Context, _ string) error { return errors.New("stub") }
-func (stubFleetBackend) Close(_ context.Context, _ string, _ backend.CloseParams) (*backend.CloseResult, error) {
-	return nil, errors.New("stub")
-}
-func (stubFleetBackend) Reopen(_ context.Context, _ string, _ backend.ReopenParams) error {
-	return errors.New("stub")
-}
-func (stubFleetBackend) Delete(_ context.Context, _ backend.DeleteParams) error {
-	return errors.New("stub")
-}
-func (stubFleetBackend) AddDependency(_ context.Context, _ backend.DepAddParams) error {
-	return errors.New("stub")
-}
-func (stubFleetBackend) RemoveDependency(_ context.Context, _ backend.DepRemoveParams) error {
-	return errors.New("stub")
-}
-func (stubFleetBackend) AddLabel(_ context.Context, _ string, _ string) error {
-	return errors.New("stub")
-}
-func (stubFleetBackend) RemoveLabel(_ context.Context, _ string, _ string) error {
-	return errors.New("stub")
-}
-func (stubFleetBackend) ListComments(_ context.Context, _ string) ([]backend.CommentData, error) {
-	return nil, errors.New("stub")
-}
-func (stubFleetBackend) AddComment(_ context.Context, _ backend.CommentAddParams) (*backend.CommentData, error) {
-	return nil, errors.New("stub")
-}
-func (stubFleetBackend) ListEvents(_ context.Context, _ string, _ int) ([]backend.EventData, error) {
-	return nil, errors.New("stub")
-}
-func (stubFleetBackend) Batch(_ context.Context, _ []backend.BatchOp) ([]backend.BatchResult, error) {
-	return nil, errors.New("stub")
-}
-func (stubFleetBackend) BackendName() string { return "stub-fleet" }
 
 // newFleetSubscriberHookEnv builds the test env: hub, multiSub, registry,
 // and the hook itself. Cleanup is registered on t.
@@ -120,7 +41,7 @@ func newFleetSubscriberHookEnv(t *testing.T) (*FleetSubscriberHook, *MultiWorksp
 // registerFleetWorkspaceWithBackend adds a stub fleet backend as a registered
 // workspace resource. Returns the backend so the test can confirm it landed
 // in the resource bag.
-func registerFleetWorkspaceWithBackend(t *testing.T, registry *coordinator.WorkspaceRegistry, wsID string) backend.IssueBackend {
+func registerFleetWorkspaceWithBackend(t *testing.T, registry *coordinator.WorkspaceRegistry, wsID string) workitems.MutationStream {
 	t.Helper()
 	be := stubFleetBackend{}
 

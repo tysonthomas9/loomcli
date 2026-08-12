@@ -5,15 +5,15 @@ import (
 	"fmt"
 	"log/slog"
 
-	"github.com/tysonthomas9/loomcli/internal/backend"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 	"github.com/tysonthomas9/loomcli/internal/webui/coordinator"
 	"github.com/tysonthomas9/loomcli/internal/webui/subscription"
 )
 
 // FleetSubscriberHook implements coordinator.LifecycleHook for per-workspace
-// BackendMutationSubscriber lifecycle. It uses the same deferred-Activate
-// pattern as other workspace hooks and sources mutations from a fleet
-// IssueBackend provided by FleetBackendHook on OnRegister.
+// WorkItemMutationSubscriber lifecycle. It uses the same deferred-Activate
+// pattern as other workspace hooks and sources Work Items mutations from the
+// FleetDB adapter provided by FleetBackendHook on OnRegister.
 //
 // Hook ordering matters: FleetBackendHook must register first so that by
 // the time Activate fires, ResourceKeyFleetBackend is in the workspace's
@@ -99,12 +99,12 @@ func (h *FleetSubscriberHook) Activate(wsID string) error {
 			"workspace", wsID)
 		return nil
 	}
-	be, ok := res.(backend.IssueBackend)
+	stream, ok := res.(workitems.MutationStream)
 	if !ok {
-		return fmt.Errorf("activate fleet subscriber: workspace %q resource is not backend.IssueBackend (got %T)", wsID, res)
+		return fmt.Errorf("activate fleet subscriber: workspace %q resource is not workitems.MutationStream (got %T)", wsID, res)
 	}
 
-	if err := h.multiSub.EnsureActive(context.Background(), wsID, be, subscription.ActivationReasonRegistry); err != nil {
+	if err := h.multiSub.EnsureActive(context.Background(), wsID, stream, subscription.ActivationReasonRegistry); err != nil {
 		h.logger.Warn("failed to activate fleet subscriber for workspace",
 			"workspace", wsID, "err", err)
 		return fmt.Errorf("add workspace fleet subscriber %q: %w", wsID, err)

@@ -386,18 +386,6 @@ func (b *FleetBackend) runSingleDelete(ctx context.Context, op backend.BatchOp) 
 const fleetCursorZero = "0"
 const fleetOpaqueCursorPrefix = "c1."
 
-// formatFleetCursor renders an int64 millisecond epoch into the Redis-stream
-// ID shape that fleet-db's `since` validator accepts. Zero stays "0"; any
-// positive value gets a "-0" suffix to satisfy "<ms>-<seq>" parsing without
-// claiming a specific sequence position. Callers re-receive events from the
-// same millisecond as the cursor — see GetMutations doc for the dedupe trade.
-func formatFleetCursor(sinceMs int64) string {
-	if sinceMs <= 0 {
-		return fleetCursorZero
-	}
-	return strconv.FormatInt(sinceMs, 10) + "-0"
-}
-
 func normalizeFleetCursor(cursor string) string {
 	cursor = strings.TrimSpace(cursor)
 	if cursor == "" || cursor == fleetCursorZero {
@@ -441,7 +429,7 @@ func isFleetStreamID(cursor string) bool {
 
 // --- Mutation polling ---
 
-func (b *FleetBackend) getMutationsAfter(ctx context.Context, op string, since string, timeoutMs int64) ([]backend.MutationData, error) {
+func (b *FleetBackend) getMutationsAfter(ctx context.Context, op string, since string, timeoutMs int64) ([]workitems.Mutation, error) {
 	params := url.Values{}
 	params.Set("since", normalizeFleetCursorForV2(since))
 	if timeoutMs > 0 {
@@ -453,67 +441,21 @@ func (b *FleetBackend) getMutationsAfter(ctx context.Context, op string, since s
 		return nil, err
 	}
 	if !hasData(resp) {
-		return []backend.MutationData{}, nil
+		return []workitems.Mutation{}, nil
 	}
 	var fresp fleetMutationsResponse
 	if err := json.Unmarshal(resp.Data, &fresp); err != nil {
 		return nil, backend.ErrInternal(op, "unmarshal response", err)
 	}
-	return fleetEventsToMutationData(fresp.Events), nil
+	return fleetEventsToMutations(fresp.Events), nil
 }
 
 // GetMutationsAfter returns mutation events after an opaque fleet-db cursor.
-func (b *FleetBackend) GetMutationsAfter(ctx context.Context, since string) ([]backend.MutationData, error) {
+func (b *FleetBackend) GetMutationsAfter(ctx context.Context, since string) ([]workitems.Mutation, error) {
 	return b.getMutationsAfter(ctx, "GetMutationsAfter", since, 0)
 }
 
 // WaitForMutationsAfter long-polls mutation events after an opaque fleet-db cursor.
-func (b *FleetBackend) WaitForMutationsAfter(ctx context.Context, since string, timeoutMs int64) ([]backend.MutationData, error) {
+func (b *FleetBackend) WaitForMutationsAfter(ctx context.Context, since string, timeoutMs int64) ([]workitems.Mutation, error) {
 	return b.getMutationsAfter(ctx, "WaitForMutationsAfter", since, timeoutMs)
-}
-
-// GetMutations returns mutation events from fleet-db's cursor-based events
-// stream. fleet-db's `since` parameter validates strictly: it must be the
-// literal string "0" OR a Redis Stream ID of the form "<ms>-<seq>".
-// Caller passes a millisecond epoch (int64) per the IssueBackend interface;
-// for any value > 0 we synthesize the lowest-sequence stream ID
-// "<ms>-0" so the validator passes. Trade-off: events that landed in the
-// same millisecond as the cursor get re-delivered (caller must dedupe).
-// Once a generic cursor API lands (fleet-0qcs) we can round-trip the full
-// "<ms>-<seq>" form.
-func (b *FleetBackend) GetMutations(ctx context.Context, sinceMs int64) ([]backend.MutationData, error) {
-	path := "/events/mutations?since=" + formatFleetCursor(sinceMs)
-	resp, err := b.exec(ctx, "GetMutations", "GET", path, nil)
-	if err != nil {
-		return nil, err
-	}
-	if !hasData(resp) {
-		return []backend.MutationData{}, nil
-	}
-	var fresp fleetMutationsResponse
-	if err := json.Unmarshal(resp.Data, &fresp); err != nil {
-		return nil, backend.ErrInternal("GetMutations", "unmarshal response", err)
-	}
-	return fleetEventsToMutationData(fresp.Events), nil
-}
-
-// WaitForMutations long-polls fleet-db's events endpoint. Fleet-db's contract
-// is that `timeout` must be 0 (non-blocking) or 1000-120000 (ms); we forward
-// timeoutMs unchanged and let the server return a 400 for out-of-range values
-// so callers see a classified validation error rather than silent truncation.
-// On timeout, fleet-db returns an empty events array (not an error).
-func (b *FleetBackend) WaitForMutations(ctx context.Context, sinceMs int64, timeoutMs int64) ([]backend.MutationData, error) {
-	path := fmt.Sprintf("/events/mutations?since=%s&timeout=%d", formatFleetCursor(sinceMs), timeoutMs)
-	resp, err := b.exec(ctx, "WaitForMutations", "GET", path, nil)
-	if err != nil {
-		return nil, err
-	}
-	if !hasData(resp) {
-		return []backend.MutationData{}, nil
-	}
-	var fresp fleetMutationsResponse
-	if err := json.Unmarshal(resp.Data, &fresp); err != nil {
-		return nil, backend.ErrInternal("WaitForMutations", "unmarshal response", err)
-	}
-	return fleetEventsToMutationData(fresp.Events), nil
 }

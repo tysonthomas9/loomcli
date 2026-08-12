@@ -327,48 +327,7 @@ func TestStatsData_ZeroValuesPresent(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Section 5: MutationData JSON round-trip
-// ---------------------------------------------------------------------------
-
-func TestMutationData_JSONRoundTrip(t *testing.T) {
-	ts := time.Date(2026, 4, 1, 8, 30, 0, 0, time.UTC)
-	original := MutationData{
-		Type:      MutationStatus,
-		IssueID:   "mut-1",
-		Title:     "Status change",
-		Assignee:  "heidi",
-		Actor:     "ivan",
-		Timestamp: ts,
-		OldStatus: "open",
-		NewStatus: "in_progress",
-	}
-
-	data, err := json.Marshal(original)
-	if err != nil {
-		t.Fatalf("Marshal: %v", err)
-	}
-
-	var decoded MutationData
-	if err := json.Unmarshal(data, &decoded); err != nil {
-		t.Fatalf("Unmarshal: %v", err)
-	}
-
-	if decoded.Type != original.Type {
-		t.Errorf("Type = %q, want %q", decoded.Type, original.Type)
-	}
-	if decoded.OldStatus != original.OldStatus {
-		t.Errorf("OldStatus = %q, want %q", decoded.OldStatus, original.OldStatus)
-	}
-	if decoded.NewStatus != original.NewStatus {
-		t.Errorf("NewStatus = %q, want %q", decoded.NewStatus, original.NewStatus)
-	}
-	if !decoded.Timestamp.Equal(original.Timestamp) {
-		t.Errorf("Timestamp = %v, want %v", decoded.Timestamp, original.Timestamp)
-	}
-}
-
-// ---------------------------------------------------------------------------
-// Section 6: UpdateParams pointer fields — nil vs zero-value
+// Section 5: UpdateParams pointer fields — nil vs zero-value
 // ---------------------------------------------------------------------------
 
 func TestUpdateParams_NilFieldsOmitted(t *testing.T) {
@@ -466,7 +425,7 @@ func TestUpdateParams_JSONRoundTrip(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Section 7: BatchOp and BatchResult — json.RawMessage round-trip
+// Section 6: BatchOp and BatchResult — json.RawMessage round-trip
 // ---------------------------------------------------------------------------
 
 func TestBatchOp_RawMessageRoundTrip(t *testing.T) {
@@ -565,39 +524,7 @@ func TestBatchResult_ErrorCase(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Section 8: Mutation constants
-// ---------------------------------------------------------------------------
-
-func TestMutationConstants(t *testing.T) {
-	tests := []struct {
-		name     string
-		constant string
-		want     string
-	}{
-		{"MutationCreate", MutationCreate, "create"},
-		{"MutationUpdate", MutationUpdate, "update"},
-		{"MutationDelete", MutationDelete, "delete"},
-		{"MutationComment", MutationComment, "comment"},
-		{"MutationBonded", MutationBonded, "bonded"},
-		{"MutationSquashed", MutationSquashed, "squashed"},
-		{"MutationBurned", MutationBurned, "burned"},
-		{"MutationStatus", MutationStatus, "status"},
-		{"MutationRefresh", MutationRefresh, "refresh"},
-		{"MutationSessionChange", MutationSessionChange, "session_change"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if tt.constant != tt.want {
-				t.Errorf("%s = %q, want %q", tt.name, tt.constant, tt.want)
-			}
-		})
-	}
-}
-
-// ---------------------------------------------------------------------------
-// Section 9: OmitEmpty correctness for optional fields
+// Section 7: OmitEmpty correctness for optional fields
 // ---------------------------------------------------------------------------
 
 func TestIssueData_OmitEmptyFields(t *testing.T) {
@@ -637,7 +564,7 @@ func TestIssueData_OmitEmptyFields(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Section 10: CloseResult JSON round-trip
+// Section 8: CloseResult JSON round-trip
 // ---------------------------------------------------------------------------
 
 func TestCloseResult_JSONRoundTrip(t *testing.T) {
@@ -688,7 +615,7 @@ func TestCloseResult_JSONRoundTrip(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Section 11: ListOpts pointer fields — Priority filter
+// Section 9: ListOpts pointer fields — Priority filter
 // ---------------------------------------------------------------------------
 
 func TestListOpts_PriorityFilterNilVsZero(t *testing.T) {
@@ -715,7 +642,7 @@ func TestListOpts_PriorityFilterNilVsZero(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Section 12: CommentData with optional pointer fields
+// Section 10: CommentData with optional pointer fields
 // ---------------------------------------------------------------------------
 
 func TestCommentData_JSONRoundTrip(t *testing.T) {

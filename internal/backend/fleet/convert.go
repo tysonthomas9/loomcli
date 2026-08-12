@@ -323,42 +323,42 @@ type fleetMutationsResponse struct {
 }
 
 // actionToMutationType maps fleet-db Action values (issue.create, ...) to the
-// backend.Mutation* string constants. Fleet emits fine-grained actions; loom's
+// Work Items mutation constants. Fleet emits fine-grained actions; loom's
 // mutation-type space is coarser, so several actions fold into MutationUpdate.
 func actionToMutationType(action, entityType string) string {
 	switch action {
 	case "issue.create":
-		return backend.MutationCreate
+		return workitems.MutationCreate
 	case "issue.delete":
-		return backend.MutationDelete
+		return workitems.MutationDelete
 	case "issue.close", "issue.reopen", "issue.update", "issue.claim",
 		"issue.release", "issue.assign", "issue.defer", "issue.undefer":
 		// All status / metadata transitions on an issue collapse into "update"
 		// from the subscriber's point of view — callers that care about the
 		// specific transition read OldStatus/NewStatus.
 		if action == "issue.close" || action == "issue.reopen" {
-			return backend.MutationStatus
+			return workitems.MutationStatus
 		}
-		return backend.MutationUpdate
+		return workitems.MutationUpdate
 	case "comment.add":
-		return backend.MutationComment
+		return workitems.MutationComment
 	case "dep.add", "dep.remove", "label.add", "label.remove":
-		return backend.MutationUpdate
+		return workitems.MutationUpdate
 	}
 	// Workspace-level actions and any future additions fall back to
 	// MutationRefresh so SSE consumers invalidate their caches.
 	if entityType == "workspace" {
-		return backend.MutationRefresh
+		return workitems.MutationRefresh
 	}
-	return backend.MutationUpdate
+	return workitems.MutationUpdate
 }
 
-// fleetEventToMutationData converts a single fleet mutation event into
-// backend.MutationData. Title/status/parent fields come from the event's
+// fleetEventToMutation converts a single fleet mutation event into the Work
+// Items-owned durable stream projection. Title/status/parent fields come from the event's
 // after-snapshot JSON when present; fields absent from fleet's event model
 // (StepCount, Assignee for non-assign actions) remain zero.
-func fleetEventToMutationData(e *fleetMutationEvent) backend.MutationData {
-	md := backend.MutationData{
+func fleetEventToMutation(e *fleetMutationEvent) workitems.Mutation {
+	md := workitems.Mutation{
 		Cursor:     e.ID,
 		Type:       actionToMutationType(e.Action, e.EntityType),
 		EntityType: e.EntityType,
@@ -404,12 +404,12 @@ func fleetEventToMutationData(e *fleetMutationEvent) backend.MutationData {
 	return md
 }
 
-// fleetEventsToMutationData converts a slice of fleetMutationEvent to
-// []backend.MutationData. Always returns a non-nil slice.
-func fleetEventsToMutationData(events []fleetMutationEvent) []backend.MutationData {
-	result := make([]backend.MutationData, 0, len(events))
+// fleetEventsToMutations converts FleetDB events to the Work Items-owned
+// projection. It always returns a non-nil slice.
+func fleetEventsToMutations(events []fleetMutationEvent) []workitems.Mutation {
+	result := make([]workitems.Mutation, 0, len(events))
 	for i := range events {
-		result = append(result, fleetEventToMutationData(&events[i]))
+		result = append(result, fleetEventToMutation(&events[i]))
 	}
 	return result
 }

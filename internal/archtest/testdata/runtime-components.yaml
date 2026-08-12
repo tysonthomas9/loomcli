@@ -85,8 +85,8 @@ goroutine_launches:
   - {file: "internal/webui/server/middleware/ratelimit.go", function: "RateLimit", site: "go#1", callee: "rl.cleanupLoop", disposition: component, component_ids: [http-rate-limit-cleanup]}
   - {file: "internal/webui/server/realtime/sse_token.go", function: "NewTokenStore", site: "go#1", callee: "s.cleanupLoop", disposition: component, component_ids: [sse-token-nonce-cleanup]}
   - {file: "internal/webui/server/realtime/terminal_auth.go", function: "NewTerminalAuth", site: "go#1", callee: "ta.cleanupLoop", disposition: component, component_ids: [terminal-token-nonce-cleanup]}
-  - {file: "internal/webui/subscription/backend_subscriber.go", function: "BackendMutationSubscriber.Start", site: "go#1", callee: "s.loop", disposition: component, component_ids: [backend-mutation-long-poll]}
   - {file: "internal/webui/subscription/multi.go", function: "MultiWorkspaceSubscriber.Start", site: "go#1", callee: "<anonymous>", disposition: component, component_ids: [workspace-subscriber-idle-deactivation]}
+  - {file: "internal/webui/subscription/workitem_mutation_subscriber.go", function: "WorkItemMutationSubscriber.Start", site: "go#1", callee: "s.loop", disposition: component, component_ids: [workitem-mutation-long-poll]}
   - {file: "internal/webui/terminal/agent_tmux.go", function: "AgentTmuxManager.KillWorkspaceSessions", site: "go#1", callee: "<anonymous>", disposition: bounded, reason: "tmux cleanup fan-out is WaitGroup-joined before return"}
   - {file: "internal/webui/terminal/agent_tmux.go", function: "AgentTmuxManager.KillWorkspaceSessions", site: "go#2", callee: "<anonymous>", disposition: bounded, reason: "tmux cleanup fan-out is WaitGroup-joined before return"}
   - {file: "internal/webui/terminal/pty_manager.go", function: "NewPTYManager", site: "go#1", callee: "m.reapLoop", disposition: component, component_ids: [terminal-idle-reaper]}
@@ -892,17 +892,17 @@ components:
     retry_backoff: "no in-process listener restart"
     classification: managed
 
-  - id: backend-mutation-long-poll
+  - id: workitem-mutation-long-poll
     kind: component
-    file: internal/webui/subscription/backend_subscriber.go
-    function: BackendMutationSubscriber.loop
+    file: internal/webui/subscription/workitem_mutation_subscriber.go
+    function: WorkItemMutationSubscriber.loop
     site: component:mutation-long-poll
-    capability: workspace
+    capability: workitems
     owner: web subscription runtime
-    cadence: "backend long-poll, normally bounded by backendWaitTimeout"
+    cadence: "Work Items stream long-poll, normally bounded by mutationWaitTimeout"
     cancellation: "subscriber context cancellation with WaitGroup join"
     readiness_health: "durable cursor advances before broadcast; errors are workspace-scoped in logs"
-    retry_backoff: "backendRetryDelay after errors and backendEmptyPollDelay after early empty responses"
+    retry_backoff: "mutationRetryDelay after errors and mutationEmptyPollDelay after early empty responses"
     classification: managed
 
   - id: logrouter-lock-watcher

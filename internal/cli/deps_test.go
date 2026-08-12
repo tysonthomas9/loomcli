@@ -626,10 +626,6 @@ func TestUnavailableIssueBackend_AllMethodsFailClosed(t *testing.T) {
 	assertUnavailable("ListEvents", err)
 	_, err = ib.Batch(ctx, []backend.BatchOp{})
 	assertUnavailable("Batch", err)
-	_, err = ib.GetMutations(ctx, 0)
-	assertUnavailable("GetMutations", err)
-	_, err = ib.WaitForMutations(ctx, 0, 1)
-	assertUnavailable("WaitForMutations", err)
 }
 
 func TestFleetDBActorPreference(t *testing.T) {
@@ -817,8 +813,4 @@ func TestFleetDBIssueBackend_FailsClosedWhenStoreUnavailable(t *testing.T) {
 	assertUnavailable("ListEvents", err)
 	_, err = ib.Batch(ctx, []backend.BatchOp{})
 	assertUnavailable("Batch", err)
-	_, err = ib.GetMutations(ctx, 0)
-	assertUnavailable("GetMutations", err)
-	_, err = ib.WaitForMutations(ctx, 0, 1)
-	assertUnavailable("WaitForMutations", err)
 }

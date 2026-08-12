@@ -157,6 +157,40 @@ type Event struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
+// Mutation is the durable Work Items change-stream projection consumed by
+// realtime delivery. Cursor is opaque and owned by FleetDB; callers must pass
+// it back unchanged rather than deriving a timestamp cursor.
+type Mutation struct {
+	Cursor     string    `json:"cursor,omitempty"`
+	Type       string    `json:"type"`
+	EntityType string    `json:"entity_type,omitempty"`
+	EntityID   string    `json:"entity_id,omitempty"`
+	Action     string    `json:"action,omitempty"`
+	IssueID    string    `json:"issue_id,omitempty"`
+	Title      string    `json:"title,omitempty"`
+	Assignee   string    `json:"assignee,omitempty"`
+	Actor      string    `json:"actor,omitempty"`
+	Timestamp  time.Time `json:"timestamp"`
+	OldStatus  string    `json:"old_status,omitempty"`
+	NewStatus  string    `json:"new_status,omitempty"`
+	ParentID   string    `json:"parent_id,omitempty"`
+	SourceRepo string    `json:"source_repo,omitempty"`
+	StepCount  int       `json:"step_count,omitempty"`
+}
+
+const (
+	MutationCreate        = "create"
+	MutationUpdate        = "update"
+	MutationDelete        = "delete"
+	MutationComment       = "comment"
+	MutationBonded        = "bonded"
+	MutationSquashed      = "squashed"
+	MutationBurned        = "burned"
+	MutationStatus        = "status"
+	MutationRefresh       = "refresh"
+	MutationSessionChange = "session_change"
+)
+
 type EventType string
 
 const (

@@ -199,8 +199,6 @@ func TestMockIssueBackendDefaultPaths(t *testing.T) {
 	m.AddCommentResult = &backend.CommentData{ID: 2}
 	m.ListEventsResult = []backend.EventData{{ID: "event"}}
 	m.BatchResult = []backend.BatchResult{{Success: true}}
-	m.GetMutationsResult = []backend.MutationData{{Cursor: "1"}}
-	m.WaitForMutationsResult = []backend.MutationData{{Cursor: "2"}}
 	m.BackendNameResult = "mock-backend"
 
 	callDefaults(t, ctx, m)
@@ -209,7 +207,7 @@ func TestMockIssueBackendDefaultPaths(t *testing.T) {
 		"Get", "List", "Ready", "Blocked", "Stats", "Count", "GetChildren", "SearchIssues",
 		"Create", "Update", "ClaimIssue", "DeferIssue", "UndeferIssue", "Close", "Reopen",
 		"Delete", "AddDependency", "RemoveDependency", "AddLabel", "RemoveLabel", "ListComments",
-		"AddComment", "ListEvents", "Batch", "GetMutations", "WaitForMutations", "BackendName",
+		"AddComment", "ListEvents", "Batch", "BackendName",
 	}
 	for _, method := range wantMethods {
 		if !m.Called(method) {
@@ -318,12 +316,6 @@ func callDefaults(t *testing.T, ctx context.Context, m *MockIssueBackend) {
 	}
 	if _, err := m.Batch(ctx, []backend.BatchOp{}); err != nil {
 		t.Fatalf("Batch returned error: %v", err)
-	}
-	if _, err := m.GetMutations(ctx, 1); err != nil {
-		t.Fatalf("GetMutations returned error: %v", err)
-	}
-	if _, err := m.WaitForMutations(ctx, 1, 100); err != nil {
-		t.Fatalf("WaitForMutations returned error: %v", err)
 	}
 	if got := m.BackendName(); got != "mock-backend" {
 		t.Fatalf("BackendName returned %q", got)
