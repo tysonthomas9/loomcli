@@ -5,7 +5,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/tysonthomas9/loomcli/internal/sessions/transcript"
+	"github.com/tysonthomas9/loomcli/internal/modules/artifacts/transcript"
 )
 
 // TestTSLeafCorpusConformsToCanonicalSchema is the Phase-U/U0 contract lock: it

@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/tysonthomas9/loomcli/internal/atomicfile"
-	"github.com/tysonthomas9/loomcli/internal/sessions/redact"
+	"github.com/tysonthomas9/loomcli/internal/infra/artifactredact"
 )
 
 // redactionEnabled reports whether transcript capture should run content

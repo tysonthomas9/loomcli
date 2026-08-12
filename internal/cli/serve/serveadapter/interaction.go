@@ -41,6 +41,13 @@ func (capability *InteractionCapability) InteractionAPI() interaction.API {
 	return capability.capability.InteractionAPI()
 }
 
+func (capability *InteractionCapability) SessionQueries() interaction.SessionQueries {
+	if capability == nil || capability.capability == nil {
+		return nil
+	}
+	return capability.capability.SessionQueries()
+}
+
 func (capability *InteractionCapability) OperatorAuthorityResolver() workflowcataloghttp.OperatorAuthorityResolver {
 	if capability == nil || capability.capability == nil {
 		return nil

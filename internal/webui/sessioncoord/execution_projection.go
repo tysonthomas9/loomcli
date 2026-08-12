@@ -9,8 +9,8 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	artifactsmodule "github.com/tysonthomas9/loomcli/internal/modules/artifacts"
+	"github.com/tysonthomas9/loomcli/internal/modules/artifacts/transcript"
 	"github.com/tysonthomas9/loomcli/internal/sessions"
-	"github.com/tysonthomas9/loomcli/internal/sessions/transcript"
 	"github.com/tysonthomas9/loomcli/internal/webui/apperrors"
 )
 

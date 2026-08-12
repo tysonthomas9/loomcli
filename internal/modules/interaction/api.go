@@ -219,6 +219,12 @@ type API interface {
 	ReconcileSessions(context.Context, authority.SystemAuthority, string, time.Time) (int, error)
 }
 
+// SessionQueries is Interaction's immutable owner snapshot used by composed
+// read projections. It exposes no lease, terminal, inbox, or mutation port.
+type SessionQueries interface {
+	GetSession(context.Context, string, string) (*AgentSession, error)
+}
+
 type RuntimeStartRecoveryAPI interface {
 	RecoverSessionStartAsSystem(
 		context.Context,

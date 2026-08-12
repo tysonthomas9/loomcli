@@ -18,15 +18,16 @@ const maxSessionContentBytes = 64 << 20
 type SessionService struct {
 	store     SessionStore
 	admission *authority.Admission
+	evidence  *EvidencePolicy
 }
 
 var _ SessionAPI = (*SessionService)(nil)
 
-func NewSession(store SessionStore, admission *authority.Admission) (*SessionService, error) {
-	if store == nil || admission == nil {
-		return nil, fmt.Errorf("compose session Artifacts: durable port and admission are required: %w", ErrUnavailable)
+func NewSession(store SessionStore, admission *authority.Admission, evidence *EvidencePolicy) (*SessionService, error) {
+	if store == nil || admission == nil || evidence == nil {
+		return nil, fmt.Errorf("compose session Artifacts: durable port, admission, and evidence policy are required: %w", ErrUnavailable)
 	}
-	return &SessionService{store: store, admission: admission}, nil
+	return &SessionService{store: store, admission: admission, evidence: evidence}, nil
 }
 
 //nolint:funlen // Creation keeps authority, owner, digest, and persisted projection checks together.
@@ -45,7 +46,15 @@ func (service *SessionService) CreateContent(
 		return nil, err
 	}
 	owner = authorized
-	hash := artifactContentHash(command.Content)
+	prepared, err := service.evidence.Prepare(ctx, command.Type, command.MIMEType, command.Content, command.Metadata)
+	if err != nil {
+		return nil, service.recordContentFailure(ctx, auth, owner, command, err)
+	}
+	command.Content = prepared.Content
+	command.MIMEType = prepared.MIMEType
+	command.RedactionStatus = prepared.RedactionStatus
+	command.Metadata = prepared.Metadata
+	hash := prepared.ContentHash
 	create := CreateCommand{
 		ArtifactID: command.ArtifactID, AgentID: owner.AgentID, SessionID: owner.SessionID,
 		TaskID: command.TaskID, Type: command.Type, Summary: command.Summary,
@@ -124,6 +133,7 @@ func (service *SessionService) authorizeContent(
 		{ActionGet, auth.Get},
 		{ActionUpload, auth.Upload},
 		{ActionFinalize, auth.Finalize},
+		{ActionFail, auth.Fail},
 	}
 	var authorized SessionOwner
 	for _, operation := range operations {
@@ -134,6 +144,54 @@ func (service *SessionService) authorizeContent(
 		authorized = value
 	}
 	return authorized, nil
+}
+
+func (service *SessionService) recordContentFailure(
+	ctx context.Context,
+	auth SessionContentAuthorities,
+	owner SessionOwner,
+	command SessionContentCommand,
+	cause error,
+) error {
+	failure := evidenceFailureCommand(command.ArtifactID, cause)
+	failure, err := normalizeFail(failure)
+	if err != nil {
+		return errors.Join(cause, fmt.Errorf("normalize failed session evidence: %w", err))
+	}
+	create := CreateCommand{
+		ArtifactID: command.ArtifactID, AgentID: owner.AgentID, SessionID: owner.SessionID,
+		TaskID: command.TaskID, Type: command.Type, Summary: "evidence capture failure",
+		Metadata: cloneMetadata(failure.Metadata),
+	}
+	artifact, err := service.store.CreateSession(ctx, owner, create)
+	if err != nil {
+		if !errors.Is(err, ErrAlreadyExists) {
+			return errors.Join(cause, fmt.Errorf("declare failed session evidence: %w", err))
+		}
+		artifact, err = service.store.GetSession(ctx, owner, GetQuery{ArtifactID: command.ArtifactID})
+		if err != nil {
+			return errors.Join(cause, fmt.Errorf("load failed session evidence: %w", err))
+		}
+		if err := validateSessionArtifact(artifact, owner, command.ArtifactID); err != nil {
+			return errors.Join(cause, err)
+		}
+		if artifact.DurableStatus == StatusFailed && artifact.Metadata["loom.evidence.failure_class"] == failure.FailureClass {
+			return cause
+		}
+	}
+	failed, err := service.store.FailSession(ctx, owner, cloneFailCommand(failure))
+	if err != nil {
+		return errors.Join(cause, fmt.Errorf("persist failed session evidence: %w", err))
+	}
+	if err := validateSessionArtifact(failed, owner, command.ArtifactID); err != nil {
+		return errors.Join(cause, err)
+	}
+	if failed.DurableStatus != StatusFailed || failed.FinalizedAt != nil ||
+		failed.Metadata[MetadataEvidenceCaptureStatus] != "capture_failed" ||
+		failed.Metadata["loom.evidence.failure_class"] != failure.FailureClass {
+		return errors.Join(cause, ErrInvalidPersistedState)
+	}
+	return cause
 }
 
 func (service *SessionService) authorize(

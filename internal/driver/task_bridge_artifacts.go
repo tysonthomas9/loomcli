@@ -14,10 +14,10 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	artifactsmodule "github.com/tysonthomas9/loomcli/internal/modules/artifacts"
+	"github.com/tysonthomas9/loomcli/internal/modules/artifacts/transcript"
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 	platformruntime "github.com/tysonthomas9/loomcli/internal/platform/runtime"
-	"github.com/tysonthomas9/loomcli/internal/sessions/transcript"
 )
 
 const maxHostBridgeArtifactFileBytes int64 = 64 << 20
@@ -343,6 +343,7 @@ func (e HostBridgeTaskExecutor) artifactContentAuthorities(ctx context.Context, 
 		{artifactsmodule.ActionGet, func(value authority.ExecutionAuthority) { result.Get = value }},
 		{artifactsmodule.ActionUpload, func(value authority.ExecutionAuthority) { result.Upload = value }},
 		{artifactsmodule.ActionFinalize, func(value authority.ExecutionAuthority) { result.Finalize = value }},
+		{artifactsmodule.ActionFail, func(value authority.ExecutionAuthority) { result.Fail = value }},
 		{artifactsmodule.ActionReference, func(value authority.ExecutionAuthority) { result.Reference = value }},
 	}
 	for _, operation := range actions {

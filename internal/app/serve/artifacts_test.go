@@ -40,6 +40,10 @@ func (stub *artifactsInfraTransportStub) Finalize(context.Context, infrafleetdb.
 	return nil, stub.err
 }
 
+func (stub *artifactsInfraTransportStub) Fail(context.Context, infrafleetdb.ArtifactOwner, infrafleetdb.ArtifactFailCommand) (*infrafleetdb.Artifact, error) {
+	return nil, stub.err
+}
+
 func (stub *artifactsInfraTransportStub) Reference(context.Context, infrafleetdb.ArtifactOwner, infrafleetdb.ArtifactReferenceCommand) (infrafleetdb.ArtifactReferenceResult, error) {
 	return stub.referenceResult, stub.err
 }

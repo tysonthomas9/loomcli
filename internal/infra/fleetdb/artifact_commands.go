@@ -107,6 +107,13 @@ type ArtifactFinalizeCommand struct {
 	Metadata        *map[string]string
 }
 
+type ArtifactFailCommand struct {
+	ArtifactID     string
+	FailureClass   string
+	FailureMessage string
+	Metadata       map[string]string
+}
+
 type ArtifactReferenceCommand struct {
 	ArtifactID string
 	Kind       string
@@ -142,6 +149,7 @@ type ArtifactTransport interface {
 	Create(context.Context, ArtifactOwner, ArtifactCreateCommand) (*Artifact, error)
 	Upload(context.Context, ArtifactOwner, ArtifactUploadCommand) (*Artifact, error)
 	Finalize(context.Context, ArtifactOwner, ArtifactFinalizeCommand) (*Artifact, error)
+	Fail(context.Context, ArtifactOwner, ArtifactFailCommand) (*Artifact, error)
 	Reference(context.Context, ArtifactOwner, ArtifactReferenceCommand) (ArtifactReferenceResult, error)
 	Get(context.Context, ArtifactOwner, string) (*Artifact, error)
 	List(context.Context, ArtifactOwner, ArtifactFilter) ([]*Artifact, error)
@@ -205,6 +213,18 @@ type artifactFinalizeRequest struct {
 	ContentHash      string            `json:"content_hash,omitempty"`
 	Visibility       string            `json:"visibility,omitempty"`
 	RedactionStatus  string            `json:"redaction_status,omitempty"`
+	Metadata         map[string]string `json:"metadata,omitempty"`
+}
+
+type artifactFailRequest struct {
+	CommandID        string            `json:"command_id"`
+	TaskRunID        string            `json:"task_run_id"`
+	NodeID           string            `json:"node_id"`
+	LeaseID          string            `json:"lease_id"`
+	FencingToken     int64             `json:"fencing_token"`
+	ExpectedRevision uint64            `json:"expected_revision"`
+	FailureClass     string            `json:"failure_class"`
+	FailureMessage   string            `json:"failure_message,omitempty"`
 	Metadata         map[string]string `json:"metadata,omitempty"`
 }
 
@@ -329,6 +349,67 @@ func (s *artifactCommandStore) Finalize(ctx context.Context, owner ArtifactOwner
 		}
 	}
 	return nil, lastConflict
+}
+
+func (s *artifactCommandStore) Fail(ctx context.Context, owner ArtifactOwner, command ArtifactFailCommand) (*Artifact, error) {
+	if err := validateArtifactOwner(owner); err != nil {
+		return nil, err
+	}
+	command.ArtifactID = strings.TrimSpace(command.ArtifactID)
+	command.FailureClass = strings.TrimSpace(command.FailureClass)
+	command.FailureMessage = strings.TrimSpace(command.FailureMessage)
+	if command.ArtifactID == "" || command.FailureClass == "" {
+		return nil, fmt.Errorf("artifact fail id and class are required: %w", ErrArtifactsInvalid)
+	}
+	current, err := s.getArtifactForCommand(ctx, owner, command.ArtifactID)
+	if err != nil {
+		return nil, err
+	}
+	commandID := deterministicArtifactCommandID("fail", owner, command.ArtifactID, command)
+	lower := current.Revision
+	if current.DurableStatus == "failed" {
+		lower = uint64(1)
+		if current.Revision > artifactCommandReplayRevisionWindow {
+			lower = current.Revision - artifactCommandReplayRevisionWindow + 1
+		}
+	}
+	var lastConflict error
+	for expected := current.Revision; expected >= lower; expected-- {
+		artifact, failErr := s.failAtRevision(ctx, owner, command, commandID, expected)
+		if failErr == nil {
+			return artifact, nil
+		}
+		if !errors.Is(failErr, ErrArtifactsConflict) {
+			return nil, failErr
+		}
+		lastConflict = failErr
+		if expected == lower {
+			break
+		}
+	}
+	return nil, lastConflict
+}
+
+func (s *artifactCommandStore) failAtRevision(ctx context.Context, owner ArtifactOwner, command ArtifactFailCommand, commandID string, expected uint64) (*Artifact, error) {
+	request := artifactFailRequest{
+		CommandID: commandID, TaskRunID: owner.TaskRunID, NodeID: owner.NodeID,
+		LeaseID: owner.LeaseID, FencingToken: owner.FencingToken, ExpectedRevision: expected,
+		FailureClass: command.FailureClass, FailureMessage: command.FailureMessage,
+		Metadata: cloneArtifactMetadata(command.Metadata),
+	}
+	var result artifactCommandResult
+	path := "/api/v1/" + pathEscape(owner.WorkspaceKey) + "/artifacts/" + pathEscape(command.ArtifactID) + "/commands/fail"
+	if err := s.client.doWithHeaders(ctx, http.MethodPost, path, request, &result, map[string]string{"X-Lease-Token": owner.LeaseToken}); err != nil {
+		return nil, mapArtifactTransportError("fail", err)
+	}
+	artifact, err := validateArtifactCommandResult(owner, command.ArtifactID, commandID, "artifact_fail", &result)
+	if err != nil {
+		return nil, err
+	}
+	if artifact.DurableStatus != "failed" || artifact.FinalizedAt != nil || artifact.Metadata["loom.evidence.capture_status"] != "capture_failed" || artifact.Metadata["loom.evidence.failure_class"] != command.FailureClass {
+		return nil, fmt.Errorf("artifact fail returned divergent state: %w", ErrArtifactsUnavailable)
+	}
+	return artifact, nil
 }
 
 const artifactCommandReplayRevisionWindow uint64 = 128

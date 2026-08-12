@@ -11,6 +11,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/app/agentprovisioning"
 	"github.com/tysonthomas9/loomcli/internal/app/prreviewer"
+	"github.com/tysonthomas9/loomcli/internal/app/query/runcapture"
 	"github.com/tysonthomas9/loomcli/internal/app/webhookingestion"
 	"github.com/tysonthomas9/loomcli/internal/app/workflowbinding"
 	"github.com/tysonthomas9/loomcli/internal/app/workfloweventing"
@@ -65,6 +66,7 @@ type InteractionSessionAuthorityResolver interface {
 // InteractionCapability is the session, terminal, inbox, and combined activity handle.
 type InteractionCapability interface {
 	InteractionAPI() interaction.API
+	SessionQueries() interaction.SessionQueries
 	ChatAPI() interaction.ChatAPI
 	ChatMessenger() interaction.ChatMessenger
 	OperatorAuthorityResolver() workflowcataloghttp.OperatorAuthorityResolver
@@ -102,6 +104,10 @@ type ExecutionCapability interface {
 type ArtifactsCapability interface {
 	ArtifactsAPI() artifacts.API
 	ArtifactQueries() artifacts.QueryAPI
+}
+
+type RunCaptureCapability interface {
+	RunCaptureAPI() runcapture.API
 }
 
 // Exact module aliases keep ServerConfig's public field types source

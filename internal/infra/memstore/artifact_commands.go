@@ -59,6 +59,20 @@ func (s *artifactStore) Finalize(ctx context.Context, owner artifacts.ExecutionO
 	return s.seed(ctx, *value, nil)
 }
 
+func (s *artifactStore) Fail(ctx context.Context, owner artifacts.ExecutionOwner, command artifacts.FailCommand) (*artifacts.Artifact, error) {
+	value, err := s.ownedExecutionArtifact(ctx, owner, command.ArtifactID)
+	if err != nil {
+		return nil, err
+	}
+	if value.DurableStatus == artifacts.StatusFinalized {
+		return nil, artifacts.ErrInvalidTransition
+	}
+	value.Metadata = cloneMap(command.Metadata)
+	value.DurableStatus = artifacts.StatusFailed
+	value.FinalizedAt = nil
+	return s.seed(ctx, *value, nil)
+}
+
 func applyArtifactFinalizeCommand(value *artifacts.Artifact, command artifacts.FinalizeCommand) {
 	assignArtifactCommand(command.URI, &value.URI)
 	assignArtifactCommand(command.Summary, &value.Summary)

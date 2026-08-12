@@ -5,12 +5,13 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/sessions/transcript"
+	"github.com/tysonthomas9/loomcli/internal/infra/artifacttranscript"
+	"github.com/tysonthomas9/loomcli/internal/modules/artifacts/transcript"
 )
 
 // Portions of the OpenCode export mapping were ported from
 // github.com/entireio/cli cmd/entire/cli/agent/opencode/ (MIT, (c) 2026 Entire
-// Inc.). See transcript/ORIGIN.md for attribution.
+// Inc.). See internal/infra/artifacttranscript/ORIGIN.md for attribution.
 type openCodeExport struct {
 	Messages []openCodeMessage `json:"messages"`
 }
@@ -58,7 +59,7 @@ func parseOpenCodeEvents(data []byte) ([]transcript.Event, error) {
 			case "text":
 				text := part.Text
 				if role == transcript.RoleUser {
-					text = transcript.StripIDEContextTags(text)
+					text = artifacttranscript.StripIDEContextTags(text)
 				}
 				if text == "" {
 					continue

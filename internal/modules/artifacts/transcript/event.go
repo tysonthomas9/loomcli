@@ -1,3 +1,4 @@
+// Package transcript defines Artifacts' canonical durable transcript format.
 package transcript
 
 import (

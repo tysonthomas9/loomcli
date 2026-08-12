@@ -1,7 +1,7 @@
 // Ported from github.com/entireio/cli cmd/entire/cli/transcript/parse_test.go
 // (MIT, (c) 2026 Entire Inc.). See ORIGIN.md.
 
-package transcript
+package artifacttranscript
 
 import (
 	"encoding/json"

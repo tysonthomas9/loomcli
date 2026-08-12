@@ -3,7 +3,7 @@
 //
 // Ported from github.com/entireio/cli (MIT, (c) 2026 Entire Inc.).
 // See ORIGIN.md for attribution and LICENSE.upstream for the upstream notice.
-package transcript
+package artifacttranscript
 
 import "encoding/json"
 

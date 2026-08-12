@@ -9,8 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/artifacts/transcript"
 	"github.com/tysonthomas9/loomcli/internal/sessions"
-	"github.com/tysonthomas9/loomcli/internal/sessions/transcript"
 	"github.com/tysonthomas9/loomcli/internal/webui/apperrors"
 	"github.com/tysonthomas9/loomcli/internal/webui/localredis"
 	"github.com/tysonthomas9/loomcli/internal/webui/sessioncoord"

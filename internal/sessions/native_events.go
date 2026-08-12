@@ -11,8 +11,8 @@ import (
 	hwclaude "github.com/olesho/harness-wrapper/pkg/transcript/claudecode"
 	hwcodex "github.com/olesho/harness-wrapper/pkg/transcript/codex"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/artifacts/transcript"
 	platformruntime "github.com/tysonthomas9/loomcli/internal/platform/runtime"
-	"github.com/tysonthomas9/loomcli/internal/sessions/transcript"
 )
 
 // LoadNativeEvents parses a session's captured native transcript into the

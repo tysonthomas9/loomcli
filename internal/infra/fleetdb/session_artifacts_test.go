@@ -127,3 +127,42 @@ func TestSessionArtifactTransportRejectsCrossOwnerResponse(t *testing.T) {
 		t.Fatalf("cross-owner response error = %v, want ErrArtifactsUnavailable", err)
 	}
 }
+
+func TestSessionArtifactTransportPersistsCanonicalFailureMetadata(t *testing.T) {
+	httpClient := newWorkspaceHTTPClient(func(response http.ResponseWriter, request *http.Request) {
+		if request.Method != http.MethodPatch || request.URL.Path != "/api/v1/WS/artifacts/transcript-session-1" {
+			t.Fatalf("fail request = %s %s", request.Method, request.URL.Path)
+		}
+		var body map[string]any
+		if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		metadata, ok := body["metadata"].(map[string]any)
+		if !ok || body["durable_status"] != "failed" ||
+			metadata["loom.evidence.capture_status"] != "capture_failed" ||
+			metadata["loom.evidence.failure_class"] != "evidence_corrupt" {
+			t.Fatalf("fail body = %+v", body)
+		}
+		writeJSON(t, response, Artifact{
+			WorkspaceKey: "WS", ArtifactID: "transcript-session-1", AgentID: "agent-1",
+			SessionID: "session-1", OwnerType: "session", OwnerID: "session-1", Type: "transcript",
+			DurableStatus: "failed", Metadata: map[string]string{
+				"loom.evidence.capture_status": "capture_failed",
+				"loom.evidence.failure_class":  "evidence_corrupt",
+			},
+		})
+	})
+	client, err := New(Config{BaseURL: "http://fleet.test", HTTPClient: httpClient})
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifact, err := client.SessionArtifacts().FailSession(t.Context(), SessionArtifactOwner{
+		WorkspaceKey: "WS", SessionID: "session-1", AgentID: "agent-1",
+	}, ArtifactFailCommand{
+		ArtifactID: "transcript-session-1", FailureClass: "evidence_corrupt",
+		FailureMessage: "candidate evidence did not match the canonical format",
+	})
+	if err != nil || artifact.DurableStatus != "failed" || artifact.Metadata["loom.evidence.failure_class"] != "evidence_corrupt" {
+		t.Fatalf("FailSession = %#v, %v", artifact, err)
+	}
+}

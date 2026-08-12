@@ -3,9 +3,9 @@ package sessioncoord
 import (
 	"context"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/artifacts/transcript"
 	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
 	"github.com/tysonthomas9/loomcli/internal/sessions"
-	"github.com/tysonthomas9/loomcli/internal/sessions/transcript"
 )
 
 // TranscriptEvents is the canonical transcript shape exposed by WebUI session

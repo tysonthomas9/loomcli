@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tysonthomas9/loomcli/internal/sessions/transcript"
+	"github.com/tysonthomas9/loomcli/internal/modules/artifacts/transcript"
 )
 
 // Every built-in is registered and discoverable through the generalized

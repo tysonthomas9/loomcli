@@ -8,7 +8,7 @@ import (
 
 	hwtranscript "github.com/olesho/harness-wrapper/pkg/transcript"
 
-	"github.com/tysonthomas9/loomcli/internal/sessions/transcript"
+	"github.com/tysonthomas9/loomcli/internal/modules/artifacts/transcript"
 )
 
 func TestArchiveOwnsLocalSessionLifecycle(t *testing.T) {

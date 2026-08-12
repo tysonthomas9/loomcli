@@ -2,7 +2,7 @@
 // (MIT, (c) 2026 Entire Inc.). Inlined here so the transcript package has
 // no external dependency for its single call site.
 
-package transcript
+package artifacttranscript
 
 import (
 	"regexp"

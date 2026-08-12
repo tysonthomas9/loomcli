@@ -8,10 +8,11 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/tysonthomas9/loomcli/internal/app/query/runcapture"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	artifactsmodule "github.com/tysonthomas9/loomcli/internal/modules/artifacts"
+	"github.com/tysonthomas9/loomcli/internal/modules/artifacts/transcript"
 	"github.com/tysonthomas9/loomcli/internal/sessions"
-	"github.com/tysonthomas9/loomcli/internal/sessions/transcript"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/apperrors"
 	"github.com/tysonthomas9/loomcli/internal/webui/storeadapter"
@@ -57,6 +58,7 @@ func sessionControlPlaneReadError(message string, err error) error {
 type sessionServiceImpl struct {
 	store      ProjectionReader
 	artifacts  artifactsmodule.QueryAPI
+	captures   runcapture.API
 	histStore  HistoryReader
 	runtimeDir string
 }
@@ -99,7 +101,23 @@ func NewSessionServiceWithArtifactQueries(
 	runtimeDir string,
 	artifactQueries artifactsmodule.QueryAPI,
 ) SessionService {
-	return &sessionServiceImpl{store: st, artifacts: artifactQueries, histStore: histStore, runtimeDir: runtimeDir}
+	return NewSessionServiceWithRunCaptures(st, histStore, runtimeDir, artifactQueries, nil)
+}
+
+// NewSessionServiceWithRunCaptures composes durable transcript reads through
+// the owner-validated Run Capture projection. The remaining parameters are
+// transitional until the rest of the legacy session UI is removed.
+func NewSessionServiceWithRunCaptures(
+	st ProjectionReader,
+	histStore HistoryReader,
+	runtimeDir string,
+	artifactQueries artifactsmodule.QueryAPI,
+	captures runcapture.API,
+) SessionService {
+	return &sessionServiceImpl{
+		store: st, artifacts: artifactQueries, captures: captures,
+		histStore: histStore, runtimeDir: runtimeDir,
+	}
 }
 
 func composeArtifactQueries(st ProjectionReaderWithArtifactQueries) artifactsmodule.QueryAPI {

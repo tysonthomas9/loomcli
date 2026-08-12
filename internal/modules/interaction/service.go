@@ -22,6 +22,7 @@ type Service struct {
 }
 
 var _ API = (*Service)(nil)
+var _ SessionQueries = (*Service)(nil)
 
 func New(
 	sessions SessionStore,
@@ -43,6 +44,42 @@ func New(
 }
 
 const maxSessionTranscriptBytes = (64 << 20) - (1 << 20)
+
+// GetSession returns one defensive Interaction-owned snapshot for immutable
+// application projections. Session credentials and lease tokens never cross
+// this boundary.
+func (service *Service) GetSession(ctx context.Context, workspace, sessionID string) (*AgentSession, error) {
+	workspace = strings.TrimSpace(workspace)
+	sessionID = strings.TrimSpace(sessionID)
+	if workspace == "" || sessionID == "" {
+		return nil, ErrInvalid
+	}
+	if service == nil || service.sessions == nil {
+		return nil, ErrUnavailable
+	}
+	session, err := service.sessions.Get(ctx, workspace, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateQueriedSession(session, workspace, sessionID); err != nil {
+		return nil, err
+	}
+	return cloneSession(session), nil
+}
+
+func validateQueriedSession(session *AgentSession, workspace, sessionID string) error {
+	if session == nil || session.WorkspaceKey != workspace || session.SessionID != sessionID ||
+		strings.TrimSpace(session.AgentID) == "" || session.CreatedAt.IsZero() || session.UpdatedAt.IsZero() {
+		return fmt.Errorf("session store returned a mismatched query row: %w", ErrInvalidPersistedState)
+	}
+	switch session.Status {
+	case SessionStarting, SessionRunning, SessionCompleted, SessionFailed,
+		SessionCancelled, SessionExpired, SessionInterrupted:
+		return nil
+	default:
+		return fmt.Errorf("session store returned status %q: %w", session.Status, ErrInvalidPersistedState)
+	}
+}
 
 // PublishTranscript persists canonical transcript bytes through Interaction's
 // narrow Artifacts port, then links the deterministic artifact to the exact

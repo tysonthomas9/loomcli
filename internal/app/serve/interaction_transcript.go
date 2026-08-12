@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	artifactredact "github.com/tysonthomas9/loomcli/internal/infra/artifactredact"
 	infrafleetdb "github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
 	"github.com/tysonthomas9/loomcli/internal/modules/artifacts"
 	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
@@ -43,7 +44,11 @@ func newInteractionTranscriptArtifactStore(
 	if err != nil {
 		return nil, fmt.Errorf("compose Interaction transcript Artifacts admission: %w", err)
 	}
-	service, err := artifacts.NewSession(store, admission)
+	evidence, err := artifacts.NewEvidencePolicy(artifactredact.Adapter{})
+	if err != nil {
+		return nil, err
+	}
+	service, err := artifacts.NewSession(store, admission, evidence)
 	if err != nil {
 		return nil, err
 	}
@@ -99,7 +104,7 @@ func (adapter *interactionTranscriptArtifacts) CreateContent(
 func (adapter *interactionTranscriptArtifacts) deriveAuthorities(
 	auth authority.SessionAuthority,
 ) (artifacts.SessionContentAuthorities, error) {
-	actions := []authority.Action{artifacts.ActionDeclare, artifacts.ActionGet, artifacts.ActionUpload, artifacts.ActionFinalize}
+	actions := []authority.Action{artifacts.ActionDeclare, artifacts.ActionGet, artifacts.ActionUpload, artifacts.ActionFinalize, artifacts.ActionFail}
 	principal, err := adapter.issuer.DeriveVerifiedPrincipal(authority.PrincipalClaims{
 		Subject: auth.Subject(), Class: authority.ClassSession, Workspace: auth.Workspace(),
 		Actions: actions, ExpiresAt: auth.ExpiresAt(),
@@ -126,7 +131,11 @@ func (adapter *interactionTranscriptArtifacts) deriveAuthorities(
 	if err != nil {
 		return artifacts.SessionContentAuthorities{}, err
 	}
-	return artifacts.SessionContentAuthorities{Declare: declare, Get: get, Upload: upload, Finalize: finalize}, nil
+	fail, err := issue(artifacts.ActionFail)
+	if err != nil {
+		return artifacts.SessionContentAuthorities{}, err
+	}
+	return artifacts.SessionContentAuthorities{Declare: declare, Get: get, Upload: upload, Finalize: finalize, Fail: fail}, nil
 }
 
 func mapInteractionArtifactError(err error) error {
@@ -198,6 +207,18 @@ func (transport *interactionArtifactsFleetDBTransport) FinalizeSession(
 		SizeBytes: cloneInteractionInt64Pointer(command.SizeBytes), Checksum: cloneInteractionStringPointer(command.Checksum),
 		ContentHash: cloneInteractionStringPointer(command.ContentHash), Visibility: cloneInteractionStringPointer(command.Visibility),
 		RedactionStatus: cloneInteractionStringPointer(command.RedactionStatus), Metadata: cloneInteractionMapPointer(command.Metadata),
+	})
+	return interactionArtifactFromInfra(value), translateInteractionArtifactTransportError(err)
+}
+
+func (transport *interactionArtifactsFleetDBTransport) FailSession(
+	ctx context.Context,
+	owner artifacts.SessionOwner,
+	command artifacts.FailCommand,
+) (*artifacts.Artifact, error) {
+	value, err := transport.transport.FailSession(ctx, interactionArtifactInfraOwner(owner), infrafleetdb.ArtifactFailCommand{
+		ArtifactID: command.ArtifactID, FailureClass: command.FailureClass,
+		FailureMessage: command.FailureMessage, Metadata: cloneInteractionMap(command.Metadata),
 	})
 	return interactionArtifactFromInfra(value), translateInteractionArtifactTransportError(err)
 }

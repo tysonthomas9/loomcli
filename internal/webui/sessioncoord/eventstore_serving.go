@@ -6,8 +6,8 @@ import (
 
 	hwtranscript "github.com/olesho/harness-wrapper/pkg/transcript"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/artifacts/transcript"
 	"github.com/tysonthomas9/loomcli/internal/sessions"
-	"github.com/tysonthomas9/loomcli/internal/sessions/transcript"
 )
 
 // serveFromEventStoreEnabled reports F3 (env LOOM_SERVE_FROM_EVENTSTORE): whether

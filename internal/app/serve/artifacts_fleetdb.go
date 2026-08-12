@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	artifactredact "github.com/tysonthomas9/loomcli/internal/infra/artifactredact"
 	infrafleetdb "github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
 	"github.com/tysonthomas9/loomcli/internal/modules/artifacts"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
@@ -64,6 +65,18 @@ func (transport *artifactsFleetDBTransport) Finalize(
 		SizeBytes: cloneArtifactInt64Pointer(command.SizeBytes), Checksum: cloneArtifactStringPointer(command.Checksum),
 		ContentHash: cloneArtifactStringPointer(command.ContentHash), Visibility: cloneArtifactStringPointer(command.Visibility),
 		RedactionStatus: cloneArtifactStringPointer(command.RedactionStatus), Metadata: cloneArtifactMapPointer(command.Metadata),
+	})
+	return artifactFromInfra(value), translateArtifactsFleetDBError(err)
+}
+
+func (transport *artifactsFleetDBTransport) Fail(
+	ctx context.Context,
+	owner artifacts.ExecutionOwner,
+	command artifacts.FailCommand,
+) (*artifacts.Artifact, error) {
+	value, err := transport.transport.Fail(ctx, artifactInfraOwner(owner), infrafleetdb.ArtifactFailCommand{
+		ArtifactID: command.ArtifactID, FailureClass: command.FailureClass,
+		FailureMessage: command.FailureMessage, Metadata: cloneArtifactStringMap(command.Metadata),
 	})
 	return artifactFromInfra(value), translateArtifactsFleetDBError(err)
 }
@@ -260,7 +273,11 @@ func newArtifactsCapability(
 	if err != nil {
 		return nil, fmt.Errorf("compose Artifacts admission: %w", err)
 	}
-	service, err := artifacts.New(store, admission)
+	evidence, err := artifacts.NewEvidencePolicy(artifactredact.Adapter{})
+	if err != nil {
+		return nil, fmt.Errorf("compose Artifacts evidence policy: %w", err)
+	}
+	service, err := artifacts.New(store, admission, evidence)
 	if err != nil {
 		return nil, fmt.Errorf("compose Artifacts service: %w", err)
 	}

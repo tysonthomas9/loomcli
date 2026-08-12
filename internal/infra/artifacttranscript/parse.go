@@ -1,7 +1,7 @@
 // Ported from github.com/entireio/cli cmd/entire/cli/transcript/parse.go
 // (MIT, (c) 2026 Entire Inc.). See ORIGIN.md.
 
-package transcript
+package artifacttranscript
 
 import (
 	"bufio"

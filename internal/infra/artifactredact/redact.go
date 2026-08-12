@@ -9,6 +9,8 @@
 //
 // Ported from github.com/entireio/cli redact/redact.go
 // (MIT, (c) 2026 Entire Inc.).
+// Package redact implements the mechanical secret scrubbing adapter used by
+// Artifacts evidence policy.
 package redact
 
 import (

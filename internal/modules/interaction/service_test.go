@@ -84,6 +84,44 @@ func harnessTerminalValues() map[string]*TerminalSession {
 	return map[string]*TerminalSession{}
 }
 
+func TestGetSessionReturnsTerminalOwnerSnapshotDefensively(t *testing.T) {
+	harness := newInteractionHarness(t)
+	finished := harness.now.Add(-time.Minute)
+	metadata := map[string]string{"backend": "codex"}
+	harness.sessions.values[testSession] = &AgentSession{
+		WorkspaceKey: testWorkspace, SessionID: testSession, AgentID: testAgent,
+		Kind: SessionKindInteractive, Status: SessionCompleted,
+		Metadata: metadata, FinishedAt: &finished,
+		CreatedAt: harness.now.Add(-time.Hour), UpdatedAt: harness.now,
+	}
+	got, err := harness.service.GetSession(t.Context(), testWorkspace, testSession)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != SessionCompleted || got.AgentID != testAgent || got.FinishedAt == nil {
+		t.Fatalf("GetSession = %+v", got)
+	}
+	got.Metadata["backend"] = "mutated"
+	*got.FinishedAt = time.Time{}
+	if metadata["backend"] != "codex" || harness.sessions.values[testSession].FinishedAt.IsZero() {
+		t.Fatal("GetSession leaked mutable persisted values")
+	}
+}
+
+func TestGetSessionRejectsCrossWorkspaceAndMalformedRows(t *testing.T) {
+	harness := newInteractionHarness(t)
+	if _, err := harness.service.GetSession(t.Context(), "", testSession); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("blank workspace error = %v", err)
+	}
+	harness.sessions.values[testSession] = &AgentSession{
+		WorkspaceKey: "OTHER", SessionID: testSession, AgentID: testAgent,
+		Status: SessionRunning, CreatedAt: harness.now, UpdatedAt: harness.now,
+	}
+	if _, err := harness.service.GetSession(t.Context(), testWorkspace, testSession); !errors.Is(err, ErrInvalidPersistedState) {
+		t.Fatalf("cross-workspace error = %v", err)
+	}
+}
+
 func (harness *interactionHarness) operator(t *testing.T, action authority.Action) authority.OperatorAuthority {
 	t.Helper()
 	principal, err := harness.issuer.DeriveVerifiedPrincipal(authority.PrincipalClaims{

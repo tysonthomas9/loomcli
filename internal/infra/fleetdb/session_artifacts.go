@@ -38,6 +38,7 @@ type SessionArtifactTransport interface {
 	CreateSession(context.Context, SessionArtifactOwner, SessionArtifactCreateCommand) (*Artifact, error)
 	UploadSession(context.Context, SessionArtifactOwner, ArtifactUploadCommand) (*Artifact, error)
 	FinalizeSession(context.Context, SessionArtifactOwner, ArtifactFinalizeCommand) (*Artifact, error)
+	FailSession(context.Context, SessionArtifactOwner, ArtifactFailCommand) (*Artifact, error)
 	GetSession(context.Context, SessionArtifactOwner, string) (*Artifact, error)
 }
 
@@ -146,6 +147,42 @@ func (store *sessionArtifactStore) FinalizeSession(
 	if artifact.DurableStatus != "finalized" || artifact.FinalizedAt == nil ||
 		(command.ContentHash != nil && !strings.EqualFold(artifact.ContentHash, *command.ContentHash)) {
 		return nil, fmt.Errorf("session artifact finalize returned divergent state: %w", ErrArtifactsUnavailable)
+	}
+	return &artifact, nil
+}
+
+func (store *sessionArtifactStore) FailSession(
+	ctx context.Context,
+	owner SessionArtifactOwner,
+	command ArtifactFailCommand,
+) (*Artifact, error) {
+	if err := validateSessionArtifactOwner(owner); err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(command.ArtifactID) == "" || strings.TrimSpace(command.FailureClass) == "" {
+		return nil, fmt.Errorf("session artifact fail identity and class are required: %w", ErrArtifactsInvalid)
+	}
+	metadata := cloneArtifactMetadata(command.Metadata)
+	if metadata == nil {
+		metadata = map[string]string{}
+	}
+	metadata["loom.evidence.capture_status"] = "capture_failed"
+	metadata["loom.evidence.failure_class"] = strings.TrimSpace(command.FailureClass)
+	if message := strings.TrimSpace(command.FailureMessage); message != "" {
+		metadata["loom.evidence.failure_message"] = message
+	}
+	var artifact Artifact
+	path := "/api/v1/" + pathEscape(owner.WorkspaceKey) + "/artifacts/" + pathEscape(command.ArtifactID)
+	if err := store.client.do(ctx, http.MethodPatch, path, map[string]any{
+		"durable_status": "failed", "metadata": metadata,
+	}, &artifact); err != nil {
+		return nil, mapArtifactTransportError("fail session artifact", err)
+	}
+	if err := validateSessionArtifactSnapshot(owner, command.ArtifactID, &artifact); err != nil {
+		return nil, err
+	}
+	if artifact.DurableStatus != "failed" || artifact.FinalizedAt != nil || artifact.Metadata["loom.evidence.failure_class"] != command.FailureClass {
+		return nil, fmt.Errorf("session artifact fail returned divergent state: %w", ErrArtifactsUnavailable)
 	}
 	return &artifact, nil
 }

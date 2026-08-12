@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tysonthomas9/loomcli/internal/sessions/transcript"
+	"github.com/tysonthomas9/loomcli/internal/modules/artifacts/transcript"
 )
 
 func TestLoadNativeEvents_ReturnsNilWhenMissing(t *testing.T) {

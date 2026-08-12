@@ -15,6 +15,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	appserve "github.com/tysonthomas9/loomcli/internal/app/serve"
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
@@ -759,6 +760,15 @@ func buildServerConfig(
 		}
 		cfg.ExecutionCapability = executionCapability
 		cfg.ArtifactsCapability = artifactsCapability
+		runCaptures, captureErr := appserve.NewRunCaptureCapability(
+			executionCapability.TaskRunQueries(),
+			interactionCapability.SessionQueries(),
+			artifactsCapability.ArtifactQueries(),
+		)
+		if captureErr != nil {
+			return webui.ServerConfig{}, serveCapabilitySet{}, captureErr
+		}
+		cfg.RunCaptureCapability = runCaptures
 	}
 	// Workspace clone/add-repo wiring is intentionally last: its only remote
 	// checkout authority is the Source Control materializer composed above.

@@ -4,11 +4,13 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
 
 	infrafleetdb "github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
+	artifacttranscript "github.com/tysonthomas9/loomcli/internal/modules/artifacts/transcript"
 	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 )
@@ -176,7 +178,7 @@ func TestInteractionTranscriptArtifactStoreRejectsDivergentRetry(t *testing.T) {
 		ArtifactID:   "transcript-session-1",
 		AgentID:      "agent-1",
 		SessionID:    "session-1",
-		Content:      []byte("{\"seq\":1,\"text\":\"first\"}\n"),
+		Content:      canonicalInteractionTranscript(t, "first"),
 	}
 	if artifactID, err := adapter.CreateContent(t.Context(), auth, command); err != nil || artifactID != command.ArtifactID {
 		t.Fatalf("first transcript publish = %q, %v", artifactID, err)
@@ -184,7 +186,7 @@ func TestInteractionTranscriptArtifactStoreRejectsDivergentRetry(t *testing.T) {
 	if artifactID, err := adapter.CreateContent(t.Context(), auth, command); err != nil || artifactID != command.ArtifactID {
 		t.Fatalf("exact transcript replay = %q, %v", artifactID, err)
 	}
-	command.Content = []byte("{\"seq\":1,\"text\":\"different\"}\n")
+	command.Content = canonicalInteractionTranscript(t, "different")
 	if _, err := adapter.CreateContent(t.Context(), auth, command); !errors.Is(err, interaction.ErrConflict) {
 		t.Fatalf("divergent transcript replay error = %v, want conflict", err)
 	}
@@ -218,7 +220,7 @@ func TestInteractionTranscriptArtifactStorePreservesLeaseCredentialForSessionAtt
 	}
 	_, err = adapter.CreateContent(t.Context(), auth, interaction.TranscriptArtifactCreate{
 		WorkspaceKey: "WS", ArtifactID: "transcript-session-1", AgentID: "agent-1", SessionID: "session-1",
-		Content: []byte("{\"text\":\"hello\"}\n"),
+		Content: canonicalInteractionTranscript(t, "hello"),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -239,7 +241,7 @@ func TestInteractionTranscriptArtifactStoreRejectsForeignPublishAuthority(t *tes
 	foreignAuthority := interactionTranscriptTestAuthority(t, authority.NewIssuer())
 	_, err = adapter.CreateContent(t.Context(), foreignAuthority, interaction.TranscriptArtifactCreate{
 		WorkspaceKey: "WS", ArtifactID: "transcript-session-1", AgentID: "agent-1", SessionID: "session-1",
-		Content: []byte("{\"text\":\"hello\"}\n"),
+		Content: canonicalInteractionTranscript(t, "hello"),
 	})
 	if !errors.Is(err, authority.ErrAdmissionDenied) || !errors.Is(err, interaction.ErrNotOwner) {
 		t.Fatalf("foreign publish authority error = %v, want admission denied and not owner", err)
@@ -294,6 +296,17 @@ func (stub *sessionArtifactTransportStub) FinalizeSession(
 	return cloneSessionArtifact(stub.artifact), nil
 }
 
+func (stub *sessionArtifactTransportStub) FailSession(
+	_ context.Context,
+	_ infrafleetdb.SessionArtifactOwner,
+	command infrafleetdb.ArtifactFailCommand,
+) (*infrafleetdb.Artifact, error) {
+	stub.artifact.DurableStatus = "failed"
+	stub.artifact.FinalizedAt = nil
+	stub.artifact.Metadata = cloneInteractionMap(command.Metadata)
+	return cloneSessionArtifact(stub.artifact), nil
+}
+
 func (stub *sessionArtifactTransportStub) GetSession(
 	context.Context,
 	infrafleetdb.SessionArtifactOwner,
@@ -334,6 +347,18 @@ func interactionTranscriptTestAuthority(t *testing.T, issuer *authority.Issuer) 
 		t.Fatal(err)
 	}
 	return auth
+}
+
+func canonicalInteractionTranscript(t *testing.T, text string) []byte {
+	t.Helper()
+	value, err := json.Marshal(artifacttranscript.Event{
+		Seq: 1, Timestamp: time.Date(2026, 8, 4, 10, 0, 0, 0, time.UTC),
+		Role: artifacttranscript.RoleAssistant, Type: artifacttranscript.EventText, Text: text,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return append(value, '\n')
 }
 
 type interactionForceCommandsStub struct {

@@ -11,6 +11,7 @@ import (
 
 	"github.com/redis/go-redis/v9"
 
+	"github.com/tysonthomas9/loomcli/internal/app/query/runcapture"
 	"github.com/tysonthomas9/loomcli/internal/app/workitemmove"
 	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 	"github.com/tysonthomas9/loomcli/internal/webui"
@@ -387,11 +388,16 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 	if config.ArtifactsCapability != nil {
 		artifactQueries = config.ArtifactsCapability.ArtifactQueries()
 	}
-	app.sessSvc = sessioncoord.NewSessionServiceWithArtifactQueries(
+	var runCaptures runcapture.API
+	if config.RunCaptureCapability != nil {
+		runCaptures = config.RunCaptureCapability.RunCaptureAPI()
+	}
+	app.sessSvc = sessioncoord.NewSessionServiceWithRunCaptures(
 		config.Store,
 		app.sessionHistoryStore,
 		config.SessionRuntimeDir,
 		artifactQueries,
+		runCaptures,
 	)
 
 	app.buildHandlers()

@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"github.com/tysonthomas9/loomcli/internal/atomicfile"
-	"github.com/tysonthomas9/loomcli/internal/sessions/redact"
+	"github.com/tysonthomas9/loomcli/internal/infra/artifactredact"
 )
 
 // subagentsSubdir is the subdirectory inside a session dir that holds

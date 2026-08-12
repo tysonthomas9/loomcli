@@ -18,6 +18,12 @@ var (
 	// ErrContentUnavailable means metadata is durable but the managed content
 	// plane cannot currently serve the artifact bytes.
 	ErrContentUnavailable = errors.New("artifacts: content unavailable")
+	// ErrCaptureFailed means evidence could not be safely prepared or persisted.
+	// The owning run/session outcome remains independent from this evidence fact.
+	ErrCaptureFailed = errors.New("artifacts: evidence capture failed")
+	// ErrEvidenceCorrupt means durable or candidate evidence does not conform to
+	// the canonical Artifacts-owned format.
+	ErrEvidenceCorrupt = errors.New("artifacts: evidence corrupt")
 	// ErrInvalidPersistedState means durable storage returned data outside the
 	// execution-scoped ownership contract.
 	ErrInvalidPersistedState = errors.New("artifacts: invalid persisted state")
