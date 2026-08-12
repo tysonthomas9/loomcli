@@ -1974,4 +1974,4 @@ owners, consumer-owned ports, and independently replaceable adapters intact.
 
 ---
 
-[Migration overview](README.md) · [Phase 8 consolidation](15-phase-8-consolidation-and-evidence.md)
+[Migration overview](README.md) · [Phase 8 consolidation](15-phase-8-consolidation-and-evidence.md) · [Direct writes and outside-module packages](17-phase-9-direct-write-and-outside-package-catalog.md)
