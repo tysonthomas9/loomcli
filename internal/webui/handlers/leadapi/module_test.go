@@ -334,7 +334,7 @@ func TestLeadAPISessionEnsureCreatesStampedNodeIDAndAdopts(t *testing.T) {
 	h := newHarness(t, harnessOptions{createNode: true})
 	token := h.mintToken(t, time.Hour, nil)
 
-	resp, decoded := h.postLeadOp(t, "WS", "session-ensure", token, []byte(`{"terminalId":"term-1","metadata":{"runtime":"codex"}}`))
+	resp, decoded := h.postLeadOp(t, "WS", "session-ensure", token, []byte(`{"terminalId":"term-1","metadata":{"runtime":"codex","codex_provider_thread_id":"thr-123"}}`))
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d (%v), want 200", resp.StatusCode, decoded)
 	}
@@ -347,7 +347,7 @@ func TestLeadAPISessionEnsureCreatesStampedNodeIDAndAdopts(t *testing.T) {
 		t.Fatalf("created session = %+v", session)
 	}
 
-	resp, decoded = h.postLeadOp(t, "WS", "session-ensure", token, []byte(`{"terminalId":"term-2","metadata":{"runtime":"harness"}}`))
+	resp, decoded = h.postLeadOp(t, "WS", "session-ensure", token, []byte(`{"terminalId":"term-2","metadata":{"actor":"sandbox","lead_workdir":"/workspace"}}`))
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("second status = %d (%v), want 200", resp.StatusCode, decoded)
 	}
@@ -359,7 +359,7 @@ func TestLeadAPISessionEnsureCreatesStampedNodeIDAndAdopts(t *testing.T) {
 		t.Fatalf("sessions for node = %d, want 1: %+v", len(sessions), sessions)
 	}
 	session = getSessionByID(t, h, h.workspace, sessionID)
-	if session.TerminalID != "term-2" || session.Metadata["runtime"] != "harness" {
+	if session.TerminalID != "term-2" || session.Metadata["runtime"] != "codex" || session.Metadata["codex_provider_thread_id"] != "thr-123" || session.Metadata["actor"] != "sandbox" || session.Metadata["lead_workdir"] != "/workspace" {
 		t.Fatalf("adopted session update = %+v", session)
 	}
 

@@ -349,7 +349,13 @@ func (m *Module) updateAdoptedSession(ctx context.Context, ws string, session *d
 		apply = true
 	}
 	if params.Metadata != nil {
-		metadata := copyStringMap(*params.Metadata)
+		metadata := copyStringMap(session.Metadata)
+		if metadata == nil {
+			metadata = make(map[string]string, len(*params.Metadata))
+		}
+		for key, value := range *params.Metadata {
+			metadata[key] = value
+		}
 		patch.Metadata = &metadata
 		apply = true
 	}
