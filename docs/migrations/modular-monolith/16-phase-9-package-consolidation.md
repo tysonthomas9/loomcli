@@ -31,6 +31,7 @@
 - **Wave 9.27 implementation:** `14f4ee9ac`
 - **Wave 9.28 implementation:** `a6856f943`
 - **Wave 9.29 implementation:** `eb0fd856b`
+- **Wave 9.30 implementation:** `962b65d63`
 - **Stacked branches:** `modular-monolith-phase9-01-types-ratchet`, then
   `modular-monolith-phase9-02-shallow-seams`, then
   `modular-monolith-phase9-03-legacy-planes`, then
@@ -59,7 +60,8 @@
   `modular-monolith-phase9-26-runtime-legacy-deletion`, then
   `modular-monolith-phase9-27-handler-port-deletion`, then
   `modular-monolith-phase9-28-shallow-composition-deletion`, then
-  `modular-monolith-phase9-29-workitems-backend-deletion`
+  `modular-monolith-phase9-29-workitems-backend-deletion`, then
+  `modular-monolith-phase9-30-workitems-lifecycle-query-deletion`
 - **Purpose:** Reduce the residual package surface toward 160 production Go
   packages without weakening capability ownership, consumer-owned ports, or
   independently replaceable adapters.
@@ -1441,6 +1443,50 @@ The next deletion slice migrates the remaining Work Items lifecycle and query
 consumers to capability-owned ports and models, then deletes the corresponding
 `IssueBackend` methods and backend DTOs. The broad interface is not an accepted
 endpoint.
+
+## Wave 9.30 result
+
+Wave 9.30 deletes six more operations from the horizontal `IssueBackend`
+contract after proving they had no production consumer beyond adapters,
+decorators, lazy proxies, unavailable stubs, and test mocks:
+
+- `GetChildren` is replaced at its test-only workflow consumers by the existing
+  filtered list query;
+- dedicated `DeferIssue` and `UndeferIssue` are removed because status changes
+  already flow through Work Items `Patch` and the adapter's private transition
+  implementation;
+- public `AddLabel` and `RemoveLabel` disappear while FleetDB label requests
+  remain private details of its update adapter; and
+- the polymorphic `Batch` contract, `BatchOp`/`BatchResult` DTOs, API no-op,
+  FleetDB fan-out emulation, and all forwarding scaffolding are deleted.
+
+This removes the entire 461-line `fleet_batch_mutations.go` implementation and
+its two dedicated test files. Durable FleetDB event and mutation-stream code
+that shared that file moves into the accurately named `fleet_events.go`; no
+batch abstraction or public replacement survives. A cannot-return guard rejects
+all six operation names and both batch DTOs across production backend, adapter,
+and CLI roots.
+
+The core interface contracts from 26 methods to 20. The implementation and
+enforcement commit changes 23 files with 251 insertions and 1,721 deletions, a
+net removal of 1,470 lines. Exact package shape remains
+`159 / 15 / 144 / 42 / 60`, direct persistence remains `90 / 108`, handler
+legacy imports remain zero, and runtime inventory remains `70 / 79`. Phase 9
+is still incomplete because those 20 lifecycle/query/command methods and their
+backend-owned DTOs remain a horizontal plane.
+
+## Wave 9.30 validation
+
+| Check | Result |
+|---|---|
+| Complete backend adapter behavior | PASS: `internal/backend`, `internal/backend/api`, and `internal/backend/fleet`; retained list-parent, private deferred workflow, private label requests, and mutation events are covered |
+| CLI adapter and mock behavior | PASS: `internal/cli/data` and `internal/cli/testdata/clitest`; every internal package compiles after removing the forwarding methods |
+| Cannot-return architecture ratchet | PASS: `TestUnusedIssueBackendCompatibilityOperationsCannotReturn` and the prior mutation-plane guard |
+| Aggregate `make gate` | PASS: all Go and frontend quality gates against paired FleetDB source `9c1859ab1` and its exact built binary, with four Go OS threads, two Go package workers, one Vitest worker, and a 2 GiB Go soft memory limit |
+
+The next wave must migrate a real consumer block—starting with query models and
+ports—rather than merely prune unused methods. Success remains deletion of
+`IssueBackend` and its duplicate DTO plane, not a smaller legacy interface.
 
 ---
 
