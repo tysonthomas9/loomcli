@@ -61,6 +61,9 @@ type HostBridgeTaskExecutor struct {
 	// WorktreeResolver maps bundled local task runs onto isolated per-run git
 	// worktrees. When nil, WorktreePath is used as supplied by the caller.
 	WorktreeResolver TaskWorktreeResolver
+	// RootResolver maps repository-set TaskRuns onto a composite root. It owns
+	// the new multi-repository path and takes precedence over WorktreeResolver.
+	RootResolver TaskRootResolver
 	// StackStore is the finalize-barrier seam: after a stacked task completes
 	// (branch pushed, result reported) the executor records the task's stack node
 	// state/SHA here BEFORE returning — i.e. before the worker closes the task and
@@ -78,6 +81,7 @@ type HostBridgeTaskExecutor struct {
 	// which the per-run git worktree does NOT contain — so taskRunnerBundleEnv must
 	// resolve the bundle against this base, not the reassigned worktree.
 	driverBundleBaseDir string
+	taskRootManifest    string
 }
 
 type bridgeTaskRunnerResult struct {
@@ -206,6 +210,10 @@ func (e HostBridgeTaskExecutor) ExecuteTask(ctx context.Context, req TaskExecReq
 	if result, refused := refuseUntrustedTaskRunnerExecution(req); refused {
 		return result, nil
 	}
+	resolvedRoot, rootFailure, rooted := e.resolveLocalTaskRoot(ctx, req)
+	if rootFailure.ErrorClass != "" {
+		return rootFailure, nil
+	}
 	resolvedWorktree, worktreeFailure, failed := e.resolveLocalTaskWorktree(ctx, req)
 	if failed {
 		return worktreeFailure, nil
@@ -216,7 +224,7 @@ func (e HostBridgeTaskExecutor) ExecuteTask(ctx context.Context, req TaskExecReq
 	// binding is exported as runner env (local) AND injected into the request
 	// Input (so a daytona sandbox, which has no host stack store, still receives
 	// the canonical branch + base ref). nil => not stacked => runner's old path.
-	if e.StackStore != nil {
+	if e.StackStore != nil && !rooted {
 		repoName := strings.TrimSpace(resolvedWorktree.RepoName)
 		if repoName == "" {
 			repoName = e.resolveStackRepoName(ctx, req)
@@ -279,6 +287,13 @@ func (e HostBridgeTaskExecutor) ExecuteTask(ctx context.Context, req TaskExecReq
 			"repo_name":       resolvedWorktree.RepoName,
 			"source_repo_id":  resolvedWorktree.SourceRepoID,
 			"worktree_source": "local_workspace_state",
+		})
+	}
+	if rooted {
+		result.RuntimeMetadata = mergeStringMaps(result.RuntimeMetadata, map[string]string{
+			"task_root_path":     resolvedRoot.Path,
+			"task_root_manifest": resolvedRoot.ManifestPath,
+			"repository_count":   fmt.Sprintf("%d", len(resolvedRoot.Repositories)),
 		})
 	}
 	if artifacts := runner.finalizedArtifacts(); len(artifacts) > 0 {
@@ -686,6 +701,9 @@ func (e HostBridgeTaskExecutor) taskRunnerEnv(req TaskExecRequest, requestJSON s
 	}
 	if apiBaseURL := strings.TrimSpace(e.APIBaseURL); apiBaseURL != "" {
 		env = append(env, "LOOM_TASK_RUN_API_URL="+apiBaseURL)
+	}
+	if manifest := strings.TrimSpace(e.taskRootManifest); manifest != "" {
+		env = append(env, "LOOM_TASK_ROOT_MANIFEST="+manifest)
 	}
 	// Stacked task: tell the runner to push the canonical branch on the
 	// predecessor base instead of opening an independent loom/<taskid> PR.

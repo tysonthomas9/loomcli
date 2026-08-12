@@ -41,6 +41,59 @@ func TestTaskRunnerEnvAPIBaseURL(t *testing.T) {
 	}
 }
 
+type fixedTaskRootResolver struct {
+	root TaskRoot
+}
+
+func (r fixedTaskRootResolver) ResolveTaskRoot(context.Context, TaskExecRequest) (TaskRoot, error) {
+	return r.root, nil
+}
+
+func TestHostBridgeTaskExecutorStartsLocalRunnerInCompositeTaskRoot(t *testing.T) {
+	root := t.TempDir()
+	manifest := filepath.Join(root, "manifest.json")
+	if err := os.WriteFile(manifest, []byte(`{"version":1}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	evidence := filepath.Join(t.TempDir(), "runner-evidence.txt")
+	executor := HostBridgeTaskExecutor{
+		Store:        memstore.New(),
+		WorktreePath: t.TempDir(),
+		RootResolver: fixedTaskRootResolver{root: TaskRoot{Path: root, ManifestPath: manifest}},
+		Command:      []string{"sh", "-c", `printf '%s\n%s\n' "$PWD" "$LOOM_TASK_ROOT_MANIFEST" > "$1"; printf '%s\n' '{"status":"completed","exit_code":0}'`, "sh", evidence},
+	}
+	req := hostBridgeTaskExecRequest()
+	req.RunnerEntrypoint = LocalTaskRunnerEntrypoint
+	req.RunnerTrustLevel = domain.DriverTrustTrusted
+	req.RepositorySet = []string{"repo-a", "repo-b"}
+	result, err := executor.ExecuteTask(t.Context(), req)
+	if err != nil {
+		t.Fatalf("ExecuteTask: %v", err)
+	}
+	if result.Status != domain.TaskRunCompleted {
+		t.Fatalf("status = %q, want completed", result.Status)
+	}
+	data, err := os.ReadFile(evidence)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("runner cwd/manifest = %q", data)
+	}
+	rootInfo, err := os.Stat(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cwdInfo, err := os.Stat(lines[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !os.SameFile(rootInfo, cwdInfo) || lines[1] != manifest {
+		t.Fatalf("runner cwd/manifest = %q/%q, want root %q and manifest %q", lines[0], lines[1], root, manifest)
+	}
+}
+
 func TestLocalTaskRunnerSettingsDoNotOverrideInheritedGitHubToken(t *testing.T) {
 	settingsDir := t.TempDir()
 	credential, err := runtimesettings.SealRuntimeCredential(settingsDir, runtimesettings.RuntimeCredentialProviderGitHub, "settings-token", time.Now())

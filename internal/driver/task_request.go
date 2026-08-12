@@ -84,6 +84,8 @@ type TaskExecRequest struct {
 	DriverStepID     string                  `json:"driver_step_id,omitempty"`
 	TaskRunID        string                  `json:"task_run_id"`
 	TaskID           string                  `json:"task_id"`
+	RepositorySet    []string                `json:"repository_set"`
+	RootGeneration   int64                   `json:"root_generation,omitempty"`
 	WorkerProfileID  string                  `json:"worker_profile_id,omitempty"`
 	Runner           string                  `json:"runner,omitempty"`
 	RunnerRef        string                  `json:"runner_ref,omitempty"`
@@ -750,6 +752,8 @@ func taskExecRequest(claimed *domain.TaskRun, opts executeClaimedTaskRunOptions,
 		DriverStepID:     refs.DriverStepID,
 		TaskRunID:        claimed.TaskRunID,
 		TaskID:           refs.TaskID,
+		RepositorySet:    append([]string(nil), claimed.RepositorySet...),
+		RootGeneration:   claimed.RootGeneration,
 		WorkerProfileID:  claimed.WorkerProfileID,
 		Runner:           refs.Runner,
 		RunnerRef:        refs.RunnerRef,

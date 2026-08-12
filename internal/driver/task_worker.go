@@ -41,6 +41,7 @@ type TaskWorker struct {
 	// WorktreeResolver resolves per-task-run local worktrees for bundled local
 	// task runners. Nil uses the machine-local workspace cache.
 	WorktreeResolver TaskWorktreeResolver
+	RootResolver     TaskRootResolver
 	// Now is a clock seam for tests; nil uses time.Now.
 	Now func() time.Time
 }
@@ -91,6 +92,7 @@ func (w *TaskWorker) runOnceInWorkspace(ctx context.Context, ws, workDir string)
 			APIBaseURL:       w.APIBaseURL,
 			LocalSettingsDir: w.LocalSettingsDir,
 			WorktreeResolver: firstNonNilTaskWorktreeResolver(w.WorktreeResolver, LocalTaskWorktreeResolver{Store: w.Store, Lineage: DefaultStackLineageLookup()}),
+			RootResolver:     firstNonNilTaskRootResolver(w.RootResolver, LocalTaskRootResolver{Store: w.Store}),
 			StackStore:       DefaultStackStore(),
 		}
 	}
@@ -121,6 +123,13 @@ func (w *TaskWorker) runOnceInWorkspace(ctx context.Context, ws, workDir string)
 		return outcome, err
 	}
 	return outcome, nil
+}
+
+func firstNonNilTaskRootResolver(primary, fallback TaskRootResolver) TaskRootResolver {
+	if primary != nil {
+		return primary
+	}
+	return fallback
 }
 
 func firstNonNilTaskWorktreeResolver(primary, fallback TaskWorktreeResolver) TaskWorktreeResolver {
