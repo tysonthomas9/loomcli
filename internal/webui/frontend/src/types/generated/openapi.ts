@@ -3001,6 +3001,7 @@ export interface components {
       is_active: boolean;
       has_transcript: boolean;
       has_diff: boolean;
+      github_pr_url?: string;
       last_error?: string;
     };
     /** @description Single transcript entry from a session */

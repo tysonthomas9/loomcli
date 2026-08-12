@@ -5745,6 +5745,8 @@ components:
           type: boolean
         has_diff:
           type: boolean
+        github_pr_url:
+          type: string
         last_error:
           type: string
 

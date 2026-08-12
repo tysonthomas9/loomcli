@@ -2658,6 +2658,7 @@ type SessionResponse struct {
 	ExitCode         int        `json:"exit_code"`
 	FilesChanged     int        `json:"files_changed"`
 	FilesTouched     *[]string  `json:"files_touched,omitempty"`
+	GithubPrUrl      *string    `json:"github_pr_url,omitempty"`
 	HasDiff          bool       `json:"has_diff"`
 	HasTranscript    bool       `json:"has_transcript"`
 	InputTokens      int64      `json:"input_tokens"`

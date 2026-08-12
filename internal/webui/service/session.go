@@ -43,9 +43,10 @@ type SessionService interface {
 // SessionListItem extends a session record with computed UI fields.
 type SessionListItem struct {
 	sessions.SessionRecord
-	IsActive      bool `json:"is_active"`
-	HasTranscript bool `json:"has_transcript"`
-	HasDiff       bool `json:"has_diff"`
+	IsActive      bool   `json:"is_active"`
+	HasTranscript bool   `json:"has_transcript"`
+	HasDiff       bool   `json:"has_diff"`
+	GitHubPRURL   string `json:"github_pr_url,omitempty"`
 }
 
 // SessionDetailData extends session metadata with computed UI fields.

@@ -373,6 +373,18 @@
   font-size: 12px;
 }
 
+.prLink {
+  margin-left: auto;
+  color: var(--color-primary);
+  font-size: 12px;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.prLink:hover {
+  text-decoration: underline;
+}
+
 /* Prompt block — initial user kickoff surfaced once in masthead */
 .promptBlock {
   margin: 0 0 10px;

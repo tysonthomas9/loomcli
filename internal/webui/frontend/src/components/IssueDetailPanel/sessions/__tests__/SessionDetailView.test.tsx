@@ -175,6 +175,18 @@ describe("SessionDetailView", () => {
       expect(screen.getByText("active")).toBeInTheDocument();
     });
 
+    it.each([
+      ["https://github.com/acme/widgets/pull/42", true],
+      ["http://github.com/acme/widgets/pull/42", false],
+      ["https://attacker.example/not-a-pr", false],
+    ])("renders only secure PR URLs (%s)", (github_pr_url, shouldRender) => {
+      const session = createSession({ github_pr_url });
+      render(<SessionDetailView taskId="task-1" session={session} />);
+      expect(screen.queryByRole("link", { name: /View PR/ }) !== null).toBe(
+        shouldRender,
+      );
+    });
+
     it("surfaces the initial user text as a Prompt block", () => {
       mockUseSessionTranscript.mockReturnValue({
         entries: [
