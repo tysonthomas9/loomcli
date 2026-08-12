@@ -1,5 +1,19 @@
 # Loom Security Guide
 
+## Execution Isolation
+
+Loom does not sandbox the process that runs the LLM and edits code. The
+container sandbox (`LOOM_DRIVER_SANDBOX=container`) contains the DriverRun
+workflow bundle only; TaskRun leaves and daemon-supervised agents run as host
+processes, and the backend CLIs are launched with their own sandboxes disabled.
+`read_only` and the tool lists are backend tool/approval policy, not a
+boundary. A Daytona leaf is the only real remote isolation available today and
+needs a network-reachable git URL.
+
+Read `docs/design/execution-isolation.md` before relying on any of these as a
+security control. The rest of this guide covers credential storage and the
+network-facing API surface, which are separate concerns.
+
 ## Credential Storage
 
 ### Redis Passwords

@@ -1,11 +1,13 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/tysonthomas9/loomcli/internal/backendnames"
 	"github.com/tysonthomas9/loomcli/internal/usage"
@@ -121,8 +123,38 @@ func ValidBackendNames() string {
 	return strings.Join(ListBackends(), ", ")
 }
 
+// daemonMode records that this process was spawned by the daemon supervisor
+// (`--daemon-mode`). It is set once, early, by whichever agent command owns the
+// invocation, and read by InvokeAgent to refuse the interactive path.
+var daemonMode atomic.Bool
+
+// SetDaemonMode marks this process as daemon-supervised. Call it as soon as
+// the flag is known, before any backend invocation.
+func SetDaemonMode(on bool) { daemonMode.Store(on) }
+
+// InDaemonMode reports whether this process was spawned by the supervisor.
+func InDaemonMode() bool { return daemonMode.Load() }
+
+// ErrInteractiveInDaemonMode is returned when a daemon-supervised process
+// tries to start an interactive session.
+var ErrInteractiveInDaemonMode = errors.New(
+	"interactive invocation refused: this process is daemon-supervised and has no controlling TTY")
+
 // InvokeAgent dispatches an interactive invocation to the active backend.
+//
+// It refuses outright under `--daemon-mode`. A supervised agent has no
+// controlling TTY, so an interactive backend renders its TUI into nothing and
+// the process exits 0 having done no work — which the supervisor cannot
+// distinguish from a successful run, so completion hooks fire and the pipeline
+// advances on a phantom. That failure has been observed twice: once as a custom
+// role silently killed by the watchdog at 15 minutes, and once as EVERY daemon
+// agent exiting 0 in ~65ms while labels kept being stamped. Both times the
+// pipeline looked healthy. Failing loudly here is what makes those bugs visible
+// at the first spawn instead of after a day of stamped labels.
 func InvokeAgent(workDir, prompt, agentName string) error {
+	if InDaemonMode() {
+		return fmt.Errorf("%w; use InvokeAgentNonInteractive", ErrInteractiveInDaemonMode)
+	}
 	backendMu.RLock()
 	name := activeBackend
 	b, ok := backends[name]

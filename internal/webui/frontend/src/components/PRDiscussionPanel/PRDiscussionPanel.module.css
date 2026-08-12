@@ -139,7 +139,6 @@
   border-radius: var(--radius-sm);
   font-size: 13px;
   line-height: 1.45;
-  white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
 
@@ -158,6 +157,45 @@
 
 .messageText {
   min-width: 0;
+}
+
+/* Drop shared MarkdownRenderer block padding so bubble spacing stays on the
+   message container, and keep chat typography on the primary text color.
+   Reset white-space: markdown already lays out paragraphs/lists; inheriting
+   pre-wrap from the old plain-text bubbles turns inter-element newlines into
+   huge blank gaps (react-markdown#611). */
+.messageText.messageText {
+  padding-top: 0;
+  padding-bottom: 0;
+  color: inherit;
+  font-size: inherit;
+  line-height: 1.5;
+  white-space: normal;
+}
+
+.messageText.messageText p {
+  margin: 0 0 0.55em;
+}
+
+.messageText.messageText p:last-child {
+  margin-bottom: 0;
+}
+
+.messageText.messageText ul,
+.messageText.messageText ol {
+  margin: 0 0 0.55em;
+}
+
+.messageText.messageText ul:last-child,
+.messageText.messageText ol:last-child {
+  margin-bottom: 0;
+}
+
+/* Chat-bubble placement for the shared tool pill (components/ToolPill owns the
+   pill's own appearance). */
+.toolBlock {
+  align-self: flex-start;
+  max-width: 96%;
 }
 
 .composer {

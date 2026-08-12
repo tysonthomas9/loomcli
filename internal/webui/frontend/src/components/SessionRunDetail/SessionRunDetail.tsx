@@ -23,6 +23,16 @@ export interface SessionRunDetailProps {
   session: SessionRecord;
 }
 
+function isSyntheticUserContext(text: string): boolean {
+  const normalized = text.trimStart();
+  return (
+    normalized.startsWith("<recommended_plugins>") ||
+    normalized.startsWith("# AGENTS.md instructions for ") ||
+    normalized.startsWith("<environment_context>") ||
+    normalized.startsWith("<INSTRUCTIONS>")
+  );
+}
+
 type InnerTab = "transcript" | "diff";
 
 function formatExitCode(code: number): string {
@@ -154,6 +164,9 @@ function groupEvents(entries: TranscriptEntry[]): GroupedEvents {
     if (e.role === "user" && e.type === "text") {
       const text = (e.text ?? "").trim();
       if (!text) continue;
+      // Known backend-injected context is not a user turn; rendering it as one
+      // buries the real prompt under environment preamble.
+      if (isSyntheticUserContext(text)) continue;
       if (!sawFirstUserText) {
         sawFirstUserText = true;
         prompt = e.timestamp ? { text, timestamp: e.timestamp } : { text };
@@ -198,7 +211,10 @@ function groupEvents(entries: TranscriptEntry[]): GroupedEvents {
           input: e.tool_input,
           inputPreview: formatToolInput(e.tool_input),
         };
-        if (paired?.output) tool.result = paired.output;
+        // A backend that inlines the result on the tool_use event emits no
+        // paired tool_result; without this fallback the tool body renders empty.
+        const resultText = paired?.output || e.output;
+        if (resultText) tool.result = resultText;
         if (paired?.timestamp) tool.resultTimestamp = paired.timestamp;
         turn.items.push(tool);
       }
@@ -420,12 +436,14 @@ export function SessionRunDetail({
             <div className={styles.statLabel}>Tokens</div>
             <div className={styles.statValue}>{formatTokens(totalTokens)}</div>
           </div>
-          <div className={styles.stat}>
-            <div className={styles.statLabel}>Cost</div>
-            <div className={styles.statValue}>
-              {formatCost(session.estimated_cost_usd)}
+          {(session.estimated_cost_usd ?? 0) > 0 && (
+            <div className={styles.stat}>
+              <div className={styles.statLabel}>Cost</div>
+              <div className={styles.statValue}>
+                {formatCost(session.estimated_cost_usd)}
+              </div>
             </div>
-          </div>
+          )}
           {(session.files_changed > 0 ||
             session.lines_added > 0 ||
             session.lines_removed > 0) && (

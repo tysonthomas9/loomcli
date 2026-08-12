@@ -42,6 +42,8 @@ func TestDecide_Golden(t *testing.T) {
 			Disposition{Decision: Retry, Backoff: BPDefault, OnExhaustion: Block, BlockBudget: defaultBlockBudget}},
 		{"spawn-failure → retry/block (capped)", agenterr.OutcomeFromDomain(agenterr.SpawnFailureOutcome),
 			Disposition{Decision: Retry, Backoff: BPDefault, OnExhaustion: Block, BlockBudget: defaultBlockBudget}},
+		{"completion-hook-failure → retry/block (capped)", agenterr.OutcomeFromDomain(agenterr.CompletionHookFailureOutcome),
+			Disposition{Decision: Retry, Backoff: BPDefault, OnExhaustion: Block, BlockBudget: defaultBlockBudget}},
 		// zero value (clean) — defensive conservative restart
 		{"zero outcome → conservative retry", agenterr.Outcome{},
 			Disposition{Decision: Retry, Backoff: BPDefault, OnExhaustion: Block, BlockBudget: defaultBlockBudget}},
@@ -79,6 +81,7 @@ func TestQuarantineEligible(t *testing.T) {
 		{"lock-conflict → not eligible", agenterr.OutcomeFromDomain(agenterr.LockConflictOutcome), false},
 		{"spawn-failure → not eligible", agenterr.OutcomeFromDomain(agenterr.SpawnFailureOutcome), false},
 		{"backend-unavailable → not eligible", agenterr.OutcomeFromDomain(agenterr.BackendUnavailableOutcome), false},
+		{"completion-hook-failure → not eligible (supervisor write fault, not task fault)", agenterr.OutcomeFromDomain(agenterr.CompletionHookFailureOutcome), false},
 		// zero value (clean success)
 		{"zero outcome → not eligible", agenterr.Outcome{}, false},
 	}

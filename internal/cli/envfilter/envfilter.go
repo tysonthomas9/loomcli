@@ -29,6 +29,10 @@ var envAllowlistExact = map[string]bool{
 	"ANTHROPIC_API_KEY": true, "OPENAI_API_KEY": true,
 	"GEMINI_API_KEY": true, "GOOGLE_API_KEY": true, "CURSOR_API_KEY": true,
 	"CODEX_HOME": true,
+	// claude-code's config-dir override. claudeAuthFilePath() honors it when
+	// locating ~/.claude/.credentials.json for health checks, so dropping it
+	// here made preflight and the spawned CLI disagree about where auth lives.
+	"CLAUDE_CONFIG_DIR": true,
 	// claude-code's long-lived OAuth token (`claude setup-token`); the headless
 	// equivalent of a ~/.claude login, so interactive/lead claude invocations must
 	// inherit it (mirrors trustedLocalProviderCredentials on the task-runner path).

@@ -1,0 +1,119 @@
+/* Tool call — inline collapsible pill. Shared by the run transcript and the PR
+   reviewer chat so the two renderings of a tool call cannot drift apart. */
+
+.toolBlock {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.toolPill {
+  display: inline-flex;
+  align-items: stretch;
+  align-self: flex-start;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition:
+    border-color var(--transition-fast),
+    background var(--transition-fast);
+  color: var(--color-text-primary);
+  text-align: left;
+  padding: 0;
+}
+
+.toolPill:hover {
+  border-color: var(--color-text-muted);
+  background: var(--color-bg-hover);
+}
+
+.toolPillOpen {
+  border-color: #ea580c;
+}
+
+.toolPillIcon {
+  padding: 6px 10px;
+  background: rgba(234, 88, 12, 0.12);
+  color: #ea580c;
+  border-right: 1px solid var(--color-border-light);
+  border-radius: var(--radius-md) 0 0 var(--radius-md);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  font-size: 11.5px;
+}
+
+[data-theme="light"] .toolPillIcon {
+  background: #fff1e6;
+}
+
+.toolPillArg {
+  padding: 6px 10px;
+  color: var(--color-text-secondary);
+  max-width: 420px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.toolPillCaret {
+  padding: 6px 10px;
+  color: var(--color-text-muted);
+  border-left: 1px solid var(--color-border-light);
+  display: flex;
+  align-items: center;
+}
+
+.toolPillOpen .toolPillCaret {
+  color: #ea580c;
+}
+
+/* Tool body — expanded input + result */
+.toolBody {
+  margin-top: 8px;
+  padding-left: 12px;
+  border-left: 2px solid rgba(234, 88, 12, 0.35);
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.toolInput,
+.toolOutput {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.55;
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-md);
+  padding: 10px 12px;
+  margin: 0;
+  white-space: pre;
+  overflow-x: auto;
+  color: var(--color-text-primary);
+}
+
+.toolOutput {
+  color: var(--color-text-secondary);
+}
+
+.toolResultLabel {
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-text-tertiary);
+  margin: 10px 0 4px;
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+}
+
+.toolResultLabel .ts {
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0;
+}

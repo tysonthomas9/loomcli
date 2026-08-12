@@ -382,34 +382,13 @@ func (s *Supervisor) clearAgentSessionState(ap *AgentProcess) {
 	ap.ResumeTaskID = ""          // per-cycle; re-detected in preFlightSetup (ResumeFailures persists)
 	ap.RecoveryMode = recoverCold // per-cycle; re-classified in preFlightSetup
 	ap.LastActivity = time.Time{}
+	// A child that died while parked on an interactive prompt never sends its
+	// "end", so the in-flight count must not survive into the next cycle: a
+	// stale pending count would suspend the output-timeout watchdog for an
+	// agent that is no longer waiting on anything.
+	ap.InputWaitPending = 0
+	ap.InputWaitSince = time.Time{}
 	ap.Mu.Unlock()
-}
-
-// RecordAgentActivity advances ap.LastActivity for the named agent toward the
-// observed PTY-output timestamp. It is a no-op if the agent isn't currently
-// supervised. Out-of-order heartbeats never regress the stored value — callers
-// can safely retry without ever rewinding the timestamp.
-func (s *Supervisor) RecordAgentActivity(agentName string, at time.Time) {
-	if agentName == "" || at.IsZero() {
-		return
-	}
-	s.AgentsMu.RLock()
-	var target *AgentProcess
-	for _, ap := range s.Agents {
-		if ap.Entry.Worktree == agentName {
-			target = ap
-			break
-		}
-	}
-	s.AgentsMu.RUnlock()
-	if target == nil {
-		return
-	}
-	target.Mu.Lock()
-	if at.After(target.LastActivity) {
-		target.LastActivity = at
-	}
-	target.Mu.Unlock()
 }
 
 // preFlightSetup verifies the backend is spawnable, then runs recovery,
@@ -427,6 +406,9 @@ func (s *Supervisor) preFlightSetup(ap *AgentProcess) bool {
 	if err := s.gateBackendAvailable(ap); err != nil {
 		return false
 	}
+	if err := s.gateSafetyKnobsEnforceable(ap); err != nil {
+		return false
+	}
 
 	taskID, mode := s.detectRecovery(ap)
 	switch mode {
@@ -435,6 +417,9 @@ func (s *Supervisor) preFlightSetup(ap *AgentProcess) bool {
 	case recoverCheckpoint:
 		s.prepareCheckpointRetry(ap, taskID)
 	default: // recoverCold
+		ap.Mu.Lock()
+		ap.ResumeFailures = 0 // cold-starting ⇒ let a future interruption recover again
+		ap.Mu.Unlock()
 		// A cold decision can still carry the task from a stale, live-orphaned,
 		// or recovery-exhausted lock. Treat that task as failed so destructive
 		// recovery resets it before Ready selects fresh work. With exit code 0,
@@ -444,7 +429,9 @@ func (s *Supervisor) preFlightSetup(ap *AgentProcess) bool {
 		if taskID != "" {
 			recoveryExitCode = -1
 		}
-		if err := s.recoverAgent(ap, recoveryExitCode); err != nil {
+		// Cold start: nothing here is being continued, so recovery takes its
+		// fully destructive form (incomplete=false).
+		if err := s.recoverAgent(ap, recoveryExitCode, false); err != nil {
 			slog.Warn("pre-flight recovery failed", "worktree", ap.Entry.Worktree, "err", err)
 			// Keep this lock on the destructive cold path across retries. In
 			// particular, a release conflict means another actor now owns its task;
@@ -825,8 +812,16 @@ func (s *Supervisor) spawnAndWait(ap *AgentProcess) {
 	exitCode := s.waitForAgent(ap)
 	s.classifyAgentExit(ap, exitCode)
 	// Ledger hook: LastError is set, the lock is still present, and
-	// AgentSessionID has not been cleared by finalize yet.
+	// AgentSessionID has not been cleared by finalize yet. It runs with the
+	// FACTUAL exit code, so a clean run that later fails a completion hook
+	// evicts its ledger entry and the hook failure never counts toward task
+	// quarantine — deliberate (hook outcomes are agent-side, not task-side) and
+	// bounded instead by the agent's block budget via CompletionHookFailure.
 	s.recordTaskExitForQuarantine(ap, exitCode)
+	// Completion hooks run while the session id, claim, and transcript still
+	// exist, and before finalize/checkpoint/recovery decide the run's fate: a
+	// failed hook write demotes exitCode so the owned task is reopened.
+	exitCode = s.runCompletionHooks(ap, exitCode)
 	s.finalizeAgentSession(ap, exitCode)
 	s.handleAgentCheckpoint(ap, exitCode)
 	s.postMortemRecovery(ap, exitCode)
@@ -843,7 +838,7 @@ func (s *Supervisor) postMortemRecovery(ap *AgentProcess, exitCode int) {
 		slog.Info("skipping post-mortem recovery for yield exit", "worktree", ap.Entry.Worktree)
 		return
 	}
-	if err := s.recoverAgent(ap, exitCode); err != nil {
+	if err := s.recoverAgent(ap, exitCode, isIncompleteRun(ap)); err != nil {
 		slog.Warn("post-mortem recovery failed", "worktree", ap.Entry.Worktree, "err", err)
 		// RecoverWorktree deliberately preserves the local lock when a destructive
 		// backend release/reset cannot be proven safe. Keep the next loop on cold

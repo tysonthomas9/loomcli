@@ -37,6 +37,8 @@ type Module struct {
 	dialCodex               func(ctx context.Context, endpoint string) (codexThreadReader, error)
 	streamPollInterval      time.Duration
 	streamHeartbeatInterval time.Duration
+	// rollouts memoizes the codex reviewer's on-disk rollout across polls.
+	rollouts codexRolloutCache
 	// seeded caches "connector+grants already ensured" by canonical resource
 	// and action set so read and write authority cannot share a cache hit.
 	seeded                     sync.Map

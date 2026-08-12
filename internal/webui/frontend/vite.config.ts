@@ -37,10 +37,6 @@ function manualChunks(id: string): string | undefined {
     return "better-auth";
   }
 
-  if (normalizedId.includes("/node_modules/@wterm/")) {
-    return "terminal-vendor";
-  }
-
   if (normalizedId.includes("/node_modules/@dnd-kit/")) {
     return "dnd-kit";
   }

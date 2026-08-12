@@ -89,6 +89,14 @@ func remoteFileCapabilities(r *http.Request, cfg FileAccessConfig, logger *slog.
 	return fileCapabilitiesForRole(role)
 }
 
+// KnownFileRole reports whether role names a role the file-browser capability
+// check recognizes. Configuration surfaces use it to reject a typo at startup
+// instead of shipping a resolver that forbids every request at serve time.
+func KnownFileRole(role string) bool {
+	_, ok := fileCapabilitiesForRole(role)
+	return ok
+}
+
 func fileCapabilitiesForRole(role string) (fileaccess.Capabilities, bool) {
 	switch normalizeFileRole(role) {
 	case "admin", "owner", "maintainer":

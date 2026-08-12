@@ -18,7 +18,7 @@ func TestHarnessNameForBackend(t *testing.T) {
 		"Claude":   HarnessNameClaudeCode,
 		"codex":    HarnessNameCodex,
 		"gemini":   HarnessNameGemini,
-		"opencode": HarnessNameGeneric,
+		"opencode": HarnessNameOpenCode,
 		"cursor":   HarnessNameGeneric,
 		"":         HarnessNameGeneric,
 	}
@@ -26,6 +26,39 @@ func TestHarnessNameForBackend(t *testing.T) {
 		if got := HarnessNameForBackend(backend); got != want {
 			t.Errorf("HarnessNameForBackend(%q) = %q, want %q", backend, got, want)
 		}
+	}
+}
+
+func TestHarnessLeadArgsPromptPlacement(t *testing.T) {
+	tests := []struct {
+		name string
+		cfg  HarnessLeadRuntimeConfig
+		want []string
+	}{
+		{
+			name: "positional prompt",
+			cfg:  HarnessLeadRuntimeConfig{Args: []string{"--force"}, Prompt: "lead prompt"},
+			want: []string{"--force", "lead prompt"},
+		},
+		{
+			name: "flagged prompt",
+			cfg:  HarnessLeadRuntimeConfig{Args: []string{"--model", "provider/model"}, PromptFlag: "--prompt", Prompt: "lead prompt"},
+			want: []string{"--model", "provider/model", "--prompt", "lead prompt"},
+		},
+		{
+			name: "empty prompt omits flag",
+			cfg:  HarnessLeadRuntimeConfig{Args: []string{"--model", "provider/model"}, PromptFlag: "--prompt"},
+			want: []string{"--model", "provider/model"},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := harnessLeadArgs(tc.cfg)
+			if strings.Join(got, "\x00") != strings.Join(tc.want, "\x00") {
+				t.Fatalf("harnessLeadArgs() = %q, want %q", got, tc.want)
+			}
+		})
 	}
 }
 
@@ -129,6 +162,55 @@ func TestRunHarnessLeadRuntimeLifecycle(t *testing.T) {
 	}
 	if !fake.closed {
 		t.Fatalf("conversation was not closed on runtime exit")
+	}
+}
+
+func TestHarnessLeadRuntimeWatcherIgnoresNonTurnEvents(t *testing.T) {
+	fake := newFakeHarnessConversation()
+	handle := &leadConversationHandle{conv: fake}
+	watcher := &harnessLeadRuntimeWatcher{
+		handle:     handle,
+		lastStatus: RuntimeStatusIdle,
+	}
+
+	watcher.observeConversationEvent(context.Background(), chat.ConversationEvent{
+		Type:  chat.EventInputRequest,
+		Input: &chat.InputRequest{ID: "trust-1"},
+		Turn:  chat.Turn{Role: chat.RoleAssistant, State: chat.TurnStatePending},
+	})
+	if watcher.lastStatus != RuntimeStatusIdle {
+		t.Fatalf("runtime status = %q, want input request ignored", watcher.lastStatus)
+	}
+	if !watcher.turnPendingSince.IsZero() {
+		t.Fatalf("turn pending timestamp = %v, want zero after input request", watcher.turnPendingSince)
+	}
+	if handle.turnInFlight() {
+		t.Fatal("input request marked a runtime turn in flight")
+	}
+	if !handle.hasPendingInput() {
+		t.Fatal("input request did not pause delivery")
+	}
+
+	started := time.Now()
+	handle.markTurnStarted()
+	watcher.lastStatus = RuntimeStatusActive
+	watcher.turnPendingSince = started
+	watcher.observeConversationEvent(context.Background(), chat.ConversationEvent{
+		Type:  chat.EventInputResolved,
+		Input: &chat.InputRequest{ID: "trust-1"},
+		Turn:  chat.Turn{Role: chat.RoleAssistant, State: chat.TurnStateComplete},
+	})
+	if watcher.lastStatus != RuntimeStatusActive {
+		t.Fatalf("runtime status = %q, want input resolution ignored", watcher.lastStatus)
+	}
+	if !watcher.turnPendingSince.Equal(started) {
+		t.Fatalf("turn pending timestamp = %v, want unchanged %v", watcher.turnPendingSince, started)
+	}
+	if !handle.turnInFlight() {
+		t.Fatal("input resolution completed the runtime's in-flight turn")
+	}
+	if handle.hasPendingInput() {
+		t.Fatal("input resolution did not resume delivery")
 	}
 }
 
