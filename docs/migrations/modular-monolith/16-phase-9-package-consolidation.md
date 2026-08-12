@@ -37,6 +37,7 @@
 - **Wave 9.32 implementation:** `06609d6ca`
 - **Wave 9.33 implementation:** `cad1c8b31`
 - **Wave 9.34 implementation:** `280ef5435`
+- **Wave 9.35 implementation:** `0a6363960`
 - **Stacked branches:** `modular-monolith-phase9-01-types-ratchet`, then
   `modular-monolith-phase9-02-shallow-seams`, then
   `modular-monolith-phase9-03-legacy-planes`, then
@@ -70,7 +71,8 @@
   `modular-monolith-phase9-31-fleet-compatibility-deletion`, then
   `modular-monolith-phase9-32-workitems-create-fallback-deletion`, then
   `modular-monolith-phase9-33-workitems-query-deletion`, then
-  `modular-monolith-phase9-34-workitems-query-ports`
+  `modular-monolith-phase9-34-workitems-query-ports`, then
+  `modular-monolith-phase9-35-workitems-stats-port`
 - **Purpose:** Reduce the residual package surface toward 160 production Go
   packages without weakening capability ownership, consumer-owned ports, or
   independently replaceable adapters.
@@ -1655,6 +1657,47 @@ Phase 9 remains incomplete. `IssueBackend` still carries 18 lifecycle, query,
 and command methods plus duplicate DTOs and transitional composition/proxy
 machinery. Subsequent waves continue moving real consumers to owner ports and
 delete the horizontal plane only after its final consumer is gone.
+
+## Wave 9.35 result
+
+Wave 9.35 moves aggregate statistics from the horizontal `IssueBackend`
+contract to the existing Work Items-owned `StatsQueries` port. The Loom API and
+FleetDB adapters now return `workitems.Stats` directly; the WebUI composition,
+CLI monitor, lazy workspace proxy, unavailable backend, and tracing decorator
+all require that owner port and fail closed when it is missing.
+
+The field-for-field duplicate `backend.StatsData` DTO is deleted rather than
+retained as an alias. Its JSON round-trip and meaningful-zero-value tests move
+to the owner model. The tracing span moves from the implicit
+`service.IssueBackend.Stats` convention to `service.WorkItems.Stats`, and a
+cannot-return ratchet rejects `StatsData` throughout backend, adapter, and CLI
+roots.
+
+The broad interface contracts from 18 methods to 17. Implementation commit
+`0a6363960` changes 23 files with 125 insertions and 130 deletions, a net
+removal of five lines. Exact package shape remains `159 / 15 / 144 / 42 / 60`;
+this wave deletes a duplicated representation and adds no facade, alias, or
+production package.
+
+## Wave 9.35 validation
+
+| Check | Result |
+|---|---|
+| Repository compile graph | PASS: every Go package compiled after deleting `IssueBackend.Stats` and `backend.StatsData` |
+| Owner and adapter behavior | PASS: Work Items cloning and JSON contracts plus API and FleetDB statistics behavior pass |
+| WebUI, health, monitor, metrics, proxy, and tracing consumers | PASS: focused suites use `StatsQueries`, including fail-closed missing-port behavior |
+| Cannot-return architecture ratchet | PASS: `TestUnusedIssueBackendCompatibilityOperationsCannotReturn` rejects `StatsData` |
+| Loom `make gate` | PASS: all Go and frontend quality gates against paired FleetDB source `e9c185b` and its exact binary, with four Go OS threads, two Go package workers, one Vitest worker, and a 2 GiB Go soft memory limit |
+
+The complete gate rebuilt its tagged architecture graphs before the later race,
+coverage, and integration stages. The observed architecture process remained
+below 355 MiB RSS, comfortably inside the 2 GiB guard. No test, threshold,
+profile, or owner rule was disabled.
+
+Phase 9 remains incomplete. `IssueBackend` still carries 17 lifecycle, query,
+and command methods plus duplicate issue/detail/comment/event DTOs and
+transitional composition/proxy machinery. Those are deletion targets, not
+accepted compatibility architecture.
 
 ---
 
