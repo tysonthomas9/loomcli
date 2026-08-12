@@ -5,6 +5,7 @@ package role
 import (
 	"context"
 	"fmt"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -182,6 +183,7 @@ func runRoleAdd(_ *cobra.Command, args []string) error {
 			return fmt.Errorf("create role: %w", err)
 		}
 		fmt.Printf("Created role %s/%s\n", r.WorkspaceKey, r.Name)
+		warnDroppedLabelConstraints(r, in.Labels, in.ExcludeLabels)
 		return nil
 	})
 }
@@ -288,10 +290,12 @@ func runRoleSet(_ *cobra.Command, args []string) error {
 		if err != nil {
 			return err
 		}
-		if _, err := h.Store.Roles().Update(ctx, ws, name, patch); err != nil {
+		r, err := h.Store.Roles().Update(ctx, ws, name, patch)
+		if err != nil {
 			return fmt.Errorf("update role: %w", err)
 		}
 		fmt.Printf("Set %s/%s.%s = %s\n", ws, name, key, value)
+		warnDroppedLabelConstraints(r, derefSlice(patch.Labels), derefSlice(patch.ExcludeLabels))
 		return nil
 	})
 }
@@ -449,6 +453,46 @@ func normalizeRoleKindValue(value string) string {
 	return strings.ToLower(strings.TrimSpace(value))
 }
 
+// warnDroppedLabelConstraints reports label constraints that were written but
+// did not come back on the stored role.
+//
+// The wire encoding is fail-open by construction: the create/patch bodies carry
+// `labels` / `exclude_labels` as ordinary JSON, and a fleet-db deployment that
+// predates label constraints ignores the unknown fields and answers 200. The
+// write "succeeds", `loom role show` comes back without the constraints, and
+// the routing gate the operator just configured is simply absent — the role
+// goes on claiming every issue, which is the exact failure this feature exists
+// to prevent. Silence there is the worst outcome, so say it out loud.
+//
+// stored == nil is treated as "not persisted": every backend returns the stored
+// role on success, so a nil here means we cannot confirm the write either way.
+func warnDroppedLabelConstraints(stored *domain.Role, wantLabels, wantExclude []string) {
+	var missing []string
+	if len(wantLabels) > 0 && (stored == nil || len(stored.Labels) == 0) {
+		missing = append(missing, "labels")
+	}
+	if len(wantExclude) > 0 && (stored == nil || len(stored.ExcludeLabels) == 0) {
+		missing = append(missing, "exclude_labels")
+	}
+	if len(missing) == 0 {
+		return
+	}
+	fmt.Fprintf(os.Stderr,
+		"warning: %s was accepted but not stored - label routing is NOT active for this role.\n"+
+			"  The backend is most likely older than label-constraint support; deploy fleet-db first,\n"+
+			"  then re-apply. Confirm with: loom role show <name>\n",
+		strings.Join(missing, " and "))
+}
+
+// derefSlice returns the pointed-to slice, or nil when the patch leaves the
+// field alone.
+func derefSlice(p *[]string) []string {
+	if p == nil {
+		return nil
+	}
+	return *p
+}
+
 func validateRoleKindValue(value string) error {
 	switch normalizeRoleKindValue(value) {
 	case "", string(domain.RoleKindInteractive), string(domain.RoleKindWorker):
@@ -458,9 +502,6 @@ func validateRoleKindValue(value string) error {
 	}
 }
 
-// sliceCSVPtr returns a non-nil *[]string for the patch. Empty input
-// becomes an empty slice (which fleet-db treats as "set to empty list",
-// equivalent to clearing the field).
 // trimFilterLabels trims whitespace and drops empty elements from a
 // --labels/--exclude-labels flag value. Labels are hard-reject constraints
 // (unlike Skills' soft demote), so a stray whitespace-only element must not
@@ -481,6 +522,9 @@ func trimFilterLabels(in []string) []string {
 	return out
 }
 
+// sliceCSVPtr returns a non-nil *[]string for the patch. Empty input
+// becomes an empty slice (which fleet-db treats as "set to empty list",
+// equivalent to clearing the field).
 func sliceCSVPtr(csv string) *[]string {
 	out := splitCSV(csv)
 	if out == nil {

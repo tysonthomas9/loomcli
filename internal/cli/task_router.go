@@ -361,6 +361,10 @@ func firstMissingLabel(labels, required []string) (string, bool) {
 
 // splitLabelCSV splits a comma-separated env value, trimming whitespace and
 // dropping empty elements. Returns nil for an all-empty input.
+//
+// The separator is not escapable, so a label containing a comma arrives here as
+// two labels — see appendRoutingEnv (supervisor/spawn.go) for why that is
+// accepted and what it would take to change.
 func splitLabelCSV(v string) []string {
 	var out []string
 	for _, p := range strings.Split(v, ",") {
