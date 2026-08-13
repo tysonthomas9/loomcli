@@ -40,3 +40,35 @@ func TestClassifyHTTPError_ExistingMappingsUnchanged(t *testing.T) {
 		}
 	}
 }
+
+// Upstream 5xx is a retryable availability failure, not an opaque error: without
+// a sentinel, callers cannot tell "fleet-db is down" from "this service has a
+// bug", and every transcript/artifact read failure surfaces as a 500.
+func TestClassifyHTTPError_ServerErrorsMapToErrUnavailable(t *testing.T) {
+	t.Parallel()
+	for _, status := range []int{
+		http.StatusInternalServerError,
+		http.StatusBadGateway,
+		http.StatusServiceUnavailable,
+		http.StatusGatewayTimeout,
+	} {
+		err := classifyHTTPError(http.MethodGet, "/api/v1/WS/artifacts/a/content", status, nil)
+		if !errors.Is(err, domain.ErrUnavailable) {
+			t.Fatalf("status %d: err = %v, want errors.Is ErrUnavailable", status, err)
+		}
+		if errors.Is(err, domain.ErrNotFound) || errors.Is(err, domain.ErrConflict) {
+			t.Fatalf("status %d: err = %v, must not satisfy ErrNotFound/ErrConflict", status, err)
+		}
+	}
+}
+
+// 4xx must keep its existing classification and never become "unavailable".
+func TestClassifyHTTPError_ClientErrorsAreNotUnavailable(t *testing.T) {
+	t.Parallel()
+	for _, status := range []int{http.StatusNotFound, http.StatusConflict, http.StatusBadRequest, http.StatusTeapot} {
+		err := classifyHTTPError(http.MethodGet, "/x", status, nil)
+		if errors.Is(err, domain.ErrUnavailable) {
+			t.Fatalf("status %d: err = %v, must not satisfy ErrUnavailable", status, err)
+		}
+	}
+}

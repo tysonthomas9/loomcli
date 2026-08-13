@@ -48,4 +48,11 @@ var (
 	// lease_expired). Distinct from ErrNotFound (never existed here) and
 	// ErrConflict (someone else holds it): re-acquire is safe.
 	ErrGone = errors.New("domain: gone")
+
+	// ErrUnavailable indicates an upstream dependency could not serve the
+	// request — it was unreachable, or answered 5xx. The request may well
+	// succeed on retry, so callers should surface it as 503 rather than
+	// laundering it into an opaque internal error. Distinct from ErrNotFound
+	// (the thing does not exist) and ErrInvalid (the request was wrong).
+	ErrUnavailable = errors.New("domain: upstream unavailable")
 )

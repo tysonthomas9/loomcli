@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -489,7 +490,7 @@ func (s *sessionServiceImpl) controlPlaneSessionTranscript(ctx context.Context, 
 	}
 	data, err := s.readTranscriptRef(ctx, wsID, transcriptRef)
 	if err != nil {
-		return nil, service.ErrInternal("failed to load transcript", err)
+		return nil, transcriptReadError(err)
 	}
 	events, err := parseCanonicalTranscriptBytes(data)
 	if err != nil {
@@ -499,6 +500,22 @@ func (s *sessionServiceImpl) controlPlaneSessionTranscript(ctx context.Context, 
 		events = []transcript.Event{}
 	}
 	return events, nil
+}
+
+// transcriptReadError classifies a transcript-store read failure so the handler
+// can answer with a status the client can act on. Collapsing everything into
+// ErrInternal reports a transient fleet-db/content-store outage — and a
+// transcript_ref whose artifact no longer exists — as a 500, which reads as
+// "this service is broken" and gives clients no retry signal.
+func transcriptReadError(err error) error {
+	switch {
+	case errors.Is(err, domain.ErrNotFound):
+		return service.ErrNotFound("transcript not found")
+	case errors.Is(err, domain.ErrUnavailable):
+		return service.ErrUnavailable("transcript store unavailable")
+	default:
+		return service.ErrInternal("failed to load transcript", err)
+	}
 }
 
 const maxControlPlaneTranscriptBytes = 16 << 20
@@ -549,7 +566,11 @@ func readTranscriptURI(ctx context.Context, rawURI string) ([]byte, error) {
 		if path == "" {
 			return nil, errors.New("empty file transcript ref")
 		}
-		return os.ReadFile(path) //nolint:gosec // refs are emitted by the trusted runner/control-plane path.
+		data, readErr := os.ReadFile(path) //nolint:gosec // refs are emitted by the trusted runner/control-plane path.
+		if readErr != nil && errors.Is(readErr, os.ErrNotExist) {
+			return nil, fmt.Errorf("transcript file %s: %w", path, domain.ErrNotFound)
+		}
+		return data, readErr
 	case strings.HasPrefix(rawURI, "http://"), strings.HasPrefix(rawURI, "https://"):
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURI, nil)
 		if err != nil {
@@ -557,11 +578,18 @@ func readTranscriptURI(ctx context.Context, rawURI string) ([]byte, error) {
 		}
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
-			return nil, err
+			// Content store unreachable — retryable, not an internal fault.
+			return nil, fmt.Errorf("transcript ref request failed: %w: %w", domain.ErrUnavailable, err)
 		}
 		defer resp.Body.Close()
 		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-			return nil, errors.New("transcript ref returned non-success status")
+			switch {
+			case resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusGone:
+				return nil, fmt.Errorf("transcript ref returned HTTP %d: %w", resp.StatusCode, domain.ErrNotFound)
+			case resp.StatusCode >= 500 || resp.StatusCode == http.StatusTooManyRequests:
+				return nil, fmt.Errorf("transcript ref returned HTTP %d: %w", resp.StatusCode, domain.ErrUnavailable)
+			}
+			return nil, fmt.Errorf("transcript ref returned non-success status %d", resp.StatusCode)
 		}
 		body, err := io.ReadAll(io.LimitReader(resp.Body, maxControlPlaneTranscriptBytes+1))
 		if err != nil {

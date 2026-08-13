@@ -5024,8 +5024,15 @@ export interface operations {
           };
         };
       };
-      /** @description Session not found */
+      /** @description Session not found, or the referenced transcript content no longer exists */
       404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Transcript store unavailable (retryable) */
+      503: {
         headers: {
           [name: string]: unknown;
         };
