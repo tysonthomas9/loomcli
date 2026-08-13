@@ -222,11 +222,6 @@ func runDaemonBody() int {
 		return 1
 	}
 
-	if len(config.Agents) == 0 {
-		fmt.Fprintf(os.Stderr, "Error: no agents configured in FleetDB for the active workspace\n")
-		return 1
-	}
-
 	paths := resolveDaemonPaths(projectDir, config)
 	ValidateDaemonPaths(projectDir, paths.pidFile, paths.logDir)
 

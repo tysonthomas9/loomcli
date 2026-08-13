@@ -15,7 +15,7 @@ func TestNewDaemon_NilConfig(t *testing.T) {
 	}
 }
 
-func TestNewDaemon_EmptyAgents(t *testing.T) {
+func TestDaemon_StartsWithEmptyAgentSet(t *testing.T) {
 	cfg := &DaemonConfig{
 		Agents: []AgentEntry{},
 	}
@@ -26,6 +26,13 @@ func TestNewDaemon_EmptyAgents(t *testing.T) {
 	if d.config != cfg {
 		t.Fatal("daemon config was not preserved")
 	}
+	if err := d.Start(); err != nil {
+		t.Fatalf("Start empty daemon: %v", err)
+	}
+	if d.sup.Shutdown == nil {
+		t.Fatal("empty daemon did not initialize its supervisor")
+	}
+	d.Stop()
 }
 
 func TestDaemon_StopAgent_NilProcess(t *testing.T) {

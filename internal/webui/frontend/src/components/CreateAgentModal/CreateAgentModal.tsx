@@ -376,6 +376,9 @@ export function CreateAgentModal({
         auto: false,
         cross_repo: crossRepo,
         repos: crossRepo ? [] : selectedRepos,
+        ...(selection.kind === "background"
+          ? { desired_state: "stopped" as const }
+          : {}),
         ...interactiveFields,
       };
       const agent = await createAgent({

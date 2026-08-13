@@ -2,7 +2,7 @@
  * @vitest-environment jsdom
  */
 
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom";
 import { describe, expect, it, vi } from "vitest";
 
@@ -13,11 +13,17 @@ import { AgentDetailMain } from "./AgentDetailMain";
 
 const mocks = vi.hoisted(() => ({
   useAgentStoreInstance: vi.fn(),
+  startAgent: vi.fn(),
 }));
 
 vi.mock("@/hooks", () => ({
   useAgentStoreInstance: mocks.useAgentStoreInstance,
 }));
+
+vi.mock("@/hooks/api", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/hooks/api")>();
+  return { ...actual, startAgent: mocks.startAgent };
+});
 
 vi.mock("@/components/TerminalView", () => ({
   TerminalView: () => <div data-testid="terminal-view" />,
@@ -224,6 +230,49 @@ describe("AgentDetailMain", () => {
     expect(screen.queryByText("unknown")).not.toBeInTheDocument();
   });
 
+  it("starts an idle background agent through the lifecycle endpoint", async () => {
+    mocks.startAgent.mockResolvedValue(undefined);
+    const agent = {
+      name: "planner-a",
+      branch: "planner-a",
+      status: "idle",
+      ahead: 0,
+      behind: 0,
+      workspace: "E2E",
+      role: "plan",
+      state: "idle",
+    } as LoomAgentStatus;
+    const store = createAgentStore();
+    store.setState({ agents: [agent] });
+    mocks.useAgentStoreInstance.mockReturnValue(store);
+
+    render(<AgentDetailMain agentName={agent.name} workspaceId="E2E" />);
+    fireEvent.click(screen.getByTestId("agent-start-button"));
+
+    await waitFor(() => {
+      expect(mocks.startAgent).toHaveBeenCalledWith("E2E", "planner-a");
+      expect(screen.getByText("Start requested")).toBeDisabled();
+    });
+  });
+
+  it("does not offer start for an already running background agent", () => {
+    const agent = {
+      name: "planner-live",
+      branch: "planner-live",
+      status: "planning",
+      ahead: 0,
+      behind: 0,
+      workspace: "E2E",
+      role: "plan",
+      state: "active",
+      desired_state: "running",
+    } as LoomAgentStatus;
+
+    renderWithAgents([agent], agent.name);
+
+    expect(screen.queryByTestId("agent-start-button")).not.toBeInTheDocument();
+  });
+
   it("keeps completed ephemeral worker artifacts and cleanup actions visible", () => {
     const agent = completedWorkerAgent();
 
@@ -248,6 +297,7 @@ describe("AgentDetailMain", () => {
     expect(
       screen.getByRole("button", { name: "Rerun task" }),
     ).toBeInTheDocument();
+    expect(screen.queryByTestId("agent-start-button")).not.toBeInTheDocument();
     expect(screen.queryByTestId("terminal-view")).not.toBeInTheDocument();
   });
 

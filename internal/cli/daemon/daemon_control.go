@@ -185,6 +185,37 @@ func (d *Daemon) handleAgentControlStop(name string, force bool) DaemonControlRe
 }
 
 // handleAgentControlStart starts a previously stopped agent.
+// resolveAgentEntryForStart finds the agent entry, pulling config once
+// synchronously if it is missing. Command-created agents may have been written to
+// fleet-db after the last config poll, so a queued start must be able to
+// materialize the new local worker immediately.
+//
+// The agent is suppressed for the duration of the reload: otherwise the generic
+// add path inside reloadAndReconcile starts it before the caller can attach
+// taskID/parentSessionID, and the explicit start then fails as "already running".
+// Suppression is undone only if the entry never showed up AND the agent was not
+// already stopped beforehand, so this cannot resurrect a deliberately stopped agent.
+func (d *Daemon) resolveAgentEntryForStart(name string) (config.AgentEntry, bool) {
+	entry, ok := d.findAgentEntry(name)
+	if ok {
+		return entry, true
+	}
+	d.sup.AgentsMu.Lock()
+	_, wasStopped := d.sup.StoppedAgents[name]
+	d.sup.StoppedAgents[name] = struct{}{}
+	d.sup.AgentsMu.Unlock()
+
+	d.reloadAndReconcile()
+
+	entry, ok = d.findAgentEntry(name)
+	if !ok && !wasStopped {
+		d.sup.AgentsMu.Lock()
+		delete(d.sup.StoppedAgents, name)
+		d.sup.AgentsMu.Unlock()
+	}
+	return entry, ok
+}
+
 func (d *Daemon) handleAgentControlStart(name string, taskIDs ...string) DaemonControlResponse {
 	taskID := ""
 	if len(taskIDs) > 0 {
@@ -198,14 +229,7 @@ func (d *Daemon) handleAgentControlStart(name string, taskIDs ...string) DaemonC
 		return DaemonControlResponse{Error: "agent name is required"}
 	}
 
-	// Command-created agents may have been written to fleet-db after the last
-	// config poll. Pull config once synchronously so a queued start command can
-	// materialize the new local worker immediately.
-	entry, ok := d.findAgentEntry(name)
-	if !ok {
-		d.reloadAndReconcile()
-		entry, ok = d.findAgentEntry(name)
-	}
+	entry, ok := d.resolveAgentEntryForStart(name)
 	if !ok {
 		return DaemonControlResponse{Error: fmt.Sprintf("agent %q not found in daemon config", name)}
 	}

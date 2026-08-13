@@ -390,6 +390,7 @@ function AgentsPageInner(): JSX.Element {
             <div className={styles.realTabBody}>
               <AgentDetailMain
                 agentName={agentName}
+                workspaceId={workspaceId}
                 pendingTerminalInput={pendingTerminalInput}
                 onTerminalInputConsumed={() =>
                   setPendingTerminalInput(undefined)
@@ -576,6 +577,7 @@ function AgentsPageInner(): JSX.Element {
       statusType,
       hasDiffStat,
       diffStat,
+      workspaceId,
     ],
   );
 

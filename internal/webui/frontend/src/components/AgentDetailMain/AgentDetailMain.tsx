@@ -32,9 +32,13 @@ import type {
   TerminalSplitControls,
 } from "@/components/TerminalView";
 import { useAgentStoreInstance } from "@/hooks";
-import { wsUrl } from "@/hooks/api";
+import { startAgent, wsUrl } from "@/hooks/api";
 import { type LoomAgentStatus, parseLoomStatus } from "@/types";
-import { isInteractiveAgent, isLeadRole } from "@/utils/agentRole";
+import {
+  isBackgroundAgent,
+  isInteractiveAgent,
+  isLeadRole,
+} from "@/utils/agentRole";
 import {
   agentDisplayRoleLabel,
   agentDisplayTitle,
@@ -51,6 +55,7 @@ const TerminalView = lazy(() =>
 
 interface AgentDetailMainProps {
   agentName: string | undefined;
+  workspaceId?: string | undefined;
   pendingTerminalInput?: TerminalInputRequest | undefined;
   onTerminalInputConsumed?: (() => void) | undefined;
   onTerminalSplitControlsChange?: (
@@ -72,6 +77,7 @@ const STATUS_DOT_COLOR: Record<string, string> = {
 
 export function AgentDetailMain({
   agentName,
+  workspaceId = "",
   pendingTerminalInput,
   onTerminalInputConsumed,
   onTerminalSplitControlsChange,
@@ -90,8 +96,14 @@ export function AgentDetailMain({
   const [pendingAgentName, setPendingAgentName] = useState<string | undefined>(
     agentName,
   );
+  const [startPending, setStartPending] = useState(false);
+  const [startAccepted, setStartAccepted] = useState(false);
+  const [startError, setStartError] = useState("");
   useEffect(() => {
     if (agentName) setPendingAgentName(agentName);
+    setStartPending(false);
+    setStartAccepted(false);
+    setStartError("");
   }, [agentName]);
   const handleAgentNameConsumed = useCallback(
     () => setPendingAgentName(undefined),
@@ -105,6 +117,27 @@ export function AgentDetailMain({
     agent != null && terminalUnavailable
       ? terminalUnavailableEmptyState(agent)
       : null;
+  const canStartBackgroundAgent =
+    agent != null &&
+    isBackgroundAgent(agent) &&
+    agent.mode !== "ephemeral" &&
+    !isAgentLifecycleRunning(agent);
+  const handleStartAgent = useCallback(async () => {
+    if (!agent || !workspaceId || startPending) return;
+    setStartPending(true);
+    setStartAccepted(false);
+    setStartError("");
+    try {
+      await startAgent(workspaceId, agent.name);
+      setStartAccepted(true);
+    } catch (err) {
+      setStartError(
+        err instanceof Error ? err.message : "Failed to start agent",
+      );
+    } finally {
+      setStartPending(false);
+    }
+  }, [agent, startPending, workspaceId]);
 
   if (!agentName) {
     return (
@@ -127,7 +160,15 @@ export function AgentDetailMain({
         minHeight: 0,
       }}
     >
-      <Header agent={agent} agentName={agentName} />
+      <Header
+        agent={agent}
+        agentName={agentName}
+        canStart={canStartBackgroundAgent}
+        startPending={startPending}
+        startAccepted={startAccepted}
+        startError={startError}
+        onStart={handleStartAgent}
+      />
       <div
         style={{
           flex: 1,
@@ -172,6 +213,19 @@ function isTerminalUnavailable(agent: LoomAgentStatus): boolean {
   const state = (agent.state ?? "").toLowerCase();
   const desiredState = (agent.desired_state ?? "").toLowerCase();
   return state === "stopped" || state === "dead" || desiredState === "stopped";
+}
+
+function isAgentLifecycleRunning(agent: LoomAgentStatus): boolean {
+  const state = (agent.state ?? "").trim().toLowerCase();
+  const desiredState = (agent.desired_state ?? "").trim().toLowerCase();
+  const status = parseLoomStatus(agent.status ?? "").type;
+  return (
+    desiredState === "running" ||
+    state === "active" ||
+    state === "running" ||
+    status === "working" ||
+    status === "planning"
+  );
 }
 
 function terminalUnavailableEmptyState(_agent: LoomAgentStatus): {
@@ -391,9 +445,19 @@ function EphemeralWorkerSummary({
 function Header({
   agent,
   agentName,
+  canStart,
+  startPending,
+  startAccepted,
+  startError,
+  onStart,
 }: {
   agent: LoomAgentStatus | undefined;
   agentName: string;
+  canStart: boolean;
+  startPending: boolean;
+  startAccepted: boolean;
+  startError: string;
+  onStart: () => void;
 }): JSX.Element {
   const parsed = useMemo(
     () => parseLoomStatus(agent?.status ?? ""),
@@ -596,6 +660,52 @@ function Header({
           ))}
         </div>
       </div>
+      {canStart ? (
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "flex-end",
+            gap: 4,
+          }}
+        >
+          <button
+            type="button"
+            data-testid="agent-start-button"
+            disabled={startPending || startAccepted}
+            onClick={onStart}
+            style={{
+              minHeight: 30,
+              padding: "0 10px",
+              border: "1px solid var(--color-border, #ddd)",
+              borderRadius: 4,
+              background: "var(--color-bg-card, #fff)",
+              color: "var(--color-text-primary, #333)",
+              fontSize: 12,
+              fontWeight: 600,
+              cursor: startPending || startAccepted ? "wait" : "pointer",
+            }}
+          >
+            {startPending
+              ? "Starting..."
+              : startAccepted
+                ? "Start requested"
+                : "Start agent"}
+          </button>
+          {startError ? (
+            <span
+              role="alert"
+              data-testid="agent-start-error"
+              style={{
+                color: "var(--color-status-error, #d14545)",
+                fontSize: 11,
+              }}
+            >
+              {startError}
+            </span>
+          ) : null}
+        </div>
+      ) : null}
     </div>
   );
 }

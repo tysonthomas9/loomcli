@@ -336,6 +336,7 @@ describe("CreateAgentModal: submission", () => {
       name: "planner",
       role_name: "task",
       auto: false,
+      desired_state: "stopped",
       cross_repo: false,
       repos: ["alpha"], // first repo is the default
       backend: "claude",

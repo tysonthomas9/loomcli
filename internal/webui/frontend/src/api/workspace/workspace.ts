@@ -47,6 +47,7 @@ export interface CreateAgentRequest {
   prompt?: string;
   prompt_file?: string;
   auto?: boolean;
+  desired_state?: "running" | "stopped" | "draining";
   backend?: string;
   repos?: string[];
   repo_groups?: string[];
