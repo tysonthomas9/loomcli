@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tysonthomas9/loomcli/internal/sessions/transcript"
+	transcript "github.com/tysonthomas9/loomcli/internal/modules/artifacts"
 )
 
 // Every built-in is registered and discoverable through the generalized
@@ -543,7 +543,7 @@ func assertCanonicalTranscript(t *testing.T, entries []transcript.Event) {
 		if entry.Timestamp.IsZero() {
 			t.Fatalf("entry %d has zero timestamp: %+v", index, entry)
 		}
-		if !transcript.KnownRoles[entry.Role] || !transcript.KnownEventTypes[entry.Type] {
+		if !transcript.IsCanonicalTranscriptRole(entry.Role) || !transcript.IsCanonicalTranscriptEventType(entry.Type) {
 			t.Fatalf("entry %d is outside canonical vocabulary: %+v", index, entry)
 		}
 	}

@@ -16,7 +16,6 @@ import (
 	artifactsmodule "github.com/tysonthomas9/loomcli/internal/modules/artifacts"
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
-	"github.com/tysonthomas9/loomcli/internal/sessions/transcript"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -97,65 +96,65 @@ type hostBridgeStore interface {
 }
 
 type bridgeTaskRunnerResult struct {
-	Status                  domain.TaskRunStatus `json:"status"`
-	ExitCode                *int                 `json:"exit_code"`
-	ExitCodeCamel           *int                 `json:"exitCode"`
-	LogsRef                 string               `json:"logs_ref"`
-	LogsRefCamel            string               `json:"logsRef"`
-	Logs                    string               `json:"logs"`
-	LogsPath                string               `json:"logs_path"`
-	LogsPathCamel           string               `json:"logsPath"`
-	ArtifactsRef            string               `json:"artifacts_ref"`
-	ArtifactsRefCamel       string               `json:"artifactsRef"`
-	ArtifactIDs             []string             `json:"artifact_ids"`
-	ArtifactIDsCamel        []string             `json:"artifactIds"`
-	InputTokens             int64                `json:"input_tokens"`
-	InputTokensCamel        int64                `json:"inputTokens"`
-	OutputTokens            int64                `json:"output_tokens"`
-	OutputTokensCamel       int64                `json:"outputTokens"`
-	CacheReadTokens         int64                `json:"cache_read_tokens"`
-	CacheReadTokensCamel    int64                `json:"cacheReadTokens"`
-	CacheWriteTokens        int64                `json:"cache_write_tokens"`
-	CacheWriteTokensCamel   int64                `json:"cacheWriteTokens"`
-	EstimatedCostUSD        float64              `json:"estimated_cost_usd"`
-	EstimatedCostUSDCamel   float64              `json:"estimatedCostUsd"`
-	Artifacts               []bridgeArtifact     `json:"artifacts"`
-	ArtifactDescriptors     []bridgeArtifact     `json:"artifact_descriptors"`
-	ArtifactDescriptorsAlt  []bridgeArtifact     `json:"artifactDescriptors"`
-	SessionID               string               `json:"session_id"`
-	SessionIDCamel          string               `json:"sessionId"`
-	TranscriptRef           string               `json:"transcript_ref"`
-	TranscriptRefCamel      string               `json:"transcriptRef"`
-	Transcript              string               `json:"transcript"`
-	TranscriptPath          string               `json:"transcript_path"`
-	TranscriptPathCamel     string               `json:"transcriptPath"`
-	TranscriptEntries       []transcript.Event   `json:"transcript_entries"`
-	TranscriptEntriesCamel  []transcript.Event   `json:"transcriptEntries"`
-	TranscriptEvents        []transcript.Event   `json:"transcript_events"`
-	TranscriptEventsCamel   []transcript.Event   `json:"transcriptEvents"`
-	RuntimeMetadata         map[string]string    `json:"runtime_metadata"`
-	RuntimeMetadataCamel    map[string]string    `json:"runtimeMetadata"`
-	ErrorClass              string               `json:"error_class"`
-	ErrorClassCamel         string               `json:"errorClass"`
-	ErrorMessage            string               `json:"error_message"`
-	ErrorMessageCamel       string               `json:"errorMessage"`
-	Patch                   string               `json:"patch"`
-	PatchPath               string               `json:"patch_path"`
-	PatchPathCamel          string               `json:"patchPath"`
-	PatchBaseRef            string               `json:"patch_base_ref"`
-	PatchBaseRefCamel       string               `json:"patchBaseRef"`
-	BaseRef                 string               `json:"base_ref"`
-	BaseRefCamel            string               `json:"baseRef"`
-	PatchArtifactID         string               `json:"patch_artifact_id"`
-	PatchArtifactIDCamel    string               `json:"patchArtifactId"`
-	PatchSummary            string               `json:"patch_summary"`
-	PatchSummaryCamel       string               `json:"patchSummary"`
-	PatchMIMEType           string               `json:"patch_mime_type"`
-	PatchMIMETypeCamel      string               `json:"patchMimeType"`
-	PatchVisibility         string               `json:"patch_visibility"`
-	PatchVisibilityCamel    string               `json:"patchVisibility"`
-	PatchRedactionStatus    string               `json:"patch_redaction_status"`
-	PatchRedactionStatusAlt string               `json:"patchRedactionStatus"`
+	Status                  domain.TaskRunStatus    `json:"status"`
+	ExitCode                *int                    `json:"exit_code"`
+	ExitCodeCamel           *int                    `json:"exitCode"`
+	LogsRef                 string                  `json:"logs_ref"`
+	LogsRefCamel            string                  `json:"logsRef"`
+	Logs                    string                  `json:"logs"`
+	LogsPath                string                  `json:"logs_path"`
+	LogsPathCamel           string                  `json:"logsPath"`
+	ArtifactsRef            string                  `json:"artifacts_ref"`
+	ArtifactsRefCamel       string                  `json:"artifactsRef"`
+	ArtifactIDs             []string                `json:"artifact_ids"`
+	ArtifactIDsCamel        []string                `json:"artifactIds"`
+	InputTokens             int64                   `json:"input_tokens"`
+	InputTokensCamel        int64                   `json:"inputTokens"`
+	OutputTokens            int64                   `json:"output_tokens"`
+	OutputTokensCamel       int64                   `json:"outputTokens"`
+	CacheReadTokens         int64                   `json:"cache_read_tokens"`
+	CacheReadTokensCamel    int64                   `json:"cacheReadTokens"`
+	CacheWriteTokens        int64                   `json:"cache_write_tokens"`
+	CacheWriteTokensCamel   int64                   `json:"cacheWriteTokens"`
+	EstimatedCostUSD        float64                 `json:"estimated_cost_usd"`
+	EstimatedCostUSDCamel   float64                 `json:"estimatedCostUsd"`
+	Artifacts               []bridgeArtifact        `json:"artifacts"`
+	ArtifactDescriptors     []bridgeArtifact        `json:"artifact_descriptors"`
+	ArtifactDescriptorsAlt  []bridgeArtifact        `json:"artifactDescriptors"`
+	SessionID               string                  `json:"session_id"`
+	SessionIDCamel          string                  `json:"sessionId"`
+	TranscriptRef           string                  `json:"transcript_ref"`
+	TranscriptRefCamel      string                  `json:"transcriptRef"`
+	Transcript              string                  `json:"transcript"`
+	TranscriptPath          string                  `json:"transcript_path"`
+	TranscriptPathCamel     string                  `json:"transcriptPath"`
+	TranscriptEntries       []artifactsmodule.Event `json:"transcript_entries"`
+	TranscriptEntriesCamel  []artifactsmodule.Event `json:"transcriptEntries"`
+	TranscriptEvents        []artifactsmodule.Event `json:"transcript_events"`
+	TranscriptEventsCamel   []artifactsmodule.Event `json:"transcriptEvents"`
+	RuntimeMetadata         map[string]string       `json:"runtime_metadata"`
+	RuntimeMetadataCamel    map[string]string       `json:"runtimeMetadata"`
+	ErrorClass              string                  `json:"error_class"`
+	ErrorClassCamel         string                  `json:"errorClass"`
+	ErrorMessage            string                  `json:"error_message"`
+	ErrorMessageCamel       string                  `json:"errorMessage"`
+	Patch                   string                  `json:"patch"`
+	PatchPath               string                  `json:"patch_path"`
+	PatchPathCamel          string                  `json:"patchPath"`
+	PatchBaseRef            string                  `json:"patch_base_ref"`
+	PatchBaseRefCamel       string                  `json:"patchBaseRef"`
+	BaseRef                 string                  `json:"base_ref"`
+	BaseRefCamel            string                  `json:"baseRef"`
+	PatchArtifactID         string                  `json:"patch_artifact_id"`
+	PatchArtifactIDCamel    string                  `json:"patchArtifactId"`
+	PatchSummary            string                  `json:"patch_summary"`
+	PatchSummaryCamel       string                  `json:"patchSummary"`
+	PatchMIMEType           string                  `json:"patch_mime_type"`
+	PatchMIMETypeCamel      string                  `json:"patchMimeType"`
+	PatchVisibility         string                  `json:"patch_visibility"`
+	PatchVisibilityCamel    string                  `json:"patchVisibility"`
+	PatchRedactionStatus    string                  `json:"patch_redaction_status"`
+	PatchRedactionStatusAlt string                  `json:"patchRedactionStatus"`
 }
 
 type bridgeArtifact struct {
@@ -300,10 +299,7 @@ func (e HostBridgeTaskExecutor) ExecuteTask(ctx context.Context, req TaskExecReq
 			return TaskExecResult{}, err
 		}
 	}
-	result, err = e.persistRunnerOutputArtifacts(ctx, req, runnerResult, result)
-	if err != nil {
-		return TaskExecResult{}, err
-	}
+	result = e.persistRunnerOutputArtifacts(ctx, req, runnerResult, result)
 	patch, err := e.readPatch(ctx, runnerResult)
 	if err != nil {
 		return TaskExecResult{}, err
@@ -834,19 +830,24 @@ func (e HostBridgeTaskExecutor) finalizeAndApplyPatch(ctx context.Context, req T
 	}
 	finalized, baseRef, err := e.createPatchArtifact(ctx, req, runner, patch)
 	if err != nil {
-		return TaskExecResult{}, err
+		result = recordEvidenceCaptureFailure(result, artifactsmodule.EvidenceDiff, err, taskExecAttempt(req))
+	} else {
+		result = recordEvidenceCaptureSuccess(result, artifactsmodule.EvidenceDiff, taskExecAttempt(req))
+		result.ArtifactIDs = normalizeArtifactIDs(append(result.ArtifactIDs, finalized.ArtifactID))
+		if result.ArtifactsRef == "" {
+			result.ArtifactsRef = "artifacts://" + req.TaskRunID
+		}
+		if result.RuntimeMetadata == nil {
+			result.RuntimeMetadata = map[string]string{}
+		}
+		result.RuntimeMetadata["patch_artifact_id"] = finalized.ArtifactID
+		result.RuntimeMetadata["patch_content_hash"] = finalized.ContentHash
 	}
-	result.ArtifactIDs = normalizeArtifactIDs(append(result.ArtifactIDs, finalized.ArtifactID))
-	if result.ArtifactsRef == "" {
-		result.ArtifactsRef = "artifacts://" + req.TaskRunID
+	if localTaskRunnerPublishedDelivery(req, result) {
+		return result, nil
 	}
 	if result.RuntimeMetadata == nil {
 		result.RuntimeMetadata = map[string]string{}
-	}
-	result.RuntimeMetadata["patch_artifact_id"] = finalized.ArtifactID
-	result.RuntimeMetadata["patch_content_hash"] = finalized.ContentHash
-	if localTaskRunnerPublishedDelivery(req, result) {
-		return result, nil
 	}
 	if strings.TrimSpace(e.WorktreePath) == "" || strings.TrimSpace(baseRef) == "" {
 		result.Status = domain.TaskRunFailed

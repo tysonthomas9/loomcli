@@ -2,13 +2,17 @@ package agents
 
 import (
 	"context"
+	"errors"
 	"net/http"
+	"strings"
 	"testing"
 
+	"github.com/tysonthomas9/loomcli/internal/app/query/runcapture"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	artifactsmodule "github.com/tysonthomas9/loomcli/internal/modules/artifacts"
-	"github.com/tysonthomas9/loomcli/internal/sessions/transcript"
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
+	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/apperrors"
 	"github.com/tysonthomas9/loomcli/internal/webui/sessioncoord"
@@ -52,7 +56,7 @@ func TestFlueTaskRunIsOwnedByTaskSessionsNotAgentHistory(t *testing.T) {
 		t.Fatalf("agent history sessions = %+v, want none", history.Sessions)
 	}
 
-	taskSessions, err := sessioncoord.NewSessionService(st, nil).ListTaskSessions(
+	taskSessions, err := sessioncoord.NewSessionService(st, nil, nil).ListTaskSessions(
 		ctx,
 		agentRecordTestWS,
 		"TASK-SHARED-1",
@@ -113,6 +117,10 @@ func TestAgentSessionTranscriptRouteReturnsCanonicalEntriesAndEnforcesOwner(t *t
 		Type:          "transcript",
 		MIMEType:      "application/x-ndjson",
 		DurableStatus: artifactsmodule.StatusFinalized,
+		Metadata: map[string]string{
+			artifactsmodule.MetadataEvidenceCaptureStatus: "finalized",
+			artifactsmodule.MetadataEvidenceTruncated:     "false",
+		},
 	}, body)
 	if err != nil {
 		t.Fatalf("create transcript artifact: %v", err)
@@ -127,7 +135,21 @@ func TestAgentSessionTranscriptRouteReturnsCanonicalEntriesAndEnforcesOwner(t *t
 	}); err != nil {
 		t.Fatalf("create interactive session: %v", err)
 	}
-	transcripts, ok := sessioncoord.NewSessionService(st, nil).(sessioncoord.AgentSessionTranscriptService)
+	artifactQueries, err := artifactsmodule.NewQuery(st.ArtifactQueries())
+	if err != nil {
+		t.Fatalf("compose artifact queries: %v", err)
+	}
+	captures, err := runcapture.New(
+		agentTranscriptExecutionQueries{},
+		agentTranscriptInteractionQueries{store: st.AgentSessions()},
+		artifactQueries,
+	)
+	if err != nil {
+		t.Fatalf("compose run captures: %v", err)
+	}
+	transcripts, ok := sessioncoord.NewSessionService(
+		st, nil, captures,
+	).(sessioncoord.AgentSessionTranscriptService)
 	if !ok {
 		t.Fatal("session service does not implement AgentSessionTranscriptService")
 	}
@@ -296,11 +318,83 @@ func TestAgentSessionTranscriptRoutePreservesUnavailable(t *testing.T) {
 
 type agentSessionTranscriptErrorService struct{ err error }
 
+type agentTranscriptExecutionQueries struct{}
+
+func (agentTranscriptExecutionQueries) GetTaskRun(context.Context, string, string) (*execution.TaskRun, error) {
+	return nil, execution.ErrNotFound
+}
+
+func (agentTranscriptExecutionQueries) ListTaskRuns(context.Context, execution.TaskRunArchiveQuery) ([]*execution.TaskRun, error) {
+	return nil, nil
+}
+
+func (agentTranscriptExecutionQueries) ListActiveTaskRuns(context.Context, execution.ActiveTaskRunQuery) ([]*execution.TaskRun, error) {
+	return nil, nil
+}
+
+func (agentTranscriptExecutionQueries) ListTaskRunEvents(context.Context, execution.TaskRunEventQuery) ([]*execution.TaskRunEvent, error) {
+	return nil, nil
+}
+
+type agentTranscriptInteractionQueries struct{ store store.AgentSessionStore }
+
+func (queries agentTranscriptInteractionQueries) GetSession(
+	ctx context.Context,
+	workspace, sessionID string,
+) (*interaction.AgentSession, error) {
+	value, err := queries.store.Get(ctx, workspace, sessionID)
+	if errors.Is(err, domain.ErrNotFound) {
+		return nil, interaction.ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return agentTranscriptInteractionSnapshot(value), nil
+}
+
+func (queries agentTranscriptInteractionQueries) ListSessions(
+	ctx context.Context,
+	query interaction.SessionArchiveQuery,
+) ([]*interaction.AgentSession, error) {
+	values, err := queries.store.List(ctx, query.WorkspaceKey, store.AgentSessionFilter{
+		AgentID: query.AgentID,
+		TaskID:  query.WorkItemID,
+		Limit:   query.Limit,
+	})
+	if err != nil {
+		return nil, err
+	}
+	result := make([]*interaction.AgentSession, 0, len(values))
+	for _, value := range values {
+		result = append(result, agentTranscriptInteractionSnapshot(value))
+	}
+	return result, nil
+}
+
+func agentTranscriptInteractionSnapshot(value *domain.AgentSession) *interaction.AgentSession {
+	if value == nil {
+		return nil
+	}
+	return &interaction.AgentSession{
+		WorkspaceKey:         value.WorkspaceKey,
+		SessionID:            value.SessionID,
+		AgentID:              value.AgentID,
+		TaskID:               value.TaskID,
+		Status:               interaction.SessionStatus(value.Status),
+		TranscriptArtifactID: strings.TrimPrefix(value.Metadata["transcript_ref"], "artifact://"),
+		Metadata:             value.Metadata,
+		StartedAt:            value.StartedAt,
+		FinishedAt:           value.FinishedAt,
+		CreatedAt:            value.CreatedAt,
+		UpdatedAt:            value.UpdatedAt,
+	}
+}
+
 func (s agentSessionTranscriptErrorService) GetAgentSessionTranscript(
 	context.Context,
 	string,
 	string,
 	string,
-) ([]transcript.Event, error) {
+) ([]artifactsmodule.Event, error) {
 	return nil, s.err
 }

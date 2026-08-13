@@ -54,7 +54,11 @@ For production Redis deployments:
 - **Atomic writes**: `SaveConfig` uses tmp+rename to prevent partial writes on crash.
 - **File locking**: flock-based config file locking (`internal/configlock`) prevents concurrent write corruption from parallel agents.
 - **Parse failure protection**: `LoadConfig` refuses to overwrite config after parse/read failures, preventing data loss from corrupted reads.
-- **Session file permissions**: Session audit trail files are created with `0o600` permissions. Session directories use `0o700`.
+- **Durable evidence ownership**: Transcripts, diffs, logs, reports, and
+  finalized scrollback are stored only as owner-scoped Artifacts. Artifacts
+  applies redaction, size bounds, checksums, finalization, and a closed failure
+  vocabulary before the content becomes visible; task/session routes never
+  fall back to legacy local session files.
 
 ### Secret Rotation
 
@@ -107,10 +111,6 @@ SSE tokens are bound to a specific workspace ID at issuance. The server enforces
 ### Terminal WebSocket Auth
 
 Terminal WebSocket connections use HMAC-SHA256 token exchange. Tokens bind to both user identity and workspace, preventing cross-workspace terminal access.
-
-### Session Notification Endpoint
-
-`POST /api/sessions/notify` uses bearer token authentication instead of the previous loopback IP check, hardening against request forgery from local processes.
 
 ## Editor Launch Security
 

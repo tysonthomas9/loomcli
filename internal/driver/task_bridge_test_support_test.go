@@ -2,6 +2,7 @@
 package driver
 
 import (
+	artifactredact "github.com/tysonthomas9/loomcli/internal/infra/artifactredact"
 	artifactsmodule "github.com/tysonthomas9/loomcli/internal/modules/artifacts"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 )
@@ -24,7 +25,11 @@ func testArtifactsAPI(st bridgeArtifactFixtureStore) artifactsmodule.API {
 	if err != nil {
 		panic(err)
 	}
-	service, err := artifactsmodule.New(st.ArtifactCommands(), admission)
+	evidence, err := artifactsmodule.NewEvidencePolicy(artifactredact.Adapter{})
+	if err != nil {
+		panic(err)
+	}
+	service, err := artifactsmodule.New(st.ArtifactCommands(), admission, evidence)
 	if err != nil {
 		panic(err)
 	}

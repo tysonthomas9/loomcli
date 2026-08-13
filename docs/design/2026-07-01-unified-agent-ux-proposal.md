@@ -49,9 +49,10 @@ All verified in-tree 2026-07-01:
    workflows pass the prompt as workflow input) > the runner's generic prompt.
    In-source: *"prompt = data, brain stays custom"*
    (`internal/workflows/builtin/local-task-runner.ts:125-140`).
-3. **Shared telemetry vocabulary (Phase U/U0).** Transcript event types are
-   blessed in one place "so both execution planes share ONE event vocabulary"
-   (`internal/sessions/transcript/event.go:36`).
+3. **Shared telemetry vocabulary (Phase U/U0, current owner).** Artifacts owns
+   the one canonical transcript event contract used by both execution planes
+   (`internal/modules/artifacts/transcript_contract.go`). The former
+   `internal/sessions` copy has been retired.
 4. **Task-runner drivers are builtins already**: `local-task-runner`,
    `daytona-task-runner`, `openshell-task-runner`, `github-review-task-runner`
    (`internal/workflows/workflows.go`, `internal/workflows/builtin/`). The

@@ -5,6 +5,7 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -85,13 +86,13 @@ func TestCheckedInManifestsAndRepository(t *testing.T) {
 	if got, want := report.MutationCommands, 107; got != want {
 		t.Fatalf("mutation commands = %d, want %d", got, want)
 	}
-	if got, want := report.DirectPersistenceWrites, 90; got != want {
+	if got, want := report.DirectPersistenceWrites, 82; got != want {
 		t.Fatalf("direct persistence-write rows = %d, want %d", got, want)
 	}
-	if got, want := report.RuntimeComponents, 70; got != want {
+	if got, want := report.RuntimeComponents, 71; got != want {
 		t.Fatalf("runtime components = %d, want %d", got, want)
 	}
-	if got, want := report.RuntimeGoroutineLaunches, 79; got != want {
+	if got, want := report.RuntimeGoroutineLaunches, 78; got != want {
 		t.Fatalf("runtime goroutine launches = %d, want %d", got, want)
 	}
 	if got, want := report.PerformanceMetrics, 6; got != want {
@@ -704,11 +705,7 @@ func TestRetiredHorizontalRootsCannotReturn(t *testing.T) {
 		"internal/pathsec",
 		"internal/runtimectx",
 		"internal/runtimepreflight",
-		"internal/sessions/eventstore",
-		"internal/sessions/transcript/backends",
-		"internal/sessions/transcript/claude",
-		"internal/sessions/transcript/codex",
-		"internal/sessions/transcript/opencode",
+		"internal/sessions",
 		"internal/stacklineage",
 		"internal/stackpublish",
 		"internal/stackstore",
@@ -857,27 +854,27 @@ func TestRetiredAmbientRuntimeContextCannotReturn(t *testing.T) {
 		"func SetContextProvider(",
 		"ambientCtxProvider",
 	}
-	err = filepath.WalkDir(filepath.Join(root, "internal"), func(path string, entry os.DirEntry, walkErr error) error {
+	repository := openRootedTestFS(t, root)
+	err = fs.WalkDir(repository, "internal", func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
 		if entry.IsDir() {
 			if entry.Name() == "archtest" {
-				return filepath.SkipDir
+				return fs.SkipDir
 			}
 			return nil
 		}
 		if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
 			return nil
 		}
-		content, readErr := os.ReadFile(path)
+		content, readErr := fs.ReadFile(repository, path)
 		if readErr != nil {
 			return readErr
 		}
 		for _, fragment := range forbidden {
 			if strings.Contains(string(content), fragment) {
-				relative, _ := filepath.Rel(root, path)
-				t.Errorf("retired ambient runtime-context fallback %q returned in %s", fragment, filepath.ToSlash(relative))
+				t.Errorf("retired ambient runtime-context fallback %q returned in %s", fragment, path)
 			}
 		}
 		return nil
@@ -969,6 +966,16 @@ func TestRetiredSourceCompatibilityAPIsCannotReturn(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, relative := range []string{
+		"internal/app/serve/run_capture.go",
+		"internal/cli/backends/transcript_flags.go",
+		"internal/cli/backends/transcript_flags_test.go",
+		"internal/cli/doctor/doctor_checks_transcripts.go",
+		"internal/cli/doctor/doctor_checks_transcripts_test.go",
+		"internal/cli/hooks/hooks_dispatch.go",
+		"internal/cli/hooks/hooks_dispatch_test.go",
+		"internal/cli/hooks/hooks_dispatch_cmd.go",
+		"internal/cli/hooks/hooks_dispatch_cmd_test.go",
+		"internal/cli/sessionfinalize/finalize_worktree.go",
 		"internal/driver/stale_task_sweeper_legacy_test.go",
 		"internal/driver/stale_task_sweeper_test.go",
 		"internal/driver/await_op_legacy_test.go",
@@ -1009,6 +1016,11 @@ func TestRetiredSourceCompatibilityAPIsCannotReturn(t *testing.T) {
 		"internal/infra/memstore/platform_provenance_test.go",
 		"internal/webui/handlers/webhooks/await_dispatch_test.go",
 		"internal/webui/handlers/webhooks/webhooks_router_e2e_test.go",
+		"internal/webui/app/notify_token.go",
+		"internal/webui/sessioncoord/eventstore_serving.go",
+		"internal/webui/sessioncoord/eventstore_serving_test.go",
+		"internal/webui/sessioncoord/service_disktruth_test.go",
+		"internal/webui/sessioncoord/transcript_reader_test.go",
 	} {
 		if _, statErr := os.Stat(filepath.Join(root, filepath.FromSlash(relative))); !os.IsNotExist(statErr) {
 			t.Errorf("retired compatibility test implementation %s returned (stat error: %v)", relative, statErr)
@@ -1066,12 +1078,22 @@ func TestRetiredCompatibilitySurfacesCannotReturn(t *testing.T) {
 		"internal/app/serve/execution_task_run_recovery.go": {
 			"LegacyDriverRuns", "AllowLegacyStoreAdapters", "executionTaskRunLegacyRecoveryAdapter",
 		},
-		"internal/app/serve/execution.go":                                     {"LegacyDriverRuns:"},
-		"internal/driver/task_worker.go":                                      {"legacyTaskRunFromExecution"},
-		"internal/driver/task_worktree_resolver.go":                           {"repoBasename"},
-		"internal/domain/control_plane.go":                                    {"AgentSessionKindOrchestration"},
-		"internal/webui/app/server.go":                                        {"wsExistsFn"},
-		"internal/webui/sessioncoord/execution_projection.go":                 {"legacyAgentSessionTaskRunID"},
+		"internal/app/serve/execution.go":                     {"LegacyDriverRuns:"},
+		"internal/driver/task_worker.go":                      {"legacyTaskRunFromExecution"},
+		"internal/driver/task_worktree_resolver.go":           {"repoBasename"},
+		"internal/domain/control_plane.go":                    {"AgentSessionKindOrchestration"},
+		"internal/webui/app/server.go":                        {"wsExistsFn"},
+		"internal/webui/sessioncoord/execution_projection.go": {"legacyAgentSessionTaskRunID"},
+		"internal/webui/sessioncoord/service.go": {
+			"NewSessionServiceWithRuntimeDir", "NewSessionServiceWithRunCaptures",
+		},
+		"internal/webui/sessioncoord/ports.go": {"type SessionRecord =", "ValidateSessionHistoryIssueID"},
+		"internal/webui/server_config.go":      {"NotifyTokenDir", "SessionRuntimeDir"},
+		"internal/webui/capabilities.go":       {"ArtifactQueryAPI"},
+		"internal/cli/backends/backend_session_env.go": {
+			"SetActiveSessionRuntimeEnv", "GetActiveSessionRuntimeEnv", "ClearActiveSessionEnv", "activeSessionEnvVars",
+		},
+		"internal/cli/hooks/hooks_cmd.go":                                     {"hooksDispatchCmd"},
 		"internal/modules/automation/admission.go":                            {"deliveryDispatchLegacyKeyAccepted", "taskReadyExhaustedRecoverySuffix"},
 		"internal/infra/automationruntime/issue_journal_bridge_task_ready.go": {"snapshotSourceRepo"},
 		"internal/store/platform_store.go": {
@@ -1104,27 +1126,27 @@ func TestRetiredDriverAuthenticationFallbackCannotReturn(t *testing.T) {
 		"HeaderDriverRunID", "HeaderDriverNodeID", "HeaderDriverLeaseID", "HeaderDriverLeaseToken", "HeaderDriverFencingToken",
 		"legacyDriverAuthEnv", "driverAPIToken",
 	}
-	err = filepath.WalkDir(filepath.Join(root, "internal"), func(path string, entry os.DirEntry, walkErr error) error {
+	repository := openRootedTestFS(t, root)
+	err = fs.WalkDir(repository, "internal", func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
 		if entry.IsDir() {
 			if entry.Name() == "archtest" {
-				return filepath.SkipDir
+				return fs.SkipDir
 			}
 			return nil
 		}
 		if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
 			return nil
 		}
-		content, readErr := os.ReadFile(path)
+		content, readErr := fs.ReadFile(repository, path)
 		if readErr != nil {
 			return readErr
 		}
 		for _, fragment := range forbidden {
 			if strings.Contains(string(content), fragment) {
-				relative, _ := filepath.Rel(root, path)
-				t.Errorf("retired Driver authentication fallback %q returned in %s", fragment, filepath.ToSlash(relative))
+				t.Errorf("retired Driver authentication fallback %q returned in %s", fragment, path)
 			}
 		}
 		return nil
@@ -1132,6 +1154,20 @@ func TestRetiredDriverAuthenticationFallbackCannotReturn(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+}
+
+func openRootedTestFS(t *testing.T, path string) fs.FS {
+	t.Helper()
+	root, err := os.OpenRoot(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := root.Close(); err != nil {
+			t.Errorf("close rooted test filesystem: %v", err)
+		}
+	})
+	return root.FS()
 }
 
 func TestRetiredTerminalLaunchFallbackCannotReturn(t *testing.T) {
@@ -1362,15 +1398,16 @@ func TestRootBackendFacadeCannotReturn(t *testing.T) {
 		"github.com/tysonthomas9/loomcli/internal/",
 		"backend\"",
 	}, "")
+	repository := openRootedTestFS(t, root)
 	for _, sourceRoot := range []string{"cmd", "internal"} {
-		err = filepath.Walk(filepath.Join(root, sourceRoot), func(path string, info os.FileInfo, walkErr error) error {
+		err = fs.WalkDir(repository, sourceRoot, func(path string, entry fs.DirEntry, walkErr error) error {
 			if walkErr != nil {
 				return walkErr
 			}
-			if info.IsDir() || filepath.Ext(path) != ".go" {
+			if entry.IsDir() || filepath.Ext(path) != ".go" {
 				return nil
 			}
-			content, readErr := os.ReadFile(path)
+			content, readErr := fs.ReadFile(repository, path)
 			if readErr != nil {
 				return readErr
 			}

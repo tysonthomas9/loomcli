@@ -75,6 +75,48 @@ func TestArtifactCommandCreatePreservesExecutionArtifactFields(t *testing.T) {
 	}
 }
 
+func TestArtifactCommandCreateAcceptsCanonicalDigestAliasFilledByFleet(t *testing.T) {
+	now := time.Date(2026, 8, 12, 12, 0, 0, 0, time.UTC)
+	const digest = "sha256:content"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request struct {
+			CommandID   string `json:"command_id"`
+			ArtifactID  string `json:"artifact_id"`
+			Checksum    string `json:"checksum"`
+			ContentHash string `json:"content_hash"`
+		}
+		decodeJSONBody(t, r, &request)
+		if request.Checksum != "" || request.ContentHash != digest {
+			t.Fatalf("create digest request = checksum %q, content_hash %q", request.Checksum, request.ContentHash)
+		}
+		artifact := artifactCreateTestSnapshot(now, "", "task-1", "", 7, digest, digest)
+		writeJSON(t, w, map[string]any{
+			"artifact": artifact,
+			"receipt": map[string]any{
+				"workspace_key": "WS", "command_id": request.CommandID, "artifact_id": request.ArtifactID,
+				"command_type": "artifact_create", "request_fingerprint": "sha256:request", "artifact_revision": 1,
+				"committed_at": now,
+			},
+		})
+	}))
+	defer server.Close()
+
+	client, err := New(Config{BaseURL: server.URL, Actor: "tester"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifact, err := client.ArtifactCommands().Create(t.Context(), artifactCreateTestOwner(), ArtifactCreateCommand{
+		ArtifactID: "artifact-1", TaskID: "task-1", Type: "transcript",
+		SizeBytes: 7, ContentHash: digest,
+	})
+	if err != nil {
+		t.Fatalf("Create() rejected Fleet's canonical checksum alias: %v", err)
+	}
+	if artifact.Checksum != digest || artifact.ContentHash != digest {
+		t.Fatalf("Create() digest aliases = checksum %q, content_hash %q", artifact.Checksum, artifact.ContentHash)
+	}
+}
+
 func TestArtifactCommandCreateRejectsDivergentExecutionArtifactFields(t *testing.T) {
 	now := time.Date(2026, 7, 16, 12, 0, 0, 0, time.UTC)
 	tests := []struct {
@@ -273,6 +315,79 @@ func TestArtifactCommandFinalizeReachesReceiptAfterOwnerTermination(t *testing.T
 	}
 	if artifact.Revision != 3 || postCount != 3 {
 		t.Fatalf("Finalize() = %#v, posts=%d; want receipt replay at original revision", artifact, postCount)
+	}
+}
+
+func TestArtifactCommandFailUsesOwnerFencedReceiptContract(t *testing.T) {
+	now := time.Date(2026, 8, 12, 12, 0, 0, 0, time.UTC)
+	step := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		step++
+		switch step {
+		case 1:
+			if r.Method != http.MethodGet || r.URL.Path != "/api/v1/WS/artifacts/artifact-1" || r.Header.Get("X-Lease-Token") != "" {
+				t.Fatalf("prepare request = %s %s token=%q", r.Method, r.URL.Path, r.Header.Get("X-Lease-Token"))
+			}
+			writeJSON(t, w, artifactUploadTestSnapshot(now, 1, "", "pending"))
+		case 2:
+			if r.Method != http.MethodPost || r.URL.Path != "/api/v1/WS/artifacts/artifact-1/commands/fail" {
+				t.Fatalf("fail request = %s %s", r.Method, r.URL.Path)
+			}
+			if r.Header.Get("X-Lease-Token") != "secret-token" {
+				t.Fatalf("fail token = %q", r.Header.Get("X-Lease-Token"))
+			}
+			var raw map[string]json.RawMessage
+			decodeJSONBody(t, r, &raw)
+			if _, exposed := raw["lease_token"]; exposed {
+				t.Fatal("artifact fail body exposed lease_token")
+			}
+			var request struct {
+				CommandID        string            `json:"command_id"`
+				ExpectedRevision uint64            `json:"expected_revision"`
+				FailureClass     string            `json:"failure_class"`
+				FailureMessage   string            `json:"failure_message"`
+				Metadata         map[string]string `json:"metadata"`
+			}
+			body, err := json.Marshal(raw)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := json.Unmarshal(body, &request); err != nil {
+				t.Fatal(err)
+			}
+			if request.CommandID == "" || request.ExpectedRevision != 1 || request.FailureClass != "capture_failed" ||
+				request.FailureMessage != "evidence preparation failed" {
+				t.Fatalf("fail command = %+v", request)
+			}
+			artifact := artifactUploadTestSnapshot(now, 2, "", "failed")
+			artifact["metadata"] = map[string]string{
+				"loom.evidence.capture_status": "capture_failed",
+				"loom.evidence.failure_class":  request.FailureClass,
+			}
+			writeJSON(t, w, map[string]any{
+				"artifact": artifact,
+				"receipt": map[string]any{
+					"workspace_key": "WS", "command_id": request.CommandID, "artifact_id": "artifact-1",
+					"command_type": "artifact_fail", "request_fingerprint": "sha256:request",
+					"artifact_revision": 2, "committed_at": now,
+				},
+			})
+		default:
+			t.Fatalf("unexpected request %d: %s %s", step, r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	client, err := New(Config{BaseURL: server.URL, Actor: "tester"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifact, err := client.ArtifactCommands().Fail(t.Context(), artifactCreateTestOwner(), ArtifactFailCommand{
+		ArtifactID: "artifact-1", FailureClass: "capture_failed", FailureMessage: "evidence preparation failed",
+		Metadata: map[string]string{"loom.evidence.capture_status": "capture_failed"},
+	})
+	if err != nil || artifact.DurableStatus != "failed" || artifact.FinalizedAt != nil || step != 2 {
+		t.Fatalf("Fail() = %#v, %v, requests=%d", artifact, err, step)
 	}
 }
 

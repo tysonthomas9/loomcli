@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	storepkg "github.com/tysonthomas9/loomcli/internal/store"
 )
 
 // InteractionMutationTransport contains only the compound Phase 5
@@ -19,6 +20,7 @@ type InteractionMutationTransport interface {
 	StartInteractionSession(context.Context, InteractionSessionStartInput) (*InteractionSessionStartResult, error)
 	RecoverInteractionSessionStart(context.Context, InteractionSessionStartRecoveryInput) (*InteractionSessionStartResult, error)
 	GetInteractionSession(context.Context, string, string) (*domain.AgentSession, error)
+	ListInteractionSessions(context.Context, InteractionSessionQuery) ([]*domain.AgentSession, error)
 	PatchInteractionSession(context.Context, InteractionSessionPatchInput) (*InteractionSessionMutationResult, error)
 	HeartbeatInteractionSession(context.Context, InteractionSessionHeartbeatInput) (*InteractionSessionMutationResult, error)
 	FinishInteractionSession(context.Context, InteractionSessionFinishInput) (*InteractionSessionMutationResult, error)
@@ -35,6 +37,13 @@ type InteractionMutationTransport interface {
 	CompleteInteractionInbox(context.Context, InteractionInboxCompleteInput) (*domain.AgentInboxMessage, error)
 
 	ListInteractionActivity(context.Context, string, string, int) ([]InteractionActivity, error)
+}
+
+type InteractionSessionQuery struct {
+	WorkspaceKey string
+	AgentID      string
+	WorkItemID   string
+	Limit        int
 }
 
 type InteractionSessionStartInput struct {
@@ -326,6 +335,30 @@ func (store *interactionStore) GetInteractionSession(
 		return nil, mapInteractionAuthorityError("get interaction session", err)
 	}
 	return &response, nil
+}
+
+func (store *interactionStore) ListInteractionSessions(
+	ctx context.Context,
+	query InteractionSessionQuery,
+) ([]*domain.AgentSession, error) {
+	if store == nil || store.client == nil {
+		return nil, ErrInteractionUnavailable
+	}
+	query.WorkspaceKey = strings.TrimSpace(query.WorkspaceKey)
+	query.AgentID = strings.TrimSpace(query.AgentID)
+	query.WorkItemID = strings.TrimSpace(query.WorkItemID)
+	if query.WorkspaceKey == "" || query.Limit < 1 || query.Limit > 100 {
+		return nil, ErrInteractionInvalid
+	}
+	values, err := store.client.ListAgentSessions(ctx, query.WorkspaceKey, storepkg.AgentSessionFilter{
+		AgentID: query.AgentID,
+		TaskID:  query.WorkItemID,
+		Limit:   query.Limit,
+	})
+	if err != nil {
+		return nil, mapInteractionAuthorityError("list interaction sessions", err)
+	}
+	return values, nil
 }
 
 func (store *interactionStore) HeartbeatInteractionSession(

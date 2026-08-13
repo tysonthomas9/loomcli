@@ -89,6 +89,10 @@ func (module *Module) Register(mux *http.ServeMux) {
 		module.publishTranscript,
 	)
 	mux.HandleFunc(
+		"POST /api/workspaces/{ws}/interaction/sessions/{sessionId}/transcript/failure",
+		module.recordTranscriptFailure,
+	)
+	mux.HandleFunc(
 		"POST /api/workspaces/{ws}/interaction/sessions/{sessionId}/finish",
 		module.finishSession,
 	)
@@ -137,6 +141,11 @@ type heartbeatSessionRequest struct {
 	sessionProofRequest
 	Phase           string `json:"phase,omitempty"`
 	LeaseTTLSeconds int    `json:"lease_ttl_seconds"`
+}
+
+type transcriptFailureRequest struct {
+	sessionProofRequest
+	FailureClass string `json:"failure_class"`
 }
 
 type finishSessionRequest struct {
@@ -259,6 +268,34 @@ func (module *Module) publishTranscript(response http.ResponseWriter, request *h
 		},
 	)
 	clear(content)
+	if err != nil {
+		writeMappedError(response, err)
+		return
+	}
+	writeJSON(response, http.StatusOK, value)
+}
+
+func (module *Module) recordTranscriptFailure(response http.ResponseWriter, request *http.Request) {
+	var input transcriptFailureRequest
+	if !module.decodeSessionRequest(response, request, &input) {
+		return
+	}
+	auth, ok := module.resolveSession(
+		response, request, interaction.ActionPublishTranscript, input.sessionProofRequest,
+	)
+	if !ok {
+		return
+	}
+	defer auth.SessionOwner().CloseLeaseCredential()
+	value, err := module.sessionCommands.PublishTranscript(
+		request.Context(),
+		auth,
+		interaction.PublishTranscriptCommand{
+			WorkspaceKey: canonicalWorkspaceFromRequest(request),
+			SessionID:    request.PathValue("sessionId"),
+			FailureClass: strings.TrimSpace(input.FailureClass),
+		},
+	)
 	if err != nil {
 		writeMappedError(response, err)
 		return

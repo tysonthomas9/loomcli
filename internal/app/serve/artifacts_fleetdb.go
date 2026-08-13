@@ -6,8 +6,12 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/app/query/runcapture"
+	artifactredact "github.com/tysonthomas9/loomcli/internal/infra/artifactredact"
 	infrafleetdb "github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
 	"github.com/tysonthomas9/loomcli/internal/modules/artifacts"
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
+	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 )
 
@@ -64,6 +68,18 @@ func (transport *artifactsFleetDBTransport) Finalize(
 		SizeBytes: cloneArtifactInt64Pointer(command.SizeBytes), Checksum: cloneArtifactStringPointer(command.Checksum),
 		ContentHash: cloneArtifactStringPointer(command.ContentHash), Visibility: cloneArtifactStringPointer(command.Visibility),
 		RedactionStatus: cloneArtifactStringPointer(command.RedactionStatus), Metadata: cloneArtifactMapPointer(command.Metadata),
+	})
+	return artifactFromInfra(value), translateArtifactsFleetDBError(err)
+}
+
+func (transport *artifactsFleetDBTransport) Fail(
+	ctx context.Context,
+	owner artifacts.ExecutionOwner,
+	command artifacts.FailCommand,
+) (*artifacts.Artifact, error) {
+	value, err := transport.transport.Fail(ctx, artifactInfraOwner(owner), infrafleetdb.ArtifactFailCommand{
+		ArtifactID: command.ArtifactID, FailureClass: command.FailureClass,
+		FailureMessage: command.FailureMessage, Metadata: cloneArtifactStringMap(command.Metadata),
 	})
 	return artifactFromInfra(value), translateArtifactsFleetDBError(err)
 }
@@ -260,7 +276,11 @@ func newArtifactsCapability(
 	if err != nil {
 		return nil, fmt.Errorf("compose Artifacts admission: %w", err)
 	}
-	service, err := artifacts.New(store, admission)
+	evidence, err := artifacts.NewEvidencePolicy(artifactredact.Adapter{})
+	if err != nil {
+		return nil, fmt.Errorf("compose Artifacts evidence policy: %w", err)
+	}
+	service, err := artifacts.New(store, admission, evidence)
 	if err != nil {
 		return nil, fmt.Errorf("compose Artifacts service: %w", err)
 	}
@@ -269,4 +289,27 @@ func newArtifactsCapability(
 		return nil, fmt.Errorf("compose Artifacts queries: %w", err)
 	}
 	return &ArtifactsCapability{api: service, queries: queries}, nil
+}
+
+// RunCaptureCapability is the composition-owned immutable evidence view. It
+// cannot mutate any lifecycle owner or Artifact.
+type RunCaptureCapability struct{ api runcapture.API }
+
+func (capability *RunCaptureCapability) RunCaptureAPI() runcapture.API {
+	if capability == nil {
+		return nil
+	}
+	return capability.api
+}
+
+func NewRunCaptureCapability(
+	executions execution.TaskRunQueries,
+	interactions interaction.SessionQueries,
+	artifactQueries artifacts.QueryAPI,
+) (*RunCaptureCapability, error) {
+	service, err := runcapture.New(executions, interactions, artifactQueries)
+	if err != nil {
+		return nil, fmt.Errorf("compose Run Capture: %w", err)
+	}
+	return &RunCaptureCapability{api: service}, nil
 }

@@ -10,6 +10,7 @@ const (
 	ActionDeclare   authority.Action = "artifacts.declare"
 	ActionUpload    authority.Action = "artifacts.upload"
 	ActionFinalize  authority.Action = "artifacts.finalize"
+	ActionFail      authority.Action = "artifacts.fail"
 	ActionReference authority.Action = "artifacts.reference"
 	ActionGet       authority.Action = "artifacts.get"
 	ActionList      authority.Action = "artifacts.list"
@@ -25,6 +26,7 @@ func OperationRules() []authority.OperationRule {
 		authority.Allow(ActionDeclare, authority.ClassExecution, authority.ClassSession),
 		authority.Allow(ActionUpload, authority.ClassExecution, authority.ClassSession),
 		authority.Allow(ActionFinalize, authority.ClassExecution, authority.ClassSession),
+		authority.Allow(ActionFail, authority.ClassExecution, authority.ClassSession),
 		authority.Allow(ActionReference, authority.ClassExecution),
 		authority.Allow(ActionGet, authority.ClassExecution, authority.ClassSession),
 		authority.Allow(ActionList, authority.ClassExecution),
@@ -88,6 +90,13 @@ type FinalizeCommand struct {
 	Metadata        *map[string]string
 }
 
+type FailCommand struct {
+	ArtifactID     string
+	FailureClass   string
+	FailureMessage string
+	Metadata       map[string]string
+}
+
 // ReferenceCommand creates one immutable association from a finalized
 // Artifact to a deterministic task-run output target.
 type ReferenceCommand struct {
@@ -118,6 +127,7 @@ type ContentAuthorities struct {
 	Get       authority.ExecutionAuthority
 	Upload    authority.ExecutionAuthority
 	Finalize  authority.ExecutionAuthority
+	Fail      authority.ExecutionAuthority
 	Reference authority.ExecutionAuthority
 }
 
@@ -153,6 +163,16 @@ type SessionContentCommand struct {
 	Content         []byte
 }
 
+// SessionFailureCommand records a capture failure that occurred before any
+// canonical content was available. Artifacts validates the failure vocabulary
+// and owns the durable failed-evidence representation.
+type SessionFailureCommand struct {
+	ArtifactID   string
+	TaskID       string
+	Type         string
+	FailureClass string
+}
+
 // SessionContentAuthorities carries one independently issued session
 // authority per durable operation. A publish authority cannot be replayed as
 // a different lifecycle action.
@@ -161,6 +181,7 @@ type SessionContentAuthorities struct {
 	Get      authority.SessionAuthority
 	Upload   authority.SessionAuthority
 	Finalize authority.SessionAuthority
+	Fail     authority.SessionAuthority
 }
 
 // SessionAPI is the session-scoped Artifacts surface consumed by Interaction.
@@ -168,6 +189,7 @@ type SessionContentAuthorities struct {
 // queries.
 type SessionAPI interface {
 	CreateContent(context.Context, SessionContentAuthorities, SessionOwner, SessionContentCommand) (*Artifact, error)
+	RecordFailure(context.Context, SessionContentAuthorities, SessionOwner, SessionFailureCommand) (*Artifact, error)
 }
 
 // QueryAPI is the general read-only Artifacts surface consumed by product
@@ -184,6 +206,7 @@ type API interface {
 	Create(context.Context, authority.ExecutionAuthority, ExecutionOwner, CreateCommand) (*Artifact, error)
 	Upload(context.Context, authority.ExecutionAuthority, ExecutionOwner, UploadCommand) (*Artifact, error)
 	Finalize(context.Context, authority.ExecutionAuthority, ExecutionOwner, FinalizeCommand) (*Artifact, error)
+	Fail(context.Context, authority.ExecutionAuthority, ExecutionOwner, FailCommand) (*Artifact, error)
 	Reference(context.Context, authority.ExecutionAuthority, ExecutionOwner, ReferenceCommand) (ReferenceResult, error)
 	Get(context.Context, authority.ExecutionAuthority, ExecutionOwner, GetQuery) (*Artifact, error)
 	List(context.Context, authority.ExecutionAuthority, ExecutionOwner, ListFilter) ([]*Artifact, error)

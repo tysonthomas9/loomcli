@@ -1,10 +1,13 @@
 package local
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -13,6 +16,46 @@ import (
 func TestLocalServeStartupTimeoutCoversDurableReplay(t *testing.T) {
 	if localServeStartupTimeout < 2*time.Minute {
 		t.Fatalf("localServeStartupTimeout = %s, want at least 2m for durable FleetDB replay", localServeStartupTimeout)
+	}
+}
+
+func TestAwaitServeHealthyReturnsWhenChildExits(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("helper command uses a POSIX shell")
+	}
+
+	dataDir := t.TempDir()
+	writeServeLog(t, dataDir, "fleet-db compatibility check failed\n")
+	cfg := &localServiceConfig{
+		dataDir: dataDir,
+		url:     "http://127.0.0.1:1",
+	}
+	info := &runtimeInfo{}
+	serveCmd := exec.Command("/bin/sh", "-c", "exit 42") //nolint:norawexec // deterministic child-exit regression fixture.
+	if err := serveCmd.Start(); err != nil {
+		t.Fatalf("start helper: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	startedAt := time.Now()
+	err := awaitServeHealthy(ctx, cfg, info, trackLocalServeProcess(serveCmd))
+	elapsed := time.Since(startedAt)
+
+	if err == nil {
+		t.Fatal("awaitServeHealthy() error = nil, want exited-child error")
+	}
+	if elapsed >= 500*time.Millisecond {
+		t.Fatalf("awaitServeHealthy() elapsed = %s, want immediate child-exit detection", elapsed)
+	}
+	if !strings.Contains(err.Error(), "exit status 42") {
+		t.Fatalf("awaitServeHealthy() error = %q, want child exit status", err)
+	}
+	if !strings.Contains(err.Error(), "fleet-db compatibility check failed") {
+		t.Fatalf("awaitServeHealthy() error = %q, want recent startup log", err)
+	}
+	if info.Status != "failed" {
+		t.Fatalf("runtime status = %q, want failed", info.Status)
 	}
 }
 

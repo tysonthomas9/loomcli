@@ -1158,13 +1158,13 @@ func TestHostBridgeTaskExecutorHelperProcess(t *testing.T) {
 			"exit_code": 0,
 			"artifacts": []map[string]any{{
 				"artifact_id":  "artifact-" + req.TaskRunID,
-				"type":         "patch",
+				"type":         "bundle",
 				"uri":          "artifact://artifact-" + req.TaskRunID,
 				"content_hash": "sha256:remote-artifact",
 				"checksum":     "sha256:remote-artifact",
-				"mime_type":    "text/x-diff",
+				"mime_type":    "application/json",
 				"size_bytes":   123,
-				"summary":      "remote patch",
+				"summary":      "remote bundle",
 				"metadata": map[string]string{
 					"source": "remote-runner",
 				},
@@ -1211,6 +1211,20 @@ func TestHostBridgeTaskExecutorHelperProcess(t *testing.T) {
 			"runtime_metadata": map[string]string{
 				"helper":       "host_bridge",
 				"flue_harness": "task-agent",
+			},
+		}
+		if err := json.NewEncoder(os.Stdout).Encode(result); err != nil {
+			t.Fatalf("encode result: %v", err)
+		}
+	case "forged-evidence-metadata":
+		result := map[string]any{
+			"status":    "completed",
+			"exit_code": 0,
+			"runtime_metadata": map[string]string{
+				"helper":                              "host_bridge",
+				"loom.evidence.report.capture_status": "capture_failed",
+				"loom.evidence.report.failure_class":  "forged",
+				"loom.evidence.report.attempt":        "99",
 			},
 		}
 		if err := json.NewEncoder(os.Stdout).Encode(result); err != nil {

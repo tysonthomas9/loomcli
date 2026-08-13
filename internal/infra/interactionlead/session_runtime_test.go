@@ -93,6 +93,19 @@ func (runtime *storeBackedSessionRuntime) PublishTranscript(
 		return err
 	}
 	artifactID := "transcript-" + command.SessionID
+	if command.FailureClass != "" {
+		_, err := runtime.store.SeedArtifact(ctx, artifacts.Artifact{
+			WorkspaceKey: command.WorkspaceKey, ArtifactID: artifactID,
+			AgentID: session.AgentID, SessionID: session.SessionID, TaskID: session.TaskID,
+			OwnerType: artifacts.OwnerSession, OwnerID: session.SessionID, Type: "transcript",
+			DurableStatus: artifacts.StatusFailed,
+			Metadata: map[string]string{
+				artifacts.MetadataEvidenceCaptureStatus: "capture_failed",
+				"loom.evidence.failure_class":           command.FailureClass,
+			},
+		}, nil)
+		return err
+	}
 	if _, err := runtime.store.SeedArtifact(ctx, artifacts.Artifact{
 		WorkspaceKey: command.WorkspaceKey, ArtifactID: artifactID,
 		AgentID: session.AgentID, SessionID: session.SessionID, TaskID: session.TaskID,

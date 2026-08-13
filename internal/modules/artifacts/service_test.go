@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -14,6 +15,7 @@ type fakeStore struct {
 	create    func(context.Context, ExecutionOwner, CreateCommand) (*Artifact, error)
 	upload    func(context.Context, ExecutionOwner, UploadCommand) (*Artifact, error)
 	finalize  func(context.Context, ExecutionOwner, FinalizeCommand) (*Artifact, error)
+	fail      func(context.Context, ExecutionOwner, FailCommand) (*Artifact, error)
 	reference func(context.Context, ExecutionOwner, ReferenceCommand) (ReferenceResult, error)
 	get       func(context.Context, ExecutionOwner, GetQuery) (*Artifact, error)
 	list      func(context.Context, ExecutionOwner, ListFilter) ([]*Artifact, error)
@@ -29,6 +31,13 @@ func (f *fakeStore) Upload(ctx context.Context, owner ExecutionOwner, command Up
 
 func (f *fakeStore) Finalize(ctx context.Context, owner ExecutionOwner, command FinalizeCommand) (*Artifact, error) {
 	return f.finalize(ctx, owner, command)
+}
+
+func (f *fakeStore) Fail(ctx context.Context, owner ExecutionOwner, command FailCommand) (*Artifact, error) {
+	if f.fail == nil {
+		return nil, ErrUnavailable
+	}
+	return f.fail(ctx, owner, command)
 }
 
 func (f *fakeStore) Reference(ctx context.Context, owner ExecutionOwner, command ReferenceCommand) (ReferenceResult, error) {
@@ -50,6 +59,21 @@ type serviceFixture struct {
 	expiresAt time.Time
 }
 
+type testRedactor struct{}
+
+func (testRedactor) RedactEvidence(_ context.Context, request RedactionRequest) (RedactionResult, error) {
+	return RedactionResult{Content: append([]byte(nil), request.Content...)}, nil
+}
+
+func newTestEvidencePolicy(t *testing.T) *EvidencePolicy {
+	t.Helper()
+	policy, err := NewEvidencePolicy(testRedactor{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return policy
+}
+
 func newServiceFixture(t *testing.T, store Store, owner ExecutionOwner) serviceFixture {
 	t.Helper()
 	issuer := authority.NewIssuer()
@@ -68,7 +92,7 @@ func newServiceFixtureWithIssuer(
 	if err != nil {
 		t.Fatalf("NewAdmission: %v", err)
 	}
-	service, err := New(store, admission)
+	service, err := New(store, admission, newTestEvidencePolicy(t))
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -87,6 +111,7 @@ func (fixture serviceFixture) contentAuthorities(t *testing.T) ContentAuthoritie
 		Get:       fixture.auth(t, ActionGet),
 		Upload:    fixture.auth(t, ActionUpload),
 		Finalize:  fixture.auth(t, ActionFinalize),
+		Fail:      fixture.auth(t, ActionFail),
 		Reference: fixture.auth(t, ActionReference),
 	}
 }
@@ -486,15 +511,22 @@ func TestCreateContentReusesMatchingFinalizedArtifactAndCommitsReference(t *test
 	now := time.Date(2026, 7, 16, 10, 0, 0, 0, time.UTC)
 	content := []byte("content")
 	uploadCalls, finalizeCalls, referenceCalls := 0, 0, 0
-	command := CreateCommand{ArtifactID: "transcript-task-run-1", SessionID: "session-1", Type: "transcript", MIMEType: "application/x-ndjson"}
+	command := CreateCommand{ArtifactID: "logs-task-run-1", SessionID: "session-1", Type: "logs", MIMEType: "text/plain; charset=utf-8"}
 	reference := ReferenceCommand{ArtifactID: command.ArtifactID, Kind: "task-output", TargetRef: "task-run://task-run-1/output"}
+	var prepared CreateCommand
 	store := &fakeStore{
-		create: func(context.Context, ExecutionOwner, CreateCommand) (*Artifact, error) { return nil, ErrAlreadyExists },
+		create: func(_ context.Context, _ ExecutionOwner, got CreateCommand) (*Artifact, error) {
+			prepared = cloneCreateCommand(got)
+			return nil, ErrAlreadyExists
+		},
 		get: func(context.Context, ExecutionOwner, GetQuery) (*Artifact, error) {
-			artifact := finalizedArtifact(owner, command.ArtifactID, command.Type, now)
-			artifact.SessionID = command.SessionID
-			artifact.MIMEType = command.MIMEType
-			artifact.ContentHash = artifactContentHash(content)
+			artifact := finalizedArtifact(owner, prepared.ArtifactID, prepared.Type, now)
+			artifact.SessionID = prepared.SessionID
+			artifact.MIMEType = prepared.MIMEType
+			artifact.SizeBytes = prepared.SizeBytes
+			artifact.ContentHash = prepared.ContentHash
+			artifact.RedactionStatus = prepared.RedactionStatus
+			artifact.Metadata = cloneMetadata(prepared.Metadata)
 			return artifact, nil
 		},
 		reference: func(context.Context, ExecutionOwner, ReferenceCommand) (ReferenceResult, error) {
@@ -531,6 +563,7 @@ func TestCreateContentRejectsIncompleteAuthorityBundleBeforePort(t *testing.T) {
 		{name: "get", zero: func(value *ContentAuthorities) { value.Get = authority.ExecutionAuthority{} }},
 		{name: "upload", zero: func(value *ContentAuthorities) { value.Upload = authority.ExecutionAuthority{} }},
 		{name: "finalize", zero: func(value *ContentAuthorities) { value.Finalize = authority.ExecutionAuthority{} }},
+		{name: "fail", zero: func(value *ContentAuthorities) { value.Fail = authority.ExecutionAuthority{} }},
 		{name: "reference", zero: func(value *ContentAuthorities) { value.Reference = authority.ExecutionAuthority{} }},
 	}
 	for _, test := range tests {
@@ -558,16 +591,146 @@ func TestCreateContentRejectsIncompleteAuthorityBundleBeforePort(t *testing.T) {
 	}
 }
 
+func TestCreateContentPersistsSanitizedCaptureFailureAndReplayNeverPublishes(t *testing.T) {
+	owner := validOwner()
+	secretCause := errors.New("redactor failed while handling token=super-secret")
+	policy, err := NewEvidencePolicy(redactorFunc(func(context.Context, RedactionRequest) (RedactionResult, error) {
+		return RedactionResult{}, secretCause
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	issuer := authority.NewIssuer()
+	admission, err := issuer.NewAdmission(OperationRules()...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var persisted *Artifact
+	createCalls, failCalls, uploadCalls, finalizeCalls, referenceCalls := 0, 0, 0, 0, 0
+	store := &fakeStore{}
+	store.create = func(_ context.Context, gotOwner ExecutionOwner, command CreateCommand) (*Artifact, error) {
+		createCalls++
+		if persisted != nil {
+			return nil, ErrAlreadyExists
+		}
+		persisted = &Artifact{
+			WorkspaceKey: gotOwner.WorkspaceKey, ArtifactID: command.ArtifactID,
+			OwnerType: OwnerTaskRun, OwnerID: gotOwner.TaskRunID, Type: command.Type,
+			Summary: command.Summary, DurableStatus: StatusDeclared, Metadata: cloneMetadata(command.Metadata),
+		}
+		return cloneArtifact(persisted), nil
+	}
+	store.get = func(context.Context, ExecutionOwner, GetQuery) (*Artifact, error) {
+		return cloneArtifact(persisted), nil
+	}
+	store.fail = func(_ context.Context, _ ExecutionOwner, command FailCommand) (*Artifact, error) {
+		failCalls++
+		persisted.DurableStatus = StatusFailed
+		persisted.FinalizedAt = nil
+		persisted.Metadata = cloneMetadata(command.Metadata)
+		return cloneArtifact(persisted), nil
+	}
+	store.upload = func(context.Context, ExecutionOwner, UploadCommand) (*Artifact, error) {
+		uploadCalls++
+		return nil, nil
+	}
+	store.finalize = func(context.Context, ExecutionOwner, FinalizeCommand) (*Artifact, error) {
+		finalizeCalls++
+		return nil, nil
+	}
+	store.reference = func(context.Context, ExecutionOwner, ReferenceCommand) (ReferenceResult, error) {
+		referenceCalls++
+		return ReferenceResult{}, nil
+	}
+	service, err := New(store, admission, policy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fixture := serviceFixture{service: service, issuer: issuer, owner: owner, expiresAt: time.Now().Add(time.Hour)}
+	command := CreateCommand{ArtifactID: "logs-task-run-1", Type: "logs"}
+	reference := ReferenceCommand{ArtifactID: command.ArtifactID, Kind: "task-output", TargetRef: "task-run://task-run-1/output"}
+
+	for attempt := 1; attempt <= 2; attempt++ {
+		_, gotErr := service.CreateContent(t.Context(), fixture.contentAuthorities(t), owner, command, []byte("candidate"), reference)
+		if !errors.Is(gotErr, ErrCaptureFailed) || !errors.Is(gotErr, secretCause) {
+			t.Fatalf("attempt %d error = %v, want capture failure and adapter cause", attempt, gotErr)
+		}
+	}
+	if createCalls != 2 || failCalls != 1 || uploadCalls != 0 || finalizeCalls != 0 || referenceCalls != 0 {
+		t.Fatalf("calls create=%d fail=%d upload=%d finalize=%d reference=%d", createCalls, failCalls, uploadCalls, finalizeCalls, referenceCalls)
+	}
+	if persisted.DurableStatus != StatusFailed || persisted.Metadata[MetadataEvidenceCaptureStatus] != "capture_failed" ||
+		persisted.Metadata["loom.evidence.failure_class"] != "capture_failed" ||
+		strings.Contains(persisted.Metadata["loom.evidence.failure_message"], "super-secret") {
+		t.Fatalf("persisted failure = %#v", persisted)
+	}
+}
+
+func TestCreateContentPersistsTransportFailureAfterDeclaration(t *testing.T) {
+	owner := validOwner()
+	var persisted *Artifact
+	failCalls := 0
+	store := &fakeStore{}
+	store.create = func(_ context.Context, _ ExecutionOwner, command CreateCommand) (*Artifact, error) {
+		if persisted != nil {
+			return nil, ErrAlreadyExists
+		}
+		persisted = &Artifact{
+			WorkspaceKey: owner.WorkspaceKey, ArtifactID: command.ArtifactID,
+			OwnerType: OwnerTaskRun, OwnerID: owner.TaskRunID, Type: command.Type,
+			MIMEType: command.MIMEType, SizeBytes: command.SizeBytes, ContentHash: command.ContentHash,
+			RedactionStatus: command.RedactionStatus, DurableStatus: StatusDeclared,
+			Metadata: cloneMetadata(command.Metadata),
+		}
+		return cloneArtifact(persisted), nil
+	}
+	store.upload = func(context.Context, ExecutionOwner, UploadCommand) (*Artifact, error) {
+		return nil, ErrUnavailable
+	}
+	store.get = func(context.Context, ExecutionOwner, GetQuery) (*Artifact, error) {
+		return cloneArtifact(persisted), nil
+	}
+	store.fail = func(_ context.Context, _ ExecutionOwner, command FailCommand) (*Artifact, error) {
+		failCalls++
+		persisted.DurableStatus = StatusFailed
+		persisted.Metadata = cloneMetadata(command.Metadata)
+		return cloneArtifact(persisted), nil
+	}
+	store.finalize = func(context.Context, ExecutionOwner, FinalizeCommand) (*Artifact, error) {
+		t.Fatal("finalize called after upload failure")
+		return nil, nil
+	}
+	store.reference = func(context.Context, ExecutionOwner, ReferenceCommand) (ReferenceResult, error) {
+		t.Fatal("reference called after upload failure")
+		return ReferenceResult{}, nil
+	}
+	fixture := newServiceFixture(t, store, owner)
+	command := CreateCommand{ArtifactID: "logs-task-run-1", Type: "logs"}
+	_, err := fixture.service.CreateContent(t.Context(), fixture.contentAuthorities(t), owner, command, []byte("logs"), ReferenceCommand{
+		ArtifactID: command.ArtifactID, Kind: "task-output", TargetRef: "task-run://task-run-1/output",
+	})
+	if !errors.Is(err, ErrUnavailable) || failCalls != 1 {
+		t.Fatalf("CreateContent error = %v, fail calls = %d", err, failCalls)
+	}
+	if persisted.DurableStatus != StatusFailed ||
+		persisted.Metadata[MetadataEvidenceCaptureStatus] != "capture_failed" ||
+		persisted.Metadata["loom.evidence.failure_class"] != "capture_unavailable" {
+		t.Fatalf("persisted failure = %#v", persisted)
+	}
+}
+
 func TestCreateContentUploadsFinalizesAndReferencesDeclaredArtifact(t *testing.T) {
 	owner := validOwner()
 	now := time.Date(2026, 7, 16, 10, 0, 0, 0, time.UTC)
 	command := CreateCommand{ArtifactID: "logs-task-run-1", Type: "logs", MIMEType: "text/plain"}
 	reference := ReferenceCommand{ArtifactID: command.ArtifactID, Kind: "task-output", TargetRef: "task-run://task-run-1/output"}
 	store := &fakeStore{}
-	store.create = func(context.Context, ExecutionOwner, CreateCommand) (*Artifact, error) {
+	store.create = func(_ context.Context, _ ExecutionOwner, got CreateCommand) (*Artifact, error) {
 		return &Artifact{
-			WorkspaceKey: owner.WorkspaceKey, ArtifactID: command.ArtifactID, OwnerType: OwnerTaskRun,
-			OwnerID: owner.TaskRunID, Type: command.Type, MIMEType: command.MIMEType, DurableStatus: StatusDeclared,
+			WorkspaceKey: owner.WorkspaceKey, ArtifactID: got.ArtifactID, OwnerType: OwnerTaskRun,
+			OwnerID: owner.TaskRunID, Type: got.Type, MIMEType: got.MIMEType,
+			SizeBytes: got.SizeBytes, ContentHash: got.ContentHash, RedactionStatus: got.RedactionStatus,
+			Metadata: cloneMetadata(got.Metadata), DurableStatus: StatusDeclared,
 		}, nil
 	}
 	store.upload = func(_ context.Context, _ ExecutionOwner, upload UploadCommand) (*Artifact, error) {
@@ -640,11 +803,14 @@ func TestNewFailsClosedWithoutDurablePortOrAdmission(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := New(nil, admission); !errors.Is(err, ErrUnavailable) {
+	if _, err := New(nil, admission, newTestEvidencePolicy(t)); !errors.Is(err, ErrUnavailable) {
 		t.Fatalf("New(nil, admission) = %v, want ErrUnavailable", err)
 	}
-	if _, err := New(&fakeStore{}, nil); !errors.Is(err, ErrUnavailable) {
+	if _, err := New(&fakeStore{}, nil, newTestEvidencePolicy(t)); !errors.Is(err, ErrUnavailable) {
 		t.Fatalf("New(store, nil) = %v, want ErrUnavailable", err)
+	}
+	if _, err := New(&fakeStore{}, admission, nil); !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("New(store, admission, nil) = %v, want ErrUnavailable", err)
 	}
 }
 

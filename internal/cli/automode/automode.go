@@ -17,7 +17,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/backends"
 	"github.com/tysonthomas9/loomcli/internal/events"
-	"github.com/tysonthomas9/loomcli/internal/sessions"
 	"github.com/tysonthomas9/loomcli/internal/usage"
 )
 
@@ -143,7 +142,6 @@ type autoLoopCtx struct {
 	hasAvailableTasks func() (bool, error)
 	generatePrompt    func(string) string
 	usageStore        *usage.Projection
-	sessStore         *sessions.Archive
 	updateState       func(string) error
 	clearTaskID       func() error
 	readLock          func() (*cli.LockInfo, error)
@@ -279,12 +277,6 @@ func initAutoLoop(parent context.Context, opts AutoModeOptions) *autoLoopCtx {
 	}
 	ctx.usageStore = usageStore
 
-	sessStore, sessErr := sessions.OpenArchive(parent, cli.GetWorkspaceRuntimeDir())
-	if sessErr != nil {
-		log.Printf("[auto] Warning: session store unavailable: %v", sessErr)
-	}
-	ctx.sessStore = sessStore
-
 	ctx.updateState = buildStateUpdater(opts)
 	ctx.clearTaskID = buildTaskIDClearer(opts)
 	ctx.readLock = buildLockReader(opts)
@@ -408,7 +400,6 @@ func runAutoTask(ctx *autoLoopCtx, shutdown chan struct{}) bool {
 	defer backends.ClearResumeSessionID()
 
 	prompt := ctx.generatePrompt(ctx.opts.AgentName)
-	sess := createAutoSession(ctx, prompt)
 
 	backendName := cli.GetBackendName()
 	collector := usage.NewCollector(backendName, ctx.opts.AgentName)
@@ -418,7 +409,7 @@ func runAutoTask(ctx *autoLoopCtx, shutdown chan struct{}) bool {
 	captureSessionID(ctx)
 	endedAt := time.Now()
 
-	recordAndFinalize(ctx, collector, sess, beforeRef, backendName, startedAt, endedAt, err)
+	recordSessionUsage(ctx.usageStore, collector, ctx.opts.WorktreePath, ctx.opts.AgentName, ctx.opts.ParentID, startedAt, endedAt, err, ctx.opts.LockBridge)
 
 	if updateErr := ctx.updateState(cli.StateIdle); updateErr != nil {
 		fmt.Printf("[auto] Warning: failed to update state: %v\n", updateErr)
@@ -475,18 +466,6 @@ func captureSessionID(ctx *autoLoopCtx) {
 		ctx.lastClaudeSessionID = capturedID
 		ctx.resumeFailures = 0
 	}
-}
-
-func recordAndFinalize(ctx *autoLoopCtx, collector *usage.Collector, sess *sessions.Session, beforeRef, backendName string, startedAt, endedAt time.Time, err error) {
-	recordSessionUsage(ctx.usageStore, collector, ctx.opts.WorktreePath, ctx.opts.AgentName, ctx.opts.ParentID, startedAt, endedAt, err, ctx.opts.LockBridge)
-
-	inTok, outTok, cacheRead, cacheWrite := collector.Totals()
-	tier := usage.ResolvePricing(backendName)
-	costUSD := usage.EstimateCost(tier, usage.SessionUsage{
-		InputTokens: inTok, OutputTokens: outTok,
-		CacheReadTokens: cacheRead, CacheWriteTokens: cacheWrite,
-	})
-	finalizeAutoSession(ctx, sess, beforeRef, err, inTok, outTok, cacheRead, cacheWrite, costUSD)
 }
 
 func classifyInvokeError(err error, backendName string) *agenterr.AgentError {

@@ -16,6 +16,7 @@ type TaskRunDependencies struct {
 // snapshot. It never returns the raw lease credential.
 type TaskRunQueryPort interface {
 	GetTaskRun(context.Context, string, string) (*TaskRun, error)
+	ListTaskRuns(context.Context, TaskRunArchiveQuery) ([]*TaskRun, error)
 	ListActiveTaskRuns(context.Context, ActiveTaskRunQuery) ([]*TaskRun, error)
 	ListTaskRunEvents(context.Context, TaskRunEventQuery) ([]*TaskRunEvent, error)
 }

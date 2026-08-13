@@ -1,19 +1,14 @@
 package misc
 
 import (
-	"crypto/subtle"
 	"errors"
-	"log/slog"
 	"net/http"
 	"regexp"
-	"strings"
-	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/sessions/transcript"
+	transcript "github.com/tysonthomas9/loomcli/internal/modules/artifacts"
 	"github.com/tysonthomas9/loomcli/internal/webui/apperrors"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
-	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 	"github.com/tysonthomas9/loomcli/internal/webui/sessioncoord"
 )
 
@@ -55,19 +50,6 @@ type TranscriptResponse struct {
 type TranscriptData struct {
 	SessionID string             `json:"session_id"`
 	Entries   []transcript.Event `json:"entries"`
-}
-
-// SubagentListResponse is the JSON envelope for listing subagents on a session.
-type SubagentListResponse struct {
-	Success bool              `json:"success"`
-	Data    *SubagentListData `json:"data,omitempty"`
-	Error   string            `json:"error,omitempty"`
-}
-
-// SubagentListData contains captured subagent IDs for a session.
-type SubagentListData struct {
-	SessionID   string   `json:"session_id"`
-	SubagentIDs []string `json:"subagent_ids"`
 }
 
 // --- Handlers ---
@@ -163,123 +145,6 @@ func HandleGetSessionTranscript(svc sessioncoord.SessionService) http.HandlerFun
 				SessionID: sessionID,
 				Entries:   entries,
 			},
-		})
-	}
-}
-
-// sessionNotifyRequest is the JSON body expected by HandleNotifySessionChange.
-type sessionNotifyRequest struct {
-	TaskID      string `json:"task_id"`
-	SessionID   string `json:"session_id"`
-	Status      string `json:"status"`
-	WorkspaceID string `json:"workspace_id"`
-}
-
-// HandleNotifySessionChange receives fire-and-forget notifications from local
-// agent processes when a session status changes, and broadcasts a session_change
-// SSE event to all connected web UI clients.
-// POST /api/sessions/notify
-func HandleNotifySessionChange(hub *realtime.Hub, notifyToken string) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		// Validate bearer token — fail-closed if server token is empty.
-		if notifyToken == "" {
-			http.Error(w, "Forbidden", http.StatusForbidden)
-			return
-		}
-		authHeader := r.Header.Get("Authorization")
-		const prefix = "Bearer "
-		if !strings.HasPrefix(authHeader, prefix) {
-			http.Error(w, "Forbidden", http.StatusForbidden)
-			return
-		}
-		token := authHeader[len(prefix):]
-		if subtle.ConstantTimeCompare([]byte(token), []byte(notifyToken)) != 1 {
-			http.Error(w, "Forbidden", http.StatusForbidden)
-			return
-		}
-
-		var req sessionNotifyRequest
-		if err := handler.DecodeOneJSON(w, r, &req, handler.JSONDecodeOptions{}); err != nil {
-			http.Error(w, "Bad Request", http.StatusBadRequest)
-			return
-		}
-
-		if req.TaskID == "" || req.SessionID == "" {
-			http.Error(w, "Bad Request: task_id and session_id required", http.StatusBadRequest)
-			return
-		}
-
-		if req.WorkspaceID == "" {
-			slog.Warn("session notify missing workspace_id, mutation will be dropped", "task_id", req.TaskID)
-		}
-		hub.Broadcast(&realtime.MutationPayload{
-			Type:        realtime.MutationSessionChange,
-			EntityType:  "session",
-			EntityID:    req.SessionID,
-			Action:      "session.change",
-			IssueID:     req.TaskID,
-			NewStatus:   req.Status,
-			Timestamp:   time.Now().UTC().Format(time.RFC3339),
-			WorkspaceID: req.WorkspaceID,
-		})
-
-		w.WriteHeader(http.StatusNoContent)
-	}
-}
-
-// HandleListSessionSubagents returns the list of captured subagent IDs for a session.
-func HandleListSessionSubagents(svc sessioncoord.SessionService) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		wsID := middleware.WorkspaceFromContext(r.Context())
-		taskID := r.PathValue("taskId")
-		sessionID := r.PathValue("sessionId")
-
-		ids, err := svc.ListSessionSubagents(r.Context(), wsID, taskID, sessionID)
-		if err != nil {
-			var svcErr *apperrors.ServiceError
-			status := http.StatusInternalServerError
-			msg := "internal server error"
-			if errors.As(err, &svcErr) {
-				status = handler.StatusForKind(svcErr.Kind)
-				msg = svcErr.Message
-			}
-			handler.WriteJSON(w, status, SubagentListResponse{Success: false, Error: msg})
-			return
-		}
-		if ids == nil {
-			ids = []string{}
-		}
-		handler.WriteJSON(w, http.StatusOK, SubagentListResponse{
-			Success: true,
-			Data:    &SubagentListData{SessionID: sessionID, SubagentIDs: ids},
-		})
-	}
-}
-
-// HandleGetSessionSubagentTranscript returns the canonical event stream for a
-// captured subagent transcript.
-func HandleGetSessionSubagentTranscript(svc sessioncoord.SessionService) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		wsID := middleware.WorkspaceFromContext(r.Context())
-		taskID := r.PathValue("taskId")
-		sessionID := r.PathValue("sessionId")
-		subagentID := r.PathValue("subagentId")
-
-		events, err := svc.GetSessionSubagentTranscript(r.Context(), wsID, taskID, sessionID, subagentID)
-		if err != nil {
-			var svcErr *apperrors.ServiceError
-			status := http.StatusInternalServerError
-			msg := "internal server error"
-			if errors.As(err, &svcErr) {
-				status = handler.StatusForKind(svcErr.Kind)
-				msg = svcErr.Message
-			}
-			handler.WriteJSON(w, status, TranscriptResponse{Success: false, Error: msg})
-			return
-		}
-		handler.WriteJSON(w, http.StatusOK, TranscriptResponse{
-			Success: true,
-			Data:    &TranscriptData{SessionID: sessionID + "/" + subagentID, Entries: events},
 		})
 	}
 }

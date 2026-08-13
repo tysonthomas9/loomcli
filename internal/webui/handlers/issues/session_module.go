@@ -10,7 +10,7 @@ import (
 // SessionHistoryQueries is the issue-history read projection consumed by this
 // route module. Task session evidence is composed separately by Artifacts.
 type SessionHistoryQueries interface {
-	ListSessionHistory(context.Context, string, string) ([]sessioncoord.SessionRecord, error)
+	ListSessionHistory(context.Context, string, string) ([]sessioncoord.SessionHistoryItem, error)
 	GetSessionScrollback(context.Context, string, string, string) (*sessioncoord.SessionScrollbackResult, error)
 }
 

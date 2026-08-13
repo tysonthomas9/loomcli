@@ -3,8 +3,6 @@ package middleware
 import (
 	"net/http"
 	"strings"
-
-	"github.com/tysonthomas9/loomcli/internal/sessions"
 )
 
 // isPublicRoute returns true if the given method+path combination should be
@@ -22,11 +20,6 @@ func isPublicRoute(method, path string) bool {
 
 	// Client error reporting is public so errors during auth bootstrap are captured
 	if method == http.MethodPost && normalizedPath == "/api/client-errors" {
-		return true
-	}
-
-	// Session notifications use their own auth mechanism
-	if method == http.MethodPost && normalizedPath == sessions.NotifyPath {
 		return true
 	}
 

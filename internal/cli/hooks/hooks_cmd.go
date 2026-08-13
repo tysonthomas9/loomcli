@@ -27,7 +27,7 @@ var hooksCmd = &cobra.Command{
 	},
 }
 
-// hooksClaudeCodeCmd groups the four Claude Code hook handlers.
+// hooksClaudeCodeCmd groups the Claude Code assignment and yield handlers.
 var hooksClaudeCodeCmd = &cobra.Command{
 	Use:    "claude-code",
 	Short:  "Claude Code hook handlers",
@@ -113,21 +113,15 @@ var hookSessionEndCmd = &cobra.Command{
 	},
 }
 
-// runClaudeHook is the shared logic for all four Claude Code hook handlers.
-// It reads LOOM_SESSION_ID and the workspace runtime dir from env, reads JSON from
-// stdin, parses it, and dispatches the event. Always returns nil so the
-// hook process exits 0.
+// runClaudeHook parses one Claude event for assignment-context and cooperative
+// yield behavior. Always returns nil so the hook process exits 0.
 func runClaudeHook(cmd *cobra.Command, hookName string) error {
-	sessionID := os.Getenv("LOOM_SESSION_ID")
-	runtimeDir := os.Getenv("LOOM_WORKSPACE_RUNTIME_DIR")
-
-	event, err := ParseClaudeHookInput(hookName, cmd.InOrStdin())
+	_, err := ParseClaudeHookInput(hookName, cmd.InOrStdin())
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "loom hook %s: parse error: %v\n", hookName, err)
 		return nil // Always exit 0
 	}
 
-	_ = dispatchHookEvent(cmd.Context(), event, runtimeDir, sessionID)
 	maybeWriteClaudeAssignmentContext(cmd, hookName)
 
 	// Yield check for stop hook (defense-in-depth)
@@ -281,10 +275,6 @@ func init() {
 	hooksCmd.AddCommand(hooksInstallCmd)
 	hooksCmd.AddCommand(hooksUninstallCmd)
 	hooksCmd.AddCommand(hooksStatusCmd)
-
-	// The generic wrapper-driven entrypoint (loom hooks dispatch <harness> <event>),
-	// coexisting with the legacy claude-code handlers above.
-	hooksCmd.AddCommand(hooksDispatchCmd)
 
 	// Register hooksCmd under cli.GetRootCmd()
 	cli.RegisterCommand(hooksCmd)

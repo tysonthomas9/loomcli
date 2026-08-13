@@ -234,6 +234,7 @@ type TaskRunAPI interface {
 // adapters after they have verified run-scoped authority.
 type TaskRunQueries interface {
 	GetTaskRun(context.Context, string, string) (*TaskRun, error)
+	ListTaskRuns(context.Context, TaskRunArchiveQuery) ([]*TaskRun, error)
 	ListActiveTaskRuns(context.Context, ActiveTaskRunQuery) ([]*TaskRun, error)
 	ListTaskRunEvents(context.Context, TaskRunEventQuery) ([]*TaskRunEvent, error)
 }

@@ -84,6 +84,38 @@ function evidenceLabel(value: string | undefined): string {
   return (value ?? "").replace(/_/g, " ").trim();
 }
 
+function evidenceProblem(session: SessionRecord): string | null {
+  const problems: string[] = [];
+  const add = (
+    label: string,
+    state: SessionRecord["transcript_evidence_status"],
+    failureClass?: string,
+  ) => {
+    switch (state) {
+      case "capture_failed":
+        problems.push(
+          `${label} capture failed${failureClass ? ` (${evidenceLabel(failureClass)})` : ""}.`,
+        );
+        break;
+      case "content_unavailable":
+        problems.push(`${label} content is unavailable.`);
+        break;
+      case "corrupt":
+        problems.push(`${label} evidence is corrupt.`);
+        break;
+    }
+  };
+  add(
+    "Transcript",
+    session.transcript_evidence_status,
+    session.transcript_failure_class,
+  );
+  add("Diff", session.diff_evidence_status, session.diff_failure_class);
+  return problems.length > 0
+    ? `${problems.join(" ")} The run outcome is unchanged.`
+    : null;
+}
+
 function safeExternalURL(value: string | undefined): string | null {
   if (!value) return null;
   try {
@@ -416,6 +448,7 @@ function SessionRunDetailContent({
     (session.cache_read_tokens ?? 0) +
     (session.cache_write_tokens ?? 0);
   const runError = runErrorSummary(session);
+  const evidenceError = evidenceProblem(session);
   const executionBranch = session.local_branch || session.github_branch;
   const githubPRURL = safeExternalURL(session.github_pr_url);
   const hasExecutionEvidence = Boolean(
@@ -470,6 +503,17 @@ function SessionRunDetailContent({
               {runErrorTitle(session.status)}
             </div>
             <div className={styles.runErrorBody}>{runError}</div>
+          </div>
+        )}
+
+        {evidenceError && (
+          <div
+            className={styles.runErrorBanner}
+            role="alert"
+            data-testid="evidence-status-banner"
+          >
+            <div className={styles.runErrorTitle}>Evidence incomplete</div>
+            <div className={styles.runErrorBody}>{evidenceError}</div>
           </div>
         )}
 
@@ -593,6 +637,23 @@ function SessionRunDetailContent({
                 </a>
               </div>
             )}
+          </div>
+        )}
+        {(session.transcript_evidence_status !== "missing" ||
+          session.diff_evidence_status !== "missing") && (
+          <div className={styles.statRow} data-testid="session-evidence-status">
+            <div className={styles.stat}>
+              <div className={styles.statLabel}>Transcript</div>
+              <div className={styles.statValue}>
+                {evidenceLabel(session.transcript_evidence_status)}
+              </div>
+            </div>
+            <div className={styles.stat}>
+              <div className={styles.statLabel}>Diff</div>
+              <div className={styles.statValue}>
+                {evidenceLabel(session.diff_evidence_status)}
+              </div>
+            </div>
           </div>
         )}
       </header>

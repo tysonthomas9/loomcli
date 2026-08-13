@@ -75,22 +75,11 @@ export interface SessionDetailResponse {
   data: SessionRecord;
 }
 
-/** Response from GET .../sessions/{sessionId}/transcript
- *  or          GET .../sessions/{sessionId}/subagents/{subagentId}/transcript
- */
+/** Response from GET .../sessions/{sessionId}/transcript */
 export interface TranscriptResponse {
   success: boolean;
   data: {
     session_id: string;
     entries: TranscriptEntry[];
-  };
-}
-
-/** Response from GET .../sessions/{sessionId}/subagents */
-export interface SubagentListResponse {
-  success: boolean;
-  data: {
-    session_id: string;
-    subagent_ids: string[];
   };
 }

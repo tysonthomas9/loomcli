@@ -10,6 +10,7 @@ type Store interface {
 	Create(context.Context, ExecutionOwner, CreateCommand) (*Artifact, error)
 	Upload(context.Context, ExecutionOwner, UploadCommand) (*Artifact, error)
 	Finalize(context.Context, ExecutionOwner, FinalizeCommand) (*Artifact, error)
+	Fail(context.Context, ExecutionOwner, FailCommand) (*Artifact, error)
 	Reference(context.Context, ExecutionOwner, ReferenceCommand) (ReferenceResult, error)
 	Get(context.Context, ExecutionOwner, GetQuery) (*Artifact, error)
 	List(context.Context, ExecutionOwner, ListFilter) ([]*Artifact, error)
@@ -24,6 +25,7 @@ type SessionStore interface {
 	CreateSession(context.Context, SessionOwner, CreateCommand) (*Artifact, error)
 	UploadSession(context.Context, SessionOwner, UploadCommand) (*Artifact, error)
 	FinalizeSession(context.Context, SessionOwner, FinalizeCommand) (*Artifact, error)
+	FailSession(context.Context, SessionOwner, FailCommand) (*Artifact, error)
 	GetSession(context.Context, SessionOwner, GetQuery) (*Artifact, error)
 }
 

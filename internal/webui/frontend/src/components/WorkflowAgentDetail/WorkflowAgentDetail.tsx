@@ -887,6 +887,8 @@ function fallbackSessionFromRun(
     is_active: live,
     has_transcript: true,
     has_diff: false,
+    transcript_evidence_status: "pending",
+    diff_evidence_status: "missing",
   };
   if (run.error_class) {
     session.error_class = run.error_class;

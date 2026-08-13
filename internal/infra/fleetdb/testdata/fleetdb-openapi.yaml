@@ -7478,6 +7478,39 @@ paths:
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
 
+  /api/v1/{workspace}/artifacts/{artifact_id}/commands/fail:
+    parameters:
+      - $ref: "#/components/parameters/Workspace"
+      - $ref: "#/components/parameters/ArtifactID"
+    post:
+      tags: [ControlPlane]
+      summary: Record a terminal artifact capture failure with owner fencing and revision CAS
+      description: >-
+        Service-actor-only owner command. The failed Artifact remains durable
+        and queryable independently of its TaskRun outcome. Exact replay
+        returns the original committed failure snapshot.
+      operationId: failArtifactCommand
+      parameters:
+        - name: X-Lease-Token
+          in: header
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ArtifactFailCommand" }
+      responses:
+        "200":
+          description: Failure command committed or replayed
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ArtifactCommandResult" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
   /api/v1/{workspace}/task-runs/{task_run_id}/artifacts:
     parameters:
       - $ref: "#/components/parameters/Workspace"
@@ -15569,6 +15602,19 @@ components:
             kind: { type: string }
             target_ref: { type: string }
 
+    ArtifactFailCommand:
+      allOf:
+        - $ref: "#/components/schemas/ArtifactCommandOwner"
+        - type: object
+          required: [expected_revision, failure_class]
+          properties:
+            expected_revision: { type: integer, format: int64, minimum: 1 }
+            failure_class: { type: string, maxLength: 128 }
+            failure_message: { type: string, maxLength: 4096 }
+            metadata:
+              type: object
+              additionalProperties: { type: string }
+
     ArtifactReference:
       type: object
       required: [workspace_key, reference_id, artifact_id, owner_type, owner_id, kind, target_ref, created_at]
@@ -15584,7 +15630,7 @@ components:
 
     ArtifactCommandType:
       type: string
-      enum: [artifact_create, artifact_upload, artifact_finalize, artifact_reference]
+      enum: [artifact_create, artifact_upload, artifact_finalize, artifact_fail, artifact_reference]
 
     ArtifactCommandReceipt:
       type: object

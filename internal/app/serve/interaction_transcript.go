@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	artifactredact "github.com/tysonthomas9/loomcli/internal/infra/artifactredact"
 	infrafleetdb "github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
 	"github.com/tysonthomas9/loomcli/internal/modules/artifacts"
 	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
@@ -43,7 +44,11 @@ func newInteractionTranscriptArtifactStore(
 	if err != nil {
 		return nil, fmt.Errorf("compose Interaction transcript Artifacts admission: %w", err)
 	}
-	service, err := artifacts.NewSession(store, admission)
+	evidence, err := artifacts.NewEvidencePolicy(artifactredact.Adapter{})
+	if err != nil {
+		return nil, err
+	}
+	service, err := artifacts.NewSession(store, admission, evidence)
 	if err != nil {
 		return nil, err
 	}
@@ -92,6 +97,45 @@ func (adapter *interactionTranscriptArtifacts) CreateContent(
 	return artifact.ArtifactID, nil
 }
 
+func (adapter *interactionTranscriptArtifacts) RecordFailure(
+	ctx context.Context,
+	auth authority.SessionAuthority,
+	command interaction.TranscriptArtifactFailure,
+) error {
+	if adapter == nil || adapter.api == nil || adapter.issuer == nil || adapter.interactionAdmission == nil {
+		return interaction.ErrUnavailable
+	}
+	if err := adapter.interactionAdmission.RequireSession(
+		interaction.ActionPublishTranscript,
+		command.WorkspaceKey,
+		auth,
+	); err != nil {
+		return fmt.Errorf("validate transcript failure authority: %w", errors.Join(interaction.ErrNotOwner, err))
+	}
+	if auth.Action() != interaction.ActionPublishTranscript || auth.Workspace() != command.WorkspaceKey ||
+		auth.SessionID() != command.SessionID || auth.AgentID() != command.AgentID {
+		return interaction.ErrNotOwner
+	}
+	authorities, err := adapter.deriveAuthorities(auth)
+	if err != nil {
+		return fmt.Errorf("derive transcript failure Artifacts authority: %w", err)
+	}
+	artifact, err := adapter.api.RecordFailure(ctx, authorities, artifacts.SessionOwner{
+		WorkspaceKey: command.WorkspaceKey, SessionID: command.SessionID, AgentID: command.AgentID,
+		NodeID: auth.NodeID(), LeaseID: auth.LeaseID(), FencingToken: auth.FencingToken(),
+	}, artifacts.SessionFailureCommand{
+		ArtifactID: command.ArtifactID, TaskID: command.TaskID, Type: "transcript",
+		FailureClass: command.FailureClass,
+	})
+	if err != nil {
+		return mapInteractionArtifactError(err)
+	}
+	if artifact == nil || artifact.ArtifactID != command.ArtifactID || artifact.DurableStatus != artifacts.StatusFailed {
+		return interaction.ErrInvalidPersistedState
+	}
+	return nil
+}
+
 // deriveAuthorities converts one already-admitted Interaction publish grant
 // into the four exact Artifacts lifecycle grants needed by the bounded
 // transcript saga. No new identity or lease credential is introduced, and the
@@ -99,7 +143,7 @@ func (adapter *interactionTranscriptArtifacts) CreateContent(
 func (adapter *interactionTranscriptArtifacts) deriveAuthorities(
 	auth authority.SessionAuthority,
 ) (artifacts.SessionContentAuthorities, error) {
-	actions := []authority.Action{artifacts.ActionDeclare, artifacts.ActionGet, artifacts.ActionUpload, artifacts.ActionFinalize}
+	actions := []authority.Action{artifacts.ActionDeclare, artifacts.ActionGet, artifacts.ActionUpload, artifacts.ActionFinalize, artifacts.ActionFail}
 	principal, err := adapter.issuer.DeriveVerifiedPrincipal(authority.PrincipalClaims{
 		Subject: auth.Subject(), Class: authority.ClassSession, Workspace: auth.Workspace(),
 		Actions: actions, ExpiresAt: auth.ExpiresAt(),
@@ -126,7 +170,11 @@ func (adapter *interactionTranscriptArtifacts) deriveAuthorities(
 	if err != nil {
 		return artifacts.SessionContentAuthorities{}, err
 	}
-	return artifacts.SessionContentAuthorities{Declare: declare, Get: get, Upload: upload, Finalize: finalize}, nil
+	fail, err := issue(artifacts.ActionFail)
+	if err != nil {
+		return artifacts.SessionContentAuthorities{}, err
+	}
+	return artifacts.SessionContentAuthorities{Declare: declare, Get: get, Upload: upload, Finalize: finalize, Fail: fail}, nil
 }
 
 func mapInteractionArtifactError(err error) error {
@@ -198,6 +246,18 @@ func (transport *interactionArtifactsFleetDBTransport) FinalizeSession(
 		SizeBytes: cloneInteractionInt64Pointer(command.SizeBytes), Checksum: cloneInteractionStringPointer(command.Checksum),
 		ContentHash: cloneInteractionStringPointer(command.ContentHash), Visibility: cloneInteractionStringPointer(command.Visibility),
 		RedactionStatus: cloneInteractionStringPointer(command.RedactionStatus), Metadata: cloneInteractionMapPointer(command.Metadata),
+	})
+	return interactionArtifactFromInfra(value), translateInteractionArtifactTransportError(err)
+}
+
+func (transport *interactionArtifactsFleetDBTransport) FailSession(
+	ctx context.Context,
+	owner artifacts.SessionOwner,
+	command artifacts.FailCommand,
+) (*artifacts.Artifact, error) {
+	value, err := transport.transport.FailSession(ctx, interactionArtifactInfraOwner(owner), infrafleetdb.ArtifactFailCommand{
+		ArtifactID: command.ArtifactID, FailureClass: command.FailureClass,
+		FailureMessage: command.FailureMessage, Metadata: cloneInteractionMap(command.Metadata),
 	})
 	return interactionArtifactFromInfra(value), translateInteractionArtifactTransportError(err)
 }

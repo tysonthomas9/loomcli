@@ -30,7 +30,7 @@ function formatRelativeTime(dateString: string): string {
   return `${days}d ago`;
 }
 
-function formatDuration(startStr: string, endStr?: string): string {
+function formatDuration(startStr: string, endStr?: string | null): string {
   const start = new Date(startStr).getTime();
   const end = endStr ? new Date(endStr).getTime() : Date.now();
   const diffMs = end - start;
@@ -44,6 +44,35 @@ function formatDuration(startStr: string, endStr?: string): string {
   const remainingMinutes = minutes % 60;
   if (remainingMinutes === 0) return `${hours}h`;
   return `${hours}h ${remainingMinutes}m`;
+}
+
+function scrollbackEvidenceLabel(
+  state: SessionRecord["scrollback_evidence_status"],
+): string {
+  switch (state) {
+    case "pending":
+      return "Scrollback pending";
+    case "finalized":
+      return "Scrollback ready";
+    case "truncated":
+      return "Scrollback ready (truncated)";
+    case "capture_failed":
+      return "Scrollback capture failed";
+    case "content_unavailable":
+      return "Scrollback unavailable";
+    case "corrupt":
+      return "Scrollback corrupt";
+    default:
+      return "Scrollback not captured";
+  }
+}
+
+function canViewScrollback(record: SessionRecord): boolean {
+  return (
+    record.status === "completed" &&
+    (record.scrollback_evidence_status === "finalized" ||
+      record.scrollback_evidence_status === "truncated")
+  );
 }
 
 export function SessionHistorySection({
@@ -83,7 +112,7 @@ export function SessionHistorySection({
     return () => {
       cancelled = true;
     };
-  }, [issueId]);
+  }, [workspaceId, issueId]);
 
   const handleViewScrollback = useCallback(
     async (recordId: string, sessionName: string) => {
@@ -103,7 +132,7 @@ export function SessionHistorySection({
         setScrollbackLoading(false);
       }
     },
-    [issueId],
+    [workspaceId, issueId],
   );
 
   if (loading) {
@@ -140,6 +169,13 @@ export function SessionHistorySection({
             <span className={styles.sessionHistoryDuration}>
               {formatDuration(record.started_at, record.ended_at)}
             </span>
+            <span
+              className={styles.sessionHistoryEvidence}
+              data-evidence-state={record.scrollback_evidence_status}
+              data-testid={`scrollback-evidence-status-${record.id}`}
+            >
+              {scrollbackEvidenceLabel(record.scrollback_evidence_status)}
+            </span>
           </div>
           <div className={styles.sessionHistoryActions}>
             {record.status === "active" && onJumpToSession && (
@@ -151,7 +187,7 @@ export function SessionHistorySection({
                 Jump to tab
               </button>
             )}
-            {record.status === "completed" && record.scrollback_path && (
+            {canViewScrollback(record) && (
               <button
                 type="button"
                 className={styles.sessionHistoryAction}

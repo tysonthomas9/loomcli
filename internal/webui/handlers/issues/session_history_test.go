@@ -14,12 +14,22 @@ import (
 	"github.com/alicebob/miniredis/v2"
 	"github.com/redis/go-redis/v9"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
 	"github.com/tysonthomas9/loomcli/internal/webui/localredis"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/sessioncoord"
 )
 
 const testSHWSID = "test-ws-uuid"
+
+type scrollbackResultService struct {
+	stubSessionService
+	result *sessioncoord.SessionScrollbackResult
+}
+
+func (service *scrollbackResultService) GetSessionScrollback(context.Context, string, string, string) (*sessioncoord.SessionScrollbackResult, error) {
+	return service.result, nil
+}
 
 func setupSessionHistoryStore(t *testing.T) *localredis.SessionHistoryStore {
 	t.Helper()
@@ -38,7 +48,7 @@ func TestHandleListSessionHistory_ReturnsRecords(t *testing.T) {
 	ctx := context.Background()
 
 	// Add a session record.
-	record := sessioncoord.SessionRecord{
+	record := interaction.SessionHistoryRecord{
 		ID:          "issue-proj-1:1700000000",
 		SessionName: "issue-proj-1",
 		IssueID:     "proj.1",
@@ -64,8 +74,8 @@ func TestHandleListSessionHistory_ReturnsRecords(t *testing.T) {
 	}
 
 	var resp struct {
-		Success bool                         `json:"success"`
-		Data    []sessioncoord.SessionRecord `json:"data"`
+		Success bool                              `json:"success"`
+		Data    []sessioncoord.SessionHistoryItem `json:"data"`
 	}
 	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
 		t.Fatalf("decode: %v", err)
@@ -81,6 +91,9 @@ func TestHandleListSessionHistory_ReturnsRecords(t *testing.T) {
 	}
 	if resp.Data[0].Backend != "claude" {
 		t.Errorf("data[0].Backend = %q, want %q", resp.Data[0].Backend, "claude")
+	}
+	if resp.Data[0].ScrollbackEvidenceStatus != "content_unavailable" {
+		t.Errorf("scrollback evidence status = %q", resp.Data[0].ScrollbackEvidenceStatus)
 	}
 }
 
@@ -100,8 +113,8 @@ func TestHandleListSessionHistory_EmptyArrayForUnknownIssue(t *testing.T) {
 	}
 
 	var resp struct {
-		Success bool                         `json:"success"`
-		Data    []sessioncoord.SessionRecord `json:"data"`
+		Success bool                              `json:"success"`
+		Data    []sessioncoord.SessionHistoryItem `json:"data"`
 	}
 	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
 		t.Fatalf("decode: %v", err)
@@ -177,6 +190,25 @@ func TestHandleGetSessionScrollback_NilStore(t *testing.T) {
 	}
 }
 
+func TestHandleGetSessionScrollback_ReturnsContractText(t *testing.T) {
+	handler := handleGetSessionScrollback(&scrollbackResultService{result: &sessioncoord.SessionScrollbackResult{
+		Content: "first\nsecond", Lines: 2,
+	}})
+	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/"+testSHWSID+"/issues/proj.1/sessions/rec-1/scrollback", nil)
+	req.SetPathValue("issueId", "proj.1")
+	req.SetPathValue("recordId", "rec-1")
+	req = withSHWSContext(req, testSHWSID)
+	rr := httptest.NewRecorder()
+	handler(rr, req)
+
+	if rr.Code != http.StatusOK || rr.Body.String() != "first\nsecond" {
+		t.Fatalf("response = %d %q", rr.Code, rr.Body.String())
+	}
+	if got := rr.Header().Get("Content-Type"); got != "text/plain; charset=utf-8" {
+		t.Fatalf("content type = %q", got)
+	}
+}
+
 func TestHandleGetSessionScrollback_RecordNotFound(t *testing.T) {
 	store := setupSessionHistoryStore(t)
 	handler := handleGetSessionScrollback(NewSessionService(nil, store))
@@ -237,8 +269,8 @@ func TestHandleGetSessionScrollback_NoScrollbackAvailable(t *testing.T) {
 	store := setupSessionHistoryStore(t)
 	ctx := context.Background()
 
-	// Add a completed record with no scrollback path.
-	record := sessioncoord.SessionRecord{
+	// Add a completed record with no durable scrollback evidence.
+	record := interaction.SessionHistoryRecord{
 		ID:          "issue-proj-1:1700000000",
 		SessionName: "issue-proj-1",
 		IssueID:     "proj.1",
@@ -246,7 +278,6 @@ func TestHandleGetSessionScrollback_NoScrollbackAvailable(t *testing.T) {
 		Status:      "completed",
 		Launcher:    "user",
 		StartedAt:   time.Date(2025, 1, 15, 10, 0, 0, 0, time.UTC),
-		// ScrollbackPath intentionally empty.
 	}
 	if err := store.Add(ctx, testSHWSID, record); err != nil {
 		t.Fatalf("Add: %v", err)

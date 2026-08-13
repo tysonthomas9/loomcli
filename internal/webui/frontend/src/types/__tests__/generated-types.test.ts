@@ -799,6 +799,8 @@ describe("Structural compatibility", () => {
       is_active: false,
       has_transcript: false,
       has_diff: false,
+      transcript_evidence_status: "missing",
+      diff_evidence_status: "missing",
     };
     const aliased: SessionRecord = raw;
     expect(aliased).toBe(raw);

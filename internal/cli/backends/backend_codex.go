@@ -121,7 +121,6 @@ func buildBackendEnv(workDir, agentName string) []string {
 	if agentName != "" {
 		env = append(env, "LOOM_AGENT_NAME="+agentName)
 	}
-	env = append(env, activeSessionEnvVars()...)
 	return env
 }
 

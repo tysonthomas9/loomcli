@@ -2,6 +2,7 @@ package artifacts
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -10,11 +11,14 @@ import (
 )
 
 type fakeSessionStore struct {
-	artifact  *Artifact
-	content   []byte
-	creates   int
-	uploads   int
-	finalizes int
+	artifact    *Artifact
+	content     []byte
+	creates     int
+	uploads     int
+	finalizes   int
+	fails       int
+	uploadErr   error
+	finalizeErr error
 }
 
 func (store *fakeSessionStore) CreateSession(_ context.Context, owner SessionOwner, command CreateCommand) (*Artifact, error) {
@@ -36,6 +40,9 @@ func (store *fakeSessionStore) CreateSession(_ context.Context, owner SessionOwn
 
 func (store *fakeSessionStore) UploadSession(_ context.Context, _ SessionOwner, command UploadCommand) (*Artifact, error) {
 	store.uploads++
+	if store.uploadErr != nil {
+		return nil, store.uploadErr
+	}
 	store.content = append([]byte(nil), command.Content...)
 	store.artifact.SizeBytes = int64(len(command.Content))
 	store.artifact.ContentHash = artifactContentHash(command.Content)
@@ -46,12 +53,23 @@ func (store *fakeSessionStore) UploadSession(_ context.Context, _ SessionOwner, 
 
 func (store *fakeSessionStore) FinalizeSession(_ context.Context, _ SessionOwner, command FinalizeCommand) (*Artifact, error) {
 	store.finalizes++
+	if store.finalizeErr != nil {
+		return nil, store.finalizeErr
+	}
 	now := time.Date(2026, 8, 4, 10, 1, 0, 0, time.UTC)
 	store.artifact.DurableStatus = StatusFinalized
 	store.artifact.FinalizedAt = &now
 	if command.ContentHash != nil {
 		store.artifact.ContentHash = *command.ContentHash
 	}
+	return cloneArtifact(store.artifact), nil
+}
+
+func (store *fakeSessionStore) FailSession(_ context.Context, _ SessionOwner, command FailCommand) (*Artifact, error) {
+	store.fails++
+	store.artifact.DurableStatus = StatusFailed
+	store.artifact.FinalizedAt = nil
+	store.artifact.Metadata = cloneMetadata(command.Metadata)
 	return cloneArtifact(store.artifact), nil
 }
 
@@ -69,7 +87,7 @@ func TestSessionServiceOwnsRetrySafeContentLifecycle(t *testing.T) {
 	command := SessionContentCommand{
 		ArtifactID: "transcript-session-1", TaskID: "TASK-1", Type: "transcript",
 		Summary: "interactive session transcript", MIMEType: "application/x-ndjson",
-		Metadata: map[string]string{"backend": "codex"}, Content: []byte("{\"text\":\"hello\"}\n"),
+		Metadata: map[string]string{"backend": "codex"}, Content: canonicalTestTranscript(t, "hello"),
 	}
 
 	artifact, err := service.CreateContent(t.Context(), auth, owner, command)
@@ -94,7 +112,7 @@ func TestSessionServiceOwnsRetrySafeContentLifecycle(t *testing.T) {
 		t.Fatalf("exact replay rewrote content: create %d upload %d finalize %d", store.creates, store.uploads, store.finalizes)
 	}
 
-	command.Content = []byte("{\"text\":\"different\"}\n")
+	command.Content = canonicalTestTranscript(t, "different")
 	if _, err := service.CreateContent(t.Context(), auth, owner, command); !errors.Is(err, ErrAlreadyExists) {
 		t.Fatalf("divergent replay error = %v, want ErrAlreadyExists", err)
 	}
@@ -107,7 +125,10 @@ func TestSessionServiceRejectsForeignAuthorityAndGeneration(t *testing.T) {
 	service, _, owner := newSessionServiceFixture(t, &fakeSessionStore{})
 	foreign := authority.NewIssuer()
 	auth := sessionContentAuthorities(t, foreign, owner)
-	command := SessionContentCommand{ArtifactID: "transcript-session-1", Type: "transcript", Content: []byte("x")}
+	command := SessionContentCommand{
+		ArtifactID: "transcript-session-1", Type: "transcript",
+		Content: canonicalTestTranscript(t, "x"),
+	}
 	if _, err := service.CreateContent(t.Context(), auth, owner, command); !errors.Is(err, authority.ErrAdmissionDenied) {
 		t.Fatalf("foreign authority error = %v, want admission denied", err)
 	}
@@ -126,14 +147,107 @@ func TestSessionServiceRejectsCrossOwnerPersistedArtifact(t *testing.T) {
 	store.artifact = &Artifact{
 		WorkspaceKey: owner.WorkspaceKey, ArtifactID: "transcript-session-1", AgentID: "other-agent",
 		SessionID: owner.SessionID, OwnerType: OwnerSession, OwnerID: owner.SessionID,
-		Type: "transcript", DurableStatus: StatusFinalized, ContentHash: artifactContentHash([]byte("x")),
+		Type: "transcript", DurableStatus: StatusFinalized, ContentHash: artifactContentHash(canonicalTestTranscript(t, "x")),
 		FinalizedAt: ptrTime(time.Now()),
 	}
 	_, err := service.CreateContent(t.Context(), sessionContentAuthorities(t, issuer, owner), owner, SessionContentCommand{
-		ArtifactID: "transcript-session-1", Type: "transcript", Content: []byte("x"),
+		ArtifactID: "transcript-session-1", Type: "transcript", Content: canonicalTestTranscript(t, "x"),
 	})
 	if !errors.Is(err, ErrInvalidPersistedState) {
 		t.Fatalf("cross-owner result error = %v, want ErrInvalidPersistedState", err)
+	}
+}
+
+func TestSessionServicePersistsMalformedTranscriptAsFailedEvidence(t *testing.T) {
+	store := &fakeSessionStore{}
+	service, issuer, owner := newSessionServiceFixture(t, store)
+	command := SessionContentCommand{
+		ArtifactID: "transcript-session-1", Type: "transcript",
+		Content: []byte("not-canonical-jsonl\n"),
+	}
+	_, err := service.CreateContent(t.Context(), sessionContentAuthorities(t, issuer, owner), owner, command)
+	if !errors.Is(err, ErrEvidenceCorrupt) {
+		t.Fatalf("CreateContent error = %v, want ErrEvidenceCorrupt", err)
+	}
+	if store.creates != 1 || store.fails != 1 || store.uploads != 0 || store.finalizes != 0 {
+		t.Fatalf("calls create=%d fail=%d upload=%d finalize=%d", store.creates, store.fails, store.uploads, store.finalizes)
+	}
+	if store.artifact == nil || store.artifact.DurableStatus != StatusFailed ||
+		store.artifact.Metadata[MetadataEvidenceCaptureStatus] != "capture_failed" ||
+		store.artifact.Metadata["loom.evidence.failure_class"] != "evidence_corrupt" {
+		t.Fatalf("failed transcript artifact = %#v", store.artifact)
+	}
+}
+
+func TestSessionServicePersistsTransportFailureAfterDeclaration(t *testing.T) {
+	tests := []struct {
+		name        string
+		configure   func(*fakeSessionStore)
+		wantUploads int
+		wantFinals  int
+	}{
+		{name: "upload", configure: func(store *fakeSessionStore) { store.uploadErr = ErrUnavailable }, wantUploads: 1},
+		{name: "finalize", configure: func(store *fakeSessionStore) { store.finalizeErr = ErrUnavailable }, wantUploads: 1, wantFinals: 1},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			store := &fakeSessionStore{}
+			test.configure(store)
+			service, issuer, owner := newSessionServiceFixture(t, store)
+			command := SessionContentCommand{
+				ArtifactID: "transcript-session-1", Type: "transcript",
+				Content: canonicalTestTranscript(t, "hello"),
+			}
+			_, err := service.CreateContent(t.Context(), sessionContentAuthorities(t, issuer, owner), owner, command)
+			if !errors.Is(err, ErrUnavailable) {
+				t.Fatalf("CreateContent error = %v, want ErrUnavailable", err)
+			}
+			if store.uploads != test.wantUploads || store.finalizes != test.wantFinals || store.fails != 1 {
+				t.Fatalf("calls upload=%d finalize=%d fail=%d", store.uploads, store.finalizes, store.fails)
+			}
+			if store.artifact == nil || store.artifact.DurableStatus != StatusFailed ||
+				store.artifact.Metadata[MetadataEvidenceCaptureStatus] != "capture_failed" ||
+				store.artifact.Metadata["loom.evidence.failure_class"] != "capture_unavailable" {
+				t.Fatalf("failed transcript artifact = %#v", store.artifact)
+			}
+		})
+	}
+}
+
+func TestSessionServiceRecordsPreContentCaptureFailure(t *testing.T) {
+	store := &fakeSessionStore{}
+	service, issuer, owner := newSessionServiceFixture(t, store)
+	auth := sessionContentAuthorities(t, issuer, owner)
+	command := SessionFailureCommand{
+		ArtifactID: "transcript-session-1", TaskID: "TASK-1", Type: "transcript",
+		FailureClass: EvidenceFailureUnavailable,
+	}
+
+	artifact, err := service.RecordFailure(t.Context(), auth, owner, command)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if artifact.DurableStatus != StatusFailed || artifact.OwnerType != OwnerSession ||
+		artifact.OwnerID != owner.SessionID || artifact.TaskID != command.TaskID ||
+		artifact.Metadata[MetadataEvidenceCaptureStatus] != "capture_failed" ||
+		artifact.Metadata["loom.evidence.failure_class"] != EvidenceFailureUnavailable {
+		t.Fatalf("failed evidence = %#v", artifact)
+	}
+	if store.creates != 1 || store.fails != 1 || store.uploads != 0 || store.finalizes != 0 {
+		t.Fatalf("calls create=%d fail=%d upload=%d finalize=%d", store.creates, store.fails, store.uploads, store.finalizes)
+	}
+
+	replayed, err := service.RecordFailure(t.Context(), auth, owner, command)
+	if err != nil || replayed.ArtifactID != command.ArtifactID {
+		t.Fatalf("exact failure replay = %#v, %v", replayed, err)
+	}
+	if store.creates != 2 || store.fails != 1 {
+		t.Fatalf("exact replay rewrote failure: create=%d fail=%d", store.creates, store.fails)
+	}
+
+	command.FailureClass = "runner-controlled-class"
+	if _, err := service.RecordFailure(t.Context(), auth, owner, command); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("unknown failure class error = %v, want ErrInvalid", err)
 	}
 }
 
@@ -144,7 +258,7 @@ func newSessionServiceFixture(t *testing.T, store SessionStore) (*SessionService
 	if err != nil {
 		t.Fatal(err)
 	}
-	service, err := NewSession(store, admission)
+	service, err := NewSession(store, admission, newTestEvidencePolicy(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -157,7 +271,7 @@ func newSessionServiceFixture(t *testing.T, store SessionStore) (*SessionService
 
 func sessionContentAuthorities(t *testing.T, issuer *authority.Issuer, owner SessionOwner) SessionContentAuthorities {
 	t.Helper()
-	actions := []authority.Action{ActionDeclare, ActionGet, ActionUpload, ActionFinalize}
+	actions := []authority.Action{ActionDeclare, ActionGet, ActionUpload, ActionFinalize, ActionFail}
 	principal, err := issuer.DeriveVerifiedPrincipal(authority.PrincipalClaims{
 		Subject: "session:" + owner.SessionID, Class: authority.ClassSession, Workspace: owner.WorkspaceKey,
 		Actions: actions, ExpiresAt: time.Now().Add(time.Hour),
@@ -177,8 +291,20 @@ func sessionContentAuthorities(t *testing.T, issuer *authority.Issuer, owner Ses
 		return value
 	}
 	return SessionContentAuthorities{
-		Declare: issue(ActionDeclare), Get: issue(ActionGet), Upload: issue(ActionUpload), Finalize: issue(ActionFinalize),
+		Declare: issue(ActionDeclare), Get: issue(ActionGet), Upload: issue(ActionUpload), Finalize: issue(ActionFinalize), Fail: issue(ActionFail),
 	}
 }
 
 func ptrTime(value time.Time) *time.Time { return &value }
+
+func canonicalTestTranscript(t *testing.T, text string) []byte {
+	t.Helper()
+	value, err := json.Marshal(Event{
+		Seq: 1, Timestamp: time.Date(2026, 8, 4, 10, 0, 0, 0, time.UTC),
+		Role: RoleAssistant, Type: EventText, Text: text,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return append(value, '\n')
+}

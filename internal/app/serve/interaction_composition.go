@@ -35,6 +35,14 @@ func (capability *InteractionCapability) InteractionAPI() interaction.API {
 	return capability.api
 }
 
+func (capability *InteractionCapability) SessionQueries() interaction.SessionQueries {
+	if capability == nil {
+		return nil
+	}
+	queries, _ := capability.api.(interaction.SessionQueries)
+	return queries
+}
+
 func (capability *InteractionCapability) ChatAPI() interaction.ChatAPI {
 	if capability == nil {
 		return nil

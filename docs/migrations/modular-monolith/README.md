@@ -3,7 +3,7 @@
 - **Status:** Phase 9 package consolidation complete through Wave 9.41; the
   modular monolith is ratcheted to 158 production packages with no
   `internal/backend` compatibility tree
-- **Date:** 2026-08-12
+- **Decision last amended:** 2026-08-13
 - **Scope:** `loom serve`, the operator CLI entry surfaces, the Vite frontend counterpart, and the fleet-db contracts those capabilities depend on
 - **Provenance:** [Phase 0 integration baseline](00-phase-0-baseline.md), final [Phase 1 evidence](06-phase-1-decisions-and-evidence.md) at Loom `7e8a6dd2`, [Phase 2 evidence](07-phase-2-decisions-and-evidence.md) at Loom `84cccb761` with FleetDB `430dce8d9`, [Phase 3 evidence](08-phase-3-decisions-and-evidence.md) at core implementation commits Loom `7f95b9bf1` and FleetDB `f1c4e1119`, final [Phase 4 evidence](09-phase-4-decisions-and-evidence.md) at Loom `53cbe2577` with FleetDB `afb688768`, and the appended reliability-validation record at Loom `67c45972f` with FleetDB `9ffa69f60`
 - **Related:** [Unified agent UX](../../design/2026-07-01-unified-agent-ux-proposal.md) · [Durable agent identity](../../design/2026-07-07-agent-identity-record.md) · [Workflow driver authoring](../../design/workflow-driver-authoring-guide.md)
@@ -11,6 +11,14 @@
 ## Decision summary
 
 Migrate the application inside `loom serve` to a **capability-owned modular monolith**.
+
+The [Phase 10 consolidated deep-module goal](20-phase-10-consolidated-deep-module-goal.md)
+is the sole normative Phase 10 plan. Documents 18 and 19, the six-candidate
+session, and the later outside-package and Source Control/package-unification
+sessions are superseded planning records. Their accepted conclusions are
+restated in document 20; anything not restated there has no implementation
+authority. ADRs remain supporting architecture decisions, and per-stack
+records remain implementation evidence rather than alternative plans.
 
 - Keep one Go module, one build, and—after supervisor retirement—one Loom application process.
 - Keep fleet-db as the separate durability/control-plane service.
@@ -79,10 +87,11 @@ one-file packages, and 60 one-or-two-file packages.
 | [15-phase-8-consolidation-and-evidence.md](15-phase-8-consolidation-and-evidence.md) | How is post-extraction fragmentation removed without weakening ports-and-adapters boundaries? |
 | [16-phase-9-package-consolidation.md](16-phase-9-package-consolidation.md) | Which residual horizontal planes and shallow packages will be retired next, and what has the first slice proved? |
 | [17-phase-9-direct-write-and-outside-package-catalog.md](17-phase-9-direct-write-and-outside-package-catalog.md) | Which direct persistence calls remain, and why does each production package outside `internal/modules/` still exist? |
-| [18-post-phase-9-webui-deepening-plan.md](18-post-phase-9-webui-deepening-plan.md) | Superseded WebUI architecture discussion and complete decision ledger; retained for rationale. |
-| [19-phase-10-application-deepening-goal.md](19-phase-10-application-deepening-goal.md) | Superseded application-deepening discussion; retained for rationale and accepted supporting ADRs. |
-| [20-phase-10-consolidated-deep-module-goal.md](20-phase-10-consolidated-deep-module-goal.md) | Canonical Phase 10 ownership decisions, supersession map, ordered twelve-PR manifest, gates, and completion criteria. |
+| [18-post-phase-9-webui-deepening-plan.md](18-post-phase-9-webui-deepening-plan.md) | **Superseded.** Historical WebUI architecture discussion and complete question ledger; not an implementation authority. |
+| [19-phase-10-application-deepening-goal.md](19-phase-10-application-deepening-goal.md) | **Superseded.** Historical application-deepening discussion; not an implementation authority. Its supporting ADRs remain accepted. |
+| [20-phase-10-consolidated-deep-module-goal.md](20-phase-10-consolidated-deep-module-goal.md) | **Final and normative.** Sole Phase 10 ownership and delivery decision, with the supersession map, ordered twelve-PR manifest, gates, and completion criteria. |
 | [21-phase-10-1-generated-http-contract-evidence.md](21-phase-10-1-generated-http-contract-evidence.md) | Stack 10.1 implementation and proof for the canonical generated Go and TypeScript HTTP contract seam. |
+| [22-phase-10-2-artifacts-run-capture-evidence.md](22-phase-10-2-artifacts-run-capture-evidence.md) | Stack 10.2 implementation and proof for Artifacts evidence policy, Run Capture, Transcript Evidence, and Sessions-path deletion. |
 
 ## Scope boundaries
 

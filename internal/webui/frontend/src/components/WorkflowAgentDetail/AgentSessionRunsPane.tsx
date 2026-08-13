@@ -104,6 +104,8 @@ function fallbackSession(session: AgentHistorySession): SessionRecord {
     // sessions may also resolve through their existing task-owned route.
     has_transcript: true,
     has_diff: false,
+    transcript_evidence_status: "pending",
+    diff_evidence_status: "missing",
     ...(session.phase ? { phase: session.phase } : {}),
     ...(session.error_class ? { error_class: session.error_class } : {}),
     ...(lastError ? { last_error: lastError } : {}),

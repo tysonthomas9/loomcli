@@ -159,7 +159,6 @@ func runTaskSingleTask(ctx context.Context, deps *cli.Deps, worktreePath, agentN
 
 	ws, _ := config.ResolveActiveWorkspace(ctx)
 	prompt := GenerateTaskPrompt(agentName, ws, taskParentID, cli.GetBackendName())
-	sess := createAgentSession(ctx, agentName, taskParentID, prompt, "implementation")
 
 	// Single-task mode: the task is self-claimed by the agent during the
 	// run, so the ID is unknown here. Emit with TaskID="" to start the
@@ -167,11 +166,9 @@ func runTaskSingleTask(ctx context.Context, deps *cli.Deps, worktreePath, agentN
 	// invoke to recover the resolved ID for the close-out event.
 	emitTaskClaimedFromEnv(ctx, agentName, "")
 
-	beforeRef := automode.CaptureHEADRef(worktreePath)
 	startedAt := time.Now()
 	invokeErr := deps.Agent.InvokeInteractive(worktreePath, prompt, agentName)
 	emitTaskLifecycleResult(ctx, agentName, worktreePath, startedAt, invokeErr)
-	finalizeAgentSession(sess, worktreePath, beforeRef, invokeErr, nil, startedAt, taskParentID)
 
 	if invokeErr != nil {
 		fmt.Fprintf(os.Stderr, "Error running agent: %v\n", invokeErr)

@@ -97,24 +97,23 @@ type ServerConfig struct {
 	// Store is the transitional unified state store for workspace configuration
 	// not yet migrated behind capability-owned APIs. Local and distributed modes
 	// both use it as the authoritative source for those remaining records.
-	Store               store.Store
-	BackendOps          ops.BackendOps        // Backend health operations interface (optional; nil disables backend health endpoint)
-	ScrollbackMaxLines  int                   // Maximum lines per scrollback buffer (0 = default 10000)
-	NotifyTokenDir      string                // Directory to write notify.token (typically runtime dir); empty = token file not written
-	SessionRuntimeDir   string                // Runtime dir searched for local agent sessions; empty = workspace/repo stores only
-	LocalSettingsDir    string                // Desktop-local settings directory; empty disables /api/local/settings
-	FleetMode           bool                  // When true, skip local daemon lifecycle hooks; fleet server manages agents
-	FleetClientURL      string                // Fleet server URL for fleet-mode workers (e.g., "http://fleet.example.com"); empty = no fleet client
-	FleetClientAPIKey   string                // Pre-shared API key for fleet worker backend auth
-	FleetClientActor    string                // X-Actor header value for fleet-db --auth-dev-mode (typically the loom agent name)
-	FleetDBBaseURL      string                // fleet-db HTTP base URL backing Store
-	DriverAPIBaseURL    string                // This serve process's own driver/task-run API base URL, required by task runners as LOOM_TASK_RUN_API_URL
-	DriverRunTokenKey   []byte                // Required HS256 signing key for run-scoped driver-op tokens (LOOM_RUN_TOKEN_SIGNING_KEY or ephemeral)
-	ExecutionCapability ExecutionCapability   // Active Execution APIs and typed authority resolvers; nil fails mutating execution routes closed
-	DaytonaProvider     DaytonaProviderBroker // Host-owned, owner-fenced Daytona provider operation; nil fails closed.
-	ArtifactsCapability ArtifactsCapability   // Active owner-fenced Artifact lifecycle; nil fails artifact mutations closed
-	Logger              *slog.Logger          // Structured logger (optional; nil falls back to slog.Default())
-	SentryDSN           string                // Sentry/GlitchTip DSN for error tracking (optional; empty disables)
+	Store                store.Store
+	BackendOps           ops.BackendOps        // Backend health operations interface (optional; nil disables backend health endpoint)
+	ScrollbackMaxLines   int                   // Maximum lines per scrollback buffer (0 = default 10000)
+	LocalSettingsDir     string                // Desktop-local settings directory; empty disables /api/local/settings
+	FleetMode            bool                  // When true, skip local daemon lifecycle hooks; fleet server manages agents
+	FleetClientURL       string                // Fleet server URL for fleet-mode workers (e.g., "http://fleet.example.com"); empty = no fleet client
+	FleetClientAPIKey    string                // Pre-shared API key for fleet worker backend auth
+	FleetClientActor     string                // X-Actor header value for fleet-db --auth-dev-mode (typically the loom agent name)
+	FleetDBBaseURL       string                // fleet-db HTTP base URL backing Store
+	DriverAPIBaseURL     string                // This serve process's own driver/task-run API base URL, required by task runners as LOOM_TASK_RUN_API_URL
+	DriverRunTokenKey    []byte                // Required HS256 signing key for run-scoped driver-op tokens (LOOM_RUN_TOKEN_SIGNING_KEY or ephemeral)
+	ExecutionCapability  ExecutionCapability   // Active Execution APIs and typed authority resolvers; nil fails mutating execution routes closed
+	DaytonaProvider      DaytonaProviderBroker // Host-owned, owner-fenced Daytona provider operation; nil fails closed.
+	ArtifactsCapability  ArtifactsCapability   // Active owner-fenced Artifact lifecycle; nil fails artifact mutations closed
+	RunCaptureCapability RunCaptureCapability  // Immutable owner-validated run/session evidence projection
+	Logger               *slog.Logger          // Structured logger (optional; nil falls back to slog.Default())
+	SentryDSN            string                // Sentry/GlitchTip DSN for error tracking (optional; empty disables)
 	// WorkItemsFn returns the active workspace-scoped Work Items capability. When
 	// nil, Work Items HTTP and onboarding routes remain unavailable.
 	//

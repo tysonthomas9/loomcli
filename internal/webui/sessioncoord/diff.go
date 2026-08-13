@@ -2,11 +2,9 @@ package sessioncoord
 
 import (
 	"context"
-	"errors"
-	"os"
 	"strings"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/app/query/runcapture"
 	artifactsmodule "github.com/tysonthomas9/loomcli/internal/modules/artifacts"
 	"github.com/tysonthomas9/loomcli/internal/webui/apperrors"
 )
@@ -18,127 +16,61 @@ func (s *sessionServiceImpl) GetSessionDiff(ctx context.Context, wsID, taskID, s
 	if sessionID == "" || !validSessionID.MatchString(sessionID) {
 		return "", apperrors.ErrValidation("invalid session ID")
 	}
-	// As with detail and transcript, prefer the canonical TaskRun artifact over
-	// any local interaction session that happens to reuse the route ID.
-	if run, runErr := s.executionTaskRunForSession(ctx, wsID, taskID, sessionID); runErr == nil {
-		return s.executionTaskRunDiff(ctx, wsID, run)
-	} else if !serviceErrorNotFound(runErr) {
-		return "", runErr
-	}
-	store, _, err := s.authorizedSessionStore(ctx, wsID, taskID, sessionID)
-	if err != nil {
-		if !sessionStoreAllowsControlPlaneFallback(err) {
-			return "", err
-		}
-		return s.controlPlaneSessionDiff(ctx, wsID, taskID, sessionID)
-	}
-
-	diff, diffErr := store.ReadDiff(sessionID)
-	if diffErr != nil {
-		if errors.Is(diffErr, os.ErrNotExist) {
-			cpDiff, cpErr := s.controlPlaneSessionDiff(ctx, wsID, taskID, sessionID)
-			if cpErr == nil {
-				return cpDiff, nil
-			}
-			if serviceErrorNotFound(cpErr) {
-				return "", apperrors.ErrNotFound("diff not found")
-			}
-			return "", cpErr
-		}
-		logger.Error("failed to read diff", "session_id", sessionID, "err", diffErr)
-		return "", apperrors.ErrInternal("failed to read diff", diffErr)
-	}
-	if diff == "" {
-		if cpDiff, cpErr := s.controlPlaneSessionDiff(ctx, wsID, taskID, sessionID); cpErr == nil {
-			return cpDiff, nil
-		}
-	}
-	return diff, nil
+	return s.controlPlaneSessionDiff(ctx, wsID, taskID, sessionID)
 }
 
 func (s *sessionServiceImpl) controlPlaneSessionDiff(ctx context.Context, wsID, taskID, sessionID string) (string, error) {
+	if s.captures == nil {
+		return "", apperrors.ErrUnavailable("run capture is unavailable")
+	}
 	run, runErr := s.executionTaskRunForSession(ctx, wsID, taskID, sessionID)
 	if runErr == nil {
-		return s.executionTaskRunDiff(ctx, wsID, run)
+		return s.runCaptureDiff(ctx, runcapture.Query{
+			WorkspaceKey: wsID, OwnerKind: runcapture.OwnerExecution,
+			OwnerID: run.TaskRunID, WorkItemID: run.TaskID,
+		})
 	}
 	if !serviceErrorNotFound(runErr) {
 		return "", runErr
 	}
-	rec, err := s.controlPlaneSessionRecord(ctx, wsID, taskID, sessionID)
+	record, err := s.controlPlaneSessionRecord(ctx, wsID, taskID, sessionID)
 	if err != nil {
 		return "", err
 	}
-	artifactID := ""
-	if rec.Metadata != nil {
-		artifactID = controlPlaneDiffArtifactRef(rec.Metadata)
+	if taskRunID := strings.TrimSpace(record.Metadata["task_run_id"]); taskRunID != "" {
+		return s.runCaptureDiff(ctx, runcapture.Query{
+			WorkspaceKey: wsID, OwnerKind: runcapture.OwnerExecution,
+			OwnerID: taskRunID, WorkItemID: taskID,
+		})
 	}
-	if artifactID == "" && rec.Metadata != nil {
-		artifactID, err = s.diffArtifactIDForTaskRun(ctx, wsID, rec.Metadata["task_run_id"])
-		if err != nil {
-			return "", err
-		}
-	}
-	if artifactID == "" {
-		return "", apperrors.ErrNotFound("diff not found")
-	}
-	data, err := s.readOwnedTaskRunArtifact(ctx, wsID, rec, artifactID, "patch")
-	if err != nil {
-		if errors.Is(err, domain.ErrNotFound) {
-			return "", apperrors.ErrNotFound("diff not found")
-		}
-		if errors.Is(err, artifactsmodule.ErrContentUnavailable) {
-			return "", apperrors.ErrUnavailable("diff content is temporarily unavailable")
-		}
-		return "", sessionControlPlaneReadError(
-			"failed to read diff",
-			err,
-		)
-	}
-	return string(data), nil
-}
-
-func controlPlaneDiffArtifactRef(metadata map[string]string) string {
-	if metadata == nil {
-		return ""
-	}
-	return normalizeArtifactRef(firstNonEmptySessionValue(
-		metadata["patch_artifact_id"],
-		metadata["diff_artifact_id"],
-		metadata["patch_ref"],
-		metadata["diff_ref"],
-	))
-}
-
-func normalizeArtifactRef(ref string) string {
-	ref = strings.TrimSpace(ref)
-	if strings.HasPrefix(ref, "artifact://") {
-		ref = strings.TrimSpace(strings.TrimPrefix(ref, "artifact://"))
-	}
-	return ref
-}
-
-func (s *sessionServiceImpl) diffArtifactIDForTaskRun(ctx context.Context, wsID, taskRunID string) (string, error) {
-	taskRunID = strings.TrimSpace(taskRunID)
-	if taskRunID == "" || s.artifacts == nil {
-		return "", nil
-	}
-	artifactValues, err := s.artifacts.ListArtifacts(ctx, artifactsmodule.SearchQuery{
-		WorkspaceKey: wsID,
-		Filter: artifactsmodule.SearchFilter{
-			OwnerType: artifactsmodule.OwnerTaskRun, OwnerID: taskRunID,
-			Type: "patch", DurableStatus: artifactsmodule.StatusFinalized, Limit: 1,
-		},
+	return s.runCaptureDiff(ctx, runcapture.Query{
+		WorkspaceKey: wsID, OwnerKind: runcapture.OwnerInteraction,
+		OwnerID: record.SessionID, AgentID: record.AgentID, WorkItemID: taskID,
 	})
+}
+
+func (s *sessionServiceImpl) runCaptureDiff(ctx context.Context, query runcapture.Query) (string, error) {
+	evidence, err := s.captures.ReadEvidence(ctx, query, artifactsmodule.EvidenceDiff)
 	if err != nil {
-		return "", sessionControlPlaneReadError(
-			"failed to list patch artifacts",
-			err,
-		)
+		return "", runCaptureReadError(err)
 	}
-	for _, artifact := range artifactValues {
-		if artifact != nil && strings.TrimSpace(artifact.ArtifactID) != "" {
-			return artifact.ArtifactID, nil
-		}
+	if evidence == nil {
+		return "", apperrors.ErrInternal("run capture returned no diff projection", runcapture.ErrInvalidPersistedState)
 	}
-	return "", nil
+	switch evidence.Evidence.State {
+	case runcapture.EvidenceFinalized, runcapture.EvidenceTruncated:
+		return string(evidence.Content), nil
+	case runcapture.EvidenceMissing:
+		return "", apperrors.ErrNotFound("diff not found")
+	case runcapture.EvidencePending:
+		return "", apperrors.ErrUnavailable("diff capture is still pending")
+	case runcapture.EvidenceCaptureFailed:
+		return "", apperrors.ErrUnavailable("diff capture failed")
+	case runcapture.EvidenceContentUnavailable:
+		return "", apperrors.ErrUnavailable("diff content is temporarily unavailable")
+	case runcapture.EvidenceCorrupt:
+		return "", apperrors.ErrInternal("diff evidence is corrupt", runcapture.ErrEvidenceCorrupt)
+	default:
+		return "", apperrors.ErrInternal("run capture returned an invalid evidence state", runcapture.ErrInvalidPersistedState)
+	}
 }

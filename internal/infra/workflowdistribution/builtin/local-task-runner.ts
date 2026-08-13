@@ -1336,7 +1336,7 @@ export function scrubToken(text, ...tokens) {
 }
 
 // shannonEntropy is the byte-frequency Shannon entropy of s (bits/symbol), ported
-// verbatim from internal/sessions/redact/redact.go. The secret segments it scores
+// verbatim from internal/infra/artifactredact. The secret segments it scores
 // are ASCII by construction, so per-char iteration matches Go's per-byte.
 function shannonEntropy(s) {
   if (!s) {
@@ -1374,7 +1374,7 @@ const SECRET_PATTERNS = [
 
 // redactSecretsInText replaces secrets in text with "REDACTED", flagging a
 // substring if EITHER its Shannon entropy exceeds 4.5 OR it matches a known secret
-// shape — the layered approach of internal/sessions/redact/redact.go.
+// shape — the layered approach of internal/infra/artifactredact.
 export function redactSecretsInText(text) {
   const s = text == null ? "" : String(text);
   if (!s) {

@@ -341,6 +341,15 @@ type ActiveTaskRunQuery struct {
 	Limit        int
 }
 
+// TaskRunArchiveQuery is Execution's bounded immutable history query for Run
+// Capture composition. Empty WorkItemID means all TaskRuns in the workspace;
+// Limit is mandatory so callers cannot request an unbounded archive scan.
+type TaskRunArchiveQuery struct {
+	WorkspaceKey string
+	WorkItemID   string
+	Limit        int
+}
+
 type TaskRunEventQuery struct {
 	WorkspaceKey string
 	EpicID       string

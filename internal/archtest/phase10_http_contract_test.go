@@ -1,6 +1,7 @@
 package archtest
 
 import (
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -41,15 +42,16 @@ func TestPhase10MigratedHTTPContractsCannotReturnAsHandwrittenStructs(t *testing
 		"pullRequestReviewResult", "reviewerConversation", "reviewerEnsureResult",
 		"reviewerMessageRequest", "reviewerMessageResult",
 	}
-	handlers := filepath.Join(root, "internal", "webui", "handlers")
-	if err := filepath.WalkDir(handlers, func(path string, entry os.DirEntry, walkErr error) error {
+	repository := openRootedTestFS(t, root)
+	handlers := filepath.ToSlash(filepath.Join("internal", "webui", "handlers"))
+	if err := fs.WalkDir(repository, handlers, func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
 		if entry.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
 			return nil
 		}
-		content, err := os.ReadFile(path)
+		content, err := fs.ReadFile(repository, path)
 		if err != nil {
 			return err
 		}

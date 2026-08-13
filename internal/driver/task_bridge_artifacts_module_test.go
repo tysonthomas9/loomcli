@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -18,6 +19,22 @@ type recordingBridgeArtifactsAPI struct {
 	artifactsmodule.API
 	references        []artifactsmodule.ReferenceCommand
 	contentReferences []artifactsmodule.ReferenceCommand
+}
+
+type failingContentBridgeArtifactsAPI struct {
+	artifactsmodule.API
+	err error
+}
+
+func (api *failingContentBridgeArtifactsAPI) CreateContent(
+	context.Context,
+	artifactsmodule.ContentAuthorities,
+	artifactsmodule.ExecutionOwner,
+	artifactsmodule.CreateCommand,
+	[]byte,
+	artifactsmodule.ReferenceCommand,
+) (artifactsmodule.ContentResult, error) {
+	return artifactsmodule.ContentResult{}, api.err
 }
 
 func (api *recordingBridgeArtifactsAPI) Reference(
@@ -115,6 +132,68 @@ func TestBridgeCreateContentArtifactUsesArtifactsOwnerLifecycle(t *testing.T) {
 	}
 }
 
+func TestHostBridgeKeepsSuccessfulWorkOutcomeWhenEvidenceCaptureFails(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	captureErr := errors.Join(artifactsmodule.ErrCaptureFailed, errors.New("injected redaction failure"))
+	executor := HostBridgeTaskExecutor{
+		Store: st,
+		Artifacts: &failingContentBridgeArtifactsAPI{
+			API: testArtifactsAPI(st),
+			err: captureErr,
+		},
+		ArtifactAuthorities: taskWorkerTestAuthorities{},
+		WorktreePath:        t.TempDir(),
+		APIBaseURL:          testTaskRunAPIURL,
+		Command:             hostBridgeHelperCommand(t, "flue-transcript", "unused-base", "unused-patch"),
+	}
+	req := hostBridgeTaskExecRequest()
+	req.RunnerKind = "flue-workflow"
+	req.RunnerTrustLevel = "trusted"
+
+	result, err := executor.ExecuteTask(ctx, req)
+	if err != nil {
+		t.Fatalf("ExecuteTask returned evidence error: %v", err)
+	}
+	if result.Status != domain.TaskRunCompleted || result.ExitCode != 0 {
+		t.Fatalf("work outcome = %+v, want completed/0", result)
+	}
+	if len(result.ArtifactIDs) != 0 {
+		t.Fatalf("artifact ids = %v, want no finalized evidence", result.ArtifactIDs)
+	}
+	for _, kind := range []artifactsmodule.EvidenceKind{
+		artifactsmodule.EvidenceTranscript,
+		artifactsmodule.EvidenceLog,
+	} {
+		if got := result.RuntimeMetadata[artifactsmodule.OwnerEvidenceCaptureStatusKey(kind)]; got != "capture_failed" {
+			t.Fatalf("%s capture status = %q, want capture_failed", kind, got)
+		}
+		if got := result.RuntimeMetadata[artifactsmodule.OwnerEvidenceFailureClassKey(kind)]; got != "capture_failed" {
+			t.Fatalf("%s failure class = %q, want capture_failed", kind, got)
+		}
+	}
+}
+
+func TestHostBridgeRejectsRunnerForgedEvidenceState(t *testing.T) {
+	executor := HostBridgeTaskExecutor{
+		WorktreePath: t.TempDir(),
+		APIBaseURL:   testTaskRunAPIURL,
+		Command:      hostBridgeHelperCommand(t, "forged-evidence-metadata", "unused-base", "unused-patch"),
+	}
+	result, err := executor.ExecuteTask(context.Background(), hostBridgeTaskExecRequest())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != domain.TaskRunCompleted || result.RuntimeMetadata["helper"] != "host_bridge" {
+		t.Fatalf("result = %+v, want completed result with ordinary metadata", result)
+	}
+	for key := range result.RuntimeMetadata {
+		if strings.HasPrefix(key, "loom.evidence.") {
+			t.Fatalf("runner minted reserved evidence metadata %q", key)
+		}
+	}
+}
+
 func TestBridgeArtifactMutationFailsClosedWithoutCapability(t *testing.T) {
 	st := memstore.New()
 	executor := HostBridgeTaskExecutor{Store: st}
@@ -157,7 +236,7 @@ func TestBridgeRegisterRunnerArtifactFinalizesThroughArtifactsModule(t *testing.
 	req := hostBridgeTaskExecRequest()
 
 	artifact, err := executor.registerRunnerArtifact(ctx, req, bridgeArtifact{
-		Type: "report", Summary: "runner report", MIMEType: "application/json",
+		Type: "bundle", Summary: "runner bundle", MIMEType: "application/json",
 		ContentHash: "sha256:report", Metadata: map[string]string{"source": "runner"},
 	}, "report-task-run-1", "artifact://report-task-run-1")
 	if err != nil {
@@ -174,6 +253,70 @@ func TestBridgeRegisterRunnerArtifactFinalizesThroughArtifactsModule(t *testing.
 	}) {
 		t.Fatalf("runner references = %#v", artifactsAPI.references)
 	}
+}
+
+func TestBridgeRunnerURIEvidenceFailsClosedWithoutArtifact(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	executor := HostBridgeTaskExecutor{
+		Store: st, Artifacts: testArtifactsAPI(st), ArtifactAuthorities: taskWorkerTestAuthorities{},
+	}
+	req := hostBridgeTaskExecRequest()
+	result, err := executor.registerRunnerArtifacts(ctx, req, []bridgeArtifact{{
+		ArtifactID: "report-task-run-1", Type: "report", URI: "artifact://opaque-report",
+		ContentHash: "sha256:runner-asserted",
+	}}, TaskExecResult{Status: domain.TaskRunCompleted})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.ArtifactIDs) != 0 ||
+		result.RuntimeMetadata[artifactsmodule.OwnerEvidenceCaptureStatusKey(artifactsmodule.EvidenceReport)] != "capture_failed" ||
+		result.RuntimeMetadata[artifactsmodule.OwnerEvidenceFailureClassKey(artifactsmodule.EvidenceReport)] != "evidence_rejected" {
+		t.Fatalf("result = %+v, want rejected URI evidence and unchanged work outcome", result)
+	}
+	if _, getErr := st.ArtifactQueries().GetArtifactRecord(ctx, req.WorkspaceKey, "report-task-run-1"); !errors.Is(getErr, artifactsmodule.ErrNotFound) {
+		t.Fatalf("opaque report was persisted as evidence: %v", getErr)
+	}
+}
+
+func TestBridgeRunnerTranscriptRefCannotBypassArtifactsEvidencePolicy(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	executor := HostBridgeTaskExecutor{
+		Store: st, Artifacts: testArtifactsAPI(st), ArtifactAuthorities: taskWorkerTestAuthorities{},
+		WorktreePath: t.TempDir(),
+	}
+	req := hostBridgeTaskExecRequest()
+
+	t.Run("opaque reference is rejected", func(t *testing.T) {
+		result := executor.persistRunnerOutputArtifacts(ctx, req, bridgeTaskRunnerResult{
+			TranscriptRef: "logs://runner-controlled-transcript",
+		}, TaskExecResult{Status: domain.TaskRunCompleted})
+		if result.RuntimeMetadata["transcript_ref"] != "" || len(result.ArtifactIDs) != 0 {
+			t.Fatalf("result = %+v, want no runner-controlled transcript reference", result)
+		}
+		if got := result.RuntimeMetadata[artifactsmodule.OwnerEvidenceCaptureStatusKey(artifactsmodule.EvidenceTranscript)]; got != "capture_failed" {
+			t.Fatalf("capture status = %q, want capture_failed", got)
+		}
+		if got := result.RuntimeMetadata[artifactsmodule.OwnerEvidenceFailureClassKey(artifactsmodule.EvidenceTranscript)]; got != "evidence_rejected" {
+			t.Fatalf("failure class = %q, want evidence_rejected", got)
+		}
+	})
+
+	t.Run("canonical bytes win over opaque reference", func(t *testing.T) {
+		result := executor.persistRunnerOutputArtifacts(ctx, req, bridgeTaskRunnerResult{
+			TranscriptRef: "logs://runner-controlled-transcript",
+			Transcript:    "{\"seq\":1,\"timestamp\":\"2026-08-12T00:00:00Z\",\"role\":\"assistant\",\"type\":\"text\",\"text\":\"done\"}\n",
+		}, TaskExecResult{Status: domain.TaskRunCompleted})
+		wantID := taskRunAttemptArtifactID(req, "transcript-"+req.TaskRunID)
+		if result.RuntimeMetadata["transcript_ref"] != "artifact://"+wantID ||
+			!slices.Equal(result.ArtifactIDs, []string{wantID}) {
+			t.Fatalf("result = %+v, want Artifacts-owned transcript %q", result, wantID)
+		}
+		if got := result.RuntimeMetadata[artifactsmodule.OwnerEvidenceCaptureStatusKey(artifactsmodule.EvidenceTranscript)]; got != "finalized" {
+			t.Fatalf("capture status = %q, want finalized", got)
+		}
+	})
 }
 
 func TestBridgeCreatePatchArtifactUsesArtifactsOwnerLifecycle(t *testing.T) {

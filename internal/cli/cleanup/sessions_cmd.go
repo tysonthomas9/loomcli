@@ -9,14 +9,13 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/tysonthomas9/loomcli/internal/cli"
-	"github.com/tysonthomas9/loomcli/internal/sessions"
 )
 
 var sessionsOlderThan string
 
 var sessionsCmd = &cobra.Command{
 	Use:   "sessions",
-	Short: "Manage agent sessions",
+	Short: "Remove retired local session archives",
 	Run: func(cmd *cobra.Command, args []string) {
 		_ = cmd.Help()
 	},
@@ -31,17 +30,12 @@ var sessionsCleanCmd = &cobra.Command{
 			return fmt.Errorf("invalid --older-than value %q: %w", sessionsOlderThan, err)
 		}
 
-		archive, err := sessions.OpenArchive(cmd.Context(), cli.GetWorkspaceRuntimeDir())
+		purged, err := cleanupSessions(cmd.Context(), cli.GetWorkspaceRuntimeDir(), dur, false)
 		if err != nil {
-			return fmt.Errorf("open session store: %w", err)
+			return fmt.Errorf("purge legacy sessions: %w", err)
 		}
 
-		result, err := archive.Cleanup(sessions.CleanupOptions{OlderThan: dur})
-		if err != nil {
-			return fmt.Errorf("purge sessions: %w", err)
-		}
-
-		fmt.Printf("Purged %d sessions older than %s\n", result.Purged, sessionsOlderThan)
+		fmt.Printf("Purged %d sessions older than %s\n", purged, sessionsOlderThan)
 		return nil
 	},
 }

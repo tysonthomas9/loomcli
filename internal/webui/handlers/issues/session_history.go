@@ -39,12 +39,8 @@ func handleGetSessionScrollback(svc SessionHistoryQueries) http.HandlerFunc {
 			return
 		}
 
-		handler.WriteJSON(w, http.StatusOK, map[string]interface{}{
-			"success": true,
-			"data": map[string]interface{}{
-				"content": result.Content,
-				"lines":   result.Lines,
-			},
-		})
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(result.Content))
 	}
 }

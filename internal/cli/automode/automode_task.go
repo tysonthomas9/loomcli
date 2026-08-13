@@ -1,67 +1,15 @@
 package automode
 
 import (
-	"errors"
 	"fmt"
 	"log"
-	"os/exec"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/agenterr"
 	"github.com/tysonthomas9/loomcli/internal/agentpolicy"
-	"github.com/tysonthomas9/loomcli/internal/cli"
-	"github.com/tysonthomas9/loomcli/internal/cli/backends"
 	"github.com/tysonthomas9/loomcli/internal/cli/git"
-	"github.com/tysonthomas9/loomcli/internal/cli/sessionfinalize"
 	"github.com/tysonthomas9/loomcli/internal/events"
-	"github.com/tysonthomas9/loomcli/internal/sessions"
 )
-
-func createAutoSession(ctx *autoLoopCtx, prompt string) *sessions.Session {
-	if ctx.sessStore == nil {
-		return nil
-	}
-	sess, _ := ctx.sessStore.Begin(sessions.CreateOptions{
-		AgentName: ctx.opts.AgentName, Backend: cli.ResolveBackendName(),
-		EpicID: ctx.opts.ParentID, Prompt: prompt, AttemptNum: ctx.state.TasksCompleted + 1,
-	})
-	if sess != nil {
-		backends.SetActiveSessionRuntimeEnv(cli.GetWorkspaceRuntimeDir(), sess.SessionID())
-		go sessions.NotifyWebUI(ctx.ctx, backends.ResolveWebUIURL(), "", sess.SessionID(), sessions.StatusRunning, backends.ResolveNotifyToken())
-	}
-	return sess
-}
-
-func finalizeAutoSession(ctx *autoLoopCtx, sess *sessions.Session, beforeRef string, err error, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens int64, estimatedCostUSD float64) {
-	if sess == nil {
-		return
-	}
-	exitCode := 0
-	if err != nil {
-		exitCode = 1
-		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) {
-			exitCode = exitErr.ExitCode()
-		}
-	}
-	taskID := ""
-	if info, lockErr := ctx.readLock(); lockErr == nil && info != nil {
-		taskID = info.TaskID
-	}
-	_, _ = sessionfinalize.WithWorktree(sess, sessionfinalize.WithWorktreeOptions{
-		WorktreePath:     ctx.opts.WorktreePath,
-		BeforeRef:        beforeRef,
-		TaskID:           taskID,
-		ExitCode:         exitCode,
-		InputTokens:      inputTokens,
-		OutputTokens:     outputTokens,
-		CacheReadTokens:  cacheReadTokens,
-		CacheWriteTokens: cacheWriteTokens,
-		EstimatedCostUSD: estimatedCostUSD,
-	})
-	backends.ClearActiveSessionEnv()
-	go sessions.NotifyWebUI(ctx.ctx, backends.ResolveWebUIURL(), taskID, sess.SessionID(), sess.Status(), backends.ResolveNotifyToken())
-}
 
 // maxSameTaskFailures is the consecutive same-task-ID failure threshold that
 // triggers stuck-task detection: skip the task and continue the loop instead

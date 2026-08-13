@@ -38,6 +38,33 @@ var (
 	localServiceMaxRestartDelay = 30 * time.Second
 )
 
+// localServeProcess owns the single Wait call for one loom serve generation.
+// Startup readiness and steady-state supervision both need to observe the
+// child's exit, so the result is cached behind done instead of racing two
+// exec.Cmd.Wait calls.
+type localServeProcess struct {
+	cmd     *exec.Cmd
+	done    chan struct{}
+	waitErr error
+}
+
+func trackLocalServeProcess(cmd *exec.Cmd) *localServeProcess {
+	process := &localServeProcess{
+		cmd:  cmd,
+		done: make(chan struct{}),
+	}
+	go func() {
+		process.waitErr = cmd.Wait()
+		close(process.done)
+	}()
+	return process
+}
+
+func (p *localServeProcess) wait() error {
+	<-p.done
+	return p.waitErr
+}
+
 // localServeStartupTimeout includes replaying the embedded FleetDB snapshot
 // and rebuilding its in-memory indexes before the HTTP health endpoint can
 // answer. Production desktop state can legitimately contain hundreds of
@@ -198,7 +225,7 @@ func superviseLocalServe(ctx context.Context, cfg *localServiceConfig, logFile i
 	}
 }
 
-func startLocalServeGeneration(ctx context.Context, cfg *localServiceConfig, logFile io.Writer, info *runtimeInfo) (*exec.Cmd, error) {
+func startLocalServeGeneration(ctx context.Context, cfg *localServiceConfig, logFile io.Writer, info *runtimeInfo) (*localServeProcess, error) {
 	info.Status = "starting"
 	info.Error = ""
 	info.ServePID = 0
@@ -210,9 +237,10 @@ func startLocalServeGeneration(ctx context.Context, cfg *localServiceConfig, log
 		return nil, err
 	}
 	if err := localServiceAwaitServe(ctx, cfg, info, serveCmd); err != nil {
-		// awaitServeHealthy kills a child that fails its health budget. Reap
-		// it here because this long-lived service will continue running.
-		_ = serveCmd.Wait()
+		// awaitServeHealthy kills a child that fails its health budget. Wait
+		// through the shared process observer so startup and supervision never
+		// race separate exec.Cmd.Wait calls.
+		_ = serveCmd.wait()
 		return nil, err
 	}
 	return serveCmd, nil
@@ -322,8 +350,8 @@ func newRuntimeInfo(cfg *localServiceConfig) *runtimeInfo {
 }
 
 // startServeProcess spawns `loom serve` as a child, records its PID in
-// runtime.json, and returns the running *exec.Cmd. Caller owns Wait().
-func startServeProcess(ctx context.Context, cfg *localServiceConfig, logFile io.Writer, info *runtimeInfo) (*exec.Cmd, error) {
+// runtime.json, and returns the tracked process. The tracker owns Wait().
+func startServeProcess(ctx context.Context, cfg *localServiceConfig, logFile io.Writer, info *runtimeInfo) (*localServeProcess, error) {
 	// exe is this process's resolved binary path; args are fixed subcommand +
 	// CLI-validated bindFlag / port. The guard refuses to re-exec a *.test
 	// binary (fork-bomb protection; see reexec_guard.go).
@@ -352,9 +380,10 @@ func startServeProcess(ctx context.Context, cfg *localServiceConfig, logFile io.
 	info.ServePID = serveCmd.Process.Pid
 	if err := writeRuntime(cfg.dataDir, info); err != nil {
 		_ = serveCmd.Process.Kill()
+		_ = serveCmd.Wait()
 		return nil, err
 	}
-	return serveCmd, nil
+	return trackLocalServeProcess(serveCmd), nil
 }
 
 // serveStartupLogTailBytes caps how much of loom-serve.log we splice into
@@ -412,31 +441,71 @@ func wrapServeStartupError(dataDir string, healthErr error) error {
 // awaitServeHealthy polls the serve URL until it becomes ready or the startup
 // budget expires. Marks the runtime info accordingly; on timeout the
 // child serve process is killed.
-func awaitServeHealthy(ctx context.Context, cfg *localServiceConfig, info *runtimeInfo, serveCmd *exec.Cmd) error {
+func awaitServeHealthy(ctx context.Context, cfg *localServiceConfig, info *runtimeInfo, serveCmd *localServeProcess) error {
 	waitCtx, cancel := context.WithTimeout(ctx, localServeStartupTimeout)
 	defer cancel()
-	if err := waitForRuntime(waitCtx, cfg.url); err != nil {
+	if err := waitForRuntimeOrServeExit(waitCtx, cfg.url, serveCmd); err != nil {
 		wrapped := wrapServeStartupError(cfg.dataDir, err)
 		info.Status = "failed"
 		info.Error = wrapped.Error()
 		_ = writeRuntime(cfg.dataDir, info)
-		_ = serveCmd.Process.Kill()
+		select {
+		case <-serveCmd.done:
+		default:
+			_ = serveCmd.cmd.Process.Kill()
+		}
 		return wrapped
 	}
 	info.Status = "running"
 	info.Error = ""
 	if err := writeRuntime(cfg.dataDir, info); err != nil {
-		_ = serveCmd.Process.Kill()
+		_ = serveCmd.cmd.Process.Kill()
 		return err
 	}
 	return nil
 }
 
+func waitForRuntimeOrServeExit(ctx context.Context, url string, serveCmd *localServeProcess) error {
+	var lastHealthErr error
+	for {
+		select {
+		case <-serveCmd.done:
+			if err := serveCmd.wait(); err != nil {
+				return fmt.Errorf("loom serve exited before becoming healthy: %w", err)
+			}
+			return errors.New("loom serve exited before becoming healthy")
+		default:
+		}
+		if err := checkRuntimeHealth(ctx, url); err == nil {
+			return nil
+		} else {
+			lastHealthErr = err
+		}
+		retry := time.NewTimer(200 * time.Millisecond)
+		select {
+		case <-serveCmd.done:
+			if !retry.Stop() {
+				<-retry.C
+			}
+			if err := serveCmd.wait(); err != nil {
+				return fmt.Errorf("loom serve exited before becoming healthy: %w", err)
+			}
+			return errors.New("loom serve exited before becoming healthy")
+		case <-ctx.Done():
+			if !retry.Stop() {
+				<-retry.C
+			}
+			return lastHealthErr
+		case <-retry.C:
+		}
+	}
+}
+
 // waitServeExit blocks until the child serve process exits, then updates
 // runtime.json with the final status. Returns nil when shutdown was caused
 // by a signal (serviceCtx cancellation).
-func waitServeExit(ctx context.Context, serveCmd *exec.Cmd, dataDir string, info *runtimeInfo) error {
-	err := serveCmd.Wait()
+func waitServeExit(ctx context.Context, serveCmd *localServeProcess, dataDir string, info *runtimeInfo) error {
+	err := serveCmd.wait()
 	info.Status = "stopped"
 	info.Error = ""
 	if err != nil && ctx.Err() == nil {

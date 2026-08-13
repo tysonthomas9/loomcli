@@ -115,10 +115,6 @@ type Server struct {
 	// Workspace resolver
 	wsResolveFn middleware.WorkspaceResolveFn
 
-	// Notify token for session change endpoint auth
-	notifyToken     string
-	notifyTokenFile string
-
 	// Pre-built top-level handlers.
 	handlers *Handlers
 
@@ -158,7 +154,6 @@ func (app *Server) buildHandlers() {
 		Hub:                app.hub,
 		ExtAuthURL:         app.config.ExtAuthURL,
 		BackendsHealthH:    backendsHealthH,
-		NotifyToken:        app.notifyToken,
 		FleetTimeoutsFn:    getFleetTimeouts,
 		ClaimMetrics:       app.claimMetrics,
 		TerminalGraceMS:    graceMS,
@@ -202,9 +197,6 @@ func (app *Server) Close() {
 		}
 	}
 
-	if app.notifyTokenFile != "" {
-		_ = os.Remove(app.notifyTokenFile)
-	}
 	if app.jobStore != nil {
 		app.jobStore.Stop()
 	}

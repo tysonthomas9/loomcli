@@ -4351,33 +4351,6 @@ paths:
                   success:
                     type: boolean
 
-  # ── Session Notify ──────────────────────────────────────────────────────
-  /api/sessions/notify:
-    post:
-      operationId: notifySessionChange
-      tags: [sessions]
-      summary: Notify SSE hub of session status change (agent-to-server)
-      security: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [task_id, session_id, status, workspace_id]
-              properties:
-                task_id:
-                  type: string
-                session_id:
-                  type: string
-                status:
-                  type: string
-                workspace_id:
-                  type: string
-      responses:
-        "200":
-          description: Notification received
-
   # ── Fleet ───────────────────────────────────────────────────────────────
   /api/workspaces/{ws}/fleet/register:
     post:
@@ -6971,6 +6944,8 @@ components:
         - is_active
         - has_transcript
         - has_diff
+        - transcript_evidence_status
+        - diff_evidence_status
       properties:
         session_id:
           type: string
@@ -7034,6 +7009,14 @@ components:
           type: boolean
         has_diff:
           type: boolean
+        transcript_evidence_status:
+          $ref: "#/components/schemas/EvidenceState"
+        transcript_failure_class:
+          type: string
+        diff_evidence_status:
+          $ref: "#/components/schemas/EvidenceState"
+        diff_failure_class:
+          type: string
         last_error:
           type: string
         runtime_strategy:
@@ -7052,6 +7035,11 @@ components:
           type: string
         github_pr_url:
           type: string
+
+    EvidenceState:
+      type: string
+      description: Durable Artifacts evidence state, independent of the owning run or session outcome.
+      enum: [missing, pending, finalized, truncated, capture_failed, content_unavailable, corrupt]
 
     TranscriptResponse:
       type: object
@@ -7107,7 +7095,7 @@ components:
     SessionHistoryRecord:
       type: object
       description: Session history record (Redis-backed, per-issue)
-      required: [id, session_name, issue_id, backend, status, launcher, started_at]
+      required: [id, session_name, issue_id, backend, status, launcher, started_at, scrollback_evidence_status]
       properties:
         id:
           type: string
@@ -7129,8 +7117,12 @@ components:
         ended_at:
           type: [string, "null"]
           format: date-time
-        scrollback_path:
+        scrollback_evidence_status:
+          $ref: "#/components/schemas/EvidenceState"
+          description: Durable scrollback state, independent of terminal session outcome.
+        scrollback_failure_class:
           type: string
+          description: Sanitized failure class when scrollback capture failed.
 
     # ── Terminal Schemas ────────────────────────────────────────────────
     TerminalSessionInfo:

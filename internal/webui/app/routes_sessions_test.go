@@ -5,13 +5,10 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"testing"
 
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
-	"github.com/tysonthomas9/loomcli/internal/sessions"
 	storepkg "github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui"
 	"github.com/tysonthomas9/loomcli/internal/webui/sessioncoord"
@@ -49,7 +46,7 @@ func TestSessionRouteMigration_OldFlatRoutesReturn404(t *testing.T) {
 	sessDir := t.TempDir()
 
 	app := &Server{config: webui.ServerConfig{}, wsResolveFn: testWorkspaceResolver("test-ws")}
-	app.sessSvc = sessioncoord.NewSessionService(testSessionWorkspaceStore(t, sessDir), nil)
+	app.sessSvc = sessioncoord.NewSessionService(testSessionWorkspaceStore(t, sessDir), nil, nil)
 	setupTestRoutes(t, app)
 
 	// Old flat routes that should have been removed — each must return 404.
@@ -90,7 +87,7 @@ func TestSessionRouteMigration_WorkspaceScopedRoutesRegistered(t *testing.T) {
 	sessDir := t.TempDir()
 
 	app := &Server{config: webui.ServerConfig{}, wsResolveFn: testWorkspaceResolver("test-ws")}
-	app.sessSvc = sessioncoord.NewSessionService(testSessionWorkspaceStore(t, sessDir), nil)
+	app.sessSvc = sessioncoord.NewSessionService(testSessionWorkspaceStore(t, sessDir), nil, nil)
 	setupTestRoutes(t, app)
 
 	// New workspace-scoped routes that should be registered.
@@ -137,7 +134,7 @@ func TestSessionRouteMigration_UnknownWorkspaceReturns404(t *testing.T) {
 	sessDir := t.TempDir()
 
 	app := &Server{config: webui.ServerConfig{}, wsResolveFn: testWorkspaceResolver("test-ws")}
-	app.sessSvc = sessioncoord.NewSessionService(testSessionWorkspaceStore(t, sessDir), nil)
+	app.sessSvc = sessioncoord.NewSessionService(testSessionWorkspaceStore(t, sessDir), nil, nil)
 	setupTestRoutes(t, app)
 
 	// Routes with a non-existent workspace should return 404 from WorkspaceMiddleware.
@@ -172,7 +169,7 @@ func TestSessionRouteMigration_WorkspaceScopedListReturnsJSON(t *testing.T) {
 	sessDir := t.TempDir()
 
 	app := &Server{config: webui.ServerConfig{}, wsResolveFn: testWorkspaceResolver("test-ws")}
-	app.sessSvc = sessioncoord.NewSessionService(testSessionWorkspaceStore(t, sessDir), nil)
+	app.sessSvc = sessioncoord.NewSessionService(testSessionWorkspaceStore(t, sessDir), nil, nil)
 	setupTestRoutes(t, app)
 
 	// GET /api/workspaces/{ws}/tasks/{taskId}/sessions should return 200 with
@@ -212,112 +209,3 @@ func TestSessionRouteMigration_WorkspaceScopedListReturnsJSON(t *testing.T) {
 
 // TestSessionRouteMigration_WorkspaceScopedSessionWithData verifies that the
 // workspace-scoped session detail endpoint returns data for a real session.
-func TestSessionRouteMigration_WorkspaceScopedSessionWithData(t *testing.T) {
-	sessStore, sessDir := newTestSessionStoreWithDir(t)
-	sess := createTestSession(t, sessStore, "loom-routed")
-
-	app := &Server{config: webui.ServerConfig{}, wsResolveFn: testWorkspaceResolver("test-ws")}
-	app.sessSvc = sessioncoord.NewSessionService(testSessionWorkspaceStore(t, sessDir), nil)
-	setupTestRoutes(t, app)
-
-	// GET session detail via workspace-scoped route.
-	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/test-ws/tasks/loom-routed/sessions/"+sess.SessionID(), nil)
-	rr := httptest.NewRecorder()
-	app.mux.ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusOK {
-		t.Fatalf("expected %d, got %d (body: %s)", http.StatusOK, rr.Code, rr.Body.String())
-	}
-
-	var resp misc.SessionDetailResponse
-	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	if !resp.Success {
-		t.Fatalf("success = false, error = %q", resp.Error)
-	}
-	if resp.Data == nil {
-		t.Fatal("data is nil")
-	}
-	if resp.Data.SessionID != sess.SessionID() {
-		t.Errorf("session_id = %q, want %q", resp.Data.SessionID, sess.SessionID())
-	}
-}
-
-// TestSessionRouteMigration_WorkspaceScopedDiffEndpoint verifies that the
-// workspace-scoped diff endpoint is wired through the mux correctly.
-func TestSessionRouteMigration_WorkspaceScopedDiffEndpoint(t *testing.T) {
-	sessStore, sessDir := newTestSessionStoreWithDir(t)
-	sess := createTestSession(t, sessStore, "loom-diffrouted")
-
-	app := &Server{config: webui.ServerConfig{}, wsResolveFn: testWorkspaceResolver("test-ws")}
-	app.sessSvc = sessioncoord.NewSessionService(testSessionWorkspaceStore(t, sessDir), nil)
-	setupTestRoutes(t, app)
-
-	// GET diff via workspace-scoped route — createTestSession includes a DiffPatch.
-	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/test-ws/tasks/loom-diffrouted/sessions/"+sess.SessionID()+"/diff", nil)
-	rr := httptest.NewRecorder()
-	app.mux.ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusOK {
-		t.Fatalf("expected %d, got %d (body: %s)", http.StatusOK, rr.Code, rr.Body.String())
-	}
-
-	ct := rr.Header().Get("Content-Type")
-	if ct != "text/plain" {
-		t.Errorf("Content-Type = %q, want %q", ct, "text/plain")
-	}
-
-	body := rr.Body.String()
-	if body == "" {
-		t.Error("body is empty, expected diff content")
-	}
-}
-
-// TestSessionRouteMigration_WorkspaceScopedTranscriptEndpoint verifies that
-// the workspace-scoped transcript endpoint is wired through the mux correctly.
-func TestSessionRouteMigration_WorkspaceScopedTranscriptEndpoint(t *testing.T) {
-	t.Setenv("LOOM_REDACT_TRANSCRIPTS", "off")
-
-	sessStore, sessDir := newTestSessionStoreWithDir(t)
-	sess := createTestSession(t, sessStore, "loom-transrouted")
-
-	// Seed a Claude Code native transcript and sync it into the session.
-	nativePath := filepath.Join(t.TempDir(), "native.jsonl")
-	payload := []byte(`{"type":"user","uuid":"u1","message":{"content":"Hello via workspace route"}}` + "\n")
-	if err := os.WriteFile(nativePath, payload, 0o600); err != nil {
-		t.Fatalf("write native: %v", err)
-	}
-	if err := sessStore.SyncNativeTranscript(sess.SessionID(), nativePath, sessions.TranscriptFormatRaw); err != nil {
-		t.Fatalf("SyncNativeTranscript: %v", err)
-	}
-
-	app := &Server{config: webui.ServerConfig{}, wsResolveFn: testWorkspaceResolver("test-ws")}
-	app.sessSvc = sessioncoord.NewSessionService(testSessionWorkspaceStore(t, sessDir), nil)
-	setupTestRoutes(t, app)
-
-	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/test-ws/tasks/loom-transrouted/sessions/"+sess.SessionID()+"/transcript", nil)
-	rr := httptest.NewRecorder()
-	app.mux.ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusOK {
-		t.Fatalf("expected %d, got %d (body: %s)", http.StatusOK, rr.Code, rr.Body.String())
-	}
-
-	var resp misc.TranscriptResponse
-	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	if !resp.Success {
-		t.Fatalf("success = false, error = %q", resp.Error)
-	}
-	if resp.Data == nil {
-		t.Fatal("data is nil")
-	}
-	if len(resp.Data.Entries) != 1 {
-		t.Fatalf("entries length = %d, want 1", len(resp.Data.Entries))
-	}
-	if resp.Data.Entries[0].Text != "Hello via workspace route" {
-		t.Errorf("text = %q, want %q", resp.Data.Entries[0].Text, "Hello via workspace route")
-	}
-}

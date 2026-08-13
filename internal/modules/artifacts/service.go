@@ -17,6 +17,7 @@ import (
 type Service struct {
 	store     Store
 	admission *authority.Admission
+	evidence  *EvidencePolicy
 }
 
 var _ API = (*Service)(nil)
@@ -24,11 +25,11 @@ var _ API = (*Service)(nil)
 // New constructs Artifacts over its owner-scoped durable port and an
 // issuer-bound, default-deny admission registry. Missing dependencies fail
 // closed at composition time.
-func New(store Store, admission *authority.Admission) (*Service, error) {
-	if store == nil || admission == nil {
-		return nil, fmt.Errorf("compose Artifacts: durable port and admission are required: %w", ErrUnavailable)
+func New(store Store, admission *authority.Admission, evidence *EvidencePolicy) (*Service, error) {
+	if store == nil || admission == nil || evidence == nil {
+		return nil, fmt.Errorf("compose Artifacts: durable port, admission, and evidence policy are required: %w", ErrUnavailable)
 	}
-	return &Service{store: store, admission: admission}, nil
+	return &Service{store: store, admission: admission, evidence: evidence}, nil
 }
 
 func (s *Service) Create(ctx context.Context, auth authority.ExecutionAuthority, owner ExecutionOwner, command CreateCommand) (*Artifact, error) {
@@ -111,6 +112,30 @@ func (s *Service) Finalize(ctx context.Context, auth authority.ExecutionAuthorit
 	}
 	if err := validateFinalizedArtifact(artifact, expected); err != nil {
 		return nil, err
+	}
+	return cloneArtifact(artifact), nil
+}
+
+func (s *Service) Fail(ctx context.Context, auth authority.ExecutionAuthority, owner ExecutionOwner, command FailCommand) (*Artifact, error) {
+	owner, err := s.authorize(ActionFail, owner, auth)
+	if err != nil {
+		return nil, err
+	}
+	command, err = normalizeFail(command)
+	if err != nil {
+		return nil, err
+	}
+	artifact, err := s.store.Fail(ctx, owner, cloneFailCommand(command))
+	if err != nil {
+		return nil, fmt.Errorf("fail artifact %q: %w", command.ArtifactID, err)
+	}
+	if err := validatePersistedArtifact(artifact, owner, command.ArtifactID); err != nil {
+		return nil, err
+	}
+	if artifact.DurableStatus != StatusFailed || artifact.FinalizedAt != nil ||
+		artifact.Metadata[MetadataEvidenceCaptureStatus] != "capture_failed" ||
+		artifact.Metadata["loom.evidence.failure_class"] != command.FailureClass {
+		return nil, fmt.Errorf("fail artifact %q returned invalid evidence state: %w", command.ArtifactID, ErrInvalidPersistedState)
 	}
 	return cloneArtifact(artifact), nil
 }
@@ -206,6 +231,16 @@ func (s *Service) CreateContent(
 		return ContentResult{}, err
 	}
 	owner = authorizedOwner
+	prepared, err := s.evidence.Prepare(ctx, command.Type, command.MIMEType, content, command.Metadata)
+	if err != nil {
+		return ContentResult{}, s.recordContentFailure(ctx, auth, owner, command, err)
+	}
+	content = prepared.Content
+	command.MIMEType = prepared.MIMEType
+	command.SizeBytes = int64(len(content))
+	command.ContentHash = prepared.ContentHash
+	command.RedactionStatus = prepared.RedactionStatus
+	command.Metadata = prepared.Metadata
 	artifact, complete, result, err := s.prepareContentArtifact(ctx, auth, owner, command, content, reference)
 	if err != nil {
 		return ContentResult{}, err
@@ -213,7 +248,7 @@ func (s *Service) CreateContent(
 	if complete {
 		return result, nil
 	}
-	return s.persistContentArtifact(ctx, auth, owner, artifact, command.MIMEType, content, reference)
+	return s.persistContentArtifact(ctx, auth, owner, artifact, command, content, reference)
 }
 
 func (s *Service) prepareContentArtifact(
@@ -277,22 +312,22 @@ func (s *Service) persistContentArtifact(
 	auth ContentAuthorities,
 	owner ExecutionOwner,
 	artifact *Artifact,
-	mimeType string,
+	command CreateCommand,
 	content []byte,
 	reference ReferenceCommand,
 ) (ContentResult, error) {
 	_, err := s.Upload(ctx, auth.Upload, owner, UploadCommand{
 		ArtifactID: artifact.ArtifactID,
 		Content:    content,
-		MIMEType:   mimeType,
+		MIMEType:   command.MIMEType,
 	})
 	if err != nil {
-		return ContentResult{}, err
+		return ContentResult{}, s.recordContentFailure(ctx, auth, owner, command, err)
 	}
 	hash := artifactContentHash(content)
 	finalized, err := s.Finalize(ctx, auth.Finalize, owner, FinalizeCommand{ArtifactID: artifact.ArtifactID, ContentHash: &hash})
 	if err != nil {
-		return ContentResult{}, err
+		return ContentResult{}, s.recordContentFailure(ctx, auth, owner, command, err)
 	}
 	referenced, err := s.referenceContentArtifact(ctx, auth.Reference, owner, finalized, reference)
 	if err != nil {
@@ -321,6 +356,7 @@ func (s *Service) authorizeContent(owner ExecutionOwner, auth ContentAuthorities
 		{ActionGet, auth.Get},
 		{ActionUpload, auth.Upload},
 		{ActionFinalize, auth.Finalize},
+		{ActionFail, auth.Fail},
 		{ActionReference, auth.Reference},
 	}
 	var authorized ExecutionOwner
@@ -332,6 +368,37 @@ func (s *Service) authorizeContent(owner ExecutionOwner, auth ContentAuthorities
 		authorized = value
 	}
 	return authorized, nil
+}
+
+func (s *Service) recordContentFailure(
+	ctx context.Context,
+	auth ContentAuthorities,
+	owner ExecutionOwner,
+	command CreateCommand,
+	cause error,
+) error {
+	failure := evidenceFailureCommand(command.ArtifactID, cause)
+	declared := CreateCommand{
+		ArtifactID: command.ArtifactID, SessionID: command.SessionID, TaskID: command.TaskID,
+		Type: command.Type, Summary: "evidence capture failure", Metadata: cloneMetadata(failure.Metadata),
+	}
+	_, err := s.Create(ctx, auth.Declare, owner, declared)
+	if err != nil {
+		if !errors.Is(err, ErrAlreadyExists) {
+			return errors.Join(cause, fmt.Errorf("declare failed evidence: %w", err))
+		}
+		artifact, getErr := s.Get(ctx, auth.Get, owner, GetQuery{ArtifactID: command.ArtifactID})
+		if getErr != nil {
+			return errors.Join(cause, fmt.Errorf("load failed evidence: %w", getErr))
+		}
+		if artifact.DurableStatus == StatusFailed && artifact.Metadata["loom.evidence.failure_class"] == failure.FailureClass {
+			return cause
+		}
+	}
+	if _, err := s.Fail(ctx, auth.Fail, owner, failure); err != nil {
+		return errors.Join(cause, fmt.Errorf("persist failed evidence: %w", err))
+	}
+	return cause
 }
 
 func artifactContentHash(content []byte) string {
@@ -452,6 +519,91 @@ func normalizeReference(command ReferenceCommand) (ReferenceCommand, error) {
 func cloneUploadCommand(command UploadCommand) UploadCommand {
 	command.Content = append([]byte(nil), command.Content...)
 	return command
+}
+
+func normalizeFail(command FailCommand) (FailCommand, error) {
+	var err error
+	command.ArtifactID, err = requireCanonical("artifact id", command.ArtifactID)
+	if err != nil {
+		return FailCommand{}, err
+	}
+	command.FailureClass, err = requireCanonical("failure class", command.FailureClass)
+	if err != nil || len(command.FailureClass) > 128 {
+		return FailCommand{}, fmt.Errorf("bounded failure class is required: %w", ErrInvalid)
+	}
+	command.FailureMessage = strings.TrimSpace(command.FailureMessage)
+	if len(command.FailureMessage) > 4096 {
+		return FailCommand{}, fmt.Errorf("failure message exceeds 4096 bytes: %w", ErrInvalid)
+	}
+	// Failure state is an Artifacts-owned vocabulary. Drop the caller's entire
+	// reserved namespace before setting the canonical status and class.
+	command.Metadata = WithoutOwnerEvidenceMetadata(command.Metadata)
+	if command.Metadata == nil {
+		command.Metadata = map[string]string{}
+	}
+	command.Metadata[MetadataEvidenceCaptureStatus] = "capture_failed"
+	command.Metadata["loom.evidence.failure_class"] = command.FailureClass
+	if command.FailureMessage != "" {
+		command.Metadata["loom.evidence.failure_message"] = command.FailureMessage
+	}
+	return command, nil
+}
+
+func cloneFailCommand(command FailCommand) FailCommand {
+	command.Metadata = cloneMetadata(command.Metadata)
+	return command
+}
+
+func evidenceFailureCommand(artifactID string, cause error) FailCommand {
+	class := EvidenceFailureCaptureFailed
+	switch {
+	case errors.Is(cause, ErrEvidenceCorrupt):
+		class = EvidenceFailureCorrupt
+	case errors.Is(cause, ErrInvalid):
+		class = EvidenceFailureRejected
+	case errors.Is(cause, context.Canceled), errors.Is(cause, context.DeadlineExceeded):
+		class = EvidenceFailureInterrupted
+	case errors.Is(cause, ErrUnavailable), errors.Is(cause, ErrContentUnavailable):
+		class = EvidenceFailureUnavailable
+	}
+	return evidenceFailureCommandForClass(artifactID, class)
+}
+
+const (
+	EvidenceFailureCaptureFailed = "capture_failed"
+	EvidenceFailureCorrupt       = "evidence_corrupt"
+	EvidenceFailureRejected      = "evidence_rejected"
+	EvidenceFailureInterrupted   = "capture_interrupted"
+	EvidenceFailureUnavailable   = "capture_unavailable"
+)
+
+func validEvidenceFailureClass(class string) bool {
+	switch class {
+	case EvidenceFailureCaptureFailed, EvidenceFailureCorrupt, EvidenceFailureRejected,
+		EvidenceFailureInterrupted, EvidenceFailureUnavailable:
+		return true
+	default:
+		return false
+	}
+}
+
+func evidenceFailureCommandForClass(artifactID, class string) FailCommand {
+	message := "evidence preparation failed"
+	switch class {
+	case EvidenceFailureCorrupt:
+		message = "candidate evidence did not match the canonical format"
+	case EvidenceFailureRejected:
+		message = "candidate evidence was rejected by policy"
+	case EvidenceFailureInterrupted:
+		message = "evidence capture was interrupted"
+	case EvidenceFailureUnavailable:
+		message = "evidence capture storage was unavailable"
+	}
+	return FailCommand{
+		ArtifactID: artifactID, FailureClass: class,
+		FailureMessage: message,
+		Metadata:       map[string]string{MetadataEvidenceCaptureStatus: "capture_failed"},
+	}
 }
 
 func normalizeFinalize(command FinalizeCommand) (FinalizeCommand, error) {

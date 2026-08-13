@@ -40,6 +40,10 @@ func (stub *artifactsInfraTransportStub) Finalize(context.Context, infrafleetdb.
 	return nil, stub.err
 }
 
+func (stub *artifactsInfraTransportStub) Fail(context.Context, infrafleetdb.ArtifactOwner, infrafleetdb.ArtifactFailCommand) (*infrafleetdb.Artifact, error) {
+	return nil, stub.err
+}
+
 func (stub *artifactsInfraTransportStub) Reference(context.Context, infrafleetdb.ArtifactOwner, infrafleetdb.ArtifactReferenceCommand) (infrafleetdb.ArtifactReferenceResult, error) {
 	return stub.referenceResult, stub.err
 }
@@ -147,8 +151,9 @@ func TestExecutionTaskRunResolverWhitelistsEveryArtifactsOperation(t *testing.T)
 		NodeID: "node-1", LeaseID: "lease-1", LeaseToken: "secret", FencingToken: 7,
 	}
 	for _, action := range []authority.Action{
-		artifacts.ActionDeclare, artifacts.ActionUpload, artifacts.ActionFinalize,
-		artifacts.ActionReference, artifacts.ActionGet, artifacts.ActionList,
+		artifacts.ActionDeclare, artifacts.ActionGet, artifacts.ActionUpload,
+		artifacts.ActionFinalize, artifacts.ActionFail,
+		artifacts.ActionReference, artifacts.ActionList,
 	} {
 		auth, err := executionCapability.TaskRunAuthorityResolver().ResolveTaskRunAuthority(t.Context(), "WS", action, owner)
 		if err != nil {

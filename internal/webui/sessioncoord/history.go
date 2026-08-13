@@ -3,19 +3,19 @@ package sessioncoord
 import (
 	"context"
 	"errors"
-	"io"
-	"os"
-	"path/filepath"
 	"strings"
 
+	"github.com/tysonthomas9/loomcli/internal/app/query/runcapture"
+	"github.com/tysonthomas9/loomcli/internal/modules/artifacts"
+	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
 	"github.com/tysonthomas9/loomcli/internal/webui/apperrors"
 )
 
-func (s *sessionServiceImpl) ListSessionHistory(ctx context.Context, wsID, issueID string) ([]SessionRecord, error) {
+func (s *sessionServiceImpl) ListSessionHistory(ctx context.Context, wsID, issueID string) ([]SessionHistoryItem, error) {
 	if s.histStore == nil {
 		return nil, apperrors.ErrUnavailable("session history not available (no Redis)")
 	}
-	if err := ValidateSessionHistoryIssueID(issueID); err != nil {
+	if err := interaction.ValidateSessionHistoryIssueID(issueID); err != nil {
 		return nil, apperrors.ErrValidation(err.Error())
 	}
 
@@ -24,14 +24,45 @@ func (s *sessionServiceImpl) ListSessionHistory(ctx context.Context, wsID, issue
 		logger.Error("failed to list session history", "issue_id", issueID, "err", err)
 		return nil, apperrors.ErrInternal("failed to list session history", err)
 	}
-	return records, nil
+	items := make([]SessionHistoryItem, 0, len(records))
+	for _, record := range records {
+		item := SessionHistoryItem{
+			SessionHistoryRecord: record, ScrollbackEvidenceStatus: string(runcapture.EvidenceMissing),
+		}
+		if s.captures == nil {
+			item.ScrollbackEvidenceStatus = string(runcapture.EvidenceContentUnavailable)
+			items = append(items, item)
+			continue
+		}
+		capture, captureErr := s.captures.Get(ctx, runcapture.Query{
+			WorkspaceKey: wsID, OwnerKind: runcapture.OwnerInteraction,
+			OwnerID: record.ID, WorkItemID: issueID,
+		})
+		if captureErr != nil {
+			if !errors.Is(captureErr, runcapture.ErrNotFound) {
+				item.ScrollbackEvidenceStatus = string(runcapture.EvidenceContentUnavailable)
+			}
+			items = append(items, item)
+			continue
+		}
+		for _, evidence := range capture.Evidence {
+			if evidence.Kind == artifacts.EvidenceScrollback {
+				item.ScrollbackEvidenceStatus = string(evidence.State)
+				item.ScrollbackFailureClass = evidence.FailureClass
+				break
+			}
+		}
+		items = append(items, item)
+	}
+	return items, nil
 }
 
+//nolint:funlen // Authorization and every durable evidence state stay explicit at this read boundary.
 func (s *sessionServiceImpl) GetSessionScrollback(ctx context.Context, wsID, issueID, recordID string) (*SessionScrollbackResult, error) {
 	if s.histStore == nil {
 		return nil, apperrors.ErrUnavailable("session history not available (no Redis)")
 	}
-	if err := ValidateSessionHistoryIssueID(issueID); err != nil {
+	if err := interaction.ValidateSessionHistoryIssueID(issueID); err != nil {
 		return nil, apperrors.ErrValidation(err.Error())
 	}
 	if recordID == "" {
@@ -49,58 +80,52 @@ func (s *sessionServiceImpl) GetSessionScrollback(ctx context.Context, wsID, iss
 		return nil, apperrors.ErrNotFound("session record not found")
 	}
 
-	if found.ScrollbackPath == "" {
+	if s.captures == nil {
+		return nil, apperrors.ErrUnavailable("run capture archive is unavailable")
+	}
+	evidence, err := s.captures.ReadEvidence(ctx, runcapture.Query{
+		WorkspaceKey: wsID,
+		OwnerKind:    runcapture.OwnerInteraction,
+		OwnerID:      found.ID,
+		WorkItemID:   issueID,
+	}, artifacts.EvidenceScrollback)
+	if errors.Is(err, runcapture.ErrNotFound) {
 		return nil, apperrors.ErrNotFound("no scrollback available for this session")
 	}
-
-	return readScrollbackFile(found.ScrollbackPath)
+	if errors.Is(err, runcapture.ErrUnavailable) {
+		return nil, apperrors.ErrUnavailable("run capture archive is unavailable")
+	}
+	if err != nil {
+		return nil, apperrors.ErrInternal("failed to read durable scrollback", err)
+	}
+	if evidence == nil || evidence.Evidence.State == runcapture.EvidenceMissing {
+		return nil, apperrors.ErrNotFound("no scrollback available for this session")
+	}
+	switch evidence.Evidence.State {
+	case runcapture.EvidenceFinalized, runcapture.EvidenceTruncated:
+		text := string(evidence.Content)
+		lines := 0
+		if text != "" {
+			lines = strings.Count(text, "\n") + 1
+		}
+		return &SessionScrollbackResult{Content: text, Lines: lines}, nil
+	case runcapture.EvidencePending:
+		return nil, apperrors.ErrUnavailable("scrollback capture is not finalized")
+	case runcapture.EvidenceCaptureFailed:
+		return nil, apperrors.ErrUnavailable("scrollback capture failed")
+	case runcapture.EvidenceContentUnavailable:
+		return nil, apperrors.ErrUnavailable("scrollback content is unavailable")
+	default:
+		return nil, apperrors.ErrInternal("scrollback evidence is corrupt", runcapture.ErrEvidenceCorrupt)
+	}
 }
 
 // findSessionRecord returns the record with the given ID, or nil if not found.
-func findSessionRecord(records []SessionRecord, id string) *SessionRecord {
+func findSessionRecord(records []interaction.SessionHistoryRecord, id string) *interaction.SessionHistoryRecord {
 	for i := range records {
 		if records[i].ID == id {
 			return &records[i]
 		}
 	}
 	return nil
-}
-
-// readScrollbackFile validates the path, reads the file, and returns the result.
-func readScrollbackFile(scrollbackPath string) (*SessionScrollbackResult, error) {
-	homeDir, err := userHomeDir()
-	if err != nil {
-		return nil, apperrors.ErrInternal("resolve home directory", err)
-	}
-	if strings.TrimSpace(homeDir) == "" {
-		return nil, apperrors.ErrInternal("resolve home directory", errors.New("empty home directory"))
-	}
-	expectedPrefix := filepath.Clean(homeDir+"/.loom/session-scrollback") + string(os.PathSeparator)
-	cleanPath := filepath.Clean(scrollbackPath)
-	if !strings.HasPrefix(cleanPath+string(os.PathSeparator), expectedPrefix) {
-		return nil, apperrors.ErrValidation("invalid scrollback path")
-	}
-
-	f, err := os.Open(cleanPath) //nolint:gosec // path cleaned and prefix-validated above
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, apperrors.ErrNotFound("scrollback file not found")
-		}
-		logger.Error("failed to open scrollback file", "path", scrollbackPath, "err", err)
-		return nil, apperrors.ErrInternal("failed to read scrollback", err)
-	}
-	defer f.Close()
-
-	content, err := io.ReadAll(f)
-	if err != nil {
-		logger.Error("failed to read scrollback file", "path", scrollbackPath, "err", err)
-		return nil, apperrors.ErrInternal("failed to read scrollback", err)
-	}
-
-	text := string(content)
-	lines := 0
-	if text != "" {
-		lines = strings.Count(text, "\n") + 1
-	}
-	return &SessionScrollbackResult{Content: text, Lines: lines}, nil
 }
