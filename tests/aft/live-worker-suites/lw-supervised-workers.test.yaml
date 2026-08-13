@@ -1,0 +1,826 @@
+# Live worker acceptance under a harness-owned REAL `loom daemon`.
+#
+# Exactly one selected backend CLI is reachable; every other AI CLI is shadowed
+# by the run-aft stub farm. Both cases create the worker through CreateAgentModal,
+# start through a supported browser lifecycle surface (which queues the real
+# daemon command), and demand artifact-backed session evidence that stubs cannot
+# fake. Task Runners are delegated through the assignee picker; Planners are
+# intentionally absent from that picker and start from their agent header.
+#
+# The repository and its origin are local, throwaway paths under tmp/. The Task
+# Runner may follow its normal commit/stack-publish instructions, but publication
+# can reach only the local bare origin created in setup — never a hosted remote.
+suite: lw-supervised-workers
+baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
+setup: |
+  set -e
+  # The registered workspace does NOT live at the seed directory. An API-registered
+  # workspace is created under .loom-config/workspaces/<key>/ with its repo copied
+  # inside it, so asserting `path == tmp/e2e-workspace` was false at runtime and
+  # seeding the fixture into tmp/e2e-workspace wrote it into a repo no agent uses.
+  # Read both paths from the API and use them verbatim.
+  curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS" > "$AFT_WORK_DIR/lw-workspace.json"
+  python3 - "$AFT_WORK_DIR/lw-workspace.json" "$AFT_WORK_DIR" <<'PY'
+  import json, pathlib, sys
+  data = json.load(open(sys.argv[1])).get("data") or {}
+  repos = data.get("repos") or []
+  assert len(repos) == 1, repos
+  repo = repos[0]
+  assert repo.get("path"), repo
+  out = pathlib.Path(sys.argv[2])
+  out.joinpath("lw-workspace.path").write_text(data["path"], encoding="utf-8")
+  out.joinpath("lw-repo.name").write_text(repo["name"], encoding="utf-8")
+  out.joinpath("lw-repo.path").write_text(repo["path"], encoding="utf-8")
+  PY
+  repo="$(cat "$AFT_WORK_DIR/lw-repo.path")"
+  # `test -d "$repo/.git"` is wrong here: a workspace repo is a LINKED WORKTREE, so
+  # .git is a FILE containing `gitdir: …`, not a directory. Ask git instead of
+  # guessing at the on-disk shape.
+  git -C "$repo" rev-parse --is-inside-work-tree >/dev/null
+
+  git -C "$repo" config user.name "Loom Live AFT"
+  git -C "$repo" config user.email "live-aft@example.test"
+  cat > "$repo/README.md" <<'EOF'
+  # Live worker fixture
+
+  This intentionally tiny repository exists only for the supervised-worker AFT tier.
+  EOF
+  cat > "$repo/Makefile" <<'EOF'
+  .PHONY: gate
+  gate:
+  	@test -f README.md
+  EOF
+  git -C "$repo" add README.md Makefile
+  git -C "$repo" commit -m "add live worker fixture" -q
+  branch="$(git -C "$repo" branch --show-current)"
+  remote="$AFT_WORK_DIR/lw-origin.git"
+  rm -rf "$remote"
+  git init --bare "$remote" -q
+  git -C "$repo" remote remove origin >/dev/null 2>&1 || true
+  git -C "$repo" remote add origin "$remote"
+  git -C "$repo" push -u origin "$branch" -q
+
+  kill -0 "$AFT_DAEMON_PID"
+  grep -q "Loom Agent Supervisor" "$AFT_DAEMON_LOG"
+  grep -q "Agents: 0" "$AFT_DAEMON_LOG"
+teardown: |
+  set +e
+  run="${RUN_ID:-local}"
+  for agent in "lw-task-$run" "lw-plan-$run"; do
+    curl -s -X POST "$AFT_BASE_URL/api/workspaces/E2E-WS/agents/$agent/stop" >/dev/null || true
+  done
+  AFT_WS=E2E-WS "$AFT_TESTS_DIR/scripts/close-open-issues.sh"
+  for agent in "lw-task-$run" "lw-plan-$run"; do
+    curl -s -X DELETE "$AFT_BASE_URL/api/workspaces/E2E-WS/agents/$agent" >/dev/null || true
+  done
+
+tests:
+  # covers: LW-1; zero-agent daemon boot; CreateAgentModal Task Runner; browser
+  # delegation; synchronous daemon config reload; real backend; session transcript,
+  # diff, filesystem artifact, and Runs/Diff UI.
+  - name: a modal-created Task Runner completes delegated work under the real daemon
+    intent: An operator creates a Task Runner, delegates a designed task in the browser, and reviews the real daemon-supervised backend's completed artifact and native evidence
+    steps:
+      - run: |
+          set -e
+          kill -0 "$AFT_DAEMON_PID"
+          grep -q "Loom Agent Supervisor" "$AFT_DAEMON_LOG"
+          grep -q "Agents: 0" "$AFT_DAEMON_LOG"
+        intent: "The harness proves its zero-agent daemon is alive before the browser creates any worker"
+      - open: /ws/E2E-WS/agents
+      - wait:
+          fn: &agentsPageReady >-
+            (() => {
+              const page = document.querySelector('[data-testid=agents-page]');
+              const add = Array.from(document.querySelectorAll('button'))
+                .some((b) => (b.textContent || '').trim() === '+ Add agent');
+              const cards = document.querySelectorAll('[aria-label^="Agent: "]');
+              const sig = [location.pathname, cards.length, add ? 'add' : 'no-add'].join('|');
+              if (!page || !add) { window.__aftLWAgentsSig = null; return false; }
+              if (window.__aftLWAgentsSig !== sig) {
+                window.__aftLWAgentsSig = sig;
+                window.__aftLWAgentsAt = Date.now();
+                return false;
+              }
+              return Date.now() - (window.__aftLWAgentsAt || 0) >= 300;
+            })()
+        intent: "Wait until the primary workspace agents page is stable"
+      - click: { role: button, name: "+ Add agent", exact: true }
+      - wait:
+          fn: &createAgentDialogOpen >-
+            (() => {
+              const overlay = document.querySelector('[data-testid=create-agent-overlay]');
+              if (overlay) return true;
+              return false;
+            })()
+        intent: "Wait until CreateAgentModal opens"
+      - click: { testid: create-agent-template-task }
+      - fill: { testid: create-agent-name, value: "lw-task-${RUN_ID:-local}" }
+      - wait:
+          fn: >-
+            document.querySelectorAll('[data-testid=create-agent-backend] option').length > 1
+        intent: "Wait until live backend options load"
+      - select: { testid: create-agent-backend, value: "${AFT_REAL_BACKEND:-codex}" }
+      - click: { testid: create-agent-submit }
+      - wait:
+          fn: >-
+            !document.querySelector('[data-testid=create-agent-overlay]') &&
+            document.body.textContent.includes('lw-task-${RUN_ID:-local}')
+        intent: "Wait until the Task Runner created through the modal is rendered"
+      - run: |
+          set -e
+          run="${RUN_ID:-local}"
+          name="lw-task-$run"
+          repo="$(cat "$AFT_WORK_DIR/lw-repo.name")"
+          curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS/agents" > "$AFT_WORK_DIR/lw1-agent.json"
+          python3 - "$AFT_WORK_DIR/lw1-agent.json" "$name" "${AFT_REAL_BACKEND:-codex}" "$repo" <<'PY'
+          import json, sys
+          payload = json.load(open(sys.argv[1]))
+          agents = payload.get("data") or []
+          matches = [a for a in agents if a.get("name") == sys.argv[2]]
+          assert len(matches) == 1, agents
+          a = matches[0]
+          assert a.get("role_name") == "task", a
+          assert a.get("backend") == sys.argv[3], a
+          assert a.get("repos") == [sys.argv[4]], a
+          assert not a.get("auto"), a
+          assert a.get("desired_state") in (None, "", "stopped"), a
+          PY
+          # Same linked-worktree shape as the workspace repo: .git is a FILE here,
+          # so ask git rather than testing for a directory.
+          git -C "$(cat "$AFT_WORK_DIR/lw-workspace.path")/worktrees/$repo/$name" rev-parse --is-inside-work-tree >/dev/null
+        intent: "An operator confirms the modal persisted a stopped Task Runner and materialized its real worktree"
+      - run: |
+          set -e
+          run="${RUN_ID:-local}"
+          name="lw-task-$run"
+          repo="$(cat "$AFT_WORK_DIR/lw-repo.name")"
+          ws_path="$(cat "$AFT_WORK_DIR/lw-workspace.path")"
+          # Clause 5 (negative scope), captured BEFORE the model is started. Without
+          # this the case only proves "something happened" — files_changed >= 1 is
+          # satisfied just as well by an agent that rewrote the whole workspace.
+          "$AFT_TESTS_DIR/scripts/live-scope-baseline.sh" "$ws_path" "$AFT_WORK_DIR/lw1-baseline.txt"
+        intent: "An operator snapshots the workspace before delegating, so out-of-scope changes are provable afterwards"
+      - api:
+          method: "GET"
+          path: "/api/workspaces/E2E-WS"
+          save:
+            - from: "data.repos.0.source_repo_id"
+              as: "lwRepoSource"
+        intent: "An operator resolves the registered source-repo identity for the delegated task"
+      - api:
+          method: "POST"
+          path: "/api/workspaces/E2E-WS/issues"
+          body:
+            title: "AFT LW-1 implementation ${RUN_ID:-local}"
+            issue_type: "task"
+            priority: 1
+            source_repo: "${var:lwRepoSource}"
+            description: "Implement only the acceptance marker described by the design. This is an isolated local repository with a local bare origin; no hosted remote or external service is involved."
+            design: "## Summary\nCreate `LW1-${RUN_ID:-local}.txt` at the repository root. Its exact bytes must be `AFT-LW1-${RUN_ID:-local}\\n`.\n\n## Technical Approach\nUse a single local file write. Do not modify or delete any other tracked or untracked file.\n\n## Files to Create\n- `LW1-${RUN_ID:-local}.txt` with exactly the required one-line marker.\n\n## Files to Modify\nNone.\n\n## Dependencies\nNone.\n\n## Edge Cases & Error Handling\nFail rather than writing a different value or a second file.\n\n## Acceptance Criteria\n- The marker exists at the worktree root.\n- `python3 -c 'from pathlib import Path; assert Path(\"LW1-${RUN_ID:-local}.txt\").read_bytes() == b\"AFT-LW1-${RUN_ID:-local}\\\\n\"'` succeeds.\n- No other file changes.\n\n## Testing Strategy\nRun the byte-exact Python assertion, then the repository gate. Commit to the configured local origin, close this task, run `loom complete`, and exit.\n\n## Delivery Scope (read this before the publish step)\nThis repository's only remote is a LOCAL BARE repository on disk. There is no GitHub or other hosted remote, by design: this is an isolated test workspace and no hosted git mutation is permitted. Stacked publishing (`loom stack publish`) therefore does not apply here — `loom` will reject a local bare origin, and that rejection is EXPECTED, not a blocker. Skip the publish step entirely and do not mark this task blocked because of it. Committing locally plus closing the task is the complete definition of done."
+          save:
+            - from: "data.id"
+              as: "lw1TaskId"
+        intent: "An API client creates the exact designed task that the operator will delegate"
+      - open: /ws/E2E-WS/kanban?groupBy=none
+      # The assignee picker reads the zustand agentStore (IssueDetailPanel.tsx:605),
+      # not the issue payload. Arriving here by client-side navigation from the agents
+      # page left that store without the just-created worker — measured: panel open,
+      # menu open, zero agent options — while a fresh page load lists it within
+      # seconds. Reload so the store refetches, the same pattern the deterministic
+      # suites use before asserting monitor-derived UI.
+      - reload: true
+      - wait:
+          fn: >-
+            Array.from(document.querySelectorAll("section[data-status=ready] article"))
+              .some((el) => el.textContent.includes('AFT LW-1 implementation ${RUN_ID:-local}'))
+        intent: "Wait until the designed task appears in Ready after a store-refreshing reload"
+      - click: { selector: "section[data-status=ready] article[aria-label*='AFT LW-1 implementation ${RUN_ID:-local}']", first: true }
+      - wait:
+          fn: >-
+            document.querySelector('[data-testid=issue-detail-panel]')?.getAttribute('data-state') === 'open'
+        intent: "Wait until the task detail panel opens"
+      - run: |
+          set -e
+          name="lw-task-${RUN_ID:-local}"
+          # Click the trigger through the DOM, not `find … click`. The popover only
+          # opened reliably via an element click. Do NOT click the body between
+          # attempts to "reset" the popover: this is a slide-over with
+          # click-outside-to-dismiss, so that closes the PANEL, the trigger
+          # disappears, and every later attempt clicks nothing.
+          #
+          # budget: 75s, and it MUST stay above 30s. AssigneeDropdown renders from
+          # agentStore.agents, which useStoreContext.tsx:184 polls at
+          # AGENT_REFRESH_INTERVAL_MS = 30_000. This agent is created AFTER the page's
+          # initial fetch, so the store's snapshot predates it and the option cannot
+          # appear until the next poll — up to 30s later. A 10s budget failed here
+          # every time while passing on a deterministic stack, where the initial fetch
+          # returns in ~50ms and happens to win the race. That is a timing window, not
+          # a product defect: at failure time the server, and the browser's own fetch,
+          # both already listed this agent. 75s covers two full poll cycles.
+          #
+          # Deadline on wall clock, not iteration count: each pass also spends ~0.4s in
+          # agent-browser, so `seq 1 75` would run ~105s and risk aft's hard 120s cap on
+          # a run: step (steps.ts:171) — turning a legitimate wait into a harness
+          # timeout that reports as a product failure.
+          deadline=$((SECONDS + 75))
+          while [ "$SECONDS" -lt "$deadline" ]; do
+            agent-browser --session "$AFT_SESSION" eval "(() => { const t = document.querySelector('[data-testid=assignee-dropdown-trigger]'); if (!t) return 'no-trigger'; if (!document.querySelector('[data-testid=assignee-dropdown-menu]')) t.click(); return 'ok'; })()" >/dev/null 2>&1 || true
+            sleep 1
+            if agent-browser --session "$AFT_SESSION" eval "!!document.querySelector('[data-testid=agent-assignee-$name]')" | grep -q true; then
+              exit 0
+            fi
+          done
+          echo "assignee menu never listed $name" >&2
+          # Keep the three-layer dump. It is what identified the 30s poll window above:
+          # the DOM listed no options while the browser's OWN fetch and the server both
+          # already had the agent, which ruled out every server- and API-side theory in
+          # one shot and left the client store's refresh interval as the only candidate.
+          # If this step ever fails again, the same three layers say immediately whether
+          # it regressed into a real product bug or is another timing window.
+          agent-browser --session "$AFT_SESSION" eval "JSON.stringify({panel: document.querySelector('[data-testid=issue-detail-panel]')?.getAttribute('data-state'), menu: !!document.querySelector('[data-testid=assignee-dropdown-menu]'), options: Array.from(document.querySelectorAll('[data-testid^=agent-assignee-]')).map(e=>e.getAttribute('data-testid'))})" >&2 || true
+          agent-browser --session "$AFT_SESSION" eval "fetch('/api/monitor/status?workspace=E2E-WS').then(r=>r.json()).then(d=>JSON.stringify({rosterFromBrowser:(d.agents||[]).map(a=>a.name+':'+a.role+':'+a.status)}))" >&2 || true
+          echo "server-side agents:" >&2
+          curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS/agents" >&2 || true
+          echo "server-side monitor roster:" >&2
+          curl -sf "$AFT_BASE_URL/api/monitor/status?workspace=E2E-WS" >&2 || true
+          exit 1
+        intent: "An operator opens the assignee menu and sees the modal-created Task Runner"
+      - click: { testid: "agent-assignee-lw-task-${RUN_ID:-local}" }
+      - wait:
+          fn: >-
+            !document.querySelector('[data-testid=assignee-saving]') &&
+            !document.querySelector('[data-testid=assignee-error]')
+        intent: "The operator delegates work and the UI queues the daemon start command"
+      - run: |
+          set -e
+          name="lw-task-${RUN_ID:-local}"
+          for i in $(seq 1 60); do
+            kill -0 "$AFT_DAEMON_PID" || exit 1
+            if grep -F "agent started via control socket" "$AFT_DAEMON_LOG" | grep -F "worktree=$name" >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "real daemon never confirmed start for $name"
+          tail -40 "$AFT_DAEMON_LOG"
+          exit 1
+        intent: "The harness proves the real daemon synchronously loaded and started the newly created worker"
+      - run: &waitGraceOne |
+          set -e
+          task="$(cat "$AFT_WORK_DIR/lw1TaskId")"
+          for i in $(seq 1 55); do
+            curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS/issues/$task" | grep -q '"status":"closed"' && exit 0
+            sleep 2
+          done
+          echo "LW-1 not closed yet (grace window 1)"
+          exit 0
+        intent: "Wait one bounded window for the real Task Runner to finish"
+      - run: *waitGraceOne
+        intent: "Wait a second bounded window for the real Task Runner to finish"
+      - run: |
+          set -e
+          task="$(cat "$AFT_WORK_DIR/lw1TaskId")"
+          for i in $(seq 1 55); do
+            curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS/issues/$task" | grep -q '"status":"closed"' && exit 0
+            sleep 2
+          done
+          echo "LW-1 never closed"
+          exit 1
+        intent: "Fail without retrying the model if the Task Runner never closes the task"
+      - run: |
+          set -e
+          task="$(cat "$AFT_WORK_DIR/lw1TaskId")"
+          # Deliberately NOT sessions[0]. The daemon restarts a supervised worker after it
+          # finishes, so by the time the task is closed the NEWEST session is a fresh,
+          # empty one (status=running, is_active=true, files_changed=0,
+          # has_transcript=false). Asserting against it fails while appearing to say the
+          # model produced nothing — which is exactly how this read once got reported.
+          # Select the session that actually ran: the most recent FINALIZED one.
+          for i in $(seq 1 50); do
+            curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS/tasks/$task/sessions" \
+              > "$AFT_WORK_DIR/lw1-sessions.json" || true
+            if python3 - "$AFT_WORK_DIR/lw1-sessions.json" "$AFT_WORK_DIR/lw1SessionRecord" "$AFT_WORK_DIR/lw1SessionId" <<'PY'
+          import json, sys
+          data = json.load(open(sys.argv[1])).get("data") or {}
+          # is_active/status is the finalization marker. has_transcript is NOT: real
+          # codex worker sessions finish with has_transcript=false (FINDINGS §1.27 — no
+          # native transcript file and no event-store entries are produced), so selecting
+          # on it waits forever for a session that will never exist.
+          finalized = [s for s in (data.get("sessions") or [])
+                       if not s.get("is_active") and s.get("status") == "completed"]
+          if not finalized:
+              raise SystemExit(1)
+          s = finalized[0]
+          open(sys.argv[2], "w").write(json.dumps(s))
+          open(sys.argv[3], "w").write(s["session_id"])
+          PY
+            then
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "no finalized worker session recorded for $task" >&2
+          cat "$AFT_WORK_DIR/lw1-sessions.json" >&2 || true
+          exit 1
+        intent: "An operator captures the completed worker session"
+      - run: |
+          set -e
+          run="${RUN_ID:-local}"
+          task="$(cat "$AFT_WORK_DIR/lw1TaskId")"
+          sid="$(cat "$AFT_WORK_DIR/lw1SessionId")"
+          agent="lw-task-$run"
+          repo="$(cat "$AFT_WORK_DIR/lw-repo.name")"
+          worktree="$(cat "$AFT_WORK_DIR/lw-workspace.path")/worktrees/$repo/$agent"
+          marker="$worktree/LW1-$run.txt"
+          python3 - "$AFT_WORK_DIR/lw1SessionRecord" "${AFT_REAL_BACKEND:-codex}" <<'PY'
+          import json, sys
+          s = json.load(open(sys.argv[1]))
+          assert s.get("backend") == sys.argv[2], s
+          assert s.get("exit_code") == 0, s
+          assert int(s.get("files_changed") or 0) >= 1, s
+          assert s.get("has_diff") is True, s
+          # PINNED KNOWN GAP — FINDINGS §1.27. A real codex worker session finalizes with
+          # has_transcript=false. Mechanism, verified in source: HasTranscript is set only
+          # from a native transcript FILE of non-zero size, or from event-store entries for
+          # that session id (webui/svcimpl/session_service.go:185-190). For these runs
+          # neither exists — so this is a CAPTURE gap, not the §1.2 serving bug (that one
+          # is about fleet-db's missing artifact GET, a different layer; do not conflate
+          # them, as an earlier revision of this comment did). The codex event stream IS on
+          # disk in the agent log asserted below, which is why the run is still provable.
+          # Asserting True would keep this tier permanently red; asserting False makes it a
+          # tripwire that fires the moment transcripts start being captured.
+          assert s.get("has_transcript") is False, \
+              ("FINDINGS §1.27 looks fixed — restore the transcript assertion here", s)
+          evidence = s.get("evidence") or {}
+          assert evidence.get("status") == "ok", evidence
+          assert not evidence.get("conflicts"), evidence
+          PY
+          python3 - "$marker" "$run" <<'PY'
+          import pathlib, sys
+          got = pathlib.Path(sys.argv[1]).read_bytes()
+          assert got == f"AFT-LW1-{sys.argv[2]}\n".encode(), got
+          PY
+          test ! -e "$(cat "$AFT_WORK_DIR/lw-workspace.path")/LW1-$run.txt"
+          curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS/tasks/$task/sessions/$sid/diff" > "$AFT_WORK_DIR/lw1-diff.patch"
+          python3 - "$AFT_WORK_DIR/lw1SessionRecord" "$AFT_WORK_DIR/lw1-diff.patch" "$run" <<'PY'
+          import json, pathlib, sys
+          s = json.load(open(sys.argv[1]))
+          # The product's own record of what the real run touched — a stub cannot fake
+          # files_touched, because the daemon derives it from the worktree diff.
+          assert f"LW1-{sys.argv[3]}.txt" in (s.get("files_touched") or []), s
+          # The diff endpoint serves text/plain — a raw unified diff, NOT JSON
+          # (handlers/misc/sessions.go:317). json.load on it dies with a decode error
+          # that says nothing about the actual assertion.
+          diff_blob = pathlib.Path(sys.argv[2]).read_text(encoding="utf-8", errors="replace")
+          assert diff_blob.strip(), "session diff is empty"
+          assert f"LW1-{sys.argv[3]}.txt" in diff_blob, diff_blob[:800]
+          assert f"AFT-LW1-{sys.argv[3]}" in diff_blob, diff_blob[:800]
+          PY
+          # Clause 4 (native evidence) read from the event stream the backend itself
+          # wrote — the same data the transcript endpoint would serve if §1.2 were fixed.
+          # Structured codex events, not a substring search over a blob the prompt could
+          # have supplied: this asserts real tool_use items with a command. A stub cannot
+          # satisfy it — the deterministic tier's agent logs contain zero JSON event lines.
+          #
+          # SCOPE, precisely: this log is per-AGENT and append-only
+          # (cli/agent/archive_log.go:24-31), and the agent name embeds RUN_ID, so it can
+          # never carry another run's events. It is NOT per-session, though: the daemon
+          # restarts a worker after it finishes, so a sibling session of the same agent
+          # could in principle supply these events. What this step proves is therefore
+          # "this run's agent really executed tools", not "the selected session did".
+          # The session-scoped half of the evidence is the block above — files_touched on
+          # the selected session record plus the run-scoped marker inside that session's
+          # own diff — so the two together still pin the work to this run's session.
+          ws_path="$(cat "$AFT_WORK_DIR/lw-workspace.path")"
+          agent_log="${ws_path%/workspaces/*}/.loom/logs/E2E-WS/agents/lw-task-$run.log"
+          test -s "$agent_log" || { echo "no agent event log at $agent_log" >&2; exit 1; }
+          python3 - "$agent_log" <<'PY'
+          import json, sys
+          native = 0
+          for line in open(sys.argv[1], encoding="utf-8", errors="replace"):
+              line = line.strip()
+              if not line.startswith("{"):
+                  continue
+              try:
+                  ev = json.loads(line)
+              except ValueError:
+                  continue
+              item = ev.get("item") or {}
+              if ev.get("type") == "item.completed" and item.get("type") == "command_execution" \
+                      and (item.get("command") or "").strip():
+                  native += 1
+          assert native > 0, "no structured native tool events in the agent event log"
+          PY
+        intent: "An operator verifies backend identity, healthy evidence, byte-exact worktree output, structured native tool events, and recorded diff content"
+      - run: |
+          set -e
+          run="${RUN_ID:-local}"
+          name="lw-task-$run"
+          repo="$(cat "$AFT_WORK_DIR/lw-repo.name")"
+          ws_path="$(cat "$AFT_WORK_DIR/lw-workspace.path")"
+          # A Task Runner legitimately owns exactly one tree — its own worktree — and
+          # nothing else in the workspace. Allowlisting the specific worktree rather
+          # than all of worktrees/ means another agent's tree changing is still caught.
+          # `sessions` is loom's own run bookkeeping (diff.patch/metadata.json/prompt.txt
+          # plus index.jsonl) — written by the product for any real run, not by the model.
+          # `refs:$repo` allows that repo's refs to advance because this agent was told to
+          # commit; its FILES are still checked, so an edit to the main working tree is
+          # still a violation.
+          "$AFT_TESTS_DIR/scripts/live-scope-verify.sh" "$ws_path" "$AFT_WORK_DIR/lw1-baseline.txt" \
+            "worktrees/$repo/$name" "sessions" "usage.jsonl" "refs:$repo"
+        intent: "An operator proves the real Task Runner changed nothing outside its own worktree"
+      - open: /ws/E2E-WS/kanban?groupBy=none
+      - wait:
+          fn: >-
+            Array.from(document.querySelectorAll("section[data-status=done] article"))
+              .some((el) => el.textContent.includes('AFT LW-1 implementation ${RUN_ID:-local}'))
+        intent: "Wait until the completed task renders in Done"
+      - click: { selector: "section[data-status=done] article[aria-label*='AFT LW-1 implementation ${RUN_ID:-local}']", first: true }
+      - wait:
+          fn: >-
+            document.querySelector('[data-testid=issue-detail-panel]')?.getAttribute('data-state') === 'open'
+        intent: "Open the completed task for review"
+      # Click-and-VERIFY, not fire-and-forget. `click: {role: tab, name: Runs}` reports
+      # success as long as it found a node, but the panel re-renders as issue data
+      # loads after data-state=open, so the click lands on a node that is replaced and
+      # the tab stays on Details. Measured: tabs=["Details:true","Runs:false"] with the
+      # step reporting ✓ — which then surfaces 60s later as "the timeline never
+      # mounted", pointing at the wrong component entirely. issue-detail.test.yaml
+      # documents the same async-rerender hazard for this panel.
+      - run: |
+          set -e
+          deadline=$((SECONDS + 30))
+          while [ "$SECONDS" -lt "$deadline" ]; do
+            if agent-browser --session "$AFT_SESSION" eval "(() => { const t = Array.from(document.querySelectorAll('[role=tab]')).find(e => (e.textContent||'').trim() === 'Runs'); if (!t) return 'no-tab'; if (t.getAttribute('aria-selected') === 'true') return 'true'; t.click(); return 'clicked'; })()" | grep -q true; then
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "Runs tab never became selected" >&2
+          agent-browser --session "$AFT_SESSION" eval "JSON.stringify(Array.from(document.querySelectorAll('[role=tab]')).map(e=>((e.textContent||'').trim()+':'+e.getAttribute('aria-selected'))))" >&2 || true
+          exit 1
+        intent: "An operator switches the issue panel to its Runs tab"
+      # Mirror the deterministic flow that passes (zz-agent-flow.test.yaml:294-298):
+      # the timeline must MOUNT before hunting for a row inside it.
+      #
+      # A run: block, NOT `wait: fn:` — a wait has no per-step timeout and inherits the
+      # browser default of 1200s, so when the timeline never mounted this single step
+      # burned twenty minutes and the whole run died before the diagnostics in the NEXT
+      # step could execute. aft hard-caps run: at 120s (steps.ts:171), which bounds the
+      # cost and lets the failure report what it saw.
+      - run: |
+          set -e
+          deadline=$((SECONDS + 60))
+          while [ "$SECONDS" -lt "$deadline" ]; do
+            if agent-browser --session "$AFT_SESSION" eval "!!document.querySelector('[data-testid=sessions-tab]') && !!document.querySelector('[data-testid=session-timeline]')" | grep -q true; then
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "Runs tab never rendered the session timeline" >&2
+          agent-browser --session "$AFT_SESSION" eval "JSON.stringify({panel: document.querySelector('[data-testid=issue-detail-panel]')?.getAttribute('data-state'), tabs: Array.from(document.querySelectorAll('[role=tab]')).map(e=>((e.textContent||'').trim()+':'+e.getAttribute('aria-selected'))), sessionTestids: Array.from(document.querySelectorAll('[data-testid*=session]')).map(e=>e.getAttribute('data-testid')).slice(0,20), panelText: (document.querySelector('[data-testid=issue-detail-panel]')?.innerText||'').slice(0,400)})" >&2 || true
+          exit 1
+        intent: "Wait until the Runs tab renders the session timeline"
+      - run: |
+          set -e
+          sid="$(cat "$AFT_WORK_DIR/lw1SessionId")"
+          # 60s wall-clock, not 10: the Runs tab fetches its session list after the tab
+          # mounts, and this suite has already been bitten once by a UI budget shorter
+          # than the data path behind it. On failure, dump WHICH rows exist — "no rows
+          # at all" (panel never loaded) and "rows, but not mine" (wrong session picked)
+          # are different bugs that a bare timeout cannot tell apart.
+          deadline=$((SECONDS + 60))
+          while [ "$SECONDS" -lt "$deadline" ]; do
+            agent-browser --session "$AFT_SESSION" click "[data-testid='session-row-$sid']" && exit 0
+            sleep 1
+          done
+          echo "session row $sid never became clickable" >&2
+          # The row list came back "[]" — zero rows, so the question is why the panel is
+          # empty, not which session was picked. Dump the panel/tab state and what the
+          # API says for the same task, so panel-not-mounted, tab-not-switched and
+          # server-has-no-sessions are distinguishable in one shot.
+          agent-browser --session "$AFT_SESSION" eval "JSON.stringify({panel: document.querySelector('[data-testid=issue-detail-panel]')?.getAttribute('data-state'), rows: Array.from(document.querySelectorAll('[data-testid^=session-row-]')).map(e=>e.getAttribute('data-testid')), sessionTestids: Array.from(document.querySelectorAll('[data-testid*=session]')).map(e=>e.getAttribute('data-testid')).slice(0,20), tabs: Array.from(document.querySelectorAll('[role=tab]')).map(e=>((e.textContent||'')+':'+e.getAttribute('aria-selected')))})" >&2 || true
+          echo "server-side sessions for this task:" >&2
+          curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS/tasks/$(cat "$AFT_WORK_DIR/lw1TaskId")/sessions" >&2 || true
+          exit 1
+        intent: "Wait until the Runs tab renders and opens the real worker session"
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=session-detail-view]')
+        intent: "Open the real worker session detail"
+      - click: { testid: session-inner-tab-diff }
+      - wait:
+          fn: >-
+            document.querySelector('[data-testid=session-diff]')?.textContent.includes('LW1-${RUN_ID:-local}.txt') &&
+            document.querySelector('[data-testid=session-diff]')?.textContent.includes('AFT-LW1-${RUN_ID:-local}')
+        intent: "A reviewer sees the exact live marker in the session Diff tab"
+      - run: >-
+          "$AFT_TESTS_DIR/scripts/live-stop-worker.sh" "lw-task-${RUN_ID:-local}" E2E-WS
+        intent: "The operator stops the live worker and the real daemon proves it drained"
+
+  # covers: LW-2; CreateAgentModal Planner; browser delegation; real daemon and
+  # backend; supported agent-header start; reviewable design projection; native
+  # transcript and Runs UI.
+  - name: a modal-created Planner produces a reviewable design under the real daemon
+    intent: An operator creates a Planner, starts it from the agent UI against a designless task, and reviews a substantive real-backend design with native session evidence
+    steps:
+      - open: /ws/E2E-WS/agents
+      - wait:
+          fn: *agentsPageReady
+        intent: "Wait until the primary workspace agents page is stable"
+      - click: { role: button, name: "+ Add agent", exact: true }
+      - wait:
+          fn: *createAgentDialogOpen
+        intent: "Wait until CreateAgentModal opens"
+      - click: { testid: create-agent-template-planner }
+      - fill: { testid: create-agent-name, value: "lw-plan-${RUN_ID:-local}" }
+      - wait:
+          fn: >-
+            document.querySelectorAll('[data-testid=create-agent-backend] option').length > 1
+        intent: "Wait until live backend options load"
+      - select: { testid: create-agent-backend, value: "${AFT_REAL_BACKEND:-codex}" }
+      - click: { testid: create-agent-submit }
+      - wait:
+          fn: >-
+            !document.querySelector('[data-testid=create-agent-overlay]') &&
+            document.body.textContent.includes('lw-plan-${RUN_ID:-local}')
+        intent: "Wait until the Planner created through the modal is rendered"
+      - api:
+          method: "GET"
+          path: "/api/workspaces/E2E-WS"
+          save:
+            - from: "data.repos.0.source_repo_id"
+              as: "lwRepoSource"
+        intent: "An operator resolves the registered source-repo identity for the planning task"
+      - run: >-
+          "$AFT_TESTS_DIR/scripts/live-scope-baseline.sh" "$(cat "$AFT_WORK_DIR/lw-workspace.path")" "$AFT_WORK_DIR/lw2-baseline.txt"
+        intent: "An operator snapshots the workspace before the Planner runs, so any implementation it attempts is provable"
+      - api:
+          method: "POST"
+          path: "/api/workspaces/E2E-WS/issues"
+          body:
+            title: "AFT LW-2 widget parser design ${RUN_ID:-local}"
+            issue_type: "task"
+            priority: 1
+            source_repo: "${var:lwRepoSource}"
+            description: "Design only; do not implement. Plan a small Go package `internal/widget` exposing `ParseName(string) (string, error)` that trims surrounding whitespace, rejects empty results, and preserves internal spaces, plus `cmd/widget` and focused tests. Put the unique review token AFT-LW2-${RUN_ID:-local} in the Summary. The design must name concrete files, error behavior, acceptance criteria, and test commands."
+          save:
+            - from: "data.id"
+              as: "lw2TaskId"
+        intent: "An API client creates the designless task that the operator will delegate"
+      - open: /ws/E2E-WS/agents/lw-plan-${RUN_ID:-local}
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=agent-start-button]')
+        intent: "Wait until the modal-created idle Planner exposes its supported lifecycle control"
+      - click: { testid: agent-start-button }
+      - wait:
+          fn: >-
+            !document.querySelector('[data-testid=agent-start-error]') &&
+            (!document.querySelector('[data-testid=agent-start-button]') ||
+              document.querySelector('[data-testid=agent-start-button]')?.textContent.includes('Start requested'))
+        intent: "The operator starts the Planner in the browser and the UI queues the daemon command"
+      - run: |
+          set -e
+          name="lw-plan-${RUN_ID:-local}"
+          for i in $(seq 1 60); do
+            kill -0 "$AFT_DAEMON_PID" || exit 1
+            if grep -F "agent started via control socket" "$AFT_DAEMON_LOG" | grep -F "worktree=$name" >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "real daemon never confirmed start for $name"
+          tail -40 "$AFT_DAEMON_LOG"
+          exit 1
+        intent: "The harness proves the real daemon loaded and started the new Planner"
+      - run: &waitPlanGrace |
+          set -e
+          task="$(cat "$AFT_WORK_DIR/lw2TaskId")"
+          for i in $(seq 1 55); do
+            curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS/issues/$task" > "$AFT_WORK_DIR/lw2-issue.poll.json" &&
+            python3 - "$AFT_WORK_DIR/lw2-issue.poll.json" <<'PY' && exit 0
+          import json, sys
+          d = json.load(open(sys.argv[1])).get("data") or {}
+          assert d.get("status") == "review", d
+          assert d.get("has_design") or d.get("design") or d.get("design_artifact_id"), d
+          PY
+            sleep 2
+          done
+          echo "LW-2 not reviewable yet (grace window)"
+          exit 0
+        intent: "Wait one bounded window for the real Planner to produce a reviewable design"
+      - run: *waitPlanGrace
+        intent: "Wait a second bounded window for the real Planner to produce a reviewable design"
+      - run: |
+          set -e
+          task="$(cat "$AFT_WORK_DIR/lw2TaskId")"
+          for i in $(seq 1 55); do
+            curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS/issues/$task" > "$AFT_WORK_DIR/lw2-issue.json" &&
+            python3 - "$AFT_WORK_DIR/lw2-issue.json" <<'PY' && exit 0
+          import json, sys
+          d = json.load(open(sys.argv[1])).get("data") or {}
+          assert d.get("status") == "review", d
+          assert d.get("has_design") or d.get("design") or d.get("design_artifact_id"), d
+          PY
+            sleep 2
+          done
+          echo "LW-2 never reached review with a design"
+          exit 1
+        intent: "Fail without retrying the model if the Planner never produces reviewable work"
+      - run: |
+          set -e
+          task="$(cat "$AFT_WORK_DIR/lw2TaskId")"
+          # Same restart-shadowing trap as LW-1: pick the finalized planning session, not
+          # whichever session happens to be newest.
+          for i in $(seq 1 50); do
+            curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS/tasks/$task/sessions" \
+              > "$AFT_WORK_DIR/lw2-sessions.json" || true
+            if python3 - "$AFT_WORK_DIR/lw2-sessions.json" "$AFT_WORK_DIR/lw2SessionRecord" "$AFT_WORK_DIR/lw2SessionId" <<'PY'
+          import json, sys
+          data = json.load(open(sys.argv[1])).get("data") or {}
+          # is_active/status is the finalization marker. has_transcript is NOT: real
+          # codex worker sessions finish with has_transcript=false (FINDINGS §1.27 — no
+          # native transcript file and no event-store entries are produced), so selecting
+          # on it waits forever for a session that will never exist.
+          finalized = [s for s in (data.get("sessions") or [])
+                       if not s.get("is_active") and s.get("status") == "completed"]
+          if not finalized:
+              raise SystemExit(1)
+          s = finalized[0]
+          open(sys.argv[2], "w").write(json.dumps(s))
+          open(sys.argv[3], "w").write(s["session_id"])
+          PY
+            then
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "no finalized planning session recorded for $task" >&2
+          cat "$AFT_WORK_DIR/lw2-sessions.json" >&2 || true
+          exit 1
+        intent: "An operator captures the completed planning session"
+      - run: |
+          set -e
+          run="${RUN_ID:-local}"
+          task="$(cat "$AFT_WORK_DIR/lw2TaskId")"
+          sid="$(cat "$AFT_WORK_DIR/lw2SessionId" 2>/dev/null || true)"
+          # A bare `curl -sf .../sessions//transcript` under `set -e` dies with no
+          # message, which is how this step failed opaquely: the real question is
+          # whether the Planner recorded a session at all. Say so.
+          if [[ -z "$sid" ]]; then
+            echo "LW-2: no session id was saved for the planning task $task —" >&2
+            echo "the Planner reached review but recorded no session, so there is no" >&2
+            echo "native evidence to verify. Sessions seen:" >&2
+            curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS/tasks/$task/sessions" >&2 || true
+            exit 1
+          fi
+          curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS/issues/$task" > "$AFT_WORK_DIR/lw2-issue.json"
+          # Native evidence comes from the agent's own event log, not the transcript
+          # endpoint: FINDINGS §1.2 (HIGH, open) means fleet-db serves no artifact
+          # content, so a real codex planning session finalizes with has_transcript=false
+          # and the transcript route cannot succeed. See the pinned tripwire below.
+          ws_path="$(cat "$AFT_WORK_DIR/lw-workspace.path")"
+          agent_log="${ws_path%/workspaces/*}/.loom/logs/E2E-WS/agents/lw-plan-$run.log"
+          test -s "$agent_log" || { echo "no agent event log at $agent_log" >&2; exit 1; }
+          python3 - "$AFT_WORK_DIR/lw2-issue.json" "$AFT_WORK_DIR/lw2SessionRecord" "$run" "${AFT_REAL_BACKEND:-codex}" <<'PY'
+          import json, sys
+          issue = json.load(open(sys.argv[1])).get("data") or {}
+          session = json.load(open(sys.argv[2]))
+          run, backend = sys.argv[3], sys.argv[4]
+          design = issue.get("design") or ""
+          assert issue.get("status") == "review", issue
+          assert not issue.get("assignee"), issue
+          assert f"AFT-LW2-{run}" in design, design[:800]
+          required = ["Summary", "Technical Approach", "Files to", "Edge Cases", "Acceptance Criteria", "Testing Strategy", "internal/widget", "cmd/widget", "ParseName"]
+          missing = [part for part in required if part.lower() not in design.lower()]
+          assert not missing, (missing, design[:1200])
+          assert len(design) >= 700, len(design)
+          assert session.get("backend") == backend, session
+          assert session.get("exit_code") == 0, session
+          # PINNED KNOWN GAP — FINDINGS §1.2 (HIGH, open). Tripwire: fails when fixed.
+          assert session.get("has_transcript") is False, \
+              ("FINDINGS §1.27 looks fixed — restore the transcript assertion here", session)
+          evidence = session.get("evidence") or {}
+          assert evidence.get("status") == "ok", evidence
+          assert not evidence.get("conflicts"), evidence
+          PY
+          python3 - "$agent_log" <<'PY'
+          import json, sys
+          native = 0
+          for line in open(sys.argv[1], encoding="utf-8", errors="replace"):
+              line = line.strip()
+              if not line.startswith("{"):
+                  continue
+              try:
+                  ev = json.loads(line)
+              except ValueError:
+                  continue
+              item = ev.get("item") or {}
+              if ev.get("type") == "item.completed" and item.get("type") == "command_execution" \
+                      and (item.get("command") or "").strip():
+                  native += 1
+          assert native > 0, "no structured native tool events in the planner event log"
+          PY
+        intent: "An operator verifies substantive design content plus structured native tool evidence, rather than treating zero changed files as proof of a real Planner"
+      # THE planner negative. Design content proves a real model ran; it says nothing
+      # about whether that model stayed in its lane. A Planner that also implements the
+      # task is a genuine product failure — it burns the worker's work and lands code
+      # nobody reviewed — and every positive assertion above passes while it happens.
+      # `files_changed == 0` is not offered here as real-vs-stub evidence (a stub
+      # writes none either); the native tool_use check above carries that weight.
+      - run: |
+          set -e
+          run="${RUN_ID:-local}"
+          task="$(cat "$AFT_WORK_DIR/lw2TaskId")"
+          ws_path="$(cat "$AFT_WORK_DIR/lw-workspace.path")"
+          python3 "$AFT_TESTS_DIR/scripts/live-session-evidence.py" \
+            --base "$AFT_BASE_URL" --workspace E2E-WS --task "$task" \
+            --backend "${AFT_REAL_BACKEND:-codex}" \
+            --agent-log "${ws_path%/workspaces/*}/.loom/logs/E2E-WS/agents/lw-plan-$run.log" \
+            --max-files-changed 0 --forbid-diff
+          # `sessions` only. Deliberately NO refs: allowance here — a Planner that commits
+          # is precisely what this negative exists to catch, so its repo's refs must stay
+          # exactly where they were.
+          "$AFT_TESTS_DIR/scripts/live-scope-verify.sh" \
+            "$(cat "$AFT_WORK_DIR/lw-workspace.path")" "$AFT_WORK_DIR/lw2-baseline.txt" "sessions" "usage.jsonl"
+        intent: "An operator proves the real Planner designed the work without implementing any of it"
+      - open: /ws/E2E-WS/kanban?groupBy=none
+      - wait:
+          fn: >-
+            Array.from(document.querySelectorAll("section[data-status=review] article"))
+              .some((el) => el.textContent.includes('AFT LW-2 widget parser design ${RUN_ID:-local}'))
+        intent: "Wait until the planned task renders in Review"
+      - click: { selector: "section[data-status=review] article[aria-label*='AFT LW-2 widget parser design ${RUN_ID:-local}']", first: true }
+      - wait:
+          fn: >-
+            document.querySelector('[data-testid=design-panel]')?.textContent.includes('AFT-LW2-${RUN_ID:-local}') &&
+            document.querySelector('[data-testid=design-panel]')?.textContent.includes('Testing Strategy')
+        intent: "A reviewer sees the unique, substantive Planner design in the issue UI"
+      # Click-and-VERIFY, not fire-and-forget. `click: {role: tab, name: Runs}` reports
+      # success as long as it found a node, but the panel re-renders as issue data
+      # loads after data-state=open, so the click lands on a node that is replaced and
+      # the tab stays on Details. Measured: tabs=["Details:true","Runs:false"] with the
+      # step reporting ✓ — which then surfaces 60s later as "the timeline never
+      # mounted", pointing at the wrong component entirely. issue-detail.test.yaml
+      # documents the same async-rerender hazard for this panel.
+      - run: |
+          set -e
+          deadline=$((SECONDS + 30))
+          while [ "$SECONDS" -lt "$deadline" ]; do
+            if agent-browser --session "$AFT_SESSION" eval "(() => { const t = Array.from(document.querySelectorAll('[role=tab]')).find(e => (e.textContent||'').trim() === 'Runs'); if (!t) return 'no-tab'; if (t.getAttribute('aria-selected') === 'true') return 'true'; t.click(); return 'clicked'; })()" | grep -q true; then
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "Runs tab never became selected" >&2
+          agent-browser --session "$AFT_SESSION" eval "JSON.stringify(Array.from(document.querySelectorAll('[role=tab]')).map(e=>((e.textContent||'').trim()+':'+e.getAttribute('aria-selected'))))" >&2 || true
+          exit 1
+        intent: "An operator switches the issue panel to its Runs tab"
+      # Mirror the deterministic flow that passes (zz-agent-flow.test.yaml:294-298):
+      # the timeline must MOUNT before hunting for a row inside it.
+      #
+      # A run: block, NOT `wait: fn:` — a wait has no per-step timeout and inherits the
+      # browser default of 1200s, so when the timeline never mounted this single step
+      # burned twenty minutes and the whole run died before the diagnostics in the NEXT
+      # step could execute. aft hard-caps run: at 120s (steps.ts:171), which bounds the
+      # cost and lets the failure report what it saw.
+      - run: |
+          set -e
+          deadline=$((SECONDS + 60))
+          while [ "$SECONDS" -lt "$deadline" ]; do
+            if agent-browser --session "$AFT_SESSION" eval "!!document.querySelector('[data-testid=sessions-tab]') && !!document.querySelector('[data-testid=session-timeline]')" | grep -q true; then
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "Runs tab never rendered the session timeline" >&2
+          agent-browser --session "$AFT_SESSION" eval "JSON.stringify({panel: document.querySelector('[data-testid=issue-detail-panel]')?.getAttribute('data-state'), tabs: Array.from(document.querySelectorAll('[role=tab]')).map(e=>((e.textContent||'').trim()+':'+e.getAttribute('aria-selected'))), sessionTestids: Array.from(document.querySelectorAll('[data-testid*=session]')).map(e=>e.getAttribute('data-testid')).slice(0,20), panelText: (document.querySelector('[data-testid=issue-detail-panel]')?.innerText||'').slice(0,400)})" >&2 || true
+          exit 1
+        intent: "Wait until the Runs tab renders the session timeline"
+      - run: |
+          set -e
+          sid="$(cat "$AFT_WORK_DIR/lw2SessionId")"
+          # 60s wall-clock, not 10: the Runs tab fetches its session list after the tab
+          # mounts, and this suite has already been bitten once by a UI budget shorter
+          # than the data path behind it. On failure, dump WHICH rows exist — "no rows
+          # at all" (panel never loaded) and "rows, but not mine" (wrong session picked)
+          # are different bugs that a bare timeout cannot tell apart.
+          deadline=$((SECONDS + 60))
+          while [ "$SECONDS" -lt "$deadline" ]; do
+            agent-browser --session "$AFT_SESSION" click "[data-testid='session-row-$sid']" && exit 0
+            sleep 1
+          done
+          echo "session row $sid never became clickable" >&2
+          agent-browser --session "$AFT_SESSION" eval "JSON.stringify(Array.from(document.querySelectorAll('[data-testid^=session-row-]')).map(e=>e.getAttribute('data-testid')))" >&2 || true
+          exit 1
+        intent: "Wait until the Runs tab renders and opens the real planning session"
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=session-detail-view]')
+        intent: "Open the real planning session detail"
+      - expect: { visible: { testid: session-transcript } }
+      - run: >-
+          "$AFT_TESTS_DIR/scripts/live-stop-worker.sh" "lw-plan-${RUN_ID:-local}" E2E-WS
+        intent: "The operator stops the live Planner and the real daemon proves it drained"

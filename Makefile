@@ -1,6 +1,6 @@
 # Makefile for loomcli project
 
-.PHONY: all build build-frontend build-all test test-builtin-workflows test-integration test-all test-playground test-fleetdb-embedded test-fleetdb-supervisor test-fleetdb-ui test-fleetdb-empty-cli fleetdb-empty-up fleetdb-empty-down fleetdb-regression-up fleetdb-regression-down test-env-up test-env-down test-env-status ensure-frontend-dist ensure-frontend-deps local-mode-frontend-dist local-mode-up local-mode-codex-up local-mode-claude-up local-mode-daytona-up local-mode-down local-mode-logs local-mode-verify local-mode-codex-verify test-local-mode-harness test-distributed-smoke lint lint-frontend test-frontend e2e test-e2e test-aft test-aft-real test-aft-real-claude test-aft-real-opencode test-aft-real-cursor test-aft-real-all test-aft-terminal test-aft-strict test-aft-heal demo test-e2e-api test-e2e-api-local test-e2e-real-smoke test-e2e-real-smoke-local test-e2e-real-regression test-e2e-real-regression-local test-e2e-integration test-e2e-integration-local test-e2e-integration-full clean install help frontend check check-go check-frontend check-product-invariants gate gate-e2e gate-e2e-full hooks ensure-hooks dev dev-check dev-loom dev-vite check-loc check-loc-stale check-control-plane-paths check-no-raw-exec check-no-beads-prod test-coverage test-forkwatch test-frontend-coverage test-race-cover test-integration-race-cover gen-go-api check-go-api-staleness local-mode-webhook-verify test-e2e-github-webhook test-e2e-github-webhook-live
+.PHONY: all build build-frontend build-all test test-builtin-workflows test-integration test-all test-playground test-fleetdb-embedded test-fleetdb-supervisor test-fleetdb-ui test-fleetdb-empty-cli fleetdb-empty-up fleetdb-empty-down fleetdb-regression-up fleetdb-regression-down test-env-up test-env-down test-env-status ensure-frontend-dist ensure-frontend-deps local-mode-frontend-dist local-mode-up local-mode-codex-up local-mode-claude-up local-mode-daytona-up local-mode-down local-mode-logs local-mode-verify local-mode-codex-verify test-local-mode-harness test-distributed-smoke lint lint-frontend test-frontend e2e test-e2e test-aft test-aft-real test-aft-real-claude test-aft-real-opencode test-aft-real-cursor test-aft-real-all test-aft-terminal test-aft-live-interactive test-aft-live-workers test-aft-live-pr-review test-aft-strict test-aft-heal demo test-e2e-api test-e2e-api-local test-e2e-real-smoke test-e2e-real-smoke-local test-e2e-real-regression test-e2e-real-regression-local test-e2e-integration test-e2e-integration-local test-e2e-integration-full clean install help frontend check check-go check-frontend check-product-invariants gate gate-e2e gate-e2e-full hooks ensure-hooks dev dev-check dev-loom dev-vite check-loc check-loc-stale check-control-plane-paths check-no-raw-exec check-no-beads-prod test-coverage test-forkwatch test-frontend-coverage test-race-cover test-integration-race-cover gen-go-api check-go-api-staleness local-mode-webhook-verify test-e2e-github-webhook test-e2e-github-webhook-live
 
 # Default target
 all: build
@@ -464,6 +464,39 @@ test-aft-real-cursor:
 # Opt-in convenience: every real backend tier sequentially, each on its own fresh stack.
 # Consumes all four accounts' rate windows — do not loop.
 test-aft-real-all: test-aft-real test-aft-real-claude test-aft-real-opencode test-aft-real-cursor
+
+# Opt-in: drive a Custom-prompt INTERACTIVE agent with a real backend, so the
+# prompt->argv->live-model->artifact chain is proven end to end rather than
+# stopping at argv. LIVE_BACKEND=claude switches to the harness-wrapper runtime.
+# Consumes that account's rate-limit window and runs a model with sandboxing
+# disabled inside an isolated workspace — never in CI, never in a loop.
+LIVE_BACKEND ?= codex
+test-aft-live-interactive:
+	@echo "Running aft LIVE INTERACTIVE tier against real $(LIVE_BACKEND) (spends that account's rate window)..."
+	@AFT_SUITES=$(PWD)/tests/aft/live-interactive-suites tests/aft/run-aft.sh \
+		--no-agent --live --real-backend $(LIVE_BACKEND) --max-real-cases 3 $(AFT_ARGS)
+
+# Opt-in: browser-create Task Runner + Planner workers, start them through their
+# supported UI surfaces, and execute both under an owned daemon and one real backend.
+# The repo remote is a throwaway local bare repository; no hosted git mutation.
+# NO working spend ceiling exists for claude: --max-budget-usd is "--print only" per
+# `claude --help`, and the worker path deliberately omits -p, so LOOM_MAX_BUDGET_USD is
+# inert there (tests/aft/README.md and FINDINGS §1.25). Treat LIVE_BACKEND=claude as
+# uncapped spend.
+test-aft-live-workers:
+	@echo "Running aft LIVE WORKER tier against real $(LIVE_BACKEND) with an owned daemon (spends that account's rate window)..."
+	@AFT_SUITES=$(PWD)/tests/aft/live-worker-suites tests/aft/run-aft.sh \
+		--no-agent --live --with-daemon --real-backend $(LIVE_BACKEND) --max-real-cases 2 $(AFT_ARGS)
+
+# Opt-in: a real reviewer reviews a seeded defect and must write nothing. Fully
+# hermetic — a local bare repo stands in for GitHub (refs/pull/7/head) and the
+# connector is pointed at tests/aft/fixtures/fake-github. The suites directory name
+# is load-bearing: run-aft.sh maps live-pr-review* to AFT_LIVE_SUITE_KIND=prreview,
+# which is what starts that fixture.
+test-aft-live-pr-review:
+	@echo "Running aft LIVE PR-REVIEW tier against real $(LIVE_BACKEND) (spends that account's rate window)..."
+	@AFT_SUITES=$(PWD)/tests/aft/live-pr-review-suites tests/aft/run-aft.sh \
+		--no-agent --live --real-backend $(LIVE_BACKEND) --max-real-cases 1 $(AFT_ARGS)
 
 # Opt-in: exercise the agents-page Logs tab's live-tmux terminal with real codex.
 test-aft-terminal:
