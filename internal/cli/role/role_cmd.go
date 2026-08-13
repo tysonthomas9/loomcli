@@ -319,7 +319,14 @@ func buildRolePatch(key, value string, unset bool) (store.RoleUpdate, error) {
 	case "model":
 		patch.Model = strPtr(value)
 	case "task_filter":
-		patch.TaskFilter = strPtr(value)
+		// The role's filter is the one the daemon router actually reads, so an
+		// unrecognized value here degrades routing silently. Reject it at input
+		// time and store the canonical spelling.
+		canonical, err := cli.ValidateTaskFilter(value)
+		if err != nil {
+			return patch, err
+		}
+		patch.TaskFilter = strPtr(canonical)
 	case "executor":
 		// Closed vocabulary, validated client-side so a typo fails here with
 		// the accepted values instead of as a server 400: "" (clear, same as

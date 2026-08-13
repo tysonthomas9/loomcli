@@ -279,15 +279,23 @@ func runAgentSingleTask(worktreePath, agentName string, promptGen func(string, *
 // The parentID is captured in the returned closure to scope task discovery.
 func mapTaskFilter(filter, parentID string) (func() (bool, error), error) {
 	repoLabel := os.Getenv("LOOM_AGENT_REPO")
-	switch filter {
-	case "needs_design":
+	// Canonicalize first: the daemon passes the role's stored filter straight
+	// through as --task-filter (supervisor/spawn.go, webui terminal), and roles
+	// store the canonical "needs_plan". Without the alias this rejects its own
+	// canonical spelling and the supervised agent exits 1 in a crash loop.
+	canonical, err := cli.ValidateTaskFilter(filter)
+	if err != nil {
+		return nil, err
+	}
+	switch canonical {
+	case "needs_plan":
 		return func() (bool, error) { return automode.HasAvailablePlanningTasks(parentID, repoLabel) }, nil
 	case "has_design":
 		return func() (bool, error) { return automode.HasAvailableImplementationTasks(parentID, repoLabel) }, nil
 	case "any", "":
 		return func() (bool, error) { return automode.HasAnyAvailableTasks(parentID, repoLabel) }, nil
 	default:
-		return nil, fmt.Errorf("invalid task filter: %s (must be needs_design, has_design, or any)", filter)
+		return nil, fmt.Errorf("invalid task filter: %s (must be needs_design, has_design, or any)", canonical)
 	}
 }
 

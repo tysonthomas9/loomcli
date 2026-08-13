@@ -95,6 +95,39 @@ func TestBuildRolePatchInputPolicy_RejectsUnknownDisposition(t *testing.T) {
 	}
 }
 
+// The role's task_filter is the value the daemon router actually reads, so an
+// unrecognized spelling must fail at input time rather than degrade into
+// has_design at dispatch. The documented "needs_design" is stored canonically.
+func TestBuildRolePatchTaskFilter(t *testing.T) {
+	tests := []struct {
+		name  string
+		value string
+		unset bool
+		want  string
+	}{
+		{name: "needs_design canonicalized", value: "needs_design", want: "needs_plan"},
+		{name: "needs_plan", value: "needs_plan", want: "needs_plan"},
+		{name: "has_design", value: "has_design", want: "has_design"},
+		{name: "any", value: "any", want: "any"},
+		{name: "unset", unset: true, want: ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			patch, err := buildRolePatch("task_filter", tt.value, tt.unset)
+			if err != nil {
+				t.Fatalf("buildRolePatch() error = %v", err)
+			}
+			if patch.TaskFilter == nil {
+				t.Fatalf("buildRolePatch() TaskFilter = nil")
+			}
+			if got := *patch.TaskFilter; got != tt.want {
+				t.Fatalf("buildRolePatch() TaskFilter = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestBuildRolePatchInputPolicy_SetAndClear(t *testing.T) {
 	patch, err := buildRolePatch("input_policy", "default=deny, trust_prompt=allow , confirm=ask", false)
 	if err != nil {
@@ -185,5 +218,17 @@ func TestFormatInputPolicy_RoundTripsThroughSet(t *testing.T) {
 	}
 	if got := formatInputPolicy(&domain.RoleInputPolicy{}); got != "deny (empty policy)" {
 		t.Errorf("empty policy rendered as %q, want it to say what it does", got)
+	}
+}
+
+// An unrecognized spelling must fail at input time and leave the patch
+// untouched, so a rejected filter cannot be half-applied.
+func TestBuildRolePatchTaskFilterInvalid(t *testing.T) {
+	patch, err := buildRolePatch("task_filter", "needs-design", false)
+	if err == nil {
+		t.Fatalf("buildRolePatch() error = nil, want validation error")
+	}
+	if patch.TaskFilter != nil {
+		t.Fatalf("buildRolePatch() TaskFilter = %q, want nil", *patch.TaskFilter)
 	}
 }

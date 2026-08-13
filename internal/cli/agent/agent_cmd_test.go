@@ -26,6 +26,13 @@ func TestMapTaskFilter(t *testing.T) {
 			filter: "needs_design",
 		},
 		{
+			// Roles store the canonical spelling and the daemon passes it
+			// straight through as --task-filter; rejecting it here would
+			// crash-loop the supervised agent.
+			name:   "canonical needs_plan returns a function",
+			filter: "needs_plan",
+		},
+		{
 			name:   "has_design returns a function",
 			filter: "has_design",
 		},

@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
@@ -243,11 +244,59 @@ func AgentEntryFromEnv() config.AgentEntry {
 	return ae
 }
 
+// TaskFilterAliases maps every accepted spelling of a task filter onto its
+// canonical form.
+//
+// Two vocabularies grew independently: `loom agent --task-filter` documents and
+// validates "needs_design" (see mapTaskFilter), while the daemon's router only
+// ever matched "needs_plan". An agentdef created the documented way therefore
+// fell through to the default branch below and was treated as "has_design", so a
+// planner silently ran as a second worker. Both spellings are accepted here, and
+// ValidateTaskFilter rejects anything else at input time.
+var TaskFilterAliases = map[string]string{
+	"needs_design": "needs_plan",
+	"needs_plan":   "needs_plan",
+	"has_design":   "has_design",
+	"any":          "any",
+	"":             "",
+}
+
+// ValidateTaskFilter returns the canonical spelling of filter, or an error
+// naming the accepted values. Callers that persist a filter should run it
+// through this so an unrecognized value fails loudly instead of degrading into
+// "has_design" at dispatch time.
+func ValidateTaskFilter(filter string) (string, error) {
+	canonical, ok := TaskFilterAliases[filter]
+	if !ok {
+		return "", fmt.Errorf("invalid task filter: %s (must be needs_design, has_design, or any)", filter)
+	}
+	return canonical, nil
+}
+
+// warnedTaskFilters records the unrecognized filter values already reported by
+// warnUnknownTaskFilterOnce.
+var warnedTaskFilters sync.Map
+
+// warnUnknownTaskFilterOnce logs the unrecognized-filter warning at most once
+// per distinct value per process. applyTaskFilter runs once per ready issue per
+// scoring pass (SelectBestTask fetches up to 10k) on every claim tick and
+// availability poll, so an unguarded log.Printf turns one bad stored value into
+// thousands of identical lines a minute.
+func warnUnknownTaskFilterOnce(filter string) {
+	if _, seen := warnedTaskFilters.LoadOrStore(filter, struct{}{}); seen {
+		return
+	}
+	log.Printf("warning: unrecognized task filter %q; treating as has_design", filter)
+}
+
 // applyTaskFilter checks if the issue passes the given task filter.
 // Returns an empty string if the issue passes, or a rejection reason.
 func applyTaskFilter(issue backend.IssueData, filter string) string {
 	if filter == "" {
 		filter = "has_design"
+	}
+	if canonical, ok := TaskFilterAliases[filter]; ok && canonical != "" {
+		filter = canonical
 	}
 	switch filter {
 	case "needs_plan":
@@ -261,6 +310,10 @@ func applyTaskFilter(issue backend.IssueData, filter string) string {
 	case "any":
 		// No additional filter
 	default:
+		// Reachable only for a filter that bypassed ValidateTaskFilter (a
+		// hand-edited config, or one stored before validation existed). Say so
+		// rather than quietly behaving as has_design.
+		warnUnknownTaskFilterOnce(filter)
 		if !ReadyToImplement(issue) {
 			return "filter: not ready to implement"
 		}
