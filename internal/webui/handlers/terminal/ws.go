@@ -42,6 +42,7 @@ const (
 	wsDisconnectReasonServerClose   = "server_close"
 	wsDisconnectReasonBackendExited = "backend_exited"
 	wsDisconnectReasonSessionKilled = "session_killed"
+	wsDisconnectReasonSandboxGone   = "sandbox_gone"
 	wsDisconnectReasonError         = "error"
 )
 
@@ -59,6 +60,8 @@ func wsCloseReason(status websocket.StatusCode) string { //nolint:staticcheck //
 		return wsDisconnectReasonBackendExited
 	case websocket.StatusCode(realtime.WSCloseSessionKilled): //nolint:staticcheck // SA1019
 		return wsDisconnectReasonSessionKilled
+	case websocket.StatusCode(realtime.WSCloseSandboxGone): //nolint:staticcheck // SA1019
+		return wsDisconnectReasonSandboxGone
 	default:
 		return wsDisconnectReasonError
 	}
@@ -279,6 +282,18 @@ func classifyAttachErr(err error, session, workspace string) (websocket.StatusCo
 	case errors.Is(err, webuterminal.ErrPTYManagerClosed), errors.Is(err, webuterminal.ErrWorkspaceNotRegistered):
 		slog.Info("terminal attach after workspace unavailable", "session", session, "workspace", workspace, "err", err)
 		return websocket.StatusGoingAway, "workspace unavailable" //nolint:staticcheck // SA1019
+	case errors.Is(err, webuterminal.ErrDaytonaSandboxGone):
+		// The remote sandbox is permanently gone (deleted out-of-band), so the
+		// client must stop auto-reconnecting rather than hammer a 404 forever.
+		// 4003 is emitted on the attach-FAILURE path, before the relay writes
+		// any frame — the reverse of the immediate post-upgrade close warned
+		// about in wsCloseReason's callers. It is delivered reliably here
+		// because reaching this case requires a completed client.Get round-trip
+		// to the Daytona API (tens–hundreds of ms), by which point the browser
+		// has finished the WS handshake and fired onopen; the close code is not
+		// dropped as a bare 1006. Logged at INFO (not ERROR) to end the flood.
+		slog.Info("terminal attach: remote sandbox no longer exists", "session", session, "workspace", workspace, "err", err)
+		return websocket.StatusCode(realtime.WSCloseSandboxGone), "sandbox no longer exists" //nolint:staticcheck // SA1019
 	default:
 		slog.Error("failed to attach terminal session", "session", session, "err", err)
 		return websocket.StatusInternalError, err.Error() //nolint:staticcheck // SA1019

@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	sdkdaytona "github.com/daytonaio/daytona/libs/sdk-go/pkg/daytona"
+	daytonaerrors "github.com/daytonaio/daytona/libs/sdk-go/pkg/errors"
 	sdktypes "github.com/daytonaio/daytona/libs/sdk-go/pkg/types"
 )
 
@@ -25,6 +26,8 @@ var (
 	// absent in the sandbox. Attaching must fail rather than creating a second
 	// lead process.
 	ErrDaytonaPTYSessionNotFound = errors.New("daytona pty session not found")
+	// ErrDaytonaSandboxGone means the remote Daytona sandbox no longer exists.
+	ErrDaytonaSandboxGone = errors.New("daytona sandbox no longer exists")
 
 	newDaytonaPTYUpstreamForManager = NewDaytonaPTYUpstream
 )
@@ -115,12 +118,20 @@ func NewDaytonaPTYUpstream(ctx context.Context, sandboxID, ptySessionID string, 
 	}
 	sandbox, err := client.Get(ctx, sandboxID)
 	if err != nil {
+		if isDaytonaSandboxNotFound(err) {
+			return nil, fmt.Errorf("daytona get sandbox %q: %w", sandboxID, errors.Join(ErrDaytonaSandboxGone, err))
+		}
 		return nil, fmt.Errorf("daytona get sandbox %q: %w", sandboxID, err)
 	}
 	if sandbox == nil || sandbox.Process == nil {
 		return nil, fmt.Errorf("daytona sandbox %q has no process service", sandboxID)
 	}
 	return newDaytonaPTYUpstreamFromConnector(ctx, daytonaProcessService{process: sandbox.Process}, sandboxID, ptySessionID)
+}
+
+func isDaytonaSandboxNotFound(err error) bool {
+	var notFound *daytonaerrors.DaytonaNotFoundError
+	return errors.As(err, &notFound)
 }
 
 func newDaytonaPTYUpstreamFromConnector(ctx context.Context, connector daytonaPTYConnector, sandboxID, ptySessionID string) (*daytonaPTYUpstream, error) {

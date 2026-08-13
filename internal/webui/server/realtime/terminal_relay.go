@@ -42,6 +42,10 @@ const (
 	// resurrecting a session the user just destroyed.
 	WSCloseSessionKilled = 4002
 
+	// WSCloseSandboxGone is the WebSocket close code for a remote Daytona
+	// sandbox that no longer exists.
+	WSCloseSandboxGone = 4003
+
 	// TerminalReadBufSize is the buffer size for reading from PTY.
 	TerminalReadBufSize = 4096
 	// MaxTerminalCols is the maximum allowed terminal columns.
