@@ -5,6 +5,7 @@ package role
 import (
 	"context"
 	"fmt"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -27,6 +28,8 @@ var (
 	roleAddBackend        string
 	roleAddEffort         string
 	roleAddSkills         []string
+	roleAddLabels         []string
+	roleAddExcludeLabels  []string
 	roleAddMaxConc        int
 	roleAddReadOnly       bool
 	roleAddInputPolicy    []string
@@ -89,6 +92,8 @@ var roleSetCmd = &cobra.Command{
   max_budget_usd  float
   max_run_duration integer (seconds; 0 disables the run-duration cap)
   skills          comma-separated list
+  labels          comma-separated list (issue must carry ALL of these; evaluated after exclude_labels)
+  exclude_labels  comma-separated list (issue rejected if it carries ANY of these; evaluated before labels)
   path_patterns   comma-separated list
   allowed_tools   comma-separated list
   denied_tools    comma-separated list
@@ -115,7 +120,7 @@ var roleUnsetCmd = &cobra.Command{
   max_run_duration *int    (clear — the role falls back to the daemon default)
   input_policy    (clear — the role then auto-answers no harness prompt)
   description / kind / prompt / prompt_file / model / task_filter / backend / effort  (set to "")
-  skills / path_patterns / allowed_tools / denied_tools      (set to empty list)
+  skills / labels / exclude_labels / path_patterns / allowed_tools / denied_tools      (set to empty list)
   read_only                                                 (set to false)`,
 	Args: cobra.ExactArgs(2),
 	RunE: runRoleUnset,
@@ -130,6 +135,8 @@ func init() {
 	roleAddCmd.Flags().StringVar(&roleAddBackend, "backend", "", "AI backend (e.g., claude, codex)")
 	roleAddCmd.Flags().StringVar(&roleAddEffort, "effort", "", "Agent effort (low, medium, high, xhigh, max)")
 	roleAddCmd.Flags().StringSliceVar(&roleAddSkills, "skills", nil, "Skills (comma-separated or repeat flag)")
+	roleAddCmd.Flags().StringSliceVar(&roleAddLabels, "labels", nil, "Issue must carry ALL of these labels (comma-separated or repeat flag)")
+	roleAddCmd.Flags().StringSliceVar(&roleAddExcludeLabels, "exclude-labels", nil, "Reject issue if it carries ANY of these labels (comma-separated or repeat flag)")
 	roleAddCmd.Flags().IntVar(&roleAddMaxConc, "max-concurrency", 0, "Max concurrent agents (0 = unlimited)")
 	roleAddCmd.Flags().BoolVar(&roleAddReadOnly, "read-only", false, "Read-only role (hard on claude/codex/gemini; prompt-only elsewhere, and the daemon logs which one you get)")
 	roleAddCmd.Flags().StringSliceVar(&roleAddInputPolicy, "input-policy", nil, "Auto-answer disposition per harness prompt kind, KIND=deny|allow|ask (comma-separated or repeat flag)")
@@ -152,18 +159,20 @@ func runRoleAdd(_ *cobra.Command, args []string) error {
 	}
 	return cmdstore.WithActiveWorkspace(func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error {
 		in := store.RoleCreate{
-			WorkspaceKey: ws,
-			Name:         args[0],
-			Kind:         normalizeRoleKindValue(roleAddKind),
-			Description:  roleAddDescription,
-			Prompt:       roleAddPrompt,
-			PromptFile:   roleAddPromptFile,
-			Model:        roleAddModel,
-			Backend:      roleAddBackend,
-			Effort:       roleAddEffort,
-			Skills:       roleAddSkills,
-			ReadOnly:     roleAddReadOnly,
-			InputPolicy:  inputPolicy,
+			WorkspaceKey:  ws,
+			Name:          args[0],
+			Kind:          normalizeRoleKindValue(roleAddKind),
+			Description:   roleAddDescription,
+			Prompt:        roleAddPrompt,
+			PromptFile:    roleAddPromptFile,
+			Model:         roleAddModel,
+			Backend:       roleAddBackend,
+			Effort:        roleAddEffort,
+			Skills:        roleAddSkills,
+			Labels:        trimFilterLabels(roleAddLabels),
+			ExcludeLabels: trimFilterLabels(roleAddExcludeLabels),
+			ReadOnly:      roleAddReadOnly,
+			InputPolicy:   inputPolicy,
 		}
 		if roleAddMaxConc > 0 {
 			v := roleAddMaxConc
@@ -174,6 +183,7 @@ func runRoleAdd(_ *cobra.Command, args []string) error {
 			return fmt.Errorf("create role: %w", err)
 		}
 		fmt.Printf("Created role %s/%s\n", r.WorkspaceKey, r.Name)
+		warnDroppedLabelConstraints(r, in.Labels, in.ExcludeLabels)
 		return nil
 	})
 }
@@ -202,6 +212,66 @@ func runRoleList(_ *cobra.Command, _ []string) error {
 	})
 }
 
+// printRoleRouting prints the fields that decide which tasks a role claims.
+// Split out of runRoleShow: label routing added two more optional lines to a
+// function that was already one long chain of "print it if it is set", which
+// tipped it over the cognitive-complexity limit.
+func printRoleRouting(r *domain.Role) {
+	if len(r.Skills) > 0 {
+		fmt.Printf("Skills:       %s\n", strings.Join(r.Skills, ", "))
+	}
+	if len(r.Labels) > 0 {
+		fmt.Printf("Labels:       %s\n", strings.Join(r.Labels, ", "))
+	}
+	if len(r.ExcludeLabels) > 0 {
+		fmt.Printf("Exclude labels: %s\n", strings.Join(r.ExcludeLabels, ", "))
+	}
+	if r.MaxConcurrency != nil {
+		fmt.Printf("Max concurrency: %d\n", *r.MaxConcurrency)
+	}
+	if r.ReadOnly {
+		fmt.Printf("Read-only:    true\n")
+	}
+	// Printed only when set. A role with no policy denies every prompt, which
+	// is also what the whole rest of the fleet does, so a line on every role
+	// would be noise; the interesting state is a role that has opted
+	// something in.
+	if r.InputPolicy != nil {
+		fmt.Printf("Input policy: %s\n", formatInputPolicy(r.InputPolicy))
+	}
+}
+
+// printRoleIdentity prints the descriptive fields: who the role is and how it
+// is executed, as opposed to what it claims.
+func printRoleIdentity(r *domain.Role) {
+	fmt.Printf("Workspace:    %s\n", r.WorkspaceKey)
+	fmt.Printf("Name:         %s\n", r.Name)
+	if r.Description != "" {
+		fmt.Printf("Description:  %s\n", r.Description)
+	}
+	if r.Kind != "" {
+		fmt.Printf("Kind:         %s\n", r.Kind)
+	}
+	if r.Model != "" {
+		fmt.Printf("Model:        %s\n", r.Model)
+	}
+	if r.Backend != "" {
+		fmt.Printf("Backend:      %s\n", r.Backend)
+	}
+	if r.Effort != "" {
+		fmt.Printf("Effort:       %s\n", r.Effort)
+	}
+	if r.Prompt != "" {
+		fmt.Printf("Prompt:       %s\n", r.Prompt)
+	}
+	if r.PromptFile != "" {
+		fmt.Printf("Prompt file:  %s\n", r.PromptFile)
+	}
+	if r.Executor != "" {
+		fmt.Printf("Executor:     %s\n", r.Executor)
+	}
+}
+
 func runRoleShow(_ *cobra.Command, args []string) error {
 	return cmdstore.WithActiveWorkspace(func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error {
 		r, err := h.Store.Roles().Get(ctx, ws, args[0])
@@ -211,48 +281,8 @@ func runRoleShow(_ *cobra.Command, args []string) error {
 		if roleShowJSON {
 			return cmdstore.WriteJSON(r)
 		}
-		fmt.Printf("Workspace:    %s\n", r.WorkspaceKey)
-		fmt.Printf("Name:         %s\n", r.Name)
-		if r.Description != "" {
-			fmt.Printf("Description:  %s\n", r.Description)
-		}
-		if r.Kind != "" {
-			fmt.Printf("Kind:         %s\n", r.Kind)
-		}
-		if r.Model != "" {
-			fmt.Printf("Model:        %s\n", r.Model)
-		}
-		if r.Backend != "" {
-			fmt.Printf("Backend:      %s\n", r.Backend)
-		}
-		if r.Effort != "" {
-			fmt.Printf("Effort:       %s\n", r.Effort)
-		}
-		if r.Prompt != "" {
-			fmt.Printf("Prompt:       %s\n", r.Prompt)
-		}
-		if r.PromptFile != "" {
-			fmt.Printf("Prompt file:  %s\n", r.PromptFile)
-		}
-		if r.Executor != "" {
-			fmt.Printf("Executor:     %s\n", r.Executor)
-		}
-		if len(r.Skills) > 0 {
-			fmt.Printf("Skills:       %s\n", strings.Join(r.Skills, ", "))
-		}
-		if r.MaxConcurrency != nil {
-			fmt.Printf("Max concurrency: %d\n", *r.MaxConcurrency)
-		}
-		if r.ReadOnly {
-			fmt.Printf("Read-only:    true\n")
-		}
-		// Printed only when set. A role with no policy denies every prompt,
-		// which is also what the whole rest of the fleet does, so a line on
-		// every role would be noise; the interesting state is a role that has
-		// opted something in.
-		if r.InputPolicy != nil {
-			fmt.Printf("Input policy: %s\n", formatInputPolicy(r.InputPolicy))
-		}
+		printRoleIdentity(r)
+		printRoleRouting(r)
 		return nil
 	})
 }
@@ -274,10 +304,12 @@ func runRoleSet(_ *cobra.Command, args []string) error {
 		if err != nil {
 			return err
 		}
-		if _, err := h.Store.Roles().Update(ctx, ws, name, patch); err != nil {
+		r, err := h.Store.Roles().Update(ctx, ws, name, patch)
+		if err != nil {
 			return fmt.Errorf("update role: %w", err)
 		}
 		fmt.Printf("Set %s/%s.%s = %s\n", ws, name, key, value)
+		warnDroppedLabelConstraints(r, derefSlice(patch.Labels), derefSlice(patch.ExcludeLabels))
 		return nil
 	})
 }
@@ -403,6 +435,10 @@ func buildRolePatch(key, value string, unset bool) (store.RoleUpdate, error) {
 		patch.MaxRunDuration = &ptr
 	case "skills":
 		patch.Skills = sliceCSVPtr(value)
+	case "labels":
+		patch.Labels = sliceCSVPtr(value)
+	case "exclude_labels":
+		patch.ExcludeLabels = sliceCSVPtr(value)
 	case "path_patterns":
 		patch.PathPatterns = sliceCSVPtr(value)
 	case "allowed_tools":
@@ -438,6 +474,46 @@ func normalizeRoleKindValue(value string) string {
 	return strings.ToLower(strings.TrimSpace(value))
 }
 
+// warnDroppedLabelConstraints reports label constraints that were written but
+// did not come back on the stored role.
+//
+// The wire encoding is fail-open by construction: the create/patch bodies carry
+// `labels` / `exclude_labels` as ordinary JSON, and a fleet-db deployment that
+// predates label constraints ignores the unknown fields and answers 200. The
+// write "succeeds", `loom role show` comes back without the constraints, and
+// the routing gate the operator just configured is simply absent — the role
+// goes on claiming every issue, which is the exact failure this feature exists
+// to prevent. Silence there is the worst outcome, so say it out loud.
+//
+// stored == nil is treated as "not persisted": every backend returns the stored
+// role on success, so a nil here means we cannot confirm the write either way.
+func warnDroppedLabelConstraints(stored *domain.Role, wantLabels, wantExclude []string) {
+	var missing []string
+	if len(wantLabels) > 0 && (stored == nil || len(stored.Labels) == 0) {
+		missing = append(missing, "labels")
+	}
+	if len(wantExclude) > 0 && (stored == nil || len(stored.ExcludeLabels) == 0) {
+		missing = append(missing, "exclude_labels")
+	}
+	if len(missing) == 0 {
+		return
+	}
+	fmt.Fprintf(os.Stderr,
+		"warning: %s was accepted but not stored - label routing is NOT active for this role.\n"+
+			"  The backend is most likely older than label-constraint support; deploy fleet-db first,\n"+
+			"  then re-apply. Confirm with: loom role show <name>\n",
+		strings.Join(missing, " and "))
+}
+
+// derefSlice returns the pointed-to slice, or nil when the patch leaves the
+// field alone.
+func derefSlice(p *[]string) []string {
+	if p == nil {
+		return nil
+	}
+	return *p
+}
+
 func validateRoleKindValue(value string) error {
 	switch normalizeRoleKindValue(value) {
 	case "", string(domain.RoleKindInteractive), string(domain.RoleKindWorker):
@@ -445,6 +521,26 @@ func validateRoleKindValue(value string) error {
 	default:
 		return fmt.Errorf("kind must be interactive or worker")
 	}
+}
+
+// trimFilterLabels trims whitespace and drops empty elements from a
+// --labels/--exclude-labels flag value. Labels are hard-reject constraints
+// (unlike Skills' soft demote), so a stray whitespace-only element must not
+// survive: it would never match a real issue label, silently starving a
+// required-labels role or leaving an exclude-labels-only role with an
+// effectively empty constraint list (falling through the routing-check
+// activation guard, the exact bug this constraint exists to prevent).
+func trimFilterLabels(in []string) []string {
+	if len(in) == 0 {
+		return in
+	}
+	out := make([]string, 0, len(in))
+	for _, v := range in {
+		if v = strings.TrimSpace(v); v != "" {
+			out = append(out, v)
+		}
+	}
+	return out
 }
 
 // sliceCSVPtr returns a non-nil *[]string for the patch. Empty input

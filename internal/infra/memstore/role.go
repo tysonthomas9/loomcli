@@ -51,6 +51,8 @@ func (s *roleStore) Create(_ context.Context, in store.RoleCreate) (*domain.Role
 		PathPatterns:   append([]string(nil), in.PathPatterns...),
 		Skills:         append([]string(nil), in.Skills...),
 		InputPolicy:    in.InputPolicy.Clone(),
+		Labels:         append([]string(nil), in.Labels...),
+		ExcludeLabels:  append([]string(nil), in.ExcludeLabels...),
 		MaxPriority:    clonePtr(in.MaxPriority),
 		MaxConcurrency: clonePtr(in.MaxConcurrency),
 		ReadOnly:       in.ReadOnly,
@@ -147,6 +149,12 @@ func applyRoleControlPatch(r *domain.Role, patch store.RoleUpdate) {
 		// flip a role's disposition after the store accepted the patch.
 		r.InputPolicy = (*patch.InputPolicy).Clone()
 	}
+	if patch.Labels != nil {
+		r.Labels = append([]string(nil), (*patch.Labels)...)
+	}
+	if patch.ExcludeLabels != nil {
+		r.ExcludeLabels = append([]string(nil), (*patch.ExcludeLabels)...)
+	}
 	if patch.MaxPriority != nil {
 		r.MaxPriority = clonePtr(*patch.MaxPriority)
 	}
@@ -194,6 +202,8 @@ func cloneRole(r *domain.Role) *domain.Role {
 	out := *r
 	out.PathPatterns = append([]string(nil), r.PathPatterns...)
 	out.Skills = append([]string(nil), r.Skills...)
+	out.Labels = append([]string(nil), r.Labels...)
+	out.ExcludeLabels = append([]string(nil), r.ExcludeLabels...)
 	out.AllowedTools = append([]string(nil), r.AllowedTools...)
 	out.DeniedTools = append([]string(nil), r.DeniedTools...)
 	out.InputPolicy = r.InputPolicy.Clone()
