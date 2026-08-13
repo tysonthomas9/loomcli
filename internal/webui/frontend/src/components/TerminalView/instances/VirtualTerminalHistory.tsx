@@ -62,6 +62,48 @@ interface CachedRange {
   count: number;
 }
 
+export function cacheTerminalHistoryRange<T extends { i: number }>(
+  lineCache: Map<number, T>,
+  rangeCache: Map<string, CachedRange>,
+  key: string,
+  range: CachedRange,
+  lines: T[],
+): void {
+  for (const line of lines) {
+    lineCache.set(line.i, line);
+  }
+  rangeCache.set(key, range);
+  while (rangeCache.size > MAX_RANGE_CACHE) {
+    const oldest = rangeCache.keys().next().value as string | undefined;
+    if (!oldest) break;
+    const evicted = rangeCache.get(oldest);
+    rangeCache.delete(oldest);
+    if (!evicted) continue;
+    const retainedRanges = Array.from(rangeCache.values());
+    const end = evicted.from + evicted.count;
+    for (let index = evicted.from; index < end; index += 1) {
+      const retained = retainedRanges.some(
+        (cached) => index >= cached.from && index < cached.from + cached.count,
+      );
+      if (!retained) lineCache.delete(index);
+    }
+  }
+}
+
+export function historyNoticeText(meta: TerminalHistoryMeta): string {
+  let text = `Current size ${meta.cols}×${meta.rows}`;
+  if (meta.altScreen) text += " · fullscreen history is limited";
+  if (meta.recordingStopped) {
+    text += " · history recording stopped";
+  } else if (meta.historyLimited) {
+    text += " · layout history is limited";
+  }
+  if (meta.gaps > 0) text += ` · ${meta.gaps} output gaps`;
+  // unhandledSequences stays in meta for diagnostics but is not user-facing:
+  // real TUIs emit tens of thousands of benign render hints per session.
+  return text;
+}
+
 interface IdentityBoundMeta {
   identity: string;
   value: TerminalHistoryMeta;
@@ -152,7 +194,9 @@ export const VirtualTerminalHistory = forwardRef<
   const historyCount = Math.max(
     0,
     meta?.closed
-      ? meta.totalLines
+      ? firstScreenLine === undefined
+        ? meta.totalLines
+        : Math.min(meta.totalLines, firstScreenLine)
       : Math.min(
           meta?.totalLines ?? 0,
           Math.max(meta?.firstScreenLine ?? 0, firstScreenLine ?? 0),
@@ -267,15 +311,13 @@ export const VirtualTerminalHistory = forwardRef<
         ) {
           return;
         }
-        for (const line of history.lines) {
-          lineCacheRef.current.set(line.i, line);
-        }
-        const ranges = rangeCacheRef.current;
-        ranges.set(key, { from: requestedWindow.from, count });
-        if (ranges.size > MAX_RANGE_CACHE) {
-          const oldest = ranges.keys().next().value as string | undefined;
-          if (oldest) ranges.delete(oldest);
-        }
+        cacheTerminalHistoryRange(
+          lineCacheRef.current,
+          rangeCacheRef.current,
+          key,
+          { from: requestedWindow.from, count },
+          history.lines,
+        );
         setCacheVersion((version) => version + 1);
       })
       .catch(() => undefined)
@@ -406,13 +448,7 @@ export const VirtualTerminalHistory = forwardRef<
       </div>
       {!atBottom && meta ? (
         <div className={styles.historyNotice} role="status">
-          Current size {meta.cols}×{meta.rows}
-          {meta.altScreen ? " · fullscreen history is limited" : ""}
-          {meta.historyLimited ? " · layout history is limited" : ""}
-          {meta.gaps > 0 ? ` · ${meta.gaps} output gaps` : ""}
-          {meta.unhandledSequences.count > 0
-            ? ` · ${meta.unhandledSequences.count} unsupported terminal sequences`
-            : ""}
+          {historyNoticeText(meta)}
         </div>
       ) : null}
     </div>

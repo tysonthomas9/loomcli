@@ -4495,7 +4495,7 @@ components:
 
     TerminalHistoryMeta:
       type: object
-      required: [generation, totalLines, firstScreenLine, startedAt, cols, rows, altScreen, gaps, unhandledSequences, historyLimited, closed]
+      required: [generation, totalLines, firstScreenLine, startedAt, cols, rows, altScreen, gaps, unhandledSequences, historyLimited, recordingStopped, closed]
       properties:
         generation:
           type: string
@@ -4522,6 +4522,8 @@ components:
         unhandledSequences:
           $ref: "#/components/schemas/TerminalUnhandledSequences"
         historyLimited:
+          type: boolean
+        recordingStopped:
           type: boolean
         closed:
           type: boolean

@@ -53,6 +53,14 @@ const INITIAL_CONNECT_CONFIG: ReconnectConfig = {
 };
 
 /**
+ * A connection must stay open this long before it resets the reconnect
+ * backoff. A crash-looping session "connects" successfully and dies moments
+ * later; resetting on bare ws.onopen made every doomed cycle restart the
+ * backoff at attempt 0, hammering the server at the base cadence forever.
+ */
+const HEALTHY_CONNECTION_RESET_MS = 10_000;
+
+/**
  * Wall-clock ceiling: if a reconnect doesn't succeed within this window,
  * give up and surface the `expired` overlay. The ceiling is clamped to the
  * server's advertised grace period (`/api/config/terminal`) so the client
@@ -144,7 +152,10 @@ export const TerminalInstance = forwardRef<
   const virtualHistoryRef = useRef<VirtualTerminalHistoryHandle | null>(null);
   const pendingRendererWritesRef = useRef<Array<string | Uint8Array>>([]);
   const terminalSizeRef = useRef({ cols: 80, rows: 24 });
-  const historyModeRef = useRef(getTerminalHistoryMode());
+  const configuredHistoryModeRef = useRef(getTerminalHistoryMode());
+  const [historyMode, setHistoryMode] = useState(
+    configuredHistoryModeRef.current,
+  );
   const [firstScreenLine, setFirstScreenLine] = useState<number | undefined>();
   const [recordingEpoch, setRecordingEpoch] = useState(0);
 
@@ -223,12 +234,21 @@ export const TerminalInstance = forwardRef<
     );
   }, [connectionState]);
 
+  const reconnectAttemptCarryRef = useRef(0);
+  const healthyResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
+
   const clearReconnectTimers = useCallback(() => {
     reconnectCancelRef.current?.();
     reconnectCancelRef.current = null;
     if (reconnectTimeoutRef.current) {
       clearTimeout(reconnectTimeoutRef.current);
       reconnectTimeoutRef.current = null;
+    }
+    if (healthyResetTimerRef.current) {
+      clearTimeout(healthyResetTimerRef.current);
+      healthyResetTimerRef.current = null;
     }
   }, []);
 
@@ -257,12 +277,14 @@ export const TerminalInstance = forwardRef<
             doConnectRef.current?.({ onOutcome: resolve });
           }),
         (state: ReconnectState) => {
+          reconnectAttemptCarryRef.current = state.attempt;
           if (state.gaveUp) {
             clearReconnectTimers();
             onReconnectStateChangeRef.current?.("expired");
           }
         },
         config,
+        reconnectAttemptCarryRef.current,
       );
       reconnectCancelRef.current = cancel;
     },
@@ -290,6 +312,12 @@ export const TerminalInstance = forwardRef<
         // immediately after this callback.
         () => {
           clearReconnectTimers();
+          // Only a connection that stays up resets the backoff carry; a
+          // crash-looping session that opens and dies keeps escalating.
+          healthyResetTimerRef.current = setTimeout(() => {
+            reconnectAttemptCarryRef.current = 0;
+            healthyResetTimerRef.current = null;
+          }, HEALTHY_CONNECTION_RESET_MS);
           onReconnectStateChangeRef.current?.(null);
           setFirstScreenLine(undefined);
           setRecordingEpoch((epoch) => epoch + 1);
@@ -328,7 +356,12 @@ export const TerminalInstance = forwardRef<
           onReconnectStateChangeRef.current?.(null);
         },
         terminalSizeRef.current,
-        (line) => setFirstScreenLine(line),
+        (line, available) => {
+          setHistoryMode(
+            available ? configuredHistoryModeRef.current : "classic",
+          );
+          setFirstScreenLine(available ? line : undefined);
+        },
       );
       wsCleanupRef.current = cleanup;
     },
@@ -599,8 +632,8 @@ export const TerminalInstance = forwardRef<
         onBinary={handleBinary}
         onResize={handleResize}
         onFocus={() => onTerminalFocusRef.current?.()}
-        scrollbackLines={historyModeRef.current === "virtual" ? 0 : undefined}
-        allowParentWheelScroll={historyModeRef.current === "virtual"}
+        scrollbackLines={historyMode === "virtual" ? 0 : undefined}
+        allowParentWheelScroll={historyMode === "virtual"}
       />
     </Suspense>
   );
@@ -611,9 +644,9 @@ export const TerminalInstance = forwardRef<
       data-testid="terminal-wrapper"
       data-terminal-input
       data-terminal-renderer="xterm"
-      data-history-mode={historyModeRef.current}
+      data-history-mode={historyMode}
     >
-      {historyModeRef.current === "virtual" ? (
+      {historyMode === "virtual" ? (
         <VirtualTerminalHistory
           ref={virtualHistoryRef}
           sessionName={sessionName}

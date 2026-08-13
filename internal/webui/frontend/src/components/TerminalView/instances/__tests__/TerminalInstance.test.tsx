@@ -7,6 +7,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const connectionState = vi.hoisted(() => ({
   writeCallbacks: [] as Array<(data: string | Uint8Array) => void>,
+  historyCallbacks: [] as Array<
+    (firstScreenLine: number, available: boolean) => void
+  >,
   cleanupCount: 0,
   fitCountsAtConnect: [] as number[],
   terminalSizesAtConnect: [] as Array<{ cols: number; rows: number }>,
@@ -80,8 +83,13 @@ vi.mock("../terminalConnection", () => ({
       _onBackendCrash: (reason: string) => void,
       _onSessionKilled: () => void,
       terminalSize: { cols: number; rows: number },
+      onHistoryCoordinate: (
+        firstScreenLine: number,
+        available: boolean,
+      ) => void,
     ): (() => void) => {
       connectionState.writeCallbacks.push(write);
+      connectionState.historyCallbacks.push(onHistoryCoordinate);
       connectionState.fitCountsAtConnect.push(xtermState.fitCount);
       connectionState.terminalSizesAtConnect.push(terminalSize);
       setConnState("connecting");
@@ -127,6 +135,7 @@ function latestWriteCallback(): (data: string | Uint8Array) => void {
 describe("TerminalInstance", () => {
   beforeEach(() => {
     connectionState.writeCallbacks.length = 0;
+    connectionState.historyCallbacks.length = 0;
     connectionState.cleanupCount = 0;
     connectionState.fitCountsAtConnect.length = 0;
     connectionState.terminalSizesAtConnect.length = 0;
@@ -200,6 +209,32 @@ describe("TerminalInstance", () => {
     expect(
       view.getByTestId("terminal-wrapper").getAttribute("data-history-mode"),
     ).toBe("classic");
+  });
+
+  it("falls back to classic xterm scrollback when recording is unavailable", async () => {
+    const view = render(
+      <TerminalInstance
+        sessionName="shell-recording-failed"
+        backendName="shell"
+        isActive
+      />,
+    );
+    await waitFor(() => expect(xtermState.onReady).not.toBeNull());
+    readyRenderer();
+    await waitFor(() => {
+      expect(connectionState.historyCallbacks).toHaveLength(1);
+    });
+
+    act(() => connectionState.historyCallbacks[0]?.(0, false));
+
+    await waitFor(() => {
+      expect(
+        view.getByTestId("terminal-wrapper").getAttribute("data-history-mode"),
+      ).toBe("classic");
+    });
+    expect(xtermState.rendererProps?.scrollbackLines).toBeUndefined();
+    expect(xtermState.rendererProps?.allowParentWheelScroll).toBe(false);
+    expect(view.queryByTestId("terminal-history-scroller")).toBeNull();
   });
 
   it("fits the visible pane before opening its first WebSocket", async () => {

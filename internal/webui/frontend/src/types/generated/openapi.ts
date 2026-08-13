@@ -2398,6 +2398,7 @@ export interface components {
       gaps: number;
       unhandledSequences: components["schemas"]["TerminalUnhandledSequences"];
       historyLimited: boolean;
+      recordingStopped: boolean;
       closed: boolean;
     };
     /** @description Bounded diagnostics for parsed terminal escape sequences the focused recorder did not implement. Count is exact; prefixes is a bounded heavy-hitter map. */

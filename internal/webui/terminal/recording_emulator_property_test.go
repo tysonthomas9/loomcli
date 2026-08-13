@@ -219,10 +219,12 @@ func TestRecordingCorpusUnhandledSequenceMeasurement(t *testing.T) {
 			combined[prefix] += count
 		}
 	}
-	if total != 3 {
-		t.Fatalf("corpus unhandled sequence count = %d, want 3; prefixes=%v", total, combined)
+	// Cursor-visibility (?25) is a render hint and is deliberately not
+	// counted; only sequences with no safe interpretation remain.
+	if total != 1 {
+		t.Fatalf("corpus unhandled sequence count = %d, want 1; prefixes=%v", total, combined)
 	}
-	want := map[string]uint64{"OSC 0": 1, "CSI ?25l": 1, "CSI ?25h": 1}
+	want := map[string]uint64{"OSC 0": 1}
 	for prefix, count := range want {
 		if combined[prefix] != count {
 			t.Fatalf("unhandled prefix %q = %d, want %d; all=%v", prefix, combined[prefix], count, combined)

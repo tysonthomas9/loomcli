@@ -119,8 +119,9 @@ func (s *Store) List(ctx context.Context, workspaceID, issueID string) ([]Sessio
 	return sessions, nil
 }
 
-// Complete marks an active session as completed, setting EndedAt and ScrollbackPath.
-func (s *Store) Complete(ctx context.Context, workspaceID, issueID, sessionName, scrollbackPath string) error {
+// Complete marks the exact active session record as completed, setting EndedAt
+// and ScrollbackPath.
+func (s *Store) Complete(ctx context.Context, workspaceID, issueID, recordID, scrollbackPath string) error {
 	if err := ValidateIssueID(issueID); err != nil {
 		return err
 	}
@@ -134,7 +135,7 @@ func (s *Store) Complete(ctx context.Context, workspaceID, issueID, sessionName,
 	now := time.Now().UTC()
 	found := false
 	for i := range history.Sessions {
-		if history.Sessions[i].SessionName == sessionName && history.Sessions[i].Status == "active" {
+		if history.Sessions[i].ID == recordID && history.Sessions[i].Status == "active" {
 			history.Sessions[i].Status = "completed"
 			history.Sessions[i].EndedAt = &now
 			history.Sessions[i].ScrollbackPath = scrollbackPath

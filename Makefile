@@ -521,7 +521,7 @@ install:
 clean:
 	@echo "Cleaning..."
 	rm -f loom
-	rm -f /tmp/loom.coverage.out
+	rm -f /tmp/loom.coverage.out tmp/loom.coverage.out
 
 # Frontend directory
 FRONTEND_DIR := internal/webui/frontend
@@ -578,9 +578,10 @@ check-go:
 	@echo "=== [11/13] Go: generated API staleness ==="
 	@./scripts/check-go-api-staleness.sh
 	@echo "=== [12/13] Go: test with race detector ==="
-	@./scripts/with-clean-loom-env.sh go test -p 1 -race -covermode=atomic -coverprofile=/tmp/loom.coverage.out -timeout 15m ./...
+	@mkdir -p tmp
+	@./scripts/with-clean-loom-env.sh go test -p 1 -race -covermode=atomic -coverprofile=$(CURDIR)/tmp/loom.coverage.out -timeout 15m ./...
 	@echo "=== [13/13] Go: coverage threshold ==="
-	@COVERAGE_THRESHOLD=60 ./scripts/check-coverage.sh
+	@COVERAGE_THRESHOLD=60 COVERAGE_PROFILE=$(CURDIR)/tmp/loom.coverage.out ./scripts/check-coverage.sh
 	@echo "=== Go quality gates PASSED ==="
 
 # Frontend-only quality gate (no Go toolchain, no dist prerequisite)

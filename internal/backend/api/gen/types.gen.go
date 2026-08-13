@@ -2758,11 +2758,12 @@ type TerminalHistoryMeta struct {
 	Gaps            int64 `json:"gaps"`
 
 	// Generation Current opaque PTY-lifetime identity; pass it on every history range request.
-	Generation     string `json:"generation"`
-	HistoryLimited bool   `json:"historyLimited"`
-	Rows           int    `json:"rows"`
-	StartedAt      int64  `json:"startedAt"`
-	TotalLines     int64  `json:"totalLines"`
+	Generation       string `json:"generation"`
+	HistoryLimited   bool   `json:"historyLimited"`
+	RecordingStopped bool   `json:"recordingStopped"`
+	Rows             int    `json:"rows"`
+	StartedAt        int64  `json:"startedAt"`
+	TotalLines       int64  `json:"totalLines"`
 
 	// UnhandledSequences Bounded diagnostics for parsed terminal escape sequences the focused recorder did not implement. Count is exact; prefixes is a bounded heavy-hitter map.
 	UnhandledSequences TerminalUnhandledSequences `json:"unhandledSequences"`

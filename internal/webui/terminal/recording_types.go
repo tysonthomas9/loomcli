@@ -48,6 +48,7 @@ type RecordingMeta struct {
 	FormatVersion        uint8                       `json:"formatVersion"`
 	Generation           string                      `json:"generation"`
 	SessionKey           string                      `json:"sessionKey"`
+	IssueID              string                      `json:"issueId,omitempty"`
 	StartedAt            int64                       `json:"startedAt"`
 	Cols                 uint16                      `json:"cols"`
 	Rows                 uint16                      `json:"rows"`
@@ -56,8 +57,10 @@ type RecordingMeta struct {
 	RawLen               uint64                      `json:"rawLen"`
 	AltScreen            bool                        `json:"altScreen"`
 	Gaps                 uint64                      `json:"gaps"`
+	PendingGap           bool                        `json:"pendingGap,omitempty"`
 	UnhandledSequences   RecordingUnhandledSequences `json:"unhandledSequences"`
 	HistoryLimited       bool                        `json:"historyLimited,omitempty"`
+	RecordingStopped     bool                        `json:"recordingStopped,omitempty"`
 	Closed               bool                        `json:"closed"`
 	CheckpointGeneration uint64                      `json:"checkpointGeneration,omitempty"`
 }

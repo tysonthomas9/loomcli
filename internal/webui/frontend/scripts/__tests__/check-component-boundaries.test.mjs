@@ -21,9 +21,7 @@ import {
 // ---------------------------------------------------------------------------
 
 /** Resolve the frontend root directory (scripts/../). */
-const FRONTEND_ROOT = fileURLToPath(
-  new URL("../../", import.meta.url),
-);
+const FRONTEND_ROOT = fileURLToPath(new URL("../../", import.meta.url));
 
 // ---------------------------------------------------------------------------
 // scanFile — cross-component internal imports (violations)
@@ -161,7 +159,10 @@ describe("scanFile — relative imports", () => {
   it("allows relative barrel imports to sibling components", () => {
     const source = `import { IssueCard } from "../IssueCard";`;
     const violations = scanFile(
-      join(FRONTEND_ROOT, "src/components/DraggableIssueCard/DraggableIssueCard.tsx"),
+      join(
+        FRONTEND_ROOT,
+        "src/components/DraggableIssueCard/DraggableIssueCard.tsx",
+      ),
       FRONTEND_ROOT,
       source,
     );
@@ -274,12 +275,14 @@ describe("scanFile — line numbers", () => {
 // ---------------------------------------------------------------------------
 
 describe("scanAll", () => {
+  // Scans the entire real src/ tree; under coverage with the Go checks
+  // running in parallel this can exceed the 5s default timeout.
   it("returns 0 violations with real codebase (all known are allowlisted)", () => {
     const result = scanAll(FRONTEND_ROOT);
     expect(result.violations).toHaveLength(0);
     expect(result.allowlistedCount).toBe(ALLOWLIST.length);
     expect(result.scannedCount).toBeGreaterThan(0);
-  });
+  }, 30_000);
 });
 
 // ---------------------------------------------------------------------------

@@ -319,8 +319,12 @@ func (e *recordingEmulator) handleCSI(cmd ansi.Cmd, params ansi.Params) {
 					e.WrapPending = false
 				}
 			default:
-				unhandled = true
+				// Private modes that cannot affect committed history are
+				// render/input hints (?2026 sync output, ?25 cursor
+				// visibility, mouse/focus reporting, ...); ignore them
+				// silently rather than counting them as unsupported.
 				if privateModeCanAffectCommit(mode) {
+					unhandled = true
 					e.CommitBlocked = true
 				}
 			}
@@ -331,7 +335,9 @@ func (e *recordingEmulator) handleCSI(cmd ansi.Cmd, params ansi.Params) {
 		return
 	}
 	if cmd.Prefix() != 0 || cmd.Intermediate() != 0 {
-		e.noteUnhandled(formatUnhandledCSI("CSI", cmd, params))
+		if !benignRenderHintCSI(cmd) {
+			e.noteUnhandled(formatUnhandledCSI("CSI", cmd, params))
+		}
 		return
 	}
 
@@ -466,9 +472,19 @@ func (e *recordingEmulator) resize(cols, rows uint16) {
 		e.Screen = resizeRecordingScreen(e.Screen, newRows, newCols)
 	}
 	if e.Primary != nil {
-		e.Primary.Screen = resizeRecordingScreen(e.Primary.Screen, newRows, newCols)
+		primarySlide := 0
+		if newRows < e.Rows {
+			primarySlide = maxInt(0, e.Primary.CursorY-newRows+1)
+			for i := 0; i < primarySlide; i++ {
+				if !e.CommitBlocked && e.onCommit != nil && e.err == nil {
+					e.err = e.onCommit(rowRuns(e.Primary.Screen[i]), e.LastTimestamp, e.LastFrameOff)
+				}
+			}
+		}
+		e.Primary.Screen = resizeRecordingScreen(e.Primary.Screen[primarySlide:], newRows, newCols)
 		e.Primary.CursorX = clampInt(e.Primary.CursorX, 0, newCols-1)
-		e.Primary.CursorY = clampInt(e.Primary.CursorY, 0, newRows-1)
+		e.Primary.CursorY = clampInt(e.Primary.CursorY-primarySlide, 0, newRows-1)
+		e.Primary.SavedY = clampInt(e.Primary.SavedY-primarySlide, 0, newRows-1)
 		e.Primary.ScrollTop, e.Primary.ScrollBottom = 0, newRows-1
 		e.Primary.WrapPending = false
 	}
@@ -561,10 +577,28 @@ func (e *recordingEmulator) homeCursor() {
 func privateModeCanAffectCommit(mode int) bool {
 	switch mode {
 	case 3, // DECCOLM (80/132 columns)
-		40, // allow DECCOLM
-		45, // reverse wraparound
-		69, // left/right margin mode
-		95: // suppress clear on DECCOLM
+		40,   // allow DECCOLM
+		45,   // reverse wraparound
+		69,   // left/right margin mode
+		95,   // suppress clear on DECCOLM
+		2027: // grapheme clustering changes width semantics
+		return true
+	default:
+		return false
+	}
+}
+
+// benignRenderHintCSI reports whether a prefixed/intermediate CSI is a known
+// render or input hint with no effect on committed history: DECSCUSR
+// (CSI Ps SP q), DECRQM (CSI ? Ps $ p), and the kitty keyboard protocol
+// (CSI > ... u / CSI = ... u).
+func benignRenderHintCSI(cmd ansi.Cmd) bool {
+	switch {
+	case cmd.Final() == 'q' && cmd.Intermediate() == ' ':
+		return true
+	case cmd.Final() == 'p' && cmd.Intermediate() == '$':
+		return true
+	case cmd.Final() == 'u' && (cmd.Prefix() == '>' || cmd.Prefix() == '='):
 		return true
 	default:
 		return false
@@ -815,6 +849,15 @@ func (e *recordingEmulator) screenRows() []RecordingLine {
 	if e.Alt && e.Primary != nil {
 		return rowsFromCells(e.Primary.Screen, e.Primary.CursorY, e.LastTimestamp, e.LastFrameOff)
 	}
+	return rowsFromCells(e.Screen, e.CursorY, e.LastTimestamp, e.LastFrameOff)
+}
+
+// activeScreenRows returns the rows of the buffer the terminal is currently
+// drawing into (the alt screen while a fullscreen TUI is up). screenRows, by
+// contrast, always returns the primary screen because committed history never
+// includes alt-screen content. Attach replay must repaint what is actually on
+// screen, so it uses this accessor.
+func (e *recordingEmulator) activeScreenRows() []RecordingLine {
 	return rowsFromCells(e.Screen, e.CursorY, e.LastTimestamp, e.LastFrameOff)
 }
 

@@ -2,7 +2,6 @@ package terminal
 
 import (
 	"bufio"
-	"bytes"
 	"encoding/binary"
 	"encoding/json"
 	"errors"
@@ -27,26 +26,74 @@ const (
 
 var recordingFileHeader = [recordingFileHeaderSize]byte{'L', 'O', 'O', 'M', 'T', 'R', 'M', recordingFormatVersion}
 
+// recordingStartedGrace is how long a session must live (absent any committed
+// line) before the started lifecycle hook fires and its recording counts as
+// non-trivial. Recordings that end sooner with no committed lines and no
+// issue association are discarded, so crash-looping spawns don't accrete a
+// generation directory and a session-history record per respawn. Variable so
+// tests can shorten it.
+var recordingStartedGrace = 5 * time.Second
+
 type recordingEventKind uint8
 
 const (
 	recordingOutput      recordingEventKind = 1
 	recordingResizeEvent recordingEventKind = 2
+	// recordingBarrierEvent is an in-memory sync marker for attach replay:
+	// the worker responds with the screen rendered at exactly this queue
+	// position. It is never written to the raw segment.
+	recordingBarrierEvent recordingEventKind = 3
 )
 
 type recordingEvent struct {
-	kind      recordingEventKind
-	payload   []byte
-	timestamp int64
-	cols      uint16
-	rows      uint16
+	kind            recordingEventKind
+	payload         []byte
+	timestamp       int64
+	cols            uint16
+	rows            uint16
+	sequence        uint64
+	barrierResponse chan attachReplay
+}
+
+type recorderQuery struct {
+	after    uint64
+	response chan recorderSnapshot
+}
+
+type recorderUpdate struct {
+	issueID  string
+	response chan error
+}
+
+type recorderReplayBaseline struct {
+	checkpoint      []byte
+	body            []byte
+	throughSequence uint64
+	cols            uint16
+	rows            uint16
 }
 
 type recorderSnapshot struct {
-	meta   RecordingMeta
-	screen []RecordingLine
-	dir    string
-	err    error
+	meta             RecordingMeta
+	screen           []RecordingLine
+	activeScreen     []RecordingLine
+	pendingLines     []RecordingLine
+	durableLineCount uint64
+	cursorX          int
+	cursorY          int
+	dir              string
+	err              error
+}
+
+// attachReplay is delivered to a new attachment once the recorder worker has
+// processed every chunk enqueued before the attachment registered: the
+// virtual-history coordinate plus a boundary-safe ANSI rendering of the live
+// screen. Rendering from emulator cells (instead of replaying raw ring bytes)
+// means the replay can never begin or end mid-escape-sequence, and it shows
+// the current screen even when the raw output has rotated out of the ring.
+type attachReplay struct {
+	firstScreenLine uint64
+	screen          []byte
 }
 
 type indexerCheckpoint struct {
@@ -67,7 +114,8 @@ type SessionRecorder struct {
 	dir   string
 
 	events chan recordingEvent
-	query  chan chan recorderSnapshot
+	query  chan recorderQuery
+	update chan recorderUpdate
 	stop   chan struct{}
 	done   chan struct{}
 
@@ -76,6 +124,7 @@ type SessionRecorder struct {
 	unsafeGap     atomic.Bool
 	closeOnce     sync.Once
 	enqueueMu     sync.Mutex
+	nextSequence  uint64
 	beforeEnqueue func() // deterministic Append/Close interleaving test hook
 
 	rawFile   *os.File
@@ -85,12 +134,25 @@ type SessionRecorder struct {
 	idxFile   *os.File
 	idxBuf    *bufio.Writer
 
-	rawLen       uint64
-	linesLen     uint64
-	meta         RecordingMeta
-	emulator     *recordingEmulator
-	geometrySeen bool
-	lastErr      error
+	rawLen         uint64
+	linesLen       uint64
+	durableLines   uint64
+	pendingLines   []RecordingLine
+	meta           RecordingMeta
+	startMeta      RecordingMeta
+	emulator       *recordingEmulator
+	geometrySeen   bool
+	lastErr        error
+	processedSeq   uint64
+	rebasedThrough uint64
+	progressMu     sync.Mutex
+	replayWaiters  map[uint64][]chan attachReplay
+	replayMu       sync.RWMutex
+	replaySnapshot func() recorderReplayBaseline
+
+	lifecycleMu      sync.Mutex
+	lifecycleStarted chan struct{}
+	lifecycleFired   bool
 }
 
 // newSessionRecorder opens and crash-recovers the three segment files as one
@@ -123,7 +185,8 @@ func newSessionRecorder(store *RecordingStore, key SessionKey, dir, generation s
 		key:    key,
 		dir:    dir,
 		events: make(chan recordingEvent, queueSize),
-		query:  make(chan chan recorderSnapshot),
+		query:  make(chan recorderQuery),
+		update: make(chan recorderUpdate),
 		stop:   make(chan struct{}),
 		done:   make(chan struct{}),
 		rawLen: rawLen,
@@ -137,7 +200,9 @@ func newSessionRecorder(store *RecordingStore, key SessionKey, dir, generation s
 			LineCount:     lineCount,
 			RawLen:        rawLen,
 		},
-		linesLen: linesLen,
+		linesLen:      linesLen,
+		durableLines:  lineCount,
+		replayWaiters: make(map[uint64][]chan attachReplay),
 	}
 	metaErr := readJSONFile(filepath.Join(dir, "meta.json"), &r.meta)
 	if metaErr != nil && !os.IsNotExist(metaErr) {
@@ -170,7 +235,10 @@ func newSessionRecorder(store *RecordingStore, key SessionKey, dir, generation s
 	r.meta.RawLen = rawLen
 	r.meta.Closed = false
 	r.droppedChunks.Store(r.meta.Gaps)
-	r.unsafeGap.Store(r.meta.Gaps > 0)
+	// Re-arm only a gap that was still pending (not yet re-baselined) when the
+	// previous process stopped; a historical Gaps count alone already has its
+	// marker committed in lines.jsonl.
+	r.unsafeGap.Store(r.meta.PendingGap)
 
 	if err := r.openAppendFiles(rawPath, linesPath, idxPath); err != nil {
 		r.closeFiles()
@@ -190,6 +258,7 @@ func newSessionRecorder(store *RecordingStore, key SessionKey, dir, generation s
 			return nil, r.lastErr
 		}
 	}
+	r.startMeta = r.meta
 
 	go r.run()
 	return r, nil
@@ -354,7 +423,8 @@ func (r *SessionRecorder) Append(data []byte) {
 		r.beforeEnqueue()
 	}
 	select {
-	case r.events <- recordingEvent{kind: recordingOutput, payload: chunk, timestamp: unixMilliNow()}:
+	case r.events <- recordingEvent{kind: recordingOutput, payload: chunk, timestamp: unixMilliNow(), sequence: r.nextSequence + 1}:
+		r.nextSequence++
 	default:
 		r.noteDroppedEvent()
 	}
@@ -372,7 +442,8 @@ func (r *SessionRecorder) Resize(cols, rows uint16) {
 		return
 	}
 	select {
-	case r.events <- recordingEvent{kind: recordingResizeEvent, timestamp: unixMilliNow(), cols: cols, rows: rows}:
+	case r.events <- recordingEvent{kind: recordingResizeEvent, timestamp: unixMilliNow(), cols: cols, rows: rows, sequence: r.nextSequence + 1}:
+		r.nextSequence++
 	default:
 		r.noteDroppedEvent()
 	}
@@ -385,22 +456,109 @@ func (r *SessionRecorder) snapshot() recorderSnapshot {
 	if r.closed.Load() {
 		<-r.done
 		meta, err := readRecordingMeta(r.dir)
-		return recorderSnapshot{meta: meta, dir: r.dir, err: err}
+		return recorderSnapshot{meta: meta, durableLineCount: meta.LineCount, dir: r.dir, err: err}
 	}
+	after := r.enqueuedSequence()
 	response := make(chan recorderSnapshot, 1)
 	select {
-	case r.query <- response:
+	case r.query <- recorderQuery{after: after, response: response}:
 		return <-response
 	case <-r.done:
 		meta, err := readRecordingMeta(r.dir)
-		return recorderSnapshot{meta: meta, dir: r.dir, err: err}
+		return recorderSnapshot{meta: meta, durableLineCount: meta.LineCount, dir: r.dir, err: err}
 	}
 }
 
+func (r *SessionRecorder) enqueuedSequence() uint64 {
+	if r == nil {
+		return 0
+	}
+	r.enqueueMu.Lock()
+	defer r.enqueueMu.Unlock()
+	return r.nextSequence
+}
+
 // FirstScreenLine returns the immutable line count after synchronizing the
-// recorder worker. Attach uses this once before replaying the live screen.
+// recorder worker through every event already accepted by this call.
 func (r *SessionRecorder) FirstScreenLine() uint64 {
-	return r.snapshot().meta.LineCount
+	return (<-r.attachReplayBarrier()).firstScreenLine
+}
+
+// attachReplayBarrier registers an attach point: the returned channel yields
+// the history coordinate and rendered screen reflecting exactly the output
+// enqueued before this call — never more, or the client would double-apply
+// chunks it also receives live. If the worker is behind, the waiter fires in
+// markProcessed at the exact registered sequence; if it is caught up, a
+// barrier event is enqueued while enqueueMu keeps the (empty) queue frozen,
+// so the worker renders at exactly this stream position.
+func (r *SessionRecorder) attachReplayBarrier() <-chan attachReplay {
+	response := make(chan attachReplay, 1)
+	if r == nil {
+		response <- attachReplay{}
+		return response
+	}
+	r.enqueueMu.Lock()
+	defer r.enqueueMu.Unlock()
+	if r.closed.Load() {
+		// Recorder is stopping: answer from the durable snapshot once the
+		// worker exits.
+		go func() {
+			snap := r.snapshot()
+			response <- attachReplay{
+				firstScreenLine: snap.meta.LineCount,
+				screen:          renderRecorderScreen(snap.activeScreen, snap.cursorX, snap.cursorY),
+			}
+		}()
+		return response
+	}
+	sequence := r.nextSequence
+	r.progressMu.Lock()
+	reached := r.processedSeq >= sequence
+	if !reached {
+		r.replayWaiters[sequence] = append(r.replayWaiters[sequence], response)
+	}
+	r.progressMu.Unlock()
+	if reached {
+		select {
+		case r.events <- recordingEvent{kind: recordingBarrierEvent, sequence: sequence, barrierResponse: response}:
+		default:
+			// Unreachable in practice: reached implies the queue is empty
+			// and enqueueMu blocks new events. Degrade to a snapshot
+			// round-trip rather than risking a stuck attach.
+			go func() {
+				snap := r.snapshot()
+				response <- attachReplay{
+					firstScreenLine: snap.meta.LineCount,
+					screen:          renderRecorderScreen(snap.activeScreen, snap.cursorX, snap.cursorY),
+				}
+			}()
+		}
+	}
+	return response
+}
+
+// markProcessed runs on the recorder worker, so reading meta/emulator state
+// here is safe; the screen is rendered at most once per call, and only when a
+// waiter's registered sequence has just been reached.
+func (r *SessionRecorder) markProcessed(sequence uint64) {
+	r.progressMu.Lock()
+	r.processedSeq = sequence
+	var rendered []byte
+	renderReady := false
+	for target, waiters := range r.replayWaiters {
+		if target > sequence {
+			continue
+		}
+		if !renderReady {
+			rendered = renderRecorderScreen(r.emulator.activeScreenRows(), r.emulator.CursorX, r.emulator.CursorY)
+			renderReady = true
+		}
+		for _, waiter := range waiters {
+			waiter <- attachReplay{firstScreenLine: r.meta.LineCount, screen: rendered}
+		}
+		delete(r.replayWaiters, target)
+	}
+	r.progressMu.Unlock()
 }
 
 // Close drains queued events, commits the final normal-buffer screen, and
@@ -419,6 +577,15 @@ func (r *SessionRecorder) Close() error {
 	return r.lastErr
 }
 
+func (r *SessionRecorder) setReplaySource(source func() recorderReplayBaseline) {
+	if r == nil {
+		return
+	}
+	r.replayMu.Lock()
+	r.replaySnapshot = source
+	r.replayMu.Unlock()
+}
+
 func (r *SessionRecorder) run() {
 	ticker := time.NewTicker(recordingFlushInterval)
 	defer ticker.Stop()
@@ -426,22 +593,42 @@ func (r *SessionRecorder) run() {
 	for {
 		select {
 		case event := <-r.events:
-			r.applyEvent(event)
-		case response := <-r.query:
-			r.drainPendingEvents()
+			r.handleEvent(event)
+			r.maybeStartLifecycle()
+		case query := <-r.query:
+			r.processThrough(query.after)
+			query.response <- r.currentSnapshot()
+		case update := <-r.update:
+			r.meta.IssueID = update.issueID
 			r.flush(false)
-			response <- r.currentSnapshot()
+			update.response <- r.lastErr
+			r.maybeStartLifecycle()
 		case <-ticker.C:
 			r.flush(false)
+			r.maybeStartLifecycle()
 		case <-r.stop:
 			for {
 				select {
 				case event := <-r.events:
-					r.applyEvent(event)
+					r.handleEvent(event)
 				default:
+					r.progressMu.Lock()
+					processed := r.processedSeq
+					r.progressMu.Unlock()
+					if r.trivialRecording() {
+						// Nothing worth keeping: drop the generation
+						// instead of finalizing it, and skip both
+						// lifecycle hooks (no record was ever created).
+						r.closeFiles()
+						r.store.discardGeneration(r.key, r.meta.Generation, r.dir)
+						r.store.removeActive(r.key, r)
+						return
+					}
+					r.startLifecycle()
+					r.rebaselinePendingGap(unixMilliNow(), processed)
 					r.finalize()
 					r.store.removeActive(r.key, r)
-					r.store.recordingCompleted(r.key, r.dir, r.meta)
+					r.completeLifecycle()
 					return
 				}
 			}
@@ -449,23 +636,47 @@ func (r *SessionRecorder) run() {
 	}
 }
 
-func (r *SessionRecorder) drainPendingEvents() {
+func (r *SessionRecorder) processThrough(sequence uint64) {
 	for {
-		select {
-		case event := <-r.events:
-			r.applyEvent(event)
-		default:
+		r.progressMu.Lock()
+		processed := r.processedSeq
+		r.progressMu.Unlock()
+		if processed >= sequence {
 			return
 		}
+		event := <-r.events
+		r.handleEvent(event)
 	}
+}
+
+// handleEvent dispatches one queued event on the recorder worker. Barrier
+// events respond with the screen rendered at exactly this point in the
+// stream and are never applied or persisted; everything else advances the
+// emulator and the processed-sequence watermark.
+func (r *SessionRecorder) handleEvent(event recordingEvent) {
+	if event.kind == recordingBarrierEvent {
+		event.barrierResponse <- attachReplay{
+			firstScreenLine: r.meta.LineCount,
+			screen:          renderRecorderScreen(r.emulator.activeScreenRows(), r.emulator.CursorX, r.emulator.CursorY),
+		}
+		return
+	}
+	r.applyEvent(event)
+	r.markProcessed(event.sequence)
 }
 
 func (r *SessionRecorder) applyEvent(event recordingEvent) {
 	if r.lastErr != nil {
 		return
 	}
-	if r.unsafeGap.Load() {
-		r.emulator.CommitBlocked = true
+	if r.unsafeGap.Swap(false) {
+		if err := r.rebaselineAfterGap(event.timestamp, event.sequence); err != nil {
+			r.setError(err)
+			return
+		}
+	}
+	if event.sequence != 0 && event.sequence <= r.rebasedThrough {
+		return
 	}
 	switch event.kind {
 	case recordingOutput:
@@ -537,10 +748,6 @@ func (r *SessionRecorder) applyGeometry(cols, rows uint16, timestamp int64, fram
 }
 
 func (r *SessionRecorder) writeCommittedLine(runs []RecordingRun, timestamp int64, frameOffset uint64) error {
-	if r.unsafeGap.Load() {
-		r.emulator.CommitBlocked = true
-		return nil
-	}
 	line := RecordingLine{
 		Index: r.meta.LineCount, Timestamp: timestamp,
 		Offset: OpaqueRecordingOffset(frameOffset), Cols: uint16(r.emulator.Cols), Runs: runs,
@@ -562,6 +769,7 @@ func (r *SessionRecorder) writeCommittedLine(runs []RecordingRun, timestamp int6
 	}
 	r.linesLen += uint64(len(data) + 1)
 	r.meta.LineCount++
+	r.pendingLines = append(r.pendingLines, line)
 	return nil
 }
 
@@ -570,17 +778,97 @@ func (r *SessionRecorder) noteDroppedEvent() {
 	r.unsafeGap.Store(true)
 }
 
+func (r *SessionRecorder) rebaselinePendingGap(timestamp int64, sequence uint64) {
+	if !r.unsafeGap.Swap(false) || r.lastErr != nil {
+		return
+	}
+	if err := r.rebaselineAfterGap(timestamp, sequence); err != nil {
+		r.setError(err)
+	}
+}
+
+func (r *SessionRecorder) rebaselineAfterGap(timestamp int64, sequence uint64) error {
+	r.replayMu.RLock()
+	source := r.replaySnapshot
+	r.replayMu.RUnlock()
+	baseline := recorderReplayBaseline{
+		throughSequence: sequence,
+		cols:            r.meta.Cols,
+		rows:            r.meta.Rows,
+	}
+	if source != nil {
+		baseline = source()
+	} else if sequence > 0 {
+		// A standalone recorder has no PTY replay ring. Re-seed to a clear
+		// screen, then still apply the current accepted event.
+		baseline.throughSequence = sequence - 1
+	}
+	if baseline.cols == 0 {
+		baseline.cols = normalizedRecordingCols(r.meta.Cols)
+	}
+	if baseline.rows == 0 {
+		baseline.rows = normalizedRecordingRows(r.meta.Rows)
+	}
+	if baseline.throughSequence < sequence {
+		baseline.throughSequence = sequence
+	}
+
+	// The marker lives in lines.jsonl/meta rather than a new raw frame kind.
+	// The re-seed itself is an ordinary output frame, so the v1 validity scan
+	// and replay paths need no new-kind coupling.
+	r.emulator.CommitBlocked = false
+	if err := r.writeCommittedLine(
+		[]RecordingRun{{Text: "[terminal history gap: output dropped]"}},
+		timestamp,
+		r.rawLen,
+	); err != nil {
+		return fmt.Errorf("write recording gap marker: %w", err)
+	}
+	replay := make([]byte, 0, len(baseline.checkpoint)+len(screenResetSeq)+len(baseline.body))
+	replay = append(replay, baseline.checkpoint...)
+	replay = append(replay, screenResetSeq...)
+	replay = append(replay, baseline.body...)
+	frameOffset, err := r.writeRawEvent(recordingOutput, timestamp, replay)
+	if err != nil {
+		return fmt.Errorf("write recording gap baseline: %w", err)
+	}
+	r.emulator = newRecordingEmulator(baseline.cols, baseline.rows, r.writeCommittedLine)
+	r.geometrySeen = true
+	r.meta.Cols, r.meta.Rows = baseline.cols, baseline.rows
+	if err := r.emulator.feed(replay, timestamp, frameOffset); err != nil {
+		return fmt.Errorf("apply recording gap baseline: %w", err)
+	}
+	r.rebasedThrough = baseline.throughSequence
+	r.meta.HistoryLimited = true
+	return nil
+}
+
+func (r *SessionRecorder) historyLimited() bool {
+	return r.meta.HistoryLimited || r.emulator.CommitBlocked || r.droppedChunks.Load() > 0 || r.lastErr != nil
+}
+
 func (r *SessionRecorder) currentSnapshot() recorderSnapshot {
 	meta := r.meta
 	meta.AltScreen = meta.AltScreen || r.emulator.EverAlt
 	meta.Gaps = r.droppedChunks.Load()
+	meta.PendingGap = r.unsafeGap.Load()
 	meta.UnhandledSequences = r.emulator.unhandledSequenceSummary()
-	meta.HistoryLimited = r.emulator.CommitBlocked
+	meta.HistoryLimited = r.historyLimited()
+	meta.RecordingStopped = r.lastErr != nil
 	screen := r.emulator.screenRows()
 	for i := range screen {
 		screen[i].Index = meta.LineCount + uint64(i)
 	}
-	return recorderSnapshot{meta: meta, screen: screen, dir: r.dir, err: r.lastErr}
+	pending := append([]RecordingLine(nil), r.pendingLines...)
+	return recorderSnapshot{
+		meta: meta, screen: screen,
+		activeScreen:     r.emulator.activeScreenRows(),
+		pendingLines:     pending,
+		durableLineCount: r.durableLines,
+		cursorX:          r.emulator.CursorX,
+		cursorY:          r.emulator.CursorY,
+		dir:              r.dir, err: r.lastErr,
+	}
 }
 
 func (r *SessionRecorder) finalize() {
@@ -606,14 +894,22 @@ func (r *SessionRecorder) flush(syncFiles bool) {
 	r.meta.RawLen = r.rawLen
 	r.meta.AltScreen = r.meta.AltScreen || r.emulator.EverAlt
 	r.meta.Gaps = r.droppedChunks.Load()
+	r.meta.PendingGap = r.unsafeGap.Load()
 	r.meta.UnhandledSequences = r.emulator.unhandledSequenceSummary()
-	r.meta.HistoryLimited = r.emulator.CommitBlocked
+	r.meta.HistoryLimited = r.historyLimited()
+	r.meta.RecordingStopped = r.lastErr != nil
+	flushed := true
 	for _, writer := range []*bufio.Writer{r.rawBuf, r.linesBuf, r.idxBuf} {
 		if writer != nil {
 			if err := writer.Flush(); err != nil {
+				flushed = false
 				r.setError(fmt.Errorf("flush recording: %w", err))
 			}
 		}
+	}
+	if flushed {
+		r.durableLines = r.meta.LineCount
+		r.pendingLines = nil
 	}
 	if syncFiles {
 		for _, file := range []*os.File{r.rawFile, r.linesFile, r.idxFile} {
@@ -653,6 +949,8 @@ func (r *SessionRecorder) flush(syncFiles bool) {
 func (r *SessionRecorder) setError(err error) {
 	if err != nil && r.lastErr == nil {
 		r.lastErr = err
+		r.meta.HistoryLimited = true
+		r.meta.RecordingStopped = true
 		slog.Error("terminal recording failed", "session", r.key.String(), "err", err)
 	}
 }
@@ -663,184 +961,4 @@ func (r *SessionRecorder) closeFiles() {
 			_ = file.Close()
 		}
 	}
-}
-
-// recoverRawSegment walks the raw segment frame by frame looking for the last
-// intact one. Every branch is a distinct way a crash can tear a frame.
-//
-//nolint:gocognit,cyclop,funlen // one branch per way a frame can be torn
-func recoverRawSegment(path string) (uint64, bool, error) {
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
-	if err != nil {
-		return 0, false, fmt.Errorf("open raw segment for recovery: %w", err)
-	}
-	defer f.Close()
-	info, err := f.Stat()
-	if err != nil {
-		return 0, false, fmt.Errorf("stat raw segment for recovery: %w", err)
-	}
-	if info.Size() == 0 {
-		if _, err := f.Write(recordingFileHeader[:]); err != nil {
-			return 0, false, fmt.Errorf("write raw format header: %w", err)
-		}
-		if err := f.Sync(); err != nil {
-			return 0, false, fmt.Errorf("sync raw format header: %w", err)
-		}
-		return recordingFileHeaderSize, true, nil
-	}
-	var fileHeader [recordingFileHeaderSize]byte
-	if _, err := io.ReadFull(f, fileHeader[:]); err != nil {
-		return 0, false, fmt.Errorf("read raw format header: %w", err)
-	}
-	if !bytes.Equal(fileHeader[:], recordingFileHeader[:]) {
-		return 0, false, fmt.Errorf("unsupported terminal recording raw format header %x", fileHeader)
-	}
-	offset := uint64(recordingFileHeaderSize)
-	frameCount := 0
-	header := make([]byte, recordingFrameHeaderSize)
-	for {
-		n, readErr := io.ReadFull(f, header)
-		if errors.Is(readErr, io.EOF) && n == 0 {
-			break
-		}
-		if readErr != nil {
-			if err := f.Truncate(int64(offset)); err != nil {
-				return 0, false, fmt.Errorf("truncate torn raw header: %w", err)
-			}
-			break
-		}
-		kind := recordingEventKind(header[0])
-		length := binary.BigEndian.Uint32(header[1:5])
-		valid := (kind == recordingOutput && length <= maxRecordingFrameSize) ||
-			(kind == recordingResizeEvent && length == 4)
-		if !valid || (frameCount == 0 && kind != recordingResizeEvent) {
-			if err := f.Truncate(int64(offset)); err != nil {
-				return 0, false, fmt.Errorf("truncate invalid raw event: %w", err)
-			}
-			break
-		}
-		if _, err := io.CopyN(io.Discard, f, int64(length)); err != nil {
-			if truncateErr := f.Truncate(int64(offset)); truncateErr != nil {
-				return 0, false, fmt.Errorf("truncate torn raw payload: %w", truncateErr)
-			}
-			break
-		}
-		offset += recordingFrameHeaderSize + uint64(length)
-		frameCount++
-	}
-	return offset, frameCount == 0, nil
-}
-
-// recoverLineIndex truncates the lines file and its offset index back to a
-// consistent pair after a crash, which reads as a single sequence.
-//
-//nolint:funlen // one recovery sequence over a file pair
-func recoverLineIndex(linesPath, idxPath string) (uint64, uint64, error) {
-	lines, err := os.OpenFile(linesPath, os.O_CREATE|os.O_RDWR, 0o600)
-	if err != nil {
-		return 0, 0, fmt.Errorf("open line log for recovery: %w", err)
-	}
-	defer lines.Close()
-	reader := bufio.NewReader(lines)
-	var offsets []uint64
-	var offset uint64
-	for {
-		start := offset
-		data, readErr := reader.ReadBytes('\n')
-		if len(data) == 0 && errors.Is(readErr, io.EOF) {
-			break
-		}
-		if readErr != nil || len(data) == 0 || data[len(data)-1] != '\n' {
-			if err := lines.Truncate(int64(start)); err != nil {
-				return 0, 0, fmt.Errorf("truncate torn line record: %w", err)
-			}
-			offset = start
-			break
-		}
-		var line RecordingLine
-		if err := json.Unmarshal(bytes.TrimSuffix(data, []byte{'\n'}), &line); err != nil || line.Index != uint64(len(offsets)) {
-			if truncateErr := lines.Truncate(int64(start)); truncateErr != nil {
-				return 0, 0, fmt.Errorf("truncate invalid line record: %w", truncateErr)
-			}
-			offset = start
-			break
-		}
-		offsets = append(offsets, start)
-		offset += uint64(len(data))
-	}
-
-	idx, err := os.OpenFile(idxPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
-	if err != nil {
-		return 0, 0, fmt.Errorf("rebuild line index: %w", err)
-	}
-	writer := bufio.NewWriter(idx)
-	var raw [8]byte
-	for _, lineOffset := range offsets {
-		binary.BigEndian.PutUint64(raw[:], lineOffset)
-		if _, err := writer.Write(raw[:]); err != nil {
-			_ = idx.Close()
-			return 0, 0, fmt.Errorf("write rebuilt line index: %w", err)
-		}
-	}
-	if err := writer.Flush(); err != nil {
-		_ = idx.Close()
-		return 0, 0, fmt.Errorf("flush rebuilt line index: %w", err)
-	}
-	if err := idx.Close(); err != nil {
-		return 0, 0, fmt.Errorf("close rebuilt line index: %w", err)
-	}
-	return uint64(len(offsets)), offset, nil
-}
-
-func readJSONFile(path string, destination any) error {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return err
-	}
-	return json.Unmarshal(data, destination)
-}
-
-func writeJSONAtomic(path string, value any) error {
-	data, err := json.Marshal(value)
-	if err != nil {
-		return err
-	}
-	tmp := path + ".tmp"
-	file, err := os.OpenFile(tmp, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
-	if err != nil {
-		return err
-	}
-	if _, err := file.Write(data); err != nil {
-		_ = file.Close()
-		_ = os.Remove(tmp)
-		return err
-	}
-	if err := file.Sync(); err != nil {
-		_ = file.Close()
-		_ = os.Remove(tmp)
-		return err
-	}
-	if err := file.Close(); err != nil {
-		_ = os.Remove(tmp)
-		return err
-	}
-	if err := os.Rename(tmp, path); err != nil {
-		_ = os.Remove(tmp)
-		return err
-	}
-	dir, err := os.Open(filepath.Dir(path))
-	if err != nil {
-		return err
-	}
-	defer dir.Close()
-	return dir.Sync()
-}
-
-func readRecordingMeta(dir string) (RecordingMeta, error) {
-	var meta RecordingMeta
-	err := readJSONFile(filepath.Join(dir, "meta.json"), &meta)
-	if err != nil {
-		return RecordingMeta{}, fmt.Errorf("read recording metadata: %w", err)
-	}
-	return meta, nil
 }

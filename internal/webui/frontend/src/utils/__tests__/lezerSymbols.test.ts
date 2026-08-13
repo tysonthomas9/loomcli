@@ -1,4 +1,5 @@
-import { EditorState } from "@codemirror/state";
+import { EditorState, type Extension } from "@codemirror/state";
+import { ensureSyntaxTree } from "@codemirror/language";
 import { go } from "@codemirror/lang-go";
 import { javascript } from "@codemirror/lang-javascript";
 import { python } from "@codemirror/lang-python";
@@ -9,6 +10,17 @@ import {
   symbolTrailAtPosition,
   supportsLezerSymbols,
 } from "../lezerSymbols";
+
+/**
+ * Build a state whose syntax tree is fully parsed. CodeMirror parses lazily
+ * with a time budget, so on a loaded machine a bare EditorState.create can
+ * leave a partial tree and extraction would silently miss symbols.
+ */
+function parsedState(doc: string, extension: Extension): EditorState {
+  const state = EditorState.create({ doc, extensions: [extension] });
+  ensureSyntaxTree(state, state.doc.length, 30_000);
+  return state;
+}
 
 describe("lezer symbol extraction", () => {
   it("extracts go types, functions, methods, and cursor trail", () => {
@@ -22,7 +34,7 @@ describe("lezer symbol extraction", () => {
       "func main() {}",
       "",
     ].join("\n");
-    const state = EditorState.create({ doc, extensions: [go()] });
+    const state = parsedState(doc, go());
 
     const symbols = extractSymbolsFromState(state, "go");
 
@@ -46,10 +58,7 @@ describe("lezer symbol extraction", () => {
       "type Alias = string",
       "",
     ].join("\n");
-    const state = EditorState.create({
-      doc,
-      extensions: [javascript({ typescript: true })],
-    });
+    const state = parsedState(doc, javascript({ typescript: true }));
 
     const symbols = extractSymbolsFromState(state, "typescript");
 
@@ -75,7 +84,7 @@ describe("lezer symbol extraction", () => {
       "    return x",
       "",
     ].join("\n");
-    const state = EditorState.create({ doc, extensions: [python()] });
+    const state = parsedState(doc, python());
 
     const symbols = extractSymbolsFromState(state, "python");
 

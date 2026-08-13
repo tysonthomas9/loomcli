@@ -4,10 +4,15 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"encoding/json"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -115,6 +120,11 @@ func TestRecordingStoreRangeReadResizeAndTornTailRecovery(t *testing.T) {
 }
 
 func TestRecordingRawFormatHeaderAndInitialGeometry(t *testing.T) {
+	// Zero grace keeps this short-lived recording non-trivial so Close
+	// finalizes the segment files instead of discarding the generation.
+	oldGrace := recordingStartedGrace
+	recordingStartedGrace = 0
+	defer func() { recordingStartedGrace = oldGrace }()
 	root := t.TempDir()
 	key := SessionKey{Workspace: "ws-test", Name: "raw-format"}
 	store := NewRecordingStore(root, nil)
@@ -143,7 +153,7 @@ func TestRecordingRawFormatHeaderAndInitialGeometry(t *testing.T) {
 	}
 }
 
-func TestRecordingRawFormatRefusesUnversionedLayout(t *testing.T) {
+func TestRecordingRawFormatQuarantinesUnversionedLayout(t *testing.T) {
 	root := t.TempDir()
 	key := SessionKey{Workspace: "ws-test", Name: "old-raw"}
 	store := NewRecordingStore(root, nil)
@@ -162,8 +172,22 @@ func TestRecordingRawFormatRefusesUnversionedLayout(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("write recording metadata: %v", err)
 	}
-	if _, err := store.StartRecording(key, 80, 24); err == nil {
-		t.Fatal("StartRecording accepted an unversioned raw layout")
+	recorder, err := store.StartRecording(key, 80, 24)
+	if err != nil {
+		t.Fatalf("StartRecording after invalid raw layout: %v", err)
+	}
+	if recorder.meta.Generation == generation {
+		t.Fatalf("fresh recorder reused invalid generation %q", generation)
+	}
+	quarantined, err := filepath.Glob(dir + ".quarantine-*")
+	if err != nil {
+		t.Fatalf("find quarantined generation: %v", err)
+	}
+	if len(quarantined) != 1 {
+		t.Fatalf("quarantined generations = %#v, want one", quarantined)
+	}
+	if err := recorder.Close(); err != nil {
+		t.Fatalf("Close fresh recorder: %v", err)
 	}
 }
 
@@ -176,6 +200,326 @@ func TestSessionRecorderAppendDropsInsteadOfBlocking(t *testing.T) {
 	}
 	if got := len(recorder.events); got != 1 {
 		t.Fatalf("queued chunks = %d, want 1", got)
+	}
+}
+
+func TestRecordingErrorIsSurfacedAsStoppedHistory(t *testing.T) {
+	recorder := &SessionRecorder{
+		meta:     RecordingMeta{Generation: strings.Repeat("a", recordingGenerationBytes*2)},
+		emulator: newRecordingEmulator(80, 24, nil),
+		lastErr:  errors.New("recording writer stopped"),
+	}
+	snapshot := recorder.currentSnapshot()
+	data, err := json.Marshal(snapshot.meta)
+	if err != nil {
+		t.Fatalf("marshal metadata: %v", err)
+	}
+	var fields map[string]any
+	if err := json.Unmarshal(data, &fields); err != nil {
+		t.Fatalf("decode metadata: %v", err)
+	}
+	if snapshot.meta.HistoryLimited != true || fields["recordingStopped"] != true {
+		t.Fatalf("recording error metadata = %s", data)
+	}
+}
+
+func TestStartRecordingDoesNotWaitForLifecycleHook(t *testing.T) {
+	// Short grace so the deferred started hook fires promptly on the worker
+	// ticker rather than after the 5s production default.
+	oldGrace := recordingStartedGrace
+	recordingStartedGrace = 50 * time.Millisecond
+	defer func() { recordingStartedGrace = oldGrace }()
+	store := NewRecordingStore(t.TempDir(), nil)
+	key := SessionKey{Workspace: "ws-test", Name: "async-start-hook"}
+	hookStarted := make(chan struct{})
+	releaseHook := make(chan struct{})
+	store.SetLifecycleHooks(func(SessionKey, string, RecordingMeta) {
+		close(hookStarted)
+		<-releaseHook
+	}, nil)
+
+	type startResult struct {
+		recorder *SessionRecorder
+		err      error
+	}
+	result := make(chan startResult, 1)
+	go func() {
+		recorder, err := store.StartRecording(key, 80, 24)
+		result <- startResult{recorder: recorder, err: err}
+	}()
+	<-hookStarted
+
+	var started startResult
+	returnedBeforeRelease := false
+	select {
+	case started = <-result:
+		returnedBeforeRelease = true
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(releaseHook)
+	if !returnedBeforeRelease {
+		started = <-result
+		t.Error("StartRecording blocked on the lifecycle hook")
+	}
+	if started.err != nil {
+		t.Fatalf("StartRecording: %v", started.err)
+	}
+	if err := started.recorder.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+}
+
+func TestRecorderCloseDoesNotWaitForCompletedLifecycleHook(t *testing.T) {
+	// Zero grace keeps the instantly-closed recording non-trivial so the
+	// completed lifecycle hook actually fires; a trivial recording is
+	// discarded without one.
+	oldGrace := recordingStartedGrace
+	recordingStartedGrace = 0
+	defer func() { recordingStartedGrace = oldGrace }()
+	store := NewRecordingStore(t.TempDir(), nil)
+	key := SessionKey{Workspace: "ws-test", Name: "async-complete-hook"}
+	hookStarted := make(chan struct{})
+	releaseHook := make(chan struct{})
+	store.SetLifecycleHooks(nil, func(SessionKey, string, RecordingMeta) {
+		close(hookStarted)
+		<-releaseHook
+	})
+	recorder, err := store.StartRecording(key, 80, 24)
+	if err != nil {
+		t.Fatalf("StartRecording: %v", err)
+	}
+
+	closed := make(chan error, 1)
+	go func() { closed <- recorder.Close() }()
+	<-hookStarted
+	returnedBeforeRelease := false
+	var closeErr error
+	select {
+	case closeErr = <-closed:
+		returnedBeforeRelease = true
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(releaseHook)
+	if !returnedBeforeRelease {
+		closeErr = <-closed
+		t.Error("Close blocked on the completed lifecycle hook")
+	}
+	if closeErr != nil {
+		t.Fatalf("Close: %v", closeErr)
+	}
+}
+
+func TestRecorderSnapshotDoesNotForceDurabilityFlush(t *testing.T) {
+	store := NewRecordingStore(t.TempDir(), nil)
+	key := SessionKey{Workspace: "ws-test", Name: "query-without-flush"}
+	recorder, err := store.StartRecording(key, 80, 24)
+	if err != nil {
+		t.Fatalf("StartRecording: %v", err)
+	}
+	metaPath := filepath.Join(recorder.dir, "meta.json")
+	if _, err := os.Stat(metaPath); !os.IsNotExist(err) {
+		t.Fatalf("meta.json exists before query: %v", err)
+	}
+
+	if snapshot := recorder.snapshot(); snapshot.err != nil {
+		t.Fatalf("snapshot: %v", snapshot.err)
+	}
+	if _, err := os.Stat(metaPath); !os.IsNotExist(err) {
+		t.Errorf("snapshot forced a durability flush; meta.json stat error = %v", err)
+	}
+	if err := recorder.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+}
+
+func TestStartRecordingNeverReturnsClosingRecorder(t *testing.T) {
+	store := NewRecordingStore(t.TempDir(), nil)
+	key := SessionKey{Workspace: "ws-test", Name: "closing-recorder"}
+	first, err := store.StartRecording(key, 80, 24)
+	if err != nil {
+		t.Fatalf("first StartRecording: %v", err)
+	}
+
+	blockedResponse := make(chan recorderSnapshot)
+	queryAccepted := make(chan struct{})
+	go func() {
+		first.query <- recorderQuery{response: blockedResponse}
+		close(queryAccepted)
+	}()
+	<-queryAccepted
+	closeResult := make(chan error, 1)
+	go func() { closeResult <- first.Close() }()
+	deadline := time.Now().Add(time.Second)
+	for !first.closed.Load() {
+		if time.Now().After(deadline) {
+			t.Fatal("first recorder did not begin closing")
+		}
+		time.Sleep(time.Millisecond)
+	}
+
+	type startResult struct {
+		recorder *SessionRecorder
+		err      error
+	}
+	started := make(chan startResult, 1)
+	go func() {
+		recorder, startErr := store.StartRecording(key, 80, 24)
+		started <- startResult{recorder: recorder, err: startErr}
+	}()
+	var early *startResult
+	select {
+	case result := <-started:
+		early = &result
+	case <-time.After(50 * time.Millisecond):
+	}
+	<-blockedResponse
+	if err := <-closeResult; err != nil {
+		t.Fatalf("close first recorder: %v", err)
+	}
+	var next startResult
+	if early != nil {
+		next = *early
+	} else {
+		next = <-started
+	}
+	if next.err != nil {
+		t.Fatalf("second StartRecording: %v", next.err)
+	}
+	if next.recorder == first || next.recorder.closed.Load() {
+		t.Errorf("StartRecording returned closing recorder %p", next.recorder)
+	}
+	if next.recorder != first {
+		if err := next.recorder.Close(); err != nil {
+			t.Fatalf("close second recorder: %v", err)
+		}
+	}
+}
+
+func TestOldGenerationRecoveryNeverEvictsLiveRecorder(t *testing.T) {
+	// Zero grace: the old-generation fixture closes immediately and must
+	// survive as a readable generation rather than being discarded as
+	// trivial.
+	oldGrace := recordingStartedGrace
+	recordingStartedGrace = 0
+	defer func() { recordingStartedGrace = oldGrace }()
+	store := NewRecordingStore(t.TempDir(), nil)
+	key := SessionKey{Workspace: "ws-test", Name: "old-generation-read"}
+	live, err := store.StartRecording(key, 80, 24)
+	if err != nil {
+		t.Fatalf("start live recording: %v", err)
+	}
+
+	oldGeneration, oldDir, err := store.allocateGenerationDir(key)
+	if err != nil {
+		t.Fatalf("allocate old generation: %v", err)
+	}
+	old, err := newSessionRecorder(store, key, oldDir, oldGeneration, unixMilliNow()-1, 80, 24, defaultRecordingQueue)
+	if err != nil {
+		t.Fatalf("create old recording: %v", err)
+	}
+	old.Append([]byte("old generation\r\n"))
+	if err := old.Close(); err != nil {
+		t.Fatalf("close old recording fixture: %v", err)
+	}
+	markRecordingOpenForRecoveryTest(t, oldDir)
+
+	if _, err := store.recordingSnapshot(t.Context(), key, oldGeneration); err != nil {
+		t.Fatalf("recover old generation: %v", err)
+	}
+	store.mu.Lock()
+	active := store.active[key]
+	store.mu.Unlock()
+	if active != live {
+		t.Errorf("old-generation recovery replaced live recorder: got %p want %p", active, live)
+	}
+	if err := live.Close(); err != nil {
+		t.Fatalf("close live recorder: %v", err)
+	}
+}
+
+func TestStartRecordingRecoversReferencedGenerationWithoutMeta(t *testing.T) {
+	root := t.TempDir()
+	key := SessionKey{Workspace: "ws-test", Name: "missing-meta"}
+	store := NewRecordingStore(root, nil)
+	first, err := store.StartRecording(key, 8, 2)
+	if err != nil {
+		t.Fatalf("start first recording: %v", err)
+	}
+	first.Append([]byte("recover me\r\n"))
+	if err := first.Close(); err != nil {
+		t.Fatalf("close first recording: %v", err)
+	}
+	firstDir := first.dir
+	if err := os.Remove(filepath.Join(firstDir, "meta.json")); err != nil {
+		t.Fatalf("remove meta.json: %v", err)
+	}
+
+	restarted := NewRecordingStore(root, nil)
+	second, err := restarted.StartRecording(key, 8, 2)
+	if err != nil {
+		t.Fatalf("StartRecording after missing meta.json: %v", err)
+	}
+	if second.meta.Generation == first.meta.Generation {
+		t.Fatalf("new PTY reused recovered generation %q", second.meta.Generation)
+	}
+	recovered, err := readRecordingMeta(firstDir)
+	if err != nil {
+		t.Fatalf("read rebuilt meta.json: %v", err)
+	}
+	if !recovered.Closed || recovered.LineCount == 0 {
+		t.Fatalf("recovered metadata = %#v, want closed recording with rows", recovered)
+	}
+	if err := second.Close(); err != nil {
+		t.Fatalf("close second recording: %v", err)
+	}
+}
+
+func TestConcurrentHistoryRecoveryUsesOneDetachedGenerationLease(t *testing.T) {
+	root := t.TempDir()
+	key := SessionKey{Workspace: "ws-test", Name: "concurrent-recovery"}
+	seed := NewRecordingStore(root, nil)
+	recorder, err := seed.StartRecording(key, 8, 2)
+	if err != nil {
+		t.Fatalf("seed StartRecording: %v", err)
+	}
+	recorder.Append([]byte("one\r\ntwo\r\nthree"))
+	if err := recorder.Close(); err != nil {
+		t.Fatalf("seed Close: %v", err)
+	}
+	generation := recorder.startMeta.Generation
+	dir := recorder.dir
+	markRecordingOpenForRecoveryTest(t, dir)
+
+	restarted := NewRecordingStore(root, nil)
+	const readers = 8
+	start := make(chan struct{})
+	errs := make(chan error, readers)
+	var wg sync.WaitGroup
+	for range readers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			history, historyErr := restarted.HistoryGeneration(t.Context(), key, generation, 0, 100)
+			if historyErr == nil && history.TotalLines != 3 {
+				historyErr = fmt.Errorf("total lines = %d, want 3", history.TotalLines)
+			}
+			errs <- historyErr
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(errs)
+	for historyErr := range errs {
+		if historyErr != nil {
+			t.Fatalf("concurrent recovery: %v", historyErr)
+		}
+	}
+	restarted.mu.Lock()
+	active := restarted.active[key]
+	restarted.mu.Unlock()
+	if active != nil {
+		t.Fatalf("detached recovery leaked into active map: %p", active)
 	}
 }
 
@@ -231,6 +575,7 @@ func TestRecordingRecoveryRejectsStaleCheckpointAcrossGeometryChanges(t *testing
 		t.Fatalf("committed lines before resize = %d, want 1", got)
 	}
 	dir := store.mustSessionDir(key)
+	waitForRecordingFile(t, filepath.Join(dir, "indexer.json"))
 	staleCheckpoint, err := os.ReadFile(filepath.Join(dir, "indexer.json"))
 	if err != nil {
 		t.Fatalf("read stale checkpoint: %v", err)
@@ -239,6 +584,8 @@ func TestRecordingRecoveryRejectsStaleCheckpointAcrossGeometryChanges(t *testing
 	recorder.Resize(12, 4)
 	recorder.Append([]byte("\r\nE\x1b[H" + "X"))
 	_ = recorder.FirstScreenLine()
+	waitForRecordingFile(t, filepath.Join(dir, "meta.json"))
+	time.Sleep(recordingFlushInterval + 50*time.Millisecond)
 
 	crashRoot := t.TempDir()
 	crashStore := NewRecordingStore(crashRoot, nil)
@@ -280,6 +627,11 @@ func TestRecordingRecoveryRejectsStaleCheckpointAcrossGeometryChanges(t *testing
 }
 
 func TestRecordingRecoveryRejectsCheckpointWithWrongRows(t *testing.T) {
+	// Zero grace so the source recording's Close finalizes its files (the
+	// fixture copies them) instead of discarding the generation as trivial.
+	oldGrace := recordingStartedGrace
+	recordingStartedGrace = 0
+	defer func() { recordingStartedGrace = oldGrace }()
 	root := t.TempDir()
 	key := SessionKey{Workspace: "ws-test", Name: "wrong-checkpoint-rows"}
 	store := NewRecordingStore(root, nil)
@@ -290,6 +642,7 @@ func TestRecordingRecoveryRejectsCheckpointWithWrongRows(t *testing.T) {
 	recorder.Append([]byte("A\r\nB\r\nC"))
 	_ = recorder.FirstScreenLine()
 	dir := store.mustSessionDir(key)
+	waitForRecordingFile(t, filepath.Join(dir, "meta.json"))
 
 	crashRoot := t.TempDir()
 	crashStore := NewRecordingStore(crashRoot, nil)
@@ -336,26 +689,27 @@ func TestRecordingRecoveryRejectsCheckpointWithWrongRows(t *testing.T) {
 }
 
 func TestRecordingStoreLifecycleHooks(t *testing.T) {
+	// Zero grace so this short-lived recording is non-trivial and both
+	// lifecycle hooks fire.
+	oldGrace := recordingStartedGrace
+	recordingStartedGrace = 0
+	defer func() { recordingStartedGrace = oldGrace }()
 	root := t.TempDir()
 	key := SessionKey{Workspace: "ws-test", Name: "session-hooks"}
 	store := NewRecordingStore(root, nil)
-	var started, completed int
-	var startedPath, completedPath, generation string
+	type lifecycleCall struct {
+		key  SessionKey
+		dir  string
+		meta RecordingMeta
+	}
+	started := make(chan lifecycleCall, 1)
+	completed := make(chan lifecycleCall, 1)
 	store.SetLifecycleHooks(
 		func(gotKey SessionKey, dir string, meta RecordingMeta) {
-			started++
-			startedPath = dir
-			generation = meta.Generation
-			if gotKey != key || dir == "" || meta.StartedAt == 0 {
-				t.Fatalf("start hook = key=%#v dir=%q meta=%#v", gotKey, dir, meta)
-			}
+			started <- lifecycleCall{key: gotKey, dir: dir, meta: meta}
 		},
 		func(gotKey SessionKey, dir string, meta RecordingMeta) {
-			completed++
-			completedPath = dir
-			if gotKey != key || !meta.Closed {
-				t.Fatalf("complete hook = key=%#v meta=%#v", gotKey, meta)
-			}
+			completed <- lifecycleCall{key: gotKey, dir: dir, meta: meta}
 		},
 	)
 	recorder, err := store.StartRecording(key, 80, 24)
@@ -366,26 +720,37 @@ func TestRecordingStoreLifecycleHooks(t *testing.T) {
 	if err := recorder.Close(); err != nil {
 		t.Fatalf("Close: %v", err)
 	}
-	if started != 1 || completed != 1 {
-		t.Fatalf("hook calls = started %d completed %d, want 1 each", started, completed)
+	startCall := <-started
+	completeCall := <-completed
+	if startCall.key != key || startCall.dir == "" || startCall.meta.StartedAt == 0 {
+		t.Fatalf("start hook = %#v", startCall)
 	}
+	if completeCall.key != key || !completeCall.meta.Closed {
+		t.Fatalf("complete hook = %#v", completeCall)
+	}
+	generation := startCall.meta.Generation
 	if !validRecordingGeneration(generation) {
 		t.Fatalf("started generation = %q, want a 32-character lowercase hex identity", generation)
 	}
 	wantPath := filepath.Join(root, key.Workspace, key.Name, "generations", generation)
-	if startedPath != wantPath || completedPath != wantPath {
-		t.Fatalf("lifecycle paths = started %q completed %q, want %q", startedPath, completedPath, wantPath)
+	if startCall.dir != wantPath || completeCall.dir != wantPath {
+		t.Fatalf("lifecycle paths = started %q completed %q, want %q", startCall.dir, completeCall.dir, wantPath)
 	}
 }
 
 func TestRecordingStoreReusedSessionStartsDistinctReadableGeneration(t *testing.T) {
+	// Zero grace so both short-lived generations persist and fire their
+	// started hooks instead of being discarded as trivial.
+	oldGrace := recordingStartedGrace
+	recordingStartedGrace = 0
+	defer func() { recordingStartedGrace = oldGrace }()
 	root := t.TempDir()
 	key := SessionKey{Workspace: "ws-test", Name: "reused-session"}
 	store := NewRecordingStore(root, nil)
-	var recordingDirs []string
+	recordingDirs := make(chan string, 2)
 	store.SetLifecycleHooks(
 		func(_ SessionKey, dir string, _ RecordingMeta) {
-			recordingDirs = append(recordingDirs, dir)
+			recordingDirs <- dir
 		},
 		nil,
 	)
@@ -398,10 +763,7 @@ func TestRecordingStoreReusedSessionStartsDistinctReadableGeneration(t *testing.
 	if err := first.Close(); err != nil {
 		t.Fatalf("close first recording: %v", err)
 	}
-	if len(recordingDirs) != 1 {
-		t.Fatalf("recording start paths after first PTY = %#v, want one", recordingDirs)
-	}
-	firstDir := recordingDirs[0]
+	firstDir := <-recordingDirs
 	firstMeta, err := readRecordingMeta(firstDir)
 	if err != nil {
 		t.Fatalf("read first recording metadata: %v", err)
@@ -419,10 +781,7 @@ func TestRecordingStoreReusedSessionStartsDistinctReadableGeneration(t *testing.
 	if err := second.Close(); err != nil {
 		t.Fatalf("close second recording: %v", err)
 	}
-	if len(recordingDirs) != 2 {
-		t.Fatalf("recording start paths after second PTY = %#v, want two", recordingDirs)
-	}
-	secondDir := recordingDirs[1]
+	secondDir := <-recordingDirs
 	if secondDir == firstDir {
 		t.Fatalf("second PTY reused first recording directory %q", firstDir)
 	}
@@ -505,6 +864,18 @@ func fileSize(t *testing.T, path string) int64 {
 	return info.Size()
 }
 
+func waitForRecordingFile(t *testing.T, path string) {
+	t.Helper()
+	deadline := time.Now().Add(2 * recordingFlushInterval)
+	for time.Now().Before(deadline) {
+		if _, err := os.Stat(path); err == nil {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for periodic recording flush: %s", path)
+}
+
 // TestValidRecordingComponentRejectsOnlyPathSeparators pins the character set
 // that gates every recording path.
 //
@@ -544,5 +915,141 @@ func TestValidRecordingComponentRejectsOnlyPathSeparators(t *testing.T) {
 		if validRecordingComponent(name) {
 			t.Errorf("validRecordingComponent(%q) = true, want false", name)
 		}
+	}
+}
+
+func TestInstantExitRecordingIsDiscardedWithoutHistoryRecord(t *testing.T) {
+	root := t.TempDir()
+	s := NewRecordingStore(root, nil)
+	var started, completed atomic.Int32
+	s.SetLifecycleHooks(
+		func(SessionKey, string, RecordingMeta) { started.Add(1) },
+		func(SessionKey, string, RecordingMeta) { completed.Add(1) },
+	)
+	key := SessionKey{Workspace: "ws-test", Name: "stillborn"}
+
+	recorder, err := s.StartRecording(key, 80, 24)
+	if err != nil {
+		t.Fatalf("StartRecording: %v", err)
+	}
+	if err := recorder.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	time.Sleep(100 * time.Millisecond) // let any (wrongly) fired hooks land
+	if got := started.Load(); got != 0 {
+		t.Fatalf("onStarted fired %d times for a stillborn session, want 0", got)
+	}
+	if got := completed.Load(); got != 0 {
+		t.Fatalf("onCompleted fired %d times for a stillborn session, want 0", got)
+	}
+	sessionRoot := filepath.Join(root, "ws-test", "stillborn")
+	if _, err := os.Stat(filepath.Join(sessionRoot, "current.json")); !os.IsNotExist(err) {
+		t.Fatalf("current.json still points at a discarded generation (stat err=%v)", err)
+	}
+	if entries, err := os.ReadDir(filepath.Join(sessionRoot, "generations")); err == nil {
+		for _, entry := range entries {
+			if entry.IsDir() {
+				t.Fatalf("stillborn generation dir %q survived discard", entry.Name())
+			}
+		}
+	} else if !os.IsNotExist(err) {
+		t.Fatalf("read generations dir: %v", err)
+	}
+
+	// The key must remain usable after a discard.
+	again, err := s.StartRecording(key, 80, 24)
+	if err != nil {
+		t.Fatalf("StartRecording after discard: %v", err)
+	}
+	again.Append([]byte("fresh\n"))
+	_ = again.Close()
+}
+
+func TestRecordingLifecycleDefersUntilFirstCommittedLine(t *testing.T) {
+	root := t.TempDir()
+	s := NewRecordingStore(root, nil)
+	var started atomic.Int32
+	s.SetLifecycleHooks(
+		func(SessionKey, string, RecordingMeta) { started.Add(1) },
+		nil,
+	)
+	key := SessionKey{Workspace: "ws-test", Name: "defers"}
+
+	recorder, err := s.StartRecording(key, 20, 4)
+	if err != nil {
+		t.Fatalf("StartRecording: %v", err)
+	}
+	defer func() { _ = recorder.Close() }()
+
+	recorder.snapshot() // drain the queue so any eager hook would have fired
+	if got := started.Load(); got != 0 {
+		t.Fatalf("onStarted fired %d times before any committed line, want 0", got)
+	}
+
+	// Scroll enough lines through a 4-row screen to commit durable history.
+	for i := 0; i < 12; i++ {
+		recorder.Append([]byte(fmt.Sprintf("line-%d\r\n", i)))
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		recorder.snapshot()
+		if started.Load() > 0 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if got := started.Load(); got != 1 {
+		t.Fatalf("onStarted fired %d times after first committed line, want 1", got)
+	}
+}
+
+func TestIdleRecordingLifecycleFiresAfterGrace(t *testing.T) {
+	oldGrace := recordingStartedGrace
+	recordingStartedGrace = 50 * time.Millisecond
+	defer func() { recordingStartedGrace = oldGrace }()
+
+	root := t.TempDir()
+	s := NewRecordingStore(root, nil)
+	var started, completed atomic.Int32
+	s.SetLifecycleHooks(
+		func(SessionKey, string, RecordingMeta) { started.Add(1) },
+		func(SessionKey, string, RecordingMeta) { completed.Add(1) },
+	)
+	key := SessionKey{Workspace: "ws-test", Name: "idle-but-real"}
+
+	recorder, err := s.StartRecording(key, 80, 24)
+	if err != nil {
+		t.Fatalf("StartRecording: %v", err)
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) && started.Load() == 0 {
+		time.Sleep(20 * time.Millisecond)
+	}
+	if got := started.Load(); got != 1 {
+		t.Fatalf("onStarted fired %d times after grace elapsed on an idle session, want 1", got)
+	}
+	if err := recorder.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	deadline = time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) && completed.Load() == 0 {
+		time.Sleep(20 * time.Millisecond)
+	}
+	if got := completed.Load(); got != 1 {
+		t.Fatalf("onCompleted fired %d times for a graced session, want 1", got)
+	}
+	entries, err := os.ReadDir(filepath.Join(root, "ws-test", "idle-but-real", "generations"))
+	if err != nil {
+		t.Fatalf("read generations dir: %v", err)
+	}
+	dirs := 0
+	for _, entry := range entries {
+		if entry.IsDir() {
+			dirs++
+		}
+	}
+	if dirs != 1 {
+		t.Fatalf("generation dirs = %d, want 1 retained (graced session is not trivial)", dirs)
 	}
 }

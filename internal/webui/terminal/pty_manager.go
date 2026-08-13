@@ -24,6 +24,7 @@ package terminal
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"sort"
@@ -44,6 +45,28 @@ var ErrPTYMaxSessionsReached = errors.New("maximum terminal sessions reached")
 // ErrPTYSessionNotFound is returned when backend-owned input targets a
 // session that is not live in this manager.
 var ErrPTYSessionNotFound = errors.New("terminal session not found")
+
+// ErrPTYSpawnBackoff is returned by AttachSession/EnsureSession when the
+// session's process has self-exited within spawnFastExitThreshold on
+// spawnFastExitLimit consecutive recent spawns. Refusing further respawns
+// breaks crash loops that would otherwise create a recording generation and
+// a doomed child process on every reconnect tick.
+var ErrPTYSpawnBackoff = errors.New("terminal session process is exiting immediately; respawn paused")
+
+// ErrPTYSessionExited is returned when the freshly spawned process exits on
+// its own before the attach completes. Unlike the close-during-attach
+// teardown race, respawning would just recreate the same doomed process, so
+// the attach fails instead of retrying.
+var ErrPTYSessionExited = errors.New("terminal session process exited during attach")
+
+const (
+	// A self-exit faster than this counts toward the spawn breaker.
+	spawnFastExitThreshold = 5 * time.Second
+	// Fast self-exits older than this no longer count toward the breaker.
+	spawnFastExitWindow = time.Minute
+	// This many recent fast self-exits trip the breaker.
+	spawnFastExitLimit = 3
+)
 
 const (
 	defaultPTYMaxSessions = 40
@@ -141,6 +164,11 @@ type PTYManager struct {
 	mu       sync.Mutex
 	sessions map[SessionKey]*ptySession
 	ended    map[SessionKey]string
+	// fastExits holds recent self-exit timestamps (unix nanos) for sessions
+	// that died within spawnFastExitThreshold of spawning; see
+	// ErrPTYSpawnBackoff. Entries are pruned to spawnFastExitWindow on every
+	// read and cleared by a slow (healthy) exit.
+	fastExits map[SessionKey][]int64
 
 	shell string   // absolute path to the login shell (e.g. /bin/bash)
 	argv  []string // default args when a session's argv is nil
@@ -198,6 +226,7 @@ func NewPTYManager(command string, maxSessions int, cwd string) *PTYManager {
 	m := &PTYManager{
 		sessions:    make(map[SessionKey]*ptySession),
 		ended:       make(map[SessionKey]string),
+		fastExits:   make(map[SessionKey][]int64),
 		shell:       shell,
 		argv:        argv,
 		env:         env,
@@ -273,6 +302,10 @@ func (m *PTYManager) AttachSession(key SessionKey, cols, rows uint16, launch *ta
 				m.mu.Unlock()
 				return nil, false, ErrPTYMaxSessionsReached
 			}
+			if m.spawnBreakerTrippedLocked(key) {
+				m.mu.Unlock()
+				return nil, false, fmt.Errorf("terminal attach: session %q: %w", key, ErrPTYSpawnBackoff)
+			}
 			newSess, spawnErr := m.spawnSession(key, cols, rows, launch)
 			if spawnErr != nil {
 				m.mu.Unlock()
@@ -294,7 +327,14 @@ func (m *PTYManager) AttachSession(key SessionKey, cols, rows uint16, launch *ta
 		if local := sess.attachNew(connID); local != nil {
 			return local, existed, nil
 		}
-		// Session was closed between lookup and attach. Retry.
+		// Session was closed between lookup and attach. If the child exited
+		// on its own, respawning would just recreate the same doomed process
+		// (and another recording generation) — fail the attach instead of
+		// retrying. Only the teardown races (kill, grace timer, reaper)
+		// warrant another lookup.
+		if reason, _ := sess.closeReason.Load().(string); reason == ExitReasonExited {
+			return nil, false, fmt.Errorf("terminal attach: session %q: %w", key, ErrPTYSessionExited)
+		}
 	}
 	return nil, false, fmt.Errorf("terminal attach: session %q repeatedly closed during attach", key)
 }
@@ -320,6 +360,10 @@ func (m *PTYManager) EnsureSession(key SessionKey, cols, rows uint16, argv []str
 		if len(m.sessions) >= m.max {
 			m.mu.Unlock()
 			return false, ErrPTYMaxSessionsReached
+		}
+		if m.spawnBreakerTrippedLocked(key) {
+			m.mu.Unlock()
+			return false, fmt.Errorf("terminal ensure: session %q: %w", key, ErrPTYSpawnBackoff)
 		}
 		var launch *tabmeta.LaunchSpec
 		if len(argv) > 0 {
@@ -384,12 +428,8 @@ func (m *PTYManager) spawnSession(key SessionKey, cols, rows uint16, launch *tab
 	if m.recordingStore != nil {
 		recorder, err = m.recordingStore.StartRecording(key, cols, rows)
 		if err != nil {
-			_ = ptmx.Close()
-			if cmd.Process != nil {
-				_ = cmd.Process.Kill()
-				_ = cmd.Wait()
-			}
-			return nil, fmt.Errorf("start terminal recording: %w", err)
+			slog.Error("terminal recording unavailable; continuing without durable history", "session", key.String(), "err", err)
+			recorder = nil
 		}
 	}
 
@@ -426,6 +466,9 @@ func (m *PTYManager) killSession(key SessionKey, reason string) error {
 		delete(m.sessions, key)
 		if reason != "" {
 			m.ended[key] = reason
+		}
+		if reason == ExitReasonExited {
+			m.recordSelfExitLocked(key, sess)
 		}
 	}
 	m.mu.Unlock()
@@ -586,4 +629,45 @@ func (m *PTYManager) reapIdle() {
 // process exits on its own (PTY EOF). Cleans up manager-side state.
 func (m *PTYManager) onSessionExited(key SessionKey) {
 	_ = m.killSession(key, ExitReasonExited)
+}
+
+// recordSelfExitLocked updates spawn-breaker state for a child that exited on
+// its own. A healthy (slow) exit clears the key's history. Must be called
+// with m.mu held.
+func (m *PTYManager) recordSelfExitLocked(key SessionKey, sess *ptySession) {
+	now := time.Now().UnixNano()
+	if time.Duration(now-sess.createdUnixNano()) >= spawnFastExitThreshold {
+		delete(m.fastExits, key)
+		return
+	}
+	recent := m.fastExits[key][:0]
+	for _, ts := range m.fastExits[key] {
+		if now-ts <= int64(spawnFastExitWindow) {
+			recent = append(recent, ts)
+		}
+	}
+	m.fastExits[key] = append(recent, now)
+}
+
+// spawnBreakerTrippedLocked reports whether respawning key should be refused
+// because of recent fast self-exits. Prunes aged entries. Must be called with
+// m.mu held.
+func (m *PTYManager) spawnBreakerTrippedLocked(key SessionKey) bool {
+	entries, ok := m.fastExits[key]
+	if !ok {
+		return false
+	}
+	now := time.Now().UnixNano()
+	recent := entries[:0]
+	for _, ts := range entries {
+		if now-ts <= int64(spawnFastExitWindow) {
+			recent = append(recent, ts)
+		}
+	}
+	if len(recent) == 0 {
+		delete(m.fastExits, key)
+		return false
+	}
+	m.fastExits[key] = recent
+	return len(recent) >= spawnFastExitLimit
 }

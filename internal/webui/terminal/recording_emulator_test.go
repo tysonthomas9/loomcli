@@ -128,6 +128,34 @@ func TestRecordingEmulatorAlternateScreenDoesNotCommit(t *testing.T) {
 	}
 }
 
+func TestRecordingEmulatorAltScreenShrinkCommitsDisplacedPrimaryRows(t *testing.T) {
+	var committed []string
+	emulator := newRecordingEmulator(8, 3, func(runs []RecordingRun, _ int64, _ uint64) error {
+		committed = append(committed, runsText(runs))
+		return nil
+	})
+	if err := emulator.feed([]byte("one\r\ntwo\r\nthree\x1b[?1049h"), 1, 0); err != nil {
+		t.Fatalf("enter alternate screen: %v", err)
+	}
+
+	emulator.resize(8, 2)
+	if err := emulator.feed([]byte("\x1b[?1049l"), 2, 1); err != nil {
+		t.Fatalf("exit alternate screen: %v", err)
+	}
+
+	if !reflect.DeepEqual(committed, []string{"one"}) {
+		t.Fatalf("committed primary rows = %#v, want [one]", committed)
+	}
+	rows := emulator.screenRows()
+	got := []string{lineText(rows[0]), lineText(rows[1])}
+	if !reflect.DeepEqual(got, []string{"two", "three"}) {
+		t.Fatalf("primary rows after alt-screen shrink = %#v, want [two three]", got)
+	}
+	if emulator.CursorY != 1 {
+		t.Fatalf("restored primary cursor row = %d, want 1", emulator.CursorY)
+	}
+}
+
 func TestRecordingEmulatorOverwriteWideContinuationClearsWholeGlyph(t *testing.T) {
 	emulator := newRecordingEmulator(6, 2, nil)
 	if err := emulator.feed([]byte("界\r\x1b[2GX"), 1, 0); err != nil {
@@ -147,4 +175,57 @@ func runsText(runs []RecordingRun) string {
 		text += run.Text
 	}
 	return text
+}
+
+func TestRecordingEmulatorIgnoresBenignRenderHintSequences(t *testing.T) {
+	var committed []string
+	emulator := newRecordingEmulator(20, 4, func(runs []RecordingRun, _ int64, _ uint64) error {
+		committed = append(committed, runsText(runs))
+		return nil
+	})
+	benign := "\x1b[?2026h\x1b[?2026l\x1b[?25l\x1b[?25h\x1b[?1004h\x1b[?1004l" +
+		"\x1b[2 q\x1b[0 q\x1b[?2004$p\x1b[>1u\x1b[=5;1u"
+	if err := emulator.feed([]byte("one\r\n"+benign+"two"), 1, 0); err != nil {
+		t.Fatalf("feed benign sequences: %v", err)
+	}
+	if emulator.CommitBlocked {
+		t.Fatal("CommitBlocked = true after benign render-hint sequences")
+	}
+	if got := emulator.UnhandledSequences.Count; got != 0 {
+		t.Fatalf("UnhandledSequences.Count = %d after benign sequences, want 0 (prefixes: %#v)",
+			got, emulator.UnhandledSequences.Prefixes)
+	}
+	if len(committed) != 0 {
+		t.Fatalf("committed rows = %#v, want none (nothing scrolled off)", committed)
+	}
+}
+
+func TestRecordingEmulatorStillCountsCommitAffectingAndUnknownSequences(t *testing.T) {
+	emulator := newRecordingEmulator(20, 4, func([]RecordingRun, int64, uint64) error { return nil })
+	if err := emulator.feed([]byte("\x1b[?3h"), 1, 0); err != nil {
+		t.Fatalf("feed DECCOLM: %v", err)
+	}
+	if !emulator.CommitBlocked {
+		t.Fatal("CommitBlocked = false after DECCOLM")
+	}
+	if emulator.UnhandledSequences.Count == 0 {
+		t.Fatal("UnhandledSequences.Count = 0 after DECCOLM, want counted")
+	}
+	before := emulator.UnhandledSequences.Count
+
+	grapheme := newRecordingEmulator(20, 4, func([]RecordingRun, int64, uint64) error { return nil })
+	if err := grapheme.feed([]byte("\x1b[?2027h"), 1, 0); err != nil {
+		t.Fatalf("feed grapheme clustering mode: %v", err)
+	}
+	if !grapheme.CommitBlocked || grapheme.UnhandledSequences.Count == 0 {
+		t.Fatalf("mode 2027: CommitBlocked=%v count=%d, want blocked and counted",
+			grapheme.CommitBlocked, grapheme.UnhandledSequences.Count)
+	}
+
+	if err := emulator.feed([]byte("\x1b[5z"), 2, 0); err != nil {
+		t.Fatalf("feed unknown CSI final: %v", err)
+	}
+	if emulator.UnhandledSequences.Count <= before {
+		t.Fatal("unknown CSI final not counted")
+	}
 }

@@ -71,6 +71,9 @@ func (a *localAttachment) Resize(_ string, cols, rows uint16) error {
 }
 
 func (a *localAttachment) FirstScreenLine() uint64 { return a.firstScreenLine }
+func (a *localAttachment) RecordingAvailable() bool {
+	return a.session != nil && a.session.recorder != nil
+}
 
 // ExitReason returns the reason the owning session closed, or "" if the
 // session is still live (or was never given a reason). Only meaningful
@@ -92,12 +95,14 @@ func (a *localAttachment) ExitReason() string {
 // pair. Each attachment is a separate WebSocket / viewer that sees the
 // same output and can write input into the shared PTY.
 type ptySession struct {
-	key        SessionKey
-	pty        *os.File
-	cmd        *exec.Cmd
-	scrollback *ringBuffer
-	recorder   *SessionRecorder
-	createdAt  int64 // unix nanos
+	key           SessionKey
+	pty           *os.File
+	cmd           *exec.Cmd
+	scrollback    *ringBuffer
+	recorder      *SessionRecorder
+	recordingCols uint16
+	recordingRows uint16
+	createdAt     int64 // unix nanos
 
 	lastOutput atomic.Int64 // unix nanos, updated by drain
 
@@ -129,7 +134,7 @@ type attachmentState struct {
 }
 
 func newPtySession(key SessionKey, f *os.File, cmd *exec.Cmd, recorder *SessionRecorder) *ptySession {
-	return &ptySession{
+	session := &ptySession{
 		key:        key,
 		pty:        f,
 		cmd:        cmd,
@@ -138,6 +143,23 @@ func newPtySession(key SessionKey, f *os.File, cmd *exec.Cmd, recorder *SessionR
 		createdAt:  time.Now().UnixNano(),
 		attaches:   make(map[string]*attachmentState),
 		done:       make(chan struct{}),
+	}
+	if recorder != nil {
+		session.recordingCols = recorder.startMeta.Cols
+		session.recordingRows = recorder.startMeta.Rows
+		recorder.setReplaySource(session.recordingReplayBaseline)
+	}
+	return session
+}
+
+func (s *ptySession) recordingReplayBaseline() recorderReplayBaseline {
+	s.attachMu.Lock()
+	defer s.attachMu.Unlock()
+	checkpoint, body := s.scrollback.ReplaySnapshot()
+	return recorderReplayBaseline{
+		checkpoint: checkpoint, body: body,
+		throughSequence: s.recorder.enqueuedSequence(),
+		cols:            s.recordingCols, rows: s.recordingRows,
 	}
 }
 
@@ -198,6 +220,7 @@ func (s *ptySession) resize(cols, rows uint16) error {
 	defer s.attachMu.Unlock()
 	err := pty.Setsize(s.pty, &pty.Winsize{Cols: cols, Rows: rows})
 	if err == nil && s.recorder != nil {
+		s.recordingCols, s.recordingRows = cols, rows
 		s.recorder.Resize(cols, rows)
 	}
 	return err
@@ -205,8 +228,9 @@ func (s *ptySession) resize(cols, rows uint16) error {
 
 // attachNew adds a fresh attachment to the session without disturbing any
 // existing ones (multi-client). Returns a localAttachment preloaded with
-// the replay bytes (reset escape + current scrollback) so the new client
-// starts from the same grid state as the existing ones.
+// replay bytes so the new client starts from the same grid state as the
+// existing ones: an emulator-rendered screen when the session records, or
+// the raw replay ring for recording-less (classic mode) sessions.
 //
 // Returns nil if the session was closed concurrently (close() nils
 // s.attaches). The caller (PTYManager.AttachSession) is expected to retry
@@ -227,28 +251,67 @@ func (s *ptySession) attachNew(connID string) *localAttachment {
 		close(ch)
 		return nil
 	}
+	// Recorder-less sessions replay the raw ring (classic mode). Sessions
+	// with a recorder replay an emulator-rendered screen instead: the raw
+	// ring can begin mid-escape-sequence after eviction trims at arbitrary
+	// byte offsets, and re-feeding up to 256KB of raw output on every
+	// reattach stalls the browser main thread. All three ring samples below
+	// are consistent with the barrier sequence because publishOutput appends
+	// under the same attachMu this function holds.
 	var replay []byte
-	checkpoint, body := s.scrollback.ReplaySnapshot()
-	if len(checkpoint) > 0 || len(body) > 0 {
-		replay = make([]byte, 0, len(checkpoint)+len(screenResetSeq)+len(body))
-		replay = append(replay, checkpoint...)
-		replay = append(replay, screenResetSeq...)
-		replay = append(replay, body...)
+	var modeCheckpoint, rawTail []byte
+	if s.recorder == nil {
+		checkpoint, body := s.scrollback.ReplaySnapshot()
+		replay = composeReplay(checkpoint, body, nil)
+	} else {
+		modeCheckpoint = s.scrollback.CurrentModeCheckpoint()
+		rawTail = s.scrollback.TailBytes(maxTrailingSequenceScan)
 	}
 
 	var firstScreenLine uint64
+	var replayReady <-chan attachReplay
 	if s.recorder != nil {
-		firstScreenLine = s.recorder.FirstScreenLine()
+		replayReady = s.recorder.attachReplayBarrier()
 	}
 	if existing, ok := s.attaches[connID]; ok {
 		existing.close()
 	}
 	s.attaches[connID] = st
 	s.attachMu.Unlock()
+	if s.recorder != nil {
+		rendered := <-replayReady
+		firstScreenLine = rendered.firstScreenLine
+		// If the stream ends inside an escape sequence (or multi-byte rune),
+		// append that fragment verbatim: the first live chunk delivered to
+		// this attachment starts with the sequence's remaining bytes, which
+		// would otherwise print as text.
+		replay = composeReplay(modeCheckpoint, rendered.screen, incompleteTrailingSequence(rawTail))
+		s.attachMu.Lock()
+		if s.attaches == nil || s.attaches[connID] != st {
+			s.attachMu.Unlock()
+			st.close()
+			return nil
+		}
+		s.attachMu.Unlock()
+	}
 	return &localAttachment{
 		connID: connID, pty: s.pty, output: ch, scrollback: replay,
 		session: s, firstScreenLine: firstScreenLine,
 	}
+}
+
+// composeReplay concatenates the non-empty replay sections around the
+// clear/home reset, returning nil when there is nothing to replay.
+func composeReplay(checkpoint, body, fragment []byte) []byte {
+	if len(checkpoint) == 0 && len(body) == 0 && len(fragment) == 0 {
+		return nil
+	}
+	replay := make([]byte, 0, len(checkpoint)+len(screenResetSeq)+len(body)+len(fragment))
+	replay = append(replay, checkpoint...)
+	replay = append(replay, screenResetSeq...)
+	replay = append(replay, body...)
+	replay = append(replay, fragment...)
+	return replay
 }
 
 // detach releases the attachment identified by connID and reports whether

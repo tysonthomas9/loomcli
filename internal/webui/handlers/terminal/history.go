@@ -26,6 +26,7 @@ type terminalHistoryMetaResponse struct {
 	Gaps               uint64                                   `json:"gaps"`
 	UnhandledSequences webuterminal.RecordingUnhandledSequences `json:"unhandledSequences"`
 	HistoryLimited     bool                                     `json:"historyLimited"`
+	RecordingStopped   bool                                     `json:"recordingStopped"`
 	Closed             bool                                     `json:"closed"`
 }
 
@@ -107,7 +108,8 @@ func HandleTerminalHistoryMeta(store *webuterminal.RecordingStore) http.HandlerF
 			StartedAt: meta.StartedAt, Cols: meta.Cols, Rows: meta.Rows,
 			AltScreen: meta.AltScreen, Gaps: meta.Gaps,
 			UnhandledSequences: meta.UnhandledSequences,
-			HistoryLimited:     meta.HistoryLimited, Closed: meta.Closed,
+			HistoryLimited:     meta.HistoryLimited, RecordingStopped: meta.RecordingStopped,
+			Closed: meta.Closed,
 		})
 	}
 }

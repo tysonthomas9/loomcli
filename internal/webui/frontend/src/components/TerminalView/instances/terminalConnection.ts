@@ -98,7 +98,7 @@ export function connectWebSocket(
   onBackendCrash?: (reason: string) => void,
   onSessionKilled?: () => void,
   initialSize?: { cols: number; rows: number },
-  onHistoryCoordinate?: (firstScreenLine: number) => void,
+  onHistoryCoordinate?: (firstScreenLine: number, available: boolean) => void,
 ): () => void {
   setConnectionState("connecting");
 
@@ -216,13 +216,17 @@ export function connectWebSocket(
           try {
             const control = JSON.parse(ev.data) as {
               type?: string;
+              available?: boolean;
               firstScreenLine?: number;
             };
             if (
               control.type === "terminal-history" &&
               typeof control.firstScreenLine === "number"
             ) {
-              onHistoryCoordinate?.(control.firstScreenLine);
+              onHistoryCoordinate?.(
+                control.firstScreenLine,
+                control.available !== false,
+              );
               return;
             }
           } catch {

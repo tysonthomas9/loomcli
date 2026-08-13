@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -40,10 +41,27 @@ type RecordingStore struct {
 
 	mu          sync.Mutex
 	active      map[SessionKey]*SessionRecorder
+	starting    map[SessionKey]*recordingStartLease
+	recovering  map[recordingRecoveryKey]*recordingRecoveryLease
 	queueSize   int
 	closed      bool
 	onStarted   func(SessionKey, string, RecordingMeta)
 	onCompleted func(SessionKey, string, RecordingMeta)
+}
+
+type recordingStartLease struct {
+	done chan struct{}
+}
+
+type recordingRecoveryKey struct {
+	key        SessionKey
+	generation string
+}
+
+type recordingRecoveryLease struct {
+	done     chan struct{}
+	snapshot recorderSnapshot
+	err      error
 }
 
 // currentRecordingPointer is the durable no-payload indirection from a reused
@@ -63,7 +81,8 @@ type currentRecordingPointer struct {
 }
 
 // SetLifecycleHooks connects durable recordings to higher-level audit
-// metadata. Hooks run on the recorder worker, never on the PTY drain path.
+// metadata. Hooks run asynchronously, never on the PTY drain path or recorder
+// worker.
 // The path passed to both hooks is the guarded recording directory.
 func (s *RecordingStore) SetLifecycleHooks(
 	onStarted func(SessionKey, string, RecordingMeta),
@@ -81,8 +100,10 @@ func (s *RecordingStore) SetLifecycleHooks(
 func NewRecordingStore(root string, redisClient *redis.Client) *RecordingStore {
 	return &RecordingStore{
 		root: root, redis: redisClient,
-		active:    make(map[SessionKey]*SessionRecorder),
-		queueSize: defaultRecordingQueue,
+		active:     make(map[SessionKey]*SessionRecorder),
+		starting:   make(map[SessionKey]*recordingStartLease),
+		recovering: make(map[recordingRecoveryKey]*recordingRecoveryLease),
+		queueSize:  defaultRecordingQueue,
 	}
 }
 
@@ -125,69 +146,113 @@ func (s *RecordingStore) StartRecording(key SessionKey, cols, rows uint16) (*Ses
 			return nil, errors.New("recording store closed")
 		}
 		if current := s.active[key]; current != nil {
+			if current.closed.Load() {
+				done := current.done
+				s.mu.Unlock()
+				<-done
+				continue
+			}
 			s.mu.Unlock()
 			return current, nil
 		}
-
-		// A serve restart can leave the previous current generation open. Recover
-		// and close it before allocating the next PTY lifetime so its final rows
-		// remain independently readable and its lifecycle hook can complete.
-		previousGeneration, pointerErr := s.readCurrentGeneration(key)
-		var previousMeta RecordingMeta
-		if pointerErr == nil {
-			previousDir, dirErr := s.generationDir(key, previousGeneration)
-			if dirErr != nil {
-				s.mu.Unlock()
-				return nil, dirErr
-			}
-			previousMeta, pointerErr = readRecordingMeta(previousDir)
-			if pointerErr == nil && !previousMeta.Closed {
-				recovery, recoverErr := newSessionRecorder(s, key, previousDir, previousGeneration, 0, 80, 24, s.queueSize)
-				if recoverErr != nil {
-					s.mu.Unlock()
-					return nil, recoverErr
-				}
-				s.active[key] = recovery
-				s.mu.Unlock()
-				if closeErr := recovery.Close(); closeErr != nil {
-					return nil, closeErr
-				}
-				continue
-			}
-		}
-		if pointerErr != nil && !errors.Is(pointerErr, ErrRecordingNotFound) {
+		if lease := s.starting[key]; lease != nil {
+			done := lease.done
 			s.mu.Unlock()
-			return nil, pointerErr
+			<-done
+			continue
 		}
-
-		generation, dir, err := s.allocateGenerationDir(key)
-		if err != nil {
-			s.mu.Unlock()
-			return nil, err
-		}
-		startedAt := unixMilliNow()
-		if previousMeta.StartedAt >= startedAt {
-			startedAt = previousMeta.StartedAt + 1
-		}
-		recorder, err := newSessionRecorder(s, key, dir, generation, startedAt, cols, rows, s.queueSize)
-		if err != nil {
-			s.mu.Unlock()
-			return nil, err
-		}
-		pointer := currentRecordingPointer{FormatVersion: recordingFormatVersion, Generation: generation}
-		if err := writeJSONAtomic(s.currentPointerPath(key), pointer); err != nil {
-			s.mu.Unlock()
-			_ = recorder.Close()
-			return nil, fmt.Errorf("write current recording generation: %w", err)
-		}
-		s.active[key] = recorder
-		onStarted := s.onStarted
+		lease := &recordingStartLease{done: make(chan struct{})}
+		s.starting[key] = lease
+		queueSize := s.queueSize
 		s.mu.Unlock()
-		if onStarted != nil {
-			onStarted(key, dir, recorder.snapshot().meta)
+
+		recorder, err := s.startRecording(key, cols, rows, queueSize)
+
+		s.mu.Lock()
+		if s.starting[key] == lease {
+			delete(s.starting, key)
 		}
+		if err == nil && !s.closed {
+			recorder.prepareLifecycle()
+			s.active[key] = recorder
+		}
+		closed := s.closed
+		close(lease.done)
+		s.mu.Unlock()
+
+		if err != nil {
+			return nil, err
+		}
+		if closed {
+			_ = recorder.Close()
+			return nil, errors.New("recording store closed")
+		}
+		// The started hook is deliberately NOT fired here: the recorder
+		// fires it once the recording proves non-trivial (first committed
+		// line, or outliving recordingStartedGrace), so stillborn sessions
+		// never appear in the session-history store.
 		return recorder, nil
 	}
+}
+
+// discardGeneration removes a trivial recording's directory and, when
+// current.json still points at it, the pointer file, so crash-looping spawns
+// leave nothing on disk. Called from the recorder worker on close.
+func (s *RecordingStore) discardGeneration(key SessionKey, generation, dir string) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	if current, err := s.readCurrentGeneration(key); err == nil && current == generation {
+		_ = os.Remove(s.currentPointerPath(key))
+	}
+	s.mu.Unlock()
+	_ = os.RemoveAll(dir)
+}
+
+func (s *RecordingStore) startRecording(key SessionKey, cols, rows uint16, queueSize int) (*SessionRecorder, error) {
+	previousGeneration, pointerErr := s.readCurrentGeneration(key)
+	var previousMeta RecordingMeta
+	if pointerErr == nil {
+		previousDir, err := s.generationDir(key, previousGeneration)
+		if err != nil {
+			return nil, err
+		}
+		previousMeta, err = readRecordingMeta(previousDir)
+		if err != nil || !previousMeta.Closed {
+			recovered, recoverErr := s.recoverGeneration(context.Background(), key, previousGeneration, previousDir)
+			if recoverErr != nil {
+				if quarantineErr := s.quarantineGeneration(previousDir); quarantineErr != nil {
+					return nil, errors.Join(recoverErr, quarantineErr)
+				}
+				slog.Warn("quarantined unrecoverable terminal recording", "session", key.String(), "generation", previousGeneration, "err", recoverErr)
+				previousMeta = RecordingMeta{}
+			} else {
+				previousMeta = recovered.meta
+			}
+		}
+	} else if !errors.Is(pointerErr, ErrRecordingNotFound) {
+		return nil, pointerErr
+	}
+
+	generation, dir, err := s.allocateGenerationDir(key)
+	if err != nil {
+		return nil, err
+	}
+	startedAt := unixMilliNow()
+	if previousMeta.StartedAt >= startedAt {
+		startedAt = previousMeta.StartedAt + 1
+	}
+	recorder, err := newSessionRecorder(s, key, dir, generation, startedAt, cols, rows, queueSize)
+	if err != nil {
+		return nil, err
+	}
+	pointer := currentRecordingPointer{FormatVersion: recordingFormatVersion, Generation: generation}
+	if err := writeJSONAtomic(s.currentPointerPath(key), pointer); err != nil {
+		_ = recorder.Close()
+		return nil, fmt.Errorf("write current recording generation: %w", err)
+	}
+	return recorder, nil
 }
 
 func (s *RecordingStore) ActiveLineCount(key SessionKey) uint64 {
@@ -215,18 +280,24 @@ func (s *RecordingStore) History(ctx context.Context, key SessionKey, from uint6
 // HistoryGeneration reads one bounded range from the requested PTY lifetime.
 // An empty generation resolves the current pointer for internal callers; HTTP
 // range requests always pass the explicit generation learned from Meta.
-func (s *RecordingStore) HistoryGeneration(ctx context.Context, key SessionKey, generation string, from uint64, count int) (RecordingHistory, error) {
+func clampHistoryRangeCount(count int) int {
 	if count <= 0 {
-		count = 1
+		return 1
 	}
 	if count > MaxHistoryRangeCount {
-		count = MaxHistoryRangeCount
+		return MaxHistoryRangeCount
 	}
+	return count
+}
+
+func (s *RecordingStore) HistoryGeneration(ctx context.Context, key SessionKey, generation string, from uint64, count int) (RecordingHistory, error) {
+	count = clampHistoryRangeCount(count)
 	snapshot, err := s.recordingSnapshot(ctx, key, generation)
 	if err != nil {
 		return RecordingHistory{}, err
 	}
 	committed := snapshot.meta.LineCount
+	durable := minUint64(snapshot.durableLineCount, committed)
 	total := committed + uint64(len(snapshot.screen))
 	if snapshot.meta.Closed {
 		total = committed
@@ -236,13 +307,21 @@ func (s *RecordingStore) HistoryGeneration(ctx context.Context, key SessionKey, 
 	}
 	end := minUint64(total, from+uint64(count))
 	lines := make([]RecordingLine, 0, end-from)
-	if from < committed {
-		committedEnd := minUint64(end, committed)
-		diskLines, readErr := readIndexedRecordingLines(snapshot.dir, from, committedEnd, committed)
+	if from < durable {
+		durableEnd := minUint64(end, durable)
+		diskLines, readErr := readIndexedRecordingLines(snapshot.dir, from, durableEnd, durable)
 		if readErr != nil {
 			return RecordingHistory{}, readErr
 		}
 		lines = append(lines, diskLines...)
+	}
+	if end > durable && from < committed {
+		pendingStart := maxUint64(from, durable) - durable
+		pendingEnd := minUint64(end, committed) - durable
+		if pendingEnd > uint64(len(snapshot.pendingLines)) {
+			return RecordingHistory{}, fmt.Errorf("recording pending line range short read: got %d want %d", len(snapshot.pendingLines), pendingEnd)
+		}
+		lines = append(lines, snapshot.pendingLines[pendingStart:pendingEnd]...)
 	}
 	if end > committed && !snapshot.meta.Closed {
 		screenStart := maxUint64(from, committed) - committed
@@ -340,32 +419,65 @@ func (s *RecordingStore) recordingSnapshot(ctx context.Context, key SessionKey, 
 	}
 	meta, metaErr := readRecordingMeta(dir)
 	if metaErr == nil && meta.Closed {
-		return recorderSnapshot{meta: meta, dir: dir}, nil
+		return recorderSnapshot{meta: meta, durableLineCount: meta.LineCount, dir: dir}, nil
 	}
-	if metaErr != nil && !os.IsNotExist(metaErr) {
+	if metaErr != nil && !errors.Is(metaErr, ErrRecordingNotFound) {
 		return recorderSnapshot{}, metaErr
 	}
 
 	// No live PTY owns this recording. Recover derived state from the raw tail
 	// and finalize the last screen so a post-restart read has a final row count.
+	return s.recoverGeneration(ctx, key, generation, dir)
+}
+
+func (s *RecordingStore) recoverGeneration(ctx context.Context, key SessionKey, generation, dir string) (recorderSnapshot, error) {
+	recoveryKey := recordingRecoveryKey{key: key, generation: generation}
 	s.mu.Lock()
-	if current := s.active[key]; current != nil && current.meta.Generation == generation {
+	if lease := s.recovering[recoveryKey]; lease != nil {
+		done := lease.done
 		s.mu.Unlock()
-		snapshot := current.snapshot()
-		return snapshot, snapshot.err
+		select {
+		case <-done:
+			return lease.snapshot, lease.err
+		case <-ctx.Done():
+			return recorderSnapshot{}, ctx.Err()
+		}
 	}
-	recorder, openErr := newSessionRecorder(s, key, dir, generation, 0, 80, 24, s.queueSize)
-	if openErr != nil {
-		s.mu.Unlock()
-		return recorderSnapshot{}, openErr
-	}
-	s.active[key] = recorder
+	lease := &recordingRecoveryLease{done: make(chan struct{})}
+	s.recovering[recoveryKey] = lease
+	queueSize := s.queueSize
 	s.mu.Unlock()
-	if closeErr := recorder.Close(); closeErr != nil {
-		return recorderSnapshot{}, closeErr
+
+	recorder, err := newSessionRecorder(s, key, dir, generation, 0, 80, 24, queueSize)
+	if err == nil {
+		err = recorder.Close()
 	}
-	meta, readErr := readRecordingMeta(dir)
-	return recorderSnapshot{meta: meta, dir: dir}, readErr
+	if err == nil {
+		var meta RecordingMeta
+		meta, err = readRecordingMeta(dir)
+		if err == nil {
+			lease.snapshot = recorderSnapshot{meta: meta, durableLineCount: meta.LineCount, dir: dir}
+		}
+	}
+	lease.err = err
+
+	s.mu.Lock()
+	delete(s.recovering, recoveryKey)
+	close(lease.done)
+	s.mu.Unlock()
+	return lease.snapshot, lease.err
+}
+
+func (s *RecordingStore) quarantineGeneration(dir string) error {
+	for attempt := range 8 {
+		quarantine := fmt.Sprintf("%s.quarantine-%d-%d", dir, time.Now().UnixNano(), attempt)
+		if err := os.Rename(dir, quarantine); err == nil {
+			return nil
+		} else if !os.IsExist(err) {
+			return fmt.Errorf("quarantine terminal recording: %w", err)
+		}
+	}
+	return errors.New("allocate terminal recording quarantine path")
 }
 
 func (s *RecordingStore) removeActive(key SessionKey, recorder *SessionRecorder) {
@@ -391,6 +503,41 @@ func (s *RecordingStore) recordingCompleted(key SessionKey, dir string, meta Rec
 	}
 }
 
+func (s *RecordingStore) recordingStarted(key SessionKey, dir string, meta RecordingMeta) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	onStarted := s.onStarted
+	s.mu.Unlock()
+	if onStarted != nil {
+		onStarted(key, dir, meta)
+	}
+}
+
+// SetIssueID durably associates a recording generation with the issue whose
+// terminal tab launched it. The lifecycle hook calls this off the recorder
+// worker so Redis lookup latency never blocks PTY output.
+func (s *RecordingStore) SetIssueID(key SessionKey, generation, issueID string) error {
+	if s == nil || issueID == "" {
+		return nil
+	}
+	s.mu.Lock()
+	recorder := s.active[key]
+	if recorder != nil && recorder.startMeta.Generation != generation {
+		recorder = nil
+	}
+	s.mu.Unlock()
+	if recorder != nil {
+		return recorder.setIssueID(issueID)
+	}
+	dir, err := s.generationDir(key, generation)
+	if err != nil {
+		return err
+	}
+	return persistRecordingIssueID(dir, issueID)
+}
+
 func (s *RecordingStore) updatePointer(key SessionKey, dir string, meta RecordingMeta) {
 	if s == nil || s.redis == nil {
 		return
@@ -406,6 +553,51 @@ func (s *RecordingStore) updatePointer(key SessionKey, dir string, meta Recordin
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	_ = s.redis.Set(ctx, recordingRedisKey(key), data, 0).Err()
+}
+
+// ClosedRecording identifies a finalized generation discovered during the
+// startup reconciliation sweep.
+type ClosedRecording struct {
+	Key  SessionKey
+	Dir  string
+	Meta RecordingMeta
+}
+
+// ClosedRecordings returns valid finalized generations without mutating them.
+func (s *RecordingStore) ClosedRecordings() ([]ClosedRecording, error) {
+	if s == nil {
+		return nil, nil
+	}
+	var recordings []ClosedRecording
+	err := filepath.WalkDir(s.root, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() || entry.Name() != "meta.json" {
+			return nil
+		}
+		rel, err := filepath.Rel(s.root, path)
+		if err != nil {
+			return err
+		}
+		parts := strings.Split(filepath.ToSlash(rel), "/")
+		if len(parts) != 5 || parts[2] != "generations" || !validRecordingGeneration(parts[3]) {
+			return nil
+		}
+		meta, err := readRecordingMeta(filepath.Dir(path))
+		if err != nil || !meta.Closed || meta.Generation != parts[3] || meta.IssueID == "" {
+			return nil
+		}
+		recordings = append(recordings, ClosedRecording{
+			Key: SessionKey{Workspace: parts[0], Name: parts[1]},
+			Dir: filepath.Dir(path), Meta: meta,
+		})
+		return nil
+	})
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	return recordings, err
 }
 
 func (s *RecordingStore) Close() error {

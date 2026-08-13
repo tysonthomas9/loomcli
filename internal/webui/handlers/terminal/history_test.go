@@ -7,7 +7,9 @@ import (
 	"net/http/httptest"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	webuterminal "github.com/tysonthomas9/loomcli/internal/webui/terminal"
@@ -76,7 +78,9 @@ func TestHandleTerminalHistoryMetaIncludesUnhandledSequenceDiagnostics(t *testin
 	if err != nil {
 		t.Fatalf("StartRecording: %v", err)
 	}
-	recorder.Append([]byte("\x1b]0;title\x07\x1b[?25l"))
+	// OSC 0 and DECCOLM (?3) count as unhandled; ?25 (cursor visibility) is
+	// a benign render hint that must NOT count.
+	recorder.Append([]byte("\x1b]0;title\x07\x1b[?25l\x1b[?3h"))
 	_ = recorder.FirstScreenLine()
 	t.Cleanup(func() { _ = recorder.Close() })
 
@@ -94,41 +98,67 @@ func TestHandleTerminalHistoryMetaIncludesUnhandledSequenceDiagnostics(t *testin
 	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("decode meta: %v", err)
 	}
-	if payload.UnhandledSequences.Count != 2 || payload.UnhandledSequences.Prefixes["OSC 0"] != 1 || payload.UnhandledSequences.Prefixes["CSI ?25l"] != 1 {
+	if payload.UnhandledSequences.Count != 2 || payload.UnhandledSequences.Prefixes["OSC 0"] != 1 || payload.UnhandledSequences.Prefixes["CSI ?3h"] != 1 {
 		t.Fatalf("unhandledSequences = %#v", payload.UnhandledSequences)
+	}
+	if _, counted := payload.UnhandledSequences.Prefixes["CSI ?25l"]; counted {
+		t.Fatalf("benign cursor-visibility hint was counted: %#v", payload.UnhandledSequences)
 	}
 }
 
 func TestHandleTerminalHistoryGenerationSeparatesImmutableCacheIdentity(t *testing.T) {
 	store := webuterminal.NewRecordingStore(t.TempDir(), nil)
 	key := webuterminal.SessionKey{Workspace: "ws-1", Name: "reused-term"}
+	// The started hook fires asynchronously on the recorder worker once a
+	// durable line commits, so guard the slice and poll for each entry.
+	var startsMu sync.Mutex
 	var starts []webuterminal.RecordingMeta
 	store.SetLifecycleHooks(
 		func(_ webuterminal.SessionKey, _ string, meta webuterminal.RecordingMeta) {
+			startsMu.Lock()
 			starts = append(starts, meta)
+			startsMu.Unlock()
 		},
 		nil,
 	)
+	waitForStarts := func(want int) {
+		t.Helper()
+		deadline := time.Now().Add(5 * time.Second)
+		for {
+			startsMu.Lock()
+			n := len(starts)
+			startsMu.Unlock()
+			if n == want {
+				return
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("recording starts = %d, want %d", n, want)
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+	}
 
+	// Each generation scrolls its marker line off the 2-row screen so a
+	// durable line commits; the deferred started hook only fires (and the
+	// generation is only kept) once the recording proves non-trivial.
 	first, err := store.StartRecording(key, 80, 2)
 	if err != nil {
 		t.Fatalf("start generation A: %v", err)
 	}
-	first.Append([]byte("generation-a-only\r\n"))
+	first.Append([]byte("generation-a-only\r\npad-a\r\npad-a2\r\n"))
 	if err := first.Close(); err != nil {
 		t.Fatalf("close generation A: %v", err)
 	}
+	waitForStarts(1)
 	second, err := store.StartRecording(key, 80, 2)
 	if err != nil {
 		t.Fatalf("start generation B: %v", err)
 	}
-	second.Append([]byte("generation-b-only\r\n"))
+	second.Append([]byte("generation-b-only\r\npad-b\r\npad-b2\r\n"))
 	if err := second.Close(); err != nil {
 		t.Fatalf("close generation B: %v", err)
 	}
-	if len(starts) != 2 {
-		t.Fatalf("recording starts = %d, want 2", len(starts))
-	}
+	waitForStarts(2)
 
 	generationA := regressionGenerationID(t, starts[0], "legacy-generation-a")
 	generationB := regressionGenerationID(t, starts[1], "legacy-generation-b")
