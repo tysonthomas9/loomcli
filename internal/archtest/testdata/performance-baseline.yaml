@@ -179,8 +179,9 @@ production_background_loops:
       goroutine launch definition plus every additional boot or long-lived
       component. It adds the AgentProvisioning and Interaction recovery plus
       separately scheduled Workspace repository-admission recovery and lease
-      renewal registrations to the managed population; bounded command,
-      request, and startup waits remain visible but do not inflate that count.
+      renewal registrations and the local loom-serve child reaper to the
+      managed population; bounded command, request, and startup waits remain
+      visible but do not inflate that count.
       The all-source definition ledger intentionally includes architecture
       tooling, mutually exclusive build-tag variants such as testbackend, and
       the fake-harness helper; it is not a simultaneous product-runtime
@@ -219,14 +220,14 @@ production_background_loops:
           - internal/archtest/testdata/runtime-components.yaml
   result:
     inventory_path: internal/archtest/testdata/runtime-components.yaml
-    total_components: 70
+    total_components: 71
     ticker_sites: 43
-    goroutine_launch_sites: 77
-    managed: 43
+    goroutine_launch_sites: 78
+    managed: 44
     command_poll: 4
     request_scoped: 15
     startup_wait: 8
-    background_loop_count: 43
+    background_loop_count: 44
     count_rule: classification equals managed
 
 full_build_gate_duration:

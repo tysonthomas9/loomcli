@@ -25,14 +25,14 @@ func TestSuperviseLocalServeRestartsAfterHealthyChildExit(t *testing.T) {
 	defer cancel()
 	starts := 0
 	localServiceRestartDelay = 0
-	localServiceStartServe = func(context.Context, *localServiceConfig, io.Writer, *runtimeInfo) (*exec.Cmd, error) {
+	localServiceStartServe = func(context.Context, *localServiceConfig, io.Writer, *runtimeInfo) (*localServeProcess, error) {
 		starts++
-		return &exec.Cmd{}, nil
+		return &localServeProcess{cmd: &exec.Cmd{}}, nil
 	}
-	localServiceAwaitServe = func(context.Context, *localServiceConfig, *runtimeInfo, *exec.Cmd) error {
+	localServiceAwaitServe = func(context.Context, *localServiceConfig, *runtimeInfo, *localServeProcess) error {
 		return nil
 	}
-	localServiceWaitServe = func(context.Context, *exec.Cmd, string, *runtimeInfo) error {
+	localServiceWaitServe = func(context.Context, *localServeProcess, string, *runtimeInfo) error {
 		if starts == 1 {
 			return errors.New("signal: killed")
 		}
@@ -65,11 +65,13 @@ func TestSuperviseLocalServeReturnsInitialHealthFailure(t *testing.T) {
 
 	starts := 0
 	wantErr := errors.New("fleet compatibility failure")
-	localServiceStartServe = func(context.Context, *localServiceConfig, io.Writer, *runtimeInfo) (*exec.Cmd, error) {
+	localServiceStartServe = func(context.Context, *localServiceConfig, io.Writer, *runtimeInfo) (*localServeProcess, error) {
 		starts++
-		return &exec.Cmd{}, nil
+		done := make(chan struct{})
+		close(done)
+		return &localServeProcess{cmd: &exec.Cmd{}, done: done}, nil
 	}
-	localServiceAwaitServe = func(context.Context, *localServiceConfig, *runtimeInfo, *exec.Cmd) error {
+	localServiceAwaitServe = func(context.Context, *localServiceConfig, *runtimeInfo, *localServeProcess) error {
 		return wantErr
 	}
 

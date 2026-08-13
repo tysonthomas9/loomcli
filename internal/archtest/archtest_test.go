@@ -89,10 +89,10 @@ func TestCheckedInManifestsAndRepository(t *testing.T) {
 	if got, want := report.DirectPersistenceWrites, 82; got != want {
 		t.Fatalf("direct persistence-write rows = %d, want %d", got, want)
 	}
-	if got, want := report.RuntimeComponents, 70; got != want {
+	if got, want := report.RuntimeComponents, 71; got != want {
 		t.Fatalf("runtime components = %d, want %d", got, want)
 	}
-	if got, want := report.RuntimeGoroutineLaunches, 77; got != want {
+	if got, want := report.RuntimeGoroutineLaunches, 78; got != want {
 		t.Fatalf("runtime goroutine launches = %d, want %d", got, want)
 	}
 	if got, want := report.PerformanceMetrics, 6; got != want {
