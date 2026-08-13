@@ -190,10 +190,16 @@ func startServeRuntime(
 ) (serveRuntimeStop, error) {
 	automationCapability := capabilities.Automation
 	if automationCapability != nil {
-		if err := serveadapter.RefreshBoundPromptAgentWorkflows(
+		if err := retryServeStartupTransient(
 			ctx,
-			storeHandle,
-			capabilities.WorkflowCatalog,
+			defaultServeStartupRetryPolicy(),
+			func(retryCtx context.Context) error {
+				return serveadapter.RefreshBoundPromptAgentWorkflows(
+					retryCtx,
+					storeHandle,
+					capabilities.WorkflowCatalog,
+				)
+			},
 		); err != nil {
 			return nil, fmt.Errorf("refresh bound prompt-agent workflows: %w", err)
 		}
