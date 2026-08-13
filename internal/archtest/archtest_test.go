@@ -1398,15 +1398,16 @@ func TestRootBackendFacadeCannotReturn(t *testing.T) {
 		"github.com/tysonthomas9/loomcli/internal/",
 		"backend\"",
 	}, "")
+	repository := openRootedTestFS(t, root)
 	for _, sourceRoot := range []string{"cmd", "internal"} {
-		err = filepath.Walk(filepath.Join(root, sourceRoot), func(path string, info os.FileInfo, walkErr error) error {
+		err = fs.WalkDir(repository, sourceRoot, func(path string, entry fs.DirEntry, walkErr error) error {
 			if walkErr != nil {
 				return walkErr
 			}
-			if info.IsDir() || filepath.Ext(path) != ".go" {
+			if entry.IsDir() || filepath.Ext(path) != ".go" {
 				return nil
 			}
-			content, readErr := os.ReadFile(path)
+			content, readErr := fs.ReadFile(repository, path)
 			if readErr != nil {
 				return readErr
 			}
