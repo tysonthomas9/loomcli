@@ -1454,7 +1454,54 @@ describe("IssueDetailPanel", () => {
       });
     });
 
-    it("creates a fresh lead when the default epic lead name already exists", async () => {
+    it("resumes the lead that already owns the epic", async () => {
+      const mockStartWorkflowRun = startWorkflowRun as ReturnType<typeof vi.fn>;
+      const mockCreateWorkspaceAgent = createWorkspaceAgent as ReturnType<
+        typeof vi.fn
+      >;
+      mockUseWorkspaceContext.mockImplementation(() =>
+        createWorkspaceContext({
+          workspaceId: "DESKTOP-QA",
+          agents: [
+            {
+              name: "lead-desktop-qa-epic",
+              repos: [],
+              repo_groups: [],
+              cross_repo: true,
+              role_name: "lead",
+              parent: "DESKTOP-QA-EPIC",
+            },
+          ],
+        }),
+      );
+      const epic = createTestIssueDetails({
+        id: "DESKTOP-QA-EPIC",
+        issue_type: "epic",
+        status: "open",
+      });
+
+      render(
+        <IssueDetailPanel isOpen={true} issue={epic} onClose={() => {}} />,
+      );
+
+      fireEvent.click(screen.getByTestId("header-run-epic-button"));
+
+      await waitFor(() => {
+        expect(mockCreateWorkspaceAgent).not.toHaveBeenCalled();
+        expect(mockStartWorkflowRun).toHaveBeenCalledWith(
+          "DESKTOP-QA",
+          "epic-runner",
+          {
+            epicId: "DESKTOP-QA-EPIC",
+            leadName: "lead-desktop-qa-epic",
+            requestedBy: "ui",
+            runner: "local-task-runner",
+          },
+        );
+      });
+    });
+
+    it("creates a fresh lead when an unassigned agent already uses the default name", async () => {
       const mockStartWorkflowRun = startWorkflowRun as ReturnType<typeof vi.fn>;
       const mockCreateWorkspaceAgent = createWorkspaceAgent as ReturnType<
         typeof vi.fn
