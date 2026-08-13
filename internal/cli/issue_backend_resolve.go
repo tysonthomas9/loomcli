@@ -80,6 +80,12 @@ func IsAPIActive() bool {
 	return ResolveIssueBackendType() == IssueBackendAPI
 }
 
+// IsLeadOccupantActive reports whether this process is a sandboxed lead
+// occupant. Partial environments count so callers fail closed on that path.
+func IsLeadOccupantActive() bool {
+	return ResolveIssueBackendType() == issueBackendOccupant
+}
+
 // --- Package-level IssueBackend state (merged from issue_backend.go) ---
 
 var (

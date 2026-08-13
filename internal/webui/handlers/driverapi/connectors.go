@@ -144,6 +144,11 @@ func (m *Module) resolveParentBindingID(ctx context.Context, ws string, parent *
 		return fmt.Errorf("driver run %q has no trigger binding; connector egress is deny-by-default: %w",
 			parent.RunID, domain.ErrGrantDenied)
 	}
+	// Occupant SourceRef values are principals, never trigger route keys. A
+	// colliding binding name must not grant connector egress to these runs.
+	if parent.SourceKind == domain.DriverRunSourceLeadOccupant {
+		return "", denied()
+	}
 	sourceRef := strings.TrimSpace(parent.SourceRef)
 	if sourceRef == "" {
 		return "", denied()

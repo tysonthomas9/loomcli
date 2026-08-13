@@ -183,10 +183,16 @@ func (p *Provisioner) runtimeCredentials() (string, func() (string, error), erro
 
 func (p *Provisioner) provisionRequest(ws, name, authJSON string, gitToken func() (string, error), promptText string) placement.ProvisionRequest {
 	return placement.ProvisionRequest{
-		WorkspaceKey:           ws,
-		AgentName:              name,
-		SnapshotRef:            p.snapshotRef,
-		Caps:                   []string{placement.CapLeadSession, placement.CapLeadAssignment, placement.CapLeadInbox, placement.CapLeadData},
+		WorkspaceKey: ws,
+		AgentName:    name,
+		SnapshotRef:  p.snapshotRef,
+		Caps: []string{
+			placement.CapLeadSession,
+			placement.CapLeadAssignment,
+			placement.CapLeadInbox,
+			placement.CapLeadData,
+			placement.CapLeadDispatch,
+		},
 		Resource:               p.resource,
 		Backend:                backendnames.Codex,
 		GitToken:               gitToken,

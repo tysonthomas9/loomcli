@@ -31,6 +31,9 @@ const (
 	// CapLeadData authorizes the sandboxed lead to read and write issue data
 	// through the /lead/data mount. It never grants the general REST surface.
 	CapLeadData = "lead:data"
+	// CapLeadDispatch authorizes only the pinned epic-runner dispatch and
+	// status surface. It never grants the general /workflows/ routes.
+	CapLeadDispatch = "lead:dispatch"
 
 	// DefaultOccupantTokenTTL is the default lifetime for a lead occupant
 	// token. Tokens share driver.ResolveRunTokenSigningKey's signing key; an

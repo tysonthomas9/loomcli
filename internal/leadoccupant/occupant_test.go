@@ -13,6 +13,13 @@ import (
 	"time"
 )
 
+func TestUnauthorizedMessageIsPinned(t *testing.T) {
+	const want = "occupant token expired; the lead runtime is not refreshing it — restart the lead"
+	if UnauthorizedMessage != want {
+		t.Fatalf("UnauthorizedMessage = %q, want %q", UnauthorizedMessage, want)
+	}
+}
+
 func TestFromEnvThreeStates(t *testing.T) {
 	tests := []struct {
 		name      string

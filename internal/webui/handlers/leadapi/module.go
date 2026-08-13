@@ -23,10 +23,16 @@ import (
 	"sync"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/leadtoken"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
+
+// IssueBackendFn resolves the per-request issue backend. The occupant actor
+// must already be on ctx; serve keys its backend cache on (workspace, actor)
+// so an occupant's reads carry the placement identity, never serve's actor.
+type IssueBackendFn func(context.Context) backend.IssueBackend
 
 const (
 	maxLeadOpBodyBytes       = 8 << 20
@@ -38,11 +44,12 @@ type Config struct {
 	Store store.Store
 	// TokenKey is the HS256 signing key shared with driver run tokens
 	// (LOOM_RUN_TOKEN_SIGNING_KEY, or the same ephemeral per-process key).
-	TokenKey []byte
-	Data     *DataRoutes
+	TokenKey     []byte
+	Data         *DataRoutes
+	IssueBackend IssueBackendFn
 	// OpenAuthMode records whether the general serve origin accepts requests
 	// without user authentication. AllowOpenAuthMode is the explicit POC-only
-	// override for mounting occupant data routes in that posture.
+	// override for mounting occupant data and dispatch routes in that posture.
 	OpenAuthMode      bool
 	AllowOpenAuthMode bool
 }
@@ -53,6 +60,7 @@ type Module struct {
 	tokenKey          []byte
 	ops               map[string]leadOp
 	data              *DataRoutes
+	issueBackend      IssueBackendFn
 	openAuthMode      bool
 	allowOpenAuthMode bool
 	limiter           *placementLimiter
@@ -68,6 +76,7 @@ func NewModule(cfg Config) *Module {
 		store:             cfg.Store,
 		tokenKey:          resolveTokenKey(cfg.TokenKey),
 		data:              cfg.Data,
+		issueBackend:      cfg.IssueBackend,
 		openAuthMode:      cfg.OpenAuthMode,
 		allowOpenAuthMode: cfg.AllowOpenAuthMode,
 		limiter:           newPlacementLimiter(),
@@ -103,7 +112,12 @@ func (m *Module) Register(mux *http.ServeMux) {
 		return
 	}
 	mux.HandleFunc("POST /api/workspaces/{ws}/lead/{op}", m.handleOp)
+	if m.openAuthMode && !m.allowOpenAuthMode {
+		slog.Error("lead occupant data + dispatch mounts disabled in open auth mode; set LOOM_LEAD_DATA_ALLOW_OPEN_AUTH=1 to override (POC only)")
+		return
+	}
 	m.registerDataRoutes(mux)
+	m.registerDispatchRoutes(mux)
 }
 
 type occupantIdentity struct {

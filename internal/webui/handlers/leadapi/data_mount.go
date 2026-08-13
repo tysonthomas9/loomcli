@@ -2,7 +2,6 @@ package leadapi
 
 import (
 	"fmt"
-	"log/slog"
 	"net/http"
 
 	"github.com/tysonthomas9/loomcli/internal/leadtoken"
@@ -64,10 +63,6 @@ func (m *Module) registerDataRoutes(mux *http.ServeMux) {
 	if m.data == nil {
 		return
 	}
-	if m.openAuthMode && !m.allowOpenAuthMode {
-		slog.Error("lead data mount disabled in open auth mode; set the POC-only override explicitly")
-		return
-	}
 	base := "/api/workspaces/{ws}/lead/data"
 	mux.HandleFunc(base+"/issues/search", m.dataRoute(false, denyDataRoute))
 	var getIssueRoute, patchIssueRoute http.HandlerFunc
@@ -105,14 +100,43 @@ func getOrPatchOnly(get, patch http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
+// occupantHandler is an occupant-authenticated handler. It receives the
+// verified identity directly; r.Context() already carries the stamped
+// occupant actor and the canonical workspace.
+type occupantHandler func(w http.ResponseWriter, r *http.Request, id occupantIdentity)
+
+// occupantRouteSpec configures one mounted occupant route. label appears in
+// the cap-denied message; unavailable is fixed at registration time.
+type occupantRouteSpec struct {
+	label       string
+	capability  string
+	mutating    bool
+	unavailable bool
+	handle      occupantHandler
+}
+
 func (m *Module) dataRoute(mutating bool, h http.HandlerFunc) http.HandlerFunc {
+	return m.occupantRoute(occupantRouteSpec{
+		label:       "data",
+		capability:  leadtoken.CapLeadData,
+		mutating:    mutating,
+		unavailable: h == nil,
+		handle: func(w http.ResponseWriter, r *http.Request, _ occupantIdentity) {
+			h(w, r)
+		},
+	})
+}
+
+// occupantRoute is the normative occupant admission chain shared by the data
+// and dispatch mounts. Its ordering is security-sensitive.
+func (m *Module) occupantRoute(spec occupantRouteSpec) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id, err := m.authenticateRequest(r.Context(), r)
 		if err != nil {
 			writeDataStatusError(w, err)
 			return
 		}
-		if err := hasCapOrError("data", leadtoken.CapLeadData, id.claims); err != nil {
+		if err := hasCapOrError(spec.label, spec.capability, id.claims); err != nil {
 			writeDataStatusError(w, err)
 			return
 		}
@@ -122,12 +146,12 @@ func (m *Module) dataRoute(mutating bool, h http.HandlerFunc) http.HandlerFunc {
 			writeDataStatusError(w, newStatusError(http.StatusUnauthorized, "identity_mismatch", msg, false))
 			return
 		}
-		if h == nil {
+		if spec.unavailable {
 			writeDataError(w, http.StatusServiceUnavailable, "unavailable", "occupant data handler unavailable")
 			return
 		}
 		limiterKey := id.claims.WorkspaceKey + "\x00" + id.claims.PlacementID
-		if !m.limiter.allow(limiterKey, mutating) {
+		if !m.limiter.allow(limiterKey, spec.mutating) {
 			w.Header().Set("Retry-After", "1")
 			writeDataError(w, http.StatusTooManyRequests, "rate_limited", "placement request rate exceeded")
 			return
@@ -139,7 +163,7 @@ func (m *Module) dataRoute(mutating bool, h http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 		ctx := middleware.WithActor(r.Context(), actor)
-		h(w, r.WithContext(ctx))
+		spec.handle(w, r.WithContext(ctx), id)
 	}
 }
 

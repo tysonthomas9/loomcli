@@ -15,6 +15,7 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 
+	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/leadtoken"
@@ -118,6 +119,7 @@ type dataMountHarnessOptions struct {
 	createNode        bool
 	createSession     bool
 	data              *DataRoutes
+	issueBackend      IssueBackendFn
 	openAuthMode      bool
 	allowOpenAuthMode bool
 	configure         func(*dataMountHarness)
@@ -146,10 +148,15 @@ func newDataMountHarness(t *testing.T, opts dataMountHarnessOptions) *dataMountH
 	if data == nil {
 		data = h.spyDataRoutes(t)
 	}
+	issueBackend := opts.issueBackend
+	if issueBackend == nil {
+		issueBackend = func(context.Context) backend.IssueBackend { return nil }
+	}
 	h.module = NewModule(Config{
 		Store:             h.store,
 		TokenKey:          h.key,
 		Data:              data,
+		IssueBackend:      issueBackend,
 		OpenAuthMode:      opts.openAuthMode,
 		AllowOpenAuthMode: opts.allowOpenAuthMode,
 	})
@@ -280,6 +287,19 @@ func TestDataMount_AuthMatrix(t *testing.T) {
 				h := newDataMountHarness(t, dataMountHarnessOptions{createNode: true})
 				assertDataRouteResult(t, h, h.request(t, route, h.token(t, nil), "WS", nil), http.StatusNoContent, "", true)
 			})
+		})
+	}
+}
+
+func TestDataMount_RefusesDispatchOnlyToken(t *testing.T) {
+	h := newDataMountHarness(t, dataMountHarnessOptions{createNode: true})
+	token := h.token(t, func(c *leadtoken.OccupantClaims) {
+		c.Caps = []string{leadtoken.CapLeadDispatch}
+	})
+	for _, route := range dataRouteSpecs("WS") {
+		t.Run(route.name, func(t *testing.T) {
+			assertDataRouteResult(t, h, h.request(t, route, token, "WS", nil),
+				http.StatusForbidden, "cap_denied", false)
 		})
 	}
 }

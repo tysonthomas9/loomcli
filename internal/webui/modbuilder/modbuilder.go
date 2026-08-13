@@ -186,6 +186,7 @@ func NewLeadAPIModule(deps LeadAPIDeps) interface{ Register(*http.ServeMux) } {
 		Store:             deps.Store,
 		TokenKey:          deps.TokenKey,
 		Data:              data,
+		IssueBackend:      leadapi.IssueBackendFn(deps.IssueBackendFn),
 		OpenAuthMode:      deps.OpenAuthMode,
 		AllowOpenAuthMode: deps.AllowOpenAuthMode,
 	})

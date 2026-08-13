@@ -1644,6 +1644,12 @@ func TestDataMount_NewWsMuxRouteDoesNotJoinDataMount(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	dispatchToken, err := leadtoken.MintOccupantToken(leadtoken.OccupantClaims{
+		WorkspaceKey: "WS", PlacementID: "p1", Generation: 7, Caps: []string{leadtoken.CapLeadDispatch},
+	}, key, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
 	apiClient := &http.Client{Transport: leadDataRoundTripFunc(func(*http.Request) (*http.Response, error) {
 		return leadDataHTTPResponse(http.StatusOK, `{"success":true,"data":[]}`), nil
 	})}
@@ -1681,20 +1687,22 @@ func TestDataMount_NewWsMuxRouteDoesNotJoinDataMount(t *testing.T) {
 	setupTestRoutes(t, app)
 
 	for _, tc := range []struct {
-		path string
-		auth bool
-		want int
+		path  string
+		token string
+		want  int
 	}{
-		{"/api/workspaces/WS/issues", false, http.StatusOK},
-		{"/api/workspaces/WS/ready", false, http.StatusOK},
-		{"/api/workspaces/WS/lead/data/issues", true, http.StatusOK},
-		{"/api/workspaces/WS/lead/data/ready", true, http.StatusOK},
-		{"/api/workspaces/WS/future-route", false, http.StatusNoContent},
-		{"/api/workspaces/WS/lead/data/future-route", true, http.StatusNotFound},
+		{"/api/workspaces/WS/issues", "", http.StatusOK},
+		{"/api/workspaces/WS/ready", "", http.StatusOK},
+		{"/api/workspaces/WS/lead/data/issues", token, http.StatusOK},
+		{"/api/workspaces/WS/lead/data/ready", token, http.StatusOK},
+		{"/api/workspaces/WS/future-route", "", http.StatusNoContent},
+		{"/api/workspaces/WS/lead/data/future-route", token, http.StatusNotFound},
+		{"/api/workspaces/WS/lead/dispatch/future-route", dispatchToken, http.StatusNotFound},
+		{"/api/workspaces/WS/lead/dispatch/runs/nope", dispatchToken, http.StatusNotFound},
 	} {
 		req := httptest.NewRequest(http.MethodGet, tc.path, nil)
-		if tc.auth {
-			req.Header.Set("Authorization", "Bearer "+token)
+		if tc.token != "" {
+			req.Header.Set("Authorization", "Bearer "+tc.token)
 		}
 		rec := httptest.NewRecorder()
 		app.mux.ServeHTTP(rec, req)

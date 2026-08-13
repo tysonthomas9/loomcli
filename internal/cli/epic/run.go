@@ -72,7 +72,6 @@ another registered workflow with the same payload shape.`,
 
 func init() {
 	epicRunCmd.Flags().StringVar(&runParent, "parent", "", "Epic ID to drain (required)")
-	_ = epicRunCmd.MarkFlagRequired("parent")
 	epicRunCmd.Flags().IntVar(&runMaxConcurrency, "max-concurrency", 2, "Maximum simultaneous workers spawned by this run")
 	epicRunCmd.Flags().StringVar(&runWorkerPrefix, "worker-prefix", "", "Optional worker profile prefix for spawned workers")
 	epicRunCmd.Flags().IntVar(&runIntervalSeconds, "interval-seconds", 5, "Seconds between reconcile passes")
@@ -103,6 +102,11 @@ func runnerNeedsLocalPreflight(runner string) bool {
 
 //nolint:funlen // The command wires validation, queueing, optional projection, execution, and post-drain publish.
 func runEpicRun(cmd *cobra.Command, _ []string) error {
+	if cli.IsLeadOccupantActive() {
+		ctx, cancel := signalContext(cmd.Context())
+		defer cancel()
+		return runEpicRunSandbox(ctx, cmd)
+	}
 	if err := validateEpicRunFlags(); err != nil {
 		return err
 	}

@@ -5,6 +5,7 @@ package leadoccupant
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -13,6 +14,13 @@ import (
 	"strings"
 	"time"
 )
+
+// UnauthorizedMessage is the shared stale occupant-token guidance.
+const UnauthorizedMessage = "occupant token expired; the lead runtime is not refreshing it — restart the lead"
+
+// ErrIncompleteEnv means an occupant token was provided without every
+// endpoint/workspace value needed to stay on the sandbox-safe path.
+var ErrIncompleteEnv = errors.New("occupant environment incomplete: LOOM_LEAD_OCCUPANT_TOKEN is set but LOOM_LEAD_API_URL/LOOM_WORKSPACE is missing")
 
 const (
 	EnvOccupantToken = "LOOM_LEAD_OCCUPANT_TOKEN" //nolint:gosec // env var name, not a credential

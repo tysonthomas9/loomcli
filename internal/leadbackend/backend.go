@@ -3,7 +3,6 @@
 package leadbackend
 
 import (
-	"errors"
 	"fmt"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
@@ -11,7 +10,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/leadoccupant"
 )
 
-const unauthorizedMessage = "occupant token expired; the lead runtime is not refreshing it — restart the lead"
+const unauthorizedMessage = leadoccupant.UnauthorizedMessage
 
 // New returns the occupant backend when the sandbox credential is present.
 // An incomplete occupant environment fails closed rather than falling through
@@ -22,13 +21,13 @@ func New() (backend.IssueBackend, error) {
 	case leadoccupant.StateAbsent:
 		return nil, nil
 	case leadoccupant.StatePartial:
-		return nil, errors.New("occupant environment incomplete: LOOM_LEAD_OCCUPANT_TOKEN is set but LOOM_LEAD_API_URL/LOOM_WORKSPACE is missing")
+		return nil, leadoccupant.ErrIncompleteEnv
 	case leadoccupant.StateComplete:
 		return api.New(api.Config{
 			BaseURL:             env.BaseURL,
 			WorkspaceID:         env.Workspace,
 			PathPrefix:          leadoccupant.DataPathPrefix,
-			UnauthorizedMessage: unauthorizedMessage,
+			UnauthorizedMessage: leadoccupant.UnauthorizedMessage,
 			HTTPClient:          api.NewAuthHTTPClient(env.Transport()),
 		})
 	default:

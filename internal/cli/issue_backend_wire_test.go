@@ -20,6 +20,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/modbuilder"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
+	"github.com/tysonthomas9/loomcli/internal/workflows"
 )
 
 type issueWireRequest struct {
@@ -192,6 +193,167 @@ func TestIssueBackendWire_OccupantAttributionThroughLeadDataMount(t *testing.T) 
 	if p1Backend == p2Backend {
 		t.Fatal("two placements resolved to the same actor-keyed backend instance")
 	}
+}
+
+func TestIssueBackendWire_OccupantEpicRunDispatchAttribution(t *testing.T) {
+	fixture := newIssueDispatchWireFixture(t)
+	first := fixture.request(t, http.MethodPost, "/api/workspaces/WS/lead/dispatch/epic-run", "p1", `{"epicId":"epic-1"}`)
+	second := fixture.request(t, http.MethodPost, "/api/workspaces/WS/lead/dispatch/epic-run", "p2", `{"epicId":"epic-2"}`)
+	if first.Code != http.StatusAccepted || second.Code != http.StatusAccepted {
+		t.Fatalf("dispatch statuses = %d/%d; bodies = %s / %s", first.Code, second.Code, first.Body.String(), second.Body.String())
+	}
+	assertIssueWireActor(t, fixture.recorder.findByActor(t, http.MethodGet,
+		"/api/v1/WS/issues/epic-1", "lead-occupant:p1"), "lead-occupant:p1")
+	assertIssueWireActor(t, fixture.recorder.findByActor(t, http.MethodGet,
+		"/api/v1/WS/issues/epic-2", "lead-occupant:p2"), "lead-occupant:p2")
+
+	runs, err := fixture.store.DriverRuns().List(context.Background(), "WS", store.DriverRunFilter{})
+	if err != nil || len(runs) != 2 {
+		t.Fatalf("runs = %+v, err = %v", runs, err)
+	}
+	runBySource := make(map[string]*domain.DriverRun, len(runs))
+	for _, run := range runs {
+		runBySource[run.SourceRef] = run
+	}
+	for _, placement := range []string{"p1", "p2"} {
+		source := leadtoken.OccupantActor(placement)
+		if runBySource[source] == nil {
+			t.Fatalf("missing run for source %q: %+v", source, runs)
+		}
+	}
+	for placement, ownSource := range map[string]string{"p1": "lead-occupant:p1", "p2": "lead-occupant:p2"} {
+		own := runBySource[ownSource]
+		foreign := runBySource[map[string]string{"p1": "lead-occupant:p2", "p2": "lead-occupant:p1"}[placement]]
+		ownResult := fixture.request(t, http.MethodGet,
+			"/api/workspaces/WS/lead/dispatch/runs/"+own.RunID, placement, "")
+		foreignResult := fixture.request(t, http.MethodGet,
+			"/api/workspaces/WS/lead/dispatch/runs/"+foreign.RunID, placement, "")
+		if ownResult.Code != http.StatusOK || foreignResult.Code != http.StatusNotFound {
+			t.Fatalf("placement %s own/foreign statuses = %d/%d", placement, ownResult.Code, foreignResult.Code)
+		}
+	}
+}
+
+func TestEpicRunStatus_MissingAndForeignRunsAreByteIdentical(t *testing.T) {
+	fixture := newIssueDispatchWireFixture(t)
+	dispatched := fixture.request(t, http.MethodPost,
+		"/api/workspaces/WS/lead/dispatch/epic-run", "p1", `{"epicId":"epic-1"}`)
+	if dispatched.Code != http.StatusAccepted {
+		t.Fatalf("dispatch status = %d; body = %s", dispatched.Code, dispatched.Body.String())
+	}
+	var response struct {
+		Data struct {
+			RunID string `json:"runId"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(dispatched.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	foreign := fixture.request(t, http.MethodGet,
+		"/api/workspaces/WS/lead/dispatch/runs/"+response.Data.RunID, "p2", "")
+	missing := fixture.request(t, http.MethodGet,
+		"/api/workspaces/WS/lead/dispatch/runs/run-does-not-exist", "p2", "")
+	if foreign.Code != http.StatusNotFound || missing.Code != http.StatusNotFound {
+		t.Fatalf("foreign/missing statuses = %d/%d", foreign.Code, missing.Code)
+	}
+	if !bytes.Equal(foreign.Body.Bytes(), missing.Body.Bytes()) {
+		t.Fatalf("foreign body %q != missing body %q", foreign.Body.Bytes(), missing.Body.Bytes())
+	}
+}
+
+type issueDispatchWireFixture struct {
+	mux      *http.ServeMux
+	store    store.Store
+	key      []byte
+	recorder *issueWireRecorder
+}
+
+func newIssueDispatchWireFixture(t *testing.T) *issueDispatchWireFixture {
+	t.Helper()
+	recorder := &issueWireRecorder{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		recorder.requests = append(recorder.requests, issueWireRequest{
+			method: r.Method, path: r.URL.Path, actor: r.Header.Get("X-Actor"), body: body,
+		})
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method == http.MethodGet &&
+			(r.URL.Path == "/api/v1/WS/issues/epic-1" || r.URL.Path == "/api/v1/WS/issues/epic-2") {
+			id := strings.TrimPrefix(r.URL.Path, "/api/v1/WS/issues/")
+			writeIssueWireResponse(t, w, map[string]any{
+				"id": id, "title": "Epic", "type": "epic", "repo": "repo-1",
+			})
+			return
+		}
+		writeIssueWireResponse(t, w, []any{})
+	}))
+	t.Cleanup(server.Close)
+
+	st := memstore.New()
+	seedIssueDispatchWireStore(t, st)
+	key := bytes.Repeat([]byte{0x79}, 32)
+	factory := cli.WorkspaceAwareIssueBackendForURL(server.URL, "serve-actor")
+	mux := http.NewServeMux()
+	modbuilder.NewLeadAPIModule(modbuilder.LeadAPIDeps{
+		Store: st, TokenKey: key, IssueBackendFn: factory,
+	}).Register(mux)
+	return &issueDispatchWireFixture{mux: mux, store: st, key: key, recorder: recorder}
+}
+
+func seedIssueDispatchWireStore(t *testing.T, st store.Store) {
+	t.Helper()
+	ctx := context.Background()
+	for _, placement := range []struct{ id, agent string }{{"p1", "lead-one"}, {"p2", "lead-two"}} {
+		if _, err := st.Nodes().Create(ctx, store.NodeCreate{
+			WorkspaceKey: "WS", NodeID: placement.id, OwnerActor: "agent:" + placement.agent,
+			Labels:    []string{"loom-agent=" + placement.agent},
+			Placement: &domain.NodePlacement{SandboxID: "sandbox-" + placement.id, Generation: 7, State: domain.PlacementStateActive},
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := st.AgentSessions().Create(ctx, store.AgentSessionCreate{
+			WorkspaceKey: "WS", SessionID: "session-" + placement.id, AgentID: placement.agent,
+			NodeID: placement.id, Kind: domain.AgentSessionKindOrchestration, Status: domain.AgentSessionRunning,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := st.Repos().Create(ctx, store.RepoCreate{
+		WorkspaceKey: "WS", Name: "repo-1", RemoteURL: "https://github.com/octocat/hello", DefaultBranch: "main",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.Drivers().Create(ctx, store.DriverCreate{
+		WorkspaceKey: "WS", DriverID: workflows.BuiltinEpicRunnerWorkflowName,
+		Name: workflows.BuiltinEpicRunnerWorkflowName, OwnerType: domain.DriverOwnerSystem,
+		ActiveVersionID: "epic-version", Status: domain.DriverStatusActive, TrustLevel: domain.DriverTrustTrusted,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.DriverVersions().Create(ctx, store.DriverVersionCreate{
+		WorkspaceKey: "WS", VersionID: "epic-version", DriverID: workflows.BuiltinEpicRunnerWorkflowName,
+		Version: 1, SourceDigest: "sha256:source", BundleDigest: "sha256:bundle",
+		ValidationStatus: domain.DriverVersionValidationPassed,
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func (f *issueDispatchWireFixture) request(t *testing.T, method, path, placement, body string) *httptest.ResponseRecorder {
+	t.Helper()
+	token, err := leadtoken.MintOccupantToken(leadtoken.OccupantClaims{
+		WorkspaceKey: "WS", PlacementID: placement, Generation: 7,
+		Caps: []string{leadtoken.CapLeadDispatch},
+	}, f.key, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(method, path, strings.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "WS"))
+	rec := httptest.NewRecorder()
+	f.mux.ServeHTTP(rec, req)
+	return rec
 }
 
 func TestIssueBackendWire_OccupantAddComment(t *testing.T) {
