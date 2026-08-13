@@ -1,6 +1,7 @@
 # Phase 10 Consolidated Deep Module Goal
 
-- **Status:** Canonical approved architecture; implementation in progress
+- **Status:** Final approved Phase 10 decision; implementation in progress
+- **Normative authority:** Sole Phase 10 architecture and delivery plan
 - **Implemented:** Stack 10.1 canonical generated HTTP contract seam
 - **Date:** 2026-08-12
 - **Baseline:** Phase 9 Wave 9.41, 158 production packages
@@ -15,6 +16,26 @@
   [workflow bundle availability](../../adr/0003-separate-workflow-bundle-availability.md),
   [private composed runtime](../../adr/0004-private-composed-serve-runtime.md),
   and [Artifacts evidence policy](../../adr/0005-artifacts-own-evidence-policy.md)
+
+## Decision precedence
+
+This document is the only normative Phase 10 architecture and implementation
+plan. If an earlier discussion, session conclusion, stack order, package
+forecast, or completion criterion conflicts with this document, this document
+wins.
+
+| Record | Final status | Treatment |
+|---|---|---|
+| This consolidated deep-module goal | **Final and normative** | Use its ownership decisions, twelve-stack manifest, gates, and completion criteria. |
+| [Post-Phase-9 WebUI deepening discussion](18-post-phase-9-webui-deepening-plan.md) | **Superseded** | Retain only as historical rationale and its complete question ledger. |
+| [Phase 10 application deepening discussion](19-phase-10-application-deepening-goal.md) | **Superseded** | Retain only as historical rationale for the accepted supporting ADRs. |
+| Separate six-candidate Phase 10 session discussion | **Superseded** | Its accepted conclusions are incorporated here; its separate stack and unresolved alternatives have no authority. |
+
+ADRs 0001 through 0005 are accepted supporting decisions, not competing Phase
+10 plans. Per-stack evidence records describe what was implemented and proved;
+they cannot silently revise this architecture. Any future change to the final
+decision requires an explicit amendment here and, when architectural, a new or
+superseding ADR.
 
 ## Goal
 
@@ -244,7 +265,7 @@ Desktop matrix rather than substituting API-only evidence.
 Implementation evidence is recorded per stack. Stack 10.1 is documented in
 [Phase 10.1 generated HTTP contract evidence](21-phase-10-1-generated-http-contract-evidence.md).
 
-## Superseded alternatives
+## Superseded decisions and alternatives
 
 The following earlier decisions are explicitly replaced:
 

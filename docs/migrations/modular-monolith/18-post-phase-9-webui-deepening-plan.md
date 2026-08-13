@@ -1,6 +1,7 @@
 # Post-Phase-9 WebUI Deepening Plan
 
-- **Status:** Superseded by the
+- **Status:** Superseded; retained for historical rationale only
+- **Normative authority:** None. The sole final Phase 10 decision is the
   [Phase 10 consolidated deep-module goal](20-phase-10-consolidated-deep-module-goal.md)
 - **Date:** 2026-08-12
 - **Scope:** Remaining shallow modules under `internal/webui`, the capability
@@ -8,10 +9,12 @@
   prove WebUI is delivery-only
 - **Decision:** [ADR-0001: WebUI is a delivery-only module](../../adr/0001-webui-is-delivery-only.md)
 
-> This document is retained as the complete WebUI architecture discussion and
-> decision ledger. It is not the implementation authority. The consolidated
-> Phase 10 goal resolves its naming, evidence-policy, dependency-order, and
-> delivery-stack decisions; ADR-0001 remains accepted.
+> **Superseded record.** This document is retained as the complete WebUI
+> architecture discussion and decision ledger. Do not use its approved seams,
+> nine-entry stack, ordering, package forecast, or completion criteria as an
+> implementation plan. The final Phase 10 decision resolves its naming,
+> evidence-policy, dependency-order, and delivery-stack decisions. ADR-0001
+> remains accepted as a supporting constraint.
 
 ## Goal
 

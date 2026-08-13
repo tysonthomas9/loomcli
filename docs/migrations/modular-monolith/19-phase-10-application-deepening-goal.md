@@ -1,6 +1,7 @@
 # Phase 10 Application Deepening Goal
 
-- **Status:** Superseded by the
+- **Status:** Superseded; retained for historical rationale only
+- **Normative authority:** None. The sole final Phase 10 decision is the
   [Phase 10 consolidated deep-module goal](20-phase-10-consolidated-deep-module-goal.md)
 - **Date:** 2026-08-12
 - **Baseline:** Phase 9 Wave 9.41, 158 production packages
@@ -11,11 +12,11 @@
   [workflow bundle availability](../../adr/0003-separate-workflow-bundle-availability.md),
   and [private composed runtime](../../adr/0004-private-composed-serve-runtime.md)
 
-> This document is retained as the complete application-deepening discussion.
-> It is not the implementation authority. The consolidated Phase 10 goal
-> incorporates its accepted ADRs, resolves overlap with the WebUI and six-
-> candidate discussions, and replaces its five-stack manifest and provisional
-> package forecast.
+> **Superseded record.** This document is retained as the complete application-
+> deepening discussion. Do not use its five-stack manifest, ordering,
+> provisional package forecast, or completion criteria as an implementation
+> plan. The final Phase 10 decision incorporates its accepted ADRs and resolves
+> its overlap with the WebUI and six-candidate discussions.
 
 ## Goal
 
