@@ -123,9 +123,10 @@ type ServerConfig struct {
 	// cli wiring can resolve the backend lazily without webui depending on
 	// internal/cli (which would create an import cycle).
 	//
-	// The ctx carries the per-request workspace ID via middleware.WithWorkspace,
-	// allowing the closure to construct a per-workspace fleet-db backend in
-	// cloud mode. Local wirings return the process-global fleet-db backend.
+	// The ctx carries the per-request workspace ID via middleware.WithWorkspace
+	// and may carry a request principal via middleware.ActorFromContext. The
+	// cloud-mode factory caches fleet-db backends by (workspace, actor) and fails
+	// closed for occupant principals in local mode.
 	IssueBackendFn func(ctx context.Context) backend.IssueBackend
 }
 

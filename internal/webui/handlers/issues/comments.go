@@ -97,9 +97,18 @@ func HandleAddComment(svc service.IssueService) http.HandlerFunc {
 			return
 		}
 
+		author, reject := actorAttribution(r.Context())
+		if reject {
+			handler.WriteJSON(w, http.StatusForbidden, CommentResponse{
+				Success: false,
+				Error:   "invalid request principal",
+			})
+			return
+		}
+
 		comment, err := svc.AddComment(r.Context(), service.AddCommentParams{
 			IssueID: issueID,
-			Author:  "web-ui",
+			Author:  author,
 			Text:    req.Content(),
 		})
 		if err != nil {

@@ -4,8 +4,18 @@ import (
 	"net/http"
 
 	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
+
+// withWebUIActor stamps the browser principal on the request context.
+// This module is the browser mount; it never serves occupant traffic
+// (occupants get their own allowlisted mount under /api/lead/ in Phase A).
+func withWebUIActor(h http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		h(w, r.WithContext(middleware.WithActor(r.Context(), middleware.WebUIActor())))
+	}
+}
 
 // IssueModule registers the workspace-scoped issue CRUD, comment, event,
 // and dependency routes on a [*http.ServeMux].
@@ -36,28 +46,28 @@ func (m *IssueModule) Register(mux *http.ServeMux) {
 	// Search — must register alongside {id} because Go 1.22+ ServeMux prefers
 	// the literal "search" segment over the {id} wildcard, so this will route
 	// correctly even though both patterns share the same prefix.
-	mux.HandleFunc("GET /api/workspaces/{ws}/issues/search", HandleSearchIssues(m.svc))
+	mux.HandleFunc("GET /api/workspaces/{ws}/issues/search", withWebUIActor(HandleSearchIssues(m.svc)))
 
 	// Issue CRUD
-	mux.HandleFunc("GET /api/workspaces/{ws}/issues/{id}", HandleGetIssue(m.svc))
-	mux.HandleFunc("GET /api/workspaces/{ws}/issues", HandleListIssues(m.svc))
-	mux.HandleFunc("POST /api/workspaces/{ws}/issues", HandleCreateIssue(m.svc))
-	mux.HandleFunc("PATCH /api/workspaces/{ws}/issues/{id}", HandlePatchIssue(m.svc))
-	mux.HandleFunc("POST /api/workspaces/{ws}/issues/{id}/close", HandleCloseIssue(m.svc))
-	mux.HandleFunc("POST /api/workspaces/{ws}/issues/{id}/reopen", HandleReopenIssue(m.svc))
-	mux.HandleFunc("POST /api/workspaces/{ws}/issues/{id}/claim", HandleClaimIssue(m.svc))
-	mux.HandleFunc("POST /api/workspaces/{ws}/issues/{id}/move", HandleMoveIssue(m.svc, m.store))
-	mux.HandleFunc("DELETE /api/workspaces/{ws}/issues/{id}", HandleDeleteIssue(m.svc))
+	mux.HandleFunc("GET /api/workspaces/{ws}/issues/{id}", withWebUIActor(HandleGetIssue(m.svc)))
+	mux.HandleFunc("GET /api/workspaces/{ws}/issues", withWebUIActor(HandleListIssues(m.svc)))
+	mux.HandleFunc("POST /api/workspaces/{ws}/issues", withWebUIActor(HandleCreateIssue(m.svc)))
+	mux.HandleFunc("PATCH /api/workspaces/{ws}/issues/{id}", withWebUIActor(HandlePatchIssue(m.svc)))
+	mux.HandleFunc("POST /api/workspaces/{ws}/issues/{id}/close", withWebUIActor(HandleCloseIssue(m.svc)))
+	mux.HandleFunc("POST /api/workspaces/{ws}/issues/{id}/reopen", withWebUIActor(HandleReopenIssue(m.svc)))
+	mux.HandleFunc("POST /api/workspaces/{ws}/issues/{id}/claim", withWebUIActor(HandleClaimIssue(m.svc)))
+	mux.HandleFunc("POST /api/workspaces/{ws}/issues/{id}/move", withWebUIActor(HandleMoveIssue(m.svc, m.store)))
+	mux.HandleFunc("DELETE /api/workspaces/{ws}/issues/{id}", withWebUIActor(HandleDeleteIssue(m.svc)))
 
 	// Comments
-	mux.HandleFunc("GET /api/workspaces/{ws}/issues/{id}/comments", HandleListComments(m.svc))
-	mux.HandleFunc("POST /api/workspaces/{ws}/issues/{id}/comments", HandleAddComment(m.svc))
+	mux.HandleFunc("GET /api/workspaces/{ws}/issues/{id}/comments", withWebUIActor(HandleListComments(m.svc)))
+	mux.HandleFunc("POST /api/workspaces/{ws}/issues/{id}/comments", withWebUIActor(HandleAddComment(m.svc)))
 
 	// Events
-	mux.HandleFunc("GET /api/workspaces/{ws}/issues/{id}/events", HandleGetIssueEvents(m.svc))
+	mux.HandleFunc("GET /api/workspaces/{ws}/issues/{id}/events", withWebUIActor(HandleGetIssueEvents(m.svc)))
 
 	// Dependencies
-	mux.HandleFunc("GET /api/workspaces/{ws}/issues/{id}/dependencies", HandleListDependencies(m.svc))
-	mux.HandleFunc("POST /api/workspaces/{ws}/issues/{id}/dependencies", HandleAddDependency(m.svc))
-	mux.HandleFunc("DELETE /api/workspaces/{ws}/issues/{id}/dependencies/{depId}", HandleRemoveDependency(m.svc))
+	mux.HandleFunc("GET /api/workspaces/{ws}/issues/{id}/dependencies", withWebUIActor(HandleListDependencies(m.svc)))
+	mux.HandleFunc("POST /api/workspaces/{ws}/issues/{id}/dependencies", withWebUIActor(HandleAddDependency(m.svc)))
+	mux.HandleFunc("DELETE /api/workspaces/{ws}/issues/{id}/dependencies/{depId}", withWebUIActor(HandleRemoveDependency(m.svc)))
 }

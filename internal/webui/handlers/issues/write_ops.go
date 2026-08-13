@@ -1,12 +1,14 @@
 package issues
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
 
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
+	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
@@ -27,7 +29,13 @@ func HandleCreateIssue(svc service.IssueService) http.HandlerFunc {
 			return
 		}
 
-		data, err := svc.CreateIssue(r.Context(), createParamsFromRequest(r, &req))
+		params := createParamsFromRequest(r, &req)
+		if applyActorAttribution(r.Context(), &params) {
+			writeIssuesError(w, http.StatusForbidden, "invalid request principal", "INVALID_PRINCIPAL")
+			return
+		}
+
+		data, err := svc.CreateIssue(r.Context(), params)
 		if err != nil {
 			handler.HandleServiceError(w, err)
 			return
@@ -38,6 +46,32 @@ func HandleCreateIssue(svc service.IssueService) http.HandlerFunc {
 			Data:    data,
 		})
 	}
+}
+
+// applyActorAttribution overrides client-supplied attribution for
+// principals that do not get to name themselves. Web-UI requests are a
+// no-op (full client trust, unchanged). reject is true for an invalid
+// principal — the handler must 403.
+func applyActorAttribution(ctx context.Context, p *service.CreateIssueParams) (reject bool) {
+	a, ok := middleware.ActorFromContext(ctx)
+	if !ok {
+		return false
+	}
+	if err := a.Validate(); err != nil {
+		return true
+	}
+	if !a.OverridesClientAttribution() {
+		return false
+	}
+	att := a.Attribution()
+	p.CreatedBy = att
+	if p.Assignee != "" {
+		p.Assignee = att // Tyson: coerce non-empty, empty stays unassigned
+	}
+	if p.Owner != "" {
+		p.Owner = att // Tyson 2026-08-13: owner locked down like assignee
+	}
+	return false
 }
 
 // createParamsFromRequest maps the decoded create request body plus the
