@@ -3,13 +3,15 @@
 - **Status:** Final approved Phase 10 decision; implementation in progress
 - **Normative authority:** Sole Phase 10 architecture and delivery plan
 - **Implemented:** Stack 10.1 canonical generated HTTP contract seam
-- **Date:** 2026-08-12
+- **Decision last amended:** 2026-08-13
 - **Baseline:** Phase 9 Wave 9.41, 158 production packages
 - **Supersedes:** the
   [Post-Phase-9 WebUI deepening discussion](18-post-phase-9-webui-deepening-plan.md),
   the
   [Phase 10 application deepening discussion](19-phase-10-application-deepening-goal.md),
-  and the separate six-candidate Phase 10 discussion
+  the separate six-candidate Phase 10 discussion,
+  the later outside-package deepening discussion,
+  and the later Source Control/package-unification discussion
 - **Supporting decisions:**
   [WebUI is delivery-only](../../adr/0001-webui-is-delivery-only.md),
   [atomic Work Item move](../../adr/0002-atomic-cross-workspace-work-item-move.md),
@@ -30,12 +32,39 @@ wins.
 | [Post-Phase-9 WebUI deepening discussion](18-post-phase-9-webui-deepening-plan.md) | **Superseded** | Retain only as historical rationale and its complete question ledger. |
 | [Phase 10 application deepening discussion](19-phase-10-application-deepening-goal.md) | **Superseded** | Retain only as historical rationale for the accepted supporting ADRs. |
 | Separate six-candidate Phase 10 session discussion | **Superseded** | Its accepted conclusions are incorporated here; its separate stack and unresolved alternatives have no authority. |
+| Later outside-package deepening session discussion | **Superseded** | Its deletion-test and package-locality conclusions are incorporated below; its candidate list and package-count targets have no independent authority. |
+| Later Source Control/package-unification session discussion | **Superseded** | Its accepted Git consolidation is incorporated into the Source Control decision below; its alternative boundaries and sequencing have no independent authority. |
+| Any other Phase 10 planning session or proposal not ratified by an explicit amendment to this document | **Superseded** | It may be retained as research or rationale, but it cannot change ownership, interfaces, stack order, gates, or completion criteria. |
 
 ADRs 0001 through 0005 are accepted supporting decisions, not competing Phase
 10 plans. Per-stack evidence records describe what was implemented and proved;
 they cannot silently revise this architecture. Any future change to the final
 decision requires an explicit amendment here and, when architectural, a new or
 superseding ADR.
+
+### Cross-session consolidation
+
+The two later discussions refine this decision; they do not add new stacks or
+parallel authorities:
+
+- **Outside-package reduction:** the target is less knowledge spread outside
+  capability owners, not the smallest possible package count. Move product
+  policy, aggregate behavior, and persistence-shaped interfaces to their
+  owners. Retain a package outside `internal/modules` only when deleting it
+  would duplicate a real protocol, security, operating-system, runtime, build,
+  or independently replaceable mechanism across callers. Stacks 10.3, 10.6,
+  and 10.11 perform this work and tighten the exact inventory after each
+  deletion.
+- **Git package convergence:** consumers receive the single Source Control
+  module through Browse, Mutate, and Checkout ports. Local Git mechanics,
+  stack persistence, forge publication, and credential brokering remain
+  private adapters because they cross distinct earned seams. Consolidation
+  removes duplicate public Git/FileOps policy and coordinators; it does not
+  flatten those mechanisms into one large implementation package. Stack 10.3
+  is the sole delivery authority for this change.
+
+Any conclusion from a superseded discussion that is not restated in this
+document is rejected rather than implicitly deferred.
 
 ## Goal
 
@@ -279,8 +308,9 @@ The following earlier decisions are explicitly replaced:
   `internal/app/repositoryadmission` workflow name.
 - **Transcript Evidence as the complete run record** is replaced by Run Capture
   as the grouping projection, with Transcript Evidence as one facet.
-- **Separate six-, nine-, and five-entry Phase 10 stacks** are replaced by the
-  twelve-entry manifest in this document.
+- **Separate six-, nine-, and five-entry Phase 10 stacks, plus later
+  outside-package and Source Control candidate sequences,** are replaced by
+  the twelve-entry manifest in this document.
 - **The provisional 156-package forecast** is withdrawn. Each stack records an
   exact shrink-only inventory after its physical shape is reviewed; no package
   count justifies a shallow interface.

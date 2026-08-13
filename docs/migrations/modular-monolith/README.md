@@ -3,7 +3,7 @@
 - **Status:** Phase 9 package consolidation complete through Wave 9.41; the
   modular monolith is ratcheted to 158 production packages with no
   `internal/backend` compatibility tree
-- **Date:** 2026-08-12
+- **Decision last amended:** 2026-08-13
 - **Scope:** `loom serve`, the operator CLI entry surfaces, the Vite frontend counterpart, and the fleet-db contracts those capabilities depend on
 - **Provenance:** [Phase 0 integration baseline](00-phase-0-baseline.md), final [Phase 1 evidence](06-phase-1-decisions-and-evidence.md) at Loom `7e8a6dd2`, [Phase 2 evidence](07-phase-2-decisions-and-evidence.md) at Loom `84cccb761` with FleetDB `430dce8d9`, [Phase 3 evidence](08-phase-3-decisions-and-evidence.md) at core implementation commits Loom `7f95b9bf1` and FleetDB `f1c4e1119`, final [Phase 4 evidence](09-phase-4-decisions-and-evidence.md) at Loom `53cbe2577` with FleetDB `afb688768`, and the appended reliability-validation record at Loom `67c45972f` with FleetDB `9ffa69f60`
 - **Related:** [Unified agent UX](../../design/2026-07-01-unified-agent-ux-proposal.md) · [Durable agent identity](../../design/2026-07-07-agent-identity-record.md) · [Workflow driver authoring](../../design/workflow-driver-authoring-guide.md)
@@ -11,6 +11,14 @@
 ## Decision summary
 
 Migrate the application inside `loom serve` to a **capability-owned modular monolith**.
+
+The [Phase 10 consolidated deep-module goal](20-phase-10-consolidated-deep-module-goal.md)
+is the sole normative Phase 10 plan. Documents 18 and 19, the six-candidate
+session, and the later outside-package and Source Control/package-unification
+sessions are superseded planning records. Their accepted conclusions are
+restated in document 20; anything not restated there has no implementation
+authority. ADRs remain supporting architecture decisions, and per-stack
+records remain implementation evidence rather than alternative plans.
 
 - Keep one Go module, one build, and—after supervisor retirement—one Loom application process.
 - Keep fleet-db as the separate durability/control-plane service.
