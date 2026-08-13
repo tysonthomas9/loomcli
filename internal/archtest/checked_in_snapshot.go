@@ -30,7 +30,7 @@ func checkedInSnapshotViolations(report Report) []string {
 		}
 	}
 
-	checkCount("composite Store files", len(report.CompositeStoreFiles), 14)
+	checkCount("composite Store files", len(report.CompositeStoreFiles), 13)
 	checkCount("outside-composition Store files", len(report.CompositeStoreOutside), 0)
 	checkCount("legacy handler imports", len(report.LegacyHandlerImports), 0)
 	if !slices.Equal(report.ModuleRoots, checkedInModuleRoots) {

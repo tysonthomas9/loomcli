@@ -6,26 +6,35 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
 	loomapi "github.com/tysonthomas9/loomcli/internal/platform/loomapi/gen"
 	"github.com/tysonthomas9/loomcli/internal/webui/apperrors"
-	"github.com/tysonthomas9/loomcli/internal/webui/filecoord"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
 
 // IsBinaryContent checks if data is likely binary (non-UTF-8 or contains null bytes).
 func IsBinaryContent(data []byte) bool {
-	return filecoord.IsBinaryContent(data)
+	return sourcecontrol.IsBinaryContent(data)
 }
 
 // scopeFromQuery parses the scope/target query params for the scoped file
 // browser, defaulting to the workspace scope when scope is omitted.
-func scopeFromQuery(r *http.Request) (filecoord.FileScope, string, string) {
-	scope := filecoord.FileScope(r.URL.Query().Get("scope"))
+func scopeFromQuery(r *http.Request) (sourcecontrol.FileScope, string, string) {
+	scope := sourcecontrol.FileScope(r.URL.Query().Get("scope"))
 	if scope == "" {
-		scope = filecoord.ScopeWorkspace
+		scope = sourcecontrol.ScopeWorkspace
 	}
 	return scope, r.URL.Query().Get("target"), r.URL.Query().Get("repo")
+}
+
+func fileLocation(wsID string, scope sourcecontrol.FileScope, target, repo string) sourcecontrol.FileLocation {
+	return sourcecontrol.FileLocation{WorkspaceKey: wsID, Scope: scope, Target: target, Repository: repo}
+}
+
+func fileAccessGrant(r *http.Request) sourcecontrol.AccessGrant {
+	grant, _ := middleware.FileAccessGrantFromContext(r.Context())
+	return grant
 }
 
 func repoFromQueryAndBody(queryRepo, bodyRepo string) (string, error) {
@@ -102,74 +111,82 @@ func decodeJSONBody(w http.ResponseWriter, r *http.Request, dst any, optional bo
 // HandleFileCapabilities returns the permissions already established by file middleware.
 func HandleFileCapabilities() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		capabilities, ok := filecoord.FileCapabilitiesFromContext(r.Context())
+		grant, ok := middleware.FileAccessGrantFromContext(r.Context())
 		if !ok {
 			handler.RespondError(w, http.StatusForbidden, "forbidden")
 			return
 		}
-		handler.WriteJSON(w, http.StatusOK, capabilities)
+		handler.WriteJSON(w, http.StatusOK, fileCapabilitiesResponse(grant.Capabilities()))
 	}
 }
 
 // HandleScopedFileTree handles GET /api/workspaces/{ws}/files/tree?scope=&target=&path=.
-func HandleScopedFileTree(svc filecoord.FileService) http.HandlerFunc {
+func HandleScopedFileTree(svc sourcecontrol.Browse) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		wsID := middleware.WorkspaceFromContext(r.Context())
 		scope, target, repo := scopeFromQuery(r)
 		reqPath := r.URL.Query().Get("path")
 
-		result, err := svc.ListDirectoryScoped(r.Context(), wsID, scope, target, repo, reqPath)
+		result, err := svc.ListDirectory(r.Context(), sourcecontrol.PathQuery{
+			Grant: fileAccessGrant(r), Location: fileLocation(wsID, scope, target, repo), Path: reqPath,
+		})
 		if err != nil {
-			handler.HandleServiceError(w, err)
+			handler.HandleSourceControlError(w, err)
 			return
 		}
-		handler.WriteJSON(w, http.StatusOK, result)
+		handler.WriteJSON(w, http.StatusOK, fileTreeResponse(result))
 	}
 }
 
 // HandleScopedFileStat handles GET /api/workspaces/{ws}/files/stat?scope=&target=&path=.
-func HandleScopedFileStat(svc filecoord.FileService) http.HandlerFunc {
+func HandleScopedFileStat(svc sourcecontrol.Browse) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		wsID := middleware.WorkspaceFromContext(r.Context())
 		scope, target, repo := scopeFromQuery(r)
-		result, err := svc.StatPathScoped(r.Context(), wsID, scope, target, repo, r.URL.Query().Get("path"))
+		result, err := svc.StatPath(r.Context(), sourcecontrol.PathQuery{
+			Grant: fileAccessGrant(r), Location: fileLocation(wsID, scope, target, repo), Path: r.URL.Query().Get("path"),
+		})
 		if err != nil {
-			handler.HandleServiceError(w, err)
+			handler.HandleSourceControlError(w, err)
 			return
 		}
 		w.Header().Set("ETag", quotedETag(result.Version))
-		handler.WriteJSON(w, http.StatusOK, result)
+		handler.WriteJSON(w, http.StatusOK, fileStatResponse(result))
 	}
 }
 
 // HandleScopedFileRead handles GET /api/workspaces/{ws}/files?scope=&target=&path=.
-func HandleScopedFileRead(svc filecoord.FileService) http.HandlerFunc {
+func HandleScopedFileRead(svc sourcecontrol.Browse) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		wsID := middleware.WorkspaceFromContext(r.Context())
 		scope, target, repo := scopeFromQuery(r)
 		reqPath := r.URL.Query().Get("path")
 		rev := r.URL.Query().Get("rev")
 
-		var result *filecoord.FileReadResult
+		var result *sourcecontrol.FileReadResult
 		var err error
 		if strings.TrimSpace(rev) != "" {
-			result, err = svc.ReadFileAtRevScoped(r.Context(), wsID, scope, target, repo, reqPath, rev)
+			result, err = svc.ReadFileAtRevision(r.Context(), sourcecontrol.RevisionQuery{
+				Grant: fileAccessGrant(r), Location: fileLocation(wsID, scope, target, repo), Path: reqPath, Revision: rev,
+			})
 		} else {
-			result, err = svc.ReadFileScoped(r.Context(), wsID, scope, target, repo, reqPath)
+			result, err = svc.ReadFile(r.Context(), sourcecontrol.PathQuery{
+				Grant: fileAccessGrant(r), Location: fileLocation(wsID, scope, target, repo), Path: reqPath,
+			})
 		}
 		if err != nil {
-			handler.HandleServiceError(w, err)
+			handler.HandleSourceControlError(w, err)
 			return
 		}
 		if strings.TrimSpace(rev) == "" && result.Version != "" {
 			w.Header().Set("ETag", quotedETag(result.Version))
 		}
-		handler.WriteJSON(w, http.StatusOK, result)
+		handler.WriteJSON(w, http.StatusOK, fileReadResponse(result))
 	}
 }
 
 // HandleScopedFileDiff handles GET /api/workspaces/{ws}/files/diff?scope=&target=&path=&from=&to=.
-func HandleScopedFileDiff(svc filecoord.FileService) http.HandlerFunc {
+func HandleScopedFileDiff(svc sourcecontrol.Browse) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		wsID := middleware.WorkspaceFromContext(r.Context())
 		scope, target, repo := scopeFromQuery(r)
@@ -177,137 +194,157 @@ func HandleScopedFileDiff(svc filecoord.FileService) http.HandlerFunc {
 		from := r.URL.Query().Get("from")
 		to := r.URL.Query().Get("to")
 
-		result, err := svc.DiffFileScoped(r.Context(), wsID, scope, target, repo, reqPath, from, to)
+		result, err := svc.DiffPath(r.Context(), sourcecontrol.PathDiffQuery{
+			Grant: fileAccessGrant(r), Location: fileLocation(wsID, scope, target, repo),
+			Path: reqPath, From: from, To: to,
+		})
 		if err != nil {
-			handler.HandleServiceError(w, err)
+			handler.HandleSourceControlError(w, err)
 			return
 		}
-		handler.WriteJSON(w, http.StatusOK, result)
+		handler.WriteJSON(w, http.StatusOK, fileDiffResponse(result))
 	}
 }
 
 // HandleScopedFileHistory handles GET /api/workspaces/{ws}/files/history?scope=&target=&path=.
-func HandleScopedFileHistory(svc filecoord.FileService) http.HandlerFunc {
+func HandleScopedFileHistory(svc sourcecontrol.Browse) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		wsID := middleware.WorkspaceFromContext(r.Context())
 		scope, target, repo := scopeFromQuery(r)
 		reqPath := r.URL.Query().Get("path")
 
-		result, err := svc.HistoryFileScoped(r.Context(), wsID, scope, target, repo, reqPath)
+		result, err := svc.PathHistory(r.Context(), sourcecontrol.PathQuery{
+			Grant: fileAccessGrant(r), Location: fileLocation(wsID, scope, target, repo), Path: reqPath,
+		})
 		if err != nil {
-			handler.HandleServiceError(w, err)
+			handler.HandleSourceControlError(w, err)
 			return
 		}
-		handler.WriteJSON(w, http.StatusOK, result)
+		handler.WriteJSON(w, http.StatusOK, fileHistoryResponse(result))
 	}
 }
 
 // HandleScopedFileBlame handles GET /api/workspaces/{ws}/files/blame?scope=&target=&path=.
-func HandleScopedFileBlame(svc filecoord.FileService) http.HandlerFunc {
+func HandleScopedFileBlame(svc sourcecontrol.Browse) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		wsID := middleware.WorkspaceFromContext(r.Context())
 		scope, target, repo := scopeFromQuery(r)
 		reqPath := r.URL.Query().Get("path")
 
-		result, err := svc.BlameFileScoped(r.Context(), wsID, scope, target, repo, reqPath)
+		result, err := svc.BlamePath(r.Context(), sourcecontrol.PathQuery{
+			Grant: fileAccessGrant(r), Location: fileLocation(wsID, scope, target, repo), Path: reqPath,
+		})
 		if err != nil {
-			handler.HandleServiceError(w, err)
+			handler.HandleSourceControlError(w, err)
 			return
 		}
-		handler.WriteJSON(w, http.StatusOK, result)
+		handler.WriteJSON(w, http.StatusOK, fileBlameResponse(result))
 	}
 }
 
 // HandleScopedFileIndex handles GET /api/workspaces/{ws}/files/index?scope=&target=.
-func HandleScopedFileIndex(svc filecoord.FileService) http.HandlerFunc {
+func HandleScopedFileIndex(svc sourcecontrol.Browse) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		wsID := middleware.WorkspaceFromContext(r.Context())
 		scope, target, repo := scopeFromQuery(r)
 
-		result, err := svc.IndexFilesScoped(r.Context(), wsID, scope, target, repo)
+		result, err := svc.IndexFiles(r.Context(), sourcecontrol.LocationQuery{
+			Grant: fileAccessGrant(r), Location: fileLocation(wsID, scope, target, repo),
+		})
 		if err != nil {
-			handler.HandleServiceError(w, err)
+			handler.HandleSourceControlError(w, err)
 			return
 		}
-		handler.WriteJSON(w, http.StatusOK, result)
+		handler.WriteJSON(w, http.StatusOK, fileIndexResponse(result))
 	}
 }
 
 // HandleScopedFileSearch handles POST /api/workspaces/{ws}/files/search?scope=&target=.
-func HandleScopedFileSearch(svc filecoord.FileService) http.HandlerFunc {
+func HandleScopedFileSearch(svc sourcecontrol.Browse) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		wsID := middleware.WorkspaceFromContext(r.Context())
 		scope, target, queryRepo := scopeFromQuery(r)
 
-		var req filecoord.FileSearchRequest
+		var req loomapi.FileSearchRequest
 		if !decodeRequiredJSONBody(w, r, &req) {
 			return
 		}
 
-		repo, err := repoFromQueryAndBody(queryRepo, req.Repo)
+		repo, err := repoFromQueryAndBody(queryRepo, optionalFileRepo(req.Repo))
 		if err != nil {
 			handler.HandleServiceError(w, err)
 			return
 		}
-		result, err := svc.SearchFilesScoped(r.Context(), wsID, scope, target, repo, req)
+		result, err := svc.SearchFiles(r.Context(), sourcecontrol.SearchQuery{
+			Grant: fileAccessGrant(r), Location: fileLocation(wsID, scope, target, repo), Search: fileSearchCommand(req),
+		})
 		if err != nil {
-			handler.HandleServiceError(w, err)
+			handler.HandleSourceControlError(w, err)
 			return
 		}
-		handler.WriteJSON(w, http.StatusOK, result)
+		handler.WriteJSON(w, http.StatusOK, fileSearchResponse(result))
 	}
 }
 
 // HandleScopedGitStatus handles GET /api/workspaces/{ws}/files/git-status?scope=&target=.
-func HandleScopedGitStatus(svc filecoord.FileService) http.HandlerFunc {
+func HandleScopedGitStatus(svc sourcecontrol.Checkout) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		wsID := middleware.WorkspaceFromContext(r.Context())
 		scope, target, repo := scopeFromQuery(r)
 
-		result, err := svc.GitStatusScoped(r.Context(), wsID, scope, target, repo)
+		result, err := svc.Status(r.Context(), sourcecontrol.LocationQuery{
+			Grant: fileAccessGrant(r), Location: fileLocation(wsID, scope, target, repo),
+		})
 		if err != nil {
-			handler.HandleServiceError(w, err)
+			handler.HandleSourceControlError(w, err)
 			return
 		}
-		handler.WriteJSON(w, http.StatusOK, result)
+		handler.WriteJSON(w, http.StatusOK, fileGitStatusResponse(result))
 	}
 }
 
 // HandleFileCheckouts handles GET /api/workspaces/{ws}/files/checkouts.
-func HandleFileCheckouts(svc filecoord.FileService) http.HandlerFunc {
+func HandleFileCheckouts(svc sourcecontrol.Checkout) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		wsID := middleware.WorkspaceFromContext(r.Context())
 
-		result, err := svc.ListFileCheckouts(r.Context(), wsID)
+		result, err := svc.ListCheckouts(r.Context(), sourcecontrol.WorkspaceQuery{
+			Grant: fileAccessGrant(r), WorkspaceKey: wsID,
+		})
 		if err != nil {
-			handler.HandleServiceError(w, err)
+			handler.HandleSourceControlError(w, err)
 			return
 		}
-		handler.WriteJSON(w, http.StatusOK, result)
+		handler.WriteJSON(w, http.StatusOK, fileCheckoutsResponse(result))
 	}
 }
 
 // HandleFileCheckoutRepair handles POST /api/workspaces/{ws}/files/checkouts/repair.
-func HandleFileCheckoutRepair(svc filecoord.FileService) http.HandlerFunc {
+func HandleFileCheckoutRepair(svc sourcecontrol.Checkout) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		wsID := middleware.WorkspaceFromContext(r.Context())
 
-		var req filecoord.FileCheckoutRepairRequest
+		var req loomapi.FileCheckoutRepairRequest
 		if !decodeRequiredJSONBody(w, r, &req) {
 			return
 		}
 
-		result, err := svc.RepairCheckout(r.Context(), wsID, req)
+		repair := fileRepairCommand(req)
+		result, err := svc.Repair(r.Context(), sourcecontrol.RepairCommand{
+			Grant:    fileAccessGrant(r),
+			Location: fileLocation(wsID, sourcecontrol.FileScope(repair.Scope), repair.Target, repair.Repo),
+			Force:    repair.Force,
+		})
 		if err != nil {
-			handler.HandleServiceError(w, err)
+			handler.HandleSourceControlError(w, err)
 			return
 		}
-		handler.WriteJSON(w, http.StatusOK, result)
+		handler.WriteJSON(w, http.StatusOK, fileRepairResponse(result))
 	}
 }
 
 // HandleScopedFileWrite handles PUT /api/workspaces/{ws}/files?scope=&target=&path=.
-func HandleScopedFileWrite(svc filecoord.FileService) http.HandlerFunc {
+func HandleScopedFileWrite(svc sourcecontrol.Mutate) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		wsID := middleware.WorkspaceFromContext(r.Context())
 		scope, target, queryRepo := scopeFromQuery(r)
@@ -333,18 +370,21 @@ func HandleScopedFileWrite(svc filecoord.FileService) http.HandlerFunc {
 			handler.HandleServiceError(w, apperrors.ErrValidation("If-None-Match only supports *"))
 			return
 		}
-		result, err := svc.WriteFileConditionalScoped(r.Context(), wsID, scope, target, repo, reqPath, req.Content, filecoord.FileWritePreconditions{IfMatch: ifMatch, IfNoneMatch: ifNoneMatch == "*"})
+		result, err := svc.WriteFile(r.Context(), sourcecontrol.WriteCommand{
+			Grant: fileAccessGrant(r), Location: fileLocation(wsID, scope, target, repo),
+			Path: reqPath, Content: req.Content, ExpectedVersion: ifMatch, CreateOnly: ifNoneMatch == "*",
+		})
 		if err != nil {
-			handler.HandleServiceError(w, err)
+			handler.HandleSourceControlError(w, err)
 			return
 		}
 		w.Header().Set("ETag", quotedETag(result.Version))
-		handler.WriteJSON(w, http.StatusOK, result)
+		handler.WriteJSON(w, http.StatusOK, fileMutationResponse(result))
 	}
 }
 
 // HandleScopedFileDelete handles DELETE /api/workspaces/{ws}/files?scope=&target=&path=&recursive=1.
-func HandleScopedFileDelete(svc filecoord.FileService) http.HandlerFunc {
+func HandleScopedFileDelete(svc sourcecontrol.Mutate) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		wsID := middleware.WorkspaceFromContext(r.Context())
 		scope, target, repo := scopeFromQuery(r)
@@ -356,8 +396,11 @@ func HandleScopedFileDelete(svc filecoord.FileService) http.HandlerFunc {
 			handler.HandleServiceError(w, err)
 			return
 		}
-		if err := svc.DeletePathVersionedScoped(r.Context(), wsID, scope, target, repo, reqPath, recursive, version); err != nil {
-			handler.HandleServiceError(w, err)
+		if err := svc.DeletePath(r.Context(), sourcecontrol.DeleteCommand{
+			Grant: fileAccessGrant(r), Location: fileLocation(wsID, scope, target, repo),
+			Path: reqPath, Recursive: recursive, ExpectedVersion: version,
+		}); err != nil {
+			handler.HandleSourceControlError(w, err)
 			return
 		}
 		handler.WriteJSON(w, http.StatusOK, map[string]bool{"success": true})
@@ -365,7 +408,7 @@ func HandleScopedFileDelete(svc filecoord.FileService) http.HandlerFunc {
 }
 
 // HandleScopedFileMkdir handles POST /api/workspaces/{ws}/files/mkdir?scope=&target=&path=.
-func HandleScopedFileMkdir(svc filecoord.FileService) http.HandlerFunc {
+func HandleScopedFileMkdir(svc sourcecontrol.Mutate) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		wsID := middleware.WorkspaceFromContext(r.Context())
 		scope, target, queryRepo := scopeFromQuery(r)
@@ -380,8 +423,10 @@ func HandleScopedFileMkdir(svc filecoord.FileService) http.HandlerFunc {
 			return
 		}
 
-		if err := svc.MkdirScoped(r.Context(), wsID, scope, target, repo, reqPath); err != nil {
-			handler.HandleServiceError(w, err)
+		if err := svc.CreateDirectory(r.Context(), sourcecontrol.CreateDirectoryCommand{
+			Grant: fileAccessGrant(r), Location: fileLocation(wsID, scope, target, repo), Path: reqPath,
+		}); err != nil {
+			handler.HandleSourceControlError(w, err)
 			return
 		}
 		handler.WriteJSON(w, http.StatusOK, map[string]bool{"success": true})
@@ -389,27 +434,32 @@ func HandleScopedFileMkdir(svc filecoord.FileService) http.HandlerFunc {
 }
 
 // HandleScopedFileMove handles PATCH /api/workspaces/{ws}/files/move?scope=&target=.
-func HandleScopedFileMove(svc filecoord.FileService) http.HandlerFunc {
+func HandleScopedFileMove(svc sourcecontrol.Mutate) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		wsID := middleware.WorkspaceFromContext(r.Context())
 		scope, target, queryRepo := scopeFromQuery(r)
 
-		var req filecoord.FileMoveRequest
+		var req loomapi.FileMoveRequest
 		if !decodeRequiredJSONBody(w, r, &req) {
 			return
 		}
 
-		repo, err := repoFromQueryAndBody(queryRepo, req.Repo)
+		repo, err := repoFromQueryAndBody(queryRepo, optionalFileRepo(req.Repo))
 		if err != nil {
 			handler.HandleServiceError(w, err)
 			return
 		}
-		result, err := svc.MovePathVersionedScoped(r.Context(), wsID, scope, target, repo, req.From, req.To, req.Overwrite, req.SourceVersion, req.DestinationVersion)
+		result, err := svc.MovePath(r.Context(), sourcecontrol.MoveCommand{
+			Grant: fileAccessGrant(r), Location: fileLocation(wsID, scope, target, repo),
+			From: req.From, To: req.To, Overwrite: valueOrZero(req.Overwrite),
+			ExpectedSourceVersion:      valueOrZero(req.SourceVersion),
+			ExpectedDestinationVersion: valueOrZero(req.DestinationVersion),
+		})
 		if err != nil {
-			handler.HandleServiceError(w, err)
+			handler.HandleSourceControlError(w, err)
 			return
 		}
 		w.Header().Set("ETag", quotedETag(result.Version))
-		handler.WriteJSON(w, http.StatusOK, result)
+		handler.WriteJSON(w, http.StatusOK, fileMutationResponse(result))
 	}
 }

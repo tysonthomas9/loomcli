@@ -21,7 +21,10 @@ restrictions:
 external_import_policy:
   core_allowed_prefixes:
     - github.com/robfig/cron/v3
-  adapter_allowed_prefixes: []
+  adapter_allowed_prefixes:
+    - github.com/bmatcuk/doublestar/v4
+    - golang.org/x/sync
+    - golang.org/x/sys
   platform_allowed_prefixes:
     - github.com/oapi-codegen/runtime
     - go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp

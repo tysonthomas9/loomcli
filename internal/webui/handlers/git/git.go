@@ -7,9 +7,8 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/tysonthomas9/loomcli/internal/ops"
-	"github.com/tysonthomas9/loomcli/internal/webui/agentcoord"
-	"github.com/tysonthomas9/loomcli/internal/webui/apperrors"
+	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
+	loomapi "github.com/tysonthomas9/loomcli/internal/platform/loomapi/gen"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
@@ -40,53 +39,44 @@ func decodeOptionalRequest(w http.ResponseWriter, r *http.Request, dst any) bool
 	return false
 }
 
-// writeAgentGitError maps a service error to an HTTP response for agent git handlers.
-// ServiceErrors use HandleServiceError; other errors use the given fallback status.
-func writeAgentGitError(w http.ResponseWriter, err error, fallbackStatus int) {
-	var svcErr *apperrors.ServiceError
-	if errors.As(err, &svcErr) {
-		handler.HandleServiceError(w, err)
-		return
-	}
-	handler.RespondError(w, fallbackStatus, err.Error())
+// writeSourceControlError maps a Source Control error to its canonical HTTP
+// status and public error envelope.
+func writeSourceControlError(w http.ResponseWriter, err error) {
+	handler.HandleSourceControlError(w, err)
 }
 
 // --- Push ---
 
-type gitPushRequest struct {
-	Target string `json:"target"`
-}
-
 // HandleGitPush handles POST /api/agents/{name}/git/push
 // Merges the agent's worktree branch INTO the target branch (loom push semantics).
-func HandleGitPush(svc agentcoord.AgentService) http.HandlerFunc {
+func HandleGitPush(svc sourcecontrol.Checkout) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		agentName := r.PathValue("name")
 		wsID := middleware.WorkspaceFromContext(r.Context())
 
-		var req gitPushRequest
+		var req loomapi.GitPushRequest
 		if !decodeOptionalRequest(w, r, &req) {
 			return
 		}
 
-		target := req.Target
+		target := gitValueOrZero(req.Target)
 		if target != "" && (!validGitRef.MatchString(target) || strings.Contains(target, "..")) {
 			handler.RespondError(w, http.StatusBadRequest, "invalid target branch name")
 			return
 		}
 
-		result, err := svc.GitPush(r.Context(), wsID, agentName, target)
+		result, err := svc.Push(r.Context(), sourcecontrol.PushCommand{WorkspaceKey: wsID, AgentID: agentName, TargetBranch: target})
 		if err != nil {
-			writeAgentGitError(w, err, http.StatusBadGateway)
+			writeSourceControlError(w, err)
 			return
 		}
 
 		if !result.Success && len(result.ConflictedFiles) > 0 {
-			handler.WriteJSON(w, http.StatusConflict, result)
+			handler.WriteJSON(w, http.StatusConflict, pushResponse(result))
 			return
 		}
 
-		handler.WriteJSON(w, http.StatusOK, result)
+		handler.WriteJSON(w, http.StatusOK, pushResponse(result))
 	}
 }
 
@@ -94,56 +84,52 @@ func HandleGitPush(svc agentcoord.AgentService) http.HandlerFunc {
 
 // HandleGitPushAll handles POST /api/git/push-all
 // Pushes all agent worktree branches to their target branches.
-func HandleGitPushAll(svc agentcoord.AgentService) http.HandlerFunc {
+func HandleGitPushAll(svc sourcecontrol.Checkout) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		wsID := middleware.WorkspaceFromContext(r.Context())
 
-		result, err := svc.GitPushAll(r.Context(), wsID)
+		result, err := svc.PushAll(r.Context(), sourcecontrol.PushAllCommand{WorkspaceKey: wsID})
 		if err != nil {
 			handler.RespondError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
 
-		handler.WriteJSON(w, http.StatusOK, result)
+		handler.WriteJSON(w, http.StatusOK, pushAllResponse(result))
 	}
 }
 
 // --- Pull ---
 
-type gitPullRequest struct {
-	Source string `json:"source"`
-}
-
 // HandleGitPull handles POST /api/agents/{name}/git/pull
 // Merges the source branch INTO the agent's worktree branch.
-func HandleGitPull(svc agentcoord.AgentService) http.HandlerFunc {
+func HandleGitPull(svc sourcecontrol.Checkout) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		agentName := r.PathValue("name")
 		wsID := middleware.WorkspaceFromContext(r.Context())
 
-		var req gitPullRequest
+		var req loomapi.GitPullRequest
 		if !decodeOptionalRequest(w, r, &req) {
 			return
 		}
 
-		source := req.Source
+		source := gitValueOrZero(req.Source)
 		if source != "" && (!validGitRef.MatchString(source) || strings.Contains(source, "..")) {
 			handler.RespondError(w, http.StatusBadRequest, "invalid source branch name")
 			return
 		}
 
-		result, err := svc.GitPull(r.Context(), wsID, agentName, source)
+		result, err := svc.Pull(r.Context(), sourcecontrol.PullCommand{WorkspaceKey: wsID, AgentID: agentName, SourceBranch: source})
 		if err != nil {
-			writeAgentGitError(w, err, http.StatusBadGateway)
+			writeSourceControlError(w, err)
 			return
 		}
 
 		if !result.Success && len(result.ConflictedFiles) > 0 {
-			handler.WriteJSON(w, http.StatusConflict, result)
+			handler.WriteJSON(w, http.StatusConflict, pullResponse(result))
 			return
 		}
 
-		handler.WriteJSON(w, http.StatusOK, result)
+		handler.WriteJSON(w, http.StatusOK, pullResponse(result))
 	}
 }
 
@@ -151,128 +137,110 @@ func HandleGitPull(svc agentcoord.AgentService) http.HandlerFunc {
 
 // HandleGitSync handles POST /api/agents/{name}/git/sync
 // Full push+pull cycle: first push to target, then pull from target.
-func HandleGitSync(svc agentcoord.AgentService) http.HandlerFunc {
+func HandleGitSync(svc sourcecontrol.Checkout) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		agentName := r.PathValue("name")
 		wsID := middleware.WorkspaceFromContext(r.Context())
 
-		result, err := svc.GitSync(r.Context(), wsID, agentName)
+		result, err := svc.Sync(r.Context(), sourcecontrol.SyncCommand{WorkspaceKey: wsID, AgentID: agentName})
 		if err != nil {
-			writeAgentGitError(w, err, http.StatusBadGateway)
+			writeSourceControlError(w, err)
 			return
 		}
 
 		// Push conflict: return partial result
-		if result.PushResult != nil && !result.PushResult.Success && len(result.PushResult.ConflictedFiles) > 0 {
-			handler.WriteJSON(w, http.StatusConflict, result)
+		if result.Push != nil && !result.Push.Success && len(result.Push.ConflictedFiles) > 0 {
+			handler.WriteJSON(w, http.StatusConflict, syncResponse(result))
 			return
 		}
 
 		status := http.StatusOK
-		if result.PullResult != nil && !result.PullResult.Success && len(result.PullResult.ConflictedFiles) > 0 {
+		if result.Pull != nil && !result.Pull.Success && len(result.Pull.ConflictedFiles) > 0 {
 			status = http.StatusConflict
 		}
 
-		handler.WriteJSON(w, status, result)
+		handler.WriteJSON(w, status, syncResponse(result))
 	}
 }
 
 // --- PR ---
 
-type gitPRRequest struct {
-	Target string `json:"target"`
-}
-
 // HandleGitPR handles POST /api/agents/{name}/git/pr
 // Creates a GitHub PR from the agent's worktree branch.
-func HandleGitPR(svc agentcoord.AgentService) http.HandlerFunc {
+func HandleGitPR(svc sourcecontrol.Checkout) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		agentName := r.PathValue("name")
 		wsID := middleware.WorkspaceFromContext(r.Context())
 
-		var req gitPRRequest
+		var req loomapi.GitCreatePullRequestRequest
 		if !decodeOptionalRequest(w, r, &req) {
 			return
 		}
 
-		target := req.Target
+		target := gitValueOrZero(req.Target)
 		if target != "" && (!validGitRef.MatchString(target) || strings.Contains(target, "..")) {
 			handler.RespondError(w, http.StatusBadRequest, "invalid target branch name")
 			return
 		}
 
-		result, err := svc.CreatePR(r.Context(), wsID, agentName, target)
+		result, err := svc.CreatePullRequest(r.Context(), sourcecontrol.CreatePullRequestCommand{WorkspaceKey: wsID, AgentID: agentName, TargetBranch: target})
 		if err != nil {
-			writeAgentGitError(w, err, http.StatusBadGateway)
+			writeSourceControlError(w, err)
 			return
 		}
 
 		if result.Created {
-			handler.WriteJSON(w, http.StatusCreated, result)
+			handler.WriteJSON(w, http.StatusCreated, pullRequestCreationResponse(result))
 		} else {
-			handler.WriteJSON(w, http.StatusOK, result)
+			handler.WriteJSON(w, http.StatusOK, pullRequestCreationResponse(result))
 		}
 	}
 }
 
 // --- Reset ---
 
-type gitResetRequest struct {
-	Branch string `json:"branch"`
-	Force  bool   `json:"force"`
-	Push   bool   `json:"push"`
-}
-
-type lockedResponse struct {
-	Error    string       `json:"error"`
-	LockInfo lockInfoResp `json:"lock_info"`
-}
-
-type lockInfoResp struct {
-	Agent    string `json:"agent"`
-	PID      int    `json:"pid"`
-	Duration string `json:"duration"`
-	TaskID   string `json:"task_id,omitempty"`
-}
-
 // HandleGitReset handles POST /api/agents/{name}/git/reset
 // Hard resets the worktree to a branch.
-func HandleGitReset(svc agentcoord.AgentService) http.HandlerFunc {
+func HandleGitReset(svc sourcecontrol.Checkout) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		agentName := r.PathValue("name")
 		wsID := middleware.WorkspaceFromContext(r.Context())
 
-		var req gitResetRequest
+		var req loomapi.GitResetRequest
 		if !decodeOptionalRequest(w, r, &req) {
 			return
 		}
 
-		branch := req.Branch
+		branch := gitValueOrZero(req.Branch)
 		if branch != "" && (!validGitRef.MatchString(branch) || strings.Contains(branch, "..")) {
 			handler.RespondError(w, http.StatusBadRequest, "invalid branch name")
 			return
 		}
 
-		result, err := svc.GitReset(r.Context(), wsID, agentName, branch, req.Force, req.Push)
+		result, err := svc.Reset(r.Context(), sourcecontrol.ResetCommand{
+			WorkspaceKey: wsID, AgentID: agentName, TargetBranch: branch,
+			Force: gitValueOrZero(req.Force), Push: gitValueOrZero(req.Push),
+		})
 		if err != nil {
-			var lockedErr *ops.GitResetLockedError
+			var lockedErr *sourcecontrol.ResetLockedError
 			if errors.As(err, &lockedErr) {
-				handler.WriteJSON(w, http.StatusLocked, lockedResponse{
-					Error: "agent locked",
-					LockInfo: lockInfoResp{
-						Agent:    lockedErr.AgentName,
-						PID:      lockedErr.PID,
-						Duration: lockedErr.Duration,
-						TaskID:   lockedErr.TaskID,
-					},
+				lockInfo := loomapi.GitResetLockInfo{
+					Agent: lockedErr.AgentID, Pid: lockedErr.PID, Duration: lockedErr.Age,
+				}
+				if lockedErr.TaskID != "" {
+					lockInfo.TaskId = gitPointer(lockedErr.TaskID)
+				}
+				handler.WriteJSON(w, http.StatusLocked, loomapi.GitResetLockedResponse{
+					Error:    "agent locked",
+					LockInfo: lockInfo,
 				})
 				return
 			}
-			writeAgentGitError(w, err, http.StatusBadGateway)
+			writeSourceControlError(w, err)
 			return
 		}
 
-		handler.WriteJSON(w, http.StatusOK, result)
+		handler.WriteJSON(w, http.StatusOK, resetResponse(result))
 	}
 }
 
@@ -280,40 +248,31 @@ func HandleGitReset(svc agentcoord.AgentService) http.HandlerFunc {
 
 // HandleGitStatus handles GET /api/agents/{name}/git/status
 // Returns detailed git status for the agent's worktree.
-func HandleGitStatus(svc agentcoord.AgentService) http.HandlerFunc {
+func HandleGitStatus(svc sourcecontrol.Checkout) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		agentName := r.PathValue("name")
 		wsID := middleware.WorkspaceFromContext(r.Context())
 
-		result, err := svc.GitStatus(r.Context(), wsID, agentName)
+		result, err := svc.AgentStatus(r.Context(), sourcecontrol.AgentStatusQuery{WorkspaceKey: wsID, AgentID: agentName})
 		if err != nil {
-			writeAgentGitError(w, err, http.StatusInternalServerError)
+			writeSourceControlError(w, err)
 			return
 		}
 
-		handler.WriteJSON(w, http.StatusOK, result)
+		handler.WriteJSON(w, http.StatusOK, statusResponse(result))
 	}
 }
 
 // --- Target Update ---
 
-type gitTargetRequest struct {
-	Branch string `json:"branch"`
-}
-
-type gitTargetResponse struct {
-	Success bool   `json:"success"`
-	Branch  string `json:"branch"`
-}
-
 // HandleGitTargetUpdate handles PATCH /api/agents/{name}/git/target
 // Changes the target/integration branch for a worktree.
-func HandleGitTargetUpdate(svc agentcoord.AgentService) http.HandlerFunc {
+func HandleGitTargetUpdate(svc sourcecontrol.Checkout) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		agentName := r.PathValue("name")
 		wsID := middleware.WorkspaceFromContext(r.Context())
 
-		var req gitTargetRequest
+		var req loomapi.GitTargetRequest
 		if r.Body != nil {
 			defer r.Body.Close()
 			if err := handler.DecodeOneJSON(w, r, &req, handler.JSONDecodeOptions{MaxBytes: handler.MaxRequestBody}); err != nil {
@@ -332,14 +291,22 @@ func HandleGitTargetUpdate(svc agentcoord.AgentService) http.HandlerFunc {
 			return
 		}
 
-		if err := svc.SetTargetBranch(r.Context(), wsID, agentName, req.Branch); err != nil {
-			writeAgentGitError(w, err, http.StatusInternalServerError)
+		if err := svc.SetTargetBranch(r.Context(), sourcecontrol.SetTargetBranchCommand{WorkspaceKey: wsID, AgentID: agentName, Branch: req.Branch}); err != nil {
+			writeSourceControlError(w, err)
 			return
 		}
 
-		handler.WriteJSON(w, http.StatusOK, gitTargetResponse{
+		handler.WriteJSON(w, http.StatusOK, loomapi.GitTargetResponse{
 			Success: true,
 			Branch:  req.Branch,
 		})
 	}
+}
+
+func gitValueOrZero[T any](value *T) T {
+	if value == nil {
+		var zero T
+		return zero
+	}
+	return *value
 }

@@ -17,16 +17,16 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/app/workitemmove"
 	connectorsmodule "github.com/tysonthomas9/loomcli/internal/modules/connectors"
+	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
 	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 	"github.com/tysonthomas9/loomcli/internal/modules/workspace"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui"
 	"github.com/tysonthomas9/loomcli/internal/webui/agentcoord"
+	"github.com/tysonthomas9/loomcli/internal/webui/readprojection"
 	"github.com/tysonthomas9/loomcli/internal/webui/sessioncoord"
-	"github.com/tysonthomas9/loomcli/internal/webui/sourcecontrolcoord"
 	"github.com/tysonthomas9/loomcli/internal/webui/workspacecoord"
 
-	"github.com/tysonthomas9/loomcli/internal/webui/filecoord"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/terminal"
 )
@@ -68,10 +68,12 @@ type Server struct {
 	agentSvc         agentcoord.AgentService
 	agentRuntime     agentcoord.InteractiveAgentRuntime
 	workspaceSvc     workspacecoord.WorkspaceService
-	termSvc          terminal.TerminalService       // nil if termMgr is nil
-	diffSvc          sourcecontrolcoord.DiffService // nil if ops.GitOps is nil
-	fileSvc          filecoord.FileService          // nil if ops.FileOps is nil
-	sessSvc          sessioncoord.SessionService    // always constructed (stores may be nil internally)
+	termSvc          terminal.TerminalService // nil if termMgr is nil
+	sourceBrowse     sourcecontrol.Browse
+	sourceMutate     sourcecontrol.Mutate
+	sourceCheckout   sourcecontrol.Checkout
+	issueDiff        readprojection.IssueDiffProjection
+	sessSvc          sessioncoord.SessionService // always constructed (stores may be nil internally)
 
 	// Real-time
 	hub               *Hub

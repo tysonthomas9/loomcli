@@ -3,7 +3,6 @@ package app
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -14,9 +13,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 	"github.com/tysonthomas9/loomcli/internal/webui"
 	"github.com/tysonthomas9/loomcli/internal/webui/agentcoord"
-	"github.com/tysonthomas9/loomcli/internal/webui/filecoord"
 	"github.com/tysonthomas9/loomcli/internal/webui/sessioncoord"
-	"github.com/tysonthomas9/loomcli/internal/webui/sourcecontrolcoord"
 	"github.com/tysonthomas9/loomcli/internal/webui/workspacecoord"
 
 	"github.com/tysonthomas9/loomcli/internal/ops"
@@ -938,33 +935,12 @@ func TestSetupRoutes_TabMetadataReturns404WhenStoreNil(t *testing.T) {
 // POST /api/workspaces/{ws}/agents/{name}/git/push) still work.
 func TestFlatAgentRoutesRemoved(t *testing.T) {
 	// Register workspace identity so workspace-scoped routes are functional.
-	gitOps := &mockGitOps{}
-	worktreeDir := t.TempDir()
-	fileOps := &mockFileOps{
-		resolveFunc: func(name string) (*ops.AgentWorktree, error) {
-			if name != "alice" {
-				return nil, errors.New("not found")
-			}
-			return &ops.AgentWorktree{Path: worktreeDir}, nil
-		},
-		resolveWsRootFunc: func() (string, error) {
-			return worktreeDir, nil
-		},
-		resolveWsDataFunc: func() (*ops.WorkspaceData, error) {
-			return &ops.WorkspaceData{
-				ID:   "test-ws",
-				Name: "test-ws",
-				Path: worktreeDir,
-				Agents: []ops.WorkspaceAgentInfo{
-					{Name: "alice"},
-				},
-			}, nil
-		},
-	}
-
-	app := &Server{config: webui.ServerConfig{GitOps: gitOps, FileOps: fileOps}, wsResolveFn: testWorkspaceResolver("test-ws"), agentSvc: agentcoord.NewAgentService(gitOps, nil, nil)}
-	app.diffSvc = sourcecontrolcoord.NewDiffService(gitOps, nil, middleware.WithWorkspace)
-	app.fileSvc = filecoord.NewFileService(fileOps)
+	app := &Server{wsResolveFn: testWorkspaceResolver("test-ws"), agentSvc: agentcoord.NewAgentService(nil, nil)}
+	sourcePorts := &stubFileService{}
+	app.sourceBrowse = sourcePorts
+	app.sourceMutate = sourcePorts
+	app.sourceCheckout = sourcePorts
+	app.issueDiff = &stubIssueDiff{}
 	app.sessSvc = sessioncoord.NewSessionService(nil, nil, nil)
 	setupTestRoutes(t, app)
 

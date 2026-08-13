@@ -261,7 +261,7 @@ func capabilityNameForRoot(root string, graph CapabilityGraph) string {
 }
 
 func isConcreteAdapterSegment(segment string) bool {
-	return segment == "fleetdb" || segment == "httpapi"
+	return segment == "filesystem" || segment == "fleetdb" || segment == "httpapi"
 }
 
 func isSharedFleetDBTransport(importPath string) bool {

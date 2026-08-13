@@ -6,11 +6,10 @@ import (
 	"testing"
 )
 
-// Compile-time assertion: *GitModule implements the module interface.
-var _ module = (*GitModule)(nil)
+var _ module = (*Module)(nil)
 
 func TestGitModule_RegisterRoutes(t *testing.T) {
-	mod := NewGitModule(&mockAgentService{}, &stubDiffService{})
+	mod := NewModule(&stubCheckout{}, &stubBrowse{}, &stubIssueDiff{})
 
 	mux := http.NewServeMux()
 	mod.Register(mux)
@@ -52,7 +51,7 @@ func TestGitModule_RegisterRoutes(t *testing.T) {
 }
 
 func TestGitModule_WrongMethod_Returns405(t *testing.T) {
-	mod := NewGitModule(&mockAgentService{}, &stubDiffService{})
+	mod := NewModule(&stubCheckout{}, &stubBrowse{}, &stubIssueDiff{})
 
 	mux := http.NewServeMux()
 	mod.Register(mux)
@@ -67,7 +66,7 @@ func TestGitModule_WrongMethod_Returns405(t *testing.T) {
 }
 
 func TestGitModule_NilDeps(t *testing.T) {
-	mod := NewGitModule(nil, nil)
+	mod := NewModule(nil, nil, nil)
 
 	mux := http.NewServeMux()
 	mod.Register(mux) // must not panic during registration

@@ -15,7 +15,6 @@ import (
 	driversandbox "github.com/tysonthomas9/loomcli/internal/driver/sandbox"
 	artifactsmodule "github.com/tysonthomas9/loomcli/internal/modules/artifacts"
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
-	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -69,9 +68,9 @@ type HostBridgeTaskExecutor struct {
 	// StackBindings is Source Control's narrow stack lookup used to inject the
 	// canonical branch and base into a task run. It exposes no persistence store
 	// or mutation command.
-	StackBindings sourcecontrol.StackBindingResolver
+	StackBindings sourceControlStackBindings
 	// TaskOutcomes is Source Control's narrow finalize-barrier mutation port.
-	TaskOutcomes sourcecontrol.TaskOutcomeRecorder
+	TaskOutcomes sourceControlTaskOutcomes
 	// stackBinding is computed once per ExecuteTask after the worktree resolves:
 	// the task's stack id, canonical output branch, and base ref. When set, it is
 	// exported to a stacked runner so it pushes the canonical branch on the

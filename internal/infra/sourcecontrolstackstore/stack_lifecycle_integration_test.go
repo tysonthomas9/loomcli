@@ -160,7 +160,7 @@ func TestStackLifecycleOwnsPublicationStateAndPreservesEvidence(t *testing.T) {
 	}
 }
 
-func newStackLifecycle(t *testing.T) sourcecontrol.StackLifecycle {
+func newStackLifecycle(t *testing.T) *sourcecontrol.StackLifecycleService {
 	t.Helper()
 	service, err := sourcecontrol.NewStackLifecycle(stackstore.New(t.TempDir()), time.Now)
 	if err != nil {

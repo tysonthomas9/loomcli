@@ -2,21 +2,14 @@ package misc
 
 import (
 	"context"
-	"errors"
-	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
-	"os"
-	"path/filepath"
-	"sort"
-	"strings"
-	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/ops"
+	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
+	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol/filesystem"
+	loomapi "github.com/tysonthomas9/loomcli/internal/platform/loomapi/gen"
 	"github.com/tysonthomas9/loomcli/internal/webui/agentcoord"
-	"github.com/tysonthomas9/loomcli/internal/webui/apperrors"
-	"github.com/tysonthomas9/loomcli/internal/webui/filecoord"
+	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
 
 // logger is a package-level variable used by test code to capture log output.
@@ -31,8 +24,17 @@ type module interface {
 // FileModule → Module (struct alias)
 type FileModule = Module
 
-// NewFileModule → NewModule
-var NewFileModule = NewModule
+type testFilePorts interface {
+	sourcecontrol.Browse
+	sourcecontrol.Mutate
+	sourcecontrol.Checkout
+}
+
+// NewFileModule keeps old handler tests concise while passing the three real
+// Source Control ports independently to production composition.
+func NewFileModule(ports testFilePorts, accessCfg ...middleware.FileAccessConfig) *Module {
+	return NewModule(ports, ports, ports, accessCfg...)
+}
 
 // maxRequestBody is the maximum request body size (1MB).
 const maxRequestBody = 1 << 20
@@ -74,518 +76,103 @@ type clientErrorLimiter = ClientErrorLimiter
 // AgentLogResult → agentcoord.AgentLogResult
 type AgentLogResult = agentcoord.AgentLogResult
 
-// FileReadResult → filecoord.FileReadResult
-type FileReadResult = filecoord.FileReadResult
+// FileReadResult is the canonical generated HTTP response used by handler tests.
+type FileReadResult = loomapi.FileReadResponse
 
-// FileTreeResult → filecoord.FileTreeResult
-type FileTreeResult = filecoord.FileTreeResult
+// FileTreeResult is the canonical generated HTTP response used by handler tests.
+type FileTreeResult = loomapi.FileTreeResponse
 
-// FileTreeEntry → filecoord.FileTreeEntry
-type FileTreeEntry = filecoord.FileTreeEntry
+// FileTreeEntry is the canonical generated HTTP response entry used by tests.
+type FileTreeEntry = loomapi.FileTreeEntry
 
-// ---------------------------------------------------------------------------
-// Test-local FileService implementation (mirrors svcimpl.fileServiceImpl)
-// ---------------------------------------------------------------------------
+// NewFileService wires handler tests through the production Source Control
+// owner. Keeping the tests on the real owner prevents a second file-policy
+// implementation from drifting inside the delivery package.
+type testWorkspaceLayout struct{}
 
-// testFileServiceImpl implements filecoord.FileService for handler-level tests.
-// This duplicates the essential logic from svcimpl to avoid the import cycle
-// svcimpl → handlers/misc → svcimpl.
-type testFileServiceImpl struct {
-	fileOps ops.FileOps
+func (testWorkspaceLayout) ResolveAgentCheckout(context.Context, string, string) (sourcecontrol.AgentCheckout, error) {
+	return sourcecontrol.AgentCheckout{}, sourcecontrol.ErrNotFound
 }
-
-// NewFileService creates a test-local FileService implementation.
-func NewFileService(fileOps ops.FileOps) filecoord.FileService {
-	return &testFileServiceImpl{fileOps: fileOps}
+func (testWorkspaceLayout) ListAgentCheckouts(context.Context, string) ([]sourcecontrol.AgentCheckout, error) {
+	return nil, nil
 }
-
-// resolveScopeRootTest mirrors svcimpl.fileServiceImpl.resolveScopeRoot.
-func (s *testFileServiceImpl) resolveScopeRootTest(wsID string, scope filecoord.FileScope, target, repo string) (string, error) {
-	if repo != "" && scope != filecoord.ScopeAgent {
-		return "", apperrors.ErrValidation("repo qualifier is only supported for agent scope")
-	}
-	switch scope {
-	case filecoord.ScopeWorkspace:
-		if target != "" {
-			return "", apperrors.ErrValidation("workspace scope does not take a target")
-		}
-		root, err := s.fileOps.ResolveWorkspaceRoot(wsID)
-		if err != nil {
-			return "", apperrors.ErrNotFound(err.Error())
-		}
-		return root, nil
-	case filecoord.ScopeRepo:
-		if target == "" {
-			return "", apperrors.ErrValidation("repo scope requires a target")
-		}
-		ws, err := s.fileOps.ResolveWorkspaceData(wsID)
-		if err != nil {
-			return "", apperrors.ErrNotFound(err.Error())
-		}
-		repoName := ""
-		for _, repo := range ws.Repos {
-			if repo.Name == target {
-				repoName = repo.Name
-				break
-			}
-		}
-		if repoName == "" {
-			return "", apperrors.ErrNotFound(fmt.Sprintf("repo %q not found", target))
-		}
-		root, err := s.fileOps.ResolveWorkspaceRoot(wsID)
-		if err != nil {
-			return "", apperrors.ErrNotFound(err.Error())
-		}
-		return filepath.Join(root, repoName), nil
-	case filecoord.ScopeAgent:
-		if target == "" || !agentcoord.IsValidAgentName(target) {
-			return "", apperrors.ErrValidation("invalid agent name")
-		}
-		ws, err := s.fileOps.ResolveWorkspaceData(wsID)
-		if err != nil {
-			return "", apperrors.ErrNotFound(err.Error())
-		}
-		var found bool
-		for _, agent := range ws.Agents {
-			if agent.Name == target {
-				found = true
-				break
-			}
-		}
-		if !found {
-			return "", apperrors.ErrNotFound(fmt.Sprintf("agent %q not found", target))
-		}
-		var wt *ops.AgentWorktree
-		if repo != "" {
-			wt, err = s.fileOps.ResolveAgentWorktreeForRepo(wsID, target, repo)
-		} else {
-			wt, err = s.fileOps.ResolveAgentWorktree(wsID, target)
-		}
-		if err != nil {
-			return "", apperrors.ErrNotFound(fmt.Sprintf("agent worktree %q not found", target))
-		}
-		return wt.Path, nil
-	default:
-		return "", apperrors.ErrValidation(fmt.Sprintf("unsupported scope %q", scope))
-	}
+func (testWorkspaceLayout) ListRepositoryCheckouts(context.Context, string) ([]sourcecontrol.RepositoryCheckoutView, error) {
+	return nil, nil
 }
-
-func (s *testFileServiceImpl) ListDirectoryScoped(_ context.Context, wsID string, scope filecoord.FileScope, target, repo, path string) (*filecoord.FileTreeResult, error) {
-	root, err := s.resolveScopeRootTest(wsID, scope, target, repo)
-	if err != nil {
-		return nil, err
-	}
-	_, fullPath, err := testScopedFullPath(root, path, true)
-	if err != nil {
-		return nil, err
-	}
-	if err := testNoSymlinkComponents(root, fullPath); err != nil {
-		return nil, err
-	}
-	fi, err := os.Lstat(fullPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, apperrors.ErrNotFound("directory not found")
-		}
-		return nil, apperrors.ErrInternal("failed to stat path", err)
-	}
-	if fi.Mode()&os.ModeSymlink != 0 {
-		return nil, apperrors.ErrForbidden("refusing to follow symlink")
-	}
-	if !fi.IsDir() {
-		return nil, apperrors.ErrValidation("path is not a directory")
-	}
-	dirEntries, err := os.ReadDir(fullPath)
-	if err != nil {
-		return nil, apperrors.ErrInternal("failed to read directory", err)
-	}
-	sort.Slice(dirEntries, func(i, j int) bool {
-		iDir := dirEntries[i].IsDir()
-		jDir := dirEntries[j].IsDir()
-		if iDir != jDir {
-			return iDir
-		}
-		return dirEntries[i].Name() < dirEntries[j].Name()
-	})
-	entries := make([]filecoord.FileTreeEntry, 0, len(dirEntries))
-	for _, de := range dirEntries {
-		if de.Type()&os.ModeSymlink != 0 || strings.EqualFold(de.Name(), ".git") {
-			continue
-		}
-		info, infoErr := de.Info()
-		if infoErr != nil {
-			continue
-		}
-		entries = append(entries, filecoord.FileTreeEntry{
-			Name:    de.Name(),
-			IsDir:   de.IsDir(),
-			Size:    info.Size(),
-			ModTime: info.ModTime().UTC().Format(time.RFC3339),
-		})
-	}
-	relPath, _ := filepath.Rel(root, fullPath)
-	if relPath == "" {
-		relPath = "."
-	}
-	return &filecoord.FileTreeResult{Path: relPath, Entries: entries}, nil
-}
-
-func (s *testFileServiceImpl) ReadFileScoped(_ context.Context, wsID string, scope filecoord.FileScope, target, repo, path string) (*filecoord.FileReadResult, error) {
-	root, err := s.resolveScopeRootTest(wsID, scope, target, repo)
-	if err != nil {
-		return nil, err
-	}
-	cleanPath, fullPath, err := testScopedFullPath(root, path, false)
-	if err != nil {
-		return nil, err
-	}
-	if err := testNoSymlinkComponents(root, fullPath); err != nil {
-		return nil, err
-	}
-	fi, err := os.Lstat(fullPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, apperrors.ErrNotFound("file not found")
-		}
-		return nil, apperrors.ErrInternal("failed to stat file", err)
-	}
-	if fi.Mode()&os.ModeSymlink != 0 {
-		return nil, apperrors.ErrForbidden("refusing to follow symlink")
-	}
-	if fi.IsDir() {
-		return nil, apperrors.ErrValidation("path is a directory, not a file")
-	}
-	f, err := OpenLogFileSecure(fullPath, root)
-	if err != nil {
-		if strings.Contains(err.Error(), "symlink") {
-			return nil, apperrors.ErrForbidden("refusing to follow symlink")
-		}
-		return nil, apperrors.ErrInternal("failed to open file", err)
-	}
-	defer f.Close()
-	truncated := fi.Size() > maxRequestBody
-	data, err := io.ReadAll(io.LimitReader(f, maxRequestBody))
-	if err != nil {
-		return nil, apperrors.ErrInternal("failed to read file", err)
-	}
-	if IsBinaryContent(data) {
-		return &filecoord.FileReadResult{Path: cleanPath, Size: fi.Size(), Binary: true, Truncated: truncated}, nil
-	}
-	return &filecoord.FileReadResult{Path: cleanPath, Content: string(data), Size: fi.Size(), Truncated: truncated}, nil
-}
-
-func (s *testFileServiceImpl) StatPathScoped(_ context.Context, _ string, _ filecoord.FileScope, _, _, _ string) (*filecoord.FileStatResult, error) {
-	return &filecoord.FileStatResult{}, nil
-}
-
-func (s *testFileServiceImpl) ReadFileAtRevScoped(_ context.Context, _ string, _ filecoord.FileScope, _, _, _, _ string) (*filecoord.FileReadResult, error) {
-	return &filecoord.FileReadResult{}, nil
-}
-
-func (s *testFileServiceImpl) IndexFilesScoped(_ context.Context, wsID string, scope filecoord.FileScope, target, repo string) (*filecoord.FileIndexResult, error) {
-	if _, err := s.resolveScopeRootTest(wsID, scope, target, repo); err != nil {
-		return nil, err
-	}
-	return &filecoord.FileIndexResult{Paths: []string{}, Truncated: false}, nil
-}
-
-func (s *testFileServiceImpl) SearchFilesScoped(_ context.Context, wsID string, scope filecoord.FileScope, target, repo string, _ filecoord.FileSearchRequest) (*filecoord.FileSearchResult, error) {
-	if _, err := s.resolveScopeRootTest(wsID, scope, target, repo); err != nil {
-		return nil, err
-	}
-	return &filecoord.FileSearchResult{Results: []filecoord.FileSearchFileResult{}, LimitHit: false}, nil
-}
-
-func (s *testFileServiceImpl) GitStatusScoped(_ context.Context, _ string, _ filecoord.FileScope, _, _ string) (filecoord.FileGitStatusResult, error) {
-	return filecoord.FileGitStatusResult{}, nil
-}
-
-func (s *testFileServiceImpl) ListFileCheckouts(_ context.Context, _ string) (*filecoord.FileCheckoutsResult, error) {
-	return &filecoord.FileCheckoutsResult{}, nil
-}
-
-func (s *testFileServiceImpl) RepairCheckout(_ context.Context, wsID string, req filecoord.FileCheckoutRepairRequest) (*ops.RepairResult, error) {
-	result, err := s.fileOps.RepairCheckout(wsID, req.Scope, req.Target, req.Repo, req.Force)
-	if err != nil {
-		if errors.Is(err, ops.ErrCheckoutTargetNotAllowed) || errors.Is(err, ops.ErrAgentRepoNotAllowed) {
-			return nil, apperrors.ErrValidation("checkout target is not allowed")
-		}
-		return nil, err
-	}
-	return &result, nil
-}
-
-func (s *testFileServiceImpl) DiffFileScoped(_ context.Context, _ string, _ filecoord.FileScope, _, _, _, _, _ string) (*filecoord.FileDiffResult, error) {
-	return &filecoord.FileDiffResult{}, nil
-}
-
-func (s *testFileServiceImpl) BlameFileScoped(_ context.Context, _ string, _ filecoord.FileScope, _, _, _ string) (*filecoord.FileBlameResult, error) {
-	return &filecoord.FileBlameResult{}, nil
-}
-
-func (s *testFileServiceImpl) HistoryFileScoped(_ context.Context, _ string, _ filecoord.FileScope, _, _, _ string) (*filecoord.FileHistoryResult, error) {
-	return &filecoord.FileHistoryResult{}, nil
-}
-
-func (s *testFileServiceImpl) WriteFileConditionalScoped(_ context.Context, wsID string, scope filecoord.FileScope, target, repo, path, content string, _ filecoord.FileWritePreconditions) (*filecoord.FileMutationResult, error) {
-	root, err := s.resolveScopeRootTest(wsID, scope, target, repo)
-	if err != nil {
-		return nil, err
-	}
-	if err := testWriteFileAt(root, path, content); err != nil {
-		return nil, err
-	}
-	return &filecoord.FileMutationResult{Success: true, Version: "sha256:test"}, nil
-}
-
-func (s *testFileServiceImpl) DeletePathVersionedScoped(_ context.Context, wsID string, scope filecoord.FileScope, target, repo, path string, recursive bool, _ string) error {
-	root, err := s.resolveScopeRootTest(wsID, scope, target, repo)
-	if err != nil {
-		return err
-	}
-	return testDeletePathAt(root, path, recursive)
-}
-
-func (s *testFileServiceImpl) MkdirScoped(_ context.Context, wsID string, scope filecoord.FileScope, target, repo, path string) error {
-	root, err := s.resolveScopeRootTest(wsID, scope, target, repo)
-	if err != nil {
-		return err
-	}
-	return testMkdirAt(root, path)
-}
-
-func (s *testFileServiceImpl) MovePathVersionedScoped(_ context.Context, wsID string, scope filecoord.FileScope, target, repo, from, to string, overwrite bool, _, _ string) (*filecoord.FileMutationResult, error) {
-	root, err := s.resolveScopeRootTest(wsID, scope, target, repo)
-	if err != nil {
-		return nil, err
-	}
-	if err := testMovePathAt(root, from, to, overwrite); err != nil {
-		return nil, err
-	}
-	return &filecoord.FileMutationResult{Success: true, Version: "sha256:test"}, nil
-}
-
-func testScopedFullPath(rootDir, path string, allowEmpty bool) (string, string, error) {
-	if path == "" {
-		if !allowEmpty {
-			return "", "", apperrors.ErrValidation("path parameter is required")
-		}
-		path = "."
-	}
-	if filepath.IsAbs(path) {
-		return "", "", apperrors.ErrForbidden("path outside root")
-	}
-	cleanPath := filepath.Clean(path)
-	for _, segment := range strings.Split(cleanPath, string(filepath.Separator)) {
-		if strings.EqualFold(segment, ".git") {
-			return "", "", apperrors.ErrForbidden(".git paths are not available")
-		}
-	}
-	fullPath := filepath.Join(rootDir, cleanPath)
-	if err := validatePathWithinDir(fullPath, rootDir); err != nil {
-		return "", "", apperrors.ErrForbidden("path outside root")
-	}
-	relPath, err := filepath.Rel(rootDir, fullPath)
-	if err != nil || relPath == ".." || strings.HasPrefix(relPath, ".."+string(filepath.Separator)) || filepath.IsAbs(relPath) {
-		return "", "", apperrors.ErrForbidden("path outside root")
-	}
-	if relPath == "" {
-		relPath = "."
-	}
-	return relPath, fullPath, nil
-}
-
-func testNoSymlinkComponents(rootDir, fullPath string) error {
-	relPath, err := filepath.Rel(rootDir, fullPath)
-	if err != nil || relPath == ".." || strings.HasPrefix(relPath, ".."+string(filepath.Separator)) || filepath.IsAbs(relPath) {
-		return apperrors.ErrForbidden("path outside root")
-	}
-	if relPath == "." {
-		return nil
-	}
-	current := rootDir
-	for _, segment := range strings.Split(relPath, string(filepath.Separator)) {
-		if segment == "" || segment == "." {
-			continue
-		}
-		current = filepath.Join(current, segment)
-		fi, err := os.Lstat(current)
-		if err != nil {
-			if os.IsNotExist(err) {
-				return nil
-			}
-			return apperrors.ErrInternal("failed to stat path", err)
-		}
-		if fi.Mode()&os.ModeSymlink != 0 {
-			return apperrors.ErrForbidden("refusing to follow symlink")
-		}
-	}
+func (testWorkspaceLayout) SetRepositoryDefaultBranch(context.Context, string, string, string) error {
 	return nil
 }
 
-func testExistingParent(fullPath, rootDir string) error {
-	parentDir := filepath.Dir(fullPath)
-	if err := validatePathWithinDir(parentDir, rootDir); err != nil {
-		return apperrors.ErrForbidden("parent directory outside root")
-	}
-	if err := testNoSymlinkComponents(rootDir, parentDir); err != nil {
-		return err
-	}
-	parentFi, err := os.Lstat(parentDir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return apperrors.ErrNotFound("parent directory does not exist")
-		}
-		return apperrors.ErrInternal("failed to stat parent directory", err)
-	}
-	if parentFi.Mode()&os.ModeSymlink != 0 {
-		return apperrors.ErrForbidden("parent directory is a symlink")
-	}
-	if !parentFi.IsDir() {
-		return apperrors.ErrValidation("parent path is not a directory")
-	}
-	return nil
+type testGitBrowseMechanics struct{}
+
+func (testGitBrowseMechanics) DiffStat(context.Context, string, string) (sourcecontrol.DiffStat, error) {
+	return sourcecontrol.DiffStat{}, nil
+}
+func (testGitBrowseMechanics) ResolveMergeBase(context.Context, string, string) (string, error) {
+	return "main", nil
+}
+func (testGitBrowseMechanics) DiffCommits(context.Context, string, string, int) ([]sourcecontrol.DiffCommit, error) {
+	return nil, nil
+}
+func (testGitBrowseMechanics) DiffFiles(context.Context, string, string, string) ([]sourcecontrol.DiffFile, error) {
+	return nil, nil
+}
+func (testGitBrowseMechanics) DiffFilePatch(context.Context, string, string, string, string) (*sourcecontrol.DiffFilePatch, error) {
+	return &sourcecontrol.DiffFilePatch{}, nil
+}
+func (testGitBrowseMechanics) Push(context.Context, string, string, string, string) (*sourcecontrol.PushResult, error) {
+	return &sourcecontrol.PushResult{}, nil
+}
+func (testGitBrowseMechanics) Pull(context.Context, string, string, string, string) (*sourcecontrol.PullResult, error) {
+	return &sourcecontrol.PullResult{}, nil
+}
+func (testGitBrowseMechanics) CurrentBranch(context.Context, string) (string, error) {
+	return "main", nil
+}
+func (testGitBrowseMechanics) Reset(context.Context, string, string, string, bool, bool) (*sourcecontrol.ResetResult, error) {
+	return &sourcecontrol.ResetResult{}, nil
+}
+func (testGitBrowseMechanics) Status(context.Context, string, string) (*sourcecontrol.AgentStatusResult, error) {
+	return &sourcecontrol.AgentStatusResult{}, nil
+}
+func (testGitBrowseMechanics) Available(context.Context) error { return nil }
+func (testGitBrowseMechanics) CreatePullRequest(context.Context, string, string, string, string) (*sourcecontrol.PullRequestCreation, error) {
+	return &sourcecontrol.PullRequestCreation{}, nil
+}
+func (testGitBrowseMechanics) ListPullRequests(context.Context, string, string, int) ([]sourcecontrol.PullRequest, error) {
+	return nil, nil
 }
 
-func testWriteFileAt(rootDir, path, content string) error {
-	_, fullPath, err := testScopedFullPath(rootDir, path, false)
-	if err != nil {
-		return err
-	}
-	if err := testNoSymlinkComponents(rootDir, fullPath); err != nil {
-		return err
-	}
-	if err := testExistingParent(fullPath, rootDir); err != nil {
-		return err
-	}
-	perm := os.FileMode(0644)
-	if fi, err := os.Lstat(fullPath); err == nil {
-		if fi.Mode()&os.ModeSymlink != 0 {
-			return apperrors.ErrForbidden("refusing to overwrite symlink")
-		}
-		if fi.IsDir() {
-			return apperrors.ErrValidation("path is a directory, not a file")
-		}
-		perm = fi.Mode().Perm()
-	} else if !os.IsNotExist(err) {
-		return apperrors.ErrInternal("failed to stat file", err)
-	}
-	if err := os.WriteFile(fullPath, []byte(content), perm); err != nil {
-		return apperrors.ErrInternal("failed to save file", err)
-	}
-	return nil
+type composedTestFilePorts struct {
+	sourcecontrol.Browse
+	sourcecontrol.Mutate
+	sourcecontrol.Checkout
 }
 
-func testDeletePathAt(rootDir, path string, recursive bool) error {
-	_, fullPath, err := testScopedFullPath(rootDir, path, false)
-	if err != nil {
-		return err
-	}
-	if err := testNoSymlinkComponents(rootDir, fullPath); err != nil {
-		return err
-	}
-	if err := testExistingParent(fullPath, rootDir); err != nil {
-		return err
-	}
-	fi, err := os.Lstat(fullPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return apperrors.ErrNotFound("path not found")
-		}
-		return apperrors.ErrInternal("failed to stat path", err)
-	}
-	if fi.Mode()&os.ModeSymlink != 0 {
-		return apperrors.ErrForbidden("refusing to follow symlink")
-	}
-	if fi.IsDir() {
-		if recursive {
-			if err := os.RemoveAll(fullPath); err != nil {
-				return apperrors.ErrInternal("failed to delete directory", err)
-			}
-			return nil
-		}
-		entries, err := os.ReadDir(fullPath)
-		if err != nil {
-			return apperrors.ErrInternal("failed to read directory", err)
-		}
-		if len(entries) > 0 {
-			return apperrors.ErrConflict("directory not empty")
-		}
-	}
-	if err := os.Remove(fullPath); err != nil {
-		return apperrors.ErrInternal("failed to delete path", err)
-	}
-	return nil
+var testFileGrantIssuer = sourcecontrol.NewAccessGrantIssuer()
+
+type testFileMechanics interface {
+	ResolveAgentWorktree(string, string) (*sourcecontrol.Worktree, error)
+	ResolveAgentWorktreeForRepo(string, string, string) (*sourcecontrol.Worktree, error)
+	ResolveWorkspaceRoot(string) (string, error)
+	ResolveWorkspaceData(string) (*sourcecontrol.WorkspaceTopology, error)
+	ResolveLoomDataDir() (string, error)
+	GitStatusPorcelain(context.Context, string) (sourcecontrol.GitFileStatusResult, error)
+	GitShowFileAtRev(context.Context, string, string, string, int64) (*sourcecontrol.GitFileContentAtRev, error)
+	GitDiffFile(context.Context, string, string, string, string) (sourcecontrol.GitBoundedTextResult, error)
+	GitLogFile(context.Context, string, string, int) (sourcecontrol.GitBoundedTextResult, error)
+	GitBlamePorcelain(context.Context, string, string) (sourcecontrol.GitBoundedTextResult, error)
+	GitCurrentBranch(context.Context, string) (string, error)
+	RepairCheckout(string, string, string, string, bool) (sourcecontrol.RepairResult, error)
 }
 
-func testMkdirAt(rootDir, path string) error {
-	_, fullPath, err := testScopedFullPath(rootDir, path, false)
+func NewFileService(mechanics testFileMechanics) *composedTestFilePorts {
+	adapters := testGitBrowseMechanics{}
+	ports, err := sourcecontrol.NewWorkspacePorts(testFileGrantIssuer, testWorkspaceLayout{}, adapters, filesystem.New(mechanics), adapters, adapters)
 	if err != nil {
-		return err
+		panic(err)
 	}
-	if err := testNoSymlinkComponents(rootDir, fullPath); err != nil {
-		return err
-	}
-	if fi, err := os.Lstat(fullPath); err == nil {
-		if fi.Mode()&os.ModeSymlink != 0 {
-			return apperrors.ErrForbidden("refusing to follow symlink")
-		}
-		if !fi.IsDir() {
-			return apperrors.ErrConflict("file exists at path")
-		}
-		return nil
-	} else if !os.IsNotExist(err) {
-		return apperrors.ErrInternal("failed to stat path", err)
-	}
-	if err := os.MkdirAll(fullPath, 0755); err != nil {
-		return apperrors.ErrInternal("failed to create directory", err)
-	}
-	return nil
-}
-
-func testMovePathAt(rootDir, from, to string, overwrite bool) error {
-	_, fromPath, err := testScopedFullPath(rootDir, from, false)
-	if err != nil {
-		return err
-	}
-	_, toPath, err := testScopedFullPath(rootDir, to, false)
-	if err != nil {
-		return err
-	}
-	if err := testNoSymlinkComponents(rootDir, fromPath); err != nil {
-		return err
-	}
-	if err := testNoSymlinkComponents(rootDir, toPath); err != nil {
-		return err
-	}
-	if err := testExistingParent(fromPath, rootDir); err != nil {
-		return err
-	}
-	if err := testExistingParent(toPath, rootDir); err != nil {
-		return err
-	}
-	if fi, err := os.Lstat(fromPath); err != nil {
-		if os.IsNotExist(err) {
-			return apperrors.ErrNotFound("source path not found")
-		}
-		return apperrors.ErrInternal("failed to stat source path", err)
-	} else if fi.Mode()&os.ModeSymlink != 0 {
-		return apperrors.ErrForbidden("refusing to follow symlink")
-	}
-	if destFi, err := os.Lstat(toPath); err == nil {
-		if destFi.Mode()&os.ModeSymlink != 0 {
-			return apperrors.ErrForbidden("refusing to follow symlink")
-		}
-		if !overwrite {
-			return apperrors.ErrConflict("destination exists")
-		}
-	} else if !os.IsNotExist(err) {
-		return apperrors.ErrInternal("failed to stat destination path", err)
-	}
-	if err := os.Rename(fromPath, toPath); err != nil {
-		return apperrors.ErrInternal("failed to move path", err)
-	}
-	return nil
+	return &composedTestFilePorts{Browse: ports.Browse, Mutate: ports.Mutate, Checkout: ports.Checkout}
 }
 
 // ReadLastNLines wraps the package-internal readLastNLinesFromFile without
@@ -599,15 +186,6 @@ type mockAgentService struct {
 	getTerminalInfoFunc       func(ctx context.Context, wsID, agentName string) (*agentcoord.AgentTerminalInfoResult, error)
 	generateTerminalTokenFunc func(ctx context.Context, wsID, agentName, userID string) (string, error)
 	getLogFunc                func(ctx context.Context, wsID, agentName string, lines int, beforeLine int64) (*agentcoord.AgentLogResult, error)
-	getDiffStatFunc           func(ctx context.Context, wsID, agentName string) (*agentcoord.AgentDiffStatResult, error)
-	gitPushFunc               func(ctx context.Context, wsID, agentName, target string) (*ops.GitPushResult, error)
-	gitPushAllFunc            func(ctx context.Context, wsID string) (*agentcoord.GitPushAllResult, error)
-	gitPullFunc               func(ctx context.Context, wsID, agentName, source string) (*ops.GitPullResult, error)
-	gitSyncFunc               func(ctx context.Context, wsID, agentName string) (*agentcoord.GitSyncResult, error)
-	createPRFunc              func(ctx context.Context, wsID, agentName, target string) (*ops.GitPRResult, error)
-	gitResetFunc              func(ctx context.Context, wsID, agentName, branch string, force, push bool) (*ops.GitResetResult, error)
-	gitStatusFunc             func(ctx context.Context, wsID, agentName string) (*ops.GitStatusResult, error)
-	setTargetBranchFunc       func(ctx context.Context, wsID, agentName, branch string) error
 }
 
 func (m *mockAgentService) GetTerminalInfo(ctx context.Context, wsID, agentName string) (*agentcoord.AgentTerminalInfoResult, error) {
@@ -628,91 +206,100 @@ func (m *mockAgentService) GetLog(ctx context.Context, wsID, agentName string, l
 	}
 	return &agentcoord.AgentLogResult{Lines: []string{}, LineCount: 0, StartLine: 1}, nil
 }
-func (m *mockAgentService) GetDiffStat(ctx context.Context, wsID, agentName string) (*agentcoord.AgentDiffStatResult, error) {
-	return &agentcoord.AgentDiffStatResult{}, nil
-}
-func (m *mockAgentService) GitPush(ctx context.Context, wsID, agentName, target string) (*ops.GitPushResult, error) {
-	return &ops.GitPushResult{Success: true}, nil
-}
-func (m *mockAgentService) GitPushAll(ctx context.Context, wsID string) (*agentcoord.GitPushAllResult, error) {
-	return &agentcoord.GitPushAllResult{}, nil
-}
-func (m *mockAgentService) GitPull(ctx context.Context, wsID, agentName, source string) (*ops.GitPullResult, error) {
-	return &ops.GitPullResult{Success: true}, nil
-}
-func (m *mockAgentService) GitSync(ctx context.Context, wsID, agentName string) (*agentcoord.GitSyncResult, error) {
-	return &agentcoord.GitSyncResult{}, nil
-}
-func (m *mockAgentService) CreatePR(ctx context.Context, wsID, agentName, target string) (*ops.GitPRResult, error) {
-	return &ops.GitPRResult{}, nil
-}
-
-func (m *mockAgentService) ListPullRequests(context.Context, string, string) (*ops.GitPullRequestList, error) {
-	return &ops.GitPullRequestList{PullRequests: []ops.GitPullRequest{}}, nil
-}
-
-func (m *mockAgentService) GitReset(ctx context.Context, wsID, agentName, branch string, force, push bool) (*ops.GitResetResult, error) {
-	return &ops.GitResetResult{}, nil
-}
-func (m *mockAgentService) GitStatus(ctx context.Context, wsID, agentName string) (*ops.GitStatusResult, error) {
-	return &ops.GitStatusResult{}, nil
-}
-func (m *mockAgentService) SetTargetBranch(ctx context.Context, wsID, agentName, branch string) error {
-	return nil
-}
 
 // ---------------------------------------------------------------------------
 // Stub types for module tests
 // ---------------------------------------------------------------------------
 
-// stubFileService implements filecoord.FileService with no-op defaults for module tests.
+// stubFileService implements the three Source Control workspace ports with
+// no-op defaults for module tests.
 type stubFileService struct{}
 
-func (s *stubFileService) ListDirectoryScoped(_ context.Context, _ string, _ filecoord.FileScope, _, _, _ string) (*filecoord.FileTreeResult, error) {
-	return &filecoord.FileTreeResult{}, nil
+func (s *stubFileService) DiffStat(context.Context, sourcecontrol.AgentQuery) (sourcecontrol.AgentDiffStat, error) {
+	return sourcecontrol.AgentDiffStat{}, nil
 }
-func (s *stubFileService) ReadFileScoped(_ context.Context, _ string, _ filecoord.FileScope, _, _, _ string) (*filecoord.FileReadResult, error) {
-	return &filecoord.FileReadResult{}, nil
+func (s *stubFileService) DiffCommits(context.Context, sourcecontrol.DiffCommitsQuery) ([]sourcecontrol.DiffCommit, error) {
+	return nil, nil
 }
-func (s *stubFileService) StatPathScoped(_ context.Context, _ string, _ filecoord.FileScope, _, _, _ string) (*filecoord.FileStatResult, error) {
-	return &filecoord.FileStatResult{}, nil
+func (s *stubFileService) DiffFiles(context.Context, sourcecontrol.DiffFilesQuery) ([]sourcecontrol.DiffFile, error) {
+	return nil, nil
 }
-func (s *stubFileService) ReadFileAtRevScoped(_ context.Context, _ string, _ filecoord.FileScope, _, _, _, _ string) (*filecoord.FileReadResult, error) {
-	return &filecoord.FileReadResult{}, nil
+func (s *stubFileService) DiffFilePatch(context.Context, sourcecontrol.DiffFilePatchQuery) (*sourcecontrol.DiffFilePatch, error) {
+	return &sourcecontrol.DiffFilePatch{}, nil
 }
-func (s *stubFileService) IndexFilesScoped(_ context.Context, _ string, _ filecoord.FileScope, _, _ string) (*filecoord.FileIndexResult, error) {
-	return &filecoord.FileIndexResult{}, nil
+
+func (s *stubFileService) ListDirectory(_ context.Context, _ sourcecontrol.PathQuery) (*sourcecontrol.FileTreeResult, error) {
+	return &sourcecontrol.FileTreeResult{}, nil
 }
-func (s *stubFileService) SearchFilesScoped(_ context.Context, _ string, _ filecoord.FileScope, _, _ string, _ filecoord.FileSearchRequest) (*filecoord.FileSearchResult, error) {
-	return &filecoord.FileSearchResult{}, nil
+func (s *stubFileService) ReadFile(_ context.Context, _ sourcecontrol.PathQuery) (*sourcecontrol.FileReadResult, error) {
+	return &sourcecontrol.FileReadResult{}, nil
 }
-func (s *stubFileService) GitStatusScoped(_ context.Context, _ string, _ filecoord.FileScope, _, _ string) (filecoord.FileGitStatusResult, error) {
-	return filecoord.FileGitStatusResult{}, nil
+func (s *stubFileService) StatPath(_ context.Context, _ sourcecontrol.PathQuery) (*sourcecontrol.FileStatResult, error) {
+	return &sourcecontrol.FileStatResult{}, nil
 }
-func (s *stubFileService) ListFileCheckouts(_ context.Context, _ string) (*filecoord.FileCheckoutsResult, error) {
-	return &filecoord.FileCheckoutsResult{}, nil
+func (s *stubFileService) ReadFileAtRevision(_ context.Context, _ sourcecontrol.RevisionQuery) (*sourcecontrol.FileReadResult, error) {
+	return &sourcecontrol.FileReadResult{}, nil
 }
-func (s *stubFileService) RepairCheckout(_ context.Context, _ string, _ filecoord.FileCheckoutRepairRequest) (*ops.RepairResult, error) {
-	return &ops.RepairResult{}, nil
+func (s *stubFileService) IndexFiles(_ context.Context, _ sourcecontrol.LocationQuery) (*sourcecontrol.FileIndexResult, error) {
+	return &sourcecontrol.FileIndexResult{}, nil
 }
-func (s *stubFileService) DiffFileScoped(_ context.Context, _ string, _ filecoord.FileScope, _, _, _, _, _ string) (*filecoord.FileDiffResult, error) {
-	return &filecoord.FileDiffResult{}, nil
+func (s *stubFileService) SearchFiles(_ context.Context, _ sourcecontrol.SearchQuery) (*sourcecontrol.FileSearchResult, error) {
+	return &sourcecontrol.FileSearchResult{}, nil
 }
-func (s *stubFileService) BlameFileScoped(_ context.Context, _ string, _ filecoord.FileScope, _, _, _ string) (*filecoord.FileBlameResult, error) {
-	return &filecoord.FileBlameResult{}, nil
+func (s *stubFileService) Status(_ context.Context, _ sourcecontrol.LocationQuery) (sourcecontrol.FileGitStatusResult, error) {
+	return sourcecontrol.FileGitStatusResult{}, nil
 }
-func (s *stubFileService) HistoryFileScoped(_ context.Context, _ string, _ filecoord.FileScope, _, _, _ string) (*filecoord.FileHistoryResult, error) {
-	return &filecoord.FileHistoryResult{}, nil
+func (s *stubFileService) ListCheckouts(_ context.Context, _ sourcecontrol.WorkspaceQuery) (*sourcecontrol.FileCheckoutsResult, error) {
+	return &sourcecontrol.FileCheckoutsResult{}, nil
 }
-func (s *stubFileService) WriteFileConditionalScoped(_ context.Context, _ string, _ filecoord.FileScope, _, _, _, _ string, _ filecoord.FileWritePreconditions) (*filecoord.FileMutationResult, error) {
-	return &filecoord.FileMutationResult{Success: true}, nil
+func (s *stubFileService) Repair(_ context.Context, _ sourcecontrol.RepairCommand) (*sourcecontrol.RepairResult, error) {
+	return &sourcecontrol.RepairResult{}, nil
 }
-func (s *stubFileService) DeletePathVersionedScoped(_ context.Context, _ string, _ filecoord.FileScope, _, _, _ string, _ bool, _ string) error {
+func (s *stubFileService) DiffPath(_ context.Context, _ sourcecontrol.PathDiffQuery) (*sourcecontrol.FileDiffResult, error) {
+	return &sourcecontrol.FileDiffResult{}, nil
+}
+func (s *stubFileService) BlamePath(_ context.Context, _ sourcecontrol.PathQuery) (*sourcecontrol.FileBlameResult, error) {
+	return &sourcecontrol.FileBlameResult{}, nil
+}
+func (s *stubFileService) PathHistory(_ context.Context, _ sourcecontrol.PathQuery) (*sourcecontrol.FileHistoryResult, error) {
+	return &sourcecontrol.FileHistoryResult{}, nil
+}
+func (s *stubFileService) WriteFile(_ context.Context, _ sourcecontrol.WriteCommand) (*sourcecontrol.FileMutationResult, error) {
+	return &sourcecontrol.FileMutationResult{Success: true}, nil
+}
+func (s *stubFileService) DeletePath(_ context.Context, _ sourcecontrol.DeleteCommand) error {
 	return nil
 }
-func (s *stubFileService) MkdirScoped(_ context.Context, _ string, _ filecoord.FileScope, _, _, _ string) error {
+func (s *stubFileService) CreateDirectory(_ context.Context, _ sourcecontrol.CreateDirectoryCommand) error {
 	return nil
 }
-func (s *stubFileService) MovePathVersionedScoped(_ context.Context, _ string, _ filecoord.FileScope, _, _, _, _ string, _ bool, _, _ string) (*filecoord.FileMutationResult, error) {
-	return &filecoord.FileMutationResult{Success: true}, nil
+func (s *stubFileService) MovePath(_ context.Context, _ sourcecontrol.MoveCommand) (*sourcecontrol.FileMutationResult, error) {
+	return &sourcecontrol.FileMutationResult{Success: true}, nil
+}
+func (s *stubFileService) Push(context.Context, sourcecontrol.PushCommand) (*sourcecontrol.PushResult, error) {
+	return &sourcecontrol.PushResult{Success: true}, nil
+}
+func (s *stubFileService) PushAll(context.Context, sourcecontrol.PushAllCommand) (*sourcecontrol.PushAllResult, error) {
+	return &sourcecontrol.PushAllResult{}, nil
+}
+func (s *stubFileService) Pull(context.Context, sourcecontrol.PullCommand) (*sourcecontrol.PullResult, error) {
+	return &sourcecontrol.PullResult{Success: true}, nil
+}
+func (s *stubFileService) Sync(context.Context, sourcecontrol.SyncCommand) (*sourcecontrol.SyncResult, error) {
+	return &sourcecontrol.SyncResult{}, nil
+}
+func (s *stubFileService) CreatePullRequest(context.Context, sourcecontrol.CreatePullRequestCommand) (*sourcecontrol.PullRequestCreation, error) {
+	return &sourcecontrol.PullRequestCreation{}, nil
+}
+func (s *stubFileService) ListPullRequests(context.Context, sourcecontrol.ListPullRequestsQuery) (*sourcecontrol.PullRequestList, error) {
+	return &sourcecontrol.PullRequestList{}, nil
+}
+func (s *stubFileService) Reset(context.Context, sourcecontrol.ResetCommand) (*sourcecontrol.ResetResult, error) {
+	return &sourcecontrol.ResetResult{}, nil
+}
+func (s *stubFileService) AgentStatus(context.Context, sourcecontrol.AgentStatusQuery) (*sourcecontrol.AgentStatusResult, error) {
+	return &sourcecontrol.AgentStatusResult{}, nil
+}
+func (s *stubFileService) SetTargetBranch(context.Context, sourcecontrol.SetTargetBranchCommand) error {
+	return nil
 }

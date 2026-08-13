@@ -82,7 +82,7 @@ func (testTaskMaterializer) PreparePullRequestCheckout(
 	return nil, sourcecontrol.ErrUnavailable
 }
 
-var _ sourcecontrol.Materializer = testTaskMaterializer{}
+var _ sourceControlTaskMaterializer = testTaskMaterializer{}
 
 func testGitOutputForMaterializer(
 	ctx context.Context,

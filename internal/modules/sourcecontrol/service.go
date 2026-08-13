@@ -21,8 +21,6 @@ type Service struct {
 	fetches      *refFetchCoordinator
 }
 
-var _ API = (*Service)(nil)
-
 func New(
 	repositories RepositoryResolver,
 	broker GitReadBroker,

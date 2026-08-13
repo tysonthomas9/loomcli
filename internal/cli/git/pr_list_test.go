@@ -3,7 +3,7 @@ package git
 import (
 	"testing"
 
-	"github.com/tysonthomas9/loomcli/internal/ops"
+	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
 )
 
 func TestMapPRListGhState(t *testing.T) {
@@ -45,10 +45,10 @@ func TestNormalizePRListLimit(t *testing.T) {
 }
 
 func TestFilterPullRequestsForReview(t *testing.T) {
-	prs := []ops.GitPullRequest{
+	prs := []sourcecontrol.PullRequest{
 		{Number: 1, State: "OPEN", ReviewDecision: ""},
 		{Number: 2, State: "OPEN", ReviewDecision: "APPROVED"},
-		{Number: 3, State: "OPEN", IsDraft: true},
+		{Number: 3, State: "OPEN", Draft: true},
 		{Number: 4, State: "MERGED"},
 		{Number: 5, State: "OPEN", ReviewDecision: "CHANGES_REQUESTED"},
 	}

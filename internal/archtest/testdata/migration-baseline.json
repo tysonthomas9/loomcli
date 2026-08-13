@@ -738,7 +738,7 @@
   },
   "ratchets": {
     "composite_store": {
-      "max_production_files": 14,
+      "max_production_files": 13,
       "max_outside_composition": 0,
       "composition_prefixes": [
         "internal/bootstrap/",
@@ -753,7 +753,6 @@
         "internal/cli/cmdstore/cmdstore.go",
         "internal/cli/serve/metricscmd/handlers.go",
         "internal/cli/serve/metricscmd/monitor_store_data_source.go",
-        "internal/cli/serve/opsimpl/gitops.go",
         "internal/cli/serve/serve.go",
         "internal/cli/serve/serve_runtime.go",
         "internal/cli/serve/serve_runtime_loops.go",

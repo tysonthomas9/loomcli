@@ -14,8 +14,6 @@ type TaskOutcomeService struct {
 	now   func() time.Time
 }
 
-var _ TaskOutcomeRecorder = (*TaskOutcomeService)(nil)
-
 func NewTaskOutcomes(store TaskOutcomeStore, now func() time.Time) (*TaskOutcomeService, error) {
 	if store == nil || now == nil {
 		return nil, fmt.Errorf("compose Source Control task outcomes: store and clock are required: %w", ErrUnavailable)

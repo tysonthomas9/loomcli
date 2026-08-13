@@ -41,6 +41,13 @@ func TestPhase10MigratedHTTPContractsCannotReturnAsHandwrittenStructs(t *testing
 		"pullRequestDetail", "pullRequestDiff", "pullRequestDiffFile", "pullRequestReviewRequest",
 		"pullRequestReviewResult", "reviewerConversation", "reviewerEnsureResult",
 		"reviewerMessageRequest", "reviewerMessageResult",
+		"gitMergeResponse", "gitSyncResponse", "gitPushAllResponse",
+		"gitPushAllCheckoutResponse", "gitPullRequestCreationResponse",
+		"gitResetResponse", "gitStatusResponse", "gitPushRequest",
+		"gitPullRequest", "gitPRRequest", "gitResetRequest", "lockedResponse",
+		"lockInfoResp", "gitTargetRequest", "gitTargetResponse", "diffResponse",
+		"diffCommitDTO", "diffFileDTO", "diffFilePatchDTO", "DiffStatResponse",
+		"pullRequestsData", "pullRequestData",
 	}
 	repository := openRootedTestFS(t, root)
 	handlers := filepath.ToSlash(filepath.Join("internal", "webui", "handlers"))

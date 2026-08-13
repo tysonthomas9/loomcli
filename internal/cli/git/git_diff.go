@@ -13,7 +13,7 @@ import (
 	"github.com/go-git/go-git/v6/utils/merkletrie"
 
 	"github.com/tysonthomas9/loomcli/internal/cli"
-	"github.com/tysonthomas9/loomcli/internal/ops"
+	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
 )
 
 const (
@@ -56,9 +56,9 @@ func ResolveMergeBase(worktreePath, branch string) (string, error) {
 		return bases[0].Hash.String(), nil
 	}
 	if len(tried) == 0 {
-		return "", fmt.Errorf("%w: no candidate refs resolved for %q", ops.ErrDiffBaseNotFound, branch)
+		return "", fmt.Errorf("%w: no candidate refs resolved for %q", sourcecontrol.ErrDiffBaseNotFound, branch)
 	}
-	return "", fmt.Errorf("%w: no common ancestor for %q (tried: %s)", ops.ErrDiffBaseNotFound, branch, strings.Join(tried, ", "))
+	return "", fmt.Errorf("%w: no common ancestor for %q (tried: %s)", sourcecontrol.ErrDiffBaseNotFound, branch, strings.Join(tried, ", "))
 }
 
 func openGoGitRepo(worktreePath string) (*gogit.Repository, error) {
@@ -149,7 +149,7 @@ func repoRemotes(repo *gogit.Repository) []string {
 // Format: %H|%h|%an|%ae|%aI|%s — subject is last so pipes in it are preserved.
 // ctx is currently unused at this layer (RunGitCommand has no ctx surface yet)
 // but is accepted so the public API mirrors DiffFiles/DiffFilePatch.
-func DiffCommits(ctx context.Context, worktreePath, mergeBase string, limit int) ([]ops.DiffCommitResult, error) {
+func DiffCommits(ctx context.Context, worktreePath, mergeBase string, limit int) ([]sourcecontrol.DiffCommit, error) {
 	_ = ctx
 	if err := validateGitRef(mergeBase); err != nil {
 		return nil, err
@@ -164,7 +164,7 @@ func DiffCommits(ctx context.Context, worktreePath, mergeBase string, limit int)
 	}
 
 	lines := strings.Split(strings.TrimSpace(out), "\n")
-	results := make([]ops.DiffCommitResult, 0, len(lines))
+	results := make([]sourcecontrol.DiffCommit, 0, len(lines))
 	for _, line := range lines {
 		if line == "" {
 			continue
@@ -173,7 +173,7 @@ func DiffCommits(ctx context.Context, worktreePath, mergeBase string, limit int)
 		if len(parts) < 6 {
 			continue
 		}
-		results = append(results, ops.DiffCommitResult{
+		results = append(results, sourcecontrol.DiffCommit{
 			Hash:      parts[0],
 			ShortHash: parts[1],
 			Author:    parts[2],
@@ -188,12 +188,12 @@ func DiffCommits(ctx context.Context, worktreePath, mergeBase string, limit int)
 // DiffFiles returns the list of changed files between two refs with status and stats.
 // ctx is plumbed into go-git's DiffContext so a canceled request stops the
 // in-process tree walk instead of running to natural completion.
-func DiffFiles(ctx context.Context, worktreePath, from, to string) ([]ops.DiffFileResult, error) {
+func DiffFiles(ctx context.Context, worktreePath, from, to string) ([]sourcecontrol.DiffFile, error) {
 	changes, err := diffChanges(ctx, worktreePath, from, to)
 	if err != nil {
 		return nil, err
 	}
-	results := make([]ops.DiffFileResult, 0, len(changes))
+	results := make([]sourcecontrol.DiffFile, 0, len(changes))
 	for _, change := range changes {
 		if len(results) >= maxDiffFiles {
 			break
@@ -242,27 +242,27 @@ func diffChanges(ctx context.Context, worktreePath, from, to string) (object.Cha
 	return changes, nil
 }
 
-func diffFileResult(change *object.Change) (ops.DiffFileResult, bool) {
+func diffFileResult(change *object.Change) (sourcecontrol.DiffFile, bool) {
 	action, err := change.Action()
 	if err != nil {
-		return ops.DiffFileResult{}, false
+		return sourcecontrol.DiffFile{}, false
 	}
 	switch action {
 	case merkletrie.Insert:
-		return ops.DiffFileResult{Status: "A", Path: change.To.Name}, true
+		return sourcecontrol.DiffFile{Status: "A", Path: change.To.Name}, true
 	case merkletrie.Delete:
-		return ops.DiffFileResult{Status: "D", Path: change.From.Name}, true
+		return sourcecontrol.DiffFile{Status: "D", Path: change.From.Name}, true
 	case merkletrie.Modify:
 		if change.From.Name != "" && change.To.Name != "" && change.From.Name != change.To.Name {
-			return ops.DiffFileResult{Status: "R", OldPath: change.From.Name, Path: change.To.Name}, true
+			return sourcecontrol.DiffFile{Status: "R", OldPath: change.From.Name, Path: change.To.Name}, true
 		}
 		path := change.To.Name
 		if path == "" {
 			path = change.From.Name
 		}
-		return ops.DiffFileResult{Status: "M", Path: path}, path != ""
+		return sourcecontrol.DiffFile{Status: "M", Path: path}, path != ""
 	default:
-		return ops.DiffFileResult{}, false
+		return sourcecontrol.DiffFile{}, false
 	}
 }
 
@@ -323,7 +323,7 @@ func parseNumstatRenamePath(s string) string {
 // DiffFilePatch returns the unified diff patch for a single file between two refs.
 // ctx is plumbed into the underlying go-git tree walk so a canceled request
 // stops the walk.
-func DiffFilePatch(ctx context.Context, worktreePath, from, to, path string) (*ops.DiffFilePatchResult, error) {
+func DiffFilePatch(ctx context.Context, worktreePath, from, to, path string) (*sourcecontrol.DiffFilePatch, error) {
 	if path == "" {
 		return nil, fmt.Errorf("path must not be empty")
 	}
@@ -331,7 +331,7 @@ func DiffFilePatch(ctx context.Context, worktreePath, from, to, path string) (*o
 	if err != nil {
 		return nil, err
 	}
-	result := &ops.DiffFilePatchResult{}
+	result := &sourcecontrol.DiffFilePatch{}
 	for _, change := range changes {
 		if !changeMatchesPath(change, path) {
 			continue

@@ -1599,6 +1599,23 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/workspaces/{ws}/pull-requests": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List pull requests visible to a workspace */
+    get: operations["listPullRequests"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/workspaces/{ws}/pull-requests/{owner}/{repo}/{number}": {
     parameters: {
       query?: never;
@@ -2659,6 +2676,161 @@ export interface components {
       mode: "workflow-catalog";
       workspace: string;
       reason?: string;
+    };
+    GitPushRequest: {
+      /** @description Remote branch target. */
+      target?: string;
+    };
+    GitPullRequest: {
+      /** @description Remote branch source. */
+      source?: string;
+    };
+    GitCreatePullRequestRequest: {
+      /** @description Pull-request base branch. */
+      target?: string;
+    };
+    GitResetRequest: {
+      branch?: string;
+      /** @default false */
+      force: boolean;
+      /** @default false */
+      push: boolean;
+    };
+    GitTargetRequest: {
+      branch: string;
+    };
+    GitMergeResponse: {
+      success: boolean;
+      message: string;
+      already_up_to_date: boolean;
+      conflicted_files?: string[];
+    };
+    GitSyncResponse: {
+      push_result?: components["schemas"]["GitMergeResponse"];
+      pull_result?: components["schemas"]["GitMergeResponse"];
+    };
+    GitPushAllCheckoutResponse: {
+      name: string;
+      success: boolean;
+      message?: string;
+      error?: string;
+    };
+    GitPushAllResponse: {
+      results: components["schemas"]["GitPushAllCheckoutResponse"][];
+      pushed: number;
+      failed: number;
+    };
+    GitPullRequestCreationResponse: {
+      url?: string;
+      created: boolean;
+      already_exists: boolean;
+      no_commits: boolean;
+    };
+    GitResetResponse: {
+      success: boolean;
+      message: string;
+      previous_branch?: string;
+      pushed: boolean;
+    };
+    GitResetLockInfo: {
+      agent: string;
+      pid: number;
+      duration: string;
+      task_id?: string;
+    };
+    GitResetLockedResponse: {
+      error: string;
+      lock_info: components["schemas"]["GitResetLockInfo"];
+    };
+    GitStatusResponse: {
+      branch: string;
+      target_branch: string;
+      is_clean: boolean;
+      ahead: number;
+      behind: number;
+      changed_files: string[];
+      conflicted_files: string[];
+      has_conflicts: boolean;
+      stash_count: number;
+    };
+    GitTargetResponse: {
+      success: boolean;
+      branch: string;
+    };
+    DiffStatResponse: {
+      branch: string;
+      added: number;
+      removed: number;
+    };
+    GitDiffCommit: {
+      hash: string;
+      short_hash: string;
+      subject: string;
+      author: string;
+      email: string;
+      date: string;
+    };
+    GitDiffFile: {
+      path: string;
+      status: string;
+      old_path?: string;
+      additions: number;
+      deletions: number;
+    };
+    GitDiffFilePatch: {
+      patch: string;
+      is_binary: boolean;
+      is_too_large: boolean;
+      additions: number;
+      deletions: number;
+    };
+    GitDiffCommitsData: {
+      commits: components["schemas"]["GitDiffCommit"][];
+    };
+    GitDiffCommitsResponse: {
+      success: boolean;
+      data: components["schemas"]["GitDiffCommitsData"];
+      error?: string;
+    };
+    GitDiffFilesData: {
+      files: components["schemas"]["GitDiffFile"][];
+    };
+    GitDiffFilesResponse: {
+      success: boolean;
+      data: components["schemas"]["GitDiffFilesData"];
+      error?: string;
+    };
+    GitDiffFileResponse: {
+      success: boolean;
+      data: components["schemas"]["GitDiffFilePatch"];
+      error?: string;
+    };
+    PullRequestSummary: {
+      number: number;
+      title: string;
+      url: string;
+      state: string;
+      is_draft: boolean;
+      head_ref_name: string;
+      base_ref_name: string;
+      author_login?: string;
+      created_at?: string;
+      updated_at?: string;
+      review_decision?: string;
+      repo_name: string;
+      source_repo?: string;
+      additions?: number;
+      deletions?: number;
+      changed_files?: number;
+    };
+    PullRequestsData: {
+      pull_requests: components["schemas"]["PullRequestSummary"][];
+      warnings?: string[];
+    };
+    PullRequestsResponse: {
+      success: boolean;
+      data: components["schemas"]["PullRequestsData"];
+      error?: string;
     };
     PullRequestDetail: {
       number: number;
@@ -5219,7 +5391,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": Record<string, never>;
+          "application/json": components["schemas"]["DiffStatResponse"];
         };
       };
     };
@@ -7565,7 +7737,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": Record<string, never>;
+          "application/json": components["schemas"]["GitStatusResponse"];
         };
       };
     };
@@ -7584,10 +7756,7 @@ export interface operations {
     };
     requestBody?: {
       content: {
-        "application/json": {
-          /** @description Remote branch target */
-          target?: string;
-        };
+        "application/json": components["schemas"]["GitPushRequest"];
       };
     };
     responses: {
@@ -7597,7 +7766,16 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["MessageResponse"];
+          "application/json": components["schemas"]["GitMergeResponse"];
+        };
+      };
+      /** @description Push conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GitMergeResponse"];
         };
       };
     };
@@ -7616,10 +7794,7 @@ export interface operations {
     };
     requestBody?: {
       content: {
-        "application/json": {
-          /** @description Remote branch source */
-          source?: string;
-        };
+        "application/json": components["schemas"]["GitPullRequest"];
       };
     };
     responses: {
@@ -7629,7 +7804,16 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["MessageResponse"];
+          "application/json": components["schemas"]["GitMergeResponse"];
+        };
+      };
+      /** @description Pull conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GitMergeResponse"];
         };
       };
     };
@@ -7654,7 +7838,16 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["MessageResponse"];
+          "application/json": components["schemas"]["GitSyncResponse"];
+        };
+      };
+      /** @description Push or pull conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GitSyncResponse"];
         };
       };
     };
@@ -7671,15 +7864,28 @@ export interface operations {
       };
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody?: {
+      content: {
+        "application/json": components["schemas"]["GitCreatePullRequestRequest"];
+      };
+    };
     responses: {
-      /** @description PR created */
+      /** @description Pull request already exists or no commits are available */
       200: {
         headers: {
           [name: string]: unknown;
         };
         content: {
-          "application/json": Record<string, never>;
+          "application/json": components["schemas"]["GitPullRequestCreationResponse"];
+        };
+      };
+      /** @description Pull request created */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GitPullRequestCreationResponse"];
         };
       };
     };
@@ -7696,7 +7902,11 @@ export interface operations {
       };
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody?: {
+      content: {
+        "application/json": components["schemas"]["GitResetRequest"];
+      };
+    };
     responses: {
       /** @description Reset complete */
       200: {
@@ -7704,7 +7914,16 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["MessageResponse"];
+          "application/json": components["schemas"]["GitResetResponse"];
+        };
+      };
+      /** @description Agent checkout is locked by an active task */
+      423: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GitResetLockedResponse"];
         };
       };
     };
@@ -7723,9 +7942,7 @@ export interface operations {
     };
     requestBody: {
       content: {
-        "application/json": {
-          target?: string;
-        };
+        "application/json": components["schemas"]["GitTargetRequest"];
       };
     };
     responses: {
@@ -7735,7 +7952,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["MessageResponse"];
+          "application/json": components["schemas"]["GitTargetResponse"];
         };
       };
     };
@@ -7758,7 +7975,32 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": Record<string, never>;
+          "application/json": components["schemas"]["GitPushAllResponse"];
+        };
+      };
+    };
+  };
+  listPullRequests: {
+    parameters: {
+      query?: {
+        state?: "all" | "open" | "merged" | "review";
+      };
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Pull-request list and any per-repository warnings */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PullRequestsResponse"];
         };
       };
     };
@@ -8222,14 +8464,17 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": Record<string, never>;
+          "application/json": components["schemas"]["DiffStatResponse"];
         };
       };
     };
   };
   getDiffCommits: {
     parameters: {
-      query?: never;
+      query?: {
+        from?: string;
+        limit?: number;
+      };
       header?: never;
       path: {
         /** @description Workspace identifier */
@@ -8247,14 +8492,17 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": Record<string, never>;
+          "application/json": components["schemas"]["GitDiffCommitsResponse"];
         };
       };
     };
   };
   getDiffFiles: {
     parameters: {
-      query?: never;
+      query?: {
+        from?: string;
+        to?: string;
+      };
       header?: never;
       path: {
         /** @description Workspace identifier */
@@ -8272,7 +8520,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": Record<string, never>;
+          "application/json": components["schemas"]["GitDiffFilesResponse"];
         };
       };
     };
@@ -8281,6 +8529,8 @@ export interface operations {
     parameters: {
       query: {
         path: string;
+        from?: string;
+        to?: string;
       };
       header?: never;
       path: {
@@ -8299,7 +8549,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": Record<string, never>;
+          "application/json": components["schemas"]["GitDiffFileResponse"];
         };
       };
     };

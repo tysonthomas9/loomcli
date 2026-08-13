@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tysonthomas9/loomcli/internal/ops"
+	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
 )
 
 // setupDiffTestRepo creates a git repo with a main branch and a feature branch
@@ -325,7 +325,7 @@ func TestResolveMergeBase_NoCommonHistoryReturnsSentinel(t *testing.T) {
 	repo.commitAll("feature")
 
 	_, err := ResolveMergeBase(repo.dir, "main")
-	if !errors.Is(err, ops.ErrDiffBaseNotFound) {
+	if !errors.Is(err, sourcecontrol.ErrDiffBaseNotFound) {
 		t.Fatalf("ResolveMergeBase error = %v, want ErrDiffBaseNotFound", err)
 	}
 }
@@ -834,7 +834,7 @@ func TestDiffFilePatch_RenameMatchesOldAndNewPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DiffFilePatch new path failed: %v", err)
 	}
-	for path, result := range map[string]*ops.DiffFilePatchResult{
+	for path, result := range map[string]*sourcecontrol.DiffFilePatch{
 		"to-rename.txt": oldPathResult,
 		"renamed.txt":   newPathResult,
 	} {

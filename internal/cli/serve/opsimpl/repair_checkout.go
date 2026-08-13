@@ -13,6 +13,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/gitbranch"
 	"github.com/tysonthomas9/loomcli/internal/localworkspace"
 	"github.com/tysonthomas9/loomcli/internal/modules/agents"
+	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
 	"github.com/tysonthomas9/loomcli/internal/ops"
 )
 
@@ -41,14 +42,14 @@ var (
 // RepairCheckout repairs or provisions a known workspace checkout. All target
 // paths are derived from workspace topology and validated under the workspace
 // root; no request field is treated as a filesystem path.
-func (g *GitOpsImpl) RepairCheckout(workspaceID, scope, target, repoName string, force bool) (ops.RepairResult, error) {
+func (g *LocalSourceControlMechanics) RepairCheckout(workspaceID, scope, target, repoName string, force bool) (sourcecontrol.RepairResult, error) {
 	ws, err := g.ResolveWorkspaceData(workspaceID)
 	if err != nil {
-		return ops.RepairResult{}, fmt.Errorf("load workspace data: %w", err)
+		return sourcecontrol.RepairResult{}, fmt.Errorf("load workspace data: %w", err)
 	}
 	wsRoot, err := g.ResolveWorkspaceRoot(workspaceID)
 	if err != nil {
-		return ops.RepairResult{}, fmt.Errorf("resolve workspace root: %w", err)
+		return sourcecontrol.RepairResult{}, fmt.Errorf("resolve workspace root: %w", err)
 	}
 	ws.Path = wsRoot
 
@@ -56,17 +57,17 @@ func (g *GitOpsImpl) RepairCheckout(workspaceID, scope, target, repoName string,
 	if strings.TrimSpace(scope) == "agent" {
 		agent, err = g.loadRuntimeIdentity(context.Background(), workspaceID, strings.TrimSpace(target))
 		if err != nil {
-			return ops.RepairResult{}, fmt.Errorf("%w: agent %q is not known in workspace", ops.ErrCheckoutTargetNotAllowed, target)
+			return sourcecontrol.RepairResult{}, fmt.Errorf("%w: agent %q is not known in workspace", sourcecontrol.ErrCheckoutTargetNotAllowed, target)
 		}
 	}
 	spec, err := repairCheckoutTarget(ws, wsRoot, agent, scope, target, repoName)
 	if err != nil {
-		return ops.RepairResult{}, err
+		return sourcecontrol.RepairResult{}, err
 	}
 
 	exists, err := repairPathExists(spec.path)
 	if err != nil {
-		return ops.RepairResult{}, err
+		return sourcecontrol.RepairResult{}, err
 	}
 	source, sourceOK := findRepairSource(ws, wsRoot, spec.repo, spec.path)
 	if !exists {
@@ -76,18 +77,18 @@ func (g *GitOpsImpl) RepairCheckout(workspaceID, scope, target, repoName string,
 }
 
 // provisionMissingCheckout creates a checkout whose working directory is absent.
-func provisionMissingCheckout(source string, sourceOK bool, spec repairCheckoutSpec) (ops.RepairResult, error) {
+func provisionMissingCheckout(source string, sourceOK bool, spec repairCheckoutSpec) (sourcecontrol.RepairResult, error) {
 	if !sourceOK {
 		return repairNone("No healthy source checkout is available to provision " + spec.label), nil
 	}
 	recovery, err := repairProvisionCheckout(source, spec.path, spec.branch, spec.baseBranch)
 	if err != nil {
-		return ops.RepairResult{}, fmt.Errorf("provision checkout: %w", err)
+		return sourcecontrol.RepairResult{}, fmt.Errorf("provision checkout: %w", err)
 	}
 	if !repairCheckoutHealthy(spec.path) {
-		return ops.RepairResult{}, fmt.Errorf("provisioned checkout did not become healthy")
+		return sourcecontrol.RepairResult{}, fmt.Errorf("provisioned checkout did not become healthy")
 	}
-	return ops.RepairResult{
+	return sourcecontrol.RepairResult{
 		Repaired: true,
 		Method:   repairMethodProvision,
 		Message:  repairMessageWithBranchRecovery("Provisioned "+spec.label, recovery),
@@ -97,9 +98,9 @@ func provisionMissingCheckout(source string, sourceOK bool, spec repairCheckoutS
 // repairExistingCheckout repairs a checkout whose working directory is present.
 // Non-destructive `worktree repair` is always attempted first; recreation (which
 // preserves the existing directory as a timestamped backup) requires force.
-func repairExistingCheckout(source string, sourceOK bool, spec repairCheckoutSpec, force bool) (ops.RepairResult, error) {
+func repairExistingCheckout(source string, sourceOK bool, spec repairCheckoutSpec, force bool) (sourcecontrol.RepairResult, error) {
 	if repairCheckoutHealthy(spec.path) {
-		return ops.RepairResult{
+		return sourcecontrol.RepairResult{
 			Repaired: true,
 			Method:   repairMethodNone,
 			Message:  spec.label + " is already healthy",
@@ -112,7 +113,7 @@ func repairExistingCheckout(source string, sourceOK bool, spec repairCheckoutSpe
 	_, _ = runRepairGit(source, "worktree", "prune")
 	_, _ = runRepairGit(source, "worktree", "repair", spec.path)
 	if repairCheckoutHealthy(spec.path) {
-		return ops.RepairResult{
+		return sourcecontrol.RepairResult{
 			Repaired: true,
 			Method:   repairMethodRepair,
 			Message:  "Repaired " + spec.label,
@@ -120,7 +121,7 @@ func repairExistingCheckout(source string, sourceOK bool, spec repairCheckoutSpe
 	}
 
 	if !force {
-		return ops.RepairResult{
+		return sourcecontrol.RepairResult{
 			Repaired:      false,
 			Method:        repairMethodNone,
 			RequiresForce: true,
@@ -130,10 +131,10 @@ func repairExistingCheckout(source string, sourceOK bool, spec repairCheckoutSpe
 
 	backupPath, recovery, err := recreateRepairCheckout(source, spec.path, spec.branch, spec.baseBranch)
 	if err != nil {
-		return ops.RepairResult{}, err
+		return sourcecontrol.RepairResult{}, err
 	}
 	message := fmt.Sprintf("Recreated %s and preserved previous contents at %s", spec.label, backupPath)
-	return ops.RepairResult{
+	return sourcecontrol.RepairResult{
 		Repaired:   true,
 		Method:     repairMethodRecreate,
 		BackupPath: backupPath,
@@ -141,8 +142,8 @@ func repairExistingCheckout(source string, sourceOK bool, spec repairCheckoutSpe
 	}, nil
 }
 
-func repairNone(message string) ops.RepairResult {
-	return ops.RepairResult{Repaired: false, Method: repairMethodNone, Message: message}
+func repairNone(message string) sourcecontrol.RepairResult {
+	return sourcecontrol.RepairResult{Repaired: false, Method: repairMethodNone, Message: message}
 }
 
 func repairCheckoutTarget(ws *ops.WorkspaceData, wsRoot string, agent *agents.RuntimeIdentity, scope, target, repoName string) (repairCheckoutSpec, error) {
@@ -155,13 +156,13 @@ func repairCheckoutTarget(ws *ops.WorkspaceData, wsRoot string, agent *agents.Ru
 	case "repo":
 		return repairRepoCheckoutTarget(ws, wsRoot, target, repoName)
 	default:
-		return repairCheckoutSpec{}, fmt.Errorf("%w: unsupported scope %q", ops.ErrCheckoutTargetNotAllowed, scope)
+		return repairCheckoutSpec{}, fmt.Errorf("%w: unsupported scope %q", sourcecontrol.ErrCheckoutTargetNotAllowed, scope)
 	}
 }
 
 func repairAgentCheckoutTarget(ws *ops.WorkspaceData, wsRoot string, agent *agents.RuntimeIdentity, target, repoName string) (repairCheckoutSpec, error) {
 	if agent == nil || agent.AgentID != target || agent.WorkspaceKey != ws.ID {
-		return repairCheckoutSpec{}, fmt.Errorf("%w: agent %q is not known in workspace", ops.ErrCheckoutTargetNotAllowed, target)
+		return repairCheckoutSpec{}, fmt.Errorf("%w: agent %q is not known in workspace", sourcecontrol.ErrCheckoutTargetNotAllowed, target)
 	}
 	var err error
 	var repo ops.WorkspaceRepo
@@ -190,11 +191,11 @@ func repairAgentCheckoutTarget(ws *ops.WorkspaceData, wsRoot string, agent *agen
 
 func repairRepoCheckoutTarget(ws *ops.WorkspaceData, wsRoot, target, repoName string) (repairCheckoutSpec, error) {
 	if repoName != "" && repoName != target {
-		return repairCheckoutSpec{}, fmt.Errorf("%w: repo body value %q does not match target %q", ops.ErrCheckoutTargetNotAllowed, repoName, target)
+		return repairCheckoutSpec{}, fmt.Errorf("%w: repo body value %q does not match target %q", sourcecontrol.ErrCheckoutTargetNotAllowed, repoName, target)
 	}
 	repo, ok := findWorkspaceRepo(ws.Repos, target)
 	if !ok {
-		return repairCheckoutSpec{}, fmt.Errorf("%w: repo %q is not known in workspace", ops.ErrCheckoutTargetNotAllowed, target)
+		return repairCheckoutSpec{}, fmt.Errorf("%w: repo %q is not known in workspace", sourcecontrol.ErrCheckoutTargetNotAllowed, target)
 	}
 	path, err := validateRepairTargetPath(wsRoot, repairRepoCheckoutPath(wsRoot, repo))
 	if err != nil {
@@ -233,14 +234,14 @@ func repairRepoCheckoutPath(wsRoot string, repo ops.WorkspaceRepo) string {
 func validateRepairTargetPath(wsRoot, path string) (string, error) {
 	absRoot, err := filepath.Abs(wsRoot)
 	if err != nil {
-		return "", fmt.Errorf("%w: resolve workspace root: %v", ops.ErrCheckoutTargetNotAllowed, err)
+		return "", fmt.Errorf("%w: resolve workspace root: %v", sourcecontrol.ErrCheckoutTargetNotAllowed, err)
 	}
 	absPath, err := filepath.Abs(path)
 	if err != nil {
-		return "", fmt.Errorf("%w: resolve checkout path: %v", ops.ErrCheckoutTargetNotAllowed, err)
+		return "", fmt.Errorf("%w: resolve checkout path: %v", sourcecontrol.ErrCheckoutTargetNotAllowed, err)
 	}
 	if absPath == absRoot || !localworkspace.PathContains(absRoot, absPath) {
-		return "", fmt.Errorf("%w: checkout path escapes workspace root", ops.ErrCheckoutTargetNotAllowed)
+		return "", fmt.Errorf("%w: checkout path escapes workspace root", sourcecontrol.ErrCheckoutTargetNotAllowed)
 	}
 	if err := validateNoRepairSymlinkComponents(absRoot, absPath); err != nil {
 		return "", err
@@ -251,7 +252,7 @@ func validateRepairTargetPath(wsRoot, path string) (string, error) {
 func validateNoRepairSymlinkComponents(root, target string) error {
 	rel, err := filepath.Rel(root, target)
 	if err != nil {
-		return fmt.Errorf("%w: resolve checkout relative path: %v", ops.ErrCheckoutTargetNotAllowed, err)
+		return fmt.Errorf("%w: resolve checkout relative path: %v", sourcecontrol.ErrCheckoutTargetNotAllowed, err)
 	}
 	current := root
 	for _, part := range strings.Split(rel, string(filepath.Separator)) {
@@ -264,10 +265,10 @@ func validateNoRepairSymlinkComponents(root, target string) error {
 			if os.IsNotExist(err) {
 				return nil
 			}
-			return fmt.Errorf("%w: inspect checkout path: %v", ops.ErrCheckoutTargetNotAllowed, err)
+			return fmt.Errorf("%w: inspect checkout path: %v", sourcecontrol.ErrCheckoutTargetNotAllowed, err)
 		}
 		if info.Mode()&os.ModeSymlink != 0 {
-			return fmt.Errorf("%w: checkout path contains a symlink", ops.ErrCheckoutTargetNotAllowed)
+			return fmt.Errorf("%w: checkout path contains a symlink", sourcecontrol.ErrCheckoutTargetNotAllowed)
 		}
 	}
 	return nil

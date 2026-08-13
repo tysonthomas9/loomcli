@@ -140,6 +140,10 @@ type EpicStackProjection struct {
 	Lineage    map[string]driverpkg.TaskLineage
 }
 
+type epicStackReconciler interface {
+	ReconcileStack(context.Context, sourcecontrol.ReconcileStackCommand) (*sourcecontrol.ReconcileStackResult, error)
+}
+
 // projectEpicStack reads an epic's child-task DAG from Work Items and
 // asks Source Control to reconcile it as a forest of linear chains. It is
 // idempotent: re-running keeps every existing node's stable OutputBranch
@@ -150,7 +154,7 @@ type EpicStackProjection struct {
 // scopes lineage lookups per repo); rootBase is the branch chain roots build on.
 //
 //nolint:cyclop,funlen,gocognit // Projection combines backend snapshot normalization with stackstore upsert ordering.
-func projectEpicStack(ctx context.Context, items driverpkg.EpicWorkItems, stacks sourcecontrol.StackLifecycle, ws, epicID, repoName, rootBase string) (*EpicStackProjection, error) {
+func projectEpicStack(ctx context.Context, items driverpkg.EpicWorkItems, stacks epicStackReconciler, ws, epicID, repoName, rootBase string) (*EpicStackProjection, error) {
 	ws = strings.TrimSpace(ws)
 	epicID = strings.TrimSpace(epicID)
 	repoName = strings.TrimSpace(repoName)

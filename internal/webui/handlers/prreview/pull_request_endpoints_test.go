@@ -14,7 +14,8 @@ import (
 	providers "github.com/tysonthomas9/loomcli/internal/infra/connectorsproviders"
 	"github.com/tysonthomas9/loomcli/internal/infra/connectorsvault"
 	"github.com/tysonthomas9/loomcli/internal/modules/connectors"
-	"github.com/tysonthomas9/loomcli/internal/ops"
+	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
+	loomapi "github.com/tysonthomas9/loomcli/internal/platform/loomapi/gen"
 )
 
 func TestGetPullRequestDetail(t *testing.T) {
@@ -78,7 +79,7 @@ func TestGetPullRequestEnvTokenOverridesSettings(t *testing.T) {
 }
 
 func TestPRReviewWithoutGitHubCredentialFailsAndWarns(t *testing.T) {
-	fallback := &fallbackAgentService{result: &ops.GitPullRequestList{}}
+	fallback := &fallbackPullRequestLister{result: &sourcecontrol.PullRequestList{}}
 	h := newPRReviewHarnessWithCredential(t, true, fallback, testCredentialNone, "")
 
 	status, raw := h.get(t, "/api/workspaces/WS/pull-requests/octocat/hello/7")
@@ -309,8 +310,8 @@ func TestListPullRequestsConnector(t *testing.T) {
 	var decoded struct {
 		Success bool `json:"success"`
 		Data    struct {
-			PullRequests []ops.GitPullRequest `json:"pull_requests"`
-			Warnings     []string             `json:"warnings,omitempty"`
+			PullRequests []loomapi.PullRequestSummary `json:"pull_requests"`
+			Warnings     []string                     `json:"warnings,omitempty"`
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(raw, &decoded); err != nil {
@@ -320,11 +321,11 @@ func TestListPullRequestsConnector(t *testing.T) {
 		t.Fatalf("response = %+v, want success with three PRs", decoded)
 	}
 	first := decoded.Data.PullRequests[0]
-	if first.Number != 11 || first.URL != "https://github.com/octocat/hello/pull/11" || first.RepoName != "octocat/hello" {
+	if first.Number != 11 || first.Url != "https://github.com/octocat/hello/pull/11" || first.RepoName != "octocat/hello" {
 		t.Fatalf("first PR = %+v, want URL and GitHub repo name populated", first)
 	}
-	if first.SourceRepo != "hello" || first.SourceRepo == first.RepoName {
-		t.Fatalf("first PR source_repo = %q, want workspace repo name %q", first.SourceRepo, "hello")
+	if testPointerValue(first.SourceRepo) != "hello" || testPointerValue(first.SourceRepo) == first.RepoName {
+		t.Fatalf("first PR source_repo = %q, want workspace repo name %q", testPointerValue(first.SourceRepo), "hello")
 	}
 	// The frontend filters on the UPPERCASE state the gh path emits
 	// (isOpenPr: pr.state === "OPEN"). GitHub REST returns lowercase, so the
@@ -332,8 +333,8 @@ func TestListPullRequestsConnector(t *testing.T) {
 	if first.State != "OPEN" {
 		t.Fatalf("first PR state = %q, want %q (frontend keys open rows off this)", first.State, "OPEN")
 	}
-	if first.AuthorLogin != "octocat" || first.UpdatedAt != "2026-07-13T13:00:00Z" {
-		t.Fatalf("first PR author/update = %q/%q, want connector list fields", first.AuthorLogin, first.UpdatedAt)
+	if testPointerValue(first.AuthorLogin) != "octocat" || testPointerValue(first.UpdatedAt) != "2026-07-13T13:00:00Z" {
+		t.Fatalf("first PR author/update = %q/%q, want connector list fields", testPointerValue(first.AuthorLogin), testPointerValue(first.UpdatedAt))
 	}
 	if got := decoded.Data.PullRequests[1]; !got.IsDraft || got.HeadRefName != "feature/two" || got.BaseRefName != "main" {
 		t.Fatalf("second PR = %+v, want draft/head/base mapped", got)
@@ -373,8 +374,8 @@ func TestSSHRemoteAuthorizesAndListsPullRequests(t *testing.T) {
 }
 
 func TestListPullRequestsWarnsForUnparseableRemote(t *testing.T) {
-	fallback := &fallbackAgentService{result: &ops.GitPullRequestList{}}
-	h := newPRReviewHarnessWithAgent(t, true, fallback)
+	fallback := &fallbackPullRequestLister{result: &sourcecontrol.PullRequestList{}}
+	h := newPRReviewHarnessWithPullRequests(t, true, fallback)
 	h.updateRepoRemote(t, "hello", "not a repository URL")
 
 	status, raw := h.get(t, "/api/workspaces/WS/pull-requests?state=open")
@@ -453,8 +454,9 @@ func TestListPullRequestsConnectorWarnsAtPageCap(t *testing.T) {
 	if len(data.PullRequests) != pullsListPerPage*maxPullsListPages {
 		t.Fatalf("pull request count = %d, want capped %d", len(data.PullRequests), pullsListPerPage*maxPullsListPages)
 	}
-	if len(data.Warnings) != 1 || !strings.Contains(data.Warnings[0], "octocat/hello") ||
-		!strings.Contains(data.Warnings[0], "truncated") {
+	warnings := testPointerValue(data.Warnings)
+	if len(warnings) != 1 || !strings.Contains(warnings[0], "octocat/hello") ||
+		!strings.Contains(warnings[0], "truncated") {
 		t.Fatalf("warnings = %v, want repo-scoped truncation warning", data.Warnings)
 	}
 	if calls := h.github.snapshot(); len(calls) != maxPullsListPages {
@@ -482,14 +484,14 @@ func TestNormalizePullState(t *testing.T) {
 }
 
 func TestListPullRequestsMergedRoutesToGh(t *testing.T) {
-	fallback := &fallbackAgentService{
-		result: &ops.GitPullRequestList{
-			PullRequests: []ops.GitPullRequest{{Number: 9, Title: "Merged PR", State: "merged", RepoName: "octocat/hello"}},
+	fallback := &fallbackPullRequestLister{
+		result: &sourcecontrol.PullRequestList{
+			PullRequests: []sourcecontrol.PullRequest{{Number: 9, Title: "Merged PR", State: "merged", Repository: "octocat/hello"}},
 		},
 	}
 	// Connector IS available, but "merged" can't be served by the pulls API, so
 	// it must route straight to gh without hitting the connector list endpoint.
-	h := newPRReviewHarnessWithAgent(t, true, fallback)
+	h := newPRReviewHarnessWithPullRequests(t, true, fallback)
 	status, raw := h.get(t, "/api/workspaces/WS/pull-requests?state=merged")
 	if status != http.StatusOK {
 		t.Fatalf("status = %d (body %s)", status, raw)
@@ -505,19 +507,19 @@ func TestListPullRequestsMergedRoutesToGh(t *testing.T) {
 }
 
 func TestListPullRequestsFallsBackToGhWhenNoConnector(t *testing.T) {
-	fallback := &fallbackAgentService{
-		result: &ops.GitPullRequestList{
-			PullRequests: []ops.GitPullRequest{{
-				Number:   21,
-				Title:    "Fallback PR",
-				URL:      "https://github.com/octocat/hello/pull/21",
-				State:    "open",
-				RepoName: "octocat/hello",
+	fallback := &fallbackPullRequestLister{
+		result: &sourcecontrol.PullRequestList{
+			PullRequests: []sourcecontrol.PullRequest{{
+				Number:     21,
+				Title:      "Fallback PR",
+				URL:        "https://github.com/octocat/hello/pull/21",
+				State:      "open",
+				Repository: "octocat/hello",
 			}},
 			Warnings: []string{"local gh warning"},
 		},
 	}
-	h := newPRReviewHarnessWithAgent(t, false, fallback)
+	h := newPRReviewHarnessWithPullRequests(t, false, fallback)
 
 	status, raw := h.get(t, "/api/workspaces/WS/pull-requests?state=review")
 	if status != http.StatusOK {
@@ -529,8 +531,8 @@ func TestListPullRequestsFallsBackToGhWhenNoConnector(t *testing.T) {
 	var decoded struct {
 		Success bool `json:"success"`
 		Data    struct {
-			PullRequests []ops.GitPullRequest `json:"pull_requests"`
-			Warnings     []string             `json:"warnings,omitempty"`
+			PullRequests []loomapi.PullRequestSummary `json:"pull_requests"`
+			Warnings     []string                     `json:"warnings,omitempty"`
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(raw, &decoded); err != nil {
@@ -545,14 +547,14 @@ func TestListPullRequestsFallsBackToGhWhenNoConnector(t *testing.T) {
 }
 
 func TestListPullRequestsConnectorFailureSurfacesWarning(t *testing.T) {
-	fallback := &fallbackAgentService{
-		result: &ops.GitPullRequestList{
-			PullRequests: []ops.GitPullRequest{{Number: 5, RepoName: "octocat/hello", State: "OPEN"}},
+	fallback := &fallbackPullRequestLister{
+		result: &sourcecontrol.PullRequestList{
+			PullRequests: []sourcecontrol.PullRequest{{Number: 5, Repository: "octocat/hello", State: "OPEN"}},
 		},
 	}
 	// Connector IS available, but its list fails for the only repo → wholesale
 	// fallback to gh. The failure must be surfaced, not silent.
-	h := newPRReviewHarnessWithAgent(t, true, fallback)
+	h := newPRReviewHarnessWithPullRequests(t, true, fallback)
 	h.github.setListStatus("octocat", "hello", http.StatusInternalServerError)
 
 	status, raw := h.get(t, "/api/workspaces/WS/pull-requests?state=open")
@@ -564,8 +566,8 @@ func TestListPullRequestsConnectorFailureSurfacesWarning(t *testing.T) {
 	}
 	var decoded struct {
 		Data struct {
-			PullRequests []ops.GitPullRequest `json:"pull_requests"`
-			Warnings     []string             `json:"warnings"`
+			PullRequests []loomapi.PullRequestSummary `json:"pull_requests"`
+			Warnings     []string                     `json:"warnings"`
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(raw, &decoded); err != nil {
@@ -589,12 +591,12 @@ func TestListPullRequestsConnectorFailureSurfacesWarning(t *testing.T) {
 }
 
 func TestListPullRequestsOversizedConnectorPageSurfacesWarning(t *testing.T) {
-	fallback := &fallbackAgentService{
-		result: &ops.GitPullRequestList{
-			PullRequests: []ops.GitPullRequest{{Number: 5, RepoName: "octocat/hello", State: "OPEN"}},
+	fallback := &fallbackPullRequestLister{
+		result: &sourcecontrol.PullRequestList{
+			PullRequests: []sourcecontrol.PullRequest{{Number: 5, Repository: "octocat/hello", State: "OPEN"}},
 		},
 	}
-	h := newPRReviewHarnessWithAgent(t, true, fallback)
+	h := newPRReviewHarnessWithPullRequests(t, true, fallback)
 	h.github.setListPayload("octocat", "hello", []map[string]any{{
 		"number":  7,
 		"state":   "open",
@@ -611,7 +613,7 @@ func TestListPullRequestsOversizedConnectorPageSurfacesWarning(t *testing.T) {
 		t.Fatalf("fallback = %v, pull_requests = %+v; want non-empty fallback", fallback.called, decoded.PullRequests)
 	}
 	warningFound := false
-	for _, warning := range decoded.Warnings {
+	for _, warning := range testPointerValue(decoded.Warnings) {
 		if strings.Contains(warning, "octocat/hello") &&
 			strings.Contains(warning, "response exceeded 4194304 bytes") {
 			warningFound = true
@@ -620,6 +622,14 @@ func TestListPullRequestsOversizedConnectorPageSurfacesWarning(t *testing.T) {
 	if !warningFound {
 		t.Fatalf("warnings = %v, want per-repo oversized-response warning", decoded.Warnings)
 	}
+}
+
+func testPointerValue[T any](value *T) T {
+	if value == nil {
+		var zero T
+		return zero
+	}
+	return *value
 }
 
 func TestListPullRequestsPartialRepoErrorWarns(t *testing.T) {
@@ -644,8 +654,8 @@ func TestListPullRequestsPartialRepoErrorWarns(t *testing.T) {
 	var decoded struct {
 		Success bool `json:"success"`
 		Data    struct {
-			PullRequests []ops.GitPullRequest `json:"pull_requests"`
-			Warnings     []string             `json:"warnings,omitempty"`
+			PullRequests []loomapi.PullRequestSummary `json:"pull_requests"`
+			Warnings     []string                     `json:"warnings,omitempty"`
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(raw, &decoded); err != nil {

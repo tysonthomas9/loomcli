@@ -9,8 +9,17 @@ import (
 
 // Reconciler publishes a stack's lineage as stacked PRs.
 type Reconciler struct {
-	Stacks sourcecontrol.StackLifecycle
+	Stacks StackLifecycle
 	Forge  Forge
+}
+
+// StackLifecycle is the publication adapter's narrow view of Source Control
+// checkout lineage. The Source Control owner no longer exports one broad stack
+// authority for every consumer.
+type StackLifecycle interface {
+	GetStack(context.Context, string, string) (*sourcecontrol.Stack, error)
+	ListStackNodes(context.Context, string, string) ([]sourcecontrol.StackNode, error)
+	RecordStackNodePublication(context.Context, sourcecontrol.RecordStackNodePublicationCommand) error
 }
 
 // Options tunes a publish run.

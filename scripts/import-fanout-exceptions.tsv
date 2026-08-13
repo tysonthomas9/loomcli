@@ -6,4 +6,4 @@ internal/cli/serve/serveadapter	27	Serve adapter assembles the local runtime bou
 internal/cli/serve	27	Serve command composition owns the folded install log-router and runtime wiring alongside startup loops monitoring and Interaction lifecycle
 internal/webui	23	Web delivery root exposes the public server capability contract including immutable Run Capture and top-level construction
 internal/webui/handlers/agents	17	Agent delivery routes combine lifecycle session transcript and terminal ports
-internal/webui/handlers/prreview	15	PR review delivery coordinates connector agent interaction source-control and terminal ports
+internal/webui/handlers/prreview	13	PR review delivery coordinates connector agent interaction source-control and terminal ports

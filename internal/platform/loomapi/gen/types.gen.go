@@ -1761,6 +1761,30 @@ func (e GetGraphParamsStatus) Valid() bool {
 	}
 }
 
+// Defines values for ListPullRequestsParamsState.
+const (
+	All    ListPullRequestsParamsState = "all"
+	Merged ListPullRequestsParamsState = "merged"
+	Open   ListPullRequestsParamsState = "open"
+	Review ListPullRequestsParamsState = "review"
+)
+
+// Valid indicates whether the value is a known member of the ListPullRequestsParamsState enum.
+func (e ListPullRequestsParamsState) Valid() bool {
+	switch e {
+	case All:
+		return true
+	case Merged:
+		return true
+	case Open:
+		return true
+	case Review:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ListReadyParamsType.
 const (
 	Bug     ListReadyParamsType = "bug"
@@ -2343,6 +2367,13 @@ type DependencyRef struct {
 	Type string `json:"type"`
 }
 
+// DiffStatResponse defines model for DiffStatResponse.
+type DiffStatResponse struct {
+	Added   int    `json:"added"`
+	Branch  string `json:"branch"`
+	Removed int    `json:"removed"`
+}
+
 // DriverRun defines model for DriverRun.
 type DriverRun struct {
 	AgentServiceId        *string            `json:"agent_service_id,omitempty"`
@@ -2645,6 +2676,173 @@ type FileWriteRequest struct {
 
 	// Repo Optional repo qualifier, valid only when scope=agent.
 	Repo *string `json:"repo,omitempty"`
+}
+
+// GitCreatePullRequestRequest defines model for GitCreatePullRequestRequest.
+type GitCreatePullRequestRequest struct {
+	// Target Pull-request base branch.
+	Target *string `json:"target,omitempty"`
+}
+
+// GitDiffCommit defines model for GitDiffCommit.
+type GitDiffCommit struct {
+	Author    string `json:"author"`
+	Date      string `json:"date"`
+	Email     string `json:"email"`
+	Hash      string `json:"hash"`
+	ShortHash string `json:"short_hash"`
+	Subject   string `json:"subject"`
+}
+
+// GitDiffCommitsData defines model for GitDiffCommitsData.
+type GitDiffCommitsData struct {
+	Commits []GitDiffCommit `json:"commits"`
+}
+
+// GitDiffCommitsResponse defines model for GitDiffCommitsResponse.
+type GitDiffCommitsResponse struct {
+	Data    GitDiffCommitsData `json:"data"`
+	Error   *string            `json:"error,omitempty"`
+	Success bool               `json:"success"`
+}
+
+// GitDiffFile defines model for GitDiffFile.
+type GitDiffFile struct {
+	Additions int     `json:"additions"`
+	Deletions int     `json:"deletions"`
+	OldPath   *string `json:"old_path,omitempty"`
+	Path      string  `json:"path"`
+	Status    string  `json:"status"`
+}
+
+// GitDiffFilePatch defines model for GitDiffFilePatch.
+type GitDiffFilePatch struct {
+	Additions  int    `json:"additions"`
+	Deletions  int    `json:"deletions"`
+	IsBinary   bool   `json:"is_binary"`
+	IsTooLarge bool   `json:"is_too_large"`
+	Patch      string `json:"patch"`
+}
+
+// GitDiffFileResponse defines model for GitDiffFileResponse.
+type GitDiffFileResponse struct {
+	Data    GitDiffFilePatch `json:"data"`
+	Error   *string          `json:"error,omitempty"`
+	Success bool             `json:"success"`
+}
+
+// GitDiffFilesData defines model for GitDiffFilesData.
+type GitDiffFilesData struct {
+	Files []GitDiffFile `json:"files"`
+}
+
+// GitDiffFilesResponse defines model for GitDiffFilesResponse.
+type GitDiffFilesResponse struct {
+	Data    GitDiffFilesData `json:"data"`
+	Error   *string          `json:"error,omitempty"`
+	Success bool             `json:"success"`
+}
+
+// GitMergeResponse defines model for GitMergeResponse.
+type GitMergeResponse struct {
+	AlreadyUpToDate bool      `json:"already_up_to_date"`
+	ConflictedFiles *[]string `json:"conflicted_files,omitempty"`
+	Message         string    `json:"message"`
+	Success         bool      `json:"success"`
+}
+
+// GitPullRequest defines model for GitPullRequest.
+type GitPullRequest struct {
+	// Source Remote branch source.
+	Source *string `json:"source,omitempty"`
+}
+
+// GitPullRequestCreationResponse defines model for GitPullRequestCreationResponse.
+type GitPullRequestCreationResponse struct {
+	AlreadyExists bool    `json:"already_exists"`
+	Created       bool    `json:"created"`
+	NoCommits     bool    `json:"no_commits"`
+	Url           *string `json:"url,omitempty"`
+}
+
+// GitPushAllCheckoutResponse defines model for GitPushAllCheckoutResponse.
+type GitPushAllCheckoutResponse struct {
+	Error   *string `json:"error,omitempty"`
+	Message *string `json:"message,omitempty"`
+	Name    string  `json:"name"`
+	Success bool    `json:"success"`
+}
+
+// GitPushAllResponse defines model for GitPushAllResponse.
+type GitPushAllResponse struct {
+	Failed  int                          `json:"failed"`
+	Pushed  int                          `json:"pushed"`
+	Results []GitPushAllCheckoutResponse `json:"results"`
+}
+
+// GitPushRequest defines model for GitPushRequest.
+type GitPushRequest struct {
+	// Target Remote branch target.
+	Target *string `json:"target,omitempty"`
+}
+
+// GitResetLockInfo defines model for GitResetLockInfo.
+type GitResetLockInfo struct {
+	Agent    string  `json:"agent"`
+	Duration string  `json:"duration"`
+	Pid      int     `json:"pid"`
+	TaskId   *string `json:"task_id,omitempty"`
+}
+
+// GitResetLockedResponse defines model for GitResetLockedResponse.
+type GitResetLockedResponse struct {
+	Error    string           `json:"error"`
+	LockInfo GitResetLockInfo `json:"lock_info"`
+}
+
+// GitResetRequest defines model for GitResetRequest.
+type GitResetRequest struct {
+	Branch *string `json:"branch,omitempty"`
+	Force  *bool   `json:"force,omitempty"`
+	Push   *bool   `json:"push,omitempty"`
+}
+
+// GitResetResponse defines model for GitResetResponse.
+type GitResetResponse struct {
+	Message        string  `json:"message"`
+	PreviousBranch *string `json:"previous_branch,omitempty"`
+	Pushed         bool    `json:"pushed"`
+	Success        bool    `json:"success"`
+}
+
+// GitStatusResponse defines model for GitStatusResponse.
+type GitStatusResponse struct {
+	Ahead           int      `json:"ahead"`
+	Behind          int      `json:"behind"`
+	Branch          string   `json:"branch"`
+	ChangedFiles    []string `json:"changed_files"`
+	ConflictedFiles []string `json:"conflicted_files"`
+	HasConflicts    bool     `json:"has_conflicts"`
+	IsClean         bool     `json:"is_clean"`
+	StashCount      int      `json:"stash_count"`
+	TargetBranch    string   `json:"target_branch"`
+}
+
+// GitSyncResponse defines model for GitSyncResponse.
+type GitSyncResponse struct {
+	PullResult *GitMergeResponse `json:"pull_result,omitempty"`
+	PushResult *GitMergeResponse `json:"push_result,omitempty"`
+}
+
+// GitTargetRequest defines model for GitTargetRequest.
+type GitTargetRequest struct {
+	Branch string `json:"branch"`
+}
+
+// GitTargetResponse defines model for GitTargetResponse.
+type GitTargetResponse struct {
+	Branch  string `json:"branch"`
+	Success bool   `json:"success"`
 }
 
 // HourlyBucket defines model for HourlyBucket.
@@ -3273,6 +3471,39 @@ type PullRequestReviewRequestEvent string
 type PullRequestReviewResult struct {
 	ReviewId *int    `json:"review_id,omitempty"`
 	State    *string `json:"state,omitempty"`
+}
+
+// PullRequestSummary defines model for PullRequestSummary.
+type PullRequestSummary struct {
+	Additions      *int    `json:"additions,omitempty"`
+	AuthorLogin    *string `json:"author_login,omitempty"`
+	BaseRefName    string  `json:"base_ref_name"`
+	ChangedFiles   *int    `json:"changed_files,omitempty"`
+	CreatedAt      *string `json:"created_at,omitempty"`
+	Deletions      *int    `json:"deletions,omitempty"`
+	HeadRefName    string  `json:"head_ref_name"`
+	IsDraft        bool    `json:"is_draft"`
+	Number         int     `json:"number"`
+	RepoName       string  `json:"repo_name"`
+	ReviewDecision *string `json:"review_decision,omitempty"`
+	SourceRepo     *string `json:"source_repo,omitempty"`
+	State          string  `json:"state"`
+	Title          string  `json:"title"`
+	UpdatedAt      *string `json:"updated_at,omitempty"`
+	Url            string  `json:"url"`
+}
+
+// PullRequestsData defines model for PullRequestsData.
+type PullRequestsData struct {
+	PullRequests []PullRequestSummary `json:"pull_requests"`
+	Warnings     *[]string            `json:"warnings,omitempty"`
+}
+
+// PullRequestsResponse defines model for PullRequestsResponse.
+type PullRequestsResponse struct {
+	Data    PullRequestsData `json:"data"`
+	Error   *string          `json:"error,omitempty"`
+	Success bool             `json:"success"`
 }
 
 // ReviewerConversation defines model for ReviewerConversation.
@@ -3919,26 +4150,23 @@ type ListAgentRunsParams struct {
 	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
+// GetDiffCommitsParams defines parameters for GetDiffCommits.
+type GetDiffCommitsParams struct {
+	From  *string `form:"from,omitempty" json:"from,omitempty"`
+	Limit *int    `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
 // GetDiffFileParams defines parameters for GetDiffFile.
 type GetDiffFileParams struct {
-	Path string `form:"path" json:"path"`
+	Path string  `form:"path" json:"path"`
+	From *string `form:"from,omitempty" json:"from,omitempty"`
+	To   *string `form:"to,omitempty" json:"to,omitempty"`
 }
 
-// GitPullJSONBody defines parameters for GitPull.
-type GitPullJSONBody struct {
-	// Source Remote branch source
-	Source *string `json:"source,omitempty"`
-}
-
-// GitPushJSONBody defines parameters for GitPush.
-type GitPushJSONBody struct {
-	// Target Remote branch target
-	Target *string `json:"target,omitempty"`
-}
-
-// UpdateGitTargetJSONBody defines parameters for UpdateGitTarget.
-type UpdateGitTargetJSONBody struct {
-	Target *string `json:"target,omitempty"`
+// GetDiffFilesParams defines parameters for GetDiffFiles.
+type GetDiffFilesParams struct {
+	From *string `form:"from,omitempty" json:"from,omitempty"`
+	To   *string `form:"to,omitempty" json:"to,omitempty"`
 }
 
 // GetAgentLogParams defines parameters for GetAgentLog.
@@ -4225,6 +4453,14 @@ type RunOnboardingFirstTaskJSONBody struct {
 	Title       string  `json:"title"`
 }
 
+// ListPullRequestsParams defines parameters for ListPullRequests.
+type ListPullRequestsParams struct {
+	State *ListPullRequestsParamsState `form:"state,omitempty" json:"state,omitempty"`
+}
+
+// ListPullRequestsParamsState defines parameters for ListPullRequests.
+type ListPullRequestsParamsState string
+
 // ListReadyParams defines parameters for ListReady.
 type ListReadyParams struct {
 	Assignee *string `form:"assignee,omitempty" json:"assignee,omitempty"`
@@ -4333,14 +4569,20 @@ type CreateAgentJSONRequestBody = CreateUnifiedAgentRequest
 // PatchAgentJSONRequestBody defines body for PatchAgent for application/json ContentType.
 type PatchAgentJSONRequestBody = PatchUnifiedAgentRequest
 
+// GitCreatePRJSONRequestBody defines body for GitCreatePR for application/json ContentType.
+type GitCreatePRJSONRequestBody = GitCreatePullRequestRequest
+
 // GitPullJSONRequestBody defines body for GitPull for application/json ContentType.
-type GitPullJSONRequestBody GitPullJSONBody
+type GitPullJSONRequestBody = GitPullRequest
 
 // GitPushJSONRequestBody defines body for GitPush for application/json ContentType.
-type GitPushJSONRequestBody GitPushJSONBody
+type GitPushJSONRequestBody = GitPushRequest
+
+// GitResetJSONRequestBody defines body for GitReset for application/json ContentType.
+type GitResetJSONRequestBody = GitResetRequest
 
 // UpdateGitTargetJSONRequestBody defines body for UpdateGitTarget for application/json ContentType.
-type UpdateGitTargetJSONRequestBody UpdateGitTargetJSONBody
+type UpdateGitTargetJSONRequestBody = GitTargetRequest
 
 // PatchWorkspaceBackendJSONRequestBody defines body for PatchWorkspaceBackend for application/json ContentType.
 type PatchWorkspaceBackendJSONRequestBody = WorkspaceBackendPatchRequest

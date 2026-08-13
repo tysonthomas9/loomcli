@@ -74,28 +74,28 @@ func (capability *AgentsCapability) RuntimeRegistrations() []platformruntime.Reg
 	return registrations
 }
 
-func (capability *AgentsCapability) SourceControlMaterializer() sourcecontrol.Materializer {
+func (capability *AgentsCapability) SourceControlMaterializer() appserve.Materializer {
 	if capability == nil || capability.sourceControl == nil {
 		return nil
 	}
 	return capability.sourceControl.SourceControlMaterializer()
 }
 
-func (capability *AgentsCapability) TaskStackBindings() sourcecontrol.StackBindingResolver {
+func (capability *AgentsCapability) TaskStackBindings() webui.SourceControlStackBindingResolver {
 	if capability == nil || capability.sourceControl == nil {
 		return nil
 	}
 	return capability.sourceControl
 }
 
-func (capability *AgentsCapability) TaskOutcomes() sourcecontrol.TaskOutcomeRecorder {
+func (capability *AgentsCapability) TaskOutcomes() webui.SourceControlTaskOutcomeRecorder {
 	if capability == nil || capability.sourceControl == nil {
 		return nil
 	}
 	return capability.sourceControl
 }
 
-func (capability *AgentsCapability) RepositoryAdmissionMaterializer() sourcecontrol.RepositoryAdmissionMaterializer {
+func (capability *AgentsCapability) RepositoryAdmissionMaterializer() appserve.RepositoryAdmissionMaterializer {
 	if capability == nil || capability.sourceControl == nil {
 		return nil
 	}

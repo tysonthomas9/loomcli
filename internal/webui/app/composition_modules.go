@@ -8,6 +8,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/app/workitemmove"
 	"github.com/tysonthomas9/loomcli/internal/modules/agents"
 	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
+	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
 	workflowcataloghttp "github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog/httpapi"
 	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 	"github.com/tysonthomas9/loomcli/internal/modules/workspace"
@@ -15,16 +16,15 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/agentcoord"
 	"github.com/tysonthomas9/loomcli/internal/webui/agentmodules"
-	"github.com/tysonthomas9/loomcli/internal/webui/filecoord"
 	githandlers "github.com/tysonthomas9/loomcli/internal/webui/handlers/git"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/issues"
 	locsettings "github.com/tysonthomas9/loomcli/internal/webui/handlers/localsettings"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/misc"
 	hterminal "github.com/tysonthomas9/loomcli/internal/webui/handlers/terminal"
+	"github.com/tysonthomas9/loomcli/internal/webui/readprojection"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 	"github.com/tysonthomas9/loomcli/internal/webui/sessioncoord"
-	"github.com/tysonthomas9/loomcli/internal/webui/sourcecontrolcoord"
 	"github.com/tysonthomas9/loomcli/internal/webui/terminal"
 )
 
@@ -152,13 +152,17 @@ func NewIssueTabModule(issueTabs interaction.IssueTabStateAPI, hub *realtime.Hub
 }
 
 // NewDiffModule creates the git diff module.
-func NewDiffModule(agentSvc agentcoord.AgentService, diffSvc sourcecontrolcoord.DiffService) interface{ Register(*http.ServeMux) } {
-	return githandlers.NewModule(agentSvc, diffSvc)
+func NewDiffModule(
+	checkout sourcecontrol.Checkout,
+	browse sourcecontrol.Browse,
+	issueDiff readprojection.IssueDiffProjection,
+) interface{ Register(*http.ServeMux) } {
+	return githandlers.NewModule(checkout, browse, issueDiff)
 }
 
 // NewFileModule creates the file operations module.
-func NewFileModule(fileSvc filecoord.FileService, accessCfg ...middleware.FileAccessConfig) interface{ Register(*http.ServeMux) } {
-	return misc.NewModule(fileSvc, accessCfg...)
+func NewFileModule(browse sourcecontrol.Browse, mutate sourcecontrol.Mutate, checkout sourcecontrol.Checkout, accessCfg ...middleware.FileAccessConfig) interface{ Register(*http.ServeMux) } {
+	return misc.NewModule(browse, mutate, checkout, accessCfg...)
 }
 
 // NewLocalSettingsHandlers wires GitHub credential changes to the PR-review

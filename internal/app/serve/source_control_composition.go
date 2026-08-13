@@ -28,15 +28,49 @@ const (
 // Phase 5 checkout materializer. Consumers receive only the Source Control API;
 // the credential source and Connectors broker remain private.
 type SourceControlCapability struct {
-	api      sourcecontrol.API
+	api      sourceControlOwnerAPI
 	issuer   *authority.Issuer
 	now      func() time.Time
-	outcomes sourcecontrol.TaskOutcomeRecorder
-	stacks   sourcecontrol.StackLifecycle
+	outcomes taskOutcomeRecorder
+	stacks   stackLifecycle
 }
 
-type Materializer = sourcecontrol.Materializer
-type RepositoryAdmissionMaterializer = sourcecontrol.RepositoryAdmissionMaterializer
+// Materializer is the authority-free Checkout view consumed by task execution
+// and pull-request review.
+type Materializer interface {
+	PrepareTaskCheckout(context.Context, sourcecontrol.TaskCheckoutCommand) (*sourcecontrol.TaskCheckout, error)
+	PreparePullRequestCheckout(context.Context, sourcecontrol.PullRequestCheckoutCommand) (*sourcecontrol.PullRequestCheckout, error)
+}
+
+// RepositoryAdmissionMaterializer is the Workspace-only Checkout view used by
+// repository admission.
+type RepositoryAdmissionMaterializer interface {
+	PrepareRepositoryAdmissionCheckout(context.Context, sourcecontrol.RepositoryAdmissionCheckoutCommand) (*sourcecontrol.PreparedRepositoryCheckout, error)
+}
+
+type sourceControlOwnerAPI interface {
+	MaterializeWorkspace(context.Context, authority.SystemAuthority, sourcecontrol.MaterializeCommand) (*sourcecontrol.Materialization, error)
+	FetchRepositoryRef(context.Context, authority.SystemAuthority, sourcecontrol.FetchRefCommand) (*sourcecontrol.FetchedRef, error)
+}
+
+type taskOutcomeRecorder interface {
+	RecordTaskOutcome(context.Context, sourcecontrol.TaskOutcomeCommand) (bool, error)
+}
+
+type stackLifecycle interface {
+	EnsureStack(context.Context, sourcecontrol.EnsureStackCommand) (*sourcecontrol.Stack, error)
+	ListStacks(context.Context, string) ([]sourcecontrol.Stack, error)
+	GetStack(context.Context, string, string) (*sourcecontrol.Stack, error)
+	ListStackNodes(context.Context, string, string) ([]sourcecontrol.StackNode, error)
+	ValidateStack(context.Context, string, string) error
+	AddStackNode(context.Context, sourcecontrol.AddStackNodeCommand) (*sourcecontrol.StackNode, error)
+	MoveStackNode(context.Context, sourcecontrol.MoveStackNodeCommand) error
+	SetStackNodeBase(context.Context, sourcecontrol.SetStackNodeBaseCommand) error
+	RemoveStackNode(context.Context, sourcecontrol.RemoveStackNodeCommand) error
+	ReconcileStack(context.Context, sourcecontrol.ReconcileStackCommand) (*sourcecontrol.ReconcileStackResult, error)
+	RecordStackNodePublication(context.Context, sourcecontrol.RecordStackNodePublicationCommand) error
+	ResolveTaskStackBinding(context.Context, string, string, string) (sourcecontrol.TaskStackBinding, bool, error)
+}
 type RepositoryResolver = sourcecontrol.RepositoryResolver
 type RepositoryAdmissionCheckoutCommand = sourcecontrol.RepositoryAdmissionCheckoutCommand
 type PreparedRepositoryCheckout = sourcecontrol.PreparedRepositoryCheckout
@@ -47,7 +81,7 @@ type PullRequestCheckout = sourcecontrol.PullRequestCheckout
 
 var ErrUnavailable = sourcecontrol.ErrUnavailable
 
-func (capability *SourceControlCapability) SourceControlAPI() sourcecontrol.API {
+func (capability *SourceControlCapability) SourceControlAPI() sourceControlOwnerAPI {
 	if capability == nil {
 		return nil
 	}
@@ -57,20 +91,20 @@ func (capability *SourceControlCapability) SourceControlAPI() sourcecontrol.API 
 // SourceControlMaterializer exposes the authority-free application workflow.
 // Callers cannot recover the owner API, issuer, Connectors broker, or
 // credential source from this interface.
-func (capability *SourceControlCapability) SourceControlMaterializer() sourcecontrol.Materializer {
+func (capability *SourceControlCapability) SourceControlMaterializer() Materializer {
 	if capability == nil {
 		return nil
 	}
 	return capability
 }
 
-var _ sourcecontrol.Materializer = (*SourceControlCapability)(nil)
-var _ sourcecontrol.RepositoryAdmissionMaterializer = (*SourceControlCapability)(nil)
+var _ Materializer = (*SourceControlCapability)(nil)
+var _ RepositoryAdmissionMaterializer = (*SourceControlCapability)(nil)
 
 // RepositoryAdmissionMaterializer exposes only the trusted Workspace
 // pre-admission workflow. Task, PR, and web request adapters receive the
 // narrower Materializer above and cannot register a remote projection.
-func (capability *SourceControlCapability) RepositoryAdmissionMaterializer() sourcecontrol.RepositoryAdmissionMaterializer {
+func (capability *SourceControlCapability) RepositoryAdmissionMaterializer() RepositoryAdmissionMaterializer {
 	if capability == nil {
 		return nil
 	}
@@ -346,7 +380,7 @@ func NewSourceControlCapabilityWithFleetDB(
 	return capability, err
 }
 
-func newDefaultStackServices(now func() time.Time) (sourcecontrol.TaskOutcomeRecorder, sourcecontrol.StackLifecycle) {
+func newDefaultStackServices(now func() time.Time) (taskOutcomeRecorder, stackLifecycle) {
 	store, err := infrastackstore.Default()
 	if err != nil {
 		return nil, nil
@@ -499,8 +533,7 @@ func (provider *sourceControlBrokerAuthorityProvider) AuthorityForGitRead(
 	)
 }
 
-var _ sourcecontrol.TaskOutcomeRecorder = (*SourceControlCapability)(nil)
-var _ sourcecontrol.StackBindingResolver = (*SourceControlCapability)(nil)
+var _ taskOutcomeRecorder = (*SourceControlCapability)(nil)
 
 func (capability *SourceControlCapability) RecordTaskOutcome(
 	ctx context.Context,

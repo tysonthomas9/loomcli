@@ -7,7 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/tysonthomas9/loomcli/internal/webui/filecoord"
+	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
 
@@ -56,7 +56,8 @@ func TestFileModule_NilDeps(t *testing.T) {
 
 func TestFileModule_ViewerCapabilities(t *testing.T) {
 	accessCfg := middleware.FileAccessConfig{
-		RemoteAuth: true,
+		RemoteAuth:  true,
+		GrantIssuer: sourcecontrol.NewAccessGrantIssuer(),
 		ResolveRole: func(context.Context, string, middleware.UserIdentity) (string, error) {
 			return "viewer", nil
 		},
@@ -71,11 +72,11 @@ func TestFileModule_ViewerCapabilities(t *testing.T) {
 	if capRR.Code != http.StatusOK {
 		t.Fatalf("capabilities status=%d body=%s", capRR.Code, capRR.Body.String())
 	}
-	var capabilities filecoord.FileCapabilities
+	var capabilities sourcecontrol.FileCapabilities
 	if err := json.NewDecoder(capRR.Body).Decode(&capabilities); err != nil {
 		t.Fatal(err)
 	}
-	if capabilities != (filecoord.FileCapabilities{Read: true}) {
+	if capabilities != (sourcecontrol.FileCapabilities{Read: true}) {
 		t.Fatalf("capabilities=%+v", capabilities)
 	}
 }

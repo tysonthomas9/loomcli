@@ -15,10 +15,9 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 	"github.com/tysonthomas9/loomcli/internal/webui"
 	"github.com/tysonthomas9/loomcli/internal/webui/agentcoord"
-	"github.com/tysonthomas9/loomcli/internal/webui/filecoord"
+	"github.com/tysonthomas9/loomcli/internal/webui/readprojection"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/sessioncoord"
-	"github.com/tysonthomas9/loomcli/internal/webui/sourcecontrolcoord"
 	"github.com/tysonthomas9/loomcli/internal/webui/storeadapter"
 	"github.com/tysonthomas9/loomcli/internal/webui/terminal"
 	"github.com/tysonthomas9/loomcli/internal/webui/workspacecoord"
@@ -365,19 +364,28 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 		app.ptyMgr,
 	)
 	app.agentRuntime = agentcoord.NewCanonicalInteractiveAgentRuntime(interactiveController)
-	if config.GitOps != nil {
-		app.agentSvc = agentcoord.NewAgentService(config.GitOps, app.agentTmuxMgr, app.termAuth)
+	// Agent delivery now owns terminal/log access only. Git and checkout
+	// behavior is composed independently through Source Control Checkout.
+	app.agentSvc = agentcoord.NewAgentService(app.agentTmuxMgr, app.termAuth)
+
+	app.sourceBrowse = config.SourceControlBrowse
+	if app.sourceBrowse != nil {
+		app.issueDiff, err = readprojection.NewIssueDiffProjection(
+			func(ctx context.Context, workspaceKey string) readprojection.IssueDiffWorkItemQuery {
+				if config.WorkItemsFn == nil {
+					return nil
+				}
+				return config.WorkItemsFn(middleware.WithWorkspace(ctx, workspaceKey))
+			},
+			app.sourceBrowse,
+		)
+		if err != nil {
+			return nil, err
+		}
 	}
 
-	// Initialize diff service layer (requires ops.GitOps)
-	if config.GitOps != nil {
-		app.diffSvc = sourcecontrolcoord.NewDiffService(config.GitOps, config.WorkItemsFn, middleware.WithWorkspace)
-	}
-
-	// Initialize file service layer (requires ops.FileOps)
-	if config.FileOps != nil {
-		app.fileSvc = filecoord.NewFileService(config.FileOps)
-	}
+	app.sourceMutate = config.SourceControlMutate
+	app.sourceCheckout = config.SourceControlCheckout
 
 	// Initialize session delivery over lifecycle-owner queries and the
 	// immutable Run Capture projection. WebUI never queries Artifacts directly.

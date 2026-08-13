@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tysonthomas9/loomcli/internal/webui/filecoord"
+	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
 )
 
 func TestFileAccessRemoteRequiresIdentityAndWorkspaceResolver(t *testing.T) {
@@ -44,6 +44,19 @@ func TestFileAccessRemoteMissingResolverReportsRBACNotConfigured(t *testing.T) {
 	}
 	if !strings.Contains(rr.Body.String(), "file browser RBAC not configured") {
 		t.Fatalf("body = %s, want RBAC diagnostic", rr.Body.String())
+	}
+}
+
+func TestFileAccessMissingGrantIssuerFailsClosed(t *testing.T) {
+	h := FileAccess(FileAccessConfig{FrontendOrigins: []string{"http://127.0.0.1:8080"}})(
+		http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) }),
+	)
+	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/WS/files/tree", nil)
+	req.Host = "127.0.0.1:8080"
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusForbidden || !strings.Contains(rr.Body.String(), "grant issuer unavailable") {
+		t.Fatalf("status=%d body=%s, want fail-closed grant issuer diagnostic", rr.Code, rr.Body.String())
 	}
 }
 
@@ -93,17 +106,21 @@ func TestFileAccessViewerReadsAndSearchesButCannotWrite(t *testing.T) {
 func TestFileAccessInstallsRoleCapabilities(t *testing.T) {
 	for _, tc := range []struct {
 		role string
-		want filecoord.FileCapabilities
+		want sourcecontrol.FileCapabilities
 	}{
-		{role: "viewer", want: filecoord.FileCapabilities{Read: true}},
-		{role: "editor", want: filecoord.FileCapabilities{Read: true, Write: true, Sensitive: true}},
-		{role: "admin", want: filecoord.FileCapabilities{Read: true, Write: true, Sensitive: true}},
+		{role: "viewer", want: sourcecontrol.FileCapabilities{Read: true}},
+		{role: "editor", want: sourcecontrol.FileCapabilities{Read: true, Write: true, Sensitive: true}},
+		{role: "admin", want: sourcecontrol.FileCapabilities{Read: true, Write: true, Sensitive: true}},
 	} {
 		t.Run(tc.role, func(t *testing.T) {
-			var got filecoord.FileCapabilities
-			cfg := FileAccessConfig{RemoteAuth: true, ResolveRole: func(context.Context, string, UserIdentity) (string, error) { return tc.role, nil }}
+			var got sourcecontrol.FileCapabilities
+			cfg := FileAccessConfig{RemoteAuth: true, ResolveRole: func(context.Context, string, UserIdentity) (string, error) { return tc.role, nil }, GrantIssuer: sourcecontrol.NewAccessGrantIssuer()}
 			h := FileAccess(cfg)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				got, _ = filecoord.FileCapabilitiesFromContext(r.Context())
+				grant, ok := FileAccessGrantFromContext(r.Context())
+				if !ok {
+					t.Fatal("file access middleware did not install a Source Control grant")
+				}
+				got = grant.Capabilities()
 				w.WriteHeader(http.StatusNoContent)
 			}))
 			req := httptest.NewRequest(http.MethodGet, "/api/workspaces/WS/files/capabilities", nil)
@@ -164,6 +181,9 @@ func TestFileAccessLocalRequiresConfiguredLoopbackFrontend(t *testing.T) {
 
 func serveFileAccess(t *testing.T, cfg FileAccessConfig, method, path, host, origin, workspace string, identity *UserIdentity) *httptest.ResponseRecorder {
 	t.Helper()
+	if !cfg.GrantIssuer.Available() {
+		cfg.GrantIssuer = sourcecontrol.NewAccessGrantIssuer()
+	}
 	h := FileAccess(cfg)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 	}))

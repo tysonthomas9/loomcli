@@ -12,11 +12,10 @@ import (
 )
 
 // TestPhase5SourceControlProductionReachabilityRatchet keeps the named owner
-// on the two production paths Phase 5 closes. Task execution and PR review
-// receive only the typed authority-free application Materializer. Workspace
-// admission alone receives the separate admission materializer; task/PR
-// helpers may create worktrees from refs/loom but may not resolve credentials
-// or perform credential-aware clone/fetch operations themselves.
+// on the two production paths Phase 5 closes. Task execution, PR review, and
+// Workspace admission define narrow consumer-side Checkout projections;
+// task/PR helpers may create worktrees from refs/loom but may not resolve
+// credentials or perform credential-aware clone/fetch operations themselves.
 func TestPhase5SourceControlProductionReachabilityRatchet(t *testing.T) {
 	root, err := filepath.Abs(filepath.Join("..", ".."))
 	if err != nil {
@@ -125,20 +124,19 @@ func TestPhase5SourceControlProductionReachabilityRatchet(t *testing.T) {
 	if !agentsFacts.retainsSourceControl {
 		t.Error("Agents composition no longer retains the SourceControl capability it constructs")
 	}
-	sourceControlAPIFacts := loadSourceControlFileFacts(
+	sourceControlPortFacts := loadSourceControlFileFacts(
 		t,
 		root,
-		"internal/modules/sourcecontrol/api.go",
+		"internal/modules/sourcecontrol/workspace_ports.go",
 	)
 	for _, required := range []string{
-		"Materializer",
-		"RepositoryAdmissionMaterializer",
-		"PrepareTaskCheckout",
-		"PreparePullRequestCheckout",
-		"PrepareRepositoryAdmissionCheckout",
+		"Browse",
+		"Mutate",
+		"Checkout",
+		"NewWorkspacePorts",
 	} {
-		if sourceControlAPIFacts.identifiers[required] == 0 {
-			t.Errorf("Source Control API no longer declares required split materialization symbol %s", required)
+		if sourceControlPortFacts.identifiers[required] == 0 {
+			t.Errorf("Source Control no longer presents required workspace port %s", required)
 		}
 	}
 	assertFileExcludes(t, root, "internal/modules/sourcecontrol/api.go", []string{

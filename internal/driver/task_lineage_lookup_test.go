@@ -316,7 +316,7 @@ func corruptStoredStackNodeBase(t *testing.T, loomDir, workspace, stackID, taskI
 	}
 }
 
-func mustTestStackLifecycle(t *testing.T, store sourcecontrol.StackLifecycleStore) sourcecontrol.StackLifecycle {
+func mustTestStackLifecycle(t *testing.T, store sourcecontrol.StackLifecycleStore) *sourcecontrol.StackLifecycleService {
 	t.Helper()
 	service, err := sourcecontrol.NewStackLifecycle(store, time.Now)
 	if err != nil {

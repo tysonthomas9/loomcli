@@ -5,275 +5,150 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"testing"
+	"strings"
 
-	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
-	"github.com/tysonthomas9/loomcli/internal/ops"
-	"github.com/tysonthomas9/loomcli/internal/webui/agentcoord"
+	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
+	"github.com/tysonthomas9/loomcli/internal/webui/readprojection"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
-	"github.com/tysonthomas9/loomcli/internal/webui/sourcecontrolcoord"
 )
 
-// ---------------------------------------------------------------------------
-// Aliases for renamed types (old → new)
-// ---------------------------------------------------------------------------
+type module interface{ Register(*http.ServeMux) }
 
-// GitModule → Module (struct alias for compile-time assertions in tests)
-type GitModule = Module
-
-// NewGitModule → NewModule
-var NewGitModule = NewModule
-
-// module is a local interface matching webui.Module for compile-time assertions.
-// The root webui.Module interface cannot be imported here without creating a cycle.
-type module interface {
-	Register(mux *http.ServeMux)
-}
-
-// handleAgentDiffStat → HandleAgentDiffStat
-var handleAgentDiffStat = HandleAgentDiffStat
-
-// handleDiffCommits → HandleDiffCommits
-var handleDiffCommits = HandleDiffCommits
-
-// handleDiffFiles → HandleDiffFiles
-var handleDiffFiles = HandleDiffFiles
-
-// handleDiffFile → HandleDiffFile
-var handleDiffFile = HandleDiffFile
-
-// handleGitPush → HandleGitPush
-var handleGitPush = HandleGitPush
-
-// handleGitPushAll → HandleGitPushAll
-var handleGitPushAll = HandleGitPushAll
-
-// handleGitPull → HandleGitPull
-var handleGitPull = HandleGitPull
-
-// handleGitSync → HandleGitSync
-var handleGitSync = HandleGitSync
-
-// handleGitPR → HandleGitPR
-var handleGitPR = HandleGitPR
-
-// handleGitReset → HandleGitReset
-var handleGitReset = HandleGitReset
-
-// handleGitStatus → HandleGitStatus
-var handleGitStatus = HandleGitStatus
-
-// handleGitTargetUpdate → HandleGitTargetUpdate
-var handleGitTargetUpdate = HandleGitTargetUpdate
-
-// AgentDiffStatResult → agentcoord.AgentDiffStatResult
-type AgentDiffStatResult = agentcoord.AgentDiffStatResult
-
-// MaxListLimit from handler package
 const MaxListLimit = handler.MaxListLimit
 
-// GitSyncResult → agentcoord.GitSyncResult
-type GitSyncResult = agentcoord.GitSyncResult
-
-// GitPushAllResult → agentcoord.GitPushAllResult
-type GitPushAllResult = agentcoord.GitPushAllResult
-
-// GitPushAllWorktreeResult → agentcoord.GitPushAllWorktreeResult
-type GitPushAllWorktreeResult = agentcoord.GitPushAllWorktreeResult
-
-// ---------------------------------------------------------------------------
-// stubDiffService implements sourcecontrolcoord.DiffService with no-op defaults for module tests.
-// ---------------------------------------------------------------------------
-
-type stubDiffService struct{}
-
-func (s *stubDiffService) DiffCommits(_ context.Context, _, _, _ string, _ int) ([]ops.DiffCommitResult, error) {
-	return nil, nil
-}
-func (s *stubDiffService) DiffFiles(_ context.Context, _, _, _, _ string) ([]ops.DiffFileResult, error) {
-	return nil, nil
-}
-func (s *stubDiffService) DiffFilePatch(_ context.Context, _, _, _, _, _ string) (*ops.DiffFilePatchResult, error) {
-	return &ops.DiffFilePatchResult{}, nil
-}
-func (s *stubDiffService) GetIssueDiffStat(_ context.Context, _, _ string) (*sourcecontrolcoord.IssueDiffStatResult, error) {
-	return &sourcecontrolcoord.IssueDiffStatResult{}, nil
+type stubIssueDiff struct {
+	result readprojection.IssueDiffResult
+	err    error
 }
 
-func newTestDiffService(gitOps ops.GitOps, backendFn workitems.Provider) sourcecontrolcoord.DiffService {
-	return sourcecontrolcoord.NewDiffService(gitOps, backendFn, middleware.WithWorkspace)
+func (stub *stubIssueDiff) GetIssueDiff(
+	context.Context,
+	readprojection.IssueDiffQuery,
+) (readprojection.IssueDiffResult, error) {
+	return stub.result, stub.err
 }
 
-// ---------------------------------------------------------------------------
-// mockAgentService — local copy for handler-level testing
-// (The original is in the root webui package's test files and can't be imported.)
-// ---------------------------------------------------------------------------
-
-type mockAgentService struct {
-	getTerminalInfoFunc       func(ctx context.Context, wsID, agentName string) (*agentcoord.AgentTerminalInfoResult, error)
-	generateTerminalTokenFunc func(ctx context.Context, wsID, agentName, userID string) (string, error)
-	getLogFunc                func(ctx context.Context, wsID, agentName string, lines int, beforeLine int64) (*agentcoord.AgentLogResult, error)
-	getDiffStatFunc           func(ctx context.Context, wsID, agentName string) (*agentcoord.AgentDiffStatResult, error)
-	gitPushFunc               func(ctx context.Context, wsID, agentName, target string) (*ops.GitPushResult, error)
-	gitPushAllFunc            func(ctx context.Context, wsID string) (*agentcoord.GitPushAllResult, error)
-	gitPullFunc               func(ctx context.Context, wsID, agentName, source string) (*ops.GitPullResult, error)
-	gitSyncFunc               func(ctx context.Context, wsID, agentName string) (*agentcoord.GitSyncResult, error)
-	createPRFunc              func(ctx context.Context, wsID, agentName, target string) (*ops.GitPRResult, error)
-	gitResetFunc              func(ctx context.Context, wsID, agentName, branch string, force, push bool) (*ops.GitResetResult, error)
-	gitStatusFunc             func(ctx context.Context, wsID, agentName string) (*ops.GitStatusResult, error)
-	setTargetBranchFunc       func(ctx context.Context, wsID, agentName, branch string) error
+type stubBrowse struct {
+	diffStat      func(context.Context, sourcecontrol.AgentQuery) (sourcecontrol.AgentDiffStat, error)
+	diffCommits   func(context.Context, sourcecontrol.DiffCommitsQuery) ([]sourcecontrol.DiffCommit, error)
+	diffFiles     func(context.Context, sourcecontrol.DiffFilesQuery) ([]sourcecontrol.DiffFile, error)
+	diffFilePatch func(context.Context, sourcecontrol.DiffFilePatchQuery) (*sourcecontrol.DiffFilePatch, error)
 }
 
-func (m *mockAgentService) GetTerminalInfo(ctx context.Context, wsID, agentName string) (*agentcoord.AgentTerminalInfoResult, error) {
-	if m.getTerminalInfoFunc != nil {
-		return m.getTerminalInfoFunc(ctx, wsID, agentName)
+func (stub *stubBrowse) DiffStat(ctx context.Context, query sourcecontrol.AgentQuery) (sourcecontrol.AgentDiffStat, error) {
+	if stub != nil && stub.diffStat != nil {
+		return stub.diffStat(ctx, query)
 	}
-	return &agentcoord.AgentTerminalInfoResult{Agent: agentName, Mode: "archive"}, nil
+	return sourcecontrol.AgentDiffStat{}, nil
 }
 
-func (m *mockAgentService) GenerateTerminalToken(ctx context.Context, wsID, agentName, userID string) (string, error) {
-	if m.generateTerminalTokenFunc != nil {
-		return m.generateTerminalTokenFunc(ctx, wsID, agentName, userID)
+func (stub *stubBrowse) DiffCommits(ctx context.Context, query sourcecontrol.DiffCommitsQuery) ([]sourcecontrol.DiffCommit, error) {
+	if stub != nil && stub.diffCommits != nil {
+		return stub.diffCommits(ctx, query)
 	}
-	return "test-token", nil
+	return []sourcecontrol.DiffCommit{}, nil
 }
 
-func (m *mockAgentService) GetLog(ctx context.Context, wsID, agentName string, lines int, beforeLine int64) (*agentcoord.AgentLogResult, error) {
-	if m.getLogFunc != nil {
-		return m.getLogFunc(ctx, wsID, agentName, lines, beforeLine)
+func (stub *stubBrowse) DiffFiles(ctx context.Context, query sourcecontrol.DiffFilesQuery) ([]sourcecontrol.DiffFile, error) {
+	if stub != nil && stub.diffFiles != nil {
+		return stub.diffFiles(ctx, query)
 	}
-	return &agentcoord.AgentLogResult{Lines: []string{}, LineCount: 0, StartLine: 1}, nil
+	return []sourcecontrol.DiffFile{}, nil
 }
 
-func (m *mockAgentService) GetDiffStat(ctx context.Context, wsID, agentName string) (*agentcoord.AgentDiffStatResult, error) {
-	if m.getDiffStatFunc != nil {
-		return m.getDiffStatFunc(ctx, wsID, agentName)
+func (stub *stubBrowse) DiffFilePatch(ctx context.Context, query sourcecontrol.DiffFilePatchQuery) (*sourcecontrol.DiffFilePatch, error) {
+	if stub != nil && stub.diffFilePatch != nil {
+		return stub.diffFilePatch(ctx, query)
 	}
-	return &agentcoord.AgentDiffStatResult{}, nil
+	return &sourcecontrol.DiffFilePatch{}, nil
 }
 
-func (m *mockAgentService) GitPush(ctx context.Context, wsID, agentName, target string) (*ops.GitPushResult, error) {
-	if m.gitPushFunc != nil {
-		return m.gitPushFunc(ctx, wsID, agentName, target)
+type stubCheckout struct {
+	push              func(context.Context, sourcecontrol.PushCommand) (*sourcecontrol.PushResult, error)
+	pushAll           func(context.Context, sourcecontrol.PushAllCommand) (*sourcecontrol.PushAllResult, error)
+	pull              func(context.Context, sourcecontrol.PullCommand) (*sourcecontrol.PullResult, error)
+	sync              func(context.Context, sourcecontrol.SyncCommand) (*sourcecontrol.SyncResult, error)
+	createPullRequest func(context.Context, sourcecontrol.CreatePullRequestCommand) (*sourcecontrol.PullRequestCreation, error)
+	reset             func(context.Context, sourcecontrol.ResetCommand) (*sourcecontrol.ResetResult, error)
+	agentStatus       func(context.Context, sourcecontrol.AgentStatusQuery) (*sourcecontrol.AgentStatusResult, error)
+	setTargetBranch   func(context.Context, sourcecontrol.SetTargetBranchCommand) error
+}
+
+func (*stubCheckout) Status(context.Context, sourcecontrol.LocationQuery) (sourcecontrol.FileGitStatusResult, error) {
+	return sourcecontrol.FileGitStatusResult{}, nil
+}
+func (*stubCheckout) ListCheckouts(context.Context, sourcecontrol.WorkspaceQuery) (*sourcecontrol.FileCheckoutsResult, error) {
+	return &sourcecontrol.FileCheckoutsResult{}, nil
+}
+func (*stubCheckout) Repair(context.Context, sourcecontrol.RepairCommand) (*sourcecontrol.RepairResult, error) {
+	return &sourcecontrol.RepairResult{}, nil
+}
+func (stub *stubCheckout) Push(ctx context.Context, command sourcecontrol.PushCommand) (*sourcecontrol.PushResult, error) {
+	if stub != nil && stub.push != nil {
+		return stub.push(ctx, command)
 	}
-	return &ops.GitPushResult{Success: true, Message: "pushed"}, nil
+	return &sourcecontrol.PushResult{Success: true}, nil
 }
-
-func (m *mockAgentService) GitPushAll(ctx context.Context, wsID string) (*agentcoord.GitPushAllResult, error) {
-	if m.gitPushAllFunc != nil {
-		return m.gitPushAllFunc(ctx, wsID)
+func (stub *stubCheckout) PushAll(ctx context.Context, command sourcecontrol.PushAllCommand) (*sourcecontrol.PushAllResult, error) {
+	if stub != nil && stub.pushAll != nil {
+		return stub.pushAll(ctx, command)
 	}
-	return &agentcoord.GitPushAllResult{}, nil
+	return &sourcecontrol.PushAllResult{}, nil
 }
-
-func (m *mockAgentService) GitPull(ctx context.Context, wsID, agentName, source string) (*ops.GitPullResult, error) {
-	if m.gitPullFunc != nil {
-		return m.gitPullFunc(ctx, wsID, agentName, source)
+func (stub *stubCheckout) Pull(ctx context.Context, command sourcecontrol.PullCommand) (*sourcecontrol.PullResult, error) {
+	if stub != nil && stub.pull != nil {
+		return stub.pull(ctx, command)
 	}
-	return &ops.GitPullResult{Success: true, Message: "pulled"}, nil
+	return &sourcecontrol.PullResult{Success: true}, nil
 }
-
-func (m *mockAgentService) GitSync(ctx context.Context, wsID, agentName string) (*agentcoord.GitSyncResult, error) {
-	if m.gitSyncFunc != nil {
-		return m.gitSyncFunc(ctx, wsID, agentName)
+func (stub *stubCheckout) Sync(ctx context.Context, command sourcecontrol.SyncCommand) (*sourcecontrol.SyncResult, error) {
+	if stub != nil && stub.sync != nil {
+		return stub.sync(ctx, command)
 	}
-	return &agentcoord.GitSyncResult{
-		PushResult: &ops.GitPushResult{Success: true},
-		PullResult: &ops.GitPullResult{Success: true},
-	}, nil
+	return &sourcecontrol.SyncResult{}, nil
 }
-
-func (m *mockAgentService) CreatePR(ctx context.Context, wsID, agentName, target string) (*ops.GitPRResult, error) {
-	if m.createPRFunc != nil {
-		return m.createPRFunc(ctx, wsID, agentName, target)
+func (stub *stubCheckout) CreatePullRequest(ctx context.Context, command sourcecontrol.CreatePullRequestCommand) (*sourcecontrol.PullRequestCreation, error) {
+	if stub != nil && stub.createPullRequest != nil {
+		return stub.createPullRequest(ctx, command)
 	}
-	return &ops.GitPRResult{URL: "https://github.com/test/pr/1", Created: true}, nil
+	return &sourcecontrol.PullRequestCreation{}, nil
 }
-
-func (m *mockAgentService) ListPullRequests(context.Context, string, string) (*ops.GitPullRequestList, error) {
-	return &ops.GitPullRequestList{PullRequests: []ops.GitPullRequest{}}, nil
+func (*stubCheckout) ListPullRequests(context.Context, sourcecontrol.ListPullRequestsQuery) (*sourcecontrol.PullRequestList, error) {
+	return &sourcecontrol.PullRequestList{}, nil
 }
-
-func (m *mockAgentService) GitReset(ctx context.Context, wsID, agentName, branch string, force, push bool) (*ops.GitResetResult, error) {
-	if m.gitResetFunc != nil {
-		return m.gitResetFunc(ctx, wsID, agentName, branch, force, push)
+func (stub *stubCheckout) Reset(ctx context.Context, command sourcecontrol.ResetCommand) (*sourcecontrol.ResetResult, error) {
+	if stub != nil && stub.reset != nil {
+		return stub.reset(ctx, command)
 	}
-	return &ops.GitResetResult{Success: true, Message: "reset done"}, nil
+	return &sourcecontrol.ResetResult{}, nil
 }
-
-func (m *mockAgentService) GitStatus(ctx context.Context, wsID, agentName string) (*ops.GitStatusResult, error) {
-	if m.gitStatusFunc != nil {
-		return m.gitStatusFunc(ctx, wsID, agentName)
+func (stub *stubCheckout) AgentStatus(ctx context.Context, query sourcecontrol.AgentStatusQuery) (*sourcecontrol.AgentStatusResult, error) {
+	if stub != nil && stub.agentStatus != nil {
+		return stub.agentStatus(ctx, query)
 	}
-	return &ops.GitStatusResult{Branch: "feature", TargetBranch: "main", IsClean: true}, nil
+	return &sourcecontrol.AgentStatusResult{}, nil
 }
-
-func (m *mockAgentService) SetTargetBranch(ctx context.Context, wsID, agentName, branch string) error {
-	if m.setTargetBranchFunc != nil {
-		return m.setTargetBranchFunc(ctx, wsID, agentName, branch)
+func (stub *stubCheckout) SetTargetBranch(ctx context.Context, command sourcecontrol.SetTargetBranchCommand) error {
+	if stub != nil && stub.setTargetBranch != nil {
+		return stub.setTargetBranch(ctx, command)
 	}
 	return nil
 }
 
-// ---------------------------------------------------------------------------
-// Test helpers (duplicated from root webui contract_test.go)
-// ---------------------------------------------------------------------------
-
-func assertJSONResponse(t *testing.T, w *httptest.ResponseRecorder) map[string]interface{} {
-	t.Helper()
-	contentType := w.Header().Get("Content-Type")
-	if contentType != "application/json" {
-		t.Errorf("Content-Type = %q, want %q", contentType, "application/json")
-	}
-	var result map[string]interface{}
-	if err := json.NewDecoder(w.Body).Decode(&result); err != nil {
-		t.Fatalf("failed to decode JSON response: %v", err)
-	}
-	return result
+func request(method, path, body string) *http.Request {
+	req := httptest.NewRequest(method, path, strings.NewReader(body))
+	return req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 }
 
-func assertEnvelopeSuccess(t *testing.T, body map[string]interface{}) {
-	t.Helper()
-	success, ok := body["success"]
-	if !ok {
-		t.Fatal("missing 'success' field in response")
-	}
-	if success != true {
-		t.Errorf("success = %v, want true", success)
-	}
-	if errVal, ok := body["error"]; ok {
-		if str, isStr := errVal.(string); isStr && str != "" {
-			t.Errorf("unexpected 'error' field in success response: %v", errVal)
-		}
-	}
+func serveRoute(pattern string, handler http.HandlerFunc, req *http.Request) *httptest.ResponseRecorder {
+	mux := http.NewServeMux()
+	mux.HandleFunc(pattern, handler)
+	recorder := httptest.NewRecorder()
+	mux.ServeHTTP(recorder, req)
+	return recorder
 }
 
-func assertEnvelopeSuccessWithData(t *testing.T, body map[string]interface{}, dataFieldName string) {
-	t.Helper()
-	assertEnvelopeSuccess(t, body)
-	if _, ok := body[dataFieldName]; !ok {
-		t.Errorf("missing '%s' field in success response", dataFieldName)
-	}
-}
-
-func assertEnvelopeError(t *testing.T, body map[string]interface{}, dataFieldName string) {
-	t.Helper()
-	success, ok := body["success"]
-	if !ok {
-		t.Fatal("missing 'success' field in response")
-	}
-	if success != false {
-		t.Errorf("success = %v, want false", success)
-	}
-	errVal, ok := body["error"]
-	if !ok {
-		t.Fatal("missing 'error' field in error response")
-	}
-	if _, ok := errVal.(string); !ok {
-		t.Errorf("'error' field is %T, want string", errVal)
-	}
-	if dataVal, ok := body[dataFieldName]; ok && dataVal != nil {
-		t.Errorf("unexpected '%s' field in error response: %v", dataFieldName, dataVal)
-	}
+func decodeJSON(body string, destination any) error {
+	return json.Unmarshal([]byte(body), destination)
 }

@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/ops"
+	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
 )
 
 // Regression: DiffFiles / DiffFilePatch / DiffCommits MUST accept a
@@ -44,7 +44,7 @@ func TestDiffFilesHonorsCanceledContext(t *testing.T) {
 	dir, base := setupDiffTestRepo(t)
 
 	type result struct {
-		files []ops.DiffFileResult
+		files []sourcecontrol.DiffFile
 		err   error
 		dur   time.Duration
 	}

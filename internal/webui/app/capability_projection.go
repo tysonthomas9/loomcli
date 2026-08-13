@@ -10,7 +10,6 @@ import (
 	workflowcataloghttp "github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog/httpapi"
 	"github.com/tysonthomas9/loomcli/internal/modules/workspace"
 	"github.com/tysonthomas9/loomcli/internal/webui"
-	"github.com/tysonthomas9/loomcli/internal/webui/agentcoord"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/prreview"
 )
 
@@ -87,7 +86,6 @@ func NewPRReviewModule(
 	connectorManagement connectorsmodule.Management,
 	connectorSealer connectorsmodule.CredentialSealer,
 	dispatcher connectorsmodule.Dispatcher,
-	agentService agentcoord.AgentService,
 ) PRReviewModule {
 	var reviewerProvisioning prreviewer.Commands
 	var reviewerAgents agents.IdentityQueries
@@ -105,7 +103,7 @@ func NewPRReviewModule(
 	}
 	return prreview.NewModule(prreview.Config{
 		Workspace: workspaceQueries, ConnectorManagement: connectorManagement, ConnectorSealer: connectorSealer,
-		Dispatcher: dispatcher, AgentService: agentService,
+		Dispatcher: dispatcher, PullRequests: config.SourceControlCheckout,
 		LocalSettingsDir:     config.LocalSettingsDir,
 		ReviewerProvisioning: reviewerProvisioning, ReviewerAgents: reviewerAgents,
 		SourceControl:   config.SourceControl,

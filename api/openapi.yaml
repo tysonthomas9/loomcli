@@ -968,7 +968,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
+                $ref: "#/components/schemas/DiffStatResponse"
 
   # ── Comments ────────────────────────────────────────────────────────────
   /api/workspaces/{ws}/issues/{id}/comments:
@@ -3002,7 +3002,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
+                $ref: "#/components/schemas/GitStatusResponse"
 
   /api/workspaces/{ws}/agents/{name}/git/push:
     post:
@@ -3016,18 +3016,20 @@ paths:
         content:
           application/json:
             schema:
-              type: object
-              properties:
-                target:
-                  type: string
-                  description: Remote branch target
+              $ref: "#/components/schemas/GitPushRequest"
       responses:
         "200":
           description: Push result
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/MessageResponse"
+                $ref: "#/components/schemas/GitMergeResponse"
+        "409":
+          description: Push conflict
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GitMergeResponse"
 
   /api/workspaces/{ws}/agents/{name}/git/pull:
     post:
@@ -3041,18 +3043,20 @@ paths:
         content:
           application/json:
             schema:
-              type: object
-              properties:
-                source:
-                  type: string
-                  description: Remote branch source
+              $ref: "#/components/schemas/GitPullRequest"
       responses:
         "200":
           description: Pull result
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/MessageResponse"
+                $ref: "#/components/schemas/GitMergeResponse"
+        "409":
+          description: Pull conflict
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GitMergeResponse"
 
   /api/workspaces/{ws}/agents/{name}/git/sync:
     post:
@@ -3068,7 +3072,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/MessageResponse"
+                $ref: "#/components/schemas/GitSyncResponse"
+        "409":
+          description: Push or pull conflict
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GitSyncResponse"
 
   /api/workspaces/{ws}/agents/{name}/git/pr:
     post:
@@ -3078,13 +3088,24 @@ paths:
       parameters:
         - $ref: "#/components/parameters/WorkspaceId"
         - $ref: "#/components/parameters/AgentName"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GitCreatePullRequestRequest"
       responses:
         "200":
-          description: PR created
+          description: Pull request already exists or no commits are available
           content:
             application/json:
               schema:
-                type: object
+                $ref: "#/components/schemas/GitPullRequestCreationResponse"
+        "201":
+          description: Pull request created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GitPullRequestCreationResponse"
 
   /api/workspaces/{ws}/agents/{name}/git/reset:
     post:
@@ -3094,13 +3115,24 @@ paths:
       parameters:
         - $ref: "#/components/parameters/WorkspaceId"
         - $ref: "#/components/parameters/AgentName"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GitResetRequest"
       responses:
         "200":
           description: Reset complete
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/MessageResponse"
+                $ref: "#/components/schemas/GitResetResponse"
+        "423":
+          description: Agent checkout is locked by an active task
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GitResetLockedResponse"
 
   /api/workspaces/{ws}/agents/{name}/git/target:
     patch:
@@ -3115,17 +3147,14 @@ paths:
         content:
           application/json:
             schema:
-              type: object
-              properties:
-                target:
-                  type: string
+              $ref: "#/components/schemas/GitTargetRequest"
       responses:
         "200":
           description: Target updated
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/MessageResponse"
+                $ref: "#/components/schemas/GitTargetResponse"
 
   /api/workspaces/{ws}/git/push-all:
     post:
@@ -3140,7 +3169,29 @@ paths:
           content:
             application/json:
               schema:
-                type: object
+                $ref: "#/components/schemas/GitPushAllResponse"
+
+  /api/workspaces/{ws}/pull-requests:
+    get:
+      operationId: listPullRequests
+      tags: [pull-requests]
+      summary: List pull requests visible to a workspace
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: state
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [all, open, merged, review]
+            default: all
+      responses:
+        "200":
+          description: Pull-request list and any per-repository warnings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PullRequestsResponse"
 
   # ── Pull Requests ───────────────────────────────────────────────────────
   /api/workspaces/{ws}/pull-requests/{owner}/{repo}/{number}:
@@ -3572,7 +3623,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
+                $ref: "#/components/schemas/DiffStatResponse"
 
   # ── Diff ────────────────────────────────────────────────────────────────
   /api/workspaces/{ws}/agents/{name}/diff/commits:
@@ -3583,13 +3634,24 @@ paths:
       parameters:
         - $ref: "#/components/parameters/WorkspaceId"
         - $ref: "#/components/parameters/AgentName"
+        - name: from
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
       responses:
         "200":
           description: Commit list
           content:
             application/json:
               schema:
-                type: object
+                $ref: "#/components/schemas/GitDiffCommitsResponse"
 
   /api/workspaces/{ws}/agents/{name}/diff/files:
     get:
@@ -3599,13 +3661,23 @@ paths:
       parameters:
         - $ref: "#/components/parameters/WorkspaceId"
         - $ref: "#/components/parameters/AgentName"
+        - name: from
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: to
+          in: query
+          required: false
+          schema:
+            type: string
       responses:
         "200":
           description: Changed files
           content:
             application/json:
               schema:
-                type: object
+                $ref: "#/components/schemas/GitDiffFilesResponse"
 
   /api/workspaces/{ws}/agents/{name}/diff/file:
     get:
@@ -3620,13 +3692,23 @@ paths:
           required: true
           schema:
             type: string
+        - name: from
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: to
+          in: query
+          required: false
+          schema:
+            type: string
       responses:
         "200":
           description: File diff
           content:
             application/json:
               schema:
-                type: object
+                $ref: "#/components/schemas/GitDiffFileResponse"
 
   /api/workspaces/{ws}/files/stat:
     get:
@@ -5308,6 +5390,367 @@ components:
         workspace:
           type: string
         reason:
+          type: string
+
+    # ── Source Control Schemas ──────────────────────────────────────────
+    GitPushRequest:
+      type: object
+      properties:
+        target:
+          type: string
+          description: Remote branch target.
+
+    GitPullRequest:
+      type: object
+      properties:
+        source:
+          type: string
+          description: Remote branch source.
+
+    GitCreatePullRequestRequest:
+      type: object
+      properties:
+        target:
+          type: string
+          description: Pull-request base branch.
+
+    GitResetRequest:
+      type: object
+      properties:
+        branch:
+          type: string
+        force:
+          type: boolean
+          default: false
+        push:
+          type: boolean
+          default: false
+
+    GitTargetRequest:
+      type: object
+      required: [branch]
+      properties:
+        branch:
+          type: string
+
+    GitMergeResponse:
+      type: object
+      required: [success, message, already_up_to_date]
+      properties:
+        success:
+          type: boolean
+        message:
+          type: string
+        already_up_to_date:
+          type: boolean
+        conflicted_files:
+          type: array
+          items:
+            type: string
+
+    GitSyncResponse:
+      type: object
+      properties:
+        push_result:
+          $ref: "#/components/schemas/GitMergeResponse"
+        pull_result:
+          $ref: "#/components/schemas/GitMergeResponse"
+
+    GitPushAllCheckoutResponse:
+      type: object
+      required: [name, success]
+      properties:
+        name:
+          type: string
+        success:
+          type: boolean
+        message:
+          type: string
+        error:
+          type: string
+
+    GitPushAllResponse:
+      type: object
+      required: [results, pushed, failed]
+      properties:
+        results:
+          type: array
+          items:
+            $ref: "#/components/schemas/GitPushAllCheckoutResponse"
+        pushed:
+          type: integer
+        failed:
+          type: integer
+
+    GitPullRequestCreationResponse:
+      type: object
+      required: [created, already_exists, no_commits]
+      properties:
+        url:
+          type: string
+        created:
+          type: boolean
+        already_exists:
+          type: boolean
+        no_commits:
+          type: boolean
+
+    GitResetResponse:
+      type: object
+      required: [success, message, pushed]
+      properties:
+        success:
+          type: boolean
+        message:
+          type: string
+        previous_branch:
+          type: string
+        pushed:
+          type: boolean
+
+    GitResetLockInfo:
+      type: object
+      required: [agent, pid, duration]
+      properties:
+        agent:
+          type: string
+        pid:
+          type: integer
+        duration:
+          type: string
+        task_id:
+          type: string
+
+    GitResetLockedResponse:
+      type: object
+      required: [error, lock_info]
+      properties:
+        error:
+          type: string
+        lock_info:
+          $ref: "#/components/schemas/GitResetLockInfo"
+
+    GitStatusResponse:
+      type: object
+      required:
+        - branch
+        - target_branch
+        - is_clean
+        - ahead
+        - behind
+        - changed_files
+        - conflicted_files
+        - has_conflicts
+        - stash_count
+      properties:
+        branch:
+          type: string
+        target_branch:
+          type: string
+        is_clean:
+          type: boolean
+        ahead:
+          type: integer
+        behind:
+          type: integer
+        changed_files:
+          type: array
+          items:
+            type: string
+        conflicted_files:
+          type: array
+          items:
+            type: string
+        has_conflicts:
+          type: boolean
+        stash_count:
+          type: integer
+
+    GitTargetResponse:
+      type: object
+      required: [success, branch]
+      properties:
+        success:
+          type: boolean
+        branch:
+          type: string
+
+    DiffStatResponse:
+      type: object
+      required: [branch, added, removed]
+      properties:
+        branch:
+          type: string
+        added:
+          type: integer
+        removed:
+          type: integer
+
+    GitDiffCommit:
+      type: object
+      required: [hash, short_hash, subject, author, email, date]
+      properties:
+        hash:
+          type: string
+        short_hash:
+          type: string
+        subject:
+          type: string
+        author:
+          type: string
+        email:
+          type: string
+        date:
+          type: string
+
+    GitDiffFile:
+      type: object
+      required: [path, status, additions, deletions]
+      properties:
+        path:
+          type: string
+        status:
+          type: string
+        old_path:
+          type: string
+        additions:
+          type: integer
+        deletions:
+          type: integer
+
+    GitDiffFilePatch:
+      type: object
+      required: [patch, is_binary, is_too_large, additions, deletions]
+      properties:
+        patch:
+          type: string
+        is_binary:
+          type: boolean
+        is_too_large:
+          type: boolean
+        additions:
+          type: integer
+        deletions:
+          type: integer
+
+    GitDiffCommitsData:
+      type: object
+      required: [commits]
+      properties:
+        commits:
+          type: array
+          items:
+            $ref: "#/components/schemas/GitDiffCommit"
+
+    GitDiffCommitsResponse:
+      type: object
+      required: [success, data]
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: "#/components/schemas/GitDiffCommitsData"
+        error:
+          type: string
+
+    GitDiffFilesData:
+      type: object
+      required: [files]
+      properties:
+        files:
+          type: array
+          items:
+            $ref: "#/components/schemas/GitDiffFile"
+
+    GitDiffFilesResponse:
+      type: object
+      required: [success, data]
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: "#/components/schemas/GitDiffFilesData"
+        error:
+          type: string
+
+    GitDiffFileResponse:
+      type: object
+      required: [success, data]
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: "#/components/schemas/GitDiffFilePatch"
+        error:
+          type: string
+
+    PullRequestSummary:
+      type: object
+      required:
+        - number
+        - title
+        - url
+        - state
+        - is_draft
+        - head_ref_name
+        - base_ref_name
+        - repo_name
+      properties:
+        number:
+          type: integer
+        title:
+          type: string
+        url:
+          type: string
+        state:
+          type: string
+        is_draft:
+          type: boolean
+        head_ref_name:
+          type: string
+        base_ref_name:
+          type: string
+        author_login:
+          type: string
+        created_at:
+          type: string
+        updated_at:
+          type: string
+        review_decision:
+          type: string
+        repo_name:
+          type: string
+        source_repo:
+          type: string
+        additions:
+          type: integer
+        deletions:
+          type: integer
+        changed_files:
+          type: integer
+
+    PullRequestsData:
+      type: object
+      required: [pull_requests]
+      properties:
+        pull_requests:
+          type: array
+          items:
+            $ref: "#/components/schemas/PullRequestSummary"
+        warnings:
+          type: array
+          items:
+            type: string
+
+    PullRequestsResponse:
+      type: object
+      required: [success, data]
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: "#/components/schemas/PullRequestsData"
+        error:
           type: string
 
     # ── Pull Request Schemas ────────────────────────────────────────────

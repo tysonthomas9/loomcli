@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
 	"github.com/tysonthomas9/loomcli/internal/ops"
 	storepkg "github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
@@ -86,34 +87,21 @@ func testWorkspaceStore(_ string, workspaces []ops.WorkspaceSummary) storepkg.St
 	return st
 }
 
-// testWorktree returns a standard ops.AgentWorktree used across tests.
-func testWorktree() *ops.AgentWorktree {
-	return &ops.AgentWorktree{
-		Name:          "test-agent",
-		Path:          "/tmp/worktrees/test-agent",
-		Branch:        "loomcli-test-agent",
-		DefaultBranch: "main",
-		Remote:        "origin",
-		RepoName:      "myrepo",
-		IsWorkspace:   true,
-	}
-}
-
-// mockFileOps implements ops.FileOps for testing.
+// mockFileOps implements Source Control's private FileMechanics seam for tests.
 type mockFileOps struct {
-	resolveFunc       func(name string) (*ops.AgentWorktree, error)
+	resolveFunc       func(name string) (*sourcecontrol.Worktree, error)
 	resolveWsRootFunc func() (string, error)
-	resolveWsDataFunc func() (*ops.WorkspaceData, error)
+	resolveWsDataFunc func() (*sourcecontrol.WorkspaceTopology, error)
 }
 
-func (m *mockFileOps) ResolveAgentWorktree(_, name string) (*ops.AgentWorktree, error) {
+func (m *mockFileOps) ResolveAgentWorktree(_, name string) (*sourcecontrol.Worktree, error) {
 	if m.resolveFunc != nil {
 		return m.resolveFunc(name)
 	}
 	return nil, errors.New("not found")
 }
 
-func (m *mockFileOps) ResolveAgentWorktreeForRepo(_, name, _ string) (*ops.AgentWorktree, error) {
+func (m *mockFileOps) ResolveAgentWorktreeForRepo(_, name, _ string) (*sourcecontrol.Worktree, error) {
 	return m.ResolveAgentWorktree("", name)
 }
 
@@ -124,31 +112,31 @@ func (m *mockFileOps) ResolveWorkspaceRoot(_ string) (string, error) {
 	return "", errors.New("not found")
 }
 
-func (m *mockFileOps) ResolveWorkspaceData(_ string) (*ops.WorkspaceData, error) {
+func (m *mockFileOps) ResolveWorkspaceData(_ string) (*sourcecontrol.WorkspaceTopology, error) {
 	if m.resolveWsDataFunc != nil {
 		return m.resolveWsDataFunc()
 	}
 	return nil, errors.New("not found")
 }
 
-func (m *mockFileOps) GitStatusPorcelain(_ context.Context, worktreePath string) (ops.GitFileStatusResult, error) {
-	return ops.GitFileStatusResult{Entries: map[string]string{}}, nil
+func (m *mockFileOps) GitStatusPorcelain(_ context.Context, worktreePath string) (sourcecontrol.GitFileStatusResult, error) {
+	return sourcecontrol.GitFileStatusResult{Entries: map[string]string{}}, nil
 }
 
-func (m *mockFileOps) GitShowFileAtRev(_ context.Context, worktreePath, rev, path string, maxBytes int64) (*ops.GitFileContentAtRev, error) {
-	return &ops.GitFileContentAtRev{Content: []byte(""), Size: 0}, nil
+func (m *mockFileOps) GitShowFileAtRev(_ context.Context, worktreePath, rev, path string, maxBytes int64) (*sourcecontrol.GitFileContentAtRev, error) {
+	return &sourcecontrol.GitFileContentAtRev{Content: []byte(""), Size: 0}, nil
 }
 
-func (m *mockFileOps) GitDiffFile(_ context.Context, worktreePath, path, from, to string) (ops.GitBoundedTextResult, error) {
-	return ops.GitBoundedTextResult{}, nil
+func (m *mockFileOps) GitDiffFile(_ context.Context, worktreePath, path, from, to string) (sourcecontrol.GitBoundedTextResult, error) {
+	return sourcecontrol.GitBoundedTextResult{}, nil
 }
 
-func (m *mockFileOps) GitLogFile(_ context.Context, worktreePath, path string, limit int) (ops.GitBoundedTextResult, error) {
-	return ops.GitBoundedTextResult{}, nil
+func (m *mockFileOps) GitLogFile(_ context.Context, worktreePath, path string, limit int) (sourcecontrol.GitBoundedTextResult, error) {
+	return sourcecontrol.GitBoundedTextResult{}, nil
 }
 
-func (m *mockFileOps) GitBlamePorcelain(_ context.Context, worktreePath, path string) (ops.GitBoundedTextResult, error) {
-	return ops.GitBoundedTextResult{}, nil
+func (m *mockFileOps) GitBlamePorcelain(_ context.Context, worktreePath, path string) (sourcecontrol.GitBoundedTextResult, error) {
+	return sourcecontrol.GitBoundedTextResult{}, nil
 }
 
 func (m *mockFileOps) ResolveLoomDataDir() (string, error) {
@@ -159,121 +147,6 @@ func (m *mockFileOps) GitCurrentBranch(_ context.Context, _ string) (string, err
 	return "main", nil
 }
 
-func (m *mockFileOps) RepairCheckout(_, _, _, _ string, _ bool) (ops.RepairResult, error) {
-	return ops.RepairResult{Repaired: false, Method: "none", Message: "not implemented"}, nil
-}
-
-// mockGitOps implements ops.GitOps for testing in the root package.
-type mockGitOps struct {
-	resolveFunc            func(name string) (*ops.AgentWorktree, error)
-	pushFunc               func(worktreePath, sourceBranch, targetBranch, remote string) (*ops.GitPushResult, error)
-	pullFunc               func(worktreePath, currentBranch, sourceBranch, remote string) (*ops.GitPullResult, error)
-	createPRFunc           func(worktreePath, sourceBranch, targetBranch, remote string) (*ops.GitPRResult, error)
-	resetFunc              func(worktreePath, worktreeName, targetBranch string, force, push bool) (*ops.GitResetResult, error)
-	statusFunc             func(worktreePath, targetBranch string) (*ops.GitStatusResult, error)
-	getCurrentBranchFunc   func(worktreePath string) (string, error)
-	checkGhInstalledFunc   func() error
-	setRepoDefaultFunc     func(repoName, branch string) error
-	listAgentWorktreesFunc func() ([]ops.AgentWorktree, error)
-	diffStatFunc           func(worktreePath, fromRef string) ops.DiffStatResult
-	resolveMergeBaseFunc   func(worktreePath, branch string) (string, error)
-	diffCommitsFunc        func(worktreePath, mergeBase string, limit int) ([]ops.DiffCommitResult, error)
-	diffFilesFunc          func(worktreePath, from, to string) ([]ops.DiffFileResult, error)
-	diffFilePatchFunc      func(worktreePath, from, to, path string) (*ops.DiffFilePatchResult, error)
-}
-
-func (m *mockGitOps) ResolveAgentWorktree(_, name string) (*ops.AgentWorktree, error) {
-	if m.resolveFunc != nil {
-		return m.resolveFunc(name)
-	}
-	return nil, errors.New("not found")
-}
-func (m *mockGitOps) Push(worktreePath, sourceBranch, targetBranch, remote string) (*ops.GitPushResult, error) {
-	if m.pushFunc != nil {
-		return m.pushFunc(worktreePath, sourceBranch, targetBranch, remote)
-	}
-	return &ops.GitPushResult{Success: true, Message: "pushed"}, nil
-}
-func (m *mockGitOps) Pull(worktreePath, currentBranch, sourceBranch, remote string) (*ops.GitPullResult, error) {
-	if m.pullFunc != nil {
-		return m.pullFunc(worktreePath, currentBranch, sourceBranch, remote)
-	}
-	return &ops.GitPullResult{Success: true, Message: "pulled"}, nil
-}
-func (m *mockGitOps) CreatePR(worktreePath, sourceBranch, targetBranch, remote string) (*ops.GitPRResult, error) {
-	if m.createPRFunc != nil {
-		return m.createPRFunc(worktreePath, sourceBranch, targetBranch, remote)
-	}
-	return &ops.GitPRResult{URL: "https://github.com/test/pr/1", Created: true}, nil
-}
-
-func (m *mockGitOps) ListWorkspacePullRequests(string, string, int) (*ops.GitPullRequestList, error) {
-	return &ops.GitPullRequestList{PullRequests: []ops.GitPullRequest{}}, nil
-}
-
-func (m *mockGitOps) Reset(worktreePath, worktreeName, targetBranch string, force, push bool) (*ops.GitResetResult, error) {
-	if m.resetFunc != nil {
-		return m.resetFunc(worktreePath, worktreeName, targetBranch, force, push)
-	}
-	return &ops.GitResetResult{Success: true, Message: "reset done"}, nil
-}
-func (m *mockGitOps) Status(worktreePath, targetBranch string) (*ops.GitStatusResult, error) {
-	if m.statusFunc != nil {
-		return m.statusFunc(worktreePath, targetBranch)
-	}
-	return &ops.GitStatusResult{Branch: "feature", TargetBranch: "main", IsClean: true}, nil
-}
-func (m *mockGitOps) GetCurrentBranch(worktreePath string) (string, error) {
-	if m.getCurrentBranchFunc != nil {
-		return m.getCurrentBranchFunc(worktreePath)
-	}
-	return "feature-branch", nil
-}
-func (m *mockGitOps) CheckGhInstalled() error {
-	if m.checkGhInstalledFunc != nil {
-		return m.checkGhInstalledFunc()
-	}
-	return nil
-}
-func (m *mockGitOps) SetRepoDefaultBranch(_ context.Context, _, repoName, branch string) error {
-	if m.setRepoDefaultFunc != nil {
-		return m.setRepoDefaultFunc(repoName, branch)
-	}
-	return nil
-}
-func (m *mockGitOps) ListAgentWorktrees(_ string) ([]ops.AgentWorktree, error) {
-	if m.listAgentWorktreesFunc != nil {
-		return m.listAgentWorktreesFunc()
-	}
-	return nil, nil
-}
-func (m *mockGitOps) DiffStat(worktreePath, fromRef string) ops.DiffStatResult {
-	if m.diffStatFunc != nil {
-		return m.diffStatFunc(worktreePath, fromRef)
-	}
-	return ops.DiffStatResult{}
-}
-func (m *mockGitOps) ResolveMergeBase(worktreePath, branch string) (string, error) {
-	if m.resolveMergeBaseFunc != nil {
-		return m.resolveMergeBaseFunc(worktreePath, branch)
-	}
-	return "abc123", nil
-}
-func (m *mockGitOps) DiffCommits(_ context.Context, worktreePath, mergeBase string, limit int) ([]ops.DiffCommitResult, error) {
-	if m.diffCommitsFunc != nil {
-		return m.diffCommitsFunc(worktreePath, mergeBase, limit)
-	}
-	return []ops.DiffCommitResult{}, nil
-}
-func (m *mockGitOps) DiffFiles(_ context.Context, worktreePath, from, to string) ([]ops.DiffFileResult, error) {
-	if m.diffFilesFunc != nil {
-		return m.diffFilesFunc(worktreePath, from, to)
-	}
-	return []ops.DiffFileResult{}, nil
-}
-func (m *mockGitOps) DiffFilePatch(_ context.Context, worktreePath, from, to, path string) (*ops.DiffFilePatchResult, error) {
-	if m.diffFilePatchFunc != nil {
-		return m.diffFilePatchFunc(worktreePath, from, to, path)
-	}
-	return &ops.DiffFilePatchResult{}, nil
+func (m *mockFileOps) RepairCheckout(_, _, _, _ string, _ bool) (sourcecontrol.RepairResult, error) {
+	return sourcecontrol.RepairResult{Repaired: false, Method: "none", Message: "not implemented"}, nil
 }

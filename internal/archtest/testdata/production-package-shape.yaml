@@ -1,4 +1,4 @@
-# Exact Phase 10.2 production-package topology ratchet.
+# Exact current production-package topology ratchet.
 # Generated .go files count as compiled package topology; _test.go files do not.
 # Refresh only after an intentional consolidation review; see package_shape_test.go.
 schema_version: 1
@@ -14,11 +14,11 @@ semantics:
     - vendor
     - worktrees
 ceilings:
-  total_packages: 156
-  module_packages: 17
-  outside_module_packages: 139
+  total_packages: 155
+  module_packages: 18
+  outside_module_packages: 137
   one_file_packages: 38
-  one_or_two_file_packages: 60
+  one_or_two_file_packages: 57
 packages:
   - internal/agenterr
   - internal/agentpolicy
@@ -114,6 +114,7 @@ packages:
   - internal/modules/interaction
   - internal/modules/interaction/fleetdb
   - internal/modules/sourcecontrol
+  - internal/modules/sourcecontrol/filesystem
   - internal/modules/workflowcatalog
   - internal/modules/workflowcatalog/fleetdb
   - internal/modules/workflowcatalog/httpapi
@@ -141,7 +142,6 @@ packages:
   - internal/webui/apperrors
   - internal/webui/coordinator
   - internal/webui/editor
-  - internal/webui/filecoord
   - internal/webui/fleet
   - internal/webui/handlers/agents
   - internal/webui/handlers/agentsmanagement
@@ -171,7 +171,6 @@ packages:
   - internal/webui/server/middleware
   - internal/webui/server/realtime
   - internal/webui/sessioncoord
-  - internal/webui/sourcecontrolcoord
   - internal/webui/storeadapter
   - internal/webui/subscription
   - internal/webui/terminal

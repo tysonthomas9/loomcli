@@ -20,7 +20,6 @@ import (
 	driverexecutor "github.com/tysonthomas9/loomcli/internal/driver"
 	trigger "github.com/tysonthomas9/loomcli/internal/infra/automationruntime"
 	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
-	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
 	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui"
@@ -54,9 +53,9 @@ func buildExecutionRuntimePasses(
 	runOutcomes driverexecutor.RunOutcomePublisher,
 	executionCapability webui.ExecutionCapability,
 	artifactsCapability webui.ArtifactsCapability,
-	sourceControl sourcecontrol.Materializer,
-	stackBindings sourcecontrol.StackBindingResolver,
-	taskOutcomes sourcecontrol.TaskOutcomeRecorder,
+	sourceControl webui.SourceControlMaterializer,
+	stackBindings webui.SourceControlStackBindingResolver,
+	taskOutcomes webui.SourceControlTaskOutcomeRecorder,
 	config serveRuntimeConfig,
 ) (serveadapter.ExecutionRuntimePasses, error) {
 	if err := validateExecutionRuntimePassCapabilities(st, executionCapability, artifactsCapability); err != nil {
@@ -105,9 +104,9 @@ func newExecutionTaskWorker(
 	executor *driverexecutor.Executor,
 	artifactsCapability webui.ArtifactsCapability,
 	executionCapability webui.ExecutionCapability,
-	sourceControl sourcecontrol.Materializer,
-	stackBindings sourcecontrol.StackBindingResolver,
-	taskOutcomes sourcecontrol.TaskOutcomeRecorder,
+	sourceControl webui.SourceControlMaterializer,
+	stackBindings webui.SourceControlStackBindingResolver,
+	taskOutcomes webui.SourceControlTaskOutcomeRecorder,
 	config serveRuntimeConfig,
 	workDir string,
 	nodeCapacity int,

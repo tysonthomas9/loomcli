@@ -14,9 +14,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tysonthomas9/loomcli/internal/ops"
-	"github.com/tysonthomas9/loomcli/internal/webui/apperrors"
-	"github.com/tysonthomas9/loomcli/internal/webui/filecoord"
+	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
+	loomapi "github.com/tysonthomas9/loomcli/internal/platform/loomapi/gen"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
 
@@ -30,8 +29,8 @@ func wsRootFor(dir string) *mockFileOps {
 		resolveWsRootFunc: func() (string, error) {
 			return resolved, nil
 		},
-		resolveWsDataFunc: func() (*ops.WorkspaceData, error) {
-			return &ops.WorkspaceData{ID: "test-ws", Path: resolved}, nil
+		resolveWsDataFunc: func() (*sourcecontrol.WorkspaceTopology, error) {
+			return &sourcecontrol.WorkspaceTopology{ID: "test-ws", Path: resolved}, nil
 		},
 	}
 }
@@ -40,12 +39,16 @@ func wsRootFor(dir string) *mockFileOps {
 // workspace context the handler reads wsID from.
 func scopedReq(target string) *http.Request {
 	req := httptest.NewRequest(http.MethodGet, target, nil)
-	return req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
+	ctx := middleware.WithWorkspace(req.Context(), "test-ws")
+	ctx = middleware.WithFileAccessGrant(ctx, testFileGrantIssuer.ReadWrite(true))
+	return req.WithContext(ctx)
 }
 
 func scopedReqBody(method, target, body string) *http.Request {
 	req := httptest.NewRequest(method, target, strings.NewReader(body))
-	return req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
+	ctx := middleware.WithWorkspace(req.Context(), "test-ws")
+	ctx = middleware.WithFileAccessGrant(ctx, testFileGrantIssuer.ReadWrite(true))
+	return req.WithContext(ctx)
 }
 
 type handlerScopeCase struct {
@@ -58,16 +61,16 @@ type handlerScopeCase struct {
 type recordingNavigationFileService struct {
 	stubFileService
 	indexWS      string
-	indexScope   filecoord.FileScope
+	indexScope   sourcecontrol.FileScope
 	indexTarget  string
 	indexRepo    string
 	searchWS     string
-	searchScope  filecoord.FileScope
+	searchScope  sourcecontrol.FileScope
 	searchTarget string
 	searchRepo   string
-	searchReq    filecoord.FileSearchRequest
+	searchReq    sourcecontrol.FileSearchRequest
 	statusWS     string
-	statusScope  filecoord.FileScope
+	statusScope  sourcecontrol.FileScope
 	statusTarget string
 	statusRepo   string
 }
@@ -82,13 +85,13 @@ type failingRevisionFileService struct {
 	err error
 }
 
-func (s *failingRevisionFileService) ReadFileAtRevScoped(context.Context, string, filecoord.FileScope, string, string, string, string) (*filecoord.FileReadResult, error) {
+func (s *failingRevisionFileService) ReadFileAtRevision(context.Context, sourcecontrol.RevisionQuery) (*sourcecontrol.FileReadResult, error) {
 	return nil, s.err
 }
 
-func (s *recordingCheckoutsFileService) ListFileCheckouts(_ context.Context, wsID string) (*filecoord.FileCheckoutsResult, error) {
-	s.wsID = wsID
-	return &filecoord.FileCheckoutsResult{Checkouts: []filecoord.FileCheckout{{
+func (s *recordingCheckoutsFileService) ListCheckouts(_ context.Context, query sourcecontrol.WorkspaceQuery) (*sourcecontrol.FileCheckoutsResult, error) {
+	s.wsID = query.WorkspaceKey
+	return &sourcecontrol.FileCheckoutsResult{Checkouts: []sourcecontrol.FileCheckout{{
 		Kind:        "agent",
 		Agent:       "agent-a",
 		Repo:        "repo-a",
@@ -98,40 +101,40 @@ func (s *recordingCheckoutsFileService) ListFileCheckouts(_ context.Context, wsI
 	}}}, nil
 }
 
-func (s *recordingNavigationFileService) IndexFilesScoped(_ context.Context, wsID string, scope filecoord.FileScope, target, repo string) (*filecoord.FileIndexResult, error) {
-	s.indexWS = wsID
-	s.indexScope = scope
-	s.indexTarget = target
-	s.indexRepo = repo
-	return &filecoord.FileIndexResult{Paths: []string{"src/main.go"}, Truncated: true, PartialReasons: []filecoord.FilePartialReason{filecoord.FilePartialFileCount}}, nil
+func (s *recordingNavigationFileService) IndexFiles(_ context.Context, query sourcecontrol.LocationQuery) (*sourcecontrol.FileIndexResult, error) {
+	s.indexWS = query.Location.WorkspaceKey
+	s.indexScope = query.Location.Scope
+	s.indexTarget = query.Location.Target
+	s.indexRepo = query.Location.Repository
+	return &sourcecontrol.FileIndexResult{Paths: []string{"src/main.go"}, Truncated: true, PartialReasons: []sourcecontrol.FilePartialReason{sourcecontrol.FilePartialFileCount}}, nil
 }
 
-func (s *recordingNavigationFileService) SearchFilesScoped(_ context.Context, wsID string, scope filecoord.FileScope, target, repo string, req filecoord.FileSearchRequest) (*filecoord.FileSearchResult, error) {
-	s.searchWS = wsID
-	s.searchScope = scope
-	s.searchTarget = target
-	s.searchRepo = repo
-	s.searchReq = req
-	return &filecoord.FileSearchResult{
-		Results: []filecoord.FileSearchFileResult{{
+func (s *recordingNavigationFileService) SearchFiles(_ context.Context, query sourcecontrol.SearchQuery) (*sourcecontrol.FileSearchResult, error) {
+	s.searchWS = query.Location.WorkspaceKey
+	s.searchScope = query.Location.Scope
+	s.searchTarget = query.Location.Target
+	s.searchRepo = query.Location.Repository
+	s.searchReq = query.Search
+	return &sourcecontrol.FileSearchResult{
+		Results: []sourcecontrol.FileSearchFileResult{{
 			Path: "src/main.go",
-			Matches: []filecoord.FileSearchMatch{{
+			Matches: []sourcecontrol.FileSearchMatch{{
 				Line:    2,
 				Col:     4,
 				Preview: "const needle = true",
 			}},
 		}},
 		LimitHit:       true,
-		PartialReasons: []filecoord.FilePartialReason{filecoord.FilePartialResultCount},
+		PartialReasons: []sourcecontrol.FilePartialReason{sourcecontrol.FilePartialResultCount},
 	}, nil
 }
 
-func (s *recordingNavigationFileService) GitStatusScoped(_ context.Context, wsID string, scope filecoord.FileScope, target, repo string) (filecoord.FileGitStatusResult, error) {
-	s.statusWS = wsID
-	s.statusScope = scope
-	s.statusTarget = target
-	s.statusRepo = repo
-	return filecoord.FileGitStatusResult{Status: map[string]string{"src/main.go": " M"}, Errors: []filecoord.FileCheckoutError{}}, nil
+func (s *recordingNavigationFileService) Status(_ context.Context, query sourcecontrol.LocationQuery) (sourcecontrol.FileGitStatusResult, error) {
+	s.statusWS = query.Location.WorkspaceKey
+	s.statusScope = query.Location.Scope
+	s.statusTarget = query.Location.Target
+	s.statusRepo = query.Location.Repository
+	return sourcecontrol.FileGitStatusResult{Status: map[string]string{"src/main.go": " M"}, Errors: []sourcecontrol.FileCheckoutError{}}, nil
 }
 
 func scopedHandlersFixture(t *testing.T) (*mockFileOps, []handlerScopeCase) {
@@ -148,21 +151,21 @@ func scopedHandlersFixture(t *testing.T) (*mockFileOps, []handlerScopeCase) {
 		}
 	}
 	fileOps := &mockFileOps{
-		resolveFunc: func(name string) (*ops.AgentWorktree, error) {
+		resolveFunc: func(name string) (*sourcecontrol.Worktree, error) {
 			if name != "agent-a" {
 				return nil, errors.New("not found")
 			}
-			return &ops.AgentWorktree{Name: name, Path: agentRoot, RepoName: "repo-a"}, nil
+			return &sourcecontrol.Worktree{Name: name, Path: agentRoot, RepoName: "repo-a"}, nil
 		},
 		resolveWsRootFunc: func() (string, error) {
 			return wsRoot, nil
 		},
-		resolveWsDataFunc: func() (*ops.WorkspaceData, error) {
-			return &ops.WorkspaceData{
+		resolveWsDataFunc: func() (*sourcecontrol.WorkspaceTopology, error) {
+			return &sourcecontrol.WorkspaceTopology{
 				ID:     "test-ws",
 				Path:   wsRoot,
-				Repos:  []ops.WorkspaceRepo{{Name: "repo-a", Path: repoRoot}},
-				Agents: []ops.WorkspaceAgentInfo{{Name: "agent-a"}},
+				Repos:  []sourcecontrol.WorkspaceRepo{{Name: "repo-a", Path: repoRoot}},
+				Agents: []sourcecontrol.WorkspaceAgent{{Name: "agent-a"}},
 			}, nil
 		},
 	}
@@ -203,20 +206,20 @@ func TestHandleScopedFileIndex_UsesScopeTarget(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, body %s", rr.Code, rr.Body.String())
 	}
-	if svc.indexWS != "test-ws" || svc.indexScope != filecoord.ScopeRepo || svc.indexTarget != "repo-a" {
+	if svc.indexWS != "test-ws" || svc.indexScope != sourcecontrol.ScopeRepo || svc.indexTarget != "repo-a" {
 		t.Fatalf("recorded call = ws %q scope %q target %q", svc.indexWS, svc.indexScope, svc.indexTarget)
 	}
-	var body filecoord.FileIndexResult
+	var body loomapi.FileIndexResponse
 	if err := json.NewDecoder(rr.Body).Decode(&body); err != nil {
 		t.Fatalf("decode body: %v", err)
 	}
-	if !body.Truncated || len(body.Paths) != 1 || body.Paths[0] != "src/main.go" || !hasFilePartialReason(body.PartialReasons, filecoord.FilePartialFileCount) {
+	if !body.Truncated || len(body.Paths) != 1 || body.Paths[0] != "src/main.go" || !hasFilePartialReason(body.PartialReasons, loomapi.FilePartialReason(sourcecontrol.FilePartialFileCount)) {
 		t.Fatalf("body = %+v", body)
 	}
 }
 
 func TestHandleScopedFileRead_InspectionTimeoutIsGatewayTimeout(t *testing.T) {
-	h := HandleScopedFileRead(&failingRevisionFileService{err: apperrors.ErrTimeout("git show timed out")})
+	h := HandleScopedFileRead(&failingRevisionFileService{err: sourcecontrol.ErrTimeout})
 	rr := httptest.NewRecorder()
 	h.ServeHTTP(rr, scopedReq("/api/workspaces/test-ws/files?scope=workspace&path=file.txt&rev=HEAD"))
 	if rr.Code != http.StatusGatewayTimeout {
@@ -225,7 +228,7 @@ func TestHandleScopedFileRead_InspectionTimeoutIsGatewayTimeout(t *testing.T) {
 }
 
 func TestHandleScopedFileRead_InvalidRevisionIsBadRequest(t *testing.T) {
-	h := HandleScopedFileRead(&failingRevisionFileService{err: apperrors.ErrValidation("invalid git revision")})
+	h := HandleScopedFileRead(&failingRevisionFileService{err: sourcecontrol.ErrInvalid})
 	rr := httptest.NewRecorder()
 	h.ServeHTTP(rr, scopedReq("/api/workspaces/test-ws/files?scope=workspace&path=file.txt&rev=bad..range"))
 	if rr.Code != http.StatusBadRequest {
@@ -234,7 +237,7 @@ func TestHandleScopedFileRead_InvalidRevisionIsBadRequest(t *testing.T) {
 }
 
 func TestHandleScopedFileRead_MissingRevisionPathIsNotFound(t *testing.T) {
-	h := HandleScopedFileRead(&failingRevisionFileService{err: apperrors.ErrNotFound("file not found at revision")})
+	h := HandleScopedFileRead(&failingRevisionFileService{err: sourcecontrol.ErrNotFound})
 	rr := httptest.NewRecorder()
 	h.ServeHTTP(rr, scopedReq("/api/workspaces/test-ws/files?scope=workspace&path=untracked.txt&rev=HEAD"))
 	if rr.Code != http.StatusNotFound {
@@ -242,7 +245,7 @@ func TestHandleScopedFileRead_MissingRevisionPathIsNotFound(t *testing.T) {
 	}
 }
 
-func hasFilePartialReason(reasons []filecoord.FilePartialReason, want filecoord.FilePartialReason) bool {
+func hasFilePartialReason(reasons []loomapi.FilePartialReason, want loomapi.FilePartialReason) bool {
 	for _, reason := range reasons {
 		if reason == want {
 			return true
@@ -262,7 +265,7 @@ func TestHandleScopedFileIndex_UsesRepoQualifier(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, body %s", rr.Code, rr.Body.String())
 	}
-	if svc.indexWS != "test-ws" || svc.indexScope != filecoord.ScopeAgent || svc.indexTarget != "agent-a" || svc.indexRepo != "repo-b" {
+	if svc.indexWS != "test-ws" || svc.indexScope != sourcecontrol.ScopeAgent || svc.indexTarget != "agent-a" || svc.indexRepo != "repo-b" {
 		t.Fatalf("recorded call = ws %q scope %q target %q repo %q", svc.indexWS, svc.indexScope, svc.indexTarget, svc.indexRepo)
 	}
 }
@@ -278,10 +281,10 @@ func TestHandleScopedGitStatus_UsesScopeTarget(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, body %s", rr.Code, rr.Body.String())
 	}
-	if svc.statusWS != "test-ws" || svc.statusScope != filecoord.ScopeRepo || svc.statusTarget != "repo-a" {
+	if svc.statusWS != "test-ws" || svc.statusScope != sourcecontrol.ScopeRepo || svc.statusTarget != "repo-a" {
 		t.Fatalf("recorded call = ws %q scope %q target %q", svc.statusWS, svc.statusScope, svc.statusTarget)
 	}
-	var body filecoord.FileGitStatusResult
+	var body loomapi.FileGitStatusResponse
 	if err := json.NewDecoder(rr.Body).Decode(&body); err != nil {
 		t.Fatalf("decode body: %v", err)
 	}
@@ -301,7 +304,7 @@ func TestHandleScopedGitStatus_UsesRepoQualifier(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, body %s", rr.Code, rr.Body.String())
 	}
-	if svc.statusWS != "test-ws" || svc.statusScope != filecoord.ScopeAgent || svc.statusTarget != "agent-a" || svc.statusRepo != "repo-b" {
+	if svc.statusWS != "test-ws" || svc.statusScope != sourcecontrol.ScopeAgent || svc.statusTarget != "agent-a" || svc.statusRepo != "repo-b" {
 		t.Fatalf("recorded call = ws %q scope %q target %q repo %q", svc.statusWS, svc.statusScope, svc.statusTarget, svc.statusRepo)
 	}
 }
@@ -321,7 +324,7 @@ func TestHandleScopedFileSearch_DecodesRequest(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, body %s", rr.Code, rr.Body.String())
 	}
-	if svc.searchWS != "test-ws" || svc.searchScope != filecoord.ScopeAgent || svc.searchTarget != "agent-a" || svc.searchRepo != "repo-b" {
+	if svc.searchWS != "test-ws" || svc.searchScope != sourcecontrol.ScopeAgent || svc.searchTarget != "agent-a" || svc.searchRepo != "repo-b" {
 		t.Fatalf("recorded call = ws %q scope %q target %q repo %q", svc.searchWS, svc.searchScope, svc.searchTarget, svc.searchRepo)
 	}
 	if svc.searchReq.Query != "needle" || !svc.searchReq.Regex || !svc.searchReq.CaseSensitive {
@@ -333,11 +336,11 @@ func TestHandleScopedFileSearch_DecodesRequest(t *testing.T) {
 	if svc.searchReq.Exclude == nil || strings.Join(*svc.searchReq.Exclude, ",") != "vendor/*" {
 		t.Fatalf("exclude = %+v", svc.searchReq.Exclude)
 	}
-	var body filecoord.FileSearchResult
+	var body loomapi.FileSearchResponse
 	if err := json.NewDecoder(rr.Body).Decode(&body); err != nil {
 		t.Fatalf("decode body: %v", err)
 	}
-	if !body.LimitHit || len(body.Results) != 1 || body.Results[0].Matches[0].Line != 2 || !hasFilePartialReason(body.PartialReasons, filecoord.FilePartialResultCount) {
+	if !body.LimitHit || len(body.Results) != 1 || body.Results[0].Matches[0].Line != 2 || !hasFilePartialReason(body.PartialReasons, loomapi.FilePartialReason(sourcecontrol.FilePartialResultCount)) {
 		t.Fatalf("body = %+v", body)
 	}
 }
@@ -356,11 +359,11 @@ func TestHandleFileCheckouts(t *testing.T) {
 	if svc.wsID != "test-ws" {
 		t.Fatalf("wsID = %q", svc.wsID)
 	}
-	var body filecoord.FileCheckoutsResult
+	var body loomapi.FileCheckoutsResponse
 	if err := json.NewDecoder(rr.Body).Decode(&body); err != nil {
 		t.Fatalf("decode body: %v", err)
 	}
-	if len(body.Checkouts) != 1 || body.Checkouts[0].Kind != "agent" || body.Checkouts[0].Repo != "repo-a" || body.Checkouts[0].ChangeCount != 2 {
+	if len(body.Checkouts) != 1 || body.Checkouts[0].Kind != loomapi.FileCheckoutKindAgent || body.Checkouts[0].Repo != "repo-a" || body.Checkouts[0].ChangeCount != 2 {
 		t.Fatalf("body = %+v", body)
 	}
 }
@@ -427,8 +430,8 @@ func TestHandleScopedFileRead_WorkspaceRootReadsFile(t *testing.T) {
 	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if resp.Content != "Hello, world!\n" {
-		t.Errorf("content = %q, want %q", resp.Content, "Hello, world!\n")
+	if resp.Content == nil || *resp.Content != "Hello, world!\n" {
+		t.Errorf("content = %v, want %q", resp.Content, "Hello, world!\n")
 	}
 }
 
@@ -437,6 +440,7 @@ func TestHandleScopedFileCRUD_AllScopes(t *testing.T) {
 	svc := NewFileService(fileOps)
 	writeHandler := HandleScopedFileWrite(svc)
 	readHandler := HandleScopedFileRead(svc)
+	statHandler := HandleScopedFileStat(svc)
 	treeHandler := HandleScopedFileTree(svc)
 	deleteHandler := HandleScopedFileDelete(svc)
 	mkdirHandler := HandleScopedFileMkdir(svc)
@@ -459,7 +463,7 @@ func TestHandleScopedFileCRUD_AllScopes(t *testing.T) {
 			if err := json.NewDecoder(w.Body).Decode(&readResp); err != nil {
 				t.Fatalf("decode read: %v", err)
 			}
-			if readResp.Content != "A=1" || readResp.Truncated {
+			if readResp.Content == nil || *readResp.Content != "A=1" || readResp.Truncated {
 				t.Fatalf("read .env = %+v, want content A=1 and truncated=false", readResp)
 			}
 
@@ -499,13 +503,26 @@ func TestHandleScopedFileCRUD_AllScopes(t *testing.T) {
 			if err := os.WriteFile(filepath.Join(sc.root, "dir", "sub", "file.txt"), []byte("x"), 0644); err != nil {
 				t.Fatal(err)
 			}
+			stat := httptest.NewRecorder()
+			statHandler.ServeHTTP(stat, scopedReq(scopedPathURL("/api/workspaces/test-ws/files/stat", sc, "dir")))
+			if stat.Code != http.StatusOK {
+				t.Fatalf("stat directory status = %d, want 200; body: %s", stat.Code, stat.Body.String())
+			}
+			dirVersion := stat.Header().Get("ETag")
+			if dirVersion == "" {
+				t.Fatal("stat directory did not return an ETag")
+			}
 			w = httptest.NewRecorder()
-			deleteHandler.ServeHTTP(w, scopedReqBody(http.MethodDelete, scopedPathURL("/api/workspaces/test-ws/files", sc, "dir"), ""))
+			deleteReq := scopedReqBody(http.MethodDelete, scopedPathURL("/api/workspaces/test-ws/files", sc, "dir"), "")
+			deleteReq.Header.Set("If-Match", dirVersion)
+			deleteHandler.ServeHTTP(w, deleteReq)
 			if w.Code != http.StatusConflict {
 				t.Fatalf("delete nonempty status = %d, want 409; body: %s", w.Code, w.Body.String())
 			}
 			w = httptest.NewRecorder()
-			deleteHandler.ServeHTTP(w, scopedReqBody(http.MethodDelete, scopedPathURL("/api/workspaces/test-ws/files", sc, "dir")+"&recursive=1", ""))
+			deleteReq = scopedReqBody(http.MethodDelete, scopedPathURL("/api/workspaces/test-ws/files", sc, "dir")+"&recursive=1", "")
+			deleteReq.Header.Set("If-Match", dirVersion)
+			deleteHandler.ServeHTTP(w, deleteReq)
 			if w.Code != http.StatusOK {
 				t.Fatalf("recursive delete status = %d, want 200; body: %s", w.Code, w.Body.String())
 			}
@@ -525,13 +542,23 @@ func TestHandleScopedFileCRUD_AllScopes(t *testing.T) {
 			if err := os.WriteFile(filepath.Join(sc.root, "move-dst"), []byte("dst"), 0644); err != nil {
 				t.Fatal(err)
 			}
+			grant := testFileGrantIssuer.ReadWrite(true)
+			location := sourcecontrol.FileLocation{WorkspaceKey: "test-ws", Scope: sourcecontrol.FileScope(sc.scope), Target: sc.target}
+			sourceStat, err := svc.StatPath(context.Background(), sourcecontrol.PathQuery{Grant: grant, Location: location, Path: "move-src"})
+			if err != nil {
+				t.Fatalf("stat move source: %v", err)
+			}
+			destinationStat, err := svc.StatPath(context.Background(), sourcecontrol.PathQuery{Grant: grant, Location: location, Path: "move-dst"})
+			if err != nil {
+				t.Fatalf("stat move destination: %v", err)
+			}
 			w = httptest.NewRecorder()
-			moveHandler.ServeHTTP(w, scopedReqBody(http.MethodPatch, scopedMoveURL(sc), `{"from":"move-src","to":"move-dst"}`))
+			moveHandler.ServeHTTP(w, scopedReqBody(http.MethodPatch, scopedMoveURL(sc), `{"from":"move-src","to":"move-dst","source_version":"`+sourceStat.Version+`"}`))
 			if w.Code != http.StatusConflict {
 				t.Fatalf("move conflict status = %d, want 409; body: %s", w.Code, w.Body.String())
 			}
 			w = httptest.NewRecorder()
-			moveHandler.ServeHTTP(w, scopedReqBody(http.MethodPatch, scopedMoveURL(sc), `{"from":"move-src","to":"move-dst","overwrite":true}`))
+			moveHandler.ServeHTTP(w, scopedReqBody(http.MethodPatch, scopedMoveURL(sc), `{"from":"move-src","to":"move-dst","overwrite":true,"source_version":"`+sourceStat.Version+`","destination_version":"`+destinationStat.Version+`"}`))
 			if w.Code != http.StatusOK {
 				t.Fatalf("move overwrite status = %d, want 200; body: %s", w.Code, w.Body.String())
 			}

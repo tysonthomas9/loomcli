@@ -1055,7 +1055,23 @@ function_surfaces:
     access: read-only
     capability_owner: sourcecontrol
   - package: github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol
+    function: GitWorktreeIdentityFromContext
+    access: read-only
+    capability_owner: sourcecontrol
+  - package: github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol
+    function: IsBinaryContent
+    access: read-only
+    capability_owner: sourcecontrol
+  - package: github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol
+    function: IsSensitiveFilePath
+    access: read-only
+    capability_owner: sourcecontrol
+  - package: github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol
     function: New
+    access: read-only
+    capability_owner: sourcecontrol
+  - package: github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol
+    function: NewAccessGrantIssuer
     access: read-only
     capability_owner: sourcecontrol
   - package: github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol
@@ -1068,6 +1084,10 @@ function_surfaces:
     capability_owner: sourcecontrol
   - package: github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol
     function: NewTaskOutcomes
+    access: read-only
+    capability_owner: sourcecontrol
+  - package: github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol
+    function: NewWorkspacePorts
     access: read-only
     capability_owner: sourcecontrol
   - package: github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol
@@ -1100,6 +1120,10 @@ function_surfaces:
     capability_owner: sourcecontrol
   - package: github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol
     function: ValidateTokenFreeRemote
+    access: read-only
+    capability_owner: sourcecontrol
+  - package: github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol
+    function: WithGitWorktreeIdentity
     access: read-only
     capability_owner: sourcecontrol
   - package: github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog

@@ -50,6 +50,110 @@ type storedStack struct {
 	Nodes map[string]*sl.StackNode `json:"nodes,omitempty"` // key = TaskID
 }
 
+// stackRecord and stackNodeRecord are the stable version-1 persistence
+// contract. Source Control owner models intentionally carry no JSON metadata.
+type stackRecord struct {
+	ID                sl.StackID    `json:"id"`
+	WorkspaceKey      string        `json:"workspaceKey"`
+	Repository        string        `json:"repoName"`
+	RootBase          string        `json:"rootBase"`
+	DefaultCommitMode sl.CommitMode `json:"defaultCommitMode,omitempty"`
+	CreatedAt         time.Time     `json:"createdAt"`
+	UpdatedAt         time.Time     `json:"updatedAt"`
+}
+
+type stackNodeRecord struct {
+	StackID         sl.StackID    `json:"stackId"`
+	TaskID          string        `json:"taskId"`
+	BaseTaskID      string        `json:"baseTaskId,omitempty"`
+	OutputBranch    string        `json:"outputBranch"`
+	CommitMode      sl.CommitMode `json:"commitMode,omitempty"`
+	State           sl.NodeState  `json:"state"`
+	PRNumber        int           `json:"prNumber,omitempty"`
+	PRURL           string        `json:"prUrl,omitempty"`
+	OutputSHA       string        `json:"outputSha,omitempty"`
+	LastPublishedAt *time.Time    `json:"lastPublishedAt,omitempty"`
+	CreatedAt       time.Time     `json:"createdAt"`
+	UpdatedAt       time.Time     `json:"updatedAt"`
+}
+
+type storedStackRecord struct {
+	Stack stackRecord                 `json:"stack"`
+	Nodes map[string]*stackNodeRecord `json:"nodes,omitempty"`
+}
+
+func (stored storedStack) MarshalJSON() ([]byte, error) {
+	record := storedStackRecord{Stack: stackToRecord(stored.Stack)}
+	if stored.Nodes != nil {
+		record.Nodes = make(map[string]*stackNodeRecord, len(stored.Nodes))
+		for taskID, node := range stored.Nodes {
+			if node == nil {
+				record.Nodes[taskID] = nil
+				continue
+			}
+			mapped := stackNodeToRecord(*node)
+			record.Nodes[taskID] = &mapped
+		}
+	}
+	return json.Marshal(record)
+}
+
+func (stored *storedStack) UnmarshalJSON(data []byte) error {
+	var record storedStackRecord
+	if err := json.Unmarshal(data, &record); err != nil {
+		return err
+	}
+	stored.Stack = stackFromRecord(record.Stack)
+	if record.Nodes == nil {
+		stored.Nodes = nil
+		return nil
+	}
+	stored.Nodes = make(map[string]*sl.StackNode, len(record.Nodes))
+	for taskID, node := range record.Nodes {
+		if node == nil {
+			stored.Nodes[taskID] = nil
+			continue
+		}
+		mapped := stackNodeFromRecord(*node)
+		stored.Nodes[taskID] = &mapped
+	}
+	return nil
+}
+
+func stackToRecord(value sl.Stack) stackRecord {
+	return stackRecord{
+		ID: value.ID, WorkspaceKey: value.WorkspaceKey, Repository: value.Repository,
+		RootBase: value.RootBase, DefaultCommitMode: value.DefaultCommitMode,
+		CreatedAt: value.CreatedAt, UpdatedAt: value.UpdatedAt,
+	}
+}
+
+func stackFromRecord(value stackRecord) sl.Stack {
+	return sl.Stack{
+		ID: value.ID, WorkspaceKey: value.WorkspaceKey, Repository: value.Repository,
+		RootBase: value.RootBase, DefaultCommitMode: value.DefaultCommitMode,
+		CreatedAt: value.CreatedAt, UpdatedAt: value.UpdatedAt,
+	}
+}
+
+func stackNodeToRecord(value sl.StackNode) stackNodeRecord {
+	return stackNodeRecord{
+		StackID: value.StackID, TaskID: value.TaskID, BaseTaskID: value.BaseTaskID,
+		OutputBranch: value.OutputBranch, CommitMode: value.CommitMode, State: value.State,
+		PRNumber: value.PRNumber, PRURL: value.PRURL, OutputSHA: value.OutputSHA,
+		LastPublishedAt: value.LastPublishedAt, CreatedAt: value.CreatedAt, UpdatedAt: value.UpdatedAt,
+	}
+}
+
+func stackNodeFromRecord(value stackNodeRecord) sl.StackNode {
+	return sl.StackNode{
+		StackID: value.StackID, TaskID: value.TaskID, BaseTaskID: value.BaseTaskID,
+		OutputBranch: value.OutputBranch, CommitMode: value.CommitMode, State: value.State,
+		PRNumber: value.PRNumber, PRURL: value.PRURL, OutputSHA: value.OutputSHA,
+		LastPublishedAt: value.LastPublishedAt, CreatedAt: value.CreatedAt, UpdatedAt: value.UpdatedAt,
+	}
+}
+
 // LocalStore -----------------------------------------------------------------
 
 // LocalStore implements Source Control's persistence ports against a single

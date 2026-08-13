@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
 	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/store"
@@ -80,14 +81,16 @@ type ServerConfig struct {
 	AgentsCapability          AgentsCapability
 	AgentProvisioning         AgentProvisioningCapability
 	SourceControl             SourceControlMaterializer
+	SourceControlBrowse       sourcecontrol.Browse
+	SourceControlMutate       sourcecontrol.Mutate
+	SourceControlCheckout     sourcecontrol.Checkout
+	SourceControlAccessGrants sourcecontrol.AccessGrantIssuer
 	TaskStackBindings         SourceControlStackBindingResolver
 	TaskOutcomes              SourceControlTaskOutcomeRecorder
 	WorkspaceSourceControl    RepositoryAdmissionMaterializer
 	WorkspaceCatalog          WorkspaceAPI
 	InteractionCapability     InteractionCapability
 	MonitorHandlers           MonitorHandlers                    // Pre-built handlers for monitor/metrics endpoints (injected by cli)
-	GitOps                    ops.GitOps                         // Git operations interface (optional; nil disables git endpoints)
-	FileOps                   ops.FileOps                        // File operations interface (optional; nil disables file endpoints)
 	WorkspaceDeleteCleanupFn  func(key string) error             // Machine-local cleanup after an owner-command deletion.
 	WorkspaceCreateFn         workspacecoord.WorkspaceCreateFn   // Workspace creation function; nil = creation unavailable
 	WorkspaceAddReposFn       workspacecoord.WorkspaceAddReposFn // Attach local repos to an existing workspace; nil = unavailable

@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/ops"
+	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
 )
 
 const (
@@ -286,7 +286,7 @@ func validateInspectorCheckoutDir(ctx context.Context, operation, dir string) (s
 	if !info.IsDir() {
 		return "", validationInspectorError(operation, errors.New("checkout dir is not a directory"))
 	}
-	if expected, ok := ops.GitWorktreeIdentityFromContext(ctx); ok && !os.SameFile(expected.Info, info) {
+	if expected, ok := sourcecontrol.GitWorktreeIdentityFromContext(ctx); ok && !os.SameFile(expected.Info, info) {
 		return "", validationInspectorError(operation, errors.New("checkout dir identity changed before git inspection"))
 	}
 	return absDir, nil

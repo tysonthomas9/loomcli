@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
 	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 	"github.com/tysonthomas9/loomcli/internal/modules/workspace"
 	"github.com/tysonthomas9/loomcli/internal/webui/apperrors"
@@ -114,6 +115,39 @@ func HandleWorkspaceError(w http.ResponseWriter, err error) {
 	}
 	slog.Error("workspace error", "status", status, "err", err)
 	WriteJSON(w, status, map[string]string{"error": message})
+}
+
+// HandleSourceControlError maps Source Control's transport-neutral failure
+// vocabulary at the HTTP delivery seam.
+func HandleSourceControlError(w http.ResponseWriter, err error) {
+	status := http.StatusInternalServerError
+	switch {
+	case errors.Is(err, sourcecontrol.ErrInvalid):
+		status = http.StatusBadRequest
+	case errors.Is(err, sourcecontrol.ErrNotFound):
+		status = http.StatusNotFound
+	case errors.Is(err, sourcecontrol.ErrForbidden):
+		status = http.StatusForbidden
+	case errors.Is(err, sourcecontrol.ErrPayloadTooLarge):
+		status = http.StatusRequestEntityTooLarge
+	case errors.Is(err, sourcecontrol.ErrPreconditionFailed):
+		status = http.StatusPreconditionFailed
+	case errors.Is(err, sourcecontrol.ErrPreconditionRequired):
+		status = http.StatusPreconditionRequired
+	case errors.Is(err, sourcecontrol.ErrTimeout):
+		status = http.StatusGatewayTimeout
+	case errors.Is(err, sourcecontrol.ErrCheckoutConflict),
+		errors.Is(err, sourcecontrol.ErrIdempotencyConflict):
+		status = http.StatusConflict
+	case errors.Is(err, sourcecontrol.ErrUnavailable):
+		status = http.StatusServiceUnavailable
+	case errors.Is(err, sourcecontrol.ErrRemote):
+		status = http.StatusBadGateway
+	}
+	slog.Error("source control error", "status", status, "err", err)
+	WriteJSON(w, status, map[string]string{
+		"error": sourcecontrol.PublicErrorMessage(err),
+	})
 }
 
 // IsControlPlaneRateLimited reports whether a compatibility dependency

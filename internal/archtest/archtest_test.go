@@ -1958,8 +1958,12 @@ func validGraph() CapabilityGraph {
 			ModulesRejectLegacyTypes: true,
 		},
 		ExternalImports: ExternalImportPolicy{
-			CoreAllowedPrefixes:        []string{},
-			AdapterAllowedPrefixes:     []string{},
+			CoreAllowedPrefixes: []string{},
+			AdapterAllowedPrefixes: []string{
+				"github.com/bmatcuk/doublestar/v4",
+				"golang.org/x/sync",
+				"golang.org/x/sys",
+			},
 			PlatformAllowedPrefixes:    []string{},
 			CoreDeniedStandardPrefixes: []string{"database/sql", "net/http", "net/rpc", "os", "plugin", "syscall"},
 		},

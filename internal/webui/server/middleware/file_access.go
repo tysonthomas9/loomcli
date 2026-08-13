@@ -8,7 +8,7 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/tysonthomas9/loomcli/internal/webui/filecoord"
+	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
 )
 
 // WorkspaceRoleResolver authorizes a user for one canonical workspace.
@@ -20,6 +20,7 @@ type FileAccessConfig struct {
 	ResolveRole     WorkspaceRoleResolver
 	FrontendOrigins []string
 	Logger          *slog.Logger
+	GrantIssuer     sourcecontrol.AccessGrantIssuer
 }
 
 // FileAccess authorizes file-browser requests and installs effective capabilities.
@@ -38,67 +39,86 @@ func FileAccess(cfg FileAccessConfig) Middleware {
 				next.ServeHTTP(w, r)
 				return
 			}
-
-			capabilities, ok := remoteFileCapabilities(r, cfg, logger)
-			if !cfg.RemoteAuth {
-				capabilities, ok = localFileCapabilities(r, localOrigins)
-			}
+			grant, status, message, ok := authorizeFileRequest(r, cfg, logger, localOrigins)
 			if !ok {
-				if cfg.RemoteAuth {
-					if identity, present := UserIdentityFromContext(r.Context()); !present || strings.TrimSpace(identity.UserID) == "" {
-						writeJSONError(w, http.StatusUnauthorized, "authentication required")
-						return
-					}
-					if cfg.ResolveRole == nil {
-						writeJSONError(w, http.StatusForbidden, "file browser RBAC not configured")
-						return
-					}
-				}
-				writeJSONError(w, http.StatusForbidden, "forbidden")
-				return
-			}
-			if fileRequestRequiresWrite(r.Method, r.URL.Path) && !capabilities.Write {
-				writeJSONError(w, http.StatusForbidden, "forbidden")
+				writeJSONError(w, status, message)
 				return
 			}
 
-			ctx := filecoord.WithFileCapabilities(r.Context(), capabilities)
+			ctx := WithFileAccessGrant(r.Context(), grant)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
 }
 
-func remoteFileCapabilities(r *http.Request, cfg FileAccessConfig, logger *slog.Logger) (filecoord.FileCapabilities, bool) {
+func authorizeFileRequest(
+	r *http.Request,
+	cfg FileAccessConfig,
+	logger *slog.Logger,
+	localOrigins []localFrontendOrigin,
+) (sourcecontrol.AccessGrant, int, string, bool) {
+	if !cfg.GrantIssuer.Available() {
+		return sourcecontrol.AccessGrant{}, http.StatusForbidden, "file browser grant issuer unavailable", false
+	}
+	grant, ok := remoteFileAccessGrant(r, cfg, logger)
 	if !cfg.RemoteAuth {
-		return filecoord.FileCapabilities{}, false
+		grant, ok = localFileAccessGrant(r, localOrigins, cfg.GrantIssuer)
+	}
+	if !ok {
+		status, message := fileAccessDenial(r, cfg)
+		return sourcecontrol.AccessGrant{}, status, message, false
+	}
+	if fileRequestRequiresWrite(r.Method, r.URL.Path) && !grant.Capabilities().Write {
+		return sourcecontrol.AccessGrant{}, http.StatusForbidden, "forbidden", false
+	}
+	return grant, 0, "", true
+}
+
+func fileAccessDenial(r *http.Request, cfg FileAccessConfig) (int, string) {
+	if !cfg.RemoteAuth {
+		return http.StatusForbidden, "forbidden"
+	}
+	identity, present := UserIdentityFromContext(r.Context())
+	if !present || strings.TrimSpace(identity.UserID) == "" {
+		return http.StatusUnauthorized, "authentication required"
+	}
+	if cfg.ResolveRole == nil {
+		return http.StatusForbidden, "file browser RBAC not configured"
+	}
+	return http.StatusForbidden, "forbidden"
+}
+
+func remoteFileAccessGrant(r *http.Request, cfg FileAccessConfig, logger *slog.Logger) (sourcecontrol.AccessGrant, bool) {
+	if !cfg.RemoteAuth {
+		return sourcecontrol.AccessGrant{}, false
 	}
 	identity, ok := UserIdentityFromContext(r.Context())
 	if !ok || strings.TrimSpace(identity.UserID) == "" || cfg.ResolveRole == nil {
-		return filecoord.FileCapabilities{}, false
+		return sourcecontrol.AccessGrant{}, false
 	}
 	workspaceID := WorkspaceFromContext(r.Context())
 	if strings.TrimSpace(workspaceID) == "" {
-		return filecoord.FileCapabilities{}, false
+		return sourcecontrol.AccessGrant{}, false
 	}
 	role, err := cfg.ResolveRole(r.Context(), workspaceID, identity)
 	if err != nil {
 		logger.WarnContext(r.Context(), "workspace file role resolution failed",
 			"workspace", workspaceID, "user_id", identity.UserID, "err", err)
-		return filecoord.FileCapabilities{}, false
+		return sourcecontrol.AccessGrant{}, false
 	}
-	return fileCapabilitiesForRole(role)
+	return fileCapabilitiesForRole(cfg.GrantIssuer, role)
 }
 
-func fileCapabilitiesForRole(role string) (filecoord.FileCapabilities, bool) {
+func fileCapabilitiesForRole(issuer sourcecontrol.AccessGrantIssuer, role string) (sourcecontrol.AccessGrant, bool) {
 	switch normalizeFileRole(role) {
 	case "admin", "owner", "maintainer":
-		return filecoord.FileCapabilities{Read: true, Write: true, Sensitive: true}, true
+		return issuer.ReadWrite(true), true
 	case "editor", "developer", "dev":
-		return filecoord.FileCapabilities{Read: true, Write: true, Sensitive: true}, true
+		return issuer.ReadWrite(true), true
 	case "viewer", "read_only", "readonly", "read-only":
-		return filecoord.FileCapabilities{Read: true}, true
+		return issuer.Read(false), true
 	default:
-		return filecoord.FileCapabilities{}, false
+		return sourcecontrol.AccessGrant{}, false
 	}
 }
 
@@ -142,10 +162,10 @@ func parseLoopbackOrigins(rawOrigins []string) []localFrontendOrigin {
 	return origins
 }
 
-func localFileCapabilities(r *http.Request, origins []localFrontendOrigin) (filecoord.FileCapabilities, bool) {
+func localFileAccessGrant(r *http.Request, origins []localFrontendOrigin, issuer sourcecontrol.AccessGrantIssuer) (sourcecontrol.AccessGrant, bool) {
 	requestHost := strings.ToLower(requestHostname(r.Host))
 	if !isLoopbackHostname(requestHost) {
-		return filecoord.FileCapabilities{}, false
+		return sourcecontrol.AccessGrant{}, false
 	}
 	rawOrigin := strings.TrimSuffix(strings.TrimSpace(r.Header.Get("Origin")), "/")
 	for _, allowed := range origins {
@@ -154,15 +174,28 @@ func localFileCapabilities(r *http.Request, origins []localFrontendOrigin) (file
 		}
 		if rawOrigin == "" {
 			if strings.EqualFold(r.Host, allowed.authority) {
-				return filecoord.FileCapabilities{Read: true, Write: true, Sensitive: true}, true
+				return issuer.ReadWrite(true), true
 			}
 			continue
 		}
 		if strings.EqualFold(rawOrigin, allowed.origin) {
-			return filecoord.FileCapabilities{Read: true, Write: true, Sensitive: true}, true
+			return issuer.ReadWrite(true), true
 		}
 	}
-	return filecoord.FileCapabilities{}, false
+	return sourcecontrol.AccessGrant{}, false
+}
+
+type fileAccessGrantContextKey struct{}
+
+// WithFileAccessGrant carries the delivery boundary's authenticated grant to
+// the HTTP handler, which passes it explicitly into Source Control commands.
+func WithFileAccessGrant(ctx context.Context, grant sourcecontrol.AccessGrant) context.Context {
+	return context.WithValue(ctx, fileAccessGrantContextKey{}, grant)
+}
+
+func FileAccessGrantFromContext(ctx context.Context) (sourcecontrol.AccessGrant, bool) {
+	grant, ok := ctx.Value(fileAccessGrantContextKey{}).(sourcecontrol.AccessGrant)
+	return grant, ok && grant.Capabilities().Read
 }
 
 func requestHostname(authority string) string {

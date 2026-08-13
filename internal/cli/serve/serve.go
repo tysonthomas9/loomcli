@@ -29,6 +29,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui"
 	webuiapp "github.com/tysonthomas9/loomcli/internal/webui/app"
+	"github.com/tysonthomas9/loomcli/internal/webui/storeadapter"
 )
 
 // envLoomFleetMode is the env var that toggles --fleet-mode when no flag is
@@ -624,10 +625,12 @@ func applyStoreHandleServerConfig(
 	cfg *webui.ServerConfig,
 	fs fleetState,
 	storeHandle *bootstrap.StoreHandle,
-	gitOps *opsimpl.GitOpsImpl,
+	sourceControlRuntime *opsimpl.SourceControlRuntime,
 ) (fleetState, error) {
 	cfg.Store = storeHandle.Store
-	gitOps.WithStore(storeHandle.Store)
+	sourceControlRuntime.WithWorkspaceProjection(
+		storeadapter.NewSourceControlWorkspaceProjection(storeHandle.Store),
+	)
 	if url := storeHandle.URL(); url != "" {
 		fleetAPIKey := storeHandle.FleetDBClientAPIKey()
 		cfg.WorkItemsFn = cli.WorkspaceAwareWorkItemsForConfig(
@@ -662,15 +665,22 @@ func buildServerConfig(
 	fs fleetState,
 	storeHandle *bootstrap.StoreHandle,
 ) (webui.ServerConfig, serveCapabilitySet, error) {
-	gitOps := opsimpl.NewGitOps()
+	sourceControlRuntime, err := opsimpl.NewSourceControlRuntime()
+	if err != nil {
+		return webui.ServerConfig{}, serveCapabilitySet{}, err
+	}
 	resolvedBackend := cli.ResolveBackendName()
 	log.Printf("Terminal backend: %s", resolvedBackend)
 
-	cfg := buildCoreServerConfig(monitorHandlers, gitOps, resolvedBackend)
+	cfg := buildCoreServerConfig(monitorHandlers, resolvedBackend)
+	cfg.SourceControlBrowse = sourceControlRuntime.Browse()
+	cfg.SourceControlMutate = sourceControlRuntime.Mutate()
+	cfg.SourceControlCheckout = sourceControlRuntime.Checkout()
+	cfg.SourceControlAccessGrants = sourceControlRuntime.AccessGrants()
 	cfg.DaytonaProvider = serveadapter.NewDaytonaProviderBroker(cfg.LocalSettingsDir)
 	if storeHandle != nil {
 		var err error
-		fs, err = applyStoreHandleServerConfig(&cfg, fs, storeHandle, gitOps)
+		fs, err = applyStoreHandleServerConfig(&cfg, fs, storeHandle, sourceControlRuntime)
 		if err != nil {
 			return webui.ServerConfig{}, serveCapabilitySet{}, err
 		}
@@ -725,7 +735,7 @@ func buildServerConfig(
 		}
 		cfg.AgentsCapability = agentsCapability
 		capabilities.agents = agentsCapability
-		gitOps.WithAgentQueries(agentsCapability.AgentsAPI())
+		sourceControlRuntime.WithAgentQueries(agentsCapability.AgentsAPI())
 		cfg.SourceControl = agentsCapability.SourceControlMaterializer()
 		cfg.TaskStackBindings = agentsCapability.TaskStackBindings()
 		cfg.TaskOutcomes = agentsCapability.TaskOutcomes()
@@ -811,7 +821,7 @@ func buildServeWorkflowCatalogModule(
 	})
 }
 
-func buildCoreServerConfig(monitorHandlers webui.MonitorHandlers, gitOps *opsimpl.GitOpsImpl, backend string) webui.ServerConfig {
+func buildCoreServerConfig(monitorHandlers webui.MonitorHandlers, backend string) webui.ServerConfig {
 	return webui.ServerConfig{
 		Port:                 servePort,
 		BindAddress:          serveBindAddr,
@@ -823,8 +833,6 @@ func buildCoreServerConfig(monitorHandlers webui.MonitorHandlers, gitOps *opsimp
 		ExtAuthIssuer:        serveAuthIssuer,
 		ExtAuthAudience:      serveAuthAudience,
 		ExtAuthAllowInsecure: serveAuthAllowInsecure,
-		GitOps:               gitOps,
-		FileOps:              gitOps,
 		BackendOps:           opsimpl.NewBackendOps(),
 		LocalSettingsDir:     bootstrap.LoomDir(),
 		Logger:               slog.Default(),

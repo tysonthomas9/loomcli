@@ -1,71 +1,23 @@
 /**
  * API functions for git endpoints.
- * Uses raw fetch because most spec responses are untyped Record<string, never>.
+ * Uses the canonical OpenAPI-generated Source Control contracts.
  */
 
 import { get, post, patch, wsUrl } from "@/api/common";
+import type { components } from "@/types/generated/openapi";
 
 // ============= Types =============
 
-export interface GitStatus {
-  branch: string;
-  target_branch: string;
-  is_clean: boolean;
-  ahead: number;
-  behind: number;
-  changed_files: string[];
-  conflicted_files: string[];
-  has_conflicts: boolean;
-  stash_count: number;
-}
-
-export interface GitPushResult {
-  success: boolean;
-  message: string;
-  already_up_to_date: boolean;
-  conflicted_files?: string[];
-}
-
-export interface GitPullResult {
-  success: boolean;
-  message: string;
-  already_up_to_date: boolean;
-  conflicted_files?: string[];
-}
-
-export interface GitSyncResult {
-  push_result: GitPushResult;
-  pull_result: GitPullResult;
-}
-
-export interface GitPRResult {
-  url?: string;
-  created: boolean;
-  already_exists: boolean;
-  no_commits: boolean;
-}
-
-export interface GitResetResult {
-  success: boolean;
-  message: string;
-  previous_branch?: string;
-  pushed: boolean;
-}
-
-export interface GitResetLockedResponse {
-  error: string;
-  lock_info: {
-    agent: string;
-    pid: number;
-    duration: string;
-    task_id?: string;
-  };
-}
-
-export interface GitTargetResult {
-  success: boolean;
-  branch: string;
-}
+export type GitStatus = components["schemas"]["GitStatusResponse"];
+export type GitPushResult = components["schemas"]["GitMergeResponse"];
+export type GitPullResult = components["schemas"]["GitMergeResponse"];
+export type GitSyncResult = components["schemas"]["GitSyncResponse"];
+export type GitPRResult =
+  components["schemas"]["GitPullRequestCreationResponse"];
+export type GitResetResult = components["schemas"]["GitResetResponse"];
+export type GitResetLockedResponse =
+  components["schemas"]["GitResetLockedResponse"];
+export type GitTargetResult = components["schemas"]["GitTargetResponse"];
 
 // ============= API Functions =============
 
@@ -167,10 +119,7 @@ export async function gitReset(
 }
 
 /** POST /api/workspaces/{ws}/git/push-all — push all worktrees */
-export interface GitPushAllResult {
-  failed: number;
-  results: { name: string; success: boolean }[];
-}
+export type GitPushAllResult = components["schemas"]["GitPushAllResponse"];
 export async function gitPushAll(
   workspaceId: string,
 ): Promise<GitPushAllResult> {

@@ -16,7 +16,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
 	workspacemodule "github.com/tysonthomas9/loomcli/internal/modules/workspace"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
-	"github.com/tysonthomas9/loomcli/internal/webui/agentcoord"
 )
 
 const (
@@ -36,10 +35,10 @@ type Module struct {
 	connectorManagement     connectorsmodule.Management
 	connectorSealer         connectorsmodule.CredentialSealer
 	dispatcher              connectorsmodule.Dispatcher
-	agentSvc                agentcoord.AgentService
+	pullRequests            PullRequestLister
 	reviewerProvisioning    prreviewer.Commands
 	reviewerAgents          agents.IdentityQueries
-	sourceControl           sourcecontrol.Materializer
+	sourceControl           PullRequestCheckoutMaterializer
 	interactionChat         interaction.ChatAPI
 	interactionMessenger    interaction.ChatMessenger
 	interactionAuthority    OperatorAuthorityResolver
@@ -71,6 +70,17 @@ type WorkspaceQueries interface {
 	ListRepositories(context.Context, workspacemodule.ListRepositoriesQuery) ([]workspacemodule.Repository, error)
 }
 
+// PullRequestLister is the narrow Source Control query consumed by the PR
+// review fallback. It is separate from the connector path, which proves a
+// different trust origin before returning the same delivery projection.
+type PullRequestLister interface {
+	ListPullRequests(context.Context, sourcecontrol.ListPullRequestsQuery) (*sourcecontrol.PullRequestList, error)
+}
+
+type PullRequestCheckoutMaterializer interface {
+	PreparePullRequestCheckout(context.Context, sourcecontrol.PullRequestCheckoutCommand) (*sourcecontrol.PullRequestCheckout, error)
+}
+
 // Config contains the owner interfaces and runtime adapters consumed by PR
 // Review. Composition belongs to the application root; the route module never
 // receives a repository collection or constructs an owner implementation.
@@ -79,11 +89,11 @@ type Config struct {
 	ConnectorManagement  connectorsmodule.Management
 	ConnectorSealer      connectorsmodule.CredentialSealer
 	Dispatcher           connectorsmodule.Dispatcher
-	AgentService         agentcoord.AgentService
+	PullRequests         PullRequestLister
 	LocalSettingsDir     string
 	ReviewerProvisioning prreviewer.Commands
 	ReviewerAgents       agents.IdentityQueries
-	SourceControl        sourcecontrol.Materializer
+	SourceControl        PullRequestCheckoutMaterializer
 	InteractionChat      interaction.ChatAPI
 	InteractionMessenger interaction.ChatMessenger
 	InteractionAuthority OperatorAuthorityResolver
@@ -102,7 +112,7 @@ func NewModule(config Config) *Module {
 		connectorManagement:     config.ConnectorManagement,
 		connectorSealer:         config.ConnectorSealer,
 		dispatcher:              config.Dispatcher,
-		agentSvc:                config.AgentService,
+		pullRequests:            config.PullRequests,
 		reviewerProvisioning:    config.ReviewerProvisioning,
 		reviewerAgents:          config.ReviewerAgents,
 		sourceControl:           config.SourceControl,

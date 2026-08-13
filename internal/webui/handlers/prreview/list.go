@@ -9,14 +9,10 @@ import (
 	workspacemodule "github.com/tysonthomas9/loomcli/internal/modules/workspace"
 
 	connectorsmodule "github.com/tysonthomas9/loomcli/internal/modules/connectors"
-	"github.com/tysonthomas9/loomcli/internal/ops"
+	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
+	loomapi "github.com/tysonthomas9/loomcli/internal/platform/loomapi/gen"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
-
-type pullRequestsData struct {
-	PullRequests []ops.GitPullRequest `json:"pull_requests"`
-	Warnings     []string             `json:"warnings,omitempty"`
-}
 
 const (
 	pullsListPerPage  = 100
@@ -73,15 +69,15 @@ func (m *Module) listPullRequests(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, pullRequestsData{PullRequests: prs, Warnings: warnings})
+	writeJSON(w, pullRequestsTransportData(prs, warnings))
 }
 
 // connectorListPullRequests lists PRs for every connector-eligible workspace
 // repo, accumulating per-repo warnings instead of failing the whole list.
 // attempted/failed let the caller distinguish "no repo was eligible" from
 // "the connector tried and failed everywhere".
-func (m *Module) connectorListPullRequests(r *http.Request, ws, state string, repos []workspacemodule.Repository) (prs []ops.GitPullRequest, warnings []string, attempted, failed int) {
-	prs = []ops.GitPullRequest{}
+func (m *Module) connectorListPullRequests(r *http.Request, ws, state string, repos []workspacemodule.Repository) (prs []loomapi.PullRequestSummary, warnings []string, attempted, failed int) {
+	prs = []loomapi.PullRequestSummary{}
 	for _, workspaceRepo := range repos {
 		owner, repo, ok := parseGitHubOwnerRepo(workspaceRepo.RemoteURL)
 		if !ok {
@@ -117,8 +113,8 @@ func (m *Module) connectorListPullRequests(r *http.Request, ws, state string, re
 func (m *Module) connectorListPullRequestsForRepo(
 	r *http.Request,
 	ws, state, owner, repo, sourceRepo string,
-) (prs []ops.GitPullRequest, truncated bool, err error) {
-	prs = []ops.GitPullRequest{}
+) (prs []loomapi.PullRequestSummary, truncated bool, err error) {
+	prs = []loomapi.PullRequestSummary{}
 	for page := 1; page <= maxPullsListPages; page++ {
 		res, dispatchErr := m.dispatcher.Dispatch(r.Context(), connectorsmodule.DispatchCommand{
 			WorkspaceKey: ws,
@@ -165,24 +161,30 @@ func (m *Module) connectorListAvailable() bool {
 const connectorUnavailableWarning = "GitHub connector unavailable — showing local pull requests instead"
 
 func (m *Module) ghListFallback(w http.ResponseWriter, ctx context.Context, ws, state string, priorWarnings ...string) {
-	if m == nil || m.agentSvc == nil {
+	if m == nil || m.pullRequests == nil {
 		writePRReviewError(w, errEgressUnavailable)
 		return
 	}
-	res, err := m.agentSvc.ListPullRequests(ctx, ws, state)
+	res, err := m.pullRequests.ListPullRequests(ctx, sourcecontrol.ListPullRequestsQuery{
+		WorkspaceKey: ws,
+		State:        state,
+	})
 	if err != nil {
 		writePRReviewErrorCode(w, http.StatusBadGateway, "upstream_error", err.Error(), true)
 		return
 	}
-	prs := []ops.GitPullRequest{}
+	prs := []loomapi.PullRequestSummary{}
 	warnings := append([]string{}, priorWarnings...)
 	if res != nil {
 		if res.PullRequests != nil {
-			prs = res.PullRequests
+			prs = make([]loomapi.PullRequestSummary, len(res.PullRequests))
+			for index, pull := range res.PullRequests {
+				prs[index] = pullRequestDataFromSourceControl(pull)
+			}
 		}
 		warnings = append(warnings, res.Warnings...)
 	}
-	writeJSON(w, pullRequestsData{PullRequests: prs, Warnings: warnings})
+	writeJSON(w, pullRequestsTransportData(prs, warnings))
 }
 
 func connectorListState(state string) string {
@@ -200,8 +202,8 @@ func listRunID(r *http.Request, owner, repo string) string {
 	return "webui-review:" + userID + ":" + owner + "/" + repo + ":list:" + connectorsmodule.ActionGitHubPullsList
 }
 
-func pullRequestsFromBody(owner, repo, sourceRepo string, body map[string]any) []ops.GitPullRequest {
-	prs := []ops.GitPullRequest{}
+func pullRequestsFromBody(owner, repo, sourceRepo string, body map[string]any) []loomapi.PullRequestSummary {
+	prs := []loomapi.PullRequestSummary{}
 	if rawPulls, ok := body["pullRequests"].([]map[string]any); ok {
 		for _, raw := range rawPulls {
 			prs = append(prs, pullRequestFromSummary(owner, repo, sourceRepo, raw))
@@ -220,25 +222,85 @@ func pullRequestsFromBody(owner, repo, sourceRepo string, body map[string]any) [
 	return prs
 }
 
-func pullRequestFromSummary(owner, repo, sourceRepo string, body map[string]any) ops.GitPullRequest {
+func pullRequestFromSummary(owner, repo, sourceRepo string, body map[string]any) loomapi.PullRequestSummary {
 	number := intValue(body["number"])
 	repoName := owner + "/" + repo
 	// GitHub's REST list payload does not expose aggregate review decision,
 	// so ReviewDecision intentionally remains empty on the connector path.
-	return ops.GitPullRequest{
+	response := loomapi.PullRequestSummary{
 		Number:      number,
 		Title:       stringValue(body["title"]),
-		URL:         fmt.Sprintf("https://github.com/%s/pull/%d", repoName, number),
+		Url:         fmt.Sprintf("https://github.com/%s/pull/%d", repoName, number),
 		State:       normalizePullState(stringValue(body["state"]), boolValue(body["merged"])),
 		IsDraft:     boolValue(body["draft"]),
 		HeadRefName: stringValue(body["headRef"]),
 		BaseRefName: stringValue(body["baseRef"]),
-		AuthorLogin: stringValue(body["authorLogin"]),
-		UpdatedAt:   stringValue(body["updatedAt"]),
 		RepoName:    repoName,
-		SourceRepo:  sourceRepo,
+	}
+	setPullRequestTransportOptionals(
+		&response, stringValue(body["authorLogin"]), "", stringValue(body["updatedAt"]), "",
+		sourceRepo, 0, 0, 0,
+	)
+	return response
+}
+
+func pullRequestDataFromSourceControl(pull sourcecontrol.PullRequest) loomapi.PullRequestSummary {
+	response := loomapi.PullRequestSummary{
+		Number: pull.Number, Title: pull.Title, Url: pull.URL, State: pull.State,
+		IsDraft: pull.Draft, HeadRefName: pull.HeadBranch, BaseRefName: pull.BaseBranch,
+		RepoName: pull.Repository,
+	}
+	setPullRequestTransportOptionals(
+		&response, pull.Author, pull.CreatedAt, pull.UpdatedAt, pull.ReviewDecision,
+		pull.SourceRepo, pull.Additions, pull.Deletions, pull.ChangedFiles,
+	)
+	return response
+}
+
+func pullRequestsTransportData(pulls []loomapi.PullRequestSummary, warnings []string) loomapi.PullRequestsData {
+	data := loomapi.PullRequestsData{PullRequests: pulls}
+	if data.PullRequests == nil {
+		data.PullRequests = []loomapi.PullRequestSummary{}
+	}
+	if len(warnings) > 0 {
+		copyWarnings := append([]string(nil), warnings...)
+		data.Warnings = &copyWarnings
+	}
+	return data
+}
+
+func setPullRequestTransportOptionals(
+	response *loomapi.PullRequestSummary,
+	author, createdAt, updatedAt, reviewDecision, sourceRepo string,
+	additions, deletions, changedFiles int,
+) {
+	if author != "" {
+		response.AuthorLogin = transportPointer(author)
+	}
+	if createdAt != "" {
+		response.CreatedAt = transportPointer(createdAt)
+	}
+	if updatedAt != "" {
+		response.UpdatedAt = transportPointer(updatedAt)
+	}
+	if reviewDecision != "" {
+		response.ReviewDecision = transportPointer(reviewDecision)
+	}
+	if sourceRepo != "" {
+		response.SourceRepo = transportPointer(sourceRepo)
+	}
+	if additions != 0 {
+		response.Additions = transportPointer(additions)
+	}
+	if deletions != 0 {
+		response.Deletions = transportPointer(deletions)
+	}
+	if changedFiles != 0 {
+		response.ChangedFiles = transportPointer(changedFiles)
 	}
 }
+
+func transportPointer[T any](value T) *T { return &value }
 
 // normalizePullState converts GitHub REST's lowercase pull state ("open" /
 // "closed") into the UPPERCASE form the rest of loom speaks (the `gh` path

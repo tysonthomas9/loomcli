@@ -83,7 +83,7 @@ func (f *fakeForge) QueuedPRNumbers(context.Context, string, string) (map[int]bo
 }
 
 type updateFailLifecycle struct {
-	sourcecontrol.StackLifecycle
+	StackLifecycle
 	err error
 }
 

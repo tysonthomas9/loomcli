@@ -95,10 +95,22 @@ func LineageFromInput(input json.RawMessage) (TaskLineage, bool) {
 	return *envelope.Lineage, true
 }
 
+type sourceControlTaskMaterializer interface {
+	PrepareTaskCheckout(context.Context, sourcecontrol.TaskCheckoutCommand) (*sourcecontrol.TaskCheckout, error)
+}
+
+type sourceControlStackBindings interface {
+	ResolveTaskStackBinding(context.Context, string, string, string) (sourcecontrol.TaskStackBinding, bool, error)
+}
+
+type sourceControlTaskOutcomes interface {
+	RecordTaskOutcome(context.Context, sourcecontrol.TaskOutcomeCommand) (bool, error)
+}
+
 // StackLineageLookup narrows Source Control's stack binding query to the base
 // ref lookup consumed by the worktree resolver.
 type StackLineageLookup struct {
-	Bindings sourcecontrol.StackBindingResolver
+	Bindings sourceControlStackBindings
 }
 
 var _ TaskLineageLookup = StackLineageLookup{}
@@ -140,7 +152,7 @@ func (e HostBridgeTaskExecutor) resolveStackRepoName(ctx context.Context, req Ta
 // a stack for repoName.
 func stackBindingForTask(
 	ctx context.Context,
-	resolver sourcecontrol.StackBindingResolver,
+	resolver sourceControlStackBindings,
 	workspaceKey,
 	repoName,
 	taskID string,
@@ -192,7 +204,7 @@ type LocalTaskWorktreeResolver struct {
 	// SourceControl is the authority-free application materializer. Production
 	// task runs fail closed when it is unavailable; neither this resolver nor
 	// the local preparer receives Local Settings or a credential source.
-	SourceControl sourcecontrol.Materializer
+	SourceControl sourceControlTaskMaterializer
 	// Lineage is optional. When nil (the two pre-stacking construction sites and
 	// all tests), the worktree base stays the repo default branch. When set, the
 	// per-task worktree is cut from the task's lineage base so each stacked task

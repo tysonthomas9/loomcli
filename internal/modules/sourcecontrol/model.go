@@ -6,18 +6,18 @@ import "time"
 // public Source Control API does not accept a remote URL, so embedded URL
 // credentials cannot cross this boundary even as a rejected request.
 type MaterializeCommand struct {
-	WorkspaceKey      string `json:"workspace_key"`
-	MaterializationID string `json:"materialization_id"`
-	RepositoryRef     string `json:"repository_ref"`
+	WorkspaceKey      string
+	MaterializationID string
+	RepositoryRef     string
 }
 
 // Materialization is a credential-free local checkout receipt.
 type Materialization struct {
-	WorkspaceKey      string `json:"workspace_key"`
-	MaterializationID string `json:"materialization_id"`
-	RepositoryRef     string `json:"repository_ref"`
-	CheckoutPath      string `json:"checkout_path"`
-	Reused            bool   `json:"reused"`
+	WorkspaceKey      string
+	MaterializationID string
+	RepositoryRef     string
+	CheckoutPath      string
+	Reused            bool
 }
 
 // CheckoutMatch is the complete result of comparing an existing target with
@@ -68,24 +68,24 @@ type GitCloneReceipt struct {
 // Source-Control-owned destination ref. Remote URL, checkout paths, and
 // credentials are all resolved behind the repository port.
 type FetchRefCommand struct {
-	WorkspaceKey   string `json:"workspace_key"`
-	OperationID    string `json:"operation_id"`
-	RepositoryRef  string `json:"repository_ref"`
-	SourceRef      string `json:"source_ref"`
-	DestinationRef string `json:"destination_ref"`
-	ExpectedCommit string `json:"expected_commit,omitempty"`
+	WorkspaceKey   string
+	OperationID    string
+	RepositoryRef  string
+	SourceRef      string
+	DestinationRef string
+	ExpectedCommit string
 }
 
 // FetchedRef is a credential-free, postcondition-verified receipt.
 type FetchedRef struct {
-	WorkspaceKey   string `json:"workspace_key"`
-	OperationID    string `json:"operation_id"`
-	RepositoryRef  string `json:"repository_ref"`
-	CheckoutPath   string `json:"checkout_path"`
-	RemoteName     string `json:"remote_name"`
-	SourceRef      string `json:"source_ref"`
-	DestinationRef string `json:"destination_ref"`
-	CommitSHA      string `json:"commit_sha"`
+	WorkspaceKey   string
+	OperationID    string
+	RepositoryRef  string
+	CheckoutPath   string
+	RemoteName     string
+	SourceRef      string
+	DestinationRef string
+	CommitSHA      string
 }
 
 // GitFetchRequest is the exact credential-free request Source Control sends
@@ -246,33 +246,33 @@ const (
 	NodeStateClosed     NodeState = "closed"
 )
 
-// Stack is Source Control's canonical stack-lineage model. The local adapter
-// persists this exact shape, so callers, policy, and persistence no longer
-// maintain parallel representations or mapper layers.
+// Stack is Source Control's canonical transport-neutral stack-lineage model.
+// Persistence and delivery adapters map it to their independently versioned
+// wire shapes.
 type Stack struct {
-	ID                StackID    `json:"id"`
-	WorkspaceKey      string     `json:"workspaceKey"`
-	Repository        string     `json:"repoName"`
-	RootBase          string     `json:"rootBase"`
-	DefaultCommitMode CommitMode `json:"defaultCommitMode,omitempty"`
-	CreatedAt         time.Time  `json:"createdAt"`
-	UpdatedAt         time.Time  `json:"updatedAt"`
+	ID                StackID
+	WorkspaceKey      string
+	Repository        string
+	RootBase          string
+	DefaultCommitMode CommitMode
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
 }
 
 // StackNode is Source Control's canonical model for one stable task slot.
 type StackNode struct {
-	StackID         StackID    `json:"stackId"`
-	TaskID          string     `json:"taskId"`
-	BaseTaskID      string     `json:"baseTaskId,omitempty"`
-	OutputBranch    string     `json:"outputBranch"`
-	CommitMode      CommitMode `json:"commitMode,omitempty"`
-	State           NodeState  `json:"state"`
-	PRNumber        int        `json:"prNumber,omitempty"`
-	PRURL           string     `json:"prUrl,omitempty"`
-	OutputSHA       string     `json:"outputSha,omitempty"`
-	LastPublishedAt *time.Time `json:"lastPublishedAt,omitempty"`
-	CreatedAt       time.Time  `json:"createdAt"`
-	UpdatedAt       time.Time  `json:"updatedAt"`
+	StackID         StackID
+	TaskID          string
+	BaseTaskID      string
+	OutputBranch    string
+	CommitMode      CommitMode
+	State           NodeState
+	PRNumber        int
+	PRURL           string
+	OutputSHA       string
+	LastPublishedAt *time.Time
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
 }
 
 type EnsureStackCommand struct {
@@ -325,9 +325,9 @@ type ReconcileStackCommand struct {
 }
 
 type StackLineage struct {
-	StackID      string `json:"stackId,omitempty"`
-	BaseRef      string `json:"baseRef,omitempty"`
-	OutputBranch string `json:"outputBranch,omitempty"`
+	StackID      string
+	BaseRef      string
+	OutputBranch string
 }
 
 type ReconcileStackResult struct {

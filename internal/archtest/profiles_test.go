@@ -144,6 +144,16 @@ func TestProfileBoundaryRulesMatchApprovedPackageShape(t *testing.T) {
 			to:   modulePath + "/internal/modules/execution/fleetdb/codec",
 		},
 		{
+			name: "source control filesystem adapter to own public root",
+			from: modulePath + "/internal/modules/sourcecontrol/filesystem",
+			to:   modulePath + "/internal/modules/sourcecontrol",
+		},
+		{
+			name: "source control filesystem adapter to approved bounded walker",
+			from: modulePath + "/internal/modules/sourcecontrol/filesystem",
+			to:   "github.com/bmatcuk/doublestar/v4",
+		},
+		{
 			name: "capability core to approved platform mechanism",
 			from: modulePath + "/internal/modules/execution/internal/service",
 			to:   modulePath + "/internal/platform/runtime",

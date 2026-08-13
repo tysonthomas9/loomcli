@@ -12,7 +12,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tysonthomas9/loomcli/internal/ops"
+	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
 )
 
 type diffFileParityRow struct {
@@ -274,7 +274,7 @@ func TestDiffFilesParityMissingBaseObject(t *testing.T) {
 	}
 }
 
-func canonicalGoGitDiffFiles(files []ops.DiffFileResult) []diffFileParityRow {
+func canonicalGoGitDiffFiles(files []sourcecontrol.DiffFile) []diffFileParityRow {
 	rows := make([]diffFileParityRow, 0, len(files))
 	for _, file := range files {
 		rows = append(rows, diffFileParityRow{

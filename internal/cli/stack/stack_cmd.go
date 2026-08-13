@@ -55,7 +55,23 @@ func activeWorkspace() (string, error) {
 
 func openStore() (*stackstore.LocalStore, error) { return stackstore.Default() }
 
-func openStackLifecycle() (sourcecontrol.StackLifecycle, error) {
+// stackLifecycle is the stack command's consumer-defined Checkout projection.
+// It deliberately keeps Source Control's persistence mechanism and owner
+// implementation out of the CLI contract.
+type stackLifecycle interface {
+	EnsureStack(context.Context, sourcecontrol.EnsureStackCommand) (*sourcecontrol.Stack, error)
+	ListStacks(context.Context, string) ([]sourcecontrol.Stack, error)
+	GetStack(context.Context, string, string) (*sourcecontrol.Stack, error)
+	ListStackNodes(context.Context, string, string) ([]sourcecontrol.StackNode, error)
+	ValidateStack(context.Context, string, string) error
+	AddStackNode(context.Context, sourcecontrol.AddStackNodeCommand) (*sourcecontrol.StackNode, error)
+	MoveStackNode(context.Context, sourcecontrol.MoveStackNodeCommand) error
+	SetStackNodeBase(context.Context, sourcecontrol.SetStackNodeBaseCommand) error
+	RemoveStackNode(context.Context, sourcecontrol.RemoveStackNodeCommand) error
+	RecordStackNodePublication(context.Context, sourcecontrol.RecordStackNodePublicationCommand) error
+}
+
+func openStackLifecycle() (stackLifecycle, error) {
 	store, err := openStore()
 	if err != nil {
 		return nil, err
@@ -144,7 +160,7 @@ func initCmd() *cobra.Command {
 				return err
 			}
 			if jsonOut {
-				return cmdstore.WriteJSON(stack)
+				return cmdstore.WriteJSON(stackForJSON(*stack))
 			}
 			fmt.Printf("stack %s ready (repo=%s base=%s)\n", stack.ID, repo, base)
 			return nil
@@ -177,7 +193,7 @@ func listCmd() *cobra.Command {
 				return err
 			}
 			if jsonOut {
-				return cmdstore.WriteJSON(values)
+				return cmdstore.WriteJSON(stacksForJSON(values))
 			}
 			if len(values) == 0 {
 				fmt.Println("no stacks")
@@ -213,7 +229,9 @@ func showCmd() *cobra.Command {
 				return err
 			}
 			if jsonOut {
-				return cmdstore.WriteJSON(map[string]any{"stack": stack, "nodes": nodes})
+				return cmdstore.WriteJSON(map[string]any{
+					"stack": stackForJSON(*stack), "nodes": stackNodesForJSON(nodes),
+				})
 			}
 			fmt.Printf("%s  repo=%s base=%s\n", stack.ID, stack.Repository, stack.RootBase)
 			for _, n := range nodes {
@@ -369,7 +387,7 @@ func addCmd() *cobra.Command {
 				return err
 			}
 			if jsonOut {
-				return cmdstore.WriteJSON(node)
+				return cmdstore.WriteJSON(stackNodeForJSON(*node))
 			}
 			base := node.BaseTaskID
 			if base == "" {
@@ -606,7 +624,7 @@ func publishCmd() *cobra.Command {
 
 // shared loaders -------------------------------------------------------------
 
-func loadCtx(stackID string) (string, sourcecontrol.StackLifecycle, string, error) {
+func loadCtx(stackID string) (string, stackLifecycle, string, error) {
 	ws, err := activeWorkspace()
 	if err != nil {
 		return "", nil, "", err

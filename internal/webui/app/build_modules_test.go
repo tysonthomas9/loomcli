@@ -12,25 +12,22 @@ import (
 )
 
 // TestServer_BuildModules_ZeroValue verifies that calling buildModules on a
-// zero-value Server populates wsModules with the 4 always-constructed modules
-// plus the non-store pull-request-list fallback, and does not panic.
+// zero-value Server populates wsModules with the four always-constructed
+// modules and does not invent a Source Control route without an owner port.
 func TestServer_BuildModules_ZeroValue(t *testing.T) {
 	var app Server
 	app.buildModules()
 
-	if got := len(app.wsModules); got != 5 {
-		t.Fatalf("len(wsModules) = %d, want 5", got)
+	if got := len(app.wsModules); got != 4 {
+		t.Fatalf("len(wsModules) = %d, want 4", got)
 	}
 
-	// Verify concrete types in order. The gh-backed PR list fallback is
-	// registered whenever there is no store (its Register no-ops without an
-	// agent service).
+	// Verify concrete types in order.
 	wantTypes := []string{
 		"*app.WorkspaceOpsModule",
 		"*issues.IssueModule",
 		"*issues.SessionModule",
 		"*app.LogModule",
-		"*git.PullRequestListModule",
 	}
 	for i, mod := range app.wsModules {
 		got := fmt.Sprintf("%T", mod)
@@ -47,20 +44,23 @@ func TestServer_BuildModules_AllDeps(t *testing.T) {
 	go hub.Run()
 	t.Cleanup(func() { hub.Stop() })
 
+	sourcePorts := &stubFileService{}
 	app := Server{
-		hub:           hub,
-		termSvc:       &stubTerminalService{},
-		issueTabStore: localredis.NewIssueTabStore(nil, nil),
-		fleetRegistry: &fleet.StoreRegistry{},
-		diffSvc:       &stubDiffService{},
-		fileSvc:       &stubFileService{},
-		claimMetrics:  fleet.NewClaimMetrics(),
+		hub:            hub,
+		termSvc:        &stubTerminalService{},
+		issueTabStore:  localredis.NewIssueTabStore(nil, nil),
+		fleetRegistry:  &fleet.StoreRegistry{},
+		sourceBrowse:   sourcePorts,
+		sourceMutate:   sourcePorts,
+		sourceCheckout: sourcePorts,
+		issueDiff:      &stubIssueDiff{},
+		claimMetrics:   fleet.NewClaimMetrics(),
 	}
 
 	app.buildModules()
 
 	// 4 always + SSE(hub) + TerminalTab(termSvc) + IssueTab(issueTabStore) +
-	// Terminal(termSvc) + Fleet(fleetRegistry) + Git(diffSvc) + File(fileSvc) +
+	// Terminal(termSvc) + Fleet(fleetRegistry) + Git(diffSvc) + Source Control file ports +
 	// gh-backed PR list fallback (non-store) = 12
 	if got := len(app.wsModules); got != 12 {
 		t.Fatalf("len(wsModules) = %d, want 12", got)

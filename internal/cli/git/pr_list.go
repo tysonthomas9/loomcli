@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/tysonthomas9/loomcli/internal/cli"
-	"github.com/tysonthomas9/loomcli/internal/ops"
+	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
 )
 
 const prListJSONFields = "number,title,url,state,isDraft,headRefName,baseRefName,author,createdAt,updatedAt,reviewDecision,additions,deletions,changedFiles"
@@ -37,7 +37,7 @@ type ghPRItem struct {
 // ListPullRequests returns open/closed/merged PRs for a repo via gh CLI.
 // Callers are expected to have verified gh availability once per request
 // (a missing binary still surfaces as a run error).
-func ListPullRequests(repoPath, state string, limit int) ([]ops.GitPullRequest, error) {
+func ListPullRequests(repoPath, state string, limit int) ([]sourcecontrol.PullRequest, error) {
 	limit = normalizePRListLimit(limit)
 
 	result := cli.GetDeps(nil).Exec.Run(
@@ -57,7 +57,7 @@ func ListPullRequests(repoPath, state string, limit int) ([]ops.GitPullRequest, 
 
 	raw := strings.TrimSpace(result.Stdout)
 	if raw == "" || raw == "[]" {
-		return []ops.GitPullRequest{}, nil
+		return []sourcecontrol.PullRequest{}, nil
 	}
 
 	var items []ghPRItem
@@ -65,17 +65,17 @@ func ListPullRequests(repoPath, state string, limit int) ([]ops.GitPullRequest, 
 		return nil, fmt.Errorf("parsing pull requests: %w", err)
 	}
 
-	out := make([]ops.GitPullRequest, 0, len(items))
+	out := make([]sourcecontrol.PullRequest, 0, len(items))
 	for _, item := range items {
-		out = append(out, ops.GitPullRequest{
+		out = append(out, sourcecontrol.PullRequest{
 			Number:         item.Number,
 			Title:          item.Title,
 			URL:            item.URL,
 			State:          strings.ToUpper(item.State),
-			IsDraft:        item.IsDraft,
-			HeadRefName:    item.HeadRefName,
-			BaseRefName:    item.BaseRefName,
-			AuthorLogin:    item.Author.Login,
+			Draft:          item.IsDraft,
+			HeadBranch:     item.HeadRefName,
+			BaseBranch:     item.BaseRefName,
+			Author:         item.Author.Login,
 			CreatedAt:      item.CreatedAt,
 			UpdatedAt:      item.UpdatedAt,
 			ReviewDecision: item.ReviewDecision,
@@ -108,10 +108,10 @@ func mapPRListGhState(state string) string {
 }
 
 // FilterPullRequestsForReview keeps open PRs that still need human review.
-func FilterPullRequestsForReview(prs []ops.GitPullRequest) []ops.GitPullRequest {
-	out := make([]ops.GitPullRequest, 0, len(prs))
+func FilterPullRequestsForReview(prs []sourcecontrol.PullRequest) []sourcecontrol.PullRequest {
+	out := make([]sourcecontrol.PullRequest, 0, len(prs))
 	for _, pr := range prs {
-		if pr.IsDraft {
+		if pr.Draft {
 			continue
 		}
 		if strings.EqualFold(pr.State, "MERGED") || strings.EqualFold(pr.State, "CLOSED") {

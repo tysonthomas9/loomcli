@@ -15,7 +15,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	artifactsmodule "github.com/tysonthomas9/loomcli/internal/modules/artifacts"
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
-	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
 )
 
 var ErrNoQueuedTaskRun = errors.New("task worker: no queued task run")
@@ -94,12 +93,12 @@ type TaskWorker struct {
 	LocalTaskRunnerEnv func([]string) []string
 	// SourceControl is the authority-free checkout materializer used by the
 	// default local task worktree resolver.
-	SourceControl sourcecontrol.Materializer
+	SourceControl sourceControlTaskMaterializer
 	// StackBindings and TaskOutcomes are separately injected Source Control
 	// ports. Production composition must provide them explicitly; task execution
 	// never recovers broader capability surfaces with type assertions.
-	StackBindings sourcecontrol.StackBindingResolver
-	TaskOutcomes  sourcecontrol.TaskOutcomeRecorder
+	StackBindings sourceControlStackBindings
+	TaskOutcomes  sourceControlTaskOutcomes
 	// WorktreeResolver resolves per-task-run local worktrees for bundled local
 	// task runners. Nil uses the machine-local workspace cache.
 	WorktreeResolver TaskWorktreeResolver

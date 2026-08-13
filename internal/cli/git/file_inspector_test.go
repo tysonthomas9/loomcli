@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/ops"
+	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
 )
 
 func TestParsePorcelainV1ZUnusualPathsAndRenameSource(t *testing.T) {
@@ -100,7 +100,7 @@ func TestGitInspectorRejectsChangedCheckoutIdentity(t *testing.T) {
 	}
 	sentinel := filepath.Join(t.TempDir(), "ran")
 	fake := writeInspectorScript(t, "touch \""+sentinel+"\"")
-	ctx := ops.WithGitWorktreeIdentity(context.Background(), dir, info)
+	ctx := sourcecontrol.WithGitWorktreeIdentity(context.Background(), dir, info)
 	_, err = (&GitInspector{binary: fake}).Status(ctx, dir)
 	if inspectionKind(err) != "validation" {
 		t.Fatalf("Status error = %T %v, want validation", err, err)

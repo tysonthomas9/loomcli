@@ -12,13 +12,13 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/gitbranch"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/modules/agents"
-	"github.com/tysonthomas9/loomcli/internal/ops"
+	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/testutil"
 )
 
 type repairFixture struct {
-	g         *GitOpsImpl
+	g         *LocalSourceControlMechanics
 	wsRoot    string
 	repoPath  string
 	agentPath string
@@ -100,7 +100,7 @@ func setupRepairFixture(t *testing.T, createAgentWorktree bool) repairFixture {
 	}
 
 	return repairFixture{
-		g:      NewGitOps().WithStore(st).WithAgentQueries(testutil.StaticAgentQueries{Agents: []*agents.Agent{nova}}),
+		g:      NewLocalSourceControlMechanics().WithWorkspaceProjection(testWorkspaceProjection{store: st}).WithAgentQueries(testutil.StaticAgentQueries{Agents: []*agents.Agent{nova}}),
 		wsRoot: wsRoot, repoPath: repoPath, agentPath: agentPath,
 	}
 }
@@ -109,7 +109,7 @@ func TestRepairCheckout_DisallowedRepoRejected(t *testing.T) {
 	fx := setupRepairFixture(t, false)
 
 	_, err := fx.g.RepairCheckout("WS1", "agent", "nova", "docs", false)
-	if !errors.Is(err, ops.ErrAgentRepoNotAllowed) {
+	if !errors.Is(err, sourcecontrol.ErrAgentRepoNotAllowed) {
 		t.Fatalf("err = %v, want ErrAgentRepoNotAllowed", err)
 	}
 }

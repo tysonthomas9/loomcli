@@ -48,6 +48,19 @@ type ProjectionStore interface {
 	Connectors() connectorsmodule.ManagementStore
 }
 
+type sourceControlMaterializer interface {
+	PrepareTaskCheckout(context.Context, sourcecontrol.TaskCheckoutCommand) (*sourcecontrol.TaskCheckout, error)
+	PreparePullRequestCheckout(context.Context, sourcecontrol.PullRequestCheckoutCommand) (*sourcecontrol.PullRequestCheckout, error)
+}
+
+type sourceControlStackBindings interface {
+	ResolveTaskStackBinding(context.Context, string, string, string) (sourcecontrol.TaskStackBinding, bool, error)
+}
+
+type sourceControlTaskOutcomes interface {
+	RecordTaskOutcome(context.Context, sourcecontrol.TaskOutcomeCommand) (bool, error)
+}
+
 // Deps contains the capability ports used by the workspace route composition.
 type Deps struct {
 	Store                          ProjectionStore
@@ -60,9 +73,9 @@ type Deps struct {
 	DriverAPIBaseURL               string
 	DriverRunTokenKey              []byte
 	LocalSettingsDir               string
-	SourceControl                  sourcecontrol.Materializer
-	TaskStackBindings              sourcecontrol.StackBindingResolver
-	TaskOutcomes                   sourcecontrol.TaskOutcomeRecorder
+	SourceControl                  sourceControlMaterializer
+	TaskStackBindings              sourceControlStackBindings
+	TaskOutcomes                   sourceControlTaskOutcomes
 	Dispatcher                     connectorsmodule.Dispatcher
 	ConnectorBindingGrantLifecycle connectorsmodule.BindingGrantLifecycle
 	AutomationBindings             automation.BindingOperations

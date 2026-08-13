@@ -119,14 +119,28 @@ func RunCaptureProjection(capability RunCaptureCapability) runcapture.API {
 	return capability.RunCaptureAPI()
 }
 
-// Exact module aliases keep ServerConfig's public field types source
-// compatible while preserving the capability-owned contracts.
+// SourceControlMaterializer is a consumer-defined narrow Checkout view. The
+// owner no longer publishes parallel Materializer or Stack interfaces beside
+// Browse, Mutate, and Checkout.
+type SourceControlMaterializer interface {
+	PrepareTaskCheckout(context.Context, sourcecontrol.TaskCheckoutCommand) (*sourcecontrol.TaskCheckout, error)
+	PreparePullRequestCheckout(context.Context, sourcecontrol.PullRequestCheckoutCommand) (*sourcecontrol.PullRequestCheckout, error)
+}
+
+type SourceControlStackBindingResolver interface {
+	ResolveTaskStackBinding(context.Context, string, string, string) (sourcecontrol.TaskStackBinding, bool, error)
+}
+
+type SourceControlTaskOutcomeRecorder interface {
+	RecordTaskOutcome(context.Context, sourcecontrol.TaskOutcomeCommand) (bool, error)
+}
+
+type RepositoryAdmissionMaterializer interface {
+	PrepareRepositoryAdmissionCheckout(context.Context, sourcecontrol.RepositoryAdmissionCheckoutCommand) (*sourcecontrol.PreparedRepositoryCheckout, error)
+}
+
 type (
 	DaytonaProviderBroker                    = execution.DaytonaProviderBroker
-	SourceControlMaterializer                = sourcecontrol.Materializer
-	SourceControlStackBindingResolver        = sourcecontrol.StackBindingResolver
-	SourceControlTaskOutcomeRecorder         = sourcecontrol.TaskOutcomeRecorder
-	RepositoryAdmissionMaterializer          = sourcecontrol.RepositoryAdmissionMaterializer
 	WorkflowCatalogAPI                       = workflowcatalog.API
 	WorkflowCatalogVersionAuthoringAPI       = workflowcatalog.VersionAuthoringAPI
 	WorkflowCatalogDriver                    = workflowcatalog.Driver

@@ -15,8 +15,6 @@ type StackLifecycleService struct {
 	now   func() time.Time
 }
 
-var _ StackLifecycle = (*StackLifecycleService)(nil)
-
 func NewStackLifecycle(store StackLifecycleStore, now func() time.Time) (*StackLifecycleService, error) {
 	if store == nil || now == nil {
 		return nil, fmt.Errorf("compose Source Control stack lifecycle: store and clock are required: %w", ErrUnavailable)

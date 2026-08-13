@@ -290,7 +290,7 @@ func mustNodes(t *testing.T, ctx context.Context, s *stackstore.LocalStore, ws s
 	return nodes
 }
 
-func mustStackLifecycle(t *testing.T, store sourcecontrol.StackLifecycleStore) sourcecontrol.StackLifecycle {
+func mustStackLifecycle(t *testing.T, store sourcecontrol.StackLifecycleStore) epicStackReconciler {
 	t.Helper()
 	service, err := sourcecontrol.NewStackLifecycle(store, time.Now)
 	if err != nil {

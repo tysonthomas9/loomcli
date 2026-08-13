@@ -6,46 +6,45 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/tysonthomas9/loomcli/internal/webui/apperrors"
-	"github.com/tysonthomas9/loomcli/internal/webui/filecoord"
+	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
 )
 
 type preconditionRecordingFileService struct {
 	stubFileService
-	readResult      *filecoord.FileReadResult
-	writeResult     *filecoord.FileMutationResult
+	readResult      *sourcecontrol.FileReadResult
+	writeResult     *sourcecontrol.FileMutationResult
 	writeErr        error
-	writeConditions filecoord.FileWritePreconditions
+	writeConditions sourcecontrol.FileWritePreconditions
 	deleteErr       error
 	deleteVersion   string
-	moveResult      *filecoord.FileMutationResult
+	moveResult      *sourcecontrol.FileMutationResult
 	moveErr         error
 	moveSource      string
 	moveDestination string
 }
 
-func (s *preconditionRecordingFileService) ReadFileScoped(_ context.Context, _ string, _ filecoord.FileScope, _, _, _ string) (*filecoord.FileReadResult, error) {
+func (s *preconditionRecordingFileService) ReadFile(_ context.Context, _ sourcecontrol.PathQuery) (*sourcecontrol.FileReadResult, error) {
 	return s.readResult, nil
 }
 
-func (s *preconditionRecordingFileService) WriteFileConditionalScoped(_ context.Context, _ string, _ filecoord.FileScope, _, _, _, _ string, conditions filecoord.FileWritePreconditions) (*filecoord.FileMutationResult, error) {
-	s.writeConditions = conditions
+func (s *preconditionRecordingFileService) WriteFile(_ context.Context, command sourcecontrol.WriteCommand) (*sourcecontrol.FileMutationResult, error) {
+	s.writeConditions = sourcecontrol.FileWritePreconditions{IfMatch: command.ExpectedVersion, IfNoneMatch: command.CreateOnly}
 	return s.writeResult, s.writeErr
 }
 
-func (s *preconditionRecordingFileService) DeletePathVersionedScoped(_ context.Context, _ string, _ filecoord.FileScope, _, _, _ string, _ bool, version string) error {
-	s.deleteVersion = version
+func (s *preconditionRecordingFileService) DeletePath(_ context.Context, command sourcecontrol.DeleteCommand) error {
+	s.deleteVersion = command.ExpectedVersion
 	return s.deleteErr
 }
 
-func (s *preconditionRecordingFileService) MovePathVersionedScoped(_ context.Context, _ string, _ filecoord.FileScope, _, _, _, _ string, _ bool, sourceVersion, destinationVersion string) (*filecoord.FileMutationResult, error) {
-	s.moveSource = sourceVersion
-	s.moveDestination = destinationVersion
+func (s *preconditionRecordingFileService) MovePath(_ context.Context, command sourcecontrol.MoveCommand) (*sourcecontrol.FileMutationResult, error) {
+	s.moveSource = command.ExpectedSourceVersion
+	s.moveDestination = command.ExpectedDestinationVersion
 	return s.moveResult, s.moveErr
 }
 
 func TestHandleScopedFileRead_EmitsStrongETag(t *testing.T) {
-	svc := &preconditionRecordingFileService{readResult: &filecoord.FileReadResult{Path: "file.txt", Version: "sha256:abc"}}
+	svc := &preconditionRecordingFileService{readResult: &sourcecontrol.FileReadResult{Path: "file.txt", Version: "sha256:abc"}}
 	w := httptest.NewRecorder()
 	HandleScopedFileRead(svc).ServeHTTP(w, scopedReq("/api/workspaces/test-ws/files?path=file.txt"))
 	if w.Code != http.StatusOK {
@@ -57,7 +56,7 @@ func TestHandleScopedFileRead_EmitsStrongETag(t *testing.T) {
 }
 
 func TestHandleScopedFileWrite_ForwardsConditionalHeaders(t *testing.T) {
-	svc := &preconditionRecordingFileService{writeResult: &filecoord.FileMutationResult{Success: true, Version: "sha256:new"}}
+	svc := &preconditionRecordingFileService{writeResult: &sourcecontrol.FileMutationResult{Success: true, Version: "sha256:new"}}
 	req := scopedReqBody(http.MethodPut, "/api/workspaces/test-ws/files?path=file.txt", `{"content":"new"}`)
 	req.Header.Set("If-Match", `"sha256:old"`)
 	w := httptest.NewRecorder()
@@ -74,7 +73,7 @@ func TestHandleScopedFileWrite_ForwardsConditionalHeaders(t *testing.T) {
 }
 
 func TestHandleScopedFileWrite_CreateOnlyAndStaleMappings(t *testing.T) {
-	svc := &preconditionRecordingFileService{writeErr: apperrors.ErrPreconditionFailed("stale")}
+	svc := &preconditionRecordingFileService{writeErr: sourcecontrol.ErrPreconditionFailed}
 	req := scopedReqBody(http.MethodPut, "/api/workspaces/test-ws/files?path=file.txt", `{"content":"new"}`)
 	req.Header.Set("If-None-Match", "*")
 	w := httptest.NewRecorder()
@@ -88,7 +87,7 @@ func TestHandleScopedFileWrite_CreateOnlyAndStaleMappings(t *testing.T) {
 }
 
 func TestHandleScopedFileDelete_PreconditionRequiredAndForwarded(t *testing.T) {
-	svc := &preconditionRecordingFileService{deleteErr: apperrors.ErrPreconditionRequired("version required")}
+	svc := &preconditionRecordingFileService{deleteErr: sourcecontrol.ErrPreconditionRequired}
 	w := httptest.NewRecorder()
 	HandleScopedFileDelete(svc).ServeHTTP(w, scopedReq("/api/workspaces/test-ws/files?path=file.txt"))
 	if w.Code != http.StatusPreconditionRequired {
@@ -106,7 +105,7 @@ func TestHandleScopedFileDelete_PreconditionRequiredAndForwarded(t *testing.T) {
 }
 
 func TestHandleScopedFileMove_ForwardsBothVersions(t *testing.T) {
-	svc := &preconditionRecordingFileService{moveResult: &filecoord.FileMutationResult{Success: true, Version: "sha256:source"}}
+	svc := &preconditionRecordingFileService{moveResult: &sourcecontrol.FileMutationResult{Success: true, Version: "sha256:source"}}
 	req := scopedReqBody(http.MethodPatch, "/api/workspaces/test-ws/files/move", `{"from":"a","to":"b","overwrite":true,"source_version":"sha256:source","destination_version":"sha256:destination"}`)
 	w := httptest.NewRecorder()
 	HandleScopedFileMove(svc).ServeHTTP(w, req)

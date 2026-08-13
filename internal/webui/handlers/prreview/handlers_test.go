@@ -31,10 +31,9 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/modules/connectors"
 	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
 	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
-	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
+	loomapi "github.com/tysonthomas9/loomcli/internal/platform/loomapi/gen"
 	"github.com/tysonthomas9/loomcli/internal/store"
-	"github.com/tysonthomas9/loomcli/internal/webui/agentcoord"
 	localsettingshandler "github.com/tysonthomas9/loomcli/internal/webui/handlers/localsettings"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
@@ -196,12 +195,9 @@ func writeUpstreamJSON(w http.ResponseWriter, status int, v any) {
 	_ = json.NewEncoder(w).Encode(v)
 }
 
-func decodePullRequestsResponse(t *testing.T, raw []byte) pullRequestsData {
+func decodePullRequestsResponse(t *testing.T, raw []byte) loomapi.PullRequestsData {
 	t.Helper()
-	var decoded struct {
-		Success bool             `json:"success"`
-		Data    pullRequestsData `json:"data"`
-	}
+	var decoded loomapi.PullRequestsResponse
 	if err := json.Unmarshal(raw, &decoded); err != nil {
 		t.Fatalf("decode pull request response: %v (body %s)", err, raw)
 	}
@@ -436,13 +432,11 @@ const (
 	testCredentialNone     testCredentialSource = "none"
 )
 
-type fallbackAgentService struct {
-	agentcoord.AgentService
-
+type fallbackPullRequestLister struct {
 	called bool
 	ws     string
 	state  string
-	result *ops.GitPullRequestList
+	result *sourcecontrol.PullRequestList
 	err    error
 }
 
@@ -538,25 +532,25 @@ func cloneReviewerAgent(agent *agents.Agent) *agents.Agent {
 	return &out
 }
 
-func (s *fallbackAgentService) ListPullRequests(ctx context.Context, wsID, state string) (*ops.GitPullRequestList, error) {
+func (s *fallbackPullRequestLister) ListPullRequests(_ context.Context, query sourcecontrol.ListPullRequestsQuery) (*sourcecontrol.PullRequestList, error) {
 	s.called = true
-	s.ws = wsID
-	s.state = state
+	s.ws = query.WorkspaceKey
+	s.state = query.State
 	return s.result, s.err
 }
 
 func newPRReviewHarness(t *testing.T, withDispatcher bool) *prReviewHarness {
-	return newPRReviewHarnessWithAgent(t, withDispatcher, nil)
+	return newPRReviewHarnessWithPullRequests(t, withDispatcher, nil)
 }
 
-func newPRReviewHarnessWithAgent(t *testing.T, withDispatcher bool, agentSvc agentcoord.AgentService) *prReviewHarness {
-	return newPRReviewHarnessWithCredential(t, withDispatcher, agentSvc, testCredentialEnv, prReviewTestToken)
+func newPRReviewHarnessWithPullRequests(t *testing.T, withDispatcher bool, pullRequests PullRequestLister) *prReviewHarness {
+	return newPRReviewHarnessWithCredential(t, withDispatcher, pullRequests, testCredentialEnv, prReviewTestToken)
 }
 
 func newPRReviewHarnessWithCredential(
 	t *testing.T,
 	withDispatcher bool,
-	agentSvc agentcoord.AgentService,
+	pullRequests PullRequestLister,
 	source testCredentialSource,
 	token string,
 ) *prReviewHarness {
@@ -598,7 +592,7 @@ func newPRReviewHarnessWithCredential(
 	}
 	h.module = NewModule(Config{
 		Workspace: buildTestWorkspaceQueries(t, h.store), ConnectorManagement: connectorManagement, ConnectorSealer: connectorSealer,
-		Dispatcher: dispatcher, AgentService: agentSvc, LocalSettingsDir: h.dataDir,
+		Dispatcher: dispatcher, PullRequests: pullRequests, LocalSettingsDir: h.dataDir,
 		ReviewerProvisioning: h.reviewers, ReviewerAgents: h.reviewers, SourceControl: h.materializer,
 		InteractionChat: h.chat, InteractionMessenger: h.messenger, InteractionAuthority: h.chatAuthority,
 	})

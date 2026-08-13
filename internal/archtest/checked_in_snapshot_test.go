@@ -24,7 +24,7 @@ func TestCheckedInSnapshotViolations(t *testing.T) {
 
 func checkedInSnapshotReport() Report {
 	return Report{
-		CompositeStoreFiles:        make([]string, 14),
+		CompositeStoreFiles:        make([]string, 13),
 		CompositeStoreOutside:      make([]string, 0),
 		LegacyHandlerImports:       make([]LegacyImportUse, 0),
 		ModuleRoots:                append([]string(nil), checkedInModuleRoots...),

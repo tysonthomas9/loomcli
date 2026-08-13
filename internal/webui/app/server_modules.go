@@ -105,16 +105,17 @@ func (app *Server) buildInfraModules() {
 				app.config.WorkItemsFn, app.claimMetrics, app.fleetRegCfg))
 	}
 
-	if app.diffSvc != nil {
-		app.wsModules = append(app.wsModules, NewDiffModule(app.agentSvc, app.diffSvc))
+	if app.sourceCheckout != nil && app.sourceBrowse != nil && app.issueDiff != nil {
+		app.wsModules = append(app.wsModules, NewDiffModule(app.sourceCheckout, app.sourceBrowse, app.issueDiff))
 	}
 
-	if app.fileSvc != nil {
-		app.wsModules = append(app.wsModules, NewFileModule(app.fileSvc, middleware.FileAccessConfig{
+	if app.sourceBrowse != nil && app.sourceMutate != nil && app.sourceCheckout != nil {
+		app.wsModules = append(app.wsModules, NewFileModule(app.sourceBrowse, app.sourceMutate, app.sourceCheckout, middleware.FileAccessConfig{
 			RemoteAuth:      app.config.ExtAuthURL != "",
 			ResolveRole:     app.config.WorkspaceRoleResolver,
 			FrontendOrigins: app.config.FrontendOrigins,
 			Logger:          app.config.Logger,
+			GrantIssuer:     app.config.SourceControlAccessGrants,
 		}))
 	}
 
@@ -174,7 +175,6 @@ func (app *Server) buildPRReviewModule() {
 		app.connectorManagement,
 		app.connectorSealer,
 		app.connectorDispatcher,
-		app.agentSvc,
 	)
 	app.prReviewCredentialSeeds = prReviewModule
 	app.wsModules = append(app.wsModules, prReviewModule)
@@ -183,5 +183,7 @@ func (app *Server) buildPRReviewModule() {
 func (app *Server) buildStorelessInfraModules() {
 	// Without a store there is no connector-backed prreview module, so
 	// keep the gh-backed pull-request list route available.
-	app.wsModules = append(app.wsModules, githandlers.NewPullRequestListModule(app.agentSvc))
+	if app.sourceCheckout != nil {
+		app.wsModules = append(app.wsModules, githandlers.NewPullRequestListModule(app.sourceCheckout))
+	}
 }
