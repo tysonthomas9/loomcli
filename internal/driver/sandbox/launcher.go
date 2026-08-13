@@ -346,16 +346,36 @@ child.on('error', (error) => {
 function shutdown(signal) {
   if (completed) return;
   completed = true;
-  try { child.kill(signal); } catch {}
-  setTimeout(() => {
+
+  // Do not exit the launcher until the workflow child has observed the signal
+  // and exited. Exiting immediately after child.kill can close IPC and orphan
+  // the child before its cancellation handler runs, which is especially
+  // visible on macOS. Keep the hard-kill timer referenced so shutdown still
+  // has a deterministic upper bound when a workflow ignores the signal.
+  let shutdownFinished = false;
+  let forceKillTimer;
+  const finishShutdown = () => {
+    if (shutdownFinished) return;
+    shutdownFinished = true;
+    if (forceKillTimer) clearTimeout(forceKillTimer);
+    console.log(JSON.stringify({
+      status: 'cancelled',
+      summary: 'Flue local runner cancelled',
+      errorClass: 'driver_cancelled',
+    }));
+    process.exit(signal === 'SIGINT' ? 130 : 143);
+  };
+
+  child.once('exit', finishShutdown);
+  let signalled = false;
+  try { signalled = child.kill(signal); } catch {}
+  if (!signalled) {
+    finishShutdown();
+    return;
+  }
+  forceKillTimer = setTimeout(() => {
     try { child.kill('SIGKILL'); } catch {}
-  }, 1000).unref?.();
-  console.log(JSON.stringify({
-    status: 'cancelled',
-    summary: 'Flue local runner cancelled',
-    errorClass: 'driver_cancelled',
-  }));
-  process.exit(signal === 'SIGINT' ? 130 : 143);
+  }, 1000);
 }
 
 process.once('SIGINT', () => shutdown('SIGINT'));
