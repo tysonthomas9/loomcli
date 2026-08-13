@@ -36,7 +36,7 @@ jobs:
           token: ${{ secrets.AFT_CHECKOUT_TOKEN }}
           path: .aft
           # Pinned like the flue checkout below; update deliberately with AFT changes.
-          ref: 1a08986574ef6a730d3d0a623fb1d886ed9eaa4b
+          ref: 0e92b11505a9212e4acbabbfdb8d2bd277c4cda6
 
       - uses: actions/checkout@v4
         with:
