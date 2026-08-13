@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -593,8 +594,21 @@ func (b *FleetBackend) Update(ctx context.Context, id string, params backend.Upd
 
 	req := updateParamsToPatchRequest(params)
 	if len(req) > 0 {
-		if _, err := b.exec(ctx, "Update", "PATCH", "/issues/"+url.PathEscape(id), req); err != nil {
+		// Tolerant PATCH: a field this fleet-db does not declare must not take the
+		// rest of the update down with it. See update_compat.go and FINDINGS §1.13.
+		dropped, err := b.patchIssueTolerantly(ctx, id, req)
+		if err != nil {
 			return err
+		}
+		// Do NOT swallow the dropped list. Returning nil after silently discarding a
+		// field the caller asked to write is the same silent data loss this change
+		// exists to fix, just moved one layer up: `design` lands, `design_format` is
+		// dropped, and the caller is told the whole update succeeded. Surfacing it in
+		// the log keeps the drift visible at the moment it happens.
+		if len(dropped) > 0 {
+			slog.Warn("fleet update applied without unsupported fields",
+				"issue", id, "dropped", strings.Join(dropped, ","),
+				"detail", "fleet-db rejected these as unknown; the remaining fields were written")
 		}
 		handled = true
 	}

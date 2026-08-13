@@ -285,7 +285,7 @@ func TestDeleteTab_KillsPTY(t *testing.T) {
 	}
 }
 
-func TestDeleteTab_IgnoresKillErrorAndStillRemovesMetadata(t *testing.T) {
+func TestDeleteTab_ReportsKillErrorButStillRemovesMetadata(t *testing.T) {
 	svc, fake, _ := newLivenessTestSvc(t)
 	ctx := context.Background()
 	const ws = "w"
@@ -294,9 +294,17 @@ func TestDeleteTab_IgnoresKillErrorAndStillRemovesMetadata(t *testing.T) {
 	fake.alive[SessionKey{Workspace: ws, Name: "sess"}] = true
 	fake.killErr = errors.New("PTY kill failed deep in the OS")
 
-	if err := svc.DeleteTab(ctx, ws, "sess"); err != nil {
-		t.Fatalf("DeleteTab should swallow Kill error, got %v", err)
+	// Contract change (was: swallow the Kill error). Callers treat a successful
+	// DeleteTab as evidence the process died — for an agent terminal that process is
+	// a billed model CLI — so a swallowed failure made "cleaned up" and "still
+	// running" indistinguishable. The live tier hit exactly that: a tab deleted
+	// successfully while `codex app-server` kept running.
+	err := svc.DeleteTab(ctx, ws, "sess")
+	if err == nil {
+		t.Fatal("DeleteTab should report a Kill failure, got nil")
 	}
+	// The metadata delete is still NOT undone: the tab really is gone, so the caller
+	// can retry the kill or escalate rather than being left with a phantom tab.
 	if meta, _ := svc.tabStore.Get(ctx, ws, "sess"); meta != nil {
 		t.Errorf("metadata should have been removed despite Kill failure")
 	}

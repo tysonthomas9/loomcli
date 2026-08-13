@@ -154,14 +154,21 @@ func (s *terminalServiceImpl) DeleteTab(ctx context.Context, wsID, session strin
 		return service.ErrInternal("failed to delete tab metadata", err)
 	}
 
-	// Metadata is gone, but a child PTY keyed by the same name could still
-	// be running (especially with grace_period=0 on local serve). Kill it
-	// so no orphaned shell outlives its tab. Best-effort: a Kill failure
-	// is logged but doesn't undo the metadata delete.
+	// Metadata is gone, but a child PTY keyed by the same name could still be
+	// running (especially with grace_period=0 on local serve). Kill it so no
+	// orphaned process outlives its tab.
+	//
+	// The kill error is REPORTED, not just logged. Callers use "tab deleted" as
+	// evidence the process died — for an agent terminal that process is a billed
+	// model CLI — and swallowing the failure made a successful delete indistinguishable
+	// from a survivor. The metadata delete above is not undone: the tab really is gone,
+	// so the caller can retry the kill or escalate, but it must learn that it happened.
+	killErr := error(nil)
 	if s.ptyMgr != nil {
 		if err := s.ptyMgr.Kill(SessionKey{Workspace: wsID, Name: session}); err != nil {
 			slog.Warn("failed to kill PTY on tab delete",
 				"workspace", wsID, "session", session, "err", err)
+			killErr = err
 		}
 	}
 
@@ -174,6 +181,9 @@ func (s *terminalServiceImpl) DeleteTab(ctx context.Context, wsID, session strin
 			Timestamp:   time.Now().UTC().Format(time.RFC3339),
 			WorkspaceID: wsID,
 		})
+	}
+	if killErr != nil {
+		return service.ErrInternal("tab metadata deleted but its process could not be killed", killErr)
 	}
 	return nil
 }

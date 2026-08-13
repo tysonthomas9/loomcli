@@ -5,6 +5,7 @@ import (
 	"os/exec"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"github.com/creack/pty"
@@ -291,11 +292,43 @@ func (s *ptySession) close(reason string) error {
 			}
 		}
 		if s.cmd != nil && s.cmd.Process != nil {
-			_ = s.cmd.Process.Kill()
+			if err := killProcessTree(s.cmd.Process.Pid); err != nil && firstErr == nil {
+				firstErr = err
+			}
 			_ = s.cmd.Wait()
 		}
 	})
 	return firstErr
+}
+
+// killProcessTree SIGKILLs the child's whole process group, not just the child.
+//
+// The PTY child is a session leader (creack/pty sets Setsid), and anything it
+// spawns without asking for its own group stays in that group. `loom lead` spawns
+// `codex app-server` exactly that way. SIGKILL cannot be trapped, so killing only
+// the child skips loom's deferred stopCodexAppServer and orphans a live — billed —
+// app-server that outlives the terminal. Observed in the live tier: a passing test
+// left `codex app-server --listen ws://…` running after the run ended.
+//
+// Falls back to the single-process kill when the group cannot be resolved (the
+// child is not a group leader, or the platform refuses), so this can only ever
+// kill at least as much as before, never less.
+func killProcessTree(pid int) error {
+	if pid <= 0 {
+		return nil
+	}
+	if pgid, err := syscall.Getpgid(pid); err == nil && pgid == pid {
+		// Negative pid targets the group. Only when the child leads its own group:
+		// otherwise this would signal the group loom serve itself belongs to.
+		if err := syscall.Kill(-pgid, syscall.SIGKILL); err == nil {
+			return nil
+		}
+	}
+	proc, err := os.FindProcess(pid)
+	if err != nil {
+		return err
+	}
+	return proc.Kill()
 }
 
 // send attempts a non-blocking copy to the attachment's channel. Dropped
