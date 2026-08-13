@@ -796,7 +796,12 @@ export AFT_REPORT_DIR="$REPORT_DIR"
 if [[ -n "${AFT_REAL_BACKEND:-}" ]]; then
     export AFT_REAL_BACKEND
 fi
-export AFT_WORK_DIR="$REPORT_DIR/work/$RUN_ID"   # scratch space for run-step state (issue ids etc.)
+# `_work`, not `work`: the go tool ignores directories beginning with `_` or `.`.
+# Live suites seed throwaway git repos here, and the PR-review fixture seeds a Go
+# file — under a plain `work/` those became real packages in `go test ./...`, whose
+# coverage lines corrupted the profile and failed `make check` at the coverage gate
+# with a decidedly unhelpful "line \"1 1\" doesn't match expected format".
+export AFT_WORK_DIR="$REPORT_DIR/_work/$RUN_ID"  # scratch space for run-step state (issue ids etc.)
 mkdir -p "$AFT_WORK_DIR"
 
 if [[ -n "$AFT_WITH_DAEMON" ]]; then
