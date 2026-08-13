@@ -99,14 +99,16 @@ type PatchSessionCommand struct {
 	TranscriptArtifactID *string
 }
 
-// PublishTranscriptCommand carries one bounded canonical transcript for the
-// exact live AgentSession generation. Artifact identity and ownership are
-// derived by Interaction; the child cannot choose or redirect them.
+// PublishTranscriptCommand carries either one bounded canonical transcript or
+// one sanitized pre-content capture failure for the exact live AgentSession
+// generation. Artifact identity and ownership are derived by Interaction; the
+// child cannot choose or redirect them.
 type PublishTranscriptCommand struct {
 	WorkspaceKey string
 	SessionID    string
 	Content      []byte
 	Metadata     map[string]string
+	FailureClass string
 }
 
 type FinishSessionCommand struct {
@@ -223,6 +225,17 @@ type API interface {
 // read projections. It exposes no lease, terminal, inbox, or mutation port.
 type SessionQueries interface {
 	GetSession(context.Context, string, string) (*AgentSession, error)
+	ListSessions(context.Context, SessionArchiveQuery) ([]*AgentSession, error)
+}
+
+// SessionArchiveQuery is Interaction's bounded immutable history query for
+// Run Capture composition. Filters are owner vocabulary rather than storage
+// DTOs, and Limit is mandatory.
+type SessionArchiveQuery struct {
+	WorkspaceKey string
+	AgentID      string
+	WorkItemID   string
+	Limit        int
 }
 
 type RuntimeStartRecoveryAPI interface {

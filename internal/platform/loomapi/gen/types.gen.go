@@ -405,6 +405,39 @@ func (e ErrorResponseSuccess) Valid() bool {
 	}
 }
 
+// Defines values for EvidenceState.
+const (
+	CaptureFailed      EvidenceState = "capture_failed"
+	ContentUnavailable EvidenceState = "content_unavailable"
+	Corrupt            EvidenceState = "corrupt"
+	Finalized          EvidenceState = "finalized"
+	Missing            EvidenceState = "missing"
+	Pending            EvidenceState = "pending"
+	Truncated          EvidenceState = "truncated"
+)
+
+// Valid indicates whether the value is a known member of the EvidenceState enum.
+func (e EvidenceState) Valid() bool {
+	switch e {
+	case CaptureFailed:
+		return true
+	case ContentUnavailable:
+		return true
+	case Corrupt:
+		return true
+	case Finalized:
+		return true
+	case Missing:
+		return true
+	case Pending:
+		return true
+	case Truncated:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for FileCheckoutKind.
 const (
 	FileCheckoutKindAgent FileCheckoutKind = "agent"
@@ -2376,6 +2409,9 @@ type ErrorResponse struct {
 // ErrorResponseSuccess defines model for ErrorResponse.Success.
 type ErrorResponseSuccess bool
 
+// EvidenceState Durable Artifacts evidence state, independent of the owning run or session outcome.
+type EvidenceState string
+
 // FileBlameLine defines model for FileBlameLine.
 type FileBlameLine struct {
 	Author  string `json:"author"`
@@ -3334,15 +3370,20 @@ type SeedRequest struct {
 
 // SessionHistoryRecord Session history record (Redis-backed, per-issue)
 type SessionHistoryRecord struct {
-	Backend        string                       `json:"backend"`
-	EndedAt        *time.Time                   `json:"ended_at,omitempty"`
-	Id             string                       `json:"id"`
-	IssueId        string                       `json:"issue_id"`
-	Launcher       SessionHistoryRecordLauncher `json:"launcher"`
-	ScrollbackPath *string                      `json:"scrollback_path,omitempty"`
-	SessionName    string                       `json:"session_name"`
-	StartedAt      time.Time                    `json:"started_at"`
-	Status         SessionHistoryRecordStatus   `json:"status"`
+	Backend  string                       `json:"backend"`
+	EndedAt  *time.Time                   `json:"ended_at,omitempty"`
+	Id       string                       `json:"id"`
+	IssueId  string                       `json:"issue_id"`
+	Launcher SessionHistoryRecordLauncher `json:"launcher"`
+
+	// ScrollbackEvidenceStatus Durable Artifacts evidence state, independent of the owning run or session outcome.
+	ScrollbackEvidenceStatus EvidenceState `json:"scrollback_evidence_status"`
+
+	// ScrollbackFailureClass Sanitized failure class when scrollback capture failed.
+	ScrollbackFailureClass *string                    `json:"scrollback_failure_class,omitempty"`
+	SessionName            string                     `json:"session_name"`
+	StartedAt              time.Time                  `json:"started_at"`
+	Status                 SessionHistoryRecordStatus `json:"status"`
 }
 
 // SessionHistoryRecordLauncher defines model for SessionHistoryRecord.Launcher.
@@ -3353,41 +3394,49 @@ type SessionHistoryRecordStatus string
 
 // SessionResponse Session audit record returned by the canonical HTTP contract.
 type SessionResponse struct {
-	AgentName        string     `json:"agent_name"`
-	AttemptNum       int        `json:"attempt_num"`
-	Backend          string     `json:"backend"`
-	CacheReadTokens  int64      `json:"cache_read_tokens"`
-	CacheWriteTokens int64      `json:"cache_write_tokens"`
-	Delivery         *string    `json:"delivery,omitempty"`
-	DurationS        *float64   `json:"duration_s,omitempty"`
-	EndedAt          *time.Time `json:"ended_at,omitempty"`
-	EpicId           *string    `json:"epic_id,omitempty"`
-	ErrorClass       *string    `json:"error_class,omitempty"`
-	EstimatedCostUsd float64    `json:"estimated_cost_usd"`
-	ExitCode         int        `json:"exit_code"`
-	FilesChanged     int        `json:"files_changed"`
-	FilesTouched     *[]string  `json:"files_touched,omitempty"`
-	GithubBranch     *string    `json:"github_branch,omitempty"`
-	GithubPrUrl      *string    `json:"github_pr_url,omitempty"`
-	HasDiff          bool       `json:"has_diff"`
-	HasTranscript    bool       `json:"has_transcript"`
-	HeadSha          *string    `json:"head_sha,omitempty"`
-	InputTokens      int64      `json:"input_tokens"`
-	IsActive         bool       `json:"is_active"`
-	LastError        *string    `json:"last_error,omitempty"`
-	LinesAdded       int        `json:"lines_added"`
-	LinesRemoved     int        `json:"lines_removed"`
-	LocalBranch      *string    `json:"local_branch,omitempty"`
-	LogsRef          *string    `json:"logs_ref,omitempty"`
-	Model            *string    `json:"model,omitempty"`
-	OutputTokens     int64      `json:"output_tokens"`
-	PatchBackStatus  *string    `json:"patch_back_status,omitempty"`
-	Phase            *string    `json:"phase,omitempty"`
-	RuntimeStrategy  *string    `json:"runtime_strategy,omitempty"`
-	SessionId        string     `json:"session_id"`
-	StartedAt        time.Time  `json:"started_at"`
-	Status           string     `json:"status"`
-	TaskId           string     `json:"task_id"`
+	AgentName        string  `json:"agent_name"`
+	AttemptNum       int     `json:"attempt_num"`
+	Backend          string  `json:"backend"`
+	CacheReadTokens  int64   `json:"cache_read_tokens"`
+	CacheWriteTokens int64   `json:"cache_write_tokens"`
+	Delivery         *string `json:"delivery,omitempty"`
+
+	// DiffEvidenceStatus Durable Artifacts evidence state, independent of the owning run or session outcome.
+	DiffEvidenceStatus EvidenceState `json:"diff_evidence_status"`
+	DiffFailureClass   *string       `json:"diff_failure_class,omitempty"`
+	DurationS          *float64      `json:"duration_s,omitempty"`
+	EndedAt            *time.Time    `json:"ended_at,omitempty"`
+	EpicId             *string       `json:"epic_id,omitempty"`
+	ErrorClass         *string       `json:"error_class,omitempty"`
+	EstimatedCostUsd   float64       `json:"estimated_cost_usd"`
+	ExitCode           int           `json:"exit_code"`
+	FilesChanged       int           `json:"files_changed"`
+	FilesTouched       *[]string     `json:"files_touched,omitempty"`
+	GithubBranch       *string       `json:"github_branch,omitempty"`
+	GithubPrUrl        *string       `json:"github_pr_url,omitempty"`
+	HasDiff            bool          `json:"has_diff"`
+	HasTranscript      bool          `json:"has_transcript"`
+	HeadSha            *string       `json:"head_sha,omitempty"`
+	InputTokens        int64         `json:"input_tokens"`
+	IsActive           bool          `json:"is_active"`
+	LastError          *string       `json:"last_error,omitempty"`
+	LinesAdded         int           `json:"lines_added"`
+	LinesRemoved       int           `json:"lines_removed"`
+	LocalBranch        *string       `json:"local_branch,omitempty"`
+	LogsRef            *string       `json:"logs_ref,omitempty"`
+	Model              *string       `json:"model,omitempty"`
+	OutputTokens       int64         `json:"output_tokens"`
+	PatchBackStatus    *string       `json:"patch_back_status,omitempty"`
+	Phase              *string       `json:"phase,omitempty"`
+	RuntimeStrategy    *string       `json:"runtime_strategy,omitempty"`
+	SessionId          string        `json:"session_id"`
+	StartedAt          time.Time     `json:"started_at"`
+	Status             string        `json:"status"`
+	TaskId             string        `json:"task_id"`
+
+	// TranscriptEvidenceStatus Durable Artifacts evidence state, independent of the owning run or session outcome.
+	TranscriptEvidenceStatus EvidenceState `json:"transcript_evidence_status"`
+	TranscriptFailureClass   *string       `json:"transcript_failure_class,omitempty"`
 }
 
 // StaleDetectorStatus defines model for StaleDetectorStatus.
@@ -3835,14 +3884,6 @@ type GetObservabilityMetricsParams struct {
 	Workspace *string `form:"workspace,omitempty" json:"workspace,omitempty"`
 }
 
-// NotifySessionChangeJSONBody defines parameters for NotifySessionChange.
-type NotifySessionChangeJSONBody struct {
-	SessionId   string `json:"session_id"`
-	Status      string `json:"status"`
-	TaskId      string `json:"task_id"`
-	WorkspaceId string `json:"workspace_id"`
-}
-
 // CreateWorkspaceJSONBody defines parameters for CreateWorkspace.
 type CreateWorkspaceJSONBody struct {
 	Name string `json:"name"`
@@ -4276,9 +4317,6 @@ type PushWorkerLogsJSONRequestBody = PushWorkerLogsJSONBody
 
 // UpdateWorkerStateJSONRequestBody defines body for UpdateWorkerState for application/json ContentType.
 type UpdateWorkerStateJSONRequestBody = WorkerStateRequest
-
-// NotifySessionChangeJSONRequestBody defines body for NotifySessionChange for application/json ContentType.
-type NotifySessionChangeJSONRequestBody NotifySessionChangeJSONBody
 
 // CreateWorkspaceJSONRequestBody defines body for CreateWorkspace for application/json ContentType.
 type CreateWorkspaceJSONRequestBody CreateWorkspaceJSONBody

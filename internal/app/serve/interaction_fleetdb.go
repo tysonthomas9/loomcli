@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
@@ -242,6 +243,29 @@ func (transport *interactionFleetDBAuthorityTransport) GetSession(
 	}
 	value, err := transport.transport.GetInteractionSession(ctx, workspace, sessionID)
 	return interactionSession(value), translateInteractionFleetDBError(err)
+}
+
+func (transport *interactionFleetDBAuthorityTransport) ListSessions(
+	ctx context.Context,
+	query interaction.SessionArchiveQuery,
+) ([]*interaction.AgentSession, error) {
+	if transport == nil || transport.transport == nil {
+		return nil, interactionfleetdb.ErrTransportUnavailable
+	}
+	values, err := transport.transport.ListInteractionSessions(ctx, infrafleetdb.InteractionSessionQuery{
+		WorkspaceKey: query.WorkspaceKey,
+		AgentID:      query.AgentID,
+		WorkItemID:   query.WorkItemID,
+		Limit:        query.Limit,
+	})
+	if err != nil {
+		return nil, translateInteractionFleetDBError(err)
+	}
+	out := make([]*interaction.AgentSession, 0, len(values))
+	for _, value := range values {
+		out = append(out, interactionSession(value))
+	}
+	return out, nil
 }
 
 func (transport *interactionFleetDBAuthorityTransport) HeartbeatSessionOwned(
@@ -591,7 +615,7 @@ func interactionSession(value *domain.AgentSession) *interaction.AgentSession {
 		CurrentLeaseID:           value.CurrentLeaseID,
 		CurrentLeaseFencingToken: value.CurrentLeaseFencingToken,
 		Summary:                  value.Summary, ErrorClass: value.ErrorClass, ExitCode: cloneInteractionInt(value.ExitCode),
-		TranscriptArtifactID: value.Metadata["transcript_ref"],
+		TranscriptArtifactID: strings.TrimPrefix(value.Metadata["transcript_ref"], "artifact://"),
 		Metadata:             cloneInteractionMap(value.Metadata),
 		StartedAt:            value.StartedAt, LastHeartbeat: value.LastHeartbeat,
 		FinishedAt: cloneInteractionTime(value.FinishedAt), CreatedAt: value.CreatedAt,

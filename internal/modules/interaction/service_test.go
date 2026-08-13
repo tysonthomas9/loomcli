@@ -554,6 +554,58 @@ func TestPublishTranscriptUsesSessionAuthorityAndLinksExactGeneration(t *testing
 	}
 }
 
+func TestPublishTranscriptRecordsPreContentFailureWithoutChangingSessionOutcome(t *testing.T) {
+	harness := newInteractionHarness(t)
+	harness.sessions.values[testSession] = &AgentSession{
+		WorkspaceKey: testWorkspace, SessionID: testSession, AgentID: testAgent,
+		NodeID: "node-1", Kind: SessionKindInteractive, TerminalID: testTerminal,
+		TaskID: "task-1", Status: SessionRunning, CurrentLeaseID: "lease-1",
+		CurrentLeaseFencingToken: 1,
+	}
+	harness.leases.values[testSession] = &SessionLease{
+		WorkspaceKey: testWorkspace, SessionID: testSession, AgentID: testAgent,
+		NodeID: "node-1", LeaseID: "lease-1", FencingToken: 1,
+		Status: "active", ExpiresAt: harness.now.Add(time.Minute),
+	}
+
+	updated, err := harness.service.PublishTranscript(
+		t.Context(),
+		harness.session(t, ActionPublishTranscript, testTerminal, 1),
+		PublishTranscriptCommand{
+			WorkspaceKey: testWorkspace, SessionID: testSession,
+			FailureClass: "capture_unavailable",
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Status != SessionRunning || updated.TranscriptArtifactID != "" {
+		t.Fatalf("session outcome changed by evidence failure: %+v", updated)
+	}
+	if len(harness.transcripts.failures) != 1 || harness.transcripts.failures[0] != (TranscriptArtifactFailure{
+		WorkspaceKey: testWorkspace, ArtifactID: "transcript-" + testSession,
+		AgentID: testAgent, SessionID: testSession, TaskID: "task-1",
+		FailureClass: "capture_unavailable",
+	}) {
+		t.Fatalf("recorded failures = %+v", harness.transcripts.failures)
+	}
+	if len(harness.transcripts.commands) != 0 {
+		t.Fatalf("failure attempted content publish: %+v", harness.transcripts.commands)
+	}
+
+	_, err = harness.service.PublishTranscript(
+		t.Context(),
+		harness.session(t, ActionPublishTranscript, testTerminal, 1),
+		PublishTranscriptCommand{
+			WorkspaceKey: testWorkspace, SessionID: testSession,
+			Content: []byte("content"), FailureClass: "capture_unavailable",
+		},
+	)
+	if !errors.Is(err, ErrInvalid) {
+		t.Fatalf("content plus failure error = %v, want ErrInvalid", err)
+	}
+}
+
 func TestInteractiveFinishRequiresAtomicTerminalResult(t *testing.T) {
 	harness := newInteractionHarness(t)
 	harness.sessions.values[testSession] = &AgentSession{
@@ -943,6 +995,7 @@ type fakeSessionStore struct {
 
 type fakeTranscriptArtifactStore struct {
 	commands    []TranscriptArtifactCreate
+	failures    []TranscriptArtifactFailure
 	authorities []authority.SessionAuthority
 	err         error
 }
@@ -958,6 +1011,16 @@ func (store *fakeTranscriptArtifactStore) CreateContent(
 		return "", store.err
 	}
 	return command.ArtifactID, nil
+}
+
+func (store *fakeTranscriptArtifactStore) RecordFailure(
+	_ context.Context,
+	auth authority.SessionAuthority,
+	command TranscriptArtifactFailure,
+) error {
+	store.authorities = append(store.authorities, auth)
+	store.failures = append(store.failures, command)
+	return store.err
 }
 
 func (store *fakeSessionStore) Start(_ context.Context, command StartSessionCommand) (SessionStart, error) {
@@ -996,6 +1059,22 @@ func (store *fakeSessionStore) Get(_ context.Context, _, sessionID string) (*Age
 		return nil, ErrNotFound
 	}
 	return cloneSession(value), nil
+}
+
+func (store *fakeSessionStore) List(_ context.Context, query SessionArchiveQuery) ([]*AgentSession, error) {
+	out := make([]*AgentSession, 0, len(store.values))
+	for _, value := range store.values {
+		if value.WorkspaceKey != query.WorkspaceKey ||
+			(query.AgentID != "" && value.AgentID != query.AgentID) ||
+			(query.WorkItemID != "" && value.TaskID != query.WorkItemID) {
+			continue
+		}
+		out = append(out, cloneSession(value))
+		if len(out) == query.Limit {
+			break
+		}
+	}
+	return out, nil
 }
 
 func (store *fakeSessionStore) PatchOwned(

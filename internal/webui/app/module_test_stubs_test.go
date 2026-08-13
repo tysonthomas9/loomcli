@@ -3,8 +3,8 @@ package app
 import (
 	"context"
 
+	transcript "github.com/tysonthomas9/loomcli/internal/modules/artifacts"
 	"github.com/tysonthomas9/loomcli/internal/ops"
-	"github.com/tysonthomas9/loomcli/internal/sessions"
 	"github.com/tysonthomas9/loomcli/internal/webui/filecoord"
 	"github.com/tysonthomas9/loomcli/internal/webui/sessioncoord"
 	"github.com/tysonthomas9/loomcli/internal/webui/sourcecontrolcoord"
@@ -49,19 +49,19 @@ func (s *stubTerminalService) StartSetup(_ context.Context, _ string, req termin
 // stubSessionService implements SessionService with no-op defaults for module tests.
 type stubSessionService struct{}
 
-func (s *stubSessionService) ListTaskSessions(_ context.Context, _ string) ([]sessioncoord.SessionListItem, error) {
+func (s *stubSessionService) ListTaskSessions(_ context.Context, _, _ string) ([]sessioncoord.SessionListItem, error) {
 	return nil, nil
 }
-func (s *stubSessionService) GetSession(_ context.Context, _, _ string) (*sessioncoord.SessionDetailData, error) {
+func (s *stubSessionService) GetSession(_ context.Context, _, _, _ string) (*sessioncoord.SessionDetailData, error) {
 	return &sessioncoord.SessionDetailData{}, nil
 }
-func (s *stubSessionService) GetSessionTranscript(_ context.Context, _, _ string) ([]sessions.TranscriptEntry, error) {
+func (s *stubSessionService) GetSessionTranscript(_ context.Context, _, _, _ string) ([]transcript.Event, error) {
 	return nil, nil
 }
-func (s *stubSessionService) GetSessionDiff(_ context.Context, _, _ string) (string, error) {
+func (s *stubSessionService) GetSessionDiff(_ context.Context, _, _, _ string) (string, error) {
 	return "", nil
 }
-func (s *stubSessionService) ListSessionHistory(_ context.Context, _, _ string) ([]sessioncoord.SessionRecord, error) {
+func (s *stubSessionService) ListSessionHistory(_ context.Context, _, _ string) ([]sessioncoord.SessionHistoryItem, error) {
 	return nil, nil
 }
 func (s *stubSessionService) GetSessionScrollback(_ context.Context, _, _, _ string) (*sessioncoord.SessionScrollbackResult, error) {

@@ -10,8 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/tysonthomas9/loomcli/internal/modules/artifacts/transcript"
+	"unicode/utf8"
 )
 
 const (
@@ -27,6 +26,8 @@ const (
 	MetadataEvidenceOriginalBytes  = "loom.evidence.original_size_bytes"
 	MetadataEvidenceLimitBytes     = "loom.evidence.capture_limit_bytes"
 	MetadataEvidenceTruncateReason = "loom.evidence.truncation_reason"
+	ownerEvidenceMetadataPrefix    = "loom.evidence."
+	transcriptTruncationNotice     = "Transcript truncated by Loom because source history or canonical output exceeded Loom's bounded capture limits."
 )
 
 type EvidenceKind string
@@ -68,6 +69,64 @@ type PreparedEvidence struct {
 	Truncated       bool
 }
 
+// OwnerEvidenceCaptureStatusKey and OwnerEvidenceFailureClassKey expose the
+// Artifacts-owned vocabulary used when the lifecycle owner must durably record
+// a capture failure that occurred before an Artifact row could be committed.
+// Run Capture reads these keys only from an already-authorized owner snapshot.
+func OwnerEvidenceCaptureStatusKey(kind EvidenceKind) string {
+	return ownerEvidenceMetadataPrefix + string(kind) + ".capture_status"
+}
+
+func OwnerEvidenceFailureClassKey(kind EvidenceKind) string {
+	return ownerEvidenceMetadataPrefix + string(kind) + ".failure_class"
+}
+
+func OwnerEvidenceAttemptKey(kind EvidenceKind) string {
+	return ownerEvidenceMetadataPrefix + string(kind) + ".attempt"
+}
+
+func OwnerEvidenceFinalized(kind EvidenceKind, attempt int) map[string]string {
+	result := map[string]string{
+		OwnerEvidenceCaptureStatusKey(kind): "finalized",
+		OwnerEvidenceFailureClassKey(kind):  "",
+	}
+	if attempt > 0 {
+		result[OwnerEvidenceAttemptKey(kind)] = strconv.Itoa(attempt)
+	}
+	return result
+}
+
+// WithoutOwnerEvidenceMetadata prevents a backend or workflow runner from
+// minting Artifacts-owned evidence state through arbitrary runtime metadata.
+func WithoutOwnerEvidenceMetadata(source map[string]string) map[string]string {
+	if source == nil {
+		return nil
+	}
+	result := make(map[string]string, len(source))
+	for key, value := range source {
+		if strings.HasPrefix(strings.TrimSpace(key), ownerEvidenceMetadataPrefix) {
+			continue
+		}
+		result[key] = value
+	}
+	return result
+}
+
+// OwnerEvidenceCaptureFailure returns a sanitized, durable owner-metadata
+// projection. Raw adapter errors are deliberately excluded so credentials or
+// backend details cannot leak into TaskRun or AgentSession records.
+func OwnerEvidenceCaptureFailure(kind EvidenceKind, cause error, attempt ...int) map[string]string {
+	failure := evidenceFailureCommand("owner-projection", cause)
+	result := map[string]string{
+		OwnerEvidenceCaptureStatusKey(kind): "capture_failed",
+		OwnerEvidenceFailureClassKey(kind):  failure.FailureClass,
+	}
+	if len(attempt) > 0 && attempt[0] > 0 {
+		result[OwnerEvidenceAttemptKey(kind)] = strconv.Itoa(attempt[0])
+	}
+	return result
+}
+
 // EvidencePolicy owns canonicalization, redaction requirements, size bounds,
 // truncation provenance, and the durable metadata vocabulary for evidence.
 type EvidencePolicy struct {
@@ -83,6 +142,7 @@ func NewEvidencePolicy(redactor RedactionMechanism) (*EvidencePolicy, error) {
 	return &EvidencePolicy{redactor: redactor, maxBytes: MaxEvidenceCaptureBytes, now: time.Now}, nil
 }
 
+//nolint:funlen // Policy keeps redaction, canonicalization, bounds, and provenance atomic.
 func (policy *EvidencePolicy) Prepare(
 	ctx context.Context,
 	artifactType, mimeType string,
@@ -113,6 +173,9 @@ func (policy *EvidencePolicy) Prepare(
 		return PreparedEvidence{}, fmt.Errorf("redactor returned invalid %s evidence size: %w", kind, ErrInvalidPersistedState)
 	}
 	preparedContent := append([]byte(nil), redacted.Content...)
+	if (kind == EvidenceTranscript || strings.HasPrefix(mimeType, "text/")) && !utf8.Valid(preparedContent) {
+		return PreparedEvidence{}, fmt.Errorf("%s evidence is not valid UTF-8: %w", kind, ErrEvidenceCorrupt)
+	}
 	truncated := false
 	reason := ""
 	if kind == EvidenceTranscript {
@@ -121,7 +184,7 @@ func (policy *EvidencePolicy) Prepare(
 			return PreparedEvidence{}, err
 		}
 	} else if len(preparedContent) > policy.maxBytes {
-		preparedContent = append([]byte(nil), preparedContent[:policy.maxBytes]...)
+		preparedContent = truncateEvidenceContent(preparedContent, mimeType, policy.maxBytes)
 		truncated = true
 		reason = "canonical_output_limit"
 	}
@@ -184,7 +247,10 @@ func evidenceMetadata(
 	truncated bool,
 	reason string,
 ) map[string]string {
-	result := cloneMetadata(source)
+	// Every key in the loom.evidence namespace is policy-owned. Strip the
+	// caller's complete namespace before projecting the canonical values so a
+	// runner cannot pre-mint a current or future evidence state field.
+	result := WithoutOwnerEvidenceMetadata(source)
 	if result == nil {
 		result = map[string]string{}
 	}
@@ -203,37 +269,37 @@ func evidenceMetadata(
 
 func (policy *EvidencePolicy) canonicalTranscript(content []byte) ([]byte, bool, string, error) {
 	decoder := json.NewDecoder(bytes.NewReader(content))
-	events := make([]transcript.Event, 0, 256)
+	events := make([]Event, 0, 256)
 	for {
-		var event transcript.Event
+		var event Event
 		if err := decoder.Decode(&event); errors.Is(err, io.EOF) {
 			break
 		} else if err != nil {
 			return nil, false, "", fmt.Errorf("decode canonical transcript: %w", errors.Join(ErrEvidenceCorrupt, err))
 		}
-		if err := transcript.ValidateCanonicalEvent(event); err != nil {
+		if err := ValidateCanonicalEvent(event); err != nil {
 			return nil, false, "", fmt.Errorf("validate canonical transcript: %w", errors.Join(ErrEvidenceCorrupt, err))
 		}
 		events = append(events, event)
-		if len(events) > transcript.MaxCanonicalEvents {
+		if len(events) > MaxCanonicalEvents {
 			break
 		}
 	}
 	if len(events) == 0 {
 		return nil, false, "", fmt.Errorf("canonical transcript has no events: %w", ErrEvidenceCorrupt)
 	}
-	return policy.encodeTranscript(events, len(content) > policy.maxBytes || len(events) > transcript.MaxCanonicalEvents)
+	return policy.encodeTranscript(events, len(content) > policy.maxBytes || len(events) > MaxCanonicalEvents)
 }
 
 func (policy *EvidencePolicy) encodeTranscript(
-	events []transcript.Event,
+	events []Event,
 	sourceExceeded bool,
 ) ([]byte, bool, string, error) {
 	var output bytes.Buffer
 	truncated := sourceExceeded
 	reason := ""
 	for index, event := range events {
-		if index >= transcript.MaxCanonicalEvents-1 {
+		if index >= MaxCanonicalEvents-1 {
 			truncated = true
 			reason = "canonical_event_limit"
 			break
@@ -244,8 +310,11 @@ func (policy *EvidencePolicy) encodeTranscript(
 			return nil, false, "", fmt.Errorf("encode canonical transcript: %w", errors.Join(ErrEvidenceCorrupt, err))
 		}
 		encoded = append(encoded, '\n')
-		marker := policy.transcriptTruncationMarker(index+2, "canonical_output_limit")
-		if output.Len()+len(encoded)+len(marker) > policy.maxBytes {
+		needed := output.Len() + len(encoded)
+		if sourceExceeded || index < len(events)-1 {
+			needed += len(policy.transcriptTruncationMarker(index+2, "canonical_output_limit"))
+		}
+		if needed > policy.maxBytes {
 			truncated = true
 			reason = "canonical_output_limit"
 			break
@@ -270,13 +339,27 @@ func (policy *EvidencePolicy) encodeTranscript(
 }
 
 func (policy *EvidencePolicy) transcriptTruncationMarker(seq int, reason string) []byte {
-	event := transcript.Event{
-		Seq: seq, Timestamp: policy.now().UTC(), Role: transcript.RoleSystem,
-		Type: transcript.EventSessionMeta,
-		Text: "Transcript truncated by Loom (" + reason + ").",
+	_ = reason // The machine-readable reason is recorded in reserved metadata.
+	event := Event{
+		Seq: seq, Timestamp: policy.now().UTC(), Role: RoleSystem,
+		Type: EventSessionMeta,
+		Text: transcriptTruncationNotice,
 	}
 	encoded, _ := json.Marshal(event)
 	return append(encoded, '\n')
+}
+
+func truncateEvidenceContent(content []byte, mimeType string, limit int) []byte {
+	if limit <= 0 || len(content) <= limit {
+		return append([]byte(nil), content...)
+	}
+	end := limit
+	if strings.HasPrefix(mimeType, "text/") {
+		for end > 0 && !utf8.RuneStart(content[end]) {
+			end--
+		}
+	}
+	return append([]byte(nil), content[:end]...)
 }
 
 func outputLineCount(value []byte) int {

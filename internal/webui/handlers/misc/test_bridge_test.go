@@ -13,14 +13,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/modules/artifacts/transcript"
 	"github.com/tysonthomas9/loomcli/internal/ops"
-	"github.com/tysonthomas9/loomcli/internal/sessions"
 	"github.com/tysonthomas9/loomcli/internal/webui/agentcoord"
 	"github.com/tysonthomas9/loomcli/internal/webui/apperrors"
 	"github.com/tysonthomas9/loomcli/internal/webui/filecoord"
-	"github.com/tysonthomas9/loomcli/internal/webui/localredis"
-	"github.com/tysonthomas9/loomcli/internal/webui/sessioncoord"
 )
 
 // logger is a package-level variable used by test code to capture log output.
@@ -63,7 +59,6 @@ var handleGetSession = HandleGetSession
 var handleGetSessionDiff = HandleGetSessionDiff
 var handleGetSessionTranscript = HandleGetSessionTranscript
 var handleListTaskSessions = HandleListTaskSessions
-var handleNotifySessionChange = HandleNotifySessionChange
 var handleWorkerRegister = HandleWorkerRegister
 
 // ---------------------------------------------------------------------------
@@ -720,202 +715,4 @@ func (s *stubFileService) MkdirScoped(_ context.Context, _ string, _ filecoord.F
 }
 func (s *stubFileService) MovePathVersionedScoped(_ context.Context, _ string, _ filecoord.FileScope, _, _, _, _ string, _ bool, _, _ string) (*filecoord.FileMutationResult, error) {
 	return &filecoord.FileMutationResult{Success: true}, nil
-}
-
-// ---------------------------------------------------------------------------
-// Test-local SessionService implementation
-// ---------------------------------------------------------------------------
-
-// validTaskID and validSessionID are already defined in the misc package
-// (logs.go and sessions.go), so we reuse them here.
-
-// testSessionServiceImpl mirrors the root webui.sessionServiceImpl for tests.
-type testSessionServiceImpl struct {
-	sessStore *sessions.Store
-	histStore *localredis.SessionHistoryStore
-}
-
-// NewSessionService creates a test-local SessionService implementation.
-// This mirrors the root webui.NewSessionService, duplicated here to avoid
-// a circular import (webui → handlers/misc → webui).
-func NewSessionService(sessStore *sessions.Store, histStore *localredis.SessionHistoryStore) sessioncoord.SessionService {
-	return &testSessionServiceImpl{sessStore: sessStore, histStore: histStore}
-}
-
-func (s *testSessionServiceImpl) ListTaskSessions(_ context.Context, _, taskID string) ([]sessioncoord.SessionListItem, error) {
-	if s.sessStore == nil {
-		return nil, apperrors.ErrUnavailable("session store not available")
-	}
-	if taskID == "" || !validTaskID.MatchString(taskID) {
-		return nil, apperrors.ErrValidation("invalid task ID: must match [a-zA-Z0-9._-]+")
-	}
-	records, err := s.sessStore.SessionsByTask(taskID)
-	if err != nil {
-		return nil, apperrors.ErrInternal("failed to list sessions", err)
-	}
-	items := make([]sessioncoord.SessionListItem, 0, len(records))
-	for _, rec := range records {
-		item := sessioncoord.SessionListItem{
-			SessionRecord: rec,
-			IsActive:      rec.Status == sessions.StatusRunning,
-		}
-		if info, err := os.Stat(s.sessStore.NativeTranscriptPath(rec.SessionID)); err == nil && info.Size() > 0 {
-			item.HasTranscript = true
-		}
-		if diff, err := s.sessStore.ReadDiff(rec.SessionID); err == nil && diff != "" {
-			item.HasDiff = true
-		}
-		items = append(items, item)
-	}
-	return items, nil
-}
-
-func (s *testSessionServiceImpl) GetSession(_ context.Context, _, taskID, sessionID string) (*sessioncoord.SessionDetailData, error) {
-	if s.sessStore == nil {
-		return nil, apperrors.ErrUnavailable("session store not available")
-	}
-	if taskID == "" || !validTaskID.MatchString(taskID) {
-		return nil, apperrors.ErrValidation("invalid task ID")
-	}
-	if sessionID == "" || !validSessionID.MatchString(sessionID) {
-		return nil, apperrors.ErrValidation("invalid session ID")
-	}
-	meta, err := s.sessStore.LoadMetadata(sessionID)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return nil, apperrors.ErrNotFound("session not found")
-		}
-		return nil, apperrors.ErrInternal("failed to load session", err)
-	}
-	if meta.TaskID != taskID {
-		return nil, apperrors.ErrNotFound("session not found")
-	}
-	return &sessioncoord.SessionDetailData{
-		SessionMetadata: *meta,
-		IsActive:        meta.Status == sessions.StatusRunning,
-	}, nil
-}
-
-func (s *testSessionServiceImpl) GetSessionTranscript(_ context.Context, _, taskID, sessionID string) ([]transcript.Event, error) {
-	if s.sessStore == nil {
-		return nil, apperrors.ErrUnavailable("session store not available")
-	}
-	if taskID == "" || !validTaskID.MatchString(taskID) {
-		return nil, apperrors.ErrValidation("invalid task ID")
-	}
-	if sessionID == "" || !validSessionID.MatchString(sessionID) {
-		return nil, apperrors.ErrValidation("invalid session ID")
-	}
-	meta, err := s.sessStore.LoadMetadata(sessionID)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return nil, apperrors.ErrNotFound("session not found")
-		}
-		return nil, apperrors.ErrInternal("failed to load session", err)
-	}
-	if meta.TaskID != taskID {
-		return nil, apperrors.ErrNotFound("session not found")
-	}
-	events, loadErr := s.sessStore.LoadNativeEvents(sessionID)
-	if loadErr != nil {
-		return nil, apperrors.ErrInternal("failed to load transcript", loadErr)
-	}
-	if events == nil {
-		events = []transcript.Event{}
-	}
-	return events, nil
-}
-
-func (s *testSessionServiceImpl) ListSessionSubagents(_ context.Context, _, _, sessionID string) ([]string, error) {
-	if s.sessStore == nil {
-		return nil, apperrors.ErrUnavailable("session store not available")
-	}
-	names, err := s.sessStore.ListSubagentTranscripts(sessionID)
-	if err != nil {
-		return nil, apperrors.ErrInternal("list subagents", err)
-	}
-	ids := make([]string, 0, len(names))
-	for _, n := range names {
-		stripped := strings.TrimSuffix(strings.TrimPrefix(n, "agent-"), ".jsonl")
-		if stripped != "" {
-			ids = append(ids, stripped)
-		}
-	}
-	return ids, nil
-}
-
-func (s *testSessionServiceImpl) GetSessionSubagentTranscript(_ context.Context, _, _, sessionID, subagentID string) ([]transcript.Event, error) {
-	if s.sessStore == nil {
-		return nil, apperrors.ErrUnavailable("session store not available")
-	}
-	if subagentID == "" {
-		return nil, apperrors.ErrValidation("subagent ID is required")
-	}
-	path := s.sessStore.SubagentTranscriptPath(sessionID, subagentID)
-	if _, err := os.Stat(path); err != nil {
-		if os.IsNotExist(err) {
-			return nil, apperrors.ErrNotFound("subagent transcript not found")
-		}
-		return nil, apperrors.ErrInternal("stat subagent transcript", err)
-	}
-	meta, err := s.sessStore.LoadMetadata(sessionID)
-	if err != nil {
-		return nil, apperrors.ErrInternal("load metadata", err)
-	}
-	events, parseErr := sessions.ParseNativeEventsFromFile(meta.Backend, path)
-	if parseErr != nil {
-		return nil, apperrors.ErrInternal("parse subagent transcript", parseErr)
-	}
-	if events == nil {
-		events = []transcript.Event{}
-	}
-	return events, nil
-}
-
-func (s *testSessionServiceImpl) GetSessionDiff(_ context.Context, _, taskID, sessionID string) (string, error) {
-	if s.sessStore == nil {
-		return "", apperrors.ErrUnavailable("session store not available")
-	}
-	if taskID == "" || !validTaskID.MatchString(taskID) {
-		return "", apperrors.ErrValidation("invalid task ID")
-	}
-	if sessionID == "" || !validSessionID.MatchString(sessionID) {
-		return "", apperrors.ErrValidation("invalid session ID")
-	}
-	meta, err := s.sessStore.LoadMetadata(sessionID)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return "", apperrors.ErrNotFound("session not found")
-		}
-		return "", apperrors.ErrInternal("failed to load session", err)
-	}
-	if meta.TaskID != taskID {
-		return "", apperrors.ErrNotFound("session not found")
-	}
-	diff, diffErr := s.sessStore.ReadDiff(sessionID)
-	if diffErr != nil {
-		if errors.Is(diffErr, os.ErrNotExist) {
-			return "", apperrors.ErrNotFound("diff not found")
-		}
-		return "", apperrors.ErrInternal("failed to read diff", diffErr)
-	}
-	return diff, nil
-}
-
-func (s *testSessionServiceImpl) ListSessionHistory(ctx context.Context, wsID, issueID string) ([]sessioncoord.SessionRecord, error) {
-	if s.histStore == nil {
-		return nil, apperrors.ErrUnavailable("session history not available (no Redis)")
-	}
-	if err := sessioncoord.ValidateSessionHistoryIssueID(issueID); err != nil {
-		return nil, apperrors.ErrValidation(err.Error())
-	}
-	records, err := s.histStore.List(ctx, wsID, issueID)
-	if err != nil {
-		return nil, apperrors.ErrInternal("failed to list session history", err)
-	}
-	return records, nil
-}
-
-func (s *testSessionServiceImpl) GetSessionScrollback(ctx context.Context, wsID, issueID, recordID string) (*sessioncoord.SessionScrollbackResult, error) {
-	return nil, apperrors.ErrUnavailable("not implemented in test")
 }

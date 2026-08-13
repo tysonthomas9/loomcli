@@ -8,8 +8,7 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/tysonthomas9/loomcli/internal/modules/artifacts/transcript"
+	"unicode/utf8"
 )
 
 type redactorFunc func(context.Context, RedactionRequest) (RedactionResult, error)
@@ -34,6 +33,8 @@ func TestEvidencePolicyOwnsRedactionAndReservedMetadata(t *testing.T) {
 		MetadataEvidenceTruncateReason: "forged",
 		MetadataEvidenceOriginalBytes:  "0",
 		MetadataEvidenceLimitBytes:     "0",
+		"loom.evidence.failure_class":  "forged",
+		"loom.evidence.future_field":   "forged",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -53,6 +54,39 @@ func TestEvidencePolicyOwnsRedactionAndReservedMetadata(t *testing.T) {
 	}
 	if _, ok := prepared.Metadata[MetadataEvidenceTruncateReason]; ok {
 		t.Fatalf("untruncated evidence retained forged reason: %v", prepared.Metadata)
+	}
+	if _, ok := prepared.Metadata["loom.evidence.failure_class"]; ok {
+		t.Fatalf("finalized evidence retained forged failure class: %v", prepared.Metadata)
+	}
+	if _, ok := prepared.Metadata["loom.evidence.future_field"]; ok {
+		t.Fatalf("finalized evidence retained future reserved field: %v", prepared.Metadata)
+	}
+}
+
+func TestNormalizeFailOwnsCompleteReservedMetadataNamespace(t *testing.T) {
+	command, err := normalizeFail(FailCommand{
+		ArtifactID:   "artifact-1",
+		FailureClass: EvidenceFailureCorrupt,
+		Metadata: map[string]string{
+			"runner":                      "codex",
+			MetadataEvidenceKind:          "forged",
+			MetadataEvidenceTruncated:     "true",
+			"loom.evidence.failure_class": "forged",
+			"loom.evidence.future_field":  "forged",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if command.Metadata["runner"] != "codex" ||
+		command.Metadata[MetadataEvidenceCaptureStatus] != "capture_failed" ||
+		command.Metadata["loom.evidence.failure_class"] != EvidenceFailureCorrupt {
+		t.Fatalf("normalized failure metadata = %v", command.Metadata)
+	}
+	for _, key := range []string{MetadataEvidenceKind, MetadataEvidenceTruncated, "loom.evidence.future_field"} {
+		if _, ok := command.Metadata[key]; ok {
+			t.Fatalf("normalized failure retained caller-owned reserved key %q: %v", key, command.Metadata)
+		}
 	}
 }
 
@@ -82,9 +116,9 @@ func TestEvidencePolicyTruncatesTranscriptWithValidProvenance(t *testing.T) {
 	policy := testEvidencePolicyWithLimit(t, 700)
 	var source bytes.Buffer
 	for index := range 12 {
-		value, err := json.Marshal(transcript.Event{
+		value, err := json.Marshal(Event{
 			Seq: index + 10, Timestamp: time.Date(2026, 8, 4, 10, 0, index, 0, time.UTC),
-			Role: transcript.RoleAssistant, Type: transcript.EventText,
+			Role: RoleAssistant, Type: EventText,
 			Text: strings.Repeat("x", 180),
 		})
 		if err != nil {
@@ -107,19 +141,41 @@ func TestEvidencePolicyTruncatesTranscriptWithValidProvenance(t *testing.T) {
 		t.Fatalf("truncated transcript = %q, want evidence plus marker", prepared.Content)
 	}
 	for index, line := range lines {
-		var event transcript.Event
+		var event Event
 		if err := json.Unmarshal(line, &event); err != nil {
 			t.Fatalf("line %d is not JSON: %v", index, err)
 		}
-		if err := transcript.ValidateCanonicalEvent(event); err != nil {
+		if err := ValidateCanonicalEvent(event); err != nil {
 			t.Fatalf("line %d is not canonical: %v", index, err)
 		}
 		if event.Seq != index+1 {
 			t.Fatalf("line %d sequence = %d", index, event.Seq)
 		}
-		if index == len(lines)-1 && (event.Role != transcript.RoleSystem || event.Type != transcript.EventSessionMeta || !strings.Contains(event.Text, "truncated")) {
+		if index == len(lines)-1 && (event.Role != RoleSystem || event.Type != EventSessionMeta || !strings.Contains(event.Text, "truncated")) {
 			t.Fatalf("final event is not truncation provenance: %+v", event)
 		}
+		if index == len(lines)-1 && event.Text != transcriptTruncationNotice {
+			t.Fatalf("truncation notice = %q, want %q", event.Text, transcriptTruncationNotice)
+		}
+	}
+}
+
+func TestEvidencePolicyDoesNotTruncateFinalEventThatExactlyFits(t *testing.T) {
+	event := Event{
+		Seq: 1, Timestamp: time.Date(2026, 8, 4, 10, 0, 0, 0, time.UTC),
+		Role: RoleAssistant, Type: EventText, Text: "exact boundary",
+	}
+	encoded, err := json.Marshal(event)
+	if err != nil {
+		t.Fatal(err)
+	}
+	policy := testEvidencePolicyWithLimit(t, len(encoded)+1)
+	content, truncated, reason, err := policy.encodeTranscript([]Event{event}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if truncated || reason != "" || !bytes.Equal(content, append(encoded, '\n')) {
+		t.Fatalf("encoded = %q truncated=%t reason=%q", content, truncated, reason)
 	}
 }
 
@@ -132,6 +188,25 @@ func TestEvidencePolicyTruncatesGenericEvidenceDeterministically(t *testing.T) {
 	if string(prepared.Content) != "01234567" || !prepared.Truncated ||
 		prepared.Metadata[MetadataEvidenceTruncateReason] != "canonical_output_limit" {
 		t.Fatalf("prepared = %+v content=%q", prepared, prepared.Content)
+	}
+}
+
+func TestEvidencePolicyPreservesUTF8BoundaryWhenTruncatingText(t *testing.T) {
+	policy := testEvidencePolicyWithLimit(t, 9)
+	prepared, err := policy.Prepare(t.Context(), "log", "", []byte("12345678éx"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(prepared.Content) != "12345678" || !utf8.Valid(prepared.Content) || !prepared.Truncated {
+		t.Fatalf("prepared content = %q (valid=%t, truncated=%t)", prepared.Content, utf8.Valid(prepared.Content), prepared.Truncated)
+	}
+}
+
+func TestEvidencePolicyRejectsInvalidUTF8Text(t *testing.T) {
+	policy := testEvidencePolicyWithLimit(t, 32)
+	_, err := policy.Prepare(t.Context(), "diff", "", []byte{'o', 'k', 0xff}, nil)
+	if !errors.Is(err, ErrEvidenceCorrupt) {
+		t.Fatalf("Prepare error = %v, want ErrEvidenceCorrupt", err)
 	}
 }
 

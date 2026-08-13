@@ -826,8 +826,6 @@ func buildCoreServerConfig(monitorHandlers webui.MonitorHandlers, gitOps *opsimp
 		GitOps:               gitOps,
 		FileOps:              gitOps,
 		BackendOps:           opsimpl.NewBackendOps(),
-		NotifyTokenDir:       cli.GetWorkspaceRuntimeDir(),
-		SessionRuntimeDir:    cli.GetWorkspaceRuntimeDir(),
 		LocalSettingsDir:     bootstrap.LoomDir(),
 		Logger:               slog.Default(),
 		SentryDSN:            serveSentryDSN,

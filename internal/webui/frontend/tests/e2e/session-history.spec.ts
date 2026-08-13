@@ -64,7 +64,6 @@ interface SessionRecord {
   launcher: string;
   started_at: string;
   ended_at?: string;
-  scrollback_path?: string;
 }
 
 function createMockSession(overrides?: Partial<SessionRecord>): SessionRecord {
@@ -77,7 +76,6 @@ function createMockSession(overrides?: Partial<SessionRecord>): SessionRecord {
     launcher: "loom",
     started_at: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(), // 2h ago
     ended_at: new Date(Date.now() - 1.5 * 60 * 60 * 1000).toISOString(), // 1.5h ago
-    scrollback_path: "/tmp/scrollback/sess-rec-1.log",
     ...overrides,
   };
 }
@@ -88,7 +86,6 @@ const activeSession = createMockSession({
   status: "active",
   started_at: new Date(Date.now() - 30 * 60 * 1000).toISOString(), // 30m ago
   ended_at: undefined,
-  scrollback_path: undefined,
 });
 
 const completedSessionWithScrollback = createMockSession({
@@ -97,7 +94,6 @@ const completedSessionWithScrollback = createMockSession({
   status: "completed",
   started_at: new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString(),
   ended_at: new Date(Date.now() - 2.5 * 60 * 60 * 1000).toISOString(),
-  scrollback_path: "/tmp/scrollback/done.log",
 });
 
 const completedSessionNoScrollback = createMockSession({
@@ -106,7 +102,6 @@ const completedSessionNoScrollback = createMockSession({
   status: "completed",
   started_at: new Date(Date.now() - 5 * 60 * 60 * 1000).toISOString(),
   ended_at: new Date(Date.now() - 4 * 60 * 60 * 1000).toISOString(),
-  scrollback_path: undefined,
 });
 
 const DEFAULT_SESSIONS = [
@@ -611,7 +606,7 @@ test.describe("Session history section", () => {
   });
 
   test.describe("View scrollback button", () => {
-    test("completed session with scrollback_path shows View scrollback", async ({ page }) => {
+    test("completed session shows View scrollback", async ({ page }) => {
       await setupMocks(page, { sessions: [completedSessionWithScrollback] });
       await navigateToApp(page);
       await openIssuePanel(page, "Session Test Issue");
@@ -620,13 +615,13 @@ test.describe("Session history section", () => {
       await expect(page.getByText("View scrollback")).toBeVisible();
     });
 
-    test("completed session without scrollback_path does not show View scrollback", async ({ page }) => {
+    test("completed session does not require a storage locator", async ({ page }) => {
       await setupMocks(page, { sessions: [completedSessionNoScrollback] });
       await navigateToApp(page);
       await openIssuePanel(page, "Session Test Issue");
       await expandSessionHistory(page);
 
-      await expect(page.getByText("View scrollback")).not.toBeVisible();
+      await expect(page.getByText("View scrollback")).toBeVisible();
     });
 
     test("active session does not show View scrollback", async ({ page }) => {
@@ -743,7 +738,6 @@ test.describe("Session history section", () => {
             i % 2 === 0
               ? new Date(Date.now() - i * 60 * 60 * 1000).toISOString()
               : undefined,
-          scrollback_path: i % 2 === 0 ? `/tmp/sb-${i}.log` : undefined,
         }),
       );
       await setupMocks(page, { sessions: manySessions });

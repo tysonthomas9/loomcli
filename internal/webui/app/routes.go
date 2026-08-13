@@ -13,7 +13,7 @@ func (app *Server) registerRoutes() {
 	h := app.handlers
 	app.registerCoreAPIRoutes(h)
 	app.registerMonitorHandlers()
-	app.registerEditorAndNotifyRoutes(h)
+	app.registerEditorRoutes(h)
 	app.registerAuthProxy()
 
 	// Workspace management and workspace-scoped API routes.
@@ -68,13 +68,10 @@ func (app *Server) registerAuthProxy() {
 	}
 }
 
-// registerEditorAndNotifyRoutes registers editor and session notification endpoints.
-func (app *Server) registerEditorAndNotifyRoutes(h *Handlers) {
+// registerEditorRoutes registers editor endpoints.
+func (app *Server) registerEditorRoutes(h *Handlers) {
 	app.mux.HandleFunc("GET /api/editors", h.ListEditors)
 	app.mux.HandleFunc("POST /api/editors/open", h.OpenEditor)
-	if h.NotifySessionChange != nil {
-		app.mux.HandleFunc("POST /api/sessions/notify", h.NotifySessionChange)
-	}
 }
 
 // registerMonitorHandlers registers monitor/metrics/observability handlers

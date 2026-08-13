@@ -221,7 +221,7 @@ production_background_loops:
     inventory_path: internal/archtest/testdata/runtime-components.yaml
     total_components: 70
     ticker_sites: 43
-    goroutine_launch_sites: 79
+    goroutine_launch_sites: 77
     managed: 43
     command_poll: 4
     request_scoped: 15

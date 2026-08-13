@@ -94,8 +94,9 @@ func (s *SessionHistoryStore) List(ctx context.Context, workspaceID, issueID str
 	return sessions, nil
 }
 
-// Complete marks an active session as completed, setting EndedAt and ScrollbackPath.
-func (s *SessionHistoryStore) Complete(ctx context.Context, workspaceID, issueID, sessionName, scrollbackPath string) error {
+// Complete marks an active session as completed. Durable scrollback is an
+// Artifacts-owned Run Capture facet and is never represented by a local path.
+func (s *SessionHistoryStore) Complete(ctx context.Context, workspaceID, issueID, sessionName string) error {
 	if err := interaction.ValidateSessionHistoryIssueID(issueID); err != nil {
 		return err
 	}
@@ -112,7 +113,6 @@ func (s *SessionHistoryStore) Complete(ctx context.Context, workspaceID, issueID
 		if history.Sessions[i].SessionName == sessionName && history.Sessions[i].Status == "active" {
 			history.Sessions[i].Status = "completed"
 			history.Sessions[i].EndedAt = &now
-			history.Sessions[i].ScrollbackPath = scrollbackPath
 			found = true
 			break
 		}

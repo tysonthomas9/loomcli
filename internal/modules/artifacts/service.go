@@ -248,7 +248,7 @@ func (s *Service) CreateContent(
 	if complete {
 		return result, nil
 	}
-	return s.persistContentArtifact(ctx, auth, owner, artifact, command.MIMEType, content, reference)
+	return s.persistContentArtifact(ctx, auth, owner, artifact, command, content, reference)
 }
 
 func (s *Service) prepareContentArtifact(
@@ -312,22 +312,22 @@ func (s *Service) persistContentArtifact(
 	auth ContentAuthorities,
 	owner ExecutionOwner,
 	artifact *Artifact,
-	mimeType string,
+	command CreateCommand,
 	content []byte,
 	reference ReferenceCommand,
 ) (ContentResult, error) {
 	_, err := s.Upload(ctx, auth.Upload, owner, UploadCommand{
 		ArtifactID: artifact.ArtifactID,
 		Content:    content,
-		MIMEType:   mimeType,
+		MIMEType:   command.MIMEType,
 	})
 	if err != nil {
-		return ContentResult{}, err
+		return ContentResult{}, s.recordContentFailure(ctx, auth, owner, command, err)
 	}
 	hash := artifactContentHash(content)
 	finalized, err := s.Finalize(ctx, auth.Finalize, owner, FinalizeCommand{ArtifactID: artifact.ArtifactID, ContentHash: &hash})
 	if err != nil {
-		return ContentResult{}, err
+		return ContentResult{}, s.recordContentFailure(ctx, auth, owner, command, err)
 	}
 	referenced, err := s.referenceContentArtifact(ctx, auth.Reference, owner, finalized, reference)
 	if err != nil {
@@ -382,14 +382,14 @@ func (s *Service) recordContentFailure(
 		ArtifactID: command.ArtifactID, SessionID: command.SessionID, TaskID: command.TaskID,
 		Type: command.Type, Summary: "evidence capture failure", Metadata: cloneMetadata(failure.Metadata),
 	}
-	artifact, err := s.Create(ctx, auth.Declare, owner, declared)
+	_, err := s.Create(ctx, auth.Declare, owner, declared)
 	if err != nil {
 		if !errors.Is(err, ErrAlreadyExists) {
 			return errors.Join(cause, fmt.Errorf("declare failed evidence: %w", err))
 		}
-		artifact, err = s.Get(ctx, auth.Get, owner, GetQuery{ArtifactID: command.ArtifactID})
-		if err != nil {
-			return errors.Join(cause, fmt.Errorf("load failed evidence: %w", err))
+		artifact, getErr := s.Get(ctx, auth.Get, owner, GetQuery{ArtifactID: command.ArtifactID})
+		if getErr != nil {
+			return errors.Join(cause, fmt.Errorf("load failed evidence: %w", getErr))
 		}
 		if artifact.DurableStatus == StatusFailed && artifact.Metadata["loom.evidence.failure_class"] == failure.FailureClass {
 			return cause
@@ -535,7 +535,9 @@ func normalizeFail(command FailCommand) (FailCommand, error) {
 	if len(command.FailureMessage) > 4096 {
 		return FailCommand{}, fmt.Errorf("failure message exceeds 4096 bytes: %w", ErrInvalid)
 	}
-	command.Metadata = cloneMetadata(command.Metadata)
+	// Failure state is an Artifacts-owned vocabulary. Drop the caller's entire
+	// reserved namespace before setting the canonical status and class.
+	command.Metadata = WithoutOwnerEvidenceMetadata(command.Metadata)
 	if command.Metadata == nil {
 		command.Metadata = map[string]string{}
 	}
@@ -553,18 +555,49 @@ func cloneFailCommand(command FailCommand) FailCommand {
 }
 
 func evidenceFailureCommand(artifactID string, cause error) FailCommand {
-	class := "capture_failed"
-	message := "evidence preparation failed"
+	class := EvidenceFailureCaptureFailed
 	switch {
 	case errors.Is(cause, ErrEvidenceCorrupt):
-		class = "evidence_corrupt"
-		message = "candidate evidence did not match the canonical format"
+		class = EvidenceFailureCorrupt
 	case errors.Is(cause, ErrInvalid):
-		class = "evidence_rejected"
-		message = "candidate evidence was rejected by policy"
+		class = EvidenceFailureRejected
 	case errors.Is(cause, context.Canceled), errors.Is(cause, context.DeadlineExceeded):
-		class = "capture_interrupted"
+		class = EvidenceFailureInterrupted
+	case errors.Is(cause, ErrUnavailable), errors.Is(cause, ErrContentUnavailable):
+		class = EvidenceFailureUnavailable
+	}
+	return evidenceFailureCommandForClass(artifactID, class)
+}
+
+const (
+	EvidenceFailureCaptureFailed = "capture_failed"
+	EvidenceFailureCorrupt       = "evidence_corrupt"
+	EvidenceFailureRejected      = "evidence_rejected"
+	EvidenceFailureInterrupted   = "capture_interrupted"
+	EvidenceFailureUnavailable   = "capture_unavailable"
+)
+
+func validEvidenceFailureClass(class string) bool {
+	switch class {
+	case EvidenceFailureCaptureFailed, EvidenceFailureCorrupt, EvidenceFailureRejected,
+		EvidenceFailureInterrupted, EvidenceFailureUnavailable:
+		return true
+	default:
+		return false
+	}
+}
+
+func evidenceFailureCommandForClass(artifactID, class string) FailCommand {
+	message := "evidence preparation failed"
+	switch class {
+	case EvidenceFailureCorrupt:
+		message = "candidate evidence did not match the canonical format"
+	case EvidenceFailureRejected:
+		message = "candidate evidence was rejected by policy"
+	case EvidenceFailureInterrupted:
 		message = "evidence capture was interrupted"
+	case EvidenceFailureUnavailable:
+		message = "evidence capture storage was unavailable"
 	}
 	return FailCommand{
 		ArtifactID: artifactID, FailureClass: class,

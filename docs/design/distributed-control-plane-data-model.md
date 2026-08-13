@@ -145,8 +145,12 @@ Assessment:
 
 ### Session Models
 
-`internal/entity.Session` and `internal/sessions.Session` capture agent
-session telemetry.
+> **Current architecture note (Phase 10):** the legacy
+> `internal/entity.Session` / `internal/sessions.Session` model described below
+> has been retired. Interaction owns `AgentSession` and `TerminalSession`,
+> Execution owns `TaskRun`, Artifacts owns evidence content, and Run Capture is
+> their immutable read projection. The following assessment is retained as the
+> historical rationale for that split.
 
 Assessment:
 

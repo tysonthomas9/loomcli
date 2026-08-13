@@ -10,7 +10,7 @@ import (
 	"time"
 
 	infrafleetdb "github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
-	artifacttranscript "github.com/tysonthomas9/loomcli/internal/modules/artifacts/transcript"
+	artifacttranscript "github.com/tysonthomas9/loomcli/internal/modules/artifacts"
 	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 )
@@ -29,6 +29,13 @@ func (*interactionPersistenceStub) RecoverStart(
 }
 
 func (*interactionPersistenceStub) Get(context.Context, string, string) (*interaction.AgentSession, error) {
+	return nil, nil
+}
+
+func (*interactionPersistenceStub) List(
+	context.Context,
+	interaction.SessionArchiveQuery,
+) ([]*interaction.AgentSession, error) {
 	return nil, nil
 }
 
@@ -165,6 +172,14 @@ func (*interactionTranscriptStoreStub) CreateContent(
 	return "transcript-session-1", nil
 }
 
+func (*interactionTranscriptStoreStub) RecordFailure(
+	context.Context,
+	authority.SessionAuthority,
+	interaction.TranscriptArtifactFailure,
+) error {
+	return nil
+}
+
 func TestInteractionTranscriptArtifactStoreRejectsDivergentRetry(t *testing.T) {
 	issuer := authority.NewIssuer()
 	persistence := &sessionArtifactTransportStub{}
@@ -245,6 +260,29 @@ func TestInteractionTranscriptArtifactStoreRejectsForeignPublishAuthority(t *tes
 	})
 	if !errors.Is(err, authority.ErrAdmissionDenied) || !errors.Is(err, interaction.ErrNotOwner) {
 		t.Fatalf("foreign publish authority error = %v, want admission denied and not owner", err)
+	}
+}
+
+func TestInteractionTranscriptArtifactStoreRecordsOwnerFencedPreContentFailure(t *testing.T) {
+	issuer := authority.NewIssuer()
+	persistence := &sessionArtifactTransportStub{}
+	adapter, err := newInteractionTranscriptArtifactStore(persistence, issuer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	auth := interactionTranscriptTestAuthority(t, issuer)
+	err = adapter.RecordFailure(t.Context(), auth, interaction.TranscriptArtifactFailure{
+		WorkspaceKey: "WS", ArtifactID: "transcript-session-1", AgentID: "agent-1",
+		SessionID: "session-1", TaskID: "TASK-1", FailureClass: artifacttranscript.EvidenceFailureUnavailable,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if persistence.artifact == nil || persistence.artifact.DurableStatus != "failed" ||
+		persistence.artifact.OwnerType != "session" || persistence.artifact.OwnerID != "session-1" ||
+		persistence.artifact.Metadata[artifacttranscript.MetadataEvidenceCaptureStatus] != "capture_failed" ||
+		persistence.artifact.Metadata["loom.evidence.failure_class"] != artifacttranscript.EvidenceFailureUnavailable {
+		t.Fatalf("failed transcript artifact = %#v", persistence.artifact)
 	}
 }
 

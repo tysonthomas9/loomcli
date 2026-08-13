@@ -7,7 +7,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/fleet"
 	"github.com/tysonthomas9/loomcli/internal/webui/localredis"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
-	"github.com/tysonthomas9/loomcli/internal/webui/sessioncoord"
 	"github.com/tysonthomas9/loomcli/internal/webui/subscription"
 )
 
@@ -33,9 +32,6 @@ const (
 	ActivationReasonHTTP     = subscription.ActivationReasonHTTP
 	ActivationReasonRegistry = subscription.ActivationReasonRegistry
 )
-
-// SessionRecord is a type alias for the session coordination projection.
-type SessionRecord = sessioncoord.SessionRecord
 
 // MutationsSinceFn is the type for the getMutationsSince callback.
 type MutationsSinceFn = func(wsID string, since string) []realtime.MutationEvent
@@ -97,11 +93,6 @@ func InitSessionHistory(ctx context.Context, redisCfg *fleet.RedisConfig, initia
 	cleanup := func() { _ = store.Close() }
 	logger.Info("session history store initialized", "redis_address", redisCfg.Address)
 	return store, cleanup
-}
-
-// ValidateIssueID validates an issue ID string.
-func ValidateIssueID(issueID string) error {
-	return sessioncoord.ValidateSessionHistoryIssueID(issueID)
 }
 
 // SubscriptionModule is a type alias for subscription.Module.

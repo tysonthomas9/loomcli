@@ -14,7 +14,7 @@ import (
 
 	"nhooyr.io/websocket" //nolint:staticcheck // existing project websocket dependency
 
-	"github.com/tysonthomas9/loomcli/internal/modules/artifacts/transcript"
+	transcript "github.com/tysonthomas9/loomcli/internal/modules/artifacts"
 )
 
 // A transcript page contains one turn so ordinary accumulated text cannot make

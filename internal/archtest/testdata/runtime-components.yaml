@@ -20,8 +20,6 @@ goroutine_launches:
   - {file: "internal/bootstrap/embedded.go", function: "StartEmbedded", site: "go#1", callee: "emb.reapAndPublish", disposition: component, component_ids: [embedded-fleetdb-process-reaper]}
   - {file: "internal/cli/agent/lead/lead.go", function: "startLeadSessionHeartbeat", site: "go#1", callee: "heartbeatLeadSession", disposition: component, component_ids: [lead-session-heartbeat]}
   - {file: "internal/cli/automode/automode.go", function: "SetupSignalHandler", site: "go#1", callee: "<anonymous>", disposition: command, reason: "one-shot operating-system signal relay owned by the foreground automode command"}
-  - {file: "internal/cli/automode/automode_task.go", function: "createAutoSession", site: "go#1", callee: "sessions.NotifyWebUI", disposition: bounded, reason: "best-effort Web UI notification carries its own two-second timeout"}
-  - {file: "internal/cli/automode/automode_task.go", function: "finalizeAutoSession", site: "go#1", callee: "sessions.NotifyWebUI", disposition: bounded, reason: "best-effort Web UI notification carries its own two-second timeout"}
   - {file: "internal/cli/automode/automode_tmux.go", function: "RunAutoModeTmux", site: "go#1", callee: "listenForAttachKey", disposition: component, component_ids: [automode-attach-input]}
   - {file: "internal/cli/automode/automode_tmux_util.go", function: "listenForAttachKey", site: "go#1", callee: "<anonymous>", disposition: component, component_ids: [automode-attach-input]}
   - {file: "internal/cli/backend_echo_testbackend.go", function: "EchoBackend.InvokeNonInteractive", site: "go#1", callee: "<anonymous>", disposition: bounded, reason: "testbackend pipe writer is drained and joined before the invocation returns"}

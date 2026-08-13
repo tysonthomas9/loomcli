@@ -7,17 +7,18 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/modules/artifacts/transcript"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 )
 
 type fakeSessionStore struct {
-	artifact  *Artifact
-	content   []byte
-	creates   int
-	uploads   int
-	finalizes int
-	fails     int
+	artifact    *Artifact
+	content     []byte
+	creates     int
+	uploads     int
+	finalizes   int
+	fails       int
+	uploadErr   error
+	finalizeErr error
 }
 
 func (store *fakeSessionStore) CreateSession(_ context.Context, owner SessionOwner, command CreateCommand) (*Artifact, error) {
@@ -39,6 +40,9 @@ func (store *fakeSessionStore) CreateSession(_ context.Context, owner SessionOwn
 
 func (store *fakeSessionStore) UploadSession(_ context.Context, _ SessionOwner, command UploadCommand) (*Artifact, error) {
 	store.uploads++
+	if store.uploadErr != nil {
+		return nil, store.uploadErr
+	}
 	store.content = append([]byte(nil), command.Content...)
 	store.artifact.SizeBytes = int64(len(command.Content))
 	store.artifact.ContentHash = artifactContentHash(command.Content)
@@ -49,6 +53,9 @@ func (store *fakeSessionStore) UploadSession(_ context.Context, _ SessionOwner, 
 
 func (store *fakeSessionStore) FinalizeSession(_ context.Context, _ SessionOwner, command FinalizeCommand) (*Artifact, error) {
 	store.finalizes++
+	if store.finalizeErr != nil {
+		return nil, store.finalizeErr
+	}
 	now := time.Date(2026, 8, 4, 10, 1, 0, 0, time.UTC)
 	store.artifact.DurableStatus = StatusFinalized
 	store.artifact.FinalizedAt = &now
@@ -172,6 +179,78 @@ func TestSessionServicePersistsMalformedTranscriptAsFailedEvidence(t *testing.T)
 	}
 }
 
+func TestSessionServicePersistsTransportFailureAfterDeclaration(t *testing.T) {
+	tests := []struct {
+		name        string
+		configure   func(*fakeSessionStore)
+		wantUploads int
+		wantFinals  int
+	}{
+		{name: "upload", configure: func(store *fakeSessionStore) { store.uploadErr = ErrUnavailable }, wantUploads: 1},
+		{name: "finalize", configure: func(store *fakeSessionStore) { store.finalizeErr = ErrUnavailable }, wantUploads: 1, wantFinals: 1},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			store := &fakeSessionStore{}
+			test.configure(store)
+			service, issuer, owner := newSessionServiceFixture(t, store)
+			command := SessionContentCommand{
+				ArtifactID: "transcript-session-1", Type: "transcript",
+				Content: canonicalTestTranscript(t, "hello"),
+			}
+			_, err := service.CreateContent(t.Context(), sessionContentAuthorities(t, issuer, owner), owner, command)
+			if !errors.Is(err, ErrUnavailable) {
+				t.Fatalf("CreateContent error = %v, want ErrUnavailable", err)
+			}
+			if store.uploads != test.wantUploads || store.finalizes != test.wantFinals || store.fails != 1 {
+				t.Fatalf("calls upload=%d finalize=%d fail=%d", store.uploads, store.finalizes, store.fails)
+			}
+			if store.artifact == nil || store.artifact.DurableStatus != StatusFailed ||
+				store.artifact.Metadata[MetadataEvidenceCaptureStatus] != "capture_failed" ||
+				store.artifact.Metadata["loom.evidence.failure_class"] != "capture_unavailable" {
+				t.Fatalf("failed transcript artifact = %#v", store.artifact)
+			}
+		})
+	}
+}
+
+func TestSessionServiceRecordsPreContentCaptureFailure(t *testing.T) {
+	store := &fakeSessionStore{}
+	service, issuer, owner := newSessionServiceFixture(t, store)
+	auth := sessionContentAuthorities(t, issuer, owner)
+	command := SessionFailureCommand{
+		ArtifactID: "transcript-session-1", TaskID: "TASK-1", Type: "transcript",
+		FailureClass: EvidenceFailureUnavailable,
+	}
+
+	artifact, err := service.RecordFailure(t.Context(), auth, owner, command)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if artifact.DurableStatus != StatusFailed || artifact.OwnerType != OwnerSession ||
+		artifact.OwnerID != owner.SessionID || artifact.TaskID != command.TaskID ||
+		artifact.Metadata[MetadataEvidenceCaptureStatus] != "capture_failed" ||
+		artifact.Metadata["loom.evidence.failure_class"] != EvidenceFailureUnavailable {
+		t.Fatalf("failed evidence = %#v", artifact)
+	}
+	if store.creates != 1 || store.fails != 1 || store.uploads != 0 || store.finalizes != 0 {
+		t.Fatalf("calls create=%d fail=%d upload=%d finalize=%d", store.creates, store.fails, store.uploads, store.finalizes)
+	}
+
+	replayed, err := service.RecordFailure(t.Context(), auth, owner, command)
+	if err != nil || replayed.ArtifactID != command.ArtifactID {
+		t.Fatalf("exact failure replay = %#v, %v", replayed, err)
+	}
+	if store.creates != 2 || store.fails != 1 {
+		t.Fatalf("exact replay rewrote failure: create=%d fail=%d", store.creates, store.fails)
+	}
+
+	command.FailureClass = "runner-controlled-class"
+	if _, err := service.RecordFailure(t.Context(), auth, owner, command); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("unknown failure class error = %v, want ErrInvalid", err)
+	}
+}
+
 func newSessionServiceFixture(t *testing.T, store SessionStore) (*SessionService, *authority.Issuer, SessionOwner) {
 	t.Helper()
 	issuer := authority.NewIssuer()
@@ -220,9 +299,9 @@ func ptrTime(value time.Time) *time.Time { return &value }
 
 func canonicalTestTranscript(t *testing.T, text string) []byte {
 	t.Helper()
-	value, err := json.Marshal(transcript.Event{
+	value, err := json.Marshal(Event{
 		Seq: 1, Timestamp: time.Date(2026, 8, 4, 10, 0, 0, 0, time.UTC),
-		Role: transcript.RoleAssistant, Type: transcript.EventText, Text: text,
+		Role: RoleAssistant, Type: EventText, Text: text,
 	})
 	if err != nil {
 		t.Fatal(err)

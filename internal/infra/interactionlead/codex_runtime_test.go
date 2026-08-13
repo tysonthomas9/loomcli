@@ -12,7 +12,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
-	"github.com/tysonthomas9/loomcli/internal/modules/artifacts/transcript"
+	transcript "github.com/tysonthomas9/loomcli/internal/modules/artifacts"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -599,6 +599,27 @@ func TestCaptureCodexInteractiveTranscriptPersistsSessionArtifactAndRef(t *testi
 	}
 	if got.Seq != 2 || got.Role != transcript.RoleAssistant || got.Text != "No issues found." {
 		t.Fatalf("assistant event = %+v", got)
+	}
+}
+
+func TestCaptureCodexInteractiveTranscriptPersistsPreContentFailure(t *testing.T) {
+	runtime := &storeBackedSessionRuntime{}
+	originalDial := dialCodexAppServerClient
+	dialCodexAppServerClient = func(context.Context, string) (codexAppServerClient, error) {
+		return nil, errors.New("app-server unavailable")
+	}
+	t.Cleanup(func() { dialCodexAppServerClient = originalDial })
+
+	err := captureCodexInteractiveTranscript(t.Context(), CodexLeadRuntimeConfig{
+		Runtime: runtime, Workspace: "WS", SessionID: "session-1", WorkDir: "/repo",
+	}, CodexRuntimeMetadata{Endpoint: "ws://127.0.0.1:1", ThreadID: "thread-1"}, time.Now().Add(-time.Minute))
+	if err == nil || !strings.Contains(err.Error(), "app-server unavailable") {
+		t.Fatalf("capture error = %v", err)
+	}
+	if len(runtime.published) != 1 || runtime.published[0].FailureClass != transcript.EvidenceFailureUnavailable ||
+		len(runtime.published[0].Content) != 0 || runtime.published[0].WorkspaceKey != "WS" ||
+		runtime.published[0].SessionID != "session-1" {
+		t.Fatalf("published failure = %+v", runtime.published)
 	}
 }
 

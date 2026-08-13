@@ -4,20 +4,11 @@
  */
 
 import { api, apiErrorFromResponse, unwrapResponse } from "@/api/common";
+import type { components } from "@/types/generated/openapi";
 
 // ============= Types =============
 
-export interface SessionRecord {
-  id: string;
-  session_name: string;
-  issue_id: string;
-  backend: string;
-  status: "active" | "completed";
-  launcher: string;
-  started_at: string;
-  ended_at?: string;
-  scrollback_path?: string;
-}
+export type SessionRecord = components["schemas"]["SessionHistoryRecord"];
 
 // ============= API Functions =============
 

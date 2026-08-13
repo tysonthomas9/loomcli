@@ -32,10 +32,31 @@ func (fake *queryStoreFake) ReadArtifactContent(context.Context, string, string)
 }
 
 func validQueryArtifact() *Artifact {
+	content := []byte("content")
 	return &Artifact{
 		WorkspaceKey: "WS", ArtifactID: "artifact-1", TaskID: "TASK-1",
 		OwnerType: OwnerTaskRun, OwnerID: "run-1", Type: "transcript",
-		DurableStatus: StatusFinalized, Metadata: map[string]string{"format": "canonical"},
+		DurableStatus: StatusFinalized, SizeBytes: int64(len(content)), ContentHash: artifactContentHash(content),
+		Metadata: map[string]string{"format": "canonical"},
+	}
+}
+
+func TestQueryServiceRejectsCorruptDurableContent(t *testing.T) {
+	artifact := validQueryArtifact()
+	store := &queryStoreFake{artifact: artifact, content: []byte("tampered")}
+	service, err := NewQuery(store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = service.ReadArtifactContent(t.Context(), Query{WorkspaceKey: "WS", ArtifactID: artifact.ArtifactID})
+	if !errors.Is(err, ErrEvidenceCorrupt) {
+		t.Fatalf("ReadArtifactContent error = %v, want ErrEvidenceCorrupt", err)
+	}
+
+	artifact.DurableStatus = StatusUploading
+	_, err = service.ReadArtifactContent(t.Context(), Query{WorkspaceKey: "WS", ArtifactID: artifact.ArtifactID})
+	if !errors.Is(err, ErrContentUnavailable) || store.reads != 1 {
+		t.Fatalf("non-finalized read error = %v reads=%d", err, store.reads)
 	}
 }
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Regenerates internal/sessions/transcript/testdata/ts_leaf_corpus.json — the
+// Regenerates internal/modules/artifacts/transcript/testdata/ts_leaf_corpus.json — the
 // fixture the Phase-U/U0 conformance test (transcript.conformance_test.go) uses to
 // pin the TypeScript local-task-runner leaf's output to the canonical Go
 // transcript.Event schema.
@@ -16,7 +16,7 @@ import { fileURLToPath } from "node:url";
 import { parseStreamJSONTranscript } from "../internal/infra/workflowdistribution/builtin/local-task-runner.ts";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const out = path.join(here, "../internal/sessions/transcript/testdata/ts_leaf_corpus.json");
+const out = path.join(here, "../internal/modules/artifacts/transcript/testdata/ts_leaf_corpus.json");
 
 // claude covers session_meta + reasoning(thinking) + text + tool_use + tool_result + result(usage+cost).
 const claude = [

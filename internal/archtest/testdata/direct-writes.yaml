@@ -1,6 +1,6 @@
 schema_version: 1
 status: complete
-source_head: 45dae70cbeb801a531d7b839d7208ec1ec3b7020
+source_head: 2eb968eee290196221fe2b38aa20ba8a1b6b7d09
 adapter_roots:
   - internal/app
   - internal/cli
@@ -8,7 +8,6 @@ adapter_roots:
   - internal/infra/sourcecontrolstackstore
   - internal/infra/workspacecatalog
   - internal/modules
-  - internal/sessions/archive.go
   - internal/usage
   - internal/webui/handlers
 owner_adapters:
@@ -38,8 +37,6 @@ owner_adapters:
     aggregate_owner: sourcecontrol
   - path: internal/infra/workspacecatalog
     aggregate_owner: workspace
-  - path: internal/sessions/archive.go
-    aggregate_owner: interaction
   - path: internal/usage
     aggregate_owner: read_projection
 analysis_profiles:
@@ -97,9 +94,6 @@ persistence_packages:
   - path: github.com/tysonthomas9/loomcli/internal/modules/workspace
     receiver_names: [CatalogStore, RepositoryCatalogStore]
     receiver_suffixes: []
-  - path: github.com/tysonthomas9/loomcli/internal/sessions
-    receiver_names: [Session, Store]
-    receiver_suffixes: []
   - path: github.com/tysonthomas9/loomcli/internal/store
     receiver_names: []
     receiver_suffixes: [Appender, Dispatcher, Reader, Store, Support]
@@ -131,13 +125,13 @@ method_sets:
     mutating: [SetDesiredState, SetDesiredStateOwned]
   - name: artifacts_port
     read_only: [Get, List]
-    mutating: [Create, Finalize, Reference, Upload]
+    mutating: [Create, Fail, Finalize, Reference, Upload]
   - name: artifacts_query
     read_only: [GetArtifactRecord, ListArtifactRecords, ReadArtifactContent]
     mutating: []
   - name: artifacts_session_port
     read_only: [GetSession]
-    mutating: [CreateSession, FinalizeSession, UploadSession]
+    mutating: [CreateSession, FailSession, FinalizeSession, UploadSession]
   - name: automation_persistence
     read_only: [GetBinding, ListBindings]
     mutating: [AppendTriggerEvent, CreateBinding, CreateManagedBinding, DeleteBinding, DeleteManagedBindingIfUnchanged, DeleteUnmanagedBindingIfUnchanged, ReplaceManagedBinding, ReplaceUnmanagedBinding, ReserveEvent, TransitionDelivery, UpdateBinding]
@@ -234,7 +228,7 @@ method_sets:
     read_only: [ValidateSessionAuthority]
     mutating: []
   - name: fleetdb_interaction_mutation_transport
-    read_only: [GetInteractionSession, GetInteractionTerminal, ListInteractionActivity, ListRecoverableInteractionSessions]
+    read_only: [GetInteractionSession, GetInteractionTerminal, ListInteractionActivity, ListInteractionSessions, ListRecoverableInteractionSessions]
     mutating: [ClaimInteractionInbox, CompleteInteractionInbox, CreateInteractionTerminal, EnqueueInteractionInbox, FinishInteractionSession, ForceInterruptInteractionSession, HeartbeatInteractionSession, InterruptInteractionSessionIfLeaseMissing, PatchInteractionSession, RecoverInteractionSessionStart, StartInteractionSession, UpdateInteractionTerminal]
   - name: fleetdb_repository_admission_transport
     read_only: [GetRepositoryAdmission, GetRepositoryAdmissionByOperation, ListRecoverableRepositoryAdmissions]
@@ -243,14 +237,14 @@ method_sets:
     read_only: []
     mutating: [ClaimNext, Complete, Enqueue]
   - name: interaction_session
-    read_only: [Get, ListRecoverable]
+    read_only: [Get, List, ListRecoverable]
     mutating: [FinishOwned, ForceInterrupt, HeartbeatOwned, InterruptIfLeaseMissing, PatchOwned, RecoverStart, Start]
   - name: interaction_terminal
     read_only: [Get]
     mutating: [Create, Update]
   - name: interaction_transcript
     read_only: []
-    mutating: [CreateContent]
+    mutating: [CreateContent, RecordFailure]
   - name: issue_tabs
     read_only: [Close, Get, GetIssueTabs]
     mutating: [ClearIssueTabs, ReplaceIssueTabs]
@@ -260,43 +254,9 @@ method_sets:
   - name: repository_admission_journal
     read_only: [ResolveLocalRepositoryAdmission, getByAdmission, getByOperation, list, loadLocked, materializationAuthorityCount, materializationAuthorityDeadline]
     mutating: [acquireMaterializationLock, activateMaterializationAuthority, bind, deactivateAllMaterializationAuthorities, deactivateMaterializationAuthority, prepare, remove, renewMaterializationAuthority, saveLocked, withLockedFile]
-  - name: session
-    read_only: [Backend, SessionID, StartedAt, Status]
-    mutating: [Finalize, SyncLatestClaudeTranscript, SyncLatestCodexRollout]
   - name: session_history
     read_only: [Close, List, getHistory]
     mutating: [Add, Complete, saveHistory]
-  - name: session_store
-    read_only:
-      - CountIndexEntries
-      - Dir
-      - HasEventTranscript
-      - ListSubagentTranscripts
-      - LoadEnvelopes
-      - LoadMetadata
-      - LoadNativeEvents
-      - LoadTranscript
-      - NativeTranscriptPath
-      - Query
-      - ReadDiff
-      - ReadPrompt
-      - SessionDir
-      - SessionsByTask
-      - SubagentTranscriptPath
-    mutating:
-      - AppendEnvelope
-      - AppendTranscript
-      - CompactIndex
-      - CreateSession
-      - PurgeOlderThan
-      - ReIndex
-      - SaveMetadata
-      - SweepOrphans
-      - SyncLatestClaudeTranscript
-      - SyncLatestCodexRollout
-      - SyncNativeTranscript
-      - SyncSubagentTranscript
-      - UpdatePrompt
   - name: sourcecontrol_stack_lifecycle
     read_only: [GetStackRecord, ListStackNodeRecords, ListStackRecords]
     mutating: [AddStackNodeRecord, EnsureStackRecord, MoveStackNodeRecord, RemoveStackNodeRecord, SetStackNodeBaseRecord, UpdateStackNodePublicationRecord]
@@ -417,14 +377,6 @@ receiver_surfaces:
     package: github.com/tysonthomas9/loomcli/internal/infra/sourcecontrolstackstore
     method_set: stack_store
     capability_owner: sourcecontrol
-  - receiver: "*github.com/tysonthomas9/loomcli/internal/sessions.Session"
-    package: github.com/tysonthomas9/loomcli/internal/sessions
-    method_set: session
-    capability_owner: interaction
-  - receiver: "*github.com/tysonthomas9/loomcli/internal/sessions.Store"
-    package: github.com/tysonthomas9/loomcli/internal/sessions
-    method_set: session_store
-    capability_owner: interaction
   - receiver: "*github.com/tysonthomas9/loomcli/internal/usage.Store"
     package: github.com/tysonthomas9/loomcli/internal/usage
     method_set: usage
@@ -871,7 +823,19 @@ function_surfaces:
     access: read-only
     capability_owner: agents
   - package: github.com/tysonthomas9/loomcli/internal/modules/artifacts
+    function: DecodeCanonicalTranscript
+    access: read-only
+    capability_owner: artifacts
+  - package: github.com/tysonthomas9/loomcli/internal/modules/artifacts
+    function: EvidenceKindForArtifactType
+    access: read-only
+    capability_owner: artifacts
+  - package: github.com/tysonthomas9/loomcli/internal/modules/artifacts
     function: New
+    access: read-only
+    capability_owner: artifacts
+  - package: github.com/tysonthomas9/loomcli/internal/modules/artifacts
+    function: NewEvidencePolicy
     access: read-only
     capability_owner: artifacts
   - package: github.com/tysonthomas9/loomcli/internal/modules/artifacts
@@ -884,6 +848,30 @@ function_surfaces:
     capability_owner: artifacts
   - package: github.com/tysonthomas9/loomcli/internal/modules/artifacts
     function: OperationRules
+    access: read-only
+    capability_owner: artifacts
+  - package: github.com/tysonthomas9/loomcli/internal/modules/artifacts
+    function: OwnerEvidenceAttemptKey
+    access: read-only
+    capability_owner: artifacts
+  - package: github.com/tysonthomas9/loomcli/internal/modules/artifacts
+    function: OwnerEvidenceCaptureFailure
+    access: read-only
+    capability_owner: artifacts
+  - package: github.com/tysonthomas9/loomcli/internal/modules/artifacts
+    function: OwnerEvidenceCaptureStatusKey
+    access: read-only
+    capability_owner: artifacts
+  - package: github.com/tysonthomas9/loomcli/internal/modules/artifacts
+    function: OwnerEvidenceFailureClassKey
+    access: read-only
+    capability_owner: artifacts
+  - package: github.com/tysonthomas9/loomcli/internal/modules/artifacts
+    function: OwnerEvidenceFinalized
+    access: read-only
+    capability_owner: artifacts
+  - package: github.com/tysonthomas9/loomcli/internal/modules/artifacts
+    function: WithoutOwnerEvidenceMetadata
     access: read-only
     capability_owner: artifacts
   - package: github.com/tysonthomas9/loomcli/internal/modules/automation
@@ -1206,30 +1194,6 @@ function_surfaces:
     function: WithRepositoryCatalog
     access: read-only
     capability_owner: workspace
-  - package: github.com/tysonthomas9/loomcli/internal/sessions
-    function: DecodeDiffStatsMetadata
-    access: read-only
-    capability_owner: interaction
-  - package: github.com/tysonthomas9/loomcli/internal/sessions
-    function: EncodeDiffStatsMetadata
-    access: read-only
-    capability_owner: interaction
-  - package: github.com/tysonthomas9/loomcli/internal/sessions
-    function: NewStore
-    access: mutating
-    capability_owner: interaction
-  - package: github.com/tysonthomas9/loomcli/internal/sessions
-    function: NotifyWebUI
-    access: read-only
-    capability_owner: interaction
-  - package: github.com/tysonthomas9/loomcli/internal/sessions
-    function: OpenArchive
-    access: read-only
-    capability_owner: interaction
-  - package: github.com/tysonthomas9/loomcli/internal/sessions
-    function: SumTranscriptUsage
-    access: read-only
-    capability_owner: interaction
   - package: github.com/tysonthomas9/loomcli/internal/store
     function: DefaultBindingID
     access: read-only
@@ -1758,54 +1722,6 @@ writes:
       method: Update
       count: 3
       aggregate_owner: workspace
-      disposition: owner_adapter
-    - file: internal/sessions/archive.go
-      receiver: '*github.com/tysonthomas9/loomcli/internal/sessions.Store'
-      method: AppendEnvelope
-      count: 1
-      aggregate_owner: interaction
-      disposition: owner_adapter
-    - file: internal/sessions/archive.go
-      receiver: '*github.com/tysonthomas9/loomcli/internal/sessions.Store'
-      method: CompactIndex
-      count: 1
-      aggregate_owner: interaction
-      disposition: owner_adapter
-    - file: internal/sessions/archive.go
-      receiver: '*github.com/tysonthomas9/loomcli/internal/sessions.Store'
-      method: CreateSession
-      count: 1
-      aggregate_owner: interaction
-      disposition: owner_adapter
-    - file: internal/sessions/archive.go
-      receiver: '*github.com/tysonthomas9/loomcli/internal/sessions.Store'
-      method: PurgeOlderThan
-      count: 1
-      aggregate_owner: interaction
-      disposition: owner_adapter
-    - file: internal/sessions/archive.go
-      receiver: '*github.com/tysonthomas9/loomcli/internal/sessions.Store'
-      method: ReIndex
-      count: 1
-      aggregate_owner: interaction
-      disposition: owner_adapter
-    - file: internal/sessions/archive.go
-      receiver: '*github.com/tysonthomas9/loomcli/internal/sessions.Store'
-      method: SaveMetadata
-      count: 1
-      aggregate_owner: interaction
-      disposition: owner_adapter
-    - file: internal/sessions/archive.go
-      receiver: '*github.com/tysonthomas9/loomcli/internal/sessions.Store'
-      method: SyncNativeTranscript
-      count: 1
-      aggregate_owner: interaction
-      disposition: owner_adapter
-    - file: internal/sessions/archive.go
-      receiver: '*github.com/tysonthomas9/loomcli/internal/sessions.Store'
-      method: SyncSubagentTranscript
-      count: 1
-      aggregate_owner: interaction
       disposition: owner_adapter
     - file: internal/usage/projection.go
       receiver: '*github.com/tysonthomas9/loomcli/internal/usage.Store'

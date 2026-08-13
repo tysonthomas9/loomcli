@@ -64,8 +64,8 @@ func runCleanup(cmd *cobra.Command, _ []string) error {
 
 	var hasError bool
 
-	sp, sc, se := cleanupSessions(cmd.Context(), runtimeDir, sessDur, cleanupDryRun)
-	hasError = printCleanupResult("Sessions", sp, sc, se) || hasError
+	sp, se := cleanupSessions(cmd.Context(), runtimeDir, sessDur, cleanupDryRun)
+	hasError = printCleanupResult("Sessions", sp, 0, se) || hasError
 
 	up, ue := cleanupUsage(runtimeDir, usageDur, cleanupDryRun)
 	hasError = printCleanupResult("Usage", up, 0, ue) || hasError

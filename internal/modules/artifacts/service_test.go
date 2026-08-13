@@ -666,6 +666,59 @@ func TestCreateContentPersistsSanitizedCaptureFailureAndReplayNeverPublishes(t *
 	}
 }
 
+func TestCreateContentPersistsTransportFailureAfterDeclaration(t *testing.T) {
+	owner := validOwner()
+	var persisted *Artifact
+	failCalls := 0
+	store := &fakeStore{}
+	store.create = func(_ context.Context, _ ExecutionOwner, command CreateCommand) (*Artifact, error) {
+		if persisted != nil {
+			return nil, ErrAlreadyExists
+		}
+		persisted = &Artifact{
+			WorkspaceKey: owner.WorkspaceKey, ArtifactID: command.ArtifactID,
+			OwnerType: OwnerTaskRun, OwnerID: owner.TaskRunID, Type: command.Type,
+			MIMEType: command.MIMEType, SizeBytes: command.SizeBytes, ContentHash: command.ContentHash,
+			RedactionStatus: command.RedactionStatus, DurableStatus: StatusDeclared,
+			Metadata: cloneMetadata(command.Metadata),
+		}
+		return cloneArtifact(persisted), nil
+	}
+	store.upload = func(context.Context, ExecutionOwner, UploadCommand) (*Artifact, error) {
+		return nil, ErrUnavailable
+	}
+	store.get = func(context.Context, ExecutionOwner, GetQuery) (*Artifact, error) {
+		return cloneArtifact(persisted), nil
+	}
+	store.fail = func(_ context.Context, _ ExecutionOwner, command FailCommand) (*Artifact, error) {
+		failCalls++
+		persisted.DurableStatus = StatusFailed
+		persisted.Metadata = cloneMetadata(command.Metadata)
+		return cloneArtifact(persisted), nil
+	}
+	store.finalize = func(context.Context, ExecutionOwner, FinalizeCommand) (*Artifact, error) {
+		t.Fatal("finalize called after upload failure")
+		return nil, nil
+	}
+	store.reference = func(context.Context, ExecutionOwner, ReferenceCommand) (ReferenceResult, error) {
+		t.Fatal("reference called after upload failure")
+		return ReferenceResult{}, nil
+	}
+	fixture := newServiceFixture(t, store, owner)
+	command := CreateCommand{ArtifactID: "logs-task-run-1", Type: "logs"}
+	_, err := fixture.service.CreateContent(t.Context(), fixture.contentAuthorities(t), owner, command, []byte("logs"), ReferenceCommand{
+		ArtifactID: command.ArtifactID, Kind: "task-output", TargetRef: "task-run://task-run-1/output",
+	})
+	if !errors.Is(err, ErrUnavailable) || failCalls != 1 {
+		t.Fatalf("CreateContent error = %v, fail calls = %d", err, failCalls)
+	}
+	if persisted.DurableStatus != StatusFailed ||
+		persisted.Metadata[MetadataEvidenceCaptureStatus] != "capture_failed" ||
+		persisted.Metadata["loom.evidence.failure_class"] != "capture_unavailable" {
+		t.Fatalf("persisted failure = %#v", persisted)
+	}
+}
+
 func TestCreateContentUploadsFinalizesAndReferencesDeclaredArtifact(t *testing.T) {
 	owner := validOwner()
 	now := time.Date(2026, 7, 16, 10, 0, 0, 0, time.UTC)

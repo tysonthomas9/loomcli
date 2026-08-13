@@ -82,6 +82,28 @@ func (adapter *executionTaskRunPortsAdapter) ListActiveTaskRuns(
 	return out, nil
 }
 
+func (adapter *executionTaskRunPortsAdapter) ListTaskRuns(
+	ctx context.Context,
+	query execution.TaskRunArchiveQuery,
+) ([]*execution.TaskRun, error) {
+	values, err := adapter.dependencies.TaskRuns.List(ctx, query.WorkspaceKey, store.TaskRunFilter{
+		TaskID: query.WorkItemID,
+		Limit:  query.Limit,
+	})
+	if err != nil {
+		return nil, mapFleetExecutionPortError(err)
+	}
+	out := make([]*execution.TaskRun, 0, len(values))
+	for _, value := range values {
+		run, snapshotErr := executionTaskRunSnapshot(value, "")
+		if snapshotErr != nil {
+			return nil, snapshotErr
+		}
+		out = append(out, run)
+	}
+	return out, nil
+}
+
 func (adapter *executionTaskRunPortsAdapter) ListTaskRunEvents(
 	ctx context.Context,
 	query execution.TaskRunEventQuery,

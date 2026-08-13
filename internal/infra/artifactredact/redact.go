@@ -1,5 +1,6 @@
-// Package redact scrubs secrets out of captured agent transcripts before
-// they hit disk. See ORIGIN.md for upstream attribution.
+// Package redact scrubs secrets out of captured agent evidence before
+// Artifacts sends bytes to durable storage. See ORIGIN.md for upstream
+// attribution.
 //
 // Layered detection:
 //  1. Entropy — alphanumeric segments with Shannon entropy above 4.5.
@@ -61,6 +62,8 @@ type region struct{ start, end int }
 
 // String replaces secrets in s with "REDACTED". A substring is redacted if
 // EITHER the entropy check or a gitleaks rule flags it.
+//
+//nolint:gocognit,funlen // Region collection and merge are one security-sensitive redaction algorithm.
 func String(s string) string {
 	var regions []region
 

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -14,7 +15,6 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	artifactsmodule "github.com/tysonthomas9/loomcli/internal/modules/artifacts"
-	"github.com/tysonthomas9/loomcli/internal/modules/artifacts/transcript"
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 	platformruntime "github.com/tysonthomas9/loomcli/internal/platform/runtime"
@@ -48,6 +48,14 @@ func (e HostBridgeTaskExecutor) registerRunnerArtifacts(ctx context.Context, req
 		if artifactID == "" {
 			artifactID = taskRunAttemptArtifactID(req, fmt.Sprintf("artifact-%s-%d", req.TaskRunID, i+1))
 		}
+		if kind, kindErr := artifactsmodule.EvidenceKindForArtifactType(artifact.Type); kindErr == nil {
+			// URI descriptors prove neither policy-owned bytes nor redaction,
+			// bounds, and truncation provenance. Durable evidence must enter via
+			// CreateContent; a runner cannot promote an opaque location into a
+			// finalized evidence facet.
+			result = recordEvidenceCaptureFailure(result, kind, artifactsmodule.ErrInvalid, taskExecAttempt(req))
+			continue
+		}
 		uri := strings.TrimSpace(artifact.URI)
 		if uri == "" {
 			artifactIDs = normalizeArtifactIDs(append(artifactIDs, artifactID))
@@ -55,6 +63,10 @@ func (e HostBridgeTaskExecutor) registerRunnerArtifacts(ctx context.Context, req
 		}
 		finalized, err := e.registerRunnerArtifact(ctx, req, artifact, artifactID, uri)
 		if err != nil {
+			if kind, kindErr := artifactsmodule.EvidenceKindForArtifactType(artifact.Type); kindErr == nil {
+				result = recordEvidenceCaptureFailure(result, kind, err, taskExecAttempt(req))
+				continue
+			}
 			return TaskExecResult{}, err
 		}
 		artifactIDs = normalizeArtifactIDs(append(artifactIDs, finalized.ArtifactID))
@@ -138,48 +150,113 @@ func runnerArtifactMetadataWithSource(req TaskExecRequest, source map[string]str
 	return metadata
 }
 
-func (e HostBridgeTaskExecutor) persistRunnerOutputArtifacts(ctx context.Context, req TaskExecRequest, runner bridgeTaskRunnerResult, result TaskExecResult) (TaskExecResult, error) {
+func (e HostBridgeTaskExecutor) persistRunnerOutputArtifacts(ctx context.Context, req TaskExecRequest, runner bridgeTaskRunnerResult, result TaskExecResult) TaskExecResult {
 	if result.RuntimeMetadata == nil {
 		result.RuntimeMetadata = map[string]string{}
 	}
-	if transcriptRef := firstNonEmpty(runner.TranscriptRef, runner.TranscriptRefCamel); transcriptRef != "" {
-		result.RuntimeMetadata["transcript_ref"] = transcriptRef
-	}
-	transcriptContent, err := e.runnerFileOrInlineBytes(runner.transcriptInline(), firstNonEmpty(runner.TranscriptPath, runner.TranscriptPathCamel), "transcript")
-	if err != nil {
-		return TaskExecResult{}, err
-	}
-	if len(transcriptContent) > 0 && result.RuntimeMetadata["transcript_ref"] == "" {
-		artifactID := taskRunAttemptArtifactID(req, "transcript-"+req.TaskRunID)
-		finalized, err := e.createContentArtifact(ctx, req, artifactID, "transcript", "task run transcript", "application/x-ndjson", transcriptContent)
-		if err != nil {
-			return TaskExecResult{}, err
-		}
-		result.ArtifactIDs = normalizeArtifactIDs(append(result.ArtifactIDs, finalized.ArtifactID))
-		result.RuntimeMetadata["transcript_ref"] = "artifact://" + finalized.ArtifactID
-		result.RuntimeMetadata["transcript_artifact_id"] = finalized.ArtifactID
-	}
-	logContent, err := e.runnerFileOrInlineBytes(runner.logsInline(), firstNonEmpty(runner.LogsPath, runner.LogsPathCamel), "logs")
-	if err != nil {
-		return TaskExecResult{}, err
-	}
-	if len(logContent) > 0 && result.LogsRef == "" {
-		artifactID := taskRunAttemptArtifactID(req, "logs-"+req.TaskRunID)
-		finalized, err := e.createContentArtifact(ctx, req, artifactID, "logs", "task run logs", "text/plain; charset=utf-8", logContent)
-		if err != nil {
-			return TaskExecResult{}, err
-		}
-		result.ArtifactIDs = normalizeArtifactIDs(append(result.ArtifactIDs, finalized.ArtifactID))
-		result.LogsRef = "artifact://" + finalized.ArtifactID
-		result.RuntimeMetadata["logs_artifact_id"] = finalized.ArtifactID
-	}
+	result = e.persistRunnerTranscript(ctx, req, runner, result)
+	result = e.persistRunnerLogs(ctx, req, runner, result)
 	if result.LogsRef != "" {
 		result.RuntimeMetadata["logs_ref"] = result.LogsRef
 	}
 	if result.ArtifactsRef == "" && len(result.ArtifactIDs) > 0 {
 		result.ArtifactsRef = "artifacts://" + req.TaskRunID
 	}
-	return result, nil
+	return result
+}
+
+func (e HostBridgeTaskExecutor) persistRunnerTranscript(ctx context.Context, req TaskExecRequest, runner bridgeTaskRunnerResult, result TaskExecResult) TaskExecResult {
+	runnerTranscriptRef := firstNonEmpty(
+		runner.TranscriptRef,
+		runner.TranscriptRefCamel,
+		result.RuntimeMetadata["transcript_ref"],
+		result.RuntimeMetadata["transcript_artifact_id"],
+	)
+	// A runner cannot mint a durable evidence locator. Only the finalized
+	// Artifact returned by CreateContent may populate these owner projections.
+	delete(result.RuntimeMetadata, "transcript_ref")
+	delete(result.RuntimeMetadata, "transcript_artifact_id")
+	transcriptContent, err := e.runnerFileOrInlineBytes(runner.transcriptInline(), firstNonEmpty(runner.TranscriptPath, runner.TranscriptPathCamel), "transcript")
+	if err != nil {
+		result = recordEvidenceCaptureFailure(result, artifactsmodule.EvidenceTranscript, err, taskExecAttempt(req))
+	}
+	if len(transcriptContent) > 0 {
+		artifactID := taskRunAttemptArtifactID(req, "transcript-"+req.TaskRunID)
+		finalized, err := e.createContentArtifact(ctx, req, artifactID, "transcript", "task run transcript", "application/x-ndjson", transcriptContent)
+		if err != nil {
+			slog.WarnContext(ctx, "Artifacts transcript capture failed",
+				"workspace_key", req.WorkspaceKey,
+				"task_id", req.TaskID,
+				"task_run_id", req.TaskRunID,
+				"artifact_id", artifactID,
+				"context_error", ctx.Err(),
+				"error", err,
+			)
+			result = recordEvidenceCaptureFailure(result, artifactsmodule.EvidenceTranscript, err, taskExecAttempt(req))
+		} else {
+			result = recordEvidenceCaptureSuccess(result, artifactsmodule.EvidenceTranscript, taskExecAttempt(req))
+			result.ArtifactIDs = normalizeArtifactIDs(append(result.ArtifactIDs, finalized.ArtifactID))
+			result.RuntimeMetadata["transcript_ref"] = "artifact://" + finalized.ArtifactID
+			result.RuntimeMetadata["transcript_artifact_id"] = finalized.ArtifactID
+		}
+	} else if err == nil && runnerTranscriptRef != "" {
+		result = recordEvidenceCaptureFailure(
+			result,
+			artifactsmodule.EvidenceTranscript,
+			artifactsmodule.ErrInvalid,
+			taskExecAttempt(req),
+		)
+	}
+	return result
+}
+
+func (e HostBridgeTaskExecutor) persistRunnerLogs(ctx context.Context, req TaskExecRequest, runner bridgeTaskRunnerResult, result TaskExecResult) TaskExecResult {
+	logContent, err := e.runnerFileOrInlineBytes(runner.logsInline(), firstNonEmpty(runner.LogsPath, runner.LogsPathCamel), "logs")
+	if err != nil {
+		result = recordEvidenceCaptureFailure(result, artifactsmodule.EvidenceLog, err, taskExecAttempt(req))
+	}
+	if len(logContent) > 0 && result.LogsRef == "" {
+		artifactID := taskRunAttemptArtifactID(req, "logs-"+req.TaskRunID)
+		finalized, err := e.createContentArtifact(ctx, req, artifactID, "logs", "task run logs", "text/plain; charset=utf-8", logContent)
+		if err != nil {
+			result = recordEvidenceCaptureFailure(result, artifactsmodule.EvidenceLog, err, taskExecAttempt(req))
+		} else {
+			result = recordEvidenceCaptureSuccess(result, artifactsmodule.EvidenceLog, taskExecAttempt(req))
+			result.ArtifactIDs = normalizeArtifactIDs(append(result.ArtifactIDs, finalized.ArtifactID))
+			result.LogsRef = "artifact://" + finalized.ArtifactID
+			result.RuntimeMetadata["logs_artifact_id"] = finalized.ArtifactID
+		}
+	}
+	return result
+}
+
+func recordEvidenceCaptureFailure(
+	result TaskExecResult,
+	kind artifactsmodule.EvidenceKind,
+	cause error,
+	attempt int,
+) TaskExecResult {
+	if result.RuntimeMetadata == nil {
+		result.RuntimeMetadata = map[string]string{}
+	}
+	for key, value := range artifactsmodule.OwnerEvidenceCaptureFailure(kind, cause, attempt) {
+		result.RuntimeMetadata[key] = value
+	}
+	return result
+}
+
+func recordEvidenceCaptureSuccess(
+	result TaskExecResult,
+	kind artifactsmodule.EvidenceKind,
+	attempt int,
+) TaskExecResult {
+	if result.RuntimeMetadata == nil {
+		result.RuntimeMetadata = map[string]string{}
+	}
+	for key, value := range artifactsmodule.OwnerEvidenceFinalized(kind, attempt) {
+		result.RuntimeMetadata[key] = value
+	}
+	return result
 }
 
 func (r bridgeTaskRunnerResult) transcriptInline() []byte {
@@ -206,7 +283,7 @@ func (r bridgeTaskRunnerResult) logsInline() []byte {
 	return []byte(r.Logs)
 }
 
-func marshalTranscriptJSONL(events []transcript.Event) []byte {
+func marshalTranscriptJSONL(events []artifactsmodule.Event) []byte {
 	var out bytes.Buffer
 	for _, event := range events {
 		if err := json.NewEncoder(&out).Encode(event); err != nil {
@@ -310,7 +387,7 @@ func (e HostBridgeTaskExecutor) createPatchArtifact(ctx context.Context, req Tas
 		Metadata:        metadata,
 	}, patch, taskOutputReference(req, artifactID))
 	if err != nil {
-		return nil, "", fmt.Errorf("create patch artifact: %w", err)
+		return nil, baseRef, fmt.Errorf("create patch artifact: %w", err)
 	}
 	return result.Artifact, baseRef, nil
 }
@@ -480,9 +557,11 @@ func (r bridgeTaskRunnerResult) taskExecResult() TaskExecResult {
 		CacheReadTokens:  firstNonZeroInt64(r.CacheReadTokens, r.CacheReadTokensCamel),
 		CacheWriteTokens: firstNonZeroInt64(r.CacheWriteTokens, r.CacheWriteTokensCamel),
 		EstimatedCostUSD: firstNonZeroFloat64(r.EstimatedCostUSD, r.EstimatedCostUSDCamel),
-		RuntimeMetadata:  cloneStringMap(firstNonNilMap(r.RuntimeMetadata, r.RuntimeMetadataCamel)),
-		ErrorClass:       firstNonEmpty(r.ErrorClass, r.ErrorClassCamel),
-		ErrorMessage:     firstNonEmpty(r.ErrorMessage, r.ErrorMessageCamel),
+		RuntimeMetadata: artifactsmodule.WithoutOwnerEvidenceMetadata(
+			firstNonNilMap(r.RuntimeMetadata, r.RuntimeMetadataCamel),
+		),
+		ErrorClass:   firstNonEmpty(r.ErrorClass, r.ErrorClassCamel),
+		ErrorMessage: firstNonEmpty(r.ErrorMessage, r.ErrorMessageCamel),
 	}
 }
 

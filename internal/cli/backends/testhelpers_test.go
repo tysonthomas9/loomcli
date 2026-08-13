@@ -170,10 +170,6 @@ func SetupMockClaudeInvoker(t *testing.T, returnErr error) *MockClaudeInvokerRec
 	return recorder
 }
 
-// --- lowercase alias for exported function ---
-
-func resolveNotifyToken() string { return ResolveNotifyToken() }
-
 func containsSubstring(slice []string, substr string) bool {
 	for _, s := range slice {
 		if len(s) >= len(substr) {

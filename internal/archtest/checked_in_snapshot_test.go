@@ -30,9 +30,9 @@ func checkedInSnapshotReport() Report {
 		ModuleRoots:                append([]string(nil), checkedInModuleRoots...),
 		AnalysisProfilesEnforced:   11,
 		MutationCommands:           107,
-		DirectPersistenceWrites:    90,
+		DirectPersistenceWrites:    82,
 		RuntimeComponents:          70,
-		RuntimeGoroutineLaunches:   79,
+		RuntimeGoroutineLaunches:   77,
 		PerformanceMetrics:         6,
 		PerformanceMetricsMeasured: 6,
 	}

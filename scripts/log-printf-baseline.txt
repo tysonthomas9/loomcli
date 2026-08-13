@@ -31,6 +31,4 @@ internal/cli/serve/workspacemgr/sessions.go
 internal/cli/task_router.go
 internal/events/otelexport/exporter.go
 internal/kv/stale.go
-internal/sessions/notify.go
-internal/sessions/query.go
 internal/usage/store.go

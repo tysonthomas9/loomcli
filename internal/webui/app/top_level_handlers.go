@@ -17,16 +17,15 @@ import (
 
 // Handlers holds all pre-built top-level HTTP handlers.
 type Handlers struct {
-	Health              http.HandlerFunc
-	APIHealth           http.HandlerFunc
-	ClientErrors        http.HandlerFunc
-	AuthConfig          http.HandlerFunc
-	Metrics             http.HandlerFunc // pre-built by caller (requires fleet types)
-	GetTerminalConfig   http.HandlerFunc
-	GetBackendsHealth   http.HandlerFunc // pre-built by caller (requires ops types), may be nil
-	ListEditors         http.HandlerFunc
-	OpenEditor          http.HandlerFunc
-	NotifySessionChange http.HandlerFunc // pre-built by caller, may be nil
+	Health            http.HandlerFunc
+	APIHealth         http.HandlerFunc
+	ClientErrors      http.HandlerFunc
+	AuthConfig        http.HandlerFunc
+	Metrics           http.HandlerFunc // pre-built by caller (requires fleet types)
+	GetTerminalConfig http.HandlerFunc
+	GetBackendsHealth http.HandlerFunc // pre-built by caller (requires ops types), may be nil
+	ListEditors       http.HandlerFunc
+	OpenEditor        http.HandlerFunc
 
 	// Closers for cleanup
 	ClientErrLimiter Stopper
@@ -42,8 +41,7 @@ type Stopper interface {
 type HandlerDeps struct {
 	Hub                *realtime.Hub // may be nil
 	ExtAuthURL         string
-	BackendsHealthH    http.HandlerFunc // pre-built; nil disables endpoint
-	NotifyToken        string
+	BackendsHealthH    http.HandlerFunc    // pre-built; nil disables endpoint
 	FleetTimeoutsFn    func() int64        // nil = no fleet
 	ClaimMetrics       *fleet.ClaimMetrics // nil = no fleet
 	TerminalGraceMS    int64               // 0 = disabled
@@ -85,9 +83,6 @@ func BuildHandlers(deps HandlerDeps) *Handlers {
 	}
 
 	h.GetBackendsHealth = deps.BackendsHealthH
-	if deps.Hub != nil {
-		h.NotifySessionChange = misc.HandleNotifySessionChange(deps.Hub, deps.NotifyToken)
-	}
 
 	return h
 }

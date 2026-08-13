@@ -78,6 +78,7 @@ type SessionStore interface {
 	// session after the original response may have been lost.
 	RecoverStart(context.Context, RecoverSessionStartCommand) (SessionStart, error)
 	Get(context.Context, string, string) (*AgentSession, error)
+	List(context.Context, SessionArchiveQuery) ([]*AgentSession, error)
 	PatchOwned(context.Context, string, authority.SessionOwner, SessionPatch) (*AgentSession, *SessionLease, error)
 	HeartbeatOwned(context.Context, string, authority.SessionOwner, SessionHeartbeat) (*AgentSession, *SessionLease, error)
 	FinishOwned(context.Context, string, authority.SessionOwner, SessionFinish) (SessionFinishResult, error)
@@ -99,10 +100,22 @@ type TranscriptArtifactCreate struct {
 	Metadata     map[string]string
 }
 
+// TranscriptArtifactFailure is the server-derived identity for a capture
+// failure that happened before canonical transcript bytes were available.
+type TranscriptArtifactFailure struct {
+	WorkspaceKey string
+	ArtifactID   string
+	AgentID      string
+	SessionID    string
+	TaskID       string
+	FailureClass string
+}
+
 // TranscriptArtifactStore is the narrow Artifacts capability consumed by
 // Interaction. It deliberately exposes no generic artifact CRUD surface.
 type TranscriptArtifactStore interface {
 	CreateContent(context.Context, authority.SessionAuthority, TranscriptArtifactCreate) (string, error)
+	RecordFailure(context.Context, authority.SessionAuthority, TranscriptArtifactFailure) error
 }
 
 type TerminalUpdate struct {

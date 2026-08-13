@@ -132,6 +132,10 @@ func (adapter workflowRunStoreTestExecution) GetTaskRun(ctx context.Context, wor
 	return &execution.TaskRun{WorkspaceKey: value.WorkspaceKey, TaskRunID: value.TaskRunID, WorkItemID: value.TaskID}, nil
 }
 
+func (adapter workflowRunStoreTestExecution) ListTaskRuns(context.Context, execution.TaskRunArchiveQuery) ([]*execution.TaskRun, error) {
+	return nil, nil
+}
+
 func (adapter workflowRunStoreTestExecution) ListActiveTaskRuns(context.Context, execution.ActiveTaskRunQuery) ([]*execution.TaskRun, error) {
 	return nil, nil
 }

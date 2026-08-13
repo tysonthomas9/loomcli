@@ -11,7 +11,6 @@ import (
 
 	"github.com/redis/go-redis/v9"
 
-	"github.com/tysonthomas9/loomcli/internal/app/query/runcapture"
 	"github.com/tysonthomas9/loomcli/internal/app/workitemmove"
 	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 	"github.com/tysonthomas9/loomcli/internal/webui"
@@ -342,9 +341,6 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 		AgentDirectory:       workspaceAgents,
 	})
 
-	// Generate and persist notify token for session change endpoint auth.
-	app.notifyToken, app.notifyTokenFile = generateNotifyToken(config.NotifyTokenDir)
-
 	// Initialize terminal service layer. The surviving methods are tab
 	// metadata CRUD, terminal UI state, and the WS auth token issuer — all
 	// backed by Redis / in-memory state, no tmux required.
@@ -383,21 +379,12 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 		app.fileSvc = filecoord.NewFileService(config.FileOps)
 	}
 
-	// Initialize session service over the read-only Artifacts capability.
-	var artifactQueries webui.ArtifactQueryAPI
-	if config.ArtifactsCapability != nil {
-		artifactQueries = config.ArtifactsCapability.ArtifactQueries()
-	}
-	var runCaptures runcapture.API
-	if config.RunCaptureCapability != nil {
-		runCaptures = config.RunCaptureCapability.RunCaptureAPI()
-	}
-	app.sessSvc = sessioncoord.NewSessionServiceWithRunCaptures(
+	// Initialize session delivery over lifecycle-owner queries and the
+	// immutable Run Capture projection. WebUI never queries Artifacts directly.
+	app.sessSvc = sessioncoord.NewSessionService(
 		config.Store,
 		app.sessionHistoryStore,
-		config.SessionRuntimeDir,
-		artifactQueries,
-		runCaptures,
+		webui.RunCaptureProjection(config.RunCaptureCapability),
 	)
 
 	app.buildHandlers()

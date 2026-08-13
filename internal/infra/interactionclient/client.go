@@ -220,7 +220,21 @@ func (client *Client) PublishTranscript(
 	ctx context.Context,
 	command interaction.PublishTranscriptCommand,
 ) error {
-	if len(command.Content) == 0 || len(command.Content) > maxTranscriptBytes {
+	failureClass := strings.TrimSpace(command.FailureClass)
+	hasContent := len(command.Content) > 0
+	hasFailure := failureClass != ""
+	if hasContent == hasFailure {
+		return errors.New("exactly one transcript content or failure class is required")
+	}
+	if hasFailure {
+		if len(failureClass) > 128 || len(command.Metadata) != 0 {
+			return errors.New("transcript failure class must be bounded and cannot carry metadata")
+		}
+		body := client.proofBody()
+		body["failure_class"] = failureClass
+		return client.do(ctx, http.MethodPost, client.sessionPath()+"/transcript/failure", body, nil)
+	}
+	if len(command.Content) > maxTranscriptBytes {
 		return fmt.Errorf("canonical transcript must contain 1..%d bytes", maxTranscriptBytes)
 	}
 	metadata, err := json.Marshal(command.Metadata)

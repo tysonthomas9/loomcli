@@ -22,6 +22,7 @@ type MutationTransport interface {
 		interaction.RecoverSessionStartCommand,
 	) (interaction.SessionStart, error)
 	GetSession(context.Context, string, string) (*interaction.AgentSession, error)
+	ListSessions(context.Context, interaction.SessionArchiveQuery) ([]*interaction.AgentSession, error)
 	PatchSessionOwned(
 		context.Context,
 		string,
@@ -146,6 +147,14 @@ func (adapter *Adapter) Get(
 ) (*interaction.AgentSession, error) {
 	value, err := adapter.mutations.GetSession(ctx, workspace, sessionID)
 	return value, mapError("get AgentSession", err)
+}
+
+func (adapter *Adapter) List(
+	ctx context.Context,
+	query interaction.SessionArchiveQuery,
+) ([]*interaction.AgentSession, error) {
+	values, err := adapter.mutations.ListSessions(ctx, query)
+	return values, mapError("list AgentSessions", err)
 }
 
 func (adapter *Adapter) HeartbeatOwned(

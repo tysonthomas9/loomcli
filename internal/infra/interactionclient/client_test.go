@@ -84,6 +84,47 @@ func TestClientPublishesTranscriptWithScopedProofHeaders(t *testing.T) {
 	}
 }
 
+func TestClientReportsTranscriptCaptureFailureWithScopedProof(t *testing.T) {
+	env := completeEnvelope()
+	transport := roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if req.Method != http.MethodPost || req.URL.Path != "/api/workspaces/WS/interaction/sessions/session-1/transcript/failure" {
+			t.Fatalf("request = %s %s", req.Method, req.URL.Path)
+		}
+		body, err := io.ReadAll(req.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var decoded map[string]any
+		if err := json.Unmarshal(body, &decoded); err != nil {
+			t.Fatal(err)
+		}
+		if decoded["failure_class"] != "capture_unavailable" || decoded["session_token"] != nil {
+			t.Fatalf("failure body = %#v", decoded)
+		}
+		if req.Header.Get(sessionTokenHeader) != testToken || bytes.Contains(body, []byte(testToken)) {
+			t.Fatal("session token was not confined to its credential header")
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(strings.NewReader(`{"session_id":"session-1"}`)),
+			Header:     make(http.Header),
+		}, nil
+	})
+	client, registered, err := newFromEnvironment(
+		func(name string) (string, bool) { value, ok := env[name]; return value, ok },
+		func(name string) error { delete(env, name); return nil },
+		&http.Client{Transport: transport},
+	)
+	if err != nil || !registered {
+		t.Fatalf("newFromEnvironment = registered %v err %v", registered, err)
+	}
+	if err := client.PublishTranscript(t.Context(), interaction.PublishTranscriptCommand{
+		FailureClass: "capture_unavailable",
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestNewFromEnvironmentDistinguishesStandaloneAndFailsPartialClosed(t *testing.T) {
 	t.Run("standalone", func(t *testing.T) {
 		client, registered, err := newFromEnvironment(

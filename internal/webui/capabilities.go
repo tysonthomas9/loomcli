@@ -110,11 +110,19 @@ type RunCaptureCapability interface {
 	RunCaptureAPI() runcapture.API
 }
 
+// RunCaptureProjection unwraps the optional composed capability for delivery
+// wiring without making WebUI composition import the application query.
+func RunCaptureProjection(capability RunCaptureCapability) runcapture.API {
+	if capability == nil {
+		return nil
+	}
+	return capability.RunCaptureAPI()
+}
+
 // Exact module aliases keep ServerConfig's public field types source
 // compatible while preserving the capability-owned contracts.
 type (
 	DaytonaProviderBroker                    = execution.DaytonaProviderBroker
-	ArtifactQueryAPI                         = artifacts.QueryAPI
 	SourceControlMaterializer                = sourcecontrol.Materializer
 	SourceControlStackBindingResolver        = sourcecontrol.StackBindingResolver
 	SourceControlTaskOutcomeRecorder         = sourcecontrol.TaskOutcomeRecorder

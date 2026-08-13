@@ -2,6 +2,7 @@ package leadcontrol
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -11,7 +12,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/olesho/harness-wrapper/pkg/chat"
 
-	"github.com/tysonthomas9/loomcli/internal/modules/artifacts/transcript"
+	transcript "github.com/tysonthomas9/loomcli/internal/modules/artifacts"
 	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
 )
 
@@ -125,14 +126,15 @@ func captureHarnessInteractiveTranscriptWithUnavailableSource(
 		unavailableSourceCause,
 	)
 	if err != nil {
-		return err
+		return persistTranscriptCaptureFailure(ctx, cfg.Runtime, workspace, sessionID, err)
 	}
 	capture, err := marshalCanonicalTranscriptWithSourceState(
 		collection.events,
 		collection.sourceTruncation,
 	)
 	if err != nil {
-		return fmt.Errorf("marshal harness transcript: %w", err)
+		cause := fmt.Errorf("marshal harness transcript: %w", errors.Join(transcript.ErrEvidenceCorrupt, err))
+		return persistTranscriptCaptureFailure(ctx, cfg.Runtime, workspace, sessionID, cause)
 	}
 	return publishHarnessTranscript(ctx, cfg, collection.history, capture)
 }

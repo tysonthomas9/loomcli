@@ -52,6 +52,10 @@ func (a taskRunArtifactTestAPI) Finalize(ctx context.Context, _ authority.Execut
 	return a.store.Finalize(ctx, owner, command)
 }
 
+func (a taskRunArtifactTestAPI) Fail(ctx context.Context, _ authority.ExecutionAuthority, owner artifactsmodule.ExecutionOwner, command artifactsmodule.FailCommand) (*artifactsmodule.Artifact, error) {
+	return a.store.Fail(ctx, owner, command)
+}
+
 func (a taskRunArtifactTestAPI) Reference(ctx context.Context, _ authority.ExecutionAuthority, owner artifactsmodule.ExecutionOwner, command artifactsmodule.ReferenceCommand) (artifactsmodule.ReferenceResult, error) {
 	return a.store.Reference(ctx, owner, command)
 }
@@ -120,6 +124,13 @@ func (a taskRunArtifactTestAdapter) Finalize(ctx context.Context, owner artifact
 		return nil, err
 	}
 	return a.store.Finalize(ctx, owner, command)
+}
+
+func (a taskRunArtifactTestAdapter) Fail(ctx context.Context, owner artifactsmodule.ExecutionOwner, command artifactsmodule.FailCommand) (*artifactsmodule.Artifact, error) {
+	if _, err := a.authorize(ctx, owner); err != nil {
+		return nil, err
+	}
+	return a.store.Fail(ctx, owner, command)
 }
 
 func (a taskRunArtifactTestAdapter) Reference(ctx context.Context, owner artifactsmodule.ExecutionOwner, command artifactsmodule.ReferenceCommand) (artifactsmodule.ReferenceResult, error) {

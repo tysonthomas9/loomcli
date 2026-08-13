@@ -259,7 +259,7 @@ func (s *artifactCommandStore) Create(ctx context.Context, owner ArtifactOwner, 
 	if artifact.SessionID != command.SessionID ||
 		(command.TaskID != "" && artifact.TaskID != command.TaskID) ||
 		artifact.URI != command.URI || artifact.SizeBytes != command.SizeBytes ||
-		artifact.Checksum != command.Checksum || artifact.ContentHash != command.ContentHash {
+		!artifactCreateDigestsMatch(command.Checksum, command.ContentHash, artifact.Checksum, artifact.ContentHash) {
 		return nil, fmt.Errorf("artifact create returned divergent execution metadata: %w", ErrArtifactsUnavailable)
 	}
 	return artifact, nil
@@ -631,6 +631,25 @@ func deterministicArtifactCommandID(operation string, owner ArtifactOwner, artif
 func artifactContentDigest(content []byte) string {
 	sum := sha256.Sum256(content)
 	return "sha256:" + hex.EncodeToString(sum[:])
+}
+
+// Fleet canonicalizes a declaration with only one digest alias by filling the
+// other alias with the same value. Preserve strict comparison for every
+// supplied field while accepting that canonical, non-divergent enrichment.
+func artifactCreateDigestsMatch(expectedChecksum, expectedContentHash, actualChecksum, actualContentHash string) bool {
+	switch {
+	case expectedChecksum != "" && expectedContentHash != "":
+		return strings.EqualFold(actualChecksum, expectedChecksum) &&
+			strings.EqualFold(actualContentHash, expectedContentHash)
+	case expectedChecksum != "":
+		return strings.EqualFold(actualChecksum, expectedChecksum) &&
+			(actualContentHash == "" || strings.EqualFold(actualContentHash, expectedChecksum))
+	case expectedContentHash != "":
+		return strings.EqualFold(actualContentHash, expectedContentHash) &&
+			(actualChecksum == "" || strings.EqualFold(actualChecksum, expectedContentHash))
+	default:
+		return true
+	}
 }
 
 func artifactDigest(artifact *Artifact) string {

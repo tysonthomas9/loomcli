@@ -82,12 +82,24 @@ func (service *QueryService) ReadArtifactContent(ctx context.Context, query Quer
 	// Re-resolve and validate metadata immediately before touching managed
 	// bytes. A content-capable adapter cannot become an ID-only read bypass for
 	// malformed or cross-workspace persisted rows.
-	if _, err := service.GetArtifact(ctx, query); err != nil {
+	artifact, err := service.GetArtifact(ctx, query)
+	if err != nil {
 		return nil, err
+	}
+	if artifact.DurableStatus != StatusFinalized {
+		return nil, fmt.Errorf("read artifact %q before finalization: %w", query.ArtifactID, ErrContentUnavailable)
 	}
 	content, err := service.store.ReadArtifactContent(ctx, query.WorkspaceKey, query.ArtifactID)
 	if err != nil {
 		return nil, fmt.Errorf("read artifact %q content: %w", query.ArtifactID, err)
+	}
+	persistedHash := strings.TrimSpace(artifact.ContentHash)
+	if persistedHash == "" {
+		persistedHash = strings.TrimSpace(artifact.Checksum)
+	}
+	if len(content) == 0 || artifact.SizeBytes != int64(len(content)) || persistedHash == "" ||
+		!strings.EqualFold(persistedHash, artifactContentHash(content)) {
+		return nil, fmt.Errorf("artifact %q content failed durable integrity validation: %w", query.ArtifactID, ErrEvidenceCorrupt)
 	}
 	return append([]byte(nil), content...), nil
 }

@@ -81,8 +81,6 @@ func TestRunTask_SingleTask_Success(t *testing.T) {
 	taskJSON := `[{"id":"loom-123","status":"open","issue_type":"task","title":"Test task","design":"Implementation plan here"}]`
 	mock := NewCommandMock(t, []CommandStub{
 		{Name: "issue-store", Args: []string{"ready", "--json", "--limit", "100"}, Stdout: taskJSON},
-		{Name: "git", Args: []string{"rev-parse", "HEAD"}, Stdout: "abc123\n"},
-		{Name: "git", Args: []string{"diff", "--numstat", "abc123..HEAD"}, Stdout: ""},
 	})
 	mock.Install()
 

@@ -60,7 +60,6 @@ var loomDesktopEnvKeys = []string{
 	"LOOM_FRONTEND_DIR",
 	"LOOM_WEBUI_URL",
 	"LOOM_LOCAL_RUNTIME",
-	"LOOM_NOTIFY_TOKEN",
 	"LOOM_AGENT_NAME",
 	"LOOM_AGENT_ROLE",
 	"LOOM_AGENT_TERMINAL_ID",
@@ -70,7 +69,7 @@ var loomDesktopEnvKeys = []string{
 
 // ClearLoomEnv removes Loom desktop/runtime environment variables that can
 // make local tests resolve the real desktop workspace, frontend bundle, runtime
-// directory, or notify token instead of test fixtures.
+// directory, or agent/session identity instead of test fixtures.
 func ClearLoomEnv(t *testing.T) {
 	t.Helper()
 	for _, key := range loomDesktopEnvKeys {

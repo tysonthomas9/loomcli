@@ -163,6 +163,16 @@ type SessionContentCommand struct {
 	Content         []byte
 }
 
+// SessionFailureCommand records a capture failure that occurred before any
+// canonical content was available. Artifacts validates the failure vocabulary
+// and owns the durable failed-evidence representation.
+type SessionFailureCommand struct {
+	ArtifactID   string
+	TaskID       string
+	Type         string
+	FailureClass string
+}
+
 // SessionContentAuthorities carries one independently issued session
 // authority per durable operation. A publish authority cannot be replayed as
 // a different lifecycle action.
@@ -179,6 +189,7 @@ type SessionContentAuthorities struct {
 // queries.
 type SessionAPI interface {
 	CreateContent(context.Context, SessionContentAuthorities, SessionOwner, SessionContentCommand) (*Artifact, error)
+	RecordFailure(context.Context, SessionContentAuthorities, SessionOwner, SessionFailureCommand) (*Artifact, error)
 }
 
 // QueryAPI is the general read-only Artifacts surface consumed by product

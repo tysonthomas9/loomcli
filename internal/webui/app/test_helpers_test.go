@@ -3,12 +3,10 @@ package app
 import (
 	"context"
 	"errors"
-	"testing"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/ops"
-	"github.com/tysonthomas9/loomcli/internal/sessions"
 	storepkg "github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 )
@@ -70,55 +68,6 @@ func (tc *testSSEClient) DrainMutations() []*realtime.MutationPayload {
 func (tc *testSSEClient) Close() {
 	tc.hub.UnregisterClient(tc.client)
 	close(tc.client.Done())
-}
-
-// newTestSessionStore creates a sessions.Store rooted in a temporary directory.
-func newTestSessionStore(t *testing.T) *sessions.Store {
-	t.Helper()
-	dir := t.TempDir()
-	store, err := sessions.NewStore(t.Context(), dir)
-	if err != nil {
-		t.Fatalf("NewStore: %v", err)
-	}
-	return store
-}
-
-// newTestSessionStoreWithDir creates a sessions.Store and returns the base dir (for configByIDFn).
-func newTestSessionStoreWithDir(t *testing.T) (*sessions.Store, string) {
-	t.Helper()
-	dir := t.TempDir()
-	store, err := sessions.NewStore(t.Context(), dir)
-	if err != nil {
-		t.Fatalf("NewStore: %v", err)
-	}
-	return store, dir
-}
-
-// createTestSession creates a session via the store and finalizes it.
-func createTestSession(t *testing.T, store *sessions.Store, taskID string) *sessions.Session {
-	t.Helper()
-	sess, err := store.CreateSession(sessions.CreateOptions{
-		AgentName:  "testagent",
-		Backend:    "claude",
-		AttemptNum: 1,
-	})
-	if err != nil {
-		t.Fatalf("CreateSession: %v", err)
-	}
-	err = sess.Finalize(sessions.FinalizeOptions{
-		TaskID:   taskID,
-		ExitCode: 0,
-		DiffStats: sessions.DiffStats{
-			FilesChanged: 2,
-			LinesAdded:   10,
-			LinesRemoved: 3,
-		},
-		DiffPatch: "diff --git a/foo.go b/foo.go\n+hello\n",
-	})
-	if err != nil {
-		t.Fatalf("Finalize: %v", err)
-	}
-	return sess
 }
 
 // testWorkspaceStore returns a FleetDB-style workspace store for testing.

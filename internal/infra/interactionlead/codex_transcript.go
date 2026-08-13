@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/modules/artifacts/transcript"
+	transcript "github.com/tysonthomas9/loomcli/internal/modules/artifacts"
 	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
 )
 
@@ -75,12 +75,15 @@ func captureCodexInteractiveTranscript(
 	runtimeStartedAt time.Time,
 ) error {
 	target, err := resolveCodexTranscriptCaptureTarget(ctx, cfg, runtime, runtimeStartedAt)
-	if err != nil || target == nil {
-		return err
+	if err != nil {
+		return persistTranscriptCaptureFailure(ctx, cfg.Runtime, cfg.Workspace, cfg.SessionID, err)
+	}
+	if target == nil {
+		return nil
 	}
 	capture, err := readCodexTranscriptContent(ctx, target.runtime)
 	if err != nil {
-		return err
+		return persistTranscriptCaptureFailure(ctx, cfg.Runtime, target.workspace, target.sessionID, err)
 	}
 	return publishCodexTranscript(ctx, cfg, *target, capture)
 }
@@ -154,7 +157,7 @@ func readCodexTranscriptContent(ctx context.Context, runtime CodexRuntimeMetadat
 		},
 	)
 	if err != nil {
-		return canonicalTranscriptCapture{}, fmt.Errorf("marshal codex transcript: %w", err)
+		return canonicalTranscriptCapture{}, fmt.Errorf("marshal codex transcript: %w", errors.Join(transcript.ErrEvidenceCorrupt, err))
 	}
 	return capture, nil
 }

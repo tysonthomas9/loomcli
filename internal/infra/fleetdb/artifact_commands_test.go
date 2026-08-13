@@ -75,6 +75,48 @@ func TestArtifactCommandCreatePreservesExecutionArtifactFields(t *testing.T) {
 	}
 }
 
+func TestArtifactCommandCreateAcceptsCanonicalDigestAliasFilledByFleet(t *testing.T) {
+	now := time.Date(2026, 8, 12, 12, 0, 0, 0, time.UTC)
+	const digest = "sha256:content"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request struct {
+			CommandID   string `json:"command_id"`
+			ArtifactID  string `json:"artifact_id"`
+			Checksum    string `json:"checksum"`
+			ContentHash string `json:"content_hash"`
+		}
+		decodeJSONBody(t, r, &request)
+		if request.Checksum != "" || request.ContentHash != digest {
+			t.Fatalf("create digest request = checksum %q, content_hash %q", request.Checksum, request.ContentHash)
+		}
+		artifact := artifactCreateTestSnapshot(now, "", "task-1", "", 7, digest, digest)
+		writeJSON(t, w, map[string]any{
+			"artifact": artifact,
+			"receipt": map[string]any{
+				"workspace_key": "WS", "command_id": request.CommandID, "artifact_id": request.ArtifactID,
+				"command_type": "artifact_create", "request_fingerprint": "sha256:request", "artifact_revision": 1,
+				"committed_at": now,
+			},
+		})
+	}))
+	defer server.Close()
+
+	client, err := New(Config{BaseURL: server.URL, Actor: "tester"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifact, err := client.ArtifactCommands().Create(t.Context(), artifactCreateTestOwner(), ArtifactCreateCommand{
+		ArtifactID: "artifact-1", TaskID: "task-1", Type: "transcript",
+		SizeBytes: 7, ContentHash: digest,
+	})
+	if err != nil {
+		t.Fatalf("Create() rejected Fleet's canonical checksum alias: %v", err)
+	}
+	if artifact.Checksum != digest || artifact.ContentHash != digest {
+		t.Fatalf("Create() digest aliases = checksum %q, content_hash %q", artifact.Checksum, artifact.ContentHash)
+	}
+}
+
 func TestArtifactCommandCreateRejectsDivergentExecutionArtifactFields(t *testing.T) {
 	now := time.Date(2026, 7, 16, 12, 0, 0, 0, time.UTC)
 	tests := []struct {

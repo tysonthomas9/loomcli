@@ -74,7 +74,7 @@ func taskRunExecutionAction(action authority.Action) bool {
 		execution.ActionUpdateTaskRunWorkItemDesign,
 		execution.ActionRequeueTaskRun, execution.ActionExhaustTaskRunRetries,
 		artifacts.ActionDeclare, artifacts.ActionUpload, artifacts.ActionFinalize,
-		artifacts.ActionReference, artifacts.ActionGet, artifacts.ActionList:
+		artifacts.ActionFail, artifacts.ActionReference, artifacts.ActionGet, artifacts.ActionList:
 		return true
 	default:
 		return false

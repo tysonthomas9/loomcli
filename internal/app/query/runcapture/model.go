@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/modules/artifacts"
-	"github.com/tysonthomas9/loomcli/internal/modules/artifacts/transcript"
 )
 
 var (
@@ -67,6 +66,8 @@ type RunCapture struct {
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
 	Evidence     []Evidence
+
+	ownerEvidenceMetadata map[string]string
 }
 
 type Evidence struct {
@@ -85,11 +86,18 @@ type Evidence struct {
 type TranscriptEvidence struct {
 	Capture  *RunCapture
 	Evidence Evidence
-	Events   []transcript.Event
+	Events   []artifacts.TranscriptEvent
+}
+
+type EvidenceContent struct {
+	Capture  *RunCapture
+	Evidence Evidence
+	Content  []byte
 }
 
 type API interface {
 	Get(context.Context, Query) (*RunCapture, error)
 	List(context.Context, ArchiveQuery) ([]*RunCapture, error)
+	ReadEvidence(context.Context, Query, artifacts.EvidenceKind) (*EvidenceContent, error)
 	Transcript(context.Context, Query) (*TranscriptEvidence, error)
 }

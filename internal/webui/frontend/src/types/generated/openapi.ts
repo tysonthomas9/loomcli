@@ -2079,23 +2079,6 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  "/api/sessions/notify": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    get?: never;
-    put?: never;
-    /** Notify SSE hub of session status change (agent-to-server) */
-    post: operations["notifySessionChange"];
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
   "/api/workspaces/{ws}/fleet/register": {
     parameters: {
       query?: never;
@@ -3558,6 +3541,10 @@ export interface components {
       is_active: boolean;
       has_transcript: boolean;
       has_diff: boolean;
+      transcript_evidence_status: components["schemas"]["EvidenceState"];
+      transcript_failure_class?: string;
+      diff_evidence_status: components["schemas"]["EvidenceState"];
+      diff_failure_class?: string;
       last_error?: string;
       runtime_strategy?: string;
       delivery?: string;
@@ -3568,6 +3555,18 @@ export interface components {
       github_branch?: string;
       github_pr_url?: string;
     };
+    /**
+     * @description Durable Artifacts evidence state, independent of the owning run or session outcome.
+     * @enum {string}
+     */
+    EvidenceState:
+      | "missing"
+      | "pending"
+      | "finalized"
+      | "truncated"
+      | "capture_failed"
+      | "content_unavailable"
+      | "corrupt";
     TranscriptResponse: {
       success: boolean;
       data?: components["schemas"]["TranscriptData"];
@@ -3614,7 +3613,10 @@ export interface components {
       started_at: string;
       /** Format: date-time */
       ended_at?: string | null;
-      scrollback_path?: string;
+      /** @description Durable scrollback state, independent of terminal session outcome. */
+      scrollback_evidence_status: components["schemas"]["EvidenceState"];
+      /** @description Sanitized failure class when scrollback capture failed. */
+      scrollback_failure_class?: string;
     };
     TerminalSessionInfo: {
       name: string;
@@ -8951,33 +8953,6 @@ export interface operations {
             success: boolean;
           };
         };
-      };
-    };
-  };
-  notifySessionChange: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    requestBody: {
-      content: {
-        "application/json": {
-          task_id: string;
-          session_id: string;
-          status: string;
-          workspace_id: string;
-        };
-      };
-    };
-    responses: {
-      /** @description Notification received */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content?: never;
       };
     };
   };

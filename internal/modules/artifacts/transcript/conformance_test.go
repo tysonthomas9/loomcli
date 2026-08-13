@@ -1,12 +1,15 @@
 package transcript_test
 
 import (
+	_ "embed"
 	"encoding/json"
-	"os"
 	"testing"
 
-	"github.com/tysonthomas9/loomcli/internal/modules/artifacts/transcript"
+	transcript "github.com/tysonthomas9/loomcli/internal/modules/artifacts"
 )
+
+//go:embed testdata/ts_leaf_corpus.json
+var tsLeafCorpus []byte
 
 // TestTSLeafCorpusConformsToCanonicalSchema is the Phase-U/U0 contract lock: it
 // pins the TypeScript local-task-runner leaf's `transcript_entries` output to the
@@ -18,16 +21,11 @@ import (
 // representative claude/codex/cursor stream-json — regenerate with
 // scripts/gen-ts-leaf-transcript-corpus.mjs whenever the parser changes.
 func TestTSLeafCorpusConformsToCanonicalSchema(t *testing.T) {
-	raw, err := os.ReadFile("testdata/ts_leaf_corpus.json")
-	if err != nil {
-		t.Fatalf("read TS-leaf corpus: %v", err)
-	}
-
 	// (1) The raw TS output must decode into []transcript.Event without error.
 	// Timestamp is a time.Time, so a non-RFC3339 stamp would fail HERE — that is
 	// the latent "one bad timestamp poisons the whole run" hazard, pinned shut.
 	var byBackend map[string][]transcript.Event
-	if err := json.Unmarshal(raw, &byBackend); err != nil {
+	if err := json.Unmarshal(tsLeafCorpus, &byBackend); err != nil {
 		t.Fatalf("TS-leaf transcript_entries must decode into []transcript.Event: %v", err)
 	}
 	if len(byBackend) == 0 {

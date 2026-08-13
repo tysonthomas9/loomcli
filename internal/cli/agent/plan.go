@@ -14,13 +14,9 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/agenterr"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/automode"
-	"github.com/tysonthomas9/loomcli/internal/cli/backends"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
-	"github.com/tysonthomas9/loomcli/internal/cli/sessionfinalize"
 	"github.com/tysonthomas9/loomcli/internal/cli/workspace"
 	"github.com/tysonthomas9/loomcli/internal/events"
-	"github.com/tysonthomas9/loomcli/internal/sessions"
-	"github.com/tysonthomas9/loomcli/internal/usage"
 )
 
 var (
@@ -167,7 +163,6 @@ func runPlanSingleTask(ctx context.Context, deps *cli.Deps, worktreePath, agentN
 
 	ws, _ := config.ResolveActiveWorkspace(ctx)
 	prompt := GeneratePlanningPrompt(agentName, ws, planParentID)
-	sess := createAgentSession(ctx, agentName, planParentID, prompt, "planning")
 
 	// Single-task mode: the task is self-claimed by the agent during the
 	// run, so the ID is unknown here. Emit with TaskID="" to start the
@@ -175,91 +170,13 @@ func runPlanSingleTask(ctx context.Context, deps *cli.Deps, worktreePath, agentN
 	// invoke to recover the resolved ID for the close-out event.
 	emitTaskClaimedFromEnv(ctx, agentName, "")
 
-	beforeRef := automode.CaptureHEADRef(worktreePath)
 	startedAt := time.Now()
 	invokeErr := deps.Agent.InvokeInteractive(worktreePath, prompt, agentName)
 	emitTaskLifecycleResult(ctx, agentName, worktreePath, startedAt, invokeErr)
-	finalizeAgentSession(sess, worktreePath, beforeRef, invokeErr, nil, startedAt, planParentID)
 
 	if invokeErr != nil {
 		fmt.Fprintf(os.Stderr, "Error running agent: %v\n", invokeErr)
 		cli.ExitWithFlush(1)
-	}
-}
-
-// createAgentSession creates a new session for tracking.
-func createAgentSession(ctx context.Context, agentName, parentID, prompt, phase string) *sessions.Session {
-	sessStore, sessErr := sessions.OpenArchive(ctx, cli.GetWorkspaceRuntimeDir())
-	if sessErr != nil {
-		log.Printf("[agent] Warning: session store unavailable: %v", sessErr)
-		return nil
-	}
-	sess, _ := sessStore.Begin(sessions.CreateOptions{
-		AgentName: agentName, Backend: cli.ResolveBackendName(),
-		EpicID: parentID, Prompt: prompt, Phase: phase,
-	})
-	if sess != nil {
-		backends.SetActiveSessionRuntimeEnv(cli.GetWorkspaceRuntimeDir(), sess.SessionID())
-	}
-	return sess
-}
-
-// finalizeAgentSession finalizes a compatibility CLI session after invocation.
-func finalizeAgentSession(sess *sessions.Session, worktreePath, beforeRef string, invokeErr error, collector *usage.Collector, startedAt time.Time, epicID string) {
-	if sess == nil {
-		return
-	}
-	exitCode := exitCodeFromErr(invokeErr)
-	taskID := ""
-	if info, lockErr := cli.ReadLockFile(worktreePath); lockErr == nil {
-		taskID = info.TaskID
-	}
-
-	// GetLastCapturedSessionID returns the Claude session UUID scraped from the
-	// run's stream output (empty for interactive runs or non-Claude backends),
-	// letting WithWorktree resolve the native transcript exactly.
-	opts := sessionfinalize.WithWorktreeOptions{
-		WorktreePath:    worktreePath,
-		BeforeRef:       beforeRef,
-		TaskID:          taskID,
-		ExitCode:        exitCode,
-		ClaudeSessionID: backends.GetLastCapturedSessionID(),
-	}
-	if collector != nil {
-		rec := collector.Finalize(taskID, epicID, startedAt, time.Now(), exitCode)
-		opts.InputTokens = rec.InputTokens
-		opts.OutputTokens = rec.OutputTokens
-		opts.CacheReadTokens = rec.CacheReadTokens
-		opts.CacheWriteTokens = rec.CacheWriteTokens
-		opts.EstimatedCostUSD = rec.EstimatedCostUSD
-		appendUsageRecord(rec)
-	}
-
-	_, _ = sessionfinalize.WithWorktree(sess, opts)
-	backends.ClearActiveSessionEnv()
-}
-
-// exitCodeFromErr derives a process exit code from an invocation error.
-func exitCodeFromErr(invokeErr error) int {
-	if invokeErr == nil {
-		return 0
-	}
-	var exitErr *exec.ExitError
-	if errors.As(invokeErr, &exitErr) {
-		return exitErr.ExitCode()
-	}
-	return 1
-}
-
-// appendUsageRecord persists a usage record to the workspace usage.jsonl.
-func appendUsageRecord(rec usage.SessionUsage) {
-	store, err := usage.NewProjection(cli.GetWorkspaceRuntimeDir())
-	if err != nil {
-		log.Printf("[agent] Warning: usage store unavailable: %v", err)
-		return
-	}
-	if err := store.Append(rec); err != nil {
-		log.Printf("[agent] Warning: failed to record usage: %v", err)
 	}
 }
 

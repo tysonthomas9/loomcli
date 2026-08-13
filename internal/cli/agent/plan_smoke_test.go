@@ -3,7 +3,6 @@ package agent
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,7 +11,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
-	"github.com/tysonthomas9/loomcli/internal/sessions"
 )
 
 // TestPlanSmoke_HappyPath validates the full single-task pipeline:
@@ -150,62 +148,7 @@ func TestPlanSmoke_NoTasksExitsCleanly(t *testing.T) {
 
 // TestPlanSmoke_AgentError_SessionFinalized validates that when the agent returns an error,
 // the session is finalized with a non-zero exit code.
-func TestPlanSmoke_AgentError_SessionFinalized(t *testing.T) {
-	t.Parallel()
 
-	tmpDir := t.TempDir()
-	runtimeDir := filepath.Join(tmpDir, "runtime")
-
-	sessStore, err := sessions.NewStore(t.Context(), runtimeDir)
-	if err != nil {
-		t.Fatalf("failed to create session store: %v", err)
-	}
-
-	sess, err := sessStore.CreateSession(sessions.CreateOptions{
-		AgentName: "smoke-test",
-		Backend:   "mock",
-		Phase:     "planning",
-		Prompt:    "test prompt",
-	})
-	if err != nil {
-		t.Fatalf("failed to create session: %v", err)
-	}
-
-	if sess.Meta.Status != sessions.StatusRunning {
-		t.Errorf("new session status should be 'running', got %q", sess.Meta.Status)
-	}
-
-	err = sess.Finalize(sessions.FinalizeOptions{ExitCode: 1})
-	if err != nil {
-		t.Fatalf("failed to finalize session: %v", err)
-	}
-
-	if sess.Meta.Status != sessions.StatusFailed {
-		t.Errorf("session status should be 'failed', got %q", sess.Meta.Status)
-	}
-	if sess.Meta.ExitCode != 1 {
-		t.Errorf("session exit code should be 1, got %d", sess.Meta.ExitCode)
-	}
-	if sess.Meta.Phase != "planning" {
-		t.Errorf("session phase should be 'planning', got %q", sess.Meta.Phase)
-	}
-
-	metaPath := filepath.Join(runtimeDir, "sessions", sess.SessionID(), "metadata.json")
-	data, err := os.ReadFile(metaPath)
-	if err != nil {
-		t.Fatalf("failed to read metadata.json: %v", err)
-	}
-	var meta sessions.SessionMetadata
-	if err := json.Unmarshal(data, &meta); err != nil {
-		t.Fatalf("failed to unmarshal metadata: %v", err)
-	}
-	if meta.Status != sessions.StatusFailed {
-		t.Errorf("persisted metadata status should be 'failed', got %q", meta.Status)
-	}
-}
-
-// TestPlanSmoke_PromptIncludesAllSections validates that GeneratePlanningPrompt
-// produces a prompt containing all expected workflow sections and safety guardrails.
 func TestPlanSmoke_PromptIncludesAllSections(t *testing.T) {
 	t.Parallel()
 

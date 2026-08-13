@@ -97,6 +97,45 @@ func (adapter *interactionTranscriptArtifacts) CreateContent(
 	return artifact.ArtifactID, nil
 }
 
+func (adapter *interactionTranscriptArtifacts) RecordFailure(
+	ctx context.Context,
+	auth authority.SessionAuthority,
+	command interaction.TranscriptArtifactFailure,
+) error {
+	if adapter == nil || adapter.api == nil || adapter.issuer == nil || adapter.interactionAdmission == nil {
+		return interaction.ErrUnavailable
+	}
+	if err := adapter.interactionAdmission.RequireSession(
+		interaction.ActionPublishTranscript,
+		command.WorkspaceKey,
+		auth,
+	); err != nil {
+		return fmt.Errorf("validate transcript failure authority: %w", errors.Join(interaction.ErrNotOwner, err))
+	}
+	if auth.Action() != interaction.ActionPublishTranscript || auth.Workspace() != command.WorkspaceKey ||
+		auth.SessionID() != command.SessionID || auth.AgentID() != command.AgentID {
+		return interaction.ErrNotOwner
+	}
+	authorities, err := adapter.deriveAuthorities(auth)
+	if err != nil {
+		return fmt.Errorf("derive transcript failure Artifacts authority: %w", err)
+	}
+	artifact, err := adapter.api.RecordFailure(ctx, authorities, artifacts.SessionOwner{
+		WorkspaceKey: command.WorkspaceKey, SessionID: command.SessionID, AgentID: command.AgentID,
+		NodeID: auth.NodeID(), LeaseID: auth.LeaseID(), FencingToken: auth.FencingToken(),
+	}, artifacts.SessionFailureCommand{
+		ArtifactID: command.ArtifactID, TaskID: command.TaskID, Type: "transcript",
+		FailureClass: command.FailureClass,
+	})
+	if err != nil {
+		return mapInteractionArtifactError(err)
+	}
+	if artifact == nil || artifact.ArtifactID != command.ArtifactID || artifact.DurableStatus != artifacts.StatusFailed {
+		return interaction.ErrInvalidPersistedState
+	}
+	return nil
+}
+
 // deriveAuthorities converts one already-admitted Interaction publish grant
 // into the four exact Artifacts lifecycle grants needed by the bounded
 // transcript saga. No new identity or lease credential is introduced, and the

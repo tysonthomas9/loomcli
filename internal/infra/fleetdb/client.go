@@ -277,6 +277,14 @@ func (requester *capabilityRequester) GetAgentSession(
 	return requester.client.sessions.Get(ctx, workspace, sessionID)
 }
 
+func (requester *capabilityRequester) ListAgentSessions(
+	ctx context.Context,
+	workspace string,
+	filter store.AgentSessionFilter,
+) ([]*domain.AgentSession, error) {
+	return requester.client.sessions.List(ctx, workspace, filter)
+}
+
 // Compile-time check.
 var _ store.Store = (*Client)(nil)
 

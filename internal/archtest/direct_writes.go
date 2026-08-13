@@ -244,7 +244,6 @@ func (i DirectWriteInventory) validateMetadata() error {
 		"internal/infra/sourcecontrolstackstore",
 		"internal/infra/workspacecatalog",
 		"internal/modules",
-		"internal/sessions/archive.go",
 		"internal/usage",
 		"internal/webui/handlers",
 	}

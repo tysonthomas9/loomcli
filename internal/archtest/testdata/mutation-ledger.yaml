@@ -1352,13 +1352,13 @@ commands:
     mechanism_discriminator: session_transcript:agent_session:lease
     instance_owner: interaction
     accepted_authority: [session]
-    durable_commands: [fleetdb.create_artifact.v1, fleetdb.finalize_artifact.v1, fleetdb.patch_interaction_session.v1, fleetdb.upload_artifact_content.v1]
-    transaction_or_saga_boundary: Serve resolves the one-use SessionAuthority before accepting bounded canonical NDJSON, Interaction derives the immutable session-owned Artifact identity, and the final owned AgentSession patch revalidates the exact live lease generation before linking the finalized transcript.
+    durable_commands: [fleetdb.create_artifact.v1, fleetdb.fail_artifact.v1, fleetdb.finalize_artifact.v1, fleetdb.patch_interaction_session.v1, fleetdb.upload_artifact_content.v1]
+    transaction_or_saga_boundary: Serve resolves the one-use SessionAuthority before accepting bounded canonical NDJSON or a sanitized pre-content capture-failure class. Interaction derives the immutable session-owned Artifact identity. Artifacts records either finalized content or a terminal failed-evidence row, and only successful content performs the final owned AgentSession patch that revalidates the exact live lease generation before linking the transcript.
     idempotency_key: workspace_id:session_id:transcript
     semantic_events_or_read_models: [artifacts.lifecycle.v1, interaction.session.v1]
-    retry_restart_behavior: The deterministic transcript Artifact is reusable only for the same session owner and finalized content; exact replay converges, while a stale or successor lease cannot attach the reference. A lost response may leave only the same owner-bound finalized Artifact for a bounded retry to link.
-    negative_tests: [empty_transcript, expired_session, invalid_content_type, invalid_metadata, oversized_transcript, owner_mismatch, stale_fence, unauthenticated, wrong_action, wrong_workspace]
-    fault_injection_tests: [duplicate_request, lost_response_after_artifact_finalize, publish_finish_race]
+    retry_restart_behavior: The deterministic transcript Artifact is reusable only for the same session owner and identical terminal evidence outcome; exact finalized-content and capture-failure replays converge, while a stale or successor lease cannot attach or fail evidence. A lost response may leave the same owner-bound finalized or failed Artifact for a bounded retry.
+    negative_tests: [content_and_failure_together, empty_transcript, expired_session, forged_failure_class, invalid_content_type, invalid_metadata, oversized_transcript, owner_mismatch, stale_fence, unauthenticated, wrong_action, wrong_workspace]
+    fault_injection_tests: [duplicate_failure, duplicate_request, lost_response_after_artifact_finalize, lost_response_after_failure_commit, publish_finish_race]
   - id: interaction.reconcile-sessions
     phase: 5
     aggregate_owner: interaction

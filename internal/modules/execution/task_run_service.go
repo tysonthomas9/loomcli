@@ -32,6 +32,34 @@ func (service *Service) GetTaskRun(ctx context.Context, workspace, taskRunID str
 	return cloneTaskRun(run), nil
 }
 
+func (service *Service) ListTaskRuns(ctx context.Context, query TaskRunArchiveQuery) ([]*TaskRun, error) {
+	query.WorkspaceKey = strings.TrimSpace(query.WorkspaceKey)
+	query.WorkItemID = strings.TrimSpace(query.WorkItemID)
+	if query.WorkspaceKey == "" || query.Limit < 1 || query.Limit > 100 {
+		return nil, ErrInvalid
+	}
+	port := service.dependencies.TaskRuns.Queries
+	if port == nil {
+		return nil, ErrUnavailable
+	}
+	values, err := port.ListTaskRuns(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	if len(values) > query.Limit {
+		return nil, ErrConflict
+	}
+	out := make([]*TaskRun, 0, len(values))
+	for _, run := range values {
+		if run == nil || run.WorkspaceKey != query.WorkspaceKey ||
+			(query.WorkItemID != "" && run.WorkItemID != query.WorkItemID) {
+			return nil, ErrConflict
+		}
+		out = append(out, cloneTaskRun(run))
+	}
+	return out, nil
+}
+
 func (service *Service) ListActiveTaskRuns(ctx context.Context, query ActiveTaskRunQuery) ([]*TaskRun, error) {
 	query.WorkspaceKey = strings.TrimSpace(query.WorkspaceKey)
 	query.DriverRunID = strings.TrimSpace(query.DriverRunID)

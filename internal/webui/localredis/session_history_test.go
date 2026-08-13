@@ -163,8 +163,7 @@ func TestSessionHistoryCompleteMarksActiveSession(t *testing.T) {
 		t.Fatalf("Add: %v", err)
 	}
 
-	scrollbackPath := "/home/user/.loom/session-scrollback/issue-proj-1.log"
-	if err := store.Complete(ctx, sessionHistoryTestWorkspaceID, "proj.1", "issue-proj-1", scrollbackPath); err != nil {
+	if err := store.Complete(ctx, sessionHistoryTestWorkspaceID, "proj.1", "issue-proj-1"); err != nil {
 		t.Fatalf("Complete: %v", err)
 	}
 
@@ -183,9 +182,6 @@ func TestSessionHistoryCompleteMarksActiveSession(t *testing.T) {
 	}
 	if records[0].EndedAt.IsZero() {
 		t.Error("EndedAt should not be zero after Complete")
-	}
-	if records[0].ScrollbackPath != scrollbackPath {
-		t.Errorf("ScrollbackPath = %q, want %q", records[0].ScrollbackPath, scrollbackPath)
 	}
 }
 
@@ -209,7 +205,7 @@ func TestSessionHistoryCompleteNoOpWhenNoMatchingActiveSession(t *testing.T) {
 	}
 
 	// Complete for a session name that doesn't match any active session.
-	err := store.Complete(ctx, sessionHistoryTestWorkspaceID, "proj.1", "nonexistent-session", "/tmp/scrollback.log")
+	err := store.Complete(ctx, sessionHistoryTestWorkspaceID, "proj.1", "nonexistent-session")
 	if err != nil {
 		t.Fatalf("Complete should be no-op, got error: %v", err)
 	}
@@ -232,7 +228,7 @@ func TestSessionHistoryCompleteNoOpForEmptyHistory(t *testing.T) {
 	ctx := context.Background()
 
 	// Complete for an issue with no history at all.
-	err := store.Complete(ctx, sessionHistoryTestWorkspaceID, "proj.1", "issue-proj-1", "/tmp/scrollback.log")
+	err := store.Complete(ctx, sessionHistoryTestWorkspaceID, "proj.1", "issue-proj-1")
 	if err != nil {
 		t.Fatalf("Complete on empty history should be no-op, got error: %v", err)
 	}
@@ -266,7 +262,7 @@ func TestSessionHistoryListInvalidIssueID(t *testing.T) {
 
 func TestSessionHistoryCompleteInvalidIssueID(t *testing.T) {
 	store, _ := setupSessionHistoryStoreTest(t)
-	err := store.Complete(context.Background(), sessionHistoryTestWorkspaceID, "", "session", "/tmp/scrollback.log")
+	err := store.Complete(context.Background(), sessionHistoryTestWorkspaceID, "", "session")
 	if err == nil {
 		t.Fatal("expected error for empty issue ID")
 	}

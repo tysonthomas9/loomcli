@@ -151,8 +151,9 @@ func TestExecutionTaskRunResolverWhitelistsEveryArtifactsOperation(t *testing.T)
 		NodeID: "node-1", LeaseID: "lease-1", LeaseToken: "secret", FencingToken: 7,
 	}
 	for _, action := range []authority.Action{
-		artifacts.ActionDeclare, artifacts.ActionUpload, artifacts.ActionFinalize,
-		artifacts.ActionReference, artifacts.ActionGet, artifacts.ActionList,
+		artifacts.ActionDeclare, artifacts.ActionGet, artifacts.ActionUpload,
+		artifacts.ActionFinalize, artifacts.ActionFail,
+		artifacts.ActionReference, artifacts.ActionList,
 	} {
 		auth, err := executionCapability.TaskRunAuthorityResolver().ResolveTaskRunAuthority(t.Context(), "WS", action, owner)
 		if err != nil {

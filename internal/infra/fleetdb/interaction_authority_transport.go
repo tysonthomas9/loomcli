@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
 var (
@@ -73,6 +74,7 @@ type InteractionTransport interface {
 type interactionRequester interface {
 	fleetRequester
 	GetAgentSession(context.Context, string, string) (*domain.AgentSession, error)
+	ListAgentSessions(context.Context, string, store.AgentSessionFilter) ([]*domain.AgentSession, error)
 }
 
 type interactionStore struct {

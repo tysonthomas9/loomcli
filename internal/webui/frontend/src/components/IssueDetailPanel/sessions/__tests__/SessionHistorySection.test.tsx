@@ -47,9 +47,10 @@ function createRecord(overrides: Record<string, unknown> = {}) {
     issue_id: "issue-1",
     backend: "claude",
     status: "completed" as const,
-    launcher: "auto",
+    launcher: "user" as const,
     started_at: "2026-01-20T10:00:00Z",
     ended_at: "2026-01-20T10:05:00Z",
+    scrollback_evidence_status: "finalized" as const,
     ...overrides,
   };
 }
@@ -223,12 +224,9 @@ describe("SessionHistorySection", () => {
   });
 
   describe("View scrollback button", () => {
-    it('shows "View scrollback" for completed sessions with scrollback_path', async () => {
+    it('shows "View scrollback" for completed sessions', async () => {
       mockListSessionHistory.mockResolvedValue([
-        createRecord({
-          status: "completed",
-          scrollback_path: "/path/to/scroll",
-        }),
+        createRecord({ status: "completed" }),
       ]);
       render(<SessionHistorySection issueId="issue-1" />);
       await waitFor(() => {
@@ -236,24 +234,21 @@ describe("SessionHistorySection", () => {
       });
     });
 
-    it('does not show "View scrollback" for completed sessions without scrollback_path', async () => {
+    it("does not require a storage locator to offer durable scrollback", async () => {
       mockListSessionHistory.mockResolvedValue([
-        createRecord({ status: "completed", scrollback_path: undefined }),
+        createRecord({ status: "completed" }),
       ]);
       render(<SessionHistorySection issueId="issue-1" />);
       await waitFor(() => {
         const indicator = document.querySelector('[data-status="completed"]');
         expect(indicator).toBeInTheDocument();
       });
-      expect(screen.queryByText("View scrollback")).not.toBeInTheDocument();
+      expect(screen.getByText("View scrollback")).toBeInTheDocument();
     });
 
     it('does not show "View scrollback" for active sessions', async () => {
       mockListSessionHistory.mockResolvedValue([
-        createRecord({
-          status: "active",
-          scrollback_path: "/path/to/scroll",
-        }),
+        createRecord({ status: "active" }),
       ]);
       render(<SessionHistorySection issueId="issue-1" />);
       await waitFor(() => {
@@ -261,6 +256,36 @@ describe("SessionHistorySection", () => {
         expect(indicator).toBeInTheDocument();
       });
       expect(screen.queryByText("View scrollback")).not.toBeInTheDocument();
+    });
+
+    it("shows capture failure without offering an unavailable scrollback", async () => {
+      mockListSessionHistory.mockResolvedValue([
+        createRecord({
+          status: "completed",
+          scrollback_evidence_status: "capture_failed",
+          scrollback_failure_class: "capture_unavailable",
+        }),
+      ]);
+      render(<SessionHistorySection issueId="issue-1" />);
+      await waitFor(() => {
+        expect(
+          screen.getByText("Scrollback capture failed"),
+        ).toBeInTheDocument();
+      });
+      expect(screen.queryByText("View scrollback")).not.toBeInTheDocument();
+    });
+
+    it("offers truncated durable scrollback and labels its provenance", async () => {
+      mockListSessionHistory.mockResolvedValue([
+        createRecord({ scrollback_evidence_status: "truncated" }),
+      ]);
+      render(<SessionHistorySection issueId="issue-1" />);
+      await waitFor(() => {
+        expect(
+          screen.getByText("Scrollback ready (truncated)"),
+        ).toBeInTheDocument();
+      });
+      expect(screen.getByText("View scrollback")).toBeInTheDocument();
     });
   });
 
@@ -270,7 +295,6 @@ describe("SessionHistorySection", () => {
         createRecord({
           id: "r1",
           status: "completed",
-          scrollback_path: "/path",
           session_name: "test-sess",
         }),
       ]);
@@ -294,7 +318,6 @@ describe("SessionHistorySection", () => {
         createRecord({
           id: "r1",
           status: "completed",
-          scrollback_path: "/path",
           session_name: "test-sess",
         }),
       ]);
@@ -322,7 +345,6 @@ describe("SessionHistorySection", () => {
         createRecord({
           id: "r1",
           status: "completed",
-          scrollback_path: "/path",
           session_name: "test-sess",
         }),
       ]);
@@ -349,7 +371,6 @@ describe("SessionHistorySection", () => {
         createRecord({
           id: "r1",
           status: "completed",
-          scrollback_path: "/path",
           session_name: "test-sess",
         }),
       ]);
@@ -382,7 +403,6 @@ describe("SessionHistorySection", () => {
         createRecord({
           id: "r1",
           status: "completed",
-          scrollback_path: "/path",
           session_name: "test-sess",
         }),
       ]);

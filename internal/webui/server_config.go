@@ -100,8 +100,6 @@ type ServerConfig struct {
 	Store                store.Store
 	BackendOps           ops.BackendOps        // Backend health operations interface (optional; nil disables backend health endpoint)
 	ScrollbackMaxLines   int                   // Maximum lines per scrollback buffer (0 = default 10000)
-	NotifyTokenDir       string                // Directory to write notify.token (typically runtime dir); empty = token file not written
-	SessionRuntimeDir    string                // Runtime dir searched for local agent sessions; empty = workspace/repo stores only
 	LocalSettingsDir     string                // Desktop-local settings directory; empty disables /api/local/settings
 	FleetMode            bool                  // When true, skip local daemon lifecycle hooks; fleet server manages agents
 	FleetClientURL       string                // Fleet server URL for fleet-mode workers (e.g., "http://fleet.example.com"); empty = no fleet client

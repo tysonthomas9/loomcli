@@ -388,6 +388,47 @@ func TestPublishTranscriptStreamsContentWithHeaderProofAndNoTokenLeak(t *testing
 	}
 }
 
+func TestRecordTranscriptFailureForwardsSanitizedClassWithSessionProof(t *testing.T) {
+	const rawToken = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	api := &sessionCommandAPIStub{}
+	resolver := newSessionAuthorityResolverStub()
+	mux := http.NewServeMux()
+	New(Config{
+		Interaction: api, Authority: &operatorResolverStub{},
+		SessionAuthorities: resolver,
+	}).Register(mux)
+
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/api/workspaces/WS/interaction/sessions/session-1/transcript/failure",
+		strings.NewReader(`{
+			"agent_id":"agent-docs",
+			"terminal_id":"terminal-1",
+			"node_id":"node-1",
+			"lease_id":"lease-1",
+			"fencing_token":7,
+			"failure_class":"capture_unavailable"
+		}`),
+	)
+	request = withCanonicalWorkspace(request, "WS", "WS")
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set(sessionTokenHeader, rawToken)
+	response := httptest.NewRecorder()
+	mux.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status/body = %d/%s", response.Code, response.Body.String())
+	}
+	if api.transcriptCommand.FailureClass != "capture_unavailable" ||
+		len(api.transcriptCommand.Content) != 0 || len(api.transcriptCommand.Metadata) != 0 {
+		t.Fatalf("transcript failure command = %+v", api.transcriptCommand)
+	}
+	if len(resolver.actions) != 1 || resolver.actions[0] != interaction.ActionPublishTranscript ||
+		resolver.tokens[0] != rawToken || request.Header.Get(sessionTokenHeader) != "" {
+		t.Fatalf("resolved action/tokens/header = %v/%v/%q", resolver.actions, resolver.tokens, request.Header.Get(sessionTokenHeader))
+	}
+}
+
 func TestCompleteInboxForwardsExactClaimAttempt(t *testing.T) {
 	const rawToken = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 	api := &sessionCommandAPIStub{}

@@ -49,6 +49,8 @@ function createSession(overrides: Partial<SessionRecord> = {}): SessionRecord {
     is_active: false,
     has_transcript: false,
     has_diff: false,
+    transcript_evidence_status: "missing",
+    diff_evidence_status: "missing",
     ...overrides,
   };
 }
@@ -183,6 +185,35 @@ describe("SessionRunDetail execution evidence", () => {
       "server PTY killed",
     );
     expect(screen.queryByText("Run failed")).not.toBeInTheDocument();
+  });
+
+  it("shows evidence capture failure without changing a successful run outcome", () => {
+    render(
+      <SessionRunDetail
+        taskId="task-phase-4"
+        session={createSession({
+          status: "completed",
+          transcript_evidence_status: "capture_failed",
+          transcript_failure_class: "capture_unavailable",
+          diff_evidence_status: "truncated",
+          has_diff: true,
+        })}
+      />,
+    );
+
+    expect(screen.getByText("Outcome").nextElementSibling).toHaveTextContent(
+      "Completed",
+    );
+    expect(screen.queryByTestId("run-error-banner")).not.toBeInTheDocument();
+    expect(screen.getByTestId("evidence-status-banner")).toHaveTextContent(
+      "Transcript capture failed",
+    );
+    expect(screen.getByTestId("evidence-status-banner")).toHaveTextContent(
+      "capture unavailable",
+    );
+    expect(screen.getByTestId("session-evidence-status")).toHaveTextContent(
+      "Difftruncated",
+    );
   });
 
   it("does not turn non-HTTP execution metadata into a link", () => {

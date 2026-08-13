@@ -357,7 +357,7 @@ func TestSetupRoutes_SSEEndpointRegisteredOnWorkspaceScope(t *testing.T) {
 	defer hub.Stop()
 
 	app := &Server{hub: hub, wsResolveFn: testWorkspaceResolver("test-ws")}
-	app.sessSvc = sessioncoord.NewSessionService(nil, nil)
+	app.sessSvc = sessioncoord.NewSessionService(nil, nil, nil)
 	setupTestRoutes(t, app)
 
 	// Use a context with short timeout because the SSE handler streams forever
@@ -390,7 +390,7 @@ func TestSetupRoutes_SSEEndpointUsesCanonicalWorkspace(t *testing.T) {
 			return middleware.WorkspaceRef{RequestedID: requestedID, CanonicalID: "canonical-ws"}, true
 		},
 	}
-	app.sessSvc = sessioncoord.NewSessionService(nil, nil)
+	app.sessSvc = sessioncoord.NewSessionService(nil, nil, nil)
 	setupTestRoutes(t, app)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -435,7 +435,7 @@ func TestSetupRoutes_WorkspaceMonitorStatusInjectsWorkspace(t *testing.T) {
 			},
 		},
 	}
-	app.sessSvc = sessioncoord.NewSessionService(nil, nil)
+	app.sessSvc = sessioncoord.NewSessionService(nil, nil, nil)
 	setupTestRoutes(t, app)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/test-ws/monitor/status", nil)
@@ -472,7 +472,7 @@ func TestSetupRoutes_WorkspaceGetUsesCanonicalWorkspace(t *testing.T) {
 			return middleware.WorkspaceRef{RequestedID: requestedID, CanonicalID: "canonical-ws"}, true
 		},
 	}
-	app.sessSvc = sessioncoord.NewSessionService(nil, nil)
+	app.sessSvc = sessioncoord.NewSessionService(nil, nil, nil)
 	setupTestRoutes(t, app)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/alias-ws", nil)
@@ -510,7 +510,7 @@ func TestSetupRoutes_WorkspaceBackendGetEndpoint(t *testing.T) {
 		},
 	}
 	app := &Server{config: webui.ServerConfig{}, wsResolveFn: testWorkspaceResolver("test-ws"), workspaceSvc: wsSvc}
-	app.sessSvc = sessioncoord.NewSessionService(nil, nil)
+	app.sessSvc = sessioncoord.NewSessionService(nil, nil, nil)
 	setupTestRoutes(t, app)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/test-ws/config/backend", nil)
@@ -550,7 +550,7 @@ func TestSetupRoutes_WorkspaceBackendPatchEndpoint(t *testing.T) {
 		},
 	}
 	app := &Server{config: webui.ServerConfig{}, wsResolveFn: testWorkspaceResolver("test-ws"), workspaceSvc: wsSvc}
-	app.sessSvc = sessioncoord.NewSessionService(nil, nil)
+	app.sessSvc = sessioncoord.NewSessionService(nil, nil, nil)
 	setupTestRoutes(t, app)
 
 	req := httptest.NewRequest(http.MethodPatch, "/api/workspaces/test-ws/config/backend",
@@ -612,7 +612,7 @@ func TestSetupRoutes_WorkspaceRenamePatchEndpoint(t *testing.T) {
 		workspaceCatalog: catalog,
 		workspaceStore:   st.Workspaces(),
 	}
-	app.sessSvc = sessioncoord.NewSessionService(nil, nil)
+	app.sessSvc = sessioncoord.NewSessionService(nil, nil, nil)
 	setupTestRoutes(t, app)
 
 	req := httptest.NewRequest(http.MethodPatch, "/api/workspaces/test-ws/name",
@@ -666,7 +666,7 @@ func TestSetupRoutes_WorkspaceBackendPatchReadsBody(t *testing.T) {
 		},
 	}
 	app := &Server{config: webui.ServerConfig{}, wsResolveFn: testWorkspaceResolver("test-ws"), workspaceSvc: wsSvc}
-	app.sessSvc = sessioncoord.NewSessionService(nil, nil)
+	app.sessSvc = sessioncoord.NewSessionService(nil, nil, nil)
 	setupTestRoutes(t, app)
 
 	req := httptest.NewRequest(http.MethodPatch, "/api/workspaces/test-ws/config/backend",
@@ -965,7 +965,7 @@ func TestFlatAgentRoutesRemoved(t *testing.T) {
 	app := &Server{config: webui.ServerConfig{GitOps: gitOps, FileOps: fileOps}, wsResolveFn: testWorkspaceResolver("test-ws"), agentSvc: agentcoord.NewAgentService(gitOps, nil, nil)}
 	app.diffSvc = sourcecontrolcoord.NewDiffService(gitOps, nil, middleware.WithWorkspace)
 	app.fileSvc = filecoord.NewFileService(fileOps)
-	app.sessSvc = sessioncoord.NewSessionService(nil, nil)
+	app.sessSvc = sessioncoord.NewSessionService(nil, nil, nil)
 	setupTestRoutes(t, app)
 
 	// Removed flat routes; each must return 404.

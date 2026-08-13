@@ -30,7 +30,7 @@ func NewSession(store SessionStore, admission *authority.Admission, evidence *Ev
 	return &SessionService{store: store, admission: admission, evidence: evidence}, nil
 }
 
-//nolint:funlen // Creation keeps authority, owner, digest, and persisted projection checks together.
+//nolint:funlen,cyclop // One bounded saga keeps authority, retry, failure, and persisted checks together.
 func (service *SessionService) CreateContent(
 	ctx context.Context,
 	auth SessionContentAuthorities,
@@ -48,7 +48,7 @@ func (service *SessionService) CreateContent(
 	owner = authorized
 	prepared, err := service.evidence.Prepare(ctx, command.Type, command.MIMEType, command.Content, command.Metadata)
 	if err != nil {
-		return nil, service.recordContentFailure(ctx, auth, owner, command, err)
+		return nil, service.recordContentFailure(ctx, owner, command, err)
 	}
 	command.Content = prepared.Content
 	command.MIMEType = prepared.MIMEType
@@ -95,30 +95,63 @@ func (service *SessionService) CreateContent(
 	upload := UploadCommand{ArtifactID: command.ArtifactID, Content: command.Content, MIMEType: command.MIMEType}
 	artifact, err = service.store.UploadSession(ctx, owner, cloneUploadCommand(upload))
 	if err != nil {
-		return nil, fmt.Errorf("upload session artifact %q: %w", command.ArtifactID, err)
+		cause := fmt.Errorf("upload session artifact %q: %w", command.ArtifactID, err)
+		return nil, service.recordContentFailure(ctx, owner, command, cause)
 	}
 	if err := validateSessionArtifact(artifact, owner, command.ArtifactID); err != nil {
-		return nil, err
+		return nil, service.recordContentFailure(ctx, owner, command, err)
 	}
 	if err := validateUploadedArtifact(artifact, upload); err != nil {
-		return nil, err
+		return nil, service.recordContentFailure(ctx, owner, command, err)
 	}
 
 	finalize := FinalizeCommand{ArtifactID: command.ArtifactID, ContentHash: &hash}
 	artifact, err = service.store.FinalizeSession(ctx, owner, finalize)
 	if err != nil {
-		return nil, fmt.Errorf("finalize session artifact %q: %w", command.ArtifactID, err)
+		cause := fmt.Errorf("finalize session artifact %q: %w", command.ArtifactID, err)
+		return nil, service.recordContentFailure(ctx, owner, command, cause)
 	}
 	if err := validateSessionArtifact(artifact, owner, command.ArtifactID); err != nil {
-		return nil, err
+		return nil, service.recordContentFailure(ctx, owner, command, err)
 	}
 	if artifact.DurableStatus != StatusFinalized || artifact.FinalizedAt == nil {
-		return nil, fmt.Errorf("finalize session artifact %q returned status %q: %w", command.ArtifactID, artifact.DurableStatus, ErrInvalidPersistedState)
+		cause := fmt.Errorf("finalize session artifact %q returned status %q: %w", command.ArtifactID, artifact.DurableStatus, ErrInvalidPersistedState)
+		return nil, service.recordContentFailure(ctx, owner, command, cause)
 	}
 	if err := validateFinalizedArtifact(artifact, finalize); err != nil {
-		return nil, err
+		return nil, service.recordContentFailure(ctx, owner, command, err)
 	}
 	return cloneArtifact(artifact), nil
+}
+
+// RecordFailure persists an owner-fenced terminal evidence failure when the
+// producer could not obtain canonical content. Work/session lifecycle remains
+// independent; this command changes only the Artifacts-owned evidence facet.
+func (service *SessionService) RecordFailure(
+	ctx context.Context,
+	auth SessionContentAuthorities,
+	owner SessionOwner,
+	command SessionFailureCommand,
+) (*Artifact, error) {
+	authorized, err := service.authorizeContent(owner, auth)
+	if err != nil {
+		return nil, err
+	}
+	command, err = normalizeSessionFailure(command)
+	if err != nil {
+		return nil, err
+	}
+	content := SessionContentCommand{
+		ArtifactID: command.ArtifactID,
+		TaskID:     command.TaskID,
+		Type:       command.Type,
+	}
+	return service.persistSessionFailure(
+		ctx,
+		authorized,
+		content,
+		evidenceFailureCommandForClass(command.ArtifactID, command.FailureClass),
+	)
 }
 
 func (service *SessionService) authorizeContent(
@@ -148,50 +181,62 @@ func (service *SessionService) authorizeContent(
 
 func (service *SessionService) recordContentFailure(
 	ctx context.Context,
-	auth SessionContentAuthorities,
 	owner SessionOwner,
 	command SessionContentCommand,
 	cause error,
 ) error {
 	failure := evidenceFailureCommand(command.ArtifactID, cause)
+	_, err := service.persistSessionFailure(ctx, owner, command, failure)
+	if err != nil {
+		return errors.Join(cause, err)
+	}
+	return cause
+}
+
+func (service *SessionService) persistSessionFailure(
+	ctx context.Context,
+	owner SessionOwner,
+	command SessionContentCommand,
+	failure FailCommand,
+) (*Artifact, error) {
 	failure, err := normalizeFail(failure)
 	if err != nil {
-		return errors.Join(cause, fmt.Errorf("normalize failed session evidence: %w", err))
+		return nil, fmt.Errorf("normalize failed session evidence: %w", err)
 	}
 	create := CreateCommand{
 		ArtifactID: command.ArtifactID, AgentID: owner.AgentID, SessionID: owner.SessionID,
 		TaskID: command.TaskID, Type: command.Type, Summary: "evidence capture failure",
 		Metadata: cloneMetadata(failure.Metadata),
 	}
-	artifact, err := service.store.CreateSession(ctx, owner, create)
+	_, err = service.store.CreateSession(ctx, owner, create)
 	if err != nil {
 		if !errors.Is(err, ErrAlreadyExists) {
-			return errors.Join(cause, fmt.Errorf("declare failed session evidence: %w", err))
+			return nil, fmt.Errorf("declare failed session evidence: %w", err)
 		}
-		artifact, err = service.store.GetSession(ctx, owner, GetQuery{ArtifactID: command.ArtifactID})
-		if err != nil {
-			return errors.Join(cause, fmt.Errorf("load failed session evidence: %w", err))
+		artifact, getErr := service.store.GetSession(ctx, owner, GetQuery{ArtifactID: command.ArtifactID})
+		if getErr != nil {
+			return nil, fmt.Errorf("load failed session evidence: %w", getErr)
 		}
 		if err := validateSessionArtifact(artifact, owner, command.ArtifactID); err != nil {
-			return errors.Join(cause, err)
+			return nil, err
 		}
 		if artifact.DurableStatus == StatusFailed && artifact.Metadata["loom.evidence.failure_class"] == failure.FailureClass {
-			return cause
+			return cloneArtifact(artifact), nil
 		}
 	}
 	failed, err := service.store.FailSession(ctx, owner, cloneFailCommand(failure))
 	if err != nil {
-		return errors.Join(cause, fmt.Errorf("persist failed session evidence: %w", err))
+		return nil, fmt.Errorf("persist failed session evidence: %w", err)
 	}
 	if err := validateSessionArtifact(failed, owner, command.ArtifactID); err != nil {
-		return errors.Join(cause, err)
+		return nil, err
 	}
 	if failed.DurableStatus != StatusFailed || failed.FinalizedAt != nil ||
 		failed.Metadata[MetadataEvidenceCaptureStatus] != "capture_failed" ||
 		failed.Metadata["loom.evidence.failure_class"] != failure.FailureClass {
-		return errors.Join(cause, ErrInvalidPersistedState)
+		return nil, ErrInvalidPersistedState
 	}
-	return cause
+	return cloneArtifact(failed), nil
 }
 
 func (service *SessionService) authorize(
@@ -264,6 +309,24 @@ func normalizeSessionContent(command SessionContentCommand) (SessionContentComma
 	command.Content = append([]byte(nil), command.Content...)
 	if len(command.Content) == 0 || len(command.Content) > maxSessionContentBytes {
 		return SessionContentCommand{}, fmt.Errorf("session artifact content must contain 1..%d bytes: %w", maxSessionContentBytes, ErrInvalid)
+	}
+	return command, nil
+}
+
+func normalizeSessionFailure(command SessionFailureCommand) (SessionFailureCommand, error) {
+	var err error
+	command.ArtifactID, err = requireCanonical("artifact id", command.ArtifactID)
+	if err != nil {
+		return SessionFailureCommand{}, err
+	}
+	command.Type, err = requireCanonical("artifact type", command.Type)
+	if err != nil {
+		return SessionFailureCommand{}, err
+	}
+	command.TaskID = strings.TrimSpace(command.TaskID)
+	command.FailureClass = strings.TrimSpace(command.FailureClass)
+	if !validEvidenceFailureClass(command.FailureClass) {
+		return SessionFailureCommand{}, fmt.Errorf("unsupported evidence failure class %q: %w", command.FailureClass, ErrInvalid)
 	}
 	return command, nil
 }
