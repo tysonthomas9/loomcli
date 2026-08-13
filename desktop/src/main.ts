@@ -3,6 +3,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Command } from "@tauri-apps/plugin-shell";
 import {
   terminalRuntimeFailure,
+  type RuntimeInfo,
   type RuntimeStatus,
 } from "./runtime-status";
 import "./styles.css";
@@ -166,10 +167,10 @@ async function ensureRuntime() {
     );
   }
 
-  return waitForHealthyRuntime();
+  return waitForHealthyRuntime(initial.runtime);
 }
 
-async function waitForHealthyRuntime() {
+async function waitForHealthyRuntime(preStartRuntime?: RuntimeInfo) {
   const startedAt = Date.now();
   let lastError = "";
 
@@ -188,7 +189,7 @@ async function waitForHealthyRuntime() {
     if (status.healthy && status.runtime?.url) {
       return status;
     }
-    const terminalFailure = terminalRuntimeFailure(status);
+    const terminalFailure = terminalRuntimeFailure(status, preStartRuntime);
     if (terminalFailure) {
       throw new Error(terminalFailure);
     }

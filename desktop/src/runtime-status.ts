@@ -17,8 +17,28 @@ export type RuntimeStatus = {
   error?: string;
 };
 
-export function terminalRuntimeFailure(status: RuntimeStatus): string {
+function sameRuntimeSnapshot(
+  current: RuntimeInfo | undefined,
+  stale: RuntimeInfo | undefined,
+): boolean {
+  if (!current || !stale) return false;
+  return (
+    current.status === stale.status &&
+    current.pid === stale.pid &&
+    current.serve_pid === stale.serve_pid &&
+    current.started_at === stale.started_at &&
+    current.updated_at === stale.updated_at
+  );
+}
+
+export function terminalRuntimeFailure(
+  status: RuntimeStatus,
+  preStartRuntime?: RuntimeInfo,
+): string {
   if (status.healthy || status.runtime?.status !== "failed") {
+    return "";
+  }
+  if (sameRuntimeSnapshot(status.runtime, preStartRuntime)) {
     return "";
   }
   return (
