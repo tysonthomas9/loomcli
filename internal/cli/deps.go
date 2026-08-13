@@ -14,6 +14,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/backend/fleet"
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
+	"github.com/tysonthomas9/loomcli/internal/leadbackend"
 	"github.com/tysonthomas9/loomcli/internal/usage"
 )
 
@@ -139,6 +140,8 @@ func DefaultDeps() *Deps {
 	var issueBackend backend.IssueBackend
 
 	switch ResolveIssueBackendType() {
+	case issueBackendOccupant:
+		issueBackend = newLeadOccupantIssueBackend()
 	case IssueBackendFleetDB:
 		issueBackend = newFleetDBIssueBackend()
 	case IssueBackendFleet:
@@ -186,6 +189,18 @@ func DefaultDeps() *Deps {
 		// the active loom.cli span. See agent_invoker_tracing.go.
 		Agent: wrapAgentInvokerWithTracing(registryAgentInvoker{}),
 	}
+}
+
+func newLeadOccupantIssueBackend() backend.IssueBackend {
+	occupantBackend, err := leadbackend.New()
+	if err == nil && occupantBackend == nil {
+		err = fmt.Errorf("occupant environment disappeared during backend construction")
+	}
+	if err != nil {
+		slog.Error("lead occupant backend creation failed", "err", err)
+		return newUnavailableIssueBackend(issueBackendOccupant, err)
+	}
+	return occupantBackend
 }
 
 // defaultDeps is the package-level Deps instance used by package helpers.

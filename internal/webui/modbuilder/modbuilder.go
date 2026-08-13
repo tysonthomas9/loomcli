@@ -4,14 +4,17 @@
 package modbuilder
 
 import (
+	"context"
 	"net/http"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/connector"
 	"github.com/tysonthomas9/loomcli/internal/leadprovision"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/approvals"
 	githandlers "github.com/tysonthomas9/loomcli/internal/webui/handlers/git"
+	healthhandlers "github.com/tysonthomas9/loomcli/internal/webui/handlers/health"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/issues"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/leadapi"
 	locsettings "github.com/tysonthomas9/loomcli/internal/webui/handlers/localsettings"
@@ -149,9 +152,41 @@ func NewTaskRunAPIModule(st store.Store, fleetBaseURL string, localSettingsDir s
 	return taskrunapi.NewModule(taskrunapi.Config{Store: st, FleetBaseURL: fleetBaseURL, LocalSettingsDir: localSettingsDir})
 }
 
-// NewLeadAPIModule creates the sandboxed-lead HTTP API module
-// (POST /api/workspaces/{ws}/lead/{op}, occupant-token auth) so lead
-// runtimes talk to serve instead of holding fleet-db credentials.
-func NewLeadAPIModule(st store.Store, tokenKey []byte) interface{ Register(*http.ServeMux) } {
-	return leadapi.NewModule(leadapi.Config{Store: st, TokenKey: tokenKey})
+// LeadAPIDeps wires the sandboxed-lead control and issue-data surfaces.
+type LeadAPIDeps struct {
+	Store             store.Store
+	TokenKey          []byte
+	IssueBackendFn    func(context.Context) backend.IssueBackend
+	OpenAuthMode      bool
+	AllowOpenAuthMode bool
+}
+
+// NewLeadAPIModule creates the occupant-authenticated sandboxed-lead module.
+func NewLeadAPIModule(deps LeadAPIDeps) interface{ Register(*http.ServeMux) } {
+	var data *leadapi.DataRoutes
+	if deps.IssueBackendFn != nil {
+		backendProvider := service.IssueBackendProvider(deps.IssueBackendFn)
+		issueSvc := service.NewIssueServiceWithBackend(nil, nil, middleware.WithWorkspace, backendProvider)
+		data = &leadapi.DataRoutes{
+			ListIssues:       issues.HandleListIssues(issueSvc),
+			CreateIssue:      issues.HandleCreateIssue(issueSvc),
+			GetIssue:         issues.HandleGetIssue(issueSvc),
+			PatchIssue:       issues.HandlePatchIssue(issueSvc),
+			CloseIssue:       issues.HandleCloseIssue(issueSvc),
+			ClaimIssue:       issues.HandleClaimIssue(issueSvc),
+			AddComment:       issues.HandleAddComment(issueSvc),
+			AddDependency:    issues.HandleAddDependency(issueSvc),
+			RemoveDependency: issues.HandleRemoveDependency(issueSvc),
+			Ready:            issues.HandleReadyWithBackend(nil, issues.IssueBackendFn(deps.IssueBackendFn)),
+			Blocked:          githandlers.HandleBlockedWithBackend(nil, githandlers.IssueBackendFn(deps.IssueBackendFn)),
+			Stats:            healthhandlers.HandleStatsWithBackend(nil, healthhandlers.IssueBackendFn(deps.IssueBackendFn)),
+		}
+	}
+	return leadapi.NewModule(leadapi.Config{
+		Store:             deps.Store,
+		TokenKey:          deps.TokenKey,
+		Data:              data,
+		OpenAuthMode:      deps.OpenAuthMode,
+		AllowOpenAuthMode: deps.AllowOpenAuthMode,
+	})
 }

@@ -18,29 +18,10 @@ func HandlePatchIssue(svc service.IssueService) http.HandlerFunc {
 			return
 		}
 
-		params := service.PatchIssueParams{
-			IssueID:            issueID,
-			Title:              req.Title,
-			Description:        req.Description,
-			Status:             req.Status,
-			Priority:           req.Priority,
-			Assignee:           req.Assignee,
-			Owner:              req.Owner,
-			Design:             req.Design,
-			DesignFormat:       req.DesignFormat,
-			AcceptanceCriteria: req.AcceptanceCriteria,
-			Notes:              req.Notes,
-			ExternalRef:        req.ExternalRef,
-			EstimatedMinutes:   req.EstimatedMinutes,
-			IssueType:          req.IssueType,
-			AddLabels:          req.AddLabels,
-			RemoveLabels:       req.RemoveLabels,
-			SetLabels:          req.SetLabels,
-			Pinned:             req.Pinned,
-			Parent:             req.Parent,
-			DueAt:              req.DueAt,
-			DeferUntil:         req.DeferUntil,
-			AgentState:         req.AgentState,
+		params := patchParamsFromRequest(issueID, req)
+		if code, reject := applyPatchActorAttribution(r.Context(), &params); reject {
+			writeIssuesError(w, http.StatusForbidden, "invalid request principal", code)
+			return
 		}
 
 		if err := svc.PatchIssue(r.Context(), params); err != nil {
@@ -58,6 +39,33 @@ func HandlePatchIssue(svc service.IssueService) http.HandlerFunc {
 			Success: true,
 			Data:    data,
 		})
+	}
+}
+
+func patchParamsFromRequest(issueID string, req *PatchIssueRequest) service.PatchIssueParams {
+	return service.PatchIssueParams{
+		IssueID:            issueID,
+		Title:              req.Title,
+		Description:        req.Description,
+		Status:             req.Status,
+		Priority:           req.Priority,
+		Assignee:           req.Assignee,
+		Owner:              req.Owner,
+		Design:             req.Design,
+		DesignFormat:       req.DesignFormat,
+		AcceptanceCriteria: req.AcceptanceCriteria,
+		Notes:              req.Notes,
+		ExternalRef:        req.ExternalRef,
+		EstimatedMinutes:   req.EstimatedMinutes,
+		IssueType:          req.IssueType,
+		AddLabels:          req.AddLabels,
+		RemoveLabels:       req.RemoveLabels,
+		SetLabels:          req.SetLabels,
+		Pinned:             req.Pinned,
+		Parent:             req.Parent,
+		DueAt:              req.DueAt,
+		DeferUntil:         req.DeferUntil,
+		AgentState:         req.AgentState,
 	}
 }
 

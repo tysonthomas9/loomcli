@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/leadoccupant"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -293,6 +294,47 @@ func TestTokenRotationUsesFreshTokenOnNextRequest(t *testing.T) {
 	}
 	if _, err := client.Agents().Get(context.Background(), "WS", "ignored"); err != nil {
 		t.Fatalf("Agents.Get: %v", err)
+	}
+}
+
+func TestTokenRotationPersistsForChildProcesses(t *testing.T) {
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+	now := time.Date(2026, 8, 9, 12, 0, 0, 0, time.UTC)
+	client := newStepClient(t, []leadHTTPExpectation{{
+		op:    "heartbeat",
+		token: "tok-old",
+		body:  map[string]any{},
+		resp:  heartbeatEnvelope{Session: sessionResult{SessionID: "lead-session", AgentID: "nova", LastHeartbeat: now}, OccupantToken: "tok-new"},
+	}}, withInitialToken("tok-old"), func(cfg *Config) { cfg.PersistToken = leadoccupant.WriteToken })
+
+	if _, err := client.AgentSessions().Heartbeat(context.Background(), "WS", "ignored"); err != nil {
+		t.Fatalf("Heartbeat: %v", err)
+	}
+	if got := leadoccupant.ReadToken(); got != "tok-new" {
+		t.Fatalf("child-process token = %q, want tok-new", got)
+	}
+}
+
+func TestTokenRotationPersistenceFailureIsNonFatal(t *testing.T) {
+	now := time.Date(2026, 8, 9, 12, 0, 0, 0, time.UTC)
+	called := false
+	client := newStepClient(t, []leadHTTPExpectation{{
+		op:    "heartbeat",
+		token: "tok-old",
+		body:  map[string]any{},
+		resp:  heartbeatEnvelope{Session: sessionResult{SessionID: "lead-session", AgentID: "nova", LastHeartbeat: now}, OccupantToken: "tok-new"},
+	}}, withInitialToken("tok-old"), func(cfg *Config) {
+		cfg.PersistToken = func(string) error {
+			called = true
+			return errors.New("disk full")
+		}
+	})
+
+	if _, err := client.AgentSessions().Heartbeat(context.Background(), "WS", "ignored"); err != nil {
+		t.Fatalf("Heartbeat: %v", err)
+	}
+	if !called || client.currentToken() != "tok-new" {
+		t.Fatalf("persist called/token = %t/%q, want true/tok-new", called, client.currentToken())
 	}
 }
 

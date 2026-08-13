@@ -138,6 +138,78 @@ func TestWorkspaceURLConstruction(t *testing.T) {
 	}
 }
 
+func TestPathPrefix_AllEndpointURLs(t *testing.T) {
+	type endpoint struct {
+		name string
+		want string
+		call func(context.Context, *APIBackend)
+	}
+	endpoints := []endpoint{
+		{"get", "/issues/i%2F1", func(ctx context.Context, b *APIBackend) { _, _ = b.Get(ctx, "i/1") }},
+		{"list", "/issues", func(ctx context.Context, b *APIBackend) { _, _ = b.List(ctx, backend.ListOpts{}) }},
+		{"ready", "/ready", func(ctx context.Context, b *APIBackend) { _, _ = b.Ready(ctx, backend.ReadyOpts{}) }},
+		{"blocked", "/blocked", func(ctx context.Context, b *APIBackend) { _, _ = b.Blocked(ctx, backend.BlockedOpts{}) }},
+		{"stats", "/stats", func(ctx context.Context, b *APIBackend) { _, _ = b.Stats(ctx) }},
+		{"children", "/issues", func(ctx context.Context, b *APIBackend) { _, _ = b.GetChildren(ctx, "i/1") }},
+		{"search", "/issues", func(ctx context.Context, b *APIBackend) { _, _ = b.SearchIssues(ctx, "needle", 3) }},
+		{"create", "/issues", func(ctx context.Context, b *APIBackend) { _, _ = b.Create(ctx, backend.CreateParams{Title: "t"}) }},
+		{"update", "/issues/i%2F1", func(ctx context.Context, b *APIBackend) { _ = b.Update(ctx, "i/1", backend.UpdateParams{}) }},
+		{"claim", "/issues/i%2F1/claim", func(ctx context.Context, b *APIBackend) { _ = b.ClaimIssue(ctx, "i/1", 0) }},
+		{"close", "/issues/i%2F1/close", func(ctx context.Context, b *APIBackend) { _, _ = b.Close(ctx, "i/1", backend.CloseParams{}) }},
+		{"reopen", "/issues/i%2F1", func(ctx context.Context, b *APIBackend) { _ = b.Reopen(ctx, "i/1", backend.ReopenParams{}) }},
+		{"delete", "/issues/i%2F1", func(ctx context.Context, b *APIBackend) {
+			_ = b.Delete(ctx, backend.DeleteParams{IDs: []string{"i/1"}})
+		}},
+		{"add dependency", "/issues/i%2F1/dependencies", func(ctx context.Context, b *APIBackend) {
+			_ = b.AddDependency(ctx, backend.DepAddParams{FromID: "i/1", ToID: "i2"})
+		}},
+		{"remove dependency", "/issues/i%2F1/dependencies/i%202", func(ctx context.Context, b *APIBackend) {
+			_ = b.RemoveDependency(ctx, backend.DepRemoveParams{FromID: "i/1", ToID: "i 2"})
+		}},
+		{"add label", "/issues/i%2F1", func(ctx context.Context, b *APIBackend) { _ = b.AddLabel(ctx, "i/1", "x") }},
+		{"remove label", "/issues/i%2F1", func(ctx context.Context, b *APIBackend) { _ = b.RemoveLabel(ctx, "i/1", "x") }},
+		{"comments", "/issues/i%2F1/comments", func(ctx context.Context, b *APIBackend) {
+			_, _ = b.AddComment(ctx, backend.CommentAddParams{IssueID: "i/1", Text: "x"})
+		}},
+		{"events", "/issues/i%2F1/events", func(ctx context.Context, b *APIBackend) { _, _ = b.ListEvents(ctx, "i/1", 0) }},
+	}
+
+	for _, prefix := range []string{"", "lead/data/"} {
+		for _, ep := range endpoints {
+			t.Run(prefix+"/"+ep.name, func(t *testing.T) {
+				var got string
+				ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					got = r.URL.EscapedPath()
+					if r.URL.RawQuery != "" {
+						got += "?" + r.URL.RawQuery
+					}
+					respondOK(w, map[string]any{})
+				}))
+				defer ts.Close()
+				ab, err := New(Config{BaseURL: ts.URL, WorkspaceID: "test ws", PathPrefix: prefix})
+				if err != nil {
+					t.Fatal(err)
+				}
+				ep.call(context.Background(), ab)
+				wantPrefix := "/api/workspaces/test%20ws"
+				if prefix != "" {
+					wantPrefix += "/lead/data"
+				}
+				want := wantPrefix + ep.want
+				if ep.name == "children" {
+					want += "?parent_id=i%2F1"
+				}
+				if ep.name == "search" {
+					want += "?q=needle&limit=3"
+				}
+				if got != want {
+					t.Errorf("URL = %q, want %q", got, want)
+				}
+			})
+		}
+	}
+}
+
 // --- Get tests ---
 
 func TestGet_HappyPath(t *testing.T) {
@@ -405,43 +477,46 @@ func TestBlockedIncludesExplicitBlockedStatusIssues(t *testing.T) {
 
 // --- Stats ---
 
-func TestStats_HappyPath(t *testing.T) {
-	// Stats returns raw Statistics, NOT the envelope.
-	ab, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/workspaces/test-ws/stats" {
-			t.Errorf("path = %q", r.URL.Path)
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(gen.Statistics{
-			TotalIssues:          100,
-			OpenIssues:           40,
-			InProgressIssues:     20,
-			ClosedIssues:         30,
-			BlockedIssues:        5,
-			DeferredIssues:       3,
-			ReadyIssues:          15,
-			TombstoneIssues:      2,
-			PinnedIssues:         1,
-			AverageLeadTimeHours: 2.5,
-		})
-	})
-	defer ts.Close()
-
-	result, err := ab.Stats(context.Background())
+func TestStats_ResponseShapes(t *testing.T) {
+	stats := gen.Statistics{TotalIssues: 100, OpenIssues: 40, ReadyIssues: 15, AverageLeadTimeHours: 2.5}
+	statsJSON, err := json.Marshal(stats)
 	if err != nil {
-		t.Fatalf("Stats: %v", err)
+		t.Fatal(err)
 	}
-	if result.TotalIssues != 100 {
-		t.Errorf("TotalIssues = %d", result.TotalIssues)
+	tests := []struct {
+		name     string
+		status   int
+		body     string
+		wantKind backend.ErrorKind
+	}{
+		{"envelope", 200, `{"success":true,"data":` + string(statsJSON) + `}`, ""},
+		{"server failure envelope", 200, `{"success":false,"error":"x"}`, backend.KindInternal},
+		{"success without data", 200, `{"success":true}`, backend.KindInternal},
+		{"malformed data", 200, `{"success":true,"data":"bad"}`, backend.KindInternal},
+		{"raw legacy", 200, string(statsJSON), ""},
+		{"non 2xx", 503, `{"success":false,"error":"down"}`, backend.KindUnavailable},
 	}
-	if result.OpenIssues != 40 {
-		t.Errorf("OpenIssues = %d", result.OpenIssues)
-	}
-	if result.ReadyIssues != 15 {
-		t.Errorf("ReadyIssues = %d", result.ReadyIssues)
-	}
-	if result.AverageLeadTime != 2.5 {
-		t.Errorf("AverageLeadTime = %f", result.AverageLeadTime)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ab, ts := newTestServer(t, func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(tt.status)
+				_, _ = w.Write([]byte(tt.body))
+			})
+			defer ts.Close()
+			got, err := ab.Stats(context.Background())
+			if tt.wantKind != "" {
+				if !backend.IsKind(err, tt.wantKind) {
+					t.Fatalf("error = %v, want kind %s", err, tt.wantKind)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.TotalIssues != 100 || got.OpenIssues != 40 || got.ReadyIssues != 15 || got.AverageLeadTime != 2.5 {
+				t.Errorf("stats = %+v", got)
+			}
+		})
 	}
 }
 

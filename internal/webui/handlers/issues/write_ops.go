@@ -6,6 +6,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"strings"
 
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
@@ -30,8 +31,8 @@ func HandleCreateIssue(svc service.IssueService) http.HandlerFunc {
 		}
 
 		params := createParamsFromRequest(r, &req)
-		if applyActorAttribution(r.Context(), &params) {
-			writeIssuesError(w, http.StatusForbidden, "invalid request principal", "INVALID_PRINCIPAL")
+		if code, reject := applyActorAttribution(r.Context(), &params); reject {
+			writeIssuesError(w, http.StatusForbidden, "invalid request principal", code)
 			return
 		}
 
@@ -52,16 +53,19 @@ func HandleCreateIssue(svc service.IssueService) http.HandlerFunc {
 // principals that do not get to name themselves. Web-UI requests are a
 // no-op (full client trust, unchanged). reject is true for an invalid
 // principal — the handler must 403.
-func applyActorAttribution(ctx context.Context, p *service.CreateIssueParams) (reject bool) {
+func applyActorAttribution(ctx context.Context, p *service.CreateIssueParams) (code string, reject bool) {
 	a, ok := middleware.ActorFromContext(ctx)
 	if !ok {
-		return false
+		return "", false
 	}
 	if err := a.Validate(); err != nil {
-		return true
+		return "INVALID_PRINCIPAL", true
 	}
 	if !a.OverridesClientAttribution() {
-		return false
+		return "", false
+	}
+	if strings.TrimSpace(p.ID) != "" {
+		return "CLIENT_ID_FORBIDDEN", true
 	}
 	att := a.Attribution()
 	p.CreatedBy = att
@@ -71,7 +75,27 @@ func applyActorAttribution(ctx context.Context, p *service.CreateIssueParams) (r
 	if p.Owner != "" {
 		p.Owner = att // Tyson 2026-08-13: owner locked down like assignee
 	}
-	return false
+	return "", false
+}
+
+// applyPatchActorAttribution locks occupant-owned attribution while keeping
+// assignee free so an interactive lead can assign work to worker agents.
+func applyPatchActorAttribution(ctx context.Context, p *service.PatchIssueParams) (code string, reject bool) {
+	a, ok := middleware.ActorFromContext(ctx)
+	if !ok {
+		return "", false
+	}
+	if err := a.Validate(); err != nil {
+		return "INVALID_PRINCIPAL", true
+	}
+	if !a.OverridesClientAttribution() {
+		return "", false
+	}
+	if p.Owner != nil && strings.TrimSpace(*p.Owner) != "" {
+		owner := a.Attribution()
+		p.Owner = &owner
+	}
+	return "", false
 }
 
 // createParamsFromRequest maps the decoded create request body plus the

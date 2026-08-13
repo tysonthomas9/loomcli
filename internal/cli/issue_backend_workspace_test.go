@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -121,6 +122,42 @@ func TestFactory_SameOccupantIsCached(t *testing.T) {
 	for i, got := range actors {
 		if got != "lead-occupant:p1" {
 			t.Errorf("request %d X-Actor = %q, want lead-occupant:p1", i, got)
+		}
+	}
+}
+
+func TestWorkspaceIssueBackendFactory_OccupantCacheBounded(t *testing.T) {
+	var actors []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		actors = append(actors, r.Header.Get("X-Actor"))
+		writeIssueBackendSuccess(t, w)
+	}))
+	t.Cleanup(server.Close)
+
+	factory := newWorkspaceIssueBackendFactory(server.URL, "serve-actor")
+	browserCtx := middleware.WithActor(middleware.WithWorkspace(context.Background(), "WS"), middleware.WebUIActor())
+	browserBackend := factory.backend(browserCtx)
+	for i := 0; i < maxOccupantBackends+1; i++ {
+		actor := mustOccupantActor(t, fmt.Sprintf("lead-occupant:p%d", i))
+		ctx := middleware.WithActor(middleware.WithWorkspace(context.Background(), "WS"), actor)
+		be := factory.backend(ctx)
+		if err := be.ClaimIssue(context.Background(), fmt.Sprintf("issue-%d", i), 0); err != nil {
+			t.Fatalf("occupant %d ClaimIssue: %v", i, err)
+		}
+	}
+	if got := len(factory.occupantCache); got != maxOccupantBackends {
+		t.Fatalf("occupant cache size = %d, want %d", got, maxOccupantBackends)
+	}
+	if got := factory.backend(browserCtx); got != browserBackend {
+		t.Fatal("browser/default cache entry changed while evicting occupants")
+	}
+	if len(actors) != maxOccupantBackends+1 {
+		t.Fatalf("recorded actors = %d, want %d", len(actors), maxOccupantBackends+1)
+	}
+	for i, got := range actors {
+		want := fmt.Sprintf("lead-occupant:p%d", i)
+		if got != want {
+			t.Fatalf("request %d actor = %q, want %q", i, got, want)
 		}
 	}
 }

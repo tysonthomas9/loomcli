@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"path"
@@ -16,6 +17,7 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/leadoccupant"
 	"github.com/tysonthomas9/loomcli/internal/netbase"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
@@ -35,6 +37,7 @@ type Config struct {
 	WorkspaceKey  string
 	OccupantToken string //nolint:gosec // occupant bearer credential intentionally held by the client.
 	HTTPClient    *http.Client
+	PersistToken  func(string) error
 }
 
 // Client is a placement-scoped partial store.Store backed by serve's lead API.
@@ -45,6 +48,7 @@ type Client struct {
 
 	tokenMu       sync.RWMutex
 	occupantToken string //nolint:gosec // guarded bearer credential, never logged.
+	persistToken  func(string) error
 
 	agentSessions store.AgentSessionStore
 	agents        store.AgentStore
@@ -77,6 +81,7 @@ func New(cfg Config) (*Client, error) {
 		workspaceKey:  workspaceKey,
 		httpClient:    httpClient,
 		occupantToken: token,
+		persistToken:  cfg.PersistToken,
 	}
 	c.agentSessions = agentSessionStore{client: c}
 	c.agents = agentStore{client: c}
@@ -148,6 +153,12 @@ func (c *Client) rotateTokenFromResponse(body []byte) {
 	c.tokenMu.Lock()
 	c.occupantToken = token
 	c.tokenMu.Unlock()
+	if c.persistToken != nil {
+		if err := c.persistToken(token); err != nil {
+			path, _ := leadoccupant.TokenPath()
+			slog.Warn("persist rotated occupant token", "path", path, "err", err)
+		}
+	}
 }
 
 type opErrorEnvelope struct {

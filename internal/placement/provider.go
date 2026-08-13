@@ -34,13 +34,13 @@ const (
 	// API occupant bearer token.
 	OccupantTokenEnv = "LOOM_LEAD_OCCUPANT_TOKEN" //nolint:gosec // env var name, not a credential
 
-	// CapLeadSession, CapLeadAssignment, and CapLeadInbox are re-exported for
-	// placement-created lead nodes and occupant tokens. A sandboxed lead needs
-	// all three to run its orchestrator loop: session lifecycle, assignment
-	// context, and inbox drain.
+	// Lead capabilities are re-exported for placement-created lead nodes and
+	// occupant tokens. A sandboxed lead needs all four to run its orchestrator
+	// loop and use the allowlisted issue-data surface.
 	CapLeadSession    = leadtoken.CapLeadSession
 	CapLeadAssignment = leadtoken.CapLeadAssignment
 	CapLeadInbox      = leadtoken.CapLeadInbox
+	CapLeadData       = leadtoken.CapLeadData
 )
 
 // ErrSandboxNotFound lets release confirmation and resume paths distinguish a

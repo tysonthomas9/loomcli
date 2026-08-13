@@ -2,9 +2,11 @@ package app
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -14,6 +16,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/backend"
+	backendapi "github.com/tysonthomas9/loomcli/internal/backend/api"
+	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	"github.com/tysonthomas9/loomcli/internal/leadtoken"
+	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui"
 
 	"github.com/tysonthomas9/loomcli/internal/ops"
@@ -1489,6 +1497,265 @@ func TestSetupRoutes_WorkspaceRenamePatchEndpoint(t *testing.T) {
 		t.Error("expected 'data' field in successful response")
 	} else if name, _ := data["name"].(string); name != "renamed-ws" {
 		t.Errorf("data.name = %q, want %q", name, "renamed-ws")
+	}
+}
+
+type leadDataRoundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f leadDataRoundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) { return f(req) }
+
+func TestSetupRoutes_LeadDataPatchReadsBodyThroughNestedWorkspaceMux(t *testing.T) {
+	multiPool := daemon.NewMultiPool(middleware.WorkspaceFromContext, 1)
+	_ = multiPool.Register("WS", &stubPool{})
+
+	wantBody := `{"status":"in_progress","assignee":"nova","notes":"non-trivial occupant PATCH body"}`
+	var capturedBody string
+	apiClient := &http.Client{Transport: leadDataRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if req.Method == http.MethodPatch {
+			body, err := io.ReadAll(req.Body)
+			if err != nil {
+				return nil, err
+			}
+			capturedBody = string(body)
+			return leadDataHTTPResponse(http.StatusOK, `{"success":true}`), nil
+		}
+		return leadDataHTTPResponse(http.StatusOK, `{"success":true,"data":{"id":"issue-1","title":"patched","issue_type":"task","priority":2}}`), nil
+	})}
+	apiBackend, err := backendapi.New(backendapi.Config{BaseURL: "http://loom.test", WorkspaceID: "WS", HTTPClient: apiClient})
+	if err != nil {
+		t.Fatalf("api.New: %v", err)
+	}
+	st := memstore.New()
+	_, err = st.Nodes().Create(context.Background(), store.NodeCreate{
+		WorkspaceKey: "WS",
+		NodeID:       "p1",
+		OwnerActor:   "lead",
+		Placement: &domain.NodePlacement{
+			SandboxID:  "sandbox-p1",
+			Generation: 7,
+			State:      domain.PlacementStateActive,
+		},
+	})
+	if err != nil {
+		t.Fatalf("create placement: %v", err)
+	}
+	key := bytes.Repeat([]byte{0x66}, 32)
+	token, err := leadtoken.MintOccupantToken(leadtoken.OccupantClaims{
+		WorkspaceKey: "WS",
+		PlacementID:  "p1",
+		Generation:   7,
+		Caps:         []string{leadtoken.CapLeadData},
+	}, key, time.Hour)
+	if err != nil {
+		t.Fatalf("MintOccupantToken: %v", err)
+	}
+	var gotActor string
+	app := &Server{
+		multiPool: multiPool,
+		config: webui.ServerConfig{
+			Store:             st,
+			DriverRunTokenKey: key,
+			ExtAuthURL:        "https://auth.example.test",
+			IssueBackendFn: func(ctx context.Context) backend.IssueBackend {
+				actor, ok := middleware.ActorFromContext(ctx)
+				if ok {
+					gotActor = actor.BackendActor()
+				}
+				return apiBackend
+			},
+		},
+		wsExistsFn:   func(id string) bool { return multiPool.PoolForWorkspace(id) != nil },
+		workspaceSvc: &mockWorkspaceService{},
+	}
+	app.sessSvc = svcimpl.NewSessionService(nil, nil)
+	setupTestRoutes(t, app)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	req := httptest.NewRequest(http.MethodPatch, "/api/workspaces/WS/lead/data/issues/issue-1", strings.NewReader(wantBody)).WithContext(ctx)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec := httptest.NewRecorder()
+	done := make(chan struct{})
+	go func() {
+		app.mux.ServeHTTP(rec, req)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-ctx.Done():
+		t.Fatalf("nested workspace mux PATCH did not complete within 5s: %v", ctx.Err())
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body = %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	var gotPatch, wantPatch map[string]any
+	if err := json.Unmarshal([]byte(capturedBody), &gotPatch); err != nil {
+		t.Fatalf("decode captured PATCH: %v; body = %q", err, capturedBody)
+	}
+	if err := json.Unmarshal([]byte(wantBody), &wantPatch); err != nil {
+		t.Fatalf("decode expected PATCH: %v", err)
+	}
+	if !mapsEqual(gotPatch, wantPatch) {
+		t.Fatalf("handler consumed PATCH = %#v, want %#v", gotPatch, wantPatch)
+	}
+	if gotActor != "lead-occupant:p1" {
+		t.Fatalf("backend actor = %q, want lead-occupant:p1", gotActor)
+	}
+}
+
+func mapsEqual(got, want map[string]any) bool {
+	gotJSON, gotErr := json.Marshal(got)
+	wantJSON, wantErr := json.Marshal(want)
+	return gotErr == nil && wantErr == nil && bytes.Equal(gotJSON, wantJSON)
+}
+
+func leadDataHTTPResponse(status int, body string) *http.Response {
+	return &http.Response{
+		StatusCode: status,
+		Header:     make(http.Header),
+		Body:       io.NopCloser(strings.NewReader(body)),
+	}
+}
+
+type testWorkspaceRouteModule struct {
+	handler http.HandlerFunc
+}
+
+func (m testWorkspaceRouteModule) Register(mux *http.ServeMux) {
+	mux.HandleFunc("GET /api/workspaces/{ws}/future-route", m.handler)
+}
+
+func TestDataMount_NewWsMuxRouteDoesNotJoinDataMount(t *testing.T) {
+	multiPool := daemon.NewMultiPool(middleware.WorkspaceFromContext, 1)
+	_ = multiPool.Register("WS", &stubPool{})
+	st := memstore.New()
+	_, err := st.Nodes().Create(context.Background(), store.NodeCreate{
+		WorkspaceKey: "WS", NodeID: "p1", OwnerActor: "lead",
+		Placement: &domain.NodePlacement{SandboxID: "sandbox-p1", Generation: 7, State: domain.PlacementStateActive},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := bytes.Repeat([]byte{0x67}, 32)
+	token, err := leadtoken.MintOccupantToken(leadtoken.OccupantClaims{
+		WorkspaceKey: "WS", PlacementID: "p1", Generation: 7, Caps: []string{leadtoken.CapLeadData},
+	}, key, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	apiClient := &http.Client{Transport: leadDataRoundTripFunc(func(*http.Request) (*http.Response, error) {
+		return leadDataHTTPResponse(http.StatusOK, `{"success":true,"data":[]}`), nil
+	})}
+	apiBackend, err := backendapi.New(backendapi.Config{BaseURL: "http://loom.test", WorkspaceID: "WS", HTTPClient: apiClient})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var actors []string
+	backendFn := func(ctx context.Context) backend.IssueBackend {
+		actor, ok := middleware.ActorFromContext(ctx)
+		if ok {
+			actors = append(actors, string(actor.Kind())+":"+actor.BackendActor())
+		} else {
+			actors = append(actors, "")
+		}
+		return apiBackend
+	}
+	futureCalled := false
+	app := &Server{
+		multiPool: multiPool,
+		config: webui.ServerConfig{
+			Store: st, DriverRunTokenKey: key, ExtAuthURL: "https://auth.example.test", IssueBackendFn: backendFn,
+		},
+		wsExistsFn: func(id string) bool { return id == "WS" }, workspaceSvc: &mockWorkspaceService{},
+		wsModules: []wsModule{testWorkspaceRouteModule{handler: func(w http.ResponseWriter, r *http.Request) {
+			futureCalled = true
+			if actor, ok := middleware.ActorFromContext(r.Context()); ok && actor.Kind() == middleware.ActorKindOccupant {
+				t.Error("future browser route carried occupant actor")
+			}
+			w.WriteHeader(http.StatusNoContent)
+		}}},
+	}
+	app.issueSvc = service.NewIssueServiceWithBackend(nil, nil, middleware.WithWorkspace, service.IssueBackendProvider(backendFn))
+	app.sessSvc = svcimpl.NewSessionService(nil, nil)
+	setupTestRoutes(t, app)
+
+	for _, tc := range []struct {
+		path string
+		auth bool
+		want int
+	}{
+		{"/api/workspaces/WS/issues", false, http.StatusOK},
+		{"/api/workspaces/WS/ready", false, http.StatusOK},
+		{"/api/workspaces/WS/lead/data/issues", true, http.StatusOK},
+		{"/api/workspaces/WS/lead/data/ready", true, http.StatusOK},
+		{"/api/workspaces/WS/future-route", false, http.StatusNoContent},
+		{"/api/workspaces/WS/lead/data/future-route", true, http.StatusNotFound},
+	} {
+		req := httptest.NewRequest(http.MethodGet, tc.path, nil)
+		if tc.auth {
+			req.Header.Set("Authorization", "Bearer "+token)
+		}
+		rec := httptest.NewRecorder()
+		app.mux.ServeHTTP(rec, req)
+		if rec.Code != tc.want {
+			t.Fatalf("GET %s status = %d, want %d; body = %s", tc.path, rec.Code, tc.want, rec.Body.String())
+		}
+	}
+	if !futureCalled {
+		t.Fatal("future wsMux route was not reached")
+	}
+	wantActors := []string{"web-ui:", "", "lead-occupant:lead-occupant:p1", "lead-occupant:lead-occupant:p1"}
+	if len(actors) != len(wantActors) {
+		t.Fatalf("backend actors = %#v, want %#v", actors, wantActors)
+	}
+	for i := range actors {
+		if actors[i] != wantActors[i] {
+			t.Errorf("backend actor %d = %q, want %q", i, actors[i], wantActors[i])
+		}
+	}
+}
+
+func TestOpenAuthMode_FullAppBrowserIssuesReachableWithoutAuthorization(t *testing.T) {
+	multiPool := daemon.NewMultiPool(middleware.WorkspaceFromContext, 1)
+	_ = multiPool.Register("WS", &stubPool{})
+	apiClient := &http.Client{Transport: leadDataRoundTripFunc(func(*http.Request) (*http.Response, error) {
+		return leadDataHTTPResponse(http.StatusOK, `{"success":true,"data":[]}`), nil
+	})}
+	apiBackend, err := backendapi.New(backendapi.Config{BaseURL: "http://loom.test", WorkspaceID: "WS", HTTPClient: apiClient})
+	if err != nil {
+		t.Fatal(err)
+	}
+	called := false
+	backendFn := func(ctx context.Context) backend.IssueBackend {
+		called = true
+		if _, ok := middleware.UserIdentityFromContext(ctx); ok {
+			t.Error("open-mode no-auth request unexpectedly carried UserIdentity")
+		}
+		return apiBackend
+	}
+	app := &Server{
+		multiPool:  multiPool,
+		config:     webui.ServerConfig{ExtAuthURL: "", IssueBackendFn: backendFn},
+		wsExistsFn: func(id string) bool { return id == "WS" }, workspaceSvc: &mockWorkspaceService{},
+	}
+	app.issueSvc = service.NewIssueServiceWithBackend(nil, nil, middleware.WithWorkspace, service.IssueBackendProvider(backendFn))
+	app.sessSvc = svcimpl.NewSessionService(nil, nil)
+	setupTestRoutes(t, app)
+
+	authMW, cleanup := initExtAuth(app.config)
+	if cleanup != nil {
+		defer cleanup()
+	}
+	var handler http.Handler = app.mux
+	if authMW != nil {
+		handler = authMW(handler)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/WS/issues", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK || !called {
+		t.Fatalf("open-mode browser request status = %d, backend called=%t; body=%s", rec.Code, called, rec.Body.String())
 	}
 }
 

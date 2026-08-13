@@ -56,6 +56,7 @@ const envLoomLeadMaxVCPU = "LOOM_LEAD_MAX_VCPU"
 const envLoomLeadMaxMemGiB = "LOOM_LEAD_MAX_MEM_GIB"
 const envLoomLeadAllowlist = "LOOM_LEAD_ALLOWLIST"
 const envLoomLeadAPIBaseURL = "LOOM_LEAD_API_BASE_URL"
+const envLoomLeadDataAllowOpenAuth = "LOOM_LEAD_DATA_ALLOW_OPEN_AUTH"
 const envLoomLeadSnapshot = "LOOM_LEAD_SNAPSHOT"
 
 const monitorCollectionCacheTTL = 10 * time.Second
@@ -755,30 +756,39 @@ func buildServerConfig(monitorHandlers webui.MonitorHandlers, fs fleetState, sto
 }
 
 func buildCoreServerConfig(monitorHandlers webui.MonitorHandlers, gitOps *opsimpl.GitOpsImpl, backend string) webui.ServerConfig {
+	leadDataAllowOpenAuth := strings.TrimSpace(os.Getenv(envLoomLeadDataAllowOpenAuth)) == "1"
+	if leadDataAllowOpenAuth {
+		if serveAuthURL == "" {
+			slog.Error("lead data mount enabled in OPEN AUTH MODE (LOOM_LEAD_DATA_ALLOW_OPEN_AUTH=1) — POC-only posture, see .scratch/lead-in-daytona/issues/27-lead-origin-isolation.md")
+		} else {
+			slog.Warn("lead data mount open-auth override armed but inert (ext auth configured)")
+		}
+	}
 	return webui.ServerConfig{
-		Port:                 servePort,
-		BindAddress:          serveBindAddr,
-		SocketPath:           serveWebUISocket,
-		FrontendDir:          serveFrontendDir,
-		MonitorHandlers:      monitorHandlers,
-		AgentControlFn:       daemonwire.BuildAgentControlFn(),
-		DaemonSupervisorFn:   daemonwire.BuildDaemonSupervisorFn(),
-		DaemonConfigFn:       daemonwire.BuildDaemonConfigFn(),
-		AgentQueueFn:         daemonwire.BuildAgentQueueFn(),
-		TerminalCmd:          fmt.Sprintf("loom lead --backend %s", backend),
-		HSTSEnabled:          serveHSTS,
-		ExtAuthURL:           serveAuthURL,
-		ExtAuthIssuer:        serveAuthIssuer,
-		ExtAuthAudience:      serveAuthAudience,
-		ExtAuthAllowInsecure: serveAuthAllowInsecure,
-		GitOps:               gitOps,
-		FileOps:              gitOps,
-		BackendOps:           opsimpl.NewBackendOps(),
-		NotifyTokenDir:       cli.GetWorkspaceRuntimeDir(),
-		SessionRuntimeDir:    cli.GetWorkspaceRuntimeDir(),
-		LocalSettingsDir:     bootstrap.LoomDir(),
-		Logger:               slog.Default(),
-		SentryDSN:            serveSentryDSN,
+		Port:                  servePort,
+		BindAddress:           serveBindAddr,
+		SocketPath:            serveWebUISocket,
+		FrontendDir:           serveFrontendDir,
+		MonitorHandlers:       monitorHandlers,
+		AgentControlFn:        daemonwire.BuildAgentControlFn(),
+		DaemonSupervisorFn:    daemonwire.BuildDaemonSupervisorFn(),
+		DaemonConfigFn:        daemonwire.BuildDaemonConfigFn(),
+		AgentQueueFn:          daemonwire.BuildAgentQueueFn(),
+		TerminalCmd:           fmt.Sprintf("loom lead --backend %s", backend),
+		HSTSEnabled:           serveHSTS,
+		ExtAuthURL:            serveAuthURL,
+		ExtAuthIssuer:         serveAuthIssuer,
+		ExtAuthAudience:       serveAuthAudience,
+		ExtAuthAllowInsecure:  serveAuthAllowInsecure,
+		LeadDataAllowOpenAuth: leadDataAllowOpenAuth,
+		GitOps:                gitOps,
+		FileOps:               gitOps,
+		BackendOps:            opsimpl.NewBackendOps(),
+		NotifyTokenDir:        cli.GetWorkspaceRuntimeDir(),
+		SessionRuntimeDir:     cli.GetWorkspaceRuntimeDir(),
+		LocalSettingsDir:      bootstrap.LoomDir(),
+		Logger:                slog.Default(),
+		SentryDSN:             serveSentryDSN,
 		// Wire the active IssueBackend (fleet / fleet-db / api) into
 		// the webui service layer so the migrated CRUD endpoints don't
 		// hardcode the rpc.Client path. The closure lets the backend resolve

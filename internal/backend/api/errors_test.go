@@ -82,6 +82,34 @@ func TestClassifyHTTPError_StatusCodes(t *testing.T) {
 	}
 }
 
+func TestClassifyHTTPError_NonOccupant413RemainsInternal(t *testing.T) {
+	err := classifyHTTPError("Create", 413, apiResponse{Error: "request body too large"})
+	if !backend.IsKind(err, backend.KindInternal) {
+		t.Fatalf("413 error = %v, want internal", err)
+	}
+}
+
+func TestClassifyHTTPError_Occupant413IsValidation(t *testing.T) {
+	err := classifyHTTPErrorWithMessage("Create", 413, apiResponse{Error: "request body too large"}, "occupant auth message")
+	if !backend.IsKind(err, backend.KindValidation) {
+		t.Fatalf("occupant 413 error = %v, want validation", err)
+	}
+}
+
+func TestClassifyHTTPError_UnauthorizedMessageOverride(t *testing.T) {
+	const want = "occupant token expired; the lead runtime is not refreshing it — restart the lead"
+	for _, status := range []int{401, 403} {
+		err := classifyHTTPErrorWithMessage("Get", status, apiResponse{Error: "server detail"}, want)
+		var be *backend.BackendError
+		if !errors.As(err, &be) {
+			t.Fatalf("status %d: expected BackendError, got %T", status, err)
+		}
+		if be.Message != want {
+			t.Errorf("status %d: message = %q, want %q", status, be.Message, want)
+		}
+	}
+}
+
 func TestClassifyHTTPError_AuthMessagePrefix(t *testing.T) {
 	err := classifyHTTPError("Get", 401, apiResponse{Error: "token expired"})
 	if err == nil {

@@ -24,6 +24,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/epicrunner"
 	"github.com/tysonthomas9/loomcli/internal/leadclient"
+	"github.com/tysonthomas9/loomcli/internal/leadoccupant"
 	"github.com/tysonthomas9/loomcli/internal/placement"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
@@ -46,6 +47,7 @@ var leadMessage string
 var leadPromptFile string
 
 var openLeadFleetStore = cmdstore.OpenStore
+var writeLeadOccupantToken = leadoccupant.WriteToken
 
 var leadCmd = &cobra.Command{
 	Use:     "lead",
@@ -190,7 +192,7 @@ func loadLeadRolePrompt(ctx context.Context, registration leadSessionRegistratio
 		var err error
 		handle, ws, err = openLeadSessionStore(openCtx)
 		if err != nil {
-			slog.Debug("lead inline prompt lookup: store unavailable", "err", err)
+			slog.Warn("lead inline prompt lookup: store unavailable", "err", err)
 			return ""
 		}
 		defer func() { _ = handle.Close() }()
@@ -240,7 +242,7 @@ func applyLeadPromptContext(prompt string, resumeEligible bool) string {
 func currentLeadAssignmentPrompt(ctx context.Context, markDelivered bool) string {
 	handle, ws, err := openLeadSessionStore(ctx)
 	if err != nil {
-		slog.Debug("lead assignment context: store unavailable", "err", err)
+		slog.Warn("lead assignment context: store unavailable", "err", err)
 		return ""
 	}
 	defer func() { _ = handle.Close() }()
@@ -367,10 +369,14 @@ func openLeadSessionStore(ctx context.Context) (*bootstrap.StoreHandle, string, 
 		if ws == "" {
 			return nil, "", fmt.Errorf("LOOM_WORKSPACE is required for sandbox lead store")
 		}
+		if err := writeLeadOccupantToken(token); err != nil {
+			return nil, "", fmt.Errorf("persist initial occupant token: %w", err)
+		}
 		shim, err := leadclient.New(leadclient.Config{
 			BaseURL:       baseURL,
 			WorkspaceKey:  ws,
 			OccupantToken: token,
+			PersistToken:  writeLeadOccupantToken,
 		})
 		if err != nil {
 			return nil, "", err

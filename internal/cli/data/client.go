@@ -2,6 +2,7 @@ package data
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -10,7 +11,11 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/backend/api"
 	"github.com/tysonthomas9/loomcli/internal/httpclient"
+	"github.com/tysonthomas9/loomcli/internal/leadbackend"
+	"github.com/tysonthomas9/loomcli/internal/leadoccupant"
 )
+
+const occupantHTTPError = "loom data agents/monitor are not available to a sandboxed lead (occupant credentials cover issue data only)"
 
 // Package-level HTTP client state. The client is lazily constructed on the
 // first call to getHTTPClient() and re-used within a single process
@@ -51,6 +56,9 @@ func SetLocalIssueBackendProvider(provider func(context.Context) backend.IssueBa
 func getHTTPClient() (*http.Client, string, error) {
 	clientMu.Lock()
 	defer clientMu.Unlock()
+	if _, state := leadoccupant.FromEnv(); state != leadoccupant.StateAbsent {
+		return nil, "", errors.New(occupantHTTPError)
+	}
 	if clientReady {
 		return httpCli, resolvedURL, clientErr
 	}
@@ -82,6 +90,13 @@ func configuredServerURL() string {
 }
 
 func getIssueBackend(ctx context.Context) (backend.IssueBackend, error) {
+	occupantBackend, err := leadbackend.New()
+	if err != nil {
+		return nil, err
+	}
+	if occupantBackend != nil {
+		return occupantBackend, nil
+	}
 	if configuredServerURL() == "" {
 		providerMu.Lock()
 		provider := localIssueBackendProvider

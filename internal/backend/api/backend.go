@@ -36,9 +36,11 @@ const maxResponseBody = 50 << 20
 // APIBackend implements backend.IssueBackend by forwarding calls to a loom
 // server's REST API. It is safe for concurrent use.
 type APIBackend struct {
-	client      *http.Client
-	baseURL     string // e.g., "http://localhost:8080" (no trailing slash)
-	workspaceID string
+	client              *http.Client
+	baseURL             string // e.g., "http://localhost:8080" (no trailing slash)
+	workspaceID         string
+	pathPrefix          string
+	unauthorizedMessage string
 }
 
 // Compile-time interface check.
@@ -65,6 +67,10 @@ func New(cfg Config) (*APIBackend, error) {
 	}
 
 	baseURL := strings.TrimRight(cfg.BaseURL, "/")
+	pathPrefix := strings.TrimRight(strings.TrimSpace(cfg.PathPrefix), "/")
+	if pathPrefix != "" && !strings.HasPrefix(pathPrefix, "/") {
+		pathPrefix = "/" + pathPrefix
+	}
 	parsed, err := url.Parse(baseURL)
 	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
 		return nil, fmt.Errorf("api.New: invalid server URL %q", cfg.BaseURL)
@@ -83,9 +89,11 @@ func New(cfg Config) (*APIBackend, error) {
 	}
 
 	return &APIBackend{
-		client:      httpClient,
-		baseURL:     baseURL,
-		workspaceID: cfg.WorkspaceID,
+		client:              httpClient,
+		baseURL:             baseURL,
+		workspaceID:         cfg.WorkspaceID,
+		pathPrefix:          pathPrefix,
+		unauthorizedMessage: cfg.UnauthorizedMessage,
 	}, nil
 }
 
@@ -95,7 +103,7 @@ func (b *APIBackend) BackendName() string { return "api" }
 // workspaceBasePath returns the workspace-scoped URL path prefix for this
 // backend, with the workspace ID URL-encoded.
 func (b *APIBackend) workspaceBasePath() string {
-	return "/api/workspaces/" + url.PathEscape(b.workspaceID)
+	return "/api/workspaces/" + url.PathEscape(b.workspaceID) + b.pathPrefix
 }
 
 // doRequest executes an HTTP request against the workspace-scoped API and
@@ -142,6 +150,9 @@ func (b *APIBackend) doRequestHeaders(ctx context.Context, method, path string, 
 
 	var parsed apiResponse
 	if err := json.Unmarshal(respBody, &parsed); err != nil {
+		if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+			return &apiResponse{Error: string(respBody)}, resp.StatusCode, nil
+		}
 		return nil, resp.StatusCode, fmt.Errorf("server returned non-JSON response (HTTP %d)", resp.StatusCode)
 	}
 	return &parsed, resp.StatusCode, nil
@@ -158,7 +169,7 @@ func (b *APIBackend) execHeaders(ctx context.Context, op, method, path string, b
 	if err != nil {
 		return nil, classifyTransportError(op, err)
 	}
-	if cerr := classifyHTTPError(op, statusCode, *resp); cerr != nil {
+	if cerr := classifyHTTPErrorWithMessage(op, statusCode, *resp, b.unauthorizedMessage); cerr != nil {
 		return nil, cerr
 	}
 	return resp, nil
@@ -251,12 +262,9 @@ func (b *APIBackend) Blocked(ctx context.Context, opts backend.BlockedOpts) ([]b
 	return result, nil
 }
 
-// Stats fetches per-workspace statistics. The server returns a raw
-// Statistics object directly (not wrapped in the envelope) at
-// GET /api/workspaces/{ws}/stats.
+// Stats fetches per-workspace statistics. Current serve responses use the
+// standard envelope; raw Statistics remains supported for legacy servers.
 func (b *APIBackend) Stats(ctx context.Context) (*backend.StatsData, error) {
-	// The /stats endpoint does not use the envelope — call via raw doRequest
-	// and decode directly into Statistics.
 	fullURL := b.baseURL + b.workspaceBasePath() + "/stats"
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fullURL, nil)
 	if err != nil {
@@ -273,10 +281,42 @@ func (b *APIBackend) Stats(ctx context.Context) (*backend.StatsData, error) {
 		return nil, backend.ErrInternal("Stats", "read response body", err)
 	}
 	if resp.StatusCode >= 400 {
-		return nil, classifyHTTPError("Stats", resp.StatusCode, apiResponse{Error: string(body)})
+		var envelope apiResponse
+		if err := json.Unmarshal(body, &envelope); err != nil {
+			envelope.Error = string(body)
+		}
+		return nil, classifyHTTPErrorWithMessage("Stats", resp.StatusCode, envelope, b.unauthorizedMessage)
 	}
+	return decodeStatsResponse(body)
+}
+
+func decodeStatsResponse(body []byte) (*backend.StatsData, error) {
+	var envelope struct {
+		Success *bool           `json:"success"`
+		Data    json.RawMessage `json:"data"`
+		Error   string          `json:"error"`
+	}
+	if err := json.Unmarshal(body, &envelope); err != nil {
+		return nil, backend.ErrInternal("Stats", "unmarshal response", err)
+	}
+	if envelope.Success != nil || envelope.Data != nil {
+		if envelope.Success == nil {
+			return nil, backend.ErrInternal("Stats", "malformed response envelope: success is missing", nil)
+		}
+		if !*envelope.Success {
+			return nil, classifyHTTPError("Stats", http.StatusOK, apiResponse{Error: envelope.Error})
+		}
+		if envelope.Data == nil || string(envelope.Data) == "null" {
+			return nil, backend.ErrInternal("Stats", "malformed response envelope: data is missing", nil)
+		}
+		return decodeStatsData(envelope.Data)
+	}
+	return decodeStatsData(body)
+}
+
+func decodeStatsData(data []byte) (*backend.StatsData, error) {
 	var stats gen.Statistics
-	if err := json.Unmarshal(body, &stats); err != nil {
+	if err := json.Unmarshal(data, &stats); err != nil {
 		return nil, backend.ErrInternal("Stats", "unmarshal response", err)
 	}
 	result := statisticsToData(stats)

@@ -28,6 +28,9 @@ const (
 	CapLeadAssignment = "lead:assignment"
 	// CapLeadInbox authorizes the sandboxed lead to drain its inbox.
 	CapLeadInbox = "lead:inbox"
+	// CapLeadData authorizes the sandboxed lead to read and write issue data
+	// through the /lead/data mount. It never grants the general REST surface.
+	CapLeadData = "lead:data"
 
 	// DefaultOccupantTokenTTL is the default lifetime for a lead occupant
 	// token. Tokens share driver.ResolveRunTokenSigningKey's signing key; an

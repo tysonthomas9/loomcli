@@ -97,6 +97,94 @@ func TestHandleCreateIssue_OccupantLeavesEmptyFieldsEmpty(t *testing.T) {
 	}
 }
 
+func TestHandleCreateIssue_OccupantClientIDRejected(t *testing.T) {
+	called := false
+	svc := &mockIssueService{createIssueFunc: func(_ context.Context, _ service.CreateIssueParams) (json.RawMessage, error) {
+		called = true
+		return nil, nil
+	}}
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/WS/issues", strings.NewReader(`{
+		"id":"client-chosen",
+		"title":"test issue",
+		"issue_type":"task",
+		"priority":2
+	}`))
+	req = req.WithContext(middleware.WithActor(req.Context(), testOccupantActor(t)))
+	rec := httptest.NewRecorder()
+
+	HandleCreateIssue(svc).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403; body = %s", rec.Code, rec.Body.String())
+	}
+	var resp IssuesResponse
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.Success || resp.Code != "CLIENT_ID_FORBIDDEN" {
+		t.Fatalf("response = %+v, want CLIENT_ID_FORBIDDEN", resp)
+	}
+	if called {
+		t.Fatal("CreateIssue service was called for an occupant client ID")
+	}
+}
+
+func TestHandleCreateIssue_WebUIClientIDUnchanged(t *testing.T) {
+	got := performCreateAttributionRequest(t, middleware.WithActor(context.Background(), middleware.WebUIActor()), `{
+		"id":"client-chosen",
+		"title":"test issue",
+		"issue_type":"task",
+		"priority":2
+	}`)
+	if got.ID != "client-chosen" {
+		t.Fatalf("ID = %q, want client-chosen", got.ID)
+	}
+}
+
+func TestHandlePatchIssue_OccupantOwnerCoerced_AssigneeUntouched(t *testing.T) {
+	got := performPatchAttributionRequest(t, middleware.WithActor(context.Background(), testOccupantActor(t)), `{
+		"owner":"attacker",
+		"assignee":"nova"
+	}`)
+	if got.Owner == nil || *got.Owner != "lead-occupant:p1" {
+		t.Fatalf("Owner = %v, want lead-occupant:p1", got.Owner)
+	}
+	if got.Assignee == nil || *got.Assignee != "nova" {
+		t.Fatalf("Assignee = %v, want nova", got.Assignee)
+	}
+}
+
+func TestHandlePatchIssue_InvalidActorRejected(t *testing.T) {
+	called := false
+	svc := &mockIssueService{patchIssueFunc: func(_ context.Context, _ service.PatchIssueParams) error {
+		called = true
+		return nil
+	}}
+	req := httptest.NewRequest(http.MethodPatch, "/api/workspaces/WS/issues/issue-1", strings.NewReader(`{"owner":"attacker"}`))
+	req.SetPathValue("id", "issue-1")
+	req = req.WithContext(middleware.WithActor(req.Context(), middleware.Actor{}))
+	rec := httptest.NewRecorder()
+
+	HandlePatchIssue(svc).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403; body = %s", rec.Code, rec.Body.String())
+	}
+	if called {
+		t.Fatal("PatchIssue service was called for an invalid actor")
+	}
+}
+
+func TestHandlePatchIssue_WebUIUnchanged(t *testing.T) {
+	got := performPatchAttributionRequest(t, middleware.WithActor(context.Background(), middleware.WebUIActor()), `{
+		"owner":"carol",
+		"assignee":"bob"
+	}`)
+	if got.Owner == nil || *got.Owner != "carol" || got.Assignee == nil || *got.Assignee != "bob" {
+		t.Fatalf("patch attribution = Owner %v Assignee %v, want carol/bob", got.Owner, got.Assignee)
+	}
+}
+
 func TestHandleCreateIssue_InvalidActorRejected(t *testing.T) {
 	called := false
 	svc := &mockIssueService{
@@ -161,6 +249,30 @@ func performCreateAttributionRequest(t *testing.T, ctx context.Context, body str
 
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("status = %d, want %d; body = %s", rec.Code, http.StatusCreated, rec.Body.String())
+	}
+	return got
+}
+
+func performPatchAttributionRequest(t *testing.T, ctx context.Context, body string) service.PatchIssueParams {
+	t.Helper()
+	var got service.PatchIssueParams
+	svc := &mockIssueService{
+		patchIssueFunc: func(_ context.Context, params service.PatchIssueParams) error {
+			got = params
+			return nil
+		},
+		getIssueFunc: func(context.Context, string) (json.RawMessage, error) {
+			return json.RawMessage(`{"id":"issue-1"}`), nil
+		},
+	}
+	req := httptest.NewRequest(http.MethodPatch, "/api/workspaces/WS/issues/issue-1", strings.NewReader(body)).WithContext(ctx)
+	req.SetPathValue("id", "issue-1")
+	rec := httptest.NewRecorder()
+
+	HandlePatchIssue(svc).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body = %s", rec.Code, rec.Body.String())
 	}
 	return got
 }

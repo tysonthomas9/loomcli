@@ -74,6 +74,7 @@ type ServerConfig struct {
 	ExtAuthIssuer           string                           // Expected JWT issuer (validated against "iss" claim; defaults to ExtAuthURL)
 	ExtAuthAudience         string                           // Expected JWT audience (validated against "aud" claim; defaults to "loom")
 	ExtAuthAllowInsecure    bool                             // Allow HTTP for non-loopback --auth-url (escape hatch for Docker networks)
+	LeadDataAllowOpenAuth   bool                             // POC-only override for the occupant data mount in open auth mode
 	WorkspaceRoleResolver   middleware.WorkspaceRoleResolver // Authorizes an identity for one canonical workspace; required for remote file access
 	MonitorHandlers         MonitorHandlers                  // Pre-built handlers for monitor/metrics endpoints (injected by cli)
 	GitOps                  ops.GitOps                       // Git operations interface (optional; nil disables git endpoints)

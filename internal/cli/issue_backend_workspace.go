@@ -15,26 +15,43 @@ import (
 
 type issueBackendKey struct{ ws, actor string }
 
+const maxOccupantBackends = 64
+
+type occupantBackendEntry struct {
+	backend  backend.IssueBackend
+	lastUsed uint64
+}
+
+type workspaceIssueBackendFactory struct {
+	fleetURL string
+	actor    string
+
+	mu            sync.Mutex
+	cache         map[issueBackendKey]backend.IssueBackend
+	occupantCache map[issueBackendKey]occupantBackendEntry
+	useSequence   uint64
+}
+
 var errOccupantNeedsFleet = errors.New("occupant principals require a fleet-db-backed serve (no local-mode fallback)")
 
 // resolveRequestActor returns the fleet-db actor to use for ctx, or a non-nil
 // fail-closed backend when the request principal is unusable. Validate runs
 // before the kind check so a zero Actor{} (kind "") cannot slip past.
-func resolveRequestActor(ctx context.Context, wsID, processActor string) (string, backend.IssueBackend) {
+func resolveRequestActor(ctx context.Context, wsID, processActor string) (string, bool, backend.IssueBackend) {
 	a, ok := middleware.ActorFromContext(ctx)
 	if !ok {
-		return processActor, nil
+		return processActor, false, nil
 	}
 	if err := a.Validate(); err != nil {
-		return "", newUnavailableIssueBackend(IssueBackendFleetDB, err)
+		return "", false, newUnavailableIssueBackend(IssueBackendFleetDB, err)
 	}
 	if a.Kind() != middleware.ActorKindOccupant {
-		return processActor, nil
+		return processActor, false, nil
 	}
 	if wsID == "" {
-		return "", newUnavailableIssueBackend(IssueBackendFleetDB, errOccupantNeedsFleet)
+		return "", true, newUnavailableIssueBackend(IssueBackendFleetDB, errOccupantNeedsFleet)
 	}
-	return a.BackendActor(), nil
+	return a.BackendActor(), true, nil
 }
 
 // WorkspaceAwareIssueBackend returns an IssueBackend factory that picks a
@@ -56,49 +73,100 @@ func WorkspaceAwareIssueBackendForURL(fleetURL, actor string) func(ctx context.C
 	if fleetURL == "" {
 		// Local mode: ctx-aware factory degenerates to the global backend.
 		return func(ctx context.Context) backend.IssueBackend {
-			if _, unavailable := resolveRequestActor(ctx, "", ""); unavailable != nil {
+			if _, _, unavailable := resolveRequestActor(ctx, "", ""); unavailable != nil {
 				return unavailable
 			}
 			return DefaultIssueBackend()
 		}
 	}
 
+	factory := newWorkspaceIssueBackendFactory(fleetURL, actor)
+	return factory.backend
+}
+
+func newWorkspaceIssueBackendFactory(fleetURL, actor string) *workspaceIssueBackendFactory {
 	if actor == "" {
 		actor = os.Getenv(bootstrap.EnvFleetDBActor)
 	}
 	if actor == "" {
 		actor = os.Getenv("USER")
 	}
-	var (
-		mu    sync.Mutex
-		cache = make(map[issueBackendKey]backend.IssueBackend)
-	)
-	return func(ctx context.Context) backend.IssueBackend {
-		wsID := middleware.WorkspaceFromContext(ctx)
-		reqActor, unavailable := resolveRequestActor(ctx, wsID, actor)
-		if unavailable != nil {
-			return unavailable
-		}
-		if wsID == "" {
-			return DefaultIssueBackend()
-		}
-
-		key := issueBackendKey{ws: wsID, actor: reqActor}
-		mu.Lock()
-		defer mu.Unlock()
-		if be, ok := cache[key]; ok {
-			return be
-		}
-		fb, err := fleet.New(fleet.Config{
-			BaseURL:     fleetURL,
-			WorkspaceID: wsID,
-			Actor:       reqActor,
-		})
-		if err != nil {
-			slog.Error("workspace fleet backend construction failed", "ws", wsID, "err", err)
-			return newUnavailableIssueBackend(IssueBackendFleetDB, err)
-		}
-		cache[key] = fb
-		return fb
+	return &workspaceIssueBackendFactory{
+		fleetURL:      fleetURL,
+		actor:         actor,
+		cache:         make(map[issueBackendKey]backend.IssueBackend),
+		occupantCache: make(map[issueBackendKey]occupantBackendEntry),
 	}
+}
+
+func (f *workspaceIssueBackendFactory) backend(ctx context.Context) backend.IssueBackend {
+	wsID := middleware.WorkspaceFromContext(ctx)
+	reqActor, isOccupant, unavailable := resolveRequestActor(ctx, wsID, f.actor)
+	if unavailable != nil {
+		return unavailable
+	}
+	if wsID == "" {
+		return DefaultIssueBackend()
+	}
+
+	key := issueBackendKey{ws: wsID, actor: reqActor}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.useSequence++
+	if isOccupant {
+		return f.occupantBackend(key)
+	}
+	if be, ok := f.cache[key]; ok {
+		return be
+	}
+	be := f.newBackend(wsID, reqActor)
+	if !isUnavailableIssueBackend(be) {
+		f.cache[key] = be
+	}
+	return be
+}
+
+func (f *workspaceIssueBackendFactory) occupantBackend(key issueBackendKey) backend.IssueBackend {
+	if entry, ok := f.occupantCache[key]; ok {
+		entry.lastUsed = f.useSequence
+		f.occupantCache[key] = entry
+		return entry.backend
+	}
+	be := f.newBackend(key.ws, key.actor)
+	if isUnavailableIssueBackend(be) {
+		return be
+	}
+	if len(f.occupantCache) >= maxOccupantBackends {
+		f.evictOldestOccupant()
+	}
+	f.occupantCache[key] = occupantBackendEntry{backend: be, lastUsed: f.useSequence}
+	return be
+}
+
+func (f *workspaceIssueBackendFactory) evictOldestOccupant() {
+	var oldestKey issueBackendKey
+	var oldestUse uint64
+	first := true
+	for key, entry := range f.occupantCache {
+		if first || entry.lastUsed < oldestUse {
+			oldestKey, oldestUse, first = key, entry.lastUsed, false
+		}
+	}
+	if !first {
+		delete(f.occupantCache, oldestKey)
+	}
+}
+
+func (f *workspaceIssueBackendFactory) newBackend(wsID, actor string) backend.IssueBackend {
+	fb, err := fleet.New(fleet.Config{BaseURL: f.fleetURL, WorkspaceID: wsID, Actor: actor})
+	if err != nil {
+		slog.Error("workspace fleet backend construction failed", "ws", wsID, "err", err)
+		return newUnavailableIssueBackend(IssueBackendFleetDB, err)
+	}
+	return fb
+}
+
+func isUnavailableIssueBackend(be backend.IssueBackend) bool {
+	_, ok := be.(*unavailableIssueBackend)
+	return ok
 }

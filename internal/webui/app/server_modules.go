@@ -139,7 +139,13 @@ func (app *Server) buildInfraModules() {
 		app.prReviewCredentialSeeds = prReviewModule
 		app.wsModules = append(app.wsModules, prReviewModule)
 		app.wsModules = append(app.wsModules, modbuilder.NewApprovalsModule(app.config.Store))
-		app.wsModules = append(app.wsModules, modbuilder.NewLeadAPIModule(app.config.Store, app.config.DriverRunTokenKey))
+		app.wsModules = append(app.wsModules, modbuilder.NewLeadAPIModule(modbuilder.LeadAPIDeps{
+			Store:             app.config.Store,
+			TokenKey:          app.config.DriverRunTokenKey,
+			IssueBackendFn:    app.config.IssueBackendFn,
+			OpenAuthMode:      app.config.ExtAuthURL == "",
+			AllowOpenAuthMode: app.config.LeadDataAllowOpenAuth,
+		}))
 		app.wsModules = append(app.wsModules, modbuilder.NewTaskRunAPIModule(app.config.Store, app.config.FleetDBBaseURL, app.config.LocalSettingsDir))
 		app.wsModules = append(app.wsModules, driverapi.NewModule(driverapi.Config{
 			Store:            app.config.Store,

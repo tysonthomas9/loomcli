@@ -2,6 +2,7 @@ package issues
 
 import (
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 
@@ -87,8 +88,12 @@ func HandleAddComment(svc service.IssueService) http.HandlerFunc {
 			return
 		}
 
+		r.Body = http.MaxBytesReader(w, r.Body, handler.MaxRequestBody)
 		var req CommentRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			if writeCommentBodyError(w, err) {
+				return
+			}
 			slog.Warn("invalid request body in handleAddComment", "err", err)
 			handler.WriteJSON(w, http.StatusBadRequest, CommentResponse{
 				Success: false,
@@ -121,4 +126,16 @@ func HandleAddComment(svc service.IssueService) http.HandlerFunc {
 			Data:    comment,
 		})
 	}
+}
+
+func writeCommentBodyError(w http.ResponseWriter, err error) bool {
+	var maxBytesErr *http.MaxBytesError
+	if !errors.As(err, &maxBytesErr) {
+		return false
+	}
+	handler.WriteJSON(w, http.StatusRequestEntityTooLarge, CommentResponse{
+		Success: false,
+		Error:   "request body too large (max 1MB)",
+	})
+	return true
 }

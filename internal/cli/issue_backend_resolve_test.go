@@ -2,6 +2,8 @@ package cli
 
 import (
 	"testing"
+
+	"github.com/tysonthomas9/loomcli/internal/leadoccupant"
 )
 
 func TestResolveIssueBackendType(t *testing.T) {
@@ -59,4 +61,39 @@ func TestIsFleetActive(t *testing.T) {
 			t.Error("expected isFleetActive() to return false by default")
 		}
 	})
+}
+
+func TestResolveIssueBackendType_OccupantPresenceBeatsPublicSelection(t *testing.T) {
+	t.Setenv(leadoccupant.EnvOccupantToken, "token")
+	t.Setenv(leadoccupant.EnvLeadAPIURL, "")
+	t.Setenv(leadoccupant.EnvWorkspace, "")
+	t.Setenv("LOOM_ISSUE_BACKEND", IssueBackendFleet)
+	t.Setenv("LOOM_SERVER_URL", "http://ordinary.invalid")
+	if got := resolveIssueBackendType(); got != issueBackendOccupant {
+		t.Fatalf("resolveIssueBackendType() = %q, want internal occupant sentinel", got)
+	}
+}
+
+func TestResolveIssueBackendType_NoOccupantSnapshot(t *testing.T) {
+	t.Setenv(leadoccupant.EnvOccupantToken, "")
+	for _, tc := range []struct {
+		name   string
+		issue  string
+		server string
+		want   string
+	}{
+		{"default", "", "", IssueBackendFleetDB},
+		{"explicit fleet", IssueBackendFleet, "", IssueBackendFleet},
+		{"explicit fleetdb", IssueBackendFleetDB, "http://server", IssueBackendFleetDB},
+		{"explicit api", IssueBackendAPI, "", IssueBackendAPI},
+		{"server", "", "http://server", IssueBackendAPI},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("LOOM_ISSUE_BACKEND", tc.issue)
+			t.Setenv("LOOM_SERVER_URL", tc.server)
+			if got := resolveIssueBackendType(); got != tc.want {
+				t.Fatalf("got %q, want %q", got, tc.want)
+			}
+		})
+	}
 }

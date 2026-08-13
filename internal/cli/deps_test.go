@@ -12,6 +12,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
+	"github.com/tysonthomas9/loomcli/internal/leadoccupant"
 	"github.com/tysonthomas9/loomcli/internal/usage"
 )
 
@@ -561,6 +562,35 @@ func TestDefaultDeps_APIConstructionFailureFailsClosed(t *testing.T) {
 	_, err := d.IssueBackend.Ready(context.Background(), backend.ReadyOpts{})
 	if !backend.IsKind(err, backend.KindUnavailable) {
 		t.Fatalf("Ready error = %v, want unavailable", err)
+	}
+}
+
+func TestDefaultDeps_PartialOccupantFailsClosed(t *testing.T) {
+	t.Setenv(leadoccupant.EnvOccupantToken, "token")
+	t.Setenv(leadoccupant.EnvLeadAPIURL, "")
+	t.Setenv(leadoccupant.EnvWorkspace, "")
+	t.Setenv("LOOM_ISSUE_BACKEND", IssueBackendFleetDB)
+
+	d := DefaultDeps()
+	if got := d.IssueBackend.BackendName(); got != "lead-occupant-unavailable" {
+		t.Fatalf("DefaultDeps IssueBackend = %q, want lead-occupant-unavailable", got)
+	}
+	_, err := d.IssueBackend.Ready(context.Background(), backend.ReadyOpts{})
+	if !backend.IsKind(err, backend.KindUnavailable) {
+		t.Fatalf("Ready error = %v, want unavailable", err)
+	}
+}
+
+func TestDefaultDeps_CompleteOccupantAvoidsFleetDB(t *testing.T) {
+	t.Setenv(leadoccupant.EnvOccupantToken, "token")
+	t.Setenv(leadoccupant.EnvLeadAPIURL, "http://lead.invalid")
+	t.Setenv(leadoccupant.EnvWorkspace, "ws")
+	t.Setenv("LOOM_ISSUE_BACKEND", IssueBackendFleetDB)
+	t.Setenv("LOOM_FLEET_DB_URL", "")
+
+	d := DefaultDeps()
+	if got := d.IssueBackend.BackendName(); got != "api" {
+		t.Fatalf("DefaultDeps IssueBackend = %q, want api", got)
 	}
 }
 

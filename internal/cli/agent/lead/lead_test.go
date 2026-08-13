@@ -16,6 +16,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/epicrunner"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	"github.com/tysonthomas9/loomcli/internal/leadoccupant"
 	"github.com/tysonthomas9/loomcli/internal/placement"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/usage"
@@ -293,6 +294,49 @@ func TestOpenLeadSessionStoreSandboxRequiresAPIURL(t *testing.T) {
 	}
 	if called {
 		t.Fatal("sandbox preflight called fleet store opener")
+	}
+}
+
+func TestOpenLeadSessionStorePersistsInitialOccupantToken(t *testing.T) {
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+	t.Setenv(placement.OccupantTokenEnv, "initial-token")
+	t.Setenv(bootstrap.EnvWorkspace, "WS")
+	t.Setenv(envLeadAPIURL, "https://loom.test")
+
+	handle, ws, err := openLeadSessionStore(context.Background())
+	if err != nil {
+		t.Fatalf("openLeadSessionStore: %v", err)
+	}
+	defer handle.Close()
+	if ws != "WS" {
+		t.Fatalf("workspace = %q, want WS", ws)
+	}
+	if got := leadoccupant.ReadToken(); got != "initial-token" {
+		t.Fatalf("persisted initial token = %q, want initial-token", got)
+	}
+}
+
+func TestOpenLeadSessionStoreInitialTokenWriteFailureIsFatal(t *testing.T) {
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+	if err := leadoccupant.WriteToken("stale-token"); err != nil {
+		t.Fatalf("seed stale token: %v", err)
+	}
+	t.Setenv(placement.OccupantTokenEnv, "fresh-token")
+	t.Setenv(bootstrap.EnvWorkspace, "WS")
+	t.Setenv(envLeadAPIURL, "https://loom.test")
+
+	original := writeLeadOccupantToken
+	writeLeadOccupantToken = func(string) error { return errors.New("disk full") }
+	t.Cleanup(func() { writeLeadOccupantToken = original })
+	handle, ws, err := openLeadSessionStore(context.Background())
+	if err == nil {
+		t.Fatal("openLeadSessionStore succeeded after initial token write failure")
+	}
+	if handle != nil || ws != "" || !strings.Contains(err.Error(), "persist initial occupant token") {
+		t.Fatalf("handle/ws/error = %#v/%q/%v", handle, ws, err)
+	}
+	if got := leadoccupant.ReadToken(); got != "stale-token" {
+		t.Fatalf("stale token changed to %q after failed overwrite", got)
 	}
 }
 

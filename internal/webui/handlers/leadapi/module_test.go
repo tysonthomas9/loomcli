@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -241,6 +242,118 @@ func TestLeadAPIAuthHappyPath(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d (%v), want 200", resp.StatusCode, decoded)
 	}
+}
+
+func TestLeadAPIExistingOpAuthFailureGoldens(t *testing.T) {
+	ops := []struct {
+		name          string
+		capability    string
+		capDeniedBody string
+	}{
+		{"agent-get", leadtoken.CapLeadAssignment, "{\"error\":{\"code\":\"cap_denied\",\"message\":\"lead op \\\"agent-get\\\" requires cap \\\"lead:assignment\\\"\",\"retryable\":false}}\n"},
+		{"heartbeat", leadtoken.CapLeadSession, "{\"error\":{\"code\":\"cap_denied\",\"message\":\"lead op \\\"heartbeat\\\" requires cap \\\"lead:session\\\"\",\"retryable\":false}}\n"},
+		{"inbox-claim", leadtoken.CapLeadInbox, "{\"error\":{\"code\":\"cap_denied\",\"message\":\"lead op \\\"inbox-claim\\\" requires cap \\\"lead:inbox\\\"\",\"retryable\":false}}\n"},
+		{"inbox-complete", leadtoken.CapLeadInbox, "{\"error\":{\"code\":\"cap_denied\",\"message\":\"lead op \\\"inbox-complete\\\" requires cap \\\"lead:inbox\\\"\",\"retryable\":false}}\n"},
+		{"inbox-list", leadtoken.CapLeadInbox, "{\"error\":{\"code\":\"cap_denied\",\"message\":\"lead op \\\"inbox-list\\\" requires cap \\\"lead:inbox\\\"\",\"retryable\":false}}\n"},
+		{"session-ensure", leadtoken.CapLeadSession, "{\"error\":{\"code\":\"cap_denied\",\"message\":\"lead op \\\"session-ensure\\\" requires cap \\\"lead:session\\\"\",\"retryable\":false}}\n"},
+		{"session-get", leadtoken.CapLeadSession, "{\"error\":{\"code\":\"cap_denied\",\"message\":\"lead op \\\"session-get\\\" requires cap \\\"lead:session\\\"\",\"retryable\":false}}\n"},
+		{"session-update", leadtoken.CapLeadSession, "{\"error\":{\"code\":\"cap_denied\",\"message\":\"lead op \\\"session-update\\\" requires cap \\\"lead:session\\\"\",\"retryable\":false}}\n"},
+	}
+	for _, op := range ops {
+		t.Run(op.name, func(t *testing.T) {
+			for _, failure := range existingOpAuthFailureGoldens(op.capability, op.capDeniedBody) {
+				t.Run(failure.name, func(t *testing.T) {
+					h := newHarness(t, failure.opts)
+					resp, body := h.postLeadOpRaw(t, failure.pathWS, op.name, failure.token(t, h), []byte("{}"))
+					if resp.StatusCode != failure.wantStatus {
+						t.Fatalf("status = %d, want %d; body = %s", resp.StatusCode, failure.wantStatus, body)
+					}
+					if string(body) != failure.wantBody {
+						t.Fatalf("body mismatch\n got: %q\nwant: %q", body, failure.wantBody)
+					}
+				})
+			}
+		})
+	}
+}
+
+type existingOpAuthFailureGolden struct {
+	name       string
+	opts       harnessOptions
+	pathWS     string
+	token      func(*testing.T, *testHarness) string
+	wantStatus int
+	wantBody   string
+}
+
+func existingOpAuthFailureGoldens(capability, capDeniedBody string) []existingOpAuthFailureGolden {
+	withRecord := harnessOptions{createNode: true, createSession: true}
+	validCap := func(t *testing.T, h *testHarness) string { return h.mintTokenWithCaps(t, capability) }
+	return []existingOpAuthFailureGolden{
+		{"no bearer", withRecord, "WS", func(*testing.T, *testHarness) string { return "" }, http.StatusUnauthorized, "{\"error\":{\"code\":\"unauthenticated\",\"message\":\"Authorization: Bearer \\u003coccupant token\\u003e required\",\"retryable\":false}}\n"},
+		{"invalid bearer", withRecord, "WS", wrongKeyToken, http.StatusUnauthorized, "{\"error\":{\"code\":\"unauthenticated\",\"message\":\"invalid occupant token\",\"retryable\":false}}\n"},
+		{"expired bearer", withRecord, "WS", expiredToken, http.StatusUnauthorized, "{\"error\":{\"code\":\"token_expired\",\"message\":\"occupant token expired\",\"retryable\":true}}\n"},
+		{"wrong workspace", withRecord, "OTHER", validCap, http.StatusUnauthorized, "{\"error\":{\"code\":\"identity_mismatch\",\"message\":\"occupant token is scoped to workspace \\\"WS\\\", not \\\"OTHER\\\"\",\"retryable\":false}}\n"},
+		{"placement absent", harnessOptions{}, "WS", validCap, http.StatusUnauthorized, "{\"error\":{\"code\":\"placement_absent\",\"message\":\"placement record not found\",\"retryable\":false}}\n"},
+		{"placement store unavailable", unavailableStoreOptions(), "WS", validCap, http.StatusServiceUnavailable, "{\"error\":{\"code\":\"unavailable\",\"message\":\"placement store unavailable\",\"retryable\":true}}\n"},
+		{"placement record malformed", malformedPlacementOptions(), "WS", validCap, http.StatusUnauthorized, "{\"error\":{\"code\":\"placement_absent\",\"message\":\"placement record missing node placement\",\"retryable\":false}}\n"},
+		{"placement state rejected", rejectedPlacementOptions(), "WS", validCap, http.StatusUnauthorized, "{\"error\":{\"code\":\"placement_released\",\"message\":\"placement state \\\"releasing\\\" does not allow lead operations\",\"retryable\":false}}\n"},
+		{"generation fenced", withRecord, "WS", func(t *testing.T, h *testHarness) string {
+			return h.mintToken(t, time.Hour, func(claims *leadtoken.OccupantClaims) {
+				claims.Caps = []string{capability}
+				claims.Generation--
+			})
+		}, http.StatusUnauthorized, "{\"error\":{\"code\":\"generation_fenced\",\"message\":\"placement generation no longer owns this lead\",\"retryable\":false}}\n"},
+		{"capability denied", withRecord, "WS", missingCapToken, http.StatusForbidden, capDeniedBody},
+	}
+}
+
+func malformedPlacementOptions() harnessOptions {
+	return harnessOptions{
+		configure: func(h *testHarness, m *Module) {
+			m.store = overrideStore{Store: h.store, nodes: overrideNodeStore{
+				NodeStore: h.store.Nodes(),
+				get: func(context.Context, string, string) (*domain.Node, error) {
+					return &domain.Node{}, nil
+				},
+			}}
+		},
+	}
+}
+
+func rejectedPlacementOptions() harnessOptions {
+	return harnessOptions{
+		configure: func(h *testHarness, m *Module) {
+			m.store = overrideStore{Store: h.store, nodes: overrideNodeStore{
+				NodeStore: h.store.Nodes(),
+				get: func(context.Context, string, string) (*domain.Node, error) {
+					return &domain.Node{Placement: &domain.NodePlacement{State: domain.PlacementStateReleasing}}, nil
+				},
+			}}
+		},
+	}
+}
+
+func (h *testHarness) postLeadOpRaw(t *testing.T, pathWS, op, token string, body []byte) (*http.Response, []byte) {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodPost, h.server.URL+"/api/workspaces/"+pathWS+"/lead/"+op, bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if token != "" {
+		req.Header.Set("Authorization", bearerHeader(token))
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("POST lead op: %v", err)
+	}
+	defer resp.Body.Close()
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read response: %v", err)
+	}
+	return resp, raw
 }
 
 func TestLeadAPITokenExpiredIsRetryable(t *testing.T) {
@@ -706,7 +819,7 @@ func TestLeadAPISessionLookupDoesNotTruncateBeforeActiveFilter(t *testing.T) {
 
 func TestLeadAPIHeartbeatRenewsNearExpiry(t *testing.T) {
 	h := newHarness(t, harnessOptions{createNode: true, createSession: true})
-	wantCaps := []string{leadtoken.CapLeadSession, "lead:custom"}
+	wantCaps := []string{leadtoken.CapLeadSession, leadtoken.CapLeadData, "lead:custom"}
 	token := h.mintToken(t, 29*time.Minute, func(c *leadtoken.OccupantClaims) {
 		c.Caps = append([]string(nil), wantCaps...)
 	})

@@ -90,7 +90,7 @@ func TestProvisionForAgentBuildsCodexDaytonaRequest(t *testing.T) {
 	if req.Resource != DefaultResource() {
 		t.Fatalf("Resource = %+v, want %+v", req.Resource, DefaultResource())
 	}
-	wantCaps := []string{placement.CapLeadSession, placement.CapLeadAssignment, placement.CapLeadInbox}
+	wantCaps := []string{placement.CapLeadSession, placement.CapLeadAssignment, placement.CapLeadInbox, placement.CapLeadData}
 	if len(req.Caps) != len(wantCaps) {
 		t.Fatalf("Caps = %v, want %v", req.Caps, wantCaps)
 	}

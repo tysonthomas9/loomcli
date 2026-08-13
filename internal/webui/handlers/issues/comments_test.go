@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/tysonthomas9/loomcli/internal/types"
+	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
@@ -165,6 +166,28 @@ func TestHandleAddComment_InvalidBody(t *testing.T) {
 	json.NewDecoder(rec.Body).Decode(&resp)
 	if resp.Error != "invalid request body" {
 		t.Errorf("expected 'invalid request body', got: %s", resp.Error)
+	}
+}
+
+func TestHandleAddComment_RequestBodyTooLarge(t *testing.T) {
+	svc := &mockIssueService{}
+	h := handleAddComment(svc)
+	body := `{"text":"` + strings.Repeat("x", handler.MaxRequestBody+1) + `"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/issues/test-123/comments", strings.NewReader(body))
+	req.SetPathValue("id", "test-123")
+	rec := httptest.NewRecorder()
+
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status = %d, want 413; body = %s", rec.Code, rec.Body.String())
+	}
+	var resp CommentResponse
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.Success || resp.Error != "request body too large (max 1MB)" {
+		t.Fatalf("response = %+v, want body-too-large error", resp)
 	}
 }
 

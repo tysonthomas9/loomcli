@@ -39,14 +39,24 @@ type Config struct {
 	// TokenKey is the HS256 signing key shared with driver run tokens
 	// (LOOM_RUN_TOKEN_SIGNING_KEY, or the same ephemeral per-process key).
 	TokenKey []byte
+	Data     *DataRoutes
+	// OpenAuthMode records whether the general serve origin accepts requests
+	// without user authentication. AllowOpenAuthMode is the explicit POC-only
+	// override for mounting occupant data routes in that posture.
+	OpenAuthMode      bool
+	AllowOpenAuthMode bool
 }
 
 // Module serves workspace-scoped lead routes.
 type Module struct {
-	store    store.Store
-	tokenKey []byte
-	ops      map[string]leadOp
-	now      func() time.Time
+	store             store.Store
+	tokenKey          []byte
+	ops               map[string]leadOp
+	data              *DataRoutes
+	openAuthMode      bool
+	allowOpenAuthMode bool
+	limiter           *placementLimiter
+	now               func() time.Time
 
 	sessionEnsureMu sync.Mutex
 }
@@ -55,9 +65,13 @@ type Module struct {
 // Register registers nothing.
 func NewModule(cfg Config) *Module {
 	m := &Module{
-		store:    cfg.Store,
-		tokenKey: resolveTokenKey(cfg.TokenKey),
-		now:      func() time.Time { return time.Now().UTC() },
+		store:             cfg.Store,
+		tokenKey:          resolveTokenKey(cfg.TokenKey),
+		data:              cfg.Data,
+		openAuthMode:      cfg.OpenAuthMode,
+		allowOpenAuthMode: cfg.AllowOpenAuthMode,
+		limiter:           newPlacementLimiter(),
+		now:               func() time.Time { return time.Now().UTC() },
 	}
 	m.ops = map[string]leadOp{
 		"agent-get":      {handler: m.agentGet, cap: leadtoken.CapLeadAssignment},
@@ -89,6 +103,7 @@ func (m *Module) Register(mux *http.ServeMux) {
 		return
 	}
 	mux.HandleFunc("POST /api/workspaces/{ws}/lead/{op}", m.handleOp)
+	m.registerDataRoutes(mux)
 }
 
 type occupantIdentity struct {
@@ -131,52 +146,59 @@ func (m *Module) handleOp(w http.ResponseWriter, r *http.Request) {
 }
 
 func (m *Module) authenticate(w http.ResponseWriter, r *http.Request) (occupantIdentity, bool) {
-	claims, ok := m.parseBearer(w, r)
-	if !ok {
+	id, err := m.authenticateRequest(r.Context(), r)
+	if err != nil {
+		writeDomainOpError(w, err)
 		return occupantIdentity{}, false
+	}
+	return id, true
+}
+
+func (m *Module) authenticateRequest(ctx context.Context, r *http.Request) (occupantIdentity, error) {
+	claims, err := m.parseBearer(r)
+	if err != nil {
+		return occupantIdentity{}, err
 	}
 	ws := r.PathValue("ws")
 	if claims.WorkspaceKey != ws {
-		writeOpError(w, http.StatusUnauthorized, "identity_mismatch",
-			fmt.Sprintf("occupant token is scoped to workspace %q, not %q", claims.WorkspaceKey, ws), false)
-		return occupantIdentity{}, false
+		msg := fmt.Sprintf("occupant token is scoped to workspace %q, not %q", claims.WorkspaceKey, ws)
+		return occupantIdentity{}, newStatusError(http.StatusUnauthorized, "identity_mismatch", msg, false)
 	}
-	node, ok := m.placementForClaims(w, r.Context(), claims)
-	if !ok {
-		return occupantIdentity{}, false
+	node, err := m.placementForClaims(ctx, claims)
+	if err != nil {
+		return occupantIdentity{}, err
 	}
-	return occupantIdentity{claims: claims, node: node}, true
+	return occupantIdentity{claims: claims, node: node}, nil
 }
 
-func (m *Module) parseBearer(w http.ResponseWriter, r *http.Request) (*leadtoken.OccupantClaims, bool) {
+func (m *Module) parseBearer(r *http.Request) (*leadtoken.OccupantClaims, error) {
 	token := bearerCredential(r)
 	if token == "" {
-		writeOpError(w, http.StatusUnauthorized, "unauthenticated", "Authorization: Bearer <occupant token> required", false)
-		return nil, false
+		return nil, newStatusError(http.StatusUnauthorized, "unauthenticated", "Authorization: Bearer <occupant token> required", false)
 	}
 	claims, err := leadtoken.ParseOccupantToken(token, m.tokenKey)
 	switch {
 	case err == nil:
-		return claims, true
+		return claims, nil
 	case leadtoken.IsOccupantTokenExpired(err):
-		writeOpError(w, http.StatusUnauthorized, "token_expired", "occupant token expired", true)
+		return nil, newStatusError(http.StatusUnauthorized, "token_expired", "occupant token expired", true)
 	default:
-		writeOpError(w, http.StatusUnauthorized, "unauthenticated", "invalid occupant token", false)
+		return nil, newStatusError(http.StatusUnauthorized, "unauthenticated", "invalid occupant token", false)
 	}
-	return nil, false
 }
 
-func (m *Module) placementForClaims(w http.ResponseWriter, ctx context.Context, claims *leadtoken.OccupantClaims) (*domain.Node, bool) {
+func (m *Module) placementForClaims(ctx context.Context, claims *leadtoken.OccupantClaims) (*domain.Node, error) {
 	node, err := m.store.Nodes().Get(ctx, claims.WorkspaceKey, claims.PlacementID)
 	if err != nil {
-		writePlacementLookupError(w, err)
-		return nil, false
+		if errors.Is(err, domain.ErrNotFound) {
+			return nil, newStatusError(http.StatusUnauthorized, "placement_absent", "placement record not found", false)
+		}
+		return nil, newStatusError(http.StatusServiceUnavailable, "unavailable", "placement store unavailable", true)
 	}
 	if err := validatePlacementForClaims(node, claims); err != nil {
-		writeDomainOpError(w, err)
-		return nil, false
+		return nil, err
 	}
-	return node, true
+	return node, nil
 }
 
 func validatePlacementForClaims(node *domain.Node, claims *leadtoken.OccupantClaims) error {
@@ -203,15 +225,21 @@ func placementStateAllowsLead(state domain.PlacementState) bool {
 }
 
 func (m *Module) authorizeOp(w http.ResponseWriter, op, capability string, claims *leadtoken.OccupantClaims) bool {
-	if strings.TrimSpace(capability) == "" {
-		writeOpError(w, http.StatusForbidden, "cap_denied", fmt.Sprintf("lead op %q has no configured capability", op), false)
+	if err := hasCapOrError(op, capability, claims); err != nil {
+		writeDomainOpError(w, err)
 		return false
 	}
-	if leadtoken.HasCap(claims, capability) {
-		return true
+	return true
+}
+
+func hasCapOrError(op, capability string, claims *leadtoken.OccupantClaims) error {
+	if strings.TrimSpace(capability) == "" {
+		return newStatusError(http.StatusForbidden, "cap_denied", fmt.Sprintf("lead op %q has no configured capability", op), false)
 	}
-	writeOpError(w, http.StatusForbidden, "cap_denied", fmt.Sprintf("lead op %q requires cap %q", op, capability), false)
-	return false
+	if leadtoken.HasCap(claims, capability) {
+		return nil
+	}
+	return newStatusError(http.StatusForbidden, "cap_denied", fmt.Sprintf("lead op %q requires cap %q", op, capability), false)
 }
 
 func (m *Module) heartbeat(ctx context.Context, ws string, id occupantIdentity, body []byte) (any, error) {
@@ -435,14 +463,6 @@ func writeOpError(w http.ResponseWriter, status int, code, message string, retry
 
 func writeOpErrorDetails(w http.ResponseWriter, status int, code, message string, retryable bool, details map[string]any) {
 	writeJSON(w, status, map[string]any{"error": opError{Code: code, Message: message, Retryable: retryable, Details: details}})
-}
-
-func writePlacementLookupError(w http.ResponseWriter, err error) {
-	if errors.Is(err, domain.ErrNotFound) {
-		writeOpError(w, http.StatusUnauthorized, "placement_absent", "placement record not found", false)
-		return
-	}
-	writeOpError(w, http.StatusServiceUnavailable, "unavailable", "placement store unavailable", true)
 }
 
 func writeReadBodyError(w http.ResponseWriter, err error) {

@@ -186,7 +186,7 @@ func (p *Provisioner) provisionRequest(ws, name, authJSON string, gitToken func(
 		WorkspaceKey:           ws,
 		AgentName:              name,
 		SnapshotRef:            p.snapshotRef,
-		Caps:                   []string{placement.CapLeadSession, placement.CapLeadAssignment, placement.CapLeadInbox},
+		Caps:                   []string{placement.CapLeadSession, placement.CapLeadAssignment, placement.CapLeadInbox, placement.CapLeadData},
 		Resource:               p.resource,
 		Backend:                backendnames.Codex,
 		GitToken:               gitToken,
