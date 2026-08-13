@@ -1,26 +1,11 @@
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Command } from "@tauri-apps/plugin-shell";
+import {
+  terminalRuntimeFailure,
+  type RuntimeStatus,
+} from "./runtime-status";
 import "./styles.css";
-
-type RuntimeInfo = {
-  status?: string;
-  pid?: number;
-  serve_pid?: number;
-  data_dir?: string;
-  url?: string;
-  port?: number;
-  claims_paused?: boolean;
-  started_at?: string;
-  updated_at?: string;
-  error?: string;
-};
-
-type RuntimeStatus = {
-  runtime?: RuntimeInfo;
-  healthy: boolean;
-  error?: string;
-};
 
 type WorkspaceRecovery = {
   route: string;
@@ -190,17 +175,24 @@ async function waitForHealthyRuntime() {
 
   while (Date.now() - startedAt < RUNTIME_TIMEOUT_MS) {
     setStage("starting", "Starting Loom", "Waiting for the workspace runtime.");
+    let status: RuntimeStatus;
     try {
-      const status = await readRuntimeStatus();
-      renderRuntime(status);
-      if (status.healthy && status.runtime?.url) {
-        return status;
-      }
-      lastError = status.error || status.runtime?.error || "";
+      status = await readRuntimeStatus();
     } catch (err) {
       lastError = errorMessage(err);
       renderRuntime({ healthy: false, error: lastError });
+      await delay(RUNTIME_POLL_MS);
+      continue;
     }
+    renderRuntime(status);
+    if (status.healthy && status.runtime?.url) {
+      return status;
+    }
+    const terminalFailure = terminalRuntimeFailure(status);
+    if (terminalFailure) {
+      throw new Error(terminalFailure);
+    }
+    lastError = status.error || status.runtime?.error || "";
     await delay(RUNTIME_POLL_MS);
   }
 
