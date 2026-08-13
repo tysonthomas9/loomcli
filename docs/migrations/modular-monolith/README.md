@@ -19,6 +19,9 @@ sessions are superseded planning records. Their accepted conclusions are
 restated in document 20; anything not restated there has no implementation
 authority. ADRs remain supporting architecture decisions, and per-stack
 records remain implementation evidence rather than alternative plans.
+Every other Phase 10 proposal, candidate list, package target, stack sequence,
+or unresolved alternative is likewise superseded unless document 20 is
+explicitly amended.
 
 - Keep one Go module, one build, and—after supervisor retirement—one Loom application process.
 - Keep fleet-db as the separate durability/control-plane service.
@@ -92,6 +95,7 @@ one-file packages, and 60 one-or-two-file packages.
 | [20-phase-10-consolidated-deep-module-goal.md](20-phase-10-consolidated-deep-module-goal.md) | **Final and normative.** Sole Phase 10 ownership and delivery decision, with the supersession map, ordered twelve-PR manifest, gates, and completion criteria. |
 | [21-phase-10-1-generated-http-contract-evidence.md](21-phase-10-1-generated-http-contract-evidence.md) | Stack 10.1 implementation and proof for the canonical generated Go and TypeScript HTTP contract seam. |
 | [22-phase-10-2-artifacts-run-capture-evidence.md](22-phase-10-2-artifacts-run-capture-evidence.md) | Stack 10.2 implementation and proof for Artifacts evidence policy, Run Capture, Transcript Evidence, and Sessions-path deletion. |
+| [23-phase-10-3-deep-source-control-evidence.md](23-phase-10-3-deep-source-control-evidence.md) | Stack 10.3 implementation and proof for the three Source Control ports, private filesystem adapter, legacy FileOps/GitOps deletion, full gates, and exact-source Files/PR UI journeys. |
 
 ## Scope boundaries
 

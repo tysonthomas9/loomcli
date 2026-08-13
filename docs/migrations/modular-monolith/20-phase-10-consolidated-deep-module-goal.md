@@ -2,7 +2,8 @@
 
 - **Status:** Final approved Phase 10 decision; implementation in progress
 - **Normative authority:** Sole Phase 10 architecture and delivery plan
-- **Implemented:** Stack 10.1 canonical generated HTTP contract seam
+- **Implemented:** Stacks 10.1 canonical generated HTTP contract seam, 10.2
+  Artifacts and Run Capture seam, and 10.3 deep Source Control seam
 - **Decision last amended:** 2026-08-13
 - **Baseline:** Phase 9 Wave 9.41, 158 production packages
 - **Supersedes:** the
@@ -26,6 +27,16 @@ plan. If an earlier discussion, session conclusion, stack order, package
 forecast, or completion criterion conflicts with this document, this document
 wins.
 
+**Final decision:** deliver the twelve ordered stacks in this document, with
+capability-owned behavior behind the named owner and application ports. Reduce
+packages by deleting displaced policy and coordination, not by collapsing
+earned protocol, security, operating-system, runtime, build, or independently
+replaceable adapter seams. Source Control is the single owner of file and Git
+product semantics and exposes Browse, Mutate, and Checkout; its local Git,
+bounded filesystem execution, stack-persistence, forge-publication, and
+credential-brokering mechanisms stay private. This paragraph and the detailed
+decisions below are the complete accepted outcome of the cross-session review.
+
 | Record | Final status | Treatment |
 |---|---|---|
 | This consolidated deep-module goal | **Final and normative** | Use its ownership decisions, twelve-stack manifest, gates, and completion criteria. |
@@ -34,7 +45,7 @@ wins.
 | Separate six-candidate Phase 10 session discussion | **Superseded** | Its accepted conclusions are incorporated here; its separate stack and unresolved alternatives have no authority. |
 | Later outside-package deepening session discussion | **Superseded** | Its deletion-test and package-locality conclusions are incorporated below; its candidate list and package-count targets have no independent authority. |
 | Later Source Control/package-unification session discussion | **Superseded** | Its accepted Git consolidation is incorporated into the Source Control decision below; its alternative boundaries and sequencing have no independent authority. |
-| Any other Phase 10 planning session or proposal not ratified by an explicit amendment to this document | **Superseded** | It may be retained as research or rationale, but it cannot change ownership, interfaces, stack order, gates, or completion criteria. |
+| Every other Phase 10 planning session, proposal, candidate list, package target, or alternative not ratified by an explicit amendment to this document | **Superseded** | It may be retained as research or rationale, but it cannot change ownership, interfaces, stack order, gates, or completion criteria. |
 
 ADRs 0001 through 0005 are accepted supporting decisions, not competing Phase
 10 plans. Per-stack evidence records describe what was implemented and proved;
@@ -42,7 +53,7 @@ they cannot silently revise this architecture. Any future change to the final
 decision requires an explicit amendment here and, when architectural, a new or
 superseding ADR.
 
-### Cross-session consolidation
+### Final cross-session ruling
 
 The two later discussions refine this decision; they do not add new stacks or
 parallel authorities:
@@ -57,8 +68,8 @@ parallel authorities:
   deletion.
 - **Git package convergence:** consumers receive the single Source Control
   module through Browse, Mutate, and Checkout ports. Local Git mechanics,
-  stack persistence, forge publication, and credential brokering remain
-  private adapters because they cross distinct earned seams. Consolidation
+  bounded filesystem execution, stack persistence, forge publication, and
+  credential brokering remain private adapters because they cross distinct earned seams. Consolidation
   removes duplicate public Git/FileOps policy and coordinators; it does not
   flatten those mechanisms into one large implementation package. Stack 10.3
   is the sole delivery authority for this change.
@@ -121,9 +132,11 @@ Workspace supplies Repository References and approved local placement. Source
 Control owns Git semantics, path normalization, containment and symlink safety,
 `.git` and sensitive-path protection, optimistic versions, traversal bounds,
 caching, invalidation, mutation locks, recovery, and the complete publication
-transaction. Its earned private adapters are local Git, stack persistence,
-forge publication, and credential brokering. The old FileOps/GitOps seams and
-WebUI file and Source Control coordinators are deleted.
+transaction. Its earned private adapters are bounded filesystem execution,
+local Git, stack persistence, forge publication, and credential brokering. The
+filesystem adapter is constructed only by serve composition and is not a fourth
+product port. The old FileOps/GitOps seams and WebUI file and Source Control
+coordinators are deleted.
 
 ### Artifacts, Run Capture, and Transcript Evidence
 
@@ -295,6 +308,8 @@ Implementation evidence is recorded per stack. Stack 10.1 is documented in
 [Phase 10.1 generated HTTP contract evidence](21-phase-10-1-generated-http-contract-evidence.md).
 Stack 10.2 is documented in
 [Phase 10.2 Artifacts and Run Capture evidence](22-phase-10-2-artifacts-run-capture-evidence.md).
+Stack 10.3 is documented in
+[Phase 10.3 deep Source Control evidence](23-phase-10-3-deep-source-control-evidence.md).
 
 ## Superseded decisions and alternatives
 
