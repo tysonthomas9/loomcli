@@ -31,7 +31,7 @@ func newGitWorktree(t *testing.T, dir string) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	gitCmd(t, dir, "init", "-q")
+	gitCmd(t, dir, "init", "-q", "--initial-branch=main")
 	gitCmd(t, dir, "config", "user.email", "t@example.test")
 	gitCmd(t, dir, "config", "user.name", "Test")
 	if err := os.WriteFile(filepath.Join(dir, "README.md"), []byte("base\n"), 0o644); err != nil {

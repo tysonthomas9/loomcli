@@ -2,17 +2,20 @@ package driver
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	runtimesettings "github.com/tysonthomas9/loomcli/internal/localsettings"
 	"github.com/tysonthomas9/loomcli/internal/sessions/transcript"
 	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/taskroot"
 )
 
 type changeHandoffOutcome string
@@ -57,6 +60,65 @@ type GitPushProxy struct {
 	LocalSettingsDir string
 }
 
+func (e HostBridgeTaskExecutor) enqueueTaskChangeReview(ctx context.Context, req TaskExecRequest, version int) (string, error) {
+	if e.Store == nil {
+		return "", fmt.Errorf("store required to enqueue review: %w", domain.ErrInvalid)
+	}
+	taskRunID := req.TaskRunID + "-review-v" + strconv.Itoa(version)
+	_, err := e.Store.TaskRuns().Create(ctx, store.TaskRunCreate{
+		WorkspaceKey: req.WorkspaceKey, TaskRunID: taskRunID, TaskID: req.TaskID,
+		ExecutionClass: domain.TaskRunExecutionReview, ChangeSetVersion: version, RootGeneration: 1,
+		WorkerProfileID: req.WorkerProfileID, Runner: req.Runner, RunnerRef: req.RunnerRef,
+		RunnerKind: req.RunnerKind, RunnerEntrypoint: req.RunnerEntrypoint, RunnerVersionID: req.RunnerVersionID,
+		ProviderProfile: req.ProviderProfile, BackendKind: req.ProviderProfile, Status: domain.TaskRunQueued,
+		RuntimeMetadata: map[string]string{
+			"review_of_task_run_id": req.TaskRunID,
+			"change_set_version":    strconv.Itoa(version),
+			"runner_trust_level":    string(taskRunnerTrustLevel(req.RunnerTrustLevel)),
+		},
+		Input: req.Input,
+	})
+	if err != nil && !errors.Is(err, domain.ErrAlreadyExists) {
+		return "", fmt.Errorf("enqueue review TaskRun %s: %w", taskRunID, err)
+	}
+	return taskRunID, nil
+}
+
+func (e HostBridgeTaskExecutor) recordTaskRunExecutionContext(ctx context.Context, req TaskExecRequest, state domain.TaskRunRootState, backendSessionRef, backendKind string) error {
+	lifecycle, ok := store.ResolveTaskRunExecutionContextStore(e.Store)
+	if !ok {
+		return nil
+	}
+	if backendKind == "" {
+		backendKind = e.resolveTaskRunnerBackend(req)
+	}
+	_, err := lifecycle.UpdateTaskRunExecutionContext(ctx, req.WorkspaceKey, req.TaskRunID, store.TaskRunExecutionContextUpdate{
+		RootState: state, RootNodeID: req.NodeID, RootFencingToken: req.FencingToken,
+		BackendKind: backendKind, BackendSessionRef: backendSessionRef,
+	})
+	if err != nil {
+		return fmt.Errorf("persist TaskRun execution context: %w", err)
+	}
+	return nil
+}
+
+// durableTaskRootManifest preserves the root binding after physical cleanup.
+func durableTaskRootManifest(path string) (string, error) {
+	payload, err := os.ReadFile(path) //nolint:gosec // path is the manifest returned by the validated TaskRootResolver.
+	if err != nil {
+		return "", err
+	}
+	var manifest taskroot.RootManifest
+	if err := json.Unmarshal(payload, &manifest); err != nil {
+		return "", fmt.Errorf("decode %s: %w", path, err)
+	}
+	canonical, err := json.Marshal(manifest)
+	if err != nil {
+		return "", fmt.Errorf("encode %s: %w", path, err)
+	}
+	return string(canonical), nil
+}
+
 func (p GitPushProxy) Finalize(ctx context.Context, claim CompletionClaim) (CompletionOutcome, error) {
 	req, inspection, artifactRefs := claim.Request, claim.Inspection, claim.ArtifactRefs
 	if inspection.Outcome == changeHandoffNoChange {
@@ -66,44 +128,52 @@ func (p GitPushProxy) Finalize(ctx context.Context, claim CompletionClaim) (Comp
 		return CompletionOutcome{}, fmt.Errorf("change handoff is not publishable: %s", inspection.Outcome)
 	}
 	if p.Recorder == nil {
-		return CompletionOutcome{}, fmt.Errorf("Task Change Set recorder is required")
+		return CompletionOutcome{}, fmt.Errorf("task change set recorder is required")
 	}
 	token := p.githubToken()
 	entries := make([]domain.TaskChangeSetEntry, 0, len(inspection.Repositories))
 	for _, repository := range inspection.Repositories {
-		existing, err := p.Recorder.GetTaskBranch(ctx, req.WorkspaceKey, req.TaskID, repository.Name)
-		if err == nil && existing.ConfirmedRemoteHeadSHA == repository.HeadSHA {
-			entries = append(entries, changeSetEntry(repository, artifactRefs))
-			continue
-		}
-		if err != nil && !errors.Is(err, domain.ErrNotFound) {
-			return CompletionOutcome{}, fmt.Errorf("read Task Branch %s: %w", repository.Name, err)
-		}
-		if _, err := p.Recorder.PutTaskBranch(ctx, domain.TaskBranch{
-			WorkspaceKey: req.WorkspaceKey, TaskID: req.TaskID, RepoName: repository.Name,
-			BranchName: repository.BranchName, AdmittedBaseSHA: repository.BaseSHA,
-			ExpectedRemoteHeadSHA: repository.HeadSHA,
-		}); err != nil {
-			return CompletionOutcome{}, fmt.Errorf("record expected Task Branch %s: %w", repository.Name, err)
-		}
-		if err := pushAndVerifyRepository(ctx, repository, "origin", token); err != nil {
-			return CompletionOutcome{}, fmt.Errorf("publish repository %s: %w", repository.Name, err)
-		}
-		if _, err := p.Recorder.PutTaskBranch(ctx, domain.TaskBranch{
-			WorkspaceKey: req.WorkspaceKey, TaskID: req.TaskID, RepoName: repository.Name,
-			BranchName: repository.BranchName, AdmittedBaseSHA: repository.BaseSHA,
-			ExpectedRemoteHeadSHA: repository.HeadSHA, ConfirmedRemoteHeadSHA: repository.HeadSHA,
-		}); err != nil {
-			return CompletionOutcome{}, fmt.Errorf("confirm Task Branch %s: %w", repository.Name, err)
+		if err := p.publishRepository(ctx, req, repository, token); err != nil {
+			return CompletionOutcome{}, err
 		}
 		entries = append(entries, changeSetEntry(repository, artifactRefs))
 	}
+	return p.recordChangeSet(ctx, req, entries)
+}
+
+func (p GitPushProxy) publishRepository(ctx context.Context, req TaskExecRequest, repository changedRepository, token string) error {
+	existing, err := p.Recorder.GetTaskBranch(ctx, req.WorkspaceKey, req.TaskID, repository.Name)
+	if err == nil && existing.ConfirmedRemoteHeadSHA == repository.HeadSHA {
+		return nil
+	}
+	if err != nil && !errors.Is(err, domain.ErrNotFound) {
+		return fmt.Errorf("read Task Branch %s: %w", repository.Name, err)
+	}
+	branch := domain.TaskBranch{
+		WorkspaceKey: req.WorkspaceKey, TaskID: req.TaskID, RepoName: repository.Name,
+		BranchName: repository.BranchName, AdmittedBaseSHA: repository.BaseSHA,
+		ExpectedRemoteHeadSHA: repository.HeadSHA,
+	}
+	if _, err := p.Recorder.PutTaskBranch(ctx, branch); err != nil {
+		return fmt.Errorf("record expected Task Branch %s: %w", repository.Name, err)
+	}
+	if err := pushAndVerifyRepository(ctx, repository, "origin", token); err != nil {
+		return fmt.Errorf("publish repository %s: %w", repository.Name, err)
+	}
+	branch.ConfirmedRemoteHeadSHA = repository.HeadSHA
+	if _, err := p.Recorder.PutTaskBranch(ctx, branch); err != nil {
+		return fmt.Errorf("confirm Task Branch %s: %w", repository.Name, err)
+	}
+	return nil
+}
+
+func (p GitPushProxy) recordChangeSet(ctx context.Context, req TaskExecRequest, entries []domain.TaskChangeSetEntry) (CompletionOutcome, error) {
 	changeSet := domain.TaskChangeSet{WorkspaceKey: req.WorkspaceKey, TaskID: req.TaskID, Version: 1, Entries: entries}
 	if existing, err := p.Recorder.GetTaskChangeSet(ctx, req.WorkspaceKey, req.TaskID, 1); err == nil {
 		if taskChangeSetEntriesEqual(existing.Entries, entries) {
 			return CompletionOutcome{Outcome: changeHandoffReadyToReview, ChangeSet: existing}, nil
 		}
-		return CompletionOutcome{}, fmt.Errorf("Task Change Set version 1 already exists with different entries")
+		return CompletionOutcome{}, fmt.Errorf("task change set version 1 already exists with different entries")
 	} else if !errors.Is(err, domain.ErrNotFound) {
 		return CompletionOutcome{}, fmt.Errorf("read Task Change Set version 1: %w", err)
 	}

@@ -345,7 +345,7 @@ func createRepository(t *testing.T, workspace, name string) (string, string) {
 
 func run(t *testing.T, dir, name string, args ...string) {
 	t.Helper()
-	cmd := exec.Command(name, args...)
+	cmd := exec.Command(name, args...) //nolint:norawexec // test helper exercises real Git worktree lifecycle behavior.
 	cmd.Dir = dir
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("%s %v: %v\n%s", name, args, err, output)
@@ -354,7 +354,7 @@ func run(t *testing.T, dir, name string, args ...string) {
 
 func gitOutput(t *testing.T, dir string, args ...string) string {
 	t.Helper()
-	cmd := exec.Command("git", args...)
+	cmd := exec.Command("git", args...) //nolint:norawexec // test helper exercises real Git worktree lifecycle behavior.
 	cmd.Dir = dir
 	output, err := cmd.CombinedOutput()
 	if err != nil {

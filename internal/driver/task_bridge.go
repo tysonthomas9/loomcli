@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -14,7 +13,6 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
-	runtimesettings "github.com/tysonthomas9/loomcli/internal/localsettings"
 	"github.com/tysonthomas9/loomcli/internal/sessions/transcript"
 	"github.com/tysonthomas9/loomcli/internal/stackstore"
 	"github.com/tysonthomas9/loomcli/internal/store"
@@ -468,51 +466,6 @@ func (e HostBridgeTaskExecutor) ExecuteTask(ctx context.Context, req TaskExecReq
 	return e.finalizeAndApplyPatch(ctx, req, runnerResult, patch, result)
 }
 
-func (e HostBridgeTaskExecutor) enqueueTaskChangeReview(ctx context.Context, req TaskExecRequest, version int) (string, error) {
-	if e.Store == nil {
-		return "", fmt.Errorf("store required to enqueue review: %w", domain.ErrInvalid)
-	}
-	taskRunID := req.TaskRunID + "-review-v" + strconv.Itoa(version)
-	_, err := e.Store.TaskRuns().Create(ctx, store.TaskRunCreate{
-		WorkspaceKey: req.WorkspaceKey, TaskRunID: taskRunID, TaskID: req.TaskID,
-		ExecutionClass: domain.TaskRunExecutionReview, ChangeSetVersion: version, RootGeneration: 1,
-		WorkerProfileID: req.WorkerProfileID, Runner: req.Runner, RunnerRef: req.RunnerRef,
-		RunnerKind: req.RunnerKind, RunnerEntrypoint: req.RunnerEntrypoint, RunnerVersionID: req.RunnerVersionID,
-		ProviderProfile: req.ProviderProfile, BackendKind: req.ProviderProfile, Status: domain.TaskRunQueued,
-		RuntimeMetadata: map[string]string{
-			"review_of_task_run_id": req.TaskRunID,
-			"change_set_version":    strconv.Itoa(version),
-			// Preserve the server-admitted trust of the exact runner version.
-			// Dropping this stamp makes the review look untrusted at claim time
-			// even though it reuses the implementation runner identity.
-			"runner_trust_level": string(taskRunnerTrustLevel(req.RunnerTrustLevel)),
-		},
-		Input: req.Input,
-	})
-	if err != nil && !errors.Is(err, domain.ErrAlreadyExists) {
-		return "", fmt.Errorf("enqueue review TaskRun %s: %w", taskRunID, err)
-	}
-	return taskRunID, nil
-}
-
-func (e HostBridgeTaskExecutor) recordTaskRunExecutionContext(ctx context.Context, req TaskExecRequest, state domain.TaskRunRootState, backendSessionRef, backendKind string) error {
-	lifecycle, ok := store.ResolveTaskRunExecutionContextStore(e.Store)
-	if !ok {
-		return nil
-	}
-	if backendKind == "" {
-		backendKind = e.resolveTaskRunnerBackend(req)
-	}
-	_, err := lifecycle.UpdateTaskRunExecutionContext(ctx, req.WorkspaceKey, req.TaskRunID, store.TaskRunExecutionContextUpdate{
-		RootState: state, RootNodeID: req.NodeID, RootFencingToken: req.FencingToken,
-		BackendKind: backendKind, BackendSessionRef: backendSessionRef,
-	})
-	if err != nil {
-		return fmt.Errorf("persist TaskRun execution context: %w", err)
-	}
-	return nil
-}
-
 func (e HostBridgeTaskExecutor) bridgeRunner(ctx context.Context, req TaskExecRequest) (func() (bridgeTaskRunnerResult, error), error) {
 	command, err := e.command()
 	if err != nil {
@@ -581,7 +534,7 @@ func (e HostBridgeTaskExecutor) runBuiltInFlueWorkflow(ctx context.Context, req 
 	}
 	baseEnv := taskRunnerBaseEnvForRequest(req, os.Environ())
 	env := append([]string{}, baseEnv...)
-	env = append(env, e.taskRunnerEnv(req, string(input), baseEnv)...)
+	env = append(env, e.taskRunnerEnv(req, string(input))...)
 	cmd.Env = env
 	cmd.Stdin = bytes.NewReader(input)
 	var stdout, stderr bytes.Buffer
@@ -641,7 +594,7 @@ func (e HostBridgeTaskExecutor) runCommand(ctx context.Context, req TaskExecRequ
 	}
 	baseEnv := taskRunnerBaseEnvForRequest(req, os.Environ())
 	env := append([]string{}, baseEnv...)
-	env = append(env, e.taskRunnerEnv(req, string(input), baseEnv)...)
+	env = append(env, e.taskRunnerEnv(req, string(input))...)
 	cmd.Env = env
 	cmd.Stdin = bytes.NewReader(input)
 	var stdout, stderr bytes.Buffer
@@ -870,167 +823,6 @@ process.once('SIGTERM', () => {
 });
 `
 
-func (e HostBridgeTaskExecutor) taskRunnerEnv(req TaskExecRequest, requestJSON string, inherited ...[]string) []string {
-	env := []string{
-		"LOOM_TASK_RUN_REQUEST_JSON=" + requestJSON,
-		"LOOM_WORKTREE_PATH=" + strings.TrimSpace(e.WorktreePath),
-		"LOOM_DRIVER_WORKSPACE=" + req.WorkspaceKey,
-		"LOOM_DRIVER_RUN_ID=" + req.DriverRunID,
-		"LOOM_DRIVER_STEP_ID=" + req.DriverStepID,
-		"LOOM_PARENT_SESSION_ID=" + req.ParentSessionID,
-		"LOOM_TASK_RUN_ID=" + req.TaskRunID,
-		"LOOM_TASK_ID=" + req.TaskID,
-		"LOOM_TASK_RUN_PARENT_SESSION_ID=" + req.ParentSessionID,
-		"LOOM_TASK_RUN_WORKER_PROFILE_ID=" + req.WorkerProfileID,
-		"LOOM_TASK_RUNNER=" + req.Runner,
-		"LOOM_TASK_RUNNER_REF=" + req.RunnerRef,
-		"LOOM_TASK_RUNNER_KIND=" + req.RunnerKind,
-		"LOOM_TASK_RUNNER_ENTRYPOINT=" + req.RunnerEntrypoint,
-		"LOOM_TASK_RUNNER_DRIVER_VERSION_ID=" + req.RunnerVersionID,
-		"LOOM_TASK_RUNNER_TRUST_LEVEL=" + string(taskRunnerTrustLevel(req.RunnerTrustLevel)),
-		"LOOM_TASK_RUN_PROVIDER_PROFILE=" + req.ProviderProfile,
-		"LOOM_TASK_RUN_NODE_ID=" + req.NodeID,
-		"LOOM_TASK_RUN_LEASE_ID=" + req.LeaseID,
-		"LOOM_TASK_RUN_LEASE_TOKEN=" + req.LeaseToken,
-		fmt.Sprintf("LOOM_TASK_RUN_FENCING_TOKEN=%d", req.FencingToken),
-		"LOOM_TASK_RUN_RUNNER_PLACEMENT_JSON=" + taskRunPlacementJSON(req.RunnerPlacement),
-		"LOOM_TASK_RUN_SANDBOX_PLACEMENT_JSON=" + taskRunPlacementJSON(req.SandboxPlacement),
-	}
-	if apiBaseURL := strings.TrimSpace(e.APIBaseURL); apiBaseURL != "" {
-		env = append(env, "LOOM_TASK_RUN_API_URL="+apiBaseURL)
-	}
-	if manifest := strings.TrimSpace(e.taskRootManifest); manifest != "" {
-		env = append(env, "LOOM_TASK_ROOT_MANIFEST="+manifest)
-	}
-	// Stacked task: tell the runner to push the canonical branch on the
-	// predecessor base instead of opening an independent loom/<taskid> PR.
-	if e.stackBinding != nil {
-		env = append(env,
-			"LOOM_TASK_RUN_STACKED=1",
-			"LOOM_TASK_RUN_STACK_ID="+e.stackBinding.StackID,
-			"LOOM_TASK_RUN_OUTPUT_BRANCH="+e.stackBinding.OutputBranch,
-			"LOOM_TASK_RUN_BASE_REF="+e.stackBinding.BaseRef,
-		)
-	}
-	env = append(env, e.taskRunnerBundleEnv(req)...)
-	if isLocalTaskRunner(req) {
-		env = append(env, TaskRunnerBackendEnv+"="+e.resolveTaskRunnerBackend(req))
-		existing := env
-		if len(inherited) > 0 && len(inherited[0]) > 0 {
-			existing = append(append([]string{}, inherited[0]...), env...)
-		}
-		env = append(env, e.localTaskRunnerSettingsEnv(existing)...)
-	}
-	return env
-}
-
-func (e HostBridgeTaskExecutor) localTaskRunnerSettingsEnv(existing []string) []string {
-	dir := strings.TrimSpace(e.LocalSettingsDir)
-	if dir == "" {
-		return nil
-	}
-	settings, err := runtimesettings.Load(dir)
-	if err != nil {
-		return nil
-	}
-	out := make([]string, 0, 1)
-	if model := strings.TrimSpace(settings.LocalTaskRunner.OpenCodeModel); model != "" {
-		out = append(out, "LOOM_OPENCODE_MODEL="+model)
-	}
-	return out
-}
-
-func envHasAny(env []string, names ...string) bool {
-	for _, entry := range env {
-		name, value, ok := strings.Cut(entry, "=")
-		if !ok || strings.TrimSpace(value) == "" {
-			continue
-		}
-		for _, want := range names {
-			if name == want {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-// resolveTaskRunnerBackend resolves the backend CLI for the local task runner,
-// mirroring service.GetWorkspaceBackend precedence (§4.3): a per-agent override
-// (the worker's agent row Backend) wins, else DaemonProfile.AgentBackend, else
-// the default codex. The store is consulted best-effort; any lookup failure
-// falls through to the next source so the runner always receives a backend.
-func (e HostBridgeTaskExecutor) resolveTaskRunnerBackend(req TaskExecRequest) string {
-	if e.Store == nil {
-		return defaultTaskRunnerBackend
-	}
-	ctx := context.Background()
-	if worker := strings.TrimSpace(req.WorkerProfileID); worker != "" {
-		if agent, err := e.Store.Agents().Get(ctx, req.WorkspaceKey, worker); err == nil && agent != nil {
-			if backend := strings.TrimSpace(agent.Backend); backend != "" {
-				return backend
-			}
-		}
-	}
-	if profile, err := e.Store.Daemon().Get(ctx, req.WorkspaceKey); err == nil && profile != nil {
-		if backend := strings.TrimSpace(profile.AgentBackend); backend != "" {
-			return backend
-		}
-	}
-	return defaultTaskRunnerBackend
-}
-
-func (e HostBridgeTaskExecutor) taskRunnerBundleEnv(req TaskExecRequest) []string {
-	if e.Store == nil || strings.TrimSpace(req.RunnerVersionID) == "" {
-		return nil
-	}
-	ctx := context.Background()
-	version, err := e.Store.DriverVersions().Get(ctx, req.WorkspaceKey, req.RunnerVersionID)
-	if err != nil || version.BundleRef == "" {
-		return nil
-	}
-	// The bundle is staged at registration under <driver-base>/.loom/drivers/<version>. Try the
-	// current WorktreePath first (covers callers that stage the bundle into the worktree, incl. the
-	// productionize_runner tests), then fall back to the retained driver base — necessary once
-	// WorktreeResolver has swapped WorktreePath for a per-run target-repo worktree (which lacks the
-	// bundle). Without this fall-back every bundled local-task-runner fails with
-	// task_runner_invoker_failed: "flue-workflow runner requires LOOM_TASK_RUNNER_SERVER_PATH".
-	for _, base := range []string{strings.TrimSpace(e.WorktreePath), strings.TrimSpace(e.driverBundleBaseDir)} {
-		if base == "" {
-			continue
-		}
-		bundleRoot, err := safeBundleRoot(base, version.BundleRef)
-		if err != nil {
-			continue
-		}
-		manifest, serverPath, err := verifyBundleManifest(bundleRoot, version.BundleDigest)
-		if err != nil {
-			continue
-		}
-		encoded, err := json.Marshal(manifest)
-		if err != nil {
-			continue
-		}
-		return []string{
-			"LOOM_TASK_RUNNER_BUNDLE_ROOT=" + bundleRoot,
-			"LOOM_TASK_RUNNER_SERVER_PATH=" + serverPath,
-			"LOOM_TASK_RUNNER_MANIFEST_JSON=" + string(encoded),
-		}
-	}
-	return nil
-}
-
-func taskRunPlacementJSON(placement domain.TaskRunPlacement) string {
-	if placement.Empty() {
-		return "{}"
-	}
-	b, err := json.Marshal(placement)
-	if err != nil {
-		return "{}"
-	}
-	return string(b)
-}
-
 func (e HostBridgeTaskExecutor) finalizeAndApplyPatch(ctx context.Context, req TaskExecRequest, runner bridgeTaskRunnerResult, patch []byte, result TaskExecResult) (TaskExecResult, error) {
 	if e.Store == nil {
 		return TaskExecResult{}, fmt.Errorf("store required for patch artifact finalization: %w", domain.ErrInvalid)
@@ -1149,26 +941,6 @@ func firstNonNilStrings(values ...[]string) []string {
 		}
 	}
 	return nil
-}
-
-// durableTaskRootManifest captures the exact repository/root binding before
-// the runner starts. The Root Manager removes the physical manifest when a
-// successful run is released, so the compact JSON copy in TaskRun runtime
-// metadata is the durable audit record used by handoff and review evidence.
-func durableTaskRootManifest(path string) (string, error) {
-	payload, err := os.ReadFile(path)
-	if err != nil {
-		return "", err
-	}
-	var manifest taskroot.RootManifest
-	if err := json.Unmarshal(payload, &manifest); err != nil {
-		return "", fmt.Errorf("decode %s: %w", path, err)
-	}
-	canonical, err := json.Marshal(manifest)
-	if err != nil {
-		return "", fmt.Errorf("encode %s: %w", path, err)
-	}
-	return string(canonical), nil
 }
 
 func firstNonEmpty(values ...string) string {

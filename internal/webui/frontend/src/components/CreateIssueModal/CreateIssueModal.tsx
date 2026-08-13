@@ -55,7 +55,9 @@ export function CreateIssueModal({
   const [title, setTitle] = useState("");
   const [issueType, setIssueType] = useState<IssueType>("task");
   const [sourceRepo, setSourceRepo] = useState("");
-  const [selectedRepositories, setSelectedRepositories] = useState<string[]>([]);
+  const [selectedRepositories, setSelectedRepositories] = useState<string[]>(
+    [],
+  );
   const [parentEpic, setParentEpic] = useState("");
   const [status, setStatus] = useState<"open" | "deferred">("open");
   const [assignee, setAssignee] = useState("");
@@ -385,7 +387,8 @@ export function CreateIssueModal({
             <fieldset className={styles.repositorySet}>
               <legend className={styles.label}>Additional repositories</legend>
               <p className={styles.hint}>
-                The task agent starts with exactly these repositories plus the primary repository.
+                The task agent starts with exactly these repositories plus the
+                primary repository.
               </p>
               <div className={styles.repositoryOptions}>
                 {repoOptions

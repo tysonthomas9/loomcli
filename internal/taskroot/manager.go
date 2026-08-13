@@ -95,19 +95,31 @@ func (m *LocalGitManager) Prepare(ctx context.Context, spec RootSpec) (RootManif
 		return RootManifest{}, err
 	}
 	if existing, found, err := matchingManifest(ctx, rootPath, spec, repositories); found || err != nil {
-		if err == nil && found && existing.State == "retained" {
-			existing.State = "ready"
-			existing.RetainUntil = nil
-			if err := publishManifest(rootPath, existing); err != nil {
-				return RootManifest{}, err
-			}
-		}
-		return existing, err
+		return reactivateManifest(rootPath, existing, found, err)
 	}
 	if err := os.MkdirAll(rootPath, 0o700); err != nil {
 		return RootManifest{}, fmt.Errorf("create TaskRun Root: %w", err)
 	}
+	manifest := newRootManifest(rootPath, spec, repositories)
+	if err := provisionRoot(ctx, rootPath, repositories, manifest); err != nil {
+		return RootManifest{}, err
+	}
+	return manifest, nil
+}
 
+func reactivateManifest(rootPath string, manifest RootManifest, found bool, matchErr error) (RootManifest, error) {
+	if matchErr != nil || !found || manifest.State != "retained" {
+		return manifest, matchErr
+	}
+	manifest.State = "ready"
+	manifest.RetainUntil = nil
+	if err := publishManifest(rootPath, manifest); err != nil {
+		return RootManifest{}, err
+	}
+	return manifest, nil
+}
+
+func newRootManifest(rootPath string, spec RootSpec, repositories []RepositorySpec) RootManifest {
 	manifest := RootManifest{
 		Version:      ManifestVersion,
 		TaskRunID:    spec.TaskRunID,
@@ -128,76 +140,57 @@ func (m *LocalGitManager) Prepare(ctx context.Context, spec RootSpec) (RootManif
 			Detached:   repository.Detached,
 		})
 	}
+	return manifest
+}
+
+func provisionRoot(ctx context.Context, rootPath string, repositories []RepositorySpec, manifest RootManifest) error {
 	journal := manifest
 	journal.State = "provisioning"
 	if err := writeManifest(rootPath, ".provisioning.json", journal); err != nil {
 		_ = os.RemoveAll(rootPath)
-		return RootManifest{}, err
+		return err
 	}
 	created := make([]RepositoryManifest, 0, len(repositories))
-	rollback := func() {
-		for i := len(created) - 1; i >= 0; i-- {
-			_, _ = runGit(ctx, created[i].SourcePath, "worktree", "remove", "--force", created[i].Path)
-			_, _ = runGit(ctx, created[i].SourcePath, "worktree", "prune")
-		}
-		_ = os.RemoveAll(rootPath)
-	}
-
 	for index, repository := range repositories {
 		entry := manifest.Repositories[index]
 		if err := addWorktree(ctx, repository, entry.Path); err != nil {
-			rollback()
-			return RootManifest{}, fmt.Errorf("provision repository %q: %w", repository.Name, err)
+			rollbackRoot(ctx, rootPath, created)
+			return fmt.Errorf("provision repository %q: %w", repository.Name, err)
 		}
 		created = append(created, entry)
 	}
 	if err := publishManifest(rootPath, manifest); err != nil {
-		rollback()
-		return RootManifest{}, err
+		rollbackRoot(ctx, rootPath, created)
+		return err
 	}
 	if err := os.Remove(filepath.Join(rootPath, ".provisioning.json")); err != nil && !errors.Is(err, os.ErrNotExist) {
-		rollback()
-		return RootManifest{}, fmt.Errorf("remove TaskRun Root provisioning journal: %w", err)
+		rollbackRoot(ctx, rootPath, created)
+		return fmt.Errorf("remove TaskRun Root provisioning journal: %w", err)
 	}
-	return manifest, nil
+	return nil
+}
+
+func rollbackRoot(ctx context.Context, rootPath string, created []RepositoryManifest) {
+	for index := len(created) - 1; index >= 0; index-- {
+		_, _ = runGit(ctx, created[index].SourcePath, "worktree", "remove", "--force", created[index].Path)
+		_, _ = runGit(ctx, created[index].SourcePath, "worktree", "prune")
+	}
+	_ = os.RemoveAll(rootPath)
 }
 
 func matchingManifest(ctx context.Context, rootPath string, spec RootSpec, repositories []RepositorySpec) (RootManifest, bool, error) {
-	data, err := os.ReadFile(filepath.Join(rootPath, "manifest.json"))
+	manifest, err := readManifest(filepath.Join(rootPath, "manifest.json"))
 	if errors.Is(err, os.ErrNotExist) {
 		return RootManifest{}, false, nil
 	}
 	if err != nil {
 		return RootManifest{}, true, fmt.Errorf("read existing TaskRun Root Manifest: %w", err)
 	}
-	var manifest RootManifest
-	if err := json.Unmarshal(data, &manifest); err != nil {
-		return RootManifest{}, true, fmt.Errorf("decode existing TaskRun Root Manifest: %w", err)
+	if err := validateManifestIdentity(manifest, spec); err != nil {
+		return RootManifest{}, true, err
 	}
-	if manifest.Version != ManifestVersion || manifest.TaskRunID != spec.TaskRunID || manifest.Generation != spec.Generation {
-		return RootManifest{}, true, fmt.Errorf("existing TaskRun Root identity does not match requested lease")
-	}
-	if manifest.FencingToken > spec.FencingToken {
-		return RootManifest{}, true, fmt.Errorf("existing TaskRun Root fence %d is newer than requested fence %d: %w", manifest.FencingToken, spec.FencingToken, ErrStaleLease)
-	}
-	if len(manifest.Repositories) != len(repositories) {
-		return RootManifest{}, true, fmt.Errorf("existing TaskRun Root repository set does not match request")
-	}
-	for index, requested := range repositories {
-		existing := manifest.Repositories[index]
-		if existing.Name != requested.Name || existing.SourcePath != requested.SourcePath || existing.BranchName != requested.BranchName || existing.BaseSHA != requested.BaseSHA || existing.Detached != requested.Detached {
-			return RootManifest{}, true, fmt.Errorf("existing TaskRun Root repository %q does not match request", requested.Name)
-		}
-		if existing.Path != filepath.Join(rootPath, requested.Name) || !pathContains(rootPath, existing.Path) {
-			return RootManifest{}, true, fmt.Errorf("existing TaskRun Root repository %q path is invalid", requested.Name)
-		}
-		if _, err := os.Stat(filepath.Join(existing.Path, ".git")); err != nil {
-			return RootManifest{}, true, fmt.Errorf("existing TaskRun Root repository %q is unavailable: %w", requested.Name, err)
-		}
-		branch, err := runGit(ctx, existing.Path, "branch", "--show-current")
-		if err != nil || (!requested.Detached && branch != requested.BranchName) || (requested.Detached && branch != "") {
-			return RootManifest{}, true, fmt.Errorf("existing TaskRun Root repository %q branch changed", requested.Name)
-		}
+	if err := validateManifestRepositories(ctx, rootPath, manifest.Repositories, repositories); err != nil {
+		return RootManifest{}, true, err
 	}
 	if manifest.FencingToken < spec.FencingToken {
 		manifest.FencingToken = spec.FencingToken
@@ -206,6 +199,45 @@ func matchingManifest(ctx context.Context, rootPath string, spec RootSpec, repos
 		}
 	}
 	return manifest, true, nil
+}
+
+func validateManifestIdentity(manifest RootManifest, spec RootSpec) error {
+	if manifest.Version != ManifestVersion || manifest.TaskRunID != spec.TaskRunID || manifest.Generation != spec.Generation {
+		return fmt.Errorf("existing TaskRun Root identity does not match requested lease")
+	}
+	if manifest.FencingToken > spec.FencingToken {
+		return fmt.Errorf("existing TaskRun Root fence %d is newer than requested fence %d: %w", manifest.FencingToken, spec.FencingToken, ErrStaleLease)
+	}
+	return nil
+}
+
+func validateManifestRepositories(ctx context.Context, rootPath string, existing []RepositoryManifest, requested []RepositorySpec) error {
+	if len(existing) != len(requested) {
+		return fmt.Errorf("existing TaskRun Root repository set does not match request")
+	}
+	for index := range requested {
+		if err := validateManifestRepository(ctx, rootPath, existing[index], requested[index]); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateManifestRepository(ctx context.Context, rootPath string, existing RepositoryManifest, requested RepositorySpec) error {
+	if existing.Name != requested.Name || existing.SourcePath != requested.SourcePath || existing.BranchName != requested.BranchName || existing.BaseSHA != requested.BaseSHA || existing.Detached != requested.Detached {
+		return fmt.Errorf("existing TaskRun Root repository %q does not match request", requested.Name)
+	}
+	if existing.Path != filepath.Join(rootPath, requested.Name) || !pathContains(rootPath, existing.Path) {
+		return fmt.Errorf("existing TaskRun Root repository %q path is invalid", requested.Name)
+	}
+	if _, err := os.Stat(filepath.Join(existing.Path, ".git")); err != nil {
+		return fmt.Errorf("existing TaskRun Root repository %q is unavailable: %w", requested.Name, err)
+	}
+	branch, err := runGit(ctx, existing.Path, "branch", "--show-current")
+	if err != nil || (!requested.Detached && branch != requested.BranchName) || (requested.Detached && branch != "") {
+		return fmt.Errorf("existing TaskRun Root repository %q branch changed", requested.Name)
+	}
+	return nil
 }
 
 func (m *LocalGitManager) Inventory(_ context.Context) (Inventory, error) {
@@ -225,12 +257,8 @@ func (m *LocalGitManager) Inventory(_ context.Context) (Inventory, error) {
 		if !entry.IsDir() || strings.HasPrefix(entry.Name(), ".") {
 			continue
 		}
-		data, err := os.ReadFile(filepath.Join(root, entry.Name(), "manifest.json"))
+		manifest, err := readManifest(filepath.Join(root, entry.Name(), "manifest.json"))
 		if err != nil {
-			continue
-		}
-		var manifest RootManifest
-		if json.Unmarshal(data, &manifest) != nil {
 			continue
 		}
 		inventory.Roots++
@@ -248,16 +276,12 @@ func (m *LocalGitManager) Release(ctx context.Context, lease RootLease, policy R
 		return fmt.Errorf("task_run_id %q is not a safe path segment", lease.TaskRunID)
 	}
 	rootPath := filepath.Join(root, lease.TaskRunID)
-	data, err := os.ReadFile(filepath.Join(rootPath, "manifest.json"))
+	manifest, err := readManifest(filepath.Join(rootPath, "manifest.json"))
 	if errors.Is(err, os.ErrNotExist) {
 		return nil
 	}
 	if err != nil {
 		return fmt.Errorf("read TaskRun Root Manifest for release: %w", err)
-	}
-	var manifest RootManifest
-	if err := json.Unmarshal(data, &manifest); err != nil {
-		return fmt.Errorf("decode TaskRun Root Manifest for release: %w", err)
 	}
 	if manifest.TaskRunID != lease.TaskRunID || manifest.Generation != lease.Generation || manifest.FencingToken != lease.FencingToken {
 		return ErrStaleLease
@@ -304,52 +328,67 @@ func (m *LocalGitManager) Reconcile(ctx context.Context) error {
 		if !entry.IsDir() || strings.HasPrefix(entry.Name(), ".") || !repositoryNamePattern.MatchString(entry.Name()) {
 			continue
 		}
-		rootPath := filepath.Join(root, entry.Name())
-		manifestPath := filepath.Join(rootPath, "manifest.json")
-		if _, err := os.Stat(manifestPath); err == nil {
-			manifest, err := readManifest(manifestPath)
-			if err != nil {
-				return err
-			}
-			if manifest.State == "retained" && manifest.RetainUntil != nil && !manifest.RetainUntil.After(time.Now()) {
-				if err := m.Release(ctx, RootLease{TaskRunID: manifest.TaskRunID, Generation: manifest.Generation, FencingToken: manifest.FencingToken}, RetentionPolicy{}); err != nil {
-					return err
-				}
-				continue
-			}
-			for _, repository := range manifest.Repositories {
-				if _, err := runGit(ctx, repository.SourcePath, "worktree", "prune"); err != nil {
-					return fmt.Errorf("reconcile repository %q registrations: %w", repository.Name, err)
-				}
-			}
-			continue
-		} else if !errors.Is(err, os.ErrNotExist) {
+		if err := m.reconcileRoot(ctx, filepath.Join(root, entry.Name())); err != nil {
 			return err
 		}
-		journalPath := filepath.Join(rootPath, ".provisioning.json")
-		journal, err := readManifest(journalPath)
-		if errors.Is(err, os.ErrNotExist) {
-			if removeErr := os.Remove(rootPath); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
-				return fmt.Errorf("remove empty orphan TaskRun Root: %w", removeErr)
-			}
-			continue
+	}
+	return nil
+}
+
+func (m *LocalGitManager) reconcileRoot(ctx context.Context, rootPath string) error {
+	manifest, err := readManifest(filepath.Join(rootPath, "manifest.json"))
+	if err == nil {
+		return m.reconcileManifest(ctx, manifest)
+	}
+	if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return reconcileOrphan(ctx, rootPath)
+}
+
+func (m *LocalGitManager) reconcileManifest(ctx context.Context, manifest RootManifest) error {
+	if manifest.State == "retained" && manifest.RetainUntil != nil && !manifest.RetainUntil.After(time.Now()) {
+		return m.Release(ctx, RootLease{
+			TaskRunID: manifest.TaskRunID, Generation: manifest.Generation, FencingToken: manifest.FencingToken,
+		}, RetentionPolicy{})
+	}
+	for _, repository := range manifest.Repositories {
+		if _, err := runGit(ctx, repository.SourcePath, "worktree", "prune"); err != nil {
+			return fmt.Errorf("reconcile repository %q registrations: %w", repository.Name, err)
 		}
-		if err != nil {
+	}
+	return nil
+}
+
+func reconcileOrphan(ctx context.Context, rootPath string) error {
+	journal, err := readManifest(filepath.Join(rootPath, ".provisioning.json"))
+	if errors.Is(err, os.ErrNotExist) {
+		if removeErr := os.Remove(rootPath); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
+			return fmt.Errorf("remove empty orphan TaskRun Root: %w", removeErr)
+		}
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	for index := len(journal.Repositories) - 1; index >= 0; index-- {
+		if err := removeOrphanRepository(ctx, rootPath, journal.Repositories[index]); err != nil {
 			return err
 		}
-		for index := len(journal.Repositories) - 1; index >= 0; index-- {
-			repository := journal.Repositories[index]
-			if !pathContains(rootPath, repository.Path) || repository.Path == rootPath {
-				return fmt.Errorf("orphan repository %q path escapes TaskRun Root", repository.Name)
-			}
-			_, _ = runGit(ctx, repository.SourcePath, "worktree", "remove", "--force", repository.Path)
-			if _, err := runGit(ctx, repository.SourcePath, "worktree", "prune"); err != nil {
-				return fmt.Errorf("prune orphan repository %q registration: %w", repository.Name, err)
-			}
-		}
-		if err := os.RemoveAll(rootPath); err != nil {
-			return fmt.Errorf("remove orphan TaskRun Root: %w", err)
-		}
+	}
+	if err := os.RemoveAll(rootPath); err != nil {
+		return fmt.Errorf("remove orphan TaskRun Root: %w", err)
+	}
+	return nil
+}
+
+func removeOrphanRepository(ctx context.Context, rootPath string, repository RepositoryManifest) error {
+	if !pathContains(rootPath, repository.Path) || repository.Path == rootPath {
+		return fmt.Errorf("orphan repository %q path escapes TaskRun Root", repository.Name)
+	}
+	_, _ = runGit(ctx, repository.SourcePath, "worktree", "remove", "--force", repository.Path)
+	if _, err := runGit(ctx, repository.SourcePath, "worktree", "prune"); err != nil {
+		return fmt.Errorf("prune orphan repository %q registration: %w", repository.Name, err)
 	}
 	return nil
 }
@@ -464,7 +503,7 @@ func writeManifest(rootPath, name string, manifest RootManifest) error {
 }
 
 func readManifest(path string) (RootManifest, error) {
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) //nolint:gosec // callers provide paths rooted under the validated task-root inventory.
 	if err != nil {
 		return RootManifest{}, err
 	}

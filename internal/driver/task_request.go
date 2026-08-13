@@ -518,31 +518,6 @@ func newTaskRunRequestRefs(opts TaskRunRequestOptions, parent *domain.DriverRun)
 }
 
 func createQueuedTaskRun(ctx context.Context, s store.Store, opts TaskRunRequestOptions, refs taskRunRequestRefs) (*domain.TaskRun, error) {
-	runtimeMetadata := map[string]string{
-		"driver_run_id": opts.DriverRunID,
-		"requested_by":  "driver",
-	}
-	if opts.Runner != "" {
-		runtimeMetadata["runner"] = opts.Runner
-	}
-	if opts.RunnerRef != "" {
-		runtimeMetadata["runner_ref"] = opts.RunnerRef
-	}
-	if opts.RunnerKind != "" {
-		runtimeMetadata["runner_kind"] = opts.RunnerKind
-	}
-	if opts.RunnerEntrypoint != "" {
-		runtimeMetadata["runner_entrypoint"] = opts.RunnerEntrypoint
-	}
-	if opts.RunnerVersionID != "" {
-		runtimeMetadata["runner_driver_version_id"] = opts.RunnerVersionID
-	}
-	if opts.RunnerTrustLevel != "" {
-		runtimeMetadata["runner_trust_level"] = string(opts.RunnerTrustLevel)
-	}
-	if opts.ParentSessionID != "" {
-		runtimeMetadata["parent_session_id"] = opts.ParentSessionID
-	}
 	executionClass := opts.ExecutionClass
 	if executionClass == "" {
 		executionClass = domain.TaskRunExecutionImplementation
@@ -568,9 +543,27 @@ func createQueuedTaskRun(ctx context.Context, s store.Store, opts TaskRunRequest
 		NodeID:           opts.NodeID,
 		RunnerPlacement:  opts.RunnerPlacement,
 		SandboxPlacement: opts.SandboxPlacement,
-		RuntimeMetadata:  runtimeMetadata,
+		RuntimeMetadata:  taskRunRuntimeMetadata(opts),
 		Input:            opts.Input,
 	})
+}
+
+func taskRunRuntimeMetadata(opts TaskRunRequestOptions) map[string]string {
+	metadata := map[string]string{"driver_run_id": opts.DriverRunID, "requested_by": "driver"}
+	for _, field := range []struct{ key, value string }{
+		{"runner", opts.Runner},
+		{"runner_ref", opts.RunnerRef},
+		{"runner_kind", opts.RunnerKind},
+		{"runner_entrypoint", opts.RunnerEntrypoint},
+		{"runner_driver_version_id", opts.RunnerVersionID},
+		{"runner_trust_level", string(opts.RunnerTrustLevel)},
+		{"parent_session_id", opts.ParentSessionID},
+	} {
+		if field.value != "" {
+			metadata[field.key] = field.value
+		}
+	}
+	return metadata
 }
 
 func claimQueuedTaskRunRequest(ctx context.Context, s store.Store, opts TaskRunRequestOptions, queued *domain.TaskRun, refs taskRunRequestRefs) (*domain.TaskRun, error) {

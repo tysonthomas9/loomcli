@@ -222,7 +222,7 @@ func TestLocalTaskRunnerSettingsNeverExposeGitHubToken(t *testing.T) {
 	req.RunnerEntrypoint = LocalTaskRunnerEntrypoint
 	executor := HostBridgeTaskExecutor{WorktreePath: "/wt", LocalSettingsDir: settingsDir}
 
-	env := executor.taskRunnerEnv(req, "{}", []string{"PATH=/bin", "GITHUB_TOKEN=host-token"})
+	env := executor.taskRunnerEnv(req, "{}")
 	if envHasAny(env, "GITHUB_TOKEN", "GH_TOKEN") {
 		t.Fatalf("local backend received a GitHub credential: %v", env)
 	}
@@ -230,12 +230,12 @@ func TestLocalTaskRunnerSettingsNeverExposeGitHubToken(t *testing.T) {
 		t.Fatalf("non-secret local task runner setting was not exported: %v", env)
 	}
 
-	env = executor.taskRunnerEnv(req, "{}", []string{"PATH=/bin", "GH_TOKEN=host-token"})
+	env = executor.taskRunnerEnv(req, "{}")
 	if envHasAny(env, "GITHUB_TOKEN", "GH_TOKEN") {
 		t.Fatalf("local backend received inherited GH_TOKEN: %v", env)
 	}
 
-	env = executor.taskRunnerEnv(req, "{}", []string{"PATH=/bin"})
+	env = executor.taskRunnerEnv(req, "{}")
 	if envHasAny(env, "GITHUB_TOKEN", "GH_TOKEN") {
 		t.Fatalf("local backend received sealed GitHub credential: %v", env)
 	}
@@ -1101,6 +1101,21 @@ func envContains(env []string, want string) bool {
 	for _, entry := range env {
 		if entry == want {
 			return true
+		}
+	}
+	return false
+}
+
+func envHasAny(env []string, names ...string) bool {
+	for _, entry := range env {
+		name, value, ok := strings.Cut(entry, "=")
+		if !ok || strings.TrimSpace(value) == "" {
+			continue
+		}
+		for _, want := range names {
+			if name == want {
+				return true
+			}
 		}
 	}
 	return false
