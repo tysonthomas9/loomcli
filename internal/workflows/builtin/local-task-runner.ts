@@ -113,6 +113,10 @@ export async function run(ctx = {}) {
   const stackBranch = stringValue(process.env.LOOM_TASK_RUN_OUTPUT_BRANCH);
   const stackBaseRef = stringValue(process.env.LOOM_TASK_RUN_BASE_REF);
   const stackId = stringValue(process.env.LOOM_TASK_RUN_STACK_ID);
+  // The stack node's last published head, used as the push lease so a re-run
+  // cannot silently discard a restack, a reviewer commit, or a zombie attempt's
+  // push. Empty when the node has never published (or on an older host).
+  const stackOutputSHA = stringValue(process.env.LOOM_TASK_RUN_OUTPUT_SHA);
 
   const isolated = stacked ? null : await setupIsolatedWorktree(worktree, taskRunId, logs);
   const execWorktree = isolated ? isolated.path : worktree;
@@ -190,10 +194,10 @@ export async function run(ctx = {}) {
         } else {
           const title = stringValue((task && (task.title || task.name)) || ("Loom task " + (taskId || taskRunId)));
           try {
-            stackInfo = await deliverStackBranch({ worktreePath: execWorktree, token, owner: slug.owner, repo: slug.repo, branch: stackBranch, title });
+            stackInfo = await deliverStackBranch({ worktreePath: execWorktree, token, owner: slug.owner, repo: slug.repo, branch: stackBranch, title, recordedSHA: stackOutputSHA });
             logs.push("pushed stack branch " + stackInfo.branch + " @ " + stackInfo.head.slice(0, 12));
           } catch (error) {
-            prFailure = { class: "stack_push_failed", message: "failed to push stack branch: " + errorMessage(error) };
+            prFailure = { class: stringValue(error && error.errorClass) || "stack_push_failed", message: "failed to push stack branch: " + errorMessage(error) };
           }
         }
       }
@@ -218,7 +222,7 @@ export async function run(ctx = {}) {
             prInfo = await deliverPullRequest({ isolatedPath: isolated.path, token, owner: slug.owner, repo: slug.repo, base, branch, title, body: prBody });
             logs.push("opened pull request " + prInfo.url);
           } catch (error) {
-            prFailure = { class: "github_pr_failed", message: "failed to open pull request: " + errorMessage(error) };
+            prFailure = { class: stringValue(error && error.errorClass) || "github_pr_failed", message: "failed to open pull request: " + errorMessage(error) };
           }
         }
       }
@@ -833,6 +837,81 @@ function redactTranscriptSecrets(entries, env = process.env) {
   return entries;
 }
 
+// Supplies the token to git through the subprocess ENV (LOOM_PR_GIT_PASSWORD)
+// instead of argv, keeping it out of `ps` and git's URL logging. The empty
+// `credential.helper=` first clears any inherited helper.
+const CRED_HELPER = '!f() { echo username=x-access-token; echo "password=$LOOM_PR_GIT_PASSWORD"; }; f';
+
+// deliveryPushArgs builds the argv for a leased delivery push.
+//
+// Delivery branches are NOT privately owned by the run that writes them:
+// stackpublish's reconciler and restack rewrite the same refs
+// (internal/stackpublish/forge_github.go, restack.go), reviewers push onto an
+// open PR head, and a stale-lease recovery can leave a zombie attempt alive
+// alongside its replacement. A bare `--force` therefore silently discards other
+// people's commits, and because it cannot fail there is no error surface.
+//
+// Every push instead asserts where it believes the remote ref is
+// (`--force-with-lease=<ref>:<expect>`) — the same explicit-lease form
+// internal/stackpublish/forge_github.go already uses. An empty expectedSHA
+// asserts the ref must not exist yet (first publish).
+export function deliveryPushArgs({ dir, remoteUrl, branch, expectedSHA }) {
+  return [
+    "-C", dir,
+    "-c", "credential.helper=",
+    "-c", "credential.helper=" + CRED_HELPER,
+    "push",
+    "--force-with-lease=refs/heads/" + branch + ":" + stringValue(expectedSHA).trim(),
+    remoteUrl,
+    "HEAD:refs/heads/" + branch,
+  ];
+}
+
+// observeRemoteHead returns the SHA the remote branch is currently at, or ""
+// when it does not exist. Used as the lease expectation when the host supplied
+// no recorded head — it cannot detect drift that happened before this run, but
+// it does close the observe->push window and makes the push fail loudly rather
+// than overwrite blind. Fails closed: an unreadable remote aborts delivery.
+async function observeRemoteHead(dir, remoteUrl, branch, token) {
+  const res = await execBackend(
+    "git",
+    [
+      "-C", dir,
+      "-c", "credential.helper=",
+      "-c", "credential.helper=" + CRED_HELPER,
+      "ls-remote", "--exit-code", remoteUrl, "refs/heads/" + branch,
+    ],
+    { cwd: dir, env: { ...process.env, LOOM_PR_GIT_PASSWORD: token, GIT_TERMINAL_PROMPT: "0" } },
+  );
+  // `--exit-code` reports 2 when no ref matched: the branch is unborn.
+  if (res.code === 2) return "";
+  if (res.code !== 0) {
+    throw new Error("git ls-remote failed: " + scrubToken(textTail(res.stderr || res.stdout, 400), token));
+  }
+  return stringValue(res.stdout).trim().split(/\s+/)[0] || "";
+}
+
+// pushLeased runs a leased delivery push and converts a lease rejection into a
+// tagged drift error, so branch drift surfaces as its own error class instead of
+// a generic push failure.
+async function pushLeased({ dir, remoteUrl, branch, expectedSHA, token, driftClass }) {
+  const pushRes = await execBackend("git", deliveryPushArgs({ dir, remoteUrl, branch, expectedSHA }), {
+    cwd: dir,
+    env: { ...process.env, LOOM_PR_GIT_PASSWORD: token, GIT_TERMINAL_PROMPT: "0" },
+  });
+  if (pushRes.code === 0) return;
+  const detail = scrubToken(textTail(pushRes.stderr || pushRes.stdout, 400), token);
+  if (/stale info|force-with-lease/i.test(detail)) {
+    const drift = new Error(
+      "branch drift: " + branch + " is no longer at " + (expectedSHA || "<unborn>") +
+      "; refusing to overwrite it. " + detail,
+    );
+    drift.errorClass = driftClass;
+    throw drift;
+  }
+  throw new Error("git push failed: " + detail);
+}
+
 // deliverPullRequest commits the isolated worktree's changes onto a branch,
 // pushes it (token supplied via env-backed credential helper, never in argv),
 // and opens (or finds) a PR. Returns { url, number, branch }.
@@ -847,25 +926,20 @@ async function deliverPullRequest({ isolatedPath, token, owner, repo, base, bran
   await git("checkout", "-b", branch);
   await git("add", "-A");
   await git("-c", "user.email=loom@example.test", "-c", "user.name=Loom", "commit", "-m", title);
-  // Push WITHOUT the token in argv: supply it through a credential helper that
-  // reads it from the subprocess ENV (LOOM_PR_GIT_PASSWORD), with a token-free
-  // remote URL. This keeps the credential out of `ps`/argv and out of git's URL
-  // logging. The empty `credential.helper=` first clears any inherited helper.
-  const pushRes = await execBackend(
-    "git",
-    [
-      "-C", isolatedPath,
-      "-c", "credential.helper=",
-      "-c", 'credential.helper=!f() { echo username=x-access-token; echo "password=$LOOM_PR_GIT_PASSWORD"; }; f',
-      "push", "--force",
-      "https://github.com/" + owner + "/" + repo + ".git",
-      "HEAD:refs/heads/" + branch,
-    ],
-    { cwd: isolatedPath, env: { ...process.env, LOOM_PR_GIT_PASSWORD: token, GIT_TERMINAL_PROMPT: "0" } },
-  );
-  if (pushRes.code !== 0) {
-    throw new Error("git push failed: " + scrubToken(textTail(pushRes.stderr || pushRes.stdout, 400), token));
-  }
+  // Push WITHOUT the token in argv (env-backed credential helper, token-free
+  // remote URL) and WITHOUT a bare --force: loom/<taskId> is keyed on the task,
+  // so it survives across runs and may already carry an open PR that a reviewer
+  // has pushed onto. Lease against the head we observe right before pushing.
+  const remoteUrl = "https://github.com/" + owner + "/" + repo + ".git";
+  const expectedSHA = await observeRemoteHead(isolatedPath, remoteUrl, branch, token);
+  await pushLeased({
+    dir: isolatedPath,
+    remoteUrl,
+    branch,
+    expectedSHA,
+    token,
+    driftClass: "github_branch_drift",
+  });
 
   const created = await githubFetch(token, "POST", "/repos/" + owner + "/" + repo + "/pulls", {
     title,
@@ -893,7 +967,7 @@ async function deliverPullRequest({ isolatedPath, token, owner, repo, base, bran
 // cut it there), so the commit lands directly on top of the predecessor and the
 // pushed branch's base == the predecessor branch by construction. The post-drain
 // reconcile opens/links the PR and sets bases. Returns { branch, head }.
-async function deliverStackBranch({ worktreePath, token, owner, repo, branch, title }) {
+async function deliverStackBranch({ worktreePath, token, owner, repo, branch, title, recordedSHA }) {
   const git = async (...args) => {
     const r = await execBackend("git", ["-C", worktreePath, ...args], { cwd: worktreePath });
     if (r.code !== 0) {
@@ -905,23 +979,22 @@ async function deliverStackBranch({ worktreePath, token, owner, repo, branch, ti
   await git("-c", "user.email=loom@example.test", "-c", "user.name=Loom", "commit", "-m", title);
   const head = stringValue((await git("rev-parse", "HEAD")).stdout).trim();
   // Push token via an env-backed credential helper (never in argv), token-free
-  // remote URL — same hardening as deliverPullRequest. Each task owns its
-  // canonical branch, so --force is safe (only this task pushes loom/stack/.../<task>).
-  const pushRes = await execBackend(
-    "git",
-    [
-      "-C", worktreePath,
-      "-c", "credential.helper=",
-      "-c", 'credential.helper=!f() { echo username=x-access-token; echo "password=$LOOM_PR_GIT_PASSWORD"; }; f',
-      "push", "--force",
-      "https://github.com/" + owner + "/" + repo + ".git",
-      "HEAD:refs/heads/" + branch,
-    ],
-    { cwd: worktreePath, env: { ...process.env, LOOM_PR_GIT_PASSWORD: token, GIT_TERMINAL_PROMPT: "0" } },
-  );
-  if (pushRes.code !== 0) {
-    throw new Error("git push failed: " + scrubToken(textTail(pushRes.stderr || pushRes.stdout, 400), token));
-  }
+  // remote URL — same hardening as deliverPullRequest. The canonical branch is
+  // NOT privately owned: stackpublish's restack rebases it and the reconciler
+  // republishes it under a lease, so lease this push too. recordedSHA is the
+  // stack node's last published head (LOOM_TASK_RUN_OUTPUT_SHA); when the host
+  // supplied none, fall back to the head observed just before pushing.
+  const remoteUrl = "https://github.com/" + owner + "/" + repo + ".git";
+  const expectedSHA = stringValue(recordedSHA).trim() ||
+    await observeRemoteHead(worktreePath, remoteUrl, branch, token);
+  await pushLeased({
+    dir: worktreePath,
+    remoteUrl,
+    branch,
+    expectedSHA,
+    token,
+    driftClass: "stack_branch_drift",
+  });
   return { branch, head };
 }
 
