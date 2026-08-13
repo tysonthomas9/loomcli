@@ -6,6 +6,7 @@
 # This suite creates an agent definition and run artifacts, so it owns a dedicated
 # workspace instead of leaking agent state into the shared E2E-WS empty-state suites.
 suite: zz-agent-flow
+classification: { area: agents, feature: agent-lifecycle, surface: mixed, purpose: journey }
 baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
 setup: >-
   d="$AFT_WORK_DIR/agent-repo";

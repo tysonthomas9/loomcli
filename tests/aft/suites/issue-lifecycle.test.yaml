@@ -1,6 +1,7 @@
 # Full issue lifecycle driven through the workspace HTTP API, with the kanban
 # board following live via SSE at every transition — no reloads anywhere.
 suite: issue-lifecycle
+classification: { area: issues, feature: issue-lifecycle, surface: mixed, purpose: journey }
 baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
 teardown: '"$AFT_TESTS_DIR/scripts/close-open-issues.sh"'
 

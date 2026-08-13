@@ -1,6 +1,7 @@
 # API contract coverage for custom-prompt agents. This surface suite owns fresh
 # workspaces because role rows outlive individual agents.
 suite: custom-prompt-contracts
+classification: { area: agents, feature: custom-prompts, surface: api, purpose: contract }
 baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
 setup: |
   set -e

@@ -3,6 +3,7 @@
 # auto-detect, not a product-correct authoring scenario. Promote when the per-issue
 # format contract lands and a faithful actor can create formatted design content.
 suite: design-format-legacy-surface
+classification: { area: workspaces, feature: design-settings, surface: ui, purpose: contract }
 baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
 setup: >-
   curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS" > "$AFT_WORK_DIR/surface-design-workspace.orig.json"; python3 -c 'import json,sys; d=json.load(open(sys.argv[1]))["data"]; print(d.get("design_format") or "markdown")' "$AFT_WORK_DIR/surface-design-workspace.orig.json" > "$AFT_WORK_DIR/surface-design-format.orig"

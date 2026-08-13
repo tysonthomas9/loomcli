@@ -1,6 +1,7 @@
 # Lead interactive-agent template coverage. This suite owns its workspace
 # because lead agents create durable role rows and PTY-backed terminal tabs.
 suite: zz-lead-agent
+classification: { area: agents, feature: lead-agents, surface: mixed, purpose: journey }
 baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
 setup: |
   set -e

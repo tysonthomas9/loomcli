@@ -3,6 +3,7 @@
 # tier-1 pr-workspace-degraded suite; promote or fold this back when a
 # fake-connector seam exists (FINDINGS §3.9 staleness note).
 suite: pr-contracts-surface
+classification: { area: reviews, feature: pull-requests, surface: api, purpose: contract }
 baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
 setup: >-
   name="aft-prc-${RUN_ID:-local}"; list_code="$(curl -sS -o "$AFT_WORK_DIR/prc-workspaces.setup.json" -w "%{http_code}" "$AFT_BASE_URL/api/workspaces")"; [ "$list_code" = 200 ] || { echo "workspace list failed with HTTP $list_code:"; cat "$AFT_WORK_DIR/prc-workspaces.setup.json"; exit 1; }; existing="$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); target=sys.argv[2]; print(next((w.get("id","") for w in d.get("workspaces",[]) if w.get("name")==target or w.get("id")==target), ""))' "$AFT_WORK_DIR/prc-workspaces.setup.json" "$name")"; if [ -n "$existing" ]; then delete_code="$(curl -sS -o "$AFT_WORK_DIR/prc-delete-stale.resp.json" -w "%{http_code}" -X DELETE "$AFT_BASE_URL/api/workspaces/$existing")"; [ "$delete_code" = 200 ] || [ "$delete_code" = 404 ] || { echo "stale workspace delete failed with HTTP $delete_code:"; cat "$AFT_WORK_DIR/prc-delete-stale.resp.json"; exit 1; }; fi

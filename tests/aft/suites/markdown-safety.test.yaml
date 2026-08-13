@@ -2,6 +2,7 @@
 # article elements with aria-label="Issue: <title>"; clicking one opens the
 # panel overlay, whose description uses EditableDescription/MarkdownRenderer.
 suite: markdown-safety
+classification: { area: issues, feature: markdown, surface: ui, purpose: contract }
 baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
 teardown: '"$AFT_TESTS_DIR/scripts/close-open-issues.sh"'
 

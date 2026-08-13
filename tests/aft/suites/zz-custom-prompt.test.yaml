@@ -1,6 +1,7 @@
 # CreateAgentModal Custom prompt coverage. This suite owns its workspaces because
 # custom-prompt agents leave durable role rows behind until the workspace is deleted.
 suite: zz-custom-prompt
+classification: { area: agents, feature: custom-prompts, surface: mixed, purpose: journey }
 baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
 setup: |
   set -e

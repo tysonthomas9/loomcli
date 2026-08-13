@@ -1,6 +1,7 @@
 # Task Runner template coverage. This suite owns E2E-WS-TASK because
 # task-runner agents create durable fleet-db rows and local worktrees.
 suite: zz-task-runner
+classification: { area: agents, feature: task-runners, surface: mixed, purpose: journey }
 baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
 setup: |
   set -e

@@ -3,6 +3,7 @@
 # by design. This suite guards only the published API contract. Promote it when
 # a mounted human-facing reorder control exists.
 suite: workspace-order-surface
+classification: { area: workspaces, feature: workspace-order, surface: api, purpose: contract }
 baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
 teardown: >-
   if [ -s "$AFT_WORK_DIR/surfaceOrderWorkspaceId" ]; then curl -s -X DELETE "$AFT_BASE_URL/api/workspaces/$(cat "$AFT_WORK_DIR/surfaceOrderWorkspaceId")" >/dev/null || true; fi

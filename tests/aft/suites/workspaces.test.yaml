@@ -2,6 +2,7 @@
 # WorkspaceSwitcher dialog. Suite setup provisions e2e-ws-2 as a shared fixture;
 # the product-correct creation scenario uses CreateWorkspaceModal's Empty mode.
 suite: workspaces
+classification: { area: workspaces, feature: workspace-management, surface: mixed, purpose: journey }
 baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
 setup: >-
   curl -s -X POST "$AFT_BASE_URL/api/workspaces" -H "Content-Type: application/json"

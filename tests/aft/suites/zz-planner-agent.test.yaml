@@ -1,6 +1,7 @@
 # Planner template coverage. This suite owns E2E-WS-PLAN because planner
 # agents leave durable fleet-db rows and local worktrees behind.
 suite: zz-planner-agent
+classification: { area: agents, feature: planner-agents, surface: mixed, purpose: journey }
 baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
 setup: |
   set -e

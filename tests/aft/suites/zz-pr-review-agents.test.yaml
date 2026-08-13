@@ -1,6 +1,7 @@
 # PR Review interactive agent-template coverage. This suite owns its workspace
 # because built-in interactive agents leave durable role rows behind.
 suite: zz-pr-review-agents
+classification: { area: reviews, feature: pr-review-agents, surface: mixed, purpose: journey }
 baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
 setup: |
   set -e

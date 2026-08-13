@@ -5,6 +5,7 @@
 # provider surfaces as task-never-closed. Every other agent CLI is stubbed
 # (e2e/stubs-real-opencode). Named zz- defensively. NOT part of the default suites/ dir.
 suite: zz-real-opencode-epic
+classification: { area: agents, feature: real-agent-backends, surface: mixed, purpose: journey }
 baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
 teardown: >-
   "$AFT_TESTS_DIR/scripts/close-open-issues.sh";

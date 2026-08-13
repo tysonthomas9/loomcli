@@ -1,6 +1,7 @@
 # Bulk table actions in an owned workspace so row counts and selection state are
 # isolated from shared E2E-WS fixtures.
 suite: table-bulk
+classification: { area: issues, feature: table-bulk-actions, surface: mixed, purpose: journey }
 baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
 setup: >-
   name="aft-bulk-${RUN_ID:-local}"; curl -sf "$AFT_BASE_URL/api/workspaces" > "$AFT_WORK_DIR/bulk-workspaces.setup.json" || true; existing="$(python3 -c 'import json,sys,os; p=sys.argv[1]; target=sys.argv[2]; print(next((w.get("id","") for w in (json.load(open(p)).get("workspaces",[]) if os.path.exists(p) and os.path.getsize(p) else []) if w.get("name")==target or w.get("id")==target), ""))' "$AFT_WORK_DIR/bulk-workspaces.setup.json" "$name")"; [ -z "$existing" ] || curl -s -X DELETE "$AFT_BASE_URL/api/workspaces/$existing" >/dev/null || true; python3 -c 'import json,os; run=os.environ.get("RUN_ID") or "local"; print(json.dumps({"name":"aft-bulk-"+run,"type":"empty"}))' > "$AFT_WORK_DIR/bulk-create.json"; curl -sf -X POST "$AFT_BASE_URL/api/workspaces" -H "Content-Type: application/json" -d @"$AFT_WORK_DIR/bulk-create.json" > "$AFT_WORK_DIR/bulk-create.resp.json"; python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); data=d.get("data") or {}; assert data.get("id"), d; print(data["id"])' "$AFT_WORK_DIR/bulk-create.resp.json" > "$AFT_WORK_DIR/bulk-ws.id"

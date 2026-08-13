@@ -1,6 +1,7 @@
 # Issue creation through the UI — v5 has a New Issue modal (title is the only
 # required field; priority is fixed at 2; new issues default to status open).
 suite: issue-create-ui
+classification: { area: issues, feature: issue-creation, surface: mixed, purpose: journey }
 baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
 teardown: '"$AFT_TESTS_DIR/scripts/close-open-issues.sh"'
 

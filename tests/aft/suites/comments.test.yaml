@@ -2,6 +2,7 @@
 # workspace-scoped and accept {"text": "..."}; the panel renders comments and
 # events through ActivityLog.
 suite: comments
+classification: { area: issues, feature: comments, surface: mixed, purpose: journey }
 baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
 teardown: '"$AFT_TESTS_DIR/scripts/close-open-issues.sh"'
 

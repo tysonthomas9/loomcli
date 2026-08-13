@@ -3,6 +3,7 @@
 # renders epic-grouped swim lanes (issues without an epic land in "Ungrouped").
 # v5 renders no connection indicator, so SSE is asserted by observing the board.
 suite: smoke
+classification: { area: platform, feature: application-startup, surface: mixed, purpose: smoke }
 baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
 teardown: '"$AFT_TESTS_DIR/scripts/close-open-issues.sh"'
 

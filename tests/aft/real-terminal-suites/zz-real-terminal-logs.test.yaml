@@ -3,6 +3,7 @@
 # Opt in by running `make test-aft-terminal`; this directory is separate from
 # real-suites so `make test-aft-real` never discovers it.
 suite: zz-real-terminal-logs
+classification: { area: agents, feature: terminal-logs, surface: ui, purpose: journey }
 baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
 teardown: >-
   "$AFT_TESTS_DIR/scripts/close-open-issues.sh";

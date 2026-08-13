@@ -1,5 +1,6 @@
 # Monitor dashboard route and empty-state coverage for the v5 workspace monitor.
 suite: monitor
+classification: { area: platform, feature: monitor, surface: ui, purpose: smoke }
 baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
 
 tests:

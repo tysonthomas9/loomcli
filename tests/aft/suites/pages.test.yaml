@@ -4,6 +4,7 @@
 # TerminalView.tsx + NoBackendsEmptyState.tsx, FileExplorer.tsx, WorkspacePage.tsx,
 # AgentsPage.tsx + AgentDetailMain.tsx, IssueDetailView.tsx.
 suite: pages
+classification: { area: workspaces, feature: navigation, surface: ui, purpose: smoke }
 baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
 teardown: '"$AFT_TESTS_DIR/scripts/close-open-issues.sh"'
 

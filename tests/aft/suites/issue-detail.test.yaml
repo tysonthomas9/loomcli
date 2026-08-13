@@ -2,6 +2,7 @@
 # elements with no testid, so this suite opens the lone ready card after API
 # seeding and then exercises verified IssueDetailPanel/StatusDropdown anchors.
 suite: issue-detail
+classification: { area: issues, feature: issue-detail, surface: mixed, purpose: journey }
 baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
 teardown: '"$AFT_TESTS_DIR/scripts/close-open-issues.sh"'
 

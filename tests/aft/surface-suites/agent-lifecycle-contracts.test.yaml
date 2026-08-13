@@ -2,6 +2,7 @@
 # operator controls yet, and the repo-less workspace case is a hollow fixture.
 # Promote individual tests when a normal product surface drives the same call.
 suite: agent-lifecycle-contracts
+classification: { area: agents, feature: task-runners, surface: api, purpose: contract }
 baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
 setup: |
   set -e

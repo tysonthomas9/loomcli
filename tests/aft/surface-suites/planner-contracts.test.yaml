@@ -1,6 +1,7 @@
 # Planner surface contracts. This suite owns a workspace because the plan-role
 # create-contract probes and assignee-picker gap require durable agent rows.
 suite: planner-contracts
+classification: { area: agents, feature: planner-agents, surface: api, purpose: contract }
 baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
 setup: |
   set -e

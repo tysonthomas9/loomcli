@@ -2,6 +2,7 @@
 # Gated: only runs under AFT_REAL_CODEX=1 (run-aft.sh points AFT_SUITES at real-suites/).
 # Needs a logged-in ~/.codex. Named zz- defensively. NOT part of the default suites/ dir.
 suite: zz-real-codex-epic
+classification: { area: agents, feature: real-agent-backends, surface: mixed, purpose: journey }
 baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
 teardown: >-
   "$AFT_TESTS_DIR/scripts/close-open-issues.sh";

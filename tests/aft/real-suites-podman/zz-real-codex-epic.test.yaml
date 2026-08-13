@@ -1,6 +1,7 @@
 # REAL codex tier through the containerized ModeCloud stack. Steps 1-7b mirror
 # real-suites/zz-real-codex-epic.test.yaml; step 8 verifies volume-backed isolation.
 suite: zz-real-codex-epic
+classification: { area: agents, feature: real-agent-backends, surface: mixed, purpose: journey }
 baseUrl: "${AFT_BASE_URL:-http://localhost:18282}"
 teardown: >-
   "$AFT_TESTS_DIR/scripts/close-open-issues.sh";

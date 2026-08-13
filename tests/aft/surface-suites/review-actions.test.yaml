@@ -3,6 +3,7 @@
 # the wired buttons/status transitions without claiming a real review scenario.
 # Promote them once seeded branch/commit review content exists.
 suite: review-actions-surface
+classification: { area: reviews, feature: review-actions, surface: mixed, purpose: contract }
 baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
 teardown: '"$AFT_TESTS_DIR/scripts/close-open-issues.sh"'
 

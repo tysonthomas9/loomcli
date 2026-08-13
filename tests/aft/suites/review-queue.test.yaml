@@ -2,6 +2,7 @@
 # to surface-suites/review-actions because this gh-less stack has no reviewable
 # branch/commit content (FINDINGS §1.19).
 suite: review-queue
+classification: { area: reviews, feature: review-queue, surface: ui, purpose: journey }
 baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
 teardown: '"$AFT_TESTS_DIR/scripts/close-open-issues.sh"'
 

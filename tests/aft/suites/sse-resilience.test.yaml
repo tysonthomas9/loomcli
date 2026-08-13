@@ -2,6 +2,7 @@
 # issue before disconnect because App suppresses StaleDataBanner on an empty
 # issue-based view.
 suite: sse-resilience
+classification: { area: platform, feature: realtime, surface: ui, purpose: resilience }
 baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
 teardown: '"$AFT_TESTS_DIR/scripts/close-open-issues.sh"'
 

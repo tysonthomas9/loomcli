@@ -2,6 +2,7 @@
 # browser scenario. Browser-observable boot/config effects remain in tier-1 smoke;
 # promote individual probes only when a product surface renders their result.
 suite: api-contracts-surface
+classification: { area: platform, feature: web-api, surface: api, purpose: contract }
 baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
 teardown: "true"
 

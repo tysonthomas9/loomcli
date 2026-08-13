@@ -2,6 +2,7 @@
 # workspace creation, repo management, and rename. API-only reorder coverage
 # lives in surface-suites/workspace-order.
 suite: workspace-mgmt
+classification: { area: workspaces, feature: workspace-management, surface: mixed, purpose: journey }
 baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
 setup: >-
   seed="$AFT_WORK_DIR/wm-seed"; extra="$AFT_WORK_DIR/wm-extra"; rm -rf "$seed" "$extra"; mkdir -p "$seed" "$extra"; git -C "$seed" init -q; printf '%s\n' "seed ${RUN_ID:-local}" > "$seed/README.md"; git -C "$seed" add README.md; git -C "$seed" -c user.email=e2e@x -c user.name=e2e commit -m init -q; git -C "$seed" branch -M main; git -C "$extra" init -q; printf '%s\n' "extra ${RUN_ID:-local}" > "$extra/README.md"; git -C "$extra" add README.md; git -C "$extra" -c user.email=e2e@x -c user.name=e2e commit -m init -q; git -C "$extra" branch -M main; basename "$extra" > "$AFT_WORK_DIR/wm-extra.repo"

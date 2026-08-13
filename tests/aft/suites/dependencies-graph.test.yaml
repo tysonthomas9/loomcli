@@ -1,6 +1,7 @@
 # Dependency graph coverage. A blocks B is represented by making B depend on A:
 # POST /api/workspaces/:ws/issues/:B/dependencies with depends_on_id=A.
 suite: dependencies-graph
+classification: { area: issues, feature: dependencies, surface: mixed, purpose: journey }
 baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
 teardown: '"$AFT_TESTS_DIR/scripts/close-open-issues.sh"'
 

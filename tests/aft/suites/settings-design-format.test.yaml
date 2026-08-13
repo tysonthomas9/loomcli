@@ -2,6 +2,7 @@
 # process-global Daytona/runtime settings. Legacy inline-HTML rendering lives in
 # surface-suites/design-format-legacy until the per-issue contract lands.
 suite: settings-design-format
+classification: { area: workspaces, feature: settings, surface: mixed, purpose: contract }
 baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
 setup: >-
   curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS" > "$AFT_WORK_DIR/settings-workspace.orig.json"; python3 -c 'import json,sys; d=json.load(open(sys.argv[1]))["data"]; print(d.get("design_format") or "markdown")' "$AFT_WORK_DIR/settings-workspace.orig.json" > "$AFT_WORK_DIR/settings-design-format.orig"; curl -sf "$AFT_BASE_URL/api/local/settings" > "$AFT_WORK_DIR/local-settings.orig.json"; python3 -c 'import json,sys; data=json.load(open(sys.argv[1])).get("data",{}); print((data.get("agent_runtime") or {}).get("default") or "local")' "$AFT_WORK_DIR/local-settings.orig.json" > "$AFT_WORK_DIR/settings-runtime.orig"; python3 -c 'import json,sys; data=json.load(open(sys.argv[1])).get("data",{}); print("true" if ((data.get("runtime_credentials") or {}).get("daytona") or {}).get("configured") else "false")' "$AFT_WORK_DIR/local-settings.orig.json" > "$AFT_WORK_DIR/settings-daytona-configured.orig"
