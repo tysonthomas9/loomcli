@@ -91,6 +91,7 @@ one-file packages, and 60 one-or-two-file packages.
 | [19-phase-10-application-deepening-goal.md](19-phase-10-application-deepening-goal.md) | **Superseded.** Historical application-deepening discussion; not an implementation authority. Its supporting ADRs remain accepted. |
 | [20-phase-10-consolidated-deep-module-goal.md](20-phase-10-consolidated-deep-module-goal.md) | **Final and normative.** Sole Phase 10 ownership and delivery decision, with the supersession map, ordered twelve-PR manifest, gates, and completion criteria. |
 | [21-phase-10-1-generated-http-contract-evidence.md](21-phase-10-1-generated-http-contract-evidence.md) | Stack 10.1 implementation and proof for the canonical generated Go and TypeScript HTTP contract seam. |
+| [22-phase-10-2-artifacts-run-capture-evidence.md](22-phase-10-2-artifacts-run-capture-evidence.md) | Stack 10.2 implementation and proof for Artifacts evidence policy, Run Capture, Transcript Evidence, and Sessions-path deletion. |
 
 ## Scope boundaries
 

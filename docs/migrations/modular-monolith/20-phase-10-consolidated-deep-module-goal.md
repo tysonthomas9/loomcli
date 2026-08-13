@@ -293,6 +293,8 @@ Desktop matrix rather than substituting API-only evidence.
 
 Implementation evidence is recorded per stack. Stack 10.1 is documented in
 [Phase 10.1 generated HTTP contract evidence](21-phase-10-1-generated-http-contract-evidence.md).
+Stack 10.2 is documented in
+[Phase 10.2 Artifacts and Run Capture evidence](22-phase-10-2-artifacts-run-capture-evidence.md).
 
 ## Superseded decisions and alternatives
 
