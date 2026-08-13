@@ -367,9 +367,9 @@ function shutdown(signal) {
   };
 
   child.once('exit', finishShutdown);
-  let signalled = false;
-  try { signalled = child.kill(signal); } catch {}
-  if (!signalled) {
+  let signaled = false;
+  try { signaled = child.kill(signal); } catch {}
+  if (!signaled) {
     finishShutdown();
     return;
   }
