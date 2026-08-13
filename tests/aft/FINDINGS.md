@@ -197,7 +197,24 @@ left unpushed for a PR. The stack-improvement items in §3 remain open follow-up
   `tests/aft/surface-suites/workspace-order.test.yaml`.
 
 ### 1.13 Per-issue `design_format` — loom↔fleet-db contract drift + whole-PATCH amplification
-- **Severity:** MED (drift latent; amplification real) · **Fix:** fleet-db (Part B) + loom (tolerant PATCH) · **Status:** OPEN (found 2026-07-18 by the settings-design-format suite)
+- **Severity:** HIGH (no longer latent — observed destroying a real Planner's entire output) · **Fix:** fleet-db (Part B) + loom (tolerant PATCH) · **Status:** OPEN (found 2026-07-18 by the settings-design-format suite; **confirmed live 2026-08-04**)
+- **2026-08-04 — the predicted sender arrived.** This entry called the failure "latent today:
+  no first-party sender … but any agent/API client setting the field … hits the hard failure."
+  A real codex Planner is that client. In the live worker tier (`lw-supervised-workers`, LW-2)
+  the Planner ran to completion and its write-back 400'd:
+  `backend error in PatchIssue issue_id=E2E-WS-2 err="backend [validation_error] Update:
+  unknown field \"design_format\""`. The amplification is what makes it HIGH: the PATCH
+  carried the design *and* the status transition, so **both were lost** — the issue ended
+  `has_design: false`, still `in_progress`, and the Planner's whole run was discarded with no
+  user-visible error. LW-1 (Task Runner, `E2E-WS-1`) hit the identical 400.
+- Why no existing test caught it: this is §0's theme exactly. The deterministic stub backends
+  never set `design_format`, so the 150-case corpus stays green while the real-agent path
+  fails 100% of the time. Only a live backend exercises the sender.
+- Sender is `internal/backend/fleet/params.go:329` (`setStrField(req, "design_format", …)`,
+  added by `02da9dc4e`, PR #150); fleet-db's `UpdateIssueRequest`
+  (`internal/api/request.go:48-57`) accepts only title/description/priority/status/type/
+  design/notes/due_at. `owner` and `external_ref` are sent on the same PATCH and are likewise
+  absent from that struct — same latent trap, not yet observed firing.
 - fleet-db main has `design_format` **only on the workspace model**
   (`internal/models/workspace.go` — the #87 "Part A" change); the issue model/update path has
   no such field. loom v5 exposes per-issue `design_format` on the PATCH surface anyway
@@ -212,6 +229,180 @@ left unpushed for a PR. The stack-improvement items in §3 remain open follow-up
 - **Fix:** (a) fleet-db: add issue-level `design_format` (finish Part B); (b) loom: strip or
   compat-fallback unsupported update fields against fleet-db so one drifted field cannot
   poison a whole PATCH. (b) is worth doing regardless of (a).
+- **2026-08-04 — (b) landed; (a) still open.** `internal/backend/fleet/update_compat.go`
+  makes the PATCH tolerant: when fleet-db rejects a named field, loom drops **only that
+  field** and retries, so the rest of the update lands. Deliberately reactive — loom does
+  not keep its own copy of fleet-db's schema, which would drift the other way and silently
+  stop sending fields a newer fleet-db does accept. If *every* field is rejected it still
+  errors, because reporting success there would be the same silent data loss in a new
+  costume. Covered by four cases in `update_compat_test.go`, including the two failure
+  modes worth guarding: an unrelated validation error must not be retried, and a server
+  naming a field loom never sent must not spin the retry loop.
+- **Still true after (b):** per-issue `design_format` does not round-trip — it is dropped,
+  not stored. Anything that needs the value persisted still depends on (a).
+
+### 1.25 No working spend ceiling for claude — the flag is accepted and ignored ✅
+- **Severity:** HIGH (uncapped spend on a paid account) · **Fix:** product-decision · **Status:** OPEN (found 2026-08-04, confirmed by codex review)
+- `claude --help` documents `--max-budget-usd` as **"only works with `--print`"**.
+  `buildClaudeRunTurnArgs` deliberately omits `-p`
+  (`internal/cli/backends/backend_claude.go`), yet the worker path still appends the
+  flag — and its comment claimed the cap "carries over to the RunTurn path". It does
+  not. The flag is inert on every interactive and worker invocation.
+- Consequence: a claude Lead, reviewer, Task Runner or Planner can exceed the
+  advertised ceiling without being stopped. `LOOM_MAX_BUDGET_USD` and the
+  `DefaultMaxBudgetUSD = 50.0` constant both describe a guarantee that does not exist.
+- The misleading comment and the Makefile's "$5/session ceiling" claim are corrected;
+  the flag is left in place so the intent survives if Claude ever honors it
+  interactively. **A real ceiling needs a product decision** — either drive claude
+  through `--print` where the flag works, or enforce the budget loom-side.
+- The live tiers here run codex, so no run has spent against this gap; it matters the
+  moment `LIVE_BACKEND=claude` is used.
+
+### 1.28 `delivery_state` silently regresses from `delivered` to `pending` forever ✅
+- **Severity:** HIGH (a delivered assignment reports as undelivered; makes the state unusable for orchestration decisions) · **Fix:** loom · **Status:** OPEN (found 2026-08-04 by the live lead tier)
+- The version compared is a **mutable timestamp**. `monitorLeadAssignmentVersion` returns
+  `agent.UpdatedAt.UTC().Format(time.RFC3339Nano)`
+  (`internal/cli/serve/metricscmd/monitor_store_data_source.go:271-279`), while the lead
+  process stores whatever `assignment.AssignmentVersion` it read when it built its prompt
+  (`internal/cli/agent/lead/lead.go:232-257`). The monitor reports `delivered` only when
+  the two are equal (`:281-286`).
+- Therefore **any** later write to the agent row — a status change, a heartbeat, a
+  `desired_state` update, an unrelated PATCH — bumps `UpdatedAt`, the stored marker
+  becomes permanently stale, and `delivery_state` reverts to `pending`. The lead never
+  re-reads, so it never re-converges.
+- **Observed:** LL-1 passed twice, then failed with the identical suite logic and only
+  comment changes — `parent` set, `orchestrator_session_id` present, `delivery_state:
+  pending`. The two green runs were timing luck, not correctness.
+- **Indistinguishable from a real failure over the API:** `pending` from this race and
+  `pending` from "the lead never read the assignment" look identical to every client;
+  the durable marker lives in orchestration-session metadata, which no HTTP route exposes.
+- **Fix:** version the assignment by something immutable — the epic id plus an explicit
+  assignment counter/uuid written at assign time — rather than the row's `UpdatedAt`.
+- **Consequence for this tier:** LL-1 is inherently flaky until this is fixed. Its
+  failure message now names this finding so a real regression is distinguishable from the
+  known race, but the case cannot be made reliably green from the test side.
+
+### 1.27 Real codex worker/planner sessions capture no transcript ✅
+- **Severity:** MED (Runs-tab transcript is empty for every codex agent run) · **Fix:** loom · **Status:** OPEN (found 2026-08-04 by the live worker tier)
+- Observed: a completed codex Task Runner session reports `status: completed`,
+  `exit_code: 0`, `files_changed: 1`, `files_touched: ["LW1-<run>.txt"]`, `has_diff: true`
+  — and **`has_transcript: false`**. Same for the Planner.
+- **MECHANISM CORRECTED 2026-08-05 — my first diagnosis was wrong.** I wrote that "for a
+  codex run nothing materializes it". False: a codex capture path exists and runs on every
+  daemon finalize — `sessionfinalize.WithWorktree` calls `SyncLatestCodexRollout` when the
+  backend is codex (`internal/cli/sessionfinalize/finalize_worktree.go:51-60`), mirroring the
+  matching rollout to `agent_transcript.jsonl`. Verified on this machine: **160 non-empty**
+  `agent_transcript.jsonl` files across 686 session dirs. Capture works.
+- **The real cause is still unproven, and two candidate explanations were BOTH rejected on
+  evidence.** (a) "Writer and reader resolve different session-store roots" does not by
+  itself explain it: the reader also searches the fleet-db workspace root and every repo
+  path (`internal/webui/svcimpl/session_service.go:70-84`). (b) `sameCleanPath` lacking
+  symlink resolution (`internal/sessions/codex_rollout.go:151-189`) is plausible hardening
+  but nothing retained demonstrates the mismatch for these runs.
+- **Confirmed adjacent defect, found while vetting the above:** the supervisor reads the
+  transcript bytes at `session_finalize.go:126` (`readLeafTranscript`) **before** the codex
+  sync runs inside `WithWorktree`, then uploads those bytes as the control-plane
+  `transcript_ref` artifact. So control-plane transcript materialization can be empty even
+  when the later local sync succeeds — an ordering bug independent of whatever causes the
+  local `has_transcript:false`.
+- **Next step is instrumentation, not a fix.** Every error on this path is discarded
+  (`_, _ =` at finalize_worktree.go:54-59), which is exactly why the cause cannot be
+  established from the artifacts. Log the `(path, err)` of the sync and the resolved store
+  root, run the live worker tier once, and let that decide the fix.
+- **Not §1.2.** That finding is fleet-db's missing `GET .../artifacts/{id}/content` —
+  a serving bug one layer up, listed as fixed in §0a. This is a *capture* gap and
+  survives regardless. An earlier revision of the live suites attributed the false
+  `has_transcript` to §1.2; that attribution was wrong and is corrected in place.
+- The evidence is not lost — the full codex event stream is written to
+  `~/.loom/logs/<ws>/agents/<agent>.log` (`internal/cli/agent/archive_log.go:24-31`),
+  which is what the live tier reads for clause 4. It simply never reaches the session
+  record, so the product's own Runs tab shows no transcript for any codex agent run.
+- Pinned as a tripwire in `lw-supervised-workers.test.yaml` and
+  `tests/aft/scripts/live-session-evidence.py`: both assert `has_transcript is False`
+  and fail loudly if it ever becomes true, forcing the stronger assertion back.
+
+### 1.26 Known limits of the live tier's read-only and kill proofs (not defects — scope)
+- **Severity:** LOW/MED · **Status:** DOCUMENTED 2026-08-04 (codex review)
+- Recorded so nobody reads these assertions as stronger than they are:
+  - **LP-1 read-only** does not inspect `.git` internals (config, hooks, index flags,
+    reflogs), does not see **ignored** files (`git status --porcelain` omits them), and
+    `for-each-ref` on the bare upstream cannot detect unreachable objects written by
+    `git hash-object -w`. A reviewer doing any of those stays green. The refs delta is
+    now pinned exactly; the rest is stated in the suite's own intent text.
+  - **Clause 4 native evidence** is per-AGENT, not per-session: the event log is
+    append-only (`cli/agent/archive_log.go:24-31`) and agent names embed the run id, so
+    it cannot leak across runs, but a restarted sibling session of the same agent could
+    supply the events. The session-scoped half is `files_touched` plus the run token in
+    that session's diff.
+  - **`killProcessTree`** falls back to `proc.Kill()` when the group kill fails and
+    returns that result, so a caller can receive `nil` while descendants survive; a
+    descendant that calls `setsid` escapes the group entirely
+    (`internal/webui/terminal/pty_session.go`). `live-sweep.sh`'s process-table diff is
+    the backstop that catches this in the live tiers.
+  - **`DeleteTab`** deletes metadata and `killSession` drops the session from the
+    manager map before `close`, so after a kill failure the error is surfaced but the
+    orphan is no longer addressable — recovery is manual (the sweep reports the pid).
+  - **§1.24's SIGTERM diagnosis** is a race, not a deterministic signal difference: root
+    subscribes to INT and TERM identically, so which handler wins is timing. SIGHUP is
+    deterministically safe only because root does not subscribe to it — which means the
+    harness's SIGINT workaround is itself racy, and observed-graceful 3/3 is evidence,
+    not a guarantee.
+
+### 1.24 `loom daemon` dies on SIGTERM without draining — the root CLI handler defeats it ✅
+- **Severity:** HIGH (no graceful stop under any process manager) · **Fix:** loom · **Status:** OPEN (found 2026-08-04 by the live worker tier)
+- **Root cause, verified against source.** `internal/cli/root.go:198-211` installs a
+  trace-flush handler for SIGINT **and SIGTERM**. On receipt it ends the root span, then:
+  `signal.Reset(s)` — restoring the **default** disposition process-wide — followed by
+  `syscall.Kill(getpid(), s)` to re-raise. The re-raise now terminates the process
+  immediately, so any command-level handler registered for the same signal never gets to
+  finish. `setupSignalHandler` (`daemon_cmd.go:167-180`) registers INT/TERM/HUP and is
+  installed correctly; it simply loses the race to a process that has already been killed.
+- **Reproduced directly**, fully-started daemon (supervisor banner + 15s settle), one
+  signal each, `exec`'d so the pid under test is loom itself:
+
+  | signal | exit | shutdown markers |
+  |---|---|---|
+  | SIGINT  | 0   | 3 (graceful) |
+  | SIGHUP  | 0   | 3 (graceful) |
+  | SIGTERM | **143** | **0** |
+
+  SIGHUP survives *because root.go does not register it* — only INT and TERM. That
+  asymmetry is the tell, and it rules out "the daemon's handler is misregistered".
+- **Why it matters:** systemd, launchd, Docker, Kubernetes and every process supervisor
+  stop services with SIGTERM. In all of them the daemon is killed outright: agents are
+  never drained, and the deferred PID-file / lock-file / state-file cleanup in
+  `runDaemonBody` does not run, so it exits leaving a stale lock that the next start must
+  break. Ctrl-C (SIGINT) is the only path that shuts down cleanly, and only by luck of the
+  race.
+- **Fix:** stop the root handler from defeating command-level handlers — gate it on
+  tracing actually being enabled (`LOOM_TRACE=1` / `OTEL_EXPORTER_OTLP_ENDPOINT`, the same
+  condition `initCLITracing` already uses), so it is not installed at all in the
+  overwhelmingly common untraced case. Re-raising after `signal.Reset` is only safe for a
+  command with no shutdown logic of its own.
+- Applies to every long-running loom command sharing this root, not just `daemon`:
+  `serve` and `worker` install their own SIGTERM handlers too.
+- The live worker tier works around it by sending **SIGINT** (verified graceful 3/3) and
+  will keep doing so until this is fixed; that workaround is why `daemon=clean` is
+  achievable at all today.
+
+### 1.23 A Task Runner cannot reach `closed` in a workspace whose only remote is local
+- **Severity:** MED · **Fix:** product-decision · **Status:** OPEN (found 2026-08-04 by the live worker tier)
+- Observed, not inferred. In LW-1 the real Task Runner did everything right: wrote the
+  byte-exact marker, passed the acceptance assertion and the repo gate, committed
+  `bb510ac`. It then reached its stacked-publish step, and loom rejected the origin
+  because a local bare repository is not a hosted remote. The agent correctly refused to
+  claim success and set the task to **`blocked`** — so the task never closes, and the
+  daemon's `[recover] … exited cleanly (code 0), trusting agent's task status` path
+  leaves it parked there.
+- The agent's own words from `.loom/logs/E2E-WS/agents/<agent>.log`: *"This is an external
+  tooling blocker under Step 8a, not an implementation failure: the repository's only
+  origin is a local bare repo."* That is the right call by the model; the gap is that the
+  Task Runner workflow treats publishing as mandatory.
+- Consequence: any fully-local/offline workspace (no hosted remote) cannot complete a Task
+  Runner run end to end, regardless of the model used.
+- Worked around in the live suite by stating in the task design that publishing is out of
+  scope for a local-only origin. That unblocks the test but not the product: a user with a
+  local-only workspace still hits this with the default template prompt.
 
 ### 1.14 CreateWorkspaceModal cannot create local or empty workspaces
 - **Severity:** MED (feature gap, inconsistent) · **Fix:** loom · **Status:** RESOLVED 2026-07-21

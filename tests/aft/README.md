@@ -126,6 +126,112 @@ HELLO.md physically on disk — same real-vs-stub discriminators as the codex ti
 None of these run in CI (no operator credentials there), and none should be looped
 casually — every run consumes the respective account's rate/usage window.
 
+### Live interactive tier
+
+`make test-aft-live-interactive` (add `LIVE_BACKEND=claude` for the harness-wrapper
+runtime) drives a **Custom-prompt interactive agent** with a real backend, so the
+chain prompt → `loom lead` argv → live model → instructed artifact is proven end to
+end instead of stopping at argv. Suites live in `tests/aft/live-interactive-suites/`.
+
+The acceptance criterion lives *in the prompt*: the agent is told to write a marker
+file whose exact contents contain this run's id. No stub writes it, no built-in
+prompt produces it, and a stale prompt yields the wrong id — one artifact, three
+discriminators. The test then asserts the bytes, asserts nothing else changed
+relative to a **captured baseline** (the workspace root is not clean — the stack
+writes response JSON after its seed commit), and closes the terminal tab fatally.
+
+Live-tier flags are owned by `run-aft.sh`, not aft, and are consumed before the
+stack boots:
+
+| flag | effect |
+|---|---|
+| `--live` | opt in; requires `--no-agent`, refuses `--strict`/`--heal`, and requires `AFT_SUITES` to point at a `live-*` path |
+| `--real-backend <b>` | flag form of `AFT_REAL_BACKEND` |
+| `--max-real-cases <n>` | refuses to start when the selected suites hold more cases than the cap |
+| `--with-daemon` | start and own a real daemon; required for `live-worker*` suites and rejected elsewhere |
+
+Two properties this tier depends on, both deliberate: interactive agents get **no
+worktree**, so the artifact lands in the isolated workspace root; and readiness is
+asserted from **rendered terminal output**, never from `pty_alive`, which is true for
+attachable metadata before any child has spawned. There is no transcript assertion
+because an interactive lead records no task session — the evidence is the artifact,
+the terminal, and the orchestration session id.
+
+**The workspace root is not a security boundary.** Codex leads launch with
+`--dangerously-bypass-approvals-and-sandbox`; changing the process cwd confines
+nothing. The model can write anywhere the operator can, and LI-1's negative-scope
+assertion only inspects the test workspace. Treat the whole host account as exposed
+until this tier runs inside a real sandbox with only the workspace writable.
+
+Cleanup is **harness-owned, not suite-owned**, because a suite cannot be trusted with
+it: aft skips every remaining step once one fails (so a test's own final "close the
+tab" step is skipped on exactly the runs that leak), and treats suite-teardown failure
+as report-only. So `run-aft.sh` runs `scripts/live-sweep.sh` after aft exits, pass or
+fail: it deletes every terminal tab, then checks the **process table** against a
+pre-run PID baseline — because `DeleteTab` removes metadata first and only logs a
+PTY-kill failure, "no tabs" alone is not proof the child died. A sweep that cannot
+prove cleanliness fails the run even when every test passed.
+
+Every run then appends an accounting line to `reports/live-ledger.log` (backend,
+resolved binary + version, case count, exit code, wall time, surviving tabs,
+process-sweep verdict, and daemon-cleanup verdict).
+
+Known gap: there is **no working spend ceiling for a claude live agent**.
+`--max-budget-usd` is documented by `claude --help` as "only works with `--print`",
+and the lead path deliberately omits `-p`. Until an external watchdog exists, prefer
+`LIVE_BACKEND=codex` and keep fixtures small.
+
+### Live supervised-worker tier
+
+`make test-aft-live-workers` (optionally `LIVE_BACKEND=claude`) runs exactly two
+cases from `tests/aft/live-worker-suites/`: LW-1 creates a Task Runner through
+`CreateAgentModal` and delegates a designed implementation task through the issue
+assignee UI; LW-2 creates a Planner, creates a designless task, and starts the
+Planner from its agent header. Both workers run under a foreground `loom daemon`
+that `run-aft.sh` owns.
+
+The different start surfaces are intentional. The assignee picker is a Task Runner
+surface and explicitly excludes `plan` roles, so forcing Planner through it would
+contradict the product contract. Phase 2 adds the previously missing browser
+lifecycle seam: an idle background agent's header exposes **Start agent**, backed by
+the same lifecycle endpoint and queued daemon command as assignment-driven starts.
+Modal-created background agents are persisted as `desired_state: stopped`, so the
+30-second config reconciler cannot race that explicit action. When the start command
+arrives for a newly created agent, the daemon suppresses only that agent during its
+synchronous config reload, then starts it once with the requested task/session scope.
+
+The daemon now legitimately starts with zero agents. That is a product seam, not a
+test bypass: the empty supervisor, FleetDB config reconciler, and queued-command
+poller already supported agents added later, while the old early exit made a fresh
+workspace impossible to operate and caused the local daemon supervisor to restart
+until an agent happened to exist. The live suite proves the startup banner says
+`Agents: 0`, then proves each UI lifecycle command reached that same daemon through
+its per-agent start/stop log records.
+
+The worker fixture uses the primary isolated E2E workspace and adds a tiny committed
+Makefile plus a throwaway **local bare origin** under `$AFT_WORK_DIR`. A Task Runner
+following its normal commit/stack-publish prompt therefore has a complete local
+delivery path but cannot mutate a hosted repository. Only the selected backend is
+real; all other AI CLIs and `gh` remain in the stub farm. Claude's noninteractive
+worker sessions default to `LOOM_MAX_BUDGET_USD=5.00`; override with
+`AFT_LIVE_MAX_BUDGET_USD` only deliberately.
+
+LW-1 requires all of: task closure, byte-exact content in
+`worktrees/<repo>/<agent>/`, selected-backend session identity, `files_changed >= 1`,
+healthy evidence, a structured native `tool_use` entry, diff content containing the
+unique marker, and the same patch rendered in the browser's Runs → Diff view. LW-2
+requires a review-state design with a run-unique token, concrete architecture/file/
+error/acceptance/test sections, healthy selected-backend session evidence, a
+structured native tool event, the design rendered in the browser, and the session
+visible in Runs. It deliberately does **not** use `files_changed == 0` as its
+real-backend discriminator.
+
+Cleanup order is strict: successful cases stop their workers through the product
+lifecycle endpoint and wait for daemon confirmation; after AFT returns, the harness
+stops the owned daemon and requires its clean exit marker; only then does the global
+process-baseline sweep prove no selected-backend process survived. The EXIT trap
+also stops the daemon on interruption before tearing down the server.
+
 ### Live terminal tier
 
 `make test-aft-terminal` proves the agents-page Logs tab's live-tmux path:
