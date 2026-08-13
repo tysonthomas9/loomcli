@@ -115,6 +115,12 @@ func harnessLeadInvocation(backend, workDir string) (harnessLeadLaunch, bool) {
 	switch backend {
 	case "claude":
 		sessionID := newHarnessSessionID()
+		// NOT capped with --max-budget-usd: `claude --help` documents that flag as
+		// "only works with --print", and this path deliberately omits -p. Appending it
+		// here would have read as a spend ceiling in review and in tests while
+		// enforcing nothing. The worker path still passes it; that it is inert there
+		// too is recorded in tests/aft/FINDINGS.md §1.25. A real interactive cap needs
+		// an external watchdog, not a flag.
 		env := append(buildClaudeEnv(workDir, ""), claudeVirtualScrollEnv)
 		return harnessLeadLaunch{
 			binary:           "claude",

@@ -39,6 +39,14 @@ func TestRunControlledLeadRuntimeDispatchesClaude(t *testing.T) {
 	if len(captured.Args) != 3 || captured.Args[0] != "--session-id" || captured.Args[2] != "--dangerously-skip-permissions" {
 		t.Fatalf("captured args = %#v, want [--session-id <uuid> --dangerously-skip-permissions]", captured.Args)
 	}
+	// Pinned deliberately: --max-budget-usd must NOT appear here. `claude --help`
+	// documents it as "only works with --print" and this launch has no -p, so
+	// adding it would assert a spend ceiling that does not exist.
+	for _, arg := range captured.Args {
+		if arg == "--max-budget-usd" {
+			t.Fatalf("captured args = %#v, want no --max-budget-usd on a non---print launch", captured.Args)
+		}
+	}
 	if captured.HarnessSessionID == "" || captured.HarnessSessionID != captured.Args[1] {
 		t.Fatalf("HarnessSessionID = %q, want the --session-id value %q", captured.HarnessSessionID, captured.Args[1])
 	}

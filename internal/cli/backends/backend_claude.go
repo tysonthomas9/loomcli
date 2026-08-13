@@ -266,6 +266,15 @@ func buildClaudeEnv(workDir, agentName string) []string {
 	// inside one it is the deployment's container doing the isolating, not
 	// loom's.
 	env = append(env, "IS_SANDBOX=1")
+	// Claude's config/credential home. Scoped here rather than added to the global
+	// envfilter allowlist: that allowlist feeds EVERY backend and external plugin,
+	// and an alternate claude config dir carries settings and hooks that only the
+	// claude child has any business seeing. Without this, a caller pointing claude
+	// at an isolated credential home has it validated in the parent and silently
+	// dropped for the child, which then falls back to ~/.claude.
+	if dir := strings.TrimSpace(os.Getenv("CLAUDE_CONFIG_DIR")); dir != "" {
+		env = append(env, "CLAUDE_CONFIG_DIR="+dir)
+	}
 	return append(env, activeSessionEnvVars()...)
 }
 
@@ -279,10 +288,13 @@ func buildClaudeRunTurnArgs(resumeSessionID string) []string {
 		args = append(args, claudeResumeArgs(resumeSessionID)...)
 	}
 	args = append(args, "--dangerously-skip-permissions")
-	// Per-run USD guardrail. Claude Code's interactive mode accepts
-	// --max-budget-usd (same flag as print mode), so the LOOM_MAX_BUDGET_USD
-	// cap carries over to the RunTurn path. Omitted only when
-	// resolveMaxBudgetUSD opts out (returns "").
+	// NOT a working guardrail. `claude --help` documents --max-budget-usd as
+	// "only works with --print", and buildClaudeRunTurnArgs deliberately omits -p,
+	// so this flag is INERT on this path: it is accepted and ignored. The previous
+	// comment here claimed the cap "carries over to the RunTurn path" — it does not,
+	// and that claim is what made an uncapped worker look capped. The flag is kept
+	// so the intent survives if Claude ever honors it interactively; the honest
+	// statement of today's behavior lives in tests/aft/FINDINGS.md §1.25.
 	if budget := resolveMaxBudgetUSD(); budget != "" {
 		args = append(args, "--max-budget-usd", budget)
 	}

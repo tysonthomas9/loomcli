@@ -9,6 +9,31 @@ import (
 	"time"
 )
 
+// Regression: loom used to launch the app server with `-c sqlite_home=<fresh dir>`.
+// On codex 0.145.0 that makes app-server wait on a state-db backfill in the default
+// home and never bind its listener, so every controlled Codex lead died at loom's 60s
+// readiness timeout with an empty app-server.log. Reintroducing the flag would break
+// the lead runtime silently again, so pin the argv.
+func TestCodexAppServerArgsDoNotOverrideSQLiteHome(t *testing.T) {
+	endpoint := "ws://127.0.0.1:52525"
+	got := codexAppServerArgs(endpoint)
+
+	want := []string{"app-server", "--listen", endpoint}
+	if len(got) != len(want) {
+		t.Fatalf("codexAppServerArgs() = %#v, want %#v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("codexAppServerArgs() = %#v, want %#v", got, want)
+		}
+	}
+	for _, arg := range got {
+		if strings.Contains(arg, "sqlite_home") {
+			t.Fatalf("codexAppServerArgs() must not override sqlite_home: %#v", got)
+		}
+	}
+}
+
 func TestNewestCodexThreadWaitsForThreadCreatedAfterRuntimeStart(t *testing.T) {
 	startedAt := time.Date(2026, 5, 17, 6, 5, 36, 0, time.UTC)
 	threads := []CodexThread{
