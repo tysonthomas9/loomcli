@@ -53,7 +53,7 @@ func RunCodexLeadRuntime(ctx context.Context, cfg CodexLeadRuntimeConfig) error 
 		return err
 	}
 	appServerLogPath := codexAppServerLogPath(runtimeHome)
-	appCmd, appErr, cancelApp, logFile, err := startCodexAppServer(ctx, cfg, runtimeHome, sqliteHome, endpoint)
+	appCmd, appErr, cancelApp, logFile, err := startCodexAppServer(ctx, cfg, runtimeHome, endpoint)
 	if err != nil {
 		return err
 	}
@@ -123,11 +123,13 @@ func codexAppServerArgs(endpoint string) []string {
 	return []string{"app-server", "--listen", endpoint}
 }
 
+// sqliteHome is deliberately NOT a parameter: the `-c sqlite_home=…` override was
+// removed (it wedges codex app-server startup on 0.145.0), so this function has no
+// use for it. The value is still recorded as runtime metadata by the caller.
 func startCodexAppServer(
 	ctx context.Context,
 	cfg CodexLeadRuntimeConfig,
 	runtimeHome string,
-	sqliteHome string,
 	endpoint string,
 ) (*exec.Cmd, chan error, context.CancelFunc, *os.File, error) {
 	// #nosec G304 -- runtimeHome is a lead-scoped cache path derived from Loom workspace/session ids.
