@@ -7,6 +7,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const connectionState = vi.hoisted(() => ({
   writeCallbacks: [] as Array<(data: string | Uint8Array) => void>,
+  historyCallbacks: [] as Array<
+    (firstScreenLine: number, available: boolean) => void
+  >,
   cleanupCount: 0,
   fitCountsAtConnect: [] as number[],
   terminalSizesAtConnect: [] as Array<{ cols: number; rows: number }>,
@@ -17,6 +20,10 @@ const xtermState = vi.hoisted(() => {
     fitCount: 0,
     onReady: null as null | ((handle: unknown) => void),
     onResize: null as null | ((cols: number, rows: number) => void),
+    rendererProps: null as null | {
+      scrollbackLines?: number;
+      allowParentWheelScroll?: boolean;
+    },
     handle: null as unknown as {
       write: ReturnType<typeof vi.fn>;
       focus: ReturnType<typeof vi.fn>;
@@ -43,14 +50,18 @@ vi.mock("../XTermRenderer", async () => {
     onReady: (handle: unknown) => void;
     onDispose: (handle: unknown) => void;
     onResize: (cols: number, rows: number) => void;
+    scrollbackLines?: number;
+    allowParentWheelScroll?: boolean;
   }) {
+    const { onDispose } = props;
     xtermState.onReady = props.onReady;
     xtermState.onResize = props.onResize;
+    xtermState.rendererProps = props;
     React.useEffect(
       () => () => {
-        props.onDispose(xtermState.handle);
+        onDispose(xtermState.handle);
       },
-      [props.onDispose],
+      [onDispose],
     );
     return React.createElement("div", { "data-testid": "mock-xterm" });
   }
@@ -72,8 +83,13 @@ vi.mock("../terminalConnection", () => ({
       _onBackendCrash: (reason: string) => void,
       _onSessionKilled: () => void,
       terminalSize: { cols: number; rows: number },
+      onHistoryCoordinate: (
+        firstScreenLine: number,
+        available: boolean,
+      ) => void,
     ): (() => void) => {
       connectionState.writeCallbacks.push(write);
+      connectionState.historyCallbacks.push(onHistoryCoordinate);
       connectionState.fitCountsAtConnect.push(xtermState.fitCount);
       connectionState.terminalSizesAtConnect.push(terminalSize);
       setConnState("connecting");
@@ -119,12 +135,15 @@ function latestWriteCallback(): (data: string | Uint8Array) => void {
 describe("TerminalInstance", () => {
   beforeEach(() => {
     connectionState.writeCallbacks.length = 0;
+    connectionState.historyCallbacks.length = 0;
     connectionState.cleanupCount = 0;
     connectionState.fitCountsAtConnect.length = 0;
     connectionState.terminalSizesAtConnect.length = 0;
     xtermState.fitCount = 0;
     xtermState.onReady = null;
     xtermState.onResize = null;
+    xtermState.rendererProps = null;
+    localStorage.removeItem("terminal.history.mode");
     xtermState.handle.write.mockClear();
     xtermState.handle.focus.mockClear();
     xtermState.handle.scrollToBottom.mockClear();
@@ -154,6 +173,69 @@ describe("TerminalInstance", () => {
       expect(view.queryByTestId("mock-xterm")).not.toBeNull();
     },
   );
+
+  it("gives the parent sole wheel and scrollback ownership in virtual mode", async () => {
+    const view = render(
+      <TerminalInstance
+        sessionName="shell-virtual"
+        backendName="shell"
+        isActive
+      />,
+    );
+    await waitFor(() => expect(xtermState.rendererProps).not.toBeNull());
+
+    expect(xtermState.rendererProps?.scrollbackLines).toBe(0);
+    expect(xtermState.rendererProps?.allowParentWheelScroll).toBe(true);
+    expect(view.getByTestId("terminal-history-scroller")).toBeTruthy();
+    expect(
+      view.getByTestId("terminal-wrapper").getAttribute("data-history-mode"),
+    ).toBe("virtual");
+  });
+
+  it("keeps classic mode on xterm's default scrollback and input path", async () => {
+    localStorage.setItem("terminal.history.mode", "classic");
+    const view = render(
+      <TerminalInstance
+        sessionName="shell-classic"
+        backendName="shell"
+        isActive
+      />,
+    );
+    await waitFor(() => expect(xtermState.rendererProps).not.toBeNull());
+
+    expect(xtermState.rendererProps?.scrollbackLines).toBeUndefined();
+    expect(xtermState.rendererProps?.allowParentWheelScroll).toBe(false);
+    expect(view.queryByTestId("terminal-history-scroller")).toBeNull();
+    expect(
+      view.getByTestId("terminal-wrapper").getAttribute("data-history-mode"),
+    ).toBe("classic");
+  });
+
+  it("falls back to classic xterm scrollback when recording is unavailable", async () => {
+    const view = render(
+      <TerminalInstance
+        sessionName="shell-recording-failed"
+        backendName="shell"
+        isActive
+      />,
+    );
+    await waitFor(() => expect(xtermState.onReady).not.toBeNull());
+    readyRenderer();
+    await waitFor(() => {
+      expect(connectionState.historyCallbacks).toHaveLength(1);
+    });
+
+    act(() => connectionState.historyCallbacks[0]?.(0, false));
+
+    await waitFor(() => {
+      expect(
+        view.getByTestId("terminal-wrapper").getAttribute("data-history-mode"),
+      ).toBe("classic");
+    });
+    expect(xtermState.rendererProps?.scrollbackLines).toBeUndefined();
+    expect(xtermState.rendererProps?.allowParentWheelScroll).toBe(false);
+    expect(view.queryByTestId("terminal-history-scroller")).toBeNull();
+  });
 
   it("fits the visible pane before opening its first WebSocket", async () => {
     render(

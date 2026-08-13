@@ -1,0 +1,10 @@
+{
+  "name": "decstbm-scroll-region",
+  "cols": 12,
+  "rows": 4,
+  "events": [
+    {"data": "header\r\none\r\ntwo\r\nfooter"},
+    {"data": "\u001b[2;3r\u001b[3;1Hthree\n\rfour"},
+    {"data": "\u001b[r\u001b[4;1Htail\nend"}
+  ]
+}

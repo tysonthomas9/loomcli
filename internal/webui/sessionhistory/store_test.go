@@ -160,7 +160,7 @@ func TestComplete_MarksActiveSession(t *testing.T) {
 	}
 
 	scrollbackPath := "/home/user/.loom/session-scrollback/issue-proj-1.log"
-	if err := store.Complete(ctx, testWorkspaceID, "proj.1", "issue-proj-1", scrollbackPath); err != nil {
+	if err := store.Complete(ctx, testWorkspaceID, "proj.1", record.ID, scrollbackPath); err != nil {
 		t.Fatalf("Complete: %v", err)
 	}
 
@@ -220,6 +220,40 @@ func TestComplete_NoOpWhenNoMatchingActiveSession(t *testing.T) {
 	}
 	if records[0].Status != "completed" {
 		t.Errorf("Status = %q, want %q (should not have changed)", records[0].Status, "completed")
+	}
+}
+
+func TestCompleteMatchesExactSessionRecordID(t *testing.T) {
+	store, _ := setupTest(t)
+	ctx := context.Background()
+	const (
+		issue   = "proj.1"
+		session = "issue-proj-1"
+		oldID   = "issue-proj-1:100"
+		newID   = "issue-proj-1:200"
+	)
+	for _, record := range []SessionRecord{
+		{ID: oldID, SessionName: session, IssueID: issue, Status: "active", StartedAt: time.UnixMilli(100).UTC()},
+		{ID: newID, SessionName: session, IssueID: issue, Status: "active", StartedAt: time.UnixMilli(200).UTC()},
+	} {
+		if err := store.Add(ctx, testWorkspaceID, record); err != nil {
+			t.Fatalf("Add(%s): %v", record.ID, err)
+		}
+	}
+
+	if err := store.Complete(ctx, testWorkspaceID, issue, newID, "/recordings/new/lines.jsonl"); err != nil {
+		t.Fatalf("Complete: %v", err)
+	}
+	records, err := store.List(ctx, testWorkspaceID, issue)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	status := make(map[string]string, len(records))
+	for _, record := range records {
+		status[record.ID] = record.Status
+	}
+	if status[oldID] != "active" || status[newID] != "completed" {
+		t.Fatalf("completion statuses = %#v, want old active and new completed", status)
 	}
 }
 

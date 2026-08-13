@@ -1,0 +1,9 @@
+{
+  "name": "cursor-motion-outside-scroll-region",
+  "cols": 10,
+  "rows": 5,
+  "events": [
+    {"data": "\u001b[2;4r\u001b[5Bbottom"},
+    {"data": "\u001b[1;1H\u001bMtop\u001b[r"}
+  ]
+}

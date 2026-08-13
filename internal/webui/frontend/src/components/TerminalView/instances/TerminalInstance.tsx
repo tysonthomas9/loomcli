@@ -32,6 +32,11 @@ import {
 import type { ReconnectOverlayState } from "./ReconnectingOverlay";
 import { connectWebSocket, encodeResize } from "./terminalConnection";
 import type { XTermRendererHandle } from "./XTermRenderer";
+import { getTerminalHistoryMode } from "./terminalHistoryMode";
+import {
+  VirtualTerminalHistory,
+  type VirtualTerminalHistoryHandle,
+} from "./VirtualTerminalHistory";
 import styles from "./TerminalInstance.module.css";
 
 const LazyXTermRenderer = lazy(async () => {
@@ -46,6 +51,14 @@ const INITIAL_CONNECT_CONFIG: ReconnectConfig = {
   maxDelay: 15000,
   jitterFactor: 0.5,
 };
+
+/**
+ * A connection must stay open this long before it resets the reconnect
+ * backoff. A crash-looping session "connects" successfully and dies moments
+ * later; resetting on bare ws.onopen made every doomed cycle restart the
+ * backoff at attempt 0, hammering the server at the base cadence forever.
+ */
+const HEALTHY_CONNECTION_RESET_MS = 10_000;
 
 /**
  * Wall-clock ceiling: if a reconnect doesn't succeed within this window,
@@ -136,8 +149,15 @@ export const TerminalInstance = forwardRef<
 ) {
   const { workspaceId } = useWorkspaceContext();
   const xtermInstanceRef = useRef<XTermRendererHandle | null>(null);
+  const virtualHistoryRef = useRef<VirtualTerminalHistoryHandle | null>(null);
   const pendingRendererWritesRef = useRef<Array<string | Uint8Array>>([]);
   const terminalSizeRef = useRef({ cols: 80, rows: 24 });
+  const configuredHistoryModeRef = useRef(getTerminalHistoryMode());
+  const [historyMode, setHistoryMode] = useState(
+    configuredHistoryModeRef.current,
+  );
+  const [firstScreenLine, setFirstScreenLine] = useState<number | undefined>();
+  const [recordingEpoch, setRecordingEpoch] = useState(0);
 
   const syncViewportToBottom = useCallback(() => {
     xtermInstanceRef.current?.scrollToBottom();
@@ -214,12 +234,21 @@ export const TerminalInstance = forwardRef<
     );
   }, [connectionState]);
 
+  const reconnectAttemptCarryRef = useRef(0);
+  const healthyResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
+
   const clearReconnectTimers = useCallback(() => {
     reconnectCancelRef.current?.();
     reconnectCancelRef.current = null;
     if (reconnectTimeoutRef.current) {
       clearTimeout(reconnectTimeoutRef.current);
       reconnectTimeoutRef.current = null;
+    }
+    if (healthyResetTimerRef.current) {
+      clearTimeout(healthyResetTimerRef.current);
+      healthyResetTimerRef.current = null;
     }
   }, []);
 
@@ -248,12 +277,14 @@ export const TerminalInstance = forwardRef<
             doConnectRef.current?.({ onOutcome: resolve });
           }),
         (state: ReconnectState) => {
+          reconnectAttemptCarryRef.current = state.attempt;
           if (state.gaveUp) {
             clearReconnectTimers();
             onReconnectStateChangeRef.current?.("expired");
           }
         },
         config,
+        reconnectAttemptCarryRef.current,
       );
       reconnectCancelRef.current = cancel;
     },
@@ -281,7 +312,15 @@ export const TerminalInstance = forwardRef<
         // immediately after this callback.
         () => {
           clearReconnectTimers();
+          // Only a connection that stays up resets the backoff carry; a
+          // crash-looping session that opens and dies keeps escalating.
+          healthyResetTimerRef.current = setTimeout(() => {
+            reconnectAttemptCarryRef.current = 0;
+            healthyResetTimerRef.current = null;
+          }, HEALTHY_CONNECTION_RESET_MS);
           onReconnectStateChangeRef.current?.(null);
+          setFirstScreenLine(undefined);
+          setRecordingEpoch((epoch) => epoch + 1);
           if (!initialViewportSyncDoneRef.current) {
             initialViewportSyncDoneRef.current = true;
             syncViewportToBottom();
@@ -317,6 +356,12 @@ export const TerminalInstance = forwardRef<
           onReconnectStateChangeRef.current?.(null);
         },
         terminalSizeRef.current,
+        (line, available) => {
+          setHistoryMode(
+            available ? configuredHistoryModeRef.current : "classic",
+          );
+          setFirstScreenLine(available ? line : undefined);
+        },
       );
       wsCleanupRef.current = cleanup;
     },
@@ -437,6 +482,7 @@ export const TerminalInstance = forwardRef<
   const handleData = useCallback(
     (data: string) => {
       if (!writable) return;
+      virtualHistoryRef.current?.scrollToBottom();
       const ws = wsRef.current;
       if (ws?.readyState === WebSocket.OPEN) {
         ws.send(data);
@@ -564,11 +610,32 @@ export const TerminalInstance = forwardRef<
         if (!writable) return;
         const ws = wsRef.current;
         if (ws?.readyState === WebSocket.OPEN) {
+          virtualHistoryRef.current?.scrollToBottom();
           ws.send(text);
         }
       },
     }),
     [focus, clearReconnectTimers, writable],
+  );
+
+  const renderer = (
+    <Suspense
+      fallback={
+        <div className={styles.xtermContainer} data-testid="xterm-loading" />
+      }
+    >
+      <LazyXTermRenderer
+        className={styles.xtermContainer}
+        onReady={handleXTermReady}
+        onDispose={handleXTermDispose}
+        onData={handleData}
+        onBinary={handleBinary}
+        onResize={handleResize}
+        onFocus={() => onTerminalFocusRef.current?.()}
+        scrollbackLines={historyMode === "virtual" ? 0 : undefined}
+        allowParentWheelScroll={historyMode === "virtual"}
+      />
+    </Suspense>
   );
 
   return (
@@ -577,22 +644,21 @@ export const TerminalInstance = forwardRef<
       data-testid="terminal-wrapper"
       data-terminal-input
       data-terminal-renderer="xterm"
+      data-history-mode={historyMode}
     >
-      <Suspense
-        fallback={
-          <div className={styles.xtermContainer} data-testid="xterm-loading" />
-        }
-      >
-        <LazyXTermRenderer
-          className={styles.xtermContainer}
-          onReady={handleXTermReady}
-          onDispose={handleXTermDispose}
-          onData={handleData}
-          onBinary={handleBinary}
-          onResize={handleResize}
-          onFocus={() => onTerminalFocusRef.current?.()}
-        />
-      </Suspense>
+      {historyMode === "virtual" ? (
+        <VirtualTerminalHistory
+          ref={virtualHistoryRef}
+          sessionName={sessionName}
+          isActive={isActive}
+          recordingEpoch={recordingEpoch}
+          firstScreenLine={firstScreenLine}
+        >
+          {renderer}
+        </VirtualTerminalHistory>
+      ) : (
+        renderer
+      )}
     </div>
   );
 });

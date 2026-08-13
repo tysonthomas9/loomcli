@@ -149,7 +149,7 @@ func (r *ringBuffer) trackPrivateModesLocked(chunkStart int64, p []byte) {
 	r.scanTail = append(r.scanTail[:0], combined[start:]...)
 }
 
-func (r *ringBuffer) applyPrivateModeEventLocked(event privateModeEvent) {
+func applyPrivateModeEvent(modes map[string]bool, event privateModeEvent) {
 	for _, mode := range event.modes {
 		if !isReplayablePrivateMode(mode) {
 			continue
@@ -157,12 +157,12 @@ func (r *ringBuffer) applyPrivateModeEventLocked(event privateModeEvent) {
 		if event.enabled {
 			if group := mutuallyExclusivePrivateModes(mode); group != nil {
 				for _, peer := range group {
-					r.headModes[peer] = peer == mode
+					modes[peer] = peer == mode
 				}
 				continue
 			}
 		}
-		r.headModes[mode] = event.enabled
+		modes[mode] = event.enabled
 	}
 }
 
@@ -180,7 +180,7 @@ func (r *ringBuffer) advanceHeadLocked(target int64) {
 		event := r.modeEvents[consumed]
 		switch {
 		case event.end <= target:
-			r.applyPrivateModeEventLocked(event)
+			applyPrivateModeEvent(r.headModes, event)
 			consumed++
 		case event.start < target:
 			extra := event.end - target
@@ -188,7 +188,7 @@ func (r *ringBuffer) advanceHeadLocked(target int64) {
 				r.dropFrontLocked(extra)
 				target = event.end
 			}
-			r.applyPrivateModeEventLocked(event)
+			applyPrivateModeEvent(r.headModes, event)
 			consumed++
 		default:
 			r.headOffset = target
@@ -221,17 +221,7 @@ func (r *ringBuffer) ReplaySnapshot() (checkpoint []byte, body []byte) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	// Alternate-buffer state comes first so the caller's clear/home applies to
-	// the correct buffer. For mutually-exclusive groups, reset stale peers
-	// before setting the selected mode; emitting a peer reset afterward can
-	// disable the selection in terminal emulators.
-	checkpoint = r.appendModeGroupCheckpointLocked(checkpoint, alternateBufferModes)
-	checkpoint = r.appendModeCheckpointLocked(checkpoint, "1")
-	checkpoint = r.appendModeCheckpointLocked(checkpoint, "25")
-	checkpoint = r.appendModeGroupCheckpointLocked(checkpoint, mouseEventModes)
-	checkpoint = r.appendModeCheckpointLocked(checkpoint, "1004")
-	checkpoint = r.appendModeGroupCheckpointLocked(checkpoint, mouseEncodingModes)
-	checkpoint = r.appendModeCheckpointLocked(checkpoint, "2004")
+	checkpoint = synthesizeModeCheckpoint(r.headModes)
 
 	if len(r.buf) > 0 {
 		body = make([]byte, len(r.buf))
@@ -240,10 +230,27 @@ func (r *ringBuffer) ReplaySnapshot() (checkpoint []byte, body []byte) {
 	return checkpoint, body
 }
 
-func (r *ringBuffer) appendModeGroupCheckpointLocked(dst []byte, modes []string) []byte {
+// synthesizeModeCheckpoint emits DECSET/DECRST sequences reproducing the
+// given private-mode state. Alternate-buffer state comes first so the
+// caller's clear/home applies to the correct buffer. For mutually-exclusive
+// groups, stale peers are reset before the selected mode is set; emitting a
+// peer reset afterward can disable the selection in terminal emulators.
+func synthesizeModeCheckpoint(modes map[string]bool) []byte {
+	var dst []byte
+	dst = appendModeGroupCheckpoint(dst, modes, alternateBufferModes)
+	dst = appendModeCheckpoint(dst, modes, "1")
+	dst = appendModeCheckpoint(dst, modes, "25")
+	dst = appendModeGroupCheckpoint(dst, modes, mouseEventModes)
+	dst = appendModeCheckpoint(dst, modes, "1004")
+	dst = appendModeGroupCheckpoint(dst, modes, mouseEncodingModes)
+	dst = appendModeCheckpoint(dst, modes, "2004")
+	return dst
+}
+
+func appendModeGroupCheckpoint(dst []byte, modes map[string]bool, group []string) []byte {
 	for _, enabled := range []bool{false, true} {
-		for _, mode := range modes {
-			state, seen := r.headModes[mode]
+		for _, mode := range group {
+			state, seen := modes[mode]
 			if !seen || state != enabled {
 				continue
 			}
@@ -253,12 +260,44 @@ func (r *ringBuffer) appendModeGroupCheckpointLocked(dst []byte, modes []string)
 	return dst
 }
 
-func (r *ringBuffer) appendModeCheckpointLocked(dst []byte, mode string) []byte {
-	enabled, seen := r.headModes[mode]
+func appendModeCheckpoint(dst []byte, modes map[string]bool, mode string) []byte {
+	enabled, seen := modes[mode]
 	if !seen {
 		return dst
 	}
 	return appendPrivateModeSequence(dst, mode, enabled)
+}
+
+// CurrentModeCheckpoint synthesizes the private-mode state at the stream END:
+// the head checkpoint plus every complete DECSET/DECRST still in the retained
+// window. Recorder-rendered attach replays discard the retained byte tail, so
+// mode switches inside it must be folded into the checkpoint they replay.
+func (r *ringBuffer) CurrentModeCheckpoint() []byte {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	modes := make(map[string]bool, len(r.headModes)+4)
+	for mode, enabled := range r.headModes {
+		modes[mode] = enabled
+	}
+	for _, event := range r.modeEvents {
+		applyPrivateModeEvent(modes, event)
+	}
+	return synthesizeModeCheckpoint(modes)
+}
+
+// TailBytes returns a copy of at most n of the newest buffered bytes.
+func (r *ringBuffer) TailBytes(n int) []byte {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if n <= 0 || len(r.buf) == 0 {
+		return nil
+	}
+	if n > len(r.buf) {
+		n = len(r.buf)
+	}
+	out := make([]byte, n)
+	copy(out, r.buf[len(r.buf)-n:])
+	return out
 }
 
 func appendPrivateModeSequence(dst []byte, mode string, enabled bool) []byte {

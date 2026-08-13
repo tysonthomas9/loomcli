@@ -15,6 +15,87 @@
   position: relative;
 }
 
+.historyScroller {
+  position: absolute;
+  inset: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  background: var(--terminal-bg);
+  scrollbar-width: thin;
+  scrollbar-color: var(--terminal-scrollbar-thumb) var(--terminal-bg);
+  scrollbar-gutter: stable;
+}
+
+.historyScroller::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.historyScroller::-webkit-scrollbar-track {
+  background: var(--terminal-bg);
+}
+
+.historyScroller::-webkit-scrollbar-thumb {
+  background: var(--terminal-scrollbar-thumb);
+  border-radius: 4px;
+}
+
+.historyScroller::-webkit-scrollbar-thumb:hover {
+  background: var(--terminal-scrollbar-thumb-hover);
+}
+
+.historyCanvas {
+  position: relative;
+  min-width: 100%;
+}
+
+.historyRows {
+  position: absolute;
+  inset: 0 0 auto;
+  min-width: max-content;
+  width: 100%;
+}
+
+.historyRow {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 0 8px;
+  overflow: hidden;
+  color: var(--terminal-fg);
+  font-family: var(--terminal-font-family), monospace;
+  font-size: var(--terminal-font-size);
+  line-height: 20px;
+  white-space: pre;
+}
+
+.liveScreen {
+  position: absolute;
+  left: 0;
+  width: 100%;
+  min-height: 1px;
+  overflow: hidden;
+  background: var(--terminal-bg);
+}
+
+.historyNotice {
+  position: sticky;
+  right: 12px;
+  bottom: 10px;
+  z-index: 3;
+  float: right;
+  max-width: calc(100% - 24px);
+  padding: 3px 8px;
+  border: 1px solid var(--terminal-border, #333);
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--terminal-bg) 92%, transparent);
+  color: var(--text-secondary, #aaa);
+  font-size: 11px;
+  pointer-events: none;
+}
+
 .xtermContainer {
   width: 100%;
   height: 100%;
@@ -33,6 +114,15 @@
   overscroll-behavior: contain;
   scrollbar-width: thin;
   scrollbar-color: var(--terminal-scrollbar-thumb) var(--terminal-bg);
+}
+
+.wrapper[data-history-mode="virtual"] .xtermContainer :global(.xterm-viewport) {
+  overflow-y: hidden;
+  pointer-events: none;
+}
+
+.wrapper[data-history-mode="virtual"] .xtermContainer :global(.xterm-screen) {
+  touch-action: pan-y;
 }
 
 .xtermContainer :global(.xterm-viewport)::-webkit-scrollbar {

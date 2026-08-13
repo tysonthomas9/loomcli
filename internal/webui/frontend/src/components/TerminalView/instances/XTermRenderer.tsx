@@ -29,6 +29,8 @@ interface XTermRendererProps {
   onBinary: (data: Uint8Array) => void;
   onResize: (cols: number, rows: number) => void;
   onFocus?: (() => void) | undefined;
+  scrollbackLines?: number | undefined;
+  allowParentWheelScroll?: boolean | undefined;
 }
 
 function cssValue(name: string, fallback: string): string {
@@ -84,6 +86,8 @@ export function XTermRenderer({
   onBinary,
   onResize,
   onFocus,
+  scrollbackLines = TERMINAL_SCROLLBACK_LINES,
+  allowParentWheelScroll = false,
 }: XTermRendererProps) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const onDataRef = useRef(onData);
@@ -108,9 +112,16 @@ export function XTermRenderer({
       cursorBlink: true,
       fontFamily: font.fontFamily,
       fontSize: font.fontSize,
-      scrollback: TERMINAL_SCROLLBACK_LINES,
+      scrollback: scrollbackLines,
       theme: readTheme(),
     });
+    if (allowParentWheelScroll) {
+      // With no xterm scrollback, xterm normally converts wheel gestures into
+      // cursor-key input and cancels the browser event. Virtual history lives
+      // in the scrollable ancestor instead, so leave the trusted wheel event
+      // untouched and let the browser perform native scrolling there.
+      terminal.attachCustomWheelEventHandler(() => false);
+    }
     const fitAddon = new FitAddon();
     terminal.loadAddon(fitAddon);
     terminal.open(host);
@@ -211,7 +222,7 @@ export function XTermRenderer({
       onDisposeRef.current(handle);
       terminal.dispose();
     };
-  }, []);
+  }, [allowParentWheelScroll, scrollbackLines]);
 
   return (
     <div

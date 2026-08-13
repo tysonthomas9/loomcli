@@ -1652,6 +1652,102 @@ paths:
         "401":
           description: Invalid or expired token
 
+  /api/workspaces/{ws}/terminal/sessions/{session}/history:
+    get:
+      operationId: getTerminalHistory
+      tags: [terminal]
+      summary: Read a bounded range of durable terminal rows
+      description: |
+        Returns stable rendered terminal rows by line index. `count` is capped
+        at 1000. Mutable totals and lifecycle state are served separately by
+        the no-store metadata endpoint. Committed ranges are immutable and
+        served with a strong ETag.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: session
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: generation
+          in: query
+          required: true
+          description: Opaque PTY-lifetime identity reported by the no-store metadata endpoint.
+          schema:
+            type: string
+            pattern: "^[0-9a-f]{32}$"
+        - name: from
+          in: query
+          schema:
+            type: integer
+            format: int64
+            minimum: 0
+            default: 0
+        - name: count
+          in: query
+          description: Number of rows to return; values above 1000 are clamped.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 1000
+            default: 200
+      responses:
+        "200":
+          description: Bounded terminal history range
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TerminalHistoryResponse"
+        "400":
+          description: Missing or invalid generation or range parameter
+        "404":
+          description: Recording not found
+
+  /api/workspaces/{ws}/terminal/sessions/{session}/history/meta:
+    get:
+      operationId: getTerminalHistoryMeta
+      tags: [terminal]
+      summary: Get durable terminal recording metadata
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: session
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Terminal recording metadata
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TerminalHistoryMeta"
+        "404":
+          description: Recording not found
+
+  /api/workspaces/{ws}/terminal/sessions/{session}/history/raw:
+    get:
+      operationId: exportTerminalHistoryRaw
+      tags: [terminal]
+      summary: Download the byte-exact framed terminal output segment
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: session
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Framed raw terminal segment
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        "404":
+          description: Recording not found
+
   /api/workspaces/{ws}/terminal/session-status:
     get:
       operationId: getTerminalSessionStatus
@@ -4346,6 +4442,105 @@ components:
           const: true
         message:
           type: string
+
+    TerminalHistoryRun:
+      type: object
+      required: [text]
+      properties:
+        text:
+          type: string
+        fg:
+          type: string
+        bg:
+          type: string
+        bold:
+          type: boolean
+        italic:
+          type: boolean
+        underline:
+          type: boolean
+        inverse:
+          type: boolean
+
+    TerminalHistoryLine:
+      type: object
+      required: [i, t, cols, runs]
+      properties:
+        i:
+          type: integer
+          format: int64
+        t:
+          type: integer
+          format: int64
+        cols:
+          type: integer
+        runs:
+          type: array
+          items:
+            $ref: "#/components/schemas/TerminalHistoryRun"
+
+    TerminalHistoryResponse:
+      type: object
+      description: A bounded row-only range. Mutable recording coordinates are served by TerminalHistoryMeta.
+      required: [generation, lines]
+      properties:
+        generation:
+          type: string
+          description: Opaque PTY-lifetime identity for every row in this response.
+          pattern: "^[0-9a-f]{32}$"
+        lines:
+          type: array
+          items:
+            $ref: "#/components/schemas/TerminalHistoryLine"
+
+    TerminalHistoryMeta:
+      type: object
+      required: [generation, totalLines, firstScreenLine, startedAt, cols, rows, altScreen, gaps, unhandledSequences, historyLimited, recordingStopped, closed]
+      properties:
+        generation:
+          type: string
+          description: Current opaque PTY-lifetime identity; pass it on every history range request.
+          pattern: "^[0-9a-f]{32}$"
+        totalLines:
+          type: integer
+          format: int64
+        firstScreenLine:
+          type: integer
+          format: int64
+        startedAt:
+          type: integer
+          format: int64
+        cols:
+          type: integer
+        rows:
+          type: integer
+        altScreen:
+          type: boolean
+        gaps:
+          type: integer
+          format: int64
+        unhandledSequences:
+          $ref: "#/components/schemas/TerminalUnhandledSequences"
+        historyLimited:
+          type: boolean
+        recordingStopped:
+          type: boolean
+        closed:
+          type: boolean
+
+    TerminalUnhandledSequences:
+      type: object
+      description: Bounded diagnostics for parsed terminal escape sequences the focused recorder did not implement. Count is exact; prefixes is a bounded heavy-hitter map.
+      required: [count, prefixes]
+      properties:
+        count:
+          type: integer
+          format: int64
+        prefixes:
+          type: object
+          additionalProperties:
+            type: integer
+            format: int64
 
     FileMutationResponse:
       type: object

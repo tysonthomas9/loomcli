@@ -1,0 +1,9 @@
+{
+  "name": "sgr-preserves-wrap-pending",
+  "cols": 5,
+  "rows": 3,
+  "events": [
+    {"data": "abcde\u001b[31mf\u001b[0m"},
+    {"data": "\r\n12345\u001b[K6"}
+  ]
+}

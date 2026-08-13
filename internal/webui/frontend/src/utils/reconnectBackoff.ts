@@ -51,16 +51,21 @@ export function calculateBackoffDelay(
  * @param connectFn - Called on each reconnection attempt. Return true if connection succeeded, false otherwise. May return a Promise for async connection attempts.
  * @param onStateChange - Called whenever the reconnect state changes.
  * @param config - Backoff configuration.
+ * @param initialAttempt - Attempt number to resume from. Callers that restart
+ *   the loop after a short-lived "successful" connection pass the prior
+ *   attempt count so a crash-looping backend keeps escalating delays instead
+ *   of hammering at the base cadence forever.
  * @returns A cancel function that stops the reconnection loop.
  */
 export function startAutoReconnect(
   connectFn: () => boolean | Promise<boolean>,
   onStateChange: (state: ReconnectState) => void,
   config: ReconnectConfig = DEFAULT_RECONNECT_CONFIG,
+  initialAttempt = 0,
 ): () => void {
   let cancelled = false;
   let timerId: ReturnType<typeof setTimeout> | null = null;
-  let attempt = 0;
+  let attempt = initialAttempt;
 
   function scheduleNext(): void {
     if (cancelled) return;

@@ -1,0 +1,9 @@
+{
+  "name": "sgr-colors-and-attributes",
+  "cols": 24,
+  "rows": 3,
+  "events": [
+    {"data": "\u001b[1;31mred\u001b[0m plain\r\n"},
+    {"data": "\u001b[38;5;202mindexed\u001b[39m \u001b[48;2;1;2;3mtrue\u001b[0m\r\nend"}
+  ]
+}

@@ -71,6 +71,7 @@ type TerminalModuleDeps struct {
 	Store           store.Store
 	TabMetaStore    *tabmeta.Store
 	Hub             *realtime.Hub
+	RecordingStore  *terminal.RecordingStore
 	ServerStartedAt time.Time
 }
 
@@ -82,7 +83,7 @@ func NewTerminalModules(deps TerminalModuleDeps) []interface{ Register(*http.Ser
 			deps.TermSvc, deps.AgentSvc, deps.PTYMgr, deps.AgentTmuxMgr,
 			deps.TermAuth, deps.CORSOrigins,
 			deps.SelfURL, deps.Store,
-			deps.TabMetaStore, deps.Hub, deps.ServerStartedAt),
+			deps.TabMetaStore, deps.Hub, deps.RecordingStore, deps.ServerStartedAt),
 	}
 }
 

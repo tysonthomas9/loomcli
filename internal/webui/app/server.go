@@ -77,6 +77,7 @@ type Server struct {
 	ptyMgr       *terminal.MultiPTYManager  // main web terminal (per-workspace dispatch)
 	agentTmuxMgr *terminal.AgentTmuxManager // agent-view only; nil if tmux unavailable
 	termAuth     *appstores.TerminalAuth    // one-time token issuer (nil disables auth)
+	recordings   *terminal.RecordingStore   // durable local PTY history (payload on disk)
 
 	// SSE token exchange (external auth mode only)
 	sseTokens *appstores.TokenStore // nil if ExtAuthURL is empty
@@ -219,11 +220,14 @@ func (app *Server) Close() {
 	if app.jwksCleanup != nil {
 		app.jwksCleanup()
 	}
-	if app.sessionHistoryStore != nil {
-		_ = app.sessionHistoryStore.Close()
-	}
 	if app.issueTabStore != nil {
 		_ = app.issueTabStore.Close()
+	}
+	if app.recordings != nil {
+		_ = app.recordings.Close()
+	}
+	if app.sessionHistoryStore != nil {
+		_ = app.sessionHistoryStore.Close()
 	}
 	if app.tabMetaStore != nil {
 		_ = app.tabMetaStore.Close()

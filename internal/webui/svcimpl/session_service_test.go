@@ -2,6 +2,7 @@ package svcimpl
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -17,6 +18,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/sessions/eventstore"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
+	"github.com/tysonthomas9/loomcli/internal/webui/terminal"
 )
 
 func TestSessionServiceListTaskSessionsUsesControlPlane(t *testing.T) {
@@ -615,12 +617,10 @@ func TestSessionServiceEventStoreSubagentsAreDiscoverable(t *testing.T) {
 	}
 }
 
-func TestReadScrollbackFileReturnsInternalWhenHomeDirUnavailable(t *testing.T) {
-	oldUserHomeDir := userHomeDir
-	userHomeDir = func() (string, error) {
-		return "", errors.New("home unavailable")
-	}
-	t.Cleanup(func() { userHomeDir = oldUserHomeDir })
+func TestReadScrollbackFileReturnsInternalWhenLoomDirUnavailable(t *testing.T) {
+	oldResolver := recordingRootResolver
+	recordingRootResolver = func() (string, error) { return "", errors.New("no loom directory") }
+	t.Cleanup(func() { recordingRootResolver = oldResolver })
 
 	_, err := readScrollbackFile("/.loom/session-scrollback/session.log")
 	if err == nil {
@@ -632,5 +632,85 @@ func TestReadScrollbackFileReturnsInternalWhenHomeDirUnavailable(t *testing.T) {
 	}
 	if svcErr.Kind != service.KindInternal {
 		t.Fatalf("error kind = %q, want %q", svcErr.Kind, service.KindInternal)
+	}
+}
+
+func TestReadScrollbackFileDecodesGuardedRecordingLines(t *testing.T) {
+	loomDir := t.TempDir()
+	oldResolver := recordingRootResolver
+	recordingRootResolver = func() (string, error) { return filepath.Join(loomDir, "session-recordings"), nil }
+	t.Cleanup(func() { recordingRootResolver = oldResolver })
+
+	dir := filepath.Join(loomDir, "session-recordings", "ws", "session")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	path := filepath.Join(dir, "lines.jsonl")
+	lines := []terminal.RecordingLine{
+		{Index: 0, Runs: []terminal.RecordingRun{{Text: "hello"}, {Text: " world", Bold: true}}},
+		{Index: 1, Runs: []terminal.RecordingRun{{Text: "second"}}},
+	}
+	f, err := os.Create(path) //nolint:gosec // test-owned temporary path
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	encoder := json.NewEncoder(f)
+	for _, line := range lines {
+		if err := encoder.Encode(line); err != nil {
+			t.Fatalf("Encode: %v", err)
+		}
+	}
+	if err := f.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	result, err := readScrollbackFile(path)
+	if err != nil {
+		t.Fatalf("readScrollbackFile: %v", err)
+	}
+	if result.Content != "hello world\nsecond" || result.Lines != 2 {
+		t.Fatalf("result = %#v", result)
+	}
+}
+
+func TestReadScrollbackFileRejectsSiblingOfResolvedLoomDir(t *testing.T) {
+	parent := t.TempDir()
+	loomDir := filepath.Join(parent, "configured-loom")
+	oldResolver := recordingRootResolver
+	recordingRootResolver = func() (string, error) { return filepath.Join(loomDir, "session-recordings"), nil }
+	t.Cleanup(func() { recordingRootResolver = oldResolver })
+
+	sibling := filepath.Join(parent, "configured-loom-evil", "session-recordings", "ws", "lines.jsonl")
+	if err := os.MkdirAll(filepath.Dir(sibling), 0o700); err != nil {
+		t.Fatalf("MkdirAll sibling: %v", err)
+	}
+	if err := os.WriteFile(sibling, []byte("{}\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile sibling: %v", err)
+	}
+	_, err := readScrollbackFile(sibling)
+	if err == nil {
+		t.Fatal("expected traversal guard to reject sibling prefix")
+	}
+	var svcErr *service.ServiceError
+	if !errors.As(err, &svcErr) || svcErr.Kind != service.KindValidation {
+		t.Fatalf("error = %T %v, want validation ServiceError", err, err)
+	}
+}
+
+// TestScrollbackRootsAreSiblings pins the assumption readScrollbackFile makes
+// about the recording root: its parent is the loom dir, so the legacy
+// session-scrollback directory is its sibling. If DefaultRecordingRoot ever
+// nests deeper, the scrollback allow-list would silently start guarding the
+// wrong directory; this fails instead.
+func TestScrollbackRootsAreSiblings(t *testing.T) {
+	root, err := terminal.DefaultRecordingRoot()
+	if err != nil {
+		t.Fatalf("DefaultRecordingRoot: %v", err)
+	}
+	if base := filepath.Base(root); base != "session-recordings" {
+		t.Fatalf("recording root base = %q, want %q", base, "session-recordings")
+	}
+	if parent := filepath.Dir(root); parent == "" || parent == "." || parent == string(os.PathSeparator) {
+		t.Fatalf("recording root %q has no loom dir parent", root)
 	}
 }

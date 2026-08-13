@@ -842,6 +842,63 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/workspaces/{ws}/terminal/sessions/{session}/history": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Read a bounded range of durable terminal rows
+     * @description Returns stable rendered terminal rows by line index. `count` is capped
+     *     at 1000. Mutable totals and lifecycle state are served separately by
+     *     the no-store metadata endpoint. Committed ranges are immutable and
+     *     served with a strong ETag.
+     */
+    get: operations["getTerminalHistory"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/terminal/sessions/{session}/history/meta": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Get durable terminal recording metadata */
+    get: operations["getTerminalHistoryMeta"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/terminal/sessions/{session}/history/raw": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Download the byte-exact framed terminal output segment */
+    get: operations["exportTerminalHistoryRaw"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/workspaces/{ws}/terminal/session-status": {
     parameters: {
       query?: never;
@@ -2301,6 +2358,56 @@ export interface components {
       /** @constant */
       success: true;
       message: string;
+    };
+    TerminalHistoryRun: {
+      text: string;
+      fg?: string;
+      bg?: string;
+      bold?: boolean;
+      italic?: boolean;
+      underline?: boolean;
+      inverse?: boolean;
+    };
+    TerminalHistoryLine: {
+      /** Format: int64 */
+      i: number;
+      /** Format: int64 */
+      t: number;
+      cols: number;
+      runs: components["schemas"]["TerminalHistoryRun"][];
+    };
+    /** @description A bounded row-only range. Mutable recording coordinates are served by TerminalHistoryMeta. */
+    TerminalHistoryResponse: {
+      /** @description Opaque PTY-lifetime identity for every row in this response. */
+      generation: string;
+      lines: components["schemas"]["TerminalHistoryLine"][];
+    };
+    TerminalHistoryMeta: {
+      /** @description Current opaque PTY-lifetime identity; pass it on every history range request. */
+      generation: string;
+      /** Format: int64 */
+      totalLines: number;
+      /** Format: int64 */
+      firstScreenLine: number;
+      /** Format: int64 */
+      startedAt: number;
+      cols: number;
+      rows: number;
+      altScreen: boolean;
+      /** Format: int64 */
+      gaps: number;
+      unhandledSequences: components["schemas"]["TerminalUnhandledSequences"];
+      historyLimited: boolean;
+      recordingStopped: boolean;
+      closed: boolean;
+    };
+    /** @description Bounded diagnostics for parsed terminal escape sequences the focused recorder did not implement. Count is exact; prefixes is a bounded heavy-hitter map. */
+    TerminalUnhandledSequences: {
+      /** Format: int64 */
+      count: number;
+      prefixes: {
+        [key: string]: number;
+      };
     };
     FileMutationResponse: {
       success: boolean;
@@ -5251,6 +5358,112 @@ export interface operations {
       };
       /** @description Invalid or expired token */
       401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  getTerminalHistory: {
+    parameters: {
+      query: {
+        /** @description Opaque PTY-lifetime identity reported by the no-store metadata endpoint. */
+        generation: string;
+        from?: number;
+        /** @description Number of rows to return; values above 1000 are clamped. */
+        count?: number;
+      };
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        session: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Bounded terminal history range */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["TerminalHistoryResponse"];
+        };
+      };
+      /** @description Missing or invalid generation or range parameter */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Recording not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  getTerminalHistoryMeta: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        session: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Terminal recording metadata */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["TerminalHistoryMeta"];
+        };
+      };
+      /** @description Recording not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  exportTerminalHistoryRaw: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        session: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Framed raw terminal segment */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/octet-stream": string;
+        };
+      };
+      /** @description Recording not found */
+      404: {
         headers: {
           [name: string]: unknown;
         };

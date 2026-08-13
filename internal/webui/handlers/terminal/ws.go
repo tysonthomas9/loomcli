@@ -279,6 +279,12 @@ func classifyAttachErr(err error, session, workspace string) (websocket.StatusCo
 	case errors.Is(err, webuterminal.ErrPTYManagerClosed), errors.Is(err, webuterminal.ErrWorkspaceNotRegistered):
 		slog.Info("terminal attach after workspace unavailable", "session", session, "workspace", workspace, "err", err)
 		return websocket.StatusGoingAway, "workspace unavailable" //nolint:staticcheck // SA1019
+	case errors.Is(err, webuterminal.ErrPTYSpawnBackoff), errors.Is(err, webuterminal.ErrPTYSessionExited):
+		// The session's process is exiting immediately (crash loop / doomed
+		// spawn). BackendExited puts the client in the crash overlay instead
+		// of the auto-reconnect loop that would respawn the same process.
+		slog.Info("terminal session process exiting immediately", "session", session, "workspace", workspace, "err", err)
+		return websocket.StatusCode(realtime.WSCloseBackendExited), err.Error() //nolint:staticcheck // SA1019
 	default:
 		slog.Error("failed to attach terminal session", "session", session, "err", err)
 		return websocket.StatusInternalError, err.Error() //nolint:staticcheck // SA1019
@@ -317,6 +323,8 @@ func runTerminalRelay(reqCtx context.Context, conn *websocket.Conn, p *terminalW
 		maybeEmitStaleRestartBanner(reqCtx, conn, p, workspace, session)
 	}
 
+	sendHistoryCoordinate(reqCtx, conn, att, session)
+
 	// Emit scrollback replay (reset escape + ring bytes) before going live.
 	if replay := att.Scrollback(); len(replay) > 0 {
 		if err := conn.Write(reqCtx, websocket.MessageBinary, replay); err != nil { //nolint:staticcheck // SA1019
@@ -344,6 +352,25 @@ func runTerminalRelay(reqCtx context.Context, conn *websocket.Conn, p *terminalW
 	p.manager.Detach(key, connID)
 
 	return (<-crashCh).WSClose()
+}
+
+// sendHistoryCoordinate emits the terminal-history control frame. Text
+// control frames are kept separate from binary PTY output; the client uses
+// this stable coordinate to stop virtual history exactly where the live
+// xterm screen begins.
+func sendHistoryCoordinate(ctx context.Context, conn *websocket.Conn, att webuterminal.Attachment, session string) { //nolint:staticcheck // SA1019: websocket migration tracked separately
+	historyAttachment, ok := att.(interface{ FirstScreenLine() uint64 })
+	if !ok {
+		return
+	}
+	available := true
+	if availability, supported := att.(interface{ RecordingAvailable() bool }); supported {
+		available = availability.RecordingAvailable()
+	}
+	control := fmt.Sprintf(`{"type":"terminal-history","available":%t,"firstScreenLine":%d}`, available, historyAttachment.FirstScreenLine())
+	if err := conn.Write(ctx, websocket.MessageText, []byte(control)); err != nil { //nolint:staticcheck // SA1019
+		slog.Warn("terminal history coordinate write failed", "session", session, "err", err)
+	}
 }
 
 func ensureWorkspacePTYRegistered(ctx context.Context, p *terminalWSParams, workspace string) {

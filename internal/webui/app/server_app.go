@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"path/filepath"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -355,6 +356,22 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 		cleanups = append(cleanups, shCleanup)
 	}
 
+	// Terminal payload is always file-backed. Redis receives only the small
+	// pointer/summary record used for discovery and survives local miniredis
+	// snapshots via the terminal:recording: persisted prefix.
+	recordingRoot, err := terminal.DefaultRecordingRoot()
+	if err != nil {
+		return nil, err
+	}
+	var recordingRedis *redis.Client
+	if app.tabMetaStore != nil {
+		recordingRedis = app.tabMetaStore.RedisClient()
+	}
+	app.recordings = terminal.NewRecordingStore(recordingRoot, recordingRedis)
+	wireRecordingSessionHistory(app)
+	app.ptyMgr.SetRecordingStore(app.recordings)
+	cleanups = append(cleanups, func() { _ = app.recordings.Close() })
+
 	// Initialize external auth (JWKS cache + middleware)
 	app.extAuthMiddleware, app.jwksCleanup = initExtAuth(config)
 	if app.jwksCleanup != nil {
@@ -461,6 +478,91 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 	app.registerWorkerAPIRoutes()
 
 	return app, nil
+}
+
+// wireRecordingSessionHistory revives the existing session-history completion
+// pipeline. Terminal payload stays in the recording directory; Redis receives
+// only the existing audit record and its scrollbackPath pointer.
+//
+//nolint:funlen // the length is the number of collaborators it wires together
+func wireRecordingSessionHistory(app *Server) {
+	if app.recordings == nil || app.tabMetaStore == nil || app.sessionHistoryStore == nil {
+		return
+	}
+
+	app.recordings.SetLifecycleHooks(
+		func(key terminal.SessionKey, dir string, meta terminal.RecordingMeta) {
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			tab, err := app.tabMetaStore.Get(ctx, key.Workspace, key.Name)
+			if err != nil {
+				logger.Warn("failed to resolve terminal tab for session history", "workspace", key.Workspace, "session", key.Name, "err", err)
+				return
+			}
+			if tab == nil || tab.IssueID == "" {
+				return
+			}
+			recordID := fmt.Sprintf("%s:%d", key.Name, meta.StartedAt)
+			if err := app.recordings.SetIssueID(key, meta.Generation, tab.IssueID); err != nil {
+				logger.Warn("failed to persist terminal recording issue", "workspace", key.Workspace, "session", key.Name, "issue", tab.IssueID, "err", err)
+			}
+
+			records, err := app.sessionHistoryStore.List(ctx, key.Workspace, tab.IssueID)
+			if err != nil {
+				logger.Warn("failed to inspect terminal session history", "workspace", key.Workspace, "session", key.Name, "issue", tab.IssueID, "err", err)
+				return
+			}
+			for _, record := range records {
+				if record.ID == recordID {
+					return
+				}
+			}
+			if err := app.sessionHistoryStore.Add(ctx, key.Workspace, appstores.SessionRecord{
+				ID:             recordID,
+				SessionName:    key.Name,
+				IssueID:        tab.IssueID,
+				Backend:        tab.Backend,
+				Status:         "active",
+				Launcher:       "user",
+				StartedAt:      time.UnixMilli(meta.StartedAt).UTC(),
+				ScrollbackPath: filepath.Join(dir, "lines.jsonl"),
+			}); err != nil {
+				logger.Warn("failed to add terminal session history", "workspace", key.Workspace, "session", key.Name, "issue", tab.IssueID, "err", err)
+			}
+		},
+		func(key terminal.SessionKey, dir string, meta terminal.RecordingMeta) {
+			if meta.IssueID == "" {
+				return
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			recordID := fmt.Sprintf("%s:%d", key.Name, meta.StartedAt)
+			if err := app.sessionHistoryStore.Complete(ctx, key.Workspace, meta.IssueID, recordID, filepath.Join(dir, "lines.jsonl")); err != nil {
+				logger.Warn("failed to complete terminal session history", "workspace", key.Workspace, "session", key.Name, "issue", meta.IssueID, "err", err)
+			}
+		},
+	)
+	go sweepClosedRecordingSessionHistory(app)
+}
+
+func sweepClosedRecordingSessionHistory(app *Server) {
+	recordings, err := app.recordings.ClosedRecordings()
+	if err != nil {
+		logger.Warn("failed to scan closed terminal recordings", "err", err)
+		return
+	}
+	for _, recording := range recordings {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		recordID := fmt.Sprintf("%s:%d", recording.Key.Name, recording.Meta.StartedAt)
+		err := app.sessionHistoryStore.Complete(
+			ctx, recording.Key.Workspace, recording.Meta.IssueID, recordID,
+			filepath.Join(recording.Dir, "lines.jsonl"),
+		)
+		cancel()
+		if err != nil {
+			logger.Warn("failed to sweep closed terminal session history", "workspace", recording.Key.Workspace, "session", recording.Key.Name, "issue", recording.Meta.IssueID, "err", err)
+		}
+	}
 }
 
 func addBundledLoopbackFrontendOrigins(config *webui.ServerConfig, actualPort int) {

@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -179,6 +181,31 @@ func TestAttach_SpawnsFreshSession(t *testing.T) {
 		t.Errorf("SessionCount=%d want 1", got)
 	}
 	m.Detach(key, att.ConnID())
+}
+
+func TestAttachSpawnsSessionWhenRecordingCannotStart(t *testing.T) {
+	m := newTestManager(t)
+	badRoot := filepath.Join(t.TempDir(), "recording-root-is-a-file")
+	if err := os.WriteFile(badRoot, []byte("not a directory"), 0o600); err != nil {
+		t.Fatalf("seed unusable recording root: %v", err)
+	}
+	m.SetRecordingStore(NewRecordingStore(badRoot, nil))
+	key := SessionKey{Workspace: "ws1", Name: "recording-unavailable"}
+
+	att, _, err := m.AttachSession(key, 80, 24, &LaunchSpec{Argv: []string{"-c", "cat"}})
+	if err != nil {
+		t.Fatalf("AttachSession failed for a recording-only error: %v", err)
+	}
+	availability, ok := att.(interface{ RecordingAvailable() bool })
+	if !ok || availability.RecordingAvailable() {
+		t.Fatalf("recording availability = %v, want false", ok && availability.RecordingAvailable())
+	}
+	if _, err := att.WriteInput([]byte("shell-still-alive\n")); err != nil {
+		t.Fatalf("WriteInput: %v", err)
+	}
+	if !readChunkContains(t, att, []byte("shell-still-alive"), time.Second) {
+		t.Fatal("PTY did not remain usable after recording startup failed")
+	}
 }
 
 func TestDetachDoesNotKillImmediately(t *testing.T) {
@@ -533,5 +560,137 @@ func TestShutdown_Idempotent(t *testing.T) {
 	}
 	if err := m.Shutdown(); err != nil {
 		t.Errorf("second Shutdown: %v, want nil", err)
+	}
+}
+
+func waitForSessionSelfExit(t *testing.T, m *PTYManager, key SessionKey) {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if m.SessionClosed(key) {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("session %v did not close after instant-exit command", key)
+}
+
+func countRecordingGenerationDirs(t *testing.T, sessionDir string) int {
+	t.Helper()
+	entries, err := os.ReadDir(sessionDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return 0
+		}
+		t.Fatalf("read session recording dir: %v", err)
+	}
+	dirs := 0
+	for _, entry := range entries {
+		if entry.IsDir() {
+			dirs++
+		}
+	}
+	return dirs
+}
+
+func TestSpawnBreakerStopsInstantExitRespawnLoop(t *testing.T) {
+	m := newTestManager(t)
+	root := t.TempDir()
+	m.SetRecordingStore(NewRecordingStore(root, nil))
+	key := SessionKey{Workspace: "ws1", Name: "crash-loop"}
+	launch := &LaunchSpec{Argv: []string{"-c", "exit 0"}}
+
+	for i := 0; i < 3; i++ {
+		_, _, err := m.AttachSession(key, 80, 24, launch)
+		if err != nil && !errors.Is(err, ErrPTYSessionExited) {
+			t.Fatalf("attach %d: %v", i+1, err)
+		}
+		waitForSessionSelfExit(t, m, key)
+	}
+
+	sessionDir := filepath.Join(root, "ws1", "crash-loop", "generations")
+	beforeRefusal := countRecordingGenerationDirs(t, sessionDir)
+	if beforeRefusal > 3 {
+		t.Fatalf("generation dirs after 3 attach attempts = %d, want at most one per attempt", beforeRefusal)
+	}
+	if _, _, err := m.AttachSession(key, 80, 24, launch); !errors.Is(err, ErrPTYSpawnBackoff) {
+		t.Fatalf("attach after 3 fast self-exits: err = %v, want ErrPTYSpawnBackoff", err)
+	}
+	if got := countRecordingGenerationDirs(t, sessionDir); got != beforeRefusal {
+		t.Fatalf("generation dirs grew %d -> %d across a refused attach, want no growth", beforeRefusal, got)
+	}
+
+	// The breaker is per-session: an unrelated healthy session still spawns.
+	other := SessionKey{Workspace: "ws1", Name: "healthy-neighbor"}
+	att, _, err := m.AttachSession(other, 80, 24, &LaunchSpec{Argv: []string{"-c", "cat"}})
+	if err != nil {
+		t.Fatalf("healthy neighbor session blocked: %v", err)
+	}
+	if _, err := att.WriteInput([]byte("alive\n")); err != nil {
+		t.Fatalf("WriteInput to healthy neighbor: %v", err)
+	}
+}
+
+func TestReattachReplayIsEmulatorRenderedNotRawRing(t *testing.T) {
+	m := newTestManager(t)
+	m.SetGracePeriod(2 * time.Second)
+	m.SetRecordingStore(NewRecordingStore(t.TempDir(), nil))
+	key := SessionKey{Workspace: "ws1", Name: "replay-rendered"}
+
+	// The child prints raw bytes ending in a dangling incomplete CSI, which
+	// lands verbatim at the tail of the PTY stream and the replay ring.
+	launch := &LaunchSpec{Argv: []string{"-c", `printf 'marker-text\ntail\033['; cat`}}
+	att1, _, err := m.AttachSession(key, 80, 24, launch)
+	if err != nil {
+		t.Fatalf("AttachSession: %v", err)
+	}
+	if !readChunkContains(t, att1, []byte("tail"), 2*time.Second) {
+		t.Fatal("child output never arrived")
+	}
+	// The dangling ESC [ normally arrives in the same PTY read as "tail", but
+	// nothing guarantees it; wait until the ring holds it before detaching so
+	// the reattach below deterministically sees the torn tail.
+	m.mu.Lock()
+	ring := m.sessions[key].scrollback
+	m.mu.Unlock()
+	deadline := time.Now().Add(2 * time.Second)
+	for !bytes.HasSuffix(ring.Bytes(), []byte{0x1b, '['}) {
+		if time.Now().After(deadline) {
+			t.Fatalf("torn escape never reached the ring: %q", ring.Bytes())
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	m.Detach(key, att1.ConnID())
+
+	att2, reattached, err := m.AttachSession(key, 80, 24, &LaunchSpec{Argv: []string{"-c", "cat"}})
+	if err != nil {
+		t.Fatalf("re-AttachSession: %v", err)
+	}
+	if !reattached {
+		t.Fatal("expected grace-window reattach, got fresh session")
+	}
+	replay := att2.Scrollback()
+	if !bytes.Contains(replay, []byte("marker-text")) {
+		t.Fatalf("replay lost screen content: %q", replay)
+	}
+	// The raw ring would replay "marker-text\r\ntail\x1b[" verbatim; a
+	// rendered replay reconstructs cells with absolute row addressing, so
+	// that raw CR/LF juxtaposition must be gone.
+	if bytes.Contains(replay, []byte("marker-text\r\ntail")) {
+		t.Fatalf("replay contains raw ring bytes, not a rendered screen: %q", replay)
+	}
+	// The stream's dangling incomplete CSI must be preserved verbatim at the
+	// very end: the next live chunk delivered to this attachment begins with
+	// the sequence's remaining bytes, and without the fragment the client
+	// would print them as literal text.
+	if !bytes.HasSuffix(replay, []byte{0x1b, '['}) {
+		t.Fatalf("replay dropped the in-flight escape fragment: %q", replay)
+	}
+	// Everything before that fragment must be fully terminated sequences —
+	// the tear at the ring head (eviction trims at arbitrary byte offsets)
+	// must never surface in a rendered replay.
+	body := replay[:len(replay)-2]
+	if esc := bytes.LastIndexByte(body, 0x1b); esc >= 0 && !escapeSequenceComplete(body[esc:]) {
+		t.Fatalf("rendered replay contains an interior torn sequence: %q", body[esc:])
 	}
 }
