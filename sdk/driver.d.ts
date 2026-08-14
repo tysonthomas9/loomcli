@@ -216,6 +216,27 @@ export interface LoomConnectorDispatchInput extends LoomConnectorCallInput {
   action: string;
 }
 
+export interface LoomLabelInput {
+  /** Issue to mutate. `id` is accepted as an alias. */
+  issueId?: string;
+  id?: string;
+  label: string;
+}
+
+export interface LoomLabelResult {
+  issueId: string;
+  label: string;
+  /**
+   * The actor loomcli supplied to the issue backend (driver-run:<runId>).
+   * NOT necessarily the actor recorded in fleet-db's journal: fleet-db
+   * journals the authenticated identity of loomcli's own credential. Do not
+   * rely on an actor filter to keep a label-writing workflow from
+   * re-triggering itself through a journal-sourced binding.
+   */
+  actor: string;
+  [key: string]: unknown;
+}
+
 export interface LoomConnectorCallResult {
   callId: string;
   /** FROZEN: a dispatch that returns (rather than throws) was granted. */
@@ -445,6 +466,12 @@ export declare class LoomDriverClient {
     start(input: LoomWorkflowStartInput): Promise<LoomWorkflowStartResult>;
     /** Throws WorkflowSuspended when the run suspends; shares the awaitIndex counter with events.await. */
     await(input: LoomWorkflowAwaitInput): Promise<LoomWorkflowAwaitResult>;
+  };
+  readonly issues: {
+    /** Idempotent: a no-op when the label is already present. */
+    addLabel(input: LoomLabelInput): Promise<LoomLabelResult>;
+    /** Idempotent: a no-op when the label is absent. */
+    removeLabel(input: LoomLabelInput): Promise<LoomLabelResult>;
   };
 
   completed(input?: { summary?: string }): LoomDriverResult;
