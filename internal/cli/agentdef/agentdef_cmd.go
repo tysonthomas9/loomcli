@@ -231,47 +231,46 @@ func warnIfBackendMissing(cmd *cobra.Command, agentName, agentBackend string) {
 		agentName, effective)
 }
 
+// ensureAgentDefinitionLocalWorktrees materializes an agent's local worktrees
+// through the shared localworkspace materializer. The failure *policy* (the
+// rollback in runAgentAdd) stays at the call site.
 func ensureAgentDefinitionLocalWorktrees(ctx context.Context, st store.Store, agent domain.Agent) error {
-	sc, err := bootstrap.LoadStateCache()
-	if err != nil {
-		return fmt.Errorf("load local workspace state: %w", err)
-	}
-	local := sc.Workspaces[agent.WorkspaceKey]
-	if local.Path == "" {
-		return nil
-	}
-	repos, err := st.Repos().List(ctx, agent.WorkspaceKey)
-	if err != nil {
-		return fmt.Errorf("list workspace repos: %w", err)
-	}
-	localRepos := make([]localworkspace.Repo, 0, len(repos))
-	for _, repo := range repos {
-		if repo == nil {
-			continue
-		}
-		localRepos = append(localRepos, localworkspace.Repo{
-			Name:   repo.Name,
-			Path:   localworkspace.RepoPath(local, repo.Name),
-			Groups: append([]string(nil), repo.Groups...),
-		})
-	}
-	selected, err := localworkspace.SelectAgentRepos(localRepos, agent)
-	if err != nil {
-		return err
-	}
-	if len(selected) == 0 {
-		return fmt.Errorf("workspace %s has no repos for agent %q", agent.WorkspaceKey, agent.Name)
-	}
+	return agentDefinitionWorktreeMaterializer(st).Materialize(ctx, agent)
+}
 
-	created := make(map[string]string, len(selected))
-	for _, repo := range selected {
-		target := localworkspace.AgentWorktreePath(local.Path, repo.Name, agent.Name)
-		if err := localworkspace.EnsureGitWorktree(repo.Path, target, agent.Name); err != nil {
-			return fmt.Errorf("create worktree for repo %q: %w", repo.Name, err)
-		}
-		created[repo.Name] = target
+// agentDefinitionWorktreeMaterializer binds the CLI's workspace lookup (local
+// state cache for the path, the store for the repo list) to the shared
+// materializer. SkipAgent is deliberately unset: `loom agentdef add` has never
+// consulted the role kind here, so every agent it creates is materialized.
+func agentDefinitionWorktreeMaterializer(st store.Store) localworkspace.AgentWorktreeMaterializer {
+	return localworkspace.AgentWorktreeMaterializer{
+		ResolveWorkspace: func(ctx context.Context, workspaceKey string) (localworkspace.LocalWorkspaceView, error) {
+			sc, err := bootstrap.LoadStateCache()
+			if err != nil {
+				return localworkspace.LocalWorkspaceView{}, fmt.Errorf("load local workspace state: %w", err)
+			}
+			local := sc.Workspaces[workspaceKey]
+			if local.Path == "" {
+				return localworkspace.LocalWorkspaceView{}, nil
+			}
+			repos, err := st.Repos().List(ctx, workspaceKey)
+			if err != nil {
+				return localworkspace.LocalWorkspaceView{}, fmt.Errorf("list workspace repos: %w", err)
+			}
+			localRepos := make([]localworkspace.Repo, 0, len(repos))
+			for _, repo := range repos {
+				if repo == nil {
+					continue
+				}
+				localRepos = append(localRepos, localworkspace.Repo{
+					Name:   repo.Name,
+					Path:   localworkspace.RepoPath(local, repo.Name),
+					Groups: append([]string(nil), repo.Groups...),
+				})
+			}
+			return localworkspace.LocalWorkspaceView{Root: local.Path, Repos: localRepos}, nil
+		},
 	}
-	return localworkspace.RememberAgentWorktree(agent.WorkspaceKey, agent.Name, localworkspace.FirstWorktreePath(created))
 }
 
 func runAgentList(_ *cobra.Command, _ []string) error {

@@ -386,55 +386,69 @@ func (s *agentServiceImpl) CreateAgent(ctx context.Context, in service.AgentCrea
 	return created, nil
 }
 
+// ensureLocalAgentWorktrees materializes an agent's local worktrees through the
+// shared localworkspace materializer, translating its classified failures into
+// service errors. The failure *policy* (CreateAgent's compensating delete) stays
+// at the call site.
 func (s *agentServiceImpl) ensureLocalAgentWorktrees(ctx context.Context, agent domain.Agent) error {
-	role, err := s.loadAgentRoleForKind(ctx, agent.WorkspaceKey, agent.RoleName)
-	if err != nil {
-		return err
-	}
-	if domain.ResolveRoleKind(role, agent.RoleName) == domain.RoleKindInteractive {
-		return nil
-	}
-	ws, err := storeadapter.BuildWorkspaceDataForKey(ctx, s.store, agent.WorkspaceKey)
-	if err != nil {
-		return service.ErrInternal("load workspace for agent worktree", err)
-	}
-	if ws.Path == "" {
-		// Distributed/cloud workspaces can be managed by this server without a
-		// checkout mounted locally. In that shape the agent assignment is still
-		// valid fleet-db state; local worktrees are created only on machines that
-		// have workspace paths.
-		return nil
-	}
-	localRepos := make([]localworkspace.Repo, 0, len(ws.Repos))
-	for _, repo := range ws.Repos {
-		localRepos = append(localRepos, localworkspace.Repo{
-			Name:   repo.Name,
-			Path:   repo.Path,
-			Groups: append([]string(nil), repo.Groups...),
-		})
-	}
-	repos, err := localworkspace.SelectAgentRepos(localRepos, agent)
-	if err != nil {
-		return service.ErrValidation(err.Error())
-	}
-	if len(repos) == 0 {
-		return service.ErrValidation("workspace has no repos for agent")
-	}
-	createdPaths := make(map[string]string, len(repos))
-	for _, repo := range repos {
-		if repo.Path == "" {
-			return service.ErrValidation(fmt.Sprintf("repo %q has no local path on this machine", repo.Name))
-		}
-		target := localworkspace.AgentWorktreePath(ws.Path, repo.Name, agent.Name)
-		if err := localworkspace.EnsureGitWorktree(repo.Path, target, agent.Name); err != nil {
-			return service.ErrInternal(fmt.Sprintf("create worktree for repo %q", repo.Name), err)
-		}
-		createdPaths[repo.Name] = target
-	}
-	if err := localworkspace.RememberAgentWorktree(agent.WorkspaceKey, agent.Name, localworkspace.FirstWorktreePath(createdPaths)); err != nil {
-		return service.ErrInternal("update local agent state", err)
+	if err := s.agentWorktreeMaterializer().Materialize(ctx, agent); err != nil {
+		return agentWorktreeServiceError(err)
 	}
 	return nil
+}
+
+// agentWorktreeMaterializer binds the webui's role and workspace lookups to the
+// shared materializer. Agents on interactive roles are skipped; the workspace
+// view comes from the fleet-db-backed workspace data.
+func (s *agentServiceImpl) agentWorktreeMaterializer() localworkspace.AgentWorktreeMaterializer {
+	return localworkspace.AgentWorktreeMaterializer{
+		SkipAgent: func(ctx context.Context, agent domain.Agent) (bool, error) {
+			role, err := s.loadAgentRoleForKind(ctx, agent.WorkspaceKey, agent.RoleName)
+			if err != nil {
+				return false, err
+			}
+			return domain.ResolveRoleKind(role, agent.RoleName) == domain.RoleKindInteractive, nil
+		},
+		ResolveWorkspace: func(ctx context.Context, workspaceKey string) (localworkspace.LocalWorkspaceView, error) {
+			ws, err := storeadapter.BuildWorkspaceDataForKey(ctx, s.store, workspaceKey)
+			if err != nil {
+				return localworkspace.LocalWorkspaceView{}, service.ErrInternal("load workspace for agent worktree", err)
+			}
+			localRepos := make([]localworkspace.Repo, 0, len(ws.Repos))
+			for _, repo := range ws.Repos {
+				localRepos = append(localRepos, localworkspace.Repo{
+					Name:   repo.Name,
+					Path:   repo.Path,
+					Groups: append([]string(nil), repo.Groups...),
+				})
+			}
+			return localworkspace.LocalWorkspaceView{Root: ws.Path, Repos: localRepos}, nil
+		},
+	}
+}
+
+// agentWorktreeServiceError maps a materialization failure onto the service
+// error kinds this surface reports. Errors raised by the injected lookups are
+// already service errors and pass through unchanged.
+func agentWorktreeServiceError(err error) error {
+	var merr *localworkspace.MaterializeError
+	if !errors.As(err, &merr) {
+		return err
+	}
+	switch merr.Kind {
+	case localworkspace.MaterializeRepoSelection:
+		return service.ErrValidation(merr.Error())
+	case localworkspace.MaterializeNoRepos:
+		return service.ErrValidation("workspace has no repos for agent")
+	case localworkspace.MaterializeRepoPathMissing:
+		return service.ErrValidation(fmt.Sprintf("repo %q has no local path on this machine", merr.Repo))
+	case localworkspace.MaterializeWorktreeCreate:
+		return service.ErrInternal(fmt.Sprintf("create worktree for repo %q", merr.Repo), merr.Err)
+	case localworkspace.MaterializeLocalState:
+		return service.ErrInternal("update local agent state", merr.Err)
+	default:
+		return service.ErrInternal("materialize agent worktrees", merr)
+	}
 }
 
 func (s *agentServiceImpl) loadAgentRoleForKind(ctx context.Context, workspaceKey, roleName string) (*domain.Role, error) {
