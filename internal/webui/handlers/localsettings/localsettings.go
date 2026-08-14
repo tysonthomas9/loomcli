@@ -82,30 +82,14 @@ func HandlePatch(dataDir string, options ...PatchOptions) http.HandlerFunc {
 		opts = options[0]
 	}
 	return func(w http.ResponseWriter, r *http.Request) {
-		r.Body = http.MaxBytesReader(w, r.Body, handler.MaxRequestBody)
-		var req patchRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			var maxBytesErr *http.MaxBytesError
-			if errors.As(err, &maxBytesErr) {
-				handler.WriteJSON(w, http.StatusRequestEntityTooLarge, response{Success: false, Error: "request body too large"})
-				return
-			}
-			handler.WriteJSON(w, http.StatusBadRequest, response{Success: false, Error: "invalid request body"})
+		req, ok := decodePatchRequest(w, r)
+		if !ok {
 			return
 		}
 
-		settings, err := load(dataDir)
+		settings, githubCredentialChanged, status, err := updateLocalSettings(dataDir, req)
 		if err != nil {
-			handler.WriteJSON(w, http.StatusInternalServerError, response{Success: false, Error: err.Error()})
-			return
-		}
-		githubCredentialChanged, err := applyPatchRequest(dataDir, &settings, req)
-		if err != nil {
-			handler.WriteJSON(w, http.StatusBadRequest, response{Success: false, Error: err.Error()})
-			return
-		}
-		if err := runtimesettings.Save(dataDir, settings); err != nil {
-			handler.WriteJSON(w, http.StatusBadRequest, response{Success: false, Error: err.Error()})
+			handler.WriteJSON(w, status, response{Success: false, Error: err.Error()})
 			return
 		}
 		if githubCredentialChanged && opts.OnGitHubRuntimeCredentialChanged != nil {
@@ -118,6 +102,43 @@ func HandlePatch(dataDir string, options ...PatchOptions) http.HandlerFunc {
 			Message: "Local settings saved.",
 		})
 	}
+}
+
+func decodePatchRequest(w http.ResponseWriter, r *http.Request) (patchRequest, bool) {
+	r.Body = http.MaxBytesReader(w, r.Body, handler.MaxRequestBody)
+	var req patchRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			handler.WriteJSON(w, http.StatusRequestEntityTooLarge, response{Success: false, Error: "request body too large"})
+			return patchRequest{}, false
+		}
+		handler.WriteJSON(w, http.StatusBadRequest, response{Success: false, Error: "invalid request body"})
+		return patchRequest{}, false
+	}
+	return req, true
+}
+
+func updateLocalSettings(dataDir string, req patchRequest) (runtimesettings.Settings, bool, int, error) {
+	if strings.TrimSpace(dataDir) == "" {
+		return runtimesettings.Settings{}, false, http.StatusInternalServerError, errors.New("local settings data dir is not configured")
+	}
+
+	var patchErr error
+	var githubCredentialChanged bool
+	settings, err := runtimesettings.Update(dataDir, func(settings *runtimesettings.Settings) error {
+		changed, err := applyPatchRequest(dataDir, settings, req)
+		if err != nil {
+			patchErr = err
+			return err
+		}
+		githubCredentialChanged = changed
+		return nil
+	})
+	if err != nil {
+		return runtimesettings.Settings{}, false, localSettingsErrorStatus(err, patchErr), err
+	}
+	return settings, githubCredentialChanged, http.StatusOK, nil
 }
 
 func applyPatchRequest(dataDir string, settings *runtimesettings.Settings, req patchRequest) (bool, error) {
@@ -138,6 +159,16 @@ func applyPatchRequest(dataDir string, settings *runtimesettings.Settings, req p
 		return false, nil
 	}
 	return applyRuntimeCredentialsPatch(dataDir, settings, *req.RuntimeCredentials)
+}
+
+func localSettingsErrorStatus(err, patchErr error) int {
+	if patchErr != nil {
+		return http.StatusBadRequest
+	}
+	if strings.HasPrefix(err.Error(), "read local settings") || strings.HasPrefix(err.Error(), "parse local settings") {
+		return http.StatusInternalServerError
+	}
+	return http.StatusBadRequest
 }
 
 func load(dataDir string) (runtimesettings.Settings, error) {

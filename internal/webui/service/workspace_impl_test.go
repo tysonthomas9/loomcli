@@ -3,11 +3,14 @@ package service
 import (
 	"context"
 	"errors"
+	"os"
 	"testing"
 
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	"github.com/tysonthomas9/loomcli/internal/localsettings"
+	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
 )
@@ -122,6 +125,112 @@ func TestListWorkspaces_StoreBackedMarksActiveWithoutDefault(t *testing.T) {
 	}
 }
 
+func TestReorderWorkspaces_PersistsLocalUIPreferenceAndListsInOrder(t *testing.T) {
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+	t.Setenv("LOOM_WORKSPACE", "")
+
+	ctx := context.Background()
+	st := memstore.New()
+	for _, ws := range []store.WorkspaceCreate{
+		{Key: "ALPHA", Name: "Alpha Project"},
+		{Key: "BETA", Name: "Beta Project"},
+		{Key: "GAMMA", Name: "Gamma Project"},
+	} {
+		if _, err := st.Workspaces().Create(ctx, ws); err != nil {
+			t.Fatalf("create %s: %v", ws.Key, err)
+		}
+	}
+
+	settingsDir := t.TempDir()
+	svc := NewWorkspaceService(WorkspaceServiceConfig{
+		Store:            st,
+		LocalSettingsDir: settingsDir,
+	})
+
+	data, err := svc.ReorderWorkspaces(ctx, []string{"STALE", "GAMMA", "ALPHA", "ALPHA", " "})
+	if err != nil {
+		t.Fatalf("ReorderWorkspaces returned error: %v", err)
+	}
+	assertWorkspaceSummaryOrder(t, data.Workspaces, []string{"GAMMA", "ALPHA", "BETA"})
+
+	settings, err := localsettings.Load(settingsDir)
+	if err != nil {
+		t.Fatalf("load local settings: %v", err)
+	}
+	if got, want := settings.UIPreferences.WorkspaceOrder, []string{"STALE", "GAMMA", "ALPHA"}; !equalStringSlices(got, want) {
+		t.Fatalf("saved order = %#v, want %#v", got, want)
+	}
+
+	items, err := svc.ListWorkspaces(ctx)
+	if err != nil {
+		t.Fatalf("ListWorkspaces returned error: %v", err)
+	}
+	assertWorkspaceListOrder(t, items, []string{"GAMMA", "ALPHA", "BETA"})
+
+	freshSvc := NewWorkspaceService(WorkspaceServiceConfig{
+		Store:            st,
+		LocalSettingsDir: settingsDir,
+	})
+	freshItems, err := freshSvc.ListWorkspaces(ctx)
+	if err != nil {
+		t.Fatalf("fresh ListWorkspaces returned error: %v", err)
+	}
+	assertWorkspaceListOrder(t, freshItems, []string{"GAMMA", "ALPHA", "BETA"})
+}
+
+func TestListWorkspaces_CachesWorkspaceOrderAndFallsBackOnUnreadableSettings(t *testing.T) {
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+	t.Setenv("LOOM_WORKSPACE", "")
+
+	ctx := context.Background()
+	st := memstore.New()
+	for _, ws := range []store.WorkspaceCreate{
+		{Key: "ALPHA", Name: "Alpha Project"},
+		{Key: "BETA", Name: "Beta Project"},
+		{Key: "GAMMA", Name: "Gamma Project"},
+	} {
+		if _, err := st.Workspaces().Create(ctx, ws); err != nil {
+			t.Fatalf("create %s: %v", ws.Key, err)
+		}
+	}
+
+	settingsDir := t.TempDir()
+	settings := localsettings.Default()
+	settings.UIPreferences.WorkspaceOrder = []string{"GAMMA", "ALPHA"}
+	if err := localsettings.Save(settingsDir, settings); err != nil {
+		t.Fatalf("save local settings: %v", err)
+	}
+
+	svc := NewWorkspaceService(WorkspaceServiceConfig{
+		Store:            st,
+		LocalSettingsDir: settingsDir,
+	})
+	items, err := svc.ListWorkspaces(ctx)
+	if err != nil {
+		t.Fatalf("ListWorkspaces returned error: %v", err)
+	}
+	assertWorkspaceListOrder(t, items, []string{"GAMMA", "ALPHA", "BETA"})
+
+	if err := os.WriteFile(localsettings.Path(settingsDir), []byte("{"), 0600); err != nil {
+		t.Fatalf("corrupt local settings: %v", err)
+	}
+	cachedItems, err := svc.ListWorkspaces(ctx)
+	if err != nil {
+		t.Fatalf("cached ListWorkspaces returned error: %v", err)
+	}
+	assertWorkspaceListOrder(t, cachedItems, []string{"GAMMA", "ALPHA", "BETA"})
+
+	freshSvc := NewWorkspaceService(WorkspaceServiceConfig{
+		Store:            st,
+		LocalSettingsDir: settingsDir,
+	})
+	fallbackItems, err := freshSvc.ListWorkspaces(ctx)
+	if err != nil {
+		t.Fatalf("fallback ListWorkspaces returned error: %v", err)
+	}
+	assertWorkspaceListOrder(t, fallbackItems, []string{"ALPHA", "BETA", "GAMMA"})
+}
+
 func TestGetActiveWorkspace_StoreBackedReturnsData(t *testing.T) {
 	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
 	t.Setenv("LOOM_WORKSPACE", "")
@@ -178,6 +287,62 @@ func TestCreateWorkspace_StoreBackedReturnsCreatedWorkspaceData(t *testing.T) {
 	}
 	if len(data.Workspaces) != 2 {
 		t.Fatalf("workspace summary count = %d, want 2", len(data.Workspaces))
+	}
+}
+
+func TestRemoveWorkspaceRepo_RemovesOnlyMatchingWorkspaceRepo(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "ALPHA", Name: "Alpha Project"}); err != nil {
+		t.Fatalf("create alpha: %v", err)
+	}
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "BETA", Name: "Beta Project"}); err != nil {
+		t.Fatalf("create beta: %v", err)
+	}
+	if _, err := st.Repos().Create(ctx, store.RepoCreate{WorkspaceKey: "ALPHA", Name: "api"}); err != nil {
+		t.Fatalf("create alpha repo: %v", err)
+	}
+	if _, err := st.Repos().Create(ctx, store.RepoCreate{WorkspaceKey: "BETA", Name: "api"}); err != nil {
+		t.Fatalf("create beta repo: %v", err)
+	}
+
+	svc := NewWorkspaceService(WorkspaceServiceConfig{Store: st})
+	data, err := svc.RemoveWorkspaceRepo(ctx, WorkspaceRemoveRepoRequest{WorkspaceID: "ALPHA", RepoName: "api"})
+	if err != nil {
+		t.Fatalf("RemoveWorkspaceRepo returned error: %v", err)
+	}
+	if len(data.Repos) != 0 {
+		t.Fatalf("ALPHA repos = %+v, want empty after removal", data.Repos)
+	}
+	if _, err := st.Repos().Get(ctx, "ALPHA", "api"); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("ALPHA repo still exists or unexpected error: %v", err)
+	}
+	if _, err := st.Repos().Get(ctx, "BETA", "api"); err != nil {
+		t.Fatalf("BETA repo should remain: %v", err)
+	}
+}
+
+func TestRemoveWorkspaceRepo_WrongWorkspaceReturnsNotFound(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "ALPHA", Name: "Alpha Project"}); err != nil {
+		t.Fatalf("create alpha: %v", err)
+	}
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "BETA", Name: "Beta Project"}); err != nil {
+		t.Fatalf("create beta: %v", err)
+	}
+	if _, err := st.Repos().Create(ctx, store.RepoCreate{WorkspaceKey: "BETA", Name: "api"}); err != nil {
+		t.Fatalf("create beta repo: %v", err)
+	}
+
+	svc := NewWorkspaceService(WorkspaceServiceConfig{Store: st})
+	_, err := svc.RemoveWorkspaceRepo(ctx, WorkspaceRemoveRepoRequest{WorkspaceID: "ALPHA", RepoName: "api"})
+	var se *ServiceError
+	if !errors.As(err, &se) || se.Kind != KindNotFound {
+		t.Fatalf("err = %v, want NotFound", err)
+	}
+	if _, err := st.Repos().Get(ctx, "BETA", "api"); err != nil {
+		t.Fatalf("BETA repo should remain: %v", err)
 	}
 }
 
@@ -381,47 +546,6 @@ func TestPatchWorkspaceDesignFormat_RejectsInvalidFormat(t *testing.T) {
 	}
 }
 
-func TestSetDefaultWorkspace_Removed(t *testing.T) {
-	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
-
-	ctx := context.Background()
-	st := memstore.New()
-	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "ALPHA", Name: "Alpha Project"}); err != nil {
-		t.Fatalf("create alpha: %v", err)
-	}
-
-	svc := NewWorkspaceService(WorkspaceServiceConfig{Store: st})
-
-	data, err := svc.SetDefaultWorkspace(ctx, "Alpha Project")
-	if data != nil {
-		t.Fatalf("data = %+v, want nil", data)
-	}
-	var serr *ServiceError
-	if !errors.As(err, &serr) || serr.Kind != KindUnavailable {
-		t.Fatalf("SetDefaultWorkspace err = %v, want unavailable ServiceError", err)
-	}
-}
-
-func TestClearDefaultWorkspace_Removed(t *testing.T) {
-	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
-
-	ctx := context.Background()
-	st := memstore.New()
-	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "ALPHA", Name: "Alpha Project"}); err != nil {
-		t.Fatalf("create alpha: %v", err)
-	}
-	svc := NewWorkspaceService(WorkspaceServiceConfig{Store: st})
-
-	data, err := svc.ClearDefaultWorkspace(ctx)
-	if data != nil {
-		t.Fatalf("data = %+v, want nil", data)
-	}
-	var serr *ServiceError
-	if !errors.As(err, &serr) || serr.Kind != KindUnavailable {
-		t.Fatalf("ClearDefaultWorkspace err = %v, want unavailable ServiceError", err)
-	}
-}
-
 func TestGetWorkspaceJob_StoreFallbackSurvivesJobStoreLoss(t *testing.T) {
 	ctx := context.Background()
 	st := memstore.New()
@@ -526,6 +650,40 @@ func (s *workspaceCountingRepoStore) List(ctx context.Context, workspaceKey stri
 type workspaceCountingDaemonStore struct {
 	store.DaemonProfileStore
 	getByWorkspace map[string]int
+}
+
+func assertWorkspaceSummaryOrder(t *testing.T, summaries []ops.WorkspaceSummary, want []string) {
+	t.Helper()
+	got := make([]string, 0, len(summaries))
+	for _, ws := range summaries {
+		got = append(got, ws.ID)
+	}
+	if !equalStringSlices(got, want) {
+		t.Fatalf("workspace summary order = %#v, want %#v", got, want)
+	}
+}
+
+func assertWorkspaceListOrder(t *testing.T, items []WorkspaceListItem, want []string) {
+	t.Helper()
+	got := make([]string, 0, len(items))
+	for _, item := range items {
+		got = append(got, item.ID)
+	}
+	if !equalStringSlices(got, want) {
+		t.Fatalf("workspace list order = %#v, want %#v", got, want)
+	}
+}
+
+func equalStringSlices(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func (s *workspaceCountingDaemonStore) Get(ctx context.Context, workspaceKey string) (*domain.DaemonProfile, error) {

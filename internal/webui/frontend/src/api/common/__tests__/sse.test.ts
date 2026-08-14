@@ -689,7 +689,7 @@ describe("WorkspaceSSEClient", () => {
       expect(client.getLastEventId()).toBe("abc");
     });
 
-    it("stores the last delivered event ID", async () => {
+    it("does not move the reconnect cursor backwards", async () => {
       const client = new WorkspaceSSEClient("test-ws-id");
 
       await client.connect();
@@ -712,7 +712,27 @@ describe("WorkspaceSSEClient", () => {
       MockEventSource.lastInstance?.simulateMutation(mutation1, "2000");
       MockEventSource.lastInstance?.simulateMutation(mutation2, "1000");
 
-      expect(client.getLastEventId()).toBe("1000");
+      expect(client.getLastEventId()).toBe("2000");
+    });
+
+    it("delivers a replayed durable cursor only once", async () => {
+      const onMutation = vi.fn();
+      const client = new WorkspaceSSEClient("test-ws-id", { onMutation });
+
+      await client.connect();
+      MockEventSource.lastInstance?.simulateOpen();
+      const mutation: MutationPayload = {
+        type: "update",
+        issue_id: "issue-dedup",
+        title: "Newest",
+        timestamp: "2025-01-23T12:00:00Z",
+      };
+
+      MockEventSource.lastInstance?.simulateMutation(mutation, "2000-1");
+      MockEventSource.lastInstance?.simulateMutation(mutation, "2000-1");
+
+      expect(onMutation).toHaveBeenCalledTimes(1);
+      expect(client.getLastEventId()).toBe("2000-1");
     });
 
     it("handles empty lastEventId string", async () => {

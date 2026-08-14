@@ -84,11 +84,21 @@ function computeCostSummary(sessions: SessionRecord[]): RunRailSummary {
   let totalCost = 0;
   let activeSessions = 0;
   let failedSessions = 0;
+  let unavailableUsageSessions = 0;
+  let conflictingSessions = 0;
   for (const s of sessions) {
-    totalTokens += sessionTotalTokens(s);
-    if (s.estimated_cost_usd > 0) {
-      totalCost += s.estimated_cost_usd;
+    const usageUnavailable =
+      s.evidence?.usage_status === "unavailable" ||
+      (s.evidence == null && s.input_tokens == null && s.output_tokens == null);
+    if (usageUnavailable) {
+      unavailableUsageSessions++;
+    } else {
+      totalTokens += sessionTotalTokens(s);
+      if ((s.estimated_cost_usd ?? 0) > 0) {
+        totalCost += s.estimated_cost_usd ?? 0;
+      }
     }
+    if (s.evidence?.status === "conflict") conflictingSessions++;
     if (s.is_active) activeSessions++;
     if (s.status === "failed") failedSessions++;
   }
@@ -98,5 +108,7 @@ function computeCostSummary(sessions: SessionRecord[]): RunRailSummary {
     totalCost,
     activeSessions,
     failedSessions,
+    unavailableUsageSessions,
+    conflictingSessions,
   };
 }

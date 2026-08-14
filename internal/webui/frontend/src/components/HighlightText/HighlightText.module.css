@@ -1,6 +1,8 @@
 .highlight {
-  background-color: var(--color-highlight);
+  background-color: color-mix(in srgb, var(--color-warning) 22%, transparent);
   color: inherit;
-  border-radius: 2px;
-  padding: 0 1px;
+  border-radius: var(--radius-sm);
+  padding: 0 2px;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
 }

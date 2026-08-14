@@ -1,13 +1,10 @@
 package svcimpl
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
-	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -112,10 +109,48 @@ func (s *sessionServiceImpl) findStoreForSession(ctx context.Context, wsID, sess
 	if err != nil {
 		return nil, err
 	}
-	if st := storeOwningSession(stores, sessionID); st != nil {
-		return st, nil
+	for _, st := range stores {
+		if _, err := st.LoadMetadata(sessionID); err != nil {
+			continue
+		}
+		if s.sessionStoreIsWorkspaceScoped(ctx, wsID, st) {
+			return st, nil
+		}
+		// A shared runtime store is safe only when the workspace-scoped control
+		// plane independently owns this exact session ID.
+		if s.store != nil {
+			if _, err := s.store.AgentSessions().Get(ctx, wsID, sessionID); err == nil {
+				return st, nil
+			}
+		}
 	}
 	return nil, service.ErrNotFound("session not found")
+}
+
+func (s *sessionServiceImpl) sessionStoreIsWorkspaceScoped(ctx context.Context, wsID string, sessStore *sessions.Store) bool {
+	if s.store == nil || sessStore == nil {
+		return s.store == nil
+	}
+	wsData, err := storeadapter.BuildWorkspaceDataForKey(ctx, s.store, wsID)
+	if err != nil || wsData == nil {
+		return false
+	}
+	root := filepath.Clean(filepath.Dir(sessStore.Dir()))
+	paths := []string{wsData.Path}
+	for _, repo := range wsData.Repos {
+		paths = append(paths, repo.Path)
+	}
+	for _, candidate := range paths {
+		candidate = filepath.Clean(candidate)
+		if candidate == "." || candidate == "" {
+			continue
+		}
+		rel, relErr := filepath.Rel(candidate, root)
+		if relErr == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *sessionServiceImpl) ListTaskSessions(ctx context.Context, wsID, taskID string) ([]service.SessionListItem, error) {
@@ -134,6 +169,9 @@ func (s *sessionServiceImpl) ListTaskSessions(ctx context.Context, wsID, taskID 
 
 	var items []service.SessionListItem
 	for _, sessStore := range stores {
+		if !s.sessionStoreIsWorkspaceScoped(ctx, wsID, sessStore) {
+			continue
+		}
 		records, err := sessStore.SessionsByTask(taskID)
 		if err != nil {
 			continue
@@ -144,6 +182,7 @@ func (s *sessionServiceImpl) ListTaskSessions(ctx context.Context, wsID, taskID 
 				IsActive:      rec.Status == sessions.StatusRunning,
 			}
 			enrichSessionUsageFromTranscript(sessStore, &item.SessionRecord)
+			item.Evidence = sessionEvidence(item.SessionRecord, nil)
 			if info, err := os.Stat(sessStore.NativeTranscriptPath(rec.SessionID)); err == nil && info.Size() > 0 {
 				item.HasTranscript = true
 			}
@@ -171,8 +210,10 @@ func (s *sessionServiceImpl) enrichSessionListItemsFromFileStores(ctx context.Co
 			if err != nil || meta.TaskID != taskID {
 				continue
 			}
-			enrichSessionRecordFromLocal(&item.SessionRecord, meta.SessionRecord)
+			conflicts := append([]service.SessionEvidenceConflict{}, item.Evidence.Conflicts...)
+			conflicts = append(conflicts, enrichSessionRecordFromLocal(&item.SessionRecord, meta.SessionRecord)...)
 			enrichSessionUsageFromTranscript(sessStore, &item.SessionRecord)
+			item.Evidence = sessionEvidence(item.SessionRecord, conflicts)
 			if info, err := os.Stat(sessStore.NativeTranscriptPath(item.SessionID)); err == nil && info.Size() > 0 {
 				item.HasTranscript = true
 			}
@@ -188,7 +229,7 @@ func (s *sessionServiceImpl) enrichSessionListItemsFromFileStores(ctx context.Co
 // transcript when session metadata still has zeros (common for completed Go Codex
 // daemon runs whose collector finalize never persisted usage).
 func enrichSessionUsageFromTranscript(store *sessions.Store, rec *sessions.SessionRecord) {
-	if localHasUsage(*rec) {
+	if sessionRecordHasUsage(*rec) {
 		return
 	}
 	u := store.TranscriptUsage(rec.SessionID)
@@ -201,54 +242,13 @@ func enrichSessionUsageFromTranscript(store *sessions.Store, rec *sessions.Sessi
 	rec.CacheWriteTokens = u.CacheWriteTokens
 }
 
-func enrichSessionRecordFromLocal(rec *sessions.SessionRecord, local sessions.SessionRecord) {
-	if rec.TaskID == "" {
-		rec.TaskID = local.TaskID
-	}
-	if rec.EpicID == "" {
-		rec.EpicID = local.EpicID
-	}
-	if rec.Backend == "" {
-		rec.Backend = local.Backend
-	}
-	if rec.Model == "" {
-		rec.Model = local.Model
-	}
-	if rec.Phase == "" {
-		rec.Phase = local.Phase
-	}
-	if localHasUsage(local) {
-		rec.InputTokens = local.InputTokens
-		rec.OutputTokens = local.OutputTokens
-		rec.CacheReadTokens = local.CacheReadTokens
-		rec.CacheWriteTokens = local.CacheWriteTokens
-		rec.EstimatedCostUSD = local.EstimatedCostUSD
-	}
-	if local.FilesChanged != 0 {
-		rec.FilesChanged = local.FilesChanged
-	}
-	if local.LinesAdded != 0 {
-		rec.LinesAdded = local.LinesAdded
-	}
-	if local.LinesRemoved != 0 {
-		rec.LinesRemoved = local.LinesRemoved
-	}
-	if len(local.FilesTouched) > 0 {
-		rec.FilesTouched = local.FilesTouched
-	}
-	if rec.ErrorClass == "" {
-		rec.ErrorClass = local.ErrorClass
-	}
-}
-
-func localHasUsage(rec sessions.SessionRecord) bool {
+func sessionRecordHasUsage(rec sessions.SessionRecord) bool {
 	return rec.InputTokens != 0 ||
 		rec.OutputTokens != 0 ||
 		rec.CacheReadTokens != 0 ||
 		rec.CacheWriteTokens != 0 ||
 		rec.EstimatedCostUSD != 0
 }
-
 func firstNonEmptySessionValue(values ...string) string {
 	for _, value := range values {
 		if strings.TrimSpace(value) != "" {
@@ -256,6 +256,111 @@ func firstNonEmptySessionValue(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func (s *sessionServiceImpl) projectTaskRunOntoSessionRecord(ctx context.Context, wsID string, rec *sessions.SessionRecord, session *domain.AgentSession, taskRunsByID map[string]*domain.TaskRun) []service.SessionEvidenceConflict {
+	if s.store == nil || rec == nil || session == nil {
+		return nil
+	}
+	taskRunID := controlPlaneSessionTaskRunID(session)
+	if taskRunID == "" {
+		return nil
+	}
+	if taskRunsByID != nil {
+		return enrichSessionRecordFromTaskRun(rec, session, taskRunsByID[taskRunID])
+	}
+	run, err := s.store.TaskRuns().Get(ctx, wsID, taskRunID)
+	if err != nil {
+		if !errors.Is(err, domain.ErrNotFound) {
+			logger.Warn("failed to load task run for session projection", "workspace", wsID, "session_id", session.SessionID, "task_run_id", taskRunID, "err", err)
+		}
+		return nil
+	}
+	return enrichSessionRecordFromTaskRun(rec, session, run)
+}
+
+func (s *sessionServiceImpl) controlPlaneTaskRunsByID(ctx context.Context, wsID, taskID string) map[string]*domain.TaskRun {
+	if s.store == nil {
+		return nil
+	}
+	runs, err := s.store.TaskRuns().List(ctx, wsID, store.TaskRunFilter{TaskID: taskID, Limit: 50})
+	if err != nil {
+		if !errors.Is(err, domain.ErrNotFound) {
+			logger.Warn("failed to list task runs for session projection", "workspace", wsID, "task_id", taskID, "err", err)
+		}
+		return map[string]*domain.TaskRun{}
+	}
+	byID := make(map[string]*domain.TaskRun, len(runs))
+	for _, run := range runs {
+		if run != nil && run.TaskRunID != "" {
+			byID[run.TaskRunID] = run
+		}
+	}
+	return byID
+}
+
+func controlPlaneSessionTaskRunID(session *domain.AgentSession) string {
+	if session == nil {
+		return ""
+	}
+	if session.Metadata != nil {
+		if taskRunID := strings.TrimSpace(firstNonEmptySessionValue(session.Metadata["task_run_id"], session.Metadata["taskRunID"])); taskRunID != "" {
+			return taskRunID
+		}
+	}
+	if !strings.HasPrefix(session.SessionID, "flue-") {
+		return ""
+	}
+	return strings.TrimSpace(strings.TrimPrefix(session.SessionID, "flue-"))
+}
+
+func enrichSessionRecordFromTaskRun(rec *sessions.SessionRecord, session *domain.AgentSession, run *domain.TaskRun) []service.SessionEvidenceConflict {
+	if rec == nil || run == nil {
+		return nil
+	}
+	var conflicts []service.SessionEvidenceConflict
+	addConflict := func(field, existing, incoming string) {
+		conflicts = append(conflicts, service.SessionEvidenceConflict{
+			Field: field, ExistingSource: "agent_session", ExistingValue: existing,
+			IncomingSource: "task_run", IncomingValue: incoming,
+		})
+	}
+	if rec.TaskID != "" && run.TaskID != "" && rec.TaskID != run.TaskID {
+		addConflict("task_id", rec.TaskID, run.TaskID)
+	}
+	if session != nil {
+		runStatus := sessionStatusFromTaskRun(run.Status)
+		if runStatus != "" && rec.Status != runStatus {
+			addConflict("status", string(rec.Status), string(runStatus))
+		}
+		if session.ExitCode != nil && run.ExitCode != nil && *session.ExitCode != *run.ExitCode {
+			addConflict("exit_code", fmt.Sprint(*session.ExitCode), fmt.Sprint(*run.ExitCode))
+		}
+	}
+	fillIfZero(&rec.InputTokens, run.InputTokens)
+	fillIfZero(&rec.OutputTokens, run.OutputTokens)
+	fillIfZero(&rec.CacheReadTokens, run.CacheReadTokens)
+	fillIfZero(&rec.CacheWriteTokens, run.CacheWriteTokens)
+	fillIfZero(&rec.EstimatedCostUSD, run.EstimatedCostUSD)
+	diffMeta := sessions.DecodeDiffStatsMetadata(run.RuntimeMetadata)
+	fillIfZero(&rec.FilesChanged, diffMeta.FilesChanged)
+	fillIfZero(&rec.LinesAdded, diffMeta.LinesAdded)
+	fillIfZero(&rec.LinesRemoved, diffMeta.LinesRemoved)
+	reconcileStringSlice("files_touched", &rec.FilesTouched, diffMeta.FilesTouched, addConflict)
+	return conflicts
+}
+
+func sessionStatusFromTaskRun(status domain.TaskRunStatus) sessions.SessionStatus {
+	switch status {
+	case domain.TaskRunCompleted:
+		return sessions.StatusCompleted
+	case domain.TaskRunFailed:
+		return sessions.StatusFailed
+	case domain.TaskRunCancelled:
+		return sessions.StatusAborted
+	default:
+		return sessions.StatusRunning
+	}
 }
 
 func (s *sessionServiceImpl) controlPlaneTaskSessions(ctx context.Context, wsID, taskID string) ([]service.SessionListItem, error) {
@@ -273,14 +378,18 @@ func (s *sessionServiceImpl) controlPlaneTaskSessions(ctx context.Context, wsID,
 	if len(records) > 0 {
 		stores, _ = s.storesForWorkspace(ctx, wsID)
 	}
+	taskRunsByID := s.controlPlaneTaskRunsByID(ctx, wsID, taskID)
 	items := make([]service.SessionListItem, 0, len(records))
 	for _, rec := range records {
 		if rec == nil {
 			continue
 		}
+		sessionRec := sessionRecordFromAgentSession(rec)
+		conflicts := s.projectTaskRunOntoSessionRecord(ctx, wsID, &sessionRec, rec, taskRunsByID)
 		item := service.SessionListItem{
-			SessionRecord: sessionRecordFromAgentSession(rec),
+			SessionRecord: sessionRec,
 			IsActive:      isActiveAgentSession(rec.Status),
+			Evidence:      sessionEvidence(sessionRec, conflicts),
 		}
 		fillControlPlaneArtifactFlags(&item, stores, rec)
 		items = append(items, item)
@@ -311,8 +420,16 @@ func fillControlPlaneArtifactFlags(item *service.SessionListItem, stores []*sess
 	}
 	if rec.Metadata != nil {
 		item.HasTranscript = rec.Metadata["transcript_path"] != "" || rec.Metadata["transcript_ref"] != ""
-		item.HasDiff = rec.Metadata["diff_path"] != "" || controlPlaneDiffArtifactRef(rec.Metadata) != ""
+		item.HasDiff = controlPlaneSessionHasDiff(rec.Metadata)
 	}
+}
+
+func controlPlaneSessionHasDiff(metadata map[string]string) bool {
+	return firstNonEmptySessionValue(
+		metadata["diff_path"],
+		metadata["patch_path"],
+		controlPlaneDiffArtifactRef(metadata),
+	) != ""
 }
 
 func sessionRecordFromAgentSession(rec *domain.AgentSession) sessions.SessionRecord {
@@ -411,9 +528,26 @@ func (s *sessionServiceImpl) GetSession(ctx context.Context, wsID, taskID, sessi
 		return nil, service.ErrNotFound("session not found")
 	}
 
+	if rec, err := s.controlPlaneSessionRecord(ctx, wsID, taskID, sessionID); err == nil {
+		sessionRec := sessionRecordFromAgentSession(rec)
+		conflicts := s.projectTaskRunOntoSessionRecord(ctx, wsID, &sessionRec, rec, nil)
+		conflicts = append(conflicts, enrichSessionRecordFromLocal(&sessionRec, meta.SessionRecord)...)
+		meta.SessionRecord = sessionRec
+		hasTranscript := false
+		if info, statErr := os.Stat(store.NativeTranscriptPath(sessionID)); statErr == nil && info.Size() > 0 {
+			hasTranscript = true
+		}
+		if !hasTranscript && eventStoreHasTranscript(store, sessionID) {
+			hasTranscript = true
+		}
+		diff, _ := store.ReadDiff(sessionID)
+		return &service.SessionDetailData{SessionMetadata: *meta, IsActive: meta.Status == sessions.StatusRunning, HasTranscript: hasTranscript, HasDiff: diff != "", Evidence: sessionEvidence(sessionRec, conflicts)}, nil
+	}
+
 	return &service.SessionDetailData{
 		SessionMetadata: *meta,
 		IsActive:        meta.Status == sessions.StatusRunning,
+		Evidence:        sessionEvidence(meta.SessionRecord, nil),
 	}, nil
 }
 
@@ -442,9 +576,34 @@ func (s *sessionServiceImpl) controlPlaneSession(ctx context.Context, wsID, task
 	if err != nil {
 		return nil, err
 	}
+	sessionRec := sessionRecordFromAgentSession(rec)
+	conflicts := s.projectTaskRunOntoSessionRecord(ctx, wsID, &sessionRec, rec, nil)
+	var hasTranscript, hasDiff bool
+	if stores, storeErr := s.storesForWorkspace(ctx, wsID); storeErr == nil {
+		if localStore := storeOwningSession(stores, sessionID); localStore != nil {
+			if meta, loadErr := localStore.LoadMetadata(sessionID); loadErr == nil {
+				conflicts = append(conflicts, enrichSessionRecordFromLocal(&sessionRec, meta.SessionRecord)...)
+			}
+			if info, statErr := os.Stat(localStore.NativeTranscriptPath(sessionID)); statErr == nil && info.Size() > 0 {
+				hasTranscript = true
+			}
+			if !hasTranscript && eventStoreHasTranscript(localStore, sessionID) {
+				hasTranscript = true
+			}
+			diff, _ := localStore.ReadDiff(sessionID)
+			hasDiff = diff != ""
+		}
+	}
+	if rec.Metadata != nil {
+		hasTranscript = hasTranscript || rec.Metadata["transcript_path"] != "" || rec.Metadata["transcript_ref"] != ""
+		hasDiff = hasDiff || controlPlaneSessionHasDiff(rec.Metadata)
+	}
 	return &service.SessionDetailData{
-		SessionMetadata: sessions.SessionMetadata{SessionRecord: sessionRecordFromAgentSession(rec)},
+		SessionMetadata: sessions.SessionMetadata{SessionRecord: sessionRec},
 		IsActive:        isActiveAgentSession(rec.Status),
+		HasTranscript:   hasTranscript,
+		HasDiff:         hasDiff,
+		Evidence:        sessionEvidence(sessionRec, conflicts),
 	}, nil
 }
 
@@ -487,8 +646,11 @@ func (s *sessionServiceImpl) controlPlaneSessionTranscript(ctx context.Context, 
 	if transcriptRef == "" {
 		return nil, service.ErrNotFound("transcript not found")
 	}
-	data, err := s.readTranscriptRef(ctx, wsID, transcriptRef)
+	data, err := s.readArtifactRef(ctx, wsID, transcriptRef)
 	if err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			return nil, service.ErrNotFound("transcript not found")
+		}
 		return nil, service.ErrInternal("failed to load transcript", err)
 	}
 	events, err := parseCanonicalTranscriptBytes(data)
@@ -501,112 +663,17 @@ func (s *sessionServiceImpl) controlPlaneSessionTranscript(ctx context.Context, 
 	return events, nil
 }
 
-const maxControlPlaneTranscriptBytes = 16 << 20
-
-func (s *sessionServiceImpl) readTranscriptRef(ctx context.Context, wsID, ref string) ([]byte, error) {
-	ref = strings.TrimSpace(ref)
-	if ref == "" {
-		return nil, errors.New("empty transcript ref")
-	}
-	if strings.HasPrefix(ref, "artifact://") {
-		artifactID := strings.TrimSpace(strings.TrimPrefix(ref, "artifact://"))
-		if artifactID == "" {
-			return nil, errors.New("empty artifact transcript ref")
-		}
-		if s.store == nil {
-			return nil, errors.New("artifact store unavailable")
-		}
-		if reader, ok := s.store.Artifacts().(store.ArtifactContentReader); ok {
-			data, err := reader.ReadContent(ctx, wsID, artifactID)
-			if err == nil {
-				return data, nil
-			}
-			if !errors.Is(err, domain.ErrNotFound) {
-				return nil, err
-			}
-		}
-		artifact, err := s.store.Artifacts().Get(ctx, wsID, artifactID)
-		if err != nil {
-			return nil, err
-		}
-		return readTranscriptURI(ctx, artifact.URI)
-	}
-	return readTranscriptURI(ctx, ref)
-}
-
-func readTranscriptURI(ctx context.Context, rawURI string) ([]byte, error) {
-	rawURI = strings.TrimSpace(rawURI)
-	switch {
-	case strings.HasPrefix(rawURI, "file://"):
-		parsed, err := url.Parse(rawURI)
-		if err != nil {
-			return nil, err
-		}
-		path := parsed.Path
-		if path == "" {
-			path = parsed.Host
-		}
-		if path == "" {
-			return nil, errors.New("empty file transcript ref")
-		}
-		return os.ReadFile(path) //nolint:gosec // refs are emitted by the trusted runner/control-plane path.
-	case strings.HasPrefix(rawURI, "http://"), strings.HasPrefix(rawURI, "https://"):
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURI, nil)
-		if err != nil {
-			return nil, err
-		}
-		resp, err := http.DefaultClient.Do(req)
-		if err != nil {
-			return nil, err
-		}
-		defer resp.Body.Close()
-		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-			return nil, errors.New("transcript ref returned non-success status")
-		}
-		body, err := io.ReadAll(io.LimitReader(resp.Body, maxControlPlaneTranscriptBytes+1))
-		if err != nil {
-			return nil, err
-		}
-		if len(body) > maxControlPlaneTranscriptBytes {
-			return nil, errors.New("transcript is too large")
-		}
-		return body, nil
-	default:
-		return nil, errors.New("unsupported transcript ref")
-	}
-}
-
-func parseCanonicalTranscriptBytes(data []byte) ([]transcript.Event, error) {
-	trimmed := bytes.TrimSpace(data)
-	if len(trimmed) == 0 {
-		return []transcript.Event{}, nil
-	}
-	if trimmed[0] == '[' {
-		var events []transcript.Event
-		if err := json.Unmarshal(trimmed, &events); err != nil {
-			return nil, err
-		}
-		return events, nil
-	}
-	lines := bytes.Split(trimmed, []byte("\n"))
-	events := make([]transcript.Event, 0, len(lines))
-	for _, line := range lines {
-		line = bytes.TrimSpace(line)
-		if len(line) == 0 {
-			continue
-		}
-		var event transcript.Event
-		if err := json.Unmarshal(line, &event); err != nil {
-			return nil, err
-		}
-		events = append(events, event)
-	}
-	return events, nil
-}
-
 func serviceErrorNotFound(err error) bool {
+	return serviceErrorKind(err, service.KindNotFound)
+}
+
+func serviceErrorIsNotFound(err error) bool {
+	return serviceErrorNotFound(err)
+}
+
+func serviceErrorKind(err error, kind service.ErrorKind) bool {
 	var svcErr *service.ServiceError
-	return errors.As(err, &svcErr) && svcErr.Kind == service.KindNotFound
+	return errors.As(err, &svcErr) && svcErr.Kind == kind
 }
 
 func (s *sessionServiceImpl) ListSessionSubagents(ctx context.Context, wsID, taskID, sessionID string) ([]string, error) {
@@ -760,91 +827,6 @@ func (s *sessionServiceImpl) controlPlaneSessionDiff(ctx context.Context, wsID, 
 		return "", service.ErrInternal("failed to read diff", err)
 	}
 	return diff, nil
-}
-
-func controlPlaneDiffArtifactRef(metadata map[string]string) string {
-	if metadata == nil {
-		return ""
-	}
-	return normalizeArtifactRef(firstNonEmptySessionValue(
-		metadata["patch_artifact_id"],
-		metadata["diff_artifact_id"],
-		metadata["patch_ref"],
-		metadata["diff_ref"],
-	))
-}
-
-func normalizeArtifactRef(ref string) string {
-	ref = strings.TrimSpace(ref)
-	if strings.HasPrefix(ref, "artifact://") {
-		ref = strings.TrimSpace(strings.TrimPrefix(ref, "artifact://"))
-	}
-	return ref
-}
-
-func (s *sessionServiceImpl) diffArtifactIDForTaskRun(ctx context.Context, wsID, taskRunID string) (string, error) {
-	taskRunID = strings.TrimSpace(taskRunID)
-	if taskRunID == "" || s.store == nil {
-		return "", nil
-	}
-	artifacts, err := s.store.Artifacts().List(ctx, wsID, store.ArtifactFilter{
-		OwnerType: "task_run",
-		OwnerID:   taskRunID,
-		Type:      "patch",
-		Status:    "finalized",
-		Limit:     1,
-	})
-	if err != nil {
-		return "", service.ErrInternal("failed to list patch artifacts", err)
-	}
-	for _, artifact := range artifacts {
-		if artifact != nil && strings.TrimSpace(artifact.ArtifactID) != "" {
-			return artifact.ArtifactID, nil
-		}
-	}
-	return "", nil
-}
-
-func (s *sessionServiceImpl) readControlPlaneArtifactText(ctx context.Context, wsID, artifactID string) (string, error) {
-	artifactID = normalizeArtifactRef(artifactID)
-	if artifactID == "" {
-		return "", errors.New("empty artifact ref")
-	}
-	if isSupportedControlPlaneURI(artifactID) {
-		data, err := readTranscriptURI(ctx, artifactID)
-		if err != nil {
-			return "", err
-		}
-		return string(data), nil
-	}
-	if s.store == nil {
-		return "", errors.New("artifact store unavailable")
-	}
-	if reader, ok := s.store.Artifacts().(store.ArtifactContentReader); ok {
-		data, err := reader.ReadContent(ctx, wsID, artifactID)
-		if err == nil {
-			return string(data), nil
-		}
-		if !errors.Is(err, domain.ErrNotFound) {
-			return "", err
-		}
-	}
-	artifact, err := s.store.Artifacts().Get(ctx, wsID, artifactID)
-	if err != nil {
-		return "", err
-	}
-	if strings.TrimSpace(artifact.URI) == "" {
-		return "", domain.ErrNotFound
-	}
-	data, err := readTranscriptURI(ctx, artifact.URI)
-	if err != nil {
-		return "", err
-	}
-	return string(data), nil
-}
-
-func isSupportedControlPlaneURI(ref string) bool {
-	return strings.HasPrefix(ref, "file://") || strings.HasPrefix(ref, "http://") || strings.HasPrefix(ref, "https://")
 }
 
 func (s *sessionServiceImpl) ListSessionHistory(ctx context.Context, wsID, issueID string) ([]sessionhistory.SessionRecord, error) {

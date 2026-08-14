@@ -3,7 +3,6 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type {
   Issue,
   IssueDetails,
-  Statistics,
   WorkFilter,
   BlockedIssue,
   Comment,
@@ -14,11 +13,11 @@ import {
   getIssue,
   getReadyIssues,
   getKanbanIssues,
-  getStats,
   getBlockedIssues,
   createIssue,
   updateIssue,
   closeIssue,
+  applyReviewDecision,
   addDependency,
   removeDependency,
   addComment,
@@ -740,64 +739,6 @@ describe("issues API", () => {
     });
   });
 
-  describe("getStats", () => {
-    const mockStats: Statistics = {
-      total_issues: 100,
-      open_issues: 45,
-      closed_issues: 55,
-      blocked_issues: 10,
-      issues_by_type: {
-        bug: 30,
-        feature: 40,
-        task: 20,
-        chore: 10,
-      },
-      issues_by_priority: {
-        high: 25,
-        medium: 50,
-        low: 25,
-      },
-    };
-
-    it("calls api.GET with /api/workspaces/{ws}/stats", async () => {
-      // getStats returns data directly (not via unwrap)
-      mockApiGet.mockResolvedValue(okResponse(mockStats));
-
-      await getStats("test-ws-id");
-
-      expect(mockApiGet).toHaveBeenCalledWith(
-        "/api/workspaces/{ws}/stats",
-        expect.objectContaining({
-          params: { path: { ws: "test-ws-id" } },
-        }),
-      );
-    });
-
-    it("returns Statistics directly from successful response", async () => {
-      mockApiGet.mockResolvedValue(okResponse(mockStats));
-
-      const result = await getStats("test-ws-id");
-
-      expect(result).toEqual(mockStats);
-    });
-
-    it("throws ApiError on HTTP error response", async () => {
-      mockApiGet.mockResolvedValue(
-        errorResponse(503, "Service Unavailable", {
-          error: "Stats unavailable",
-        }),
-      );
-
-      await expect(getStats("test-ws-id")).rejects.toThrow(ApiError);
-    });
-
-    it("propagates ApiError from HTTP error response", async () => {
-      mockApiGet.mockResolvedValue(errorResponse(503, "Service Unavailable"));
-
-      await expect(getStats("test-ws-id")).rejects.toThrow(ApiError);
-    });
-  });
-
   describe("getBlockedIssues", () => {
     const mockBlockedIssues: BlockedIssue[] = [
       {
@@ -1503,14 +1444,66 @@ describe("issues API", () => {
       );
     });
 
-    it("unwraps successful response and returns Issue", async () => {
+    it("unwraps successful response and returns issue metadata", async () => {
       mockApiPost.mockResolvedValue(
         okResponse({ success: true, data: mockCreatedIssue }),
       );
 
       const result = await createIssue("test-ws-id", validCreateRequest);
 
-      expect(result).toEqual(mockCreatedIssue);
+      expect(result).toEqual({
+        issue: mockCreatedIssue,
+        softDuplicate: false,
+      });
+    });
+
+    it("marks create responses with the soft-duplicate warning header", async () => {
+      mockApiPost.mockResolvedValue({
+        data: { success: true, data: mockCreatedIssue },
+        error: undefined,
+        response: new Response(null, {
+          headers: { "X-Idempotency-Warning": "soft-duplicate" },
+        }),
+      });
+
+      const result = await createIssue("test-ws-id", validCreateRequest);
+
+      expect(result).toEqual({
+        issue: mockCreatedIssue,
+        softDuplicate: true,
+      });
+    });
+
+    it("sends the force idempotency header only when requested", async () => {
+      mockApiPost.mockResolvedValue(
+        okResponse({ success: true, data: mockCreatedIssue }),
+      );
+
+      await createIssue("test-ws-id", validCreateRequest, { force: true });
+
+      expect(mockApiPost).toHaveBeenCalledWith(
+        "/api/workspaces/{ws}/issues",
+        expect.objectContaining({
+          headers: { "X-Idempotency-Force": "true" },
+        }),
+      );
+    });
+
+    it("sends a stable caller-provided idempotency key", async () => {
+      mockApiPost.mockResolvedValue(
+        okResponse({ success: true, data: mockCreatedIssue }),
+      );
+
+      await createIssue("test-ws-id", validCreateRequest, {
+        idempotencyKey: "submit-123",
+      });
+
+      expect(mockApiPost).toHaveBeenCalledWith(
+        "/api/workspaces/{ws}/issues",
+        expect.objectContaining({
+          headers: { "X-Idempotency-Key": "submit-123" },
+        }),
+      );
     });
 
     it("handles create request with all optional fields", async () => {
@@ -1521,6 +1514,7 @@ describe("issues API", () => {
         id: "custom-id",
         parent: "parent-123",
         description: "Detailed description",
+        status: "deferred",
         design: "Design notes",
         acceptance_criteria: "Must pass tests",
         notes: "Additional notes",
@@ -1552,6 +1546,7 @@ describe("issues API", () => {
             id: "custom-id",
             parent: "parent-123",
             description: "Detailed description",
+            status: "deferred",
           }),
         }),
       );
@@ -1789,6 +1784,42 @@ describe("issues API", () => {
           params: { path: { ws: "test-ws-id", id: "issue-123" } },
           body: {},
         }),
+      );
+    });
+  });
+
+  describe("applyReviewDecision", () => {
+    it("sends the stable decision key and returns stage evidence", async () => {
+      const result = {
+        issue_id: "issue-123",
+        decision: "request_changes" as const,
+        decision_id: "decision-1",
+        github_stage: "not_applicable" as const,
+        loom_stage: "applied" as const,
+        replayed: false,
+      };
+      mockApiPost.mockResolvedValue(
+        okResponse({ success: true, data: result }),
+      );
+
+      await expect(
+        applyReviewDecision(
+          "test-ws-id",
+          "issue-123",
+          "request_changes",
+          "needs tests",
+          "decision-1",
+        ),
+      ).resolves.toEqual(result);
+      expect(mockApiPost).toHaveBeenCalledWith(
+        "/api/workspaces/{ws}/issues/{id}/review-decision",
+        {
+          params: {
+            path: { ws: "test-ws-id", id: "issue-123" },
+            header: { "X-Idempotency-Key": "decision-1" },
+          },
+          body: { decision: "request_changes", reason: "needs tests" },
+        },
       );
     });
   });
@@ -2124,7 +2155,6 @@ describe("issues API", () => {
       await expect(getIssue("test-ws-id", "123")).rejects.toThrow(ApiError);
       await expect(getReadyIssues("test-ws-id")).rejects.toThrow(ApiError);
       await expect(getKanbanIssues("test-ws-id")).rejects.toThrow(ApiError);
-      await expect(getStats("test-ws-id")).rejects.toThrow(ApiError);
       await expect(getBlockedIssues("test-ws-id")).rejects.toThrow(ApiError);
       await expect(fetchGraphIssues("test-ws-id")).rejects.toThrow(ApiError);
     });

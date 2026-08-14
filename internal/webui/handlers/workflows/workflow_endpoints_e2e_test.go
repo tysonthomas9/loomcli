@@ -452,11 +452,11 @@ func (e *workflowEndpointE2E) createIssue(params backend.CreateParams) *backend.
 	e.t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
-	issue, err := e.issueBackend.Create(ctx, params)
+	created, err := e.issueBackend.Create(ctx, params)
 	if err != nil {
 		e.t.Fatalf("create issue %q: %v", params.Title, err)
 	}
-	return issue
+	return &created.Issue
 }
 
 func (e *workflowEndpointE2E) startLoomServe() {

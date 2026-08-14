@@ -2,6 +2,7 @@ package svcimpl
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -18,6 +19,64 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
+
+type failingArtifactContentStore struct {
+	store.ArtifactStore
+}
+
+func (s failingArtifactContentStore) ReadContent(context.Context, string, string) ([]byte, error) {
+	return nil, domain.ErrConflict
+}
+
+type failingArtifactContentReadStore struct {
+	store.Store
+}
+
+func (s failingArtifactContentReadStore) Artifacts() store.ArtifactStore {
+	return failingArtifactContentStore{ArtifactStore: s.Store.Artifacts()}
+}
+
+type missingArtifactContentStore struct {
+	store.ArtifactStore
+}
+
+func (s missingArtifactContentStore) ReadContent(context.Context, string, string) ([]byte, error) {
+	return nil, domain.ErrNotFound
+}
+
+type missingArtifactContentReadStore struct {
+	store.Store
+}
+
+func (s missingArtifactContentReadStore) Artifacts() store.ArtifactStore {
+	return missingArtifactContentStore{ArtifactStore: s.Store.Artifacts()}
+}
+
+type taskRunListErrorStore struct {
+	store.Store
+	gets      *int
+	listLimit *int
+}
+
+func (s taskRunListErrorStore) TaskRuns() store.TaskRunStore {
+	return taskRunListErrorTaskRunStore{TaskRunStore: s.Store.TaskRuns(), gets: s.gets, listLimit: s.listLimit}
+}
+
+type taskRunListErrorTaskRunStore struct {
+	store.TaskRunStore
+	gets      *int
+	listLimit *int
+}
+
+func (s taskRunListErrorTaskRunStore) List(_ context.Context, _ string, filter store.TaskRunFilter) ([]*domain.TaskRun, error) {
+	*s.listLimit = filter.Limit
+	return nil, errors.New("task run list failed")
+}
+
+func (s taskRunListErrorTaskRunStore) Get(ctx context.Context, workspaceKey, taskRunID string) (*domain.TaskRun, error) {
+	*s.gets++
+	return s.TaskRunStore.Get(ctx, workspaceKey, taskRunID)
+}
 
 func TestSessionServiceListTaskSessionsUsesControlPlane(t *testing.T) {
 	st := memstore.New()
@@ -117,6 +176,91 @@ func TestSessionServiceCloudControlPlaneTranscriptArtifactReadContent(t *testing
 	}
 	if len(events) != 1 || events[0].Role != "assistant" || events[0].Text != "done" {
 		t.Fatalf("events = %+v, want assistant transcript", events)
+	}
+}
+
+func TestSessionServiceControlPlaneTranscriptArtifactReadFallbackOnContentError(t *testing.T) {
+	ctx := t.Context()
+	st := memstore.New()
+	transcriptBody := []byte(`{"seq":1,"timestamp":"2026-06-09T12:00:00Z","role":"assistant","type":"text","text":"from uri"}` + "\n")
+	transcriptPath := filepath.Join(t.TempDir(), "transcript.jsonl")
+	if err := os.WriteFile(transcriptPath, transcriptBody, 0o600); err != nil {
+		t.Fatalf("write transcript fallback file: %v", err)
+	}
+	if _, err := st.Artifacts().Create(ctx, store.ArtifactCreate{
+		WorkspaceKey: "WS",
+		ArtifactID:   "transcript-fallback",
+		SessionID:    "flue-task-run-fallback",
+		TaskID:       "TASK-FALLBACK-1",
+		OwnerType:    "task_run",
+		OwnerID:      "task-run-fallback",
+		Type:         "transcript",
+		URI:          "file://" + transcriptPath,
+	}); err != nil {
+		t.Fatalf("create transcript artifact: %v", err)
+	}
+	if _, err := st.AgentSessions().Create(ctx, store.AgentSessionCreate{
+		WorkspaceKey: "WS",
+		SessionID:    "flue-task-run-fallback",
+		AgentID:      "flue-task-agent",
+		Kind:         domain.AgentSessionKindTask,
+		TaskID:       "TASK-FALLBACK-1",
+		Status:       domain.AgentSessionCompleted,
+		Metadata: map[string]string{
+			"runtime":        "flue",
+			"task_run_id":    "task-run-fallback",
+			"transcript_ref": "artifact://transcript-fallback",
+		},
+	}); err != nil {
+		t.Fatalf("create control-plane session: %v", err)
+	}
+
+	svc := NewSessionService(failingArtifactContentReadStore{Store: st}, nil)
+	events, err := svc.GetSessionTranscript(ctx, "WS", "TASK-FALLBACK-1", "flue-task-run-fallback")
+	if err != nil {
+		t.Fatalf("GetSessionTranscript: %v", err)
+	}
+	if len(events) != 1 || events[0].Text != "from uri" {
+		t.Fatalf("events = %+v, want URI fallback transcript", events)
+	}
+}
+
+func TestSessionServiceControlPlaneTranscriptMissingUploadReturnsNotFound(t *testing.T) {
+	ctx := t.Context()
+	st := memstore.New()
+	if _, err := st.Artifacts().Create(ctx, store.ArtifactCreate{
+		WorkspaceKey:  "WS",
+		ArtifactID:    "transcript-declared",
+		SessionID:     "flue-task-run-declared",
+		TaskID:        "TASK-DECLARED-1",
+		OwnerType:     "task_run",
+		OwnerID:       "task-run-declared",
+		Type:          "transcript",
+		MIMEType:      "application/x-ndjson",
+		DurableStatus: "declared",
+	}); err != nil {
+		t.Fatalf("create transcript artifact: %v", err)
+	}
+	if _, err := st.AgentSessions().Create(ctx, store.AgentSessionCreate{
+		WorkspaceKey: "WS",
+		SessionID:    "flue-task-run-declared",
+		AgentID:      "flue-task-agent",
+		Kind:         domain.AgentSessionKindTask,
+		TaskID:       "TASK-DECLARED-1",
+		Status:       domain.AgentSessionCompleted,
+		Metadata: map[string]string{
+			"runtime":        "flue",
+			"task_run_id":    "task-run-declared",
+			"transcript_ref": "artifact://transcript-declared",
+		},
+	}); err != nil {
+		t.Fatalf("create control-plane session: %v", err)
+	}
+
+	svc := NewSessionService(missingArtifactContentReadStore{Store: st}, nil)
+	_, err := svc.GetSessionTranscript(ctx, "WS", "TASK-DECLARED-1", "flue-task-run-declared")
+	if !serviceErrorIsNotFound(err) {
+		t.Fatalf("GetSessionTranscript err = %v, want not found", err)
 	}
 }
 
@@ -352,6 +496,109 @@ func assertServiceError(t *testing.T, err error, want service.ErrorKind, wantMes
 	}
 }
 
+func TestSessionServiceControlPlaneProjectsTaskRunUsageAndDiffStats(t *testing.T) {
+	ctx := t.Context()
+	st := memstore.New()
+	if _, err := st.TaskRuns().Create(ctx, store.TaskRunCreate{
+		WorkspaceKey: "WS",
+		TaskRunID:    "task-run-projection",
+		TaskID:       "TASK-PROJECTION-1",
+		Status:       domain.TaskRunRunning,
+	}); err != nil {
+		t.Fatalf("create task run: %v", err)
+	}
+	if _, err := st.TaskRuns().Complete(ctx, "WS", "task-run-projection", store.TaskRunComplete{
+		CompletionID:        "complete-task-run-projection",
+		Status:              domain.TaskRunCompleted,
+		InputTokens:         101,
+		OutputTokens:        202,
+		CacheReadTokens:     303,
+		CacheWriteTokens:    404,
+		EstimatedCostUSD:    0.505,
+		RuntimeMetadata:     map[string]string{"files_changed": "2", "lines_added": "8", "lines_removed": "3", "files_touched": "a.go\nb.go"},
+		RequiredArtifactIDs: nil,
+	}); err != nil {
+		t.Fatalf("complete task run: %v", err)
+	}
+	if _, err := st.AgentSessions().Create(ctx, store.AgentSessionCreate{
+		WorkspaceKey: "WS",
+		SessionID:    "flue-task-run-projection",
+		AgentID:      "flue-task-agent",
+		Kind:         domain.AgentSessionKindTask,
+		TaskID:       "TASK-PROJECTION-1",
+		Status:       domain.AgentSessionCompleted,
+		Metadata:     map[string]string{"runtime": "flue", "task_run_id": "task-run-projection"},
+	}); err != nil {
+		t.Fatalf("create control-plane session: %v", err)
+	}
+
+	svc := NewSessionService(st, nil)
+	items, err := svc.ListTaskSessions(ctx, "WS", "TASK-PROJECTION-1")
+	if err != nil {
+		t.Fatalf("ListTaskSessions: %v", err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("items = %d, want 1", len(items))
+	}
+	assertProjectedTaskRunFields(t, items[0].SessionRecord)
+	detail, err := svc.GetSession(ctx, "WS", "TASK-PROJECTION-1", "flue-task-run-projection")
+	if err != nil {
+		t.Fatalf("GetSession: %v", err)
+	}
+	assertProjectedTaskRunFields(t, detail.SessionRecord)
+}
+
+func TestSessionServiceTaskRunProjectionListErrorDoesNotFanOutGets(t *testing.T) {
+	ctx := t.Context()
+	st := memstore.New()
+	if _, err := st.AgentSessions().Create(ctx, store.AgentSessionCreate{
+		WorkspaceKey: "WS",
+		SessionID:    "flue-task-run-list-error",
+		AgentID:      "flue-task-agent",
+		Kind:         domain.AgentSessionKindTask,
+		TaskID:       "TASK-LIST-ERROR-1",
+		Status:       domain.AgentSessionCompleted,
+		Metadata: map[string]string{
+			"runtime":     "flue",
+			"task_run_id": "task-run-list-error",
+		},
+	}); err != nil {
+		t.Fatalf("create control-plane session: %v", err)
+	}
+	gets := 0
+	listLimit := 0
+	svc := NewSessionService(taskRunListErrorStore{Store: st, gets: &gets, listLimit: &listLimit}, nil)
+	items, err := svc.ListTaskSessions(ctx, "WS", "TASK-LIST-ERROR-1")
+	if err != nil {
+		t.Fatalf("ListTaskSessions: %v", err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("items = %d, want 1", len(items))
+	}
+	if listLimit != 50 {
+		t.Fatalf("TaskRuns.List limit = %d, want 50", listLimit)
+	}
+	if gets != 0 {
+		t.Fatalf("TaskRuns.Get calls after list error = %d, want 0", gets)
+	}
+}
+
+func assertProjectedTaskRunFields(t *testing.T, rec sessions.SessionRecord) {
+	t.Helper()
+	if rec.InputTokens != 101 || rec.OutputTokens != 202 || rec.CacheReadTokens != 303 || rec.CacheWriteTokens != 404 {
+		t.Fatalf("usage = in:%d out:%d read:%d write:%d", rec.InputTokens, rec.OutputTokens, rec.CacheReadTokens, rec.CacheWriteTokens)
+	}
+	if rec.EstimatedCostUSD != 0.505 {
+		t.Fatalf("cost = %v, want 0.505", rec.EstimatedCostUSD)
+	}
+	if rec.FilesChanged != 2 || rec.LinesAdded != 8 || rec.LinesRemoved != 3 {
+		t.Fatalf("diff stats = %+v, want task-run stats", rec)
+	}
+	if len(rec.FilesTouched) != 2 || rec.FilesTouched[0] != "a.go" || rec.FilesTouched[1] != "b.go" {
+		t.Fatalf("files touched = %v, want [a.go b.go]", rec.FilesTouched)
+	}
+}
+
 func TestSessionServiceListTaskSessionsEnrichesControlPlaneWithLocalUsage(t *testing.T) {
 	ctx := t.Context()
 	runtimeDir := t.TempDir()
@@ -444,6 +691,118 @@ func TestSessionServiceListTaskSessionsEnrichesControlPlaneWithLocalUsage(t *tes
 	}
 }
 
+func TestSessionServiceTaskRunAndLocalUsageMergeAgreeForListAndDetail(t *testing.T) {
+	ctx := t.Context()
+	runtimeDir := t.TempDir()
+	sessStore, err := sessions.NewStore(runtimeDir)
+	if err != nil {
+		t.Fatalf("new session store: %v", err)
+	}
+	sess, err := sessStore.CreateSession(sessions.CreateOptions{
+		AgentName: "worker-merge",
+		Backend:   "codex",
+		Phase:     "implementation",
+	})
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	if err := sess.Finalize(sessions.FinalizeOptions{
+		TaskID:           "TASK-MERGE-1",
+		ExitCode:         0,
+		InputTokens:      12,
+		OutputTokens:     34,
+		CacheReadTokens:  0,
+		CacheWriteTokens: 56,
+	}); err != nil {
+		t.Fatalf("finalize session: %v", err)
+	}
+
+	st := memstore.New()
+	if _, err := st.TaskRuns().Create(ctx, store.TaskRunCreate{
+		WorkspaceKey: "WS",
+		TaskRunID:    "task-run-merge",
+		TaskID:       "TASK-MERGE-1",
+		Status:       domain.TaskRunRunning,
+	}); err != nil {
+		t.Fatalf("create task run: %v", err)
+	}
+	if _, err := st.TaskRuns().Complete(ctx, "WS", "task-run-merge", store.TaskRunComplete{
+		CompletionID:    "complete-task-run-merge",
+		Status:          domain.TaskRunCompleted,
+		CacheReadTokens: 303,
+	}); err != nil {
+		t.Fatalf("complete task run: %v", err)
+	}
+	if _, err := st.AgentSessions().Create(ctx, store.AgentSessionCreate{
+		WorkspaceKey: "WS",
+		SessionID:    sess.SessionID(),
+		AgentID:      "worker-merge",
+		Kind:         domain.AgentSessionKindTask,
+		TaskID:       "TASK-MERGE-1",
+		Status:       domain.AgentSessionCompleted,
+		Metadata: map[string]string{
+			"runtime":     "flue",
+			"task_run_id": "task-run-merge",
+		},
+	}); err != nil {
+		t.Fatalf("create control-plane session: %v", err)
+	}
+
+	svc := NewSessionServiceWithRuntimeDir(st, nil, runtimeDir)
+	items, err := svc.ListTaskSessions(ctx, "WS", "TASK-MERGE-1")
+	if err != nil {
+		t.Fatalf("ListTaskSessions: %v", err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("items = %d, want 1", len(items))
+	}
+	assertMergedUsage(t, items[0].SessionRecord)
+	detail, err := svc.GetSession(ctx, "WS", "TASK-MERGE-1", sess.SessionID())
+	if err != nil {
+		t.Fatalf("GetSession: %v", err)
+	}
+	assertMergedUsage(t, detail.SessionRecord)
+}
+
+func assertMergedUsage(t *testing.T, rec sessions.SessionRecord) {
+	t.Helper()
+	if rec.InputTokens != 12 || rec.OutputTokens != 34 || rec.CacheReadTokens != 303 || rec.CacheWriteTokens != 56 {
+		t.Fatalf("usage = in:%d out:%d read:%d write:%d, want 12/34/303/56", rec.InputTokens, rec.OutputTokens, rec.CacheReadTokens, rec.CacheWriteTokens)
+	}
+}
+
+func TestSessionEvidenceReportsConflictingPersistedValues(t *testing.T) {
+	rec := sessions.SessionRecord{
+		TaskID: "TASK-1", Status: sessions.StatusCompleted,
+		InputTokens: 12, FilesChanged: 2,
+	}
+	local := sessions.SessionRecord{
+		TaskID: "TASK-1", Status: sessions.StatusCompleted,
+		InputTokens: 13, FilesChanged: 3,
+	}
+	conflicts := enrichSessionRecordFromLocal(&rec, local)
+	evidence := sessionEvidence(rec, conflicts)
+	if evidence.Status != "conflict" || evidence.UsageStatus != "conflict" {
+		t.Fatalf("evidence = %+v, want usage conflict", evidence)
+	}
+	if len(evidence.Conflicts) != 2 {
+		t.Fatalf("conflicts = %+v, want input_tokens and files_changed", evidence.Conflicts)
+	}
+	if rec.InputTokens != 12 || rec.FilesChanged != 2 {
+		t.Fatalf("conflicting source silently overwrote canonical values: %+v", rec)
+	}
+}
+
+func TestSessionEvidenceMarksZeroUsageUnavailable(t *testing.T) {
+	evidence := sessionEvidence(sessions.SessionRecord{}, nil)
+	if evidence.Status != "ok" || evidence.UsageStatus != "unavailable" {
+		t.Fatalf("evidence = %+v, want ok/unavailable", evidence)
+	}
+	if evidence.Conflicts == nil {
+		t.Fatal("conflicts must serialize as [] rather than null")
+	}
+}
+
 func TestSessionServiceListTaskSessionsFallsBackToFileStores(t *testing.T) {
 	loomConfigDir := t.TempDir()
 	t.Setenv("LOOM_CONFIG_DIR", loomConfigDir)
@@ -517,6 +876,51 @@ func TestSessionServiceListTaskSessionsFallsBackToFileStores(t *testing.T) {
 	}
 }
 
+func TestSessionServiceSharedRuntimeCannotLeakAcrossWorkspaces(t *testing.T) {
+	ctx := t.Context()
+	runtimeDir := t.TempDir()
+	sessStore, err := sessions.NewStore(runtimeDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sess, err := sessStore.CreateSession(sessions.CreateOptions{AgentName: "agent-a", Backend: "codex"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sess.Finalize(sessions.FinalizeOptions{TaskID: "SHARED-TASK", ExitCode: 0}); err != nil {
+		t.Fatal(err)
+	}
+
+	st := memstore.New()
+	for _, key := range []string{"WS-A", "WS-B"} {
+		if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: key, Name: key}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := st.AgentSessions().Create(ctx, store.AgentSessionCreate{
+		WorkspaceKey: "WS-A", SessionID: sess.SessionID(), AgentID: "agent-a",
+		TaskID: "SHARED-TASK", Status: domain.AgentSessionCompleted,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	svc := NewSessionServiceWithRuntimeDir(st, nil, runtimeDir)
+	items, err := svc.ListTaskSessions(ctx, "WS-B", "SHARED-TASK")
+	if err != nil {
+		t.Fatalf("ListTaskSessions WS-B: %v", err)
+	}
+	if len(items) != 0 {
+		t.Fatalf("WS-B sessions = %+v, want none", items)
+	}
+	if _, err := svc.GetSession(ctx, "WS-B", "SHARED-TASK", sess.SessionID()); !serviceErrorIsNotFound(err) {
+		t.Fatalf("foreign GetSession error = %v, want not found", err)
+	}
+	items, err = svc.ListTaskSessions(ctx, "WS-A", "SHARED-TASK")
+	if err != nil || len(items) != 1 {
+		t.Fatalf("WS-A sessions = %+v err=%v, want one", items, err)
+	}
+}
+
 func TestSessionServiceListTaskSessionsSearchesRuntimeDir(t *testing.T) {
 	// Isolate the state cache to a temp config dir — bootstrap.SaveStateCache
 	// REPLACES the whole state.json, so without this it clobbers the developer's
@@ -552,6 +956,12 @@ func TestSessionServiceListTaskSessionsSearchesRuntimeDir(t *testing.T) {
 	}
 	if err := sess.Finalize(sessions.FinalizeOptions{TaskID: "DESKTOP-QA-3", ExitCode: 0}); err != nil {
 		t.Fatalf("finalize session: %v", err)
+	}
+	if _, err := st.AgentSessions().Create(ctx, store.AgentSessionCreate{
+		WorkspaceKey: "WS", SessionID: sess.SessionID(), AgentID: "desktopqa",
+		TaskID: "DESKTOP-QA-3", Status: domain.AgentSessionCompleted,
+	}); err != nil {
+		t.Fatalf("create workspace ownership record: %v", err)
 	}
 
 	svc := NewSessionServiceWithRuntimeDir(st, nil, runtimeDir)

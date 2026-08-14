@@ -263,6 +263,23 @@ describe("CreateAgentModal: client-side validation", () => {
     expect(mockCreateAgent).not.toHaveBeenCalled();
   });
 
+  it("shows inline validation text for invalid names", () => {
+    renderModal();
+    fireEvent.change(screen.getByTestId("create-agent-name"), {
+      target: { value: "has space" },
+    });
+
+    const nameInput = screen.getByTestId("create-agent-name");
+    const error = screen.getByTestId("create-agent-name-error");
+
+    expect(error).toHaveTextContent(/lowercase/i);
+    expect(nameInput).toHaveAttribute("aria-invalid", "true");
+    expect(nameInput).toHaveAttribute("aria-describedby", "agent-name-error");
+    expect(
+      screen.getByRole("button", { name: /create agent/i }),
+    ).toBeDisabled();
+  });
+
   it("treats a workspace with no repos as workspace scope (cross_repo)", async () => {
     // With no repos available there are no chips to pick, so the agent is
     // created with workspace scope rather than erroring.
@@ -274,6 +291,19 @@ describe("CreateAgentModal: client-side validation", () => {
       cross_repo: true,
       repos: [],
     });
+  });
+
+  it("shows one honest no-repos hint and suppresses the workspace-scope duplicate hint", () => {
+    renderModal({ repos: [] });
+
+    expect(screen.getByTestId("create-agent-no-repos")).toHaveTextContent(
+      "No repos in this workspace yet — background agents need at least one repo; interactive agents run with workspace scope.",
+    );
+    expect(
+      screen.queryByText(
+        "No repo selected — the agent gets workspace-wide scope.",
+      ),
+    ).not.toBeInTheDocument();
   });
 });
 
@@ -422,6 +452,28 @@ describe("CreateAgentModal: submission", () => {
     );
   });
 
+  it("keeps template selection atomic when switching to an interactive card", () => {
+    renderModal();
+    fireEvent.click(screen.getByTestId("create-agent-template-lead"));
+
+    expect(screen.getByTestId("create-agent-template-lead")).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(screen.getByTestId("create-agent-template-task")).toHaveAttribute(
+      "aria-pressed",
+      "false",
+    );
+    expect(screen.getByTestId("create-agent-template-planner")).toHaveAttribute(
+      "aria-pressed",
+      "false",
+    );
+    expect(
+      screen.getByTestId("create-agent-template-interactive-pr-review"),
+    ).toHaveAttribute("aria-pressed", "false");
+    expect(screen.getAllByText("Selected")).toHaveLength(1);
+  });
+
   it("resets the form to the configured defaults after a successful submit", async () => {
     mockCreateAgent.mockResolvedValueOnce(sampleAgent);
     renderModal({ defaultName: "seed-name", defaultRoleName: "plan" });
@@ -448,15 +500,17 @@ describe("CreateAgentModal: submission", () => {
 // ---------- error surfacing ----------
 
 describe("CreateAgentModal: error handling", () => {
-  it("surfaces ApiError messages from the backend", async () => {
+  it("presents ApiError messages from the backend and keeps raw text in the title", async () => {
+    const raw =
+      "create agent: fleetdb: POST /api/v1/E2E-WS-TASK/agents: HTTP 409: already exists: domain: already exists";
     mockCreateAgent.mockRejectedValueOnce(
-      new ApiError("conflict: agent already exists", 409),
+      new ApiError(409, "Conflict", { error: raw }),
     );
     renderModal({ defaultName: "dup" });
     fireEvent.click(screen.getByRole("button", { name: /create agent/i }));
-    expect(await screen.findByRole("alert")).toHaveTextContent(
-      /conflict: agent already exists/i,
-    );
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("An agent with this name already exists.");
+    expect(alert).toHaveAttribute("title", raw);
   });
 
   it("surfaces generic Error messages", async () => {

@@ -62,7 +62,7 @@ func (s *stubGraphBackend) GetChildren(_ context.Context, _ string) ([]backend.I
 func (s *stubGraphBackend) SearchIssues(_ context.Context, _ string, _ int) ([]backend.IssueData, error) {
 	return nil, fmt.Errorf("SearchIssues not implemented in stubGraphBackend")
 }
-func (s *stubGraphBackend) Create(_ context.Context, _ backend.CreateParams) (*backend.IssueData, error) {
+func (s *stubGraphBackend) Create(_ context.Context, _ backend.CreateParams) (*backend.CreateResult, error) {
 	return nil, fmt.Errorf("Create not implemented in stubGraphBackend")
 }
 func (s *stubGraphBackend) Update(_ context.Context, _ string, _ backend.UpdateParams) error {

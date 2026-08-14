@@ -15,6 +15,8 @@ export interface RunRailSummary {
   totalCost: number;
   activeSessions: number;
   failedSessions: number;
+  unavailableUsageSessions?: number;
+  conflictingSessions?: number;
 }
 
 export interface SessionTimelineProps {
@@ -65,6 +67,12 @@ export function SessionTimeline({
   }
   if (summary.failedSessions > 0) {
     summaryParts.push(`${summary.failedSessions} failed`);
+  }
+  if ((summary.unavailableUsageSessions ?? 0) > 0) {
+    summaryParts.push(`${summary.unavailableUsageSessions} usage unavailable`);
+  }
+  if ((summary.conflictingSessions ?? 0) > 0) {
+    summaryParts.push(`${summary.conflictingSessions} evidence conflict`);
   }
 
   return (

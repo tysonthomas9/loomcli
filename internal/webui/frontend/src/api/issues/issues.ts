@@ -8,7 +8,6 @@ import type {
   Issue,
   IssueDetails,
   BlockedIssue,
-  Statistics,
   WorkFilter,
   Priority,
   IssueType,
@@ -177,19 +176,6 @@ export async function getReadyIssues(
   );
   if (error) throw apiErrorFromResponse(error, response);
   return normalizeIssueRepos(unwrap(data, response) as unknown as Issue[]);
-}
-
-/**
- * Get project statistics.
- */
-export async function getStats(workspaceId: string): Promise<Statistics> {
-  const { data, error, response } = await api.GET(
-    "/api/workspaces/{ws}/stats",
-    { params: { path: { ws: workspaceId } } },
-  );
-  if (error) throw apiErrorFromResponse(error, response);
-  // This endpoint returns Statistics directly, not wrapped
-  return data as unknown as Statistics;
 }
 
 /**
@@ -369,6 +355,17 @@ export interface CreateIssueRequest {
   defer_until?: string;
 }
 
+export interface CreateIssueOptions {
+  force?: boolean;
+  /** Stable key for one user submit intent. Reuse after ambiguous failures. */
+  idempotencyKey?: string;
+}
+
+export interface CreateIssueResult {
+  issue: Issue;
+  softDuplicate: boolean;
+}
+
 export interface UpdateIssueRequest {
   title?: string;
   description?: string;
@@ -391,7 +388,15 @@ export interface UpdateIssueRequest {
 export async function createIssue(
   workspaceId: string,
   reqData: CreateIssueRequest,
-): Promise<Issue> {
+  options?: CreateIssueOptions,
+): Promise<CreateIssueResult> {
+  const headers: Record<string, string> = {};
+  if (options?.idempotencyKey) {
+    headers["X-Idempotency-Key"] = options.idempotencyKey;
+  }
+  if (options?.force) {
+    headers["X-Idempotency-Force"] = "true";
+  }
   const body = cleanQuery({
     title: reqData.title,
     issue_type: reqData.issue_type as
@@ -404,6 +409,7 @@ export async function createIssue(
     id: reqData.id,
     parent: reqData.parent,
     description: reqData.description,
+    status: reqData.status,
     design: reqData.design,
     acceptance_criteria: reqData.acceptance_criteria,
     notes: reqData.notes,
@@ -423,10 +429,25 @@ export async function createIssue(
     {
       params: { path: { ws: workspaceId } },
       body,
+      ...(Object.keys(headers).length > 0 ? { headers } : {}),
     },
   );
   if (error) throw apiErrorFromResponse(error, response);
-  return normalizeIssueRepo(unwrap(data, response) as unknown as Issue);
+  const issue = normalizeIssueRepo(unwrap(data, response) as unknown as Issue);
+  return {
+    issue,
+    softDuplicate:
+      response.headers.get("x-idempotency-warning") === "soft-duplicate",
+  };
+}
+
+export async function createIssueOnly(
+  workspaceId: string,
+  reqData: CreateIssueRequest,
+  options?: CreateIssueOptions,
+): Promise<Issue> {
+  const result = await createIssue(workspaceId, reqData, options);
+  return result.issue;
 }
 
 /**
@@ -479,6 +500,37 @@ export async function closeIssue(
     },
   );
   if (error) throw apiErrorFromResponse(error, response);
+}
+
+export interface ReviewDecisionResult {
+  issue_id: string;
+  decision: "approve" | "request_changes";
+  decision_id: string;
+  github_stage: "not_applicable" | "applied" | "replayed";
+  loom_stage: "applied" | "replayed";
+  replayed: boolean;
+}
+
+/** Apply one stable, server-coordinated review decision intent. */
+export async function applyReviewDecision(
+  workspaceId: string,
+  id: string,
+  decision: "approve" | "request_changes",
+  reason: string,
+  idempotencyKey: string,
+): Promise<ReviewDecisionResult> {
+  const { data, error, response } = await api.POST(
+    "/api/workspaces/{ws}/issues/{id}/review-decision",
+    {
+      params: {
+        path: { ws: workspaceId, id },
+        header: { "X-Idempotency-Key": idempotencyKey },
+      },
+      body: reason ? { decision, reason } : { decision },
+    },
+  );
+  if (error) throw apiErrorFromResponse(error, response);
+  return unwrap(data, response) as ReviewDecisionResult;
 }
 
 // ============= DEPENDENCY OPERATIONS =============

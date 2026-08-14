@@ -72,6 +72,7 @@ describe("ListPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockData.filteredIssues = [];
+    mockData.debouncedSearch = "";
   });
 
   it("shows epic id alongside epic title in lane header", () => {
@@ -163,5 +164,31 @@ describe("ListPage", () => {
     expect(runEpic).toHaveBeenCalledWith(
       expect.objectContaining({ id: "HELLO-WORLD-2" }),
     );
+  });
+
+  it("highlights matching title text in list rows", () => {
+    mockData.debouncedSearch = "Child";
+    mockData.filteredIssues = [
+      createMockIssue({
+        id: "HELLO-WORLD-2",
+        title: "Build the Hello World web app",
+        issue_type: "epic",
+        status: "open",
+      }),
+      createMockIssue({
+        id: "task-1",
+        title: "Child Task",
+        issue_type: "task",
+        parent: "HELLO-WORLD-2",
+        parent_title: "Build the Hello World web app",
+        status: "open",
+      }),
+    ];
+
+    const { container } = render(<ListPage />);
+
+    const mark = container.querySelector("mark");
+    expect(mark).toBeInTheDocument();
+    expect(mark).toHaveTextContent("Child");
   });
 });

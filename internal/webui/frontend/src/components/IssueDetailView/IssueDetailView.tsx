@@ -7,15 +7,26 @@
 
 import { useEffect, useState, useCallback } from "react";
 
-import type { Issue, IssueDetails, IssueWithDependencyMetadata } from "@/types";
+import type {
+  Comment,
+  Event,
+  Issue,
+  IssueDetails,
+  IssueWithDependencyMetadata,
+} from "@/types";
 import type { ViewMode } from "@/types";
 import type { Status } from "@/types/issue";
 import { useRegisterEscapeLayer, LAYER_ISSUE_PANEL } from "@/hooks";
 import { getReviewType } from "@/utils/issue";
 import { StatusDropdown } from "@/components/StatusDropdown";
 import { ErrorToast } from "@/components/ErrorToast";
-import { DesignPanel, MarkdownRenderer } from "@/components/IssueDetailPanel";
-import { updateIssue } from "@/hooks/api";
+import {
+  ActivityLog,
+  CommentForm,
+  DesignPanel,
+  MarkdownRenderer,
+} from "@/components/IssueDetailPanel";
+import { getIssueEvents, updateIssue } from "@/hooks/api";
 import { useWorkspaceContext } from "@/hooks/workspace";
 
 import styles from "./IssueDetailView.module.css";
@@ -182,6 +193,10 @@ export function IssueDetailView({
   const [isRejecting, setIsRejecting] = useState(false);
   const [isSavingStatus, setIsSavingStatus] = useState(false);
   const [statusError, setStatusError] = useState<string | null>(null);
+  const [localComments, setLocalComments] = useState<Comment[]>([]);
+  const [events, setEvents] = useState<Event[]>([]);
+  const issueComments =
+    issue && isIssueDetails(issue) ? issue.comments : undefined;
 
   // Reset state when issue changes
   useEffect(() => {
@@ -192,6 +207,36 @@ export function IssueDetailView({
     setIsSavingStatus(false);
     setStatusError(null);
   }, [issue?.id]);
+
+  useEffect(() => {
+    if (issue && isIssueDetails(issue)) {
+      setLocalComments(issue.comments ?? []);
+    } else {
+      setLocalComments([]);
+    }
+  }, [issue?.id, issueComments]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setEvents([]);
+    if (!issue?.id) return;
+
+    void getIssueEvents(workspaceId, issue.id)
+      .then((nextEvents) => {
+        if (!cancelled) {
+          setEvents(nextEvents);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setEvents([]);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [workspaceId, issue?.id]);
 
   // Escape key handler via global shortcut layer system.
   // Dropdowns/dialogs have higher priority layers so they close first.
@@ -244,8 +289,12 @@ export function IssueDetailView({
         setIsSavingStatus(false);
       }
     },
-    [issue, onIssueUpdate],
+    [issue, onIssueUpdate, workspaceId],
   );
+
+  const handleCommentAdded = useCallback((comment: Comment) => {
+    setLocalComments((prev) => [...prev, comment]);
+  }, []);
 
   // Loading state
   if (isLoading) {
@@ -397,6 +446,11 @@ export function IssueDetailView({
           onStatusChange={handleStatusChange}
           isSaving={isSavingStatus}
         />
+        {issue.status === "closed" && issue.close_reason && (
+          <span className={styles.closeReason} data-testid="issue-close-reason">
+            {issue.close_reason}
+          </span>
+        )}
         <h1 className={styles.headerTitle} data-testid="detail-title">
           {issue.title}
         </h1>
@@ -620,11 +674,11 @@ export function IssueDetailView({
           </section>
         )}
 
-        {/* Dependencies */}
+        {/* Blocked By */}
         {dependencies && dependencies.length > 0 && (
           <section className={styles.section}>
             <h3 className={styles.sectionTitle}>
-              Dependencies ({dependencies.length})
+              Blocked By ({dependencies.length})
             </h3>
             <ul className={styles.dependencyList}>
               {dependencies.map((dep) =>
@@ -648,26 +702,12 @@ export function IssueDetailView({
           </section>
         )}
 
-        {/* Comments */}
-        {issueHasDetails && issue.comments && issue.comments.length > 0 && (
-          <section className={styles.section}>
-            <h3 className={styles.sectionTitle}>
-              Comments ({issue.comments.length})
-            </h3>
-            {issue.comments.map((comment, idx) => (
-              <div key={comment.id ?? idx} style={{ marginBottom: 12 }}>
-                <div style={{ fontSize: 12, color: "var(--color-text-muted)" }}>
-                  {comment.author} &middot;{" "}
-                  {comment.created_at ? formatDate(comment.created_at) : ""}
-                </div>
-                <MarkdownRenderer
-                  className={styles.description ?? ""}
-                  content={comment.text}
-                />
-              </div>
-            ))}
-          </section>
-        )}
+        <ActivityLog
+          comments={localComments}
+          events={events}
+          issueId={issue.id}
+        />
+        <CommentForm issueId={issue.id} onCommentAdded={handleCommentAdded} />
 
         {/* Labels */}
         {issue.labels && issue.labels.length > 0 && (

@@ -27,18 +27,21 @@ export interface ToastContainerProps {
   onDismiss: (id: string) => void;
   /** Position on screen (default: 'bottom-right') */
   position?: ToastPosition;
+  /** Maximum visible toasts (default: 3) */
+  maxVisible?: number;
   /** Additional CSS class */
   className?: string;
 }
 
 /**
- * ToastContainer renders all active toasts in a stacked layout.
+ * ToastContainer renders the newest active toasts in a stacked layout.
  * Toasts stack from the chosen corner, with newest at the end of the stack.
  */
 export function ToastContainer({
   toasts,
   onDismiss,
   position = "bottom-right",
+  maxVisible = 3,
   className,
 }: ToastContainerProps): JSX.Element {
   const positionClass =
@@ -48,6 +51,8 @@ export function ToastContainer({
   const rootClassName = [styles.container, positionClass, className]
     .filter(Boolean)
     .join(" ");
+  const visibleCount = Math.max(0, maxVisible);
+  const visibleToasts = toasts.slice(Math.max(0, toasts.length - visibleCount));
 
   return (
     <div
@@ -55,7 +60,7 @@ export function ToastContainer({
       aria-label="Notifications"
       data-testid="toast-container"
     >
-      {toasts.map((toast) => (
+      {visibleToasts.map((toast) => (
         <Toast
           key={toast.id}
           id={toast.id}

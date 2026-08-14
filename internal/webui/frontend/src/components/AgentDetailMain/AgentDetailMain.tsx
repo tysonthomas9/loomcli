@@ -281,7 +281,6 @@ function EphemeralWorkerSummary({
           style={{
             fontSize: 18,
             fontWeight: 700,
-            textTransform: "capitalize",
           }}
         >
           {agent.name}

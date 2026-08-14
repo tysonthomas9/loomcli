@@ -134,6 +134,40 @@ describe("IssueHeader", () => {
     expect(badge).toHaveAttribute("data-status", "closed");
   });
 
+  it("renders close reason for closed issues", () => {
+    const closedIssue = {
+      ...mockIssue,
+      status: "closed",
+      close_reason: "fixed by test",
+    };
+
+    render(<IssueHeader issue={closedIssue} onClose={() => {}} />);
+
+    expect(screen.getByTestId("issue-close-reason")).toHaveTextContent(
+      "fixed by test",
+    );
+  });
+
+  it("does not render close reason for non-closed issues", () => {
+    const openIssue = {
+      ...mockIssue,
+      status: "open",
+      close_reason: "not visible",
+    };
+
+    render(<IssueHeader issue={openIssue} onClose={() => {}} />);
+
+    expect(screen.queryByTestId("issue-close-reason")).not.toBeInTheDocument();
+  });
+
+  it("does not render close reason when a closed issue has no reason", () => {
+    const closedIssue = { ...mockIssue, status: "closed" };
+
+    render(<IssueHeader issue={closedIssue} onClose={() => {}} />);
+
+    expect(screen.queryByTestId("issue-close-reason")).not.toBeInTheDocument();
+  });
+
   it("renders blocked status with correct data attribute", () => {
     const blockedIssue = { ...mockIssue, status: "blocked" };
     render(<IssueHeader issue={blockedIssue} onClose={() => {}} />);

@@ -1,6 +1,11 @@
 package dto
 
-import "time"
+import (
+	"time"
+
+	"github.com/tysonthomas9/loomcli/internal/sessions"
+	"github.com/tysonthomas9/loomcli/internal/webui/service"
+)
 
 // SessionResponse is the typed API response for a single session.
 // Uses string (not entity/sessions types) for Status/Phase to decouple the
@@ -27,12 +32,13 @@ type SessionResponse struct {
 	Status   string `json:"status"`    // "running", "completed", "failed", "aborted"
 	ExitCode int    `json:"exit_code"` // No omitempty: 0 is valid (success)
 
-	// Token usage (flat) — no omitempty: zero values are meaningful
-	InputTokens      int64   `json:"input_tokens"`
-	OutputTokens     int64   `json:"output_tokens"`
-	CacheReadTokens  int64   `json:"cache_read_tokens"`
-	CacheWriteTokens int64   `json:"cache_write_tokens"`
-	EstimatedCostUSD float64 `json:"estimated_cost_usd"`
+	// Token usage is null when no source reported usage. A numeric zero is only
+	// emitted when usage was reported and the field itself was zero.
+	InputTokens      *int64   `json:"input_tokens"`
+	OutputTokens     *int64   `json:"output_tokens"`
+	CacheReadTokens  *int64   `json:"cache_read_tokens"`
+	CacheWriteTokens *int64   `json:"cache_write_tokens"`
+	EstimatedCostUSD *float64 `json:"estimated_cost_usd"`
 
 	// Diff stats (flat) — no omitempty: zero means "no changes"
 	FilesChanged int      `json:"files_changed"`
@@ -45,12 +51,45 @@ type SessionResponse struct {
 	ErrorClass string `json:"error_class,omitempty"`
 
 	// Computed fields (populated by handlers)
-	IsActive      bool `json:"is_active"`
-	HasTranscript bool `json:"has_transcript"`
-	HasDiff       bool `json:"has_diff"`
+	IsActive      bool                    `json:"is_active"`
+	HasTranscript bool                    `json:"has_transcript"`
+	HasDiff       bool                    `json:"has_diff"`
+	Evidence      service.SessionEvidence `json:"evidence"`
 
 	// Detail-only field — omitted in list view
 	LastError string `json:"last_error,omitempty"`
+}
+
+// SessionResponseFromListItem maps the persistence/service model to its
+// explicit wire contract, including unavailable usage as null.
+func SessionResponseFromListItem(item service.SessionListItem) SessionResponse {
+	return sessionResponse(item.SessionRecord, item.IsActive, item.HasTranscript, item.HasDiff, "", item.Evidence)
+}
+
+// SessionResponseFromDetail maps a detail result to the shared session wire contract.
+func SessionResponseFromDetail(detail service.SessionDetailData) SessionResponse {
+	return sessionResponse(detail.SessionRecord, detail.IsActive, detail.HasTranscript, detail.HasDiff, detail.LastError, detail.Evidence)
+}
+
+func sessionResponse(rec sessions.SessionRecord, isActive, hasTranscript, hasDiff bool, lastError string, evidence service.SessionEvidence) SessionResponse {
+	response := SessionResponse{
+		SessionID: rec.SessionID, TaskID: rec.TaskID, EpicID: rec.EpicID,
+		AgentName: rec.AgentName, Backend: rec.Backend, Model: rec.Model, Phase: rec.Phase,
+		StartedAt: rec.StartedAt, EndedAt: rec.EndedAt, DurationS: rec.DurationS,
+		Status: string(rec.Status), ExitCode: rec.ExitCode,
+		FilesChanged: rec.FilesChanged, LinesAdded: rec.LinesAdded, LinesRemoved: rec.LinesRemoved, FilesTouched: rec.FilesTouched,
+		AttemptNum: rec.AttemptNum, ErrorClass: rec.ErrorClass,
+		IsActive: isActive, HasTranscript: hasTranscript, HasDiff: hasDiff,
+		LastError: lastError, Evidence: evidence,
+	}
+	if evidence.UsageStatus != "unavailable" {
+		response.InputTokens = &rec.InputTokens
+		response.OutputTokens = &rec.OutputTokens
+		response.CacheReadTokens = &rec.CacheReadTokens
+		response.CacheWriteTokens = &rec.CacheWriteTokens
+		response.EstimatedCostUSD = &rec.EstimatedCostUSD
+	}
+	return response
 }
 
 // TranscriptEntry is the API representation of a single transcript entry.

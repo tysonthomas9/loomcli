@@ -1,6 +1,7 @@
 package api
 
 import (
+	"reflect"
 	"testing"
 	"time"
 
@@ -421,12 +422,24 @@ func TestCommentToData(t *testing.T) {
 
 func TestEventToData(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
+	oldValue := "open"
+	newValue := "in_progress"
+	comment := "status moved"
+	field := "status"
+	fieldCount := 1
+	fields := []string{"status"}
 	e := gen.IssueEvent{
-		Id:        123,
-		IssueId:   "loom-1",
-		EventType: "status_change",
-		Actor:     "alice",
-		CreatedAt: now,
+		Id:         123,
+		IssueId:    "loom-1",
+		EventType:  "status_change",
+		Actor:      "alice",
+		Field:      &field,
+		FieldCount: &fieldCount,
+		Fields:     &fields,
+		OldValue:   &oldValue,
+		NewValue:   &newValue,
+		Comment:    &comment,
+		CreatedAt:  now,
 	}
 	d := eventToData(e)
 	if d.ID != "123" {
@@ -434,6 +447,24 @@ func TestEventToData(t *testing.T) {
 	}
 	if d.IssueID != "loom-1" || d.Kind != "status_change" || d.Actor != "alice" {
 		t.Errorf("fields: %+v", d)
+	}
+	if d.OldValue == nil || *d.OldValue != oldValue {
+		t.Errorf("OldValue = %v, want %q", d.OldValue, oldValue)
+	}
+	if d.Field == nil || *d.Field != field {
+		t.Errorf("Field = %v, want %q", d.Field, field)
+	}
+	if d.FieldCount != fieldCount {
+		t.Errorf("FieldCount = %d, want %d", d.FieldCount, fieldCount)
+	}
+	if !reflect.DeepEqual(d.Fields, fields) {
+		t.Errorf("Fields = %#v, want %#v", d.Fields, fields)
+	}
+	if d.NewValue == nil || *d.NewValue != newValue {
+		t.Errorf("NewValue = %v, want %q", d.NewValue, newValue)
+	}
+	if d.Comment == nil || *d.Comment != comment {
+		t.Errorf("Comment = %v, want %q", d.Comment, comment)
 	}
 	if !d.CreatedAt.Equal(now) {
 		t.Errorf("CreatedAt: %v", d.CreatedAt)

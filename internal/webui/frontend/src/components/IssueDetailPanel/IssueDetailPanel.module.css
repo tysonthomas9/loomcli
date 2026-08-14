@@ -213,6 +213,18 @@
   color: var(--color-text-tertiary);
 }
 
+.metadataControl {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+}
+
+.metadataLabels {
+  flex: 1 1 100%;
+  min-width: 240px;
+  padding-top: 2px;
+}
+
 .metadataItem svg {
   width: 14px;
   height: 14px;

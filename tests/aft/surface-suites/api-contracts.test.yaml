@@ -1,0 +1,47 @@
+# Surface tier: these are standalone operator API contract assertions with no
+# browser scenario. Browser-observable boot/config effects remain in tier-1 smoke;
+# promote individual probes only when a product surface renders their result.
+suite: api-contracts-surface
+classification: { area: platform, feature: web-api, surface: api, purpose: contract }
+baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
+teardown: "true"
+
+tests:
+  # Surface-only because the test probes endpoints without a user-facing flow;
+  # promote an endpoint when its effect is asserted through a mounted surface.
+  # covers: LCLI-OPS-002; /health; /api/config; readyz; /api/health
+  - name: health and config endpoints return expected payloads
+    intent: Operators can probe process health and frontend runtime config without loading the SPA
+    steps:
+      - api:
+          method: "GET"
+          path: "/health"
+          assert:
+            - path: "status"
+              equals: "ok"
+        intent: "An operator confirms the process health probe reports ok"
+      - api:
+          method: "GET"
+          path: "/api/config"
+          assert:
+            - path: "mode"
+              equals: "open"
+            - path: "issue_backend"
+              equals: "fleet"
+        intent: "An operator confirms the frontend config exposes open mode with the fleet backend"
+      - api:
+          method: "GET"
+          path: "/api/workspaces/${AFT_WS:-E2E-WS}/readyz"
+          assert:
+            - path: "ready"
+              equals: true
+            - path: "mode"
+              equals: "fleet"
+        intent: "An operator confirms workspace readiness in fleet mode"
+      - api:
+          method: "GET"
+          path: "/api/health"
+          assert:
+            - path: "status"
+              exists: true
+        intent: "An operator confirms the API health probe returns a structured status payload"

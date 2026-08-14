@@ -40,6 +40,9 @@ import type {
   DependencyType,
   Comment,
   Event,
+  IssueType,
+  KnownIssueType,
+  Priority,
 } from "@/types";
 import type { Status } from "@/types/issue";
 import { formatStatusLabel, getReviewType, isPRUrl } from "@/utils/issue";
@@ -68,7 +71,14 @@ import {
   RejectCommentForm,
 } from "./sections";
 import { IssueHeader } from "./header";
-import { AssigneeDropdown, RepoDropdown } from "./fields";
+import {
+  AssigneeDropdown,
+  LabelEditor,
+  OwnerDropdown,
+  PriorityDropdown,
+  RepoDropdown,
+  TypeDropdown,
+} from "./fields";
 import { ConfirmDialog } from "../ConfirmDialog";
 import { MoveIssueDialog } from "./actions";
 import { SplitDetailSummary } from "./SplitDetailSummary";
@@ -79,7 +89,7 @@ import { useSplitRatio, useToast } from "@/hooks/ui";
 import { CollapsibleSection } from "./CollapsibleSection";
 import { SessionsTab } from "./sessions";
 import styles from "./IssueDetailPanel.module.css";
-import { formatDate, formatIssueType, isIssueDetails } from "./utils";
+import { formatDate, isIssueDetails } from "./utils";
 
 /**
  * Blocking banner component - shows when issue is in blocked state with open dependencies.
@@ -451,9 +461,14 @@ function DefaultContent({
   const [isSavingTitle, setIsSavingTitle] = useState(false);
   const [isSavingStatus, setIsSavingStatus] = useState(false);
   const [isSavingAssignee, setIsSavingAssignee] = useState(false);
+  const [isSavingOwner, setIsSavingOwner] = useState(false);
+  const [isSavingPriority, setIsSavingPriority] = useState(false);
+  const [isSavingType, setIsSavingType] = useState(false);
+  const [isSavingLabels, setIsSavingLabels] = useState(false);
   const [isSavingRepo, setIsSavingRepo] = useState(false);
   const [statusError, setStatusError] = useState<string | null>(null);
   const [titleError, setTitleError] = useState<string | null>(null);
+  const [metadataError, setMetadataError] = useState<string | null>(null);
   const [showRejectForm, setShowRejectForm] = useState(false);
   const [isApproving, setIsApproving] = useState(false);
   const [isRejecting, setIsRejecting] = useState(false);
@@ -605,6 +620,28 @@ function DefaultContent({
     }
     return children;
   }, [issuesMap, issue]);
+  const typeDisabledOptions = useMemo<
+    Partial<Record<KnownIssueType, string>>
+  >(() => {
+    const hasKnownChildren =
+      issue?.issue_type === "epic" &&
+      (epicChildren.length > 0 ||
+        (issue && isIssueDetails(issue)
+          ? (issue.dependents ?? []).some(
+              (dep) => dep.dependency_type === "parent-child",
+            )
+          : false));
+    if (!hasKnownChildren) {
+      return {};
+    }
+    const reason = "Epics with child issues cannot be changed to another type.";
+    return {
+      bug: reason,
+      feature: reason,
+      task: reason,
+      chore: reason,
+    };
+  }, [epicChildren.length, issue]);
 
   // Reset tabs when issue changes — clean up orphaned terminal sessions first
   useEffect(() => {
@@ -765,10 +802,22 @@ function DefaultContent({
   // Local state for events (activity log)
   const [events, setEvents] = useState<Event[]>([]);
 
-  // Sync local comments when issue changes (e.g., different issue selected)
+  // Sync local comments when the issue prop changes. Same-issue refreshes
+  // (SSE/store updates) carry comment snapshots taken before a just-posted
+  // comment existed; replacing wholesale would clobber the optimistic append
+  // for good, since nothing refetches comments afterwards. Merge instead:
+  // the snapshot, then any optimistic comments it doesn't know about yet.
   useEffect(() => {
     if (issue && isIssueDetails(issue)) {
-      setLocalComments(issue.comments);
+      setLocalComments((prev) => {
+        const snapshot = issue.comments ?? [];
+        if (!prev) return snapshot;
+        const known = new Set(snapshot.map((c) => c.id));
+        const optimistic = prev.filter(
+          (c) => c.issue_id === issue.id && !known.has(c.id),
+        );
+        return [...snapshot, ...optimistic];
+      });
     } else {
       setLocalComments(undefined);
     }
@@ -900,6 +949,121 @@ function DefaultContent({
       }
     },
     [agents, issue, onIssueUpdate, workspaceId],
+  );
+
+  const handleOwnerSave = useCallback(
+    async (newOwner: string) => {
+      if (!issue) return;
+
+      setIsSavingOwner(true);
+      setMetadataError(null);
+      try {
+        const updatedIssue = await updateIssue(workspaceId, issue.id, {
+          owner: newOwner,
+        });
+        onIssueUpdate?.(updatedIssue);
+      } catch (err) {
+        const message =
+          err instanceof Error ? err.message : "Failed to update owner";
+        setMetadataError(message);
+        throw err;
+      } finally {
+        setIsSavingOwner(false);
+      }
+    },
+    [issue, onIssueUpdate, workspaceId],
+  );
+
+  const handlePrioritySave = useCallback(
+    async (newPriority: Priority) => {
+      if (!issue) return;
+
+      setIsSavingPriority(true);
+      setMetadataError(null);
+      try {
+        const updatedIssue = await updateIssue(workspaceId, issue.id, {
+          priority: newPriority,
+        });
+        onIssueUpdate?.(updatedIssue);
+      } catch (err) {
+        const message =
+          err instanceof Error ? err.message : "Failed to update priority";
+        setMetadataError(message);
+        throw err;
+      } finally {
+        setIsSavingPriority(false);
+      }
+    },
+    [issue, onIssueUpdate, workspaceId],
+  );
+
+  const handleTypeSave = useCallback(
+    async (newType: IssueType) => {
+      if (!issue) return;
+
+      setIsSavingType(true);
+      setMetadataError(null);
+      try {
+        const updatedIssue = await updateIssue(workspaceId, issue.id, {
+          issue_type: newType,
+        });
+        onIssueUpdate?.(updatedIssue);
+      } catch (err) {
+        const message =
+          err instanceof Error ? err.message : "Failed to update type";
+        setMetadataError(message);
+        throw err;
+      } finally {
+        setIsSavingType(false);
+      }
+    },
+    [issue, onIssueUpdate, workspaceId],
+  );
+
+  const handleAddLabel = useCallback(
+    async (label: string) => {
+      if (!issue) return;
+
+      setIsSavingLabels(true);
+      setMetadataError(null);
+      try {
+        const updatedIssue = await updateIssue(workspaceId, issue.id, {
+          add_labels: [label],
+        });
+        onIssueUpdate?.(updatedIssue);
+      } catch (err) {
+        const message =
+          err instanceof Error ? err.message : "Failed to add label";
+        setMetadataError(message);
+        throw err;
+      } finally {
+        setIsSavingLabels(false);
+      }
+    },
+    [issue, onIssueUpdate, workspaceId],
+  );
+
+  const handleRemoveLabel = useCallback(
+    async (label: string) => {
+      if (!issue) return;
+
+      setIsSavingLabels(true);
+      setMetadataError(null);
+      try {
+        const updatedIssue = await updateIssue(workspaceId, issue.id, {
+          remove_labels: [label],
+        });
+        onIssueUpdate?.(updatedIssue);
+      } catch (err) {
+        const message =
+          err instanceof Error ? err.message : "Failed to remove label";
+        setMetadataError(message);
+        throw err;
+      } finally {
+        setIsSavingLabels(false);
+      }
+    },
+    [issue, onIssueUpdate, workspaceId],
   );
 
   const handleRepoSave = useCallback(
@@ -1201,16 +1365,24 @@ function DefaultContent({
 
         {/* Metadata Bar */}
         <div className={styles.metadataBar}>
-          <span className={styles.metadataItem} data-testid="metadata-type">
-            <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
-              <path
-                d="M2 4h12M2 8h12M2 12h8"
-                stroke="currentColor"
-                strokeWidth="1.5"
-                strokeLinecap="round"
-              />
-            </svg>
-            {formatIssueType(issue.issue_type)}
+          <span className={styles.metadataControl} data-testid="metadata-type">
+            <TypeDropdown
+              type={issue.issue_type}
+              onSave={handleTypeSave}
+              isSaving={isSavingType}
+              disabledTypeOptions={typeDisabledOptions}
+              showInlineError={false}
+            />
+          </span>
+          <span
+            className={styles.metadataControl}
+            data-testid="metadata-priority"
+          >
+            <PriorityDropdown
+              priority={(issue.priority ?? 2) as Priority}
+              onSave={handlePrioritySave}
+              isSaving={isSavingPriority}
+            />
           </span>
           <AssigneeDropdown
             assignee={issue.assignee}
@@ -1218,6 +1390,11 @@ function DefaultContent({
             isSaving={isSavingAssignee}
             agents={agents}
             agentTasks={agentTasks}
+          />
+          <OwnerDropdown
+            owner={issue.owner}
+            onSave={handleOwnerSave}
+            isSaving={isSavingOwner}
           />
           {(repos.length > 0 || currentRepo !== null) && (
             <RepoDropdown
@@ -1235,6 +1412,14 @@ function DefaultContent({
               Created: {formatDate(issue.created_at)}
             </span>
           )}
+          <div className={styles.metadataLabels}>
+            <LabelEditor
+              labels={issue.labels ?? []}
+              onAddLabel={handleAddLabel}
+              onRemoveLabel={handleRemoveLabel}
+              disabled={isSavingLabels}
+            />
+          </div>
         </div>
       </div>
 
@@ -1551,6 +1736,15 @@ function DefaultContent({
         />
       )}
 
+      {/* Error toast for metadata save failures */}
+      {metadataError && (
+        <ErrorToast
+          message={metadataError}
+          onDismiss={() => setMetadataError(null)}
+          testId="metadata-error-toast"
+        />
+      )}
+
       {/* Close confirmation dialog for terminal tabs with active sessions */}
       <ConfirmDialog
         isOpen={pendingCloseTabId !== null}
@@ -1613,6 +1807,7 @@ export function IssueDetailPanel({
   // Full-page maximize toggle for the slide-over.
   const [isMaximized, setIsMaximized] = useState(false);
   const toggleMaximize = useCallback(() => setIsMaximized((v) => !v), []);
+  const renderInline = inline && !isMaximized;
   // Reset to the default slide-over width when the panel closes or the
   // selected issue changes, so a maximized panel doesn't "stick" across opens.
   useEffect(() => {
@@ -1623,24 +1818,24 @@ export function IssueDetailPanel({
   }, [issue?.id]);
 
   // Handle Escape key to close panel via global shortcut layer system.
-  // Inline mode skips this — the embedding view owns close semantics.
-  useRegisterEscapeLayer(LAYER_ISSUE_PANEL, onClose, isOpen && !inline);
+  // Inline mode skips this until expanded; the embedding view owns close semantics.
+  useRegisterEscapeLayer(LAYER_ISSUE_PANEL, onClose, isOpen && !renderInline);
 
   // Lock body scroll when open as a slide-out overlay. Inline mode is part
   // of the page flow, so don't lock scroll.
   useEffect(() => {
-    if (isOpen && !inline) {
+    if (isOpen && !renderInline) {
       const previousOverflow = document.body.style.overflow;
       document.body.style.overflow = "hidden";
       return () => {
         document.body.style.overflow = previousOverflow;
       };
     }
-  }, [isOpen, inline]);
+  }, [isOpen, renderInline]);
 
   // Focus management: only meaningful for the slide-out overlay.
-  useFocusReturn(isOpen && !inline, { focusTarget: panelRef });
-  useFocusTrap(panelRef, isOpen && !inline);
+  useFocusReturn(isOpen && !renderInline, { focusTarget: panelRef });
+  useFocusTrap(panelRef, isOpen && !renderInline);
 
   // Determine content: children override default, otherwise render default content
   const content = children ?? (
@@ -1654,16 +1849,14 @@ export function IssueDetailPanel({
       {...(onIssueUpdate !== undefined && { onIssueUpdate })}
       {...(onCopyLink !== undefined && { onCopyLink })}
       {...(onNavigateToIssue !== undefined && { onNavigateToIssue })}
-      {...(!inline && {
-        isMaximized,
-        onToggleMaximize: toggleMaximize,
-      })}
+      isMaximized={isMaximized}
+      onToggleMaximize={toggleMaximize}
     />
   );
 
   // Inline mode: render a regular column without overlay, backdrop, or
   // slide-out animation. The embedding layout reserves the space.
-  if (inline) {
+  if (renderInline) {
     return (
       <aside
         ref={panelRef}

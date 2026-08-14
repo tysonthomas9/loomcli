@@ -40,6 +40,14 @@ export interface AgentCardProps {
   selected?: boolean;
 }
 
+function normalizeCardStatus(agent: LoomAgentStatus): string {
+  const status = effectiveAgentStatus(agent).trim();
+  if (status === "" || status.toLowerCase() === "configured") {
+    return "idle";
+  }
+  return status;
+}
+
 function pickedUpTaskLabel(
   agent: LoomAgentStatus,
   taskTitle: string | undefined,
@@ -66,7 +74,7 @@ export function AgentCard({
   compact = false,
   selected = false,
 }: AgentCardProps): JSX.Element {
-  const parsed = parseLoomStatus(effectiveAgentStatus(agent));
+  const parsed = parseLoomStatus(normalizeCardStatus(agent));
   const avatarColor = getAvatarColor(agent.name);
   const dotColor = getStatusDotColor(parsed.type);
   const statusLabel = getStatusLabel(parsed);
@@ -140,7 +148,9 @@ export function AgentCard({
       </div>
 
       <div className={styles.info}>
-        <span className={nameClassName}>{title}</span>
+        <span className={nameClassName} title={agent.name}>
+          {title}
+        </span>
         <span className={styles.role}>{roleLabel}</span>
         {agent.repo && showRepoBadge && (
           <span className={styles.repoLine}>

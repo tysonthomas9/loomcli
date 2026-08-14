@@ -13,8 +13,7 @@ import (
 // Idempotent-create transport support. The X-Idempotency-Key /
 // X-Idempotency-Force values travel as request headers — fleet-db's strict
 // JSON decode rejects unknown body fields — and the replay / soft-duplicate
-// signals come back as response headers, which the backend contract
-// (IssueData only) cannot carry, so they are surfaced via logs here.
+// signals come back as response headers.
 
 // doRequestHeaders is doRequest with extra request headers and the response
 // headers surfaced to the caller.

@@ -59,3 +59,6 @@ worktrees/
 .agent.yield
 node_modules/
 *.agent.lock.flock
+
+# Machine-local aft overrides (sourced by tests/aft/run-aft*.sh)
+tests/aft/local.env

@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/tysonthomas9/loomcli/internal/ops"
+	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
@@ -134,4 +135,73 @@ func TestHandleGetWorkspace_EmptyID(t *testing.T) {
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d", rec.Code)
 	}
+}
+
+func TestHandleRemoveWorkspaceRepo_Success(t *testing.T) {
+	removeCalled := false
+	svc := &mockWorkspaceService{
+		removeWorkspaceRepoFn: func(_ context.Context, req service.WorkspaceRemoveRepoRequest) (*ops.WorkspaceData, error) {
+			removeCalled = true
+			if req.WorkspaceID != "ws-alpha" {
+				t.Fatalf("WorkspaceID = %q, want ws-alpha", req.WorkspaceID)
+			}
+			if req.RepoName != "api" {
+				t.Fatalf("RepoName = %q, want api", req.RepoName)
+			}
+			return &ops.WorkspaceData{ID: "ws-alpha", Repos: []ops.WorkspaceRepo{}}, nil
+		},
+	}
+
+	handler := handleRemoveWorkspaceRepo(svc)
+	req := removeRepoRequest("ws-alpha", "api")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if !removeCalled {
+		t.Fatal("expected RemoveWorkspaceRepo to be called")
+	}
+}
+
+func TestHandleRemoveWorkspaceRepo_WrongWorkspaceNotFound(t *testing.T) {
+	svc := &mockWorkspaceService{
+		removeWorkspaceRepoFn: func(_ context.Context, _ service.WorkspaceRemoveRepoRequest) (*ops.WorkspaceData, error) {
+			return nil, service.ErrNotFound(`repo "api" not found in workspace "ws-alpha"`)
+		},
+	}
+
+	handler := handleRemoveWorkspaceRepo(svc)
+	req := removeRepoRequest("ws-alpha", "api")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestHandleRemoveWorkspaceRepo_Forbidden(t *testing.T) {
+	svc := &mockWorkspaceService{
+		removeWorkspaceRepoFn: func(_ context.Context, _ service.WorkspaceRemoveRepoRequest) (*ops.WorkspaceData, error) {
+			return nil, service.ErrForbidden("repo removal is not permitted")
+		},
+	}
+
+	handler := handleRemoveWorkspaceRepo(svc)
+	req := removeRepoRequest("ws-alpha", "api")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func removeRepoRequest(wsID, repoName string) *http.Request {
+	req := httptest.NewRequest(http.MethodDelete, "/api/workspaces/"+wsID+"/repos/"+repoName, nil)
+	req.SetPathValue("ws", wsID)
+	req.SetPathValue("repo", repoName)
+	return req.WithContext(middleware.WithWorkspace(req.Context(), wsID))
 }

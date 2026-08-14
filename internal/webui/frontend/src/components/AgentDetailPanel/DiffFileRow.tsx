@@ -1,6 +1,6 @@
 /**
  * DiffFileRow - single row in the diff file list.
- * Shows status badge, file path, +/- stats, viewed checkbox, expand chevron.
+ * Shows status badge, file path, +/- stats, viewed control, expand chevron.
  */
 
 import type { DiffFile } from "@/api/issues";
@@ -54,15 +54,20 @@ export function DiffFileRow({
           <span className={styles.rowStatDel}>-{file.deletions}</span>
         )}
       </span>
-      <input
-        type="checkbox"
-        className={styles.viewedCheckbox}
-        checked={isViewed}
-        onChange={onToggleViewed}
-        onClick={(e) => e.stopPropagation()}
-        aria-label={`Mark ${file.path} as viewed`}
-        title="Viewed"
-      />
+      <button
+        type="button"
+        className={styles.viewedToggle}
+        data-viewed={isViewed || undefined}
+        aria-pressed={isViewed}
+        aria-label={`${isViewed ? "Unmark" : "Mark"} ${file.path} as viewed`}
+        title={isViewed ? "Viewed" : "Mark viewed"}
+        onClick={(e) => {
+          e.stopPropagation();
+          onToggleViewed();
+        }}
+      >
+        Viewed
+      </button>
       <svg
         className={styles.expandChevron}
         data-expanded={isExpanded}

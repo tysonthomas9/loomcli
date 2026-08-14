@@ -63,8 +63,6 @@ export interface WorkspaceViewActions {
   handleIssueClick: (issue: Issue) => void;
   handlePanelClose: () => void;
   handleAgentClick: (agentName: string) => void;
-  handleAgentPanelClose: () => void;
-  handleAgentTaskClick: (taskId: string) => void;
   handleApprove: (issue: Issue) => Promise<void>;
   handleReject: (issue: Issue, comment: string) => Promise<void>;
   handleCopyLink: () => Promise<void>;
@@ -119,8 +117,6 @@ export const NO_WORKSPACE_VIEW_ACTIONS: WorkspaceViewActions = {
   handleIssueClick: noop,
   handlePanelClose: noop,
   handleAgentClick: noop,
-  handleAgentPanelClose: noop,
-  handleAgentTaskClick: noop,
   handleApprove: asyncNoop,
   handleReject: asyncNoop,
   handleCopyLink: asyncNoop,

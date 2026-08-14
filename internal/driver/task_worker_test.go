@@ -81,6 +81,12 @@ func TestTaskWorkerRunOnceClaimsQueuedTaskRunAndClosesTask(t *testing.T) {
 	if replayed.TaskRunID != "task-run-worker-loop" {
 		t.Fatalf("replayed completion = %+v", replayed)
 	}
+	if _, err := st.TaskRuns().Complete(ctx, "TEST", "task-run-worker-loop", store.TaskRunComplete{
+		CompletionID: "complete-task-run-worker-loop",
+		Status:       domain.TaskRunCompleted,
+	}); !errors.Is(err, domain.ErrInvalidTransition) {
+		t.Fatalf("minimal completion id err = %v, want terminal-state conflict", err)
+	}
 	step, err := st.DriverSteps().Get(ctx, "TEST", "step-worker-loop")
 	if err != nil {
 		t.Fatalf("Get driver step: %v", err)

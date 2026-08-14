@@ -35,7 +35,7 @@ func TestCreateExternalRefSupportedUsesSinglePost(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	if issue == nil || issue.ID != "issue-1" {
+	if issue == nil || issue.Issue.ID != "issue-1" {
 		t.Fatalf("issue = %#v, want issue-1", issue)
 	}
 	if posts != 1 {
@@ -79,7 +79,7 @@ func TestCreateExternalRefUnsupportedRetriesThenPatches(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	if issue == nil || issue.ID != "issue-2" || issue.ExternalRef != params.ExternalRef {
+	if issue == nil || issue.Issue.ID != "issue-2" || issue.Issue.ExternalRef != params.ExternalRef {
 		t.Fatalf("issue = %#v, want issue-2 with external_ref", issue)
 	}
 	if len(postBodies) != 2 {
@@ -123,7 +123,7 @@ func TestCreateExternalRefPatchFailureReturnsCreatedIssue(t *testing.T) {
 	if err == nil {
 		t.Fatal("Create error = nil, want PATCH failure")
 	}
-	if issue == nil || issue.ID != "issue-3" {
+	if issue == nil || issue.Issue.ID != "issue-3" {
 		t.Fatalf("issue = %#v, want partially-created issue-3", issue)
 	}
 	if !backend.IsKind(err, backend.KindValidation) {

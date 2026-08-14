@@ -1,0 +1,104 @@
+# Search filters the board, syncs to ?search= on the workspace route, and
+# survives a reload (URL is the source of truth for filter state). The v5
+# board toolbar has no group-by control, so this suite covers search only.
+suite: filters
+classification: { area: issues, feature: filters, surface: ui, purpose: journey }
+baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
+teardown: '"$AFT_TESTS_DIR/scripts/close-open-issues.sh"'
+
+tests:
+  - name: search filters the board and survives a reload
+    intent: An agent creates two issues through the API, then an operator searches the board and sees the matching filter persist in the URL across reload
+    steps:
+      - open: /ws/E2E-WS/kanban
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=board-toolbar]')
+        intent: "Wait until the workspace board is ready"
+      - api:
+          method: "POST"
+          path: "/api/workspaces/${AFT_WS:-E2E-WS}/issues"
+          body:
+            title: "alpha $RUN_ID"
+            issue_type: "task"
+            priority: 1
+        intent: "An agent creates the alpha issue at priority 1"
+      - api:
+          method: "POST"
+          path: "/api/workspaces/${AFT_WS:-E2E-WS}/issues"
+          body:
+            title: "beta $RUN_ID"
+            issue_type: "task"
+            priority: 3
+        intent: "An agent creates the beta issue at priority 3"
+      - wait:
+          fn: >-
+            document.querySelectorAll('section[data-status=ready] article').length === 2
+        intent: "Wait until the board renders exactly two ready issue cards"
+      - fill: { testid: search-input-field, value: alpha }
+      - wait: { url: "**search=alpha**" }
+      - expect: { count: { selector: "section[data-status=ready] article", equals: 1 } }
+      - reload: true
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=board-toolbar]')
+        intent: "Wait until the workspace board is ready"
+      - expect: { url: "**search=alpha**" }
+      - expect: { count: { selector: "section[data-status=ready] article", equals: 1 } }
+      - expect: { value: { testid: search-input-field, equals: alpha } }
+
+  # covers: LCLI-DV-004
+  - name: deep link applies search priority type and label filters on load
+    intent: An agent creates issues with distinct metadata through the API, then an operator follows a filtered deep link and sees only the matching issue
+    steps:
+      - api:
+          method: "POST"
+          path: "/api/workspaces/${AFT_WS:-E2E-WS}/issues"
+          body:
+            title: "filters-deeplink-${RUN_ID:-local}-match"
+            issue_type: "bug"
+            priority: 1
+            labels: ["aft-filter-${RUN_ID:-local}"]
+        intent: "An agent creates the issue matching every deep-link filter"
+      - api:
+          method: "POST"
+          path: "/api/workspaces/${AFT_WS:-E2E-WS}/issues"
+          body:
+            title: "filters-deeplink-${RUN_ID:-local}-wrong-priority"
+            issue_type: "bug"
+            priority: 2
+            labels: ["aft-filter-${RUN_ID:-local}"]
+        intent: "An agent creates a control issue with the wrong priority"
+      - api:
+          method: "POST"
+          path: "/api/workspaces/${AFT_WS:-E2E-WS}/issues"
+          body:
+            title: "filters-deeplink-${RUN_ID:-local}-wrong-type"
+            issue_type: "task"
+            priority: 1
+            labels: ["aft-filter-${RUN_ID:-local}"]
+        intent: "An agent creates a control issue with the wrong type"
+      - api:
+          method: "POST"
+          path: "/api/workspaces/${AFT_WS:-E2E-WS}/issues"
+          body:
+            title: "filters-deeplink-${RUN_ID:-local}-wrong-label"
+            issue_type: "bug"
+            priority: 1
+            labels: ["other-filter-${RUN_ID:-local}"]
+        intent: "An agent creates a control issue with the wrong label"
+      - open: /ws/E2E-WS/kanban?search=filters-deeplink-${RUN_ID:-local}&priority=1&type=bug&labels=aft-filter-${RUN_ID:-local}
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=board-toolbar]')
+        intent: "Wait until the workspace board is ready"
+      - wait:
+          fn: >-
+            document.querySelectorAll('section[data-status=ready] article').length === 1
+        intent: "Wait until the board renders exactly one ready issue card"
+      - expect: { value: { testid: search-input-field, equals: "filters-deeplink-${RUN_ID:-local}" } }
+      - expect: { count: { selector: "section[data-status=ready] article", equals: 1 } }
+      - expect: { text: "filters-deeplink-${RUN_ID:-local}-match" }
+      - expect: { notText: "filters-deeplink-${RUN_ID:-local}-wrong-priority" }
+      - expect: { notText: "filters-deeplink-${RUN_ID:-local}-wrong-type" }
+      - expect: { notText: "filters-deeplink-${RUN_ID:-local}-wrong-label" }

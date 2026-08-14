@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -668,8 +669,8 @@ func TestCreate_HappyPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	if result.ID != "new-1" {
-		t.Errorf("ID = %q, want %q", result.ID, "new-1")
+	if result.Issue.ID != "new-1" {
+		t.Errorf("ID = %q, want %q", result.Issue.ID, "new-1")
 	}
 	if gotBody["status"] != "deferred" {
 		t.Errorf("body.status = %v, want deferred", gotBody["status"])
@@ -1507,7 +1508,62 @@ func TestListEvents_HappyPath(t *testing.T) {
 					"id":        "1",
 					"timestamp": now,
 					"actor":     "user",
-					"action":    "issue.created",
+					"action":    "issue.update",
+					"changes": []map[string]any{
+						{"field": "status", "before": "open", "after": "in_progress"},
+					},
+				},
+				{
+					"id":        "2",
+					"timestamp": now,
+					"actor":     "user",
+					"action":    "label.add",
+					"metadata":  map[string]string{"label": "bug"},
+				},
+				{
+					"id":        "3",
+					"timestamp": now,
+					"actor":     "user",
+					"action":    "dep.remove",
+					"metadata":  map[string]string{"depends_on_id": "test-2"},
+				},
+				{
+					"id":        "4",
+					"timestamp": now,
+					"actor":     "user",
+					"action":    "comment.add",
+					"metadata":  map[string]string{"text": "hello"},
+				},
+				{
+					"id":        "5",
+					"timestamp": now,
+					"actor":     "user",
+					"action":    "issue.assign",
+					"metadata":  map[string]string{"assignee": "worker-1"},
+				},
+				{
+					"id":        "6",
+					"timestamp": now,
+					"actor":     "user",
+					"action":    "issue.update",
+					"changes": []map[string]any{
+						{"field": "priority", "before": "2", "after": "0"},
+						{"field": "owner", "before": "", "after": "alice"},
+					},
+				},
+				{
+					"id":        "7",
+					"timestamp": now,
+					"actor":     "user",
+					"action":    "issue.defer",
+					"metadata":  map[string]string{"defer_until": "2026-05-01T00:00:00Z"},
+				},
+				{
+					"id":        "8",
+					"timestamp": now,
+					"actor":     "user",
+					"action":    "issue.close",
+					"metadata":  map[string]string{"reason": "shipped"},
 				},
 			},
 		})
@@ -1518,11 +1574,50 @@ func TestListEvents_HappyPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListEvents: %v", err)
 	}
-	if len(result) != 1 {
-		t.Fatalf("len = %d, want 1", len(result))
+	if len(result) != 8 {
+		t.Fatalf("len = %d, want 8", len(result))
 	}
-	if result[0].Kind != "issue.created" {
-		t.Errorf("Kind = %q, want %q", result[0].Kind, "issue.created")
+	if result[0].Kind != "issue.update" {
+		t.Errorf("Kind = %q, want %q", result[0].Kind, "issue.update")
+	}
+	if result[0].Field == nil || *result[0].Field != "status" {
+		t.Errorf("Field = %v, want status", result[0].Field)
+	}
+	if result[0].FieldCount != 1 {
+		t.Errorf("FieldCount = %d, want 1", result[0].FieldCount)
+	}
+	if result[0].OldValue == nil || *result[0].OldValue != "open" {
+		t.Errorf("OldValue = %v, want open", result[0].OldValue)
+	}
+	if result[0].NewValue == nil || *result[0].NewValue != "in_progress" {
+		t.Errorf("NewValue = %v, want in_progress", result[0].NewValue)
+	}
+	if result[1].NewValue == nil || *result[1].NewValue != "bug" {
+		t.Errorf("label NewValue = %v, want bug", result[1].NewValue)
+	}
+	if result[2].OldValue == nil || *result[2].OldValue != "test-2" {
+		t.Errorf("dependency OldValue = %v, want test-2", result[2].OldValue)
+	}
+	if result[3].Comment == nil || *result[3].Comment != "hello" {
+		t.Errorf("Comment = %v, want hello", result[3].Comment)
+	}
+	if result[4].NewValue == nil || *result[4].NewValue != "worker-1" {
+		t.Errorf("assignee NewValue = %v, want worker-1", result[4].NewValue)
+	}
+	if result[5].OldValue != nil || result[5].NewValue != nil {
+		t.Errorf("multi-field update values = %v/%v, want nil/nil", result[5].OldValue, result[5].NewValue)
+	}
+	if result[5].FieldCount != 2 {
+		t.Errorf("multi-field FieldCount = %d, want 2", result[5].FieldCount)
+	}
+	if !reflect.DeepEqual(result[5].Fields, []string{"priority", "owner"}) {
+		t.Errorf("multi-field Fields = %#v, want [priority owner]", result[5].Fields)
+	}
+	if result[6].NewValue == nil || *result[6].NewValue != "2026-05-01T00:00:00Z" {
+		t.Errorf("defer NewValue = %v, want defer date", result[6].NewValue)
+	}
+	if result[7].Comment == nil || *result[7].Comment != "shipped" {
+		t.Errorf("close Comment = %v, want shipped", result[7].Comment)
 	}
 }
 

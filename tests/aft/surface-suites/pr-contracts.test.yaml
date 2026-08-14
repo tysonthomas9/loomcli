@@ -1,0 +1,52 @@
+# Surface tier: pins the degraded-mode PR reviewer API error contract (HTTP
+# status codes + code fields). The user-visible degraded behavior lives in the
+# tier-1 pr-workspace-degraded suite; promote or fold this back when a
+# fake-connector seam exists (FINDINGS §3.9 staleness note).
+suite: pr-contracts-surface
+classification: { area: reviews, feature: pull-requests, surface: api, purpose: contract }
+baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
+setup: >-
+  name="aft-prc-${RUN_ID:-local}"; list_code="$(curl -sS -o "$AFT_WORK_DIR/prc-workspaces.setup.json" -w "%{http_code}" "$AFT_BASE_URL/api/workspaces")"; [ "$list_code" = 200 ] || { echo "workspace list failed with HTTP $list_code:"; cat "$AFT_WORK_DIR/prc-workspaces.setup.json"; exit 1; }; existing="$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); target=sys.argv[2]; print(next((w.get("id","") for w in d.get("workspaces",[]) if w.get("name")==target or w.get("id")==target), ""))' "$AFT_WORK_DIR/prc-workspaces.setup.json" "$name")"; if [ -n "$existing" ]; then delete_code="$(curl -sS -o "$AFT_WORK_DIR/prc-delete-stale.resp.json" -w "%{http_code}" -X DELETE "$AFT_BASE_URL/api/workspaces/$existing")"; [ "$delete_code" = 200 ] || [ "$delete_code" = 404 ] || { echo "stale workspace delete failed with HTTP $delete_code:"; cat "$AFT_WORK_DIR/prc-delete-stale.resp.json"; exit 1; }; fi
+teardown: >-
+  if [ -s "$AFT_WORK_DIR/prcWs" ]; then AFT_WS="$(cat "$AFT_WORK_DIR/prcWs")" "$AFT_TESTS_DIR/scripts/close-open-issues.sh" || true; delete_code="$(curl -sS -o "$AFT_WORK_DIR/prc-delete-workspace.resp.json" -w "%{http_code}" -X DELETE "$AFT_BASE_URL/api/workspaces/$(cat "$AFT_WORK_DIR/prcWs")")"; [ "$delete_code" = 200 ] || [ "$delete_code" = 404 ] || { echo "workspace teardown delete failed with HTTP $delete_code:"; cat "$AFT_WORK_DIR/prc-delete-workspace.resp.json"; exit 1; }; fi
+
+tests:
+  # Surface-only because the test probes endpoint contracts without a user-facing flow;
+  # promote or fold it back when a fake-connector seam supports a faithful scenario.
+  # covers: PR reviewer/conversation degraded-mode endpoint contracts
+  - name: pr reviewer endpoints return degraded codes without github access
+    intent: An API client probes the PR reviewer endpoints on a gh-less stack and receives the documented degraded codes
+    steps:
+      # The server-assigned workspace id (not the name) is what the pull-requests
+      # routes require — handlers resolve it inconsistently by name (repos/issues
+      # accept the name; the reviewer route 500s), so save the real id here.
+      - api:
+          method: "POST"
+          path: "/api/workspaces"
+          body: { name: "aft-prc-${RUN_ID:-local}", type: "empty" }
+          status: 201
+          assert:
+            - path: "data.id"
+              exists: true
+          save:
+            - { from: "data.id", as: "prcWs" }
+        intent: "An API client creates the fixture workspace and captures its server-assigned id"
+      - run: >-
+          ws="$(cat "$AFT_WORK_DIR/prcWs")"; repo="$AFT_WORK_DIR/prc-widgets-${RUN_ID:-local}"; rm -rf "$repo"; mkdir -p "$repo"; git -C "$repo" init -q; printf '%s\n' "widgets ${RUN_ID:-local}" > "$repo/README.md"; git -C "$repo" add README.md; git -C "$repo" -c user.email=e2e@x -c user.name=e2e commit -m init -q; git -C "$repo" branch -M main; git -C "$repo" remote add origin https://github.com/acme/widgets; basename "$repo" > "$AFT_WORK_DIR/prc-repo.name"; python3 -c 'import json,sys; print(json.dumps({"repos":[sys.argv[1]]}))' "$repo" > "$AFT_WORK_DIR/prc-add-repo.json"; repo_code="$(curl -sS -o "$AFT_WORK_DIR/prc-add-repo.resp.json" -w "%{http_code}" -X POST "$AFT_BASE_URL/api/workspaces/$ws/repos" -H "Content-Type: application/json" -d @"$AFT_WORK_DIR/prc-add-repo.json")"; [ "$repo_code" = 201 ] || { echo "repo add failed with HTTP $repo_code:"; cat "$AFT_WORK_DIR/prc-add-repo.resp.json"; exit 1; }; python3 -c 'import json,os,sys; run=os.environ.get("RUN_ID") or "local"; repo=open(sys.argv[1]).read().strip(); print(json.dumps({"title":"pr contracts "+run,"issue_type":"task","priority":2,"external_ref":"https://github.com/acme/widgets/pull/7","source_repo":repo}))' "$AFT_WORK_DIR/prc-repo.name" > "$AFT_WORK_DIR/prc-issue.json"; issue_code="$(curl -sS -o "$AFT_WORK_DIR/prc-issue.resp.json" -w "%{http_code}" -X POST "$AFT_BASE_URL/api/workspaces/$ws/issues" -H "Content-Type: application/json" -d @"$AFT_WORK_DIR/prc-issue.json")"; [ "$issue_code" = 201 ] || { echo "PR issue create failed with HTTP $issue_code:"; cat "$AFT_WORK_DIR/prc-issue.resp.json"; exit 1; }
+        intent: "An API client seeds the GitHub-shaped repository and review issue fixture"
+      - api:
+          method: "POST"
+          path: "/api/workspaces/${var:prcWs}/pull-requests/acme/widgets/7/reviewer"
+          status: 503
+          assert:
+            - path: "code"
+              equals: "egress_unavailable"
+        intent: "An API client confirms reviewer creation reports unavailable connector egress"
+      - api:
+          method: "GET"
+          path: "/api/workspaces/${var:prcWs}/pull-requests/acme/widgets/7/conversation"
+          status: 404
+          assert:
+            - path: "code"
+              equals: "reviewer_not_started"
+        intent: "An API client confirms the absent reviewer has no conversation yet"

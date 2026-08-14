@@ -44,6 +44,12 @@ const ISSUE_TYPES: { value: IssueType; label: string }[] = [
 
 const DEFAULT_PRIORITY: Priority = 2;
 
+function newCreateIdempotencyKey(): string {
+  const bytes = new Uint8Array(16);
+  globalThis.crypto.getRandomValues(bytes);
+  return `loom-ui-${Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("")}`;
+}
+
 export function CreateIssueModal({
   isOpen,
   onClose,
@@ -61,11 +67,20 @@ export function CreateIssueModal({
   const [description, setDescription] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState("");
+  const [softDuplicateIssue, setSoftDuplicateIssue] = useState<Issue | null>(
+    null,
+  );
+  const [pendingDuplicateRequest, setPendingDuplicateRequest] =
+    useState<CreateIssueRequest | null>(null);
 
   const dialogRef = useRef<HTMLDivElement>(null);
   const titleRef = useRef<HTMLInputElement>(null);
   const mountedRef = useRef(true);
   const wasOpenRef = useRef(false);
+  const createIntentRef = useRef<{
+    fingerprint: string;
+    idempotencyKey: string;
+  } | null>(null);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -105,6 +120,9 @@ export function CreateIssueModal({
     setDescription(initialValues?.description ?? "");
     setIsSubmitting(false);
     setError("");
+    setSoftDuplicateIssue(null);
+    setPendingDuplicateRequest(null);
+    createIntentRef.current = null;
   }, [
     isOpen,
     initialValues?.title,
@@ -128,6 +146,15 @@ export function CreateIssueModal({
 
   const canSubmit = title.trim() !== "" && !isSubmitting;
 
+  const finishCreate = useCallback(
+    async (issue: Issue) => {
+      await onSuccess(issue);
+      if (!mountedRef.current) return;
+      onClose();
+    },
+    [onClose, onSuccess],
+  );
+
   const handleSubmit = useCallback(
     async (e: React.FormEvent) => {
       e.preventDefault();
@@ -135,6 +162,8 @@ export function CreateIssueModal({
 
       setIsSubmitting(true);
       setError("");
+      setSoftDuplicateIssue(null);
+      setPendingDuplicateRequest(null);
 
       const req: CreateIssueRequest = {
         title: title.trim(),
@@ -161,11 +190,24 @@ export function CreateIssueModal({
       }
 
       try {
-        const issue = await createIssue(workspaceId, req);
+        const fingerprint = JSON.stringify(req);
+        if (createIntentRef.current?.fingerprint !== fingerprint) {
+          createIntentRef.current = {
+            fingerprint,
+            idempotencyKey: newCreateIdempotencyKey(),
+          };
+        }
+        const result = await createIssue(workspaceId, req, {
+          idempotencyKey: createIntentRef.current.idempotencyKey,
+        });
         if (!mountedRef.current) return;
-        await onSuccess(issue);
+        if (result.softDuplicate) {
+          setSoftDuplicateIssue(result.issue);
+          setPendingDuplicateRequest(req);
+          return;
+        }
+        await finishCreate(result.issue);
         if (!mountedRef.current) return;
-        onClose();
       } catch (err: unknown) {
         if (!mountedRef.current) return;
         const message =
@@ -198,10 +240,51 @@ export function CreateIssueModal({
       assignee,
       description,
       workspaceId,
-      onSuccess,
-      onClose,
+      finishCreate,
     ],
   );
+
+  const handleShowExisting = useCallback(async () => {
+    if (!softDuplicateIssue || isSubmitting) return;
+    setIsSubmitting(true);
+    setError("");
+    try {
+      await finishCreate(softDuplicateIssue);
+    } catch (err: unknown) {
+      if (!mountedRef.current) return;
+      const message =
+        err instanceof Error ? err.message : "Failed to show existing issue";
+      setError(message);
+    } finally {
+      if (mountedRef.current) {
+        setIsSubmitting(false);
+      }
+    }
+  }, [finishCreate, isSubmitting, softDuplicateIssue]);
+
+  const handleCreateAnyway = useCallback(async () => {
+    if (!pendingDuplicateRequest || isSubmitting) return;
+    setIsSubmitting(true);
+    setError("");
+
+    try {
+      const result = await createIssue(workspaceId, pendingDuplicateRequest, {
+        force: true,
+        idempotencyKey: newCreateIdempotencyKey(),
+      });
+      if (!mountedRef.current) return;
+      await finishCreate(result.issue);
+    } catch (err: unknown) {
+      if (!mountedRef.current) return;
+      const message =
+        err instanceof Error ? err.message : "Failed to create issue";
+      setError(message);
+    } finally {
+      if (mountedRef.current) {
+        setIsSubmitting(false);
+      }
+    }
+  }, [finishCreate, isSubmitting, pendingDuplicateRequest, workspaceId]);
 
   if (!isOpen) return null;
 
@@ -388,6 +471,39 @@ export function CreateIssueModal({
             >
               {error}
             </p>
+          )}
+
+          {softDuplicateIssue && (
+            <div
+              className={styles.duplicateNotice}
+              data-testid="soft-duplicate-notice"
+              role="status"
+            >
+              <p>
+                An identical issue was created moments ago:{" "}
+                <strong>{softDuplicateIssue.title}</strong>.
+              </p>
+              <div className={styles.duplicateActions}>
+                <button
+                  type="button"
+                  className={styles.secondaryActionButton}
+                  onClick={handleShowExisting}
+                  disabled={isSubmitting}
+                  data-testid="soft-duplicate-show-existing"
+                >
+                  Show existing
+                </button>
+                <button
+                  type="button"
+                  className={styles.secondaryActionButton}
+                  onClick={handleCreateAnyway}
+                  disabled={isSubmitting}
+                  data-testid="soft-duplicate-create-anyway"
+                >
+                  Create anyway
+                </button>
+              </div>
+            </div>
           )}
 
           <div className={styles.actions}>

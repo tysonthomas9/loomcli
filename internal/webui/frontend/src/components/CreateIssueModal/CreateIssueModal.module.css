@@ -106,6 +106,45 @@
   border-radius: var(--radius-sm);
 }
 
+.duplicateNotice {
+  margin: 0 0 14px;
+  padding: 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-subtle);
+  color: var(--color-text);
+  font-size: 13px;
+}
+
+.duplicateNotice p {
+  margin: 0 0 10px;
+}
+
+.duplicateActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.secondaryActionButton {
+  padding: 5px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.secondaryActionButton:hover:not(:disabled) {
+  background: var(--color-bg-hover);
+}
+
+.secondaryActionButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .actions {
   display: flex;
   justify-content: flex-end;

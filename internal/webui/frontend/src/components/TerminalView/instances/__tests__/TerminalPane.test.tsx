@@ -173,6 +173,9 @@ describe("TerminalPane overlay exclusivity", () => {
       ).toBeInTheDocument();
       expect(screen.getByText("Connecting...")).toBeInTheDocument();
       expect(
+        screen.getByTestId("loading-skeleton-terminal"),
+      ).toBeInTheDocument();
+      expect(
         screen.queryByTestId("reconnecting-overlay"),
       ).not.toBeInTheDocument();
     });

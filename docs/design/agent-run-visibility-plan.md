@@ -159,7 +159,7 @@ explicit and may be outside the server container.
    - append logs/transcript
    - attach artifacts
    - complete/fail run
-2. Store session history and run artifacts in FleetDB, Redis, or another
+2. Store run records and artifacts in FleetDB, Redis, or another
    server-visible durable store, not only container-local files.
 3. Add container metadata to the run:
    - image
@@ -245,7 +245,7 @@ structured run failure instead of leaving the task in a confusing state.
 
 ### Phase 2: Shared Session Store
 
-- Move task session history to a server-visible store.
+- Move task run records to a server-visible store.
 - Keep filesystem session files as local artifacts or cache, not the only
   source of truth.
 - Add transcript/log artifact APIs that work for local and remote runs.

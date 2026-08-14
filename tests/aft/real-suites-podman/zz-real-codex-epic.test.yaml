@@ -1,0 +1,126 @@
+# REAL codex tier through the containerized ModeCloud stack. Steps 1-7b mirror
+# real-suites/zz-real-codex-epic.test.yaml; step 8 verifies volume-backed isolation.
+suite: zz-real-codex-epic
+classification: { area: agents, feature: real-agent-backends, surface: mixed, purpose: journey }
+baseUrl: "${AFT_BASE_URL:-http://localhost:18282}"
+teardown: >-
+  "$AFT_TESTS_DIR/scripts/close-open-issues.sh";
+  "$AFT_TESTS_DIR/scripts/real-codex-teardown.sh" || true
+
+tests:
+  - name: real codex epic-runner creates HELLO.md and closes the task
+    intent: The real codex CLI, selected as the workspace default backend, claims the seeded child task via epic-runner, creates HELLO.md in a resolved task worktree, patches it back, records a real transcript+diff, and closes the task
+    steps:
+      # 1) seed epic + one child task carrying a tiny, deterministic DESIGN (the codex prompt).
+      - api:
+          method: "POST"
+          path: "/api/workspaces/${AFT_WS:-E2E-WS}/issues"
+          body:
+            title: "real-codex epic $RUN_ID"
+            issue_type: "epic"
+            priority: 2
+          save:
+            - from: "data.id"
+              as: "rcEpicId"
+        intent: "An operator seeds the real-codex epic at priority 2"
+      - api:
+          method: "POST"
+          path: "/api/workspaces/${AFT_WS:-E2E-WS}/issues"
+          body:
+            title: "real-codex task $RUN_ID"
+            issue_type: "task"
+            priority: 2
+            parent: "${var:rcEpicId}"
+            design: "Create a file named HELLO.md at the repository root whose entire contents are exactly the line: hello world. Do not create any other files. Do not modify any other files."
+          save:
+            - from: "data.id"
+              as: "rcTaskId"
+        intent: "An operator seeds the real-codex child task with the HELLO.md design"
+      # 2) confirm the card is on the board (SSE) before triggering.
+      - open: /ws/E2E-WS/kanban
+      - wait: { fn: "!!document.querySelector('[data-testid=board-toolbar]')" }
+        intent: "Wait until the workspace board is ready"
+      - wait: { text: real-codex task }
+      # 3) trigger epic-runner (default backend = codex). POST carries the one-time flue bundle
+      #    build; still well under the 120s run-step ceiling.
+      - api:
+          method: "POST"
+          path: "/api/workspaces/${AFT_WS:-E2E-WS}/workflows/epic-runner"
+          body:
+            epicId: "${var:rcEpicId}"
+        intent: "An operator starts epic-runner with the real codex backend"
+      # 4) WAIT for completion by polling the API for status:closed. The board is NOT a usable
+      #    completion signal here: ready-absence happens at CLAIM (minutes early), and the
+      #    epic-grouped board HIDES closed children entirely (product finding: an epic lane
+      #    whose tasks are all closed renders no lane, so the Done column never shows them —
+      #    verified live; the flat groupBy=none board renders them fine). aft caps each run:
+      #    step at 120s, so the poll is chained: two grace polls (always exit 0) then a final
+      #    assert — ~5.5 min total budget; a real codex HELLO.md run measured ~53s.
+      - run: >-
+          for i in $(seq 1 55); do curl -sf "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/issues/$(cat "$AFT_WORK_DIR/rcTaskId")" | grep -q '"status":"closed"' && exit 0; sleep 2; done; echo "not closed yet (grace window 1)"; exit 0
+        intent: "Wait until the real backend task reaches closed state in the workspace API"
+      - run: >-
+          for i in $(seq 1 55); do curl -sf "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/issues/$(cat "$AFT_WORK_DIR/rcTaskId")" | grep -q '"status":"closed"' && exit 0; sleep 2; done; echo "not closed yet (grace window 2)"; exit 0
+        intent: "Wait until the real backend task reaches closed state in the workspace API"
+      - run: >-
+          for i in $(seq 1 55); do curl -sf "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/issues/$(cat "$AFT_WORK_DIR/rcTaskId")" | grep -q '"status":"closed"' && exit 0; sleep 2; done; echo "task never closed"; exit 1
+        intent: "Wait until the real backend task reaches closed state in the workspace API"
+      # 5) board-level UX assert on the FLAT board, where closed cards do render in Done.
+      - open: /ws/E2E-WS/kanban?groupBy=none
+      - wait:
+          fn: >-
+            Array.from(document.querySelectorAll("section[data-status=done] article"))
+              .some((el) => el.textContent.includes('real-codex task ${RUN_ID:-local}'))
+        intent: "Wait until the flat board renders the completed real-backend task in Done"
+      # 6) a session was recorded, and it is a codex/local run with a real diff (files_changed>=1).
+      #    Also capture the session id for the transcript check.
+      - api:
+          method: "GET"
+          path: "/api/workspaces/${AFT_WS:-E2E-WS}/tasks/${var:rcTaskId}/sessions"
+          assert:
+            - path: "data.sessions.0.backend"
+              equals: "codex"
+            - path: "data.sessions.0.exit_code"
+              equals: 0
+          save:
+            - from: "data.sessions.0"
+              as: "rcSessionRecord"
+            - from: "data.sessions.0.session_id"
+              as: "rcSessionId"
+        intent: "An operator reads back the completed real-codex session and captures its identity"
+      - run: >-
+          python3 -c 'import json,os; s=json.load(open(os.environ["AFT_WORK_DIR"]+"/rcSessionRecord")); assert s.get("backend")=="codex", s; assert s.get("exit_code")==0, s; assert int(s.get("files_changed") or 0) >= 1, s'
+        intent: "An operator confirms the real-codex session carries non-stub execution evidence"
+      # 7) transcript is real: >=1 non-system entry AND references the file it created / tool
+      #    activity. Shape: {success, data: {session_id, entries: [{seq, ts, role, ...}]}}.
+      #    HARD ASSERT: serve reads artifact-backed transcripts via GET /artifacts/{id}/content,
+      #    which fleet-db now registers. This previously 500'd (fleet-db had only PUT, so the
+      #    405 defeated loom's not-found-only fallback) and was tolerated as an xfail.
+      - api:
+          method: "GET"
+          path: "/api/workspaces/${AFT_WS:-E2E-WS}/tasks/${var:rcTaskId}/sessions/${var:rcSessionId}/transcript"
+          status: 200
+          save:
+            - from: "data.entries"
+              as: "rcTranscriptEntries"
+        intent: "An operator reads the real-codex session transcript"
+      - run: >-
+          python3 -c 'import json,os; ents=json.load(open(os.environ["AFT_WORK_DIR"]+"/rcTranscriptEntries")); nonsys=[e for e in ents if e.get("role")!="system"]; assert nonsys, "no non-system transcript entries"; blob=json.dumps(ents).lower(); assert "hello.md" in blob or any(e.get("role")=="tool" for e in ents) or "tool_use" in blob, "transcript lacks tool activity / HELLO.md reference (stub signature)"'
+        intent: "An operator confirms the real-codex transcript contains non-system tool activity"
+      # 7b) the session diff is now readable too (has_diff keyed off patch_artifact_id, and
+      #     GetSessionDiff gained a control-plane fallback). Content assertion, not a flag check.
+      - run: >-
+          code=$(curl -s -o "$AFT_WORK_DIR/rc-diff.json" -w "%{http_code}" "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/tasks/$(cat "$AFT_WORK_DIR/rcTaskId")/sessions/$(cat "$AFT_WORK_DIR/rcSessionId")/diff");
+          [ "$code" = "200" ] || { echo "session diff returned $code (expected 200)"; cat "$AFT_WORK_DIR/rc-diff.json"; exit 1; };
+          grep -q 'HELLO.md' "$AFT_WORK_DIR/rc-diff.json" || { echo "diff does not mention HELLO.md"; head -c 400 "$AFT_WORK_DIR/rc-diff.json"; exit 1; }
+        intent: "An operator confirms the recorded session diff contains HELLO.md"
+      # 8a) isolation is structural: /work must be a named volume, never a host bind.
+      - run: >-
+          test -n "$AFT_SERVE_CONTAINER" || { echo "AFT_SERVE_CONTAINER is unset"; exit 1; }; mounts="$(podman inspect "$AFT_SERVE_CONTAINER" --format '{{json .Mounts}}')" || { echo "could not inspect serve container mounts"; exit 1; }; printf '%s' "$mounts" | python3 -c "import json,sys; mounts=json.load(sys.stdin); work=[m for m in mounts if m.get('Destination')=='/work']; assert len(work)==1, 'expected exactly one /work mount, got '+repr(work); assert work[0].get('Type')=='volume', '/work must be a named volume, got '+repr(work[0])" || { echo "serve container /work is not backed by a named volume"; exit 1; }; echo "serve container /work is backed by a named volume"
+        intent: "A deployment verifier confirms the serve work directory is backed by one named volume"
+      # 8b) confirm the expected file in /work. Host absence is a cheap regression
+      #     guard against a future bind-mount mistake; the volume check above is
+      #     the structural isolation assertion.
+      - run: >-
+          test -n "$AFT_SERVE_CONTAINER" || { echo "AFT_SERVE_CONTAINER is unset"; exit 1; }; f="$(podman exec "$AFT_SERVE_CONTAINER" sh -c 'find /work -name HELLO.md -print | head -n1')"; test -n "$f" || { echo "HELLO.md not in serve container /work — stub ran?"; exit 1; }; podman exec "$AFT_SERVE_CONTAINER" sh -c "grep -qx 'hello world' \"$f\"" || { echo "HELLO.md content wrong in serve container"; exit 1; }; ! find "$AFT_TESTS_DIR/../../tmp" -name HELLO.md -print 2>/dev/null | grep -q . || { echo "HELLO.md appeared under host tmp — possible bind-mount regression"; exit 1; }; echo "real codex wrote $f in the serve container; host tmp remains clear"
+        intent: "A deployment verifier confirms HELLO.md exists only in the serve container work volume"

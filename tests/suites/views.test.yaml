@@ -1,0 +1,41 @@
+# View switching via the nav rail: each button renders its view and syncs ?view=.
+# Notes for this build: navigation is the NavRail (aria-labelled buttons; view id
+# "table" is labelled "List") — the ViewSwitcher component exists in source but is
+# not rendered. Views are lazy-loaded, so table presence is awaited with wait.fn
+# rather than asserted immediately. The suite seeds one issue: an empty board
+# renders issue-table-empty instead of issue-table.
+suite: views
+baseUrl: "${AFT_BASE_URL:-http://localhost:8090}"
+setup: >-
+  curl -sf -X POST "$AFT_BASE_URL/api/issues" -H "Content-Type: application/json"
+  -d "{\"title\":\"views seed $RUN_ID\",\"issue_type\":\"task\",\"priority\":2}" >/dev/null
+  && echo "seeded 1 issue"
+teardown: '"$AFT_TESTS_DIR/scripts/close-open-issues.sh"'
+
+tests:
+  - name: nav rail switches views and syncs the URL
+    intent: Switching between the kanban and list views via the nav rail updates the URL and renders each view
+    steps:
+      - open: /
+      - expect: { visible: { selector: "nav[aria-label=Primary]" } }
+      - wait: { text: views seed }
+      - click: { role: button, name: List, exact: true }
+      - wait: { url: "**view=table**" }
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=issue-table]')
+      - expect: { visible: { testid: issue-table } }
+      - expect: { count: { selector: "section[data-status=ready]", equals: 0 } }
+      - click: { role: button, name: Kanban, exact: true }
+      - expect: { visible: { selector: "section[data-status=ready]" } }
+
+  - name: a deep link straight to the table view works
+    intent: Opening /?view=table directly renders the table without visiting the kanban first
+    steps:
+      - open: /?view=table
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=issue-table]')
+      - expect: { visible: { testid: issue-table } }
+      - expect: { text: views seed }
+      - expect: { count: { selector: "section[data-status=ready]", equals: 0 } }

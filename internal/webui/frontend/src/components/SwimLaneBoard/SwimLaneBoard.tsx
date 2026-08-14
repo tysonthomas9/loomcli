@@ -52,6 +52,8 @@ import styles from "./SwimLaneBoard.module.css";
 export interface SwimLaneBoardProps {
   /** Issues to display in the board */
   issues: Issue[];
+  /** Full issue data loaded for the board, before render-specific filtering */
+  allIssues?: Issue[];
   /** Field to group issues by */
   groupBy: GroupByField;
   /** Column configurations (default: 5-column kanban layout) */
@@ -93,6 +95,7 @@ export interface SwimLaneBoardProps {
  */
 export function SwimLaneBoard({
   issues,
+  allIssues,
   groupBy,
   columns: propColumns,
   filters,
@@ -207,6 +210,7 @@ export function SwimLaneBoard({
     ...(cardLimit !== undefined && { cardLimit }),
     ...(pendingIds !== undefined && { pendingIds }),
     ...(isMultiRepo !== undefined && { isMultiRepo }),
+    ...(allIssues !== undefined && { allIssues }),
     ...(hasFiltersActive !== undefined && { hasFiltersActive }),
     ...(onRunEpic !== undefined && { onRunEpic }),
     ...(isRunningEpic !== undefined && { isRunningEpic }),
@@ -221,6 +225,7 @@ export function SwimLaneBoard({
  */
 function SwimLaneBoardContent({
   issues,
+  allIssues,
   groupBy,
   columns,
   onIssueClick,
@@ -256,8 +261,8 @@ function SwimLaneBoardContent({
   const [activeIssue, setActiveIssue] = useState<Issue | null>(null);
   const [sourceColumnId, setSourceColumnId] = useState<string | null>(null);
   const [showCompletedLanes, setShowCompletedLanes] = useState(() => {
-    if (!workspaceId) return false;
-    return wsGet(workspaceId, "swimlane-show-completed") === "true";
+    if (!workspaceId) return true;
+    return wsGet(workspaceId, "swimlane-show-completed") !== "false";
   });
   // Track lanes that have been toggled from their default state.
   // When defaultCollapsed=true, this tracks lanes that were EXPANDED (toggled to open).
@@ -326,6 +331,13 @@ function SwimLaneBoardContent({
     }
     return { lanes: active, completedLaneCount: completed };
   }, [allLanes, groupBy, showCompletedLanes]);
+
+  const completedIssueCount = useMemo(
+    () =>
+      (allIssues ?? issues).filter((issue) => issue.status === "closed").length,
+    [allIssues, issues],
+  );
+  const hasCompletedIssueInData = completedIssueCount > 0;
 
   // Toggle lane collapse state - adds/removes from toggled set
   const toggleLaneCollapse = useCallback((laneId: string) => {
@@ -484,8 +496,7 @@ function SwimLaneBoardContent({
           aria-label="Lane controls"
         >
           {compactToggle}
-          {(lanes.length > 1 ||
-            (groupBy === "epic" && completedLaneCount > 0)) && (
+          {(lanes.length > 1 || groupBy === "epic") && (
             <span className={styles.toolbarDivider} aria-hidden="true" />
           )}
           {lanes.length > 1 && (
@@ -510,17 +521,24 @@ function SwimLaneBoardContent({
               </button>
             </>
           )}
-          {groupBy === "epic" && completedLaneCount > 0 && (
-            <button
-              type="button"
-              className={styles.toolbarButton}
-              onClick={() => setShowCompletedLanes((v) => !v)}
-              data-testid="toggle-completed-lanes"
+          {groupBy === "epic" && (
+            <span
+              className={styles.completedToggleSlot}
+              aria-hidden={hasCompletedIssueInData ? undefined : true}
             >
-              {showCompletedLanes
-                ? "Hide Completed"
-                : `${completedLaneCount} Completed`}
-            </button>
+              {hasCompletedIssueInData && (
+                <button
+                  type="button"
+                  className={styles.toolbarButton}
+                  onClick={() => setShowCompletedLanes((v) => !v)}
+                  data-testid="toggle-completed-lanes"
+                >
+                  {showCompletedLanes
+                    ? "Hide Completed"
+                    : `${completedIssueCount} Completed`}
+                </button>
+              )}
+            </span>
           )}
         </div>
         {lanes.map((lane) => {

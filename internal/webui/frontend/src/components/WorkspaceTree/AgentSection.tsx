@@ -162,8 +162,6 @@ export function AgentSection({
     setContextMenu(null);
   }, []);
 
-  if (agents.length === 0 && !addClick) return <></>;
-
   const listProps = {
     fullOrder: agentOrder,
     onReorder: persistAgentOrder,
@@ -180,31 +178,37 @@ export function AgentSection({
         <span>Agents</span>
       </div>
       <div className={styles.list}>
-        <SortableAgentList
-          agents={regular}
-          listClassName={styles.sortableList}
-          {...listProps}
-        />
-        {showBackgroundGroup ? (
-          <div
-            className={styles.subgroup}
-            data-testid="agent-section-background"
-          >
-            <div className={styles.subgroupHeader}>
-              <span>Background</span>
-            </div>
+        {agents.length === 0 ? (
+          <p className={styles.emptyState}>No agents yet</p>
+        ) : (
+          <>
             <SortableAgentList
-              agents={background}
-              listClassName={styles.subgroupList}
+              agents={regular}
+              listClassName={styles.sortableList}
               {...listProps}
             />
-          </div>
-        ) : (
-          <SortableAgentList
-            agents={background}
-            listClassName={styles.sortableList}
-            {...listProps}
-          />
+            {showBackgroundGroup ? (
+              <div
+                className={styles.subgroup}
+                data-testid="agent-section-background"
+              >
+                <div className={styles.subgroupHeader}>
+                  <span>Background</span>
+                </div>
+                <SortableAgentList
+                  agents={background}
+                  listClassName={styles.subgroupList}
+                  {...listProps}
+                />
+              </div>
+            ) : (
+              <SortableAgentList
+                agents={background}
+                listClassName={styles.sortableList}
+                {...listProps}
+              />
+            )}
+          </>
         )}
       </div>
       {addClick && (

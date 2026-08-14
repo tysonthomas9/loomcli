@@ -115,11 +115,14 @@ func TestCreate_ReplayedResponseStillReturnsIssue(t *testing.T) {
 
 	params := sampleCreateParams()
 	params.IdempotencyKey = "key-123"
-	issue, err := fb.Create(context.Background(), params)
+	result, err := fb.Create(context.Background(), params)
 	if err != nil {
 		t.Fatalf("Create on replay: %v", err)
 	}
-	if issue.ID != "TEST-1" {
-		t.Errorf("replayed issue ID = %q, want TEST-1", issue.ID)
+	if result.Issue.ID != "TEST-1" {
+		t.Errorf("replayed issue ID = %q, want TEST-1", result.Issue.ID)
+	}
+	if !result.Replayed {
+		t.Errorf("Replayed = false, want true")
 	}
 }

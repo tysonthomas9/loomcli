@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
-	"os"
 
 	"github.com/spf13/cobra"
 
@@ -48,10 +46,13 @@ func init() {
 
 //nolint:funlen // CLI command wires validation, transcript parsing, store lookup, and session update in one path.
 func runDaemonSeedTranscript(_ *cobra.Command, _ []string) error {
+	if err := requireTestSupport(); err != nil {
+		return err
+	}
 	if seedTranscriptSession == "" || seedTranscriptTask == "" {
 		return fmt.Errorf("--session and --task are required")
 	}
-	data, err := readSeedTranscriptContent(seedTranscriptFile)
+	data, err := readSeedContent(seedTranscriptFile)
 	if err != nil {
 		return fmt.Errorf("read transcript content: %w", err)
 	}
@@ -109,11 +110,4 @@ func runDaemonSeedTranscript(_ *cobra.Command, _ []string) error {
 		fmt.Printf("seeded transcript: ws=%s session=%s task=%s ref=%s bytes=%d\n", ws, seedTranscriptSession, seedTranscriptTask, ref, len(data))
 		return nil
 	})
-}
-
-func readSeedTranscriptContent(path string) ([]byte, error) {
-	if path == "" || path == "-" {
-		return io.ReadAll(os.Stdin)
-	}
-	return os.ReadFile(path) //nolint:gosec // test-only CLI flag
 }

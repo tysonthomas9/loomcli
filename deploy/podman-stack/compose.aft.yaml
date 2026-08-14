@@ -1,0 +1,36 @@
+# AFT real-codex overlay for the containerized ModeCloud stack.
+# The epic-runner's builtin local-task-runner inherits CODEX_HOME, so this
+# overlay intentionally does not set LOOM_DRIVER_TASK_RUNNER_CMD_JSON.
+
+services:
+  fleet-db:
+    environment:
+      # The aft tier exercises the ModeCloud container topology + session
+      # forensics over real containers/redis — NOT fleet-db's authz model.
+      # The base stack enables full authz, which requires per-API-key
+      # authorization grants (provisioned via setup.sh in the A1 flow) before
+      # serve's domain calls succeed. Run fleet-db in dev-mode (trust X-Actor)
+      # with authz off so the epic-runner flow works without that grant step,
+      # matching the binary-only standalone recipe (--auth-dev-mode
+      # --authz-enabled=false).
+      FLEET_AUTH_DEV_MODE: "true"
+      FLEET_AUTHZ_ENABLED: "false"
+  loom-serve:
+    environment:
+      CODEX_HOME: /home/node/.codex-rw
+      LOOM_STACK_CODEX_RW_DIR: /home/node/.codex-rw
+      # The epic-runner is a BUILT-IN workflow whose registration resolves
+      # @flue/runtime at trigger time; without this serve 500s with "local
+      # @flue/runtime package not found". The image bakes flue at /opt/flue
+      # (Containerfile.loom-serve). (The A1 review flow uses a different path,
+      # so the base stack never sets this.) Mirrors the host tier's FLUE_REPO.
+      FLUE_REPO: /opt/flue
+      # Remove the base stack's empty generic-runner override. Epic-runner must
+      # select the builtin local-task-runner so CODEX_HOME is re-admitted.
+      LOOM_DRIVER_TASK_RUNNER_CMD_JSON: null
+      LOOM_FLUE_AGENT_MODEL: ${LOOM_AFT_FLUE_AGENT_MODEL:-openai-codex/gpt-5.5}
+      LOOM_FRONTEND_DIR: /opt/webui
+      LOOM_FRONTEND_URL: http://localhost:${LOOM_STACK_SERVE_PORT:-18282}
+    volumes:
+      - ${LOOM_STACK_CODEX_HOST_DIR:?set to host ~/.codex}:/home/node/.codex:ro
+      - ${LOOM_AFT_FRONTEND_DIST:?set to internal/webui/frontend/dist}:/opt/webui:ro

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
   ensureAgentTerminalSession,
@@ -36,6 +36,7 @@ export function AgentLogsTab({
   } | null>(null);
   const [lines, setLines] = useState<string[]>([]);
   const [state, setState] = useState<LogViewState>("connecting");
+  const archiveScrollRef = useRef<HTMLDivElement | null>(null);
 
   const load = useCallback(async () => {
     setState("connecting");
@@ -71,19 +72,44 @@ export function AgentLogsTab({
     void load();
   }, [isActive, load]);
 
-  const stateLabel = state === "empty" ? "no logs" : state;
+  useEffect(() => {
+    if (mode !== "archive") return;
+    const scrollContainer = archiveScrollRef.current;
+    if (!scrollContainer) return;
+    scrollContainer.scrollTop = scrollContainer.scrollHeight;
+  }, [lines, mode]);
+
+  const stateLabel = state === "empty" ? "No logs" : state;
 
   return (
-    <div className={styles.scrollableContent}>
-      <div className={styles.section}>
-        <h3 className={styles.sectionTitle}>
-          {mode === "tmux" ? "Live terminal" : "Archive snapshot"}
-        </h3>
-        <button type="button" onClick={load}>
-          Refresh
-        </button>
-        <div data-testid="log-viewer">
-          <span data-state={state}>{stateLabel}</span>
+    <div
+      className={`${styles.scrollableContent} ${styles.logsContent}`}
+      ref={archiveScrollRef}
+    >
+      <section className={`${styles.section} ${styles.logsSection}`}>
+        <div className={styles.logsHeader}>
+          <div className={styles.logsTitleRow}>
+            <h3 className={styles.sectionTitle}>
+              {mode === "tmux" ? "Live terminal" : "Archive snapshot"}
+            </h3>
+            <span
+              className={styles.logStatusChip}
+              data-testid="log-status"
+              data-state={state}
+            >
+              {stateLabel}
+            </span>
+          </div>
+          <button
+            type="button"
+            className={styles.logsRefreshButton}
+            data-testid="log-refresh-button"
+            onClick={load}
+          >
+            Refresh
+          </button>
+        </div>
+        <div className={styles.logViewer} data-testid="log-viewer">
           {mode === "tmux" && terminalSession ? (
             <EmbeddedTerminal
               sessionName={terminalSession.sessionName}
@@ -97,10 +123,15 @@ export function AgentLogsTab({
               No logs available for this agent yet.
             </p>
           ) : (
-            <pre data-testid="terminal-container">{lines.join("\n")}</pre>
+            <pre
+              className={styles.archiveLogPre}
+              data-testid="terminal-container"
+            >
+              {lines.join("\n")}
+            </pre>
           )}
         </div>
-      </div>
+      </section>
     </div>
   );
 }

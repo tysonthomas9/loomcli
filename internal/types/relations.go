@@ -221,14 +221,17 @@ type Comment struct {
 
 // Event represents an audit trail entry
 type Event struct {
-	ID        int64     `json:"id"`
-	IssueID   string    `json:"issue_id"`
-	EventType EventType `json:"event_type"`
-	Actor     string    `json:"actor"`
-	OldValue  *string   `json:"old_value,omitempty"`
-	NewValue  *string   `json:"new_value,omitempty"`
-	Comment   *string   `json:"comment,omitempty"`
-	CreatedAt time.Time `json:"created_at"`
+	ID         int64     `json:"id"`
+	IssueID    string    `json:"issue_id"`
+	EventType  EventType `json:"event_type"`
+	Actor      string    `json:"actor"`
+	Field      *string   `json:"field,omitempty"`
+	Fields     []string  `json:"fields,omitempty"`
+	FieldCount int       `json:"field_count,omitempty"`
+	OldValue   *string   `json:"old_value,omitempty"`
+	NewValue   *string   `json:"new_value,omitempty"`
+	Comment    *string   `json:"comment,omitempty"`
+	CreatedAt  time.Time `json:"created_at"`
 }
 
 // EventType categorizes audit trail events
@@ -240,8 +243,14 @@ const (
 	EventUpdated           EventType = "issue.updated"
 	EventStatusChanged     EventType = "issue.status_changed"
 	EventCommented         EventType = "issue.commented"
+	EventClaimed           EventType = "issue.claimed"
+	EventReleased          EventType = "issue.released"
+	EventDeferred          EventType = "issue.deferred"
+	EventUndeferred        EventType = "issue.undeferred"
 	EventClosed            EventType = "issue.closed"
 	EventReopened          EventType = "issue.reopened"
+	EventAssigned          EventType = "issue.assigned"
+	EventDeleted           EventType = "issue.deleted"
 	EventDependencyAdded   EventType = "issue.dependency_added"
 	EventDependencyRemoved EventType = "issue.dependency_removed"
 	EventLabelAdded        EventType = "issue.label_added"

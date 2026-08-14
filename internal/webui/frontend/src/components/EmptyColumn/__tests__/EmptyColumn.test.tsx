@@ -139,7 +139,7 @@ describe("EmptyColumn", () => {
       render(<EmptyColumn status="backlog" />);
 
       expect(
-        screen.getByText("No blocked or deferred issues"),
+        screen.getByText("No backlog or deferred issues"),
       ).toBeInTheDocument();
     });
 
@@ -149,7 +149,7 @@ describe("EmptyColumn", () => {
       const statusElement = screen.getByRole("status");
       expect(statusElement).toHaveAttribute(
         "aria-label",
-        "No blocked or deferred issues",
+        "No backlog or deferred issues",
       );
     });
 

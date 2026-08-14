@@ -147,6 +147,58 @@ describe("CreateWorkspaceModal", () => {
       expect(dialog).toHaveAttribute("aria-label", "New Workspace");
     });
 
+    it("switches between clone, local-repo, and empty creation modes", () => {
+      render(
+        <CreateWorkspaceModal
+          isOpen={true}
+          onClose={onClose}
+          onSuccess={onSuccess}
+        />,
+      );
+
+      expect(screen.getByTestId("create-workspace-mode-clone")).toHaveAttribute(
+        "aria-selected",
+        "true",
+      );
+      expect(screen.getByTestId("create-workspace-mode-local")).toHaveAttribute(
+        "aria-selected",
+        "false",
+      );
+      expect(screen.getByTestId("create-workspace-mode-empty")).toHaveAttribute(
+        "aria-selected",
+        "false",
+      );
+      expect(
+        screen.getByTestId("create-workspace-clone-url"),
+      ).toBeInTheDocument();
+
+      fireEvent.click(screen.getByTestId("create-workspace-mode-local"));
+      expect(screen.getByTestId("create-workspace-mode-local")).toHaveAttribute(
+        "aria-selected",
+        "true",
+      );
+      expect(
+        screen.queryByTestId("create-workspace-clone-url"),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.getByTestId("create-workspace-local-path"),
+      ).toBeInTheDocument();
+
+      fireEvent.click(screen.getByTestId("create-workspace-mode-empty"));
+      expect(screen.getByTestId("create-workspace-mode-empty")).toHaveAttribute(
+        "aria-selected",
+        "true",
+      );
+      expect(
+        screen.queryByTestId("create-workspace-local-path"),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.getByText(
+          "Create the workspace now and add repositories later.",
+        ),
+      ).toBeInTheDocument();
+    });
+
     it("prefills provided clone workspace values", () => {
       render(
         <CreateWorkspaceModal
@@ -235,6 +287,53 @@ describe("CreateWorkspaceModal", () => {
         target: { value: "https://github.com/example/repo" },
       });
 
+      expect(screen.getByTestId("create-workspace-submit")).toBeEnabled();
+    });
+
+    it("requires a local path in local-repos mode", () => {
+      render(
+        <CreateWorkspaceModal
+          isOpen={true}
+          onClose={onClose}
+          onSuccess={onSuccess}
+        />,
+      );
+
+      fireEvent.change(screen.getByTestId("create-workspace-name"), {
+        target: { value: "local-workspace" },
+      });
+      fireEvent.click(screen.getByTestId("create-workspace-mode-local"));
+      expect(screen.getByTestId("create-workspace-submit")).toBeDisabled();
+
+      fireEvent.change(screen.getByTestId("create-workspace-local-path"), {
+        target: { value: "/repos/local" },
+      });
+      expect(screen.getByTestId("create-workspace-submit")).toBeEnabled();
+
+      fireEvent.click(screen.getByRole("button", { name: "Add" }));
+      expect(screen.getByTestId("create-workspace-submit")).toBeEnabled();
+
+      fireEvent.click(
+        screen.getByRole("button", { name: "Remove /repos/local" }),
+      );
+      expect(screen.getByTestId("create-workspace-submit")).toBeDisabled();
+    });
+
+    it("allows empty-mode submission with only a valid name", () => {
+      render(
+        <CreateWorkspaceModal
+          isOpen={true}
+          onClose={onClose}
+          onSuccess={onSuccess}
+        />,
+      );
+
+      fireEvent.click(screen.getByTestId("create-workspace-mode-empty"));
+      expect(screen.getByTestId("create-workspace-submit")).toBeDisabled();
+
+      fireEvent.change(screen.getByTestId("create-workspace-name"), {
+        target: { value: "empty-workspace" },
+      });
       expect(screen.getByTestId("create-workspace-submit")).toBeEnabled();
     });
 
@@ -454,6 +553,66 @@ describe("CreateWorkspaceModal", () => {
           ],
         });
       });
+    });
+
+    it("sends local paths as repos on an empty-type workspace", async () => {
+      mockCreateWorkspace.mockResolvedValue(MOCK_CREATE_RESULT);
+
+      render(
+        <CreateWorkspaceModal
+          isOpen={true}
+          onClose={onClose}
+          onSuccess={onSuccess}
+        />,
+      );
+
+      fireEvent.change(screen.getByTestId("create-workspace-name"), {
+        target: { value: "local-ws" },
+      });
+      fireEvent.click(screen.getByTestId("create-workspace-mode-local"));
+      fireEvent.change(screen.getByTestId("create-workspace-local-path"), {
+        target: { value: "/repos/api\n/repos/web" },
+      });
+      fireEvent.click(screen.getByTestId("create-workspace-submit"));
+
+      await waitFor(() => {
+        expect(mockCreateWorkspace).toHaveBeenCalledWith({
+          name: "local-ws",
+          type: "empty",
+          repos: ["/repos/api", "/repos/web"],
+        });
+      });
+    });
+
+    it("creates an empty workspace without repo fields", async () => {
+      mockCreateWorkspace.mockResolvedValue(MOCK_CREATE_RESULT);
+
+      render(
+        <CreateWorkspaceModal
+          isOpen={true}
+          onClose={onClose}
+          onSuccess={onSuccess}
+        />,
+      );
+
+      fireEvent.change(screen.getByTestId("create-workspace-name"), {
+        target: { value: "empty-ws" },
+      });
+      fireEvent.click(screen.getByTestId("create-workspace-mode-empty"));
+      fireEvent.click(screen.getByTestId("create-workspace-submit"));
+
+      await waitFor(() => {
+        expect(mockCreateWorkspace).toHaveBeenCalledWith({
+          name: "empty-ws",
+          type: "empty",
+        });
+        expect(onSuccess).toHaveBeenCalledWith(
+          MOCK_WORKSPACE_DATA,
+          "empty-ws",
+          undefined,
+        );
+      });
+      expect(onClose).toHaveBeenCalledTimes(1);
     });
 
     it("displays error message on API failure", async () => {

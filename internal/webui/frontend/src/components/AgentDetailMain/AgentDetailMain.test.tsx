@@ -183,7 +183,7 @@ describe("AgentDetailMain", () => {
     expect(screen.queryByText("Agent is stopped")).not.toBeInTheDocument();
   });
 
-  it("capitalizes the agent name in the detail header", () => {
+  it("shows the raw agent name in the detail header", () => {
     renderWithAgents(
       [
         {
@@ -200,9 +200,7 @@ describe("AgentDetailMain", () => {
       "lead-b",
     );
 
-    expect(screen.getByText("lead-b")).toHaveStyle({
-      textTransform: "capitalize",
-    });
+    expect(screen.getByText("lead-b")).toBeInTheDocument();
   });
 
   it("makes an unassigned lead explicit instead of showing unknown", () => {

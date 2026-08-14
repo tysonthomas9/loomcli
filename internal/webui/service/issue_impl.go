@@ -205,7 +205,7 @@ func (s *issueServiceImpl) GetIssue(ctx context.Context, issueID string) (json.R
 	return out, nil
 }
 
-func (s *issueServiceImpl) CreateIssue(ctx context.Context, params CreateIssueParams) (json.RawMessage, error) {
+func (s *issueServiceImpl) CreateIssue(ctx context.Context, params CreateIssueParams) (*CreateIssueResult, error) {
 	if err := validateCreateParams(&params); err != nil {
 		return nil, err
 	}
@@ -226,33 +226,34 @@ func (s *issueServiceImpl) CreateIssue(ctx context.Context, params CreateIssuePa
 	if created == nil {
 		return nil, ErrInternal("backend returned nil issue after create", nil)
 	}
+	createdIssue := created.Issue
 
 	// backend.IssueData is the slim projection; the previous direct-RPC
 	// path returned the full types.Issue (with description / design /
 	// acceptance_criteria / notes / external_ref / created_by / etc.) and
 	// the FE relies on those fields for the create-then-read-back roundtrip.
 	// Fetch the full detail post-create to preserve that contract.
-	detail, getErr := be.Get(ctx, created.ID)
+	detail, getErr := be.Get(ctx, createdIssue.ID)
 	if getErr == nil && detail != nil {
 		out, err := json.Marshal(issueDetailDataToWire(detail))
 		if err != nil {
 			return nil, ErrInternal("failed to marshal created issue", err)
 		}
-		return out, nil
+		return &CreateIssueResult{Data: out, IdempotencyWarning: created.IdempotencyWarning, IdempotencyReplayed: created.Replayed}, nil
 	}
 	if getErr != nil {
 		slog.Warn("CreateIssue: post-create Get failed; returning slim projection",
-			"issue_id", created.ID, "err", getErr)
+			"issue_id", createdIssue.ID, "err", getErr)
 	}
 
 	// Fall back to the slim projection if the follow-up Get fails — the
 	// create itself succeeded so we still return success rather than
 	// surface the read failure as a create failure.
-	out, err := json.Marshal(issueDataToWire(created))
+	out, err := json.Marshal(issueDataToWire(&createdIssue))
 	if err != nil {
 		return nil, ErrInternal("failed to marshal created issue", err)
 	}
-	return out, nil
+	return &CreateIssueResult{Data: out, IdempotencyWarning: created.IdempotencyWarning, IdempotencyReplayed: created.Replayed}, nil
 }
 
 func (s *issueServiceImpl) PatchIssue(ctx context.Context, params PatchIssueParams) error {
@@ -315,8 +316,23 @@ func (s *issueServiceImpl) CloseIssue(ctx context.Context, params CloseIssuePara
 		// as a quiet no-op success instead of an ERROR-level failure (new
 		// fleet-db returns 200 and never reaches this branch).
 		if backend.IsAlreadyClosedConflict(err) {
-			slog.Info("close was a no-op: issue already closed", "issue_id", params.IssueID)
-			result = &backend.CloseResult{Closed: &backend.IssueData{ID: params.IssueID}}
+			detail, getErr := be.Get(ctx, params.IssueID)
+			if getErr != nil {
+				return nil, translateBackendError(getErr)
+			}
+			if detail == nil || detail.Status != "closed" {
+				return nil, ErrConflict("backend reported already closed but canonical closed state was unavailable")
+			}
+			if !closeReasonsMatch(detail.CloseReason, params.Reason) {
+				return nil, ErrConflict(fmt.Sprintf(
+					"issue is already closed with reason %q, not %q",
+					detail.CloseReason,
+					params.Reason,
+				))
+			}
+			slog.Info("close replay matched canonical closed state", "issue_id", params.IssueID)
+			closed := detail.IssueData
+			result = &backend.CloseResult{Closed: &closed}
 		} else {
 			// "blocker" / cycle conflicts surface as KindConflict via the backend's
 			// classifier; KindNotFound is mapped already. Fall through to translate.
@@ -335,6 +351,15 @@ func (s *issueServiceImpl) CloseIssue(ctx context.Context, params CloseIssuePara
 		return nil, ErrInternal("failed to marshal close result", err)
 	}
 	return out, nil
+}
+
+func closeReasonsMatch(persisted, requested string) bool {
+	persisted = strings.TrimSpace(persisted)
+	requested = strings.TrimSpace(requested)
+	if requested == "" {
+		return persisted == "" || persisted == "Closed"
+	}
+	return persisted == requested
 }
 
 // ClaimIssue atomically claims an issue by ID for the server-side actor.

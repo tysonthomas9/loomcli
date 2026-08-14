@@ -15,5 +15,3 @@ export { QueueStatsBar } from "./QueueStatsBar";
 export type { WorkQueueCounts, QueueStatsBarProps } from "./QueueStatsBar";
 export { WorkspaceSelectorBar } from "./WorkspaceSelectorBar";
 export type { WorkspaceSelectorBarProps } from "./WorkspaceSelectorBar";
-export { OtherWorkspacesSection } from "./OtherWorkspacesSection";
-export type { OtherWorkspacesSectionProps } from "./OtherWorkspacesSection";

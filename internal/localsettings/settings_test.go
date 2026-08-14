@@ -3,7 +3,9 @@ package localsettings
 import (
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
+	"time"
 )
 
 func TestRedisFromURL_ParsesRedisCLIUpstashCommand(t *testing.T) {
@@ -93,4 +95,68 @@ func TestSaveCreatesPrivateSettingsDir(t *testing.T) {
 	if got := info.Mode().Perm(); got != 0700 {
 		t.Fatalf("settings dir mode = %#o, want 0700", got)
 	}
+}
+
+func TestUpdateSerializesConcurrentReadModifyWrite(t *testing.T) {
+	dir := t.TempDir()
+	firstInCallback := make(chan struct{})
+	releaseFirst := make(chan struct{})
+	errCh := make(chan error, 2)
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		_, err := Update(dir, func(settings *Settings) error {
+			settings.UIPreferences.WorkspaceOrder = []string{"BETA", "ALPHA"}
+			close(firstInCallback)
+			<-releaseFirst
+			return nil
+		})
+		errCh <- err
+	}()
+
+	<-firstInCallback
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		_, err := Update(dir, func(settings *Settings) error {
+			settings.AgentRuntime.Default = AgentRuntimeDaytona
+			return nil
+		})
+		errCh <- err
+	}()
+
+	time.Sleep(20 * time.Millisecond)
+	close(releaseFirst)
+	wg.Wait()
+	close(errCh)
+
+	for err := range errCh {
+		if err != nil {
+			t.Fatalf("Update returned error: %v", err)
+		}
+	}
+	loaded, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if got, want := loaded.UIPreferences.WorkspaceOrder, []string{"BETA", "ALPHA"}; !equalStrings(got, want) {
+		t.Fatalf("WorkspaceOrder = %#v, want %#v", got, want)
+	}
+	if loaded.AgentRuntime.Default != AgentRuntimeDaytona {
+		t.Fatalf("AgentRuntime.Default = %q, want %q", loaded.AgentRuntime.Default, AgentRuntimeDaytona)
+	}
+}
+
+func equalStrings(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }

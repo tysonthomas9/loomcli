@@ -66,6 +66,34 @@ func TestScopedSubprocessBaseEnvFiltersBroadCredentials(t *testing.T) {
 	}
 }
 
+func TestLocalTaskRunnerBaseEnvKeepsBackendConfigDirs(t *testing.T) {
+	env := []string{
+		"PATH=/usr/bin",
+		"HOME=/home/loom",
+		"CODEX_HOME=/custom/.codex",
+		"CLAUDE_CONFIG_DIR=/custom/.claude",
+		"ANTHROPIC_API_KEY=model-secret",
+	}
+
+	local := envMap(localTaskRunnerBaseEnv(env))
+	for key, want := range map[string]string{
+		"CODEX_HOME":        "/custom/.codex",
+		"CLAUDE_CONFIG_DIR": "/custom/.claude",
+		"ANTHROPIC_API_KEY": "model-secret",
+	} {
+		if local[key] != want {
+			t.Fatalf("%s = %q, want %q (local runner must inherit backend config dirs/credentials): %+v", key, local[key], want, local)
+		}
+	}
+
+	strict := envMap(driverRuntimeBaseEnv(env))
+	for _, key := range []string{"CODEX_HOME", "CLAUDE_CONFIG_DIR", "ANTHROPIC_API_KEY"} {
+		if _, ok := strict[key]; ok {
+			t.Fatalf("%s leaked into strict driver env: %+v", key, strict)
+		}
+	}
+}
+
 func TestFlueRuntimeEnvCarriesNoFleetDBCredentials(t *testing.T) {
 	t.Setenv("LOOM_FLEET_DB_URL", "https://fleet.invalid")
 	t.Setenv("LOOM_FLEET_DB_API_KEY", "broad-secret")

@@ -27,6 +27,9 @@ func (m *mockWorkspaceService) CreateWorkspace(_ context.Context, _ service.Work
 func (m *mockWorkspaceService) AddWorkspaceRepos(_ context.Context, _ service.WorkspaceAddReposRequest) (*ops.WorkspaceData, error) {
 	return nil, service.ErrUnavailable("not available")
 }
+func (m *mockWorkspaceService) RemoveWorkspaceRepo(_ context.Context, _ service.WorkspaceRemoveRepoRequest) (*ops.WorkspaceData, error) {
+	return nil, service.ErrUnavailable("not available")
+}
 func (m *mockWorkspaceService) StartAsyncCreate(_ context.Context, _ service.WorkspaceCreateRequest) (string, error) {
 	return "", service.ErrUnavailable("not available")
 }
@@ -40,12 +43,6 @@ func (m *mockWorkspaceService) RenameWorkspace(_ context.Context, _ string, _ st
 	return nil, service.ErrUnavailable("not available")
 }
 func (m *mockWorkspaceService) ReorderWorkspaces(_ context.Context, _ []string) (*ops.WorkspaceData, error) {
-	return nil, service.ErrUnavailable("not available")
-}
-func (m *mockWorkspaceService) SetDefaultWorkspace(_ context.Context, _ string) (*ops.WorkspaceData, error) {
-	return nil, service.ErrUnavailable("not available")
-}
-func (m *mockWorkspaceService) ClearDefaultWorkspace(_ context.Context) (*ops.WorkspaceData, error) {
 	return nil, service.ErrUnavailable("not available")
 }
 func (m *mockWorkspaceService) GetWorkspaceBackend(_ context.Context, _ string) (*service.BackendConfigData, error) {

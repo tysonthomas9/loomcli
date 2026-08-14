@@ -43,15 +43,36 @@ type SessionService interface {
 // SessionListItem extends a session record with computed UI fields.
 type SessionListItem struct {
 	sessions.SessionRecord
-	IsActive      bool `json:"is_active"`
-	HasTranscript bool `json:"has_transcript"`
-	HasDiff       bool `json:"has_diff"`
+	IsActive      bool            `json:"is_active"`
+	HasTranscript bool            `json:"has_transcript"`
+	HasDiff       bool            `json:"has_diff"`
+	Evidence      SessionEvidence `json:"evidence"`
 }
 
 // SessionDetailData extends session metadata with computed UI fields.
 type SessionDetailData struct {
 	sessions.SessionMetadata
-	IsActive bool `json:"is_active"`
+	IsActive      bool            `json:"is_active"`
+	HasTranscript bool            `json:"has_transcript"`
+	HasDiff       bool            `json:"has_diff"`
+	Evidence      SessionEvidence `json:"evidence"`
+}
+
+// SessionEvidence describes whether independently persisted run evidence agrees.
+// A conflict is surfaced to callers instead of being hidden by source precedence.
+type SessionEvidence struct {
+	Status      string                    `json:"status"`
+	UsageStatus string                    `json:"usage_status"`
+	Conflicts   []SessionEvidenceConflict `json:"conflicts"`
+}
+
+// SessionEvidenceConflict identifies a field that disagrees between two sources.
+type SessionEvidenceConflict struct {
+	Field          string `json:"field"`
+	ExistingSource string `json:"existing_source"`
+	ExistingValue  string `json:"existing_value"`
+	IncomingSource string `json:"incoming_source"`
+	IncomingValue  string `json:"incoming_value"`
 }
 
 // SessionScrollbackResult contains scrollback file content.

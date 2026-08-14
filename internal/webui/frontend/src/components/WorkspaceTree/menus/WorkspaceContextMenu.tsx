@@ -20,6 +20,12 @@ export interface WorkspaceContextMenuProps {
   onRemove: () => void;
   /** Callback to close the menu */
   onClose: () => void;
+  /**
+   * Whether to render the Remove action. Hidden for the active workspace,
+   * which can't be removed from under the view it's currently showing.
+   * Defaults to true.
+   */
+  showRemove?: boolean;
 }
 
 export function WorkspaceContextMenu({
@@ -28,6 +34,7 @@ export function WorkspaceContextMenu({
   onRename,
   onRemove,
   onClose,
+  showRemove = true,
 }: WorkspaceContextMenuProps): JSX.Element | null {
   const menuRef = useContextMenuLifecycle(isOpen, position, onClose);
 
@@ -99,34 +106,36 @@ export function WorkspaceContextMenu({
         </svg>
         <span>Rename</span>
       </button>
-      <button
-        type="button"
-        className={`${styles.menuItem} ${styles.dangerItem}`}
-        onClick={handleRemoveClick}
-        onKeyDown={handleRemoveKeyDown}
-        role="menuitem"
-        aria-label="Remove workspace"
-        title="Remove workspace"
-        data-testid="workspace-context-menu-remove"
-      >
-        <svg
-          width="14"
-          height="14"
-          viewBox="0 0 14 14"
-          fill="none"
-          className={styles.menuItemIcon}
-          aria-hidden="true"
+      {showRemove && (
+        <button
+          type="button"
+          className={`${styles.menuItem} ${styles.dangerItem}`}
+          onClick={handleRemoveClick}
+          onKeyDown={handleRemoveKeyDown}
+          role="menuitem"
+          aria-label="Remove workspace"
+          title="Remove workspace"
+          data-testid="workspace-context-menu-remove"
         >
-          <path
-            d="M2 3.5H12M5.5 6V10.5M8.5 6V10.5M3 3.5L3.5 11.5C3.5 12.05 3.95 12.5 4.5 12.5H9.5C10.05 12.5 10.5 12.05 10.5 11.5L11 3.5M5 3.5V2C5 1.45 5.45 1 6 1H8C8.55 1 9 1.45 9 2V3.5"
-            stroke="currentColor"
-            strokeWidth="1.3"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-        </svg>
-        <span>Remove</span>
-      </button>
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 14 14"
+            fill="none"
+            className={styles.menuItemIcon}
+            aria-hidden="true"
+          >
+            <path
+              d="M2 3.5H12M5.5 6V10.5M8.5 6V10.5M3 3.5L3.5 11.5C3.5 12.05 3.95 12.5 4.5 12.5H9.5C10.05 12.5 10.5 12.05 10.5 11.5L11 3.5M5 3.5V2C5 1.45 5.45 1 6 1H8C8.55 1 9 1.45 9 2V3.5"
+              stroke="currentColor"
+              strokeWidth="1.3"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+          <span>Remove</span>
+        </button>
+      )}
     </div>
   );
 }

@@ -52,10 +52,16 @@ vi.mock("react-router-dom", () => ({
 }));
 
 // Create hoisted mocks for @/api functions used by handleApprove/handleReject
-const { mockCloseIssue, mockUpdateIssue, mockAddComment } = vi.hoisted(() => ({
+const {
+  mockCloseIssue,
+  mockUpdateIssue,
+  mockAddComment,
+  mockApplyReviewDecision,
+} = vi.hoisted(() => ({
   mockCloseIssue: vi.fn(),
   mockUpdateIssue: vi.fn(),
   mockAddComment: vi.fn(),
+  mockApplyReviewDecision: vi.fn(),
 }));
 
 const { mockStartAgent } = vi.hoisted(() => ({
@@ -121,6 +127,7 @@ vi.mock("@/api", async (importOriginal) => {
     updateIssue: mockUpdateIssue,
     addComment: mockAddComment,
     closeIssue: mockCloseIssue,
+    applyReviewDecision: mockApplyReviewDecision,
     startAgent: mockStartAgent,
     getIssueEvents: vi.fn().mockImplementation(() => new Promise(() => {})),
     getTaskLogPhases: vi.fn().mockResolvedValue([]),
@@ -723,6 +730,8 @@ interface MockStoreStateOverrides {
   agents: any[];
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   agentTasks: Record<string, any>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  upsertWorkspaceAgent: (agent: any) => void;
   retryNow: () => void;
 }
 
@@ -767,6 +776,7 @@ function createMockUseIssuesReturn(
     // Agent store fields (shared mockStoreState — useStore ignores store arg)
     agents: [],
     agentTasks: {},
+    upsertWorkspaceAgent: vi.fn(),
     retryNow: vi.fn(),
     stats: {
       open: 0,
@@ -1002,7 +1012,10 @@ describe("App", () => {
     // Set up default API mocks (resolve by default so existing tests aren't affected)
     mockUpdateIssue.mockResolvedValue({});
     mockAddComment.mockResolvedValue({});
-    mockCreateIssue.mockResolvedValue(createMockIssue({ id: "created-issue" }));
+    mockCreateIssue.mockResolvedValue({
+      issue: createMockIssue({ id: "created-issue" }),
+      softDuplicate: false,
+    });
     mockStartAgent.mockResolvedValue(undefined);
     mockRunOnboardingFirstTask.mockResolvedValue({
       success: true,
@@ -1578,7 +1591,7 @@ describe("App", () => {
       ).toBeInTheDocument();
     });
 
-    it("renders no FilterBar in the board toolbar (Aether V3: tabs · search · New Issue)", () => {
+    it("renders no legacy FilterBar in the board toolbar", () => {
       const mockReturn = createMockUseIssuesReturn({
         issues: [createMockIssue()],
       });
@@ -1586,8 +1599,8 @@ describe("App", () => {
 
       render(<App />);
 
-      // The design board-head has only the view tabs, search, and New Issue —
-      // no filter controls.
+      // The legacy mounted FilterBar remains absent; active URL filters render
+      // as compact chips instead.
       expect(screen.queryByTestId("filter-bar")).not.toBeInTheDocument();
       expect(screen.queryByTestId("priority-filter")).not.toBeInTheDocument();
       expect(screen.queryByTestId("type-filter")).not.toBeInTheDocument();
@@ -1596,6 +1609,78 @@ describe("App", () => {
       ).not.toBeInTheDocument();
       expect(screen.getByTestId("search-input")).toBeInTheDocument();
       expect(screen.getByTestId("new-issue-button")).toBeInTheDocument();
+    });
+
+    it("renders active URL filter chips and clears them through filter actions", () => {
+      const mockReturn = createMockUseIssuesReturn({
+        issues: [createMockIssue()],
+      });
+      mockStoreState = mockReturn;
+
+      const filterActions = {
+        setPriority: vi.fn(),
+        setType: vi.fn(),
+        setLabels: vi.fn(),
+        setSearch: vi.fn(),
+        setShowBlocked: vi.fn(),
+        setGroupBy: vi.fn(),
+        clearFilter: vi.fn(),
+        clearAll: vi.fn(),
+      };
+
+      vi.mocked(useFilterState).mockReturnValue([
+        {
+          search: "deploy",
+          priority: 1,
+          type: "bug",
+          labels: ["frontend", "urgent"],
+        },
+        filterActions,
+      ]);
+
+      render(<App />);
+
+      expect(screen.getByTestId("board-filter-chips")).toBeInTheDocument();
+      expect(screen.getByTestId("search-input-field")).toHaveValue("deploy");
+      expect(
+        screen.getByRole("button", { name: "Clear search: deploy filter" }),
+      ).toHaveTextContent("search: deploy");
+      expect(
+        screen.getByRole("button", { name: "Clear priority: P1 filter" }),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: "Clear type: bug filter" }),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: "Clear label: frontend filter" }),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: "Clear label: urgent filter" }),
+      ).toBeInTheDocument();
+
+      fireEvent.click(
+        screen.getByRole("button", { name: "Clear search: deploy filter" }),
+      );
+      expect(filterActions.setSearch).toHaveBeenCalledWith(undefined);
+      expect(screen.getByTestId("search-input-field")).toHaveValue("");
+
+      fireEvent.click(
+        screen.getByRole("button", { name: "Clear priority: P1 filter" }),
+      );
+      expect(filterActions.setPriority).toHaveBeenCalledWith(undefined);
+
+      fireEvent.click(
+        screen.getByRole("button", { name: "Clear type: bug filter" }),
+      );
+      expect(filterActions.setType).toHaveBeenCalledWith(undefined);
+
+      fireEvent.click(
+        screen.getByRole("button", { name: "Clear label: frontend filter" }),
+      );
+      expect(filterActions.setLabels).toHaveBeenCalledWith(["urgent"]);
+
+      fireEvent.click(screen.getByRole("button", { name: "Clear all" }));
+      expect(filterActions.clearAll).toHaveBeenCalledTimes(1);
     });
 
     it("renders filter navigation even in loading state", () => {
@@ -2579,7 +2664,12 @@ describe("App", () => {
       expect(upsertAgent).toHaveBeenCalledWith(
         expect.objectContaining({ name: "planner", role_name: "plan" }),
       );
-      expect(refetchWorkspace).toHaveBeenCalled();
+      expect(mockStoreState.upsertWorkspaceAgent).toHaveBeenCalledWith(
+        expect.objectContaining({ name: "planner", role_name: "plan" }),
+      );
+      await waitFor(() => {
+        expect(refetchWorkspace).toHaveBeenCalled();
+      });
 
       expect(
         screen.queryByRole("dialog", {
@@ -2765,7 +2855,10 @@ describe("App", () => {
         title: "Manual first task",
         issue_type: "task",
       });
-      mockCreateIssue.mockResolvedValue(createdIssue);
+      mockCreateIssue.mockResolvedValue({
+        issue: createdIssue,
+        softDuplicate: false,
+      });
       mockStoreState = createMockUseIssuesReturn({
         issues: [],
         refetch,
@@ -2825,6 +2918,9 @@ describe("App", () => {
           "test-ws-id",
           expect.objectContaining({
             title: "Manual first task",
+          }),
+          expect.objectContaining({
+            idempotencyKey: expect.stringMatching(/^loom-ui-/),
           }),
         );
       });
@@ -3170,37 +3266,6 @@ describe("App", () => {
         expect.stringContaining("/agents/agent-2"),
       );
     });
-
-    it("agent panel close calls closePanel", () => {
-      const mockReturn = createMockUseIssuesReturn({
-        agents: [
-          {
-            name: "agent-1",
-            status: "idle",
-            current_task: null,
-            workspace: "/test",
-            started_at: "2024-01-01T00:00:00Z",
-          },
-        ],
-      });
-      mockStoreState = mockReturn;
-
-      // Set panel to open state so close button is visible
-      mockUsePanelManager.mockReturnValue({
-        activePanel: { type: "agent", name: "agent-1" },
-        pendingPanel: null,
-        openPanel: mockOpenPanel,
-        closePanel: mockClosePanel,
-        isOpen: vi.fn(() => true),
-      });
-
-      render(<App />);
-
-      // Close the panel using the close button
-      const closeButton = screen.getByRole("button", { name: "Close panel" });
-      fireEvent.click(closeButton);
-      expect(mockClosePanel).toHaveBeenCalled();
-    });
   });
 
   describe("handleApprove and handleReject", () => {
@@ -3208,6 +3273,7 @@ describe("App", () => {
       mockCloseIssue.mockResolvedValue(undefined);
       mockUpdateIssue.mockResolvedValue(undefined);
       mockAddComment.mockResolvedValue(undefined);
+      mockApplyReviewDecision.mockResolvedValue({});
     });
 
     it("plan approve calls updateIssueStatus with open status", async () => {
@@ -3299,7 +3365,7 @@ describe("App", () => {
       expect(mockCloseIssue).not.toHaveBeenCalled();
     });
 
-    it("code approve calls closeIssue and then refetch", async () => {
+    it("code approve calls the coordinated review decision and then refetch", async () => {
       const updateIssueStatus = vi.fn().mockResolvedValue(undefined);
       const refetch = vi.fn().mockResolvedValue(undefined);
       const mockReturn = createMockUseIssuesReturn({
@@ -3333,11 +3399,13 @@ describe("App", () => {
       fireEvent.click(approveButton);
 
       await waitFor(() => {
-        expect(mockCloseIssue).toHaveBeenCalledTimes(1);
-        expect(mockCloseIssue).toHaveBeenCalledWith(
+        expect(mockApplyReviewDecision).toHaveBeenCalledTimes(1);
+        expect(mockApplyReviewDecision).toHaveBeenCalledWith(
           "test-ws-id",
           "code-issue",
+          "approve",
           "PR approved after code review",
+          expect.stringMatching(/^review-/),
         );
       });
 
@@ -3348,7 +3416,7 @@ describe("App", () => {
       expect(updateIssueStatus).not.toHaveBeenCalled();
     });
 
-    it("reject calls addComment, updateIssue, refetch and closes panel", async () => {
+    it("reject calls the coordinated review decision, refetches, and closes", async () => {
       const updateIssueStatus = vi.fn().mockResolvedValue(undefined);
       const refetch = vi.fn().mockResolvedValue(undefined);
       const mockReturn = createMockUseIssuesReturn({
@@ -3391,23 +3459,12 @@ describe("App", () => {
       fireEvent.click(submitButton);
 
       await waitFor(() => {
-        expect(mockAddComment).toHaveBeenCalledTimes(1);
-        expect(mockAddComment).toHaveBeenCalledWith(
+        expect(mockApplyReviewDecision).toHaveBeenCalledWith(
           "test-ws-id",
           "reject-issue",
-          "FEEDBACK: Needs more work on the design",
-        );
-      });
-
-      await waitFor(() => {
-        expect(mockUpdateIssue).toHaveBeenCalledTimes(1);
-        expect(mockUpdateIssue).toHaveBeenCalledWith(
-          "test-ws-id",
-          "reject-issue",
-          {
-            status: "open",
-            add_labels: ["needs-revision"],
-          },
+          "request_changes",
+          "Needs more work on the design",
+          expect.stringMatching(/^review-/),
         );
       });
 
@@ -3416,7 +3473,7 @@ describe("App", () => {
       });
     });
 
-    it("code review reject uses CODE REVIEW prefix in comment", async () => {
+    it("code review reject uses the coordinated review decision", async () => {
       const updateIssueStatus = vi.fn().mockResolvedValue(undefined);
       const refetch = vi.fn().mockResolvedValue(undefined);
       const mockReturn = createMockUseIssuesReturn({
@@ -3458,17 +3515,19 @@ describe("App", () => {
       fireEvent.click(submitButton);
 
       await waitFor(() => {
-        expect(mockAddComment).toHaveBeenCalledTimes(1);
-        expect(mockAddComment).toHaveBeenCalledWith(
+        expect(mockApplyReviewDecision).toHaveBeenCalledTimes(1);
+        expect(mockApplyReviewDecision).toHaveBeenCalledWith(
           "test-ws-id",
           "code-reject-issue",
-          "CODE REVIEW: Fix the lint errors",
+          "request_changes",
+          "Fix the lint errors",
+          expect.stringMatching(/^review-/),
         );
       });
     });
 
     it("approve shows error toast on failure for code review type", async () => {
-      const mockCloseIssueFn = mockCloseIssue.mockRejectedValue(
+      const mockDecisionFn = mockApplyReviewDecision.mockRejectedValue(
         new Error("Network error"),
       );
       const showToast = vi.fn();
@@ -3510,7 +3569,7 @@ describe("App", () => {
           type: "error",
         });
       });
-      mockCloseIssueFn.mockReset();
+      mockDecisionFn.mockReset();
     });
 
     it("approve does not show toast for plan review failures (handled by optimistic rollback)", async () => {

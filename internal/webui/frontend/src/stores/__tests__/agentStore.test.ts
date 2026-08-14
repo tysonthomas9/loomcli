@@ -272,6 +272,110 @@ describe("agentStore", () => {
     });
   });
 
+  describe("upsertWorkspaceAgent", () => {
+    it("adds a newly-created workspace agent to the rail store immediately", () => {
+      store.getState().upsertWorkspaceAgent({
+        name: "lead-scout",
+        role_name: "lead",
+        repos: [],
+        repo_groups: [],
+        cross_repo: true,
+        backend: "codex",
+      });
+
+      expect(store.getState().agents).toEqual([
+        expect.objectContaining({
+          name: "lead-scout",
+          branch: "",
+          status: "ready",
+          ahead: 0,
+          behind: 0,
+          role: "lead",
+          role_kind: "interactive",
+          cross_repo: true,
+        }),
+      ]);
+    });
+
+    it("maps background role names so grouping does not wait for monitor polling", () => {
+      store.getState().upsertWorkspaceAgent({
+        name: "task-runner",
+        role_name: "task",
+        repos: ["source-repo"],
+        repo_groups: [],
+        cross_repo: false,
+      });
+
+      expect(store.getState().agents[0]).toEqual(
+        expect.objectContaining({
+          name: "task-runner",
+          role: "task",
+          role_kind: "worker",
+          repo: "source-repo",
+        }),
+      );
+    });
+
+    it("uses response role_kind for custom interactive agents", () => {
+      store.getState().upsertWorkspaceAgent({
+        name: "review-nova",
+        role_name: "review-nova",
+        role_kind: "interactive",
+        repos: [],
+        repo_groups: [],
+        cross_repo: false,
+      });
+
+      expect(store.getState().agents[0]).toEqual(
+        expect.objectContaining({
+          name: "review-nova",
+          role: "review-nova",
+          role_kind: "interactive",
+        }),
+      );
+    });
+
+    it("keeps live status fields when a workspace agent already exists", () => {
+      mockFetchStatus.mockResolvedValueOnce(
+        makeStatusResult({
+          agents: [
+            makeAgent({
+              name: "nova",
+              status: "working",
+              role: "lead",
+              role_kind: "interactive",
+              parent: "epic-1",
+            }),
+          ],
+        }),
+      );
+
+      return store
+        .getState()
+        .fetchData()
+        .then(() => {
+          store.getState().upsertWorkspaceAgent({
+            name: "nova",
+            role_name: "lead",
+            repos: [],
+            repo_groups: [],
+            cross_repo: true,
+          });
+
+          expect(store.getState().agents[0]).toEqual(
+            expect.objectContaining({
+              name: "nova",
+              status: "working",
+              parent: "epic-1",
+              role: "lead",
+              role_kind: "interactive",
+              cross_repo: true,
+            }),
+          );
+        });
+    });
+  });
+
   // -----------------------------------------------------------------------
   // 7-9. Polling
   // -----------------------------------------------------------------------

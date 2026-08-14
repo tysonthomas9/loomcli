@@ -22,7 +22,7 @@ export type ToastType = "success" | "error" | "warning" | "info";
  * Type-specific default durations in milliseconds.
  */
 const defaultDurations: Record<ToastType, number> = {
-  success: 3000,
+  success: 4000,
   error: 10000,
   warning: 5000,
   info: 5000,
@@ -73,14 +73,26 @@ function generateId(): string {
 
 // Toast reducer actions
 type ToastAction =
-  | { type: "ADD"; payload: Toast }
+  | { type: "ADD"; payload: Toast; maxToasts: number }
   | { type: "REMOVE"; payload: string }
   | { type: "CLEAR" };
 
 function toastReducer(state: Toast[], action: ToastAction): Toast[] {
   switch (action.type) {
-    case "ADD":
-      return [...state, action.payload];
+    case "ADD": {
+      const last = state[state.length - 1];
+      if (
+        last &&
+        last.message === action.payload.message &&
+        last.type === action.payload.type
+      ) {
+        return state;
+      }
+      const next = [...state, action.payload];
+      return next.length > action.maxToasts
+        ? next.slice(next.length - action.maxToasts)
+        : next;
+    }
     case "REMOVE":
       return state.filter((toast) => toast.id !== action.payload);
     case "CLEAR":
@@ -117,14 +129,16 @@ export function ToastProvider({
   maxToasts = 3,
 }: ToastProviderProps): JSX.Element {
   const [toasts, dispatch] = useReducer(toastReducer, []);
+  const toastsRef = useRef<Toast[]>([]);
 
   // Track auto-dismiss timeouts
   const timeoutsRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(
     new Map(),
   );
 
-  // Track recent toast message+type for coalescing (key: "type:message", value: timestamp)
-  const recentToastsRef = useRef<Map<string, number>>(new Map());
+  useEffect(() => {
+    toastsRef.current = toasts;
+  }, [toasts]);
 
   // Cleanup all timeouts on unmount
   useEffect(() => {
@@ -144,7 +158,7 @@ export function ToastProvider({
       clearTimeout(timeoutId);
       timeoutsRef.current.delete(id);
     }
-    // No cleanup needed for recentToastsRef — entries expire naturally via timestamp check
+    toastsRef.current = toastsRef.current.filter((toast) => toast.id !== id);
     dispatch({ type: "REMOVE", payload: id });
   }, []);
 
@@ -152,20 +166,10 @@ export function ToastProvider({
     (message: string, options?: ToastOptions): string => {
       const type = options?.type ?? "info";
       const duration = options?.duration ?? defaultDurations[type];
-
-      // Coalescing: skip duplicate if same message+type within 500ms
-      const now = Date.now();
-      const COALESCE_WINDOW = 500;
-
-      // Evict stale entries to prevent unbounded growth
-      for (const [key, ts] of recentToastsRef.current) {
-        if (now - ts >= COALESCE_WINDOW) recentToastsRef.current.delete(key);
-      }
-
-      const coalesceKey = `${type}:${message}`;
-      const lastSeen = recentToastsRef.current.get(coalesceKey);
-      if (lastSeen && now - lastSeen < COALESCE_WINDOW) {
-        return ""; // coalesced — no new toast created
+      const activeToasts = toastsRef.current;
+      const last = activeToasts[activeToasts.length - 1];
+      if (last && last.message === message && last.type === type) {
+        return last.id;
       }
 
       const id = generateId();
@@ -174,8 +178,19 @@ export function ToastProvider({
         toast.onUndo = options.onUndo;
       }
 
-      dispatch({ type: "ADD", payload: toast });
-      recentToastsRef.current.set(coalesceKey, now);
+      const nextToasts = [...activeToasts, toast];
+      const overflowCount = Math.max(0, nextToasts.length - maxToasts);
+      for (const overflowToast of nextToasts.slice(0, overflowCount)) {
+        const timeoutId = timeoutsRef.current.get(overflowToast.id);
+        if (timeoutId) {
+          clearTimeout(timeoutId);
+          timeoutsRef.current.delete(overflowToast.id);
+        }
+      }
+      toastsRef.current =
+        overflowCount > 0 ? nextToasts.slice(overflowCount) : nextToasts;
+
+      dispatch({ type: "ADD", payload: toast, maxToasts });
 
       // Set up auto-dismiss if duration > 0
       if (duration > 0) {
@@ -187,7 +202,7 @@ export function ToastProvider({
 
       return id;
     },
-    [dismissToast],
+    [dismissToast, maxToasts],
   );
 
   const dismissAll = useCallback(() => {
@@ -196,6 +211,7 @@ export function ToastProvider({
       clearTimeout(timeoutId);
     }
     timeoutsRef.current.clear();
+    toastsRef.current = [];
     dispatch({ type: "CLEAR" });
   }, []);
 

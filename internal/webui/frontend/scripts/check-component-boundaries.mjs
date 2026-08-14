@@ -21,16 +21,20 @@ export const ALLOWLIST = [
     target: "@/components/table/columns",
   },
   {
-    source: "src/components/RepoSelector/RepoSelector.tsx",
-    target: "../FilterBar/FilterBar.module.css",
-  },
-  {
     source: "src/components/IssueDetailPanel/fields/PriorityDropdown.tsx",
     target: "@/components/VisuallyHidden/VisuallyHidden",
   },
   {
     source: "src/components/AppLayout/AppLayout.tsx",
     target: "@/components/LiveRegion/LiveRegion",
+  },
+  {
+    // The workspace quick-switcher reuses the shared per-workspace overflow
+    // menu (rename/remove), which lives with its sibling Task/Epic menus and
+    // their shared stylesheet under WorkspaceTree/menus. Deep-importing it (vs.
+    // the WorkspaceTree barrel) avoids a WorkspaceTree↔WorkspaceSwitcher cycle.
+    source: "src/components/WorkspaceSwitcher/WorkspaceSwitcher.tsx",
+    target: "@/components/WorkspaceTree/menus/WorkspaceContextMenu",
   },
 ];
 
@@ -101,7 +105,10 @@ function parseImportTarget(importPath, sourceComponent, relToComponents) {
   // Handle relative imports that may cross component boundaries
   if (importPath.startsWith("../")) {
     const sourceDir = dirname(relToComponents);
-    const resolved = normalize(join(sourceDir, importPath)).replaceAll(sep, "/");
+    const resolved = normalize(join(sourceDir, importPath)).replaceAll(
+      sep,
+      "/",
+    );
 
     // If resolved goes above components dir (starts with ..), it's outside scope
     if (resolved.startsWith("..")) return null;
@@ -221,7 +228,11 @@ export function scanFile(filePath, sourceRoot, contents) {
     const specifier = getModuleSpecifier(node);
     if (!specifier) return;
 
-    const result = parseImportTarget(specifier, sourceComponent, relToComponents);
+    const result = parseImportTarget(
+      specifier,
+      sourceComponent,
+      relToComponents,
+    );
     if (result) {
       const { line } = sourceFile.getLineAndCharacterOfPosition(
         node.getStart(sourceFile),
@@ -246,7 +257,8 @@ export function scanFile(filePath, sourceRoot, contents) {
 function isAllowlisted(violation) {
   return ALLOWLIST.some(
     (entry) =>
-      entry.source === violation.relPath && entry.target === violation.importPath,
+      entry.source === violation.relPath &&
+      entry.target === violation.importPath,
   );
 }
 

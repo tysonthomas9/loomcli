@@ -1,0 +1,36 @@
+# Full issue lifecycle driven through the HTTP API, with the kanban board
+# following live via SSE at every transition — no reloads anywhere.
+suite: issue-lifecycle
+baseUrl: "${AFT_BASE_URL:-http://localhost:8090}"
+teardown: '"$AFT_TESTS_DIR/scripts/close-open-issues.sh"'
+
+tests:
+  - name: issue travels ready to in progress to closed, board follows live
+    intent: An issue created, started, and closed via the API moves across the kanban columns in realtime
+    steps:
+      - open: /
+      - wait:
+          fn: >-
+            document.querySelector('[aria-label^="Connection status"]')?.dataset.state === 'connected'
+      - expect: { count: { selector: "section[data-status=ready] article", equals: 0 } }
+      - run: >-
+          curl -sf -X POST "$AFT_BASE_URL/api/issues"
+          -H "Content-Type: application/json"
+          -d "{\"title\":\"lifecycle $RUN_ID\",\"issue_type\":\"task\",\"priority\":2}"
+          | python3 -c "import sys,json;print(json.load(sys.stdin)['data']['id'])"
+          > "$AFT_WORK_DIR/lifecycle.id"
+      - wait: { text: lifecycle }
+      - expect: { count: { selector: "section[data-status=ready] article", equals: 1 } }
+      - run: >-
+          curl -sf -X PATCH "$AFT_BASE_URL/api/issues/$(cat "$AFT_WORK_DIR/lifecycle.id")"
+          -H "Content-Type: application/json" -d '{"status":"in_progress"}'
+      - wait:
+          fn: >-
+            document.querySelectorAll('section[data-status=in_progress] article').length === 1
+      - expect: { count: { selector: "section[data-status=ready] article", equals: 0 } }
+      - run: >-
+          curl -sf -X POST "$AFT_BASE_URL/api/issues/$(cat "$AFT_WORK_DIR/lifecycle.id")/close"
+      - wait:
+          fn: >-
+            document.querySelectorAll('section[data-status=in_progress] article').length === 0
+      - expect: { count: { selector: "section[data-status=ready] article", equals: 0 } }

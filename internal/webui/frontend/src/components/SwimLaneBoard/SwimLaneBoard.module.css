@@ -9,10 +9,10 @@
   gap: 0;
   padding: 0;
   overflow: visible;
-  flex: 0 0 auto;
+  flex: 1 0 auto;
   width: fit-content;
   min-width: 100%;
-  min-height: auto;
+  min-height: 100%;
   --swim-lane-sticky-offset: 0px;
   /* Epic lane header block — column headers stick beneath toolbar + this row */
   --swim-lane-header-height: calc(var(--space-2) * 2 + 1.625rem);
@@ -133,6 +133,14 @@
   height: 1.625rem;
   margin: 0 var(--space-1);
   background-color: var(--color-border);
+}
+
+.completedToggleSlot {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  min-width: 7.75rem;
+  flex-shrink: 0;
 }
 
 /**

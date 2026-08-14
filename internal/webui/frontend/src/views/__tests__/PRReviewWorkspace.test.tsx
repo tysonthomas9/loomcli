@@ -201,7 +201,10 @@ describe("PRReviewWorkspace", () => {
       head_sha: "sha-old",
       merged: false,
     });
-    mocks.createIssue.mockResolvedValue(makeIssue({ id: "TASK-99" }));
+    mocks.createIssue.mockResolvedValue({
+      issue: makeIssue({ id: "TASK-99" }),
+      softDuplicate: false,
+    });
     mocks.updateIssue.mockResolvedValue(makeIssue({ id: "TASK-99" }));
     mocks.actions.updateIssueStatus.mockResolvedValue(undefined);
   });
@@ -268,33 +271,54 @@ describe("PRReviewWorkspace", () => {
     );
   });
 
-  it.each([{ issue: makePullRequestIssue() }, { issue: null }])(
-    "does not render deferred decision controls",
-    async ({ issue }) => {
-      renderWorkspace({ issue });
+  it("does not render decision controls for a ticketless pull request", async () => {
+    renderWorkspace({ issue: null });
 
-      await waitFor(() => {
-        expect(mocks.getPullRequestDetail).toHaveBeenCalledWith(
-          "WS",
-          "octocat",
-          "hello",
-          7,
-        );
-      });
+    await waitFor(() => {
+      expect(mocks.getPullRequestDetail).toHaveBeenCalledWith(
+        "WS",
+        "octocat",
+        "hello",
+        7,
+      );
+    });
 
-      expect(screen.queryByTestId("pr-review-comment")).not.toBeInTheDocument();
-      expect(
-        screen.queryByRole("button", { name: /request changes/i }),
-      ).not.toBeInTheDocument();
-      expect(
-        screen.queryByRole("button", { name: /^approve$/i }),
-      ).not.toBeInTheDocument();
-    },
-  );
+    expect(screen.queryByTestId("pr-review-comment")).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /request changes/i }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /^approve$/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("renders the issue decision bar for an issue-backed review", async () => {
+    renderWorkspace({ issue: makePullRequestIssue() });
+
+    await waitFor(() => {
+      expect(mocks.getPullRequestDetail).toHaveBeenCalledWith(
+        "WS",
+        "octocat",
+        "hello",
+        7,
+      );
+    });
+
+    expect(screen.queryByTestId("pr-review-comment")).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /request changes/i }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /approve/i }),
+    ).toBeInTheDocument();
+  });
 
   it("creates and links a ticket for a ticketless pull request", async () => {
     const onLinkedTicket = vi.fn();
-    mocks.createIssue.mockResolvedValueOnce(makeIssue({ id: "TASK-99" }));
+    mocks.createIssue.mockResolvedValueOnce({
+      issue: makeIssue({ id: "TASK-99" }),
+      softDuplicate: false,
+    });
 
     renderWorkspace({ issue: null, onLinkedTicket });
 

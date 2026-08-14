@@ -1,0 +1,85 @@
+# Full issue lifecycle driven through the workspace HTTP API, with the kanban
+# board following live via SSE at every transition — no reloads anywhere.
+suite: issue-lifecycle
+classification: { area: issues, feature: issue-lifecycle, surface: mixed, purpose: journey }
+baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
+teardown: '"$AFT_TESTS_DIR/scripts/close-open-issues.sh"'
+
+tests:
+  - name: issue travels open to in progress to closed, board follows live
+    intent: An agent creates, starts, and closes an issue through the API while an operator observes it move across kanban columns in realtime
+    steps:
+      - open: /ws/E2E-WS/kanban
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=board-toolbar]')
+        intent: "Wait until the workspace board is ready"
+      - expect: { count: { selector: "section[data-status=ready] article", equals: 0 } }
+      - api:
+          method: "POST"
+          path: "/api/workspaces/${AFT_WS:-E2E-WS}/issues"
+          body:
+            title: "lifecycle $RUN_ID"
+            issue_type: "task"
+            priority: 2
+          save:
+            - from: "data.id"
+              as: "lifecycleId"
+        intent: "An agent creates the lifecycle issue at priority 2"
+      - wait: { text: lifecycle }
+      - expect: { count: { selector: "section[data-status=ready] article", equals: 1 } }
+      - api:
+          method: "PATCH"
+          path: "/api/workspaces/${AFT_WS:-E2E-WS}/issues/${var:lifecycleId}"
+          body:
+            status: "in_progress"
+        intent: "An agent starts work on the lifecycle issue"
+      - wait:
+          fn: >-
+            document.querySelectorAll('section[data-status=in_progress] article').length === 1
+        intent: "Wait until the board renders the issue in progress"
+      - expect: { count: { selector: "section[data-status=ready] article", equals: 0 } }
+      - api:
+          method: "POST"
+          path: "/api/workspaces/${AFT_WS:-E2E-WS}/issues/${var:lifecycleId}/close"
+          body:
+            reason: "aft lifecycle test"
+        intent: "An agent closes the lifecycle issue with its completion reason"
+      - wait:
+          fn: >-
+            document.querySelectorAll('section[data-status=in_progress] article').length === 0
+        intent: "Wait until the board removes the closed issue from In Progress"
+      # positive confirmation of the close: the server state is closed and the
+      # SSE-closed card lands in Done. Scope to this run's title because closed
+      # issues accumulate across suites and Done only renders the newest cards.
+      - api:
+          method: "GET"
+          path: "/api/workspaces/${AFT_WS:-E2E-WS}/issues/${var:lifecycleId}"
+          assert:
+            - path: "data.status"
+              equals: "closed"
+            - path: "data.close_reason"
+              equals: "aft lifecycle test"
+            - path: "data.closed_at"
+              exists: true
+        intent: "An operator's readback confirms the close state, reason, and timestamp persisted"
+      - api:
+          method: "GET"
+          path: "/api/workspaces/${AFT_WS:-E2E-WS}/issues/${var:lifecycleId}/events"
+          save:
+            - from: "data"
+              as: "lifecycleEvents"
+        intent: "An operator reads back the lifecycle event history"
+      - run: >-
+          python3 -c 'import json,os; events=json.load(open(os.environ["AFT_WORK_DIR"]+"/lifecycleEvents")); closes=[e for e in events if e.get("event_type")=="issue.closed"]; assert len(closes)==1, events; assert closes[0].get("comment")=="aft lifecycle test", closes[0]'
+        intent: "An operator's readback confirms exactly one close event carries the completion reason"
+      - fill: { testid: search-input-field, value: "lifecycle ${RUN_ID:-local}" }
+      - wait:
+          fn: >-
+            document.querySelectorAll("section[data-status=done] article[aria-label*='lifecycle ${RUN_ID:-local}']").length === 1
+        intent: "Wait until the board renders the lifecycle issue in Done"
+      - expect: { count: { selector: "section[data-status=done] article[aria-label*='lifecycle ${RUN_ID:-local}']", equals: 1 } }
+      - expect: { count: { selector: "section[data-status=ready] article[aria-label*='lifecycle ${RUN_ID:-local}']", equals: 0 } }
+      - expect: { count: { selector: "section[data-status=ready] article", equals: 0 } }
+      - click: { selector: "section[data-status=done] article[aria-label*='lifecycle ${RUN_ID:-local}']", first: true }
+      - wait: { text: aft lifecycle test }

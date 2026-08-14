@@ -89,6 +89,16 @@
   color: var(--color-text-muted);
 }
 
+.closeReason {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--color-text-muted);
+  font-size: 11px;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* PR view link */
 .prViewLink {
   font-size: 11px;

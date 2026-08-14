@@ -110,6 +110,15 @@ describe("AgentCard", () => {
       expect(screen.getByText("nova")).toBeInTheDocument();
     });
 
+    it("keeps the raw name available for truncated sidebar labels", () => {
+      render(<AgentCard agent={makeAgent({ name: "planner-1785391718" })} />);
+
+      expect(screen.getByText("planner-1785391718")).toHaveAttribute(
+        "title",
+        "planner-1785391718",
+      );
+    });
+
     it("prefers display_name when present", () => {
       render(
         <AgentCard
@@ -249,6 +258,16 @@ describe("AgentCard", () => {
     it('shows "Idle" for idle status', () => {
       render(
         <AgentCard agent={makeAgent({ status: "idle", branch: "dev" })} />,
+      );
+
+      expect(screen.getByText("Idle")).toBeInTheDocument();
+    });
+
+    it('shows "Idle" for configured agents without runtime state', () => {
+      render(
+        <AgentCard
+          agent={makeAgent({ status: "configured", branch: "dev" })}
+        />,
       );
 
       expect(screen.getByText("Idle")).toBeInTheDocument();

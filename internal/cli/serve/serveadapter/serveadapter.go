@@ -81,24 +81,3 @@ func deleteWorkspaceLocalState(key string) error {
 		return nil
 	})
 }
-
-// BuildSetDefaultWorkspaceFn is retained for compatibility with older server
-// wiring. Default workspace selection is disabled in the service layer.
-func BuildSetDefaultWorkspaceFn(s store.Store) func(string) error {
-	if s == nil {
-		return nil
-	}
-	return func(key string) error {
-		// Validate the workspace exists before recording.
-		if _, err := s.Workspaces().Get(context.Background(), key); err != nil {
-			return err
-		}
-		return bootstrap.SetActiveWorkspaceKey(key)
-	}
-}
-
-// BuildClearDefaultWorkspaceFn is retained for compatibility with older server
-// wiring. Default workspace selection is disabled in the service layer.
-func BuildClearDefaultWorkspaceFn() func() error {
-	return bootstrap.ClearActiveWorkspaceKey
-}

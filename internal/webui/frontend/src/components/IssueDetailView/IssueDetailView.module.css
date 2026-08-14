@@ -113,6 +113,17 @@
   color: var(--color-success);
 }
 
+.closeReason {
+  max-width: 240px;
+  overflow: hidden;
+  color: var(--color-text-muted);
+  font-size: var(--font-xs);
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex-shrink: 1;
+}
+
 .headerTitle {
   flex: 1;
   font-size: 16px;

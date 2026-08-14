@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -36,7 +38,7 @@ type fakeIssueBackend struct {
 	deferredResult      []backend.IssueData
 	deferredErr         error
 	deferredCalls       []backend.DeferredOpts
-	createResult        *backend.IssueData
+	createResult        *backend.CreateResult
 	createErr           error
 	createParams        []backend.CreateParams
 	updateErr           error
@@ -137,7 +139,7 @@ func (f *fakeIssueBackend) SearchIssues(_ context.Context, _ string, _ int) ([]b
 	return nil, nil
 }
 
-func (f *fakeIssueBackend) Create(_ context.Context, params backend.CreateParams) (*backend.IssueData, error) {
+func (f *fakeIssueBackend) Create(_ context.Context, params backend.CreateParams) (*backend.CreateResult, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.createParams = append(f.createParams, params)
@@ -242,10 +244,22 @@ func newServiceWithFake(fb *fakeIssueBackend) IssueService {
 
 func TestListEvents_Backend_Success(t *testing.T) {
 	now := time.Now().UTC()
+	oldValue := "open"
+	newValue := "in_progress"
+	comment := "status changed"
 	fb := &fakeIssueBackend{
 		listEventsResult: []backend.EventData{
 			{ID: "1", IssueID: "test-1", Kind: "issue.created", Actor: "alice", CreatedAt: now},
-			{ID: "2", IssueID: "test-1", Kind: "issue.status_changed", Actor: "bob", CreatedAt: now},
+			{
+				ID:        "2",
+				IssueID:   "test-1",
+				Kind:      "issue.status_changed",
+				Actor:     "bob",
+				OldValue:  &oldValue,
+				NewValue:  &newValue,
+				Comment:   &comment,
+				CreatedAt: now,
+			},
 		},
 	}
 	svc := newServiceWithFake(fb)
@@ -263,11 +277,145 @@ func TestListEvents_Backend_Success(t *testing.T) {
 	if events[0].EventType != types.EventCreated {
 		t.Errorf("event[0].EventType = %q, want %q", events[0].EventType, types.EventCreated)
 	}
+	if events[1].OldValue == nil || *events[1].OldValue != oldValue {
+		t.Errorf("event[1].OldValue = %v, want %q", events[1].OldValue, oldValue)
+	}
+	if events[1].NewValue == nil || *events[1].NewValue != newValue {
+		t.Errorf("event[1].NewValue = %v, want %q", events[1].NewValue, newValue)
+	}
+	if events[1].Comment == nil || *events[1].Comment != comment {
+		t.Errorf("event[1].Comment = %v, want %q", events[1].Comment, comment)
+	}
 	if len(fb.listEventsCalls) != 1 {
 		t.Fatalf("expected 1 backend call, got %d", len(fb.listEventsCalls))
 	}
 	if fb.listEventsCalls[0].id != "test-1" || fb.listEventsCalls[0].limit != 50 {
 		t.Errorf("unexpected call args: %+v", fb.listEventsCalls[0])
+	}
+}
+
+func TestEventDataToTypesEvent_NormalizesFleetDBIssueActions(t *testing.T) {
+	tests := []struct {
+		name string
+		kind string
+		want types.EventType
+	}{
+		{name: "create", kind: "issue.create", want: types.EventCreated},
+		{name: "update", kind: "issue.update", want: types.EventUpdated},
+		{name: "close", kind: "issue.close", want: types.EventClosed},
+		{name: "reopen", kind: "issue.reopen", want: types.EventReopened},
+		{name: "delete", kind: "issue.delete", want: types.EventDeleted},
+		{name: "claim", kind: "issue.claim", want: types.EventClaimed},
+		{name: "release", kind: "issue.release", want: types.EventReleased},
+		{name: "assign", kind: "issue.assign", want: types.EventAssigned},
+		{name: "defer", kind: "issue.defer", want: types.EventDeferred},
+		{name: "undefer", kind: "issue.undefer", want: types.EventUndeferred},
+		{name: "dependency add", kind: "dep.add", want: types.EventDependencyAdded},
+		{name: "dependency remove", kind: "dep.remove", want: types.EventDependencyRemoved},
+		{name: "label add", kind: "label.add", want: types.EventLabelAdded},
+		{name: "label remove", kind: "label.remove", want: types.EventLabelRemoved},
+		{name: "comment add", kind: "comment.add", want: types.EventCommented},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := eventDataToTypesEvent(backend.EventData{ID: "1", Kind: tt.kind})
+			if got.EventType != tt.want {
+				t.Fatalf("EventType = %q, want %q", got.EventType, tt.want)
+			}
+		})
+	}
+}
+
+func TestEventDataToTypesEvent_CarriesUpdateFieldDetails(t *testing.T) {
+	field := "priority"
+	oldValue := "P2"
+	newValue := "P0"
+	got := eventDataToTypesEvent(backend.EventData{
+		ID:         "1",
+		Kind:       "issue.update",
+		Field:      &field,
+		Fields:     []string{"priority"},
+		FieldCount: 1,
+		OldValue:   &oldValue,
+		NewValue:   &newValue,
+	})
+	if got.Field == nil || *got.Field != "priority" {
+		t.Fatalf("Field = %v, want priority", got.Field)
+	}
+	if got.FieldCount != 1 {
+		t.Fatalf("FieldCount = %d, want 1", got.FieldCount)
+	}
+	if len(got.Fields) != 1 || got.Fields[0] != "priority" {
+		t.Fatalf("Fields = %#v, want [priority]", got.Fields)
+	}
+}
+
+func TestEventDataToTypesEvent_CommentAddReachesActivityFilterKind(t *testing.T) {
+	got := eventDataToTypesEvent(backend.EventData{ID: "1", Kind: "comment.add"})
+	if got.EventType != types.EventCommented {
+		t.Fatalf("EventType = %q, want %q", got.EventType, types.EventCommented)
+	}
+}
+
+func TestFleetEventKindMap_FrontendEventCoverage(t *testing.T) {
+	eventTypesSource := readFrontendSource(t, "src", "types", "workspace", "event.ts")
+	activitySource := readFrontendSource(t, "src", "components", "IssueDetailPanel", "sections", "ActivityLog.tsx")
+
+	seen := make(map[types.EventType]bool)
+	for _, eventType := range fleetEventKindMap {
+		seen[eventType] = true
+	}
+	for eventType := range seen {
+		literal := `"` + string(eventType) + `"`
+		if !strings.Contains(eventTypesSource, literal) {
+			t.Errorf("frontend EventType union is missing %s", literal)
+		}
+		if !strings.Contains(activitySource, `case `+literal+`:`) {
+			t.Errorf("ActivityLog describeEvent is missing case %s", literal)
+		}
+	}
+}
+
+func readFrontendSource(t *testing.T, path ...string) string {
+	t.Helper()
+	parts := append([]string{"..", "frontend"}, path...)
+	data, err := os.ReadFile(filepath.Join(parts...))
+	if err != nil {
+		t.Fatalf("read frontend source %v: %v", path, err)
+	}
+	return string(data)
+}
+
+func TestEventDataToTypesEvent_PreservesAlreadyNormalizedAndUnknownKinds(t *testing.T) {
+	tests := []string{
+		string(types.EventCreated),
+		string(types.EventUpdated),
+		string(types.EventStatusChanged),
+		string(types.EventCommented),
+		string(types.EventClaimed),
+		string(types.EventReleased),
+		string(types.EventDeferred),
+		string(types.EventUndeferred),
+		string(types.EventClosed),
+		string(types.EventReopened),
+		string(types.EventAssigned),
+		string(types.EventDeleted),
+		string(types.EventDependencyAdded),
+		string(types.EventDependencyRemoved),
+		string(types.EventLabelAdded),
+		string(types.EventLabelRemoved),
+		string(types.EventCompacted),
+		"future.event",
+	}
+
+	for _, kind := range tests {
+		t.Run(kind, func(t *testing.T) {
+			got := eventDataToTypesEvent(backend.EventData{ID: "1", Kind: kind})
+			if got.EventType != types.EventType(kind) {
+				t.Fatalf("EventType = %q, want passthrough %q", got.EventType, kind)
+			}
+		})
 	}
 }
 
@@ -409,7 +557,7 @@ func TestMoveIssue_Backend_Success_UsesBackendWithoutDaemonPool(t *testing.T) {
 		closeResult:      &backend.CloseResult{Closed: &backend.IssueData{ID: "SRC-1", Status: "closed"}},
 	}
 	target := &fakeIssueBackend{
-		createResult: &backend.IssueData{ID: "DST-9", Title: "Move me", Status: "open", CreatedAt: now, UpdatedAt: now},
+		createResult: &backend.CreateResult{Issue: backend.IssueData{ID: "DST-9", Title: "Move me", Status: "open", CreatedAt: now, UpdatedAt: now}},
 	}
 
 	type workspaceKey struct{}
@@ -820,10 +968,10 @@ func TestDeleteIssue_Backend_Success_ReturnsEnvelope(t *testing.T) {
 func TestCreateIssue_Backend_Success_ReturnsIssueShape(t *testing.T) {
 	now := time.Now().UTC()
 	fb := &fakeIssueBackend{
-		createResult: &backend.IssueData{
+		createResult: &backend.CreateResult{Issue: backend.IssueData{
 			ID: "loom-x1", Title: "New", Status: "open", Priority: 2,
 			IssueType: "task", CreatedAt: now, UpdatedAt: now,
-		},
+		}},
 		// Post-create Get fetches the full detail; FE expects rich fields.
 		getResult: &backend.IssueDetailData{
 			IssueData: backend.IssueData{
@@ -836,7 +984,7 @@ func TestCreateIssue_Backend_Success_ReturnsIssueShape(t *testing.T) {
 	}
 	svc := newServiceWithFake(fb)
 
-	raw, err := svc.CreateIssue(context.Background(), CreateIssueParams{
+	result, err := svc.CreateIssue(context.Background(), CreateIssueParams{
 		Title:      "New",
 		IssueType:  "task",
 		Priority:   2,
@@ -847,7 +995,7 @@ func TestCreateIssue_Backend_Success_ReturnsIssueShape(t *testing.T) {
 		t.Fatalf("CreateIssue: %v", err)
 	}
 	var got map[string]any
-	if err := json.Unmarshal(raw, &got); err != nil {
+	if err := json.Unmarshal(result.Data, &got); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
 	if got["id"] != "loom-x1" || got["title"] != "New" || got["status"] != "open" {
@@ -879,15 +1027,15 @@ func TestCreateIssue_Backend_Success_ReturnsIssueShape(t *testing.T) {
 func TestCreateIssue_Backend_GetFails_FallsBackToSlimProjection(t *testing.T) {
 	now := time.Now().UTC()
 	fb := &fakeIssueBackend{
-		createResult: &backend.IssueData{
+		createResult: &backend.CreateResult{Issue: backend.IssueData{
 			ID: "loom-x2", Title: "Slim", Status: "open", Priority: 2,
 			IssueType: "task", CreatedAt: now, UpdatedAt: now,
-		},
+		}},
 		getErr: backend.ErrUnavailable("Get", "transient", nil),
 	}
 	svc := newServiceWithFake(fb)
 
-	raw, err := svc.CreateIssue(context.Background(), CreateIssueParams{
+	result, err := svc.CreateIssue(context.Background(), CreateIssueParams{
 		Title:     "Slim",
 		IssueType: "task",
 		Priority:  2,
@@ -896,7 +1044,7 @@ func TestCreateIssue_Backend_GetFails_FallsBackToSlimProjection(t *testing.T) {
 		t.Fatalf("CreateIssue (get-fail fallback): %v", err)
 	}
 	var got map[string]any
-	if err := json.Unmarshal(raw, &got); err != nil {
+	if err := json.Unmarshal(result.Data, &got); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
 	if got["id"] != "loom-x2" || got["title"] != "Slim" {
@@ -1102,10 +1250,13 @@ func TestCloseIssue_Backend_AlreadyClosed_IsQuietNoOp(t *testing.T) {
 	// ERROR-level failure. New fleet-db returns 200 and never hits this.
 	fb := &fakeIssueBackend{
 		closeErr: backend.ErrConflict("Close", "issue is already closed"),
+		getResult: &backend.IssueDetailData{IssueData: backend.IssueData{
+			ID: "i-1", Status: "closed", CloseReason: "done",
+		}},
 	}
 	svc := newServiceWithFake(fb)
 
-	raw, err := svc.CloseIssue(context.Background(), CloseIssueParams{IssueID: "i-1"})
+	raw, err := svc.CloseIssue(context.Background(), CloseIssueParams{IssueID: "i-1", Reason: "done"})
 	if err != nil {
 		t.Fatalf("already-closed close must be a no-op success, got %v", err)
 	}
@@ -1116,6 +1267,25 @@ func TestCloseIssue_Backend_AlreadyClosed_IsQuietNoOp(t *testing.T) {
 	closedMap, ok := got["closed"].(map[string]any)
 	if !ok || closedMap["id"] != "i-1" {
 		t.Errorf("expected synthetic closed result for i-1, got %v", got["closed"])
+	}
+}
+
+func TestCloseIssue_Backend_AlreadyClosedReasonMismatchConflicts(t *testing.T) {
+	fb := &fakeIssueBackend{
+		closeErr: backend.ErrConflict("Close", "issue is already closed"),
+		getResult: &backend.IssueDetailData{IssueData: backend.IssueData{
+			ID: "i-1", Status: "closed", CloseReason: "original",
+		}},
+	}
+	svc := newServiceWithFake(fb)
+
+	_, err := svc.CloseIssue(context.Background(), CloseIssueParams{IssueID: "i-1", Reason: "different"})
+	var sErr *ServiceError
+	if !errors.As(err, &sErr) || sErr.Kind != KindConflict {
+		t.Fatalf("reason mismatch must be a conflict, got %v", err)
+	}
+	if !strings.Contains(sErr.Message, "original") || !strings.Contains(sErr.Message, "different") {
+		t.Fatalf("conflict must identify both reasons, got %q", sErr.Message)
 	}
 }
 
@@ -1134,11 +1304,15 @@ func TestCloseIssue_Backend_BlockerConflict_StillFails(t *testing.T) {
 func TestCreateIssue_Backend_ForwardsIdempotency(t *testing.T) {
 	now := time.Now().UTC()
 	fb := &fakeIssueBackend{
-		createResult: &backend.IssueData{ID: "i-9", Title: "t", Status: "open", CreatedAt: now, UpdatedAt: now},
+		createResult: &backend.CreateResult{
+			Issue:              backend.IssueData{ID: "i-9", Title: "t", Status: "open", CreatedAt: now, UpdatedAt: now},
+			IdempotencyWarning: "soft-duplicate",
+			Replayed:           true,
+		},
 	}
 	svc := newServiceWithFake(fb)
 
-	_, err := svc.CreateIssue(context.Background(), CreateIssueParams{
+	result, err := svc.CreateIssue(context.Background(), CreateIssueParams{
 		Title:          "t",
 		IssueType:      "task",
 		IdempotencyKey: "key-xyz",
@@ -1152,5 +1326,8 @@ func TestCreateIssue_Backend_ForwardsIdempotency(t *testing.T) {
 	}
 	if fb.createParams[0].IdempotencyKey != "key-xyz" || !fb.createParams[0].Force {
 		t.Errorf("idempotency not forwarded to backend.CreateParams: %+v", fb.createParams[0])
+	}
+	if result.IdempotencyWarning != "soft-duplicate" || !result.IdempotencyReplayed {
+		t.Errorf("idempotency metadata = warning %q replayed %v, want soft-duplicate/true", result.IdempotencyWarning, result.IdempotencyReplayed)
 	}
 }

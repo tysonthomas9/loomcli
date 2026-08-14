@@ -82,6 +82,7 @@ export function createIssueStore(
   let mutationCountAtDisconnect = 0;
   let prevConnectionState: ConnectionState = "disconnected";
   let reconnectRecoveryPending = false;
+  let reconnectGeneration = 0;
   let maxReconnectAttemptsTracked = 0;
   let eventUnsubscribe: (() => void) | null = null;
 
@@ -263,6 +264,19 @@ export function createIssueStore(
           if (!apiIssue) {
             const createdTime = Date.parse(currentIssue.created_at);
             if (!isNaN(createdTime) && createdTime >= fetchTimestamp) {
+              mergedMap.set(id, currentIssue);
+              continue;
+            }
+
+            // A close mutation can beat the projection refetch that it
+            // schedules. Preserve that terminal local state until the
+            // projection catches up, mirroring recently-created preservation.
+            const updatedTime = Date.parse(currentIssue.updated_at);
+            if (
+              currentIssue.status === "closed" &&
+              !isNaN(updatedTime) &&
+              updatedTime >= fetchTimestamp
+            ) {
               mergedMap.set(id, currentIssue);
             }
             continue;
@@ -515,6 +529,7 @@ export function createIssueStore(
       if (newState === "reconnecting" && prev !== "reconnecting") {
         const now = Date.now();
         reconnectRecoveryPending = true;
+        reconnectGeneration++;
         set({ disconnectedSince: now });
         mutationCountAtDisconnect = get().mutationCount;
 
@@ -529,32 +544,50 @@ export function createIssueStore(
           clearTimeout(staleBannerTimeout);
           staleBannerTimeout = null;
         }
-        set({
-          showStaleBanner: false,
-          connectionLost: false,
-          disconnectedSince: null,
-        });
+        const generation = reconnectGeneration;
+        const tooFarBehind =
+          maxReconnectAttemptsTracked >= TOO_FAR_BEHIND_THRESHOLD;
+        const changeCount = get().mutationCount - mutationCountAtDisconnect;
 
-        if (maxReconnectAttemptsTracked >= TOO_FAR_BEHIND_THRESHOLD) {
-          onToast?.("Connection restored. Refreshing data...", {
-            type: "info",
-            duration: 3000,
+        // Catch-up events are invalidations, not state authority. Always
+        // reconcile a canonical snapshot, and keep stale UI visible until
+        // that read succeeds. A newer disconnect invalidates this completion.
+        void (async () => {
+          await get().refetch();
+          if (
+            generation !== reconnectGeneration ||
+            prevConnectionState !== "connected"
+          ) {
+            return;
+          }
+          if (get().error) {
+            set({ showStaleBanner: true, connectionLost: true });
+            return;
+          }
+          set({
+            showStaleBanner: false,
+            connectionLost: false,
+            disconnectedSince: null,
           });
-          void get().refetch();
-        } else {
-          const changeCount = get().mutationCount - mutationCountAtDisconnect;
-          if (changeCount > 0) {
+          if (tooFarBehind) {
+            onToast?.("Connection restored. Data refreshed.", {
+              type: "info",
+              duration: 3000,
+            });
+          } else if (changeCount > 0) {
             onToast?.(
               `Connection restored. ${changeCount} change${changeCount !== 1 ? "s" : ""} synced.`,
               { type: "info", duration: 3000 },
             );
           } else {
-            void get().refetch();
-            onToast?.("Connection restored.", { type: "info", duration: 3000 });
+            onToast?.("Connection restored.", {
+              type: "info",
+              duration: 3000,
+            });
           }
-        }
-        maxReconnectAttemptsTracked = 0;
-        reconnectRecoveryPending = false;
+          maxReconnectAttemptsTracked = 0;
+          reconnectRecoveryPending = false;
+        })();
       }
 
       if (newState === "disconnected" && reconnectRecoveryPending) {
@@ -625,6 +658,7 @@ export function createIssueStore(
       mutationCountAtDisconnect = 0;
       prevConnectionState = "disconnected";
       reconnectRecoveryPending = false;
+      reconnectGeneration = 0;
       maxReconnectAttemptsTracked = 0;
 
       set({ ...INITIAL_STATE, pendingIds: new Set(), issuesMap: new Map() });

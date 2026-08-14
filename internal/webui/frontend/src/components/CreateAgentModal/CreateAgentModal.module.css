@@ -4,6 +4,47 @@
   gap: 16px;
 }
 
+.modalBody {
+  overflow-y: scroll;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-text-muted) transparent;
+}
+
+.modalBody::-webkit-scrollbar {
+  width: 8px;
+}
+
+.modalBody::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.modalBody::-webkit-scrollbar-thumb {
+  min-height: 28px;
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-text-muted) 58%, transparent);
+  background-clip: padding-box;
+}
+
+.modalBody::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--color-text-muted) 72%, transparent);
+  background-clip: padding-box;
+}
+
+.scrollHint {
+  position: sticky;
+  bottom: 0;
+  height: 32px;
+  margin-top: -32px;
+  pointer-events: none;
+  background: linear-gradient(
+    to bottom,
+    transparent,
+    var(--color-panel-bg) 78%
+  );
+}
+
 .panel {
   padding: 14px 14px 12px;
   border: 1px solid var(--color-border-light);
@@ -67,11 +108,7 @@
   color: var(--color-text);
   cursor: pointer;
   box-shadow: inset 3px 0 0 transparent;
-  transition:
-    background-color var(--transition-fast),
-    border-color var(--transition-fast),
-    box-shadow var(--transition-fast),
-    transform var(--transition-fast);
+  transition: transform var(--transition-fast);
 }
 
 .templateCard:hover:not(:disabled) {
@@ -215,6 +252,10 @@
   border-color: var(--color-primary);
 }
 
+.input[aria-invalid="true"] {
+  border-color: var(--color-danger);
+}
+
 .input::placeholder,
 .textarea::placeholder {
   color: var(--color-text-muted);
@@ -286,6 +327,13 @@
   font-size: 11px;
   line-height: 1.45;
   color: var(--color-text-muted);
+}
+
+.fieldError {
+  margin: 5px 0 0;
+  color: var(--color-danger);
+  font-size: 11px;
+  line-height: 1.4;
 }
 
 .emptyHint {

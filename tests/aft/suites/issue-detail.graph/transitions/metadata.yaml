@@ -1,0 +1,164 @@
+kind: graph-transitions
+version: 1
+flow: issue-detail
+group: metadata
+
+transitions:
+  change-priority:
+    intent: A human changes the issue from medium to high priority through the mounted priority menu.
+    actor: human
+    via: ui
+    steps:
+      - run: >-
+          for i in 1 2 3; do
+          agent-browser --session "$AFT_SESSION" find testid priority-dropdown-trigger click || true;
+          sleep 1;
+          agent-browser --session "$AFT_SESSION" eval "!!document.querySelector('[data-testid=priority-dropdown-menu]')" | grep -q true && exit 0;
+          done; echo "priority dropdown click never opened the menu"; exit 1
+        intent: A human retries the priority control until its mounted menu opens.
+      - click: { testid: priority-option-1 }
+
+  close-and-filter-priority:
+    intent: A human closes the panel and follows a fresh priority-filtered board URL to verify persistence.
+    actor: human
+    via: ui
+    steps:
+      - click: { testid: header-close-button }
+      - open: "/ws/${AFT_WS:-E2E-WS}/kanban?priority=1"
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=board-toolbar]')
+        intent: Wait until the priority-filtered board is ready.
+
+  reopen-prioritized-card:
+    intent: A human reopens the case-specific card from the priority-filtered board.
+    actor: human
+    via: ui
+    steps:
+      - click:
+          selector: "section[data-status=ready] article[aria-label='Issue: aft issue detail ${RUN_ID:-local}-${AFT_CASE_ID}']"
+
+  set-owner:
+    intent: A human sets a case-specific owner through the mounted owner editor.
+    actor: human
+    via: ui
+    steps:
+      - run: >-
+          for i in 1 2 3; do
+          agent-browser --session "$AFT_SESSION" find testid owner-dropdown-trigger click || true;
+          sleep 1;
+          agent-browser --session "$AFT_SESSION" eval "!!document.querySelector('[data-testid=owner-input]')" | grep -q true && exit 0;
+          done; echo "owner dropdown click never opened the owner editor"; exit 1
+        intent: A human retries the owner control until its mounted input opens.
+      - fill:
+          testid: owner-input
+          value: "graph-owner-${RUN_ID:-local}-${AFT_CASE_ID}"
+      - click: { testid: owner-submit }
+
+  close-and-reload-owner-board:
+    intent: A human closes the panel and reloads the priority-filtered board to verify the owner badge persisted.
+    actor: human
+    via: ui
+    steps:
+      - click: { testid: header-close-button }
+      - reload: true
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=board-toolbar]')
+        intent: Wait until the reloaded priority-filtered board is ready.
+
+  change-type:
+    intent: A human changes the issue from task to bug through the mounted type menu.
+    actor: human
+    via: ui
+    steps:
+      - run: >-
+          for i in 1 2 3; do
+          agent-browser --session "$AFT_SESSION" find testid type-dropdown-trigger click || true;
+          sleep 1;
+          agent-browser --session "$AFT_SESSION" eval "!!document.querySelector('[data-testid=type-dropdown-menu]')" | grep -q true && exit 0;
+          done; echo "type dropdown click never opened the menu"; exit 1
+        intent: A human retries the type control until its mounted menu opens.
+      - click: { testid: type-option-bug }
+
+  close-and-filter-type:
+    intent: A human closes the panel and follows a fresh type-filtered board URL to verify persistence.
+    actor: human
+    via: ui
+    steps:
+      - click: { testid: header-close-button }
+      - open: "/ws/${AFT_WS:-E2E-WS}/kanban?type=bug"
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=board-toolbar]')
+        intent: Wait until the type-filtered board is ready.
+
+  add-label:
+    intent: A human adds a case-specific label through the mounted label editor.
+    actor: human
+    via: ui
+    steps:
+      - run: >-
+          for i in 1 2 3; do
+          agent-browser --session "$AFT_SESSION" find testid add-label-button click || true;
+          sleep 1;
+          agent-browser --session "$AFT_SESSION" eval "!!document.querySelector('[data-testid=label-input]')" | grep -q true && exit 0;
+          done; echo "add label click never opened the label editor"; exit 1
+        intent: A human retries the add-label control until its mounted input opens.
+      - fill:
+          testid: label-input
+          value: "graph-label-${RUN_ID:-local}-${AFT_CASE_ID}"
+      - press: Enter
+
+  close-and-filter-label:
+    intent: A human closes the panel and follows a fresh label-filtered board URL to verify persistence.
+    actor: human
+    via: ui
+    steps:
+      - click: { testid: header-close-button }
+      - open: "/ws/${AFT_WS:-E2E-WS}/kanban?labels=graph-label-${RUN_ID:-local}-${AFT_CASE_ID}"
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=board-toolbar]')
+        intent: Wait until the label-filtered board is ready.
+
+  reopen-labeled-card:
+    intent: A human reopens the case-specific card from the label-filtered board.
+    actor: human
+    via: ui
+    steps:
+      - click:
+          selector: "section[data-status=ready] article[aria-label='Issue: aft issue detail ${RUN_ID:-local}-${AFT_CASE_ID}']"
+
+  remove-label:
+    intent: A human removes the case-specific label through its mounted remove control.
+    actor: human
+    via: ui
+    steps:
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid="remove-label-graph-label-${RUN_ID:-local}-${AFT_CASE_ID}"]')
+        intent: Wait until the case-specific remove-label control is mounted.
+      - click:
+          testid: "remove-label-graph-label-${RUN_ID:-local}-${AFT_CASE_ID}"
+      - run: >-
+          for i in 1 2 3 4 5; do
+          agent-browser --session "$AFT_SESSION" eval "(document.querySelector('[data-testid=label-list]')?.textContent || '').includes('graph-label-${RUN_ID:-local}-${AFT_CASE_ID}') === false" | grep -q true && exit 0;
+          agent-browser --session "$AFT_SESSION" find testid "remove-label-graph-label-${RUN_ID:-local}-${AFT_CASE_ID}" click || true;
+          sleep 1;
+          done;
+          agent-browser --session "$AFT_SESSION" eval "(document.querySelector('[data-testid=label-list]')?.textContent || '').includes('graph-label-${RUN_ID:-local}-${AFT_CASE_ID}') === false" | grep -q true && exit 0;
+          echo "remove-label click never removed the label chip"; exit 1
+        intent: A human retries the remove control until the label chip leaves the panel.
+
+  close-and-refilter-label:
+    intent: A human closes the panel and follows the same label-filtered board URL to verify the removed label no longer matches.
+    actor: human
+    via: ui
+    steps:
+      - click: { testid: header-close-button }
+      - open: "/ws/${AFT_WS:-E2E-WS}/kanban?labels=graph-label-${RUN_ID:-local}-${AFT_CASE_ID}"
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=board-toolbar]')
+        intent: Wait until the label-filtered board is ready after label removal.

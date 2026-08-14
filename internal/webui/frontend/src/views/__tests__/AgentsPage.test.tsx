@@ -4,6 +4,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { existsSync } from "node:fs";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import "@testing-library/jest-dom";
 
 import { startWorkflowRun } from "@/api";
 
@@ -26,6 +27,7 @@ const mocks = vi.hoisted(() => {
       status?: string;
       branch?: string;
       cross_repo?: boolean;
+      worktree_path?: string;
     }>,
     agentStore: {
       getState: () => ({ fetchData }),
@@ -63,6 +65,12 @@ vi.mock("@/api", () => ({
 
 vi.mock("@/hooks", () => ({
   useAgentStoreInstance: () => mocks.agentStore,
+  useAgentDiffStat: () => ({
+    data: null,
+    isLoading: false,
+    error: null,
+    refetch: vi.fn(),
+  }),
 }));
 
 vi.mock("@/hooks/workspace", () => ({
@@ -86,11 +94,50 @@ vi.mock("@/components/AgentDetailMain/AgentDetailMain", () => ({
 }));
 
 vi.mock("@/components/AgentDetailPanel", () => ({
-  GitTab: ({ agent }: { agent: { name: string } }) => (
-    <div data-testid="git-tab" data-agent={agent.name} />
+  GitTab: ({
+    agent,
+    isActive,
+  }: {
+    agent: { name: string };
+    isActive?: boolean;
+  }) => (
+    <div
+      data-testid="git-tab"
+      data-agent={agent.name}
+      data-active={String(isActive)}
+    />
   ),
-  DiffTab: ({ agent }: { agent: { name: string } }) => (
-    <div data-testid="diff-tab" data-agent={agent.name} />
+  AgentLogsTab: ({
+    agentName,
+    isActive,
+  }: {
+    agentName: string;
+    isActive: boolean;
+  }) => (
+    <div
+      data-testid="agent-logs-tab"
+      data-agent={agentName}
+      data-active={String(isActive)}
+    />
+  ),
+  DiffTab: ({
+    agent,
+    isActive,
+  }: {
+    agent: { name: string };
+    isActive: boolean;
+  }) => (
+    <div
+      data-testid="diff-tab"
+      data-agent={agent.name}
+      data-active={String(isActive)}
+    />
+  ),
+}));
+
+vi.mock("@/components/OpenInEditor", () => ({
+  OpenInEditor: ({ path }: { path: string }) => (
+    <div data-testid="open-in-editor" data-path={path} />
   ),
 }));
 
@@ -264,6 +311,51 @@ describe("AgentsPage", () => {
         },
       );
     });
+  });
+
+  it("renders a Logs tab and shows the logs pane when clicked", async () => {
+    mocks.agents = [
+      {
+        name: "lead-1",
+        status: "ready",
+        role: "lead",
+        branch: "agent/lead-1",
+        repo: "loomcli",
+      },
+    ];
+
+    render(<AgentsPage />);
+
+    const logsTab = await screen.findByRole("button", { name: "Logs" });
+    fireEvent.click(logsTab);
+
+    expect(logsTab).toHaveAttribute("aria-current", "page");
+    expect(screen.getByTestId("agent-logs-tab")).toHaveAttribute(
+      "data-agent",
+      "lead-1",
+    );
+    expect(screen.getByTestId("agent-logs-tab")).toHaveAttribute(
+      "data-active",
+      "true",
+    );
+  });
+
+  it("renders OpenInEditor in Info when worktree_path is set", async () => {
+    mocks.agents = [
+      {
+        name: "lead-1",
+        status: "ready",
+        role: "lead",
+        branch: "agent/lead-1",
+        repo: "loomcli",
+        worktree_path: "/tmp/loomcli/lead-1",
+      },
+    ];
+
+    render(<AgentsPage />);
+
+    const openInEditor = await screen.findByTestId("open-in-editor");
+    expect(openInEditor).toHaveAttribute("data-path", "/tmp/loomcli/lead-1");
   });
 
   it("renders the files tab with the agent-rooted v3 browser and gates shortcuts while inactive", async () => {

@@ -928,6 +928,6 @@ func (s *testSessionServiceImpl) ListSessionHistory(ctx context.Context, wsID, i
 	return records, nil
 }
 
-func (s *testSessionServiceImpl) GetSessionScrollback(ctx context.Context, wsID, issueID, recordID string) (*service.SessionScrollbackResult, error) {
+func (s *testSessionServiceImpl) GetSessionScrollback(context.Context, string, string, string) (*service.SessionScrollbackResult, error) {
 	return nil, service.ErrUnavailable("not implemented in test")
 }

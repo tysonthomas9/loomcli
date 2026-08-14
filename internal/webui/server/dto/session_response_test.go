@@ -4,6 +4,9 @@ import (
 	"encoding/json"
 	"testing"
 	"time"
+
+	"github.com/tysonthomas9/loomcli/internal/sessions"
+	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
 func TestSessionResponse_JSONRoundTrip(t *testing.T) {
@@ -23,11 +26,11 @@ func TestSessionResponse_JSONRoundTrip(t *testing.T) {
 		DurationS:        1800.5,
 		Status:           "completed",
 		ExitCode:         0,
-		InputTokens:      50000,
-		OutputTokens:     12000,
-		CacheReadTokens:  3000,
-		CacheWriteTokens: 1500,
-		EstimatedCostUSD: 0.42,
+		InputTokens:      ptr(int64(50000)),
+		OutputTokens:     ptr(int64(12000)),
+		CacheReadTokens:  ptr(int64(3000)),
+		CacheWriteTokens: ptr(int64(1500)),
+		EstimatedCostUSD: ptr(0.42),
 		FilesChanged:     3,
 		LinesAdded:       100,
 		LinesRemoved:     20,
@@ -86,20 +89,20 @@ func TestSessionResponse_JSONRoundTrip(t *testing.T) {
 	if got.ExitCode != resp.ExitCode {
 		t.Errorf("ExitCode = %d, want %d", got.ExitCode, resp.ExitCode)
 	}
-	if got.InputTokens != resp.InputTokens {
-		t.Errorf("InputTokens = %d, want %d", got.InputTokens, resp.InputTokens)
+	if got.InputTokens == nil || *got.InputTokens != *resp.InputTokens {
+		t.Errorf("InputTokens = %v, want %v", got.InputTokens, resp.InputTokens)
 	}
-	if got.OutputTokens != resp.OutputTokens {
-		t.Errorf("OutputTokens = %d, want %d", got.OutputTokens, resp.OutputTokens)
+	if got.OutputTokens == nil || *got.OutputTokens != *resp.OutputTokens {
+		t.Errorf("OutputTokens = %v, want %v", got.OutputTokens, resp.OutputTokens)
 	}
-	if got.CacheReadTokens != resp.CacheReadTokens {
-		t.Errorf("CacheReadTokens = %d, want %d", got.CacheReadTokens, resp.CacheReadTokens)
+	if got.CacheReadTokens == nil || *got.CacheReadTokens != *resp.CacheReadTokens {
+		t.Errorf("CacheReadTokens = %v, want %v", got.CacheReadTokens, resp.CacheReadTokens)
 	}
-	if got.CacheWriteTokens != resp.CacheWriteTokens {
-		t.Errorf("CacheWriteTokens = %d, want %d", got.CacheWriteTokens, resp.CacheWriteTokens)
+	if got.CacheWriteTokens == nil || *got.CacheWriteTokens != *resp.CacheWriteTokens {
+		t.Errorf("CacheWriteTokens = %v, want %v", got.CacheWriteTokens, resp.CacheWriteTokens)
 	}
-	if got.EstimatedCostUSD != resp.EstimatedCostUSD {
-		t.Errorf("EstimatedCostUSD = %f, want %f", got.EstimatedCostUSD, resp.EstimatedCostUSD)
+	if got.EstimatedCostUSD == nil || *got.EstimatedCostUSD != *resp.EstimatedCostUSD {
+		t.Errorf("EstimatedCostUSD = %v, want %v", got.EstimatedCostUSD, resp.EstimatedCostUSD)
 	}
 	if got.FilesChanged != resp.FilesChanged {
 		t.Errorf("FilesChanged = %d, want %d", got.FilesChanged, resp.FilesChanged)
@@ -350,7 +353,12 @@ func TestSessionResponse_FilesTouchedPresent(t *testing.T) {
 }
 
 func TestSessionResponse_TokenFieldsZeroPreserved(t *testing.T) {
-	resp := SessionResponse{}
+	resp := SessionResponse{
+		InputTokens:      ptr(int64(0)),
+		OutputTokens:     ptr(int64(0)),
+		CacheReadTokens:  ptr(int64(0)),
+		CacheWriteTokens: ptr(int64(0)),
+	}
 
 	data, err := json.Marshal(resp)
 	if err != nil {
@@ -374,6 +382,35 @@ func TestSessionResponse_TokenFieldsZeroPreserved(t *testing.T) {
 		if string(val) != "0" {
 			t.Errorf("%s = %s, want 0", field, val)
 		}
+	}
+}
+
+func TestSessionResponse_UnavailableUsageIsNull(t *testing.T) {
+	data, err := json.Marshal(SessionResponse{})
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatalf("Unmarshal raw: %v", err)
+	}
+	for _, field := range []string{"input_tokens", "output_tokens", "cache_read_tokens", "cache_write_tokens", "estimated_cost_usd"} {
+		if string(raw[field]) != "null" {
+			t.Errorf("%s = %s, want null", field, raw[field])
+		}
+	}
+}
+
+func TestSessionResponseFromListItem_ReportedZeroUsageIsNumeric(t *testing.T) {
+	response := SessionResponseFromListItem(service.SessionListItem{
+		SessionRecord: sessions.SessionRecord{InputTokens: 1},
+		Evidence:      service.SessionEvidence{Status: "ok", UsageStatus: "reported", Conflicts: []service.SessionEvidenceConflict{}},
+	})
+	if response.InputTokens == nil || *response.InputTokens != 1 {
+		t.Fatalf("input_tokens = %v, want 1", response.InputTokens)
+	}
+	if response.OutputTokens == nil || *response.OutputTokens != 0 {
+		t.Fatalf("output_tokens = %v, want reported zero", response.OutputTokens)
 	}
 }
 

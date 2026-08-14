@@ -19,7 +19,7 @@ import { useStore } from "zustand";
 
 import { useParams, useNavigate, Outlet } from "react-router-dom";
 
-import { updateIssue, addComment, closeIssue } from "@/api";
+import { applyReviewDecision } from "@/api";
 import {
   fetchWorkspaceApi,
   runOnboardingFirstTask,
@@ -55,7 +55,6 @@ import { ToastContainer } from "@/components/Toast/ToastContainer";
 import { SearchInput } from "@/components/search/SearchInput";
 import { SearchScopeIndicator } from "@/components/search/SearchScopeIndicator";
 import { IssueDetailPanel } from "@/components/IssueDetailPanel/IssueDetailPanel";
-import { AgentDetailPanel } from "@/components/AgentDetailPanel/AgentDetailPanel";
 import { WorkspaceTree } from "@/components/WorkspaceTree/WorkspaceTree";
 import { NavRail } from "@/components/NavRail/NavRail";
 import { ThemeToggle } from "@/components/ThemeToggle/ThemeToggle";
@@ -119,6 +118,12 @@ const TerminalView = lazy(() =>
 );
 
 type OnboardingAction = "confirming-agent" | "running-first-task";
+
+function newReviewDecisionID(): string {
+  const bytes = new Uint8Array(16);
+  crypto.getRandomValues(bytes);
+  return `review-${Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("")}`;
+}
 
 function isOnboardingPlannerAgent(agent: WorkspaceAgentInfo): boolean {
   const roleName = agent.role_name?.trim();
@@ -424,25 +429,15 @@ function App() {
   const { toasts, showToast, dismissToast } = useToast();
   const mountedRef = useRef(true);
 
-  // Centralized panel state (issue detail panel + agent detail panel).
+  // Centralized panel state for issue detail overlays.
   // Enforces mutual exclusivity with 300ms close-then-open transitions.
-  const { activePanel, pendingPanel, openPanel, closePanel } =
-    usePanelManager();
+  const { activePanel, openPanel, closePanel } = usePanelManager();
 
   // Derive panel visibility booleans from the centralized panel state.
   const isPanelOpen = activePanel?.type === "issue";
-  const isAgentPanelOpen = activePanel?.type === "agent";
-  const selectedAgentName =
-    activePanel?.type === "agent"
-      ? activePanel.name
-      : pendingPanel?.type === "agent"
-        ? pendingPanel.name
-        : null;
 
   const sidebarSelectedAgentName =
-    activeView === "agents" && routeAgentName
-      ? routeAgentName
-      : selectedAgentName;
+    activeView === "agents" && routeAgentName ? routeAgentName : null;
 
   // Ref to main scrollable container for workspace state snapshot.
   // NOTE: Must be declared BEFORE useWorkspaceState below — React runs effects
@@ -674,6 +669,13 @@ function App() {
     filterActions.setSearch(undefined);
   }, [filterActions]);
 
+  const handleClearAllBoardFilters = useCallback(() => {
+    hasPendingSearchEditRef.current = false;
+    pendingSearchCommitRef.current = { value: undefined };
+    setSearchValueState("");
+    filterActions.clearAll();
+  }, [filterActions]);
+
   // Handle issue click from SwimLaneBoard/IssueTable
   const handleIssueClick = useCallback(
     (issue: Issue) => {
@@ -704,17 +706,32 @@ function App() {
   }, [closePanel, clearIssue]);
 
   // Handle approve button click on review cards
+  const reviewDecisionIntentRef = useRef<{
+    fingerprint: string;
+    id: string;
+  } | null>(null);
+  const reviewDecisionID = useCallback((fingerprint: string): string => {
+    if (reviewDecisionIntentRef.current?.fingerprint === fingerprint) {
+      return reviewDecisionIntentRef.current.id;
+    }
+    const id = newReviewDecisionID();
+    reviewDecisionIntentRef.current = { fingerprint, id };
+    return id;
+  }, []);
+
   const handleApprove = useCallback(
     async (issue: Issue) => {
       try {
         const reviewType = getReviewType(issue);
 
         if (reviewType === "code") {
-          // Code review: Close the issue (PR was reviewed and approved)
-          await closeIssue(
+          const reason = "PR approved after code review";
+          await applyReviewDecision(
             workspaceId,
             issue.id,
-            "PR approved after code review",
+            "approve",
+            reason,
+            reviewDecisionID(`${issue.id}:approve:${reason}`),
           );
           await refetch();
         } else if (reviewType === "plan") {
@@ -739,24 +756,27 @@ function App() {
         }
       }
     },
-    [workspaceId, updateIssueStatus, refetch, handlePanelClose, showToast],
+    [
+      workspaceId,
+      updateIssueStatus,
+      refetch,
+      handlePanelClose,
+      showToast,
+      reviewDecisionID,
+    ],
   );
 
   // Handle reject button submission on review cards
   const handleReject = useCallback(
     async (issue: Issue, comment: string) => {
       try {
-        const reviewType = getReviewType(issue);
-
-        // Add feedback comment
-        const prefix = reviewType === "code" ? "CODE REVIEW" : "FEEDBACK";
-        await addComment(workspaceId, issue.id, `${prefix}: ${comment}`);
-
-        // Add needs-revision label and set status to open
-        await updateIssue(workspaceId, issue.id, {
-          status: "open",
-          add_labels: ["needs-revision"],
-        });
+        await applyReviewDecision(
+          workspaceId,
+          issue.id,
+          "request_changes",
+          comment,
+          reviewDecisionID(`${issue.id}:request_changes:${comment}`),
+        );
 
         // Refetch to reflect label/status changes and close panel
         await refetch();
@@ -767,7 +787,7 @@ function App() {
         showToast(message, { type: "error" });
       }
     },
-    [workspaceId, refetch, handlePanelClose, showToast],
+    [workspaceId, refetch, handlePanelClose, showToast, reviewDecisionID],
   );
 
   // Close all panels synchronously (no animation) for workspace switch
@@ -803,11 +823,6 @@ function App() {
     },
     [navigate, workspaceId, closeAllPanels, agents, workspaceConfigAgents],
   );
-
-  // Handle agent panel close
-  const handleAgentPanelClose = useCallback(() => {
-    closePanel();
-  }, [closePanel]);
 
   useEffect(() => {
     if (activeView === "terminal") {
@@ -1145,16 +1160,6 @@ function App() {
     [workspace, workspaceId, closeAllPanels, navigate],
   );
 
-  // Handle task click from agent panel (opens issue panel overlay)
-  const handleAgentTaskClick = useCallback(
-    (taskId: string) => {
-      // Mutual exclusivity handled by usePanelManager (closes agent panel first)
-      openPanel({ type: "issue", id: taskId });
-      fetchIssue(taskId);
-    },
-    [openPanel, fetchIssue],
-  );
-
   // -----------------------------------------------------------------------
   // WorkspaceViewContext: data + actions for view components
   // -----------------------------------------------------------------------
@@ -1225,8 +1230,6 @@ function App() {
       handleIssueClick,
       handlePanelClose,
       handleAgentClick,
-      handleAgentPanelClose,
-      handleAgentTaskClick,
       handleApprove,
       handleReject,
       handleCopyLink,
@@ -1245,8 +1248,6 @@ function App() {
       handleIssueClick,
       handlePanelClose,
       handleAgentClick,
-      handleAgentPanelClose,
-      handleAgentTaskClick,
       handleApprove,
       handleReject,
       handleCopyLink,
@@ -1305,9 +1306,55 @@ function App() {
     </button>
   );
 
+  const activeFilterChips = useMemo(() => {
+    const chips: Array<{
+      key: string;
+      label: string;
+      onClear: () => void;
+    }> = [];
+    const search = filters.search?.trim();
+    if (search) {
+      chips.push({
+        key: "search",
+        label: `search: ${search}`,
+        onClear: handleSearchClear,
+      });
+    }
+    if (filters.priority !== undefined) {
+      chips.push({
+        key: "priority",
+        label: `priority: P${filters.priority}`,
+        onClear: () => filterActions.setPriority(undefined),
+      });
+    }
+    if (filters.type !== undefined) {
+      chips.push({
+        key: "type",
+        label: `type: ${filters.type}`,
+        onClear: () => filterActions.setType(undefined),
+      });
+    }
+    for (const label of filters.labels ?? []) {
+      chips.push({
+        key: `label:${label}`,
+        label: `label: ${label}`,
+        onClear: () => {
+          const nextLabels = (filters.labels ?? []).filter(
+            (item) => item !== label,
+          );
+          filterActions.setLabels(
+            nextLabels.length > 0 ? nextLabels : undefined,
+          );
+        },
+      });
+    }
+    return chips;
+  }, [filterActions, filters, handleSearchClear]);
+
   // Board toolbar: view tabs on the left; search · New Issue on the right —
   // exactly the Aether design's board-head (tabs / centered search / New
-  // Issue), with no extra filter controls. Shown only for issue-based views.
+  // Issue), with URL-driven filter chips below when active. Shown only for
+  // issue-based views.
   const showBoardToolbar =
     activeView === "kanban" ||
     activeView === "list" ||
@@ -1320,6 +1367,33 @@ function App() {
       </div>
       <div className={styles.boardToolbarSearch}>{searchControl}</div>
       <div className={styles.boardToolbarActions}>{newIssueButton}</div>
+      {activeFilterChips.length > 0 && (
+        <div
+          className={styles.boardToolbarFilterChips}
+          aria-label="Active filters"
+          data-testid="board-filter-chips"
+        >
+          {activeFilterChips.map((chip) => (
+            <button
+              key={chip.key}
+              type="button"
+              className={styles.filterChip}
+              onClick={chip.onClear}
+              aria-label={`Clear ${chip.label} filter`}
+            >
+              <span>{chip.label}</span>
+              <span aria-hidden="true">×</span>
+            </button>
+          ))}
+          <button
+            type="button"
+            className={styles.clearFiltersButton}
+            onClick={handleClearAllBoardFilters}
+          >
+            Clear all
+          </button>
+        </div>
+      )}
     </div>
   );
 
@@ -1481,14 +1555,6 @@ function App() {
             onCopyLink={handleCopyLink}
             onNavigateToIssue={handleIssueClick}
           />
-          <AgentDetailPanel
-            isOpen={isAgentPanelOpen}
-            agentName={selectedAgentName}
-            agents={agents}
-            agentTasks={agentTasks}
-            onClose={handleAgentPanelClose}
-            onTaskClick={handleAgentTaskClick}
-          />
           <CreateIssueModal
             isOpen={showCreateIssue}
             onClose={() => setShowCreateIssue(false)}
@@ -1542,6 +1608,7 @@ function App() {
         onSuccess={(agent) => {
           setShowCreateAgent(false);
           upsertWorkspaceAgent?.(agent);
+          agentStore.getState().upsertWorkspaceAgent(agent);
           showToast(`Agent "${agent.name}" created`, { type: "success" });
           if (shouldPrefillOnboardingIssue) {
             setOnboardingAction("confirming-agent");

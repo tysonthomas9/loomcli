@@ -13,12 +13,19 @@ import {
   normalizeStoredAgentName,
   validateStoredAgentName,
 } from "@/utils/agentName";
+import {
+  presentServerErrorMessage,
+  type PresentedErrorMessage,
+} from "@/utils/errorMessagePresenter";
 
 import { AgentTemplateCard } from "./AgentTemplateCard";
 import styles from "./CreateAgentModal.module.css";
 
 type AgentKind = "background" | "interactive";
 type BackgroundRole = "plan" | "task";
+type TemplateSelection =
+  | { kind: "background"; role: BackgroundRole }
+  | { kind: "interactive"; promptID: string };
 
 const CUSTOM_PROMPT_ID = "custom";
 
@@ -105,11 +112,11 @@ function interactivePromptCard(prompt: InteractivePromptInfo) {
 function resolveInitialSelection(
   defaultKind: AgentKind | undefined,
   defaultRoleName: BackgroundRole,
-): { kind: AgentKind; backgroundRole: BackgroundRole } {
+): TemplateSelection {
   if (defaultKind === "interactive") {
-    return { kind: "interactive", backgroundRole: defaultRoleName };
+    return { kind: "interactive", promptID: "pr-review" };
   }
-  return { kind: "background", backgroundRole: defaultRoleName };
+  return { kind: "background", role: defaultRoleName };
 }
 
 export interface CreateAgentModalProps {
@@ -144,21 +151,18 @@ export function CreateAgentModal({
   );
 
   const [name, setName] = useState(resolvedDefaultName);
-  const [selectedKind, setSelectedKind] = useState<AgentKind>(
-    initialSelection.kind,
-  );
-  const [backgroundRole, setBackgroundRole] = useState<BackgroundRole>(
-    initialSelection.backgroundRole,
-  );
+  const [nameTouched, setNameTouched] = useState(false);
+  const [selection, setSelection] =
+    useState<TemplateSelection>(initialSelection);
   const [backend, setBackend] = useState(resolvedDefaultBackend);
   const [selectedRepos, setSelectedRepos] = useState<string[]>([]);
-  const [selectedBuiltinPromptID, setSelectedBuiltinPromptID] =
-    useState("pr-review");
   const [customPrompt, setCustomPrompt] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<PresentedErrorMessage | null>(null);
+  const [showScrollHint, setShowScrollHint] = useState(false);
   const wasOpenRef = useRef(false);
   const nameRef = useRef<HTMLInputElement>(null);
+  const modalBodyRef = useRef<HTMLDivElement>(null);
   const createAgent = useCreateWorkspaceAgent(workspaceId);
   const { backends } = useBackends();
   const { prompts: fetchedInteractivePrompts, error: promptLoadError } =
@@ -173,39 +177,38 @@ export function CreateAgentModal({
   );
 
   const namePlaceholder = useMemo(() => {
-    if (selectedKind === "interactive") {
-      if (selectedBuiltinPromptID === CUSTOM_PROMPT_ID) {
+    if (selection.kind === "interactive") {
+      if (selection.promptID === CUSTOM_PROMPT_ID) {
         return CUSTOM_PROMPT_TEMPLATE.placeholder;
       }
       const selectedPrompt = interactivePrompts.find(
-        (prompt) => prompt.id === selectedBuiltinPromptID,
+        (prompt) => prompt.id === selection.promptID,
       );
       return selectedPrompt
         ? interactivePromptCard(selectedPrompt).placeholder
         : "reviewer";
     }
     const template = BACKGROUND_TEMPLATES.find(
-      (t) => t.role === backgroundRole,
+      (t) => t.role === selection.role,
     );
     return template?.placeholder ?? "agent";
-  }, [
-    selectedKind,
-    backgroundRole,
-    interactivePrompts,
-    selectedBuiltinPromptID,
-  ]);
+  }, [selection, interactivePrompts]);
 
   useEffect(() => {
-    if (selectedBuiltinPromptID === CUSTOM_PROMPT_ID) {
+    if (selection.kind !== "interactive") {
       return;
     }
-    if (
-      interactivePrompts.some((prompt) => prompt.id === selectedBuiltinPromptID)
-    ) {
+    if (selection.promptID === CUSTOM_PROMPT_ID) {
       return;
     }
-    setSelectedBuiltinPromptID(interactivePrompts[0]?.id ?? "lead");
-  }, [interactivePrompts, selectedBuiltinPromptID]);
+    if (interactivePrompts.some((prompt) => prompt.id === selection.promptID)) {
+      return;
+    }
+    setSelection({
+      kind: "interactive",
+      promptID: interactivePrompts[0]?.id ?? "lead",
+    });
+  }, [interactivePrompts, selection]);
 
   const repoOptions = useMemo(
     () =>
@@ -244,11 +247,10 @@ export function CreateAgentModal({
       resolvedDefaultRoleName,
     );
     setName(resolvedDefaultName);
-    setSelectedKind(selection.kind);
-    setBackgroundRole(selection.backgroundRole);
+    setNameTouched(false);
+    setSelection(selection);
     setBackend(resolvedDefaultBackend);
     setSelectedRepos(defaultRepos);
-    setSelectedBuiltinPromptID("pr-review");
     setCustomPrompt("");
     setIsSubmitting(false);
     setError(null);
@@ -267,24 +269,64 @@ export function CreateAgentModal({
     }
   }, [isOpen]);
 
+  useEffect(() => {
+    if (!isOpen) {
+      setShowScrollHint(false);
+      return;
+    }
+    const body = modalBodyRef.current;
+    if (!body) return;
+
+    const updateScrollHint = () => {
+      const maxScrollTop = body.scrollHeight - body.clientHeight;
+      setShowScrollHint(maxScrollTop > 2 && body.scrollTop < maxScrollTop - 2);
+    };
+
+    updateScrollHint();
+    body.addEventListener("scroll", updateScrollHint, { passive: true });
+    window.addEventListener("resize", updateScrollHint);
+
+    let resizeObserver: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== "undefined") {
+      resizeObserver = new ResizeObserver(updateScrollHint);
+      resizeObserver.observe(body);
+      if (body.firstElementChild) {
+        resizeObserver.observe(body.firstElementChild);
+      }
+    }
+
+    return () => {
+      body.removeEventListener("scroll", updateScrollHint);
+      window.removeEventListener("resize", updateScrollHint);
+      resizeObserver?.disconnect();
+    };
+  }, [
+    customPrompt,
+    error,
+    isOpen,
+    name,
+    promptLoadError,
+    repoOptions.length,
+    selection,
+  ]);
+
+  const nameValidationMessage = validateStoredAgentName(name);
+  const showNameValidation =
+    nameTouched && nameValidationMessage !== null && !isSubmitting;
   const hasPromptSelection =
-    selectedKind !== "interactive" ||
-    (selectedBuiltinPromptID === CUSTOM_PROMPT_ID
+    selection.kind !== "interactive" ||
+    (selection.promptID === CUSTOM_PROMPT_ID
       ? customPrompt.trim() !== ""
-      : selectedBuiltinPromptID.trim() !== "");
+      : selection.promptID.trim() !== "");
   const canSubmit =
-    validateStoredAgentName(name) === null &&
-    hasPromptSelection &&
-    !isSubmitting;
+    nameValidationMessage === null && hasPromptSelection && !isSubmitting;
 
   const selectBackground = (role: BackgroundRole): void => {
-    setSelectedKind("background");
-    setBackgroundRole(role);
+    setSelection({ kind: "background", role });
   };
 
   const selectInteractive = (promptID: string): void => {
-    setSelectedKind("interactive");
-    setSelectedBuiltinPromptID(promptID);
+    setSelection({ kind: "interactive", promptID });
   };
 
   const handleSubmit = async (event: FormEvent) => {
@@ -294,7 +336,7 @@ export function CreateAgentModal({
     const trimmedBackend = backend.trim();
     const nameError = validateStoredAgentName(name);
     if (nameError) {
-      setError(nameError);
+      setNameTouched(true);
       return;
     }
 
@@ -307,9 +349,9 @@ export function CreateAgentModal({
         prompt_file?: string;
       } = {};
       const isLeadSelection =
-        selectedKind === "interactive" && selectedBuiltinPromptID === "lead";
-      if (selectedKind === "interactive") {
-        if (selectedBuiltinPromptID === CUSTOM_PROMPT_ID) {
+        selection.kind === "interactive" && selection.promptID === "lead";
+      if (selection.kind === "interactive") {
+        if (selection.promptID === CUSTOM_PROMPT_ID) {
           roleName = trimmedName;
           interactiveFields = {
             kind: "interactive",
@@ -318,14 +360,14 @@ export function CreateAgentModal({
         } else if (isLeadSelection) {
           roleName = "lead";
         } else {
-          roleName = selectedBuiltinPromptID;
+          roleName = selection.promptID;
           interactiveFields = {
             kind: "interactive",
-            prompt_file: `builtin:${selectedBuiltinPromptID}`,
+            prompt_file: `builtin:${selection.promptID}`,
           };
         }
       } else {
-        roleName = backgroundRole;
+        roleName = selection.role;
       }
 
       const request = {
@@ -341,33 +383,35 @@ export function CreateAgentModal({
         ...(trimmedBackend ? { backend: trimmedBackend } : {}),
       });
       onSuccess(agent);
-      const selection = resolveInitialSelection(
+      const resetSelection = resolveInitialSelection(
         defaultKind,
         resolvedDefaultRoleName,
       );
       setName(resolvedDefaultName);
-      setSelectedKind(selection.kind);
-      setBackgroundRole(selection.backgroundRole);
+      setNameTouched(false);
+      setSelection(resetSelection);
       setBackend(resolvedDefaultBackend);
       setSelectedRepos(defaultRepos);
-      setSelectedBuiltinPromptID("pr-review");
       setCustomPrompt("");
     } catch (err) {
       if (err instanceof ApiError) {
-        setError(err.message);
+        setError(presentServerErrorMessage(err.message, err.status));
       } else if (err instanceof Error) {
-        setError(err.message);
+        setError(presentServerErrorMessage(err.message));
       } else {
-        setError("Failed to create agent");
+        setError(presentServerErrorMessage("Failed to create agent"));
       }
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  const repoHint = crossRepo
-    ? "No repo selected — the agent gets workspace-wide scope."
-    : "Pick every repo this agent works in. Leave all unselected for workspace scope.";
+  const repoHint =
+    repoOptions.length === 0
+      ? ""
+      : crossRepo
+        ? "No repo selected — the agent gets workspace-wide scope."
+        : "Pick every repo this agent works in. Leave all unselected for workspace scope.";
 
   return (
     <AetherModal
@@ -378,6 +422,8 @@ export function CreateAgentModal({
       overlayTestId="create-agent-overlay"
       closeTestId="create-agent-close"
       dialogClassName={aetherModalStyles.dialogWide}
+      bodyRef={modalBodyRef}
+      bodyClassName={styles.modalBody}
       footer={
         <>
           <button
@@ -400,222 +446,244 @@ export function CreateAgentModal({
         </>
       }
     >
-      <form
-        id="create-agent-form"
-        className={styles.form}
-        onSubmit={handleSubmit}
-      >
-        <div className={styles.panel}>
-          <h3 className={styles.panelHeader}>Agent type</h3>
+      <>
+        <form
+          id="create-agent-form"
+          className={styles.form}
+          onSubmit={handleSubmit}
+        >
+          <div className={styles.panel}>
+            <h3 className={styles.panelHeader}>Agent type</h3>
 
-          <div
-            className={styles.group}
-            role="group"
-            aria-labelledby="create-agent-background-label"
-          >
-            <span
-              className={styles.groupLabel}
-              id="create-agent-background-label"
+            <div
+              className={styles.group}
+              role="group"
+              aria-labelledby="create-agent-background-label"
             >
-              Background agents
-            </span>
-            <p className={styles.groupHint}>
-              Supervised workers that run automatically
-            </p>
-            <div className={styles.templateList}>
-              {BACKGROUND_TEMPLATES.map((template) => (
-                <AgentTemplateCard
-                  key={template.role}
-                  title={template.title}
-                  description={template.description}
-                  glyph={template.glyph}
-                  accentColor={template.accentColor}
-                  selected={
-                    selectedKind === "background" &&
-                    backgroundRole === template.role
-                  }
-                  disabled={isSubmitting}
-                  ariaLabel={`${template.title}, background agent`}
-                  testId={template.testId}
-                  onSelect={() => selectBackground(template.role)}
-                />
-              ))}
-            </div>
-          </div>
-
-          <div
-            className={styles.group}
-            role="group"
-            aria-labelledby="create-agent-interactive-label"
-          >
-            <span
-              className={styles.groupLabel}
-              id="create-agent-interactive-label"
-            >
-              Interactive agents
-            </span>
-            <p className={styles.groupHint}>
-              Terminal teammates you talk to directly
-            </p>
-            <div className={styles.templateList}>
-              {interactivePrompts.map((prompt) => {
-                const card = interactivePromptCard(prompt);
-                return (
+              <span
+                className={styles.groupLabel}
+                id="create-agent-background-label"
+              >
+                Background agents
+              </span>
+              <p className={styles.groupHint}>
+                Supervised workers that run automatically
+              </p>
+              <div className={styles.templateList}>
+                {BACKGROUND_TEMPLATES.map((template) => (
                   <AgentTemplateCard
-                    key={prompt.id}
-                    title={prompt.label}
-                    description={card.description}
-                    glyph={card.glyph}
-                    accentColor={card.accentColor}
+                    key={template.role}
+                    title={template.title}
+                    description={template.description}
+                    glyph={template.glyph}
+                    accentColor={template.accentColor}
                     selected={
-                      selectedKind === "interactive" &&
-                      selectedBuiltinPromptID === prompt.id
+                      selection.kind === "background" &&
+                      selection.role === template.role
                     }
                     disabled={isSubmitting}
-                    ariaLabel={`${prompt.label}, built-in interactive prompt`}
-                    testId={card.testId}
-                    onSelect={() => selectInteractive(prompt.id)}
+                    ariaLabel={`${template.title}, background agent`}
+                    testId={template.testId}
+                    onSelect={() => selectBackground(template.role)}
                   />
-                );
-              })}
-              <AgentTemplateCard
-                title={CUSTOM_PROMPT_TEMPLATE.title}
-                description={CUSTOM_PROMPT_TEMPLATE.description}
-                glyph={CUSTOM_PROMPT_TEMPLATE.glyph}
-                accentColor={CUSTOM_PROMPT_TEMPLATE.accentColor}
-                selected={
-                  selectedKind === "interactive" &&
-                  selectedBuiltinPromptID === CUSTOM_PROMPT_ID
-                }
-                disabled={isSubmitting}
-                ariaLabel="Custom prompt, interactive agent"
-                testId={CUSTOM_PROMPT_TEMPLATE.testId}
-                onSelect={() => selectInteractive(CUSTOM_PROMPT_ID)}
-              />
-            </div>
-            {promptLoadError && (
-              <p className={styles.hint}>
-                Prompt list unavailable; showing built-in defaults.
-              </p>
-            )}
-          </div>
-        </div>
-
-        <div className={styles.panel}>
-          <h3 className={styles.panelHeader}>Configuration</h3>
-
-          <div className={styles.configRow}>
-            <div className={styles.fieldGroup}>
-              <label className={styles.label} htmlFor="agent-name">
-                Name
-              </label>
-              <input
-                id="agent-name"
-                ref={nameRef}
-                className={styles.input}
-                value={name}
-                onChange={(event) => setName(event.target.value)}
-                placeholder={namePlaceholder}
-                disabled={isSubmitting}
-                data-testid="create-agent-name"
-              />
-            </div>
-
-            <div className={styles.fieldGroup}>
-              <label className={styles.label} htmlFor="agent-backend">
-                AI Backend
-              </label>
-              <select
-                id="agent-backend"
-                className={styles.select}
-                value={backend}
-                onChange={(event) => setBackend(event.target.value)}
-                disabled={isSubmitting}
-                data-testid="create-agent-backend"
-              >
-                {backendOptions.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
                 ))}
-              </select>
-            </div>
-          </div>
-
-          {selectedKind === "interactive" &&
-            selectedBuiltinPromptID === CUSTOM_PROMPT_ID && (
-              <div
-                className={`${styles.fieldGroup} ${styles.fieldGroupSpaced}`}
-              >
-                <label className={styles.label} htmlFor="agent-custom-prompt">
-                  Custom prompt
-                </label>
-                <textarea
-                  id="agent-custom-prompt"
-                  className={styles.textarea}
-                  value={customPrompt}
-                  onChange={(event) => setCustomPrompt(event.target.value)}
-                  placeholder="Describe how this interactive agent should help..."
-                  disabled={isSubmitting}
-                  data-testid="create-agent-interactive-prompt"
-                />
               </div>
-            )}
+            </div>
 
-          <div className={`${styles.fieldGroup} ${styles.fieldGroupSpaced}`}>
-            <span className={styles.label} id="agent-repos-label">
-              Repos
-            </span>
-            {repoOptions.length === 0 ? (
-              <p
-                className={styles.emptyHint}
-                data-testid="create-agent-no-repos"
+            <div
+              className={styles.group}
+              role="group"
+              aria-labelledby="create-agent-interactive-label"
+            >
+              <span
+                className={styles.groupLabel}
+                id="create-agent-interactive-label"
               >
-                No repos yet — add one from the sidebar first. This agent will
-                run with workspace scope.
+                Interactive agents
+              </span>
+              <p className={styles.groupHint}>
+                Terminal teammates you talk to directly
               </p>
-            ) : (
-              <div
-                className={styles.repoChips}
-                role="group"
-                aria-labelledby="agent-repos-label"
-                data-testid="create-agent-repo-chips"
-              >
-                {repoOptions.map((repo) => {
-                  const on = selectedRepos.includes(repo);
+              <div className={styles.templateList}>
+                {interactivePrompts.map((prompt) => {
+                  const card = interactivePromptCard(prompt);
                   return (
-                    <button
-                      key={repo}
-                      type="button"
-                      className={styles.repoChip}
-                      data-active={on || undefined}
-                      aria-pressed={on}
-                      onClick={() => toggleRepo(repo)}
+                    <AgentTemplateCard
+                      key={prompt.id}
+                      title={prompt.label}
+                      description={card.description}
+                      glyph={card.glyph}
+                      accentColor={card.accentColor}
+                      selected={
+                        selection.kind === "interactive" &&
+                        selection.promptID === prompt.id
+                      }
                       disabled={isSubmitting}
-                    >
-                      <span className={styles.repoChipBox} aria-hidden="true">
-                        {on ? "✓" : ""}
-                      </span>
-                      {repo}
-                    </button>
+                      ariaLabel={`${prompt.label}, built-in interactive prompt`}
+                      testId={card.testId}
+                      onSelect={() => selectInteractive(prompt.id)}
+                    />
                   );
                 })}
+                <AgentTemplateCard
+                  title={CUSTOM_PROMPT_TEMPLATE.title}
+                  description={CUSTOM_PROMPT_TEMPLATE.description}
+                  glyph={CUSTOM_PROMPT_TEMPLATE.glyph}
+                  accentColor={CUSTOM_PROMPT_TEMPLATE.accentColor}
+                  selected={
+                    selection.kind === "interactive" &&
+                    selection.promptID === CUSTOM_PROMPT_ID
+                  }
+                  disabled={isSubmitting}
+                  ariaLabel="Custom prompt, interactive agent"
+                  testId={CUSTOM_PROMPT_TEMPLATE.testId}
+                  onSelect={() => selectInteractive(CUSTOM_PROMPT_ID)}
+                />
               </div>
-            )}
-            <p className={styles.hint}>{repoHint}</p>
+              {promptLoadError && (
+                <p className={styles.hint}>
+                  Prompt list unavailable; showing built-in defaults.
+                </p>
+              )}
+            </div>
           </div>
-        </div>
 
-        {error && (
-          <div
-            className={styles.error}
-            role="alert"
-            data-testid="create-agent-error"
-          >
-            {error}
+          <div className={styles.panel}>
+            <h3 className={styles.panelHeader}>Configuration</h3>
+
+            <div className={styles.configRow}>
+              <div className={styles.fieldGroup}>
+                <label className={styles.label} htmlFor="agent-name">
+                  Name
+                </label>
+                <input
+                  id="agent-name"
+                  ref={nameRef}
+                  className={styles.input}
+                  value={name}
+                  onChange={(event) => {
+                    setNameTouched(true);
+                    setName(event.target.value);
+                  }}
+                  placeholder={namePlaceholder}
+                  disabled={isSubmitting}
+                  aria-invalid={showNameValidation ? true : undefined}
+                  aria-describedby={
+                    showNameValidation ? "agent-name-error" : undefined
+                  }
+                  data-testid="create-agent-name"
+                />
+                {showNameValidation && (
+                  <p
+                    id="agent-name-error"
+                    className={styles.fieldError}
+                    data-testid="create-agent-name-error"
+                  >
+                    {nameValidationMessage}
+                  </p>
+                )}
+              </div>
+
+              <div className={styles.fieldGroup}>
+                <label className={styles.label} htmlFor="agent-backend">
+                  AI Backend
+                </label>
+                <select
+                  id="agent-backend"
+                  className={styles.select}
+                  value={backend}
+                  onChange={(event) => setBackend(event.target.value)}
+                  disabled={isSubmitting}
+                  data-testid="create-agent-backend"
+                >
+                  {backendOptions.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            {selection.kind === "interactive" &&
+              selection.promptID === CUSTOM_PROMPT_ID && (
+                <div
+                  className={`${styles.fieldGroup} ${styles.fieldGroupSpaced}`}
+                >
+                  <label className={styles.label} htmlFor="agent-custom-prompt">
+                    Custom prompt
+                  </label>
+                  <textarea
+                    id="agent-custom-prompt"
+                    className={styles.textarea}
+                    value={customPrompt}
+                    onChange={(event) => setCustomPrompt(event.target.value)}
+                    placeholder="Describe how this interactive agent should help..."
+                    disabled={isSubmitting}
+                    data-testid="create-agent-interactive-prompt"
+                  />
+                </div>
+              )}
+
+            <div className={`${styles.fieldGroup} ${styles.fieldGroupSpaced}`}>
+              <span className={styles.label} id="agent-repos-label">
+                Repos
+              </span>
+              {repoOptions.length === 0 ? (
+                <p
+                  className={styles.emptyHint}
+                  data-testid="create-agent-no-repos"
+                >
+                  No repos in this workspace yet — background agents need at
+                  least one repo; interactive agents run with workspace scope.
+                </p>
+              ) : (
+                <div
+                  className={styles.repoChips}
+                  role="group"
+                  aria-labelledby="agent-repos-label"
+                  data-testid="create-agent-repo-chips"
+                >
+                  {repoOptions.map((repo) => {
+                    const on = selectedRepos.includes(repo);
+                    return (
+                      <button
+                        key={repo}
+                        type="button"
+                        className={styles.repoChip}
+                        data-active={on || undefined}
+                        aria-pressed={on}
+                        onClick={() => toggleRepo(repo)}
+                        disabled={isSubmitting}
+                      >
+                        <span className={styles.repoChipBox} aria-hidden="true">
+                          {on ? "✓" : ""}
+                        </span>
+                        {repo}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+              {repoHint && <p className={styles.hint}>{repoHint}</p>}
+            </div>
           </div>
+
+          {error && (
+            <div
+              className={styles.error}
+              role="alert"
+              data-testid="create-agent-error"
+              title={error.raw}
+            >
+              {error.message}
+            </div>
+          )}
+        </form>
+        {showScrollHint && (
+          <div className={styles.scrollHint} aria-hidden="true" />
         )}
-      </form>
+      </>
     </AetherModal>
   );
 }

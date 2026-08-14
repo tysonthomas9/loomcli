@@ -20,6 +20,7 @@ import {
 } from "@/contexts/WorkspaceViewContext";
 import { useAgentStoreInstance } from "@/hooks/common";
 import { useRunEpicWorkflow } from "@/hooks/workspace";
+import { HighlightText } from "@/components/HighlightText";
 import type { Issue, Status } from "@/types";
 import { buildEpicLeadClaims } from "@/utils/agentRole";
 import { formatIssueId, formatStatusLabel, isPRUrl } from "@/utils/issue";
@@ -62,7 +63,7 @@ function Avatar({ name }: { name: string }): JSX.Element {
 }
 
 export function ListPage(): JSX.Element {
-  const { filteredIssues } = useWorkspaceViewData();
+  const { filteredIssues, debouncedSearch } = useWorkspaceViewData();
   const { handleIssueClick, showToast } = useWorkspaceViewActions();
   const { runEpic, isRunningEpic } = useRunEpicWorkflow({ showToast });
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
@@ -305,7 +306,12 @@ export function ListPage(): JSX.Element {
                           <code className={styles.rowId} title={issue.id}>
                             {formatIssueId(issue.id)}
                           </code>
-                          <span className={styles.rowTitle}>{issue.title}</span>
+                          <span className={styles.rowTitle} title={issue.title}>
+                            <HighlightText
+                              text={issue.title}
+                              searchTerm={debouncedSearch}
+                            />
+                          </span>
                           <span className={styles.spacer} />
                           <span
                             className={styles.statusChip}

@@ -7,13 +7,14 @@
  *
  * Fully data-backed:
  *   - Diff: the review agent's real branch diff (PRFilesTab → /agents/{name}/diff/*)
+ *   - Decisions: one idempotent server-coordinated review operation
  *   - New review agent: real createWorkspaceAgent → assign → startAgent
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
-import { createIssue, updateIssue } from "@/api";
+import { applyReviewDecision, createIssue, updateIssue } from "@/api";
 import { getPullRequestDetail } from "@/api/workspace/prReview";
 import { startAgent } from "@/hooks/api";
 import { CreateAgentModal } from "@/components/CreateAgentModal/CreateAgentModal";
@@ -144,6 +145,10 @@ export function PRReviewWorkspace({
   const [agentMenuOpen, setAgentMenuOpen] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const [isAssigning, setIsAssigning] = useState(false);
+  const [isDeciding, setIsDeciding] = useState(false);
+  const decisionIntentRef = useRef<{ fingerprint: string; id: string } | null>(
+    null,
+  );
   const [headSha, setHeadSha] = useState<string | null>(null);
   const [stale, setStale] = useState(false);
   const [diffRefreshKey, setDiffRefreshKey] = useState(0);
@@ -302,7 +307,7 @@ export function PRReviewWorkspace({
     setCreatingTicket(true);
     try {
       const sourceRepo = pullRequest.source_repo?.trim();
-      const created = await createIssue(workspaceId, {
+      const { issue: created } = await createIssue(workspaceId, {
         title: pullRequest.title,
         external_ref: pullRequest.url,
         ...(sourceRepo ? { source_repo: sourceRepo } : {}),
@@ -333,6 +338,46 @@ export function PRReviewWorkspace({
       );
     } finally {
       setCreatingTicket(false);
+    }
+  };
+
+  const decide = async (decision: "approve" | "changes"): Promise<void> => {
+    if (!issue) return;
+    setIsDeciding(true);
+    try {
+      const action = decision === "approve" ? "approve" : "request_changes";
+      const reason =
+        decision === "approve"
+          ? "PR approved after code review"
+          : "Changes requested from review workspace";
+      const fingerprint = `${issue.id}:${action}:${reason}`;
+      if (decisionIntentRef.current?.fingerprint !== fingerprint) {
+        decisionIntentRef.current = {
+          fingerprint,
+          id: `review-${crypto.randomUUID()}`,
+        };
+      }
+      await applyReviewDecision(
+        workspaceId,
+        issue.id,
+        action,
+        reason,
+        decisionIntentRef.current.id,
+      );
+      if (decision === "approve") {
+        showToast(`${issue.id} approved and closed`);
+      } else {
+        showToast(`${issue.id} sent back — changes requested`);
+      }
+      refetch();
+      onBack();
+    } catch (err) {
+      showToast(
+        err instanceof Error ? err.message : "Failed to record decision",
+        { type: "error" },
+      );
+    } finally {
+      setIsDeciding(false);
     }
   };
 
@@ -500,6 +545,28 @@ export function PRReviewWorkspace({
             >
               Discuss PR
             </button>
+          )}
+
+          {/* Decision bar (design rw-decision, adapted to real statuses). */}
+          {issue && (
+            <>
+              <button
+                type="button"
+                className={styles.changesButton}
+                disabled={isDeciding}
+                onClick={() => void decide("changes")}
+              >
+                ✗ Request changes
+              </button>
+              <button
+                type="button"
+                className={styles.approveButton}
+                disabled={isDeciding}
+                onClick={() => void decide("approve")}
+              >
+                ✓ Approve
+              </button>
+            </>
           )}
         </div>
         {stale && (

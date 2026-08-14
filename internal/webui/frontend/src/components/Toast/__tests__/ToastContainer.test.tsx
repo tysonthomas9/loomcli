@@ -51,7 +51,7 @@ describe("ToastContainer", () => {
   });
 
   describe("toast rendering", () => {
-    it("renders all toasts in array", () => {
+    it("renders all toasts in array up to the default visible cap", () => {
       const toasts = [
         createToast({ id: "toast-1", message: "First" }),
         createToast({ id: "toast-2", message: "Second" }),
@@ -61,6 +61,38 @@ describe("ToastContainer", () => {
       render(<ToastContainer {...defaultProps} toasts={toasts} />);
 
       expect(screen.getByText("First")).toBeInTheDocument();
+      expect(screen.getByText("Second")).toBeInTheDocument();
+      expect(screen.getByText("Third")).toBeInTheDocument();
+    });
+
+    it("caps visible toasts to the newest maxVisible entries", () => {
+      const toasts = [
+        createToast({ id: "toast-1", message: "First" }),
+        createToast({ id: "toast-2", message: "Second" }),
+        createToast({ id: "toast-3", message: "Third" }),
+        createToast({ id: "toast-4", message: "Fourth" }),
+      ];
+
+      render(<ToastContainer {...defaultProps} toasts={toasts} />);
+
+      expect(screen.queryByText("First")).not.toBeInTheDocument();
+      expect(screen.getByText("Second")).toBeInTheDocument();
+      expect(screen.getByText("Third")).toBeInTheDocument();
+      expect(screen.getByText("Fourth")).toBeInTheDocument();
+    });
+
+    it("honors a custom visible cap", () => {
+      const toasts = [
+        createToast({ id: "toast-1", message: "First" }),
+        createToast({ id: "toast-2", message: "Second" }),
+        createToast({ id: "toast-3", message: "Third" }),
+      ];
+
+      render(
+        <ToastContainer {...defaultProps} toasts={toasts} maxVisible={2} />,
+      );
+
+      expect(screen.queryByText("First")).not.toBeInTheDocument();
       expect(screen.getByText("Second")).toBeInTheDocument();
       expect(screen.getByText("Third")).toBeInTheDocument();
     });

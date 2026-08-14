@@ -9,6 +9,23 @@ import { createStore, type StoreApi } from "zustand/vanilla";
 import { fetchWorkspaceApi } from "../api/workspace";
 import type { WorkspaceData } from "../api/workspace";
 
+type WorkspaceAgent = WorkspaceData["agents"][number];
+
+function normalizeWorkspaceAgent(agent: WorkspaceAgent): WorkspaceAgent {
+  return {
+    ...agent,
+    repos: agent.repos ?? [],
+    repo_groups: agent.repo_groups ?? [],
+  };
+}
+
+function normalizeWorkspaceData(data: WorkspaceData): WorkspaceData {
+  return {
+    ...data,
+    agents: (data.agents ?? []).map(normalizeWorkspaceAgent),
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -24,7 +41,7 @@ export interface WorkspaceStoreActions {
   startPolling: (options: WorkspacePollingOptions) => void;
   stopPolling: () => void;
   refetch: () => void;
-  upsertAgent: (agent: WorkspaceData["agents"][number]) => void;
+  upsertAgent: (agent: WorkspaceAgent) => void;
   reset: () => void;
 }
 
@@ -59,9 +76,10 @@ export function createWorkspaceStore(): StoreApi<WorkspaceStore> {
   let visibilityHandler: (() => void) | null = null;
   let activeWorkspaceId: string | undefined;
   let activePollInterval = DEFAULT_POLL_INTERVAL;
-  const pendingAgents = new Map<string, WorkspaceData["agents"][number]>();
+  const pendingAgents = new Map<string, WorkspaceAgent>();
 
-  const mergePendingAgents = (data: WorkspaceData): WorkspaceData => {
+  const mergePendingAgents = (rawData: WorkspaceData): WorkspaceData => {
+    const data = normalizeWorkspaceData(rawData);
     if (pendingAgents.size === 0) return data;
 
     const agents = data.agents ?? [];
@@ -199,23 +217,26 @@ export function createWorkspaceStore(): StoreApi<WorkspaceStore> {
       void fetchWorkspace(activeWorkspaceId);
     };
 
-    const upsertAgent = (agent: WorkspaceData["agents"][number]): void => {
-      if (agent.name) {
-        pendingAgents.set(agent.name, agent);
+    const upsertAgent = (agent: WorkspaceAgent): void => {
+      const normalizedAgent = normalizeWorkspaceAgent(agent);
+      if (normalizedAgent.name) {
+        pendingAgents.set(normalizedAgent.name, normalizedAgent);
       }
 
       const current = get().workspace;
-      if (!current || !agent.name) return;
+      if (!current || !normalizedAgent.name) return;
 
-      const agents = current.agents ?? [];
+      const agents = (current.agents ?? []).map(normalizeWorkspaceAgent);
       const existingIndex = agents.findIndex(
-        (item) => item.name === agent.name,
+        (item) => item.name === normalizedAgent.name,
       );
       const nextAgents =
         existingIndex === -1
-          ? [...agents, agent]
+          ? [...agents, normalizedAgent]
           : agents.map((item, index) =>
-              index === existingIndex ? { ...item, ...agent } : item,
+              index === existingIndex
+                ? normalizeWorkspaceAgent({ ...item, ...normalizedAgent })
+                : item,
             );
 
       set({

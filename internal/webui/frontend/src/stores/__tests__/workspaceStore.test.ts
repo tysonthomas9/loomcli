@@ -433,6 +433,28 @@ describe("workspaceStore", () => {
       ]);
     });
 
+    it("normalizes missing create-response assignment arrays on upsert", async () => {
+      const ws = makeWorkspace({ agents: [] });
+      mockFetchWorkspaceApi.mockResolvedValueOnce(ws);
+      await store.getState().fetchWorkspace("ws-1");
+
+      store.getState().upsertAgent({
+        name: "planner",
+        role_name: "plan",
+        cross_repo: false,
+      });
+
+      expect(store.getState().workspace?.agents).toEqual([
+        {
+          name: "planner",
+          role_name: "plan",
+          repos: [],
+          repo_groups: [],
+          cross_repo: false,
+        },
+      ]);
+    });
+
     it("updates an existing optimistic agent instead of duplicating it", async () => {
       const ws = makeWorkspace({
         agents: [

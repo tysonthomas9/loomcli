@@ -80,9 +80,6 @@ export interface WorkspaceContextValue extends UseWorkspaceReturn {
   activeWorkspaceName: string | null;
   setActiveWorkspace: (name: string) => void;
 
-  defaultWorkspaceName: string | null;
-  setDefaultWorkspace: (name: string | null) => Promise<void>;
-
   selectedRepoNames: Set<string>;
   activeRepos: RepoInfo[];
   activeRepoNames: string[];
@@ -115,8 +112,6 @@ interface OuterContextValue {
   getReposByGroup: (group: string) => RepoInfo[];
   getAgentByName: (name: string) => WorkspaceAgentInfo | undefined;
   setActiveWorkspace: (name: string) => void;
-  defaultWorkspaceName: string | null;
-  setDefaultWorkspace: (name: string | null) => Promise<void>;
   isMultiRepo: boolean;
 }
 
@@ -179,12 +174,6 @@ export function WorkspaceProvider({
   // (including PerWorkspacePrefsProvider) for no real reason.
   const workspaceRef = useRef<WorkspaceData | null>(workspace);
   workspaceRef.current = workspace;
-
-  const defaultWorkspaceName = null;
-
-  const setDefaultWorkspace = useCallback(async (_name: string | null) => {
-    throw new Error("Default workspace selection has been removed");
-  }, []);
 
   // Workspace switch: build the destination URL via buildWorkspaceSwitchUrl
   // (preserves `view=`, drops everything else) and navigate with
@@ -250,8 +239,6 @@ export function WorkspaceProvider({
       getReposByGroup,
       getAgentByName,
       setActiveWorkspace,
-      defaultWorkspaceName,
-      setDefaultWorkspace,
       isMultiRepo,
     }),
     [
@@ -269,8 +256,6 @@ export function WorkspaceProvider({
       getReposByGroup,
       getAgentByName,
       setActiveWorkspace,
-      defaultWorkspaceName,
-      setDefaultWorkspace,
       isMultiRepo,
     ],
   );
@@ -314,8 +299,6 @@ export const NO_WORKSPACE_CONTEXT: WorkspaceContextValue = {
   workspaceId: "",
   activeWorkspaceName: null,
   setActiveWorkspace: () => {},
-  defaultWorkspaceName: null,
-  setDefaultWorkspace: () => Promise.resolve(),
   selectedRepoNames: new Set<string>(),
   activeRepos: [],
   activeRepoNames: [],
@@ -357,8 +340,6 @@ export function useWorkspaceContext(): WorkspaceContextValue {
     workspaceId: outer.workspaceId,
     activeWorkspaceName: outer.activeWorkspaceName,
     setActiveWorkspace: outer.setActiveWorkspace,
-    defaultWorkspaceName: outer.defaultWorkspaceName,
-    setDefaultWorkspace: outer.setDefaultWorkspace,
     selectedRepoNames: inner.selectedRepoNames,
     activeRepos: inner.activeRepos,
     activeRepoNames: inner.activeRepoNames,

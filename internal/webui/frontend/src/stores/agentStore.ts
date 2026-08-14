@@ -8,6 +8,7 @@
 import { createStore, type StoreApi } from "zustand/vanilla";
 
 import { fetchStatus } from "../api/agents";
+import type { WorkspaceAgentInfo } from "../api/workspace";
 import { resolveAgentByName } from "../types";
 import type {
   LoomAgentStatus,
@@ -30,6 +31,14 @@ const STALE_BANNER_DELAY_MS = 5_000;
 const MAX_FAILURES_AT_CEILING = 5;
 const FETCH_TIMEOUT_MS = 15_000;
 const WATCHDOG_TIMEOUT_MS = 20_000;
+const INTERACTIVE_ROLE_NAMES = new Set(["lead", "orchestrator"]);
+const WORKER_ROLE_NAMES = new Set([
+  "plan",
+  "planner",
+  "task",
+  "coder",
+  "worker",
+]);
 
 // ---------------------------------------------------------------------------
 // Default values (moved from useAgents.ts)
@@ -117,6 +126,7 @@ export interface AgentStoreActions {
   startPolling: (options?: PollingOptions) => void;
   stopPolling: () => void;
   retryNow: () => void;
+  upsertWorkspaceAgent: (agent: WorkspaceAgentInfo) => void;
   getAgentByName: (name: string) => LoomAgentStatus | undefined;
   reset: () => void;
 }
@@ -187,6 +197,49 @@ function deriveConnectionState(
   if (retryCountdown > 0) return "reconnecting";
   if (!wasEverConnected) return "never_connected";
   return "disconnected";
+}
+
+function roleKindForWorkspaceAgent(
+  agent: WorkspaceAgentInfo,
+): LoomAgentStatus["role_kind"] | undefined {
+  if (agent.role_kind === "interactive" || agent.role_kind === "worker") {
+    return agent.role_kind;
+  }
+  const roleName = agent.role_name;
+  const normalized = (roleName ?? "").trim().toLowerCase();
+  if (INTERACTIVE_ROLE_NAMES.has(normalized)) return "interactive";
+  if (WORKER_ROLE_NAMES.has(normalized)) return "worker";
+  return undefined;
+}
+
+function statusFromWorkspaceAgent(
+  agent: WorkspaceAgentInfo,
+  existing: LoomAgentStatus | undefined,
+): LoomAgentStatus {
+  const repos = agent.repos ?? [];
+  const roleKind = roleKindForWorkspaceAgent(agent);
+  const next: LoomAgentStatus = {
+    ...existing,
+    name: agent.name,
+    branch: existing?.branch ?? "",
+    status: existing?.status ?? "ready",
+    ahead: existing?.ahead ?? 0,
+    behind: existing?.behind ?? 0,
+    cross_repo: agent.cross_repo,
+  };
+  if (agent.role_name) {
+    next.role = agent.role_name;
+  }
+  if (roleKind) {
+    next.role_kind = roleKind;
+  }
+  const onlyRepo = repos[0];
+  if (repos.length === 1 && onlyRepo) {
+    next.repo = onlyRepo;
+  } else if (repos.length !== 1 && next.repo && !existing?.repo) {
+    delete next.repo;
+  }
+  return next;
 }
 
 // ---------------------------------------------------------------------------
@@ -466,6 +519,25 @@ export function createAgentStore(
       consecutiveFailuresAtCeiling = 0;
       set({ connectionLost: false, retryCountdown: 0 });
       void get().fetchData();
+    },
+
+    upsertWorkspaceAgent(agent: WorkspaceAgentInfo): void {
+      if (!agent.name) return;
+
+      const agents = get().agents;
+      const existingIndex = agents.findIndex(
+        (item) => item.name === agent.name,
+      );
+      const existing = existingIndex === -1 ? undefined : agents[existingIndex];
+      const nextAgent = statusFromWorkspaceAgent(agent, existing);
+      const nextAgents =
+        existingIndex === -1
+          ? [...agents, nextAgent]
+          : agents.map((item, index) =>
+              index === existingIndex ? nextAgent : item,
+            );
+
+      set({ agents: nextAgents });
     },
 
     getAgentByName(name: string): LoomAgentStatus | undefined {

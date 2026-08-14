@@ -120,6 +120,37 @@ func HandleAddWorkspaceRepos(svc service.WorkspaceService) http.HandlerFunc {
 	}
 }
 
+// HandleRemoveWorkspaceRepo returns DELETE /api/workspaces/{ws}/repos/{repo}.
+func HandleRemoveWorkspaceRepo(svc service.WorkspaceService) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		wsID := workspaceIDFromRequest(r)
+		repoName := strings.TrimSpace(r.PathValue("repo"))
+		ctx, span := startSpan(r.Context(), "service.Repo.Remove",
+			attribute.String("loom.workspace", wsID))
+		defer span.End()
+
+		if wsID == "" {
+			handler.RespondError(w, http.StatusBadRequest, "workspace ID is required")
+			return
+		}
+		if repoName == "" {
+			handler.RespondError(w, http.StatusBadRequest, "repo name is required")
+			return
+		}
+
+		data, err := svc.RemoveWorkspaceRepo(ctx, service.WorkspaceRemoveRepoRequest{
+			WorkspaceID: wsID,
+			RepoName:    repoName,
+		})
+		if err != nil {
+			recordErr(span, err)
+			handler.HandleServiceError(w, err)
+			return
+		}
+		handler.WriteJSON(w, http.StatusOK, WorkspaceResponse{Success: true, Data: data})
+	}
+}
+
 func workspaceIDFromRequest(r *http.Request) string {
 	if wsID := strings.TrimSpace(middleware.WorkspaceFromContext(r.Context())); wsID != "" {
 		return wsID

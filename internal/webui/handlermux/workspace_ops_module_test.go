@@ -33,6 +33,7 @@ func TestWorkspaceOpsModule_RegisterRoutes(t *testing.T) {
 		{"GET", "/api/workspaces/test-ws/issues/graph"},
 		{"GET", "/api/workspaces/test-ws/readyz"},
 		{"GET", "/api/workspaces/test-ws/config/backend"},
+		{"DELETE", "/api/workspaces/test-ws/repos/api"},
 	}
 
 	for _, rt := range routes {

@@ -55,7 +55,8 @@ function formatTimestamp(ts: string | undefined): string {
 
 // Cost and duration keep detail-panel precision here (sub-cent cost to 4dp,
 // fractional seconds) rather than the run rail's rounded summary formatting.
-function formatCost(usd: number): string {
+function formatCost(usd: number | null): string {
+  if (usd == null) return "—";
   if (usd === 0) return "$0";
   if (usd < 0.01) return `$${usd.toFixed(4)}`;
   return `$${usd.toFixed(2)}`;
@@ -89,7 +90,7 @@ type ToolItem = {
   resultTimestamp?: string;
 };
 
-type TextItem = { kind: "text"; seq: number; text: string };
+type TextItem = { kind: "text"; seq: number; text: string; rawText?: string };
 
 type TurnItem = TextItem | ToolItem;
 
@@ -194,8 +195,10 @@ function groupEvents(entries: TranscriptEntry[]): GroupedEvents {
       // just assigned). Narrow with a local alias for TS.
       const turn = current!;
       if (e.type === "text") {
-        const text = (e.text ?? "").trim();
-        if (text) turn.items.push({ kind: "text", seq: e.seq, text });
+        const decoded = decodeTranscriptText(e.text ?? "");
+        if (decoded.text) {
+          turn.items.push({ kind: "text", seq: e.seq, ...decoded });
+        }
       } else if (e.type === "tool_use") {
         const paired = e.tool_use_id
           ? resultById.get(e.tool_use_id)
@@ -223,6 +226,51 @@ function groupEvents(entries: TranscriptEntry[]): GroupedEvents {
 }
 
 // ─── Sub-components ────────────────────────────────────────────────────
+
+function decodeTranscriptText(rawText: string): {
+  text: string;
+  rawText?: string;
+} {
+  const trimmed = rawText.trim();
+  if (!trimmed.startsWith("{") || !trimmed.endsWith("}")) {
+    return { text: trimmed };
+  }
+
+  try {
+    const parsed = JSON.parse(trimmed) as unknown;
+    if (
+      parsed &&
+      typeof parsed === "object" &&
+      "output" in parsed &&
+      typeof (parsed as { output?: unknown }).output === "string"
+    ) {
+      return {
+        text: (parsed as { output: string }).output.trim(),
+        rawText: trimmed,
+      };
+    }
+  } catch {
+    return { text: trimmed };
+  }
+
+  return { text: trimmed };
+}
+
+function TranscriptText({ item }: { item: TextItem }): JSX.Element {
+  if (!item.rawText) {
+    return <MarkdownRenderer content={item.text} className={styles.msg} />;
+  }
+
+  return (
+    <div className={styles.msgFrame} title={item.rawText}>
+      <MarkdownRenderer content={item.text} className={styles.msg} />
+      <details className={styles.rawTranscriptDetails}>
+        <summary>Raw envelope</summary>
+        <pre>{item.rawText}</pre>
+      </details>
+    </div>
+  );
+}
 
 // ─── Main component ───────────────────────────────────────────────────
 
@@ -262,7 +310,13 @@ export function SessionDetailView({
     });
   };
 
-  const totalTokens = sessionTotalTokens(session);
+  const totalTokens =
+    session.evidence?.usage_status === "unavailable" ||
+    (session.evidence == null &&
+      session.input_tokens == null &&
+      session.output_tokens == null)
+      ? null
+      : sessionTotalTokens(session);
   const runError = runErrorSummary(session);
 
   return (
@@ -298,6 +352,25 @@ export function SessionDetailView({
           </div>
         )}
 
+        {session.evidence?.status === "conflict" && (
+          <div
+            className={styles.runErrorBanner}
+            role="alert"
+            data-testid="run-evidence-conflict"
+          >
+            <div className={styles.runErrorTitle}>Run evidence conflict</div>
+            <div className={styles.runErrorBody}>
+              {session.evidence.conflicts.map((conflict) => (
+                <div key={`${conflict.field}-${conflict.incoming_source}`}>
+                  {conflict.field}: {conflict.existing_source} reported{" "}
+                  {conflict.existing_value}; {conflict.incoming_source} reported{" "}
+                  {conflict.incoming_value}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         <div className={styles.statRow}>
           <div className={styles.stat}>
             <div className={styles.statLabel}>Outcome</div>
@@ -322,7 +395,9 @@ export function SessionDetailView({
           </div>
           <div className={styles.stat}>
             <div className={styles.statLabel}>Tokens</div>
-            <div className={styles.statValue}>{formatTokens(totalTokens)}</div>
+            <div className={styles.statValue}>
+              {totalTokens == null ? "—" : formatTokens(totalTokens)}
+            </div>
           </div>
           {(session.estimated_cost_usd ?? 0) > 0 && (
             <div className={styles.stat}>
@@ -473,11 +548,7 @@ export function SessionDetailView({
                 </div>
                 {block.items.map((item) =>
                   item.kind === "text" ? (
-                    <MarkdownRenderer
-                      key={item.seq}
-                      content={item.text}
-                      className={styles.msg}
-                    />
+                    <TranscriptText key={item.seq} item={item} />
                   ) : (
                     <ToolPill
                       key={item.seq}

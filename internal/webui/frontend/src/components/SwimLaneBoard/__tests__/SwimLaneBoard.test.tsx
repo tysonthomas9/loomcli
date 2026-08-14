@@ -323,6 +323,76 @@ describe("SwimLaneBoard", () => {
       ).toBeInTheDocument();
     });
 
+    it("shows epic lanes whose child issues are all closed in the Done column", () => {
+      const issues = [
+        createMockIssue({
+          id: "epic-1",
+          title: "Finished Epic",
+          issue_type: "epic",
+          status: "open",
+        }),
+        createMockIssue({
+          id: "task-1",
+          title: "Finished Task",
+          issue_type: "task",
+          parent: "epic-1",
+          parent_title: "Finished Epic",
+          status: "closed",
+        }),
+      ];
+
+      render(<SwimLaneBoard issues={issues} groupBy="epic" />);
+
+      expect(
+        screen.getByRole("heading", { name: "Finished Epic" }),
+      ).toBeInTheDocument();
+      const doneColumn = document.querySelector('section[data-status="done"]');
+      expect(doneColumn).not.toBeNull();
+      expect(
+        within(doneColumn as HTMLElement).getByText("Finished Task"),
+      ).toBeInTheDocument();
+    });
+
+    it("keeps the completed-lanes toggle when full board data has completed issues", () => {
+      const visibleIssues = [
+        createMockIssue({
+          id: "epic-1",
+          title: "Active Epic",
+          issue_type: "epic",
+          status: "open",
+        }),
+        createMockIssue({
+          id: "task-1",
+          title: "Active Task",
+          issue_type: "task",
+          parent: "epic-1",
+          parent_title: "Active Epic",
+          status: "open",
+        }),
+      ];
+      const allIssues = [
+        ...visibleIssues,
+        createMockIssue({
+          id: "task-done",
+          title: "Completed Task",
+          issue_type: "task",
+          status: "closed",
+        }),
+      ];
+
+      render(
+        <SwimLaneBoard
+          issues={visibleIssues}
+          allIssues={allIssues}
+          groupBy="epic"
+        />,
+      );
+
+      expect(screen.getByTestId("toggle-completed-lanes")).toHaveTextContent(
+        "Hide Completed",
+      );
+    });
+
     it("shows correct lane titles for label grouping", () => {
       const issues = [
         createMockIssue({ id: "issue-1", labels: ["frontend"] }),

@@ -62,8 +62,9 @@ type IssueBackend interface {
 	// --- Mutation operations ---
 
 	// Create creates a new issue and returns the slim projection of the
-	// created issue. If CreateParams.ID is empty, the backend generates an ID.
-	Create(ctx context.Context, params CreateParams) (*IssueData, error)
+	// created issue plus idempotency metadata when the backend supports it.
+	// If CreateParams.ID is empty, the backend generates an ID.
+	Create(ctx context.Context, params CreateParams) (*CreateResult, error)
 
 	// Update applies partial updates to an existing issue. Only non-nil
 	// pointer fields in UpdateParams are applied. Returns KindNotFound if

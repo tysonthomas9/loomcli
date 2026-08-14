@@ -362,10 +362,6 @@ export function WorkspaceTree({
             </div>
           )}
 
-          {!isLoading && !error && workspaceRepos.length === 0 && (
-            <div className={styles.emptyState}>No repos in workspace</div>
-          )}
-
           {/* Agents in board views; terminal sessions in Terminal view */}
           {showTerminalSidebar ? (
             <TerminalSection />
@@ -385,7 +381,11 @@ export function WorkspaceTree({
           {/* Repo inventory with the Add Repo entry at its bottom (Aether V3) */}
           <ReposSection
             repos={workspaceRepos}
-            {...(workspaceId && { onAddRepo: () => setAddRepoOpen(true) })}
+            {...(workspaceId && {
+              workspaceId,
+              onAddRepo: () => setAddRepoOpen(true),
+              onRepoRemoved: refetch,
+            })}
           />
         </div>
       )}

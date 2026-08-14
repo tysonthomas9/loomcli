@@ -21,7 +21,7 @@ func isCreateExternalRefUnsupported(err error) bool {
 func (b *FleetBackend) createWithoutExternalRef(
 	ctx context.Context,
 	params backend.CreateParams,
-) (*backend.IssueData, error) {
+) (*backend.CreateResult, error) {
 	retryParams := params
 	retryParams.ExternalRef = ""
 	retryKey, err := retryParams.FleetCreateIdempotencyKey(time.Now())
@@ -35,12 +35,12 @@ func (b *FleetBackend) createWithoutExternalRef(
 	}
 
 	externalRef := params.ExternalRef
-	if err := b.Update(ctx, result.ID, backend.UpdateParams{ExternalRef: &externalRef}); err != nil {
+	if err := b.Update(ctx, result.Issue.ID, backend.UpdateParams{ExternalRef: &externalRef}); err != nil {
 		// The issue itself was created; return it alongside the classified
 		// error so callers that inspect the partial result can still see the ID.
-		return result, createExternalRefPatchError(result.ID, err)
+		return result, createExternalRefPatchError(result.Issue.ID, err)
 	}
-	result.ExternalRef = externalRef
+	result.Issue.ExternalRef = externalRef
 	return result, nil
 }
 

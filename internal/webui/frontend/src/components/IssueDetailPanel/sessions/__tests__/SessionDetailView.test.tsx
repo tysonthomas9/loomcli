@@ -68,6 +68,7 @@ function createSession(overrides: Partial<SessionRecord> = {}): SessionRecord {
     has_transcript: true,
     has_diff: true,
     is_active: false,
+    evidence: { status: "ok", usage_status: "reported", conflicts: [] },
     ...overrides,
   };
 }
@@ -155,6 +156,28 @@ describe("SessionDetailView", () => {
       render(<SessionDetailView taskId="task-1" session={session} />);
       expect(screen.getByTestId("run-error-banner")).toHaveTextContent(
         "AuthFailure",
+      );
+    });
+
+    it("shows explicit run evidence conflicts", () => {
+      const session = createSession({
+        evidence: {
+          status: "conflict",
+          usage_status: "conflict",
+          conflicts: [
+            {
+              field: "input_tokens",
+              existing_source: "control_plane",
+              existing_value: "12",
+              incoming_source: "session_store",
+              incoming_value: "13",
+            },
+          ],
+        },
+      });
+      render(<SessionDetailView taskId="task-1" session={session} />);
+      expect(screen.getByTestId("run-evidence-conflict")).toHaveTextContent(
+        "input_tokens: control_plane reported 12; session_store reported 13",
       );
     });
 
@@ -358,6 +381,30 @@ describe("SessionDetailView", () => {
       // Literal markdown syntax must not survive
       expect(container.textContent).not.toContain("**JsonlStateStore**");
       expect(container.textContent).not.toContain("`add_state`");
+    });
+
+    it("renders JSON transcript envelopes as output text and keeps the raw envelope in details", () => {
+      const raw =
+        '{"status":"completed","output":"Review complete.\\n\\nNo changes needed."}';
+      mockUseSessionTranscript.mockReturnValue({
+        entries: [
+          createEntry({
+            seq: 1,
+            role: "assistant",
+            type: "text",
+            text: raw,
+          }),
+        ],
+        isLoading: false,
+        error: null,
+      });
+      render(<SessionDetailView taskId="task-1" session={defaultSession} />);
+
+      expect(screen.getByText("Review complete.")).toBeInTheDocument();
+      expect(screen.getByText("No changes needed.")).toBeInTheDocument();
+      const details = screen.getByText("Raw envelope").closest("details");
+      expect(details).not.toHaveAttribute("open");
+      expect(details).toHaveTextContent(raw);
     });
 
     it("renders a user-message interjection as formatted Markdown", () => {

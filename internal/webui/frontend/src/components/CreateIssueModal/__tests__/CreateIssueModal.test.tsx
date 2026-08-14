@@ -68,6 +68,11 @@ const MOCK_ISSUE: Issue = {
   updated_at: "2026-03-21T00:00:00Z",
 };
 
+const MOCK_CREATE_RESULT = {
+  issue: MOCK_ISSUE,
+  softDuplicate: false,
+};
+
 describe("CreateIssueModal", () => {
   let onClose: ReturnType<typeof vi.fn>;
   let onSuccess: ReturnType<typeof vi.fn>;
@@ -205,10 +210,10 @@ describe("CreateIssueModal", () => {
 
     it("shows 'Creating...' text on submit button during submission", async () => {
       // Keep the promise pending so we can observe the submitting state
-      let resolvePromise!: (value: Issue) => void;
+      let resolvePromise!: (value: typeof MOCK_CREATE_RESULT) => void;
       mockCreateIssue.mockImplementation(
         () =>
-          new Promise<Issue>((resolve) => {
+          new Promise<typeof MOCK_CREATE_RESULT>((resolve) => {
             resolvePromise = resolve;
           }),
       );
@@ -236,14 +241,14 @@ describe("CreateIssueModal", () => {
 
       // Clean up
       await act(async () => {
-        resolvePromise(MOCK_ISSUE);
+        resolvePromise(MOCK_CREATE_RESULT);
       });
     });
   });
 
   describe("form submission", () => {
     it("calls createIssue with correct data on submit", async () => {
-      mockCreateIssue.mockResolvedValue(MOCK_ISSUE);
+      mockCreateIssue.mockResolvedValue(MOCK_CREATE_RESULT);
 
       render(
         <CreateIssueModal
@@ -265,17 +270,21 @@ describe("CreateIssueModal", () => {
       fireEvent.click(screen.getByTestId("create-issue-submit"));
 
       await waitFor(() => {
-        expect(mockCreateIssue).toHaveBeenCalledWith("test-ws-id", {
-          title: "Fix login bug",
-          issue_type: "bug",
-          priority: 2,
-          description: "Users cannot log in",
-        });
+        expect(mockCreateIssue).toHaveBeenCalledWith(
+          "test-ws-id",
+          {
+            title: "Fix login bug",
+            issue_type: "bug",
+            priority: 2,
+            description: "Users cannot log in",
+          },
+          { idempotencyKey: expect.stringMatching(/^loom-ui-/) },
+        );
       });
     });
 
     it("calls onSuccess and onClose after successful creation", async () => {
-      mockCreateIssue.mockResolvedValue(MOCK_ISSUE);
+      mockCreateIssue.mockResolvedValue(MOCK_CREATE_RESULT);
 
       render(
         <CreateIssueModal
@@ -297,7 +306,7 @@ describe("CreateIssueModal", () => {
     });
 
     it("waits for async onSuccess before closing", async () => {
-      mockCreateIssue.mockResolvedValue(MOCK_ISSUE);
+      mockCreateIssue.mockResolvedValue(MOCK_CREATE_RESULT);
       let resolveSuccess!: () => void;
       onSuccess.mockImplementation(
         () =>
@@ -334,7 +343,7 @@ describe("CreateIssueModal", () => {
     });
 
     it("surfaces async onSuccess failures without closing", async () => {
-      mockCreateIssue.mockResolvedValue(MOCK_ISSUE);
+      mockCreateIssue.mockResolvedValue(MOCK_CREATE_RESULT);
       onSuccess.mockRejectedValue(new Error("Refresh failed"));
 
       render(
@@ -384,8 +393,83 @@ describe("CreateIssueModal", () => {
       expect(onClose).not.toHaveBeenCalled();
     });
 
+    it("reuses the submit idempotency key after an ambiguous failure", async () => {
+      mockCreateIssue
+        .mockRejectedValueOnce(new Error("response lost"))
+        .mockResolvedValueOnce(MOCK_CREATE_RESULT);
+
+      render(
+        <CreateIssueModal
+          isOpen={true}
+          onClose={onClose}
+          onSuccess={onSuccess}
+        />,
+      );
+
+      fireEvent.change(screen.getByTestId("create-issue-title"), {
+        target: { value: "Retry-safe issue" },
+      });
+      fireEvent.click(screen.getByTestId("create-issue-submit"));
+      await screen.findByText("response lost");
+
+      fireEvent.click(screen.getByTestId("create-issue-submit"));
+      await waitFor(() => expect(onSuccess).toHaveBeenCalledWith(MOCK_ISSUE));
+
+      const firstKey = mockCreateIssue.mock.calls[0]?.[2]?.idempotencyKey;
+      const secondKey = mockCreateIssue.mock.calls[1]?.[2]?.idempotencyKey;
+      expect(firstKey).toMatch(/^loom-ui-/);
+      expect(secondKey).toBe(firstKey);
+    });
+
+    it("surfaces soft duplicate creates and retries with force when requested", async () => {
+      const forcedIssue = { ...MOCK_ISSUE, id: "TST-002" };
+      mockCreateIssue
+        .mockResolvedValueOnce({ issue: MOCK_ISSUE, softDuplicate: true })
+        .mockResolvedValueOnce({ issue: forcedIssue, softDuplicate: false });
+
+      render(
+        <CreateIssueModal
+          isOpen={true}
+          onClose={onClose}
+          onSuccess={onSuccess}
+        />,
+      );
+
+      fireEvent.change(screen.getByTestId("create-issue-title"), {
+        target: { value: "Test issue" },
+      });
+      fireEvent.click(screen.getByTestId("create-issue-submit"));
+
+      await waitFor(() => {
+        expect(screen.getByTestId("soft-duplicate-notice")).toHaveTextContent(
+          "An identical issue was created moments ago",
+        );
+      });
+      expect(onSuccess).not.toHaveBeenCalled();
+
+      fireEvent.click(screen.getByTestId("soft-duplicate-create-anyway"));
+
+      await waitFor(() => {
+        expect(mockCreateIssue).toHaveBeenLastCalledWith(
+          "test-ws-id",
+          {
+            title: "Test issue",
+            issue_type: "task",
+            priority: 2,
+          },
+          {
+            force: true,
+            idempotencyKey: expect.stringMatching(/^loom-ui-/),
+          },
+        );
+      });
+      await waitFor(() => {
+        expect(onSuccess).toHaveBeenCalledWith(forcedIssue);
+      });
+    });
+
     it("description is optional: submitting without description works", async () => {
-      mockCreateIssue.mockResolvedValue(MOCK_ISSUE);
+      mockCreateIssue.mockResolvedValue(MOCK_CREATE_RESULT);
 
       render(
         <CreateIssueModal
@@ -402,11 +486,15 @@ describe("CreateIssueModal", () => {
       fireEvent.click(screen.getByTestId("create-issue-submit"));
 
       await waitFor(() => {
-        expect(mockCreateIssue).toHaveBeenCalledWith("test-ws-id", {
-          title: "No description issue",
-          issue_type: "task",
-          priority: 2,
-        });
+        expect(mockCreateIssue).toHaveBeenCalledWith(
+          "test-ws-id",
+          {
+            title: "No description issue",
+            issue_type: "task",
+            priority: 2,
+          },
+          { idempotencyKey: expect.stringMatching(/^loom-ui-/) },
+        );
       });
 
       // description key should not be present in the request
@@ -415,7 +503,7 @@ describe("CreateIssueModal", () => {
     });
 
     it("includes selected source_repo in multi-repo workspaces", async () => {
-      mockCreateIssue.mockResolvedValue(MOCK_ISSUE);
+      mockCreateIssue.mockResolvedValue(MOCK_CREATE_RESULT);
       mockUseWorkspaceContext.mockReturnValue({
         workspaceId: "test-ws-id",
         repos: [
@@ -441,17 +529,21 @@ describe("CreateIssueModal", () => {
       fireEvent.click(screen.getByTestId("create-issue-submit"));
 
       await waitFor(() => {
-        expect(mockCreateIssue).toHaveBeenCalledWith("test-ws-id", {
-          title: "Repo scoped issue",
-          issue_type: "task",
-          priority: 2,
-          source_repo: "e2e-lib",
-        });
+        expect(mockCreateIssue).toHaveBeenCalledWith(
+          "test-ws-id",
+          {
+            title: "Repo scoped issue",
+            issue_type: "task",
+            priority: 2,
+            source_repo: "e2e-lib",
+          },
+          { idempotencyKey: expect.stringMatching(/^loom-ui-/) },
+        );
       });
     });
 
     it("defaults source_repo in single-repo workspaces", async () => {
-      mockCreateIssue.mockResolvedValue(MOCK_ISSUE);
+      mockCreateIssue.mockResolvedValue(MOCK_CREATE_RESULT);
       mockUseWorkspaceContext.mockReturnValue({
         workspaceId: "test-ws-id",
         repos: [{ name: "hello-world", source_repo_id: "hello-world" }],
@@ -472,12 +564,16 @@ describe("CreateIssueModal", () => {
       fireEvent.click(screen.getByTestId("create-issue-submit"));
 
       await waitFor(() => {
-        expect(mockCreateIssue).toHaveBeenCalledWith("test-ws-id", {
-          title: "Single repo issue",
-          issue_type: "task",
-          priority: 2,
-          source_repo: "hello-world",
-        });
+        expect(mockCreateIssue).toHaveBeenCalledWith(
+          "test-ws-id",
+          {
+            title: "Single repo issue",
+            issue_type: "task",
+            priority: 2,
+            source_repo: "hello-world",
+          },
+          { idempotencyKey: expect.stringMatching(/^loom-ui-/) },
+        );
       });
     });
   });

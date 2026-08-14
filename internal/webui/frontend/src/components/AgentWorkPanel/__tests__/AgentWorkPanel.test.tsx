@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -146,6 +146,83 @@ describe("AgentWorkPanel", () => {
     );
 
     expect(onTaskClick).toHaveBeenCalledWith(epic);
+  });
+
+  it("renders a status badge for orchestrator worker-history rows", () => {
+    renderWithStores(<AgentWorkPanel agentName="lead-1" />, {
+      agents: [
+        agent({ name: "lead-1", role: "lead" }),
+        agent({
+          name: "orchestrator-runner",
+          role: "task",
+          mode: "ephemeral",
+          task_id: "TASK-1",
+          status: "working on TASK-1",
+        }),
+      ],
+      issues: [
+        issue({
+          id: "EPIC-1",
+          title: "Open epic",
+          issue_type: "epic",
+          status: "open",
+        }),
+        issue({
+          id: "TASK-1",
+          title: "First task",
+          parent: "EPIC-1",
+          status: "open",
+        }),
+      ],
+    });
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Expand epic EPIC-1 (1 open)" }),
+    );
+
+    expect(
+      within(screen.getByLabelText("Worker history")).getByText(
+        "orchestrator-runner",
+      ),
+    ).toBeTruthy();
+    expect(
+      screen.getByTestId("worker-history-status").getAttribute("data-status"),
+    ).toBe("running");
+  });
+
+  it("opens a completed task from an expanded idle-lead epic", () => {
+    const onTaskClick = vi.fn();
+    const completedTask = issue({
+      id: "TASK-DONE",
+      title: "Finished task",
+      parent: "EPIC-1",
+      status: "closed",
+    });
+    renderWithStores(
+      <AgentWorkPanel agentName="lead-1" onTaskClick={onTaskClick} />,
+      {
+        agents: [agent({ name: "lead-1", role: "lead" })],
+        issues: [
+          issue({
+            id: "EPIC-1",
+            title: "Open epic",
+            issue_type: "epic",
+            status: "open",
+          }),
+          completedTask,
+        ],
+      },
+    );
+
+    expect(screen.queryByText("TASK-DONE")).toBeNull();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Expand epic EPIC-1 (0 open)" }),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: /TASK-DONE.*Finished task/ }),
+    );
+
+    expect(onTaskClick).toHaveBeenCalledWith(completedTask);
   });
 
   it("filters tasks by id and title and hides empty epic groups", () => {

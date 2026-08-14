@@ -923,6 +923,8 @@ func TestCreate_HappyPath(t *testing.T) {
 	ab, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		gotMethod = r.Method
 		gotPath = r.URL.Path
+		w.Header().Set("X-Idempotency-Warning", "soft-duplicate")
+		w.Header().Set("X-Idempotency-Replayed", "true")
 		respondOK(w, gen.IssueResponse{
 			Id:        "new-1",
 			Title:     "New",
@@ -950,8 +952,11 @@ func TestCreate_HappyPath(t *testing.T) {
 	if !strings.HasSuffix(gotPath, "/issues") {
 		t.Errorf("path = %q", gotPath)
 	}
-	if result.ID != "new-1" {
-		t.Errorf("ID = %q", result.ID)
+	if result.Issue.ID != "new-1" {
+		t.Errorf("ID = %q", result.Issue.ID)
+	}
+	if result.IdempotencyWarning != "soft-duplicate" || !result.Replayed {
+		t.Errorf("idempotency metadata = warning %q replayed %v, want soft-duplicate/true", result.IdempotencyWarning, result.Replayed)
 	}
 }
 

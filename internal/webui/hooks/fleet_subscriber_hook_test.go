@@ -49,7 +49,7 @@ func (stubFleetBackend) GetChildren(_ context.Context, _ string) ([]backend.Issu
 func (stubFleetBackend) SearchIssues(_ context.Context, _ string, _ int) ([]backend.IssueData, error) {
 	return nil, errors.New("stub")
 }
-func (stubFleetBackend) Create(_ context.Context, _ backend.CreateParams) (*backend.IssueData, error) {
+func (stubFleetBackend) Create(_ context.Context, _ backend.CreateParams) (*backend.CreateResult, error) {
 	return nil, errors.New("stub")
 }
 func (stubFleetBackend) Update(_ context.Context, _ string, _ backend.UpdateParams) error {

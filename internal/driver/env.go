@@ -83,10 +83,14 @@ var trustedLocalProviderCredentials = map[string]struct{}{
 	"ANTHROPIC_API_KEY": {},
 	// claude-code's long-lived OAuth token (`claude setup-token`); the headless
 	// equivalent of a ~/.claude login, so the local runner must inherit it too.
-	"CLAUDE_CODE_OAUTH_TOKEN":        {},
-	"OPENAI_API_KEY":                 {},
-	"CODEX_API_KEY":                  {},
-	"CODEX_HOME":                     {},
+	"CLAUDE_CODE_OAUTH_TOKEN": {},
+	"OPENAI_API_KEY":          {},
+	"CODEX_API_KEY":           {},
+	"CODEX_HOME":              {},
+	// claude-code's config-dir override (default ~/.claude); the runner's claude
+	// CLI reads its OAuth credentials from here, so it must survive like CODEX_HOME
+	// or a custom-dir login passes preflight and then fails at runtime.
+	"CLAUDE_CONFIG_DIR":              {},
 	"GEMINI_API_KEY":                 {},
 	"GOOGLE_API_KEY":                 {},
 	"GOOGLE_APPLICATION_CREDENTIALS": {},

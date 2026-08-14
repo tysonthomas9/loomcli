@@ -7,7 +7,7 @@
  *
  * parsePatch: pure function tests for hunk parsing, line numbering, multi-hunk patches.
  * DiffFileViewer: rendering tests for loading, error, binary, too-large, empty, and actual diff.
- * DiffFileRow: status badges, rename display, stats, viewed checkbox, expand chevron, click handlers.
+ * DiffFileRow: status badges, rename display, stats, viewed control, expand chevron, click handlers.
  */
 
 import { render, screen, fireEvent } from "@testing-library/react";
@@ -150,6 +150,19 @@ describe("parsePatch", () => {
     expect(result.hunks).toHaveLength(1);
     const lines = result.hunks[0].lines;
     expect(lines[1]).toEqual({ type: "add", content: "+added", newNum: 7 });
+  });
+
+  it("does not synthesize a trailing context row for a terminal newline", () => {
+    const patch = "@@ -0,0 +1 @@\n+added\n";
+
+    const result = parsePatch(patch);
+    expect(result.hunks).toHaveLength(1);
+    expect(result.hunks[0].lines).toHaveLength(2);
+    expect(result.hunks[0].lines[1]).toEqual({
+      type: "add",
+      content: "+added",
+      newNum: 1,
+    });
   });
 
   it("tracks line numbers correctly through consecutive deletes and adds", () => {
@@ -421,6 +434,12 @@ describe("DiffFileRow", () => {
     return render(<DiffFileRow {...props} />);
   }
 
+  function getRowButton(): HTMLElement {
+    const row = screen.getByText("src/main.go").closest('[role="button"]');
+    expect(row).toBeInTheDocument();
+    return row as HTMLElement;
+  }
+
   describe("status badge", () => {
     it("renders the file status text", () => {
       renderRow({ file: makeFile({ status: "M" }) });
@@ -515,39 +534,49 @@ describe("DiffFileRow", () => {
     });
   });
 
-  describe("viewed checkbox", () => {
-    it("renders unchecked when isViewed is false", () => {
+  describe("viewed control", () => {
+    it("renders unpressed when isViewed is false", () => {
       renderRow({ isViewed: false });
-      const checkbox = screen.getByRole("checkbox");
-      expect(checkbox).not.toBeChecked();
+      const viewedButton = screen.getByRole("button", {
+        name: "Mark src/main.go as viewed",
+      });
+      expect(viewedButton).toHaveAttribute("aria-pressed", "false");
     });
 
-    it("renders checked when isViewed is true", () => {
+    it("renders pressed when isViewed is true", () => {
       renderRow({ isViewed: true });
-      const checkbox = screen.getByRole("checkbox");
-      expect(checkbox).toBeChecked();
+      const viewedButton = screen.getByRole("button", {
+        name: "Unmark src/main.go as viewed",
+      });
+      expect(viewedButton).toHaveAttribute("aria-pressed", "true");
     });
 
-    it("calls onToggleViewed when checkbox changes", () => {
+    it("calls onToggleViewed when viewed control is clicked", () => {
       const onToggleViewed = vi.fn();
       renderRow({ onToggleViewed });
-      fireEvent.click(screen.getByRole("checkbox"));
+      fireEvent.click(
+        screen.getByRole("button", { name: "Mark src/main.go as viewed" }),
+      );
       expect(onToggleViewed).toHaveBeenCalledTimes(1);
     });
 
-    it("does not call onToggleExpand when checkbox is clicked", () => {
+    it("does not call onToggleExpand when viewed control is clicked", () => {
       const onToggleExpand = vi.fn();
       const onToggleViewed = vi.fn();
       renderRow({ onToggleExpand, onToggleViewed });
-      fireEvent.click(screen.getByRole("checkbox"));
+      fireEvent.click(
+        screen.getByRole("button", { name: "Mark src/main.go as viewed" }),
+      );
       expect(onToggleExpand).not.toHaveBeenCalled();
       expect(onToggleViewed).toHaveBeenCalledTimes(1);
     });
 
     it("has correct aria-label", () => {
       renderRow({ file: makeFile({ path: "src/app.go" }) });
-      const checkbox = screen.getByRole("checkbox");
-      expect(checkbox).toHaveAttribute(
+      const viewedButton = screen.getByRole("button", {
+        name: "Mark src/app.go as viewed",
+      });
+      expect(viewedButton).toHaveAttribute(
         "aria-label",
         "Mark src/app.go as viewed",
       );
@@ -572,34 +601,34 @@ describe("DiffFileRow", () => {
     it("calls onToggleExpand when row is clicked", () => {
       const onToggleExpand = vi.fn();
       renderRow({ onToggleExpand });
-      fireEvent.click(screen.getByRole("button"));
+      fireEvent.click(getRowButton());
       expect(onToggleExpand).toHaveBeenCalledTimes(1);
     });
 
     it("calls onToggleExpand on Enter key", () => {
       const onToggleExpand = vi.fn();
       renderRow({ onToggleExpand });
-      fireEvent.keyDown(screen.getByRole("button"), { key: "Enter" });
+      fireEvent.keyDown(getRowButton(), { key: "Enter" });
       expect(onToggleExpand).toHaveBeenCalledTimes(1);
     });
 
     it("calls onToggleExpand on Space key", () => {
       const onToggleExpand = vi.fn();
       renderRow({ onToggleExpand });
-      fireEvent.keyDown(screen.getByRole("button"), { key: " " });
+      fireEvent.keyDown(getRowButton(), { key: " " });
       expect(onToggleExpand).toHaveBeenCalledTimes(1);
     });
 
     it("does not call onToggleExpand on other keys", () => {
       const onToggleExpand = vi.fn();
       renderRow({ onToggleExpand });
-      fireEvent.keyDown(screen.getByRole("button"), { key: "Tab" });
+      fireEvent.keyDown(getRowButton(), { key: "Tab" });
       expect(onToggleExpand).not.toHaveBeenCalled();
     });
 
     it("has tabIndex 0 for keyboard accessibility", () => {
       renderRow();
-      expect(screen.getByRole("button")).toHaveAttribute("tabIndex", "0");
+      expect(getRowButton()).toHaveAttribute("tabIndex", "0");
     });
   });
 });

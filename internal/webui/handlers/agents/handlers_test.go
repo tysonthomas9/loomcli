@@ -12,6 +12,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/webui/server/dto"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 	"github.com/tysonthomas9/loomcli/internal/webui/svcimpl"
@@ -78,12 +79,28 @@ func TestHandleCreateCarriesInteractiveKindAndPromptFile(t *testing.T) {
 	if rr.Code != http.StatusCreated {
 		t.Fatalf("status = %d body = %s, want 201", rr.Code, rr.Body.String())
 	}
-	var created domain.Agent
+	var created dto.WorkspaceAgentInfo
 	if err := json.Unmarshal(rr.Body.Bytes(), &created); err != nil {
 		t.Fatalf("decode created agent: %v", err)
 	}
 	if created.Name != "review-nova" || created.RoleName != "pr-review" {
 		t.Fatalf("created agent = %#v, want review-nova/pr-review", created)
+	}
+	if created.Backend != "codex" {
+		t.Fatalf("created backend = %q, want codex", created.Backend)
+	}
+	if created.RoleKind != "interactive" {
+		t.Fatalf("created role_kind = %q, want interactive", created.RoleKind)
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(rr.Body.Bytes(), &raw); err != nil {
+		t.Fatalf("decode raw created agent: %v", err)
+	}
+	if string(raw["repos"]) != "[]" {
+		t.Fatalf("created repos = %s, want [] in %s", raw["repos"], rr.Body.String())
+	}
+	if string(raw["repo_groups"]) != "[]" {
+		t.Fatalf("created repo_groups = %s, want [] in %s", raw["repo_groups"], rr.Body.String())
 	}
 	role, err := st.Roles().Get(ctx, "TEST2", "pr-review")
 	if err != nil {

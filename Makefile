@@ -1,6 +1,6 @@
 # Makefile for loomcli project
 
-.PHONY: all build build-frontend build-all test test-builtin-workflows test-integration test-all test-playground test-fleetdb-embedded test-fleetdb-supervisor test-fleetdb-ui test-fleetdb-empty-cli fleetdb-empty-up fleetdb-empty-down fleetdb-regression-up fleetdb-regression-down test-env-up test-env-down test-env-status ensure-frontend-dist ensure-frontend-deps local-mode-frontend-dist local-mode-up local-mode-codex-up local-mode-claude-up local-mode-daytona-up local-mode-down local-mode-logs local-mode-verify local-mode-codex-verify test-local-mode-harness test-distributed-smoke lint lint-frontend test-frontend e2e test-e2e test-e2e-api test-e2e-api-local test-e2e-real-smoke test-e2e-real-smoke-local test-e2e-real-regression test-e2e-real-regression-local test-e2e-integration test-e2e-integration-local test-e2e-integration-full clean install help frontend check check-go check-frontend gate gate-e2e gate-e2e-full hooks ensure-hooks dev dev-check dev-loom dev-vite check-loc check-loc-stale check-control-plane-paths check-no-raw-exec check-no-beads-prod test-coverage test-forkwatch test-frontend-coverage test-race-cover test-integration-race-cover gen-go-api check-go-api-staleness local-mode-webhook-verify test-e2e-github-webhook test-e2e-github-webhook-live
+.PHONY: all build build-frontend build-all test test-builtin-workflows test-integration test-all test-playground test-fleetdb-embedded test-fleetdb-supervisor test-fleetdb-ui test-fleetdb-empty-cli fleetdb-empty-up fleetdb-empty-down fleetdb-regression-up fleetdb-regression-down test-env-up test-env-down test-env-status ensure-frontend-dist ensure-frontend-deps local-mode-frontend-dist local-mode-up local-mode-codex-up local-mode-claude-up local-mode-daytona-up local-mode-down local-mode-logs local-mode-verify local-mode-codex-verify test-local-mode-harness test-distributed-smoke lint lint-frontend test-frontend e2e test-e2e test-aft test-aft-real test-aft-real-claude test-aft-real-opencode test-aft-real-cursor test-aft-real-all test-aft-terminal test-aft-strict test-aft-heal demo test-e2e-api test-e2e-api-local test-e2e-real-smoke test-e2e-real-smoke-local test-e2e-real-regression test-e2e-real-regression-local test-e2e-integration test-e2e-integration-local test-e2e-integration-full clean install help frontend check check-go check-frontend check-product-invariants gate gate-e2e gate-e2e-full hooks ensure-hooks dev dev-check dev-loom dev-vite check-loc check-loc-stale check-control-plane-paths check-no-raw-exec check-no-beads-prod test-coverage test-forkwatch test-frontend-coverage test-race-cover test-integration-race-cover gen-go-api check-go-api-staleness local-mode-webhook-verify test-e2e-github-webhook test-e2e-github-webhook-live
 
 # Default target
 all: build
@@ -433,6 +433,61 @@ test-e2e: ensure-frontend-deps
 	@cd $(FRONTEND_DIR) && npx playwright install --with-deps chromium 2>/dev/null || true
 	@cd $(FRONTEND_DIR) && npx playwright test --project=chromium --workers=1
 
+# Run aft browser e2e suites (self-contained stack; deterministic, no model calls)
+test-aft:
+	@echo "Running aft browser e2e tests (no agent)..."
+	@tests/aft/run-aft.sh --no-agent $(AFT_ARGS)
+
+# Opt-in: run the REAL codex CLI through epic-runner (needs a logged-in ~/.codex; never in CI)
+test-aft-real:
+	@echo "Running aft REAL-CODEX tier (spends nothing on a ChatGPT-account codex; needs ~/.codex login)..."
+	@AFT_REAL_BACKEND=codex AFT_REAL_CODEX=1 tests/aft/run-aft.sh --no-agent $(AFT_ARGS)
+
+# Opt-in: run the REAL claude CLI through epic-runner (subscription OAuth login; consumes
+# the Claude account rate window — ANTHROPIC_API_KEY is unset so no API dollars; never in CI)
+test-aft-real-claude:
+	@echo "Running aft REAL-CLAUDE tier (subscription login; needs ~/.claude/.credentials.json)..."
+	@AFT_REAL_BACKEND=claude tests/aft/run-aft.sh --no-agent $(AFT_ARGS)
+
+# Opt-in: run the REAL opencode CLI through epic-runner (bills whatever provider its own
+# auth config selects; never in CI)
+test-aft-real-opencode:
+	@echo "Running aft REAL-OPENCODE tier (needs opencode + its provider auth)..."
+	@AFT_REAL_BACKEND=opencode tests/aft/run-aft.sh --no-agent $(AFT_ARGS)
+
+# Opt-in: run the REAL cursor-agent CLI through epic-runner (account login; consumes the
+# Cursor account usage window — CURSOR_API_KEY is unset so no API billing; never in CI)
+test-aft-real-cursor:
+	@echo "Running aft REAL-CURSOR tier (needs a logged-in cursor-agent)..."
+	@AFT_REAL_BACKEND=cursor tests/aft/run-aft.sh --no-agent $(AFT_ARGS)
+
+# Opt-in convenience: every real backend tier sequentially, each on its own fresh stack.
+# Consumes all four accounts' rate windows — do not loop.
+test-aft-real-all: test-aft-real test-aft-real-claude test-aft-real-opencode test-aft-real-cursor
+
+# Opt-in: exercise the agents-page Logs tab's live-tmux terminal with real codex.
+test-aft-terminal:
+	@command -v tmux >/dev/null 2>&1 || { echo "test-aft-terminal requires tmux on PATH" >&2; exit 1; }
+	@AFT_REAL_BACKEND=codex AFT_REAL_CODEX=1 AFT_SUITES=$(PWD)/tests/aft/real-terminal-suites tests/aft/run-aft.sh --no-agent $(AFT_ARGS)
+
+test-aft-podman:
+	@AFT_STACK=podman AFT_REAL_CODEX=1 tests/aft/run-aft-podman.sh --no-agent $(AFT_ARGS)
+
+# Run aft with agent diagnosis on failures (needs claude CLI)
+test-aft-strict:
+	@echo "Running aft browser e2e tests (strict: agent diagnoses failures)..."
+	@tests/aft/run-aft.sh --strict $(AFT_ARGS)
+
+# Run aft with agent healing (local dev; needs claude CLI)
+test-aft-heal:
+	@echo "Running aft browser e2e tests (heal mode)..."
+	@tests/aft/run-aft.sh --heal $(AFT_ARGS)
+
+# Ad-hoc manual stack for poking the UI; distinct ports from `make test-aft`.
+demo:
+	@E2E_PORT=$${E2E_PORT:-8190} E2E_FRONTEND_PORT=$${E2E_FRONTEND_PORT:-3190} \
+		bash scripts/start-e2e-server.sh
+
 # Run Playwright API e2e tests (self-contained: builds loom, starts server, runs tests)
 test-e2e-api: ensure-frontend-deps
 	@echo "Running Playwright API e2e tests (self-contained)..."
@@ -550,35 +605,40 @@ frontend: build-frontend
 
 # Go-only quality gate (no Node, no frontend dist)
 check-go:
-	@echo "=== [1/13] Go: format check ==="
+	@echo "=== [1/14] Go: format check ==="
 	@bad=$$(gofmt -l . 2>/dev/null | grep -v third_party | grep -v worktrees | grep -v vendor | grep -v node_modules | head -20); \
 	if [ -n "$$bad" ]; then echo "gofmt violations:"; echo "$$bad"; exit 1; fi
-	@echo "=== [2/13] Go: vet ==="
+	@echo "=== [2/14] Go: vet ==="
 	@go vet ./...
-	@echo "=== [3/13] Go: build ==="
+	@echo "=== [3/14] Go: build ==="
 	@go build -buildvcs=false ./...
-	@echo "=== [4/13] Go: lint (golangci-lint + depguard + control-plane path guard) ==="
+	@echo "=== [4/14] Go: lint (golangci-lint + depguard + control-plane path guard) ==="
 	@golangci-lint run --timeout=5m --allow-parallel-runners
 	@./scripts/check-control-plane-paths.sh
-	@echo "=== [5/13] Go: LOC check ==="
+	@echo "=== [5/14] Go: LOC check ==="
 	@./scripts/check-loc.sh 1000 2500
-	@echo "=== [6/13] Go: package size check ==="
+	@echo "=== [6/14] Go: package size check ==="
 	@./scripts/check-package-size.sh 25
-	@echo "=== [7/13] Go: import fanout check ==="
+	@echo "=== [7/14] Go: import fanout check ==="
 	@./scripts/check-import-fanout.sh 18
-	@echo "=== [8/13] Go: exec.Command guard ==="
+	@echo "=== [8/14] Go: exec.Command guard ==="
 	@./scripts/check-no-raw-exec.sh
-	@echo "=== [9/13] Go: log.Printf guard ==="
+	@echo "=== [9/14] Go: log.Printf guard ==="
 	@./scripts/check-no-log-printf.sh
-	@echo "=== [10/13] Go: no new production beads/bd references ==="
+	@echo "=== [10/14] Go: no new production beads/bd references ==="
 	@./scripts/check-no-beads-prod.sh
-	@echo "=== [11/13] Go: generated API staleness ==="
+	@echo "=== [11/14] Go: generated API staleness ==="
 	@./scripts/check-go-api-staleness.sh
-	@echo "=== [12/13] Go: test with race detector ==="
+	@echo "=== [12/14] Product truth registry ==="
+	@$(MAKE) check-product-invariants
+	@echo "=== [13/14] Go: test with race detector ==="
 	@./scripts/with-clean-loom-env.sh go test -p 1 -race -covermode=atomic -coverprofile=/tmp/loom.coverage.out -timeout 15m ./...
-	@echo "=== [13/13] Go: coverage threshold ==="
+	@echo "=== [14/14] Go: coverage threshold ==="
 	@COVERAGE_THRESHOLD=60 ./scripts/check-coverage.sh
 	@echo "=== Go quality gates PASSED ==="
+
+check-product-invariants:
+	@go run ./cmd/product-truths
 
 # Frontend-only quality gate (no Go toolchain, no dist prerequisite)
 check-frontend: ensure-frontend-deps
@@ -694,6 +754,7 @@ help:
 	@echo "  make lint-frontend     - Run frontend typecheck + ESLint"
 	@echo "  make test-frontend     - Run frontend unit tests (vitest)"
 	@echo "  make test-e2e          - Run Playwright mocked e2e tests (no server)"
+	@echo "  make demo              - Start manual e2e stack on :8190/:3190"
 	@echo "  make test-fleetdb-ui   - Run fleet-db-only UI regression suite"
 	@echo "  make test-env-up        - Start the disposable fleet-db test backend (workspace LOOMTEST, :53351)"
 	@echo "  make test-env-down      - Stop it and drop its volumes"

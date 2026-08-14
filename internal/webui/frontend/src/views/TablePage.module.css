@@ -1,0 +1,30 @@
+.tablePage {
+  display: flex;
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 0;
+}
+
+.bulkDialogField {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: var(--color-text);
+}
+
+.bulkDialogSelect,
+.bulkDialogInput {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 6px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg);
+  color: var(--color-text);
+  font: inherit;
+}
+
+.bulkDialogHint {
+  font-size: 12px;
+  color: var(--color-text-muted);
+}

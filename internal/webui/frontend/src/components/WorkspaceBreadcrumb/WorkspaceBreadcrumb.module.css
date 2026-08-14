@@ -1,10 +1,19 @@
 .breadcrumb {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 7px;
+  color: var(--color-text-primary);
+}
+
+.brandMark {
+  color: var(--color-primary);
+  font-size: 1.125rem;
+  line-height: 1;
 }
 
 .viewLabel {
-  font-weight: 400;
-  color: var(--color-text-secondary);
+  font-size: 1rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--color-text-primary);
 }

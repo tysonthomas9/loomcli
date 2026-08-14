@@ -291,7 +291,7 @@ func callDefaults(t *testing.T, ctx context.Context, m *MockIssueBackend) {
 	if _, err := m.SearchIssues(ctx, "query", 10); err != nil {
 		t.Fatalf("SearchIssues returned error: %v", err)
 	}
-	if created, err := m.Create(ctx, backend.CreateParams{}); err != nil || created.ID != "created" {
+	if created, err := m.Create(ctx, backend.CreateParams{}); err != nil || created.Issue.ID != "created" {
 		t.Fatalf("Create returned %+v, %v", created, err)
 	}
 	mustNoErr("Update", m.Update(ctx, "id", backend.UpdateParams{}))

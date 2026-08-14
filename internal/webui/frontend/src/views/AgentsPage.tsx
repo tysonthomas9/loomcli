@@ -33,7 +33,7 @@ import { useStore } from "zustand";
 
 import { ErrorBoundary, LoadingSkeleton } from "@/components";
 import { AgentDetailMain } from "@/components/AgentDetailMain/AgentDetailMain";
-import { GitTab } from "@/components/AgentDetailPanel";
+import { AgentLogsTab, GitTab } from "@/components/AgentDetailPanel";
 import { AgentWorkPanel } from "@/components/AgentWorkPanel/AgentWorkPanel";
 import { PanelWidthResizeHandle } from "@/components/AgentWorkPanel/PanelWidthResizeHandle";
 import {
@@ -41,6 +41,7 @@ import {
   orderAgentsForEpicRunner,
 } from "@/components/AgentIconRail/AgentIconRail";
 import { IssueDetailPanel } from "@/components/IssueDetailPanel/IssueDetailPanel";
+import { OpenInEditor } from "@/components/OpenInEditor";
 import {
   EPIC_RUNNER_WORKFLOW_NAME,
   isTerminalWorkflowRunStatus,
@@ -51,7 +52,7 @@ import {
   useWorkspaceViewActions,
   useWorkspaceViewData,
 } from "@/contexts/WorkspaceViewContext";
-import { useAgentStoreInstance } from "@/hooks";
+import { useAgentDiffStat, useAgentStoreInstance } from "@/hooks";
 import { useLocalSettings, useWorkspaceContext } from "@/hooks/workspace";
 import {
   OPEN_QUEUE_PANEL_MAX_WIDTH,
@@ -374,6 +375,12 @@ function AgentsPageInner(): JSX.Element {
   const roleName = selected?.role ?? statusType;
   const selColor = getAvatarColor(selected?.name ?? "agent");
   const selText = shouldUseWhiteText(selColor) ? "#fff" : "#171717";
+  const { data: diffStat } = useAgentDiffStat({
+    agentName: selected?.name ?? "",
+    enabled: !!selected,
+    pollInterval: 60000,
+  });
+  const hasDiffStat = diffStat !== null;
 
   const renderAgentPane = useCallback(
     (tab: AgentEditorTab, isActive: boolean) => {
@@ -427,7 +434,23 @@ function AgentsPageInner(): JSX.Element {
                 </dl>
               </section>
               <section className={styles.card}>
-                <h2 className={styles.cardLabel}>Agent Info</h2>
+                <div className={styles.cardHeaderRow}>
+                  <h2 className={styles.cardLabel}>Agent Info</h2>
+                  {hasDiffStat && diffStat ? (
+                    <span
+                      className={styles.diffStatSummary}
+                      title={`${diffStat.added} lines added, ${diffStat.removed} lines removed`}
+                      data-testid="agent-diff-stat-summary"
+                    >
+                      <span className={styles.diffStatAdded}>
+                        +{diffStat.added}
+                      </span>
+                      <span className={styles.diffStatRemoved}>
+                        -{diffStat.removed}
+                      </span>
+                    </span>
+                  ) : null}
+                </div>
                 <dl className={styles.configGrid}>
                   <div>
                     <dt>Status</dt>
@@ -462,6 +485,9 @@ function AgentsPageInner(): JSX.Element {
                     </div>
                   ) : null}
                 </dl>
+                {selected.worktree_path ? (
+                  <OpenInEditor path={selected.worktree_path} />
+                ) : null}
               </section>
             </div>
           );
@@ -478,6 +504,19 @@ function AgentsPageInner(): JSX.Element {
               className={`${styles.realTabBody} ${styles.realTabBodyScroll}`}
             >
               <GitTab agent={selected} isActive={isActive} />
+            </div>
+          );
+        case "logs":
+          if (!selected) {
+            return (
+              <div className={styles.tabFallback}>
+                Select an agent to view logs.
+              </div>
+            );
+          }
+          return (
+            <div className={styles.realTabBodyScroll}>
+              <AgentLogsTab agentName={selected.name} isActive={isActive} />
             </div>
           );
         case "diff":
@@ -535,6 +574,8 @@ function AgentsPageInner(): JSX.Element {
       roleName,
       infoStats,
       statusType,
+      hasDiffStat,
+      diffStat,
     ],
   );
 

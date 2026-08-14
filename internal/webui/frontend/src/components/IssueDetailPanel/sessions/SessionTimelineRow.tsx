@@ -62,7 +62,13 @@ export function SessionTimelineRow({
   isSelected,
   onClick,
 }: SessionTimelineRowProps): JSX.Element {
-  const totalTokens = sessionTotalTokens(session);
+  const totalTokens =
+    session.evidence?.usage_status === "unavailable" ||
+    (session.evidence == null &&
+      session.input_tokens == null &&
+      session.output_tokens == null)
+      ? null
+      : sessionTotalTokens(session);
   const errorSummary = runErrorSummary(session);
   const statusLabel = formatRunStatus(session.status);
   const when = formatWhen(session.started_at);
@@ -115,12 +121,14 @@ export function SessionTimelineRow({
             {formatDuration(session.duration_s)}
           </span>
           <span aria-hidden="true">·</span>
-          <span className={styles.tokens}>{formatTokens(totalTokens)}</span>
+          <span className={styles.tokens}>
+            {totalTokens == null ? "—" : formatTokens(totalTokens)}
+          </span>
           {showCost && (
             <>
               <span aria-hidden="true">·</span>
               <span className={styles.cost}>
-                {formatCost(session.estimated_cost_usd)}
+                {formatCost(session.estimated_cost_usd ?? 0)}
               </span>
             </>
           )}

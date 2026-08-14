@@ -24,11 +24,6 @@ export * from "@/api";
 // can still reach it through the hooks layer.
 export { gitPushAll } from "@/api/workspace";
 
-// Session history is a thin sub-module that isn't in the @/api barrel.
-// Re-export what components need.
-export { listSessionHistory, getSessionScrollback } from "@/api/terminal";
-export type { SessionRecord } from "@/api/terminal";
-
 // Terminal sub-module functions not in the @/api barrel.
 // Most tmux-era terminal APIs (spawn, restart, kill, seed, lead-session,
 // close-all, export, scrollback) were removed during terminal simplification.
@@ -51,6 +46,7 @@ export {
   reorderWorkspaces,
   createWorkspace,
   addWorkspaceRepos,
+  deleteWorkspaceRepo,
   createWorkspaceEpic,
   createWorkspaceTask,
 } from "@/api/workspace";

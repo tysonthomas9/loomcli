@@ -14,6 +14,7 @@ export interface LocalSettingsData {
   agent_runtime: LocalAgentRuntimeSettings;
   local_task_runner: LocalTaskRunnerSettings;
   runtime_credentials: RuntimeCredentialsStatus;
+  ui_preferences?: LocalUIPreferencesSettings;
 }
 
 export type AgentRuntimeDefault = "local" | "daytona";
@@ -34,6 +35,10 @@ export interface RuntimeCredentialStatus {
 export interface RuntimeCredentialsStatus {
   daytona: RuntimeCredentialStatus;
   github: RuntimeCredentialStatus;
+}
+
+export interface LocalUIPreferencesSettings {
+  workspace_order?: string[];
 }
 
 export interface UpdateLocalRedisSettings {

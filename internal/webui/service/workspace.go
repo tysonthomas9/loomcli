@@ -52,6 +52,10 @@ type WorkspaceService interface {
 	// AddWorkspaceRepos attaches one or more local git repos to an existing workspace.
 	AddWorkspaceRepos(ctx context.Context, req WorkspaceAddReposRequest) (*ops.WorkspaceData, error)
 
+	// RemoveWorkspaceRepo detaches a repo from an existing workspace.
+	// This does not delete files on disk.
+	RemoveWorkspaceRepo(ctx context.Context, req WorkspaceRemoveRepoRequest) (*ops.WorkspaceData, error)
+
 	// StartAsyncCreate starts an async workspace creation job for clone workspaces.
 	// Returns the job ID. Validates the request before starting.
 	// Returns ServiceError{Kind: Unavailable} if job store not available.
@@ -72,12 +76,6 @@ type WorkspaceService interface {
 	// ReorderWorkspaces persists a custom workspace display order.
 	// Returns refreshed workspace data.
 	ReorderWorkspaces(ctx context.Context, order []string) (*ops.WorkspaceData, error)
-
-	// SetDefaultWorkspace is retained for API compatibility. The feature is disabled.
-	SetDefaultWorkspace(ctx context.Context, name string) (*ops.WorkspaceData, error)
-
-	// ClearDefaultWorkspace is retained for API compatibility. The feature is disabled.
-	ClearDefaultWorkspace(ctx context.Context) (*ops.WorkspaceData, error)
 
 	// GetWorkspaceBackend returns a workspace's AI backend config setting.
 	GetWorkspaceBackend(ctx context.Context, wsID string) (*BackendConfigData, error)

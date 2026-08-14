@@ -111,6 +111,14 @@ export function IssueHeader({
               {formatStatus(issue.status)}
             </span>
           )}
+          {issue.status === "closed" && issue.close_reason && (
+            <span
+              className={styles.closeReason}
+              data-testid="issue-close-reason"
+            >
+              {issue.close_reason}
+            </span>
+          )}
         </div>
         <div className={styles.topRowActions}>
           {prUrl && prNumber && (

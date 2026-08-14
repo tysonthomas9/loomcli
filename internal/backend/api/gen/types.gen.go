@@ -824,6 +824,81 @@ func (e PullRequestReviewRequestEvent) Valid() bool {
 	}
 }
 
+// Defines values for ReviewDecisionRequestDecision.
+const (
+	ReviewDecisionRequestDecisionApprove        ReviewDecisionRequestDecision = "approve"
+	ReviewDecisionRequestDecisionRequestChanges ReviewDecisionRequestDecision = "request_changes"
+)
+
+// Valid indicates whether the value is a known member of the ReviewDecisionRequestDecision enum.
+func (e ReviewDecisionRequestDecision) Valid() bool {
+	switch e {
+	case ReviewDecisionRequestDecisionApprove:
+		return true
+	case ReviewDecisionRequestDecisionRequestChanges:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ReviewDecisionResultDecision.
+const (
+	ReviewDecisionResultDecisionApprove        ReviewDecisionResultDecision = "approve"
+	ReviewDecisionResultDecisionRequestChanges ReviewDecisionResultDecision = "request_changes"
+)
+
+// Valid indicates whether the value is a known member of the ReviewDecisionResultDecision enum.
+func (e ReviewDecisionResultDecision) Valid() bool {
+	switch e {
+	case ReviewDecisionResultDecisionApprove:
+		return true
+	case ReviewDecisionResultDecisionRequestChanges:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ReviewDecisionResultGithubStage.
+const (
+	ReviewDecisionResultGithubStageApplied       ReviewDecisionResultGithubStage = "applied"
+	ReviewDecisionResultGithubStageNotApplicable ReviewDecisionResultGithubStage = "not_applicable"
+	ReviewDecisionResultGithubStageReplayed      ReviewDecisionResultGithubStage = "replayed"
+)
+
+// Valid indicates whether the value is a known member of the ReviewDecisionResultGithubStage enum.
+func (e ReviewDecisionResultGithubStage) Valid() bool {
+	switch e {
+	case ReviewDecisionResultGithubStageApplied:
+		return true
+	case ReviewDecisionResultGithubStageNotApplicable:
+		return true
+	case ReviewDecisionResultGithubStageReplayed:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ReviewDecisionResultLoomStage.
+const (
+	ReviewDecisionResultLoomStageApplied  ReviewDecisionResultLoomStage = "applied"
+	ReviewDecisionResultLoomStageReplayed ReviewDecisionResultLoomStage = "replayed"
+)
+
+// Valid indicates whether the value is a known member of the ReviewDecisionResultLoomStage enum.
+func (e ReviewDecisionResultLoomStage) Valid() bool {
+	switch e {
+	case ReviewDecisionResultLoomStageApplied:
+		return true
+	case ReviewDecisionResultLoomStageReplayed:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for RuntimeReadyResponseMode.
 const (
 	Daemon RuntimeReadyResponseMode = "daemon"
@@ -842,36 +917,39 @@ func (e RuntimeReadyResponseMode) Valid() bool {
 	}
 }
 
-// Defines values for SessionHistoryRecordLauncher.
+// Defines values for SessionEvidenceStatus.
 const (
-	SessionHistoryRecordLauncherStartWork SessionHistoryRecordLauncher = "start-work"
-	SessionHistoryRecordLauncherUser      SessionHistoryRecordLauncher = "user"
+	SessionEvidenceStatusConflict SessionEvidenceStatus = "conflict"
+	SessionEvidenceStatusOk       SessionEvidenceStatus = "ok"
 )
 
-// Valid indicates whether the value is a known member of the SessionHistoryRecordLauncher enum.
-func (e SessionHistoryRecordLauncher) Valid() bool {
+// Valid indicates whether the value is a known member of the SessionEvidenceStatus enum.
+func (e SessionEvidenceStatus) Valid() bool {
 	switch e {
-	case SessionHistoryRecordLauncherStartWork:
+	case SessionEvidenceStatusConflict:
 		return true
-	case SessionHistoryRecordLauncherUser:
+	case SessionEvidenceStatusOk:
 		return true
 	default:
 		return false
 	}
 }
 
-// Defines values for SessionHistoryRecordStatus.
+// Defines values for SessionEvidenceUsageStatus.
 const (
-	Active    SessionHistoryRecordStatus = "active"
-	Completed SessionHistoryRecordStatus = "completed"
+	SessionEvidenceUsageStatusConflict    SessionEvidenceUsageStatus = "conflict"
+	SessionEvidenceUsageStatusReported    SessionEvidenceUsageStatus = "reported"
+	SessionEvidenceUsageStatusUnavailable SessionEvidenceUsageStatus = "unavailable"
 )
 
-// Valid indicates whether the value is a known member of the SessionHistoryRecordStatus enum.
-func (e SessionHistoryRecordStatus) Valid() bool {
+// Valid indicates whether the value is a known member of the SessionEvidenceUsageStatus enum.
+func (e SessionEvidenceUsageStatus) Valid() bool {
 	switch e {
-	case Active:
+	case SessionEvidenceUsageStatusConflict:
 		return true
-	case Completed:
+	case SessionEvidenceUsageStatusReported:
+		return true
+	case SessionEvidenceUsageStatusUnavailable:
 		return true
 	default:
 		return false
@@ -880,22 +958,22 @@ func (e SessionHistoryRecordStatus) Valid() bool {
 
 // Defines values for TranscriptEntryRole.
 const (
-	TranscriptEntryRoleAssistant TranscriptEntryRole = "assistant"
-	TranscriptEntryRoleSystem    TranscriptEntryRole = "system"
-	TranscriptEntryRoleTool      TranscriptEntryRole = "tool"
-	TranscriptEntryRoleUser      TranscriptEntryRole = "user"
+	Assistant TranscriptEntryRole = "assistant"
+	System    TranscriptEntryRole = "system"
+	Tool      TranscriptEntryRole = "tool"
+	User      TranscriptEntryRole = "user"
 )
 
 // Valid indicates whether the value is a known member of the TranscriptEntryRole enum.
 func (e TranscriptEntryRole) Valid() bool {
 	switch e {
-	case TranscriptEntryRoleAssistant:
+	case Assistant:
 		return true
-	case TranscriptEntryRoleSystem:
+	case System:
 		return true
-	case TranscriptEntryRoleTool:
+	case Tool:
 		return true
-	case TranscriptEntryRoleUser:
+	case User:
 		return true
 	default:
 		return false
@@ -2087,14 +2165,17 @@ type IssueStatus string
 
 // IssueEvent Audit trail entry for an issue
 type IssueEvent struct {
-	Actor     string    `json:"actor"`
-	Comment   *string   `json:"comment,omitempty"`
-	CreatedAt time.Time `json:"created_at"`
-	EventType string    `json:"event_type"`
-	Id        int64     `json:"id"`
-	IssueId   string    `json:"issue_id"`
-	NewValue  *string   `json:"new_value,omitempty"`
-	OldValue  *string   `json:"old_value,omitempty"`
+	Actor      string    `json:"actor"`
+	Comment    *string   `json:"comment,omitempty"`
+	CreatedAt  time.Time `json:"created_at"`
+	EventType  string    `json:"event_type"`
+	Field      *string   `json:"field,omitempty"`
+	FieldCount *int      `json:"field_count,omitempty"`
+	Fields     *[]string `json:"fields,omitempty"`
+	Id         int64     `json:"id"`
+	IssueId    string    `json:"issue_id"`
+	NewValue   *string   `json:"new_value,omitempty"`
+	OldValue   *string   `json:"old_value,omitempty"`
 }
 
 // IssueResponse Full issue detail returned by get-single-issue endpoint. Includes dependency/dependent refs, comments, and counts.
@@ -2568,6 +2649,34 @@ type PullRequestReviewResult struct {
 	State    *string `json:"state,omitempty"`
 }
 
+// ReviewDecisionRequest defines model for ReviewDecisionRequest.
+type ReviewDecisionRequest struct {
+	Decision ReviewDecisionRequestDecision `json:"decision"`
+	Reason   *string                       `json:"reason,omitempty"`
+}
+
+// ReviewDecisionRequestDecision defines model for ReviewDecisionRequest.Decision.
+type ReviewDecisionRequestDecision string
+
+// ReviewDecisionResult defines model for ReviewDecisionResult.
+type ReviewDecisionResult struct {
+	Decision    ReviewDecisionResultDecision    `json:"decision"`
+	DecisionId  string                          `json:"decision_id"`
+	GithubStage ReviewDecisionResultGithubStage `json:"github_stage"`
+	IssueId     string                          `json:"issue_id"`
+	LoomStage   ReviewDecisionResultLoomStage   `json:"loom_stage"`
+	Replayed    bool                            `json:"replayed"`
+}
+
+// ReviewDecisionResultDecision defines model for ReviewDecisionResult.Decision.
+type ReviewDecisionResultDecision string
+
+// ReviewDecisionResultGithubStage defines model for ReviewDecisionResult.GithubStage.
+type ReviewDecisionResultGithubStage string
+
+// ReviewDecisionResultLoomStage defines model for ReviewDecisionResult.LoomStage.
+type ReviewDecisionResultLoomStage string
+
 // ReviewerConversation defines model for ReviewerConversation.
 type ReviewerConversation struct {
 	// Detail Human-readable context for failed/unsupported states.
@@ -2645,54 +2754,58 @@ type SeedRequest struct {
 	Title       string  `json:"title"`
 }
 
-// SessionHistoryRecord Session history record (Redis-backed, per-issue)
-type SessionHistoryRecord struct {
-	Backend        string                       `json:"backend"`
-	EndedAt        *time.Time                   `json:"ended_at,omitempty"`
-	Id             string                       `json:"id"`
-	IssueId        string                       `json:"issue_id"`
-	Launcher       SessionHistoryRecordLauncher `json:"launcher"`
-	ScrollbackPath *string                      `json:"scrollback_path,omitempty"`
-	SessionName    string                       `json:"session_name"`
-	StartedAt      time.Time                    `json:"started_at"`
-	Status         SessionHistoryRecordStatus   `json:"status"`
+// SessionEvidence defines model for SessionEvidence.
+type SessionEvidence struct {
+	Conflicts   []SessionEvidenceConflict  `json:"conflicts"`
+	Status      SessionEvidenceStatus      `json:"status"`
+	UsageStatus SessionEvidenceUsageStatus `json:"usage_status"`
 }
 
-// SessionHistoryRecordLauncher defines model for SessionHistoryRecord.Launcher.
-type SessionHistoryRecordLauncher string
+// SessionEvidenceStatus defines model for SessionEvidence.Status.
+type SessionEvidenceStatus string
 
-// SessionHistoryRecordStatus defines model for SessionHistoryRecord.Status.
-type SessionHistoryRecordStatus string
+// SessionEvidenceUsageStatus defines model for SessionEvidence.UsageStatus.
+type SessionEvidenceUsageStatus string
+
+// SessionEvidenceConflict defines model for SessionEvidenceConflict.
+type SessionEvidenceConflict struct {
+	ExistingSource string `json:"existing_source"`
+	ExistingValue  string `json:"existing_value"`
+	Field          string `json:"field"`
+	IncomingSource string `json:"incoming_source"`
+	IncomingValue  string `json:"incoming_value"`
+}
 
 // SessionResponse Session audit record from dto.SessionResponse
 type SessionResponse struct {
-	AgentName        string     `json:"agent_name"`
-	AttemptNum       int        `json:"attempt_num"`
-	Backend          string     `json:"backend"`
-	CacheReadTokens  int64      `json:"cache_read_tokens"`
-	CacheWriteTokens int64      `json:"cache_write_tokens"`
-	DurationS        *float64   `json:"duration_s,omitempty"`
-	EndedAt          *time.Time `json:"ended_at,omitempty"`
-	EpicId           *string    `json:"epic_id,omitempty"`
-	ErrorClass       *string    `json:"error_class,omitempty"`
-	EstimatedCostUsd float64    `json:"estimated_cost_usd"`
-	ExitCode         int        `json:"exit_code"`
-	FilesChanged     int        `json:"files_changed"`
-	FilesTouched     *[]string  `json:"files_touched,omitempty"`
-	HasDiff          bool       `json:"has_diff"`
-	HasTranscript    bool       `json:"has_transcript"`
-	InputTokens      int64      `json:"input_tokens"`
-	IsActive         bool       `json:"is_active"`
-	LastError        *string    `json:"last_error,omitempty"`
-	LinesAdded       int        `json:"lines_added"`
-	LinesRemoved     int        `json:"lines_removed"`
-	Model            *string    `json:"model,omitempty"`
-	OutputTokens     int64      `json:"output_tokens"`
-	Phase            *string    `json:"phase,omitempty"`
-	SessionId        string     `json:"session_id"`
-	StartedAt        time.Time  `json:"started_at"`
-	Status           string     `json:"status"`
-	TaskId           string     `json:"task_id"`
+	AgentName        string          `json:"agent_name"`
+	AttemptNum       int             `json:"attempt_num"`
+	Backend          string          `json:"backend"`
+	CacheReadTokens  *int64          `json:"cache_read_tokens"`
+	CacheWriteTokens *int64          `json:"cache_write_tokens"`
+	DurationS        *float64        `json:"duration_s,omitempty"`
+	EndedAt          *time.Time      `json:"ended_at,omitempty"`
+	EpicId           *string         `json:"epic_id,omitempty"`
+	ErrorClass       *string         `json:"error_class,omitempty"`
+	EstimatedCostUsd *float64        `json:"estimated_cost_usd"`
+	Evidence         SessionEvidence `json:"evidence"`
+	ExitCode         int             `json:"exit_code"`
+	FilesChanged     int             `json:"files_changed"`
+	FilesTouched     *[]string       `json:"files_touched,omitempty"`
+	HasDiff          bool            `json:"has_diff"`
+	HasTranscript    bool            `json:"has_transcript"`
+	InputTokens      *int64          `json:"input_tokens"`
+	IsActive         bool            `json:"is_active"`
+	LastError        *string         `json:"last_error,omitempty"`
+	LinesAdded       int             `json:"lines_added"`
+	LinesRemoved     int             `json:"lines_removed"`
+	Model            *string         `json:"model,omitempty"`
+	OutputTokens     *int64          `json:"output_tokens"`
+	Phase            *string         `json:"phase,omitempty"`
+	SessionId        string          `json:"session_id"`
+	StartedAt        time.Time       `json:"started_at"`
+	Status           string          `json:"status"`
+	TaskId           string          `json:"task_id"`
 }
 
 // StaleDetectorStatus defines model for StaleDetectorStatus.
@@ -3066,11 +3179,6 @@ type CreateWorkspaceJSONBody struct {
 	Path string `json:"path"`
 }
 
-// SetDefaultWorkspaceJSONBody defines parameters for SetDefaultWorkspace.
-type SetDefaultWorkspaceJSONBody struct {
-	Workspace string `json:"workspace"`
-}
-
 // ReorderWorkspacesJSONBody defines parameters for ReorderWorkspaces.
 type ReorderWorkspacesJSONBody struct {
 	Order []string `json:"order"`
@@ -3390,6 +3498,11 @@ type GetGraphParams struct {
 // GetGraphParamsStatus defines parameters for GetGraph.
 type GetGraphParamsStatus string
 
+// ApplyReviewDecisionParams defines parameters for ApplyReviewDecision.
+type ApplyReviewDecisionParams struct {
+	XIdempotencyKey string `json:"X-Idempotency-Key"`
+}
+
 // SaveIssueTabsJSONBody defines parameters for SaveIssueTabs.
 type SaveIssueTabsJSONBody struct {
 	ActiveTabId string     `json:"active_tab_id"`
@@ -3505,9 +3618,6 @@ type NotifySessionChangeJSONRequestBody NotifySessionChangeJSONBody
 // CreateWorkspaceJSONRequestBody defines body for CreateWorkspace for application/json ContentType.
 type CreateWorkspaceJSONRequestBody CreateWorkspaceJSONBody
 
-// SetDefaultWorkspaceJSONRequestBody defines body for SetDefaultWorkspace for application/json ContentType.
-type SetDefaultWorkspaceJSONRequestBody SetDefaultWorkspaceJSONBody
-
 // ReorderWorkspacesJSONRequestBody defines body for ReorderWorkspaces for application/json ContentType.
 type ReorderWorkspacesJSONRequestBody ReorderWorkspacesJSONBody
 
@@ -3567,6 +3677,9 @@ type AddDependencyJSONRequestBody = AddDependencyRequest
 
 // MoveIssueJSONRequestBody defines body for MoveIssue for application/json ContentType.
 type MoveIssueJSONRequestBody = MoveIssueRequest
+
+// ApplyReviewDecisionJSONRequestBody defines body for ApplyReviewDecision for application/json ContentType.
+type ApplyReviewDecisionJSONRequestBody = ReviewDecisionRequest
 
 // SaveIssueTabsJSONRequestBody defines body for SaveIssueTabs for application/json ContentType.
 type SaveIssueTabsJSONRequestBody SaveIssueTabsJSONBody

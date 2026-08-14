@@ -1,0 +1,31 @@
+# Surface tier: workspace reorder is intentionally UI-unreachable (FINDINGS
+# §1.12); positional ordering was left out of the search-filtered quick switcher
+# by design. This suite guards only the published API contract. Promote it when
+# a mounted human-facing reorder control exists.
+suite: workspace-order-surface
+classification: { area: workspaces, feature: workspace-order, surface: api, purpose: contract }
+baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
+teardown: >-
+  if [ -s "$AFT_WORK_DIR/surfaceOrderWorkspaceId" ]; then curl -s -X DELETE "$AFT_BASE_URL/api/workspaces/$(cat "$AFT_WORK_DIR/surfaceOrderWorkspaceId")" >/dev/null || true; fi
+
+tests:
+  # Surface-only because no UI actor can reach reorder; promote when a mounted
+  # reorder affordance can drive the same persistence contract.
+  # covers: /api/workspaces; /api/workspaces/order
+  - name: workspace order endpoint persists an explicit order
+    intent: The published workspace-order API persists the requested workspace ordering
+    steps:
+      - api:
+          method: "POST"
+          path: "/api/workspaces"
+          body:
+            name: "aft-order-${RUN_ID:-local}"
+            type: "empty"
+          status: 201
+          save:
+            - from: "data.id"
+              as: "surfaceOrderWorkspaceId"
+        intent: "An API client creates the workspace used to verify explicit ordering"
+      - run: >-
+          ws="$(cat "$AFT_WORK_DIR/surfaceOrderWorkspaceId")"; curl -sf "$AFT_BASE_URL/api/workspaces" > "$AFT_WORK_DIR/surface-order-before.json"; python3 -c 'import json,sys; ws=sys.argv[2]; ids=[w["id"] for w in json.load(open(sys.argv[1])).get("workspaces",[])]; assert ws in ids, ids; print(json.dumps({"order":[ws]+[i for i in ids if i != ws]}))' "$AFT_WORK_DIR/surface-order-before.json" "$ws" > "$AFT_WORK_DIR/surface-order.json"; curl -sf -X PUT "$AFT_BASE_URL/api/workspaces/order" -H "Content-Type: application/json" -d @"$AFT_WORK_DIR/surface-order.json" > "$AFT_WORK_DIR/surface-order-put.json"; curl -sf "$AFT_BASE_URL/api/workspaces" > "$AFT_WORK_DIR/surface-order-after.json"; python3 -c 'import json,sys; ws=sys.argv[2]; d=json.load(open(sys.argv[1])); ids=[w.get("id") for w in d.get("workspaces",[])]; order=d.get("workspace_order") or ids; assert order and order[0]==ws, (order, d)' "$AFT_WORK_DIR/surface-order-after.json" "$ws"
+        intent: "An API client places the created workspace first and confirms the published order persisted"

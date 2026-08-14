@@ -31,9 +31,9 @@
 /* Badge container positioned at top-right corner of node */
 .badgeContainer {
   position: absolute;
-  top: -8px;
-  right: -8px;
-  z-index: 10;
+  top: var(--space-2);
+  right: var(--space-2);
+  z-index: 2;
 }
 
 .issueNode.selected {
@@ -69,6 +69,14 @@
   align-items: center;
   gap: var(--space-2);
   flex-wrap: wrap;
+}
+
+.issueNode:has(.badgeContainer) .header {
+  padding-right: 2.75rem;
+}
+
+.issueNode[data-is-root-blocker="true"] .header {
+  padding-left: 0.875rem;
 }
 
 .id {
@@ -252,14 +260,13 @@
 .issueNode[data-is-root-blocker="true"]::before {
   content: "";
   position: absolute;
-  top: -6px;
-  left: -6px;
-  width: 14px;
-  height: 14px;
+  top: var(--space-2);
+  left: var(--space-2);
+  width: 8px;
+  height: 8px;
   background-color: var(--color-blocked);
   border-radius: 50%;
-  opacity: 0.8;
-  box-shadow: 0 0 4px var(--color-blocked);
+  opacity: 0.9;
 }
 
 /* =================================

@@ -85,6 +85,7 @@ func (m *WorkspaceOpsModule) WithLocalWorkspacePathFn(fn healthhandlers.Workspac
 func (m *WorkspaceOpsModule) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/workspaces/{ws}/repos", workspace.HandleListWorkspaceRepos(m.workspaceSvc))
 	mux.HandleFunc("POST /api/workspaces/{ws}/repos", workspace.HandleAddWorkspaceRepos(m.workspaceSvc))
+	mux.HandleFunc("DELETE /api/workspaces/{ws}/repos/{repo}", workspace.HandleRemoveWorkspaceRepo(m.workspaceSvc))
 	mux.HandleFunc("GET /api/workspaces/{ws}/stats",
 		healthhandlers.HandleStatsWithBackend(m.multiPool, healthhandlers.IssueBackendFn(m.issueBackendFn)))
 	mux.HandleFunc("GET /api/workspaces/{ws}/ready",
@@ -118,17 +119,14 @@ func HandleListWorkspaceRepos(svc service.WorkspaceService) http.HandlerFunc {
 func HandleAddWorkspaceRepos(svc service.WorkspaceService) http.HandlerFunc {
 	return workspace.HandleAddWorkspaceRepos(svc)
 }
+func HandleRemoveWorkspaceRepo(svc service.WorkspaceService) http.HandlerFunc {
+	return workspace.HandleRemoveWorkspaceRepo(svc)
+}
 func HandleGetWorkspaceJob(svc service.WorkspaceService) http.HandlerFunc {
 	return workspace.HandleGetWorkspaceJob(svc)
 }
 func HandleWorkspaceReorder(svc service.WorkspaceService) http.HandlerFunc {
 	return workspace.HandleWorkspaceReorder(svc)
-}
-func HandleSetDefaultWorkspace(svc service.WorkspaceService) http.HandlerFunc {
-	return workspace.HandleSetDefaultWorkspace(svc)
-}
-func HandleClearDefaultWorkspace(svc service.WorkspaceService) http.HandlerFunc {
-	return workspace.HandleClearDefaultWorkspace(svc)
 }
 func HandleWorkspaceDelete(svc service.WorkspaceService) http.HandlerFunc {
 	return workspace.HandleWorkspaceDelete(svc)

@@ -1,0 +1,14 @@
+.initialSkeleton {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background: var(--terminal-bg);
+  opacity: 0.72;
+}
+
+.initialSkeleton :global([data-testid="loading-skeleton-terminal"]) {
+  width: 100%;
+  height: 100%;
+  background: transparent;
+}

@@ -84,7 +84,7 @@ func runExplicitCreateID(t *testing.T, cfg IssueBackendSuiteConfig) {
 	ib := cfg.NewBackend(t)
 	ctx := suiteContext(t)
 	wantID := "CONTRACT-" + strings.ToUpper(safeName(t.Name()))
-	issue, err := ib.Create(ctx, backend.CreateParams{
+	created, err := ib.Create(ctx, backend.CreateParams{
 		ID:        wantID,
 		Title:     uniqueTitle(t, "explicit-id"),
 		Status:    "open",
@@ -94,8 +94,8 @@ func runExplicitCreateID(t *testing.T, cfg IssueBackendSuiteConfig) {
 	if err != nil {
 		t.Fatalf("Create explicit ID: %v", err)
 	}
-	if issue.ID != wantID {
-		t.Fatalf("CreateParams.ID was not honored: got %q, want %q", issue.ID, wantID)
+	if created.Issue.ID != wantID {
+		t.Fatalf("CreateParams.ID was not honored: got %q, want %q", created.Issue.ID, wantID)
 	}
 }
 
@@ -167,7 +167,7 @@ func suiteContext(t *testing.T) context.Context {
 
 func createIssue(t *testing.T, ctx context.Context, ib backend.IssueBackend, suffix string) *backend.IssueData {
 	t.Helper()
-	issue, err := ib.Create(ctx, backend.CreateParams{
+	created, err := ib.Create(ctx, backend.CreateParams{
 		Title:       uniqueTitle(t, suffix),
 		Description: "created by IssueBackend conformance suite",
 		Status:      "open",
@@ -178,7 +178,7 @@ func createIssue(t *testing.T, ctx context.Context, ib backend.IssueBackend, suf
 	if err != nil {
 		t.Fatalf("Create(%s): %v", suffix, err)
 	}
-	return issue
+	return &created.Issue
 }
 
 func assertIssue(t *testing.T, issue *backend.IssueData, titleSuffix, status string) {

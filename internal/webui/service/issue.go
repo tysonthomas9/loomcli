@@ -108,6 +108,14 @@ type CreateIssueParams struct {
 	Force          bool
 }
 
+// CreateIssueResult carries the JSON issue payload plus idempotency metadata
+// surfaced by backends that support guarded creates.
+type CreateIssueResult struct {
+	Data                json.RawMessage
+	IdempotencyWarning  string
+	IdempotencyReplayed bool
+}
+
 // PatchIssueParams mirrors PatchIssueRequest but is not HTTP-bound.
 type PatchIssueParams struct {
 	IssueID            string
@@ -176,7 +184,7 @@ type ReopenIssueParams struct {
 type IssueService interface {
 	GetIssue(ctx context.Context, issueID string) (json.RawMessage, error)
 	ListIssues(ctx context.Context, params ListIssuesParams) (*ListIssuesResult, error)
-	CreateIssue(ctx context.Context, params CreateIssueParams) (json.RawMessage, error)
+	CreateIssue(ctx context.Context, params CreateIssueParams) (*CreateIssueResult, error)
 	PatchIssue(ctx context.Context, params PatchIssueParams) error
 	CloseIssue(ctx context.Context, params CloseIssueParams) (json.RawMessage, error)
 	ReopenIssue(ctx context.Context, params ReopenIssueParams) error

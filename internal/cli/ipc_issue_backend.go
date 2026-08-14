@@ -109,7 +109,7 @@ func (b *ipcIssueBackend) SearchIssues(ctx context.Context, query string, limit 
 	return b.direct.SearchIssues(ctx, query, limit)
 }
 
-func (b *ipcIssueBackend) Create(ctx context.Context, params backend.CreateParams) (*backend.IssueData, error) {
+func (b *ipcIssueBackend) Create(ctx context.Context, params backend.CreateParams) (*backend.CreateResult, error) {
 	return b.direct.Create(ctx, params)
 }
 

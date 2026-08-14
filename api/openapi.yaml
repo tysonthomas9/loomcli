@@ -38,8 +38,6 @@ tags:
     description: Issue audit events and SSE mutation stream
   - name: sessions
     description: Session audit trail (task-scoped)
-  - name: session-history
-    description: Session history (issue-scoped, Redis-backed)
   - name: logs
     description: Agent and task log retrieval
   - name: terminal
@@ -370,40 +368,6 @@ paths:
       responses:
         "200":
           description: Order updated
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/MessageResponse"
-
-  /api/workspaces/default:
-    put:
-      operationId: setDefaultWorkspace
-      tags: [workspaces]
-      summary: Set the default workspace
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [workspace]
-              properties:
-                workspace:
-                  type: string
-      responses:
-        "200":
-          description: Default set
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/MessageResponse"
-    delete:
-      operationId: clearDefaultWorkspace
-      tags: [workspaces]
-      summary: Clear the default workspace
-      responses:
-        "200":
-          description: Default cleared
           content:
             application/json:
               schema:
@@ -783,6 +747,52 @@ paths:
                     type: object
         "404":
           description: Issue not found
+
+  /api/workspaces/{ws}/issues/{id}/review-decision:
+    post:
+      operationId: applyReviewDecision
+      tags: [issues]
+      summary: Apply one idempotent review decision
+      description: GitHub-linked decisions fail before Loom mutation unless GitHub execution is configured.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/IssueId"
+        - name: X-Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReviewDecisionRequest"
+      responses:
+        "200":
+          description: Decision applied or replayed
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    $ref: "#/components/schemas/ReviewDecisionResult"
+        "400":
+          description: Invalid or missing decision intent
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: External review execution unavailable; Loom state unchanged
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 
   /api/workspaces/{ws}/issues/{id}/claim:
     post:
@@ -1252,62 +1262,6 @@ paths:
                   disabled:
                     type: boolean
                     description: True when SSE token exchange is disabled in open mode
-
-  # ── Session History (Issue-Scoped) ──────────────────────────────────────
-  /api/workspaces/{ws}/issues/{issueId}/sessions:
-    get:
-      operationId: listSessionHistory
-      tags: [session-history]
-      summary: List session history records for an issue
-      parameters:
-        - $ref: "#/components/parameters/WorkspaceId"
-        - name: issueId
-          in: path
-          required: true
-          schema:
-            type: string
-      responses:
-        "200":
-          description: Session history
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [success]
-                properties:
-                  success:
-                    type: boolean
-                  data:
-                    type: array
-                    items:
-                      $ref: "#/components/schemas/SessionHistoryRecord"
-
-  /api/workspaces/{ws}/issues/{issueId}/sessions/{recordId}/scrollback:
-    get:
-      operationId: getSessionScrollback
-      tags: [session-history]
-      summary: Get scrollback content for a session history record
-      parameters:
-        - $ref: "#/components/parameters/WorkspaceId"
-        - name: issueId
-          in: path
-          required: true
-          schema:
-            type: string
-        - name: recordId
-          in: path
-          required: true
-          schema:
-            type: string
-      responses:
-        "200":
-          description: Scrollback content
-          content:
-            text/plain:
-              schema:
-                type: string
-        "404":
-          description: Record not found
 
   # ── Sessions (Task-Scoped Audit Trail) ──────────────────────────────────
   /api/workspaces/{ws}/tasks/{taskId}/sessions:
@@ -5264,6 +5218,14 @@ components:
           type: string
         actor:
           type: string
+        field:
+          type: [string, "null"]
+        fields:
+          type: array
+          items:
+            type: string
+        field_count:
+          type: integer
         old_value:
           type: [string, "null"]
         new_value:
@@ -5431,6 +5393,36 @@ components:
         suggest_next:
           type: boolean
         force:
+          type: boolean
+
+    ReviewDecisionRequest:
+      type: object
+      required: [decision]
+      properties:
+        decision:
+          type: string
+          enum: [approve, request_changes]
+        reason:
+          type: string
+
+    ReviewDecisionResult:
+      type: object
+      required: [issue_id, decision, decision_id, github_stage, loom_stage, replayed]
+      properties:
+        issue_id:
+          type: string
+        decision:
+          type: string
+          enum: [approve, request_changes]
+        decision_id:
+          type: string
+        github_stage:
+          type: string
+          enum: [not_applicable, applied, replayed]
+        loom_stage:
+          type: string
+          enum: [applied, replayed]
+        replayed:
           type: boolean
 
     MoveIssueRequest:
@@ -5700,6 +5692,7 @@ components:
         - is_active
         - has_transcript
         - has_diff
+        - evidence
       properties:
         session_id:
           type: string
@@ -5729,19 +5722,19 @@ components:
         exit_code:
           type: integer
         input_tokens:
-          type: integer
+          type: [integer, "null"]
           format: int64
         output_tokens:
-          type: integer
+          type: [integer, "null"]
           format: int64
         cache_read_tokens:
-          type: integer
+          type: [integer, "null"]
           format: int64
         cache_write_tokens:
-          type: integer
+          type: [integer, "null"]
           format: int64
         estimated_cost_usd:
-          type: number
+          type: [number, "null"]
           format: double
         files_changed:
           type: integer
@@ -5763,7 +5756,39 @@ components:
           type: boolean
         has_diff:
           type: boolean
+        evidence:
+          $ref: "#/components/schemas/SessionEvidence"
         last_error:
+          type: string
+
+    SessionEvidence:
+      type: object
+      required: [status, usage_status, conflicts]
+      properties:
+        status:
+          type: string
+          enum: [ok, conflict]
+        usage_status:
+          type: string
+          enum: [unavailable, reported, conflict]
+        conflicts:
+          type: array
+          items:
+            $ref: "#/components/schemas/SessionEvidenceConflict"
+
+    SessionEvidenceConflict:
+      type: object
+      required: [field, existing_source, existing_value, incoming_source, incoming_value]
+      properties:
+        field:
+          type: string
+        existing_source:
+          type: string
+        existing_value:
+          type: string
+        incoming_source:
+          type: string
+        incoming_value:
           type: string
 
     TranscriptEntry:
@@ -5789,34 +5814,6 @@ components:
         tool_input:
           type: string
         raw:
-          type: string
-
-    SessionHistoryRecord:
-      type: object
-      description: Session history record (Redis-backed, per-issue)
-      required: [id, session_name, issue_id, backend, status, launcher, started_at]
-      properties:
-        id:
-          type: string
-        session_name:
-          type: string
-        issue_id:
-          type: string
-        backend:
-          type: string
-        status:
-          type: string
-          enum: [active, completed]
-        launcher:
-          type: string
-          enum: [user, start-work]
-        started_at:
-          type: string
-          format: date-time
-        ended_at:
-          type: [string, "null"]
-          format: date-time
-        scrollback_path:
           type: string
 
     # ── Terminal Schemas ────────────────────────────────────────────────

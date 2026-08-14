@@ -17,8 +17,8 @@ import {
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import "@testing-library/jest-dom";
 
-import type { Issue } from "@/types";
-import { updateIssue } from "@/api";
+import type { Event, Issue } from "@/types";
+import { getIssueEvents, updateIssue } from "@/hooks/api";
 
 import { IssueDetailView } from "../IssueDetailView";
 import type { IssueDetailViewProps } from "../IssueDetailView";
@@ -36,7 +36,11 @@ vi.mock("@/hooks", async (importOriginal) => {
   };
 });
 
-vi.mock("@/api", () => ({
+vi.mock("@/hooks/api", () => ({
+  addComment: vi.fn(),
+  getIssueEvents: vi
+    .fn()
+    .mockImplementation(() => new Promise<Event[]>(() => {})),
   updateIssue: vi.fn(),
 }));
 
@@ -52,6 +56,7 @@ vi.mock("@/hooks/workspace", async () => {
 });
 
 const mockUpdateIssue = vi.mocked(updateIssue);
+const mockGetIssueEvents = vi.mocked(getIssueEvents);
 
 /**
  * Create a minimal test issue with required fields.
@@ -103,6 +108,7 @@ function getEscapeHandler(): (() => void) | null {
 describe("IssueDetailView", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockGetIssueEvents.mockImplementation(() => new Promise<Event[]>(() => {}));
   });
 
   afterEach(() => {
@@ -134,6 +140,42 @@ describe("IssueDetailView", () => {
       expect(panel.className).not.toMatch(/description/);
       expect(screen.getAllByText("Design")).toHaveLength(1);
       expect(screen.getByTitle("HTML design artifact")).toBeInTheDocument();
+    });
+  });
+
+  describe("extended detail sections", () => {
+    it("renders the issue description", () => {
+      const issue = createTestIssue({
+        description: "Implementation notes for the standalone page.",
+      });
+
+      render(<IssueDetailView {...createDefaultProps({ issue })} />);
+
+      expect(screen.getByText("Description")).toBeInTheDocument();
+      expect(
+        screen.getByText("Implementation notes for the standalone page."),
+      ).toBeInTheDocument();
+    });
+
+    it("renders fetched activity events", async () => {
+      const event: Event = {
+        id: 42,
+        issue_id: "test-issue-abc123",
+        event_type: "issue.created",
+        actor: "tester",
+        created_at: "2024-01-15T10:35:00Z",
+      };
+      mockGetIssueEvents.mockResolvedValueOnce([event]);
+
+      render(<IssueDetailView {...createDefaultProps()} />);
+
+      expect(mockGetIssueEvents).toHaveBeenCalledWith(
+        "test-ws-id",
+        "test-issue-abc123",
+      );
+      expect(
+        await screen.findByText("tester created this issue"),
+      ).toBeInTheDocument();
     });
   });
 
@@ -228,6 +270,42 @@ describe("IssueDetailView", () => {
       const dropdown = screen.getByTestId("status-dropdown");
       expect(dropdown).toBeInTheDocument();
       expect(dropdown).toHaveValue("in_progress");
+    });
+
+    it("renders close reason for closed issues", () => {
+      const issue = createTestIssue({
+        status: "closed",
+        close_reason: "fixed by detail test",
+      });
+
+      render(<IssueDetailView {...createDefaultProps({ issue })} />);
+
+      expect(screen.getByTestId("issue-close-reason")).toHaveTextContent(
+        "fixed by detail test",
+      );
+    });
+
+    it("does not render close reason for non-closed issues", () => {
+      const issue = createTestIssue({
+        status: "open",
+        close_reason: "not visible",
+      });
+
+      render(<IssueDetailView {...createDefaultProps({ issue })} />);
+
+      expect(
+        screen.queryByTestId("issue-close-reason"),
+      ).not.toBeInTheDocument();
+    });
+
+    it("does not render close reason when a closed issue has no reason", () => {
+      const issue = createTestIssue({ status: "closed" });
+
+      render(<IssueDetailView {...createDefaultProps({ issue })} />);
+
+      expect(
+        screen.queryByTestId("issue-close-reason"),
+      ).not.toBeInTheDocument();
     });
 
     it("defaults to open when issue has no status", () => {

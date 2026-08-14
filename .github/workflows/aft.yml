@@ -1,0 +1,121 @@
+name: aft e2e
+
+on:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "aft mode (strict runs the Claude recovery agent on failures; needs ANTHROPIC_API_KEY secret)"
+        type: choice
+        default: no-agent
+        options: [no-agent, strict]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aft-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  aft:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      AFT_DIR: ${{ github.workspace }}/.aft
+      FLEET_DB_REPO: ${{ github.workspace }}/.fleet-db
+      FLUE_REPO: ${{ github.workspace }}/.flue
+    steps:
+      - uses: actions/checkout@v4
+
+      # aft and fleet-db live in separate private repos. AFT_CHECKOUT_TOKEN must be
+      # a token with read access to both tysonthomas9/aft and tysonthomas9/fleet-db.
+      - uses: actions/checkout@v4
+        with:
+          repository: tysonthomas9/aft
+          token: ${{ secrets.AFT_CHECKOUT_TOKEN }}
+          path: .aft
+          # Pinned like the flue checkout below; update deliberately with AFT changes.
+          ref: 8d533f0f00c489e1f577f9b2947adc4d1b0e091b
+
+      - uses: actions/checkout@v4
+        with:
+          repository: tysonthomas9/fleet-db
+          token: ${{ secrets.AFT_CHECKOUT_TOKEN }}
+          path: .fleet-db
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24 # agent-browser requires >= 24; flue needs >= 22.19
+          cache: npm
+          cache-dependency-path: |
+            internal/webui/frontend/package-lock.json
+            .aft/package-lock.json
+
+      # flue runtime + cli, needed to build the builtin epic-runner workflow bundle
+      # (zz-agent-flow suite). Public repo, pinned like ci.yml's builtin-bundle-pin
+      # job — and like it, built AFTER setup-node so pnpm runs on node 24.
+      - name: Read pinned flue commit
+        id: flue-pin
+        run: |
+          set -euo pipefail
+          sha="$(tr -d '[:space:]' < internal/workflows/FLUE_COMMIT)"
+          printf '%s' "$sha" | grep -Eq '^[0-9a-f]{40}$'
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ vars.FLUE_REPOSITORY || 'withastro/flue' }}
+          ref: ${{ steps.flue-pin.outputs.sha }}
+          path: .flue
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: '11.1.1'
+
+      - name: Build flue
+        run: cd .flue && pnpm install --frozen-lockfile && pnpm --filter @flue/runtime --filter @flue/cli build
+
+      - name: Install agent-browser, Chrome, and ffmpeg
+        run: |
+          npm install -g agent-browser
+          agent-browser install --with-deps
+          sudo apt-get update -q
+          sudo apt-get install -y -q ffmpeg
+
+      - name: Build aft
+        run: cd .aft && npm ci # prepare script compiles dist/
+
+      - name: Build frontend
+        run: cd internal/webui/frontend && npm ci && npm run build
+
+      - name: Run aft suites (deterministic)
+        if: inputs.mode != 'strict'
+        run: make test-aft AFT_ARGS="--record --screenshots --junit tests/aft/reports/junit.xml"
+
+      - name: Install claude CLI
+        if: inputs.mode == 'strict'
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Run aft suites (strict — agent diagnoses failures)
+        if: inputs.mode == 'strict'
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: make test-aft-strict AFT_ARGS="--record --screenshots --junit tests/aft/reports/junit.xml"
+
+      - name: Write step summary
+        if: always()
+        run: python3 tests/aft/scripts/report-summary.py tests/aft/reports/last-run.json >> "$GITHUB_STEP_SUMMARY" || true
+
+      - name: Upload reports (JSON, JUnit, HTML report, screenshots, failure videos, server log)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: aft-reports
+          path: tests/aft/reports/
+          if-no-files-found: ignore
+          retention-days: 14

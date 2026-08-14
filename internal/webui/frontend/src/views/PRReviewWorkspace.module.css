@@ -365,3 +365,43 @@
 .ctaButton:hover {
   filter: brightness(1.08);
 }
+
+/* Decision bar (rw-decision) */
+.approveButton,
+.changesButton {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 16px;
+  font-size: 13px;
+  font-weight: 700;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.approveButton {
+  border: 1px solid var(--color-success);
+  background: var(--color-success);
+  color: #fff;
+}
+
+.approveButton:hover:not(:disabled) {
+  filter: brightness(1.1);
+}
+
+.changesButton {
+  border: 1px solid var(--color-danger);
+  background: transparent;
+  color: var(--color-danger);
+}
+
+.changesButton:hover:not(:disabled) {
+  background: rgb(239 68 68 / 10%);
+}
+
+.approveButton:disabled,
+.changesButton:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}

@@ -1,0 +1,184 @@
+# Issue detail panel coverage for the real v5 kanban shell. Cards are article
+# elements with no testid, so this suite opens the lone ready card after API
+# seeding and then exercises verified IssueDetailPanel/StatusDropdown anchors.
+suite: issue-detail
+classification: { area: issues, feature: issue-detail, surface: mixed, purpose: journey }
+baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
+teardown: '"$AFT_TESTS_DIR/scripts/close-open-issues.sh"'
+
+tests:
+  # covers: LCLI-WP-002; LCLI-WP-006 partial (markdown description only — the
+  # DesignPanel's design notes / acceptance criteria are untested); LCLI-WP-003
+  # partial; PriorityDropdown; LabelEditor; IssueDetailPanel PATCH wiring
+  - name: detail panel edits markdown status and persists metadata
+    intent: An agent creates an issue through the API, then a human editor saves markdown, changes priority and labels through mounted controls, and changes status while readbacks verify persistence
+    steps:
+      - api:
+          method: "POST"
+          path: "/api/workspaces/${AFT_WS:-E2E-WS}/issues"
+          body:
+            title: "detail panel $RUN_ID"
+            issue_type: "task"
+            priority: 2
+            description: "Initial detail description $RUN_ID"
+          save:
+            - from: "data.id"
+              as: "detailId"
+        intent: "An agent creates the detail-panel issue with its initial description"
+      - open: /ws/E2E-WS/kanban
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=board-toolbar]')
+        intent: "Wait until the workspace board is ready"
+      - wait: { text: detail panel }
+      - expect: { count: { selector: "section[data-status=ready] article", equals: 1 } }
+      - click: { selector: "section[data-status=ready] article", first: true }
+      - wait:
+          fn: >-
+            document.querySelector('[data-testid=issue-detail-panel]')?.getAttribute('data-state') === 'open'
+        intent: "Wait until the selected issue detail panel is open"
+      - expect: { visible: { testid: issue-header } }
+      - expect: { visible: { testid: status-dropdown } }
+      - expect: { text: "detail panel ${RUN_ID:-local}" }
+      # the panel's sections render async after data-state=open and re-render as
+      # issue data loads — settle on networkidle so the edit button is stable
+      # before clicking (clicking the just-mounted node loses the event)
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=description-edit-button]')
+        intent: "Wait until the description editor control is ready"
+      - wait: { load: networkidle }
+      # even after networkidle the panel body can re-render and swallow the click —
+      # retry the edit click until the textarea actually mounts
+      - run: >-
+          for i in 1 2 3; do
+          agent-browser --session "$AFT_SESSION" find testid description-edit-button click || true;
+          sleep 1;
+          agent-browser --session "$AFT_SESSION" eval "!!document.querySelector('[data-testid=description-textarea]')" | grep -q true && exit 0;
+          done; echo "description edit click never opened the editor"; exit 1
+        intent: "A human editor retries opening the description editor until it is mounted"
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=description-textarea]')
+        intent: "Wait until the description editor is open"
+      - expect: { visible: { testid: description-textarea } }
+      - fill:
+          testid: description-textarea
+          value: |-
+            Updated **bold detail** ${RUN_ID:-local}
+
+            Panel markdown persists.
+      - click: { testid: description-save }
+      - wait:
+          fn: >-
+            Array.from(document.querySelectorAll('[data-testid=markdown-content] strong')).some((node) => node.textContent === 'bold detail')
+        intent: "Wait until the saved markdown renders the bold detail text"
+      - expect: { text: Panel markdown persists. }
+      - reload: true
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=board-toolbar]')
+        intent: "Wait until the workspace board is ready"
+      - click: { selector: "section[data-status=ready] article", first: true }
+      - wait:
+          fn: >-
+            document.querySelector('[data-testid=issue-detail-panel]')?.getAttribute('data-state') === 'open'
+        intent: "Wait until the selected issue detail panel is open"
+      - wait:
+          fn: >-
+            Array.from(document.querySelectorAll('[data-testid=markdown-content] strong')).some((node) => node.textContent === 'bold detail')
+        intent: "Wait until the saved markdown renders the bold detail text"
+      - expect: { text: Panel markdown persists. }
+      - run: >-
+          for i in 1 2 3; do
+          agent-browser --session "$AFT_SESSION" find testid priority-dropdown-trigger click || true;
+          sleep 1;
+          agent-browser --session "$AFT_SESSION" eval "!!document.querySelector('[data-testid=priority-dropdown-menu]')" | grep -q true && exit 0;
+          done; echo "priority dropdown click never opened the menu"; exit 1
+        intent: "A human editor retries opening the priority menu until it is mounted"
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=priority-dropdown-menu]')
+        intent: "Wait until the priority menu is open"
+      - click: { testid: priority-option-1 }
+      - wait:
+          fn: >-
+            document.querySelector('[data-testid=priority-dropdown-trigger]')?.getAttribute('data-priority') === '1'
+        intent: "Wait until the priority control reflects priority 1"
+      - run: >-
+          for i in 1 2 3; do
+          agent-browser --session "$AFT_SESSION" find testid add-label-button click || true;
+          sleep 1;
+          agent-browser --session "$AFT_SESSION" eval "!!document.querySelector('[data-testid=label-input]')" | grep -q true && exit 0;
+          done; echo "add label click never opened the label editor"; exit 1
+        intent: "A human editor retries opening the label editor until it is mounted"
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=label-input]')
+        intent: "Wait until the label editor is open"
+      - fill: { testid: label-input, value: "detail-label-${RUN_ID:-local}" }
+      - press: Enter
+      - wait:
+          fn: >-
+            document.querySelector('[data-testid=label-list]')?.textContent.includes('detail-label-${RUN_ID:-local}')
+        intent: "Wait until the new label appears in the issue metadata"
+      - click: { testid: header-close-button }
+      - open: /ws/E2E-WS/kanban?priority=1&labels=detail-label-${RUN_ID:-local}
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=board-toolbar]')
+        intent: "Wait until the workspace board is ready"
+      - wait: { text: detail panel }
+      - expect: { count: { selector: "section[data-status=ready] article", equals: 1 } }
+      - expect: { attr: { selector: "section[data-status=ready] article", name: data-priority, equals: "1" } }
+      - api:
+          method: "GET"
+          path: "/api/workspaces/${AFT_WS:-E2E-WS}/issues/${var:detailId}"
+          assert:
+            - path: "data.priority"
+              equals: 1
+            - path: "data.labels"
+              contains: "detail-label-$RUN_ID"
+        intent: "A human editor's readback confirms the priority and label changes persisted"
+      - open: /ws/E2E-WS/kanban
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=board-toolbar]')
+        intent: "Wait until the workspace board is ready"
+      - wait: { text: detail panel }
+      - click: { selector: "section[data-status=ready] article", first: true }
+      - wait:
+          fn: >-
+            document.querySelector('[data-testid=issue-detail-panel]')?.getAttribute('data-state') === 'open'
+        intent: "Wait until the selected issue detail panel is open"
+      - select: { testid: status-dropdown, value: in_progress }
+      - wait:
+          fn: >-
+            document.querySelector('[data-testid=status-dropdown]')?.getAttribute('data-status') === 'in_progress'
+        intent: "Wait until the status control reflects in-progress state"
+      - select: { testid: status-dropdown, value: closed }
+      - wait:
+          fn: >-
+            document.querySelector('[data-testid=status-dropdown]')?.getAttribute('data-status') === 'closed'
+        intent: "Wait until the status control reflects closed state"
+      - select: { testid: status-dropdown, value: open }
+      - wait:
+          fn: >-
+            document.querySelector('[data-testid=status-dropdown]')?.getAttribute('data-status') === 'open'
+        intent: "Wait until the status control reflects open state"
+      - click: { testid: header-close-button }
+      - wait:
+          fn: >-
+            document.querySelectorAll('section[data-status=ready] article').length === 1
+        intent: "Wait until the board renders exactly one ready issue card"
+      # persistence proof beyond the dropdown's optimistic data-status
+      - api:
+          method: "GET"
+          path: "/api/workspaces/${AFT_WS:-E2E-WS}/issues/${var:detailId}"
+          assert:
+            - path: "data.status"
+              equals: "open"
+        intent: "A human editor's readback confirms the final open status persisted"
+      - expect: { count: { selector: "section[data-status=in_progress] article", equals: 0 } }
+      # scope to this issue: other suites' teardown-closed issues populate Done in a full run
+      - expect: { count: { selector: "section[data-status=done] article[aria-label*='detail panel ${RUN_ID:-local}']", equals: 0 } }

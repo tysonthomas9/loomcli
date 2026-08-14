@@ -297,14 +297,14 @@ describe("useToast", () => {
   });
 
   describe("type-specific default durations", () => {
-    it("uses 3000ms for success toasts", () => {
+    it("uses 4000ms for success toasts", () => {
       const { result } = renderHook(() => useToast(), { wrapper });
 
       act(() => {
         result.current.showToast("Success!", { type: "success" });
       });
 
-      expect(result.current.toasts[0].duration).toBe(3000);
+      expect(result.current.toasts[0].duration).toBe(4000);
     });
 
     it("uses 10000ms for error toasts", () => {
@@ -378,7 +378,7 @@ describe("useToast", () => {
   });
 
   describe("coalescing", () => {
-    it("coalesces duplicate toasts within 500ms window", () => {
+    it("dedupes identical consecutive active toasts", () => {
       const { result } = renderHook(() => useToast(), { wrapper });
 
       act(() => {
@@ -423,7 +423,7 @@ describe("useToast", () => {
       expect(result.current.toasts).toHaveLength(2);
     });
 
-    it("allows duplicate toasts after 500ms window", () => {
+    it("allows the same message after a different toast intervenes", () => {
       const { result } = renderHook(() => useToast(), { wrapper });
 
       act(() => {
@@ -431,21 +431,21 @@ describe("useToast", () => {
           type: "error",
           duration: 0,
         });
-      });
-
-      // Advance past the coalescing window
-      act(() => {
-        vi.advanceTimersByTime(600);
-      });
-
-      act(() => {
+        result.current.showToast("Different message", {
+          type: "error",
+          duration: 0,
+        });
         result.current.showToast("Same message", {
           type: "error",
           duration: 0,
         });
       });
 
-      expect(result.current.toasts).toHaveLength(2);
+      expect(result.current.toasts.map((toast) => toast.message)).toEqual([
+        "Same message",
+        "Different message",
+        "Same message",
+      ]);
     });
   });
 

@@ -13,7 +13,7 @@ import {
   del,
   ApiError,
 } from "@/api/common";
-import { createIssue } from "@/api/issues";
+import { createIssueOnly } from "@/api/issues";
 import type { Issue } from "@/types";
 
 // ============= Types =============
@@ -32,10 +32,11 @@ export interface RepoInfo {
 
 export interface WorkspaceAgentInfo {
   name: string;
-  repos: string[];
-  repo_groups: string[];
+  repos?: string[];
+  repo_groups?: string[];
   cross_repo: boolean;
   role_name?: string;
+  role_kind?: "interactive" | "worker";
   backend?: string;
 }
 
@@ -209,29 +210,6 @@ export async function reorderWorkspaces(
   return unwrap(response);
 }
 
-/**
- * Deprecated: default workspace selection has been removed.
- */
-export async function setDefaultWorkspace(
-  name: string,
-): Promise<WorkspaceData> {
-  const response = await put<ApiResult<WorkspaceData>>(
-    "/api/workspaces/default",
-    { name },
-  );
-  return unwrap(response);
-}
-
-/**
- * Deprecated: default workspace selection has been removed.
- */
-export async function clearDefaultWorkspace(): Promise<WorkspaceData> {
-  const response = await del<ApiResult<WorkspaceData>>(
-    "/api/workspaces/default",
-  );
-  return unwrap(response);
-}
-
 // ============= Workspace Creation =============
 
 export interface CreateWorkspaceRequest {
@@ -319,6 +297,16 @@ export async function addWorkspaceRepos(
   return unwrap(response);
 }
 
+export async function deleteWorkspaceRepo(
+  workspaceId: string,
+  repoName: string,
+): Promise<WorkspaceData> {
+  const response = await del<ApiResult<WorkspaceData>>(
+    `/api/workspaces/${encodeURIComponent(workspaceId)}/repos/${encodeURIComponent(repoName)}`,
+  );
+  return unwrap(response);
+}
+
 export async function createWorkspaceAgent(
   workspaceId: string,
   req: CreateAgentRequest,
@@ -393,7 +381,7 @@ export async function createWorkspaceTask(
   epicId: string,
   title: string,
 ): Promise<Issue> {
-  return createIssue(workspaceId, {
+  return createIssueOnly(workspaceId, {
     title,
     issue_type: "task",
     priority: 3,
@@ -408,7 +396,7 @@ export async function createWorkspaceEpic(
   workspaceId: string,
   title: string,
 ): Promise<Issue> {
-  return createIssue(workspaceId, {
+  return createIssueOnly(workspaceId, {
     title,
     issue_type: "epic",
     priority: 2,
