@@ -1544,3 +1544,49 @@ func TestResetTask_CrashStillRespectsTerminalStates(t *testing.T) {
 		})
 	}
 }
+
+// The reset is the one write standing between a crashed run and a task nobody
+// can claim, and it was seen losing that race to a rate-limited backend — the
+// recovery decided correctly and then simply did not happen. A backend saturated
+// by the fleet's own polling is the normal condition, so one attempt is a coin
+// flip rather than a reset.
+func TestResetTask_RetriesATransientFailure(t *testing.T) {
+	t.Parallel()
+	deps, _, _, _, tracker := NewTestDeps(t)
+
+	tracker.GetResult = &backend.IssueDetailData{IssueData: backend.IssueData{ID: "task-789", Status: "in_progress"}}
+	calls := 0
+	tracker.UpdateFn = func(ctx context.Context, id string, opts backend.UpdateParams) error {
+		calls++
+		if calls == 1 {
+			return errors.New("backend [unavailable] Update: rate limited: rate limit exceeded")
+		}
+		return nil
+	}
+
+	resetTask(deps, "task-789", resetAfterCrash)
+
+	if calls < 2 {
+		t.Fatalf("Update called %d time(s); a transient failure must be retried, or the task is stranded", calls)
+	}
+}
+
+// It must also give up rather than spin: a genuine outage cannot block the
+// supervisor's recovery path forever.
+func TestResetTask_GivesUpAfterItsAttempts(t *testing.T) {
+	t.Parallel()
+	deps, _, _, _, tracker := NewTestDeps(t)
+
+	tracker.GetResult = &backend.IssueDetailData{IssueData: backend.IssueData{ID: "task-789", Status: "in_progress"}}
+	calls := 0
+	tracker.UpdateFn = func(ctx context.Context, id string, opts backend.UpdateParams) error {
+		calls++
+		return errors.New("still down")
+	}
+
+	resetTask(deps, "task-789", resetAfterCrash)
+
+	if calls != resetTaskAttempts {
+		t.Errorf("Update called %d time(s), want exactly %d", calls, resetTaskAttempts)
+	}
+}

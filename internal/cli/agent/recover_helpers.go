@@ -163,6 +163,14 @@ const (
 	resetAfterCrash
 )
 
+// How hard recovery tries to put a task back on the queue. Three attempts a few
+// seconds apart clears a saturated backend without turning a genuine outage into
+// a long stall — recovery runs on the supervisor's path, so it cannot block.
+const (
+	resetTaskAttempts = 3
+	resetTaskRetryGap = 3 * time.Second
+)
+
 // resetTask resets a task to open status, unless its current status says
 // otherwise. Closed is terminal and blocked was quarantined deliberately (by
 // the daemon or a human), so neither is ever flipped back by a recovery pass.
@@ -203,18 +211,40 @@ func resetTask(deps *cli.Deps, taskID string, cause resetCause) {
 		}
 	}
 
-	err = ib.Update(ctx, taskID, backend.UpdateParams{
-		Status:   strPtr("open"),
-		Assignee: strPtr(""),
-	})
-	if err != nil {
-		fmt.Printf("Warning: failed to reset task: %v\n", err)
-		fmt.Println("")
-		fmt.Println("You may need to manually reset the task:")
-		fmt.Printf("  loom data update %s --status open --assignee \"\"\n", taskID)
-	} else {
-		fmt.Printf("✓ Task %s reset to open\n", taskID)
+	// Retried, because this single write is what stands between a crashed run
+	// and a task nobody can ever claim — and it was observed losing that race:
+	//
+	//   Warning: failed to reset task: backend [unavailable] Update: rate limited
+	//
+	// The recovery decided correctly and then simply did not happen, leaving the
+	// task stranded exactly as if the decision had never been made. A backend
+	// under load from the fleet's own polling is the normal condition here, not
+	// an exotic one, so one attempt is not a reset — it is a coin flip.
+	//
+	// Retrying is safe without any error classification: the update is
+	// idempotent (set status open, clear assignee), so a retry after a response
+	// that was lost rather than rejected costs nothing.
+	for attempt := 1; ; attempt++ {
+		err = ib.Update(ctx, taskID, backend.UpdateParams{
+			Status:   strPtr("open"),
+			Assignee: strPtr(""),
+		})
+		if err == nil {
+			fmt.Printf("✓ Task %s reset to open\n", taskID)
+			return
+		}
+		if attempt == resetTaskAttempts {
+			break
+		}
+		fmt.Printf("Reset of %s failed (attempt %d/%d): %v — retrying in %s\n",
+			taskID, attempt, resetTaskAttempts, err, resetTaskRetryGap)
+		time.Sleep(resetTaskRetryGap)
 	}
+
+	fmt.Printf("Warning: failed to reset task after %d attempts: %v\n", resetTaskAttempts, err)
+	fmt.Println("")
+	fmt.Println("You may need to manually reset the task:")
+	fmt.Printf("  loom data update %s --status open --assignee \"\"\n", taskID)
 }
 
 // killProcess sends SIGTERM then SIGKILL to the given PID's process group.
