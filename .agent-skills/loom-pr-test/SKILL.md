@@ -205,7 +205,7 @@ curl -sS "http://127.0.0.1:$API_PORT/api/monitor/agents?workspace=LOCALMODE"
 
 ## Browser Validation
 
-Use `agent-browser` after the stack is up. Always pass a dedicated profile path so cookies, storage, tabs, and browser state do not bleed between reviews or stacks. Use one profile per stack and include a unique run name.
+Use `agent-browser` after the stack is up. Always pass a dedicated profile path so cookies, storage, tabs, and browser state do not bleed between reviews or stacks. Use one profile per stack and include a unique run name. Browser sessions on this host belong to multiple agents: never run `agent-browser close --all` — close only sessions you opened, by name/profile.
 
 ```bash
 RUN_NAME=<review-or-branch-name>
@@ -293,7 +293,7 @@ LOCAL_MODE_COMPOSE_FILES=/tmp/fleetdb-review.yml \
 make local-mode-down
 ```
 
-Browser profiles:
+Browser profiles (never `close --all` — other agents' sessions share this host):
 
 ```bash
 agent-browser --profile /tmp/loom-agent-browser/<run-name>/<stack-name> close

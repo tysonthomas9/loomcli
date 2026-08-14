@@ -57,6 +57,9 @@ owns it without any error.
 - Never run `up`, `down`, or `--build` against a compose project you did not
   create this session; tear down only your own project (same
   `LOCAL_MODE_COMPOSE_PROJECT` on `make local-mode-down`) when finished.
+- The same etiquette applies to `agent-browser`: sessions and profiles on this
+  host belong to multiple agents. Never run `close --all`; close only sessions
+  you opened, by name/profile.
 
 ## Generated Workflow Bundles
 
