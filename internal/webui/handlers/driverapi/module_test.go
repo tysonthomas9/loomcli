@@ -21,12 +21,15 @@ import (
 // touch need real implementations; anything else panics loudly.
 type fakeIssueBackend struct {
 	backend.IssueBackend
-	ready    []backend.IssueData
-	blocked  []backend.IssueData
-	children []backend.IssueData
-	epic     *backend.IssueDetailData
-	actor    string
-	claimed  []string
+	ready        []backend.IssueData
+	blocked      []backend.IssueData
+	children     []backend.IssueData
+	epic         *backend.IssueDetailData
+	actor        string
+	claimed      []string
+	created      []backend.CreateParams
+	createResult *backend.IssueData
+	createErr    error
 }
 
 func (f *fakeIssueBackend) Ready(_ context.Context, _ backend.ReadyOpts) ([]backend.IssueData, error) {
@@ -54,6 +57,11 @@ func (f *fakeIssueBackend) ClaimIssueAsActor(_ context.Context, id string, _ tim
 
 func (f *fakeIssueBackend) Get(_ context.Context, _ string) (*backend.IssueDetailData, error) {
 	return f.epic, nil
+}
+
+func (f *fakeIssueBackend) Create(_ context.Context, params backend.CreateParams) (*backend.IssueData, error) {
+	f.created = append(f.created, params)
+	return f.createResult, f.createErr
 }
 
 type testHarness struct {
