@@ -155,12 +155,11 @@ function getOnboardingPlannerName(
   );
 }
 
-function getSingleRepoSourceRepo(
-  repos: readonly { name?: string; source_repo_id?: string }[],
-): string | undefined {
-  if (repos.length !== 1) return undefined;
-  const repo = repos[0];
-  return repo?.source_repo_id || repo?.name || undefined;
+function getRepoSourceRepo(repo: {
+  name?: string;
+  source_repo_id?: string;
+}): string | undefined {
+  return repo.source_repo_id || repo.name || undefined;
 }
 
 function App() {
@@ -263,6 +262,18 @@ function App() {
     () => workspaceRepos.some((repo) => isOnboardingRepo(repo)),
     [workspaceRepos],
   );
+  const onboardingRepoOptions = useMemo(
+    () =>
+      workspaceRepos.flatMap((repo) => {
+        const value = getRepoSourceRepo(repo);
+        return value ? [{ value, label: repo.name || value }] : [];
+      }),
+    [workspaceRepos],
+  );
+  const firstOnboardingSourceRepo = onboardingRepoOptions[0]?.value ?? "";
+  const onboardingRepoOptionsKey = onboardingRepoOptions
+    .map((repo) => repo.value)
+    .join("\n");
   const [showTeamTemplate, setShowTeamTemplate] = useState(false);
   const [teamTemplateApplyReport, setTeamTemplateApplyReport] =
     useState<TeamTemplateApplyReport | null>(null);
@@ -573,6 +584,26 @@ function App() {
   const [onboardingActionError, setOnboardingActionError] = useState<
     string | null
   >(null);
+  const [onboardingIssueTitle, setOnboardingIssueTitle] = useState(() =>
+    hasOnboardingRepo ? ONBOARDING_ISSUE_TITLE : "",
+  );
+  const [onboardingIssueDescription, setOnboardingIssueDescription] = useState(
+    () => (hasOnboardingRepo ? ONBOARDING_ISSUE_DESCRIPTION : ""),
+  );
+  const [onboardingIssueSourceRepo, setOnboardingIssueSourceRepo] = useState(
+    () => firstOnboardingSourceRepo,
+  );
+
+  useEffect(() => {
+    setOnboardingIssueTitle(hasOnboardingRepo ? ONBOARDING_ISSUE_TITLE : "");
+    setOnboardingIssueDescription(
+      hasOnboardingRepo ? ONBOARDING_ISSUE_DESCRIPTION : "",
+    );
+  }, [workspaceId, hasOnboardingRepo]);
+
+  useEffect(() => {
+    setOnboardingIssueSourceRepo(firstOnboardingSourceRepo);
+  }, [workspaceId, firstOnboardingSourceRepo, onboardingRepoOptionsKey]);
 
   // Track mount state for async operations.
   useEffect(() => {
@@ -903,7 +934,6 @@ function App() {
   const shouldShowWorkspaceOnboarding =
     !onboardingDismissed &&
     !isWorkspaceOnboardingComplete &&
-    (workspaceRepos.length === 0 || hasOnboardingRepo) &&
     (!hasWorkspaceRepo || !hasWorkspaceAgent || !hasWorkspaceIssue);
   const handleOnboardingDismiss = useCallback(() => {
     dismissOnboarding(workspaceId);
@@ -933,6 +963,11 @@ function App() {
 
   const handleRunFirstOnboardingTask = useCallback(async () => {
     if (onboardingAction !== null) return;
+    const title = onboardingIssueTitle.trim();
+    if (!title) {
+      setOnboardingActionError("Issue title is required.");
+      return;
+    }
 
     setOnboardingAction("running-first-task");
     setOnboardingActionError(null);
@@ -964,14 +999,16 @@ function App() {
         throw new Error("Planner or template architect is not available yet.");
       }
 
-      const sourceRepo = getSingleRepoSourceRepo(workspaceRepos);
+      const description = onboardingIssueDescription.trim();
       const result = await runOnboardingFirstTask(workspaceId, {
         agent_name: onboardingAgent,
-        title: ONBOARDING_ISSUE_TITLE,
-        description: ONBOARDING_ISSUE_DESCRIPTION,
+        title,
+        ...(description ? { description } : {}),
         issue_type: "task",
         priority: 2,
-        ...(sourceRepo ? { source_repo: sourceRepo } : {}),
+        ...(onboardingIssueSourceRepo
+          ? { source_repo: onboardingIssueSourceRepo }
+          : {}),
         ...(latestArchitectAgentName
           ? { labels: ["architect"], pin_agent: false }
           : {}),
@@ -1004,6 +1041,9 @@ function App() {
     closeAllPanels,
     navigateToView,
     onboardingAction,
+    onboardingIssueDescription,
+    onboardingIssueSourceRepo,
+    onboardingIssueTitle,
     refetch,
     refetchWorkspace,
     showToast,
@@ -1011,7 +1051,6 @@ function App() {
     teamTemplateApplyReport,
     teamTemplateBreadcrumb,
     workspaceId,
-    workspaceRepos,
   ]);
 
   const handleCreateIssueSuccess = useCallback(
@@ -1035,6 +1074,7 @@ function App() {
           <AIBackendSetupList
             backends={aiBackends}
             defaultBackend={defaultBackend}
+            registrableBackends={onboardingBackendConfig?.available ?? []}
             isLoading={aiBackendsLoading || onboardingBackendConfigLoading}
             error={aiBackendsError}
             isSavingDefault={isSavingOnboardingBackend}
@@ -1046,7 +1086,9 @@ function App() {
         id: "workspace-repo",
         title: "Create workspace with repo",
         description: hasWorkspaceRepo
-          ? "The sample repo is attached to this workspace."
+          ? hasOnboardingRepo
+            ? "The sample repo is attached to this workspace."
+            : "A repo is attached to this workspace."
           : "Add the sample repo from the workspace tree; the URL is prefilled for first-run setup.",
         status: hasWorkspaceRepo ? "complete" : "current",
       },
@@ -1116,7 +1158,9 @@ function App() {
               : "Creating the task, assigning the planner, and starting work."
             : hasWorkspaceIssue
               ? "The first issue is ready for agent work."
-              : "Create and run the prefilled sample task.",
+              : hasOnboardingRepo
+                ? "Create and run the prefilled sample task."
+                : "Describe the first task for this workspace.",
         status: deriveFirstIssueStepStatus({
           isRunning: onboardingAction === "running-first-task",
           hasWorkspaceIssue,
@@ -1128,10 +1172,59 @@ function App() {
           onboardingAction === "running-first-task"
             ? "Creating…"
             : "Create first issue",
-        actionDisabled: onboardingAction !== null,
+        actionDisabled:
+          onboardingAction !== null || onboardingIssueTitle.trim() === "",
         onAction: handleRunFirstOnboardingTask,
-        detail: onboardingActionError ? (
-          <p role="alert">{onboardingActionError}</p>
+        detail: !hasWorkspaceIssue ? (
+          <div className={styles.onboardingIssueForm}>
+            <label htmlFor="onboarding-issue-title">Issue title</label>
+            <input
+              id="onboarding-issue-title"
+              type="text"
+              required
+              value={onboardingIssueTitle}
+              placeholder={
+                hasOnboardingRepo ? undefined : "Plan the first useful change"
+              }
+              onChange={(event) => setOnboardingIssueTitle(event.target.value)}
+              disabled={onboardingAction !== null}
+            />
+            {onboardingRepoOptions.length > 1 ? (
+              <>
+                <label htmlFor="onboarding-issue-repo">Repository</label>
+                <select
+                  id="onboarding-issue-repo"
+                  value={onboardingIssueSourceRepo}
+                  onChange={(event) =>
+                    setOnboardingIssueSourceRepo(event.target.value)
+                  }
+                  disabled={onboardingAction !== null}
+                >
+                  {onboardingRepoOptions.map((repo) => (
+                    <option key={repo.value} value={repo.value}>
+                      {repo.label}
+                    </option>
+                  ))}
+                </select>
+              </>
+            ) : null}
+            <label htmlFor="onboarding-issue-description">
+              Description (optional)
+            </label>
+            <textarea
+              id="onboarding-issue-description"
+              value={onboardingIssueDescription}
+              placeholder="Add context, acceptance criteria, and testing notes"
+              rows={3}
+              onChange={(event) =>
+                setOnboardingIssueDescription(event.target.value)
+              }
+              disabled={onboardingAction !== null}
+            />
+            {onboardingActionError ? (
+              <p role="alert">{onboardingActionError}</p>
+            ) : null}
+          </div>
         ) : undefined,
       },
     ],
@@ -1141,10 +1234,12 @@ function App() {
       hasTemplateArchitect,
       hasWorkspaceIssue,
       hasWorkspaceRepo,
+      hasOnboardingRepo,
       isDefaultBackendReady,
       defaultBackendStatus,
       aiBackends,
       defaultBackend,
+      onboardingBackendConfig?.available,
       aiBackendsLoading,
       onboardingBackendConfigLoading,
       aiBackendsError,
@@ -1153,6 +1248,10 @@ function App() {
       handleRunFirstOnboardingTask,
       onboardingAction,
       onboardingActionError,
+      onboardingIssueDescription,
+      onboardingIssueSourceRepo,
+      onboardingIssueTitle,
+      onboardingRepoOptions,
       teamTemplateApplyReport,
       detectedTeamTemplate,
     ],

@@ -238,6 +238,43 @@ describe("SettingsView", () => {
   });
 
   describe("backend dropdown", () => {
+    it("does not offer an unregistrable harness backend as the workspace default", () => {
+      mockUseBackendConfig.mockReturnValue(
+        createMockHookReturn({
+          config: createMockConfig({
+            backend: "anthropic",
+            available: ["anthropic", "openai"],
+          }),
+        }),
+      );
+      mockUseBackends.mockReturnValue(
+        createMockBackendsReturn({
+          backends: [
+            ...createMockBackendsReturn().backends,
+            {
+              name: "localdogfood",
+              displayName: "Local Dogfood",
+              provider: "Test harness",
+              brandColor: "#888888",
+              available: true,
+              installed: true,
+              apiKeySet: true,
+            },
+          ],
+        }),
+      );
+
+      render(<SettingsView />);
+
+      const dogfoodRow = screen.getByRole("row", { name: /Local Dogfood/ });
+      expect(
+        within(dogfoodRow).getByRole("button", { name: "Test" }),
+      ).toBeInTheDocument();
+      expect(
+        within(dogfoodRow).queryByRole("button", { name: "Set Default" }),
+      ).not.toBeInTheDocument();
+    });
+
     it("renders backend dropdown with current value selected", () => {
       mockUseBackendConfig.mockReturnValue(
         createMockHookReturn({

@@ -2,8 +2,8 @@
  * @vitest-environment jsdom
  */
 
-import { render, screen } from "@testing-library/react";
-import { describe, it, expect } from "vitest";
+import { render, screen, fireEvent, within } from "@testing-library/react";
+import { describe, it, expect, vi } from "vitest";
 import "@testing-library/jest-dom";
 
 import type { BackendInfo } from "@/utils/workspace";
@@ -64,5 +64,57 @@ describe("AIBackendSetupList", () => {
     expect(list).toHaveTextContent("Codex");
     expect(list).toHaveTextContent("Claude");
     expect(list.textContent).not.toMatch(/OpenAI|Anthropic/);
+  });
+
+  it("offers testing instead of set-as-default for a non-registrable backend", () => {
+    const onAction = vi.fn();
+    const localDogfood = createBackend({
+      name: "localdogfood",
+      displayName: "Local Dogfood",
+      provider: "Test harness",
+    });
+    render(
+      <AIBackendSetupList
+        backends={[createBackend(), localDogfood]}
+        defaultBackend="codex"
+        registrableBackends={["codex"]}
+        onAction={onAction}
+      />,
+    );
+
+    const dogfoodRow = screen.getByRole("group", {
+      name: "Local Dogfood CLI",
+    });
+    const action = within(dogfoodRow).getByRole("button", {
+      name: "Test",
+    });
+    fireEvent.click(action);
+
+    expect(onAction).toHaveBeenCalledWith(localDogfood, "test");
+  });
+
+  it("omits Set Default for a non-registrable backend in the matrix", () => {
+    render(
+      <AIBackendSetupList
+        variant="matrix"
+        backends={[
+          createBackend(),
+          createBackend({
+            name: "localdogfood",
+            displayName: "Local Dogfood",
+          }),
+        ]}
+        defaultBackend="codex"
+        registrableBackends={["codex"]}
+      />,
+    );
+
+    const dogfoodRow = screen.getByRole("row", { name: /Local Dogfood/ });
+    expect(
+      within(dogfoodRow).getByRole("button", { name: "Test" }),
+    ).toBeInTheDocument();
+    expect(
+      within(dogfoodRow).queryByRole("button", { name: "Set Default" }),
+    ).not.toBeInTheDocument();
   });
 });

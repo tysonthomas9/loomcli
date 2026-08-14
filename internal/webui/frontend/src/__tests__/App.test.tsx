@@ -823,9 +823,11 @@ function backendInfo(name: string, available: boolean) {
 function mockBackendState({
   defaultBackend = "opencode",
   backends = [backendInfo("opencode", true)],
+  registrableBackends,
 }: {
   defaultBackend?: string | null;
   backends?: ReturnType<typeof backendInfo>[];
+  registrableBackends?: string[];
 } = {}) {
   vi.mocked(useBackends).mockReturnValue({
     backends,
@@ -840,9 +842,11 @@ function mockBackendState({
         : {
             backend: defaultBackend,
             source: "test",
-            available: backends
-              .filter((backend) => backend.available)
-              .map((backend) => backend.name),
+            available:
+              registrableBackends ??
+              backends
+                .filter((backend) => backend.available)
+                .map((backend) => backend.name),
             agents: [],
           },
     isLoading: false,
@@ -857,11 +861,23 @@ function mockBackendState({
 function mockHelloWorldWorkspaceContext({
   agents = [{ name: "planner", role_name: "plan" }],
   workspaces = [],
+  repos = [
+    {
+      name: "Hello-World",
+      remote: "https://github.com/octocat/Hello-World",
+    },
+  ],
   refetch = vi.fn(),
   upsertAgent = vi.fn(),
 }: {
   agents?: Array<{ name: string; role_name?: string; backend?: string }>;
   workspaces?: Array<{ id: string; name: string; backend?: string }>;
+  repos?: Array<{
+    name: string;
+    remote?: string;
+    path?: string;
+    source_repo_id?: string;
+  }>;
   refetch?: () => void;
   upsertAgent?: ReturnType<typeof vi.fn>;
 } = {}) {
@@ -872,12 +888,7 @@ function mockHelloWorldWorkspaceContext({
       agents,
       workspaces,
     },
-    repos: [
-      {
-        name: "Hello-World",
-        remote: "https://github.com/octocat/Hello-World",
-      },
-    ],
+    repos,
     groups: [],
     agents,
     isLoading: false,
@@ -889,14 +900,9 @@ function mockHelloWorldWorkspaceContext({
     getAgentByName: vi.fn(),
     activeWorkspaceName: "Hello-World",
     setActiveWorkspace: vi.fn(),
-    selectedRepoNames: new Set<string>(["Hello-World"]),
-    activeRepos: [
-      {
-        name: "Hello-World",
-        remote: "https://github.com/octocat/Hello-World",
-      },
-    ],
-    activeRepoNames: ["Hello-World"],
+    selectedRepoNames: new Set<string>(repos.map((repo) => repo.name)),
+    activeRepos: repos,
+    activeRepoNames: repos.map((repo) => repo.name),
     isAllSelected: true,
     selectRepos: vi.fn(),
     selectAll: vi.fn(),
@@ -2634,7 +2640,7 @@ describe("App", () => {
       expect(mockRunOnboardingFirstTask).not.toHaveBeenCalled();
     });
 
-    it("runs the first onboarding task through the orchestration endpoint", async () => {
+    it("prefills the sample issue draft and submits user edits", async () => {
       localStorage.clear();
       const refetch = vi.fn().mockResolvedValue(undefined);
       const fetchIssue = vi.fn();
@@ -2680,6 +2686,22 @@ describe("App", () => {
 
       render(<App />);
 
+      const titleInput = screen.getByRole("textbox", {
+        name: "Issue title",
+      });
+      const descriptionInput = screen.getByRole("textbox", {
+        name: "Description (optional)",
+      });
+      expect(titleInput).toHaveValue(ONBOARDING_ISSUE_TITLE);
+      expect(titleInput).toBeRequired();
+      expect(descriptionInput).toHaveValue(ONBOARDING_ISSUE_DESCRIPTION);
+
+      fireEvent.change(titleInput, {
+        target: { value: "Plan the first product change" },
+      });
+      fireEvent.change(descriptionInput, {
+        target: { value: "Inspect the API and propose a tested change." },
+      });
       fireEvent.click(
         screen.getByRole("button", { name: "Create first issue" }),
       );
@@ -2689,8 +2711,8 @@ describe("App", () => {
           "test-ws-id",
           expect.objectContaining({
             agent_name: "fresh-planner",
-            title: ONBOARDING_ISSUE_TITLE,
-            description: ONBOARDING_ISSUE_DESCRIPTION,
+            title: "Plan the first product change",
+            description: "Inspect the API and propose a tested change.",
             issue_type: "task",
             priority: 2,
             source_repo: "Hello-World",
@@ -2772,6 +2794,85 @@ describe("App", () => {
         "Created your first issue and labeled it architect. Your architect picks it up on the next poll.",
         { type: "success" },
       );
+    });
+
+    it("defaults a multi-repo first issue to the first repo and submits the selected repo", async () => {
+      localStorage.clear();
+      const repos = [
+        {
+          name: "product-api",
+          remote: "https://github.com/acme/product-api",
+          source_repo_id: "repo-product-api",
+        },
+        {
+          name: "product-web",
+          remote: "https://github.com/acme/product-web",
+          source_repo_id: "repo-product-web",
+        },
+      ];
+      mockStoreState = createMockUseIssuesReturn({
+        issues: [],
+        refetch: vi.fn().mockResolvedValue(undefined),
+      });
+      mockBackendState({
+        defaultBackend: "opencode",
+        backends: [backendInfo("opencode", true)],
+      });
+      mockHelloWorldWorkspaceContext({ repos });
+      mockFetchWorkspaceApi.mockResolvedValue({
+        id: "test-ws-id",
+        name: "Product",
+        path: "/tmp/product",
+        repos: [],
+        groups: [],
+        agents: [
+          {
+            name: "planner",
+            role_name: "plan",
+            repos: [],
+            repo_groups: [],
+            cross_repo: true,
+          },
+        ],
+        workspaces: [],
+        default_workspace: "Product",
+      });
+
+      render(<App />);
+
+      const repoSelect = screen.getByRole("combobox", {
+        name: "Repository",
+      });
+      expect(repoSelect).toHaveValue("repo-product-api");
+      expect(screen.getByRole("textbox", { name: "Issue title" })).toHaveValue(
+        "",
+      );
+      expect(
+        screen.getByRole("textbox", { name: "Issue title" }),
+      ).toHaveAttribute("placeholder", "Plan the first useful change");
+      expect(
+        screen.getByRole("button", { name: "Create first issue" }),
+      ).toBeDisabled();
+
+      fireEvent.change(screen.getByRole("textbox", { name: "Issue title" }), {
+        target: { value: "Design repository boundaries" },
+      });
+      fireEvent.change(repoSelect, {
+        target: { value: "repo-product-web" },
+      });
+      fireEvent.click(
+        screen.getByRole("button", { name: "Create first issue" }),
+      );
+
+      await waitFor(() => {
+        expect(mockRunOnboardingFirstTask).toHaveBeenCalledWith("test-ws-id", {
+          agent_name: "planner",
+          title: "Design repository boundaries",
+          issue_type: "task",
+          priority: 2,
+          source_repo: "repo-product-web",
+        });
+      });
     });
 
     it("does not run the first task when the refreshed workspace has no planner", async () => {
@@ -2986,6 +3087,65 @@ describe("App", () => {
   });
 
   describe("onboarding setup gating and defaults", () => {
+    it("does not offer an unregistrable harness backend as the workspace default", () => {
+      localStorage.clear();
+      mockStoreState = createMockUseIssuesReturn({ issues: [] });
+      mockBackendState({
+        defaultBackend: "codex",
+        backends: [
+          backendInfo("codex", true),
+          {
+            ...backendInfo("localdogfood", true),
+            displayName: "Local Dogfood",
+          },
+        ],
+        registrableBackends: ["codex"],
+      });
+      mockHelloWorldWorkspaceContext({ agents: [] });
+
+      render(<App />);
+
+      const dogfoodRow = screen.getByRole("group", {
+        name: "Local Dogfood CLI",
+      });
+      expect(
+        within(dogfoodRow).getByRole("button", {
+          name: "Test",
+        }),
+      ).toBeInTheDocument();
+      expect(
+        within(dogfoodRow).queryByRole("button", {
+          name: "Use",
+        }),
+      ).not.toBeInTheDocument();
+    });
+
+    it("shows team setup for a real-repo workspace with no agents", () => {
+      localStorage.clear();
+      mockStoreState = createMockUseIssuesReturn({ issues: [] });
+      mockBackendState({
+        defaultBackend: "opencode",
+        backends: [backendInfo("opencode", true)],
+      });
+      mockHelloWorldWorkspaceContext({
+        agents: [],
+        repos: [
+          {
+            name: "product-api",
+            remote: "https://github.com/acme/product-api",
+            source_repo_id: "repo-product-api",
+          },
+        ],
+      });
+
+      render(<App />);
+
+      expect(screen.getByTestId("onboarding-flow")).toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: "Choose Template" }),
+      ).toBeEnabled();
+    });
+
     it("does not treat a task agent as the onboarding planner", () => {
       localStorage.clear();
       mockStoreState = createMockUseIssuesReturn({ issues: [] });

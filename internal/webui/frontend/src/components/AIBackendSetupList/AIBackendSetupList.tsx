@@ -8,6 +8,8 @@ export type { AIBackendSetupAction } from "@/utils/cliSetup";
 export interface AIBackendSetupListProps {
   backends: BackendInfo[];
   defaultBackend?: string | undefined;
+  /** Backend names accepted by the workspace default-backend endpoint. */
+  registrableBackends?: readonly string[] | undefined;
   variant?: "list" | "matrix";
   isLoading?: boolean;
   error?: string | null;
@@ -85,6 +87,7 @@ function sortedBackends(
 export function AIBackendSetupList({
   backends,
   defaultBackend,
+  registrableBackends,
   variant = "list",
   isLoading = false,
   error = null,
@@ -92,6 +95,9 @@ export function AIBackendSetupList({
   onAction,
 }: AIBackendSetupListProps): JSX.Element {
   const visibleBackends = sortedBackends(backends, defaultBackend);
+  const registrableBackendNames = registrableBackends
+    ? new Set(registrableBackends)
+    : null;
   const rootClassName = [
     styles.root,
     variant === "matrix" ? styles.matrixVariant : styles.listVariant,
@@ -138,14 +144,15 @@ export function AIBackendSetupList({
             {visibleBackends.map((backend) => {
               const readiness = readinessFor(backend);
               const isDefault = backend.name === defaultBackend;
-              const action =
-                backend.available && !isDefault
-                  ? "set-default"
-                  : readiness.action;
-              const actionLabel =
-                backend.available && !isDefault
-                  ? "Set Default"
-                  : readiness.actionLabel;
+              const canSetDefault =
+                backend.available &&
+                !isDefault &&
+                (registrableBackendNames === null ||
+                  registrableBackendNames.has(backend.name));
+              const action = canSetDefault ? "set-default" : readiness.action;
+              const actionLabel = canSetDefault
+                ? "Set Default"
+                : readiness.actionLabel;
               return (
                 <tr key={backend.name}>
                   <td>
@@ -185,12 +192,20 @@ export function AIBackendSetupList({
       {visibleBackends.map((backend) => {
         const readiness = readinessFor(backend);
         const isDefault = backend.name === defaultBackend;
-        const action =
-          backend.available && !isDefault ? "set-default" : readiness.action;
-        const actionLabel =
-          backend.available && !isDefault ? "Use" : readiness.actionLabel;
+        const canSetDefault =
+          backend.available &&
+          !isDefault &&
+          (registrableBackendNames === null ||
+            registrableBackendNames.has(backend.name));
+        const action = canSetDefault ? "set-default" : readiness.action;
+        const actionLabel = canSetDefault ? "Use" : readiness.actionLabel;
         return (
-          <div key={backend.name} className={styles.cliRow}>
+          <div
+            key={backend.name}
+            className={styles.cliRow}
+            role="group"
+            aria-label={`${backend.displayName} CLI`}
+          >
             <div className={styles.cliMain}>
               <div className={styles.cliTitleRow}>
                 <span
