@@ -27,6 +27,11 @@ type fakeIssueBackend struct {
 	epic     *backend.IssueDetailData
 	actor    string
 	claimed  []string
+
+	// Label mutation recorder (see labels_test.go).
+	labelAdds    []string
+	labelRemoves []string
+	labelErr     error
 }
 
 func (f *fakeIssueBackend) Ready(_ context.Context, _ backend.ReadyOpts) ([]backend.IssueData, error) {
