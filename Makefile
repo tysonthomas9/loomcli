@@ -647,9 +647,23 @@ hooks:
 	@pre-commit install
 	@echo "Pre-commit hooks installed"
 
-# Ensure hooks are installed (runs once — skips if pre-push hook already exists)
+# Ensure hooks are installed (skips only when the installed pre-push already
+# matches scripts/hooks/pre-push byte for byte)
+# Reinstall when the hook is missing *or* has drifted from scripts/hooks/pre-push.
+# scripts/hooks/pre-push is the source of truth and the installed hook is a
+# managed artifact: `cmp` sees any difference, so a hand-edited local hook is
+# overwritten on the next `make dev`. That is deliberate — local copies drifting
+# is the whole failure mode below — and `make hooks` announces the reinstall.
+# An existence-only check lets a stale hook survive forever, which is not
+# hypothetical: a pre-push installed before scripts/hooks/pre-push started
+# clearing `git rev-parse --local-env-vars` leaves GIT_DIR exported into
+# `make check`. Every test that drives a throwaway repo under t.TempDir() then
+# resolves git against this checkout instead — `git commit` fires this repo's
+# pre-commit hook ("No .pre-commit-config.yaml file was found") and branch
+# lookups return the branch being pushed. Ten packages fail that way and the
+# gate can never pass, so nothing can be pushed at all.
 ensure-hooks:
-	@test -f '$(GIT_HOOKS_DIR)/pre-push' || $(MAKE) hooks
+	@cmp -s scripts/hooks/pre-push '$(GIT_HOOKS_DIR)/pre-push' || $(MAKE) hooks
 
 # Check dev dependencies
 dev-check:
