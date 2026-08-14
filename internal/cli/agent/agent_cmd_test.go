@@ -22,6 +22,10 @@ func TestMapTaskFilter(t *testing.T) {
 		errContains string
 	}{
 		{
+			name:   "needs_plan returns a function",
+			filter: "needs_plan",
+		},
+		{
 			name:   "needs_design returns a function",
 			filter: "needs_design",
 		},
@@ -47,7 +51,7 @@ func TestMapTaskFilter(t *testing.T) {
 			name:        "unknown filter returns error",
 			filter:      "foo_bar",
 			wantErr:     true,
-			errContains: "must be needs_design, has_design, or any",
+			errContains: "must be needs_plan, needs_design, has_design, or any",
 		},
 	}
 
@@ -93,6 +97,20 @@ func TestMapTaskFilter_WithParentID(t *testing.T) {
 		expectedArgs   []string
 		expectedResult bool
 	}{
+		{
+			name:           "needs_plan with parent ID",
+			filter:         "needs_plan",
+			parentID:       "EPIC-110",
+			expectedArgs:   []string{"issue-store", "ready", "--json", "--limit", "10000", "--parent", "EPIC-110"},
+			expectedResult: true,
+		},
+		{
+			name:           "needs_plan without parent ID",
+			filter:         "needs_plan",
+			parentID:       "",
+			expectedArgs:   []string{"issue-store", "ready", "--json", "--limit", "10000"},
+			expectedResult: true,
+		},
 		{
 			name:           "needs_design with parent ID",
 			filter:         "needs_design",
@@ -163,7 +181,7 @@ func TestMapTaskFilter_WithParentID(t *testing.T) {
 				}
 				// Return appropriate mock data based on filter
 				var mockIssue backend.IssueData
-				if tt.filter == "needs_design" {
+				if tt.filter == "needs_plan" || tt.filter == "needs_design" {
 					mockIssue = backend.IssueData{ID: "T-1", Title: "Task", Status: "open", Design: ""}
 				} else if tt.filter == "has_design" {
 					mockIssue = backend.IssueData{ID: "T-2", Title: "Task with design", Status: "open", Design: "Implementation plan"}

@@ -1,12 +1,74 @@
 package daemon
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
+	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/daemon/supervisor"
 )
+
+func captureQueueHeaderOutput(t *testing.T, fn func()) string {
+	t.Helper()
+	oldStdout := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("pipe stdout: %v", err)
+	}
+	os.Stdout = w
+	t.Cleanup(func() { os.Stdout = oldStdout })
+
+	fn()
+	if err := w.Close(); err != nil {
+		t.Fatalf("close stdout writer: %v", err)
+	}
+	os.Stdout = oldStdout
+
+	var buf bytes.Buffer
+	if _, err := buf.ReadFrom(r); err != nil {
+		t.Fatalf("read stdout: %v", err)
+	}
+	if err := r.Close(); err != nil {
+		t.Fatalf("close stdout reader: %v", err)
+	}
+	return buf.String()
+}
+
+func TestPrintQueueHeader_ShowsAgentRoleLabelConstraints(t *testing.T) {
+	agent := &AgentEntry{Worktree: "atlas", Role: "architect"}
+	constraints := cli.RoleConstraints{
+		TaskFilter:    "any",
+		Labels:        []string{"architect", "area:api"},
+		ExcludeLabels: []string{"needs-revision", "blocked"},
+	}
+
+	output := captureQueueHeaderOutput(t, func() {
+		printQueueHeader(agent.Worktree, agent, constraints)
+	})
+	for _, want := range []string{
+		"Agent role: architect\n",
+		"Labels: architect, area:api\n",
+		"Exclude labels: needs-revision, blocked\n",
+	} {
+		if !strings.Contains(output, want) {
+			t.Errorf("queue header missing %q:\n%s", want, output)
+		}
+	}
+}
+
+func TestPrintQueueHeader_OmitsEmptyLabelConstraints(t *testing.T) {
+	agent := &AgentEntry{Worktree: "ember", Role: "task"}
+	output := captureQueueHeaderOutput(t, func() {
+		printQueueHeader(agent.Worktree, agent, cli.RoleConstraints{TaskFilter: "has_design"})
+	})
+
+	if strings.Contains(output, "Labels:") || strings.Contains(output, "Exclude labels:") {
+		t.Fatalf("queue header rendered empty label constraints:\n%s", output)
+	}
+}
 
 func TestResolveRoleConfigStatic_BuiltinPlan(t *testing.T) {
 	config := &DaemonConfig{

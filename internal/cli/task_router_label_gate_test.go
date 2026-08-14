@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
+	"github.com/tysonthomas9/loomcli/internal/cli/config"
 )
 
 // --- MatchTask label gate tests ---
@@ -14,6 +15,22 @@ func labelGateIssue(labels ...string) backend.IssueData {
 	return backend.IssueData{
 		ID: "T-1", Status: "open", IssueType: "task",
 		Priority: 0, Design: "plan", Labels: labels,
+	}
+}
+
+func TestMatchTask_SeededPlanRoleRejectsArchitectLabel(t *testing.T) {
+	constraints := MergeRoleConstraints(config.RoleConfig{
+		TaskFilter:    "needs_plan",
+		ExcludeLabels: []string{"architect"},
+	}, config.AgentEntry{Role: "plan"})
+	issue := backend.IssueData{
+		ID: "T-architect", Status: "open", IssueType: "feature",
+		Labels: []string{"architect"},
+	}
+
+	got := MatchTask(issue, constraints)
+	if got.Score != 0 || got.Reason != "excluded label: architect" {
+		t.Fatalf("architect-labeled issue match = score %d, reason %q; want hard exclusion", got.Score, got.Reason)
 	}
 }
 

@@ -82,6 +82,7 @@ services:
       LOOM_WEBUI_URL: http://127.0.0.1:8080
       LOCAL_MODE_API_URL: "http://localhost:${LOCAL_MODE_API_PORT:-8282}"
       LOCAL_MODE_UI_URL: "http://localhost:${LOCAL_MODE_UI_PORT:-8283}"
+      LOCAL_MODE_MAX_AGENTS: "${LOCAL_MODE_MAX_AGENTS:-2}"
       # File-browser routes fail closed unless the loopback frontend origin
       # is explicitly allowed; Caddy preserves the browser's Host header. The
       # Vite dev-server origins (`make dev` on :3000, and :3100 when :3000 is

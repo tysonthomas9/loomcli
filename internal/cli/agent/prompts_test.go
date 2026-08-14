@@ -858,6 +858,24 @@ func TestGenerateFleetTaskPrompt(t *testing.T) {
 	}
 }
 
+func TestTaskPromptsUseLabelDeltaFlagForDesignRevision(t *testing.T) {
+	prompts := map[string]string{
+		"task":       GenerateTaskPrompt("coder", nil, "", "claude"),
+		"fleet_task": GenerateFleetTaskPrompt("coder", "T-1", nil, "claude"),
+	}
+
+	for name, prompt := range prompts {
+		t.Run(name, func(t *testing.T) {
+			if !strings.Contains(prompt, "--add-label needs-revision") {
+				t.Error("prompt does not use --add-label for needs-revision")
+			}
+			if strings.Contains(prompt, "--labels") {
+				t.Error("prompt still references nonexistent --labels flag")
+			}
+		})
+	}
+}
+
 func TestTaskPromptsRequireStackedPRDelivery(t *testing.T) {
 	prompts := map[string]string{
 		"task":       GenerateTaskPrompt("test", nil, "", "claude"),

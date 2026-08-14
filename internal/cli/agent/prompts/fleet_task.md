@@ -97,7 +97,7 @@ Procedure:
    git add <files> && git commit -m "WIP: <task-id> - design revision pending"
 3. If you committed salvageable work, publish it with the stacked PR commands in Step 9.
 4. Flip the task back to the planner:
-   loom data update <id> --status open --labels +needs-revision
+   loom data update <id> --status open --add-label needs-revision
 5. Signal completion: loom complete
 6. EXIT immediately
 

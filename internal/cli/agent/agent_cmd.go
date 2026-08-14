@@ -48,7 +48,7 @@ Required Flags:
                   prompt that ships with loom (see 'Built-in prompts' below)
 
 Optional Flags:
-  -f, --task-filter   Task filter: needs_design, has_design, or any (default: any)
+  -f, --task-filter   Task filter: needs_plan, needs_design, has_design, or any (default: any)
   -a, --auto          Enable continuous mode (process multiple tasks)
   -i, --interval      Polling interval in seconds when no tasks (default: 30)
   -m, --max-tasks     Maximum tasks to process before exiting (0 = unlimited)
@@ -57,7 +57,7 @@ Optional Flags:
 Template Variables (all optional — reference only what you want):
   {{.AgentName}}        Agent name (derived from worktree)
   {{.WorktreeName}}     Worktree name
-  {{.Role}}             Real role name, or "custom" outside the daemon
+  {{.Role}}             Real agent role name, or "custom" outside the daemon
   {{.TaskID}}           Pre-claimed task ID (daemon mode; empty otherwise)
   {{.EpicID}}           Epic this agent is scoped to (--parent), or empty
 
@@ -91,7 +91,7 @@ Examples:
 func init() {
 	agentCmd.Flags().StringVarP(&agentPromptFile, "prompt", "p", "", "Path to prompt template file")
 	_ = agentCmd.MarkFlagRequired("prompt")
-	agentCmd.Flags().StringVarP(&agentTaskFilter, "task-filter", "f", "any", "Task filter: needs_design, has_design, or any")
+	agentCmd.Flags().StringVarP(&agentTaskFilter, "task-filter", "f", "any", "Task filter: needs_plan, needs_design, has_design, or any")
 	agentCmd.Flags().BoolVarP(&agentAutoMode, "auto", "a", false, "Enable continuous mode (process multiple tasks)")
 	agentCmd.Flags().BoolVar(&agentDaemonMode, "daemon-mode", false, "Internal: single task mode for daemon")
 	_ = agentCmd.Flags().MarkHidden("daemon-mode")
@@ -312,14 +312,14 @@ func runAgentSingleTask(worktreePath, agentName string, promptGen func(string, *
 func mapTaskFilter(filter, parentID string) (func() (bool, error), error) {
 	repoLabel := os.Getenv("LOOM_AGENT_REPO")
 	switch filter {
-	case "needs_design":
+	case "needs_plan", "needs_design":
 		return func() (bool, error) { return automode.HasAvailablePlanningTasks(parentID, repoLabel) }, nil
 	case "has_design":
 		return func() (bool, error) { return automode.HasAvailableImplementationTasks(parentID, repoLabel) }, nil
 	case "any", "":
 		return func() (bool, error) { return automode.HasAnyAvailableTasks(parentID, repoLabel) }, nil
 	default:
-		return nil, fmt.Errorf("invalid task filter: %s (must be needs_design, has_design, or any)", filter)
+		return nil, fmt.Errorf("invalid task filter: %s (must be needs_plan, needs_design, has_design, or any)", filter)
 	}
 }
 

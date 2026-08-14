@@ -17,7 +17,7 @@ import (
 // RoleConstraints holds the resolved routing constraints from a config.RoleConfig
 // merged with any per-agent config.AgentEntry overrides.
 type RoleConstraints struct {
-	TaskFilter   string   // "needs_plan", "has_design", "any", or "" (defaults to "has_design")
+	TaskFilter   string   // "needs_plan", "needs_design", "has_design", "any", or "" (defaults to "has_design")
 	Backend      string   // resolved backend name
 	PathPatterns []string // not used in routing decisions; carried through for subprocess env var propagation
 	Skills       []string // skill labels this role handles
@@ -282,9 +282,9 @@ func applyTaskFilter(issue backend.IssueData, filter string) string {
 		filter = "has_design"
 	}
 	switch filter {
-	case "needs_plan":
+	case "needs_plan", "needs_design":
 		if !NeedsPlan(issue) {
-			return "filter: has design (needs_plan filter)"
+			return fmt.Sprintf("filter: has design (%s filter)", filter)
 		}
 	case "has_design":
 		if !ReadyToImplement(issue) {

@@ -366,8 +366,8 @@ func TestMatchTask_PriorityBonus(t *testing.T) {
 func TestMatchTask_TaskFilterNeedsPlan(t *testing.T) {
 	c := RoleConstraints{TaskFilter: "needs_plan"}
 
-	// Issue without design should match
-	noDesign := backend.IssueData{ID: "T-1", Status: "open", IssueType: "task"}
+	// An open feature without a design is in the built-in planning pool.
+	noDesign := backend.IssueData{ID: "T-1", Status: "open", IssueType: "feature"}
 	got := MatchTask(noDesign, c)
 	if got.Score == 0 {
 		t.Error("no-design issue rejected by needs_plan filter, want accepted")
@@ -391,6 +391,22 @@ func TestMatchTask_TaskFilterNeedsPlan(t *testing.T) {
 	got = MatchTask(hasDesign, c)
 	if got.Score != 0 {
 		t.Errorf("has-design issue passed needs_plan filter, want rejected (Score=%d)", got.Score)
+	}
+}
+
+func TestMatchTask_TaskFilterNeedsDesign(t *testing.T) {
+	c := RoleConstraints{TaskFilter: "needs_design"}
+
+	noDesign := backend.IssueData{ID: "T-1", Status: "open", IssueType: "feature"}
+	if got := MatchTask(noDesign, c); got.Score == 0 {
+		t.Fatalf("no-design feature rejected by needs_design filter: %s", got.Reason)
+	}
+
+	ready := backend.IssueData{
+		ID: "T-2", Status: "open", IssueType: "feature", Design: "approved design",
+	}
+	if got := MatchTask(ready, c); got.Score != 0 {
+		t.Fatalf("ready-to-implement feature passed needs_design filter with score %d", got.Score)
 	}
 }
 

@@ -7,12 +7,14 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 
+	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	cfgpkg "github.com/tysonthomas9/loomcli/internal/cli/config"
@@ -497,7 +499,7 @@ func runDaemonStatus(cmd *cobra.Command, args []string) {
 	fmt.Printf("Daemon: running (PID %d)\n", rt.PID)
 
 	// Read and display agent status
-	stateFilePath := cfgpkg.ResolveDaemonStatePath(projectDir)
+	stateFilePath := resolveDaemonStatePathForCommand(projectDir, rt)
 	state, err := ReadStateFile(stateFilePath)
 	if err != nil {
 		fmt.Printf("  (no agent status available: %v)\n", err)
@@ -524,6 +526,28 @@ func runDaemonStatus(cmd *cobra.Command, args []string) {
 	}
 
 	printQuarantinedTasks(state.QuarantinedTasks)
+}
+
+// resolveDaemonStatePathForCommand keeps cwd-local daemon behavior unchanged,
+// but when runtime detection fell back to the active workspace lock it resolves
+// the snapshot beside that workspace's daemon files rather than beside the
+// caller's unrelated cwd.
+func resolveDaemonStatePathForCommand(projectDir string, rt cli.DaemonRuntimeInfo) string {
+	if rt.Source != "workspace-lock" {
+		return cfgpkg.ResolveDaemonStatePath(projectDir)
+	}
+
+	workspace := strings.TrimSpace(os.Getenv("LOOM_WORKSPACE"))
+	workspaceDir := cfgpkg.GetWorkspaceDir(workspace)
+	if state, err := bootstrap.LoadStateCache(); err == nil {
+		if local, ok := state.Workspaces[workspace]; ok && local.Path != "" {
+			workspaceDir = local.Path
+		}
+	}
+	if workspaceDir == "" {
+		return cfgpkg.ResolveDaemonStatePath(projectDir)
+	}
+	return cfgpkg.ResolveDaemonStatePath(workspaceDir)
 }
 
 // pendingInputsByAgent fetches every pending prompt from the daemon control

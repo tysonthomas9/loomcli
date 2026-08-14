@@ -174,7 +174,7 @@ register_agents() {
   loom daemon profile set issue_backend fleetdb
   loom daemon profile set log_dir "${WORKSPACE_ROOT}/.loom/daemon-logs"
   loom daemon profile set events_dir "${WORKSPACE_ROOT}/.loom/events"
-  loom daemon profile set max_agents 2
+  loom daemon profile set max_agents "${LOCAL_MODE_MAX_AGENTS:-2}"
   loom daemon profile set startup_timeout 30
 
   if [ "$AGENT_BACKEND" != "localdogfood" ]; then
@@ -439,8 +439,18 @@ start_workspace_daemon() {
     export LOOM_FLEET_URL="${LOOM_FLEET_URL:-http://fleet-db:8080}"
     export LOOM_FLEET_DB_ACTOR="${LOOM_FLEET_DB_ACTOR:-local-mode-harness@fixture.local}"
     export LOOM_FLEET_ACTOR="${LOOM_FLEET_ACTOR:-local-mode-harness@fixture.local}"
-    loom daemon
-  ) >>"$log_file" 2>&1 &
+    if loom daemon >>"$log_file" 2>&1; then
+      return 0
+    else
+      daemon_status="$?"
+    fi
+    startup_error="$(tail -n 1 "$log_file" 2>/dev/null || true)"
+    if [ "$startup_error" = "" ]; then
+      startup_error="no startup error was written; inspect ${log_file}"
+    fi
+    echo "[local-mode] daemon for workspace ${ws_key} exited with status ${daemon_status}: ${startup_error}" >&2
+    return "$daemon_status"
+  ) &
 }
 
 reconcile_workspace_daemons() {
