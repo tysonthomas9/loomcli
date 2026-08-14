@@ -49,6 +49,8 @@ type Store interface {
 	ConnectorCalls() ConnectorAuditStore
 	Workers() WorkerStore
 	Roles() RoleStore
+	Skills() SkillStore
+	SkillPacks() SkillPackStore
 	Daemon() DaemonProfileStore
 	io.Closer
 }
