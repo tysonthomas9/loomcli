@@ -177,7 +177,7 @@ func readLocalSkillDirectoryWithHook(directory, nameOverride string, beforeRead 
 			return fmt.Errorf("skill directory contains more than %d regular files", maxSkillFileCount)
 		}
 		if filePath != domain.SkillFileNameSKILLMD {
-			if err := validateSkillFileDestination(filePath); err != nil {
+			if err := domain.ValidateSkillFilePath(filePath); err != nil {
 				invalidPaths = append(invalidPaths, fmt.Sprintf("%s (%v)", filePath, err))
 				return nil
 			}

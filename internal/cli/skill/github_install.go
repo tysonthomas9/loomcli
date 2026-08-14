@@ -822,7 +822,7 @@ func (a githubArchive) toSkill(source githubSource, skillDir, nameOverride strin
 		if filePath == domain.SkillFileNameSKILLMD {
 			continue
 		}
-		if err := validateSkillFileDestination(filePath); err != nil {
+		if err := domain.ValidateSkillFilePath(filePath); err != nil {
 			return fetchedGitHubSkill{}, fmt.Errorf("bundled skill file %q: %w", filePath, err)
 		}
 		files = append(files, domain.SkillFile{

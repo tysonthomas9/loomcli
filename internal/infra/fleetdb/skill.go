@@ -2,11 +2,13 @@ package fleetdb
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/store"
@@ -250,19 +252,19 @@ func sourceQuery(source string) url.Values {
 // --- SkillStore ---
 
 func (s *skillStore) Create(ctx context.Context, in store.SkillCreate) (*domain.Skill, error) {
-	if err := in.Ref.Validate(); err != nil {
+	if err := validateSkillRoute(in.WorkspaceKey, in.Ref); err != nil {
 		return nil, err
 	}
 	var resp skillWire
 	path := skillCollectionPath(in.WorkspaceKey, in.Ref)
-	if err := s.client.do(ctx, http.MethodPost, path, newCreateSkillBody(in, true), &resp); err != nil {
+	if _, _, err := s.client.doWithResponseNoRedirect(ctx, http.MethodPost, path, newCreateSkillBody(in, true), &resp, nil); err != nil {
 		return nil, err
 	}
 	return resp.toDomain(), nil
 }
 
 func (s *skillStore) Get(ctx context.Context, ws string, ref domain.SkillRef) (*domain.Skill, error) {
-	if err := ref.Validate(); err != nil {
+	if err := validateSkillRoute(ws, ref); err != nil {
 		return nil, err
 	}
 	var resp skillWire
@@ -277,6 +279,14 @@ func (s *skillStore) Get(ctx context.Context, ws string, ref domain.SkillRef) (*
 // chain is the workspace skills plus its own role's, and asking for them
 // separately would be two round trips and a window for them to disagree.
 func (s *skillStore) List(ctx context.Context, ws string, filter store.SkillFilter) ([]*domain.Skill, error) {
+	if err := validateSkillPathSegment("workspace", ws); err != nil {
+		return nil, err
+	}
+	if filter.RoleName != "" {
+		if err := domain.ValidateRoleName(filter.RoleName); err != nil {
+			return nil, err
+		}
+	}
 	q := url.Values{}
 	if filter.Scope != "" {
 		q.Set("scope", string(filter.Scope))
@@ -299,7 +309,7 @@ func (s *skillStore) List(ctx context.Context, ws string, filter store.SkillFilt
 }
 
 func (s *skillStore) Upsert(ctx context.Context, in store.SkillUpsert) (*domain.Skill, bool, error) {
-	if err := in.Skill.Ref.Validate(); err != nil {
+	if err := validateSkillRoute(in.Skill.WorkspaceKey, in.Skill.Ref); err != nil {
 		return nil, false, err
 	}
 	method := http.MethodPut
@@ -311,7 +321,7 @@ func (s *skillStore) Upsert(ctx context.Context, in store.SkillUpsert) (*domain.
 		method, path = http.MethodPost, path+"/force-upsert"
 	}
 	var resp skillWire
-	status, _, err := s.client.doWithResponse(ctx, method, path, newCreateSkillBody(in.Skill, false), &resp, nil)
+	status, _, err := s.client.doWithResponseNoRedirect(ctx, method, path, newCreateSkillBody(in.Skill, false), &resp, nil)
 	if err != nil {
 		return nil, false, err
 	}
@@ -319,7 +329,7 @@ func (s *skillStore) Upsert(ctx context.Context, in store.SkillUpsert) (*domain.
 }
 
 func (s *skillStore) Update(ctx context.Context, ws string, ref domain.SkillRef, patch store.SkillUpdate) (*domain.Skill, error) {
-	if err := ref.Validate(); err != nil {
+	if err := validateSkillRoute(ws, ref); err != nil {
 		return nil, err
 	}
 	body := updateSkillBody{
@@ -336,14 +346,14 @@ func (s *skillStore) Update(ctx context.Context, ws string, ref domain.SkillRef,
 		body.Files = &files
 	}
 	var resp skillWire
-	if err := s.client.do(ctx, http.MethodPatch, skillItemPath(ws, ref), body, &resp); err != nil {
+	if _, _, err := s.client.doWithResponseNoRedirect(ctx, http.MethodPatch, skillItemPath(ws, ref), body, &resp, nil); err != nil {
 		return nil, err
 	}
 	return resp.toDomain(), nil
 }
 
 func (s *skillStore) Delete(ctx context.Context, ws string, ref domain.SkillRef, del store.SkillDelete) error {
-	if err := ref.Validate(); err != nil {
+	if err := validateSkillRoute(ws, ref); err != nil {
 		return err
 	}
 	// Delete is guarded exactly like an overwrite, and force-delete is its own
@@ -353,11 +363,12 @@ func (s *skillStore) Delete(ctx context.Context, ws string, ref domain.SkillRef,
 	if del.Force {
 		method, path = http.MethodPost, path+"/force-delete"
 	}
-	return s.client.do(ctx, method, withQuery(path, sourceQuery(del.Source)), nil, nil)
+	_, _, err := s.client.doWithResponseNoRedirect(ctx, method, withQuery(path, sourceQuery(del.Source)), nil, nil, nil)
+	return err
 }
 
 func (s *skillStore) GetFile(ctx context.Context, ws string, ref domain.SkillRef, filePath string) (*domain.SkillDocument, error) {
-	if err := ref.Validate(); err != nil {
+	if err := validateSkillDocumentRoute(ws, ref, filePath); err != nil {
 		return nil, err
 	}
 	var resp skillDocumentWire
@@ -370,7 +381,7 @@ func (s *skillStore) GetFile(ctx context.Context, ws string, ref domain.SkillRef
 }
 
 func (s *skillStore) PutFile(ctx context.Context, ws string, ref domain.SkillRef, write store.SkillFileWrite) (*domain.SkillDocument, error) {
-	if err := ref.Validate(); err != nil {
+	if err := validateSkillDocumentRoute(ws, ref, write.Path); err != nil {
 		return nil, err
 	}
 	headers := map[string]string{}
@@ -387,7 +398,7 @@ func (s *skillStore) PutFile(ctx context.Context, ws string, ref domain.SkillRef
 	body := putSkillFileBody{Content: write.Content, Executable: write.Executable, Source: write.Source}
 	var resp skillDocumentWire
 	path := skillDocumentPath(ws, ref, write.Path)
-	_, respHeaders, err := s.client.doWithResponse(ctx, http.MethodPut, path, body, &resp, headers)
+	_, respHeaders, err := s.client.doWithResponseNoRedirect(ctx, http.MethodPut, path, body, &resp, headers)
 	if err != nil {
 		return nil, err
 	}
@@ -395,7 +406,7 @@ func (s *skillStore) PutFile(ctx context.Context, ws string, ref domain.SkillRef
 }
 
 func (s *skillStore) DeleteFile(ctx context.Context, ws string, ref domain.SkillRef, del store.SkillFileDelete) error {
-	if err := ref.Validate(); err != nil {
+	if err := validateSkillDocumentRoute(ws, ref, del.Path); err != nil {
 		return err
 	}
 	headers := map[string]string{}
@@ -408,7 +419,47 @@ func (s *skillStore) DeleteFile(ctx context.Context, ws string, ref domain.Skill
 	}
 	// Source travels as a query parameter because DELETE carries no body.
 	path := withQuery(skillDocumentPath(ws, ref, del.Path), sourceQuery(del.Source))
-	return s.client.doWithHeaders(ctx, http.MethodDelete, path, nil, nil, headers)
+	_, _, err := s.client.doWithResponseNoRedirect(ctx, http.MethodDelete, path, nil, nil, headers)
+	return err
+}
+
+// validateSkillRoute is the adapter's final defense before constructing a URL.
+// Domain validation protects role/name; the segment check also protects the
+// workspace key supplied separately to the Store method.
+func validateSkillRoute(ws string, ref domain.SkillRef) error {
+	if err := validateSkillPathSegment("workspace", ws); err != nil {
+		return err
+	}
+	if err := ref.Validate(); err != nil {
+		return err
+	}
+	return nil
+}
+
+func validateSkillDocumentRoute(ws string, ref domain.SkillRef, filePath string) error {
+	if err := validateSkillRoute(ws, ref); err != nil {
+		return err
+	}
+	if filePath == domain.SkillFileNameSKILLMD {
+		return nil
+	}
+	return domain.ValidateSkillFilePath(filePath)
+}
+
+func validateSkillPathSegment(field, value string) error {
+	if strings.TrimSpace(value) == "" || value == "." || value == ".." || strings.ContainsAny(value, `/\`) {
+		return fmt.Errorf("skill %s %q must be a safe path segment: %w", field, value, domain.ErrInvalid)
+	}
+	for _, r := range value {
+		if unicode.IsControl(r) {
+			return fmt.Errorf("skill %s %q contains a control character: %w", field, value, domain.ErrInvalid)
+		}
+	}
+	escaped := pathEscape(value)
+	if escaped == "." || escaped == ".." || strings.Contains(escaped, "/") {
+		return fmt.Errorf("skill %s %q escapes to an unsafe path segment: %w", field, value, domain.ErrInvalid)
+	}
+	return nil
 }
 
 // --- error classification ---

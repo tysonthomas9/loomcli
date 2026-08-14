@@ -85,6 +85,55 @@ func TestSkillStore_ScopeSelectsTheRouteFamily(t *testing.T) {
 	}
 }
 
+func TestSkillStore_InvalidRoleTraversalNeverReachesNetwork(t *testing.T) {
+	requests := 0
+	client, closeFn := newSkillTestClient(t, func(http.ResponseWriter, *http.Request) {
+		requests++
+	})
+	defer closeFn()
+
+	_, err := client.Skills().PutFile(t.Context(), "WS", domain.RoleSkillRef("..", "alpha"), store.SkillFileWrite{
+		Path: domain.SkillFileNameSKILLMD, Content: "overwrite", IfMatch: "revision",
+	})
+	if !errors.Is(err, domain.ErrInvalid) {
+		t.Fatalf("PutFile error = %v, want ErrInvalid", err)
+	}
+	if requests != 0 {
+		t.Fatalf("invalid role traversal reached fleet-db %d time(s)", requests)
+	}
+}
+
+func TestSkillStore_MutationsDoNotFollowRedirects(t *testing.T) {
+	var workspaceMutation bool
+	mux := http.NewServeMux()
+	mux.HandleFunc("PUT /api/v1/WS/roles/lead/skills/alpha/files/SKILL.md", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/api/v1/WS/skills/alpha/files/SKILL.md", http.StatusTemporaryRedirect)
+	})
+	mux.HandleFunc("PUT /api/v1/WS/skills/alpha/files/SKILL.md", func(w http.ResponseWriter, _ *http.Request) {
+		workspaceMutation = true
+		w.Header().Set(etagHeader, `"advanced"`)
+		_ = json.NewEncoder(w).Encode(skillDocumentWire{
+			Path: domain.SkillFileNameSKILLMD, Content: "overwritten", Revision: "advanced", SkillRef: "workspace:alpha",
+		})
+	})
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+	client, err := New(Config{BaseURL: ts.URL, Actor: "tester"})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	_, err = client.Skills().PutFile(t.Context(), "WS", domain.RoleSkillRef("lead", "alpha"), store.SkillFileWrite{
+		Path: domain.SkillFileNameSKILLMD, Content: "overwrite", IfMatch: "revision",
+	})
+	if err == nil {
+		t.Fatal("PutFile followed a mutation redirect, want an error")
+	}
+	if workspaceMutation {
+		t.Fatal("role-scoped mutation was replayed on the workspace route")
+	}
+}
+
 // A malformed ref must fail before it reaches the network, because a
 // role-scoped ref with no role would otherwise build "/roles//skills" and hit
 // whatever that happens to route to.

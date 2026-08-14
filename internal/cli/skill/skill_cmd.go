@@ -10,11 +10,9 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path"
 	"path/filepath"
 	"sort"
 	"strings"
-	"unicode"
 	"unicode/utf8"
 
 	"github.com/spf13/cobra"
@@ -488,7 +486,7 @@ func readSkillFiles(specs []string) ([]domain.SkillFile, error) {
 		} else if destination == "" {
 			return nil, fmt.Errorf("--file destination must not be empty in %q", spec)
 		}
-		if err := validateSkillFileDestination(destination); err != nil {
+		if err := domain.ValidateSkillFilePath(destination); err != nil {
 			return nil, fmt.Errorf("--file %q: %w", spec, err)
 		}
 		if _, duplicate := destinations[destination]; duplicate {
@@ -513,31 +511,6 @@ func readSkillFiles(specs []string) ([]domain.SkillFile, error) {
 		destinations[destination] = struct{}{}
 	}
 	return files, nil
-}
-
-func validateSkillFileDestination(destination string) error {
-	if !utf8.ValidString(destination) || destination == "" {
-		return fmt.Errorf("destination must be a non-empty UTF-8 relative path")
-	}
-	if filepath.IsAbs(destination) || filepath.VolumeName(destination) != "" || strings.Contains(destination, `\`) {
-		return fmt.Errorf("destination %q must be a relative slash-separated path", destination)
-	}
-	clean := path.Clean(destination)
-	if clean != destination || clean == "." || clean == ".." || strings.HasPrefix(clean, "../") {
-		return fmt.Errorf("destination %q must be normalized and must not contain . or .. segments", destination)
-	}
-	segments := strings.Split(destination, "/")
-	for _, segment := range segments {
-		if strings.EqualFold(segment, domain.SkillFileNameSKILLMD) && segment == segments[0] {
-			return fmt.Errorf("destination %q is reserved for the skill body", destination)
-		}
-		for _, r := range segment {
-			if unicode.IsControl(r) {
-				return fmt.Errorf("destination %q contains a control character", destination)
-			}
-		}
-	}
-	return nil
 }
 
 type skillListEntry struct {
