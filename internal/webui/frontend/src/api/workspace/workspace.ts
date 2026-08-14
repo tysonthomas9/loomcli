@@ -68,6 +68,8 @@ export interface RunOnboardingFirstTaskRequest {
   issue_type?: "task" | "bug" | "feature" | "epic" | "chore";
   priority?: number;
   source_repo?: string;
+  labels?: string[];
+  pin_agent?: boolean;
 }
 
 export interface RunOnboardingFirstTaskResponse {

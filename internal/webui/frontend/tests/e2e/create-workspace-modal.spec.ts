@@ -314,7 +314,7 @@ async function openCreateWorkspaceModal(page: Page) {
 
 async function selectWorkspaceType(
   page: Page,
-  type: "empty" | "clone" | "template",
+  type: "empty" | "clone",
 ) {
   await page.getByTestId(`create-workspace-type-${type}`).click();
 }
@@ -472,18 +472,6 @@ test.describe("CreateWorkspaceModal", () => {
       await expect(
         page.getByTestId("create-workspace-repo-path"),
       ).toBeVisible();
-    });
-
-    test("Template type shows coming soon placeholder", async ({ page }) => {
-      await setupMocks(page);
-      await navigateToApp(page);
-      await openCreateWorkspaceModal(page);
-
-      await selectWorkspaceType(page, "template");
-      await expect(
-        page.getByTestId("create-workspace-template-placeholder"),
-      ).toBeVisible();
-      await expect(page.getByTestId("create-workspace-submit")).toBeDisabled();
     });
   });
 

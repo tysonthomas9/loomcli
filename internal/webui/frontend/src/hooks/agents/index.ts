@@ -31,6 +31,9 @@ export type {
 export { useUsage } from "./useUsage";
 export type { UseUsageOptions, UseUsageResult } from "./useUsage";
 
+export { useTeamTemplates } from "./useTeamTemplates";
+export type { UseTeamTemplatesResult } from "./useTeamTemplates";
+
 export { usePendingInput } from "./usePendingInput";
 export type {
   PendingAnswerBody,

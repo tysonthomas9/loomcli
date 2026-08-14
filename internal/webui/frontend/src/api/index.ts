@@ -1,6 +1,7 @@
 export * from "./agents";
 export * from "./common";
 export * from "./issues";
+export * from "./teamTemplates";
 export * from "./terminal";
 export * from "./workspace";
 export * from "./workflows";
