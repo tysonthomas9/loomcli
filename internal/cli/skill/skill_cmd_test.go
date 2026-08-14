@@ -155,6 +155,7 @@ func TestSkillWriteCommandsRefuseWhenAgentNameIsSet(t *testing.T) {
 		args []string
 	}{
 		{name: "create", args: []string{"create", "guarded", "--description", "blocked"}},
+		{name: "install", args: []string{"install"}},
 		{name: "update", args: []string{"update", "guarded", "--description", "blocked"}},
 		{name: "delete", args: []string{"delete", "guarded"}},
 	}
@@ -278,15 +279,15 @@ func TestSkillPreconditionErrorSuggestsReread(t *testing.T) {
 	}
 }
 
-func TestSkillCommandSurfaceIsCRUDOnly(t *testing.T) {
+func TestSkillCommandSurfaceIncludesInstall(t *testing.T) {
 	cmd := newSkillCommand()
 	got := make([]string, 0, len(cmd.Commands()))
 	for _, child := range cmd.Commands() {
 		got = append(got, child.Name())
 	}
 	sort.Strings(got)
-	if strings.Join(got, ",") != "create,delete,list,show,update" {
-		t.Fatalf("skill subcommands = %v, want CRUD only", got)
+	if strings.Join(got, ",") != "create,delete,install,list,show,update" {
+		t.Fatalf("skill subcommands = %v, want CRUD plus install", got)
 	}
 
 	create, _, err := cmd.Find([]string{"create"})
@@ -303,6 +304,20 @@ func TestSkillCommandSurfaceIsCRUDOnly(t *testing.T) {
 	}
 	if got := create.Flags().Lookup("file").Value.Type(); got != "stringArray" {
 		t.Errorf("create --file type = %q, want repeatable stringArray", got)
+	}
+	install, _, _ := cmd.Find([]string{"install"})
+	for _, flag := range []string{"scope", "name"} {
+		if install.Flags().Lookup(flag) == nil {
+			t.Errorf("install is missing --%s", flag)
+		}
+	}
+	if got := install.Flags().Lookup("scope").DefValue; got != "workspace" {
+		t.Errorf("install --scope default = %q, want workspace", got)
+	}
+	for _, want := range []string{"tree", "one path segment", "@<ref>", "containing /"} {
+		if !strings.Contains(install.Long, want) {
+			t.Errorf("install Long help %q does not contain %q", install.Long, want)
+		}
 	}
 
 	list, _, _ := cmd.Find([]string{"list"})
@@ -331,6 +346,14 @@ func TestSkillCommandSurfaceIsCRUDOnly(t *testing.T) {
 		if deleteCmd.Flags().Lookup(flag) == nil {
 			t.Errorf("delete is missing --%s", flag)
 		}
+	}
+}
+
+func TestSkillCreateRejectsBinaryContent(t *testing.T) {
+	withoutAgentName(t)
+	_, err := executeSkillCommand(t, "binary\x00body", "create", "binary-skill", "--description", "Binary")
+	if err == nil || !strings.Contains(err.Error(), "UTF-8 text") {
+		t.Fatalf("binary create content error = %v", err)
 	}
 }
 
