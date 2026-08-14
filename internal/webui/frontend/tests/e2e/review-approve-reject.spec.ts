@@ -350,9 +350,16 @@ test.describe("E2E Journey: Review and approve/reject agent plan", () => {
         res.request().method() === "PATCH",
     );
 
-    // Verify PATCH body: plan approval sets status to "open"
+    // Verify PATCH body: plan approval sets status to "open" AND clears the
+    // rejection marker. Removal is unconditional — this fixture was never
+    // rejected, and sending it anyway is an idempotent no-op server-side.
+    // Asserting it here is deliberate: the previous exact-match on
+    // { status: "open" } is what locked the one-way behaviour in place.
     expect(patchCalls).toHaveLength(1);
-    expect(patchCalls[0]).toEqual({ status: "open" });
+    expect(patchCalls[0]).toEqual({
+      status: "open",
+      remove_labels: ["needs-revision"],
+    });
 
     // Panel should close after approve
     await expect(panel).toHaveAttribute("data-state", "closed");
@@ -362,6 +369,84 @@ test.describe("E2E Journey: Review and approve/reject agent plan", () => {
     await expect(
       reviewColumn.getByText("Agent Plan: Migrate to new API"),
     ).toBeVisible();
+  });
+
+  // The reject -> approve round trip. Previously untested: the approve fixture
+  // carried no labels, so nothing exercised approving an issue that had ALREADY
+  // been rejected — the only case where the loop bites. Without remove_labels
+  // the issue returns to `open` still carrying needs-revision, the planner
+  // re-claims it (NeedsPlan matches on that label), and the human is asked to
+  // approve the same plan again indefinitely.
+  test("approve a previously-rejected plan clears needs-revision", async ({
+    page,
+  }) => {
+    const rejectedIssue = { ...reviewIssue1, labels: ["needs-revision"] };
+    const rejectedDetails = { ...reviewDetails1, labels: ["needs-revision"] };
+
+    await installIssuesMock(page, [rejectedIssue, reviewIssue2]);
+    await setupBaseMocks(page);
+
+    await page.route("**/workspaces/*/issues/review-plan-001", async (route) => {
+      if (route.request().method() === "GET") {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: ok(rejectedDetails),
+        });
+      } else {
+        await route.fallback();
+      }
+    });
+
+    const patchCalls: Array<Record<string, unknown>> = [];
+    await page.route("**/workspaces/*/issues/review-plan-001", async (route) => {
+      if (route.request().method() === "PATCH") {
+        patchCalls.push(route.request().postDataJSON());
+        // The server applied the delta: status open, label gone.
+        await page.evaluate((data) => {
+          (window as any).__mockIssues = data;
+        }, [reviewIssue2]);
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: ok({ ...reviewIssue1, status: "open", labels: [] }),
+        });
+      } else {
+        await route.fallback();
+      }
+    });
+
+    await navigateAndWaitForBoard(page);
+
+    const reviewColumn = page.locator('section[data-status="review"]');
+    await expect(reviewColumn).toBeVisible();
+
+    const card = page
+      .locator("article")
+      .filter({ hasText: "Agent Plan: Add caching layer" });
+    await expect(card).toBeVisible();
+    await card.click();
+
+    const panel = page.getByTestId("issue-detail-panel");
+    await expect(panel).toHaveAttribute("data-state", "open");
+    await page.getByTestId("panel-approve-button").click();
+
+    await page.waitForResponse(
+      (res) =>
+        res.url().includes("/issues/review-plan-001") &&
+        res.request().method() === "PATCH",
+    );
+
+    // The label must be cleared in the SAME call that reopens the issue.
+    // Reopening without clearing is exactly the non-terminating state.
+    expect(patchCalls).toHaveLength(1);
+    expect(patchCalls[0]).toEqual({
+      status: "open",
+      remove_labels: ["needs-revision"],
+    });
+
+    // And it leaves the Review column rather than coming back around.
+    await expect(reviewColumn.locator("article")).toHaveCount(1);
   });
 
   test("reject plan review: reject form, Ctrl+Enter submit, issue leaves Review column", async ({

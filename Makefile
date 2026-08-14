@@ -575,9 +575,19 @@ check-go:
 	@echo "=== [11/13] Go: generated API staleness ==="
 	@./scripts/check-go-api-staleness.sh
 	@echo "=== [12/13] Go: test with race detector ==="
-	@./scripts/with-clean-loom-env.sh go test -p 1 -race -covermode=atomic -coverprofile=/tmp/loom.coverage.out -timeout 15m ./...
-	@echo "=== [13/13] Go: coverage threshold ==="
-	@COVERAGE_THRESHOLD=60 ./scripts/check-coverage.sh
+#   Steps 12 and 13 share one shell so they can share a PER-RUN profile path.
+#   A fixed /tmp path is unsafe two ways: two concurrent gates interleave writes
+#   into one file, and a gate killed mid-`go test` leaves a truncated file behind
+#   for the next run to read. Either produces a malformed record and the opaque
+#   failure `cover: line "..." doesn't match expected format`, which looks like a
+#   coverage regression but is a corrupt profile. The trap removes it on every
+#   exit path, so nothing stale survives to poison a later run.
+	@set -e; \
+	 profile="$$(mktemp "$${TMPDIR:-/tmp}/loom.coverage.XXXXXX")"; \
+	 trap 'rm -f "$$profile"' EXIT; \
+	 ./scripts/with-clean-loom-env.sh go test -p 1 -race -covermode=atomic -coverprofile="$$profile" -timeout 15m ./...; \
+	 echo "=== [13/13] Go: coverage threshold ==="; \
+	 COVERAGE_THRESHOLD=60 ./scripts/check-coverage.sh "$$profile"
 	@echo "=== Go quality gates PASSED ==="
 
 # Frontend-only quality gate (no Go toolchain, no dist prerequisite)
@@ -647,9 +657,23 @@ hooks:
 	@pre-commit install
 	@echo "Pre-commit hooks installed"
 
-# Ensure hooks are installed (runs once — skips if pre-push hook already exists)
+# Ensure hooks are installed (skips only when the installed pre-push already
+# matches scripts/hooks/pre-push byte for byte)
+# Reinstall when the hook is missing *or* has drifted from scripts/hooks/pre-push.
+# scripts/hooks/pre-push is the source of truth and the installed hook is a
+# managed artifact: `cmp` sees any difference, so a hand-edited local hook is
+# overwritten on the next `make dev`. That is deliberate — local copies drifting
+# is the whole failure mode below — and `make hooks` announces the reinstall.
+# An existence-only check lets a stale hook survive forever, which is not
+# hypothetical: a pre-push installed before scripts/hooks/pre-push started
+# clearing `git rev-parse --local-env-vars` leaves GIT_DIR exported into
+# `make check`. Every test that drives a throwaway repo under t.TempDir() then
+# resolves git against this checkout instead — `git commit` fires this repo's
+# pre-commit hook ("No .pre-commit-config.yaml file was found") and branch
+# lookups return the branch being pushed. Ten packages fail that way and the
+# gate can never pass, so nothing can be pushed at all.
 ensure-hooks:
-	@test -f '$(GIT_HOOKS_DIR)/pre-push' || $(MAKE) hooks
+	@cmp -s scripts/hooks/pre-push '$(GIT_HOOKS_DIR)/pre-push' || $(MAKE) hooks
 
 # Check dev dependencies
 dev-check:
