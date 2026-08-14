@@ -310,6 +310,8 @@ Stack 10.2 is documented in
 [Phase 10.2 Artifacts and Run Capture evidence](22-phase-10-2-artifacts-run-capture-evidence.md).
 Stack 10.3 is documented in
 [Phase 10.3 deep Source Control evidence](23-phase-10-3-deep-source-control-evidence.md).
+Stack 10.4 is documented in
+[Phase 10.4 Interaction and PTY evidence](24-phase-10-4-interaction-pty-evidence.md).
 
 ## Superseded decisions and alternatives
 
