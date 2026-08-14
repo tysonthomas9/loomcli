@@ -33,6 +33,7 @@ const (
 	// skills.
 	maxSkillArchiveCompressedBytes   int64 = 32 << 20
 	maxSkillArchiveDecompressedBytes int64 = 128 << 20
+	maxSkillFileCount                      = 2000
 	defaultGitHubHTTPTimeout               = 5 * time.Minute
 )
 
@@ -57,6 +58,21 @@ type fetchedGitHubSkill struct {
 	Files                  []domain.SkillFile
 	Source                 string
 	DroppedFrontmatterKeys []string
+	SkippedHiddenPaths     []string
+}
+
+// fetchedGitHubSkillResult keeps discovery separate from validation. A pack
+// sync is intentionally best-effort across skills, so one malformed candidate
+// must not prevent valid siblings from being imported.
+type fetchedGitHubSkillResult struct {
+	Directory string
+	Skill     fetchedGitHubSkill
+	Err       error
+}
+
+type fetchedGitHubPack struct {
+	Commit string
+	Skills []fetchedGitHubSkillResult
 }
 
 type githubSource struct {
@@ -76,6 +92,7 @@ type githubArchive struct {
 	files       map[string]githubArchiveFile
 	links       map[string]string
 	unsupported map[string]string
+	commit      string
 }
 
 type skillFrontmatter struct {
@@ -89,15 +106,7 @@ func (i githubSkillInstaller) Fetch(ctx context.Context, rawSource, nameOverride
 	if err != nil {
 		return fetchedGitHubSkill{}, err
 	}
-	compressed, err := i.download(ctx, source)
-	if err != nil {
-		return fetchedGitHubSkill{}, err
-	}
-	decompressed, err := readGzipArchive(compressed, i.decompressedLimit())
-	if err != nil {
-		return fetchedGitHubSkill{}, err
-	}
-	archive, err := readGitHubTar(decompressed, i.decompressedLimit())
+	archive, err := i.fetchArchive(ctx, source)
 	if err != nil {
 		return fetchedGitHubSkill{}, err
 	}
@@ -109,6 +118,54 @@ func (i githubSkillInstaller) Fetch(ctx context.Context, rawSource, nameOverride
 		return fetchedGitHubSkill{}, err
 	}
 	return archive.toSkill(source, skillDir, nameOverride)
+}
+
+// FetchAllSource downloads one repository archive and returns every skill at
+// the supported discovery depths beneath source.Subpath. Archive failures are
+// returned as pack-level errors; candidate validation failures stay attached
+// to that candidate so sync can continue with its siblings.
+func (i githubSkillInstaller) FetchAllSource(ctx context.Context, source githubSource) (fetchedGitHubPack, error) {
+	archive, err := i.fetchArchive(ctx, source)
+	if err != nil {
+		return fetchedGitHubPack{}, err
+	}
+	directories := archive.skillDirsUnder(source.Subpath)
+	if len(directories) == 0 {
+		root := source.Subpath
+		if root == "" {
+			root = "."
+		}
+		return fetchedGitHubPack{}, fmt.Errorf("no %s found beneath GitHub discovery root %q", domain.SkillFileNameSKILLMD, root)
+	}
+
+	results := make([]fetchedGitHubSkillResult, 0, len(directories))
+	for _, directory := range directories {
+		selected := archive.forSkillDir(directory, directories)
+		result := fetchedGitHubSkillResult{Directory: directory}
+		if err := selected.rejectUnsafeSelectedEntries(directory); err != nil {
+			result.Err = err
+		} else {
+			result.Skill, result.Err = selected.toSkill(source, directory, "")
+		}
+		results = append(results, result)
+	}
+	return fetchedGitHubPack{Commit: archive.commit, Skills: results}, nil
+}
+
+func (i githubSkillInstaller) fetchArchive(ctx context.Context, source githubSource) (githubArchive, error) {
+	compressed, err := i.download(ctx, source)
+	if err != nil {
+		return githubArchive{}, err
+	}
+	decompressed, err := readGzipArchive(compressed, i.decompressedLimit())
+	if err != nil {
+		return githubArchive{}, err
+	}
+	archive, err := readGitHubTar(decompressed, i.decompressedLimit())
+	if err != nil {
+		return githubArchive{}, err
+	}
+	return archive, nil
 }
 
 func (i githubSkillInstaller) download(ctx context.Context, source githubSource) ([]byte, error) {
@@ -369,6 +426,7 @@ func readGitHubTar(data []byte, logicalLimit int64) (githubArchive, error) {
 	topLevel := ""
 	seen := make(map[string]struct{})
 	logicalRemaining := logicalLimit
+	regularFileCount := 0
 	for {
 		hdr, err := tr.Next()
 		if err == io.EOF {
@@ -381,6 +439,9 @@ func readGitHubTar(data []byte, logicalLimit int64) (githubArchive, error) {
 			// git archive (and therefore codeload) leads with a
 			// pax_global_header recording the commit SHA; archive/tar hands it
 			// to the caller as an entry, but it is metadata, not a path.
+			if commit := gitCommitFromPAX(hdr.PAXRecords); commit != "" {
+				archive.commit = commit
+			}
 			continue
 		}
 		entryPath, root, err := safeTarEntryPath(hdr.Name)
@@ -405,6 +466,10 @@ func readGitHubTar(data []byte, logicalLimit int64) (githubArchive, error) {
 
 		switch hdr.Typeflag {
 		case tar.TypeReg: // Reader.Next normalizes legacy TypeRegA to TypeReg.
+			regularFileCount++
+			if regularFileCount > maxSkillFileCount {
+				return githubArchive{}, fmt.Errorf("GitHub tar archive contains more than %d regular files", maxSkillFileCount)
+			}
 			if hdr.Size > logicalRemaining {
 				return githubArchive{}, fmt.Errorf("GitHub tar logical file content exceeds the %d-byte budget at entry %q: declared size %d, remaining %d",
 					logicalLimit, entryPath, hdr.Size, logicalRemaining)
@@ -434,6 +499,19 @@ func readGitHubTar(data []byte, logicalLimit int64) (githubArchive, error) {
 		return githubArchive{}, fmt.Errorf("GitHub tar archive is empty")
 	}
 	return archive, nil
+}
+
+func gitCommitFromPAX(records map[string]string) string {
+	commit := strings.TrimSpace(records["comment"])
+	if len(commit) != 40 && len(commit) != 64 {
+		return ""
+	}
+	for _, r := range commit {
+		if (r < '0' || r > '9') && (r < 'a' || r > 'f') && (r < 'A' || r > 'F') {
+			return ""
+		}
+	}
+	return strings.ToLower(commit)
 }
 
 func safeTarEntryPath(raw string) (relative, root string, err error) {
@@ -540,11 +618,113 @@ func (a githubArchive) candidates(match func([]string) bool) []string {
 	return candidates
 }
 
+// skillDirsUnder returns all candidates in the repository root, skills/*,
+// .agents/skills/*, and one directory deep, with those depths interpreted
+// relative to root.
+func (a githubArchive) skillDirsUnder(root string) []string {
+	seen := make(map[string]struct{})
+	for filePath := range a.files {
+		relative, ok := pathWithinRoot(root, filePath)
+		if !ok {
+			continue
+		}
+		parts := strings.Split(relative, "/")
+		if parts[len(parts)-1] != domain.SkillFileNameSKILLMD {
+			continue
+		}
+		matches := len(parts) == 1 ||
+			(len(parts) == 2) ||
+			(len(parts) == 3 && parts[0] == "skills") ||
+			(len(parts) == 4 && parts[0] == ".agents" && parts[1] == "skills")
+		if !matches {
+			continue
+		}
+		directory := strings.TrimSuffix(relative, "/"+domain.SkillFileNameSKILLMD)
+		if relative == domain.SkillFileNameSKILLMD {
+			directory = ""
+		}
+		if root != "" {
+			directory = path.Join(root, directory)
+		}
+		seen[directory] = struct{}{}
+	}
+	directories := make([]string, 0, len(seen))
+	for directory := range seen {
+		directories = append(directories, directory)
+	}
+	sort.Strings(directories)
+	return directories
+}
+
+func pathWithinRoot(root, filePath string) (string, bool) {
+	if root == "" {
+		return filePath, true
+	}
+	prefix := root + "/"
+	if !strings.HasPrefix(filePath, prefix) {
+		return "", false
+	}
+	return strings.TrimPrefix(filePath, prefix), true
+}
+
+// forSkillDir removes nested skill candidates from the selected skill's file
+// tree. This matters when a repository-root SKILL.md coexists with skills/*:
+// each is a separate skill, not bundled content of the root skill.
+func (a githubArchive) forSkillDir(selected string, all []string) githubArchive {
+	out := githubArchive{
+		files:       make(map[string]githubArchiveFile),
+		links:       make(map[string]string),
+		unsupported: make(map[string]string),
+		commit:      a.commit,
+	}
+	copySelected := func(entryPath string) bool {
+		if !isWithinSkillDir(selected, entryPath) {
+			return false
+		}
+		for _, other := range all {
+			if other == selected || !isDescendantSkillDir(selected, other) {
+				continue
+			}
+			if isWithinSkillDir(other, entryPath) {
+				return false
+			}
+		}
+		return true
+	}
+	for entryPath, file := range a.files {
+		if copySelected(entryPath) {
+			out.files[entryPath] = file
+		}
+	}
+	for entryPath, kind := range a.links {
+		if copySelected(entryPath) {
+			out.links[entryPath] = kind
+		}
+	}
+	for entryPath, kind := range a.unsupported {
+		if copySelected(entryPath) {
+			out.unsupported[entryPath] = kind
+		}
+	}
+	return out
+}
+
+func isDescendantSkillDir(parent, child string) bool {
+	if child == "" {
+		return false
+	}
+	return parent == "" || strings.HasPrefix(child, parent+"/")
+}
+
 func (a githubArchive) rejectUnsafeSelectedEntries(skillDir string) error {
 	var links []string
 	for entryPath, kind := range a.links {
 		if isWithinSkillDir(skillDir, entryPath) {
-			links = append(links, fmt.Sprintf("%s (%s)", relativeSkillPath(skillDir, entryPath), kind))
+			relative := relativeSkillPath(skillDir, entryPath)
+			if _, hidden := hiddenSkillPath(relative); hidden {
+				continue
+			}
+			links = append(links, fmt.Sprintf("%s (%s)", relative, kind))
 		}
 	}
 	if len(links) > 0 {
@@ -554,7 +734,11 @@ func (a githubArchive) rejectUnsafeSelectedEntries(skillDir string) error {
 	var unsupported []string
 	for entryPath, kind := range a.unsupported {
 		if isWithinSkillDir(skillDir, entryPath) {
-			unsupported = append(unsupported, fmt.Sprintf("%s (%s)", relativeSkillPath(skillDir, entryPath), kind))
+			relative := relativeSkillPath(skillDir, entryPath)
+			if _, hidden := hiddenSkillPath(relative); hidden {
+				continue
+			}
+			unsupported = append(unsupported, fmt.Sprintf("%s (%s)", relative, kind))
 		}
 	}
 	if len(unsupported) > 0 {
@@ -567,9 +751,31 @@ func (a githubArchive) rejectUnsafeSelectedEntries(skillDir string) error {
 //nolint:funlen // Selection, frontmatter parse, and bundling stay one auditable unit.
 func (a githubArchive) toSkill(source githubSource, skillDir, nameOverride string) (fetchedGitHubSkill, error) {
 	selected := make(map[string]githubArchiveFile)
+	hiddenPaths := make(map[string]struct{})
 	for filePath, file := range a.files {
 		if isWithinSkillDir(skillDir, filePath) {
-			selected[relativeSkillPath(skillDir, filePath)] = file
+			relative := relativeSkillPath(skillDir, filePath)
+			if hidden, ok := hiddenSkillPath(relative); ok {
+				hiddenPaths[hidden] = struct{}{}
+				continue
+			}
+			selected[relative] = file
+		}
+	}
+	for entryPath := range a.links {
+		if !isWithinSkillDir(skillDir, entryPath) {
+			continue
+		}
+		if hidden, ok := hiddenSkillPath(relativeSkillPath(skillDir, entryPath)); ok {
+			hiddenPaths[hidden] = struct{}{}
+		}
+	}
+	for entryPath := range a.unsupported {
+		if !isWithinSkillDir(skillDir, entryPath) {
+			continue
+		}
+		if hidden, ok := hiddenSkillPath(relativeSkillPath(skillDir, entryPath)); ok {
+			hiddenPaths[hidden] = struct{}{}
 		}
 	}
 	var binaryPaths []string
@@ -629,6 +835,11 @@ func (a githubArchive) toSkill(source githubSource, skillDir, nameOverride strin
 		})
 	}
 	sort.Slice(files, func(i, j int) bool { return files[i].Path < files[j].Path })
+	skippedHidden := make([]string, 0, len(hiddenPaths))
+	for hidden := range hiddenPaths {
+		skippedHidden = append(skippedHidden, hidden)
+	}
+	sort.Strings(skippedHidden)
 
 	provenancePath := skillDir
 	provenance := "github.com/" + source.Owner + "/" + source.Repo
@@ -643,7 +854,18 @@ func (a githubArchive) toSkill(source githubSource, skillDir, nameOverride strin
 		Files:                  files,
 		Source:                 provenance,
 		DroppedFrontmatterKeys: append([]string(nil), metadata.DroppedKeys...),
+		SkippedHiddenPaths:     skippedHidden,
 	}, nil
+}
+
+func hiddenSkillPath(filePath string) (string, bool) {
+	parts := strings.Split(filePath, "/")
+	for index, part := range parts {
+		if strings.HasPrefix(part, ".") && part != "." && part != ".." {
+			return strings.Join(parts[:index+1], "/"), true
+		}
+	}
+	return "", false
 }
 
 func parseSkillDocument(data []byte) (skillFrontmatter, []byte, error) {

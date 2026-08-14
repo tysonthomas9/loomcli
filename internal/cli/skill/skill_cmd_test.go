@@ -155,7 +155,11 @@ func TestSkillWriteCommandsRefuseWhenAgentNameIsSet(t *testing.T) {
 		args []string
 	}{
 		{name: "create", args: []string{"create", "guarded", "--description", "blocked"}},
+		{name: "import", args: []string{"import"}},
 		{name: "install", args: []string{"install"}},
+		{name: "pack add", args: []string{"pack", "add"}},
+		{name: "pack remove", args: []string{"pack", "remove"}},
+		{name: "sync", args: []string{"sync"}},
 		{name: "update", args: []string{"update", "guarded", "--description", "blocked"}},
 		{name: "delete", args: []string{"delete", "guarded"}},
 	}
@@ -183,11 +187,14 @@ func TestSkillWriteCommandsRefuseWhenAgentNameIsSet(t *testing.T) {
 	if _, err := executeSkillCommand(t, "", "list"); err != nil {
 		t.Fatalf("list should stay open to agents: %v", err)
 	}
+	if _, err := executeSkillCommand(t, "", "pack", "list"); err != nil {
+		t.Fatalf("pack list should stay open to agents: %v", err)
+	}
 	if _, err := executeSkillCommand(t, "", "show", "missing"); err == nil || strings.Contains(err.Error(), "agent-initiated") {
 		t.Fatalf("show should reach the store and return its normal error, got %v", err)
 	}
-	if storeCalls != 2 {
-		t.Fatalf("read commands acquired the store %d times, want 2", storeCalls)
+	if storeCalls != 3 {
+		t.Fatalf("read commands acquired the store %d times, want 3", storeCalls)
 	}
 }
 
@@ -286,8 +293,8 @@ func TestSkillCommandSurfaceIncludesInstall(t *testing.T) {
 		got = append(got, child.Name())
 	}
 	sort.Strings(got)
-	if strings.Join(got, ",") != "create,delete,install,list,show,update" {
-		t.Fatalf("skill subcommands = %v, want CRUD plus install", got)
+	if strings.Join(got, ",") != "create,delete,import,install,list,pack,show,sync,update" {
+		t.Fatalf("skill subcommands = %v, want CRUD, import, install, pack, and sync", got)
 	}
 
 	create, _, err := cmd.Find([]string{"create"})
@@ -313,6 +320,16 @@ func TestSkillCommandSurfaceIncludesInstall(t *testing.T) {
 	}
 	if got := install.Flags().Lookup("scope").DefValue; got != "workspace" {
 		t.Errorf("install --scope default = %q, want workspace", got)
+	}
+	importCmd, _, _ := cmd.Find([]string{"import"})
+	for _, flag := range []string{"scope", "name", "force"} {
+		if importCmd.Flags().Lookup(flag) == nil {
+			t.Errorf("import is missing --%s", flag)
+		}
+	}
+	packAdd, _, _ := cmd.Find([]string{"pack", "add"})
+	if packAdd.Flags().Lookup("path") == nil {
+		t.Error("pack add is missing --path")
 	}
 	for _, want := range []string{"tree", "one path segment", "@<ref>", "containing /"} {
 		if !strings.Contains(install.Long, want) {
