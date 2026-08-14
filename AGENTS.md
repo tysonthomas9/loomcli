@@ -34,6 +34,30 @@ reaches a real external/paid service, costs money / may mutate external state). 
 real/live path is blocked, report blocked/unverified — never fabricate state. See
 `docs/testing-terminology.md`.
 
+## Shared Local-Mode Stacks
+
+Local-mode compose stacks share one podman host with other agents and with the
+operator's own long-lived dogfood stack. `up --build` against an existing
+compose project name silently recreates that project's containers with your
+branch's images and mutates its LOCALMODE workspace data — you clobber whoever
+owns it without any error.
+
+- NEVER touch the default compose project `loomcli-local-mode` (ports
+  8280/8282/8283). It is reserved for the human operator; `make local-mode-up`
+  and `local-mode-down` refuse it unless `LOCAL_MODE_ALLOW_DEFAULT=1`
+  (operators only).
+- Before any `up`: run `podman ps`, treat every existing stack as owned by
+  someone else, and claim an unused port block —
+  `LOCAL_MODE_COMPOSE_PROJECT=loomcli-local-mode-<runname>` with
+  `LOCAL_MODE_FLEETDB_PORT=8x80 LOCAL_MODE_API_PORT=8x82
+  LOCAL_MODE_UI_PORT=8x83` where no port of block `8x8y` is bound
+  (x = 3, 4, 5, …). Image tags derive from the project name, so builds stay
+  isolated too. Port numbers in runbook examples are examples, not reserved
+  defaults.
+- Never run `up`, `down`, or `--build` against a compose project you did not
+  create this session; tear down only your own project (same
+  `LOCAL_MODE_COMPOSE_PROJECT` on `make local-mode-down`) when finished.
+
 ## Generated Workflow Bundles
 
 Do not commit `internal/workflows/builtin-dist/` or other generated Flue bundle
