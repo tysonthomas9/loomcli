@@ -22,6 +22,8 @@ type RoleCreate struct {
 	Effort         string
 	PathPatterns   []string
 	Skills         []string
+	Labels         []string
+	ExcludeLabels  []string
 	InputPolicy    *domain.RoleInputPolicy
 	MaxPriority    *int
 	MaxConcurrency *int
@@ -45,6 +47,11 @@ type RoleUpdate struct {
 	Effort       *string
 	PathPatterns *[]string
 	Skills       *[]string
+	// Labels / ExcludeLabels follow the same *[]string convention as
+	// Skills/PathPatterns: nil leaves the list alone, a pointer to a (possibly
+	// empty) slice replaces it wholesale.
+	Labels        *[]string
+	ExcludeLabels *[]string
 	// InputPolicy uses the same double-pointer convention as the other
 	// optional pointer fields: nil leaves it alone, &nil clears it back to the
 	// deny-everything zero value, and a pointer to a non-nil policy sets it.

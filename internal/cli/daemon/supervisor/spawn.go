@@ -172,13 +172,20 @@ func appendRoleEnv(env []string, ap *AgentProcess) []string {
 	return env
 }
 
-// appendRoutingEnv adds routing constraint env vars (skills, path patterns, priority, role).
+// appendRoutingEnv adds routing constraint env vars (skills, path patterns,
+// label gate, priority, role).
 func appendRoutingEnv(env []string, ap *AgentProcess) []string {
 	if len(ap.RoleConfig.Skills) > 0 {
 		env = append(env, fmt.Sprintf("LOOM_ROLE_SKILLS=%s", strings.Join(ap.RoleConfig.Skills, ",")))
 	}
 	if len(ap.RoleConfig.PathPatterns) > 0 {
 		env = append(env, fmt.Sprintf("LOOM_ROLE_PATH_PATTERNS=%s", strings.Join(ap.RoleConfig.PathPatterns, ",")))
+	}
+	if len(ap.RoleConfig.Labels) > 0 {
+		env = append(env, fmt.Sprintf("LOOM_ROLE_LABELS=%s", strings.Join(ap.RoleConfig.Labels, ",")))
+	}
+	if len(ap.RoleConfig.ExcludeLabels) > 0 {
+		env = append(env, fmt.Sprintf("LOOM_ROLE_EXCLUDE_LABELS=%s", strings.Join(ap.RoleConfig.ExcludeLabels, ",")))
 	}
 	if ap.RoleConfig.MaxPriority != nil {
 		env = append(env, fmt.Sprintf("LOOM_ROLE_MAX_PRIORITY=%d", *ap.RoleConfig.MaxPriority))

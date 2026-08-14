@@ -185,6 +185,18 @@ type Role struct {
 	PathPatterns []string `json:"path_patterns,omitempty"`
 	Skills       []string `json:"skills,omitempty"`
 
+	// Labels restricts the role to issues carrying ALL of these labels (AND).
+	// Empty means no requirement. Exclusion (ExcludeLabels) is evaluated
+	// before this: if a label appears in both, exclusion wins. Comparison is
+	// exact and case-sensitive; values are stored verbatim and never
+	// normalised. Mirrors fleet-db's models.Role.Labels.
+	Labels []string `json:"labels,omitempty"`
+
+	// ExcludeLabels rejects an issue if it carries ANY of these labels (OR).
+	// Empty means no exclusion. Evaluated before Labels. Same exact,
+	// case-sensitive comparison. Mirrors fleet-db's models.Role.ExcludeLabels.
+	ExcludeLabels []string `json:"exclude_labels,omitempty"`
+
 	// InputPolicy declares what an agent in this role may auto-answer when the
 	// harness raises an interactive prompt mid-turn. Nil — the zero value —
 	// denies every prompt: a role that declares no policy auto-answers
