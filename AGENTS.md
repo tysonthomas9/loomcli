@@ -60,6 +60,12 @@ owns it without any error.
 - The same etiquette applies to `agent-browser`: sessions and profiles on this
   host belong to multiple agents. Never run `close --all`; close only sessions
   you opened, by name/profile.
+- Dev servers on fixed ports are shared host state too. Playwright's
+  `reuseExistingServer` will silently test whatever already listens on the
+  port — possibly another checkout's build. Before trusting a local e2e run,
+  confirm the listener belongs to your checkout (`lsof -nP -iTCP:<port>
+  -sTCP:LISTEN`); if it does not, start your own server on a unique port
+  rather than killing a process you did not start.
 
 ## Generated Workflow Bundles
 
