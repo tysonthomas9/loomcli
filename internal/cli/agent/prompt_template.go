@@ -71,6 +71,20 @@ type PromptData struct {
 	// dependencies. Empty when there is no pre-claimed task or the fetch fails.
 	// This is the only field that talks to the issue backend.
 	TaskDetail string
+
+	// DesignFormat is the workspace's design output format ("markdown" or
+	// "html"), i.e. the value a prompt passes to
+	// `loom data update <id> --design-format=...`. It is always populated
+	// because it is one struct-field read off the workspace config — there is
+	// nothing to gate.
+	//
+	// It exists here because a worker that WRITES a design (an architect or
+	// designer agent role, not just the built-in planner) has to know the
+	// format the board expects. The built-in planning prompts read the same
+	// value from promptTemplateData.DesignFormat; this is that field's worker
+	// counterpart, so a design-producing prompt renders identically on both
+	// context types.
+	DesignFormat string
 }
 
 // promptFieldRefs is the set of PromptData field names a parsed template reads.
@@ -184,17 +198,29 @@ func loadPromptTemplateWith(path string, build func(promptFieldRefs) PromptData)
 	if err != nil {
 		return "", fmt.Errorf("reading prompt template %s: %w", path, err)
 	}
+	return executePromptTemplate(filepath.Base(path), string(content), build)
+}
 
-	tmpl, err := template.New(filepath.Base(path)).Parse(string(content))
+// executePromptTemplate parses content under name, hands build the set of
+// PromptData fields the template references, and executes it with whatever
+// build returns.
+//
+// Split out of loadPromptTemplateWith so a prompt body that is embedded rather
+// than read off disk (the built-in worker prompts) goes through exactly the
+// same parse → gate → execute pipeline, including the field gating. Two
+// pipelines would drift, and the one that drifted would be the one no custom
+// prompt exercises.
+func executePromptTemplate(name, content string, build func(promptFieldRefs) PromptData) (string, error) {
+	tmpl, err := template.New(name).Parse(content)
 	if err != nil {
-		return "", fmt.Errorf("parsing prompt template %s: %w", path, err)
+		return "", fmt.Errorf("parsing prompt template %s: %w", name, err)
 	}
 
 	data := build(referencedPromptFields(tmpl))
 
 	var buf bytes.Buffer
 	if err := tmpl.Execute(&buf, data); err != nil {
-		return "", fmt.Errorf("executing prompt template %s: %w", path, err)
+		return "", fmt.Errorf("executing prompt template %s: %w", name, err)
 	}
 
 	return buf.String(), nil

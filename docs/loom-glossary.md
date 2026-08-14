@@ -50,6 +50,21 @@ Prompt values can be:
   `builtin:pr-review` selects the embedded PR-review terminal-agent prompt.
 - Empty for the default built-in lead prompt.
 
+`builtin:<id>` resolves for both kinds of agent role, against two **separate**
+registries — an ID from one never resolves through the other:
+
+- Interactive terminal prompts (`domain.BuiltinInteractivePrompts`): `lead`,
+  `pr-review`, `pr-review-checkout`. These populate the interactive-prompt
+  picker.
+- Worker prompts (`domain.BuiltinWorkerPrompts`): the `team-*` bodies used by
+  the specialist agent roles. They are deliberately absent from that picker: a
+  worker body claims a task, works it, and exits, which is wrong for a terminal.
+
+A worker reference is forwarded to `loom agent --prompt builtin:<id>` verbatim —
+the daemon does not turn it into a path — and is rendered from the body embedded
+at `internal/cli/agent/prompts/<id>.md` with the custom-prompt template context
+below.
+
 ### Custom Prompt Template Variables
 
 A prompt file is a Go `text/template`. Unlike the built-in planning and task
@@ -70,12 +85,14 @@ at a time. Referencing none of them leaves the file rendered exactly as written.
 | `{{.SafetyBlock}}` | Shared multi-agent safety rules (do not stash, do not switch branches, do not clean up another agent's files). |
 | `{{.CheckpointBlock}}` | "PREVIOUS ATTEMPT CONTEXT" for the last crashed or preempted attempt in this worktree. Empty when there is no checkpoint or a session resume is armed. |
 | `{{.TaskDetail}}` | Full detail of `TaskID`: title, status, priority, labels, description, design, acceptance criteria, notes, dependencies. |
+| `{{.DesignFormat}}` | Workspace design output format, `markdown` or `html`. Pass it to `loom data update --design-format` when the agent role writes a design. |
 
-The last five are computed only when the template names them, so a prompt that
+`WorkspaceBlock`, `EpicScope`, `SafetyBlock`, `CheckpointBlock` and `TaskDetail`
+are computed only when the template names them, so a prompt that
 ignores `{{.TaskDetail}}` never pays for the issue-backend fetch it would need.
 The detection reads the parsed template, so mentioning a variable name in prose
 is not a reference; a template that renders the whole context wholesale with
-`{{.}}` names nothing and therefore gets only the first five.
+`{{.}}` names nothing and therefore gets only the always-populated fields.
 
 Read-only roles additionally get the read-only preamble prepended, once,
 regardless of what the template references.

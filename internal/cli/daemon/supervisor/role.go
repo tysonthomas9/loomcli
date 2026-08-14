@@ -11,7 +11,8 @@ import (
 
 // ResolveRoleConfigStatic looks up a role by name without requiring a Supervisor instance.
 // For built-in roles, merges any user-defined config on top of defaults.
-// For custom roles, requires a prompt_file that must exist.
+// For custom roles, requires a prompt_file: either a builtin:<id> reference to
+// a prompt that ships with loom, or a file that must exist on disk.
 func ResolveRoleConfigStatic(roleName string, config *cfgpkg.DaemonConfig, projectDir string) (cfgpkg.RoleConfig, error) {
 	if BuiltInRoles[roleName] {
 		rc := builtInRoleConfig(roleName)
@@ -37,6 +38,18 @@ func ResolveRoleConfigStatic(roleName string, config *cfgpkg.DaemonConfig, proje
 
 	if rc.PromptFile == "" {
 		return cfgpkg.RoleConfig{}, fmt.Errorf("custom role %q missing prompt_file", roleName)
+	}
+
+	// builtin:<id> names a prompt that ships inside loom, so there is nothing to
+	// stat and nothing to make absolute. The value is left EXACTLY as stored:
+	// spawn forwards prompt_file verbatim to `loom agent --prompt`, which
+	// resolves the same reference on the other side. Rewriting it into a path
+	// here would hand the worker a filename that does not exist.
+	if id, ok := domain.ParseBuiltinPromptRef(rc.PromptFile); ok {
+		if !domain.IsBuiltinWorkerPrompt(id) {
+			return cfgpkg.RoleConfig{}, fmt.Errorf("agent role %q references unknown built-in prompt %q", roleName, id)
+		}
+		return rc, nil
 	}
 
 	promptPath := rc.PromptFile
