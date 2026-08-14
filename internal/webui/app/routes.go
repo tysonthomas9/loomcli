@@ -18,6 +18,9 @@ func (app *Server) registerRoutes() {
 	app.registerMonitorHandlers()
 	app.registerEditorAndNotifyRoutes(h)
 	app.registerAuthProxy()
+	for _, module := range app.apiModules {
+		module.Register(app.mux)
+	}
 
 	// Workspace management and workspace-scoped API routes
 	if app.multiPool != nil {

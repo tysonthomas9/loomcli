@@ -105,6 +105,117 @@ func TestHandleRunFirstTaskKeepsTaskClaimableForDaemon(t *testing.T) {
 	}
 }
 
+func TestHandleRunFirstTaskPassesLabelsToCreatedIssue(t *testing.T) {
+	issueSvc := &stubIssueService{
+		createFunc: func(_ context.Context, params service.CreateIssueParams) (json.RawMessage, error) {
+			if len(params.Labels) != 1 || params.Labels[0] != "architect" {
+				t.Fatalf("Labels = %v, want [architect]", params.Labels)
+			}
+			return json.RawMessage(`{"id":"task-1"}`), nil
+		},
+	}
+	agentSvc := &stubAgentService{
+		agents: []*domain.Agent{{Name: "app-architect-1", RoleName: "app-architect"}},
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/HELLO-WORLD/onboarding/first-task", strings.NewReader(`{
+		"agent_name":"app-architect-1",
+		"title":"Design the first feature",
+		"labels":["architect"],
+		"pin_agent":false
+	}`))
+	req.SetPathValue("ws", "HELLO-WORLD")
+
+	HandleRunFirstTask(issueSvc, agentSvc).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestHandleRunFirstTaskPinAgentFalseQueuesNoLifecycleCommand(t *testing.T) {
+	issueSvc := &stubIssueService{
+		createFunc: func(context.Context, service.CreateIssueParams) (json.RawMessage, error) {
+			return json.RawMessage(`{"id":"task-1"}`), nil
+		},
+		deleteFunc: func(context.Context, string) (json.RawMessage, error) {
+			t.Fatal("DeleteIssue should not run when no lifecycle command is requested")
+			return nil, nil
+		},
+	}
+	agentSvc := &stubAgentService{
+		agents: []*domain.Agent{{Name: "app-architect-1", RoleName: "app-architect"}},
+		lifecycleFunc: func(context.Context, string, string, service.AgentLifecycleInput) (*domain.Agent, error) {
+			t.Fatal("RequestAgentLifecycle should not run when pin_agent is false")
+			return nil, nil
+		},
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/HELLO-WORLD/onboarding/first-task", strings.NewReader(`{
+		"agent_name":"app-architect-1",
+		"title":"Design the first feature",
+		"pin_agent":false
+	}`))
+	req.SetPathValue("ws", "HELLO-WORLD")
+
+	HandleRunFirstTask(issueSvc, agentSvc).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var body runFirstTaskResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body.Queued {
+		t.Fatalf("Queued = true, want false: %#v", body)
+	}
+}
+
+func TestHandleRunFirstTaskAbsentOptionalFieldsPreservesPlannerPath(t *testing.T) {
+	issueSvc := &stubIssueService{
+		createFunc: func(_ context.Context, params service.CreateIssueParams) (json.RawMessage, error) {
+			if params.Labels != nil {
+				t.Fatalf("Labels = %v, want nil for omitted labels", params.Labels)
+			}
+			return json.RawMessage(`{"id":"task-1"}`), nil
+		},
+	}
+	var queued bool
+	agentSvc := &stubAgentService{
+		agents: []*domain.Agent{{Name: "planner", RoleName: "plan"}},
+		lifecycleFunc: func(_ context.Context, wsKey, name string, in service.AgentLifecycleInput) (*domain.Agent, error) {
+			queued = true
+			if wsKey != "HELLO-WORLD" || name != "planner" || in.CommandType != "start" || in.Payload["task_id"] != "task-1" {
+				t.Fatalf("planner lifecycle input = %s/%s %#v", wsKey, name, in)
+			}
+			return &domain.Agent{Name: name}, nil
+		},
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/HELLO-WORLD/onboarding/first-task", strings.NewReader(`{
+		"agent_name":"planner",
+		"title":"Explore Hello-World onboarding"
+	}`))
+	req.SetPathValue("ws", "HELLO-WORLD")
+
+	HandleRunFirstTask(issueSvc, agentSvc).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusCreated || !queued {
+		t.Fatalf("planner path status = %d, queued = %v, body = %s", rec.Code, queued, rec.Body.String())
+	}
+	var body runFirstTaskResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if !body.Queued || body.Started {
+		t.Fatalf("planner response = %#v", body)
+	}
+}
+
 func TestHandleRunFirstTaskDeletesCreatedIssueWhenStartFails(t *testing.T) {
 	var deletedIssueID string
 	issueSvc := &stubIssueService{

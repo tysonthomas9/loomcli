@@ -401,16 +401,24 @@ func (s *agentServiceImpl) ensureLocalAgentWorktrees(ctx context.Context, agent 
 // shared materializer. Agents on interactive roles are skipped; the workspace
 // view comes from the fleet-db-backed workspace data.
 func (s *agentServiceImpl) agentWorktreeMaterializer() localworkspace.AgentWorktreeMaterializer {
+	materializer := newAgentWorktreeMaterializer(s.store)
+	materializer.SkipAgent = func(ctx context.Context, agent domain.Agent) (bool, error) {
+		role, err := s.loadAgentRoleForKind(ctx, agent.WorkspaceKey, agent.RoleName)
+		if err != nil {
+			return false, err
+		}
+		return domain.ResolveRoleKind(role, agent.RoleName) == domain.RoleKindInteractive, nil
+	}
+	return materializer
+}
+
+// newAgentWorktreeMaterializer binds the webui's workspace resolver closures
+// without a SkipAgent policy. Team Template apply owns its interactive-agent
+// skip decision; single-agent creation adds its policy above.
+func newAgentWorktreeMaterializer(st store.Store) localworkspace.AgentWorktreeMaterializer {
 	return localworkspace.AgentWorktreeMaterializer{
-		SkipAgent: func(ctx context.Context, agent domain.Agent) (bool, error) {
-			role, err := s.loadAgentRoleForKind(ctx, agent.WorkspaceKey, agent.RoleName)
-			if err != nil {
-				return false, err
-			}
-			return domain.ResolveRoleKind(role, agent.RoleName) == domain.RoleKindInteractive, nil
-		},
 		ResolveWorkspace: func(ctx context.Context, workspaceKey string) (localworkspace.LocalWorkspaceView, error) {
-			ws, err := storeadapter.BuildWorkspaceDataForKey(ctx, s.store, workspaceKey)
+			ws, err := storeadapter.BuildWorkspaceDataForKey(ctx, st, workspaceKey)
 			if err != nil {
 				return localworkspace.LocalWorkspaceView{}, service.ErrInternal("load workspace for agent worktree", err)
 			}

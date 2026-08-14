@@ -52,6 +52,10 @@ tags:
     description: Per-agent terminal info and WebSocket
   - name: agent-control
     description: Agent lifecycle (start/stop/restart/yield)
+  - name: onboarding
+    description: First-run workspace onboarding
+  - name: team-templates
+    description: Built-in agent-team catalogs and workspace provisioning
   - name: git
     description: Git operations (status, push, pull, sync, PR, reset)
   - name: pull-requests
@@ -2117,17 +2121,82 @@ paths:
         "503":
           description: Terminal manager not available
 
+  # ── Team Templates ──────────────────────────────────────────────────────
+  /api/team-templates:
+    get:
+      operationId: listTeamTemplates
+      tags: [team-templates]
+      summary: List built-in Team Templates
+      responses:
+        "200":
+          description: Team Template picker catalog
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TeamTemplateCatalogResponse"
+
+  /api/workspaces/{ws}/team-templates/{id}/apply:
+    post:
+      operationId: applyTeamTemplate
+      tags: [team-templates]
+      summary: Apply a Team Template to a workspace
+      description: |
+        Synchronously creates missing agent roles and agents without modifying
+        existing entries. Per-step failures are returned in the completed report
+        so the caller can show partial progress and retry safely.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: id
+          in: path
+          required: true
+          description: Built-in Team Template identifier
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TeamTemplateApplyRequest"
+      responses:
+        "200":
+          description: Apply completed; inspect report.failed for partial failures
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TeamTemplateApplyResponse"
+        "400":
+          description: Preflight refusal, including a local workspace with no repositories
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ServiceErrorResponse"
+        "404":
+          description: Workspace or Team Template not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ServiceErrorResponse"
+        "503":
+          description: Fleet-db store unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ServiceErrorResponse"
+
   # ── Onboarding ──────────────────────────────────────────────────────────
   /api/workspaces/{ws}/onboarding/first-task:
     post:
       operationId: runOnboardingFirstTask
       tags: [onboarding]
-      summary: Create the onboarding first task and queue an agent start
+      summary: Create the onboarding first task and optionally queue an agent start
       description: |
-        Creates an open, unassigned issue and requests the named agent start
-        working on it via the lifecycle backend. If the lifecycle request
-        fails the just-created issue is deleted in a bounded cleanup so the
-        kanban does not accumulate orphans on disconnect.
+        Creates an open, unassigned issue. By default it requests the named
+        agent start working on it via the lifecycle backend. With pin_agent
+        false, no lifecycle command is queued; labels can route the claim
+        through the configured agent role label gate instead. If a requested
+        lifecycle call fails, the just-created issue is deleted in a bounded
+        cleanup so the kanban does not accumulate orphans on disconnect.
       parameters:
         - $ref: "#/components/parameters/WorkspaceId"
       requestBody:
@@ -2151,9 +2220,16 @@ paths:
                   type: integer
                 source_repo:
                   type: string
+                labels:
+                  type: array
+                  items:
+                    type: string
+                pin_agent:
+                  type: boolean
+                  default: true
       responses:
         "201":
-          description: Issue created and agent start queued
+          description: Issue created; queued reports whether an agent start was requested
           content:
             application/json:
               schema:
@@ -4321,6 +4397,15 @@ components:
 
   schemas:
     # ── Response Envelopes ──────────────────────────────────────────────
+    ServiceErrorResponse:
+      type: object
+      required: [error, kind]
+      properties:
+        error:
+          type: string
+        kind:
+          type: string
+
     ErrorResponse:
       type: object
       required: [success, error]
@@ -4345,6 +4430,133 @@ components:
           type: boolean
           const: true
         message:
+          type: string
+
+    # ── Team Template Schemas ───────────────────────────────────────────
+    TeamTemplateCatalogResponse:
+      type: object
+      required: [templates]
+      properties:
+        templates:
+          type: array
+          items:
+            $ref: "#/components/schemas/TeamTemplateCatalogEntry"
+
+    TeamTemplateCatalogEntry:
+      type: object
+      required: [id, label, description, revision, schema_version, roles, agents]
+      properties:
+        id:
+          type: string
+        label:
+          type: string
+        description:
+          type: string
+        revision:
+          type: integer
+        schema_version:
+          type: integer
+        roles:
+          type: array
+          items:
+            $ref: "#/components/schemas/TeamTemplateCatalogAgentRole"
+        agents:
+          type: array
+          items:
+            $ref: "#/components/schemas/TeamTemplateCatalogAgent"
+
+    TeamTemplateCatalogAgentRole:
+      type: object
+      required: [name, kind, display_label, description]
+      properties:
+        name:
+          type: string
+        kind:
+          type: string
+          enum: [worker, interactive]
+        display_label:
+          type: string
+          enum: [Developer, QA, Architecture]
+        description:
+          type: string
+
+    TeamTemplateCatalogAgent:
+      type: object
+      required: [name, role_name]
+      properties:
+        name:
+          type: string
+        role_name:
+          type: string
+
+    TeamTemplateApplyRequest:
+      type: object
+      properties:
+        dry_run:
+          type: boolean
+          default: false
+
+    TeamTemplateApplyResponse:
+      type: object
+      required: [status, report]
+      properties:
+        status:
+          type: string
+          const: done
+        report:
+          $ref: "#/components/schemas/TeamTemplateApplyReport"
+
+    TeamTemplateApplyReport:
+      type: object
+      required: [template_id, revision, schema_version, workspace_key, dry_run, steps, created, skipped, diverged, failed, materialized]
+      properties:
+        template_id:
+          type: string
+        revision:
+          type: integer
+        schema_version:
+          type: integer
+        workspace_key:
+          type: string
+        dry_run:
+          type: boolean
+        steps:
+          type: array
+          items:
+            $ref: "#/components/schemas/TeamTemplateApplyStep"
+        created:
+          type: integer
+        skipped:
+          type: integer
+        diverged:
+          type: integer
+        failed:
+          type: integer
+        warnings:
+          type: array
+          items:
+            type: string
+        materialized:
+          type: integer
+
+    TeamTemplateApplyStep:
+      type: object
+      required: [entity, name, action]
+      properties:
+        entity:
+          type: string
+          enum: [role, agent]
+          description: Store entity vocabulary; user-facing copy calls role entries agent roles.
+        name:
+          type: string
+        action:
+          type: string
+          enum: [created, skipped_match, skipped_diverged, failed]
+        fields:
+          type: array
+          items:
+            type: string
+        error:
           type: string
 
     FileMutationResponse:

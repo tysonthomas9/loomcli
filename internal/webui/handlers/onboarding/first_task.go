@@ -20,12 +20,14 @@ import (
 const cleanupTimeout = 5 * time.Second
 
 type runFirstTaskRequest struct {
-	AgentName   string `json:"agent_name"`
-	Title       string `json:"title"`
-	Description string `json:"description,omitempty"`
-	IssueType   string `json:"issue_type,omitempty"`
-	Priority    *int   `json:"priority,omitempty"`
-	SourceRepo  string `json:"source_repo,omitempty"`
+	AgentName   string   `json:"agent_name"`
+	Title       string   `json:"title"`
+	Description string   `json:"description,omitempty"`
+	IssueType   string   `json:"issue_type,omitempty"`
+	Priority    *int     `json:"priority,omitempty"`
+	SourceRepo  string   `json:"source_repo,omitempty"`
+	Labels      []string `json:"labels,omitempty"`
+	PinAgent    *bool    `json:"pin_agent,omitempty"`
 }
 
 type runFirstTaskResponse struct {
@@ -47,10 +49,12 @@ type normalizedRunFirstTaskRequest struct {
 	IssueType   string
 	Priority    int
 	SourceRepo  string
+	Labels      []string
+	PinAgent    bool
 }
 
-// HandleRunFirstTask creates the first onboarding task, assigns it to the
-// selected planner, and requests the agent start in one backend operation.
+// HandleRunFirstTask creates the first onboarding task and optionally requests
+// a pinned agent start. Label-routed tasks skip that lifecycle command.
 func HandleRunFirstTask(issueSvc service.IssueService, agentSvc service.AgentService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ws := middleware.WorkspaceFromContext(r.Context())
@@ -80,7 +84,7 @@ func HandleRunFirstTask(issueSvc service.IssueService, agentSvc service.AgentSer
 			Issue:     created,
 			AgentName: normalized.AgentName,
 			Started:   false,
-			Queued:    true,
+			Queued:    normalized.PinAgent,
 		})
 	}
 }
@@ -101,6 +105,8 @@ func normalizeRunFirstTaskRequest(req runFirstTaskRequest) (normalizedRunFirstTa
 		IssueType:   strings.TrimSpace(req.IssueType),
 		Priority:    2,
 		SourceRepo:  strings.TrimSpace(req.SourceRepo),
+		Labels:      req.Labels,
+		PinAgent:    req.PinAgent == nil || *req.PinAgent,
 	}
 	if out.AgentName == "" {
 		return normalizedRunFirstTaskRequest{}, service.ErrValidation("agent_name is required")
@@ -134,9 +140,13 @@ func createAndQueueFirstTask(
 		Description: req.Description,
 		Status:      "open",
 		SourceRepo:  req.SourceRepo,
+		Labels:      req.Labels,
 	})
 	if err != nil {
 		return nil, err
+	}
+	if !req.PinAgent {
+		return created, nil
 	}
 	issueID, err := decodeIssueID(created)
 	if err != nil {

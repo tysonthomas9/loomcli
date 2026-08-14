@@ -48,6 +48,7 @@ type Server struct {
 
 	// HTTP routing
 	mux                 *http.ServeMux
+	apiModules          []wsModule // API modules registered directly on the outer mux
 	wsModules           []wsModule // workspace-scoped route modules (registered on wsMux)
 	connectorDispatcher *connector.Dispatcher
 

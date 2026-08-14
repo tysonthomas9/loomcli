@@ -21,6 +21,12 @@ func TestServer_BuildModules_ZeroValue(t *testing.T) {
 	var app Server
 	app.buildModules()
 
+	if got := len(app.apiModules); got != 1 {
+		t.Fatalf("len(apiModules) = %d, want 1", got)
+	}
+	if got := fmt.Sprintf("%T", app.apiModules[0]); got != "*teamtemplates.Module" {
+		t.Fatalf("apiModules[0] type = %s, want *teamtemplates.Module", got)
+	}
 	if got := len(app.wsModules); got != 5 {
 		t.Fatalf("len(wsModules) = %d, want 5", got)
 	}

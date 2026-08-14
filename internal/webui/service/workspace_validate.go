@@ -77,6 +77,7 @@ func validateWorkspaceCreateRequest(req *WorkspaceCreateRequest) *ServiceError {
 			}
 		}
 	case "template":
+		// Unrelated to Team Templates (see docs/loom-glossary.md): this reserved type is a repo-source discriminator, never implemented.
 		return &ServiceError{Kind: KindUnavailable, Message: "template workspace type is not yet supported"}
 	case "":
 		return ErrValidation("type is required")
