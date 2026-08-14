@@ -3,6 +3,7 @@
 package skill
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -31,11 +32,20 @@ const manualSkillSource = "manual"
 // against memstore without opening a fleet-db connection.
 var skillWithActiveWorkspace = cmdstore.WithActiveWorkspace
 
+// Kept replaceable alongside skillWithActiveWorkspace so command tests can
+// use the real fetch path through a local httptest codeload endpoint.
+var skillGitHubInstaller = githubSkillInstaller{}
+
 type skillCreateFlags struct {
 	description string
 	content     string
 	scope       string
 	files       []string
+}
+
+type skillInstallFlags struct {
+	scope string
+	name  string
 }
 
 type skillListFlags struct {
@@ -72,11 +82,31 @@ func newSkillCommand() *cobra.Command {
 	}
 	cmd.AddCommand(
 		newSkillCreateCommand(),
+		newSkillInstallCommand(),
 		newSkillListCommand(),
 		newSkillShowCommand(),
 		newSkillUpdateCommand(),
 		newSkillDeleteCommand(),
 	)
+	return cmd
+}
+
+func newSkillInstallCommand() *cobra.Command {
+	var flags skillInstallFlags
+	cmd := &cobra.Command{
+		Use:   "install <SOURCE>",
+		Short: "Install a skill from GitHub",
+		Long: `Install a skill from a GitHub repository or subpath.
+
+In a GitHub /tree/ URL, Loom treats exactly one path segment after /tree/ as
+the ref. For branches containing /, use owner/repo/sub/path@<ref> instead.`,
+		Args: skillWriteArgs("loom skill install"),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runSkillInstall(cmd, args[0], flags)
+		},
+	}
+	cmd.Flags().StringVar(&flags.scope, "scope", string(domain.SkillScopeWorkspace), "Skill scope: workspace or role=<name>")
+	cmd.Flags().StringVar(&flags.name, "name", "", "Override the skill name from SKILL.md")
 	return cmd
 }
 
@@ -193,6 +223,46 @@ func runSkillCreate(cmd *cobra.Command, name string, flags skillCreateFlags) err
 			return skillWriteError("create", err, false)
 		}
 		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Created skill %s/%s\n", sk.WorkspaceKey, sk.Ref())
+		return nil
+	})
+}
+
+func runSkillInstall(cmd *cobra.Command, source string, flags skillInstallFlags) error {
+	if err := refuseAgentSkillWrite("loom skill install"); err != nil {
+		return err
+	}
+	if _, _, err := parseSkillScope(flags.scope); err != nil {
+		return err
+	}
+	if cmd.Flags().Changed("name") {
+		if err := domain.ValidateSkillName(flags.name); err != nil {
+			return err
+		}
+	}
+	fetched, err := skillGitHubInstaller.Fetch(cmd.Context(), source, flags.name)
+	if err != nil {
+		return fmt.Errorf("fetch skill from GitHub: %w", err)
+	}
+	if len(fetched.DroppedFrontmatterKeys) > 0 {
+		_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "Notice: dropped SKILL.md frontmatter keys: %s\n", strings.Join(fetched.DroppedFrontmatterKeys, ", "))
+	}
+	ref, err := parseSkillRef(fetched.Name, flags.scope)
+	if err != nil {
+		return err
+	}
+	return skillWithActiveWorkspace(func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error {
+		sk, err := h.Store.Skills().Create(ctx, store.SkillCreate{
+			WorkspaceKey: ws,
+			Ref:          ref,
+			Description:  fetched.Description,
+			Content:      fetched.Content,
+			Files:        fetched.Files,
+			Source:       fetched.Source,
+		})
+		if err != nil {
+			return skillInstallWriteError(ref, err)
+		}
+		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Installed skill %s/%s\n", sk.WorkspaceKey, sk.Ref())
 		return nil
 	})
 }
@@ -339,14 +409,25 @@ func parseSkillRef(name, scope string) (domain.SkillRef, error) {
 	if err := domain.ValidateSkillName(name); err != nil {
 		return domain.SkillRef{}, err
 	}
+	skillScope, role, err := parseSkillScope(scope)
+	if err != nil {
+		return domain.SkillRef{}, err
+	}
+	if skillScope == domain.SkillScopeRole {
+		return domain.RoleSkillRef(role, name), nil
+	}
+	return domain.WorkspaceSkillRef(name), nil
+}
+
+func parseSkillScope(scope string) (domain.SkillScope, string, error) {
 	scope = strings.TrimSpace(scope)
 	if scope == string(domain.SkillScopeWorkspace) {
-		return domain.WorkspaceSkillRef(name), nil
+		return domain.SkillScopeWorkspace, "", nil
 	}
 	if role, ok := strings.CutPrefix(scope, string(domain.SkillScopeRole)+"="); ok && strings.TrimSpace(role) != "" {
-		return domain.RoleSkillRef(strings.TrimSpace(role), name), nil
+		return domain.SkillScopeRole, strings.TrimSpace(role), nil
 	}
-	return domain.SkillRef{}, fmt.Errorf("--scope must be %q or %q, got %q", "workspace", "role=<name>", scope)
+	return "", "", fmt.Errorf("--scope must be %q or %q, got %q", "workspace", "role=<name>", scope)
 }
 
 func readSkillText(filePath string, stdin io.Reader, label string) (string, error) {
@@ -365,10 +446,14 @@ func readSkillText(filePath string, stdin io.Reader, label string) (string, erro
 			return "", fmt.Errorf("read %s from %q: %w", label, filePath, err)
 		}
 	}
-	if !utf8.Valid(data) || strings.IndexByte(string(data), 0) >= 0 {
+	if !isSkillText(data) {
 		return "", fmt.Errorf("%s must be UTF-8 text; binary content is not supported", label)
 	}
 	return string(data), nil
+}
+
+func isSkillText(data []byte) bool {
+	return utf8.Valid(data) && bytes.IndexByte(data, 0) < 0
 }
 
 func readSkillFiles(specs []string) ([]domain.SkillFile, error) {
@@ -582,6 +667,14 @@ func skillWriteError(action string, err error, forceAvailable bool) error {
 	}
 
 	return fmt.Errorf("%s skill: %w", action, err)
+}
+
+func skillInstallWriteError(ref domain.SkillRef, err error) error {
+	if errors.Is(err, domain.ErrAlreadyExists) {
+		return fmt.Errorf("install skill: %w; choose a different name with --name <new-name>, or update the existing skill with %q",
+			err, fmt.Sprintf("loom skill update %s --scope %s", ref.Name, formatSkillScope(ref)))
+	}
+	return skillWriteError("install", err, false)
 }
 
 func conflictRef(conflict *domain.SkillProvenanceConflictError) string {
