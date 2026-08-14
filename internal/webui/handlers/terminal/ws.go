@@ -2,39 +2,43 @@ package terminal
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"strconv"
-	"strings"
 	"time"
 
-	"github.com/google/uuid"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 	"nhooyr.io/websocket" //nolint:staticcheck // SA1019: websocket migration tracked separately
 
-	"github.com/tysonthomas9/loomcli/internal/modules/agents"
 	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
+	loomapi "github.com/tysonthomas9/loomcli/internal/platform/loomapi/gen"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
-	webuterminal "github.com/tysonthomas9/loomcli/internal/webui/terminal"
-)
-
-var (
-	errAgentLaunchSpecMissing    = errors.New("agent terminal launch spec missing")
-	errAgentTerminalStopped      = errors.New("agent terminal is stopped; start the agent before connecting")
-	errTerminalLaunchMetaMissing = errors.New("terminal launch metadata missing")
 )
 
 // terminalTracerName is the instrumentation library name for terminal WS
 // spans. Stable so dashboards filtering on it don't break.
 const terminalTracerName = "github.com/tysonthomas9/loomcli/internal/webui/handlers/terminal"
+
+// A replay replaces the cached renderer state completely. CSI 3 J clears
+// saved scrollback, CSI 2 J clears the viewport, and CSI H homes the cursor.
+// Clearing only the viewport lets remount/reflow artifacts accumulate above
+// an otherwise correct replay when @wterm/react reuses its core.
+var terminalReplayReset = []byte("\x1b[3J\x1b[2J\x1b[H")
+
+//nolint:staticcheck // SA1019: terminal relay still uses the repository's existing websocket dependency.
+type terminalReplayFrame struct {
+	messageType websocket.MessageType
+	payload     []byte
+}
 
 // Disconnect reasons reported on `ws.disconnect` spans. Bounded enum so
 // the `disconnect.reason` attribute stays low-cardinality. See
@@ -68,12 +72,11 @@ func wsCloseReason(status websocket.StatusCode) string { //nolint:staticcheck //
 
 // terminalWSParams holds the dependencies for a terminal WebSocket handler.
 type terminalWSParams struct {
-	manager       webuterminal.PTYSource
+	terminals     interaction.TerminalTabs
 	auth          *realtime.TerminalAuth
 	patterns      []string
 	loomServerURL string
 	state         StateQueries
-	tabMetaStore  webuterminal.TabMetadataReader
 	hub           *realtime.Hub
 	// serverStartedAt is used to distinguish "tab metadata from a prior
 	// server process whose PTY is long gone" from "tab metadata just
@@ -81,13 +84,7 @@ type terminalWSParams struct {
 	// triggers a 4410 close; the latter proceeds to AttachSession as
 	// normal.
 	serverStartedAt time.Time
-	agentIdentity   terminalAgentIdentity
 	interaction     InteractionDependencies
-	interactionNode string
-}
-
-type workspacePTYEnsurer interface {
-	EnsureRegistered(wsID, path string) error
 }
 
 // HandleTerminalWS returns a WebSocket handler for terminal relay. It upgrades
@@ -100,69 +97,41 @@ type workspacePTYEnsurer interface {
 // on disconnect the PTY and child process stay alive for a grace period so a
 // reconnecting client gets its shell and scrollback back. See PTYManager for
 // the lifecycle details.
-func HandleTerminalWS(
-	manager webuterminal.PTYSource,
-	auth *realtime.TerminalAuth,
-	allowedOrigins []string,
-	loomServerURL string,
-	state StateQueries,
-	tabMetaStore webuterminal.TabMetadataReader,
-	hub *realtime.Hub,
-	serverStartedAt time.Time,
-	identities ...terminalAgentIdentity,
-) http.HandlerFunc {
-	return HandleTerminalWSWithInteraction(
-		manager,
-		auth,
-		allowedOrigins,
-		loomServerURL,
-		state,
-		tabMetaStore,
-		hub,
-		serverStartedAt,
-		InteractionDependencies{},
-		identities...,
-	)
-}
-
-// HandleTerminalWSWithInteraction adds the owner-scoped Interaction lifecycle
-// required for agent PTYs. HandleTerminalWS remains as the compatibility
-// entrypoint for non-agent terminal composition and isolated route tests.
+// HandleTerminalWS maps the terminal WebSocket protocol onto Interaction's
+// lifecycle interface. Delivery cannot attach without the owner dependencies
+// needed to authorize a fresh interactive Agent session.
 //
 //nolint:funlen // Keep terminal dependency capture and request lifecycle ordering in one explicit WebSocket composition boundary.
-func HandleTerminalWSWithInteraction(
-	manager webuterminal.PTYSource,
+func HandleTerminalWS(
+	terminals interaction.TerminalTabs,
 	auth *realtime.TerminalAuth,
 	allowedOrigins []string,
 	loomServerURL string,
 	state StateQueries,
-	tabMetaStore webuterminal.TabMetadataReader,
 	hub *realtime.Hub,
 	serverStartedAt time.Time,
 	interactionDeps InteractionDependencies,
-	identities ...terminalAgentIdentity,
 ) http.HandlerFunc {
 	p := &terminalWSParams{
-		manager:         manager,
+		terminals:       terminals,
 		auth:            auth,
 		patterns:        originHosts(allowedOrigins),
 		loomServerURL:   loomServerURL,
 		state:           state,
-		tabMetaStore:    tabMetaStore,
 		hub:             hub,
 		serverStartedAt: serverStartedAt,
-		agentIdentity:   firstTerminalAgentIdentity(identities),
 		interaction:     interactionDeps,
-		interactionNode: "loom-terminal-" + uuid.NewString(),
 	}
 
 	return func(w http.ResponseWriter, r *http.Request) {
-		session, workspace, ok := validateTerminalWSRequest(w, r, p.manager, p.auth)
+		session, workspace, attachPlan, ok := validateTerminalWSRequest(w, r, p.terminals, p.auth)
 		if !ok {
 			return
 		}
 		initialCols, initialRows := initialTerminalSizeFromRequest(r)
-		startAuthority, ok := resolveTerminalInteractionStartAuthority(w, r, p, session, workspace)
+		startAuthority, ok := resolveTerminalInteractionStartAuthority(
+			w, r, p, workspace, attachPlan.StartAuthorityRequired,
+		)
 		if !ok {
 			return
 		}
@@ -235,12 +204,12 @@ func emitDisconnectSpan(upgradeCtx context.Context, workspace, session string, c
 
 // validateTerminalWSRequest validates the session parameter, auth token, and
 // session limit. Returns (session, workspace, true) on success.
-func validateTerminalWSRequest(w http.ResponseWriter, r *http.Request, manager webuterminal.PTYSource, auth *realtime.TerminalAuth) (string, string, bool) {
-	if manager == nil {
+func validateTerminalWSRequest(w http.ResponseWriter, r *http.Request, terminals interaction.TerminalTabs, auth *realtime.TerminalAuth) (string, string, interaction.TerminalAttachPlan, bool) {
+	if terminals == nil {
 		handler.WriteJSON(w, http.StatusServiceUnavailable, map[string]interface{}{
-			"success": false, "error": "terminal manager not initialized",
+			"success": false, "error": "terminal service not initialized",
 		})
-		return "", "", false
+		return "", "", interaction.TerminalAttachPlan{}, false
 	}
 
 	session := r.URL.Query().Get("session")
@@ -249,31 +218,37 @@ func validateTerminalWSRequest(w http.ResponseWriter, r *http.Request, manager w
 		handler.WriteJSON(w, http.StatusBadRequest, map[string]interface{}{
 			"success": false, "error": "missing session parameter",
 		})
-		return "", "", false
+		return "", "", interaction.TerminalAttachPlan{}, false
 	}
 	if !validTerminalSession.MatchString(session) {
 		handler.WriteJSON(w, http.StatusBadRequest, map[string]interface{}{
 			"success": false, "error": "invalid session name: must match [a-zA-Z0-9_-]+",
 		})
-		return "", "", false
+		return "", "", interaction.TerminalAttachPlan{}, false
 	}
 
 	if !authenticateTerminalSession(w, r, auth, session, workspace) {
-		return "", "", false
+		return "", "", interaction.TerminalAttachPlan{}, false
 	}
 
 	// Reject only when we'd have to spawn a *new* session past the cap.
 	// Reconnects to an existing (workspace, session) must still pass —
 	// AttachSession doesn't count them against the cap, and a 503 here
 	// would lock users out of live sessions until one is killed.
-	key := webuterminal.SessionKey{Workspace: workspace, Name: session}
-	if !manager.HasSession(key) && manager.SessionCountFor(workspace) >= manager.MaxSessions() {
-		handler.WriteJSON(w, http.StatusServiceUnavailable, map[string]interface{}{
-			"success": false, "error": "maximum terminal sessions reached",
+	plan, err := terminals.PlanTerminalAttach(r.Context(), interaction.TerminalAttachCommand{
+		WorkspaceKey: workspace, TerminalID: session,
+	})
+	if err != nil {
+		status := http.StatusServiceUnavailable
+		if errors.Is(err, interaction.ErrInvalid) {
+			status = http.StatusBadRequest
+		}
+		handler.WriteJSON(w, status, map[string]interface{}{
+			"success": false, "error": interaction.PublicTerminalErrorMessage(err),
 		})
-		return "", "", false
+		return "", "", interaction.TerminalAttachPlan{}, false
 	}
-	return session, workspace, true
+	return session, workspace, plan, true
 }
 
 // resolveTerminalInteractionStartAuthority derives the exact operator grant
@@ -283,31 +258,19 @@ func resolveTerminalInteractionStartAuthority(
 	response http.ResponseWriter,
 	request *http.Request,
 	params *terminalWSParams,
-	session,
 	workspace string,
+	required bool,
 ) (*authority.OperatorAuthority, bool) {
-	if params == nil || params.manager == nil {
+	if params == nil || params.terminals == nil {
 		handler.WriteJSON(response, http.StatusServiceUnavailable, map[string]any{
-			"success": false, "error": "terminal manager not initialized",
+			"success": false, "error": "terminal service not initialized",
 		})
 		return nil, false
 	}
-	key := webuterminal.SessionKey{Workspace: workspace, Name: session}
-	if params.manager.HasSession(key) || params.tabMetaStore == nil {
+	if !required {
 		return nil, true
 	}
-	meta, err := params.tabMetaStore.Get(request.Context(), workspace, session)
-	if err != nil {
-		handler.WriteJSON(response, http.StatusInternalServerError, map[string]any{
-			"success": false, "error": "load terminal metadata",
-		})
-		return nil, false
-	}
-	if meta == nil || meta.Kind != terminalKindAgent {
-		return nil, true
-	}
-	if params.interaction.API == nil || params.interaction.Operator == nil ||
-		params.interaction.SessionAuthorities == nil {
+	if params.interaction.Operator == nil {
 		handler.WriteJSON(response, http.StatusServiceUnavailable, map[string]any{
 			"success": false, "error": "Interaction session lifecycle unavailable",
 		})
@@ -376,22 +339,19 @@ func upgradeTerminalWS(w http.ResponseWriter, r *http.Request, patterns []string
 // at ERROR level, so on-call noise doesn't spike on every workspace delete.
 func classifyAttachErr(err error, session, workspace string) (websocket.StatusCode, string) { //nolint:staticcheck // SA1019: websocket migration tracked separately
 	switch {
-	case errors.Is(err, errAgentLaunchSpecMissing):
+	case errors.Is(err, interaction.ErrTerminalLaunchMissing):
 		slog.Error("agent terminal metadata missing launch spec", "session", session, "workspace", workspace)
-		return websocket.StatusInternalError, err.Error() //nolint:staticcheck // SA1019
-	case errors.Is(err, errAgentTerminalStopped):
+		return websocket.StatusInternalError, interaction.PublicTerminalErrorMessage(err) //nolint:staticcheck // SA1019
+	case errors.Is(err, interaction.ErrAgentTerminalStopped):
 		slog.Info("stopped agent terminal attach refused", "session", session, "workspace", workspace)
-		return websocket.StatusPolicyViolation, err.Error() //nolint:staticcheck // SA1019
-	case errors.Is(err, errBackgroundWorkerTerminal):
+		return websocket.StatusPolicyViolation, interaction.PublicTerminalErrorMessage(err) //nolint:staticcheck // SA1019
+	case errors.Is(err, interaction.ErrAgentTerminalWorker):
 		slog.Info("background worker terminal attach refused", "session", session, "workspace", workspace)
-		return websocket.StatusPolicyViolation, err.Error() //nolint:staticcheck // SA1019
-	case errors.Is(err, errTerminalLaunchMetaMissing):
-		slog.Error("terminal metadata missing launch spec", "session", session, "workspace", workspace)
-		return websocket.StatusInternalError, err.Error() //nolint:staticcheck // SA1019
-	case errors.Is(err, webuterminal.ErrPTYMaxSessionsReached):
+		return websocket.StatusPolicyViolation, interaction.PublicTerminalErrorMessage(err) //nolint:staticcheck // SA1019
+	case errors.Is(err, interaction.ErrTerminalCapacity):
 		slog.Info("terminal session limit reached", "session", session)
 		return websocket.StatusInternalError, err.Error() //nolint:staticcheck // SA1019
-	case errors.Is(err, webuterminal.ErrPTYManagerClosed), errors.Is(err, webuterminal.ErrWorkspaceNotRegistered):
+	case errors.Is(err, interaction.ErrTerminalClosed), errors.Is(err, interaction.ErrTerminalPlacement):
 		slog.Info("terminal attach after workspace unavailable", "session", session, "workspace", workspace, "err", err)
 		return websocket.StatusGoingAway, "workspace unavailable" //nolint:staticcheck // SA1019
 	default:
@@ -415,8 +375,7 @@ func runTerminalRelay(
 	initialRows uint16,
 	startAuthority *authority.OperatorAuthority,
 ) (websocket.StatusCode, string) {
-	key := webuterminal.SessionKey{Workspace: workspace, Name: session}
-	ensureWorkspacePTYRegistered(reqCtx, p, workspace)
+	key := interaction.TerminalKey{WorkspaceKey: workspace, TerminalID: session}
 
 	att, reattach, err := attachTerminalSession(
 		reqCtx,
@@ -439,17 +398,17 @@ func runTerminalRelay(
 		injectTerminalContextBanner(att, p.loomServerURL, workspaceName(reqCtx, p.state, wsID))
 	}
 
-	broadcastSessionIssueEvent(p.tabMetaStore, p.hub, workspace, session)
+	broadcastSessionIssueEvent(p.terminals, p.hub, workspace, session)
 
 	if !reattach {
 		maybeEmitStaleRestartBanner(reqCtx, conn, p, workspace, session)
 	}
 
-	// Emit scrollback replay (reset escape + ring bytes) before going live.
-	if replay := att.Scrollback(); len(replay) > 0 {
-		if err := conn.Write(reqCtx, websocket.MessageBinary, replay); err != nil { //nolint:staticcheck // SA1019
-			slog.Warn("scrollback replay write failed", "session", session, "err", err)
-		}
+	// Rebuild historical grid geometry before switching to live output. Binary
+	// frames are PTY output; generated-schema text frames are replay-only resize
+	// controls and are never echoed back to the live child.
+	if err := writeTerminalReplay(reqCtx, conn, att.Replay()); err != nil {
+		slog.Warn("terminal replay write failed", "session", session, "err", err)
 	}
 
 	ctx, cancel := context.WithCancel(reqCtx)
@@ -462,32 +421,85 @@ func runTerminalRelay(
 		crashCh <- realtime.AttachmentToWS(ctx, cancel, conn, att)
 	}()
 
-	// WS → PTY until the client disconnects. The attachment satisfies
-	// realtime.Resizer directly so the manager doesn't need a connID → PTY
-	// lookup table.
+	// WS → terminal until the client disconnects. The process-neutral
+	// attachment carries resize and input behavior from Interaction.
 	realtime.WSToPTY(ctx, conn, attachmentWriter{att}, att, connID)
 
-	// WebSocket gone — detach the attachment. PTY stays alive for the
-	// manager's grace period.
-	p.manager.Detach(key, connID)
+	// WebSocket gone — Interaction keeps the child alive for reconnect grace.
+	p.terminals.DetachTerminal(reqCtx, key.WorkspaceKey, key.TerminalID, connID)
 
 	return (<-crashCh).WSClose()
+}
+
+//nolint:staticcheck // SA1019: terminal relay still uses the repository's existing websocket dependency.
+func writeTerminalReplay(
+	ctx context.Context,
+	conn *websocket.Conn,
+	events []interaction.TerminalReplayEvent,
+) error {
+	frames, err := terminalReplayFrames(events)
+	if err != nil {
+		return err
+	}
+	for _, frame := range frames {
+		if err := conn.Write(ctx, frame.messageType, frame.payload); err != nil { //nolint:staticcheck // SA1019
+			return err
+		}
+	}
+	return nil
+}
+
+func terminalReplayFrames(events []interaction.TerminalReplayEvent) ([]terminalReplayFrame, error) {
+	if len(events) == 0 {
+		return nil, nil
+	}
+	frames := make([]terminalReplayFrame, 0, len(events)+1)
+	frames = append(frames, terminalReplayFrame{
+		messageType: websocket.MessageBinary,
+		payload:     append([]byte(nil), terminalReplayReset...),
+	})
+	for _, event := range events {
+		if event.IsResize() {
+			payload, err := json.Marshal(loomapi.TerminalReplayControl{
+				Type:    loomapi.TerminalReplayResize,
+				Columns: int32(event.Columns),
+				Rows:    int32(event.Rows),
+			})
+			if err != nil {
+				return nil, fmt.Errorf("encode terminal replay control: %w", err)
+			}
+			frames = append(frames, terminalReplayFrame{
+				messageType: websocket.MessageText,
+				payload:     payload,
+			})
+			continue
+		}
+		if len(event.Output) > 0 {
+			frames = append(frames, terminalReplayFrame{
+				messageType: websocket.MessageBinary,
+				payload:     append([]byte(nil), event.Output...),
+			})
+		}
+	}
+	return frames, nil
 }
 
 // broadcastSessionIssueEvent sends an SSE event when the attached terminal is
 // linked to an issue. The metadata read uses a background timeout because the
 // request context may be invalid after WebSocket hijack.
 func broadcastSessionIssueEvent(
-	tabMetaStore webuterminal.TabMetadataReader,
+	terminals interface {
+		GetTab(context.Context, string, string) (*interaction.TabMetadata, error)
+	},
 	hub *realtime.Hub,
 	workspace, session string,
 ) {
-	if tabMetaStore == nil || hub == nil {
+	if terminals == nil || hub == nil {
 		return
 	}
 	metaCtx, metaCancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer metaCancel()
-	meta, err := tabMetaStore.Get(metaCtx, workspace, session)
+	meta, err := terminals.GetTab(metaCtx, workspace, session)
 	if err != nil || meta == nil || meta.IssueID == "" {
 		return
 	}
@@ -502,197 +514,33 @@ func broadcastSessionIssueEvent(
 	})
 }
 
-// attachTerminalSession resolves the server-owned launch contract before
-// asking the PTY manager to attach or spawn. Keeping the authorization check
-// on this boundary ensures a persisted tab cannot respawn a stopped
-// interactive agent through a direct or reconnecting WebSocket.
-//
-//nolint:funlen // Keep authorization, owner-fenced Interaction launch, PTY spawn, and compensating cleanup in one attach transaction.
+// attachTerminalSession delegates the complete launch and process transaction
+// to Interaction. WebUI receives only the attachment needed for framing.
 func attachTerminalSession(
 	ctx context.Context,
 	p *terminalWSParams,
-	key webuterminal.SessionKey,
+	key interaction.TerminalKey,
 	cols, rows uint16,
 	startAuthority ...*authority.OperatorAuthority,
-) (webuterminal.Attachment, bool, error) {
-	launch, agentID, err := resolveTerminalLaunch(ctx, p, key.Workspace, key.Name)
+) (interaction.TerminalAttachment, bool, error) {
+	if p == nil || p.terminals == nil {
+		return nil, false, interaction.ErrUnavailable
+	}
+	var operator *authority.OperatorAuthority
+	if len(startAuthority) > 0 {
+		operator = startAuthority[0]
+	}
+	result, err := p.terminals.AttachTerminal(ctx, interaction.TerminalAttachCommand{
+		WorkspaceKey: key.WorkspaceKey, TerminalID: key.TerminalID,
+		Columns: cols, Rows: rows, StartAuthority: operator,
+	})
 	if err != nil {
 		return nil, false, err
 	}
-	if agentID != "" {
-		// resolveTerminalLaunch may have observed running just before Stop
-		// entered its ownership snapshot. Re-authorize after taking Stop's
-		// ordering boundary so an attachment either completes before Stop
-		// snapshots/kills it or observes the durable stopped state afterward.
-		unlock := webuterminal.LockAgentLifecycle(key.Workspace, agentID)
-		defer unlock()
-		if err := authorizeAgentTerminalLaunch(
-			ctx,
-			p.state,
-			key.Workspace,
-			agentID,
-			p.agentIdentity,
-		); err != nil {
-			return nil, false, err
-		}
+	if result == nil || result.Attachment == nil {
+		return nil, false, interaction.ErrInvalidPersistedState
 	}
-	var lifecycle *terminalInteractionLifecycle
-	if agentID != "" && !p.manager.HasSession(key) {
-		var operator *authority.OperatorAuthority
-		if len(startAuthority) > 0 {
-			operator = startAuthority[0]
-		}
-		launch, lifecycle, err = prepareTerminalInteractionLaunch(
-			ctx,
-			p,
-			key,
-			agentID,
-			launch,
-			operator,
-		)
-		if err != nil {
-			return nil, false, err
-		}
-		defer lifecycle.Close()
-	}
-	attachment, reattached, err := p.manager.AttachSession(key, cols, rows, launch)
-	if err != nil {
-		if lifecycle != nil {
-			lifecycle.fail(ctx, "terminal_spawn_failed")
-		}
-		return nil, false, err
-	}
-	if lifecycle != nil {
-		if err := lifecycle.running(ctx, attachment); err != nil {
-			_ = p.manager.Kill(key)
-			lifecycle.fail(ctx, "terminal_running_transition_failed")
-			return nil, false, err
-		}
-	}
-	if agentID == "" {
-		return attachment, reattached, nil
-	}
-
-	// Keep the post-attach state check as a fail-closed defense if lifecycle
-	// state is changed by a path that does not participate in the ordering
-	// boundary.
-	if err := authorizeAgentTerminalLaunch(
-		ctx,
-		p.state,
-		key.Workspace,
-		agentID,
-		p.agentIdentity,
-	); err != nil {
-		if killErr := p.manager.Kill(key); killErr != nil {
-			return nil, false, fmt.Errorf("%w; additionally failed to fence spawned PTY: %v", err, killErr)
-		}
-		return nil, false, err
-	}
-	return attachment, reattached, nil
-}
-
-func ensureWorkspacePTYRegistered(ctx context.Context, p *terminalWSParams, workspace string) {
-	if p == nil || workspace == "" {
-		return
-	}
-	ensurer, ok := p.manager.(workspacePTYEnsurer)
-	if !ok {
-		return
-	}
-	// Healing resolve: if the local path is missing from state.json, re-bind it
-	// from an existing on-disk checkout so the PTY can register (otherwise the
-	// attach fails with "workspace unavailable" → the UI shows "Disconnected").
-	if p.state == nil {
-		return
-	}
-	path := p.state.ResolveWorkspacePath(ctx, workspace)
-	if strings.TrimSpace(path) == "" {
-		return
-	}
-	if err := ensurer.EnsureRegistered(workspace, path); err != nil {
-		slog.Warn("terminal workspace pty self-heal failed",
-			"workspace", workspace, "path", path, "err", err)
-	}
-}
-
-func resolveTerminalLaunch(
-	ctx context.Context,
-	p *terminalWSParams,
-	workspace, session string,
-) (*webuterminal.LaunchSpec, string, error) {
-	if p.tabMetaStore == nil {
-		return nil, "", errTerminalLaunchMetaMissing
-	}
-	meta, err := p.tabMetaStore.Get(ctx, workspace, session)
-	if err != nil {
-		return nil, "", fmt.Errorf("load terminal metadata: %w", err)
-	}
-	if meta == nil {
-		return nil, "", errTerminalLaunchMetaMissing
-	}
-	if meta.Kind == "agent" {
-		if err := authorizeAgentTerminalLaunch(
-			ctx,
-			p.state,
-			workspace,
-			meta.AgentID,
-			p.agentIdentity,
-		); err != nil {
-			return nil, "", err
-		}
-		if meta.Launch == nil || (len(meta.Launch.Argv) == 0 && len(meta.Launch.Env) == 0) {
-			return nil, "", errAgentLaunchSpecMissing
-		}
-		if len(meta.Launch.Argv) == 0 {
-			return nil, "", errAgentLaunchSpecMissing
-		}
-		return meta.Launch, meta.AgentID, nil
-	}
-	if meta.Launch != nil && len(meta.Launch.Argv) > 0 {
-		return meta.Launch, "", nil
-	}
-	// Setup terminals are started by the backend before the browser attaches.
-	// They need persisted placement metadata but no respawn contract while the
-	// exact in-process PTY is alive. After a restart, the PTY is absent and the
-	// missing launch envelope correctly fails closed instead of replaying setup.
-	if p.manager != nil && p.manager.HasSession(webuterminal.SessionKey{
-		Workspace: workspace,
-		Name:      session,
-	}) {
-		return nil, "", nil
-	}
-	return nil, "", errTerminalLaunchMetaMissing
-}
-
-func authorizeAgentTerminalLaunch(
-	ctx context.Context,
-	state StateQueries,
-	workspace,
-	agentID string,
-	identities ...terminalAgentIdentity,
-) error {
-	if state == nil {
-		return errors.New("agent terminal state unavailable")
-	}
-	agentID = strings.TrimSpace(agentID)
-	if agentID == "" {
-		return errors.New("agent terminal metadata missing agent identity")
-	}
-	agent, err := loadTerminalAgent(ctx, workspace, agentID, identities...)
-	if err != nil {
-		return fmt.Errorf("load agent terminal state: %w", err)
-	}
-	role, err := loadAgentLaunchRole(ctx, state, workspace, agent.RoleName)
-	if err != nil {
-		return fmt.Errorf("load agent terminal role: %w", err)
-	}
-	if isBackgroundWorker(agent, resolveTerminalRoleKind(role, agent.RoleName)) {
-		return errBackgroundWorkerTerminal
-	}
-	if agent.DesiredState != agents.DesiredRunning {
-		return errAgentTerminalStopped
-	}
-	return nil
+	return result.Attachment, result.Reattached, nil
 }
 
 func initialTerminalSizeFromRequest(r *http.Request) (uint16, uint16) {
@@ -721,7 +569,9 @@ func mustUint16(n int) uint16 {
 }
 
 // attachmentWriter adapts Attachment to realtime.WSToPTY's io.Writer input.
-type attachmentWriter struct{ a webuterminal.Attachment }
+type attachmentWriter struct {
+	a interaction.TerminalAttachment
+}
 
 func (w attachmentWriter) Write(p []byte) (int, error) { return w.a.WriteInput(p) }
 
@@ -732,10 +582,10 @@ func (w attachmentWriter) Write(p []byte) (int, error) { return w.a.WriteInput(p
 // WebSocket close codes right after upgrade, so this in-band banner is the
 // reliable fallback for any client that reached this path anyway.
 func maybeEmitStaleRestartBanner(reqCtx context.Context, conn *websocket.Conn, p *terminalWSParams, workspace, session string) { //nolint:staticcheck // SA1019
-	if p.tabMetaStore == nil {
+	if p.terminals == nil {
 		return
 	}
-	meta, err := p.tabMetaStore.Get(reqCtx, workspace, session)
+	meta, err := p.terminals.GetTab(reqCtx, workspace, session)
 	if err != nil || meta == nil || !meta.CreatedAt.Before(p.serverStartedAt) {
 		return
 	}
@@ -746,14 +596,14 @@ func maybeEmitStaleRestartBanner(reqCtx context.Context, conn *websocket.Conn, p
 
 // injectTerminalContextBanner fetches project context from the loom server
 // and writes a formatted banner to the newly attached session.
-func injectTerminalContextBanner(att webuterminal.Attachment, loomServerURL string, wsName string) {
-	tc, err := webuterminal.FetchTerminalContext(loomServerURL)
+func injectTerminalContextBanner(att interaction.TerminalAttachment, loomServerURL string, wsName string) {
+	tc, err := FetchTerminalContext(loomServerURL)
 	if err != nil {
 		slog.Error("terminal context fetch failed, skipping banner", "err", err)
 		return
 	}
 
-	banner := webuterminal.FormatContextBanner(tc, wsName)
+	banner := FormatContextBanner(tc, wsName)
 	if _, writeErr := att.WriteInput([]byte(banner)); writeErr != nil {
 		slog.Warn("failed to write context banner to pty", "err", writeErr)
 	}

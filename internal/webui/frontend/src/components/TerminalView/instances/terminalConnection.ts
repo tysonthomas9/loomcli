@@ -7,8 +7,40 @@
  */
 
 import { get, wsUrl, getWsBaseUrl } from "@/hooks/api";
+import type { components } from "@/types/generated/openapi";
 
 import type { ConnectionState } from "./TerminalInstance";
+
+type TerminalReplayControl = components["schemas"]["TerminalReplayControl"];
+
+function decodeTerminalReplayControl(
+  raw: string,
+): TerminalReplayControl | null {
+  try {
+    const value: unknown = JSON.parse(raw);
+    if (value == null || typeof value !== "object" || Array.isArray(value)) {
+      return null;
+    }
+    const record = value as Record<string, unknown>;
+    if (
+      Object.keys(record).length !== 3 ||
+      record.type !== "terminal.replay.resize" ||
+      !Number.isSafeInteger(record.columns) ||
+      !Number.isSafeInteger(record.rows) ||
+      Number(record.columns) <= 0 ||
+      Number(record.rows) <= 0
+    ) {
+      return null;
+    }
+    return {
+      type: "terminal.replay.resize",
+      columns: Number(record.columns),
+      rows: Number(record.rows),
+    };
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Fetch a one-time terminal auth token from the server. The token endpoint
@@ -98,6 +130,7 @@ export function connectWebSocket(
   onBackendCrash?: (reason: string) => void,
   onSessionKilled?: () => void,
   initialSize?: { cols: number; rows: number },
+  onReplayResize?: (cols: number, rows: number) => void,
 ): () => void {
   setConnectionState("connecting");
 
@@ -212,7 +245,15 @@ export function connectWebSocket(
       ws.onmessage = (ev: MessageEvent) => {
         if (cancelled) return;
         if (typeof ev.data === "string") {
-          pendingWrites.push(ev.data);
+          const control = decodeTerminalReplayControl(ev.data);
+          if (control == null) {
+            ws.close(1002, "invalid terminal control frame");
+            return;
+          }
+          cancelPendingFlush();
+          flushPendingWrites();
+          onReplayResize?.(control.columns, control.rows);
+          return;
         } else if (ev.data instanceof ArrayBuffer) {
           pendingWrites.push(new Uint8Array(ev.data));
         } else if (ev.data instanceof Blob) {

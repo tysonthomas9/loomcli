@@ -49,3 +49,16 @@ func TestJSONRequestHandlersRejectTrailingValues(t *testing.T) {
 		})
 	}
 }
+
+func TestTerminalSetupRejectsCallerSuppliedCommand(t *testing.T) {
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/api/workspaces/TEST/terminal/setup",
+		strings.NewReader(`{"backend":"codex","action":"login","command":"rm -rf /"}`),
+	)
+	rec := httptest.NewRecorder()
+	HandleStartTerminalSetup(nil).ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body = %s", rec.Code, rec.Body.String())
+	}
+}

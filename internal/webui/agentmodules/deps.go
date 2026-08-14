@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/tysonthomas9/loomcli/internal/app/agentprovisioning"
+	"github.com/tysonthomas9/loomcli/internal/app/query/sessionarchive"
 	"github.com/tysonthomas9/loomcli/internal/app/webhookingestion"
 	"github.com/tysonthomas9/loomcli/internal/app/workflowbinding"
 	"github.com/tysonthomas9/loomcli/internal/app/workfloweventing"
@@ -22,7 +23,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/agentcoord"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/workflows"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
-	"github.com/tysonthomas9/loomcli/internal/webui/sessioncoord"
 )
 
 // ProjectionStore contains the read models needed to assemble
@@ -65,7 +65,7 @@ type sourceControlTaskOutcomes interface {
 type Deps struct {
 	Store                          ProjectionStore
 	InteractiveAgentRuntime        agentcoord.InteractiveAgentRuntime
-	AgentSessionTranscripts        sessioncoord.AgentSessionTranscriptService
+	AgentSessionTranscripts        sessionarchive.AgentSessionTranscriptService
 	WorkItems                      workitems.API
 	Workspace                      workspace.API
 	Hub                            *realtime.Hub

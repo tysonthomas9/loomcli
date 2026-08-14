@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
-	webuiterminal "github.com/tysonthomas9/loomcli/internal/webui/terminal"
 	"github.com/tysonthomas9/loomcli/internal/webui/workspacecoord"
 )
 
@@ -20,7 +20,7 @@ type BackendConfigResponse struct {
 
 // isValidBackend checks if the backend name is in the allowed list.
 func isValidBackend(name string) bool {
-	for _, b := range webuiterminal.ValidBackends {
+	for _, b := range interaction.ValidBackends {
 		if b == name {
 			return true
 		}
@@ -79,7 +79,7 @@ func HandleWorkspaceBackendPatch(svc workspacecoord.WorkspaceService) http.Handl
 		if !isValidBackend(req.Backend) {
 			handler.WriteJSON(w, http.StatusBadRequest, WorkspaceResponse{
 				Success: false,
-				Error:   fmt.Sprintf("invalid backend %q; valid options: %v", req.Backend, webuiterminal.ValidBackends),
+				Error:   fmt.Sprintf("invalid backend %q; valid options: %v", req.Backend, interaction.ValidBackends),
 			})
 			return
 		}

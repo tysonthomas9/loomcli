@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/tysonthomas9/loomcli/internal/app/query/runcapture"
+	"github.com/tysonthomas9/loomcli/internal/app/query/sessionarchive"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	artifactsmodule "github.com/tysonthomas9/loomcli/internal/modules/artifacts"
@@ -15,7 +16,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/apperrors"
-	"github.com/tysonthomas9/loomcli/internal/webui/sessioncoord"
 )
 
 func TestFlueTaskRunIsOwnedByTaskSessionsNotAgentHistory(t *testing.T) {
@@ -56,7 +56,12 @@ func TestFlueTaskRunIsOwnedByTaskSessionsNotAgentHistory(t *testing.T) {
 		t.Fatalf("agent history sessions = %+v, want none", history.Sessions)
 	}
 
-	taskSessions, err := sessioncoord.NewSessionService(st, nil, nil).ListTaskSessions(
+	taskSessions, err := sessionarchive.NewSessionService(
+		agentTranscriptExecutionQueries{store: st.TaskRuns()},
+		agentTranscriptInteractionQueries{store: st.AgentSessions()},
+		nil,
+		nil,
+	).ListTaskSessions(
 		ctx,
 		agentRecordTestWS,
 		"TASK-SHARED-1",
@@ -147,9 +152,12 @@ func TestAgentSessionTranscriptRouteReturnsCanonicalEntriesAndEnforcesOwner(t *t
 	if err != nil {
 		t.Fatalf("compose run captures: %v", err)
 	}
-	transcripts, ok := sessioncoord.NewSessionService(
-		st, nil, captures,
-	).(sessioncoord.AgentSessionTranscriptService)
+	transcripts, ok := sessionarchive.NewSessionService(
+		agentTranscriptExecutionQueries{},
+		agentTranscriptInteractionQueries{store: st.AgentSessions()},
+		nil,
+		captures,
+	).(sessionarchive.AgentSessionTranscriptService)
 	if !ok {
 		t.Fatal("session service does not implement AgentSessionTranscriptService")
 	}
@@ -318,14 +326,37 @@ func TestAgentSessionTranscriptRoutePreservesUnavailable(t *testing.T) {
 
 type agentSessionTranscriptErrorService struct{ err error }
 
-type agentTranscriptExecutionQueries struct{}
+type agentTranscriptExecutionQueries struct{ store store.TaskRunStore }
 
-func (agentTranscriptExecutionQueries) GetTaskRun(context.Context, string, string) (*execution.TaskRun, error) {
-	return nil, execution.ErrNotFound
+func (queries agentTranscriptExecutionQueries) GetTaskRun(ctx context.Context, workspace, taskRunID string) (*execution.TaskRun, error) {
+	if queries.store == nil {
+		return nil, execution.ErrNotFound
+	}
+	value, err := queries.store.Get(ctx, workspace, taskRunID)
+	if errors.Is(err, domain.ErrNotFound) {
+		return nil, execution.ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return agentTranscriptExecutionSnapshot(value), nil
 }
 
-func (agentTranscriptExecutionQueries) ListTaskRuns(context.Context, execution.TaskRunArchiveQuery) ([]*execution.TaskRun, error) {
-	return nil, nil
+func (queries agentTranscriptExecutionQueries) ListTaskRuns(ctx context.Context, query execution.TaskRunArchiveQuery) ([]*execution.TaskRun, error) {
+	if queries.store == nil {
+		return []*execution.TaskRun{}, nil
+	}
+	values, err := queries.store.List(ctx, query.WorkspaceKey, store.TaskRunFilter{
+		TaskID: query.WorkItemID, Limit: query.Limit,
+	})
+	if err != nil {
+		return nil, err
+	}
+	result := make([]*execution.TaskRun, 0, len(values))
+	for _, value := range values {
+		result = append(result, agentTranscriptExecutionSnapshot(value))
+	}
+	return result, nil
 }
 
 func (agentTranscriptExecutionQueries) ListActiveTaskRuns(context.Context, execution.ActiveTaskRunQuery) ([]*execution.TaskRun, error) {
@@ -334,6 +365,25 @@ func (agentTranscriptExecutionQueries) ListActiveTaskRuns(context.Context, execu
 
 func (agentTranscriptExecutionQueries) ListTaskRunEvents(context.Context, execution.TaskRunEventQuery) ([]*execution.TaskRunEvent, error) {
 	return nil, nil
+}
+
+func agentTranscriptExecutionSnapshot(value *domain.TaskRun) *execution.TaskRun {
+	if value == nil {
+		return nil
+	}
+	status := execution.Status(value.Status)
+	if value.Status == domain.TaskRunCompleted {
+		status = execution.StatusSucceeded
+	}
+	return &execution.TaskRun{
+		WorkspaceKey: value.WorkspaceKey, TaskRunID: value.TaskRunID,
+		WorkItemID: value.TaskID, WorkerProfileID: value.WorkerProfileID,
+		Runner: value.Runner, RunnerKind: value.RunnerKind, Status: status,
+		RuntimeMetadata: value.RuntimeMetadata, Input: value.Input,
+		ExitCode: value.ExitCode, LogsRef: value.LogsRef,
+		StartedAt: &value.StartedAt, FinishedAt: value.FinishedAt,
+		CreatedAt: value.CreatedAt, UpdatedAt: value.UpdatedAt,
+	}
 }
 
 type agentTranscriptInteractionQueries struct{ store store.AgentSessionStore }

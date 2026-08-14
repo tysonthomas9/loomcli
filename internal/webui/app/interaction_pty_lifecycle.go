@@ -6,14 +6,13 @@ import (
 	"strings"
 
 	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
-	"github.com/tysonthomas9/loomcli/internal/webui/terminal"
 )
 
 // InteractionPTYTabStore is the server-owned tab identity view needed to
 // converge a process-owned PTY termination into the canonical Interaction
 // lifecycle.
 type InteractionPTYTabStore interface {
-	Get(context.Context, string, string) (*terminal.TabMetadata, error)
+	Get(context.Context, string, string) (*interaction.TabMetadata, error)
 }
 
 // InteractionForceInterrupter returns the exact interrupt port published by an
@@ -33,13 +32,13 @@ func InteractionForceInterrupter(capability interface {
 func NewInteractionPTYBeforeKill(
 	tabs InteractionPTYTabStore,
 	interrupter interaction.ForceInterrupter,
-) terminal.BeforeKillFunc {
+) interaction.TerminalLifecycleHook {
 	if tabs == nil {
 		return nil
 	}
 	return func(
 		ctx context.Context,
-		key terminal.SessionKey,
+		key interaction.TerminalKey,
 		reason string,
 	) error {
 		return interruptInteractionPTYBeforeKill(ctx, key, reason, tabs, interrupter)
@@ -48,12 +47,12 @@ func NewInteractionPTYBeforeKill(
 
 func interruptInteractionPTYBeforeKill(
 	ctx context.Context,
-	key terminal.SessionKey,
+	key interaction.TerminalKey,
 	reason string,
 	tabs InteractionPTYTabStore,
 	interrupter interaction.ForceInterrupter,
 ) error {
-	meta, err := tabs.Get(ctx, key.Workspace, key.Name)
+	meta, err := tabs.Get(ctx, key.WorkspaceKey, key.TerminalID)
 	if err != nil {
 		return fmt.Errorf("load terminal lifecycle identity: %w", err)
 	}
@@ -78,14 +77,14 @@ func interruptInteractionPTYBeforeKill(
 		return interaction.ErrUnavailable
 	}
 	_, err = interrupter.ForceInterrupt(ctx, interaction.ForceInterruptCommand{
-		WorkspaceKey:              key.Workspace,
+		WorkspaceKey:              key.WorkspaceKey,
 		SessionID:                 sessionID,
 		AgentID:                   agentID,
 		TerminalID:                terminalID,
 		ExpectedLeaseID:           expectedLeaseID,
 		ExpectedLeaseFencingToken: expectedLeaseFence,
 		StreamRef:                 "terminal:" + key.String(),
-		TerminalTab:               key.Name,
+		TerminalTab:               key.TerminalID,
 		Reason:                    "server PTY " + strings.TrimSpace(reason),
 	})
 	if err != nil {

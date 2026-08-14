@@ -5,12 +5,36 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/tysonthomas9/loomcli/internal/app/query/sessionarchive"
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
 	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
 	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 	"github.com/tysonthomas9/loomcli/internal/modules/workspace"
 	"github.com/tysonthomas9/loomcli/internal/webui/apperrors"
 )
+
+// HandleSessionArchiveError maps the immutable session Read Projection's
+// transport-neutral failures at the HTTP delivery seam.
+func HandleSessionArchiveError(w http.ResponseWriter, err error) {
+	status := 0
+	switch {
+	case errors.Is(err, sessionarchive.ErrInvalid):
+		status = http.StatusBadRequest
+	case errors.Is(err, sessionarchive.ErrNotFound):
+		status = http.StatusNotFound
+	case errors.Is(err, sessionarchive.ErrUnavailable):
+		status = http.StatusServiceUnavailable
+	case errors.Is(err, sessionarchive.ErrInvalidPersistedState):
+		status = http.StatusInternalServerError
+	}
+	if status == 0 {
+		HandleServiceError(w, err)
+		return
+	}
+	slog.Error("session archive error", "status", status, "err", err)
+	WriteJSON(w, status, map[string]string{"error": sessionarchive.PublicErrorMessage(err)})
+}
 
 // kindToStatus maps each apperrors.ErrorKind to its HTTP status code.
 // This must stay in sync with service/errors.go (task .9).
@@ -147,6 +171,40 @@ func HandleSourceControlError(w http.ResponseWriter, err error) {
 	slog.Error("source control error", "status", status, "err", err)
 	WriteJSON(w, status, map[string]string{
 		"error": sourcecontrol.PublicErrorMessage(err),
+	})
+}
+
+// HandleTerminalError maps Interaction's terminal-specific failure vocabulary
+// at the HTTP delivery seam. It falls back to the legacy service mapper for
+// mixed handlers that can still fail while resolving WebUI-only agent state.
+func HandleTerminalError(w http.ResponseWriter, err error) {
+	status := 0
+	switch {
+	case errors.Is(err, interaction.ErrInvalid):
+		status = http.StatusBadRequest
+	case errors.Is(err, interaction.ErrNotFound):
+		status = http.StatusNotFound
+	case errors.Is(err, interaction.ErrNotOwner):
+		status = http.StatusForbidden
+	case errors.Is(err, interaction.ErrConflict),
+		errors.Is(err, interaction.ErrInvalidTransition),
+		errors.Is(err, interaction.ErrTerminalClosed):
+		status = http.StatusConflict
+	case errors.Is(err, interaction.ErrTerminalCapacity):
+		status = http.StatusTooManyRequests
+	case errors.Is(err, interaction.ErrUnavailable),
+		errors.Is(err, interaction.ErrTerminalPlacement):
+		status = http.StatusServiceUnavailable
+	case errors.Is(err, interaction.ErrInvalidPersistedState):
+		status = http.StatusInternalServerError
+	}
+	if status == 0 {
+		HandleServiceError(w, err)
+		return
+	}
+	slog.Error("interaction terminal error", "status", status, "err", err)
+	WriteJSON(w, status, map[string]string{
+		"error": interaction.PublicTerminalErrorMessage(err),
 	})
 }
 

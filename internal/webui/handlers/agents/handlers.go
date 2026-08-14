@@ -5,8 +5,8 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	agentmodule "github.com/tysonthomas9/loomcli/internal/modules/agents"
 	loomapi "github.com/tysonthomas9/loomcli/internal/platform/loomapi/gen"
-	"github.com/tysonthomas9/loomcli/internal/webui/agentcoord"
 	"github.com/tysonthomas9/loomcli/internal/webui/apperrors"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
@@ -56,7 +56,7 @@ func writeAgentInternalError(w http.ResponseWriter, message string, cause error)
 }
 
 func validStoredAgentName(value string) bool {
-	return value != "" && agentcoord.ValidStoredAgentName.MatchString(value)
+	return agentmodule.ValidStoredAgentName(value)
 }
 
 type lifecycleRequest struct{}

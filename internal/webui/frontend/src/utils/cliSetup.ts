@@ -1,4 +1,8 @@
 import type { BackendInfo } from "@/utils/workspace";
+import type { components } from "@/types/generated/openapi";
+
+type TerminalSetupRequest = components["schemas"]["TerminalSetupRequest"];
+export type TerminalSetupBackend = TerminalSetupRequest["backend"];
 
 export type AIBackendSetupAction =
   | "install"
@@ -9,11 +13,35 @@ export type AIBackendSetupAction =
 
 export interface CliSetupRequest {
   id: string;
-  backendName: string;
+  backendName: TerminalSetupBackend;
   displayName: string;
   provider: string;
   brandColor: string;
   action: AIBackendSetupAction;
+}
+
+const TERMINAL_SETUP_BACKENDS = new Set<TerminalSetupBackend>([
+  "claude",
+  "codex",
+  "gemini",
+  "opencode",
+  "cursor",
+]);
+
+const CLI_SETUP_ACTIONS = new Set<AIBackendSetupAction>([
+  "install",
+  "login",
+  "configure",
+  "set-default",
+  "test",
+]);
+
+function isTerminalSetupBackend(value: string): value is TerminalSetupBackend {
+  return TERMINAL_SETUP_BACKENDS.has(value as TerminalSetupBackend);
+}
+
+function isAIBackendSetupAction(value: string): value is AIBackendSetupAction {
+  return CLI_SETUP_ACTIONS.has(value as AIBackendSetupAction);
 }
 
 export interface CliSetupInstructions {
@@ -113,7 +141,9 @@ function parseRequest(raw: string | null): CliSetupRequest | null {
       typeof parsed.displayName !== "string" ||
       typeof parsed.provider !== "string" ||
       typeof parsed.brandColor !== "string" ||
-      typeof parsed.action !== "string"
+      typeof parsed.action !== "string" ||
+      !isTerminalSetupBackend(parsed.backendName) ||
+      !isAIBackendSetupAction(parsed.action)
     ) {
       return null;
     }
@@ -123,7 +153,7 @@ function parseRequest(raw: string | null): CliSetupRequest | null {
       displayName: parsed.displayName,
       provider: parsed.provider,
       brandColor: parsed.brandColor,
-      action: parsed.action as AIBackendSetupAction,
+      action: parsed.action,
     };
   } catch {
     return null;
@@ -154,6 +184,9 @@ export function requestCliSetup(
   backend: BackendInfo,
   action: AIBackendSetupAction,
 ): CliSetupRequest {
+  if (!isTerminalSetupBackend(backend.name)) {
+    throw new Error(`Unsupported terminal setup backend: ${backend.name}`);
+  }
   const request: CliSetupRequest = {
     id: makeRequestId(),
     backendName: backend.name,

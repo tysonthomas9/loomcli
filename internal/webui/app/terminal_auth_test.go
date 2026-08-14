@@ -11,10 +11,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/infra/pty"
+	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
 	hterminal "github.com/tysonthomas9/loomcli/internal/webui/handlers/terminal"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
-	"github.com/tysonthomas9/loomcli/internal/webui/terminal"
 )
 
 // newTestTerminalAuth creates a TerminalAuth for testing via the public constructor.
@@ -445,7 +446,7 @@ func TestHandleTerminalToken_ValidSession(t *testing.T) {
 	ta := newTestTerminalAuth()
 	defer ta.Stop()
 
-	handler := hterminal.HandleTerminalToken(terminal.NewTerminalService(ta, nil, nil, nil, nil, time.Now()))
+	handler := hterminal.HandleTerminalToken(ta)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/terminal/token?session=my-session", nil)
 	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-workspace"))
@@ -487,7 +488,7 @@ func TestHandleTerminalToken_EmptySession(t *testing.T) {
 	ta := newTestTerminalAuth()
 	defer ta.Stop()
 
-	handler := hterminal.HandleTerminalToken(terminal.NewTerminalService(ta, nil, nil, nil, nil, time.Now()))
+	handler := hterminal.HandleTerminalToken(ta)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/terminal/token", nil)
 	w := httptest.NewRecorder()
@@ -514,7 +515,7 @@ func TestHandleTerminalToken_InvalidSessionChars(t *testing.T) {
 	ta := newTestTerminalAuth()
 	defer ta.Stop()
 
-	handler := hterminal.HandleTerminalToken(terminal.NewTerminalService(ta, nil, nil, nil, nil, time.Now()))
+	handler := hterminal.HandleTerminalToken(ta)
 
 	tests := []struct {
 		name    string
@@ -554,10 +555,10 @@ func TestHandleTerminalWS_AuthNoToken(t *testing.T) {
 	// However, looking at the code: nil manager check -> session check -> auth check.
 	// With nil manager, we get 503 before auth is checked.
 	// We need to provide a real manager or restructure. Let's try with a real manager.
-	manager := terminal.NewPTYManager("", 0, t.TempDir())
-	defer manager.Shutdown()
+	manager := pty.NewRuntime("", 0)
+	defer manager.Close()
 
-	handler := hterminal.HandleTerminalWS(manager, ta, nil, "", nil, nil, nil, time.Time{})
+	handler := hterminal.HandleTerminalWS(interaction.NewTerminalTabs(nil, manager, time.Now(), interaction.TerminalDependencies{}), ta, nil, "", nil, nil, time.Time{}, hterminal.InteractionDependencies{})
 
 	// Request with valid session but no token
 	req := httptest.NewRequest(http.MethodGet, "/api/terminal/ws?session=auth-test", nil)
@@ -588,10 +589,10 @@ func TestHandleTerminalWS_AuthInvalidToken(t *testing.T) {
 	ta := newTestTerminalAuth()
 	defer ta.Stop()
 
-	manager := terminal.NewPTYManager("", 0, t.TempDir())
-	defer manager.Shutdown()
+	manager := pty.NewRuntime("", 0)
+	defer manager.Close()
 
-	handler := hterminal.HandleTerminalWS(manager, ta, nil, "", nil, nil, nil, time.Time{})
+	handler := hterminal.HandleTerminalWS(interaction.NewTerminalTabs(nil, manager, time.Now(), interaction.TerminalDependencies{}), ta, nil, "", nil, nil, time.Time{}, hterminal.InteractionDependencies{})
 
 	req := httptest.NewRequest(http.MethodGet, "/api/terminal/ws?session=auth-test&token=bogus.token", nil)
 	w := httptest.NewRecorder()
@@ -610,10 +611,10 @@ func TestHandleTerminalWS_AuthValidToken(t *testing.T) {
 	ta := newTestTerminalAuth()
 	defer ta.Stop()
 
-	manager := terminal.NewPTYManager("", 0, t.TempDir())
-	defer manager.Shutdown()
+	manager := pty.NewRuntime("", 0)
+	defer manager.Close()
 
-	handler := hterminal.HandleTerminalWS(manager, ta, nil, "", nil, nil, nil, time.Time{})
+	handler := hterminal.HandleTerminalWS(interaction.NewTerminalTabs(nil, manager, time.Now(), interaction.TerminalDependencies{}), ta, nil, "", nil, nil, time.Time{}, hterminal.InteractionDependencies{})
 
 	session := "auth-valid"
 	token, err := ta.GenerateToken(session, "test-workspace", "")
@@ -648,11 +649,11 @@ func TestHandleTerminalWS_AuthValidToken(t *testing.T) {
 // TestHandleTerminalWS_AuthNilPassesThrough tests that when auth is nil
 // (not configured), the handler does not require a token.
 func TestHandleTerminalWS_AuthNilPassesThrough(t *testing.T) {
-	manager := terminal.NewPTYManager("", 0, t.TempDir())
-	defer manager.Shutdown()
+	manager := pty.NewRuntime("", 0)
+	defer manager.Close()
 
 	// auth=nil means no token auth required
-	handler := hterminal.HandleTerminalWS(manager, nil, nil, "", nil, nil, nil, time.Time{})
+	handler := hterminal.HandleTerminalWS(interaction.NewTerminalTabs(nil, manager, time.Now(), interaction.TerminalDependencies{}), nil, nil, "", nil, nil, time.Time{}, hterminal.InteractionDependencies{})
 
 	req := httptest.NewRequest(http.MethodGet, "/api/terminal/ws?session=no-auth", nil)
 	w := httptest.NewRecorder()
@@ -671,10 +672,10 @@ func TestHandleTerminalWS_AuthReusedTokenFails(t *testing.T) {
 	ta := newTestTerminalAuth()
 	defer ta.Stop()
 
-	manager := terminal.NewPTYManager("", 0, t.TempDir())
-	defer manager.Shutdown()
+	manager := pty.NewRuntime("", 0)
+	defer manager.Close()
 
-	handler := hterminal.HandleTerminalWS(manager, ta, nil, "", nil, nil, nil, time.Time{})
+	handler := hterminal.HandleTerminalWS(interaction.NewTerminalTabs(nil, manager, time.Now(), interaction.TerminalDependencies{}), ta, nil, "", nil, nil, time.Time{}, hterminal.InteractionDependencies{})
 
 	session := "reuse-ws"
 	token, err := ta.GenerateToken(session, "test-workspace", "")
@@ -744,7 +745,7 @@ func TestHandleTerminalToken_ValidSessionNames(t *testing.T) {
 	ta := newTestTerminalAuth()
 	defer ta.Stop()
 
-	handler := hterminal.HandleTerminalToken(terminal.NewTerminalService(ta, nil, nil, nil, nil, time.Now()))
+	handler := hterminal.HandleTerminalToken(ta)
 
 	tests := []struct {
 		name    string
@@ -831,7 +832,7 @@ func TestHandleTerminalToken_WithUserIdentity(t *testing.T) {
 	ta := newTestTerminalAuth()
 	defer ta.Stop()
 
-	handler := hterminal.HandleTerminalToken(terminal.NewTerminalService(ta, nil, nil, nil, nil, time.Now()))
+	handler := hterminal.HandleTerminalToken(ta)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/terminal/token?session=oidc-test", nil)
 	identity := middleware.UserIdentity{UserID: "test-user", Email: "test@example.com"}
@@ -878,7 +879,7 @@ func TestHandleTerminalToken_NoUserIdentity(t *testing.T) {
 	ta := newTestTerminalAuth()
 	defer ta.Stop()
 
-	handler := hterminal.HandleTerminalToken(terminal.NewTerminalService(ta, nil, nil, nil, nil, time.Now()))
+	handler := hterminal.HandleTerminalToken(ta)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/terminal/token?session=open-test", nil)
 	w := httptest.NewRecorder()

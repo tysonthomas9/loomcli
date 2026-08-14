@@ -4,10 +4,11 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/tysonthomas9/loomcli/internal/app/query/sessionarchive"
 	"github.com/tysonthomas9/loomcli/internal/webui/agentmodules"
 	githandlers "github.com/tysonthomas9/loomcli/internal/webui/handlers/git"
+	hterminal "github.com/tysonthomas9/loomcli/internal/webui/handlers/terminal"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
-	"github.com/tysonthomas9/loomcli/internal/webui/sessioncoord"
 	"github.com/tysonthomas9/loomcli/internal/webui/storeadapter"
 )
 
@@ -60,30 +61,23 @@ func (app *Server) buildModules() {
 // dependencies are available.
 func (app *Server) buildTerminalModules() {
 	if app.termSvc != nil {
-		var workspacePath func(context.Context, string) string
-		if app.config.Store != nil {
-			workspacePath = func(ctx context.Context, workspaceKey string) string {
-				return storeadapter.ResolveOrHealWorkspacePath(ctx, app.config.Store, workspaceKey)
-			}
+		var presentationState hterminal.PresentationState
+		if app.tabMetaStore != nil {
+			presentationState = hterminal.NewPresentationState(app.tabMetaStore.RedisClient())
 		}
 		app.wsModules = append(app.wsModules,
 			NewTerminalModules(
-				app.config.AgentsCapability,
 				app.config.InteractionCapability,
 				TerminalModuleDeps{
-					TermSvc:         app.termSvc,
-					AgentSvc:        app.agentSvc,
-					PTYMgr:          app.ptyMgr,
-					AgentTmuxMgr:    app.agentTmuxMgr,
-					TermAuth:        app.termAuth,
-					CORSOrigins:     app.corsConfig.AllowedOrigins,
-					SelfURL:         fmt.Sprintf("http://localhost:%d", app.actualPort),
-					Workspace:       app.workspaceCatalog,
-					Orchestration:   app.config.Store,
-					WorkspacePath:   workspacePath,
-					TabMetaStore:    app.tabMetaStore,
-					Hub:             app.hub,
-					ServerStartedAt: app.startedAt,
+					TermSvc:           app.termSvc,
+					AgentSvc:          app.agentSvc,
+					TermAuth:          app.termAuth,
+					CORSOrigins:       app.corsConfig.AllowedOrigins,
+					SelfURL:           fmt.Sprintf("http://localhost:%d", app.actualPort),
+					Workspace:         app.workspaceCatalog,
+					PresentationState: presentationState,
+					Hub:               app.hub,
+					ServerStartedAt:   app.startedAt,
 				},
 			)...)
 	}
@@ -158,7 +152,7 @@ func (app *Server) unifiedAgentModuleDeps() UnifiedAgentModuleDeps {
 			},
 		)
 	}
-	if transcripts, ok := app.sessSvc.(sessioncoord.AgentSessionTranscriptService); ok {
+	if transcripts, ok := app.sessSvc.(sessionarchive.AgentSessionTranscriptService); ok {
 		deps.AgentSessionTranscripts = transcripts
 	}
 	if capability := app.config.ArtifactsCapability; capability != nil {

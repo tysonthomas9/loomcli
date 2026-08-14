@@ -1683,32 +1683,6 @@ paths:
                         format: int64
 
   # ── Terminal ────────────────────────────────────────────────────────────
-  /api/workspaces/{ws}/terminal/sessions:
-    get:
-      operationId: listTerminalSessions
-      tags: [terminal]
-      summary: List active terminal sessions
-      parameters:
-        - $ref: "#/components/parameters/WorkspaceId"
-      responses:
-        "200":
-          description: Session list
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [success]
-                properties:
-                  success:
-                    type: boolean
-                  data:
-                    type: object
-                    properties:
-                      sessions:
-                        type: array
-                        items:
-                          $ref: "#/components/schemas/TerminalSessionInfo"
-
   /api/workspaces/{ws}/terminal/token:
     get:
       operationId: getTerminalToken
@@ -1758,219 +1732,6 @@ paths:
           description: Switching Protocols (WebSocket upgrade)
         "401":
           description: Invalid or expired token
-
-  /api/workspaces/{ws}/terminal/session-status:
-    get:
-      operationId: getTerminalSessionStatus
-      tags: [terminal]
-      summary: Check if a terminal session is alive
-      parameters:
-        - $ref: "#/components/parameters/WorkspaceId"
-        - name: session
-          in: query
-          schema:
-            type: string
-      responses:
-        "200":
-          description: Session status
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  alive:
-                    type: boolean
-                  exit_reason:
-                    type: string
-
-  /api/workspaces/{ws}/terminal/spawn:
-    post:
-      operationId: spawnTerminalSession
-      tags: [terminal]
-      summary: Spawn a new terminal session
-      parameters:
-        - $ref: "#/components/parameters/WorkspaceId"
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/TerminalSpawnRequest"
-      responses:
-        "200":
-          description: Session spawned
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [success]
-                properties:
-                  success:
-                    type: boolean
-                  data:
-                    $ref: "#/components/schemas/TerminalSpawnData"
-
-  /api/workspaces/{ws}/terminal/restart:
-    post:
-      operationId: restartTerminal
-      tags: [terminal]
-      summary: Restart the terminal backend process
-      parameters:
-        - $ref: "#/components/parameters/WorkspaceId"
-      responses:
-        "200":
-          description: Terminal restarted
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/MessageResponse"
-
-  /api/workspaces/{ws}/terminal/kill:
-    post:
-      operationId: killTerminal
-      tags: [terminal]
-      summary: Kill the terminal backend process
-      parameters:
-        - $ref: "#/components/parameters/WorkspaceId"
-      responses:
-        "200":
-          description: Terminal killed
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/MessageResponse"
-
-  /api/workspaces/{ws}/terminal/sessions/{name}/seed:
-    post:
-      operationId: seedTerminalSession
-      tags: [terminal]
-      summary: Seed a terminal session with issue context
-      parameters:
-        - $ref: "#/components/parameters/WorkspaceId"
-        - name: name
-          in: path
-          required: true
-          schema:
-            type: string
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/SeedRequest"
-      responses:
-        "200":
-          description: Session seeded
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/MessageResponse"
-
-  /api/workspaces/{ws}/terminal/sessions/{session}/kill:
-    post:
-      operationId: scheduleSessionKill
-      tags: [terminal]
-      summary: Schedule a terminal session for graceful termination
-      parameters:
-        - $ref: "#/components/parameters/WorkspaceId"
-        - name: session
-          in: path
-          required: true
-          schema:
-            type: string
-      responses:
-        "200":
-          description: Kill scheduled
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/MessageResponse"
-
-  /api/workspaces/{ws}/terminal/sessions/close-all:
-    post:
-      operationId: closeAllTerminalSessions
-      tags: [terminal]
-      summary: Close all terminal sessions
-      parameters:
-        - $ref: "#/components/parameters/WorkspaceId"
-      responses:
-        "200":
-          description: All sessions closed
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/MessageResponse"
-
-  /api/workspaces/{ws}/terminal/sessions/{session}/scrollback:
-    get:
-      operationId: getScrollback
-      tags: [terminal]
-      summary: Get scrollback buffer for a terminal session
-      parameters:
-        - $ref: "#/components/parameters/WorkspaceId"
-        - name: session
-          in: path
-          required: true
-          schema:
-            type: string
-      responses:
-        "200":
-          description: Scrollback content
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [success]
-                properties:
-                  success:
-                    type: boolean
-                  data:
-                    type: object
-                    properties:
-                      content:
-                        type: string
-                      lines:
-                        type: integer
-
-  /api/workspaces/{ws}/terminal/sessions/{session}/export:
-    get:
-      operationId: exportSession
-      tags: [terminal]
-      summary: Export terminal session content
-      parameters:
-        - $ref: "#/components/parameters/WorkspaceId"
-        - name: session
-          in: path
-          required: true
-          schema:
-            type: string
-      responses:
-        "200":
-          description: Session export
-          content:
-            text/plain:
-              schema:
-                type: string
-
-  /api/workspaces/{ws}/terminal/sessions/{session}/scrollback-info:
-    get:
-      operationId: getScrollbackInfo
-      tags: [terminal]
-      summary: Get scrollback metadata (line count, size)
-      parameters:
-        - $ref: "#/components/parameters/WorkspaceId"
-        - name: session
-          in: path
-          required: true
-          schema:
-            type: string
-      responses:
-        "200":
-          description: Scrollback info
-          content:
-            application/json:
-              schema:
-                type: object
 
   # ── Terminal Tabs ───────────────────────────────────────────────────────
   /api/workspaces/{ws}/terminal/tabs:
@@ -2051,6 +1812,8 @@ paths:
                 properties:
                   success:
                     type: boolean
+                  data:
+                    $ref: "#/components/schemas/TabMetadata"
     patch:
       operationId: patchTerminalTab
       tags: [terminal-tabs]
@@ -2079,6 +1842,8 @@ paths:
                 properties:
                   success:
                     type: boolean
+                  data:
+                    $ref: "#/components/schemas/TabMetadata"
     delete:
       operationId: deleteTerminalTab
       tags: [terminal-tabs]
@@ -2120,6 +1885,16 @@ paths:
             application/json:
               schema:
                 type: object
+                required: [success, data]
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    additionalProperties:
+                      type: array
+                      items:
+                        type: string
 
   # ── Terminal State ──────────────────────────────────────────────────────
   /api/workspaces/{ws}/terminal/state:
@@ -2184,41 +1959,20 @@ paths:
         content:
           application/json:
             schema:
-              type: object
-              required: [backend, action]
-              properties:
-                backend:
-                  type: string
-                  description: AI backend name (claude, codex, gemini, opencode, cursor)
-                action:
-                  type: string
-                  enum: [install, login, configure, test]
+              $ref: "#/components/schemas/TerminalSetupRequest"
       responses:
-        "201":
-          description: Setup terminal created or reused
+        "200":
+          description: Setup terminal started or reused
           content:
             application/json:
               schema:
                 type: object
+                required: [success, data]
                 properties:
-                  session_name:
-                    type: string
-                  label:
-                    type: string
-                  backend:
-                    type: string
-                  action:
-                    type: string
-                  command:
-                    type: string
-                  title:
-                    type: string
-                  message:
-                    type: string
-                  manual:
+                  success:
                     type: boolean
-                  created:
-                    type: boolean
+                  data:
+                    $ref: "#/components/schemas/TerminalSetupResult"
         "400":
           description: Invalid backend or action
         "503":
@@ -2299,6 +2053,19 @@ paths:
             application/json:
               schema:
                 type: object
+                required: [success, data]
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    required: [agent, mode]
+                    properties:
+                      agent:
+                        type: string
+                      mode:
+                        type: string
+                        enum: [tmux, archive]
 
   /api/workspaces/{ws}/agents/{name}/terminal/token:
     get:
@@ -2315,10 +2082,48 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [token]
+                required: [success, data]
                 properties:
-                  token:
-                    type: string
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    required: [token]
+                    properties:
+                      token:
+                        type: string
+
+  /api/workspaces/{ws}/agents/{name}/terminal/session:
+    post:
+      operationId: ensureAgentTerminalSession
+      tags: [agent-terminal]
+      summary: Resolve or create the canonical interactive terminal session for an agent
+      description: |
+        Resolves Agent and Role policy through Interaction and returns only the
+        public tab projection. Launch arguments, environment, lifecycle IDs,
+        leases, and fencing state remain private.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/AgentName"
+      responses:
+        "200":
+          description: Canonical agent terminal session
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    $ref: "#/components/schemas/TabMetadata"
+        "400":
+          description: Invalid agent identity
+        "404":
+          description: Agent or role not found
+        "503":
+          description: Interaction terminal runtime unavailable
 
   /api/workspaces/{ws}/agents/{name}/terminal/ws:
     get:
@@ -4950,6 +4755,29 @@ components:
         label:
           type: string
 
+    TerminalReplayControl:
+      type: object
+      additionalProperties: false
+      description: |
+        Server-to-client terminal replay control frame. WebSocket output bytes
+        remain binary; text frames use this schema so historical geometry can
+        be applied in order without being echoed back to the live PTY.
+      required: [type, columns, rows]
+      properties:
+        type:
+          type: string
+          const: terminal.replay.resize
+        columns:
+          type: integer
+          format: int32
+          minimum: 1
+          maximum: 500
+        rows:
+          type: integer
+          format: int32
+          minimum: 1
+          maximum: 200
+
     # ── Response Envelopes ──────────────────────────────────────────────
     ErrorResponse:
       type: object
@@ -6135,18 +5963,6 @@ components:
       properties:
         issue_id:
           type: string
-        kind:
-          type: string
-          description: Server-owned terminal kind. Agent tabs use `agent`.
-        agent_id:
-          type: string
-        role:
-          type: string
-        backend:
-          type: string
-          description: Validated backend intent used to build the persisted launch envelope.
-        writable:
-          type: boolean
         depends_on_id:
           type: string
         type:
@@ -7568,75 +7384,27 @@ components:
           description: Sanitized failure class when scrollback capture failed.
 
     # ── Terminal Schemas ────────────────────────────────────────────────
-    TerminalSessionInfo:
-      type: object
-      required: [name, label, created]
-      properties:
-        name:
-          type: string
-        label:
-          type: string
-        created:
-          type: integer
-          format: int64
-          description: Unix timestamp
-        issue_id:
-          type: string
-
-    TerminalSpawnRequest:
-      type: object
-      required: [session_name, backend]
-      properties:
-        session_name:
-          type: string
-        backend:
-          type: string
-
-    TerminalSpawnData:
-      type: object
-      required: [session_name, backend, command, created]
-      properties:
-        session_name:
-          type: string
-        backend:
-          type: string
-        command:
-          type: string
-        created:
-          type: boolean
-
-    SeedRequest:
-      type: object
-      required: [issue_id, title]
-      properties:
-        issue_id:
-          type: string
-        title:
-          type: string
-        description:
-          type: string
-        design:
-          type: string
-        blockers:
-          type: array
-          items:
-            type: object
-            required: [id, title]
-            properties:
-              id:
-                type: string
-              title:
-                type: string
-
     TabMetadata:
       type: object
-      description: Terminal tab metadata (Redis-backed)
+      description: Public projection of Interaction-owned terminal tab metadata
       required: [session_name, label, notes, sort_order, pinned, created_at, updated_at, pty_alive, attached_clients]
       properties:
         session_name:
           type: string
         workspace:
           type: string
+        kind:
+          type: string
+          description: Server-owned terminal kind. Agent tabs use `agent`.
+        agent_id:
+          type: string
+        role:
+          type: string
+        backend:
+          type: string
+          description: Validated backend intent. Private launch arguments and environment are never exposed.
+        writable:
+          type: boolean
         label:
           type: string
         notes:
@@ -7669,6 +7437,42 @@ components:
             live, within its grace window). Values ≥2 can be surfaced as
             a "multiple viewers" indicator so users can be warned before
             destructive tab-close actions.
+
+    TerminalSetupRequest:
+      type: object
+      required: [backend, action]
+      properties:
+        backend:
+          type: string
+          enum: [claude, codex, gemini, opencode, cursor]
+        action:
+          type: string
+          enum: [install, login, configure, test]
+
+    TerminalSetupResult:
+      type: object
+      required: [session_name, label, backend, action, command, title, message, manual, created]
+      properties:
+        session_name:
+          type: string
+        label:
+          type: string
+        backend:
+          type: string
+          enum: [claude, codex, gemini, opencode, cursor]
+        action:
+          type: string
+          enum: [install, login, configure, test]
+        command:
+          type: string
+        title:
+          type: string
+        message:
+          type: string
+        manual:
+          type: boolean
+        created:
+          type: boolean
 
     TabPutRequest:
       type: object

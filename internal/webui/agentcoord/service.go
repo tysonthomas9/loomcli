@@ -2,11 +2,12 @@ package agentcoord
 
 import (
 	"context"
+	"errors"
 
 	webuilog "github.com/tysonthomas9/loomcli/internal/logstore"
+	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
 	"github.com/tysonthomas9/loomcli/internal/webui/apperrors"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
-	"github.com/tysonthomas9/loomcli/internal/webui/terminal"
 )
 
 var _ AgentService = (*agentServiceImpl)(nil)
@@ -14,28 +15,32 @@ var _ AgentService = (*agentServiceImpl)(nil)
 // agentServiceImpl is the remaining delivery service for agent terminal and
 // local log observation. Source Control owns every checkout and Git operation.
 type agentServiceImpl struct {
-	termMgr  *terminal.AgentTmuxManager
-	termAuth *realtime.TerminalAuth
+	terminals interaction.TerminalTabs
+	termAuth  *realtime.TerminalAuth
 }
 
-func NewAgentService(termMgr *terminal.AgentTmuxManager, termAuth *realtime.TerminalAuth) AgentService {
-	return &agentServiceImpl{termMgr: termMgr, termAuth: termAuth}
+func NewAgentService(terminals interaction.TerminalTabs, termAuth *realtime.TerminalAuth) AgentService {
+	return &agentServiceImpl{terminals: terminals, termAuth: termAuth}
 }
 
 func agentLogTokenScope(agentName string) string { return "agent:" + agentName + ":logs" }
 
-func (service *agentServiceImpl) GetTerminalInfo(_ context.Context, workspace, agent string) (*AgentTerminalInfoResult, error) {
+func (service *agentServiceImpl) GetTerminalInfo(ctx context.Context, workspace, agent string) (*AgentTerminalInfoResult, error) {
 	if err := ValidateAgentName(agent); err != nil {
 		return nil, err
 	}
-	if service.termMgr == nil {
+	if service.terminals == nil {
 		return nil, apperrors.ErrUnavailable("terminal manager not initialized")
 	}
 	mode := AgentTerminalModeArchive
-	if _, found, err := service.termMgr.FindLatestAgentSession(workspace, agent); err != nil {
+	info, err := service.terminals.AgentTerminalInfo(ctx, workspace, agent)
+	if err != nil {
 		logger.Error("failed to resolve agent tmux session", "agent", agent, "err", err)
+		if errors.Is(err, interaction.ErrUnavailable) {
+			return nil, apperrors.ErrUnavailable("terminal manager not initialized")
+		}
 		return nil, apperrors.ErrInternal("failed to inspect terminal sessions", err)
-	} else if found {
+	} else if info != nil && info.Live {
 		mode = AgentTerminalModeTmux
 	}
 	return &AgentTerminalInfoResult{Agent: agent, Mode: mode}, nil

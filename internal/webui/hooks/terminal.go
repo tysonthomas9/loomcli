@@ -4,8 +4,11 @@ import (
 	"log/slog"
 
 	"github.com/tysonthomas9/loomcli/internal/webui/coordinator"
-	"github.com/tysonthomas9/loomcli/internal/webui/terminal"
 )
+
+type AgentWorkspaceTerminalRuntime interface {
+	KillWorkspaceSessions(workspaceKey string) error
+}
 
 // TerminalHook implements coordinator.LifecycleHook for per-workspace terminal
 // session lifecycle.
@@ -21,13 +24,13 @@ import (
 // When tmux is not installed, agentTmuxMgr will be nil; the hook then simply
 // provides nil to the bag and no-ops on cleanup.
 type TerminalHook struct {
-	agentTmuxMgr *terminal.AgentTmuxManager
+	agentTmuxMgr AgentWorkspaceTerminalRuntime
 	logger       *slog.Logger
 }
 
 // NewTerminalHook creates a TerminalHook. agentTmuxMgr may be nil (tmux not
 // installed). A nil logger defaults to slog.Default().
-func NewTerminalHook(agentTmuxMgr *terminal.AgentTmuxManager, logger *slog.Logger) *TerminalHook {
+func NewTerminalHook(agentTmuxMgr AgentWorkspaceTerminalRuntime, logger *slog.Logger) *TerminalHook {
 	if logger == nil {
 		logger = slog.Default()
 	}

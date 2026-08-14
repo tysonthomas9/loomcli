@@ -79,7 +79,7 @@ class MockWebSocket {
 
   /** Simulate receiving a message. */
   simulateMessage(data: string | ArrayBuffer): void {
-    this.onmessage?.(new MessageEvent("message", { data }));
+    this.onmessage?.({ data } as MessageEvent);
   }
 
   /** Simulate connection close. */
@@ -120,6 +120,19 @@ function makeMocks() {
 
 async function waitForBufferedFlush(): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, 25));
+}
+
+function binary(value: string): ArrayBuffer {
+  const encoded = new TextEncoder().encode(value);
+  const buffer = new ArrayBuffer(encoded.byteLength);
+  new Uint8Array(buffer).set(encoded);
+  return buffer;
+}
+
+function writtenText(write: ReturnType<typeof vi.fn>, index = 0): string {
+  const value = write.mock.calls[index]?.[0] as Uint8Array | undefined;
+  if (!value) throw new Error(`missing renderer write at index ${index}`);
+  return new TextDecoder().decode(value);
 }
 
 // ── Tests ────────────────────────────────────────────────────────────────────
@@ -285,9 +298,9 @@ describe("connectWebSocket", () => {
     expect(m.onConnected).toHaveBeenCalled();
 
     // Receive data
-    ws.simulateMessage("output text");
+    ws.simulateMessage(binary("output text"));
     await waitForBufferedFlush();
-    expect(m.write).toHaveBeenCalledWith("output text");
+    expect(writtenText(m.write)).toBe("output text");
     expect(m.onOutput).toHaveBeenCalled();
 
     // Clean up
@@ -317,14 +330,82 @@ describe("connectWebSocket", () => {
     const ws = MockWebSocket.instances[0];
     ws.simulateOpen();
 
-    ws.simulateMessage("hello");
-    ws.simulateMessage(" ");
-    ws.simulateMessage("world");
+    ws.simulateMessage(binary("hello"));
+    ws.simulateMessage(binary(" "));
+    ws.simulateMessage(binary("world"));
     await waitForBufferedFlush();
 
     expect(m.write).toHaveBeenCalledTimes(1);
-    expect(m.write).toHaveBeenCalledWith("hello world");
+    expect(writtenText(m.write)).toBe("hello world");
     expect(m.onOutput).toHaveBeenCalledTimes(1);
+  });
+
+  it("applies replay resize controls between binary output groups", async () => {
+    const m = makeMocks();
+    const onReplayResize = vi.fn();
+    connectWebSocket(
+      "ws1",
+      "session1",
+      m.write,
+      m.wsRef,
+      m.setConnectionState,
+      m.onConnected,
+      m.onDisconnected,
+      m.onOutput,
+      undefined,
+      undefined,
+      { cols: 132, rows: 40 },
+      onReplayResize,
+    );
+
+    shared.resolveToken!({ token: "tok" });
+    await vi.waitFor(() => {
+      expect(MockWebSocket.instances).toHaveLength(1);
+    });
+    const ws = MockWebSocket.instances[0];
+    ws.simulateOpen();
+
+    ws.simulateMessage(binary("before"));
+    ws.simulateMessage(
+      JSON.stringify({
+        type: "terminal.replay.resize",
+        columns: 80,
+        rows: 24,
+      }),
+    );
+    ws.simulateMessage(binary("after"));
+    await waitForBufferedFlush();
+
+    expect(writtenText(m.write, 0)).toBe("before");
+    expect(onReplayResize).toHaveBeenCalledWith(80, 24);
+    expect(writtenText(m.write, 1)).toBe("after");
+    expect(m.write.mock.invocationCallOrder[0]).toBeLessThan(
+      onReplayResize.mock.invocationCallOrder[0] ?? 0,
+    );
+    expect(onReplayResize.mock.invocationCallOrder[0]).toBeLessThan(
+      m.write.mock.invocationCallOrder[1] ?? 0,
+    );
+  });
+
+  it("fails closed on malformed terminal control text", async () => {
+    const m = makeMocks();
+    connectWebSocket("ws1", "session1", m.write, m.wsRef, m.setConnectionState);
+
+    shared.resolveToken!({ token: "tok" });
+    await vi.waitFor(() => {
+      expect(MockWebSocket.instances).toHaveLength(1);
+    });
+    const ws = MockWebSocket.instances[0];
+    ws.simulateOpen();
+    ws.simulateMessage(
+      '{"type":"terminal.replay.resize","columns":0,"rows":24}',
+    );
+
+    expect(ws.close).toHaveBeenCalledWith(
+      1002,
+      "invalid terminal control frame",
+    );
+    expect(m.write).not.toHaveBeenCalled();
   });
 
   it("includes initial terminal size in the first workspace terminal websocket URL", async () => {

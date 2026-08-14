@@ -6,7 +6,7 @@ import {
   patchTabMetadata,
   deleteTabMetadata,
 } from "@/api/terminal";
-import type { TabMetadata } from "@/api/terminal";
+import type { TabMetadata, TerminalBackend } from "@/api/terminal";
 import type { MutationPayload } from "@/api/common";
 
 export interface UseTerminalMetadataReturn {
@@ -131,8 +131,10 @@ export function useTerminalMetadata(
       });
       try {
         await putTabMetadata(workspace, session, {
-          session_name: session,
-          backend,
+          // The picker receives the server-advertised backend list plus the
+          // built-in shell option. The generated request type remains the
+          // canonical wire contract; the server rejects stale values.
+          backend: backend as TerminalBackend,
           label,
           sort_order: sortOrder,
           notes: "",

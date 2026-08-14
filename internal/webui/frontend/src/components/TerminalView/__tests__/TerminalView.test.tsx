@@ -765,6 +765,52 @@ describe("TerminalView", () => {
       });
     });
 
+    it("does not duplicate a tab when metadata sync wins the create race", async () => {
+      let resolveCreate: (() => void) | undefined;
+      mockMetadataHook.createTab = vi
+        .fn()
+        .mockImplementation(
+          (
+            sessionName: string,
+            label: string,
+            sortOrder: number,
+            backend: string,
+          ) => {
+            setMetadata([
+              ...DEFAULT_METADATA,
+              {
+                session_name: sessionName,
+                label,
+                sort_order: sortOrder,
+                backend,
+              },
+            ]);
+            return new Promise<void>((resolve) => {
+              resolveCreate = resolve;
+            });
+          },
+        );
+      setMetadata(DEFAULT_METADATA);
+      const { rerender } = render(<TerminalView />);
+
+      fireEvent.click(screen.getByTestId("new-tab-backend-claude"));
+      rerender(<TerminalView />);
+
+      await waitFor(() => {
+        expect(
+          screen.getAllByTestId("terminal-instance-lead-claude-1"),
+        ).toHaveLength(1);
+      });
+
+      act(() => resolveCreate?.());
+
+      await waitFor(() => {
+        expect(
+          screen.getAllByTestId("terminal-instance-lead-claude-1"),
+        ).toHaveLength(1);
+      });
+    });
+
     it("clicking + when max tabs exist reports tab limit", () => {
       const onTabLimitReached = vi.fn();
       const maxTabs = Array.from({ length: MAX_TABS }, (_, i) => ({

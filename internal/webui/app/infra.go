@@ -6,12 +6,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
 	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 	"github.com/tysonthomas9/loomcli/internal/webui/coordinator"
 	"github.com/tysonthomas9/loomcli/internal/webui/fleet"
 	"github.com/tysonthomas9/loomcli/internal/webui/hooks"
 	"github.com/tysonthomas9/loomcli/internal/webui/subscription"
-	"github.com/tysonthomas9/loomcli/internal/webui/terminal"
 )
 
 // Type aliases so the app package can reference concrete types without
@@ -45,15 +45,21 @@ func NewWorkspaceRegistry(logger *slog.Logger) *WorkspaceRegistry {
 
 // HookConfig holds the dependencies for registering lifecycle hooks.
 type HookConfig struct {
-	MultiSub    *subscription.MultiWorkspaceSubscriber
-	TermMgr     *terminal.AgentTmuxManager
-	PTYMultiMgr *terminal.MultiPTYManager
-	FleetReg    *fleet.StoreRegistry
-	FleetURL    string
-	FleetKey    string
-	FleetActor  string // X-Actor header value (fleet-db --auth-dev-mode)
-	FleetMode   bool
-	Logger      *slog.Logger
+	MultiSub *subscription.MultiWorkspaceSubscriber
+	TermMgr  interface {
+		interaction.AgentTerminalRuntime
+		KillWorkspaceSessions(string) error
+	}
+	PTYMultiMgr interface {
+		interaction.TerminalRuntime
+		hooks.WorkspaceTerminalRuntime
+	}
+	FleetReg   *fleet.StoreRegistry
+	FleetURL   string
+	FleetKey   string
+	FleetActor string // X-Actor header value (fleet-db --auth-dev-mode)
+	FleetMode  bool
+	Logger     *slog.Logger
 }
 
 // RegisteredHooks returns references to hooks that require post-registration

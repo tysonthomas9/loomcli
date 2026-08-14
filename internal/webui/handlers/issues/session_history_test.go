@@ -14,20 +14,20 @@ import (
 	"github.com/alicebob/miniredis/v2"
 	"github.com/redis/go-redis/v9"
 
+	"github.com/tysonthomas9/loomcli/internal/app/query/sessionarchive"
+	"github.com/tysonthomas9/loomcli/internal/infra/localredis"
 	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
-	"github.com/tysonthomas9/loomcli/internal/webui/localredis"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
-	"github.com/tysonthomas9/loomcli/internal/webui/sessioncoord"
 )
 
 const testSHWSID = "test-ws-uuid"
 
 type scrollbackResultService struct {
 	stubSessionService
-	result *sessioncoord.SessionScrollbackResult
+	result *sessionarchive.SessionScrollbackResult
 }
 
-func (service *scrollbackResultService) GetSessionScrollback(context.Context, string, string, string) (*sessioncoord.SessionScrollbackResult, error) {
+func (service *scrollbackResultService) GetSessionScrollback(context.Context, string, string, string) (*sessionarchive.SessionScrollbackResult, error) {
 	return service.result, nil
 }
 
@@ -74,8 +74,8 @@ func TestHandleListSessionHistory_ReturnsRecords(t *testing.T) {
 	}
 
 	var resp struct {
-		Success bool                              `json:"success"`
-		Data    []sessioncoord.SessionHistoryItem `json:"data"`
+		Success bool                                `json:"success"`
+		Data    []sessionarchive.SessionHistoryItem `json:"data"`
 	}
 	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
 		t.Fatalf("decode: %v", err)
@@ -113,8 +113,8 @@ func TestHandleListSessionHistory_EmptyArrayForUnknownIssue(t *testing.T) {
 	}
 
 	var resp struct {
-		Success bool                              `json:"success"`
-		Data    []sessioncoord.SessionHistoryItem `json:"data"`
+		Success bool                                `json:"success"`
+		Data    []sessionarchive.SessionHistoryItem `json:"data"`
 	}
 	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
 		t.Fatalf("decode: %v", err)
@@ -191,7 +191,7 @@ func TestHandleGetSessionScrollback_NilStore(t *testing.T) {
 }
 
 func TestHandleGetSessionScrollback_ReturnsContractText(t *testing.T) {
-	handler := handleGetSessionScrollback(&scrollbackResultService{result: &sessioncoord.SessionScrollbackResult{
+	handler := handleGetSessionScrollback(&scrollbackResultService{result: &sessionarchive.SessionScrollbackResult{
 		Content: "first\nsecond", Lines: 2,
 	}})
 	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/"+testSHWSID+"/issues/proj.1/sessions/rec-1/scrollback", nil)

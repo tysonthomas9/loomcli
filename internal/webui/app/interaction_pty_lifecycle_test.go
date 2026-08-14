@@ -5,11 +5,10 @@ import (
 	"testing"
 
 	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
-	"github.com/tysonthomas9/loomcli/internal/webui/terminal"
 )
 
 type interactionPTYTabStoreStub struct {
-	value *terminal.TabMetadata
+	value *interaction.TabMetadata
 	err   error
 }
 
@@ -17,7 +16,7 @@ func (stub *interactionPTYTabStoreStub) Get(
 	context.Context,
 	string,
 	string,
-) (*terminal.TabMetadata, error) {
+) (*interaction.TabMetadata, error) {
 	return stub.value, stub.err
 }
 
@@ -35,7 +34,7 @@ func (stub *interactionPTYForceStub) ForceInterrupt(
 }
 
 func TestInteractionPTYBeforeKillUsesExactServerOwnedPlacement(t *testing.T) {
-	tabs := &interactionPTYTabStoreStub{value: &terminal.TabMetadata{
+	tabs := &interactionPTYTabStoreStub{value: &interaction.TabMetadata{
 		SessionName: "agent-tab", Workspace: "WS", Kind: "agent",
 		AgentID: "agent-1", InteractionSessionID: "session-1",
 		InteractionTerminalID: "terminal-1",
@@ -43,29 +42,29 @@ func TestInteractionPTYBeforeKillUsesExactServerOwnedPlacement(t *testing.T) {
 	}}
 	force := &interactionPTYForceStub{}
 	hook := NewInteractionPTYBeforeKill(tabs, force)
-	key := terminal.SessionKey{Workspace: "WS", Name: "agent-tab"}
-	if err := hook(t.Context(), key, terminal.ExitReasonShutdown); err != nil {
+	key := interaction.TerminalKey{WorkspaceKey: "WS", TerminalID: "agent-tab"}
+	if err := hook(t.Context(), key, "shutdown"); err != nil {
 		t.Fatal(err)
 	}
 	if len(force.commands) != 1 {
 		t.Fatalf("force commands = %+v", force.commands)
 	}
 	command := force.commands[0]
-	if command.WorkspaceKey != key.Workspace ||
+	if command.WorkspaceKey != key.WorkspaceKey ||
 		command.SessionID != "session-1" ||
 		command.AgentID != "agent-1" ||
 		command.TerminalID != "terminal-1" ||
 		command.ExpectedLeaseID != "lease-1" ||
 		command.ExpectedLeaseFencingToken != 7 ||
 		command.StreamRef != "terminal:WS/agent-tab" ||
-		command.TerminalTab != key.Name ||
+		command.TerminalTab != key.TerminalID ||
 		command.Reason != "server PTY shutdown" {
 		t.Fatalf("force command = %+v", command)
 	}
 }
 
 func TestInteractionPTYBeforeKillFailsClosedForPartialCanonicalIdentity(t *testing.T) {
-	tabs := &interactionPTYTabStoreStub{value: &terminal.TabMetadata{
+	tabs := &interactionPTYTabStoreStub{value: &interaction.TabMetadata{
 		SessionName: "agent-tab", Workspace: "WS", Kind: "agent",
 		AgentID: "agent-1", InteractionSessionID: "session-1",
 		InteractionTerminalID: "terminal-1",
@@ -74,8 +73,8 @@ func TestInteractionPTYBeforeKillFailsClosedForPartialCanonicalIdentity(t *testi
 	hook := NewInteractionPTYBeforeKill(tabs, force)
 	if err := hook(
 		t.Context(),
-		terminal.SessionKey{Workspace: "WS", Name: "agent-tab"},
-		terminal.ExitReasonKilled,
+		interaction.TerminalKey{WorkspaceKey: "WS", TerminalID: "agent-tab"},
+		"killed",
 	); err == nil {
 		t.Fatal("partial canonical identity was allowed")
 	}

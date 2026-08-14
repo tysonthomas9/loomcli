@@ -5,9 +5,9 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/tysonthomas9/loomcli/internal/infra/localredis"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/webui/fleet"
-	"github.com/tysonthomas9/loomcli/internal/webui/localredis"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 )
 

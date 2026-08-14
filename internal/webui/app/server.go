@@ -15,8 +15,10 @@ import (
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/h2c"
 
+	"github.com/tysonthomas9/loomcli/internal/app/query/sessionarchive"
 	"github.com/tysonthomas9/loomcli/internal/app/workitemmove"
 	connectorsmodule "github.com/tysonthomas9/loomcli/internal/modules/connectors"
+	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
 	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
 	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 	"github.com/tysonthomas9/loomcli/internal/modules/workspace"
@@ -24,12 +26,28 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui"
 	"github.com/tysonthomas9/loomcli/internal/webui/agentcoord"
 	"github.com/tysonthomas9/loomcli/internal/webui/readprojection"
-	"github.com/tysonthomas9/loomcli/internal/webui/sessioncoord"
 	"github.com/tysonthomas9/loomcli/internal/webui/workspacecoord"
 
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
-	"github.com/tysonthomas9/loomcli/internal/webui/terminal"
 )
+
+type terminalRuntime interface {
+	interaction.TerminalRuntime
+	RegisterWorkspace(string, string) error
+	DeregisterWorkspace(string) error
+	SetLifecycleHook(interaction.TerminalLifecycleHook)
+	SetGracePeriod(time.Duration)
+	SetIdleTimeout(time.Duration)
+	GracePeriod() time.Duration
+	IdleTimeout() time.Duration
+	Close() error
+}
+
+type agentTerminalRuntime interface {
+	interaction.AgentTerminalRuntime
+	KillWorkspaceSessions(string) error
+	Shutdown() error
+}
 
 // logger is the package-level structured logger.
 var logger = slog.Default()
@@ -68,12 +86,12 @@ type Server struct {
 	agentSvc         agentcoord.AgentService
 	agentRuntime     agentcoord.InteractiveAgentRuntime
 	workspaceSvc     workspacecoord.WorkspaceService
-	termSvc          terminal.TerminalService // nil if termMgr is nil
+	termSvc          interaction.TerminalTabs
 	sourceBrowse     sourcecontrol.Browse
 	sourceMutate     sourcecontrol.Mutate
 	sourceCheckout   sourcecontrol.Checkout
 	issueDiff        readprojection.IssueDiffProjection
-	sessSvc          sessioncoord.SessionService // always constructed (stores may be nil internally)
+	sessSvc          sessionarchive.SessionService // always constructed (stores may be nil internally)
 
 	// Real-time
 	hub               *Hub
@@ -85,9 +103,9 @@ type Server struct {
 	initialWorkspaceID string
 
 	// Terminal
-	ptyMgr       *terminal.MultiPTYManager  // main web terminal (per-workspace dispatch)
-	agentTmuxMgr *terminal.AgentTmuxManager // agent-view only; nil if tmux unavailable
-	termAuth     *TerminalAuth              // one-time token issuer (nil disables auth)
+	ptyMgr       terminalRuntime
+	agentTmuxMgr agentTerminalRuntime
+	termAuth     *TerminalAuth // one-time token issuer (nil disables auth)
 
 	// SSE token exchange (external auth mode only)
 	sseTokens *TokenStore // nil if ExtAuthURL is empty

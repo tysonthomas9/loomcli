@@ -6,7 +6,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/tysonthomas9/loomcli/internal/webui/terminal"
+	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
 )
 
 type canonicalInteractiveAgentRuntime struct {
@@ -43,7 +43,7 @@ func (runtime *canonicalInteractiveAgentRuntime) StopAgent(
 // ownership was established from server-owned tab metadata, not from a
 // caller-supplied Fleet AgentSession.TerminalID.
 type InteractiveRuntimeSession struct {
-	Key                   terminal.SessionKey
+	Key                   interaction.TerminalKey
 	InteractionSessionID  string
 	InteractionTerminalID string
 	StreamRef             string
@@ -56,7 +56,7 @@ type InteractiveRuntimeSession struct {
 // PTY manager under Interaction runtime ownership.
 type InteractiveRuntimeController interface {
 	OwnedAgentSessions(ctx context.Context, workspace, agentID string) ([]InteractiveRuntimeSession, error)
-	Kill(key terminal.SessionKey) error
+	Kill(key interaction.TerminalKey) error
 }
 
 // InteractiveRuntimeTab is the minimum server-owned tab metadata needed to
@@ -79,9 +79,9 @@ type InteractiveRuntimeTabSource interface {
 // InteractiveRuntimePTYSource is the process-local PTY surface required by
 // lifecycle control.
 type InteractiveRuntimePTYSource interface {
-	HasSession(key terminal.SessionKey) bool
-	SessionClosed(key terminal.SessionKey) bool
-	Kill(key terminal.SessionKey) error
+	IsLive(key interaction.TerminalKey) bool
+	IsClosed(key interaction.TerminalKey) bool
+	Kill(key interaction.TerminalKey) error
 }
 
 type tabOwnedInteractiveRuntime struct {
@@ -112,19 +112,19 @@ func (r *tabOwnedInteractiveRuntime) OwnedAgentSessions(
 		return nil, err
 	}
 
-	seen := make(map[terminal.SessionKey]struct{}, len(tabs))
+	seen := make(map[interaction.TerminalKey]struct{}, len(tabs))
 	owned := make([]InteractiveRuntimeSession, 0, len(tabs))
 	for i := range tabs {
 		tab := &tabs[i]
 		if tab.Kind != "agent" || tab.AgentID != agentID || strings.TrimSpace(tab.SessionName) == "" {
 			continue
 		}
-		key := terminal.SessionKey{Workspace: workspace, Name: tab.SessionName}
+		key := interaction.TerminalKey{WorkspaceKey: workspace, TerminalID: tab.SessionName}
 		if _, duplicate := seen[key]; duplicate {
 			continue
 		}
-		live := r.ptys.HasSession(key)
-		closed := r.ptys.SessionClosed(key)
+		live := r.ptys.IsLive(key)
+		closed := r.ptys.IsClosed(key)
 		// ListTabs marks metadata created by this server process attachable even
 		// before the first WebSocket creates its PTY. Preserve that key so a
 		// Stop can fence the startup window with a second idempotent Kill.
@@ -141,11 +141,11 @@ func (r *tabOwnedInteractiveRuntime) OwnedAgentSessions(
 			Live:                  live, Closed: closed,
 		})
 	}
-	sort.Slice(owned, func(i, j int) bool { return owned[i].Key.Name < owned[j].Key.Name })
+	sort.Slice(owned, func(i, j int) bool { return owned[i].Key.TerminalID < owned[j].Key.TerminalID })
 	return owned, nil
 }
 
-func (r *tabOwnedInteractiveRuntime) Kill(key terminal.SessionKey) error {
+func (r *tabOwnedInteractiveRuntime) Kill(key interaction.TerminalKey) error {
 	if r == nil || r.ptys == nil {
 		return nil
 	}

@@ -4,8 +4,12 @@ import (
 	"log/slog"
 
 	"github.com/tysonthomas9/loomcli/internal/webui/coordinator"
-	"github.com/tysonthomas9/loomcli/internal/webui/terminal"
 )
+
+type WorkspaceTerminalRuntime interface {
+	RegisterWorkspace(workspaceKey, path string) error
+	DeregisterWorkspace(workspaceKey string) error
+}
 
 // PTYHook implements coordinator.LifecycleHook for per-workspace web-terminal
 // PTY manager lifecycle. On workspace registration it registers the workspace
@@ -16,13 +20,13 @@ import (
 // Non-critical by design (decision F-1): a bad workspace path downgrades the
 // workspace to "no terminal available" rather than failing registration.
 type PTYHook struct {
-	multi  *terminal.MultiPTYManager
+	multi  WorkspaceTerminalRuntime
 	logger *slog.Logger
 }
 
 // NewPTYHook creates a PTYHook. multi must not be nil (panics).
 // A nil logger defaults to slog.Default().
-func NewPTYHook(multi *terminal.MultiPTYManager, logger *slog.Logger) *PTYHook {
+func NewPTYHook(multi WorkspaceTerminalRuntime, logger *slog.Logger) *PTYHook {
 	if multi == nil {
 		panic("NewPTYHook: multi must not be nil")
 	}
@@ -47,7 +51,7 @@ func (h *PTYHook) Critical() bool { return false }
 func (h *PTYHook) OnRegister(ctx *coordinator.RegistrationContext) error {
 	wsID := ctx.WorkspaceID
 	path := ctx.WorkspacePath
-	if err := h.multi.Register(wsID, path); err != nil {
+	if err := h.multi.RegisterWorkspace(wsID, path); err != nil {
 		h.logger.Warn("pty manager register failed; terminal disabled for workspace",
 			"workspace", wsID, "path", path, "err", err)
 		return nil
@@ -59,7 +63,7 @@ func (h *PTYHook) OnRegister(ctx *coordinator.RegistrationContext) error {
 // OnDeregister removes the workspace entry and kills any live PTY sessions.
 // MultiPTYManager.Deregister is idempotent on unknown IDs.
 func (h *PTYHook) OnDeregister(ctx coordinator.DeregistrationContext) {
-	h.multi.Deregister(ctx.WorkspaceID)
+	_ = h.multi.DeregisterWorkspace(ctx.WorkspaceID)
 }
 
 // OnRollback undoes OnRegister — same as OnDeregister.

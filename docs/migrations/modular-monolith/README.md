@@ -96,6 +96,7 @@ one-file packages, and 60 one-or-two-file packages.
 | [21-phase-10-1-generated-http-contract-evidence.md](21-phase-10-1-generated-http-contract-evidence.md) | Stack 10.1 implementation and proof for the canonical generated Go and TypeScript HTTP contract seam. |
 | [22-phase-10-2-artifacts-run-capture-evidence.md](22-phase-10-2-artifacts-run-capture-evidence.md) | Stack 10.2 implementation and proof for Artifacts evidence policy, Run Capture, Transcript Evidence, and Sessions-path deletion. |
 | [23-phase-10-3-deep-source-control-evidence.md](23-phase-10-3-deep-source-control-evidence.md) | Stack 10.3 implementation and proof for the three Source Control ports, private filesystem adapter, legacy FileOps/GitOps deletion, full gates, and exact-source Files/PR UI journeys. |
+| [24-phase-10-4-interaction-pty-evidence.md](24-phase-10-4-interaction-pty-evidence.md) | Stack 10.4 implementation and proof for Interaction-owned terminal lifecycle, private PTY and Redis adapters, replay and resize correctness, legacy coordinator deletion, full gates, and packaged Desktop terminal journeys. |
 
 ## Scope boundaries
 

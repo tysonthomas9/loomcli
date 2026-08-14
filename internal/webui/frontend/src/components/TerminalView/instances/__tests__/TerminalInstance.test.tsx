@@ -43,11 +43,14 @@ const wtermState = vi.hoisted(() => {
   return {
     stub,
     onReadyFiredCount: 0,
+    onResize: null as ((cols: number, rows: number) => void) | null,
   };
 });
 
 const connectionState = vi.hoisted(() => ({
   writeCallbacks: [] as Array<(data: string | Uint8Array) => void>,
+  replayResizeCallbacks: [] as Array<(cols: number, rows: number) => void>,
+  resizeMessages: [] as string[],
   cleanupCount: 0,
 }));
 
@@ -88,6 +91,7 @@ vi.mock("@wterm/react", async () => {
       );
 
       React.useEffect(() => {
+        wtermState.onResize = props.onResize ?? null;
         if (wtermState.onReadyFiredCount === 0) {
           wtermState.onReadyFiredCount += 1;
           props.onReady?.(wtermState.stub);
@@ -116,11 +120,26 @@ vi.mock("../terminalConnection", () => ({
       write: (data: string | Uint8Array) => void,
       _wsRef: { current: WebSocket | null },
       setConnState: (s: string) => void,
+      _onConnected?: () => void,
+      _onDisconnected?: () => void,
+      _onOutput?: () => void,
+      _onBackendCrash?: (reason: string) => void,
+      _onSessionKilled?: () => void,
+      _initialSize?: { cols: number; rows: number },
+      onReplayResize?: (cols: number, rows: number) => void,
     ): (() => void) => {
       connectionState.writeCallbacks.push(write);
+      if (onReplayResize) {
+        connectionState.replayResizeCallbacks.push(onReplayResize);
+      }
+      _wsRef.current = {
+        readyState: WebSocket.OPEN,
+        send: (value: string) => connectionState.resizeMessages.push(value),
+      } as WebSocket;
       setConnState("connecting");
       const cleanup = () => {
         connectionState.cleanupCount += 1;
+        _wsRef.current = null;
       };
       return cleanup;
     },
@@ -152,6 +171,9 @@ async function flushPendingWork(): Promise<void> {
   await act(async () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
   });
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 40));
+  });
 }
 
 function latestWriteCallback(): (data: string | Uint8Array) => void {
@@ -161,14 +183,56 @@ function latestWriteCallback(): (data: string | Uint8Array) => void {
   return cb;
 }
 
+function latestReplayResizeCallback(): (cols: number, rows: number) => void {
+  const cb =
+    connectionState.replayResizeCallbacks[
+      connectionState.replayResizeCallbacks.length - 1
+    ];
+  if (!cb) throw new Error("no replay resize callback captured yet");
+  return cb;
+}
+
+function installMeasuredRenderer(width = 800, height = 400) {
+  const element = document.createElement("div");
+  Object.defineProperty(element, "clientWidth", { value: width });
+  Object.defineProperty(element, "clientHeight", { value: height });
+  const grid = document.createElement("div");
+  grid.className = "term-grid";
+  element.appendChild(grid);
+  wtermState.stub.element = element;
+  return vi
+    .spyOn(HTMLElement.prototype, "getBoundingClientRect")
+    .mockReturnValue({
+      width: 10,
+      height: 20,
+      top: 0,
+      left: 0,
+      right: 10,
+      bottom: 20,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    } as DOMRect);
+}
+
 // ── Tests ────────────────────────────────────────────────────────────────────
 
 describe("TerminalInstance", () => {
   beforeEach(() => {
     wtermState.stub.write = vi.fn();
+    wtermState.stub.resize = vi.fn((cols: number, rows: number) => {
+      wtermState.stub.cols = cols;
+      wtermState.stub.rows = rows;
+      wtermState.onResize?.(cols, rows);
+    });
+    wtermState.stub.cols = 80;
+    wtermState.stub.rows = 24;
     wtermState.stub.element = document.createElement("div");
     wtermState.onReadyFiredCount = 0;
+    wtermState.onResize = null;
     connectionState.writeCallbacks.length = 0;
+    connectionState.replayResizeCallbacks.length = 0;
+    connectionState.resizeMessages.length = 0;
     connectionState.cleanupCount = 0;
   });
 
@@ -178,6 +242,7 @@ describe("TerminalInstance", () => {
 
   describe("write path after remount (regression: PR #54)", () => {
     it("delivers bytes to wterm after a sessionName change forces the lifecycle effect to re-run", async () => {
+      const rectSpy = installMeasuredRenderer();
       // First mount: a fresh wterm fires onReady once and sets
       // wtermInstanceRef. Output written through the captured callback should
       // reach the stub.
@@ -222,9 +287,11 @@ describe("TerminalInstance", () => {
       expect(writeMock).toHaveBeenCalledWith("post-remount-replay");
 
       unmount();
+      rectSpy.mockRestore();
     });
 
     it("delivers bytes to wterm after StrictMode double-mounts the component", async () => {
+      const rectSpy = installMeasuredRenderer();
       // Same scenario, exercised through React.StrictMode rather than a prop
       // change. StrictMode double-invokes mount → cleanup → mount in dev
       // mode, which is exactly the path that surfaced the original bug in
@@ -249,6 +316,91 @@ describe("TerminalInstance", () => {
       expect(writeMock).toHaveBeenCalledWith("strict-mode-bytes");
 
       unmount();
+      rectSpy.mockRestore();
+    });
+
+    it("waits for a measurable active grid before accepting replay", async () => {
+      let viewportWidth = 0;
+      let viewportHeight = 0;
+      const element = document.createElement("div");
+      Object.defineProperty(element, "clientWidth", {
+        get: () => viewportWidth,
+      });
+      Object.defineProperty(element, "clientHeight", {
+        get: () => viewportHeight,
+      });
+      const grid = document.createElement("div");
+      grid.className = "term-grid";
+      element.appendChild(grid);
+      wtermState.stub.element = element;
+      wtermState.stub.cols = 1;
+      wtermState.stub.rows = 1;
+
+      const rectSpy = vi
+        .spyOn(HTMLElement.prototype, "getBoundingClientRect")
+        .mockReturnValue({
+          width: 10,
+          height: 20,
+          top: 0,
+          left: 0,
+          right: 10,
+          bottom: 20,
+          x: 0,
+          y: 0,
+          toJSON: () => ({}),
+        } as DOMRect);
+
+      const { unmount } = render(
+        <TerminalInstance sessionName="alpha" isActive />,
+      );
+      await flushPendingWork();
+
+      // A hidden/transitioning pane measures as 0x0. Connecting here lets
+      // replay enter wterm after autoResize has collapsed it to a one-cell
+      // grid, fragmenting every prior line into single-character rows.
+      expect(connectionState.writeCallbacks).toHaveLength(0);
+
+      viewportWidth = 800;
+      viewportHeight = 400;
+      act(() => {
+        window.dispatchEvent(
+          new CustomEvent<TerminalFontChangeDetail>(
+            TERMINAL_FONT_CHANGE_EVENT,
+            {
+              detail: {
+                fontFamily: "Monaco, monospace",
+                fontSize: 14,
+              },
+            },
+          ),
+        );
+      });
+      await flushPendingWork();
+
+      expect(connectionState.writeCallbacks.length).toBeGreaterThanOrEqual(1);
+      expect(wtermState.stub.resize).toHaveBeenCalledWith(80, 20);
+
+      unmount();
+      rectSpy.mockRestore();
+    });
+
+    it("applies historical resize without echoing it to the live PTY", async () => {
+      const rectSpy = installMeasuredRenderer(800, 400);
+      const { unmount } = render(
+        <TerminalInstance sessionName="alpha" isActive />,
+      );
+      await flushPendingWork();
+      connectionState.resizeMessages.length = 0;
+
+      act(() => {
+        latestReplayResizeCallback()(132, 41);
+      });
+
+      expect(wtermState.stub.resize).toHaveBeenCalledWith(132, 41);
+      expect(connectionState.resizeMessages).toHaveLength(0);
+
+      unmount();
+      rectSpy.mockRestore();
     });
   });
 

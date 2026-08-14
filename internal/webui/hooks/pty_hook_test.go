@@ -8,13 +8,14 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tysonthomas9/loomcli/internal/infra/pty"
+	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
 	"github.com/tysonthomas9/loomcli/internal/webui/coordinator"
-	"github.com/tysonthomas9/loomcli/internal/webui/terminal"
 )
 
-func newPTYHookFixture(t *testing.T) (*PTYHook, *terminal.MultiPTYManager) {
+func newPTYHookFixture(t *testing.T) (*PTYHook, *pty.Runtime) {
 	t.Helper()
-	multi := terminal.NewMultiPTYManager("bash", 0)
+	multi := pty.NewRuntime("bash", 0)
 	t.Cleanup(func() { _ = multi.Close() })
 	return NewPTYHook(multi, slog.Default()), multi
 }
@@ -51,7 +52,7 @@ func TestPTYHook_NilMulti_Panics(t *testing.T) {
 }
 
 func TestPTYHook_DefaultLogger(t *testing.T) {
-	multi := terminal.NewMultiPTYManager("bash", 0)
+	multi := pty.NewRuntime("bash", 0)
 	t.Cleanup(func() { _ = multi.Close() })
 	hook := NewPTYHook(multi, nil)
 	if hook.logger == nil {
@@ -74,12 +75,12 @@ func TestPTYHook_OnRegister_ValidPath(t *testing.T) {
 	// workspace is registered, AttachSession reaches managerForWS and then
 	// PTYManager.AttachSession. Instead, use the in-package test helper
 	// hasManager to confirm the entry exists without spawning a shell.
-	_, _, err := multi.AttachSession(terminal.SessionKey{Workspace: ws, Name: "t"}, 80, 24, &terminal.LaunchSpec{Argv: []string{"/bin/true"}})
-	if errors.Is(err, terminal.ErrWorkspaceNotRegistered) {
+	_, _, err := multi.Attach(interaction.TerminalKey{WorkspaceKey: ws, TerminalID: "t"}, 80, 24, &interaction.LaunchSpec{Argv: []string{"/bin/true"}})
+	if errors.Is(err, interaction.ErrTerminalPlacement) {
 		t.Fatalf("AttachSession after register returned ErrWorkspaceNotRegistered: %v", err)
 	}
 	// Kill any session we may have created so cleanup Close() is clean.
-	_ = multi.Kill(terminal.SessionKey{Workspace: ws, Name: "t"})
+	_ = multi.Kill(interaction.TerminalKey{WorkspaceKey: ws, TerminalID: "t"})
 }
 
 func TestPTYHook_OnRegister_InvalidPath_NonexistentDir(t *testing.T) {
@@ -91,8 +92,8 @@ func TestPTYHook_OnRegister_InvalidPath_NonexistentDir(t *testing.T) {
 		t.Fatalf("OnRegister should swallow invalid-path errors, got: %v", err)
 	}
 
-	_, _, err := multi.AttachSession(terminal.SessionKey{Workspace: ws, Name: "t"}, 80, 24, &terminal.LaunchSpec{Argv: []string{"/bin/true"}})
-	if !errors.Is(err, terminal.ErrWorkspaceNotRegistered) {
+	_, _, err := multi.Attach(interaction.TerminalKey{WorkspaceKey: ws, TerminalID: "t"}, 80, 24, &interaction.LaunchSpec{Argv: []string{"/bin/true"}})
+	if !errors.Is(err, interaction.ErrTerminalPlacement) {
 		t.Fatalf("AttachSession for invalid-path workspace = %v, want ErrWorkspaceNotRegistered", err)
 	}
 }
@@ -110,8 +111,8 @@ func TestPTYHook_OnRegister_InvalidPath_IsFile(t *testing.T) {
 		t.Fatalf("OnRegister should swallow invalid-path errors, got: %v", err)
 	}
 
-	_, _, err := multi.AttachSession(terminal.SessionKey{Workspace: ws, Name: "t"}, 80, 24, &terminal.LaunchSpec{Argv: []string{"/bin/true"}})
-	if !errors.Is(err, terminal.ErrWorkspaceNotRegistered) {
+	_, _, err := multi.Attach(interaction.TerminalKey{WorkspaceKey: ws, TerminalID: "t"}, 80, 24, &interaction.LaunchSpec{Argv: []string{"/bin/true"}})
+	if !errors.Is(err, interaction.ErrTerminalPlacement) {
 		t.Fatalf("AttachSession for file-path workspace = %v, want ErrWorkspaceNotRegistered", err)
 	}
 }
@@ -130,7 +131,7 @@ func TestPTYHook_OnRegister_DoesNotProvide(t *testing.T) {
 }
 
 func TestPTYHook_OnRegister_MultiPTYManagerClosed(t *testing.T) {
-	multi := terminal.NewMultiPTYManager("bash", 0)
+	multi := pty.NewRuntime("bash", 0)
 	_ = multi.Close()
 	hook := NewPTYHook(multi, slog.Default())
 	ctx := regCtx("ws-1", t.TempDir())
@@ -150,8 +151,8 @@ func TestPTYHook_OnDeregister_RemovesEntry(t *testing.T) {
 	}
 	hook.OnDeregister(deregCtx(ws))
 
-	_, _, err := multi.AttachSession(terminal.SessionKey{Workspace: ws, Name: "t"}, 80, 24, &terminal.LaunchSpec{Argv: []string{"/bin/true"}})
-	if !errors.Is(err, terminal.ErrWorkspaceNotRegistered) {
+	_, _, err := multi.Attach(interaction.TerminalKey{WorkspaceKey: ws, TerminalID: "t"}, 80, 24, &interaction.LaunchSpec{Argv: []string{"/bin/true"}})
+	if !errors.Is(err, interaction.ErrTerminalPlacement) {
 		t.Fatalf("AttachSession after deregister = %v, want ErrWorkspaceNotRegistered", err)
 	}
 }
@@ -172,14 +173,14 @@ func TestPTYHook_OnRollback_SameAsDeregister(t *testing.T) {
 	}
 	hook.OnRollback(deregCtx(ws))
 
-	_, _, err := multi.AttachSession(terminal.SessionKey{Workspace: ws, Name: "t"}, 80, 24, &terminal.LaunchSpec{Argv: []string{"/bin/true"}})
-	if !errors.Is(err, terminal.ErrWorkspaceNotRegistered) {
+	_, _, err := multi.Attach(interaction.TerminalKey{WorkspaceKey: ws, TerminalID: "t"}, 80, 24, &interaction.LaunchSpec{Argv: []string{"/bin/true"}})
+	if !errors.Is(err, interaction.ErrTerminalPlacement) {
 		t.Fatalf("AttachSession after rollback = %v, want ErrWorkspaceNotRegistered", err)
 	}
 }
 
 func TestPTYHook_IntegrationWithRegistry(t *testing.T) {
-	multi := terminal.NewMultiPTYManager("bash", 0)
+	multi := pty.NewRuntime("bash", 0)
 	t.Cleanup(func() { _ = multi.Close() })
 
 	registry := coordinator.NewWorkspaceRegistry(slog.Default())
@@ -193,22 +194,22 @@ func TestPTYHook_IntegrationWithRegistry(t *testing.T) {
 		t.Fatalf("registry.Register: %v", err)
 	}
 
-	_, _, err := multi.AttachSession(terminal.SessionKey{Workspace: ws, Name: "t"}, 80, 24, &terminal.LaunchSpec{Argv: []string{"/bin/true"}})
-	if errors.Is(err, terminal.ErrWorkspaceNotRegistered) {
+	_, _, err := multi.Attach(interaction.TerminalKey{WorkspaceKey: ws, TerminalID: "t"}, 80, 24, &interaction.LaunchSpec{Argv: []string{"/bin/true"}})
+	if errors.Is(err, interaction.ErrTerminalPlacement) {
 		t.Fatalf("post-Register AttachSession returned ErrWorkspaceNotRegistered: %v", err)
 	}
-	_ = multi.Kill(terminal.SessionKey{Workspace: ws, Name: "t"})
+	_ = multi.Kill(interaction.TerminalKey{WorkspaceKey: ws, TerminalID: "t"})
 
 	registry.Deregister(ws)
 
-	_, _, err = multi.AttachSession(terminal.SessionKey{Workspace: ws, Name: "t2"}, 80, 24, &terminal.LaunchSpec{Argv: []string{"/bin/true"}})
-	if !errors.Is(err, terminal.ErrWorkspaceNotRegistered) {
+	_, _, err = multi.Attach(interaction.TerminalKey{WorkspaceKey: ws, TerminalID: "t2"}, 80, 24, &interaction.LaunchSpec{Argv: []string{"/bin/true"}})
+	if !errors.Is(err, interaction.ErrTerminalPlacement) {
 		t.Fatalf("post-Deregister AttachSession = %v, want ErrWorkspaceNotRegistered", err)
 	}
 }
 
 func TestPTYHook_IntegrationWithRegistry_InvalidPath(t *testing.T) {
-	multi := terminal.NewMultiPTYManager("bash", 0)
+	multi := pty.NewRuntime("bash", 0)
 	t.Cleanup(func() { _ = multi.Close() })
 
 	registry := coordinator.NewWorkspaceRegistry(slog.Default())
@@ -222,8 +223,8 @@ func TestPTYHook_IntegrationWithRegistry_InvalidPath(t *testing.T) {
 		t.Fatalf("registry.Register should succeed for non-critical hook failure, got: %v", err)
 	}
 
-	_, _, err := multi.AttachSession(terminal.SessionKey{Workspace: "ws-bad", Name: "t"}, 80, 24, &terminal.LaunchSpec{Argv: []string{"/bin/true"}})
-	if !errors.Is(err, terminal.ErrWorkspaceNotRegistered) {
+	_, _, err := multi.Attach(interaction.TerminalKey{WorkspaceKey: "ws-bad", TerminalID: "t"}, 80, 24, &interaction.LaunchSpec{Argv: []string{"/bin/true"}})
+	if !errors.Is(err, interaction.ErrTerminalPlacement) {
 		t.Fatalf("AttachSession on downgraded workspace = %v, want ErrWorkspaceNotRegistered", err)
 	}
 }

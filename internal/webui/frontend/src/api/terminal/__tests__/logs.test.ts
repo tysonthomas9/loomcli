@@ -8,13 +8,12 @@ import {
   getAgentTerminalWsUrl,
   getAgentLogArchive,
 } from "../logs";
-import { ApiError, api, get } from "@/api/common";
+import { ApiError, api } from "@/api/common";
 
 vi.mock("@/api/common", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/api/common")>();
   return {
     ...actual,
-    get: vi.fn(),
     api: {
       GET: vi.fn(),
       POST: vi.fn(),
@@ -27,7 +26,6 @@ vi.mock("@/api/common", async (importOriginal) => {
 });
 
 const mockApiGet = vi.mocked(api.GET);
-const mockGet = vi.mocked(get);
 
 describe("logs API", () => {
   beforeEach(() => {
@@ -165,16 +163,23 @@ describe("logs API", () => {
 
   describe("agent terminal endpoints", () => {
     it("fetches agent terminal mode", async () => {
-      mockGet.mockResolvedValueOnce({
-        success: true,
-        data: { agent: "ember", mode: "tmux" },
-      });
+      mockApiGet.mockResolvedValueOnce({
+        data: {
+          success: true,
+          data: { agent: "ember", mode: "tmux" },
+        },
+        error: undefined,
+        response: new Response(),
+      } as never);
 
       const mode = await getAgentTerminalInfo("test-ws-id", "ember");
 
       expect(mode).toBe("tmux");
-      expect(mockGet).toHaveBeenCalledWith(
-        "/api/workspaces/test-ws-id/agents/ember/terminal/info",
+      expect(mockApiGet).toHaveBeenCalledWith(
+        "/api/workspaces/{ws}/agents/{name}/terminal/info",
+        {
+          params: { path: { ws: "test-ws-id", name: "ember" } },
+        },
       );
     });
 

@@ -4,8 +4,8 @@ import (
 	"context"
 	"log/slog"
 
+	"github.com/tysonthomas9/loomcli/internal/infra/localredis"
 	"github.com/tysonthomas9/loomcli/internal/webui/fleet"
-	"github.com/tysonthomas9/loomcli/internal/webui/localredis"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 	"github.com/tysonthomas9/loomcli/internal/webui/subscription"
 )

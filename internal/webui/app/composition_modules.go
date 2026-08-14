@@ -5,15 +5,13 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/app/query/sessionarchive"
 	"github.com/tysonthomas9/loomcli/internal/app/workitemmove"
-	"github.com/tysonthomas9/loomcli/internal/modules/agents"
 	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
 	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
 	workflowcataloghttp "github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog/httpapi"
 	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 	"github.com/tysonthomas9/loomcli/internal/modules/workspace"
-	"github.com/tysonthomas9/loomcli/internal/platform/authority"
-	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/agentcoord"
 	"github.com/tysonthomas9/loomcli/internal/webui/agentmodules"
 	githandlers "github.com/tysonthomas9/loomcli/internal/webui/handlers/git"
@@ -24,8 +22,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/readprojection"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
-	"github.com/tysonthomas9/loomcli/internal/webui/sessioncoord"
-	"github.com/tysonthomas9/loomcli/internal/webui/terminal"
 )
 
 // PRReviewModule is the route module plus its credential-cache invalidation
@@ -43,7 +39,7 @@ type LocalSettingsHandlers struct {
 }
 
 // NewIssueModules creates the issue and session modules.
-func NewIssueModules(workItems workitems.API, mover workitemmove.Commands, sessSvc sessioncoord.SessionService) []interface{ Register(*http.ServeMux) } {
+func NewIssueModules(workItems workitems.API, mover workitemmove.Commands, sessSvc sessionarchive.SessionService) []interface{ Register(*http.ServeMux) } {
 	return []interface{ Register(*http.ServeMux) }{
 		issues.NewIssueModule(workItems, mover),
 		issues.NewSessionModule(sessSvc, issues.SessionModuleOpts{
@@ -55,77 +51,40 @@ func NewIssueModules(workItems workitems.API, mover workitemmove.Commands, sessS
 	}
 }
 
-// TerminalModuleDeps holds dependencies for the (now tmux-free) terminal
-// modules. PTYMgr drives the main terminal WS; AgentTmuxMgr is kept only for
-// the live agent-view WS, which still reads auto-mode tmux sessions.
+// TerminalModuleDeps holds the Interaction terminal owner plus delivery-only
+// HTTP, WebSocket, presentation, and token dependencies.
 type TerminalModuleDeps struct {
-	TermSvc            terminal.TerminalService
-	AgentSvc           agentcoord.AgentService
-	PTYMgr             terminal.PTYSource
-	AgentTmuxMgr       *terminal.AgentTmuxManager // may be nil when tmux is missing
-	TermAuth           *realtime.TerminalAuth
-	CORSOrigins        []string
-	SelfURL            string
-	TabMetaStore       terminal.TabMetadataStore
-	Hub                *realtime.Hub
-	ServerStartedAt    time.Time
-	Agents             agents.IdentityQueries
-	Roles              agents.RoleQueries
-	Workspace          workspace.API
-	Orchestration      store.OrchestrationSessionStore
-	WorkspacePath      func(context.Context, string) string
-	Interaction        interaction.API
-	Operator           workflowcataloghttp.OperatorAuthorityResolver
-	SessionAuthorities interface {
-		ResolveSessionAuthority(
-			context.Context,
-			authority.Action,
-			interaction.SessionAuthorityProof,
-		) (authority.SessionAuthority, error)
-	}
+	TermSvc           interaction.TerminalTabs
+	AgentSvc          agentcoord.AgentService
+	TermAuth          *realtime.TerminalAuth
+	CORSOrigins       []string
+	SelfURL           string
+	PresentationState hterminal.PresentationState
+	Hub               *realtime.Hub
+	ServerStartedAt   time.Time
+	Workspace         workspace.API
+	Operator          workflowcataloghttp.OperatorAuthorityResolver
 }
 
 // NewTerminalModules creates the terminal tab and main terminal modules.
 func newTerminalRouteModules(deps TerminalModuleDeps) []interface{ Register(*http.ServeMux) } {
-	state := terminalStateQueryAdapter{
-		roles: deps.Roles, workspace: deps.Workspace,
-		orchestration: deps.Orchestration, workspacePath: deps.WorkspacePath,
-	}
+	state := terminalStateQueryAdapter{workspace: deps.Workspace}
+	terminalTabs := hterminal.WithTerminalNotifications(deps.TermSvc, deps.Hub)
 	return []interface{ Register(*http.ServeMux) }{
-		hterminal.NewTabModule(deps.TermSvc),
+		hterminal.NewTabModule(terminalTabs, deps.PresentationState),
 		hterminal.NewModule(
-			deps.TermSvc, deps.AgentSvc, deps.PTYMgr, deps.AgentTmuxMgr,
+			terminalTabs, deps.AgentSvc,
 			deps.TermAuth, deps.CORSOrigins,
 			deps.SelfURL, state,
-			deps.TabMetaStore, deps.Hub, deps.ServerStartedAt,
+			deps.Hub, deps.ServerStartedAt,
 			hterminal.InteractionDependencies{
-				API: deps.Interaction, Operator: deps.Operator,
-				SessionAuthorities: deps.SessionAuthorities,
-				TerminalIdentities: deps.TermSvc,
-			},
-			deps.Agents),
+				Operator: deps.Operator,
+			}),
 	}
 }
 
 type terminalStateQueryAdapter struct {
-	roles         agents.RoleQueries
-	workspace     workspace.API
-	orchestration store.OrchestrationSessionStore
-	workspacePath func(context.Context, string) string
-}
-
-func (adapter terminalStateQueryAdapter) GetRole(ctx context.Context, workspaceKey, roleName string) (*agents.Role, error) {
-	if adapter.roles == nil {
-		return nil, agents.ErrNotFound
-	}
-	return adapter.roles.GetRole(ctx, workspaceKey, roleName)
-}
-
-func (adapter terminalStateQueryAdapter) FindActiveOrchestrationSession(ctx context.Context, workspaceKey, agentID string) (string, error) {
-	if adapter.orchestration == nil {
-		return "", nil
-	}
-	return store.OrchestrationSessionIDFor(ctx, adapter.orchestration, workspaceKey, agentID)
+	workspace workspace.API
 }
 
 func (adapter terminalStateQueryAdapter) ResolveWorkspaceName(ctx context.Context, reference string) (string, error) {
@@ -137,13 +96,6 @@ func (adapter terminalStateQueryAdapter) ResolveWorkspaceName(ctx context.Contex
 		return "", err
 	}
 	return resolved.Name, nil
-}
-
-func (adapter terminalStateQueryAdapter) ResolveWorkspacePath(ctx context.Context, workspaceKey string) string {
-	if adapter.workspacePath == nil {
-		return ""
-	}
-	return adapter.workspacePath(ctx, workspaceKey)
 }
 
 // NewIssueTabModule creates the issue tab module.

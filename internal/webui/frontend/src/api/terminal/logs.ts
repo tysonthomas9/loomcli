@@ -8,7 +8,7 @@ import {
   api,
   ApiError,
   apiErrorFromResponse,
-  get,
+  unwrapResponse,
   wsUrl,
   getWsBaseUrl,
 } from "@/api/common";
@@ -74,26 +74,19 @@ export async function getTaskLogContent(
 
 /**
  * Fetch whether agent logs should use live tmux streaming or archive fallback.
- * Uses raw fetch because the spec response is untyped.
  */
 export async function getAgentTerminalInfo(
   workspaceId: string,
   agentName: string,
 ): Promise<"tmux" | "archive"> {
-  const response = await get<{
-    success: boolean;
-    data?: { agent: string; mode: "tmux" | "archive" };
-    error?: string;
-  }>(
-    wsUrl(
-      workspaceId,
-      `/agents/${encodeURIComponent(agentName)}/terminal/info`,
-    ),
+  const { data, error, response } = await api.GET(
+    "/api/workspaces/{ws}/agents/{name}/terminal/info",
+    {
+      params: { path: { ws: workspaceId, name: agentName } },
+    },
   );
-  if (!response.success || !response.data) {
-    throw new Error(response.error || "Failed to fetch agent terminal info");
-  }
-  return response.data.mode;
+  if (error) throw apiErrorFromResponse(error, response);
+  return unwrapResponse(data, response).mode;
 }
 
 /**
@@ -110,12 +103,7 @@ export async function getAgentTerminalToken(
     },
   );
   if (error) throw apiErrorFromResponse(error, response);
-  const payload = data as { token?: string; data?: { token?: string } };
-  const token = payload.data?.token ?? payload.token;
-  if (!token) {
-    throw new Error("Agent terminal token response was missing a token");
-  }
-  return token;
+  return unwrapResponse(data, response).token;
 }
 
 /**

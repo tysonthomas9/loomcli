@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
-	"github.com/tysonthomas9/loomcli/internal/webui/localredis"
+	"github.com/tysonthomas9/loomcli/internal/infra/localredis"
 )
 
 // startLocalRedis boots an in-process miniredis for terminal-state persistence

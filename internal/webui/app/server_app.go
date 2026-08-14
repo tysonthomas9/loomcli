@@ -9,17 +9,17 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/redis/go-redis/v9"
-
+	"github.com/tysonthomas9/loomcli/internal/app/query/sessionarchive"
 	"github.com/tysonthomas9/loomcli/internal/app/workitemmove"
+	"github.com/tysonthomas9/loomcli/internal/bootstrap"
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
+	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
 	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 	"github.com/tysonthomas9/loomcli/internal/webui"
 	"github.com/tysonthomas9/loomcli/internal/webui/agentcoord"
 	"github.com/tysonthomas9/loomcli/internal/webui/readprojection"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
-	"github.com/tysonthomas9/loomcli/internal/webui/sessioncoord"
 	"github.com/tysonthomas9/loomcli/internal/webui/storeadapter"
-	"github.com/tysonthomas9/loomcli/internal/webui/terminal"
 	"github.com/tysonthomas9/loomcli/internal/webui/workspacecoord"
 )
 
@@ -142,7 +142,7 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 	// SessionKey.Workspace. Per-workspace managers are created lazily on first
 	// AttachSession and use workspace.Path as the shell's cwd. Workspaces are
 	// registered via PTYHook (see RegisterHooks wiring).
-	app.ptyMgr = terminal.NewMultiPTYManager(config.TerminalCmd, config.MaxTerminalSessions)
+	app.ptyMgr = bootstrap.NewLocalTerminalRuntime(config.TerminalCmd, config.MaxTerminalSessions)
 	cleanups = append(cleanups, func() { _ = app.ptyMgr.Close() })
 	logger.Info("multi pty manager initialized", "component", "terminal", "default_command", config.TerminalCmd)
 
@@ -150,8 +150,8 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 	// sessions that the CLI auto-mode creates for agents. Missing tmux is a
 	// soft failure — the agent-terminal live view is disabled, archive logs
 	// still work.
-	if mgr, agentErr := terminal.NewAgentTmuxManager(config.MaxTerminalSessions); agentErr != nil {
-		if errors.Is(agentErr, terminal.ErrTmuxNotFound) {
+	if mgr, agentErr := bootstrap.NewLocalAgentTerminalRuntime(config.MaxTerminalSessions); agentErr != nil {
+		if errors.Is(agentErr, bootstrap.ErrTmuxNotFound) {
 			logger.Warn("tmux not found, agent terminal live view disabled")
 		} else {
 			logger.Warn("failed to initialize agent tmux manager", "err", agentErr)
@@ -340,22 +340,43 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 		AgentDirectory:       workspaceAgents,
 	})
 
-	// Initialize terminal service layer. The surviving methods are tab
-	// metadata CRUD, terminal UI state, and the WS auth token issuer — all
-	// backed by Redis / in-memory state, no tmux required.
+	// Compose Interaction's terminal-tab policy over its private runtime port.
 	{
-		var rc *redis.Client
-		if app.tabMetaStore != nil {
-			rc = app.tabMetaStore.RedisClient()
+		var agentTerminal interaction.TerminalDependencies
+		var workspacePath func(context.Context, string) string
+		if config.Store != nil {
+			workspacePath = func(ctx context.Context, workspaceKey string) string {
+				return storeadapter.ResolveOrHealWorkspacePath(ctx, config.Store, workspaceKey)
+			}
 		}
-		app.termSvc = terminal.NewTerminalService(
-			app.termAuth, app.tabMetaStore, app.hub, rc, app.ptyMgr, app.startedAt,
+		agentTerminal.Placement = storeadapter.NewTerminalPlacement(config.Store, workspacePath)
+		agentTerminal.LiveView = app.agentTmuxMgr
+		agentTerminal.Setup = interaction.NewTerminalSetupCatalog()
+		if config.AgentsCapability != nil {
+			identities := config.AgentsCapability.AgentsAPI()
+			agentTerminal.Agents = identities
+			agentTerminal.Roles = identities
+		}
+		if config.InteractionCapability != nil {
+			nodeID, idErr := interaction.NewUUID()
+			if idErr != nil {
+				return nil, fmt.Errorf("compose Interaction terminal node identity: %w", idErr)
+			}
+			agentTerminal.Sessions = interaction.AgentTerminalSessionDependencies{
+				API:         config.InteractionCapability.InteractionAPI(),
+				Authorities: config.InteractionCapability.SessionAuthorityResolver(),
+				NodeID:      "loom-terminal-" + nodeID,
+				APIURL:      fmt.Sprintf("http://localhost:%d", app.actualPort),
+			}
+		}
+		app.termSvc = interaction.NewTerminalTabs(
+			app.tabMetaStore, app.ptyMgr, app.startedAt, agentTerminal,
 		)
 	}
 
 	// Initialize agent service after terminal metadata so interactive lifecycle
 	// authority can bind process-local PTYs to server-owned agent tabs.
-	app.ptyMgr.SetBeforeKill(NewInteractionPTYBeforeKill(
+	app.ptyMgr.SetLifecycleHook(NewInteractionPTYBeforeKill(
 		app.tabMetaStore,
 		InteractionForceInterrupter(config.InteractionCapability),
 	))
@@ -366,7 +387,7 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 	app.agentRuntime = agentcoord.NewCanonicalInteractiveAgentRuntime(interactiveController)
 	// Agent delivery now owns terminal/log access only. Git and checkout
 	// behavior is composed independently through Source Control Checkout.
-	app.agentSvc = agentcoord.NewAgentService(app.agentTmuxMgr, app.termAuth)
+	app.agentSvc = agentcoord.NewAgentService(app.termSvc, app.termAuth)
 
 	app.sourceBrowse = config.SourceControlBrowse
 	if app.sourceBrowse != nil {
@@ -389,8 +410,17 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 
 	// Initialize session delivery over lifecycle-owner queries and the
 	// immutable Run Capture projection. WebUI never queries Artifacts directly.
-	app.sessSvc = sessioncoord.NewSessionService(
-		config.Store,
+	var executionSessions execution.TaskRunQueries
+	if config.ExecutionCapability != nil {
+		executionSessions = config.ExecutionCapability.TaskRunQueries()
+	}
+	var interactionSessions interaction.SessionQueries
+	if config.InteractionCapability != nil {
+		interactionSessions = config.InteractionCapability.SessionQueries()
+	}
+	app.sessSvc = sessionarchive.NewSessionService(
+		executionSessions,
+		interactionSessions,
 		app.sessionHistoryStore,
 		webui.RunCaptureProjection(config.RunCaptureCapability),
 	)
@@ -411,7 +441,7 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 // terminal service rather than the persistence store so PTYAlive reflects the
 // current server process.
 type interactiveRuntimeTabSource struct {
-	terminalService terminal.TerminalService
+	terminalService interaction.TerminalTabs
 }
 
 func (s interactiveRuntimeTabSource) ListInteractiveRuntimeTabs(

@@ -5,14 +5,13 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
-	"github.com/tysonthomas9/loomcli/internal/webui/terminal"
 )
 
 // HandleGetTerminalState returns the persisted terminal UI state.
-func HandleGetTerminalState(svc terminal.TerminalService) http.HandlerFunc {
+func HandleGetTerminalState(state PresentationState) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		wsID := middleware.WorkspaceFromContext(r.Context())
-		activeTab, err := svc.GetTerminalState(r.Context(), wsID)
+		activeTab, err := state.GetActiveTab(r.Context(), wsID)
 		if err != nil {
 			handler.HandleServiceError(w, err)
 			return
@@ -25,7 +24,7 @@ func HandleGetTerminalState(svc terminal.TerminalService) http.HandlerFunc {
 }
 
 // HandlePatchTerminalState updates the persisted terminal UI state.
-func HandlePatchTerminalState(svc terminal.TerminalService) http.HandlerFunc {
+func HandlePatchTerminalState(state PresentationState) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
 			ActiveTab string `json:"active_tab"`
@@ -36,7 +35,7 @@ func HandlePatchTerminalState(svc terminal.TerminalService) http.HandlerFunc {
 		}
 
 		wsID := middleware.WorkspaceFromContext(r.Context())
-		if err := svc.PatchTerminalState(r.Context(), wsID, req.ActiveTab); err != nil {
+		if err := state.SetActiveTab(r.Context(), wsID, req.ActiveTab); err != nil {
 			handler.HandleServiceError(w, err)
 			return
 		}

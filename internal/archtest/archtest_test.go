@@ -86,7 +86,7 @@ func TestCheckedInManifestsAndRepository(t *testing.T) {
 	if got, want := report.MutationCommands, 107; got != want {
 		t.Fatalf("mutation commands = %d, want %d", got, want)
 	}
-	if got, want := report.DirectPersistenceWrites, 82; got != want {
+	if got, want := report.DirectPersistenceWrites, 84; got != want {
 		t.Fatalf("direct persistence-write rows = %d, want %d", got, want)
 	}
 	if got, want := report.RuntimeComponents, 71; got != want {
@@ -1078,18 +1078,18 @@ func TestRetiredCompatibilitySurfacesCannotReturn(t *testing.T) {
 		"internal/app/serve/execution_task_run_recovery.go": {
 			"LegacyDriverRuns", "AllowLegacyStoreAdapters", "executionTaskRunLegacyRecoveryAdapter",
 		},
-		"internal/app/serve/execution.go":                     {"LegacyDriverRuns:"},
-		"internal/driver/task_worker.go":                      {"legacyTaskRunFromExecution"},
-		"internal/driver/task_worktree_resolver.go":           {"repoBasename"},
-		"internal/domain/control_plane.go":                    {"AgentSessionKindOrchestration"},
-		"internal/webui/app/server.go":                        {"wsExistsFn"},
-		"internal/webui/sessioncoord/execution_projection.go": {"legacyAgentSessionTaskRunID"},
-		"internal/webui/sessioncoord/service.go": {
+		"internal/app/serve/execution.go":                           {"LegacyDriverRuns:"},
+		"internal/driver/task_worker.go":                            {"legacyTaskRunFromExecution"},
+		"internal/driver/task_worktree_resolver.go":                 {"repoBasename"},
+		"internal/domain/control_plane.go":                          {"AgentSessionKindOrchestration"},
+		"internal/webui/app/server.go":                              {"wsExistsFn"},
+		"internal/app/query/sessionarchive/execution_projection.go": {"legacyAgentSessionTaskRunID"},
+		"internal/app/query/sessionarchive/service.go": {
 			"NewSessionServiceWithRuntimeDir", "NewSessionServiceWithRunCaptures",
 		},
-		"internal/webui/sessioncoord/ports.go": {"type SessionRecord =", "ValidateSessionHistoryIssueID"},
-		"internal/webui/server_config.go":      {"NotifyTokenDir", "SessionRuntimeDir"},
-		"internal/webui/capabilities.go":       {"ArtifactQueryAPI"},
+		"internal/app/query/sessionarchive/api.go": {"type SessionRecord =", "ValidateSessionHistoryIssueID"},
+		"internal/webui/server_config.go":          {"NotifyTokenDir", "SessionRuntimeDir"},
+		"internal/webui/capabilities.go":           {"ArtifactQueryAPI"},
 		"internal/cli/backends/backend_session_env.go": {
 			"SetActiveSessionRuntimeEnv", "GetActiveSessionRuntimeEnv", "ClearActiveSessionEnv", "activeSessionEnvVars",
 		},
@@ -1176,7 +1176,7 @@ func TestRetiredTerminalLaunchFallbackCannotReturn(t *testing.T) {
 		t.Fatal(err)
 	}
 	files := map[string][]string{
-		"internal/webui/terminal/session_command.go": {
+		"internal/modules/interaction/terminal_launch.go": {
 			"ArgvForSession", "session names encode the backend",
 		},
 		"internal/webui/handlers/terminal/ws.go": {
@@ -1207,6 +1207,67 @@ func TestRetiredTerminalLaunchFallbackCannotReturn(t *testing.T) {
 			if strings.Contains(string(content), fragment) {
 				t.Errorf("retired terminal launch fallback %q returned in %s", fragment, relative)
 			}
+		}
+	}
+}
+
+func TestPhase10InteractionOwnsTerminalRuntimeAndLegacyCoordinatorsStayDeleted(t *testing.T) {
+	root, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, retired := range []string{
+		"internal/webui/terminal",
+		"internal/webui/sessioncoord",
+		"internal/webui/localredis",
+	} {
+		if _, statErr := os.Stat(filepath.Join(root, filepath.FromSlash(retired))); !os.IsNotExist(statErr) {
+			t.Errorf("retired coordinator %s returned (stat error: %v)", retired, statErr)
+		}
+	}
+
+	for _, relative := range []string{
+		"internal/webui/handlers/terminal",
+		"internal/webui/agentcoord",
+		"internal/webui/hooks",
+	} {
+		err := filepath.WalkDir(filepath.Join(root, filepath.FromSlash(relative)), func(path string, entry fs.DirEntry, walkErr error) error {
+			if walkErr != nil {
+				return walkErr
+			}
+			if entry.IsDir() || filepath.Ext(path) != ".go" || strings.HasSuffix(path, "_test.go") {
+				return nil
+			}
+			content, readErr := os.ReadFile(path)
+			if readErr != nil {
+				return readErr
+			}
+			for _, forbidden := range []string{
+				"internal/bootstrap",
+				"internal/infra/localredis",
+				"internal/infra/pty",
+				"internal/localworkspace",
+				"internal/ops",
+				"internal/store",
+			} {
+				if strings.Contains(string(content), forbidden) {
+					t.Errorf("terminal delivery package imports forbidden owner or adapter path %q: %s", forbidden, path)
+				}
+			}
+			return nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	content, err := os.ReadFile(filepath.Join(root, "internal/modules/interaction/terminal_runtime.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, required := range []string{"type TerminalRuntime interface", "type TerminalAttachment interface"} {
+		if !strings.Contains(string(content), required) {
+			t.Errorf("Interaction terminal port is missing %q", required)
 		}
 	}
 }

@@ -9,20 +9,20 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/app/query/sessionarchive"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 	"github.com/tysonthomas9/loomcli/internal/webui"
 	"github.com/tysonthomas9/loomcli/internal/webui/agentcoord"
-	"github.com/tysonthomas9/loomcli/internal/webui/sessioncoord"
 	"github.com/tysonthomas9/loomcli/internal/webui/workspacecoord"
 
+	"github.com/tysonthomas9/loomcli/internal/infra/pty"
 	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	healthhandlers "github.com/tysonthomas9/loomcli/internal/webui/handlers/health"
 	hterminal "github.com/tysonthomas9/loomcli/internal/webui/handlers/terminal"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
-	"github.com/tysonthomas9/loomcli/internal/webui/terminal"
 )
 
 // setupTestRoutes constructs handlers and registers routes on app.mux.
@@ -194,7 +194,7 @@ func TestSetupRoutes_FlatTerminalWSEndpointReturns404(t *testing.T) {
 // return 404 even when termManager is non-nil (they have been removed in favor
 // of workspace-scoped equivalents).
 func TestSetupRoutes_FlatTerminalRoutesReturn404(t *testing.T) {
-	ptyMgr := terminal.NewMultiPTYManager("bash", 0)
+	ptyMgr := pty.NewRuntime("bash", 0)
 	defer ptyMgr.Close()
 
 	app := &Server{ptyMgr: ptyMgr}
@@ -232,7 +232,7 @@ func TestSetupRoutes_FlatTerminalRoutesReturn404(t *testing.T) {
 // calling handleTerminalWS directly with nil manager returns 503.
 // This complements the route registration test by verifying handler behavior.
 func TestSetupRoutes_TerminalEndpointNilManagerReturns503(t *testing.T) {
-	handler := hterminal.HandleTerminalWS(nil, nil, nil, "", nil, nil, nil, time.Time{})
+	handler := hterminal.HandleTerminalWS(nil, nil, nil, "", nil, nil, time.Time{}, hterminal.InteractionDependencies{})
 
 	req := httptest.NewRequest(http.MethodGet, "/api/terminal/ws?session=test", nil)
 	rr := httptest.NewRecorder()
@@ -252,8 +252,8 @@ func TestSetupRoutes_TerminalEndpointNilManagerReturns503(t *testing.T) {
 		t.Error("expected success to be false")
 	}
 
-	if resp["error"] != "terminal manager not initialized" {
-		t.Errorf("expected error 'terminal manager not initialized', got %q", resp["error"])
+	if resp["error"] != "terminal service not initialized" {
+		t.Errorf("expected error 'terminal service not initialized', got %q", resp["error"])
 	}
 }
 
@@ -354,7 +354,7 @@ func TestSetupRoutes_SSEEndpointRegisteredOnWorkspaceScope(t *testing.T) {
 	defer hub.Stop()
 
 	app := &Server{hub: hub, wsResolveFn: testWorkspaceResolver("test-ws")}
-	app.sessSvc = sessioncoord.NewSessionService(nil, nil, nil)
+	app.sessSvc = sessionarchive.NewSessionService(nil, nil, nil, nil)
 	setupTestRoutes(t, app)
 
 	// Use a context with short timeout because the SSE handler streams forever
@@ -387,7 +387,7 @@ func TestSetupRoutes_SSEEndpointUsesCanonicalWorkspace(t *testing.T) {
 			return middleware.WorkspaceRef{RequestedID: requestedID, CanonicalID: "canonical-ws"}, true
 		},
 	}
-	app.sessSvc = sessioncoord.NewSessionService(nil, nil, nil)
+	app.sessSvc = sessionarchive.NewSessionService(nil, nil, nil, nil)
 	setupTestRoutes(t, app)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -432,7 +432,7 @@ func TestSetupRoutes_WorkspaceMonitorStatusInjectsWorkspace(t *testing.T) {
 			},
 		},
 	}
-	app.sessSvc = sessioncoord.NewSessionService(nil, nil, nil)
+	app.sessSvc = sessionarchive.NewSessionService(nil, nil, nil, nil)
 	setupTestRoutes(t, app)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/test-ws/monitor/status", nil)
@@ -469,7 +469,7 @@ func TestSetupRoutes_WorkspaceGetUsesCanonicalWorkspace(t *testing.T) {
 			return middleware.WorkspaceRef{RequestedID: requestedID, CanonicalID: "canonical-ws"}, true
 		},
 	}
-	app.sessSvc = sessioncoord.NewSessionService(nil, nil, nil)
+	app.sessSvc = sessionarchive.NewSessionService(nil, nil, nil, nil)
 	setupTestRoutes(t, app)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/alias-ws", nil)
@@ -507,7 +507,7 @@ func TestSetupRoutes_WorkspaceBackendGetEndpoint(t *testing.T) {
 		},
 	}
 	app := &Server{config: webui.ServerConfig{}, wsResolveFn: testWorkspaceResolver("test-ws"), workspaceSvc: wsSvc}
-	app.sessSvc = sessioncoord.NewSessionService(nil, nil, nil)
+	app.sessSvc = sessionarchive.NewSessionService(nil, nil, nil, nil)
 	setupTestRoutes(t, app)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/test-ws/config/backend", nil)
@@ -547,7 +547,7 @@ func TestSetupRoutes_WorkspaceBackendPatchEndpoint(t *testing.T) {
 		},
 	}
 	app := &Server{config: webui.ServerConfig{}, wsResolveFn: testWorkspaceResolver("test-ws"), workspaceSvc: wsSvc}
-	app.sessSvc = sessioncoord.NewSessionService(nil, nil, nil)
+	app.sessSvc = sessionarchive.NewSessionService(nil, nil, nil, nil)
 	setupTestRoutes(t, app)
 
 	req := httptest.NewRequest(http.MethodPatch, "/api/workspaces/test-ws/config/backend",
@@ -609,7 +609,7 @@ func TestSetupRoutes_WorkspaceRenamePatchEndpoint(t *testing.T) {
 		workspaceCatalog: catalog,
 		workspaceStore:   st.Workspaces(),
 	}
-	app.sessSvc = sessioncoord.NewSessionService(nil, nil, nil)
+	app.sessSvc = sessionarchive.NewSessionService(nil, nil, nil, nil)
 	setupTestRoutes(t, app)
 
 	req := httptest.NewRequest(http.MethodPatch, "/api/workspaces/test-ws/name",
@@ -663,7 +663,7 @@ func TestSetupRoutes_WorkspaceBackendPatchReadsBody(t *testing.T) {
 		},
 	}
 	app := &Server{config: webui.ServerConfig{}, wsResolveFn: testWorkspaceResolver("test-ws"), workspaceSvc: wsSvc}
-	app.sessSvc = sessioncoord.NewSessionService(nil, nil, nil)
+	app.sessSvc = sessionarchive.NewSessionService(nil, nil, nil, nil)
 	setupTestRoutes(t, app)
 
 	req := httptest.NewRequest(http.MethodPatch, "/api/workspaces/test-ws/config/backend",
@@ -686,7 +686,7 @@ func TestSetupRoutes_WorkspaceBackendPatchReadsBody(t *testing.T) {
 // TestSetupRoutes_FlatTerminalTokenReturns404 verifies that GET /api/terminal/token
 // returns 404 (flat route removed, only workspace-scoped route exists).
 func TestSetupRoutes_FlatTerminalTokenReturns404(t *testing.T) {
-	ptyMgr := terminal.NewMultiPTYManager("bash", 0)
+	ptyMgr := pty.NewRuntime("bash", 0)
 	t.Cleanup(func() { ptyMgr.Close() })
 
 	termAuth, err := realtime.NewTerminalAuth()
@@ -941,7 +941,7 @@ func TestFlatAgentRoutesRemoved(t *testing.T) {
 	app.sourceMutate = sourcePorts
 	app.sourceCheckout = sourcePorts
 	app.issueDiff = &stubIssueDiff{}
-	app.sessSvc = sessioncoord.NewSessionService(nil, nil, nil)
+	app.sessSvc = sessionarchive.NewSessionService(nil, nil, nil, nil)
 	setupTestRoutes(t, app)
 
 	// Removed flat routes; each must return 404.
