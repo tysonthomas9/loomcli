@@ -1,0 +1,89 @@
+schema_version: 1
+id: backend
+label: Backend Development
+description: Architect-led service team with a backend implementer, a data engineer and a QA and review pair.
+revision: 1
+
+roles:
+  # Design role: task_filter "any" + a required label. NEVER needs_plan/needs_design —
+  # the worker CLI rejects the first and mis-routes the second.
+  - name: api-architect
+    kind: worker
+    display_label: Architecture
+    description: Turns backend tasks into implementable designs with API contracts, data models, migration plans and file-level change lists.
+    prompt_file: builtin:team-architect
+    task_filter: any
+    labels: [architect]
+    effort: high
+    skills: [design, api]
+    read_only: false
+
+  # Shared verbatim with the fullstack-app bundle so applying both templates
+  # converges on one agent role instead of reporting a divergence.
+  - name: backend-dev
+    kind: worker
+    display_label: Developer
+    description: Implements server-side tasks against the design's API contract; extends tests for changed behavior.
+    prompt_file: builtin:team-backend-dev
+    task_filter: has_design
+    exclude_labels: [architect]
+    effort: medium
+    skills: [backend, api]
+
+  # denied_tools stays EMPTY: only claude enforces tool lists and a non-empty list is a
+  # hard error on every other backend. Intended-but-unshipped deny patterns:
+  # destructive database commands outside a migration file. The restraint is stated
+  # in builtin:team-data-engineer's prose instead.
+  - name: data-engineer
+    kind: worker
+    display_label: Developer
+    description: Implements schema, migration and data-pipeline tasks against an approved design, with reversible migrations and seed fixtures.
+    prompt_file: builtin:team-data-engineer
+    task_filter: has_design
+    exclude_labels: [architect]
+    effort: medium
+    skills: [data, migration]
+    denied_tools: []
+
+  # Same name as the fullstack-app bundle's QA agent role but a different lens
+  # (integration/contract rather than unit/e2e), so a workspace that applied
+  # fullstack-app first reports this one as diverged rather than matched.
+  - name: qa-engineer
+    kind: worker
+    display_label: QA
+    description: Writes and runs unit, e2e, integration and contract tests against a task's acceptance criteria and files defects as follow-up tasks.
+    prompt_file: builtin:team-qa
+    task_filter: has_design
+    exclude_labels: [architect]
+    effort: medium
+    skills: [qa, testing, integration]
+    denied_tools: []
+
+  - name: code-reviewer
+    kind: interactive
+    display_label: QA
+    description: Human-driven PR review terminal; reads diffs and asks before any GitHub mutation.
+    prompt_file: builtin:pr-review
+    effort: high
+
+agents:
+  - name: api-architect-1
+    role_name: api-architect
+    auto: true
+    desired_state: running
+    cross_repo: true
+  - name: backend-dev-1
+    role_name: backend-dev
+    auto: true
+    desired_state: running
+    cross_repo: true
+  - name: data-engineer-1
+    role_name: data-engineer
+    auto: true
+    desired_state: running
+    cross_repo: true
+  - name: qa-engineer-1
+    role_name: qa-engineer
+    auto: true
+    desired_state: running
+    cross_repo: true

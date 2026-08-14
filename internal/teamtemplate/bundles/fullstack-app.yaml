@@ -1,0 +1,82 @@
+schema_version: 1
+id: fullstack-app
+label: Full-Stack App Development
+description: Architect-led team with split frontend/backend implementers plus a QA and review pair.
+revision: 1
+
+roles:
+  # Design role: task_filter "any" + a required label. NEVER needs_plan/needs_design —
+  # the worker CLI rejects the first and mis-routes the second.
+  - name: app-architect
+    kind: worker
+    display_label: Architecture
+    description: Turns full-stack tasks into implementable designs with interface contracts, data models and file-level change lists.
+    prompt_file: builtin:team-architect
+    task_filter: any
+    labels: [architect]
+    effort: high
+    skills: [design, architecture]
+    read_only: false
+
+  - name: frontend-dev
+    kind: worker
+    display_label: Developer
+    description: Implements UI tasks against an approved design spec; verifies loading/empty/error states and accessibility basics.
+    prompt_file: builtin:team-frontend-dev
+    task_filter: has_design
+    exclude_labels: [architect]
+    effort: medium
+    skills: [frontend, ui]
+
+  - name: backend-dev
+    kind: worker
+    display_label: Developer
+    description: Implements server-side tasks against the design's API contract; extends tests for changed behavior.
+    prompt_file: builtin:team-backend-dev
+    task_filter: has_design
+    exclude_labels: [architect]
+    effort: medium
+    skills: [backend, api]
+
+  # denied_tools stays EMPTY: only claude enforces tool lists and a non-empty list is a
+  # hard error on every other backend. Intended-but-unshipped deny patterns:
+  # push/deploy-shaped Bash. The restraint is stated in builtin:team-qa's prose instead.
+  - name: qa-engineer
+    kind: worker
+    display_label: QA
+    description: Writes and runs unit, e2e, integration and contract tests against a task's acceptance criteria and files defects as follow-up tasks.
+    prompt_file: builtin:team-qa
+    task_filter: has_design
+    exclude_labels: [architect]
+    effort: medium
+    skills: [qa, testing, integration]
+    denied_tools: []
+
+  - name: code-reviewer
+    kind: interactive
+    display_label: QA
+    description: Human-driven PR review terminal; reads diffs and asks before any GitHub mutation.
+    prompt_file: builtin:pr-review
+    effort: high
+
+agents:
+  - name: app-architect-1
+    role_name: app-architect
+    auto: true
+    desired_state: running
+    cross_repo: true
+  - name: frontend-dev-1
+    role_name: frontend-dev
+    auto: true
+    desired_state: running
+    cross_repo: true
+  - name: backend-dev-1
+    role_name: backend-dev
+    auto: true
+    desired_state: running
+    cross_repo: true
+  - name: qa-engineer-1
+    role_name: qa-engineer
+    auto: true
+    desired_state: running
+    cross_repo: true
