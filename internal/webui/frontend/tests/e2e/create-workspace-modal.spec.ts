@@ -427,18 +427,34 @@ test.describe("CreateWorkspaceModal", () => {
       await expect(page.getByTestId("create-workspace-submit")).toBeEnabled();
     });
 
-    test("shows the clone-only Repository URL field", async ({ page }) => {
+    test("defaults to clone source and switches to a local path field", async ({
+      page,
+    }) => {
       await setupMocks(page);
       await navigateToApp(page);
       await openCreateWorkspaceModal(page);
 
+      await expect(
+        page.getByRole("radio", { name: "Clone from Git URL" }),
+      ).toBeChecked();
       await expect(
         page.getByTestId("create-workspace-clone-url"),
       ).toBeVisible();
       await expect(page.getByTestId("create-workspace-repo-path")).toHaveCount(
         0,
       );
-      await expect(page.getByTestId("create-workspace-path")).toHaveCount(0);
+
+      await page.getByRole("radio", { name: "Use local path" }).check();
+
+      await expect(page.getByTestId("create-workspace-clone-url")).toHaveCount(
+        0,
+      );
+      await expect(
+        page.getByTestId("create-workspace-repo-path"),
+      ).toBeVisible();
+      await expect(
+        page.getByTestId("create-workspace-repo-path"),
+      ).toHaveAttribute("placeholder", "/Users/you/code/my-repo");
     });
   });
 
@@ -649,6 +665,35 @@ test.describe("CreateWorkspaceModal", () => {
     });
   });
 
+  test.describe("Form Submission - Local Path", () => {
+    test("submits the existing empty workspace request shape", async ({
+      page,
+    }) => {
+      const { postCalls } = await setupMocks(page);
+      await navigateToApp(page);
+      await openCreateWorkspaceModal(page);
+
+      await page.getByRole("radio", { name: "Use local path" }).check();
+      await page.getByTestId("create-workspace-name").fill("local-workspace");
+      await page
+        .getByTestId("create-workspace-repo-path")
+        .fill("/Users/me/code/local-repo");
+      await page.getByTestId("create-workspace-branch").fill("feature-work");
+
+      const postPromise = waitForCreatePost(page);
+      await page.getByTestId("create-workspace-submit").click();
+      await postPromise;
+
+      expect(postCalls).toHaveLength(1);
+      expect(postCalls[0].body).toEqual({
+        name: "local-workspace",
+        type: "empty",
+        repos: ["/Users/me/code/local-repo"],
+        branch: "feature-work",
+      });
+    });
+  });
+
   test.describe("Loading State", () => {
     test("submit shows 'Creating...' and disables form during submission", async ({
       page,
@@ -783,6 +828,15 @@ test.describe("CreateWorkspaceModal", () => {
       await expect(
         page.getByTestId("create-workspace-clone-url"),
       ).toHaveAttribute("id", "ws-clone-url");
+
+      // Shared optional branch label → ws-branch input
+      await expect(page.locator('label[for="ws-branch"]')).toHaveText(
+        "Branch (optional)",
+      );
+      await expect(page.getByTestId("create-workspace-branch")).toHaveAttribute(
+        "id",
+        "ws-branch",
+      );
     });
   });
 });

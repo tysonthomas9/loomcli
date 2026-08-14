@@ -147,6 +147,33 @@ describe("CreateWorkspaceModal", () => {
       expect(dialog).toHaveAttribute("aria-label", "New Workspace");
     });
 
+    it("offers a local repository path source", () => {
+      render(
+        <CreateWorkspaceModal
+          isOpen={true}
+          onClose={onClose}
+          onSuccess={onSuccess}
+        />,
+      );
+
+      expect(
+        screen.getByRole("radio", { name: "Clone from Git URL" }),
+      ).toBeChecked();
+      const localSource = screen.getByRole("radio", {
+        name: "Use local path",
+      });
+      expect(localSource).not.toBeChecked();
+
+      fireEvent.click(localSource);
+
+      expect(screen.queryByLabelText("Repository URL")).not.toBeInTheDocument();
+      expect(screen.getByLabelText("Local repository path")).toHaveAttribute(
+        "placeholder",
+        "/Users/you/code/my-repo",
+      );
+      expect(screen.getByLabelText("Branch (optional)")).toBeInTheDocument();
+    });
+
     it("prefills provided clone workspace values", () => {
       render(
         <CreateWorkspaceModal
@@ -418,6 +445,39 @@ describe("CreateWorkspaceModal", () => {
           name: "cloned-ws",
           type: "clone",
           clone_urls: ["https://github.com/example/repo.git"],
+        });
+      });
+    });
+
+    it("sends the existing empty workspace shape for a local path", async () => {
+      mockCreateWorkspace.mockResolvedValue(MOCK_CREATE_RESULT);
+
+      render(
+        <CreateWorkspaceModal
+          isOpen={true}
+          onClose={onClose}
+          onSuccess={onSuccess}
+        />,
+      );
+
+      fireEvent.click(screen.getByRole("radio", { name: "Use local path" }));
+      fireEvent.change(screen.getByTestId("create-workspace-name"), {
+        target: { value: "local-ws" },
+      });
+      fireEvent.change(screen.getByTestId("create-workspace-repo-path"), {
+        target: { value: " /Users/me/code/local-repo " },
+      });
+      fireEvent.change(screen.getByTestId("create-workspace-branch"), {
+        target: { value: " feature-work " },
+      });
+      fireEvent.click(screen.getByTestId("create-workspace-submit"));
+
+      await waitFor(() => {
+        expect(mockCreateWorkspace).toHaveBeenCalledWith({
+          name: "local-ws",
+          type: "empty",
+          repos: ["/Users/me/code/local-repo"],
+          branch: "feature-work",
         });
       });
     });
