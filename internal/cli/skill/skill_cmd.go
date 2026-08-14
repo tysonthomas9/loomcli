@@ -82,9 +82,12 @@ func newSkillCommand() *cobra.Command {
 	}
 	cmd.AddCommand(
 		newSkillCreateCommand(),
+		newSkillImportCommand(),
 		newSkillInstallCommand(),
 		newSkillListCommand(),
+		newSkillPackCommand(),
 		newSkillShowCommand(),
+		newSkillSyncCommand(),
 		newSkillUpdateCommand(),
 		newSkillDeleteCommand(),
 	)
@@ -246,6 +249,9 @@ func runSkillInstall(cmd *cobra.Command, source string, flags skillInstallFlags)
 	if len(fetched.DroppedFrontmatterKeys) > 0 {
 		_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "Notice: dropped SKILL.md frontmatter keys: %s\n", strings.Join(fetched.DroppedFrontmatterKeys, ", "))
 	}
+	if len(fetched.SkippedHiddenPaths) > 0 {
+		_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "Notice: skipped hidden skill paths: %s\n", strings.Join(fetched.SkippedHiddenPaths, ", "))
+	}
 	ref, err := parseSkillRef(fetched.Name, flags.scope)
 	if err != nil {
 		return err
@@ -397,11 +403,24 @@ func refuseAgentSkillWrite(command string) error {
 // "writes are deferred" path instead of leaking through to a generic usage
 // error that hides the product decision.
 func skillWriteArgs(command string) cobra.PositionalArgs {
+	return skillWriteExactArgs(command, 1)
+}
+
+func skillWriteExactArgs(command string, count int) cobra.PositionalArgs {
 	return func(cmd *cobra.Command, args []string) error {
 		if err := refuseAgentSkillWrite(command); err != nil {
 			return err
 		}
-		return cobra.ExactArgs(1)(cmd, args)
+		return cobra.ExactArgs(count)(cmd, args)
+	}
+}
+
+func skillWriteMaximumArgs(command string, count int) cobra.PositionalArgs {
+	return func(cmd *cobra.Command, args []string) error {
+		if err := refuseAgentSkillWrite(command); err != nil {
+			return err
+		}
+		return cobra.MaximumNArgs(count)(cmd, args)
 	}
 }
 

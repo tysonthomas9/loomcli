@@ -122,6 +122,9 @@ func TestSkillInstallCommandFetchesAndCreates(t *testing.T) {
 			mode: 0o755,
 			body: "#!/bin/sh\necho checked\n",
 		},
+		tarFixtureEntry{name: "repo-main/.env", mode: 0o644, body: "TOKEN=secret\n"},
+		tarFixtureEntry{name: "repo-main/.git/config", mode: 0o644, body: "secret\n"},
+		tarFixtureEntry{name: "repo-main/.git/latest", kind: tar.TypeSymlink, mode: 0o777, link: "config"},
 	)
 	requests := 0
 	server := serveTarball(t, tarball, func(r *http.Request) {
@@ -152,6 +155,9 @@ func TestSkillInstallCommandFetchesAndCreates(t *testing.T) {
 	}
 	if !strings.Contains(out, "Notice: dropped SKILL.md frontmatter keys: license, metadata") {
 		t.Fatalf("install output is missing dropped-key notice: %q", out)
+	}
+	if !strings.Contains(out, "Notice: skipped hidden skill paths: .env, .git") {
+		t.Fatalf("install output is missing hidden-path notice: %q", out)
 	}
 	if requests != 1 {
 		t.Fatalf("codeload requests = %d, want exactly 1", requests)
@@ -456,6 +462,22 @@ func TestGitHubSkillInstallerRejectsSizeCaps(t *testing.T) {
 	}
 }
 
+func TestGitHubSkillInstallerRejectsTooManyFiles(t *testing.T) {
+	entries := make([]tarFixtureEntry, 0, maxSkillFileCount+1)
+	entries = append(entries, tarFixtureEntry{name: "repo-main/SKILL.md", mode: 0o644, body: skillDocument("root-skill", "Root")})
+	for index := 0; index < maxSkillFileCount; index++ {
+		entries = append(entries, tarFixtureEntry{name: fmt.Sprintf("repo-main/file-%04d.txt", index), mode: 0o644})
+	}
+	tarball := buildSkillTarball(t, entries...)
+	server := serveTarball(t, tarball, nil)
+	installer := githubSkillInstaller{HTTPClient: server.Client(), CodeloadBaseURL: server.URL}
+
+	_, err := installer.Fetch(context.Background(), "owner/repo", "")
+	if err == nil || !strings.Contains(err.Error(), fmt.Sprintf("more than %d regular files", maxSkillFileCount)) {
+		t.Fatalf("archive file-count error = %v", err)
+	}
+}
+
 func TestGitHubSkillInstallerRejectsSparseLogicalSize(t *testing.T) {
 	const logicalSize = int64(1 << 30)
 	tarball := buildPAXSparseTarball(t, logicalSize)
@@ -522,6 +544,7 @@ type tarFixtureEntry struct {
 	body string
 	data []byte
 	link string
+	pax  map[string]string
 }
 
 func buildSkillTarball(t *testing.T, entries ...tarFixtureEntry) []byte {
@@ -539,10 +562,11 @@ func buildSkillTarball(t *testing.T, entries ...tarFixtureEntry) []byte {
 			data = []byte(entry.body)
 		}
 		header := &tar.Header{
-			Name:     entry.name,
-			Typeflag: kind,
-			Mode:     entry.mode,
-			Linkname: entry.link,
+			Name:       entry.name,
+			Typeflag:   kind,
+			Mode:       entry.mode,
+			Linkname:   entry.link,
+			PAXRecords: entry.pax,
 		}
 		if kind == tar.TypeReg || kind == tar.TypeRegA {
 			header.Size = int64(len(data))
