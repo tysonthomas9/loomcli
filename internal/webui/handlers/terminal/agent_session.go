@@ -15,6 +15,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/localworkspace"
+	"github.com/tysonthomas9/loomcli/internal/skillmat"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
@@ -97,15 +98,16 @@ func ensureAgentTerminalSession(ctx context.Context, svc service.TerminalService
 		return nil, err
 	}
 	existing := selectAgentTerminalTab(tabs, agentName)
-	if existing != nil && existing.PTYAlive {
+	livePTYPresent := existing != nil && existing.PTYAlive
+	if livePTYPresent {
 		// Cache-validity check: if the agent's effective backend/role has
 		// changed since the existing tab was built, the cached launch spec
 		// is stale (e.g. agent was created with no backend, workspace
 		// default was codex, then user set agent.backend = claude). The
 		// running PTY is still on the old backend. Rebuild a candidate
-		// spec and compare argv; if they differ, fall through to the
-		// rebuild path which will issue a fresh tab metadata. The stale
-		// PTY is killed by svc.PutTab → reattach when the user reloads.
+		// spec and compare argv; if they differ, fall through to issue fresh
+		// tab metadata. The fresh UUID does not replace or kill the live PTY,
+		// so the rebuild must not materialize into its active worktree.
 		if !agentTerminalLaunchSpecStale(ctx, st, workspace, existing, agent) {
 			return existing, nil
 		}
@@ -115,6 +117,11 @@ func ensureAgentTerminalSession(ctx context.Context, svc service.TerminalService
 	}
 
 	sessionName, label, sortOrder := newAgentTerminalTabPlacement(tabs, existing, agentName)
+	if roleKind == domain.RoleKindInteractive && !livePTYPresent {
+		if err := materializeInteractiveSkills(ctx, st, workspace, agent.RoleName, agentLaunchCwd(workspace, agent)); err != nil {
+			return nil, err
+		}
+	}
 	agentForLaunch, orchestratorID, err := ensureTerminalOrchestratorLink(ctx, st, workspace, sessionName, agent, roleKind)
 	if err != nil {
 		return nil, err
@@ -130,6 +137,21 @@ func ensureAgentTerminalSession(ctx context.Context, svc service.TerminalService
 	}
 	pruneStaleAgentTerminalTabs(ctx, svc, workspace, agentName, sessionName, tabs)
 	return svc.GetTab(ctx, workspace, sessionName)
+}
+
+func materializeInteractiveSkills(ctx context.Context, st store.Store, workspace, roleName, targetDir string) error {
+	if targetDir == "" {
+		return nil
+	}
+	if err := skillmat.Materialize(ctx, st, workspace, roleName, targetDir); err != nil {
+		if skillmat.IsStoreUnavailable(err) {
+			slog.Warn("skill store unavailable; continuing with existing materialization",
+				"workspace", workspace, "role", roleName, "target", targetDir, "err", err)
+			return nil
+		}
+		return service.ErrInternal("failed to materialize agent skills", err)
+	}
+	return nil
 }
 
 // agentTerminalLaunchSpecStale returns true when the existing tab's cached
