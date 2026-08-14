@@ -71,7 +71,6 @@
 }
 
 .card:focus-visible,
-.blankButton:focus-visible,
 .errorBlock button:focus-visible {
   outline: 2px solid var(--color-focus);
   outline-offset: 2px;
@@ -157,18 +156,8 @@
   justify-content: flex-end;
 }
 
-.blankButton {
-  padding: 6px 0;
-  border: 0;
-  background: transparent;
-  color: var(--color-text-muted);
-  font: inherit;
-  font-size: 12px;
-  cursor: pointer;
-}
-
-.blankButton:hover {
-  color: var(--color-text-primary);
+.pickerFooter {
+  justify-content: flex-end;
 }
 
 .progressBlock {

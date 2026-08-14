@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { AetherModal, aetherModalStyles } from "@/components/AetherModal";
+import { LAYER_MODAL, useRegisterEscapeLayer } from "@/hooks";
 import { useTeamTemplates } from "@/hooks/agents";
 import type {
   TeamTemplate,
@@ -79,6 +80,7 @@ export function TeamTemplateModal({
   const handleClose = (): void => {
     if (!isApplying) onClose();
   };
+  useRegisterEscapeLayer(LAYER_MODAL, handleClose, isOpen && !isApplying);
 
   const submit = async (teamTemplate: TeamTemplate, retry: boolean) => {
     if (isApplying) return;
@@ -153,14 +155,6 @@ export function TeamTemplateModal({
       </button>
     ) : (
       <div className={styles.pickerFooter}>
-        <button
-          type="button"
-          className={styles.blankButton}
-          onClick={handleClose}
-          disabled={isApplying}
-        >
-          Blank — keep this workspace as-is
-        </button>
         <button
           type="button"
           className={aetherModalStyles.primaryButton}
