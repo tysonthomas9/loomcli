@@ -6,8 +6,8 @@ import type { Page } from "@playwright/test";
  *
  * Tests the full workspace creation flow: opening the modal via the
  * WorkspaceTree "+ New Workspace" button, interacting with form fields
- * (multi-value URL chips, path chips, type switching), submitting to
- * the mocked API, and verifying success/error behavior.
+ * (onboarding defaults and multi-value URL chips), submitting to the mocked
+ * API, and verifying success/error behavior.
  */
 
 // -- Mock data --
@@ -132,8 +132,7 @@ async function setupMocks(
           contentType: "application/json",
           body: JSON.stringify({
             success: false,
-            error:
-              options.postErrorMessage ?? "Failed to create workspace",
+            error: options.postErrorMessage ?? "Failed to create workspace",
           }),
         });
         return;
@@ -282,10 +281,10 @@ async function setupMocks(
         method === "GET"
       ) {
         return Promise.resolve(
-          new Response(
-            JSON.stringify({ success: true, data: [issue] }),
-            { status: 200, headers: { "Content-Type": "application/json" } },
-          ),
+          new Response(JSON.stringify({ success: true, data: [issue] }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }),
         );
       }
       return originalFetch(input, init);
@@ -310,13 +309,6 @@ async function openCreateWorkspaceModal(page: Page) {
 
   const overlay = page.getByTestId("create-workspace-overlay");
   await expect(overlay).toBeVisible({ timeout: 5_000 });
-}
-
-async function selectWorkspaceType(
-  page: Page,
-  type: "empty" | "clone",
-) {
-  await page.getByTestId(`create-workspace-type-${type}`).click();
 }
 
 /** Wait for POST /api/workspaces response. */
@@ -394,9 +386,7 @@ test.describe("CreateWorkspaceModal", () => {
       const dialog = page.getByRole("dialog", { name: "New Workspace" });
       await dialog.click();
 
-      await expect(
-        page.getByTestId("create-workspace-overlay"),
-      ).toBeVisible();
+      await expect(page.getByTestId("create-workspace-overlay")).toBeVisible();
     });
 
     test("Escape key closes modal", async ({ page }) => {
@@ -423,55 +413,32 @@ test.describe("CreateWorkspaceModal", () => {
       await expect(nameInput).toHaveAttribute("placeholder", "my-workspace");
     });
 
-    test("Location placeholder updates dynamically with name", async ({
-      page,
-    }) => {
+    test("opens with the onboarding repository defaults", async ({ page }) => {
       await setupMocks(page);
       await navigateToApp(page);
       await openCreateWorkspaceModal(page);
 
-      const pathInput = page.getByTestId("create-workspace-path");
-      await expect(pathInput).toHaveAttribute(
-        "placeholder",
-        "~/.loom/workspaces/<name>",
+      await expect(page.getByTestId("create-workspace-name")).toHaveValue(
+        "Hello-World",
       );
-
-      await page.getByTestId("create-workspace-name").fill("my-project");
-      await expect(pathInput).toHaveAttribute(
-        "placeholder",
-        "~/.loom/workspaces/my-project",
+      await expect(page.getByTestId("create-workspace-clone-url")).toHaveValue(
+        "https://github.com/octocat/Hello-World",
       );
+      await expect(page.getByTestId("create-workspace-submit")).toBeEnabled();
     });
 
-    test("Clone type is selected by default", async ({ page }) => {
+    test("shows the clone-only Repository URL field", async ({ page }) => {
       await setupMocks(page);
       await navigateToApp(page);
       await openCreateWorkspaceModal(page);
-
-      await expect(
-        page.getByTestId("create-workspace-type-clone"),
-      ).toHaveAttribute("aria-checked", "true");
 
       await expect(
         page.getByTestId("create-workspace-clone-url"),
       ).toBeVisible();
-    });
-
-    test("Local Repos type shows Repository Paths field instead", async ({
-      page,
-    }) => {
-      await setupMocks(page);
-      await navigateToApp(page);
-      await openCreateWorkspaceModal(page);
-
-      await selectWorkspaceType(page, "empty");
-
-      await expect(
-        page.getByTestId("create-workspace-clone-url"),
-      ).not.toBeVisible();
-      await expect(
-        page.getByTestId("create-workspace-repo-path"),
-      ).toBeVisible();
+      await expect(page.getByTestId("create-workspace-repo-path")).toHaveCount(
+        0,
+      );
+      await expect(page.getByTestId("create-workspace-path")).toHaveCount(0);
     });
   });
 
@@ -558,42 +525,11 @@ test.describe("CreateWorkspaceModal", () => {
       await openCreateWorkspaceModal(page);
 
       const urlInput = page.getByTestId("create-workspace-clone-url");
-      const addButton = urlInput.locator("..").locator("button", { hasText: "Add" });
+      await urlInput.fill("");
+      const addButton = urlInput
+        .locator("..")
+        .locator("button", { hasText: "Add" });
       await expect(addButton).toBeDisabled();
-    });
-  });
-
-  test.describe("Multi-Value Repo Path Input", () => {
-    test("type path and Add creates a chip", async ({ page }) => {
-      await setupMocks(page);
-      await navigateToApp(page);
-      await openCreateWorkspaceModal(page);
-
-      await selectWorkspaceType(page, "empty");
-
-      const repoInput = page.getByTestId("create-workspace-repo-path");
-      await repoInput.fill("/home/user/my-repo");
-      await repoInput.press("Enter");
-
-      await expect(
-        page.locator('[class*="chipText"]', { hasText: "/home/user/my-repo" }),
-      ).toBeVisible();
-    });
-
-    test("duplicate paths not added", async ({ page }) => {
-      await setupMocks(page);
-      await navigateToApp(page);
-      await openCreateWorkspaceModal(page);
-
-      await selectWorkspaceType(page, "empty");
-
-      const repoInput = page.getByTestId("create-workspace-repo-path");
-      await repoInput.fill("/home/user/my-repo");
-      await repoInput.press("Enter");
-      await repoInput.fill("/home/user/my-repo");
-      await repoInput.press("Enter");
-
-      await expect(page.locator('[class*="chipText"]')).toHaveCount(1);
     });
   });
 
@@ -603,9 +539,9 @@ test.describe("CreateWorkspaceModal", () => {
       await navigateToApp(page);
       await openCreateWorkspaceModal(page);
 
-      await expect(
-        page.getByTestId("create-workspace-submit"),
-      ).toBeDisabled();
+      await page.getByTestId("create-workspace-name").fill("");
+
+      await expect(page.getByTestId("create-workspace-submit")).toBeDisabled();
     });
 
     test("submit disabled when clone type and no URLs added", async ({
@@ -616,10 +552,9 @@ test.describe("CreateWorkspaceModal", () => {
       await openCreateWorkspaceModal(page);
 
       await page.getByTestId("create-workspace-name").fill("test-workspace");
+      await page.getByTestId("create-workspace-clone-url").fill("");
 
-      await expect(
-        page.getByTestId("create-workspace-submit"),
-      ).toBeDisabled();
+      await expect(page.getByTestId("create-workspace-submit")).toBeDisabled();
     });
 
     test("submit enabled with name + pending URL text", async ({ page }) => {
@@ -632,14 +567,10 @@ test.describe("CreateWorkspaceModal", () => {
         .getByTestId("create-workspace-clone-url")
         .fill("https://github.com/test/repo.git");
 
-      await expect(
-        page.getByTestId("create-workspace-submit"),
-      ).toBeEnabled();
+      await expect(page.getByTestId("create-workspace-submit")).toBeEnabled();
     });
 
-    test("submit enabled when name filled and URLs added", async ({
-      page,
-    }) => {
+    test("submit enabled when name filled and URLs added", async ({ page }) => {
       await setupMocks(page);
       await navigateToApp(page);
       await openCreateWorkspaceModal(page);
@@ -649,41 +580,7 @@ test.describe("CreateWorkspaceModal", () => {
       await urlInput.fill("https://github.com/test/repo.git");
       await urlInput.press("Enter");
 
-      await expect(
-        page.getByTestId("create-workspace-submit"),
-      ).toBeEnabled();
-    });
-
-    test("submit enabled for Empty workspace with no repo paths", async ({
-      page,
-    }) => {
-      await setupMocks(page);
-      await navigateToApp(page);
-      await openCreateWorkspaceModal(page);
-
-      await page.getByTestId("create-workspace-name").fill("test-workspace");
-      await selectWorkspaceType(page, "empty");
-
-      await expect(
-        page.getByTestId("create-workspace-submit"),
-      ).toBeEnabled();
-    });
-
-    test("submit enabled for Local Repos with paths", async ({ page }) => {
-      await setupMocks(page);
-      await navigateToApp(page);
-      await openCreateWorkspaceModal(page);
-
-      await page.getByTestId("create-workspace-name").fill("test-workspace");
-      await selectWorkspaceType(page, "empty");
-
-      const repoInput = page.getByTestId("create-workspace-repo-path");
-      await repoInput.fill("/home/user/repo");
-      await repoInput.press("Enter");
-
-      await expect(
-        page.getByTestId("create-workspace-submit"),
-      ).toBeEnabled();
+      await expect(page.getByTestId("create-workspace-submit")).toBeEnabled();
     });
   });
 
@@ -752,59 +649,6 @@ test.describe("CreateWorkspaceModal", () => {
     });
   });
 
-  test.describe("Form Submission - Local Repos Type", () => {
-    test("submits with correct body", async ({ page }) => {
-      const { postCalls } = await setupMocks(page);
-      await navigateToApp(page);
-      await openCreateWorkspaceModal(page);
-
-      await page.getByTestId("create-workspace-name").fill("local-workspace");
-      await selectWorkspaceType(page, "empty");
-
-      const repoInput = page.getByTestId("create-workspace-repo-path");
-      await repoInput.fill("/home/user/repo");
-      await repoInput.press("Enter");
-
-      const postPromise = waitForCreatePost(page);
-      await page.getByTestId("create-workspace-submit").click();
-      await postPromise;
-
-      expect(postCalls).toHaveLength(1);
-      expect(postCalls[0].body).toEqual({
-        name: "local-workspace",
-        type: "empty",
-        repos: ["/home/user/repo"],
-      });
-    });
-
-    test("custom path sent when Location field filled", async ({ page }) => {
-      const { postCalls } = await setupMocks(page);
-      await navigateToApp(page);
-      await openCreateWorkspaceModal(page);
-
-      await page
-        .getByTestId("create-workspace-name")
-        .fill("custom-workspace");
-      await page.getByTestId("create-workspace-path").fill("/custom/path");
-      await selectWorkspaceType(page, "empty");
-
-      const repoInput = page.getByTestId("create-workspace-repo-path");
-      await repoInput.fill("/home/user/repo");
-      await repoInput.press("Enter");
-
-      const postPromise = waitForCreatePost(page);
-      await page.getByTestId("create-workspace-submit").click();
-      await postPromise;
-
-      expect(postCalls[0].body).toEqual({
-        name: "custom-workspace",
-        type: "empty",
-        repos: ["/home/user/repo"],
-        path: "/custom/path",
-      });
-    });
-  });
-
   test.describe("Loading State", () => {
     test("submit shows 'Creating...' and disables form during submission", async ({
       page,
@@ -851,9 +695,7 @@ test.describe("CreateWorkspaceModal", () => {
       await page.getByTestId("create-workspace-submit").click();
       await postPromise;
 
-      await expect(
-        page.getByTestId("create-workspace-error"),
-      ).toBeVisible();
+      await expect(page.getByTestId("create-workspace-error")).toBeVisible();
     });
 
     test("form remains editable after error", async ({ page }) => {
@@ -872,43 +714,17 @@ test.describe("CreateWorkspaceModal", () => {
       await postPromise;
 
       // Error shown, form still editable, modal still open
-      await expect(
-        page.getByTestId("create-workspace-error"),
-      ).toBeVisible();
+      await expect(page.getByTestId("create-workspace-error")).toBeVisible();
       await expect(nameInput).toBeEnabled();
-      await expect(
-        page.getByTestId("create-workspace-submit"),
-      ).toBeEnabled();
-      await expect(
-        page.getByTestId("create-workspace-overlay"),
-      ).toBeVisible();
-    });
-
-    test("error clears when switching workspace type", async ({ page }) => {
-      await setupMocks(page, { postError: true });
-      await navigateToApp(page);
-      await openCreateWorkspaceModal(page);
-
-      await page.getByTestId("create-workspace-name").fill("test-workspace");
-      const urlInput = page.getByTestId("create-workspace-clone-url");
-      await urlInput.fill("https://github.com/test/repo.git");
-      await urlInput.press("Enter");
-
-      const postPromise = waitForCreatePost(page);
-      await page.getByTestId("create-workspace-submit").click();
-      await postPromise;
-
-      const errorMsg = page.getByTestId("create-workspace-error");
-      await expect(errorMsg).toBeVisible();
-
-      // Switch type — error should clear
-      await selectWorkspaceType(page, "empty");
-      await expect(errorMsg).not.toBeVisible();
+      await expect(page.getByTestId("create-workspace-submit")).toBeEnabled();
+      await expect(page.getByTestId("create-workspace-overlay")).toBeVisible();
     });
   });
 
   test.describe("Form Reset", () => {
-    test("close and reopen resets all fields", async ({ page }) => {
+    test("close and reopen restores the onboarding defaults", async ({
+      page,
+    }) => {
       await setupMocks(page);
       await navigateToApp(page);
       await openCreateWorkspaceModal(page);
@@ -928,14 +744,13 @@ test.describe("CreateWorkspaceModal", () => {
       // Reopen
       await openCreateWorkspaceModal(page);
 
-      // All fields reset
-      await expect(page.getByTestId("create-workspace-name")).toHaveValue("");
-      await expect(
-        page.getByTestId("create-workspace-clone-url"),
-      ).toHaveValue("");
-      await expect(
-        page.getByTestId("create-workspace-type-clone"),
-      ).toHaveAttribute("aria-checked", "true");
+      // Transient edits reset back to the values supplied by App.
+      await expect(page.getByTestId("create-workspace-name")).toHaveValue(
+        "Hello-World",
+      );
+      await expect(page.getByTestId("create-workspace-clone-url")).toHaveValue(
+        "https://github.com/octocat/Hello-World",
+      );
       await expect(page.locator('[class*="chipText"]')).toHaveCount(0);
     });
   });
@@ -946,9 +761,7 @@ test.describe("CreateWorkspaceModal", () => {
       await navigateToApp(page);
       await openCreateWorkspaceModal(page);
 
-      await expect(
-        page.getByTestId("create-workspace-name"),
-      ).toBeFocused();
+      await expect(page.getByTestId("create-workspace-name")).toBeFocused();
     });
 
     test("form labels correctly associated with inputs", async ({ page }) => {
@@ -963,14 +776,13 @@ test.describe("CreateWorkspaceModal", () => {
         "ws-name",
       );
 
-      // Location label → ws-path input
-      await expect(page.locator('label[for="ws-path"]')).toHaveText(
-        "Location",
+      // Repository URL label → ws-clone-url input
+      await expect(page.locator('label[for="ws-clone-url"]')).toHaveText(
+        "Repository URL",
       );
-      await expect(page.getByTestId("create-workspace-path")).toHaveAttribute(
-        "id",
-        "ws-path",
-      );
+      await expect(
+        page.getByTestId("create-workspace-clone-url"),
+      ).toHaveAttribute("id", "ws-clone-url");
     });
   });
 });
