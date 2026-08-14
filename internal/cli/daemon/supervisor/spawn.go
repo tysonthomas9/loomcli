@@ -1,9 +1,11 @@
 package supervisor
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"log"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -18,6 +20,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/events"
 	"github.com/tysonthomas9/loomcli/internal/observability/tracing"
+	"github.com/tysonthomas9/loomcli/internal/skillmat"
 
 	"go.opentelemetry.io/otel/attribute"
 )
@@ -255,6 +258,15 @@ func (s *Supervisor) spawnAgent(ap *AgentProcess) error {
 		recordErr(span, err, "spawn.backend_unavailable")
 		return err
 	}
+	if err := s.materializeSkills(ap); err != nil {
+		if skillmat.IsStoreUnavailable(err) {
+			slog.Warn("skill store unavailable; continuing with existing materialization",
+				"worktree", ap.Entry.Worktree, "workspace", s.WorkspaceID, "err", err)
+		} else {
+			recordErr(span, err, "spawn.materialize_skills")
+			return fmt.Errorf("materialize skills: %w", err)
+		}
+	}
 
 	cmd, err := s.buildCommand(ap)
 	if err != nil {
@@ -295,6 +307,20 @@ func (s *Supervisor) spawnAgent(ap *AgentProcess) error {
 	s.markControlPlaneAgentSessionRunning(ap)
 
 	return nil
+}
+
+func (s *Supervisor) materializeSkills(ap *AgentProcess) error {
+	if s.WorkspaceID == "" {
+		return nil
+	}
+	if s.ControlStore == nil {
+		slog.Warn("skill store is not configured; continuing without skill materialization",
+			"worktree", ap.Entry.Worktree, "workspace", s.WorkspaceID)
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(cmdstore.RootContext(), controlPlaneOperationTimeout)
+	defer cancel()
+	return skillmat.Materialize(ctx, s.ControlStore, s.WorkspaceID, ap.Entry.Role, ap.WorktreePath)
 }
 
 // setupAgentLogFile wires the agent subprocess's stdout/stderr to its log

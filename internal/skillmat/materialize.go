@@ -1,0 +1,715 @@
+// Package skillmat materializes FleetDB skills into agent working directories.
+package skillmat
+
+import (
+	"bytes"
+	"context"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io/fs"
+	"net"
+	"os"
+	"os/exec"
+	"path"
+	"path/filepath"
+	"regexp"
+	"sort"
+	"strings"
+	"unicode"
+	"unicode/utf8"
+
+	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/store"
+	"golang.org/x/text/cases"
+	"golang.org/x/text/unicode/norm"
+	"gopkg.in/yaml.v3"
+)
+
+const (
+	// AgentsSkillsDir is the canonical skill directory relative to an agent's working directory.
+	AgentsSkillsDir = ".agents/skills"
+	// ClaudeSkillsDir contains relative compatibility links to AgentsSkillsDir.
+	ClaudeSkillsDir = ".claude/skills"
+	// MarkerPath records the projection hash and every managed file or link.
+	MarkerPath = AgentsSkillsDir + "/.loom-skills-marker.json"
+
+	markerVersion  = 1
+	maxMarkerBytes = 1 << 20
+)
+
+type marker struct {
+	Version int      `json:"version"`
+	Hash    string   `json:"hash"`
+	Paths   []string `json:"paths"`
+}
+
+type entryKind string
+
+const (
+	entryFile    entryKind = "file"
+	entrySymlink entryKind = "symlink"
+)
+
+type desiredEntry struct {
+	Path       string
+	Kind       entryKind
+	Content    []byte
+	Mode       os.FileMode
+	LinkTarget string
+	Skill      string
+	SourcePath string
+}
+
+type desiredNode struct {
+	Path  string
+	Entry desiredEntry
+	Dir   bool
+}
+
+// StoreUnavailableError reports that the skill listing could not be loaded.
+// Callers use it to preserve the existing spawn-time degraded-mode behavior
+// without hiding local collision or filesystem failures.
+type StoreUnavailableError struct {
+	Err error
+}
+
+func (e *StoreUnavailableError) Error() string { return fmt.Sprintf("load skills: %v", e.Err) }
+func (e *StoreUnavailableError) Unwrap() error { return e.Err }
+
+// IsStoreUnavailable reports whether materialization stopped before touching
+// the target because the backing skill store could not be read.
+func IsStoreUnavailable(err error) bool {
+	var unavailable *StoreUnavailableError
+	return errors.As(err, &unavailable)
+}
+
+// Materialize resolves workspace and role skills and reconciles targetDir's
+// Loom-managed skill projection. A matching marker is a no-op. Store read
+// failures are returned as StoreUnavailableError before the filesystem is
+// touched; every other error is a fail-closed local preparation failure.
+func Materialize(ctx context.Context, st store.Store, workspace, roleName, targetDir string) error {
+	if err := ensurePlatformSupported(); err != nil {
+		return err
+	}
+	if st == nil || st.Skills() == nil {
+		return fmt.Errorf("materialize skills: skill store is not configured")
+	}
+	if strings.TrimSpace(targetDir) == "" {
+		return fmt.Errorf("materialize skills: target directory is required")
+	}
+
+	skills, err := st.Skills().List(ctx, workspace, store.SkillFilter{})
+	if err != nil {
+		if isUnavailableStoreError(err) {
+			return &StoreUnavailableError{Err: err}
+		}
+		return fmt.Errorf("load skills: %w", err)
+	}
+	entries, err := desiredEntries(domain.ResolveSkillChainDetail(skills, roleName))
+	if err != nil {
+		return err
+	}
+	projectionHash, err := hashEntries(entries)
+	if err != nil {
+		return fmt.Errorf("hash skill projection: %w", err)
+	}
+	paths := entryPaths(entries)
+
+	root, err := openSecureRoot(targetDir)
+	if err != nil {
+		return fmt.Errorf("open skill target %q: %w", targetDir, err)
+	}
+	defer root.Close()
+
+	previous, err := readMarker(root)
+	if err != nil {
+		return err
+	}
+	if previous != nil && previous.Hash == projectionHash {
+		if !equalStrings(previous.Paths, paths) {
+			return fmt.Errorf("skill marker hash matches but recorded paths differ; refusing cleanup")
+		}
+		matches, err := projectionMatches(root, entries)
+		if err != nil {
+			return fmt.Errorf("verify materialized skill projection: %w", err)
+		}
+		if matches {
+			return ensureGitExcludes(ctx, targetDir)
+		}
+	}
+
+	if err := detectDesiredCollisions(entries); err != nil {
+		return err
+	}
+	if err := detectExistingCollisions(root, targetDir, entries, previous); err != nil {
+		return err
+	}
+	if err := cleanupPrevious(root, previous); err != nil {
+		return err
+	}
+	if err := writeProjection(root, entries, projectionHash, paths); err != nil {
+		return err
+	}
+	if err := ensureGitExcludes(ctx, targetDir); err != nil {
+		return fmt.Errorf("ensure skill git excludes: %w", err)
+	}
+	return nil
+}
+
+var fleetDBServerErrorPattern = regexp.MustCompile(`\bHTTP 5[0-9][0-9]\b`)
+
+func isUnavailableStoreError(err error) bool {
+	if errors.Is(err, context.Canceled) {
+		return false
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	var networkError net.Error
+	if errors.As(err, &networkError) {
+		return true
+	}
+	return fleetDBServerErrorPattern.MatchString(err.Error())
+}
+
+func desiredEntries(resolved []domain.ResolvedSkill) ([]desiredEntry, error) {
+	entries := make([]desiredEntry, 0, len(resolved)*2)
+	for _, item := range resolved {
+		skill := item.Skill
+		if skill == nil {
+			continue
+		}
+		if err := domain.ValidateSkillName(skill.Name); err != nil {
+			return nil, fmt.Errorf("materialize skill %q: %w", skill.Name, err)
+		}
+		frontmatter, err := yaml.Marshal(struct {
+			Name        string `yaml:"name"`
+			Description string `yaml:"description"`
+		}{Name: skill.Name, Description: skill.Description})
+		if err != nil {
+			return nil, fmt.Errorf("render skill %q frontmatter: %w", skill.Name, err)
+		}
+		skillDir := path.Join(AgentsSkillsDir, skill.Name)
+		entries = append(entries, desiredEntry{
+			Path:       path.Join(skillDir, domain.SkillFileNameSKILLMD),
+			Kind:       entryFile,
+			Content:    []byte("---\n" + string(frontmatter) + "---\n" + skill.Content),
+			Mode:       0o644,
+			Skill:      skill.Name,
+			SourcePath: domain.SkillFileNameSKILLMD,
+		})
+		for _, file := range skill.Files {
+			if err := validateBundledPath(file.Path); err != nil {
+				return nil, fmt.Errorf("materialize skill %q file %q: %w", skill.Name, file.Path, err)
+			}
+			mode := os.FileMode(0o644)
+			if file.Executable {
+				mode = 0o755
+			}
+			entries = append(entries, desiredEntry{
+				Path:       path.Join(skillDir, file.Path),
+				Kind:       entryFile,
+				Content:    []byte(file.Content),
+				Mode:       mode,
+				Skill:      skill.Name,
+				SourcePath: file.Path,
+			})
+		}
+		entries = append(entries, desiredEntry{
+			Path:       path.Join(ClaudeSkillsDir, skill.Name),
+			Kind:       entrySymlink,
+			LinkTarget: "../../.agents/skills/" + skill.Name,
+			Skill:      skill.Name,
+			SourcePath: skill.Name,
+		})
+	}
+	sort.Slice(entries, func(i, j int) bool { return entries[i].Path < entries[j].Path })
+	return entries, nil
+}
+
+func validateBundledPath(name string) error {
+	if name == "" || !utf8.ValidString(name) {
+		return fmt.Errorf("path must be non-empty valid UTF-8")
+	}
+	if strings.Contains(name, `\`) || strings.HasPrefix(name, "/") || strings.HasPrefix(name, "~") || strings.Contains(name, ":") {
+		return fmt.Errorf("path %q must be a normalized relative path", name)
+	}
+	for _, r := range name {
+		if unicode.IsControl(r) {
+			return fmt.Errorf("path %q contains a control character", name)
+		}
+	}
+	for _, part := range strings.Split(name, "/") {
+		if part == "" || part == "." || part == ".." {
+			return fmt.Errorf("path %q contains an unsafe component", name)
+		}
+	}
+	if path.Clean(name) != name {
+		return fmt.Errorf("path %q is not normalized", name)
+	}
+	return nil
+}
+
+func hashEntries(entries []desiredEntry) (string, error) {
+	type hashEntry struct {
+		Path       string    `json:"path"`
+		Kind       entryKind `json:"kind"`
+		Content    []byte    `json:"content,omitempty"`
+		Mode       uint32    `json:"mode,omitempty"`
+		LinkTarget string    `json:"link_target,omitempty"`
+	}
+	canonical := make([]hashEntry, 0, len(entries))
+	for _, entry := range entries {
+		canonical = append(canonical, hashEntry{
+			Path:       entry.Path,
+			Kind:       entry.Kind,
+			Content:    entry.Content,
+			Mode:       uint32(entry.Mode.Perm()),
+			LinkTarget: entry.LinkTarget,
+		})
+	}
+	b, err := json.Marshal(canonical)
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:]), nil
+}
+
+func entryPaths(entries []desiredEntry) []string {
+	paths := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		paths = append(paths, entry.Path)
+	}
+	return paths
+}
+
+func readMarker(root secureRoot) (*marker, error) {
+	b, _, err := root.ReadFile(MarkerPath, maxMarkerBytes)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read skill marker: %w", err)
+	}
+	var m marker
+	if err := json.Unmarshal(b, &m); err != nil {
+		return nil, fmt.Errorf("decode skill marker: %w", err)
+	}
+	if m.Version != markerVersion || m.Hash == "" {
+		return nil, fmt.Errorf("skill marker has unsupported or incomplete format")
+	}
+	seen := make(map[string]bool, len(m.Paths))
+	for _, recorded := range m.Paths {
+		if !validManagedPath(recorded) {
+			return nil, fmt.Errorf("skill marker contains unsafe path %q", recorded)
+		}
+		if seen[recorded] {
+			return nil, fmt.Errorf("skill marker records path %q more than once", recorded)
+		}
+		seen[recorded] = true
+	}
+	if !sort.StringsAreSorted(m.Paths) {
+		return nil, fmt.Errorf("skill marker paths are not sorted")
+	}
+	return &m, nil
+}
+
+func validManagedPath(name string) bool {
+	if name == "" || strings.ContainsRune(name, '\\') || path.Clean(name) != name || strings.HasPrefix(name, "/") {
+		return false
+	}
+	if name == MarkerPath {
+		return false
+	}
+	if strings.HasPrefix(name, AgentsSkillsDir+"/") || strings.HasPrefix(name, ClaudeSkillsDir+"/") {
+		for _, part := range strings.Split(name, "/") {
+			if part == "" || part == "." || part == ".." {
+				return false
+			}
+		}
+		return true
+	}
+	return false
+}
+
+func collisionKey(name string) string {
+	return cases.Fold().String(norm.NFC.String(name))
+}
+
+func detectDesiredCollisions(entries []desiredEntry) error {
+	files := make(map[string]desiredEntry, len(entries))
+	dirs := make(map[string]desiredEntry, len(entries)*2)
+	for _, entry := range entries {
+		key := collisionKey(entry.Path)
+		if previous, ok := files[key]; ok {
+			return collisionError(entry.Skill, previous.SourcePath, entry.SourcePath)
+		}
+		if child, ok := dirs[key]; ok {
+			return collisionError(entry.Skill, entry.SourcePath, child.SourcePath)
+		}
+		files[key] = entry
+		parent := path.Dir(entry.Path)
+		for parent != "." && parent != "/" {
+			parentKey := collisionKey(parent)
+			if file, ok := files[parentKey]; ok {
+				return collisionError(entry.Skill, file.SourcePath, entry.SourcePath)
+			}
+			if _, ok := dirs[parentKey]; !ok {
+				dirs[parentKey] = entry
+			}
+			parent = path.Dir(parent)
+		}
+	}
+	return nil
+}
+
+func collisionError(skill, first, second string) error {
+	return fmt.Errorf("materialize skill %q: paths %q and %q collide when written", skill, first, second)
+}
+
+func cleanupPrevious(root secureRoot, previous *marker) error {
+	if previous == nil {
+		return nil
+	}
+	paths := append([]string(nil), previous.Paths...)
+	sort.Slice(paths, func(i, j int) bool {
+		if pathDepth(paths[i]) != pathDepth(paths[j]) {
+			return pathDepth(paths[i]) > pathDepth(paths[j])
+		}
+		return paths[i] > paths[j]
+	})
+	for _, recorded := range paths {
+		if err := root.Remove(recorded); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return fmt.Errorf("remove previously materialized path %q: %w", recorded, err)
+		}
+	}
+	if err := root.Remove(MarkerPath); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("remove previous skill marker: %w", err)
+	}
+	removeEmptyParents(root, paths)
+	return nil
+}
+
+func writeProjection(root secureRoot, entries []desiredEntry, hash string, paths []string) (retErr error) {
+	if err := root.MkdirAll(AgentsSkillsDir, 0o755); err != nil {
+		return fmt.Errorf("create canonical skills directory: %w", err)
+	}
+	if err := root.MkdirAll(ClaudeSkillsDir, 0o755); err != nil {
+		return fmt.Errorf("create Claude skills directory: %w", err)
+	}
+	written := make([]string, 0, len(entries))
+	defer func() {
+		if retErr == nil {
+			return
+		}
+		for i := len(written) - 1; i >= 0; i-- {
+			_ = root.Remove(written[i])
+		}
+		removeEmptyParents(root, written)
+	}()
+	for _, entry := range entries {
+		matches, err := entryExactlyMatches(root, entry)
+		if err != nil {
+			return fmt.Errorf("inspect materialized path %q: %w", entry.Path, err)
+		}
+		if matches {
+			continue
+		}
+		if err := root.MkdirAll(path.Dir(entry.Path), 0o755); err != nil {
+			return fmt.Errorf("create parent for %q: %w", entry.Path, err)
+		}
+		switch entry.Kind {
+		case entryFile:
+			if err := root.CreateFile(entry.Path, entry.Content, entry.Mode); err != nil {
+				return fmt.Errorf("write materialized path %q: %w", entry.Path, err)
+			}
+		case entrySymlink:
+			if err := root.Symlink(entry.LinkTarget, entry.Path); err != nil {
+				return fmt.Errorf("write materialized link %q: %w", entry.Path, err)
+			}
+		default:
+			return fmt.Errorf("materialized path %q has unknown kind %q", entry.Path, entry.Kind)
+		}
+		written = append(written, entry.Path)
+	}
+	markerBytes, err := json.MarshalIndent(marker{Version: markerVersion, Hash: hash, Paths: paths}, "", "  ")
+	if err != nil {
+		return fmt.Errorf("encode skill marker: %w", err)
+	}
+	markerBytes = append(markerBytes, '\n')
+	if err := writeMarkerAtomically(root, markerBytes); err != nil {
+		return fmt.Errorf("write skill marker: %w", err)
+	}
+	return nil
+}
+
+func writeMarkerAtomically(root secureRoot, markerBytes []byte) (retErr error) {
+	var nonce [12]byte
+	if _, err := rand.Read(nonce[:]); err != nil {
+		return fmt.Errorf("generate marker temporary name: %w", err)
+	}
+	temporary := MarkerPath + ".tmp-" + hex.EncodeToString(nonce[:])
+	if err := root.CreateFile(temporary, markerBytes, 0o644); err != nil {
+		return err
+	}
+	defer func() {
+		if retErr != nil {
+			_ = root.Remove(temporary)
+		}
+	}()
+	if err := root.Rename(temporary, MarkerPath); err != nil {
+		return err
+	}
+	return nil
+}
+
+func removeEmptyParents(root secureRoot, names []string) {
+	dirs := make(map[string]bool)
+	for _, name := range names {
+		for parent := path.Dir(name); parent != "." && parent != AgentsSkillsDir && parent != ClaudeSkillsDir; parent = path.Dir(parent) {
+			dirs[parent] = true
+		}
+	}
+	ordered := make([]string, 0, len(dirs))
+	for dir := range dirs {
+		ordered = append(ordered, dir)
+	}
+	sort.Slice(ordered, func(i, j int) bool { return pathDepth(ordered[i]) > pathDepth(ordered[j]) })
+	for _, dir := range ordered {
+		_ = root.RemoveDir(dir)
+	}
+}
+
+func pathDepth(name string) int { return strings.Count(name, "/") }
+
+func equalStrings(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func projectionMatches(root secureRoot, entries []desiredEntry) (bool, error) {
+	for _, entry := range entries {
+		info, err := root.Lstat(entry.Path)
+		if errors.Is(err, fs.ErrNotExist) {
+			return false, nil
+		}
+		if err != nil {
+			return false, err
+		}
+		switch entry.Kind {
+		case entryFile:
+			if !info.Mode.IsRegular() || info.Mode.Perm() != entry.Mode.Perm() {
+				return false, nil
+			}
+		case entrySymlink:
+			if info.Mode&os.ModeSymlink == 0 || info.LinkTarget != entry.LinkTarget {
+				return false, nil
+			}
+		default:
+			return false, fmt.Errorf("materialized path %q has unknown kind %q", entry.Path, entry.Kind)
+		}
+	}
+	return true, nil
+}
+
+func entryExactlyMatches(root secureRoot, entry desiredEntry) (bool, error) {
+	switch entry.Kind {
+	case entryFile:
+		content, mode, err := root.ReadFile(entry.Path, int64(len(entry.Content))+1)
+		if errors.Is(err, fs.ErrNotExist) {
+			return false, nil
+		}
+		if err != nil {
+			return false, err
+		}
+		return mode.IsRegular() && mode.Perm() == entry.Mode.Perm() && bytes.Equal(content, entry.Content), nil
+	case entrySymlink:
+		info, err := root.Lstat(entry.Path)
+		if errors.Is(err, fs.ErrNotExist) {
+			return false, nil
+		}
+		if err != nil {
+			return false, err
+		}
+		return info.Mode&os.ModeSymlink != 0 && info.LinkTarget == entry.LinkTarget, nil
+	default:
+		return false, fmt.Errorf("materialized path %q has unknown kind %q", entry.Path, entry.Kind)
+	}
+}
+
+func detectExistingCollisions(root secureRoot, targetDir string, entries []desiredEntry, previous *marker) error {
+	managed := map[string]bool{}
+	managedDirs := map[string]bool{}
+	if previous != nil {
+		for _, recorded := range previous.Paths {
+			managed[recorded] = true
+			for parent := path.Dir(recorded); parent != "."; parent = path.Dir(parent) {
+				managedDirs[parent] = true
+			}
+		}
+	}
+	desired := make(map[string]desiredNode, len(entries)*2)
+	for _, entry := range entries {
+		desired[collisionKey(entry.Path)] = desiredNode{Path: entry.Path, Entry: entry}
+		for parent := path.Dir(entry.Path); parent != "."; parent = path.Dir(parent) {
+			key := collisionKey(parent)
+			if _, ok := desired[key]; !ok {
+				desired[key] = desiredNode{Path: parent, Entry: entry, Dir: true}
+			}
+		}
+	}
+	for _, rootName := range []string{AgentsSkillsDir, ClaudeSkillsDir} {
+		absoluteRoot := filepath.Join(targetDir, filepath.FromSlash(rootName))
+		err := filepath.WalkDir(absoluteRoot, func(name string, item fs.DirEntry, walkErr error) error {
+			if errors.Is(walkErr, fs.ErrNotExist) {
+				return nil
+			}
+			if walkErr != nil {
+				return walkErr
+			}
+			rel, err := filepath.Rel(targetDir, name)
+			if err != nil {
+				return err
+			}
+			rel = filepath.ToSlash(rel)
+			if rel == rootName {
+				if item.Type()&os.ModeSymlink != 0 || !item.IsDir() {
+					return fmt.Errorf("materialized directory %q collides with existing path %q", rootName, rel)
+				}
+				return nil
+			}
+			want, exactCollision := desired[collisionKey(rel)]
+			if exactCollision {
+				realDir := item.IsDir() && item.Type()&os.ModeSymlink == 0
+				switch {
+				case want.Dir && realDir && managed[rel]:
+					return fmt.Errorf("materialize skill %q: previously managed path %q was replaced by a directory", want.Entry.Skill, rel)
+				case want.Dir && realDir:
+					return nil
+				case want.Dir && managed[rel]:
+					return nil
+				case !want.Dir && managed[rel]:
+					return nil
+				case !want.Dir && realDir && managedDirs[rel]:
+					return nil
+				}
+				if !want.Dir {
+					matches, err := entryExactlyMatches(root, want.Entry)
+					if err != nil {
+						return fmt.Errorf("inspect existing path %q: %w", rel, err)
+					}
+					if matches {
+						return nil
+					}
+				}
+				return fmt.Errorf("materialize skill %q: desired path %q collides with existing unrecorded path %q", want.Entry.Skill, want.Entry.Path, rel)
+			}
+			if ancestor, ok := desiredFileAncestor(desired, rel); ok && !managed[rel] && !managedDirs[rel] {
+				return fmt.Errorf("materialize skill %q: desired path %q collides with existing unrecorded path %q", ancestor.Entry.Skill, ancestor.Entry.Path, rel)
+			}
+			return nil
+		})
+		if err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return err
+		}
+	}
+	return nil
+}
+
+func desiredFileAncestor(desired map[string]desiredNode, name string) (desiredNode, bool) {
+	for current := path.Dir(name); current != "." && current != "/"; current = path.Dir(current) {
+		if node, ok := desired[collisionKey(current)]; ok && !node.Dir {
+			return node, true
+		}
+	}
+	return desiredNode{}, false
+}
+
+func ensureGitExcludes(ctx context.Context, targetDir string) error {
+	inside := gitCommandContext(ctx, targetDir, "rev-parse", "--is-inside-work-tree")
+	out, err := inside.Output()
+	if err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		return nil
+	}
+	if strings.TrimSpace(string(out)) != "true" {
+		return nil
+	}
+	resolve := gitCommandContext(ctx, targetDir, "rev-parse", "--git-path", "info/exclude")
+	out, err = resolve.Output()
+	if err != nil {
+		return fmt.Errorf("resolve git info/exclude: %w", err)
+	}
+	excludePath := strings.TrimSpace(string(out))
+	if !filepath.IsAbs(excludePath) {
+		excludePath = filepath.Join(targetDir, excludePath)
+	}
+	excludePath = filepath.Clean(excludePath)
+	excludeRootPath := filepath.Dir(filepath.Dir(excludePath))
+	excludeName, err := filepath.Rel(excludeRootPath, excludePath)
+	if err != nil {
+		return fmt.Errorf("resolve git exclude relative path: %w", err)
+	}
+	excludeName = filepath.ToSlash(excludeName)
+	excludeRoot, err := openSecureRoot(excludeRootPath)
+	if err != nil {
+		return fmt.Errorf("open git metadata root %q: %w", excludeRootPath, err)
+	}
+	defer excludeRoot.Close()
+	b, _, err := excludeRoot.ReadFile(excludeName, 0)
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+	wanted := []string{AgentsSkillsDir + "/", ClaudeSkillsDir + "/"}
+	present := make(map[string]bool, len(wanted))
+	for _, line := range strings.Split(strings.ReplaceAll(string(b), "\r\n", "\n"), "\n") {
+		present[line] = true
+	}
+	var addition strings.Builder
+	if len(b) > 0 && b[len(b)-1] != '\n' {
+		addition.WriteByte('\n')
+	}
+	for _, line := range wanted {
+		if !present[line] {
+			addition.WriteString(line)
+			addition.WriteByte('\n')
+		}
+	}
+	if addition.Len() == 0 {
+		return nil
+	}
+	return excludeRoot.AppendFile(excludeName, []byte(addition.String()), 0o644)
+}
+
+func gitCommandContext(ctx context.Context, targetDir string, args ...string) *exec.Cmd {
+	commandArgs := append([]string{"-C", targetDir}, args...)
+	cmd := exec.CommandContext(ctx, "git", commandArgs...) //nolint:gosec,norawexec // fixed git inspection command
+	cmd.Env = sanitizedGitEnv(os.Environ())
+	return cmd
+}
+
+func sanitizedGitEnv(env []string) []string {
+	clean := make([]string, 0, len(env))
+	for _, item := range env {
+		key, _, _ := strings.Cut(item, "=")
+		if strings.HasPrefix(strings.ToUpper(key), "GIT_") {
+			continue
+		}
+		clean = append(clean, item)
+	}
+	return clean
+}
