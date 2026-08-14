@@ -386,14 +386,22 @@ func renderSkipCounts(w io.Writer, matched, diverged int) {
 func applyResultError(cmd *cobra.Command, report teamtemplate.ApplyReport, strict bool) error {
 	total := len(report.Steps)
 	if report.Failed > 0 {
-		cmd.SilenceErrors = true
+		silenceResultError(cmd)
 		return fmt.Errorf("template apply: %d of %d steps failed", report.Failed, total)
 	}
 	if strict && report.Diverged > 0 {
-		cmd.SilenceErrors = true
+		silenceResultError(cmd)
 		return fmt.Errorf("template apply: %d of %d entries differ from the template (--strict)", report.Diverged, total)
 	}
 	return nil
+}
+
+// silenceResultError marks the returned error as a result, not a usage
+// mistake: the report already explained it, so cobra must not re-print the
+// error or dump usage.
+func silenceResultError(cmd *cobra.Command) {
+	cmd.SilenceErrors = true
+	cmd.SilenceUsage = true
 }
 
 func daemonMaxAgents(ctx context.Context, st store.Store, workspaceKey string) int {
