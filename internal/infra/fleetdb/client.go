@@ -297,6 +297,17 @@ func (c *Client) doWithHeaders(ctx context.Context, method, path string, body, o
 // 200 update on an upsert, which is what an import or a sync reports back, and
 // the headers carry the ETag a per-document read hands to the next write.
 func (c *Client) doWithResponse(ctx context.Context, method, path string, body, out any, headers map[string]string) (int, http.Header, error) {
+	return c.doWithResponseRedirectPolicy(ctx, method, path, body, out, headers, true)
+}
+
+// doWithResponseNoRedirect is the mutation transport for skills. A redirect
+// on a skill write is never legitimate: following a 307/308 replays the body
+// and can change the authorization lane selected by the original path.
+func (c *Client) doWithResponseNoRedirect(ctx context.Context, method, path string, body, out any, headers map[string]string) (int, http.Header, error) {
+	return c.doWithResponseRedirectPolicy(ctx, method, path, body, out, headers, false)
+}
+
+func (c *Client) doWithResponseRedirectPolicy(ctx context.Context, method, path string, body, out any, headers map[string]string, followRedirects bool) (int, http.Header, error) {
 	c.mu.RLock()
 	auth := fleethttp.Auth{BearerToken: c.authToken, APIKey: c.apiKey, Actor: c.actor}
 	c.mu.RUnlock()
@@ -309,7 +320,15 @@ func (c *Client) doWithResponse(ctx context.Context, method, path string, body, 
 		req.Header.Set(k, v)
 	}
 
-	return c.doRequestResponse(req, method, path, out)
+	httpClient := c.http
+	if !followRedirects {
+		clone := *c.http
+		clone.CheckRedirect = func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		}
+		httpClient = &clone
+	}
+	return c.doRequestResponseWithClient(httpClient, req, method, path, out)
 }
 
 func (c *Client) doRaw(ctx context.Context, method, path string, body io.Reader, contentType string, out any) error {
@@ -371,7 +390,11 @@ func (c *Client) doRequest(req *http.Request, method, path string, out any) erro
 }
 
 func (c *Client) doRequestResponse(req *http.Request, method, path string, out any) (int, http.Header, error) {
-	resp, err := c.http.Do(req)
+	return c.doRequestResponseWithClient(c.http, req, method, path, out)
+}
+
+func (c *Client) doRequestResponseWithClient(httpClient *http.Client, req *http.Request, method, path string, out any) (int, http.Header, error) {
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return 0, nil, fmt.Errorf("fleetdb: %s %s: %w", method, path, err)
 	}
@@ -382,6 +405,9 @@ func (c *Client) doRequestResponse(req *http.Request, method, path string, out a
 		resp.Body.Close()
 	}()
 
+	if resp.StatusCode >= 300 && resp.StatusCode < 400 {
+		return resp.StatusCode, resp.Header, fmt.Errorf("fleetdb: %s %s: unexpected HTTP %d redirect", method, path, resp.StatusCode)
+	}
 	if resp.StatusCode >= 400 {
 		respBody, readErr := io.ReadAll(io.LimitReader(resp.Body, maxResponseBody))
 		if readErr != nil {
@@ -438,6 +464,9 @@ func classifyHTTPError(method, path string, status int, body []byte) error {
 		if strings.Contains(path, "/driver-runs/") {
 			return fmt.Errorf("%s: %w", prefix, domain.ErrNotOwner)
 		}
+		if isSkillAPIPath(path) {
+			return fmt.Errorf("%s: %w", prefix, domain.ErrSkillForbidden)
+		}
 		return fmt.Errorf("%s: %w", prefix, domain.ErrConflict)
 	case http.StatusBadRequest, http.StatusUnprocessableEntity:
 		// Structured await validation codes map back onto their domain
@@ -461,6 +490,21 @@ func classifyHTTPError(method, path string, status int, body []byte) error {
 		return fmt.Errorf("%s: %w", prefix, domain.ErrConflict)
 	}
 	return errors.New(prefix)
+}
+
+// isSkillAPIPath identifies only the two skill route families. A repository
+// or another resource may legitimately be named "skills"; its 403 must keep
+// the generic classification rather than acquiring skill-specific semantics.
+func isSkillAPIPath(requestPath string) bool {
+	requestPath, _, _ = strings.Cut(requestPath, "?")
+	segments := strings.Split(strings.Trim(requestPath, "/"), "/")
+	if len(segments) < 4 || segments[0] != "api" || segments[1] != "v1" {
+		return false
+	}
+	if segments[3] == "skills" {
+		return true
+	}
+	return len(segments) >= 6 && segments[3] == "roles" && segments[5] == "skills"
 }
 
 // extractErrorMessage delegates to fleethttp.ExtractErrorMessage and

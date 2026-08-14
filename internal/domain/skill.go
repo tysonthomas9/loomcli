@@ -3,10 +3,16 @@ package domain
 import (
 	"errors"
 	"fmt"
+	"path"
 	"regexp"
 	"sort"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
+
+	"golang.org/x/text/cases"
+	"golang.org/x/text/unicode/norm"
 )
 
 // SkillScope names the audience a Skill loads into.
@@ -37,10 +43,30 @@ const SkillFileNameSKILLMD = "SKILL.md"
 // fleet-db's models.MaxSkillNameLength.
 const MaxSkillNameLength = 64
 
+const (
+	// MaxRoleNameLength mirrors fleet-db's role-name path-segment limit.
+	MaxRoleNameLength = 100
+	// MaxSkillDescriptionBytes is the Agent Skills description limit.
+	MaxSkillDescriptionBytes = 1024
+	// MaxSkillContentBytes bounds the SKILL.md body.
+	MaxSkillContentBytes = 100_000
+	// MaxSkillFilePathLength bounds one bundled file destination.
+	MaxSkillFilePathLength = 256
+	// MaxSkillFilePathSegmentLength mirrors filesystem NAME_MAX.
+	MaxSkillFilePathSegmentLength = 255
+	// MaxSkillProvenanceLength bounds source and source_ref metadata.
+	MaxSkillProvenanceLength = 256
+)
+
 // skillNamePattern is the Agent Skills name rule: lowercase letters, digits
 // and internal hyphens. Stricter than a role name, because a skill name
 // becomes a directory name verbatim when the runtime materializes it.
 var skillNamePattern = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
+
+// roleNamePattern mirrors fleet-db's models.roleNamePattern. A role name is
+// also an HTTP path segment, so this is both domain validation and a routing
+// security boundary.
+var roleNamePattern = regexp.MustCompile(`^[a-z0-9]([a-z0-9._-]{0,98}[a-z0-9])?$`)
 
 // skillReservedNames are the names the Agent Skills spec reserves; the
 // packaging tooling that consumes a materialized directory rejects them.
@@ -80,6 +106,11 @@ var (
 	// caller held and the one on record, enough to offer a diff without a
 	// second round trip.
 	ErrSkillPreconditionFailed = errors.New("domain: skill document changed since it was read")
+
+	// ErrSkillForbidden preserves fleet-db's authoritative 403 across the
+	// Store boundary. It is skills-specific because the legacy generic client
+	// mapping classifies other 403 responses as ErrConflict.
+	ErrSkillForbidden = errors.New("domain: skill operation forbidden")
 )
 
 // SkillRef is the scope-qualified identity of a Skill within a workspace.
@@ -126,16 +157,13 @@ func (r SkillRef) Validate() error {
 			return fmt.Errorf("skill role_name must be empty when scope is workspace: %w", ErrInvalid)
 		}
 	case SkillScopeRole:
-		if strings.TrimSpace(r.RoleName) == "" {
-			return fmt.Errorf("skill role_name is required when scope is role: %w", ErrInvalid)
+		if err := ValidateRoleName(r.RoleName); err != nil {
+			return fmt.Errorf("skill role_name %q must be a valid role name: %w", r.RoleName, err)
 		}
 	default:
 		return fmt.Errorf("skill scope %q must be one of workspace, role: %w", r.Scope, ErrInvalid)
 	}
-	if strings.TrimSpace(r.Name) == "" {
-		return fmt.Errorf("skill name is required: %w", ErrInvalid)
-	}
-	return nil
+	return ValidateSkillName(r.Name)
 }
 
 // ParseSkillRef splits fleet-db's scope-qualified skill identifier back into
@@ -614,6 +642,118 @@ func ValidateSkillName(name string) error {
 	// has already forced the name to lowercase and forbidden the dot.
 	if skillDeviceNames[name] {
 		return fmt.Errorf("skill name %q is a reserved device name: %w", name, ErrInvalid)
+	}
+	return nil
+}
+
+// ValidateRoleName checks a role name against the exact fleet-db grammar. In
+// addition to matching the persisted model, this guarantees a safe, single
+// URL path segment: traversal tokens, slashes, backslashes, controls and
+// percent-encoded variants decoded by net/http cannot pass.
+func ValidateRoleName(name string) error {
+	if strings.TrimSpace(name) == "" {
+		return fmt.Errorf("role name is required: %w", ErrInvalid)
+	}
+	if len(name) > MaxRoleNameLength || !roleNamePattern.MatchString(name) {
+		return fmt.Errorf("role name %q must be 1-100 lowercase alphanumeric characters with internal dots/underscores/hyphens: %w", name, ErrInvalid)
+	}
+	return nil
+}
+
+// ValidateSkillDescription checks the required, bounded Agent Skills
+// description before a write crosses the Store seam.
+func ValidateSkillDescription(description string) error {
+	if strings.TrimSpace(description) == "" {
+		return fmt.Errorf("skill description is required: %w", ErrInvalid)
+	}
+	if len(description) > MaxSkillDescriptionBytes {
+		return fmt.Errorf("skill description must be at most %d bytes: %w", MaxSkillDescriptionBytes, ErrInvalid)
+	}
+	if strings.ContainsAny(description, "<>") {
+		return fmt.Errorf("skill description must not contain angle brackets: %w", ErrInvalid)
+	}
+	return nil
+}
+
+// ValidateSkillContent bounds the SKILL.md body.
+func ValidateSkillContent(content string) error {
+	if len(content) > MaxSkillContentBytes {
+		return fmt.Errorf("skill content must be at most %d bytes: %w", MaxSkillContentBytes, ErrInvalid)
+	}
+	return nil
+}
+
+// ValidateSkillProvenanceField bounds and validates source metadata.
+func ValidateSkillProvenanceField(field, value string) error {
+	if len(value) > MaxSkillProvenanceLength {
+		return fmt.Errorf("skill %s must be at most %d characters: %w", field, MaxSkillProvenanceLength, ErrInvalid)
+	}
+	if !utf8.ValidString(value) {
+		return fmt.Errorf("skill %s must be valid UTF-8: %w", field, ErrInvalid)
+	}
+	for _, r := range value {
+		if unicode.IsControl(r) {
+			return fmt.Errorf("skill %s must not contain control characters: %w", field, ErrInvalid)
+		}
+	}
+	return nil
+}
+
+// ValidateSkillFilePath is the canonical bundled-file destination validator
+// shared by the CLI, webui, and fleet-db adapter. SKILL.md must be routed
+// around it because that name addresses the skill body rather than a bundled
+// file.
+func ValidateSkillFilePath(filePath string) error {
+	if filePath == "" {
+		return fmt.Errorf("skill file path is required: %w", ErrInvalid)
+	}
+	if len(filePath) > MaxSkillFilePathLength {
+		return fmt.Errorf("skill file path %q must be at most %d characters: %w", filePath, MaxSkillFilePathLength, ErrInvalid)
+	}
+	if !utf8.ValidString(filePath) {
+		return fmt.Errorf("skill file path must be valid UTF-8: %w", ErrInvalid)
+	}
+	for _, r := range filePath {
+		if unicode.IsControl(r) {
+			return fmt.Errorf("skill file path %q must not contain control characters (U+%04X): %w", filePath, r, ErrInvalid)
+		}
+	}
+	if strings.Contains(filePath, `\`) {
+		return fmt.Errorf("skill file path %q must not contain backslashes: %w", filePath, ErrInvalid)
+	}
+	if strings.HasPrefix(filePath, "/") {
+		return fmt.Errorf("skill file path %q must be relative, not absolute: %w", filePath, ErrInvalid)
+	}
+	if strings.HasPrefix(filePath, "~") {
+		return fmt.Errorf("skill file path %q must not start with ~: %w", filePath, ErrInvalid)
+	}
+	if strings.Contains(filePath, ":") {
+		return fmt.Errorf("skill file path %q must not contain a colon: %w", filePath, ErrInvalid)
+	}
+	for i, segment := range strings.Split(filePath, "/") {
+		switch segment {
+		case "":
+			return fmt.Errorf("skill file path %q must not contain empty segments: %w", filePath, ErrInvalid)
+		case ".", "..":
+			return fmt.Errorf("skill file path %q must not contain %q segments: %w", filePath, segment, ErrInvalid)
+		}
+		if len(segment) > MaxSkillFilePathSegmentLength {
+			return fmt.Errorf("skill file path %q has a component longer than %d bytes: %w", filePath, MaxSkillFilePathSegmentLength, ErrInvalid)
+		}
+		folded := cases.Fold().String(norm.NFC.String(segment))
+		device := folded
+		if dot := strings.IndexByte(device, '.'); dot >= 0 {
+			device = device[:dot]
+		}
+		if skillDeviceNames[device] {
+			return fmt.Errorf("skill file path %q uses the reserved device name %q: %w", filePath, segment, ErrInvalid)
+		}
+		if i == 0 && folded == strings.ToLower(SkillFileNameSKILLMD) {
+			return fmt.Errorf("skill file path %q is reserved for the skill content (spelled %q here): %w", SkillFileNameSKILLMD, segment, ErrInvalid)
+		}
+	}
+	if path.Clean(filePath) != filePath {
+		return fmt.Errorf("skill file path %q must be normalized (got %q): %w", filePath, path.Clean(filePath), ErrInvalid)
 	}
 	return nil
 }

@@ -2,6 +2,7 @@ package domain
 
 import (
 	"errors"
+	"strings"
 	"testing"
 	"time"
 )
@@ -217,6 +218,8 @@ func TestSkillRef(t *testing.T) {
 	}{
 		{name: "workspace", ref: WorkspaceSkillRef("alpha"), want: "workspace:alpha"},
 		{name: "role", ref: RoleSkillRef("lead", "alpha"), want: "role:lead:alpha"},
+		{name: "role traversal", ref: RoleSkillRef("..", "alpha"), want: "role:..:alpha", wantErr: true},
+		{name: "role slash", ref: RoleSkillRef("a/b", "alpha"), want: "role:a/b:alpha", wantErr: true},
 		{name: "role with no role name", ref: SkillRef{Scope: SkillScopeRole, Name: "alpha"}, want: "role::alpha", wantErr: true},
 		{name: "workspace carrying a role name", ref: SkillRef{Scope: SkillScopeWorkspace, RoleName: "lead", Name: "a"}, want: "workspace:a", wantErr: true},
 		{name: "unknown scope renders empty", ref: SkillRef{Scope: "global", Name: "alpha"}, want: "", wantErr: true},
@@ -370,6 +373,86 @@ func TestValidateSkillName(t *testing.T) {
 	}
 	if err := ValidateSkillName(string(long)); err == nil {
 		t.Errorf("a %d-character name was accepted", len(long))
+	}
+}
+
+func TestValidateSkillFilePath(t *testing.T) {
+	tests := []struct {
+		name    string
+		path    string
+		wantErr bool
+	}{
+		{name: "root file", path: "notes.md"},
+		{name: "nested file", path: "references/api.md"},
+		{name: "unicode file", path: "references/café.md"},
+		{name: "empty", path: "", wantErr: true},
+		{name: "absolute", path: "/etc/passwd", wantErr: true},
+		{name: "backslash", path: `scripts\run.sh`, wantErr: true},
+		{name: "traversal", path: "../outside", wantErr: true},
+		{name: "nested traversal", path: "references/../outside", wantErr: true},
+		{name: "dot segment", path: "references/./api.md", wantErr: true},
+		{name: "empty segment", path: "references//api.md", wantErr: true},
+		{name: "trailing slash", path: "references/", wantErr: true},
+		{name: "home expansion", path: "~/.config", wantErr: true},
+		{name: "drive prefix", path: "C:/config", wantErr: true},
+		{name: "control", path: "references/api\n.md", wantErr: true},
+		{name: "reserved body", path: SkillFileNameSKILLMD, wantErr: true},
+		{name: "reserved body folded", path: "skill.MD/child", wantErr: true},
+		{name: "nested skill name allowed", path: "docs/SKILL.md", wantErr: false},
+		{name: "windows device", path: "scripts/CON.txt", wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateSkillFilePath(tt.path)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("ValidateSkillFilePath(%q) = nil, want error", tt.path)
+				}
+				if !errors.Is(err, ErrInvalid) {
+					t.Fatalf("ValidateSkillFilePath(%q) = %v, want ErrInvalid", tt.path, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("ValidateSkillFilePath(%q) = %v, want nil", tt.path, err)
+			}
+		})
+	}
+}
+
+func TestValidateRoleName(t *testing.T) {
+	tests := []struct {
+		name    string
+		role    string
+		wantErr bool
+	}{
+		{name: "simple", role: "reviewer"},
+		{name: "internal separators", role: "release.v2_review-team"},
+		{name: "one character", role: "x"},
+		{name: "maximum length", role: "r" + strings.Repeat("a", MaxRoleNameLength-1)},
+		{name: "traversal", role: "..", wantErr: true},
+		{name: "dot", role: ".", wantErr: true},
+		{name: "slash", role: "a/b", wantErr: true},
+		{name: "backslash", role: `a\b`, wantErr: true},
+		{name: "uppercase", role: "Reviewer", wantErr: true},
+		{name: "leading separator", role: "-reviewer", wantErr: true},
+		{name: "trailing separator", role: "reviewer.", wantErr: true},
+		{name: "control", role: "review\ner", wantErr: true},
+		{name: "too long", role: "r" + strings.Repeat("a", MaxRoleNameLength), wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateRoleName(tt.role)
+			if tt.wantErr {
+				if err == nil || !errors.Is(err, ErrInvalid) {
+					t.Fatalf("ValidateRoleName(%q) = %v, want ErrInvalid", tt.role, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("ValidateRoleName(%q) = %v, want nil", tt.role, err)
+			}
+		})
 	}
 }
 

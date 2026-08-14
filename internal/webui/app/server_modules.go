@@ -13,6 +13,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/driverapi"
 	githandlers "github.com/tysonthomas9/loomcli/internal/webui/handlers/git"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/onboarding"
+	"github.com/tysonthomas9/loomcli/internal/webui/handlers/skills"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/webhooks"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/workflows"
 	"github.com/tysonthomas9/loomcli/internal/webui/modbuilder"
@@ -102,6 +103,12 @@ func (app *Server) buildTerminalModules() {
 // when their dependencies are available.
 func (app *Server) buildInfraModules() {
 	storeBacked := app.config.Store != nil
+	fileAccessCfg := middleware.FileAccessConfig{
+		RemoteAuth:      app.config.ExtAuthURL != "",
+		ResolveRole:     app.config.WorkspaceRoleResolver,
+		FrontendOrigins: app.config.FrontendOrigins,
+		Logger:          app.config.Logger,
+	}
 
 	if app.fleetRegistry != nil {
 		app.wsModules = append(app.wsModules,
@@ -114,17 +121,13 @@ func (app *Server) buildInfraModules() {
 	}
 
 	if app.fileSvc != nil {
-		app.wsModules = append(app.wsModules, modbuilder.NewFileModule(app.fileSvc, middleware.FileAccessConfig{
-			RemoteAuth:      app.config.ExtAuthURL != "",
-			ResolveRole:     app.config.WorkspaceRoleResolver,
-			FrontendOrigins: app.config.FrontendOrigins,
-			Logger:          app.config.Logger,
-		}))
+		app.wsModules = append(app.wsModules, modbuilder.NewFileModule(app.fileSvc, fileAccessCfg))
 	}
 
 	if storeBacked {
 		app.connectorDispatcher = app.buildConnectorDispatcher()
 		app.wsModules = append(app.wsModules, agents.NewModule(app.agentSvc, app.hub))
+		app.wsModules = append(app.wsModules, skills.NewModule(app.config.Store, fileAccessCfg))
 		app.wsModules = append(app.wsModules, onboarding.NewModule(app.issueSvc, app.agentSvc))
 		app.wsModules = append(app.wsModules, workflows.NewModule(app.config.Store))
 		app.wsModules = append(app.wsModules, webhooks.NewModule(app.config.Store))

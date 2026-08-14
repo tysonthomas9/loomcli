@@ -14,6 +14,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/misc"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
+	"github.com/tysonthomas9/loomcli/internal/webui/skillpaths"
 )
 
 // File Browser v2 navigation caps. Every capped endpoint surfaces a response
@@ -39,6 +40,7 @@ type boundedFileWalkOptions struct {
 	includePatterns    []string
 	excludePatterns    []string
 	allowSensitive     bool
+	skillPolicy        skillpaths.Policy
 }
 
 type boundedFileWalkResult struct {
@@ -75,21 +77,26 @@ func (s *fileServiceImpl) IndexFilesScoped(ctx context.Context, wsID string, sco
 		return nil, err
 	}
 	defer root.Close()
+	skillPolicy, err := s.skillPathPolicy(wsID, root)
+	if err != nil {
+		return nil, err
+	}
 	allowSensitive := fileRequestAllowsSensitive(ctx)
-	if cached, ok := s.indexCache.get(root.identity, allowSensitive); ok {
+	policyIdentity := skillPolicy.Identity()
+	if cached, ok := s.indexCache.get(root.identity, allowSensitive, policyIdentity); ok {
 		return cached, nil
 	}
 
 	for {
 		generation := s.indexCache.currentGeneration()
-		key := fileIndexBuildKey(root.identity, allowSensitive, generation)
+		key := fileIndexBuildKey(root.identity, allowSensitive, policyIdentity, generation)
 		build := s.indexBuilds.DoChan(key, func() (any, error) {
-			if cached, ok := s.indexCache.get(root.identity, allowSensitive); ok {
+			if cached, ok := s.indexCache.get(root.identity, allowSensitive, policyIdentity); ok {
 				return cached, nil
 			}
-			result, err := s.indexBuilder(context.Background(), root.path, root.identity, allowSensitive)
+			result, err := s.indexBuilder(context.Background(), root.path, root.identity, allowSensitive, skillPolicy)
 			if err == nil {
-				s.indexCache.putIfGeneration(root.identity, allowSensitive, result, generation)
+				s.indexCache.putIfGeneration(root.identity, allowSensitive, policyIdentity, result, generation)
 			}
 			return result, err
 		})
@@ -108,7 +115,7 @@ func (s *fileServiceImpl) IndexFilesScoped(ctx context.Context, wsID string, sco
 	}
 }
 
-func (s *fileServiceImpl) buildFileIndex(ctx context.Context, rootPath, expectedIdentity string, allowSensitive bool) (*service.FileIndexResult, error) {
+func (s *fileServiceImpl) buildFileIndex(ctx context.Context, rootPath, expectedIdentity string, allowSensitive bool, skillPolicy skillpaths.Policy) (*service.FileIndexResult, error) {
 	root, err := openScopedRoot(rootPath)
 	if err != nil {
 		return nil, err
@@ -123,6 +130,7 @@ func (s *fileServiceImpl) buildFileIndex(ctx context.Context, rootPath, expected
 		timeBudget:         fileIndexWalkBudget,
 		excludeNodeModules: true,
 		allowSensitive:     allowSensitive,
+		skillPolicy:        skillPolicy,
 	}, func(relPath string, _ os.FileInfo) error {
 		paths = append(paths, relPath)
 		return nil
@@ -151,6 +159,11 @@ func (s *fileServiceImpl) SearchFilesScoped(ctx context.Context, wsID string, sc
 	if err != nil {
 		return nil, err
 	}
+	skillPolicy, err := s.skillPathPolicy(wsID, root)
+	if err != nil {
+		return nil, err
+	}
+	search.walkOpts.skillPolicy = skillPolicy
 	return runFileSearch(ctx, root.store, search)
 }
 
@@ -339,6 +352,9 @@ func (w *boundedFileWalker) checkWalkState(ctx context.Context, walkErr error) e
 }
 
 func (w *boundedFileWalker) handleDirectory(entry os.DirEntry, relPath string) (bool, error) {
+	if w.opts.skillPolicy.Hidden(relPath) {
+		return false, nil
+	}
 	if strings.EqualFold(entry.Name(), ".git") {
 		return false, nil
 	}
@@ -368,6 +384,9 @@ func (w *boundedFileWalker) handleFile(info os.FileInfo, relPath string) error {
 
 func (w *boundedFileWalker) shouldVisitFile(info os.FileInfo, relPath string) bool {
 	if !info.Mode().IsRegular() {
+		return false
+	}
+	if w.opts.skillPolicy.Hidden(relPath) {
 		return false
 	}
 	if len(w.opts.includePatterns) > 0 && !globMatchesAny(w.opts.includePatterns, relPath) {

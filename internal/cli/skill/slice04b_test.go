@@ -76,7 +76,7 @@ func TestSkillImportBinaryAbortListsEveryFile(t *testing.T) {
 	st := memstore.New()
 	withSkillCommandStore(t, st)
 	directory := writeLocalSkillFixture(t, "binary-tool", "Binary", "body\n")
-	if err := os.WriteFile(filepath.Join(directory, "nul.dat"), []byte("bad\x00data"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(directory, "zero.dat"), []byte("bad\x00data"), 0o644); err != nil {
 		t.Fatalf("write NUL fixture: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(directory, "utf8.dat"), []byte{0xff, 0xfe}, 0o644); err != nil {
@@ -87,7 +87,7 @@ func TestSkillImportBinaryAbortListsEveryFile(t *testing.T) {
 	if err == nil {
 		t.Fatal("binary import error = nil")
 	}
-	for _, want := range []string{"binary content is not supported", "nul.dat", "utf8.dat"} {
+	for _, want := range []string{"binary content is not supported", "zero.dat", "utf8.dat"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("binary import error %q does not contain %q", err, want)
 		}
