@@ -18,6 +18,7 @@ import (
 // breaking change; additions must be reflected here and in the SDK manifest.
 var frozenDriverOps = []string{
 	"active-task-runs",
+	"add-label",
 	"agent-orchestration-session",
 	"claim-ready",
 	"complete-task",
@@ -31,6 +32,7 @@ var frozenDriverOps = []string{
 	"list-agents",
 	"recover-stale-tasks",
 	"release-task",
+	"remove-label",
 	"task-run-get",
 	"update-agent-parent",
 }
