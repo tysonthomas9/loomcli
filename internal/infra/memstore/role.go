@@ -15,6 +15,7 @@ type roleStore struct {
 	mu       sync.RWMutex
 	items    map[string]map[string]*domain.Role // wsKey → name → Role
 	services *agentServiceStore
+	skills   *skillStore
 }
 
 func newRoleStore() *roleStore {
@@ -173,6 +174,12 @@ func applyRoleControlPatch(r *domain.Role, patch store.RoleUpdate) {
 func (s *roleStore) Delete(_ context.Context, ws, name string) error {
 	if s.services != nil && s.services.hasRole(ws, name) {
 		return fmt.Errorf("role %q in workspace %q is used by agent service: %w", name, ws, domain.ErrInvalidTransition)
+	}
+	// Same guard, same reason, for the role's skills: fleet-db refuses rather
+	// than cascading, because a cascade would destroy hand-written documents
+	// that may be the only copy.
+	if s.skills != nil && s.skills.hasRole(ws, name) {
+		return fmt.Errorf("role %q in workspace %q still owns skills: %w", name, ws, domain.ErrInvalidTransition)
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()

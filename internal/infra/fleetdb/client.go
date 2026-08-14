@@ -98,6 +98,8 @@ type Client struct {
 	awaits     *awaitStore
 	workers    *workerStore
 	roles      *roleStore
+	skills     *skillStore
+	skillPacks *skillPackStore
 	daemon     *daemonStore
 
 	connectors      *connectorStore
@@ -150,6 +152,8 @@ func New(cfg Config) (*Client, error) {
 	c.awaits = &awaitStore{client: c}
 	c.workers = &workerStore{client: c}
 	c.roles = &roleStore{client: c}
+	c.skills = &skillStore{client: c}
+	c.skillPacks = &skillPackStore{client: c}
 	c.daemon = &daemonStore{client: c}
 	c.connectors = &connectorStore{client: c}
 	c.connectorGrants = &connectorGrantStore{client: c}
@@ -234,6 +238,12 @@ func (c *Client) Workers() store.WorkerStore { return c.workers }
 // Roles returns the RoleStore.
 func (c *Client) Roles() store.RoleStore { return c.roles }
 
+// Skills returns the SkillStore.
+func (c *Client) Skills() store.SkillStore { return c.skills }
+
+// SkillPacks returns the SkillPackStore.
+func (c *Client) SkillPacks() store.SkillPackStore { return c.skillPacks }
+
 // Daemon returns the DaemonProfileStore.
 func (c *Client) Daemon() store.DaemonProfileStore { return c.daemon }
 
@@ -276,19 +286,30 @@ func (c *Client) do(ctx context.Context, method, path string, body, out any) err
 }
 
 func (c *Client) doWithHeaders(ctx context.Context, method, path string, body, out any, headers map[string]string) error {
+	_, _, err := c.doWithResponse(ctx, method, path, body, out, headers)
+	return err
+}
+
+// doWithResponse is doWithHeaders plus the parts of the response that are not
+// the body: the status code and the response headers.
+//
+// Both matter to conditional writes. The status separates a 201 create from a
+// 200 update on an upsert, which is what an import or a sync reports back, and
+// the headers carry the ETag a per-document read hands to the next write.
+func (c *Client) doWithResponse(ctx context.Context, method, path string, body, out any, headers map[string]string) (int, http.Header, error) {
 	c.mu.RLock()
 	auth := fleethttp.Auth{BearerToken: c.authToken, APIKey: c.apiKey, Actor: c.actor}
 	c.mu.RUnlock()
 
 	req, err := fleethttp.BuildJSONRequest(ctx, method, c.baseURL+path, auth, body)
 	if err != nil {
-		return fmt.Errorf("fleetdb: %w", err)
+		return 0, nil, fmt.Errorf("fleetdb: %w", err)
 	}
 	for k, v := range headers {
 		req.Header.Set(k, v)
 	}
 
-	return c.doRequest(req, method, path, out)
+	return c.doRequestResponse(req, method, path, out)
 }
 
 func (c *Client) doRaw(ctx context.Context, method, path string, body io.Reader, contentType string, out any) error {
@@ -345,9 +366,14 @@ func (c *Client) doBytes(ctx context.Context, method, path string) ([]byte, erro
 }
 
 func (c *Client) doRequest(req *http.Request, method, path string, out any) error {
+	_, _, err := c.doRequestResponse(req, method, path, out)
+	return err
+}
+
+func (c *Client) doRequestResponse(req *http.Request, method, path string, out any) (int, http.Header, error) {
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return fmt.Errorf("fleetdb: %s %s: %w", method, path, err)
+		return 0, nil, fmt.Errorf("fleetdb: %s %s: %w", method, path, err)
 	}
 	defer func() {
 		// Drain so the underlying connection can be returned to the
@@ -359,20 +385,20 @@ func (c *Client) doRequest(req *http.Request, method, path string, out any) erro
 	if resp.StatusCode >= 400 {
 		respBody, readErr := io.ReadAll(io.LimitReader(resp.Body, maxResponseBody))
 		if readErr != nil {
-			return fmt.Errorf("fleetdb: %s %s: HTTP %d (read body: %w)", method, path, resp.StatusCode, readErr)
+			return resp.StatusCode, resp.Header, fmt.Errorf("fleetdb: %s %s: HTTP %d (read body: %w)", method, path, resp.StatusCode, readErr)
 		}
-		return classifyHTTPError(method, path, resp.StatusCode, respBody)
+		return resp.StatusCode, resp.Header, classifyHTTPError(method, path, resp.StatusCode, respBody)
 	}
 	if out == nil || resp.StatusCode == http.StatusNoContent {
-		return nil
+		return resp.StatusCode, resp.Header, nil
 	}
 	if err := json.NewDecoder(io.LimitReader(resp.Body, maxResponseBody)).Decode(out); err != nil {
 		if errors.Is(err, io.EOF) {
-			return nil
+			return resp.StatusCode, resp.Header, nil
 		}
-		return fmt.Errorf("fleetdb: decode response (%s %s): %w", method, path, err)
+		return resp.StatusCode, resp.Header, fmt.Errorf("fleetdb: decode response (%s %s): %w", method, path, err)
 	}
-	return nil
+	return resp.StatusCode, resp.Header, nil
 }
 
 // classifyHTTPError maps an HTTP status + body into the appropriate
@@ -395,6 +421,10 @@ func classifyHTTPError(method, path string, status int, body []byte) error {
 			return fmt.Errorf("%s: %w", prefix, domain.ErrInvalidTransition)
 		case "conflict":
 			return fmt.Errorf("%s: %w", prefix, domain.ErrConflict)
+		case skillProvenanceConflictCode:
+			// Ownership refusal: kept apart from every other 409 because it is
+			// the one a caller cannot fix by retrying — see skill.go.
+			return skillProvenanceConflictError(prefix, body)
 		case "driver_run_already_resumed":
 			// Pending->suspend window: the await resolved before the suspend
 			// landed — the run must continue inline, never suspend.
@@ -420,6 +450,12 @@ func classifyHTTPError(method, path string, status int, body []byte) error {
 		// fleet-db heartbeat: lease exists, token is ours, but it is no
 		// longer live (expired or released) — re-acquire is safe.
 		return fmt.Errorf("%s: %w", prefix, domain.ErrGone)
+	case http.StatusPreconditionFailed:
+		// A failed If-Match on a conditional write. Distinct from every 409
+		// above because this one a caller fixes by re-reading and merging.
+		if code == preconditionFailedCode {
+			return skillPreconditionError(prefix, body)
+		}
 	}
 	if status >= 400 && status < 500 {
 		return fmt.Errorf("%s: %w", prefix, domain.ErrConflict)
@@ -455,6 +491,23 @@ func extractErrorCode(body []byte) string {
 		return ""
 	}
 	return structured.Error.Code
+}
+
+// extractErrorMeta pulls fleet-db's structured error meta out of the envelope.
+// The meta is where a machine-readable error carries the facts a caller has to
+// act on — which revision it held versus which one is stored, who owns the
+// record it was refused — that reconstructing from the message would mean
+// parsing prose.
+func extractErrorMeta(body []byte) map[string]string {
+	var structured struct {
+		Error struct {
+			Meta map[string]string `json:"meta"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(body, &structured); err != nil {
+		return nil
+	}
+	return structured.Error.Meta
 }
 
 // pathEscape wraps url.PathEscape so call sites stay compact.
