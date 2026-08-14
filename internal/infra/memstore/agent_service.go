@@ -17,14 +17,18 @@ type agentServiceStore struct {
 	items    map[string]map[string]*domain.AgentService
 	roles    *roleStore
 	profiles *workerProfileStore
+	drivers  *driverStore
+	versions *driverVersionStore
 	bindings *triggerBindingStore
 }
 
-func newAgentServiceStore(roles *roleStore, profiles *workerProfileStore) *agentServiceStore {
+func newAgentServiceStore(roles *roleStore, profiles *workerProfileStore, drivers *driverStore, versions *driverVersionStore) *agentServiceStore {
 	return &agentServiceStore{
 		items:    make(map[string]map[string]*domain.AgentService),
 		roles:    roles,
 		profiles: profiles,
+		drivers:  drivers,
+		versions: versions,
 	}
 }
 
@@ -56,8 +60,8 @@ func (s *agentServiceStore) Create(_ context.Context, in store.AgentServiceCreat
 
 func newAgentServiceMem(in store.AgentServiceCreate) (*domain.AgentService, error) {
 	serviceID := strings.TrimSpace(in.ServiceID)
-	if in.WorkspaceKey == "" || serviceID == "" || strings.TrimSpace(in.RoleName) == "" {
-		return nil, fmt.Errorf("workspace_key + service_id + role_name required: %w", domain.ErrInvalid)
+	if in.WorkspaceKey == "" || serviceID == "" {
+		return nil, fmt.Errorf("workspace_key + service_id required: %w", domain.ErrInvalid)
 	}
 	now := time.Now().UTC()
 	return &domain.AgentService{
@@ -67,6 +71,8 @@ func newAgentServiceMem(in store.AgentServiceCreate) (*domain.AgentService, erro
 		Kind:            in.Kind,
 		DesiredState:    defaultAgentServiceDesiredStateMem(in.DesiredState),
 		RoleName:        in.RoleName,
+		DriverID:        in.DriverID,
+		DriverVersionID: in.DriverVersionID,
 		ProfileName:     in.ProfileName,
 		ScheduleID:      in.ScheduleID,
 		EventSources:    cloneStringSlice(in.EventSources),
@@ -79,6 +85,7 @@ func newAgentServiceMem(in store.AgentServiceCreate) (*domain.AgentService, erro
 		BudgetPolicy:    in.BudgetPolicy,
 		StateRef:        in.StateRef,
 		Metadata:        cloneMap(in.Metadata),
+		CreatedBy:       in.CreatedBy,
 		CreatedAt:       now,
 		UpdatedAt:       now,
 	}, nil
@@ -169,18 +176,40 @@ func (s *agentServiceStore) Delete(_ context.Context, ws, serviceID string) erro
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if _, ok := s.items[ws][serviceID]; !ok {
+	svc, ok := s.items[ws][serviceID]
+	if !ok || svc.DeletedAt != nil {
 		return fmt.Errorf("agent service %q in workspace %q: %w", serviceID, ws, domain.ErrNotFound)
 	}
-	delete(s.items[ws], serviceID)
+	now := time.Now().UTC()
+	svc.DeletedAt = &now
+	svc.UpdatedAt = now
 	return nil
 }
 
 func (s *agentServiceStore) exists(ws, serviceID string) bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	_, ok := s.items[ws][serviceID]
-	return ok
+	svc, ok := s.items[ws][serviceID]
+	return ok && svc.DeletedAt == nil
+}
+
+func (s *agentServiceStore) validateBindingTarget(ws, serviceID, driverID, driverVersionID string) error {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	svc, ok := s.items[ws][serviceID]
+	if !ok || svc.DeletedAt != nil {
+		return fmt.Errorf("target agent service %q in workspace %q: %w", serviceID, ws, domain.ErrNotFound)
+	}
+	if strings.TrimSpace(svc.DriverID) == "" && strings.TrimSpace(svc.DriverVersionID) == "" {
+		return nil
+	}
+	if strings.TrimSpace(driverID) != strings.TrimSpace(svc.DriverID) || strings.TrimSpace(driverVersionID) != strings.TrimSpace(svc.DriverVersionID) {
+		return fmt.Errorf(
+			"target agent service %q requires driver_id %q and driver_version_id %q: %w",
+			serviceID, svc.DriverID, svc.DriverVersionID, domain.ErrInvalid,
+		)
+	}
+	return nil
 }
 
 func (s *agentServiceStore) triggerRefTargetCompatible(ws, bindingID, targetServiceID string) bool {
@@ -204,7 +233,7 @@ func (s *agentServiceStore) hasRole(ws, roleName string) bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	for _, svc := range s.items[ws] {
-		if svc.RoleName == roleName {
+		if svc.DeletedAt == nil && svc.RoleName == roleName {
 			return true
 		}
 	}
@@ -215,7 +244,7 @@ func (s *agentServiceStore) hasProfile(ws, profileName string) bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	for _, svc := range s.items[ws] {
-		if svc.ProfileName == profileName {
+		if svc.DeletedAt == nil && svc.ProfileName == profileName {
 			return true
 		}
 	}
@@ -223,8 +252,14 @@ func (s *agentServiceStore) hasProfile(ws, profileName string) bool {
 }
 
 func (s *agentServiceStore) validateReferences(svc *domain.AgentService) error {
-	if s.roles != nil && !s.roles.exists(svc.WorkspaceKey, svc.RoleName) {
+	if svc.RoleName != "" && s.roles != nil && !s.roles.exists(svc.WorkspaceKey, svc.RoleName) {
 		return fmt.Errorf("agent service %q role %q in workspace %q: %w", svc.ServiceID, svc.RoleName, svc.WorkspaceKey, domain.ErrNotFound)
+	}
+	if svc.DriverID != "" && s.drivers != nil && !s.drivers.exists(svc.WorkspaceKey, svc.DriverID) {
+		return fmt.Errorf("agent service %q driver %q in workspace %q: %w", svc.ServiceID, svc.DriverID, svc.WorkspaceKey, domain.ErrNotFound)
+	}
+	if svc.DriverVersionID != "" && s.versions != nil && !s.versions.belongsToDriver(svc.WorkspaceKey, svc.DriverVersionID, svc.DriverID) {
+		return fmt.Errorf("agent service %q driver version %q does not belong to driver %q in workspace %q: %w", svc.ServiceID, svc.DriverVersionID, svc.DriverID, svc.WorkspaceKey, domain.ErrNotFound)
 	}
 	if svc.ProfileName != "" && s.profiles != nil && !s.profiles.exists(svc.WorkspaceKey, svc.ProfileName) {
 		return fmt.Errorf("agent service %q profile %q in workspace %q: %w", svc.ServiceID, svc.ProfileName, svc.WorkspaceKey, domain.ErrNotFound)
@@ -251,8 +286,16 @@ func (s *agentServiceStore) validateReferences(svc *domain.AgentService) error {
 }
 
 func validateAgentServiceMem(svc *domain.AgentService) error {
-	if svc.WorkspaceKey == "" || svc.ServiceID == "" || strings.TrimSpace(svc.RoleName) == "" {
-		return fmt.Errorf("workspace_key + service_id + role_name required: %w", domain.ErrInvalid)
+	if svc.WorkspaceKey == "" || svc.ServiceID == "" {
+		return fmt.Errorf("workspace_key + service_id required: %w", domain.ErrInvalid)
+	}
+	hasRole := strings.TrimSpace(svc.RoleName) != ""
+	hasDriverRef := strings.TrimSpace(svc.DriverID) != "" || strings.TrimSpace(svc.DriverVersionID) != ""
+	if hasRole == hasDriverRef {
+		return fmt.Errorf("agent service %q requires exactly one behavior reference (role_name or driver_id + driver_version_id): %w", svc.ServiceID, domain.ErrInvalid)
+	}
+	if hasDriverRef && (strings.TrimSpace(svc.DriverID) == "" || strings.TrimSpace(svc.DriverVersionID) == "") {
+		return fmt.Errorf("agent service %q driver_id + driver_version_id required together: %w", svc.ServiceID, domain.ErrInvalid)
 	}
 	if !validAgentServiceKindMem(svc.Kind) {
 		return fmt.Errorf("agent service %q kind %q invalid: %w", svc.ServiceID, svc.Kind, domain.ErrInvalid)
@@ -299,11 +342,13 @@ func cloneAgentService(svc *domain.AgentService) *domain.AgentService {
 	out.TriggerRefs = cloneStringSlice(svc.TriggerRefs)
 	out.Permissions = cloneStringSlice(svc.Permissions)
 	out.Metadata = cloneMap(svc.Metadata)
+	out.DeletedAt = clonePtr(svc.DeletedAt)
 	return &out
 }
 
 func agentServiceMatchesMem(svc *domain.AgentService, filter store.AgentServiceFilter) bool {
-	return (filter.Kind == "" || svc.Kind == filter.Kind) &&
+	return (filter.IncludeDeleted || svc.DeletedAt == nil) &&
+		(filter.Kind == "" || svc.Kind == filter.Kind) &&
 		(filter.DesiredState == "" || svc.DesiredState == filter.DesiredState) &&
 		(filter.RoleName == "" || svc.RoleName == filter.RoleName) &&
 		(filter.ProfileName == "" || svc.ProfileName == filter.ProfileName)
@@ -321,6 +366,12 @@ func applyAgentServiceUpdateMem(svc *domain.AgentService, patch store.AgentServi
 	}
 	if patch.RoleName != nil {
 		svc.RoleName = *patch.RoleName
+	}
+	if patch.DriverID != nil {
+		svc.DriverID = *patch.DriverID
+	}
+	if patch.DriverVersionID != nil {
+		svc.DriverVersionID = *patch.DriverVersionID
 	}
 	if patch.ProfileName != nil {
 		svc.ProfileName = *patch.ProfileName

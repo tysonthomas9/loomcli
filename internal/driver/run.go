@@ -23,16 +23,18 @@ import (
 )
 
 type RunOptions struct {
-	WorkspaceKey    string
-	DriverID        string
-	DriverVersionID string
-	EpicID          string
-	RunID           string
-	IdempotencyKey  string
-	Entrypoint      string
-	SourceKind      string
-	SourceRef       string
-	Payload         json.RawMessage
+	WorkspaceKey     string
+	DriverID         string
+	DriverVersionID  string
+	EpicID           string
+	RunID            string
+	IdempotencyKey   string
+	Entrypoint       string
+	SourceKind       string
+	SourceRef        string
+	TriggerBindingID string
+	AgentServiceID   string
+	Payload          json.RawMessage
 }
 
 func CreateDriverRun(ctx context.Context, s store.Store, opts RunOptions) (*domain.DriverRun, error) {
@@ -70,16 +72,18 @@ func CreateDriverRun(ctx context.Context, s store.Store, opts RunOptions) (*doma
 		sourceRef = "loom driver run"
 	}
 	return s.DriverRuns().Create(ctx, store.DriverRunCreate{
-		WorkspaceKey:    opts.WorkspaceKey,
-		RunID:           runID,
-		DriverID:        driver.DriverID,
-		DriverVersionID: version.VersionID,
-		Entrypoint:      entrypoint,
-		SourceKind:      sourceKind,
-		SourceRef:       sourceRef,
-		EpicID:          opts.EpicID,
-		IdempotencyKey:  opts.IdempotencyKey,
-		Payload:         payload,
+		WorkspaceKey:     opts.WorkspaceKey,
+		RunID:            runID,
+		DriverID:         driver.DriverID,
+		DriverVersionID:  version.VersionID,
+		Entrypoint:       entrypoint,
+		SourceKind:       sourceKind,
+		SourceRef:        sourceRef,
+		EpicID:           opts.EpicID,
+		TriggerBindingID: opts.TriggerBindingID,
+		AgentServiceID:   opts.AgentServiceID,
+		IdempotencyKey:   opts.IdempotencyKey,
+		Payload:          payload,
 	})
 }
 

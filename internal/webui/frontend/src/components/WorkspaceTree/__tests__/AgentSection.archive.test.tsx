@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   deleteWorkspaceAgent: vi.fn(),
   showToast: vi.fn(),
   refetch: vi.fn(),
+  useAgentServices: vi.fn(),
   useAgentStoreInstance: vi.fn(),
   useWorkspaceContext: vi.fn(),
 }));
@@ -26,6 +27,7 @@ vi.mock("@/hooks", async () => {
   return {
     ...actual,
     useAgentStoreInstance: mocks.useAgentStoreInstance,
+    useAgentServices: mocks.useAgentServices,
     useWorkspaceContext: mocks.useWorkspaceContext,
   };
 });
@@ -89,6 +91,14 @@ describe("AgentSection archive", () => {
       ],
     });
     mocks.useAgentStoreInstance.mockReturnValue(store);
+    mocks.useAgentServices.mockReturnValue({
+      services: [],
+      total: 0,
+      loading: false,
+      initialized: true,
+      error: null,
+      refresh: vi.fn(),
+    });
     mocks.useWorkspaceContext.mockReturnValue({
       agents: [],
       workspace: { name: "LOCALMODE" },

@@ -262,6 +262,12 @@ func (s *driverRunStore) Create(ctx context.Context, in store.DriverRunCreate) (
 		"idempotency_key":   in.IdempotencyKey,
 		"payload":           in.Payload,
 	}
+	if in.TriggerBindingID != "" {
+		body["trigger_binding_id"] = in.TriggerBindingID
+	}
+	if in.AgentServiceID != "" {
+		body["agent_service_id"] = in.AgentServiceID
+	}
 	var out domain.DriverRun
 	if err := s.client.do(ctx, "POST", "/api/v1/"+pathEscape(in.WorkspaceKey)+"/driver-runs", body, &out); err != nil {
 		return nil, err
@@ -327,6 +333,12 @@ func (s *driverRunStore) List(ctx context.Context, ws string, filter store.Drive
 	}
 	if filter.NodeID != "" {
 		q.Set("node_id", filter.NodeID)
+	}
+	if filter.TriggerBindingID != "" {
+		q.Set("trigger_binding_id", filter.TriggerBindingID)
+	}
+	if filter.AgentServiceID != "" {
+		q.Set("agent_service_id", filter.AgentServiceID)
 	}
 	if filter.Status != "" {
 		q.Set("status", string(filter.Status))

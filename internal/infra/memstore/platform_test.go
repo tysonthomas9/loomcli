@@ -149,6 +149,109 @@ func TestPlatformRegisteredEpicRunViaTriggerBinding(t *testing.T) {
 	}
 }
 
+func TestDriverRunMemstoreAttributionFilters(t *testing.T) {
+	st := New()
+	ctx := t.Context()
+	if _, err := st.Drivers().Create(ctx, store.DriverCreate{
+		WorkspaceKey: "WS", DriverID: "scout", Name: "scout", Status: domain.DriverStatusActive,
+	}); err != nil {
+		t.Fatalf("create driver: %v", err)
+	}
+	if _, err := st.DriverVersions().Create(ctx, store.DriverVersionCreate{
+		WorkspaceKey: "WS", VersionID: "scout-v1", DriverID: "scout", Version: 1,
+		SourceDigest: "sha256:source", BundleDigest: "sha256:bundle",
+		ValidationStatus: domain.DriverVersionValidationPassed,
+	}); err != nil {
+		t.Fatalf("create driver version: %v", err)
+	}
+	if _, err := st.AgentServices().Create(ctx, store.AgentServiceCreate{
+		WorkspaceKey: "WS", ServiceID: "scout", Name: "Scout", Kind: domain.AgentServiceKindCron,
+		DriverID: "scout", DriverVersionID: "scout-v1",
+	}); err != nil {
+		t.Fatalf("create agent service: %v", err)
+	}
+	if _, err := st.TriggerBindings().Create(ctx, store.TriggerBindingCreate{
+		WorkspaceKey: "WS", BindingID: "binding-scout", Name: "Scout weekly", SourceKind: "cron",
+		RouteKey: "cron.scout.weekly", DriverID: "scout", DriverVersionID: "scout-v1",
+		TargetAgentServiceID: "scout", Enabled: true,
+	}); err != nil {
+		t.Fatalf("create trigger binding: %v", err)
+	}
+	attributed, err := st.DriverRuns().Create(ctx, store.DriverRunCreate{
+		WorkspaceKey: "WS", RunID: "run-scout", DriverID: "scout", DriverVersionID: "scout-v1",
+		TriggerBindingID: "binding-scout", AgentServiceID: "scout",
+	})
+	if err != nil {
+		t.Fatalf("create attributed run: %v", err)
+	}
+	if attributed.TriggerBindingID != "binding-scout" || attributed.AgentServiceID != "scout" {
+		t.Fatalf("attributed run = %#v", attributed)
+	}
+	if _, err := st.DriverRuns().Create(ctx, store.DriverRunCreate{
+		WorkspaceKey: "WS", RunID: "run-plain", DriverID: "scout", DriverVersionID: "scout-v1",
+	}); err != nil {
+		t.Fatalf("create plain run: %v", err)
+	}
+
+	byBinding, err := st.DriverRuns().List(ctx, "WS", store.DriverRunFilter{TriggerBindingID: "binding-scout"})
+	if err != nil || len(byBinding) != 1 || byBinding[0].RunID != "run-scout" {
+		t.Fatalf("binding-filtered runs = %#v err=%v", byBinding, err)
+	}
+	byService, err := st.DriverRuns().List(ctx, "WS", store.DriverRunFilter{AgentServiceID: "scout"})
+	if err != nil || len(byService) != 1 || byService[0].RunID != "run-scout" {
+		t.Fatalf("service-filtered runs = %#v err=%v", byService, err)
+	}
+}
+
+func TestTriggerBindingMemstoreRejectsMismatchedScriptedServiceDriver(t *testing.T) {
+	st := New()
+	ctx := t.Context()
+	for _, driverID := range []string{"scout", "other"} {
+		if _, err := st.Drivers().Create(ctx, store.DriverCreate{
+			WorkspaceKey: "WS", DriverID: driverID, Name: driverID, Status: domain.DriverStatusActive,
+		}); err != nil {
+			t.Fatalf("create driver %s: %v", driverID, err)
+		}
+		if _, err := st.DriverVersions().Create(ctx, store.DriverVersionCreate{
+			WorkspaceKey: "WS", VersionID: driverID + "-v1", DriverID: driverID, Version: 1,
+			SourceDigest: "sha256:source-" + driverID, BundleDigest: "sha256:bundle-" + driverID,
+			ValidationStatus: domain.DriverVersionValidationPassed,
+		}); err != nil {
+			t.Fatalf("create driver version %s: %v", driverID, err)
+		}
+	}
+	if _, err := st.AgentServices().Create(ctx, store.AgentServiceCreate{
+		WorkspaceKey: "WS", ServiceID: "scout", Name: "Scout", Kind: domain.AgentServiceKindCron,
+		DriverID: "scout", DriverVersionID: "scout-v1",
+	}); err != nil {
+		t.Fatalf("create scripted agent service: %v", err)
+	}
+	if _, err := st.TriggerBindings().Create(ctx, store.TriggerBindingCreate{
+		WorkspaceKey: "WS", BindingID: "binding-mismatch", Name: "Mismatch", SourceKind: "cron",
+		RouteKey: "cron.mismatch", DriverID: "other", DriverVersionID: "other-v1",
+		TargetAgentServiceID: "scout", Enabled: true,
+	}); !errors.Is(err, domain.ErrInvalid) {
+		t.Fatalf("create mismatched scripted binding err = %v, want ErrInvalid", err)
+	}
+	if _, err := st.TriggerBindings().Create(ctx, store.TriggerBindingCreate{
+		WorkspaceKey: "WS", BindingID: "binding-unattached", Name: "Unattached", SourceKind: "cron",
+		RouteKey: "cron.unattached", DriverID: "other", DriverVersionID: "other-v1", Enabled: true,
+	}); err != nil {
+		t.Fatalf("create unattached binding: %v", err)
+	}
+	target := "scout"
+	if _, err := st.TriggerBindings().Update(ctx, "WS", "binding-unattached", store.TriggerBindingUpdate{TargetAgentServiceID: &target}); !errors.Is(err, domain.ErrInvalid) {
+		t.Fatalf("attach mismatched scripted binding err = %v, want ErrInvalid", err)
+	}
+	if _, err := st.TriggerBindings().Create(ctx, store.TriggerBindingCreate{
+		WorkspaceKey: "WS", BindingID: "binding-scout", Name: "Scout weekly", SourceKind: "cron",
+		RouteKey: "cron.scout.weekly", DriverID: "scout", DriverVersionID: "scout-v1",
+		TargetAgentServiceID: "scout", Enabled: true,
+	}); err != nil {
+		t.Fatalf("create matching scripted binding: %v", err)
+	}
+}
+
 func TestDispatchTriggerRouteSupersedesQueuedRunsForSubject(t *testing.T) {
 	ctx := t.Context()
 	s := New()

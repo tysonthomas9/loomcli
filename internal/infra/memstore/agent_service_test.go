@@ -3,10 +3,114 @@ package memstore
 import (
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
+
+func TestAgentServiceMemstoreScriptedContractAndArchiveFilter(t *testing.T) {
+	st := New()
+	ctx := t.Context()
+	if _, err := st.Drivers().Create(ctx, store.DriverCreate{
+		WorkspaceKey: "WS", DriverID: "scout-driver", Name: "scout",
+		OwnerType: domain.DriverOwnerSystem, Status: domain.DriverStatusActive,
+	}); err != nil {
+		t.Fatalf("create driver: %v", err)
+	}
+	if _, err := st.DriverVersions().Create(ctx, store.DriverVersionCreate{
+		WorkspaceKey: "WS", VersionID: "scout-v1", DriverID: "scout-driver", Version: 1,
+		SourceDigest: "sha256:source", BundleDigest: "sha256:bundle",
+		ValidationStatus: domain.DriverVersionValidationPassed,
+	}); err != nil {
+		t.Fatalf("create driver version: %v", err)
+	}
+	if _, err := st.DriverVersions().Create(ctx, store.DriverVersionCreate{
+		WorkspaceKey: "WS", VersionID: "scout-v2", DriverID: "scout-driver", Version: 2,
+		SourceDigest: "sha256:source-2", BundleDigest: "sha256:bundle-2",
+		ValidationStatus: domain.DriverVersionValidationPassed,
+	}); err != nil {
+		t.Fatalf("create second driver version: %v", err)
+	}
+
+	created, err := st.AgentServices().Create(ctx, store.AgentServiceCreate{
+		WorkspaceKey: "WS", ServiceID: "scout", Name: "Scout",
+		Kind: domain.AgentServiceKindCron, DesiredState: domain.AgentServiceDesiredRunning,
+		DriverID: "scout-driver", DriverVersionID: "scout-v1", CreatedBy: "system",
+	})
+	if err != nil {
+		t.Fatalf("create scripted service: %v", err)
+	}
+	if created.RoleName != "" || created.DriverID != "scout-driver" || created.DriverVersionID != "scout-v1" || created.CreatedBy != "system" {
+		t.Fatalf("created = %#v, want role-less scripted behavior and creator", created)
+	}
+
+	emptyRole := ""
+	version2 := "scout-v2"
+	updated, err := st.AgentServices().Update(ctx, "WS", "scout", store.AgentServiceUpdate{RoleName: &emptyRole, DriverVersionID: &version2})
+	if err != nil {
+		t.Fatalf("role-less update: %v", err)
+	}
+	if updated.DriverVersionID != "scout-v2" {
+		t.Fatalf("updated DriverVersionID = %q, want scout-v2", updated.DriverVersionID)
+	}
+	if err := st.AgentServices().Delete(ctx, "WS", "scout"); err != nil {
+		t.Fatalf("archive service: %v", err)
+	}
+	archived, err := st.AgentServices().Get(ctx, "WS", "scout")
+	if err != nil {
+		t.Fatalf("get archived service: %v", err)
+	}
+	if archived.DeletedAt == nil || time.Since(*archived.DeletedAt) > time.Minute {
+		t.Fatalf("DeletedAt = %v, want a recent archive timestamp", archived.DeletedAt)
+	}
+	visible, err := st.AgentServices().List(ctx, "WS", store.AgentServiceFilter{})
+	if err != nil {
+		t.Fatalf("list visible services: %v", err)
+	}
+	if len(visible) != 0 {
+		t.Fatalf("visible services = %#v, want archived service hidden", visible)
+	}
+	all, err := st.AgentServices().List(ctx, "WS", store.AgentServiceFilter{IncludeDeleted: true})
+	if err != nil {
+		t.Fatalf("list archived services: %v", err)
+	}
+	if len(all) != 1 || all[0].DeletedAt == nil {
+		t.Fatalf("all services = %#v, want archived scout", all)
+	}
+}
+
+func TestAgentServiceMemstoreRequiresExactlyOneBehaviorReference(t *testing.T) {
+	st := New()
+	ctx := t.Context()
+	if _, err := st.Roles().Create(ctx, store.RoleCreate{WorkspaceKey: "WS", Name: "triage"}); err != nil {
+		t.Fatalf("create role: %v", err)
+	}
+	if _, err := st.Drivers().Create(ctx, store.DriverCreate{WorkspaceKey: "WS", DriverID: "driver-1", Name: "driver-1"}); err != nil {
+		t.Fatalf("create driver: %v", err)
+	}
+	if _, err := st.DriverVersions().Create(ctx, store.DriverVersionCreate{
+		WorkspaceKey: "WS", VersionID: "version-1", DriverID: "driver-1", Version: 1,
+		SourceDigest: "sha256:source", BundleDigest: "sha256:bundle",
+	}); err != nil {
+		t.Fatalf("create driver version: %v", err)
+	}
+	cases := []struct {
+		name string
+		in   store.AgentServiceCreate
+	}{
+		{name: "missing", in: store.AgentServiceCreate{WorkspaceKey: "WS", ServiceID: "missing", Kind: domain.AgentServiceKindEvent}},
+		{name: "mixed", in: store.AgentServiceCreate{WorkspaceKey: "WS", ServiceID: "mixed", Kind: domain.AgentServiceKindEvent, RoleName: "triage", DriverID: "driver-1", DriverVersionID: "version-1"}},
+		{name: "partial driver", in: store.AgentServiceCreate{WorkspaceKey: "WS", ServiceID: "partial", Kind: domain.AgentServiceKindEvent, DriverID: "driver-1"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := st.AgentServices().Create(ctx, tc.in); !errors.Is(err, domain.ErrInvalid) {
+				t.Fatalf("Create err = %v, want ErrInvalid", err)
+			}
+		})
+	}
+}
 
 func TestAgentServiceMemstoreLifecycle(t *testing.T) {
 	s := New()
@@ -87,8 +191,8 @@ func TestAgentServiceMemstoreLifecycle(t *testing.T) {
 	if err := s.AgentServices().Delete(ctx, "WS", "lead"); err != nil {
 		t.Fatalf("Delete: %v", err)
 	}
-	if _, err := s.AgentServices().Get(ctx, "WS", "lead"); !errors.Is(err, domain.ErrNotFound) {
-		t.Fatalf("Get after delete err = %v, want ErrNotFound", err)
+	if archived, err := s.AgentServices().Get(ctx, "WS", "lead"); err != nil || archived.DeletedAt == nil {
+		t.Fatalf("Get after delete = %#v err=%v, want archived record", archived, err)
 	}
 	if err := s.AgentServices().Delete(ctx, "WS", "lead"); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("duplicate Delete err = %v, want ErrNotFound", err)

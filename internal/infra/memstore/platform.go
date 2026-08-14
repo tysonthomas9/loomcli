@@ -259,8 +259,10 @@ func (s *triggerBindingStore) validateTriggerBindingCreate(in store.TriggerBindi
 	if s.versions != nil && !s.versions.belongsToDriver(in.WorkspaceKey, in.DriverVersionID, in.DriverID) {
 		return fmt.Errorf("driver version %q for driver %q in workspace %q: %w", in.DriverVersionID, in.DriverID, in.WorkspaceKey, domain.ErrNotFound)
 	}
-	if in.TargetAgentServiceID != "" && s.services != nil && !s.services.exists(in.WorkspaceKey, in.TargetAgentServiceID) {
-		return fmt.Errorf("target agent service %q in workspace %q: %w", in.TargetAgentServiceID, in.WorkspaceKey, domain.ErrNotFound)
+	if in.TargetAgentServiceID != "" && s.services != nil {
+		if err := s.services.validateBindingTarget(in.WorkspaceKey, in.TargetAgentServiceID, in.DriverID, in.DriverVersionID); err != nil {
+			return err
+		}
 	}
 	if in.RetryMaxAttempts < 0 || in.RetryBackoffSeconds < 0 {
 		return fmt.Errorf("retry_max_attempts and retry_backoff_seconds must be non-negative: %w", domain.ErrInvalid)
@@ -385,8 +387,10 @@ func (s *triggerBindingStore) Update(_ context.Context, ws, bindingID string, pa
 	if s.versions != nil && !s.versions.belongsToDriver(updated.WorkspaceKey, updated.DriverVersionID, updated.DriverID) {
 		return nil, fmt.Errorf("driver version %q for driver %q in workspace %q: %w", updated.DriverVersionID, updated.DriverID, updated.WorkspaceKey, domain.ErrNotFound)
 	}
-	if updated.TargetAgentServiceID != "" && s.services != nil && !s.services.exists(updated.WorkspaceKey, updated.TargetAgentServiceID) {
-		return nil, fmt.Errorf("target agent service %q in workspace %q: %w", updated.TargetAgentServiceID, updated.WorkspaceKey, domain.ErrNotFound)
+	if updated.TargetAgentServiceID != "" && s.services != nil {
+		if err := s.services.validateBindingTarget(updated.WorkspaceKey, updated.TargetAgentServiceID, updated.DriverID, updated.DriverVersionID); err != nil {
+			return nil, err
+		}
 	}
 	if s.services != nil && !s.services.triggerRefTargetCompatible(updated.WorkspaceKey, updated.BindingID, updated.TargetAgentServiceID) {
 		return nil, fmt.Errorf("trigger binding %q target %q would invalidate agent service trigger refs: %w", updated.BindingID, updated.TargetAgentServiceID, domain.ErrInvalidTransition)

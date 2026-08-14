@@ -1,4 +1,5 @@
 export * from "./agents";
+export * from "./agentServices";
 export * from "./common";
 export * from "./issues";
 export * from "./terminal";
