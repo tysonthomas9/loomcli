@@ -4,24 +4,24 @@ import (
 	"context"
 	"testing"
 
-	"github.com/tysonthomas9/loomcli/internal/webui/terminal"
+	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
 )
 
 type interactiveRuntimePTYFake struct {
-	live   map[terminal.SessionKey]bool
-	closed map[terminal.SessionKey]bool
-	killed []terminal.SessionKey
+	live   map[interaction.TerminalKey]bool
+	closed map[interaction.TerminalKey]bool
+	killed []interaction.TerminalKey
 }
 
-func (fake *interactiveRuntimePTYFake) HasSession(key terminal.SessionKey) bool {
+func (fake *interactiveRuntimePTYFake) IsLive(key interaction.TerminalKey) bool {
 	return fake.live[key]
 }
 
-func (fake *interactiveRuntimePTYFake) SessionClosed(key terminal.SessionKey) bool {
+func (fake *interactiveRuntimePTYFake) IsClosed(key interaction.TerminalKey) bool {
 	return fake.closed[key]
 }
 
-func (fake *interactiveRuntimePTYFake) Kill(key terminal.SessionKey) error {
+func (fake *interactiveRuntimePTYFake) Kill(key interaction.TerminalKey) error {
 	fake.killed = append(fake.killed, key)
 	return nil
 }
@@ -35,12 +35,12 @@ func (fake interactiveRuntimeTabSourceFake) ListInteractiveRuntimeTabs(context.C
 }
 
 func TestInteractiveRuntimeControllerBindsPTYsThroughServerTabMetadata(t *testing.T) {
-	keyA := terminal.SessionKey{Workspace: "TEST2", Name: "term_a"}
-	keyB := terminal.SessionKey{Workspace: "TEST2", Name: "term_b"}
-	ptys := &interactiveRuntimePTYFake{live: map[terminal.SessionKey]bool{keyA: true, keyB: true}}
+	keyA := interaction.TerminalKey{WorkspaceKey: "TEST2", TerminalID: "term_a"}
+	keyB := interaction.TerminalKey{WorkspaceKey: "TEST2", TerminalID: "term_b"}
+	ptys := &interactiveRuntimePTYFake{live: map[interaction.TerminalKey]bool{keyA: true, keyB: true}}
 	controller := NewInteractiveRuntimeController(interactiveRuntimeTabSourceFake{tabs: []InteractiveRuntimeTab{
-		{SessionName: keyA.Name, Kind: "agent", AgentID: "agent-a", PTYAlive: true},
-		{SessionName: keyB.Name, Kind: "agent", AgentID: "agent-b", PTYAlive: true},
+		{SessionName: keyA.TerminalID, Kind: "agent", AgentID: "agent-a", PTYAlive: true},
+		{SessionName: keyB.TerminalID, Kind: "agent", AgentID: "agent-b", PTYAlive: true},
 	}}, ptys)
 
 	owned, err := controller.OwnedAgentSessions(t.Context(), "TEST2", "agent-a")
@@ -53,12 +53,12 @@ func TestInteractiveRuntimeControllerBindsPTYsThroughServerTabMetadata(t *testin
 }
 
 func TestCanonicalInteractiveRuntimeCannotKillAnotherAgentsPTY(t *testing.T) {
-	keyA := terminal.SessionKey{Workspace: "TEST2", Name: "term_a"}
-	keyB := terminal.SessionKey{Workspace: "TEST2", Name: "term_b"}
-	ptys := &interactiveRuntimePTYFake{live: map[terminal.SessionKey]bool{keyA: true, keyB: true}}
+	keyA := interaction.TerminalKey{WorkspaceKey: "TEST2", TerminalID: "term_a"}
+	keyB := interaction.TerminalKey{WorkspaceKey: "TEST2", TerminalID: "term_b"}
+	ptys := &interactiveRuntimePTYFake{live: map[interaction.TerminalKey]bool{keyA: true, keyB: true}}
 	controller := NewInteractiveRuntimeController(interactiveRuntimeTabSourceFake{tabs: []InteractiveRuntimeTab{
-		{SessionName: keyA.Name, Kind: "agent", AgentID: "agent-a", PTYAlive: true},
-		{SessionName: keyB.Name, Kind: "agent", AgentID: "agent-b", PTYAlive: true},
+		{SessionName: keyA.TerminalID, Kind: "agent", AgentID: "agent-a", PTYAlive: true},
+		{SessionName: keyB.TerminalID, Kind: "agent", AgentID: "agent-b", PTYAlive: true},
 	}}, ptys)
 	runtime := NewCanonicalInteractiveAgentRuntime(controller)
 

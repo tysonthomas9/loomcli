@@ -147,7 +147,6 @@ describe("useTerminalMetadata", () => {
       });
 
       expect(mockPut).toHaveBeenCalledWith("test-ws", "new-sess", {
-        session_name: "new-sess",
         backend: "codex",
         label: "New Tab",
         sort_order: 0,

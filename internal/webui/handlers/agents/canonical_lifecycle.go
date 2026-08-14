@@ -7,9 +7,9 @@ import (
 	"time"
 
 	agentsmodule "github.com/tysonthomas9/loomcli/internal/modules/agents"
+	terminal "github.com/tysonthomas9/loomcli/internal/modules/interaction"
 	loomapi "github.com/tysonthomas9/loomcli/internal/platform/loomapi/gen"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
-	"github.com/tysonthomas9/loomcli/internal/webui/terminal"
 )
 
 func (m *Module) handleCanonicalLifecycle(operation string) http.HandlerFunc {

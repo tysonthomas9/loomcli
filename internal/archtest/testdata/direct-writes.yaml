@@ -1,10 +1,11 @@
 schema_version: 1
 status: complete
-source_head: 2eb968eee290196221fe2b38aa20ba8a1b6b7d09
+source_head: 763ae161e2e98d4941d091241879623b015be197
 adapter_roots:
   - internal/app
   - internal/cli
   - internal/driver
+  - internal/infra/localredis
   - internal/infra/sourcecontrolstackstore
   - internal/infra/workspacecatalog
   - internal/modules
@@ -33,6 +34,12 @@ owner_adapters:
     aggregate_owner: interaction
   - path: internal/cli/serve/workspacemgr
     aggregate_owner: workspace
+  - path: internal/infra/localredis/issue_tabs.go
+    aggregate_owner: interaction
+  - path: internal/infra/localredis/session_history.go
+    aggregate_owner: interaction
+  - path: internal/infra/localredis/tab_metadata.go
+    aggregate_owner: interaction
   - path: internal/infra/sourcecontrolstackstore
     aggregate_owner: sourcecontrol
   - path: internal/infra/workspacecatalog
@@ -64,6 +71,9 @@ persistence_packages:
     receiver_names: [AgentManagementTransport, Client, InteractionAuthorityTransport, InteractionMutationTransport, RepositoryAdmissionTransport]
     receiver_suffixes: []
     guard_subpackages: true
+  - path: github.com/tysonthomas9/loomcli/internal/infra/localredis
+    receiver_names: [IssueTabStore, SessionHistoryStore, TabMetadataStore]
+    receiver_suffixes: []
   - path: github.com/tysonthomas9/loomcli/internal/infra/sourcecontrolstackstore
     receiver_names: [LocalStore]
     receiver_suffixes: []
@@ -80,7 +90,7 @@ persistence_packages:
     receiver_names: [ConnectorGrantStore, DispatchStore, ManagementStore, SecretLifecycleStore]
     receiver_suffixes: []
   - path: github.com/tysonthomas9/loomcli/internal/modules/interaction
-    receiver_names: [InboxStore, SessionStore, TerminalStore, TranscriptArtifactStore]
+    receiver_names: [InboxStore, SessionStore, TabMetadataStore, TerminalStore, TranscriptArtifactStore]
     receiver_suffixes: []
   - path: github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol
     receiver_names: [StackLifecycleStore, TaskOutcomeStore]
@@ -100,9 +110,6 @@ persistence_packages:
     guard_subpackages: true
   - path: github.com/tysonthomas9/loomcli/internal/usage
     receiver_names: [Store]
-    receiver_suffixes: []
-  - path: github.com/tysonthomas9/loomcli/internal/webui/localredis
-    receiver_names: [IssueTabStore, SessionHistoryStore, TabMetadataStore]
     receiver_suffixes: []
 method_sets:
   - name: agentprovisioning_progress
@@ -373,6 +380,18 @@ receiver_surfaces:
     package: github.com/tysonthomas9/loomcli/internal/infra/fleetdb
     method_set: fleetdb_client
     capability_owner: fleet-db
+  - receiver: "*github.com/tysonthomas9/loomcli/internal/infra/localredis.IssueTabStore"
+    package: github.com/tysonthomas9/loomcli/internal/infra/localredis
+    method_set: issue_tabs
+    capability_owner: interaction
+  - receiver: "*github.com/tysonthomas9/loomcli/internal/infra/localredis.SessionHistoryStore"
+    package: github.com/tysonthomas9/loomcli/internal/infra/localredis
+    method_set: session_history
+    capability_owner: interaction
+  - receiver: "*github.com/tysonthomas9/loomcli/internal/infra/localredis.TabMetadataStore"
+    package: github.com/tysonthomas9/loomcli/internal/infra/localredis
+    method_set: tab_metadata
+    capability_owner: interaction
   - receiver: "*github.com/tysonthomas9/loomcli/internal/infra/sourcecontrolstackstore.LocalStore"
     package: github.com/tysonthomas9/loomcli/internal/infra/sourcecontrolstackstore
     method_set: stack_store
@@ -381,18 +400,6 @@ receiver_surfaces:
     package: github.com/tysonthomas9/loomcli/internal/usage
     method_set: usage
     capability_owner: read_projection
-  - receiver: "*github.com/tysonthomas9/loomcli/internal/webui/localredis.IssueTabStore"
-    package: github.com/tysonthomas9/loomcli/internal/webui/localredis
-    method_set: issue_tabs
-    capability_owner: interaction
-  - receiver: "*github.com/tysonthomas9/loomcli/internal/webui/localredis.SessionHistoryStore"
-    package: github.com/tysonthomas9/loomcli/internal/webui/localredis
-    method_set: session_history
-    capability_owner: interaction
-  - receiver: "*github.com/tysonthomas9/loomcli/internal/webui/localredis.TabMetadataStore"
-    package: github.com/tysonthomas9/loomcli/internal/webui/localredis
-    method_set: tab_metadata
-    capability_owner: interaction
   - receiver: github.com/tysonthomas9/loomcli/internal/app/agentprovisioning.ProgressStore
     package: github.com/tysonthomas9/loomcli/internal/app/agentprovisioning
     method_set: agentprovisioning_progress
@@ -532,6 +539,10 @@ receiver_surfaces:
   - receiver: github.com/tysonthomas9/loomcli/internal/modules/interaction.SessionStore
     package: github.com/tysonthomas9/loomcli/internal/modules/interaction
     method_set: interaction_session
+    capability_owner: interaction
+  - receiver: github.com/tysonthomas9/loomcli/internal/modules/interaction.TabMetadataStore
+    package: github.com/tysonthomas9/loomcli/internal/modules/interaction
+    method_set: tab_metadata
     capability_owner: interaction
   - receiver: github.com/tysonthomas9/loomcli/internal/modules/interaction.TerminalStore
     package: github.com/tysonthomas9/loomcli/internal/modules/interaction
@@ -790,6 +801,10 @@ function_surfaces:
     function: Phase5FoundationCapabilities
     access: read-only
     capability_owner: read_projection
+  - package: github.com/tysonthomas9/loomcli/internal/infra/localredis
+    function: NewManager
+    access: read-only
+    capability_owner: interaction
   - package: github.com/tysonthomas9/loomcli/internal/infra/sourcecontrolstackstore
     function: Default
     access: read-only
@@ -807,6 +822,10 @@ function_surfaces:
     access: read-only
     capability_owner: agents
   - package: github.com/tysonthomas9/loomcli/internal/modules/agents
+    function: ResolveRoleKind
+    access: read-only
+    capability_owner: agents
+  - package: github.com/tysonthomas9/loomcli/internal/modules/agents
     function: ResolveRuntimeIdentity
     access: read-only
     capability_owner: agents
@@ -815,7 +834,15 @@ function_surfaces:
     access: read-only
     capability_owner: agents
   - package: github.com/tysonthomas9/loomcli/internal/modules/agents
+    function: ValidAgentIdentifier
+    access: read-only
+    capability_owner: agents
+  - package: github.com/tysonthomas9/loomcli/internal/modules/agents
     function: ValidGenerationID
+    access: read-only
+    capability_owner: agents
+  - package: github.com/tysonthomas9/loomcli/internal/modules/agents
+    function: ValidStoredAgentName
     access: read-only
     capability_owner: agents
   - package: github.com/tysonthomas9/loomcli/internal/modules/agents
@@ -1019,6 +1046,22 @@ function_surfaces:
     access: read-only
     capability_owner: interaction
   - package: github.com/tysonthomas9/loomcli/internal/modules/interaction
+    function: IsValidTerminalBackend
+    access: read-only
+    capability_owner: interaction
+  - package: github.com/tysonthomas9/loomcli/internal/modules/interaction
+    function: LaunchSpecForBackend
+    access: read-only
+    capability_owner: interaction
+  - package: github.com/tysonthomas9/loomcli/internal/modules/interaction
+    function: LockAgentLifecycle
+    access: read-only
+    capability_owner: interaction
+  - package: github.com/tysonthomas9/loomcli/internal/modules/interaction
+    function: LoomExecutableForTerminal
+    access: read-only
+    capability_owner: interaction
+  - package: github.com/tysonthomas9/loomcli/internal/modules/interaction
     function: New
     access: read-only
     capability_owner: interaction
@@ -1031,11 +1074,23 @@ function_surfaces:
     access: read-only
     capability_owner: interaction
   - package: github.com/tysonthomas9/loomcli/internal/modules/interaction
+    function: NewTerminalSetupCatalog
+    access: read-only
+    capability_owner: interaction
+  - package: github.com/tysonthomas9/loomcli/internal/modules/interaction
+    function: NewTerminalTabs
+    access: read-only
+    capability_owner: interaction
+  - package: github.com/tysonthomas9/loomcli/internal/modules/interaction
     function: NewUUID
     access: read-only
     capability_owner: interaction
   - package: github.com/tysonthomas9/loomcli/internal/modules/interaction
     function: OperationRules
+    access: read-only
+    capability_owner: interaction
+  - package: github.com/tysonthomas9/loomcli/internal/modules/interaction
+    function: PublicTerminalErrorMessage
     access: read-only
     capability_owner: interaction
   - package: github.com/tysonthomas9/loomcli/internal/modules/interaction
@@ -1047,7 +1102,19 @@ function_surfaces:
     access: read-only
     capability_owner: interaction
   - package: github.com/tysonthomas9/loomcli/internal/modules/interaction
+    function: ShellArgvForCommand
+    access: read-only
+    capability_owner: interaction
+  - package: github.com/tysonthomas9/loomcli/internal/modules/interaction
     function: ValidateIssueTabIssueID
+    access: read-only
+    capability_owner: interaction
+  - package: github.com/tysonthomas9/loomcli/internal/modules/interaction
+    function: ValidateSessionHistoryIssueID
+    access: read-only
+    capability_owner: interaction
+  - package: github.com/tysonthomas9/loomcli/internal/modules/interaction
+    function: ValidateTerminalSessionName
     access: read-only
     capability_owner: interaction
   - package: github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol
@@ -1203,6 +1270,10 @@ function_surfaces:
     access: read-only
     capability_owner: workitems
   - package: github.com/tysonthomas9/loomcli/internal/modules/workspace
+    function: NameValidationKindOf
+    access: read-only
+    capability_owner: workspace
+  - package: github.com/tysonthomas9/loomcli/internal/modules/workspace
     function: New
     access: read-only
     capability_owner: workspace
@@ -1212,6 +1283,10 @@ function_surfaces:
     capability_owner: workspace
   - package: github.com/tysonthomas9/loomcli/internal/modules/workspace
     function: PublicErrorMessage
+    access: read-only
+    capability_owner: workspace
+  - package: github.com/tysonthomas9/loomcli/internal/modules/workspace
+    function: ValidateName
     access: read-only
     capability_owner: workspace
   - package: github.com/tysonthomas9/loomcli/internal/modules/workspace
@@ -1262,10 +1337,6 @@ function_surfaces:
     function: ResolvePricing
     access: read-only
     capability_owner: read_projection
-  - package: github.com/tysonthomas9/loomcli/internal/webui/localredis
-    function: NewManager
-    access: read-only
-    capability_owner: interaction
 writes:
     - file: internal/app/serve/agents_fleetdb.go
       receiver: github.com/tysonthomas9/loomcli/internal/infra/fleetdb.AgentManagementTransport
@@ -1692,6 +1763,18 @@ writes:
       method: FailRepositoryAdmission
       count: 1
       aggregate_owner: workspace
+      disposition: owner_adapter
+    - file: internal/infra/localredis/session_history.go
+      receiver: "*github.com/tysonthomas9/loomcli/internal/infra/localredis.SessionHistoryStore"
+      method: saveHistory
+      count: 2
+      aggregate_owner: interaction
+      disposition: owner_adapter
+    - file: internal/infra/localredis/tab_metadata.go
+      receiver: "*github.com/tysonthomas9/loomcli/internal/infra/localredis.TabMetadataStore"
+      method: Set
+      count: 1
+      aggregate_owner: interaction
       disposition: owner_adapter
     - file: internal/infra/sourcecontrolstackstore/stackstore.go
       receiver: '*github.com/tysonthomas9/loomcli/internal/infra/sourcecontrolstackstore.LocalStore'

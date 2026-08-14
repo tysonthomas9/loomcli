@@ -65,6 +65,11 @@ goroutine_launches:
   - {file: "internal/infra/interactionlead/harness_runtime.go", function: "RunHarnessLeadRuntime", site: "go#1", callee: "watchHarnessLeadRuntime", disposition: component, component_ids: [harness-lead-runtime-watch]}
   - {file: "internal/infra/interactionlead/harness_runtime.go", function: "RunHarnessLeadRuntime", site: "go#2", callee: "drainLeadMessageQueue", disposition: component, component_ids: [lead-message-delivery-drain]}
   - {file: "internal/infra/interactionlead/harness_runtime.go", function: "forwardHarnessStdin", site: "go#1", callee: "<anonymous>", disposition: component, component_ids: [harness-stdin-forwarder]}
+  - {file: "internal/infra/localredis/manager.go", function: "Manager.Start", site: "go#1", callee: "m.run", disposition: component, component_ids: [local-redis-health-monitor]}
+  - {file: "internal/infra/pty/agent_tmux.go", function: "AgentTmuxManager.KillWorkspaceSessions", site: "go#1", callee: "<anonymous>", disposition: bounded, reason: "tmux cleanup fan-out is WaitGroup-joined before return"}
+  - {file: "internal/infra/pty/agent_tmux.go", function: "AgentTmuxManager.KillWorkspaceSessions", site: "go#2", callee: "<anonymous>", disposition: bounded, reason: "tmux cleanup fan-out is WaitGroup-joined before return"}
+  - {file: "internal/infra/pty/pty_manager.go", function: "NewPTYManager", site: "go#1", callee: "m.reapLoop", disposition: component, component_ids: [terminal-idle-reaper]}
+  - {file: "internal/infra/pty/pty_manager.go", function: "PTYManager.spawnSession", site: "go#1", callee: "sess.drain", disposition: component, component_ids: [terminal-pty-drain]}
   - {file: "internal/modules/sourcecontrol/filesystem/files_git_status.go", function: "fileServiceImpl.inspectWorkspaceCheckouts", site: "go#1", callee: "<anonymous>", disposition: bounded, reason: "checkout inspection uses a ten-second context and joins its fan-out before return"}
   - {file: "internal/platform/runtime/host.go", function: "Host.Start", site: "go#1", callee: "host.runComponent", disposition: component, component_ids: [execution-await-timeout-recovery, execution-driver-run, execution-task-run-convergence, execution-task-run-workers, serve-agent-provisioning-recovery, serve-agents-desired-state-reconciliation, serve-await-event-notifications, serve-driver-run-outcomes, serve-interaction-session-recovery, serve-trigger-cron-scheduler, serve-trigger-delivery-sweeper, workspace-repository-admission-lease-renewal, workspace-repository-admission-recovery]}
   - {file: "internal/webui/app/infra.go", function: "StartPeriodicWorkspaceReconcile", site: "go#1", callee: "<anonymous>", disposition: component, component_ids: [workspace-registry-reconcile]}
@@ -79,17 +84,12 @@ goroutine_launches:
   - {file: "internal/webui/handlers/terminal/agent.go", function: "runAgentTerminalRelay", site: "go#1", callee: "<anonymous>", disposition: request, reason: "terminal kill watcher is canceled with the owning request context"}
   - {file: "internal/webui/handlers/terminal/agent.go", function: "runAgentTerminalRelay", site: "go#2", callee: "<anonymous>", disposition: request, reason: "terminal output pump is canceled and awaited by the owning request"}
   - {file: "internal/webui/handlers/terminal/ws.go", function: "runTerminalRelay", site: "go#1", callee: "<anonymous>", disposition: request, reason: "terminal WebSocket output pump is canceled and awaited by the owning request"}
-  - {file: "internal/webui/localredis/manager.go", function: "Manager.Start", site: "go#1", callee: "m.run", disposition: component, component_ids: [local-redis-health-monitor]}
   - {file: "internal/webui/server/middleware/jwks.go", function: "NewJWKSCache", site: "go#1", callee: "c.refreshLoop", disposition: component, component_ids: [jwks-background-refresh]}
   - {file: "internal/webui/server/middleware/ratelimit.go", function: "RateLimit", site: "go#1", callee: "rl.cleanupLoop", disposition: component, component_ids: [http-rate-limit-cleanup]}
   - {file: "internal/webui/server/realtime/sse_token.go", function: "NewTokenStore", site: "go#1", callee: "s.cleanupLoop", disposition: component, component_ids: [sse-token-nonce-cleanup]}
   - {file: "internal/webui/server/realtime/terminal_auth.go", function: "NewTerminalAuth", site: "go#1", callee: "ta.cleanupLoop", disposition: component, component_ids: [terminal-token-nonce-cleanup]}
   - {file: "internal/webui/subscription/multi.go", function: "MultiWorkspaceSubscriber.Start", site: "go#1", callee: "<anonymous>", disposition: component, component_ids: [workspace-subscriber-idle-deactivation]}
   - {file: "internal/webui/subscription/workitem_mutation_subscriber.go", function: "WorkItemMutationSubscriber.Start", site: "go#1", callee: "s.loop", disposition: component, component_ids: [workitem-mutation-long-poll]}
-  - {file: "internal/webui/terminal/agent_tmux.go", function: "AgentTmuxManager.KillWorkspaceSessions", site: "go#1", callee: "<anonymous>", disposition: bounded, reason: "tmux cleanup fan-out is WaitGroup-joined before return"}
-  - {file: "internal/webui/terminal/agent_tmux.go", function: "AgentTmuxManager.KillWorkspaceSessions", site: "go#2", callee: "<anonymous>", disposition: bounded, reason: "tmux cleanup fan-out is WaitGroup-joined before return"}
-  - {file: "internal/webui/terminal/pty_manager.go", function: "NewPTYManager", site: "go#1", callee: "m.reapLoop", disposition: component, component_ids: [terminal-idle-reaper]}
-  - {file: "internal/webui/terminal/pty_manager.go", function: "PTYManager.spawnSession", site: "go#1", callee: "sess.drain", disposition: component, component_ids: [terminal-pty-drain]}
   - {file: "internal/webui/workspacecoord/job_store.go", function: "NewWorkspaceJobRegistry", site: "go#1", callee: "s.cleanupLoop", disposition: component, component_ids: [workspace-job-cleanup]}
   - {file: "internal/webui/workspacecoord/job_store.go", function: "WorkspaceJobRegistry.start", site: "go#1", callee: "<anonymous>", disposition: bounded, reason: "workspace mutation job carries a five-minute context and persists terminal completion"}
 components:
@@ -697,7 +697,7 @@ components:
 
   - id: local-redis-health-monitor
     kind: ticker
-    file: internal/webui/localredis/manager.go
+    file: internal/infra/localredis/manager.go
     function: Manager.run
     site: "time.NewTicker#1"
     capability: platform
@@ -827,7 +827,7 @@ components:
 
   - id: terminal-idle-reaper
     kind: ticker
-    file: internal/webui/terminal/pty_manager.go
+    file: internal/infra/pty/pty_manager.go
     function: PTYManager.reapLoop
     site: "time.NewTicker#1"
     capability: interaction
@@ -932,7 +932,7 @@ components:
 
   - id: terminal-pty-drain
     kind: component
-    file: internal/webui/terminal/pty_session.go
+    file: internal/infra/pty/pty_session.go
     function: ptySession.drain
     site: component:pty-read-loop
     capability: interaction

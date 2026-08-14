@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/tysonthomas9/loomcli/internal/app/agentprovisioning"
+	"github.com/tysonthomas9/loomcli/internal/app/query/sessionarchive"
 	agentsmodule "github.com/tysonthomas9/loomcli/internal/modules/agents"
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
@@ -17,7 +18,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/triggerbindings"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
-	"github.com/tysonthomas9/loomcli/internal/webui/sessioncoord"
 )
 
 // BindingGrantCleanup is the consumer-owned Connectors intent needed by Agent
@@ -26,7 +26,7 @@ type BindingGrantCleanup interface {
 	RevokeBindingGrants(context.Context, string, string) (int, error)
 }
 
-type agentSessionTranscriptEvents = sessioncoord.TranscriptEvents
+type agentSessionTranscriptEvents = sessionarchive.TranscriptEvents
 
 // Config composes the unified transport with capability-owned interfaces.
 type Config struct {
@@ -34,7 +34,7 @@ type Config struct {
 	AgentIdentityCreator  CanonicalInteractiveAgentAPI
 	InteractiveRuntime    agentcoord.InteractiveAgentRuntime
 	AgentRecordAuthority  OperatorAuthorityResolver
-	SessionTranscripts    sessioncoord.AgentSessionTranscriptService
+	SessionTranscripts    sessionarchive.AgentSessionTranscriptService
 	AgentRuns             AgentRunQueries
 	Hub                   *realtime.Hub
 	Bindings              automation.BindingOperations
@@ -60,7 +60,7 @@ type Module struct {
 	agentRoleQueries      agentsmodule.RoleQueries
 	interactiveRuntime    agentcoord.InteractiveAgentRuntime
 	agentRecordAuthority  OperatorAuthorityResolver
-	sessionTranscripts    sessioncoord.AgentSessionTranscriptService
+	sessionTranscripts    sessionarchive.AgentSessionTranscriptService
 	agentRuns             AgentRunQueries
 	hub                   *realtime.Hub
 	bindings              automation.BindingOperations
@@ -147,6 +147,23 @@ func (m *Module) Register(mux *http.ServeMux) {
 }
 
 func writeAgentSessionTranscriptServiceError(w http.ResponseWriter, err error) {
+	if errors.Is(err, sessionarchive.ErrInvalid) || errors.Is(err, sessionarchive.ErrNotFound) ||
+		errors.Is(err, sessionarchive.ErrUnavailable) || errors.Is(err, sessionarchive.ErrInvalidPersistedState) {
+		status := http.StatusInternalServerError
+		switch {
+		case errors.Is(err, sessionarchive.ErrInvalid):
+			status = http.StatusBadRequest
+		case errors.Is(err, sessionarchive.ErrNotFound):
+			status = http.StatusNotFound
+		case errors.Is(err, sessionarchive.ErrUnavailable):
+			status = http.StatusServiceUnavailable
+		}
+		handler.WriteJSON(w, status, loomapi.TranscriptResponse{
+			Success: false,
+			Error:   optionalAgentRecordString(sessionarchive.PublicErrorMessage(err)),
+		})
+		return
+	}
 	var svcErr *apperrors.ServiceError
 	status := http.StatusInternalServerError
 	message := "internal server error"

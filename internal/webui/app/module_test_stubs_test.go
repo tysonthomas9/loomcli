@@ -3,56 +3,70 @@ package app
 import (
 	"context"
 
+	"github.com/tysonthomas9/loomcli/internal/app/query/sessionarchive"
 	transcript "github.com/tysonthomas9/loomcli/internal/modules/artifacts"
+	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
 	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
 	"github.com/tysonthomas9/loomcli/internal/webui/readprojection"
-	"github.com/tysonthomas9/loomcli/internal/webui/sessioncoord"
-	"github.com/tysonthomas9/loomcli/internal/webui/terminal"
 )
 
 // stubTerminalService implements TerminalService with no-op defaults for module tests.
 type stubTerminalService struct {
-	tabs []terminal.TabMetadata
+	tabs []interaction.TabMetadata
 }
 
 func (s *stubTerminalService) GenerateToken(_ context.Context, _, _, _ string) (string, error) {
 	return "tok", nil
 }
-func (s *stubTerminalService) ListTabs(_ context.Context, _ string) ([]terminal.TabMetadata, error) {
-	return append([]terminal.TabMetadata(nil), s.tabs...), nil
+func (s *stubTerminalService) ListTabs(_ context.Context, _ string) ([]interaction.TabMetadata, error) {
+	return append([]interaction.TabMetadata(nil), s.tabs...), nil
 }
-func (s *stubTerminalService) GetTab(_ context.Context, _, _ string) (*terminal.TabMetadata, error) {
-	return &terminal.TabMetadata{}, nil
+func (s *stubTerminalService) GetTab(_ context.Context, _, _ string) (*interaction.TabMetadata, error) {
+	return &interaction.TabMetadata{}, nil
 }
-func (s *stubTerminalService) PatchTab(_ context.Context, _, _ string, _ map[string]string) (*terminal.PatchTabResult, error) {
-	return &terminal.PatchTabResult{Tab: &terminal.TabMetadata{}}, nil
+func (s *stubTerminalService) PatchTab(_ context.Context, _, _ string, _ map[string]string) (*interaction.PatchTabResult, error) {
+	return &interaction.PatchTabResult{Tab: &interaction.TabMetadata{}}, nil
 }
-func (s *stubTerminalService) PutTab(_ context.Context, _ string, _ *terminal.TabMetadata) error {
-	return nil
-}
-func (s *stubTerminalService) PersistInteractionTabIdentity(_ context.Context, _ string, _ *terminal.TabMetadata) error {
-	return nil
+func (s *stubTerminalService) PutTab(_ context.Context, command interaction.PutTerminalTabCommand) (*interaction.TabMetadata, error) {
+	return &interaction.TabMetadata{SessionName: command.TerminalID}, nil
 }
 func (s *stubTerminalService) DeleteTab(_ context.Context, _, _ string) error { return nil }
 func (s *stubTerminalService) ListSessionsByIssue(_ context.Context) (map[string][]string, error) {
 	return nil, nil
 }
+func (s *stubTerminalService) EnsureAgentTerminal(_ context.Context, _ interaction.EnsureAgentTerminalCommand) (*interaction.TabMetadata, error) {
+	return &interaction.TabMetadata{}, nil
+}
+func (s *stubTerminalService) PlanTerminalAttach(context.Context, interaction.TerminalAttachCommand) (interaction.TerminalAttachPlan, error) {
+	return interaction.TerminalAttachPlan{}, nil
+}
+func (s *stubTerminalService) AttachTerminal(context.Context, interaction.TerminalAttachCommand) (*interaction.TerminalAttachResult, error) {
+	return nil, interaction.ErrUnavailable
+}
+func (s *stubTerminalService) DetachTerminal(context.Context, string, string, string) {}
+func (s *stubTerminalService) AgentTerminalInfo(context.Context, string, string) (*interaction.AgentTerminalInfo, error) {
+	return &interaction.AgentTerminalInfo{}, nil
+}
+func (s *stubTerminalService) AttachAgentTerminal(context.Context, interaction.AttachAgentTerminalCommand) (*interaction.AgentTerminalAttachResult, error) {
+	return nil, interaction.ErrUnavailable
+}
+func (s *stubTerminalService) DetachAgentTerminal(context.Context, string) error { return nil }
 func (s *stubTerminalService) GetTerminalState(_ context.Context, _ string) (string, error) {
 	return "", nil
 }
 func (s *stubTerminalService) PatchTerminalState(_ context.Context, _, _ string) error { return nil }
-func (s *stubTerminalService) StartSetup(_ context.Context, _ string, req terminal.TerminalSetupRequest) (*terminal.TerminalSetupResult, error) {
-	return &terminal.TerminalSetupResult{Backend: req.Backend, Action: req.Action}, nil
+func (s *stubTerminalService) StartSetup(_ context.Context, _ string, req interaction.TerminalSetupRequest) (*interaction.TerminalSetupResult, error) {
+	return &interaction.TerminalSetupResult{Backend: req.Backend, Action: req.Action}, nil
 }
 
 // stubSessionService implements SessionService with no-op defaults for module tests.
 type stubSessionService struct{}
 
-func (s *stubSessionService) ListTaskSessions(_ context.Context, _, _ string) ([]sessioncoord.SessionListItem, error) {
+func (s *stubSessionService) ListTaskSessions(_ context.Context, _, _ string) ([]sessionarchive.SessionListItem, error) {
 	return nil, nil
 }
-func (s *stubSessionService) GetSession(_ context.Context, _, _, _ string) (*sessioncoord.SessionDetailData, error) {
-	return &sessioncoord.SessionDetailData{}, nil
+func (s *stubSessionService) GetSession(_ context.Context, _, _, _ string) (*sessionarchive.SessionDetailData, error) {
+	return &sessionarchive.SessionDetailData{}, nil
 }
 func (s *stubSessionService) GetSessionTranscript(_ context.Context, _, _, _ string) ([]transcript.Event, error) {
 	return nil, nil
@@ -60,11 +74,11 @@ func (s *stubSessionService) GetSessionTranscript(_ context.Context, _, _, _ str
 func (s *stubSessionService) GetSessionDiff(_ context.Context, _, _, _ string) (string, error) {
 	return "", nil
 }
-func (s *stubSessionService) ListSessionHistory(_ context.Context, _, _ string) ([]sessioncoord.SessionHistoryItem, error) {
+func (s *stubSessionService) ListSessionHistory(_ context.Context, _, _ string) ([]sessionarchive.SessionHistoryItem, error) {
 	return nil, nil
 }
-func (s *stubSessionService) GetSessionScrollback(_ context.Context, _, _, _ string) (*sessioncoord.SessionScrollbackResult, error) {
-	return &sessioncoord.SessionScrollbackResult{}, nil
+func (s *stubSessionService) GetSessionScrollback(_ context.Context, _, _, _ string) (*sessionarchive.SessionScrollbackResult, error) {
+	return &sessionarchive.SessionScrollbackResult{}, nil
 }
 
 type stubIssueDiff struct{}

@@ -2,6 +2,7 @@ package execution
 
 import (
 	"encoding/json"
+	"strings"
 	"time"
 )
 
@@ -54,6 +55,27 @@ type TaskRun struct {
 	FinishedAt       *time.Time
 	CreatedAt        time.Time
 	UpdatedAt        time.Time
+}
+
+// FlueTaskSessionIDPrefix preserves the public task-session identity that the
+// historical Flue AgentSession projection exposed.
+const FlueTaskSessionIDPrefix = "flue-"
+
+// PublicTaskRunSessionID returns the session identity exposed by task-session
+// and agent-history read projections for one canonical TaskRun.
+func PublicTaskRunSessionID(run *TaskRun) string {
+	if run == nil {
+		return ""
+	}
+	taskRunID := strings.TrimSpace(run.TaskRunID)
+	if taskRunID == "" {
+		return ""
+	}
+	if strings.TrimSpace(run.RunnerKind) == "flue-workflow" ||
+		strings.TrimSpace(run.RuntimeMetadata["runtime"]) == "flue" {
+		return FlueTaskSessionIDPrefix + taskRunID
+	}
+	return taskRunID
 }
 
 // RequestTaskRunCommand is one parent-bound enqueue intent. The persistence

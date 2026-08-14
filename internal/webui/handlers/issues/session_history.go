@@ -15,7 +15,7 @@ func handleListSessionHistory(svc SessionHistoryQueries) http.HandlerFunc {
 
 		records, err := svc.ListSessionHistory(r.Context(), wsID, issueID)
 		if err != nil {
-			handler.HandleServiceError(w, err)
+			handler.HandleSessionArchiveError(w, err)
 			return
 		}
 
@@ -35,7 +35,7 @@ func handleGetSessionScrollback(svc SessionHistoryQueries) http.HandlerFunc {
 
 		result, err := svc.GetSessionScrollback(r.Context(), wsID, issueID, recordID)
 		if err != nil {
-			handler.HandleServiceError(w, err)
+			handler.HandleSessionArchiveError(w, err)
 			return
 		}
 

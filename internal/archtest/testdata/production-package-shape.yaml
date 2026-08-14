@@ -27,6 +27,7 @@ packages:
   - internal/app/connectorgrants
   - internal/app/prreviewer
   - internal/app/query/runcapture
+  - internal/app/query/sessionarchive
   - internal/app/serve
   - internal/app/systemeventing
   - internal/app/webhookingestion
@@ -92,7 +93,9 @@ packages:
   - internal/infra/interactionclient
   - internal/infra/interactionlead
   - internal/infra/localgit
+  - internal/infra/localredis
   - internal/infra/memstore
+  - internal/infra/pty
   - internal/infra/sourcecontrolpublisher
   - internal/infra/sourcecontrolstackstore
   - internal/infra/workflowdistribution
@@ -165,13 +168,10 @@ packages:
   - internal/webui/handlers/workflows
   - internal/webui/handlers/workspace
   - internal/webui/hooks
-  - internal/webui/localredis
   - internal/webui/readprojection
   - internal/webui/server/handler
   - internal/webui/server/middleware
   - internal/webui/server/realtime
-  - internal/webui/sessioncoord
   - internal/webui/storeadapter
   - internal/webui/subscription
-  - internal/webui/terminal
   - internal/webui/workspacecoord

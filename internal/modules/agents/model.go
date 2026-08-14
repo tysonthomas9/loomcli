@@ -1,6 +1,53 @@
 package agents
 
-import "time"
+import (
+	"regexp"
+	"strings"
+	"time"
+)
+
+const (
+	RoleKindInteractive = "interactive"
+	RoleKindWorker      = "worker"
+)
+
+var (
+	legacyAgentIdentifier = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
+	storedAgentIdentifier = regexp.MustCompile(`^[a-z0-9]([a-z0-9._-]{0,98}[a-z0-9])?$`)
+)
+
+// ValidAgentIdentifier reports whether value is either a legacy local Agent
+// identifier or the canonical Fleet-stored form. The stored form permits dots
+// but neither form permits separators or target/control punctuation.
+func ValidAgentIdentifier(value string) bool {
+	return legacyAgentIdentifier.MatchString(value) || ValidStoredAgentName(value)
+}
+
+// ValidStoredAgentName reports whether value matches Fleet's canonical Agent
+// name contract: lowercase, bounded, and without leading/trailing punctuation.
+func ValidStoredAgentName(value string) bool {
+	return storedAgentIdentifier.MatchString(value)
+}
+
+// ResolveRoleKind returns the Agents-owned runtime kind for one Role. Empty
+// legacy roles retain the lead/orchestrator convention until their durable
+// records are rewritten by an explicit migration.
+func ResolveRoleKind(role *Role, fallbackName string) string {
+	if role != nil {
+		if kind := strings.ToLower(strings.TrimSpace(role.Kind)); kind != "" {
+			return kind
+		}
+		if strings.TrimSpace(role.Name) != "" {
+			fallbackName = role.Name
+		}
+	}
+	switch strings.ToLower(strings.TrimSpace(fallbackName)) {
+	case "lead", "orchestrator":
+		return RoleKindInteractive
+	default:
+		return RoleKindWorker
+	}
+}
 
 // AgentKind is the durable AgentService kind. It is descriptive placement
 // metadata, not a behavior discriminator: Behavior is authoritative.

@@ -3,8 +3,9 @@
  * The tmux-era endpoints (spawn, restart, kill, session-status, seed,
  * lead-session, close-all, scrollback, scrollback-info, export,
  * list-sessions) were removed with the wterm migration. What remains is
- * WebSocket auth, tab metadata CRUD (Redis), terminal UI state (Redis),
- * and the cross-workspace "sessions by issue" lookup.
+ * WebSocket delivery, Interaction-owned tab intents and projections,
+ * presentation-only active-tab preference, and the cross-workspace
+ * "sessions by issue" lookup.
  */
 import {
   api,
@@ -12,10 +13,16 @@ import {
   apiErrorFromResponse,
   unwrapResponse,
   get,
-  post,
   wsUrl,
   getWsBaseUrl,
 } from "@/api/common";
+import type { components } from "@/types/generated/openapi";
+
+type TabPutRequest = components["schemas"]["TabPutRequest"];
+type TerminalSetupRequest = components["schemas"]["TerminalSetupRequest"];
+export type TerminalBackend = TabPutRequest["backend"];
+export type TerminalSetupBackend = TerminalSetupRequest["backend"];
+export type TerminalSetupAction = TerminalSetupRequest["action"];
 
 /**
  * Fetch a one-time terminal auth token for the given session.
@@ -61,99 +68,41 @@ export interface IssueContext {
   blockers?: Array<{ id: string; title: string }>;
 }
 
-export interface TabMetadata {
-  session_name: string;
-  label: string;
-  notes: string;
-  sort_order: number;
-  pinned: boolean;
-  issue_id?: string;
-  kind?: string;
-  agent_id?: string;
-  role?: string;
-  backend?: string;
-  writable?: boolean;
-  launch?: {
-    argv?: string[];
-    env?: Record<string, string>;
-  };
-  created_at: string;
-  updated_at: string;
-  /**
-   * Whether the backend PTY for this tab is currently alive in the server
-   * process. false means the tab survived (e.g. a server restart) but its
-   * backing shell did not — connecting will spawn a fresh session, so the
-   * UI should render the tab as "session ended" and prompt before
-   * reconnecting.
-   */
-  pty_alive: boolean;
-  /**
-   * Number of concurrent WebSocket clients currently viewing this session.
-   * 0 = no one attached; ≥2 = multi-viewer state the UI can surface before
-   * destructive tab-close actions.
-   */
-  attached_clients: number;
-}
+export type TabMetadata = components["schemas"]["TabMetadata"];
 
 export async function ensureAgentTerminalSession(
   workspaceId: string,
   agentName: string,
 ): Promise<TabMetadata> {
-  const response = await post<{
-    success: boolean;
-    data?: TabMetadata;
-    error?: string;
-  }>(
-    wsUrl(
-      workspaceId,
-      `/agents/${encodeURIComponent(agentName)}/terminal/session`,
-    ),
-    {},
+  const { data, error, response } = await api.POST(
+    "/api/workspaces/{ws}/agents/{name}/terminal/session",
+    {
+      params: { path: { ws: workspaceId, name: agentName } },
+    },
   );
-  if (!response.success || !response.data) {
-    throw new Error(response.error || "Failed to resolve agent terminal");
-  }
-  return response.data;
+  if (error) throw apiErrorFromResponse(error, response);
+  return unwrapResponse(data, response);
 }
 
-export interface TerminalSetupResult {
-  session_name: string;
-  label: string;
-  backend: string;
-  action: string;
-  command: string;
-  title: string;
-  message: string;
-  manual: boolean;
-  created: boolean;
-}
-
-type TerminalSetupApiResponse =
-  | { success: true; data: TerminalSetupResult }
-  | { success: false; error: string };
-
-function unwrapTerminalSetupResponse(
-  response: TerminalSetupApiResponse,
-): TerminalSetupResult {
-  if (!response.success) {
-    throw new ApiError(0, response.error);
-  }
-  return response.data;
-}
+export type TerminalSetupResult = components["schemas"]["TerminalSetupResult"];
 
 /**
  * Start a typed backend-owned setup command in a workspace terminal.
  */
 export async function startTerminalSetup(
   workspaceId: string,
-  backend: string,
-  action: string,
+  backend: TerminalSetupBackend,
+  action: TerminalSetupAction,
 ): Promise<TerminalSetupResult> {
-  const response = await post<TerminalSetupApiResponse>(
-    wsUrl(workspaceId, "/terminal/setup"),
-    { backend, action },
+  const { data, error, response } = await api.POST(
+    "/api/workspaces/{ws}/terminal/setup",
+    {
+      params: { path: { ws: workspaceId } },
+      body: { backend, action },
+    },
   );
-  return unwrapTerminalSetupResponse(response);
+  if (error) throw apiErrorFromResponse(error, response);
+  return unwrapResponse(data, response);
 }
 
 /**
@@ -227,17 +176,13 @@ export async function patchTabMetadata(
 export async function putTabMetadata(
   workspaceId: string,
   session: string,
-  meta: Omit<
-    TabMetadata,
-    "created_at" | "updated_at" | "pty_alive" | "attached_clients"
-  >,
+  meta: TabPutRequest,
 ): Promise<void> {
   const { error, response } = await api.PUT(
     "/api/workspaces/{ws}/terminal/tabs/{session}",
     {
       params: { path: { ws: workspaceId, session } },
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      body: meta as any,
+      body: meta,
     },
   );
   if (error) throw apiErrorFromResponse(error, response);
@@ -262,18 +207,19 @@ export async function deleteTabMetadata(
 /**
  * List sessions grouped by issue ID from GET /api/workspaces/{workspace}/terminal/sessions/by-issue.
  * Returns a map of issue_id → session_name[].
- * Uses raw fetch because the spec response is untyped.
  */
 export async function listSessionsByIssue(
   workspaceId: string,
 ): Promise<Record<string, string[]>> {
   try {
-    const response = await get<{
-      success: boolean;
-      data: Record<string, string[]>;
-    }>(wsUrl(workspaceId, "/terminal/sessions/by-issue"));
-    if (!response.success) return {};
-    return response.data ?? {};
+    const { data, error, response } = await api.GET(
+      "/api/workspaces/{ws}/terminal/sessions/by-issue",
+      {
+        params: { path: { ws: workspaceId }, query: {} },
+      },
+    );
+    if (error) throw apiErrorFromResponse(error, response);
+    return unwrapResponse(data, response);
   } catch (error) {
     if (
       error instanceof ApiError &&

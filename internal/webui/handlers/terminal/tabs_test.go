@@ -10,17 +10,28 @@ import (
 	"github.com/alicebob/miniredis/v2"
 	"github.com/redis/go-redis/v9"
 
-	"github.com/tysonthomas9/loomcli/internal/webui/localredis"
+	"github.com/tysonthomas9/loomcli/internal/infra/localredis"
+	webuterminal "github.com/tysonthomas9/loomcli/internal/modules/interaction"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
-	webuterminal "github.com/tysonthomas9/loomcli/internal/webui/terminal"
 )
 
-func newTerminalTabHTTPTestService(t *testing.T) webuterminal.TerminalService {
+func newTestTerminalService(
+	_ any,
+	store webuterminal.TabMetadataStore,
+	_ any,
+	_ any,
+	runtime webuterminal.TerminalRuntime,
+	startedAt time.Time,
+) webuterminal.TerminalTabs {
+	return webuterminal.NewTerminalTabs(store, runtime, startedAt, webuterminal.TerminalDependencies{})
+}
+
+func newTerminalTabHTTPTestService(t *testing.T) webuterminal.TerminalTabs {
 	t.Helper()
 	mr := miniredis.RunT(t)
 	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
 	t.Cleanup(func() { _ = rdb.Close() })
-	return webuterminal.NewTerminalService(
+	return newTestTerminalService(
 		nil,
 		localredis.NewTabMetadataStore(rdb, nil),
 		nil,
@@ -37,8 +48,7 @@ func terminalTabPutRequest(t *testing.T, body string) *http.Request {
 	return req.WithContext(middleware.WithWorkspace(req.Context(), "E2E"))
 }
 
-func TestPutTerminalTabPersistsServerDerivedLaunchEnvelope(t *testing.T) {
-	t.Setenv("LOOM_CONFIG_DIR", "/trusted/loom-data")
+func TestPutTerminalTabPersistsOwnerDerivedLaunchEnvelope(t *testing.T) {
 	svc := newTerminalTabHTTPTestService(t)
 	rec := httptest.NewRecorder()
 
@@ -49,6 +59,9 @@ func TestPutTerminalTabPersistsServerDerivedLaunchEnvelope(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
 	}
+	if strings.Contains(rec.Body.String(), `"launch"`) || strings.Contains(rec.Body.String(), `"argv"`) {
+		t.Fatalf("PUT response leaked private launch envelope: %s", rec.Body.String())
+	}
 
 	meta, err := svc.GetTab(t.Context(), "E2E", "lead-codex-1")
 	if err != nil {
@@ -57,8 +70,8 @@ func TestPutTerminalTabPersistsServerDerivedLaunchEnvelope(t *testing.T) {
 	if meta.Backend != "codex" || meta.Launch == nil || len(meta.Launch.Argv) != 2 {
 		t.Fatalf("persisted metadata = %#v", meta)
 	}
-	if got := meta.Launch.Env["LOOM_CONFIG_DIR"]; got != "/trusted/loom-data" {
-		t.Fatalf("LOOM_CONFIG_DIR = %q", got)
+	if len(meta.Launch.Env) != 0 {
+		t.Fatalf("delivery unexpectedly supplied launch environment: %#v", meta.Launch.Env)
 	}
 }
 

@@ -3,7 +3,7 @@ package terminal
 import (
 	"net/http"
 
-	"github.com/tysonthomas9/loomcli/internal/webui/terminal"
+	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
 )
 
 // TabModule registers workspace-scoped terminal tab metadata, UI state, and
@@ -12,13 +12,14 @@ import (
 // The module is only constructed when termSvc is non-nil. All routes are
 // unconditional within this module.
 type TabModule struct {
-	termSvc terminal.TerminalService
+	termSvc interaction.TerminalTabs
+	state   PresentationState
 }
 
 // NewTabModule returns a TabModule that will register routes
 // using the given terminal service.
-func NewTabModule(termSvc terminal.TerminalService) *TabModule {
-	return &TabModule{termSvc: termSvc}
+func NewTabModule(termSvc interaction.TerminalTabs, state PresentationState) *TabModule {
+	return &TabModule{termSvc: termSvc, state: state}
 }
 
 // Register implements [Module] by registering terminal tab, state, and setup routes.
@@ -34,8 +35,10 @@ func (m *TabModule) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/workspaces/{ws}/terminal/sessions/by-issue", HandleListSessionsByIssue(m.termSvc))
 
 	// Terminal UI state (active tab persistence)
-	mux.HandleFunc("GET /api/workspaces/{ws}/terminal/state", HandleGetTerminalState(m.termSvc))
-	mux.HandleFunc("PATCH /api/workspaces/{ws}/terminal/state", HandlePatchTerminalState(m.termSvc))
+	if m.state != nil {
+		mux.HandleFunc("GET /api/workspaces/{ws}/terminal/state", HandleGetTerminalState(m.state))
+		mux.HandleFunc("PATCH /api/workspaces/{ws}/terminal/state", HandlePatchTerminalState(m.state))
+	}
 
 	// Backend-owned setup command runner.
 	mux.HandleFunc("POST /api/workspaces/{ws}/terminal/setup", HandleStartTerminalSetup(m.termSvc))

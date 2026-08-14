@@ -13,21 +13,14 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/prreview"
 )
 
-// NewTerminalModules adds the identity and Interaction capability projections
-// to an otherwise transport-neutral terminal module dependency set.
+// NewTerminalModules adds Interaction's request-bound authority resolver to an
+// otherwise transport-neutral terminal delivery dependency set.
 func NewTerminalModules(
-	agentsCapability webui.AgentsCapability,
 	interactionCapability webui.InteractionCapability,
 	deps TerminalModuleDeps,
 ) []interface{ Register(*http.ServeMux) } {
-	if agentsCapability != nil {
-		deps.Agents = agentsCapability.AgentsAPI()
-		deps.Roles = agentsCapability.AgentsAPI()
-	}
 	if interactionCapability != nil {
-		deps.Interaction = interactionCapability.InteractionAPI()
 		deps.Operator = interactionCapability.OperatorAuthorityResolver()
-		deps.SessionAuthorities = interactionCapability.SessionAuthorityResolver()
 	}
 	return newTerminalRouteModules(deps)
 }

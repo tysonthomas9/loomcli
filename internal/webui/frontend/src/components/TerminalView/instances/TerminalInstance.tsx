@@ -143,6 +143,8 @@ export const TerminalInstance = forwardRef<
   const pendingRendererWritesRef = useRef<Array<string | Uint8Array>>([]);
   const wrapperRef = useRef<HTMLDivElement | null>(null);
   const terminalSizeRef = useRef({ cols: 80, rows: 24 });
+  const rendererLayoutReadyRef = useRef(false);
+  const applyingReplayResizeRef = useRef(false);
 
   const forceRendererPaint = useCallback((wt: WTerm | null) => {
     const render = (wt as unknown as WTermRenderAdapter | null)?._doRender;
@@ -196,6 +198,18 @@ export const TerminalInstance = forwardRef<
   );
   const focus = useCallback(() => {
     wtermInstanceRef.current?.focus();
+  }, []);
+
+  const applyReplayResize = useCallback((cols: number, rows: number) => {
+    terminalSizeRef.current = { cols, rows };
+    const wt = wtermInstanceRef.current;
+    if (!wt || (wt.cols === cols && wt.rows === rows)) return;
+    applyingReplayResizeRef.current = true;
+    try {
+      wt.resize(cols, rows);
+    } finally {
+      applyingReplayResizeRef.current = false;
+    }
   }, []);
 
   // Start pessimistic: until the server's config arrives, prefer the long
@@ -361,6 +375,7 @@ export const TerminalInstance = forwardRef<
           onReconnectStateChangeRef.current?.(null);
         },
         terminalSizeRef.current,
+        applyReplayResize,
       );
       wsCleanupRef.current = cleanup;
     },
@@ -372,6 +387,7 @@ export const TerminalInstance = forwardRef<
       syncViewportToBottom,
       startReconnectLoop,
       autoReconnect,
+      applyReplayResize,
     ],
   );
 
@@ -429,18 +445,19 @@ export const TerminalInstance = forwardRef<
     // applies to wtermInstanceRef: cleanup nulled it, but onReady won't
     // fire to re-set it, so write() would silently drop every replayed
     // byte. Restore from the still-alive TerminalHandle.
-    if (
-      isActiveRef.current &&
-      wtermReadyRef.current &&
-      (ptyAlive !== false || autoStartStaleSession)
-    ) {
+    if (isActiveRef.current && wtermReadyRef.current) {
       if (wtermInstanceRef.current == null) {
         const instance = wtermRef.current?.instance as WTerm | undefined;
         if (instance) {
           wtermInstanceRef.current = instance;
         }
       }
-      doConnectRef.current?.();
+      if (
+        rendererLayoutReadyRef.current &&
+        (ptyAlive !== false || autoStartStaleSession)
+      ) {
+        doConnectRef.current?.();
+      }
     }
     return () => {
       beingKilledRef.current = true;
@@ -483,7 +500,14 @@ export const TerminalInstance = forwardRef<
       const rect = probe.getBoundingClientRect();
       probe.remove();
 
-      if (rect.width <= 0 || rect.height <= 0) return null;
+      if (
+        rect.width <= 0 ||
+        rect.height <= 0 ||
+        el.clientWidth <= 0 ||
+        el.clientHeight <= 0
+      ) {
+        return null;
+      }
 
       const cols = Math.max(1, Math.floor(el.clientWidth / rect.width));
       const rows = Math.max(1, Math.floor(el.clientHeight / rect.height));
@@ -507,12 +531,17 @@ export const TerminalInstance = forwardRef<
         return;
       }
       const measured = measureTerminalSize(wt);
-      if (measured) {
-        terminalSizeRef.current = measured;
-        if (wt.cols !== measured.cols || wt.rows !== measured.rows) {
-          wt.resize(measured.cols, measured.rows);
-        }
+      if (!measured) {
+        return;
       }
+      terminalSizeRef.current = measured;
+      if (wt.cols !== measured.cols || wt.rows !== measured.rows) {
+        rendererLayoutReadyRef.current = false;
+        wt.resize(measured.cols, measured.rows);
+        forceRendererPaint(wt);
+        return;
+      }
+      rendererLayoutReadyRef.current = true;
       if (
         isActiveRef.current &&
         !wsCleanupRef.current &&
@@ -530,6 +559,7 @@ export const TerminalInstance = forwardRef<
   useEffect(() => {
     if (!isActive) return;
     if (ptyAlive === false && !autoStartStaleSession) return;
+    if (!rendererLayoutReadyRef.current) return;
     if (connectionState !== "disconnected") return;
     if (reconnectCancelRef.current) return;
     if (wsCleanupRef.current || isSocketOpenOrConnecting(wsRef.current)) {
@@ -569,7 +599,9 @@ export const TerminalInstance = forwardRef<
   );
 
   const handleResize = useCallback((cols: number, rows: number) => {
+    if (cols <= 1 || rows <= 1) return;
     terminalSizeRef.current = { cols, rows };
+    if (applyingReplayResizeRef.current) return;
     const ws = wsRef.current;
     if (ws?.readyState === WebSocket.OPEN) {
       ws.send(encodeResize(cols, rows));
@@ -591,12 +623,22 @@ export const TerminalInstance = forwardRef<
       const wt = wtermInstanceRef.current;
       if (!wt) return;
       const measured = measureTerminalSize(wt);
-      if (measured) {
-        terminalSizeRef.current = measured;
-        if (wt.cols !== measured.cols || wt.rows !== measured.rows) {
-          wt.resize(measured.cols, measured.rows);
-        }
-        handleResize(measured.cols, measured.rows);
+      if (!measured) return;
+      terminalSizeRef.current = measured;
+      if (wt.cols !== measured.cols || wt.rows !== measured.rows) {
+        rendererLayoutReadyRef.current = false;
+        wt.resize(measured.cols, measured.rows);
+        forceRendererPaint(wt);
+        return;
+      }
+      rendererLayoutReadyRef.current = true;
+      handleResize(measured.cols, measured.rows);
+      if (
+        (ptyAlive !== false || autoStartStaleSession) &&
+        !wsCleanupRef.current &&
+        !isSocketOpenOrConnecting(wsRef.current)
+      ) {
+        doConnectRef.current?.();
       }
       forceRendererPaint(wt);
       focus();
@@ -627,6 +669,8 @@ export const TerminalInstance = forwardRef<
     handleResize,
     measureTerminalSize,
     syncViewportToBottom,
+    ptyAlive,
+    autoStartStaleSession,
   ]);
 
   // Re-measure the grid when font prefs change so cols/rows stay accurate.
@@ -635,12 +679,23 @@ export const TerminalInstance = forwardRef<
       const wt = wtermInstanceRef.current;
       if (!wt) return;
       const measured = measureTerminalSize(wt);
-      if (measured) {
-        terminalSizeRef.current = measured;
-        if (wt.cols !== measured.cols || wt.rows !== measured.rows) {
-          wt.resize(measured.cols, measured.rows);
-        }
-        handleResize(measured.cols, measured.rows);
+      if (!measured) return;
+      terminalSizeRef.current = measured;
+      if (wt.cols !== measured.cols || wt.rows !== measured.rows) {
+        rendererLayoutReadyRef.current = false;
+        wt.resize(measured.cols, measured.rows);
+        forceRendererPaint(wt);
+        return;
+      }
+      rendererLayoutReadyRef.current = true;
+      handleResize(measured.cols, measured.rows);
+      if (
+        isActiveRef.current &&
+        (ptyAlive !== false || autoStartStaleSession) &&
+        !wsCleanupRef.current &&
+        !isSocketOpenOrConnecting(wsRef.current)
+      ) {
+        doConnectRef.current?.();
       }
       forceRendererPaint(wt);
     };
@@ -654,7 +709,13 @@ export const TerminalInstance = forwardRef<
     window.addEventListener(TERMINAL_FONT_CHANGE_EVENT, handler);
     return () =>
       window.removeEventListener(TERMINAL_FONT_CHANGE_EVENT, handler);
-  }, [forceRendererPaint, handleResize, measureTerminalSize]);
+  }, [
+    forceRendererPaint,
+    handleResize,
+    measureTerminalSize,
+    ptyAlive,
+    autoStartStaleSession,
+  ]);
 
   useImperativeHandle(
     ref,

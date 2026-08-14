@@ -7,31 +7,42 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/tysonthomas9/loomcli/internal/bootstrap"
-	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
-	storepkg "github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/app/query/sessionarchive"
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
+	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
 	"github.com/tysonthomas9/loomcli/internal/webui"
-	"github.com/tysonthomas9/loomcli/internal/webui/sessioncoord"
 
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/misc"
 )
 
-// testSessionWorkspaceStore returns a store with test-ws rooted at dir.
-func testSessionWorkspaceStore(t *testing.T, dir string) *memstore.Store {
-	t.Helper()
-	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
-	st := memstore.New()
-	if _, err := st.Workspaces().Create(context.Background(), storepkg.WorkspaceCreate{Key: "test-ws", Name: "test-ws"}); err != nil {
-		t.Fatalf("create workspace: %v", err)
-	}
-	if err := bootstrap.MutateStateCache(func(sc *bootstrap.StateCache) error {
-		sc.Workspaces["test-ws"] = bootstrap.WorkspaceLocalState{Path: dir}
-		sc.LastWorkspace = "test-ws"
-		return nil
-	}); err != nil {
-		t.Fatalf("save state cache: %v", err)
-	}
-	return st
+type emptyExecutionSessionQueries struct{}
+
+func (emptyExecutionSessionQueries) GetTaskRun(context.Context, string, string) (*execution.TaskRun, error) {
+	return nil, execution.ErrNotFound
+}
+func (emptyExecutionSessionQueries) ListTaskRuns(context.Context, execution.TaskRunArchiveQuery) ([]*execution.TaskRun, error) {
+	return []*execution.TaskRun{}, nil
+}
+func (emptyExecutionSessionQueries) ListActiveTaskRuns(context.Context, execution.ActiveTaskRunQuery) ([]*execution.TaskRun, error) {
+	return nil, nil
+}
+func (emptyExecutionSessionQueries) ListTaskRunEvents(context.Context, execution.TaskRunEventQuery) ([]*execution.TaskRunEvent, error) {
+	return nil, nil
+}
+
+type emptyInteractionSessionQueries struct{}
+
+func (emptyInteractionSessionQueries) GetSession(context.Context, string, string) (*interaction.AgentSession, error) {
+	return nil, interaction.ErrNotFound
+}
+func (emptyInteractionSessionQueries) ListSessions(context.Context, interaction.SessionArchiveQuery) ([]*interaction.AgentSession, error) {
+	return []*interaction.AgentSession{}, nil
+}
+
+func newEmptySessionArchive() sessionarchive.SessionService {
+	return sessionarchive.NewSessionService(
+		emptyExecutionSessionQueries{}, emptyInteractionSessionQueries{}, nil, nil,
+	)
 }
 
 // TestSessionRouteMigration_OldFlatRoutesReturn404 verifies that the old flat
@@ -43,10 +54,8 @@ func TestSessionRouteMigration_OldFlatRoutesReturn404(t *testing.T) {
 	// Create a sessions store so it is non-nil (handlers would return 503
 	// if nil, not 404 — we need to distinguish "route not registered" from
 	// "handler returns error").
-	sessDir := t.TempDir()
-
 	app := &Server{config: webui.ServerConfig{}, wsResolveFn: testWorkspaceResolver("test-ws")}
-	app.sessSvc = sessioncoord.NewSessionService(testSessionWorkspaceStore(t, sessDir), nil, nil)
+	app.sessSvc = newEmptySessionArchive()
 	setupTestRoutes(t, app)
 
 	// Old flat routes that should have been removed — each must return 404.
@@ -84,10 +93,8 @@ func TestSessionRouteMigration_OldFlatRoutesReturn404(t *testing.T) {
 // workspace-scoped session audit trail routes are registered and handled
 // (i.e. they do NOT fall through to the SPA catch-all).
 func TestSessionRouteMigration_WorkspaceScopedRoutesRegistered(t *testing.T) {
-	sessDir := t.TempDir()
-
 	app := &Server{config: webui.ServerConfig{}, wsResolveFn: testWorkspaceResolver("test-ws")}
-	app.sessSvc = sessioncoord.NewSessionService(testSessionWorkspaceStore(t, sessDir), nil, nil)
+	app.sessSvc = newEmptySessionArchive()
 	setupTestRoutes(t, app)
 
 	// New workspace-scoped routes that should be registered.
@@ -131,10 +138,8 @@ func TestSessionRouteMigration_WorkspaceScopedRoutesRegistered(t *testing.T) {
 // workspace-scoped session routes return 404 when the workspace ID is not
 // recognized by the WorkspaceMiddleware.
 func TestSessionRouteMigration_UnknownWorkspaceReturns404(t *testing.T) {
-	sessDir := t.TempDir()
-
 	app := &Server{config: webui.ServerConfig{}, wsResolveFn: testWorkspaceResolver("test-ws")}
-	app.sessSvc = sessioncoord.NewSessionService(testSessionWorkspaceStore(t, sessDir), nil, nil)
+	app.sessSvc = newEmptySessionArchive()
 	setupTestRoutes(t, app)
 
 	// Routes with a non-existent workspace should return 404 from WorkspaceMiddleware.
@@ -166,10 +171,8 @@ func TestSessionRouteMigration_UnknownWorkspaceReturns404(t *testing.T) {
 // workspace-scoped list sessions endpoint returns a proper JSON response,
 // confirming it is wired to the correct handler (not just registered).
 func TestSessionRouteMigration_WorkspaceScopedListReturnsJSON(t *testing.T) {
-	sessDir := t.TempDir()
-
 	app := &Server{config: webui.ServerConfig{}, wsResolveFn: testWorkspaceResolver("test-ws")}
-	app.sessSvc = sessioncoord.NewSessionService(testSessionWorkspaceStore(t, sessDir), nil, nil)
+	app.sessSvc = newEmptySessionArchive()
 	setupTestRoutes(t, app)
 
 	// GET /api/workspaces/{ws}/tasks/{taskId}/sessions should return 200 with

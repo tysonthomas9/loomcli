@@ -6,11 +6,13 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/infra/pty"
+	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
 	"github.com/tysonthomas9/loomcli/internal/webui/agentcoord"
 	"github.com/tysonthomas9/loomcli/internal/webui/apperrors"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
-	"github.com/tysonthomas9/loomcli/internal/webui/terminal"
 )
 
 func requireServiceError(t *testing.T, err error, wantKind apperrors.ErrorKind) *apperrors.ServiceError {
@@ -49,15 +51,16 @@ func TestAgentServiceGetTerminalInfo(t *testing.T) {
 		requireServiceError(t, err, apperrors.KindUnavailable)
 	})
 	t.Run("archive mode without session", func(t *testing.T) {
-		manager, err := terminal.NewAgentTmuxManager(0)
-		if err == terminal.ErrTmuxNotFound {
+		manager, err := pty.NewAgentRuntime(0)
+		if err == pty.ErrTmuxNotFound {
 			t.Skip("tmux not installed")
 		}
 		if err != nil {
 			t.Fatal(err)
 		}
 		defer manager.Shutdown()
-		service := agentcoord.NewAgentService(manager, nil)
+		terminals := interaction.NewTerminalTabs(nil, nil, time.Now(), interaction.TerminalDependencies{LiveView: manager})
+		service := agentcoord.NewAgentService(terminals, nil)
 		result, err := service.GetTerminalInfo(ctx, "ws", "nonexistent-agent")
 		if err != nil || result.Mode != agentcoord.AgentTerminalModeArchive || result.Agent != "nonexistent-agent" {
 			t.Fatalf("GetTerminalInfo() = %#v, %v", result, err)

@@ -457,6 +457,18 @@ export function TerminalView({
 
   const startCliSetup = useCallback(
     (request: CliSetupRequest) => {
+      if (request.action === "set-default") {
+        setCliSetupGuide((current) =>
+          current?.id === request.id
+            ? {
+                ...current,
+                status: "failed",
+                error: "Default backend selection belongs in Settings.",
+              }
+            : current,
+        );
+        return;
+      }
       setCliSetupGuide((current) =>
         current?.id === request.id
           ? { ...current, status: "starting", error: undefined }
@@ -637,16 +649,19 @@ export function TerminalView({
         console.error(`Failed to persist new tab ${sessionName}:`, err);
         return;
       }
-      setTabs((prev) => [
-        ...prev,
-        {
-          id: sessionName,
-          label,
-          sessionName,
-          connectionState: "disconnected" as const,
-          backendName: backend,
-        },
-      ]);
+      setTabs((prev) => {
+        if (prev.some((tab) => tab.sessionName === sessionName)) return prev;
+        return [
+          ...prev,
+          {
+            id: sessionName,
+            label,
+            sessionName,
+            connectionState: "disconnected" as const,
+            backendName: backend,
+          },
+        ];
+      });
       setActiveTabId(sessionName);
       announce(`New tab ${label} created`);
     },

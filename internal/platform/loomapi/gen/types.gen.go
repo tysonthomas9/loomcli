@@ -1139,16 +1139,135 @@ func (e SessionHistoryRecordStatus) Valid() bool {
 
 // Defines values for TabPutRequestBackend.
 const (
-	Claude   TabPutRequestBackend = "claude"
-	Codex    TabPutRequestBackend = "codex"
-	Cursor   TabPutRequestBackend = "cursor"
-	Gemini   TabPutRequestBackend = "gemini"
-	Opencode TabPutRequestBackend = "opencode"
-	Shell    TabPutRequestBackend = "shell"
+	TabPutRequestBackendClaude   TabPutRequestBackend = "claude"
+	TabPutRequestBackendCodex    TabPutRequestBackend = "codex"
+	TabPutRequestBackendCursor   TabPutRequestBackend = "cursor"
+	TabPutRequestBackendGemini   TabPutRequestBackend = "gemini"
+	TabPutRequestBackendOpencode TabPutRequestBackend = "opencode"
+	TabPutRequestBackendShell    TabPutRequestBackend = "shell"
 )
 
 // Valid indicates whether the value is a known member of the TabPutRequestBackend enum.
 func (e TabPutRequestBackend) Valid() bool {
+	switch e {
+	case TabPutRequestBackendClaude:
+		return true
+	case TabPutRequestBackendCodex:
+		return true
+	case TabPutRequestBackendCursor:
+		return true
+	case TabPutRequestBackendGemini:
+		return true
+	case TabPutRequestBackendOpencode:
+		return true
+	case TabPutRequestBackendShell:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for TerminalReplayControlType.
+const (
+	TerminalReplayResize TerminalReplayControlType = "terminal.replay.resize"
+)
+
+// Valid indicates whether the value is a known member of the TerminalReplayControlType enum.
+func (e TerminalReplayControlType) Valid() bool {
+	switch e {
+	case TerminalReplayResize:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for TerminalSetupRequestAction.
+const (
+	TerminalSetupRequestActionConfigure TerminalSetupRequestAction = "configure"
+	TerminalSetupRequestActionInstall   TerminalSetupRequestAction = "install"
+	TerminalSetupRequestActionLogin     TerminalSetupRequestAction = "login"
+	TerminalSetupRequestActionTest      TerminalSetupRequestAction = "test"
+)
+
+// Valid indicates whether the value is a known member of the TerminalSetupRequestAction enum.
+func (e TerminalSetupRequestAction) Valid() bool {
+	switch e {
+	case TerminalSetupRequestActionConfigure:
+		return true
+	case TerminalSetupRequestActionInstall:
+		return true
+	case TerminalSetupRequestActionLogin:
+		return true
+	case TerminalSetupRequestActionTest:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for TerminalSetupRequestBackend.
+const (
+	TerminalSetupRequestBackendClaude   TerminalSetupRequestBackend = "claude"
+	TerminalSetupRequestBackendCodex    TerminalSetupRequestBackend = "codex"
+	TerminalSetupRequestBackendCursor   TerminalSetupRequestBackend = "cursor"
+	TerminalSetupRequestBackendGemini   TerminalSetupRequestBackend = "gemini"
+	TerminalSetupRequestBackendOpencode TerminalSetupRequestBackend = "opencode"
+)
+
+// Valid indicates whether the value is a known member of the TerminalSetupRequestBackend enum.
+func (e TerminalSetupRequestBackend) Valid() bool {
+	switch e {
+	case TerminalSetupRequestBackendClaude:
+		return true
+	case TerminalSetupRequestBackendCodex:
+		return true
+	case TerminalSetupRequestBackendCursor:
+		return true
+	case TerminalSetupRequestBackendGemini:
+		return true
+	case TerminalSetupRequestBackendOpencode:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for TerminalSetupResultAction.
+const (
+	TerminalSetupResultActionConfigure TerminalSetupResultAction = "configure"
+	TerminalSetupResultActionInstall   TerminalSetupResultAction = "install"
+	TerminalSetupResultActionLogin     TerminalSetupResultAction = "login"
+	TerminalSetupResultActionTest      TerminalSetupResultAction = "test"
+)
+
+// Valid indicates whether the value is a known member of the TerminalSetupResultAction enum.
+func (e TerminalSetupResultAction) Valid() bool {
+	switch e {
+	case TerminalSetupResultActionConfigure:
+		return true
+	case TerminalSetupResultActionInstall:
+		return true
+	case TerminalSetupResultActionLogin:
+		return true
+	case TerminalSetupResultActionTest:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for TerminalSetupResultBackend.
+const (
+	Claude   TerminalSetupResultBackend = "claude"
+	Codex    TerminalSetupResultBackend = "codex"
+	Cursor   TerminalSetupResultBackend = "cursor"
+	Gemini   TerminalSetupResultBackend = "gemini"
+	Opencode TerminalSetupResultBackend = "opencode"
+)
+
+// Valid indicates whether the value is a known member of the TerminalSetupResultBackend enum.
+func (e TerminalSetupResultBackend) Valid() bool {
 	switch e {
 	case Claude:
 		return true
@@ -1159,8 +1278,6 @@ func (e TabPutRequestBackend) Valid() bool {
 	case Gemini:
 		return true
 	case Opencode:
-		return true
-	case Shell:
 		return true
 	default:
 		return false
@@ -1854,30 +1971,6 @@ func (e ListReadyParamsSort) Valid() bool {
 	}
 }
 
-// Defines values for StartTerminalSetupJSONBodyAction.
-const (
-	Configure StartTerminalSetupJSONBodyAction = "configure"
-	Install   StartTerminalSetupJSONBodyAction = "install"
-	Login     StartTerminalSetupJSONBodyAction = "login"
-	Test      StartTerminalSetupJSONBodyAction = "test"
-)
-
-// Valid indicates whether the value is a known member of the StartTerminalSetupJSONBodyAction enum.
-func (e StartTerminalSetupJSONBodyAction) Valid() bool {
-	switch e {
-	case Configure:
-		return true
-	case Install:
-		return true
-	case Login:
-		return true
-	case Test:
-		return true
-	default:
-		return false
-	}
-}
-
 // AddDependencyRequest defines model for AddDependencyRequest.
 type AddDependencyRequest struct {
 	DepType     *string `json:"dep_type,omitempty"`
@@ -2337,22 +2430,13 @@ type DeleteUnifiedAgentResponse = DeleteAgentRecordResponse
 
 // Dependency Full dependency relation from types.Dependency
 type Dependency struct {
-	AgentId *string `json:"agent_id,omitempty"`
-
-	// Backend Validated backend intent used to build the persisted launch envelope.
-	Backend     *string   `json:"backend,omitempty"`
 	CreatedAt   time.Time `json:"created_at"`
 	CreatedBy   *string   `json:"created_by,omitempty"`
 	DependsOnId string    `json:"depends_on_id"`
 	IssueId     string    `json:"issue_id"`
-
-	// Kind Server-owned terminal kind. Agent tabs use `agent`.
-	Kind     *string `json:"kind,omitempty"`
-	Metadata *string `json:"metadata,omitempty"`
-	Role     *string `json:"role,omitempty"`
-	ThreadId *string `json:"thread_id,omitempty"`
-	Type     string  `json:"type"`
-	Writable *bool   `json:"writable,omitempty"`
+	Metadata    *string   `json:"metadata,omitempty"`
+	ThreadId    *string   `json:"thread_id,omitempty"`
+	Type        string    `json:"type"`
 }
 
 // DependencyRef Slim reference to a dependency/dependent issue
@@ -3587,18 +3671,6 @@ type ScriptedAgentRecord struct {
 // ScriptedAgentRecordKind defines model for ScriptedAgentRecord.Kind.
 type ScriptedAgentRecordKind string
 
-// SeedRequest defines model for SeedRequest.
-type SeedRequest struct {
-	Blockers *[]struct {
-		Id    string `json:"id"`
-		Title string `json:"title"`
-	} `json:"blockers,omitempty"`
-	Description *string `json:"description,omitempty"`
-	Design      *string `json:"design,omitempty"`
-	IssueId     string  `json:"issue_id"`
-	Title       string  `json:"title"`
-}
-
 // SessionHistoryRecord Session history record (Redis-backed, per-issue)
 type SessionHistoryRecord struct {
 	Backend  string                       `json:"backend"`
@@ -3694,19 +3766,27 @@ type Statistics struct {
 	TotalIssues             int     `json:"total_issues"`
 }
 
-// TabMetadata Terminal tab metadata (Redis-backed)
+// TabMetadata Public projection of Interaction-owned terminal tab metadata
 type TabMetadata struct {
+	AgentId *string `json:"agent_id,omitempty"`
+
 	// AttachedClients Count of concurrent WebSocket clients currently viewing this
 	// session. 0 means no one is attached (but the PTY may still be
 	// live, within its grace window). Values ≥2 can be surfaced as
 	// a "multiple viewers" indicator so users can be warned before
 	// destructive tab-close actions.
-	AttachedClients int       `json:"attached_clients"`
-	CreatedAt       time.Time `json:"created_at"`
-	IssueId         *string   `json:"issue_id,omitempty"`
-	Label           string    `json:"label"`
-	Notes           string    `json:"notes"`
-	Pinned          bool      `json:"pinned"`
+	AttachedClients int `json:"attached_clients"`
+
+	// Backend Validated backend intent. Private launch arguments and environment are never exposed.
+	Backend   *string   `json:"backend,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
+	IssueId   *string   `json:"issue_id,omitempty"`
+
+	// Kind Server-owned terminal kind. Agent tabs use `agent`.
+	Kind   *string `json:"kind,omitempty"`
+	Label  string  `json:"label"`
+	Notes  string  `json:"notes"`
+	Pinned bool    `json:"pinned"`
 
 	// PtyAlive Whether the backend PTY for this tab is currently alive in the
 	// server process. False means the tab metadata survived (e.g. a
@@ -3714,10 +3794,12 @@ type TabMetadata struct {
 	// tab as "session ended" and prompt before reconnecting (which
 	// will spawn a fresh session).
 	PtyAlive    bool      `json:"pty_alive"`
+	Role        *string   `json:"role,omitempty"`
 	SessionName string    `json:"session_name"`
 	SortOrder   int       `json:"sort_order"`
 	UpdatedAt   time.Time `json:"updated_at"`
 	Workspace   *string   `json:"workspace,omitempty"`
+	Writable    *bool     `json:"writable,omitempty"`
 }
 
 // TabPatchRequest All fields optional for partial update
@@ -3748,28 +3830,48 @@ type TaskWorkflowRunsResponse struct {
 	TaskId     string      `json:"task_id"`
 }
 
-// TerminalSessionInfo defines model for TerminalSessionInfo.
-type TerminalSessionInfo struct {
-	// Created Unix timestamp
-	Created int64   `json:"created"`
-	IssueId *string `json:"issue_id,omitempty"`
-	Label   string  `json:"label"`
-	Name    string  `json:"name"`
+// TerminalReplayControl Server-to-client terminal replay control frame. WebSocket output bytes
+// remain binary; text frames use this schema so historical geometry can
+// be applied in order without being echoed back to the live PTY.
+type TerminalReplayControl struct {
+	Columns int32                     `json:"columns"`
+	Rows    int32                     `json:"rows"`
+	Type    TerminalReplayControlType `json:"type"`
 }
 
-// TerminalSpawnData defines model for TerminalSpawnData.
-type TerminalSpawnData struct {
-	Backend     string `json:"backend"`
-	Command     string `json:"command"`
-	Created     bool   `json:"created"`
-	SessionName string `json:"session_name"`
+// TerminalReplayControlType defines model for TerminalReplayControl.Type.
+type TerminalReplayControlType string
+
+// TerminalSetupRequest defines model for TerminalSetupRequest.
+type TerminalSetupRequest struct {
+	Action  TerminalSetupRequestAction  `json:"action"`
+	Backend TerminalSetupRequestBackend `json:"backend"`
 }
 
-// TerminalSpawnRequest defines model for TerminalSpawnRequest.
-type TerminalSpawnRequest struct {
-	Backend     string `json:"backend"`
-	SessionName string `json:"session_name"`
+// TerminalSetupRequestAction defines model for TerminalSetupRequest.Action.
+type TerminalSetupRequestAction string
+
+// TerminalSetupRequestBackend defines model for TerminalSetupRequest.Backend.
+type TerminalSetupRequestBackend string
+
+// TerminalSetupResult defines model for TerminalSetupResult.
+type TerminalSetupResult struct {
+	Action      TerminalSetupResultAction  `json:"action"`
+	Backend     TerminalSetupResultBackend `json:"backend"`
+	Command     string                     `json:"command"`
+	Created     bool                       `json:"created"`
+	Label       string                     `json:"label"`
+	Manual      bool                       `json:"manual"`
+	Message     string                     `json:"message"`
+	SessionName string                     `json:"session_name"`
+	Title       string                     `json:"title"`
 }
+
+// TerminalSetupResultAction defines model for TerminalSetupResult.Action.
+type TerminalSetupResultAction string
+
+// TerminalSetupResultBackend defines model for TerminalSetupResult.Backend.
+type TerminalSetupResultBackend string
 
 // TranscriptData defines model for TranscriptData.
 type TranscriptData struct {
@@ -4502,26 +4604,10 @@ type GetTaskLogParams struct {
 	BeforeLine *int64 `form:"before_line,omitempty" json:"before_line,omitempty"`
 }
 
-// GetTerminalSessionStatusParams defines parameters for GetTerminalSessionStatus.
-type GetTerminalSessionStatusParams struct {
-	Session *string `form:"session,omitempty" json:"session,omitempty"`
-}
-
 // ListSessionsByIssueParams defines parameters for ListSessionsByIssue.
 type ListSessionsByIssueParams struct {
 	IssueId *string `form:"issue_id,omitempty" json:"issue_id,omitempty"`
 }
-
-// StartTerminalSetupJSONBody defines parameters for StartTerminalSetup.
-type StartTerminalSetupJSONBody struct {
-	Action StartTerminalSetupJSONBodyAction `json:"action"`
-
-	// Backend AI backend name (claude, codex, gemini, opencode, cursor)
-	Backend string `json:"backend"`
-}
-
-// StartTerminalSetupJSONBodyAction defines parameters for StartTerminalSetup.
-type StartTerminalSetupJSONBodyAction string
 
 // PatchTerminalStateJSONBody defines parameters for PatchTerminalState.
 type PatchTerminalStateJSONBody struct {
@@ -4644,14 +4730,8 @@ type PostPullRequestReviewerMessageJSONRequestBody = ReviewerMessageRequest
 // PostPullRequestReviewJSONRequestBody defines body for PostPullRequestReview for application/json ContentType.
 type PostPullRequestReviewJSONRequestBody = PullRequestReviewRequest
 
-// SeedTerminalSessionJSONRequestBody defines body for SeedTerminalSession for application/json ContentType.
-type SeedTerminalSessionJSONRequestBody = SeedRequest
-
 // StartTerminalSetupJSONRequestBody defines body for StartTerminalSetup for application/json ContentType.
-type StartTerminalSetupJSONRequestBody StartTerminalSetupJSONBody
-
-// SpawnTerminalSessionJSONRequestBody defines body for SpawnTerminalSession for application/json ContentType.
-type SpawnTerminalSessionJSONRequestBody = TerminalSpawnRequest
+type StartTerminalSetupJSONRequestBody = TerminalSetupRequest
 
 // PatchTerminalStateJSONRequestBody defines body for PatchTerminalState for application/json ContentType.
 type PatchTerminalStateJSONRequestBody PatchTerminalStateJSONBody

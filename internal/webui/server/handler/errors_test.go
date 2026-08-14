@@ -8,8 +8,50 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
 	"github.com/tysonthomas9/loomcli/internal/webui/apperrors"
 )
+
+func TestHandleTerminalError_MapsCapabilitySentinels(t *testing.T) {
+	tests := []struct {
+		name       string
+		err        error
+		wantStatus int
+	}{
+		{name: "invalid", err: interaction.ErrInvalid, wantStatus: http.StatusBadRequest},
+		{name: "not found", err: interaction.ErrNotFound, wantStatus: http.StatusNotFound},
+		{name: "not owner", err: interaction.ErrNotOwner, wantStatus: http.StatusForbidden},
+		{name: "conflict", err: interaction.ErrConflict, wantStatus: http.StatusConflict},
+		{name: "closed", err: interaction.ErrTerminalClosed, wantStatus: http.StatusConflict},
+		{name: "capacity", err: interaction.ErrTerminalCapacity, wantStatus: http.StatusTooManyRequests},
+		{name: "unavailable", err: interaction.ErrUnavailable, wantStatus: http.StatusServiceUnavailable},
+		{name: "placement", err: interaction.ErrTerminalPlacement, wantStatus: http.StatusServiceUnavailable},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			HandleTerminalError(w, fmt.Errorf("adapter detail: %w", tt.err))
+			if w.Code != tt.wantStatus {
+				t.Fatalf("status = %d, want %d", w.Code, tt.wantStatus)
+			}
+			var body map[string]string
+			if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+				t.Fatal(err)
+			}
+			if body["error"] != "terminal operation failed" {
+				t.Fatalf("error = %q, want sanitized fallback", body["error"])
+			}
+		})
+	}
+}
+
+func TestHandleTerminalError_FallsBackToServiceError(t *testing.T) {
+	w := httptest.NewRecorder()
+	HandleTerminalError(w, apperrors.ErrValidation("agent state is invalid"))
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusBadRequest)
+	}
+}
 
 func TestHandleServiceError_AllKinds(t *testing.T) {
 	tests := []struct {

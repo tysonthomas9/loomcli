@@ -11,9 +11,10 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	"github.com/tysonthomas9/loomcli/internal/infra/pty"
+	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui"
-	"github.com/tysonthomas9/loomcli/internal/webui/terminal"
 )
 
 // TestServer_Close_ZeroValue verifies that calling Close on a zero-value
@@ -304,7 +305,7 @@ func TestServer_ConfigDefaults_AllAtOnce(t *testing.T) {
 // registered) *MultiPTYManager without panicking. This exercises the
 // server.go:143-146 aggregation now that ptyMgr has changed type.
 func TestServer_BuildHandlers_MultiPTYManagerEmpty(t *testing.T) {
-	ptyMgr := terminal.NewMultiPTYManager("bash", 0)
+	ptyMgr := pty.NewRuntime("bash", 0)
 	t.Cleanup(func() { _ = ptyMgr.Close() })
 
 	app := &Server{ptyMgr: ptyMgr}
@@ -359,7 +360,7 @@ func TestServer_BuildHandlers_MultiPTYManagerEmpty(t *testing.T) {
 // timeouts set on the *MultiPTYManager propagate through buildHandlers to
 // the /api/config/terminal response.
 func TestServer_BuildHandlers_MultiPTYManagerCustom(t *testing.T) {
-	ptyMgr := terminal.NewMultiPTYManager("bash", 42)
+	ptyMgr := pty.NewRuntime("bash", 42)
 	ptyMgr.SetGracePeriod(7 * time.Second)
 	ptyMgr.SetIdleTimeout(11 * time.Second)
 	t.Cleanup(func() { _ = ptyMgr.Close() })
@@ -403,7 +404,7 @@ func TestServer_BuildHandlers_MultiPTYManagerCustom(t *testing.T) {
 // after the graceful-shutdown path (run() in server.go) has already called
 // Close(). The MultiPTYManager must not double-error.
 func TestServer_ClosePTYMgr_IdempotentWithShutdownPath(t *testing.T) {
-	ptyMgr := terminal.NewMultiPTYManager("bash", 0)
+	ptyMgr := pty.NewRuntime("bash", 0)
 	// Simulate the graceful-shutdown path (server.go run()).
 	if err := ptyMgr.Close(); err != nil {
 		t.Fatalf("first Close (graceful shutdown path) err = %v, want nil", err)
@@ -454,7 +455,7 @@ func TestServer_ConfigDefaults_ExplicitValuesPreserved(t *testing.T) {
 
 func TestInteractiveRuntimeTabSourceMapsTerminalMetadata(t *testing.T) {
 	source := interactiveRuntimeTabSource{terminalService: &stubTerminalService{
-		tabs: []terminal.TabMetadata{{
+		tabs: []interaction.TabMetadata{{
 			SessionName: "lead-a",
 			Kind:        "agent",
 			AgentID:     "agent-a",

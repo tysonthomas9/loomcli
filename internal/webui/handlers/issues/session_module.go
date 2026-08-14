@@ -4,14 +4,14 @@ import (
 	"context"
 	"net/http"
 
-	"github.com/tysonthomas9/loomcli/internal/webui/sessioncoord"
+	"github.com/tysonthomas9/loomcli/internal/app/query/sessionarchive"
 )
 
 // SessionHistoryQueries is the issue-history read projection consumed by this
 // route module. Task session evidence is composed separately by Artifacts.
 type SessionHistoryQueries interface {
-	ListSessionHistory(context.Context, string, string) ([]sessioncoord.SessionHistoryItem, error)
-	GetSessionScrollback(context.Context, string, string, string) (*sessioncoord.SessionScrollbackResult, error)
+	ListSessionHistory(context.Context, string, string) ([]sessionarchive.SessionHistoryItem, error)
+	GetSessionScrollback(context.Context, string, string, string) (*sessionarchive.SessionScrollbackResult, error)
 }
 
 // SessionModule registers the 6 workspace-scoped session history and audit
