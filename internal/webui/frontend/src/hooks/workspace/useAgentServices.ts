@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
+  createAgentService,
+  deleteAgentService,
   getAgentServiceJournal,
   getDriverRunLog,
   getTaskRunLog,
@@ -8,12 +10,17 @@ import {
   listAgentServiceRunTasks,
   listAgentServiceRuns,
   listAgentServices,
+  listInstantiableScriptedRoles,
   listRunEvents,
+  patchAgentService,
   type AgentServiceDTO,
   type AgentServiceJournalDTO,
   type AgentServiceList,
+  type CreateAgentServiceRequest,
   type DriverRunDTO,
   type PersistedLogDTO,
+  type InstantiableScriptedRoleDTO,
+  type PatchAgentServiceRequest,
   type RunEventDTO,
   type TaskRunDTO,
 } from "@/api/agentServices";
@@ -22,6 +29,29 @@ import { ApiError } from "@/types/common";
 
 const DEFAULT_POLL_INTERVAL = 30_000;
 const DEFAULT_RUN_LIMIT = 20;
+
+const agentServiceChangeListeners = new Map<string, Set<() => Promise<void>>>();
+
+function subscribeToAgentServiceChanges(
+  workspaceId: string,
+  listener: () => Promise<void>,
+): () => void {
+  const listeners = agentServiceChangeListeners.get(workspaceId) ?? new Set();
+  listeners.add(listener);
+  agentServiceChangeListeners.set(workspaceId, listeners);
+  return () => {
+    listeners.delete(listener);
+    if (listeners.size === 0) agentServiceChangeListeners.delete(workspaceId);
+  };
+}
+
+async function notifyAgentServiceChanges(workspaceId: string): Promise<void> {
+  await Promise.allSettled(
+    [...(agentServiceChangeListeners.get(workspaceId) ?? [])].map((listener) =>
+      listener(),
+    ),
+  );
+}
 
 interface PolledListState<T> {
   key: string;
@@ -198,6 +228,10 @@ export function useAgentServices(
   const pollInterval = options.pollInterval ?? DEFAULT_POLL_INTERVAL;
   const load = useCallback(() => listAgentServices(workspaceId), [workspaceId]);
   const result = usePolledList(workspaceId, load, { enabled, pollInterval });
+  useEffect(() => {
+    if (!enabled || !workspaceId) return;
+    return subscribeToAgentServiceChanges(workspaceId, result.refresh);
+  }, [enabled, result.refresh, workspaceId]);
   return {
     services: result.items,
     total: result.total,
@@ -206,6 +240,70 @@ export function useAgentServices(
     error: result.error,
     refresh: result.refresh,
   };
+}
+
+export interface UseInstantiableScriptedRolesReturn {
+  roles: InstantiableScriptedRoleDTO[];
+  loading: boolean;
+  initialized: boolean;
+  error: Error | null;
+  refresh: () => Promise<void>;
+}
+
+export function useInstantiableScriptedRoles(
+  workspaceId: string,
+  options: { enabled?: boolean } = {},
+): UseInstantiableScriptedRolesReturn {
+  const enabled = options.enabled ?? Boolean(workspaceId);
+  const key = `${workspaceId}\0scripted-roles`;
+  const load = useCallback(
+    () => listInstantiableScriptedRoles(workspaceId),
+    [workspaceId],
+  );
+  const resource = useLazyResource(key, enabled, load);
+  return { ...resource, roles: resource.data ?? [] };
+}
+
+export interface AgentServiceMutationActions {
+  create(request: CreateAgentServiceRequest): Promise<AgentServiceDTO>;
+  patch(
+    agentServiceId: string,
+    request: PatchAgentServiceRequest,
+  ): Promise<AgentServiceDTO>;
+  remove(agentServiceId: string): Promise<void>;
+}
+
+export function useAgentServiceMutations(
+  workspaceId: string,
+): AgentServiceMutationActions {
+  const create = useCallback(
+    async (request: CreateAgentServiceRequest) => {
+      const service = await createAgentService(workspaceId, request);
+      await notifyAgentServiceChanges(workspaceId);
+      return service;
+    },
+    [workspaceId],
+  );
+  const update = useCallback(
+    async (agentServiceId: string, request: PatchAgentServiceRequest) => {
+      const service = await patchAgentService(
+        workspaceId,
+        agentServiceId,
+        request,
+      );
+      await notifyAgentServiceChanges(workspaceId);
+      return service;
+    },
+    [workspaceId],
+  );
+  const remove = useCallback(
+    async (agentServiceId: string) => {
+      await deleteAgentService(workspaceId, agentServiceId);
+      await notifyAgentServiceChanges(workspaceId);
+    },
+    [workspaceId],
+  );
+  return { create, patch: update, remove };
 }
 
 export interface UseAgentServiceRunsOptions {
@@ -415,10 +513,7 @@ function useLazyResource<T>(
     if (enabled) void refresh();
   }, [enabled, refresh]);
 
-  const scoped =
-    state.key === key
-      ? state
-      : emptyLazyResourceState<T>(key);
+  const scoped = state.key === key ? state : emptyLazyResourceState<T>(key);
   return {
     data: scoped.data,
     loading: scoped.loading,

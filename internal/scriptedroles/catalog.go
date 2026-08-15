@@ -5,6 +5,7 @@ package scriptedroles
 
 import (
 	_ "embed"
+	"sort"
 	"strings"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
@@ -138,6 +139,18 @@ func ForRole(name string) (ScriptedRole, bool) {
 		return ScriptedRole{}, false
 	}
 	return clone(role), true
+}
+
+// All returns a stable, detached snapshot of the compiled catalog.
+func All() []ScriptedRole {
+	roles := make([]ScriptedRole, 0, len(catalog))
+	for _, role := range catalog {
+		roles = append(roles, clone(role))
+	}
+	sort.Slice(roles, func(i, j int) bool {
+		return roles[i].RoleName < roles[j].RoleName
+	})
+	return roles
 }
 
 // ForWorkflow is the reverse lookup used when a workflow run is submitted by

@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -80,6 +81,7 @@ func (m *Module) Register(mux *http.ServeMux) {
 		return
 	}
 	mux.HandleFunc("GET /api/workspaces/{ws}/agent-services", m.listAgentServices)
+	mux.HandleFunc("GET /api/workspaces/{ws}/agent-services/scripted-roles", m.listInstantiableScriptedRoles)
 	mux.Handle("POST /api/workspaces/{ws}/agent-services", m.mutationAccess(http.HandlerFunc(m.createAgentService)))
 	mux.Handle("PATCH /api/workspaces/{ws}/agent-services/{id}", m.mutationAccess(http.HandlerFunc(m.patchAgentService)))
 	mux.Handle("DELETE /api/workspaces/{ws}/agent-services/{id}", m.mutationAccess(http.HandlerFunc(m.deleteAgentService)))
@@ -154,6 +156,31 @@ type patchAgentServiceBindingRequest struct {
 type agentServiceResponse struct {
 	Success bool            `json:"success"`
 	Data    agentServiceDTO `json:"data"`
+}
+
+type instantiableScriptedRoleDTO struct {
+	RoleName            string   `json:"roleName"`
+	DisplayName         string   `json:"displayName"`
+	AllowedBindingKinds []string `json:"allowedBindingKinds"`
+}
+
+func (m *Module) listInstantiableScriptedRoles(w http.ResponseWriter, r *http.Request) {
+	if strings.TrimSpace(r.PathValue("ws")) == "" {
+		handler.RespondError(w, http.StatusBadRequest, "workspace is required")
+		return
+	}
+	roles := make([]instantiableScriptedRoleDTO, 0)
+	for _, role := range scriptedroles.All() {
+		if !slices.Contains(role.AllowedBindingKinds, trigger.CronSourceKind) {
+			continue
+		}
+		roles = append(roles, instantiableScriptedRoleDTO{
+			RoleName:            role.RoleName,
+			DisplayName:         role.DisplayName,
+			AllowedBindingKinds: role.AllowedBindingKinds,
+		})
+	}
+	handler.WriteJSON(w, http.StatusOK, roles)
 }
 
 func (m *Module) createAgentService(w http.ResponseWriter, r *http.Request) {

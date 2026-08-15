@@ -583,6 +583,9 @@ function AgentsPageInner(): JSX.Element {
           <AgentServiceDetail
             workspaceId={workspaceId}
             service={selectedAgentService}
+            onRemoved={() => {
+              navigate(`/ws/${workspaceId}/agents`, { replace: true });
+            }}
           />
         ) : unresolvedAgentRoute && !agentServicesInitialized ? (
           <div className={styles.tabFallback}>Loading agent…</div>

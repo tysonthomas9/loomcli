@@ -205,6 +205,13 @@
   outline-offset: -2px;
 }
 
+.autonomousAddButton {
+  margin-top: 0;
+  margin-bottom: 0;
+  padding-top: 0.375rem;
+  padding-bottom: 0.375rem;
+}
+
 .workflowRow {
   display: flex;
   align-items: center;

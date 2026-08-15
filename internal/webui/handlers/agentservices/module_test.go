@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -21,6 +22,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/sessions/transcript"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/taskrunlogs"
+	"github.com/tysonthomas9/loomcli/internal/trigger"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/misc"
 )
 
@@ -28,6 +30,27 @@ const (
 	testScoutDriverID        = "scout"
 	testScoutDriverVersionID = "scout-v1"
 )
+
+func TestListInstantiableScriptedRolesUsesLiteralRouteAndFiltersToCron(t *testing.T) {
+	mux := http.NewServeMux()
+	NewModule(memstore.New()).Register(mux)
+
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/workspaces/WS/agent-services/scripted-roles", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s, want literal scripted-roles route", rec.Code, rec.Body.String())
+	}
+	var roles []instantiableScriptedRoleDTO
+	if err := json.Unmarshal(rec.Body.Bytes(), &roles); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(roles) != 1 || roles[0].RoleName != scriptedroles.ScoutRoleName || roles[0].DisplayName != "Scout" {
+		t.Fatalf("roles = %#v, want only the cron-instantiable scout role", roles)
+	}
+	if !slices.Equal(roles[0].AllowedBindingKinds, []string{trigger.CronSourceKind}) {
+		t.Fatalf("allowedBindingKinds = %#v", roles[0].AllowedBindingKinds)
+	}
+}
 
 func TestListAgentServicesIncludesZeroBindingRecordWithExplicitHealth(t *testing.T) {
 	st, _ := seededAgentServiceStore(t)

@@ -14,6 +14,7 @@ import {
   useWorkspaceContext,
 } from "@/hooks";
 import { useToast } from "@/hooks/ui";
+import { CreateAgentServiceModal } from "@/components/CreateAgentServiceModal";
 import type { LoomAgentStatus } from "@/types";
 import {
   SK_AGENT_SECTION_ORDER,
@@ -75,6 +76,7 @@ export function AgentSection({
   const deleteAgent = useDeleteWorkspaceAgent();
   const [agentOrder, setAgentOrder] = useState<string[]>([]);
   const [contextMenu, setContextMenu] = useState<AgentMenuState | null>(null);
+  const [createAutonomousOpen, setCreateAutonomousOpen] = useState(false);
   const prsView = activeView === "prs";
   const addClick = prsView ? undefined : onAddClick;
   const { services: allAgentServices } = useAgentServices(workspaceId, {
@@ -86,6 +88,7 @@ export function AgentSection({
     () => (prsView ? [] : allAgentServices),
     [allAgentServices, prsView],
   );
+  const showAutonomousGroup = !prsView && Boolean(workspaceId);
   const { durableRecords } = useMemo(
     () => buildAgentAutomationRows(agentServices),
     [agentServices],
@@ -192,7 +195,12 @@ export function AgentSection({
     setContextMenu(null);
   }, []);
 
-  if (agents.length === 0 && durableRecords.length === 0 && !addClick)
+  if (
+    agents.length === 0 &&
+    durableRecords.length === 0 &&
+    !addClick &&
+    !showAutonomousGroup
+  )
     return <></>;
 
   const listProps = {
@@ -237,7 +245,7 @@ export function AgentSection({
             {...listProps}
           />
         )}
-        {durableRecords.length > 0 ? (
+        {showAutonomousGroup ? (
           <div data-testid="agent-section-autonomous">
             <div className={styles.groupHeader}>
               <span>Autonomous</span>
@@ -269,6 +277,14 @@ export function AgentSection({
                 </button>
               );
             })}
+            <button
+              type="button"
+              className={`${styles.addButton} ${styles.autonomousAddButton}`}
+              aria-label="Add autonomous agent"
+              onClick={() => setCreateAutonomousOpen(true)}
+            >
+              + Add agent
+            </button>
           </div>
         ) : null}
       </div>
@@ -287,6 +303,20 @@ export function AgentSection({
           if (contextMenu) void handleArchive(contextMenu.name);
         }}
         onClose={closeContextMenu}
+      />
+      <CreateAgentServiceModal
+        isOpen={createAutonomousOpen}
+        workspaceId={workspaceId}
+        onClose={() => setCreateAutonomousOpen(false)}
+        onSuccess={(service) => {
+          showToast(
+            `Autonomous agent "${service.name || service.id}" created`,
+            {
+              type: "success",
+            },
+          );
+          onAgentClick?.(service.id);
+        }}
       />
     </div>
   );
