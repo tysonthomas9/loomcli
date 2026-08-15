@@ -75,6 +75,7 @@ func HandleEnsureAgentTerminalSession(svc service.TerminalService, st store.Stor
 	}
 }
 
+//nolint:funlen // The reuse-or-create session decision reads as one ordered sequence.
 func ensureAgentTerminalSession(ctx context.Context, svc service.TerminalService, st store.Store, workspace, agentName string) (*tabmeta.TabMetadata, error) {
 	unlock := lockAgentTerminalSession(workspace, agentName)
 	defer unlock()

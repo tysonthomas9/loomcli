@@ -22,11 +22,12 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/store"
 	"golang.org/x/text/cases"
 	"golang.org/x/text/unicode/norm"
 	"gopkg.in/yaml.v3"
+
+	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
 const (
@@ -91,6 +92,8 @@ func IsStoreUnavailable(err error) bool {
 // Loom-managed skill projection. A matching marker is a no-op. Store read
 // failures are returned as StoreUnavailableError before the filesystem is
 // touched; every other error is a fail-closed local preparation failure.
+//
+//nolint:cyclop,funlen // The reconcile pipeline reads as one ordered sequence of gates.
 func Materialize(ctx context.Context, st store.Store, workspace, roleName, targetDir string) error {
 	if err := ensurePlatformSupported(); err != nil {
 		return err
@@ -176,6 +179,7 @@ func isUnavailableStoreError(err error) bool {
 	return fleetDBServerErrorPattern.MatchString(err.Error())
 }
 
+//nolint:funlen // One skill's projection entries are derived in one pass.
 func desiredEntries(resolved []domain.ResolvedSkill) ([]desiredEntry, error) {
 	entries := make([]desiredEntry, 0, len(resolved)*2)
 	for _, item := range resolved {
@@ -549,6 +553,7 @@ func entryExactlyMatches(root secureRoot, entry desiredEntry) (bool, error) {
 	}
 }
 
+//nolint:gocognit,cyclop,funlen // The collision matrix (file/dir/symlink × managed/foreign) is deliberately exhaustive in one place.
 func detectExistingCollisions(root secureRoot, targetDir string, entries []desiredEntry, previous *marker) error {
 	managed := map[string]bool{}
 	managedDirs := map[string]bool{}
@@ -637,6 +642,7 @@ func desiredFileAncestor(desired map[string]desiredNode, name string) (desiredNo
 	return desiredNode{}, false
 }
 
+//nolint:funlen // Exclude-file reconciliation keeps its read/merge/write steps inline.
 func ensureGitExcludes(ctx context.Context, targetDir string) error {
 	inside := gitCommandContext(ctx, targetDir, "rev-parse", "--is-inside-work-tree")
 	out, err := inside.Output()

@@ -34,7 +34,7 @@ func (r *unixSecureRoot) ReadFile(name string, maxBytes int64) ([]byte, os.FileM
 	if err != nil {
 		return nil, 0, err
 	}
-	defer unix.Close(parent)
+	defer func() { _ = unix.Close(parent) }()
 	fd, err := unix.Openat(parent, base, unix.O_RDONLY|unix.O_CLOEXEC|unix.O_NOFOLLOW|unix.O_NONBLOCK, 0)
 	if err != nil {
 		return nil, 0, securePathError(name, err)
@@ -70,7 +70,7 @@ func (r *unixSecureRoot) Lstat(name string) (securePathInfo, error) {
 	if err != nil {
 		return securePathInfo{}, err
 	}
-	defer unix.Close(parent)
+	defer func() { _ = unix.Close(parent) }()
 	var stat unix.Stat_t
 	if err := unix.Fstatat(parent, base, &stat, unix.AT_SYMLINK_NOFOLLOW); err != nil {
 		return securePathInfo{}, securePathError(name, err)
@@ -120,7 +120,7 @@ func (r *unixSecureRoot) CreateFile(name string, content []byte, perm os.FileMod
 	if err != nil {
 		return err
 	}
-	defer unix.Close(parent)
+	defer func() { _ = unix.Close(parent) }()
 	fd, err := unix.Openat(parent, base, unix.O_WRONLY|unix.O_CREAT|unix.O_EXCL|unix.O_CLOEXEC|unix.O_NOFOLLOW, uint32(perm.Perm()))
 	if err != nil {
 		return securePathError(name, err)
@@ -156,7 +156,7 @@ func (r *unixSecureRoot) AppendFile(name string, content []byte, perm os.FileMod
 	if err != nil {
 		return err
 	}
-	defer unix.Close(parent)
+	defer func() { _ = unix.Close(parent) }()
 	fd, err := unix.Openat(parent, base, unix.O_WRONLY|unix.O_APPEND|unix.O_CREAT|unix.O_CLOEXEC|unix.O_NOFOLLOW|unix.O_NONBLOCK, uint32(perm.Perm()))
 	if err != nil {
 		return securePathError(name, err)
@@ -183,7 +183,7 @@ func (r *unixSecureRoot) Symlink(target, name string) error {
 	if err != nil {
 		return err
 	}
-	defer unix.Close(parent)
+	defer func() { _ = unix.Close(parent) }()
 	if err := unix.Symlinkat(target, parent, base); err != nil {
 		return securePathError(name, err)
 	}
@@ -195,12 +195,12 @@ func (r *unixSecureRoot) Rename(oldName, newName string) error {
 	if err != nil {
 		return err
 	}
-	defer unix.Close(oldParent)
+	defer func() { _ = unix.Close(oldParent) }()
 	newParent, newBase, err := r.openParent(newName)
 	if err != nil {
 		return err
 	}
-	defer unix.Close(newParent)
+	defer func() { _ = unix.Close(newParent) }()
 	if err := unix.Renameat(oldParent, oldBase, newParent, newBase); err != nil {
 		return securePathError(newName, err)
 	}
@@ -212,7 +212,7 @@ func (r *unixSecureRoot) Remove(name string) error {
 	if err != nil {
 		return err
 	}
-	defer unix.Close(parent)
+	defer func() { _ = unix.Close(parent) }()
 	var stat unix.Stat_t
 	if err := unix.Fstatat(parent, base, &stat, unix.AT_SYMLINK_NOFOLLOW); err != nil {
 		return securePathError(name, err)
@@ -232,7 +232,7 @@ func (r *unixSecureRoot) RemoveDir(name string) error {
 	if err != nil {
 		return err
 	}
-	defer unix.Close(parent)
+	defer func() { _ = unix.Close(parent) }()
 	if err := unix.Unlinkat(parent, base, unix.AT_REMOVEDIR); err != nil {
 		return securePathError(name, err)
 	}
@@ -296,7 +296,7 @@ func securePathError(name string, err error) error {
 }
 
 func fileModeFromUnixStat(stat unix.Stat_t) os.FileMode {
-	raw := uint32(stat.Mode)
+	raw := uint32(stat.Mode) //nolint:unconvert // stat.Mode is uint16 on darwin; the conversion is required there.
 	mode := os.FileMode(raw & 0o777)
 	switch raw & uint32(unix.S_IFMT) {
 	case uint32(unix.S_IFDIR):

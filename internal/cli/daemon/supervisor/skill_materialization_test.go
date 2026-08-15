@@ -15,6 +15,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/agenterr"
 	cfgpkg "github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/events"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -87,6 +88,7 @@ func TestSpawnAgentContinuesWhenSkillStoreIsUnavailable(t *testing.T) {
 	s := newTestSupervisorWithConfig(&cfgpkg.DaemonConfig{Backend: "codex"})
 	s.WorkspaceID = "WS"
 	s.ControlStore = supervisorMaterializeStore{skills: supervisorSkillStore{err: outage}}
+	s.EmitEvent = func(events.Event) {} // spawn success path emits AgentStarted
 	ap := &AgentProcess{
 		Entry:        cfgpkg.AgentEntry{Worktree: "worker-a", Role: "plan", Backend: "codex"},
 		RoleConfig:   cfgpkg.RoleConfig{},
