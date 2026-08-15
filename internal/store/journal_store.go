@@ -44,6 +44,22 @@ type JournalEvent struct {
 // empty. hasMore reports whether fleet-db filled the page (limit events
 // returned) and more may be waiting; callers keep paging while it is true.
 //
+// RESUMING IS A CONTRACT, NOT A CONVENIENCE. Callers MUST resume from
+// nextCursor and MUST NOT derive their resume position solely from the IDs of
+// the events they returned: fleet-db applies limit to the raw mutation stream
+// and only then filters by entity_type, so a page can legitimately contain
+// ZERO events while nextCursor has moved on and hasMore is still true. A
+// caller that re-derives its position from returned events alone re-issues an
+// identical request forever against such a page.
+//
+// The converse bound is just as binding: resuming from nextCursor is valid
+// only once the caller has DURABLY HANDLED every event in the page. A caller
+// that adopts nextCursor after failing to handle one of the page's events has
+// persisted a position past unhandled work and silently dropped it — advance
+// per-event in that case, and leave the cursor untouched when nothing was
+// handled at all. Callers should also bound their own paging: hasMore is the
+// server's view, not a promise of termination.
+//
 // Only the fleet-db client implements this. memstore deliberately does NOT —
 // the bridge is capability-gated on its presence, exactly as the run.finished
 // lane gates on TriggerEventAppender. There is no fleet-db change: the
