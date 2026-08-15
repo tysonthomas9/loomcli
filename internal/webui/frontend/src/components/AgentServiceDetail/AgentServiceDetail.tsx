@@ -7,6 +7,7 @@ import type {
   RunEventDTO,
 } from "@/api/agentServices";
 import { MarkdownRenderer } from "@/components/IssueDetailPanel";
+import { RolePromptCard } from "@/components/RolePromptCard";
 import {
   useAgentServiceJournal,
   useAgentServiceRunEvents,
@@ -80,7 +81,9 @@ export function foldHeartbeats(events: RunEventDTO[]): TimelineRow[] {
   return rows;
 }
 
-function heartbeatRangeLabel(row: Extract<TimelineRow, { kind: "heartbeats" }>): string {
+function heartbeatRangeLabel(
+  row: Extract<TimelineRow, { kind: "heartbeats" }>,
+): string {
   if (row.count === 1) return HEARTBEAT_ACTION;
   const first = formatFireTime(row.first.timestamp) || row.first.timestamp;
   const last = formatFireTime(row.last.timestamp) || row.last.timestamp;
@@ -339,6 +342,23 @@ export function AgentServiceDetail({
               ) : null}
             </dl>
           </section>
+
+          {service.behavior.roleName?.trim() ? (
+            <RolePromptCard
+              workspaceId={workspaceId}
+              roleName={service.behavior.roleName.trim()}
+            />
+          ) : service.kind === "scripted" ? (
+            <section
+              className={styles.card}
+              data-testid="scripted-agent-prompt-note"
+            >
+              <p className={styles.emptyText}>
+                Scripted agent — behavior comes from its driver, not a role
+                prompt.
+              </p>
+            </section>
+          ) : null}
 
           <section className={styles.card}>
             <h2 className={styles.cardTitle}>Bindings</h2>

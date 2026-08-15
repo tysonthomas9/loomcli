@@ -94,6 +94,9 @@ func (s *roleStore) Update(_ context.Context, ws, name string, patch store.RoleU
 	if !ok {
 		return nil, fmt.Errorf("role %q in workspace %q: %w", name, ws, domain.ErrNotFound)
 	}
+	if patch.ExpectedUpdatedAt != nil && !r.UpdatedAt.Equal(*patch.ExpectedUpdatedAt) {
+		return nil, fmt.Errorf("role %q in workspace %q has changed: %w", name, ws, domain.ErrConflict)
+	}
 	applyRoleDefinitionPatch(r, patch)
 	applyRoleControlPatch(r, patch)
 	r.UpdatedAt = time.Now().UTC()

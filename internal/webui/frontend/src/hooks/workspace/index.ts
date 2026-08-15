@@ -63,6 +63,13 @@ export type {
   UsePRReviewConversationResult,
 } from "./usePRReviewConversation";
 
+export { useRolePrompt } from "./useRolePrompt";
+export type {
+  RolePromptActions,
+  RolePromptDTO,
+  RoleSourceKind,
+} from "./useRolePrompt";
+
 export { useRepoFilter, parseReposFromUrl } from "./useRepoFilter";
 export type {
   UseRepoFilterOptions,

@@ -14,6 +14,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/driverapi"
 	githandlers "github.com/tysonthomas9/loomcli/internal/webui/handlers/git"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/onboarding"
+	"github.com/tysonthomas9/loomcli/internal/webui/handlers/roles"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/webhooks"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/workflows"
 	"github.com/tysonthomas9/loomcli/internal/webui/modbuilder"
@@ -127,6 +128,12 @@ func (app *Server) buildInfraModules() {
 		app.connectorDispatcher = app.buildConnectorDispatcher()
 		app.wsModules = append(app.wsModules, agents.NewModule(app.agentSvc, app.hub))
 		app.wsModules = append(app.wsModules, agentservices.NewModule(app.config.Store, app.config.SessionRuntimeDir))
+		app.wsModules = append(app.wsModules, roles.NewModule(app.config.Store, middleware.FileAccessConfig{
+			RemoteAuth:      app.config.ExtAuthURL != "",
+			ResolveRole:     app.config.WorkspaceRoleResolver,
+			FrontendOrigins: app.config.FrontendOrigins,
+			Logger:          app.config.Logger,
+		}))
 		app.wsModules = append(app.wsModules, onboarding.NewModule(app.issueSvc, app.agentSvc))
 		app.wsModules = append(app.wsModules, workflows.NewModule(app.config.Store))
 		app.wsModules = append(app.wsModules, webhooks.NewModule(app.config.Store))

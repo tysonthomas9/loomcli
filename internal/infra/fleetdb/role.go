@@ -153,6 +153,7 @@ func (s *roleStore) Update(ctx context.Context, ws, name string, patch store.Rol
 	// "clear", **int = &&value signals "set", and nil signals "leave
 	// alone") into that wire shape.
 	body := struct {
+		ExpectedUpdatedAt   *time.Time              `json:"expected_updated_at,omitempty"`
 		Description         *string                 `json:"description,omitempty"`
 		Kind                *string                 `json:"kind,omitempty"`
 		Prompt              *string                 `json:"prompt,omitempty"`
@@ -178,20 +179,21 @@ func (s *roleStore) Update(ctx context.Context, ws, name string, patch store.Rol
 		MaxRunDuration      *int                    `json:"max_run_duration,omitempty"`
 		ClearMaxRunDuration bool                    `json:"clear_max_run_duration,omitempty"`
 	}{
-		Description:  patch.Description,
-		Kind:         patch.Kind,
-		Prompt:       patch.Prompt,
-		PromptFile:   patch.PromptFile,
-		Model:        patch.Model,
-		TaskFilter:   patch.TaskFilter,
-		Executor:     patch.Executor,
-		Backend:      patch.Backend,
-		Effort:       patch.Effort,
-		PathPatterns: patch.PathPatterns,
-		Skills:       patch.Skills,
-		ReadOnly:     patch.ReadOnly,
-		AllowedTools: patch.AllowedTools,
-		DeniedTools:  patch.DeniedTools,
+		ExpectedUpdatedAt: patch.ExpectedUpdatedAt,
+		Description:       patch.Description,
+		Kind:              patch.Kind,
+		Prompt:            patch.Prompt,
+		PromptFile:        patch.PromptFile,
+		Model:             patch.Model,
+		TaskFilter:        patch.TaskFilter,
+		Executor:          patch.Executor,
+		Backend:           patch.Backend,
+		Effort:            patch.Effort,
+		PathPatterns:      patch.PathPatterns,
+		Skills:            patch.Skills,
+		ReadOnly:          patch.ReadOnly,
+		AllowedTools:      patch.AllowedTools,
+		DeniedTools:       patch.DeniedTools,
 	}
 	// input_policy is `omitempty` on a pointer, so a &nil patch would serialize
 	// to nothing at all and read on the server as "leave it alone" — silently

@@ -395,6 +395,8 @@ func classifyHTTPError(method, path string, status int, body []byte) error {
 			return fmt.Errorf("%s: %w", prefix, domain.ErrInvalidTransition)
 		case "conflict":
 			return fmt.Errorf("%s: %w", prefix, domain.ErrConflict)
+		case "stale_revision":
+			return fmt.Errorf("%s: %w", prefix, domain.ErrConflict)
 		case "driver_run_already_resumed":
 			// Pending->suspend window: the await resolved before the suspend
 			// landed — the run must continue inline, never suspend.
@@ -447,12 +449,16 @@ func extractErrorMessage(body []byte) string {
 
 func extractErrorCode(body []byte) string {
 	var structured struct {
+		Code  string `json:"code"`
 		Error struct {
 			Code string `json:"code"`
 		} `json:"error"`
 	}
 	if err := json.Unmarshal(body, &structured); err != nil {
 		return ""
+	}
+	if structured.Code != "" {
+		return structured.Code
 	}
 	return structured.Error.Code
 }

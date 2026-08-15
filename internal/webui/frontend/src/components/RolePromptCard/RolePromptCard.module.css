@@ -1,0 +1,135 @@
+.card {
+  padding: var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md, 8px);
+  background: var(--color-bg-primary);
+}
+
+.headingRow {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+}
+
+.title,
+.roleName,
+.muted,
+.note,
+.error {
+  margin: 0;
+}
+
+.title {
+  color: var(--color-text-primary);
+  font-size: var(--font-size-sm);
+  font-weight: 800;
+}
+
+.roleName,
+.muted,
+.note {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+}
+
+.roleName {
+  margin-top: 3px;
+  font-family: var(--font-family-mono);
+}
+
+.sourceLabel {
+  flex-shrink: 0;
+  padding: 4px 8px;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  color: var(--color-text-secondary);
+  background: var(--color-surface-subtle);
+  font-size: var(--font-size-xs);
+  font-weight: 700;
+}
+
+.editor,
+.sourceBody {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 220px;
+  margin: 0;
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm, 6px);
+  color: var(--color-text-primary);
+  background: var(--color-bg-secondary);
+  font-family: var(--font-family-mono);
+  font-size: var(--font-size-sm);
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+.editor {
+  resize: vertical;
+}
+
+.editor:focus-visible,
+.saveButton:focus-visible,
+.stale button:focus-visible {
+  outline: 2px solid var(--color-focus, var(--color-accent, #6d5bd0));
+  outline-offset: 2px;
+}
+
+.sourceBody {
+  overflow: auto;
+}
+
+.error,
+.stale {
+  margin-bottom: var(--space-3);
+  color: var(--color-danger, #d14545);
+  font-size: var(--font-size-sm);
+}
+
+.stale {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-top: var(--space-3);
+}
+
+.stale button {
+  border: 0;
+  color: var(--color-accent, #6d5bd0);
+  background: transparent;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.note {
+  margin-top: var(--space-3);
+  line-height: 1.45;
+}
+
+.actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: var(--space-3);
+}
+
+.saveButton {
+  padding: 7px 12px;
+  border: 1px solid var(--color-accent, #6d5bd0);
+  border-radius: var(--radius-sm, 6px);
+  color: #fff;
+  background: var(--color-accent, #6d5bd0);
+  font: inherit;
+  font-size: var(--font-size-sm);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.saveButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
