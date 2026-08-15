@@ -1,4 +1,5 @@
 import { ApiError, get, wsUrl } from "@/api/common";
+import type { TranscriptEntry, TranscriptResponse } from "@/types/agent";
 
 export type AgentServiceKind = "scripted" | "prompt" | "unknown";
 
@@ -111,6 +112,7 @@ export interface TaskRunDTO {
   startedAt?: string;
   finishedAt?: string | null;
   logsAvailable: boolean;
+  transcriptAvailable: boolean;
 }
 
 export interface PersistedLogDTO {
@@ -226,6 +228,22 @@ export function getTaskRunLog(
   return getPersistedLog(
     wsUrl(workspaceId, "/task-runs/" + encodeURIComponent(taskRunId) + "/log"),
   );
+}
+
+export async function getTaskRunTranscript(
+  workspaceId: string,
+  taskRunId: string,
+): Promise<TranscriptEntry[]> {
+  const response = await get<TranscriptResponse>(
+    wsUrl(
+      workspaceId,
+      "/task-runs/" + encodeURIComponent(taskRunId) + "/transcript",
+    ),
+  );
+  if (!response.success) {
+    throw new ApiError(0, "Failed to load task transcript", response);
+  }
+  return response.data.entries;
 }
 
 export function getDriverRunLog(

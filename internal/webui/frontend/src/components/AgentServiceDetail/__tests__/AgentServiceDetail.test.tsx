@@ -27,6 +27,7 @@ const mocks = vi.hoisted(() => ({
   getAgentServiceJournal: vi.fn(),
   listAgentServiceRunTasks: vi.fn(),
   getTaskRunLog: vi.fn(),
+  getTaskRunTranscript: vi.fn(),
   getDriverRunLog: vi.fn(),
 }));
 
@@ -54,6 +55,7 @@ vi.mock("@/api/agentServices", async (importOriginal) => {
     getAgentServiceJournal: mocks.getAgentServiceJournal,
     listAgentServiceRunTasks: mocks.listAgentServiceRunTasks,
     getTaskRunLog: mocks.getTaskRunLog,
+    getTaskRunTranscript: mocks.getTaskRunTranscript,
     getDriverRunLog: mocks.getDriverRunLog,
   };
 });
@@ -113,6 +115,7 @@ function taskRun(overrides: Partial<TaskRunDTO> = {}): TaskRunDTO {
     startedAt: "2026-08-14T10:00:10Z",
     finishedAt: "2026-08-14T10:00:40Z",
     logsAvailable: true,
+    transcriptAvailable: true,
     ...overrides,
   };
 }
@@ -138,6 +141,11 @@ describe("AgentServiceDetail", () => {
     mocks.getTaskRunLog.mockRejectedValue(
       new ApiError(404, "Not Found", {
         error: "task log is not available yet",
+      }),
+    );
+    mocks.getTaskRunTranscript.mockRejectedValue(
+      new ApiError(404, "Not Found", {
+        error: "task transcript is not available yet",
       }),
     );
     mocks.getDriverRunLog.mockRejectedValue(
@@ -257,7 +265,7 @@ describe("AgentServiceDetail", () => {
 
   it("renders task runs with runner, status, and duration", async () => {
     mocks.listAgentServiceRunTasks.mockResolvedValueOnce({
-      data: [taskRun()],
+      data: [taskRun({ transcriptAvailable: false })],
       total: 1,
     });
     render(<AgentServiceDetail workspaceId="WS" service={service} />);
@@ -276,7 +284,7 @@ describe("AgentServiceDetail", () => {
 
   it("lazily loads and displays a truncated task AI log", async () => {
     mocks.listAgentServiceRunTasks.mockResolvedValueOnce({
-      data: [taskRun()],
+      data: [taskRun({ transcriptAvailable: false })],
       total: 1,
     });
     mocks.getTaskRunLog.mockResolvedValueOnce({
@@ -320,6 +328,36 @@ describe("AgentServiceDetail", () => {
       modifiedAt: "2026-08-14T10:00:40Z",
       truncated: false,
     });
+    mocks.getTaskRunTranscript.mockResolvedValueOnce([
+      {
+        seq: 1,
+        timestamp: "2026-08-14T10:00:20Z",
+        role: "assistant",
+        type: "tool_use",
+        tool_name: "shell",
+        tool_input: { command: '/bin/bash -lc "make gate"' },
+        output: "[exit 1]\ngate failed\n",
+      },
+      {
+        seq: 2,
+        timestamp: "2026-08-14T10:00:30Z",
+        role: "assistant",
+        type: "text",
+        text: '{"recommendations":[]}',
+      },
+      {
+        seq: 3,
+        timestamp: "2026-08-14T10:00:40Z",
+        role: "system",
+        type: "result",
+        text: "completed | in=349798 out=3342 cache_read=305920",
+        output: JSON.stringify({
+          input_tokens: 349_798,
+          cache_read_tokens: 305_920,
+          output_tokens: 3_342,
+        }),
+      },
+    ]);
     render(<AgentServiceDetail workspaceId="WS" service={service} />);
     expandRun();
     fireEvent.click(
@@ -329,6 +367,8 @@ describe("AgentServiceDetail", () => {
     );
 
     const viewToggle = await screen.findByTestId("task-log-view-toggle");
+    expect(mocks.getTaskRunTranscript).toHaveBeenCalledWith("WS", "task-1");
+    expect(mocks.getTaskRunLog).not.toHaveBeenCalled();
     const prettyButton = within(viewToggle).getByRole("button", {
       name: "Pretty",
     });
@@ -357,14 +397,13 @@ describe("AgentServiceDetail", () => {
     expect(rawButton).toHaveAttribute("aria-pressed", "true");
     expect(prettyButton).toHaveAttribute("aria-pressed", "false");
     expect(screen.queryByTestId("transcript-view")).not.toBeInTheDocument();
-    expect(screen.getByTestId("task-log-content-task-1").textContent).toBe(
-      rawLog,
-    );
+    expect((await screen.findByTestId("task-log-content-task-1")).textContent).toBe(rawLog);
+    expect(mocks.getTaskRunLog).toHaveBeenCalledWith("WS", "task-1");
   });
 
   it("shows an empty state when a task AI log is absent", async () => {
     mocks.listAgentServiceRunTasks.mockResolvedValueOnce({
-      data: [taskRun()],
+      data: [taskRun({ transcriptAvailable: false })],
       total: 1,
     });
     render(<AgentServiceDetail workspaceId="WS" service={service} />);
@@ -379,6 +418,64 @@ describe("AgentServiceDetail", () => {
       "No AI log is available",
     );
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("skips settled log and transcript fetches when neither artifact exists", async () => {
+    mocks.listAgentServiceRunTasks.mockResolvedValueOnce({
+      data: [taskRun({ logsAvailable: false, transcriptAvailable: false })],
+      total: 1,
+    });
+    render(<AgentServiceDetail workspaceId="WS" service={service} />);
+    expandRun();
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: /scout-task-runner.*Completed.*30s/,
+      }),
+    );
+
+    expect(screen.getByTestId("task-log-empty")).toHaveTextContent(
+      "No AI log is available",
+    );
+    expect(screen.queryByTestId("task-log-view-toggle")).not.toBeInTheDocument();
+    expect(mocks.getTaskRunLog).not.toHaveBeenCalled();
+    expect(mocks.getTaskRunTranscript).not.toHaveBeenCalled();
+  });
+
+  it("shows transcript empty and error states in Pretty view", async () => {
+    mocks.listAgentServiceRunTasks.mockResolvedValueOnce({
+      data: [taskRun()],
+      total: 1,
+    });
+    mocks.getTaskRunTranscript.mockResolvedValueOnce([]);
+    const { unmount } = render(
+      <AgentServiceDetail workspaceId="WS" service={service} />,
+    );
+    expandRun();
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: /scout-task-runner.*Completed.*30s/,
+      }),
+    );
+    expect(await screen.findByTestId("task-transcript-empty")).toHaveTextContent(
+      "No transcript content",
+    );
+    unmount();
+
+    mocks.listAgentServiceRunTasks.mockResolvedValueOnce({
+      data: [taskRun()],
+      total: 1,
+    });
+    mocks.getTaskRunTranscript.mockRejectedValueOnce(new Error("network down"));
+    render(<AgentServiceDetail workspaceId="WS" service={service} />);
+    expandRun();
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: /scout-task-runner.*Completed.*30s/,
+      }),
+    );
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Transcript unavailable: network down",
+    );
   });
 
   it("lazily replaces a dangling logs reference with the harness log", async () => {
@@ -421,15 +518,14 @@ describe("AgentServiceDetail", () => {
         taskRun({
           status: "running",
           finishedAt: null,
+          transcriptAvailable: false,
         }),
       ],
       total: 1,
     });
-    mocks.getTaskRunLog.mockResolvedValue({
-      content: "live AI output",
-      modifiedAt: "2026-08-14T10:00:20Z",
-      truncated: false,
-    });
+    mocks.getTaskRunTranscript.mockResolvedValue([
+      { seq: 1, role: "assistant", type: "text", text: "live AI output" },
+    ]);
     render(<AgentServiceDetail workspaceId="WS" service={service} />);
     expandRun();
     await act(async () => {
@@ -444,14 +540,15 @@ describe("AgentServiceDetail", () => {
       await vi.advanceTimersByTimeAsync(0);
     });
     expect(mocks.listAgentServiceRunTasks).toHaveBeenCalledTimes(1);
-    expect(mocks.getTaskRunLog).toHaveBeenCalledTimes(1);
+    expect(mocks.getTaskRunTranscript).toHaveBeenCalledTimes(1);
+    expect(mocks.getTaskRunLog).not.toHaveBeenCalled();
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(5_000);
     });
 
     expect(mocks.listAgentServiceRunTasks).toHaveBeenCalledTimes(2);
-    expect(mocks.getTaskRunLog).toHaveBeenCalledTimes(2);
+    expect(mocks.getTaskRunTranscript).toHaveBeenCalledTimes(2);
   });
 
   it("polls an expanded running run and stops after it becomes completed", async () => {

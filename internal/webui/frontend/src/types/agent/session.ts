@@ -23,8 +23,10 @@ export type TranscriptEntryRole = "user" | "assistant" | "tool" | "system";
 /** Canonical event type values in the transcript event stream. */
 export type TranscriptEntryType =
   | "text"
+  | "reasoning"
   | "tool_use"
   | "tool_result"
+  | "result"
   | "session_meta";
 
 /**

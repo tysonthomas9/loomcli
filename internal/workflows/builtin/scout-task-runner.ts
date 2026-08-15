@@ -3,6 +3,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { defineAgent, defineWorkflow } from "@flue/runtime";
+import { transcriptEntriesForBackend } from "../lib/transcript-convert.ts";
 
 // Flue HEAD (durable-streams) requires every workflow module to default-export a
 // defineWorkflow() definition; a bare `export function run` no longer normalizes.
@@ -224,20 +225,21 @@ async function analyzePhase(root, input, taskRunId, request, logs) {
   if (exec.stderr.trim()) {
     logs.push("stderr:\n" + textTail(exec.stderr, 20000));
   }
+  const transcriptEntries = transcriptEntriesForBackend(backend, exec.stdout);
   if (exec.code !== 0) {
     removeScratch(scratch, logs);
-    return failed("scout_backend_failed", `${backend} CLI exited with code ${exec.code}`, { taskRunId, request, phase: "analyze", backend, logs });
+    return failed("scout_backend_failed", `${backend} CLI exited with code ${exec.code}`, { taskRunId, request, phase: "analyze", backend, logs, transcriptEntries });
   }
 
   const parsed = parseAnalysisOutput(resultPath, exec.stdout, logs);
   removeScratch(scratch, logs);
   if (!parsed) {
-    return failed("scout_no_result", "the analysis run produced no parseable result JSON", { taskRunId, request, phase: "analyze", backend, logs });
+    return failed("scout_no_result", "the analysis run produced no parseable result JSON", { taskRunId, request, phase: "analyze", backend, logs, transcriptEntries });
   }
 
   const analysis = normalizeAnalysis(parsed, repos, maxRecommendations, root);
   logs.push("analysis: " + analysis.recommendations.length + " recommendation(s), " + analysis.skipped.length + " skipped, " + analysis.warnings.length + " warning(s)");
-  return completedAnalysis(analysis, backend, taskRunId, request, logs);
+  return completedAnalysis(analysis, backend, taskRunId, request, logs, transcriptEntries);
 }
 
 // discoverRepos enumerates the workspace's attached repo checkouts: direct
@@ -540,11 +542,12 @@ function normalizeAnalysis(parsed, repos, maxRecommendations, root) {
   };
 }
 
-function completedAnalysis(analysis, backend, taskRunId, request, logs) {
+function completedAnalysis(analysis, backend, taskRunId, request, logs, transcriptEntries) {
   return {
     status: "completed",
     exitCode: 0,
     logs: logs.join("\n") + "\n",
+    ...(Array.isArray(transcriptEntries) ? { transcript_entries: transcriptEntries } : {}),
     runtimeMetadata: {
       task_runner: "scout-task-runner",
       runtime_strategy: "scout-analyze-" + backend,
@@ -864,7 +867,7 @@ function requestPayload(ctx) {
   }
 }
 
-function failed(errorClass, message, { taskRunId, request = {}, phase = "", backend = "", logs = [] } = {}) {
+function failed(errorClass, message, { taskRunId, request = {}, phase = "", backend = "", logs = [], transcriptEntries } = {}) {
   const metadata = {
     task_runner: "scout-task-runner",
     runtime_strategy: backend ? "scout-analyze-" + backend : "scout",
@@ -879,6 +882,7 @@ function failed(errorClass, message, { taskRunId, request = {}, phase = "", back
     errorClass,
     errorMessage: message,
     logs: logs.join("\n") + "\n",
+    ...(Array.isArray(transcriptEntries) ? { transcript_entries: transcriptEntries } : {}),
     runtimeMetadata: metadata,
   };
 }

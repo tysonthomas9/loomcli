@@ -1,9 +1,7 @@
 package svcimpl
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -491,7 +489,7 @@ func (s *sessionServiceImpl) controlPlaneSessionTranscript(ctx context.Context, 
 	if err != nil {
 		return nil, service.ErrInternal("failed to load transcript", err)
 	}
-	events, err := parseCanonicalTranscriptBytes(data)
+	events, err := transcript.ParseCanonicalBytes(data)
 	if err != nil {
 		return nil, service.ErrInternal("failed to parse transcript", err)
 	}
@@ -574,34 +572,6 @@ func readTranscriptURI(ctx context.Context, rawURI string) ([]byte, error) {
 	default:
 		return nil, errors.New("unsupported transcript ref")
 	}
-}
-
-func parseCanonicalTranscriptBytes(data []byte) ([]transcript.Event, error) {
-	trimmed := bytes.TrimSpace(data)
-	if len(trimmed) == 0 {
-		return []transcript.Event{}, nil
-	}
-	if trimmed[0] == '[' {
-		var events []transcript.Event
-		if err := json.Unmarshal(trimmed, &events); err != nil {
-			return nil, err
-		}
-		return events, nil
-	}
-	lines := bytes.Split(trimmed, []byte("\n"))
-	events := make([]transcript.Event, 0, len(lines))
-	for _, line := range lines {
-		line = bytes.TrimSpace(line)
-		if len(line) == 0 {
-			continue
-		}
-		var event transcript.Event
-		if err := json.Unmarshal(line, &event); err != nil {
-			return nil, err
-		}
-		events = append(events, event)
-	}
-	return events, nil
 }
 
 func serviceErrorNotFound(err error) bool {

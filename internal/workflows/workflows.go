@@ -52,6 +52,9 @@ var builtinScoutWorkflowSource string
 //go:embed builtin/scout-task-runner.ts
 var builtinScoutTaskRunnerWorkflowSource string
 
+//go:embed builtin/transcript-convert.ts
+var builtinTranscriptConvertSource string
+
 type Spec struct {
 	Entrypoint string
 	Files      map[string]string
@@ -103,6 +106,7 @@ func builtinSpec(name, source string) Spec {
 
 func builtinEpicRunnerSpec() Spec {
 	spec := builtinSpec(BuiltinEpicRunnerWorkflowName, builtinEpicRunnerWorkflowSource)
+	spec.Files["lib/transcript-convert.ts"] = builtinTranscriptConvertSource
 	spec.Files["workflows/local-task-runner.ts"] = builtinLocalTaskRunnerWorkflowSource
 	spec.Files["workflows/daytona-task-runner.ts"] = builtinDaytonaTaskRunnerWorkflowSource
 	spec.Files["workflows/openshell-task-runner.ts"] = builtinOpenShellTaskRunnerWorkflowSource
@@ -117,6 +121,7 @@ func builtinGitHubReviewAgentSpec() Spec {
 
 func builtinScoutSpec() Spec {
 	spec := builtinSpec(BuiltinScoutWorkflowName, builtinScoutWorkflowSource)
+	spec.Files["lib/transcript-convert.ts"] = builtinTranscriptConvertSource
 	spec.Files["workflows/"+BuiltinScoutTaskRunnerName+".ts"] = builtinScoutTaskRunnerWorkflowSource
 	return spec
 }

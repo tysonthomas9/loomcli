@@ -9,6 +9,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 // Stage the source beside a declaration-only Flue runtime stub so this leaf's
 // direct node:test suite does not depend on a built sibling Flue checkout.
 const moduleStageRoot = fs.mkdtempSync(path.join(os.tmpdir(), "local-runner-stage-"));
+const builtinSourceDir = path.dirname(fileURLToPath(import.meta.url));
 const flueStub = path.join(moduleStageRoot, "node_modules", "@flue", "runtime");
 fs.mkdirSync(flueStub, { recursive: true });
 fs.writeFileSync(
@@ -19,8 +20,12 @@ fs.writeFileSync(
   path.join(flueStub, "index.js"),
   "export const defineAgent = (fn) => ({ __agent: fn });\nexport const defineWorkflow = (definition) => definition;\n",
 );
-const stagedSource = path.join(moduleStageRoot, "local-task-runner.ts");
-fs.copyFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "local-task-runner.ts"), stagedSource);
+const stagedSource = path.join(moduleStageRoot, "workflows", "local-task-runner.ts");
+const stagedConverter = path.join(moduleStageRoot, "lib", "transcript-convert.ts");
+fs.mkdirSync(path.dirname(stagedSource), { recursive: true });
+fs.mkdirSync(path.dirname(stagedConverter), { recursive: true });
+fs.copyFileSync(path.join(builtinSourceDir, "local-task-runner.ts"), stagedSource);
+fs.copyFileSync(path.join(builtinSourceDir, "transcript-convert.ts"), stagedConverter);
 const {
   backendArgs,
   parseNumstat,

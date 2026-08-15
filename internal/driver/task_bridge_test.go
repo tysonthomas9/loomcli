@@ -322,6 +322,16 @@ func TestHostBridgeTaskExecutorMapsFlueSessionAndTranscript(t *testing.T) {
 	if !strings.HasPrefix(outcome.Run.LogsRef, "artifact://log-task-task-run-1-") {
 		t.Fatalf("logs ref = %q, want common task-request artifact", outcome.Run.LogsRef)
 	}
+	if outcome.Run.RuntimeMetadata["transcript_ref"] != "artifact://transcript-task-run-1" || outcome.Run.RuntimeMetadata["transcript_artifact_id"] != "transcript-task-run-1" {
+		t.Fatalf("task run transcript refs = %+v, want bridge-owned O(1) artifact ref", outcome.Run.RuntimeMetadata)
+	}
+	storedTaskRun, err := st.TaskRuns().Get(ctx, "TEST", "task-run-1")
+	if err != nil {
+		t.Fatalf("get stored task run: %v", err)
+	}
+	if storedTaskRun.RuntimeMetadata["transcript_ref"] != "artifact://transcript-task-run-1" {
+		t.Fatalf("stored task run metadata = %+v, want persisted transcript_ref", storedTaskRun.RuntimeMetadata)
+	}
 	if persisted, err := taskrunlogs.Get(ctx, st, "TEST", outcome.Run.LogsRef); err != nil || !strings.Contains(persisted.Content, "flue runner log") {
 		t.Fatalf("persisted task log = %+v, %v", persisted, err)
 	}

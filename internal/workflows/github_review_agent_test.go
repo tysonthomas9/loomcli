@@ -44,11 +44,11 @@ func TestBuiltinWorkflowRegistryListsAllBuiltins(t *testing.T) {
 		wantFiles := 1
 		switch name {
 		case BuiltinEpicRunnerWorkflowName:
-			wantFiles = 4
+			wantFiles = 5
 		case BuiltinGitHubReviewAgentWorkflowName:
 			wantFiles = 2
 		case BuiltinScoutWorkflowName:
-			wantFiles = 2
+			wantFiles = 3
 		}
 		if len(spec.Files) != wantFiles {
 			t.Fatalf("%s spec has %d files, want %d", name, len(spec.Files), wantFiles)

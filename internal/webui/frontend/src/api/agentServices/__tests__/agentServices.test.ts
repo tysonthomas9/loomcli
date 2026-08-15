@@ -7,6 +7,7 @@ import {
   getAgentServiceJournal,
   getDriverRunLog,
   getTaskRunLog,
+  getTaskRunTranscript,
   listAgentServiceRunTasks,
   listAgentServiceRuns,
   listAgentServices,
@@ -166,6 +167,7 @@ describe("agent-services API", () => {
           startedAt: "2026-08-14T23:38:00Z",
           finishedAt: "2026-08-14T23:39:00Z",
           logsAvailable: true,
+          transcriptAvailable: true,
         },
       ],
       total: 1,
@@ -178,6 +180,7 @@ describe("agent-services API", () => {
     );
 
     expect(result.data[0]?.logsAvailable).toBe(true);
+    expect(result.data[0]?.transcriptAvailable).toBe(true);
     expect(mockGet).toHaveBeenCalledWith(
       "/api/workspaces/Workspace%20A/agent-services/scout%2Fid/runs/run%2F1/tasks",
     );
@@ -204,6 +207,32 @@ describe("agent-services API", () => {
     expect(mockGet).toHaveBeenNthCalledWith(
       2,
       "/api/workspaces/Workspace%20A/runs/run%2F1/log",
+    );
+  });
+
+  it("gets a task-run transcript from the session transcript envelope", async () => {
+    mockGet.mockResolvedValueOnce({
+      success: true,
+      data: {
+        session_id: "task/1",
+        entries: [
+          {
+            seq: 1,
+            timestamp: "2026-08-15T12:00:00Z",
+            role: "assistant",
+            type: "text",
+            text: "analysis complete",
+          },
+        ],
+      },
+    });
+
+    const result = await getTaskRunTranscript("Workspace A", "task/1");
+
+    expect(result).toHaveLength(1);
+    expect(result[0]?.text).toBe("analysis complete");
+    expect(mockGet).toHaveBeenCalledWith(
+      "/api/workspaces/Workspace%20A/task-runs/task%2F1/transcript",
     );
   });
 });

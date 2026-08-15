@@ -10,6 +10,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 // declaration. Stage the source beside a declaration-only stub so this leaf's
 // direct node:test suite does not depend on a materialized workflow bundle.
 const moduleStageRoot = fs.mkdtempSync(path.join(os.tmpdir(), "scout-runner-stage-"));
+const builtinSourceDir = path.dirname(fileURLToPath(import.meta.url));
 const flueStub = path.join(moduleStageRoot, "node_modules", "@flue", "runtime");
 fs.mkdirSync(flueStub, { recursive: true });
 fs.writeFileSync(
@@ -20,11 +21,15 @@ fs.writeFileSync(
   path.join(flueStub, "index.js"),
   "export const defineAgent = (fn) => ({ __agent: fn });\nexport const defineWorkflow = (definition) => definition;\n",
 );
-const stagedSource = path.join(moduleStageRoot, "scout-task-runner.ts");
+const stagedSource = path.join(moduleStageRoot, "workflows", "scout-task-runner.ts");
+const stagedConverter = path.join(moduleStageRoot, "lib", "transcript-convert.ts");
+fs.mkdirSync(path.dirname(stagedSource), { recursive: true });
+fs.mkdirSync(path.dirname(stagedConverter), { recursive: true });
 fs.copyFileSync(
-  path.join(path.dirname(fileURLToPath(import.meta.url)), "scout-task-runner.ts"),
+  path.join(builtinSourceDir, "scout-task-runner.ts"),
   stagedSource,
 );
+fs.copyFileSync(path.join(builtinSourceDir, "transcript-convert.ts"), stagedConverter);
 const {
   backendArgs,
   resolveBackend,
@@ -32,6 +37,7 @@ const {
   run,
   scoutFencedContent,
 } = await import(pathToFileURL(stagedSource).href);
+const { transcriptEntriesForBackend } = await import(pathToFileURL(stagedConverter).href);
 
 after(() => {
   fs.rmSync(moduleStageRoot, { recursive: true, force: true });
@@ -199,6 +205,7 @@ describe("write phase", () => {
     });
     assert.equal(result.status, "completed");
     assert.equal("logsRef" in result, false);
+    assert.equal("transcript_entries" in result, false);
     const write = JSON.parse(result.runtimeMetadata.scout_write);
     assert.equal(write.agentsMdMode, "created");
     assert.equal(write.historyMode, "created");
@@ -328,6 +335,29 @@ describe("analyze phase", () => {
     assert.equal(fs.existsSync(path.join(root, ".loom", "scout", taskRunId)), false);
   });
 
+  it("returns canonical transcript_entries from the backend stream", async () => {
+    const root = makeDir("ws");
+    makeGitRepo(path.join("ws", "alpha"));
+    installFakeBackend(root);
+    const taskRunId = "task-run-canonical-transcript";
+    process.env.FAKE_RESULT_TARGET = path.join(root, ".loom", "scout", taskRunId, "result.json");
+    process.env.FAKE_RESULT_JSON = JSON.stringify({ recommendations: [], skipped: [], agentsMd: "" });
+    process.env.FAKE_STDOUT = [
+      JSON.stringify({ type: "item.started", item: { id: "i1", type: "command_execution", command: "git status" } }),
+      JSON.stringify({ type: "item.completed", item: { id: "i1", type: "command_execution", command: "git status", aggregated_output: "clean\n", exit_code: 0, status: "completed" } }),
+      JSON.stringify({ type: "item.completed", item: { id: "i2", type: "agent_message", text: "analysis complete" } }),
+      JSON.stringify({ type: "turn.completed", usage: { input_tokens: 12, output_tokens: 3 } }),
+    ].join("\n") + "\n";
+
+    const result = await run({ payload: { task_run_id: taskRunId, input: { phase: "analyze" } } });
+
+    assert.equal(result.status, "completed");
+    assert.equal(result.transcript_entries[0].type, "session_meta");
+    assert.equal(result.transcript_entries.filter((entry) => entry.tool_name === "shell").length, 1);
+    assert.ok(result.transcript_entries.some((entry) => entry.type === "text" && entry.text === "analysis complete"));
+    assert.ok(result.transcript_entries.some((entry) => entry.type === "result" && /in=12/.test(entry.text)));
+  });
+
   it("fails with scout_backend_failed when the CLI exits nonzero", async () => {
     const root = makeDir("ws");
     makeGitRepo(path.join("ws", "alpha"));
@@ -360,6 +390,90 @@ describe("analyze phase", () => {
     assert.ok(result.logs.includes("stdout-end"));
     assert.ok(result.logs.includes("stderr-start"));
     assert.ok(result.logs.includes("stderr-end"));
+    assert.equal("transcript_entries" in result, false, "plain output remains raw-only");
+  });
+});
+
+describe("canonical transcript conversion", () => {
+  it("ignores malformed and plain lines while retaining recognized events", () => {
+    const entries = transcriptEntriesForBackend("codex", [
+      "workspace root: /tmp/ws",
+      "{broken",
+      JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: "done" } }),
+    ].join("\n"));
+
+    assert.deepEqual(entries.map((entry) => entry.type), ["session_meta", "text"]);
+    assert.equal(entries[1].text, "done");
+  });
+
+  it("dedupes item.started and preserves the completed command", () => {
+    const entries = transcriptEntriesForBackend("codex", [
+      JSON.stringify({ type: "item.started", item: { id: "i1", type: "command_execution", command: "git status" } }),
+      JSON.stringify({ type: "item.completed", item: { id: "i1", type: "command_execution", command: "git status", aggregated_output: "clean\n", exit_code: 0 } }),
+    ].join("\n"));
+
+    const commands = entries.filter((entry) => entry.type === "tool_use" && entry.tool_name === "shell");
+    assert.equal(commands.length, 1);
+    assert.equal(commands[0].tool_input.command, "git status");
+    assert.equal(commands[0].output, "clean\n");
+  });
+
+  it("turn.failed becomes a canonical failed result entry", () => {
+    const entries = transcriptEntriesForBackend("codex", JSON.stringify({
+      type: "turn.failed",
+      error: { message: "model context exhausted" },
+    }));
+
+    assert.deepEqual(entries.map((entry) => entry.type), ["session_meta", "result"]);
+    assert.equal(entries[1].role, "system");
+    assert.equal(entries[1].text, "failed");
+  });
+
+  it("converts a supported non-codex backend stream", () => {
+    const entries = transcriptEntriesForBackend("claude", [
+      JSON.stringify({
+        type: "assistant",
+        message: { content: [{ type: "thinking", thinking: "inspect repository history" }] },
+      }),
+      JSON.stringify({
+        type: "result",
+        is_error: false,
+        usage: { input_tokens: 21, output_tokens: 5 },
+      }),
+    ].join("\n"));
+
+    assert.deepEqual(entries.map((entry) => entry.type), ["session_meta", "reasoning", "result"]);
+    assert.equal(entries[0].text, "local-cli-claude session");
+    assert.equal(entries[1].text, "inspect repository history");
+    assert.match(entries[2].text, /in=21.*out=5/);
+  });
+
+  it("omits unknown-only and plain-only streams", () => {
+    assert.equal(transcriptEntriesForBackend("codex", "plain output only\n"), undefined);
+    assert.equal(
+      transcriptEntriesForBackend("codex", JSON.stringify({ type: "future.event", payload: { value: 1 } })),
+      undefined,
+    );
+    assert.equal(transcriptEntriesForBackend("future-backend", "{}"), undefined);
+  });
+
+  it("converts the captured real-sample shape into canonical rows", () => {
+    const sample = [
+      "workspace root: /root/.loom/workspaces/LOCALMODE (LOOM_WORKTREE_PATH)",
+      '…\\":\\"rs_0008f76a2ac4f0d7016a7fa5a97ed8819ab6861c4972f53a23\\",\\"summary\\":[]}',
+      '{"type":"item.started","item":{"id":"item_5","type":"command_execution","command":"/bin/bash -lc \\"git status\\"","status":"in_progress"}}',
+      '{"type":"item.completed","item":{"id":"item_5","type":"command_execution","command":"/bin/bash -lc \\"git status\\"","aggregated_output":"clean\\n","exit_code":0,"status":"completed"}}',
+      '{"type":"item.completed","item":{"id":"item_7","type":"file_change","changes":[{"path":"/root/.loom/result.json","kind":"add"}],"status":"completed"}}',
+      '{"type":"item.completed","item":{"id":"item_9","type":"agent_message","text":"{\\"recommendations\\":[]}"}}',
+      '{"type":"turn.completed","usage":{"input_tokens":349798,"cached_input_tokens":305920,"output_tokens":3342,"reasoning_output_tokens":1118}}',
+    ].join("\n");
+
+    const entries = transcriptEntriesForBackend("codex", sample);
+    assert.deepEqual(entries.map((entry) => entry.type), ["session_meta", "tool_use", "tool_use", "text", "result"]);
+    assert.equal(entries[1].tool_name, "shell");
+    assert.equal(entries[2].tool_name, "apply_patch");
+    assert.equal(entries[3].text, '{"recommendations":[]}');
+    assert.match(entries[4].text, /in=349798.*out=3342.*cache_read=305920/);
   });
 });
 

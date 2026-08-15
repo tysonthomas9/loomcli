@@ -69,6 +69,18 @@ func TestBuiltinTaskRunnerSourcesDropFakeCompletion(t *testing.T) {
 	}
 }
 
+func TestBuiltinTranscriptConverterShipsWithEveryImportingWorkflow(t *testing.T) {
+	for _, name := range []string{BuiltinEpicRunnerWorkflowName, BuiltinScoutWorkflowName} {
+		spec, ok := BuiltinWorkflow(name)
+		if !ok {
+			t.Fatalf("built-in %s workflow missing", name)
+		}
+		if source := spec.Files["lib/transcript-convert.ts"]; source == "" {
+			t.Fatalf("built-in %s workflow missing shared transcript converter", name)
+		}
+	}
+}
+
 // The main loop is edge-triggered off the epic watch stream: no polling
 // cadence, no per-batch barrier, and no workflow-side awaiting of queued
 // task runs (terminal journal events drive the bookkeeping instead).
@@ -268,7 +280,7 @@ func TestCloneBuiltinSourceWritesLocalSourceLayout(t *testing.T) {
 	if manifest.DriverID != BuiltinEpicRunnerWorkflowName || manifest.Entrypoint != "workflows/epic-runner.ts" {
 		t.Fatalf("manifest = %+v, want epic-runner entrypoint", manifest)
 	}
-	for _, rel := range []string{"workflow.json", "workflows/epic-runner.ts", "workflows/local-task-runner.ts", "workflows/daytona-task-runner.ts"} {
+	for _, rel := range []string{"workflow.json", "lib/transcript-convert.ts", "workflows/epic-runner.ts", "workflows/local-task-runner.ts", "workflows/daytona-task-runner.ts"} {
 		if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(rel))); err != nil {
 			t.Fatalf("expected cloned source %s: %v", rel, err)
 		}

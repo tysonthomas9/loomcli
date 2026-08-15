@@ -4,6 +4,7 @@ import {
   getAgentServiceJournal,
   getDriverRunLog,
   getTaskRunLog,
+  getTaskRunTranscript,
   listAgentServiceRunTasks,
   listAgentServiceRuns,
   listAgentServices,
@@ -16,6 +17,7 @@ import {
   type RunEventDTO,
   type TaskRunDTO,
 } from "@/api/agentServices";
+import type { TranscriptEntry } from "@/types/agent";
 import { ApiError } from "@/types/common";
 
 const DEFAULT_POLL_INTERVAL = 30_000;
@@ -306,9 +308,9 @@ export function useAgentServiceRunTasks(
   };
 }
 
-interface PersistedLogState {
+interface LazyResourceState<T> {
   key: string;
-  log: PersistedLogDTO | null;
+  data: T | null;
   loading: boolean;
   initialized: boolean;
   error: Error | null;
@@ -322,21 +324,29 @@ export interface UsePersistedLogReturn {
   refresh: () => Promise<void>;
 }
 
-function usePersistedLog(
+interface UseLazyResourceReturn<T> {
+  data: T | null;
+  loading: boolean;
+  initialized: boolean;
+  error: Error | null;
+  refresh: () => Promise<void>;
+}
+
+function emptyLazyResourceState<T>(key: string): LazyResourceState<T> {
+  return { key, data: null, loading: false, initialized: false, error: null };
+}
+
+function useLazyResource<T>(
   key: string,
   enabled: boolean,
-  load: () => Promise<PersistedLogDTO>,
-): UsePersistedLogReturn {
+  load: () => Promise<T>,
+): UseLazyResourceReturn<T> {
   const activeKeyRef = useRef(key);
   const requestSequenceRef = useRef(0);
   const inFlightKeyRef = useRef<string | null>(null);
-  const [state, setState] = useState<PersistedLogState>(() => ({
-    key,
-    log: null,
-    loading: false,
-    initialized: false,
-    error: null,
-  }));
+  const [state, setState] = useState<LazyResourceState<T>>(() =>
+    emptyLazyResourceState<T>(key),
+  );
   activeKeyRef.current = key;
 
   const refresh = useCallback(async (): Promise<void> => {
@@ -349,14 +359,14 @@ function usePersistedLog(
         ? current
         : {
             key: requestKey,
-            log: null,
+            data: null,
             initialized: false,
             error: null,
           }),
       loading: true,
     }));
     try {
-      const log = await load();
+      const data = await load();
       if (
         activeKeyRef.current !== requestKey ||
         requestSequence !== requestSequenceRef.current
@@ -365,7 +375,7 @@ function usePersistedLog(
       }
       setState({
         key: requestKey,
-        log,
+        data,
         loading: false,
         initialized: true,
         error: null,
@@ -379,7 +389,7 @@ function usePersistedLog(
       }
       setState({
         key: requestKey,
-        log: null,
+        data: null,
         loading: false,
         initialized: true,
         error: error instanceof Error ? error : new Error(String(error)),
@@ -394,13 +404,7 @@ function usePersistedLog(
   useEffect(() => {
     const requestSequence = requestSequenceRef;
     const inFlightKey = inFlightKeyRef;
-    setState({
-      key,
-      log: null,
-      loading: false,
-      initialized: false,
-      error: null,
-    });
+    setState(emptyLazyResourceState<T>(key));
     return () => {
       requestSequence.current++;
       inFlightKey.current = null;
@@ -414,15 +418,9 @@ function usePersistedLog(
   const scoped =
     state.key === key
       ? state
-      : {
-          key,
-          log: null,
-          loading: false,
-          initialized: false,
-          error: null,
-        };
+      : emptyLazyResourceState<T>(key);
   return {
-    log: scoped.log,
+    data: scoped.data,
     loading: scoped.loading,
     initialized: scoped.initialized,
     error: scoped.error,
@@ -441,7 +439,31 @@ export function useTaskRunLog(
     () => getTaskRunLog(workspaceId, taskRunId),
     [taskRunId, workspaceId],
   );
-  return usePersistedLog(key, enabled, load);
+  const resource = useLazyResource(key, enabled, load);
+  return { ...resource, log: resource.data };
+}
+
+export interface UseTaskRunTranscriptReturn {
+  entries: TranscriptEntry[];
+  loading: boolean;
+  initialized: boolean;
+  error: Error | null;
+  refresh: () => Promise<void>;
+}
+
+export function useTaskRunTranscript(
+  workspaceId: string,
+  taskRunId: string,
+  options: { enabled?: boolean } = {},
+): UseTaskRunTranscriptReturn {
+  const enabled = options.enabled ?? Boolean(workspaceId && taskRunId);
+  const key = workspaceId + "\0transcript\0" + taskRunId;
+  const load = useCallback(
+    () => getTaskRunTranscript(workspaceId, taskRunId),
+    [taskRunId, workspaceId],
+  );
+  const resource = useLazyResource(key, enabled, load);
+  return { ...resource, entries: resource.data ?? [] };
 }
 
 export function useDriverRunLog(
@@ -455,7 +477,8 @@ export function useDriverRunLog(
     () => getDriverRunLog(workspaceId, runId),
     [runId, workspaceId],
   );
-  return usePersistedLog(key, enabled, load);
+  const resource = useLazyResource(key, enabled, load);
+  return { ...resource, log: resource.data };
 }
 
 interface AgentServiceJournalState {

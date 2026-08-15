@@ -16,8 +16,10 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	"github.com/tysonthomas9/loomcli/internal/sessions/transcript"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/taskrunlogs"
+	"github.com/tysonthomas9/loomcli/internal/webui/handlers/misc"
 )
 
 func TestListAgentServicesIncludesZeroBindingRecordWithExplicitHealth(t *testing.T) {
@@ -202,6 +204,7 @@ func TestListAgentServiceRunTasksFiltersByDriverRunAndReportsLogAvailability(t *
 		{
 			WorkspaceKey: "WS", TaskRunID: "task-1", DriverRunID: run.RunID, TaskID: "WS-1",
 			Runner: "scout-task-runner", Status: domain.TaskRunRunning,
+			RuntimeMetadata: map[string]string{"transcript_ref": "artifact://transcript-task-1"},
 		},
 		{
 			WorkspaceKey: "WS", TaskRunID: "task-other", DriverRunID: otherRun.RunID, TaskID: "WS-2",
@@ -247,7 +250,7 @@ func TestListAgentServiceRunTasksFiltersByDriverRunAndReportsLogAvailability(t *
 	item := items["task-1"]
 	if item["taskRunId"] != "task-1" || item["taskId"] != "WS-1" ||
 		item["runner"] != "scout-task-runner" || item["status"] != "running" ||
-		item["logsAvailable"] != true {
+		item["logsAvailable"] != true || item["transcriptAvailable"] != true {
 		t.Fatalf("task DTO = %#v", item)
 	}
 	if _, exists := item["task_run_id"]; exists {
@@ -255,6 +258,9 @@ func TestListAgentServiceRunTasksFiltersByDriverRunAndReportsLogAvailability(t *
 	}
 	if item := items["task-no-log"]; item["logsAvailable"] != false {
 		t.Fatalf("task without LogsRef = %#v, want logsAvailable false", item)
+	}
+	if item := items["task-no-log"]; item["transcriptAvailable"] != false {
+		t.Fatalf("task without transcript_ref = %#v, want transcriptAvailable false", item)
 	}
 }
 
@@ -324,6 +330,101 @@ func TestGetTaskRunLogHappyMissingTruncatedAndRejectsTraversal(t *testing.T) {
 			req.SetPathValue("taskRunId", taskRunID)
 			rec := httptest.NewRecorder()
 			module.getTaskRunLog(rec, req)
+			if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "invalid task run id") {
+				t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+			}
+		})
+	}
+}
+
+func TestGetTaskRunTranscriptHappyMissingAndRejectsTraversal(t *testing.T) {
+	st, svc := seededAgentServiceStore(t)
+	run := createAgentServiceRun(t, st, svc, "run-transcripts")
+	for _, taskRunID := range []string{"task-happy", "task-claude", "task-missing"} {
+		metadata := map[string]string(nil)
+		if taskRunID != "task-missing" {
+			metadata = map[string]string{"transcript_ref": "artifact://transcript-" + taskRunID}
+		}
+		if _, err := st.TaskRuns().Create(t.Context(), store.TaskRunCreate{
+			WorkspaceKey: "WS", TaskRunID: taskRunID, DriverRunID: run.RunID,
+			TaskID: "WS-" + taskRunID, Runner: "scout-task-runner", Status: domain.TaskRunRunning,
+			RuntimeMetadata: metadata,
+		}); err != nil {
+			t.Fatalf("create task run %s: %v", taskRunID, err)
+		}
+	}
+	transcriptBody := []byte(
+		`{"seq":1,"timestamp":"2026-08-15T12:00:00Z","role":"system","type":"session_meta","text":"local-cli-codex session"}` + "\n" +
+			`{"seq":2,"timestamp":"2026-08-15T12:00:01Z","role":"assistant","type":"text","text":"analysis complete"}` + "\n",
+	)
+	if _, err := store.UploadContentArtifact(t.Context(), st.Artifacts(), store.ArtifactCreate{
+		WorkspaceKey: "WS", ArtifactID: "transcript-task-happy", TaskID: "WS-task-happy",
+		OwnerType: "task_run", OwnerID: "task-happy", Type: "transcript",
+		MIMEType: "application/x-ndjson", DurableStatus: "declared",
+	}, transcriptBody); err != nil {
+		t.Fatalf("seed transcript artifact: %v", err)
+	}
+	claudeTranscriptBody := []byte(
+		`{"seq":1,"timestamp":"2026-08-15T12:00:00Z","role":"system","type":"session_meta","text":"local-cli-claude session"}` + "\n" +
+			`{"seq":2,"timestamp":"2026-08-15T12:00:01Z","role":"assistant","type":"reasoning","text":"inspect repository history"}` + "\n",
+	)
+	if _, err := store.UploadContentArtifact(t.Context(), st.Artifacts(), store.ArtifactCreate{
+		WorkspaceKey: "WS", ArtifactID: "transcript-task-claude", TaskID: "WS-task-claude",
+		OwnerType: "task_run", OwnerID: "task-claude", Type: "transcript",
+		MIMEType: "application/x-ndjson", DurableStatus: "declared",
+	}, claudeTranscriptBody); err != nil {
+		t.Fatalf("seed claude transcript artifact: %v", err)
+	}
+	module := NewModule(st)
+
+	t.Run("happy", func(t *testing.T) {
+		rec := getTaskRunTranscript(t, module, "task-happy")
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+		}
+		var response struct {
+			Success bool `json:"success"`
+			Data    struct {
+				SessionID string             `json:"session_id"`
+				Entries   []transcript.Event `json:"entries"`
+			} `json:"data"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+			t.Fatalf("decode response: %v", err)
+		}
+		if !response.Success || response.Data.SessionID != "task-happy" || len(response.Data.Entries) != 2 || response.Data.Entries[1].Text != "analysis complete" {
+			t.Fatalf("response = %#v", response)
+		}
+	})
+
+	t.Run("non-codex canonical fixture", func(t *testing.T) {
+		rec := getTaskRunTranscript(t, module, "task-claude")
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+		}
+		var response misc.TranscriptResponse
+		if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+			t.Fatalf("decode response: %v", err)
+		}
+		if !response.Success || response.Data == nil || response.Data.SessionID != "task-claude" || len(response.Data.Entries) != 2 || response.Data.Entries[1].Type != transcript.EventReasoning {
+			t.Fatalf("response = %#v", response)
+		}
+	})
+
+	t.Run("missing", func(t *testing.T) {
+		rec := getTaskRunTranscript(t, module, "task-missing")
+		if rec.Code != http.StatusNotFound || !strings.Contains(rec.Body.String(), "transcript is not available") {
+			t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+		}
+	})
+
+	for _, taskRunID := range []string{"../evil", "..\\evil", "nested/task"} {
+		t.Run("reject "+taskRunID, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "/", nil)
+			req.SetPathValue("ws", "WS")
+			req.SetPathValue("taskRunId", taskRunID)
+			rec := httptest.NewRecorder()
+			module.getTaskRunTranscript(rec, req)
 			if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "invalid task run id") {
 				t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
 			}
@@ -434,6 +535,15 @@ func getTaskRunLog(t *testing.T, module *Module, taskRunID string) *httptest.Res
 	module.Register(mux)
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/workspaces/WS/task-runs/"+taskRunID+"/log", nil))
+	return rec
+}
+
+func getTaskRunTranscript(t *testing.T, module *Module, taskRunID string) *httptest.ResponseRecorder {
+	t.Helper()
+	mux := http.NewServeMux()
+	module.Register(mux)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/workspaces/WS/task-runs/"+taskRunID+"/transcript", nil))
 	return rec
 }
 
