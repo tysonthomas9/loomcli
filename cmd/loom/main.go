@@ -28,6 +28,7 @@ import (
 	_ "github.com/tysonthomas9/loomcli/internal/cli/monitor"
 	_ "github.com/tysonthomas9/loomcli/internal/cli/repo"
 	_ "github.com/tysonthomas9/loomcli/internal/cli/role"
+	_ "github.com/tysonthomas9/loomcli/internal/cli/scout"
 	_ "github.com/tysonthomas9/loomcli/internal/cli/serve"
 	_ "github.com/tysonthomas9/loomcli/internal/cli/serve/install"
 	_ "github.com/tysonthomas9/loomcli/internal/cli/serve/logroutercmd"

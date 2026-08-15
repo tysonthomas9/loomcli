@@ -198,6 +198,7 @@ var step9EnvAllowedExact = map[string]bool{
 	"LOOM_DRIVER_TASK_RUNNER_CMD":      true,
 	// Runner-injected identity + invoke surface.
 	"LOOM_DRIVER_WORKSPACE": true, "LOOM_DRIVER_RUN_ID": true, "LOOM_DRIVER_NODE_ID": true,
+	"LOOM_AGENT_SERVICE_ID": true,
 	"LOOM_FLUE_SERVER_PATH": true, "LOOM_FLUE_BUNDLE_ROOT": true,
 	"LOOM_FLUE_WORKFLOW_NAME": true, "LOOM_FLUE_INVOKE_PAYLOAD": true,
 	"LOOM_DRIVER_EXEC_TASK_CMD_JSON": true,

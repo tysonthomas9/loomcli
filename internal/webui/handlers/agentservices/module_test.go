@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/agentstate"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/scriptedroles"
@@ -180,7 +181,10 @@ func TestListAgentServiceRunsDefaultsToTwentyNewestCamelCaseRuns(t *testing.T) {
 func TestGetAgentServiceJournalReturnsScoutJournal(t *testing.T) {
 	st, _ := seededAgentServiceStore(t)
 	runtimeDir := t.TempDir()
-	journalPath := filepath.Join(runtimeDir, scoutJournalFilename(t))
+	journalPath := agentstate.JournalPath(runtimeDir, "scout", scoutJournalFilename(t))
+	if err := os.MkdirAll(filepath.Dir(journalPath), 0o755); err != nil {
+		t.Fatalf("mkdir journal: %v", err)
+	}
 	content := "# Scout journal\n\nReviewed the backlog.\n"
 	if err := os.WriteFile(journalPath, []byte(content), 0o600); err != nil {
 		t.Fatalf("write journal: %v", err)
@@ -203,6 +207,38 @@ func TestGetAgentServiceJournalReturnsScoutJournal(t *testing.T) {
 	}
 	if response.Data.Content != content || !response.Data.ModifiedAt.Equal(modifiedAt) || response.Data.Truncated {
 		t.Fatalf("journal = %#v, want content round trip and modifiedAt %v", response.Data, modifiedAt)
+	}
+}
+
+func TestGetAgentServiceJournalResolvesEachInstanceNamespace(t *testing.T) {
+	st, _ := seededAgentServiceStore(t)
+	createScriptedAgentService(t, st, "scout-west")
+	runtimeDir := t.TempDir()
+	for serviceID, content := range map[string]string{
+		"scout":      "default journal\n",
+		"scout-west": "west journal\n",
+	} {
+		journalPath := agentstate.JournalPath(runtimeDir, serviceID, scoutJournalFilename(t))
+		if err := os.MkdirAll(filepath.Dir(journalPath), 0o755); err != nil {
+			t.Fatalf("mkdir %s journal: %v", serviceID, err)
+		}
+		if err := os.WriteFile(journalPath, []byte(content), 0o600); err != nil {
+			t.Fatalf("write %s journal: %v", serviceID, err)
+		}
+	}
+
+	for serviceID, want := range map[string]string{"scout": "default journal\n", "scout-west": "west journal\n"} {
+		rec := getAgentServiceJournal(t, NewModule(st, runtimeDir), serviceID)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s status = %d body=%s", serviceID, rec.Code, rec.Body.String())
+		}
+		var response agentServiceJournalResponse
+		if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+			t.Fatalf("decode %s response: %v", serviceID, err)
+		}
+		if response.Data.ServiceID != serviceID || response.Data.Content != want {
+			t.Fatalf("%s response = %#v", serviceID, response.Data)
+		}
 	}
 }
 
@@ -488,7 +524,11 @@ func TestGetAgentServiceJournalReturnsLast512KiB(t *testing.T) {
 	runtimeDir := t.TempDir()
 	tail := bytes.Repeat([]byte("z"), maxJournalBytes)
 	content := append(bytes.Repeat([]byte("discarded"), 100), tail...)
-	if err := os.WriteFile(filepath.Join(runtimeDir, scoutJournalFilename(t)), content, 0o600); err != nil {
+	journalPath := agentstate.JournalPath(runtimeDir, "scout", scoutJournalFilename(t))
+	if err := os.MkdirAll(filepath.Dir(journalPath), 0o755); err != nil {
+		t.Fatalf("mkdir journal: %v", err)
+	}
+	if err := os.WriteFile(journalPath, content, 0o600); err != nil {
 		t.Fatalf("write journal: %v", err)
 	}
 
@@ -507,16 +547,13 @@ func TestGetAgentServiceJournalReturnsLast512KiB(t *testing.T) {
 
 func TestGetAgentServiceJournalNeverUsesServiceIDAsAPath(t *testing.T) {
 	st, _ := seededAgentServiceStore(t)
-	createAgentService(t, st, "../evil")
+	createScriptedAgentService(t, st, "../evil")
 	runtimeDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(runtimeDir, scoutJournalFilename(t)), []byte("safe journal"), 0o600); err != nil {
-		t.Fatalf("write fixed journal: %v", err)
-	}
-	siblingDir := filepath.Join(filepath.Dir(runtimeDir), "evil")
-	if err := os.Mkdir(siblingDir, 0o700); err != nil {
+	traversalDir := filepath.Join(runtimeDir, ".loom", "evil")
+	if err := os.MkdirAll(traversalDir, 0o700); err != nil {
 		t.Fatalf("make traversal target: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(siblingDir, scoutJournalFilename(t)), []byte("traversed journal"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(traversalDir, scoutJournalFilename(t)), []byte("traversed journal"), 0o600); err != nil {
 		t.Fatalf("write traversal target: %v", err)
 	}
 
@@ -525,7 +562,7 @@ func TestGetAgentServiceJournalNeverUsesServiceIDAsAPath(t *testing.T) {
 	req.SetPathValue("id", "../evil")
 	rec := httptest.NewRecorder()
 	NewModule(st, runtimeDir).getAgentServiceJournal(rec, req)
-	if rec.Code != http.StatusNotFound || !strings.Contains(rec.Body.String(), "this agent has no journal") || strings.Contains(rec.Body.String(), "traversed journal") {
+	if rec.Code != http.StatusInternalServerError || !strings.Contains(rec.Body.String(), "invalid filesystem identity") || strings.Contains(rec.Body.String(), "traversed journal") {
 		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
 	}
 }
@@ -565,6 +602,16 @@ func createAgentService(t *testing.T, st store.Store, serviceID string) {
 		DriverVersionID: testScoutDriverVersionID, CreatedBy: "system",
 	}); err != nil {
 		t.Fatalf("create agent service %q: %v", serviceID, err)
+	}
+}
+
+func createScriptedAgentService(t *testing.T, st store.Store, serviceID string) {
+	t.Helper()
+	if _, err := st.AgentServices().Create(t.Context(), store.AgentServiceCreate{
+		WorkspaceKey: "WS", ServiceID: serviceID, Name: serviceID, TriggerKind: domain.AgentServiceTriggerKindCron,
+		DesiredState: domain.AgentServiceDesiredRunning, RoleName: scriptedroles.ScoutRoleName, CreatedBy: "system",
+	}); err != nil {
+		t.Fatalf("create scripted agent service %q: %v", serviceID, err)
 	}
 }
 

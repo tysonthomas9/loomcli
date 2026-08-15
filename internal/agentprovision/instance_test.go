@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/tysonthomas9/loomcli/internal/agentstate"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/scriptedroles"
@@ -51,6 +53,42 @@ func TestEnsureAgentInstanceFromCatalog(t *testing.T) {
 				t.Fatalf("repeat ensure changed stable service: first=%v second=%v", svc.UpdatedAt, second.UpdatedAt)
 			}
 		})
+	}
+}
+
+func TestEnsureAgentInstanceMovesLegacyJournalOnceWithoutOverwrite(t *testing.T) {
+	st, workspaceDir := newProvisionStore(t)
+	spec, ok := scriptedroles.ForRole(scriptedroles.ScoutRoleName)
+	if !ok || spec.DefaultInstance == nil {
+		t.Fatal("scout catalog default is missing")
+	}
+	legacyPath := filepath.Join(workspaceDir, spec.JournalFilename)
+	targetPath := agentstate.JournalPath(workspaceDir, spec.DefaultInstance.ServiceID, spec.JournalFilename)
+	if err := os.WriteFile(legacyPath, []byte("legacy journal\n"), 0o600); err != nil {
+		t.Fatalf("write legacy journal: %v", err)
+	}
+
+	if _, err := EnsureAgentInstance(t.Context(), st, "SCOUT", workspaceDir, scriptedroles.ScoutRoleName); err != nil {
+		t.Fatalf("EnsureAgentInstance: %v", err)
+	}
+	if _, err := os.Stat(legacyPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("legacy journal still exists after move: %v", err)
+	}
+	if got, err := os.ReadFile(targetPath); err != nil || string(got) != "legacy journal\n" {
+		t.Fatalf("namespaced journal = %q, err %v", got, err)
+	}
+
+	if err := os.WriteFile(legacyPath, []byte("late legacy\n"), 0o600); err != nil {
+		t.Fatalf("write late legacy journal: %v", err)
+	}
+	if _, err := EnsureAgentInstance(t.Context(), st, "SCOUT", workspaceDir, scriptedroles.ScoutRoleName); err != nil {
+		t.Fatalf("repeat EnsureAgentInstance: %v", err)
+	}
+	if got, err := os.ReadFile(targetPath); err != nil || string(got) != "legacy journal\n" {
+		t.Fatalf("repeat ensure overwrote namespaced journal = %q, err %v", got, err)
+	}
+	if got, err := os.ReadFile(legacyPath); err != nil || string(got) != "late legacy\n" {
+		t.Fatalf("late legacy journal should remain untouched = %q, err %v", got, err)
 	}
 }
 

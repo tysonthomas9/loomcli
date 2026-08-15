@@ -10,13 +10,13 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/agentprovision"
+	"github.com/tysonthomas9/loomcli/internal/agentstate"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/scriptedroles"
 	"github.com/tysonthomas9/loomcli/internal/sessions/transcript"
@@ -649,9 +649,14 @@ func (m *Module) getAgentServiceJournal(w http.ResponseWriter, r *http.Request) 
 		handler.RespondError(w, http.StatusNotFound, "this agent has no journal")
 		return
 	}
+	if err := agentprovision.ValidateServiceID(svc.ServiceID); err != nil {
+		handler.RespondError(w, http.StatusInternalServerError, "agent service has an invalid filesystem identity")
+		return
+	}
 	journalFilename := role.JournalFilename
 
-	content, modifiedAt, truncated, err := readJournalTail(filepath.Join(m.resolveRuntimeDir(), journalFilename))
+	journalPath := agentstate.JournalPath(m.resolveRuntimeDir(), svc.ServiceID, journalFilename)
+	content, modifiedAt, truncated, err := readJournalTail(journalPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			handler.RespondError(w, http.StatusNotFound, fmt.Sprintf("no journal yet — the %s has not completed a run", strings.ToLower(role.DisplayName)))

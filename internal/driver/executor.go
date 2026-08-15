@@ -820,6 +820,7 @@ func flueRuntimeEnv(req RunRequest, input []byte, execTaskCommand []string) ([]s
 		"LOOM_DRIVER_WORKSPACE="+req.Run.WorkspaceKey,
 		"LOOM_DRIVER_RUN_ID="+req.Run.RunID,
 		"LOOM_DRIVER_NODE_ID="+req.Run.NodeID,
+		"LOOM_AGENT_SERVICE_ID="+req.Run.AgentServiceID,
 	)
 	// Lease identity doubles as auth material under header-quad auth, so a
 	// token-carrying run keeps it out of the workflow env (§9.5 lockdown:

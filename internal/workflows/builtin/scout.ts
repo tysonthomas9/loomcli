@@ -63,7 +63,12 @@ export async function run(ctx) {
   const runner = stringValue(input.runner) || "scout-task-runner";
   const maxRecommendations = clampInt(input.maxRecommendations, 1, MAX_RECOMMENDATIONS, MAX_RECOMMENDATIONS);
 
-  const analysisRun = await runScoutTask(loom, runner, "scout-analyze", {
+  // This identity comes from the executor's authenticated DriverRun, never
+  // from the caller-controlled invocation payload. Keep the bytes verbatim;
+  // the leaf owns grammar validation before deriving instance paths.
+  const agentServiceID = process.env.LOOM_AGENT_SERVICE_ID ?? "";
+
+  const analysisRun = await runScoutTask(loom, runner, "scout-analyze", agentServiceID, {
     kind: "scout_analyze",
     phase: "analyze",
     maxRecommendations,
@@ -78,7 +83,7 @@ export async function run(ctx) {
 
   const outcome = await createRecommendedIssues(loom, analysis.value, maxRecommendations);
 
-  const writeRun = await runScoutTask(loom, runner, "scout-write", {
+  const writeRun = await runScoutTask(loom, runner, "scout-write", agentServiceID, {
     kind: "scout_write",
     phase: "write",
     agentsMd: analysis.value.agentsMd || "",
@@ -109,13 +114,13 @@ const MAX_RECOMMENDATIONS = 5;
 // it, mirroring github-review-agent's runReviewTask: the request is made once,
 // a conflict means a previous incarnation of this run already enqueued it, and
 // the terminal run's runtimeMetadata carries the structured result.
-async function runScoutTask(loom, runner, label, taskInput) {
+async function runScoutTask(loom, runner, label, agentServiceID, taskInput) {
   const taskRunId = deterministicTaskRunId(loom.driverRunId, label);
   const request = {
     taskId: label,
     taskRunId,
     runner,
-    input: taskInput,
+    input: { ...taskInput, agent_service_id: agentServiceID },
   };
   try {
     await loom.taskRuns.request(request);

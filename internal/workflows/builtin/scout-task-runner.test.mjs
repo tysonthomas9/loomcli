@@ -33,7 +33,9 @@ fs.copyFileSync(path.join(builtinSourceDir, "transcript-convert.ts"), stagedConv
 const {
   backendArgs,
   resolveBackend,
+  resolveAgentServiceID,
   resolveWorkspaceRoot,
+  rewriteAgentFence,
   run,
   scoutFencedContent,
 } = await import(pathToFileURL(stagedSource).href);
@@ -213,14 +215,17 @@ describe("write phase", () => {
     const write = JSON.parse(result.runtimeMetadata.scout_write);
     assert.equal(write.agentsMdMode, "created");
     assert.equal(write.historyMode, "created");
+    assert.equal(write.agentServiceId, "scout");
 
     const agents = fs.readFileSync(path.join(root, "agents.md"), "utf8");
-    assert.ok(agents.includes("<!-- scout:begin -->"));
-    assert.ok(agents.includes("<!-- scout:end -->"));
+    assert.ok(agents.includes("<!-- loom:agent:scout:begin -->"));
+    assert.ok(agents.includes("<!-- loom:agent:scout:end -->"));
     assert.ok(agents.includes("overview here"));
-    assert.equal(scoutFencedContent(agents).includes("overview here"), true);
+    assert.equal(scoutFencedContent(agents, "scout").includes("overview here"), true);
 
-    const history = fs.readFileSync(path.join(root, "history.md"), "utf8");
+    const historyPath = path.join(root, ".loom", "agents", "scout", "history.md");
+    assert.equal(write.historyPath, historyPath);
+    const history = fs.readFileSync(historyPath, "utf8");
     assert.ok(history.includes("## Run 2026-08-14T00:00:00Z (driver run run-1)"));
     assert.ok(history.includes("- loomcli @ abc1234def56 (branch main)"));
     assert.ok(history.includes("- ISSUE-1 — Do the thing"));
@@ -228,7 +233,7 @@ describe("write phase", () => {
     assert.ok(history.includes("Warnings:\n- none"));
   });
 
-  it("regenerates only inside the fences, preserving human edits byte-identically", async () => {
+  it("stages regeneration while preserving human edits byte-identically", async () => {
     const root = makeDir("ws");
     await writeRun(root, { agentsMd: "first generation", historyEntry: {} });
     const generated = fs.readFileSync(path.join(root, "agents.md"), "utf8");
@@ -238,23 +243,91 @@ describe("write phase", () => {
 
     const result = await writeRun(root, { agentsMd: "second generation", historyEntry: {} });
     const write = JSON.parse(result.runtimeMetadata.scout_write);
-    assert.equal(write.agentsMdMode, "fences-replaced");
-    const updated = fs.readFileSync(path.join(root, "agents.md"), "utf8");
-    assert.ok(updated.startsWith(humanTop));
-    assert.ok(updated.endsWith(humanBottom));
-    assert.ok(updated.includes("second generation"));
-    assert.equal(updated.includes("first generation"), false);
+    assert.equal(write.agentsMdMode, "pending");
+    assert.equal(fs.readFileSync(path.join(root, "agents.md"), "utf8"), humanTop + generated + humanBottom);
+    const pending = fs.readFileSync(path.join(root, ".loom", "agents", "scout", "agents.md.pending"), "utf8");
+    assert.ok(pending.startsWith(humanTop));
+    assert.ok(pending.endsWith(humanBottom));
+    assert.ok(pending.includes("second generation"));
+    assert.equal(pending.includes("first generation"), false);
   });
 
-  it("appends a fenced block to a human-owned file without fences", async () => {
+  it("stages a namespaced fence beside a human-owned file", async () => {
     const root = makeDir("ws");
-    fs.writeFileSync(path.join(root, "agents.md"), "# Handwritten\n\nhuman only\n");
-    const result = await writeRun(root, { agentsMd: "scout content", historyEntry: {} });
+    const approved = "# Handwritten\n\nhuman only\n";
+    fs.writeFileSync(path.join(root, "agents.md"), approved);
+    const result = await writeRun(root, { agent_service_id: "scout-west", agentsMd: "west content", historyEntry: {} });
     const write = JSON.parse(result.runtimeMetadata.scout_write);
-    assert.equal(write.agentsMdMode, "fences-appended");
-    const updated = fs.readFileSync(path.join(root, "agents.md"), "utf8");
-    assert.ok(updated.startsWith("# Handwritten\n\nhuman only\n"));
-    assert.ok(updated.indexOf("<!-- scout:begin -->") > updated.indexOf("human only"));
+    assert.equal(write.agentsMdMode, "pending");
+    assert.equal(write.agentServiceId, "scout-west");
+    assert.equal(fs.readFileSync(path.join(root, "agents.md"), "utf8"), approved);
+    const pendingPath = path.join(root, ".loom", "agents", "scout-west", "agents.md.pending");
+    const pending = fs.readFileSync(pendingPath, "utf8");
+    assert.equal(write.pendingAgentsMdPath, pendingPath);
+    assert.equal(write.historyPath, path.join(root, ".loom", "agents", "scout-west", "history.md"));
+    assert.ok(pending.startsWith(approved));
+    assert.ok(pending.includes("<!-- loom:agent:scout-west:begin -->"));
+    assert.ok(pending.includes("west content"));
+    assert.equal(fs.existsSync(write.historyPath), true);
+    assert.equal(fs.existsSync(path.join(root, ".loom", "agents", "scout", "agents.md.pending")), false);
+  });
+
+  it("rejects malformed service IDs before deriving any instance path", async () => {
+    const root = makeDir("ws-invalid");
+    process.env.LOOM_WORKSPACE_RUNTIME_DIR = root;
+    const result = await run({ payload: { task_run_id: "bad", input: { phase: "write", agent_service_id: "../evil", agentsMd: "x" } } });
+    assert.equal(result.status, "failed");
+    assert.equal(result.errorClass, "scout_invalid_agent_service_id");
+    assert.equal(fs.existsSync(path.join(root, ".loom", "agents")), false);
+  });
+
+  it("rewrites one instance fence while byte-preserving another instance region", () => {
+    const other = "<!-- loom:agent:scout-east:begin -->\nEAST\r\nbytes\n<!-- loom:agent:scout-east:end -->";
+    const before = "human-prefix\n" + other + "\nhuman-middle\n<!-- loom:agent:scout-west:begin -->\nold\n<!-- loom:agent:scout-west:end -->\nhuman-suffix";
+    const rewritten = rewriteAgentFence(before, "scout-west", "new west");
+    assert.ok(rewritten.includes("new west"));
+    assert.equal(rewritten.includes("\nold\n"), false);
+    assert.equal(rewritten.slice(rewritten.indexOf(other), rewritten.indexOf(other) + other.length), other);
+    assert.ok(rewritten.startsWith("human-prefix\n"));
+    assert.ok(rewritten.endsWith("\nhuman-suffix"));
+  });
+
+  it("renames the legacy default fence on first write and stages the new generation", async () => {
+    const root = makeDir("ws-legacy");
+    const live = "top\n<!-- scout:begin -->\nlegacy approved\n<!-- scout:end -->\nbottom\n";
+    fs.writeFileSync(path.join(root, "agents.md"), live);
+    const result = await writeRun(root, { agentsMd: "next generation", historyEntry: {} });
+    const write = JSON.parse(result.runtimeMetadata.scout_write);
+    assert.equal(write.agentsMdMode, "legacy-fence-migrated-pending");
+    const migrated = fs.readFileSync(path.join(root, "agents.md"), "utf8");
+    assert.equal(migrated, live.replace("<!-- scout:begin -->", "<!-- loom:agent:scout:begin -->").replace("<!-- scout:end -->", "<!-- loom:agent:scout:end -->"));
+    const pending = fs.readFileSync(path.join(root, ".loom", "agents", "scout", "agents.md.pending"), "utf8");
+    assert.ok(pending.includes("next generation"));
+    assert.equal(pending.includes("legacy approved"), false);
+  });
+
+  it("renames the legacy default fence even when the first write has no agents.md content", async () => {
+    const root = makeDir("ws-legacy-empty");
+    fs.writeFileSync(path.join(root, "agents.md"), "<!-- scout:begin -->\napproved\n<!-- scout:end -->\n");
+    const result = await writeRun(root, { agentsMd: "", historyEntry: {} });
+    const write = JSON.parse(result.runtimeMetadata.scout_write);
+    assert.equal(write.agentsMdMode, "legacy-fence-migrated");
+    const migrated = fs.readFileSync(path.join(root, "agents.md"), "utf8");
+    assert.ok(migrated.includes("<!-- loom:agent:scout:begin -->"));
+    assert.equal(migrated.includes("<!-- scout:begin -->"), false);
+    assert.equal(fs.existsSync(path.join(root, ".loom", "agents", "scout", "agents.md.pending")), false);
+  });
+
+  it("keeps the first fence pair and removes duplicate begin regions on rewrite", () => {
+    const begin = "<!-- loom:agent:scout-west:begin -->";
+    const end = "<!-- loom:agent:scout-west:end -->";
+    const other = "<!-- loom:agent:scout-east:begin -->\neast exact\n<!-- loom:agent:scout-east:end -->";
+    const existing = "head\n" + begin + "\nfirst old\n" + end + "\nbetween\n" + begin + "\nduplicate old\n" + end + "\n" + other + "\ntail";
+    const rewritten = rewriteAgentFence(existing, "scout-west", "winner");
+    assert.equal(rewritten.split(begin).length - 1, 1);
+    assert.equal(rewritten.includes("first old"), false);
+    assert.equal(rewritten.includes("duplicate old"), false);
+    assert.ok(rewritten.includes(other));
   });
 
   it("appends run sections and journals zero-repo runs", async () => {
@@ -267,10 +340,24 @@ describe("write phase", () => {
     const write = JSON.parse(result.runtimeMetadata.scout_write);
     assert.equal(write.agentsMdMode, "unchanged");
     assert.equal(write.historyMode, "appended");
-    const history = fs.readFileSync(path.join(root, "history.md"), "utf8");
+    const history = fs.readFileSync(path.join(root, ".loom", "agents", "scout", "history.md"), "utf8");
     assert.ok(history.indexOf("run-1") < history.indexOf("run-2"));
     assert.ok(history.includes("Nothing to analyze: the workspace has no attached repos."));
     assert.equal(fs.existsSync(path.join(root, "agents.md")), false);
+  });
+});
+
+describe("agent service identity", () => {
+  it("accepts valid IDs and defaults only absent or empty values", () => {
+    assert.deepEqual(resolveAgentServiceID("scout-west"), { ok: true, serviceID: "scout-west" });
+    assert.deepEqual(resolveAgentServiceID(undefined), { ok: true, serviceID: "scout" });
+    assert.deepEqual(resolveAgentServiceID(""), { ok: true, serviceID: "scout" });
+  });
+
+  it("rejects values outside the ServiceID grammar without trimming", () => {
+    for (const value of [" Scout", "scout/../../evil", "scout_west", "-scout", "a".repeat(65), 42]) {
+      assert.equal(resolveAgentServiceID(value).ok, false, String(value));
+    }
   });
 });
 
