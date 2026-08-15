@@ -631,7 +631,7 @@ func TestMaterializeEnsuresGitExcludeViaGitPath(t *testing.T) {
 	linked := filepath.Join(t.TempDir(), "linked")
 	runGit(t, repo, "worktree", "add", "-q", "-b", "skillmat-test", linked)
 	t.Cleanup(func() {
-		cmd := exec.Command("git", "-C", repo, "worktree", "remove", "--force", linked) //nolint:gosec,norawexec // test fixture cleanup
+		cmd := exec.Command("git", "-C", repo, "worktree", "remove", "--force", linked) //nolint:gosec //nolint:norawexec // test fixture cleanup
 		_ = cmd.Run()
 	})
 
@@ -822,7 +822,7 @@ func TestMaterializeRefusesManagedFileToNonemptyDirectoryBeforeCleanup(t *testin
 
 func runGit(t *testing.T, dir string, args ...string) string {
 	t.Helper()
-	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...) //nolint:gosec,norawexec // test fixture setup
+	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...) //nolint:gosec //nolint:norawexec // test fixture setup
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("git %v: %v\n%s", args, err, out)
