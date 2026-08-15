@@ -36,7 +36,7 @@
 }
 
 .stateTag[data-state="open"] {
-  color: var(--color-success);
+  color: var(--color-success-text);
   border-color: var(--color-success);
   background: rgb(34 197 94 / 12%);
 }
@@ -51,7 +51,7 @@
   margin-left: auto;
   font-size: 12px;
   font-weight: 700;
-  color: var(--color-primary);
+  color: var(--color-primary-text);
   text-decoration: none;
 }
 

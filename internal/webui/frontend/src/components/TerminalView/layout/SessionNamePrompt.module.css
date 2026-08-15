@@ -118,7 +118,7 @@
 .errorText {
   margin: 6px 0 0;
   font-size: var(--font-xs);
-  color: var(--color-danger);
+  color: var(--color-danger-text);
 }
 
 .footer {
