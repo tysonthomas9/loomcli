@@ -443,7 +443,7 @@ func (w attachmentWriter) Write(p []byte) (int, error) { return w.a.WriteInput(p
 
 // maybeEmitStaleRestartBanner writes a visible notice to the freshly-spawned
 // shell when the tab's metadata pre-dates the current server process — i.e.
-// the prior PTY died with a previous server. The frontend's pty_alive gate
+// the prior PTY died with a previous server. The frontend's attachable gate
 // on the tab DTO is the authoritative block, but browsers drop app-defined
 // WebSocket close codes right after upgrade, so this in-band banner is the
 // reliable fallback for any client that reached this path anyway.
