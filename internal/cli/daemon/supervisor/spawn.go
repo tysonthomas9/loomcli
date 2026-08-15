@@ -323,6 +323,24 @@ func (s *Supervisor) materializeSkills(ap *AgentProcess) error {
 	return skillmat.MaterializeLeased(ctx, s.ControlStore, s.WorkspaceID, ap.Entry.Role, ap.WorktreePath)
 }
 
+// materializeIdleSkills keeps an idle worker's worktree current while the
+// ready queue is empty: skills edited between spawns converge within one
+// no_work_backoff instead of waiting for the next claim. Only the no-work
+// loop qualifies — other pre-flight failures (backend gates) skip it.
+// Failures only log; the next spawn's materializeSkills call is the
+// enforcing one.
+func (s *Supervisor) materializeIdleSkills(ap *AgentProcess) {
+	ap.Mu.Lock()
+	noWork := ap.LastNoWork
+	ap.Mu.Unlock()
+	if !noWork {
+		return
+	}
+	if err := s.materializeSkills(ap); err != nil {
+		slog.Warn("idle skill materialization failed", "worktree", ap.Entry.Worktree, "err", err)
+	}
+}
+
 // setupAgentLogFile wires the agent subprocess's stdout/stderr to its log
 // sinks. Up to two sinks are active:
 //

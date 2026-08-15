@@ -134,6 +134,50 @@ func TestMaterializeSkillsWarnsWhenControlStoreIsMissing(t *testing.T) {
 	}
 }
 
+func TestMaterializeIdleSkillsConvergesNoWorkWorktree(t *testing.T) {
+	target := t.TempDir()
+	st := supervisorMaterializeStore{skills: supervisorSkillStore{skills: []*domain.Skill{{
+		Name: "alpha", Scope: domain.SkillScopeWorkspace, Description: "alpha", Content: "body",
+	}}}}
+	s := newTestSupervisorWithConfig(&cfgpkg.DaemonConfig{Backend: "codex"})
+	s.WorkspaceID = "WS"
+	s.ControlStore = st
+	ap := &AgentProcess{
+		Entry:        cfgpkg.AgentEntry{Worktree: "worker-a", Role: "plan", Backend: "codex"},
+		RoleConfig:   cfgpkg.RoleConfig{},
+		WorktreePath: target,
+		LastNoWork:   true,
+	}
+
+	s.materializeIdleSkills(ap)
+
+	if _, err := os.Stat(filepath.Join(target, ".agents", "skills", "alpha", "SKILL.md")); err != nil {
+		t.Fatalf("idle no-work loop did not materialize skills: %v", err)
+	}
+}
+
+func TestMaterializeIdleSkillsSkipsNonNoWorkFailures(t *testing.T) {
+	target := t.TempDir()
+	st := supervisorMaterializeStore{skills: supervisorSkillStore{skills: []*domain.Skill{{
+		Name: "alpha", Scope: domain.SkillScopeWorkspace, Description: "alpha", Content: "body",
+	}}}}
+	s := newTestSupervisorWithConfig(&cfgpkg.DaemonConfig{Backend: "codex"})
+	s.WorkspaceID = "WS"
+	s.ControlStore = st
+	ap := &AgentProcess{
+		Entry:        cfgpkg.AgentEntry{Worktree: "worker-a", Role: "plan", Backend: "codex"},
+		RoleConfig:   cfgpkg.RoleConfig{},
+		WorktreePath: target,
+		LastNoWork:   false,
+	}
+
+	s.materializeIdleSkills(ap)
+
+	if _, err := os.Lstat(filepath.Join(target, ".agents")); !os.IsNotExist(err) {
+		t.Fatalf("non-no-work failure touched target projection: %v", err)
+	}
+}
+
 func TestSpawnAgentStopsWhenSkillListingIsCanceled(t *testing.T) {
 	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
 	stubCheckBackend(t, func(name string) (discovery.Info, error) {
