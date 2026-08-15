@@ -914,8 +914,8 @@ func TestEnsureAgentTerminalSessionDoesNotRelaunchStoppedExistingAgentTab(t *tes
 	if meta.Writable {
 		t.Fatal("writable = true, want false for stopped agent tab")
 	}
-	if meta.PTYAlive {
-		t.Fatal("PTYAlive = true, want false for stopped agent tab")
+	if meta.Attachable {
+		t.Fatal("Attachable = true, want false for stopped agent tab")
 	}
 }
 

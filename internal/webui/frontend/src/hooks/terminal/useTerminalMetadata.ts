@@ -114,7 +114,7 @@ export function useTerminalMetadata(
         created_at: now,
         updated_at: now,
         // Optimistic; next ListTabs refresh returns the server's truth.
-        pty_alive: true,
+        attachable: true,
         attached_clients: 0,
       };
       let prev: TabMetadata[] = [];

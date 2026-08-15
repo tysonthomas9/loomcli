@@ -3087,13 +3087,19 @@ export interface components {
       /** Format: date-time */
       updated_at: string;
       /**
-       * @description Whether the backend PTY for this tab is currently alive in the
-       *     server process. False means the tab metadata survived (e.g. a
-       *     server restart) but the PTY did not; clients should render the
-       *     tab as "session ended" and prompt before reconnecting (which
-       *     will spawn a fresh session).
+       * @description Whether connecting to this tab will yield a working PTY. True when a
+       *     PTY is live in this server process, and also when the tab's metadata
+       *     was created during this server process — such a tab has no PTY until
+       *     the first WebSocket connects, and connecting spawns one.
+       *
+       *     This is NOT a process-liveness check: true does not guarantee the
+       *     child process is still running, only that the manager has not
+       *     released the session. False means the tab metadata outlived its
+       *     server (e.g. a restart) or its PTY has exited; clients should render
+       *     the tab as "session ended" and prompt before reconnecting, since
+       *     reconnecting spawns a fresh session.
        */
-      pty_alive: boolean;
+      attachable: boolean;
       /**
        * @description Count of concurrent WebSocket clients currently viewing this
        *     session. 0 means no one is attached (but the PTY may still be
@@ -3107,7 +3113,7 @@ export interface components {
        * @description When this tab's shell was replaced by a fresh one — the previous
        *     PTY died with a previous server process. Absent means never
        *     replaced, or the marker was dismissed via PATCH. Unlike
-       *     pty_alive this is persisted, so the marker survives a reload and
+       *     attachable this is persisted, so the marker survives a reload and
        *     is visible to every client.
        */
       replaced_at?: string;
