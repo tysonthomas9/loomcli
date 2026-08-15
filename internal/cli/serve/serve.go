@@ -532,21 +532,11 @@ func resolveFleetState(ctx context.Context) fleetState {
 		fs.clientCfg.URL = os.Getenv(bootstrap.EnvFleetDBURL)
 	}
 	if fs.clientCfg.Actor == "" {
-		fs.clientCfg.Actor = resolveFleetClientActorFallback()
+		fs.clientCfg.Actor = bootstrap.ResolveFleetDBActor("")
 	}
 
 	fs.jwtKey, fs.redisConfig = daemonwire.ResolveFleetJWTKey(ctx, serveRedisAddr, serveRedisPassword)
 	return fs
-}
-
-func resolveFleetClientActorFallback() string {
-	if v := os.Getenv(bootstrap.EnvFleetDBActor); v != "" {
-		return v
-	}
-	if v := os.Getenv(bootstrap.EnvAgentName); v != "" {
-		return v
-	}
-	return os.Getenv("USER")
 }
 
 func applyAuthDefaults() {

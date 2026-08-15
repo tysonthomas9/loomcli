@@ -93,7 +93,7 @@ func OpenStore(ctx context.Context, dataDir string, logger *slog.Logger) (*Store
 	// See internal/backend/fleet/transport.go for the rationale.
 	cfg := fleetdb.Config{
 		APIKey:     os.Getenv(EnvFleetDBAPIKey),
-		Actor:      resolveActor(),
+		Actor:      ResolveFleetDBActor(""),
 		HTTPClient: fleet.SharedHTTPClient(),
 	}
 
@@ -173,13 +173,17 @@ func waitAndOpenLocalStore(ctx context.Context, fleetDir string, cfg fleetdb.Con
 	return &StoreHandle{Store: client, mode: ModeLocal, url: cfg.BaseURL}, nil
 }
 
-// resolveActor returns the X-Actor identity.
-func resolveActor() string {
+// ResolveFleetDBActor returns the X-Actor identity, preferring worker-specific
+// environment over the configured process actor and OS user fallback.
+func ResolveFleetDBActor(configuredActor string) string {
 	if v := os.Getenv(EnvFleetDBActor); v != "" {
 		return v
 	}
 	if v := os.Getenv(EnvAgentName); v != "" {
 		return v
+	}
+	if configuredActor != "" {
+		return configuredActor
 	}
 	return os.Getenv("USER")
 }

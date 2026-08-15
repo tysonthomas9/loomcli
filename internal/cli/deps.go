@@ -275,22 +275,12 @@ func (b *fleetDBIssueBackend) withBackend(ctx context.Context, op string, fn fun
 		BaseURL:     handle.URL(),
 		WorkspaceID: ws,
 		APIKey:      os.Getenv(bootstrap.EnvFleetDBAPIKey),
-		Actor:       fleetDBActor(),
+		Actor:       bootstrap.ResolveFleetDBActor(""),
 	})
 	if err != nil {
 		return backend.ErrUnavailable(op, "create fleet-db issue backend", err)
 	}
 	return fn(fb)
-}
-
-func fleetDBActor() string {
-	if v := os.Getenv(bootstrap.EnvFleetDBActor); v != "" {
-		return v
-	}
-	if v := os.Getenv(bootstrap.EnvAgentName); v != "" {
-		return v
-	}
-	return os.Getenv("USER")
 }
 
 func (b *fleetDBIssueBackend) Get(ctx context.Context, id string) (*backend.IssueDetailData, error) {

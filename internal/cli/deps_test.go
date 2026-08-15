@@ -12,6 +12,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
+	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/usage"
 )
 
@@ -629,18 +630,18 @@ func TestFleetDBActorPreference(t *testing.T) {
 	t.Setenv("LOOM_FLEET_DB_ACTOR", "fleet-actor")
 	t.Setenv("LOOM_AGENT_NAME", "agent-name")
 	t.Setenv("USER", "user-name")
-	if got := fleetDBActor(); got != "fleet-actor" {
-		t.Fatalf("fleetDBActor() = %q, want fleet-actor", got)
+	if got := bootstrap.ResolveFleetDBActor(""); got != "fleet-actor" {
+		t.Fatalf("ResolveFleetDBActor() = %q, want fleet-actor", got)
 	}
 
 	t.Setenv("LOOM_FLEET_DB_ACTOR", "")
-	if got := fleetDBActor(); got != "agent-name" {
-		t.Fatalf("fleetDBActor() = %q, want agent-name", got)
+	if got := bootstrap.ResolveFleetDBActor(""); got != "agent-name" {
+		t.Fatalf("ResolveFleetDBActor() = %q, want agent-name", got)
 	}
 
 	t.Setenv("LOOM_AGENT_NAME", "")
-	if got := fleetDBActor(); got != "user-name" {
-		t.Fatalf("fleetDBActor() = %q, want user-name", got)
+	if got := bootstrap.ResolveFleetDBActor(""); got != "user-name" {
+		t.Fatalf("ResolveFleetDBActor() = %q, want user-name", got)
 	}
 }
 
