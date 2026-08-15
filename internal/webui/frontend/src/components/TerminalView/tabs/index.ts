@@ -30,3 +30,6 @@ export { useTabInit } from "./useTabInit";
 export { useTabOrdering } from "./useTabOrdering";
 export { useWorkspaceTabState } from "./useWorkspaceTabState";
 export { useUnreadTracking } from "./useUnreadTracking";
+export { useWaitingTracking } from "./useWaitingTracking";
+export { isWaitingForInput, WAITING_QUIET_MS } from "./waitingState";
+export type { CursorProbe, WaitingInputs } from "./waitingState";

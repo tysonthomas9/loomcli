@@ -713,6 +713,83 @@ describe("TerminalTabBar", () => {
     });
   });
 
+  describe("waiting-for-input badge", () => {
+    it("renders the badge with an accessible name", () => {
+      const tabs: TerminalTab[] = [
+        { id: "a", label: "A", connectionState: "connected" },
+        {
+          id: "b",
+          label: "B",
+          connectionState: "connected",
+          isWaitingForInput: true,
+        },
+      ];
+      render(<TerminalTabBar {...defaultProps} tabs={tabs} activeTabId="a" />);
+
+      expect(screen.getByTestId("terminal-tab-waiting-b")).toHaveAttribute(
+        "aria-label",
+        "waiting for input",
+      );
+    });
+
+    it("renders the badge on the ACTIVE tab too", () => {
+      // The incident this badge exists for happened on the focused tab, so
+      // it must not inherit the unread dot's !isActive gate.
+      const tabs: TerminalTab[] = [
+        {
+          id: "a",
+          label: "A",
+          connectionState: "connected",
+          isWaitingForInput: true,
+        },
+      ];
+      render(<TerminalTabBar {...defaultProps} tabs={tabs} activeTabId="a" />);
+
+      expect(screen.getByTestId("terminal-tab-waiting-a")).toBeInTheDocument();
+    });
+
+    it("does not render the badge when the flag is absent or false", () => {
+      const tabs: TerminalTab[] = [
+        { id: "a", label: "A", connectionState: "connected" },
+        {
+          id: "b",
+          label: "B",
+          connectionState: "connected",
+          isWaitingForInput: false,
+        },
+      ];
+      render(<TerminalTabBar {...defaultProps} tabs={tabs} activeTabId="a" />);
+
+      expect(
+        screen.queryByTestId("terminal-tab-waiting-a"),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByTestId("terminal-tab-waiting-b"),
+      ).not.toBeInTheDocument();
+    });
+
+    it("coexists with the unread dot as a distinct element", () => {
+      const tabs: TerminalTab[] = [
+        { id: "a", label: "A", connectionState: "connected" },
+        {
+          id: "b",
+          label: "B",
+          connectionState: "connected",
+          hasUnread: true,
+          isWaitingForInput: true,
+        },
+      ];
+      render(<TerminalTabBar {...defaultProps} tabs={tabs} activeTabId="a" />);
+
+      const unread = screen.getByTestId("terminal-tab-unread-b");
+      const waiting = screen.getByTestId("terminal-tab-waiting-b");
+      expect(unread).toBeInTheDocument();
+      expect(waiting).toBeInTheDocument();
+      expect(unread).not.toBe(waiting);
+      expect(unread.className).not.toBe(waiting.className);
+    });
+  });
+
   describe("edge cases", () => {
     it("renders just the new-tab button when tabs array is empty", () => {
       render(<TerminalTabBar {...defaultProps} tabs={[]} activeTabId="" />);
