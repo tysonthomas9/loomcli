@@ -355,11 +355,13 @@
 }
 
 .outputSection,
+.taskLogsSection,
 .timelineSection {
   margin-top: var(--space-4);
 }
 
 .outputSection h3,
+.taskLogsSection h3,
 .timelineSection h3 {
   margin: 0 0 var(--space-2);
   color: var(--color-text-primary);
@@ -367,7 +369,8 @@
   font-weight: 800;
 }
 
-.outputSection pre {
+.outputSection pre,
+.logBody pre {
   max-height: 280px;
   margin: 0;
   padding: var(--space-3);
@@ -381,6 +384,57 @@
   line-height: 1.5;
   overflow-wrap: anywhere;
   white-space: pre-wrap;
+}
+
+.taskLogList {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.taskLogRow {
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-sm, 6px);
+  background: var(--color-bg-primary);
+}
+
+.taskLogToggle,
+.logDisclosureButton {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border: 0;
+  color: inherit;
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.taskLogMeta {
+  display: flex;
+  flex-shrink: 0;
+  gap: var(--space-3);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+}
+
+.logBody {
+  padding: 0 var(--space-3) var(--space-3);
+}
+
+.harnessLog {
+  margin-top: var(--space-3);
+}
+
+.logDisclosureButton {
+  width: auto;
+  padding: 0;
+  color: var(--color-text-primary);
+  font-size: var(--font-size-xs);
+  font-weight: 800;
 }
 
 .logsRef {

@@ -5,6 +5,9 @@ import type { ApiError } from "@/api/common";
 
 import {
   getAgentServiceJournal,
+  getDriverRunLog,
+  getTaskRunLog,
+  listAgentServiceRunTasks,
   listAgentServiceRuns,
   listAgentServices,
   listRunEvents,
@@ -147,6 +150,60 @@ describe("agent-services API", () => {
     expect(result.filename).toBe("history.md");
     expect(mockGet).toHaveBeenCalledWith(
       "/api/workspaces/Workspace%20A/agent-services/scout%2Fid/journal",
+    );
+  });
+
+  it("lists task runs for one agent-service driver run", async () => {
+    mockGet.mockResolvedValueOnce({
+      success: true,
+      data: [
+        {
+          taskRunId: "task/1",
+          taskId: "WS-1",
+          status: "completed",
+          runner: "scout-task-runner",
+          errorClass: "",
+          startedAt: "2026-08-14T23:38:00Z",
+          finishedAt: "2026-08-14T23:39:00Z",
+          logsAvailable: true,
+        },
+      ],
+      total: 1,
+    });
+
+    const result = await listAgentServiceRunTasks(
+      "Workspace A",
+      "scout/id",
+      "run/1",
+    );
+
+    expect(result.data[0]?.logsAvailable).toBe(true);
+    expect(mockGet).toHaveBeenCalledWith(
+      "/api/workspaces/Workspace%20A/agent-services/scout%2Fid/runs/run%2F1/tasks",
+    );
+  });
+
+  it("gets task and driver logs from standard item envelopes", async () => {
+    const envelope = {
+      success: true as const,
+      data: {
+        content: "AI output",
+        modifiedAt: "2026-08-14T23:39:22.442Z",
+        truncated: false,
+      },
+    };
+    mockGet.mockResolvedValue(envelope);
+
+    await getTaskRunLog("Workspace A", "task/1");
+    await getDriverRunLog("Workspace A", "run/1");
+
+    expect(mockGet).toHaveBeenNthCalledWith(
+      1,
+      "/api/workspaces/Workspace%20A/task-runs/task%2F1/log",
+    );
+    expect(mockGet).toHaveBeenNthCalledWith(
+      2,
+      "/api/workspaces/Workspace%20A/runs/run%2F1/log",
     );
   });
 });

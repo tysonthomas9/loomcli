@@ -99,6 +99,8 @@ func TestScoutTaskRunnerSourceContract(t *testing.T) {
 		{name: "context first, task text last", want: "--- TASK ---"},
 		{name: "metadata task runner id", want: `task_runner: "scout-task-runner"`},
 		{name: "analysis result metadata key", want: "scout_analysis: JSON.stringify(analysis)"},
+		{name: "AI stdout log tail cap", want: "textTail(exec.stdout, 100000)"},
+		{name: "AI stderr log tail cap", want: "textTail(exec.stderr, 20000)"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

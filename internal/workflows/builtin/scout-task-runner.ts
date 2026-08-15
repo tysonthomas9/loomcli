@@ -219,10 +219,10 @@ async function analyzePhase(root, input, taskRunId, request, logs) {
   }
   logs.push(`${backend} CLI exit=${exec.code}`);
   if (exec.stdout.trim()) {
-    logs.push(textTail(exec.stdout, 4000));
+    logs.push(textTail(exec.stdout, 100000));
   }
   if (exec.stderr.trim()) {
-    logs.push("stderr:\n" + textTail(exec.stderr, 2000));
+    logs.push("stderr:\n" + textTail(exec.stderr, 20000));
   }
   if (exec.code !== 0) {
     removeScratch(scratch, logs);

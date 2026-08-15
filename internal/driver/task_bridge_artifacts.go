@@ -312,6 +312,7 @@ func (r bridgeTaskRunnerResult) taskExecResult() TaskExecResult {
 		Status:           r.Status,
 		ExitCode:         exitCode,
 		LogsRef:          firstNonEmpty(r.LogsRef, r.LogsRefCamel),
+		Logs:             r.Logs,
 		ArtifactsRef:     firstNonEmpty(r.ArtifactsRef, r.ArtifactsRefCamel),
 		ArtifactIDs:      normalizeArtifactIDs(firstNonNilStrings(r.ArtifactIDs, r.ArtifactIDsCamel)),
 		InputTokens:      firstNonZeroInt64(r.InputTokens, r.InputTokensCamel),

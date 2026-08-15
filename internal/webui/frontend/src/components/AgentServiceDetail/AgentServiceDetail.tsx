@@ -11,6 +11,7 @@ import { RolePromptCard } from "@/components/RolePromptCard";
 import {
   useAgentServiceJournal,
   useAgentServiceRunEvents,
+  useAgentServiceRunTasks,
   useAgentServiceRuns,
 } from "@/hooks/workspace";
 import { ApiError } from "@/types/common";
@@ -24,6 +25,7 @@ import {
 import { formatStatusLabel } from "@/utils/issue";
 
 import styles from "./AgentServiceDetail.module.css";
+import { HarnessLog, TaskLogsSection } from "./RunLogs";
 
 export interface AgentServiceDetailProps {
   workspaceId: string;
@@ -155,6 +157,7 @@ export function AgentServiceDetail({
     "overview",
   );
   const [expandedRunId, setExpandedRunId] = useState<string | null>(null);
+  const [liveLogRefreshTick, setLiveLogRefreshTick] = useState(0);
   const previousExpandedRunRef = useRef<{
     runId: string;
     status: DriverRunStatus;
@@ -165,6 +168,13 @@ export function AgentServiceDetail({
     error: eventsError,
     refresh: refreshEvents,
   } = useAgentServiceRunEvents(workspaceId, expandedRunId);
+  const {
+    tasks,
+    loading: tasksLoading,
+    initialized: tasksInitialized,
+    error: tasksError,
+    refresh: refreshTasks,
+  } = useAgentServiceRunTasks(workspaceId, service.id, expandedRunId);
   const {
     journal,
     loading: journalLoading,
@@ -185,16 +195,18 @@ export function AgentServiceDetail({
   useEffect(() => {
     setActiveTab("overview");
     setExpandedRunId(null);
+    setLiveLogRefreshTick(0);
     previousExpandedRunRef.current = null;
   }, [service.id, workspaceId]);
 
   useEffect(() => {
     if (!expandedRun || !isLiveRun(expandedRun.status)) return;
     const interval = window.setInterval(() => {
-      void Promise.allSettled([refreshEvents(), refreshRuns()]);
+      void Promise.allSettled([refreshEvents(), refreshRuns(), refreshTasks()]);
+      setLiveLogRefreshTick((tick) => tick + 1);
     }, 5_000);
     return () => window.clearInterval(interval);
-  }, [expandedRun, refreshEvents, refreshRuns]);
+  }, [expandedRun, refreshEvents, refreshRuns, refreshTasks]);
 
   useEffect(() => {
     const previous = previousExpandedRunRef.current;
@@ -488,17 +500,21 @@ export function AgentServiceDetail({
                             <pre>{run.output.flue_stdout_tail}</pre>
                           </section>
                         ) : null}
-                        {run.output?.logs_ref ? (
-                          <p className={styles.logsRef}>
-                            <strong>Logs:</strong> {run.output.logs_ref}
-                          </p>
-                        ) : null}
+                        <HarnessLog workspaceId={workspaceId} run={run} />
                         {!run.output?.flue_stdout_tail &&
                         !run.output?.logs_ref ? (
                           <p className={styles.emptyText}>
                             No output was captured for this run.
                           </p>
                         ) : null}
+                        <TaskLogsSection
+                          workspaceId={workspaceId}
+                          tasks={tasks}
+                          loading={tasksLoading}
+                          initialized={tasksInitialized}
+                          error={tasksError}
+                          liveRefreshTick={liveLogRefreshTick}
+                        />
                         <section className={styles.timelineSection}>
                           <h3>Event timeline</h3>
                           {eventsError ? (

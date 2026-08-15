@@ -2,14 +2,17 @@
 package driver
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	"github.com/tysonthomas9/loomcli/internal/runlog"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -41,6 +44,7 @@ func TestRequestTaskRunCreatesExecutesAndFinishesChild(t *testing.T) {
 		Status:           domain.TaskRunCompleted,
 		ExitCode:         0,
 		LogsRef:          "logs://task-run-1",
+		Logs:             "discovered repository\ncodex CLI exit=0\nAI transcript tail\n",
 		ArtifactsRef:     "artifacts://task-run-1",
 		ArtifactIDs:      []string{" artifact-1 ", "artifact-2", "artifact-1", ""},
 		InputTokens:      11,
@@ -99,6 +103,9 @@ func TestRequestTaskRunCreatesExecutesAndFinishesChild(t *testing.T) {
 	if result.DriverStepID != "step-1" {
 		t.Fatalf("result driver step id = %q, want step-1", result.DriverStepID)
 	}
+	if result.Logs != executor.result.Logs {
+		t.Fatalf("result logs = %q, want executor logs", result.Logs)
+	}
 	if result.InputTokens != 11 || result.OutputTokens != 7 || result.CacheReadTokens != 5 || result.CacheWriteTokens != 3 || result.EstimatedCostUSD != 0.125 {
 		t.Fatalf("result usage = %+v, want executor usage", result)
 	}
@@ -147,6 +154,89 @@ func TestRequestTaskRunCreatesExecutesAndFinishesChild(t *testing.T) {
 	}
 	if parent.Status != domain.DriverRunRunning {
 		t.Fatalf("parent status = %s, want still running", parent.Status)
+	}
+}
+
+func TestTaskRunSettlePersistsPrivateAtomicTailCappedLogs(t *testing.T) {
+	tests := []struct {
+		name        string
+		logs        string
+		wantFile    bool
+		wantContent string
+	}{
+		{
+			name:        "rich logs",
+			logs:        "discovered repository\ncodex CLI exit=0\nAI transcript tail\n",
+			wantFile:    true,
+			wantContent: "discovered repository\ncodex CLI exit=0\nAI transcript tail\n",
+		},
+		{
+			name:        "over cap keeps tail",
+			logs:        "discarded-prefix" + string(bytes.Repeat([]byte("z"), runlog.MaxBytes)),
+			wantFile:    true,
+			wantContent: string(bytes.Repeat([]byte("z"), runlog.MaxBytes)),
+		},
+		{name: "absent logs creates no file"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			runtimeDir := t.TempDir()
+			t.Setenv("LOOM_WORKSPACE_RUNTIME_DIR", runtimeDir)
+			ctx, st, run := setupRunningDriverRun(t)
+			executor := &recordingTaskExecutor{result: TaskExecResult{
+				Status:   domain.TaskRunCompleted,
+				ExitCode: 0,
+				LogsRef:  "logs://task-log-persist",
+				Logs:     tt.logs,
+			}}
+			outcome, err := RequestTaskRunWithResult(ctx, st, TaskRunRequestOptions{
+				WorkspaceKey:    "TEST",
+				DriverRunID:     run.RunID,
+				TaskRunID:       "task-log-persist",
+				TaskID:          "TEST-LOG",
+				ProviderProfile: "codex-default",
+				ParentNodeID:    run.NodeID,
+				ParentLeaseID:   run.LeaseID,
+				ParentFence:     run.FencingToken,
+				NodeID:          "node-1",
+			}, executor)
+			if err != nil {
+				t.Fatalf("RequestTaskRunWithResult: %v", err)
+			}
+			if outcome.Logs != tt.logs {
+				t.Fatalf("outcome logs bytes = %d, want %d", len(outcome.Logs), len(tt.logs))
+			}
+
+			path := filepath.Join(runtimeDir, ".loom", "task-logs", "task-log-persist.log")
+			content, readErr := os.ReadFile(path)
+			if !tt.wantFile {
+				if !errors.Is(readErr, os.ErrNotExist) {
+					t.Fatalf("ReadFile absent logs err = %v, want not exist", readErr)
+				}
+				return
+			}
+			if readErr != nil {
+				t.Fatalf("ReadFile: %v", readErr)
+			}
+			if string(content) != tt.wantContent {
+				t.Fatalf("persisted content bytes = %d, want %d-byte tail", len(content), len(tt.wantContent))
+			}
+			info, err := os.Stat(path)
+			if err != nil {
+				t.Fatalf("Stat: %v", err)
+			}
+			if got := info.Mode().Perm(); got != 0o600 {
+				t.Fatalf("mode = %o, want 600", got)
+			}
+			entries, err := os.ReadDir(filepath.Dir(path))
+			if err != nil {
+				t.Fatalf("ReadDir: %v", err)
+			}
+			if len(entries) != 1 || entries[0].Name() != "task-log-persist.log" {
+				t.Fatalf("log dir entries = %+v, want only atomically published log", entries)
+			}
+		})
 	}
 }
 

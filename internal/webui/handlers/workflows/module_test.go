@@ -1,6 +1,7 @@
 package workflows
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -14,9 +15,99 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/driver"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	"github.com/tysonthomas9/loomcli/internal/runlog"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	workflowdefs "github.com/tysonthomas9/loomcli/internal/workflows"
 )
+
+func TestGetDriverRunLogHappyMissingTruncatedAndRejectsTraversal(t *testing.T) {
+	ctx := context.Background()
+	st := seededWorkflowStore(t, ctx)
+	for _, runID := range []string{"run-happy", "run-missing", "run-large"} {
+		if _, err := st.DriverRuns().Create(ctx, store.DriverRunCreate{
+			WorkspaceKey: "TEST", RunID: runID, DriverID: "demo", DriverVersionID: "version-1",
+		}); err != nil {
+			t.Fatalf("create run %s: %v", runID, err)
+		}
+	}
+	runtimeDir := t.TempDir()
+	logDir := filepath.Join(runtimeDir, ".loom", "run-logs")
+	if err := os.MkdirAll(logDir, 0o700); err != nil {
+		t.Fatalf("create run log dir: %v", err)
+	}
+	modifiedAt := time.Date(2026, time.August, 14, 23, 39, 22, 0, time.UTC)
+	happyPath := filepath.Join(logDir, "run-happy.log")
+	happyContent := "===== stdout =====\nworkflow output\n\n===== stderr =====\n"
+	if err := os.WriteFile(happyPath, []byte(happyContent), 0o600); err != nil {
+		t.Fatalf("write happy run log: %v", err)
+	}
+	if err := os.Chtimes(happyPath, modifiedAt, modifiedAt); err != nil {
+		t.Fatalf("set run log times: %v", err)
+	}
+	tail := bytes.Repeat([]byte("z"), runlog.MaxBytes)
+	if err := os.WriteFile(filepath.Join(logDir, "run-large.log"), append([]byte("discarded"), tail...), 0o600); err != nil {
+		t.Fatalf("write large run log: %v", err)
+	}
+	module := NewModule(st, runtimeDir)
+
+	t.Run("happy", func(t *testing.T) {
+		rec := getDriverRunLog(t, module, "run-happy")
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+		}
+		var response persistedLogResponse
+		if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+			t.Fatalf("decode response: %v", err)
+		}
+		if !response.Success || response.Data.Content != happyContent ||
+			!response.Data.ModifiedAt.Equal(modifiedAt) || response.Data.Truncated {
+			t.Fatalf("response = %#v", response)
+		}
+	})
+
+	t.Run("missing", func(t *testing.T) {
+		rec := getDriverRunLog(t, module, "run-missing")
+		if rec.Code != http.StatusNotFound || !strings.Contains(rec.Body.String(), "run log is not available") {
+			t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+		}
+	})
+
+	t.Run("truncated", func(t *testing.T) {
+		rec := getDriverRunLog(t, module, "run-large")
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+		}
+		var response persistedLogResponse
+		if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+			t.Fatalf("decode response: %v", err)
+		}
+		if !response.Data.Truncated || response.Data.Content != string(tail) {
+			t.Fatalf("truncated = %v content bytes = %d, want true/%d", response.Data.Truncated, len(response.Data.Content), len(tail))
+		}
+	})
+
+	for _, runID := range []string{"../evil", "..\\evil", "nested/run"} {
+		t.Run("reject "+runID, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "/", nil)
+			req.SetPathValue("ws", "TEST")
+			req.SetPathValue("runId", runID)
+			rec := httptest.NewRecorder()
+			module.getRunLog(rec, req)
+			if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "invalid run id") {
+				t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+			}
+		})
+	}
+}
+
+func getDriverRunLog(t *testing.T, module *Module, runID string) *httptest.ResponseRecorder {
+	t.Helper()
+	mux := http.NewServeMux()
+	module.Register(mux)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/workspaces/TEST/runs/"+runID+"/log", nil))
+	return rec
+}
 
 func TestCreateWorkflowRunPassesRawPayload(t *testing.T) {
 	ctx := context.Background()

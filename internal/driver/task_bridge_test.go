@@ -421,6 +421,7 @@ func TestHostBridgeTaskExecutorRunsNodeModuleThroughGenericInvoker(t *testing.T)
     status: "completed",
     exitCode: 0,
     logsRef: "logs://" + ctx.request.task_run_id,
+    logs: "repo discovery\ncodex CLI exit=0\nbackend output\n",
     runtimeMetadata: {
       module_runner: "ok",
       input_message: (ctx.input && ctx.input.message) || ""
@@ -448,6 +449,9 @@ func TestHostBridgeTaskExecutorRunsNodeModuleThroughGenericInvoker(t *testing.T)
 	}
 	if result.Status != domain.TaskRunCompleted || result.ExitCode != 0 || result.LogsRef != "logs://task-run-1" {
 		t.Fatalf("result = %+v, want completed node-module result", result)
+	}
+	if result.Logs != "repo discovery\ncodex CLI exit=0\nbackend output\n" {
+		t.Fatalf("logs = %q, want decoded runner log body", result.Logs)
 	}
 	if result.RuntimeMetadata["module_runner"] != "ok" ||
 		result.RuntimeMetadata["input_message"] != "hello" ||

@@ -11,7 +11,11 @@ import {
 import "@testing-library/jest-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { AgentServiceDTO, DriverRunDTO } from "@/api/agentServices";
+import type {
+  AgentServiceDTO,
+  DriverRunDTO,
+  TaskRunDTO,
+} from "@/api/agentServices";
 import { ApiError } from "@/types/common";
 
 import { AgentServiceDetail } from "../AgentServiceDetail";
@@ -21,6 +25,9 @@ const mocks = vi.hoisted(() => ({
   refreshRuns: vi.fn<() => Promise<void>>(),
   listRunEvents: vi.fn(),
   getAgentServiceJournal: vi.fn(),
+  listAgentServiceRunTasks: vi.fn(),
+  getTaskRunLog: vi.fn(),
+  getDriverRunLog: vi.fn(),
 }));
 
 vi.mock("@/hooks/workspace", async (importOriginal) => {
@@ -45,6 +52,9 @@ vi.mock("@/api/agentServices", async (importOriginal) => {
     ...actual,
     listRunEvents: mocks.listRunEvents,
     getAgentServiceJournal: mocks.getAgentServiceJournal,
+    listAgentServiceRunTasks: mocks.listAgentServiceRunTasks,
+    getTaskRunLog: mocks.getTaskRunLog,
+    getDriverRunLog: mocks.getDriverRunLog,
   };
 });
 
@@ -94,6 +104,19 @@ function expandRun(runId = "run-1"): void {
   );
 }
 
+function taskRun(overrides: Partial<TaskRunDTO> = {}): TaskRunDTO {
+  return {
+    taskRunId: "task-1",
+    taskId: "WS-1",
+    status: "completed",
+    runner: "scout-task-runner",
+    startedAt: "2026-08-14T10:00:10Z",
+    finishedAt: "2026-08-14T10:00:40Z",
+    logsAvailable: true,
+    ...overrides,
+  };
+}
+
 describe("AgentServiceDetail", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -108,6 +131,20 @@ describe("AgentServiceDetail", () => {
       modifiedAt: "2026-08-14T12:00:00Z",
       truncated: false,
     });
+    mocks.listAgentServiceRunTasks.mockResolvedValue({
+      data: [],
+      total: 0,
+    });
+    mocks.getTaskRunLog.mockRejectedValue(
+      new ApiError(404, "Not Found", {
+        error: "task log is not available yet",
+      }),
+    );
+    mocks.getDriverRunLog.mockRejectedValue(
+      new ApiError(404, "Not Found", {
+        error: "run log is not available yet",
+      }),
+    );
   });
 
   afterEach(() => {
@@ -216,6 +253,143 @@ describe("AgentServiceDetail", () => {
       screen.queryByRole("heading", { name: "Output (tail)" }),
     ).not.toBeInTheDocument();
     await waitFor(() => expect(mocks.listRunEvents).toHaveBeenCalledOnce());
+  });
+
+  it("renders task runs with runner, status, and duration", async () => {
+    mocks.listAgentServiceRunTasks.mockResolvedValueOnce({
+      data: [taskRun()],
+      total: 1,
+    });
+    render(<AgentServiceDetail workspaceId="WS" service={service} />);
+    expandRun();
+
+    const section = await screen.findByTestId("task-logs-section");
+    expect(within(section).getByText("scout-task-runner")).toBeInTheDocument();
+    expect(within(section).getByText("Completed")).toBeInTheDocument();
+    expect(within(section).getByText("30s")).toBeInTheDocument();
+    expect(mocks.listAgentServiceRunTasks).toHaveBeenCalledWith(
+      "WS",
+      "scout",
+      "run-1",
+    );
+  });
+
+  it("lazily loads and displays a truncated task AI log", async () => {
+    mocks.listAgentServiceRunTasks.mockResolvedValueOnce({
+      data: [taskRun()],
+      total: 1,
+    });
+    mocks.getTaskRunLog.mockResolvedValueOnce({
+      content: "repo discovery\ncodex CLI exit=0\nbackend output",
+      modifiedAt: "2026-08-14T10:00:40Z",
+      truncated: true,
+    });
+    render(<AgentServiceDetail workspaceId="WS" service={service} />);
+    expandRun();
+
+    const taskToggle = await screen.findByRole("button", {
+      name: /scout-task-runner.*Completed.*30s/,
+    });
+    expect(mocks.getTaskRunLog).not.toHaveBeenCalled();
+    fireEvent.click(taskToggle);
+
+    expect(
+      (await screen.findByTestId("task-log-content-task-1")).textContent,
+    ).toBe("repo discovery\ncodex CLI exit=0\nbackend output");
+    expect(screen.getByRole("status")).toHaveTextContent("last 1 MiB");
+    expect(mocks.getTaskRunLog).toHaveBeenCalledWith("WS", "task-1");
+  });
+
+  it("shows an empty state when a task AI log is absent", async () => {
+    mocks.listAgentServiceRunTasks.mockResolvedValueOnce({
+      data: [taskRun()],
+      total: 1,
+    });
+    render(<AgentServiceDetail workspaceId="WS" service={service} />);
+    expandRun();
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: /scout-task-runner.*Completed.*30s/,
+      }),
+    );
+
+    expect(await screen.findByTestId("task-log-empty")).toHaveTextContent(
+      "No AI log is available",
+    );
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("lazily replaces a dangling logs reference with the harness log", async () => {
+    mocks.runs = [
+      completedRun({
+        output: { logs_ref: "driver-run://run-1/flue-local" },
+      }),
+    ];
+    mocks.getDriverRunLog.mockResolvedValueOnce({
+      content: "===== stdout =====\nworkflow output\n\n===== stderr =====\n",
+      modifiedAt: "2026-08-14T10:01:30Z",
+      truncated: true,
+    });
+    render(<AgentServiceDetail workspaceId="WS" service={service} />);
+    expandRun();
+
+    expect(mocks.getDriverRunLog).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Harness log" }));
+
+    expect((await screen.findByTestId("harness-log-content")).textContent).toBe(
+      "===== stdout =====\nworkflow output\n\n===== stderr =====\n",
+    );
+    expect(
+      screen.queryByText(/driver-run:\/\/run-1\/flue-local/),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("last 1 MiB");
+  });
+
+  it("refreshes a live task list and its expanded AI log every five seconds", async () => {
+    vi.useFakeTimers();
+    mocks.runs = [
+      completedRun({
+        status: "running",
+        finishedAt: null,
+        updatedAt: "2026-08-14T10:00:10Z",
+      }),
+    ];
+    mocks.listAgentServiceRunTasks.mockResolvedValue({
+      data: [
+        taskRun({
+          status: "running",
+          finishedAt: null,
+        }),
+      ],
+      total: 1,
+    });
+    mocks.getTaskRunLog.mockResolvedValue({
+      content: "live AI output",
+      modifiedAt: "2026-08-14T10:00:20Z",
+      truncated: false,
+    });
+    render(<AgentServiceDetail workspaceId="WS" service={service} />);
+    expandRun();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: /scout-task-runner.*Running/,
+      }),
+    );
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(mocks.listAgentServiceRunTasks).toHaveBeenCalledTimes(1);
+    expect(mocks.getTaskRunLog).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5_000);
+    });
+
+    expect(mocks.listAgentServiceRunTasks).toHaveBeenCalledTimes(2);
+    expect(mocks.getTaskRunLog).toHaveBeenCalledTimes(2);
   });
 
   it("polls an expanded running run and stops after it becomes completed", async () => {
