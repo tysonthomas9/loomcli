@@ -193,7 +193,7 @@
 
 .errorState {
   font-size: var(--font-size-sm);
-  color: var(--color-danger);
+  color: var(--color-danger-text);
   padding: var(--space-4);
   text-align: center;
 }

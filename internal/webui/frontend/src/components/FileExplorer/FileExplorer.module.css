@@ -31,7 +31,7 @@
 .capabilitiesNotice button {
   border: none;
   background: transparent;
-  color: var(--color-primary);
+  color: var(--color-primary-text);
   cursor: pointer;
   font: inherit;
   font-weight: 700;
@@ -610,7 +610,7 @@
   padding: var(--space-2);
   border: 1px solid var(--color-border-light);
   border-radius: var(--radius-sm);
-  color: var(--color-danger);
+  color: var(--color-danger-text);
   font-size: var(--font-size-sm);
 }
 
@@ -661,7 +661,7 @@
 
 .treeNode[data-selected] {
   background: var(--color-bg-active);
-  color: var(--color-primary);
+  color: var(--color-primary-text);
 }
 
 .treeNode:focus-visible {
@@ -720,7 +720,7 @@
 }
 
 .treeNode[data-dir] .icon {
-  color: var(--color-primary);
+  color: var(--color-primary-text);
 }
 
 .fileName {
@@ -744,7 +744,7 @@
 }
 
 .treeNode[data-git-status-kind="conflict"] .fileName {
-  color: var(--color-danger);
+  color: var(--color-danger-text);
   font-weight: 600;
 }
 
@@ -1031,7 +1031,7 @@
   padding: var(--space-2);
   border: 1px solid var(--color-border-light);
   border-radius: var(--radius-sm);
-  color: var(--color-danger);
+  color: var(--color-danger-text);
   font-size: var(--font-size-sm);
 }
 
@@ -1236,7 +1236,7 @@
 }
 
 .crumbLink:hover {
-  color: var(--color-primary);
+  color: var(--color-primary-text);
   text-decoration: underline;
 }
 
@@ -1293,7 +1293,7 @@
 
 .error {
   padding: var(--space-4);
-  color: var(--color-danger);
+  color: var(--color-danger-text);
   font-size: var(--font-size-sm);
 }
 
@@ -1642,7 +1642,7 @@
 
 .searchError {
   padding: var(--space-2) var(--space-3);
-  color: var(--color-danger);
+  color: var(--color-danger-text);
   font-size: var(--font-size-sm);
 }
 

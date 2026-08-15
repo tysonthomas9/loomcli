@@ -17,7 +17,7 @@
   margin: 0 0 var(--space-2);
   font-size: var(--font-size-xs);
   font-weight: var(--font-weight-semibold);
-  color: var(--color-primary);
+  color: var(--color-primary-text);
   text-transform: uppercase;
   letter-spacing: 0.08em;
 }
@@ -175,12 +175,12 @@
 
 .complete .stepIndex {
   background: color-mix(in srgb, var(--color-success) 16%, transparent);
-  color: var(--color-success);
+  color: var(--color-success-text);
 }
 
 .complete .statusBadge {
   background: color-mix(in srgb, var(--color-success) 14%, transparent);
-  color: var(--color-success);
+  color: var(--color-success-text);
 }
 
 .current {
@@ -197,14 +197,14 @@
 .actionable .stepIndex,
 .pending .stepIndex {
   background: color-mix(in srgb, var(--color-primary) 12%, transparent);
-  color: var(--color-primary);
+  color: var(--color-primary-text);
 }
 
 .current .statusBadge,
 .actionable .statusBadge,
 .pending .statusBadge {
   background: color-mix(in srgb, var(--color-primary) 12%, transparent);
-  color: var(--color-primary);
+  color: var(--color-primary-text);
 }
 
 .pending {
