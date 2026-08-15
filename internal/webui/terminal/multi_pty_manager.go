@@ -423,6 +423,17 @@ func (mm *MultiPTYManager) SessionCountFor(wsID string) int {
 	return m.SessionCount()
 }
 
+// SessionNamesFor satisfies PTYSessionLister by delegating to the
+// per-workspace PTYManager for wsID. Returns an empty slice when the
+// workspace is unknown or its manager has not yet been lazily created.
+func (mm *MultiPTYManager) SessionNamesFor(wsID string) []string {
+	m := mm.existingManagerForWS(wsID)
+	if m == nil {
+		return []string{}
+	}
+	return m.SessionNamesFor(wsID)
+}
+
 // MaxSessions returns the per-workspace session cap. Intentionally not a
 // sum across workspaces: the UI status gauge that consumes this value wants
 // the cap a single workspace is measured against.
