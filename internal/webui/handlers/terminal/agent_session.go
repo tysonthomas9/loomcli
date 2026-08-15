@@ -144,7 +144,7 @@ func materializeInteractiveSkills(ctx context.Context, st store.Store, workspace
 	if targetDir == "" {
 		return nil
 	}
-	if err := skillmat.Materialize(ctx, st, workspace, roleName, targetDir); err != nil {
+	if err := skillmat.MaterializeLeased(ctx, st, workspace, roleName, targetDir); err != nil {
 		if skillmat.IsStoreUnavailable(err) {
 			slog.Warn("skill store unavailable; continuing with existing materialization",
 				"workspace", workspace, "role", roleName, "target", targetDir, "err", err)

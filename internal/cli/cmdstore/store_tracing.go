@@ -159,11 +159,15 @@ func (t *tracedStore) Workers() store.WorkerStore       { return t.workers }
 func (t *tracedStore) Roles() store.RoleStore           { return t.roles }
 func (t *tracedStore) Daemon() store.DaemonProfileStore { return t.daemon }
 
-// Skills and SkillPacks pass through untraced, as the trigger sub-stores above
-// do. Skill calls are operator-initiated CRUD on a handful of records, not a
-// hot path a span would tell anyone anything about; wrap them when there is a
-// question spans would answer.
+// Skills, materialization leases, and SkillPacks pass through untraced, as the
+// trigger sub-stores above do. Skill CRUD is operator-initiated and the lease
+// wraps a single local projection; wrap them when there is a question spans
+// would answer.
 func (t *tracedStore) Skills() store.SkillStore { return t.inner.Skills() }
+
+func (t *tracedStore) SkillMaterializationLeases() store.SkillMaterializationLeaseStore {
+	return t.inner.SkillMaterializationLeases()
+}
 
 func (t *tracedStore) SkillPacks() store.SkillPackStore { return t.inner.SkillPacks() }
 

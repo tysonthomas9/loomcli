@@ -35,6 +35,9 @@ type supervisorMaterializeStore struct {
 }
 
 func (s supervisorMaterializeStore) Skills() store.SkillStore { return s.skills }
+func (s supervisorMaterializeStore) SkillMaterializationLeases() store.SkillMaterializationLeaseStore {
+	return nil
+}
 
 func TestSpawnAndWaitMaterializationCollisionUsesSpawnFailurePath(t *testing.T) {
 	stubCheckBackend(t, func(name string) (discovery.Info, error) {

@@ -244,6 +244,10 @@ func (s *Store) Roles() store.RoleStore { return s.roles }
 // Skills returns the SkillStore.
 func (s *Store) Skills() store.SkillStore { return s.skills }
 
+// SkillMaterializationLeases is nil because memstore is process-local and
+// production materialization coordination belongs to fleet-db's Redis lease.
+func (s *Store) SkillMaterializationLeases() store.SkillMaterializationLeaseStore { return nil }
+
 // SkillPacks returns the SkillPackStore.
 func (s *Store) SkillPacks() store.SkillPackStore { return s.skillPacks }
 

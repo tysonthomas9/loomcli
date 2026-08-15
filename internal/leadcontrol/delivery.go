@@ -11,6 +11,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/agentinbox"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/epicrunner"
+	"github.com/tysonthomas9/loomcli/internal/skillmat"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -76,6 +77,12 @@ type leadTurnDeliverer interface {
 	deliverTurn(ctx context.Context, st store.Store, workspace, sessionID string,
 		result *DeliveryResult, message, closeReason string) (*DeliveryResult, error)
 }
+
+type leadSkillMaterializer func(context.Context, store.Store, string, string, string) error
+
+// materializeLeadSkillsBeforeTurn is a test seam at the shared dispatcher,
+// so codex and harness delivery exercise the same pre-turn behavior.
+var materializeLeadSkillsBeforeTurn leadSkillMaterializer = skillmat.MaterializeLeased
 
 // delivererForSession picks the delivery strategy from the session's runtime
 // provider metadata. Sessions without provider metadata default to codex,
@@ -152,7 +159,7 @@ func DeliverCurrentAssignment(ctx context.Context, st store.Store, workspace, le
 	if pendingReason := d.pendingReason(); pendingReason != "" {
 		return recordPendingDelivery(ctx, st, workspace, session.SessionID, result, pendingReason), nil
 	}
-	return deliverNextLeadInboxMessage(ctx, st, workspace, assignment.LeadName, session.SessionID, d, result)
+	return deliverNextLeadInboxMessage(ctx, st, workspace, assignment.LeadName, session, d, result)
 }
 
 func DeliverLeadMessage(ctx context.Context, st store.Store, workspace, leadName, message string) (*DeliveryResult, error) {
@@ -202,7 +209,7 @@ func DeliverLeadMessageWithOptions(ctx context.Context, st store.Store, workspac
 	if blocked := leadMessageDeliveryBlock(ctx, st, workspace, session, d, result); blocked != nil {
 		return blocked, nil
 	}
-	return deliverNextLeadInboxMessage(ctx, st, workspace, leadName, session.SessionID, d, result)
+	return deliverNextLeadInboxMessage(ctx, st, workspace, leadName, session, d, result)
 }
 
 // enqueueLeadMessageWithoutSession queues a lead message when the lead has no
@@ -274,7 +281,7 @@ func DeliverPendingLeadMessages(ctx context.Context, st store.Store, workspace, 
 		result.Reason = pendingReason
 		return result, nil
 	}
-	return deliverNextLeadInboxMessage(ctx, st, workspace, leadName, session.SessionID, d, result)
+	return deliverNextLeadInboxMessage(ctx, st, workspace, leadName, session, d, result)
 }
 
 func deliverNextLeadInboxMessage(
@@ -282,10 +289,11 @@ func deliverNextLeadInboxMessage(
 	st store.Store,
 	workspace string,
 	leadName string,
-	sessionID string,
+	session *domain.AgentSession,
 	d leadTurnDeliverer,
 	result *DeliveryResult,
 ) (*DeliveryResult, error) {
+	sessionID := session.SessionID
 	if st == nil || st.AgentInboxMessages() == nil {
 		result.Reason = "agent inbox store is not configured"
 		return result, nil
@@ -310,6 +318,9 @@ func deliverNextLeadInboxMessage(
 	if isAssignmentInboxMessage(msg) {
 		closeReason = "assignment delivery complete"
 	}
+	if err := materializeLeadTurnSkills(ctx, st, workspace, session); err != nil {
+		return nil, err
+	}
 	delivered, err := d.deliverTurn(ctx, st, workspace, sessionID, result, msg.Body, closeReason)
 	if err != nil {
 		return nil, err
@@ -318,6 +329,39 @@ func deliverNextLeadInboxMessage(
 		return completeLeadInboxRetry(ctx, st, workspace, sessionID, d, msg, delivered)
 	}
 	return completeLeadInboxDelivered(ctx, st, workspace, sessionID, d, msg, delivered)
+}
+
+func materializeLeadTurnSkills(ctx context.Context, st store.Store, workspace string, session *domain.AgentSession) error {
+	if session == nil {
+		return nil
+	}
+	targetDir := strings.TrimSpace(session.Metadata[MetadataLeadWorkDir])
+	if targetDir == "" {
+		return nil
+	}
+	roleName := strings.TrimSpace(session.Metadata[MetadataLeadRole])
+	if roleName == "" {
+		roleName = leadSessionRoleName(ctx, st, workspace, session.AgentID)
+	}
+	if err := materializeLeadSkillsBeforeTurn(ctx, st, workspace, roleName, targetDir); err != nil {
+		if skillmat.IsStoreUnavailable(err) {
+			slog.Warn("skill store unavailable before lead turn; delivering with existing materialization",
+				"workspace", workspace, "role", roleName, "target", targetDir, "err", err)
+			return nil
+		}
+		return fmt.Errorf("skill materialization refused: %w", err)
+	}
+	return nil
+}
+
+func leadSessionRoleName(ctx context.Context, st store.Store, workspace, agentID string) string {
+	if st != nil && st.Agents() != nil && strings.TrimSpace(agentID) != "" {
+		agent, err := st.Agents().Get(ctx, workspace, strings.TrimSpace(agentID))
+		if err == nil && agent != nil && strings.TrimSpace(agent.RoleName) != "" {
+			return strings.TrimSpace(agent.RoleName)
+		}
+	}
+	return "lead"
 }
 
 // completeLeadInboxRetry records the delivery attempt and returns the claimed

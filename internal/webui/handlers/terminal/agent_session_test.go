@@ -71,6 +71,9 @@ type terminalMaterializeStore struct {
 }
 
 func (s terminalMaterializeStore) Skills() store.SkillStore { return s.skills }
+func (s terminalMaterializeStore) SkillMaterializationLeases() store.SkillMaterializationLeaseStore {
+	return nil
+}
 
 func (s slowListTerminalService) ListTabs(ctx context.Context, wsID string) ([]tabmeta.TabMetadata, error) {
 	tabs, err := s.TerminalService.ListTabs(ctx, wsID)

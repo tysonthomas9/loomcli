@@ -111,6 +111,18 @@ var (
 	// Store boundary. It is skills-specific because the legacy generic client
 	// mapping classifies other 403 responses as ErrConflict.
 	ErrSkillForbidden = errors.New("domain: skill operation forbidden")
+
+	// ErrSkillMaterializationLeaseConflict reports that another writer holds
+	// the lease for the same host-local materialization target.
+	ErrSkillMaterializationLeaseConflict = errors.New("domain: skill materialization target is leased")
+
+	// ErrSkillMaterializationLeaseTokenMismatch reports a renew or release
+	// attempted with a token from a different lease generation.
+	ErrSkillMaterializationLeaseTokenMismatch = errors.New("domain: skill materialization lease token mismatch")
+
+	// ErrSkillMaterializationLeaseStoreUnavailable preserves fleet-db's
+	// dedicated 503 classification for the ephemeral lease store.
+	ErrSkillMaterializationLeaseStoreUnavailable = errors.New("domain: skill materialization lease store unavailable")
 )
 
 // SkillRef is the scope-qualified identity of a Skill within a workspace.

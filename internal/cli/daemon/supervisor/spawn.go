@@ -320,7 +320,7 @@ func (s *Supervisor) materializeSkills(ap *AgentProcess) error {
 	}
 	ctx, cancel := context.WithTimeout(cmdstore.RootContext(), controlPlaneOperationTimeout)
 	defer cancel()
-	return skillmat.Materialize(ctx, s.ControlStore, s.WorkspaceID, ap.Entry.Role, ap.WorktreePath)
+	return skillmat.MaterializeLeased(ctx, s.ControlStore, s.WorkspaceID, ap.Entry.Role, ap.WorktreePath)
 }
 
 // setupAgentLogFile wires the agent subprocess's stdout/stderr to its log

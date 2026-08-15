@@ -22,6 +22,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/epicrunner"
+	"github.com/tysonthomas9/loomcli/internal/leadcontrol"
 	"github.com/tysonthomas9/loomcli/internal/skillmat"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
@@ -289,7 +290,7 @@ func (r leadSessionRegistration) Store() store.Store {
 type leadSkillMaterializer func(context.Context, store.Store, string, string, string) error
 
 func materializeLeadSkills(ctx context.Context, registration leadSessionRegistration, workDir string) error {
-	return materializeLeadSkillsWith(ctx, registration, workDir, skillmat.Materialize)
+	return materializeLeadSkillsWith(ctx, registration, workDir, skillmat.MaterializeLeased)
 }
 
 func materializeLeadSkillsWith(ctx context.Context, registration leadSessionRegistration, workDir string, materialize leadSkillMaterializer) error {
@@ -372,6 +373,17 @@ func openLeadSessionStore(ctx context.Context) (*bootstrap.StoreHandle, string, 
 func createLeadSession(ctx context.Context, handle *bootstrap.StoreHandle, ws, sid, agentID, workDir string) error {
 	createCtx, createCancel := context.WithTimeout(ctx, leadStoreOpTimeout)
 	defer createCancel()
+	metadata := map[string]string{
+		"actor":                         leadSessionActor(),
+		leadcontrol.MetadataLeadWorkDir: workDir,
+	}
+	roleName := strings.TrimSpace(os.Getenv("LOOM_AGENT_ROLE"))
+	if roleName == "" && strings.TrimSpace(agentID) == "lead" {
+		roleName = "lead"
+	}
+	if roleName != "" {
+		metadata[leadcontrol.MetadataLeadRole] = roleName
+	}
 	_, err := handle.Store.AgentSessions().Create(createCtx, store.AgentSessionCreate{
 		WorkspaceKey: ws,
 		SessionID:    sid,
@@ -379,10 +391,7 @@ func createLeadSession(ctx context.Context, handle *bootstrap.StoreHandle, ws, s
 		Kind:         domain.AgentSessionKindOrchestration,
 		TerminalID:   strings.TrimSpace(os.Getenv(envAgentTerminalID)),
 		Status:       domain.AgentSessionRunning,
-		Metadata: map[string]string{
-			"actor":        leadSessionActor(),
-			"lead_workdir": workDir,
-		},
+		Metadata:     metadata,
 	})
 	if errors.Is(err, domain.ErrAlreadyExists) {
 		return nil

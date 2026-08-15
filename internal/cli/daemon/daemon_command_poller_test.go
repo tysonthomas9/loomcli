@@ -158,6 +158,9 @@ func (s commandPollerTestStore) ConnectorCalls() store.ConnectorAuditStore  { re
 func (s commandPollerTestStore) Workers() store.WorkerStore                 { return nil }
 func (s commandPollerTestStore) Roles() store.RoleStore                     { return nil }
 func (s commandPollerTestStore) Skills() store.SkillStore                   { return nil }
-func (s commandPollerTestStore) SkillPacks() store.SkillPackStore           { return nil }
-func (s commandPollerTestStore) Daemon() store.DaemonProfileStore           { return nil }
-func (s commandPollerTestStore) Close() error                               { return nil }
+func (s commandPollerTestStore) SkillMaterializationLeases() store.SkillMaterializationLeaseStore {
+	return nil
+}
+func (s commandPollerTestStore) SkillPacks() store.SkillPackStore { return nil }
+func (s commandPollerTestStore) Daemon() store.DaemonProfileStore { return nil }
+func (s commandPollerTestStore) Close() error                     { return nil }

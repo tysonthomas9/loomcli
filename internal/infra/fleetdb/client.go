@@ -99,6 +99,7 @@ type Client struct {
 	workers    *workerStore
 	roles      *roleStore
 	skills     *skillStore
+	matLeases  *skillMaterializationLeaseStore
 	skillPacks *skillPackStore
 	daemon     *daemonStore
 
@@ -108,6 +109,8 @@ type Client struct {
 }
 
 // New constructs a fleet-db client. Returns an error if BaseURL is empty.
+//
+//nolint:funlen // One sub-store wire per line; splitting hides what the client serves.
 func New(cfg Config) (*Client, error) {
 	if cfg.BaseURL == "" {
 		return nil, fmt.Errorf("fleetdb: BaseURL required")
@@ -153,6 +156,7 @@ func New(cfg Config) (*Client, error) {
 	c.workers = &workerStore{client: c}
 	c.roles = &roleStore{client: c}
 	c.skills = &skillStore{client: c}
+	c.matLeases = &skillMaterializationLeaseStore{client: c}
 	c.skillPacks = &skillPackStore{client: c}
 	c.daemon = &daemonStore{client: c}
 	c.connectors = &connectorStore{client: c}
@@ -241,6 +245,11 @@ func (c *Client) Roles() store.RoleStore { return c.roles }
 // Skills returns the SkillStore.
 func (c *Client) Skills() store.SkillStore { return c.skills }
 
+// SkillMaterializationLeases returns the ephemeral materialization lease store.
+func (c *Client) SkillMaterializationLeases() store.SkillMaterializationLeaseStore {
+	return c.matLeases
+}
+
 // SkillPacks returns the SkillPackStore.
 func (c *Client) SkillPacks() store.SkillPackStore { return c.skillPacks }
 
@@ -276,8 +285,10 @@ func (c *Client) SetAPIKey(key string) {
 //   - 409 already_exists → domain.ErrAlreadyExists
 //   - 409 already_claimed → domain.ErrAlreadyClaimed
 //   - 409 invalid_transition → domain.ErrInvalidTransition
+//   - 409 skill_materialization_lease_conflict → typed holder metadata
 //   - 400/422 → domain.ErrInvalid
 //   - 4xx other → domain.ErrConflict (best fit; callers can inspect msg)
+//   - 503 skill_materialization_lease_store_unavailable → dedicated sentinel
 //   - 5xx → fmt.Errorf wrapping the body
 //
 // 204 No Content is treated as success with no body.
@@ -429,6 +440,8 @@ func (c *Client) doRequestResponseWithClient(httpClient *http.Client, req *http.
 
 // classifyHTTPError maps an HTTP status + body into the appropriate
 // domain sentinel + descriptive wrap.
+//
+//nolint:cyclop,funlen // One status/code classification table; each arm is one sentinel.
 func classifyHTTPError(method, path string, status int, body []byte) error {
 	msg := extractErrorMessage(body)
 	code := extractErrorCode(body)
@@ -441,6 +454,10 @@ func classifyHTTPError(method, path string, status int, body []byte) error {
 		return fmt.Errorf("%s: %w", prefix, domain.ErrNotFound)
 	case http.StatusConflict:
 		switch code {
+		case skillMaterializationLeaseConflictCode:
+			return skillMaterializationLeaseConflictError(prefix, body)
+		case skillMaterializationLeaseTokenMismatchCode:
+			return fmt.Errorf("%s: %w", prefix, domain.ErrSkillMaterializationLeaseTokenMismatch)
 		case "already_claimed":
 			return fmt.Errorf("%s: %w", prefix, domain.ErrAlreadyClaimed)
 		case "invalid_transition":
@@ -486,22 +503,26 @@ func classifyHTTPError(method, path string, status int, body []byte) error {
 			return skillPreconditionError(prefix, body)
 		}
 	}
+	if status == http.StatusServiceUnavailable && code == skillMaterializationLeaseStoreUnavailableCode {
+		return fmt.Errorf("%s: %w", prefix, domain.ErrSkillMaterializationLeaseStoreUnavailable)
+	}
 	if status >= 400 && status < 500 {
 		return fmt.Errorf("%s: %w", prefix, domain.ErrConflict)
 	}
 	return errors.New(prefix)
 }
 
-// isSkillAPIPath identifies only the two skill route families. A repository
-// or another resource may legitimately be named "skills"; its 403 must keep
-// the generic classification rather than acquiring skill-specific semantics.
+// isSkillAPIPath identifies only the skill and skill-materialization lease
+// route families. A repository or another resource may legitimately be named
+// "skills"; its 403 must keep the generic classification rather than
+// acquiring skill-specific semantics.
 func isSkillAPIPath(requestPath string) bool {
 	requestPath, _, _ = strings.Cut(requestPath, "?")
 	segments := strings.Split(strings.Trim(requestPath, "/"), "/")
 	if len(segments) < 4 || segments[0] != "api" || segments[1] != "v1" {
 		return false
 	}
-	if segments[3] == "skills" {
+	if segments[3] == "skills" || segments[3] == "skill-materialization-leases" {
 		return true
 	}
 	return len(segments) >= 6 && segments[3] == "roles" && segments[5] == "skills"
