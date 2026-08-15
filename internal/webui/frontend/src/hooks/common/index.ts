@@ -40,7 +40,8 @@ export {
 export type { FileCapabilitiesState } from "./useFileCapabilities";
 
 export { useScopedFileTree } from "./useScopedFileTree";
-export type { UseScopedFileTreeReturn } from "./useScopedFileTree";
+export { useScopedFileTreeCore } from "./useScopedFileTree";
+export type { DirLoader, UseScopedFileTreeReturn } from "./useScopedFileTree";
 
 export { useFolderPicker } from "./useFolderPicker";
 export type {
@@ -70,6 +71,14 @@ export type {
   SortState,
   SortDirection,
 } from "./useSort";
+
+export {
+  useSkill,
+  useSkillCapabilities,
+  useSkillsActions,
+  useSkillsCatalog,
+  useSkillsTree,
+} from "./useSkills";
 
 export {
   StoreProvider,

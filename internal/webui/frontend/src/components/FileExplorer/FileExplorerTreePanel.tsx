@@ -13,6 +13,11 @@ import {
   sameCheckoutRef,
   type CheckoutRef,
 } from "@/utils/fileExplorerRefs";
+import {
+  checkoutExplorerRef,
+  type ExplorerRef,
+  type SkillsExplorerRef,
+} from "@/utils/explorerRefs";
 import { getCompactAvatarInitials } from "@/utils/compactAvatarInitials";
 import { getAvatarColor, shouldUseWhiteText } from "@/utils/colorUtils";
 
@@ -33,7 +38,13 @@ import type {
   TreeRefreshRequest,
   TreeRevealRequest,
 } from "./workspaceFileBrowserTypes";
-import type { FileTreeRoot, FileTreeSection } from "./treeRoots";
+import { SkillsTreeBlock } from "./skills";
+import type {
+  FileTreeRoot,
+  FileTreeSection,
+  GitTreeRoot,
+  SkillsTreeRoot,
+} from "./treeRoots";
 
 const CHECKOUT_UNAVAILABLE_MESSAGE = "This checkout is not checked out";
 const GIT_STATUS_UNAVAILABLE_MESSAGE =
@@ -303,8 +314,11 @@ function hasRepoScopeChanges(sections: FileTreeSection[]): boolean {
       if (root.kind === "checkout") {
         return root.ref.scope === "repo" && root.changeCount > 0;
       }
-      return root.children.some(
-        (child) => child.ref.scope === "repo" && child.changeCount > 0,
+      return (
+        root.kind === "agent" &&
+        root.children.some(
+          (child) => child.ref.scope === "repo" && child.changeCount > 0,
+        )
       );
     }),
   );
@@ -446,7 +460,7 @@ function RootRow({
   onRepairCheckout,
   onCheckoutContextMenu,
 }: {
-  root: FileTreeRoot;
+  root: GitTreeRoot;
   expanded: boolean;
   depth?: number | undefined;
   repairing: boolean;
@@ -533,11 +547,80 @@ function RootRow({
   );
 }
 
+function SkillsRootRow({
+  root,
+  expanded,
+  canEdit,
+  onToggle,
+  onNewSkill,
+  onContextMenu,
+}: {
+  root: SkillsTreeRoot;
+  expanded: boolean;
+  canEdit: boolean;
+  onToggle: () => void;
+  onNewSkill: () => void;
+  onContextMenu: (event: MouseEvent<HTMLDivElement>) => void;
+}) {
+  const readOnlyHint =
+    root.ref.group.kind === "workspace"
+      ? "Workspace skills are read-only here; use `loom skill update`"
+      : undefined;
+  return (
+    <div
+      className={styles.rootRow}
+      onContextMenu={(event) => {
+        if (!canEdit) return;
+        event.preventDefault();
+        onContextMenu(event);
+      }}
+    >
+      <button
+        type="button"
+        className={styles.rootRowToggle}
+        style={{ paddingLeft: 8 }}
+        onClick={onToggle}
+      >
+        <span
+          className={`${styles.chevron} ${expanded ? styles.chevronExpanded : ""}`}
+          aria-hidden="true"
+        >
+          <svg viewBox="0 0 16 16">
+            <path
+              d="M6 4l4 4-4 4"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.5"
+            />
+          </svg>
+        </span>
+        <span className={styles.skillRootIcon} aria-hidden="true">
+          S
+        </span>
+        <span className={styles.rootLabel}>{root.label}</span>
+        <span className={styles.rootSecondary}>· {root.secondary}</span>
+      </button>
+      <button
+        type="button"
+        className={styles.skillAddButton}
+        aria-label={`New skill in ${root.label}`}
+        title={readOnlyHint ?? `New skill in ${root.label}`}
+        disabled={!canEdit}
+        onClick={onNewSkill}
+      >
+        +
+      </button>
+    </div>
+  );
+}
+
 function sameRefInlineEdit(
   inlineEdit: ScopedInlineEdit | null,
   ref: CheckoutRef,
 ): FileTreeInlineEdit | null {
-  return inlineEdit && sameCheckoutRef(inlineEdit.ref, ref)
+  return inlineEdit &&
+    inlineEdit.ref.kind === "checkout" &&
+    sameCheckoutRef(inlineEdit.ref.checkout, ref)
     ? inlineEdit.edit
     : null;
 }
@@ -593,7 +676,9 @@ function CheckoutTreeBlock({
   } = useScopedFileTree(refInfo);
   const [scrollTarget, setScrollTarget] = useState<string | null>(null);
   const selectedPath =
-    selectedTab && sameCheckoutRef(selectedTab.ref, refInfo)
+    selectedTab &&
+    selectedTab.ref.kind === "checkout" &&
+    sameCheckoutRef(selectedTab.ref.checkout, refInfo)
       ? selectedTab.path
       : null;
 
@@ -660,6 +745,7 @@ function CheckoutTreeBlock({
 }
 
 export function FileExplorerTreePanel({
+  workspaceId,
   lens,
   changeCount,
   compareMode,
@@ -674,6 +760,7 @@ export function FileExplorerTreePanel({
   expandedRoots,
   repairingCheckoutKey,
   canWrite,
+  canEditSkills,
   selectedTab,
   inlineEdit,
   gitStatusByRef,
@@ -687,6 +774,8 @@ export function FileExplorerTreePanel({
   onToggleRoot,
   onRepairCheckout,
   onCheckoutContextMenu,
+  onSkillGroupContextMenu,
+  onNewSkill,
   onOpenFile,
   onContextMenu,
   onRequestRename,
@@ -695,6 +784,7 @@ export function FileExplorerTreePanel({
   onInlineEditCommit,
   onInlineEditCancel,
 }: {
+  workspaceId: string;
   lens: ExplorerLens;
   changeCount: number;
   compareMode: CompareMode;
@@ -709,6 +799,7 @@ export function FileExplorerTreePanel({
   expandedRoots: Set<string>;
   repairingCheckoutKey: string | null;
   canWrite: boolean;
+  canEditSkills: (ref: SkillsExplorerRef) => boolean;
   selectedTab: FileBrowserTab | null;
   inlineEdit: ScopedInlineEdit | null;
   gitStatusByRef: Record<string, Record<string, string>>;
@@ -726,14 +817,19 @@ export function FileExplorerTreePanel({
     label: string,
     event: MouseEvent<HTMLDivElement>,
   ) => void;
-  onOpenFile: (ref: CheckoutRef, path: string) => void;
+  onSkillGroupContextMenu: (
+    ref: SkillsExplorerRef,
+    event: MouseEvent<HTMLDivElement>,
+  ) => void;
+  onNewSkill: (ref: SkillsExplorerRef) => void;
+  onOpenFile: (ref: ExplorerRef, path: string) => void;
   onContextMenu: (
-    ref: CheckoutRef,
+    ref: ExplorerRef,
     node: FileTreeNodeInfo,
     event: MouseEvent<HTMLDivElement>,
   ) => void;
   onRequestRename: (ref: CheckoutRef, node: FileTreeNodeInfo) => void;
-  onRequestDelete: (ref: CheckoutRef, node: FileTreeNodeInfo) => void;
+  onRequestDelete: (ref: ExplorerRef, node: FileTreeNodeInfo) => void;
   onInlineEditChange: (value: string) => void;
   onInlineEditCommit: () => void;
   onInlineEditCancel: () => void;
@@ -768,10 +864,19 @@ export function FileExplorerTreePanel({
               gitStatus={gitStatusByRef[key] ?? {}}
               revealRequest={treeRevealRequests[key]}
               refreshRequest={treeRefreshRequests[key]}
-              onOpenFile={onOpenFile}
-              onContextMenu={onContextMenu}
+              onOpenFile={(ref, path) =>
+                onOpenFile(checkoutExplorerRef(ref), path)
+              }
+              onContextMenu={(ref, node, event) =>
+                onContextMenu(checkoutExplorerRef(ref), node, event)
+              }
               onRequestRename={canWrite ? onRequestRename : undefined}
-              onRequestDelete={canWrite ? onRequestDelete : undefined}
+              onRequestDelete={
+                canWrite
+                  ? (ref, node) =>
+                      onRequestDelete(checkoutExplorerRef(ref), node)
+                  : undefined
+              }
               onInlineEditChange={onInlineEditChange}
               onInlineEditCommit={onInlineEditCommit}
               onInlineEditCancel={onInlineEditCancel}
@@ -784,6 +889,42 @@ export function FileExplorerTreePanel({
   };
 
   const renderRoot = (root: FileTreeRoot) => {
+    if (root.kind === "skills") {
+      const key = root.id;
+      const expanded = expandedRoots.has(key);
+      const canEdit = canEditSkills(root.ref);
+      return (
+        <div key={root.id}>
+          <SkillsRootRow
+            root={root}
+            expanded={expanded}
+            canEdit={canEdit}
+            onToggle={() => onToggleRoot(key)}
+            onNewSkill={() => onNewSkill(root.ref)}
+            onContextMenu={(event) => onSkillGroupContextMenu(root.ref, event)}
+          />
+          {expanded && (
+            <SkillsTreeBlock
+              workspaceId={workspaceId}
+              refInfo={root.ref}
+              depthOffset={1}
+              canEdit={canEdit}
+              selectedTab={selectedTab}
+              inlineEdit={inlineEdit}
+              revealRequest={treeRevealRequests[key]}
+              refreshRequest={treeRefreshRequests[key]}
+              onOpenFile={onOpenFile}
+              onContextMenu={onContextMenu}
+              onRequestDelete={onRequestDelete}
+              onNewSkill={onNewSkill}
+              onInlineEditChange={onInlineEditChange}
+              onInlineEditCommit={onInlineEditCommit}
+              onInlineEditCancel={onInlineEditCancel}
+            />
+          )}
+        </div>
+      );
+    }
     if (root.kind === "checkout") return renderCheckoutRoot(root, 0);
     if (root.flattenedRef) {
       const key = checkoutRefKey(root.flattenedRef);
@@ -809,10 +950,19 @@ export function FileExplorerTreePanel({
                 gitStatus={gitStatusByRef[key] ?? {}}
                 revealRequest={treeRevealRequests[key]}
                 refreshRequest={treeRefreshRequests[key]}
-                onOpenFile={onOpenFile}
-                onContextMenu={onContextMenu}
+                onOpenFile={(ref, path) =>
+                  onOpenFile(checkoutExplorerRef(ref), path)
+                }
+                onContextMenu={(ref, node, event) =>
+                  onContextMenu(checkoutExplorerRef(ref), node, event)
+                }
                 onRequestRename={canWrite ? onRequestRename : undefined}
-                onRequestDelete={canWrite ? onRequestDelete : undefined}
+                onRequestDelete={
+                  canWrite
+                    ? (ref, node) =>
+                        onRequestDelete(checkoutExplorerRef(ref), node)
+                    : undefined
+                }
                 onInlineEditChange={onInlineEditChange}
                 onInlineEditCommit={onInlineEditCommit}
                 onInlineEditCancel={onInlineEditCancel}
@@ -888,10 +1038,19 @@ export function FileExplorerTreePanel({
               gitStatus={gitStatusByRef[key] ?? {}}
               revealRequest={treeRevealRequests[key]}
               refreshRequest={treeRefreshRequests[key]}
-              onOpenFile={onOpenFile}
-              onContextMenu={onContextMenu}
+              onOpenFile={(ref, path) =>
+                onOpenFile(checkoutExplorerRef(ref), path)
+              }
+              onContextMenu={(ref, node, event) =>
+                onContextMenu(checkoutExplorerRef(ref), node, event)
+              }
               onRequestRename={canWrite ? onRequestRename : undefined}
-              onRequestDelete={canWrite ? onRequestDelete : undefined}
+              onRequestDelete={
+                canWrite
+                  ? (ref, node) =>
+                      onRequestDelete(checkoutExplorerRef(ref), node)
+                  : undefined
+              }
               onInlineEditChange={onInlineEditChange}
               onInlineEditCommit={onInlineEditCommit}
               onInlineEditCancel={onInlineEditCancel}
