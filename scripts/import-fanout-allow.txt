@@ -9,3 +9,7 @@
 # down; do not raise them without recording why here.
 internal/cli/daemon/supervisor 21
 internal/cli 19
+# The skills webui module adds the skills handler package to the app's module
+# wiring and the domain skill path policy to svcimpl's file index.
+internal/webui/app 19
+internal/webui/svcimpl 19
