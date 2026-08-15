@@ -131,24 +131,46 @@ func TestDrainAllWithGrace_DeadlineExpires(t *testing.T) {
 	settleDrain(t, ignorer)
 }
 
-// settleDrain kills the agent and waits for the abandoned drain goroutine to
-// finish writing to the worktree.
+// settleDrain joins the drain goroutine that an expired deadline abandoned, so
+// the test does not race it. The goroutine writes the yield file into the
+// worktree and clears it again on the way out; t.TempDir's RemoveAll fails with
+// "directory not empty" if it lands in between.
+//
+// Waiting for the file to APPEAR before waiting for it to disappear is what
+// makes the join ordered. An expired deadline returns drainAllWithGrace through
+// waitUntil's non-blocking path, which can happen before the goroutine has even
+// reached RequestYield — so absence on its own proves nothing, and the earlier
+// absence-only wait returned immediately and let the cleanup race the write.
 func settleDrain(t *testing.T, ap *AgentProcess) {
 	t.Helper()
+	// Phase 1 of the drain writes the yield file. Wait for it before killing the
+	// agent: a process already dead at the drain's pid check takes the
+	// already-stopped path and never writes one.
+	awaitYieldFile(t, ap.WorktreePath, true, "drain goroutine never requested a yield")
+
 	ap.Mu.Lock()
 	pid := ap.Pid
 	ap.Mu.Unlock()
 	if pid != 0 {
 		_ = syscall.Kill(-pid, syscall.SIGKILL)
 	}
+
+	// DrainWithGrace's deferred ClearYieldFile is its last touch of the
+	// worktree, so the file's disappearance means the goroutine is done there.
+	awaitYieldFile(t, ap.WorktreePath, false, "drain goroutine did not release the worktree")
+}
+
+// awaitYieldFile blocks until the worktree's yield file matches want.
+func awaitYieldFile(t *testing.T, worktree string, want bool, msg string) {
+	t.Helper()
 	deadline := time.Now().Add(15 * time.Second)
 	for time.Now().Before(deadline) {
-		if !IsYieldRequested(ap.WorktreePath) {
+		if IsYieldRequested(worktree) == want {
 			return
 		}
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(20 * time.Millisecond)
 	}
-	t.Fatal("drain goroutine did not release the worktree")
+	t.Fatal(msg)
 }
 
 // startYieldingAgent spawns a process that exits as soon as the yield file
