@@ -3,6 +3,7 @@ package terminal
 import (
 	"context"
 	"log/slog"
+	"sort"
 	"strings"
 	"time"
 
@@ -23,7 +24,19 @@ func (s *terminalServiceImpl) ListTabs(ctx context.Context, wsID string) ([]tabm
 		return nil, service.ErrUnavailable("tab metadata not available (no Redis)")
 	}
 
-	tabs, err := s.tabStore.EnsureDefaults(ctx, wsID, nil)
+	// Resurface live PTYs whose metadata row is missing (server restart with a
+	// surviving session, a failed metadata write, a manual key delete). Sources
+	// that cannot enumerate their sessions pass nil, which keeps EnsureDefaults
+	// at its previous list-only behavior.
+	var live []string
+	if lister, ok := s.ptyMgr.(PTYSessionLister); s.ptyMgr != nil && ok {
+		live = lister.SessionNamesFor(wsID)
+		// Map iteration order is random; sort so the sort_order EnsureDefaults
+		// assigns to newly-created rows is deterministic.
+		sort.Strings(live)
+	}
+
+	tabs, err := s.tabStore.EnsureDefaults(ctx, wsID, live)
 	if err != nil {
 		return nil, service.ErrInternal("failed to list tab metadata", err)
 	}
