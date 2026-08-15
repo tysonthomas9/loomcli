@@ -166,7 +166,7 @@
 }
 
 .errorMessage {
-  color: var(--color-danger);
+  color: var(--color-danger-text);
   margin-bottom: 16px;
 }
 
@@ -273,7 +273,7 @@
   gap: 8px;
   padding: 10px var(--panel-padding-md);
   background: var(--color-danger-bg);
-  color: var(--color-danger);
+  color: var(--color-danger-text);
   font-size: 12px;
   font-weight: 600;
 }

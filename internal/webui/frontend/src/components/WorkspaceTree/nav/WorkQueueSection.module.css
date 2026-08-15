@@ -64,5 +64,5 @@
 }
 
 .queueCount[data-highlight="true"] {
-  color: var(--color-status-working);
+  color: var(--color-primary-text);
 }

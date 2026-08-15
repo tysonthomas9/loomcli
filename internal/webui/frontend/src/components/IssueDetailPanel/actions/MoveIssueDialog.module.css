@@ -86,7 +86,7 @@
   padding: 8px 10px;
   border-radius: var(--radius-sm);
   background-color: var(--color-warning-bg);
-  color: var(--color-warning);
+  color: var(--color-warning-text);
   font-size: 12px;
   line-height: 1.5;
 }
@@ -103,7 +103,7 @@
 }
 
 .error {
-  color: var(--color-danger);
+  color: var(--color-danger-text);
   font-size: 13px;
   margin: 0 0 12px;
   line-height: 1.4;

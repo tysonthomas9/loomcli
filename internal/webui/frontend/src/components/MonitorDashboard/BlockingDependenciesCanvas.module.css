@@ -67,7 +67,7 @@
 
 .emptyIcon {
   font-size: var(--font-size-2xl);
-  color: var(--color-status-closed);
+  color: var(--color-success-text);
 }
 
 .emptyText {

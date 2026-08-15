@@ -152,17 +152,17 @@
 
 .status[data-pr-state="review"] {
   background: var(--color-primary-bg);
-  color: var(--color-status-review);
+  color: var(--color-status-review-text);
 }
 
 .status[data-pr-state="open"] {
   background: var(--color-info-bg);
-  color: var(--color-info);
+  color: var(--color-info-text);
 }
 
 .status[data-pr-state="merged"] {
   background: var(--color-success-bg);
-  color: var(--color-success);
+  color: var(--color-success-text);
 }
 
 .rowTitle {
@@ -183,7 +183,7 @@
   padding: 4px 8px;
   font-size: var(--font-size-xs);
   font-weight: 700;
-  color: var(--color-warning);
+  color: var(--color-warning-text);
   text-decoration: none;
   white-space: nowrap;
 }
@@ -250,7 +250,7 @@
   padding: 1px 7px;
   font-size: 11px;
   font-weight: var(--font-weight-semibold);
-  color: var(--color-type-epic);
+  color: var(--color-epic-text);
   background: color-mix(in srgb, var(--color-type-epic) 14%, transparent);
   border-radius: var(--radius-sm);
   overflow: hidden;

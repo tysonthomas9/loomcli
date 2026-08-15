@@ -91,7 +91,7 @@
   gap: 8px;
   padding: 8px 12px;
   border-bottom: 1px solid rgb(239 68 68 / 25%);
-  color: var(--color-danger);
+  color: var(--color-danger-text);
   background: rgb(239 68 68 / 8%);
   font-size: 12px;
 }
@@ -102,7 +102,7 @@
   border: 1px solid rgb(239 68 68 / 40%);
   border-radius: 4px;
   background: transparent;
-  color: var(--color-danger);
+  color: var(--color-danger-text);
   font-size: 12px;
   cursor: pointer;
 }
