@@ -5,6 +5,7 @@ import {
   putTabMetadata,
   patchTabMetadata,
   deleteTabMetadata,
+  dismissTabRestartNotice,
 } from "@/api/terminal";
 import type { TabMetadata } from "@/api/terminal";
 import type { MutationPayload } from "@/api/common";
@@ -25,6 +26,8 @@ export interface UseTerminalMetadataReturn {
   deleteTab: (session: string) => Promise<void>;
   linkToIssue: (session: string, issueId: string) => Promise<void>;
   unlinkFromIssue: (session: string) => Promise<void>;
+  /** Clear a tab's persisted session-replacement marker. */
+  dismissRestartNotice: (session: string) => Promise<void>;
   refetch: () => Promise<void>;
   /** Call this from an SSE onMutation handler to trigger debounced refetch */
   handleMutation: (mutation: MutationPayload) => void;
@@ -114,6 +117,8 @@ export function useTerminalMetadata(
         created_at: now,
         updated_at: now,
         // Optimistic; next ListTabs refresh returns the server's truth.
+        // `replaced_at` is deliberately absent: a tab created just now has
+        // never been replaced, and seeding it would flash a restart marker.
         attachable: true,
         attached_clients: 0,
       };
@@ -297,6 +302,27 @@ export function useTerminalMetadata(
     [workspace],
   );
 
+  const dismissRestartNotice = useCallback(
+    async (session: string) => {
+      let prev: TabMetadata[] = [];
+      setTabs((current) => {
+        prev = current;
+        return current.map((t) =>
+          t.session_name === session ? { ...t, replaced_at: "" } : t,
+        );
+      });
+      try {
+        await dismissTabRestartNotice(workspace, session);
+      } catch (err) {
+        if (mountedRef.current) {
+          setTabs(prev);
+          setError(err instanceof Error ? err : new Error(String(err)));
+        }
+      }
+    },
+    [workspace],
+  );
+
   const handleMutation = useCallback(
     (mutation: MutationPayload) => {
       if (!enabled) return;
@@ -324,6 +350,7 @@ export function useTerminalMetadata(
     deleteTab,
     linkToIssue,
     unlinkFromIssue,
+    dismissRestartNotice,
     refetch: fetchTabs,
     handleMutation,
   };
