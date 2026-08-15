@@ -11,13 +11,13 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/agent"
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	cfgpkg "github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/events"
+	"github.com/tysonthomas9/loomcli/internal/fleethttp"
 	"github.com/tysonthomas9/loomcli/internal/observability/tracing"
 
 	"go.opentelemetry.io/otel/attribute"
@@ -40,12 +40,12 @@ func (s *Supervisor) buildCommand(ap *AgentProcess) (*exec.Cmd, error) {
 	cmd.Dir = ap.WorktreePath
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
-	cmd.Env = appendEnvOverride(cli.FilteredEnv(), bootstrap.EnvAgentName, ap.Entry.Worktree)
+	cmd.Env = appendEnvOverride(cli.FilteredEnv(), fleethttp.EnvAgentName, ap.Entry.Worktree)
 	// The daemon itself may have inherited a harness/operator actor. A worker
 	// is a distinct fleet-db actor, so stamp its agent name after inheritance
 	// and replace any inherited value instead of relying on duplicate-env
 	// ordering in the child runtime.
-	cmd.Env = appendEnvOverride(cmd.Env, bootstrap.EnvFleetDBActor, ap.Entry.Worktree)
+	cmd.Env = appendEnvOverride(cmd.Env, fleethttp.EnvFleetDBActor, ap.Entry.Worktree)
 	cmd.Env = append(cmd.Env,
 		fmt.Sprintf("LOOM_WORKTREE_PATH=%s", ap.WorktreePath),
 		fmt.Sprintf("LOOM_EVENTS_DIR=%s", ResolveDaemonPath(s.ProjectDir, cfg.Daemon.EventsDir)),

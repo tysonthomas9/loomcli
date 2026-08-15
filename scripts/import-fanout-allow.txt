@@ -9,3 +9,12 @@
 # down; do not raise them without recording why here.
 internal/cli/daemon/supervisor 21
 internal/cli 19
+# The webui service layer and route wiring each grew two seams for the Team
+# Templates + audit-trail work: svcimpl consumes internal/events (merging daemon
+# lifecycle events into the workspace audit feed) and internal/teamtemplate (the
+# apply service behind the onboarding endpoints); app registers the two new
+# handler modules (handlers/audit, handlers/teamtemplates). These are cohesive
+# feature modules, not incidental coupling — ratchet back down if the handler
+# registry or event merge moves behind an existing seam.
+internal/webui/svcimpl 20
+internal/webui/app 20

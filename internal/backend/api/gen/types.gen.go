@@ -571,16 +571,16 @@ func (e MessageResponseSuccess) Valid() bool {
 
 // Defines values for MonitorAgentStatusRoleKind.
 const (
-	Interactive MonitorAgentStatusRoleKind = "interactive"
-	Worker      MonitorAgentStatusRoleKind = "worker"
+	MonitorAgentStatusRoleKindInteractive MonitorAgentStatusRoleKind = "interactive"
+	MonitorAgentStatusRoleKindWorker      MonitorAgentStatusRoleKind = "worker"
 )
 
 // Valid indicates whether the value is a known member of the MonitorAgentStatusRoleKind enum.
 func (e MonitorAgentStatusRoleKind) Valid() bool {
 	switch e {
-	case Interactive:
+	case MonitorAgentStatusRoleKindInteractive:
 		return true
-	case Worker:
+	case MonitorAgentStatusRoleKindWorker:
 		return true
 	default:
 		return false
@@ -878,6 +878,102 @@ func (e SessionHistoryRecordStatus) Valid() bool {
 	}
 }
 
+// Defines values for TeamTemplateApplyResponseStatus.
+const (
+	TeamTemplateApplyResponseStatusDone TeamTemplateApplyResponseStatus = "done"
+)
+
+// Valid indicates whether the value is a known member of the TeamTemplateApplyResponseStatus enum.
+func (e TeamTemplateApplyResponseStatus) Valid() bool {
+	switch e {
+	case TeamTemplateApplyResponseStatusDone:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for TeamTemplateApplyStepAction.
+const (
+	Created         TeamTemplateApplyStepAction = "created"
+	Failed          TeamTemplateApplyStepAction = "failed"
+	SkippedDiverged TeamTemplateApplyStepAction = "skipped_diverged"
+	SkippedMatch    TeamTemplateApplyStepAction = "skipped_match"
+)
+
+// Valid indicates whether the value is a known member of the TeamTemplateApplyStepAction enum.
+func (e TeamTemplateApplyStepAction) Valid() bool {
+	switch e {
+	case Created:
+		return true
+	case Failed:
+		return true
+	case SkippedDiverged:
+		return true
+	case SkippedMatch:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for TeamTemplateApplyStepEntity.
+const (
+	TeamTemplateApplyStepEntityAgent TeamTemplateApplyStepEntity = "agent"
+	TeamTemplateApplyStepEntityRole  TeamTemplateApplyStepEntity = "role"
+)
+
+// Valid indicates whether the value is a known member of the TeamTemplateApplyStepEntity enum.
+func (e TeamTemplateApplyStepEntity) Valid() bool {
+	switch e {
+	case TeamTemplateApplyStepEntityAgent:
+		return true
+	case TeamTemplateApplyStepEntityRole:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for TeamTemplateCatalogAgentRoleDisplayLabel.
+const (
+	Architecture TeamTemplateCatalogAgentRoleDisplayLabel = "Architecture"
+	Developer    TeamTemplateCatalogAgentRoleDisplayLabel = "Developer"
+	QA           TeamTemplateCatalogAgentRoleDisplayLabel = "QA"
+)
+
+// Valid indicates whether the value is a known member of the TeamTemplateCatalogAgentRoleDisplayLabel enum.
+func (e TeamTemplateCatalogAgentRoleDisplayLabel) Valid() bool {
+	switch e {
+	case Architecture:
+		return true
+	case Developer:
+		return true
+	case QA:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for TeamTemplateCatalogAgentRoleKind.
+const (
+	TeamTemplateCatalogAgentRoleKindInteractive TeamTemplateCatalogAgentRoleKind = "interactive"
+	TeamTemplateCatalogAgentRoleKindWorker      TeamTemplateCatalogAgentRoleKind = "worker"
+)
+
+// Valid indicates whether the value is a known member of the TeamTemplateCatalogAgentRoleKind enum.
+func (e TeamTemplateCatalogAgentRoleKind) Valid() bool {
+	switch e {
+	case TeamTemplateCatalogAgentRoleKindInteractive:
+		return true
+	case TeamTemplateCatalogAgentRoleKindWorker:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for TranscriptEntryRole.
 const (
 	TranscriptEntryRoleAssistant TranscriptEntryRole = "assistant"
@@ -925,34 +1021,34 @@ func (e TranscriptEntryType) Valid() bool {
 
 // Defines values for TreeNodeAgentState.
 const (
-	Dead     TreeNodeAgentState = "dead"
-	Done     TreeNodeAgentState = "done"
-	Idle     TreeNodeAgentState = "idle"
-	Running  TreeNodeAgentState = "running"
-	Spawning TreeNodeAgentState = "spawning"
-	Stopped  TreeNodeAgentState = "stopped"
-	Stuck    TreeNodeAgentState = "stuck"
-	Working  TreeNodeAgentState = "working"
+	TreeNodeAgentStateDead     TreeNodeAgentState = "dead"
+	TreeNodeAgentStateDone     TreeNodeAgentState = "done"
+	TreeNodeAgentStateIdle     TreeNodeAgentState = "idle"
+	TreeNodeAgentStateRunning  TreeNodeAgentState = "running"
+	TreeNodeAgentStateSpawning TreeNodeAgentState = "spawning"
+	TreeNodeAgentStateStopped  TreeNodeAgentState = "stopped"
+	TreeNodeAgentStateStuck    TreeNodeAgentState = "stuck"
+	TreeNodeAgentStateWorking  TreeNodeAgentState = "working"
 )
 
 // Valid indicates whether the value is a known member of the TreeNodeAgentState enum.
 func (e TreeNodeAgentState) Valid() bool {
 	switch e {
-	case Dead:
+	case TreeNodeAgentStateDead:
 		return true
-	case Done:
+	case TreeNodeAgentStateDone:
 		return true
-	case Idle:
+	case TreeNodeAgentStateIdle:
 		return true
-	case Running:
+	case TreeNodeAgentStateRunning:
 		return true
-	case Spawning:
+	case TreeNodeAgentStateSpawning:
 		return true
-	case Stopped:
+	case TreeNodeAgentStateStopped:
 		return true
-	case Stuck:
+	case TreeNodeAgentStateStuck:
 		return true
-	case Working:
+	case TreeNodeAgentStateWorking:
 		return true
 	default:
 		return false
@@ -1351,19 +1447,19 @@ func (e StatScopedFileParamsScope) Valid() bool {
 
 // Defines values for GetScopedFileTreeParamsScope.
 const (
-	GetScopedFileTreeParamsScopeAgent     GetScopedFileTreeParamsScope = "agent"
-	GetScopedFileTreeParamsScopeRepo      GetScopedFileTreeParamsScope = "repo"
-	GetScopedFileTreeParamsScopeWorkspace GetScopedFileTreeParamsScope = "workspace"
+	Agent     GetScopedFileTreeParamsScope = "agent"
+	Repo      GetScopedFileTreeParamsScope = "repo"
+	Workspace GetScopedFileTreeParamsScope = "workspace"
 )
 
 // Valid indicates whether the value is a known member of the GetScopedFileTreeParamsScope enum.
 func (e GetScopedFileTreeParamsScope) Valid() bool {
 	switch e {
-	case GetScopedFileTreeParamsScopeAgent:
+	case Agent:
 		return true
-	case GetScopedFileTreeParamsScopeRepo:
+	case Repo:
 		return true
-	case GetScopedFileTreeParamsScopeWorkspace:
+	case Workspace:
 		return true
 	default:
 		return false
@@ -2645,6 +2741,12 @@ type SeedRequest struct {
 	Title       string  `json:"title"`
 }
 
+// ServiceErrorResponse defines model for ServiceErrorResponse.
+type ServiceErrorResponse struct {
+	Error string `json:"error"`
+	Kind  string `json:"kind"`
+}
+
 // SessionHistoryRecord Session history record (Redis-backed, per-issue)
 type SessionHistoryRecord struct {
 	Backend        string                       `json:"backend"`
@@ -2760,6 +2862,89 @@ type TabPutRequest struct {
 	Notes     string `json:"notes"`
 	Pinned    bool   `json:"pinned"`
 	SortOrder int    `json:"sort_order"`
+}
+
+// TeamTemplateApplyReport defines model for TeamTemplateApplyReport.
+type TeamTemplateApplyReport struct {
+	Created       int                     `json:"created"`
+	Diverged      int                     `json:"diverged"`
+	DryRun        bool                    `json:"dry_run"`
+	Failed        int                     `json:"failed"`
+	Materialized  int                     `json:"materialized"`
+	Revision      int                     `json:"revision"`
+	SchemaVersion int                     `json:"schema_version"`
+	Skipped       int                     `json:"skipped"`
+	Steps         []TeamTemplateApplyStep `json:"steps"`
+	TemplateId    string                  `json:"template_id"`
+	Warnings      *[]string               `json:"warnings,omitempty"`
+	WorkspaceKey  string                  `json:"workspace_key"`
+}
+
+// TeamTemplateApplyRequest defines model for TeamTemplateApplyRequest.
+type TeamTemplateApplyRequest struct {
+	DryRun *bool `json:"dry_run,omitempty"`
+}
+
+// TeamTemplateApplyResponse defines model for TeamTemplateApplyResponse.
+type TeamTemplateApplyResponse struct {
+	Report TeamTemplateApplyReport         `json:"report"`
+	Status TeamTemplateApplyResponseStatus `json:"status"`
+}
+
+// TeamTemplateApplyResponseStatus defines model for TeamTemplateApplyResponse.Status.
+type TeamTemplateApplyResponseStatus string
+
+// TeamTemplateApplyStep defines model for TeamTemplateApplyStep.
+type TeamTemplateApplyStep struct {
+	Action TeamTemplateApplyStepAction `json:"action"`
+
+	// Entity Store entity vocabulary; user-facing copy calls role entries agent roles.
+	Entity TeamTemplateApplyStepEntity `json:"entity"`
+	Error  *string                     `json:"error,omitempty"`
+	Fields *[]string                   `json:"fields,omitempty"`
+	Name   string                      `json:"name"`
+}
+
+// TeamTemplateApplyStepAction defines model for TeamTemplateApplyStep.Action.
+type TeamTemplateApplyStepAction string
+
+// TeamTemplateApplyStepEntity Store entity vocabulary; user-facing copy calls role entries agent roles.
+type TeamTemplateApplyStepEntity string
+
+// TeamTemplateCatalogAgent defines model for TeamTemplateCatalogAgent.
+type TeamTemplateCatalogAgent struct {
+	Name     string `json:"name"`
+	RoleName string `json:"role_name"`
+}
+
+// TeamTemplateCatalogAgentRole defines model for TeamTemplateCatalogAgentRole.
+type TeamTemplateCatalogAgentRole struct {
+	Description  string                                   `json:"description"`
+	DisplayLabel TeamTemplateCatalogAgentRoleDisplayLabel `json:"display_label"`
+	Kind         TeamTemplateCatalogAgentRoleKind         `json:"kind"`
+	Name         string                                   `json:"name"`
+}
+
+// TeamTemplateCatalogAgentRoleDisplayLabel defines model for TeamTemplateCatalogAgentRole.DisplayLabel.
+type TeamTemplateCatalogAgentRoleDisplayLabel string
+
+// TeamTemplateCatalogAgentRoleKind defines model for TeamTemplateCatalogAgentRole.Kind.
+type TeamTemplateCatalogAgentRoleKind string
+
+// TeamTemplateCatalogEntry defines model for TeamTemplateCatalogEntry.
+type TeamTemplateCatalogEntry struct {
+	Agents        []TeamTemplateCatalogAgent     `json:"agents"`
+	Description   string                         `json:"description"`
+	Id            string                         `json:"id"`
+	Label         string                         `json:"label"`
+	Revision      int                            `json:"revision"`
+	Roles         []TeamTemplateCatalogAgentRole `json:"roles"`
+	SchemaVersion int                            `json:"schema_version"`
+}
+
+// TeamTemplateCatalogResponse defines model for TeamTemplateCatalogResponse.
+type TeamTemplateCatalogResponse struct {
+	Templates []TeamTemplateCatalogEntry `json:"templates"`
 }
 
 // TerminalSessionInfo defines model for TerminalSessionInfo.
@@ -3398,12 +3583,14 @@ type SaveIssueTabsJSONBody struct {
 
 // RunOnboardingFirstTaskJSONBody defines parameters for RunOnboardingFirstTask.
 type RunOnboardingFirstTaskJSONBody struct {
-	AgentName   string  `json:"agent_name"`
-	Description *string `json:"description,omitempty"`
-	IssueType   *string `json:"issue_type,omitempty"`
-	Priority    *int    `json:"priority,omitempty"`
-	SourceRepo  *string `json:"source_repo,omitempty"`
-	Title       string  `json:"title"`
+	AgentName   string    `json:"agent_name"`
+	Description *string   `json:"description,omitempty"`
+	IssueType   *string   `json:"issue_type,omitempty"`
+	Labels      *[]string `json:"labels,omitempty"`
+	PinAgent    *bool     `json:"pin_agent,omitempty"`
+	Priority    *int      `json:"priority,omitempty"`
+	SourceRepo  *string   `json:"source_repo,omitempty"`
+	Title       string    `json:"title"`
 }
 
 // ListReadyParams defines parameters for ListReady.
@@ -3582,6 +3769,9 @@ type PostPullRequestReviewerMessageJSONRequestBody = ReviewerMessageRequest
 
 // PostPullRequestReviewJSONRequestBody defines body for PostPullRequestReview for application/json ContentType.
 type PostPullRequestReviewJSONRequestBody = PullRequestReviewRequest
+
+// ApplyTeamTemplateJSONRequestBody defines body for ApplyTeamTemplate for application/json ContentType.
+type ApplyTeamTemplateJSONRequestBody = TeamTemplateApplyRequest
 
 // SeedTerminalSessionJSONRequestBody defines body for SeedTerminalSession for application/json ContentType.
 type SeedTerminalSessionJSONRequestBody = SeedRequest

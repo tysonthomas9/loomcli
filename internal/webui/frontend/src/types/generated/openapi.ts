@@ -1108,6 +1108,45 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/team-templates": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List built-in Team Templates */
+    get: operations["listTeamTemplates"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/team-templates/{id}/apply": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Apply a Team Template to a workspace
+     * @description Synchronously creates missing agent roles and agents without modifying
+     *     existing entries. Per-step failures are returned in the completed report
+     *     so the caller can show partial progress and retry safely.
+     */
+    post: operations["applyTeamTemplate"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/workspaces/{ws}/onboarding/first-task": {
     parameters: {
       query?: never;
@@ -1118,11 +1157,13 @@ export interface paths {
     get?: never;
     put?: never;
     /**
-     * Create the onboarding first task and queue an agent start
-     * @description Creates an open, unassigned issue and requests the named agent start
-     *     working on it via the lifecycle backend. If the lifecycle request
-     *     fails the just-created issue is deleted in a bounded cleanup so the
-     *     kanban does not accumulate orphans on disconnect.
+     * Create the onboarding first task and optionally queue an agent start
+     * @description Creates an open, unassigned issue. By default it requests the named
+     *     agent start working on it via the lifecycle backend. With pin_agent
+     *     false, no lifecycle command is queued; labels can route the claim
+     *     through the configured agent role label gate instead. If a requested
+     *     lifecycle call fails, the just-created issue is deleted in a bounded
+     *     cleanup so the kanban does not accumulate orphans on disconnect.
      */
     post: operations["runOnboardingFirstTask"];
     delete?: never;
@@ -2289,6 +2330,10 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
   schemas: {
+    ServiceErrorResponse: {
+      error: string;
+      kind: string;
+    };
     ErrorResponse: {
       /** @constant */
       success: false;
@@ -2301,6 +2346,65 @@ export interface components {
       /** @constant */
       success: true;
       message: string;
+    };
+    TeamTemplateCatalogResponse: {
+      templates: components["schemas"]["TeamTemplateCatalogEntry"][];
+    };
+    TeamTemplateCatalogEntry: {
+      id: string;
+      label: string;
+      description: string;
+      revision: number;
+      schema_version: number;
+      roles: components["schemas"]["TeamTemplateCatalogAgentRole"][];
+      agents: components["schemas"]["TeamTemplateCatalogAgent"][];
+    };
+    TeamTemplateCatalogAgentRole: {
+      name: string;
+      /** @enum {string} */
+      kind: "worker" | "interactive";
+      /** @enum {string} */
+      display_label: "Developer" | "QA" | "Architecture";
+      description: string;
+    };
+    TeamTemplateCatalogAgent: {
+      name: string;
+      role_name: string;
+    };
+    TeamTemplateApplyRequest: {
+      /** @default false */
+      dry_run: boolean;
+    };
+    TeamTemplateApplyResponse: {
+      /** @constant */
+      status: "done";
+      report: components["schemas"]["TeamTemplateApplyReport"];
+    };
+    TeamTemplateApplyReport: {
+      template_id: string;
+      revision: number;
+      schema_version: number;
+      workspace_key: string;
+      dry_run: boolean;
+      steps: components["schemas"]["TeamTemplateApplyStep"][];
+      created: number;
+      skipped: number;
+      diverged: number;
+      failed: number;
+      warnings?: string[];
+      materialized: number;
+    };
+    TeamTemplateApplyStep: {
+      /**
+       * @description Store entity vocabulary; user-facing copy calls role entries agent roles.
+       * @enum {string}
+       */
+      entity: "role" | "agent";
+      name: string;
+      /** @enum {string} */
+      action: "created" | "skipped_match" | "skipped_diverged" | "failed";
+      fields?: string[];
+      error?: string;
     };
     FileMutationResponse: {
       success: boolean;
@@ -5798,6 +5902,82 @@ export interface operations {
       };
     };
   };
+  listTeamTemplates: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Team Template picker catalog */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["TeamTemplateCatalogResponse"];
+        };
+      };
+    };
+  };
+  applyTeamTemplate: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        /** @description Built-in Team Template identifier */
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: {
+      content: {
+        "application/json": components["schemas"]["TeamTemplateApplyRequest"];
+      };
+    };
+    responses: {
+      /** @description Apply completed; inspect report.failed for partial failures */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["TeamTemplateApplyResponse"];
+        };
+      };
+      /** @description Preflight refusal, including a local workspace with no repositories */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ServiceErrorResponse"];
+        };
+      };
+      /** @description Workspace or Team Template not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ServiceErrorResponse"];
+        };
+      };
+      /** @description Fleet-db store unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ServiceErrorResponse"];
+        };
+      };
+    };
+  };
   runOnboardingFirstTask: {
     parameters: {
       query?: never;
@@ -5818,11 +5998,14 @@ export interface operations {
           issue_type?: string;
           priority?: number;
           source_repo?: string;
+          labels?: string[];
+          /** @default true */
+          pin_agent?: boolean;
         };
       };
     };
     responses: {
-      /** @description Issue created and agent start queued */
+      /** @description Issue created; queued reports whether an agent start was requested */
       201: {
         headers: {
           [name: string]: unknown;

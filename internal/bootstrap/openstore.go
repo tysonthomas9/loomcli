@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 
 	"github.com/tysonthomas9/loomcli/internal/backend/fleet"
+	"github.com/tysonthomas9/loomcli/internal/fleethttp"
 	"github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
@@ -18,11 +19,13 @@ import (
 const EnvFleetDBAPIKey = "LOOM_FLEET_DB_API_KEY" //nolint:gosec // env var name, not a credential
 
 // EnvFleetDBActor is the env var holding the X-Actor header value.
-// Defaults to the current agent name, then $USER.
-const EnvFleetDBActor = "LOOM_FLEET_DB_ACTOR"
+// Defaults to the current agent name, then $USER. Canonically defined in
+// fleethttp alongside the actor context plumbing; aliased here for the
+// many bootstrap-level callers.
+const EnvFleetDBActor = fleethttp.EnvFleetDBActor
 
 // EnvAgentName is the env var used to identify the current agent process.
-const EnvAgentName = "LOOM_AGENT_NAME"
+const EnvAgentName = fleethttp.EnvAgentName
 
 // StoreHandle bundles a Store with the cleanup function for any
 // subprocess (embedded fleet-db) the bootstrap had to start. Callers

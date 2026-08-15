@@ -2,7 +2,7 @@ package agent
 
 import (
 	"fmt"
-	"log"
+	"log/slog"
 	"strings"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
@@ -61,7 +61,7 @@ func generateWorkerPromptWith(id string, build func(promptFieldRefs) PromptData)
 	// into an error. Fall back to the shipped body rather than taking the run
 	// down over a file the operator can fix later — the same trade renderPrompt
 	// makes for the built-in prompts.
-	log.Printf("warning: override prompt %q execution failed: %v; falling back to the built-in body", id, err)
+	slog.Warn("override prompt execution failed, falling back to the built-in body", "prompt", id, "err", err)
 	embedded, embErr := promptFS.ReadFile("prompts/" + id + ".md")
 	if embErr != nil {
 		return "", fmt.Errorf("built-in agent-role prompt %q not found: %w", id, embErr)

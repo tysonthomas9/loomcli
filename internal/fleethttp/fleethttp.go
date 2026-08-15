@@ -38,6 +38,12 @@ const (
 // shared transport has used its bounded retry budget.
 var ErrRateLimited = errors.New("fleethttp: rate limited")
 
+// EnvFleetDBActor is the env var holding the X-Actor header value.
+const EnvFleetDBActor = "LOOM_FLEET_DB_ACTOR"
+
+// EnvAgentName is the env var used to identify the current agent process.
+const EnvAgentName = "LOOM_AGENT_NAME"
+
 // Doer is the subset of http.Client used by Do.
 type Doer interface {
 	Do(*http.Request) (*http.Response, error)
