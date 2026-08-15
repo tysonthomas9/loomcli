@@ -114,17 +114,17 @@
 }
 
 .statusChip[data-status="in_progress"] {
-  color: var(--color-success);
+  color: var(--color-success-text);
   border-color: var(--color-success);
 }
 
 .statusChip[data-status="review"] {
-  color: var(--color-primary);
+  color: var(--color-primary-text);
   border-color: var(--color-primary);
 }
 
 .statusChip[data-status="blocked"] {
-  color: var(--color-danger);
+  color: var(--color-danger-text);
   border-color: var(--color-danger);
 }
 

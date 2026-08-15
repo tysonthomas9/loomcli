@@ -82,6 +82,35 @@
   --color-danger: #ef4444; /* red-500 */
   --color-info: #06b6d4; /* cyan-500 */
 
+  /* ===========================
+   * Colors - Semantic (on-surface text variants)
+   *
+   * The vivid tokens above stay as they are: they are also used for dots,
+   * borders, chart strokes and kanban accents, and retuning them for text
+   * would dull the whole status vocabulary. Text picks these variants
+   * instead, which clear 4.5:1 against every surface in the theme.
+   *
+   * That is deliberately a text-only fix. The vivid tokens do NOT all clear
+   * the 3:1 that WCAG 1.4.11 asks of non-text UI — in the light theme most of
+   * them sit at 1.6-3.8:1 — but that is a separate palette problem, tracked as
+   * a floor in styles/contrast.ts rather than papered over here.
+   *
+   * Use for `color:` only. Leave `border-color`/`background`/`fill`/`stroke`
+   * on the vivid tokens.
+   * =========================== */
+  --color-primary-text: #60a5fa; /* blue-400,   worst 5.34:1 */
+  --color-success-text: #4ade80; /* green-400,  worst 7.79:1 */
+  --color-warning-text: #fbbf24; /* amber-400,  worst 8.13:1 */
+  --color-danger-text: #f87171; /* red-400,    worst 4.91:1 */
+  --color-info-text: #22d3ee; /* cyan-400,   worst 7.51:1 */
+  --color-epic-text: #a78bfa; /* violet-400, worst 4.99:1 */
+  /* --color-status-review (#4f46e5) is its own hex, not an alias of any of the
+     six above, and it is rendered as text on the PRs page, the status dropdown
+     and the epic rollup. It reaches only 2.16:1 here, so it needs its own
+     variant; indigo is kept distinct from --color-epic-text's violet because
+     both appear as text in the same view (views/PRsPage.module.css). */
+  --color-status-review-text: #818cf8; /* indigo-400, worst 4.55:1 */
+
   /* Semantic Background Colors (darker variants for dark theme) */
   --color-primary-bg: #1e2a4a;
   --color-success-bg: #14332a;
@@ -317,6 +346,17 @@
   --color-panel-bg: #ffffff;
   --color-primary: #2563eb;
   --color-primary-hover: #1d4ed8;
+
+  /* Semantic text variants (light). The :root values are tuned for the dark
+     backdrop and fall to 1.6-4.2:1 on the light surfaces, so every one of them
+     has to be restated here. */
+  --color-primary-text: #1d4ed8; /* blue-700,   worst 4.94:1 */
+  --color-success-text: #166534; /* green-800,  worst 5.25:1 */
+  --color-warning-text: #92400e; /* amber-800,  worst 5.22:1 */
+  --color-danger-text: #b91c1c; /* red-700,    worst 4.77:1 */
+  --color-info-text: #155e75; /* cyan-800,   worst 5.35:1 */
+  --color-epic-text: #6d28d9; /* violet-700, worst 5.23:1 */
+  --color-status-review-text: #4338ca; /* indigo-700, worst 5.82:1 */
 
   /* Semantic background colors (light variants) */
   --color-primary-bg: #eff6ff;

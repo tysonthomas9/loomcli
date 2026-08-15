@@ -219,7 +219,7 @@
   gap: 0.5rem;
   padding: 0.45rem 1rem;
   background: var(--color-warning-bg);
-  color: var(--color-warning);
+  color: var(--color-warning-text);
   font-size: 0.7rem;
   border-bottom: 1px solid var(--color-border);
 }
@@ -357,7 +357,7 @@
   display: inline-flex;
   align-items: center;
   gap: 0.25rem;
-  color: var(--color-warning);
+  color: var(--color-warning-text);
   font-weight: 600;
   cursor: pointer;
   background: none;
@@ -377,7 +377,7 @@
 }
 
 .syncBannerTextStatic {
-  color: var(--color-warning);
+  color: var(--color-warning-text);
   font-weight: 600;
   cursor: help;
 }
@@ -455,7 +455,7 @@
 }
 
 .pushDetailError {
-  color: var(--color-error);
+  color: var(--color-danger-text);
   font-size: 0.65rem;
   width: 100%;
 }
@@ -482,7 +482,7 @@
 }
 
 .pushError {
-  color: var(--color-error);
+  color: var(--color-danger-text);
   font-size: 0.7rem;
   padding: 0 1rem 0.5rem;
 }
@@ -532,7 +532,7 @@
 }
 
 .queueCount[data-highlight="true"] {
-  color: var(--color-status-working);
+  color: var(--color-primary-text);
 }
 
 /* Stats Row */
@@ -561,7 +561,7 @@
 }
 
 .completion {
-  color: var(--color-success);
+  color: var(--color-success-text);
 }
 
 /* Sync Status */
@@ -575,11 +575,11 @@
 }
 
 .syncOk {
-  color: var(--color-success);
+  color: var(--color-success-text);
 }
 
 .syncWarning {
-  color: var(--color-warning);
+  color: var(--color-warning-text);
   cursor: help;
 }
 

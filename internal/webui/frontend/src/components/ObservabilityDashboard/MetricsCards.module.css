@@ -29,7 +29,7 @@
 }
 
 .error {
-  color: var(--color-danger);
+  color: var(--color-danger-text);
 }
 
 @media (width <= 1024px) {

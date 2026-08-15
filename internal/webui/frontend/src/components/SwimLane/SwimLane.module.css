@@ -138,7 +138,7 @@
 }
 
 .laneTitleButton:hover {
-  color: var(--color-primary);
+  color: var(--color-primary-text);
   text-decoration: underline;
   text-underline-offset: 2px;
 }
@@ -234,7 +234,7 @@
   padding: var(--space-1) var(--space-2);
   font-size: var(--font-size-xs);
   font-weight: var(--font-weight-semibold);
-  color: var(--color-primary);
+  color: var(--color-primary-text);
   background-color: var(--color-primary-bg);
   border-radius: var(--radius-full);
 }

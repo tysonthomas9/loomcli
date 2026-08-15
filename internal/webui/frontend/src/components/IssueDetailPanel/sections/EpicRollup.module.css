@@ -175,27 +175,27 @@
 
 .ticketStatus[data-status="in_progress"] {
   background: var(--color-warning-bg);
-  color: var(--color-warning);
+  color: var(--color-warning-text);
 }
 
 .ticketStatus[data-status="review"] {
   background: var(--color-primary-bg);
-  color: var(--color-status-review);
+  color: var(--color-status-review-text);
 }
 
 .ticketStatus[data-status="blocked"] {
   background: var(--color-danger-bg);
-  color: var(--color-danger);
+  color: var(--color-danger-text);
 }
 
 .ticketStatus[data-status="closed"] {
   background: var(--color-success-bg);
-  color: var(--color-success);
+  color: var(--color-success-text);
 }
 
 .ticketStatus[data-status="open"] {
   background: var(--color-info-bg);
-  color: var(--color-info);
+  color: var(--color-info-text);
 }
 
 /* PR chip on a ticket row */
@@ -204,7 +204,7 @@
   font-family: var(--font-family-mono);
   font-size: var(--font-size-xs);
   font-weight: var(--font-weight-bold);
-  color: var(--color-primary);
+  color: var(--color-primary-text);
   background: var(--color-primary-bg);
   padding: 1px 6px;
   border-radius: var(--radius-sm);

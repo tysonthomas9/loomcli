@@ -121,7 +121,7 @@
 
 /* Links */
 .markdown a {
-  color: var(--color-primary);
+  color: var(--color-primary-text);
   text-decoration: none;
 }
 
