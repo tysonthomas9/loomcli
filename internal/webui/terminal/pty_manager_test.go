@@ -4,7 +4,10 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"reflect"
+	"sort"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -533,5 +536,68 @@ func TestShutdown_Idempotent(t *testing.T) {
 	}
 	if err := m.Shutdown(); err != nil {
 		t.Errorf("second Shutdown: %v, want nil", err)
+	}
+}
+
+// TestSessionNamesFor_ScopedToWorkspace — the names a bare PTYManager reports
+// must be filtered by SessionKey.Workspace, because MultiPTYManager delegates
+// straight through and ListTabs turns the result into tab metadata. Leaking
+// another workspace's session names would resurface foreign tabs.
+func TestSessionNamesFor_ScopedToWorkspace(t *testing.T) {
+	m := newTestManager(t)
+	m.SetGracePeriod(5 * time.Second)
+
+	for _, key := range []SessionKey{
+		{Workspace: "ws1", Name: "a"},
+		{Workspace: "ws1", Name: "b"},
+		{Workspace: "ws2", Name: "c"},
+	} {
+		if _, _, err := m.AttachSession(key, 80, 24, &LaunchSpec{Argv: []string{"-c", "cat"}}); err != nil {
+			t.Fatalf("AttachSession(%s): %v", key, err)
+		}
+	}
+
+	got := m.SessionNamesFor("ws1")
+	sort.Strings(got)
+	if !reflect.DeepEqual(got, []string{"a", "b"}) {
+		t.Errorf("SessionNamesFor(ws1) = %v, want [a b]", got)
+	}
+	if got := m.SessionNamesFor("ws2"); !reflect.DeepEqual(got, []string{"c"}) {
+		t.Errorf("SessionNamesFor(ws2) = %v, want [c]", got)
+	}
+	if got := m.SessionNamesFor("unknown"); len(got) != 0 {
+		t.Errorf("SessionNamesFor(unknown) = %v, want empty", got)
+	}
+}
+
+// TestSessionNamesFor_ConcurrentWithAttach — ListTabs can run while sessions
+// are spawning, so the read must take the same lock the map writers do. Run
+// with -race; without the mutex this is a straight concurrent map read/write.
+func TestSessionNamesFor_ConcurrentWithAttach(t *testing.T) {
+	m := newTestManager(t)
+	m.SetGracePeriod(5 * time.Second)
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 20; i++ {
+			key := SessionKey{Workspace: "ws1", Name: fmt.Sprintf("s-%d", i)}
+			if _, _, err := m.AttachSession(key, 80, 24, &LaunchSpec{Argv: []string{"-c", "cat"}}); err != nil {
+				t.Errorf("AttachSession(%s): %v", key, err)
+				return
+			}
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 200; i++ {
+			_ = m.SessionNamesFor("ws1")
+		}
+	}()
+	wg.Wait()
+
+	if got := len(m.SessionNamesFor("ws1")); got != 20 {
+		t.Errorf("len(SessionNamesFor(ws1)) = %d, want 20", got)
 	}
 }
