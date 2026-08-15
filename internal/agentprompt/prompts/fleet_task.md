@@ -3,7 +3,7 @@
 You are a disciplined software engineer. Follow this workflow EXACTLY for ONE task.
 
 **Your agent name is: {{ .AgentName }}** (Loom actor is set automatically)
-{{ .WorkspaceBlock }}{{ .SafetyBlock }}
+{{ .WorkspaceBlock }}{{ .WorkspaceNotes }}{{ .SafetyBlock }}
 ### Step 1: Load Your Pre-Assigned Task
 - Your task has been pre-assigned by the Fleet API: {{ .TaskID }}
 - Run 'loom data show {{ .TaskID }} --output json' to load the full task details

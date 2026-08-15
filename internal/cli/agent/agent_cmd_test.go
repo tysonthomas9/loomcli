@@ -483,8 +483,12 @@ func TestMakeCustomPromptGen_OptInBlocks(t *testing.T) {
 		AcceptanceCriteria: "TaskID is populated",
 	})
 
+	workspaceRoot := t.TempDir()
+	if err := os.WriteFile(filepath.Join(workspaceRoot, "agents.md"), []byte("Use the scout-approved workflow.\n"), 0o644); err != nil {
+		t.Fatalf("write agents.md: %v", err)
+	}
 	workspace := &WorkspaceConfig{
-		Path:  "/test/workspace",
+		Path:  workspaceRoot,
 		Repos: []RepoConfig{{Name: "api", Path: "api"}, {Name: "web", Path: "web"}},
 	}
 
@@ -502,6 +506,11 @@ func TestMakeCustomPromptGen_OptInBlocks(t *testing.T) {
 			name:      "WorkspaceBlock",
 			body:      "{{.WorkspaceBlock}}",
 			wantParts: []string{"Workspace Mode: Multi-Repo Environment", "| api | ./api | main |"},
+		},
+		{
+			name:      "WorkspaceNotes",
+			body:      "{{.WorkspaceNotes}}",
+			wantParts: []string{"Workspace Notes (Maintained by Scout)", "Use the scout-approved workflow."},
 		},
 		{
 			name:      "EpicScope",

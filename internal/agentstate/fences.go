@@ -5,9 +5,41 @@ import (
 	"strings"
 )
 
+const (
+	fencePrefix      = "<!-- loom:agent:"
+	beginFenceSuffix = ":begin -->"
+	endFenceSuffix   = ":end -->"
+)
+
 // FenceMarkers returns the paired marker grammar for one agent instance.
 func FenceMarkers(serviceID string) (begin, end string) {
-	return "<!-- loom:agent:" + serviceID + ":begin -->", "<!-- loom:agent:" + serviceID + ":end -->"
+	return fencePrefix + serviceID + beginFenceSuffix, fencePrefix + serviceID + endFenceSuffix
+}
+
+// StripFenceMarkerLines removes agent-instance fence marker lines while
+// retaining the content between them and all non-marker lines.
+func StripFenceMarkerLines(text string) string {
+	lines := strings.Split(text, "\n")
+	kept := lines[:0]
+	for _, line := range lines {
+		if !isFenceMarkerLine(line) {
+			kept = append(kept, line)
+		}
+	}
+	return strings.Join(kept, "\n")
+}
+
+func isFenceMarkerLine(line string) bool {
+	line = strings.TrimSpace(line)
+	if !strings.HasPrefix(line, fencePrefix) {
+		return false
+	}
+	for _, suffix := range []string{beginFenceSuffix, endFenceSuffix} {
+		if strings.HasSuffix(line, suffix) && len(line) > len(fencePrefix)+len(suffix) {
+			return true
+		}
+	}
+	return false
 }
 
 // MergePendingFence extracts serviceID's first complete fence pair from the
