@@ -147,7 +147,7 @@ func (s *triggerEventStore) readAuditEventStream(
 	// this context-owned stream while retaining its pooled transport.
 	streamClient := *s.client.http
 	streamClient.Timeout = 0
-	resp, err := streamClient.Do(req)
+	resp, err := fleethttp.Do(&streamClient, req)
 	if err != nil {
 		return fmt.Errorf("fleetdb: GET %s: %w", path, err)
 	}

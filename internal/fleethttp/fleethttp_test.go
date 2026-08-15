@@ -2,10 +2,13 @@ package fleethttp
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func TestAuth_Apply(t *testing.T) {
@@ -115,5 +118,106 @@ func TestExtractErrorMessage(t *testing.T) {
 				t.Errorf("ExtractErrorMessage(%q) = %q, want %q", tt.body, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestDo_RetriesRateLimitUntilSuccess(t *testing.T) {
+	var attempts atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil || string(body) != `{"name":"test"}` {
+			http.Error(w, "bad request body", http.StatusBadRequest)
+			return
+		}
+		attempt := attempts.Add(1)
+		if attempt < 3 {
+			w.Header().Set("Retry-After", "0")
+			http.Error(w, "rate limited", http.StatusTooManyRequests)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"success":true}`))
+	}))
+	t.Cleanup(server.Close)
+
+	req, err := BuildJSONRequest(t.Context(), http.MethodPost, server.URL, Auth{}, map[string]string{"name": "test"})
+	if err != nil {
+		t.Fatalf("BuildJSONRequest: %v", err)
+	}
+	resp, err := Do(server.Client(), req)
+	if err != nil {
+		t.Fatalf("Do: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+	if got := attempts.Load(); got != 3 {
+		t.Fatalf("attempts = %d, want 3", got)
+	}
+}
+
+func TestDo_ExhaustedRateLimitReturnsFinalResponse(t *testing.T) {
+	var attempts atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		attempts.Add(1)
+		w.Header().Set("Retry-After", "0")
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte(`{"error":"still limited"}`))
+	}))
+	t.Cleanup(server.Close)
+
+	req, err := BuildJSONRequest(t.Context(), http.MethodGet, server.URL, Auth{}, nil)
+	if err != nil {
+		t.Fatalf("BuildJSONRequest: %v", err)
+	}
+	resp, err := Do(server.Client(), req)
+	if err != nil {
+		t.Fatalf("Do: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusTooManyRequests {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusTooManyRequests)
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read response body: %v", err)
+	}
+	if got := string(body); got != `{"error":"still limited"}` {
+		t.Fatalf("body = %q, want final 429 body", got)
+	}
+	if got := attempts.Load(); got != maxAttempts {
+		t.Fatalf("attempts = %d, want %d", got, maxAttempts)
+	}
+}
+
+func TestDo_DoesNotRetryOtherStatuses(t *testing.T) {
+	var attempts atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		attempts.Add(1)
+		http.Error(w, "unavailable", http.StatusServiceUnavailable)
+	}))
+	t.Cleanup(server.Close)
+
+	req, err := BuildJSONRequest(t.Context(), http.MethodGet, server.URL, Auth{}, nil)
+	if err != nil {
+		t.Fatalf("BuildJSONRequest: %v", err)
+	}
+	resp, err := Do(server.Client(), req)
+	if err != nil {
+		t.Fatalf("Do: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusServiceUnavailable)
+	}
+	if got := attempts.Load(); got != 1 {
+		t.Fatalf("attempts = %d, want 1", got)
+	}
+}
+
+func TestRetryDelay_HonorsRetryAfterSeconds(t *testing.T) {
+	if got := retryDelay("3", 2); got != 3*time.Second {
+		t.Fatalf("retryDelay = %v, want 3s Retry-After", got)
 	}
 }

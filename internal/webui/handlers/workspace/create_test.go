@@ -158,6 +158,31 @@ func TestHandleWorkspaceCreate_ConflictError(t *testing.T) {
 	}
 }
 
+func TestHandleWorkspaceCreate_RateLimitedError(t *testing.T) {
+	svc := &mockWorkspaceService{
+		createWorkspaceFn: func(_ context.Context, _ service.WorkspaceCreateRequest) (*ops.WorkspaceData, []string, error) {
+			return nil, nil, service.ErrRateLimited("fleet-db rate limit exceeded")
+		},
+	}
+
+	handler := handleWorkspaceCreate(svc)
+	body := strings.NewReader(`{"name":"limited","type":"empty","repos":["/a"]}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces", body)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected 429, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var resp map[string]string
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp["error"] != "fleet-db rate limit exceeded" || resp["kind"] != string(service.KindRateLimited) {
+		t.Fatalf("unexpected response: %#v", resp)
+	}
+}
+
 func TestHandleWorkspaceCreate_InvalidJSON(t *testing.T) {
 	svc := &mockWorkspaceService{}
 	handler := handleWorkspaceCreate(svc)

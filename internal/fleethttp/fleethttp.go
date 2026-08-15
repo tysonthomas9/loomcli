@@ -5,8 +5,8 @@
 // request-building, auth-header, and error-extraction code.
 //
 // What's shared: header construction (Authorization / X-API-Key /
-// X-Fleet-API-Key / X-Actor), request body marshaling, response error-message
-// extraction.
+// X-Fleet-API-Key / X-Actor), request body marshaling, bounded HTTP 429 retry,
+// and response error-message extraction.
 //
 // What's not shared: status→sentinel mapping. The two callers map
 // errors to different domains (backend.BackendError vs
@@ -18,10 +18,30 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"math/rand/v2"
 	"net/http"
+	"strconv"
+	"strings"
+	"time"
 )
+
+const (
+	maxAttempts       = 4
+	initialBackoff    = 250 * time.Millisecond
+	maxErrorBodyDrain = 64 << 10
+)
+
+// ErrRateLimited identifies an exhausted fleet-db HTTP 429 response after the
+// shared transport has used its bounded retry budget.
+var ErrRateLimited = errors.New("fleethttp: rate limited")
+
+// Doer is the subset of http.Client used by Do.
+type Doer interface {
+	Do(*http.Request) (*http.Response, error)
+}
 
 // Auth holds the optional auth headers fleet-db accepts. Fields default
 // to empty (omitted from the request when zero).
@@ -94,6 +114,89 @@ func BuildJSONRequest(ctx context.Context, method, url string, auth Auth, body a
 		req.Header.Set("X-Actor", actor)
 	}
 	return req, nil
+}
+
+// Do sends a fleet-db request, retrying only HTTP 429 responses. It makes at
+// most four attempts, honors Retry-After when present, and otherwise uses
+// exponential backoff with jitter starting around 250ms. BuildJSONRequest
+// produces replayable bodies, so rejected mutation requests are safe to retry.
+func Do(client Doer, req *http.Request) (*http.Response, error) {
+	current := req
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		resp, err := client.Do(current)
+		if err != nil || resp.StatusCode != http.StatusTooManyRequests || attempt == maxAttempts-1 {
+			return resp, err
+		}
+		if req.Body != nil && req.GetBody == nil {
+			// A caller that did not provide a replayable body keeps the original
+			// response; retrying with an empty mutation body would be incorrect.
+			return resp, nil
+		}
+
+		delay := retryDelay(resp.Header.Get("Retry-After"), attempt)
+		drainAndClose(resp.Body)
+		if err := waitForRetry(req.Context(), delay); err != nil {
+			return nil, err
+		}
+
+		current = req.Clone(req.Context())
+		if req.Body != nil {
+			body, err := req.GetBody()
+			if err != nil {
+				return nil, fmt.Errorf("replay request body: %w", err)
+			}
+			current.Body = body
+		}
+	}
+	panic("unreachable")
+}
+
+func retryDelay(retryAfter string, retry int) time.Duration {
+	if delay, ok := parseRetryAfter(retryAfter); ok {
+		return delay
+	}
+	backoff := initialBackoff << retry
+	// Retry jitter is not security-sensitive. Keep the delay within
+	// [0.5*backoff, 1.5*backoff) to avoid synchronized retry bursts.
+	return backoff/2 + time.Duration(rand.Int64N(int64(backoff))) //nolint:gosec
+}
+
+func parseRetryAfter(value string) (time.Duration, bool) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return 0, false
+	}
+	if seconds, err := strconv.ParseInt(value, 10, 64); err == nil && seconds >= 0 {
+		return time.Duration(seconds) * time.Second, true
+	}
+	when, err := http.ParseTime(value)
+	if err != nil {
+		return 0, false
+	}
+	delay := time.Until(when)
+	if delay < 0 {
+		delay = 0
+	}
+	return delay, true
+}
+
+func waitForRetry(ctx context.Context, delay time.Duration) error {
+	if delay <= 0 {
+		return nil
+	}
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func drainAndClose(body io.ReadCloser) {
+	_, _ = io.Copy(io.Discard, io.LimitReader(body, maxErrorBodyDrain))
+	_ = body.Close()
 }
 
 func methodExpectsJSONContent(method string) bool {

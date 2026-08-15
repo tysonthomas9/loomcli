@@ -12,6 +12,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/fleethttp"
 	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
@@ -299,6 +300,9 @@ func (s *workspaceServiceImpl) CreateWorkspace(ctx context.Context, req Workspac
 		s.invalidateWorkspaceCache()
 		d, buildErr := s.loadWorkspaceByID(ctx, result.WorkspaceID)
 		if buildErr != nil {
+			if errors.Is(buildErr, fleethttp.ErrRateLimited) {
+				return nil, nil, ErrRateLimited("fleet-db rate limit exceeded")
+			}
 			return nil, nil, ErrInternal("failed to load created workspace data", buildErr)
 		}
 		normalizeWorkspaceData(d)

@@ -93,7 +93,7 @@ func (b *FleetBackend) doRequestURL(ctx context.Context, method, rawURL string, 
 		return nil, 0, err
 	}
 
-	resp, err := b.client.Do(req)
+	resp, err := fleethttp.Do(b.client, req)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -140,7 +140,7 @@ func (b *FleetBackend) doRequest(ctx context.Context, method, path string, body 
 		return nil, 0, err
 	}
 
-	resp, err := b.client.Do(req)
+	resp, err := fleethttp.Do(b.client, req)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -176,7 +176,7 @@ func (b *FleetBackend) doRequestAsActor(ctx context.Context, path string, body i
 		return nil, 0, err
 	}
 
-	resp, err := b.client.Do(req)
+	resp, err := fleethttp.Do(b.client, req)
 	if err != nil {
 		return nil, 0, err
 	}

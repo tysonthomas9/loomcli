@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/tysonthomas9/loomcli/internal/fleethttp"
 	"github.com/tysonthomas9/loomcli/internal/workspaceerrors"
 )
 
@@ -220,6 +221,9 @@ func isBlockedCloneHost(host string) bool {
 
 // classifyWorkspaceCreateError maps a workspace creation error to a ServiceError.
 func classifyWorkspaceCreateError(err error) *ServiceError {
+	if errors.Is(err, fleethttp.ErrRateLimited) {
+		return ErrRateLimited("fleet-db rate limit exceeded")
+	}
 	var ce *workspaceerrors.CreateError
 	if errors.As(err, &ce) {
 		switch ce.Code {

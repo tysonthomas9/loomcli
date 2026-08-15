@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/fleethttp"
 )
 
 func TestClassifyHTTPError_GoneMapsToErrGone(t *testing.T) {
@@ -17,6 +18,17 @@ func TestClassifyHTTPError_GoneMapsToErrGone(t *testing.T) {
 	}
 	if errors.Is(err, domain.ErrAlreadyExists) || errors.Is(err, domain.ErrConflict) {
 		t.Fatalf("err = %v, must not satisfy ErrAlreadyExists/ErrConflict", err)
+	}
+}
+
+func TestClassifyHTTPError_RateLimitMapsToSharedSentinel(t *testing.T) {
+	t.Parallel()
+	err := classifyHTTPError(http.MethodPost, "/api/v1/admin/workspaces", http.StatusTooManyRequests, nil)
+	if !errors.Is(err, fleethttp.ErrRateLimited) {
+		t.Fatalf("err = %v, want errors.Is ErrRateLimited", err)
+	}
+	if errors.Is(err, domain.ErrConflict) {
+		t.Fatalf("err = %v, must not satisfy ErrConflict", err)
 	}
 }
 
