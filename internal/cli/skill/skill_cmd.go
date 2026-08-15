@@ -360,7 +360,7 @@ func readSkillText(filePath string, stdin io.Reader, label string) (string, erro
 			return "", fmt.Errorf("read %s from stdin: %w", label, err)
 		}
 	} else {
-		data, err = os.ReadFile(filePath)
+		data, err = os.ReadFile(filePath) //nolint:gosec // G304 — the operator names the file to read
 		if err != nil {
 			return "", fmt.Errorf("read %s from %q: %w", label, filePath, err)
 		}
