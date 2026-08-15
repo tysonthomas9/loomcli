@@ -31,6 +31,7 @@ import {
 
 import type { ReconnectOverlayState } from "./ReconnectingOverlay";
 import { connectWebSocket, encodeResize } from "./terminalConnection";
+import type { TerminalAttachFrame } from "./terminalControlFrame";
 import type { XTermRendererHandle } from "./XTermRenderer";
 import styles from "./TerminalInstance.module.css";
 
@@ -57,6 +58,30 @@ const INITIAL_CONNECT_CONFIG: ReconnectConfig = {
  * loop doesn't run forever unnoticed.
  */
 const UNBOUNDED_RECONNECT_TIMEOUT_MS = 60 * 60 * 1000; // 1 h when server disables its own timeout
+
+/**
+ * Render the replacement boundary the user sees at the seam between the dead
+ * session's buffer and the new shell's first output.
+ *
+ * Deliberately plain: dim, one line, no cursor addressing and no padding to
+ * the terminal width, so a later reflow cannot corrupt it. It is a client-side
+ * render, never PTY input.
+ */
+export function formatRestartBoundary(replacedAt?: string): string {
+  const when = formatBoundaryTime(replacedAt);
+  const label = when ? `server restarted ${when}` : "server restarted";
+  return `\r\n\x1b[2m── ${label} · the previous process did not survive · this is a new shell ──\x1b[0m\r\n`;
+}
+
+/** Local HH:MM for an RFC3339 stamp; empty string when absent or unparseable. */
+function formatBoundaryTime(replacedAt?: string): string {
+  if (!replacedAt) return "";
+  const parsed = new Date(replacedAt);
+  if (Number.isNaN(parsed.getTime())) return "";
+  const hours = String(parsed.getHours()).padStart(2, "0");
+  const minutes = String(parsed.getMinutes()).padStart(2, "0");
+  return `${hours}:${minutes}`;
+}
 
 function isSocketOpenOrConnecting(ws: WebSocket | null): boolean {
   return (
@@ -102,6 +127,14 @@ export interface TerminalInstanceProps {
   autoStartStaleSession?: boolean | undefined;
   /** When false, unexpected disconnects stop at the reconnect affordance. */
   autoReconnect?: boolean | undefined;
+  /**
+   * Called with the RFC3339 replacement timestamp when the server tells us,
+   * on attach, that this tab's shell was replaced because the server
+   * restarted. The owner feeds it back into the tab metadata state, which is
+   * the same source a reloaded page reads — so live-detected and reloaded
+   * state converge on one code path.
+   */
+  onSessionReplaced?: ((replacedAt: string) => void) | undefined;
 }
 
 export interface TerminalInstanceHandle {
@@ -131,6 +164,7 @@ export const TerminalInstance = forwardRef<
     ptyAlive,
     autoStartStaleSession,
     autoReconnect = true,
+    onSessionReplaced,
   },
   ref,
 ) {
@@ -204,6 +238,33 @@ export const TerminalInstance = forwardRef<
   onBackendCrashRef.current = onBackendCrash;
   const onTerminalFocusRef = useRef(onTerminalFocus);
   onTerminalFocusRef.current = onTerminalFocus;
+  const onSessionReplacedRef = useRef(onSessionReplaced);
+  onSessionReplacedRef.current = onSessionReplaced;
+
+  // The replacement already drawn in this pane's buffer. A reconnect attaches
+  // again and the server re-announces the same replacement (with
+  // `reattached: true`); redrawing on that would stack boundaries in a buffer
+  // that is never unmounted.
+  const drawnBoundaryRef = useRef<string | null>(null);
+
+  const handleAttachFrame = useCallback(
+    (frame: TerminalAttachFrame) => {
+      const replacedAt = frame.replaced_at ?? "";
+      // `replaced` is true only when this attach IS the replacement. A reattach
+      // carries the stored timestamp so a late client learns the fact, but the
+      // durable marker (PUPPET-28) — not a boundary line — is what shows it.
+      if (frame.reattached || !frame.replaced) return;
+      if (drawnBoundaryRef.current === replacedAt) return;
+      drawnBoundaryRef.current = replacedAt;
+      // Same `write` the server's output goes through, so the boundary lands at
+      // the seam and inherits the pre-renderer pending-write drain.
+      write(formatRestartBoundary(frame.replaced_at));
+      if (replacedAt !== "") {
+        onSessionReplacedRef.current?.(replacedAt);
+      }
+    },
+    [write],
+  );
 
   // Surface connection state changes.
   useEffect(() => {
@@ -317,6 +378,7 @@ export const TerminalInstance = forwardRef<
           onReconnectStateChangeRef.current?.(null);
         },
         terminalSizeRef.current,
+        handleAttachFrame,
       );
       wsCleanupRef.current = cleanup;
     },
@@ -328,6 +390,7 @@ export const TerminalInstance = forwardRef<
       syncViewportToBottom,
       startReconnectLoop,
       autoReconnect,
+      handleAttachFrame,
     ],
   );
 
