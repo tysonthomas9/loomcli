@@ -131,13 +131,10 @@ var ProtectedRuntimePaths = []string{
 	".loom",
 	"sessions",
 	"AGENTS.md",
-	// Scout-owned workspace files (lowercase agents.md is deliberate and
-	// distinct from a repo AGENTS.md). They live at the workspace root, but the
-	// workspace runtime dir's "." fallback can land them in a repo checkout —
-	// protecting them here means agent recovery's `git clean` can never destroy
-	// them (spec: File placement and guards).
+	// Shared agents.md remains at the workspace root. history.md is the one-time
+	// legacy journal migration source; namespaced journals and pending files are
+	// recursively protected by the top-level .loom entry above.
 	"agents.md",
-	"agents.md.pending",
 	"history.md",
 }
 

@@ -76,11 +76,12 @@ func TestFlueRuntimeEnvCarriesNoFleetDBCredentials(t *testing.T) {
 
 	env, err := flueRuntimeEnv(RunRequest{
 		Run: &domain.DriverRun{
-			WorkspaceKey: "TEST",
-			RunID:        "run-1",
-			NodeID:       "node-1",
-			LeaseID:      "lease-1",
-			FencingToken: 42,
+			WorkspaceKey:   "TEST",
+			RunID:          "run-1",
+			NodeID:         "node-1",
+			LeaseID:        "lease-1",
+			FencingToken:   42,
+			AgentServiceID: "scout-west",
 		},
 		BundleRoot: "/tmp/bundle",
 		ServerPath: "/tmp/bundle/dist/server.mjs",
@@ -98,11 +99,30 @@ func TestFlueRuntimeEnvCarriesNoFleetDBCredentials(t *testing.T) {
 	if got["LOOM_DRIVER_RUN_ID"] != "run-1" {
 		t.Fatalf("LOOM_DRIVER_RUN_ID = %q, want run-1", got["LOOM_DRIVER_RUN_ID"])
 	}
+	if got["LOOM_AGENT_SERVICE_ID"] != "scout-west" {
+		t.Fatalf("LOOM_AGENT_SERVICE_ID = %q, want scout-west", got["LOOM_AGENT_SERVICE_ID"])
+	}
+}
+
+func TestFlueRuntimeEnvExportsEmptyAgentServiceIDForUnattributedRun(t *testing.T) {
+	env, err := flueRuntimeEnv(RunRequest{
+		Run:        &domain.DriverRun{WorkspaceKey: "TEST", RunID: "run-1", NodeID: "node-1"},
+		BundleRoot: "/tmp/bundle", ServerPath: "/tmp/bundle/dist/server.mjs",
+		Manifest: map[string]string{"workflow_name": "scout"},
+	}, []byte(`{}`), nil)
+	if err != nil {
+		t.Fatalf("flueRuntimeEnv: %v", err)
+	}
+	got := envMap(env)
+	value, present := got["LOOM_AGENT_SERVICE_ID"]
+	if !present || value != "" {
+		t.Fatalf("LOOM_AGENT_SERVICE_ID = %q, present %v; want exported empty value", value, present)
+	}
 }
 
 // TestNodeRunnerRuntimeEnvAuthSurface pins the §9.5 workflow env lockdown:
 // a token-carrying run with the deprecated legacy fallback switched off gets
-// exactly {LOOM_RUN_TOKEN, LOOM_DRIVER_API_URL, workspace/run/node id} on top
+// exactly {LOOM_RUN_TOKEN, LOOM_DRIVER_API_URL, workspace/run/node/agent id} on top
 // of the allowlisted base — no static bearer, no lease/fencing identity. The
 // fallback default stays ON for one release (loom-dev deploy safety), and a
 // token-less run keeps the legacy env regardless of the switch (no flag-day).
@@ -139,11 +159,12 @@ func TestNodeRunnerRuntimeEnvAuthSurface(t *testing.T) {
 func runtimeEnvAuthRequest(runToken string) RunRequest {
 	return RunRequest{
 		Run: &domain.DriverRun{
-			WorkspaceKey: "TEST",
-			RunID:        "run-1",
-			NodeID:       "node-1",
-			LeaseID:      "lease-1",
-			FencingToken: 42,
+			WorkspaceKey:   "TEST",
+			RunID:          "run-1",
+			NodeID:         "node-1",
+			LeaseID:        "lease-1",
+			FencingToken:   42,
+			AgentServiceID: "scout-west",
 		},
 		BundleRoot: "/tmp/bundle",
 		ServerPath: "/tmp/bundle/dist/server.mjs",
@@ -162,6 +183,7 @@ func assertRuntimeEnvAuthSurface(t *testing.T, got map[string]string, runToken s
 		"LOOM_DRIVER_WORKSPACE": "TEST",
 		"LOOM_DRIVER_RUN_ID":    "run-1",
 		"LOOM_DRIVER_NODE_ID":   "node-1",
+		"LOOM_AGENT_SERVICE_ID": "scout-west",
 		"LOOM_DRIVER_API_URL":   "http://127.0.0.1:1",
 	} {
 		if got[key] != want {
@@ -199,6 +221,7 @@ func assertExactLockedDownDriverEnv(t *testing.T, got map[string]string) {
 		"LOOM_DRIVER_WORKSPACE":          {},
 		"LOOM_DRIVER_RUN_ID":             {},
 		"LOOM_DRIVER_NODE_ID":            {},
+		"LOOM_AGENT_SERVICE_ID":          {},
 		"LOOM_DRIVER_EXEC_TASK_CMD_JSON": {},
 		"LOOM_FLUE_SERVER_PATH":          {},
 		"LOOM_FLUE_BUNDLE_ROOT":          {},

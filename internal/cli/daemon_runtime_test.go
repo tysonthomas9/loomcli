@@ -31,14 +31,16 @@ func TestIsProtectedRuntimePath(t *testing.T) {
 		{".loom/daemon.pid", true},
 		{".loom/nested/runtime-state.json", true},
 		{".loom/other/deep/file", true},
+		{".loom/agents/scout-west/history.md", true},
+		{".loom/agents/scout-west/agents.md.pending", true},
 		{"sessions", true},
 		{"sessions/abc", true},
 		{"AGENTS.md", true},
 
 		// Scout-owned workspace files (lowercase, distinct from AGENTS.md)
 		{"agents.md", true},
-		{"agents.md.pending", true},
 		{"history.md", true},
+		{"agents.md.pending", false},
 
 		// Not protected
 		{"leftover.txt", false},

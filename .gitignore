@@ -50,11 +50,10 @@ internal/cli/automode/sessions/
 internal/cli/daemon/supervisor/sessions/
 notify.token
 
-# Scout-owned workspace files: they belong at the workspace root, but the
-# workspace runtime dir's "." fallback can land them in a repo checkout
-# (docs/design/2026-08-14-scout-proposal.md, "File placement and guards").
+# Scout's shared agents.md remains at the workspace root. The namespaced state
+# is covered by .loom/ above; history.md is retained only as the journal
+# migration source.
 /agents.md
-/agents.md.pending
 /history.md
 
 # Auth service

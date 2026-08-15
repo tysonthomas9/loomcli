@@ -4,9 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 
+	"github.com/tysonthomas9/loomcli/internal/agentstate"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/roleprompts"
 	"github.com/tysonthomas9/loomcli/internal/scriptedroles"
@@ -50,10 +53,56 @@ func EnsureAgentInstance(ctx context.Context, st store.Store, workspaceKey, work
 	if err != nil {
 		return nil, fmt.Errorf("ensure %s agent service: %w", roleName, err)
 	}
+	if err := migrateDefaultJournal(workspaceDir, spec); err != nil {
+		return nil, fmt.Errorf("migrate %s default journal: %w", roleName, err)
+	}
 	if _, err := ensureBinding(ctx, st, workspaceKey, spec, svc, driverID, versionID); err != nil {
 		return nil, fmt.Errorf("ensure %s trigger binding: %w", roleName, err)
 	}
 	return svc, nil
+}
+
+// migrateDefaultJournal performs B5's one-time state move. It is deliberately
+// scoped to the catalog default ensured by EnsureAgentInstance: user-created
+// instances have no legacy workspace-root journal to adopt.
+func migrateDefaultJournal(workspaceDir string, spec scriptedroles.ScriptedRole) error {
+	if workspaceDir == "" || spec.DefaultInstance == nil || strings.TrimSpace(spec.JournalFilename) == "" {
+		return nil
+	}
+	legacy := filepath.Join(workspaceDir, spec.JournalFilename)
+	target := agentstate.JournalPath(workspaceDir, spec.DefaultInstance.ServiceID, spec.JournalFilename)
+	if _, err := os.Stat(target); err == nil {
+		return nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("stat namespaced journal: %w", err)
+	}
+	info, err := os.Stat(legacy)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("stat legacy journal: %w", err)
+	}
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("legacy journal %s is not a regular file", legacy)
+	}
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		return fmt.Errorf("create namespaced journal directory: %w", err)
+	}
+	// A link/unlink move retains the file's inode while giving the target
+	// O_EXCL semantics: unlike os.Rename on Unix, it cannot overwrite a journal
+	// another concurrent ensure installed after the stat above.
+	if err := os.Link(legacy, target); err != nil {
+		if errors.Is(err, os.ErrExist) {
+			return nil
+		}
+		return fmt.Errorf("move-link %s to %s: %w", legacy, target, err)
+	}
+	if err := os.Remove(legacy); err != nil {
+		_ = os.Remove(target)
+		return fmt.Errorf("remove legacy journal after move: %w", err)
+	}
+	return nil
 }
 
 func ensureRole(ctx context.Context, st store.Store, workspaceKey, workspaceDir string, spec scriptedroles.ScriptedRole) error {

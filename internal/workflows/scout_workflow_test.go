@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/tysonthomas9/loomcli/internal/scriptedroles"
 )
 
 func TestBuiltinScoutDeclaresScoutTaskRunner(t *testing.T) {
@@ -42,6 +44,8 @@ func TestScoutWorkflowSourceContract(t *testing.T) {
 		{name: "flue pin shape: defineWorkflow default export", want: "export default defineWorkflow({"},
 		{name: "flue pin shape: credential-free stub agent", want: "defineAgent(() => ({ model: false }))"},
 		{name: "payload via launcher env", want: "process.env.LOOM_FLUE_INVOKE_PAYLOAD"},
+		{name: "authenticated agent identity env", want: "process.env.LOOM_AGENT_SERVICE_ID"},
+		{name: "agent identity rides opaque task input", want: "agent_service_id: agentServiceID"},
 		{name: "default scout runner", want: `"scout-task-runner"`},
 		{name: "analyze phase enqueued", want: `"scout-analyze"`},
 		{name: "write phase enqueued", want: `"scout-write"`},
@@ -76,6 +80,18 @@ func TestScoutWorkflowSourceContract(t *testing.T) {
 // workspace-root files with atomic writes and scout fence markers.
 func TestScoutTaskRunnerSourceContract(t *testing.T) {
 	source := scoutTaskRunnerSource(t)
+	role, ok := scriptedroles.ForRole(scriptedroles.ScoutRoleName)
+	if !ok || role.DefaultInstance == nil {
+		t.Fatal("scout catalog default is missing")
+	}
+	for name, want := range map[string]string{
+		"catalog default instance": `const DEFAULT_AGENT_SERVICE_ID = "` + role.DefaultInstance.ServiceID + `"`,
+		"catalog journal filename": `const SCOUT_JOURNAL_FILENAME = "` + role.JournalFilename + `"`,
+	} {
+		if !strings.Contains(source, want) {
+			t.Fatalf("%s missing from scout leaf source: %q", name, want)
+		}
+	}
 	tests := []struct {
 		name string
 		want string
@@ -91,8 +107,10 @@ func TestScoutTaskRunnerSourceContract(t *testing.T) {
 		{name: "backlog is four", want: "4 = P4 backlog"},
 		{name: "acceptance criteria folded into description", want: `"## Acceptance Criteria" section`},
 		{name: "quarantine label forced", want: `labels.push("recommended")`},
-		{name: "scout fence begin marker", want: "<!-- scout:begin -->"},
-		{name: "scout fence end marker", want: "<!-- scout:end -->"},
+		{name: "per-instance fence marker grammar", want: "<!-- loom:agent:"},
+		{name: "legacy fence migration", want: "LEGACY_SCOUT_FENCE_BEGIN"},
+		{name: "service id validation", want: "SERVICE_ID_PATTERN"},
+		{name: "namespaced instance state", want: `path.join(root, ".loom", "agents", serviceID)`},
 		{name: "atomic tmp+rename writes", want: `".loom-atomic-"`},
 		{name: "zero-repo run journals", want: "nothing to analyze: the workspace has no attached repos"},
 		{name: "read-only prompt discipline", want: "READ-ONLY"},
