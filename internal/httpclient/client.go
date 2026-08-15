@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/authmode"
+	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
@@ -20,6 +21,7 @@ import (
 // Config holds the parameters needed to create an authenticated client.
 type Config struct {
 	ServerURL string // Base URL of the loom server (e.g., "https://loom.example.com:8080")
+	Actor     string // Configured X-Actor fallback; worker-specific env takes precedence.
 }
 
 // AuthMode represents the server's authentication configuration.
@@ -34,6 +36,7 @@ type Client struct {
 	authMode    *AuthMode
 	token       string
 	tokenExpiry time.Time
+	actor       string
 	httpClient  *http.Client
 	mu          sync.Mutex
 }
@@ -46,6 +49,7 @@ func New(cfg Config) (*Client, error) {
 
 	c := &Client{
 		serverURL: serverURL,
+		actor:     bootstrap.ResolveFleetDBActor(cfg.Actor),
 		httpClient: &http.Client{
 			Transport: otelhttp.NewTransport(http.DefaultTransport),
 			Timeout:   30 * time.Second,
@@ -71,6 +75,9 @@ func New(cfg Config) (*Client, error) {
 // If the token has expired, it re-authenticates before sending.
 // On 401 response, it clears the cached token, re-authenticates, and retries once.
 func (c *Client) Do(req *http.Request) (*http.Response, error) {
+	if c.actor != "" {
+		req.Header.Set("X-Actor", c.actor)
+	}
 	c.mu.Lock()
 	if c.authMode.Mode == authmode.ModeOIDC {
 		if err := c.ensureToken(); err != nil {

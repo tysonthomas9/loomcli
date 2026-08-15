@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"strings"
 	"testing"
@@ -141,6 +142,42 @@ func TestAuditJSONModeKeepsStdoutPureAndDecorationOnStderr(t *testing.T) {
 	}
 }
 
+func TestAuditDefaultLimitPrintsMostRecentEventsInAscendingOrder(t *testing.T) {
+	history := make([]store.AuditEvent, 150)
+	for i := range history {
+		history[i] = store.AuditEvent{
+			ID:       fmt.Sprintf("event-%03d", i),
+			Actor:    "worker",
+			Action:   "issue.update",
+			EntityID: fmt.Sprintf("ISSUE-%03d", i),
+		}
+	}
+	reader := &fakeAuditTriggerStore{history: history}
+	cmd := newAuditCommand(auditCommandTestDeps(reader))
+	var stdout bytes.Buffer
+	cmd.SetOut(&stdout)
+	cmd.SetArgs([]string{"--output", "json"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("audit command: %v", err)
+	}
+
+	var got []store.AuditEvent
+	decoder := json.NewDecoder(&stdout)
+	for decoder.More() {
+		var event store.AuditEvent
+		if err := decoder.Decode(&event); err != nil {
+			t.Fatalf("decode audit event: %v", err)
+		}
+		got = append(got, event)
+	}
+	if len(got) != defaultAuditLimit {
+		t.Fatalf("events = %d, want %d", len(got), defaultAuditLimit)
+	}
+	if got[0].ID != "event-050" || got[len(got)-1].ID != "event-149" {
+		t.Fatalf("event window = %s..%s, want event-050..event-149", got[0].ID, got[len(got)-1].ID)
+	}
+}
+
 func auditCommandTestDeps(reader *fakeAuditTriggerStore) commandDeps {
 	base := memstore.New()
 	st := auditStore{Store: base, trigger: reader}
@@ -176,12 +213,32 @@ func (f *fakeAuditTriggerStore) List(context.Context, string, store.TriggerEvent
 func (f *fakeAuditTriggerStore) ListAuditEvents(
 	_ context.Context,
 	_ string,
-	_ string,
-	_ int,
+	afterCursor string,
+	limit int,
 	filter store.AuditEventFilter,
 ) ([]store.AuditEvent, string, bool, error) {
 	f.gotFilter = filter
-	return append([]store.AuditEvent(nil), f.history...), f.cursor, false, nil
+	start := 0
+	if afterCursor != "" {
+		for i, event := range f.history {
+			if event.ID == afterCursor {
+				start = i + 1
+				break
+			}
+		}
+	}
+	end := len(f.history)
+	if limit > 0 && start+limit < end {
+		end = start + limit
+	}
+	events := append([]store.AuditEvent(nil), f.history[start:end]...)
+	nextCursor := f.cursor
+	if len(events) > 0 {
+		nextCursor = events[len(events)-1].ID
+	} else if nextCursor == "" {
+		nextCursor = afterCursor
+	}
+	return events, nextCursor, end < len(f.history), nil
 }
 
 func (f *fakeAuditTriggerStore) SubscribeAuditEvents(

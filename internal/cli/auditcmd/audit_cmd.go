@@ -16,7 +16,10 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
-const defaultAuditLimit = 100
+const (
+	defaultAuditLimit = 100
+	auditPageLimit    = 1000
+)
 
 type withActiveWorkspaceFunc func(func(context.Context, *bootstrap.StoreHandle, string) error) error
 
@@ -88,7 +91,7 @@ func runAudit(cmd *cobra.Command, deps commandDeps, opts auditOptions) error {
 		if !ok {
 			return fmt.Errorf("audit trail is unavailable for this store")
 		}
-		events, cursor, _, err := reader.ListAuditEvents(ctx, workspaceKey, strings.TrimSpace(opts.since), opts.limit, filter)
+		events, cursor, err := readAuditHistory(ctx, reader, workspaceKey, strings.TrimSpace(opts.since), opts.limit, filter)
 		if err != nil {
 			return fmt.Errorf("read audit history: %w", err)
 		}
@@ -107,6 +110,39 @@ func runAudit(cmd *cobra.Command, deps commandDeps, opts auditOptions) error {
 		live, streamErrs := reader.SubscribeAuditEvents(ctx, workspaceKey, cursor, filter)
 		return consumeAuditStream(ctx, cmd.OutOrStdout(), live, streamErrs, filter, opts.output)
 	})
+}
+
+func readAuditHistory(
+	ctx context.Context,
+	reader store.AuditJournalReader,
+	workspaceKey, since string,
+	limit int,
+	filter store.AuditEventFilter,
+) ([]store.AuditEvent, string, error) {
+	if since != "" {
+		events, cursor, _, err := reader.ListAuditEvents(ctx, workspaceKey, since, limit, filter)
+		return events, cursor, err
+	}
+
+	var recent []store.AuditEvent
+	cursor := ""
+	for {
+		events, nextCursor, hasMore, err := reader.ListAuditEvents(ctx, workspaceKey, cursor, auditPageLimit, filter)
+		if err != nil {
+			return nil, "", err
+		}
+		recent = append(recent, events...)
+		if len(recent) > limit {
+			recent = append([]store.AuditEvent(nil), recent[len(recent)-limit:]...)
+		}
+		if !hasMore {
+			return recent, nextCursor, nil
+		}
+		if nextCursor == "" || nextCursor == cursor {
+			return nil, "", fmt.Errorf("audit history cursor did not advance")
+		}
+		cursor = nextCursor
+	}
 }
 
 func consumeAuditStream(
