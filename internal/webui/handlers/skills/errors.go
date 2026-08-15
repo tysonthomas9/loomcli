@@ -11,6 +11,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
+//nolint:funlen // The domain-error → HTTP mapping is one exhaustive table.
 func writeSkillError(w http.ResponseWriter, err error) {
 	if isExpectedSkillClientError(err) {
 		slog.Debug("skill handler client error", "err", err)

@@ -65,6 +65,7 @@ func (c *fileIndexCache) get(root string, allowSensitive bool, policyIdentity st
 	return cloneFileIndexResult(&entry.result), true
 }
 
+//nolint:unparam // policyIdentity keys the cache; today's single policy is still part of the key.
 func (c *fileIndexCache) put(root string, allowSensitive bool, policyIdentity string, result *service.FileIndexResult) {
 	c.putAtGeneration(root, allowSensitive, policyIdentity, result, nil)
 }

@@ -101,6 +101,8 @@ func (app *Server) buildTerminalModules() {
 
 // buildInfraModules adds fleet, diff, file, and agent control modules
 // when their dependencies are available.
+//
+//nolint:funlen // One module registration per line; splitting hides the wiring order.
 func (app *Server) buildInfraModules() {
 	storeBacked := app.config.Store != nil
 	fileAccessCfg := middleware.FileAccessConfig{

@@ -703,6 +703,8 @@ func ValidateSkillProvenanceField(field, value string) error {
 // shared by the CLI, webui, and fleet-db adapter. SKILL.md must be routed
 // around it because that name addresses the skill body rather than a bundled
 // file.
+//
+//nolint:funlen // Each rejected path class keeps its own labeled check.
 func ValidateSkillFilePath(filePath string) error {
 	if filePath == "" {
 		return fmt.Errorf("skill file path is required: %w", ErrInvalid)

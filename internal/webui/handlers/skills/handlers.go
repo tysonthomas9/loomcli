@@ -184,7 +184,7 @@ func (h *Handler) patchRoleSkill(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if _, ok := h.requireSkillRevision(w, r, ref, ifMatch); !ok {
+	if !h.requireSkillRevision(w, r, ref, ifMatch) {
 		return
 	}
 
@@ -231,7 +231,7 @@ func (h *Handler) deleteRoleSkill(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if _, ok := h.requireSkillRevision(w, r, ref, ifMatch); !ok {
+	if !h.requireSkillRevision(w, r, ref, ifMatch) {
 		return
 	}
 	if err := h.Store.Skills().Delete(r.Context(), requestWorkspaceID(r), ref, store.SkillDelete{Source: webuiSkillSource}); err != nil {
@@ -480,7 +480,7 @@ func validateSkillCreate(ref domain.SkillRef, req createSkillRequest) error {
 	return domain.ValidateSkillProvenanceField("source_ref", req.SourceRef)
 }
 
-func (h *Handler) requireSkillRevision(w http.ResponseWriter, r *http.Request, ref domain.SkillRef, ifMatch string) (*domain.Skill, bool) {
+func (h *Handler) requireSkillRevision(w http.ResponseWriter, r *http.Request, ref domain.SkillRef, ifMatch string) bool {
 	// SkillUpdate and SkillDelete do not yet carry a record-level conditional
 	// token through the Store seam. This check rejects a stale body revision
 	// before either operation; making the check atomic with the mutation needs a
@@ -488,15 +488,15 @@ func (h *Handler) requireSkillRevision(w http.ResponseWriter, r *http.Request, r
 	skill, err := h.Store.Skills().Get(r.Context(), requestWorkspaceID(r), ref)
 	if err != nil {
 		writeSkillError(w, err)
-		return nil, false
+		return false
 	}
 	if ifMatch != "*" && ifMatch != skill.ContentRevision {
 		writeSkillError(w, &domain.SkillPreconditionError{
 			Ref: ref, Path: domain.SkillFileNameSKILLMD, Expected: ifMatch, Stored: skill.ContentRevision,
 		})
-		return nil, false
+		return false
 	}
-	return skill, true
+	return true
 }
 
 func writeWorkspaceScopeReadonly(w http.ResponseWriter) {
