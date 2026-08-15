@@ -283,6 +283,11 @@ func (s *Supervisor) superviseAgent(ap *AgentProcess) {
 			s.releaseAgentOwnership(ap)
 		}
 
+		// Ownership is the proof that no other daemon runs this agent, so any
+		// session row it left unfinished belongs to a run that is over. Once
+		// per daemon lifetime; see abandoned_run.go.
+		s.recordAbandonedRunsForAgent(ap)
+
 		if !s.Concurrency.Acquire(ap.Entry.Role) {
 			releaseOwnership()
 			slog.Info("concurrency tracker closed, exiting", "worktree", ap.Entry.Worktree)
@@ -438,6 +443,9 @@ func (s *Supervisor) preFlightSetup(ap *AgentProcess) bool {
 	if !s.claimTask(ap, epicID) {
 		return false
 	}
+	// Holding the claim lock proves any unfinished session row for this task is
+	// dead. Must run BEFORE this run's own row exists.
+	s.recordAbandonedRunsForTask(ap, s.taskIDForLifecycle(ap, nil))
 	s.createAgentSession(ap, epicID)
 	return true
 }
