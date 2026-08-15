@@ -13,7 +13,11 @@ import {
 } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { FileEntry, FileReadData } from "@/api/workspace";
+import type {
+  FileEntry,
+  FileReadData,
+  SkillCatalogGroup,
+} from "@/api/workspace";
 
 const mocks = vi.hoisted(() => ({
   showToast: vi.fn(),
@@ -83,6 +87,11 @@ const mocks = vi.hoisted(() => ({
   capabilitiesLoading: false,
   capabilitiesError: null as string | null,
   retryCapabilities: vi.fn(),
+  invalidateSkills: vi.fn(),
+  skillsCatalogStatus: "loaded" as "idle" | "loading" | "loaded" | "error",
+  skillsCatalogRevision: 1,
+  skillGroups: [] as SkillCatalogGroup[],
+  skillIndexPaths: [] as string[],
   documentExternalConflict: null as {
     content: string;
     version: string;
@@ -217,19 +226,24 @@ vi.mock("@/hooks", async () => {
   const stores = await import("@/stores");
   const documentKey = (
     workspaceId: string,
-    scopeRef: unknown,
+    explorerRef: unknown,
     path: string,
   ): string => {
-    const ref = scopeRef as {
+    const ref = explorerRef as {
+      kind?: string;
+      checkout?: { scope?: string; target?: string; repo?: string };
+      group?: { kind?: string; role?: string };
       scope?: string;
       target?: string;
       repo?: string;
     };
+    const checkout = ref.kind === "checkout" ? ref.checkout : ref;
+    const skills = ref.kind === "skills" ? ref.group : null;
     return [
       workspaceId,
-      ref.scope ?? "workspace",
-      ref.target ?? "",
-      ref.repo ?? "",
+      skills ? `skills:${skills.kind}` : (checkout?.scope ?? "workspace"),
+      skills?.role ?? checkout?.target ?? "",
+      checkout?.repo ?? "",
       path,
     ].join(":");
   };
@@ -253,15 +267,9 @@ vi.mock("@/hooks", async () => {
     if (had !== dirty) emitRegistryRevision();
   };
   const documentRegistry = {
-    get: (ref: {
-      workspaceId: string;
-      scope: string;
-      target?: string;
-      repo?: string;
-      path: string;
-    }) => ({
+    get: (ref: { workspaceId: string; ref: unknown; path: string }) => ({
       dirty: mocks.registryDirtyKeys.has(
-        documentKey(ref.workspaceId, ref, ref.path),
+        documentKey(ref.workspaceId, ref.ref, ref.path),
       ),
     }),
     dirtyPathsForPrefix: vi.fn(() => mocks.registryDirtyPaths),
@@ -269,6 +277,16 @@ vi.mock("@/hooks", async () => {
     refresh: mocks.registryRefresh,
     resetPathPrefix: mocks.registryReset,
     retargetPathPrefix: mocks.registryRetarget,
+  };
+  const skillActions = {
+    canEdit: (group: { kind: string }) => group.kind === "role",
+    createSkill: vi.fn(),
+    updateMetadata: vi.fn(),
+    deleteSkill: vi.fn(),
+    createFile: vi.fn(),
+    deleteFile: vi.fn(),
+    invalidate: mocks.invalidateSkills,
+    listIndexPaths: () => mocks.skillIndexPaths,
   };
   return {
     FileCapabilitiesProvider: ({ children }: { children: React.ReactNode }) =>
@@ -300,6 +318,89 @@ vi.mock("@/hooks", async () => {
       isLoading: mocks.capabilitiesLoading,
       error: mocks.capabilitiesError,
       retry: mocks.retryCapabilities,
+    }),
+    useSkillCapabilities: () => ({
+      status: "loaded",
+      data: {
+        can_edit_role_scope: true,
+        workspace_scope: "read_only",
+      },
+      error: null,
+      retry: vi.fn(),
+    }),
+    useSkillsCatalog: () => ({
+      status: mocks.skillsCatalogStatus,
+      revision: mocks.skillsCatalogRevision,
+      groups: mocks.skillGroups,
+      error: null,
+      shadowedByRef: {},
+      shadowsByRef: {},
+      readOnlyRefs: new Set<string>(),
+      retry: vi.fn(),
+      invalidate: mocks.invalidateSkills,
+    }),
+    useSkillsActions: () => skillActions,
+    useSkillsTree: (
+      _workspaceId: string,
+      group: { kind: string; role?: string },
+    ) => {
+      const catalogGroup = mocks.skillGroups.find((candidate) =>
+        group.kind === "workspace"
+          ? candidate.scope === "workspace"
+          : candidate.scope === "role" && candidate.role === group.role,
+      );
+      return {
+        status: "loaded",
+        revision: 1,
+        groups: mocks.skillGroups,
+        error: null,
+        shadowedByRef: {},
+        shadowsByRef: {},
+        readOnlyRefs: new Set<string>(),
+        retry: vi.fn(),
+        invalidate: mocks.invalidateSkills,
+        loader: vi.fn(),
+        skills: catalogGroup?.skills ?? [],
+        shadowed: new Set<string>(),
+        shadows: new Set<string>(),
+      };
+    },
+    useScopedFileTreeCore: () => ({
+      expanded: new Set(["audit"]),
+      treeData: new Map<string, FileEntry[]>([
+        ["", [entry("audit", true)]],
+        ["audit", [entry("SKILL.md")]],
+      ]),
+      selectedPath: null,
+      isLoading: false,
+      error: null,
+      filterText: "",
+      debouncedFilterText: "",
+      toggle: vi.fn(() => Promise.resolve()),
+      loadDir: vi.fn(() => Promise.resolve()),
+      revealPath: vi.fn(() => Promise.resolve()),
+      setFilterText: vi.fn(),
+      selectFile: vi.fn(),
+      isWorkspaceTree: false,
+    }),
+    useSkill: (
+      _workspaceId: string,
+      ref: { group: { kind: string; role?: string } } | null,
+      name: string | null,
+    ) => ({
+      skill:
+        ref && name
+          ? (mocks.skillGroups
+              .find((candidate) =>
+                ref.group.kind === "workspace"
+                  ? candidate.scope === "workspace"
+                  : candidate.scope === "role" &&
+                    candidate.role === ref.group.role,
+              )
+              ?.skills.find((skill) => skill.name === name) ?? null)
+          : null,
+      shadowedByRef: {},
+      shadowsByRef: {},
     }),
     useWorkspaceContext: () => ({
       workspaceId: "ws-1",
@@ -375,7 +476,16 @@ vi.mock("@/hooks", async () => {
         save: async () => {
           if (content === baseContent) return null;
           setIsSaving(true);
-          await mocks.writeScopedFile("ws-1", _scopeRef, path, content);
+          const ref = _scopeRef as {
+            kind?: string;
+            checkout?: unknown;
+          };
+          await mocks.writeScopedFile(
+            "ws-1",
+            ref.kind === "checkout" ? ref.checkout : _scopeRef,
+            path,
+            content,
+          );
           setBaseContent(content);
           setRegistryDirty(_workspaceId, _scopeRef, path, false);
           setIsSaving(false);
@@ -433,6 +543,10 @@ describe("WorkspaceFileBrowser", () => {
     mocks.capabilities = { read: true, write: true, sensitive: true };
     mocks.capabilitiesLoading = false;
     mocks.capabilitiesError = null;
+    mocks.skillsCatalogStatus = "loaded";
+    mocks.skillsCatalogRevision = 1;
+    mocks.skillGroups = [];
+    mocks.skillIndexPaths = [];
     mocks.documentExternalConflict = null;
     mocks.registryDirtyPaths = [];
     mocks.registryDirtyKeys.clear();
@@ -684,6 +798,27 @@ describe("WorkspaceFileBrowser", () => {
     ).toBeInTheDocument();
   });
 
+  it("rebuilds Quick Open when a catalog loaded after a checkout-only index", async () => {
+    mocks.skillsCatalogStatus = "loading";
+    const view = render(<WorkspaceFileBrowser mode="workspace" />);
+    fireEvent.keyDown(window, { key: "p", metaKey: true });
+    await screen.findByRole("dialog", { name: "Quick open" });
+    await waitFor(() =>
+      expect(mocks.indexScopedFiles).toHaveBeenCalledTimes(1),
+    );
+    expect(screen.queryByText("SKILL.md")).toBeNull();
+
+    mocks.skillsCatalogStatus = "loaded";
+    mocks.skillsCatalogRevision = 2;
+    mocks.skillIndexPaths = ["audit/SKILL.md"];
+    view.rerender(<WorkspaceFileBrowser mode="workspace" />);
+
+    await waitFor(() =>
+      expect(mocks.indexScopedFiles).toHaveBeenCalledTimes(2),
+    );
+    expect(await screen.findByText("SKILL.md")).toBeInTheDocument();
+  });
+
   it("opens, edits, saves, and guards discarding a dirty file", async () => {
     const confirmSpy = vi.spyOn(window, "confirm");
     render(<WorkspaceFileBrowser mode="workspace" />);
@@ -732,7 +867,7 @@ describe("WorkspaceFileBrowser", () => {
     await waitFor(() =>
       expect(mocks.registryDiscard).toHaveBeenCalledWith({
         workspaceId: "ws-1",
-        scope: "workspace",
+        ref: { kind: "checkout", checkout: { scope: "workspace" } },
         path: "main.ts",
       }),
     );
@@ -856,7 +991,7 @@ describe("WorkspaceFileBrowser", () => {
     await waitFor(() =>
       expect(mocks.registryRefresh).toHaveBeenCalledWith({
         workspaceId: "ws-1",
-        ...agentRef,
+        ref: { kind: "checkout", checkout: agentRef },
         path: "main.ts",
       }),
     );
@@ -1795,7 +1930,7 @@ describe("WorkspaceFileBrowser", () => {
     ).toBeInTheDocument();
   });
 
-  it("shows an empty History state when the open panel has no file subject", async () => {
+  it("unmounts History when the open panel has no file subject", async () => {
     render(<WorkspaceFileBrowser mode="workspace" />);
     await expandWorkspaceFiles();
 
@@ -1804,7 +1939,9 @@ describe("WorkspaceFileBrowser", () => {
     expect(await screen.findByLabelText("File history")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Close main.ts" }));
 
-    expect(await screen.findByText("No file selected.")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.queryByLabelText("File history")).not.toBeInTheDocument();
+    });
   });
 
   it("passes quick-diff gutter marks from HEAD to the visible editor", async () => {
@@ -1965,12 +2102,12 @@ describe("WorkspaceFileBrowser", () => {
     await waitFor(() => expect(mocks.moveScopedPath).toHaveBeenCalledTimes(2));
     expect(mocks.registryReset).toHaveBeenCalledWith(
       "ws-1",
-      { scope: "workspace" },
+      { kind: "checkout", checkout: { scope: "workspace" } },
       "src/main.ts",
     );
     expect(mocks.registryRetarget).toHaveBeenCalledWith(
       "ws-1",
-      { scope: "workspace" },
+      { kind: "checkout", checkout: { scope: "workspace" } },
       "main.ts",
       "src/main.ts",
     );
@@ -2070,7 +2207,7 @@ describe("WorkspaceFileBrowser", () => {
     await waitFor(() =>
       expect(mocks.registryRetarget).toHaveBeenCalledWith(
         "ws-1",
-        { scope: "workspace" },
+        { kind: "checkout", checkout: { scope: "workspace" } },
         "main.ts",
         "renamed.ts",
       ),
@@ -2124,7 +2261,7 @@ describe("WorkspaceFileBrowser", () => {
     await waitFor(() =>
       expect(mocks.registryRefresh).toHaveBeenCalledWith({
         workspaceId: "ws-1",
-        scope: "workspace",
+        ref: { kind: "checkout", checkout: { scope: "workspace" } },
         path: "main.ts",
       }),
     );
@@ -2219,5 +2356,92 @@ describe("WorkspaceFileBrowser", () => {
     expect(
       screen.getByRole("button", { name: "Close revision" }),
     ).toBeVisible();
+  });
+
+  it("opens workspace skill documents read-only without using checkout file APIs", async () => {
+    mocks.skillGroups = [
+      {
+        scope: "workspace",
+        skills: [
+          {
+            name: "audit",
+            scope: "workspace",
+            description: "Audit the implementation",
+            content_revision: "skill-v1",
+            files: [],
+            created_by: "operator",
+            source: "loom skill update",
+            created_at: "2026-08-14T00:00:00Z",
+            updated_at: "2026-08-14T00:00:00Z",
+          },
+        ],
+      },
+    ];
+    mocks.fileMap["audit/SKILL.md"] = {
+      path: "audit/SKILL.md",
+      content: "Review every changed seam.",
+      size: 26,
+      binary: false,
+      version: "skill-v1",
+    };
+    render(<WorkspaceFileBrowser mode="workspace" />);
+    const skillsRoot = (await screen.findByText("Workspace")).closest("button");
+    expect(skillsRoot).not.toBeNull();
+    await waitFor(() => expect(mocks.gitStatusScoped).toHaveBeenCalled());
+    const readsBefore = mocks.readScopedFile.mock.calls.length;
+    const listsBefore = mocks.listScopedDir.mock.calls.length;
+
+    fireEvent.click(skillsRoot!);
+    fireEvent.click(await screen.findByLabelText("SKILL.md"));
+
+    expect(
+      await screen.findByDisplayValue("Review every changed seam."),
+    ).toHaveAttribute("data-readonly", "true");
+    expect(screen.getByText("Audit the implementation")).toBeVisible();
+    expect(screen.getByText(/Read-only.*loom skill update/)).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
+    expect(mocks.readScopedFile).toHaveBeenCalledTimes(readsBefore);
+    expect(mocks.listScopedDir).toHaveBeenCalledTimes(listsBefore);
+  });
+
+  it("does not render checkout History after switching to a skills tab", async () => {
+    mocks.skillGroups = [
+      {
+        scope: "role",
+        role: "reviewer",
+        skills: [
+          {
+            name: "audit",
+            scope: "role",
+            role: "reviewer",
+            description: "Audit the implementation",
+            content_revision: "skill-v1",
+            files: [],
+            created_at: "2026-08-14T00:00:00Z",
+            updated_at: "2026-08-14T00:00:00Z",
+          },
+        ],
+      },
+    ];
+    mocks.fileMap["audit/SKILL.md"] = {
+      path: "audit/SKILL.md",
+      content: "Review every changed seam.",
+      size: 26,
+      binary: false,
+      version: "skill-v1",
+    };
+    render(<WorkspaceFileBrowser mode="workspace" />);
+    await expandWorkspaceFiles();
+    fireEvent.click(screen.getByLabelText("main.ts"));
+    fireEvent.click(await screen.findByRole("button", { name: "History" }));
+    expect(await screen.findByLabelText("File history")).toBeInTheDocument();
+
+    fireEvent.click((await screen.findByText("reviewer")).closest("button")!);
+    fireEvent.click(await screen.findByLabelText("SKILL.md"));
+
+    await waitFor(() => {
+      expect(screen.queryByLabelText("File history")).not.toBeInTheDocument();
+    });
+    expect(screen.queryByText("No file selected.")).toBeNull();
   });
 });

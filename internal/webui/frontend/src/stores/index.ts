@@ -68,11 +68,15 @@ export {
 
 export { FileDocumentRegistry } from "./fileDocumentRegistry";
 export type {
+  CheckoutDocumentRef,
   ExternalFileConflict,
   FileDocumentOperations,
   FileDocumentRef,
   FileDocumentState,
+  FileDocumentTransport,
+  SkillsDocumentRef,
 } from "./fileDocumentRegistry";
+export { SkillsStore, skillsStore } from "./skillsStore";
 export type {
   FileBrowserStore,
   FileBrowserStoreState,

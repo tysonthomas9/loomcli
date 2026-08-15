@@ -39,17 +39,33 @@ import {
   useFileDocumentRegistryRevision,
   useFileCapabilities,
   useFileBrowserStoreInstance,
+  useSkillsActions,
+  useSkillsCatalog,
   type FileBrowserTab,
 } from "@/hooks";
 import {
   checkoutLabel,
   checkoutRefKey,
-  checkoutTitle,
   mapWorkspaceIndexPathToCheckout,
   sameCheckoutRef,
-  tabIdentityKey,
   type CheckoutRef,
 } from "@/utils/fileExplorerRefs";
+import {
+  asCheckoutRef,
+  checkoutExplorerRef,
+  explorerLabel,
+  explorerRefKey,
+  explorerTitle,
+  sameExplorerRef,
+  tabIdentityKey,
+  type ExplorerRef,
+  type SkillsExplorerRef,
+} from "@/utils/explorerRefs";
+import {
+  parseSkillPath,
+  SKILL_MD,
+  validateSkillFilePath,
+} from "@/utils/skillsPaths";
 import { wsGet, wsSet } from "@/utils/scopedStorage";
 
 import type { FileTreeNodeInfo } from "./FileTree";
@@ -57,8 +73,9 @@ import {
   ContextMenu,
   DeleteConfirmDialog,
   MoveToDialog,
-  RepairCheckoutConfirmDialog,
 } from "./FileExplorerDialogs";
+import { SkillsBrowserOverlays } from "./skills";
+import { CapabilityNotices, CheckoutRepairOverlays } from "./overlays";
 import { FileExplorerEditorGroup } from "./FileExplorerEditorGroup";
 import { FileExplorerTreePanel } from "./FileExplorerTreePanel";
 import type {
@@ -68,6 +85,7 @@ import type {
 import { FileSearchPanel } from "./FileSearchPanel";
 import { QuickOpenPalette } from "./QuickOpenPalette";
 import {
+  checkoutRepairRequest,
   hasAvailableCheckoutStatus,
   unavailableCheckoutLabels,
 } from "./checkoutAvailability";
@@ -98,7 +116,11 @@ import {
   storeLens,
   storeTreeWidth,
 } from "./fileExplorerLocalUtils";
-import { buildFileTreeSections, existingCheckoutRefs } from "./treeRoots";
+import {
+  buildFileTreeSections,
+  existingExplorerRefs,
+  gitStatusRefs,
+} from "./treeRoots";
 import {
   buildBranchChangeGroups,
   buildChangeGroups,
@@ -112,6 +134,7 @@ import type {
   CheckoutRepairMenuState,
   CompareMode,
   DeleteConfirmState,
+  DeleteSkillState,
   DiffViewState,
   ExplorerLens,
   FileBrowserProps,
@@ -120,6 +143,7 @@ import type {
   RepairConfirmState,
   RevisionViewState,
   ScopedInlineEdit,
+  SkillGroupMenuState,
   TreeRefreshRequest,
   TreeRevealRequest,
 } from "./workspaceFileBrowserTypes";
@@ -127,26 +151,6 @@ import type {
 interface BranchDiffRequest {
   key: string;
   agent: string;
-}
-
-function checkoutRepairRequest(ref: CheckoutRef, force = false) {
-  if (ref.scope === "agent" && ref.target) {
-    const request = {
-      scope: "agent" as const,
-      target: ref.target,
-      force,
-    };
-    if (ref.repo) {
-      return { ...request, repo: ref.repo };
-    }
-    return {
-      ...request,
-    };
-  }
-  if (ref.scope === "repo" && ref.target) {
-    return { scope: "repo" as const, target: ref.target, force };
-  }
-  return null;
 }
 
 function FileBrowserInner({
@@ -167,6 +171,14 @@ function FileBrowserInner({
     retry: retryCapabilities,
   } = useFileCapabilities();
   const canWrite = capabilities?.write === true;
+  const skillsCatalog = useSkillsCatalog(workspaceId);
+  const invalidateSkillsCatalog = skillsCatalog.invalidate;
+  const skillActions = useSkillsActions(workspaceId);
+  const canEditExplorer = useCallback(
+    (ref: ExplorerRef) =>
+      ref.kind === "checkout" ? canWrite : skillActions.canEdit(ref.group),
+    [canWrite, skillActions],
+  );
   const groups = useStore(store, (s) => s.groups);
   const activeGroup = useStore(store, (s) => s.activeGroup);
   const dirty = useStore(store, (s) => s.dirty);
@@ -176,7 +188,7 @@ function FileBrowserInner({
     for (const tab of groups.flatMap((group) => group.tabs)) {
       const state = documentRegistry.get({
         workspaceId,
-        ...tab.ref,
+        ref: tab.ref,
         path: tab.path,
       });
       const key = tabIdentityKey(tab);
@@ -207,7 +219,6 @@ function FileBrowserInner({
   const [quickOpenOpen, setQuickOpenOpen] = useState(false);
   const [quickOpenItems, setQuickOpenItems] = useState<QuickOpenItem[]>([]);
   const [quickOpenTruncated, setQuickOpenTruncated] = useState(false);
-  const [quickOpenFetchedAt, setQuickOpenFetchedAt] = useState(0);
   const [quickOpenLoading, setQuickOpenLoading] = useState(false);
   const [quickOpenError, setQuickOpenError] = useState<string | null>(null);
   const [gitStatusByRef, setGitStatusByRef] = useState<
@@ -227,6 +238,13 @@ function FileBrowserInner({
   );
   const [searchPanelOpen, setSearchPanelOpen] = useState(false);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
+  const [skillGroupMenu, setSkillGroupMenu] =
+    useState<SkillGroupMenuState | null>(null);
+  const [newSkillRef, setNewSkillRef] = useState<SkillsExplorerRef | null>(
+    null,
+  );
+  const [deleteSkillConfirm, setDeleteSkillConfirm] =
+    useState<DeleteSkillState | null>(null);
   const [repairMenu, setRepairMenu] = useState<CheckoutRepairMenuState | null>(
     null,
   );
@@ -250,11 +268,21 @@ function FileBrowserInner({
     new Map(),
   );
   const branchDiffsInFlightRef = useRef<Set<string>>(new Set());
+  const quickOpenRequestRef = useRef(0);
+  const fetchQuickOpenIndexRef = useRef<(force?: boolean) => Promise<void>>(
+    async () => undefined,
+  );
+  const quickOpenFetchedAtRef = useRef(0);
+  const quickOpenSkillsRevisionRef = useRef<number | null>(null);
 
   useEffect(() => {
     if (canWrite) return;
-    setInlineEdit(null);
-    setDeleteConfirm(null);
+    setInlineEdit((current) =>
+      current?.ref.kind === "checkout" ? null : current,
+    );
+    setDeleteConfirm((current) =>
+      current?.ref.kind === "checkout" ? null : current,
+    );
     setMoveDialog(null);
     setRepairConfirm(null);
     setRepairMenu(null);
@@ -292,8 +320,9 @@ function FileBrowserInner({
         agents,
         repos,
         checkouts: visibleCheckouts,
+        skills: skillsCatalog.groups,
       }),
-    [mode, agentName, agents, repos, visibleCheckouts],
+    [mode, agentName, agents, repos, skillsCatalog.groups, visibleCheckouts],
   );
   const allSections = useMemo(
     () =>
@@ -302,33 +331,47 @@ function FileBrowserInner({
         agents,
         repos,
         checkouts,
+        skills: skillsCatalog.groups,
       }),
-    [agents, repos, checkouts],
+    [agents, repos, checkouts, skillsCatalog.groups],
   );
-  const computedVisibleRefs = useMemo(
-    () => existingCheckoutRefs(sections),
+  const computedVisibleExplorerRefs = useMemo(
+    () => existingExplorerRefs(sections),
     [sections],
   );
-  const visibleRefsKey = computedVisibleRefs.map(checkoutRefKey).join("|");
-  const visibleRefsRef = useRef<{ key: string; refs: CheckoutRef[] }>({
+  const visibleRefsKey = computedVisibleExplorerRefs
+    .map(explorerRefKey)
+    .join("|");
+  const visibleRefsRef = useRef<{ key: string; refs: ExplorerRef[] }>({
     key: "",
     refs: [],
   });
   if (visibleRefsRef.current.key !== visibleRefsKey) {
     visibleRefsRef.current = {
       key: visibleRefsKey,
-      refs: computedVisibleRefs,
+      refs: computedVisibleExplorerRefs,
     };
   }
-  const visibleRefs = visibleRefsRef.current.refs;
+  const visibleExplorerRefs = visibleRefsRef.current.refs;
+  const visibleCheckoutRefs = useMemo(
+    () => gitStatusRefs(sections),
+    [sections],
+  );
+  const visibleSkillRefs = useMemo(
+    () =>
+      visibleExplorerRefs.filter(
+        (ref): ref is SkillsExplorerRef => ref.kind === "skills",
+      ),
+    [visibleExplorerRefs],
+  );
   const computedStoreValidRefs = useMemo(
-    () => existingCheckoutRefs(allSections),
+    () => existingExplorerRefs(allSections),
     [allSections],
   );
   const storeValidRefsKey = computedStoreValidRefs
-    .map(checkoutRefKey)
+    .map(explorerRefKey)
     .join("|");
-  const storeValidRefsRef = useRef<{ key: string; refs: CheckoutRef[] }>({
+  const storeValidRefsRef = useRef<{ key: string; refs: ExplorerRef[] }>({
     key: "",
     refs: [],
   });
@@ -339,7 +382,7 @@ function FileBrowserInner({
     };
   }
   const storeValidRefs = storeValidRefsRef.current.refs;
-  const knownRefs = storeValidRefs;
+  const knownRefs = useMemo(() => gitStatusRefs(allSections), [allSections]);
   const checkoutChangeCount = useMemo(
     () =>
       visibleCheckouts.reduce(
@@ -404,7 +447,7 @@ function FileBrowserInner({
         return true;
       });
   }, [visibleCheckouts]);
-  const statusRefs = lens === "changes" ? changesRefs : visibleRefs;
+  const statusRefs = lens === "changes" ? changesRefs : visibleCheckoutRefs;
   const statusRefsKey = statusRefs.map(checkoutRefKey).join("|");
   const stableStatusRefsRef = useRef<{
     key: string;
@@ -434,10 +477,12 @@ function FileBrowserInner({
     compareMode === "branch" ? branchChangeCount : checkoutChangeCount;
   const quickOpenIndexRefs = useMemo<CheckoutRef[]>(() => {
     if (mode !== "agent") return [];
-    const agentRefs = visibleRefs.filter((ref) => ref.scope === "agent");
+    const agentRefs = visibleCheckoutRefs.filter(
+      (ref) => ref.scope === "agent",
+    );
     if (agentRefs.length > 0) return agentRefs;
     return agentName ? [{ scope: "agent", target: agentName }] : [];
-  }, [mode, agentName, visibleRefs]);
+  }, [mode, agentName, visibleCheckoutRefs]);
   const visibleChangeGroups = useMemo(
     () =>
       changeGroups.map((group) => {
@@ -468,11 +513,13 @@ function FileBrowserInner({
     if (quickOpenIndexRefs.length === 1 && firstAgentRef) {
       return firstAgentRef;
     }
+    const activeCheckout =
+      activeTab?.ref.kind === "checkout" ? activeTab.ref.checkout : null;
     if (
-      activeTab?.ref.scope === "agent" &&
-      quickOpenIndexRefs.some((ref) => sameCheckoutRef(ref, activeTab.ref))
+      activeCheckout?.scope === "agent" &&
+      quickOpenIndexRefs.some((ref) => sameCheckoutRef(ref, activeCheckout))
     ) {
-      return activeTab.ref;
+      return activeCheckout;
     }
     return firstAgentRef ?? { scope: "agent", target: agentName ?? "" };
   }, [activeTab, agentName, mode, quickOpenIndexRefs, workspaceRef]);
@@ -484,8 +531,10 @@ function FileBrowserInner({
   }, [visibleChangeGroups]);
 
   useEffect(() => {
-    store.getState().pruneUnavailableRefs(storeValidRefs);
-  }, [store, storeValidRefs]);
+    if (skillsCatalog.status === "loaded") {
+      store.getState().pruneUnavailableRefs(storeValidRefs);
+    }
+  }, [skillsCatalog.status, store, storeValidRefs]);
 
   useEffect(() => {
     const node = containerRef.current;
@@ -531,7 +580,7 @@ function FileBrowserInner({
   );
 
   const markIndexStale = useCallback(() => {
-    setQuickOpenFetchedAt(0);
+    quickOpenFetchedAtRef.current = 0;
   }, []);
 
   const refreshCheckouts = useCallback(async () => {
@@ -589,13 +638,18 @@ function FileBrowserInner({
   const fetchQuickOpenIndex = useCallback(
     async (force = false) => {
       const now = Date.now();
+      const skillsCacheIsCurrent =
+        skillsCatalog.status === "loaded" &&
+        quickOpenSkillsRevisionRef.current === skillsCatalog.revision;
       if (
         !force &&
-        quickOpenFetchedAt > 0 &&
-        now - quickOpenFetchedAt < QUICK_OPEN_STALE_MS
+        quickOpenFetchedAtRef.current > 0 &&
+        now - quickOpenFetchedAtRef.current < QUICK_OPEN_STALE_MS &&
+        skillsCacheIsCurrent
       ) {
         return;
       }
+      const requestId = ++quickOpenRequestRef.current;
       setQuickOpenLoading(true);
       setQuickOpenError(null);
       try {
@@ -615,55 +669,90 @@ function FileBrowserInner({
                   }),
                 },
               ];
-        const items = indexes.flatMap(({ ref, index }) =>
+        const checkoutItems = indexes.flatMap(({ ref, index }) =>
           index.paths.map((rawPath) => {
             const mapped =
               mode === "agent"
                 ? { ref, path: rawPath }
                 : mapWorkspaceIndexPathToCheckout(rawPath, knownRefs);
             return {
-              id: tabIdentityKey({ ref: mapped.ref, path: mapped.path }),
-              ref: mapped.ref,
+              id: tabIdentityKey({
+                ref: checkoutExplorerRef(mapped.ref),
+                path: mapped.path,
+              }),
+              ref: checkoutExplorerRef(mapped.ref),
               path: mapped.path,
               checkoutLabel: checkoutLabel(mapped.ref),
             };
           }),
         );
-        setQuickOpenItems(items);
+        const skillItems = visibleSkillRefs.flatMap((ref) =>
+          skillActions.listIndexPaths(ref.group).map((path) => ({
+            id: tabIdentityKey({ ref, path }),
+            ref,
+            path,
+            checkoutLabel: explorerLabel(ref),
+          })),
+        );
+        if (requestId !== quickOpenRequestRef.current) return;
+        setQuickOpenItems([...checkoutItems, ...skillItems]);
         setQuickOpenTruncated(
           indexes.some(({ index }) => Boolean(index.truncated)),
         );
-        setQuickOpenFetchedAt(Date.now());
+        quickOpenSkillsRevisionRef.current =
+          skillsCatalog.status === "loaded" ? skillsCatalog.revision : null;
+        quickOpenFetchedAtRef.current = Date.now();
       } catch (err) {
+        if (requestId !== quickOpenRequestRef.current) return;
         setQuickOpenError(err instanceof Error ? err.message : String(err));
       } finally {
-        setQuickOpenLoading(false);
+        if (requestId === quickOpenRequestRef.current) {
+          setQuickOpenLoading(false);
+        }
       }
     },
-    [knownRefs, mode, quickOpenFetchedAt, quickOpenIndexRefs, workspaceId],
+    [
+      knownRefs,
+      mode,
+      quickOpenIndexRefs,
+      skillActions,
+      skillsCatalog.revision,
+      skillsCatalog.status,
+      visibleSkillRefs,
+      workspaceId,
+    ],
   );
 
   useEffect(() => {
-    if (!contextMenu && !repairMenu) return;
+    if (!contextMenu && !repairMenu && !skillGroupMenu) return;
     const close = () => setContextMenu(null);
     const closeRepair = () => setRepairMenu(null);
+    const closeSkillGroup = () => setSkillGroupMenu(null);
     window.addEventListener("click", close);
     window.addEventListener("click", closeRepair);
     window.addEventListener("keydown", close);
     window.addEventListener("keydown", closeRepair);
+    window.addEventListener("click", closeSkillGroup);
+    window.addEventListener("keydown", closeSkillGroup);
     return () => {
       window.removeEventListener("click", close);
       window.removeEventListener("click", closeRepair);
       window.removeEventListener("keydown", close);
       window.removeEventListener("keydown", closeRepair);
+      window.removeEventListener("click", closeSkillGroup);
+      window.removeEventListener("keydown", closeSkillGroup);
     };
-  }, [contextMenu, repairMenu]);
+  }, [contextMenu, repairMenu, skillGroupMenu]);
+
+  useEffect(() => {
+    fetchQuickOpenIndexRef.current = fetchQuickOpenIndex;
+  }, [fetchQuickOpenIndex]);
 
   useEffect(() => {
     if (quickOpenOpen) {
-      void fetchQuickOpenIndex();
+      void fetchQuickOpenIndexRef.current();
     }
-  }, [fetchQuickOpenIndex, quickOpenOpen]);
+  }, [quickOpenOpen, skillsCatalog.revision, skillsCatalog.status]);
 
   useEffect(() => {
     void refreshCheckouts();
@@ -679,10 +768,16 @@ function FileBrowserInner({
       void refreshCheckouts();
       void refreshGitStatus();
       void refreshBranchDiffs();
+      invalidateSkillsCatalog();
     };
     window.addEventListener("focus", handleFocus);
     return () => window.removeEventListener("focus", handleFocus);
-  }, [refreshBranchDiffs, refreshCheckouts, refreshGitStatus]);
+  }, [
+    refreshBranchDiffs,
+    refreshCheckouts,
+    refreshGitStatus,
+    invalidateSkillsCatalog,
+  ]);
 
   useEffect(() => {
     const previous = reconnectAttemptsRef.current;
@@ -694,6 +789,7 @@ function FileBrowserInner({
       void refreshCheckouts();
       void refreshGitStatus();
       void refreshBranchDiffs();
+      invalidateSkillsCatalog();
     }
   }, [
     eventContext.reconnectAttempts,
@@ -701,6 +797,7 @@ function FileBrowserInner({
     refreshBranchDiffs,
     refreshCheckouts,
     refreshGitStatus,
+    invalidateSkillsCatalog,
   ]);
 
   useEffect(() => {
@@ -720,21 +817,22 @@ function FileBrowserInner({
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [isActive]);
 
-  const expandForRef = useCallback((ref: CheckoutRef) => {
+  const expandForRef = useCallback((ref: ExplorerRef) => {
     setExpandedRoots((prev) => {
       const next = new Set(prev);
-      next.add(checkoutRefKey(ref));
-      if (ref.scope === "agent" && ref.target) {
-        next.add(`agent:${ref.target}`);
+      next.add(explorerRefKey(ref));
+      const checkout = asCheckoutRef(ref);
+      if (checkout?.scope === "agent" && checkout.target) {
+        next.add(`agent:${checkout.target}`);
       }
       return next;
     });
   }, []);
 
   const revealInTree = useCallback(
-    (ref: CheckoutRef, path: string) => {
+    (ref: ExplorerRef, path: string) => {
       expandForRef(ref);
-      const key = checkoutRefKey(ref);
+      const key = explorerRefKey(ref);
       setTreeRevealRequests((prev) => ({
         ...prev,
         [key]: { path, token: (prev[key]?.token ?? 0) + 1 },
@@ -743,8 +841,8 @@ function FileBrowserInner({
     [expandForRef],
   );
 
-  const refreshParents = useCallback((ref: CheckoutRef, ...paths: string[]) => {
-    const key = checkoutRefKey(ref);
+  const refreshParents = useCallback((ref: ExplorerRef, ...paths: string[]) => {
+    const key = explorerRefKey(ref);
     setTreeRefreshRequests((prev) => ({
       ...prev,
       [key]: { paths, token: (prev[key]?.token ?? 0) + 1 },
@@ -759,7 +857,7 @@ function FileBrowserInner({
       state.setDirty(tabIdentityKey(tab), false);
       documentRegistry.discard({
         workspaceId,
-        ...tab.ref,
+        ref: tab.ref,
         path: tab.path,
       });
     },
@@ -784,7 +882,7 @@ function FileBrowserInner({
 
   const openFile = useCallback(
     (
-      ref: CheckoutRef,
+      ref: ExplorerRef,
       path: string,
       groupIndex = store.getState().activeGroup,
       lineNumber?: number,
@@ -839,7 +937,7 @@ function FileBrowserInner({
           .groups[
             groupIndex
           ]?.tabs.find((candidate) => tabIdentityKey(candidate) === key);
-        const label = tab ? checkoutTitle(tab.ref, tab.path) : key;
+        const label = tab ? explorerTitle(tab.ref, tab.path) : key;
         const ok = window.confirm(`Discard unsaved changes in ${label}?`);
         if (!ok) return;
         discardTabDraft(tab, key);
@@ -861,7 +959,7 @@ function FileBrowserInner({
       if (!key || !tab) return;
       if (state.dirty[key]) {
         const ok = window.confirm(
-          `Discard unsaved changes in ${checkoutTitle(tab.ref, tab.path)} before splitting?`,
+          `Discard unsaved changes in ${explorerTitle(tab.ref, tab.path)} before splitting?`,
         );
         if (!ok) return;
         discardTabDraft(tab, key);
@@ -874,6 +972,47 @@ function FileBrowserInner({
   const handleSaved = useCallback(
     (tab: FileBrowserTab) => {
       markIndexStale();
+      if (tab.ref.kind === "skills") {
+        invalidateSkillsCatalog();
+        refreshParents(tab.ref, tab.path);
+        showToast("Skill file saved", { type: "success" });
+        const saved = parseSkillPath(tab.path);
+        if (!saved) return;
+        const siblings = store
+          .getState()
+          .groups.flatMap((group) => group.tabs)
+          .filter((candidate) => {
+            const parsed = parseSkillPath(candidate.path);
+            return (
+              candidate.path !== tab.path &&
+              sameExplorerRef(candidate.ref, tab.ref) &&
+              parsed?.skill === saved.skill
+            );
+          });
+        void Promise.all(
+          siblings.map(async (sibling) => {
+            const ref = {
+              workspaceId,
+              ref: sibling.ref,
+              path: sibling.path,
+            };
+            const before = documentRegistry.get(ref).baseVersion;
+            await documentRegistry.refresh(ref);
+            return documentRegistry.get(ref).baseVersion !== before
+              ? sibling.path
+              : null;
+          }),
+        ).then((changed) => {
+          const paths = changed.filter((path): path is string => Boolean(path));
+          if (paths.length > 0) {
+            showToast(
+              `Another file in this skill changed during save — check ${paths.join(", ")}`,
+              { type: "warning" },
+            );
+          }
+        });
+        return;
+      }
       void refreshCheckouts();
       void refreshGitStatus();
       void refreshBranchDiffs();
@@ -888,21 +1027,36 @@ function FileBrowserInner({
       refreshGitStatus,
       refreshParents,
       showToast,
+      invalidateSkillsCatalog,
+      store,
+      workspaceId,
+      documentRegistry,
     ],
   );
 
   const openDiff = useCallback(
-    (groupIndex: number, request: HistoryOpenDiffRequest) => {
+    (
+      groupIndex: number,
+      request:
+        | HistoryOpenDiffRequest
+        | Extract<DiffViewState, { kind: "patch" }>,
+    ) => {
+      if ("kind" in request && request.kind === "patch") {
+        setDiffViews((prev) => ({ ...prev, [groupIndex]: request }));
+        setRevisionViews((prev) => ({ ...prev, [groupIndex]: null }));
+        return;
+      }
+      const checkoutRequest = request as HistoryOpenDiffRequest;
       const title =
-        request.title ??
-        (request.source === "branch"
+        checkoutRequest.title ??
+        (checkoutRequest.source === "branch"
           ? "vs base"
-          : request.to
-            ? `${request.from ?? "HEAD"}..${request.to}`
-            : `${request.from ?? "HEAD"} vs working tree`);
+          : checkoutRequest.to
+            ? `${checkoutRequest.from ?? "HEAD"}..${checkoutRequest.to}`
+            : `${checkoutRequest.from ?? "HEAD"} vs working tree`);
       setDiffViews((prev) => ({
         ...prev,
-        [groupIndex]: { ...request, title },
+        [groupIndex]: { kind: "checkout", ...checkoutRequest, title },
       }));
       setRevisionViews((prev) => ({ ...prev, [groupIndex]: null }));
     },
@@ -948,7 +1102,7 @@ function FileBrowserInner({
   }, []);
 
   const navigateToDir = useCallback(
-    (ref: CheckoutRef, dirPath: string) => {
+    (ref: ExplorerRef, dirPath: string) => {
       revealInTree(ref, dirPath);
     },
     [revealInTree],
@@ -956,11 +1110,12 @@ function FileBrowserInner({
 
   const beginCreate = useCallback(
     (
-      ref: CheckoutRef,
+      ref: ExplorerRef,
       kind: "create-file" | "create-folder",
       node: FileTreeNodeInfo,
     ) => {
-      if (!canWrite) return;
+      if (!canEditExplorer(ref)) return;
+      if (ref.kind === "skills" && kind === "create-folder") return;
       setContextMenu(null);
       const parentPath = node.isDir ? node.path : dirname(node.path);
       setInlineEdit({
@@ -973,7 +1128,7 @@ function FileBrowserInner({
         },
       });
     },
-    [canWrite],
+    [canEditExplorer],
   );
 
   const beginRename = useCallback(
@@ -981,7 +1136,7 @@ function FileBrowserInner({
       if (!canWrite) return;
       setContextMenu(null);
       setInlineEdit({
-        ref,
+        ref: checkoutExplorerRef(ref),
         edit: {
           kind: "rename",
           parentPath: dirname(node.path),
@@ -995,7 +1150,7 @@ function FileBrowserInner({
   );
 
   const commitInlineEdit = useCallback(async () => {
-    if (!inlineEdit || !canWrite) return;
+    if (!inlineEdit || !canEditExplorer(inlineEdit.ref)) return;
     const edit = inlineEdit.edit;
     const ref = inlineEdit.ref;
     const value = edit.value.trim();
@@ -1003,14 +1158,32 @@ function FileBrowserInner({
       setInlineEdit(null);
       return;
     }
-    const commitKey = `${checkoutRefKey(ref)}:${edit.kind}:${edit.path ?? edit.parentPath}:${value}`;
+    const commitKey = `${explorerRefKey(ref)}:${edit.kind}:${edit.path ?? edit.parentPath}:${value}`;
     if (inlineCommitKeyRef.current === commitKey) return;
     inlineCommitKeyRef.current = commitKey;
     setInlineEdit(null);
     try {
+      if (ref.kind === "skills") {
+        if (edit.kind !== "create-file") return;
+        const fullPath = joinPath(edit.parentPath, value);
+        const parsed = parseSkillPath(fullPath);
+        const validation = parsed
+          ? validateSkillFilePath(parsed.file)
+          : "Choose a file inside a skill";
+        if (!parsed || validation || parsed.file === SKILL_MD) {
+          throw new Error(validation ?? `${SKILL_MD} already exists`);
+        }
+        await skillActions.createFile(ref.group, parsed.skill, parsed.file);
+        markIndexStale();
+        refreshParents(ref, fullPath);
+        openFile(ref, fullPath);
+        revealInTree(ref, fullPath);
+        return;
+      }
+      const checkoutRef = ref.checkout;
       if (edit.kind === "create-file") {
         const path = joinPath(edit.parentPath, value);
-        await writeScopedFile(workspaceId, ref, path, "", {
+        await writeScopedFile(workspaceId, checkoutRef, path, "", {
           createOnly: true,
         });
         markIndexStale();
@@ -1022,7 +1195,7 @@ function FileBrowserInner({
         revealInTree(ref, path);
       } else if (edit.kind === "create-folder") {
         const path = joinPath(edit.parentPath, value);
-        await mkdirScoped(workspaceId, ref, path);
+        await mkdirScoped(workspaceId, checkoutRef, path);
         markIndexStale();
         void refreshCheckouts();
         void refreshGitStatus();
@@ -1032,10 +1205,14 @@ function FileBrowserInner({
       } else if (edit.path) {
         const nextPath = joinPath(edit.parentPath, value);
         if (nextPath !== edit.path) {
-          const source = await statScopedPath(workspaceId, ref, edit.path);
+          const source = await statScopedPath(
+            workspaceId,
+            checkoutRef,
+            edit.path,
+          );
           await moveScopedPath(
             workspaceId,
-            ref,
+            checkoutRef,
             edit.path,
             nextPath,
             false,
@@ -1066,7 +1243,7 @@ function FileBrowserInner({
     }
   }, [
     inlineEdit,
-    canWrite,
+    canEditExplorer,
     workspaceId,
     refreshParents,
     openFile,
@@ -1078,10 +1255,11 @@ function FileBrowserInner({
     refreshCheckouts,
     refreshGitStatus,
     documentRegistry,
+    skillActions,
   ]);
 
   const dirtyTabsForPath = useCallback(
-    (ref: CheckoutRef, path: string): Array<{ key: string; path: string }> => {
+    (ref: ExplorerRef, path: string): Array<{ key: string; path: string }> => {
       const state = store.getState();
       const dirtyKeys = new Set(Object.keys(state.dirty));
       return state.groups
@@ -1089,7 +1267,7 @@ function FileBrowserInner({
         .filter(
           (tab) =>
             dirtyKeys.has(tabIdentityKey(tab)) &&
-            sameCheckoutRef(tab.ref, ref) &&
+            sameExplorerRef(tab.ref, ref) &&
             pathMatchesPrefix(tab.path, path),
         )
         .map((tab) => ({ key: tabIdentityKey(tab), path: tab.path }));
@@ -1099,11 +1277,11 @@ function FileBrowserInner({
 
   const performDelete = useCallback(
     async (
-      ref: CheckoutRef,
+      ref: ExplorerRef,
       node: FileTreeNodeInfo,
       skipFutureFileConfirms = false,
     ) => {
-      if (!canWrite) return;
+      if (!canEditExplorer(ref)) return;
       const dirtyTabs = dirtyTabsForPath(ref, node.path);
       const dirtyDocuments = documentRegistry.dirtyPathsForPrefix(
         workspaceId,
@@ -1121,14 +1299,24 @@ function FileBrowserInner({
         if (!ok) return;
       }
       try {
-        const source = await statScopedPath(workspaceId, ref, node.path);
-        await deleteScopedPath(
-          workspaceId,
-          ref,
-          node.path,
-          node.isDir,
-          source.version,
-        );
+        if (ref.kind === "skills") {
+          const parsed = parseSkillPath(node.path);
+          if (!parsed || node.isDir || parsed.file === SKILL_MD) return;
+          await skillActions.deleteFile(ref.group, parsed.skill, parsed.file);
+        } else {
+          const source = await statScopedPath(
+            workspaceId,
+            ref.checkout,
+            node.path,
+          );
+          await deleteScopedPath(
+            workspaceId,
+            ref.checkout,
+            node.path,
+            node.isDir,
+            source.version,
+          );
+        }
         for (const tab of dirtyTabs) {
           store.getState().setDirty(tab.key, false);
         }
@@ -1137,7 +1325,7 @@ function FileBrowserInner({
         void refreshCheckouts();
         void refreshGitStatus();
         void refreshBranchDiffs();
-        if (!node.isDir && skipFutureFileConfirms) {
+        if (ref.kind === "checkout" && !node.isDir && skipFutureFileConfirms) {
           wsSet(workspaceId, DELETE_FILE_SKIP_KEY, "1");
         }
         store.getState().closePathPrefix(ref, node.path);
@@ -1161,14 +1349,23 @@ function FileBrowserInner({
       refreshCheckouts,
       refreshGitStatus,
       documentRegistry,
-      canWrite,
+      canEditExplorer,
+      skillActions,
     ],
   );
 
   const requestDelete = useCallback(
-    (ref: CheckoutRef, node: FileTreeNodeInfo) => {
-      if (!canWrite) return;
+    (ref: ExplorerRef, node: FileTreeNodeInfo) => {
+      if (!canEditExplorer(ref)) return;
       setContextMenu(null);
+      if (ref.kind === "skills") {
+        if (node.depth === 0) {
+          setDeleteSkillConfirm({ ref, name: node.name });
+        } else if (!node.isDir && !node.path.endsWith(`/${SKILL_MD}`)) {
+          setDeleteConfirm({ ref, node });
+        }
+        return;
+      }
       const skipFileConfirm =
         !node.isDir && wsGet(workspaceId, DELETE_FILE_SKIP_KEY) === "1";
       if (skipFileConfirm) {
@@ -1177,7 +1374,7 @@ function FileBrowserInner({
         setDeleteConfirm({ ref, node });
       }
     },
-    [canWrite, performDelete, workspaceId],
+    [canEditExplorer, performDelete, workspaceId],
   );
 
   const duplicateFile = useCallback(
@@ -1219,8 +1416,9 @@ function FileBrowserInner({
         void refreshCheckouts();
         void refreshGitStatus();
         void refreshBranchDiffs();
-        refreshParents(ref, nextPath);
-        openFile(ref, nextPath);
+        const explorerRef = checkoutExplorerRef(ref);
+        refreshParents(explorerRef, nextPath);
+        openFile(explorerRef, nextPath);
       } catch (err) {
         showToast(err instanceof Error ? err.message : String(err), {
           type: "error",
@@ -1252,7 +1450,7 @@ function FileBrowserInner({
 
   const handleContextMenu = useCallback(
     (
-      ref: CheckoutRef,
+      ref: ExplorerRef,
       node: FileTreeNodeInfo,
       event: MouseEvent<HTMLDivElement>,
     ) => {
@@ -1264,13 +1462,13 @@ function FileBrowserInner({
         duplicateEligible: false,
       };
       setContextMenu(next);
-      if (!canWrite || node.isDir) return;
-      void readScopedFile(workspaceId, ref, node.path)
+      if (ref.kind !== "checkout" || !canWrite || node.isDir) return;
+      void readScopedFile(workspaceId, ref.checkout, node.path)
         .then((data) => {
           if (data.binary || data.truncated) return;
           setContextMenu((current) =>
             current &&
-            sameCheckoutRef(current.ref, ref) &&
+            sameExplorerRef(current.ref, ref) &&
             current.node.path === node.path
               ? { ...current, duplicateEligible: true }
               : current,
@@ -1307,7 +1505,7 @@ function FileBrowserInner({
         await refreshCheckouts();
         void refreshGitStatus();
         void refreshBranchDiffs();
-        refreshParents(ref, "");
+        refreshParents(checkoutExplorerRef(ref), "");
         showToast(result.message || `Repaired ${label}.`, {
           type: "success",
         });
@@ -1348,6 +1546,7 @@ function FileBrowserInner({
       targetFolderPath: string,
     ) => {
       if (!canWrite) return;
+      const explorerRef = checkoutExplorerRef(ref);
       const move = resolveMoveToTarget(node.path, targetFolderPath);
       if (!move) return;
       let discardedDestinationTabs: string[] = [];
@@ -1371,10 +1570,10 @@ function FileBrowserInner({
         }
         const ok = window.confirm(`Overwrite ${move.to}?`);
         if (!ok) return;
-        const dirtyDestinationTabs = dirtyTabsForPath(ref, move.to);
+        const dirtyDestinationTabs = dirtyTabsForPath(explorerRef, move.to);
         const dirtyDestinationDocuments = documentRegistry.dirtyPathsForPrefix(
           workspaceId,
-          ref,
+          explorerRef,
           move.to,
         );
         const dirtyDestinationCount = new Set([
@@ -1418,16 +1617,21 @@ function FileBrowserInner({
         store.getState().setDirty(key, false);
       }
       if (overwroteDestination) {
-        documentRegistry.resetPathPrefix(workspaceId, ref, move.to);
+        documentRegistry.resetPathPrefix(workspaceId, explorerRef, move.to);
       }
-      documentRegistry.retargetPathPrefix(workspaceId, ref, move.from, move.to);
-      store.getState().retargetPathPrefix(ref, move.from, move.to);
+      documentRegistry.retargetPathPrefix(
+        workspaceId,
+        explorerRef,
+        move.from,
+        move.to,
+      );
+      store.getState().retargetPathPrefix(explorerRef, move.from, move.to);
       markIndexStale();
       void refreshCheckouts();
       void refreshGitStatus();
       void refreshBranchDiffs();
-      refreshParents(ref, move.from, move.to);
-      revealInTree(ref, move.to);
+      refreshParents(explorerRef, move.from, move.to);
+      revealInTree(explorerRef, move.to);
       showToast("Moved", { type: "success" });
       setMoveDialog(null);
     },
@@ -1469,33 +1673,30 @@ function FileBrowserInner({
         className={styles.treePanel}
         style={{ ["--tree-width"]: `${treeWidth}px` } as CSSProperties}
       >
-        {(capabilitiesLoading || capabilitiesError) && (
-          <div className={styles.capabilitiesNotice} role="status">
-            <span>
-              {capabilitiesLoading
-                ? "Checking file permissions..."
-                : "File permissions unavailable. Editing is disabled."}
-            </span>
-            {capabilitiesError && (
-              <button type="button" onClick={retryCapabilities}>
-                Retry
-              </button>
-            )}
-          </div>
-        )}
+        <CapabilityNotices
+          workspaceId={workspaceId}
+          filesLoading={capabilitiesLoading}
+          filesError={capabilitiesError}
+          retryFiles={retryCapabilities}
+        />
         {searchPanelOpen ? (
           <FileSearchPanel
             workspaceId={workspaceId}
             scopeRef={searchScopeRef}
             canWrite={canWrite}
             onOpenResult={(path, line) =>
-              openFile(searchScopeRef, path, undefined, line)
+              openFile(
+                checkoutExplorerRef(searchScopeRef),
+                path,
+                undefined,
+                line,
+              )
             }
             onFilesChanged={(paths, complete) => {
               for (const path of paths) {
                 void documentRegistry.refresh({
                   workspaceId,
-                  ...searchScopeRef,
+                  ref: checkoutExplorerRef(searchScopeRef),
                   path,
                 });
               }
@@ -1503,13 +1704,14 @@ function FileBrowserInner({
               void refreshCheckouts();
               void refreshGitStatus();
               void refreshBranchDiffs();
-              refreshParents(searchScopeRef, ...paths);
+              refreshParents(checkoutExplorerRef(searchScopeRef), ...paths);
               if (complete) showToast("Replace applied", { type: "success" });
             }}
             onClose={() => setSearchPanelOpen(false)}
           />
         ) : (
           <FileExplorerTreePanel
+            workspaceId={workspaceId}
             lens={lens}
             changeCount={activeChangeCount}
             compareMode={compareMode}
@@ -1524,6 +1726,7 @@ function FileBrowserInner({
             expandedRoots={expandedRoots}
             repairingCheckoutKey={repairingCheckoutKey}
             canWrite={canWrite}
+            canEditSkills={(ref) => canEditExplorer(ref)}
             selectedTab={selectedTab}
             inlineEdit={inlineEdit}
             gitStatusByRef={gitStatusByRef}
@@ -1541,6 +1744,18 @@ function FileBrowserInner({
               void performCheckoutRepair(ref, label)
             }
             onCheckoutContextMenu={handleCheckoutContextMenu}
+            onSkillGroupContextMenu={(ref, event) => {
+              if (!canEditExplorer(ref)) return;
+              setContextMenu(null);
+              setSkillGroupMenu({
+                ref,
+                x: event.clientX,
+                y: event.clientY,
+              });
+            }}
+            onNewSkill={(ref) => {
+              if (canEditExplorer(ref)) setNewSkillRef(ref);
+            }}
             onOpenFile={openFile}
             onContextMenu={handleContextMenu}
             onRequestRename={beginRename}
@@ -1596,10 +1811,13 @@ function FileBrowserInner({
               onOpenRevision={openRevision}
               onCloseRevision={closeRevision}
               onOpenEditableFile={(groupIndex, ref, path) =>
-                openFile(ref, path, groupIndex)
+                openFile(checkoutExplorerRef(ref), path, groupIndex)
               }
               historyRefreshKey={historyRefreshKey}
               canWrite={canWrite}
+              onDeleteSkill={(ref, name) =>
+                setDeleteSkillConfirm({ ref, name })
+              }
               onLineTargetApplied={handleLineTargetApplied}
               lineTarget={
                 groups[0]?.active ? lineTargets[groups[0].active] : undefined
@@ -1637,10 +1855,13 @@ function FileBrowserInner({
                   onOpenRevision={openRevision}
                   onCloseRevision={closeRevision}
                   onOpenEditableFile={(groupIndex, ref, path) =>
-                    openFile(ref, path, groupIndex)
+                    openFile(checkoutExplorerRef(ref), path, groupIndex)
                   }
                   historyRefreshKey={historyRefreshKey}
                   canWrite={canWrite}
+                  onDeleteSkill={(ref, name) =>
+                    setDeleteSkillConfirm({ ref, name })
+                  }
                   onLineTargetApplied={handleLineTargetApplied}
                   lineTarget={
                     groups[1]?.active
@@ -1656,56 +1877,46 @@ function FileBrowserInner({
       {contextMenu && (
         <ContextMenu
           state={contextMenu}
-          canWrite={canWrite}
+          canWrite={canEditExplorer(contextMenu.ref)}
           onNewFile={(node) =>
             beginCreate(contextMenu.ref, "create-file", node)
           }
           onNewFolder={(node) =>
             beginCreate(contextMenu.ref, "create-folder", node)
           }
-          onRename={(node) => beginRename(contextMenu.ref, node)}
+          onRename={(node) => {
+            if (contextMenu.ref.kind === "checkout") {
+              beginRename(contextMenu.ref.checkout, node);
+            }
+          }}
           onDelete={(node) => requestDelete(contextMenu.ref, node)}
           onMove={(node) => {
+            if (contextMenu.ref.kind !== "checkout") return;
             setContextMenu(null);
-            setMoveDialog({ ref: contextMenu.ref, node });
+            setMoveDialog({ ref: contextMenu.ref.checkout, node });
           }}
-          onDuplicate={(node) => duplicateFile(contextMenu.ref, node)}
+          onDuplicate={(node) => {
+            if (contextMenu.ref.kind === "checkout") {
+              void duplicateFile(contextMenu.ref.checkout, node);
+            }
+          }}
           onCopyPath={copyPath}
         />
       )}
-      {canWrite && repairMenu && (
-        <div
-          className={styles.contextMenu}
-          style={{ left: repairMenu.x, top: repairMenu.y }}
-          role="menu"
-        >
-          <button
-            type="button"
-            role="menuitem"
-            onClick={() => {
-              const { ref, label } = repairMenu;
-              setRepairMenu(null);
-              void performCheckoutRepair(ref, label);
-            }}
-          >
-            Repair checkout
-          </button>
-        </div>
-      )}
-      {canWrite && repairConfirm && (
-        <RepairCheckoutConfirmDialog
-          label={repairConfirm.label}
-          onCancel={() => setRepairConfirm(null)}
-          onConfirm={() => {
-            const { ref, label } = repairConfirm;
-            setRepairConfirm(null);
-            void performCheckoutRepair(ref, label, true);
-          }}
-        />
-      )}
-      {canWrite && deleteConfirm && (
+      <CheckoutRepairOverlays
+        canWrite={canWrite}
+        menu={repairMenu}
+        confirm={repairConfirm}
+        onCloseMenu={() => setRepairMenu(null)}
+        onCloseConfirm={() => setRepairConfirm(null)}
+        onRepair={(ref, label, force) =>
+          void performCheckoutRepair(ref, label, force)
+        }
+      />
+      {deleteConfirm && canEditExplorer(deleteConfirm.ref) && (
         <DeleteConfirmDialog
           node={deleteConfirm.node}
+          allowSkip={deleteConfirm.ref.kind === "checkout"}
           onCancel={() => setDeleteConfirm(null)}
           onConfirm={(skip) =>
             void performDelete(deleteConfirm.ref, deleteConfirm.node, skip)
@@ -1721,6 +1932,26 @@ function FileBrowserInner({
           }
         />
       )}
+      <SkillsBrowserOverlays
+        menu={skillGroupMenu}
+        newSkillRef={newSkillRef}
+        deleteSkill={deleteSkillConfirm}
+        canEdit={(ref) => canEditExplorer(ref)}
+        onChooseNew={setNewSkillRef}
+        onCloseMenu={() => setSkillGroupMenu(null)}
+        onCancelNew={() => setNewSkillRef(null)}
+        onSkillCreated={(ref, path) => {
+          setNewSkillRef(null);
+          markIndexStale();
+          revealInTree(ref, path);
+          openFile(ref, path);
+        }}
+        onCancelDelete={() => setDeleteSkillConfirm(null)}
+        onSkillDeleted={() => {
+          setDeleteSkillConfirm(null);
+          markIndexStale();
+        }}
+      />
       <QuickOpenPalette
         isOpen={quickOpenOpen}
         items={quickOpenItems}

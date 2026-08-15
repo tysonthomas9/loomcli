@@ -1,6 +1,6 @@
 /**
- * Zustand vanilla store for File Browser v3 tab state.
- * One store instance is created per workspace; each tab carries its checkout ref.
+ * Zustand vanilla store for File Browser v4 tab state.
+ * One store instance is created per workspace; each tab carries an explorer ref.
  */
 
 import {
@@ -15,19 +15,21 @@ import { createStore, type StoreApi } from "zustand/vanilla";
 
 import type { FileScopeRef } from "@/api/workspace";
 import { wsGet, wsSet } from "@/utils/scopedStorage";
+import { cleanPath } from "@/utils/fileExplorerRefs";
 import {
-  checkoutRefKey,
-  cleanPath,
-  normalizeCheckoutRef,
-  sameCheckoutRef,
+  checkoutExplorerRef,
+  explorerRefKey,
+  normalizeExplorerRef,
+  sameExplorerRef,
   tabIdentityKey,
-  type CheckoutRef,
-} from "@/utils/fileExplorerRefs";
+  type ExplorerRef,
+} from "@/utils/explorerRefs";
+import { parseSkillPath, validateRoleName } from "@/utils/skillsPaths";
 
 const FILE_BROWSER_TABS_STORAGE_KEY = "file-browser-tabs:v3";
 
 export interface FileBrowserTab {
-  ref: CheckoutRef;
+  ref: ExplorerRef;
   path: string;
 }
 
@@ -37,13 +39,13 @@ export interface FileBrowserGroup {
   active: string | null;
 }
 
-export interface PersistedFileBrowserTabsV3 {
-  v: 3;
+export interface PersistedFileBrowserTabsV4 {
+  v: 4;
   groups: FileBrowserGroup[];
   mru: FileBrowserTab[];
 }
 
-export interface FileBrowserStoreState extends PersistedFileBrowserTabsV3 {
+export interface FileBrowserStoreState extends PersistedFileBrowserTabsV4 {
   dirty: Record<string, boolean>;
   activeGroup: number;
 }
@@ -52,11 +54,11 @@ export interface FileBrowserStoreActions {
   openTab: (tab: FileBrowserTab, groupIndex?: number) => void;
   activateTab: (groupIndex: number, tabKey: string) => void;
   closeTab: (groupIndex: number, tabKey: string) => void;
-  closePathPrefix: (ref: CheckoutRef, path: string) => void;
+  closePathPrefix: (ref: ExplorerRef, path: string) => void;
   splitRight: (tab?: FileBrowserTab | null) => void;
   setDirty: (tabKey: string, dirty: boolean) => void;
-  retargetPathPrefix: (ref: CheckoutRef, from: string, to: string) => void;
-  pruneUnavailableRefs: (validRefs: CheckoutRef[]) => void;
+  retargetPathPrefix: (ref: ExplorerRef, from: string, to: string) => void;
+  pruneUnavailableRefs: (validRefs: ExplorerRef[]) => void;
   reset: () => void;
 }
 
@@ -64,12 +66,12 @@ export type FileBrowserStore = FileBrowserStoreState & FileBrowserStoreActions;
 
 export interface FileBrowserStoreConfig {
   workspaceId: string;
-  validRefs?: CheckoutRef[] | undefined;
+  validRefs?: ExplorerRef[] | undefined;
   storageKey?: string | undefined;
 }
 
-const EMPTY_FILE_BROWSER_STATE: PersistedFileBrowserTabsV3 = {
-  v: 3,
+const EMPTY_FILE_BROWSER_STATE: PersistedFileBrowserTabsV4 = {
+  v: 4,
   groups: [{ tabs: [], active: null }],
   mru: [],
 };
@@ -91,39 +93,85 @@ function normalizeTab(raw: unknown): FileBrowserTab | null {
   const item = raw as { ref?: unknown; path?: unknown };
   if (typeof item.path !== "string" || item.path.trim() === "") return null;
   if (!item.ref || typeof item.ref !== "object") return null;
-  const ref = item.ref as FileScopeRef;
-  if (
-    ref.scope !== "workspace" &&
-    ref.scope !== "repo" &&
-    ref.scope !== "agent"
-  ) {
-    return null;
-  }
-  if ((ref.scope === "repo" || ref.scope === "agent") && !ref.target) {
+  const ref = item.ref as Partial<ExplorerRef>;
+  if (ref.kind === "checkout") {
+    const checkout = ref.checkout as FileScopeRef | undefined;
+    if (
+      !checkout ||
+      (checkout.scope !== "workspace" &&
+        checkout.scope !== "repo" &&
+        checkout.scope !== "agent") ||
+      ((checkout.scope === "repo" || checkout.scope === "agent") &&
+        !checkout.target)
+    ) {
+      return null;
+    }
+  } else if (ref.kind === "skills") {
+    const group = ref.group;
+    if (
+      !group ||
+      (group.kind !== "workspace" &&
+        (group.kind !== "role" ||
+          typeof group.role !== "string" ||
+          !!validateRoleName(group.role))) ||
+      !parseSkillPath(item.path)
+    ) {
+      return null;
+    }
+  } else {
     return null;
   }
   return {
-    ref: normalizeCheckoutRef(ref),
+    ref: normalizeExplorerRef(ref as ExplorerRef),
+    path: cleanPath(item.path),
+  };
+}
+
+function normalizeLegacyTab(raw: unknown): FileBrowserTab | null {
+  if (!raw || typeof raw !== "object") return null;
+  const item = raw as { ref?: unknown; path?: unknown };
+  if (typeof item.path !== "string" || item.path.trim() === "") return null;
+  if (!item.ref || typeof item.ref !== "object") return null;
+  const ref = item.ref as FileScopeRef;
+  if (
+    (ref.scope !== "workspace" &&
+      ref.scope !== "repo" &&
+      ref.scope !== "agent") ||
+    ((ref.scope === "repo" || ref.scope === "agent") && !ref.target)
+  ) {
+    return null;
+  }
+  return {
+    ref: checkoutExplorerRef(ref),
     path: cleanPath(item.path),
   };
 }
 
 function validRefSet(
-  validRefs?: CheckoutRef[] | undefined,
+  validRefs?: ExplorerRef[] | undefined,
 ): Set<string> | null {
   if (!validRefs) return null;
-  return new Set(validRefs.map((ref) => checkoutRefKey(ref)));
+  return new Set(validRefs.map((ref) => explorerRefKey(ref)));
 }
 
 function coerceTabToValidRef(
   tab: FileBrowserTab,
-  validRefs: CheckoutRef[],
+  validRefs: ExplorerRef[],
 ): FileBrowserTab {
   const refs = validRefSet(validRefs);
-  if (refs?.has(checkoutRefKey(tab.ref))) return tab;
-  if (tab.ref.scope === "agent" && tab.ref.target && !tab.ref.repo) {
+  if (refs?.has(explorerRefKey(tab.ref))) return tab;
+  if (
+    tab.ref.kind === "checkout" &&
+    tab.ref.checkout.scope === "agent" &&
+    tab.ref.checkout.target &&
+    !tab.ref.checkout.repo
+  ) {
+    const target = tab.ref.checkout.target;
     const fallback = validRefs.find(
-      (ref) => ref.scope === "agent" && ref.target === tab.ref.target,
+      (ref) =>
+        ref.kind === "checkout" &&
+        ref.checkout.scope === "agent" &&
+        ref.checkout.target === target,
     );
     if (fallback) return { ...tab, ref: fallback };
   }
@@ -131,15 +179,15 @@ function coerceTabToValidRef(
 }
 
 function isValidTab(tab: FileBrowserTab, refs: Set<string> | null): boolean {
-  return !refs || refs.has(checkoutRefKey(tab.ref));
+  return !refs || refs.has(explorerRefKey(tab.ref));
 }
 
 function matchesPathPrefix(
   tab: FileBrowserTab,
-  ref: CheckoutRef,
+  ref: ExplorerRef,
   prefix: string,
 ): boolean {
-  if (!sameCheckoutRef(tab.ref, ref)) return false;
+  if (!sameExplorerRef(tab.ref, ref)) return false;
   const p = cleanPath(tab.path);
   const base = cleanPath(prefix);
   return p === base || p.startsWith(`${base}/`);
@@ -165,7 +213,7 @@ function uniqueTabs(
     const key = tabKey(tab);
     if (seen.has(key)) continue;
     seen.add(key);
-    out.push({ ref: normalizeCheckoutRef(tab.ref), path: cleanPath(tab.path) });
+    out.push({ ref: normalizeExplorerRef(tab.ref), path: cleanPath(tab.path) });
   }
   return out;
 }
@@ -173,6 +221,7 @@ function uniqueTabs(
 function normalizeGroups(
   rawGroups: unknown,
   refs: Set<string> | null,
+  normalizer: (raw: unknown) => FileBrowserTab | null = normalizeTab,
 ): FileBrowserGroup[] {
   const source = Array.isArray(rawGroups) ? rawGroups : [];
   const next = source.slice(0, 2).map((raw) => {
@@ -180,7 +229,7 @@ function normalizeGroups(
     const tabs = uniqueTabs(
       Array.isArray(group.tabs)
         ? group.tabs
-            .map(normalizeTab)
+            .map(normalizer)
             .filter((tab): tab is FileBrowserTab => tab !== null)
         : [],
       refs,
@@ -208,6 +257,7 @@ function normalizeMru(
   rawMru: unknown,
   groups: FileBrowserGroup[],
   refs: Set<string> | null,
+  normalizer: (raw: unknown) => FileBrowserTab | null = normalizeTab,
 ): FileBrowserTab[] {
   const open = new Map<string, FileBrowserTab>();
   for (const group of groups) {
@@ -219,7 +269,7 @@ function normalizeMru(
   const out: FileBrowserTab[] = [];
   if (Array.isArray(rawMru)) {
     for (const raw of rawMru) {
-      const tab = normalizeTab(raw);
+      const tab = normalizer(raw);
       if (!tab || !isValidTab(tab, refs)) continue;
       const key = tabKey(tab);
       const openTab = open.get(key);
@@ -249,19 +299,20 @@ function persistedFromGroups(
   groups: unknown,
   mru: unknown,
   refs: Set<string> | null,
-): PersistedFileBrowserTabsV3 {
-  const normalizedGroups = normalizeGroups(groups, refs);
+  normalizer: (raw: unknown) => FileBrowserTab | null = normalizeTab,
+): PersistedFileBrowserTabsV4 {
+  const normalizedGroups = normalizeGroups(groups, refs, normalizer);
   return {
-    v: 3,
+    v: 4,
     groups: normalizedGroups,
-    mru: normalizeMru(mru, normalizedGroups, refs),
+    mru: normalizeMru(mru, normalizedGroups, refs, normalizer),
   };
 }
 
-function parsePersistedV3(
+function parsePersistedV4(
   raw: string | null,
   refs: Set<string> | null,
-): PersistedFileBrowserTabsV3 | null {
+): PersistedFileBrowserTabsV4 | null {
   if (!raw) return null;
   try {
     const parsed = JSON.parse(raw) as {
@@ -269,8 +320,16 @@ function parsePersistedV3(
       groups?: unknown;
       mru?: unknown;
     };
-    if (parsed?.v === 3) {
+    if (parsed?.v === 4) {
       return persistedFromGroups(parsed.groups, parsed.mru, refs);
+    }
+    if (parsed?.v === 3) {
+      return persistedFromGroups(
+        parsed.groups,
+        parsed.mru,
+        refs,
+        normalizeLegacyTab,
+      );
     }
   } catch {
     return null;
@@ -280,11 +339,11 @@ function parsePersistedV3(
 
 function loadFileBrowserTabs(
   workspaceId: string,
-  validRefs?: CheckoutRef[] | undefined,
+  validRefs?: ExplorerRef[] | undefined,
   storageKey = FILE_BROWSER_TABS_STORAGE_KEY,
-): PersistedFileBrowserTabsV3 {
+): PersistedFileBrowserTabsV4 {
   const refs = validRefSet(validRefs);
-  const loaded = parsePersistedV3(wsGet(workspaceId, storageKey), refs);
+  const loaded = parsePersistedV4(wsGet(workspaceId, storageKey), refs);
   if (loaded) return loaded;
   return EMPTY_FILE_BROWSER_STATE;
 }
@@ -292,7 +351,7 @@ function loadFileBrowserTabs(
 function persist(
   workspaceId: string,
   storageKey: string,
-  state: PersistedFileBrowserTabsV3,
+  state: PersistedFileBrowserTabsV4,
 ): void {
   wsSet(workspaceId, storageKey, JSON.stringify(state));
 }
@@ -308,8 +367,8 @@ function touchMru(
 function withPersistedState(
   workspaceId: string,
   storageKey: string,
-  partial: Omit<PersistedFileBrowserTabsV3, "v">,
-): PersistedFileBrowserTabsV3 {
+  partial: Omit<PersistedFileBrowserTabsV4, "v">,
+): PersistedFileBrowserTabsV4 {
   const persisted = persistedFromGroups(partial.groups, partial.mru, null);
   persist(workspaceId, storageKey, persisted);
   return persisted;
@@ -332,7 +391,7 @@ export function createFileBrowserStore(
 
     openTab: (rawTab, groupIndex = get().activeGroup) => {
       const tab = {
-        ref: normalizeCheckoutRef(rawTab.ref),
+        ref: normalizeExplorerRef(rawTab.ref),
         path: cleanPath(rawTab.path),
       };
       if (!tab.path) return;
@@ -472,7 +531,7 @@ export function createFileBrowserStore(
       const groups = normalizeGroups(state.groups, null).map((group) => {
         const tabs = uniqueTabs(
           group.tabs.map((tab) =>
-            sameCheckoutRef(tab.ref, ref) && matchesPathPrefix(tab, ref, from)
+            sameExplorerRef(tab.ref, ref) && matchesPathPrefix(tab, ref, from)
               ? { ...tab, path: retargetPath(tab.path, from, to) }
               : tab,
           ),
@@ -481,7 +540,7 @@ export function createFileBrowserStore(
         const activeTab = tabs.find((tab) =>
           group.active
             ? tabKey(tab) === group.active ||
-              (sameCheckoutRef(tab.ref, ref) &&
+              (sameExplorerRef(tab.ref, ref) &&
                 matchesPathPrefix(tab, ref, to) &&
                 tabKey({ ...tab, path: retargetPath(tab.path, to, from) }) ===
                   group.active)
@@ -500,7 +559,7 @@ export function createFileBrowserStore(
       for (const group of state.groups) {
         for (const tab of group.tabs) {
           if (
-            sameCheckoutRef(tab.ref, ref) &&
+            sameExplorerRef(tab.ref, ref) &&
             matchesPathPrefix(tab, ref, from)
           ) {
             const next = { ...tab, path: retargetPath(tab.path, from, to) };
@@ -515,7 +574,7 @@ export function createFileBrowserStore(
       const persisted = withPersistedState(workspaceId, storageKey, {
         groups,
         mru: state.mru.map((tab) =>
-          sameCheckoutRef(tab.ref, ref) && matchesPathPrefix(tab, ref, from)
+          sameExplorerRef(tab.ref, ref) && matchesPathPrefix(tab, ref, from)
             ? { ...tab, path: retargetPath(tab.path, from, to) }
             : tab,
         ),

@@ -3,10 +3,15 @@ import { describe, expect, it } from "vitest";
 import type {
   FileCheckout,
   RepoInfo,
+  SkillCatalogGroup,
   WorkspaceAgentInfo,
 } from "@/api/workspace";
 
-import { buildFileTreeSections } from "../treeRoots";
+import {
+  buildFileTreeSections,
+  existingExplorerRefs,
+  gitStatusRefs,
+} from "../treeRoots";
 
 function repo(name: string, groups: string[] = []): RepoInfo {
   return {
@@ -24,7 +29,45 @@ function agent(partial: Partial<WorkspaceAgentInfo>): WorkspaceAgentInfo {
     repos: partial.repos ?? [],
     repo_groups: partial.repo_groups ?? [],
     cross_repo: partial.cross_repo ?? false,
+    role_name: partial.role_name,
   };
+}
+
+function skillGroups(): SkillCatalogGroup[] {
+  const timestamps = {
+    created_at: "2026-08-14T00:00:00Z",
+    updated_at: "2026-08-14T00:00:00Z",
+  };
+  return [
+    {
+      scope: "workspace",
+      skills: [
+        {
+          name: "audit",
+          scope: "workspace",
+          description: "Audit changes",
+          content_revision: "w1",
+          files: [],
+          ...timestamps,
+        },
+      ],
+    },
+    {
+      scope: "role",
+      role: "reviewer",
+      skills: [
+        {
+          name: "audit",
+          scope: "role",
+          role: "reviewer",
+          description: "Review changes",
+          content_revision: "r1",
+          files: [],
+          ...timestamps,
+        },
+      ],
+    },
+  ];
 }
 
 function checkout(item: FileCheckout): FileCheckout {
@@ -183,6 +226,7 @@ describe("treeRoots", () => {
 
     expect(sections.map((section) => section.id)).toEqual([
       "agents",
+      "skills",
       "repos",
       "workspace",
     ]);
@@ -190,7 +234,7 @@ describe("treeRoots", () => {
       kind: "agent",
       secondary: "docs-repo",
     });
-    expect(sections[1]?.roots[0]).toMatchObject({
+    expect(sections[2]?.roots[0]).toMatchObject({
       kind: "checkout",
       label: "docs-repo",
       changeCount: 2,
@@ -231,7 +275,7 @@ describe("treeRoots", () => {
       ],
     });
 
-    expect(sections.map((section) => section.id)).toEqual(["agents"]);
+    expect(sections.map((section) => section.id)).toEqual(["agents", "skills"]);
     expect(sections[0]?.roots).toHaveLength(1);
     expect(sections[0]?.roots[0]).toMatchObject({
       kind: "agent",
@@ -239,5 +283,62 @@ describe("treeRoots", () => {
       secondary: "source-repo",
       changeCount: 1,
     });
+  });
+
+  it("places workspace and role skill groups after agents and before repos", () => {
+    const sections = buildFileTreeSections({
+      mode: "workspace",
+      agents: [agent({ name: "atlas", role_name: "reviewer" })],
+      repos: [repo("source-repo")],
+      checkouts: [],
+      skills: skillGroups(),
+    });
+
+    expect(sections.map((section) => section.id)).toEqual([
+      "agents",
+      "skills",
+      "repos",
+      "workspace",
+    ]);
+    expect(sections[1]?.roots).toEqual([
+      expect.objectContaining({
+        kind: "skills",
+        label: "Workspace",
+        secondary: "1 skill",
+      }),
+      expect.objectContaining({
+        kind: "skills",
+        label: "reviewer",
+        secondary: "1 skill",
+      }),
+    ]);
+  });
+
+  it("limits agent mode to workspace plus that agent role and excludes skills from git", () => {
+    const sections = buildFileTreeSections({
+      mode: "agent",
+      agentName: "atlas",
+      agents: [
+        agent({ name: "atlas", role_name: "reviewer" }),
+        agent({ name: "nova", role_name: "planner" }),
+      ],
+      repos: [],
+      checkouts: [],
+      skills: skillGroups(),
+    });
+
+    expect(sections[1]?.roots.map((root) => root.label)).toEqual([
+      "Workspace",
+      "reviewer",
+    ]);
+    expect(existingExplorerRefs(sections)).toEqual(
+      expect.arrayContaining([
+        { kind: "skills", group: { kind: "workspace" } },
+        { kind: "skills", group: { kind: "role", role: "reviewer" } },
+      ]),
+    );
+    expect(gitStatusRefs(sections)).toEqual([
+      { scope: "agent", target: "atlas" },
+    ]);
   });
 });
