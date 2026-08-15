@@ -18,8 +18,9 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	"gopkg.in/yaml.v3"
+
+	"github.com/tysonthomas9/loomcli/internal/domain"
 )
 
 const (
@@ -357,6 +358,7 @@ func validateGitHubRef(ref string) error {
 	return nil
 }
 
+//nolint:gocognit,funlen // The tar walk validates every entry class in one bounded pass.
 func readGitHubTar(data []byte, logicalLimit int64) (githubArchive, error) {
 	archive := githubArchive{
 		files:       make(map[string]githubArchiveFile),
@@ -402,7 +404,7 @@ func readGitHubTar(data []byte, logicalLimit int64) (githubArchive, error) {
 		seen[entryPath] = struct{}{}
 
 		switch hdr.Typeflag {
-		case tar.TypeReg, tar.TypeRegA:
+		case tar.TypeReg: // Reader.Next normalizes legacy TypeRegA to TypeReg.
 			if hdr.Size > logicalRemaining {
 				return githubArchive{}, fmt.Errorf("GitHub tar logical file content exceeds the %d-byte budget at entry %q: declared size %d, remaining %d",
 					logicalLimit, entryPath, hdr.Size, logicalRemaining)
@@ -562,6 +564,7 @@ func (a githubArchive) rejectUnsafeSelectedEntries(skillDir string) error {
 	return nil
 }
 
+//nolint:funlen // Selection, frontmatter parse, and bundling stay one auditable unit.
 func (a githubArchive) toSkill(source githubSource, skillDir, nameOverride string) (fetchedGitHubSkill, error) {
 	selected := make(map[string]githubArchiveFile)
 	for filePath, file := range a.files {
