@@ -65,6 +65,17 @@ type PTYSource interface {
 	MaxSessions() int
 }
 
+// PTYSessionLister is implemented by PTY sources that can enumerate the live
+// sessions they own for a workspace. Used to resurface sessions whose tab
+// metadata is missing. Deliberately kept out of PTYSource: sources that
+// cannot enumerate (a remote agentd client, test fakes) stay valid without
+// growing a stub.
+type PTYSessionLister interface {
+	// SessionNamesFor returns the names of the live sessions owned by wsID.
+	// Returns an empty slice — never nil-derefs — for unknown workspaces.
+	SessionNamesFor(wsID string) []string
+}
+
 // PTYCommandRunner is implemented by PTY sources that can start a session
 // without a browser attachment and write backend-owned input into it. Setup
 // flows use this to run a typed command inside the same TTY the user later
@@ -113,6 +124,8 @@ var (
 	_ PTYSource        = (*MultiPTYManager)(nil)
 	_ PTYCommandRunner = (*PTYManager)(nil)
 	_ PTYCommandRunner = (*MultiPTYManager)(nil)
+	_ PTYSessionLister = (*PTYManager)(nil)
+	_ PTYSessionLister = (*MultiPTYManager)(nil)
 	_ Attachment       = (*localAttachment)(nil)
 	_ realtime.Resizer = (*localAttachment)(nil)
 )
