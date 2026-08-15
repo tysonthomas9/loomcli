@@ -8,8 +8,11 @@ import (
 	"os"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/roleprompts"
+	"github.com/tysonthomas9/loomcli/internal/scriptedroles"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/taskrunlogs"
 )
@@ -20,6 +23,8 @@ import (
 // auto-complete a task run without real execution evidence.
 const NoopTaskProviderEnvVar = "LOOM_DRIVER_ENABLE_TEST_NOOP_PROVIDER"
 
+const maxInjectedRolePromptBytes = 64 << 10
+
 // testNoopProviderEnabled reports whether the test-only noop provider gate is
 // explicitly enabled. Default (unset) is fail-closed.
 func testNoopProviderEnabled() bool {
@@ -28,6 +33,7 @@ func testNoopProviderEnabled() bool {
 
 type TaskRunRequestOptions struct {
 	WorkspaceKey       string
+	WorkspaceDir       string
 	DriverRunID        string
 	DriverStepID       string
 	TaskRunID          string
@@ -250,6 +256,10 @@ func EnqueueTaskRunWithResult(ctx context.Context, s store.Store, opts TaskRunRe
 	if err != nil {
 		return nil, err
 	}
+	opts, err = injectScriptedRolePrompt(ctx, s, opts, parent)
+	if err != nil {
+		return nil, err
+	}
 	resolved, err := resolveTaskRunRequestRunner(ctx, s, opts, parent)
 	if err != nil {
 		return nil, err
@@ -350,6 +360,10 @@ func RequestTaskRunWithResult(ctx context.Context, s store.Store, opts TaskRunRe
 	if err != nil {
 		return nil, err
 	}
+	opts, err = injectScriptedRolePrompt(ctx, s, opts, parent)
+	if err != nil {
+		return nil, err
+	}
 	resolved, err := resolveTaskRunRequestRunner(ctx, s, opts, parent)
 	if err != nil {
 		return nil, err
@@ -404,6 +418,7 @@ type taskRunRequestRefs struct {
 
 func normalizeTaskRunRequestOptions(opts TaskRunRequestOptions) TaskRunRequestOptions {
 	opts.WorkspaceKey = strings.TrimSpace(opts.WorkspaceKey)
+	opts.WorkspaceDir = strings.TrimSpace(opts.WorkspaceDir)
 	opts.DriverRunID = strings.TrimSpace(opts.DriverRunID)
 	opts.DriverStepID = strings.TrimSpace(opts.DriverStepID)
 	opts.TaskRunID = strings.TrimSpace(opts.TaskRunID)
@@ -424,6 +439,79 @@ func normalizeTaskRunRequestOptions(opts TaskRunRequestOptions) TaskRunRequestOp
 	opts.LeaseID = strings.TrimSpace(opts.LeaseID)
 	opts.LeaseToken = strings.TrimSpace(opts.LeaseToken)
 	return opts
+}
+
+func injectScriptedRolePrompt(ctx context.Context, st store.Store, opts TaskRunRequestOptions, parent *domain.DriverRun) (TaskRunRequestOptions, error) {
+	if parent == nil || strings.TrimSpace(parent.AgentServiceID) == "" {
+		return opts, nil
+	}
+	svc, err := st.AgentServices().Get(ctx, opts.WorkspaceKey, parent.AgentServiceID)
+	if err != nil {
+		return opts, fmt.Errorf("load requesting agent service %q: %w", parent.AgentServiceID, err)
+	}
+	spec, ok := scriptedroles.ForRole(svc.RoleName)
+	if !ok {
+		return opts, nil
+	}
+	role, err := st.Roles().Get(ctx, opts.WorkspaceKey, spec.RoleName)
+	if err != nil {
+		return opts, fmt.Errorf("load scripted role %q: %w", spec.RoleName, err)
+	}
+	prompt := role.Prompt
+	if strings.TrimSpace(role.PromptFile) != "" {
+		if opts.WorkspaceDir == "" {
+			return opts, fmt.Errorf("workspace path required to read scripted role %q prompt: %w", spec.RoleName, domain.ErrInvalid)
+		}
+		prompt, err = roleprompts.ReadValidated(opts.WorkspaceDir, role.PromptFile)
+		if err != nil {
+			return opts, fmt.Errorf("read scripted role %q prompt: %w", spec.RoleName, err)
+		}
+	}
+	if len(prompt) > maxInjectedRolePromptBytes {
+		originalBytes := len(prompt)
+		prompt = clampUTF8Bytes(prompt, maxInjectedRolePromptBytes)
+		slog.Warn("scripted role prompt exceeded task payload budget; truncating",
+			"workspace", opts.WorkspaceKey,
+			"role", spec.RoleName,
+			"original_bytes", originalBytes,
+			"max_bytes", maxInjectedRolePromptBytes)
+	}
+	injected, err := withRolePrompt(opts.Input, prompt)
+	if err != nil {
+		return opts, fmt.Errorf("inject scripted role %q prompt: %w", spec.RoleName, err)
+	}
+	opts.Input = injected
+	return opts, nil
+}
+
+func withRolePrompt(input json.RawMessage, prompt string) (json.RawMessage, error) {
+	fields := map[string]json.RawMessage{}
+	trimmed := strings.TrimSpace(string(input))
+	if trimmed != "" && trimmed != "null" {
+		if err := json.Unmarshal(input, &fields); err != nil {
+			return nil, fmt.Errorf("task input must be a JSON object: %w", domain.ErrInvalid)
+		}
+		if fields == nil {
+			fields = map[string]json.RawMessage{}
+		}
+	}
+	encodedPrompt, err := json.Marshal(prompt)
+	if err != nil {
+		return nil, err
+	}
+	fields["role_prompt"] = encodedPrompt
+	return json.Marshal(fields)
+}
+
+func clampUTF8Bytes(value string, maxBytes int) string {
+	if maxBytes < 1 || len(value) <= maxBytes {
+		return value
+	}
+	end := maxBytes
+	for end > 0 && !utf8.RuneStart(value[end]) {
+		end--
+	}
+	return value[:end]
 }
 
 func validateTaskRunRequestOptions(opts TaskRunRequestOptions) error {

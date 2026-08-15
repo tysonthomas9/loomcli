@@ -201,7 +201,7 @@ func TestWrapStoreWithTracing_Smoke(t *testing.T) {
 	_, _ = services.Create(ctx, store.AgentServiceCreate{
 		WorkspaceKey:  "TEST",
 		ServiceID:     "lead",
-		Kind:          domain.AgentServiceKindLead,
+		TriggerKind:   domain.AgentServiceTriggerKindLead,
 		DesiredState:  domain.AgentServiceDesiredRunning,
 		RoleName:      "lead",
 		ProfileName:   "falcon",
@@ -211,7 +211,7 @@ func TestWrapStoreWithTracing_Smoke(t *testing.T) {
 		RestartPolicy: "always",
 	})
 	_, _ = services.Get(ctx, "TEST", "lead")
-	_, _ = services.List(ctx, "TEST", store.AgentServiceFilter{Kind: domain.AgentServiceKindLead})
+	_, _ = services.List(ctx, "TEST", store.AgentServiceFilter{TriggerKind: domain.AgentServiceTriggerKindLead})
 	paused := domain.AgentServiceDesiredPaused
 	_, _ = services.Update(ctx, "TEST", "lead", store.AgentServiceUpdate{DesiredState: &paused})
 

@@ -8,6 +8,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/backends"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/runtimepreflight"
+	"github.com/tysonthomas9/loomcli/internal/scriptedroles"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -21,7 +22,7 @@ func TestRunnerNeedsLocalPreflight(t *testing.T) {
 		runner string
 		want   bool
 	}{
-		{"explicit local", runtimepreflight.LocalTaskRunnerEntrypoint, true},
+		{"explicit local", scriptedroles.LocalTaskRunnerEntrypoint, true},
 		{"empty resolves to local", "", true},
 		{"whitespace resolves to local", "   ", true},
 		{"local with surrounding space", "  local-task-runner  ", true},
@@ -30,7 +31,7 @@ func TestRunnerNeedsLocalPreflight(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := runnerNeedsLocalPreflight(tc.runner); got != tc.want {
+			if got := runnerNeedsLocalPreflight(scriptedroles.EpicRunnerWorkflowName, tc.runner); got != tc.want {
 				t.Fatalf("runnerNeedsLocalPreflight(%q) = %v, want %v", tc.runner, got, tc.want)
 			}
 		})
@@ -64,8 +65,8 @@ func TestEmptyRunnerPreflightsFailClosed(t *testing.T) {
 	})
 	defer restore()
 
-	for _, runner := range []string{"", "   ", runtimepreflight.LocalTaskRunnerEntrypoint} {
-		if !runnerNeedsLocalPreflight(runner) {
+	for _, runner := range []string{"", "   ", scriptedroles.LocalTaskRunnerEntrypoint} {
+		if !runnerNeedsLocalPreflight(scriptedroles.EpicRunnerWorkflowName, runner) {
 			t.Fatalf("runner %q must be gated for preflight", runner)
 		}
 		err := runtimepreflight.PreflightLocalTaskRunner(context.Background(), daemonGetterStub{}, "TEST")
@@ -81,7 +82,7 @@ func TestEmptyRunnerPreflightsFailClosed(t *testing.T) {
 // TestExplicitNonLocalRunnerSkipsPreflight confirms the gate does not fire for a
 // non-local runner, so its own runtime owns readiness.
 func TestExplicitNonLocalRunnerSkipsPreflight(t *testing.T) {
-	if runnerNeedsLocalPreflight("daytona") {
+	if runnerNeedsLocalPreflight(scriptedroles.EpicRunnerWorkflowName, "daytona") {
 		t.Fatal("daytona must not trigger local preflight")
 	}
 }

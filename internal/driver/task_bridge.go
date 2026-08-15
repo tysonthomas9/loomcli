@@ -13,6 +13,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	runtimesettings "github.com/tysonthomas9/loomcli/internal/localsettings"
+	"github.com/tysonthomas9/loomcli/internal/scriptedroles"
 	"github.com/tysonthomas9/loomcli/internal/sessions/transcript"
 	"github.com/tysonthomas9/loomcli/internal/stackstore"
 	"github.com/tysonthomas9/loomcli/internal/store"
@@ -26,7 +27,7 @@ const (
 	// Only the trusted-local CLI runners (this one and the scout leaf below)
 	// get the resolved backend env + the trusted-local provider-credential env
 	// allowlist (§4.3); Daytona/remote runners keep the strict driver filter.
-	LocalTaskRunnerEntrypoint = "local-task-runner"
+	LocalTaskRunnerEntrypoint = scriptedroles.LocalTaskRunnerEntrypoint
 
 	// ScoutTaskRunnerEntrypoint is the scout's bundled analysis leaf. It execs
 	// the workspace-default backend CLI on the host exactly like the local task
@@ -34,7 +35,7 @@ const (
 	// provider credentials, local runner settings) — but NOT the per-run repo
 	// worktree resolution: scout runs stay anchored at the workspace work dir,
 	// never a repo checkout.
-	ScoutTaskRunnerEntrypoint = "scout-task-runner"
+	ScoutTaskRunnerEntrypoint = scriptedroles.ScoutTaskRunnerEntrypoint
 
 	// TaskRunnerBackendEnv carries the resolved backend CLI to the local task
 	// runner (§4.5).
@@ -52,17 +53,12 @@ func isLocalTaskRunner(req TaskExecRequest) bool {
 	return strings.TrimSpace(req.RunnerEntrypoint) == LocalTaskRunnerEntrypoint
 }
 
-// isScoutTaskRunner reports whether the request targets the scout analysis
-// leaf.
-func isScoutTaskRunner(req TaskExecRequest) bool {
-	return strings.TrimSpace(req.RunnerEntrypoint) == ScoutTaskRunnerEntrypoint
-}
-
 // isTrustedLocalCLIRunner gates the trusted-local env widening (§4.3): the
-// bundled entrypoints that exec a backend CLI directly on the host. Strictly
-// entrypoint-scoped so the widened env can never reach Daytona/remote runners.
+// catalog entrypoints that exec a backend CLI directly on the host. Strictly
+// catalog- and entrypoint-scoped so the widened env can never reach
+// Daytona/remote runners.
 func isTrustedLocalCLIRunner(req TaskExecRequest) bool {
-	return isLocalTaskRunner(req) || isScoutTaskRunner(req)
+	return scriptedroles.IsTrustedLocalCLIRunner(req.RunnerEntrypoint)
 }
 
 type HostBridgeTaskExecutor struct {

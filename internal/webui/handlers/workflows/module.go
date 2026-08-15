@@ -8,16 +8,20 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/agentprovision"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/driver"
+	"github.com/tysonthomas9/loomcli/internal/scriptedroles"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/logserve"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
+	"github.com/tysonthomas9/loomcli/internal/webui/storeadapter"
 	workflowdefs "github.com/tysonthomas9/loomcli/internal/workflows"
 )
 
@@ -135,13 +139,17 @@ func (m *Module) createWorkflowRun(w http.ResponseWriter, r *http.Request) {
 	name := strings.TrimSpace(r.PathValue("name"))
 	driverID := ""
 	agentServiceID := ""
-	if name == workflowdefs.BuiltinScoutWorkflowName {
-		svc, ensureErr := workflowdefs.EnsureScoutAgent(r.Context(), m.store, ws)
-		if ensureErr == nil {
-			driverID = svc.DriverID
-			agentServiceID = svc.ServiceID
+	if role, scripted := scriptedroles.ForWorkflow(name); scripted {
+		if role.DefaultInstance != nil {
+			svc, ensureErr := agentprovision.EnsureAgentInstance(r.Context(), m.store, ws, resolveWorkflowWorkspaceDir(r.Context(), m.store, ws), role.RoleName)
+			if ensureErr == nil {
+				agentServiceID = svc.ServiceID
+			}
+			err = ensureErr
 		}
-		err = ensureErr
+		if err == nil {
+			driverID, err = m.resolveScriptedRoleDriverID(r.Context(), ws, role)
+		}
 	} else {
 		driverID, err = m.resolveWorkflowDriverID(r.Context(), ws, name)
 	}
@@ -181,6 +189,24 @@ func (m *Module) createWorkflowRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	handler.WriteJSON(w, http.StatusAccepted, run)
+}
+
+func (m *Module) resolveScriptedRoleDriverID(ctx context.Context, ws string, role scriptedroles.ScriptedRole) (string, error) {
+	if err := workflowdefs.EnsureBuiltinWorkflow(ctx, m.store, ws, role.WorkflowName); err != nil {
+		return "", err
+	}
+	return workflowdefs.ResolveDriverID(ctx, m.store, ws, role.WorkflowName)
+}
+
+func resolveWorkflowWorkspaceDir(ctx context.Context, st store.Store, ws string) string {
+	if dir := strings.TrimSpace(storeadapter.ResolveOrHealWorkspacePath(ctx, st, ws)); dir != "" {
+		return dir
+	}
+	if dir := strings.TrimSpace(os.Getenv("LOOM_WORKSPACE_RUNTIME_DIR")); dir != "" {
+		return dir
+	}
+	dir, _ := os.Getwd()
+	return dir
 }
 
 func (m *Module) resolveWorkflowDriverID(ctx context.Context, ws, name string) (string, error) {

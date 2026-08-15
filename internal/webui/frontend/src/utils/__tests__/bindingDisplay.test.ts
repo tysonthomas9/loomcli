@@ -14,9 +14,14 @@ function service(overrides: Partial<AgentServiceDTO> = {}): AgentServiceDTO {
   return {
     id: "scout",
     name: "Scout",
-    kind: "scripted",
+    triggerKind: "cron",
     enabled: true,
-    behavior: { driverId: "scout", driverVersionId: "v1" },
+    behavior: {
+      roleName: "scout",
+      roleDisplayName: "Scout",
+      workflowName: "scout",
+      scripted: true,
+    },
     bindings: [
       {
         id: "binding-scout-weekly",

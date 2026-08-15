@@ -165,7 +165,7 @@ func TestDriverRunMemstoreAttributionFilters(t *testing.T) {
 		t.Fatalf("create driver version: %v", err)
 	}
 	if _, err := st.AgentServices().Create(ctx, store.AgentServiceCreate{
-		WorkspaceKey: "WS", ServiceID: "scout", Name: "Scout", Kind: domain.AgentServiceKindCron,
+		WorkspaceKey: "WS", ServiceID: "scout", Name: "Scout", TriggerKind: domain.AgentServiceTriggerKindCron,
 		DriverID: "scout", DriverVersionID: "scout-v1",
 	}); err != nil {
 		t.Fatalf("create agent service: %v", err)
@@ -221,7 +221,7 @@ func TestTriggerBindingMemstoreRejectsMismatchedScriptedServiceDriver(t *testing
 		}
 	}
 	if _, err := st.AgentServices().Create(ctx, store.AgentServiceCreate{
-		WorkspaceKey: "WS", ServiceID: "scout", Name: "Scout", Kind: domain.AgentServiceKindCron,
+		WorkspaceKey: "WS", ServiceID: "scout", Name: "Scout", TriggerKind: domain.AgentServiceTriggerKindCron,
 		DriverID: "scout", DriverVersionID: "scout-v1",
 	}); err != nil {
 		t.Fatalf("create scripted agent service: %v", err)

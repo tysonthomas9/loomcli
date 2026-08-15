@@ -1,10 +1,11 @@
 import { ApiError, get, wsUrl } from "@/api/common";
 import type { TranscriptEntry, TranscriptResponse } from "@/types/agent";
 
-export type AgentServiceKind = "scripted" | "prompt" | "unknown";
-
 export interface AgentServiceBehaviorDTO {
   roleName?: string;
+  roleDisplayName?: string;
+  workflowName?: string;
+  scripted: boolean;
   driverId?: string;
   driverVersionId?: string;
 }
@@ -20,7 +21,7 @@ export interface AgentServiceBindingDTO {
 export interface AgentServiceDTO {
   id: string;
   name: string;
-  kind: AgentServiceKind;
+  triggerKind: "cron" | "event" | "lead";
   enabled: boolean;
   behavior: AgentServiceBehaviorDTO;
   bindings: AgentServiceBindingDTO[];

@@ -54,6 +54,9 @@ let stdin = "";
 process.stdin.setEncoding("utf8");
 process.stdin.on("data", (chunk) => { stdin += chunk; });
 process.stdin.on("end", () => {
+  if (process.env.FAKE_STDIN_TARGET) {
+    fs.writeFileSync(process.env.FAKE_STDIN_TARGET, stdin);
+  }
   if (process.env.FAKE_RESULT_TARGET && process.env.FAKE_RESULT_JSON) {
     fs.mkdirSync(path.dirname(process.env.FAKE_RESULT_TARGET), { recursive: true });
     fs.writeFileSync(process.env.FAKE_RESULT_TARGET, process.env.FAKE_RESULT_JSON);
@@ -80,6 +83,7 @@ const MUTATED_ENV = [
   "LOOM_CODEX_BIN",
   "FAKE_RESULT_TARGET",
   "FAKE_RESULT_JSON",
+  "FAKE_STDIN_TARGET",
   "FAKE_EXIT_CODE",
   "FAKE_STDOUT",
   "FAKE_STDERR",
@@ -271,6 +275,74 @@ describe("write phase", () => {
 });
 
 describe("analyze phase", () => {
+  it("uses a payload-provided role prompt", async () => {
+    const root = makeDir("ws");
+    makeGitRepo(path.join("ws", "alpha"));
+    installFakeBackend(root);
+    const taskRunId = "task-run-role-prompt";
+    process.env.FAKE_RESULT_TARGET = path.join(
+      root,
+      ".loom",
+      "scout",
+      taskRunId,
+      "result.json",
+    );
+    process.env.FAKE_RESULT_JSON = JSON.stringify({
+      recommendations: [],
+      skipped: [],
+      agentsMd: "",
+    });
+    process.env.FAKE_STDIN_TARGET = path.join(workRoot, "custom-prompt.txt");
+
+    const result = await run({
+      payload: {
+        task_run_id: taskRunId,
+        input: { phase: "analyze", role_prompt: "CUSTOM ROLE PROMPT" },
+      },
+    });
+
+    assert.equal(result.status, "completed");
+    assert.equal(
+      fs.readFileSync(process.env.FAKE_STDIN_TARGET, "utf8"),
+      "CUSTOM ROLE PROMPT",
+    );
+  });
+
+  it("uses the embedded fallback when the payload role prompt is absent or empty", async () => {
+    for (const rolePrompt of [undefined, "   "]) {
+      const root = makeDir("ws-fallback-" + String(rolePrompt === undefined));
+      makeGitRepo(path.join(path.basename(root), "alpha"));
+      installFakeBackend(root);
+      const taskRunId = "task-run-fallback-" + String(rolePrompt === undefined);
+      process.env.FAKE_RESULT_TARGET = path.join(
+        root,
+        ".loom",
+        "scout",
+        taskRunId,
+        "result.json",
+      );
+      process.env.FAKE_RESULT_JSON = JSON.stringify({
+        recommendations: [],
+        skipped: [],
+        agentsMd: "",
+      });
+      process.env.FAKE_STDIN_TARGET = path.join(workRoot, taskRunId + ".txt");
+
+      const result = await run({
+        payload: {
+          task_run_id: taskRunId,
+          input: { phase: "analyze", role_prompt: rolePrompt },
+        },
+      });
+
+      assert.equal(result.status, "completed");
+      const prompt = fs.readFileSync(process.env.FAKE_STDIN_TARGET, "utf8");
+      assert.match(prompt, /You are the Scout/);
+      assert.match(prompt, /Workspace root:/);
+      assert.doesNotMatch(prompt, /\{\{WORKSPACE_ROOT\}\}/);
+    }
+  });
+
   it("no-ops with nothingToAnalyze when the workspace has no repos", async () => {
     const root = makeDir("ws");
     process.env.LOOM_WORKSPACE_RUNTIME_DIR = root;

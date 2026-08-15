@@ -69,9 +69,14 @@ vi.mock("@/components/RolePromptCard", () => ({
 const service: AgentServiceDTO = {
   id: "scout",
   name: "Scout",
-  kind: "scripted",
+  triggerKind: "cron",
   enabled: true,
-  behavior: { driverId: "scout", driverVersionId: "scout-v1" },
+  behavior: {
+    roleName: "scout",
+    roleDisplayName: "Scout",
+    workflowName: "scout",
+    scripted: true,
+  },
   bindings: [],
   nextFireAt: null,
   lastRunStatus: "completed",
@@ -159,23 +164,23 @@ describe("AgentServiceDetail", () => {
     vi.useRealTimers();
   });
 
-  it("explains that scripted behavior comes from the driver", () => {
+  it("renders the editable role prompt for a scripted role", () => {
     render(<AgentServiceDetail workspaceId="WS" service={service} />);
-    expect(screen.getByTestId("scripted-agent-prompt-note")).toHaveTextContent(
-      "Scripted agent — behavior comes from its driver, not a role prompt.",
+    expect(screen.getByTestId("role-prompt-card")).toHaveAttribute(
+      "data-role",
+      "scout",
     );
-    expect(screen.queryByTestId("role-prompt-card")).not.toBeInTheDocument();
   });
 
-  it("renders the role prompt card for prompt-kind services", () => {
+  it("renders the role prompt card for plain prompt roles", () => {
     render(
       <AgentServiceDetail
         workspaceId="WS"
         service={{
           ...service,
           id: "reviewer",
-          kind: "prompt",
-          behavior: { roleName: "reviewer" },
+          triggerKind: "event",
+          behavior: { roleName: "reviewer", scripted: false },
         }}
       />,
     );
@@ -183,9 +188,6 @@ describe("AgentServiceDetail", () => {
       "data-role",
       "reviewer",
     );
-    expect(
-      screen.queryByTestId("scripted-agent-prompt-note"),
-    ).not.toBeInTheDocument();
   });
 
   it("expands a run with full details, stdout tail, logs reference, and newest-last events", async () => {
@@ -397,7 +399,9 @@ describe("AgentServiceDetail", () => {
     expect(rawButton).toHaveAttribute("aria-pressed", "true");
     expect(prettyButton).toHaveAttribute("aria-pressed", "false");
     expect(screen.queryByTestId("transcript-view")).not.toBeInTheDocument();
-    expect((await screen.findByTestId("task-log-content-task-1")).textContent).toBe(rawLog);
+    expect(
+      (await screen.findByTestId("task-log-content-task-1")).textContent,
+    ).toBe(rawLog);
     expect(mocks.getTaskRunLog).toHaveBeenCalledWith("WS", "task-1");
   });
 
@@ -436,7 +440,9 @@ describe("AgentServiceDetail", () => {
     expect(screen.getByTestId("task-log-empty")).toHaveTextContent(
       "No AI log is available",
     );
-    expect(screen.queryByTestId("task-log-view-toggle")).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId("task-log-view-toggle"),
+    ).not.toBeInTheDocument();
     expect(mocks.getTaskRunLog).not.toHaveBeenCalled();
     expect(mocks.getTaskRunTranscript).not.toHaveBeenCalled();
   });
@@ -456,9 +462,9 @@ describe("AgentServiceDetail", () => {
         name: /scout-task-runner.*Completed.*30s/,
       }),
     );
-    expect(await screen.findByTestId("task-transcript-empty")).toHaveTextContent(
-      "No transcript content",
-    );
+    expect(
+      await screen.findByTestId("task-transcript-empty"),
+    ).toHaveTextContent("No transcript content");
     unmount();
 
     mocks.listAgentServiceRunTasks.mockResolvedValueOnce({
