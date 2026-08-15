@@ -165,7 +165,7 @@
   margin-top: 8px;
   padding: 8px 12px;
   font-size: var(--font-size-sm);
-  color: var(--color-danger);
+  color: var(--color-danger-text);
   background-color: var(--color-danger-bg);
   border-radius: var(--radius-sm);
 }

@@ -36,13 +36,13 @@
 }
 
 .fieldHint {
-  color: var(--color-danger);
+  color: var(--color-danger-text);
   font-size: 12px;
   margin: 4px 0 0;
 }
 
 .error {
-  color: var(--color-danger);
+  color: var(--color-danger-text);
   font-size: 12px;
   margin: 0 0 14px;
   padding: 6px 10px;
@@ -138,7 +138,7 @@
 }
 
 .chipRemove:hover {
-  color: var(--color-danger);
+  color: var(--color-danger-text);
 }
 
 /* ============= Progress State ============= */

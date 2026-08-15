@@ -335,7 +335,7 @@
   line-height: 1;
   border-radius: var(--radius-sm);
   background-color: var(--color-warning-bg);
-  color: var(--color-warning);
+  color: var(--color-warning-text);
 }
 
 /* =================================
@@ -375,7 +375,7 @@
 /* PR link for code review cards */
 .prLink {
   font-size: var(--font-size-xs);
-  color: var(--color-primary);
+  color: var(--color-primary-text);
   text-decoration: none;
   padding: 1px var(--space-1);
   border-radius: var(--radius-sm);

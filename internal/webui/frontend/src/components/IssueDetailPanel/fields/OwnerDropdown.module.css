@@ -181,7 +181,7 @@
   width: 100%;
   padding: 6px 10px;
   font-size: var(--font-sm);
-  color: var(--color-danger);
+  color: var(--color-danger-text);
   background: none;
   border: none;
   border-top: 1px solid var(--color-border);
@@ -223,6 +223,6 @@
   left: 0;
   margin-top: var(--space-1, 4px);
   font-size: var(--font-xs);
-  color: var(--color-danger);
+  color: var(--color-danger-text);
   white-space: nowrap;
 }

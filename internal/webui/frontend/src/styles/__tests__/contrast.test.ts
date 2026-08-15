@@ -20,6 +20,9 @@ import {
   deriveSurfaceTokens,
   isOpaqueHex,
   TEXT_TOKENS,
+  NON_TEXT_TOKENS,
+  NON_TEXT_FLOORS,
+  worstRatioAgainstSurfaces,
   WCAG_AA_TEXT,
   WCAG_AA_NON_TEXT,
   type TokenMap,
@@ -149,6 +152,56 @@ describe("WCAG AA: text tokens against every surface token", () => {
       failures,
       `${name} theme has ${failures.length} pair(s) below AA:\n  ${failures.join("\n  ")}`,
     ).toEqual([]);
+  });
+});
+
+describe("non-text tokens: dots, borders and accents", () => {
+  it("the text and non-text registries do not overlap", () => {
+    const both = NON_TEXT_TOKENS.filter((t) => TEXT_TOKENS.includes(t));
+    expect(
+      both,
+      "a token in both lists would be held to 4.5:1 and flatten the status palette",
+    ).toEqual([]);
+  });
+
+  it.each(THEME_NAMES)("%s: every non-text token is registered", (name) => {
+    expect(Object.keys(NON_TEXT_FLOORS[name]).sort()).toEqual(
+      [...NON_TEXT_TOKENS].sort(),
+    );
+  });
+
+  // A ratchet, not a flat threshold: see the NON_TEXT_FLOORS note in
+  // contrast.ts. Tokens already at 3:1 must stay there; the ones below it
+  // (light-theme vivid semantics, and --color-status-review in dark) must not
+  // regress further while their palette fix waits.
+  it.each(THEME_NAMES)("%s: no non-text token gets less legible", (name) => {
+    const theme = themes[name];
+    const failures: string[] = [];
+
+    for (const token of NON_TEXT_TOKENS) {
+      const floor = NON_TEXT_FLOORS[name][token];
+      const { ratio, surface } = worstRatioAgainstSurfaces(theme, token);
+      if (ratio + 0.005 < floor) {
+        failures.push(
+          `${token} (${theme[token]}) on ${surface}: ${ratio.toFixed(2)}:1, ` +
+            `was ${floor.toFixed(2)}:1 — do not darken non-text tokens for text contrast, ` +
+            `use the --color-*-text variant at the call site instead`,
+        );
+      }
+    }
+
+    expect(failures, `${name}:\n  ${failures.join("\n  ")}`).toEqual([]);
+  });
+
+  it.each(THEME_NAMES)("%s: the tokens already at 3:1 stay there", (name) => {
+    const regressed = NON_TEXT_TOKENS.filter((token) => {
+      if (NON_TEXT_FLOORS[name][token] < WCAG_AA_NON_TEXT) return false;
+      return (
+        worstRatioAgainstSurfaces(themes[name], token).ratio <
+        WCAG_AA_NON_TEXT - 0.005
+      );
+    });
+    expect(regressed, `${name} tokens that fell below WCAG 1.4.11`).toEqual([]);
   });
 });
 

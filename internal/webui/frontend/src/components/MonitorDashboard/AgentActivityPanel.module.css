@@ -68,7 +68,7 @@
 
 /* Summary type colors */
 .summaryItem[data-type="active"] .summaryCount {
-  color: var(--color-status-working);
+  color: var(--color-primary-text);
 }
 
 .summaryItem[data-type="idle"] .summaryCount {
@@ -76,11 +76,11 @@
 }
 
 .summaryItem[data-type="error"] .summaryCount {
-  color: var(--color-status-error);
+  color: var(--color-danger-text);
 }
 
 .summaryItem[data-type="sync"] .summaryCount {
-  color: var(--color-warning);
+  color: var(--color-warning-text);
 }
 
 /* Agent grid */

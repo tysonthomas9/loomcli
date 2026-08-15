@@ -306,19 +306,19 @@
 }
 
 .statValue[data-tone="success"] {
-  color: var(--color-success);
+  color: var(--color-success-text);
 }
 
 .statValue[data-tone="warning"] {
-  color: var(--color-warning);
+  color: var(--color-warning-text);
 }
 
 .statValue[data-tone="danger"] {
-  color: var(--color-danger);
+  color: var(--color-danger-text);
 }
 
 .statValue[data-tone="info"] {
-  color: var(--color-primary);
+  color: var(--color-primary-text);
 }
 
 .statLabel {
@@ -399,12 +399,12 @@
 .priorityBadge[data-priority="0"],
 .priorityBadge[data-priority="1"] {
   background-color: var(--color-danger-bg);
-  color: var(--color-danger);
+  color: var(--color-danger-text);
 }
 
 .priorityBadge[data-priority="2"] {
   background-color: var(--color-warning-bg);
-  color: var(--color-warning);
+  color: var(--color-warning-text);
 }
 
 .emptyState {
@@ -444,7 +444,7 @@
 
 .commitBadge[data-type="behind"] {
   background-color: var(--color-warning-bg);
-  color: var(--color-warning);
+  color: var(--color-warning-text);
   border-color: color-mix(in srgb, var(--color-warning) 28%, transparent);
 }
 
@@ -472,14 +472,14 @@
 .commitHash {
   font-family: var(--font-mono);
   font-size: 12px;
-  color: var(--color-primary);
+  color: var(--color-primary-text);
   flex-shrink: 0;
 }
 
 .commitHashLink {
   font-family: var(--font-mono);
   font-size: 12px;
-  color: var(--color-primary);
+  color: var(--color-primary-text);
   flex-shrink: 0;
   text-decoration: none;
 }
@@ -509,7 +509,7 @@
 }
 
 .showAllCommitsBtn:hover {
-  color: var(--color-primary);
+  color: var(--color-primary-text);
   text-decoration: underline;
 }
 

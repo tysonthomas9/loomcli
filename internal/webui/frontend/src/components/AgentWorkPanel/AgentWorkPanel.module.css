@@ -82,7 +82,7 @@
   font-weight: var(--font-weight-bold);
   letter-spacing: 0.04em;
   text-transform: uppercase;
-  color: var(--color-status-working);
+  color: var(--color-primary-text);
   display: flex;
   align-items: center;
   gap: var(--space-1);
@@ -304,7 +304,7 @@
 
 .epicChip {
   background: color-mix(in srgb, var(--color-type-epic) 14%, transparent);
-  color: var(--color-type-epic);
+  color: var(--color-epic-text);
   border-color: color-mix(in srgb, var(--color-type-epic) 36%, transparent);
 }
 
@@ -344,7 +344,7 @@
 }
 
 .epicTitleButton:hover {
-  color: var(--color-primary);
+  color: var(--color-primary-text);
   text-decoration: underline;
   text-underline-offset: 2px;
 }
@@ -593,20 +593,20 @@
 
 .taskCard[data-status="in_progress"] .statusGlyph,
 .taskCard[data-status="active"] .statusGlyph {
-  color: var(--color-status-working);
+  color: var(--color-primary-text);
 }
 
 .taskCard[data-status="blocked"] .statusGlyph {
-  color: var(--color-status-error);
+  color: var(--color-danger-text);
 }
 
 .taskCard[data-status="review"] .statusGlyph {
-  color: var(--color-status-review);
+  color: var(--color-status-review-text);
 }
 
 .taskCard[data-status="closed"] .statusGlyph,
 .taskCard[data-status="done"] .statusGlyph {
-  color: var(--color-status-done);
+  color: var(--color-success-text);
 }
 
 .taskId {

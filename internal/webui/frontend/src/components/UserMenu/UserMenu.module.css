@@ -121,7 +121,7 @@
 
 .menuItem:hover:not(:disabled) {
   background-color: var(--color-bg-hover);
-  color: var(--color-danger);
+  color: var(--color-danger-text);
 }
 
 .menuItem:focus-visible {
