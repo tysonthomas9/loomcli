@@ -12,11 +12,15 @@ import {
   type TerminalFontChangeDetail,
 } from "@/hooks/terminal/useTerminalFont";
 
+import type { CursorProbe } from "../tabs/waitingState";
+
 export interface XTermRendererHandle {
   write: (data: string | Uint8Array) => void;
   focus: () => void;
   fit: () => { cols: number; rows: number } | null;
   scrollToBottom: () => void;
+  /** Cursor facts used to tell a parked prompt from a busy command. */
+  probeActivity: () => CursorProbe;
 }
 
 export const TERMINAL_SCROLLBACK_LINES = 10_000;
@@ -155,6 +159,10 @@ export function XTermRenderer({
       focus: () => terminal.focus(),
       fit,
       scrollToBottom: () => terminal.scrollToBottom(),
+      probeActivity: () => ({
+        cursorAtLineStart: terminal.buffer.active.cursorX === 0,
+        altScreen: terminal.buffer.active.type === "alternate",
+      }),
     };
 
     const dataDisposable = terminal.onData((data) => onDataRef.current(data));
