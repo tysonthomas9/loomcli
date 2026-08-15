@@ -33,6 +33,7 @@ import type { ConnectionState } from "@/components/TerminalView/instances";
 import { NewTerminalTabMenu } from "@/components/TerminalView/layout";
 import { SortableTab } from "./SortableTab";
 import { TabContextMenu } from "./TabContextMenu";
+import { TabMarkers } from "./TabMarkers";
 import styles from "./TerminalTabBar.module.css";
 
 export interface TerminalTab {
@@ -42,6 +43,11 @@ export interface TerminalTab {
   brandColor?: string;
   hasUnread?: boolean;
   isPinned?: boolean;
+  /**
+   * RFC3339 time this tab's shell was last replaced (server restart). Renders
+   * a persistent marker until dismissed; independent of connectionState.
+   */
+  replacedAt?: string;
 }
 
 export interface TerminalTabBarProps {
@@ -65,6 +71,8 @@ export interface TerminalTabBarProps {
   onTabPin?: (tabId: string, pinned: boolean) => void;
   onCloseOthers?: (tabId: string) => void;
   onReorderTabs?: (orderedTabIds: string[]) => void;
+  /** Clears a tab's persisted restart marker (marker click or context menu). */
+  onDismissRestartNotice?: (tabId: string) => void;
   /** When false, only the tab strip is shown (used on secondary split columns). */
   showToolbarActions?: boolean;
   /**
@@ -111,6 +119,7 @@ export const TerminalTabBar = forwardRef<HTMLDivElement, TerminalTabBarProps>(
       onTabPin,
       onCloseOthers,
       onReorderTabs,
+      onDismissRestartNotice,
       showToolbarActions = true,
       groupDrag,
       dropTarget,
@@ -417,6 +426,15 @@ export const TerminalTabBar = forwardRef<HTMLDivElement, TerminalTabBarProps>(
                     : undefined
                 }
               />
+              <TabMarkers
+                tabId={tab.id}
+                replacedAt={tab.replacedAt}
+                onDismissRestartNotice={
+                  onDismissRestartNotice
+                    ? () => onDismissRestartNotice(tab.id)
+                    : undefined
+                }
+              />
               {editingTabId === tab.id ? (
                 <input
                   ref={inputRef}
@@ -537,6 +555,13 @@ export const TerminalTabBar = forwardRef<HTMLDivElement, TerminalTabBarProps>(
               <span
                 className={styles.statusDot}
                 data-status={dragTab.connectionState}
+              />
+              {/* `-drag` suffix: the dragged tab is still mounted in the strip,
+                  so the overlay must not duplicate its test ids. */}
+              <TabMarkers
+                tabId={`${dragTab.id}-drag`}
+                replacedAt={dragTab.replacedAt}
+                static
               />
               <span className={styles.tabLabel}>{dragTab.label}</span>
             </div>
@@ -671,6 +696,11 @@ export const TerminalTabBar = forwardRef<HTMLDivElement, TerminalTabBarProps>(
               onCloseOthers ? () => onCloseOthers(contextMenu.tabId) : undefined
             }
             onCloseAll={onCloseAll}
+            onDismissRestartNotice={
+              onDismissRestartNotice && ctxTab.replacedAt
+                ? () => onDismissRestartNotice(contextMenu.tabId)
+                : undefined
+            }
             onDismiss={dismissCtxMenu}
           />
         )}
