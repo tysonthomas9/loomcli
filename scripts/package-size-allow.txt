@@ -31,7 +31,11 @@
 # over the 1000-line LOC gate, and .loc-allowlist takes no new entries. The
 # sweep/write section (sweepQuarantineDue .. shortSessionID) moved out
 # unchanged; the ledger and the exit hook stay in quarantine.go.
-internal/cli/daemon/supervisor 32
+# Raised 32 -> 33 for abandoned_run.go (the abandoned-run attempt recorder,
+# PUPPET-40). It cannot live in supervisor.go: that file is at 986 of the
+# 1000-line LOC ceiling, so folding ~400 lines in would trade this gate for
+# that one. Same sub-split end state applies.
+internal/cli/daemon/supervisor 33
 # internal/cli gained the daemon input-await seam (agent_input_await.go) with
 # the human answer path; 26th file, same sub-split end state applies. The
 # hook-driven exit-code contract lives in exit.go rather than a file of its own,
