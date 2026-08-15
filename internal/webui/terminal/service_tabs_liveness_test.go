@@ -90,7 +90,7 @@ func putTestTabAt(t *testing.T, svc *terminalServiceImpl, wsID, name string, at 
 	}
 }
 
-func TestListTabs_AnnotatesPTYAlive(t *testing.T) {
+func TestListTabs_AnnotatesAttachable(t *testing.T) {
 	svc, fake, _ := newLivenessTestSvc(t)
 	ctx := context.Background()
 	const ws = "w"
@@ -105,13 +105,13 @@ func TestListTabs_AnnotatesPTYAlive(t *testing.T) {
 	}
 	got := map[string]bool{}
 	for _, tb := range tabs {
-		got[tb.SessionName] = tb.PTYAlive
+		got[tb.SessionName] = tb.Attachable
 	}
 	if !got["alive-tab"] {
-		t.Errorf("alive-tab: expected pty_alive=true, got false")
+		t.Errorf("alive-tab: expected attachable=true, got false")
 	}
 	if got["dead-tab"] {
-		t.Errorf("dead-tab: expected pty_alive=false, got true")
+		t.Errorf("dead-tab: expected attachable=false, got true")
 	}
 }
 
@@ -131,13 +131,13 @@ func TestListTabs_TreatsCurrentProcessMetadataAsAttachable(t *testing.T) {
 	}
 	got := map[string]bool{}
 	for _, tb := range tabs {
-		got[tb.SessionName] = tb.PTYAlive
+		got[tb.SessionName] = tb.Attachable
 	}
 	if !got["fresh-tab"] {
-		t.Errorf("fresh-tab: expected pty_alive=true so the UI can spawn it, got false")
+		t.Errorf("fresh-tab: expected attachable=true so the UI can spawn it, got false")
 	}
 	if got["stale-tab"] {
-		t.Errorf("stale-tab: expected pty_alive=false after server restart, got true")
+		t.Errorf("stale-tab: expected attachable=false after server restart, got true")
 	}
 }
 
@@ -165,8 +165,8 @@ func TestListTabs_DoesNotTreatAgentMetadataWithoutLaunchAsAttachable(t *testing.
 		t.Fatalf("ListTabs: %v", err)
 	}
 	for _, tb := range tabs {
-		if tb.SessionName == "term_stopped_agent" && tb.PTYAlive {
-			t.Fatal("term_stopped_agent: expected pty_alive=false without launch spec")
+		if tb.SessionName == "term_stopped_agent" && tb.Attachable {
+			t.Fatal("term_stopped_agent: expected attachable=false without launch spec")
 		}
 	}
 }
@@ -187,14 +187,14 @@ func TestListTabs_DoesNotTreatClosedCurrentProcessMetadataAsAttachable(t *testin
 	}
 	got := map[string]bool{}
 	for _, tb := range tabs {
-		got[tb.SessionName] = tb.PTYAlive
+		got[tb.SessionName] = tb.Attachable
 	}
 	if got["closed-tab"] {
-		t.Errorf("closed-tab: expected pty_alive=false after PTY exit, got true")
+		t.Errorf("closed-tab: expected attachable=false after PTY exit, got true")
 	}
 }
 
-func TestGetTab_AnnotatesPTYAlive(t *testing.T) {
+func TestGetTab_AnnotatesAttachable(t *testing.T) {
 	svc, fake, _ := newLivenessTestSvc(t)
 	ctx := context.Background()
 	const ws = "w"
@@ -206,8 +206,8 @@ func TestGetTab_AnnotatesPTYAlive(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetTab: %v", err)
 	}
-	if !meta.PTYAlive {
-		t.Errorf("expected pty_alive=true on live PTY, got false")
+	if !meta.Attachable {
+		t.Errorf("expected attachable=true on live PTY, got false")
 	}
 }
 
