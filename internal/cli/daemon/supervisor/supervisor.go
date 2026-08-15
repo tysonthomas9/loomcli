@@ -230,28 +230,6 @@ const (
 
 var controlPlaneOperationTimeout = 2 * time.Second
 
-// Stop gracefully shuts down all agents. Safe to call multiple times.
-func (s *Supervisor) Stop() {
-	// Signal all goroutines to stop (protected from double-close)
-	s.ShutdownOnce.Do(func() {
-		close(s.Shutdown)
-	})
-
-	// Unblock any agents waiting for concurrency slots
-	s.Concurrency.Close()
-
-	// Yield and stop all agent processes in parallel
-	s.AgentsMu.RLock()
-	snapshot := make([]*AgentProcess, len(s.Agents))
-	copy(snapshot, s.Agents)
-	s.AgentsMu.RUnlock()
-
-	s.drainAllWithGrace(snapshot)
-
-	// Wait for all superviseAgent goroutines to exit
-	s.Wg.Wait()
-}
-
 // superviseAgent is the main loop for a single agent (runs in goroutine).
 //
 //nolint:funlen // The restart loop keeps lifecycle ordering visible.
