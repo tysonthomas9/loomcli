@@ -6125,6 +6125,21 @@ components:
             live, within its grace window). Values ≥2 can be surfaced as
             a "multiple viewers" indicator so users can be warned before
             destructive tab-close actions.
+        replaced_at:
+          type: string
+          format: date-time
+          description: |
+            When this tab's shell was replaced by a fresh one — the previous
+            PTY died with a previous server process. Absent means never
+            replaced, or the marker was dismissed via PATCH. Unlike
+            pty_alive this is persisted, so the marker survives a reload and
+            is visible to every client.
+        replaced_reason:
+          type: string
+          enum: [server_restart]
+          description: |
+            Why the shell was replaced. Server-written only; clients cannot
+            set it. Present only alongside replaced_at.
 
     TabPutRequest:
       type: object
@@ -6153,6 +6168,13 @@ components:
           type: [boolean, "null"]
         issue_id:
           type: [string, "null"]
+        replaced_at:
+          type: [string, "null"]
+          description: |
+            Dismiss the session-replacement marker by sending an empty
+            string. A non-empty value must be an RFC3339 timestamp;
+            anything else is rejected with 400. replaced_reason is not
+            client-settable — the server owns its enum.
 
     # ── Issue Tab Schemas ───────────────────────────────────────────────
     IssueTab:

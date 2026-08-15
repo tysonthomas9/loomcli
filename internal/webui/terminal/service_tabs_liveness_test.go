@@ -211,6 +211,52 @@ func TestGetTab_AnnotatesAttachable(t *testing.T) {
 	}
 }
 
+// Attachable is computed per read; the replacement marker is persisted. The
+// service annotates the first and must pass the second through untouched.
+func TestListAndGetTab_PropagateReplacementMarker(t *testing.T) {
+	svc, fake, _ := newLivenessTestSvc(t)
+	ctx := context.Background()
+	const ws = "w"
+
+	replaced := time.Now().UTC().Add(-time.Hour).Truncate(time.Second)
+	if err := svc.tabStore.Set(ctx, &tabmeta.TabMetadata{
+		SessionName:    "sess",
+		Workspace:      ws,
+		Label:          "sess",
+		CreatedAt:      replaced,
+		UpdatedAt:      replaced,
+		ReplacedAt:     replaced,
+		ReplacedReason: "server_restart",
+	}); err != nil {
+		t.Fatalf("seed Set: %v", err)
+	}
+	fake.alive[SessionKey{Workspace: ws, Name: "sess"}] = true
+
+	meta, err := svc.GetTab(ctx, ws, "sess")
+	if err != nil {
+		t.Fatalf("GetTab: %v", err)
+	}
+	if !meta.Attachable {
+		t.Errorf("expected attachable=true on live PTY, got false")
+	}
+	if !meta.ReplacedAt.Equal(replaced) || meta.ReplacedReason != "server_restart" {
+		t.Errorf("GetTab marker = (%v, %q), want (%v, %q)",
+			meta.ReplacedAt, meta.ReplacedReason, replaced, "server_restart")
+	}
+
+	tabs, err := svc.ListTabs(ctx, ws)
+	if err != nil {
+		t.Fatalf("ListTabs: %v", err)
+	}
+	if len(tabs) != 1 {
+		t.Fatalf("got %d tabs, want 1", len(tabs))
+	}
+	if !tabs[0].ReplacedAt.Equal(replaced) || tabs[0].ReplacedReason != "server_restart" {
+		t.Errorf("ListTabs marker = (%v, %q), want (%v, %q)",
+			tabs[0].ReplacedAt, tabs[0].ReplacedReason, replaced, "server_restart")
+	}
+}
+
 func TestPutTab_RejectsOverwriteWhenPTYIsLive(t *testing.T) {
 	svc, fake, _ := newLivenessTestSvc(t)
 	ctx := context.Background()
