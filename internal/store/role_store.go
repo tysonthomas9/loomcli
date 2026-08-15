@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
 )
@@ -34,17 +35,21 @@ type RoleCreate struct {
 
 // RoleUpdate is the partial-update payload for roles.
 type RoleUpdate struct {
-	Kind         *string
-	Description  *string
-	Prompt       *string
-	PromptFile   *string
-	Model        *string
-	TaskFilter   *string
-	Executor     *string
-	Backend      *string
-	Effort       *string
-	PathPatterns *[]string
-	Skills       *[]string
+	// ExpectedUpdatedAt applies the patch only when the durable role still has
+	// this revision. Nil preserves compatibility with callers and fleet-db
+	// servers that do not use conditional role updates.
+	ExpectedUpdatedAt *time.Time
+	Kind              *string
+	Description       *string
+	Prompt            *string
+	PromptFile        *string
+	Model             *string
+	TaskFilter        *string
+	Executor          *string
+	Backend           *string
+	Effort            *string
+	PathPatterns      *[]string
+	Skills            *[]string
 	// InputPolicy uses the same double-pointer convention as the other
 	// optional pointer fields: nil leaves it alone, &nil clears it back to the
 	// deny-everything zero value, and a pointer to a non-nil policy sets it.

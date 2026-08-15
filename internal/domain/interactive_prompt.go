@@ -7,7 +7,7 @@ type BuiltinInteractivePrompt struct {
 	Hidden bool   `json:"-"`
 }
 
-// ordered; ID must match an embedded internal/cli/agent/prompts/<ID>.md
+// ordered; ID must match an embedded internal/agentprompt/prompts/<ID>.md
 var builtinInteractivePrompts = []BuiltinInteractivePrompt{
 	{ID: "lead", Label: "Lead"},
 	{ID: "pr-review", Label: "PR Review"},

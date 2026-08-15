@@ -128,6 +128,22 @@ vi.mock("@/components/AgentDetailMain/AgentDetailMain", () => ({
   AgentDetailMain: () => <div data-testid="agent-detail" />,
 }));
 
+vi.mock("@/components/RolePromptCard", () => ({
+  RolePromptCard: ({
+    workspaceId,
+    roleName,
+  }: {
+    workspaceId: string;
+    roleName: string;
+  }) => (
+    <div
+      data-testid="role-prompt-card"
+      data-workspace={workspaceId}
+      data-role={roleName}
+    />
+  ),
+}));
+
 vi.mock("@/components/AgentDetailPanel", () => ({
   GitTab: ({ agent }: { agent: { name: string } }) => (
     <div data-testid="git-tab" data-agent={agent.name} />
@@ -220,6 +236,24 @@ describe("AgentsPage", () => {
 
     const toggle = await screen.findByTestId("agent-editor-split");
     expect(toggle.getAttribute("aria-label")).toBe("Split editor right");
+  });
+
+  it("shows the selected roster agent's real role in the prompt card", async () => {
+    mocks.agents = [
+      {
+        name: "lead-1",
+        role: "custom-reviewer",
+        repo: "loomcli",
+        status: "task",
+        branch: "agent/lead-1",
+      },
+    ];
+    render(<AgentsPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Info" }));
+    const card = await screen.findByTestId("role-prompt-card");
+    expect(card).toHaveAttribute("data-workspace", "DESKTOP-QA");
+    expect(card).toHaveAttribute("data-role", "custom-reviewer");
   });
 
   it("queues the built-in epic runner workflow from the lead-panel Run button", async () => {

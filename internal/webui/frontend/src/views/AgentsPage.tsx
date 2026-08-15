@@ -42,6 +42,7 @@ import {
   orderAgentsForEpicRunner,
 } from "@/components/AgentIconRail/AgentIconRail";
 import { IssueDetailPanel } from "@/components/IssueDetailPanel/IssueDetailPanel";
+import { RolePromptCard } from "@/components/RolePromptCard";
 import {
   EPIC_RUNNER_WORKFLOW_NAME,
   isTerminalWorkflowRunStatus,
@@ -399,6 +400,7 @@ function AgentsPageInner(): JSX.Element {
 
   const statusType = parseLoomStatus(selected?.status ?? "").type;
   const roleName = selected?.role ?? statusType;
+  const selectedPromptRole = selected?.role?.trim() ?? "";
   const selColor = getAvatarColor(selected?.name ?? "agent");
   const selText = shouldUseWhiteText(selColor) ? "#fff" : "#171717";
 
@@ -490,6 +492,12 @@ function AgentsPageInner(): JSX.Element {
                   ) : null}
                 </dl>
               </section>
+              {selectedPromptRole ? (
+                <RolePromptCard
+                  workspaceId={workspaceId}
+                  roleName={selectedPromptRole}
+                />
+              ) : null}
             </div>
           );
         case "git":
@@ -562,6 +570,8 @@ function AgentsPageInner(): JSX.Element {
       roleName,
       infoStats,
       statusType,
+      selectedPromptRole,
+      workspaceId,
     ],
   );
 

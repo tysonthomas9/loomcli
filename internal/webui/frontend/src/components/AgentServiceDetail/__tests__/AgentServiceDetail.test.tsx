@@ -48,6 +48,12 @@ vi.mock("@/api/agentServices", async (importOriginal) => {
   };
 });
 
+vi.mock("@/components/RolePromptCard", () => ({
+  RolePromptCard: ({ roleName }: { roleName: string }) => (
+    <div data-testid="role-prompt-card" data-role={roleName} />
+  ),
+}));
+
 const service: AgentServiceDTO = {
   id: "scout",
   name: "Scout",
@@ -106,6 +112,35 @@ describe("AgentServiceDetail", () => {
 
   afterEach(() => {
     vi.useRealTimers();
+  });
+
+  it("explains that scripted behavior comes from the driver", () => {
+    render(<AgentServiceDetail workspaceId="WS" service={service} />);
+    expect(screen.getByTestId("scripted-agent-prompt-note")).toHaveTextContent(
+      "Scripted agent — behavior comes from its driver, not a role prompt.",
+    );
+    expect(screen.queryByTestId("role-prompt-card")).not.toBeInTheDocument();
+  });
+
+  it("renders the role prompt card for prompt-kind services", () => {
+    render(
+      <AgentServiceDetail
+        workspaceId="WS"
+        service={{
+          ...service,
+          id: "reviewer",
+          kind: "prompt",
+          behavior: { roleName: "reviewer" },
+        }}
+      />,
+    );
+    expect(screen.getByTestId("role-prompt-card")).toHaveAttribute(
+      "data-role",
+      "reviewer",
+    );
+    expect(
+      screen.queryByTestId("scripted-agent-prompt-note"),
+    ).not.toBeInTheDocument();
   });
 
   it("expands a run with full details, stdout tail, logs reference, and newest-last events", async () => {

@@ -2,7 +2,6 @@ package agent
 
 import (
 	"bytes"
-	"embed"
 	"fmt"
 	"log"
 	"os"
@@ -12,15 +11,13 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/tysonthomas9/loomcli/internal/agentprompt"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/backends"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/cli/git"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 )
-
-//go:embed prompts/*.md
-var promptFS embed.FS
 
 // promptTemplateData holds all template context fields for prompt rendering.
 type promptTemplateData struct {
@@ -80,11 +77,11 @@ func renderPrompt(name string, data promptTemplateData) string {
 			panic(fmt.Sprintf("prompt: failed to execute template %q: %v", name, err))
 		}
 		log.Printf("warning: override template %q execution failed: %v; falling back to embedded default", name, err)
-		embContent, embErr := promptFS.ReadFile("prompts/" + name + ".md")
+		embContent, embErr := agentprompt.TemplateSource(name)
 		if embErr != nil {
 			panic(fmt.Sprintf("prompt: embedded fallback template %q not found: %v", name, embErr))
 		}
-		embTmpl := template.Must(template.New(name).Parse(string(embContent)))
+		embTmpl := template.Must(template.New(name).Parse(embContent))
 		buf.Reset()
 		if execErr := embTmpl.Execute(&buf, data); execErr != nil {
 			panic(fmt.Sprintf("prompt: embedded template %q execute failed (bug): %v", name, execErr))
@@ -122,11 +119,11 @@ func loadTemplate(name string) (content string, isOverride bool, err error) {
 		}
 	}
 
-	data, err := promptFS.ReadFile("prompts/" + name + ".md")
+	data, err := agentprompt.TemplateSource(name)
 	if err != nil {
 		return "", false, fmt.Errorf("embedded template %q not found: %w", name, err)
 	}
-	return string(data), false, nil
+	return data, false, nil
 }
 
 // buildWorkspaceContextBlock generates the workspace context section for prompts.
