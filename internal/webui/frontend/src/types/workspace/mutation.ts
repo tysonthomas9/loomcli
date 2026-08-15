@@ -51,6 +51,7 @@ export type MutationEntityType =
  */
 export interface MutationPayload {
   type: MutationType;
+  cursor?: string;
   entity_type?: MutationEntityType;
   entity_id?: string;
   action?: string;

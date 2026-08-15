@@ -15,6 +15,7 @@ export type ViewMode =
   | "graph"
   | "monitor"
   | "observability"
+  | "activity"
   | "terminal"
   | "agents"
   | "prs"

@@ -34,6 +34,9 @@ vi.mock("@/views/MonitorPage", () => ({ MonitorPage }));
 const ObservabilityPage = () => null;
 vi.mock("@/views/ObservabilityPage", () => ({ ObservabilityPage }));
 
+const ActivityPage = () => null;
+vi.mock("@/views/ActivityPage", () => ({ ActivityPage }));
+
 const SettingsPage = () => null;
 vi.mock("@/views/SettingsPage", () => ({ SettingsPage }));
 
@@ -119,6 +122,7 @@ describe("router view routes", () => {
       expect(paths).toContain("graph");
       expect(paths).toContain("monitor");
       expect(paths).toContain("observability");
+      expect(paths).toContain("activity");
       expect(paths).toContain("terminal");
       expect(paths).toContain("settings");
       expect(paths).toContain("workspace");
@@ -140,6 +144,7 @@ describe("router view routes", () => {
       ["graph", GraphPage],
       ["monitor", MonitorPage],
       ["observability", ObservabilityPage],
+      ["activity", ActivityPage],
       ["settings", SettingsPage],
       ["workspace", WorkspacePage],
       ["files", FilesPage],

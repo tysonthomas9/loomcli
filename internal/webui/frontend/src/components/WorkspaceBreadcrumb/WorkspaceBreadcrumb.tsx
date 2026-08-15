@@ -14,6 +14,7 @@ const VIEW_LABELS: Record<ViewMode, string> = {
   graph: "Graph",
   monitor: "Monitor",
   observability: "Observability",
+  activity: "Activity",
   terminal: "Monitor",
   agents: "Agents",
   list: "List",
