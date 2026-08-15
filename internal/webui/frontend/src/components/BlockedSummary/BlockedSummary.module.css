@@ -44,7 +44,7 @@
 
 /* Badge with blocked issues - use red color */
 .badge[data-has-blocked="true"] {
-  color: var(--color-blocked);
+  color: var(--color-danger-text);
 }
 
 .badge[data-has-blocked="true"]:hover {
@@ -204,7 +204,7 @@
 }
 
 .error {
-  color: var(--color-danger);
+  color: var(--color-danger-text);
 }
 
 .moreText {
@@ -226,7 +226,7 @@
   background: var(--color-bg-secondary);
   font-family: var(--font-family-base);
   font-size: var(--font-size-sm);
-  color: var(--color-primary);
+  color: var(--color-primary-text);
   text-align: left;
   cursor: pointer;
   transition: background-color var(--transition-fast);

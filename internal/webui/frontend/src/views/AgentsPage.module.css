@@ -122,7 +122,7 @@
 
 .tabBarControl[aria-pressed="true"] {
   background: rgb(245 158 11 / 12%);
-  color: var(--color-warning);
+  color: var(--color-warning-text);
 }
 
 .tab {
@@ -410,16 +410,16 @@
 }
 
 .statValue[data-tone="success"] {
-  color: var(--color-success);
+  color: var(--color-success-text);
 }
 .statValue[data-tone="warning"] {
-  color: var(--color-warning);
+  color: var(--color-warning-text);
 }
 .statValue[data-tone="danger"] {
-  color: var(--color-danger);
+  color: var(--color-danger-text);
 }
 .statValue[data-tone="info"] {
-  color: var(--color-primary);
+  color: var(--color-primary-text);
 }
 
 .infoTwoCol {
@@ -814,7 +814,7 @@
 .qpill[data-tone="success"] {
   border-color: color-mix(in srgb, var(--color-success) 30%, transparent);
   background: color-mix(in srgb, var(--color-success) 10%, transparent);
-  color: var(--color-success);
+  color: var(--color-success-text);
 }
 
 .queueSection {
@@ -858,7 +858,7 @@
 .epicBadge {
   border: 1px solid color-mix(in srgb, var(--color-warning) 40%, transparent);
   background: color-mix(in srgb, var(--color-warning) 10%, transparent);
-  color: var(--color-warning);
+  color: var(--color-warning-text);
 }
 
 .unassignedBadge {
@@ -968,7 +968,7 @@
   border-radius: var(--radius-full);
   border: 1px solid var(--color-warning);
   background: transparent;
-  color: var(--color-warning);
+  color: var(--color-warning-text);
   cursor: pointer;
   transition:
     background-color var(--transition-fast),
@@ -1035,7 +1035,7 @@
   gap: 6px;
   margin: 8px 0 0;
   font-size: 11px;
-  color: var(--color-warning);
+  color: var(--color-warning-text);
 }
 
 .runningDot {
@@ -1186,7 +1186,7 @@
 }
 
 .queueCardBtn:hover .queueCardTitle {
-  color: var(--color-primary);
+  color: var(--color-primary-text);
 }
 
 .queueCardBtn:focus-visible {
@@ -1210,7 +1210,7 @@
 }
 
 .epicToggle:hover .epicTitle {
-  color: var(--color-primary);
+  color: var(--color-primary-text);
 }
 
 .epicChevron {

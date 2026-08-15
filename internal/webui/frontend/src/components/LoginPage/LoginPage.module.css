@@ -126,7 +126,7 @@
 }
 
 .errorMessage {
-  color: var(--color-danger);
+  color: var(--color-danger-text);
   font-size: 13px;
   margin: 0;
   line-height: 1.4;

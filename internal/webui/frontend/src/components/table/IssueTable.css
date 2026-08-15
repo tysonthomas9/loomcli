@@ -97,7 +97,7 @@
 .issue-table__sort-indicator--asc,
 .issue-table__sort-indicator--desc {
   opacity: 1;
-  color: var(--color-primary);
+  color: var(--color-primary-text);
 }
 
 /* Table body */
@@ -230,7 +230,7 @@
 }
 
 .issue-table__group-label {
-  color: var(--color-primary);
+  color: var(--color-primary-text);
   background: color-mix(in srgb, var(--color-primary) 12%, transparent);
   text-transform: uppercase;
 }
@@ -356,7 +356,7 @@
 
 /* Underline title on clickable row hover to signal interactivity */
 .issue-table__row--clickable:hover .issue-table__title {
-  color: var(--color-primary);
+  color: var(--color-primary-text);
   text-decoration: underline;
 }
 
@@ -377,7 +377,7 @@
     var(--color-status-open) 15%,
     transparent
   );
-  color: var(--color-status-open);
+  color: var(--color-primary-text);
 }
 
 .issue-table__status.status-in-progress {
@@ -386,7 +386,7 @@
     var(--color-status-in-progress) 15%,
     transparent
   );
-  color: var(--color-status-in-progress);
+  color: var(--color-warning-text);
 }
 
 .issue-table__status.status-closed {
@@ -395,12 +395,12 @@
     var(--color-status-closed) 15%,
     transparent
   );
-  color: var(--color-status-closed);
+  color: var(--color-success-text);
 }
 
 .issue-table__status.status-blocked {
   background-color: color-mix(in srgb, var(--color-blocked) 15%, transparent);
-  color: var(--color-blocked);
+  color: var(--color-danger-text);
 }
 
 .issue-table__status.status-deferred {
@@ -505,7 +505,7 @@
   cursor: pointer;
   font-family: inherit;
   background-color: color-mix(in srgb, var(--color-blocked) 15%, transparent);
-  color: var(--color-blocked);
+  color: var(--color-danger-text);
   transition: background-color var(--transition-fast);
 }
 
