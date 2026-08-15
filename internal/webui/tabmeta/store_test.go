@@ -443,3 +443,58 @@ func TestValidateWorkspaceName(t *testing.T) {
 		}
 	}
 }
+
+// TestEnsureDefaults_AppendsLiveSessionsInOrder covers the path ListTabs now
+// uses: several live PTYs with no metadata row are appended after the highest
+// existing sort_order, in the order they were supplied, and the row that
+// already existed is left untouched.
+func TestEnsureDefaults_AppendsLiveSessionsInOrder(t *testing.T) {
+	store, _ := setupTest(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Second)
+
+	if err := store.Set(ctx, &TabMetadata{
+		SessionName: "existing",
+		Workspace:   testWorkspace,
+		Label:       "Custom Label",
+		Notes:       "keep me",
+		SortOrder:   3,
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}); err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+
+	tabs, err := store.EnsureDefaults(ctx, testWorkspace, []string{"existing", "live-a", "live-b"})
+	if err != nil {
+		t.Fatalf("EnsureDefaults: %v", err)
+	}
+	if len(tabs) != 3 {
+		t.Fatalf("expected 3 tabs, got %d", len(tabs))
+	}
+
+	order := map[string]int{}
+	for _, tb := range tabs {
+		order[tb.SessionName] = tb.SortOrder
+		if tb.SessionName == "existing" {
+			if tb.Label != "Custom Label" || tb.Notes != "keep me" || tb.SortOrder != 3 {
+				t.Errorf("existing row mutated: %+v", tb)
+			}
+		}
+	}
+	if order["live-a"] != 4 {
+		t.Errorf("live-a sort_order = %d, want 4", order["live-a"])
+	}
+	if order["live-b"] != 5 {
+		t.Errorf("live-b sort_order = %d, want 5", order["live-b"])
+	}
+
+	// The appended rows are persisted, so a plain List sees them too.
+	stored, err := store.List(ctx, testWorkspace)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(stored) != 3 {
+		t.Errorf("List returned %d rows, want 3 (defaults must be persisted)", len(stored))
+	}
+}

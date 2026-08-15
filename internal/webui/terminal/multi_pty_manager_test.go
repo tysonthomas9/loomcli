@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -772,5 +774,46 @@ func TestDispatch_LazyUncreated_NoOps(t *testing.T) {
 	}
 	if mm.hasManager("ws1") {
 		t.Errorf("hasManager=true — Detach/Kill/etc should not create the manager")
+	}
+}
+
+// TestSessionNamesFor_PerWorkspace — the dispatcher must report only the
+// names owned by the requested workspace, and must not nil-deref (or lazily
+// create a manager) for a workspace that has never attached.
+func TestSessionNamesFor_PerWorkspace(t *testing.T) {
+	mm := newTestMultiManager(t, 0)
+	mm.SetGracePeriod(5 * time.Second)
+	for _, ws := range []string{"ws1", "ws2", "ws3"} {
+		if err := mm.Register(ws, t.TempDir()); err != nil {
+			t.Fatalf("Register %s: %v", ws, err)
+		}
+	}
+	for _, key := range []SessionKey{
+		{Workspace: "ws1", Name: "a"},
+		{Workspace: "ws1", Name: "b"},
+		{Workspace: "ws2", Name: "c"},
+	} {
+		if _, _, err := mm.AttachSession(key, 80, 24, &LaunchSpec{Argv: []string{"-c", "cat"}}); err != nil {
+			t.Fatalf("AttachSession(%s): %v", key, err)
+		}
+	}
+
+	got := mm.SessionNamesFor("ws1")
+	sort.Strings(got)
+	if !reflect.DeepEqual(got, []string{"a", "b"}) {
+		t.Errorf("SessionNamesFor(ws1) = %v, want [a b]", got)
+	}
+	if got := mm.SessionNamesFor("ws2"); !reflect.DeepEqual(got, []string{"c"}) {
+		t.Errorf("SessionNamesFor(ws2) = %v, want [c]", got)
+	}
+	// Registered but never attached → no manager yet.
+	if got := mm.SessionNamesFor("ws3"); len(got) != 0 {
+		t.Errorf("SessionNamesFor(ws3 uncreated) = %v, want empty", got)
+	}
+	if got := mm.SessionNamesFor("never-registered"); len(got) != 0 {
+		t.Errorf("SessionNamesFor(unknown) = %v, want empty", got)
+	}
+	if mm.hasManager("ws3") {
+		t.Errorf("hasManager(ws3)=true — SessionNamesFor must not lazily create a manager")
 	}
 }
