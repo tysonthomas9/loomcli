@@ -105,4 +105,64 @@ describe("useBackendConfig", () => {
     expect(result.current.config).toEqual(initial);
     expect(result.current.error).toBe("save failed");
   });
+
+  describe("isLoading readiness", () => {
+    it("is loading in the same render in which enabled flips false->true", () => {
+      // Mirror of useTerminalMetadata: isLoading is seeded from `enabled`, so
+      // without a render-phase reset a consumer reads configLoading===false in
+      // the very commit where the view activates.
+      mockGetWorkspaceBackendConfig.mockImplementation(
+        () => new Promise<BackendConfigData>(() => {}),
+      );
+
+      const { result, rerender } = renderHook(
+        ({ enabled }: { enabled: boolean }) =>
+          useBackendConfig("FLEETDB", { enabled }),
+        { initialProps: { enabled: false } },
+      );
+
+      expect(result.current.isLoading).toBe(false);
+
+      rerender({ enabled: true });
+
+      expect(result.current.isLoading).toBe(true);
+    });
+
+    it("is loading in the same render in which the workspace changes", async () => {
+      const config = createMockConfig();
+      mockGetWorkspaceBackendConfig.mockResolvedValueOnce(config);
+
+      const { result, rerender } = renderHook(
+        ({ ws }: { ws: string }) => useBackendConfig(ws),
+        { initialProps: { ws: "WS1" } },
+      );
+      await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+      mockGetWorkspaceBackendConfig.mockImplementation(
+        () => new Promise<BackendConfigData>(() => {}),
+      );
+      rerender({ ws: "WS2" });
+
+      expect(result.current.isLoading).toBe(true);
+    });
+
+    it("keeps the cached config visible across the reset", async () => {
+      const cached = createMockConfig({ backend: "codex" });
+      mockGetCachedBackendConfig.mockReturnValue(cached);
+      mockGetWorkspaceBackendConfig.mockImplementation(
+        () => new Promise<BackendConfigData>(() => {}),
+      );
+
+      const { result, rerender } = renderHook(
+        ({ enabled }: { enabled: boolean }) =>
+          useBackendConfig("FLEETDB", { enabled }),
+        { initialProps: { enabled: false } },
+      );
+
+      rerender({ enabled: true });
+
+      expect(result.current.config).toEqual(cached);
+      expect(result.current.isCached).toBe(true);
+    });
+  });
 });
