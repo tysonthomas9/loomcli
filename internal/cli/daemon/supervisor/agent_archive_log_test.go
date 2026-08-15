@@ -12,9 +12,14 @@ import (
 )
 
 // TestSetupAgentLogFile_WritesUIArchive verifies that a daemon-supervised
-// agent's stdout/stderr is teed into the canonical archive the web UI Logs tab
-// reads (webuilog.GetAgentLogPath), in addition to the watchdog's daemon log.
-// This is the regression guard for daemon-mode agents showing empty logs.
+// agent's stdout/stderr reaches the canonical archive the web UI Logs tab reads
+// (webuilog.GetAgentLogPath), in addition to the watchdog's daemon log. This is
+// the regression guard for daemon-mode agents showing empty logs.
+//
+// Since PUPPET-49 the child writes only the daemon log (it must be handed a
+// real *os.File; see setupAgentLogFile) and the archive is fed asynchronously
+// by the mirror, so the test starts the mirror the way spawnAgent does and
+// asserts after closeAgentLogs has stopped and drained it.
 func TestSetupAgentLogFile_WritesUIArchive(t *testing.T) {
 	tmp := t.TempDir()
 	// Anchor the archive resolver (webuilog.GetLogDir) at the temp dir so the
@@ -42,6 +47,7 @@ func TestSetupAgentLogFile_WritesUIArchive(t *testing.T) {
 	cmd := &exec.Cmd{}
 	ap.Mu.Lock()
 	s.setupAgentLogFile(ap, cmd)
+	ap.stopLogMirror = s.startAgentLogMirror(ap)
 	ap.Mu.Unlock()
 
 	if cmd.Stdout == nil {
@@ -51,7 +57,10 @@ func TestSetupAgentLogFile_WritesUIArchive(t *testing.T) {
 		t.Fatal("ArchiveLogFile was not opened")
 	}
 	if ap.LogFile == nil {
-		t.Fatal("daemon LogFile was not opened (MultiWriter tee path not exercised)")
+		t.Fatal("daemon LogFile was not opened (both-sinks mirror path not exercised)")
+	}
+	if ap.stopLogMirror == nil {
+		t.Fatal("archive mirror did not start with both sinks open")
 	}
 
 	const line = "agent rendered output line\n"
