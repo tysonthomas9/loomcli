@@ -1,8 +1,9 @@
-// Package agentservices exposes read-only durable background-agent identity
+// Package agentservices exposes durable background-agent instance management
 // and run-history projections for the WebUI.
 package agentservices
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -15,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/agentprovision"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/scriptedroles"
 	"github.com/tysonthomas9/loomcli/internal/sessions/transcript"
@@ -24,6 +26,8 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/misc"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/dto"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
+	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
+	"github.com/tysonthomas9/loomcli/internal/webui/storeadapter"
 )
 
 const (
@@ -34,14 +38,39 @@ const (
 )
 
 type Module struct {
-	store      store.Store
-	runtimeDir string
+	store          store.Store
+	runtimeDir     string
+	mutationAccess middleware.Middleware
+	workspaceDir   func(context.Context, store.Store, string) string
 }
 
 func NewModule(st store.Store, runtimeDir ...string) *Module {
-	m := &Module{store: st}
+	dir := ""
 	if len(runtimeDir) > 0 {
-		m.runtimeDir = strings.TrimSpace(runtimeDir[0])
+		dir = runtimeDir[0]
+	}
+	return NewModuleWithAccess(st, dir, middleware.FileAccessConfig{})
+}
+
+// NewModuleWithAccess constructs the module with the same FileAccess policy
+// used by role prompt mutations.
+func NewModuleWithAccess(st store.Store, runtimeDir string, accessCfg middleware.FileAccessConfig) *Module {
+	m := &Module{
+		store: st, runtimeDir: strings.TrimSpace(runtimeDir),
+		mutationAccess: middleware.FileAccess(accessCfg),
+	}
+	m.workspaceDir = func(ctx context.Context, st store.Store, ws string) string {
+		if dir := strings.TrimSpace(storeadapter.ResolveOrHealWorkspacePath(ctx, st, ws)); dir != "" {
+			return dir
+		}
+		if m.runtimeDir != "" {
+			return m.runtimeDir
+		}
+		if dir := strings.TrimSpace(os.Getenv("LOOM_WORKSPACE_RUNTIME_DIR")); dir != "" {
+			return dir
+		}
+		dir, _ := os.Getwd()
+		return dir
 	}
 	return m
 }
@@ -51,6 +80,9 @@ func (m *Module) Register(mux *http.ServeMux) {
 		return
 	}
 	mux.HandleFunc("GET /api/workspaces/{ws}/agent-services", m.listAgentServices)
+	mux.Handle("POST /api/workspaces/{ws}/agent-services", m.mutationAccess(http.HandlerFunc(m.createAgentService)))
+	mux.Handle("PATCH /api/workspaces/{ws}/agent-services/{id}", m.mutationAccess(http.HandlerFunc(m.patchAgentService)))
+	mux.Handle("DELETE /api/workspaces/{ws}/agent-services/{id}", m.mutationAccess(http.HandlerFunc(m.deleteAgentService)))
 	mux.HandleFunc("GET /api/workspaces/{ws}/agent-services/{id}/runs", m.listAgentServiceRuns)
 	mux.HandleFunc("GET /api/workspaces/{ws}/agent-services/{id}/runs/{runId}/tasks", m.listAgentServiceRunTasks)
 	mux.HandleFunc("GET /api/workspaces/{ws}/agent-services/{id}/journal", m.getAgentServiceJournal)
@@ -62,6 +94,7 @@ type agentServiceDTO struct {
 	ID                  string                   `json:"id"`
 	Name                string                   `json:"name"`
 	TriggerKind         string                   `json:"triggerKind"`
+	DesiredState        string                   `json:"desiredState"`
 	Enabled             bool                     `json:"enabled"`
 	Behavior            agentServiceBehaviorDTO  `json:"behavior"`
 	Bindings            []agentServiceBindingDTO `json:"bindings"`
@@ -86,8 +119,201 @@ type agentServiceBindingDTO struct {
 	ID         string `json:"id"`
 	SourceKind string `json:"sourceKind"`
 	Schedule   string `json:"schedule"`
+	Timezone   string `json:"timezone"`
 	Enabled    bool   `json:"enabled"`
 	RouteKey   string `json:"routeKey"`
+}
+
+type createAgentServiceRequest struct {
+	ID      string                           `json:"id"`
+	Name    string                           `json:"name,omitempty"`
+	Role    string                           `json:"role"`
+	Binding createAgentServiceBindingRequest `json:"binding"`
+}
+
+type createAgentServiceBindingRequest struct {
+	Schedule string `json:"schedule"`
+	Timezone string `json:"timezone,omitempty"`
+	Enabled  *bool  `json:"enabled,omitempty"`
+}
+
+type patchAgentServiceRequest struct {
+	ID           json.RawMessage                  `json:"id,omitempty"`
+	Role         json.RawMessage                  `json:"role,omitempty"`
+	Name         *string                          `json:"name,omitempty"`
+	DesiredState *string                          `json:"desiredState,omitempty"`
+	Binding      *patchAgentServiceBindingRequest `json:"binding,omitempty"`
+}
+
+type patchAgentServiceBindingRequest struct {
+	Schedule *string `json:"schedule,omitempty"`
+	Timezone *string `json:"timezone,omitempty"`
+	Enabled  *bool   `json:"enabled,omitempty"`
+}
+
+type agentServiceResponse struct {
+	Success bool            `json:"success"`
+	Data    agentServiceDTO `json:"data"`
+}
+
+func (m *Module) createAgentService(w http.ResponseWriter, r *http.Request) {
+	ws := strings.TrimSpace(r.PathValue("ws"))
+	if ws == "" {
+		handler.RespondError(w, http.StatusBadRequest, "workspace is required")
+		return
+	}
+	var req createAgentServiceRequest
+	if err := readStrictRequest(w, r, &req); err != nil {
+		handler.RespondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	enabled := true
+	if spec, ok := scriptedroles.ForRole(strings.TrimSpace(req.Role)); ok && spec.DefaultInstance != nil {
+		enabled = spec.DefaultInstance.Binding.Enabled
+	}
+	if req.Binding.Enabled != nil {
+		enabled = *req.Binding.Enabled
+	}
+	svc, _, err := agentprovision.CreateAgentInstance(r.Context(), m.store, ws, m.workspaceDir(r.Context(), m.store, ws), agentprovision.AgentInstanceCreate{
+		ServiceID: req.ID, Name: req.Name, RoleName: req.Role, CreatedBy: "user",
+		Binding: agentprovision.AgentInstanceBinding{
+			Kind: "cron", Schedule: req.Binding.Schedule, Timezone: req.Binding.Timezone, Enabled: enabled,
+		},
+	})
+	if err != nil {
+		writeMutationError(w, err, "create agent service failed")
+		return
+	}
+	handler.WriteJSON(w, http.StatusCreated, agentServiceResponse{Success: true, Data: m.decorateAgentService(r, ws, svc)})
+}
+
+func (m *Module) patchAgentService(w http.ResponseWriter, r *http.Request) {
+	ws := strings.TrimSpace(r.PathValue("ws"))
+	serviceID := strings.TrimSpace(r.PathValue("id"))
+	if ws == "" {
+		handler.RespondError(w, http.StatusBadRequest, "workspace is required")
+		return
+	}
+	if err := agentprovision.ValidateServiceID(serviceID); err != nil {
+		handler.RespondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	var req patchAgentServiceRequest
+	if err := readStrictRequest(w, r, &req); err != nil {
+		handler.RespondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if len(req.ID) != 0 {
+		handler.RespondError(w, http.StatusBadRequest, "agent service id is immutable")
+		return
+	}
+	if len(req.Role) != 0 {
+		handler.RespondError(w, http.StatusBadRequest, "agent service role is immutable")
+		return
+	}
+	svc, err := m.store.AgentServices().Get(r.Context(), ws, serviceID)
+	if err != nil || svc == nil || svc.DeletedAt != nil {
+		if err == nil {
+			err = domain.ErrNotFound
+		}
+		writeMutationError(w, err, "agent service not found")
+		return
+	}
+	if _, ok := scriptedroles.ForRole(svc.RoleName); !ok {
+		handler.RespondError(w, http.StatusBadRequest, "agent service does not reference a scripted role")
+		return
+	}
+	servicePatch := store.AgentServiceUpdate{}
+	changed := false
+	if req.Name != nil {
+		name := strings.TrimSpace(*req.Name)
+		if name == "" {
+			handler.RespondError(w, http.StatusBadRequest, "name must not be blank")
+			return
+		}
+		servicePatch.Name = &name
+		changed = true
+	}
+	if req.DesiredState != nil {
+		state := domain.AgentServiceDesiredState(strings.TrimSpace(*req.DesiredState))
+		if state != domain.AgentServiceDesiredRunning && state != domain.AgentServiceDesiredStopped {
+			handler.RespondError(w, http.StatusBadRequest, "desiredState must be running or stopped")
+			return
+		}
+		servicePatch.DesiredState = &state
+		changed = true
+	}
+	var binding *domain.TriggerBinding
+	bindingPatch := store.TriggerBindingUpdate{}
+	if req.Binding != nil {
+		bindings, listErr := m.store.TriggerBindings().List(r.Context(), ws, store.TriggerBindingFilter{TargetAgentServiceID: serviceID})
+		if listErr != nil {
+			writeMutationError(w, listErr, "list agent service bindings failed")
+			return
+		}
+		if len(bindings) != 1 || bindings[0] == nil {
+			handler.RespondError(w, http.StatusConflict, "agent service must have exactly one binding to patch")
+			return
+		}
+		binding = bindings[0]
+		schedule, timezone := binding.Schedule, binding.ScheduleTimezone
+		if req.Binding.Schedule != nil {
+			schedule = strings.TrimSpace(*req.Binding.Schedule)
+			if schedule == "" {
+				handler.RespondError(w, http.StatusBadRequest, "binding schedule must not be blank")
+				return
+			}
+			bindingPatch.Schedule = &schedule
+			changed = true
+		}
+		if req.Binding.Timezone != nil {
+			timezone = strings.TrimSpace(*req.Binding.Timezone)
+			bindingPatch.ScheduleTimezone = &timezone
+			changed = true
+		}
+		if req.Binding.Enabled != nil {
+			bindingPatch.Enabled = req.Binding.Enabled
+			changed = true
+		}
+		if (req.Binding.Schedule != nil || req.Binding.Timezone != nil) && schedule != "" {
+			if _, nextErr := trigger.NextFire(schedule, timezone, time.Now().UTC()); nextErr != nil {
+				handler.RespondError(w, http.StatusBadRequest, "invalid binding schedule: "+nextErr.Error())
+				return
+			}
+		}
+	}
+	if !changed {
+		handler.RespondError(w, http.StatusBadRequest, "patch must change name, desiredState, or binding")
+		return
+	}
+	if servicePatch.Name != nil || servicePatch.DesiredState != nil {
+		svc, err = m.store.AgentServices().Update(r.Context(), ws, serviceID, servicePatch)
+		if err != nil {
+			writeMutationError(w, err, "update agent service failed")
+			return
+		}
+	}
+	if binding != nil && (bindingPatch.Schedule != nil || bindingPatch.ScheduleTimezone != nil || bindingPatch.Enabled != nil) {
+		if _, err := m.store.TriggerBindings().Update(r.Context(), ws, binding.BindingID, bindingPatch); err != nil {
+			writeMutationError(w, err, "update agent service binding failed")
+			return
+		}
+	}
+	handler.WriteJSON(w, http.StatusOK, agentServiceResponse{Success: true, Data: m.decorateAgentService(r, ws, svc)})
+}
+
+func (m *Module) deleteAgentService(w http.ResponseWriter, r *http.Request) {
+	ws := strings.TrimSpace(r.PathValue("ws"))
+	serviceID := strings.TrimSpace(r.PathValue("id"))
+	if ws == "" {
+		handler.RespondError(w, http.StatusBadRequest, "workspace is required")
+		return
+	}
+	if err := agentprovision.DeleteAgentInstance(r.Context(), m.store, ws, serviceID); err != nil {
+		writeMutationError(w, err, "delete agent service failed")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 type driverRunDTO struct {
@@ -179,7 +405,7 @@ func (m *Module) decorateAgentService(r *http.Request, ws string, svc *domain.Ag
 	}
 	out := agentServiceDTO{
 		ID: svc.ServiceID, Name: svc.Name, TriggerKind: string(svc.TriggerKind),
-		Enabled:  svc.DesiredState == domain.AgentServiceDesiredRunning,
+		DesiredState: string(svc.DesiredState), Enabled: svc.DesiredState == domain.AgentServiceDesiredRunning,
 		Behavior: behavior,
 		Bindings: []agentServiceBindingDTO{}, Errors: []string{}, CreatedAt: svc.CreatedAt, UpdatedAt: svc.UpdatedAt,
 	}
@@ -206,7 +432,7 @@ func decorateAgentServiceBindings(out *agentServiceDTO, bindings []*domain.Trigg
 		}
 		out.Bindings = append(out.Bindings, agentServiceBindingDTO{
 			ID: binding.BindingID, SourceKind: binding.SourceKind, Schedule: binding.Schedule,
-			Enabled: binding.Enabled, RouteKey: binding.RouteKey,
+			Timezone: binding.ScheduleTimezone, Enabled: binding.Enabled, RouteKey: binding.RouteKey,
 		})
 		if !binding.Enabled || binding.SourceKind != trigger.CronSourceKind || strings.TrimSpace(binding.Schedule) == "" {
 			continue
@@ -528,6 +754,32 @@ func writeStoreError(w http.ResponseWriter, err error, fallback string) {
 		handler.RespondError(w, http.StatusNotFound, fallback)
 	case errors.Is(err, domain.ErrInvalid):
 		handler.RespondError(w, http.StatusBadRequest, err.Error())
+	default:
+		handler.RespondError(w, http.StatusInternalServerError, fallback)
+	}
+}
+
+func readStrictRequest(w http.ResponseWriter, r *http.Request, dst any) error {
+	r.Body = http.MaxBytesReader(w, r.Body, handler.MaxRequestBody)
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(dst); err != nil {
+		return fmt.Errorf("invalid request body")
+	}
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		return fmt.Errorf("request body contains trailing content")
+	}
+	return nil
+}
+
+func writeMutationError(w http.ResponseWriter, err error, fallback string) {
+	switch {
+	case errors.Is(err, domain.ErrNotFound):
+		handler.RespondError(w, http.StatusNotFound, err.Error())
+	case errors.Is(err, domain.ErrInvalid):
+		handler.RespondError(w, http.StatusBadRequest, err.Error())
+	case errors.Is(err, domain.ErrAlreadyExists), errors.Is(err, domain.ErrInvalidTransition), errors.Is(err, domain.ErrConflict):
+		handler.RespondError(w, http.StatusConflict, err.Error())
 	default:
 		handler.RespondError(w, http.StatusInternalServerError, fallback)
 	}

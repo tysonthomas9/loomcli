@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/agentprovision"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/driver"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
@@ -241,6 +242,122 @@ func TestCreateScoutWorkflowRunProvisionsAndAttributesAgentService(t *testing.T)
 		binding.DriverID != run.DriverID || binding.DriverVersionID != run.DriverVersionID {
 		t.Fatalf("binding = %#v, want attached scout cron", binding)
 	}
+}
+
+func TestCreateWorkflowRunUsesRequestedAgentServiceInstance(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	installFakeFlueBuild(t)
+	t.Chdir(t.TempDir())
+	mux := http.NewServeMux()
+	NewModule(st).Register(mux)
+
+	defaultReq := httptest.NewRequest(http.MethodPost, "/api/workspaces/TEST/workflows/"+BuiltinScoutWorkflowName, stringsReader(`{"requestedBy":"ui"}`))
+	defaultRec := httptest.NewRecorder()
+	mux.ServeHTTP(defaultRec, defaultReq)
+	if defaultRec.Code != http.StatusAccepted {
+		t.Fatalf("default status = %d body=%s", defaultRec.Code, defaultRec.Body.String())
+	}
+	if _, err := st.AgentServices().Create(ctx, store.AgentServiceCreate{
+		WorkspaceKey: "TEST", ServiceID: "scout-west", Name: "Scout West",
+		TriggerKind: domain.AgentServiceTriggerKindCron, DesiredState: domain.AgentServiceDesiredRunning,
+		RoleName: scriptedroles.ScoutRoleName,
+	}); err != nil {
+		t.Fatalf("create requested instance: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/TEST/workflows/"+BuiltinScoutWorkflowName,
+		stringsReader(`{"agentServiceId":"scout-west","requestedBy":"ui"}`))
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	var run domain.DriverRun
+	if err := json.Unmarshal(rec.Body.Bytes(), &run); err != nil {
+		t.Fatalf("decode run: %v", err)
+	}
+	if run.AgentServiceID != "scout-west" || run.DriverID != BuiltinScoutWorkflowName {
+		t.Fatalf("run = %#v", run)
+	}
+}
+
+func TestCreateScoutWorkflowRunLeavesArchivedDefaultUnattributed(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	installFakeFlueBuild(t)
+	t.Chdir(t.TempDir())
+	mux := http.NewServeMux()
+	NewModule(st).Register(mux)
+
+	firstReq := httptest.NewRequest(http.MethodPost, "/api/workspaces/TEST/workflows/"+BuiltinScoutWorkflowName, stringsReader(`{"requestedBy":"ui"}`))
+	firstRec := httptest.NewRecorder()
+	mux.ServeHTTP(firstRec, firstReq)
+	if firstRec.Code != http.StatusAccepted {
+		t.Fatalf("initial status = %d body=%s", firstRec.Code, firstRec.Body.String())
+	}
+	if err := agentprovision.DeleteAgentInstance(ctx, st, "TEST", scriptedroles.ScoutRoleName); err != nil {
+		t.Fatalf("delete default scout instance: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/TEST/workflows/"+BuiltinScoutWorkflowName, stringsReader(`{"requestedBy":"ui"}`))
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status = %d body=%s, want 202", rec.Code, rec.Body.String())
+	}
+	var run domain.DriverRun
+	if err := json.Unmarshal(rec.Body.Bytes(), &run); err != nil {
+		t.Fatalf("decode run: %v", err)
+	}
+	if run.AgentServiceID != "" || run.DriverID != BuiltinScoutWorkflowName {
+		t.Fatalf("run = %#v, want unattributed scout workflow run", run)
+	}
+	services, err := st.AgentServices().List(ctx, "TEST", store.AgentServiceFilter{IncludeDeleted: true})
+	if err != nil {
+		t.Fatalf("list agent services: %v", err)
+	}
+	if len(services) != 1 || services[0].ServiceID != scriptedroles.ScoutRoleName || services[0].DeletedAt == nil {
+		t.Fatalf("services = %#v, want one archived scout tombstone", services)
+	}
+}
+
+func TestCreateWorkflowRunRejectsMissingOrMismatchedAgentService(t *testing.T) {
+	t.Run("missing", func(t *testing.T) {
+		st := memstore.New()
+		mux := http.NewServeMux()
+		NewModule(st).Register(mux)
+		req := httptest.NewRequest(http.MethodPost, "/api/workspaces/TEST/workflows/scout", stringsReader(`{"agentServiceId":"missing"}`))
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+		if rec.Code != http.StatusNotFound || !strings.Contains(rec.Body.String(), "agent service not found") {
+			t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+		}
+	})
+
+	t.Run("workflow mismatch", func(t *testing.T) {
+		st := memstore.New()
+		if _, err := st.Roles().Create(t.Context(), store.RoleCreate{
+			WorkspaceKey: "TEST", Name: scriptedroles.EpicRunnerRoleName, Kind: string(domain.RoleKindWorker),
+		}); err != nil {
+			t.Fatalf("create role: %v", err)
+		}
+		if _, err := st.AgentServices().Create(t.Context(), store.AgentServiceCreate{
+			WorkspaceKey: "TEST", ServiceID: "epic-one", Name: "Epic one",
+			TriggerKind: domain.AgentServiceTriggerKindEvent, DesiredState: domain.AgentServiceDesiredRunning,
+			RoleName: scriptedroles.EpicRunnerRoleName,
+		}); err != nil {
+			t.Fatalf("create service: %v", err)
+		}
+		mux := http.NewServeMux()
+		NewModule(st).Register(mux)
+		req := httptest.NewRequest(http.MethodPost, "/api/workspaces/TEST/workflows/scout", stringsReader(`{"agentServiceId":"epic-one"}`))
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+		if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "does not run workflow") {
+			t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+		}
+	})
 }
 
 func TestCreateWorkflowRunRefreshesStaleBuiltinRunnerManifest(t *testing.T) {

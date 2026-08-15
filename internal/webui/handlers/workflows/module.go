@@ -1,6 +1,7 @@
 package workflows
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -139,13 +140,31 @@ func (m *Module) createWorkflowRun(w http.ResponseWriter, r *http.Request) {
 	name := strings.TrimSpace(r.PathValue("name"))
 	driverID := ""
 	agentServiceID := ""
-	if role, scripted := scriptedroles.ForWorkflow(name); scripted {
+	requestedServiceID, requested, parseErr := workflowAgentServiceID(payload)
+	if parseErr != nil {
+		writeError(w, http.StatusBadRequest, parseErr.Error())
+		return
+	}
+	if requested {
+		svc, getErr := m.store.AgentServices().Get(r.Context(), ws, requestedServiceID)
+		if errors.Is(getErr, domain.ErrNotFound) || (getErr == nil && (svc == nil || svc.DeletedAt != nil)) {
+			writeError(w, http.StatusNotFound, "agent service not found")
+			return
+		}
+		if getErr != nil {
+			writeDomainError(w, getErr, "resolve agent service failed")
+			return
+		}
+		role, scripted := scriptedroles.ForRole(svc.RoleName)
+		if !scripted || role.WorkflowName != name {
+			writeError(w, http.StatusBadRequest, fmt.Sprintf("agent service %q does not run workflow %q", requestedServiceID, name))
+			return
+		}
+		agentServiceID = svc.ServiceID
+		driverID, err = m.resolveScriptedRoleDriverID(r.Context(), ws, role)
+	} else if role, scripted := scriptedroles.ForWorkflow(name); scripted {
 		if role.DefaultInstance != nil {
-			svc, ensureErr := agentprovision.EnsureAgentInstance(r.Context(), m.store, ws, resolveWorkflowWorkspaceDir(r.Context(), m.store, ws), role.RoleName)
-			if ensureErr == nil {
-				agentServiceID = svc.ServiceID
-			}
-			err = ensureErr
+			agentServiceID, err = m.defaultAgentServiceIDForRun(r.Context(), ws, role)
 		}
 		if err == nil {
 			driverID, err = m.resolveScriptedRoleDriverID(r.Context(), ws, role)
@@ -189,6 +208,51 @@ func (m *Module) createWorkflowRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	handler.WriteJSON(w, http.StatusAccepted, run)
+}
+
+func (m *Module) defaultAgentServiceIDForRun(ctx context.Context, ws string, role scriptedroles.ScriptedRole) (string, error) {
+	defaultID := role.DefaultInstance.ServiceID
+	services, err := m.store.AgentServices().List(ctx, ws, store.AgentServiceFilter{IncludeDeleted: true})
+	if err != nil {
+		return "", err
+	}
+	for _, svc := range services {
+		if svc != nil && svc.ServiceID == defaultID && svc.DeletedAt != nil {
+			// Archived defaults are tombstones. A workflow may still run, but it
+			// stays unattributed until the user creates a differently named
+			// instance; automatic ensure must never resurrect this ID.
+			return "", nil
+		}
+	}
+	svc, err := agentprovision.EnsureAgentInstance(ctx, m.store, ws, resolveWorkflowWorkspaceDir(ctx, m.store, ws), role.RoleName)
+	if errors.Is(err, domain.ErrInvalidTransition) {
+		// A concurrent delete may archive the default after the list above.
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	return svc.ServiceID, nil
+}
+
+func workflowAgentServiceID(payload json.RawMessage) (string, bool, error) {
+	trimmed := bytes.TrimSpace(payload)
+	if len(trimmed) == 0 || trimmed[0] != '{' {
+		return "", false, nil
+	}
+	var object map[string]json.RawMessage
+	if err := json.Unmarshal(trimmed, &object); err != nil {
+		return "", false, nil
+	}
+	raw, ok := object["agentServiceId"]
+	if !ok {
+		return "", false, nil
+	}
+	var id string
+	if len(raw) == 0 || string(bytes.TrimSpace(raw)) == "null" || json.Unmarshal(raw, &id) != nil || strings.TrimSpace(id) == "" {
+		return "", false, fmt.Errorf("agentServiceId must be a non-empty string")
+	}
+	return strings.TrimSpace(id), true, nil
 }
 
 func (m *Module) resolveScriptedRoleDriverID(ctx context.Context, ws string, role scriptedroles.ScriptedRole) (string, error) {

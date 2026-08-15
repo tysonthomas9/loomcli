@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
@@ -139,6 +140,68 @@ func TestEnsureAgentInstanceRejectsArchivedTombstone(t *testing.T) {
 	_, err := EnsureAgentInstance(ctx, st, "SCOUT", workspaceDir, scriptedroles.ScoutRoleName)
 	if !errors.Is(err, domain.ErrInvalidTransition) {
 		t.Fatalf("archived ensure err = %v, want ErrInvalidTransition", err)
+	}
+}
+
+func TestValidateServiceID(t *testing.T) {
+	for _, id := range []string{"scout", "scout-west-2", "a", strings.Repeat("a", 64)} {
+		if err := ValidateServiceID(id); err != nil {
+			t.Errorf("ValidateServiceID(%q) = %v, want nil", id, err)
+		}
+	}
+	for _, id := range []string{"", "Scout", "-scout", "scout_2", "scout/2", strings.Repeat("a", 65)} {
+		if err := ValidateServiceID(id); !errors.Is(err, domain.ErrInvalid) {
+			t.Errorf("ValidateServiceID(%q) = %v, want ErrInvalid", id, err)
+		}
+	}
+}
+
+func TestCreateAgentInstanceCreatesCatalogShapedCronBinding(t *testing.T) {
+	st, workspaceDir := newProvisionStore(t)
+	svc, binding, err := CreateAgentInstance(t.Context(), st, "SCOUT", workspaceDir, AgentInstanceCreate{
+		ServiceID: "scout-west", Name: "Scout West", RoleName: scriptedroles.ScoutRoleName,
+		Binding:   AgentInstanceBinding{Kind: "cron", Schedule: "0 9 * * 1-5", Timezone: "America/Los_Angeles", Enabled: true},
+		CreatedBy: "test",
+	})
+	if err != nil {
+		t.Fatalf("CreateAgentInstance: %v", err)
+	}
+	if svc.ServiceID != "scout-west" || svc.RoleName != scriptedroles.ScoutRoleName || svc.TriggerKind != domain.AgentServiceTriggerKindCron {
+		t.Fatalf("service = %#v", svc)
+	}
+	if binding.BindingID != "binding-cron-scout-west" || binding.RouteKey != "cron.scout-west" ||
+		binding.Schedule != "0 9 * * 1-5" || binding.ScheduleTimezone != "America/Los_Angeles" ||
+		binding.TargetAgentServiceID != svc.ServiceID || !binding.Enabled {
+		t.Fatalf("binding = %#v", binding)
+	}
+	role, err := st.Roles().Get(t.Context(), "SCOUT", scriptedroles.ScoutRoleName)
+	if err != nil || role.Kind != domain.RoleKindWorker {
+		t.Fatalf("role = %#v, err %v", role, err)
+	}
+}
+
+func TestCreateAgentInstancePreservesDefaultScoutBindingIdentity(t *testing.T) {
+	st, workspaceDir := newProvisionStore(t)
+	_, binding, err := CreateAgentInstance(t.Context(), st, "SCOUT", workspaceDir, AgentInstanceCreate{
+		ServiceID: "scout", RoleName: scriptedroles.ScoutRoleName,
+		Binding: AgentInstanceBinding{Kind: "cron", Schedule: "@daily", Enabled: true},
+	})
+	if err != nil {
+		t.Fatalf("CreateAgentInstance: %v", err)
+	}
+	if binding.BindingID != "binding-cron-scout-weekly" || binding.RouteKey != "cron.scout.weekly" {
+		t.Fatalf("default binding identity = %q/%q", binding.BindingID, binding.RouteKey)
+	}
+}
+
+func TestCreateAgentInstanceRejectsDisallowedBindingKind(t *testing.T) {
+	st, workspaceDir := newProvisionStore(t)
+	_, _, err := CreateAgentInstance(t.Context(), st, "SCOUT", workspaceDir, AgentInstanceCreate{
+		ServiceID: "epic-cron", RoleName: scriptedroles.EpicRunnerRoleName,
+		Binding: AgentInstanceBinding{Kind: "cron", Schedule: "@daily", Enabled: true},
+	})
+	if !errors.Is(err, domain.ErrInvalid) || !strings.Contains(err.Error(), "does not allow") {
+		t.Fatalf("CreateAgentInstance err = %v, want clear ErrInvalid", err)
 	}
 }
 

@@ -407,6 +407,16 @@ func (s *triggerBindingStore) Update(_ context.Context, ws, bindingID string, pa
 	return redactedTriggerBinding(updated), nil
 }
 
+func (s *triggerBindingStore) Delete(_ context.Context, ws, bindingID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.items[ws][bindingID]; !ok {
+		return fmt.Errorf("trigger binding %q in workspace %q: %w", bindingID, ws, domain.ErrNotFound)
+	}
+	delete(s.items[ws], bindingID)
+	return nil
+}
+
 func (s *triggerBindingStore) getForValidation(ws, bindingID string) (*domain.TriggerBinding, bool) {
 	if s == nil {
 		return nil, false
