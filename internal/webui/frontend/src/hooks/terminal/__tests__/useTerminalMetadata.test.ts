@@ -19,6 +19,7 @@ import {
 } from "@/api/terminal";
 import type { TabMetadata } from "@/api/terminal";
 import type { MutationPayload } from "@/api/common";
+import { ApiError } from "@/types/common";
 
 import { useTerminalMetadata } from "../useTerminalMetadata";
 
@@ -529,6 +530,156 @@ describe("useTerminalMetadata", () => {
       });
 
       expect(mockList).toHaveBeenCalledTimes(callCount);
+    });
+  });
+
+  describe("readiness (loadedFor / unavailable)", () => {
+    it("leaves loadedFor null until the first fetch settles", async () => {
+      let resolveFetch!: (value: TabMetadata[]) => void;
+      mockList.mockImplementationOnce(
+        () =>
+          new Promise<TabMetadata[]>((resolve) => {
+            resolveFetch = resolve;
+          }),
+      );
+
+      const { result } = renderHook(() => useTerminalMetadata("test-ws"));
+
+      expect(result.current.loadedFor).toBeNull();
+
+      await act(async () => {
+        resolveFetch([createMockTab()]);
+        await Promise.resolve();
+      });
+
+      expect(result.current.loadedFor).toBe("test-ws");
+      expect(result.current.unavailable).toBe(false);
+    });
+
+    it("clears loadedFor in the same render as a workspace change", async () => {
+      mockList.mockResolvedValueOnce([createMockTab()]);
+
+      const { result, rerender } = renderHook(
+        ({ ws }: { ws: string }) => useTerminalMetadata(ws),
+        { initialProps: { ws: "ws1" } },
+      );
+      await flushPromises();
+      expect(result.current.loadedFor).toBe("ws1");
+
+      let resolveSecond!: (value: TabMetadata[]) => void;
+      mockList.mockImplementationOnce(
+        () =>
+          new Promise<TabMetadata[]>((resolve) => {
+            resolveSecond = resolve;
+          }),
+      );
+
+      rerender({ ws: "ws2" });
+
+      // The rendered value, not a post-effect one: a consumer reading in this
+      // commit must not see ws1's readiness attached to ws2.
+      expect(result.current.loadedFor).toBeNull();
+      expect(result.current.tabs).toEqual([]);
+      expect(result.current.isLoading).toBe(true);
+
+      await act(async () => {
+        resolveSecond([]);
+        await Promise.resolve();
+      });
+      expect(result.current.loadedFor).toBe("ws2");
+    });
+
+    it("is loading in the same render in which enabled flips false->true", async () => {
+      const { result, rerender } = renderHook(
+        ({ enabled }: { enabled: boolean }) =>
+          useTerminalMetadata("test-ws", { enabled }),
+        { initialProps: { enabled: false } },
+      );
+
+      expect(result.current.isLoading).toBe(false);
+      expect(result.current.loadedFor).toBeNull();
+
+      mockList.mockImplementationOnce(
+        () => new Promise<TabMetadata[]>(() => {}),
+      );
+      rerender({ enabled: true });
+
+      // Read in the very commit where enabled flipped — this is the stale read
+      // that let useTabInit see "ready with zero tabs".
+      expect(result.current.isLoading).toBe(true);
+      expect(result.current.loadedFor).toBeNull();
+    });
+
+    it("treats 404 as a settled empty list (metadata unavailable)", async () => {
+      mockList.mockRejectedValueOnce(new ApiError(404, "Not Found"));
+
+      const { result } = renderHook(() => useTerminalMetadata("test-ws"));
+      await flushPromises();
+
+      expect(result.current.unavailable).toBe(true);
+      expect(result.current.loadedFor).toBe("test-ws");
+      expect(result.current.tabs).toEqual([]);
+      expect(result.current.error).toBeNull();
+      expect(result.current.isLoading).toBe(false);
+    });
+
+    it("treats 503 as a settled empty list (metadata unavailable)", async () => {
+      mockList.mockRejectedValueOnce(new ApiError(503, "Service Unavailable"));
+
+      const { result } = renderHook(() => useTerminalMetadata("test-ws"));
+      await flushPromises();
+
+      expect(result.current.unavailable).toBe(true);
+      expect(result.current.loadedFor).toBe("test-ws");
+      expect(result.current.error).toBeNull();
+    });
+
+    it("leaves loadedFor null on a genuine failure (500)", async () => {
+      mockList.mockRejectedValueOnce(new ApiError(500, "Internal Error"));
+
+      const { result } = renderHook(() => useTerminalMetadata("test-ws"));
+      await flushPromises();
+
+      expect(result.current.loadedFor).toBeNull();
+      expect(result.current.unavailable).toBe(false);
+      expect(result.current.error).toBeInstanceOf(Error);
+    });
+
+    it("does not mark readiness from a late response for a superseded workspace", async () => {
+      let resolveWs1!: (value: TabMetadata[]) => void;
+      mockList.mockImplementationOnce(
+        () =>
+          new Promise<TabMetadata[]>((resolve) => {
+            resolveWs1 = resolve;
+          }),
+      );
+
+      const { result, rerender } = renderHook(
+        ({ ws }: { ws: string }) => useTerminalMetadata(ws),
+        { initialProps: { ws: "ws1" } },
+      );
+
+      mockList.mockImplementationOnce(
+        () => new Promise<TabMetadata[]>(() => {}),
+      );
+      rerender({ ws: "ws2" });
+
+      await act(async () => {
+        resolveWs1([createMockTab({ label: "stale ws1 tab" })]);
+        await Promise.resolve();
+      });
+
+      expect(result.current.loadedFor).toBeNull();
+      expect(result.current.tabs).toEqual([]);
+    });
+
+    it("does not report readiness while the workspace is unresolved", async () => {
+      const { result } = renderHook(() => useTerminalMetadata(""));
+      await flushPromises();
+
+      expect(mockList).not.toHaveBeenCalled();
+      expect(result.current.loadedFor).toBeNull();
+      expect(result.current.isLoading).toBe(false);
     });
   });
 

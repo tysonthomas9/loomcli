@@ -13,7 +13,7 @@ import type { TabState } from "../terminalTabUtils";
 function createArgs(overrides: Partial<Parameters<typeof useTabInit>[0]> = {}) {
   return {
     tabMetadata: [] as TabMetadata[],
-    metaLoading: false,
+    metaReady: true,
     config: undefined as BackendConfigData | undefined,
     configLoading: false,
     createTab: vi.fn().mockResolvedValue(undefined),
@@ -31,8 +31,8 @@ describe("useTabInit", () => {
     sessionStorage.clear();
   });
 
-  it("does not initialize when metaLoading is true", () => {
-    const args = createArgs({ metaLoading: true });
+  it("does not initialize when metadata has not settled (metaReady false)", () => {
+    const args = createArgs({ metaReady: false });
 
     renderHook(() => useTabInit(args));
 
@@ -646,7 +646,7 @@ describe("useTabInit", () => {
     expect(createTab).not.toHaveBeenCalled();
   });
 
-  it("initializes when isViewActive becomes true", () => {
+  it("does not create anything when isViewActive flips true before metadata settles", () => {
     const setTabs = vi.fn();
     const setActiveTabId = vi.fn();
     const createTab = vi.fn().mockResolvedValue(undefined);
@@ -670,20 +670,28 @@ describe("useTabInit", () => {
       createTab,
       initializedRef,
       isViewActive: false,
+      metaReady: false,
     });
 
     const { rerender } = renderHook((a) => useTabInit(a), {
       initialProps: args,
     });
 
-    // Not initialized yet — view is inactive
     expect(initializedRef.current).toBe(false);
     expect(setTabs).not.toHaveBeenCalled();
 
-    // Activate the view
+    // Activate the view while the tab list is still in flight. This is the
+    // regression: an unconfirmed empty list must not be treated as "this
+    // workspace has no tabs" and auto-create a lead session.
     rerender({ ...args, isViewActive: true });
 
-    // Now should have initialized with single default backend tab
+    expect(initializedRef.current).toBe(false);
+    expect(setTabs).not.toHaveBeenCalled();
+    expect(createTab).not.toHaveBeenCalled();
+
+    // The list settles, and it really is empty.
+    rerender({ ...args, isViewActive: true, metaReady: true });
+
     expect(initializedRef.current).toBe(true);
     expect(setTabs).toHaveBeenCalledTimes(1);
     const tabs = setTabs.mock.calls[0][0] as TabState[];
@@ -691,6 +699,96 @@ describe("useTabInit", () => {
     expect(tabs[0].sessionName).toBe("lead-claude-1");
     expect(tabs[0].backendName).toBe("claude");
     expect(setActiveTabId).toHaveBeenCalledWith("lead-claude-1");
+    expect(createTab).toHaveBeenCalledTimes(1);
+  });
+
+  it("adopts the fetched tabs when metadata settles non-empty after activation", () => {
+    const setTabs = vi.fn();
+    const setActiveTabId = vi.fn();
+    const createTab = vi.fn().mockResolvedValue(undefined);
+    const initializedRef = {
+      current: false,
+    } as React.MutableRefObject<boolean>;
+
+    const args = createArgs({
+      config: {
+        backend: "claude",
+        source: "config",
+        available: ["claude", "codex"],
+        agents: [],
+      },
+      setTabs: setTabs as unknown as React.Dispatch<
+        React.SetStateAction<TabState[]>
+      >,
+      setActiveTabId: setActiveTabId as unknown as React.Dispatch<
+        React.SetStateAction<string>
+      >,
+      createTab,
+      initializedRef,
+      isViewActive: false,
+      metaReady: false,
+    });
+
+    const { rerender } = renderHook((a) => useTabInit(a), {
+      initialProps: args,
+    });
+
+    rerender({ ...args, isViewActive: true });
+    expect(createTab).not.toHaveBeenCalled();
+
+    const metadata: TabMetadata[] = [
+      {
+        session_name: "lead-claude-1",
+        label: "Claude 1",
+        notes: "",
+        sort_order: 0,
+        created_at: "2024-01-01T00:00:00Z",
+        updated_at: "2024-01-01T00:00:00Z",
+      },
+      {
+        session_name: "lead-codex-2",
+        label: "Codex 2",
+        notes: "",
+        sort_order: 1,
+        created_at: "2024-01-01T00:00:00Z",
+        updated_at: "2024-01-01T00:00:00Z",
+      },
+    ];
+    rerender({
+      ...args,
+      isViewActive: true,
+      metaReady: true,
+      tabMetadata: metadata,
+    });
+
+    expect(createTab).not.toHaveBeenCalled();
+    const tabs = setTabs.mock.calls[0][0] as TabState[];
+    expect(tabs.map((t) => t.sessionName)).toEqual([
+      "lead-claude-1",
+      "lead-codex-2",
+    ]);
+  });
+
+  it("auto-creates in the degraded metaUnavailable mode (confirmed empty)", () => {
+    const setTabs = vi.fn();
+    const createTab = vi.fn().mockResolvedValue(undefined);
+    const args = createArgs({
+      config: {
+        backend: "claude",
+        source: "config",
+        available: ["claude"],
+        agents: [],
+      },
+      setTabs: setTabs as unknown as React.Dispatch<
+        React.SetStateAction<TabState[]>
+      >,
+      createTab,
+      metaReady: true,
+      metaUnavailable: true,
+    });
+
+    renderHook(() => useTabInit(args));
+
     expect(createTab).toHaveBeenCalledTimes(1);
   });
 
