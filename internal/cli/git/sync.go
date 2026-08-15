@@ -24,6 +24,14 @@ This command:
 2. Pushes each to main (or per-repo default)
 3. Pulls main into all worktrees
 
+Sync operates on REPO CHECKOUTS, not on agent worktrees; the summary names the
+agent worktrees a run did not cover.
+
+Each repo's result is verified after the pull by measuring the checkout against
+<remote>/<default-branch>. Only a repo git reports as containing that branch is
+shown as ✓; a repo still behind, or left mid-merge, is reported as a failure and
+the command exits non-zero.
+
 This is the recommended way to keep worktrees in sync with the main branch.
 
 Flags:
@@ -150,7 +158,29 @@ func syncSingleWorkspace(deps *cli.Deps, resolver *cli.Resolver, pushOnly, pullO
 	if !pushOnly {
 		fmt.Println("")
 		fmt.Println("--- Phase 2: Pull ---")
-		pullWorkspaceWorktrees(deps, worktrees, "")
+		outcomes := pullWorkspaceWorktreesWithCoverage(deps, worktrees, "", agentWorktreeNames(resolver))
+		if n := summaryFailures(outcomes); n > 0 {
+			return fmt.Errorf("pull phase left %d repo(s) not in sync in workspace %s", n, resolver.WorkspaceName())
+		}
 	}
 	return nil
+}
+
+// agentWorktreeNames lists the agent worktrees sync does not visit, as
+// <repo>/<agent>. This is a reporting nicety only: discovery errors and
+// non-workspace mode yield an empty list and never fail the sync.
+func agentWorktreeNames(resolver *cli.Resolver) []string {
+	agents, err := resolver.DiscoverAgentWorktrees()
+	if err != nil {
+		return nil
+	}
+	names := make([]string, 0, len(agents))
+	for _, a := range agents {
+		if a.Repo != nil {
+			names = append(names, a.Repo.Name+"/"+a.Name)
+			continue
+		}
+		names = append(names, a.Name)
+	}
+	return names
 }

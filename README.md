@@ -152,7 +152,8 @@ loom lead                     # Default interactive terminal agent
 # Git operations
 loom push --all               # Push all worktrees to main
 loom pull --all               # Pull main into all worktrees
-loom sync                     # Full sync: push all + pull all
+loom sync                     # Full sync of repo checkouts (not agent worktrees);
+                              # each repo is verified against its default branch
 loom pr falcon                # Create PR from falcon to main
 
 # Monitoring
