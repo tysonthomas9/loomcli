@@ -238,6 +238,11 @@ func (s *triggerBindingStore) Update(ctx context.Context, ws, bindingID string, 
 	return &out, nil
 }
 
+func (s *triggerBindingStore) Delete(ctx context.Context, ws, bindingID string) error {
+	path := "/api/v1/" + pathEscape(ws) + "/trigger-bindings/" + pathEscape(bindingID)
+	return s.client.do(ctx, "DELETE", path, nil, nil)
+}
+
 func (s *triggerBindingStore) ResolveWebhookSecret(ctx context.Context, ws, bindingID string) (string, error) {
 	var out struct {
 		WebhookSecret string `json:"webhook_secret"`

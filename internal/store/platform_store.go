@@ -266,6 +266,7 @@ type TriggerBindingStore interface {
 	GetByRouteKey(ctx context.Context, workspaceKey, routeKey string) (*domain.TriggerBinding, error)
 	List(ctx context.Context, workspaceKey string, filter TriggerBindingFilter) ([]*domain.TriggerBinding, error)
 	Update(ctx context.Context, workspaceKey, bindingID string, patch TriggerBindingUpdate) (*domain.TriggerBinding, error)
+	Delete(ctx context.Context, workspaceKey, bindingID string) error
 	// ResolveWebhookSecret fetches a binding's plaintext webhook signing secret.
 	// Read/Get/List return the binding with the secret redacted; this is the
 	// privileged path the webhook verifier uses to check inbound signatures.

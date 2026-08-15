@@ -76,6 +76,10 @@ func TestPlatformClientDriverRunLifecycleRoutesAndErrors(t *testing.T) {
 				t.Fatalf("trigger binding update body = %+v", req)
 			}
 			writeJSON(t, w, domain.TriggerBinding{WorkspaceKey: "WS", BindingID: "binding-1", Name: *req.Name, RouteKey: "epics.runs.create", DriverID: "driver-1", DriverVersionID: "version-1", Enabled: *req.Enabled})
+		case r.Method == http.MethodDelete && r.URL.Path == "/api/v1/WS/trigger-bindings/binding-1":
+			w.WriteHeader(http.StatusNoContent)
+		case r.Method == http.MethodDelete && r.URL.Path == "/api/v1/WS/trigger-bindings/missing":
+			http.Error(w, `{"error":"not found"}`, http.StatusNotFound)
 		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/WS/epics/WS-1/runs":
 			var req struct {
 				RunID          string          `json:"run_id"`
@@ -401,6 +405,12 @@ func TestPlatformClientDriverRunLifecycleRoutesAndErrors(t *testing.T) {
 	enabled := false
 	if binding, err := client.TriggerBindings().Update(t.Context(), "WS", "binding-1", store.TriggerBindingUpdate{Name: &name, Enabled: &enabled}); err != nil || binding.Name != name || binding.Enabled {
 		t.Fatalf("Update trigger binding = %+v err=%v, want disabled renamed binding", binding, err)
+	}
+	if err := client.TriggerBindings().Delete(t.Context(), "WS", "binding-1"); err != nil {
+		t.Fatalf("Delete trigger binding: %v", err)
+	}
+	if err := client.TriggerBindings().Delete(t.Context(), "WS", "missing"); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("Delete missing trigger binding err = %v, want ErrNotFound", err)
 	}
 	if run, err := client.DriverRuns().CreateEpic(t.Context(), "WS", "WS-1", store.EpicRunCreate{
 		RunID:          "run-epic-1",

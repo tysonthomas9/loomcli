@@ -127,7 +127,12 @@ func (app *Server) buildInfraModules() {
 	if storeBacked {
 		app.connectorDispatcher = app.buildConnectorDispatcher()
 		app.wsModules = append(app.wsModules, agents.NewModule(app.agentSvc, app.hub))
-		app.wsModules = append(app.wsModules, agentservices.NewModule(app.config.Store, app.config.SessionRuntimeDir))
+		app.wsModules = append(app.wsModules, agentservices.NewModuleWithAccess(app.config.Store, app.config.SessionRuntimeDir, middleware.FileAccessConfig{
+			RemoteAuth:      app.config.ExtAuthURL != "",
+			ResolveRole:     app.config.WorkspaceRoleResolver,
+			FrontendOrigins: app.config.FrontendOrigins,
+			Logger:          app.config.Logger,
+		}))
 		app.wsModules = append(app.wsModules, roles.NewModule(app.config.Store, middleware.FileAccessConfig{
 			RemoteAuth:      app.config.ExtAuthURL != "",
 			ResolveRole:     app.config.WorkspaceRoleResolver,

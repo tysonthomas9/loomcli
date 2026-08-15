@@ -4,6 +4,9 @@
 package trigger_test
 
 import (
+	"bytes"
+	"log/slog"
+	"strings"
 	"testing"
 	"time"
 
@@ -370,5 +373,35 @@ func TestDeliverySweeperDispatchErrorBacksOff(t *testing.T) {
 	promoted, err := st.TriggerDeliveries().Get(ctx, "WS", held.DeliveryID)
 	if err != nil || promoted.Status != domain.TriggerDeliveryDispatched || promoted.Attempt != 3 {
 		t.Fatalf("promoted delivery = %+v (err %v), want dispatched attempt 3", promoted, err)
+	}
+}
+
+func TestDeliverySweeperDropsDeliveryWhoseBindingWasDeleted(t *testing.T) {
+	st := memstore.New()
+	setupSweeperBinding(t, st, store.TriggerBindingCreate{
+		BindingID: "binding-queue", ConcurrencyPolicy: domain.TriggerBindingConcurrencyQueue,
+	})
+	_, held := heldDeliveryFixture(t, st)
+	if err := st.TriggerBindings().Delete(t.Context(), "WS", held.TriggerBindingID); err != nil {
+		t.Fatalf("delete binding: %v", err)
+	}
+	var audit bytes.Buffer
+	sweeper := &trigger.DeliverySweeper{
+		Store: st, WorkspaceKey: "WS",
+		Logger: slog.New(slog.NewTextHandler(&audit, nil)),
+	}
+	result := runDeliverySweep(t, sweeper, held.NextRetryAt.Add(time.Second))
+	if result.Dropped != 1 || result.Rescheduled != 0 || result.Exhausted != 0 {
+		t.Fatalf("sweep = %+v, want one terminal drop", result)
+	}
+	dropped, err := st.TriggerDeliveries().Get(t.Context(), "WS", held.DeliveryID)
+	if err != nil {
+		t.Fatalf("get dropped delivery: %v", err)
+	}
+	if dropped.Status != domain.TriggerDeliveryRejected || dropped.ErrorClass != trigger.DeliveryErrorBindingNotFound || dropped.NextRetryAt != nil {
+		t.Fatalf("dropped delivery = %#v", dropped)
+	}
+	if !strings.Contains(audit.String(), "dropping trigger delivery") || !strings.Contains(audit.String(), held.TriggerBindingID) {
+		t.Fatalf("audit log = %q", audit.String())
 	}
 }

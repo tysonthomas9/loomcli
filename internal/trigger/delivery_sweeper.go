@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
@@ -23,6 +24,9 @@ const deliverySweepBackoffCap = time.Hour
 // reach admission. They are diagnostic only — terminality is always decided
 // by the store's retries_exhausted rule, never by the class.
 const (
+	// DeliveryErrorBindingNotFound marks a delivery terminally dropped because
+	// its binding was deleted after dispatch took a snapshot.
+	DeliveryErrorBindingNotFound = "binding_not_found"
 	// deliverySweepErrorRoute: the original ingress route key could not be
 	// reconstructed (the event's attributed binding vanished or lost its
 	// route key), so there was nothing to re-dispatch.
@@ -76,6 +80,8 @@ type DeliverySweeper struct {
 	BatchLimit int
 	// Now is a clock seam for tests; nil uses time.Now.
 	Now func() time.Time
+	// Logger receives terminal-drop audit records; nil uses slog.Default.
+	Logger *slog.Logger
 }
 
 // DeliverySweepResult summarizes one RunOnce pass.
@@ -89,6 +95,9 @@ type DeliverySweepResult struct {
 	// Exhausted counts deliveries forced terminal failed/retries_exhausted
 	// because the attempt budget is spent.
 	Exhausted int
+	// Dropped counts deliveries made terminal because their binding no longer
+	// exists. They are recorded as rejected/binding_not_found on the wire.
+	Dropped int
 }
 
 // RunOnce performs a single sweep over every target workspace. It keeps going
@@ -148,7 +157,13 @@ func (s *DeliverySweeper) sweepDelivery(ctx context.Context, ws, deliveryID stri
 	if !deliveryStillDue(delivery, now) {
 		return nil
 	}
-	binding := s.deliveryBinding(ctx, ws, delivery.TriggerBindingID)
+	binding, bindingErr := s.Store.TriggerBindings().Get(ctx, ws, delivery.TriggerBindingID)
+	if errors.Is(bindingErr, domain.ErrNotFound) {
+		return s.dropMissingBinding(ctx, ws, delivery, out)
+	}
+	if bindingErr != nil {
+		binding = nil
+	}
 	event, err := s.Store.TriggerEvents().Get(ctx, ws, delivery.TriggerEventID)
 	if err != nil {
 		return s.recordRetry(ctx, ws, delivery, binding, now, deliverySweepErrorRoute, out)
@@ -186,6 +201,18 @@ func (s *DeliverySweeper) sweepDelivery(ctx context.Context, ws, deliveryID stri
 		return fmt.Errorf("record dispatched trigger delivery %q in workspace %q: %w", delivery.DeliveryID, ws, err)
 	}
 	out.Dispatched++
+	return nil
+}
+
+func (s *DeliverySweeper) dropMissingBinding(ctx context.Context, ws string, delivery *domain.TriggerDelivery, out *DeliverySweepResult) error {
+	if _, err := s.Store.TriggerDeliveries().UpdateResult(ctx, ws, delivery.DeliveryID, store.TriggerDeliveryResultUpdate{
+		Status: domain.TriggerDeliveryRejected, Attempt: delivery.Attempt, ErrorClass: DeliveryErrorBindingNotFound,
+	}); err != nil {
+		return fmt.Errorf("drop trigger delivery %q with missing binding in workspace %q: %w", delivery.DeliveryID, ws, err)
+	}
+	s.logger().WarnContext(ctx, "dropping trigger delivery because binding no longer exists",
+		"workspace", ws, "delivery_id", delivery.DeliveryID, "binding_id", delivery.TriggerBindingID)
+	out.Dropped++
 	return nil
 }
 
@@ -236,20 +263,6 @@ func (s *DeliverySweeper) resolveRouteKey(ctx context.Context, ws string, event 
 	return binding.RouteKey
 }
 
-// deliveryBinding fetches the delivery's binding for its retry budget and
-// backoff; nil (vanished binding or read failure) falls back to the domain
-// defaults, so sweeping never stalls — mirrors the stores' own fallback.
-func (s *DeliverySweeper) deliveryBinding(ctx context.Context, ws, bindingID string) *domain.TriggerBinding {
-	if bindingID == "" {
-		return nil
-	}
-	binding, err := s.Store.TriggerBindings().Get(ctx, ws, bindingID)
-	if err != nil {
-		return nil
-	}
-	return binding
-}
-
 // workspaceKeys resolves the sweep targets: the configured workspace, or
 // every known workspace when unscoped (mirrors StaleTaskSweeper).
 func (s *DeliverySweeper) workspaceKeys(ctx context.Context) ([]string, error) {
@@ -282,6 +295,13 @@ func (s *DeliverySweeper) now() time.Time {
 		return s.Now()
 	}
 	return time.Now().UTC()
+}
+
+func (s *DeliverySweeper) logger() *slog.Logger {
+	if s.Logger != nil {
+		return s.Logger
+	}
+	return slog.Default()
 }
 
 // redispatchInput rebuilds the dispatch input from the persisted event. The
