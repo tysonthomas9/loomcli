@@ -9,6 +9,10 @@
 import { get, wsUrl, getWsBaseUrl } from "@/hooks/api";
 
 import type { ConnectionState } from "./TerminalInstance";
+import {
+  parseTerminalControlFrame,
+  type TerminalAttachFrame,
+} from "./terminalControlFrame";
 
 /**
  * Fetch a one-time terminal auth token from the server. The token endpoint
@@ -83,6 +87,10 @@ const WORKSPACE_UNAVAILABLE_REASON = "workspace unavailable";
  * lifecycle transitions. The caller owns input (`onData` → ws.send) and
  * resize (`onResize` → encodeResize → ws.send).
  *
+ * Text frames that parse as a JSON control envelope are dispatched to
+ * `onAttach` instead of being written to the terminal; every other text frame
+ * reaches the terminal exactly as before.
+ *
  * Returns a cleanup function that closes the WS and marks the connect
  * attempt cancelled (idempotent; safe to call before or after onopen).
  */
@@ -98,6 +106,7 @@ export function connectWebSocket(
   onBackendCrash?: (reason: string) => void,
   onSessionKilled?: () => void,
   initialSize?: { cols: number; rows: number },
+  onAttach?: (frame: TerminalAttachFrame) => void,
 ): () => void {
   setConnectionState("connecting");
 
@@ -212,6 +221,34 @@ export function connectWebSocket(
       ws.onmessage = (ev: MessageEvent) => {
         if (cancelled) return;
         if (typeof ev.data === "string") {
+          // A text frame is either one of our JSON control messages or PTY
+          // output from some future/other writer. Never let either the parse
+          // or the callback throw: a throw here kills the message pump and
+          // the terminal goes silent.
+          let frame: TerminalAttachFrame | null = null;
+          try {
+            frame = parseTerminalControlFrame(ev.data);
+          } catch {
+            frame = null;
+          }
+          if (frame) {
+            // Drain what already arrived before dispatching. The control
+            // frame is ordered *after* the scrollback replay on the wire, and
+            // the replay begins with \x1b[2J\x1b[H — dispatching while that
+            // replay still sits in the batch queue would let the boundary the
+            // handler draws be erased by a clear that arrives afterwards.
+            // Draining preserves arrival order rather than bypassing the
+            // queue; nothing is reordered and the frame itself is never
+            // written to the terminal.
+            cancelPendingFlush();
+            flushPendingWrites();
+            try {
+              onAttach?.(frame);
+            } catch {
+              // A misbehaving handler must not cost the user their terminal.
+            }
+            return;
+          }
           pendingWrites.push(ev.data);
         } else if (ev.data instanceof ArrayBuffer) {
           pendingWrites.push(new Uint8Array(ev.data));

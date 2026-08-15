@@ -94,6 +94,15 @@ export interface TabMetadata {
    * destructive tab-close actions.
    */
   attached_clients: number;
+  /**
+   * RFC3339 timestamp of the last time this tab's shell was replaced because
+   * the server restarted. Persisted server-side, so it survives a page
+   * reload; absent when the tab has never been replaced (or the notice was
+   * dismissed).
+   */
+  replaced_at?: string;
+  /** Server-written reason for the replacement, e.g. "server_restart". */
+  replaced_reason?: string;
 }
 
 export async function ensureAgentTerminalSession(

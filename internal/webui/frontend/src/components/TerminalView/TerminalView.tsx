@@ -154,6 +154,7 @@ export function TerminalView({
     updatePinned,
     deleteTab,
     reorderTabs: reorderTabMeta,
+    markTabReplaced,
     isLoading: metaLoading,
     loadedFor: metaLoadedFor,
     unavailable: metaUnavailable,
@@ -871,6 +872,9 @@ export function TerminalView({
           }
           hasConnected={tabHasConnected.get(tab.id) ?? false}
           reconnectState={tabReconnectState.get(tab.id) ?? null}
+          onSessionReplaced={(replacedAt) =>
+            markTabReplaced(tab.sessionName, replacedAt)
+          }
         />
       );
     },
@@ -886,6 +890,7 @@ export function TerminalView({
       tabHasConnected,
       tabReconnectState,
       metaBySession,
+      markTabReplaced,
       setFocusedLeft,
       setFocusedRight,
       paneActiveTabId,
