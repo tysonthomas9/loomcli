@@ -14,7 +14,15 @@ import {
 
 interface TabInitArgs {
   tabMetadata: TabMetadata[];
-  metaLoading: boolean;
+  /**
+   * True once the tab list has settled for exactly this workspace. Positive
+   * readiness, not "nothing says we're loading": a timing-derived flag can be
+   * read stale in the commit where the view activates, which is how an empty
+   * list once clobbered a real one (auto-creating a stray lead tab).
+   */
+  metaReady: boolean;
+  /** True when metadata storage is unavailable (404/503) — a confirmed-empty degraded mode. */
+  metaUnavailable?: boolean;
   config: BackendConfigData | undefined;
   configLoading: boolean;
   createTab: (s: string, l: string, o: number) => Promise<void>;
@@ -39,7 +47,7 @@ function metadataForInit(
   return tabMetadata.filter((m) => !isAgentMetadata(m));
 }
 
-function tabStateFromMetadata(
+export function tabStateFromMetadata(
   metadata: TabMetadata,
   defaultBackend?: string,
 ): TabState & { _sortOrder: number; _pinned: boolean } {
@@ -81,7 +89,7 @@ function sortMetadataTabs(
 export function useTabInit(args: TabInitArgs) {
   const {
     tabMetadata,
-    metaLoading,
+    metaReady,
     config,
     configLoading,
     createTab,
@@ -96,8 +104,12 @@ export function useTabInit(args: TabInitArgs) {
   const initializedMetadataRef = useRef<TabMetadata[] | null>(null);
 
   useEffect(() => {
-    if (initializedRef.current || metaLoading || configLoading || !isViewActive)
-      return;
+    if (initializedRef.current || configLoading || !isViewActive) return;
+    // No decision from an unconfirmed tab list. metaReady means "settled for
+    // this workspace", which subsumes the old !metaLoading check: the
+    // auto-create branch below is only ever reached with a confirmed-empty
+    // list.
+    if (!metaReady) return;
     initializedRef.current = true;
 
     const initMetadata = metadataForInit(tabMetadata, excludeAgentTabs);
@@ -172,7 +184,7 @@ export function useTabInit(args: TabInitArgs) {
     }
   }, [
     tabMetadata,
-    metaLoading,
+    metaReady,
     config,
     configLoading,
     createTab,
@@ -186,13 +198,8 @@ export function useTabInit(args: TabInitArgs) {
   ]);
 
   useEffect(() => {
-    if (
-      !initializedRef.current ||
-      metaLoading ||
-      configLoading ||
-      !isViewActive
-    )
-      return;
+    if (!initializedRef.current || configLoading || !isViewActive) return;
+    if (!metaReady) return;
     if (tabMetadata.length === 0) return;
     if (initializedMetadataRef.current === tabMetadata) return;
 
@@ -260,7 +267,7 @@ export function useTabInit(args: TabInitArgs) {
     });
   }, [
     tabMetadata,
-    metaLoading,
+    metaReady,
     config,
     configLoading,
     initializedRef,

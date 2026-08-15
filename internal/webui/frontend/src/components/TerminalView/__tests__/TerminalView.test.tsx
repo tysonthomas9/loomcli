@@ -21,6 +21,7 @@ import "@testing-library/jest-dom";
 import { KeyboardShortcutProvider } from "@/hooks/ui";
 
 import { TerminalView } from "../TerminalView";
+import { TerminalSection } from "@/components/WorkspaceTree/TerminalSection";
 import { TerminalInstance } from "../instances/TerminalInstance";
 import { MAX_TABS } from "@/components/TerminalView/tabs/terminalTabUtils";
 import { CLI_SETUP_REQUEST_KEY } from "@/utils/cliSetup";
@@ -50,6 +51,7 @@ const mockMetadataHook = vi.hoisted(() => ({
   }>,
   isLoading: false,
   error: null as Error | null,
+  unavailable: false,
   createTab: vi.fn().mockResolvedValue(undefined),
   updateLabel: vi.fn().mockResolvedValue(undefined),
   updateNotes: vi.fn().mockResolvedValue(undefined),
@@ -94,7 +96,13 @@ vi.mock("@/hooks/terminal", async () => {
     );
   return {
     ...actual,
-    useTerminalMetadata: () => mockMetadataHook,
+    useTerminalMetadata: (workspace: string) => ({
+      ...mockMetadataHook,
+      // The real hook reports readiness positively, scoped to the workspace
+      // whose fetch settled. Mirror that so the mock cannot claim a tab list
+      // is ready while it is still "loading".
+      loadedFor: mockMetadataHook.isLoading ? null : workspace,
+    }),
     useSessionRestore: () => mockSessionRestoreHook,
   };
 });
@@ -129,8 +137,19 @@ vi.mock("@/hooks/workspace", async () => {
     ...actual,
     useBackendConfig: () => mockBackendConfigHook,
     useBackends: () => mockBackendsHook,
+    useWorkspaceContext: () => mockWorkspaceContext,
   };
 });
+
+// TerminalView is workspace-scoped: readiness is now positive and per
+// workspace, so the view needs a resolved id (with "" nothing initialises, by
+// design). "default" is the id that carries no session-name prefix, matching
+// the session names these tests assert on.
+const mockWorkspaceContext = vi.hoisted(() => ({
+  activeWorkspaceName: "default",
+  workspaceId: "default",
+  workspace: { id: "default" },
+}));
 
 const mockSessionRestoreHook = vi.hoisted(() => ({
   activeTabId: null as string | null,
@@ -1455,6 +1474,80 @@ describe("TerminalView", () => {
       fireEvent.keyDown(document, { key: "Escape" });
 
       expect(screen.getByTestId("terminal-view")).toBeInTheDocument();
+    });
+  });
+
+  // ── Sidebar publish ──────────────────────────────────────────────────────
+
+  describe("sidebar Terminals section", () => {
+    it("lists the workspace's sessions while the Terminal view is inactive", () => {
+      // The app-level TerminalView stays mounted under display:none when
+      // another view is on screen. It must still publish the real sessions,
+      // derived from settled metadata, instead of blanking the sidebar.
+      setMetadata(DEFAULT_METADATA);
+
+      render(
+        <>
+          {/* Sidebar first: the bridge is a fire-and-forget event, so the
+              listener must be attached before TerminalView publishes. */}
+          <TerminalSection />
+          <TerminalView isActive={false} />
+        </>,
+      );
+
+      expect(
+        screen.getByTestId("sidebar-terminal-session-1"),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByTestId("sidebar-terminal-session-2"),
+      ).toBeInTheDocument();
+      expect(
+        screen.queryByText("No terminal sessions"),
+      ).not.toBeInTheDocument();
+    });
+
+    it("publishes nothing while the tab list is unconfirmed", () => {
+      mockMetadataHook.tabs = [];
+      mockMetadataHook.isLoading = true;
+
+      render(
+        <>
+          {/* Sidebar first: the bridge is a fire-and-forget event, so the
+              listener must be attached before TerminalView publishes. */}
+          <TerminalSection />
+          <TerminalView isActive={false} />
+        </>,
+      );
+
+      expect(screen.getByText("No terminal sessions")).toBeInTheDocument();
+    });
+
+    it("excludes agent PTYs, like the tab bar does", () => {
+      setMetadata([
+        { session_name: "session-1", label: "Session 1" },
+        {
+          session_name: "term_my-agent",
+          label: "agent-my-agent",
+          kind: "agent",
+          agent_id: "my-agent",
+        },
+      ]);
+
+      render(
+        <>
+          {/* Sidebar first: the bridge is a fire-and-forget event, so the
+              listener must be attached before TerminalView publishes. */}
+          <TerminalSection />
+          <TerminalView isActive={false} />
+        </>,
+      );
+
+      expect(
+        screen.getByTestId("sidebar-terminal-session-1"),
+      ).toBeInTheDocument();
+      expect(
+        screen.queryByTestId("sidebar-terminal-term_my-agent"),
+      ).not.toBeInTheDocument();
     });
   });
 });

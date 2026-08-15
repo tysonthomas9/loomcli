@@ -35,7 +35,9 @@ import {
   type TabState,
   generateTabName,
   isAgentTab,
+  isAgentMetadata,
   sanitizeSessionName,
+  tabStateFromMetadata,
   useTabOrdering,
   useTabActions,
   useTabInit,
@@ -141,8 +143,6 @@ export function TerminalView({
   const [activeTabId, setActiveTabId] = useState<string>("");
   const initializedRef = useRef(false);
   const { id: workspaceId } = useWorkspaceTabState({
-    tabs,
-    activeTabId,
     setTabs,
     setActiveTabId,
     initializedRef,
@@ -155,7 +155,21 @@ export function TerminalView({
     deleteTab,
     reorderTabs: reorderTabMeta,
     isLoading: metaLoading,
-  } = useTerminalMetadata(workspaceId, { enabled: isActive });
+    loadedFor: metaLoadedFor,
+    unavailable: metaUnavailable,
+    error: metaError,
+    refetch: refetchTabMetadata,
+    // The app-level instance (hideTabs === false) is mounted for the whole
+    // session and merely hidden when another view is on screen, and the
+    // sidebar's Terminals section renders its tab list — so fetch regardless
+    // of which view is active. Embedded instances (hideTabs) keep the gate.
+    //
+    // DELIBERATE ASYMMETRY: fetching metadata is decoupled from view
+    // activity, but tab INITIALISATION stays gated on isViewActive inside
+    // useTabInit. A user who never opens Terminal must not have a session
+    // auto-created, and TerminalPanes must not attach or spawn PTYs for a
+    // view that was never opened.
+  } = useTerminalMetadata(workspaceId, { enabled: isActive || !hideTabs });
   const { config, isLoading: configLoading } = useBackendConfig(workspaceId, {
     enabled: isActive,
   });
@@ -286,9 +300,13 @@ export function TerminalView({
   const hasPendingCliSetupRequest =
     !hideTabs && readPendingCliSetupRequest() != null;
 
+  // Positive readiness: the tab list has settled for exactly this workspace.
+  const metaReady = Boolean(workspaceId) && metaLoadedFor === workspaceId;
+
   useTabInit({
     tabMetadata,
-    metaLoading,
+    metaReady,
+    metaUnavailable,
     config: config ?? undefined,
     configLoading,
     createTab,
@@ -653,23 +671,61 @@ export function TerminalView({
     ],
   );
 
+  // Sessions derived from server metadata, for the window before the Terminal
+  // view has ever been opened (useTabInit has not run, so `tabs` is empty).
+  // Same agent-tab exclusion as visibleTabs.
+  const metadataSidebarTabs = useMemo(
+    () =>
+      tabMetadata
+        .filter((meta) => !isAgentMetadata(meta))
+        .map((meta) => tabStateFromMetadata(meta, config?.backend))
+        .sort((a, b) => {
+          if (a._pinned !== b._pinned) return a._pinned ? -1 : 1;
+          return a._sortOrder - b._sortOrder;
+        }),
+    [tabMetadata, config?.backend],
+  );
+
   useEffect(() => {
     if (hideTabs) return;
-    if (!isActive) {
-      publishTerminalSidebarState({ tabs: [], activeTabId: "" });
+    // Publish the live tabs once initialised; before that fall back to the
+    // settled metadata, so the sidebar's Terminals section lists the real
+    // sessions from the moment the workspace loads rather than going blank
+    // whenever another view is on screen. Only an unconfirmed tab list
+    // publishes nothing.
+    if (initializedRef.current && tabs.length > 0) {
+      publishTerminalSidebarState({
+        tabs: visibleTabs.map((tab) => ({
+          id: tab.id,
+          label: tab.label,
+          backendName: tab.backendName,
+          connectionState: tab.connectionState,
+          ...(tab.pinned !== undefined ? { pinned: tab.pinned } : {}),
+        })),
+        activeTabId,
+      });
       return;
     }
+    if (!metaReady) return;
     publishTerminalSidebarState({
-      tabs: visibleTabs.map((tab) => ({
+      tabs: metadataSidebarTabs.map((tab) => ({
         id: tab.id,
         label: tab.label,
         backendName: tab.backendName,
         connectionState: tab.connectionState,
         ...(tab.pinned !== undefined ? { pinned: tab.pinned } : {}),
       })),
-      activeTabId,
+      activeTabId: "",
     });
-  }, [hideTabs, isActive, visibleTabs, activeTabId]);
+  }, [
+    hideTabs,
+    tabs,
+    visibleTabs,
+    activeTabId,
+    metaReady,
+    metadataSidebarTabs,
+    initializedRef,
+  ]);
 
   useEffect(() => {
     if (hideTabs || !isActive) return;
@@ -842,6 +898,29 @@ export function TerminalView({
     <div className={containerClassName} data-testid="terminal-view">
       {(metaLoading || configLoading) && visibleTabs.length === 0 ? (
         <LoadingSkeleton.Terminal />
+      ) : metaError && visibleTabs.length === 0 ? (
+        // The tab list failed to load (a genuine failure — 404/503 is the
+        // supported "no metadata storage" mode and settles as empty). Offer a
+        // retry rather than an empty terminal: inventing tabs here is exactly
+        // what the readiness gate exists to prevent.
+        <div
+          className={styles.metaErrorState}
+          data-testid="terminal-metadata-error"
+          role="alert"
+        >
+          <h2 className={styles.metaErrorHeading}>
+            Couldn&apos;t load terminal tabs
+          </h2>
+          <p className={styles.metaErrorDescription}>{metaError.message}</p>
+          <button
+            type="button"
+            className={styles.metaErrorRetry}
+            onClick={() => void refetchTabMetadata()}
+            data-testid="terminal-metadata-retry"
+          >
+            Retry
+          </button>
+        </div>
       ) : visibleTabs.length === 0 ? (
         <NoBackendsEmptyState
           {...(onNavigateToSettings != null && {

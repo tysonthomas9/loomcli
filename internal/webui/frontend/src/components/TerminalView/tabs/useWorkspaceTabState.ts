@@ -1,8 +1,13 @@
 /**
  * Hook to manage workspace-scoped tab state.
- * Resolves the active workspace from WorkspaceContext, saves/restores tab sets
- * when switching workspaces (keyed by stable workspace UUID), and returns
- * the resolved workspace name and ID.
+ * Resolves the active workspace from WorkspaceContext, clears tab state when
+ * the workspace changes, and returns the resolved workspace name and ID.
+ *
+ * It does NOT cache tab sets per workspace: server-side tab metadata is the
+ * persistence layer, and TerminalView unmounts on every workspace switch
+ * anyway (it renders below WorkspaceProvider's <PerWorkspacePrefsProvider
+ * key={workspaceId}>). The reset below is what matters — it also covers the
+ * case where the id changes without a remount.
  */
 
 import { useEffect, useRef, type MutableRefObject } from "react";
@@ -12,8 +17,6 @@ import { useWorkspaceContext } from "@/hooks";
 import type { TabState } from "./terminalTabUtils";
 
 interface WorkspaceTabStateArgs {
-  tabs: TabState[];
-  activeTabId: string;
   setTabs: React.Dispatch<React.SetStateAction<TabState[]>>;
   setActiveTabId: React.Dispatch<React.SetStateAction<string>>;
   initializedRef: MutableRefObject<boolean>;
@@ -29,37 +32,25 @@ interface WorkspaceTabStateReturn {
 export function useWorkspaceTabState(
   args: WorkspaceTabStateArgs,
 ): WorkspaceTabStateReturn {
-  const { tabs, activeTabId, setTabs, setActiveTabId, initializedRef } = args;
-  const { activeWorkspaceName, workspace: wsData } = useWorkspaceContext();
+  const { setTabs, setActiveTabId, initializedRef } = args;
+  const {
+    activeWorkspaceName,
+    workspaceId: contextWorkspaceId,
+    workspace: wsData,
+  } = useWorkspaceContext();
   const workspace = activeWorkspaceName || "default";
-  const workspaceId = wsData?.id || "";
+  // Route-authoritative id (what WorkspaceLayout passes into WorkspaceProvider).
+  // wsData comes from the polled store, which deliberately serves the previous
+  // workspace's data while refetching, so it lags on a switch.
+  const workspaceId = contextWorkspaceId || wsData?.id || "";
 
-  const stateMapRef = useRef<
-    Map<string, { tabs: TabState[]; activeTabId: string }>
-  >(new Map());
   const cacheKey = workspaceId || "__unresolved__";
   const prevWorkspaceIdRef = useRef(cacheKey);
 
   useEffect(() => {
     if (prevWorkspaceIdRef.current === cacheKey) return;
-    if (
-      prevWorkspaceIdRef.current &&
-      prevWorkspaceIdRef.current !== "__unresolved__" &&
-      tabs.length > 0
-    ) {
-      stateMapRef.current.set(prevWorkspaceIdRef.current, {
-        tabs: [...tabs],
-        activeTabId,
-      });
-    }
-    const saved = stateMapRef.current.get(cacheKey);
-    if (saved) {
-      setTabs(saved.tabs);
-      setActiveTabId(saved.activeTabId);
-    } else {
-      setTabs([]);
-      setActiveTabId("");
-    }
+    setTabs([]);
+    setActiveTabId("");
     initializedRef.current = false;
     prevWorkspaceIdRef.current = cacheKey;
   }, [cacheKey]); // eslint-disable-line react-hooks/exhaustive-deps

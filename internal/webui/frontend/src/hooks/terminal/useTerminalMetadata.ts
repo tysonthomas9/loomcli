@@ -7,12 +7,22 @@ import {
   deleteTabMetadata,
 } from "@/api/terminal";
 import type { TabMetadata } from "@/api/terminal";
-import type { MutationPayload } from "@/api/common";
+import { ApiError, type MutationPayload } from "@/api/common";
 
 export interface UseTerminalMetadataReturn {
   tabs: TabMetadata[];
   isLoading: boolean;
   error: Error | null;
+  /**
+   * Workspace whose fetch last settled — either a success or the 404/503
+   * "metadata storage unavailable" outcome, which is a settled empty list.
+   * Null while unsettled. Consumers gate on `loadedFor === workspace` rather
+   * than on `!isLoading`, so readiness cannot be read stale in the commit
+   * where the workspace (or `enabled`) changes.
+   */
+  loadedFor: string | null;
+  /** True when the last settle was 404/503: metadata storage is not configured. */
+  unavailable: boolean;
   createTab: (
     session: string,
     label: string,
@@ -42,10 +52,32 @@ export function useTerminalMetadata(
 ): UseTerminalMetadataReturn {
   const enabled = options.enabled ?? true;
   const [tabs, setTabs] = useState<TabMetadata[]>([]);
-  const [isLoading, setIsLoading] = useState(enabled);
+  const [isLoading, setIsLoading] = useState(Boolean(enabled && workspace));
   const [error, setError] = useState<Error | null>(null);
+  const [loadedFor, setLoadedFor] = useState<string | null>(null);
+  const [unavailable, setUnavailable] = useState(false);
   const mountedRef = useRef(true);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // The workspace this hook is currently fetching for. "" means "not fetching":
+  // either disabled, or the workspace has not resolved yet.
+  const fetchKey = enabled ? workspace : "";
+  const [syncedKey, setSyncedKey] = useState(fetchKey);
+  if (fetchKey !== syncedKey) {
+    // React's supported "adjust state during render" pattern: re-renders before
+    // children/effects, so consumers never observe the previous key's readiness.
+    setSyncedKey(fetchKey);
+    setTabs([]);
+    setLoadedFor(null);
+    setUnavailable(false);
+    setError(null);
+    setIsLoading(Boolean(enabled && workspace));
+  }
+
+  // Mirrors the key so late settle handlers can tell whether their response
+  // still belongs to the workspace the hook is on.
+  const keyRef = useRef(fetchKey);
+  keyRef.current = fetchKey;
 
   useEffect(() => {
     mountedRef.current = true;
@@ -59,46 +91,60 @@ export function useTerminalMetadata(
 
   const fetchTabs = useCallback(async () => {
     if (!enabled) {
-      setIsLoading(false);
       return;
     }
     if (!workspace) {
-      // Workspace not resolved yet — stay in the loading state so
-      // downstream consumers (e.g. useTabInit) don't see
-      // "ready with zero tabs" and auto-create a default, locking out
-      // the real tab list that arrives when workspace resolves.
+      // Workspace not resolved yet — stay unsettled (loadedFor null) so
+      // downstream consumers (e.g. useTabInit) don't see "ready with zero
+      // tabs" and auto-create a default, locking out the real tab list that
+      // arrives when workspace resolves.
       return;
     }
     setIsLoading(true);
     setError(null);
+    // A settle only counts if the hook is still mounted AND still on the
+    // workspace this call was issued for; a late response for a superseded
+    // workspace must not mark the new one ready.
+    const settleable = () => mountedRef.current && keyRef.current === workspace;
     try {
       const data = await listTabMetadata(workspace);
-      if (mountedRef.current) {
+      if (settleable()) {
         setTabs(data);
+        setUnavailable(false);
+        setLoadedFor(workspace);
       }
     } catch (err) {
-      if (mountedRef.current) {
+      if (!settleable()) return;
+      if (
+        err instanceof ApiError &&
+        (err.status === 404 || err.status === 503)
+      ) {
+        // Metadata storage is not configured (404) or is down (503). That is a
+        // supported degraded mode, and a settled empty list — not a failure.
+        setTabs([]);
+        setUnavailable(true);
+        setLoadedFor(workspace);
+      } else {
+        // A genuine failure leaves loadedFor null: no tabs are invented.
         setError(err instanceof Error ? err : new Error(String(err)));
       }
     } finally {
-      if (mountedRef.current) {
+      if (settleable()) {
         setIsLoading(false);
       }
     }
   }, [enabled, workspace]);
 
-  // Re-fetch when workspace changes
+  // Fetch when the workspace (or enabled) changes. The state reset for the new
+  // key already happened during render, above.
   useEffect(() => {
     if (!enabled) {
       if (debounceRef.current) {
         clearTimeout(debounceRef.current);
         debounceRef.current = null;
       }
-      setIsLoading(false);
       return;
     }
-    setTabs([]);
-    setIsLoading(true);
     fetchTabs();
   }, [enabled, fetchTabs]);
 
@@ -316,6 +362,8 @@ export function useTerminalMetadata(
     tabs,
     isLoading,
     error,
+    loadedFor,
+    unavailable,
     createTab,
     updateLabel,
     updateNotes,

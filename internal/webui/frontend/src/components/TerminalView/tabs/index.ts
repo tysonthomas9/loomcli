@@ -26,7 +26,7 @@ export {
 export type { TabState } from "./terminalTabUtils";
 
 export { useTabActions } from "./useTabActions";
-export { useTabInit } from "./useTabInit";
+export { useTabInit, tabStateFromMetadata } from "./useTabInit";
 export { useTabOrdering } from "./useTabOrdering";
 export { useWorkspaceTabState } from "./useWorkspaceTabState";
 export { useUnreadTracking } from "./useUnreadTracking";

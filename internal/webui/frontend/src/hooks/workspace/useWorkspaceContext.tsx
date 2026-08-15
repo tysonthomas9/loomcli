@@ -12,11 +12,12 @@
  *     react-best-practices rule `rerender-derived-state-no-effect`.
  *
  *   - Per-workspace preferences (selectedRepoNames) live in
- *     PerWorkspacePrefsProvider keyed on workspaceId. That provider is the
- *     only thing that remounts on workspace switch, so per-workspace state
- *     resets automatically while the outer WorkspaceProvider, TerminalView,
- *     agent state, and the WebSocket tree — which live outside the keyed
- *     boundary — stay mounted. No terminal teardown+reconnect per switch.
+ *     PerWorkspacePrefsProvider keyed on workspaceId, so per-workspace state
+ *     resets automatically on a workspace switch. The outer WorkspaceProvider
+ *     and its store stay mounted; EVERYTHING BELOW THE KEYED PROVIDER
+ *     REMOUNTS, including the routed <Outlet/> subtree and therefore
+ *     TerminalView. Terminal tab state is not preserved in memory across a
+ *     switch — it is re-derived from server-side tab metadata.
  *
  *   - setActiveWorkspace navigates with `flushSync: true` and preserves the
  *     `view=` query param. React Router v7 wraps navigate() in
@@ -281,9 +282,10 @@ export function WorkspaceProvider({
        * key={workspaceId} forces React to unmount+remount the inner provider
        * on workspace change, which re-initializes `selectedRepoNames` from
        * the new workspace's scoped localStorage without an effect-sync
-       * dance. The outer provider and its children (TerminalView, agents,
-       * WebSocket tree) stay mounted — only the narrow per-workspace prefs
-       * subtree resets.
+       * dance. The outer provider and its store stay mounted, but everything
+       * rendered as `children` — the routed <Outlet/> subtree, so agents and
+       * TerminalView too — remounts with it. Terminal tab state therefore
+       * does not survive a switch; it is re-fetched from server metadata.
        */}
       <PerWorkspacePrefsProvider
         key={workspaceId}

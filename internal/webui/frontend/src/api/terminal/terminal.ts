@@ -159,29 +159,24 @@ export async function startTerminalSetup(
 
 /**
  * List all tab metadata from GET /api/workspaces/{workspace}/terminal/tabs.
- * Returns an empty array when tab metadata is unavailable (404 = no Redis, 503 = Redis down).
+ *
+ * Throws ApiError on any failure — including 404 (no Redis) and 503 (Redis
+ * down). Those two used to be swallowed into an empty array, which made an
+ * unavailable metadata store indistinguishable from a workspace that genuinely
+ * has no tabs. Callers classify: useTerminalMetadata treats 404/503 as a
+ * settled-empty degraded mode and every other status as a real error.
  */
 export async function listTabMetadata(
   workspaceId: string,
 ): Promise<TabMetadata[]> {
-  try {
-    const { data, error, response } = await api.GET(
-      "/api/workspaces/{ws}/terminal/tabs",
-      {
-        params: { path: { ws: workspaceId } },
-      },
-    );
-    if (error) throw apiErrorFromResponse(error, response);
-    return (unwrapResponse(data, response) ?? []) as unknown as TabMetadata[];
-  } catch (error) {
-    if (
-      error instanceof ApiError &&
-      (error.status === 404 || error.status === 503)
-    ) {
-      return [];
-    }
-    throw error;
-  }
+  const { data, error, response } = await api.GET(
+    "/api/workspaces/{ws}/terminal/tabs",
+    {
+      params: { path: { ws: workspaceId } },
+    },
+  );
+  if (error) throw apiErrorFromResponse(error, response);
+  return (unwrapResponse(data, response) ?? []) as unknown as TabMetadata[];
 }
 
 /**
