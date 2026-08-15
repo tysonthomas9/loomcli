@@ -16,6 +16,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	"github.com/tysonthomas9/loomcli/internal/runlog"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -193,6 +194,142 @@ func TestGetAgentServiceJournalReturnsScoutJournal(t *testing.T) {
 	}
 }
 
+func TestListAgentServiceRunTasksFiltersByDriverRunAndReportsLogAvailability(t *testing.T) {
+	st, svc := seededAgentServiceStore(t)
+	run := createAgentServiceRun(t, st, svc, "run-1")
+	otherRun := createAgentServiceRun(t, st, svc, "run-2")
+	for _, task := range []store.TaskRunCreate{
+		{
+			WorkspaceKey: "WS", TaskRunID: "task-1", DriverRunID: run.RunID, TaskID: "WS-1",
+			Runner: "scout-task-runner", Status: domain.TaskRunRunning,
+		},
+		{
+			WorkspaceKey: "WS", TaskRunID: "task-other", DriverRunID: otherRun.RunID, TaskID: "WS-2",
+			Runner: "scout-task-runner", Status: domain.TaskRunRunning,
+		},
+	} {
+		if _, err := st.TaskRuns().Create(t.Context(), task); err != nil {
+			t.Fatalf("create task run %s: %v", task.TaskRunID, err)
+		}
+	}
+	runtimeDir := t.TempDir()
+	logDir := filepath.Join(runtimeDir, ".loom", "task-logs")
+	if err := os.MkdirAll(logDir, 0o700); err != nil {
+		t.Fatalf("create task log dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(logDir, "task-1.log"), []byte("AI output\n"), 0o600); err != nil {
+		t.Fatalf("write task log: %v", err)
+	}
+
+	mux := http.NewServeMux()
+	NewModule(st, runtimeDir).Register(mux)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/workspaces/WS/agent-services/scout/runs/run-1/tasks", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	var raw struct {
+		Success bool
+		Data    []map[string]interface{}
+		Total   int
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &raw); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if !raw.Success || raw.Total != 1 || len(raw.Data) != 1 {
+		t.Fatalf("response = %#v, want one filtered task", raw)
+	}
+	item := raw.Data[0]
+	if item["taskRunId"] != "task-1" || item["taskId"] != "WS-1" ||
+		item["runner"] != "scout-task-runner" || item["status"] != "running" ||
+		item["logsAvailable"] != true {
+		t.Fatalf("task DTO = %#v", item)
+	}
+	if _, exists := item["task_run_id"]; exists {
+		t.Fatalf("task DTO contains snake_case: %#v", item)
+	}
+}
+
+func TestGetTaskRunLogHappyMissingTruncatedAndRejectsTraversal(t *testing.T) {
+	st, svc := seededAgentServiceStore(t)
+	run := createAgentServiceRun(t, st, svc, "run-logs")
+	for _, taskRunID := range []string{"task-happy", "task-missing", "task-large"} {
+		if _, err := st.TaskRuns().Create(t.Context(), store.TaskRunCreate{
+			WorkspaceKey: "WS", TaskRunID: taskRunID, DriverRunID: run.RunID,
+			TaskID: "WS-" + taskRunID, Runner: "scout-task-runner", Status: domain.TaskRunRunning,
+		}); err != nil {
+			t.Fatalf("create task run %s: %v", taskRunID, err)
+		}
+	}
+	runtimeDir := t.TempDir()
+	logDir := filepath.Join(runtimeDir, ".loom", "task-logs")
+	if err := os.MkdirAll(logDir, 0o700); err != nil {
+		t.Fatalf("create task log dir: %v", err)
+	}
+	modifiedAt := time.Date(2026, time.August, 14, 23, 39, 22, 0, time.UTC)
+	happyPath := filepath.Join(logDir, "task-happy.log")
+	if err := os.WriteFile(happyPath, []byte("repo discovery\ncodex CLI exit=0\nAI output\n"), 0o600); err != nil {
+		t.Fatalf("write happy task log: %v", err)
+	}
+	if err := os.Chtimes(happyPath, modifiedAt, modifiedAt); err != nil {
+		t.Fatalf("set task log times: %v", err)
+	}
+	tail := bytes.Repeat([]byte("z"), runlog.MaxBytes)
+	if err := os.WriteFile(filepath.Join(logDir, "task-large.log"), append([]byte("discarded"), tail...), 0o600); err != nil {
+		t.Fatalf("write large task log: %v", err)
+	}
+	module := NewModule(st, runtimeDir)
+
+	t.Run("happy", func(t *testing.T) {
+		rec := getTaskRunLog(t, module, "task-happy")
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+		}
+		var response persistedLogResponse
+		if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+			t.Fatalf("decode response: %v", err)
+		}
+		if !response.Success || response.Data.Content != "repo discovery\ncodex CLI exit=0\nAI output\n" ||
+			!response.Data.ModifiedAt.Equal(modifiedAt) || response.Data.Truncated {
+			t.Fatalf("response = %#v", response)
+		}
+	})
+
+	t.Run("missing", func(t *testing.T) {
+		rec := getTaskRunLog(t, module, "task-missing")
+		if rec.Code != http.StatusNotFound || !strings.Contains(rec.Body.String(), "task log is not available") {
+			t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+		}
+	})
+
+	t.Run("truncated", func(t *testing.T) {
+		rec := getTaskRunLog(t, module, "task-large")
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+		}
+		var response persistedLogResponse
+		if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+			t.Fatalf("decode response: %v", err)
+		}
+		if !response.Data.Truncated || response.Data.Content != string(tail) {
+			t.Fatalf("truncated = %v content bytes = %d, want true/%d", response.Data.Truncated, len(response.Data.Content), len(tail))
+		}
+	})
+
+	for _, taskRunID := range []string{"../evil", "..\\evil", "nested/task"} {
+		t.Run("reject "+taskRunID, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "/", nil)
+			req.SetPathValue("ws", "WS")
+			req.SetPathValue("taskRunId", taskRunID)
+			rec := httptest.NewRecorder()
+			module.getTaskRunLog(rec, req)
+			if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "invalid task run id") {
+				t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+			}
+		})
+	}
+}
+
 func TestGetAgentServiceJournalReturnsNotFoundBeforeFirstScoutRun(t *testing.T) {
 	st, _ := seededAgentServiceStore(t)
 	rec := getAgentServiceJournal(t, NewModule(st, t.TempDir()), "scout")
@@ -274,6 +411,15 @@ func getAgentServiceJournal(t *testing.T, module *Module, serviceID string) *htt
 	return rec
 }
 
+func getTaskRunLog(t *testing.T, module *Module, taskRunID string) *httptest.ResponseRecorder {
+	t.Helper()
+	mux := http.NewServeMux()
+	module.Register(mux)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/workspaces/WS/task-runs/"+taskRunID+"/log", nil))
+	return rec
+}
+
 func createAgentService(t *testing.T, st store.Store, behavior *domain.AgentService, serviceID string) {
 	t.Helper()
 	if _, err := st.AgentServices().Create(t.Context(), store.AgentServiceCreate{
@@ -327,6 +473,18 @@ func finishAgentServiceRun(t *testing.T, st store.Store, svc *domain.AgentServic
 	}); err != nil {
 		t.Fatalf("finish %s: %v", runID, err)
 	}
+}
+
+func createAgentServiceRun(t *testing.T, st store.Store, svc *domain.AgentService, runID string) *domain.DriverRun {
+	t.Helper()
+	run, err := st.DriverRuns().Create(t.Context(), store.DriverRunCreate{
+		WorkspaceKey: "WS", RunID: runID, DriverID: svc.DriverID,
+		DriverVersionID: svc.DriverVersionID, AgentServiceID: svc.ServiceID,
+	})
+	if err != nil {
+		t.Fatalf("create agent service run %s: %v", runID, err)
+	}
+	return run
 }
 
 type failingRunListStore struct {

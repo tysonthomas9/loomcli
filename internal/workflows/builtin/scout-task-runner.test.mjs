@@ -3,15 +3,39 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, beforeEach, describe, it } from "node:test";
+import { after, afterEach, beforeEach, describe, it } from "node:test";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
-import {
+// The builtin source imports @flue/runtime for its default workflow
+// declaration. Stage the source beside a declaration-only stub so this leaf's
+// direct node:test suite does not depend on a materialized workflow bundle.
+const moduleStageRoot = fs.mkdtempSync(path.join(os.tmpdir(), "scout-runner-stage-"));
+const flueStub = path.join(moduleStageRoot, "node_modules", "@flue", "runtime");
+fs.mkdirSync(flueStub, { recursive: true });
+fs.writeFileSync(
+  path.join(flueStub, "package.json"),
+  JSON.stringify({ name: "@flue/runtime", type: "module", main: "index.js" }),
+);
+fs.writeFileSync(
+  path.join(flueStub, "index.js"),
+  "export const defineAgent = (fn) => ({ __agent: fn });\nexport const defineWorkflow = (definition) => definition;\n",
+);
+const stagedSource = path.join(moduleStageRoot, "scout-task-runner.ts");
+fs.copyFileSync(
+  path.join(path.dirname(fileURLToPath(import.meta.url)), "scout-task-runner.ts"),
+  stagedSource,
+);
+const {
   backendArgs,
   resolveBackend,
   resolveWorkspaceRoot,
   run,
   scoutFencedContent,
-} from "./scout-task-runner.ts";
+} = await import(pathToFileURL(stagedSource).href);
+
+after(() => {
+  fs.rmSync(moduleStageRoot, { recursive: true, force: true });
+});
 
 // A fake backend CLI: consumes the stdin prompt, writes the JSON in
 // FAKE_RESULT_JSON to FAKE_RESULT_TARGET (the result file path the leaf's
@@ -28,8 +52,18 @@ process.stdin.on("end", () => {
     fs.mkdirSync(path.dirname(process.env.FAKE_RESULT_TARGET), { recursive: true });
     fs.writeFileSync(process.env.FAKE_RESULT_TARGET, process.env.FAKE_RESULT_JSON);
   }
+  if (process.env.FAKE_STDOUT_CHARS) {
+    process.stdout.write("stdout-start\\n" + "x".repeat(Number(process.env.FAKE_STDOUT_CHARS)) + "\\nstdout-end\\n");
+  } else if (process.env.FAKE_STDOUT) {
+    process.stdout.write(process.env.FAKE_STDOUT);
+  }
+  if (process.env.FAKE_STDERR_CHARS) {
+    process.stderr.write("stderr-start\\n" + "y".repeat(Number(process.env.FAKE_STDERR_CHARS)) + "\\nstderr-end\\n");
+  } else if (process.env.FAKE_STDERR) {
+    process.stderr.write(process.env.FAKE_STDERR);
+  }
   process.stdout.write(JSON.stringify({ type: "done" }) + "\\n");
-  process.exit(Number(process.env.FAKE_EXIT_CODE || "0"));
+  process.exitCode = Number(process.env.FAKE_EXIT_CODE || "0");
 });
 `;
 
@@ -41,6 +75,10 @@ const MUTATED_ENV = [
   "FAKE_RESULT_TARGET",
   "FAKE_RESULT_JSON",
   "FAKE_EXIT_CODE",
+  "FAKE_STDOUT",
+  "FAKE_STDERR",
+  "FAKE_STDOUT_CHARS",
+  "FAKE_STDERR_CHARS",
 ];
 
 let savedEnv;
@@ -296,6 +334,29 @@ describe("analyze phase", () => {
     const result = await run({ payload: { task_run_id: "t", input: { phase: "analyze" } } });
     assert.equal(result.status, "failed");
     assert.equal(result.errorClass, "scout_backend_failed");
+  });
+
+  it("keeps up to 100000 stdout bytes and 20000 stderr bytes in the AI log", async () => {
+    const root = makeDir("ws");
+    makeGitRepo(path.join("ws", "alpha"));
+    installFakeBackend(root);
+    const taskRunId = "task-run-long-ai-log";
+    process.env.FAKE_RESULT_TARGET = path.join(root, ".loom", "scout", taskRunId, "result.json");
+    process.env.FAKE_RESULT_JSON = JSON.stringify({
+      recommendations: [],
+      skipped: [],
+      agentsMd: "",
+    });
+    process.env.FAKE_STDOUT_CHARS = "90000";
+    process.env.FAKE_STDERR_CHARS = "15000";
+
+    const result = await run({ payload: { task_run_id: taskRunId, input: { phase: "analyze" } } });
+
+    assert.equal(result.status, "completed");
+    assert.ok(result.logs.includes("stdout-start"));
+    assert.ok(result.logs.includes("stdout-end"));
+    assert.ok(result.logs.includes("stderr-start"));
+    assert.ok(result.logs.includes("stderr-end"));
   });
 });
 

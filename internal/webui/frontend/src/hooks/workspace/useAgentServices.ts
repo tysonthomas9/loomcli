@@ -2,6 +2,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
   getAgentServiceJournal,
+  getDriverRunLog,
+  getTaskRunLog,
+  listAgentServiceRunTasks,
   listAgentServiceRuns,
   listAgentServices,
   listRunEvents,
@@ -9,7 +12,9 @@ import {
   type AgentServiceJournalDTO,
   type AgentServiceList,
   type DriverRunDTO,
+  type PersistedLogDTO,
   type RunEventDTO,
+  type TaskRunDTO,
 } from "@/api/agentServices";
 import { ApiError } from "@/types/common";
 
@@ -270,6 +275,187 @@ export function useAgentServiceRunEvents(
     error: result.error,
     refresh: result.refresh,
   };
+}
+
+export interface UseAgentServiceRunTasksReturn {
+  tasks: TaskRunDTO[];
+  loading: boolean;
+  initialized: boolean;
+  error: Error | null;
+  refresh: () => Promise<void>;
+}
+
+export function useAgentServiceRunTasks(
+  workspaceId: string,
+  agentServiceId: string,
+  runId: string | null,
+): UseAgentServiceRunTasksReturn {
+  const enabled = Boolean(workspaceId && agentServiceId && runId);
+  const key = workspaceId + "\0" + agentServiceId + "\0" + (runId ?? "");
+  const load = useCallback(async (): Promise<AgentServiceList<TaskRunDTO>> => {
+    if (!runId) return { data: [], total: 0 };
+    return listAgentServiceRunTasks(workspaceId, agentServiceId, runId);
+  }, [agentServiceId, runId, workspaceId]);
+  const result = usePolledList(key, load, { enabled, pollInterval: 0 });
+  return {
+    tasks: result.items,
+    loading: result.loading,
+    initialized: result.initialized,
+    error: result.error,
+    refresh: result.refresh,
+  };
+}
+
+interface PersistedLogState {
+  key: string;
+  log: PersistedLogDTO | null;
+  loading: boolean;
+  initialized: boolean;
+  error: Error | null;
+}
+
+export interface UsePersistedLogReturn {
+  log: PersistedLogDTO | null;
+  loading: boolean;
+  initialized: boolean;
+  error: Error | null;
+  refresh: () => Promise<void>;
+}
+
+function usePersistedLog(
+  key: string,
+  enabled: boolean,
+  load: () => Promise<PersistedLogDTO>,
+): UsePersistedLogReturn {
+  const activeKeyRef = useRef(key);
+  const requestSequenceRef = useRef(0);
+  const inFlightKeyRef = useRef<string | null>(null);
+  const [state, setState] = useState<PersistedLogState>(() => ({
+    key,
+    log: null,
+    loading: false,
+    initialized: false,
+    error: null,
+  }));
+  activeKeyRef.current = key;
+
+  const refresh = useCallback(async (): Promise<void> => {
+    if (!enabled || !key || inFlightKeyRef.current === key) return;
+    const requestKey = key;
+    const requestSequence = ++requestSequenceRef.current;
+    inFlightKeyRef.current = requestKey;
+    setState((current) => ({
+      ...(current.key === requestKey
+        ? current
+        : {
+            key: requestKey,
+            log: null,
+            initialized: false,
+            error: null,
+          }),
+      loading: true,
+    }));
+    try {
+      const log = await load();
+      if (
+        activeKeyRef.current !== requestKey ||
+        requestSequence !== requestSequenceRef.current
+      ) {
+        return;
+      }
+      setState({
+        key: requestKey,
+        log,
+        loading: false,
+        initialized: true,
+        error: null,
+      });
+    } catch (error) {
+      if (
+        activeKeyRef.current !== requestKey ||
+        requestSequence !== requestSequenceRef.current
+      ) {
+        return;
+      }
+      setState({
+        key: requestKey,
+        log: null,
+        loading: false,
+        initialized: true,
+        error: error instanceof Error ? error : new Error(String(error)),
+      });
+    } finally {
+      if (inFlightKeyRef.current === requestKey) {
+        inFlightKeyRef.current = null;
+      }
+    }
+  }, [enabled, key, load]);
+
+  useEffect(() => {
+    const requestSequence = requestSequenceRef;
+    const inFlightKey = inFlightKeyRef;
+    setState({
+      key,
+      log: null,
+      loading: false,
+      initialized: false,
+      error: null,
+    });
+    return () => {
+      requestSequence.current++;
+      inFlightKey.current = null;
+    };
+  }, [key]);
+
+  useEffect(() => {
+    if (enabled) void refresh();
+  }, [enabled, refresh]);
+
+  const scoped =
+    state.key === key
+      ? state
+      : {
+          key,
+          log: null,
+          loading: false,
+          initialized: false,
+          error: null,
+        };
+  return {
+    log: scoped.log,
+    loading: scoped.loading,
+    initialized: scoped.initialized,
+    error: scoped.error,
+    refresh,
+  };
+}
+
+export function useTaskRunLog(
+  workspaceId: string,
+  taskRunId: string,
+  options: { enabled?: boolean } = {},
+): UsePersistedLogReturn {
+  const enabled = options.enabled ?? Boolean(workspaceId && taskRunId);
+  const key = workspaceId + "\0task\0" + taskRunId;
+  const load = useCallback(
+    () => getTaskRunLog(workspaceId, taskRunId),
+    [taskRunId, workspaceId],
+  );
+  return usePersistedLog(key, enabled, load);
+}
+
+export function useDriverRunLog(
+  workspaceId: string,
+  runId: string,
+  options: { enabled?: boolean } = {},
+): UsePersistedLogReturn {
+  const enabled = options.enabled ?? Boolean(workspaceId && runId);
+  const key = workspaceId + "\0run\0" + runId;
+  const load = useCallback(
+    () => getDriverRunLog(workspaceId, runId),
+    [runId, workspaceId],
+  );
+  return usePersistedLog(key, enabled, load);
 }
 
 interface AgentServiceJournalState {

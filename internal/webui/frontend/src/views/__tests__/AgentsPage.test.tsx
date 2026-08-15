@@ -104,6 +104,13 @@ vi.mock("@/hooks/workspace", () => ({
     error: null,
     refresh: vi.fn(),
   }),
+  useAgentServiceRunTasks: () => ({
+    tasks: [],
+    loading: false,
+    initialized: true,
+    error: null,
+    refresh: vi.fn(),
+  }),
   useAgentServiceJournal: () => ({
     journal: null,
     loading: false,

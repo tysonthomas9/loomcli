@@ -10,9 +10,12 @@ export type { UseWorkspaceDesignFormatReturn } from "./useWorkspaceDesignFormat"
 
 export {
   useAgentServiceJournal,
+  useAgentServiceRunTasks,
   useAgentServiceRunEvents,
   useAgentServiceRuns,
   useAgentServices,
+  useDriverRunLog,
+  useTaskRunLog,
 } from "./useAgentServices";
 export type {
   UseAgentServicesOptions,

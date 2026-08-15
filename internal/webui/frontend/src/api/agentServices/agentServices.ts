@@ -95,6 +95,30 @@ export interface RunEventsPage {
   cursor?: string;
 }
 
+export type TaskRunStatus =
+  | "queued"
+  | "running"
+  | "completed"
+  | "failed"
+  | "cancelled";
+
+export interface TaskRunDTO {
+  taskRunId: string;
+  taskId: string;
+  status: TaskRunStatus;
+  runner: string;
+  errorClass?: string;
+  startedAt?: string;
+  finishedAt?: string | null;
+  logsAvailable: boolean;
+}
+
+export interface PersistedLogDTO {
+  content: string;
+  modifiedAt: string;
+  truncated: boolean;
+}
+
 export interface AgentServiceJournalDTO {
   serviceId: string;
   filename: string;
@@ -166,6 +190,50 @@ export async function listRunEvents(
 ): Promise<RunEventsPage> {
   return get<RunEventsPage>(
     wsUrl(workspaceId, `/runs/${encodeURIComponent(runId)}/events`),
+  );
+}
+
+export async function listAgentServiceRunTasks(
+  workspaceId: string,
+  agentServiceId: string,
+  runId: string,
+): Promise<AgentServiceList<TaskRunDTO>> {
+  const response = await get<AgentServiceListEnvelope<TaskRunDTO>>(
+    wsUrl(
+      workspaceId,
+      "/agent-services/" +
+        encodeURIComponent(agentServiceId) +
+        "/runs/" +
+        encodeURIComponent(runId) +
+        "/tasks",
+    ),
+  );
+  return unwrapList(response);
+}
+
+async function getPersistedLog(path: string): Promise<PersistedLogDTO> {
+  const response = await get<AgentServiceItemEnvelope<PersistedLogDTO>>(path);
+  if (!response.success) {
+    throw new ApiError(0, response.error, response);
+  }
+  return response.data;
+}
+
+export function getTaskRunLog(
+  workspaceId: string,
+  taskRunId: string,
+): Promise<PersistedLogDTO> {
+  return getPersistedLog(
+    wsUrl(workspaceId, "/task-runs/" + encodeURIComponent(taskRunId) + "/log"),
+  );
+}
+
+export function getDriverRunLog(
+  workspaceId: string,
+  runId: string,
+): Promise<PersistedLogDTO> {
+  return getPersistedLog(
+    wsUrl(workspaceId, "/runs/" + encodeURIComponent(runId) + "/log"),
   );
 }
 

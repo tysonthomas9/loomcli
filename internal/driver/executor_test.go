@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -299,6 +300,8 @@ func TestNodeRunnerRunsRegisteredNativeFlueArtifact(t *testing.T) {
 
 	ctx := context.Background()
 	root := t.TempDir()
+	runtimeDir := t.TempDir()
+	t.Setenv("LOOM_WORKSPACE_RUNTIME_DIR", runtimeDir)
 	writeFlueDist(t, root, "epic-runner", "native flue")
 	st := memstore.New()
 	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "TEST", Name: "test"}); err != nil {
@@ -339,6 +342,21 @@ func TestNodeRunnerRunsRegisteredNativeFlueArtifact(t *testing.T) {
 	}
 	if result.Output["logs_ref"] != "driver-run://run-1/flue-local" || result.Output["runtime"] != RuntimeFlueNode {
 		t.Fatalf("output = %+v, want driver-run logs ref and flue-node runtime", result.Output)
+	}
+	logPath := filepath.Join(runtimeDir, ".loom", "run-logs", "run-1.log")
+	logContent, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read persisted flue log: %v", err)
+	}
+	if !strings.Contains(string(logContent), "===== stdout =====") ||
+		!strings.Contains(string(logContent), "native flue") ||
+		!strings.Contains(string(logContent), "===== stderr =====") {
+		t.Fatalf("persisted flue log = %q, want delimited full stdout/stderr", logContent)
+	}
+	if info, err := os.Stat(logPath); err != nil {
+		t.Fatalf("stat persisted flue log: %v", err)
+	} else if got := info.Mode().Perm(); got != 0o600 {
+		t.Fatalf("persisted flue log mode = %o, want 600", got)
 	}
 }
 

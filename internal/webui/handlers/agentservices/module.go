@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/runlog"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/trigger"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/dto"
@@ -49,7 +50,9 @@ func (m *Module) Register(mux *http.ServeMux) {
 	}
 	mux.HandleFunc("GET /api/workspaces/{ws}/agent-services", m.listAgentServices)
 	mux.HandleFunc("GET /api/workspaces/{ws}/agent-services/{id}/runs", m.listAgentServiceRuns)
+	mux.HandleFunc("GET /api/workspaces/{ws}/agent-services/{id}/runs/{runId}/tasks", m.listAgentServiceRunTasks)
 	mux.HandleFunc("GET /api/workspaces/{ws}/agent-services/{id}/journal", m.getAgentServiceJournal)
+	mux.HandleFunc("GET /api/workspaces/{ws}/task-runs/{taskRunId}/log", m.getTaskRunLog)
 }
 
 type agentServiceDTO struct {
@@ -124,6 +127,28 @@ type agentServiceJournalDTO struct {
 type agentServiceJournalResponse struct {
 	Success bool                   `json:"success"`
 	Data    agentServiceJournalDTO `json:"data"`
+}
+
+type taskRunDTO struct {
+	TaskRunID     string               `json:"taskRunId"`
+	TaskID        string               `json:"taskId"`
+	Status        domain.TaskRunStatus `json:"status"`
+	Runner        string               `json:"runner"`
+	ErrorClass    string               `json:"errorClass,omitempty"`
+	StartedAt     time.Time            `json:"startedAt,omitempty"`
+	FinishedAt    *time.Time           `json:"finishedAt,omitempty"`
+	LogsAvailable bool                 `json:"logsAvailable"`
+}
+
+type persistedLogDTO struct {
+	Content    string    `json:"content"`
+	ModifiedAt time.Time `json:"modifiedAt"`
+	Truncated  bool      `json:"truncated"`
+}
+
+type persistedLogResponse struct {
+	Success bool            `json:"success"`
+	Data    persistedLogDTO `json:"data"`
 }
 
 func (m *Module) listAgentServices(w http.ResponseWriter, r *http.Request) {
@@ -258,6 +283,99 @@ func (m *Module) listAgentServiceRuns(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	handler.WriteJSON(w, http.StatusOK, dto.NewListResponse(items, len(items)))
+}
+
+func (m *Module) listAgentServiceRunTasks(w http.ResponseWriter, r *http.Request) {
+	ws := strings.TrimSpace(r.PathValue("ws"))
+	serviceID := strings.TrimSpace(r.PathValue("id"))
+	runID := strings.TrimSpace(r.PathValue("runId"))
+	if ws == "" || serviceID == "" || runID == "" {
+		handler.RespondError(w, http.StatusBadRequest, "workspace, agent service id, and run id are required")
+		return
+	}
+	if _, err := m.store.AgentServices().Get(r.Context(), ws, serviceID); err != nil {
+		writeStoreError(w, err, "agent service not found")
+		return
+	}
+	run, err := m.store.DriverRuns().Get(r.Context(), ws, runID)
+	if err != nil {
+		writeStoreError(w, err, "agent service run not found")
+		return
+	}
+	if run.AgentServiceID != serviceID {
+		handler.RespondError(w, http.StatusNotFound, "agent service run not found")
+		return
+	}
+	runs, err := m.store.TaskRuns().List(r.Context(), ws, store.TaskRunFilter{DriverRunID: runID})
+	if err != nil {
+		writeStoreError(w, err, "list agent service run tasks failed")
+		return
+	}
+	items := make([]taskRunDTO, 0, len(runs))
+	for _, taskRun := range runs {
+		if taskRun == nil {
+			continue
+		}
+		items = append(items, taskRunDTO{
+			TaskRunID: taskRun.TaskRunID, TaskID: taskRun.TaskID, Status: taskRun.Status,
+			Runner: taskRunRunnerLabel(taskRun), ErrorClass: taskRun.ErrorClass,
+			StartedAt: taskRun.StartedAt, FinishedAt: taskRun.FinishedAt,
+			LogsAvailable: m.taskRunLogAvailable(taskRun.TaskRunID),
+		})
+	}
+	handler.WriteJSON(w, http.StatusOK, dto.NewListResponse(items, len(items)))
+}
+
+func taskRunRunnerLabel(run *domain.TaskRun) string {
+	if run == nil {
+		return ""
+	}
+	for _, value := range []string{run.Runner, run.RunnerEntrypoint, run.WorkerProfileID, run.ProviderProfile} {
+		if value = strings.TrimSpace(value); value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func (m *Module) taskRunLogAvailable(taskRunID string) bool {
+	path, err := runlog.TaskPath(m.resolveRuntimeDir(), taskRunID)
+	if err != nil {
+		return false
+	}
+	info, err := os.Stat(path)
+	return err == nil && !info.IsDir()
+}
+
+func (m *Module) getTaskRunLog(w http.ResponseWriter, r *http.Request) {
+	ws := strings.TrimSpace(r.PathValue("ws"))
+	taskRunID := strings.TrimSpace(r.PathValue("taskRunId"))
+	if ws == "" || taskRunID == "" {
+		handler.RespondError(w, http.StatusBadRequest, "workspace and task run id are required")
+		return
+	}
+	path, err := runlog.TaskPath(m.resolveRuntimeDir(), taskRunID)
+	if err != nil {
+		handler.RespondError(w, http.StatusBadRequest, "invalid task run id")
+		return
+	}
+	if _, err := m.store.TaskRuns().Get(r.Context(), ws, taskRunID); err != nil {
+		writeStoreError(w, err, "task run not found")
+		return
+	}
+	content, modifiedAt, truncated, err := runlog.ReadTail(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			handler.RespondError(w, http.StatusNotFound, "task log is not available yet")
+			return
+		}
+		handler.RespondError(w, http.StatusInternalServerError, "read task run log failed")
+		return
+	}
+	handler.WriteJSON(w, http.StatusOK, persistedLogResponse{
+		Success: true,
+		Data:    persistedLogDTO{Content: content, ModifiedAt: modifiedAt, Truncated: truncated},
+	})
 }
 
 func (m *Module) getAgentServiceJournal(w http.ResponseWriter, r *http.Request) {

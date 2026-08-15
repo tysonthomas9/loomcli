@@ -355,11 +355,13 @@
 }
 
 .outputSection,
+.taskLogsSection,
 .timelineSection {
   margin-top: var(--space-4);
 }
 
 .outputSection h3,
+.taskLogsSection h3,
 .timelineSection h3 {
   margin: 0 0 var(--space-2);
   color: var(--color-text-primary);
@@ -367,7 +369,8 @@
   font-weight: 800;
 }
 
-.outputSection pre {
+.outputSection pre,
+.logBody pre {
   max-height: 280px;
   margin: 0;
   padding: var(--space-3);
@@ -381,6 +384,259 @@
   line-height: 1.5;
   overflow-wrap: anywhere;
   white-space: pre-wrap;
+}
+
+.taskLogList {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.taskLogRow {
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-sm, 6px);
+  background: var(--color-bg-primary);
+}
+
+.taskLogToggle,
+.logDisclosureButton {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border: 0;
+  color: inherit;
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.taskLogMeta {
+  display: flex;
+  flex-shrink: 0;
+  gap: var(--space-3);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+}
+
+.logBody {
+  padding: 0 var(--space-3) var(--space-3);
+}
+
+.taskLogViewControls {
+  display: flex;
+  width: fit-content;
+  margin: 0 0 var(--space-2) auto;
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm, 6px);
+}
+
+.taskLogViewControls button {
+  padding: 3px 9px;
+  border: 0;
+  border-left: 1px solid var(--color-border);
+  color: var(--color-text-secondary);
+  background: var(--color-bg-primary);
+  font: inherit;
+  font-size: var(--font-size-xs);
+  cursor: pointer;
+}
+
+.taskLogViewControls button:first-child {
+  border-left: 0;
+}
+
+.taskLogViewControls button[aria-pressed="true"] {
+  color: var(--color-text-primary);
+  background: var(--color-surface-subtle);
+  font-weight: 700;
+}
+
+.taskLogViewControls button:focus-visible,
+.transcriptDisclosure:focus-visible {
+  position: relative;
+  z-index: 1;
+  outline: 2px solid var(--color-focus, var(--color-accent, #6d5bd0));
+  outline-offset: -2px;
+}
+
+.transcriptView {
+  max-height: 280px;
+  overflow: auto;
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-sm, 6px);
+  color: var(--color-text-primary);
+  background: var(--color-bg-primary);
+  font-size: var(--font-size-xs);
+}
+
+.transcriptPlain,
+.transcriptUnparsed {
+  padding: 2px var(--space-3);
+  font-family: var(--font-family-mono);
+  line-height: 1.5;
+}
+
+.transcriptPlain:first-child,
+.transcriptUnparsed:first-child {
+  padding-top: var(--space-3);
+}
+
+.transcriptPlain:last-child,
+.transcriptUnparsed:last-child {
+  padding-bottom: var(--space-3);
+}
+
+.transcriptUnparsed {
+  overflow: hidden;
+  color: var(--color-text-tertiary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.transcriptRow {
+  padding: var(--space-3);
+  border-top: 1px solid var(--color-border-light);
+}
+
+.transcriptRow:first-child {
+  border-top: 0;
+}
+
+.transcriptCommandHeader,
+.transcriptSectionHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.transcriptCommand {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--color-text-primary);
+  font-family: var(--font-family-mono);
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+.transcriptBadge,
+.transcriptChangeBadge {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  padding: 2px 6px;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  color: var(--color-text-secondary);
+  background: var(--color-surface-subtle);
+  font-family: var(--font-family-mono);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.transcriptBadge[data-tone="success"] {
+  color: var(--color-success, #22c55e);
+}
+
+.transcriptBadge[data-tone="danger"] {
+  color: var(--color-danger, #d14545);
+}
+
+/* red-500 lands at 3.2:1 on the light surface at this size; the light theme
+ * defines no --color-danger override, so pin red-600 here. */
+:global([data-theme="light"]) .transcriptBadge[data-tone="danger"] {
+  color: #dc2626;
+}
+
+.transcriptDisclosure {
+  margin-top: var(--space-2);
+  padding: 0;
+  border: 0;
+  color: var(--color-primary);
+  background: transparent;
+  font: inherit;
+  font-size: var(--font-size-xs);
+  cursor: pointer;
+}
+
+.transcriptView .transcriptOutput,
+.transcriptView .transcriptMessageJson,
+.transcriptView .transcriptOther pre {
+  max-height: 220px;
+  margin-top: var(--space-2);
+}
+
+.transcriptSectionLabel {
+  display: block;
+  margin-bottom: var(--space-2);
+}
+
+.transcriptFileList {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: var(--space-2) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.transcriptFileList li {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.transcriptFileList code {
+  overflow-wrap: anywhere;
+  font-family: var(--font-family-mono);
+}
+
+.transcriptMessageText {
+  overflow-wrap: anywhere;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+.transcriptReasoning,
+.transcriptOther,
+.transcriptMuted {
+  color: var(--color-text-tertiary);
+}
+
+.transcriptMuted {
+  margin: var(--space-2) 0 0;
+}
+
+.transcriptTurnCompleted {
+  margin: var(--space-2) var(--space-3);
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--color-border-light);
+  color: var(--color-text-tertiary);
+}
+
+.transcriptError {
+  margin: var(--space-2) var(--space-3);
+  padding: var(--space-2);
+  border-left: 3px solid var(--color-danger, #d14545);
+  color: var(--color-danger, #d14545);
+  background: color-mix(in srgb, var(--color-danger, #d14545) 7%, transparent);
+}
+
+.harnessLog {
+  margin-top: var(--space-3);
+}
+
+.logDisclosureButton {
+  width: auto;
+  padding: 0;
+  color: var(--color-text-primary);
+  font-size: var(--font-size-xs);
+  font-weight: 800;
 }
 
 .logsRef {

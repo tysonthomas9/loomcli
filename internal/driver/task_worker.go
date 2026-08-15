@@ -323,5 +323,6 @@ func TaskRunResultFromOutcome(outcome *TaskRunRequestOutcome) TaskRunRequestResu
 	}
 	result := TaskRunResultFromDomain(outcome.Run, outcome.ArtifactIDs)
 	result.LeaseToken = outcome.LeaseToken
+	result.Logs = outcome.Logs
 	return result
 }

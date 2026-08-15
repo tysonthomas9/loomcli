@@ -108,6 +108,7 @@ type TaskExecResult struct {
 	Status           domain.TaskRunStatus
 	ExitCode         int
 	LogsRef          string
+	Logs             string
 	ArtifactsRef     string
 	ArtifactIDs      []string
 	InputTokens      int64
@@ -188,6 +189,7 @@ type TaskRunRequestResult struct {
 	Status           domain.TaskRunStatus `json:"status"`
 	ExitCode         *int                 `json:"exitCode,omitempty"`
 	LogsRef          string               `json:"logsRef,omitempty"`
+	Logs             string               `json:"logs,omitempty"`
 	ArtifactsRef     string               `json:"artifactsRef,omitempty"`
 	ArtifactIDs      []string             `json:"artifactIds,omitempty"`
 	InputTokens      int64                `json:"inputTokens,omitempty"`
@@ -215,6 +217,7 @@ type TaskRunRequestOutcome struct {
 	Run         *domain.TaskRun
 	LeaseToken  string
 	ArtifactIDs []string
+	Logs        string
 }
 
 func RequestTaskRun(ctx context.Context, s store.Store, opts TaskRunRequestOptions, executor TaskExecutor) (*domain.TaskRun, error) {
@@ -652,6 +655,13 @@ func executeClaimedTaskRunWithResult(ctx context.Context, s store.Store, claimed
 	defer stopHeartbeat()
 
 	execResult, execErr := executor.ExecuteTask(ctx, taskExecRequest(claimed, opts, refs))
+	if logErr := persistTaskRunLogs(claimed.TaskRunID, execResult.Logs); logErr != nil {
+		if execErr != nil {
+			execErr = fmt.Errorf("%v; persist task run logs: %w", execErr, logErr)
+		} else {
+			execErr = fmt.Errorf("persist task run logs: %w", logErr)
+		}
+	}
 	completion := normalizeTaskExecCompletion(execResult, execErr)
 	metadata := taskExecRuntimeMetadata(execResult, refs)
 	if opts.DeferCompletion && completion.Status == domain.TaskRunCompleted {
@@ -668,7 +678,7 @@ func executeClaimedTaskRunWithResult(ctx context.Context, s store.Store, claimed
 		if err := requeueLinkedDriverStep(ctx, s, claimed, requeued); err != nil {
 			return nil, err
 		}
-		return &TaskRunRequestOutcome{Run: requeued, LeaseToken: opts.LeaseToken, ArtifactIDs: normalizeArtifactIDs(execResult.ArtifactIDs)}, nil
+		return &TaskRunRequestOutcome{Run: requeued, LeaseToken: opts.LeaseToken, ArtifactIDs: normalizeArtifactIDs(execResult.ArtifactIDs), Logs: execResult.Logs}, nil
 	}
 	// Terminal failure past the retry budget: finish the run and mark the
 	// underlying task issue blocked in the same fenced finish call.
@@ -684,7 +694,7 @@ func executeClaimedTaskRunWithResult(ctx context.Context, s store.Store, claimed
 	if err := finishLinkedDriverStep(ctx, s, claimed, opts, refs, execResult, completion.Status); err != nil {
 		return nil, err
 	}
-	return &TaskRunRequestOutcome{Run: final, LeaseToken: opts.LeaseToken, ArtifactIDs: normalizeArtifactIDs(execResult.ArtifactIDs)}, nil
+	return &TaskRunRequestOutcome{Run: final, LeaseToken: opts.LeaseToken, ArtifactIDs: normalizeArtifactIDs(execResult.ArtifactIDs), Logs: execResult.Logs}, nil
 }
 
 type claimedTaskRunRefs struct {
@@ -870,7 +880,7 @@ func deferClaimedTaskRunCompletion(ctx context.Context, s store.Store, claimed *
 		return nil, fmt.Errorf("record pending task run completion: %w", err)
 	}
 	synthetic := taskRunSyntheticCompletion(pending, execResult, completion, metadata)
-	return &TaskRunRequestOutcome{Run: synthetic, LeaseToken: opts.LeaseToken, ArtifactIDs: normalizeArtifactIDs(execResult.ArtifactIDs)}, nil
+	return &TaskRunRequestOutcome{Run: synthetic, LeaseToken: opts.LeaseToken, ArtifactIDs: normalizeArtifactIDs(execResult.ArtifactIDs), Logs: execResult.Logs}, nil
 }
 
 func taskRunSyntheticCompletion(pending *domain.TaskRun, execResult TaskExecResult, completion taskExecCompletion, metadata map[string]string) *domain.TaskRun {
@@ -905,7 +915,7 @@ func completeAndCloseClaimedTaskRun(ctx context.Context, s store.Store, claimed 
 	if err := finishLinkedDriverStep(ctx, s, claimed, opts, refs, execResult, completion.Status); err != nil {
 		return nil, err
 	}
-	return &TaskRunRequestOutcome{Run: final, LeaseToken: opts.LeaseToken, ArtifactIDs: normalizeArtifactIDs(execResult.ArtifactIDs)}, nil
+	return &TaskRunRequestOutcome{Run: final, LeaseToken: opts.LeaseToken, ArtifactIDs: normalizeArtifactIDs(execResult.ArtifactIDs), Logs: execResult.Logs}, nil
 }
 
 func completeClaimedTaskRun(ctx context.Context, s store.Store, claimed *domain.TaskRun, opts executeClaimedTaskRunOptions, refs claimedTaskRunRefs, execResult TaskExecResult, completion taskExecCompletion, metadata map[string]string) (*domain.TaskRun, error) {

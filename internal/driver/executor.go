@@ -926,6 +926,10 @@ func flueRunOutput(req RunRequest, stdout, stderr string) map[string]string {
 		"runtime":  RuntimeFlueNode,
 		"logs_ref": "driver-run://" + req.Run.RunID + "/flue-local",
 	}
+	if err := persistDriverRunLogs(req.Run.RunID, stdout, stderr); err != nil {
+		output["logs_persist_error"] = err.Error()
+		slog.Warn("persist driver run logs failed", "runID", req.Run.RunID, "err", err)
+	}
 	if req.Manifest["artifact_kind"] != "" {
 		output["artifact_kind"] = req.Manifest["artifact_kind"]
 	}

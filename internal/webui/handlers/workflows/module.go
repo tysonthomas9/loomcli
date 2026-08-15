@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/driver"
+	"github.com/tysonthomas9/loomcli/internal/runlog"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	workflowdefs "github.com/tysonthomas9/loomcli/internal/workflows"
@@ -23,19 +25,36 @@ import (
 const maxRunPayloadBytes = 4 << 20
 
 type Module struct {
-	store store.Store
+	store      store.Store
+	runtimeDir string
 }
 
-func NewModule(st store.Store) *Module {
-	return &Module{store: st}
+func NewModule(st store.Store, runtimeDir ...string) *Module {
+	m := &Module{store: st}
+	if len(runtimeDir) > 0 {
+		m.runtimeDir = strings.TrimSpace(runtimeDir[0])
+	}
+	return m
 }
 
 func (m *Module) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/workspaces/{ws}/workflows/{name}/versions", m.createWorkflowVersion)
 	mux.HandleFunc("POST /api/workspaces/{ws}/workflows/{name}", m.createWorkflowRun)
 	mux.HandleFunc("GET /api/workspaces/{ws}/runs/{runId}", m.getRun)
+	mux.HandleFunc("GET /api/workspaces/{ws}/runs/{runId}/log", m.getRunLog)
 	mux.HandleFunc("GET /api/workspaces/{ws}/runs/{runId}/events", m.getRunEvents)
 	mux.HandleFunc("GET /api/workspaces/{ws}/runs/{runId}/stream", m.streamRunEvents)
+}
+
+type persistedLogDTO struct {
+	Content    string    `json:"content"`
+	ModifiedAt time.Time `json:"modifiedAt"`
+	Truncated  bool      `json:"truncated"`
+}
+
+type persistedLogResponse struct {
+	Success bool            `json:"success"`
+	Data    persistedLogDTO `json:"data"`
 }
 
 type createWorkflowVersionRequest struct {
@@ -216,6 +235,44 @@ func (m *Module) getRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	handler.WriteJSON(w, http.StatusOK, run)
+}
+
+func (m *Module) getRunLog(w http.ResponseWriter, r *http.Request) {
+	ws := strings.TrimSpace(r.PathValue("ws"))
+	runID := strings.TrimSpace(r.PathValue("runId"))
+	if ws == "" || runID == "" {
+		writeError(w, http.StatusBadRequest, "workspace and run id are required")
+		return
+	}
+	path, err := runlog.DriverPath(m.resolveRuntimeDir(), runID)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid run id")
+		return
+	}
+	if _, err := m.store.DriverRuns().Get(r.Context(), ws, runID); err != nil {
+		writeDomainError(w, err, "run not found")
+		return
+	}
+	content, modifiedAt, truncated, err := runlog.ReadTail(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			writeError(w, http.StatusNotFound, "run log is not available yet")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "read run log failed")
+		return
+	}
+	handler.WriteJSON(w, http.StatusOK, persistedLogResponse{
+		Success: true,
+		Data:    persistedLogDTO{Content: content, ModifiedAt: modifiedAt, Truncated: truncated},
+	})
+}
+
+func (m *Module) resolveRuntimeDir() string {
+	if m.runtimeDir != "" {
+		return m.runtimeDir
+	}
+	return runlog.ResolveRuntimeDir()
 }
 
 func (m *Module) getRunEvents(w http.ResponseWriter, r *http.Request) {
