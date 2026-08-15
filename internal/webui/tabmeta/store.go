@@ -33,6 +33,12 @@ var validSessionName = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
 // PTYManager. PTYAlive=false means the tab survived a server restart but
 // its backing shell did not. AttachedClients>1 means the same session is
 // being viewed by multiple WebSocket clients concurrently.
+//
+// ReplacedAt and ReplacedReason, by contrast, ARE persisted. They record
+// that the tab's shell was replaced by a fresh one — the previous PTY died
+// with a previous server process — so the marker survives a page reload and
+// is visible to every client, not only the one that happened to trigger the
+// respawn. A zero ReplacedAt means "never replaced, or dismissed".
 type TabMetadata struct {
 	SessionName     string      `json:"session_name"`
 	Workspace       string      `json:"workspace,omitempty"`
@@ -49,8 +55,25 @@ type TabMetadata struct {
 	Launch          *LaunchSpec `json:"launch,omitempty"`
 	CreatedAt       time.Time   `json:"created_at"`
 	UpdatedAt       time.Time   `json:"updated_at"`
+	ReplacedAt      time.Time   `json:"replaced_at,omitempty"`
+	ReplacedReason  string      `json:"replaced_reason,omitempty"`
 	PTYAlive        bool        `json:"pty_alive"`
 	AttachedClients int         `json:"attached_clients"`
+}
+
+// MarshalJSON drops a zero ReplacedAt from the encoded object. encoding/json's
+// omitempty has no effect on a time.Time (a struct is never "empty"), and
+// clients read the presence of replaced_at as "this tab was replaced" — a
+// literal "0001-01-01T00:00:00Z" would mark every tab that never was.
+func (m TabMetadata) MarshalJSON() ([]byte, error) {
+	type alias TabMetadata
+	if m.ReplacedAt.IsZero() {
+		return json.Marshal(struct {
+			alias
+			ReplacedAt *time.Time `json:"replaced_at,omitempty"`
+		}{alias: alias(m)})
+	}
+	return json.Marshal(alias(m))
 }
 
 // LaunchSpec is the explicit command contract for a terminal session. Agent
@@ -273,6 +296,17 @@ func (s *Store) Set(ctx context.Context, meta *TabMetadata) error {
 		fields["launch"] = ""
 	}
 
+	// Written unconditionally: HSet only overwrites the keys it is handed, so
+	// skipping these would let a PutTab reclaiming a dead tab name inherit the
+	// previous tab's replacement marker.
+	if meta.ReplacedAt.IsZero() {
+		fields["replaced_at"] = ""
+		fields["replaced_reason"] = ""
+	} else {
+		fields["replaced_at"] = meta.ReplacedAt.UTC().Format(time.RFC3339)
+		fields["replaced_reason"] = meta.ReplacedReason
+	}
+
 	if err := s.client.HSet(ctx, metaKey(meta.Workspace, meta.SessionName), fields).Err(); err != nil {
 		return fmt.Errorf("hset %s: %w", meta.SessionName, err)
 	}
@@ -280,7 +314,10 @@ func (s *Store) Set(ctx context.Context, meta *TabMetadata) error {
 }
 
 // Patch partially updates metadata fields for a session within a workspace.
-// Only non-empty fields in the map are updated. Returns the full metadata after update.
+// Every key present in fields is written, including one whose value is the
+// empty string — that is how a field is cleared (the replaced_at dismiss path
+// relies on it). Keys absent from the map are left untouched. Returns the full
+// metadata after update.
 func (s *Store) Patch(ctx context.Context, workspace, sessionName string, fields map[string]string) (*TabMetadata, error) {
 	if err := ValidateWorkspaceName(workspace); err != nil {
 		return nil, err
@@ -418,6 +455,18 @@ func (s *Store) ListIssueSessionMap(ctx context.Context) (map[string][]string, e
 	return result, nil
 }
 
+// parseHashTime reads an RFC3339 timestamp out of a Redis hash value. A
+// missing, empty or unparseable value yields the zero time rather than an
+// error — legacy hashes predate some of these fields, and one bad timestamp
+// must not fail a whole tab list.
+func parseHashTime(raw string) time.Time {
+	t, err := time.Parse(time.RFC3339, raw)
+	if err != nil {
+		return time.Time{}
+	}
+	return t
+}
+
 // parseMetadata converts a Redis hash map to a TabMetadata struct.
 func parseMetadata(workspace, sessionName string, vals map[string]string) (*TabMetadata, error) {
 	meta := &TabMetadata{
@@ -430,6 +479,8 @@ func parseMetadata(workspace, sessionName string, vals map[string]string) (*TabM
 		AgentID:     vals["agent_id"],
 		Role:        vals["role"],
 		Backend:     vals["backend"],
+
+		ReplacedReason: vals["replaced_reason"],
 	}
 
 	if so, ok := vals["sort_order"]; ok {
@@ -453,18 +504,11 @@ func parseMetadata(workspace, sessionName string, vals map[string]string) (*TabM
 		meta.Launch = &spec
 	}
 
-	if ca, ok := vals["created_at"]; ok {
-		t, err := time.Parse(time.RFC3339, ca)
-		if err == nil {
-			meta.CreatedAt = t
-		}
-	}
-
-	if ua, ok := vals["updated_at"]; ok {
-		t, err := time.Parse(time.RFC3339, ua)
-		if err == nil {
-			meta.UpdatedAt = t
-		}
+	meta.CreatedAt = parseHashTime(vals["created_at"])
+	meta.UpdatedAt = parseHashTime(vals["updated_at"])
+	meta.ReplacedAt = parseHashTime(vals["replaced_at"])
+	if meta.ReplacedAt.IsZero() {
+		meta.ReplacedReason = ""
 	}
 
 	return meta, nil

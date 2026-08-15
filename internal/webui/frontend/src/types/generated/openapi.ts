@@ -3102,6 +3102,21 @@ export interface components {
        *     destructive tab-close actions.
        */
       attached_clients: number;
+      /**
+       * Format: date-time
+       * @description When this tab's shell was replaced by a fresh one — the previous
+       *     PTY died with a previous server process. Absent means never
+       *     replaced, or the marker was dismissed via PATCH. Unlike
+       *     pty_alive this is persisted, so the marker survives a reload and
+       *     is visible to every client.
+       */
+      replaced_at?: string;
+      /**
+       * @description Why the shell was replaced. Server-written only; clients cannot
+       *     set it. Present only alongside replaced_at.
+       * @enum {string}
+       */
+      replaced_reason?: "server_restart";
     };
     TabPutRequest: {
       label: string;
@@ -3116,6 +3131,13 @@ export interface components {
       sort_order?: number | null;
       pinned?: boolean | null;
       issue_id?: string | null;
+      /**
+       * @description Dismiss the session-replacement marker by sending an empty
+       *     string. A non-empty value must be an RFC3339 timestamp;
+       *     anything else is rejected with 400. replaced_reason is not
+       *     client-settable — the server owns its enum.
+       */
+      replaced_at?: string | null;
     };
     IssueTab: {
       /** @description "details", "sessions", "logs", or "terminal-{session}" */
