@@ -113,6 +113,9 @@ func (s *artifactStore) Create(_ context.Context, in store.ArtifactCreate) (*dom
 	if s.items[in.WorkspaceKey] == nil {
 		s.items[in.WorkspaceKey] = make(map[string]*domain.Artifact)
 	}
+	if _, exists := s.items[in.WorkspaceKey][in.ArtifactID]; exists {
+		return nil, fmt.Errorf("artifact %q in workspace %q: %w", in.ArtifactID, in.WorkspaceKey, domain.ErrAlreadyExists)
+	}
 	artifact := newArtifactMem(in, time.Now().UTC())
 	s.items[in.WorkspaceKey][in.ArtifactID] = artifact
 	return cloneArtifact(artifact), nil

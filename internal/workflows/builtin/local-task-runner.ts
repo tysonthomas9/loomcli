@@ -320,7 +320,6 @@ export async function run(ctx = {}) {
       errorClass: "local_agent_failed",
       errorMessage: failureMessage,
       logs: logs.join("\n") + "\n",
-      logsRef: "logs://" + taskRunId,
       ...taskUsage,
       transcript_entries: transcriptEntries,
       patch: patchInfo.patch,
@@ -336,7 +335,6 @@ export async function run(ctx = {}) {
     status: "completed",
     exitCode: 0,
     logs: logs.join("\n") + "\n",
-    logsRef: "logs://" + taskRunId,
     ...taskUsage,
     transcript_entries: transcriptEntries,
     runtimeMetadata: metadata,
@@ -1670,7 +1668,6 @@ function failed(errorClass, message, info) {
     errorClass,
     errorMessage: textTail(message),
     logs: logs.concat([errorClass + ": " + message]).join("\n") + "\n",
-    logsRef: "logs://" + info.taskRunId,
     runtimeMetadata: stringMetadata({
       task_runner: "local-task-runner",
       runtime_strategy: info.backend ? "local-cli-" + info.backend : "local",

@@ -16,6 +16,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/taskrunlogs"
 )
 
 func TestExecutorRunOnceClaimsVerifiesAndFinishes(t *testing.T) {
@@ -300,8 +301,6 @@ func TestNodeRunnerRunsRegisteredNativeFlueArtifact(t *testing.T) {
 
 	ctx := context.Background()
 	root := t.TempDir()
-	runtimeDir := t.TempDir()
-	t.Setenv("LOOM_WORKSPACE_RUNTIME_DIR", runtimeDir)
 	writeFlueDist(t, root, "epic-runner", "native flue")
 	st := memstore.New()
 	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "TEST", Name: "test"}); err != nil {
@@ -326,37 +325,41 @@ func TestNodeRunnerRunsRegisteredNativeFlueArtifact(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Claim: %v", err)
 	}
-	req, err := loadRunRequest(ctx, root, claimed, st)
-	if err != nil {
-		t.Fatalf("loadRunRequest: %v", err)
-	}
-	if req.WorkflowPath != "" {
-		t.Fatalf("WorkflowPath = %q, want no generated workflow path", req.WorkflowPath)
-	}
-	result, err := (NodeRunner{}).Run(ctx, req)
-	if err != nil {
-		t.Fatalf("NodeRunner.Run: %v", err)
-	}
+	result := (&Executor{Store: st}).runClaimed(ctx, root, claimed)
 	if result.Status != domain.DriverRunCompleted || result.Summary != "native flue" {
 		t.Fatalf("result = %+v, want completed native flue", result)
 	}
-	if result.Output["logs_ref"] != "driver-run://run-1/flue-local" || result.Output["runtime"] != RuntimeFlueNode {
-		t.Fatalf("output = %+v, want driver-run logs ref and flue-node runtime", result.Output)
+	if !strings.HasPrefix(result.Output["logs_ref"], "artifact://log-run-run-1-") || result.Output["runtime"] != RuntimeFlueNode {
+		t.Fatalf("output = %+v, want run log artifact ref and flue-node runtime", result.Output)
 	}
-	logPath := filepath.Join(runtimeDir, ".loom", "run-logs", "run-1.log")
-	logContent, err := os.ReadFile(logPath)
+	persisted, err := taskrunlogs.Get(ctx, st, "TEST", result.Output["logs_ref"])
 	if err != nil {
-		t.Fatalf("read persisted flue log: %v", err)
+		t.Fatalf("Get persisted flue log: %v", err)
 	}
-	if !strings.Contains(string(logContent), "===== stdout =====") ||
-		!strings.Contains(string(logContent), "native flue") ||
-		!strings.Contains(string(logContent), "===== stderr =====") {
-		t.Fatalf("persisted flue log = %q, want delimited full stdout/stderr", logContent)
+	if !strings.Contains(persisted.Content, "===== stdout =====") ||
+		!strings.Contains(persisted.Content, "native flue") ||
+		!strings.Contains(persisted.Content, "===== stderr =====") {
+		t.Fatalf("persisted flue log = %q, want delimited full stdout/stderr", persisted.Content)
 	}
-	if info, err := os.Stat(logPath); err != nil {
-		t.Fatalf("stat persisted flue log: %v", err)
-	} else if got := info.Mode().Perm(); got != 0o600 {
-		t.Fatalf("persisted flue log mode = %o, want 600", got)
+	artifact, err := st.Artifacts().Get(ctx, "TEST", strings.TrimPrefix(result.Output["logs_ref"], "artifact://"))
+	if err != nil {
+		t.Fatalf("Get log artifact: %v", err)
+	}
+	if artifact.Type != "log" || artifact.OwnerType != "driver_run" || artifact.OwnerID != "run-1" {
+		t.Fatalf("artifact attribution = %+v", artifact)
+	}
+}
+
+func TestDriverRunLogUploadFailureDoesNotFailRun(t *testing.T) {
+	base := memstore.New()
+	st := &artifactCreateFailureStore{Store: base, err: errors.New("artifact backend unavailable")}
+	claimed := &domain.DriverRun{WorkspaceKey: "TEST", RunID: "run-log-upload-failure"}
+	result := (&Executor{Store: st}).persistRunLogs(t.Context(), claimed, RunResult{
+		Status: domain.DriverRunCompleted,
+		Logs:   "driver log upload should fail\n",
+	})
+	if result.Status != domain.DriverRunCompleted || result.Output["logs_ref"] != "" || result.Logs != "" {
+		t.Fatalf("result = %+v, want completed with empty logs ref", result)
 	}
 }
 

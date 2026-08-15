@@ -135,7 +135,7 @@ func (app *Server) buildInfraModules() {
 			Logger:          app.config.Logger,
 		}))
 		app.wsModules = append(app.wsModules, onboarding.NewModule(app.issueSvc, app.agentSvc))
-		app.wsModules = append(app.wsModules, workflows.NewModule(app.config.Store, app.config.SessionRuntimeDir))
+		app.wsModules = append(app.wsModules, workflows.NewModule(app.config.Store))
 		app.wsModules = append(app.wsModules, webhooks.NewModule(app.config.Store))
 		prReviewModule := modbuilder.NewPRReviewModule(
 			app.config.Store, app.connectorDispatcher, app.agentSvc, app.termSvc, app.config.LocalSettingsDir,

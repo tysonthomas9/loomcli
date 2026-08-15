@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -47,6 +48,7 @@ func TestTaskWorkerRunOnceClaimsQueuedTaskRunAndClosesTask(t *testing.T) {
 		Status:       domain.TaskRunCompleted,
 		ExitCode:     0,
 		LogsRef:      "logs://task-run-worker-loop",
+		Logs:         "worker loop log\n",
 		ArtifactsRef: "artifacts://task-run-worker-loop",
 	}}
 
@@ -222,6 +224,7 @@ func TestTaskWorkerRunOnceRetriesThenBlocksFailedTaskRun(t *testing.T) {
 		Status:       domain.TaskRunFailed,
 		ExitCode:     1,
 		LogsRef:      "logs://task-run-worker-retry",
+		Logs:         "worker retry log\n",
 		ErrorClass:   "task_runner_error",
 		ErrorMessage: "boom",
 	}}
@@ -281,7 +284,7 @@ func TestTaskWorkerRunOnceRetriesThenBlocksFailedTaskRun(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Get step after blocked: %v", err)
 	}
-	if step.Status != domain.DriverStepFailed || step.TaskRunID != "task-run-worker-retry" || step.OutputRef != "logs://task-run-worker-retry" {
+	if step.Status != domain.DriverStepFailed || step.TaskRunID != "task-run-worker-retry" || !strings.HasPrefix(step.OutputRef, "artifact://log-task-task-run-worker-retry-") {
 		t.Fatalf("step after blocked = %+v, want failed linked step with logs output", step)
 	}
 }

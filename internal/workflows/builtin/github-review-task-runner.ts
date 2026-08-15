@@ -45,7 +45,6 @@ export async function run(ctx = {}) {
   return {
     status: "completed",
     exitCode: 0,
-    logsRef: "logs://" + taskRunId,
     runtimeMetadata: {
       task_runner: "github-review-task-runner",
       runtime_strategy: "codex-review",
@@ -72,7 +71,6 @@ function failed(errorClass, message, taskRunId, request = {}) {
     exitCode: 1,
     errorClass,
     errorMessage: message,
-    logsRef: "logs://" + taskRunId,
     runtimeMetadata: {
       task_runner: "github-review-task-runner",
       runtime_strategy: "codex-review",

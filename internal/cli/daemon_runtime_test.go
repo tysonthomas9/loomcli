@@ -29,8 +29,8 @@ func TestIsProtectedRuntimePath(t *testing.T) {
 		// Protected top-level dirs/files
 		{".loom", true},
 		{".loom/daemon.pid", true},
-		{".loom/task-logs/task-run-1.log", true},
-		{".loom/run-logs/run-1.log", true},
+		{".loom/nested/runtime-state.json", true},
+		{".loom/other/deep/file", true},
 		{"sessions", true},
 		{"sessions/abc", true},
 		{"AGENTS.md", true},

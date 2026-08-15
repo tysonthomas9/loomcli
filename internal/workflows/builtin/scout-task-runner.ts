@@ -545,7 +545,6 @@ function completedAnalysis(analysis, backend, taskRunId, request, logs) {
     status: "completed",
     exitCode: 0,
     logs: logs.join("\n") + "\n",
-    logsRef: "logs://" + taskRunId,
     runtimeMetadata: {
       task_runner: "scout-task-runner",
       runtime_strategy: "scout-analyze-" + backend,
@@ -578,7 +577,6 @@ async function writePhase(root, input, taskRunId, request, logs) {
       status: "completed",
       exitCode: 0,
       logs: logs.join("\n") + "\n",
-      logsRef: "logs://" + taskRunId,
       runtimeMetadata: {
         task_runner: "scout-task-runner",
         runtime_strategy: "scout-write",
@@ -881,7 +879,6 @@ function failed(errorClass, message, { taskRunId, request = {}, phase = "", back
     errorClass,
     errorMessage: message,
     logs: logs.join("\n") + "\n",
-    logsRef: "logs://" + (taskRunId || "scout"),
     runtimeMetadata: metadata,
   };
 }

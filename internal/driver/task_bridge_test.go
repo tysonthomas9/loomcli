@@ -18,6 +18,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	runtimesettings "github.com/tysonthomas9/loomcli/internal/localsettings"
 	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/taskrunlogs"
 )
 
 // TestTaskRunnerEnvAPIBaseURL pins the serve-transport seam: when the
@@ -315,8 +316,14 @@ func TestHostBridgeTaskExecutorMapsFlueSessionAndTranscript(t *testing.T) {
 	if outcome.Run.Status != domain.TaskRunCompleted {
 		t.Fatalf("run status = %s error=%s, want completed", outcome.Run.Status, outcome.Run.ErrorMessage)
 	}
-	if len(outcome.ArtifactIDs) != 2 || outcome.ArtifactIDs[0] != "transcript-task-run-1" || outcome.ArtifactIDs[1] != "logs-task-run-1" {
-		t.Fatalf("artifact ids = %+v, want transcript and logs artifacts", outcome.ArtifactIDs)
+	if len(outcome.ArtifactIDs) != 1 || outcome.ArtifactIDs[0] != "transcript-task-run-1" {
+		t.Fatalf("artifact ids = %+v, want bridge-owned transcript only", outcome.ArtifactIDs)
+	}
+	if !strings.HasPrefix(outcome.Run.LogsRef, "artifact://log-task-task-run-1-") {
+		t.Fatalf("logs ref = %q, want common task-request artifact", outcome.Run.LogsRef)
+	}
+	if persisted, err := taskrunlogs.Get(ctx, st, "TEST", outcome.Run.LogsRef); err != nil || !strings.Contains(persisted.Content, "flue runner log") {
+		t.Fatalf("persisted task log = %+v, %v", persisted, err)
 	}
 	session, err := st.AgentSessions().Get(ctx, "TEST", "flue-task-run-1")
 	if err != nil {
@@ -331,8 +338,8 @@ func TestHostBridgeTaskExecutorMapsFlueSessionAndTranscript(t *testing.T) {
 	if session.Metadata["runtime"] != "flue" || session.Metadata["flue_session"] != "flue-task-run-1" || session.Metadata["task_run_id"] != "task-run-1" {
 		t.Fatalf("session metadata = %+v, want flue task-run metadata", session.Metadata)
 	}
-	if session.Metadata["transcript_ref"] != "artifact://transcript-task-run-1" || session.Metadata["logs_ref"] != "artifact://logs-task-run-1" {
-		t.Fatalf("session refs = %+v, want transcript/log artifact refs", session.Metadata)
+	if session.Metadata["transcript_ref"] != "artifact://transcript-task-run-1" || session.Metadata["logs_ref"] != "" {
+		t.Fatalf("session refs = %+v, want bridge-owned transcript only", session.Metadata)
 	}
 	transcriptArtifact, err := st.Artifacts().Get(ctx, "TEST", "transcript-task-run-1")
 	if err != nil {
@@ -402,7 +409,7 @@ func TestHostBridgeTaskExecutorReusesOutputArtifactsOnRetry(t *testing.T) {
 	if second.Status != domain.TaskRunCompleted {
 		t.Fatalf("second status = %s, want completed", second.Status)
 	}
-	want := []string{"transcript-task-run-1", "logs-task-run-1"}
+	want := []string{"transcript-task-run-1"}
 	if !slices.Equal(second.ArtifactIDs, want) {
 		t.Fatalf("second artifact ids = %+v, want %+v", second.ArtifactIDs, want)
 	}

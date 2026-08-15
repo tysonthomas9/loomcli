@@ -4,12 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"strings"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/taskrunlogs"
 )
 
 // NoopTaskProviderEnvVar gates the test-only noop/local-noop provider profile
@@ -152,7 +154,6 @@ func (LocalTaskExecutor) ExecuteTask(_ context.Context, req TaskExecRequest) (Ta
 			return TaskExecResult{
 				Status:          domain.TaskRunFailed,
 				ExitCode:        2,
-				LogsRef:         "task-run://" + req.TaskRunID + "/logs",
 				RuntimeMetadata: metadata,
 				ErrorClass:      "provider_unsupported",
 				ErrorMessage:    fmt.Sprintf("noop provider profile %q requires %s=1", req.ProviderProfile, NoopTaskProviderEnvVar),
@@ -161,7 +162,6 @@ func (LocalTaskExecutor) ExecuteTask(_ context.Context, req TaskExecRequest) (Ta
 		return TaskExecResult{
 			Status:          domain.TaskRunCompleted,
 			ExitCode:        0,
-			LogsRef:         "task-run://" + req.TaskRunID + "/logs",
 			RuntimeMetadata: metadata,
 		}, nil
 	default:
@@ -172,7 +172,6 @@ func (LocalTaskExecutor) ExecuteTask(_ context.Context, req TaskExecRequest) (Ta
 		return TaskExecResult{
 			Status:          domain.TaskRunFailed,
 			ExitCode:        2,
-			LogsRef:         "task-run://" + req.TaskRunID + "/logs",
 			RuntimeMetadata: metadata,
 			ErrorClass:      "provider_unsupported",
 			ErrorMessage:    fmt.Sprintf("provider profile %q is not supported by local exec-task yet", profile),
@@ -655,12 +654,12 @@ func executeClaimedTaskRunWithResult(ctx context.Context, s store.Store, claimed
 	defer stopHeartbeat()
 
 	execResult, execErr := executor.ExecuteTask(ctx, taskExecRequest(claimed, opts, refs))
-	if logErr := persistTaskRunLogs(claimed.TaskRunID, execResult.Logs); logErr != nil {
-		if execErr != nil {
-			execErr = fmt.Errorf("%v; persist task run logs: %w", execErr, logErr)
-		} else {
-			execErr = fmt.Errorf("persist task run logs: %w", logErr)
-		}
+	execResult.LogsRef = ""
+	logsRef, logErr := taskrunlogs.PutTask(ctx, s, claimed.WorkspaceKey, claimed.TaskRunID, execResult.Logs)
+	if logErr != nil {
+		slog.WarnContext(ctx, "persist task run logs failed", "taskRunID", claimed.TaskRunID, "err", logErr)
+	} else {
+		execResult.LogsRef = logsRef
 	}
 	completion := normalizeTaskExecCompletion(execResult, execErr)
 	metadata := taskExecRuntimeMetadata(execResult, refs)
@@ -833,6 +832,12 @@ func taskExecRuntimeMetadata(execResult TaskExecResult, refs claimedTaskRunRefs)
 	metadata := cloneStringMap(execResult.RuntimeMetadata)
 	if metadata == nil {
 		metadata = map[string]string{}
+	}
+	delete(metadata, "logs_ref")
+	delete(metadata, "logs_artifact_id")
+	if execResult.LogsRef != "" {
+		metadata["logs_ref"] = execResult.LogsRef
+		metadata["logs_artifact_id"] = strings.TrimPrefix(execResult.LogsRef, "artifact://")
 	}
 	if refs.DriverRunID != "" {
 		metadata["driver_run_id"] = refs.DriverRunID

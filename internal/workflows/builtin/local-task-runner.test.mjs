@@ -3,9 +3,25 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, beforeEach, describe, it } from "node:test";
+import { after, afterEach, beforeEach, describe, it } from "node:test";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
-import {
+// Stage the source beside a declaration-only Flue runtime stub so this leaf's
+// direct node:test suite does not depend on a built sibling Flue checkout.
+const moduleStageRoot = fs.mkdtempSync(path.join(os.tmpdir(), "local-runner-stage-"));
+const flueStub = path.join(moduleStageRoot, "node_modules", "@flue", "runtime");
+fs.mkdirSync(flueStub, { recursive: true });
+fs.writeFileSync(
+  path.join(flueStub, "package.json"),
+  JSON.stringify({ name: "@flue/runtime", type: "module", main: "index.js" }),
+);
+fs.writeFileSync(
+  path.join(flueStub, "index.js"),
+  "export const defineAgent = (fn) => ({ __agent: fn });\nexport const defineWorkflow = (definition) => definition;\n",
+);
+const stagedSource = path.join(moduleStageRoot, "local-task-runner.ts");
+fs.copyFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "local-task-runner.ts"), stagedSource);
+const {
   backendArgs,
   parseNumstat,
   parseRepoSlug,
@@ -16,7 +32,11 @@ import {
   run,
   scrubToken,
   taskUsageFromEntries,
-} from "./local-task-runner.ts";
+} = await import(pathToFileURL(stagedSource).href);
+
+after(() => {
+  fs.rmSync(moduleStageRoot, { recursive: true, force: true });
+});
 
 // A fake backend CLI that (optionally) writes a file into its cwd, emits
 // stream-json on stdout, then exits with FAKE_EXIT_CODE. It lets the runner be
@@ -604,6 +624,7 @@ describe("local-task-runner fail-closed classes", () => {
     assert.equal(out.status, "failed");
     assert.equal(out.errorClass, "local_backend_unsupported");
     assert.equal(out.exitCode, 1);
+    assert.equal("logsRef" in out, false);
   });
 
   it("fails with local_worktree_missing when LOOM_WORKTREE_PATH is unset", async () => {
@@ -669,6 +690,7 @@ describe("local-task-runner success", () => {
     const out = await run();
     assert.equal(out.status, "completed");
     assert.equal(out.exitCode, 0);
+    assert.equal("logsRef" in out, false);
     assert.equal(out.runtimeMetadata.task_runner, "local-task-runner");
     assert.equal(out.runtimeMetadata.runtime_strategy, "local-cli-codex");
     assert.equal(out.runtimeMetadata.backend, "codex");

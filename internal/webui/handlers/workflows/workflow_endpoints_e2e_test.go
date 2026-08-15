@@ -770,8 +770,8 @@ func (e *workflowEndpointE2E) expectRunPayloadFields(run domain.DriverRun, epicI
 	if run.DriverID != BuiltinEpicRunnerWorkflowName {
 		e.t.Fatalf("run driver = %s, want %s", run.DriverID, BuiltinEpicRunnerWorkflowName)
 	}
-	if run.Output["logs_ref"] != "driver-run://"+run.RunID+"/flue-local" {
-		e.t.Fatalf("run output logs_ref = %q", run.Output["logs_ref"])
+	if !strings.HasPrefix(run.Output["logs_ref"], "artifact://log-run-"+run.RunID+"-") {
+		e.t.Fatalf("run output logs_ref = %q, want immutable log artifact", run.Output["logs_ref"])
 	}
 }
 
@@ -1209,7 +1209,7 @@ fs.appendFileSync(logPath, request.task_id + '\n');
 console.log(JSON.stringify({
   status: 'completed',
   exitCode: 0,
-  logsRef: 'logs://' + request.task_run_id,
+  logs: 'completed task ' + request.task_id + '\n',
   runtimeMetadata: {
     task_runner: 'workflow-endpoint-e2e',
     runner: request.runner || '',

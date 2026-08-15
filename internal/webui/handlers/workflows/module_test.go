@@ -1,7 +1,6 @@
 package workflows
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -15,8 +14,8 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/driver"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
-	"github.com/tysonthomas9/loomcli/internal/runlog"
 	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/taskrunlogs"
 	workflowdefs "github.com/tysonthomas9/loomcli/internal/workflows"
 )
 
@@ -30,37 +29,30 @@ func TestGetDriverRunLogHappyMissingTruncatedAndRejectsTraversal(t *testing.T) {
 			t.Fatalf("create run %s: %v", runID, err)
 		}
 	}
-	runtimeDir := t.TempDir()
-	logDir := filepath.Join(runtimeDir, ".loom", "run-logs")
-	if err := os.MkdirAll(logDir, 0o700); err != nil {
-		t.Fatalf("create run log dir: %v", err)
-	}
-	modifiedAt := time.Date(2026, time.August, 14, 23, 39, 22, 0, time.UTC)
-	happyPath := filepath.Join(logDir, "run-happy.log")
 	happyContent := "===== stdout =====\nworkflow output\n\n===== stderr =====\n"
-	if err := os.WriteFile(happyPath, []byte(happyContent), 0o600); err != nil {
-		t.Fatalf("write happy run log: %v", err)
+	happyRef, err := taskrunlogs.PutRun(ctx, st, "TEST", "run-happy", happyContent)
+	if err != nil {
+		t.Fatalf("PutRun happy: %v", err)
 	}
-	if err := os.Chtimes(happyPath, modifiedAt, modifiedAt); err != nil {
-		t.Fatalf("set run log times: %v", err)
+	tail := strings.Repeat("z", 1<<20)
+	largeRef, err := taskrunlogs.PutRun(ctx, st, "TEST", "run-large", "discarded"+tail)
+	if err != nil {
+		t.Fatalf("PutRun large: %v", err)
 	}
-	tail := bytes.Repeat([]byte("z"), runlog.MaxBytes)
-	if err := os.WriteFile(filepath.Join(logDir, "run-large.log"), append([]byte("discarded"), tail...), 0o600); err != nil {
-		t.Fatalf("write large run log: %v", err)
-	}
-	module := NewModule(st, runtimeDir)
+	finishDriverRunWithLogRef(t, st, "run-happy", happyRef)
+	finishDriverRunWithLogRef(t, st, "run-large", largeRef)
+	module := NewModule(st)
 
 	t.Run("happy", func(t *testing.T) {
 		rec := getDriverRunLog(t, module, "run-happy")
 		if rec.Code != http.StatusOK {
 			t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
 		}
-		var response persistedLogResponse
+		var response testPersistedLogResponse
 		if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
 			t.Fatalf("decode response: %v", err)
 		}
-		if !response.Success || response.Data.Content != happyContent ||
-			!response.Data.ModifiedAt.Equal(modifiedAt) || response.Data.Truncated {
+		if !response.Success || response.Data.Content != happyContent || response.Data.ModifiedAt.IsZero() || response.Data.Truncated {
 			t.Fatalf("response = %#v", response)
 		}
 	})
@@ -77,11 +69,11 @@ func TestGetDriverRunLogHappyMissingTruncatedAndRejectsTraversal(t *testing.T) {
 		if rec.Code != http.StatusOK {
 			t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
 		}
-		var response persistedLogResponse
+		var response testPersistedLogResponse
 		if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
 			t.Fatalf("decode response: %v", err)
 		}
-		if !response.Data.Truncated || response.Data.Content != string(tail) {
+		if !response.Data.Truncated || response.Data.Content != tail {
 			t.Fatalf("truncated = %v content bytes = %d, want true/%d", response.Data.Truncated, len(response.Data.Content), len(tail))
 		}
 	})
@@ -97,6 +89,32 @@ func TestGetDriverRunLogHappyMissingTruncatedAndRejectsTraversal(t *testing.T) {
 				t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
 			}
 		})
+	}
+}
+
+type testPersistedLogResponse struct {
+	Success bool `json:"success"`
+	Data    struct {
+		Content    string    `json:"content"`
+		ModifiedAt time.Time `json:"modifiedAt"`
+		Truncated  bool      `json:"truncated"`
+	} `json:"data"`
+}
+
+func finishDriverRunWithLogRef(t testing.TB, st store.Store, runID, ref string) {
+	t.Helper()
+	claimed, err := st.DriverRuns().Claim(context.Background(), "TEST", runID, "node-"+runID, "lease-"+runID)
+	if err != nil {
+		t.Fatalf("claim run %s: %v", runID, err)
+	}
+	if _, err := st.DriverRuns().Finish(context.Background(), "TEST", runID, store.DriverRunFinish{
+		NodeID:       claimed.NodeID,
+		LeaseID:      claimed.LeaseID,
+		FencingToken: claimed.FencingToken,
+		Status:       domain.DriverRunCompleted,
+		Output:       map[string]string{"logs_ref": ref},
+	}); err != nil {
+		t.Fatalf("finish run %s: %v", runID, err)
 	}
 }
 

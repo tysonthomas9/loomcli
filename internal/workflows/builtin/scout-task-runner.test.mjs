@@ -198,6 +198,7 @@ describe("write phase", () => {
       },
     });
     assert.equal(result.status, "completed");
+    assert.equal("logsRef" in result, false);
     const write = JSON.parse(result.runtimeMetadata.scout_write);
     assert.equal(write.agentsMdMode, "created");
     assert.equal(write.historyMode, "created");
@@ -268,6 +269,7 @@ describe("analyze phase", () => {
     process.env.LOOM_WORKSPACE_RUNTIME_DIR = root;
     const result = await run({ payload: { task_run_id: "t", input: { phase: "analyze" } } });
     const analysis = analysisOf(result);
+    assert.equal("logsRef" in result, false);
     assert.equal(analysis.nothingToAnalyze, true);
     assert.deepEqual(analysis.recommendations, []);
     assert.ok(analysis.warnings.some((w) => w.includes("nothing to analyze")));
@@ -334,6 +336,7 @@ describe("analyze phase", () => {
     const result = await run({ payload: { task_run_id: "t", input: { phase: "analyze" } } });
     assert.equal(result.status, "failed");
     assert.equal(result.errorClass, "scout_backend_failed");
+    assert.equal("logsRef" in result, false);
   });
 
   it("keeps up to 100000 stdout bytes and 20000 stderr bytes in the AI log", async () => {

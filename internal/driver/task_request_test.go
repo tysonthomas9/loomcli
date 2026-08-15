@@ -6,14 +6,14 @@ import (
 	"context"
 	"errors"
 	"os"
-	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
-	"github.com/tysonthomas9/loomcli/internal/runlog"
 	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/taskrunlogs"
 )
 
 // TestMain enables the test-only noop provider gate (§4.5) for the driver test
@@ -157,32 +157,32 @@ func TestRequestTaskRunCreatesExecutesAndFinishesChild(t *testing.T) {
 	}
 }
 
-func TestTaskRunSettlePersistsPrivateAtomicTailCappedLogs(t *testing.T) {
+func TestTaskRunSettlePersistsArtifactTailCappedLogs(t *testing.T) {
 	tests := []struct {
-		name        string
-		logs        string
-		wantFile    bool
-		wantContent string
+		name          string
+		logs          string
+		wantArtifact  bool
+		wantContent   string
+		wantTruncated bool
 	}{
 		{
-			name:        "rich logs",
-			logs:        "discovered repository\ncodex CLI exit=0\nAI transcript tail\n",
-			wantFile:    true,
-			wantContent: "discovered repository\ncodex CLI exit=0\nAI transcript tail\n",
+			name:         "rich logs",
+			logs:         "discovered repository\ncodex CLI exit=0\nAI transcript tail\n",
+			wantArtifact: true,
+			wantContent:  "discovered repository\ncodex CLI exit=0\nAI transcript tail\n",
 		},
 		{
-			name:        "over cap keeps tail",
-			logs:        "discarded-prefix" + string(bytes.Repeat([]byte("z"), runlog.MaxBytes)),
-			wantFile:    true,
-			wantContent: string(bytes.Repeat([]byte("z"), runlog.MaxBytes)),
+			name:          "over cap keeps tail",
+			logs:          "discarded-prefix" + string(bytes.Repeat([]byte("z"), 1<<20)),
+			wantArtifact:  true,
+			wantContent:   string(bytes.Repeat([]byte("z"), 1<<20)),
+			wantTruncated: true,
 		},
-		{name: "absent logs creates no file"},
+		{name: "absent logs creates no artifact"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			runtimeDir := t.TempDir()
-			t.Setenv("LOOM_WORKSPACE_RUNTIME_DIR", runtimeDir)
 			ctx, st, run := setupRunningDriverRun(t)
 			executor := &recordingTaskExecutor{result: TaskExecResult{
 				Status:   domain.TaskRunCompleted,
@@ -207,37 +207,77 @@ func TestTaskRunSettlePersistsPrivateAtomicTailCappedLogs(t *testing.T) {
 			if outcome.Logs != tt.logs {
 				t.Fatalf("outcome logs bytes = %d, want %d", len(outcome.Logs), len(tt.logs))
 			}
-
-			path := filepath.Join(runtimeDir, ".loom", "task-logs", "task-log-persist.log")
-			content, readErr := os.ReadFile(path)
-			if !tt.wantFile {
-				if !errors.Is(readErr, os.ErrNotExist) {
-					t.Fatalf("ReadFile absent logs err = %v, want not exist", readErr)
+			if !tt.wantArtifact {
+				if outcome.Run.LogsRef != "" {
+					t.Fatalf("logs ref = %q, want empty", outcome.Run.LogsRef)
 				}
 				return
 			}
-			if readErr != nil {
-				t.Fatalf("ReadFile: %v", readErr)
+			if !strings.HasPrefix(outcome.Run.LogsRef, "artifact://log-task-task-log-persist-") || outcome.Run.LogsRef == "logs://task-log-persist" {
+				t.Fatalf("logs ref = %q, want new task log artifact", outcome.Run.LogsRef)
 			}
-			if string(content) != tt.wantContent {
-				t.Fatalf("persisted content bytes = %d, want %d-byte tail", len(content), len(tt.wantContent))
-			}
-			info, err := os.Stat(path)
+			persisted, err := taskrunlogs.Get(ctx, st, "TEST", outcome.Run.LogsRef)
 			if err != nil {
-				t.Fatalf("Stat: %v", err)
+				t.Fatalf("Get persisted log: %v", err)
 			}
-			if got := info.Mode().Perm(); got != 0o600 {
-				t.Fatalf("mode = %o, want 600", got)
+			if persisted.Content != tt.wantContent || persisted.Truncated != tt.wantTruncated {
+				t.Fatalf("persisted log bytes/truncated = %d/%v, want %d/%v", len(persisted.Content), persisted.Truncated, len(tt.wantContent), tt.wantTruncated)
 			}
-			entries, err := os.ReadDir(filepath.Dir(path))
+			artifactID := strings.TrimPrefix(outcome.Run.LogsRef, "artifact://")
+			artifact, err := st.Artifacts().Get(ctx, "TEST", artifactID)
 			if err != nil {
-				t.Fatalf("ReadDir: %v", err)
+				t.Fatalf("Get artifact: %v", err)
 			}
-			if len(entries) != 1 || entries[0].Name() != "task-log-persist.log" {
-				t.Fatalf("log dir entries = %+v, want only atomically published log", entries)
+			if artifact.Type != "log" || artifact.OwnerType != "task_run" || artifact.OwnerID != "task-log-persist" {
+				t.Fatalf("artifact attribution = %+v", artifact)
 			}
 		})
 	}
+}
+
+func TestTaskRunLogUploadFailureDoesNotFailTask(t *testing.T) {
+	ctx, base, run := setupRunningDriverRun(t)
+	st := &artifactCreateFailureStore{Store: base, err: errors.New("artifact backend unavailable")}
+	outcome, err := RequestTaskRunWithResult(ctx, st, TaskRunRequestOptions{
+		WorkspaceKey:    "TEST",
+		DriverRunID:     run.RunID,
+		TaskRunID:       "task-log-upload-failure",
+		TaskID:          "TEST-LOG-FAIL",
+		ProviderProfile: "codex-default",
+		ParentNodeID:    run.NodeID,
+		ParentLeaseID:   run.LeaseID,
+		ParentFence:     run.FencingToken,
+		NodeID:          "node-1",
+	}, &recordingTaskExecutor{result: TaskExecResult{
+		Status:   domain.TaskRunCompleted,
+		ExitCode: 0,
+		LogsRef:  "logs://runner-supplied",
+		Logs:     "log upload should fail\n",
+	}})
+	if err != nil {
+		t.Fatalf("RequestTaskRunWithResult: %v", err)
+	}
+	if outcome.Run.Status != domain.TaskRunCompleted || outcome.Run.LogsRef != "" {
+		t.Fatalf("outcome = %+v, want completed with empty logs ref", outcome.Run)
+	}
+}
+
+type artifactCreateFailureStore struct {
+	store.Store
+	err error
+}
+
+func (s *artifactCreateFailureStore) Artifacts() store.ArtifactStore {
+	return &artifactCreateFailureArtifactStore{ArtifactStore: s.Store.Artifacts(), err: s.err}
+}
+
+type artifactCreateFailureArtifactStore struct {
+	store.ArtifactStore
+	err error
+}
+
+func (s *artifactCreateFailureArtifactStore) Create(context.Context, store.ArtifactCreate) (*domain.Artifact, error) {
+	return nil, s.err
 }
 
 func TestEnqueueTaskRunResolvesRunnerFromDriverVersionManifest(t *testing.T) {
@@ -495,6 +535,7 @@ func TestClaimAndExecuteTaskRunWithResultCanDeferCompletion(t *testing.T) {
 		Status:       domain.TaskRunCompleted,
 		ExitCode:     0,
 		LogsRef:      "logs://worker-defer",
+		Logs:         "worker defer log\n",
 		ArtifactsRef: "artifacts://worker-defer",
 	}}
 
@@ -522,7 +563,7 @@ func TestClaimAndExecuteTaskRunWithResultCanDeferCompletion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Get deferred task run: %v", err)
 	}
-	if stored.Status != domain.TaskRunRunning || stored.LogsRef != "logs://worker-defer" || stored.ArtifactsRef != "artifacts://worker-defer" {
+	if stored.Status != domain.TaskRunRunning || !strings.HasPrefix(stored.LogsRef, "artifact://log-task-task-run-worker-defer-") || stored.LogsRef == "logs://worker-defer" || stored.ArtifactsRef != "artifacts://worker-defer" {
 		t.Fatalf("stored = %+v, want running with pending completion refs", stored)
 	}
 	if executor.req.LeaseToken != "worker-token-2" {
