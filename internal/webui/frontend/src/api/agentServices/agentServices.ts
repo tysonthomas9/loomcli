@@ -34,9 +34,10 @@ export interface AgentServiceDTO {
 export type DriverRunStatus =
   | "queued"
   | "running"
-  | "succeeded"
+  | "completed"
   | "failed"
-  | "canceled"
+  | "needs_review"
+  | "cancelled"
   | "suspended_awaiting_event";
 
 export interface DriverRunDTO {
@@ -76,6 +77,32 @@ export interface AgentServiceList<T> {
   total: number;
 }
 
+export interface RunEventDTO {
+  id: string;
+  timestamp: string;
+  actor: string;
+  action: string;
+  entity_type: string;
+  entity_id: string;
+  workspace_id: string;
+  before?: string;
+  after?: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface RunEventsPage {
+  events: RunEventDTO[];
+  cursor?: string;
+}
+
+export interface AgentServiceJournalDTO {
+  serviceId: string;
+  filename: string;
+  content: string;
+  modifiedAt: string;
+  truncated: boolean;
+}
+
 interface AgentServiceListSuccess<T> extends AgentServiceList<T> {
   success: true;
 }
@@ -87,6 +114,15 @@ interface AgentServiceListFailure {
 
 type AgentServiceListEnvelope<T> =
   | AgentServiceListSuccess<T>
+  | AgentServiceListFailure;
+
+interface AgentServiceItemSuccess<T> {
+  success: true;
+  data: T;
+}
+
+type AgentServiceItemEnvelope<T> =
+  | AgentServiceItemSuccess<T>
   | AgentServiceListFailure;
 
 function unwrapList<T>(
@@ -122,4 +158,29 @@ export async function listAgentServiceRuns(
       : `${path}?limit=${encodeURIComponent(String(limit))}`,
   );
   return unwrapList(response);
+}
+
+export async function listRunEvents(
+  workspaceId: string,
+  runId: string,
+): Promise<RunEventsPage> {
+  return get<RunEventsPage>(
+    wsUrl(workspaceId, `/runs/${encodeURIComponent(runId)}/events`),
+  );
+}
+
+export async function getAgentServiceJournal(
+  workspaceId: string,
+  agentServiceId: string,
+): Promise<AgentServiceJournalDTO> {
+  const response = await get<AgentServiceItemEnvelope<AgentServiceJournalDTO>>(
+    wsUrl(
+      workspaceId,
+      `/agent-services/${encodeURIComponent(agentServiceId)}/journal`,
+    ),
+  );
+  if (!response.success) {
+    throw new ApiError(0, response.error, response);
+  }
+  return response.data;
 }

@@ -6,7 +6,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -23,13 +26,22 @@ const (
 	defaultRunsLimit = 20
 	maxRunsLimit     = 1000
 	healthScanLimit  = 100
+	journalFilename  = "history.md"
+	maxJournalBytes  = 512 * 1024
 )
 
 type Module struct {
-	store store.Store
+	store      store.Store
+	runtimeDir string
 }
 
-func NewModule(st store.Store) *Module { return &Module{store: st} }
+func NewModule(st store.Store, runtimeDir ...string) *Module {
+	m := &Module{store: st}
+	if len(runtimeDir) > 0 {
+		m.runtimeDir = strings.TrimSpace(runtimeDir[0])
+	}
+	return m
+}
 
 func (m *Module) Register(mux *http.ServeMux) {
 	if m.store == nil {
@@ -37,6 +49,7 @@ func (m *Module) Register(mux *http.ServeMux) {
 	}
 	mux.HandleFunc("GET /api/workspaces/{ws}/agent-services", m.listAgentServices)
 	mux.HandleFunc("GET /api/workspaces/{ws}/agent-services/{id}/runs", m.listAgentServiceRuns)
+	mux.HandleFunc("GET /api/workspaces/{ws}/agent-services/{id}/journal", m.getAgentServiceJournal)
 }
 
 type agentServiceDTO struct {
@@ -98,6 +111,19 @@ type driverRunDTO struct {
 	ResumeSourceEventID string                 `json:"resumeSourceEventId,omitempty"`
 	CreatedAt           time.Time              `json:"createdAt"`
 	UpdatedAt           time.Time              `json:"updatedAt"`
+}
+
+type agentServiceJournalDTO struct {
+	ServiceID  string    `json:"serviceId"`
+	Filename   string    `json:"filename"`
+	Content    string    `json:"content"`
+	ModifiedAt time.Time `json:"modifiedAt"`
+	Truncated  bool      `json:"truncated"`
+}
+
+type agentServiceJournalResponse struct {
+	Success bool                   `json:"success"`
+	Data    agentServiceJournalDTO `json:"data"`
 }
 
 func (m *Module) listAgentServices(w http.ResponseWriter, r *http.Request) {
@@ -232,6 +258,78 @@ func (m *Module) listAgentServiceRuns(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	handler.WriteJSON(w, http.StatusOK, dto.NewListResponse(items, len(items)))
+}
+
+func (m *Module) getAgentServiceJournal(w http.ResponseWriter, r *http.Request) {
+	ws := strings.TrimSpace(r.PathValue("ws"))
+	serviceID := strings.TrimSpace(r.PathValue("id"))
+	if ws == "" || serviceID == "" {
+		handler.RespondError(w, http.StatusBadRequest, "workspace and agent service id are required")
+		return
+	}
+	if _, err := m.store.AgentServices().Get(r.Context(), ws, serviceID); err != nil {
+		writeStoreError(w, err, "agent service not found")
+		return
+	}
+	if serviceID != "scout" {
+		handler.RespondError(w, http.StatusNotFound, "this agent has no journal")
+		return
+	}
+
+	content, modifiedAt, truncated, err := readJournalTail(filepath.Join(m.resolveRuntimeDir(), journalFilename))
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			handler.RespondError(w, http.StatusNotFound, "no journal yet — the scout has not completed a run")
+			return
+		}
+		handler.RespondError(w, http.StatusInternalServerError, "read agent service journal failed")
+		return
+	}
+	handler.WriteJSON(w, http.StatusOK, agentServiceJournalResponse{
+		Success: true,
+		Data: agentServiceJournalDTO{
+			ServiceID: serviceID, Filename: journalFilename, Content: content,
+			ModifiedAt: modifiedAt, Truncated: truncated,
+		},
+	})
+}
+
+func (m *Module) resolveRuntimeDir() string {
+	if m.runtimeDir != "" {
+		return m.runtimeDir
+	}
+	if dir := strings.TrimSpace(os.Getenv("LOOM_WORKSPACE_RUNTIME_DIR")); dir != "" {
+		return dir
+	}
+	workDir, err := os.Getwd()
+	if err != nil {
+		return "."
+	}
+	return workDir
+}
+
+func readJournalTail(path string) (string, time.Time, bool, error) {
+	file, err := os.Open(path) //nolint:gosec // The caller supplies a fixed filename beneath the runtime directory.
+	if err != nil {
+		return "", time.Time{}, false, err
+	}
+	defer file.Close()
+
+	info, err := file.Stat()
+	if err != nil {
+		return "", time.Time{}, false, err
+	}
+	truncated := info.Size() > maxJournalBytes
+	if truncated {
+		if _, err := file.Seek(-maxJournalBytes, io.SeekEnd); err != nil {
+			return "", time.Time{}, false, err
+		}
+	}
+	content, err := io.ReadAll(io.LimitReader(file, maxJournalBytes))
+	if err != nil {
+		return "", time.Time{}, false, err
+	}
+	return string(content), info.ModTime(), truncated, nil
 }
 
 func parseRunsLimit(r *http.Request) (int, error) {

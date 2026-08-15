@@ -1,11 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
+  getAgentServiceJournal,
   listAgentServiceRuns,
   listAgentServices,
+  listRunEvents,
   type AgentServiceDTO,
+  type AgentServiceJournalDTO,
   type AgentServiceList,
   type DriverRunDTO,
+  type RunEventDTO,
 } from "@/api/agentServices";
 import { ApiError } from "@/types/common";
 
@@ -236,5 +240,153 @@ export function useAgentServiceRuns(
     error: result.error,
     notFound: result.notFound,
     refresh: result.refresh,
+  };
+}
+
+export interface UseAgentServiceRunEventsReturn {
+  events: RunEventDTO[];
+  loading: boolean;
+  initialized: boolean;
+  error: Error | null;
+  refresh: () => Promise<void>;
+}
+
+export function useAgentServiceRunEvents(
+  workspaceId: string,
+  runId: string | null,
+): UseAgentServiceRunEventsReturn {
+  const enabled = Boolean(workspaceId && runId);
+  const key = `${workspaceId}\0${runId ?? ""}`;
+  const load = useCallback(async (): Promise<AgentServiceList<RunEventDTO>> => {
+    if (!runId) return { data: [], total: 0 };
+    const page = await listRunEvents(workspaceId, runId);
+    return { data: page.events, total: page.events.length };
+  }, [runId, workspaceId]);
+  const result = usePolledList(key, load, { enabled, pollInterval: 0 });
+  return {
+    events: result.items,
+    loading: result.loading,
+    initialized: result.initialized,
+    error: result.error,
+    refresh: result.refresh,
+  };
+}
+
+interface AgentServiceJournalState {
+  key: string;
+  journal: AgentServiceJournalDTO | null;
+  loading: boolean;
+  initialized: boolean;
+  error: Error | null;
+}
+
+export interface UseAgentServiceJournalReturn {
+  journal: AgentServiceJournalDTO | null;
+  loading: boolean;
+  initialized: boolean;
+  error: Error | null;
+  refresh: () => Promise<void>;
+}
+
+export function useAgentServiceJournal(
+  workspaceId: string,
+  agentServiceId: string,
+  options: { enabled?: boolean } = {},
+): UseAgentServiceJournalReturn {
+  const enabled = options.enabled ?? true;
+  const key = `${workspaceId}\0${agentServiceId}`;
+  const activeKeyRef = useRef(key);
+  const requestSequenceRef = useRef(0);
+  const [state, setState] = useState<AgentServiceJournalState>(() => ({
+    key,
+    journal: null,
+    loading: false,
+    initialized: false,
+    error: null,
+  }));
+  activeKeyRef.current = key;
+
+  const refresh = useCallback(async (): Promise<void> => {
+    if (!workspaceId || !agentServiceId) return;
+    const requestKey = key;
+    const requestSequence = ++requestSequenceRef.current;
+    setState((current) => ({
+      ...(current.key === requestKey
+        ? current
+        : {
+            key: requestKey,
+            journal: null,
+            initialized: false,
+            error: null,
+          }),
+      loading: true,
+    }));
+    try {
+      const journal = await getAgentServiceJournal(workspaceId, agentServiceId);
+      if (
+        activeKeyRef.current !== requestKey ||
+        requestSequence !== requestSequenceRef.current
+      ) {
+        return;
+      }
+      setState({
+        key: requestKey,
+        journal,
+        loading: false,
+        initialized: true,
+        error: null,
+      });
+    } catch (error) {
+      if (
+        activeKeyRef.current !== requestKey ||
+        requestSequence !== requestSequenceRef.current
+      ) {
+        return;
+      }
+      setState({
+        key: requestKey,
+        journal: null,
+        loading: false,
+        initialized: true,
+        error: error instanceof Error ? error : new Error(String(error)),
+      });
+    }
+  }, [agentServiceId, key, workspaceId]);
+
+  useEffect(() => {
+    const requestSequence = requestSequenceRef;
+    setState({
+      key,
+      journal: null,
+      loading: false,
+      initialized: false,
+      error: null,
+    });
+    return () => {
+      requestSequence.current++;
+    };
+  }, [key]);
+
+  useEffect(() => {
+    if (!enabled) return;
+    void refresh();
+  }, [enabled, refresh]);
+
+  const scopedState =
+    state.key === key
+      ? state
+      : {
+          key,
+          journal: null,
+          loading: false,
+          initialized: false,
+          error: null,
+        };
+  return {
+    journal: scopedState.journal,
+    loading: scopedState.loading,
+    initialized: scopedState.initialized,
+    error: scopedState.error,
+    refresh,
   };
 }

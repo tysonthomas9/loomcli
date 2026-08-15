@@ -1,12 +1,16 @@
 package agentservices
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -157,6 +161,127 @@ func TestListAgentServiceRunsDefaultsToTwentyNewestCamelCaseRuns(t *testing.T) {
 	}
 	if raw.Data[0]["agentServiceId"] != "scout" || raw.Data[0]["sourceKind"] != "api" {
 		t.Fatalf("run attribution = %#v", raw.Data[0])
+	}
+}
+
+func TestGetAgentServiceJournalReturnsScoutJournal(t *testing.T) {
+	st, _ := seededAgentServiceStore(t)
+	runtimeDir := t.TempDir()
+	journalPath := filepath.Join(runtimeDir, journalFilename)
+	content := "# Scout journal\n\nReviewed the backlog.\n"
+	if err := os.WriteFile(journalPath, []byte(content), 0o600); err != nil {
+		t.Fatalf("write journal: %v", err)
+	}
+	modifiedAt := time.Date(2026, time.August, 14, 23, 39, 22, 0, time.UTC)
+	if err := os.Chtimes(journalPath, modifiedAt, modifiedAt); err != nil {
+		t.Fatalf("set journal times: %v", err)
+	}
+
+	rec := getAgentServiceJournal(t, NewModule(st, runtimeDir), "scout")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	var response agentServiceJournalResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if !response.Success || response.Data.ServiceID != "scout" || response.Data.Filename != journalFilename {
+		t.Fatalf("response = %#v", response)
+	}
+	if response.Data.Content != content || !response.Data.ModifiedAt.Equal(modifiedAt) || response.Data.Truncated {
+		t.Fatalf("journal = %#v, want content round trip and modifiedAt %v", response.Data, modifiedAt)
+	}
+}
+
+func TestGetAgentServiceJournalReturnsNotFoundBeforeFirstScoutRun(t *testing.T) {
+	st, _ := seededAgentServiceStore(t)
+	rec := getAgentServiceJournal(t, NewModule(st, t.TempDir()), "scout")
+	if rec.Code != http.StatusNotFound || !strings.Contains(rec.Body.String(), "no journal yet") {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestGetAgentServiceJournalRejectsServiceWithoutJournal(t *testing.T) {
+	st, svc := seededAgentServiceStore(t)
+	createAgentService(t, st, svc, "reviewer")
+	rec := getAgentServiceJournal(t, NewModule(st, t.TempDir()), "reviewer")
+	if rec.Code != http.StatusNotFound || !strings.Contains(rec.Body.String(), "this agent has no journal") {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestGetAgentServiceJournalRejectsUnknownService(t *testing.T) {
+	st, _ := seededAgentServiceStore(t)
+	rec := getAgentServiceJournal(t, NewModule(st, t.TempDir()), "missing")
+	if rec.Code != http.StatusNotFound || !strings.Contains(rec.Body.String(), "agent service not found") {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestGetAgentServiceJournalReturnsLast512KiB(t *testing.T) {
+	st, _ := seededAgentServiceStore(t)
+	runtimeDir := t.TempDir()
+	tail := bytes.Repeat([]byte("z"), maxJournalBytes)
+	content := append(bytes.Repeat([]byte("discarded"), 100), tail...)
+	if err := os.WriteFile(filepath.Join(runtimeDir, journalFilename), content, 0o600); err != nil {
+		t.Fatalf("write journal: %v", err)
+	}
+
+	rec := getAgentServiceJournal(t, NewModule(st, runtimeDir), "scout")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	var response agentServiceJournalResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if !response.Data.Truncated || response.Data.Content != string(tail) {
+		t.Fatalf("truncated = %v content bytes = %d, want true/%d", response.Data.Truncated, len(response.Data.Content), len(tail))
+	}
+}
+
+func TestGetAgentServiceJournalNeverUsesServiceIDAsAPath(t *testing.T) {
+	st, svc := seededAgentServiceStore(t)
+	createAgentService(t, st, svc, "../evil")
+	runtimeDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(runtimeDir, journalFilename), []byte("safe journal"), 0o600); err != nil {
+		t.Fatalf("write fixed journal: %v", err)
+	}
+	siblingDir := filepath.Join(filepath.Dir(runtimeDir), "evil")
+	if err := os.Mkdir(siblingDir, 0o700); err != nil {
+		t.Fatalf("make traversal target: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(siblingDir, journalFilename), []byte("traversed journal"), 0o600); err != nil {
+		t.Fatalf("write traversal target: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.SetPathValue("ws", "WS")
+	req.SetPathValue("id", "../evil")
+	rec := httptest.NewRecorder()
+	NewModule(st, runtimeDir).getAgentServiceJournal(rec, req)
+	if rec.Code != http.StatusNotFound || !strings.Contains(rec.Body.String(), "this agent has no journal") || strings.Contains(rec.Body.String(), "traversed journal") {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func getAgentServiceJournal(t *testing.T, module *Module, serviceID string) *httptest.ResponseRecorder {
+	t.Helper()
+	mux := http.NewServeMux()
+	module.Register(mux)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/workspaces/WS/agent-services/"+serviceID+"/journal", nil))
+	return rec
+}
+
+func createAgentService(t *testing.T, st store.Store, behavior *domain.AgentService, serviceID string) {
+	t.Helper()
+	if _, err := st.AgentServices().Create(t.Context(), store.AgentServiceCreate{
+		WorkspaceKey: "WS", ServiceID: serviceID, Name: serviceID, Kind: domain.AgentServiceKindCron,
+		DesiredState: domain.AgentServiceDesiredRunning, DriverID: behavior.DriverID,
+		DriverVersionID: behavior.DriverVersionID, CreatedBy: "system",
+	}); err != nil {
+		t.Fatalf("create agent service %q: %v", serviceID, err)
 	}
 }
 

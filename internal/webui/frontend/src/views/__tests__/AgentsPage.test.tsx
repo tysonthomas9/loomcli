@@ -97,6 +97,20 @@ vi.mock("@/hooks/workspace", () => ({
     notFound: mocks.serviceRunsNotFound,
     refresh: vi.fn(),
   }),
+  useAgentServiceRunEvents: () => ({
+    events: [],
+    loading: false,
+    initialized: true,
+    error: null,
+    refresh: vi.fn(),
+  }),
+  useAgentServiceJournal: () => ({
+    journal: null,
+    loading: false,
+    initialized: false,
+    error: null,
+    refresh: vi.fn(),
+  }),
 }));
 
 vi.mock("@/hooks/ui/useToast", () => ({
@@ -368,7 +382,7 @@ describe("AgentsPage", () => {
           },
         ],
         nextFireAt: "2026-08-17T00:00:00Z",
-        lastRunStatus: "succeeded",
+        lastRunStatus: "completed",
         consecutiveFailures: 0,
         errors: [],
         createdAt: "2026-08-14T00:00:00Z",
@@ -382,7 +396,7 @@ describe("AgentsPage", () => {
         driverId: "scout-driver",
         driverVersionId: "scout-v1",
         agentServiceId: "scout",
-        status: "succeeded",
+        status: "completed",
         summary: "Reviewed 3 backlog tickets",
         startedAt: "2026-08-14T10:00:00Z",
         finishedAt: "2026-08-14T10:01:00Z",
@@ -404,7 +418,7 @@ describe("AgentsPage", () => {
     );
     expect(
       screen.getByTestId("agent-service-run-run-scout-1"),
-    ).toHaveTextContent("Succeeded");
+    ).toHaveTextContent("Completed");
     expect(
       screen.getByTestId("agent-service-run-run-scout-1"),
     ).toHaveTextContent("Reviewed 3 backlog tickets");

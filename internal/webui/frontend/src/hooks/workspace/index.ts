@@ -8,7 +8,12 @@ export type { UseBackendConfigReturn } from "./useBackendConfig";
 export { useWorkspaceDesignFormat } from "./useWorkspaceDesignFormat";
 export type { UseWorkspaceDesignFormatReturn } from "./useWorkspaceDesignFormat";
 
-export { useAgentServices, useAgentServiceRuns } from "./useAgentServices";
+export {
+  useAgentServiceJournal,
+  useAgentServiceRunEvents,
+  useAgentServiceRuns,
+  useAgentServices,
+} from "./useAgentServices";
 export type {
   UseAgentServicesOptions,
   UseAgentServicesReturn,
