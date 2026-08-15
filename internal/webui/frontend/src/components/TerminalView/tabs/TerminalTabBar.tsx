@@ -41,6 +41,11 @@ export interface TerminalTab {
   connectionState: ConnectionState;
   brandColor?: string;
   hasUnread?: boolean;
+  /**
+   * Quiet and apparently parked on a prompt. Distinct from hasUnread: unread
+   * means output arrived, waiting means output stopped and it is your turn.
+   */
+  isWaitingForInput?: boolean;
   isPinned?: boolean;
 }
 
@@ -450,6 +455,20 @@ export const TerminalTabBar = forwardRef<HTMLDivElement, TerminalTabBarProps>(
                   data-testid={`terminal-tab-unread-${tab.id}`}
                 />
               )}
+              {/*
+                Deliberately NOT gated on !isActive, unlike the unread dot:
+                the incident this badge exists for happened on the tab the
+                user was looking at.
+              */}
+              {tab.isWaitingForInput && (
+                <span
+                  role="img"
+                  className={styles.waitingBadge}
+                  aria-label="waiting for input"
+                  title="Quiet — this session looks like it is waiting for input"
+                  data-testid={`terminal-tab-waiting-${tab.id}`}
+                />
+              )}
               {canCloseTabs && (
                 <button
                   type="button"
@@ -539,6 +558,14 @@ export const TerminalTabBar = forwardRef<HTMLDivElement, TerminalTabBarProps>(
                 data-status={dragTab.connectionState}
               />
               <span className={styles.tabLabel}>{dragTab.label}</span>
+              {dragTab.isWaitingForInput && (
+                <span
+                  role="img"
+                  className={styles.waitingBadge}
+                  aria-label="waiting for input"
+                  data-testid={`terminal-tab-waiting-overlay-${dragTab.id}`}
+                />
+              )}
             </div>
           ) : null}
         </DragOverlay>
