@@ -16,8 +16,10 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
-	"github.com/tysonthomas9/loomcli/internal/runlog"
+	"github.com/tysonthomas9/loomcli/internal/sessions/transcript"
 	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/taskrunlogs"
+	"github.com/tysonthomas9/loomcli/internal/webui/handlers/misc"
 )
 
 func TestListAgentServicesIncludesZeroBindingRecordWithExplicitHealth(t *testing.T) {
@@ -202,9 +204,14 @@ func TestListAgentServiceRunTasksFiltersByDriverRunAndReportsLogAvailability(t *
 		{
 			WorkspaceKey: "WS", TaskRunID: "task-1", DriverRunID: run.RunID, TaskID: "WS-1",
 			Runner: "scout-task-runner", Status: domain.TaskRunRunning,
+			RuntimeMetadata: map[string]string{"transcript_ref": "artifact://transcript-task-1"},
 		},
 		{
 			WorkspaceKey: "WS", TaskRunID: "task-other", DriverRunID: otherRun.RunID, TaskID: "WS-2",
+			Runner: "scout-task-runner", Status: domain.TaskRunRunning,
+		},
+		{
+			WorkspaceKey: "WS", TaskRunID: "task-no-log", DriverRunID: run.RunID, TaskID: "WS-3",
 			Runner: "scout-task-runner", Status: domain.TaskRunRunning,
 		},
 	} {
@@ -212,17 +219,14 @@ func TestListAgentServiceRunTasksFiltersByDriverRunAndReportsLogAvailability(t *
 			t.Fatalf("create task run %s: %v", task.TaskRunID, err)
 		}
 	}
-	runtimeDir := t.TempDir()
-	logDir := filepath.Join(runtimeDir, ".loom", "task-logs")
-	if err := os.MkdirAll(logDir, 0o700); err != nil {
-		t.Fatalf("create task log dir: %v", err)
+	ref, err := taskrunlogs.PutTask(t.Context(), st, "WS", "task-1", "AI output\n")
+	if err != nil {
+		t.Fatalf("PutTask: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(logDir, "task-1.log"), []byte("AI output\n"), 0o600); err != nil {
-		t.Fatalf("write task log: %v", err)
-	}
+	setTaskRunLogRef(t, st, "task-1", ref)
 
 	mux := http.NewServeMux()
-	NewModule(st, runtimeDir).Register(mux)
+	NewModule(st).Register(mux)
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/workspaces/WS/agent-services/scout/runs/run-1/tasks", nil))
 	if rec.Code != http.StatusOK {
@@ -236,17 +240,27 @@ func TestListAgentServiceRunTasksFiltersByDriverRunAndReportsLogAvailability(t *
 	if err := json.Unmarshal(rec.Body.Bytes(), &raw); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if !raw.Success || raw.Total != 1 || len(raw.Data) != 1 {
-		t.Fatalf("response = %#v, want one filtered task", raw)
+	if !raw.Success || raw.Total != 2 || len(raw.Data) != 2 {
+		t.Fatalf("response = %#v, want two filtered tasks", raw)
 	}
-	item := raw.Data[0]
+	items := make(map[string]map[string]interface{}, len(raw.Data))
+	for _, item := range raw.Data {
+		items[item["taskRunId"].(string)] = item
+	}
+	item := items["task-1"]
 	if item["taskRunId"] != "task-1" || item["taskId"] != "WS-1" ||
 		item["runner"] != "scout-task-runner" || item["status"] != "running" ||
-		item["logsAvailable"] != true {
+		item["logsAvailable"] != true || item["transcriptAvailable"] != true {
 		t.Fatalf("task DTO = %#v", item)
 	}
 	if _, exists := item["task_run_id"]; exists {
 		t.Fatalf("task DTO contains snake_case: %#v", item)
+	}
+	if item := items["task-no-log"]; item["logsAvailable"] != false {
+		t.Fatalf("task without LogsRef = %#v, want logsAvailable false", item)
+	}
+	if item := items["task-no-log"]; item["transcriptAvailable"] != false {
+		t.Fatalf("task without transcript_ref = %#v, want transcriptAvailable false", item)
 	}
 }
 
@@ -261,36 +275,29 @@ func TestGetTaskRunLogHappyMissingTruncatedAndRejectsTraversal(t *testing.T) {
 			t.Fatalf("create task run %s: %v", taskRunID, err)
 		}
 	}
-	runtimeDir := t.TempDir()
-	logDir := filepath.Join(runtimeDir, ".loom", "task-logs")
-	if err := os.MkdirAll(logDir, 0o700); err != nil {
-		t.Fatalf("create task log dir: %v", err)
+	happyRef, err := taskrunlogs.PutTask(t.Context(), st, "WS", "task-happy", "repo discovery\ncodex CLI exit=0\nAI output\n")
+	if err != nil {
+		t.Fatalf("PutTask happy: %v", err)
 	}
-	modifiedAt := time.Date(2026, time.August, 14, 23, 39, 22, 0, time.UTC)
-	happyPath := filepath.Join(logDir, "task-happy.log")
-	if err := os.WriteFile(happyPath, []byte("repo discovery\ncodex CLI exit=0\nAI output\n"), 0o600); err != nil {
-		t.Fatalf("write happy task log: %v", err)
+	tail := strings.Repeat("z", 1<<20)
+	largeRef, err := taskrunlogs.PutTask(t.Context(), st, "WS", "task-large", "discarded"+tail)
+	if err != nil {
+		t.Fatalf("PutTask large: %v", err)
 	}
-	if err := os.Chtimes(happyPath, modifiedAt, modifiedAt); err != nil {
-		t.Fatalf("set task log times: %v", err)
-	}
-	tail := bytes.Repeat([]byte("z"), runlog.MaxBytes)
-	if err := os.WriteFile(filepath.Join(logDir, "task-large.log"), append([]byte("discarded"), tail...), 0o600); err != nil {
-		t.Fatalf("write large task log: %v", err)
-	}
-	module := NewModule(st, runtimeDir)
+	setTaskRunLogRef(t, st, "task-happy", happyRef)
+	setTaskRunLogRef(t, st, "task-large", largeRef)
+	module := NewModule(st)
 
 	t.Run("happy", func(t *testing.T) {
 		rec := getTaskRunLog(t, module, "task-happy")
 		if rec.Code != http.StatusOK {
 			t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
 		}
-		var response persistedLogResponse
+		var response testPersistedLogResponse
 		if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
 			t.Fatalf("decode response: %v", err)
 		}
-		if !response.Success || response.Data.Content != "repo discovery\ncodex CLI exit=0\nAI output\n" ||
-			!response.Data.ModifiedAt.Equal(modifiedAt) || response.Data.Truncated {
+		if !response.Success || response.Data.Content != "repo discovery\ncodex CLI exit=0\nAI output\n" || response.Data.ModifiedAt.IsZero() || response.Data.Truncated {
 			t.Fatalf("response = %#v", response)
 		}
 	})
@@ -307,11 +314,11 @@ func TestGetTaskRunLogHappyMissingTruncatedAndRejectsTraversal(t *testing.T) {
 		if rec.Code != http.StatusOK {
 			t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
 		}
-		var response persistedLogResponse
+		var response testPersistedLogResponse
 		if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
 			t.Fatalf("decode response: %v", err)
 		}
-		if !response.Data.Truncated || response.Data.Content != string(tail) {
+		if !response.Data.Truncated || response.Data.Content != tail {
 			t.Fatalf("truncated = %v content bytes = %d, want true/%d", response.Data.Truncated, len(response.Data.Content), len(tail))
 		}
 	})
@@ -327,6 +334,117 @@ func TestGetTaskRunLogHappyMissingTruncatedAndRejectsTraversal(t *testing.T) {
 				t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
 			}
 		})
+	}
+}
+
+func TestGetTaskRunTranscriptHappyMissingAndRejectsTraversal(t *testing.T) {
+	st, svc := seededAgentServiceStore(t)
+	run := createAgentServiceRun(t, st, svc, "run-transcripts")
+	for _, taskRunID := range []string{"task-happy", "task-claude", "task-missing"} {
+		metadata := map[string]string(nil)
+		if taskRunID != "task-missing" {
+			metadata = map[string]string{"transcript_ref": "artifact://transcript-" + taskRunID}
+		}
+		if _, err := st.TaskRuns().Create(t.Context(), store.TaskRunCreate{
+			WorkspaceKey: "WS", TaskRunID: taskRunID, DriverRunID: run.RunID,
+			TaskID: "WS-" + taskRunID, Runner: "scout-task-runner", Status: domain.TaskRunRunning,
+			RuntimeMetadata: metadata,
+		}); err != nil {
+			t.Fatalf("create task run %s: %v", taskRunID, err)
+		}
+	}
+	transcriptBody := []byte(
+		`{"seq":1,"timestamp":"2026-08-15T12:00:00Z","role":"system","type":"session_meta","text":"local-cli-codex session"}` + "\n" +
+			`{"seq":2,"timestamp":"2026-08-15T12:00:01Z","role":"assistant","type":"text","text":"analysis complete"}` + "\n",
+	)
+	if _, err := store.UploadContentArtifact(t.Context(), st.Artifacts(), store.ArtifactCreate{
+		WorkspaceKey: "WS", ArtifactID: "transcript-task-happy", TaskID: "WS-task-happy",
+		OwnerType: "task_run", OwnerID: "task-happy", Type: "transcript",
+		MIMEType: "application/x-ndjson", DurableStatus: "declared",
+	}, transcriptBody); err != nil {
+		t.Fatalf("seed transcript artifact: %v", err)
+	}
+	claudeTranscriptBody := []byte(
+		`{"seq":1,"timestamp":"2026-08-15T12:00:00Z","role":"system","type":"session_meta","text":"local-cli-claude session"}` + "\n" +
+			`{"seq":2,"timestamp":"2026-08-15T12:00:01Z","role":"assistant","type":"reasoning","text":"inspect repository history"}` + "\n",
+	)
+	if _, err := store.UploadContentArtifact(t.Context(), st.Artifacts(), store.ArtifactCreate{
+		WorkspaceKey: "WS", ArtifactID: "transcript-task-claude", TaskID: "WS-task-claude",
+		OwnerType: "task_run", OwnerID: "task-claude", Type: "transcript",
+		MIMEType: "application/x-ndjson", DurableStatus: "declared",
+	}, claudeTranscriptBody); err != nil {
+		t.Fatalf("seed claude transcript artifact: %v", err)
+	}
+	module := NewModule(st)
+
+	t.Run("happy", func(t *testing.T) {
+		rec := getTaskRunTranscript(t, module, "task-happy")
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+		}
+		var response struct {
+			Success bool `json:"success"`
+			Data    struct {
+				SessionID string             `json:"session_id"`
+				Entries   []transcript.Event `json:"entries"`
+			} `json:"data"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+			t.Fatalf("decode response: %v", err)
+		}
+		if !response.Success || response.Data.SessionID != "task-happy" || len(response.Data.Entries) != 2 || response.Data.Entries[1].Text != "analysis complete" {
+			t.Fatalf("response = %#v", response)
+		}
+	})
+
+	t.Run("non-codex canonical fixture", func(t *testing.T) {
+		rec := getTaskRunTranscript(t, module, "task-claude")
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+		}
+		var response misc.TranscriptResponse
+		if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+			t.Fatalf("decode response: %v", err)
+		}
+		if !response.Success || response.Data == nil || response.Data.SessionID != "task-claude" || len(response.Data.Entries) != 2 || response.Data.Entries[1].Type != transcript.EventReasoning {
+			t.Fatalf("response = %#v", response)
+		}
+	})
+
+	t.Run("missing", func(t *testing.T) {
+		rec := getTaskRunTranscript(t, module, "task-missing")
+		if rec.Code != http.StatusNotFound || !strings.Contains(rec.Body.String(), "transcript is not available") {
+			t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+		}
+	})
+
+	for _, taskRunID := range []string{"../evil", "..\\evil", "nested/task"} {
+		t.Run("reject "+taskRunID, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "/", nil)
+			req.SetPathValue("ws", "WS")
+			req.SetPathValue("taskRunId", taskRunID)
+			rec := httptest.NewRecorder()
+			module.getTaskRunTranscript(rec, req)
+			if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "invalid task run id") {
+				t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+			}
+		})
+	}
+}
+
+type testPersistedLogResponse struct {
+	Success bool `json:"success"`
+	Data    struct {
+		Content    string    `json:"content"`
+		ModifiedAt time.Time `json:"modifiedAt"`
+		Truncated  bool      `json:"truncated"`
+	} `json:"data"`
+}
+
+func setTaskRunLogRef(t testing.TB, st store.Store, taskRunID, ref string) {
+	t.Helper()
+	if _, err := st.TaskRuns().Heartbeat(context.Background(), "WS", taskRunID, store.TaskRunHeartbeat{LogsRef: ref}); err != nil {
+		t.Fatalf("set task run %s logs ref: %v", taskRunID, err)
 	}
 }
 
@@ -417,6 +535,15 @@ func getTaskRunLog(t *testing.T, module *Module, taskRunID string) *httptest.Res
 	module.Register(mux)
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/workspaces/WS/task-runs/"+taskRunID+"/log", nil))
+	return rec
+}
+
+func getTaskRunTranscript(t *testing.T, module *Module, taskRunID string) *httptest.ResponseRecorder {
+	t.Helper()
+	mux := http.NewServeMux()
+	module.Register(mux)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/workspaces/WS/task-runs/"+taskRunID+"/transcript", nil))
 	return rec
 }
 

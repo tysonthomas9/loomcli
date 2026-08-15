@@ -64,6 +64,7 @@ func TestClaimAndExecuteTaskRunEmitsLifecycleEvents(t *testing.T) {
 			execResult: TaskExecResult{
 				Status:       domain.TaskRunCompleted,
 				LogsRef:      "logs://evt",
+				Logs:         "event log\n",
 				ArtifactsRef: "artifacts://evt",
 			},
 			maxAttempts:     1,
@@ -75,7 +76,7 @@ func TestClaimAndExecuteTaskRunEmitsLifecycleEvents(t *testing.T) {
 		},
 		{
 			name:            "complete without lead skips outbox row",
-			execResult:      TaskExecResult{Status: domain.TaskRunCompleted, LogsRef: "logs://evt"},
+			execResult:      TaskExecResult{Status: domain.TaskRunCompleted, LogsRef: "logs://evt", Logs: "event log\n"},
 			maxAttempts:     1,
 			wantTypes:       []domain.TaskRunEventType{domain.TaskRunEventClaimed, domain.TaskRunEventCompleted},
 			wantLastAttempt: 0,
@@ -148,8 +149,11 @@ func TestClaimAndExecuteTaskRunEmitsLifecycleEvents(t *testing.T) {
 			if last.Attempt != tc.wantLastAttempt {
 				t.Fatalf("last event attempt = %d, want %d", last.Attempt, tc.wantLastAttempt)
 			}
-			if last.LogsRef != tc.execResult.LogsRef {
-				t.Fatalf("last event logs ref = %q, want %q", last.LogsRef, tc.execResult.LogsRef)
+			if last.LogsRef != outcome.Run.LogsRef {
+				t.Fatalf("last event logs ref = %q, want persisted run ref %q", last.LogsRef, outcome.Run.LogsRef)
+			}
+			if tc.execResult.Logs != "" && (!strings.HasPrefix(last.LogsRef, "artifact://log-task-") || last.LogsRef == tc.execResult.LogsRef) {
+				t.Fatalf("last event logs ref = %q, want common-writer artifact and ignored runner ref", last.LogsRef)
 			}
 			if last.ErrorClass != tc.execResult.ErrorClass {
 				t.Fatalf("last event error class = %q, want %q", last.ErrorClass, tc.execResult.ErrorClass)
@@ -206,7 +210,7 @@ func TestEmitTerminalTaskRunEventsIsIdempotent(t *testing.T) {
 		NodeID:             "node-1",
 		SupportedProviders: []string{"local-noop"},
 		HeartbeatInterval:  -1,
-	}, &recordingTaskExecutor{result: TaskExecResult{Status: domain.TaskRunCompleted, LogsRef: "logs://evt"}})
+	}, &recordingTaskExecutor{result: TaskExecResult{Status: domain.TaskRunCompleted, LogsRef: "logs://evt", Logs: "event log\n"}})
 	if err != nil {
 		t.Fatalf("ClaimAndExecuteTaskRunWithResult: %v", err)
 	}

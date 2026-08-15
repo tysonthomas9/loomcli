@@ -32,4 +32,7 @@ type RunResult struct {
 	Summary    string
 	ErrorClass string
 	Output     map[string]string
+	// Logs carries the runner's raw log bytes to Executor.runClaimed, the
+	// single writer that can persist them through store.Store.
+	Logs string
 }

@@ -140,26 +140,6 @@ func (e HostBridgeTaskExecutor) persistRunnerOutputArtifacts(ctx context.Context
 		session.Metadata["transcript_ref"] = result.RuntimeMetadata["transcript_ref"]
 	}
 
-	logContent, err := e.runnerFileOrInlineBytes(runner.logsInline(), firstNonEmpty(runner.LogsPath, runner.LogsPathCamel), "logs")
-	if err != nil {
-		return TaskExecResult{}, err
-	}
-	if len(logContent) > 0 && result.LogsRef == "" {
-		artifactID := "logs-" + req.TaskRunID
-		finalized, err := e.createContentArtifact(ctx, req, sessionIDFromFlueTaskSession(session), artifactID, "logs", "task run logs", "text/plain; charset=utf-8", logContent)
-		if err != nil {
-			return TaskExecResult{}, err
-		}
-		result.ArtifactIDs = normalizeArtifactIDs(append(result.ArtifactIDs, finalized.ArtifactID))
-		result.LogsRef = "artifact://" + finalized.ArtifactID
-		result.RuntimeMetadata["logs_artifact_id"] = finalized.ArtifactID
-	}
-	if result.LogsRef != "" {
-		result.RuntimeMetadata["logs_ref"] = result.LogsRef
-		if session != nil {
-			session.Metadata["logs_ref"] = result.LogsRef
-		}
-	}
 	if result.ArtifactsRef == "" && len(result.ArtifactIDs) > 0 {
 		result.ArtifactsRef = "artifacts://" + req.TaskRunID
 	}
@@ -181,13 +161,6 @@ func (r bridgeTaskRunnerResult) transcriptInline() []byte {
 	default:
 		return nil
 	}
-}
-
-func (r bridgeTaskRunnerResult) logsInline() []byte {
-	if strings.TrimSpace(r.Logs) == "" {
-		return nil
-	}
-	return []byte(r.Logs)
 }
 
 func marshalTranscriptJSONL(events []transcript.Event) []byte {

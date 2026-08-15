@@ -1,17 +1,20 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 
 import type {
   DriverRunDTO,
   TaskRunDTO,
   TaskRunStatus,
 } from "@/api/agentServices";
-import { useDriverRunLog, useTaskRunLog } from "@/hooks/workspace";
+import {
+  useDriverRunLog,
+  useTaskRunLog,
+  useTaskRunTranscript,
+} from "@/hooks/workspace";
 import { ApiError } from "@/types/common";
 import { formatStatusLabel } from "@/utils/issue";
-import { parseTranscript } from "@/utils/transcript";
 
 import styles from "./AgentServiceDetail.module.css";
-import { TranscriptView } from "./TranscriptView";
+import { TranscriptRows } from "./TranscriptRows";
 
 interface TaskLogsSectionProps {
   workspaceId: string;
@@ -50,25 +53,46 @@ function TaskLogRow({
 }): JSX.Element {
   const [expanded, setExpanded] = useState(false);
   const [logView, setLogView] = useState<"pretty" | "raw">("pretty");
-  // A settled task whose listing already says no log exists skips the fetch
-  // entirely; live tasks still fetch, since their log lands at settle time.
-  const logCouldExist = task.logsAvailable || isLiveTask(task.status);
-  const { log, loading, initialized, error, refresh } = useTaskRunLog(
+  const live = isLiveTask(task.status);
+  const logCouldExist = task.logsAvailable || live;
+  const transcriptCouldExist = task.transcriptAvailable || live;
+  const selectedView = transcriptCouldExist ? logView : "raw";
+  const {
+    log,
+    loading: logLoading,
+    initialized: logInitialized,
+    error: logError,
+    refresh: refreshLog,
+  } = useTaskRunLog(
     workspaceId,
     task.taskRunId,
-    { enabled: expanded && logCouldExist },
+    { enabled: expanded && logCouldExist && selectedView === "raw" },
+  );
+  const {
+    entries,
+    loading: transcriptLoading,
+    initialized: transcriptInitialized,
+    error: transcriptError,
+    refresh: refreshTranscript,
+  } = useTaskRunTranscript(
+    workspaceId,
+    task.taskRunId,
+    {
+      enabled:
+        expanded && transcriptCouldExist && selectedView === "pretty",
+    },
   );
   const taskDuration = duration(task.startedAt, task.finishedAt);
-  const transcript = useMemo(
-    () => parseTranscript(log?.content ?? ""),
-    [log?.content],
-  );
 
   useEffect(() => {
-    if (expanded && liveRefreshTick > 0 && isLiveTask(task.status)) {
-      void refresh();
+    if (expanded && liveRefreshTick > 0 && live) {
+      if (selectedView === "pretty") {
+        void refreshTranscript();
+      } else {
+        void refreshLog();
+      }
     }
-  }, [expanded, liveRefreshTick, refresh, task.status]);
+  }, [expanded, live, liveRefreshTick, refreshLog, refreshTranscript, selectedView]);
 
   return (
     <article className={styles.taskLogRow}>
@@ -99,66 +123,89 @@ function TaskLogRow({
       </button>
       {expanded ? (
         <div className={styles.logBody}>
-          {!logCouldExist && !log ? (
+          {!logCouldExist && !transcriptCouldExist ? (
             <p className={styles.emptyText} data-testid="task-log-empty">
               No AI log is available for this task yet.
             </p>
-          ) : loading && !initialized ? (
-            <p className={styles.emptyText}>Loading AI log…</p>
-          ) : error instanceof ApiError && error.status === 404 ? (
-            <p className={styles.emptyText} data-testid="task-log-empty">
-              No AI log is available for this task yet.
-            </p>
-          ) : error ? (
-            <p className={styles.errorText} role="alert">
-              AI log unavailable: {error.message}
-            </p>
-          ) : log ? (
-            <>
-              {log.truncated ? (
-                <p className={styles.truncationNotice} role="status">
-                  Showing the last 1 MiB of this AI log.
-                </p>
-              ) : null}
-              {transcript.codexEventCount > 0 ? (
-                <>
-                  <div
-                    className={styles.taskLogViewControls}
-                    data-testid="task-log-view-toggle"
-                    role="group"
-                    aria-label="Task log view"
-                  >
-                    <button
-                      type="button"
-                      aria-pressed={logView === "pretty"}
-                      onClick={() => setLogView("pretty")}
-                    >
-                      Pretty
-                    </button>
-                    <button
-                      type="button"
-                      aria-pressed={logView === "raw"}
-                      onClick={() => setLogView("raw")}
-                    >
-                      Raw
-                    </button>
-                  </div>
-                  {logView === "pretty" ? (
-                    <TranscriptView transcript={transcript} />
-                  ) : (
-                    <pre data-testid={`task-log-content-${task.taskRunId}`}>
-                      {log.content}
-                    </pre>
-                  )}
-                </>
-              ) : (
-                <pre data-testid={`task-log-content-${task.taskRunId}`}>
-                  {log.content}
-                </pre>
-              )}
-            </>
           ) : (
-            <p className={styles.emptyText}>No AI log content.</p>
+            <>
+              {transcriptCouldExist ? (
+                <div
+                  className={styles.taskLogViewControls}
+                  data-testid="task-log-view-toggle"
+                  role="group"
+                  aria-label="Task log view"
+                >
+                  <button
+                    type="button"
+                    aria-pressed={selectedView === "pretty"}
+                    onClick={() => setLogView("pretty")}
+                  >
+                    Pretty
+                  </button>
+                  <button
+                    type="button"
+                    aria-pressed={selectedView === "raw"}
+                    onClick={() => setLogView("raw")}
+                  >
+                    Raw
+                  </button>
+                </div>
+              ) : null}
+              {selectedView === "pretty" ? (
+                transcriptLoading && !transcriptInitialized ? (
+                  <p className={styles.emptyText}>Loading transcript…</p>
+                ) : transcriptError instanceof ApiError &&
+                  transcriptError.status === 404 ? (
+                  <p
+                    className={styles.emptyText}
+                    data-testid="task-transcript-empty"
+                  >
+                    No transcript is available for this task yet.
+                  </p>
+                ) : transcriptError ? (
+                  <p className={styles.errorText} role="alert">
+                    Transcript unavailable: {transcriptError.message}
+                  </p>
+                ) : entries.length > 0 ? (
+                  <TranscriptRows entries={entries} />
+                ) : transcriptInitialized ? (
+                  <p
+                    className={styles.emptyText}
+                    data-testid="task-transcript-empty"
+                  >
+                    No transcript content.
+                  </p>
+                ) : null
+              ) : !logCouldExist ? (
+                <p className={styles.emptyText} data-testid="task-log-empty">
+                  No AI log is available for this task yet.
+                </p>
+              ) : logLoading && !logInitialized ? (
+                <p className={styles.emptyText}>Loading AI log…</p>
+              ) : logError instanceof ApiError && logError.status === 404 ? (
+                <p className={styles.emptyText} data-testid="task-log-empty">
+                  No AI log is available for this task yet.
+                </p>
+              ) : logError ? (
+                <p className={styles.errorText} role="alert">
+                  AI log unavailable: {logError.message}
+                </p>
+              ) : log ? (
+                <>
+                  {log.truncated ? (
+                    <p className={styles.truncationNotice} role="status">
+                      Showing the last 1 MiB of this AI log.
+                    </p>
+                  ) : null}
+                  <pre data-testid={`task-log-content-${task.taskRunId}`}>
+                    {log.content}
+                  </pre>
+                </>
+              ) : logInitialized ? (
+                <p className={styles.emptyText}>No AI log content.</p>
+              ) : null}
+            </>
           )}
         </div>
       ) : null}

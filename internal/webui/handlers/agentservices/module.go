@@ -16,9 +16,11 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/runlog"
+	"github.com/tysonthomas9/loomcli/internal/sessions/transcript"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/trigger"
+	"github.com/tysonthomas9/loomcli/internal/webui/handlers/logserve"
+	"github.com/tysonthomas9/loomcli/internal/webui/handlers/misc"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/dto"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 )
@@ -53,6 +55,7 @@ func (m *Module) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/workspaces/{ws}/agent-services/{id}/runs/{runId}/tasks", m.listAgentServiceRunTasks)
 	mux.HandleFunc("GET /api/workspaces/{ws}/agent-services/{id}/journal", m.getAgentServiceJournal)
 	mux.HandleFunc("GET /api/workspaces/{ws}/task-runs/{taskRunId}/log", m.getTaskRunLog)
+	mux.HandleFunc("GET /api/workspaces/{ws}/task-runs/{taskRunId}/transcript", m.getTaskRunTranscript)
 }
 
 type agentServiceDTO struct {
@@ -130,25 +133,15 @@ type agentServiceJournalResponse struct {
 }
 
 type taskRunDTO struct {
-	TaskRunID     string               `json:"taskRunId"`
-	TaskID        string               `json:"taskId"`
-	Status        domain.TaskRunStatus `json:"status"`
-	Runner        string               `json:"runner"`
-	ErrorClass    string               `json:"errorClass,omitempty"`
-	StartedAt     time.Time            `json:"startedAt,omitempty"`
-	FinishedAt    *time.Time           `json:"finishedAt,omitempty"`
-	LogsAvailable bool                 `json:"logsAvailable"`
-}
-
-type persistedLogDTO struct {
-	Content    string    `json:"content"`
-	ModifiedAt time.Time `json:"modifiedAt"`
-	Truncated  bool      `json:"truncated"`
-}
-
-type persistedLogResponse struct {
-	Success bool            `json:"success"`
-	Data    persistedLogDTO `json:"data"`
+	TaskRunID           string               `json:"taskRunId"`
+	TaskID              string               `json:"taskId"`
+	Status              domain.TaskRunStatus `json:"status"`
+	Runner              string               `json:"runner"`
+	ErrorClass          string               `json:"errorClass,omitempty"`
+	StartedAt           time.Time            `json:"startedAt,omitempty"`
+	FinishedAt          *time.Time           `json:"finishedAt,omitempty"`
+	LogsAvailable       bool                 `json:"logsAvailable"`
+	TranscriptAvailable bool                 `json:"transcriptAvailable"`
 }
 
 func (m *Module) listAgentServices(w http.ResponseWriter, r *http.Request) {
@@ -320,7 +313,8 @@ func (m *Module) listAgentServiceRunTasks(w http.ResponseWriter, r *http.Request
 			TaskRunID: taskRun.TaskRunID, TaskID: taskRun.TaskID, Status: taskRun.Status,
 			Runner: taskRunRunnerLabel(taskRun), ErrorClass: taskRun.ErrorClass,
 			StartedAt: taskRun.StartedAt, FinishedAt: taskRun.FinishedAt,
-			LogsAvailable: m.taskRunLogAvailable(taskRun.TaskRunID),
+			LogsAvailable:       taskRun.LogsRef != "",
+			TranscriptAvailable: taskRunTranscriptRef(taskRun) != "",
 		})
 	}
 	handler.WriteJSON(w, http.StatusOK, dto.NewListResponse(items, len(items)))
@@ -338,15 +332,6 @@ func taskRunRunnerLabel(run *domain.TaskRun) string {
 	return ""
 }
 
-func (m *Module) taskRunLogAvailable(taskRunID string) bool {
-	path, err := runlog.TaskPath(m.resolveRuntimeDir(), taskRunID)
-	if err != nil {
-		return false
-	}
-	info, err := os.Stat(path)
-	return err == nil && !info.IsDir()
-}
-
 func (m *Module) getTaskRunLog(w http.ResponseWriter, r *http.Request) {
 	ws := strings.TrimSpace(r.PathValue("ws"))
 	taskRunID := strings.TrimSpace(r.PathValue("taskRunId"))
@@ -354,27 +339,69 @@ func (m *Module) getTaskRunLog(w http.ResponseWriter, r *http.Request) {
 		handler.RespondError(w, http.StatusBadRequest, "workspace and task run id are required")
 		return
 	}
-	path, err := runlog.TaskPath(m.resolveRuntimeDir(), taskRunID)
-	if err != nil {
+	if !logserve.ValidRecordID(taskRunID) {
 		handler.RespondError(w, http.StatusBadRequest, "invalid task run id")
 		return
 	}
-	if _, err := m.store.TaskRuns().Get(r.Context(), ws, taskRunID); err != nil {
+	record, err := m.store.TaskRuns().Get(r.Context(), ws, taskRunID)
+	if err != nil {
 		writeStoreError(w, err, "task run not found")
 		return
 	}
-	content, modifiedAt, truncated, err := runlog.ReadTail(path)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			handler.RespondError(w, http.StatusNotFound, "task log is not available yet")
-			return
-		}
-		handler.RespondError(w, http.StatusInternalServerError, "read task run log failed")
+	logserve.ServeLog(w, r, m.store, ws, record.LogsRef, "task log")
+}
+
+func taskRunTranscriptRef(record *domain.TaskRun) string {
+	if record == nil || record.RuntimeMetadata == nil {
+		return ""
+	}
+	return strings.TrimSpace(record.RuntimeMetadata["transcript_ref"])
+}
+
+func (m *Module) getTaskRunTranscript(w http.ResponseWriter, r *http.Request) {
+	ws := strings.TrimSpace(r.PathValue("ws"))
+	taskRunID := strings.TrimSpace(r.PathValue("taskRunId"))
+	if ws == "" || taskRunID == "" {
+		handler.RespondError(w, http.StatusBadRequest, "workspace and task run id are required")
 		return
 	}
-	handler.WriteJSON(w, http.StatusOK, persistedLogResponse{
+	if !logserve.ValidRecordID(taskRunID) {
+		handler.RespondError(w, http.StatusBadRequest, "invalid task run id")
+		return
+	}
+	record, err := m.store.TaskRuns().Get(r.Context(), ws, taskRunID)
+	if err != nil {
+		writeStoreError(w, err, "task run not found")
+		return
+	}
+	ref := taskRunTranscriptRef(record)
+	artifactID := strings.TrimSpace(strings.TrimPrefix(ref, "artifact://"))
+	if ref == "" || artifactID == "" || artifactID == ref || !logserve.ValidRecordID(artifactID) {
+		handler.RespondError(w, http.StatusNotFound, "task transcript is not available yet")
+		return
+	}
+	reader, ok := m.store.Artifacts().(store.ArtifactContentReader)
+	if !ok {
+		handler.RespondError(w, http.StatusInternalServerError, "read task transcript failed")
+		return
+	}
+	data, err := reader.ReadContent(r.Context(), ws, artifactID)
+	if err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			handler.RespondError(w, http.StatusNotFound, "task transcript is not available yet")
+			return
+		}
+		handler.RespondError(w, http.StatusInternalServerError, "read task transcript failed")
+		return
+	}
+	entries, err := transcript.ParseCanonicalBytes(data)
+	if err != nil {
+		handler.RespondError(w, http.StatusInternalServerError, "decode task transcript failed")
+		return
+	}
+	handler.WriteJSON(w, http.StatusOK, misc.TranscriptResponse{
 		Success: true,
-		Data:    persistedLogDTO{Content: content, ModifiedAt: modifiedAt, Truncated: truncated},
+		Data:    &misc.TranscriptData{SessionID: taskRunID, Entries: entries},
 	})
 }
 

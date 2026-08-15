@@ -16,6 +16,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/driver/runtypes"
 	"github.com/tysonthomas9/loomcli/internal/driver/sandbox"
 	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/taskrunlogs"
 	"github.com/tysonthomas9/loomcli/internal/trigger"
 )
 
@@ -155,7 +156,7 @@ func (e *Executor) runClaimed(ctx context.Context, workDir string, claimed *doma
 	}
 	req, err := loadRunRequest(ctx, workDir, claimed, e.Store)
 	if err != nil {
-		return RunResult{Status: domain.DriverRunFailed, Summary: err.Error(), ErrorClass: "bundle_verification"}
+		return e.persistRunLogs(ctx, claimed, RunResult{Status: domain.DriverRunFailed, Summary: err.Error(), ErrorClass: "bundle_verification"})
 	}
 	req.RunToken = e.mintRunToken(ctx, claimed)
 	runResult, runErr := runner.Run(ctx, req)
@@ -169,7 +170,22 @@ func (e *Executor) runClaimed(ctx context.Context, workDir string, claimed *doma
 	} else {
 		runResult = requireExplicitTerminalRunResult(runResult)
 	}
-	return runResult
+	return e.persistRunLogs(ctx, claimed, runResult)
+}
+
+func (e *Executor) persistRunLogs(ctx context.Context, claimed *domain.DriverRun, result RunResult) RunResult {
+	if result.Output == nil {
+		result.Output = map[string]string{}
+	}
+	result.Output["logs_ref"] = ""
+	ref, err := taskrunlogs.PutRun(ctx, e.Store, claimed.WorkspaceKey, claimed.RunID, result.Logs)
+	if err != nil {
+		slog.WarnContext(ctx, "persist driver run logs failed", "runID", claimed.RunID, "err", err)
+	} else {
+		result.Output["logs_ref"] = ref
+	}
+	result.Logs = ""
+	return result
 }
 
 // mintRunToken mints the run-scoped bearer token for a freshly claimed run
@@ -854,7 +870,7 @@ func flueRuntimeResult(ctx context.Context, req RunRequest, stdout, stderr strin
 	if err := json.Unmarshal([]byte(lines[len(lines)-1]), &payload); err != nil {
 		return invalidDriverResult(req, fmt.Sprintf("decode Flue runtime result: %v", err), stdout, stderr)
 	}
-	result := RunResult{Status: payload.Status, Summary: payload.Summary, ErrorClass: payload.ErrorClass, Output: flueRunOutput(req, stdout, stderr)}
+	result := RunResult{Status: payload.Status, Summary: payload.Summary, ErrorClass: payload.ErrorClass, Output: flueRunMetadata(req, stdout, stderr), Logs: flueRunOutput(stdout, stderr)}
 	if result.Status == domain.DriverRunFailed {
 		result.Summary = flueFailedSummary(result.Summary, stderr)
 	}
@@ -867,14 +883,15 @@ func failedFlueRuntimeResult(ctx context.Context, req RunRequest, stdout, stderr
 			Status:     domain.DriverRunCancelled,
 			Summary:    "Flue local runner cancelled",
 			ErrorClass: "driver_cancelled",
-			Output:     flueRunOutput(req, stdout, stderr),
+			Output:     flueRunMetadata(req, stdout, stderr),
+			Logs:       flueRunOutput(stdout, stderr),
 		}
 	}
 	msg := strings.TrimSpace(stderr)
 	if msg == "" {
 		msg = runErr.Error()
 	}
-	return RunResult{Status: domain.DriverRunFailed, Summary: msg, ErrorClass: "driver_runtime", Output: flueRunOutput(req, stdout, stderr)}
+	return RunResult{Status: domain.DriverRunFailed, Summary: msg, ErrorClass: "driver_runtime", Output: flueRunMetadata(req, stdout, stderr), Logs: flueRunOutput(stdout, stderr)}
 }
 
 func flueFailedSummary(summary, stderr string) string {
@@ -917,18 +934,29 @@ func invalidDriverResult(req RunRequest, summary, stdout, stderr string) RunResu
 		Status:     domain.DriverRunFailed,
 		Summary:    summary,
 		ErrorClass: "invalid_driver_result",
-		Output:     flueRunOutput(req, stdout, stderr),
+		Output:     flueRunMetadata(req, stdout, stderr),
+		Logs:       flueRunOutput(stdout, stderr),
 	}
 }
 
-func flueRunOutput(req RunRequest, stdout, stderr string) map[string]string {
-	output := map[string]string{
-		"runtime":  RuntimeFlueNode,
-		"logs_ref": "driver-run://" + req.Run.RunID + "/flue-local",
+func flueRunOutput(stdout, stderr string) string {
+	if strings.TrimSpace(stdout) == "" && strings.TrimSpace(stderr) == "" {
+		return ""
 	}
-	if err := persistDriverRunLogs(req.Run.RunID, stdout, stderr); err != nil {
-		output["logs_persist_error"] = err.Error()
-		slog.Warn("persist driver run logs failed", "runID", req.Run.RunID, "err", err)
+	content := "===== stdout =====\n" + stdout
+	if !strings.HasSuffix(content, "\n") {
+		content += "\n"
+	}
+	content += "\n===== stderr =====\n" + stderr
+	if !strings.HasSuffix(content, "\n") {
+		content += "\n"
+	}
+	return content
+}
+
+func flueRunMetadata(req RunRequest, stdout, stderr string) map[string]string {
+	output := map[string]string{
+		"runtime": RuntimeFlueNode,
 	}
 	if req.Manifest["artifact_kind"] != "" {
 		output["artifact_kind"] = req.Manifest["artifact_kind"]

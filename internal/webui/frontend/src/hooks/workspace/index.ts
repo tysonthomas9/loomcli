@@ -16,6 +16,7 @@ export {
   useAgentServices,
   useDriverRunLog,
   useTaskRunLog,
+  useTaskRunTranscript,
 } from "./useAgentServices";
 export type {
   UseAgentServicesOptions,

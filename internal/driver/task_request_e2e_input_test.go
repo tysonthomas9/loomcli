@@ -51,6 +51,7 @@ func (e *reviewRunnerExecutor) ExecuteTask(_ context.Context, req TaskExecReques
 		Status:   domain.TaskRunCompleted,
 		ExitCode: 0,
 		LogsRef:  "logs://" + req.TaskRunID,
+		Logs:     "review completed\n",
 		RuntimeMetadata: map[string]string{
 			"review_findings": string(encoded),
 		},
