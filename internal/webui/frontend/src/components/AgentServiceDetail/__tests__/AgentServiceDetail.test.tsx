@@ -3,11 +3,12 @@
 import {
   act,
   fireEvent,
-  render,
+  render as testingLibraryRender,
   screen,
   waitFor,
   within,
 } from "@testing-library/react";
+import type { ReactElement } from "react";
 import "@testing-library/jest-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -17,8 +18,22 @@ import type {
   TaskRunDTO,
 } from "@/api/agentServices";
 import { ApiError } from "@/types/common";
+import { KeyboardShortcutProvider } from "@/hooks/ui";
 
 import { AgentServiceDetail } from "../AgentServiceDetail";
+
+function render(ui: ReactElement) {
+  const result = testingLibraryRender(
+    <KeyboardShortcutProvider>{ui}</KeyboardShortcutProvider>,
+  );
+  return {
+    ...result,
+    rerender: (next: ReactElement) =>
+      result.rerender(
+        <KeyboardShortcutProvider>{next}</KeyboardShortcutProvider>,
+      ),
+  };
+}
 
 const mocks = vi.hoisted(() => ({
   runs: [] as DriverRunDTO[],
@@ -29,6 +44,8 @@ const mocks = vi.hoisted(() => ({
   getTaskRunLog: vi.fn(),
   getTaskRunTranscript: vi.fn(),
   getDriverRunLog: vi.fn(),
+  patchAgentService: vi.fn(),
+  removeAgentService: vi.fn(),
 }));
 
 vi.mock("@/hooks/workspace", async (importOriginal) => {
@@ -43,6 +60,11 @@ vi.mock("@/hooks/workspace", async (importOriginal) => {
       error: null,
       notFound: false,
       refresh: mocks.refreshRuns,
+    }),
+    useAgentServiceMutations: () => ({
+      create: vi.fn(),
+      patch: mocks.patchAgentService,
+      remove: mocks.removeAgentService,
     }),
   };
 });
@@ -158,6 +180,19 @@ describe("AgentServiceDetail", () => {
         error: "run log is not available yet",
       }),
     );
+    mocks.patchAgentService.mockImplementation(
+      async (
+        _id: string,
+        request: { desiredState?: "running" | "stopped" },
+      ) => ({
+        ...service,
+        enabled:
+          request.desiredState === undefined
+            ? service.enabled
+            : request.desiredState === "running",
+      }),
+    );
+    mocks.removeAgentService.mockResolvedValue(undefined);
   });
 
   afterEach(() => {
@@ -170,6 +205,54 @@ describe("AgentServiceDetail", () => {
       "data-role",
       "scout",
     );
+  });
+
+  it("disables and re-enables a scripted instance through desiredState", async () => {
+    render(<AgentServiceDetail workspaceId="WS" service={service} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Disable agent" }));
+    await waitFor(() => {
+      expect(mocks.patchAgentService).toHaveBeenCalledWith("scout", {
+        desiredState: "stopped",
+      });
+    });
+    expect(
+      await screen.findByRole("button", { name: "Enable agent" }),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Enable agent" }));
+    await waitFor(() => {
+      expect(mocks.patchAgentService).toHaveBeenLastCalledWith("scout", {
+        desiredState: "running",
+      });
+    });
+    expect(
+      await screen.findByRole("button", { name: "Disable agent" }),
+    ).toBeInTheDocument();
+  });
+
+  it("removes a scripted instance only after confirmation", async () => {
+    const onRemoved = vi.fn();
+    render(
+      <AgentServiceDetail
+        workspaceId="WS"
+        service={service}
+        onRemoved={onRemoved}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Remove agent" }));
+    const dialog = screen.getByRole("alertdialog", {
+      name: "Remove autonomous agent",
+    });
+    expect(within(dialog).getByText("scout")).toBeInTheDocument();
+    expect(mocks.removeAgentService).not.toHaveBeenCalled();
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Remove" }));
+    await waitFor(() => {
+      expect(mocks.removeAgentService).toHaveBeenCalledWith("scout");
+    });
+    expect(onRemoved).toHaveBeenCalledOnce();
   });
 
   it("renders the role prompt card for plain prompt roles", () => {

@@ -13,7 +13,9 @@ export {
   useAgentServiceRunTasks,
   useAgentServiceRunEvents,
   useAgentServiceRuns,
+  useAgentServiceMutations,
   useAgentServices,
+  useInstantiableScriptedRoles,
   useDriverRunLog,
   useTaskRunLog,
   useTaskRunTranscript,
@@ -23,6 +25,8 @@ export type {
   UseAgentServicesReturn,
   UseAgentServiceRunsOptions,
   UseAgentServiceRunsReturn,
+  AgentServiceMutationActions,
+  UseInstantiableScriptedRolesReturn,
 } from "./useAgentServices";
 
 export { useDeleteWorkspaceAgent } from "./useDeleteWorkspaceAgent";

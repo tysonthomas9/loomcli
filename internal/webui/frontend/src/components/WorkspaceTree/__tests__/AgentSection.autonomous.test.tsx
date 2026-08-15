@@ -138,12 +138,15 @@ describe("AgentSection Autonomous group", () => {
     expect(onAgentClick).toHaveBeenCalledWith("scout");
   });
 
-  it("does not render an empty Autonomous group", () => {
+  it("keeps the autonomous Add-agent entry when there are no instances", () => {
     render(<AgentSection onAddClick={vi.fn()} />);
 
+    expect(screen.getByTestId("agent-section-autonomous")).toHaveTextContent(
+      "Autonomous",
+    );
     expect(
-      screen.queryByTestId("agent-section-autonomous"),
-    ).not.toBeInTheDocument();
+      screen.getByRole("button", { name: "Add autonomous agent" }),
+    ).toBeInTheDocument();
   });
 
   it("surfaces server-computed health errors as an unknown warning state", () => {

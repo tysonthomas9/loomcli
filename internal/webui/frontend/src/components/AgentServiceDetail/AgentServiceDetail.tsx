@@ -26,10 +26,12 @@ import { formatStatusLabel } from "@/utils/issue";
 
 import styles from "./AgentServiceDetail.module.css";
 import { HarnessLog, TaskLogsSection } from "./RunLogs";
+import { AgentServiceSettings } from "./AgentServiceSettings";
 
 export interface AgentServiceDetailProps {
   workspaceId: string;
   service: AgentServiceDTO;
+  onRemoved?: () => void;
 }
 
 function behaviorLabel(service: AgentServiceDTO): string {
@@ -145,8 +147,10 @@ function oldestFirst(events: RunEventDTO[]): RunEventDTO[] {
 
 export function AgentServiceDetail({
   workspaceId,
-  service,
+  service: initialService,
+  onRemoved,
 }: AgentServiceDetailProps): JSX.Element {
+  const [service, setService] = useState(initialService);
   const {
     runs,
     total,
@@ -194,6 +198,10 @@ export function AgentServiceDetail({
   const expandedRun = expandedRunId
     ? (runs.find((run) => run.runId === expandedRunId) ?? null)
     : null;
+
+  useEffect(() => {
+    setService(initialService);
+  }, [initialService]);
 
   useEffect(() => {
     setActiveTab("overview");
@@ -304,6 +312,15 @@ export function AgentServiceDetail({
                 ))}
               </ul>
             </section>
+          ) : null}
+
+          {service.behavior.scripted ? (
+            <AgentServiceSettings
+              workspaceId={workspaceId}
+              service={service}
+              onChange={setService}
+              {...(onRemoved ? { onRemoved } : {})}
+            />
           ) : null}
 
           <section className={styles.card}>

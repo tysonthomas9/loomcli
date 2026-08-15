@@ -1,9 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { get } from "@/api/common";
+import { del, get, patch, post } from "@/api/common";
 import type { ApiError } from "@/api/common";
 
 import {
+  createAgentService,
+  deleteAgentService,
   getAgentServiceJournal,
   getDriverRunLog,
   getTaskRunLog,
@@ -11,15 +13,26 @@ import {
   listAgentServiceRunTasks,
   listAgentServiceRuns,
   listAgentServices,
+  listInstantiableScriptedRoles,
   listRunEvents,
+  patchAgentService,
 } from "../agentServices";
 
 vi.mock("@/api/common", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/api/common")>();
-  return { ...actual, get: vi.fn() };
+  return {
+    ...actual,
+    get: vi.fn(),
+    post: vi.fn(),
+    patch: vi.fn(),
+    del: vi.fn(),
+  };
 });
 
 const mockGet = vi.mocked(get);
+const mockPost = vi.mocked(post);
+const mockPatch = vi.mocked(patch);
+const mockDelete = vi.mocked(del);
 
 describe("agent-services API", () => {
   beforeEach(() => {
@@ -67,6 +80,72 @@ describe("agent-services API", () => {
     expect(result.data[0]?.bindings[0]?.schedule).toBe("@weekly");
     expect(mockGet).toHaveBeenCalledWith(
       "/api/workspaces/Workspace%20A/agent-services",
+    );
+  });
+
+  it("lists instantiable scripted roles from the literal catalog route", async () => {
+    mockGet.mockResolvedValueOnce([
+      {
+        roleName: "scout",
+        displayName: "Scout",
+        allowedBindingKinds: ["cron"],
+      },
+    ]);
+
+    await expect(listInstantiableScriptedRoles("Workspace A")).resolves.toEqual(
+      [expect.objectContaining({ roleName: "scout" })],
+    );
+    expect(mockGet).toHaveBeenCalledWith(
+      "/api/workspaces/Workspace%20A/agent-services/scripted-roles",
+    );
+  });
+
+  it("creates, patches, and deletes an agent service", async () => {
+    const created = {
+      id: "scout-west",
+      name: "Scout West",
+      triggerKind: "cron" as const,
+      enabled: true,
+      behavior: { roleName: "scout", scripted: true },
+      bindings: [],
+      nextFireAt: null,
+      lastRunStatus: "",
+      consecutiveFailures: 0,
+      errors: [],
+      createdAt: "2026-08-15T00:00:00Z",
+      updatedAt: "2026-08-15T00:00:00Z",
+    };
+    mockPost.mockResolvedValueOnce({ success: true, data: created });
+    mockPatch.mockResolvedValueOnce({
+      success: true,
+      data: { ...created, enabled: false },
+    });
+    mockDelete.mockResolvedValueOnce(undefined);
+
+    await createAgentService("Workspace A", {
+      id: "scout-west",
+      role: "scout",
+      binding: { schedule: "@daily" },
+    });
+    await patchAgentService("Workspace A", "scout/west", {
+      desiredState: "stopped",
+    });
+    await deleteAgentService("Workspace A", "scout/west");
+
+    expect(mockPost).toHaveBeenCalledWith(
+      "/api/workspaces/Workspace%20A/agent-services",
+      {
+        id: "scout-west",
+        role: "scout",
+        binding: { schedule: "@daily" },
+      },
+    );
+    expect(mockPatch).toHaveBeenCalledWith(
+      "/api/workspaces/Workspace%20A/agent-services/scout%2Fwest",
+      { desiredState: "stopped" },
+    );
+    expect(mockDelete).toHaveBeenCalledWith(
+      "/api/workspaces/Workspace%20A/agent-services/scout%2Fwest",
     );
   });
 

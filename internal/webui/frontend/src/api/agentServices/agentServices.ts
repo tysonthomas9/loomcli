@@ -1,4 +1,4 @@
-import { ApiError, get, wsUrl } from "@/api/common";
+import { ApiError, del, get, patch, post, wsUrl } from "@/api/common";
 import type { TranscriptEntry, TranscriptResponse } from "@/types/agent";
 
 export interface AgentServiceBehaviorDTO {
@@ -14,8 +14,36 @@ export interface AgentServiceBindingDTO {
   id: string;
   sourceKind: string;
   schedule: string;
+  timezone?: string;
   enabled: boolean;
   routeKey: string;
+}
+
+export interface InstantiableScriptedRoleDTO {
+  roleName: string;
+  displayName: string;
+  allowedBindingKinds: string[];
+}
+
+export interface CreateAgentServiceRequest {
+  id: string;
+  name?: string;
+  role: string;
+  binding: {
+    schedule: string;
+    timezone?: string;
+    enabled?: boolean;
+  };
+}
+
+export interface PatchAgentServiceRequest {
+  name?: string;
+  desiredState?: "running" | "stopped";
+  binding?: {
+    schedule?: string;
+    timezone?: string;
+    enabled?: boolean;
+  };
 }
 
 export interface AgentServiceDTO {
@@ -161,6 +189,13 @@ function unwrapList<T>(
   return { data: response.data, total: response.total };
 }
 
+function unwrapItem<T>(response: AgentServiceItemEnvelope<T>): T {
+  if (!response.success) {
+    throw new ApiError(0, response.error, response);
+  }
+  return response.data;
+}
+
 export async function listAgentServices(
   workspaceId: string,
 ): Promise<AgentServiceList<AgentServiceDTO>> {
@@ -168,6 +203,46 @@ export async function listAgentServices(
     wsUrl(workspaceId, "/agent-services"),
   );
   return unwrapList(response);
+}
+
+export function listInstantiableScriptedRoles(
+  workspaceId: string,
+): Promise<InstantiableScriptedRoleDTO[]> {
+  return get<InstantiableScriptedRoleDTO[]>(
+    wsUrl(workspaceId, "/agent-services/scripted-roles"),
+  );
+}
+
+export async function createAgentService(
+  workspaceId: string,
+  request: CreateAgentServiceRequest,
+): Promise<AgentServiceDTO> {
+  const response = await post<AgentServiceItemEnvelope<AgentServiceDTO>>(
+    wsUrl(workspaceId, "/agent-services"),
+    request,
+  );
+  return unwrapItem(response);
+}
+
+export async function patchAgentService(
+  workspaceId: string,
+  agentServiceId: string,
+  request: PatchAgentServiceRequest,
+): Promise<AgentServiceDTO> {
+  const response = await patch<AgentServiceItemEnvelope<AgentServiceDTO>>(
+    wsUrl(workspaceId, `/agent-services/${encodeURIComponent(agentServiceId)}`),
+    request,
+  );
+  return unwrapItem(response);
+}
+
+export function deleteAgentService(
+  workspaceId: string,
+  agentServiceId: string,
+): Promise<void> {
+  return del<void>(
+    wsUrl(workspaceId, `/agent-services/${encodeURIComponent(agentServiceId)}`),
+  );
 }
 
 export async function listAgentServiceRuns(

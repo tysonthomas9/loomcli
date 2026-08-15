@@ -118,6 +118,11 @@ vi.mock("@/hooks/workspace", () => ({
     error: null,
     refresh: vi.fn(),
   }),
+  useAgentServiceMutations: () => ({
+    create: vi.fn(),
+    patch: vi.fn(),
+    remove: vi.fn(),
+  }),
 }));
 
 vi.mock("@/hooks/ui/useToast", () => ({
@@ -149,6 +154,10 @@ vi.mock("@/components/RolePromptCard", () => ({
       data-role={roleName}
     />
   ),
+}));
+
+vi.mock("@/components/ConfirmDialog", () => ({
+  ConfirmDialog: () => null,
 }));
 
 vi.mock("@/components/AgentDetailPanel", () => ({
