@@ -46,6 +46,7 @@ type AgentProcess struct {
 	LastActivity           time.Time         // most recent PTY output observed by the agent's wrapper (driven by agent IPC heartbeats); zero between spawn and first observation
 	InputWaitPending       int               // interactive harness prompts currently awaiting an answer; a count (not a flag) so overlapping prompts nest — see input_wait.go
 	InputWaitSince         time.Time         // when InputWaitPending last rose from zero; anchors the bound that stops a suspension from outliving its cause
+	AbandonedRunsChecked   bool              // true once this process reconciled the agent's leftover unfinished sessions; the check is per daemon lifetime, not per cycle — within one process every run is finished by the exit path
 
 	RestartCount   int       // consecutive restart attempts
 	LastStart      time.Time // when subprocess was last spawned
@@ -70,7 +71,7 @@ type AgentProcess struct {
 
 	StopReason StopReason // why the agent was stopped (set at decision site, empty while running)
 
-	Mu sync.Mutex // protects Cmd, Pid, LogFile, SoftKnobWarning, restart tracking, AssignedEpicID, AssignedTaskID, RequestedTaskID, ResumeTaskID, ResumeFailures, RecoveryMode, LastError, CurrentBackendIdx, Session, AgentSessionID, ParentSessionID, AgentLeaseID, AgentLeaseToken, ownership fields, TranscriptPath, BeforeRef, StopReason, LastActivity, InputWaitPending, InputWaitSince
+	Mu sync.Mutex // protects Cmd, Pid, LogFile, SoftKnobWarning, restart tracking, AssignedEpicID, AssignedTaskID, RequestedTaskID, ResumeTaskID, ResumeFailures, RecoveryMode, LastError, CurrentBackendIdx, Session, AgentSessionID, ParentSessionID, AgentLeaseID, AgentLeaseToken, ownership fields, TranscriptPath, BeforeRef, StopReason, LastActivity, InputWaitPending, InputWaitSince, AbandonedRunsChecked
 }
 
 // StopReason identifies why an agent was stopped.

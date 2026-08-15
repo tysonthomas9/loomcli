@@ -7,7 +7,12 @@
 # state is sub-packaging (inputwait / runcap / ...); until that split happens,
 # this records the ceiling. Shrink or remove the entry when the package is
 # split; do not raise it without recording why here.
-internal/cli/daemon/supervisor 28
+#
+# Raised 28 -> 29 for abandoned_run.go (the abandoned-run attempt recorder,
+# PUPPET-40). It cannot live in supervisor.go: that file is at 986 of the
+# 1000-line LOC ceiling, so folding ~400 lines in would trade this gate for
+# that one. Same sub-split end state applies.
+internal/cli/daemon/supervisor 29
 # internal/cli gained the daemon input-await seam (agent_input_await.go) with
 # the human answer path; 26th file, same sub-split end state applies.
 internal/cli 26
