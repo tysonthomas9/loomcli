@@ -56,6 +56,10 @@ func WithWorktree(sess *sessions.Session, opts WithWorktreeOptions) (WithWorktre
 		_, _ = sess.SyncLatestCodexRollout(opts.WorktreePath, sess.Meta.StartedAt)
 	case backendnames.Claude:
 		_, _ = sess.SyncLatestClaudeTranscript(opts.WorktreePath, opts.ClaudeSessionID, sess.Meta.StartedAt)
+	default:
+		if path, _ := sess.SyncLatestCodexRollout(opts.WorktreePath, sess.Meta.StartedAt); path == "" {
+			_, _ = sess.SyncLatestClaudeTranscript(opts.WorktreePath, opts.ClaudeSessionID, sess.Meta.StartedAt)
+		}
 	}
 	// Go-leaf daemon finalize often arrives with zeros because the worker was
 	// reaped before collector finalize. Recover usage from the synced native
