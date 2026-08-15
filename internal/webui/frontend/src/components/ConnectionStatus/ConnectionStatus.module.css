@@ -160,7 +160,7 @@
  * =========================== */
 .connectionStatus[data-state="disconnected"] .text,
 .connectionStatus[data-state="connection-lost"] .text {
-  color: var(--color-danger);
+  color: var(--color-danger-text);
 }
 
 /* ===========================

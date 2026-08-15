@@ -21,7 +21,7 @@
 }
 
 .banner[data-stale="true"] .icon {
-  color: var(--color-danger);
+  color: var(--color-danger-text);
 }
 
 .icon {

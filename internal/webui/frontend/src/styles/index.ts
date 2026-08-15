@@ -17,6 +17,9 @@ export {
 export {
   contrastRatio,
   relativeLuminance,
+  worstRatioAgainstSurfaces,
+  TEXT_TOKENS,
+  NON_TEXT_TOKENS,
   WCAG_AA_TEXT,
   WCAG_AA_NON_TEXT,
 } from "./contrast";

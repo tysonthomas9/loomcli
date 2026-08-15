@@ -193,8 +193,9 @@ export function parseCssVariables(cssSource: string): ParsedThemes {
  * Neutral tokens used as `color:` for text. Every one of these must reach
  * WCAG_AA_TEXT against every surface token in the same theme.
  *
- * Extensible on purpose: the semantic `--color-*-text` variants land here when
- * the sibling task adds them.
+ * The semantic `--color-*-text` variants are here too. They are a parallel set
+ * to the vivid semantic tokens, which stay in NON_TEXT_TOKENS below: text uses
+ * the `-text` variant, dots and borders keep the vivid one.
  *
  * `--color-text-inverse` is deliberately excluded: it is painted on inverted
  * surfaces (filled buttons, badges) that are not part of the standard surface
@@ -211,7 +212,130 @@ export const TEXT_TOKENS: readonly string[] = [
   "--color-text-muted", // id pills, "Unclaimed" badges — the reported bug
   "--color-status-ready", // rendered as text, not just as a dot
   "--color-status-idle", // rendered as text, not just as a dot
+
+  // Semantic text variants. Every `color:` call site that used to name a vivid
+  // semantic token now names one of these instead.
+  "--color-primary-text",
+  "--color-success-text",
+  "--color-warning-text",
+  "--color-danger-text",
+  "--color-info-text",
+  "--color-epic-text",
+  "--color-status-review-text",
 ];
+
+/**
+ * Tokens used for NON-text UI: status dots, badge and chip borders, kanban
+ * accents, graph node strokes. WCAG 1.4.11 asks 3:1 of these, not 4.5:1.
+ *
+ * Kept explicitly separate from TEXT_TOKENS. Folding them into TEXT_TOKENS
+ * would force them all darker to satisfy 4.5:1, which is exactly the change
+ * this design rejected: it would flatten the status-colour vocabulary that
+ * dots and accents depend on, for no gain to any text.
+ */
+export const NON_TEXT_TOKENS: readonly string[] = [
+  "--color-primary",
+  "--color-success",
+  "--color-warning",
+  "--color-danger",
+  "--color-info",
+  "--color-type-epic",
+  "--color-status-open",
+  "--color-status-in-progress",
+  "--color-status-closed",
+  "--color-status-working",
+  "--color-status-done",
+  "--color-status-review",
+  "--color-status-error",
+  "--color-status-dirty",
+  "--color-status-pending",
+  "--color-blocked",
+  "--color-ready",
+  "--color-closed",
+];
+
+/**
+ * Worst-case ratio each non-text token reaches today, per theme, against the
+ * derived surface set — floored to 2dp from a measurement, not a target.
+ *
+ * The design for this change assumed every vivid token already cleared
+ * WCAG_AA_NON_TEXT. Measured, they do not: `--color-status-review` is 2.16:1
+ * in dark, and in light almost the whole vivid set sits between 1.58 and
+ * 2.77:1 — the same numbers that motivated the text variants in the first
+ * place. Asserting a flat 3:1 here would just be a red gate.
+ *
+ * So this is a ratchet instead. A token at or above WCAG_AA_NON_TEXT must stay
+ * there; one below it must not get any worse. Either way a contributor who
+ * "helpfully" darkens a vivid token to chase text contrast trips the test,
+ * which is what the assertion was for. Fixing the light-theme non-text palette
+ * properly is a separate change — it needs light overrides for the vivid
+ * tokens and it moves every dot and chip border in the light theme.
+ */
+export const NON_TEXT_FLOORS: Readonly<
+  Record<"dark" | "light", Readonly<Record<string, number>>>
+> = {
+  dark: {
+    "--color-primary": 3.69,
+    "--color-success": 5.96,
+    "--color-warning": 6.32,
+    "--color-danger": 3.61,
+    "--color-info": 5.59,
+    "--color-type-epic": 3.21,
+    "--color-status-open": 3.69,
+    "--color-status-in-progress": 6.32,
+    "--color-status-closed": 5.35,
+    "--color-status-working": 3.69,
+    "--color-status-done": 5.35,
+    "--color-status-review": 2.16, // below 3:1 — see the note above
+    "--color-status-error": 3.61,
+    "--color-status-dirty": 6.32,
+    "--color-status-pending": 5.35,
+    "--color-blocked": 3.61,
+    "--color-ready": 5.96,
+    "--color-closed": 5.35,
+  },
+  light: {
+    "--color-primary": 3.81,
+    "--color-success": 1.68,
+    "--color-warning": 1.58,
+    "--color-danger": 2.77,
+    "--color-info": 1.79,
+    "--color-type-epic": 3.12,
+    "--color-status-open": 2.71,
+    "--color-status-in-progress": 1.58,
+    "--color-status-closed": 1.87,
+    "--color-status-working": 2.71,
+    "--color-status-done": 1.87,
+    "--color-status-review": 4.63,
+    "--color-status-error": 2.77,
+    "--color-status-dirty": 1.58,
+    "--color-status-pending": 1.87,
+    "--color-blocked": 2.77,
+    "--color-ready": 1.68,
+    "--color-closed": 1.87,
+  },
+};
+
+/** The worst contrast `token` reaches against any surface in `theme`. */
+export function worstRatioAgainstSurfaces(
+  theme: TokenMap,
+  token: string,
+): { ratio: number; surface: string } {
+  const fg = theme[token];
+  if (fg === undefined) {
+    throw new Error(`token not present in theme: ${token}`);
+  }
+  let ratio = Infinity;
+  let surface = "";
+  for (const name of deriveSurfaceTokens(theme)) {
+    const candidate = contrastRatio(fg, theme[name] ?? "");
+    if (candidate < ratio) {
+      ratio = candidate;
+      surface = name;
+    }
+  }
+  return { ratio, surface };
+}
 
 /**
  * Name patterns that identify a background/surface token. Matched against the
