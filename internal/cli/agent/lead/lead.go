@@ -22,6 +22,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/epicrunner"
+	"github.com/tysonthomas9/loomcli/internal/hookcfg"
 	"github.com/tysonthomas9/loomcli/internal/leadcontrol"
 	"github.com/tysonthomas9/loomcli/internal/skillmat"
 	"github.com/tysonthomas9/loomcli/internal/store"
@@ -123,6 +124,7 @@ func runLead(cmd *cobra.Command, args []string) {
 		execShell(workDir)
 		return
 	}
+	ensureLeadHookConfig(workDir, backendName)
 
 	// Generate the terminal-agent prompt and append the user's initial request if provided.
 	prompt, err := leadStartupPrompt(context.Background(), registration)
@@ -154,6 +156,18 @@ func runLead(cmd *cobra.Command, args []string) {
 		fmt.Fprintf(os.Stderr, "Error running agent: %v\n", invokeErr)
 		fmt.Fprintf(os.Stderr, "\nDropping into a shell. Fix the issue and run 'loom lead' to retry.\n\n")
 		execShell(workDir)
+	}
+}
+
+func ensureLeadHookConfig(workDir, backend string) {
+	if !hookcfg.SupportsBackend(backend) {
+		return
+	}
+	if err := hookcfg.Ensure(workDir, backend, []hookcfg.HookSpec{{
+		Event: hookcfg.UserPromptSubmit, Command: "loom skill materialize",
+	}}); err != nil {
+		slog.Warn("lead hook configuration failed; continuing without raw-PTY pre-turn hook",
+			"target", workDir, "backend", backend, "err", err)
 	}
 }
 

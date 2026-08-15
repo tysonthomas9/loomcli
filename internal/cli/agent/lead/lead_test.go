@@ -111,6 +111,13 @@ func TestRunLead_InvokesClaude(t *testing.T) {
 	if inv.agentName != "" {
 		t.Errorf("expected empty agentName for lead mode, got %q", inv.agentName)
 	}
+	hookConfig, err := os.ReadFile(filepath.Join(tmpDir, ".claude", "settings.json"))
+	if err != nil {
+		t.Fatalf("read lead hook config: %v", err)
+	}
+	if !strings.Contains(string(hookConfig), "loom skill materialize") {
+		t.Fatalf("lead hook config = %q", hookConfig)
+	}
 }
 
 func TestRunLeadUsesCustomTerminalPrompt(t *testing.T) {

@@ -13,7 +13,9 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/tysonthomas9/loomcli/internal/backendnames"
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/hookcfg"
 	"github.com/tysonthomas9/loomcli/internal/localworkspace"
 	"github.com/tysonthomas9/loomcli/internal/skillmat"
 	"github.com/tysonthomas9/loomcli/internal/store"
@@ -119,7 +121,11 @@ func ensureAgentTerminalSession(ctx context.Context, svc service.TerminalService
 
 	sessionName, label, sortOrder := newAgentTerminalTabPlacement(tabs, existing, agentName)
 	if roleKind == domain.RoleKindInteractive && !livePTYPresent {
-		if err := materializeInteractiveSkills(ctx, st, workspace, agent.RoleName, agentLaunchCwd(workspace, agent)); err != nil {
+		backend := agentLaunchBackend(ctx, st, workspace, agent, role)
+		if backend == "" {
+			backend = backendnames.Codex
+		}
+		if err := materializeInteractiveSkills(ctx, st, workspace, agent.RoleName, backend, agentLaunchCwd(workspace, agent)); err != nil {
 			return nil, err
 		}
 	}
@@ -140,7 +146,7 @@ func ensureAgentTerminalSession(ctx context.Context, svc service.TerminalService
 	return svc.GetTab(ctx, workspace, sessionName)
 }
 
-func materializeInteractiveSkills(ctx context.Context, st store.Store, workspace, roleName, targetDir string) error {
+func materializeInteractiveSkills(ctx context.Context, st store.Store, workspace, roleName, backend, targetDir string) error {
 	if targetDir == "" {
 		return nil
 	}
@@ -148,11 +154,24 @@ func materializeInteractiveSkills(ctx context.Context, st store.Store, workspace
 		if skillmat.IsStoreUnavailable(err) {
 			slog.Warn("skill store unavailable; continuing with existing materialization",
 				"workspace", workspace, "role", roleName, "target", targetDir, "err", err)
-			return nil
+		} else {
+			return service.ErrInternal("failed to materialize agent skills", err)
 		}
-		return service.ErrInternal("failed to materialize agent skills", err)
 	}
+	ensureInteractiveHookConfig(targetDir, backend)
 	return nil
+}
+
+func ensureInteractiveHookConfig(targetDir, backend string) {
+	if !hookcfg.SupportsBackend(backend) {
+		return
+	}
+	if err := hookcfg.Ensure(targetDir, backend, []hookcfg.HookSpec{{
+		Event: hookcfg.UserPromptSubmit, Command: "loom skill materialize",
+	}}); err != nil {
+		slog.Warn("interactive terminal hook configuration failed; continuing without raw-PTY pre-turn hook",
+			"target", targetDir, "backend", backend, "err", err)
+	}
 }
 
 // agentTerminalLaunchSpecStale returns true when the existing tab's cached

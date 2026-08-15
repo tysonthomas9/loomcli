@@ -389,6 +389,13 @@ func TestEnsureAgentTerminalSessionLaunchesLeadInConfiguredWorktree(t *testing.T
 	if !strings.Contains(string(materialized), "name: terminal-skill\n") || !strings.HasSuffix(string(materialized), "Lead skill body\n") {
 		t.Fatalf("terminal skill = %q", materialized)
 	}
+	hookConfig, err := os.ReadFile(filepath.Join(worktree, ".codex", "hooks.json"))
+	if err != nil {
+		t.Fatalf("read terminal hook config: %v", err)
+	}
+	if !strings.Contains(string(hookConfig), "loom skill materialize") {
+		t.Fatalf("terminal hook config = %q", hookConfig)
+	}
 }
 
 func TestEnsureAgentTerminalSessionFailsBeforeTabOnSkillCollision(t *testing.T) {
@@ -488,7 +495,7 @@ func TestEnsureAgentTerminalSessionContinuesOnSkillStoreOutage(t *testing.T) {
 func TestMaterializeInteractiveSkillsPropagatesCancellation(t *testing.T) {
 	target := t.TempDir()
 	st := terminalMaterializeStore{skills: terminalSkillStore{err: context.Canceled}}
-	err := materializeInteractiveSkills(context.Background(), st, "E2E", "lead", target)
+	err := materializeInteractiveSkills(context.Background(), st, "E2E", "lead", "codex", target)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("materializeInteractiveSkills error = %v, want context.Canceled", err)
 	}

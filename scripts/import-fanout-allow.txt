@@ -4,10 +4,11 @@
 # These are grandfathered ceilings, not targets. The supervisor is the daemon's
 # orchestration hub: the completion-hook, usage-accounting, watchdog and
 # run-duration work each add a seam it must coordinate, which pushed it past
-# the global threshold of 18. internal/cli grew one import for the same line of
+# the global threshold of 18; pre-turn hook management (hookcfg) is one more
+# such seam. internal/cli grew one import for the same line of
 # work. Ratchet these back down (or remove the entries) when coupling is paid
 # down; do not raise them without recording why here.
-internal/cli/daemon/supervisor 21
+internal/cli/daemon/supervisor 22
 internal/cli 19
 # The skills webui module adds the skills handler package to the app's module
 # wiring and the domain skill path policy to svcimpl's file index.

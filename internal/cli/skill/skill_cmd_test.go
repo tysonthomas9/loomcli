@@ -293,8 +293,15 @@ func TestSkillCommandSurfaceIncludesInstall(t *testing.T) {
 		got = append(got, child.Name())
 	}
 	sort.Strings(got)
-	if strings.Join(got, ",") != "create,delete,import,install,list,pack,show,sync,update" {
-		t.Fatalf("skill subcommands = %v, want CRUD, import, install, pack, and sync", got)
+	if strings.Join(got, ",") != "create,delete,import,install,list,materialize,pack,show,sync,update" {
+		t.Fatalf("skill subcommands = %v, want CRUD, import, install, materialize, pack, and sync", got)
+	}
+	materialize, _, err := cmd.Find([]string{"materialize"})
+	if err != nil {
+		t.Fatalf("find materialize: %v", err)
+	}
+	if !materialize.Hidden {
+		t.Fatal("materialize command is visible, want hidden hook-only verb")
 	}
 
 	create, _, err := cmd.Find([]string{"create"})

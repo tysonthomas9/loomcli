@@ -19,6 +19,7 @@ import (
 	cfgpkg "github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/events"
+	"github.com/tysonthomas9/loomcli/internal/hookcfg"
 	"github.com/tysonthomas9/loomcli/internal/observability/tracing"
 	"github.com/tysonthomas9/loomcli/internal/skillmat"
 
@@ -267,6 +268,7 @@ func (s *Supervisor) spawnAgent(ap *AgentProcess) error {
 			return fmt.Errorf("materialize skills: %w", err)
 		}
 	}
+	s.ensureHookConfig(ap)
 
 	cmd, err := s.buildCommand(ap)
 	if err != nil {
@@ -307,6 +309,19 @@ func (s *Supervisor) spawnAgent(ap *AgentProcess) error {
 	s.markControlPlaneAgentSessionRunning(ap)
 
 	return nil
+}
+
+func (s *Supervisor) ensureHookConfig(ap *AgentProcess) {
+	backend := s.GetEffectiveBackend(ap)
+	if !hookcfg.SupportsBackend(backend) {
+		return
+	}
+	if err := hookcfg.Ensure(ap.WorktreePath, backend, []hookcfg.HookSpec{{
+		Event: hookcfg.UserPromptSubmit, Command: "loom skill materialize",
+	}}); err != nil {
+		slog.Warn("agent hook configuration failed; continuing without raw-PTY pre-turn hook",
+			"worktree", ap.Entry.Worktree, "backend", backend, "err", err)
+	}
 }
 
 func (s *Supervisor) materializeSkills(ap *AgentProcess) error {

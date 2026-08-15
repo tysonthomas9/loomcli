@@ -83,6 +83,7 @@ func newSkillCommand() *cobra.Command {
 		newSkillImportCommand(),
 		newSkillInstallCommand(),
 		newSkillListCommand(),
+		newSkillMaterializeCommand(),
 		newSkillPackCommand(),
 		newSkillShowCommand(),
 		newSkillSyncCommand(),

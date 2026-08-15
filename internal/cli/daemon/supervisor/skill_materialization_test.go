@@ -111,6 +111,37 @@ func TestSpawnAgentContinuesWhenSkillStoreIsUnavailable(t *testing.T) {
 	if _, err := os.Lstat(filepath.Join(target, ".agents")); !os.IsNotExist(err) {
 		t.Fatalf("skill outage touched target projection: %v", err)
 	}
+	hookConfig, err := os.ReadFile(filepath.Join(target, ".codex", "hooks.json"))
+	if err != nil {
+		t.Fatalf("read worker hook config: %v", err)
+	}
+	if !strings.Contains(string(hookConfig), "loom skill materialize") {
+		t.Fatalf("worker hook config = %q", hookConfig)
+	}
+}
+
+func TestEnsureHookConfigWarnsAndContinuesOnMalformedJSON(t *testing.T) {
+	logs := captureSlog(t)
+	target := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(target, ".codex"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(target, ".codex", "hooks.json")
+	if err := os.WriteFile(path, []byte("not-json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s := newTestSupervisorWithConfig(&cfgpkg.DaemonConfig{Backend: "codex"})
+	ap := &AgentProcess{Entry: cfgpkg.AgentEntry{Worktree: "worker-a"}, WorktreePath: target}
+
+	s.ensureHookConfig(ap)
+
+	if !strings.Contains(logs.String(), "hook configuration failed") || !strings.Contains(logs.String(), "continuing") {
+		t.Fatalf("warning log = %q", logs.String())
+	}
+	data, err := os.ReadFile(path)
+	if err != nil || string(data) != "not-json" {
+		t.Fatalf("malformed hook config changed: data=%q err=%v", data, err)
+	}
 }
 
 func TestMaterializeSkillsWarnsWhenControlStoreIsMissing(t *testing.T) {
