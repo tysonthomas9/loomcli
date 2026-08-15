@@ -28,11 +28,12 @@ var validSessionName = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
 
 // TabMetadata represents persisted metadata for a single terminal tab.
 //
-// PTYAlive and AttachedClients are NOT persisted to Redis — they are
+// Attachable and AttachedClients are NOT persisted to Redis — they are
 // populated by the service layer at read time from the in-process
-// PTYManager. PTYAlive=false means the tab survived a server restart but
-// its backing shell did not. AttachedClients>1 means the same session is
-// being viewed by multiple WebSocket clients concurrently.
+// PTYManager. Attachable=false means connecting will not attach to an
+// existing shell: either the tab metadata outlived its server (e.g. a
+// restart) or its PTY has exited. AttachedClients>1 means the same session
+// is being viewed by multiple WebSocket clients concurrently.
 type TabMetadata struct {
 	SessionName     string      `json:"session_name"`
 	Workspace       string      `json:"workspace,omitempty"`
@@ -49,7 +50,7 @@ type TabMetadata struct {
 	Launch          *LaunchSpec `json:"launch,omitempty"`
 	CreatedAt       time.Time   `json:"created_at"`
 	UpdatedAt       time.Time   `json:"updated_at"`
-	PTYAlive        bool        `json:"pty_alive"`
+	Attachable      bool        `json:"attachable"`
 	AttachedClients int         `json:"attached_clients"`
 }
 

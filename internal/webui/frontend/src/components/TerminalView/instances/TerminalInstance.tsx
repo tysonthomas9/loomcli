@@ -97,7 +97,7 @@ export interface TerminalInstanceProps {
    * shell (losing prior scrollback). `undefined` or `true` preserves
    * the pre-liveness behavior of connecting immediately.
    */
-  ptyAlive?: boolean | undefined;
+  attachable?: boolean | undefined;
   /** When true, stale PTYs are automatically replaced with a fresh shell. */
   autoStartStaleSession?: boolean | undefined;
   /** When false, unexpected disconnects stop at the reconnect affordance. */
@@ -128,7 +128,7 @@ export const TerminalInstance = forwardRef<
     onBackendCrash,
     onTerminalFocus,
     writable = true,
-    ptyAlive,
+    attachable,
     autoStartStaleSession,
     autoReconnect = true,
   },
@@ -342,7 +342,7 @@ export const TerminalInstance = forwardRef<
     // The renderer remains mounted across metadata-driven effect re-runs, so
     // onReady does not fire again. Re-kick the WebSocket from its live handle.
     const canReconnect =
-      isActiveRef.current && (ptyAlive !== false || autoStartStaleSession);
+      isActiveRef.current && (attachable !== false || autoStartStaleSession);
     if (canReconnect && xtermInstanceRef.current != null) {
       doConnectRef.current?.();
     }
@@ -350,20 +350,20 @@ export const TerminalInstance = forwardRef<
       beingKilledRef.current = true;
       // Do NOT null xtermInstanceRef here: the XTermRenderer child owns its
       // handle and nulls it via handleXTermDispose on real disposal. Nulling it
-      // on a mere effect re-run (e.g. a ptyAlive transition) strands the
+      // on a mere effect re-run (e.g. an attachable transition) strands the
       // tab with no path back — no onReady to repopulate the ref, no reconnect.
       pendingRendererWritesRef.current = [];
       clearReconnectTimers();
       wsCleanupRef.current?.();
       wsCleanupRef.current = null;
     };
-  }, [sessionName, clearReconnectTimers, ptyAlive, autoStartStaleSession]);
+  }, [sessionName, clearReconnectTimers, attachable, autoStartStaleSession]);
 
   useEffect(() => {
-    if (ptyAlive === false && !autoStartStaleSession) {
+    if (attachable === false && !autoStartStaleSession) {
       setConnectionState("session_ended");
     }
-  }, [ptyAlive, autoStartStaleSession]);
+  }, [attachable, autoStartStaleSession]);
 
   const handleXTermReady = useCallback(
     (xterm: XTermRendererHandle) => {
@@ -375,7 +375,7 @@ export const TerminalInstance = forwardRef<
       const measured = xterm.fit();
       if (measured) terminalSizeRef.current = measured;
       setReadyVersion((value) => value + 1);
-      if (ptyAlive === false && !autoStartStaleSession) {
+      if (attachable === false && !autoStartStaleSession) {
         setConnectionState("session_ended");
         return;
       }
@@ -387,7 +387,7 @@ export const TerminalInstance = forwardRef<
         doConnectRef.current?.();
       }
     },
-    [ptyAlive, autoStartStaleSession],
+    [attachable, autoStartStaleSession],
   );
 
   const handleXTermDispose = useCallback((xterm: XTermRendererHandle) => {
@@ -401,7 +401,7 @@ export const TerminalInstance = forwardRef<
   // active; output is still written once the renderer instance is available.
   useEffect(() => {
     if (!isActive) return;
-    if (ptyAlive === false && !autoStartStaleSession) return;
+    if (attachable === false && !autoStartStaleSession) return;
     // Controlled harnesses size their inner PTY from the first WebSocket
     // attachment. Wait for the lazy xterm renderer to fit the visible pane so
     // that first attachment does not permanently seed an 80x24 inner grid.
@@ -428,7 +428,7 @@ export const TerminalInstance = forwardRef<
     };
   }, [
     isActive,
-    ptyAlive,
+    attachable,
     autoStartStaleSession,
     connectionState,
     readyVersion,

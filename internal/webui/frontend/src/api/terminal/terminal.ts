@@ -80,13 +80,14 @@ export interface TabMetadata {
   created_at: string;
   updated_at: string;
   /**
-   * Whether the backend PTY for this tab is currently alive in the server
-   * process. false means the tab survived (e.g. a server restart) but its
-   * backing shell did not — connecting will spawn a fresh session, so the
+   * Whether connecting to this tab will yield a working PTY — true for a
+   * live PTY, and for a tab created during this server process (its PTY is
+   * spawned by the first WebSocket). Not a process-liveness check. false
+   * means the tab metadata outlived its server or its PTY exited, so the
    * UI should render the tab as "session ended" and prompt before
-   * reconnecting.
+   * reconnecting, since reconnecting spawns a fresh session.
    */
-  pty_alive: boolean;
+  attachable: boolean;
   /**
    * Number of concurrent WebSocket clients currently viewing this session.
    * 0 = no one attached; ≥2 = multi-viewer state the UI can surface before
@@ -229,7 +230,7 @@ export async function putTabMetadata(
   session: string,
   meta: Omit<
     TabMetadata,
-    "created_at" | "updated_at" | "pty_alive" | "attached_clients"
+    "created_at" | "updated_at" | "attachable" | "attached_clients"
   >,
 ): Promise<void> {
   const { error, response } = await api.PUT(

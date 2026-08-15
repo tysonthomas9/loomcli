@@ -20,7 +20,7 @@ var validTerminalSession = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
 // All session lifecycle (spawn, kill, restart, etc.) is gone with tmux.
 //
 // ptyMgr keeps tab metadata in sync with the in-process PTY set: consulted
-// at read time to annotate pty_alive, and used by PutTab / DeleteTab to
+// at read time to annotate attachable, and used by PutTab / DeleteTab to
 // reject clobbers of live sessions and kill the PTY when its tab goes
 // away. nil is acceptable for callers without a PTY backend.
 type terminalServiceImpl struct {
@@ -51,16 +51,17 @@ func NewTerminalService(
 	}
 }
 
-// ptyAlive reports whether the named session has a live PTY in this server
-// process. Returns false when no PTY backend is wired (e.g. auth-only tests).
-func (s *terminalServiceImpl) ptyAlive(wsID, session string) bool {
+// hasPTY reports whether the manager currently holds a session for the named
+// key in this server process; it does not check whether the child process is
+// running. Returns false when no PTY backend is wired (e.g. auth-only tests).
+func (s *terminalServiceImpl) hasPTY(wsID, session string) bool {
 	if s.ptyMgr == nil {
 		return false
 	}
 	return s.ptyMgr.HasSession(SessionKey{Workspace: wsID, Name: session})
 }
 
-// ptyAttachable reports the value exposed as pty_alive to the UI. A live
+// ptyAttachable reports the value exposed as attachable to the UI. A live
 // PTY is attachable. Metadata created during this server process is also
 // attachable because the PTY may not exist until the first WebSocket connects.
 // Metadata from before this server started and without a PTY remains false,
