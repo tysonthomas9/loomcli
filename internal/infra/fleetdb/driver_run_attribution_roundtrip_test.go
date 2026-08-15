@@ -14,7 +14,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/store/storetest"
 )
 
-func TestFleetDBTriggerBindingDeleteConformanceRoundTrip(t *testing.T) {
+func TestFleetDBDriverRunAttributionConformanceRoundTrip(t *testing.T) {
 	requireEmbeddedFleetDBConformance(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
@@ -23,16 +23,16 @@ func TestFleetDBTriggerBindingDeleteConformanceRoundTrip(t *testing.T) {
 		t.Fatalf("StartEmbedded: %v", err)
 	}
 	t.Cleanup(func() { _ = emb.Stop() })
-	client, err := fleetdb.New(fleetdb.Config{BaseURL: emb.URL(), Actor: "binding-delete-roundtrip"})
+	client, err := fleetdb.New(fleetdb.Config{BaseURL: emb.URL(), Actor: "driver-run-attribution-roundtrip"})
 	if err != nil {
 		t.Fatalf("fleetdb client: %v", err)
 	}
 	var seq atomic.Int64
-	storetest.RunTriggerBindingDeleteConformance(t, func(t testing.TB) *storetest.TriggerBindingDeleteHarness {
-		ws := fmt.Sprintf("TBDRT%d", seq.Add(1))
+	storetest.RunDriverRunAttributionConformance(t, func(t testing.TB) *storetest.DriverRunAttributionHarness {
+		ws := fmt.Sprintf("DRATT%d", seq.Add(1))
 		if _, err := client.Workspaces().Create(ctx, store.WorkspaceCreate{Key: ws, Name: ws}); err != nil {
 			t.Fatalf("create workspace %s: %v", ws, err)
 		}
-		return &storetest.TriggerBindingDeleteHarness{Workspace: ws, Store: client}
+		return &storetest.DriverRunAttributionHarness{Workspace: ws, Store: client}
 	})
 }
