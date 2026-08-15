@@ -65,6 +65,31 @@ func (r *unixSecureRoot) ReadFile(name string, maxBytes int64) ([]byte, os.FileM
 	return b, info.Mode(), nil
 }
 
+func (r *unixSecureRoot) ReadDir(name string) ([]string, error) {
+	parent, base, err := r.openParent(name)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = unix.Close(parent) }()
+	fd, err := openDirAtNoFollow(parent, base)
+	if err != nil {
+		return nil, securePathError(name, err)
+	}
+	dir := os.NewFile(uintptr(fd), name)
+	entries, err := dir.ReadDir(-1)
+	if closeErr := dir.Close(); err == nil {
+		err = closeErr
+	}
+	if err != nil {
+		return nil, err
+	}
+	names := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		names = append(names, entry.Name())
+	}
+	return names, nil
+}
+
 func (r *unixSecureRoot) Lstat(name string) (securePathInfo, error) {
 	parent, base, err := r.openParent(name)
 	if err != nil {

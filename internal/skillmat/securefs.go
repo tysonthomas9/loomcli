@@ -8,6 +8,7 @@ import (
 type secureRoot interface {
 	io.Closer
 	ReadFile(name string, maxBytes int64) ([]byte, os.FileMode, error)
+	ReadDir(name string) ([]string, error)
 	Lstat(name string) (securePathInfo, error)
 	MkdirAll(name string, perm os.FileMode) error
 	CreateFile(name string, content []byte, perm os.FileMode) error

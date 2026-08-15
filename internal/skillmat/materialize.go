@@ -40,6 +40,8 @@ const (
 
 	markerVersion  = 1
 	maxMarkerBytes = 1 << 20
+
+	projectionTempPrefix = ".loom-skill-tmp-"
 )
 
 type marker struct {
@@ -132,6 +134,9 @@ func Materialize(ctx context.Context, st store.Store, workspace, roleName, targe
 	if err != nil {
 		return err
 	}
+	if err := sweepTemporaryFiles(root); err != nil {
+		return fmt.Errorf("sweep skill materialization temporaries: %w", err)
+	}
 	if previous != nil && previous.Hash == projectionHash {
 		if !equalStrings(previous.Paths, paths) {
 			return fmt.Errorf("skill marker hash matches but recorded paths differ; refusing cleanup")
@@ -151,14 +156,151 @@ func Materialize(ctx context.Context, st store.Store, workspace, roleName, targe
 	if err := detectExistingCollisions(root, targetDir, entries, previous); err != nil {
 		return err
 	}
-	if err := cleanupPrevious(root, previous); err != nil {
+	stalePaths := findStalePaths(previous, paths)
+	preDeleted := make(map[string]bool)
+	if err := writeProjection(root, entries, stalePaths, preDeleted); err != nil {
 		return err
 	}
-	if err := writeProjection(root, entries, projectionHash, paths); err != nil {
+	remainingStale := stalePaths[:0]
+	for _, stale := range stalePaths {
+		if !preDeleted[stale] {
+			remainingStale = append(remainingStale, stale)
+		}
+	}
+	if err := cleanupStale(root, remainingStale); err != nil {
 		return err
+	}
+	markerBytes, err := json.MarshalIndent(marker{Version: markerVersion, Hash: projectionHash, Paths: paths}, "", "  ")
+	if err != nil {
+		return fmt.Errorf("encode skill marker: %w", err)
+	}
+	markerBytes = append(markerBytes, '\n')
+	if err := writeMarkerAtomically(root, markerBytes); err != nil {
+		return fmt.Errorf("write skill marker: %w", err)
 	}
 	if err := ensureGitExcludes(ctx, targetDir); err != nil {
 		return fmt.Errorf("ensure skill git excludes: %w", err)
+	}
+	return nil
+}
+
+func findStalePaths(previous *marker, desiredPaths []string) []string {
+	if previous == nil {
+		return nil
+	}
+	desired := make(map[string]bool, len(desiredPaths))
+	for _, name := range desiredPaths {
+		desired[name] = true
+	}
+	paths := make([]string, 0, len(previous.Paths))
+	for _, recorded := range previous.Paths {
+		if !desired[recorded] {
+			paths = append(paths, recorded)
+		}
+	}
+	return paths
+}
+
+func cleanupStale(root secureRoot, paths []string) error {
+	sort.Slice(paths, func(i, j int) bool {
+		if pathDepth(paths[i]) != pathDepth(paths[j]) {
+			return pathDepth(paths[i]) > pathDepth(paths[j])
+		}
+		return paths[i] > paths[j]
+	})
+	for _, recorded := range paths {
+		if err := root.Remove(recorded); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return fmt.Errorf("remove stale materialized path %q: %w", recorded, err)
+		}
+	}
+	removeEmptyParents(root, paths)
+	return nil
+}
+
+func writeProjection(root secureRoot, entries []desiredEntry, stalePaths []string, preDeleted map[string]bool) error {
+	if err := root.MkdirAll(AgentsSkillsDir, 0o755); err != nil {
+		return fmt.Errorf("create canonical skills directory: %w", err)
+	}
+	if err := root.MkdirAll(ClaudeSkillsDir, 0o755); err != nil {
+		return fmt.Errorf("create Claude skills directory: %w", err)
+	}
+	for _, entry := range entries {
+		// Stale ancestors and descendants block managed file/directory
+		// transitions. A case-insensitive filesystem may also resolve a stale
+		// spelling to the desired destination. Remove only those recorded
+		// blockers before inspecting or installing this entry; all unrelated
+		// stale paths remain until every desired entry has been upserted.
+		var blockers []string
+		wantKey := collisionKey(entry.Path)
+		for _, stale := range stalePaths {
+			if preDeleted[stale] {
+				continue
+			}
+			staleKey := collisionKey(stale)
+			if staleKey == wantKey || strings.HasPrefix(wantKey, staleKey+"/") || strings.HasPrefix(staleKey, wantKey+"/") {
+				blockers = append(blockers, stale)
+			}
+		}
+		if err := cleanupStale(root, blockers); err != nil {
+			return fmt.Errorf("remove stale blocker for %q: %w", entry.Path, err)
+		}
+		for _, stale := range blockers {
+			preDeleted[stale] = true
+		}
+		matches, err := entryExactlyMatches(root, entry)
+		if err != nil {
+			return fmt.Errorf("inspect materialized path %q: %w", entry.Path, err)
+		}
+		if matches {
+			continue
+		}
+		if err := root.MkdirAll(path.Dir(entry.Path), 0o755); err != nil {
+			return fmt.Errorf("create parent for %q: %w", entry.Path, err)
+		}
+		if err := writeEntryAtomically(root, entry); err != nil {
+			return fmt.Errorf("write materialized path %q: %w", entry.Path, err)
+		}
+	}
+	return nil
+}
+
+func writeEntryAtomically(root secureRoot, entry desiredEntry) (retErr error) {
+	var nonce [12]byte
+	if _, err := rand.Read(nonce[:]); err != nil {
+		return fmt.Errorf("generate projection temporary name: %w", err)
+	}
+	temporary := path.Join(path.Dir(entry.Path), projectionTempPrefix+hex.EncodeToString(nonce[:]))
+	switch entry.Kind {
+	case entryFile:
+		if err := root.CreateFile(temporary, entry.Content, entry.Mode); err != nil {
+			return err
+		}
+	case entrySymlink:
+		if err := root.Symlink(entry.LinkTarget, temporary); err != nil {
+			return err
+		}
+	default:
+		return fmt.Errorf("materialized path %q has unknown kind %q", entry.Path, entry.Kind)
+	}
+	defer func() {
+		if retErr != nil {
+			_ = root.Remove(temporary)
+		}
+	}()
+	// rename(2) replaces files and symlinks atomically, but it cannot replace a
+	// directory with a non-directory. Collision validation has already proved
+	// that an existing directory here is managed and contains no unrecorded
+	// child; remove it only after the complete temporary entry is ready.
+	info, err := root.Lstat(entry.Path)
+	if err == nil && info.Mode.IsDir() {
+		if err := root.Remove(entry.Path); err != nil {
+			return err
+		}
+	} else if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+	if err := root.Rename(temporary, entry.Path); err != nil {
+		return err
 	}
 	return nil
 }
@@ -332,13 +474,62 @@ func validManagedPath(name string) bool {
 	}
 	if strings.HasPrefix(name, AgentsSkillsDir+"/") || strings.HasPrefix(name, ClaudeSkillsDir+"/") {
 		for _, part := range strings.Split(name, "/") {
-			if part == "" || part == "." || part == ".." {
+			if part == "" || part == "." || part == ".." || isTemporaryBase(part) {
 				return false
 			}
 		}
 		return true
 	}
 	return false
+}
+
+func isTemporaryBase(base string) bool {
+	return strings.HasPrefix(base, projectionTempPrefix) || strings.HasPrefix(base, path.Base(MarkerPath)+".tmp-")
+}
+
+// sweepTemporaryFiles removes only names from Loom's reserved temporary
+// namespace, below the two managed roots. Directory enumeration, metadata
+// checks, and removals all remain rooted at the already-open target fd.
+func sweepTemporaryFiles(root secureRoot) error {
+	for _, rootName := range []string{AgentsSkillsDir, ClaudeSkillsDir} {
+		if err := sweepTemporaryDir(root, rootName); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return err
+		}
+	}
+	return nil
+}
+
+func sweepTemporaryDir(root secureRoot, dir string) error {
+	names, err := root.ReadDir(dir)
+	if err != nil {
+		return err
+	}
+	sort.Strings(names)
+	for _, base := range names {
+		name := path.Join(dir, base)
+		info, err := root.Lstat(name)
+		if errors.Is(err, fs.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		if isTemporaryBase(base) {
+			if info.Mode.IsDir() {
+				return fmt.Errorf("reserved temporary path %q is a directory", name)
+			}
+			if err := root.Remove(name); err != nil && !errors.Is(err, fs.ErrNotExist) {
+				return fmt.Errorf("remove temporary path %q: %w", name, err)
+			}
+			continue
+		}
+		if info.Mode.IsDir() {
+			if err := sweepTemporaryDir(root, name); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func collisionKey(name string) string {
@@ -374,82 +565,6 @@ func detectDesiredCollisions(entries []desiredEntry) error {
 
 func collisionError(skill, first, second string) error {
 	return fmt.Errorf("materialize skill %q: paths %q and %q collide when written", skill, first, second)
-}
-
-func cleanupPrevious(root secureRoot, previous *marker) error {
-	if previous == nil {
-		return nil
-	}
-	paths := append([]string(nil), previous.Paths...)
-	sort.Slice(paths, func(i, j int) bool {
-		if pathDepth(paths[i]) != pathDepth(paths[j]) {
-			return pathDepth(paths[i]) > pathDepth(paths[j])
-		}
-		return paths[i] > paths[j]
-	})
-	for _, recorded := range paths {
-		if err := root.Remove(recorded); err != nil && !errors.Is(err, fs.ErrNotExist) {
-			return fmt.Errorf("remove previously materialized path %q: %w", recorded, err)
-		}
-	}
-	if err := root.Remove(MarkerPath); err != nil && !errors.Is(err, fs.ErrNotExist) {
-		return fmt.Errorf("remove previous skill marker: %w", err)
-	}
-	removeEmptyParents(root, paths)
-	return nil
-}
-
-func writeProjection(root secureRoot, entries []desiredEntry, hash string, paths []string) (retErr error) {
-	if err := root.MkdirAll(AgentsSkillsDir, 0o755); err != nil {
-		return fmt.Errorf("create canonical skills directory: %w", err)
-	}
-	if err := root.MkdirAll(ClaudeSkillsDir, 0o755); err != nil {
-		return fmt.Errorf("create Claude skills directory: %w", err)
-	}
-	written := make([]string, 0, len(entries))
-	defer func() {
-		if retErr == nil {
-			return
-		}
-		for i := len(written) - 1; i >= 0; i-- {
-			_ = root.Remove(written[i])
-		}
-		removeEmptyParents(root, written)
-	}()
-	for _, entry := range entries {
-		matches, err := entryExactlyMatches(root, entry)
-		if err != nil {
-			return fmt.Errorf("inspect materialized path %q: %w", entry.Path, err)
-		}
-		if matches {
-			continue
-		}
-		if err := root.MkdirAll(path.Dir(entry.Path), 0o755); err != nil {
-			return fmt.Errorf("create parent for %q: %w", entry.Path, err)
-		}
-		switch entry.Kind {
-		case entryFile:
-			if err := root.CreateFile(entry.Path, entry.Content, entry.Mode); err != nil {
-				return fmt.Errorf("write materialized path %q: %w", entry.Path, err)
-			}
-		case entrySymlink:
-			if err := root.Symlink(entry.LinkTarget, entry.Path); err != nil {
-				return fmt.Errorf("write materialized link %q: %w", entry.Path, err)
-			}
-		default:
-			return fmt.Errorf("materialized path %q has unknown kind %q", entry.Path, entry.Kind)
-		}
-		written = append(written, entry.Path)
-	}
-	markerBytes, err := json.MarshalIndent(marker{Version: markerVersion, Hash: hash, Paths: paths}, "", "  ")
-	if err != nil {
-		return fmt.Errorf("encode skill marker: %w", err)
-	}
-	markerBytes = append(markerBytes, '\n')
-	if err := writeMarkerAtomically(root, markerBytes); err != nil {
-		return fmt.Errorf("write skill marker: %w", err)
-	}
-	return nil
 }
 
 func writeMarkerAtomically(root secureRoot, markerBytes []byte) (retErr error) {
@@ -531,6 +646,16 @@ func projectionMatches(root secureRoot, entries []desiredEntry) (bool, error) {
 func entryExactlyMatches(root secureRoot, entry desiredEntry) (bool, error) {
 	switch entry.Kind {
 	case entryFile:
+		info, err := root.Lstat(entry.Path)
+		if errors.Is(err, fs.ErrNotExist) {
+			return false, nil
+		}
+		if err != nil {
+			return false, err
+		}
+		if !info.Mode.IsRegular() || info.Mode.Perm() != entry.Mode.Perm() {
+			return false, nil
+		}
 		content, mode, err := root.ReadFile(entry.Path, int64(len(entry.Content))+1)
 		if errors.Is(err, fs.ErrNotExist) {
 			return false, nil

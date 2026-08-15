@@ -40,6 +40,34 @@ func TestUnixSecureRootCreateFileRefusesSymlinkedParent(t *testing.T) {
 	}
 }
 
+func TestUnixSecureRootReadDirRefusesSymlinkedDirectory(t *testing.T) {
+	base := t.TempDir()
+	target := filepath.Join(base, "target")
+	outside := filepath.Join(base, "outside")
+	if err := os.MkdirAll(filepath.Join(target, "safe"), 0o755); err != nil {
+		t.Fatalf("create target: %v", err)
+	}
+	if err := os.MkdirAll(outside, 0o755); err != nil {
+		t.Fatalf("create outside: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(outside, "secret"), []byte("outside\n"), 0o600); err != nil {
+		t.Fatalf("write outside file: %v", err)
+	}
+	if err := os.Symlink(outside, filepath.Join(target, "safe", "link")); err != nil {
+		t.Fatalf("plant directory symlink: %v", err)
+	}
+	root, err := openSecureRoot(target)
+	if err != nil {
+		t.Fatalf("openSecureRoot: %v", err)
+	}
+	defer root.Close()
+
+	_, err = root.ReadDir("safe/link")
+	if err == nil || !strings.Contains(err.Error(), "refusing to follow symlink") {
+		t.Fatalf("ReadDir error = %v, want fd-relative symlink refusal", err)
+	}
+}
+
 func TestUnixSecureRootRejectsFIFOMarkerWithoutBlocking(t *testing.T) {
 	target := t.TempDir()
 	markerPath := filepath.Join(target, filepath.FromSlash(MarkerPath))
