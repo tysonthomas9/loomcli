@@ -22,7 +22,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"os"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -34,12 +33,7 @@ import (
 )
 
 func TestFleetDBAwaitConformanceRoundTrip(t *testing.T) {
-	if os.Getenv("LOOM_RUN_EMBEDDED_SMOKE") != "1" {
-		t.Skip("set LOOM_RUN_EMBEDDED_SMOKE=1 (with a freshly built fleet-db binary) to run the await round-trip")
-	}
-	if diag := bootstrap.DiagnoseFleetDBBinary(); diag.Err != nil {
-		t.Skipf("fleet-db binary unavailable: %v", diag.Err)
-	}
+	requireEmbeddedFleetDBConformance(t)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
