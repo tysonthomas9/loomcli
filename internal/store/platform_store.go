@@ -131,7 +131,7 @@ type AgentServiceCreate struct {
 	WorkspaceKey    string
 	ServiceID       string
 	Name            string
-	Kind            domain.AgentServiceKind
+	TriggerKind     domain.AgentServiceTriggerKind
 	DesiredState    domain.AgentServiceDesiredState
 	RoleName        string
 	DriverID        string
@@ -152,7 +152,7 @@ type AgentServiceCreate struct {
 }
 
 type AgentServiceFilter struct {
-	Kind           domain.AgentServiceKind
+	TriggerKind    domain.AgentServiceTriggerKind
 	DesiredState   domain.AgentServiceDesiredState
 	RoleName       string
 	ProfileName    string
@@ -162,7 +162,7 @@ type AgentServiceFilter struct {
 
 type AgentServiceUpdate struct {
 	Name            *string
-	Kind            *domain.AgentServiceKind
+	TriggerKind     *domain.AgentServiceTriggerKind
 	DesiredState    *domain.AgentServiceDesiredState
 	RoleName        *string
 	DriverID        *string

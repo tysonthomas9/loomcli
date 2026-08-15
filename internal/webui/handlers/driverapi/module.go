@@ -38,6 +38,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/leadcontrol"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/trigger"
+	"github.com/tysonthomas9/loomcli/internal/webui/storeadapter"
 )
 
 // maxDriverOpBodyBytes caps inbound driver-op payloads.
@@ -584,6 +585,10 @@ func (m *Module) execTask(ctx context.Context, ws string, id driverIdentity, bod
 		return nil, err
 	}
 	opts := params.requestOptions(ws, id, fencingToken)
+	opts.WorkspaceDir = strings.TrimSpace(storeadapter.ResolveOrHealWorkspacePath(ctx, m.store, ws))
+	if opts.WorkspaceDir == "" {
+		opts.WorkspaceDir = m.worktreePath
+	}
 	executor := driverpkg.HostBridgeTaskExecutor{
 		Store:            m.store,
 		WorktreePath:     m.worktreePath,

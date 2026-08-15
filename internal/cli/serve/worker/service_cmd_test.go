@@ -56,18 +56,18 @@ func TestBuildAgentServicePatch(t *testing.T) {
 		if patch.LeaseID == nil || *patch.LeaseID != "" {
 			t.Fatalf("lease_id = %#v, want empty string patch", patch.LeaseID)
 		}
-		if _, err := buildAgentServicePatch("kind", "", true); err == nil {
-			t.Fatal("unset kind err = nil, want error")
+		if _, err := buildAgentServicePatch("trigger_kind", "", true); err == nil {
+			t.Fatal("unset trigger_kind err = nil, want error")
 		}
 	})
 }
 
 func TestAgentServiceParsingHelpers(t *testing.T) {
-	if kind, err := parseAgentServiceKind("lead"); err != nil || kind != domain.AgentServiceKindLead {
-		t.Fatalf("parseAgentServiceKind = %q err=%v, want lead", kind, err)
+	if triggerKind, err := parseAgentServiceTriggerKind("lead"); err != nil || triggerKind != domain.AgentServiceTriggerKindLead {
+		t.Fatalf("parseAgentServiceTriggerKind = %q err=%v, want lead", triggerKind, err)
 	}
-	if _, err := parseAgentServiceKind("bad"); err == nil {
-		t.Fatal("parseAgentServiceKind bad err = nil, want error")
+	if _, err := parseAgentServiceTriggerKind("bad"); err == nil {
+		t.Fatal("parseAgentServiceTriggerKind bad err = nil, want error")
 	}
 	if state, err := parseAgentServiceDesiredState("running", false); err != nil || state != domain.AgentServiceDesiredRunning {
 		t.Fatalf("parseAgentServiceDesiredState = %q err=%v, want running", state, err)

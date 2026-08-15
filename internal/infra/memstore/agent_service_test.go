@@ -35,7 +35,7 @@ func TestAgentServiceMemstoreScriptedContractAndArchiveFilter(t *testing.T) {
 
 	created, err := st.AgentServices().Create(ctx, store.AgentServiceCreate{
 		WorkspaceKey: "WS", ServiceID: "scout", Name: "Scout",
-		Kind: domain.AgentServiceKindCron, DesiredState: domain.AgentServiceDesiredRunning,
+		TriggerKind: domain.AgentServiceTriggerKindCron, DesiredState: domain.AgentServiceDesiredRunning,
 		DriverID: "scout-driver", DriverVersionID: "scout-v1", CreatedBy: "system",
 	})
 	if err != nil {
@@ -99,9 +99,9 @@ func TestAgentServiceMemstoreRequiresExactlyOneBehaviorReference(t *testing.T) {
 		name string
 		in   store.AgentServiceCreate
 	}{
-		{name: "missing", in: store.AgentServiceCreate{WorkspaceKey: "WS", ServiceID: "missing", Kind: domain.AgentServiceKindEvent}},
-		{name: "mixed", in: store.AgentServiceCreate{WorkspaceKey: "WS", ServiceID: "mixed", Kind: domain.AgentServiceKindEvent, RoleName: "triage", DriverID: "driver-1", DriverVersionID: "version-1"}},
-		{name: "partial driver", in: store.AgentServiceCreate{WorkspaceKey: "WS", ServiceID: "partial", Kind: domain.AgentServiceKindEvent, DriverID: "driver-1"}},
+		{name: "missing", in: store.AgentServiceCreate{WorkspaceKey: "WS", ServiceID: "missing", TriggerKind: domain.AgentServiceTriggerKindEvent}},
+		{name: "mixed", in: store.AgentServiceCreate{WorkspaceKey: "WS", ServiceID: "mixed", TriggerKind: domain.AgentServiceTriggerKindEvent, RoleName: "triage", DriverID: "driver-1", DriverVersionID: "version-1"}},
+		{name: "partial driver", in: store.AgentServiceCreate{WorkspaceKey: "WS", ServiceID: "partial", TriggerKind: domain.AgentServiceTriggerKindEvent, DriverID: "driver-1"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -121,7 +121,7 @@ func TestAgentServiceMemstoreLifecycle(t *testing.T) {
 		WorkspaceKey:    "WS",
 		ServiceID:       "lead",
 		Name:            "Lead",
-		Kind:            domain.AgentServiceKindLead,
+		TriggerKind:     domain.AgentServiceTriggerKindLead,
 		DesiredState:    domain.AgentServiceDesiredRunning,
 		RoleName:        "lead",
 		ProfileName:     "falcon",
@@ -151,11 +151,11 @@ func TestAgentServiceMemstoreLifecycle(t *testing.T) {
 		t.Fatalf("got = %#v, want clone-isolated service", got)
 	}
 
-	if _, err := s.AgentServices().Create(ctx, store.AgentServiceCreate{WorkspaceKey: "WS", ServiceID: "lead", Kind: domain.AgentServiceKindLead, RoleName: "lead"}); !errors.Is(err, domain.ErrAlreadyExists) {
+	if _, err := s.AgentServices().Create(ctx, store.AgentServiceCreate{WorkspaceKey: "WS", ServiceID: "lead", TriggerKind: domain.AgentServiceTriggerKindLead, RoleName: "lead"}); !errors.Is(err, domain.ErrAlreadyExists) {
 		t.Fatalf("duplicate Create err = %v, want ErrAlreadyExists", err)
 	}
-	if _, err := s.AgentServices().Create(ctx, store.AgentServiceCreate{WorkspaceKey: "WS", ServiceID: "bad", Kind: domain.AgentServiceKind("bad"), RoleName: "lead"}); !errors.Is(err, domain.ErrInvalid) {
-		t.Fatalf("invalid kind err = %v, want ErrInvalid", err)
+	if _, err := s.AgentServices().Create(ctx, store.AgentServiceCreate{WorkspaceKey: "WS", ServiceID: "bad", TriggerKind: domain.AgentServiceTriggerKind("bad"), RoleName: "lead"}); !errors.Is(err, domain.ErrInvalid) {
+		t.Fatalf("invalid trigger kind err = %v, want ErrInvalid", err)
 	}
 
 	paused := domain.AgentServiceDesiredPaused
@@ -173,7 +173,7 @@ func TestAgentServiceMemstoreLifecycle(t *testing.T) {
 		t.Fatalf("updated = %#v, want paused leased silver service", updated)
 	}
 
-	services, err := s.AgentServices().List(ctx, "WS", store.AgentServiceFilter{Kind: domain.AgentServiceKindLead, DesiredState: domain.AgentServiceDesiredPaused, RoleName: "lead", ProfileName: "falcon", Limit: 1})
+	services, err := s.AgentServices().List(ctx, "WS", store.AgentServiceFilter{TriggerKind: domain.AgentServiceTriggerKindLead, DesiredState: domain.AgentServiceDesiredPaused, RoleName: "lead", ProfileName: "falcon", Limit: 1})
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
@@ -206,7 +206,7 @@ func TestAgentServiceMemstoreReferenceValidation(t *testing.T) {
 	if _, err := s.AgentServices().Create(ctx, store.AgentServiceCreate{
 		WorkspaceKey: "WS",
 		ServiceID:    "lead",
-		Kind:         domain.AgentServiceKindLead,
+		TriggerKind:  domain.AgentServiceTriggerKindLead,
 		RoleName:     "lead",
 	}); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("Create missing role err = %v, want ErrNotFound", err)
@@ -217,7 +217,7 @@ func TestAgentServiceMemstoreReferenceValidation(t *testing.T) {
 	if _, err := s.AgentServices().Create(ctx, store.AgentServiceCreate{
 		WorkspaceKey: "WS",
 		ServiceID:    "lead",
-		Kind:         domain.AgentServiceKindLead,
+		TriggerKind:  domain.AgentServiceTriggerKindLead,
 		RoleName:     "lead",
 		ProfileName:  "falcon",
 	}); !errors.Is(err, domain.ErrNotFound) {
@@ -229,7 +229,7 @@ func TestAgentServiceMemstoreReferenceValidation(t *testing.T) {
 	if _, err := s.AgentServices().Create(ctx, store.AgentServiceCreate{
 		WorkspaceKey: "WS",
 		ServiceID:    "lead",
-		Kind:         domain.AgentServiceKindLead,
+		TriggerKind:  domain.AgentServiceTriggerKindLead,
 		RoleName:     "lead",
 		ProfileName:  "falcon",
 		TriggerRefs:  []string{"binding-1"},
@@ -260,7 +260,7 @@ func TestAgentServiceMemstoreReferenceValidation(t *testing.T) {
 	if _, err := s.AgentServices().Create(ctx, store.AgentServiceCreate{
 		WorkspaceKey: "WS",
 		ServiceID:    "lead",
-		Kind:         domain.AgentServiceKindLead,
+		TriggerKind:  domain.AgentServiceTriggerKindLead,
 		RoleName:     "lead",
 		ProfileName:  "falcon",
 	}); err != nil {
@@ -269,7 +269,7 @@ func TestAgentServiceMemstoreReferenceValidation(t *testing.T) {
 	if _, err := s.AgentServices().Create(ctx, store.AgentServiceCreate{
 		WorkspaceKey: "WS",
 		ServiceID:    "other",
-		Kind:         domain.AgentServiceKindSupport,
+		TriggerKind:  domain.AgentServiceTriggerKindEvent,
 		RoleName:     "lead",
 		ProfileName:  "falcon",
 	}); err != nil {

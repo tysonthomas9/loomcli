@@ -16,7 +16,7 @@ import (
 
 var (
 	workerServiceAddName            string
-	workerServiceAddKind            string
+	workerServiceAddTriggerKind     string
 	workerServiceAddDesiredState    string
 	workerServiceAddRoleName        string
 	workerServiceAddProfileName     string
@@ -32,7 +32,7 @@ var (
 	workerServiceAddStateRef        string
 	workerServiceAddMetadata        []string
 
-	workerServiceListKind         string
+	workerServiceListTriggerKind  string
 	workerServiceListDesiredState string
 	workerServiceListRoleName     string
 	workerServiceListProfileName  string
@@ -72,7 +72,7 @@ var workerServiceSetCmd = &cobra.Command{
 	Short: "Set an agent service field",
 	Long: `Set an agent service field by key. Supported keys:
   name              string
-  kind              lead|support|triage|on_call|scheduled|maintenance|orchestrator|always_on|cron|event|campaign_orchestrator
+  trigger_kind      lead|cron|event
   desired_state     running|stopped|paused
   role_name         string
   profile_name      string
@@ -119,7 +119,7 @@ var workerServiceRemoveCmd = &cobra.Command{
 
 func initWorkerServiceCommands() {
 	workerServiceAddCmd.Flags().StringVar(&workerServiceAddName, "name", "", "Display name (default: service ID)")
-	workerServiceAddCmd.Flags().StringVar(&workerServiceAddKind, "kind", "", "Service kind")
+	workerServiceAddCmd.Flags().StringVar(&workerServiceAddTriggerKind, "trigger-kind", "", "Service trigger kind")
 	workerServiceAddCmd.Flags().StringVar(&workerServiceAddDesiredState, "desired-state", "", "Desired state running|stopped|paused (default: stopped)")
 	workerServiceAddCmd.Flags().StringVar(&workerServiceAddRoleName, "role", "", "Role name")
 	workerServiceAddCmd.Flags().StringVar(&workerServiceAddProfileName, "profile", "", "Worker profile name")
@@ -134,10 +134,10 @@ func initWorkerServiceCommands() {
 	workerServiceAddCmd.Flags().StringVar(&workerServiceAddBudgetPolicy, "budget-policy", "", "Budget policy")
 	workerServiceAddCmd.Flags().StringVar(&workerServiceAddStateRef, "state-ref", "", "Persistent state reference")
 	workerServiceAddCmd.Flags().StringArrayVar(&workerServiceAddMetadata, "metadata", nil, "Metadata key=value (repeatable)")
-	_ = workerServiceAddCmd.MarkFlagRequired("kind")
+	_ = workerServiceAddCmd.MarkFlagRequired("trigger-kind")
 	_ = workerServiceAddCmd.MarkFlagRequired("role")
 
-	workerServiceListCmd.Flags().StringVar(&workerServiceListKind, "kind", "", "Filter by service kind")
+	workerServiceListCmd.Flags().StringVar(&workerServiceListTriggerKind, "trigger-kind", "", "Filter by service trigger kind")
 	workerServiceListCmd.Flags().StringVar(&workerServiceListDesiredState, "desired-state", "", "Filter by desired state")
 	workerServiceListCmd.Flags().StringVar(&workerServiceListRoleName, "role", "", "Filter by role name")
 	workerServiceListCmd.Flags().StringVar(&workerServiceListProfileName, "profile", "", "Filter by profile name")
@@ -155,7 +155,7 @@ func runWorkerServiceAdd(_ *cobra.Command, args []string) error {
 		if err != nil {
 			return err
 		}
-		kind, err := parseAgentServiceKind(workerServiceAddKind)
+		triggerKind, err := parseAgentServiceTriggerKind(workerServiceAddTriggerKind)
 		if err != nil {
 			return err
 		}
@@ -167,7 +167,7 @@ func runWorkerServiceAdd(_ *cobra.Command, args []string) error {
 			WorkspaceKey:    ws,
 			ServiceID:       args[0],
 			Name:            workerServiceAddName,
-			Kind:            kind,
+			TriggerKind:     triggerKind,
 			DesiredState:    desiredState,
 			RoleName:        workerServiceAddRoleName,
 			ProfileName:     workerServiceAddProfileName,
@@ -197,15 +197,15 @@ func runWorkerServiceList(_ *cobra.Command, _ []string) error {
 		if err != nil {
 			return err
 		}
-		var kind domain.AgentServiceKind
-		if strings.TrimSpace(workerServiceListKind) != "" {
-			kind, err = parseAgentServiceKind(workerServiceListKind)
+		var triggerKind domain.AgentServiceTriggerKind
+		if strings.TrimSpace(workerServiceListTriggerKind) != "" {
+			triggerKind, err = parseAgentServiceTriggerKind(workerServiceListTriggerKind)
 			if err != nil {
 				return err
 			}
 		}
 		services, err := h.Store.AgentServices().List(ctx, ws, store.AgentServiceFilter{
-			Kind:         kind,
+			TriggerKind:  triggerKind,
 			DesiredState: desiredState,
 			RoleName:     workerServiceListRoleName,
 			ProfileName:  workerServiceListProfileName,
@@ -222,7 +222,7 @@ func runWorkerServiceList(_ *cobra.Command, _ []string) error {
 			return nil
 		}
 		for _, svc := range services {
-			fmt.Printf("%-24s %-14s %-10s %-14s %-14s %d\n", svc.ServiceID, svc.Kind, svc.DesiredState, svc.RoleName, svc.ProfileName, svc.MaxInstances)
+			fmt.Printf("%-24s %-14s %-10s %-14s %-14s %d\n", svc.ServiceID, svc.TriggerKind, svc.DesiredState, svc.RoleName, svc.ProfileName, svc.MaxInstances)
 		}
 		return nil
 	})
@@ -286,7 +286,7 @@ func printAgentService(svc *domain.AgentService) {
 	fmt.Printf("Workspace:      %s\n", svc.WorkspaceKey)
 	fmt.Printf("Service ID:     %s\n", svc.ServiceID)
 	fmt.Printf("Name:           %s\n", svc.Name)
-	fmt.Printf("Kind:           %s\n", svc.Kind)
+	fmt.Printf("Trigger kind:   %s\n", svc.TriggerKind)
 	fmt.Printf("Desired state:  %s\n", svc.DesiredState)
 	fmt.Printf("Role:           %s\n", svc.RoleName)
 	if svc.ProfileName != "" {
@@ -327,7 +327,7 @@ func buildAgentServicePatch(key, value string, unset bool) (store.AgentServiceUp
 	case "name", "role_name", "profile_name", "schedule_id", "placement_policy",
 		"lease_id", "restart_policy", "budget_policy", "state_ref":
 		return buildAgentServiceStringPatch(key, value, unset)
-	case "kind", "desired_state", "max_instances":
+	case "trigger_kind", "desired_state", "max_instances":
 		return buildAgentServiceTypedPatch(key, value, unset)
 	case "event_sources", "trigger_refs", "permissions", "metadata":
 		return buildAgentServiceListPatch(key, value, unset)
@@ -375,15 +375,15 @@ func buildAgentServiceStringPatch(key, value string, unset bool) (store.AgentSer
 func buildAgentServiceTypedPatch(key, value string, unset bool) (store.AgentServiceUpdate, error) {
 	var patch store.AgentServiceUpdate
 	switch key {
-	case "kind":
+	case "trigger_kind":
 		if unset {
-			return patch, fmt.Errorf("kind cannot be unset")
+			return patch, fmt.Errorf("trigger_kind cannot be unset")
 		}
-		kind, err := parseAgentServiceKind(value)
+		triggerKind, err := parseAgentServiceTriggerKind(value)
 		if err != nil {
 			return patch, err
 		}
-		patch.Kind = &kind
+		patch.TriggerKind = &triggerKind
 	case "desired_state":
 		if unset {
 			return patch, fmt.Errorf("desired_state cannot be unset")
@@ -438,16 +438,13 @@ func buildAgentServiceListPatch(key, value string, unset bool) (store.AgentServi
 	return patch, nil
 }
 
-func parseAgentServiceKind(raw string) (domain.AgentServiceKind, error) {
-	kind := domain.AgentServiceKind(strings.TrimSpace(raw))
-	switch kind {
-	case domain.AgentServiceKindLead, domain.AgentServiceKindSupport, domain.AgentServiceKindTriage,
-		domain.AgentServiceKindOnCall, domain.AgentServiceKindScheduled, domain.AgentServiceKindMaintenance,
-		domain.AgentServiceKindOrchestrator, domain.AgentServiceKindAlwaysOn, domain.AgentServiceKindCron,
-		domain.AgentServiceKindEvent, domain.AgentServiceKindCampaignOrchestrator:
-		return kind, nil
+func parseAgentServiceTriggerKind(raw string) (domain.AgentServiceTriggerKind, error) {
+	triggerKind := domain.AgentServiceTriggerKind(strings.TrimSpace(raw))
+	switch triggerKind {
+	case domain.AgentServiceTriggerKindLead, domain.AgentServiceTriggerKindCron, domain.AgentServiceTriggerKindEvent:
+		return triggerKind, nil
 	default:
-		return "", fmt.Errorf("unsupported agent service kind %q", raw)
+		return "", fmt.Errorf("unsupported agent service trigger kind %q", raw)
 	}
 }
 

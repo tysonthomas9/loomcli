@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/agentprovision"
 	"github.com/tysonthomas9/loomcli/internal/backend/api/gen"
 	"github.com/tysonthomas9/loomcli/internal/connector"
 	"github.com/tysonthomas9/loomcli/internal/connector/providers"
@@ -340,28 +341,51 @@ func (m *Module) ensureReviewerAgent(ctx context.Context, ws, agentName, repo st
 	}
 	backend := m.reviewerBackend(ctx, ws)
 	repos := reviewerRepos(repo)
-	_, err := m.store.Agents().Create(ctx, store.AgentCreate{
+	create := store.AgentCreate{
 		WorkspaceKey: ws,
 		Name:         agentName,
 		RoleName:     reviewerRoleName,
 		Backend:      backend,
 		Repos:        repos,
 		DesiredState: domain.AgentDesiredRunning,
+	}
+	_, err := agentprovision.Ensure(ctx, create, agentprovision.Reconciler[domain.Agent, store.AgentCreate, store.AgentUpdate]{
+		Get: func(ctx context.Context) (*domain.Agent, error) {
+			return m.store.Agents().Get(ctx, ws, agentName)
+		},
+		Create: m.store.Agents().Create,
+		Diff: func(agent *domain.Agent) (store.AgentUpdate, bool) {
+			if !reviewerAgentCurrent(agent, backend, reviewerRoleName) {
+				running := domain.AgentDesiredRunning
+				patch := store.AgentUpdate{Backend: &backend, RoleName: ptrReviewer(reviewerRoleName), DesiredState: &running}
+				if len(repos) > 0 {
+					patch.Repos = &repos
+				}
+				return patch, true
+			}
+			if len(repos) > 0 && !reviewerHasRepo(agent, repos[0]) {
+				return store.AgentUpdate{Repos: &repos}, true
+			}
+			return store.AgentUpdate{}, false
+		},
+		BeforePatch: func(ctx context.Context, _ *domain.Agent, patch store.AgentUpdate) error {
+			if patch.Backend == nil && patch.RoleName == nil {
+				return nil
+			}
+			return m.stopAndClearReviewerRuntime(ctx, ws, agentName)
+		},
+		Patch: func(ctx context.Context, _ *domain.Agent, patch store.AgentUpdate) (*domain.Agent, error) {
+			updated, err := m.store.Agents().Update(ctx, ws, agentName, patch)
+			if err != nil {
+				return nil, fmt.Errorf("update reviewer agent: %w", err)
+			}
+			return updated, nil
+		},
 	})
-	if err == nil {
-		return nil
+	if err != nil {
+		return fmt.Errorf("ensure reviewer agent: %w", err)
 	}
-	if !errors.Is(err, domain.ErrAlreadyExists) {
-		return fmt.Errorf("create reviewer agent: %w", err)
-	}
-	agent, getErr := m.store.Agents().Get(ctx, ws, agentName)
-	if getErr != nil {
-		return fmt.Errorf("load existing reviewer agent: %w", getErr)
-	}
-	if !reviewerAgentCurrent(agent, backend, reviewerRoleName) {
-		return m.migrateReviewer(ctx, ws, agentName, backend, reviewerRoleName, repos)
-	}
-	return m.ensureReviewerRepos(ctx, ws, agentName, agent, repos)
+	return nil
 }
 
 func reviewerRepos(repo string) []string {
@@ -381,17 +405,7 @@ func reviewerHasRepo(agent *domain.Agent, repo string) bool {
 	})
 }
 
-func (m *Module) ensureReviewerRepos(ctx context.Context, ws, agentName string, agent *domain.Agent, repos []string) error {
-	if len(repos) == 0 || reviewerHasRepo(agent, repos[0]) {
-		return nil
-	}
-	if _, err := m.store.Agents().Update(ctx, ws, agentName, store.AgentUpdate{
-		Repos: &repos,
-	}); err != nil {
-		return fmt.Errorf("update reviewer agent repos: %w", err)
-	}
-	return nil
-}
+func ptrReviewer(value string) *string { return &value }
 
 func (m *Module) ensureReviewerAgentAndRetireLegacy(
 	ctx context.Context,
@@ -446,33 +460,47 @@ func (m *Module) retireReviewerAgent(ctx context.Context, ws, agentName string) 
 }
 
 func (m *Module) ensureReviewerRole(ctx context.Context, ws string) error {
-	if _, err := m.store.Roles().Create(ctx, store.RoleCreate{
+	create := store.RoleCreate{
 		WorkspaceKey: ws,
 		Name:         reviewerRoleName,
 		Kind:         string(domain.RoleKindInteractive),
 		Description:  reviewerRoleDescription,
 		PromptFile:   reviewerPromptFile,
-	}); err == nil {
-		return nil
-	} else if !errors.Is(err, domain.ErrAlreadyExists) {
-		return fmt.Errorf("create reviewer role: %w", err)
 	}
-	role, err := m.store.Roles().Get(ctx, ws, reviewerRoleName)
+	_, err := agentprovision.Ensure(ctx, create, agentprovision.Reconciler[domain.Role, store.RoleCreate, store.RoleUpdate]{
+		Get: func(ctx context.Context) (*domain.Role, error) {
+			return m.store.Roles().Get(ctx, ws, reviewerRoleName)
+		},
+		Create: m.store.Roles().Create,
+		Diff:   reviewerRolePatch,
+		Patch: func(ctx context.Context, _ *domain.Role, patch store.RoleUpdate) (*domain.Role, error) {
+			updated, err := m.store.Roles().Update(ctx, ws, reviewerRoleName, patch)
+			if !errors.Is(err, domain.ErrConflict) {
+				return updated, err
+			}
+			latest, getErr := m.store.Roles().Get(ctx, ws, reviewerRoleName)
+			if getErr != nil {
+				return nil, getErr
+			}
+			retry, changed := reviewerRolePatch(latest)
+			if !changed {
+				return latest, nil
+			}
+			return m.store.Roles().Update(ctx, ws, reviewerRoleName, retry)
+		},
+	})
 	if err != nil {
-		return fmt.Errorf("load reviewer role: %w", err)
+		return fmt.Errorf("ensure reviewer role: %w", err)
 	}
-	return m.reconcileReviewerRole(ctx, ws, role)
+	return nil
 }
 
-func (m *Module) reconcileReviewerRole(ctx context.Context, ws string, role *domain.Role) error {
-	if role == nil {
-		return fmt.Errorf("load reviewer role: %w", domain.ErrNotFound)
-	}
+func reviewerRolePatch(role *domain.Role) (store.RoleUpdate, bool) {
 	kind := string(domain.RoleKindInteractive)
 	prompt := ""
 	promptFile := reviewerPromptFile
 	description := reviewerRoleDescription
-	patch := store.RoleUpdate{}
+	patch := store.RoleUpdate{ExpectedUpdatedAt: &role.UpdatedAt}
 	if role.Kind != domain.RoleKindInteractive {
 		patch.Kind = &kind
 	}
@@ -486,12 +514,9 @@ func (m *Module) reconcileReviewerRole(ctx context.Context, ws string, role *dom
 		patch.Description = &description
 	}
 	if patch.Kind == nil && patch.Prompt == nil && patch.PromptFile == nil && patch.Description == nil {
-		return nil
+		return store.RoleUpdate{}, false
 	}
-	if _, err := m.store.Roles().Update(ctx, ws, reviewerRoleName, patch); err != nil {
-		return fmt.Errorf("reconcile reviewer role: %w", err)
-	}
-	return nil
+	return patch, true
 }
 
 // reviewerBackend resolves the backend for a reviewer agent: the workspace's
@@ -506,30 +531,12 @@ func (m *Module) reviewerBackend(ctx context.Context, ws string) string {
 	return backend
 }
 
-// migrateReviewer switches an existing reviewer agent to the workspace's
-// current backend and role. Order matters: the old runtime's PTY is killed
+// stopAndClearReviewerRuntime is the ordered BeforePatch arm for switching an
+// existing reviewer agent to the workspace's current backend and role. Order
+// matters: the old runtime's PTY is killed
 // first so it cannot keep overwriting the orchestration session's runtime
 // metadata after the clear, then stale provider identity keys are removed so
 // the new runtime starts from a clean slate, then the agent record flips.
-func (m *Module) migrateReviewer(ctx context.Context, ws, agentName, backend, roleName string, repos []string) error {
-	if err := m.stopAndClearReviewerRuntime(ctx, ws, agentName); err != nil {
-		return err
-	}
-	running := domain.AgentDesiredRunning
-	patch := store.AgentUpdate{
-		Backend:      &backend,
-		RoleName:     &roleName,
-		DesiredState: &running,
-	}
-	if len(repos) > 0 {
-		patch.Repos = &repos
-	}
-	if _, err := m.store.Agents().Update(ctx, ws, agentName, patch); err != nil {
-		return fmt.Errorf("update reviewer agent: %w", err)
-	}
-	return nil
-}
-
 func (m *Module) stopAndClearReviewerRuntime(ctx context.Context, ws, agentName string) error {
 	if m.terminalSvc != nil {
 		tabs, err := m.terminalSvc.ListTabs(ctx, ws)

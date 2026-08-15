@@ -19,7 +19,7 @@ func (s *agentServiceStore) Create(ctx context.Context, in store.AgentServiceCre
 	body := struct {
 		ServiceID       string                          `json:"service_id"`
 		Name            string                          `json:"name,omitempty"`
-		Kind            domain.AgentServiceKind         `json:"kind"`
+		TriggerKind     domain.AgentServiceTriggerKind  `json:"trigger_kind"`
 		DesiredState    domain.AgentServiceDesiredState `json:"desired_state,omitempty"`
 		RoleName        string                          `json:"role_name,omitempty"`
 		DriverID        string                          `json:"driver_id,omitempty"`
@@ -39,7 +39,7 @@ func (s *agentServiceStore) Create(ctx context.Context, in store.AgentServiceCre
 	}{
 		ServiceID:       in.ServiceID,
 		Name:            in.Name,
-		Kind:            in.Kind,
+		TriggerKind:     in.TriggerKind,
 		DesiredState:    in.DesiredState,
 		RoleName:        in.RoleName,
 		DriverID:        in.DriverID,
@@ -75,8 +75,8 @@ func (s *agentServiceStore) Get(ctx context.Context, ws, serviceID string) (*dom
 
 func (s *agentServiceStore) List(ctx context.Context, ws string, filter store.AgentServiceFilter) ([]*domain.AgentService, error) {
 	q := url.Values{}
-	if filter.Kind != "" {
-		q.Set("kind", string(filter.Kind))
+	if filter.TriggerKind != "" {
+		q.Set("trigger_kind", string(filter.TriggerKind))
 	}
 	if filter.DesiredState != "" {
 		q.Set("desired_state", string(filter.DesiredState))
@@ -109,7 +109,7 @@ func (s *agentServiceStore) List(ctx context.Context, ws string, filter store.Ag
 func (s *agentServiceStore) Update(ctx context.Context, ws, serviceID string, patch store.AgentServiceUpdate) (*domain.AgentService, error) {
 	body := struct {
 		Name            *string                          `json:"name,omitempty"`
-		Kind            *domain.AgentServiceKind         `json:"kind,omitempty"`
+		TriggerKind     *domain.AgentServiceTriggerKind  `json:"trigger_kind,omitempty"`
 		DesiredState    *domain.AgentServiceDesiredState `json:"desired_state,omitempty"`
 		RoleName        *string                          `json:"role_name,omitempty"`
 		DriverID        *string                          `json:"driver_id,omitempty"`
@@ -128,7 +128,7 @@ func (s *agentServiceStore) Update(ctx context.Context, ws, serviceID string, pa
 		Metadata        *map[string]string               `json:"metadata,omitempty"`
 	}{
 		Name:            patch.Name,
-		Kind:            patch.Kind,
+		TriggerKind:     patch.TriggerKind,
 		DesiredState:    patch.DesiredState,
 		RoleName:        patch.RoleName,
 		DriverID:        patch.DriverID,

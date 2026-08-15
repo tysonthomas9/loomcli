@@ -17,15 +17,16 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/driver"
+	"github.com/tysonthomas9/loomcli/internal/scriptedroles"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
 const (
-	BuiltinEpicRunnerWorkflowName        = "epic-runner"
+	BuiltinEpicRunnerWorkflowName        = scriptedroles.EpicRunnerWorkflowName
 	BuiltinGitHubReviewAgentWorkflowName = "github-review-agent"
 	BuiltinGitHubReviewTaskRunnerName    = "github-review-task-runner"
-	BuiltinScoutWorkflowName             = "scout"
-	BuiltinScoutTaskRunnerName           = "scout-task-runner"
+	BuiltinScoutWorkflowName             = scriptedroles.ScoutWorkflowName
+	BuiltinScoutTaskRunnerName           = scriptedroles.ScoutTaskRunnerEntrypoint
 )
 
 //go:embed builtin/epic-runner.ts

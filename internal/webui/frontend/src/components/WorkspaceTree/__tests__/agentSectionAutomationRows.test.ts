@@ -12,9 +12,14 @@ function service(id: string, name: string): AgentServiceDTO {
   return {
     id,
     name,
-    kind: "scripted",
+    triggerKind: "cron",
     enabled: true,
-    behavior: { driverId: id, driverVersionId: "v1" },
+    behavior: {
+      roleName: id,
+      roleDisplayName: name,
+      workflowName: id,
+      scripted: true,
+    },
     bindings: [
       {
         id: `${id}-weekly`,

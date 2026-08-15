@@ -407,11 +407,13 @@ describe("AgentsPage", () => {
       {
         id: "scout",
         name: "Scout",
-        kind: "scripted",
+        triggerKind: "cron",
         enabled: true,
         behavior: {
-          driverId: "scout-driver",
-          driverVersionId: "scout-v1",
+          roleName: "scout",
+          roleDisplayName: "Scout",
+          workflowName: "scout",
+          scripted: true,
         },
         bindings: [
           {
@@ -452,7 +454,7 @@ describe("AgentsPage", () => {
       "Scout",
     );
     expect(screen.getByTestId("agent-service-detail")).toHaveTextContent(
-      "scout-driver",
+      "Scout scripted role",
     );
     expect(screen.getByTestId("agent-service-detail")).toHaveTextContent(
       "Weekly",
@@ -475,9 +477,14 @@ describe("AgentsPage", () => {
       {
         id: "scout",
         name: "Scout",
-        kind: "scripted",
+        triggerKind: "cron",
         enabled: true,
-        behavior: { driverId: "scout", driverVersionId: "v1" },
+        behavior: {
+          roleName: "scout",
+          roleDisplayName: "Scout",
+          workflowName: "scout",
+          scripted: true,
+        },
         bindings: [],
         nextFireAt: null,
         lastRunStatus: "",

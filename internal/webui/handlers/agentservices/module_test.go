@@ -16,10 +16,16 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	"github.com/tysonthomas9/loomcli/internal/scriptedroles"
 	"github.com/tysonthomas9/loomcli/internal/sessions/transcript"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/taskrunlogs"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/misc"
+)
+
+const (
+	testScoutDriverID        = "scout"
+	testScoutDriverVersionID = "scout-v1"
 )
 
 func TestListAgentServicesIncludesZeroBindingRecordWithExplicitHealth(t *testing.T) {
@@ -44,8 +50,12 @@ func TestListAgentServicesIncludesZeroBindingRecordWithExplicitHealth(t *testing
 		t.Fatalf("response = %#v", raw)
 	}
 	item := raw.Data[0]
-	if item["id"] != "scout" || item["kind"] != "scripted" || item["enabled"] != true {
+	if item["id"] != "scout" || item["triggerKind"] != "cron" || item["enabled"] != true {
 		t.Fatalf("identity = %#v", item)
+	}
+	behavior, ok := item["behavior"].(map[string]interface{})
+	if !ok || behavior["roleName"] != "scout" || behavior["workflowName"] != "scout" || behavior["scripted"] != true {
+		t.Fatalf("behavior = %#v, want catalog-resolved scout role metadata", item["behavior"])
 	}
 	bindings, ok := item["bindings"].([]interface{})
 	if !ok || len(bindings) != 0 {
@@ -66,7 +76,7 @@ func TestListAgentServicesDecoratesCronAndManualRunHealth(t *testing.T) {
 	st, svc := seededAgentServiceStore(t)
 	if _, err := st.TriggerBindings().Create(t.Context(), store.TriggerBindingCreate{
 		WorkspaceKey: "WS", BindingID: "binding-cron-scout-weekly", Name: "Scout weekly", SourceKind: "cron",
-		RouteKey: "cron.scout.weekly", DriverID: svc.DriverID, DriverVersionID: svc.DriverVersionID,
+		RouteKey: "cron.scout.weekly", DriverID: testScoutDriverID, DriverVersionID: testScoutDriverVersionID,
 		TargetAgentServiceID: svc.ServiceID, Schedule: "@weekly", Enabled: true,
 	}); err != nil {
 		t.Fatalf("create binding: %v", err)
@@ -75,7 +85,7 @@ func TestListAgentServicesDecoratesCronAndManualRunHealth(t *testing.T) {
 	finishAgentServiceRun(t, st, svc, "run-failed-1", domain.DriverRunFailed)
 	finishAgentServiceRun(t, st, svc, "run-failed-2", domain.DriverRunFailed)
 	if _, err := st.DriverRuns().Create(t.Context(), store.DriverRunCreate{
-		WorkspaceKey: "WS", RunID: "run-manual", DriverID: svc.DriverID, DriverVersionID: svc.DriverVersionID,
+		WorkspaceKey: "WS", RunID: "run-manual", DriverID: testScoutDriverID, DriverVersionID: testScoutDriverVersionID,
 		SourceKind: "api", SourceRef: "/manual", AgentServiceID: svc.ServiceID,
 	}); err != nil {
 		t.Fatalf("create manual run: %v", err)
@@ -135,8 +145,8 @@ func TestListAgentServiceRunsDefaultsToTwentyNewestCamelCaseRuns(t *testing.T) {
 	st, svc := seededAgentServiceStore(t)
 	for i := 0; i < 21; i++ {
 		if _, err := st.DriverRuns().Create(t.Context(), store.DriverRunCreate{
-			WorkspaceKey: "WS", RunID: fmt.Sprintf("run-%02d", i), DriverID: svc.DriverID,
-			DriverVersionID: svc.DriverVersionID, AgentServiceID: svc.ServiceID, SourceKind: "api",
+			WorkspaceKey: "WS", RunID: fmt.Sprintf("run-%02d", i), DriverID: testScoutDriverID,
+			DriverVersionID: testScoutDriverVersionID, AgentServiceID: svc.ServiceID, SourceKind: "api",
 		}); err != nil {
 			t.Fatalf("create run %d: %v", i, err)
 		}
@@ -170,7 +180,7 @@ func TestListAgentServiceRunsDefaultsToTwentyNewestCamelCaseRuns(t *testing.T) {
 func TestGetAgentServiceJournalReturnsScoutJournal(t *testing.T) {
 	st, _ := seededAgentServiceStore(t)
 	runtimeDir := t.TempDir()
-	journalPath := filepath.Join(runtimeDir, journalFilename)
+	journalPath := filepath.Join(runtimeDir, scoutJournalFilename(t))
 	content := "# Scout journal\n\nReviewed the backlog.\n"
 	if err := os.WriteFile(journalPath, []byte(content), 0o600); err != nil {
 		t.Fatalf("write journal: %v", err)
@@ -188,7 +198,7 @@ func TestGetAgentServiceJournalReturnsScoutJournal(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if !response.Success || response.Data.ServiceID != "scout" || response.Data.Filename != journalFilename {
+	if !response.Success || response.Data.ServiceID != "scout" || response.Data.Filename != scoutJournalFilename(t) {
 		t.Fatalf("response = %#v", response)
 	}
 	if response.Data.Content != content || !response.Data.ModifiedAt.Equal(modifiedAt) || response.Data.Truncated {
@@ -457,8 +467,8 @@ func TestGetAgentServiceJournalReturnsNotFoundBeforeFirstScoutRun(t *testing.T) 
 }
 
 func TestGetAgentServiceJournalRejectsServiceWithoutJournal(t *testing.T) {
-	st, svc := seededAgentServiceStore(t)
-	createAgentService(t, st, svc, "reviewer")
+	st, _ := seededAgentServiceStore(t)
+	createAgentService(t, st, "reviewer")
 	rec := getAgentServiceJournal(t, NewModule(st, t.TempDir()), "reviewer")
 	if rec.Code != http.StatusNotFound || !strings.Contains(rec.Body.String(), "this agent has no journal") {
 		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
@@ -478,7 +488,7 @@ func TestGetAgentServiceJournalReturnsLast512KiB(t *testing.T) {
 	runtimeDir := t.TempDir()
 	tail := bytes.Repeat([]byte("z"), maxJournalBytes)
 	content := append(bytes.Repeat([]byte("discarded"), 100), tail...)
-	if err := os.WriteFile(filepath.Join(runtimeDir, journalFilename), content, 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(runtimeDir, scoutJournalFilename(t)), content, 0o600); err != nil {
 		t.Fatalf("write journal: %v", err)
 	}
 
@@ -496,17 +506,17 @@ func TestGetAgentServiceJournalReturnsLast512KiB(t *testing.T) {
 }
 
 func TestGetAgentServiceJournalNeverUsesServiceIDAsAPath(t *testing.T) {
-	st, svc := seededAgentServiceStore(t)
-	createAgentService(t, st, svc, "../evil")
+	st, _ := seededAgentServiceStore(t)
+	createAgentService(t, st, "../evil")
 	runtimeDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(runtimeDir, journalFilename), []byte("safe journal"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(runtimeDir, scoutJournalFilename(t)), []byte("safe journal"), 0o600); err != nil {
 		t.Fatalf("write fixed journal: %v", err)
 	}
 	siblingDir := filepath.Join(filepath.Dir(runtimeDir), "evil")
 	if err := os.Mkdir(siblingDir, 0o700); err != nil {
 		t.Fatalf("make traversal target: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(siblingDir, journalFilename), []byte("traversed journal"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(siblingDir, scoutJournalFilename(t)), []byte("traversed journal"), 0o600); err != nil {
 		t.Fatalf("write traversal target: %v", err)
 	}
 
@@ -547,12 +557,12 @@ func getTaskRunTranscript(t *testing.T, module *Module, taskRunID string) *httpt
 	return rec
 }
 
-func createAgentService(t *testing.T, st store.Store, behavior *domain.AgentService, serviceID string) {
+func createAgentService(t *testing.T, st store.Store, serviceID string) {
 	t.Helper()
 	if _, err := st.AgentServices().Create(t.Context(), store.AgentServiceCreate{
-		WorkspaceKey: "WS", ServiceID: serviceID, Name: serviceID, Kind: domain.AgentServiceKindCron,
-		DesiredState: domain.AgentServiceDesiredRunning, DriverID: behavior.DriverID,
-		DriverVersionID: behavior.DriverVersionID, CreatedBy: "system",
+		WorkspaceKey: "WS", ServiceID: serviceID, Name: serviceID, TriggerKind: domain.AgentServiceTriggerKindCron,
+		DesiredState: domain.AgentServiceDesiredRunning, DriverID: testScoutDriverID,
+		DriverVersionID: testScoutDriverVersionID, CreatedBy: "system",
 	}); err != nil {
 		t.Fatalf("create agent service %q: %v", serviceID, err)
 	}
@@ -562,20 +572,26 @@ func seededAgentServiceStore(t *testing.T) (*memstore.Store, *domain.AgentServic
 	t.Helper()
 	st := memstore.New()
 	if _, err := st.Drivers().Create(t.Context(), store.DriverCreate{
-		WorkspaceKey: "WS", DriverID: "scout", Name: "scout", Status: domain.DriverStatusActive,
+		WorkspaceKey: "WS", DriverID: testScoutDriverID, Name: "scout", Status: domain.DriverStatusActive,
 	}); err != nil {
 		t.Fatalf("create driver: %v", err)
 	}
 	if _, err := st.DriverVersions().Create(t.Context(), store.DriverVersionCreate{
-		WorkspaceKey: "WS", VersionID: "scout-v1", DriverID: "scout", Version: 1,
+		WorkspaceKey: "WS", VersionID: testScoutDriverVersionID, DriverID: testScoutDriverID, Version: 1,
 		SourceDigest: "sha256:source", BundleDigest: "sha256:bundle",
 		ValidationStatus: domain.DriverVersionValidationPassed,
 	}); err != nil {
 		t.Fatalf("create driver version: %v", err)
 	}
+	spec := scoutSpec(t)
+	if _, err := st.Roles().Create(t.Context(), store.RoleCreate{
+		WorkspaceKey: "WS", Name: spec.RoleName, Kind: string(spec.DefaultRole.Kind), PromptFile: ".loom/prompts/scout.md",
+	}); err != nil {
+		t.Fatalf("create scout role: %v", err)
+	}
 	svc, err := st.AgentServices().Create(t.Context(), store.AgentServiceCreate{
-		WorkspaceKey: "WS", ServiceID: "scout", Name: "Scout", Kind: domain.AgentServiceKindCron,
-		DesiredState: domain.AgentServiceDesiredRunning, DriverID: "scout", DriverVersionID: "scout-v1", CreatedBy: "system",
+		WorkspaceKey: "WS", ServiceID: "scout", Name: "Scout", TriggerKind: domain.AgentServiceTriggerKindCron,
+		DesiredState: domain.AgentServiceDesiredRunning, RoleName: spec.RoleName, CreatedBy: "system",
 	})
 	if err != nil {
 		t.Fatalf("create agent service: %v", err)
@@ -583,10 +599,24 @@ func seededAgentServiceStore(t *testing.T) (*memstore.Store, *domain.AgentServic
 	return st, svc
 }
 
+func scoutSpec(t testing.TB) scriptedroles.ScriptedRole {
+	t.Helper()
+	spec, ok := scriptedroles.ForRole(scriptedroles.ScoutRoleName)
+	if !ok {
+		t.Fatal("scout catalog row is missing")
+	}
+	return spec
+}
+
+func scoutJournalFilename(t testing.TB) string {
+	t.Helper()
+	return scoutSpec(t).JournalFilename
+}
+
 func finishAgentServiceRun(t *testing.T, st store.Store, svc *domain.AgentService, runID string, status domain.DriverRunStatus) {
 	t.Helper()
 	if _, err := st.DriverRuns().Create(t.Context(), store.DriverRunCreate{
-		WorkspaceKey: "WS", RunID: runID, DriverID: svc.DriverID, DriverVersionID: svc.DriverVersionID,
+		WorkspaceKey: "WS", RunID: runID, DriverID: testScoutDriverID, DriverVersionID: testScoutDriverVersionID,
 		AgentServiceID: svc.ServiceID,
 	}); err != nil {
 		t.Fatalf("create %s: %v", runID, err)
@@ -605,8 +635,8 @@ func finishAgentServiceRun(t *testing.T, st store.Store, svc *domain.AgentServic
 func createAgentServiceRun(t *testing.T, st store.Store, svc *domain.AgentService, runID string) *domain.DriverRun {
 	t.Helper()
 	run, err := st.DriverRuns().Create(t.Context(), store.DriverRunCreate{
-		WorkspaceKey: "WS", RunID: runID, DriverID: svc.DriverID,
-		DriverVersionID: svc.DriverVersionID, AgentServiceID: svc.ServiceID,
+		WorkspaceKey: "WS", RunID: runID, DriverID: testScoutDriverID,
+		DriverVersionID: testScoutDriverVersionID, AgentServiceID: svc.ServiceID,
 	})
 	if err != nil {
 		t.Fatalf("create agent service run %s: %v", runID, err)

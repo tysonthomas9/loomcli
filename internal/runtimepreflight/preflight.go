@@ -21,11 +21,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
-// LocalTaskRunnerEntrypoint is the runner name that routes to the bundled
-// local task runner (which execs the backend CLI). Preflight only fires for
-// this runner; daytona/openshell/other explicit runners are not gated here.
-const LocalTaskRunnerEntrypoint = "local-task-runner"
-
 // DefaultBackend mirrors the workspace default backend (Settings "Project
 // Default Backend") used when no DaemonProfile.AgentBackend is set.
 const DefaultBackend = backendnames.Codex

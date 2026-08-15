@@ -33,8 +33,11 @@ export interface AgentServiceDetailProps {
 }
 
 function behaviorLabel(service: AgentServiceDTO): string {
-  if (service.kind === "scripted") return "Scripted autonomous agent";
-  if (service.kind === "prompt") return "Prompt autonomous agent";
+  if (service.behavior.scripted) {
+    const role = service.behavior.roleDisplayName?.trim();
+    return role ? `${role} scripted role` : "Scripted autonomous agent";
+  }
+  if (service.behavior.roleName?.trim()) return "Prompt autonomous agent";
   return "Autonomous agent";
 }
 
@@ -311,8 +314,8 @@ export function AgentServiceDetail({
                 <dd>{service.id}</dd>
               </div>
               <div>
-                <dt>Kind</dt>
-                <dd>{formatStatusLabel(service.kind)}</dd>
+                <dt>Trigger kind</dt>
+                <dd>{formatStatusLabel(service.triggerKind)}</dd>
               </div>
               <div>
                 <dt>Desired state</dt>
@@ -360,16 +363,6 @@ export function AgentServiceDetail({
               workspaceId={workspaceId}
               roleName={service.behavior.roleName.trim()}
             />
-          ) : service.kind === "scripted" ? (
-            <section
-              className={styles.card}
-              data-testid="scripted-agent-prompt-note"
-            >
-              <p className={styles.emptyText}>
-                Scripted agent — behavior comes from its driver, not a role
-                prompt.
-              </p>
-            </section>
           ) : null}
 
           <section className={styles.card}>

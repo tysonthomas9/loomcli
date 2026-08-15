@@ -120,20 +120,12 @@ type WorkerProfile struct {
 	UpdatedAt     time.Time         `json:"updated_at"`
 }
 
-type AgentServiceKind string
+type AgentServiceTriggerKind string
 
 const (
-	AgentServiceKindLead                 AgentServiceKind = "lead"
-	AgentServiceKindSupport              AgentServiceKind = "support"
-	AgentServiceKindTriage               AgentServiceKind = "triage"
-	AgentServiceKindOnCall               AgentServiceKind = "on_call"
-	AgentServiceKindScheduled            AgentServiceKind = "scheduled"
-	AgentServiceKindMaintenance          AgentServiceKind = "maintenance"
-	AgentServiceKindOrchestrator         AgentServiceKind = "orchestrator"
-	AgentServiceKindAlwaysOn             AgentServiceKind = "always_on"
-	AgentServiceKindCron                 AgentServiceKind = "cron"
-	AgentServiceKindEvent                AgentServiceKind = "event"
-	AgentServiceKindCampaignOrchestrator AgentServiceKind = "campaign_orchestrator"
+	AgentServiceTriggerKindLead  AgentServiceTriggerKind = "lead"
+	AgentServiceTriggerKindCron  AgentServiceTriggerKind = "cron"
+	AgentServiceTriggerKindEvent AgentServiceTriggerKind = "event"
 )
 
 type AgentServiceDesiredState string
@@ -148,7 +140,7 @@ type AgentService struct {
 	WorkspaceKey    string                   `json:"workspace_key"`
 	ServiceID       string                   `json:"service_id"`
 	Name            string                   `json:"name"`
-	Kind            AgentServiceKind         `json:"kind"`
+	TriggerKind     AgentServiceTriggerKind  `json:"trigger_kind"`
 	DesiredState    AgentServiceDesiredState `json:"desired_state"`
 	RoleName        string                   `json:"role_name"`
 	DriverID        string                   `json:"driver_id,omitempty"`

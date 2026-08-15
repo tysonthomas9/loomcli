@@ -18,6 +18,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	driverpkg "github.com/tysonthomas9/loomcli/internal/driver"
 	"github.com/tysonthomas9/loomcli/internal/runtimepreflight"
+	"github.com/tysonthomas9/loomcli/internal/scriptedroles"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/workflows"
 )
@@ -478,17 +479,8 @@ func workflowMissingPrerequisites(source *workflows.LocalSource) []string {
 }
 
 func workflowRunRequiresLocalPreflight(driverID string, payload json.RawMessage) bool {
-	switch strings.TrimSpace(driverID) {
-	case workflows.BuiltinEpicRunnerWorkflowName:
-		runner := strings.TrimSpace(payloadRunner(payload))
-		return runner == "" || runner == runtimepreflight.LocalTaskRunnerEntrypoint
-	case workflows.BuiltinScoutWorkflowName:
-		// The scout's analysis leaf always execs the workspace-default backend
-		// CLI on the host, so the same fail-closed backend check applies.
-		return true
-	default:
-		return false
-	}
+	role, ok := scriptedroles.ForWorkflow(driverID)
+	return ok && scriptedroles.NeedsPreflight(role, payloadRunner(payload))
 }
 
 func payloadRunner(payload json.RawMessage) string {

@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/scriptedroles"
 	"github.com/tysonthomas9/loomcli/internal/sessions/transcript"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/trigger"
@@ -29,7 +30,6 @@ const (
 	defaultRunsLimit = 20
 	maxRunsLimit     = 1000
 	healthScanLimit  = 100
-	journalFilename  = "history.md"
 	maxJournalBytes  = 512 * 1024
 )
 
@@ -61,7 +61,7 @@ func (m *Module) Register(mux *http.ServeMux) {
 type agentServiceDTO struct {
 	ID                  string                   `json:"id"`
 	Name                string                   `json:"name"`
-	Kind                string                   `json:"kind"`
+	TriggerKind         string                   `json:"triggerKind"`
 	Enabled             bool                     `json:"enabled"`
 	Behavior            agentServiceBehaviorDTO  `json:"behavior"`
 	Bindings            []agentServiceBindingDTO `json:"bindings"`
@@ -75,6 +75,9 @@ type agentServiceDTO struct {
 
 type agentServiceBehaviorDTO struct {
 	RoleName        string `json:"roleName,omitempty"`
+	RoleDisplayName string `json:"roleDisplayName,omitempty"`
+	WorkflowName    string `json:"workflowName,omitempty"`
+	Scripted        bool   `json:"scripted"`
 	DriverID        string `json:"driverId,omitempty"`
 	DriverVersionID string `json:"driverVersionId,omitempty"`
 }
@@ -166,10 +169,18 @@ func (m *Module) listAgentServices(w http.ResponseWriter, r *http.Request) {
 }
 
 func (m *Module) decorateAgentService(r *http.Request, ws string, svc *domain.AgentService) agentServiceDTO {
+	behavior := agentServiceBehaviorDTO{RoleName: svc.RoleName, DriverID: svc.DriverID, DriverVersionID: svc.DriverVersionID}
+	if role, ok := scriptedroles.ForRole(svc.RoleName); ok {
+		behavior.RoleDisplayName = role.DisplayName
+		behavior.WorkflowName = role.WorkflowName
+		behavior.Scripted = true
+	} else if strings.TrimSpace(svc.RoleName) != "" {
+		behavior.RoleDisplayName = svc.RoleName
+	}
 	out := agentServiceDTO{
-		ID: svc.ServiceID, Name: svc.Name, Kind: deriveAgentServiceKind(svc),
+		ID: svc.ServiceID, Name: svc.Name, TriggerKind: string(svc.TriggerKind),
 		Enabled:  svc.DesiredState == domain.AgentServiceDesiredRunning,
-		Behavior: agentServiceBehaviorDTO{RoleName: svc.RoleName, DriverID: svc.DriverID, DriverVersionID: svc.DriverVersionID},
+		Behavior: behavior,
 		Bindings: []agentServiceBindingDTO{}, Errors: []string{}, CreatedAt: svc.CreatedAt, UpdatedAt: svc.UpdatedAt,
 	}
 	bindings, err := m.store.TriggerBindings().List(r.Context(), ws, store.TriggerBindingFilter{TargetAgentServiceID: svc.ServiceID})
@@ -209,16 +220,6 @@ func decorateAgentServiceBindings(out *agentServiceDTO, bindings []*domain.Trigg
 			out.NextFireAt = &next
 		}
 	}
-}
-
-func deriveAgentServiceKind(svc *domain.AgentService) string {
-	if svc != nil && (strings.TrimSpace(svc.DriverID) != "" || strings.TrimSpace(svc.DriverVersionID) != "") {
-		return "scripted"
-	}
-	if svc != nil && strings.TrimSpace(svc.RoleName) != "" {
-		return "prompt"
-	}
-	return "unknown"
 }
 
 func driverRunHealth(runs []*domain.DriverRun) (string, int) {
@@ -412,19 +413,22 @@ func (m *Module) getAgentServiceJournal(w http.ResponseWriter, r *http.Request) 
 		handler.RespondError(w, http.StatusBadRequest, "workspace and agent service id are required")
 		return
 	}
-	if _, err := m.store.AgentServices().Get(r.Context(), ws, serviceID); err != nil {
+	svc, err := m.store.AgentServices().Get(r.Context(), ws, serviceID)
+	if err != nil {
 		writeStoreError(w, err, "agent service not found")
 		return
 	}
-	if serviceID != "scout" {
+	role, ok := scriptedroles.ForRole(svc.RoleName)
+	if !ok || strings.TrimSpace(role.JournalFilename) == "" {
 		handler.RespondError(w, http.StatusNotFound, "this agent has no journal")
 		return
 	}
+	journalFilename := role.JournalFilename
 
 	content, modifiedAt, truncated, err := readJournalTail(filepath.Join(m.resolveRuntimeDir(), journalFilename))
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			handler.RespondError(w, http.StatusNotFound, "no journal yet — the scout has not completed a run")
+			handler.RespondError(w, http.StatusNotFound, fmt.Sprintf("no journal yet — the %s has not completed a run", strings.ToLower(role.DisplayName)))
 			return
 		}
 		handler.RespondError(w, http.StatusInternalServerError, "read agent service journal failed")

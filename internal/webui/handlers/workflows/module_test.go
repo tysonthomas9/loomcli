@@ -14,6 +14,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/driver"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	"github.com/tysonthomas9/loomcli/internal/scriptedroles"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/taskrunlogs"
 	workflowdefs "github.com/tysonthomas9/loomcli/internal/workflows"
@@ -222,14 +223,22 @@ func TestCreateScoutWorkflowRunProvisionsAndAttributesAgentService(t *testing.T)
 	if err != nil {
 		t.Fatalf("get scout service: %v", err)
 	}
-	if svc.DriverID != run.DriverID || svc.DriverVersionID != run.DriverVersionID {
-		t.Fatalf("service = %#v run = %#v, want matching driver ref", svc, run)
+	if svc.RoleName != scriptedroles.ScoutRoleName || svc.DriverID != "" || svc.DriverVersionID != "" {
+		t.Fatalf("service = %#v, want role_name=scout and empty driver refs", svc)
+	}
+	role, err := st.Roles().Get(ctx, "TEST", scriptedroles.ScoutRoleName)
+	if err != nil {
+		t.Fatalf("get scout role: %v", err)
+	}
+	if role.Kind != domain.RoleKindWorker || strings.TrimSpace(role.PromptFile) == "" || strings.TrimSpace(role.Prompt) != "" {
+		t.Fatalf("role = %#v, want worker with a PromptFile seed", role)
 	}
 	binding, err := st.TriggerBindings().Get(ctx, "TEST", "binding-cron-scout-weekly")
 	if err != nil {
 		t.Fatalf("get scout binding: %v", err)
 	}
-	if binding.TargetAgentServiceID != "scout" || binding.RouteKey != "cron.scout.weekly" {
+	if binding.TargetAgentServiceID != "scout" || binding.RouteKey != "cron.scout.weekly" ||
+		binding.DriverID != run.DriverID || binding.DriverVersionID != run.DriverVersionID {
 		t.Fatalf("binding = %#v, want attached scout cron", binding)
 	}
 }

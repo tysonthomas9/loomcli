@@ -3,10 +3,9 @@ package workflows
 import (
 	"context"
 	"encoding/json"
-	"strings"
 
 	"github.com/tysonthomas9/loomcli/internal/runtimepreflight"
-	workflowdefs "github.com/tysonthomas9/loomcli/internal/workflows"
+	"github.com/tysonthomas9/loomcli/internal/scriptedroles"
 )
 
 // preflightRunnerForRun runs fail-closed checks before a workflow run is
@@ -21,28 +20,19 @@ import (
 // leaves never shell out locally. Returns an actionable error string when the
 // local runner cannot execute.
 func (m *Module) preflightRunnerForRun(ctx context.Context, ws, workflowName string, payload json.RawMessage) error {
-	switch strings.TrimSpace(workflowName) {
-	case workflowdefs.BuiltinEpicRunnerWorkflowName:
-		if !runnerIsLocal(payload) {
-			return nil
-		}
-		return runtimepreflight.PreflightLocalTaskRunner(ctx, m.store, ws)
-	case workflowdefs.BuiltinScoutWorkflowName:
-		// The scout's analysis leaf (scout-task-runner) always execs the
-		// workspace-default backend CLI on the host, regardless of the payload's
-		// runner field — so the same fail-closed backend health check applies.
-		return runtimepreflight.PreflightLocalTaskRunner(ctx, m.store, ws)
-	default:
+	role, ok := scriptedroles.ForWorkflow(workflowName)
+	if !ok || !scriptedroles.NeedsPreflight(role, payloadRunner(payload)) {
 		return nil
 	}
+	return runtimepreflight.PreflightLocalTaskRunner(ctx, m.store, ws)
 }
 
 // runnerIsLocal reports whether the run payload resolves to the local task
 // runner. An absent/empty runner is the UI "Locally" default, which epic-runner
 // resolves to "local-task-runner".
 func runnerIsLocal(payload json.RawMessage) bool {
-	runner := strings.TrimSpace(payloadRunner(payload))
-	return runner == "" || runner == runtimepreflight.LocalTaskRunnerEntrypoint
+	role, _ := scriptedroles.ForRole(scriptedroles.EpicRunnerRoleName)
+	return scriptedroles.NeedsPreflight(role, payloadRunner(payload))
 }
 
 // payloadRunner extracts the top-level "runner" string from the run payload,

@@ -68,7 +68,7 @@ func newAgentServiceMem(in store.AgentServiceCreate) (*domain.AgentService, erro
 		WorkspaceKey:    in.WorkspaceKey,
 		ServiceID:       serviceID,
 		Name:            firstNonEmptyMem(in.Name, serviceID),
-		Kind:            in.Kind,
+		TriggerKind:     in.TriggerKind,
 		DesiredState:    defaultAgentServiceDesiredStateMem(in.DesiredState),
 		RoleName:        in.RoleName,
 		DriverID:        in.DriverID,
@@ -297,8 +297,8 @@ func validateAgentServiceMem(svc *domain.AgentService) error {
 	if hasDriverRef && (strings.TrimSpace(svc.DriverID) == "" || strings.TrimSpace(svc.DriverVersionID) == "") {
 		return fmt.Errorf("agent service %q driver_id + driver_version_id required together: %w", svc.ServiceID, domain.ErrInvalid)
 	}
-	if !validAgentServiceKindMem(svc.Kind) {
-		return fmt.Errorf("agent service %q kind %q invalid: %w", svc.ServiceID, svc.Kind, domain.ErrInvalid)
+	if !validAgentServiceTriggerKindMem(svc.TriggerKind) {
+		return fmt.Errorf("agent service %q trigger_kind %q invalid: %w", svc.ServiceID, svc.TriggerKind, domain.ErrInvalid)
 	}
 	if !validAgentServiceDesiredStateMem(svc.DesiredState) {
 		return fmt.Errorf("agent service %q desired_state %q invalid: %w", svc.ServiceID, svc.DesiredState, domain.ErrInvalid)
@@ -312,12 +312,9 @@ func validateAgentServiceMem(svc *domain.AgentService) error {
 	return nil
 }
 
-func validAgentServiceKindMem(kind domain.AgentServiceKind) bool {
+func validAgentServiceTriggerKindMem(kind domain.AgentServiceTriggerKind) bool {
 	switch kind {
-	case domain.AgentServiceKindLead, domain.AgentServiceKindSupport, domain.AgentServiceKindTriage,
-		domain.AgentServiceKindOnCall, domain.AgentServiceKindScheduled, domain.AgentServiceKindMaintenance,
-		domain.AgentServiceKindOrchestrator, domain.AgentServiceKindAlwaysOn, domain.AgentServiceKindCron,
-		domain.AgentServiceKindEvent, domain.AgentServiceKindCampaignOrchestrator:
+	case domain.AgentServiceTriggerKindLead, domain.AgentServiceTriggerKindCron, domain.AgentServiceTriggerKindEvent:
 		return true
 	default:
 		return false
@@ -348,7 +345,7 @@ func cloneAgentService(svc *domain.AgentService) *domain.AgentService {
 
 func agentServiceMatchesMem(svc *domain.AgentService, filter store.AgentServiceFilter) bool {
 	return (filter.IncludeDeleted || svc.DeletedAt == nil) &&
-		(filter.Kind == "" || svc.Kind == filter.Kind) &&
+		(filter.TriggerKind == "" || svc.TriggerKind == filter.TriggerKind) &&
 		(filter.DesiredState == "" || svc.DesiredState == filter.DesiredState) &&
 		(filter.RoleName == "" || svc.RoleName == filter.RoleName) &&
 		(filter.ProfileName == "" || svc.ProfileName == filter.ProfileName)
@@ -358,8 +355,8 @@ func applyAgentServiceUpdateMem(svc *domain.AgentService, patch store.AgentServi
 	if patch.Name != nil {
 		svc.Name = *patch.Name
 	}
-	if patch.Kind != nil {
-		svc.Kind = *patch.Kind
+	if patch.TriggerKind != nil {
+		svc.TriggerKind = *patch.TriggerKind
 	}
 	if patch.DesiredState != nil {
 		svc.DesiredState = *patch.DesiredState

@@ -130,6 +130,7 @@ func runDriverExecTask(_ *cobra.Command, _ []string) error {
 		driverStepID := firstNonEmpty(driverExecTaskDriverStepID, os.Getenv("LOOM_DRIVER_STEP_ID"))
 		outcome, err := driverpkg.RequestTaskRunWithResult(ctx, h.Store, driverpkg.TaskRunRequestOptions{
 			WorkspaceKey:       rc.WorkspaceKey,
+			WorkspaceDir:       currentWorkingDir(),
 			DriverRunID:        rc.DriverRunID,
 			DriverStepID:       driverStepID,
 			TaskRunID:          driverExecTaskTaskRunID,

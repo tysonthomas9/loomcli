@@ -94,6 +94,63 @@ const MAX_PRIOR_AGENTS_CONTEXT_CHARS = 8_000;
 const MAX_REPO_SEED_CHARS = 9_000;
 const MAX_FIELD_CHARS = 16_000;
 
+// Embedded fallback for runs whose role prompt is absent/empty. The catalog's
+// prompts/scout.md is the create-only durable seed; this copy keeps already
+// queued runs executable if the role record has no prompt.
+const DEFAULT_ROLE_PROMPT = `You are the Scout: a proactive analysis agent for a Loom workspace.
+Loom is an AI-agent orchestration platform; a workspace groups one or more
+repo checkouts that agents work on together.
+
+Workspace root: {{WORKSPACE_ROOT}}
+Attached repos ({{REPO_COUNT}}): {{REPO_NAMES}}
+
+--- WORKSPACE CONTEXT (machine-gathered seed; you may verify and dig deeper with your tools) ---
+{{WORKSPACE_CONTEXT}}
+--- TASK ---
+You have file-reading tools: use them to read files under the workspace
+root for deeper grounding before you conclude anything. Treat the entire
+workspace as READ-ONLY: do not create, modify, or delete any file except
+the result file named below; do not run commands with side effects (no
+builds, installs, commits, pushes, or network writes).
+
+1. Propose AT MOST {{MAX_RECOMMENDATIONS}} concrete, non-generic work recommendations for
+   this workspace — real engineering work a maintainer would plausibly
+   accept, grounded in evidence you verified. Prefer fewer, better-grounded
+   recommendations over the maximum. Do NOT re-propose work the scout
+   journal above already covers (created OR skipped OR closed items stay
+   covered); list such candidates under \`skipped\` with a short reason
+   instead.
+2. Draft the scout-owned content of the workspace-level agents.md.
+
+Rules for each recommendation:
+- \`labels\` MUST include "recommended" and "repo:<repo>" for its repo.
+- \`priority\` is an integer 0-4 in Loom semantics: 0 = P0 critical, 1 = P1
+  high, 2 = P2 normal, 3 = P3 low, 4 = P4 backlog. Most recommendations
+  belong at 2-4; reserve 0-1 for genuinely urgent findings.
+- \`description\` is the full work description and MUST fold acceptance
+  criteria in as a "## Acceptance Criteria" section with verifiable bullets.
+- \`rationale\` says why the evidence makes this real, valuable work.
+- \`anchors\` are file or directory paths (relative to the repo root) that
+  exist and ground the recommendation. Never invent paths.
+
+Rules for the agents.md content:
+- Workspace-level facts ONLY — complement, don't duplicate: anything that
+  belongs in a single repo's own AGENTS.md is out of bounds.
+- Structure: \`## Workspace Overview\`; \`## How the repos relate\`
+  (companion-branch ordering, shared contracts, cross-repo test entry
+  points); then one section per repo with Build/Test (only commands you
+  verified), Architecture Sketch, Conventions, Gotchas.
+- Raw markdown, concise, no surrounding code fence, and do NOT include the
+  scout fence markers — the runner adds them.
+
+Result delivery: write ONLY a JSON object of the shape
+{"recommendations": [{"title", "description", "rationale", "repo",
+"labels", "priority", "anchors"}], "skipped": [{"title", "reason"}],
+"agentsMd": "..."} to this exact file (create it):
+  {{RESULT_PATH}}
+Then also print that same JSON object as the final line of your final
+message, as a fallback channel. No commentary around it.`;
+
 export async function run(ctx = {}) {
   const request = requestPayload(ctx);
   const taskRunId = stringValue(request.task_run_id || request.taskRunId || process.env.LOOM_TASK_RUN_ID || "scout");
@@ -206,7 +263,15 @@ async function analyzePhase(root, input, taskRunId, request, logs) {
   const resultPath = path.join(scratch, "result.json");
 
   const maxRecommendations = clampInt(input.maxRecommendations, 1, MAX_RECOMMENDATIONS, MAX_RECOMMENDATIONS);
-  const prompt = analysisPrompt({ root, repos, journal, priorAgentsMd, resultPath, maxRecommendations });
+  const prompt = analysisPrompt({
+    root,
+    repos,
+    journal,
+    priorAgentsMd,
+    resultPath,
+    maxRecommendations,
+    rolePrompt: input.role_prompt,
+  });
   logs.push("analysis prompt: " + prompt.length + " chars; backend " + backend);
 
   let exec;
@@ -271,78 +336,49 @@ async function discoverRepos(root) {
 // cache reuse (spec: Known implementation notes): the shared workspace context
 // — intro, per-repo deterministic seed, prior scout agents.md content, the
 // journal — comes FIRST and the per-run task text comes LAST.
-function analysisPrompt({ root, repos, journal, priorAgentsMd, resultPath, maxRecommendations }) {
-  const parts = [];
-  parts.push(
-    "You are the Scout: a proactive analysis agent for a Loom workspace.",
-    "Loom is an AI-agent orchestration platform; a workspace groups one or more",
-    "repo checkouts that agents work on together.",
-    "",
-    `Workspace root: ${root}`,
-    `Attached repos (${repos.length}): ${repos.map((r) => r.name).join(", ")}`,
-    "",
-    "--- WORKSPACE CONTEXT (machine-gathered seed; you may verify and dig deeper with your tools) ---",
-  );
+function analysisPrompt({
+  root,
+  repos,
+  journal,
+  priorAgentsMd,
+  resultPath,
+  maxRecommendations,
+  rolePrompt,
+}) {
+  const context = [];
   for (const repo of repos) {
-    parts.push(gatherRepoSeed(repo));
+    context.push(gatherRepoSeed(repo));
   }
   if (priorAgentsMd) {
-    parts.push("--- CURRENT SCOUT-OWNED agents.md CONTENT (you are regenerating this) ---", priorAgentsMd, "");
+    context.push(
+      "--- CURRENT SCOUT-OWNED agents.md CONTENT (you are regenerating this) ---",
+      priorAgentsMd,
+      "",
+    );
   }
   if (journal) {
-    parts.push(
+    context.push(
       "--- SCOUT JOURNAL (history.md; your memory of previous runs) ---",
       journal,
       "",
     );
   }
-  parts.push(
-    "--- TASK ---",
-    "You have file-reading tools: use them to read files under the workspace",
-    "root for deeper grounding before you conclude anything. Treat the entire",
-    "workspace as READ-ONLY: do not create, modify, or delete any file except",
-    "the result file named below; do not run commands with side effects (no",
-    "builds, installs, commits, pushes, or network writes).",
-    "",
-    `1. Propose AT MOST ${maxRecommendations} concrete, non-generic work recommendations for`,
-    "   this workspace — real engineering work a maintainer would plausibly",
-    "   accept, grounded in evidence you verified. Prefer fewer, better-grounded",
-    "   recommendations over the maximum. Do NOT re-propose work the scout",
-    "   journal above already covers (created OR skipped OR closed items stay",
-    "   covered); list such candidates under `skipped` with a short reason",
-    "   instead.",
-    "2. Draft the scout-owned content of the workspace-level agents.md.",
-    "",
-    "Rules for each recommendation:",
-    '- `labels` MUST include "recommended" and "repo:<repo>" for its repo.',
-    "- `priority` is an integer 0-4 in Loom semantics: 0 = P0 critical, 1 = P1",
-    "  high, 2 = P2 normal, 3 = P3 low, 4 = P4 backlog. Most recommendations",
-    "  belong at 2-4; reserve 0-1 for genuinely urgent findings.",
-    "- `description` is the full work description and MUST fold acceptance",
-    '  criteria in as a "## Acceptance Criteria" section with verifiable bullets.',
-    "- `rationale` says why the evidence makes this real, valuable work.",
-    "- `anchors` are file or directory paths (relative to the repo root) that",
-    "  exist and ground the recommendation. Never invent paths.",
-    "",
-    "Rules for the agents.md content:",
-    "- Workspace-level facts ONLY — complement, don't duplicate: anything that",
-    "  belongs in a single repo's own AGENTS.md is out of bounds.",
-    "- Structure: `## Workspace Overview`; `## How the repos relate`",
-    "  (companion-branch ordering, shared contracts, cross-repo test entry",
-    "  points); then one section per repo with Build/Test (only commands you",
-    "  verified), Architecture Sketch, Conventions, Gotchas.",
-    "- Raw markdown, concise, no surrounding code fence, and do NOT include the",
-    "  scout fence markers — the runner adds them.",
-    "",
-    "Result delivery: write ONLY a JSON object of the shape",
-    '{"recommendations": [{"title", "description", "rationale", "repo",',
-    '"labels", "priority", "anchors"}], "skipped": [{"title", "reason"}],',
-    '"agentsMd": "..."} to this exact file (create it):',
-    "  " + resultPath,
-    "Then also print that same JSON object as the final line of your final",
-    "message, as a fallback channel. No commentary around it.",
-  );
-  return parts.join("\n");
+  const template = rawString(rolePrompt).trim()
+    ? rawString(rolePrompt)
+    : DEFAULT_ROLE_PROMPT;
+  const values = {
+    "{{WORKSPACE_ROOT}}": root,
+    "{{REPO_COUNT}}": String(repos.length),
+    "{{REPO_NAMES}}": repos.map((repo) => repo.name).join(", "),
+    "{{WORKSPACE_CONTEXT}}": context.join("\n"),
+    "{{MAX_RECOMMENDATIONS}}": String(maxRecommendations),
+    "{{RESULT_PATH}}": resultPath,
+  };
+  let rendered = template;
+  for (const [token, value] of Object.entries(values)) {
+    rendered = rendered.split(token).join(value);
+  }
+  return rendered;
 }
 
 // gatherRepoSeed builds the deterministic per-repo context seed (no LLM): the
