@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"os"
 	"sync"
 	"time"
 
@@ -136,6 +137,12 @@ func (d *Daemon) Start() error {
 	// first, then attach the reconciler under the same crash-loud harness.
 	if err := d.sup.Start(); err != nil {
 		return err
+	}
+	if event, err := events.NewEvent(events.DaemonStarted, "", "", "", events.DaemonStartedData{
+		PID:         os.Getpid(),
+		WorkspaceID: d.sup.WorkspaceID,
+	}); err == nil {
+		d.emitEvent(event)
 	}
 	d.sup.RegisterTick(supervisor.GoroutineConfigReconciler)
 	d.sup.RunCritical(supervisor.GoroutineConfigReconciler, d.configReconciler)

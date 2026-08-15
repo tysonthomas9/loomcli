@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/agent"
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
@@ -39,8 +40,13 @@ func (s *Supervisor) buildCommand(ap *AgentProcess) (*exec.Cmd, error) {
 	cmd.Dir = ap.WorktreePath
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
-	cmd.Env = append(cli.FilteredEnv(),
-		fmt.Sprintf("LOOM_AGENT_NAME=%s", ap.Entry.Worktree),
+	cmd.Env = appendEnvOverride(cli.FilteredEnv(), bootstrap.EnvAgentName, ap.Entry.Worktree)
+	// The daemon itself may have inherited a harness/operator actor. A worker
+	// is a distinct fleet-db actor, so stamp its agent name after inheritance
+	// and replace any inherited value instead of relying on duplicate-env
+	// ordering in the child runtime.
+	cmd.Env = appendEnvOverride(cmd.Env, bootstrap.EnvFleetDBActor, ap.Entry.Worktree)
+	cmd.Env = append(cmd.Env,
 		fmt.Sprintf("LOOM_WORKTREE_PATH=%s", ap.WorktreePath),
 		fmt.Sprintf("LOOM_EVENTS_DIR=%s", ResolveDaemonPath(s.ProjectDir, cfg.Daemon.EventsDir)),
 	)
@@ -79,6 +85,18 @@ func (s *Supervisor) buildCommand(ap *AgentProcess) (*exec.Cmd, error) {
 	}
 
 	return cmd, nil
+}
+
+func appendEnvOverride(env []string, name, value string) []string {
+	prefix := name + "="
+	out := make([]string, 0, len(env)+1)
+	for _, entry := range env {
+		if strings.HasPrefix(entry, prefix) {
+			continue
+		}
+		out = append(out, entry)
+	}
+	return append(out, prefix+value)
 }
 
 // buildAgentExecCmd creates the exec.Cmd with the correct arguments for the agent role.

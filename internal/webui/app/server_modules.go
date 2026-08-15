@@ -10,6 +10,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/appstores"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlermux"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/agents"
+	"github.com/tysonthomas9/loomcli/internal/webui/handlers/audit"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/driverapi"
 	githandlers "github.com/tysonthomas9/loomcli/internal/webui/handlers/git"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/onboarding"
@@ -56,7 +57,10 @@ func (app *Server) buildModules() {
 			return storeadapter.ResolveOrHealWorkspacePath(context.Background(), store, wsKey)
 		})
 	}
-	app.wsModules = append(app.wsModules, opsModule)
+	app.wsModules = append(app.wsModules,
+		opsModule,
+		audit.NewModule(svcimpl.NewAuditService(app.config.Store)),
+	)
 
 	// Issue + session modules
 	app.wsModules = append(app.wsModules,

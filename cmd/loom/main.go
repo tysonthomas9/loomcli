@@ -13,6 +13,7 @@ import (
 	_ "github.com/tysonthomas9/loomcli/internal/cli/agent"
 	_ "github.com/tysonthomas9/loomcli/internal/cli/agent/lead"
 	_ "github.com/tysonthomas9/loomcli/internal/cli/agentdef"
+	_ "github.com/tysonthomas9/loomcli/internal/cli/auditcmd"
 	_ "github.com/tysonthomas9/loomcli/internal/cli/automode"
 	_ "github.com/tysonthomas9/loomcli/internal/cli/backends"
 	_ "github.com/tysonthomas9/loomcli/internal/cli/cleanup"
