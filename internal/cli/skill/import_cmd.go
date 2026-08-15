@@ -107,6 +107,7 @@ func readLocalSkillDirectory(directory, nameOverride string) (assembledLocalSkil
 	return readLocalSkillDirectoryWithHook(directory, nameOverride, nil)
 }
 
+//nolint:gocognit,cyclop,funlen // The directory walk applies every import safety gate in one auditable pass.
 func readLocalSkillDirectoryWithHook(directory, nameOverride string, beforeRead func(string) error) (assembledLocalSkill, error) {
 	absolute, err := filepath.Abs(directory)
 	if err != nil {
@@ -120,7 +121,7 @@ func readLocalSkillDirectoryWithHook(directory, nameOverride string, beforeRead 
 	if err != nil {
 		return assembledLocalSkill{}, fmt.Errorf("open skill directory root %q: %w", canonicalRoot, err)
 	}
-	defer root.Close()
+	defer func() { _ = root.Close() }()
 	rootInfo, err := root.Stat(".")
 	if err != nil {
 		return assembledLocalSkill{}, fmt.Errorf("stat skill directory root %q: %w", canonicalRoot, err)

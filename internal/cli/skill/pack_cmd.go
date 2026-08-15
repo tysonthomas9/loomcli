@@ -239,6 +239,7 @@ func runSkillSync(cmd *cobra.Command, packName string) error {
 	})
 }
 
+//nolint:funlen // The sync decision table (create/update/skip/conflict) stays in one place.
 func syncSkillPack(ctx context.Context, cmd *cobra.Command, h *bootstrap.StoreHandle, ws string, pack *domain.SkillPack) error {
 	source, err := sourceForSkillPack(pack)
 	if err != nil {

@@ -415,7 +415,7 @@ func validateGitHubRef(ref string) error {
 	return nil
 }
 
-//nolint:gocognit,funlen // The tar walk validates every entry class in one bounded pass.
+//nolint:gocognit,funlen,cyclop // The tar walk validates every entry class in one bounded pass.
 func readGitHubTar(data []byte, logicalLimit int64) (githubArchive, error) {
 	archive := githubArchive{
 		files:       make(map[string]githubArchiveFile),
@@ -748,7 +748,7 @@ func (a githubArchive) rejectUnsafeSelectedEntries(skillDir string) error {
 	return nil
 }
 
-//nolint:funlen // Selection, frontmatter parse, and bundling stay one auditable unit.
+//nolint:funlen,gocognit,cyclop // Selection, frontmatter parse, and bundling stay one auditable unit.
 func (a githubArchive) toSkill(source githubSource, skillDir, nameOverride string) (fetchedGitHubSkill, error) {
 	selected := make(map[string]githubArchiveFile)
 	hiddenPaths := make(map[string]struct{})
