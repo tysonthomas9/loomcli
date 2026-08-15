@@ -118,6 +118,24 @@ function makeMocks() {
   };
 }
 
+/**
+ * Latin-1 text as an ArrayBuffer built from this realm's globals — a Node
+ * TextEncoder's buffer fails terminalConnection's `instanceof ArrayBuffer`
+ * check under the jsdom environment.
+ */
+function binaryFrame(text: string): ArrayBuffer {
+  const buffer = new ArrayBuffer(text.length);
+  const view = new Uint8Array(buffer);
+  for (let i = 0; i < text.length; i += 1) {
+    view[i] = text.charCodeAt(i) & 0xff;
+  }
+  return buffer;
+}
+
+function decodeBinary(data: unknown): string {
+  return String.fromCharCode(...(data as Uint8Array));
+}
+
 async function waitForBufferedFlush(): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, 25));
 }
@@ -597,6 +615,124 @@ describe("connectWebSocket", () => {
 
     expect(m.setConnectionState).not.toHaveBeenCalled();
     expect(m.onDisconnected).not.toHaveBeenCalled();
+  });
+
+  describe("attach control frames", () => {
+    const ATTACH_FRAME = JSON.stringify({
+      type: "attach",
+      reattached: false,
+      replaced: true,
+      replaced_at: "2026-08-14T16:52:03Z",
+      replaced_reason: "server_restart",
+    });
+
+    async function openSocket(onAttach: ReturnType<typeof vi.fn>) {
+      const m = makeMocks();
+      connectWebSocket(
+        "ws1",
+        "session1",
+        m.write,
+        m.wsRef,
+        m.setConnectionState,
+        m.onConnected,
+        m.onDisconnected,
+        m.onOutput,
+        m.onBackendCrash,
+        m.onSessionKilled,
+        undefined,
+        onAttach,
+      );
+
+      shared.resolveToken!({ token: "tok" });
+      await vi.waitFor(() => {
+        expect(MockWebSocket.instances).toHaveLength(1);
+      });
+      const ws = MockWebSocket.instances[0];
+      ws.simulateOpen();
+      return { m, ws };
+    }
+
+    it("dispatches a control text frame and never writes it to xterm", async () => {
+      const onAttach = vi.fn();
+      const { m, ws } = await openSocket(onAttach);
+
+      ws.simulateMessage(ATTACH_FRAME);
+      await waitForBufferedFlush();
+
+      expect(onAttach).toHaveBeenCalledTimes(1);
+      expect(onAttach).toHaveBeenCalledWith({
+        type: "attach",
+        reattached: false,
+        replaced: true,
+        replaced_at: "2026-08-14T16:52:03Z",
+        replaced_reason: "server_restart",
+      });
+      expect(m.write).not.toHaveBeenCalled();
+    });
+
+    it("still writes a text frame that is not a control envelope", async () => {
+      const onAttach = vi.fn();
+      const { m, ws } = await openSocket(onAttach);
+
+      ws.simulateMessage('{"type":"something-else"}');
+      ws.simulateMessage("plain output\r\n");
+      await waitForBufferedFlush();
+
+      expect(onAttach).not.toHaveBeenCalled();
+      expect(m.write).toHaveBeenCalledWith(
+        '{"type":"something-else"}plain output\r\n',
+      );
+    });
+
+    it("delivers the preceding replay to xterm before dispatching", async () => {
+      const order: string[] = [];
+      const onAttach = vi.fn(() => {
+        order.push("attach");
+      });
+      const { m, ws } = await openSocket(onAttach);
+      m.write.mockImplementation(() => {
+        order.push("write");
+      });
+
+      // The server's frame order: scrollback replay (binary, starts with the
+      // screen clear) and then the control frame. The replay must reach xterm
+      // first, or the clear would erase whatever the attach handler draws.
+      ws.simulateMessage(binaryFrame("\x1b[2J\x1b[Hprompt$ "));
+      ws.simulateMessage(ATTACH_FRAME);
+
+      expect(order).toEqual(["write", "attach"]);
+
+      // Output arriving after the frame is still batched normally.
+      ws.simulateMessage(binaryFrame("later"));
+      await waitForBufferedFlush();
+      expect(order).toEqual(["write", "attach", "write"]);
+    });
+
+    it("leaves binary frames untouched", async () => {
+      const onAttach = vi.fn();
+      const { m, ws } = await openSocket(onAttach);
+
+      ws.simulateMessage(binaryFrame("binary output"));
+      await waitForBufferedFlush();
+
+      expect(onAttach).not.toHaveBeenCalled();
+      expect(m.write).toHaveBeenCalledTimes(1);
+      expect(decodeBinary(m.write.mock.calls[0][0])).toBe("binary output");
+    });
+
+    it("keeps pumping messages when the attach handler throws", async () => {
+      const onAttach = vi.fn(() => {
+        throw new Error("handler exploded");
+      });
+      const { m, ws } = await openSocket(onAttach);
+
+      ws.simulateMessage(ATTACH_FRAME);
+      ws.simulateMessage("after the throw");
+      await waitForBufferedFlush();
+
+      expect(onAttach).toHaveBeenCalledTimes(1);
+      expect(m.write).toHaveBeenCalledWith("after the throw");
+    });
   });
 
   it("handles token rejection after cleanup without state updates", async () => {

@@ -43,6 +43,13 @@ export interface UseTerminalMetadataReturn {
   updatePinned: (session: string, pinned: boolean) => Promise<void>;
   reorderTabs: (orderedSessionNames: string[]) => Promise<void>;
   deleteTab: (session: string) => Promise<void>;
+  /**
+   * Record a replacement the terminal WebSocket detected live, so the tab
+   * metadata carries it immediately instead of only after the next refetch.
+   * The server has already persisted it — this is local state catching up,
+   * not a write, which is why it is synchronous and issues no request.
+   */
+  markTabReplaced: (session: string, replacedAt: string) => void;
   linkToIssue: (session: string, issueId: string) => Promise<void>;
   unlinkFromIssue: (session: string) => Promise<void>;
   /** Clear a tab's persisted session-replacement marker. */
@@ -369,6 +376,23 @@ export function useTerminalMetadata(
     [workspace, updateTabs],
   );
 
+  const markTabReplaced = useCallback(
+    (session: string, replacedAt: string) => {
+      updateTabs(workspace, (current) =>
+        current.map((t) =>
+          t.session_name === session && t.replaced_at !== replacedAt
+            ? {
+                ...t,
+                replaced_at: replacedAt,
+                replaced_reason: "server_restart",
+              }
+            : t,
+        ),
+      );
+    },
+    [workspace, updateTabs],
+  );
+
   const linkToIssue = useCallback(
     async (session: string, issueId: string) => {
       const issued = workspace;
@@ -463,6 +487,7 @@ export function useTerminalMetadata(
     updatePinned,
     reorderTabs,
     deleteTab,
+    markTabReplaced,
     linkToIssue,
     unlinkFromIssue,
     dismissRestartNotice,
