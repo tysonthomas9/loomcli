@@ -2,9 +2,12 @@ package git
 
 import (
 	"context"
+	"errors"
+	"io"
 	"os"
 	"os/exec"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -161,6 +164,53 @@ func (m *CommandMock) Calls() []CommandStub {
 	result := make([]CommandStub, len(m.calls))
 	copy(result, m.calls)
 	return result
+}
+
+// errNoMergeHead is what git returns when MERGE_HEAD does not exist, i.e. when
+// no merge is in progress.
+var errNoMergeHead = errors.New("fatal: Needed a single revision")
+
+// verifyStubs returns the CommandMock stubs one successful pullRepoWorktree
+// makes: the HEAD read taken before the merge, then the reads verifyPulled
+// makes afterwards. The order must match verifyPulled — if it drifts, the
+// mock's t.Fatalf names the offending call.
+func verifyStubs(remote, source, before, after string, behind int) []CommandStub {
+	ref := remote + "/" + source
+	return []CommandStub{
+		{Name: "git", Args: []string{"rev-parse", "--verify", "HEAD"}, Stdout: before + "\n"},
+		{Name: "git", Args: []string{"diff", "--name-only", "--diff-filter=U"}, Stdout: ""},
+		{Name: "git", Args: []string{"rev-parse", "--verify", "MERGE_HEAD"}, Err: errNoMergeHead},
+		{Name: "git", Args: []string{"rev-parse", "--verify", "refs/remotes/" + ref}, Stdout: "ref0000\n"},
+		{Name: "git", Args: []string{"rev-list", "--count", "HEAD.." + ref}, Stdout: strconv.Itoa(behind) + "\n"},
+		{Name: "git", Args: []string{"rev-parse", "--verify", "HEAD"}, Stdout: after + "\n"},
+	}
+}
+
+// captureStdout runs fn with os.Stdout replaced by a pipe and returns what was
+// written. Tests using it MUST NOT call t.Parallel() — os.Stdout is global.
+func captureStdout(t *testing.T, fn func()) string {
+	t.Helper()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("pipe: %v", err)
+	}
+	orig := os.Stdout
+	os.Stdout = w
+
+	done := make(chan string, 1)
+	go func() {
+		var sb strings.Builder
+		_, _ = io.Copy(&sb, r)
+		done <- sb.String()
+	}()
+
+	fn()
+
+	os.Stdout = orig
+	_ = w.Close()
+	out := <-done
+	_ = r.Close()
+	return out
 }
 
 // OutputCommandStub represents an expected RunWithOutput call.
