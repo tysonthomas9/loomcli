@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import type {
   DriverRunDTO,
@@ -8,8 +8,10 @@ import type {
 import { useDriverRunLog, useTaskRunLog } from "@/hooks/workspace";
 import { ApiError } from "@/types/common";
 import { formatStatusLabel } from "@/utils/issue";
+import { parseTranscript } from "@/utils/transcript";
 
 import styles from "./AgentServiceDetail.module.css";
+import { TranscriptView } from "./TranscriptView";
 
 interface TaskLogsSectionProps {
   workspaceId: string;
@@ -47,6 +49,7 @@ function TaskLogRow({
   liveRefreshTick: number;
 }): JSX.Element {
   const [expanded, setExpanded] = useState(false);
+  const [logView, setLogView] = useState<"pretty" | "raw">("pretty");
   // A settled task whose listing already says no log exists skips the fetch
   // entirely; live tasks still fetch, since their log lands at settle time.
   const logCouldExist = task.logsAvailable || isLiveTask(task.status);
@@ -56,6 +59,10 @@ function TaskLogRow({
     { enabled: expanded && logCouldExist },
   );
   const taskDuration = duration(task.startedAt, task.finishedAt);
+  const transcript = useMemo(
+    () => parseTranscript(log?.content ?? ""),
+    [log?.content],
+  );
 
   useEffect(() => {
     if (expanded && liveRefreshTick > 0 && isLiveTask(task.status)) {
@@ -113,9 +120,42 @@ function TaskLogRow({
                   Showing the last 1 MiB of this AI log.
                 </p>
               ) : null}
-              <pre data-testid={`task-log-content-${task.taskRunId}`}>
-                {log.content}
-              </pre>
+              {transcript.codexEventCount > 0 ? (
+                <>
+                  <div
+                    className={styles.taskLogViewControls}
+                    data-testid="task-log-view-toggle"
+                    role="group"
+                    aria-label="Task log view"
+                  >
+                    <button
+                      type="button"
+                      aria-pressed={logView === "pretty"}
+                      onClick={() => setLogView("pretty")}
+                    >
+                      Pretty
+                    </button>
+                    <button
+                      type="button"
+                      aria-pressed={logView === "raw"}
+                      onClick={() => setLogView("raw")}
+                    >
+                      Raw
+                    </button>
+                  </div>
+                  {logView === "pretty" ? (
+                    <TranscriptView transcript={transcript} />
+                  ) : (
+                    <pre data-testid={`task-log-content-${task.taskRunId}`}>
+                      {log.content}
+                    </pre>
+                  )}
+                </>
+              ) : (
+                <pre data-testid={`task-log-content-${task.taskRunId}`}>
+                  {log.content}
+                </pre>
+              )}
             </>
           ) : (
             <p className={styles.emptyText}>No AI log content.</p>

@@ -297,7 +297,69 @@ describe("AgentServiceDetail", () => {
       (await screen.findByTestId("task-log-content-task-1")).textContent,
     ).toBe("repo discovery\ncodex CLI exit=0\nbackend output");
     expect(screen.getByRole("status")).toHaveTextContent("last 1 MiB");
+    expect(
+      screen.queryByTestId("task-log-view-toggle"),
+    ).not.toBeInTheDocument();
     expect(mocks.getTaskRunLog).toHaveBeenCalledWith("WS", "task-1");
+  });
+
+  it("defaults Codex task logs to Pretty and supports disclosures and Raw view", async () => {
+    const rawLog = [
+      "codex CLI exit=1",
+      '{"type":"item.started","item":{"id":"item_1","type":"command_execution","status":"in_progress"}}',
+      '{"type":"item.completed","item":{"id":"item_1","type":"command_execution","command":"/bin/bash -lc \\"make gate\\"","exit_code":1,"status":"failed","aggregated_output":"gate failed\\n"}}',
+      '{"type":"item.completed","item":{"id":"item_2","type":"agent_message","text":"{\\"recommendations\\":[]}"}}',
+      '{"type":"turn.completed","usage":{"input_tokens":349798,"cached_input_tokens":305920,"output_tokens":3342}}',
+    ].join("\n");
+    mocks.listAgentServiceRunTasks.mockResolvedValueOnce({
+      data: [taskRun()],
+      total: 1,
+    });
+    mocks.getTaskRunLog.mockResolvedValueOnce({
+      content: rawLog,
+      modifiedAt: "2026-08-14T10:00:40Z",
+      truncated: false,
+    });
+    render(<AgentServiceDetail workspaceId="WS" service={service} />);
+    expandRun();
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: /scout-task-runner.*Completed.*30s/,
+      }),
+    );
+
+    const viewToggle = await screen.findByTestId("task-log-view-toggle");
+    const prettyButton = within(viewToggle).getByRole("button", {
+      name: "Pretty",
+    });
+    const rawButton = within(viewToggle).getByRole("button", { name: "Raw" });
+    expect(prettyButton).toHaveAttribute("aria-pressed", "true");
+    expect(rawButton).toHaveAttribute("aria-pressed", "false");
+    expect(screen.getByTestId("transcript-view")).toBeInTheDocument();
+    expect(screen.getByTestId("transcript-command")).toHaveTextContent(
+      '$ /bin/bash -lc "make gate"',
+    );
+    expect(screen.getByTestId("transcript-command")).toHaveTextContent(
+      "exit 1",
+    );
+    expect(screen.getByTestId("transcript-message")).toHaveTextContent(
+      '"recommendations": []',
+    );
+    expect(screen.getByTestId("transcript-turn-completed")).toHaveTextContent(
+      "349,798 input tokens (305,920 cached) · 3,342 output",
+    );
+    expect(screen.queryByText("gate failed")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("transcript-output-toggle"));
+    expect(screen.getByText("gate failed")).toBeInTheDocument();
+
+    fireEvent.click(rawButton);
+    expect(rawButton).toHaveAttribute("aria-pressed", "true");
+    expect(prettyButton).toHaveAttribute("aria-pressed", "false");
+    expect(screen.queryByTestId("transcript-view")).not.toBeInTheDocument();
+    expect(screen.getByTestId("task-log-content-task-1").textContent).toBe(
+      rawLog,
+    );
   });
 
   it("shows an empty state when a task AI log is absent", async () => {
