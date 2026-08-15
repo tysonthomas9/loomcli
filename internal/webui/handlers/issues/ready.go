@@ -168,18 +168,21 @@ func serveReadyViaBackend(w http.ResponseWriter, r *http.Request, backendFn Issu
 		})
 		return true
 	}
+	// The web UI reviews quarantined recommendations; without this opt-in, it hides issues humans may claim.
+	args.IncludeRecommended = true
 	opts := backend.ReadyOpts{
-		Assignee:    args.Assignee,
-		Unassigned:  args.Unassigned,
-		Priority:    args.Priority,
-		Type:        args.Type,
-		ParentID:    args.ParentID,
-		Limit:       args.Limit,
-		SortPolicy:  args.SortPolicy,
-		Labels:      args.Labels,
-		LabelsAny:   args.LabelsAny,
-		MolType:     args.MolType,
-		SourceRepos: args.SourceRepos,
+		Assignee:           args.Assignee,
+		Unassigned:         args.Unassigned,
+		IncludeRecommended: args.IncludeRecommended,
+		Priority:           args.Priority,
+		Type:               args.Type,
+		ParentID:           args.ParentID,
+		Limit:              args.Limit,
+		SortPolicy:         args.SortPolicy,
+		Labels:             args.Labels,
+		LabelsAny:          args.LabelsAny,
+		MolType:            args.MolType,
+		SourceRepos:        args.SourceRepos,
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
@@ -341,6 +344,8 @@ func handleReadyWithPool(pool readyConnectionGetter) http.HandlerFunc {
 			})
 			return
 		}
+		// The web UI reviews quarantined recommendations; without this opt-in, it hides issues humans may claim.
+		args.IncludeRecommended = true
 
 		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 		defer cancel()

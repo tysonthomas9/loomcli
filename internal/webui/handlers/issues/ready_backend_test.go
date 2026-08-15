@@ -19,12 +19,14 @@ import (
 // populated. Every other method returns a sentinel error so accidental use
 // surfaces as a test failure rather than silent empty payloads.
 type stubReadyBackend struct {
-	ready []backend.IssueData
-	err   error
+	ready     []backend.IssueData
+	err       error
+	readyOpts []backend.ReadyOpts
 }
 
 func (s *stubReadyBackend) BackendName() string { return "stub-ready" }
-func (s *stubReadyBackend) Ready(_ context.Context, _ backend.ReadyOpts) ([]backend.IssueData, error) {
+func (s *stubReadyBackend) Ready(_ context.Context, opts backend.ReadyOpts) ([]backend.IssueData, error) {
+	s.readyOpts = append(s.readyOpts, opts)
 	if s.err != nil {
 		return nil, s.err
 	}
@@ -141,6 +143,9 @@ func TestHandleReady_BackendWhenNoPool(t *testing.T) {
 	}
 	if !resp.Success {
 		t.Fatalf("expected success=true; error=%q", resp.Error)
+	}
+	if len(be.readyOpts) != 1 || !be.readyOpts[0].IncludeRecommended {
+		t.Fatalf("Ready opts = %#v, want IncludeRecommended=true", be.readyOpts)
 	}
 	if len(resp.Data) != 2 {
 		t.Fatalf("data length = %d, want 2", len(resp.Data))

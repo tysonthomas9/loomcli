@@ -340,6 +340,35 @@ func TestListArgs_JSONRoundTrip(t *testing.T) {
 	}
 }
 
+func TestReadyArgs_JSONRoundTrip(t *testing.T) {
+	t.Parallel()
+
+	original := ReadyArgs{IncludeRecommended: true}
+	data, err := json.Marshal(original)
+	if err != nil {
+		t.Fatalf("json.Marshal() error: %v", err)
+	}
+	if !strings.Contains(string(data), `"include_recommended":true`) {
+		t.Fatalf("JSON = %s, want include_recommended=true", data)
+	}
+
+	var restored ReadyArgs
+	if err := json.Unmarshal(data, &restored); err != nil {
+		t.Fatalf("json.Unmarshal() error: %v", err)
+	}
+	if !restored.IncludeRecommended {
+		t.Error("IncludeRecommended = false, want true")
+	}
+
+	empty, err := json.Marshal(ReadyArgs{})
+	if err != nil {
+		t.Fatalf("json.Marshal(empty) error: %v", err)
+	}
+	if strings.Contains(string(empty), "include_recommended") {
+		t.Errorf("empty JSON = %s, want include_recommended omitted", empty)
+	}
+}
+
 func TestDeleteArgs_JSONRoundTrip(t *testing.T) {
 	t.Parallel()
 
