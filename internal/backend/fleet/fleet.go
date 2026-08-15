@@ -166,6 +166,9 @@ func (b *FleetBackend) doRequestAsActor(ctx context.Context, path string, body i
 	b.mu.RUnlock()
 	if actor != "" {
 		auth.Actor = actor
+		// An explicitly actor-scoped operation (claim/release) takes
+		// precedence over any broader request-scoped actor on ctx.
+		ctx = fleethttp.WithActor(ctx, actor)
 	}
 
 	req, err := fleethttp.BuildJSONRequest(ctx, "POST", b.baseWorkspaceURL+path, auth, body)

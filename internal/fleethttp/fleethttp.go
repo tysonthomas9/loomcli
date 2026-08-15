@@ -31,6 +31,28 @@ type Auth struct {
 	Actor       string // → X-Actor (used by --auth-dev-mode)
 }
 
+type actorContextKey struct{}
+
+// WithActor returns a context that overrides X-Actor for FleetDB requests
+// built from it. Callers must authenticate or otherwise authoritatively derive
+// actor before attaching it; the override is request-scoped and takes
+// precedence over a client's configured process actor.
+func WithActor(ctx context.Context, actor string) context.Context {
+	if actor == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, actorContextKey{}, actor)
+}
+
+// ActorFromContext returns the request-scoped FleetDB actor, if one was set.
+func ActorFromContext(ctx context.Context) (string, bool) {
+	if ctx == nil {
+		return "", false
+	}
+	actor, ok := ctx.Value(actorContextKey{}).(string)
+	return actor, ok && actor != ""
+}
+
 // Apply writes the auth headers onto req. Empty fields are skipped.
 func (a Auth) Apply(req *http.Request) {
 	if a.BearerToken != "" {
@@ -68,6 +90,9 @@ func BuildJSONRequest(ctx context.Context, method, url string, auth Auth, body a
 		req.Header.Set("Content-Type", "application/json")
 	}
 	auth.Apply(req)
+	if actor, ok := ActorFromContext(ctx); ok {
+		req.Header.Set("X-Actor", actor)
+	}
 	return req, nil
 }
 

@@ -10,6 +10,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/cli/clitest"
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/fleethttp"
 )
 
 // closeRecordingBackend models fleet-db's close endpoint closely enough to
@@ -25,6 +26,7 @@ type closeRecordingBackend struct {
 	sequence []string
 	closed   map[string]bool
 	params   []backend.CloseParams
+	actors   []string
 	// closeErr, when set, is returned instead — used for the conflicts that
 	// must still fail (open blockers, dependencies).
 	closeErr error
@@ -42,11 +44,13 @@ func newCloseRecordingBackend(closeErr error) *closeRecordingBackend {
 		cb.sequence = append(cb.sequence, "label:"+label)
 		return nil
 	}
-	cb.CloseFn = func(_ context.Context, id string, p backend.CloseParams) (*backend.CloseResult, error) {
+	cb.CloseFn = func(ctx context.Context, id string, p backend.CloseParams) (*backend.CloseResult, error) {
 		cb.mu.Lock()
 		defer cb.mu.Unlock()
 		cb.sequence = append(cb.sequence, "close")
 		cb.params = append(cb.params, p)
+		actor, _ := fleethttp.ActorFromContext(ctx)
+		cb.actors = append(cb.actors, actor)
 		if cb.closeErr != nil {
 			return nil, cb.closeErr
 		}
@@ -96,6 +100,9 @@ func TestRunCompletionHooks_ClosesLastWithReasonAndSession(t *testing.T) {
 	}
 	if cb.params[0].Session != "sess-1" {
 		t.Errorf("close session = %q, want sess-1", cb.params[0].Session)
+	}
+	if cb.actors[0] != "critic" {
+		t.Errorf("close actor = %q, want critic", cb.actors[0])
 	}
 }
 

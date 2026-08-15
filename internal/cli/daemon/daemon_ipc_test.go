@@ -5,13 +5,16 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
+	"net/http"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
+	"github.com/tysonthomas9/loomcli/internal/backend/fleet"
 	"github.com/tysonthomas9/loomcli/internal/cli/daemon/supervisor"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/events"
@@ -35,6 +38,12 @@ type mockIPCBackend struct {
 	closeErr    error
 	closeResult *backend.CloseResult
 	releaseErr  error
+}
+
+type ipcRoundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f ipcRoundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
 }
 
 // ReleaseClaim records the call so handleIPCReleaseClaim tests can assert the
@@ -238,6 +247,150 @@ func TestIPCServer_ClaimSuccess(t *testing.T) {
 	}
 	if mb.claimCalls[0].LockTTL != 0 {
 		t.Errorf("claim LockTTL = %v, want 0", mb.claimCalls[0].LockTTL)
+	}
+}
+
+func TestIPCServer_AgentMutationActorAtStoreBoundary(t *testing.T) {
+	var actors []string
+	client := &http.Client{Transport: ipcRoundTripFunc(func(r *http.Request) (*http.Response, error) {
+		actors = append(actors, r.Method+" "+r.URL.Path+" actor="+r.Header.Get("X-Actor"))
+		body := `{}`
+		switch {
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/issues/TASK-1"):
+			body = `{"id":"TASK-1","title":"test","status":"in_progress","assignee":"falcon"}`
+		case strings.HasSuffix(r.URL.Path, "/close"):
+			body = `{"id":"TASK-1","title":"test","status":"closed"}`
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(body)),
+		}, nil
+	})}
+
+	issueBackend, err := fleet.New(fleet.Config{
+		BaseURL:     "http://fleet.test",
+		WorkspaceID: "WS",
+		Actor:       "daemon-operator",
+		HTTPClient:  client,
+	})
+	if err != nil {
+		t.Fatalf("create fleet backend: %v", err)
+	}
+
+	d := newTestIPCDaemon(&mockIPCBackend{})
+	d.issueBackend = issueBackend
+	defer close(d.sup.Shutdown)
+	req := installValidIPCLease(t, d, "falcon", "TASK-1")
+
+	req.Operation = ipcOpClaim
+	if resp := d.handleIPCClaim(req); !resp.Success {
+		t.Fatalf("claim failed: %+v", resp)
+	}
+
+	design := "agent-authored design"
+	req.Operation = ipcOpUpdate
+	req.Args, err = json.Marshal(backend.UpdateParams{Design: &design})
+	if err != nil {
+		t.Fatalf("marshal update params: %v", err)
+	}
+	if resp := d.handleIPCUpdate(req); !resp.Success {
+		t.Fatalf("update failed: %+v", resp)
+	}
+
+	req.Operation = ipcOpReleaseLock
+	req.Args = nil
+	if resp := d.handleIPCReleaseLock(req); !resp.Success {
+		t.Fatalf("release lock failed: %+v", resp)
+	}
+
+	req.Operation = ipcOpReleaseClaim
+	if resp := d.handleIPCReleaseClaim(req); !resp.Success {
+		t.Fatalf("release claim failed: %+v", resp)
+	}
+
+	req.Operation = ipcOpComplete
+	req.Args, err = json.Marshal(backend.CloseParams{Reason: "done"})
+	if err != nil {
+		t.Fatalf("marshal close params: %v", err)
+	}
+	if resp := d.handleIPCComplete(req); !resp.Success {
+		t.Fatalf("complete failed: %+v", resp)
+	}
+
+	if len(actors) != 9 {
+		t.Fatalf("store requests = %v, want claim, update, release-lock, release read/enrichment/write, and close assign/write", actors)
+	}
+	for _, got := range actors {
+		if !strings.HasSuffix(got, " actor=falcon") {
+			t.Errorf("store request = %q, want connected agent actor falcon", got)
+		}
+	}
+}
+
+func TestIPCServer_DaemonAdministrativeMutationKeepsConfiguredActor(t *testing.T) {
+	var actor string
+	client := &http.Client{Transport: ipcRoundTripFunc(func(r *http.Request) (*http.Response, error) {
+		actor = r.Header.Get("X-Actor")
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{}`)),
+		}, nil
+	})}
+
+	issueBackend, err := fleet.New(fleet.Config{
+		BaseURL:     "http://fleet.test",
+		WorkspaceID: "WS",
+		Actor:       "daemon-operator",
+		HTTPClient:  client,
+	})
+	if err != nil {
+		t.Fatalf("create fleet backend: %v", err)
+	}
+
+	title := "administrative update"
+	if err := issueBackend.Update(t.Context(), "TASK-1", backend.UpdateParams{Title: &title}); err != nil {
+		t.Fatalf("administrative update: %v", err)
+	}
+	if actor != "daemon-operator" {
+		t.Fatalf("X-Actor = %q, want daemon-operator", actor)
+	}
+}
+
+func installValidIPCLease(t *testing.T, d *Daemon, agentName, issueID string) AgentIPCRequest {
+	t.Helper()
+	st := memstore.New()
+	d.store = st
+	d.sup.WorkspaceID = "WS"
+	session, err := st.AgentSessions().Create(t.Context(), store.AgentSessionCreate{
+		WorkspaceKey: "WS",
+		SessionID:    "sess-1",
+		AgentID:      agentName,
+		NodeID:       "node-1",
+		Kind:         domain.AgentSessionKindTask,
+		Status:       domain.AgentSessionRunning,
+	})
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	lease, err := st.AgentLeases().Create(t.Context(), store.AgentLeaseCreate{
+		WorkspaceKey: "WS",
+		SessionID:    session.SessionID,
+		LeaseID:      "lease-1",
+		AgentID:      agentName,
+		NodeID:       "node-1",
+		TTL:          time.Minute,
+	})
+	if err != nil {
+		t.Fatalf("create lease: %v", err)
+	}
+	return AgentIPCRequest{
+		AgentName:  agentName,
+		IssueID:    issueID,
+		SessionID:  session.SessionID,
+		LeaseID:    lease.LeaseID,
+		LeaseToken: lease.Token,
 	}
 }
 

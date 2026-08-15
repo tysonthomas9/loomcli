@@ -15,6 +15,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/cli/daemon/supervisor"
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/fleethttp"
 )
 
 // AgentIPCRequest is sent by an agent subprocess to the daemon IPC socket.
@@ -283,7 +284,8 @@ func (d *Daemon) handleIPCClaim(req AgentIPCRequest) AgentIPCResponse {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	if resp, ok := d.validateIPCLease(ctx, req); !ok {
+	ctx, resp, ok := d.authorizeIPCMutation(ctx, req)
+	if !ok {
 		return resp
 	}
 	if err := d.issueBackend.ClaimIssue(ctx, req.IssueID, lockTTL); err != nil {
@@ -315,7 +317,8 @@ func (d *Daemon) handleIPCUpdate(req AgentIPCRequest) AgentIPCResponse {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	if resp, ok := d.validateIPCLease(ctx, req); !ok {
+	ctx, resp, ok := d.authorizeIPCMutation(ctx, req)
+	if !ok {
 		return resp
 	}
 	if err := d.issueBackend.Update(ctx, req.IssueID, params); err != nil {
@@ -346,7 +349,8 @@ func (d *Daemon) handleIPCComplete(req AgentIPCRequest) AgentIPCResponse {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	if resp, ok := d.validateIPCLease(ctx, req); !ok {
+	ctx, resp, ok := d.authorizeIPCMutation(ctx, req)
+	if !ok {
 		return resp
 	}
 	result, err := d.issueBackend.Close(ctx, req.IssueID, params)
@@ -385,7 +389,8 @@ func (d *Daemon) handleIPCReleaseLock(req AgentIPCRequest) AgentIPCResponse {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	if resp, ok := d.validateIPCLease(ctx, req); !ok {
+	ctx, resp, ok := d.authorizeIPCMutation(ctx, req)
+	if !ok {
 		return resp
 	}
 	if err := d.issueBackend.ReleaseIssueLock(ctx, req.IssueID, req.AgentName); err != nil {
@@ -403,7 +408,8 @@ func (d *Daemon) handleIPCReleaseClaim(req AgentIPCRequest) AgentIPCResponse {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	if resp, ok := d.validateIPCLease(ctx, req); !ok {
+	ctx, resp, ok := d.authorizeIPCMutation(ctx, req)
+	if !ok {
 		return resp
 	}
 	releaser, ok := d.issueBackend.(backend.ClaimReleaser)
@@ -418,6 +424,17 @@ func (d *Daemon) handleIPCReleaseClaim(req AgentIPCRequest) AgentIPCResponse {
 	// the real in_progress→open release mutation, or it only dropped an
 	// operational lock for an issue whose status was already changed.
 	return AgentIPCResponse{Success: true}
+}
+
+// authorizeIPCMutation validates the agent's lease before allowing its name to
+// override the daemon process actor. Keeping those steps together prevents an
+// unfenced or failed request from being attributed to an untrusted AgentName.
+func (d *Daemon) authorizeIPCMutation(ctx context.Context, req AgentIPCRequest) (context.Context, AgentIPCResponse, bool) {
+	resp, ok := d.validateIPCLease(ctx, req)
+	if !ok {
+		return ctx, resp, false
+	}
+	return fleethttp.WithActor(ctx, req.AgentName), resp, true
 }
 
 func (d *Daemon) validateIPCLease(ctx context.Context, req AgentIPCRequest) (AgentIPCResponse, bool) {

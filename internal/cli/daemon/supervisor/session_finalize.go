@@ -15,6 +15,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/sessionfinalize"
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/fleethttp"
 	"github.com/tysonthomas9/loomcli/internal/sessions"
 )
 
@@ -250,6 +251,9 @@ func (s *Supervisor) runCompletionHooks(ap *AgentProcess, exitCode int) int {
 
 	ctx, cancel := s.operationContext(completionHookTimeout)
 	defer cancel()
+	// These writes complete the supervised agent's run, so scope every nested
+	// FleetDB request in the pipeline to that agent rather than the daemon.
+	ctx = fleethttp.WithActor(ctx, ap.Entry.Worktree)
 
 	if err := s.executeCompletionHooks(ctx, ap, hooks, taskID, sessionID); err != nil {
 		slog.Warn("completion hook failed; demoting run so the task is reopened",

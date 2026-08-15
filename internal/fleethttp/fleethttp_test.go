@@ -82,6 +82,16 @@ func TestBuildJSONRequest(t *testing.T) {
 			t.Errorf("body = %q, want JSON with k:v", got)
 		}
 	})
+	t.Run("request actor overrides configured actor", func(t *testing.T) {
+		ctx := WithActor(context.Background(), "connected-agent")
+		req, err := BuildJSONRequest(ctx, http.MethodPatch, "http://x/api", Auth{Actor: "daemon-operator"}, map[string]string{"k": "v"})
+		if err != nil {
+			t.Fatalf("err: %v", err)
+		}
+		if got := req.Header.Get("X-Actor"); got != "connected-agent" {
+			t.Errorf("X-Actor = %q, want connected-agent", got)
+		}
+	})
 }
 
 func TestExtractErrorMessage(t *testing.T) {
