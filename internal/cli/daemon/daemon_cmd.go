@@ -492,7 +492,7 @@ func runDaemonStatus(cmd *cobra.Command, args []string) {
 	// Use shared runtime detection, then fall back to the workspace lock
 	rt := detectDaemonRuntimeForCommand(projectDir)
 	if !rt.Running {
-		fmt.Fprintln(out, "Daemon: not running")
+		_, _ = fmt.Fprintln(out, "Daemon: not running")
 		return
 	}
 
@@ -518,26 +518,30 @@ func runDaemonStatus(cmd *cobra.Command, args []string) {
 
 	view := buildDaemonStatusView(in)
 	for _, line := range view.HeaderLines() {
-		fmt.Fprintln(out, line)
+		_, _ = fmt.Fprintln(out, line)
 	}
 
 	// The agent table is a rendering of the state file, so it is shown only
 	// when the state file was accepted as describing this daemon.
 	if !view.Trusted {
 		if state == nil {
-			fmt.Fprintf(out, "  (no agent status available: cannot read %s)\n", stateFilePath)
+			_, _ = fmt.Fprintf(out, "  (no agent status available: cannot read %s)\n", stateFilePath)
 		}
 		return
 	}
-	fmt.Fprintln(out, "")
+	_, _ = fmt.Fprintln(out, "")
+	printDaemonAgentTable(state, targetDir(rt, projectDir))
+}
 
+// printDaemonAgentTable renders the per-agent listing from a state file that
+// has already been accepted as describing the detected daemon.
+func printDaemonAgentTable(state *DaemonState, dir string) {
 	// Pending interactive prompts come from the live daemon, not the state
 	// file: a question is meaningful only while the asking process waits, so
 	// it is never persisted. Best-effort — status must render even when the
 	// control socket does not.
-	waiting := pendingInputsForDir(targetDir(rt, projectDir))
+	waiting := pendingInputsForDir(dir)
 
-	// Format agent table
 	for _, agent := range state.Agents {
 		printAgentStatus(agent)
 		if p, ok := waiting[agent.Worktree]; ok {

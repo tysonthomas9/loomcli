@@ -1564,7 +1564,7 @@ func TestStatePathForTarget_UsesDetectedDir(t *testing.T) {
 
 // TestStatePathForTarget_FallsBackToCwd keeps hand-built DaemonRuntimeInfo
 // values (older callers, tests) working: an empty Dir means "the cwd's daemon",
-// which is the historical behaviour.
+// which is the historical behavior.
 func TestStatePathForTarget_FallsBackToCwd(t *testing.T) {
 	cwd := t.TempDir()
 
