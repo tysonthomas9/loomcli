@@ -851,6 +851,32 @@ func (s *Supervisor) startBackoffHeartbeat(ap *AgentProcess, backoff time.Durati
 	return s.startAgentWaitHeartbeat(ap)
 }
 
+// logBackoffWait writes the one line that describes this wait and reports
+// whether the wait should also be announced as a restart (span + event).
+//
+// An idle poll is not a restart: it reaches sleepBeforeRestart because
+// claimTask found nothing, and announcing it as one both floods the log and
+// makes the fleet restart metrics fiction (events.handleAgentRestarted counts
+// every AgentRestarted). The first poll of a streak is announced, so a "went
+// idle" signal survives in the log and in the metrics; the rest are Debug
+// only.
+func logBackoffWait(ap *AgentProcess, backoff time.Duration, count int, lastErr *agenterr.AgentError, noWorkCount int, idleSince time.Time) bool {
+	idle := lastErr != nil && lastErr.Class.Is(agenterr.NoWorkOutcome)
+	// applyNoWorkRestart has already incremented, so the first poll of a
+	// streak arrives here with NoWorkCount == 1.
+	firstIdle := idle && noWorkCount <= 1
+
+	switch {
+	case !idle:
+		slog.Info("waiting before restart", "worktree", ap.Entry.Worktree, "backoff", backoff, "attempt", count)
+	case firstIdle:
+		slog.Info("agent idle", "worktree", ap.Entry.Worktree, "role", ap.Entry.Role, "poll", backoff, "reason", lastErr.Message)
+	default:
+		slog.Debug("agent still idle", "worktree", ap.Entry.Worktree, "poll", backoff, "polls", noWorkCount, "idle_for", time.Since(idleSince))
+	}
+	return !idle || firstIdle
+}
+
 // announceRestartWait opens the restart span and emits the AgentRestarted
 // event for a wait that is a genuine restart — or the first poll of an idle
 // streak, which keeps a "went idle" signal in the restart metrics. It returns
@@ -883,27 +909,7 @@ func (s *Supervisor) sleepBeforeRestart(ap *AgentProcess) bool {
 	ap.BackoffUntil = time.Now().Add(backoff)
 	ap.Mu.Unlock()
 
-	// An idle poll is not a restart. It reaches here because claimTask found
-	// nothing, and announcing it as a restart both floods the log and makes
-	// the fleet restart metrics fiction (events.handleAgentRestarted counts
-	// every AgentRestarted). Announce the first poll of an idle streak — so a
-	// "went idle" signal survives in the log and in the metrics — and demote
-	// the rest to Debug with no event and no span.
-	idle := lastErr != nil && lastErr.Class.Is(agenterr.NoWorkOutcome)
-	// applyNoWorkRestart has already incremented, so the first poll of a
-	// streak arrives here with NoWorkCount == 1.
-	firstIdle := idle && noWorkCount <= 1
-
-	switch {
-	case !idle:
-		slog.Info("waiting before restart", "worktree", ap.Entry.Worktree, "backoff", backoff, "attempt", count)
-	case firstIdle:
-		slog.Info("agent idle", "worktree", ap.Entry.Worktree, "role", ap.Entry.Role, "poll", backoff, "reason", lastErr.Message)
-	default:
-		slog.Debug("agent still idle", "worktree", ap.Entry.Worktree, "poll", backoff, "polls", noWorkCount, "idle_for", time.Since(idleSince))
-	}
-
-	if !idle || firstIdle {
+	if logBackoffWait(ap, backoff, count, lastErr, noWorkCount, idleSince) {
 		defer s.announceRestartWait(ap, count, errType)()
 	}
 
