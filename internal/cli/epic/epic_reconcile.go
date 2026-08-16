@@ -11,9 +11,9 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli/stack"
-	"github.com/tysonthomas9/loomcli/internal/configlock"
 	stackpublish "github.com/tysonthomas9/loomcli/internal/infra/sourcecontrolpublisher"
 	stackstore "github.com/tysonthomas9/loomcli/internal/infra/sourcecontrolstackstore"
+	"github.com/tysonthomas9/loomcli/internal/lockfile"
 	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
 )
 
@@ -67,7 +67,7 @@ func reconcileEpicStack(ctx context.Context, ws string, proj *EpicStackProjectio
 	// manual `loom stack publish`, an epic re-run) share the deterministic stack
 	// id, so the lock serializes them on the same key.
 	var report *stackpublish.Report
-	if lockErr := configlock.WithLock(lockDir, func() error {
+	if lockErr := lockfile.WithConfigLock(lockDir, func() error {
 		r, perr := rec.PublishFromOrigin(ctx, ws, proj.StackID, proj.RepoURL, token, opts)
 		report = r
 		return perr

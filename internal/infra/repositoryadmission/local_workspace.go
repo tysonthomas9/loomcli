@@ -1,4 +1,4 @@
-package workspacemgr
+package repositoryadmissioninfra
 
 import (
 	"context"
@@ -10,10 +10,10 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/tysonthomas9/loomcli/internal/app/repositoryadmission"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	workspacemodule "github.com/tysonthomas9/loomcli/internal/modules/workspace"
-	"github.com/tysonthomas9/loomcli/internal/webui/workspacecoord"
 )
 
 type workspaceDirPlan struct {
@@ -26,15 +26,9 @@ type workspaceDirPlan struct {
 // app data directory, but they must point at a safe workspace root: an empty
 // directory, or a not-yet-created leaf under an existing parent.
 func resolveWorkspaceDirForCreate(reqPath, wsName string) (workspaceDirPlan, error) {
-	wsDir := strings.TrimSpace(reqPath)
-	if wsDir == "" {
-		wsDir = config.GetWorkspaceDir(wsName)
-	}
-	wsDir = expandUserPath(wsDir)
-
-	absDir, err := filepath.Abs(filepath.Clean(wsDir))
+	absDir, err := canonicalWorkspacePath(reqPath, wsName)
 	if err != nil {
-		return workspaceDirPlan{}, workspacemodule.NewCreateError(workspacemodule.PathNotFound, fmt.Sprintf("cannot resolve workspace path %q", wsDir), err)
+		return workspaceDirPlan{}, err
 	}
 	if err := validateWorkspaceCreatePath(absDir); err != nil {
 		return workspaceDirPlan{}, err
@@ -42,6 +36,22 @@ func resolveWorkspaceDirForCreate(reqPath, wsName string) (workspaceDirPlan, err
 
 	_, statErr := os.Stat(absDir)
 	return workspaceDirPlan{path: absDir, removeRootOnRollback: os.IsNotExist(statErr)}, nil
+}
+
+func canonicalWorkspacePath(reqPath, workspaceName string) (string, error) {
+	path := strings.TrimSpace(reqPath)
+	if path == "" {
+		path = config.GetWorkspaceDir(workspaceName)
+	}
+	path = expandUserPath(path)
+	absolute, err := filepath.Abs(filepath.Clean(path))
+	if err != nil {
+		return "", workspacemodule.NewCreateError(workspacemodule.PathNotFound, fmt.Sprintf("cannot resolve workspace path %q", path), err)
+	}
+	if err := validateWorkspacePath(absolute); err != nil {
+		return "", err
+	}
+	return absolute, nil
 }
 
 func expandUserPath(path string) string {
@@ -167,7 +177,7 @@ type createdWorktree struct {
 }
 
 // addWorktrees creates git worktrees for each resolved repo in the workspace directory.
-func addWorktrees(ctx context.Context, resolved []resolvedRepo, wsDir, branch string) ([]createdWorktree, []config.RepoConfig, error) {
+func addWorktrees(ctx context.Context, resolved []resolvedRepo, wsDir, branch string) ([]createdWorktree, []repositoryadmission.RepositoryPlacement, error) {
 	return addWorktreesWithRepoDefault(ctx, resolved, wsDir, branch, branch)
 }
 
@@ -179,9 +189,9 @@ func addWorktreesWithRepoDefault(
 	ctx context.Context,
 	resolved []resolvedRepo,
 	wsDir, worktreeBranch, defaultBranchOverride string,
-) ([]createdWorktree, []config.RepoConfig, error) {
+) ([]createdWorktree, []repositoryadmission.RepositoryPlacement, error) {
 	var created []createdWorktree
-	var repos []config.RepoConfig
+	var repos []repositoryadmission.RepositoryPlacement
 
 	for _, repo := range resolved {
 		if ctx.Err() != nil {
@@ -210,16 +220,16 @@ func addWorktreesWithRepoDefault(
 	return created, repos, nil
 }
 
-func worktreeRepoConfig(repo resolvedRepo, worktreePath, defaultBranchOverride string) (config.RepoConfig, error) {
+func worktreeRepoConfig(repo resolvedRepo, worktreePath, defaultBranchOverride string) (repositoryadmission.RepositoryPlacement, error) {
 	defaultBranch := strings.TrimSpace(defaultBranchOverride)
 	if defaultBranch == "" {
 		var err error
 		defaultBranch, err = detectRepoDefaultBranch(repo.path)
 		if err != nil {
-			return config.RepoConfig{}, err
+			return repositoryadmission.RepositoryPlacement{}, err
 		}
 	}
-	return config.RepoConfig{
+	return repositoryadmission.RepositoryPlacement{
 		Name:          repo.name,
 		Path:          worktreePath,
 		Remote:        "origin",
@@ -310,7 +320,7 @@ func runWorkspaceGitContext(
 func warnSkippedWorktree(ctx context.Context, repoName, worktreePath string, err error) {
 	msg := fmt.Sprintf("Skipped checkout for repo %q at %s: %v", repoName, worktreePath, err)
 	slog.Warn("workspace bootstrap skipped checkout", "repo", repoName, "path", worktreePath, "err", err)
-	workspacecoord.AddCreateWarning(ctx, msg)
+	repositoryadmission.AddWarning(ctx, msg)
 }
 
 // cleanupWorktrees removes created worktrees and, only when Loom created it,
@@ -466,7 +476,7 @@ func gitRefResolvesToCommit(repoPath, ref string) bool {
 // repository. With no explicit branch, each clone keeps its independently
 // detected remote HEAD. This prevents one shared workspace default from
 // corrupting mixed-repository metadata.
-func applyRequestedCloneBranch(repos []config.RepoConfig, requested string) error {
+func applyRequestedCloneBranch(repos []repositoryadmission.RepositoryPlacement, requested string) error {
 	requested = strings.TrimSpace(requested)
 	if requested == "" {
 		return nil
@@ -492,7 +502,7 @@ func applyRequestedCloneBranch(repos []config.RepoConfig, requested string) erro
 	return nil
 }
 
-func cleanupClonedRepos(repos []config.RepoConfig) {
+func cleanupClonedRepos(repos []repositoryadmission.RepositoryPlacement) {
 	for _, repo := range repos {
 		if repo.Path != "" {
 			_ = os.RemoveAll(repo.Path)
@@ -519,7 +529,7 @@ func cleanupWorkspaceRoot(plan workspaceDirPlan) {
 	}
 }
 
-func cleanupCloneWorkspace(plan workspaceDirPlan, repos []config.RepoConfig) {
+func cleanupCloneWorkspace(plan workspaceDirPlan, repos []repositoryadmission.RepositoryPlacement) {
 	cleanupClonedRepos(repos)
 	cleanupWorkspaceRoot(plan)
 }

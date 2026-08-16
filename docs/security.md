@@ -52,7 +52,7 @@ For production Redis deployments:
 ### Config File Security Hardening
 
 - **Atomic writes**: `SaveConfig` uses tmp+rename to prevent partial writes on crash.
-- **File locking**: flock-based config file locking (`internal/configlock`) prevents concurrent write corruption from parallel agents.
+- **File locking**: flock-based machine-local configuration locking (`internal/lockfile`) prevents concurrent write corruption from parallel agents.
 - **Parse failure protection**: `LoadConfig` refuses to overwrite config after parse/read failures, preventing data loss from corrupted reads.
 - **Durable evidence ownership**: Transcripts, diffs, logs, reports, and
   finalized scrollback are stored only as owner-scoped Artifacts. Artifacts

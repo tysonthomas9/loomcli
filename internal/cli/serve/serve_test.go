@@ -14,6 +14,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
+	"github.com/tysonthomas9/loomcli/internal/cli/serve/opsimpl"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/infra/workspacecatalog"
 	"github.com/tysonthomas9/loomcli/internal/modules/agents"
@@ -28,6 +29,14 @@ type workspaceAgentsCommandsStub struct{}
 func (workspaceAgentsCommandsStub) EnsureRole(
 	context.Context,
 	agents.EnsureRoleCommand,
+) (*agents.Role, error) {
+	return &agents.Role{}, nil
+}
+
+func (workspaceAgentsCommandsStub) GetRole(
+	context.Context,
+	string,
+	string,
 ) (*agents.Role, error) {
 	return &agents.Role{}, nil
 }
@@ -266,7 +275,7 @@ func TestWriteJSON(t *testing.T) {
 func TestApplyWorkspaceConfig_NilStoreDoesNotWireWorkspaceFns(t *testing.T) {
 	cfg := webui.ServerConfig{}
 
-	applyWorkspaceConfig(&cfg, workspaceAgentsCommandsStub{})
+	opsimpl.ConfigureWorkspaceAdmission(&cfg, nil, nil, workspaceAgentsCommandsStub{})
 
 	if cfg.WorkspaceIDResolverFn != nil {
 		t.Fatal("WorkspaceIDResolverFn should be nil without store")
@@ -288,7 +297,7 @@ func TestApplyWorkspaceConfig_StoreWiresStoreBackedFns(t *testing.T) {
 	}
 	cfg := webui.ServerConfig{Store: st, WorkspaceCatalog: workspace}
 
-	applyWorkspaceConfig(&cfg, workspaceAgentsCommandsStub{})
+	opsimpl.ConfigureWorkspaceAdmission(&cfg, nil, nil, workspaceAgentsCommandsStub{})
 
 	if cfg.WorkspaceIDResolverFn == nil {
 		t.Fatal("WorkspaceIDResolverFn was nil")
@@ -307,7 +316,7 @@ func TestApplyWorkspaceConfig_StoreWiresStoreBackedFns(t *testing.T) {
 func TestApplyWorkspaceConfig_StoreWithoutAgentsCommandsFailsClosed(t *testing.T) {
 	cfg := webui.ServerConfig{Store: memstore.New()}
 
-	applyWorkspaceConfig(&cfg, nil)
+	opsimpl.ConfigureWorkspaceAdmission(&cfg, nil, nil, nil)
 
 	if cfg.WorkspaceCreateFn != nil || cfg.WorkspaceAddReposFn != nil {
 		t.Fatal("workspace mutation functions were wired without Agents commands")

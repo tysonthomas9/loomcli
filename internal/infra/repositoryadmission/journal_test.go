@@ -1,4 +1,4 @@
-package workspacemgr
+package repositoryadmissioninfra
 
 import (
 	"context"
@@ -6,31 +6,30 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
 )
 
-func TestLocalRepositoryAdmissionJournalSurvivesReloadAndBindsExactlyOnce(t *testing.T) {
+func TestLocalJournalSurvivesReloadAndBindsExactlyOnce(t *testing.T) {
 	t.Parallel()
 	dir := filepath.Join(t.TempDir(), "journal")
 	now := time.Date(2026, 7, 30, 12, 0, 0, 0, time.UTC)
-	journal, err := newLocalRepositoryAdmissionJournalAt(dir, func() time.Time {
+	journal, err := NewRepositoryAdmissionJournalAt(dir, func() time.Time {
 		return now
 	})
 	if err != nil {
 		t.Fatalf("new journal: %v", err)
 	}
-	intent := localRepositoryAdmissionIntent{
+	intent := LocalIntent{
 		OperationID:   "operation-1",
 		WorkspaceKey:  "WORK",
 		WorkspaceName: "Work",
 		WorkspacePath: filepath.Join(t.TempDir(), "workspace"),
-		Kind:          localRepositoryAdmissionCreateWorkspace,
+		Kind:          KindCreateWorkspace,
 	}
-	prepared, err := journal.prepare(context.Background(), intent)
+	prepared, err := journal.Prepare(context.Background(), intent)
 	if err != nil {
 		t.Fatalf("prepare: %v", err)
 	}
@@ -43,7 +42,7 @@ func TestLocalRepositoryAdmissionJournalSurvivesReloadAndBindsExactlyOnce(t *tes
 		admissionID = "0123456789abcdef0123456789abcdef"
 		fingerprint = "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 	)
-	bound, err := journal.bind(
+	bound, err := journal.Bind(
 		context.Background(),
 		intent.OperationID,
 		admissionID,
@@ -59,15 +58,15 @@ func TestLocalRepositoryAdmissionJournalSurvivesReloadAndBindsExactlyOnce(t *tes
 		t.Fatalf("bound = %#v", bound)
 	}
 
-	reloaded, err := newLocalRepositoryAdmissionJournalAt(dir, time.Now)
+	reloaded, err := NewRepositoryAdmissionJournalAt(dir, time.Now)
 	if err != nil {
 		t.Fatalf("reload journal: %v", err)
 	}
-	byOperation, err := reloaded.getByOperation(context.Background(), intent.OperationID)
+	byOperation, err := reloaded.GetByOperation(context.Background(), intent.OperationID)
 	if err != nil {
 		t.Fatalf("get by operation: %v", err)
 	}
-	byAdmission, err := reloaded.getByAdmission(context.Background(), admissionID)
+	byAdmission, err := reloaded.GetByAdmission(context.Background(), admissionID)
 	if err != nil {
 		t.Fatalf("get by admission: %v", err)
 	}
@@ -76,7 +75,7 @@ func TestLocalRepositoryAdmissionJournalSurvivesReloadAndBindsExactlyOnce(t *tes
 		t.Fatalf("reloaded records = %#v, %#v; want %#v", byOperation, byAdmission, bound)
 	}
 
-	info, err := os.Stat(filepath.Join(dir, localRepositoryAdmissionJournalFileName))
+	info, err := os.Stat(filepath.Join(dir, localJournalFileName))
 	if err != nil {
 		t.Fatalf("stat journal: %v", err)
 	}
@@ -90,24 +89,24 @@ func TestLocalRepositoryAdmissionAuthorityIsLiveExactAndProcessLocal(
 ) {
 	t.Parallel()
 	dir := filepath.Join(t.TempDir(), "journal")
-	journal, err := newLocalRepositoryAdmissionJournalAt(dir, time.Now)
+	journal, err := NewRepositoryAdmissionJournalAt(dir, time.Now)
 	if err != nil {
 		t.Fatalf("new journal: %v", err)
 	}
-	intent := localRepositoryAdmissionIntent{
+	intent := LocalIntent{
 		OperationID:   "operation-1",
 		WorkspaceKey:  "WORK",
 		WorkspacePath: filepath.Join(t.TempDir(), "workspace"),
-		Kind:          localRepositoryAdmissionAddRepositories,
+		Kind:          KindAddRepositories,
 	}
-	if _, err := journal.prepare(t.Context(), intent); err != nil {
+	if _, err := journal.Prepare(t.Context(), intent); err != nil {
 		t.Fatalf("prepare: %v", err)
 	}
 	const (
 		admissionID = "0123456789abcdef0123456789abcdef"
 		fingerprint = "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 	)
-	if _, err := journal.bind(
+	if _, err := journal.Bind(
 		t.Context(),
 		intent.OperationID,
 		admissionID,
@@ -115,7 +114,7 @@ func TestLocalRepositoryAdmissionAuthorityIsLiveExactAndProcessLocal(
 	); err != nil {
 		t.Fatalf("bind: %v", err)
 	}
-	coordinate := repositoryAdmissionCoordinate{
+	coordinate := Coordinate{
 		WorkspaceKey:      intent.WorkspaceKey,
 		AdmissionID:       admissionID,
 		OperationID:       intent.OperationID,
@@ -126,19 +125,19 @@ func TestLocalRepositoryAdmissionAuthorityIsLiveExactAndProcessLocal(
 	monotonicNow := time.Date(2030, time.January, 1, 0, 0, 0, 0, time.UTC)
 	journal.monotonicNow = func() time.Time { return monotonicNow }
 
-	if _, err := journal.ResolveLocalRepositoryAdmission(
+	if _, err := journal.ResolveLocal(
 		t.Context(),
 		admissionID,
-	); !errors.Is(err, sourcecontrol.ErrRepositoryAdmissionNotFound) {
+	); !errors.Is(err, ErrLocalNotFound) {
 		t.Fatalf("durable journal authorized without live owner generation: %v", err)
 	}
-	if err := journal.activateMaterializationAuthority(
+	if err := journal.ActivateMaterializationAuthority(
 		coordinate,
 		monotonicNow.Add(time.Minute),
 	); err != nil {
 		t.Fatalf("activate exact authority: %v", err)
 	}
-	projection, err := journal.ResolveLocalRepositoryAdmission(
+	projection, err := journal.ResolveLocal(
 		t.Context(),
 		admissionID,
 	)
@@ -153,82 +152,82 @@ func TestLocalRepositoryAdmissionAuthorityIsLiveExactAndProcessLocal(
 
 	stale := coordinate
 	stale.OwnerGenerationID = "11111111111111111111111111111111"
-	if journal.renewMaterializationAuthority(
+	if journal.RenewMaterializationAuthority(
 		stale,
 		monotonicNow.Add(2*time.Minute),
 	) {
 		t.Fatal("stale owner generation renewed exact authority")
 	}
-	journal.deactivateMaterializationAuthority(stale)
-	if _, err := journal.ResolveLocalRepositoryAdmission(
+	journal.DeactivateMaterializationAuthority(stale)
+	if _, err := journal.ResolveLocal(
 		t.Context(),
 		admissionID,
 	); err != nil {
 		t.Fatalf("stale owner generation cleared exact authority: %v", err)
 	}
 
-	if !journal.renewMaterializationAuthority(
+	if !journal.RenewMaterializationAuthority(
 		coordinate,
 		monotonicNow.Add(10*time.Second),
 	) {
 		t.Fatal("exact owner generation did not accept shorter renewed deadline")
 	}
 	monotonicNow = monotonicNow.Add(11 * time.Second)
-	if _, err := journal.ResolveLocalRepositoryAdmission(
+	if _, err := journal.ResolveLocal(
 		t.Context(),
 		admissionID,
-	); !errors.Is(err, sourcecontrol.ErrRepositoryAdmissionNotFound) {
+	); !errors.Is(err, ErrLocalNotFound) {
 		t.Fatalf("expired monotonic authority resolved: %v", err)
 	}
 
-	if err := journal.activateMaterializationAuthority(
+	if err := journal.ActivateMaterializationAuthority(
 		coordinate,
 		monotonicNow.Add(time.Minute),
 	); err != nil {
 		t.Fatalf("reactivate exact authority: %v", err)
 	}
-	reloaded, err := newLocalRepositoryAdmissionJournalAt(dir, time.Now)
+	reloaded, err := NewRepositoryAdmissionJournalAt(dir, time.Now)
 	if err != nil {
 		t.Fatalf("reload journal: %v", err)
 	}
-	if _, err := reloaded.ResolveLocalRepositoryAdmission(
+	if _, err := reloaded.ResolveLocal(
 		t.Context(),
 		admissionID,
-	); !errors.Is(err, sourcecontrol.ErrRepositoryAdmissionNotFound) {
+	); !errors.Is(err, ErrLocalNotFound) {
 		t.Fatalf("reloaded durable journal retained process authority: %v", err)
 	}
-	journal.deactivateMaterializationAuthority(coordinate)
-	if _, err := journal.ResolveLocalRepositoryAdmission(
+	journal.DeactivateMaterializationAuthority(coordinate)
+	if _, err := journal.ResolveLocal(
 		t.Context(),
 		admissionID,
-	); !errors.Is(err, sourcecontrol.ErrRepositoryAdmissionNotFound) {
+	); !errors.Is(err, ErrLocalNotFound) {
 		t.Fatalf("released authority still resolved: %v", err)
 	}
 }
 
-func TestLocalRepositoryAdmissionJournalReplaysExactIntentAndRejectsDivergence(t *testing.T) {
+func TestLocalJournalReplaysExactIntentAndRejectsDivergence(t *testing.T) {
 	t.Parallel()
 	now := time.Date(2026, 7, 30, 12, 0, 0, 0, time.UTC)
-	journal, err := newLocalRepositoryAdmissionJournalAt(
+	journal, err := NewRepositoryAdmissionJournalAt(
 		filepath.Join(t.TempDir(), "journal"),
 		func() time.Time { return now },
 	)
 	if err != nil {
 		t.Fatalf("new journal: %v", err)
 	}
-	intent := localRepositoryAdmissionIntent{
+	intent := LocalIntent{
 		OperationID:   " operation-1 ",
 		WorkspaceKey:  " WORK ",
 		WorkspaceName: " Work ",
 		WorkspacePath: filepath.Join(t.TempDir(), "workspace"),
-		Kind:          localRepositoryAdmissionAddRepositories,
+		Kind:          KindAddRepositories,
 	}
-	first, err := journal.prepare(context.Background(), intent)
+	first, err := journal.Prepare(context.Background(), intent)
 	if err != nil {
 		t.Fatalf("prepare first: %v", err)
 	}
 	now = now.Add(time.Hour)
-	replay, err := journal.prepare(context.Background(), intent)
+	replay, err := journal.Prepare(context.Background(), intent)
 	if err != nil {
 		t.Fatalf("prepare replay: %v", err)
 	}
@@ -238,14 +237,14 @@ func TestLocalRepositoryAdmissionJournalReplaysExactIntentAndRejectsDivergence(t
 
 	divergent := intent
 	divergent.WorkspacePath = filepath.Join(t.TempDir(), "other")
-	if _, err := journal.prepare(context.Background(), divergent); !errors.Is(err, errLocalRepositoryAdmissionConflict) {
+	if _, err := journal.Prepare(context.Background(), divergent); !errors.Is(err, ErrLocalConflict) {
 		t.Fatalf("divergent prepare error = %v, want conflict", err)
 	}
 }
 
-func TestLocalRepositoryAdmissionJournalRejectsDivergentBindings(t *testing.T) {
+func TestLocalJournalRejectsDivergentBindings(t *testing.T) {
 	t.Parallel()
-	journal, err := newLocalRepositoryAdmissionJournalAt(
+	journal, err := NewRepositoryAdmissionJournalAt(
 		filepath.Join(t.TempDir(), "journal"),
 		time.Now,
 	)
@@ -254,11 +253,11 @@ func TestLocalRepositoryAdmissionJournalRejectsDivergentBindings(t *testing.T) {
 	}
 	root := t.TempDir()
 	for _, operationID := range []string{"operation-1", "operation-2"} {
-		_, err := journal.prepare(context.Background(), localRepositoryAdmissionIntent{
+		_, err := journal.Prepare(context.Background(), LocalIntent{
 			OperationID:   operationID,
 			WorkspaceKey:  "WORK",
 			WorkspacePath: filepath.Join(root, operationID),
-			Kind:          localRepositoryAdmissionAddRepositories,
+			Kind:          KindAddRepositories,
 		})
 		if err != nil {
 			t.Fatalf("prepare %s: %v", operationID, err)
@@ -269,31 +268,65 @@ func TestLocalRepositoryAdmissionJournalRejectsDivergentBindings(t *testing.T) {
 		admissionTwo = "abcdef0123456789abcdef0123456789"
 		fingerprint  = "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 	)
-	if _, err := journal.bind(context.Background(), "operation-1", admissionOne, fingerprint); err != nil {
+	if _, err := journal.Bind(context.Background(), "operation-1", admissionOne, fingerprint); err != nil {
 		t.Fatalf("bind first: %v", err)
 	}
-	if _, err := journal.bind(context.Background(), "operation-1", admissionOne, fingerprint); err != nil {
+	if _, err := journal.Bind(context.Background(), "operation-1", admissionOne, fingerprint); err != nil {
 		t.Fatalf("replay bind: %v", err)
 	}
-	if _, err := journal.bind(context.Background(), "operation-1", admissionTwo, fingerprint); !errors.Is(err, errLocalRepositoryAdmissionConflict) {
+	if _, err := journal.Bind(context.Background(), "operation-1", admissionTwo, fingerprint); !errors.Is(err, ErrLocalConflict) {
 		t.Fatalf("divergent operation bind error = %v, want conflict", err)
 	}
-	if _, err := journal.bind(context.Background(), "operation-2", admissionOne, fingerprint); !errors.Is(err, errLocalRepositoryAdmissionConflict) {
+	if _, err := journal.Bind(context.Background(), "operation-2", admissionOne, fingerprint); !errors.Is(err, ErrLocalConflict) {
 		t.Fatalf("duplicate admission bind error = %v, want conflict", err)
 	}
-	if _, err := journal.bind(context.Background(), "missing", "fedcba9876543210fedcba9876543210", fingerprint); !errors.Is(err, errLocalRepositoryAdmissionNotFound) {
+	if _, err := journal.Bind(context.Background(), "missing", "fedcba9876543210fedcba9876543210", fingerprint); !errors.Is(err, ErrLocalNotFound) {
 		t.Fatalf("missing operation bind error = %v, want not found", err)
 	}
 	divergentFingerprint := "sha256:abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
-	if _, err := journal.bind(context.Background(), "operation-1", admissionOne, divergentFingerprint); !errors.Is(err, errLocalRepositoryAdmissionConflict) {
+	if _, err := journal.Bind(context.Background(), "operation-1", admissionOne, divergentFingerprint); !errors.Is(err, ErrLocalConflict) {
 		t.Fatalf("divergent fingerprint bind error = %v, want conflict", err)
+	}
+	rebound, err := journal.Rebind(
+		context.Background(),
+		"operation-1",
+		admissionOne,
+		fingerprint,
+		admissionTwo,
+		divergentFingerprint,
+	)
+	if err != nil {
+		t.Fatalf("exact compare-and-swap rebind: %v", err)
+	}
+	if rebound.AdmissionID != admissionTwo ||
+		rebound.SpecFingerprint != divergentFingerprint ||
+		!slices.Equal(rebound.PreviousAdmissionIDs, []string{admissionOne}) {
+		t.Fatalf("rebound coordinates = %#v", rebound)
+	}
+	byPreviousID, err := journal.GetByAdmission(context.Background(), admissionOne)
+	if err != nil || byPreviousID.AdmissionID != admissionTwo {
+		t.Fatalf("previous admission alias = %#v, err=%v", byPreviousID, err)
+	}
+	thirdAdmission := "fedcba9876543210fedcba9876543210"
+	if _, err := journal.Rebind(
+		context.Background(),
+		"operation-1",
+		admissionOne,
+		fingerprint,
+		thirdAdmission,
+		divergentFingerprint,
+	); !errors.Is(err, ErrLocalConflict) {
+		t.Fatalf("stale compare-and-swap rebind error = %v, want conflict", err)
+	}
+	if _, err := journal.Bind(context.Background(), "operation-2", admissionOne, fingerprint); !errors.Is(err, ErrLocalConflict) {
+		t.Fatalf("previous admission alias reuse error = %v, want conflict", err)
 	}
 }
 
-func TestLocalRepositoryAdmissionJournalListAndRemoveAreDeterministic(t *testing.T) {
+func TestLocalJournalListAndRemoveAreDeterministic(t *testing.T) {
 	t.Parallel()
 	now := time.Date(2026, 7, 30, 12, 0, 0, 0, time.UTC)
-	journal, err := newLocalRepositoryAdmissionJournalAt(
+	journal, err := NewRepositoryAdmissionJournalAt(
 		filepath.Join(t.TempDir(), "journal"),
 		func() time.Time { return now },
 	)
@@ -302,17 +335,17 @@ func TestLocalRepositoryAdmissionJournalListAndRemoveAreDeterministic(t *testing
 	}
 	root := t.TempDir()
 	for _, operationID := range []string{"operation-b", "operation-a"} {
-		_, err := journal.prepare(context.Background(), localRepositoryAdmissionIntent{
+		_, err := journal.Prepare(context.Background(), LocalIntent{
 			OperationID:   operationID,
 			WorkspaceKey:  "WORK",
 			WorkspacePath: filepath.Join(root, operationID),
-			Kind:          localRepositoryAdmissionAddRepositories,
+			Kind:          KindAddRepositories,
 		})
 		if err != nil {
 			t.Fatalf("prepare %s: %v", operationID, err)
 		}
 	}
-	records, err := journal.list(context.Background())
+	records, err := journal.List(context.Background())
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
@@ -321,68 +354,68 @@ func TestLocalRepositoryAdmissionJournalListAndRemoveAreDeterministic(t *testing
 		records[1].Intent.OperationID != "operation-b" {
 		t.Fatalf("records = %#v", records)
 	}
-	if err := journal.remove(context.Background(), "operation-a"); err != nil {
+	if err := journal.Remove(context.Background(), "operation-a"); err != nil {
 		t.Fatalf("remove: %v", err)
 	}
-	if err := journal.remove(context.Background(), "operation-a"); err != nil {
+	if err := journal.Remove(context.Background(), "operation-a"); err != nil {
 		t.Fatalf("idempotent remove: %v", err)
 	}
-	if _, err := journal.getByOperation(context.Background(), "operation-a"); !errors.Is(err, errLocalRepositoryAdmissionNotFound) {
+	if _, err := journal.GetByOperation(context.Background(), "operation-a"); !errors.Is(err, ErrLocalNotFound) {
 		t.Fatalf("removed get error = %v, want not found", err)
 	}
 }
 
-func TestLocalRepositoryAdmissionJournalFailsClosedOnCorruptOrUnknownFile(t *testing.T) {
+func TestLocalJournalFailsClosedOnCorruptOrUnknownFile(t *testing.T) {
 	t.Parallel()
 	dir := filepath.Join(t.TempDir(), "journal")
-	journal, err := newLocalRepositoryAdmissionJournalAt(dir, time.Now)
+	journal, err := NewRepositoryAdmissionJournalAt(dir, time.Now)
 	if err != nil {
 		t.Fatalf("new journal: %v", err)
 	}
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
-	path := filepath.Join(dir, localRepositoryAdmissionJournalFileName)
+	path := filepath.Join(dir, localJournalFileName)
 	if err := os.WriteFile(path, []byte(`{"version":999,"records":{}}`), 0o600); err != nil {
 		t.Fatalf("write unknown version: %v", err)
 	}
-	if _, err := journal.list(context.Background()); err == nil {
+	if _, err := journal.List(context.Background()); err == nil {
 		t.Fatal("unknown version list error = nil")
 	}
 	if err := os.WriteFile(path, []byte(`{`), 0o600); err != nil {
 		t.Fatalf("write corrupt file: %v", err)
 	}
-	if _, err := journal.list(context.Background()); err == nil {
+	if _, err := journal.List(context.Background()); err == nil {
 		t.Fatal("corrupt list error = nil")
 	}
 }
 
-func TestLocalRepositoryAdmissionJournalValidatesCoordinatesAndCancellation(t *testing.T) {
+func TestLocalJournalValidatesCoordinatesAndCancellation(t *testing.T) {
 	t.Parallel()
-	journal, err := newLocalRepositoryAdmissionJournalAt(
+	journal, err := NewRepositoryAdmissionJournalAt(
 		filepath.Join(t.TempDir(), "journal"),
 		time.Now,
 	)
 	if err != nil {
 		t.Fatalf("new journal: %v", err)
 	}
-	valid := localRepositoryAdmissionIntent{
+	valid := LocalIntent{
 		OperationID:   "operation-1",
 		WorkspaceKey:  "WORK",
 		WorkspacePath: filepath.Join(t.TempDir(), "workspace"),
-		Kind:          localRepositoryAdmissionCreateWorkspace,
+		Kind:          KindCreateWorkspace,
 	}
-	for name, mutate := range map[string]func(*localRepositoryAdmissionIntent){
-		"operation": func(intent *localRepositoryAdmissionIntent) { intent.OperationID = " " },
-		"workspace": func(intent *localRepositoryAdmissionIntent) { intent.WorkspaceKey = " " },
-		"path":      func(intent *localRepositoryAdmissionIntent) { intent.WorkspacePath = "relative" },
-		"root":      func(intent *localRepositoryAdmissionIntent) { intent.WorkspacePath = string(filepath.Separator) },
-		"kind":      func(intent *localRepositoryAdmissionIntent) { intent.Kind = "unknown" },
+	for name, mutate := range map[string]func(*LocalIntent){
+		"operation": func(intent *LocalIntent) { intent.OperationID = " " },
+		"workspace": func(intent *LocalIntent) { intent.WorkspaceKey = " " },
+		"path":      func(intent *LocalIntent) { intent.WorkspacePath = "relative" },
+		"root":      func(intent *LocalIntent) { intent.WorkspacePath = string(filepath.Separator) },
+		"kind":      func(intent *LocalIntent) { intent.Kind = "unknown" },
 	} {
 		t.Run(name, func(t *testing.T) {
 			intent := valid
 			mutate(&intent)
-			if _, err := journal.prepare(context.Background(), intent); err == nil {
+			if _, err := journal.Prepare(context.Background(), intent); err == nil {
 				t.Fatal("prepare error = nil")
 			}
 		})
@@ -390,29 +423,29 @@ func TestLocalRepositoryAdmissionJournalValidatesCoordinatesAndCancellation(t *t
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if _, err := journal.prepare(ctx, valid); !errors.Is(err, context.Canceled) {
+	if _, err := journal.Prepare(ctx, valid); !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancelled prepare error = %v, want context canceled", err)
 	}
 }
 
-func TestLocalRepositoryAdmissionJournalRejectsCredentialBearingCloneSourceWithoutPersistence(
+func TestLocalJournalRejectsCredentialBearingCloneSourceWithoutPersistence(
 	t *testing.T,
 ) {
 	t.Parallel()
 	dir := filepath.Join(t.TempDir(), "journal")
-	journal, err := newLocalRepositoryAdmissionJournalAt(dir, time.Now)
+	journal, err := NewRepositoryAdmissionJournalAt(dir, time.Now)
 	if err != nil {
 		t.Fatalf("new journal: %v", err)
 	}
 	const secret = "phase5-secret-token"
-	_, err = journal.prepare(
+	_, err = journal.Prepare(
 		context.Background(),
-		localRepositoryAdmissionIntent{
+		LocalIntent{
 			OperationID:   "operation-secret",
 			WorkspaceKey:  "WORK",
 			WorkspaceName: "Work",
 			WorkspacePath: filepath.Join(t.TempDir(), "workspace"),
-			Kind:          localRepositoryAdmissionCreateWorkspace,
+			Kind:          KindCreateWorkspace,
 			CloneURLs: []string{
 				"https://" + secret + "@example.com/private.git",
 			},
@@ -425,7 +458,7 @@ func TestLocalRepositoryAdmissionJournalRejectsCredentialBearingCloneSourceWitho
 		t.Fatalf("credential leaked through validation error: %v", err)
 	}
 	if _, statErr := os.Stat(
-		filepath.Join(dir, localRepositoryAdmissionJournalFileName),
+		filepath.Join(dir, localJournalFileName),
 	); !os.IsNotExist(statErr) {
 		t.Fatalf(
 			"credential-bearing intent reached durable journal: stat error = %v",
@@ -438,17 +471,17 @@ func TestRepositoryAdmissionMaterializationLockSerializesAcrossJournalInstances(
 	t *testing.T,
 ) {
 	dir := filepath.Join(t.TempDir(), "journal")
-	first, err := newLocalRepositoryAdmissionJournalAt(dir, time.Now)
+	first, err := NewRepositoryAdmissionJournalAt(dir, time.Now)
 	if err != nil {
 		t.Fatalf("new first journal: %v", err)
 	}
-	second, err := newLocalRepositoryAdmissionJournalAt(dir, time.Now)
+	second, err := NewRepositoryAdmissionJournalAt(dir, time.Now)
 	if err != nil {
 		t.Fatalf("new second journal: %v", err)
 	}
 	const admissionID = "0123456789abcdef0123456789abcdef"
 	target := filepath.Join(t.TempDir(), "workspace", "repo")
-	releaseFirst, err := first.acquireMaterializationLock(
+	releaseFirst, err := first.AcquireMaterializationLock(
 		context.Background(),
 		admissionID,
 		[]string{target},
@@ -459,7 +492,7 @@ func TestRepositoryAdmissionMaterializationLockSerializesAcrossJournalInstances(
 
 	waitCtx, cancelWait := context.WithTimeout(context.Background(), 60*time.Millisecond)
 	defer cancelWait()
-	if _, err := second.acquireMaterializationLock(
+	if _, err := second.AcquireMaterializationLock(
 		waitCtx,
 		admissionID,
 		[]string{target},
@@ -468,7 +501,7 @@ func TestRepositoryAdmissionMaterializationLockSerializesAcrossJournalInstances(
 	}
 	releaseFirst()
 
-	releaseSecond, err := second.acquireMaterializationLock(
+	releaseSecond, err := second.AcquireMaterializationLock(
 		context.Background(),
 		admissionID,
 		[]string{target},
@@ -483,17 +516,17 @@ func TestRepositoryAdmissionMaterializationLockSerializesCanonicalTargetAcrossAd
 	t *testing.T,
 ) {
 	dir := filepath.Join(t.TempDir(), "journal")
-	first, err := newLocalRepositoryAdmissionJournalAt(dir, time.Now)
+	first, err := NewRepositoryAdmissionJournalAt(dir, time.Now)
 	if err != nil {
 		t.Fatalf("new first journal: %v", err)
 	}
-	second, err := newLocalRepositoryAdmissionJournalAt(dir, time.Now)
+	second, err := NewRepositoryAdmissionJournalAt(dir, time.Now)
 	if err != nil {
 		t.Fatalf("new second journal: %v", err)
 	}
 	targetRoot := t.TempDir()
 	target := filepath.Join(targetRoot, "workspace", "repo")
-	releaseFirst, err := first.acquireMaterializationLock(
+	releaseFirst, err := first.AcquireMaterializationLock(
 		context.Background(),
 		"0123456789abcdef0123456789abcdef",
 		[]string{target},
@@ -505,7 +538,7 @@ func TestRepositoryAdmissionMaterializationLockSerializesCanonicalTargetAcrossAd
 
 	waitCtx, cancelWait := context.WithTimeout(context.Background(), 60*time.Millisecond)
 	defer cancelWait()
-	if _, err := second.acquireMaterializationLock(
+	if _, err := second.AcquireMaterializationLock(
 		waitCtx,
 		"abcdef0123456789abcdef0123456789",
 		[]string{filepath.Join(targetRoot, "workspace", ".", "repo")},

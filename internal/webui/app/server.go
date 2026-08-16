@@ -129,9 +129,6 @@ type Server struct {
 	wrappedCreateFn        workspacecoord.WorkspaceCreateFn
 	wrappedDeleteCleanupFn func(string) error
 
-	// Async workspace creation jobs
-	jobStore *workspacecoord.WorkspaceJobRegistry
-
 	// Workspace resolver
 	wsResolveFn middleware.WorkspaceResolveFn
 
@@ -217,9 +214,6 @@ func (app *Server) Close() {
 		}
 	}
 
-	if app.jobStore != nil {
-		app.jobStore.Stop()
-	}
 	if app.jwksCleanup != nil {
 		app.jwksCleanup()
 	}
@@ -331,14 +325,6 @@ func (app *Server) run(ctx context.Context) error { //nolint:funlen // server li
 
 	// Stop components in reverse-initialization order.
 	//
-	// Workspace jobs intentionally outlive the HTTP request that accepted them.
-	// Drain them before closing the registry, workspace pools, or any other
-	// dependency captured by their callbacks. Close calls Stop again, so this
-	// remains safe on both the graceful and construction-cleanup paths.
-	if app.jobStore != nil {
-		app.jobStore.Stop()
-	}
-
 	// Stop rate limiter cleanup goroutine
 	rl.Stop()
 

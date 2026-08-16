@@ -60,6 +60,18 @@ func (capability *AgentsCapability) EnsureRole(
 	return capability.api.EnsureManagedRole(ctx, auth, command)
 }
 
+// GetRole implements workspace management's read-only bootstrap query without
+// exposing the complete Agents capability.
+func (capability *AgentsCapability) GetRole(
+	ctx context.Context,
+	workspace, roleName string,
+) (*agents.Role, error) {
+	if capability == nil || capability.api == nil {
+		return nil, agents.ErrUnavailable
+	}
+	return capability.api.GetRole(ctx, workspace, roleName)
+}
+
 // RepairRolePromptFile implements workspace management's monotonic repair
 // port without exposing generic Role update authority.
 func (capability *AgentsCapability) RepairRolePromptFile(

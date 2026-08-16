@@ -1,70 +1,78 @@
-package workspacemgr
+package repositoryadmission
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
 
 	workspacemodule "github.com/tysonthomas9/loomcli/internal/modules/workspace"
-
-	"github.com/tysonthomas9/loomcli/internal/cli/config"
-	infrafleetdb "github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
 )
 
-type ambiguousRepositoryAdmissionCommitTransport struct {
-	infrafleetdb.RepositoryAdmissionTransport
+func cloneTestAdmission(record *Record) *Record {
+	if record == nil {
+		return nil
+	}
+	encoded, _ := json.Marshal(record)
+	var result Record
+	_ = json.Unmarshal(encoded, &result)
+	return &result
+}
 
-	before    *infrafleetdb.RepositoryAdmissionRecord
-	after     *infrafleetdb.RepositoryAdmissionRecord
+type ambiguousRepositoryAdmissionCommitTransport struct {
+	DurableAdmissions
+
+	before    *Record
+	after     *Record
 	commitErr error
 	gets      int
 	commits   int
 }
 
 type repositoryAdmissionOwnershipTransport struct {
-	infrafleetdb.RepositoryAdmissionTransport
+	DurableAdmissions
 
-	current   *infrafleetdb.RepositoryAdmissionRecord
-	renewed   *infrafleetdb.RepositoryAdmissionRecord
-	recovered *infrafleetdb.RepositoryAdmissionRecord
-	failed    *infrafleetdb.RepositoryAdmissionRecord
+	current   *Record
+	renewed   *Record
+	recovered *Record
+	failed    *Record
 }
 
-func (transport *repositoryAdmissionOwnershipTransport) GetRepositoryAdmission(
+func (transport *repositoryAdmissionOwnershipTransport) Get(
 	context.Context,
 	string,
 	string,
-) (*infrafleetdb.RepositoryAdmissionRecord, error) {
+) (*Record, error) {
 	return cloneTestAdmission(transport.current), nil
 }
 
-func (transport *repositoryAdmissionOwnershipTransport) RenewRepositoryAdmission(
+func (transport *repositoryAdmissionOwnershipTransport) Renew(
 	context.Context,
-	infrafleetdb.RepositoryAdmissionRenewInput,
-) (*infrafleetdb.RepositoryAdmissionRecord, error) {
+	Renew,
+) (*Record, error) {
 	return cloneTestAdmission(transport.renewed), nil
 }
 
-func (transport *repositoryAdmissionOwnershipTransport) ClaimRepositoryAdmissionRecovery(
+func (transport *repositoryAdmissionOwnershipTransport) ClaimRecovery(
 	context.Context,
-	infrafleetdb.RepositoryAdmissionRecoveryClaimInput,
-) (*infrafleetdb.RepositoryAdmissionRecord, error) {
+	RecoveryClaim,
+) (*Record, error) {
 	return cloneTestAdmission(transport.recovered), nil
 }
 
-func (transport *repositoryAdmissionOwnershipTransport) FailRepositoryAdmission(
+func (transport *repositoryAdmissionOwnershipTransport) Fail(
 	context.Context,
-	infrafleetdb.RepositoryAdmissionFailInput,
-) (*infrafleetdb.RepositoryAdmissionRecord, error) {
+	Fail,
+) (*Record, error) {
 	return cloneTestAdmission(transport.failed), nil
 }
 
-func (transport *ambiguousRepositoryAdmissionCommitTransport) GetRepositoryAdmission(
+func (transport *ambiguousRepositoryAdmissionCommitTransport) Get(
 	context.Context,
 	string,
 	string,
-) (*infrafleetdb.RepositoryAdmissionRecord, error) {
+) (*Record, error) {
 	transport.gets++
 	if transport.gets == 1 {
 		return cloneTestAdmission(transport.before), nil
@@ -72,10 +80,10 @@ func (transport *ambiguousRepositoryAdmissionCommitTransport) GetRepositoryAdmis
 	return cloneTestAdmission(transport.after), nil
 }
 
-func (transport *ambiguousRepositoryAdmissionCommitTransport) CommitRepositoryAdmission(
+func (transport *ambiguousRepositoryAdmissionCommitTransport) Commit(
 	context.Context,
-	infrafleetdb.RepositoryAdmissionCommitInput,
-) (*infrafleetdb.RepositoryAdmissionRecord, error) {
+	Commit,
+) (*Record, error) {
 	transport.commits++
 	return nil, transport.commitErr
 }
@@ -85,12 +93,12 @@ func TestRepositoryAdmissionCommitReconcilesOnlyExactLostResponse(t *testing.T) 
 
 	now := time.Date(2026, time.July, 30, 12, 0, 0, 0, time.UTC)
 	pending := testPendingRepositoryAdmission(now)
-	repositories := []config.RepoConfig{{
+	repositories := []RepositoryPlacement{{
 		Name:          "app",
 		Remote:        "origin",
 		DefaultBranch: "main",
 	}}
-	finalization := &infrafleetdb.RepositoryAdmissionWorkspaceFinalization{
+	finalization := &WorkspaceFinalization{
 		State:         "ready",
 		DefaultBranch: "main",
 	}
@@ -138,7 +146,7 @@ func TestRepositoryAdmissionCommitReconcilesOnlyExactLostResponse(t *testing.T) 
 			"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
 			pending.Version+2,
 			"release",
-			&infrafleetdb.RepositoryAdmissionWorkspaceFinalization{
+			&WorkspaceFinalization{
 				State:         "ready",
 				DefaultBranch: "release",
 			},
@@ -178,7 +186,7 @@ func TestRepositoryAdmissionCommitReconcilesOnlyExactLostResponse(t *testing.T) 
 			"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
 			pending.Version+2,
 			"release",
-			&infrafleetdb.RepositoryAdmissionWorkspaceFinalization{
+			&WorkspaceFinalization{
 				State:         "ready",
 				DefaultBranch: "release",
 			},
@@ -201,7 +209,7 @@ func TestRepositoryAdmissionCommitReconcilesOnlyExactLostResponse(t *testing.T) 
 			finalization,
 		)
 		if got != nil ||
-			!errors.Is(err, infrafleetdb.ErrRepositoryAdmissionFenceLost) ||
+			!errors.Is(err, ErrFenceLost) ||
 			transport.commits != 0 {
 			t.Fatalf(
 				"pre-commit successor reconciliation = %#v, err=%v, commits=%d",
@@ -224,7 +232,7 @@ func TestEnsureOwnershipAllowsCommittedReplayAcrossServeOwnerChange(t *testing.T
 		"cccccccccccccccccccccccccccccccc",
 		pending.Version+2,
 		"main",
-		&infrafleetdb.RepositoryAdmissionWorkspaceFinalization{
+		&WorkspaceFinalization{
 			State:         "ready",
 			DefaultBranch: "main",
 		},
@@ -269,34 +277,34 @@ func TestAcquireMaterializationOwnershipRequiresExactRecoveryAndRenewResponses(t
 
 	tests := []struct {
 		name    string
-		mutate  func(*infrafleetdb.RepositoryAdmissionRecord)
+		mutate  func(*Record)
 		wantErr bool
 	}{
 		{name: "exact"},
 		{
 			name: "version jump",
-			mutate: func(record *infrafleetdb.RepositoryAdmissionRecord) {
+			mutate: func(record *Record) {
 				record.Version++
 			},
 			wantErr: true,
 		},
 		{
 			name: "owner substitution",
-			mutate: func(record *infrafleetdb.RepositoryAdmissionRecord) {
+			mutate: func(record *Record) {
 				record.OwnerID = "loom-workspace-admission-other"
 			},
 			wantErr: true,
 		},
 		{
 			name: "generation reused",
-			mutate: func(record *infrafleetdb.RepositoryAdmissionRecord) {
+			mutate: func(record *Record) {
 				record.OwnerGenerationID = previous.OwnerGenerationID
 			},
 			wantErr: true,
 		},
 		{
 			name: "immutable spec changed",
-			mutate: func(record *infrafleetdb.RepositoryAdmissionRecord) {
+			mutate: func(record *Record) {
 				record.Spec.Repositories[0].RemoteURL =
 					"https://example.com/acme/substituted.git"
 			},
@@ -329,7 +337,7 @@ func TestAcquireMaterializationOwnershipRequiresExactRecoveryAndRenewResponses(t
 			)
 			if test.wantErr {
 				if got != nil ||
-					!errors.Is(err, infrafleetdb.ErrRepositoryAdmissionInvalid) {
+					!errors.Is(err, ErrInvalid) {
 					t.Fatalf("ensureOwnership() = %#v, %v; want invalid", got, err)
 				}
 				return
@@ -357,27 +365,27 @@ func TestAcquireMaterializationOwnershipRequiresExactRenewResponse(t *testing.T)
 
 	tests := []struct {
 		name    string
-		mutate  func(*infrafleetdb.RepositoryAdmissionRecord)
+		mutate  func(*Record)
 		wantErr bool
 	}{
 		{name: "exact"},
 		{
 			name: "version jump",
-			mutate: func(record *infrafleetdb.RepositoryAdmissionRecord) {
+			mutate: func(record *Record) {
 				record.Version++
 			},
 			wantErr: true,
 		},
 		{
 			name: "generation substitution",
-			mutate: func(record *infrafleetdb.RepositoryAdmissionRecord) {
+			mutate: func(record *Record) {
 				record.OwnerGenerationID = "33333333333333333333333333333333"
 			},
 			wantErr: true,
 		},
 		{
 			name: "immutable spec changed",
-			mutate: func(record *infrafleetdb.RepositoryAdmissionRecord) {
+			mutate: func(record *Record) {
 				record.Spec.Repositories[0].SourceRepoID = "substituted"
 			},
 			wantErr: true,
@@ -408,7 +416,7 @@ func TestAcquireMaterializationOwnershipRequiresExactRenewResponse(t *testing.T)
 			)
 			if test.wantErr {
 				if got != nil ||
-					!errors.Is(err, infrafleetdb.ErrRepositoryAdmissionInvalid) {
+					!errors.Is(err, ErrInvalid) {
 					t.Fatalf("ensureOwnership() = %#v, %v; want invalid", got, err)
 				}
 				return
@@ -446,53 +454,15 @@ func TestRepositoryAdmissionFailRequiresExactTransitionResponse(t *testing.T) {
 
 	err := process.fail(t.Context(), previous, cause)
 	if !errors.Is(err, cause) ||
-		!errors.Is(err, infrafleetdb.ErrRepositoryAdmissionInvalid) {
+		!errors.Is(err, ErrInvalid) {
 		t.Fatalf("fail() error = %v; want cause joined with invalid response", err)
-	}
-}
-
-func TestValidCommittedRepositoryAdmissionReplayRequiresOperationShape(t *testing.T) {
-	t.Parallel()
-
-	now := time.Date(2026, time.July, 30, 16, 0, 0, 0, time.UTC)
-	pending := testPendingRepositoryAdmission(now)
-	create := testCommittedRepositoryAdmission(
-		pending,
-		pending.OwnerID,
-		pending.OwnerGenerationID,
-		pending.Version+1,
-		"main",
-		&infrafleetdb.RepositoryAdmissionWorkspaceFinalization{
-			State:         "ready",
-			DefaultBranch: "main",
-		},
-		now.Add(time.Second),
-	)
-	add := cloneTestAdmission(create)
-	add.Receipt.WorkspaceFinalization = nil
-
-	if !validCommittedRepositoryAdmissionReplay(create, true) {
-		t.Fatal("create replay with exact finalization was rejected")
-	}
-	if validCommittedRepositoryAdmissionReplay(create, false) {
-		t.Fatal("add-repositories replay accepted workspace finalization")
-	}
-	if !validCommittedRepositoryAdmissionReplay(add, false) {
-		t.Fatal("add-repositories replay without finalization was rejected")
-	}
-	if validCommittedRepositoryAdmissionReplay(add, true) {
-		t.Fatal("create replay accepted missing workspace finalization")
-	}
-	create.Receipt.WorkspaceFinalization.DefaultBranch = "release"
-	if validCommittedRepositoryAdmissionReplay(create, true) {
-		t.Fatal("create replay accepted divergent workspace default branch")
 	}
 }
 
 func testPendingRepositoryAdmission(
 	now time.Time,
-) *infrafleetdb.RepositoryAdmissionRecord {
-	return &infrafleetdb.RepositoryAdmissionRecord{
+) *Record {
+	return &Record{
 		AdmissionID:         "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 		WorkspaceKey:        "WORK",
 		OperationID:         "workspace-add_repositories:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -500,10 +470,10 @@ func testPendingRepositoryAdmission(
 		OwnerGenerationID:   "11111111111111111111111111111111",
 		OwnerLeaseExpiresAt: now.Add(2 * time.Minute),
 		SpecFingerprint:     "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-		Spec: infrafleetdb.RepositoryAdmissionSpec{
+		Spec: Spec{
 			WorkspaceKey: "WORK",
 			OperationID:  "workspace-add_repositories:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-			Repositories: []infrafleetdb.RepositoryAdmissionRepoSpec{{
+			Repositories: []RepositorySpec{{
 				Name:          "app",
 				RemoteURL:     "https://example.com/acme/app.git",
 				Remote:        "origin",
@@ -518,14 +488,14 @@ func testPendingRepositoryAdmission(
 }
 
 func testCommittedRepositoryAdmission(
-	pending *infrafleetdb.RepositoryAdmissionRecord,
+	pending *Record,
 	ownerID string,
 	ownerGenerationID string,
 	version int64,
 	branch string,
-	finalization *infrafleetdb.RepositoryAdmissionWorkspaceFinalization,
+	finalization *WorkspaceFinalization,
 	committedAt time.Time,
-) *infrafleetdb.RepositoryAdmissionRecord {
+) *Record {
 	committed := cloneTestAdmission(pending)
 	committed.OwnerID = ownerID
 	committed.OwnerGenerationID = ownerGenerationID
@@ -533,10 +503,10 @@ func testCommittedRepositoryAdmission(
 	committed.Version = version
 	committed.UpdatedAt = committedAt
 	committed.TerminalAt = &committedAt
-	committed.Receipt = &infrafleetdb.RepositoryAdmissionReceipt{
+	committed.Receipt = &Receipt{
 		AdmissionID:     committed.AdmissionID,
 		SpecFingerprint: committed.SpecFingerprint,
-		Repositories: []infrafleetdb.RepositoryAdmissionRepoReceipt{{
+		Repositories: []RepositoryReceipt{{
 			Repository: workspacemodule.Repository{
 				WorkspaceKey:  committed.WorkspaceKey,
 				Name:          "app",

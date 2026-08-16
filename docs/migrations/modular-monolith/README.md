@@ -3,7 +3,7 @@
 - **Status:** Phase 9 package consolidation complete through Wave 9.41; the
   modular monolith is ratcheted to 158 production packages with no
   `internal/backend` compatibility tree
-- **Decision last amended:** 2026-08-13
+- **Decision last amended:** 2026-08-14
 - **Scope:** `loom serve`, the operator CLI entry surfaces, the Vite frontend counterpart, and the fleet-db contracts those capabilities depend on
 - **Provenance:** [Phase 0 integration baseline](00-phase-0-baseline.md), final [Phase 1 evidence](06-phase-1-decisions-and-evidence.md) at Loom `7e8a6dd2`, [Phase 2 evidence](07-phase-2-decisions-and-evidence.md) at Loom `84cccb761` with FleetDB `430dce8d9`, [Phase 3 evidence](08-phase-3-decisions-and-evidence.md) at core implementation commits Loom `7f95b9bf1` and FleetDB `f1c4e1119`, final [Phase 4 evidence](09-phase-4-decisions-and-evidence.md) at Loom `53cbe2577` with FleetDB `afb688768`, and the appended reliability-validation record at Loom `67c45972f` with FleetDB `9ffa69f60`
 - **Related:** [Unified agent UX](../../design/2026-07-01-unified-agent-ux-proposal.md) · [Durable agent identity](../../design/2026-07-07-agent-identity-record.md) · [Workflow driver authoring](../../design/workflow-driver-authoring-guide.md)
@@ -17,8 +17,9 @@ is the sole normative Phase 10 plan. Documents 18 and 19, the six-candidate
 session, and the later outside-package and Source Control/package-unification
 sessions are superseded planning records. Their accepted conclusions are
 restated in document 20; anything not restated there has no implementation
-authority. ADRs remain supporting architecture decisions, and per-stack
-records remain implementation evidence rather than alternative plans.
+authority. No other Phase 10 planning record or session remains active. ADRs
+remain supporting architecture decisions, and per-stack records remain
+implementation evidence rather than alternative plans.
 Every other Phase 10 proposal, candidate list, package target, stack sequence,
 or unresolved alternative is likewise superseded unless document 20 is
 explicitly amended.
@@ -97,6 +98,7 @@ one-file packages, and 60 one-or-two-file packages.
 | [22-phase-10-2-artifacts-run-capture-evidence.md](22-phase-10-2-artifacts-run-capture-evidence.md) | Stack 10.2 implementation and proof for Artifacts evidence policy, Run Capture, Transcript Evidence, and Sessions-path deletion. |
 | [23-phase-10-3-deep-source-control-evidence.md](23-phase-10-3-deep-source-control-evidence.md) | Stack 10.3 implementation and proof for the three Source Control ports, private filesystem adapter, legacy FileOps/GitOps deletion, full gates, and exact-source Files/PR UI journeys. |
 | [24-phase-10-4-interaction-pty-evidence.md](24-phase-10-4-interaction-pty-evidence.md) | Stack 10.4 implementation and proof for Interaction-owned terminal lifecycle, private PTY and Redis adapters, replay and resize correctness, legacy coordinator deletion, full gates, and packaged Desktop terminal journeys. |
+| [25-phase-10-5-repository-admission-evidence.md](25-phase-10-5-repository-admission-evidence.md) | Stack 10.5 implementation and proof for durable Workspace and Repository Admission, exact replay and recovery, cleanup and failure, process-local job-store deletion, and packaged Desktop repository journeys. |
 
 ## Scope boundaries
 

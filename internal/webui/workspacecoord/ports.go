@@ -6,22 +6,14 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/ops"
 )
 
-// JobRegistry tracks process-local async workspace mutations.
-type JobRegistry interface {
-	Start(req WorkspaceCreateRequest, createFn WorkspaceCreateFn) string
-	StartPrepared(id string, req WorkspaceCreateRequest, createFn WorkspaceCreateFn) string
-	StartAddRepos(req WorkspaceAddReposRequest, addReposFn WorkspaceAddReposFn) string
-	StartPreparedAddRepos(id string, req WorkspaceAddReposRequest, addReposFn WorkspaceAddReposFn) string
-	Get(id string) *WorkspaceJob
-}
-
-// WorkspaceAdmissionCoordinator durably records an asynchronous workspace
-// mutation before request handling schedules its process-local runner. Job IDs
-// are opaque durable admission handles; callers must pass them through without
-// deriving a replacement.
+// WorkspaceAdmissionCoordinator is the durable repository-admission seam used
+// by WebUI delivery. Start methods persist the exact intent before returning an
+// opaque admission ID and arrange best-effort immediate execution. FleetDB,
+// rather than process-local memory, remains authoritative for status and
+// restart recovery resumes accepted work.
 type WorkspaceAdmissionCoordinator interface {
-	PrepareCreate(ctx context.Context, req WorkspaceCreateRequest) (jobID string, err error)
-	PrepareAddRepos(ctx context.Context, req WorkspaceAddReposRequest) (jobID string, err error)
+	StartCreate(ctx context.Context, req WorkspaceCreateRequest) (admissionID string, err error)
+	StartAddRepos(ctx context.Context, req WorkspaceAddReposRequest) (admissionID string, err error)
 	LookupJob(ctx context.Context, jobID string) (job *WorkspaceJob, found bool, err error)
 }
 

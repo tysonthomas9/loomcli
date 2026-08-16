@@ -1,7 +1,7 @@
 // Package stackstore persists stack lineage for the stack-aware PR publisher.
 //
 // This iteration ships a loomcli-side LocalStore backed by ~/.loom/stacks.json,
-// using the same configlock + atomic-write discipline as the state cache. The
+// using the same file-lock + atomic-write discipline as the state cache. The
 // Source Control's owner-owned ports are the seam: a future FleetDB adapter can
 // implement them without touching the reconciler or CLI. See
 // docs/design/2026-06-18-stack-aware-pr-publisher.md.
@@ -19,7 +19,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/atomicfile"
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
-	"github.com/tysonthomas9/loomcli/internal/configlock"
+	"github.com/tysonthomas9/loomcli/internal/lockfile"
 	sl "github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
 )
 
@@ -220,7 +220,7 @@ func (s *LocalStore) withLock(fn func(*stacksFile) error) error {
 	if s.dir == "" {
 		return ErrLoomDirMissing
 	}
-	return configlock.WithLock(s.dir, func() error {
+	return lockfile.WithConfigLock(s.dir, func() error {
 		f, err := s.load()
 		if err != nil {
 			return err

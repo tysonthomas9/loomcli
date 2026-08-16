@@ -11,15 +11,15 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/tysonthomas9/loomcli/internal/app/repositoryadmission"
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/cli/serve/serveadapter"
-	"github.com/tysonthomas9/loomcli/internal/cli/serve/workspacemgr"
+	repositoryadmissioninfra "github.com/tysonthomas9/loomcli/internal/infra/repositoryadmission"
 	"github.com/tysonthomas9/loomcli/internal/infra/workspacecatalog"
 	workspacemodule "github.com/tysonthomas9/loomcli/internal/modules/workspace"
-	"github.com/tysonthomas9/loomcli/internal/webui/workspacecoord"
 )
 
 var (
@@ -137,17 +137,17 @@ func runWorkspaceCreate(cmd *cobra.Command, args []string) {
 		if err != nil {
 			return fmt.Errorf("compose Workspace for workspace creation: %w", err)
 		}
-		operations := workspacemgr.NewStoreBackedWorkspaceAdmissionOperations(
+		local := repositoryadmissioninfra.NewRepositoryAdmissionLocalWorkspace(
 			workspaceCapability,
 			agentsCapability,
 			nil,
 			nil,
-			nil,
 		)
+		operations := repositoryadmission.New(nil, nil, local)
 		if operations == nil {
 			return errors.New("compose Workspace operations for workspace creation")
 		}
-		result, err := operations.CreateWorkspace(ctx, workspacecoord.WorkspaceCreateRequest{
+		result, err := operations.Create(ctx, repositoryadmission.CreateCommand{
 			Name:   wsName,
 			Type:   "empty",
 			Repos:  repoPaths,

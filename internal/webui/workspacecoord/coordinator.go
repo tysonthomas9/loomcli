@@ -32,11 +32,10 @@ var workspaceBackendOptions = []string{"claude", defaultWorkspaceBackend, "openc
 type WorkspaceServiceConfig struct {
 	Topology             storeadapter.WorkspaceTopologyReader // Narrow Workspace and Repository read projection.
 	Workspace            workspacemodule.API                  // Workspace-owned catalog commands and queries
-	CreateFn             WorkspaceCreateFn                    // Already wrapped with registry hooks
+	CreateFn             WorkspaceCreateFn                    // Synchronous empty-workspace creation.
 	AddReposFn           WorkspaceAddReposFn                  // Store-backed repo attachment
 	DeleteCleanupFn      func(string) error                   // Machine-local cleanup after a Workspace-owned durable delete.
-	JobStore             JobRegistry                          // For async creation; nil = async unavailable
-	AdmissionCoordinator WorkspaceAdmissionCoordinator        // Optional durable admission seam for async mutations
+	AdmissionCoordinator WorkspaceAdmissionCoordinator        // Durable admission seam for async repository mutations.
 	AgentDirectory       WorkspaceAgentDirectory              // Canonical Agents/Role read surface; nil fails closed to an empty roster.
 }
 
@@ -55,7 +54,6 @@ type workspaceServiceImpl struct {
 	createFn             WorkspaceCreateFn
 	addReposFn           WorkspaceAddReposFn
 	deleteCleanupFn      func(string) error
-	jobStore             JobRegistry
 	admissionCoordinator WorkspaceAdmissionCoordinator
 	agentDirectory       WorkspaceAgentDirectory
 	workspaceCache       *workspaceDataCache
@@ -69,7 +67,6 @@ func NewWorkspaceService(cfg WorkspaceServiceConfig) WorkspaceService {
 		createFn:             cfg.CreateFn,
 		addReposFn:           cfg.AddReposFn,
 		deleteCleanupFn:      cfg.DeleteCleanupFn,
-		jobStore:             cfg.JobStore,
 		admissionCoordinator: cfg.AdmissionCoordinator,
 		agentDirectory:       cfg.AgentDirectory,
 		workspaceCache:       newWorkspaceDataCache(defaultWorkspaceDataCacheTTL),
@@ -123,31 +120,17 @@ func (s *workspaceServiceImpl) StartAsyncAddRepos(ctx context.Context, req Works
 	if len(req.CloneURLs) == 0 {
 		return "", ErrValidation("async repo attachment requires at least one clone URL")
 	}
-	if s.jobStore == nil {
+	if s.admissionCoordinator == nil {
 		return "", ErrUnavailable("async workspace repo attachment not available")
 	}
-
-	run := func(ctx context.Context, normalized WorkspaceAddReposRequest) (WorkspaceCreateResult, error) {
-		result, err := s.addReposFn(ctx, normalized)
-		if err == nil {
-			s.invalidateWorkspaceCache()
-		}
-		return result, err
+	jobID, err := s.admissionCoordinator.StartAddRepos(ctx, req)
+	if err != nil {
+		return "", classifyWorkspaceCreateError(err)
 	}
-	var jobID string
-	if s.admissionCoordinator != nil {
-		var err error
-		jobID, err = s.admissionCoordinator.PrepareAddRepos(ctx, req)
-		if err != nil {
-			return "", classifyWorkspaceCreateError(err)
-		}
-		if strings.TrimSpace(jobID) == "" {
-			return "", ErrInternal("workspace admission coordinator returned an empty job ID", nil)
-		}
-		jobID = s.jobStore.StartPreparedAddRepos(jobID, req, run)
-	} else {
-		jobID = s.jobStore.StartAddRepos(req, run)
+	if strings.TrimSpace(jobID) == "" {
+		return "", ErrInternal("workspace admission coordinator returned an empty job ID", nil)
 	}
+	s.invalidateWorkspaceCache()
 	return jobID, nil
 }
 
@@ -371,33 +354,20 @@ func (s *workspaceServiceImpl) StartAsyncCreate(ctx context.Context, req Workspa
 		return "", err
 	}
 
-	if s.jobStore == nil {
+	if s.admissionCoordinator == nil {
 		return "", ErrUnavailable("async workspace creation not available")
 	}
-
-	var jobID string
-	if s.admissionCoordinator != nil {
-		var err error
-		jobID, err = s.admissionCoordinator.PrepareCreate(ctx, req)
-		if err != nil {
-			return "", classifyWorkspaceCreateError(err)
-		}
-		if strings.TrimSpace(jobID) == "" {
-			return "", ErrInternal("workspace admission coordinator returned an empty job ID", nil)
-		}
-		jobID = s.jobStore.StartPrepared(jobID, req, s.createFn)
-	} else {
-		jobID = s.jobStore.Start(req, s.createFn)
+	jobID, err := s.admissionCoordinator.StartCreate(ctx, req)
+	if err != nil {
+		return "", classifyWorkspaceCreateError(err)
+	}
+	if strings.TrimSpace(jobID) == "" {
+		return "", ErrInternal("workspace admission coordinator returned an empty job ID", nil)
 	}
 	return jobID, nil
 }
 
 func (s *workspaceServiceImpl) GetWorkspaceJob(ctx context.Context, jobID string) (*WorkspaceJob, error) {
-	if s.jobStore != nil {
-		if job := s.jobStore.Get(jobID); job != nil {
-			return job, nil
-		}
-	}
 	if s.admissionCoordinator != nil {
 		job, found, err := s.admissionCoordinator.LookupJob(ctx, jobID)
 		if err != nil {
@@ -410,43 +380,7 @@ func (s *workspaceServiceImpl) GetWorkspaceJob(ctx context.Context, jobID string
 			return job, nil
 		}
 	}
-	if s.topology != nil {
-		return s.workspaceJobFromStore(ctx, jobID)
-	}
 	return nil, ErrNotFound("job not found")
-}
-
-func (s *workspaceServiceImpl) workspaceJobFromStore(ctx context.Context, key string) (*WorkspaceJob, error) {
-	ws, err := s.topology.Workspaces().Get(ctx, key)
-	if err != nil {
-		if errors.Is(err, domain.ErrNotFound) {
-			return nil, ErrNotFound("job not found")
-		}
-		return nil, ErrInternal("failed to load workspace job", err)
-	}
-	job := &WorkspaceJob{ID: key, WorkspaceID: key}
-	switch ws.State {
-	case workspacemodule.StateCreating:
-		job.Status = JobStatusRunning
-		job.Progress = "creating workspace..."
-	case workspacemodule.StateCloning:
-		job.Status = JobStatusRunning
-		job.Progress = "cloning repository..."
-	case workspacemodule.StateInitializing:
-		job.Status = JobStatusRunning
-		job.Progress = "initializing workspace..."
-	case workspacemodule.StateError:
-		job.Status = JobStatusFailed
-		job.Error = ws.ErrorMessage
-		if job.Error == "" {
-			job.Error = "workspace creation failed"
-		}
-		job.CompletedAt = ws.UpdatedAt
-	default:
-		job.Status = JobStatusDone
-		job.CompletedAt = ws.UpdatedAt
-	}
-	return job, nil
 }
 
 func (s *workspaceServiceImpl) DeleteWorkspace(ctx context.Context, wsID string) (*ops.WorkspaceData, error) {

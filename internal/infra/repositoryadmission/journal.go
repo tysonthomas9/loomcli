@@ -1,4 +1,4 @@
-package workspacemgr
+package repositoryadmissioninfra
 
 import (
 	"context"
@@ -15,78 +15,41 @@ import (
 	"sync"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/app/repositoryadmission"
 	"github.com/tysonthomas9/loomcli/internal/atomicfile"
-	"github.com/tysonthomas9/loomcli/internal/bootstrap"
-	"github.com/tysonthomas9/loomcli/internal/configlock"
 	"github.com/tysonthomas9/loomcli/internal/lockfile"
-	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
 )
 
 const (
-	localRepositoryAdmissionJournalVersion  = 1
-	localRepositoryAdmissionJournalDirName  = "repository-admissions"
-	localRepositoryAdmissionJournalFileName = "journal.json"
-	localRepositoryAdmissionLockDirName     = "materialization-locks"
-	maxLocalRepositoryAdmissionOperationID  = 200
-	repositoryAdmissionLockRetryInterval    = 20 * time.Millisecond
+	localJournalVersion                    = 1
+	localJournalDirName                    = "repository-admissions"
+	localJournalFileName                   = "journal.json"
+	localRepositoryAdmissionLockDirName    = "materialization-locks"
+	maxLocalRepositoryAdmissionOperationID = 200
+	repositoryAdmissionLockRetryInterval   = 20 * time.Millisecond
+)
+
+type LocalIntent = repositoryadmission.LocalIntent
+type LocalRecord = repositoryadmission.LocalRecord
+type Coordinate = repositoryadmission.Coordinate
+
+const (
+	KindCreateWorkspace = repositoryadmission.KindCreateWorkspace
+	KindAddRepositories = repositoryadmission.KindAddRepositories
 )
 
 var (
-	errLocalRepositoryAdmissionNotFound = errors.New("local repository admission not found")
-	errLocalRepositoryAdmissionConflict = errors.New("local repository admission conflict")
+	ErrLocalNotFound = repositoryadmission.ErrLocalNotFound
+	ErrLocalConflict = repositoryadmission.ErrLocalConflict
 )
 
-type localRepositoryAdmissionKind string
-
-const (
-	localRepositoryAdmissionCreateWorkspace localRepositoryAdmissionKind = "create_workspace"
-	localRepositoryAdmissionAddRepositories localRepositoryAdmissionKind = "add_repositories"
-)
-
-// localRepositoryAdmissionIntent is the correctness-critical machine-local
-// half of one durable FleetDB repository-admission process. FleetDB owns the
-// token-free repository spec and process state; this record owns the checkout
-// root plus the token-free machine-local source coordinates needed to resume
-// the exact request after serve restart.
-type localRepositoryAdmissionIntent struct {
-	OperationID    string                       `json:"operation_id"`
-	WorkspaceKey   string                       `json:"workspace_key"`
-	WorkspaceName  string                       `json:"workspace_name,omitempty"`
-	WorkspacePath  string                       `json:"workspace_path"`
-	Kind           localRepositoryAdmissionKind `json:"kind"`
-	Branch         string                       `json:"branch,omitempty"`
-	CloneURLs      []string                     `json:"clone_urls,omitempty"`
-	LocalRepoPaths []string                     `json:"local_repo_paths,omitempty"`
-}
-
-type localRepositoryAdmissionRecord struct {
-	Intent          localRepositoryAdmissionIntent `json:"intent"`
-	AdmissionID     string                         `json:"admission_id,omitempty"`
-	SpecFingerprint string                         `json:"spec_fingerprint,omitempty"`
-	CreatedAt       time.Time                      `json:"created_at"`
-	UpdatedAt       time.Time                      `json:"updated_at"`
-}
-
-type localRepositoryAdmissionJournalFile struct {
-	Version int                                       `json:"version"`
-	Records map[string]localRepositoryAdmissionRecord `json:"records"`
-}
-
-// repositoryAdmissionCoordinate identifies one exact process-local
-// materialization authority. The durable journal is sufficient to recover an
-// admission after restart, but only a successful exact Fleet renewal in this
-// serve incarnation may authorize Source Control to materialize repositories.
-type repositoryAdmissionCoordinate struct {
-	WorkspaceKey      string
-	AdmissionID       string
-	OperationID       string
-	OwnerID           string
-	OwnerGenerationID string
-	SpecFingerprint   string
+type localJournalFile struct {
+	Version int                    `json:"version"`
+	Records map[string]LocalRecord `json:"records"`
 }
 
 type repositoryAdmissionMaterializationAuthority struct {
-	coordinate repositoryAdmissionCoordinate
+	coordinate Coordinate
 	deadline   time.Time
 }
 
@@ -110,18 +73,18 @@ type repositoryAdmissionMaterializationLock struct {
 	once  sync.Once
 }
 
-func NewRepositoryAdmissionJournal() (*RepositoryAdmissionJournal, error) {
-	root := strings.TrimSpace(bootstrap.LoomDir())
+func NewRepositoryAdmissionJournal(root string) (*RepositoryAdmissionJournal, error) {
+	root = strings.TrimSpace(root)
 	if root == "" {
 		return nil, errors.New("repository admission journal: Loom directory is unavailable")
 	}
-	return newLocalRepositoryAdmissionJournalAt(
-		filepath.Join(root, localRepositoryAdmissionJournalDirName),
+	return NewRepositoryAdmissionJournalAt(
+		filepath.Join(root, localJournalDirName),
 		time.Now,
 	)
 }
 
-func newLocalRepositoryAdmissionJournalAt(
+func NewRepositoryAdmissionJournalAt(
 	dir string,
 	now func() time.Time,
 ) (*RepositoryAdmissionJournal, error) {
@@ -141,7 +104,7 @@ func newLocalRepositoryAdmissionJournalAt(
 }
 
 func validRepositoryAdmissionMaterializationCoordinate(
-	coordinate repositoryAdmissionCoordinate,
+	coordinate Coordinate,
 ) bool {
 	return strings.TrimSpace(coordinate.WorkspaceKey) != "" &&
 		strings.TrimSpace(coordinate.AdmissionID) != "" &&
@@ -151,8 +114,8 @@ func validRepositoryAdmissionMaterializationCoordinate(
 		strings.TrimSpace(coordinate.SpecFingerprint) != ""
 }
 
-func (journal *RepositoryAdmissionJournal) activateMaterializationAuthority(
-	coordinate repositoryAdmissionCoordinate,
+func (journal *RepositoryAdmissionJournal) ActivateMaterializationAuthority(
+	coordinate Coordinate,
 	deadline time.Time,
 ) error {
 	if journal == nil ||
@@ -161,7 +124,7 @@ func (journal *RepositoryAdmissionJournal) activateMaterializationAuthority(
 		deadline.IsZero() {
 		return fmt.Errorf(
 			"repository admission materialization authority is invalid: %w",
-			sourcecontrol.ErrInvalidMaterialization,
+			repositoryadmission.ErrInvalid,
 		)
 	}
 	journal.authorityMu.Lock()
@@ -169,7 +132,7 @@ func (journal *RepositoryAdmissionJournal) activateMaterializationAuthority(
 	if !deadline.After(journal.monotonicNow()) {
 		return fmt.Errorf(
 			"repository admission materialization authority is expired: %w",
-			sourcecontrol.ErrInvalidMaterialization,
+			repositoryadmission.ErrInvalid,
 		)
 	}
 	if current, exists := journal.authorities[coordinate.AdmissionID]; exists &&
@@ -177,7 +140,7 @@ func (journal *RepositoryAdmissionJournal) activateMaterializationAuthority(
 		return fmt.Errorf(
 			"repository admission %q has a different active owner generation: %w",
 			coordinate.AdmissionID,
-			sourcecontrol.ErrInvalidMaterialization,
+			repositoryadmission.ErrInvalid,
 		)
 	}
 	journal.authorities[coordinate.AdmissionID] =
@@ -188,8 +151,8 @@ func (journal *RepositoryAdmissionJournal) activateMaterializationAuthority(
 	return nil
 }
 
-func (journal *RepositoryAdmissionJournal) renewMaterializationAuthority(
-	coordinate repositoryAdmissionCoordinate,
+func (journal *RepositoryAdmissionJournal) RenewMaterializationAuthority(
+	coordinate Coordinate,
 	deadline time.Time,
 ) bool {
 	if journal == nil ||
@@ -215,8 +178,8 @@ func (journal *RepositoryAdmissionJournal) renewMaterializationAuthority(
 	return true
 }
 
-func (journal *RepositoryAdmissionJournal) deactivateMaterializationAuthority(
-	coordinate repositoryAdmissionCoordinate,
+func (journal *RepositoryAdmissionJournal) DeactivateMaterializationAuthority(
+	coordinate Coordinate,
 ) {
 	if journal == nil || strings.TrimSpace(coordinate.AdmissionID) == "" {
 		return
@@ -229,7 +192,7 @@ func (journal *RepositoryAdmissionJournal) deactivateMaterializationAuthority(
 	journal.authorityMu.Unlock()
 }
 
-func (journal *RepositoryAdmissionJournal) deactivateAllMaterializationAuthorities() {
+func (journal *RepositoryAdmissionJournal) DeactivateAllMaterializationAuthorities() {
 	if journal == nil {
 		return
 	}
@@ -266,7 +229,7 @@ func (journal *RepositoryAdmissionJournal) materializationAuthorityCount() int {
 // machine-local path if an upstream reservation invariant regresses.
 //
 //nolint:funlen // The lock acquisition must keep path containment, in-process exclusion, and OS-lock cleanup in one critical section.
-func (journal *RepositoryAdmissionJournal) acquireMaterializationLock(
+func (journal *RepositoryAdmissionJournal) AcquireMaterializationLock(
 	ctx context.Context,
 	admissionID string,
 	targets []string,
@@ -274,7 +237,7 @@ func (journal *RepositoryAdmissionJournal) acquireMaterializationLock(
 	if journal == nil || ctx == nil {
 		return nil, errors.New("repository admission materialization lock is unavailable")
 	}
-	admissionID, err := normalizeLocalRepositoryAdmissionID(admissionID)
+	admissionID, err := repositoryadmission.NormalizeID(admissionID)
 	if err != nil {
 		return nil, err
 	}
@@ -392,24 +355,24 @@ func canonicalMaterializationLockTarget(target string) (string, error) {
 	return filepath.Clean(resolved), nil
 }
 
-func (journal *RepositoryAdmissionJournal) prepare(
+func (journal *RepositoryAdmissionJournal) Prepare(
 	ctx context.Context,
-	intent localRepositoryAdmissionIntent,
-) (localRepositoryAdmissionRecord, error) {
+	intent LocalIntent,
+) (LocalRecord, error) {
 	if journal == nil {
-		return localRepositoryAdmissionRecord{}, errors.New("repository admission journal is unavailable")
+		return LocalRecord{}, errors.New("repository admission journal is unavailable")
 	}
 	normalized, err := normalizeLocalRepositoryAdmissionIntent(intent)
 	if err != nil {
-		return localRepositoryAdmissionRecord{}, err
+		return LocalRecord{}, err
 	}
-	var result localRepositoryAdmissionRecord
-	err = journal.withLockedFile(ctx, func(file *localRepositoryAdmissionJournalFile) (bool, error) {
+	var result LocalRecord
+	err = journal.withLockedFile(ctx, func(file *localJournalFile) (bool, error) {
 		if current, ok := file.Records[normalized.OperationID]; ok {
 			if !equalLocalRepositoryAdmissionIntent(current.Intent, normalized) {
 				return false, fmt.Errorf(
 					"%w: operation %q was already prepared with different local coordinates",
-					errLocalRepositoryAdmissionConflict,
+					ErrLocalConflict,
 					normalized.OperationID,
 				)
 			}
@@ -417,7 +380,7 @@ func (journal *RepositoryAdmissionJournal) prepare(
 			return false, nil
 		}
 		now := journal.now().UTC()
-		result = localRepositoryAdmissionRecord{
+		result = LocalRecord{
 			Intent: normalized, CreatedAt: now, UpdatedAt: now,
 		}
 		file.Records[normalized.OperationID] = result
@@ -426,35 +389,35 @@ func (journal *RepositoryAdmissionJournal) prepare(
 	return result, err
 }
 
-//nolint:funlen // Journal binding atomically checks immutable intent, operation identity, and admission coordinates before persistence.
-func (journal *RepositoryAdmissionJournal) bind(
+//nolint:funlen // RepositoryAdmissionJournal binding atomically checks immutable intent, operation identity, and admission coordinates before persistence.
+func (journal *RepositoryAdmissionJournal) Bind(
 	ctx context.Context,
 	operationID,
 	admissionID,
 	specFingerprint string,
-) (localRepositoryAdmissionRecord, error) {
+) (LocalRecord, error) {
 	if journal == nil {
-		return localRepositoryAdmissionRecord{}, errors.New("repository admission journal is unavailable")
+		return LocalRecord{}, errors.New("repository admission journal is unavailable")
 	}
 	operationID, err := normalizeLocalRepositoryAdmissionOperationID(operationID)
 	if err != nil {
-		return localRepositoryAdmissionRecord{}, err
+		return LocalRecord{}, err
 	}
-	admissionID, err = normalizeLocalRepositoryAdmissionID(admissionID)
+	admissionID, err = repositoryadmission.NormalizeID(admissionID)
 	if err != nil {
-		return localRepositoryAdmissionRecord{}, err
+		return LocalRecord{}, err
 	}
 	specFingerprint, err = normalizeLocalRepositoryAdmissionFingerprint(specFingerprint)
 	if err != nil {
-		return localRepositoryAdmissionRecord{}, err
+		return LocalRecord{}, err
 	}
-	var result localRepositoryAdmissionRecord
-	err = journal.withLockedFile(ctx, func(file *localRepositoryAdmissionJournalFile) (bool, error) {
+	var result LocalRecord
+	err = journal.withLockedFile(ctx, func(file *localJournalFile) (bool, error) {
 		current, ok := file.Records[operationID]
 		if !ok {
 			return false, fmt.Errorf(
 				"%w: operation %q",
-				errLocalRepositoryAdmissionNotFound,
+				ErrLocalNotFound,
 				operationID,
 			)
 		}
@@ -463,7 +426,7 @@ func (journal *RepositoryAdmissionJournal) bind(
 				current.SpecFingerprint != specFingerprint {
 				return false, fmt.Errorf(
 					"%w: operation %q is already bound to a different admission identity",
-					errLocalRepositoryAdmissionConflict,
+					ErrLocalConflict,
 					operationID,
 				)
 			}
@@ -471,10 +434,10 @@ func (journal *RepositoryAdmissionJournal) bind(
 			return false, nil
 		}
 		for otherOperationID, other := range file.Records {
-			if otherOperationID != operationID && other.AdmissionID == admissionID {
+			if otherOperationID != operationID && localRecordContainsAdmissionID(other, admissionID) {
 				return false, fmt.Errorf(
 					"%w: admission %q is already bound to operation %q",
-					errLocalRepositoryAdmissionConflict,
+					ErrLocalConflict,
 					admissionID,
 					otherOperationID,
 				)
@@ -490,24 +453,109 @@ func (journal *RepositoryAdmissionJournal) bind(
 	return result, err
 }
 
-func (journal *RepositoryAdmissionJournal) getByOperation(
+//nolint:funlen // Rebinding is a fail-closed compare-and-swap over both generations of durable identity.
+func (journal *RepositoryAdmissionJournal) Rebind(
 	ctx context.Context,
-	operationID string,
-) (localRepositoryAdmissionRecord, error) {
+	operationID,
+	expectedAdmissionID,
+	expectedSpecFingerprint,
+	replacementAdmissionID,
+	replacementSpecFingerprint string,
+) (LocalRecord, error) {
 	if journal == nil {
-		return localRepositoryAdmissionRecord{}, errors.New("repository admission journal is unavailable")
+		return LocalRecord{}, errors.New("repository admission journal is unavailable")
 	}
 	operationID, err := normalizeLocalRepositoryAdmissionOperationID(operationID)
 	if err != nil {
-		return localRepositoryAdmissionRecord{}, err
+		return LocalRecord{}, err
 	}
-	var result localRepositoryAdmissionRecord
-	err = journal.withLockedFile(ctx, func(file *localRepositoryAdmissionJournalFile) (bool, error) {
+	expectedAdmissionID, err = repositoryadmission.NormalizeID(expectedAdmissionID)
+	if err != nil {
+		return LocalRecord{}, err
+	}
+	replacementAdmissionID, err = repositoryadmission.NormalizeID(replacementAdmissionID)
+	if err != nil {
+		return LocalRecord{}, err
+	}
+	expectedSpecFingerprint, err = normalizeLocalRepositoryAdmissionFingerprint(expectedSpecFingerprint)
+	if err != nil {
+		return LocalRecord{}, err
+	}
+	replacementSpecFingerprint, err = normalizeLocalRepositoryAdmissionFingerprint(replacementSpecFingerprint)
+	if err != nil {
+		return LocalRecord{}, err
+	}
+	var result LocalRecord
+	err = journal.withLockedFile(ctx, func(file *localJournalFile) (bool, error) {
+		current, ok := file.Records[operationID]
+		if !ok {
+			return false, fmt.Errorf("%w: operation %q", ErrLocalNotFound, operationID)
+		}
+		if current.AdmissionID == replacementAdmissionID &&
+			current.SpecFingerprint == replacementSpecFingerprint {
+			result = current
+			return false, nil
+		}
+		if current.AdmissionID != expectedAdmissionID ||
+			current.SpecFingerprint != expectedSpecFingerprint {
+			return false, fmt.Errorf(
+				"%w: operation %q durable coordinates changed before replacement",
+				ErrLocalConflict,
+				operationID,
+			)
+		}
+		for otherOperationID, other := range file.Records {
+			if otherOperationID != operationID && localRecordContainsAdmissionID(other, replacementAdmissionID) {
+				return false, fmt.Errorf(
+					"%w: replacement admission %q is already bound to operation %q",
+					ErrLocalConflict,
+					replacementAdmissionID,
+					otherOperationID,
+				)
+			}
+		}
+		if !slices.Contains(current.PreviousAdmissionIDs, current.AdmissionID) {
+			current.PreviousAdmissionIDs = append(current.PreviousAdmissionIDs, current.AdmissionID)
+			sort.Strings(current.PreviousAdmissionIDs)
+		}
+		current.AdmissionID = replacementAdmissionID
+		current.SpecFingerprint = replacementSpecFingerprint
+		current.UpdatedAt = journal.now().UTC()
+		file.Records[operationID] = current
+		result = current
+		return true, nil
+	})
+	if err == nil {
+		journal.authorityMu.Lock()
+		delete(journal.authorities, expectedAdmissionID)
+		delete(journal.authorities, replacementAdmissionID)
+		journal.authorityMu.Unlock()
+	}
+	return result, err
+}
+
+func localRecordContainsAdmissionID(record LocalRecord, admissionID string) bool {
+	return record.AdmissionID == admissionID || slices.Contains(record.PreviousAdmissionIDs, admissionID)
+}
+
+func (journal *RepositoryAdmissionJournal) GetByOperation(
+	ctx context.Context,
+	operationID string,
+) (LocalRecord, error) {
+	if journal == nil {
+		return LocalRecord{}, errors.New("repository admission journal is unavailable")
+	}
+	operationID, err := normalizeLocalRepositoryAdmissionOperationID(operationID)
+	if err != nil {
+		return LocalRecord{}, err
+	}
+	var result LocalRecord
+	err = journal.withLockedFile(ctx, func(file *localJournalFile) (bool, error) {
 		current, ok := file.Records[operationID]
 		if !ok {
 			return false, fmt.Errorf(
 				"%w: operation %q",
-				errLocalRepositoryAdmissionNotFound,
+				ErrLocalNotFound,
 				operationID,
 			)
 		}
@@ -517,28 +565,28 @@ func (journal *RepositoryAdmissionJournal) getByOperation(
 	return result, err
 }
 
-func (journal *RepositoryAdmissionJournal) getByAdmission(
+func (journal *RepositoryAdmissionJournal) GetByAdmission(
 	ctx context.Context,
 	admissionID string,
-) (localRepositoryAdmissionRecord, error) {
+) (LocalRecord, error) {
 	if journal == nil {
-		return localRepositoryAdmissionRecord{}, errors.New("repository admission journal is unavailable")
+		return LocalRecord{}, errors.New("repository admission journal is unavailable")
 	}
-	admissionID, err := normalizeLocalRepositoryAdmissionID(admissionID)
+	admissionID, err := repositoryadmission.NormalizeID(admissionID)
 	if err != nil {
-		return localRepositoryAdmissionRecord{}, err
+		return LocalRecord{}, err
 	}
-	var result localRepositoryAdmissionRecord
-	err = journal.withLockedFile(ctx, func(file *localRepositoryAdmissionJournalFile) (bool, error) {
+	var result LocalRecord
+	err = journal.withLockedFile(ctx, func(file *localJournalFile) (bool, error) {
 		for _, current := range file.Records {
-			if current.AdmissionID == admissionID {
+			if localRecordContainsAdmissionID(current, admissionID) {
 				result = current
 				return false, nil
 			}
 		}
 		return false, fmt.Errorf(
 			"%w: admission %q",
-			errLocalRepositoryAdmissionNotFound,
+			ErrLocalNotFound,
 			admissionID,
 		)
 	})
@@ -546,24 +594,16 @@ func (journal *RepositoryAdmissionJournal) getByAdmission(
 }
 
 //nolint:funlen // Recovery resolution validates both durable coordinates and the complete local checkout intent before returning it.
-func (journal *RepositoryAdmissionJournal) ResolveLocalRepositoryAdmission(
+func (journal *RepositoryAdmissionJournal) ResolveLocal(
 	ctx context.Context,
 	admissionID string,
-) (sourcecontrol.RepositoryAdmissionLocalProjection, error) {
+) (repositoryadmission.LocalProjection, error) {
 	if journal == nil || journal.monotonicNow == nil {
-		return sourcecontrol.RepositoryAdmissionLocalProjection{},
-			sourcecontrol.ErrRepositoryAdmissionNotFound
+		return repositoryadmission.LocalProjection{}, repositoryadmission.ErrLocalNotFound
 	}
-	record, err := journal.getByAdmission(ctx, admissionID)
+	record, err := journal.GetByAdmission(ctx, admissionID)
 	if err != nil {
-		if errors.Is(err, errLocalRepositoryAdmissionNotFound) {
-			return sourcecontrol.RepositoryAdmissionLocalProjection{}, fmt.Errorf(
-				"%w: %v",
-				sourcecontrol.ErrRepositoryAdmissionNotFound,
-				err,
-			)
-		}
-		return sourcecontrol.RepositoryAdmissionLocalProjection{}, err
+		return repositoryadmission.LocalProjection{}, err
 	}
 	journal.authorityMu.Lock()
 	authority, active := journal.authorities[record.AdmissionID]
@@ -573,10 +613,10 @@ func (journal *RepositoryAdmissionJournal) ResolveLocalRepositoryAdmission(
 	}
 	if !active {
 		journal.authorityMu.Unlock()
-		return sourcecontrol.RepositoryAdmissionLocalProjection{}, fmt.Errorf(
+		return repositoryadmission.LocalProjection{}, fmt.Errorf(
 			"repository admission %q has no live local owner generation: %w",
 			record.AdmissionID,
-			sourcecontrol.ErrRepositoryAdmissionNotFound,
+			repositoryadmission.ErrLocalNotFound,
 		)
 	}
 	if authority.coordinate.WorkspaceKey != record.Intent.WorkspaceKey ||
@@ -584,15 +624,15 @@ func (journal *RepositoryAdmissionJournal) ResolveLocalRepositoryAdmission(
 		authority.coordinate.AdmissionID != record.AdmissionID ||
 		authority.coordinate.SpecFingerprint != record.SpecFingerprint {
 		journal.authorityMu.Unlock()
-		return sourcecontrol.RepositoryAdmissionLocalProjection{}, fmt.Errorf(
+		return repositoryadmission.LocalProjection{}, fmt.Errorf(
 			"repository admission %q local authority diverges from its durable journal: %w",
 			record.AdmissionID,
-			sourcecontrol.ErrInvalidMaterialization,
+			repositoryadmission.ErrInvalid,
 		)
 	}
 	coordinate := authority.coordinate
 	journal.authorityMu.Unlock()
-	return sourcecontrol.RepositoryAdmissionLocalProjection{
+	return repositoryadmission.LocalProjection{
 		WorkspaceKey:      record.Intent.WorkspaceKey,
 		OperationID:       record.Intent.OperationID,
 		AdmissionID:       record.AdmissionID,
@@ -603,15 +643,15 @@ func (journal *RepositoryAdmissionJournal) ResolveLocalRepositoryAdmission(
 	}, nil
 }
 
-func (journal *RepositoryAdmissionJournal) list(
+func (journal *RepositoryAdmissionJournal) List(
 	ctx context.Context,
-) ([]localRepositoryAdmissionRecord, error) {
+) ([]LocalRecord, error) {
 	if journal == nil {
 		return nil, errors.New("repository admission journal is unavailable")
 	}
-	var result []localRepositoryAdmissionRecord
-	err := journal.withLockedFile(ctx, func(file *localRepositoryAdmissionJournalFile) (bool, error) {
-		result = make([]localRepositoryAdmissionRecord, 0, len(file.Records))
+	var result []LocalRecord
+	err := journal.withLockedFile(ctx, func(file *localJournalFile) (bool, error) {
+		result = make([]LocalRecord, 0, len(file.Records))
 		for _, record := range file.Records {
 			result = append(result, record)
 		}
@@ -626,7 +666,7 @@ func (journal *RepositoryAdmissionJournal) list(
 	return result, err
 }
 
-func (journal *RepositoryAdmissionJournal) remove(
+func (journal *RepositoryAdmissionJournal) Remove(
 	ctx context.Context,
 	operationID string,
 ) error {
@@ -637,7 +677,7 @@ func (journal *RepositoryAdmissionJournal) remove(
 	if err != nil {
 		return err
 	}
-	return journal.withLockedFile(ctx, func(file *localRepositoryAdmissionJournalFile) (bool, error) {
+	return journal.withLockedFile(ctx, func(file *localJournalFile) (bool, error) {
 		if _, ok := file.Records[operationID]; !ok {
 			return false, nil
 		}
@@ -648,7 +688,7 @@ func (journal *RepositoryAdmissionJournal) remove(
 
 func (journal *RepositoryAdmissionJournal) withLockedFile(
 	ctx context.Context,
-	mutate func(*localRepositoryAdmissionJournalFile) (bool, error),
+	mutate func(*localJournalFile) (bool, error),
 ) error {
 	if ctx == nil {
 		return errors.New("repository admission journal: context is required")
@@ -665,7 +705,7 @@ func (journal *RepositoryAdmissionJournal) withLockedFile(
 	if err := os.Chmod(journal.dir, 0o700); err != nil { //nolint:gosec // A private journal directory needs owner execute permission for recovery files.
 		return fmt.Errorf("repository admission journal: protect directory: %w", err)
 	}
-	return configlock.WithLock(journal.dir, func() error {
+	return withFileLock(filepath.Join(journal.dir, "journal.lock"), func() error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
@@ -681,49 +721,65 @@ func (journal *RepositoryAdmissionJournal) withLockedFile(
 	})
 }
 
-func (journal *RepositoryAdmissionJournal) loadLocked() (*localRepositoryAdmissionJournalFile, error) {
-	path := filepath.Join(journal.dir, localRepositoryAdmissionJournalFileName)
+func withFileLock(path string, run func() error) error {
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600) //nolint:gosec // path is rooted in the private journal directory.
+	if err != nil {
+		return fmt.Errorf("repository admission journal: open lock: %w", err)
+	}
+	defer func() { _ = file.Close() }()
+	if err := file.Chmod(0o600); err != nil {
+		return fmt.Errorf("repository admission journal: protect lock: %w", err)
+	}
+	if err := lockfile.FlockExclusiveBlocking(file); err != nil {
+		return fmt.Errorf("repository admission journal: acquire lock: %w", err)
+	}
+	defer func() { _ = lockfile.FlockUnlock(file) }()
+	return run()
+}
+
+func (journal *RepositoryAdmissionJournal) loadLocked() (*localJournalFile, error) {
+	path := filepath.Join(journal.dir, localJournalFileName)
 	data, err := os.ReadFile(path) //nolint:gosec // path is rooted in the protected Loom data directory.
 	if err != nil {
 		if os.IsNotExist(err) {
-			return &localRepositoryAdmissionJournalFile{
-				Version: localRepositoryAdmissionJournalVersion,
-				Records: make(map[string]localRepositoryAdmissionRecord),
+			return &localJournalFile{
+				Version: localJournalVersion,
+				Records: make(map[string]LocalRecord),
 			}, nil
 		}
 		return nil, fmt.Errorf("repository admission journal: read: %w", err)
 	}
-	var file localRepositoryAdmissionJournalFile
+	var file localJournalFile
 	if err := json.Unmarshal(data, &file); err != nil {
 		return nil, fmt.Errorf("repository admission journal: parse: %w", err)
 	}
-	if file.Version != localRepositoryAdmissionJournalVersion {
+	if file.Version != localJournalVersion {
 		return nil, fmt.Errorf(
 			"repository admission journal: unsupported version %d",
 			file.Version,
 		)
 	}
 	if file.Records == nil {
-		file.Records = make(map[string]localRepositoryAdmissionRecord)
+		file.Records = make(map[string]LocalRecord)
 	}
 	return &file, nil
 }
 
 func (journal *RepositoryAdmissionJournal) saveLocked(
-	file *localRepositoryAdmissionJournalFile,
+	file *localJournalFile,
 ) error {
 	if file == nil {
 		return errors.New("repository admission journal: nil file")
 	}
-	file.Version = localRepositoryAdmissionJournalVersion
+	file.Version = localJournalVersion
 	if file.Records == nil {
-		file.Records = make(map[string]localRepositoryAdmissionRecord)
+		file.Records = make(map[string]LocalRecord)
 	}
 	data, err := json.MarshalIndent(file, "", "  ")
 	if err != nil {
 		return fmt.Errorf("repository admission journal: marshal: %w", err)
 	}
-	path := filepath.Join(journal.dir, localRepositoryAdmissionJournalFileName)
+	path := filepath.Join(journal.dir, localJournalFileName)
 	if err := atomicfile.WriteFile(path, data, 0o600); err != nil {
 		return fmt.Errorf("repository admission journal: write: %w", err)
 	}
@@ -732,16 +788,16 @@ func (journal *RepositoryAdmissionJournal) saveLocked(
 
 //nolint:funlen // Canonicalization validates the full restart-safe repository batch and its containment-sensitive fields together.
 func normalizeLocalRepositoryAdmissionIntent(
-	intent localRepositoryAdmissionIntent,
-) (localRepositoryAdmissionIntent, error) {
+	intent LocalIntent,
+) (LocalIntent, error) {
 	var err error
 	intent.OperationID, err = normalizeLocalRepositoryAdmissionOperationID(intent.OperationID)
 	if err != nil {
-		return localRepositoryAdmissionIntent{}, err
+		return LocalIntent{}, err
 	}
 	intent.WorkspaceKey = strings.TrimSpace(intent.WorkspaceKey)
 	if intent.WorkspaceKey == "" {
-		return localRepositoryAdmissionIntent{}, errors.New("repository admission journal: workspace key is required")
+		return LocalIntent{}, errors.New("repository admission journal: workspace key is required")
 	}
 	intent.WorkspaceName = strings.TrimSpace(intent.WorkspaceName)
 	intent.WorkspacePath = filepath.Clean(strings.TrimSpace(intent.WorkspacePath))
@@ -749,12 +805,12 @@ func normalizeLocalRepositoryAdmissionIntent(
 		intent.WorkspacePath == "." ||
 		intent.WorkspacePath == string(filepath.Separator) ||
 		!filepath.IsAbs(intent.WorkspacePath) {
-		return localRepositoryAdmissionIntent{}, errors.New("repository admission journal: safe absolute workspace path is required")
+		return LocalIntent{}, errors.New("repository admission journal: safe absolute workspace path is required")
 	}
 	switch intent.Kind {
-	case localRepositoryAdmissionCreateWorkspace, localRepositoryAdmissionAddRepositories:
+	case KindCreateWorkspace, KindAddRepositories:
 	default:
-		return localRepositoryAdmissionIntent{}, fmt.Errorf(
+		return LocalIntent{}, fmt.Errorf(
 			"repository admission journal: unsupported operation kind %q",
 			intent.Kind,
 		)
@@ -762,9 +818,9 @@ func normalizeLocalRepositoryAdmissionIntent(
 	intent.Branch = strings.TrimSpace(intent.Branch)
 	intent.CloneURLs = append([]string(nil), intent.CloneURLs...)
 	for index, rawRemote := range intent.CloneURLs {
-		remote, err := sourcecontrol.ValidateTokenFreeRemote(rawRemote)
+		remote, err := repositoryadmission.ValidateTokenFreeRemote(rawRemote)
 		if err != nil {
-			return localRepositoryAdmissionIntent{}, fmt.Errorf(
+			return LocalIntent{}, fmt.Errorf(
 				"repository admission journal: clone source %d is not canonical and token-free: %w",
 				index,
 				err,
@@ -779,7 +835,7 @@ func normalizeLocalRepositoryAdmissionIntent(
 			path == "." ||
 			path == string(filepath.Separator) ||
 			!filepath.IsAbs(path) {
-			return localRepositoryAdmissionIntent{}, fmt.Errorf(
+			return LocalIntent{}, fmt.Errorf(
 				"repository admission journal: local repository source %d must be a safe absolute path",
 				index,
 			)
@@ -791,7 +847,7 @@ func normalizeLocalRepositoryAdmissionIntent(
 
 func equalLocalRepositoryAdmissionIntent(
 	left,
-	right localRepositoryAdmissionIntent,
+	right LocalIntent,
 ) bool {
 	return left.OperationID == right.OperationID &&
 		left.WorkspaceKey == right.WorkspaceKey &&
@@ -814,18 +870,6 @@ func normalizeLocalRepositoryAdmissionOperationID(value string) (string, error) 
 			"repository admission journal: operation ID must be at most %d bytes without control characters",
 			maxLocalRepositoryAdmissionOperationID,
 		)
-	}
-	return value, nil
-}
-
-func normalizeLocalRepositoryAdmissionID(value string) (string, error) {
-	value = strings.TrimSpace(value)
-	if len(value) != 32 {
-		return "", errors.New("repository admission journal: admission ID must be 32 lowercase hex characters")
-	}
-	decoded, err := hex.DecodeString(value)
-	if err != nil || len(decoded) != 16 || strings.ToLower(value) != value {
-		return "", errors.New("repository admission journal: admission ID must be 32 lowercase hex characters")
 	}
 	return value, nil
 }

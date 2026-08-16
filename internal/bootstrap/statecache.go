@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"github.com/tysonthomas9/loomcli/internal/atomicfile"
-	"github.com/tysonthomas9/loomcli/internal/configlock"
+	"github.com/tysonthomas9/loomcli/internal/lockfile"
 )
 
 // stateCacheVersion is bumped whenever the on-disk schema gains a
@@ -123,7 +123,7 @@ func WithStateLock(fn func() error) error {
 	if dir == "" {
 		return errors.New("statecache: cannot resolve loom directory")
 	}
-	return configlock.WithLock(dir, fn)
+	return lockfile.WithConfigLock(dir, fn)
 }
 
 // MutateStateCache is the single public mutation entry point for
