@@ -2,6 +2,7 @@ package config
 
 import (
 	"testing"
+	"time"
 
 	"gopkg.in/yaml.v3"
 
@@ -67,11 +68,11 @@ func TestAgentEntryShouldSuperviseHonorsAuto(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := tt.entry.ShouldSuperviseWithRoles(tt.roles); got != tt.want {
+			if got := tt.entry.ShouldSuperviseWithRoles(tt.roles, "", time.Now()); got != tt.want {
 				t.Fatalf("ShouldSuperviseWithRoles() = %v, want %v", got, tt.want)
 			}
 			if tt.roles == nil {
-				if got := tt.entry.ShouldSupervise(); got != tt.want {
+				if got := tt.entry.ShouldSupervise("", time.Now()); got != tt.want {
 					t.Fatalf("ShouldSupervise() = %v, want %v", got, tt.want)
 				}
 			}

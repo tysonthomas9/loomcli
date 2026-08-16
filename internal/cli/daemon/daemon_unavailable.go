@@ -116,7 +116,7 @@ func (d *Daemon) retryUnavailableAgents() {
 	kept := make([]UnavailableAgent, 0, len(pending))
 	for _, u := range pending {
 		entry, ok := entries[u.Worktree]
-		if !ok || !entry.ShouldSuperviseWithRoles(roles) {
+		if !ok || !entry.ShouldSuperviseWithRoles(roles, d.sup.ResolveNodeID(), time.Now().UTC()) {
 			// Gone from the config (or parked) since boot: stop reporting it.
 			continue
 		}

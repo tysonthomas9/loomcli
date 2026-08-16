@@ -87,6 +87,14 @@ type Daemon struct {
 	// this is always a report the daemon is allowed to start under, kept for
 	// the banner and for the degradations the supervisor must honor.
 	preflight runtimepreflight.Report
+
+	// parked lists agents the daemon deliberately did not claim. They are not
+	// in sup.Agents, so they are carried here to reach the state file and
+	// `loom daemon status` instead of disappearing.
+	parked []ParkedAgent
+
+	// parkedTicks counts config-poll ticks for the parked-agent log throttle.
+	parkedTicks int
 }
 
 // PreflightReport returns the boot-time fleet-db capability report.
@@ -145,7 +153,12 @@ func NewDaemon(config *cfgpkg.DaemonConfig, projectDir string, eventBus events.E
 	wireSupervisorCallbacks(sup, issueBackend)
 	loadSupervisorWorkspace(sup)
 
-	d.unavailable = initSupervisorAgents(sup, config.Agents, config.Roles)
+	// Release drains left behind by a previous supervisor before the agent
+	// list is built: initSupervisorAgents reads config.Agents, so the clear
+	// has to land in memory first. Never fails daemon construction.
+	reconcileStaleDrains(sup, st, config)
+
+	d.parked, d.unavailable = initSupervisorAgents(sup, config.Agents, config.Roles)
 
 	d.sup = sup
 
@@ -387,17 +400,35 @@ func loadSupervisorWorkspace(sup *supervisor.Supervisor) {
 	}
 }
 
-// initSupervisorAgents creates agent processes from config entries and returns
-// the entries it could not construct. A per-agent misconfiguration must never
-// fail the daemon: one agent whose worktree was missing once crashed boot
-// outright, and whatever supervised the daemon process restarted it into the
-// same crash again and again, with every other agent in the workspace dead
-// alongside it.
-func initSupervisorAgents(sup *supervisor.Supervisor, agents []cfgpkg.AgentEntry, roles map[string]cfgpkg.RoleConfig) []UnavailableAgent {
+// initSupervisorAgents creates agent processes from config entries, returning
+// the agents it deliberately skipped (parked) and the entries it could not
+// construct (unavailable). A per-agent misconfiguration must never fail the
+// daemon: on 2026-08-17 one agent whose worktree was missing crashed boot
+// outright and PM2 restarted it fifteen times, with every other agent in the
+// workspace dead alongside it.
+//
+// Skips are logged at Warn, not Info: an unclaimed agent is an anomaly an
+// operator needs to see, and logging it at Info is how a fleet-wide park once
+// went unnoticed for hours. A disabled agent (auto: false) is a standing policy
+// decision rather than a park, so it is neither listed nor logged above Debug.
+func initSupervisorAgents(sup *supervisor.Supervisor, agents []cfgpkg.AgentEntry, roles map[string]cfgpkg.RoleConfig) ([]ParkedAgent, []UnavailableAgent) {
+	currentNodeID := sup.ResolveNodeID()
+	now := time.Now().UTC()
+	var parked []ParkedAgent
 	var unavailable []UnavailableAgent
 	for i, entry := range agents {
-		if !entry.ShouldSuperviseWithRoles(roles) {
-			slog.Info("skipping agent with non-running desired state", "worktree", entry.Worktree, "desired_state", entry.DesiredState)
+		if !entry.AutoEnabled() {
+			slog.Debug("skipping disabled agent", "worktree", entry.Worktree, "reason", "auto: false")
+			continue
+		}
+		if !entry.ShouldSuperviseWithRoles(roles, currentNodeID, now) {
+			p := newParkedAgent(entry)
+			parked = append(parked, p)
+			slog.Warn("agent parked: not claiming",
+				"worktree", entry.Worktree,
+				"desired_state", string(entry.DesiredState),
+				"drain_expires_at", formatDrainExpiry(entry.DrainExpiresAt),
+				"resume", p.ResumeCommand)
 			continue
 		}
 		ap, err := sup.NewAgent(entry, i)
@@ -410,5 +441,5 @@ func initSupervisorAgents(sup *supervisor.Supervisor, agents []cfgpkg.AgentEntry
 		}
 		sup.Agents = append(sup.Agents, ap)
 	}
-	return unavailable
+	return parked, unavailable
 }

@@ -62,8 +62,10 @@ type AgentStatus struct {
 	LastActivityAt        *time.Time     `json:"last_activity_at,omitempty"`        // most recent PTY-output observation from the agent's supervised backend; nil when not reported (a zero time.Time would serialize as "0001-01-01T00:00:00Z" and the UI would render it as a bogus "last seen" age)
 	// LiveStatus/ActiveTaskID/ActivePhase are fleet-db's DERIVED liveness signal
 	// (computed there from the running-session+fresh-lease join), carried through
-	// from the store agent record — never re-derived here. LiveStatus is "working"
-	// or "idle"; when "working", ActiveTaskID/ActivePhase describe the live session.
+	// from the store agent record — never re-derived here. LiveStatus is "working",
+	// "idle" or "draining"; when "working", ActiveTaskID/ActivePhase describe the
+	// live session. "draining" is strictly weaker than "working": an agent
+	// finishing its last task under a drain still reports "working".
 	// Empty when liveness was not computed (e.g. no fleet-db store). The store-backed
 	// serve path sets these so the UI shows a provably-working agent that the
 	// lock-derived Status would otherwise report "idle".
