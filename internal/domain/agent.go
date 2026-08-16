@@ -158,7 +158,10 @@ type AgentHookCycle struct {
 	RearmLabel string `json:"rearm_label" yaml:"rearm_label"`
 
 	// ShipLabel is stamped once the threshold is reached, handing the task to
-	// the downstream stage.
+	// the downstream stage. Shipping also CLEARS RearmLabel and every counter,
+	// so a shipped task carries this label alone: leaving the re-arm label lets
+	// the previous stage re-claim and re-ship forever, and leaving the counters
+	// lets a later re-entry ship with zero rounds run.
 	ShipLabel string `json:"ship_label" yaml:"ship_label"`
 
 	// Prefix overrides DefaultCycleLabelPrefix.
