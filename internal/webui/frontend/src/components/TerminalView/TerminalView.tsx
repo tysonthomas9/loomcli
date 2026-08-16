@@ -155,6 +155,7 @@ export function TerminalView({
     deleteTab,
     reorderTabs: reorderTabMeta,
     markTabReplaced,
+    dismissRestartNotice,
     isLoading: metaLoading,
     loadedFor: metaLoadedFor,
     unavailable: metaUnavailable,
@@ -396,10 +397,19 @@ export function TerminalView({
     [moveTabToGroup, handleGroupTabChange],
   );
 
+  const metaBySession = useMemo(
+    () => new Map(tabMetadata.map((m) => [m.session_name, m])),
+    [tabMetadata],
+  );
+
   const toTerminalTabs = useCallback(
     (subset: TabState[]) =>
       subset.map((tab) => {
         const color = BACKEND_BRAND_COLORS[tab.backendName];
+        // Live metadata wins over the value seeded at restore, so a dismiss
+        // or a fresh replacement shows up without re-initialising tabs.
+        const meta = metaBySession.get(tab.sessionName);
+        const replacedAt = meta ? meta.replaced_at : tab.replacedAt;
         return {
           id: tab.id,
           label: tab.label,
@@ -407,9 +417,26 @@ export function TerminalView({
           ...(color != null && { brandColor: color }),
           ...(tabUnread.get(tab.id) && { hasUnread: true }),
           ...(tab.pinned && { isPinned: true }),
+          ...(replacedAt ? { replacedAt } : {}),
         };
       }),
-    [tabUnread],
+    [tabUnread, metaBySession],
+  );
+
+  const handleDismissRestartNotice = useCallback(
+    (tabId: string) => {
+      const tab = tabs.find((t) => t.id === tabId);
+      if (!tab) return;
+      void dismissRestartNotice(tab.sessionName);
+      setTabs((current) =>
+        current.map((t) => {
+          if (t.id !== tabId) return t;
+          const { replacedAt: _dismissed, ...rest } = t;
+          return rest;
+        }),
+      );
+    },
+    [tabs, dismissRestartNotice, setTabs],
   );
 
   const tabsForGroup = useCallback(
@@ -805,10 +832,6 @@ export function TerminalView({
     [setFocusedPane],
   );
 
-  const metaBySession = useMemo(
-    () => new Map(tabMetadata.map((m) => [m.session_name, m])),
-    [tabMetadata],
-  );
   const paneTabs = useMemo(() => {
     if (!hideTabs) return visibleTabs;
 
@@ -953,6 +976,7 @@ export function TerminalView({
                 onTabPin={handleTabPin}
                 onCloseOthers={handleCloseOthers}
                 onReorderTabs={handleReorderTabs}
+                onDismissRestartNotice={handleDismissRestartNotice}
                 canSplitRight={canSplitRight}
                 onSplitRight={splitActiveTab}
                 totalTabCount={visibleTabs.length}
@@ -1056,6 +1080,7 @@ export function TerminalView({
                       maxTabsReached={visibleTabs.length >= MAX_TABS}
                       onTabPin={handleTabPin}
                       onCloseOthers={handleCloseOthers}
+                      onDismissRestartNotice={handleDismissRestartNotice}
                       showToolbarActions={groupIndex === 0}
                       groupDrag={{
                         onDragStart: (tabId) =>

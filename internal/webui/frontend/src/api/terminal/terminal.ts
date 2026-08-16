@@ -95,13 +95,14 @@ export interface TabMetadata {
    */
   attached_clients: number;
   /**
-   * RFC3339 timestamp of the last time this tab's shell was replaced because
-   * the server restarted. Persisted server-side, so it survives a page
-   * reload; absent when the tab has never been replaced (or the notice was
-   * dismissed).
+   * RFC3339 timestamp of the last time this tab's backing shell was replaced
+   * (e.g. the server restarted and the next attach spawned a fresh PTY under
+   * the same tab identity). Persisted server-side, so the marker survives a
+   * reload and is visible to a second viewer. Empty string once dismissed;
+   * undefined for tabs that were never replaced.
    */
   replaced_at?: string;
-  /** Server-written reason for the replacement, e.g. "server_restart". */
+  /** Machine-readable reason for the replacement (e.g. "server_restart"). */
   replaced_reason?: string;
 }
 
@@ -212,7 +213,10 @@ export async function patchTabMetadata(
   workspaceId: string,
   session: string,
   fields: Partial<
-    Pick<TabMetadata, "label" | "notes" | "pinned" | "sort_order" | "issue_id">
+    Pick<
+      TabMetadata,
+      "label" | "notes" | "pinned" | "sort_order" | "issue_id" | "replaced_at"
+    >
   >,
 ): Promise<TabMetadata> {
   const { data, error, response } = await api.PATCH(
@@ -224,6 +228,20 @@ export async function patchTabMetadata(
   );
   if (error) throw apiErrorFromResponse(error, response);
   return unwrapResponse(data, response) as unknown as TabMetadata;
+}
+
+/**
+ * Clear the persisted session-replacement marker for a tab.
+ *
+ * The empty string is the cleared value the server persists, so the marker
+ * stays gone across reloads and for other viewers. A later replacement sets a
+ * fresh timestamp and re-marks the tab — that is a new event, not a relapse.
+ */
+export async function dismissTabRestartNotice(
+  workspaceId: string,
+  sessionName: string,
+): Promise<TabMetadata> {
+  return patchTabMetadata(workspaceId, sessionName, { replaced_at: "" });
 }
 
 /**

@@ -69,6 +69,7 @@ export function tabStateFromMetadata(
     ...(metadata.kind ? { kind: metadata.kind } : {}),
     ...(metadata.role ? { role: metadata.role } : {}),
     ...(metadata.writable != null ? { writable: metadata.writable } : {}),
+    ...(metadata.replaced_at ? { replacedAt: metadata.replaced_at } : {}),
     pinned: metadata.pinned,
     _sortOrder: metadata.sort_order,
     _pinned: metadata.pinned,
