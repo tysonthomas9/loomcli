@@ -25,7 +25,9 @@ type AgentProcess struct {
 	Pid                    int               // PID of current subprocess (0 when not running)
 	LogFile                *os.File          // log file handle for subprocess output (nil if not logging)
 	LogFilePath            string            // path to agent log file for watchdog stat checks
+	LogFileStartOffset     int64             // size of the daemon log when this cycle opened it (O_APPEND); the archive mirror starts reading here so earlier cycles' bytes are not re-copied
 	ArchiveLogFile         *os.File          // canonical agent archive (~/.loom/logs/<ws>/agents/<worktree>.log) the web UI Logs tab reads; nil if unavailable
+	stopLogMirror          func()            // idempotent stop+drain for this cycle's archive mirror goroutine; nil when no mirror runs (see startAgentLogMirror)
 	TranscriptPath         string            // path to session transcript.jsonl for watchdog liveness (set by superviseAgent)
 	Session                *sessions.Session // daemon-created session handle (nil when no session active)
 	AgentSessionID         string            // fleet-db control-plane session id (empty when no session active)

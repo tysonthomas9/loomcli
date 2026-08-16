@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -290,6 +291,10 @@ func (s *Supervisor) spawnAgent(ap *AgentProcess) error {
 		return fmt.Errorf("failed to start subprocess: %w", err)
 	}
 
+	// The child owns one sink's fd directly; this feeds the other one. Started
+	// after Start() so the mirror never runs for an agent that failed to spawn.
+	ap.stopLogMirror = s.startAgentLogMirror(ap)
+
 	ap.Cmd = cmd
 	ap.Pid = cmd.Process.Pid
 	ap.LastStart = time.Now()
@@ -327,23 +332,54 @@ func (s *Supervisor) spawnAgent(ap *AgentProcess) error {
 //     — whose pane tmux routes here via `pipe-pane … loom log-router` — are
 //     inspectable. Daemon-mode agents bypass tmux, so we write it directly.
 //
-// When both sinks are open the child's output is fanned out with io.MultiWriter.
-// The watchdog still observes the daemon log's mtime because the os/exec copy
-// advances it as output arrives. Must be called while ap.Mu is held.
+// INVARIANT (PUPPET-49): the child is ALWAYS handed a real *os.File, never an
+// io.Writer wrapper. os/exec dups an *os.File straight onto the child's fd, but
+// for anything else it allocates an os.Pipe plus a copy goroutine — and
+// cmd.Wait() (see waitForAgent) then cannot return until EVERY process holding
+// that pipe's write end closes it. StopAgent only signals the worker plus the
+// descendant pgroup snapshot taken at SIGTERM time (findDescendantPGIDs), so a
+// backend that forked afterwards, was already reparented to init, or sat in a
+// pgroup the snapshot missed kept the write end open and cmd.Wait() blocked
+// forever. That was the most credible in-process cause of the 18-minute daemon
+// shutdown stall PUPPET-39 bounded but deliberately did not fix. Do NOT
+// "simplify" this back to an io.MultiWriter.
+//
+// So exactly one sink becomes the child's fd and the second, when open, is fed
+// by a daemon-owned mirror that reads the daemon log as a regular file (see
+// startAgentLogMirror) — reads on a regular file always terminate at EOF, so no
+// daemon goroutine can be pinned by a lingering descendant either.
+//
+// The daemon log is deliberately the one the child writes, because the watchdog
+// stats its mtime and the classifier tails it; the child's own write(2) now
+// advances that mtime directly instead of relying on an os/exec copy goroutine.
+// The archive tolerates the mirror's sub-second lag: nothing gates on it.
+//
+// Accepted residue: a lingering descendant still holds a dup of the daemon log
+// fd and can append to it after the agent exits. That is harmless — the file
+// stays valid — and it can no longer block cmd.Wait().
+//
+// Must be called while ap.Mu is held.
 func (s *Supervisor) setupAgentLogFile(ap *AgentProcess, cmd *exec.Cmd) {
-	var sinks []io.Writer
-
-	if f := s.openDaemonLogFile(ap); f != nil {
-		ap.LogFile = f
-		sinks = append(sinks, f)
+	daemonLog := s.openDaemonLogFile(ap)
+	if daemonLog != nil {
+		ap.LogFile = daemonLog
 	}
-	if af := s.openAgentArchiveLog(ap); af != nil {
-		ap.ArchiveLogFile = af
-		sinks = append(sinks, af)
+	archive := s.openAgentArchiveLog(ap)
+	if archive != nil {
+		ap.ArchiveLogFile = archive
 	}
 
-	switch len(sinks) {
-	case 0:
+	switch {
+	case daemonLog != nil:
+		// Both-sinks and daemon-log-only cases. spawnAgent starts the archive
+		// mirror after cmd.Start() when the archive is also open.
+		cmd.Stdout, cmd.Stderr = daemonLog, daemonLog
+	case archive != nil:
+		// Archive only: LogFilePath stays empty, so watchdog tier 2 (log mtime)
+		// is skipped — checkWatchdog already guards logPath != "" and tiers 0/1
+		// (IPC heartbeat, transcript mtime) still apply. No mirror is needed.
+		cmd.Stdout, cmd.Stderr = archive, archive
+	default:
 		// Both sinks are unavailable, so the child's stdout and stderr go
 		// nowhere: cmd.Stdout/Stderr stay nil, which os/exec wires to
 		// /dev/null. That is survivable but it must not be silent — with no
@@ -355,13 +391,93 @@ func (s *Supervisor) setupAgentLogFile(ap *AgentProcess, cmd *exec.Cmd) {
 		log.Printf("[daemon] Agent %s: NO LOG SINK — the agent's output is being discarded; "+
 			"set daemon.log_dir or fix the agent archive to make this run diagnosable",
 			ap.Entry.Worktree)
-		return
-	case 1:
-		cmd.Stdout, cmd.Stderr = sinks[0], sinks[0]
-	default:
-		w := io.MultiWriter(sinks...)
-		cmd.Stdout, cmd.Stderr = w, w
 	}
+}
+
+// agentLogMirrorInterval is how often the mirror re-checks the daemon log for
+// bytes the child appended. It bounds the Logs tab's lag, nothing else — no
+// liveness or classification signal reads the archive.
+const agentLogMirrorInterval = 250 * time.Millisecond
+
+// startAgentLogMirror feeds the agent archive from the daemon log the child is
+// writing directly (see the setupAgentLogFile invariant). It returns an
+// idempotent stop func that drains whatever is left and waits for the goroutine
+// to finish, or nil when no mirror is needed or one could not be started.
+//
+// The read side is a regular file, so io.Copy always terminates at EOF: this
+// goroutine cannot be pinned by a descendant the way an os.Pipe reader would
+// be, and registering it on s.Wg therefore cannot delay Stop()'s Wg.Wait().
+//
+// Must be called while ap.Mu is held (it reads ap's log fields).
+func (s *Supervisor) startAgentLogMirror(ap *AgentProcess) func() {
+	path, dst, offset := ap.LogFilePath, ap.ArchiveLogFile, ap.LogFileStartOffset
+	worktree := ap.Entry.Worktree
+	if path == "" || dst == nil || ap.LogFile == nil {
+		return nil // only one sink open (or none): nothing to mirror
+	}
+
+	src, err := os.Open(path) //nolint:gosec // G304: same daemon-config path openDaemonLogFile just opened
+	if err != nil {
+		// Degraded Logs tab, never a spawn failure.
+		log.Printf("[daemon] Agent %s: archive mirror disabled (open %s: %v)", worktree, path, err)
+		return nil
+	}
+	if _, err := src.Seek(offset, io.SeekStart); err != nil {
+		log.Printf("[daemon] Agent %s: archive mirror disabled (seek %s: %v)", worktree, path, err)
+		_ = src.Close()
+		return nil
+	}
+
+	stopCh, doneCh := make(chan struct{}), make(chan struct{})
+	s.Wg.Add(1)
+	go func() {
+		defer s.Wg.Done()
+		defer close(doneCh)
+		defer func() { _ = src.Close() }()
+
+		ticker := time.NewTicker(agentLogMirrorInterval)
+		defer ticker.Stop()
+		for {
+			if err := mirrorAgentLogChunk(src, dst); err != nil {
+				// Disk full, archive closed, ... — log once and give up rather
+				// than spin. The agent's lifecycle is unaffected either way.
+				log.Printf("[daemon] Agent %s: archive mirror stopped: %v", worktree, err)
+				return
+			}
+			select {
+			case <-stopCh:
+				// Final drain: the tail of a dying agent's output is the part
+				// most worth reading, so it must land before the archive closes.
+				if err := mirrorAgentLogChunk(src, dst); err != nil {
+					log.Printf("[daemon] Agent %s: archive mirror final drain failed: %v", worktree, err)
+				}
+				return
+			case <-ticker.C:
+			}
+		}
+	}()
+
+	var once sync.Once
+	return func() {
+		once.Do(func() { close(stopCh) })
+		<-doneCh
+	}
+}
+
+// mirrorAgentLogChunk copies everything appended to src since the last call
+// into dst. src is a regular file, so io.Copy returns at EOF instead of
+// blocking. If the file shrank underneath us (truncation or rotation) the read
+// position is reset to the start rather than left spinning past EOF.
+func mirrorAgentLogChunk(src *os.File, dst io.Writer) error {
+	if pos, err := src.Seek(0, io.SeekCurrent); err == nil {
+		if info, serr := src.Stat(); serr == nil && info.Size() < pos {
+			if _, err := src.Seek(0, io.SeekStart); err != nil {
+				return err
+			}
+		}
+	}
+	_, err := io.Copy(dst, src)
+	return err
 }
 
 // openDaemonLogFile opens the daemon process log consumed by the watchdog and
@@ -400,6 +516,17 @@ func (s *Supervisor) openDaemonLogFile(ap *AgentProcess) *os.File {
 		log.Printf("[daemon] Agent %s: failed to open log file: %v", ap.Entry.Worktree, err)
 		return nil
 	}
+
+	// Snapshot the size before the child writes anything. The file is opened
+	// O_APPEND and outlives restarts, so this is where the archive mirror must
+	// start reading — otherwise cycle N re-copies cycle N-1's output. Treat a
+	// stat failure as "start at 0": duplicated archive lines beat lost ones.
+	ap.LogFileStartOffset = 0
+	if info, err := f.Stat(); err == nil {
+		ap.LogFileStartOffset = info.Size()
+	} else {
+		log.Printf("[daemon] Agent %s: could not size log file for archive mirror: %v", ap.Entry.Worktree, err)
+	}
 	return f
 }
 
@@ -417,8 +544,20 @@ func (s *Supervisor) openAgentArchiveLog(ap *AgentProcess) *os.File {
 }
 
 // closeAgentLogs closes both agent log sinks (best-effort) and clears the
-// handles. Must be called while ap.Mu is held.
+// handles. Must be called while ap.Mu is held, and is called on both the
+// spawn-failure and the normal-exit paths — so it must tolerate a nil
+// stopLogMirror and a stop func invoked more than once.
+//
+// Ordering is load-bearing: the mirror is stopped (and drained) BEFORE the
+// archive handle is closed, or the dying agent's last lines are lost and the
+// goroutine writes into a closed file. The drain reads a regular file, so it is
+// bounded even though ap.Mu is held across it.
 func closeAgentLogs(ap *AgentProcess) {
+	if ap.stopLogMirror != nil {
+		ap.stopLogMirror()
+		ap.stopLogMirror = nil
+	}
+	ap.LogFileStartOffset = 0
 	if ap.LogFile != nil {
 		if err := ap.LogFile.Close(); err != nil {
 			log.Printf("[daemon] Agent %s: failed to close log file: %v", ap.Entry.Worktree, err)
