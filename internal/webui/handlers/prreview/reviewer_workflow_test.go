@@ -15,7 +15,6 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
 
-	"github.com/tysonthomas9/loomcli/internal/app/prreviewer"
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	providers "github.com/tysonthomas9/loomcli/internal/infra/connectorsproviders"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
@@ -751,9 +750,15 @@ func TestGetPullRequestEgressUnavailable(t *testing.T) {
 func createReviewerAgentForTest(t *testing.T, h *prReviewHarness, owner, repo string, number int) string {
 	t.Helper()
 	agentName := reviewerAgentName(owner, repo, number)
-	if _, err := h.reviewers.EnsureReviewer(context.Background(), prreviewer.EnsureCommand{
+	preset, err := reviewerPreset()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.reviewers.ConvergeReviewerIdentity(context.Background(), agents.ManagedReviewerCommand{
 		WorkspaceKey: prReviewTestWorkspace,
 		AgentID:      agentName,
+		DesiredState: agents.ManagedReviewerActive,
+		Preset:       preset,
 	}); err != nil {
 		t.Fatalf("Create canonical reviewer Agent: %v", err)
 	}

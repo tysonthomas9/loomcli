@@ -3,7 +3,6 @@ package app
 import (
 	"net/http"
 
-	"github.com/tysonthomas9/loomcli/internal/app/prreviewer"
 	"github.com/tysonthomas9/loomcli/internal/modules/agents"
 	connectorsmodule "github.com/tysonthomas9/loomcli/internal/modules/connectors"
 	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
@@ -80,13 +79,13 @@ func NewPRReviewModule(
 	connectorSealer connectorsmodule.CredentialSealer,
 	dispatcher connectorsmodule.Dispatcher,
 ) PRReviewModule {
-	var reviewerProvisioning prreviewer.Commands
+	var reviewerIdentities prreview.ReviewerIdentityCommands
 	var reviewerAgents agents.IdentityQueries
 	var reviewerChat interaction.ChatAPI
 	var reviewerMessenger interaction.ChatMessenger
 	var reviewerInteractionAuthority workflowcataloghttp.OperatorAuthorityResolver
 	if capability := config.AgentsCapability; capability != nil {
-		reviewerProvisioning = capability.PRReviewerProvisioning()
+		reviewerIdentities = capability
 		reviewerAgents = capability.AgentsAPI()
 	}
 	if capability := config.InteractionCapability; capability != nil {
@@ -97,8 +96,8 @@ func NewPRReviewModule(
 	return prreview.NewModule(prreview.Config{
 		Workspace: workspaceQueries, ConnectorManagement: connectorManagement, ConnectorSealer: connectorSealer,
 		Dispatcher: dispatcher, PullRequests: config.SourceControlCheckout,
-		LocalSettingsDir:     config.LocalSettingsDir,
-		ReviewerProvisioning: reviewerProvisioning, ReviewerAgents: reviewerAgents,
+		LocalSettingsDir:   config.LocalSettingsDir,
+		ReviewerIdentities: reviewerIdentities, ReviewerAgents: reviewerAgents,
 		SourceControl:   config.SourceControl,
 		InteractionChat: reviewerChat, InteractionMessenger: reviewerMessenger,
 		InteractionAuthority: reviewerInteractionAuthority,

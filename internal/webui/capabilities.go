@@ -10,7 +10,6 @@ import (
 	"context"
 
 	"github.com/tysonthomas9/loomcli/internal/app/agentprovisioning"
-	"github.com/tysonthomas9/loomcli/internal/app/prreviewer"
 	"github.com/tysonthomas9/loomcli/internal/app/query/runcapture"
 	"github.com/tysonthomas9/loomcli/internal/app/webhookingestion"
 	"github.com/tysonthomas9/loomcli/internal/app/workflowbinding"
@@ -44,7 +43,7 @@ type AutomationCapability interface {
 type AgentsCapability interface {
 	AgentsAPI() agents.API
 	OperatorAuthorityResolver() workflowcataloghttp.OperatorAuthorityResolver
-	PRReviewerProvisioning() prreviewer.Commands
+	ConvergeReviewerIdentity(context.Context, agents.ManagedReviewerCommand) (*agents.ManagedReviewerResult, error)
 }
 
 // AgentProvisioningCapability is the narrow request-facing process-manager handle.

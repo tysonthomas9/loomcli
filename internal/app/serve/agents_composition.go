@@ -11,7 +11,6 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
 
-	"github.com/tysonthomas9/loomcli/internal/app/prreviewer"
 	infrafleetdb "github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
 	"github.com/tysonthomas9/loomcli/internal/modules/agents"
 	agentsfleetdb "github.com/tysonthomas9/loomcli/internal/modules/agents/fleetdb"
@@ -27,7 +26,6 @@ type AgentsCapability struct {
 	api              agents.API
 	issuer           *authority.Issuer
 	operatorResolver workflowcataloghttp.OperatorAuthorityResolver
-	prReviewers      prreviewer.Commands
 	runtime          []platformruntime.Registration
 }
 
@@ -128,11 +126,21 @@ func (capability *AgentsCapability) OperatorAuthorityResolver() workflowcatalogh
 	return capability.operatorResolver
 }
 
-func (capability *AgentsCapability) PRReviewerProvisioning() prreviewer.Commands {
-	if capability == nil {
-		return nil
+// ConvergeReviewerIdentity is PR Review's purpose-scoped Agents port. It
+// derives authority for exactly one managed-reviewer command and never exposes
+// the issuer or generic Role/Agent mutation methods to the delivery adapter.
+func (capability *AgentsCapability) ConvergeReviewerIdentity(
+	ctx context.Context,
+	command agents.ManagedReviewerCommand,
+) (*agents.ManagedReviewerResult, error) {
+	if capability == nil || capability.api == nil {
+		return nil, agents.ErrUnavailable
 	}
-	return capability.prReviewers
+	auth, err := capability.reviewerAuthority(ctx, command.WorkspaceKey, command.AgentID)
+	if err != nil {
+		return nil, err
+	}
+	return capability.api.ConvergeManagedReviewer(ctx, auth, command)
 }
 
 type AgentsConfig struct {
@@ -143,8 +151,6 @@ type AgentsConfig struct {
 	ExternalAuth                    bool
 	ExternalOperatorResolverFactory ExternalOperatorResolverFactory
 }
-
-type PRReviewerCommands = prreviewer.Commands
 
 //nolint:funlen // Composition keeps the exact Agents ports, authority issuer, and compatibility adapters visibly co-located.
 func NewAgentsCapability(config AgentsConfig) (*AgentsCapability, error) {
@@ -161,20 +167,13 @@ func NewAgentsCapability(config AgentsConfig) (*AgentsCapability, error) {
 		return nil, fmt.Errorf("compose Agents FleetDB adapter: %w", err)
 	}
 	service, err := agents.NewWithLifecycle(
-		adapter, adapter, adapter, adapter, adapter, adapter, adapter,
+		adapter, adapter, adapter, adapter, adapter, adapter, adapter, adapter,
 		newAgentBindingStateSource(config.TriggerBindings), admission,
 	)
 	if err != nil {
 		return nil, err
 	}
 	resolver, err := composeAgentsOperatorResolver(config, issuer)
-	if err != nil {
-		return nil, err
-	}
-	reviewers, err := prreviewer.New(service, &prReviewerAuthorityProvider{
-		issuer: issuer,
-		now:    time.Now,
-	})
 	if err != nil {
 		return nil, err
 	}
@@ -189,8 +188,7 @@ func NewAgentsCapability(config AgentsConfig) (*AgentsCapability, error) {
 	}
 	return &AgentsCapability{
 		api: service, issuer: issuer, operatorResolver: resolver,
-		prReviewers: reviewers,
-		runtime:     []platformruntime.Registration{runtimeRegistration},
+		runtime: []platformruntime.Registration{runtimeRegistration},
 	}, nil
 }
 
@@ -312,40 +310,15 @@ func (provider *agentsRuntimeAuthorityProvider) AuthorityForAgentsRuntime(
 	return provider.issuer.IssueSystem(principal, workspace, action, "registered Agents desired-state reconciliation pass")
 }
 
-// prReviewerAuthorityProvider is intentionally not generic: its two public
-// methods bind the PR-reviewer application workflow to the only Agents
-// actions it needs.
-type prReviewerAuthorityProvider struct {
-	issuer *authority.Issuer
-	now    func() time.Time
-}
+const prReviewerAuthoritySubject = "serve-pr-reviewer-convergence"
 
-var _ prreviewer.AuthorityProvider = (*prReviewerAuthorityProvider)(nil)
-
-func (provider *prReviewerAuthorityProvider) AuthorityForReviewerRole(
+func (capability *AgentsCapability) reviewerAuthority(
 	ctx context.Context,
 	workspace,
-	reason string,
+	agentID string,
 ) (authority.SystemAuthority, error) {
-	return provider.issue(ctx, workspace, agents.ActionEnsureManagedRole, reason)
-}
-
-func (provider *prReviewerAuthorityProvider) AuthorityForReviewerAgent(
-	ctx context.Context,
-	workspace,
-	reason string,
-) (authority.SystemAuthority, error) {
-	return provider.issue(ctx, workspace, agents.ActionEnsureManagedAgent, reason)
-}
-
-func (provider *prReviewerAuthorityProvider) issue(
-	ctx context.Context,
-	workspace string,
-	action authority.Action,
-	reason string,
-) (authority.SystemAuthority, error) {
-	if provider == nil || provider.issuer == nil || provider.now == nil {
-		return authority.SystemAuthority{}, prreviewer.ErrUnavailable
+	if capability == nil || capability.issuer == nil {
+		return authority.SystemAuthority{}, agents.ErrUnavailable
 	}
 	if ctx == nil {
 		return authority.SystemAuthority{}, fmt.Errorf(
@@ -357,24 +330,29 @@ func (provider *prReviewerAuthorityProvider) issue(
 		return authority.SystemAuthority{}, err
 	}
 	workspace = strings.TrimSpace(workspace)
-	reason = strings.TrimSpace(reason)
-	if workspace == "" || reason == "" {
+	agentID = strings.TrimSpace(agentID)
+	if workspace == "" || agentID == "" {
 		return authority.SystemAuthority{}, fmt.Errorf(
-			"pr reviewer authority scope and reason are required: %w",
+			"pr reviewer authority workspace and agent ID are required: %w",
 			authority.ErrInvalidScope,
 		)
 	}
-	principal, err := provider.issuer.DeriveVerifiedPrincipal(authority.PrincipalClaims{
-		Subject:   prreviewer.AuthoritySubject,
+	principal, err := capability.issuer.DeriveVerifiedPrincipal(authority.PrincipalClaims{
+		Subject:   prReviewerAuthoritySubject,
 		Class:     authority.ClassSystem,
 		Workspace: workspace,
-		Actions:   []authority.Action{action},
-		ExpiresAt: provider.now().Add(time.Minute),
+		Actions:   []authority.Action{agents.ActionConvergeManagedReviewer},
+		ExpiresAt: time.Now().Add(time.Minute),
 	})
 	if err != nil {
 		return authority.SystemAuthority{}, err
 	}
-	return provider.issuer.IssueSystem(principal, workspace, action, reason)
+	return capability.issuer.IssueSystem(
+		principal,
+		workspace,
+		agents.ActionConvergeManagedReviewer,
+		"converge managed PR reviewer identity "+agentID,
+	)
 }
 
 const (

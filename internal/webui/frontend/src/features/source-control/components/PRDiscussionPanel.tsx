@@ -2,6 +2,7 @@ import { useState } from "react";
 
 import { TerminalView } from "@/components/TerminalView/TerminalView";
 
+import { archiveReviewer } from "../api/prReview";
 import { usePRReviewConversation } from "../usePRReviewConversation";
 import styles from "./PRDiscussionPanel.module.css";
 
@@ -26,6 +27,8 @@ export function PRDiscussionPanel({
 }: PRDiscussionPanelProps): JSX.Element {
   const [activeTab, setActiveTab] = useState<Tab>("chat");
   const [text, setText] = useState("");
+  const [closing, setClosing] = useState(false);
+  const [closeError, setCloseError] = useState<string | null>(null);
   const { agentName, messages, state, detail, sending, send, retry, error } =
     usePRReviewConversation({
       workspaceId,
@@ -39,11 +42,34 @@ export function PRDiscussionPanel({
   // failed: the reviewer runtime died — a sent message would only queue
   // invisibly, so hold the composer shut in both states.
   const chatUnavailable = state === "unsupported" || state === "failed";
+  const preparingReviewer = !agentName && !error;
   const canSend =
     Boolean(agentName) &&
     text.trim().length > 0 &&
     !sending &&
-    !chatUnavailable;
+    !chatUnavailable &&
+    !closing;
+  const panelError = closeError ?? error;
+
+  const close = async (): Promise<void> => {
+    if (closing) return;
+    if (!agentName) {
+      onClose();
+      return;
+    }
+    setClosing(true);
+    setCloseError(null);
+    try {
+      await archiveReviewer(workspaceId, owner, repo, number);
+      onClose();
+    } catch (err) {
+      setCloseError(
+        err instanceof Error ? err.message : "Failed to end PR review",
+      );
+    } finally {
+      setClosing(false);
+    }
+  };
 
   const submit = async (): Promise<void> => {
     if (!canSend) return;
@@ -84,16 +110,22 @@ export function PRDiscussionPanel({
           type="button"
           className={styles.closeButton}
           aria-label="Close discussion"
-          onClick={onClose}
+          disabled={closing || preparingReviewer}
+          title={
+            preparingReviewer
+              ? "Preparing the checkout reviewer"
+              : "End this review and archive its checkout-specific Agent"
+          }
+          onClick={() => void close()}
         >
-          ×
+          {closing || preparingReviewer ? "…" : "×"}
         </button>
       </header>
 
-      {error && (
+      {panelError && (
         <div className={styles.error} data-testid="pr-discussion-error">
-          <span>{error}</span>
-          {!agentName && (
+          <span>{panelError}</span>
+          {!agentName && !closeError && (
             <button
               type="button"
               className={styles.retryButton}

@@ -38,6 +38,8 @@ type transportFake struct {
 	acquire         AcquireOwnershipWire
 	renew           RenewOwnershipWire
 	release         OwnershipProofWire
+	managedReviewer ManagedReviewerWire
+	managedResult   *ManagedReviewerResultWire
 }
 
 func (fake *transportFake) GetAgentService(_ context.Context, workspace, agentID string) (*AgentServiceWire, error) {
@@ -122,6 +124,15 @@ func (fake *transportFake) SetAgentServiceDesiredStateOwned(_ context.Context, r
 	return fake.agent, fake.err
 }
 
+func (fake *transportFake) ConvergeManagedReviewer(
+	_ context.Context,
+	request ManagedReviewerWire,
+) (*ManagedReviewerResultWire, error) {
+	fake.calls = append(fake.calls, "converge-managed-reviewer")
+	fake.managedReviewer = request
+	return fake.managedResult, fake.err
+}
+
 func (fake *transportFake) AcquireAgentOwnership(_ context.Context, request AcquireOwnershipWire) (*AgentOwnershipLeaseWire, error) {
 	fake.calls = append(fake.calls, "acquire-ownership")
 	fake.acquire = request
@@ -155,6 +166,61 @@ func (fake *transportFake) ReleaseAgentOwnership(_ context.Context, request Owne
 func TestNewRejectsNilTransport(t *testing.T) {
 	if _, err := New(nil); !errors.Is(err, agents.ErrUnavailable) {
 		t.Fatalf("New(nil) error = %v, want unavailable", err)
+	}
+}
+
+func TestAdapterMapsManagedReviewerConvergenceAsOneCommand(t *testing.T) {
+	now := time.Date(2026, 8, 16, 12, 0, 0, 0, time.UTC)
+	fake := &transportFake{managedResult: &ManagedReviewerResultWire{
+		PresetID: "reviewer-v1", PresetRevision: 2,
+		PresetFingerprint: strings.Repeat("a", 64), Changed: true,
+		Role: &RoleWire{
+			WorkspaceKey: "WS", Name: "pr-reviewer", Kind: agents.RoleKindInteractive,
+			PromptFile: "builtin:pr-review-checkout", CreatedAt: now, UpdatedAt: now,
+		},
+		Agent: &AgentServiceWire{
+			WorkspaceKey: "WS", ServiceID: "review-octo-repo-pr-7",
+			GenerationID: "00112233445566778899aabbccddeeff",
+			Name:         "review-octo-repo-pr-7", Kind: string(agents.AgentKindSupport),
+			DesiredState: string(agents.DesiredRunning), RoleName: "pr-reviewer",
+			MaxInstances: 1, CreatedAt: now, UpdatedAt: now,
+		},
+	}}
+	adapter := newAdapter(t, fake)
+	mutation := agents.ManagedReviewerMutation{
+		WorkspaceKey: "WS", AgentID: "review-octo-repo-pr-7",
+		DesiredState: agents.ManagedReviewerActive, Fingerprint: strings.Repeat("a", 64),
+		ActorID: "serve-pr-reviewer-convergence",
+		Preset: agents.ManagedReviewerPreset{
+			PresetID: "reviewer-v1", Revision: 2,
+			Role: agents.ManagedReviewerRoleDefinition{
+				Name: "pr-reviewer", Kind: agents.RoleKindInteractive,
+				PromptFile: "builtin:pr-review-checkout",
+			},
+			Agent: agents.ManagedReviewerAgentDefinition{
+				Kind: agents.AgentKindSupport, DesiredState: agents.DesiredRunning,
+				RoleName: "pr-reviewer", MaxInstances: 1,
+			},
+		},
+	}
+	result, err := adapter.ConvergeManagedReviewer(t.Context(), mutation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(fake.calls, []string{"converge-managed-reviewer"}) ||
+		fake.managedReviewer.WorkspaceKey != mutation.WorkspaceKey ||
+		fake.managedReviewer.AgentID != mutation.AgentID ||
+		fake.managedReviewer.DesiredState != string(mutation.DesiredState) ||
+		fake.managedReviewer.ActorID != mutation.ActorID ||
+		fake.managedReviewer.Preset.Fingerprint != mutation.Fingerprint ||
+		!reflect.DeepEqual(fake.managedReviewer.Preset.Role, mutation.Preset.Role) ||
+		!reflect.DeepEqual(fake.managedReviewer.Preset.Agent, mutation.Preset.Agent) {
+		t.Fatalf("managed reviewer wire = %+v calls=%v", fake.managedReviewer, fake.calls)
+	}
+	if result == nil || result.PresetRevision != 2 || !result.Changed ||
+		result.Role == nil || result.Role.PromptFile != "builtin:pr-review-checkout" ||
+		result.Agent == nil || result.Agent.AgentID != mutation.AgentID {
+		t.Fatalf("managed reviewer result = %#v", result)
 	}
 }
 

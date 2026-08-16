@@ -89,9 +89,6 @@ func TestAgentsCompositionUsesPublicAPIAndTrustedOperatorAttribution(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	if capability.PRReviewerProvisioning() == nil {
-		t.Fatal("Agents composition omitted the PR reviewer application workflow")
-	}
 	request, err := http.NewRequestWithContext(t.Context(), http.MethodPost, "http://loom.invalid/agents", nil)
 	if err != nil {
 		t.Fatal(err)
@@ -143,9 +140,12 @@ func TestAgentsCompositionFailsClosedWithoutFleetOrExternalIdentityResolver(t *t
 	}
 	var capability *AgentsCapability
 	if capability.AgentsAPI() != nil ||
-		capability.OperatorAuthorityResolver() != nil ||
-		capability.PRReviewerProvisioning() != nil {
+		capability.OperatorAuthorityResolver() != nil {
 		t.Fatal("nil Agents capability exposed an API")
+	}
+	if result, err := capability.ConvergeReviewerIdentity(t.Context(), agents.ManagedReviewerCommand{}); result != nil ||
+		!errors.Is(err, agents.ErrUnavailable) {
+		t.Fatalf("nil reviewer convergence = %#v, %v", result, err)
 	}
 }
 

@@ -69,6 +69,7 @@ func TestPhase5FoundationCapabilitiesAreExact(t *testing.T) {
 
 	want := []string{
 		AgentsServiceCommandsCapability,
+		AgentsManagedReviewerConvergenceCapability,
 		AgentsLifecycleCommandsCapability,
 		AgentsOwnershipLeaseCommandsCapability,
 		InteractionSessionCommandsCapability,

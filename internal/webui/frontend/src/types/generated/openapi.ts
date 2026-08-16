@@ -1513,7 +1513,11 @@ export interface paths {
     put?: never;
     /** Ensure a per-PR terminal reviewer agent */
     post: operations["ensurePullRequestReviewer"];
-    delete?: never;
+    /**
+     * Archive the checkout-specific PR reviewer agent
+     * @description Idempotently archives only the deterministic checkout Agent through Agents' managed-reviewer convergence command. The shared reviewer Role remains available for other and future checkouts.
+     */
+    delete: operations["archivePullRequestReviewer"];
     options?: never;
     head?: never;
     patch?: never;
@@ -2715,6 +2719,10 @@ export interface components {
       agent_name: string;
       checked_out_sha: string;
       seeded: boolean;
+    };
+    ReviewerArchiveResult: {
+      agent_name: string;
+      archived: boolean;
     };
     ReviewerMessageRequest: {
       text: string;
@@ -7903,6 +7911,81 @@ export interface operations {
         };
       };
       /** @description Connector egress unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  archivePullRequestReviewer: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        owner: string;
+        repo: string;
+        number: number;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Reviewer Agent archived; shared Role preserved */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": {
+            /** @constant */
+            success: true;
+            data: components["schemas"]["ReviewerArchiveResult"];
+          };
+        };
+      };
+      /** @description Invalid path parameter */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Repository is not registered or reviewer was not started */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Reviewer identity conflicts with managed state */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Reviewer archival failed */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Agents capability unavailable */
       503: {
         headers: {
           [name: string]: unknown;

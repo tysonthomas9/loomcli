@@ -14,18 +14,17 @@ semantics:
     - vendor
     - worktrees
 ceilings:
-  total_packages: 153
+  total_packages: 152
   module_packages: 18
-  outside_module_packages: 135
-  one_file_packages: 37
-  one_or_two_file_packages: 55
+  outside_module_packages: 134
+  one_file_packages: 36
+  one_or_two_file_packages: 54
 packages:
   - internal/agenterr
   - internal/agentpolicy
   - internal/app/agentprovisioning
   - internal/app/agentprovisioning/fleetdb
   - internal/app/connectorgrants
-  - internal/app/prreviewer
   - internal/app/query/operationalview
   - internal/app/query/runcapture
   - internal/app/query/sessionarchive

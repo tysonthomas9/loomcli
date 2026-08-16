@@ -8,6 +8,8 @@ export type PullRequestReviewResult =
 export type PullRequestReviewEvent = "approve" | "request_changes" | "comment";
 export type ReviewerEnsureResult =
   components["schemas"]["ReviewerEnsureResult"];
+export type ReviewerArchiveResult =
+  components["schemas"]["ReviewerArchiveResult"];
 export type ReviewerMessageResult =
   components["schemas"]["ReviewerMessageResult"];
 export type ReviewerConversation =
@@ -76,6 +78,23 @@ export async function ensureReviewer(
   number: number,
 ): Promise<ReviewerEnsureResult> {
   const { data, error, response } = await api.POST(
+    "/api/workspaces/{ws}/pull-requests/{owner}/{repo}/{number}/reviewer",
+    {
+      params: { path: { ws, owner, repo, number } },
+    },
+  );
+  if (error) throw apiErrorFromResponse(error, response);
+  return unwrapResponse(data, response);
+}
+
+/** Archive only the checkout-specific reviewer Agent; preserve its shared Role. */
+export async function archiveReviewer(
+  ws: string,
+  owner: string,
+  repo: string,
+  number: number,
+): Promise<ReviewerArchiveResult> {
+  const { data, error, response } = await api.DELETE(
     "/api/workspaces/{ws}/pull-requests/{owner}/{repo}/{number}/reviewer",
     {
       params: { path: { ws, owner, repo, number } },

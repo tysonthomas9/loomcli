@@ -3203,6 +3203,54 @@ paths:
         "410":
           description: Exact lease generation exists but is no longer live
 
+  /api/v1/{workspace}/managed-reviewer-identities/{agent_id}/converge:
+    parameters:
+      - $ref: "#/components/parameters/Workspace"
+      - name: agent_id
+        in: path
+        required: true
+        description: Deterministic checkout-scoped reviewer Agent identity.
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 100
+    post:
+      tags: [Agent Services]
+      summary: Atomically converge one managed reviewer Role and Agent
+      description: >-
+        Service-only deep command for PR Review. The versioned preset owns one
+        shared Role while agent_id identifies one checkout-scoped Agent.
+        FleetDB creates or updates both records and their managed provenance in
+        one durable commit, or archives only the Agent while preserving the
+        Role. Exact replay is a no-op. A lower preset revision, a divergent
+        definition at the same revision, or an unmanaged record occupying
+        either identity fails closed; existing identities are never silently
+        adopted. No sequential Role/Agent fallback is permitted.
+      operationId: convergeManagedReviewerIdentity
+      parameters:
+        - $ref: "#/components/parameters/FleetDelegatedActor"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ManagedReviewerConvergenceRequest"
+      responses:
+        "200":
+          description: Exact committed convergence state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ManagedReviewerConvergenceResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
   /api/v1/{workspace}/trigger-bindings:
     parameters:
       - $ref: "#/components/parameters/Workspace"
@@ -11581,7 +11629,7 @@ components:
         capabilities:
           type: array
           items: { type: string }
-          example: [agents.agent_service_commands.v1, agents.ownership_lease_commands.v1, agents.provisioning_progress.v1, artifacts.owner_fenced_lifecycle.v1, automation.trigger_admission.v1, execution.await_atomic_resume.v1, execution.driver_run_child_cascade.v1, execution.driver_run_child_start.v1, execution.driver_run_lease_fencing.v1, execution.driver_run_review_work_item_handoff.v1, execution.driver_run_review_work_item_handoff.v2, execution.driver_run_work_item_claim.v1, execution.driver_step_terminal_repair.v1, execution.issue_claim_next_task_run_start.v1, execution.issue_claim_task_run_start.v1, execution.task_run_lease_fencing.v1, execution.task_run_log_idempotency.v1, execution.task_run_request.v1, execution.task_run_requeue.v1, execution.task_run_retry_exhaustion.v1, execution.task_run_terminal_convergence.v1, execution.task_run_work_item_design.v1, execution.terminal_driver_run_work_recovery.v1, execution.terminal_driver_run_work_recovery_queue.v1, interaction.session_commands.v1, work_items.repository_requirement.v1, workflow_catalog.version_authoring.v1, workflow_catalog.version_lifecycle.v1]
+          example: [agents.agent_service_commands.v1, agents.managed_reviewer_convergence.v1, agents.ownership_lease_commands.v1, agents.provisioning_progress.v1, artifacts.owner_fenced_lifecycle.v1, automation.trigger_admission.v1, execution.await_atomic_resume.v1, execution.driver_run_child_cascade.v1, execution.driver_run_child_start.v1, execution.driver_run_lease_fencing.v1, execution.driver_run_review_work_item_handoff.v1, execution.driver_run_review_work_item_handoff.v2, execution.driver_run_work_item_claim.v1, execution.driver_step_terminal_repair.v1, execution.issue_claim_next_task_run_start.v1, execution.issue_claim_task_run_start.v1, execution.task_run_lease_fencing.v1, execution.task_run_log_idempotency.v1, execution.task_run_request.v1, execution.task_run_requeue.v1, execution.task_run_retry_exhaustion.v1, execution.task_run_terminal_convergence.v1, execution.task_run_work_item_design.v1, execution.terminal_driver_run_work_recovery.v1, execution.terminal_driver_run_work_recovery_queue.v1, interaction.session_commands.v1, work_items.repository_requirement.v1, workflow_catalog.version_authoring.v1, workflow_catalog.version_lifecycle.v1]
 
     AutomationErrorResponse:
       type: object
@@ -11951,6 +11999,122 @@ components:
     AgentServiceDesiredState:
       type: string
       enum: [running, stopped, paused]
+
+    ManagedReviewerDesiredState:
+      type: string
+      enum: [active, archived]
+
+    ManagedReviewerRoleDefinition:
+      type: object
+      additionalProperties: false
+      required: [name]
+      description: >-
+        Complete configurable Role definition owned by the reviewer preset.
+        Workspace identity, timestamps, and audit data remain FleetDB-owned.
+      properties:
+        name: { type: string, minLength: 1 }
+        description: { type: string }
+        kind:
+          type: string
+          enum: [interactive, worker]
+        prompt: { type: string }
+        prompt_file: { type: string }
+        model: { type: string }
+        task_filter: { type: string }
+        backend: { type: string }
+        effort:
+          type: string
+          enum: [low, medium, high, xhigh, max]
+        path_patterns:
+          type: array
+          items: { type: string }
+        skills:
+          type: array
+          items: { type: string }
+        max_priority: { type: integer }
+        max_concurrency: { type: integer }
+        read_only: { type: boolean }
+        allowed_tools:
+          type: array
+          items: { type: string }
+        denied_tools:
+          type: array
+          items: { type: string }
+        max_budget_usd: { type: number }
+
+    ManagedReviewerAgentDefinition:
+      type: object
+      additionalProperties: false
+      required: [kind, desired_state, role_name, max_instances]
+      description: >-
+        Checkout-independent Agent definition owned by the reviewer preset.
+        The route agent_id supplies the deterministic checkout identity.
+      properties:
+        kind:
+          $ref: "#/components/schemas/AgentServiceKind"
+        desired_state:
+          $ref: "#/components/schemas/AgentServiceDesiredState"
+        role_name: { type: string, minLength: 1 }
+        max_instances:
+          type: integer
+          minimum: 1
+        budget_policy: { type: string }
+        metadata:
+          $ref: "#/components/schemas/StringMap"
+
+    ManagedReviewerPreset:
+      type: object
+      additionalProperties: false
+      required: [preset_id, revision, fingerprint, role, agent]
+      description: >-
+        Versioned complete reviewer definition. fingerprint is the SHA-256
+        digest of canonical fleetdb.managed_reviewer_preset.v1 material;
+        FleetDB recomputes it and rejects mismatches.
+      properties:
+        preset_id:
+          type: string
+          minLength: 1
+          maxLength: 100
+        revision:
+          type: integer
+          format: int64
+          minimum: 1
+        fingerprint:
+          type: string
+          pattern: "^[0-9a-f]{64}$"
+        role:
+          $ref: "#/components/schemas/ManagedReviewerRoleDefinition"
+        agent:
+          $ref: "#/components/schemas/ManagedReviewerAgentDefinition"
+
+    ManagedReviewerConvergenceRequest:
+      type: object
+      additionalProperties: false
+      required: [desired_state, preset]
+      properties:
+        desired_state:
+          $ref: "#/components/schemas/ManagedReviewerDesiredState"
+        preset:
+          $ref: "#/components/schemas/ManagedReviewerPreset"
+
+    ManagedReviewerConvergenceResult:
+      type: object
+      additionalProperties: false
+      required:
+        [preset_id, preset_revision, preset_fingerprint, role, agent, changed]
+      properties:
+        preset_id: { type: string }
+        preset_revision:
+          type: integer
+          format: int64
+        preset_fingerprint:
+          type: string
+          pattern: "^[0-9a-f]{64}$"
+        role:
+          $ref: "#/components/schemas/Role"
+        agent:
+          $ref: "#/components/schemas/AgentService"
+        changed: { type: boolean }
 
     AgentService:
       type: object

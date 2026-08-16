@@ -56,7 +56,7 @@ const (
 // package tree's non-test sources.
 // When you add/remove/move a client call, update clientRoutes below FIRST, then
 // bump this constant.
-const expectedClientCallSites = 237
+const expectedClientCallSites = 238
 
 // clientRoute is one method+path template the client issues. Path params are
 // written as {} (already normalized).
@@ -126,6 +126,7 @@ var clientRoutes = []clientRoute{
 	{"POST", "/api/v1/{}/agent-services/{}/desired-state"},
 	{"POST", "/api/v1/{}/agent-services/{}/desired-state/owned"},
 	{"POST", "/api/v1/{}/agent-services/{}/lifecycle"},
+	{"POST", "/api/v1/{}/managed-reviewer-identities/{}/converge"},
 
 	// agent_provisioning.go
 	{"POST", "/api/v1/{}/agent-provisioning"},

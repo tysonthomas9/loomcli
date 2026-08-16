@@ -96,6 +96,9 @@ method_sets:
   - name: agents_lifecycle
     read_only: []
     mutating: [ApplyLifecycle]
+  - name: agents_managed_reviewer
+    read_only: []
+    mutating: [ConvergeManagedReviewer]
   - name: agents_ownership
     read_only: [GetOwnership, ListOwnership]
     mutating: [AcquireOwnership, ReleaseOwnership, RenewOwnership]
@@ -161,7 +164,7 @@ method_sets:
     mutating: [AppendConnectorCallRecord, RotateConnectorSecretsRecord]
   - name: fleetdb_agent_management_transport
     read_only: [GetAgentOwnership, GetAgentRole, GetAgentService, ListAgentOwnership, ListAgentRoles, ListAgentServices]
-    mutating: [AcquireAgentOwnership, ApplyAgentServiceLifecycle, ArchiveAgentService, CreateAgentRole, CreateAgentService, DeleteAgentRole, ReleaseAgentOwnership, RenewAgentOwnership, SetAgentServiceDesiredState, SetAgentServiceDesiredStateOwned, UpdateAgentRole, UpdateAgentServiceIdentity]
+    mutating: [AcquireAgentOwnership, ApplyAgentServiceLifecycle, ArchiveAgentService, ConvergeManagedReviewer, CreateAgentRole, CreateAgentService, DeleteAgentRole, ReleaseAgentOwnership, RenewAgentOwnership, SetAgentServiceDesiredState, SetAgentServiceDesiredStateOwned, UpdateAgentRole, UpdateAgentServiceIdentity]
   - name: fleetdb_client
     read_only:
       - AgentInboxMessages
@@ -474,6 +477,10 @@ receiver_surfaces:
   - receiver: github.com/tysonthomas9/loomcli/internal/modules/agents.LifecycleStore
     package: github.com/tysonthomas9/loomcli/internal/modules/agents
     method_set: agents_lifecycle
+    capability_owner: agents
+  - receiver: github.com/tysonthomas9/loomcli/internal/modules/agents.ManagedReviewerStore
+    package: github.com/tysonthomas9/loomcli/internal/modules/agents
+    method_set: agents_managed_reviewer
     capability_owner: agents
   - receiver: github.com/tysonthomas9/loomcli/internal/modules/agents.OwnershipStore
     package: github.com/tysonthomas9/loomcli/internal/modules/agents
@@ -876,6 +883,12 @@ writes:
     - file: internal/app/serve/agents_fleetdb.go
       receiver: github.com/tysonthomas9/loomcli/internal/infra/fleetdb.AgentManagementTransport
       method: ArchiveAgentService
+      count: 1
+      aggregate_owner: agents
+      disposition: owner_adapter
+    - file: internal/app/serve/agents_fleetdb.go
+      receiver: github.com/tysonthomas9/loomcli/internal/infra/fleetdb.AgentManagementTransport
+      method: ConvergeManagedReviewer
       count: 1
       aggregate_owner: agents
       disposition: owner_adapter

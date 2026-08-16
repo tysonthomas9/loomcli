@@ -71,6 +71,20 @@ commands:
     retry_restart_behavior: Exact same-generation replay converges on the bound parent; a stale DriverRun generation or changed expected parent conflicts and cannot fall back to a filesystem lock.
     negative_tests: [expired_system_authority, forged_proof, stale_fence, unauthenticated, wrong_action, wrong_driver_run, wrong_workspace]
     fault_injection_tests: [concurrent_parent_change, duplicate_request, lost_response_after_commit]
+  - id: agents.converge-managed-reviewer
+    phase: 10
+    aggregate_owner: agents
+    coordinating_owner: agents
+    mechanism_discriminator: managed_reviewer_preset:role:agent_identity
+    instance_owner: agents
+    accepted_authority: [system]
+    durable_commands: ["POST /api/v1/{workspace}/managed-reviewer-identities/{agent_id}/converge"]
+    transaction_or_saga_boundary: Agents canonicalizes and fingerprints PR Review's complete versioned preset; one FleetDB transaction records preset provenance and atomically creates or repairs the shared Role plus checkout Agent, or archives only that Agent while preserving the Role.
+    idempotency_key: workspace_id:agent_id:preset_id:preset_revision:preset_fingerprint:desired_state
+    semantic_events_or_read_models: [agents.identity.v1, agents.managed_reviewer_preset.v1, agents.role.v1]
+    retry_restart_behavior: Exact active or archived replay converges on the stored preset and deterministic Agent; a stale revision, same-revision drift, unmanaged identity, or lost response never triggers sequential Role and Agent fallback.
+    negative_tests: [divergent_preset, expired_system_authority, forged_fingerprint, stale_revision, unauthenticated, unmanaged_agent, unmanaged_role, wrong_action, wrong_workspace]
+    fault_injection_tests: [concurrent_request, duplicate_request, lost_response_after_commit, restart_exact_replay]
   - id: agents.create-agent
     phase: 5
     aggregate_owner: agents

@@ -292,6 +292,31 @@ type LifecycleResultWire struct {
 	CommittedAt    time.Time
 }
 
+type ManagedReviewerPresetWire struct {
+	PresetID    string                                `json:"preset_id"`
+	Revision    int64                                 `json:"revision"`
+	Fingerprint string                                `json:"fingerprint"`
+	Role        agents.ManagedReviewerRoleDefinition  `json:"role"`
+	Agent       agents.ManagedReviewerAgentDefinition `json:"agent"`
+}
+
+type ManagedReviewerWire struct {
+	WorkspaceKey string
+	AgentID      string
+	DesiredState string
+	Preset       ManagedReviewerPresetWire
+	ActorID      string
+}
+
+type ManagedReviewerResultWire struct {
+	PresetID          string
+	PresetRevision    int64
+	PresetFingerprint string
+	Role              *RoleWire
+	Agent             *AgentServiceWire
+	Changed           bool
+}
+
 // LifecycleTransport is intentionally separate from the still-migrating
 // baseline transport. Production composition requires it through
 // agents.NewWithLifecycle; older fakes cannot accidentally trigger a
@@ -318,6 +343,7 @@ type Transport interface {
 	ArchiveAgentService(context.Context, ArchiveAgentServiceWire) (*AgentServiceWire, error)
 	SetAgentServiceDesiredState(context.Context, DesiredStateWire) (*AgentServiceWire, error)
 	SetAgentServiceDesiredStateOwned(context.Context, OwnedDesiredStateWire) (*AgentServiceWire, error)
+	ConvergeManagedReviewer(context.Context, ManagedReviewerWire) (*ManagedReviewerResultWire, error)
 
 	AcquireAgentOwnership(context.Context, AcquireOwnershipWire) (*AgentOwnershipLeaseWire, error)
 	GetAgentOwnership(context.Context, string, string) (*AgentOwnershipLeaseWire, error)
@@ -331,13 +357,14 @@ type Adapter struct {
 }
 
 var (
-	_ agents.AgentReader         = (*Adapter)(nil)
-	_ agents.RoleReferenceReader = (*Adapter)(nil)
-	_ agents.RoleStore           = (*Adapter)(nil)
-	_ agents.AgentIdentityStore  = (*Adapter)(nil)
-	_ agents.DesiredStateStore   = (*Adapter)(nil)
-	_ agents.OwnershipStore      = (*Adapter)(nil)
-	_ agents.LifecycleStore      = (*Adapter)(nil)
+	_ agents.AgentReader          = (*Adapter)(nil)
+	_ agents.RoleReferenceReader  = (*Adapter)(nil)
+	_ agents.RoleStore            = (*Adapter)(nil)
+	_ agents.AgentIdentityStore   = (*Adapter)(nil)
+	_ agents.DesiredStateStore    = (*Adapter)(nil)
+	_ agents.OwnershipStore       = (*Adapter)(nil)
+	_ agents.LifecycleStore       = (*Adapter)(nil)
+	_ agents.ManagedReviewerStore = (*Adapter)(nil)
 )
 
 func New(transport Transport) (*Adapter, error) {
@@ -372,6 +399,31 @@ func (adapter *Adapter) ApplyLifecycle(
 		IdempotencyKey: value.IdempotencyKey, Action: agents.LifecycleAction(value.Action),
 		Agent: agentFromWire(value.Agent), BindingIDs: append([]string(nil), value.BindingIDs...),
 		GrantIDs: append([]string(nil), value.GrantIDs...), CommittedAt: value.CommittedAt,
+	}, nil
+}
+
+func (adapter *Adapter) ConvergeManagedReviewer(
+	ctx context.Context,
+	mutation agents.ManagedReviewerMutation,
+) (*agents.ManagedReviewerResult, error) {
+	value, err := adapter.transport.ConvergeManagedReviewer(ctx, ManagedReviewerWire{
+		WorkspaceKey: mutation.WorkspaceKey, AgentID: mutation.AgentID,
+		DesiredState: string(mutation.DesiredState), ActorID: mutation.ActorID,
+		Preset: ManagedReviewerPresetWire{
+			PresetID: mutation.Preset.PresetID, Revision: mutation.Preset.Revision,
+			Fingerprint: mutation.Fingerprint, Role: mutation.Preset.Role, Agent: mutation.Preset.Agent,
+		},
+	})
+	if err != nil {
+		return nil, mapError("converge managed reviewer", err)
+	}
+	if value == nil {
+		return nil, nil
+	}
+	return &agents.ManagedReviewerResult{
+		PresetID: value.PresetID, PresetRevision: value.PresetRevision,
+		PresetFingerprint: value.PresetFingerprint, Role: roleFromWire(value.Role),
+		Agent: agentFromWire(value.Agent), Changed: value.Changed,
 	}, nil
 }
 

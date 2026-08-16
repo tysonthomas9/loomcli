@@ -40,6 +40,7 @@ func TestPhase10MigratedHTTPContractsCannotReturnAsHandwrittenStructs(t *testing
 		"tabPatchRequest", "tabPutRequest", "taskWorkflowRunsResponse", "driverRunResponse",
 		"pullRequestDetail", "pullRequestDiff", "pullRequestDiffFile", "pullRequestReviewRequest",
 		"pullRequestReviewResult", "reviewerConversation", "reviewerEnsureResult",
+		"reviewerArchiveResult",
 		"reviewerMessageRequest", "reviewerMessageResult",
 		"gitMergeResponse", "gitSyncResponse", "gitPushAllResponse",
 		"gitPushAllCheckoutResponse", "gitPullRequestCreationResponse",

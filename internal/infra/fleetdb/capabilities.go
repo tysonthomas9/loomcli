@@ -82,6 +82,10 @@ const (
 	// transition used by the Phase 5 Agents owner. Generic AgentService CRUD is
 	// not a fallback for this command surface.
 	AgentsServiceCommandsCapability = "agents.agent_service_commands.v1"
+	// AgentsManagedReviewerConvergenceCapability certifies the service-only
+	// atomic shared-Role and checkout-Agent convergence command. PR Review has
+	// no generic Role/Agent fallback.
+	AgentsManagedReviewerConvergenceCapability = "agents.managed_reviewer_convergence.v1"
 	// AgentsLifecycleCommandsCapability certifies the atomic Agent,
 	// managed-binding, binding-grant, and archival convergence command.
 	AgentsLifecycleCommandsCapability = "agents.lifecycle_commands.v1"
@@ -142,6 +146,7 @@ func Phase4FoundationCapabilities() []string {
 func Phase5FoundationCapabilities() []string {
 	return []string{
 		AgentsServiceCommandsCapability,
+		AgentsManagedReviewerConvergenceCapability,
 		AgentsLifecycleCommandsCapability,
 		AgentsOwnershipLeaseCommandsCapability,
 		InteractionSessionCommandsCapability,
