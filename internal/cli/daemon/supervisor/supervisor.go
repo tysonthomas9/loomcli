@@ -152,6 +152,12 @@ type Supervisor struct {
 	// ReloadClaimHold re-reads the hold when the FILE changed under this process. Injected by the daemon.
 	ReloadClaimHold func() (*ClaimHold, bool, error) // (hold, changed, err)
 
+	// backendStateReassertInterval bounds how often gateBackendAvailable
+	// re-asserts an unchanged backend-availability state to the control plane.
+	// Zero means use the package default (backendStateReassertInterval). Tests
+	// set a short value to exercise the re-assert without waiting 5m.
+	backendStateReassert time.Duration
+
 	// maxRetriesBlockInterval is the fixed delay computeBackoff returns once an
 	// agent has exhausted its restart budget and blocked (StopReasonMaxRetriesBlocked).
 	// Zero means use the package default (defaultMaxRetriesBlockInterval). Tests set
