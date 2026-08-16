@@ -1,6 +1,6 @@
 # Makefile for loomcli project
 
-.PHONY: all build build-frontend build-all test test-builtin-workflows test-integration test-all test-playground test-fleetdb-embedded test-fleetdb-supervisor test-fleetdb-ui test-fleetdb-empty-cli fleetdb-empty-up fleetdb-empty-down fleetdb-regression-up fleetdb-regression-down test-env-up test-env-down test-env-status ensure-frontend-dist ensure-frontend-deps local-mode-frontend-dist local-mode-up local-mode-codex-up local-mode-claude-up local-mode-daytona-up local-mode-down local-mode-logs local-mode-verify local-mode-codex-verify test-local-mode-harness test-distributed-smoke lint lint-frontend test-frontend e2e test-e2e test-e2e-api test-e2e-api-local test-e2e-real-smoke test-e2e-real-smoke-local test-e2e-real-regression test-e2e-real-regression-local test-e2e-integration test-e2e-integration-local test-e2e-integration-full clean install help frontend check check-go check-frontend gate gate-e2e gate-e2e-full hooks ensure-hooks dev dev-check dev-loom dev-vite check-loc check-loc-stale check-control-plane-paths check-no-raw-exec check-no-beads-prod test-coverage test-forkwatch test-frontend-coverage test-race-cover test-integration-race-cover gen-go-api check-go-api-staleness local-mode-webhook-verify test-e2e-github-webhook test-e2e-github-webhook-live
+.PHONY: all build build-frontend build-all test test-builtin-workflows test-integration test-all test-playground test-fleetdb-embedded test-fleetdb-supervisor test-fleetdb-ui test-fleetdb-empty-cli fleetdb-empty-up fleetdb-empty-down fleetdb-regression-up fleetdb-regression-down test-env-up test-env-down test-env-status compose-smoke compose-smoke-down ensure-frontend-dist ensure-frontend-deps local-mode-frontend-dist local-mode-up local-mode-codex-up local-mode-claude-up local-mode-daytona-up local-mode-down local-mode-logs local-mode-verify local-mode-codex-verify test-local-mode-harness test-distributed-smoke lint lint-frontend test-frontend e2e test-e2e test-e2e-api test-e2e-api-local test-e2e-real-smoke test-e2e-real-smoke-local test-e2e-real-regression test-e2e-real-regression-local test-e2e-integration test-e2e-integration-local test-e2e-integration-full clean install help frontend check check-go check-frontend gate gate-e2e gate-e2e-full hooks ensure-hooks dev dev-check dev-loom dev-vite check-loc check-loc-stale check-control-plane-paths check-no-raw-exec check-no-beads-prod test-coverage test-forkwatch test-frontend-coverage test-race-cover test-integration-race-cover gen-go-api check-go-api-staleness local-mode-webhook-verify test-e2e-github-webhook test-e2e-github-webhook-live
 
 # Default target
 all: build
@@ -204,6 +204,21 @@ test-env-down:
 
 test-env-status:
 	@./scripts/test-env.sh status
+
+# End-to-end smoke test of the SHIPPED compose stacks (docker-compose.dev.yml
+# and deploy/docker-compose.yml). This target is the anti-rot measure: both
+# files decayed into an unstartable state because nothing here or in CI ever
+# ran them. It builds four images (including an npm ci frontend build), so it
+# is minutes-long and deliberately not part of `make check`.
+compose-smoke:
+	@./scripts/compose-smoke.sh
+
+# Tear down a stack left running by `scripts/compose-smoke.sh --keep`. The
+# smoke script cleans up after itself on every other exit path.
+compose-smoke-down:
+	@set -e; \
+	$(LOCAL_MODE_COMPOSE_SELECT); \
+	$$compose -f docker-compose.dev.yml down -v --remove-orphans
 
 # Start the fleet-db regression stack: redis, fleet-db, loom serve on the
 # fleet-db backend, the Web UI sidecar, and a one-shot fixture seeder.
@@ -721,6 +736,8 @@ help:
 	@echo "  make test-fleetdb-ui   - Run fleet-db-only UI regression suite"
 	@echo "  make test-env-up        - Start the disposable fleet-db test backend (workspace LOOMTEST, :53351)"
 	@echo "  make test-env-down      - Stop it and drop its volumes"
+	@echo "  make compose-smoke      - Smoke-test the shipped compose stacks end-to-end (slow; needs ../fleet-db)"
+	@echo "  make compose-smoke-down - Tear down a compose-smoke stack left running with --keep"
 	@echo "                            Point a shell at it: eval \"\$$(scripts/test-env.sh env)\""
 	@echo "                            Use this, not the live stack on :3011, for anything that writes"
 	@echo "  make local-mode-up      - Run local-mode Podman/Docker stack"
