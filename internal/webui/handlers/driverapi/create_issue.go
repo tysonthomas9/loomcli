@@ -50,7 +50,9 @@ type createIssueParams struct {
 	// Parent is create-time only: fleet-db's PATCH cannot set it later.
 	Parent string `json:"parent,omitempty"`
 	Design string `json:"design,omitempty"`
-	// Status on create is restricted to open|deferred.
+	// Status on create is restricted to open|deferred|review. review is the
+	// scout's quarantine state: recommendations surface in the human review
+	// queue and stay out of the ready set until approved.
 	Status string `json:"status,omitempty"`
 	// IdempotencyKey is optional (<=128 printable ASCII). Omitted, the
 	// handler defaults it per run+day+body (see createIssue).
@@ -87,9 +89,9 @@ func (p createIssueParams) validate() error {
 		return fmt.Errorf("invalid priority %d: must be between 0 and 4: %w", p.Priority, domain.ErrInvalid)
 	}
 	switch p.Status {
-	case "", "open", "deferred":
+	case "", "open", "deferred", "review":
 	default:
-		return fmt.Errorf("invalid status %q: only open or deferred can be set on create: %w", p.Status, domain.ErrInvalid)
+		return fmt.Errorf("invalid status %q: only open, deferred, or review can be set on create: %w", p.Status, domain.ErrInvalid)
 	}
 	if p.IdempotencyKey != "" {
 		if len(p.IdempotencyKey) > maxCreateIssueIdempotencyKeyLen {

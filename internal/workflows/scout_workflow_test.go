@@ -55,6 +55,7 @@ func TestScoutWorkflowSourceContract(t *testing.T) {
 		{name: "issues namespace create", want: "issuesApi.create({"},
 		{name: "issues namespace degrades when absent", want: "journaled without creating issues"},
 		{name: "quarantine label re-asserted", want: `labels.push("recommended")`},
+		{name: "quarantine status on create", want: `status: "review"`},
 		{name: "repo routing label re-asserted", want: `labels.push("repo:" + repo)`},
 		{name: "priority clamped to loom range", want: "clampInt(rec.priority, 0, 4, 2)"},
 		{name: "write phase carries history entry", want: "historyEntry: historyEntry(loom, analysis.value, outcome)"},

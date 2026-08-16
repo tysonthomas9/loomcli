@@ -104,6 +104,25 @@ func TestDriverAPICreateIssueDefaultsIdempotencyKey(t *testing.T) {
 	}
 }
 
+func TestDriverAPICreateIssueAcceptsReviewStatus(t *testing.T) {
+	// The scout creates recommendations in review status so they surface in
+	// the human review queue instead of the ready set.
+	h := newTestHarness(t, "")
+	h.backend.createResult = &backend.IssueData{ID: "ISSUE-2", Title: "t", Status: "review"}
+
+	resp, decoded := h.do(t, opRequest{
+		op:      "create-issue",
+		headers: h.ownerHeaders(),
+		body:    map[string]any{"title": "t", "labels": []string{"recommended"}, "status": "review"},
+	})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d (%v), want 200", resp.StatusCode, decoded)
+	}
+	if len(h.backend.created) != 1 || h.backend.created[0].Status != "review" {
+		t.Fatalf("backend CreateParams = %+v, want status review passed through", h.backend.created)
+	}
+}
+
 func TestDriverAPICreateIssueRejectsNotAcceptedFields(t *testing.T) {
 	h := newTestHarness(t, "")
 	// The strict decode makes the not-accepted list fail loudly: a client
