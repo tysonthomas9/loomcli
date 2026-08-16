@@ -19,6 +19,14 @@ const primaryBackendRetryCooldown = time.Minute
 // than an exponential backoff, and never count these retries toward max_retries.
 const backendUnavailableRecheckInterval = 30 * time.Second
 
+// backendStateReassertInterval bounds how often gateBackendAvailable re-asserts
+// an unchanged backend-availability state to the control plane. The PATCH is
+// edge-triggered (see gateBackendAvailable), so without a level re-assert a
+// control-plane row that is recreated or reset out from under a parked agent
+// would never converge. It lives here beside backendUnavailableRecheckInterval
+// because the two set the cadence of the same recheck loop.
+const backendStateReassertInterval = 5 * time.Minute
+
 // defaultMaxRetriesBlockInterval is the fixed delay between re-attempts after
 // an agent has exhausted its restart budget and blocked (policy OnExhaustion
 // Block). Rather than abandoning the agent (silent loss until a daemon
