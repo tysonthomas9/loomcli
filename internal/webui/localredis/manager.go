@@ -4,7 +4,8 @@
 // is run without an external Redis address.
 //
 // The snapshot file lives under ~/.loom/terminal-state/snapshot.json and
-// is rewritten atomically every 30 seconds and on shutdown. The previous
+// is rewritten atomically every 30 seconds, on a short debounce after any
+// terminal-state mutation (see writethrough.go), and on shutdown. The previous
 // snapshot is retained as snapshot.json.bak so a partial write during a
 // hard kill cannot wipe user state. A sweep that cannot read every
 // persistable key ABORTS without touching the on-disk files, so a partial
@@ -39,6 +40,15 @@ const (
 	// v2: + set, list, zset, stream  (required for embedded fleet-db)
 	currentSchemaVersion = 2
 	defaultInterval      = 30 * time.Second
+
+	// Debounced write-through (see writethrough.go). A terminal-state
+	// mutation arms a timer instead of dumping inline, so a burst of
+	// writes coalesces into one sweep shortly after it ends.
+	// defaultWriteThroughGap floors the sweep rate regardless of write
+	// volume — a dump is a full-keyspace read even when the hash
+	// short-circuit skips the disk write.
+	defaultWriteThroughDelay = 1 * time.Second
+	defaultWriteThroughGap   = 5 * time.Second
 
 	// Sweep budgets. A sweep used to run under one shared 5s deadline;
 	// once a write-heavy burst pushed per-key latency up, the deadline
@@ -111,6 +121,15 @@ type Manager struct {
 	baseCtx    context.Context
 	baseCancel context.CancelFunc
 
+	// Write-through debounce. dirtyCh is the ONLY cross-goroutine path:
+	// the miniredis server goroutine pokes it from preHook, and run()
+	// owns everything else. lastWriteThrough is touched exclusively by
+	// run(), so it needs no lock — the channel is the synchronization.
+	dirtyCh           chan struct{}
+	writeThroughDelay time.Duration
+	writeThroughGap   time.Duration
+	lastWriteThrough  time.Time
+
 	stopCh    chan struct{}
 	stoppedCh chan struct{}
 	started   bool
@@ -135,6 +154,11 @@ func withBatchSize(n int) Option               { return func(m *Manager) { m.bat
 func withBatchTimeout(d time.Duration) Option  { return func(m *Manager) { m.batchTimeout = d } }
 func withSweepCap(d time.Duration) Option      { return func(m *Manager) { m.sweepCap = d } }
 func withCloseSweepCap(d time.Duration) Option { return func(m *Manager) { m.closeSweepCap = d } }
+
+func withWriteThroughDelay(d time.Duration) Option {
+	return func(m *Manager) { m.writeThroughDelay = d }
+}
+func withWriteThroughGap(d time.Duration) Option { return func(m *Manager) { m.writeThroughGap = d } }
 
 // NewManager starts an in-process miniredis and returns a Manager.
 // If snapshotPath is non-empty, the Manager loads an existing snapshot
@@ -163,8 +187,13 @@ func NewManager(snapshotPath string, fleetKeys bool, logger *slog.Logger, opts .
 		closeSweepCap: defaultCloseSweepCap,
 		baseCtx:       baseCtx,
 		baseCancel:    baseCancel,
-		stopCh:        make(chan struct{}),
-		stoppedCh:     make(chan struct{}),
+
+		writeThroughDelay: defaultWriteThroughDelay,
+		writeThroughGap:   defaultWriteThroughGap,
+		dirtyCh:           make(chan struct{}, 1),
+
+		stopCh:    make(chan struct{}),
+		stoppedCh: make(chan struct{}),
 	}
 	for _, opt := range opts {
 		opt(m)
@@ -177,6 +206,12 @@ func NewManager(snapshotPath string, fleetKeys bool, logger *slog.Logger, opts .
 			// Corrupt or missing snapshots are non-fatal — start empty.
 			logger.Warn("failed to load redis snapshot, starting empty", "path", snapshotPath, "err", err)
 		}
+		// Install AFTER load: replay uses direct-access calls that never
+		// traverse the server command path, so it would not trip the hook
+		// today, but ordering it this way keeps that intent explicit if
+		// replay is ever refactored onto the client. No hook without
+		// persistence — there would be nothing to flush.
+		m.mr.Server().SetPreHook(m.preHook)
 	}
 	return m, nil
 }
@@ -201,30 +236,70 @@ func (m *Manager) Start(ctx context.Context) {
 	go m.run(ctx)
 }
 
-// run is the periodic-dump loop. Dump derives its own context from the
-// Manager's lifetime (baseCtx), so it is independent of the Start ctx
-// and is interrupted promptly when Close begins shutdown.
+// run is the dump loop. Dump derives its own context from the Manager's
+// lifetime (baseCtx), so it is independent of the Start ctx and is
+// interrupted promptly when Close begins shutdown.
+//
+// It serves two triggers: the 30s tick (the durability floor, and the
+// only thing covering fleetPrefixes keys) and the write-through debounce
+// armed by preHook. Both dump from THIS goroutine, which is what keeps
+// sweeps single-flight — nothing else prevents two 120s-capped sweeps
+// from piling up on each other.
 func (m *Manager) run(ctx context.Context) {
 	defer close(m.stoppedCh)
 	ticker := time.NewTicker(defaultInterval)
 	defer ticker.Stop()
+	// Start disarmed; a mutation arms it.
+	debounce := time.NewTimer(m.writeThroughDelay)
+	if !debounce.Stop() {
+		<-debounce.C
+	}
+	defer debounce.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-m.stopCh:
 			return
-		case <-ticker.C:
-			if err := m.Dump(); err != nil {
-				if m.baseCtx.Err() != nil {
-					// Shutdown interrupted this sweep; the final dump in
-					// Close supersedes it — keep the log quiet.
-					m.logger.Debug("periodic snapshot dump canceled by shutdown", "err", err)
-					continue
+		case <-m.dirtyCh:
+			// Coalesce a burst: each mutation pushes the fire time out by
+			// writeThroughDelay, so a stream of writes yields one sweep
+			// once it settles.
+			if !debounce.Stop() {
+				select {
+				case <-debounce.C:
+				default:
 				}
-				m.logger.Warn("periodic snapshot dump failed", "err", err)
 			}
+			debounce.Reset(m.writeThroughDelay)
+		case <-debounce.C:
+			if since := time.Since(m.lastWriteThrough); since < m.writeThroughGap {
+				// Re-arm rather than drop. Dropping would reintroduce the
+				// bug in miniature: a write landing inside the cooldown
+				// would have to wait for the 30s tick to become durable.
+				debounce.Reset(m.writeThroughGap - since)
+				continue
+			}
+			m.lastWriteThrough = time.Now()
+			writeThroughTotal.Inc()
+			m.dumpAndLog("write-through")
+		case <-ticker.C:
+			m.dumpAndLog("periodic")
 		}
+	}
+}
+
+// dumpAndLog runs one sweep and reports the outcome. Shared by both
+// triggers so the shutdown-quiet behavior is identical for each: a
+// sweep interrupted by Close is superseded by the final dump there and
+// must not log a warning.
+func (m *Manager) dumpAndLog(kind string) {
+	if err := m.Dump(); err != nil {
+		if m.baseCtx.Err() != nil {
+			m.logger.Debug("snapshot dump canceled by shutdown", "kind", kind, "err", err)
+			return
+		}
+		m.logger.Warn("snapshot dump failed", "kind", kind, "err", err)
 	}
 }
 

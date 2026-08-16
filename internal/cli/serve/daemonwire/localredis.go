@@ -14,6 +14,11 @@ import (
 // the loom config dir, spins up the manager, and schedules shutdown via the
 // given context. Returns nil if startup fails — the caller logs a warning and
 // continues without persistence. Callers read the bind address via mgr.Addr().
+//
+// The manager snapshots on a 30s tick, on a ~1s debounce after any
+// terminal-state mutation (write-through, so an unclean kill loses at most
+// about a second of tab changes rather than a full tick), and once more on
+// the graceful shutdown scheduled here.
 func StartLocalRedis(ctx context.Context, fleetMode bool) *localredis.Manager {
 	snapshotPath := ""
 	if dir := config.GetConfigDir(); dir != "" {
