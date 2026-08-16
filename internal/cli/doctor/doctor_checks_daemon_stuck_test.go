@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	cfgpkg "github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/cli/daemon"
 )
 
@@ -307,5 +308,74 @@ func TestEvaluateDaemonStuck_ZeroBackoffFallsBackToDefault(t *testing.T) {
 	if result.Status != StatusFail {
 		t.Fatalf("expected fallback default to flag stuck backoff, got %s",
 			result.Status)
+	}
+}
+
+func TestResolveNoWorkBackoff_UsesEffectiveCeiling(t *testing.T) {
+	tests := []struct {
+		name         string
+		noWorkBackof *int
+		idlePoll     *int
+		want         time.Duration
+	}{
+		{"both unset defaults to 30s", nil, nil, 30 * time.Second},
+		{"idle poll above backoff wins", cfgpkg.IntPtr(30), cfgpkg.IntPtr(300), 300 * time.Second},
+		{"backoff above idle poll wins", cfgpkg.IntPtr(120), cfgpkg.IntPtr(30), 120 * time.Second},
+		{"equal values", cfgpkg.IntPtr(30), cfgpkg.IntPtr(30), 30 * time.Second},
+		{"idle poll only", nil, cfgpkg.IntPtr(300), 300 * time.Second},
+		{"backoff only", cfgpkg.IntPtr(90), nil, 90 * time.Second},
+		{"zero values fall back to defaults", cfgpkg.IntPtr(0), cfgpkg.IntPtr(0), 30 * time.Second},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dcfg := &cfgpkg.DaemonConfig{
+				Daemon: cfgpkg.DaemonSettings{
+					RestartPolicy: cfgpkg.RestartPolicy{
+						NoWorkBackoff:    tt.noWorkBackof,
+						IdlePollInterval: tt.idlePoll,
+					},
+				},
+			}
+			if got := resolveNoWorkBackoff(dcfg); got != tt.want {
+				t.Errorf("resolveNoWorkBackoff() = %s, want %s", got, tt.want)
+			}
+		})
+	}
+
+	t.Run("nil config defaults to 30s", func(t *testing.T) {
+		if got := resolveNoWorkBackoff(nil); got != 30*time.Second {
+			t.Errorf("resolveNoWorkBackoff(nil) = %s, want 30s", got)
+		}
+	})
+}
+
+// A relaxed idle poll makes a backoff_until that trails by a couple of minutes
+// entirely normal. It must only be flagged against the ceiling the supervisor
+// actually polls at, not against no_work_backoff alone.
+func TestEvaluateDaemonStuck_RelaxedPollCeilingSuppressesStaleBackoff(t *testing.T) {
+	now := time.Now()
+	state := daemon.DaemonState{
+		PID: 12345,
+		Agents: []daemon.DaemonAgentStatus{{
+			Worktree:     "idle-agent",
+			Status:       "running",
+			BackoffUntil: now.Add(-90 * time.Second),
+		}},
+	}
+
+	relaxed := evaluateDaemonStuck(state, now.Add(-5*time.Second), now, 300*time.Second)
+	if relaxed.Status != StatusPass {
+		t.Fatalf("a 90s-stale backoff_until must not be flagged at a 300s ceiling, got %s (%s)",
+			relaxed.Status, relaxed.Detail)
+	}
+
+	strict := evaluateDaemonStuck(state, now.Add(-5*time.Second), now, 30*time.Second)
+	if strict.Status != StatusFail {
+		t.Fatalf("the same 90s-stale backoff_until must still fail at the 30s default, got %s (%s)",
+			strict.Status, strict.Detail)
+	}
+	if !strings.Contains(strict.Detail, "idle poll ceiling") {
+		t.Errorf("detail should name what it compared against, got: %s", strict.Detail)
 	}
 }
