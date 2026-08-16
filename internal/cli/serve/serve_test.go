@@ -16,9 +16,9 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/cli/serve/opsimpl"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
-	"github.com/tysonthomas9/loomcli/internal/infra/workspacecatalog"
 	"github.com/tysonthomas9/loomcli/internal/modules/agents"
 	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
+	workspacemodule "github.com/tysonthomas9/loomcli/internal/modules/workspace"
 	"github.com/tysonthomas9/loomcli/internal/testutil"
 	"github.com/tysonthomas9/loomcli/internal/webui"
 	"github.com/tysonthomas9/loomcli/internal/webui/fleet"
@@ -291,11 +291,11 @@ func TestApplyWorkspaceConfig_NilStoreDoesNotWireWorkspaceFns(t *testing.T) {
 func TestApplyWorkspaceConfig_StoreWiresStoreBackedFns(t *testing.T) {
 	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
 	st := memstore.New()
-	workspace, err := workspacecatalog.New(st.Workspaces(), st.Repos())
+	workspace, err := workspacemodule.NewFromRecordStores(st.Workspaces(), st.Repos())
 	if err != nil {
 		t.Fatalf("compose Workspace capability: %v", err)
 	}
-	cfg := webui.ServerConfig{Store: st, WorkspaceCatalog: workspace}
+	cfg := webui.ServerConfig{ProjectionRecords: st, WorkspaceCatalog: workspace}
 
 	opsimpl.ConfigureWorkspaceAdmission(&cfg, nil, nil, workspaceAgentsCommandsStub{})
 
@@ -314,7 +314,7 @@ func TestApplyWorkspaceConfig_StoreWiresStoreBackedFns(t *testing.T) {
 }
 
 func TestApplyWorkspaceConfig_StoreWithoutAgentsCommandsFailsClosed(t *testing.T) {
-	cfg := webui.ServerConfig{Store: memstore.New()}
+	cfg := webui.ServerConfig{ProjectionRecords: memstore.New()}
 
 	opsimpl.ConfigureWorkspaceAdmission(&cfg, nil, nil, nil)
 
@@ -324,7 +324,7 @@ func TestApplyWorkspaceConfig_StoreWithoutAgentsCommandsFailsClosed(t *testing.T
 }
 
 func TestApplyFleetConfig_StoreBackedServeDoesNotExpectDaemon(t *testing.T) {
-	cfg := webui.ServerConfig{Store: memstore.New()}
+	cfg := webui.ServerConfig{ProjectionRecords: memstore.New()}
 
 	applyFleetConfig(&cfg, fleetState{})
 

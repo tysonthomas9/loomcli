@@ -5,17 +5,20 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
+
+	"github.com/tysonthomas9/loomcli/internal/modules/agents"
+
 	"github.com/spf13/cobra"
 
 	appserve "github.com/tysonthomas9/loomcli/internal/app/serve"
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	driverpkg "github.com/tysonthomas9/loomcli/internal/driver"
 	"github.com/tysonthomas9/loomcli/internal/infra/interactionchat"
 	leadcontrol "github.com/tysonthomas9/loomcli/internal/infra/interactionlead"
-	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
-	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 var (
@@ -136,7 +139,7 @@ func runDriverListAgents(cmd *cobra.Command, _ []string) error {
 		if err != nil {
 			return err
 		}
-		agents, err := h.Store.AgentServices().List(ctx, ws, store.AgentServiceFilter{})
+		agents, err := h.Store.AgentServices().List(ctx, ws, agents.AgentServiceFilter{})
 		if err != nil {
 			return fmt.Errorf("list agents: %w", err)
 		}
@@ -161,9 +164,9 @@ func runDriverAgentOrchestrationSession(cmd *cobra.Command, _ []string) error {
 		}
 		agentName := strings.TrimSpace(driverAgentSessionName)
 		if agentName == "" {
-			return fmt.Errorf("agent required: %w", domain.ErrInvalid)
+			return fmt.Errorf("agent required: %w", persistence.ErrInvalid)
 		}
-		sessionID, err := store.OrchestrationSessionIDFor(ctx, h.Store, ws, agentName)
+		sessionID, err := interaction.OrchestrationSessionIDFor(ctx, h.Store, ws, agentName)
 		if err != nil {
 			return fmt.Errorf("resolve orchestration session: %w", err)
 		}
@@ -180,7 +183,7 @@ func runDriverUpdateAgentParent(cmd *cobra.Command, _ []string) error {
 	agentName := strings.TrimSpace(driverUpdateAgentParentName)
 	parentID := strings.TrimSpace(driverUpdateAgentParentParent)
 	if agentName == "" || parentID == "" {
-		return fmt.Errorf("agent and parent required: %w", domain.ErrInvalid)
+		return fmt.Errorf("agent and parent required: %w", persistence.ErrInvalid)
 	}
 	client, err := newDriverRuntimeClient(driverRuntimeClientOptions{
 		WorkspaceKey: driverUpdateAgentParentWorkspaceKey,
@@ -189,7 +192,7 @@ func runDriverUpdateAgentParent(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	var updated domain.WorkerProfile
+	var updated execution.WorkerProfile
 	if err := client.call(cmd.Context(), "update-agent-parent", map[string]string{
 		"agent": agentName, "parent": parentID,
 		"expectParent": strings.TrimSpace(driverUpdateAgentParentExpectParent),
@@ -211,7 +214,7 @@ func runDriverDeliverLeadAssignment(cmd *cobra.Command, _ []string) error {
 		}
 		leadName := strings.TrimSpace(driverDeliverLeadName)
 		if leadName == "" {
-			return fmt.Errorf("agent required: %w", domain.ErrInvalid)
+			return fmt.Errorf("agent required: %w", persistence.ErrInvalid)
 		}
 		chat, err := buildDriverInteractionChat(h, ws)
 		if err != nil {
@@ -247,7 +250,7 @@ func runDriverDeliverAgentMessage(cmd *cobra.Command, _ []string) error {
 		agentName := strings.TrimSpace(driverDeliverAgentMessageName)
 		message := strings.TrimSpace(driverDeliverAgentMessageText)
 		if agentName == "" || message == "" {
-			return fmt.Errorf("agent and message required: %w", domain.ErrInvalid)
+			return fmt.Errorf("agent and message required: %w", persistence.ErrInvalid)
 		}
 		chat, err := buildDriverInteractionChat(h, ws)
 		if err != nil {

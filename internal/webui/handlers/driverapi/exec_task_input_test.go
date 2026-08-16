@@ -7,8 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 )
 
 // TestDriverAPIExecTaskPersistsInputPayload is the HTTP-level proof of the
@@ -53,7 +52,7 @@ func TestDriverAPIExecTaskPersistsInputPayload(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Get stored task run: %v", err)
 	}
-	if stored.Status != domain.TaskRunQueued {
+	if stored.Status != execution.TaskRunRecordQueued {
 		t.Fatalf("stored status = %s, want queued", stored.Status)
 	}
 	if len(stored.Input) == 0 {
@@ -140,7 +139,7 @@ func TestDriverAPIExecTaskPreservesRequestedNodeID(t *testing.T) {
 	if stored.NodeID != "" || stored.TargetNodeID != "task-node-target" {
 		t.Fatalf("queued TaskRun owner=%q target=%q, want empty owner and requested target", stored.NodeID, stored.TargetNodeID)
 	}
-	if _, err := h.store.TaskRuns().ClaimQueued(context.Background(), "WS", store.TaskRunClaim{
+	if _, err := h.store.TaskRuns().ClaimQueued(context.Background(), "WS", execution.TaskRunClaim{
 		TaskRunID:          "task-run-target-node",
 		NodeID:             "task-node-other",
 		LeaseID:            "lease-other",
@@ -148,7 +147,7 @@ func TestDriverAPIExecTaskPreservesRequestedNodeID(t *testing.T) {
 	}); err == nil {
 		t.Fatal("wrong node claimed node-pinned queued task run")
 	}
-	claimed, err := h.store.TaskRuns().ClaimQueued(context.Background(), "WS", store.TaskRunClaim{
+	claimed, err := h.store.TaskRuns().ClaimQueued(context.Background(), "WS", execution.TaskRunClaim{
 		TaskRunID:          "task-run-target-node",
 		NodeID:             "task-node-target",
 		LeaseID:            "lease-target",
@@ -157,7 +156,7 @@ func TestDriverAPIExecTaskPreservesRequestedNodeID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("target node ClaimQueued: %v", err)
 	}
-	if claimed.NodeID != "task-node-target" || claimed.TargetNodeID != "task-node-target" || claimed.Status != domain.TaskRunRunning {
+	if claimed.NodeID != "task-node-target" || claimed.TargetNodeID != "task-node-target" || claimed.Status != execution.TaskRunRecordRunning {
 		t.Fatalf("claimed = %+v, want target node running", claimed)
 	}
 }
@@ -193,12 +192,12 @@ func TestDriverAPIExecTaskPinnedUnschedulableNode(t *testing.T) {
 // exec-task is schedulable for the given provider.
 func registerExecTaskWorkerNode(t *testing.T, h *testHarness, nodeID, provider string) {
 	t.Helper()
-	if _, err := h.store.Nodes().Create(context.Background(), store.NodeCreate{
+	if _, err := h.store.Nodes().Create(context.Background(), execution.NodeCreate{
 		WorkspaceKey:    "WS",
 		NodeID:          nodeID,
-		RuntimeProvider: domain.RuntimeProviderLocal,
+		RuntimeProvider: execution.RuntimeProviderLocal,
 		Capabilities:    []string{"task-runner", provider},
-		DrainState:      domain.NodeDrainActive,
+		DrainState:      execution.WorkerNodeActive,
 		TTL:             time.Minute,
 	}); err != nil {
 		t.Fatalf("Create task worker node %s: %v", nodeID, err)

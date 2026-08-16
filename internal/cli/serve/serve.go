@@ -24,7 +24,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/serve/opsimpl"
 	"github.com/tysonthomas9/loomcli/internal/cli/serve/serveadapter"
 	driverexecutor "github.com/tysonthomas9/loomcli/internal/driver"
-	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 	"github.com/tysonthomas9/loomcli/internal/webui"
 	webuiapp "github.com/tysonthomas9/loomcli/internal/webui/app"
 	"github.com/tysonthomas9/loomcli/internal/webui/storeadapter"
@@ -235,6 +235,7 @@ func runServe(cmd *cobra.Command, args []string) {
 		collectDataFn,
 		staleDetectorHandler,
 		storeHandle.Store,
+		storeHandle.Store.DriverRuns(),
 		workItemsFn,
 		monitorDefaultWorkspace,
 		monitorStoreDataSource,
@@ -336,7 +337,7 @@ func buildMonitorCollectDataFn(workspaceHint string, workItemsFn metricscmd.Work
 	return buildCollectDataFn(workspaceHint, workItemsFn, monitorCollectionCacheTTL)
 }
 
-func resolveMonitorCollectorWorkspace(st store.Store, fallbackWorkspace string) string {
+func resolveMonitorCollectorWorkspace(st workspaceRecordSource, fallbackWorkspace string) string {
 	if workspace := os.Getenv(bootstrap.EnvWorkspace); workspace != "" {
 		return workspace
 	}
@@ -366,7 +367,7 @@ func openServeStore(ctx context.Context, fs fleetState) (*bootstrap.StoreHandle,
 // node-process launcher. An invalid sandbox configuration disables the
 // executor (fail closed) rather than silently degrading isolation.
 func buildDriverExecutor(
-	st store.Store,
+	st executionRuntimeRecords,
 	workDir string,
 	runOutcomes driverexecutor.RunOutcomePublisher,
 	executionCapability webui.ExecutionCapability,
@@ -604,14 +605,15 @@ func initUsageStore() {
 func buildMonitorHandlers(
 	collectDataFn metricscmd.CollectDataFn,
 	staleDetectorHandler http.HandlerFunc,
-	st store.Store,
+	st metricscmd.MonitorProjectionSources,
+	driverRuns execution.DriverRunStore,
 	workItemsFn metricscmd.WorkItemsFn,
 	defaultWorkspace string,
 	monitorStoreDataSource *metricscmd.MonitorStoreDataSource,
 ) webui.MonitorHandlers {
 	return composeMonitorHandlers(
 		collectDataFn, staleDetectorHandler, workItemsFn, defaultWorkspace, usageHandler,
-		monitorStoreDataSource, metricscmd.HandleWorkspaces(st), st.DriverRuns(),
+		monitorStoreDataSource, metricscmd.HandleWorkspaces(st), driverRuns,
 	)
 }
 
@@ -627,7 +629,7 @@ func applyStoreHandleServerConfig(
 	storeHandle *bootstrap.StoreHandle,
 	sourceControlRuntime *opsimpl.SourceControlRuntime,
 ) (fleetState, error) {
-	cfg.Store = storeHandle.Store
+	cfg.ProjectionRecords = storeHandle.Store
 	sourceControlRuntime.WithWorkspaceProjection(
 		storeadapter.NewSourceControlWorkspaceProjection(storeHandle.Store),
 	)
@@ -685,8 +687,8 @@ func buildServerConfig(
 			return webui.ServerConfig{}, serveCapabilitySet{}, err
 		}
 	}
-	if cfg.Store != nil {
-		workspaceCapability, workspaceErr := webuiapp.NewWorkspaceCapability(cfg.Store.Workspaces(), cfg.Store.Repos())
+	if cfg.ProjectionRecords != nil {
+		workspaceCapability, workspaceErr := webuiapp.NewWorkspaceCapability(cfg.ProjectionRecords.Workspaces(), cfg.ProjectionRecords.Repos())
 		if workspaceErr != nil {
 			return webui.ServerConfig{}, serveCapabilitySet{}, fmt.Errorf("compose Workspace capability: %w", workspaceErr)
 		}
@@ -874,7 +876,7 @@ func applyFleetConfig(cfg *webui.ServerConfig, fs fleetState) {
 	// Store-backed serve uses FleetDB directly, either embedded local or
 	// external cloud. In both shapes there is no local issue daemon for the
 	// web UI to probe.
-	cfg.FleetClient = fs.modeDetected || cfg.Store != nil
+	cfg.FleetClient = fs.modeDetected || cfg.ProjectionRecords != nil
 }
 
 func applyCORSConfig(cfg *webui.ServerConfig) {

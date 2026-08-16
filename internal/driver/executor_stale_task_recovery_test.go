@@ -7,11 +7,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
+	workspaceowner "github.com/tysonthomas9/loomcli/internal/modules/workspace"
+
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
-	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
 type periodicRecoveryAPIStub struct {
@@ -128,7 +128,7 @@ func TestExecutorPeriodicallyRecoversStaleChildrenOnlyDuringOwnedRun(t *testing.
 	ctx := context.Background()
 	root := t.TempDir()
 	state := memstore.New()
-	if _, err := state.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "TEST", Name: "test"}); err != nil {
+	if _, err := state.Workspaces().Create(ctx, workspaceowner.WorkspaceCreate{Key: "TEST", Name: "test"}); err != nil {
 		t.Fatalf("Create workspace: %v", err)
 	}
 	writeFlueDist(t, root, "epic-runner", "done")
@@ -216,7 +216,7 @@ func TestExecutorCancelsRunnerWhenStaleChildRecoveryLosesParentFence(t *testing.
 	ctx := context.Background()
 	root := t.TempDir()
 	state := memstore.New()
-	if _, err := state.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "TEST", Name: "test"}); err != nil {
+	if _, err := state.Workspaces().Create(ctx, workspaceowner.WorkspaceCreate{Key: "TEST", Name: "test"}); err != nil {
 		t.Fatalf("Create workspace: %v", err)
 	}
 	writeFlueDist(t, root, "epic-runner", "done")
@@ -275,7 +275,7 @@ func TestExecutorCancelsRunnerWhenStaleChildRecoveryLosesParentFence(t *testing.
 
 	select {
 	case command := <-staleOwnerAPI.finalized:
-		if command.Status != execution.DriverRunStatus(domain.DriverRunCancelled) || command.ErrorClass != "driver_cancelled" {
+		if command.Status != execution.DriverRunCancelled || command.ErrorClass != "driver_cancelled" {
 			t.Fatalf("stale-owner finalization attempt = %+v, want cancelled/driver_cancelled", command)
 		}
 	default:
@@ -285,7 +285,7 @@ func TestExecutorCancelsRunnerWhenStaleChildRecoveryLosesParentFence(t *testing.
 	if err != nil {
 		t.Fatalf("Get driver run: %v", err)
 	}
-	if stored.Status != domain.DriverRunRunning || stored.FinishedAt != nil {
+	if stored.Status != execution.DriverRunRunning || stored.FinishedAt != nil {
 		t.Fatalf("stale-owner run = %+v, must not be successfully finalized", stored)
 	}
 }
@@ -294,7 +294,7 @@ func TestExecutorCancelsRunnerWhenParentHeartbeatLosesFence(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
 	state := memstore.New()
-	if _, err := state.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "TEST", Name: "test"}); err != nil {
+	if _, err := state.Workspaces().Create(ctx, workspaceowner.WorkspaceCreate{Key: "TEST", Name: "test"}); err != nil {
 		t.Fatalf("Create workspace: %v", err)
 	}
 	writeFlueDist(t, root, "epic-runner", "done")
@@ -349,7 +349,7 @@ func TestExecutorCancelsRunnerWhenParentHeartbeatLosesFence(t *testing.T) {
 	}
 	select {
 	case command := <-staleOwnerAPI.finalized:
-		if command.Status != execution.DriverRunStatus(domain.DriverRunCancelled) || command.ErrorClass != "driver_cancelled" {
+		if command.Status != execution.DriverRunCancelled || command.ErrorClass != "driver_cancelled" {
 			t.Fatalf("stale-owner finalization attempt = %+v, want cancelled/driver_cancelled", command)
 		}
 	default:

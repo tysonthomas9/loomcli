@@ -3,7 +3,7 @@ package workspacecoord
 import (
 	"context"
 
-	"github.com/tysonthomas9/loomcli/internal/ops"
+	"github.com/tysonthomas9/loomcli/internal/app/query/operationalview"
 )
 
 // WorkspaceAdmissionCoordinator is the durable repository-admission seam used
@@ -21,19 +21,19 @@ type WorkspaceAdmissionCoordinator interface {
 // Durable catalog lifecycle is owned by modules/workspace.
 type WorkspaceService interface {
 	// GetActiveWorkspace returns the active workspace topology.
-	// Returns empty ops.WorkspaceData (non-nil, empty slices) if config unavailable.
-	GetActiveWorkspace(ctx context.Context) (*ops.WorkspaceData, error)
+	// Returns empty operationalview.Workspace (non-nil, empty slices) if config unavailable.
+	GetActiveWorkspace(ctx context.Context) (*operationalview.Workspace, error)
 
 	// GetWorkspace returns full workspace data for a specific workspace ID.
 	// Returns ServiceError{Kind: NotFound} if workspace does not exist.
-	GetWorkspace(ctx context.Context, wsID string) (*ops.WorkspaceData, error)
+	GetWorkspace(ctx context.Context, wsID string) (*operationalview.Workspace, error)
 
 	// CreateWorkspace creates a new workspace synchronously.
 	// Returns refreshed workspace data and any non-fatal warnings.
-	CreateWorkspace(ctx context.Context, req WorkspaceCreateRequest) (*ops.WorkspaceData, []string, error)
+	CreateWorkspace(ctx context.Context, req WorkspaceCreateRequest) (*operationalview.Workspace, []string, error)
 
 	// AddWorkspaceRepos attaches one or more local git repos to an existing workspace.
-	AddWorkspaceRepos(ctx context.Context, req WorkspaceAddReposRequest) (*ops.WorkspaceData, error)
+	AddWorkspaceRepos(ctx context.Context, req WorkspaceAddReposRequest) (*operationalview.Workspace, error)
 
 	// StartAsyncAddRepos starts an async repo-attachment job when cloning a
 	// remote repository. Returns the job ID after validating the request.
@@ -51,7 +51,7 @@ type WorkspaceService interface {
 
 	// DeleteWorkspace deletes a workspace by UUID.
 	// Returns refreshed workspace data.
-	DeleteWorkspace(ctx context.Context, wsID string) (*ops.WorkspaceData, error)
+	DeleteWorkspace(ctx context.Context, wsID string) (*operationalview.Workspace, error)
 
 	// GetWorkspaceBackend returns a workspace's AI backend config setting.
 	GetWorkspaceBackend(ctx context.Context, wsID string) (*BackendConfigData, error)
@@ -59,5 +59,5 @@ type WorkspaceService interface {
 	// PatchWorkspaceBackend updates a workspace's AI backend config setting.
 	// Caller must pre-validate the backend name (isValidBackend).
 	// Returns refreshed workspace data.
-	PatchWorkspaceBackend(ctx context.Context, wsID string, backend string) (*ops.WorkspaceData, error)
+	PatchWorkspaceBackend(ctx context.Context, wsID string, backend string) (*operationalview.Workspace, error)
 }

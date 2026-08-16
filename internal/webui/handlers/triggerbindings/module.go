@@ -17,12 +17,13 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/app/workflowbinding"
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/modules/agents"
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
 	"github.com/tysonthomas9/loomcli/internal/modules/connectors"
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 	workflowcataloghttp "github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog/httpapi"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 )
 
@@ -36,7 +37,7 @@ const (
 // runs in deterministic newest-first order. The port deliberately omits storage
 // filters, run creation, and every execution lifecycle mutation.
 type RunQueries interface {
-	ListByBinding(ctx context.Context, workspaceKey, bindingID string, limit int) ([]*domain.DriverRun, error)
+	ListByBinding(ctx context.Context, workspaceKey, bindingID string, limit int) ([]*execution.DriverRunRecord, error)
 }
 
 // Config contains only the owner interfaces and narrow reads needed by this
@@ -210,9 +211,9 @@ func bindingRunHealth(ctx context.Context, runs RunQueries, workspace, bindingID
 	consecutiveFailures := 0
 	for _, run := range items {
 		switch run.Status {
-		case domain.DriverRunFailed:
+		case execution.DriverRunFailed:
 			consecutiveFailures++
-		case domain.DriverRunQueued, domain.DriverRunRunning, domain.DriverRunSuspendedAwaitingEvent:
+		case execution.DriverRunQueued, execution.DriverRunRunning, execution.DriverRunSuspendedAwait:
 			continue
 		default:
 			return lastStatus, consecutiveFailures
@@ -882,14 +883,14 @@ func writeAutomationError(w http.ResponseWriter, err error, fallback string) {
 		return
 	}
 	switch {
-	case errors.Is(err, automation.ErrNotFound), errors.Is(err, domain.ErrNotFound):
+	case errors.Is(err, automation.ErrNotFound), errors.Is(err, persistence.ErrNotFound):
 		handler.RespondError(w, http.StatusNotFound, fallback)
-	case errors.Is(err, automation.ErrInvalid), errors.Is(err, automation.ErrWrongWorkspace), errors.Is(err, domain.ErrInvalid):
+	case errors.Is(err, automation.ErrInvalid), errors.Is(err, automation.ErrWrongWorkspace), errors.Is(err, persistence.ErrInvalid):
 		handler.RespondError(w, http.StatusBadRequest, err.Error())
 	case errors.Is(err, workflowbinding.ErrInvalidRequest):
 		handler.RespondError(w, http.StatusBadRequest, err.Error())
 	case errors.Is(err, automation.ErrConflict), errors.Is(err, automation.ErrManagedBinding),
-		errors.Is(err, automation.ErrBindingEnabled), errors.Is(err, automation.ErrExecutionBusy), errors.Is(err, domain.ErrConflict):
+		errors.Is(err, automation.ErrBindingEnabled), errors.Is(err, automation.ErrExecutionBusy), errors.Is(err, persistence.ErrConflict):
 		handler.RespondError(w, http.StatusConflict, err.Error())
 	case errors.Is(err, automation.ErrUnavailable), errors.Is(err, workflowbinding.ErrUnavailable):
 		handler.RespondError(w, http.StatusServiceUnavailable, fallback)

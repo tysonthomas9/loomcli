@@ -8,26 +8,27 @@ import (
 	"sync"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
+
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 type workerProfileStore struct {
 	mu       sync.RWMutex
-	items    map[string]map[string]*domain.WorkerProfile
+	items    map[string]map[string]*execution.WorkerProfile
 	services *agentServiceStore
 }
 
 func newWorkerProfileStore() *workerProfileStore {
-	return &workerProfileStore{items: make(map[string]map[string]*domain.WorkerProfile)}
+	return &workerProfileStore{items: make(map[string]map[string]*execution.WorkerProfile)}
 }
 
-var _ store.WorkerProfileStore = (*workerProfileStore)(nil)
+var _ execution.WorkerProfileStore = (*workerProfileStore)(nil)
 
-func (s *workerProfileStore) Create(_ context.Context, in store.WorkerProfileCreate) (*domain.WorkerProfile, error) {
+func (s *workerProfileStore) Create(_ context.Context, in execution.WorkerProfileCreate) (*execution.WorkerProfile, error) {
 	profileID := strings.TrimSpace(in.ProfileID)
 	if in.WorkspaceKey == "" || profileID == "" || strings.TrimSpace(in.Role) == "" {
-		return nil, fmt.Errorf("workspace_key + profile_id + role required: %w", domain.ErrInvalid)
+		return nil, fmt.Errorf("workspace_key + profile_id + role required: %w", persistence.ErrInvalid)
 	}
 	name := in.Name
 	if strings.TrimSpace(name) == "" {
@@ -38,7 +39,7 @@ func (s *workerProfileStore) Create(_ context.Context, in store.WorkerProfileCre
 		enabled = *in.Enabled
 	}
 	now := time.Now().UTC()
-	profile := &domain.WorkerProfile{
+	profile := &execution.WorkerProfile{
 		WorkspaceKey:  in.WorkspaceKey,
 		ProfileID:     profileID,
 		Name:          name,
@@ -63,29 +64,29 @@ func (s *workerProfileStore) Create(_ context.Context, in store.WorkerProfileCre
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.items[profile.WorkspaceKey] == nil {
-		s.items[profile.WorkspaceKey] = make(map[string]*domain.WorkerProfile)
+		s.items[profile.WorkspaceKey] = make(map[string]*execution.WorkerProfile)
 	}
 	if _, ok := s.items[profile.WorkspaceKey][profile.ProfileID]; ok {
-		return nil, fmt.Errorf("worker profile %q in workspace %q: %w", profile.ProfileID, profile.WorkspaceKey, domain.ErrAlreadyExists)
+		return nil, fmt.Errorf("worker profile %q in workspace %q: %w", profile.ProfileID, profile.WorkspaceKey, persistence.ErrAlreadyExists)
 	}
 	s.items[profile.WorkspaceKey][profile.ProfileID] = profile
 	return cloneWorkerProfile(profile), nil
 }
 
-func (s *workerProfileStore) Get(_ context.Context, ws, profileID string) (*domain.WorkerProfile, error) {
+func (s *workerProfileStore) Get(_ context.Context, ws, profileID string) (*execution.WorkerProfile, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	profile, ok := s.items[ws][profileID]
 	if !ok {
-		return nil, fmt.Errorf("worker profile %q in workspace %q: %w", profileID, ws, domain.ErrNotFound)
+		return nil, fmt.Errorf("worker profile %q in workspace %q: %w", profileID, ws, persistence.ErrNotFound)
 	}
 	return cloneWorkerProfile(profile), nil
 }
 
-func (s *workerProfileStore) List(_ context.Context, ws string, filter store.WorkerProfileFilter) ([]*domain.WorkerProfile, error) {
+func (s *workerProfileStore) List(_ context.Context, ws string, filter execution.WorkerProfileFilter) ([]*execution.WorkerProfile, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	out := make([]*domain.WorkerProfile, 0, len(s.items[ws]))
+	out := make([]*execution.WorkerProfile, 0, len(s.items[ws]))
 	for _, profile := range s.items[ws] {
 		if workerProfileMatchesMem(profile, filter) {
 			out = append(out, cloneWorkerProfile(profile))
@@ -98,16 +99,16 @@ func (s *workerProfileStore) List(_ context.Context, ws string, filter store.Wor
 	return out, nil
 }
 
-func (s *workerProfileStore) Update(_ context.Context, ws, profileID string, patch store.WorkerProfileUpdate) (*domain.WorkerProfile, error) {
+func (s *workerProfileStore) Update(_ context.Context, ws, profileID string, patch execution.WorkerProfileUpdate) (*execution.WorkerProfile, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	profile, ok := s.items[ws][profileID]
 	if !ok {
-		return nil, fmt.Errorf("worker profile %q in workspace %q: %w", profileID, ws, domain.ErrNotFound)
+		return nil, fmt.Errorf("worker profile %q in workspace %q: %w", profileID, ws, persistence.ErrNotFound)
 	}
 	updated := cloneWorkerProfile(profile)
 	if patch.ExpectedParentEpic != nil && updated.ParentEpic != *patch.ExpectedParentEpic {
-		return nil, domain.ErrConflict
+		return nil, persistence.ErrConflict
 	}
 	applyWorkerProfileUpdateMem(updated, patch)
 	updated.ProfileID = strings.TrimSpace(updated.ProfileID)
@@ -124,12 +125,12 @@ func (s *workerProfileStore) Update(_ context.Context, ws, profileID string, pat
 
 func (s *workerProfileStore) Delete(_ context.Context, ws, profileID string) error {
 	if s.services != nil && s.services.hasProfile(ws, profileID) {
-		return fmt.Errorf("worker profile %q in workspace %q is used by agent service: %w", profileID, ws, domain.ErrInvalidTransition)
+		return fmt.Errorf("worker profile %q in workspace %q is used by agent service: %w", profileID, ws, persistence.ErrInvalidTransition)
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if _, ok := s.items[ws][profileID]; !ok {
-		return fmt.Errorf("worker profile %q in workspace %q: %w", profileID, ws, domain.ErrNotFound)
+		return fmt.Errorf("worker profile %q in workspace %q: %w", profileID, ws, persistence.ErrNotFound)
 	}
 	delete(s.items[ws], profileID)
 	return nil
@@ -142,23 +143,23 @@ func (s *workerProfileStore) exists(ws, profileID string) bool {
 	return ok
 }
 
-func validateWorkerProfileMem(profile *domain.WorkerProfile) error {
+func validateWorkerProfileMem(profile *execution.WorkerProfile) error {
 	if profile.WorkspaceKey == "" || profile.ProfileID == "" || strings.TrimSpace(profile.Role) == "" {
-		return fmt.Errorf("workspace_key + profile_id + role required: %w", domain.ErrInvalid)
+		return fmt.Errorf("workspace_key + profile_id + role required: %w", persistence.ErrInvalid)
 	}
 	if profile.MaxPriority != nil && (*profile.MaxPriority < 0 || *profile.MaxPriority > 4) {
-		return fmt.Errorf("worker profile %q max_priority must be between 0 and 4: %w", profile.ProfileID, domain.ErrInvalid)
+		return fmt.Errorf("worker profile %q max_priority must be between 0 and 4: %w", profile.ProfileID, persistence.ErrInvalid)
 	}
 	if profile.MaxParallel < 0 {
-		return fmt.Errorf("worker profile %q max_parallel must be non-negative: %w", profile.ProfileID, domain.ErrInvalid)
+		return fmt.Errorf("worker profile %q max_parallel must be non-negative: %w", profile.ProfileID, persistence.ErrInvalid)
 	}
 	if profile.CreatedAt.IsZero() || profile.UpdatedAt.IsZero() {
-		return fmt.Errorf("worker profile %q timestamps required: %w", profile.ProfileID, domain.ErrInvalid)
+		return fmt.Errorf("worker profile %q timestamps required: %w", profile.ProfileID, persistence.ErrInvalid)
 	}
 	return nil
 }
 
-func cloneWorkerProfile(profile *domain.WorkerProfile) *domain.WorkerProfile {
+func cloneWorkerProfile(profile *execution.WorkerProfile) *execution.WorkerProfile {
 	if profile == nil {
 		return nil
 	}
@@ -179,13 +180,13 @@ func cloneStringSlice(in []string) []string {
 	return append([]string(nil), in...)
 }
 
-func workerProfileMatchesMem(profile *domain.WorkerProfile, filter store.WorkerProfileFilter) bool {
+func workerProfileMatchesMem(profile *execution.WorkerProfile, filter execution.WorkerProfileFilter) bool {
 	return (filter.Role == "" || profile.Role == filter.Role) &&
 		(filter.Backend == "" || profile.Backend == filter.Backend) &&
 		(filter.Enabled == nil || profile.Enabled == *filter.Enabled)
 }
 
-func applyWorkerProfileUpdateMem(profile *domain.WorkerProfile, patch store.WorkerProfileUpdate) {
+func applyWorkerProfileUpdateMem(profile *execution.WorkerProfile, patch execution.WorkerProfileUpdate) {
 	if patch.Name != nil {
 		profile.Name = *patch.Name
 	}

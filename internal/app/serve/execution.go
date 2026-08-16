@@ -7,13 +7,17 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/modules/automation"
+
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
+
+	workspaceowner "github.com/tysonthomas9/loomcli/internal/modules/workspace"
+
 	"github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
 	"github.com/tysonthomas9/loomcli/internal/modules/agents"
-	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 	workflowcataloghttp "github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog/httpapi"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
-	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 // ExecutionCapability is the composition-owned handle exposed to inbound
@@ -185,18 +189,18 @@ func (capability *ExecutionCapability) OperatorAuthorityResolver() workflowcatal
 }
 
 type ExecutionDependencies struct {
-	TaskRuns                     store.TaskRunStore
-	DriverRuns                   store.DriverRunStore
-	DriverSteps                  store.DriverStepStore
-	TerminalStepRepairs          store.TerminalDriverStepRepairStore
-	TaskRunEvents                store.TaskRunEventStore
-	Nodes                        store.NodeStore
-	WorkerProfiles               store.WorkerProfileStore
+	TaskRuns                     execution.TaskRunStore
+	DriverRuns                   execution.DriverRunStore
+	DriverSteps                  execution.DriverStepStore
+	TerminalStepRepairs          execution.TerminalDriverStepRepairStore
+	TaskRunEvents                execution.TaskRunEventStore
+	Nodes                        execution.NodeStore
+	WorkerProfiles               execution.WorkerProfileStore
 	AgentQueries                 agents.IdentityQueries
-	Outbox                       store.OutboxStore
-	Awaits                       store.AwaitStore
-	TriggerEvents                store.TriggerEventStore
-	Workspaces                   store.WorkspaceStore
+	Outbox                       execution.OutboxStore
+	Awaits                       execution.AwaitStore
+	TriggerEvents                automation.TriggerEventStore
+	Workspaces                   workspaceowner.WorkspaceStore
 	AtomicTaskRunRequests        execution.TaskRunRequestPort
 	AtomicTaskRunClaims          execution.TaskRunClaimPort
 	AtomicTaskRunWorkItemDesign  execution.TaskRunWorkItemDesignPort
@@ -290,12 +294,12 @@ func newExecutionTaskRunDependencies(dependencies ExecutionDependencies) (execut
 }
 
 func newExecutionConvergenceDependencies(dependencies ExecutionDependencies) (execution.TaskRunConvergenceDependencies, error) {
-	var checkpoints store.TaskRunTerminalConvergenceStore
-	if fleetCheckpoints, ok := dependencies.FleetExecution.(store.TaskRunTerminalConvergenceStore); ok {
+	var checkpoints execution.TaskRunTerminalConvergenceStore
+	if fleetCheckpoints, ok := dependencies.FleetExecution.(execution.TaskRunTerminalConvergenceStore); ok {
 		checkpoints = fleetCheckpoints
 	}
 	if checkpoints == nil {
-		checkpoints, _ = dependencies.TaskRuns.(store.TaskRunTerminalConvergenceStore)
+		checkpoints, _ = dependencies.TaskRuns.(execution.TaskRunTerminalConvergenceStore)
 	}
 	return NewExecutionTaskRunConvergenceDependencies(ExecutionTaskRunConvergenceDependencies{
 		TaskRuns: dependencies.TaskRuns, Checkpoints: checkpoints,
@@ -426,7 +430,7 @@ func (adapter *executionTaskRunTransportAdapter) Heartbeat(
 	ctx context.Context,
 	command execution.HeartbeatCommand,
 ) (execution.HeartbeatResult, error) {
-	run, err := adapter.transport.HeartbeatTaskRun(ctx, command.WorkspaceKey, command.Owner.ResourceID, store.TaskRunHeartbeat{
+	run, err := adapter.transport.HeartbeatTaskRun(ctx, command.WorkspaceKey, command.Owner.ResourceID, execution.TaskRunHeartbeat{
 		NodeID: command.Owner.NodeID, LeaseID: command.Owner.LeaseID, LeaseToken: command.Owner.LeaseToken,
 		FencingToken: command.Owner.FencingToken, RuntimeMetadata: cloneExecutionStringMap(command.RuntimeMetadata),
 		LogsRef: command.LogsRef, ArtifactsRef: command.ArtifactsRef, HeartbeatAt: command.At,
@@ -445,7 +449,7 @@ func (adapter *executionTaskRunTransportAdapter) AppendLog(
 	ctx context.Context,
 	command execution.AppendLogCommand,
 ) (execution.LogEntry, error) {
-	entry, err := adapter.transport.AppendTaskRunLog(ctx, command.WorkspaceKey, command.Owner.ResourceID, store.TaskRunLogAppend{
+	entry, err := adapter.transport.AppendTaskRunLog(ctx, command.WorkspaceKey, command.Owner.ResourceID, execution.TaskRunLogAppend{
 		RequestID: command.RequestID, NodeID: command.Owner.NodeID, LeaseID: command.Owner.LeaseID,
 		LeaseToken: command.Owner.LeaseToken, FencingToken: command.Owner.FencingToken,
 		Stream: command.Stream, Text: command.Text, Timestamp: command.Timestamp,
@@ -467,7 +471,7 @@ func (adapter *executionTaskRunTransportAdapter) Finalize(
 	if err != nil {
 		return execution.FinalizeResult{}, err
 	}
-	run, err := adapter.transport.CompleteTaskRun(ctx, command.WorkspaceKey, command.Owner.ResourceID, store.TaskRunComplete{
+	run, err := adapter.transport.CompleteTaskRun(ctx, command.WorkspaceKey, command.Owner.ResourceID, execution.TaskRunComplete{
 		CompletionID: command.RequestID, NodeID: command.Owner.NodeID, LeaseID: command.Owner.LeaseID,
 		LeaseToken: command.Owner.LeaseToken, FencingToken: command.Owner.FencingToken, Status: status,
 		ExitCode: command.ExitCode, LogsRef: command.LogsRef, ArtifactsRef: command.ArtifactsRef,
@@ -492,7 +496,7 @@ func (adapter *executionTaskRunTransportAdapter) Finalize(
 	return execution.FinalizeResult{Owner: owner, Status: command.Classification.Status, FinishedAt: finishedAt}, nil
 }
 
-func executionOwnerFromTaskRun(leaseToken string, run *domain.TaskRun) (execution.Owner, error) {
+func executionOwnerFromTaskRun(leaseToken string, run *execution.TaskRunRecord) (execution.Owner, error) {
 	if run == nil || strings.TrimSpace(run.TaskRunID) == "" || strings.TrimSpace(run.NodeID) == "" || strings.TrimSpace(run.LeaseID) == "" || run.FencingToken <= 0 {
 		return execution.Owner{}, fmt.Errorf("invalid persisted TaskRun owner: %w", execution.ErrConflict)
 	}
@@ -506,14 +510,14 @@ func executionOwnerFromTaskRun(leaseToken string, run *domain.TaskRun) (executio
 	}, nil
 }
 
-func storedTaskRunStatus(status execution.Status) (domain.TaskRunStatus, error) {
+func storedTaskRunStatus(status execution.Status) (execution.TaskRunRecordStatus, error) {
 	switch status {
 	case execution.StatusSucceeded:
-		return domain.TaskRunCompleted, nil
+		return execution.TaskRunRecordCompleted, nil
 	case execution.StatusFailed, execution.StatusBlocked:
-		return domain.TaskRunFailed, nil
+		return execution.TaskRunRecordFailed, nil
 	case execution.StatusCancelled:
-		return domain.TaskRunCancelled, nil
+		return execution.TaskRunRecordCancelled, nil
 	default:
 		return "", fmt.Errorf("unsupported terminal Execution status %q: %w", status, execution.ErrInvalid)
 	}
@@ -531,16 +535,16 @@ func cloneExecutionStringMap(values map[string]string) map[string]string {
 }
 
 type executionDriverRunStoreAdapter struct {
-	driverRuns  store.DriverRunStore
-	driverSteps store.DriverStepStore
-	awaits      store.AwaitStore
+	driverRuns  execution.DriverRunStore
+	driverSteps execution.DriverStepStore
+	awaits      execution.AwaitStore
 }
 
 func (adapter *executionDriverRunStoreAdapter) SubmitDriverRun(
 	ctx context.Context,
 	command execution.SubmitDriverRunCommand,
 ) (*execution.DriverRun, error) {
-	run, err := adapter.driverRuns.Create(ctx, store.DriverRunCreate{
+	run, err := adapter.driverRuns.Create(ctx, execution.DriverRunCreate{
 		WorkspaceKey: command.WorkspaceKey, RunID: command.RunID,
 		DriverID: command.DriverID, DriverVersionID: command.DriverVersionID,
 		Entrypoint: command.Entrypoint, SourceKind: command.SourceKind, SourceRef: command.SourceRef,
@@ -576,7 +580,7 @@ func (adapter *executionDriverRunStoreAdapter) ListDriverRuns(
 	if query.ParentRunID != "" {
 		storeLimit = 0
 	}
-	runs, err := adapter.driverRuns.List(ctx, query.WorkspaceKey, store.DriverRunFilter{
+	runs, err := adapter.driverRuns.List(ctx, query.WorkspaceKey, execution.DriverRunFilter{
 		DriverID: query.DriverID, EpicID: query.EpicID,
 		AgentServiceID: query.AgentServiceID, Status: status, Limit: storeLimit,
 	})
@@ -618,7 +622,7 @@ func (adapter *executionDriverRunStoreAdapter) ListDriverRunAwaits(
 	if err != nil {
 		return nil, translateDriverRunStoreError(err)
 	}
-	pending := make(map[string]*domain.AwaitInstance)
+	pending := make(map[string]*execution.AwaitInstance)
 	for _, instance := range due {
 		if instance != nil && instance.RunID == runID {
 			pending[instance.InstanceKey] = instance
@@ -626,7 +630,7 @@ func (adapter *executionDriverRunStoreAdapter) ListDriverRunAwaits(
 	}
 	out := make([]*execution.DriverAwaitInstance, 0)
 	for index := 1; index <= maxAwaitListProbe; index++ {
-		key := domain.AwaitInstanceKey(runID, index)
+		key := execution.AwaitInstanceKey(runID, index)
 		if instance, ok := pending[key]; ok {
 			snapshot, snapshotErr := executionDriverAwaitSnapshot(instance)
 			if snapshotErr != nil {
@@ -636,7 +640,7 @@ func (adapter *executionDriverRunStoreAdapter) ListDriverRunAwaits(
 			continue
 		}
 		instance, getErr := adapter.awaits.GetSatisfiedAwait(ctx, workspace, key)
-		if errors.Is(getErr, domain.ErrNotFound) {
+		if errors.Is(getErr, persistence.ErrNotFound) {
 			break
 		}
 		if getErr != nil {
@@ -659,7 +663,7 @@ func (adapter *executionDriverRunStoreAdapter) ListDriverRunSteps(
 	if adapter.driverSteps == nil {
 		return nil, execution.ErrUnavailable
 	}
-	values, err := adapter.driverSteps.ListForRun(ctx, workspace, runID, store.DriverStepFilter{})
+	values, err := adapter.driverSteps.ListForRun(ctx, workspace, runID, execution.DriverStepFilter{})
 	if err != nil {
 		return nil, translateDriverRunStoreError(err)
 	}
@@ -680,7 +684,7 @@ func (adapter *executionDriverRunStoreAdapter) ListDriverRunEvents(
 	ctx context.Context,
 	query execution.DriverRunEventQuery,
 ) (*execution.DriverRunEventPage, error) {
-	reader, ok := adapter.driverRuns.(store.DriverRunEventsReader)
+	reader, ok := adapter.driverRuns.(execution.DriverRunEventsReader)
 	if !ok {
 		return nil, execution.ErrUnavailable
 	}
@@ -706,7 +710,7 @@ func (adapter *executionDriverRunStoreAdapter) ResolveAndResumeDriverAwait(
 	ctx context.Context,
 	command execution.ResolveDriverAwaitCommand,
 ) error {
-	resolver, ok := adapter.awaits.(store.AtomicAwaitStore)
+	resolver, ok := adapter.awaits.(execution.AtomicAwaitStore)
 	if !ok {
 		return execution.ErrUnavailable
 	}
@@ -757,7 +761,7 @@ func (adapter *executionDriverRunStoreAdapter) FinalizeDriverRun(
 	if err != nil {
 		return nil, err
 	}
-	run, err := adapter.driverRuns.Finish(ctx, command.WorkspaceKey, command.Owner.ResourceID, store.DriverRunFinish{
+	run, err := adapter.driverRuns.Finish(ctx, command.WorkspaceKey, command.Owner.ResourceID, execution.DriverRunFinish{
 		NodeID: command.Owner.NodeID, LeaseID: command.Owner.LeaseID, FencingToken: command.Owner.FencingToken,
 		Status: status, Summary: command.Summary, ErrorClass: command.ErrorClass,
 		Output: cloneExecutionStringMap(command.Output),
@@ -772,7 +776,7 @@ func (adapter *executionDriverRunStoreAdapter) RecoverDriverRuns(
 	ctx context.Context,
 	command execution.RecoverDriverRunsCommand,
 ) (*execution.DriverRunRecoveryResult, error) {
-	result, err := adapter.driverRuns.RecoverStale(ctx, command.WorkspaceKey, store.StaleDriverRunRecovery{
+	result, err := adapter.driverRuns.RecoverStale(ctx, command.WorkspaceKey, execution.StaleDriverRunRecovery{
 		StaleBefore: command.ObservedAt.Add(-command.MaxAge), MaxAgeSeconds: int64(command.MaxAge / time.Second),
 		ErrorClass: command.ErrorClass, Summary: command.Summary, Limit: command.Limit,
 	})
@@ -795,7 +799,7 @@ func (adapter *executionDriverRunStoreAdapter) RegisterAndCheckDriverAwait(
 	workspace string,
 	registration execution.DriverAwaitRegistration,
 ) (*execution.DriverAwaitRegistrationResult, error) {
-	result, err := adapter.awaits.RegisterAwaitAndCheck(ctx, workspace, store.AwaitRegistration{
+	result, err := adapter.awaits.RegisterAwaitAndCheck(ctx, workspace, execution.AwaitRegistration{
 		InstanceKey: registration.InstanceKey, RunID: registration.RunID, Pattern: registration.Pattern,
 		ActorAllow: append([]string(nil), registration.ActorAllow...), Deadline: registration.Deadline,
 		RegisteredAt: registration.RegisteredAt,
@@ -848,7 +852,7 @@ func (adapter *executionDriverRunStoreAdapter) ResumeAwaitingDriverRun(
 	return executionDriverRunSnapshot(run)
 }
 
-func executionDriverRunSnapshot(run *domain.DriverRun) (*execution.DriverRun, error) {
+func executionDriverRunSnapshot(run *execution.DriverRunRecord) (*execution.DriverRun, error) {
 	if run == nil || strings.TrimSpace(run.WorkspaceKey) == "" || strings.TrimSpace(run.RunID) == "" {
 		return nil, fmt.Errorf("invalid persisted DriverRun: %w", execution.ErrConflict)
 	}
@@ -873,22 +877,22 @@ func executionDriverRunSnapshot(run *domain.DriverRun) (*execution.DriverRun, er
 	}, nil
 }
 
-func storedDriverRunQueryStatus(status execution.DriverRunStatus) (domain.DriverRunStatus, error) {
+func storedDriverRunQueryStatus(status execution.DriverRunStatus) (execution.DriverRunStatus, error) {
 	if status == "" {
 		return "", nil
 	}
-	mapped := domain.DriverRunStatus(status)
+	mapped := status
 	switch mapped {
-	case domain.DriverRunQueued, domain.DriverRunRunning, domain.DriverRunCompleted,
-		domain.DriverRunFailed, domain.DriverRunNeedsReview, domain.DriverRunCancelled,
-		domain.DriverRunSuspendedAwaitingEvent:
+	case execution.DriverRunQueued, execution.DriverRunRunning, execution.DriverRunCompleted,
+		execution.DriverRunFailed, execution.DriverRunNeedsReview, execution.DriverRunCancelled,
+		execution.DriverRunSuspendedAwait:
 		return mapped, nil
 	default:
 		return "", fmt.Errorf("unsupported DriverRun query status %q: %w", status, execution.ErrInvalid)
 	}
 }
 
-func executionDriverAwaitSnapshot(instance *domain.AwaitInstance) (*execution.DriverAwaitInstance, error) {
+func executionDriverAwaitSnapshot(instance *execution.AwaitInstance) (*execution.DriverAwaitInstance, error) {
 	if instance == nil || strings.TrimSpace(instance.InstanceKey) == "" || strings.TrimSpace(instance.RunID) == "" {
 		return nil, fmt.Errorf("invalid persisted DriverRun await: %w", execution.ErrConflict)
 	}
@@ -907,8 +911,8 @@ func executionDriverAwaitSnapshot(instance *domain.AwaitInstance) (*execution.Dr
 	}, nil
 }
 
-func executionDriverRunStatus(status domain.DriverRunStatus) (execution.DriverRunStatus, error) {
-	mapped := execution.DriverRunStatus(status)
+func executionDriverRunStatus(status execution.DriverRunStatus) (execution.DriverRunStatus, error) {
+	mapped := status
 	switch mapped {
 	case execution.DriverRunQueued, execution.DriverRunRunning, execution.DriverRunCompleted,
 		execution.DriverRunFailed, execution.DriverRunNeedsReview, execution.DriverRunCancelled,
@@ -919,8 +923,8 @@ func executionDriverRunStatus(status domain.DriverRunStatus) (execution.DriverRu
 	}
 }
 
-func storedDriverRunStatus(status execution.DriverRunStatus) (domain.DriverRunStatus, error) {
-	mapped := domain.DriverRunStatus(status)
+func storedDriverRunStatus(status execution.DriverRunStatus) (execution.DriverRunStatus, error) {
+	mapped := status
 	if !mapped.IsTerminal() {
 		return "", fmt.Errorf("unsupported terminal DriverRun status %q: %w", status, execution.ErrInvalid)
 	}
@@ -932,9 +936,9 @@ func translateDriverRunStoreError(err error) error {
 		return nil
 	}
 	switch {
-	case errors.Is(err, domain.ErrDriverRunAlreadyResumed):
+	case errors.Is(err, execution.ErrAlreadyResumed):
 		return errors.Join(execution.ErrAlreadyResumed, err)
-	case errors.Is(err, domain.ErrNotFound):
+	case errors.Is(err, persistence.ErrNotFound):
 		return errors.Join(execution.ErrNotFound, err)
 	default:
 		return err

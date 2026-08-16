@@ -8,8 +8,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 type taskReviewCaptureEmitter struct {
@@ -25,8 +24,8 @@ func (e *taskReviewCaptureEmitter) Emit(_ context.Context, _ string, event Inter
 func taskReviewJournalEvent(
 	action, actor, before, after string,
 	metadata map[string]string,
-) store.JournalEvent {
-	return store.JournalEvent{
+) automation.JournalEvent {
+	return automation.JournalEvent{
 		ID: "review-1", Action: action, Actor: actor, EntityID: "TASK-1",
 		Before: json.RawMessage(before), After: json.RawMessage(after), Metadata: metadata,
 	}
@@ -146,7 +145,7 @@ func TestIssueJournalBridgeTaskReviewAuthorizedRestorationAdmitsRepositoryBefore
 	}
 
 	result := &IssueJournalSweepResult{}
-	advanced, err := bridge.emitBatch(t.Context(), "WS", []store.JournalEvent{event}, result)
+	advanced, err := bridge.emitBatch(t.Context(), "WS", []automation.JournalEvent{event}, result)
 	if err != nil {
 		t.Fatalf("emitBatch: %v", err)
 	}
@@ -167,14 +166,14 @@ func TestTaskReviewSuppressedBindingIDRequiresExactServerAuthoredShape(t *testin
 	if got := taskReviewSuppressedBindingID(event); got != "binding-review-origin" {
 		t.Fatalf("suppressed binding = %q, want binding-review-origin", got)
 	}
-	for name, mutate := range map[string]func(*store.JournalEvent){
-		"missing server binding": func(ev *store.JournalEvent) { delete(ev.Metadata, reviewTriggerSuppressBindingKey) },
-		"wrong prior status":     func(ev *store.JournalEvent) { ev.Before = json.RawMessage(`{"status":"open"}`) },
-		"wrong actor":            func(ev *store.JournalEvent) { ev.Actor = "user:alice" },
-		"wrong policy": func(ev *store.JournalEvent) {
+	for name, mutate := range map[string]func(*automation.JournalEvent){
+		"missing server binding": func(ev *automation.JournalEvent) { delete(ev.Metadata, reviewTriggerSuppressBindingKey) },
+		"wrong prior status":     func(ev *automation.JournalEvent) { ev.Before = json.RawMessage(`{"status":"open"}`) },
+		"wrong actor":            func(ev *automation.JournalEvent) { ev.Actor = "user:alice" },
+		"wrong policy": func(ev *automation.JournalEvent) {
 			ev.Metadata[reviewTriggerPolicyMetadataKey] = "all"
 		},
-		"legacy caller policy": func(ev *store.JournalEvent) {
+		"legacy caller policy": func(ev *automation.JournalEvent) {
 			ev.Metadata[reviewTriggerPolicyMetadataKey] = "suppress_self"
 		},
 	} {
@@ -212,7 +211,7 @@ func TestIssueJournalBridgeEmitsEnrichedTaskReview(t *testing.T) {
 		"issue.update", "user:alice", `{"status":"open"}`, `{"status":"review"}`, nil,
 	)
 	result := &IssueJournalSweepResult{}
-	advanced, err := bridge.emitBatch(t.Context(), "WS", []store.JournalEvent{event}, result)
+	advanced, err := bridge.emitBatch(t.Context(), "WS", []automation.JournalEvent{event}, result)
 	if err != nil {
 		t.Fatalf("emitBatch: %v", err)
 	}
@@ -271,7 +270,7 @@ func TestIssueJournalBridgeTaskReviewRepositoryAdmissionClosesBothRaces(t *testi
 			},
 		}
 		result := &IssueJournalSweepResult{}
-		advanced, err := bridge.emitBatch(t.Context(), "WS", []store.JournalEvent{event}, result)
+		advanced, err := bridge.emitBatch(t.Context(), "WS", []automation.JournalEvent{event}, result)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -298,7 +297,7 @@ func TestIssueJournalBridgeTaskReviewRepositoryAdmissionClosesBothRaces(t *testi
 			},
 		}
 		result := &IssueJournalSweepResult{}
-		advanced, err := bridge.emitBatch(t.Context(), "WS", []store.JournalEvent{event}, result)
+		advanced, err := bridge.emitBatch(t.Context(), "WS", []automation.JournalEvent{event}, result)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -321,8 +320,8 @@ func TestIssueJournalBridgeTaskReviewRequiresLiveReviewAndLookup(t *testing.T) {
 		"issue.update", "user:alice", `{"status":"open"}`, `{"status":"review"}`, nil,
 	)
 	if _, err := (&IssueJournalBridge{Source: &taskReviewCaptureEmitter{}, EmitTaskReview: true}).emitBatch(
-		t.Context(), "WS", []store.JournalEvent{event}, &IssueJournalSweepResult{},
-	); !errors.Is(err, domain.ErrInvalid) {
+		t.Context(), "WS", []automation.JournalEvent{event}, &IssueJournalSweepResult{},
+	); !errors.Is(err, persistence.ErrInvalid) {
 		t.Fatalf("missing lookup err = %v, want ErrInvalid", err)
 	}
 	tests := []struct {
@@ -344,7 +343,7 @@ func TestIssueJournalBridgeTaskReviewRequiresLiveReviewAndLookup(t *testing.T) {
 		{
 			name: "deleted task",
 			lookup: func(context.Context, string, string) (TaskReadySnapshot, error) {
-				return TaskReadySnapshot{}, domain.ErrNotFound
+				return TaskReadySnapshot{}, persistence.ErrNotFound
 			},
 		},
 	}
@@ -355,7 +354,7 @@ func TestIssueJournalBridgeTaskReviewRequiresLiveReviewAndLookup(t *testing.T) {
 				Source: emitter, EmitTaskReview: true, IssueLookup: tt.lookup,
 			}
 			result := &IssueJournalSweepResult{}
-			advanced, err := bridge.emitBatch(t.Context(), "WS", []store.JournalEvent{event}, result)
+			advanced, err := bridge.emitBatch(t.Context(), "WS", []automation.JournalEvent{event}, result)
 			if err != nil {
 				t.Fatalf("emitBatch: %v", err)
 			}
@@ -379,7 +378,7 @@ func TestIssueJournalBridgeTaskReviewLookupFailurePinsCursor(t *testing.T) {
 		"issue.update", "user:alice", `{"status":"open"}`, `{"status":"review"}`, nil,
 	)
 	result := &IssueJournalSweepResult{}
-	advanced, err := bridge.emitBatch(t.Context(), "WS", []store.JournalEvent{event}, result)
+	advanced, err := bridge.emitBatch(t.Context(), "WS", []automation.JournalEvent{event}, result)
 	if !errors.Is(err, lookupErr) {
 		t.Fatalf("err = %v, want errors.Is lookupErr", err)
 	}
@@ -389,7 +388,7 @@ func TestIssueJournalBridgeTaskReviewLookupFailurePinsCursor(t *testing.T) {
 }
 
 func TestIssueJournalBridgeTaskReviewNoListenerCountsAndAdvances(t *testing.T) {
-	emitter := &taskReviewCaptureEmitter{err: domain.ErrNotFound}
+	emitter := &taskReviewCaptureEmitter{err: persistence.ErrNotFound}
 	bridge := &IssueJournalBridge{
 		Source: emitter, EmitTaskReview: true,
 		IssueLookup: func(context.Context, string, string) (TaskReadySnapshot, error) {
@@ -400,7 +399,7 @@ func TestIssueJournalBridgeTaskReviewNoListenerCountsAndAdvances(t *testing.T) {
 		"issue.update", "user:alice", `{"status":"open"}`, `{"status":"review"}`, nil,
 	)
 	result := &IssueJournalSweepResult{}
-	advanced, err := bridge.emitBatch(t.Context(), "WS", []store.JournalEvent{event}, result)
+	advanced, err := bridge.emitBatch(t.Context(), "WS", []automation.JournalEvent{event}, result)
 	if err != nil {
 		t.Fatalf("emitBatch: %v", err)
 	}

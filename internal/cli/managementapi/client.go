@@ -13,14 +13,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
-
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/driver"
 	"github.com/tysonthomas9/loomcli/internal/driver/nativearchive"
 	"github.com/tysonthomas9/loomcli/internal/httpclient"
 	"github.com/tysonthomas9/loomcli/internal/modules/agents"
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
+	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 const responseLimit = 8 << 20
@@ -169,8 +168,8 @@ func (client *Client) workspacePath(suffix string) string {
 	return "/api/workspaces/" + url.PathEscape(client.workspace) + suffix
 }
 
-func (client *Client) SubmitDriverRun(ctx context.Context, request SubmitDriverRunRequest) (*domain.DriverRun, error) {
-	var run domain.DriverRun
+func (client *Client) SubmitDriverRun(ctx context.Context, request SubmitDriverRunRequest) (*execution.DriverRunRecord, error) {
+	var run execution.DriverRunRecord
 	if err := client.doJSON(ctx, http.MethodPost, client.workspacePath("/execution/driver-runs"), request, &run); err != nil {
 		return nil, err
 	}
@@ -185,10 +184,10 @@ func (client *Client) RegisterNativeDriver(
 	request RegisterNativeDriverRequest,
 ) (*driver.RegisterFlueResult, error) {
 	if err := nativearchive.ValidateArchiveSize(len(request.Archive)); err != nil {
-		return nil, fmt.Errorf("%v: %w", err, domain.ErrInvalid)
+		return nil, fmt.Errorf("%v: %w", err, persistence.ErrInvalid)
 	}
 	if err := nativearchive.ValidateManifestSize(len(request.Manifest)); err != nil {
-		return nil, fmt.Errorf("%v: %w", err, domain.ErrInvalid)
+		return nil, fmt.Errorf("%v: %w", err, persistence.ErrInvalid)
 	}
 	var result driver.RegisterFlueResult
 	if err := client.doJSON(
@@ -211,8 +210,8 @@ func (client *Client) RegisterNativeDriver(
 	return &result, nil
 }
 
-func (client *Client) GetDriverRun(ctx context.Context, runID string) (*domain.DriverRun, error) {
-	var run domain.DriverRun
+func (client *Client) GetDriverRun(ctx context.Context, runID string) (*execution.DriverRunRecord, error) {
+	var run execution.DriverRunRecord
 	if err := client.doJSON(ctx, http.MethodGet, client.workspacePath("/runs/"+url.PathEscape(strings.TrimSpace(runID))), nil, &run); err != nil {
 		return nil, err
 	}
@@ -222,7 +221,7 @@ func (client *Client) GetDriverRun(ctx context.Context, runID string) (*domain.D
 func (client *Client) CreateWorkerProfile(ctx context.Context, command execution.CreateWorkerProfileCommand) (*execution.WorkerProfile, error) {
 	profileID := strings.TrimSpace(command.ProfileID)
 	if profileID == "" {
-		return nil, fmt.Errorf("worker profile id is required: %w", domain.ErrInvalid)
+		return nil, fmt.Errorf("worker profile id is required: %w", persistence.ErrInvalid)
 	}
 	command.ProfileID = profileID
 	var profile execution.WorkerProfile
@@ -238,7 +237,7 @@ func (client *Client) CreateWorkerProfile(ctx context.Context, command execution
 func (client *Client) UpdateWorkerProfile(ctx context.Context, profileID string, patch execution.WorkerProfilePatch) (*execution.WorkerProfile, error) {
 	profileID = strings.TrimSpace(profileID)
 	if profileID == "" {
-		return nil, fmt.Errorf("worker profile id is required: %w", domain.ErrInvalid)
+		return nil, fmt.Errorf("worker profile id is required: %w", persistence.ErrInvalid)
 	}
 	var profile execution.WorkerProfile
 	if err := client.doJSON(ctx, http.MethodPatch, client.workspacePath("/execution/worker-profiles/"+url.PathEscape(profileID)), patch, &profile); err != nil {
@@ -253,14 +252,14 @@ func (client *Client) UpdateWorkerProfile(ctx context.Context, profileID string,
 func (client *Client) DeleteWorkerProfile(ctx context.Context, profileID string) error {
 	profileID = strings.TrimSpace(profileID)
 	if profileID == "" {
-		return fmt.Errorf("worker profile id is required: %w", domain.ErrInvalid)
+		return fmt.Errorf("worker profile id is required: %w", persistence.ErrInvalid)
 	}
 	return client.doJSON(ctx, http.MethodDelete, client.workspacePath("/execution/worker-profiles/"+url.PathEscape(profileID)), nil, nil)
 }
 
 func (client *Client) CreateAgent(ctx context.Context, command agents.CreateAgentCommand) (*agents.Agent, error) {
 	if client == nil || command.WorkspaceKey != client.workspace {
-		return nil, fmt.Errorf("agent workspace does not match configured management workspace: %w", domain.ErrInvalid)
+		return nil, fmt.Errorf("agent workspace does not match configured management workspace: %w", persistence.ErrInvalid)
 	}
 	request := CreateAgentRequest{
 		AgentID: command.AgentID, Name: command.Name, Kind: command.Kind,
@@ -292,7 +291,7 @@ func (client *Client) UpdateAgent(
 ) (*agents.Agent, error) {
 	agentID = strings.TrimSpace(agentID)
 	if agentID == "" || expectedUpdatedAt.IsZero() {
-		return nil, fmt.Errorf("agent id and expected revision are required: %w", domain.ErrInvalid)
+		return nil, fmt.Errorf("agent id and expected revision are required: %w", persistence.ErrInvalid)
 	}
 	var record agents.Agent
 	if err := client.doJSON(
@@ -316,7 +315,7 @@ func (client *Client) UpdateAgent(
 func (client *Client) GetAgent(ctx context.Context, agentID string) (*agents.Agent, error) {
 	agentID = strings.TrimSpace(agentID)
 	if agentID == "" {
-		return nil, fmt.Errorf("agent id is required: %w", domain.ErrInvalid)
+		return nil, fmt.Errorf("agent id is required: %w", persistence.ErrInvalid)
 	}
 	var record agents.Agent
 	if err := client.doJSON(
@@ -359,7 +358,7 @@ func (client *Client) ArchiveAgent(
 ) (*agents.Agent, error) {
 	agentID = strings.TrimSpace(agentID)
 	if agentID == "" || expectedUpdatedAt.IsZero() {
-		return nil, fmt.Errorf("agent id and expected revision are required: %w", domain.ErrInvalid)
+		return nil, fmt.Errorf("agent id and expected revision are required: %w", persistence.ErrInvalid)
 	}
 	var record agents.Agent
 	if err := client.doJSON(
@@ -387,7 +386,7 @@ func (client *Client) SetAgentDesiredState(
 ) (*agents.Agent, error) {
 	agentID = strings.TrimSpace(agentID)
 	if agentID == "" || request.ExpectedUpdatedAt.IsZero() {
-		return nil, fmt.Errorf("agent id and expected revision are required: %w", domain.ErrInvalid)
+		return nil, fmt.Errorf("agent id and expected revision are required: %w", persistence.ErrInvalid)
 	}
 	var record agents.Agent
 	if err := client.doJSON(
@@ -418,20 +417,20 @@ func (client *Client) ApplyAgentLifecycle(
 	if agentID == "" || request.ExpectedUpdatedAt.IsZero() || request.IdempotencyKey == "" {
 		return nil, fmt.Errorf(
 			"agent id, expected revision, and idempotency key are required: %w",
-			domain.ErrInvalid,
+			persistence.ErrInvalid,
 		)
 	}
 	switch request.Action {
 	case agents.LifecycleEnable, agents.LifecycleDisable, agents.LifecycleDelete:
 	default:
-		return nil, fmt.Errorf("invalid agent lifecycle action %q: %w", request.Action, domain.ErrInvalid)
+		return nil, fmt.Errorf("invalid agent lifecycle action %q: %w", request.Action, persistence.ErrInvalid)
 	}
 	if request.ExpectedGenerationID == "" && request.Action != agents.LifecycleDelete {
-		return nil, fmt.Errorf("agent expected generation is required: %w", domain.ErrInvalid)
+		return nil, fmt.Errorf("agent expected generation is required: %w", persistence.ErrInvalid)
 	}
 	if request.ExpectedGenerationID != "" &&
 		!agents.ValidGenerationID(request.ExpectedGenerationID) {
-		return nil, fmt.Errorf("agent expected generation is invalid: %w", domain.ErrInvalid)
+		return nil, fmt.Errorf("agent expected generation is invalid: %w", persistence.ErrInvalid)
 	}
 	var result agents.LifecycleResult
 	if err := client.doJSON(
@@ -465,7 +464,7 @@ func (client *Client) CreateRole(
 	definition agents.RoleDefinition,
 ) (*agents.Role, error) {
 	if strings.TrimSpace(definition.Name) == "" {
-		return nil, fmt.Errorf("role name is required: %w", domain.ErrInvalid)
+		return nil, fmt.Errorf("role name is required: %w", persistence.ErrInvalid)
 	}
 	var role agents.Role
 	request := struct {
@@ -489,7 +488,7 @@ func (client *Client) UpdateRole(
 ) (*agents.Role, error) {
 	roleName = strings.TrimSpace(roleName)
 	if roleName == "" {
-		return nil, fmt.Errorf("role name is required: %w", domain.ErrInvalid)
+		return nil, fmt.Errorf("role name is required: %w", persistence.ErrInvalid)
 	}
 	request := UpdateRoleRequest{
 		Kind: patch.Kind, Description: patch.Description, Prompt: patch.Prompt,
@@ -541,7 +540,7 @@ func (client *Client) UpdateRole(
 func (client *Client) DeleteRole(ctx context.Context, roleName string) error {
 	roleName = strings.TrimSpace(roleName)
 	if roleName == "" {
-		return fmt.Errorf("role name is required: %w", domain.ErrInvalid)
+		return fmt.Errorf("role name is required: %w", persistence.ErrInvalid)
 	}
 	return client.doJSON(
 		ctx,
@@ -646,11 +645,11 @@ func statusError(status int, data []byte) error {
 	detail := fmt.Sprintf("Loom management API HTTP %d: %s", status, message)
 	switch status {
 	case http.StatusBadRequest, http.StatusPreconditionRequired, http.StatusPreconditionFailed:
-		return fmt.Errorf("%s: %w", detail, domain.ErrInvalid)
+		return fmt.Errorf("%s: %w", detail, persistence.ErrInvalid)
 	case http.StatusNotFound:
-		return fmt.Errorf("%s: %w", detail, domain.ErrNotFound)
+		return fmt.Errorf("%s: %w", detail, persistence.ErrNotFound)
 	case http.StatusConflict:
-		return fmt.Errorf("%s: %w", detail, domain.ErrConflict)
+		return fmt.Errorf("%s: %w", detail, persistence.ErrConflict)
 	case http.StatusUnauthorized:
 		return errors.New("Loom management API unauthorized: " + detail)
 	case http.StatusForbidden:

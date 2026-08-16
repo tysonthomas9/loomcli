@@ -7,18 +7,19 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/modules/automation"
+
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
-	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 // issueJournalReader narrows the fleet-db client to the optional capability
 // under test, failing the test when the type assertion does not hold.
-func issueJournalReader(t *testing.T, c *Client) store.IssueJournalReader {
+func issueJournalReader(t *testing.T, c *Client) automation.IssueJournalReader {
 	t.Helper()
-	r, ok := c.TriggerEvents().(store.IssueJournalReader)
+	r, ok := c.TriggerEvents().(automation.IssueJournalReader)
 	if !ok {
-		t.Fatalf("fleetdb TriggerEvents %T does not implement store.IssueJournalReader", c.TriggerEvents())
+		t.Fatalf("fleetdb TriggerEvents %T does not implement automation.IssueJournalReader", c.TriggerEvents())
 	}
 	return r
 }
@@ -39,7 +40,7 @@ func TestListIssueEvents(t *testing.T) {
 		wantCursor  string
 		wantHasMore bool
 		// assertEvents runs extra per-event assertions when set.
-		assertEvents func(t *testing.T, events []store.JournalEvent)
+		assertEvents func(t *testing.T, events []automation.JournalEvent)
 	}{
 		{
 			name:        "filter params, since/limit echo and snapshots unwrap",
@@ -76,7 +77,7 @@ func TestListIssueEvents(t *testing.T) {
 			wantLen:     1,
 			wantCursor:  "1707001234561-0",
 			wantHasMore: false,
-			assertEvents: func(t *testing.T, events []store.JournalEvent) {
+			assertEvents: func(t *testing.T, events []automation.JournalEvent) {
 				e := events[0]
 				if e.ID != "1707001234561-0" || e.Action != "issue.opened" || e.Actor != "octocat" || e.EntityID != "issue-42" {
 					t.Errorf("event projection = %+v", e)
@@ -189,7 +190,7 @@ func TestListIssueEvents(t *testing.T) {
 			wantLen:     2,
 			wantCursor:  "1707001234562-0",
 			wantHasMore: false,
-			assertEvents: func(t *testing.T, events []store.JournalEvent) {
+			assertEvents: func(t *testing.T, events []automation.JournalEvent) {
 				if events[0].Before != nil {
 					t.Errorf("malformed before should be nil, got %s", events[0].Before)
 				}
@@ -217,7 +218,7 @@ func TestListIssueEvents(t *testing.T) {
 					"error": map[string]any{"code": "invalid_parameter", "message": "bad since"},
 				})
 			},
-			wantErr: domain.ErrInvalid,
+			wantErr: persistence.ErrInvalid,
 		},
 	}
 
@@ -268,14 +269,14 @@ func TestListIssueEvents(t *testing.T) {
 }
 
 // TestMemstoreDoesNotImplementIssueJournalReader pins the capability gate: the
-// bridge is enabled only when the store satisfies store.IssueJournalReader,
+// bridge is enabled only when the store satisfies automation.IssueJournalReader,
 // and memstore deliberately does not (same posture as the run.finished lane,
 // which gates on TriggerEventAppender). If memstore ever grows this method by
 // accident the bridge would silently activate against a non-journaling store.
 func TestMemstoreDoesNotImplementIssueJournalReader(t *testing.T) {
 	t.Parallel()
 	mem := memstore.New()
-	if _, ok := mem.TriggerEvents().(store.IssueJournalReader); ok {
-		t.Fatal("memstore TriggerEvents must NOT implement store.IssueJournalReader (bridge is capability-gated)")
+	if _, ok := mem.TriggerEvents().(automation.IssueJournalReader); ok {
+		t.Fatal("memstore TriggerEvents must NOT implement automation.IssueJournalReader (bridge is capability-gated)")
 	}
 }

@@ -22,8 +22,8 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 func activeDriverVersion(ctx context.Context, s driverRunReadStore, workspaceKey, driverID string) (*workflowcatalog.Driver, *workflowcatalog.DriverVersion, error) {
@@ -32,14 +32,14 @@ func activeDriverVersion(ctx context.Context, s driverRunReadStore, workspaceKey
 		return nil, nil, fmt.Errorf("get driver: %w", err)
 	}
 	if driver.ActiveVersionID == "" {
-		return nil, nil, fmt.Errorf("driver %q has no active version: %w", driverID, domain.ErrInvalid)
+		return nil, nil, fmt.Errorf("driver %q has no active version: %w", driverID, persistence.ErrInvalid)
 	}
 	version, err := s.DriverVersions().Get(ctx, workspaceKey, driver.ActiveVersionID)
 	if err != nil {
 		return nil, nil, fmt.Errorf("get active driver version: %w", err)
 	}
 	if version.DriverID != driver.DriverID || version.ValidationStatus != workflowcatalog.DriverVersionValidationPassed {
-		return nil, nil, fmt.Errorf("driver %q active version %q is not a passed version: %w", driver.DriverID, driver.ActiveVersionID, domain.ErrInvalid)
+		return nil, nil, fmt.Errorf("driver %q active version %q is not a passed version: %w", driver.DriverID, driver.ActiveVersionID, persistence.ErrInvalid)
 	}
 	return driver, version, nil
 }
@@ -111,9 +111,9 @@ const (
 
 // ErrRunTokenInvalid indicates a run token failed validation (bad signature,
 // wrong algorithm, expired, malformed, or inconsistent claims). It wraps
-// domain.ErrNotOwner: presenting a token that does not prove run identity is
+// persistence.ErrNotOwner: presenting a token that does not prove run identity is
 // an ownership failure.
-var ErrRunTokenInvalid = fmt.Errorf("driver: run token invalid: %w", domain.ErrNotOwner)
+var ErrRunTokenInvalid = fmt.Errorf("driver: run token invalid: %w", persistence.ErrNotOwner)
 
 // RunTokenClaims bind a bearer token to one DriverRun for one lease window.
 // A stolen token is therefore bounded to a single run and rejected once the
@@ -143,7 +143,7 @@ type RunTokenClaims struct {
 func DeriveDriverRunLeaseToken(key []byte, workspaceKey, runID, nodeID, leaseID string) (string, error) {
 	if len(key) == 0 || strings.TrimSpace(workspaceKey) == "" || strings.TrimSpace(runID) == "" ||
 		strings.TrimSpace(nodeID) == "" || strings.TrimSpace(leaseID) == "" {
-		return "", fmt.Errorf("derive DriverRun lease token: signing key and owner identity required: %w", domain.ErrInvalid)
+		return "", fmt.Errorf("derive DriverRun lease token: signing key and owner identity required: %w", persistence.ErrInvalid)
 	}
 	mac := hmac.New(sha256.New, key)
 	_, _ = mac.Write([]byte("loom-driver-run-lease-v1\x00"))
@@ -159,13 +159,13 @@ func DeriveDriverRunLeaseToken(key []byte, workspaceKey, runID, nodeID, leaseID 
 // token. IssuedAt and ExpiresAt are always stamped; ttl must be positive.
 func MintRunToken(claims RunTokenClaims, key []byte, ttl time.Duration) (string, error) {
 	if strings.TrimSpace(claims.RunID) == "" {
-		return "", fmt.Errorf("mint run token: run id required: %w", domain.ErrInvalid)
+		return "", fmt.Errorf("mint run token: run id required: %w", persistence.ErrInvalid)
 	}
 	if len(key) == 0 {
-		return "", fmt.Errorf("mint run token: signing key required: %w", domain.ErrInvalid)
+		return "", fmt.Errorf("mint run token: signing key required: %w", persistence.ErrInvalid)
 	}
 	if ttl <= 0 {
-		return "", fmt.Errorf("mint run token: ttl must be positive, got %s: %w", ttl, domain.ErrInvalid)
+		return "", fmt.Errorf("mint run token: ttl must be positive, got %s: %w", ttl, persistence.ErrInvalid)
 	}
 	now := time.Now()
 	claims.Subject = DriverRunActor(claims.RunID)
@@ -186,7 +186,7 @@ func MintRunToken(claims RunTokenClaims, key []byte, ttl time.Duration) (string,
 // was minted by this serve, not that the lease is still live.
 func ParseRunToken(token string, key []byte) (*RunTokenClaims, error) {
 	if len(key) == 0 {
-		return nil, fmt.Errorf("parse run token: signing key required: %w", domain.ErrInvalid)
+		return nil, fmt.Errorf("parse run token: signing key required: %w", persistence.ErrInvalid)
 	}
 	parsed, err := jwt.ParseWithClaims(token, &RunTokenClaims{}, func(t *jwt.Token) (any, error) {
 		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
@@ -243,10 +243,10 @@ func ResolveRunTokenSigningKey() ([]byte, error) {
 func decodeRunTokenSigningKey(encoded string) ([]byte, error) {
 	key, err := hex.DecodeString(encoded)
 	if err != nil {
-		return nil, fmt.Errorf("%s: decode hex: %v: %w", RunTokenSigningKeyEnv, err, domain.ErrInvalid)
+		return nil, fmt.Errorf("%s: decode hex: %v: %w", RunTokenSigningKeyEnv, err, persistence.ErrInvalid)
 	}
 	if len(key) != runTokenKeyLen {
-		return nil, fmt.Errorf("%s: key is %d bytes, want %d: %w", RunTokenSigningKeyEnv, len(key), runTokenKeyLen, domain.ErrInvalid)
+		return nil, fmt.Errorf("%s: key is %d bytes, want %d: %w", RunTokenSigningKeyEnv, len(key), runTokenKeyLen, persistence.ErrInvalid)
 	}
 	return key, nil
 }
@@ -261,10 +261,10 @@ func RunTokenTTL() (time.Duration, error) {
 	}
 	ttl, err := time.ParseDuration(raw)
 	if err != nil {
-		return 0, fmt.Errorf("%s: parse duration %q: %v: %w", RunTokenTTLEnv, raw, err, domain.ErrInvalid)
+		return 0, fmt.Errorf("%s: parse duration %q: %v: %w", RunTokenTTLEnv, raw, err, persistence.ErrInvalid)
 	}
 	if ttl <= 0 {
-		return 0, fmt.Errorf("%s: ttl must be positive, got %s: %w", RunTokenTTLEnv, ttl, domain.ErrInvalid)
+		return 0, fmt.Errorf("%s: ttl must be positive, got %s: %w", RunTokenTTLEnv, ttl, persistence.ErrInvalid)
 	}
 	return ttl, nil
 }
@@ -315,9 +315,9 @@ func isSafeRunFinishedEventID(value string) bool {
 
 // RunFinishedSubjectKey renders the await-matchable subject key for a run's
 // terminal event — the exact pattern composition awaits register
-// (domain.AwaitEventKey over the run.finished type and the run ID).
+// (execution.AwaitEventKey over the run.finished type and the run ID).
 func RunFinishedSubjectKey(runID string) string {
-	return domain.AwaitEventKey(RunFinishedEventType, runID)
+	return execution.AwaitEventKey(RunFinishedEventType, runID)
 }
 
 // runFinishedPayload is the camelCase driver-wire payload of a run.finished
@@ -475,7 +475,7 @@ func ApplyPatchBack(ctx context.Context, opts PatchBackOptions) (*PatchBackResul
 	opts.WorktreePath = strings.TrimSpace(opts.WorktreePath)
 	opts.BaseRef = strings.TrimSpace(opts.BaseRef)
 	if opts.WorktreePath == "" || opts.BaseRef == "" || len(bytes.TrimSpace(opts.Patch)) == 0 {
-		return nil, fmt.Errorf("worktree path, base ref, and patch required: %w", domain.ErrInvalid)
+		return nil, fmt.Errorf("worktree path, base ref, and patch required: %w", persistence.ErrInvalid)
 	}
 	result := &PatchBackResult{BaseRef: opts.BaseRef}
 	baseSHA, baseErr := gitOutput(ctx, opts.WorktreePath, nil, "rev-parse", "--verify", opts.BaseRef+"^{commit}")
@@ -541,7 +541,7 @@ func ApplyPatchBack(ctx context.Context, opts PatchBackOptions) (*PatchBackResul
 // unrelated working-tree noise (the monitor's .agent.lock) is not folded into the commit.
 func CommitWorktree(ctx context.Context, worktreePath, message string) error {
 	if strings.TrimSpace(worktreePath) == "" {
-		return fmt.Errorf("worktree path required: %w", domain.ErrInvalid)
+		return fmt.Errorf("worktree path required: %w", persistence.ErrInvalid)
 	}
 	if _, err := gitOutput(ctx, worktreePath, nil, "-c", "user.name=loom", "-c", "user.email=loom@local", "commit", "-m", message); err != nil {
 		return fmt.Errorf("git commit: %w", err)

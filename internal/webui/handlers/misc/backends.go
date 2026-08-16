@@ -5,17 +5,17 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 
-	"github.com/tysonthomas9/loomcli/internal/ops"
+	"github.com/tysonthomas9/loomcli/internal/app/query/operationalview"
 )
 
 type backendsHealthResponse struct {
-	Success bool                `json:"success"`
-	Data    []ops.BackendHealth `json:"data"`
-	Error   string              `json:"error,omitempty"`
+	Success bool                      `json:"success"`
+	Data    []operationalview.Backend `json:"data"`
+	Error   string                    `json:"error,omitempty"`
 }
 
 // HandleGetBackendsHealth returns a handler that lists registered backends with health status.
-func HandleGetBackendsHealth(backendOps ops.BackendOps) http.HandlerFunc {
+func HandleGetBackendsHealth(backendOps operationalview.BackendHealthQuery) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		backends, err := backendOps.ListBackendsHealth()
 		if err != nil {
@@ -28,7 +28,7 @@ func HandleGetBackendsHealth(backendOps ops.BackendOps) http.HandlerFunc {
 
 		// Ensure empty slice for JSON [] marshaling
 		if backends == nil {
-			backends = []ops.BackendHealth{}
+			backends = []operationalview.Backend{}
 		}
 
 		handler.WriteJSON(w, http.StatusOK, backendsHealthResponse{

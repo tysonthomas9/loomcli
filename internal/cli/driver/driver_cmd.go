@@ -13,8 +13,8 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/cli/managementapi"
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	driverpkg "github.com/tysonthomas9/loomcli/internal/driver"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 var (
@@ -128,7 +128,7 @@ func runDriverRegister(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 	if driverRegisterUntrusted && driverRegisterActivate {
-		return fmt.Errorf("--untrusted cannot be combined with --activate because activation requires prior version approval: %w", domain.ErrInvalid)
+		return fmt.Errorf("--untrusted cannot be combined with --activate because activation requires prior version approval: %w", persistence.ErrInvalid)
 	}
 	archive, err := archiveNativeDriverDist(driverRegisterFlueDist)
 	if err != nil {
@@ -172,7 +172,7 @@ func runDriverRegister(cmd *cobra.Command, _ []string) error {
 
 func driverRegisterTrust() (workflowcatalog.DriverTrustLevel, error) {
 	if driverRegisterTrusted && driverRegisterUntrusted {
-		return "", fmt.Errorf("only one of --trusted or --untrusted may be set: %w", domain.ErrInvalid)
+		return "", fmt.Errorf("only one of --trusted or --untrusted may be set: %w", persistence.ErrInvalid)
 	}
 	if driverRegisterTrusted {
 		return workflowcatalog.DriverTrustTrusted, nil

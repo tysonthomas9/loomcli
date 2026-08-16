@@ -16,17 +16,42 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/automation"
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
+	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
+
+	workspaceowner "github.com/tysonthomas9/loomcli/internal/modules/workspace"
+
 	"github.com/tysonthomas9/loomcli/internal/cli/serve/serveadapter"
 	driverexecutor "github.com/tysonthomas9/loomcli/internal/driver"
 	trigger "github.com/tysonthomas9/loomcli/internal/infra/automationruntime"
 	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
 	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
-	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui"
 )
 
+type workspaceRecordSource interface {
+	Workspaces() workspaceowner.WorkspaceStore
+}
+
+type issueJournalRecords interface {
+	workspaceRecordSource
+	TriggerEvents() automation.TriggerEventStore
+}
+
+type executionRuntimeRecords interface {
+	workspaceRecordSource
+	Repos() workspaceowner.RepoStore
+	Awaits() execution.AwaitStore
+	Drivers() workflowcatalog.DriverStore
+	DriverVersions() workflowcatalog.DriverVersionStore
+	DriverRuns() execution.DriverRunStore
+	TriggerEvents() automation.TriggerEventStore
+	WorkerProfiles() execution.WorkerProfileStore
+}
+
 func validateExecutionRuntimePassCapabilities(
-	st store.Store,
+	st executionRuntimeRecords,
 	executionCapability webui.ExecutionCapability,
 	artifactsCapability webui.ArtifactsCapability,
 ) error {
@@ -49,7 +74,7 @@ func validateExecutionRuntimePassCapabilities(
 // in an existing CLI composition seam rather than widening Execution's owner
 // APIs or creating another composite Store consumer.
 func buildExecutionRuntimePasses(
-	st store.Store,
+	st executionRuntimeRecords,
 	runOutcomes driverexecutor.RunOutcomePublisher,
 	executionCapability webui.ExecutionCapability,
 	artifactsCapability webui.ArtifactsCapability,
@@ -100,7 +125,7 @@ func buildExecutionRuntimePasses(
 }
 
 func newExecutionTaskWorker(
-	st store.Store,
+	st executionRuntimeRecords,
 	executor *driverexecutor.Executor,
 	artifactsCapability webui.ArtifactsCapability,
 	executionCapability webui.ExecutionCapability,
@@ -134,7 +159,7 @@ func newExecutionTaskWorker(
 // workflow-side lead-delivery retry loops.
 func startOutboxDispatcher(
 	ctx context.Context,
-	st store.Store,
+	st workspaceRecordSource,
 	executionCapability webui.ExecutionCapability,
 	chat interaction.ChatMessenger,
 	workspaceScope string,
@@ -170,7 +195,7 @@ func startOutboxDispatcher(
 }
 
 type outboxWorkspaceLister struct {
-	store store.WorkspaceStore
+	store workspaceowner.WorkspaceStore
 }
 
 func (lister outboxWorkspaceLister) ListWorkspaceKeys(ctx context.Context) ([]string, error) {
@@ -194,7 +219,7 @@ func (lister outboxWorkspaceLister) ListWorkspaceKeys(ctx context.Context) ([]st
 // results logged via slog, and like the other always-on loops it is NOT gated
 // behind LOOM_DRIVER_EXECUTOR — journal ingestion is server policy.
 //
-// CAPABILITY GATE. The bridge needs store.IssueJournalReader, which only the
+// CAPABILITY GATE. The bridge needs automation.IssueJournalReader, which only the
 // fleet-db client implements; a memstore-backed serve (no journal reader) logs
 // once and starts no goroutine, so a no-store / local serve is a clean no-op.
 //
@@ -213,7 +238,7 @@ func (lister outboxWorkspaceLister) ListWorkspaceKeys(ctx context.Context) ([]st
 // enabled whenever the issue-journal bridge is enabled.
 func startIssueJournalBridge(
 	ctx context.Context,
-	st store.Store,
+	st issueJournalRecords,
 	issueLookup trigger.TaskReadyIssueLookup,
 	readySnapshots trigger.TaskReadySnapshotLister,
 	repositoryRequiredBlocker trigger.TaskReadyRepositoryRequiredBlocker,
@@ -253,7 +278,7 @@ func startIssueJournalBridge(
 }
 
 func buildIssueJournalBridge(
-	st store.Store,
+	st issueJournalRecords,
 	issueLookup trigger.TaskReadyIssueLookup,
 	readySnapshots trigger.TaskReadySnapshotLister,
 	repositoryRequiredBlocker trigger.TaskReadyRepositoryRequiredBlocker,
@@ -270,7 +295,7 @@ func buildIssueJournalBridge(
 		slog.Info("issue journal bridge disabled: LOOM_ISSUE_BRIDGE_DISABLED set")
 		return nil, nil
 	}
-	reader, ok := st.TriggerEvents().(store.IssueJournalReader)
+	reader, ok := st.TriggerEvents().(automation.IssueJournalReader)
 	if !ok {
 		slog.Info("issue journal bridge disabled: store has no journal reader")
 		return nil, nil

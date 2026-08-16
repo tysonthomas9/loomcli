@@ -10,7 +10,7 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 	"github.com/tysonthomas9/loomcli/internal/platform/repositoryremote"
 )
 
@@ -500,15 +500,15 @@ func mapRepositoryAdmissionError(err error) error {
 		sentinel = ErrRepositoryAdmissionConflict
 	case errors.Is(err, ErrRepositoryAdmissionInvalid):
 		sentinel = ErrRepositoryAdmissionInvalid
-	case errors.Is(err, domain.ErrNotFound):
+	case errors.Is(err, persistence.ErrNotFound):
 		sentinel = ErrRepositoryAdmissionNotFound
-	case errors.Is(err, domain.ErrNotOwner):
+	case errors.Is(err, persistence.ErrNotOwner):
 		sentinel = ErrRepositoryAdmissionFenceLost
-	case errors.Is(err, domain.ErrInvalidTransition):
+	case errors.Is(err, persistence.ErrInvalidTransition):
 		sentinel = ErrRepositoryAdmissionState
-	case errors.Is(err, domain.ErrAlreadyExists), errors.Is(err, domain.ErrConflict):
+	case errors.Is(err, persistence.ErrAlreadyExists), errors.Is(err, persistence.ErrConflict):
 		sentinel = ErrRepositoryAdmissionConflict
-	case errors.Is(err, domain.ErrInvalid):
+	case errors.Is(err, persistence.ErrInvalid):
 		sentinel = ErrRepositoryAdmissionInvalid
 	default:
 		return fmt.Errorf(

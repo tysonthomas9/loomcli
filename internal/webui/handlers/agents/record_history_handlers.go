@@ -4,7 +4,7 @@ import (
 	"context"
 	"net/http"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 	loomapi "github.com/tysonthomas9/loomcli/internal/platform/loomapi/gen"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 )
@@ -42,7 +42,7 @@ func (m *Module) writeAgentRecordRuns(
 		return
 	}
 	if runs == nil {
-		runs = []*domain.DriverRun{}
+		runs = []*execution.DriverRunRecord{}
 	}
 	handler.WriteJSON(w, http.StatusOK, loomapi.AgentRunsResponse{
 		AgentId:  record.ServiceID,
@@ -51,7 +51,7 @@ func (m *Module) writeAgentRecordRuns(
 	})
 }
 
-func (m *Module) runsForAgent(ctx context.Context, ws, agentID string, limit int) ([]*domain.DriverRun, error) {
+func (m *Module) runsForAgent(ctx context.Context, ws, agentID string, limit int) ([]*execution.DriverRunRecord, error) {
 	runs, err := m.listAgentServiceRunsForHistory(ctx, ws, agentID, limit)
 	if err != nil {
 		return nil, err

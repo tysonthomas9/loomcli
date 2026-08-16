@@ -16,48 +16,24 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/usage"
 )
 
-// setTmuxRemainOnExit sets remain-on-exit globally so tmux panes stay alive
-// even when the loom command exits (loom is not installed in CI environments).
-// It starts a keepalive tmux session if no server is running (the tmux server
-// exits when the last session is destroyed, so we need our own).
-// The original setting and keepalive session are cleaned up via t.Cleanup.
-func setTmuxRemainOnExit(t *testing.T) {
+// installBlockingLoomExecutable keeps startTmuxSession tests on the real tmux
+// path without depending on an installed loom binary. A live child also makes
+// the tests independent of tmux's machine-global remain-on-exit setting, which
+// other package processes may change concurrently under `go test ./...`.
+func installBlockingLoomExecutable(t *testing.T) {
 	t.Helper()
-
-	// Ensure a tmux server is running. If no server exists, "tmux setw -g" fails silently.
-	// Start a keepalive session that sleeps - this guarantees a server for our global setting.
-	keepalive := fmt.Sprintf("loom-test-keepalive-%d", os.Getpid())
-	if err := exec.Command("tmux", "has-session", "-t", keepalive).Run(); err != nil { //nolint:norawexec
-		out, err := exec.Command("tmux", "new-session", "-d", "-s", keepalive, "sleep", "300").CombinedOutput() //nolint:norawexec
-		if err != nil {
-			t.Skipf("failed to start tmux keepalive session: %v (%s)", err, strings.TrimSpace(string(out)))
-		}
-		t.Cleanup(func() {
-			exec.Command("tmux", "kill-session", "-t", keepalive).Run() //nolint:norawexec
-		})
+	binDir := t.TempDir()
+	loomPath := filepath.Join(binDir, "loom")
+	const script = `#!/bin/sh
+if [ "$1" = "log-router" ]; then
+  exec cat >/dev/null
+fi
+exec sleep 30
+`
+	if err := os.WriteFile(loomPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake loom executable: %v", err)
 	}
-
-	// remain-on-exit is a window option, so use `setw -g` to set the global
-	// default for new windows. Plain `set -g` is interpreted inconsistently
-	// across tmux versions and may silently no-op on the window-option
-	// namespace, leaving panes free to die the moment their command exits.
-	origRemain, _ := exec.Command("tmux", "show", "-gv", "remain-on-exit").Output()                          //nolint:norawexec
-	if out, err := exec.Command("tmux", "setw", "-g", "remain-on-exit", "on").CombinedOutput(); err != nil { //nolint:norawexec
-		t.Skipf("failed to set tmux remain-on-exit: %v (%s)", err, strings.TrimSpace(string(out)))
-	}
-	// Verify the setting actually applied. Without it the tests that assert
-	// a session is alive right after a quickly-failing command will flake.
-	if got, _ := exec.Command("tmux", "show", "-wgv", "remain-on-exit").Output(); strings.TrimSpace(string(got)) != "on" { //nolint:norawexec
-		t.Skipf("tmux remain-on-exit not honored by this server (got %q)", strings.TrimSpace(string(got)))
-	}
-	t.Cleanup(func() {
-		val := strings.TrimSpace(string(origRemain))
-		if val == "" || val == "off" {
-			exec.Command("tmux", "setw", "-g", "remain-on-exit", "off").Run() //nolint:norawexec
-		} else {
-			exec.Command("tmux", "setw", "-g", "remain-on-exit", val).Run() //nolint:norawexec
-		}
-	})
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 }
 
 func TestHasAvailablePlanningTasks(t *testing.T) {
@@ -2249,8 +2225,7 @@ func TestStartTmuxSession_Success(t *testing.T) {
 		TaskPause:    10 * time.Millisecond,
 	}
 
-	// remain-on-exit keeps the pane alive even when loom exits (not installed in CI)
-	setTmuxRemainOnExit(t)
+	installBlockingLoomExecutable(t)
 
 	t.Cleanup(func() {
 		exec.Command("tmux", "kill-session", "-t", sessionName).Run() //nolint:norawexec
@@ -2272,8 +2247,7 @@ func TestStartTmuxSession_KillsExisting(t *testing.T) {
 		t.Skip("tmux not available")
 	}
 
-	// remain-on-exit keeps the pane alive even when loom exits (not installed in CI)
-	setTmuxRemainOnExit(t)
+	installBlockingLoomExecutable(t)
 
 	tmpDir := t.TempDir()
 	sessionName := fmt.Sprintf("loom-test-kill-%d", os.Getpid())
@@ -2319,8 +2293,7 @@ func TestStartTmuxSession_QuotesShellMetachars(t *testing.T) {
 		t.Skip("tmux not available")
 	}
 
-	// remain-on-exit keeps the pane alive even when loom exits (not installed in CI)
-	setTmuxRemainOnExit(t)
+	installBlockingLoomExecutable(t)
 
 	// Create a temp dir whose name contains shell metacharacters
 	baseDir := t.TempDir()

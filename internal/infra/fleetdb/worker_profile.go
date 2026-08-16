@@ -5,15 +5,14 @@ import (
 	"net/url"
 	"strconv"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 )
 
 type workerProfileStore struct{ client *Client }
 
-var _ store.WorkerProfileStore = (*workerProfileStore)(nil)
+var _ execution.WorkerProfileStore = (*workerProfileStore)(nil)
 
-func (s *workerProfileStore) Create(ctx context.Context, in store.WorkerProfileCreate) (*domain.WorkerProfile, error) {
+func (s *workerProfileStore) Create(ctx context.Context, in execution.WorkerProfileCreate) (*execution.WorkerProfile, error) {
 	body := struct {
 		ProfileID     string            `json:"profile_id"`
 		Name          string            `json:"name,omitempty"`
@@ -43,15 +42,15 @@ func (s *workerProfileStore) Create(ctx context.Context, in store.WorkerProfileC
 		Enabled:       in.Enabled,
 		Metadata:      in.Metadata,
 	}
-	var out domain.WorkerProfile
+	var out execution.WorkerProfile
 	if err := s.client.do(ctx, "POST", "/api/v1/"+pathEscape(in.WorkspaceKey)+"/worker-profiles", body, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
 }
 
-func (s *workerProfileStore) Get(ctx context.Context, ws, profileID string) (*domain.WorkerProfile, error) {
-	var out domain.WorkerProfile
+func (s *workerProfileStore) Get(ctx context.Context, ws, profileID string) (*execution.WorkerProfile, error) {
+	var out execution.WorkerProfile
 	path := "/api/v1/" + pathEscape(ws) + "/worker-profiles/" + pathEscape(profileID)
 	if err := s.client.do(ctx, "GET", path, nil, &out); err != nil {
 		return nil, err
@@ -59,7 +58,7 @@ func (s *workerProfileStore) Get(ctx context.Context, ws, profileID string) (*do
 	return &out, nil
 }
 
-func (s *workerProfileStore) List(ctx context.Context, ws string, filter store.WorkerProfileFilter) ([]*domain.WorkerProfile, error) {
+func (s *workerProfileStore) List(ctx context.Context, ws string, filter execution.WorkerProfileFilter) ([]*execution.WorkerProfile, error) {
 	q := url.Values{}
 	if filter.Role != "" {
 		q.Set("role", filter.Role)
@@ -75,18 +74,18 @@ func (s *workerProfileStore) List(ctx context.Context, ws string, filter store.W
 	}
 	path := withQuery("/api/v1/"+pathEscape(ws)+"/worker-profiles", q)
 	var resp struct {
-		WorkerProfiles []*domain.WorkerProfile `json:"worker_profiles"`
+		WorkerProfiles []*execution.WorkerProfile `json:"worker_profiles"`
 	}
 	if err := s.client.do(ctx, "GET", path, nil, &resp); err != nil {
 		return nil, err
 	}
 	if resp.WorkerProfiles == nil {
-		resp.WorkerProfiles = []*domain.WorkerProfile{}
+		resp.WorkerProfiles = []*execution.WorkerProfile{}
 	}
 	return resp.WorkerProfiles, nil
 }
 
-func (s *workerProfileStore) Update(ctx context.Context, ws, profileID string, patch store.WorkerProfileUpdate) (*domain.WorkerProfile, error) {
+func (s *workerProfileStore) Update(ctx context.Context, ws, profileID string, patch execution.WorkerProfileUpdate) (*execution.WorkerProfile, error) {
 	body := struct {
 		Name               *string            `json:"name,omitempty"`
 		Role               *string            `json:"role,omitempty"`
@@ -118,7 +117,7 @@ func (s *workerProfileStore) Update(ctx context.Context, ws, profileID string, p
 		Enabled:            patch.Enabled,
 		Metadata:           patch.Metadata,
 	}
-	var out domain.WorkerProfile
+	var out execution.WorkerProfile
 	path := "/api/v1/" + pathEscape(ws) + "/worker-profiles/" + pathEscape(profileID)
 	if err := s.client.do(ctx, "PATCH", path, body, &out); err != nil {
 		return nil, err

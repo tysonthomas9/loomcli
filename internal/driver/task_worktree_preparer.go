@@ -10,8 +10,8 @@ import (
 	workspacemodule "github.com/tysonthomas9/loomcli/internal/modules/workspace"
 
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/localworkspace"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 // taskWorktreePreparer holds the workspace-local state used throughout one task worktree
@@ -51,7 +51,7 @@ func (p *taskWorktreePreparer) prepare(
 	baseCommit string,
 ) (string, error) {
 	if p == nil || repo == nil {
-		return "", fmt.Errorf("preparer and repo are required: %w", domain.ErrInvalid)
+		return "", fmt.Errorf("preparer and repo are required: %w", persistence.ErrInvalid)
 	}
 	expectedPath := strings.TrimSpace(localworkspace.RepoPath(p.local, repo.Name))
 	if expectedPath == "" {
@@ -63,7 +63,7 @@ func (p *taskWorktreePreparer) prepare(
 	}
 	repoPath = strings.TrimSpace(repoPath)
 	if repoPath == "" || filepath.Clean(repoPath) != filepath.Clean(expectedPath) {
-		return "", fmt.Errorf("source control returned a different repo path for %q: %w", repo.Name, domain.ErrInvalid)
+		return "", fmt.Errorf("source control returned a different repo path for %q: %w", repo.Name, persistence.ErrInvalid)
 	}
 	if !isGitCheckout(repoPath) {
 		return "", fmt.Errorf("source control checkout for repo %q is not a git checkout", repo.Name)

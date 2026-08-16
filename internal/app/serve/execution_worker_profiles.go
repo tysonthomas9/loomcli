@@ -8,9 +8,9 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
-	"github.com/tysonthomas9/loomcli/internal/store"
+
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 // Worker-profile persistence is an outbound Execution port. Inbound HTTP and
@@ -24,7 +24,7 @@ func (adapter *executionTaskRunPortsAdapter) GetWorkerProfile(ctx context.Contex
 }
 
 func (adapter *executionTaskRunPortsAdapter) ListWorkerProfiles(ctx context.Context, workspace string, filter execution.WorkerProfileFilter) ([]*execution.WorkerProfile, error) {
-	profiles, err := adapter.dependencies.WorkerProfiles.List(ctx, workspace, store.WorkerProfileFilter{
+	profiles, err := adapter.dependencies.WorkerProfiles.List(ctx, workspace, execution.WorkerProfileFilter{
 		Role: filter.Role, Backend: filter.Backend, Enabled: cloneExecutionBool(filter.Enabled), Limit: filter.Limit,
 	})
 	if err != nil {
@@ -38,7 +38,7 @@ func (adapter *executionTaskRunPortsAdapter) ListWorkerProfiles(ctx context.Cont
 }
 
 func (adapter *executionTaskRunPortsAdapter) CreateWorkerProfile(ctx context.Context, command execution.CreateWorkerProfileCommand) (*execution.WorkerProfile, error) {
-	profile, err := adapter.dependencies.WorkerProfiles.Create(ctx, store.WorkerProfileCreate{
+	profile, err := adapter.dependencies.WorkerProfiles.Create(ctx, execution.WorkerProfileCreate{
 		WorkspaceKey: command.WorkspaceKey, ProfileID: command.ProfileID, Name: command.Name, Role: command.Role,
 		Backend: command.Backend, RuntimePolicy: cloneExecutionStringMap(command.RuntimePolicy),
 		Repos: append([]string(nil), command.Repos...), MaxPriority: cloneExecutionInt(command.MaxPriority),
@@ -47,7 +47,7 @@ func (adapter *executionTaskRunPortsAdapter) CreateWorkerProfile(ctx context.Con
 		Metadata: cloneExecutionStringMap(command.Metadata),
 	})
 	if err != nil {
-		if !errors.Is(err, domain.ErrAlreadyExists) && !errors.Is(err, domain.ErrConflict) {
+		if !errors.Is(err, persistence.ErrAlreadyExists) && !errors.Is(err, persistence.ErrConflict) {
 			return nil, err
 		}
 		// WorkerProfile creation is a desired-state command keyed by the stable
@@ -66,7 +66,7 @@ func (adapter *executionTaskRunPortsAdapter) CreateWorkerProfile(ctx context.Con
 
 func (adapter *executionTaskRunPortsAdapter) UpdateWorkerProfile(ctx context.Context, command execution.UpdateWorkerProfileCommand) (*execution.WorkerProfile, error) {
 	patch := command.Patch
-	profile, err := adapter.dependencies.WorkerProfiles.Update(ctx, command.WorkspaceKey, command.ProfileID, store.WorkerProfileUpdate{
+	profile, err := adapter.dependencies.WorkerProfiles.Update(ctx, command.WorkspaceKey, command.ProfileID, execution.WorkerProfileUpdate{
 		Name: cloneExecutionString(patch.Name), Role: cloneExecutionString(patch.Role), Backend: cloneExecutionString(patch.Backend),
 		RuntimePolicy: cloneExecutionStringMapPtr(patch.RuntimePolicy), Repos: cloneExecutionStrings(patch.Repos),
 		MaxPriority: cloneExecutionInt(patch.MaxPriority), MaxParallel: cloneExecutionInt(patch.MaxParallel),
@@ -83,7 +83,7 @@ func (adapter *executionTaskRunPortsAdapter) UpdateWorkerProfile(ctx context.Con
 
 func (adapter *executionTaskRunPortsAdapter) DeleteWorkerProfile(ctx context.Context, command execution.DeleteWorkerProfileCommand) error {
 	err := adapter.dependencies.WorkerProfiles.Delete(ctx, command.WorkspaceKey, command.ProfileID)
-	if errors.Is(err, domain.ErrNotFound) {
+	if errors.Is(err, persistence.ErrNotFound) {
 		// Delete is an absent-state command, so a retry after a lost successful
 		// response converges without requiring an in-memory receipt.
 		return nil
@@ -91,7 +91,7 @@ func (adapter *executionTaskRunPortsAdapter) DeleteWorkerProfile(ctx context.Con
 	return err
 }
 
-func workerProfileMatchesCreateCommand(profile *domain.WorkerProfile, command execution.CreateWorkerProfileCommand) bool {
+func workerProfileMatchesCreateCommand(profile *execution.WorkerProfile, command execution.CreateWorkerProfileCommand) bool {
 	if profile == nil {
 		return false
 	}
@@ -119,7 +119,7 @@ func executionIntEqual(left, right *int) bool {
 	return *left == *right
 }
 
-func executionWorkerProfileSnapshot(profile *domain.WorkerProfile) *execution.WorkerProfile {
+func executionWorkerProfileSnapshot(profile *execution.WorkerProfile) *execution.WorkerProfile {
 	if profile == nil {
 		return nil
 	}

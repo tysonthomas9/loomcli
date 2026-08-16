@@ -14,10 +14,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/driver/daytonahost"
 	"github.com/tysonthomas9/loomcli/internal/driver/sandbox"
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 	platformruntime "github.com/tysonthomas9/loomcli/internal/platform/runtime"
 )
 
@@ -209,10 +209,10 @@ func (r NodeRunner) Run(ctx context.Context, req RunRequest) (RunResult, error) 
 		payload = json.RawMessage(`{}`)
 	}
 	if !json.Valid(payload) {
-		return RunResult{}, fmt.Errorf("driver payload is invalid JSON: %w", domain.ErrInvalid)
+		return RunResult{}, fmt.Errorf("driver payload is invalid JSON: %w", persistence.ErrInvalid)
 	}
 	if req.ServerPath == "" {
-		return RunResult{}, fmt.Errorf("native Flue server path required: %w", domain.ErrInvalid)
+		return RunResult{}, fmt.Errorf("native Flue server path required: %w", persistence.ErrInvalid)
 	}
 	return r.runBuiltFlueServer(ctx, req, node, payload)
 }
@@ -278,7 +278,7 @@ func (r NodeRunner) runtimeEnv(req RunRequest, input []byte) ([]string, error) {
 func flueRuntimeEnv(req RunRequest, input []byte, execTaskCommand []string) ([]string, error) {
 	runToken := strings.TrimSpace(req.RunToken)
 	if runToken == "" {
-		return nil, fmt.Errorf("run-scoped workflow token required: %w", domain.ErrInvalid)
+		return nil, fmt.Errorf("run-scoped workflow token required: %w", persistence.ErrInvalid)
 	}
 	env := platformruntime.CurrentSubprocessEnv(platformruntime.SubprocessEnvDriverRemote)
 	env = append(env,

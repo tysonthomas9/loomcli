@@ -8,7 +8,6 @@ adapter_roots:
   - internal/infra/localredis
   - internal/infra/repositoryadmission
   - internal/infra/sourcecontrolstackstore
-  - internal/infra/workspacecatalog
   - internal/modules
   - internal/usage
   - internal/webui/handlers
@@ -45,8 +44,6 @@ owner_adapters:
     aggregate_owner: workspace
   - path: internal/infra/sourcecontrolstackstore
     aggregate_owner: sourcecontrol
-  - path: internal/infra/workspacecatalog
-    aggregate_owner: workspace
   - path: internal/usage
     aggregate_owner: read_projection
 analysis_profiles:
@@ -86,37 +83,6 @@ persistence_packages:
   - path: github.com/tysonthomas9/loomcli/internal/infra/sourcecontrolstackstore
     receiver_names: [LocalStore]
     receiver_suffixes: []
-  - path: github.com/tysonthomas9/loomcli/internal/modules/agents
-    receiver_names: [AgentIdentityStore, DesiredStateStore, LifecycleStore, OwnershipStore, RoleStore]
-    receiver_suffixes: []
-  - path: github.com/tysonthomas9/loomcli/internal/modules/artifacts
-    receiver_names: [QueryStore, SessionStore, Store]
-    receiver_suffixes: []
-  - path: github.com/tysonthomas9/loomcli/internal/modules/automation
-    receiver_names: [AdmissionStore, ApprovalEventStore, BindingStore, ManagedBindingStore, UnmanagedBindingStore]
-    receiver_suffixes: []
-  - path: github.com/tysonthomas9/loomcli/internal/modules/connectors
-    receiver_names: [ConnectorGrantStore, DispatchStore, ManagementStore, SecretLifecycleStore]
-    receiver_suffixes: []
-  - path: github.com/tysonthomas9/loomcli/internal/modules/interaction
-    receiver_names: [InboxStore, SessionStore, TabMetadataStore, TerminalStore, TranscriptArtifactStore]
-    receiver_suffixes: []
-  - path: github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol
-    receiver_names: [StackLifecycleStore, TaskOutcomeStore]
-    receiver_suffixes: []
-  - path: github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog
-    receiver_names: [AuthoringStore, VersionLifecycleStore]
-    receiver_suffixes: []
-  - path: github.com/tysonthomas9/loomcli/internal/modules/workitems
-    receiver_names: [Store]
-    receiver_suffixes: []
-  - path: github.com/tysonthomas9/loomcli/internal/modules/workspace
-    receiver_names: [CatalogStore, RepositoryCatalogStore]
-    receiver_suffixes: []
-  - path: github.com/tysonthomas9/loomcli/internal/store
-    receiver_names: []
-    receiver_suffixes: [Appender, Dispatcher, Reader, Store, Support]
-    guard_subpackages: true
   - path: github.com/tysonthomas9/loomcli/internal/usage
     receiver_names: [Store]
     receiver_suffixes: []
@@ -488,6 +454,18 @@ receiver_surfaces:
     package: github.com/tysonthomas9/loomcli/internal/modules/agents
     method_set: agents_identity
     capability_owner: agents
+  - receiver: github.com/tysonthomas9/loomcli/internal/modules/agents.AgentOwnershipLeaseOwnedStore
+    package: github.com/tysonthomas9/loomcli/internal/modules/agents
+    method_set: store_repository
+    capability_owner: agents
+  - receiver: github.com/tysonthomas9/loomcli/internal/modules/agents.AgentOwnershipLeaseStore
+    package: github.com/tysonthomas9/loomcli/internal/modules/agents
+    method_set: store_repository
+    capability_owner: agents
+  - receiver: github.com/tysonthomas9/loomcli/internal/modules/agents.AgentServiceStore
+    package: github.com/tysonthomas9/loomcli/internal/modules/agents
+    method_set: store_repository
+    capability_owner: agents
   - receiver: github.com/tysonthomas9/loomcli/internal/modules/agents.DesiredStateStore
     package: github.com/tysonthomas9/loomcli/internal/modules/agents
     method_set: agents_state
@@ -499,6 +477,10 @@ receiver_surfaces:
   - receiver: github.com/tysonthomas9/loomcli/internal/modules/agents.OwnershipStore
     package: github.com/tysonthomas9/loomcli/internal/modules/agents
     method_set: agents_ownership
+    capability_owner: agents
+  - receiver: github.com/tysonthomas9/loomcli/internal/modules/agents.RoleRecordStore
+    package: github.com/tysonthomas9/loomcli/internal/modules/agents
+    method_set: store_repository
     capability_owner: agents
   - receiver: github.com/tysonthomas9/loomcli/internal/modules/agents.RoleStore
     package: github.com/tysonthomas9/loomcli/internal/modules/agents
@@ -528,9 +510,29 @@ receiver_surfaces:
     package: github.com/tysonthomas9/loomcli/internal/modules/automation
     method_set: automation_persistence
     capability_owner: automation
+  - receiver: github.com/tysonthomas9/loomcli/internal/modules/automation.IssueJournalReader
+    package: github.com/tysonthomas9/loomcli/internal/modules/automation
+    method_set: store_repository
+    capability_owner: workitems
   - receiver: github.com/tysonthomas9/loomcli/internal/modules/automation.ManagedBindingStore
     package: github.com/tysonthomas9/loomcli/internal/modules/automation
     method_set: automation_persistence
+    capability_owner: automation
+  - receiver: github.com/tysonthomas9/loomcli/internal/modules/automation.TriggerBindingStore
+    package: github.com/tysonthomas9/loomcli/internal/modules/automation
+    method_set: store_repository
+    capability_owner: automation
+  - receiver: github.com/tysonthomas9/loomcli/internal/modules/automation.TriggerDeliveryStore
+    package: github.com/tysonthomas9/loomcli/internal/modules/automation
+    method_set: store_repository
+    capability_owner: automation
+  - receiver: github.com/tysonthomas9/loomcli/internal/modules/automation.TriggerEventAppender
+    package: github.com/tysonthomas9/loomcli/internal/modules/automation
+    method_set: store_repository
+    capability_owner: automation
+  - receiver: github.com/tysonthomas9/loomcli/internal/modules/automation.TriggerEventStore
+    package: github.com/tysonthomas9/loomcli/internal/modules/automation
+    method_set: store_repository
     capability_owner: automation
   - receiver: github.com/tysonthomas9/loomcli/internal/modules/automation.UnmanagedBindingStore
     package: github.com/tysonthomas9/loomcli/internal/modules/automation
@@ -552,9 +554,97 @@ receiver_surfaces:
     package: github.com/tysonthomas9/loomcli/internal/modules/connectors
     method_set: connectors_secret_lifecycle
     capability_owner: connectors
+  - receiver: github.com/tysonthomas9/loomcli/internal/modules/execution.AtomicAwaitStore
+    package: github.com/tysonthomas9/loomcli/internal/modules/execution
+    method_set: store_repository
+    capability_owner: execution
+  - receiver: github.com/tysonthomas9/loomcli/internal/modules/execution.AwaitEventNotificationStore
+    package: github.com/tysonthomas9/loomcli/internal/modules/execution
+    method_set: store_repository
+    capability_owner: execution
+  - receiver: github.com/tysonthomas9/loomcli/internal/modules/execution.AwaitStore
+    package: github.com/tysonthomas9/loomcli/internal/modules/execution
+    method_set: store_repository
+    capability_owner: execution
+  - receiver: github.com/tysonthomas9/loomcli/internal/modules/execution.DriverRunCancelSupport
+    package: github.com/tysonthomas9/loomcli/internal/modules/execution
+    method_set: store_repository
+    capability_owner: execution
+  - receiver: github.com/tysonthomas9/loomcli/internal/modules/execution.DriverRunEventsReader
+    package: github.com/tysonthomas9/loomcli/internal/modules/execution
+    method_set: store_repository
+    capability_owner: execution
+  - receiver: github.com/tysonthomas9/loomcli/internal/modules/execution.DriverRunOutcomeStore
+    package: github.com/tysonthomas9/loomcli/internal/modules/execution
+    method_set: store_repository
+    capability_owner: execution
+  - receiver: github.com/tysonthomas9/loomcli/internal/modules/execution.DriverRunStore
+    package: github.com/tysonthomas9/loomcli/internal/modules/execution
+    method_set: store_repository
+    capability_owner: execution
+  - receiver: github.com/tysonthomas9/loomcli/internal/modules/execution.DriverStepStore
+    package: github.com/tysonthomas9/loomcli/internal/modules/execution
+    method_set: store_repository
+    capability_owner: execution
+  - receiver: github.com/tysonthomas9/loomcli/internal/modules/execution.NodeStore
+    package: github.com/tysonthomas9/loomcli/internal/modules/execution
+    method_set: store_repository
+    capability_owner: execution
+  - receiver: github.com/tysonthomas9/loomcli/internal/modules/execution.OutboxStore
+    package: github.com/tysonthomas9/loomcli/internal/modules/execution
+    method_set: store_repository
+    capability_owner: execution
+  - receiver: github.com/tysonthomas9/loomcli/internal/modules/execution.RunOutcomeAwaitStore
+    package: github.com/tysonthomas9/loomcli/internal/modules/execution
+    method_set: store_repository
+    capability_owner: execution
+  - receiver: github.com/tysonthomas9/loomcli/internal/modules/execution.TaskRunEventStore
+    package: github.com/tysonthomas9/loomcli/internal/modules/execution
+    method_set: store_repository
+    capability_owner: execution
+  - receiver: github.com/tysonthomas9/loomcli/internal/modules/execution.TaskRunStore
+    package: github.com/tysonthomas9/loomcli/internal/modules/execution
+    method_set: store_repository
+    capability_owner: execution
+  - receiver: github.com/tysonthomas9/loomcli/internal/modules/execution.TaskRunTerminalConvergenceStore
+    package: github.com/tysonthomas9/loomcli/internal/modules/execution
+    method_set: store_repository
+    capability_owner: execution
+  - receiver: github.com/tysonthomas9/loomcli/internal/modules/execution.TerminalDriverRunWorkRecoveryQueueStore
+    package: github.com/tysonthomas9/loomcli/internal/modules/execution
+    method_set: store_repository
+    capability_owner: execution
+  - receiver: github.com/tysonthomas9/loomcli/internal/modules/execution.TerminalDriverStepRepairStore
+    package: github.com/tysonthomas9/loomcli/internal/modules/execution
+    method_set: store_repository
+    capability_owner: execution
+  - receiver: github.com/tysonthomas9/loomcli/internal/modules/execution.WorkerProfileStore
+    package: github.com/tysonthomas9/loomcli/internal/modules/execution
+    method_set: store_repository
+    capability_owner: execution
+  - receiver: github.com/tysonthomas9/loomcli/internal/modules/execution.WorkerStore
+    package: github.com/tysonthomas9/loomcli/internal/modules/execution
+    method_set: store_repository
+    capability_owner: execution
+  - receiver: github.com/tysonthomas9/loomcli/internal/modules/interaction.AgentInboxMessageStore
+    package: github.com/tysonthomas9/loomcli/internal/modules/interaction
+    method_set: store_repository
+    capability_owner: interaction
+  - receiver: github.com/tysonthomas9/loomcli/internal/modules/interaction.AgentLeaseStore
+    package: github.com/tysonthomas9/loomcli/internal/modules/interaction
+    method_set: store_repository
+    capability_owner: interaction
+  - receiver: github.com/tysonthomas9/loomcli/internal/modules/interaction.AgentSessionStore
+    package: github.com/tysonthomas9/loomcli/internal/modules/interaction
+    method_set: store_repository
+    capability_owner: interaction
   - receiver: github.com/tysonthomas9/loomcli/internal/modules/interaction.InboxStore
     package: github.com/tysonthomas9/loomcli/internal/modules/interaction
     method_set: interaction_inbox
+    capability_owner: interaction
+  - receiver: github.com/tysonthomas9/loomcli/internal/modules/interaction.OrchestrationSessionStore
+    package: github.com/tysonthomas9/loomcli/internal/modules/interaction
+    method_set: composite_store
     capability_owner: interaction
   - receiver: github.com/tysonthomas9/loomcli/internal/modules/interaction.SessionStore
     package: github.com/tysonthomas9/loomcli/internal/modules/interaction
@@ -563,6 +653,10 @@ receiver_surfaces:
   - receiver: github.com/tysonthomas9/loomcli/internal/modules/interaction.TabMetadataStore
     package: github.com/tysonthomas9/loomcli/internal/modules/interaction
     method_set: tab_metadata
+    capability_owner: interaction
+  - receiver: github.com/tysonthomas9/loomcli/internal/modules/interaction.TerminalSessionStore
+    package: github.com/tysonthomas9/loomcli/internal/modules/interaction
+    method_set: store_repository
     capability_owner: interaction
   - receiver: github.com/tysonthomas9/loomcli/internal/modules/interaction.TerminalStore
     package: github.com/tysonthomas9/loomcli/internal/modules/interaction
@@ -584,6 +678,14 @@ receiver_surfaces:
     package: github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog
     method_set: workflowcatalog_authoring
     capability_owner: workflowcatalog
+  - receiver: github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog.DriverStore
+    package: github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog
+    method_set: store_repository
+    capability_owner: workflowcatalog
+  - receiver: github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog.DriverVersionStore
+    package: github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog
+    method_set: store_repository
+    capability_owner: workflowcatalog
   - receiver: github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog.VersionLifecycleStore
     package: github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog
     method_set: store_repository
@@ -596,156 +698,16 @@ receiver_surfaces:
     package: github.com/tysonthomas9/loomcli/internal/modules/workspace
     method_set: workspace_catalog
     capability_owner: workspace
+  - receiver: github.com/tysonthomas9/loomcli/internal/modules/workspace.RepoStore
+    package: github.com/tysonthomas9/loomcli/internal/modules/workspace
+    method_set: store_repository
+    capability_owner: workspace
   - receiver: github.com/tysonthomas9/loomcli/internal/modules/workspace.RepositoryCatalogStore
     package: github.com/tysonthomas9/loomcli/internal/modules/workspace
     method_set: workspace_repository_catalog
     capability_owner: workspace
-  - receiver: github.com/tysonthomas9/loomcli/internal/store.AgentInboxMessageStore
-    package: github.com/tysonthomas9/loomcli/internal/store
-    method_set: store_repository
-    capability_owner: interaction
-  - receiver: github.com/tysonthomas9/loomcli/internal/store.AgentLeaseStore
-    package: github.com/tysonthomas9/loomcli/internal/store
-    method_set: store_repository
-    capability_owner: interaction
-  - receiver: github.com/tysonthomas9/loomcli/internal/store.AgentOwnershipLeaseOwnedStore
-    package: github.com/tysonthomas9/loomcli/internal/store
-    method_set: store_repository
-    capability_owner: agents
-  - receiver: github.com/tysonthomas9/loomcli/internal/store.AgentOwnershipLeaseStore
-    package: github.com/tysonthomas9/loomcli/internal/store
-    method_set: store_repository
-    capability_owner: agents
-  - receiver: github.com/tysonthomas9/loomcli/internal/store.AgentServiceStore
-    package: github.com/tysonthomas9/loomcli/internal/store
-    method_set: store_repository
-    capability_owner: agents
-  - receiver: github.com/tysonthomas9/loomcli/internal/store.AgentSessionStore
-    package: github.com/tysonthomas9/loomcli/internal/store
-    method_set: store_repository
-    capability_owner: interaction
-  - receiver: github.com/tysonthomas9/loomcli/internal/store.AtomicAwaitStore
-    package: github.com/tysonthomas9/loomcli/internal/store
-    method_set: store_repository
-    capability_owner: execution
-  - receiver: github.com/tysonthomas9/loomcli/internal/store.AwaitEventNotificationStore
-    package: github.com/tysonthomas9/loomcli/internal/store
-    method_set: store_repository
-    capability_owner: execution
-  - receiver: github.com/tysonthomas9/loomcli/internal/store.AwaitStore
-    package: github.com/tysonthomas9/loomcli/internal/store
-    method_set: store_repository
-    capability_owner: execution
-  - receiver: github.com/tysonthomas9/loomcli/internal/store.DriverRunCancelSupport
-    package: github.com/tysonthomas9/loomcli/internal/store
-    method_set: store_repository
-    capability_owner: execution
-  - receiver: github.com/tysonthomas9/loomcli/internal/store.DriverRunEventsReader
-    package: github.com/tysonthomas9/loomcli/internal/store
-    method_set: store_repository
-    capability_owner: execution
-  - receiver: github.com/tysonthomas9/loomcli/internal/store.DriverRunOutcomeStore
-    package: github.com/tysonthomas9/loomcli/internal/store
-    method_set: store_repository
-    capability_owner: execution
-  - receiver: github.com/tysonthomas9/loomcli/internal/store.DriverRunStore
-    package: github.com/tysonthomas9/loomcli/internal/store
-    method_set: store_repository
-    capability_owner: execution
-  - receiver: github.com/tysonthomas9/loomcli/internal/store.DriverStepStore
-    package: github.com/tysonthomas9/loomcli/internal/store
-    method_set: store_repository
-    capability_owner: execution
-  - receiver: github.com/tysonthomas9/loomcli/internal/store.DriverStore
-    package: github.com/tysonthomas9/loomcli/internal/store
-    method_set: store_repository
-    capability_owner: workflowcatalog
-  - receiver: github.com/tysonthomas9/loomcli/internal/store.DriverVersionStore
-    package: github.com/tysonthomas9/loomcli/internal/store
-    method_set: store_repository
-    capability_owner: workflowcatalog
-  - receiver: github.com/tysonthomas9/loomcli/internal/store.IssueJournalReader
-    package: github.com/tysonthomas9/loomcli/internal/store
-    method_set: store_repository
-    capability_owner: workitems
-  - receiver: github.com/tysonthomas9/loomcli/internal/store.NodeStore
-    package: github.com/tysonthomas9/loomcli/internal/store
-    method_set: store_repository
-    capability_owner: execution
-  - receiver: github.com/tysonthomas9/loomcli/internal/store.OutboxStore
-    package: github.com/tysonthomas9/loomcli/internal/store
-    method_set: store_repository
-    capability_owner: execution
-  - receiver: github.com/tysonthomas9/loomcli/internal/store.RepoStore
-    package: github.com/tysonthomas9/loomcli/internal/store
-    method_set: store_repository
-    capability_owner: workspace
-  - receiver: github.com/tysonthomas9/loomcli/internal/store.RoleStore
-    package: github.com/tysonthomas9/loomcli/internal/store
-    method_set: store_repository
-    capability_owner: agents
-  - receiver: github.com/tysonthomas9/loomcli/internal/store.RunOutcomeAwaitStore
-    package: github.com/tysonthomas9/loomcli/internal/store
-    method_set: store_repository
-    capability_owner: execution
-  - receiver: github.com/tysonthomas9/loomcli/internal/store.Store
-    package: github.com/tysonthomas9/loomcli/internal/store
-    method_set: composite_store
-    capability_owner: read_projection
-  - receiver: github.com/tysonthomas9/loomcli/internal/store.TaskRunEventStore
-    package: github.com/tysonthomas9/loomcli/internal/store
-    method_set: store_repository
-    capability_owner: execution
-  - receiver: github.com/tysonthomas9/loomcli/internal/store.TaskRunStore
-    package: github.com/tysonthomas9/loomcli/internal/store
-    method_set: store_repository
-    capability_owner: execution
-  - receiver: github.com/tysonthomas9/loomcli/internal/store.TaskRunTerminalConvergenceStore
-    package: github.com/tysonthomas9/loomcli/internal/store
-    method_set: store_repository
-    capability_owner: execution
-  - receiver: github.com/tysonthomas9/loomcli/internal/store.TerminalDriverRunWorkRecoveryQueueStore
-    package: github.com/tysonthomas9/loomcli/internal/store
-    method_set: store_repository
-    capability_owner: execution
-  - receiver: github.com/tysonthomas9/loomcli/internal/store.TerminalDriverStepRepairStore
-    package: github.com/tysonthomas9/loomcli/internal/store
-    method_set: store_repository
-    capability_owner: execution
-  - receiver: github.com/tysonthomas9/loomcli/internal/store.TerminalSessionStore
-    package: github.com/tysonthomas9/loomcli/internal/store
-    method_set: store_repository
-    capability_owner: interaction
-  - receiver: github.com/tysonthomas9/loomcli/internal/store.TriggerBindingStore
-    package: github.com/tysonthomas9/loomcli/internal/store
-    method_set: store_repository
-    capability_owner: automation
-  - receiver: github.com/tysonthomas9/loomcli/internal/store.TriggerDeliveryStore
-    package: github.com/tysonthomas9/loomcli/internal/store
-    method_set: store_repository
-    capability_owner: automation
-  - receiver: github.com/tysonthomas9/loomcli/internal/store.TriggerEventAppender
-    package: github.com/tysonthomas9/loomcli/internal/store
-    method_set: store_repository
-    capability_owner: automation
-  - receiver: github.com/tysonthomas9/loomcli/internal/store.TriggerEventStore
-    package: github.com/tysonthomas9/loomcli/internal/store
-    method_set: store_repository
-    capability_owner: automation
-  - receiver: github.com/tysonthomas9/loomcli/internal/store.TriggerRouteDispatcher
-    package: github.com/tysonthomas9/loomcli/internal/store
-    method_set: store_repository
-    capability_owner: automation
-  - receiver: github.com/tysonthomas9/loomcli/internal/store.WorkerProfileStore
-    package: github.com/tysonthomas9/loomcli/internal/store
-    method_set: store_repository
-    capability_owner: execution
-  - receiver: github.com/tysonthomas9/loomcli/internal/store.WorkerStore
-    package: github.com/tysonthomas9/loomcli/internal/store
-    method_set: store_repository
-    capability_owner: execution
-  - receiver: github.com/tysonthomas9/loomcli/internal/store.WorkspaceStore
-    package: github.com/tysonthomas9/loomcli/internal/store
+  - receiver: github.com/tysonthomas9/loomcli/internal/modules/workspace.WorkspaceStore
+    package: github.com/tysonthomas9/loomcli/internal/modules/workspace
     method_set: store_repository
     capability_owner: workspace
   - receiver: github.com/tysonthomas9/loomcli/internal/webui/handlers/agents.agentProjectionStore
@@ -877,514 +839,6 @@ function_surfaces:
     function: Default
     access: read-only
     capability_owner: sourcecontrol
-  - package: github.com/tysonthomas9/loomcli/internal/modules/agents
-    function: NewWithLifecycle
-    access: read-only
-    capability_owner: agents
-  - package: github.com/tysonthomas9/loomcli/internal/modules/agents
-    function: OperationRules
-    access: read-only
-    capability_owner: agents
-  - package: github.com/tysonthomas9/loomcli/internal/modules/agents
-    function: ParseRuntimeMetadata
-    access: read-only
-    capability_owner: agents
-  - package: github.com/tysonthomas9/loomcli/internal/modules/agents
-    function: ResolveRoleKind
-    access: read-only
-    capability_owner: agents
-  - package: github.com/tysonthomas9/loomcli/internal/modules/agents
-    function: ResolveRuntimeIdentity
-    access: read-only
-    capability_owner: agents
-  - package: github.com/tysonthomas9/loomcli/internal/modules/agents
-    function: RuntimeRegistration
-    access: read-only
-    capability_owner: agents
-  - package: github.com/tysonthomas9/loomcli/internal/modules/agents
-    function: ValidAgentIdentifier
-    access: read-only
-    capability_owner: agents
-  - package: github.com/tysonthomas9/loomcli/internal/modules/agents
-    function: ValidGenerationID
-    access: read-only
-    capability_owner: agents
-  - package: github.com/tysonthomas9/loomcli/internal/modules/agents
-    function: ValidStoredAgentName
-    access: read-only
-    capability_owner: agents
-  - package: github.com/tysonthomas9/loomcli/internal/modules/agents
-    function: WithRuntimeMetadata
-    access: read-only
-    capability_owner: agents
-  - package: github.com/tysonthomas9/loomcli/internal/modules/artifacts
-    function: DecodeCanonicalTranscript
-    access: read-only
-    capability_owner: artifacts
-  - package: github.com/tysonthomas9/loomcli/internal/modules/artifacts
-    function: EvidenceKindForArtifactType
-    access: read-only
-    capability_owner: artifacts
-  - package: github.com/tysonthomas9/loomcli/internal/modules/artifacts
-    function: New
-    access: read-only
-    capability_owner: artifacts
-  - package: github.com/tysonthomas9/loomcli/internal/modules/artifacts
-    function: NewEvidencePolicy
-    access: read-only
-    capability_owner: artifacts
-  - package: github.com/tysonthomas9/loomcli/internal/modules/artifacts
-    function: NewQuery
-    access: read-only
-    capability_owner: artifacts
-  - package: github.com/tysonthomas9/loomcli/internal/modules/artifacts
-    function: NewSession
-    access: read-only
-    capability_owner: artifacts
-  - package: github.com/tysonthomas9/loomcli/internal/modules/artifacts
-    function: OperationRules
-    access: read-only
-    capability_owner: artifacts
-  - package: github.com/tysonthomas9/loomcli/internal/modules/artifacts
-    function: OwnerEvidenceAttemptKey
-    access: read-only
-    capability_owner: artifacts
-  - package: github.com/tysonthomas9/loomcli/internal/modules/artifacts
-    function: OwnerEvidenceCaptureFailure
-    access: read-only
-    capability_owner: artifacts
-  - package: github.com/tysonthomas9/loomcli/internal/modules/artifacts
-    function: OwnerEvidenceCaptureStatusKey
-    access: read-only
-    capability_owner: artifacts
-  - package: github.com/tysonthomas9/loomcli/internal/modules/artifacts
-    function: OwnerEvidenceFailureClassKey
-    access: read-only
-    capability_owner: artifacts
-  - package: github.com/tysonthomas9/loomcli/internal/modules/artifacts
-    function: OwnerEvidenceFinalized
-    access: read-only
-    capability_owner: artifacts
-  - package: github.com/tysonthomas9/loomcli/internal/modules/artifacts
-    function: WithoutOwnerEvidenceMetadata
-    access: read-only
-    capability_owner: artifacts
-  - package: github.com/tysonthomas9/loomcli/internal/modules/automation
-    function: IsReservedSystemActorRef
-    access: read-only
-    capability_owner: automation
-  - package: github.com/tysonthomas9/loomcli/internal/modules/automation
-    function: New
-    access: read-only
-    capability_owner: automation
-  - package: github.com/tysonthomas9/loomcli/internal/modules/automation
-    function: NewExecutionEventAuthority
-    access: read-only
-    capability_owner: automation
-  - package: github.com/tysonthomas9/loomcli/internal/modules/automation
-    function: NewSystemEventAuthority
-    access: read-only
-    capability_owner: automation
-  - package: github.com/tysonthomas9/loomcli/internal/modules/automation
-    function: NewWebhookEventAuthority
-    access: read-only
-    capability_owner: automation
-  - package: github.com/tysonthomas9/loomcli/internal/modules/automation
-    function: NextScheduledFire
-    access: read-only
-    capability_owner: automation
-  - package: github.com/tysonthomas9/loomcli/internal/modules/automation
-    function: RuntimeRegistrations
-    access: read-only
-    capability_owner: automation
-  - package: github.com/tysonthomas9/loomcli/internal/modules/automation
-    function: ValidateEventPattern
-    access: read-only
-    capability_owner: automation
-  - package: github.com/tysonthomas9/loomcli/internal/modules/automation
-    function: ValidateSchedule
-    access: read-only
-    capability_owner: automation
-  - package: github.com/tysonthomas9/loomcli/internal/modules/automation
-    function: ValidateScheduleTimezone
-    access: read-only
-    capability_owner: automation
-  - package: github.com/tysonthomas9/loomcli/internal/modules/automation
-    function: WithApprovalEventStore
-    access: read-only
-    capability_owner: automation
-  - package: github.com/tysonthomas9/loomcli/internal/modules/automation
-    function: WithAwaitEventNotifier
-    access: read-only
-    capability_owner: automation
-  - package: github.com/tysonthomas9/loomcli/internal/modules/automation
-    function: WithEventTrustPolicy
-    access: read-only
-    capability_owner: automation
-  - package: github.com/tysonthomas9/loomcli/internal/modules/automation
-    function: WithRuntimePorts
-    access: read-only
-    capability_owner: automation
-  - package: github.com/tysonthomas9/loomcli/internal/modules/connectors
-    function: ActionsForSource
-    access: read-only
-    capability_owner: connectors
-  - package: github.com/tysonthomas9/loomcli/internal/modules/connectors
-    function: ClassifyDispatchError
-    access: read-only
-    capability_owner: connectors
-  - package: github.com/tysonthomas9/loomcli/internal/modules/connectors
-    function: ConnectorCallID
-    access: read-only
-    capability_owner: connectors
-  - package: github.com/tysonthomas9/loomcli/internal/modules/connectors
-    function: CredentialAAD
-    access: read-only
-    capability_owner: connectors
-  - package: github.com/tysonthomas9/loomcli/internal/modules/connectors
-    function: DecisionForDispatchError
-    access: read-only
-    capability_owner: connectors
-  - package: github.com/tysonthomas9/loomcli/internal/modules/connectors
-    function: DispatcherAvailable
-    access: read-only
-    capability_owner: connectors
-  - package: github.com/tysonthomas9/loomcli/internal/modules/connectors
-    function: EvaluateGrantAuthorization
-    access: read-only
-    capability_owner: connectors
-  - package: github.com/tysonthomas9/loomcli/internal/modules/connectors
-    function: IsIrreversibleAction
-    access: read-only
-    capability_owner: connectors
-  - package: github.com/tysonthomas9/loomcli/internal/modules/connectors
-    function: MatchGrantResource
-    access: read-only
-    capability_owner: connectors
-  - package: github.com/tysonthomas9/loomcli/internal/modules/connectors
-    function: MissingActionPreconditions
-    access: read-only
-    capability_owner: connectors
-  - package: github.com/tysonthomas9/loomcli/internal/modules/connectors
-    function: New
-    access: read-only
-    capability_owner: connectors
-  - package: github.com/tysonthomas9/loomcli/internal/modules/connectors
-    function: NewDispatch
-    access: read-only
-    capability_owner: connectors
-  - package: github.com/tysonthomas9/loomcli/internal/modules/connectors
-    function: NewManagement
-    access: read-only
-    capability_owner: connectors
-  - package: github.com/tysonthomas9/loomcli/internal/modules/connectors
-    function: NewManagementWithCredentialVault
-    access: read-only
-    capability_owner: connectors
-  - package: github.com/tysonthomas9/loomcli/internal/modules/connectors
-    function: NewManagementWithSecrets
-    access: read-only
-    capability_owner: connectors
-  - package: github.com/tysonthomas9/loomcli/internal/modules/connectors
-    function: NewSecretLifecycle
-    access: read-only
-    capability_owner: connectors
-  - package: github.com/tysonthomas9/loomcli/internal/modules/connectors
-    function: NormalizeAction
-    access: read-only
-    capability_owner: connectors
-  - package: github.com/tysonthomas9/loomcli/internal/modules/connectors
-    function: OperationRules
-    access: read-only
-    capability_owner: connectors
-  - package: github.com/tysonthomas9/loomcli/internal/modules/connectors
-    function: RequiredActionPreconditions
-    access: read-only
-    capability_owner: connectors
-  - package: github.com/tysonthomas9/loomcli/internal/modules/connectors
-    function: ValidateConnectorAction
-    access: read-only
-    capability_owner: connectors
-  - package: github.com/tysonthomas9/loomcli/internal/modules/interaction
-    function: ChatOperationRules
-    access: read-only
-    capability_owner: interaction
-  - package: github.com/tysonthomas9/loomcli/internal/modules/interaction
-    function: ContentDedupeKey
-    access: read-only
-    capability_owner: interaction
-  - package: github.com/tysonthomas9/loomcli/internal/modules/interaction
-    function: IsValidTerminalBackend
-    access: read-only
-    capability_owner: interaction
-  - package: github.com/tysonthomas9/loomcli/internal/modules/interaction
-    function: LaunchSpecForBackend
-    access: read-only
-    capability_owner: interaction
-  - package: github.com/tysonthomas9/loomcli/internal/modules/interaction
-    function: LockAgentLifecycle
-    access: read-only
-    capability_owner: interaction
-  - package: github.com/tysonthomas9/loomcli/internal/modules/interaction
-    function: LoomExecutableForTerminal
-    access: read-only
-    capability_owner: interaction
-  - package: github.com/tysonthomas9/loomcli/internal/modules/interaction
-    function: New
-    access: read-only
-    capability_owner: interaction
-  - package: github.com/tysonthomas9/loomcli/internal/modules/interaction
-    function: NewChat
-    access: read-only
-    capability_owner: interaction
-  - package: github.com/tysonthomas9/loomcli/internal/modules/interaction
-    function: NewLeaseToken
-    access: read-only
-    capability_owner: interaction
-  - package: github.com/tysonthomas9/loomcli/internal/modules/interaction
-    function: NewTerminalSetupCatalog
-    access: read-only
-    capability_owner: interaction
-  - package: github.com/tysonthomas9/loomcli/internal/modules/interaction
-    function: NewTerminalTabs
-    access: read-only
-    capability_owner: interaction
-  - package: github.com/tysonthomas9/loomcli/internal/modules/interaction
-    function: NewUUID
-    access: read-only
-    capability_owner: interaction
-  - package: github.com/tysonthomas9/loomcli/internal/modules/interaction
-    function: OperationRules
-    access: read-only
-    capability_owner: interaction
-  - package: github.com/tysonthomas9/loomcli/internal/modules/interaction
-    function: PublicTerminalErrorMessage
-    access: read-only
-    capability_owner: interaction
-  - package: github.com/tysonthomas9/loomcli/internal/modules/interaction
-    function: RuntimeRegistration
-    access: read-only
-    capability_owner: interaction
-  - package: github.com/tysonthomas9/loomcli/internal/modules/interaction
-    function: SessionEnvelope
-    access: read-only
-    capability_owner: interaction
-  - package: github.com/tysonthomas9/loomcli/internal/modules/interaction
-    function: ShellArgvForCommand
-    access: read-only
-    capability_owner: interaction
-  - package: github.com/tysonthomas9/loomcli/internal/modules/interaction
-    function: ValidateIssueTabIssueID
-    access: read-only
-    capability_owner: interaction
-  - package: github.com/tysonthomas9/loomcli/internal/modules/interaction
-    function: ValidateSessionHistoryIssueID
-    access: read-only
-    capability_owner: interaction
-  - package: github.com/tysonthomas9/loomcli/internal/modules/interaction
-    function: ValidateTerminalSessionName
-    access: read-only
-    capability_owner: interaction
-  - package: github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol
-    function: AssignBranch
-    access: read-only
-    capability_owner: sourcecontrol
-  - package: github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol
-    function: GitWorktreeIdentityFromContext
-    access: read-only
-    capability_owner: sourcecontrol
-  - package: github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol
-    function: IsBinaryContent
-    access: read-only
-    capability_owner: sourcecontrol
-  - package: github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol
-    function: IsSensitiveFilePath
-    access: read-only
-    capability_owner: sourcecontrol
-  - package: github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol
-    function: New
-    access: read-only
-    capability_owner: sourcecontrol
-  - package: github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol
-    function: NewAccessGrantIssuer
-    access: read-only
-    capability_owner: sourcecontrol
-  - package: github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol
-    function: NewConnectorsGitReadBroker
-    access: read-only
-    capability_owner: sourcecontrol
-  - package: github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol
-    function: NewStackLifecycle
-    access: read-only
-    capability_owner: sourcecontrol
-  - package: github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol
-    function: NewTaskOutcomes
-    access: read-only
-    capability_owner: sourcecontrol
-  - package: github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol
-    function: NewWorkspacePorts
-    access: read-only
-    capability_owner: sourcecontrol
-  - package: github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol
-    function: OperationRules
-    access: read-only
-    capability_owner: sourcecontrol
-  - package: github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol
-    function: Ordered
-    access: read-only
-    capability_owner: sourcecontrol
-  - package: github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol
-    function: ParseRepositoryAdmissionMaterializationID
-    access: read-only
-    capability_owner: sourcecontrol
-  - package: github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol
-    function: RepositoryAdmissionMaterializationID
-    access: read-only
-    capability_owner: sourcecontrol
-  - package: github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol
-    function: ValidatePullRequestCheckoutCommand
-    access: read-only
-    capability_owner: sourcecontrol
-  - package: github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol
-    function: ValidateRepositoryAdmissionCheckoutCommand
-    access: read-only
-    capability_owner: sourcecontrol
-  - package: github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol
-    function: ValidateTaskCheckoutCommand
-    access: read-only
-    capability_owner: sourcecontrol
-  - package: github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol
-    function: ValidateTokenFreeRemote
-    access: read-only
-    capability_owner: sourcecontrol
-  - package: github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol
-    function: WithGitWorktreeIdentity
-    access: read-only
-    capability_owner: sourcecontrol
-  - package: github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog
-    function: BuiltinSourceRef
-    access: read-only
-    capability_owner: workflowcatalog
-  - package: github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog
-    function: EffectiveTrust
-    access: read-only
-    capability_owner: workflowcatalog
-  - package: github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog
-    function: IsBuiltinWorkflowName
-    access: read-only
-    capability_owner: workflowcatalog
-  - package: github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog
-    function: New
-    access: read-only
-    capability_owner: workflowcatalog
-  - package: github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog
-    function: NewWithAuthoring
-    access: read-only
-    capability_owner: workflowcatalog
-  - package: github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog
-    function: VersionApproved
-    access: read-only
-    capability_owner: workflowcatalog
-  - package: github.com/tysonthomas9/loomcli/internal/modules/workitems
-    function: AdapterCanceled
-    access: read-only
-    capability_owner: workitems
-  - package: github.com/tysonthomas9/loomcli/internal/modules/workitems
-    function: AdapterConflict
-    access: read-only
-    capability_owner: workitems
-  - package: github.com/tysonthomas9/loomcli/internal/modules/workitems
-    function: AdapterInternal
-    access: read-only
-    capability_owner: workitems
-  - package: github.com/tysonthomas9/loomcli/internal/modules/workitems
-    function: AdapterInvalid
-    access: read-only
-    capability_owner: workitems
-  - package: github.com/tysonthomas9/loomcli/internal/modules/workitems
-    function: AdapterNotFound
-    access: read-only
-    capability_owner: workitems
-  - package: github.com/tysonthomas9/loomcli/internal/modules/workitems
-    function: AdapterNotImplemented
-    access: read-only
-    capability_owner: workitems
-  - package: github.com/tysonthomas9/loomcli/internal/modules/workitems
-    function: AdapterTimeout
-    access: read-only
-    capability_owner: workitems
-  - package: github.com/tysonthomas9/loomcli/internal/modules/workitems
-    function: AdapterUnavailable
-    access: read-only
-    capability_owner: workitems
-  - package: github.com/tysonthomas9/loomcli/internal/modules/workitems
-    function: IsAlreadyClosedConflict
-    access: read-only
-    capability_owner: workitems
-  - package: github.com/tysonthomas9/loomcli/internal/modules/workitems
-    function: IsKind
-    access: read-only
-    capability_owner: workitems
-  - package: github.com/tysonthomas9/loomcli/internal/modules/workitems
-    function: New
-    access: read-only
-    capability_owner: workitems
-  - package: github.com/tysonthomas9/loomcli/internal/modules/workitems
-    function: NewOperationError
-    access: read-only
-    capability_owner: workitems
-  - package: github.com/tysonthomas9/loomcli/internal/modules/workitems
-    function: PublicErrorMessage
-    access: read-only
-    capability_owner: workitems
-  - package: github.com/tysonthomas9/loomcli/internal/modules/workspace
-    function: NameValidationKindOf
-    access: read-only
-    capability_owner: workspace
-  - package: github.com/tysonthomas9/loomcli/internal/modules/workspace
-    function: New
-    access: read-only
-    capability_owner: workspace
-  - package: github.com/tysonthomas9/loomcli/internal/modules/workspace
-    function: NewCreateError
-    access: read-only
-    capability_owner: workspace
-  - package: github.com/tysonthomas9/loomcli/internal/modules/workspace
-    function: PublicErrorMessage
-    access: read-only
-    capability_owner: workspace
-  - package: github.com/tysonthomas9/loomcli/internal/modules/workspace
-    function: ValidateName
-    access: read-only
-    capability_owner: workspace
-  - package: github.com/tysonthomas9/loomcli/internal/modules/workspace
-    function: WithRepositoryCatalog
-    access: read-only
-    capability_owner: workspace
-  - package: github.com/tysonthomas9/loomcli/internal/store
-    function: DefaultBindingID
-    access: read-only
-    capability_owner: automation
-  - package: github.com/tysonthomas9/loomcli/internal/store
-    function: IsNotFound
-    access: read-only
-    capability_owner: workspace
-  - package: github.com/tysonthomas9/loomcli/internal/store
-    function: OrchestrationSessionFor
-    access: read-only
-    capability_owner: interaction
-  - package: github.com/tysonthomas9/loomcli/internal/store
-    function: OrchestrationSessionIDFor
-    access: read-only
-    capability_owner: interaction
-  - package: github.com/tysonthomas9/loomcli/internal/store
-    function: SortDriverRunsNewestFirst
-    access: read-only
-    capability_owner: execution
-  - package: github.com/tysonthomas9/loomcli/internal/store
-    function: UploadContentArtifact
-    access: mutating
-    capability_owner: artifacts
   - package: github.com/tysonthomas9/loomcli/internal/usage
     function: EstimateCost
     access: read-only
@@ -1479,187 +933,187 @@ writes:
       aggregate_owner: agents
       disposition: owner_adapter
     - file: internal/app/serve/automation_workflow_catalog.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.AtomicAwaitStore
+      receiver: github.com/tysonthomas9/loomcli/internal/modules/execution.AtomicAwaitStore
       method: ResolveAwaitAndResume
       count: 1
       aggregate_owner: execution
       disposition: owner_adapter
     - file: internal/app/serve/execution.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.AtomicAwaitStore
+      receiver: github.com/tysonthomas9/loomcli/internal/modules/execution.AtomicAwaitStore
       method: ResolveAwaitAndResume
       count: 1
       aggregate_owner: execution
       disposition: owner_adapter
     - file: internal/app/serve/execution.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.AwaitStore
+      receiver: github.com/tysonthomas9/loomcli/internal/modules/execution.AwaitStore
       method: RegisterAwaitAndCheck
       count: 1
       aggregate_owner: execution
       disposition: owner_adapter
     - file: internal/app/serve/execution.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.DriverRunStore
+      receiver: github.com/tysonthomas9/loomcli/internal/modules/execution.DriverRunStore
       method: Claim
       count: 1
       aggregate_owner: execution
       disposition: owner_adapter
     - file: internal/app/serve/execution.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.DriverRunStore
+      receiver: github.com/tysonthomas9/loomcli/internal/modules/execution.DriverRunStore
       method: Create
       count: 1
       aggregate_owner: execution
       disposition: owner_adapter
     - file: internal/app/serve/execution.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.DriverRunStore
+      receiver: github.com/tysonthomas9/loomcli/internal/modules/execution.DriverRunStore
       method: Finish
       count: 1
       aggregate_owner: execution
       disposition: owner_adapter
     - file: internal/app/serve/execution.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.DriverRunStore
+      receiver: github.com/tysonthomas9/loomcli/internal/modules/execution.DriverRunStore
       method: Heartbeat
       count: 1
       aggregate_owner: execution
       disposition: owner_adapter
     - file: internal/app/serve/execution.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.DriverRunStore
+      receiver: github.com/tysonthomas9/loomcli/internal/modules/execution.DriverRunStore
       method: RecoverStale
       count: 1
       aggregate_owner: execution
       disposition: owner_adapter
     - file: internal/app/serve/execution.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.DriverRunStore
+      receiver: github.com/tysonthomas9/loomcli/internal/modules/execution.DriverRunStore
       method: ResumeAwaiting
       count: 1
       aggregate_owner: execution
       disposition: owner_adapter
     - file: internal/app/serve/execution.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.DriverRunStore
+      receiver: github.com/tysonthomas9/loomcli/internal/modules/execution.DriverRunStore
       method: Suspend
       count: 1
       aggregate_owner: execution
       disposition: owner_adapter
     - file: internal/app/serve/execution_outbox_delivery.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.OutboxStore
+      receiver: github.com/tysonthomas9/loomcli/internal/modules/execution.OutboxStore
       method: Create
       count: 1
       aggregate_owner: execution
       disposition: owner_adapter
     - file: internal/app/serve/execution_outbox_delivery.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.OutboxStore
+      receiver: github.com/tysonthomas9/loomcli/internal/modules/execution.OutboxStore
       method: MarkResult
       count: 1
       aggregate_owner: execution
       disposition: owner_adapter
     - file: internal/app/serve/execution_reconciliation_queues.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.AwaitEventNotificationStore
+      receiver: github.com/tysonthomas9/loomcli/internal/modules/execution.AwaitEventNotificationStore
       method: ClaimAwaitEventNotifications
       count: 1
       aggregate_owner: execution
       disposition: owner_adapter
     - file: internal/app/serve/execution_reconciliation_queues.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.AwaitEventNotificationStore
+      receiver: github.com/tysonthomas9/loomcli/internal/modules/execution.AwaitEventNotificationStore
       method: CompleteAwaitEventNotification
       count: 1
       aggregate_owner: execution
       disposition: owner_adapter
     - file: internal/app/serve/execution_reconciliation_queues.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.AwaitEventNotificationStore
+      receiver: github.com/tysonthomas9/loomcli/internal/modules/execution.AwaitEventNotificationStore
       method: RetryAwaitEventNotification
       count: 1
       aggregate_owner: execution
       disposition: owner_adapter
     - file: internal/app/serve/execution_reconciliation_queues.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.DriverRunOutcomeStore
+      receiver: github.com/tysonthomas9/loomcli/internal/modules/execution.DriverRunOutcomeStore
       method: ClaimDriverRunOutcomes
       count: 1
       aggregate_owner: execution
       disposition: owner_adapter
     - file: internal/app/serve/execution_reconciliation_queues.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.DriverRunOutcomeStore
+      receiver: github.com/tysonthomas9/loomcli/internal/modules/execution.DriverRunOutcomeStore
       method: CompleteDriverRunOutcome
       count: 1
       aggregate_owner: execution
       disposition: owner_adapter
     - file: internal/app/serve/execution_reconciliation_queues.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.DriverRunOutcomeStore
+      receiver: github.com/tysonthomas9/loomcli/internal/modules/execution.DriverRunOutcomeStore
       method: RetryDriverRunOutcome
       count: 1
       aggregate_owner: execution
       disposition: owner_adapter
     - file: internal/app/serve/execution_reconciliation_queues.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.TerminalDriverRunWorkRecoveryQueueStore
+      receiver: github.com/tysonthomas9/loomcli/internal/modules/execution.TerminalDriverRunWorkRecoveryQueueStore
       method: ClaimTerminalDriverRunWorkRecoveries
       count: 1
       aggregate_owner: execution
       disposition: owner_adapter
     - file: internal/app/serve/execution_reconciliation_queues.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.TerminalDriverRunWorkRecoveryQueueStore
+      receiver: github.com/tysonthomas9/loomcli/internal/modules/execution.TerminalDriverRunWorkRecoveryQueueStore
       method: CompleteTerminalDriverRunWorkRecovery
       count: 1
       aggregate_owner: execution
       disposition: owner_adapter
     - file: internal/app/serve/execution_reconciliation_queues.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.TerminalDriverRunWorkRecoveryQueueStore
+      receiver: github.com/tysonthomas9/loomcli/internal/modules/execution.TerminalDriverRunWorkRecoveryQueueStore
       method: RetryTerminalDriverRunWorkRecovery
       count: 1
       aggregate_owner: execution
       disposition: owner_adapter
     - file: internal/app/serve/execution_task_run_convergence.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.OutboxStore
+      receiver: github.com/tysonthomas9/loomcli/internal/modules/execution.OutboxStore
       method: Create
       count: 1
       aggregate_owner: execution
       disposition: owner_adapter
     - file: internal/app/serve/execution_task_run_convergence.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.TaskRunEventStore
+      receiver: github.com/tysonthomas9/loomcli/internal/modules/execution.TaskRunEventStore
       method: Append
       count: 1
       aggregate_owner: execution
       disposition: owner_adapter
     - file: internal/app/serve/execution_task_run_convergence.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.TaskRunTerminalConvergenceStore
+      receiver: github.com/tysonthomas9/loomcli/internal/modules/execution.TaskRunTerminalConvergenceStore
       method: CompleteTaskRunTerminalConvergence
       count: 1
       aggregate_owner: execution
       disposition: owner_adapter
     - file: internal/app/serve/execution_task_run_convergence.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.TerminalDriverStepRepairStore
+      receiver: github.com/tysonthomas9/loomcli/internal/modules/execution.TerminalDriverStepRepairStore
       method: RepairTerminalDriverStep
       count: 1
       aggregate_owner: execution
       disposition: owner_adapter
     - file: internal/app/serve/execution_task_run_ports.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.NodeStore
+      receiver: github.com/tysonthomas9/loomcli/internal/modules/execution.NodeStore
       method: Create
       count: 1
       aggregate_owner: execution
       disposition: owner_adapter
     - file: internal/app/serve/execution_task_run_ports.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.NodeStore
+      receiver: github.com/tysonthomas9/loomcli/internal/modules/execution.NodeStore
       method: Heartbeat
       count: 1
       aggregate_owner: execution
       disposition: owner_adapter
     - file: internal/app/serve/execution_task_run_ports.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.NodeStore
+      receiver: github.com/tysonthomas9/loomcli/internal/modules/execution.NodeStore
       method: Update
       count: 2
       aggregate_owner: execution
       disposition: owner_adapter
     - file: internal/app/serve/execution_worker_profiles.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.WorkerProfileStore
+      receiver: github.com/tysonthomas9/loomcli/internal/modules/execution.WorkerProfileStore
       method: Create
       count: 1
       aggregate_owner: execution
       disposition: owner_adapter
     - file: internal/app/serve/execution_worker_profiles.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.WorkerProfileStore
+      receiver: github.com/tysonthomas9/loomcli/internal/modules/execution.WorkerProfileStore
       method: Delete
       count: 1
       aggregate_owner: execution
       disposition: owner_adapter
     - file: internal/app/serve/execution_worker_profiles.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.WorkerProfileStore
+      receiver: github.com/tysonthomas9/loomcli/internal/modules/execution.WorkerProfileStore
       method: Update
       count: 1
       aggregate_owner: execution
@@ -1819,42 +1273,6 @@ writes:
       method: withLock
       count: 6
       aggregate_owner: sourcecontrol
-      disposition: owner_adapter
-    - file: internal/infra/workspacecatalog/catalog.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.RepoStore
-      method: Create
-      count: 1
-      aggregate_owner: workspace
-      disposition: owner_adapter
-    - file: internal/infra/workspacecatalog/catalog.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.RepoStore
-      method: Delete
-      count: 1
-      aggregate_owner: workspace
-      disposition: owner_adapter
-    - file: internal/infra/workspacecatalog/catalog.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.RepoStore
-      method: Update
-      count: 1
-      aggregate_owner: workspace
-      disposition: owner_adapter
-    - file: internal/infra/workspacecatalog/catalog.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.WorkspaceStore
-      method: Create
-      count: 1
-      aggregate_owner: workspace
-      disposition: owner_adapter
-    - file: internal/infra/workspacecatalog/catalog.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.WorkspaceStore
-      method: Delete
-      count: 1
-      aggregate_owner: workspace
-      disposition: owner_adapter
-    - file: internal/infra/workspacecatalog/catalog.go
-      receiver: github.com/tysonthomas9/loomcli/internal/store.WorkspaceStore
-      method: Update
-      count: 3
-      aggregate_owner: workspace
       disposition: owner_adapter
     - file: internal/usage/projection.go
       receiver: '*github.com/tysonthomas9/loomcli/internal/usage.Store'

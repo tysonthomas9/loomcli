@@ -10,10 +10,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
+
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	transcript "github.com/tysonthomas9/loomcli/internal/modules/artifacts"
-	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
 func TestNewestCodexThreadWaitsForThreadCreatedAfterRuntimeStart(t *testing.T) {
@@ -513,12 +513,12 @@ func TestMarshalCanonicalTranscriptPreservesTypedSourceLimitEvidence(t *testing.
 func TestCaptureCodexInteractiveTranscriptPersistsSessionArtifactAndRef(t *testing.T) {
 	ctx := context.Background()
 	st := memstore.New()
-	if _, err := st.AgentSessions().Create(ctx, store.AgentSessionCreate{
+	if _, err := st.AgentSessions().Create(ctx, interaction.AgentSessionCreate{
 		WorkspaceKey: "WS",
 		SessionID:    "lead-session",
 		AgentID:      "local-review",
-		Kind:         domain.AgentSessionKindInteractive,
-		Status:       domain.AgentSessionRunning,
+		Kind:         interaction.SessionRecordInteractive,
+		Status:       interaction.SessionRecordRunning,
 		Metadata:     map[string]string{"assignment": "preserve-me"},
 	}); err != nil {
 		t.Fatalf("create interactive session: %v", err)

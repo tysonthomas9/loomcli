@@ -6,8 +6,9 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/store"
+	workspaceowner "github.com/tysonthomas9/loomcli/internal/modules/workspace"
+
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 // Env vars consumed by bootstrap. Defined as constants so callers can
@@ -73,7 +74,7 @@ var ErrNoActiveWorkspace = errors.New("no active workspace: set " + EnvWorkspace
 // When ws != nil the resolved key is validated against the store (so a
 // stale env value returns ErrNotFound instead of silently routing to a
 // missing key). Pass nil to skip validation.
-func ResolveActiveWorkspaceKey(ctx context.Context, ws store.WorkspaceStore) (string, error) {
+func ResolveActiveWorkspaceKey(ctx context.Context, ws workspaceowner.WorkspaceStore) (string, error) {
 	key := os.Getenv(EnvWorkspace)
 	if key == "" {
 		return "", ErrNoActiveWorkspace
@@ -82,7 +83,7 @@ func ResolveActiveWorkspaceKey(ctx context.Context, ws store.WorkspaceStore) (st
 		return key, nil
 	}
 	if _, err := ws.Get(ctx, key); err != nil {
-		if errors.Is(err, domain.ErrNotFound) {
+		if errors.Is(err, persistence.ErrNotFound) {
 			return "", fmt.Errorf("active workspace %q not found in fleet-db: %w", key, err)
 		}
 		return "", fmt.Errorf("validate active workspace %q: %w", key, err)

@@ -24,16 +24,19 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
+
+	workspaceowner "github.com/tysonthomas9/loomcli/internal/modules/workspace"
+
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
 	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 	fleet "github.com/tysonthomas9/loomcli/internal/modules/workitems/fleetdb"
 	"github.com/tysonthomas9/loomcli/internal/netutil"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
-	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 func TestE2E_WorkflowEndpointsRunRealFlueEpicRunner(t *testing.T) {
@@ -193,24 +196,24 @@ func (e *workflowEndpointE2E) seedWorkspace() {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 
-	_, err := e.fleetClient.Workspaces().Create(ctx, store.WorkspaceCreate{
+	_, err := e.fleetClient.Workspaces().Create(ctx, workspaceowner.WorkspaceCreate{
 		Key:  e.workspace,
 		Name: "Workflow endpoint E2E",
 	})
-	if err != nil && !errors.Is(err, domain.ErrAlreadyExists) {
+	if err != nil && !errors.Is(err, persistence.ErrAlreadyExists) {
 		e.t.Fatalf("create workspace: %v", err)
 	}
 
-	_, err = e.fleetClient.Nodes().Create(ctx, store.NodeCreate{
+	_, err = e.fleetClient.Nodes().Create(ctx, execution.NodeCreate{
 		WorkspaceKey:    e.workspace,
 		NodeID:          e.nodeID,
 		OwnerActor:      e.actor,
-		RuntimeProvider: domain.RuntimeProviderLocal,
-		DrainState:      domain.NodeDrainActive,
+		RuntimeProvider: execution.RuntimeProviderLocal,
+		DrainState:      execution.WorkerNodeActive,
 		Capacity:        8,
 		TTL:             5 * time.Minute,
 	})
-	if err != nil && !errors.Is(err, domain.ErrAlreadyExists) {
+	if err != nil && !errors.Is(err, persistence.ErrAlreadyExists) {
 		e.t.Fatalf("create executor node: %v", err)
 	}
 
@@ -455,7 +458,7 @@ func (e *workflowEndpointE2E) loomEnv() []string {
 
 func (e *workflowEndpointE2E) startWorkflowRun(name string, payload map[string]any) string {
 	e.t.Helper()
-	var run domain.DriverRun
+	var run execution.DriverRunRecord
 	e.postJSONWithHeaders(
 		"/api/workspaces/"+e.workspace+"/workflows/"+name,
 		payload,
@@ -528,7 +531,7 @@ func (e *workflowEndpointE2E) runLoomJSON(out any, args ...string) {
 	}
 }
 
-func (e *workflowEndpointE2E) waitForRunCompleted(runID string) domain.DriverRun {
+func (e *workflowEndpointE2E) waitForRunCompleted(runID string) execution.DriverRunRecord {
 	e.t.Helper()
 	timeout := e.runTimeout
 	if timeout <= 0 {
@@ -536,17 +539,17 @@ func (e *workflowEndpointE2E) waitForRunCompleted(runID string) domain.DriverRun
 	}
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
-		var run domain.DriverRun
+		var run execution.DriverRunRecord
 		e.getJSON("/api/workspaces/"+e.workspace+"/runs/"+runID, http.StatusOK, &run)
 		switch run.Status {
-		case domain.DriverRunCompleted:
+		case execution.DriverRunCompleted:
 			return run
-		case domain.DriverRunFailed, domain.DriverRunNeedsReview, domain.DriverRunCancelled:
+		case execution.DriverRunFailed, execution.DriverRunNeedsReview, execution.DriverRunCancelled:
 			e.t.Fatalf("workflow run %s reached terminal status %s: %+v", runID, run.Status, run)
 		}
 		time.Sleep(500 * time.Millisecond)
 	}
-	var run domain.DriverRun
+	var run execution.DriverRunRecord
 	e.getJSON("/api/workspaces/"+e.workspace+"/runs/"+runID, http.StatusOK, &run)
 	e.t.Fatalf("workflow run %s did not complete before deadline: %+v", runID, run)
 	return run
@@ -570,7 +573,7 @@ func workflowEndpointRepoSlug(repoURL string) string {
 	return repo
 }
 
-func (e *workflowEndpointE2E) expectRunPayload(run domain.DriverRun, epicID string) {
+func (e *workflowEndpointE2E) expectRunPayload(run execution.DriverRunRecord, epicID string) {
 	e.t.Helper()
 	e.expectRunPayloadFields(run, epicID, "workflow-endpoint-e2e")
 	if !strings.Contains(run.Output["flue_stderr_tail"], "epic-runner-start "+epicID) {
@@ -578,7 +581,7 @@ func (e *workflowEndpointE2E) expectRunPayload(run domain.DriverRun, epicID stri
 	}
 }
 
-func (e *workflowEndpointE2E) expectRunPayloadFields(run domain.DriverRun, epicID, requestedBy string) {
+func (e *workflowEndpointE2E) expectRunPayloadFields(run execution.DriverRunRecord, epicID, requestedBy string) {
 	e.t.Helper()
 	var payload struct {
 		EpicID      string `json:"epicId"`
@@ -600,7 +603,7 @@ func (e *workflowEndpointE2E) expectRunPayloadFields(run domain.DriverRun, epicI
 
 func (e *workflowEndpointE2E) expectRunEvents(runID string, requiredActions ...string) {
 	e.t.Helper()
-	var page domain.PlatformEventsPage
+	var page execution.AuditPage
 	e.getJSON("/api/workspaces/"+e.workspace+"/runs/"+runID+"/events?limit=50", http.StatusOK, &page)
 	actions := map[string]bool{}
 	for _, event := range page.Events {
@@ -651,7 +654,7 @@ func (e *workflowEndpointE2E) expectDAGCompleted(dag workflowEndpointDAG, runID 
 	e.expectCloseTaskLedger(taskRunByTaskID)
 }
 
-func (e *workflowEndpointE2E) expectDAGDrained(dag workflowEndpointDAG, runID string) map[string]*domain.TaskRun {
+func (e *workflowEndpointE2E) expectDAGDrained(dag workflowEndpointDAG, runID string) map[string]*execution.TaskRunRecord {
 	e.t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
@@ -671,16 +674,16 @@ func (e *workflowEndpointE2E) expectDAGDrained(dag workflowEndpointDAG, runID st
 		e.t.Fatalf("closed child task count = %d, want 4; children=%+v", closed, children)
 	}
 
-	taskRuns, err := e.fleetClient.TaskRuns().List(ctx, e.workspace, store.TaskRunFilter{DriverRunID: runID})
+	taskRuns, err := e.fleetClient.TaskRuns().List(ctx, e.workspace, execution.TaskRunFilter{DriverRunID: runID})
 	if err != nil {
 		e.t.Fatalf("list child task runs: %v", err)
 	}
 	if len(taskRuns) != 4 {
 		e.t.Fatalf("task run count = %d, want 4; taskRuns=%+v", len(taskRuns), taskRuns)
 	}
-	taskRunByTaskID := make(map[string]*domain.TaskRun, len(taskRuns))
+	taskRunByTaskID := make(map[string]*execution.TaskRunRecord, len(taskRuns))
 	for _, taskRun := range taskRuns {
-		if taskRun.Status != domain.TaskRunCompleted || taskRun.LogsRef == "" {
+		if taskRun.Status != execution.TaskRunRecordCompleted || taskRun.LogsRef == "" {
 			e.t.Fatalf("task run = %+v, want completed with logs_ref", taskRun)
 		}
 		taskRunByTaskID[taskRun.TaskID] = taskRun
@@ -717,7 +720,7 @@ func (e *workflowEndpointE2E) expectSingleDaytonaTaskDrained(dag workflowEndpoin
 		e.t.Fatalf("children = %+v, want single closed Daytona smoke task %s", children, dag.taskA)
 	}
 
-	taskRuns, err := e.fleetClient.TaskRuns().List(ctx, e.workspace, store.TaskRunFilter{DriverRunID: runID})
+	taskRuns, err := e.fleetClient.TaskRuns().List(ctx, e.workspace, execution.TaskRunFilter{DriverRunID: runID})
 	if err != nil {
 		e.t.Fatalf("list child task runs: %v", err)
 	}
@@ -725,7 +728,7 @@ func (e *workflowEndpointE2E) expectSingleDaytonaTaskDrained(dag workflowEndpoin
 		e.t.Fatalf("task run count = %d, want 1; taskRuns=%+v", len(taskRuns), taskRuns)
 	}
 	taskRun := taskRuns[0]
-	if taskRun.TaskID != dag.taskA || taskRun.Status != domain.TaskRunCompleted || taskRun.Runner != "daytona-task-runner" {
+	if taskRun.TaskID != dag.taskA || taskRun.Status != execution.TaskRunRecordCompleted || taskRun.Runner != "daytona-task-runner" {
 		e.t.Fatalf("task run = %+v, want completed Daytona runner for %s", taskRun, dag.taskA)
 	}
 	if taskRun.RuntimeMetadata["sandbox_provider"] != "daytona" {
@@ -764,17 +767,17 @@ func (e *workflowEndpointE2E) expectDaytonaPRChainDrained(dag workflowEndpointDA
 		}
 	}
 
-	taskRuns, err := e.fleetClient.TaskRuns().List(ctx, e.workspace, store.TaskRunFilter{DriverRunID: runID})
+	taskRuns, err := e.fleetClient.TaskRuns().List(ctx, e.workspace, execution.TaskRunFilter{DriverRunID: runID})
 	if err != nil {
 		e.t.Fatalf("list child task runs: %v", err)
 	}
 	if len(taskRuns) != 3 {
 		e.t.Fatalf("task run count = %d, want 3; taskRuns=%+v", len(taskRuns), taskRuns)
 	}
-	taskRunByTaskID := make(map[string]*domain.TaskRun, len(taskRuns))
+	taskRunByTaskID := make(map[string]*execution.TaskRunRecord, len(taskRuns))
 	prURLs := make(map[string]bool, len(taskRuns))
 	for _, taskRun := range taskRuns {
-		if taskRun.Status != domain.TaskRunCompleted || taskRun.Runner != "daytona-task-runner" {
+		if taskRun.Status != execution.TaskRunRecordCompleted || taskRun.Runner != "daytona-task-runner" {
 			e.t.Fatalf("task run = %+v, want completed Daytona runner", taskRun)
 		}
 		metadata := taskRun.RuntimeMetadata
@@ -810,7 +813,7 @@ func (e *workflowEndpointE2E) expectDaytonaPRChainDrained(dag workflowEndpointDA
 	}
 }
 
-func (e *workflowEndpointE2E) expectCloseTaskLedger(taskRunByTaskID map[string]*domain.TaskRun) {
+func (e *workflowEndpointE2E) expectCloseTaskLedger(taskRunByTaskID map[string]*execution.TaskRunRecord) {
 	e.t.Helper()
 	var listed struct {
 		Actions []struct {
@@ -856,10 +859,10 @@ func (e *workflowEndpointE2E) expectCloseTaskLedger(taskRunByTaskID map[string]*
 	}
 }
 
-func (e *workflowEndpointE2E) expectTaskRunCompletionReplay(taskRun *domain.TaskRun) {
+func (e *workflowEndpointE2E) expectTaskRunCompletionReplay(taskRun *execution.TaskRunRecord) {
 	e.t.Helper()
 	var replay struct {
-		TaskRun *domain.TaskRun `json:"task_run"`
+		TaskRun *execution.TaskRunRecord `json:"task_run"`
 		Action  *struct {
 			ActionID   string `json:"action_id"`
 			ActionType string `json:"action_type"`
@@ -872,7 +875,7 @@ func (e *workflowEndpointE2E) expectTaskRunCompletionReplay(taskRun *domain.Task
 		"status":        "completed",
 		"close_task":    true,
 	}, http.StatusOK, &replay)
-	if replay.TaskRun == nil || replay.TaskRun.TaskRunID != taskRun.TaskRunID || replay.TaskRun.Status != domain.TaskRunCompleted {
+	if replay.TaskRun == nil || replay.TaskRun.TaskRunID != taskRun.TaskRunID || replay.TaskRun.Status != execution.TaskRunRecordCompleted {
 		e.t.Fatalf("completion replay task_run = %+v, want completed %s", replay.TaskRun, taskRun.TaskRunID)
 	}
 	if replay.Action == nil || replay.Action.ActionType != "close_task" || replay.Action.Status != "applied" || replay.Action.TargetRef != taskRun.TaskID {
@@ -1231,7 +1234,7 @@ func sortedKeys(values map[string]bool) []string {
 	return keys
 }
 
-func sortedTaskIDs(values map[string]*domain.TaskRun) []string {
+func sortedTaskIDs(values map[string]*execution.TaskRunRecord) []string {
 	keys := make([]string, 0, len(values))
 	for key := range values {
 		keys = append(keys, key)

@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/app/query/operationalview"
 	"github.com/tysonthomas9/loomcli/internal/app/query/sessionarchive"
 	"github.com/tysonthomas9/loomcli/internal/app/workitemmove"
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
@@ -111,11 +112,11 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 	app.initialWorkspaceID = config.InitialWorkspaceID
 
 	app.workItems = workitems.Route(config.WorkItemsFn)
-	if config.Store != nil {
-		app.workspaceStore = config.Store.Workspaces()
+	if config.ProjectionRecords != nil {
+		app.workspaceStore = config.ProjectionRecords.Workspaces()
 		app.workspaceCatalog = config.WorkspaceCatalog
 		if app.workspaceCatalog == nil {
-			app.workspaceCatalog, err = NewWorkspaceCapability(app.workspaceStore, config.Store.Repos())
+			app.workspaceCatalog, err = NewWorkspaceCapability(app.workspaceStore, config.ProjectionRecords.Repos())
 			if err != nil {
 				return nil, fmt.Errorf("compose Workspace capability: %w", err)
 			}
@@ -296,7 +297,7 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 	// `/api/workspaces/{ws}/...` route would 404 before the handler could read
 	// state from fleet-db.
 	wsResolver := config.WorkspaceIDResolverFn
-	wsStore := config.Store
+	wsStore := config.ProjectionRecords
 	app.wsResolveFn = func(reqCtx context.Context, id string) (middleware.WorkspaceRef, bool) {
 		ref := middleware.WorkspaceRef{RequestedID: id, CanonicalID: id}
 		if app.registry.Registered(id) {
@@ -321,12 +322,12 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 	}
 	// Initialize workspace service layer. FleetDB Store is the authoritative
 	// workspace source in both local and distributed modes.
-	var workspaceAgents workspacecoord.WorkspaceAgentDirectory
+	var workspaceAgents operationalview.WorkspaceAgentRecords
 	if config.AgentsCapability != nil {
 		workspaceAgents = config.AgentsCapability.AgentsAPI()
 	}
 	app.workspaceSvc = workspacecoord.NewWorkspaceService(workspacecoord.WorkspaceServiceConfig{
-		Topology:             config.Store,
+		Topology:             config.ProjectionRecords,
 		Workspace:            app.workspaceCatalog,
 		CreateFn:             app.wrappedCreateFn,
 		AddReposFn:           config.WorkspaceAddReposFn,
@@ -339,12 +340,12 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 	{
 		var agentTerminal interaction.TerminalDependencies
 		var workspacePath func(context.Context, string) string
-		if config.Store != nil {
+		if config.ProjectionRecords != nil {
 			workspacePath = func(ctx context.Context, workspaceKey string) string {
-				return storeadapter.ResolveOrHealWorkspacePath(ctx, config.Store, workspaceKey)
+				return storeadapter.ResolveOrHealWorkspacePath(ctx, config.ProjectionRecords, workspaceKey)
 			}
 		}
-		agentTerminal.Placement = storeadapter.NewTerminalPlacement(config.Store, workspacePath)
+		agentTerminal.Placement = storeadapter.NewTerminalPlacement(config.ProjectionRecords, workspacePath)
 		agentTerminal.LiveView = app.agentTmuxMgr
 		agentTerminal.Setup = interaction.NewTerminalSetupCatalog()
 		if config.AgentsCapability != nil {
@@ -496,13 +497,13 @@ func (app *Server) activateSSESubscriber(_ context.Context, wsID string) {
 }
 
 func storeWorkspacePathsFn(ctx context.Context, config webui.ServerConfig) func() (map[string]string, error) {
-	if config.Store == nil {
+	if config.ProjectionRecords == nil {
 		return nil
 	}
 	// Capture only the store handle, not the whole ServerConfig, so this
 	// long-lived closure (held by the reconcile/health goroutines) doesn't
 	// retain the full config struct for the process lifetime.
-	store := config.Store
+	store := config.ProjectionRecords
 	return func() (map[string]string, error) {
 		// Healing variant: re-bind a workspace whose local path is missing from
 		// state.json to an existing on-disk checkout, so reconciliation recovers

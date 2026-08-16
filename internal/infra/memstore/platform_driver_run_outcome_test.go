@@ -4,15 +4,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 )
 
 func TestDriverRunTerminalTransitionsEnqueueDurableOutcomes(t *testing.T) {
 	runs := newDriverRunStore(nil, nil)
 	create := func(runID string) {
 		t.Helper()
-		if _, err := runs.Create(t.Context(), store.DriverRunCreate{
+		if _, err := runs.Create(t.Context(), execution.DriverRunCreate{
 			WorkspaceKey: "WS", RunID: runID, DriverID: "driver", DriverVersionID: "v1",
 		}); err != nil {
 			t.Fatalf("Create(%s): %v", runID, err)
@@ -24,9 +23,9 @@ func TestDriverRunTerminalTransitionsEnqueueDurableOutcomes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := runs.Finish(t.Context(), "WS", "finished", store.DriverRunFinish{
+	if _, err := runs.Finish(t.Context(), "WS", "finished", execution.DriverRunFinish{
 		NodeID: "node", LeaseID: "lease", FencingToken: claimed.FencingToken,
-		Status: domain.DriverRunCompleted, Summary: "done",
+		Status: execution.DriverRunCompleted, Summary: "done",
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -48,12 +47,12 @@ func TestDriverRunTerminalTransitionsEnqueueDurableOutcomes(t *testing.T) {
 	runs.mu.Lock()
 	runs.items["WS"]["stale"].LastHeartbeat = time.Now().UTC().Add(-time.Hour)
 	runs.mu.Unlock()
-	if result, err := runs.RecoverStale(t.Context(), "WS", store.StaleDriverRunRecovery{MaxAgeSeconds: 60}); err != nil || result.Recovered != 1 {
+	if result, err := runs.RecoverStale(t.Context(), "WS", execution.StaleDriverRunRecovery{MaxAgeSeconds: 60}); err != nil || result.Recovered != 1 {
 		t.Fatalf("RecoverStale = %+v, %v", result, err)
 	}
 
 	now := time.Now().UTC().Add(time.Second)
-	outcomes, err := runs.ClaimDriverRunOutcomes(t.Context(), store.DriverRunOutcomeClaim{
+	outcomes, err := runs.ClaimDriverRunOutcomes(t.Context(), execution.DriverRunOutcomeLease{
 		WorkspaceKey: "WS", ClaimID: "claim-1", Before: now, ClaimUntil: now.Add(time.Minute), Limit: 10,
 	})
 	if err != nil {
@@ -62,17 +61,17 @@ func TestDriverRunTerminalTransitionsEnqueueDurableOutcomes(t *testing.T) {
 	if len(outcomes) != 4 {
 		t.Fatalf("outcomes = %+v, want four terminal transitions", outcomes)
 	}
-	status := make(map[string]domain.DriverRunStatus, len(outcomes))
+	status := make(map[string]execution.DriverRunStatus, len(outcomes))
 	for _, outcome := range outcomes {
 		status[outcome.RunID] = outcome.Status
 		if outcome.Attempt != 1 || outcome.OccurredAt.IsZero() {
 			t.Fatalf("outcome = %+v", outcome)
 		}
 	}
-	if status["finished"] != domain.DriverRunCompleted ||
-		status["cascade"] != domain.DriverRunCancelled ||
-		status["replace"] != domain.DriverRunCancelled ||
-		status["stale"] != domain.DriverRunFailed {
+	if status["finished"] != execution.DriverRunCompleted ||
+		status["cascade"] != execution.DriverRunCancelled ||
+		status["replace"] != execution.DriverRunCancelled ||
+		status["stale"] != execution.DriverRunFailed {
 		t.Fatalf("statuses = %+v", status)
 	}
 }

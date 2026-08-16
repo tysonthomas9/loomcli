@@ -11,11 +11,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/app/agentprovisioning"
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	agentsmodule "github.com/tysonthomas9/loomcli/internal/modules/agents"
+
+	"github.com/tysonthomas9/loomcli/internal/app/agentprovisioning"
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 	rolehandlers "github.com/tysonthomas9/loomcli/internal/webui/handlers/roles"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 )
@@ -62,7 +63,7 @@ func (m *Module) resolvePromptAgentRoleForCreate(
 	// durably records the complete specification before Agents owns the exact
 	// idempotent Role ensure. Inline prompt persistence replaces the legacy
 	// pre-commit filesystem write; PromptFilename is a UI naming hint only.
-	role := &domain.Role{
+	role := &agentsmodule.Role{
 		WorkspaceKey: ws, Name: plan.roleName,
 		Description: roleCreate.Description, Prompt: roleCreate.Prompt,
 		Model: roleCreate.Model, TaskFilter: roleCreate.TaskFilter,
@@ -79,7 +80,7 @@ func (m *Module) resolvePromptAgentRoleForCreate(
 	return promptAgentRoleSpec(role), true
 }
 
-func validatePromptAgentRoleForCreate(w http.ResponseWriter, role *domain.Role) (*domain.Role, bool) {
+func validatePromptAgentRoleForCreate(w http.ResponseWriter, role *agentsmodule.Role) (*agentsmodule.Role, bool) {
 	if err := rolehandlers.ValidatePromptAgentRole(role); err != nil {
 		handler.WriteDomainError(w, err, "invalid prompt-agent role")
 		return nil, false
@@ -87,12 +88,12 @@ func validatePromptAgentRoleForCreate(w http.ResponseWriter, role *domain.Role) 
 	return role, true
 }
 
-func promptAgentRoleSpec(role *domain.Role) agentprovisioning.RoleSpec {
+func promptAgentRoleSpec(role *agentsmodule.Role) agentprovisioning.RoleSpec {
 	if role == nil {
 		return agentprovisioning.RoleSpec{}
 	}
 	return agentprovisioning.RoleSpec{
-		Name: role.Name, Kind: string(role.Kind), Description: role.Description,
+		Name: role.Name, Kind: role.Kind, Description: role.Description,
 		Prompt: role.Prompt, PromptFile: role.PromptFile, Model: role.Model,
 		TaskFilter: role.TaskFilter, Backend: role.Backend, Effort: role.Effort,
 		PathPatterns: append([]string(nil), role.PathPatterns...),
@@ -263,7 +264,7 @@ func (m *Module) mintAvailablePromptAgentID(
 		}
 		if _, err := m.agentRecords.GetAgent(ctx, workspace, agentID); err == nil {
 			continue
-		} else if !errors.Is(err, agentsmodule.ErrNotFound) && !errors.Is(err, domain.ErrNotFound) {
+		} else if !errors.Is(err, agentsmodule.ErrNotFound) && !errors.Is(err, persistence.ErrNotFound) {
 			return "", err
 		}
 		return agentID, nil
@@ -275,12 +276,12 @@ func (m *Module) mintAvailablePromptAgentID(
 	)
 }
 
-func canonicalRoleProjection(role *agentsmodule.Role) *domain.Role {
+func canonicalRoleProjection(role *agentsmodule.Role) *agentsmodule.Role {
 	if role == nil {
 		return nil
 	}
-	return &domain.Role{
-		WorkspaceKey: role.WorkspaceKey, Name: role.Name, Kind: domain.RoleKind(role.Kind),
+	return &agentsmodule.Role{
+		WorkspaceKey: role.WorkspaceKey, Name: role.Name, Kind: role.Kind,
 		Description: role.Description, Prompt: role.Prompt, PromptFile: role.PromptFile,
 		Model: role.Model, TaskFilter: role.TaskFilter, Backend: role.Backend, Effort: role.Effort,
 		PathPatterns: append([]string(nil), role.PathPatterns...), Skills: append([]string(nil), role.Skills...),
@@ -294,7 +295,7 @@ func canonicalRoleProjection(role *agentsmodule.Role) *domain.Role {
 func promptAgentCommittedProjection(
 	record *agentprovisioning.Record,
 	now time.Time,
-) (*domain.AgentService, *automation.Binding, error) {
+) (*agentsmodule.AgentServiceRecord, *automation.Binding, error) {
 	if record == nil || record.State != agentprovisioning.StateCompleted ||
 		record.Spec.Agent.AgentID == "" || record.Spec.Binding.BindingID == "" {
 		return nil, nil, fmt.Errorf(
@@ -303,12 +304,12 @@ func promptAgentCommittedProjection(
 		)
 	}
 	createdAt, updatedAt := promptAgentProjectionTimes(record, now)
-	agent := &domain.AgentService{
+	agent := &agentsmodule.AgentServiceRecord{
 		WorkspaceKey: record.WorkspaceKey,
 		ServiceID:    record.Spec.Agent.AgentID,
 		Name:         record.Spec.Agent.Name,
-		Kind:         domain.AgentServiceKind(record.Spec.Agent.Kind),
-		DesiredState: domain.AgentServiceDesiredState(record.Spec.Agent.DesiredState),
+		Kind:         agentsmodule.AgentKind(record.Spec.Agent.Kind),
+		DesiredState: agentsmodule.DesiredState(record.Spec.Agent.DesiredState),
 		RoleName:     record.Spec.Agent.RoleName,
 		MaxInstances: 1,
 		BudgetPolicy: record.Spec.Agent.BudgetPolicy,
@@ -365,17 +366,17 @@ func writeAgentProvisioningError(
 ) {
 	switch {
 	case errors.Is(err, agentprovisioning.ErrInvalid),
-		errors.Is(err, domain.ErrInvalid):
+		errors.Is(err, persistence.ErrInvalid):
 		handler.RespondError(w, http.StatusBadRequest, err.Error())
 	case errors.Is(err, agentprovisioning.ErrNotFound),
-		errors.Is(err, domain.ErrNotFound):
+		errors.Is(err, persistence.ErrNotFound):
 		handler.RespondError(w, http.StatusNotFound, fallback)
 	case errors.Is(err, agentprovisioning.ErrConflict),
 		errors.Is(err, agentprovisioning.ErrConcurrentWrite),
 		errors.Is(err, agentprovisioning.ErrInvalidTransition),
 		errors.Is(err, agentprovisioning.ErrPermanentFailure),
-		errors.Is(err, domain.ErrAlreadyExists),
-		errors.Is(err, domain.ErrConflict):
+		errors.Is(err, persistence.ErrAlreadyExists),
+		errors.Is(err, persistence.ErrConflict):
 		handler.RespondError(w, http.StatusConflict, err.Error())
 	case errors.Is(err, agentprovisioning.ErrUnavailable),
 		errors.Is(err, context.Canceled),

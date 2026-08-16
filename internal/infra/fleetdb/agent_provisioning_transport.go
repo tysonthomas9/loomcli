@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 var (
@@ -400,15 +400,15 @@ func mapAgentProvisioningError(err error) error {
 	}
 	var sentinel error
 	switch {
-	case errors.Is(err, domain.ErrNotFound):
+	case errors.Is(err, persistence.ErrNotFound):
 		sentinel = ErrAgentProvisioningNotFound
 	case errors.Is(err, errFleetRevisionConflict):
 		sentinel = ErrAgentProvisioningConcurrentWrite
-	case errors.Is(err, domain.ErrInvalidTransition):
+	case errors.Is(err, persistence.ErrInvalidTransition):
 		sentinel = ErrAgentProvisioningInvalidTransition
-	case errors.Is(err, domain.ErrAlreadyExists), errors.Is(err, domain.ErrConflict):
+	case errors.Is(err, persistence.ErrAlreadyExists), errors.Is(err, persistence.ErrConflict):
 		sentinel = ErrAgentProvisioningConflict
-	case errors.Is(err, domain.ErrInvalid):
+	case errors.Is(err, persistence.ErrInvalid):
 		sentinel = ErrAgentProvisioningInvalid
 	default:
 		return err

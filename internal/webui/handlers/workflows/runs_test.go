@@ -10,15 +10,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 )
 
 // seedRun creates a queued driver run under the "demo" driver/"version-1"
 // version seeded by seededWorkflowStore.
-func seedRun(t *testing.T, ctx context.Context, st store.Store, runID string) *domain.DriverRun {
+func seedRun(t *testing.T, ctx context.Context, st *memstore.Store, runID string) *execution.DriverRunRecord {
 	t.Helper()
-	run, err := st.DriverRuns().Create(ctx, store.DriverRunCreate{
+	run, err := st.DriverRuns().Create(ctx, execution.DriverRunCreate{
 		WorkspaceKey:    "TEST",
 		RunID:           runID,
 		DriverID:        "demo",
@@ -32,7 +32,7 @@ func seedRun(t *testing.T, ctx context.Context, st store.Store, runID string) *d
 
 // startRun claims a queued run so it becomes running with a StartedAt stamp;
 // sequential claims produce strictly increasing StartedAt values.
-func startRun(t *testing.T, ctx context.Context, st store.Store, runID string) *domain.DriverRun {
+func startRun(t *testing.T, ctx context.Context, st *memstore.Store, runID string) *execution.DriverRunRecord {
 	t.Helper()
 	run, err := st.DriverRuns().Claim(ctx, "TEST", runID, "node-1", "lease-"+runID)
 	if err != nil {
@@ -43,9 +43,9 @@ func startRun(t *testing.T, ctx context.Context, st store.Store, runID string) *
 
 // finishRun terminalizes a running run with the given status (StartedAt is
 // preserved by Finish).
-func finishRun(t *testing.T, ctx context.Context, st store.Store, run *domain.DriverRun, status domain.DriverRunStatus) {
+func finishRun(t *testing.T, ctx context.Context, st *memstore.Store, run *execution.DriverRunRecord, status execution.DriverRunStatus) {
 	t.Helper()
-	if _, err := st.DriverRuns().Finish(ctx, "TEST", run.RunID, store.DriverRunFinish{
+	if _, err := st.DriverRuns().Finish(ctx, "TEST", run.RunID, execution.DriverRunFinish{
 		NodeID:       run.NodeID,
 		LeaseID:      run.LeaseID,
 		FencingToken: run.FencingToken,
@@ -56,9 +56,9 @@ func finishRun(t *testing.T, ctx context.Context, st store.Store, run *domain.Dr
 }
 
 type runsResponse struct {
-	DriverID        string             `json:"driver_id"`
-	ActiveVersionID string             `json:"active_version_id"`
-	Runs            []domain.DriverRun `json:"runs"`
+	DriverID        string                      `json:"driver_id"`
+	ActiveVersionID string                      `json:"active_version_id"`
+	Runs            []execution.DriverRunRecord `json:"runs"`
 }
 
 func listRuns(t *testing.T, mux *http.ServeMux, workflow, query string) (*httptest.ResponseRecorder, runsResponse) {
@@ -93,8 +93,8 @@ func TestListWorkflowRunsOrdersNewestFirst(t *testing.T) {
 	c3 := startRun(t, ctx, st, "r3")
 	time.Sleep(2 * time.Millisecond)
 	c4 := startRun(t, ctx, st, "r4")
-	finishRun(t, ctx, st, c3, domain.DriverRunCompleted)
-	finishRun(t, ctx, st, c4, domain.DriverRunFailed)
+	finishRun(t, ctx, st, c3, execution.DriverRunCompleted)
+	finishRun(t, ctx, st, c4, execution.DriverRunFailed)
 
 	mux := http.NewServeMux()
 	newWorkflowTestModule(st).Register(mux)

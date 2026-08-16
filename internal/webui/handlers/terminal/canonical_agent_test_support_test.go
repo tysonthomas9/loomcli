@@ -4,10 +4,11 @@ import (
 	"context"
 	"errors"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
+
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
-	"github.com/tysonthomas9/loomcli/internal/modules/agents"
-	"github.com/tysonthomas9/loomcli/internal/store"
+	agentsowner "github.com/tysonthomas9/loomcli/internal/modules/agents"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 	"github.com/tysonthomas9/loomcli/internal/webui/storeadapter"
 )
 
@@ -17,16 +18,16 @@ func newTerminalTestState() *terminalTestState {
 	return &terminalTestState{Store: memstore.New()}
 }
 
-func (state *terminalTestState) GetRole(ctx context.Context, workspace, roleName string) (*agents.Role, error) {
+func (state *terminalTestState) GetRole(ctx context.Context, workspace, roleName string) (*agentsowner.Role, error) {
 	role, err := state.Roles().Get(ctx, workspace, roleName)
-	if errors.Is(err, domain.ErrNotFound) {
-		return nil, agents.ErrNotFound
+	if errors.Is(err, persistence.ErrNotFound) {
+		return nil, agentsowner.ErrNotFound
 	}
 	if err != nil {
 		return nil, err
 	}
-	return &agents.Role{
-		WorkspaceKey: role.WorkspaceKey, Name: role.Name, Kind: string(role.Kind),
+	return &agentsowner.Role{
+		WorkspaceKey: role.WorkspaceKey, Name: role.Name, Kind: role.Kind,
 		Description: role.Description, Prompt: role.Prompt, PromptFile: role.PromptFile,
 		Model: role.Model, TaskFilter: role.TaskFilter, Backend: role.Backend, Effort: role.Effort,
 		PathPatterns: role.PathPatterns, Skills: role.Skills, MaxPriority: role.MaxPriority,
@@ -37,7 +38,7 @@ func (state *terminalTestState) GetRole(ctx context.Context, workspace, roleName
 }
 
 func (state *terminalTestState) FindActiveOrchestrationSession(ctx context.Context, workspace, agentID string) (string, error) {
-	return store.OrchestrationSessionIDFor(ctx, state.Store, workspace, agentID)
+	return interaction.OrchestrationSessionIDFor(ctx, state.Store, workspace, agentID)
 }
 
 func (state *terminalTestState) ResolveWorkspaceName(ctx context.Context, workspace string) (string, error) {
@@ -59,7 +60,7 @@ type terminalTestAgentCreate struct {
 	Backend        string
 	Parent         string
 	Mode           string
-	DesiredState   agents.DesiredState
+	DesiredState   agentsowner.DesiredState
 	MaxConcurrency int
 }
 
@@ -72,24 +73,24 @@ const (
 
 type terminalTestAgentUpdate struct {
 	State        *terminalTestAgentState
-	DesiredState *agents.DesiredState
+	DesiredState *agentsowner.DesiredState
 }
 
 type terminalTestAgentStore struct {
-	services store.AgentServiceStore
-	roles    store.RoleStore
+	services agentsowner.AgentServiceStore
+	roles    agentsowner.RoleRecordStore
 }
 
 func terminalTestAgents(st interface {
-	AgentServices() store.AgentServiceStore
-	Roles() store.RoleStore
+	AgentServices() agentsowner.AgentServiceStore
+	Roles() agentsowner.RoleRecordStore
 }) terminalTestAgentStore {
 	return terminalTestAgentStore{services: st.AgentServices(), roles: st.Roles()}
 }
 
-func (fixture terminalTestAgentStore) Create(ctx context.Context, input terminalTestAgentCreate) (*domain.AgentService, error) {
-	if _, err := fixture.roles.Get(ctx, input.WorkspaceKey, input.RoleName); errors.Is(err, domain.ErrNotFound) {
-		if _, err := fixture.roles.Create(ctx, store.RoleCreate{WorkspaceKey: input.WorkspaceKey, Name: input.RoleName}); err != nil {
+func (fixture terminalTestAgentStore) Create(ctx context.Context, input terminalTestAgentCreate) (*agentsowner.AgentServiceRecord, error) {
+	if _, err := fixture.roles.Get(ctx, input.WorkspaceKey, input.RoleName); errors.Is(err, persistence.ErrNotFound) {
+		if _, err := fixture.roles.Create(ctx, agentsowner.RoleRecordCreate{WorkspaceKey: input.WorkspaceKey, Name: input.RoleName}); err != nil {
 			return nil, err
 		}
 	} else if err != nil {
@@ -97,9 +98,9 @@ func (fixture terminalTestAgentStore) Create(ctx context.Context, input terminal
 	}
 	desired := input.DesiredState
 	if desired == "" {
-		desired = agents.DesiredRunning
+		desired = agentsowner.DesiredRunning
 	}
-	metadata, err := agents.WithRuntimeMetadata(nil, agents.RuntimeMetadata{Backend: input.Backend})
+	metadata, err := agentsowner.WithRuntimeMetadata(nil, agentsowner.RuntimeMetadata{Backend: input.Backend})
 	if err != nil {
 		return nil, err
 	}
@@ -107,12 +108,12 @@ func (fixture terminalTestAgentStore) Create(ctx context.Context, input terminal
 	if maxInstances < 1 {
 		maxInstances = 1
 	}
-	return fixture.services.Create(ctx, store.AgentServiceCreate{
+	return fixture.services.Create(ctx, agentsowner.AgentServiceCreate{
 		WorkspaceKey: input.WorkspaceKey,
 		ServiceID:    input.Name,
 		Name:         input.Name,
-		Kind:         domain.AgentServiceKindSupport,
-		DesiredState: domain.AgentServiceDesiredState(desired),
+		Kind:         agentsowner.AgentKindSupport,
+		DesiredState: desired,
 		RoleName:     input.RoleName,
 		MaxInstances: maxInstances,
 		Metadata:     metadata,
@@ -123,41 +124,41 @@ func (fixture terminalTestAgentStore) Update(
 	ctx context.Context,
 	workspace, name string,
 	update terminalTestAgentUpdate,
-) (*domain.AgentService, error) {
-	var desired *domain.AgentServiceDesiredState
+) (*agentsowner.AgentServiceRecord, error) {
+	var desired *agentsowner.DesiredState
 	if update.DesiredState != nil {
-		value := domain.AgentServiceDesiredState(*update.DesiredState)
+		value := *update.DesiredState
 		desired = &value
 	} else if update.State != nil && *update.State == terminalTestAgentStateStopped {
-		value := domain.AgentServiceDesiredStopped
+		value := agentsowner.DesiredStopped
 		desired = &value
 	}
-	return fixture.services.Update(ctx, workspace, name, store.AgentServiceUpdate{DesiredState: desired})
+	return fixture.services.Update(ctx, workspace, name, agentsowner.AgentServiceUpdate{DesiredState: desired})
 }
 
-type terminalStoreIdentity struct{ services store.AgentServiceStore }
+type terminalStoreIdentity struct{ services agentsowner.AgentServiceStore }
 
 func (identity terminalStoreIdentity) GetAgent(
 	ctx context.Context,
 	workspace, agentID string,
-) (*agents.Agent, error) {
+) (*agentsowner.Agent, error) {
 	record, err := identity.services.Get(ctx, workspace, agentID)
 	if err != nil {
-		if errors.Is(err, domain.ErrNotFound) {
-			return nil, agents.ErrNotFound
+		if errors.Is(err, persistence.ErrNotFound) {
+			return nil, agentsowner.ErrNotFound
 		}
 		return nil, err
 	}
-	return &agents.Agent{
+	return &agentsowner.Agent{
 		WorkspaceKey: record.WorkspaceKey,
 		AgentID:      record.ServiceID,
 		GenerationID: record.GenerationID,
 		Name:         record.Name,
-		Kind:         agents.AgentKind(record.Kind),
-		Behavior: agents.BehaviorReference{
+		Kind:         record.Kind,
+		Behavior: agentsowner.BehaviorReference{
 			RoleName: record.RoleName, DriverID: record.DriverID, DriverVersionID: record.DriverVersionID,
 		},
-		DesiredState: agents.DesiredState(record.DesiredState),
+		DesiredState: record.DesiredState,
 		ProfileName:  record.ProfileName,
 		MaxInstances: record.MaxInstances,
 		BudgetPolicy: record.BudgetPolicy,

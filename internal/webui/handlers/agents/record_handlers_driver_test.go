@@ -10,13 +10,16 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/automation"
+
+	"github.com/tysonthomas9/loomcli/internal/modules/agents"
+
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	driverpkg "github.com/tysonthomas9/loomcli/internal/driver"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	workflowdefs "github.com/tysonthomas9/loomcli/internal/infra/workflowdistribution"
-	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 const promptAgentDriverTestVersion = "prompt-agent-version-1"
@@ -61,7 +64,7 @@ func seedExecutablePromptAgentDriver(t *testing.T, st *memstore.Store) {
 	if err != nil {
 		t.Fatalf("digest prompt-agent source: %v", err)
 	}
-	if _, err := st.Drivers().Create(ctx, store.DriverCreate{
+	if _, err := st.Drivers().Create(ctx, workflowcatalog.DriverCreate{
 		WorkspaceKey: agentRecordTestWS,
 		DriverID:     workflowdefs.BuiltinPromptAgentWorkflowName,
 		Name:         workflowdefs.BuiltinPromptAgentWorkflowName,
@@ -71,7 +74,7 @@ func seedExecutablePromptAgentDriver(t *testing.T, st *memstore.Store) {
 	}); err != nil {
 		t.Fatalf("create prompt-agent driver fixture: %v", err)
 	}
-	if _, err := st.DriverVersions().Create(ctx, store.DriverVersionCreate{
+	if _, err := st.DriverVersions().Create(ctx, workflowcatalog.DriverVersionCreate{
 		WorkspaceKey:     agentRecordTestWS,
 		VersionID:        promptAgentDriverTestVersion,
 		DriverID:         workflowdefs.BuiltinPromptAgentWorkflowName,
@@ -128,14 +131,14 @@ func TestPromptAgentCreateWithVanishedActiveBundleFailsAtomically(t *testing.T) 
 		t.Fatalf("POST /agents body = %s, want actionable unavailable-toolchain guidance", rec.Body.String())
 	}
 
-	if _, err := st.Roles().Get(ctx, agentRecordTestWS, "docs-assistant"); !errors.Is(err, domain.ErrNotFound) {
+	if _, err := st.Roles().Get(ctx, agentRecordTestWS, "docs-assistant"); !errors.Is(err, persistence.ErrNotFound) {
 		t.Fatalf("role was persisted before stale-driver preflight: %v", err)
 	}
-	records, err := st.AgentServices().List(ctx, agentRecordTestWS, store.AgentServiceFilter{})
+	records, err := st.AgentServices().List(ctx, agentRecordTestWS, agents.AgentServiceFilter{})
 	if err != nil || len(records) != 0 {
 		t.Fatalf("agent records after stale-driver preflight = %+v err=%v, want none", records, err)
 	}
-	bindings, err := st.TriggerBindings().List(ctx, agentRecordTestWS, store.TriggerBindingFilter{})
+	bindings, err := st.TriggerBindings().List(ctx, agentRecordTestWS, automation.TriggerBindingFilter{})
 	if err != nil || len(bindings) != 0 {
 		t.Fatalf("bindings after stale-driver preflight = %+v err=%v, want none", bindings, err)
 	}
@@ -146,7 +149,7 @@ func TestPromptAgentCreateWithVanishedActiveBundleFailsAtomically(t *testing.T) 
 	if driverAfter.ActiveVersionID != driverBefore.ActiveVersionID {
 		t.Fatalf("active version changed after failed preflight: got %q want %q", driverAfter.ActiveVersionID, driverBefore.ActiveVersionID)
 	}
-	versions, err := st.DriverVersions().List(ctx, agentRecordTestWS, store.DriverVersionFilter{
+	versions, err := st.DriverVersions().List(ctx, agentRecordTestWS, workflowcatalog.DriverVersionFilter{
 		DriverID: workflowdefs.BuiltinPromptAgentWorkflowName,
 	})
 	if err != nil || len(versions) != 1 || versions[0].VersionID != versionBefore.VersionID {
@@ -181,7 +184,7 @@ func TestPromptAgentCreateReusesExecutableActiveBundleWithoutBuildToolchain(t *t
 	if driverAfter.ActiveVersionID != driverBefore.ActiveVersionID {
 		t.Fatalf("valid active version was rebuilt: got %q want %q", driverAfter.ActiveVersionID, driverBefore.ActiveVersionID)
 	}
-	versions, err := st.DriverVersions().List(ctx, agentRecordTestWS, store.DriverVersionFilter{
+	versions, err := st.DriverVersions().List(ctx, agentRecordTestWS, workflowcatalog.DriverVersionFilter{
 		DriverID: workflowdefs.BuiltinPromptAgentWorkflowName,
 	})
 	if err != nil || len(versions) != 1 {

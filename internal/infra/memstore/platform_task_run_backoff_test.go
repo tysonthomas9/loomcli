@@ -5,8 +5,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
+
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 // Requeued task runs become claimable only after NextEligibleAt; a zero value
@@ -48,24 +49,24 @@ func TestTaskRunRequeueNextEligibleAtGatesClaim(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := t.Context()
 			s := New()
-			if _, err := s.Nodes().Create(ctx, store.NodeCreate{
+			if _, err := s.Nodes().Create(ctx, execution.NodeCreate{
 				WorkspaceKey:    "WS",
 				NodeID:          "node-1",
-				RuntimeProvider: domain.RuntimeProviderLocal,
-				DrainState:      domain.NodeDrainActive,
+				RuntimeProvider: execution.RuntimeProviderLocal,
+				DrainState:      execution.WorkerNodeActive,
 				TTL:             time.Hour,
 			}); err != nil {
 				t.Fatalf("Create node: %v", err)
 			}
-			if _, err := s.TaskRuns().Create(ctx, store.TaskRunCreate{
+			if _, err := s.TaskRuns().Create(ctx, execution.TaskRunCreate{
 				WorkspaceKey: "WS",
 				TaskRunID:    "run-1",
 				TaskID:       "WS-1",
-				Status:       domain.TaskRunQueued,
+				Status:       execution.TaskRunRecordQueued,
 			}); err != nil {
 				t.Fatalf("Create task run: %v", err)
 			}
-			claimed, err := s.TaskRuns().ClaimQueued(ctx, "WS", store.TaskRunClaim{
+			claimed, err := s.TaskRuns().ClaimQueued(ctx, "WS", execution.TaskRunClaim{
 				NodeID:    "node-1",
 				LeaseID:   "lease-1",
 				ClaimedAt: base.Add(-time.Minute),
@@ -74,7 +75,7 @@ func TestTaskRunRequeueNextEligibleAtGatesClaim(t *testing.T) {
 				t.Fatalf("first ClaimQueued: %v", err)
 			}
 
-			requeued, err := s.TaskRuns().Requeue(ctx, "WS", claimed.TaskRunID, store.TaskRunRequeue{
+			requeued, err := s.TaskRuns().Requeue(ctx, "WS", claimed.TaskRunID, execution.TaskRunRequeue{
 				NodeID:         claimed.NodeID,
 				LeaseID:        claimed.LeaseID,
 				FencingToken:   claimed.FencingToken,
@@ -89,7 +90,7 @@ func TestTaskRunRequeueNextEligibleAtGatesClaim(t *testing.T) {
 				t.Fatalf("requeued NextEligibleAt = %v, want %v", requeued.NextEligibleAt, tc.nextEligibleAt)
 			}
 
-			reclaimed, err := s.TaskRuns().ClaimQueued(ctx, "WS", store.TaskRunClaim{
+			reclaimed, err := s.TaskRuns().ClaimQueued(ctx, "WS", execution.TaskRunClaim{
 				NodeID:    "node-1",
 				LeaseID:   "lease-2",
 				ClaimedAt: tc.claimAt,
@@ -98,12 +99,12 @@ func TestTaskRunRequeueNextEligibleAtGatesClaim(t *testing.T) {
 				if err != nil {
 					t.Fatalf("ClaimQueued after requeue: %v", err)
 				}
-				if reclaimed.TaskRunID != "run-1" || reclaimed.Status != domain.TaskRunRunning {
+				if reclaimed.TaskRunID != "run-1" || reclaimed.Status != execution.TaskRunRecordRunning {
 					t.Fatalf("reclaimed = %+v, want running run-1", reclaimed)
 				}
 				return
 			}
-			if !errors.Is(err, domain.ErrNotFound) {
+			if !errors.Is(err, persistence.ErrNotFound) {
 				t.Fatalf("ClaimQueued before NextEligibleAt err = %v, want ErrNotFound", err)
 			}
 		})

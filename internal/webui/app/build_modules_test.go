@@ -69,7 +69,7 @@ func TestServer_BuildModules_AllDeps(t *testing.T) {
 
 func TestServer_BuildModules_StoreBacked(t *testing.T) {
 	app := Server{}
-	app.config.Store = memstore.New()
+	app.config.ProjectionRecords = memstore.New()
 
 	app.buildModules()
 

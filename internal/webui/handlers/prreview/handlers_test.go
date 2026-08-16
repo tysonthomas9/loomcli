@@ -24,16 +24,15 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/infra/connectorsproviders"
 	"github.com/tysonthomas9/loomcli/internal/infra/connectorsvault"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
-	"github.com/tysonthomas9/loomcli/internal/infra/workspacecatalog"
 	"github.com/tysonthomas9/loomcli/internal/localsettings"
 	"github.com/tysonthomas9/loomcli/internal/localworkspace"
 	"github.com/tysonthomas9/loomcli/internal/modules/agents"
 	"github.com/tysonthomas9/loomcli/internal/modules/connectors"
 	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
 	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
+	workspacemodule "github.com/tysonthomas9/loomcli/internal/modules/workspace"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 	loomapi "github.com/tysonthomas9/loomcli/internal/platform/loomapi/gen"
-	"github.com/tysonthomas9/loomcli/internal/store"
 	localsettingshandler "github.com/tysonthomas9/loomcli/internal/webui/handlers/localsettings"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
@@ -208,7 +207,7 @@ func decodePullRequestsResponse(t *testing.T, raw []byte) loomapi.PullRequestsDa
 }
 
 type prReviewHarness struct {
-	store         store.Store
+	store         *memstore.Store
 	github        *fakeGitHub
 	mux           *http.ServeMux
 	module        *Module
@@ -637,7 +636,7 @@ func (h *prReviewHarness) rebuildWithDataDir(t *testing.T, dataDir string) {
 
 func buildTestConnectorCapabilities(
 	t *testing.T,
-	st store.Store,
+	st *memstore.Store,
 	dataDir string,
 ) (connectors.Dispatcher, connectors.Management, connectors.CredentialSealer) {
 	t.Helper()
@@ -665,9 +664,9 @@ func buildTestConnectorCapabilities(
 	return dispatcher, management, vault
 }
 
-func buildTestWorkspaceQueries(t *testing.T, st store.Store) WorkspaceQueries {
+func buildTestWorkspaceQueries(t *testing.T, st *memstore.Store) WorkspaceQueries {
 	t.Helper()
-	queries, err := workspacecatalog.New(st.Workspaces(), st.Repos())
+	queries, err := workspacemodule.NewFromRecordStores(st.Workspaces(), st.Repos())
 	if err != nil {
 		t.Fatalf("new workspace catalog: %v", err)
 	}
@@ -677,13 +676,13 @@ func buildTestWorkspaceQueries(t *testing.T, st store.Store) WorkspaceQueries {
 func (h *prReviewHarness) seedWorkspace(t *testing.T) {
 	t.Helper()
 	ctx := context.Background()
-	if _, err := h.store.Workspaces().Create(ctx, store.WorkspaceCreate{
+	if _, err := h.store.Workspaces().Create(ctx, workspacemodule.WorkspaceCreate{
 		Key:  prReviewTestWorkspace,
 		Name: "Test Workspace",
 	}); err != nil {
 		t.Fatalf("Create workspace: %v", err)
 	}
-	if _, err := h.store.Repos().Create(ctx, store.RepoCreate{
+	if _, err := h.store.Repos().Create(ctx, workspacemodule.RepoCreate{
 		WorkspaceKey: prReviewTestWorkspace,
 		Name:         "hello",
 		RemoteURL:    "https://github.com/octocat/hello",
@@ -694,7 +693,7 @@ func (h *prReviewHarness) seedWorkspace(t *testing.T) {
 
 func (h *prReviewHarness) addRepo(t *testing.T, name, remoteURL string) {
 	t.Helper()
-	if _, err := h.store.Repos().Create(context.Background(), store.RepoCreate{
+	if _, err := h.store.Repos().Create(context.Background(), workspacemodule.RepoCreate{
 		WorkspaceKey: prReviewTestWorkspace,
 		Name:         name,
 		RemoteURL:    remoteURL,
@@ -705,7 +704,7 @@ func (h *prReviewHarness) addRepo(t *testing.T, name, remoteURL string) {
 
 func (h *prReviewHarness) updateRepoRemote(t *testing.T, name, remoteURL string) {
 	t.Helper()
-	if _, err := h.store.Repos().Update(context.Background(), prReviewTestWorkspace, name, store.RepoUpdate{
+	if _, err := h.store.Repos().Update(context.Background(), prReviewTestWorkspace, name, workspacemodule.RepoUpdate{
 		RemoteURL: &remoteURL,
 	}); err != nil {
 		t.Fatalf("Update repo %s remote URL: %v", name, err)

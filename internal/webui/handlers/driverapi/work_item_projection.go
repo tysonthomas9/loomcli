@@ -6,9 +6,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	driverpkg "github.com/tysonthomas9/loomcli/internal/driver"
 	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 const (
@@ -63,7 +63,7 @@ func readyTaskByID(
 ) (*workitems.IssueSummary, error) {
 	taskID = strings.TrimSpace(taskID)
 	if taskID == "" {
-		return nil, fmt.Errorf("task id required: %w", domain.ErrInvalid)
+		return nil, fmt.Errorf("task id required: %w", persistence.ErrInvalid)
 	}
 	if limit <= 0 {
 		limit = defaultTargetReadyScan
@@ -78,7 +78,7 @@ func readyTaskByID(
 			return &candidate, nil
 		}
 	}
-	return nil, fmt.Errorf("task %q is not ready or already claimed: %w", taskID, domain.ErrConflict)
+	return nil, fmt.Errorf("task %q is not ready or already claimed: %w", taskID, persistence.ErrConflict)
 }
 
 func claimedTaskFromWorkItem(
@@ -123,7 +123,7 @@ func loadEpicSnapshot(
 ) (*driverpkg.EpicSnapshot, error) {
 	epicID = strings.TrimSpace(epicID)
 	if epicID == "" {
-		return nil, fmt.Errorf("epic id required: %w", domain.ErrInvalid)
+		return nil, fmt.Errorf("epic id required: %w", persistence.ErrInvalid)
 	}
 	ready, err := items.Ready(ctx, workitems.AvailabilityQuery{ParentID: epicID, Limit: defaultEpicReadyLimit})
 	if err != nil {

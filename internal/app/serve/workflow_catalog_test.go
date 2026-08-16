@@ -16,7 +16,6 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/tysonthomas9/loomcli/internal/app/workflowbinding"
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	infrafleetdb "github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
@@ -25,6 +24,7 @@ import (
 	catalogfleetdb "github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog/fleetdb"
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog/httpapi"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/webhooks"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
@@ -84,7 +84,7 @@ func TestConfiguredWorkflowTargetPreparerProjectsTarget(t *testing.T) {
 		if workspace == "TEST" && workflow == "custom-workflow" {
 			return WorkflowTarget{DriverID: "driver-1", DriverVersionID: "version-2"}, nil
 		}
-		return WorkflowTarget{}, domain.ErrNotFound
+		return WorkflowTarget{}, persistence.ErrNotFound
 	})
 	target, err := preparer.PrepareWorkflowTarget(t.Context(), "TEST", "custom-workflow")
 	if err != nil {
@@ -96,8 +96,8 @@ func TestConfiguredWorkflowTargetPreparerProjectsTarget(t *testing.T) {
 	if _, err := NewWorkflowTargetPreparer(nil).PrepareWorkflowTarget(t.Context(), "TEST", "custom-workflow"); !errors.Is(err, workflowbinding.ErrUnavailable) {
 		t.Fatalf("nil preparation error = %v, want %v", err, workflowbinding.ErrUnavailable)
 	}
-	if _, err := preparer.PrepareWorkflowTarget(t.Context(), "TEST", "missing"); !errors.Is(err, domain.ErrNotFound) {
-		t.Fatalf("missing workflow error = %v, want domain.ErrNotFound", err)
+	if _, err := preparer.PrepareWorkflowTarget(t.Context(), "TEST", "missing"); !errors.Is(err, persistence.ErrNotFound) {
+		t.Fatalf("missing workflow error = %v, want persistence.ErrNotFound", err)
 	}
 }
 

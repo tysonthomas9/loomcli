@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 func TestStageFlueDriverBundleRejectsDriverIDPathTraversalBeforeFilesystemStaging(t *testing.T) {
@@ -27,7 +27,7 @@ func TestStageFlueDriverBundleRejectsDriverIDPathTraversalBeforeFilesystemStagin
 				DriverName:   "demo",
 				DriverID:     driverID,
 			})
-			if !errors.Is(err, domain.ErrInvalid) {
+			if !errors.Is(err, persistence.ErrInvalid) {
 				t.Fatalf("StageFlueDriverBundle(%q) error = %v, want ErrInvalid", driverID, err)
 			}
 			if _, statErr := os.Stat(filepath.Join(workDir, ".loom")); !errors.Is(statErr, os.ErrNotExist) {

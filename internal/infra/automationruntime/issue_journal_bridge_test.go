@@ -12,15 +12,16 @@ import (
 	"sync"
 	"testing"
 
+	workspaceowner "github.com/tysonthomas9/loomcli/internal/modules/workspace"
+
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	trigger "github.com/tysonthomas9/loomcli/internal/infra/automationruntime"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
-	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
-// fakeIssueJournalReader is a scripted store.IssueJournalReader: it serves
+// fakeIssueJournalReader is a scripted automation.IssueJournalReader: it serves
 // pages keyed by the incoming afterCursor, so tests describe a journal as a
 // cursor->page map and watch the bridge walk it. failAt forces an error on the
 // Nth call (1-indexed) to exercise the failure backoff and mid-drain retry.
@@ -32,7 +33,7 @@ type fakeIssueJournalReader struct {
 }
 
 type journalPage struct {
-	events  []store.JournalEvent
+	events  []automation.JournalEvent
 	next    string
 	hasMore bool
 }
@@ -103,7 +104,7 @@ func (e *failingInternalEmitter) callCount() int {
 	return e.calls
 }
 
-func (r *fakeIssueJournalReader) ListIssueEvents(_ context.Context, _, afterCursor string, _ int) ([]store.JournalEvent, string, bool, error) {
+func (r *fakeIssueJournalReader) ListIssueEvents(_ context.Context, _, afterCursor string, _ int) ([]automation.JournalEvent, string, bool, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.calls = append(r.calls, afterCursor)
@@ -148,12 +149,12 @@ func (c *fixedCursorStore) Save(ws, cursor string) {
 
 // issueEvent is a tiny constructor for a journal entry with an issue After
 // snapshot (snake_case v1 wire).
-func issueEvent(id, action, actor, entityID string, after string) store.JournalEvent {
+func issueEvent(id, action, actor, entityID string, after string) automation.JournalEvent {
 	var raw json.RawMessage
 	if after != "" {
 		raw = json.RawMessage(after)
 	}
-	return store.JournalEvent{ID: id, Action: action, Actor: actor, EntityID: entityID, After: raw}
+	return automation.JournalEvent{ID: id, Action: action, Actor: actor, EntityID: entityID, After: raw}
 }
 
 // newBridge wires a scoped bridge over a fresh workspace query store and a
@@ -181,7 +182,7 @@ func seenStart(cursors *fixedCursorStore, ws string) {
 
 func TestIssueJournalBridgeEmitsCreateOnInternalBinding(t *testing.T) {
 	reader := &fakeIssueJournalReader{pages: map[string]journalPage{
-		"": {events: []store.JournalEvent{
+		"": {events: []automation.JournalEvent{
 			issueEvent("100", "issue.create", "user:alice", "42",
 				`{"status":"open","title":"Crash on boot","repo":"acme/app","created_by":"alice","number":42}`),
 		}, next: "100"},
@@ -222,7 +223,7 @@ func TestIssueJournalBridgeEmitsCreateOnInternalBinding(t *testing.T) {
 // emitter payload is the After snapshot. SubjectAttrs ride the dispatch input.
 func TestIssueJournalBridgeProvenanceAndAttrs(t *testing.T) {
 	reader := &fakeIssueJournalReader{pages: map[string]journalPage{
-		"": {events: []store.JournalEvent{
+		"": {events: []automation.JournalEvent{
 			issueEvent("7", "issue.create", "user:bob", "9",
 				`{"status":"open","title":"T","repo":"acme/app","created_by":"bob"}`),
 		}, next: "7"},
@@ -257,10 +258,10 @@ func TestIssueJournalBridgeProvenanceAndAttrs(t *testing.T) {
 func TestIssueJournalBridgeEmitFailureHoldsCursor(t *testing.T) {
 	reader := &fakeIssueJournalReader{
 		pages: map[string]journalPage{
-			"": {events: []store.JournalEvent{
+			"": {events: []automation.JournalEvent{
 				issueEvent("100", "issue.create", "u", "1", `{"status":"open"}`),
 			}, next: "100", hasMore: true},
-			"100": {events: []store.JournalEvent{
+			"100": {events: []automation.JournalEvent{
 				issueEvent("101", "issue.create", "u", "2", `{"status":"open"}`),
 			}, next: "101"},
 		},
@@ -300,7 +301,7 @@ func TestIssueJournalBridgeDrainsPastFilteredPage(t *testing.T) {
 		// cursor advanced, has_more=false (post-filter count 0 != page limit).
 		"": {events: nil, next: "50", hasMore: false},
 		// The next window finally carries the real issue.create.
-		"50": {events: []store.JournalEvent{
+		"50": {events: []automation.JournalEvent{
 			issueEvent("100", "issue.create", "user:alice", "42", `{"status":"open"}`),
 		}, next: "100", hasMore: false},
 	}}
@@ -325,7 +326,7 @@ func TestIssueJournalBridgeDrainsPastFilteredPage(t *testing.T) {
 
 func TestIssueJournalBridgeActionAllowlistSkips(t *testing.T) {
 	reader := &fakeIssueJournalReader{pages: map[string]journalPage{
-		"": {events: []store.JournalEvent{
+		"": {events: []automation.JournalEvent{
 			issueEvent("10", "issue.update", "u", "1", `{"status":"open"}`),
 			issueEvent("11", "issue.create", "u", "2", `{"status":"open"}`),
 			issueEvent("12", "issue.close", "u", "1", `{"status":"closed"}`),
@@ -354,7 +355,7 @@ func TestIssueJournalBridgeActionAllowlistSkips(t *testing.T) {
 
 func TestIssueJournalBridgeCustomAllowlist(t *testing.T) {
 	reader := &fakeIssueJournalReader{pages: map[string]journalPage{
-		"": {events: []store.JournalEvent{
+		"": {events: []automation.JournalEvent{
 			issueEvent("10", "issue.create", "u", "1", `{"status":"open"}`),
 			issueEvent("11", "issue.close", "u", "1", `{"status":"closed"}`),
 		}, next: "11"},
@@ -381,11 +382,11 @@ func TestIssueJournalBridgeCustomAllowlist(t *testing.T) {
 // workspace emits NOTHING and holds the cursor at the journal tail.
 func TestIssueJournalBridgeBootstrapFastForward(t *testing.T) {
 	reader := &fakeIssueJournalReader{pages: map[string]journalPage{
-		"": {events: []store.JournalEvent{
+		"": {events: []automation.JournalEvent{
 			issueEvent("1", "issue.create", "u", "1", `{"status":"open"}`),
 			issueEvent("2", "issue.create", "u", "2", `{"status":"open"}`),
 		}, next: "2", hasMore: true},
-		"2": {events: []store.JournalEvent{
+		"2": {events: []automation.JournalEvent{
 			issueEvent("3", "issue.create", "u", "3", `{"status":"open"}`),
 		}, next: "3"},
 	}}
@@ -408,7 +409,7 @@ func TestIssueJournalBridgeBootstrapFastForward(t *testing.T) {
 
 	// The next pass starts from the paused tail and emits only NEW entries.
 	reader.mu.Lock()
-	reader.pages["3"] = journalPage{events: []store.JournalEvent{
+	reader.pages["3"] = journalPage{events: []automation.JournalEvent{
 		issueEvent("4", "issue.create", "u", "4", `{"status":"open"}`),
 	}, next: "4"}
 	reader.mu.Unlock()
@@ -427,7 +428,7 @@ func TestIssueJournalBridgeBootstrapFastForward(t *testing.T) {
 func TestIssueJournalBridgeReplayEnvDrainsFromZero(t *testing.T) {
 	t.Setenv("LOOM_ISSUE_BRIDGE_REPLAY", "1")
 	reader := &fakeIssueJournalReader{pages: map[string]journalPage{
-		"": {events: []store.JournalEvent{
+		"": {events: []automation.JournalEvent{
 			issueEvent("1", "issue.create", "u", "1", `{"status":"open"}`),
 		}, next: "1"},
 	}}
@@ -451,18 +452,18 @@ func TestIssueJournalBridgeReplayEnvDrainsFromZero(t *testing.T) {
 // its own journal.
 func TestIssueJournalBridgeMultiWorkspaceCursorIsolation(t *testing.T) {
 	s := memstore.New()
-	if _, err := s.Workspaces().Create(t.Context(), store.WorkspaceCreate{Key: "WS", Name: "ws"}); err != nil {
+	if _, err := s.Workspaces().Create(t.Context(), workspaceowner.WorkspaceCreate{Key: "WS", Name: "ws"}); err != nil {
 		t.Fatalf("create WS: %v", err)
 	}
-	if _, err := s.Workspaces().Create(t.Context(), store.WorkspaceCreate{Key: "WS2", Name: "ws2"}); err != nil {
+	if _, err := s.Workspaces().Create(t.Context(), workspaceowner.WorkspaceCreate{Key: "WS2", Name: "ws2"}); err != nil {
 		t.Fatalf("create WS2: %v", err)
 	}
 	reader := &perWorkspaceReader{m: map[string]*fakeIssueJournalReader{
 		"WS": {pages: map[string]journalPage{
-			"": {events: []store.JournalEvent{issueEvent("a1", "issue.create", "u", "1", `{"status":"open"}`)}, next: "a1"},
+			"": {events: []automation.JournalEvent{issueEvent("a1", "issue.create", "u", "1", `{"status":"open"}`)}, next: "a1"},
 		}},
 		"WS2": {pages: map[string]journalPage{
-			"": {events: []store.JournalEvent{
+			"": {events: []automation.JournalEvent{
 				issueEvent("b1", "issue.create", "u", "1", `{"status":"open"}`),
 				issueEvent("b2", "issue.create", "u", "2", `{"status":"open"}`),
 			}, next: "b2"},
@@ -548,7 +549,7 @@ func TestIssueJournalBridgeBackoffAfterFailures(t *testing.T) {
 // the same exponential window.
 func TestIssueJournalBridgeBackoffAfterPersistentEmissionFailure(t *testing.T) {
 	reader := &fakeIssueJournalReader{pages: map[string]journalPage{
-		"": {events: []store.JournalEvent{
+		"": {events: []automation.JournalEvent{
 			issueEvent("emit-1", "issue.create", "user:alice", "TASK-1", `{"status":"open"}`),
 		}, next: "emit-1"},
 	}}
@@ -601,7 +602,7 @@ func TestIssueJournalBridgeNilDependenciesRejected(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if _, err := tt.bridge.RunOnce(t.Context()); !errors.Is(err, domain.ErrInvalid) {
+			if _, err := tt.bridge.RunOnce(t.Context()); !errors.Is(err, persistence.ErrInvalid) {
 				t.Fatalf("RunOnce err = %v, want ErrInvalid", err)
 			}
 		})
@@ -609,19 +610,19 @@ func TestIssueJournalBridgeNilDependenciesRejected(t *testing.T) {
 }
 
 // TestIssueJournalBridgeNoBindingAdvancesCursor proves a no-listener emission
-// (domain.ErrNotFound — no binding on internal.issue.created) does NOT stall
+// (persistence.ErrNotFound — no binding on internal.issue.created) does NOT stall
 // the bridge: the cursor advances past the unbound entry.
 func TestIssueJournalBridgeNoBindingAdvancesCursor(t *testing.T) {
 	s := memstore.New() // no internal binding seeded
-	if _, err := s.Workspaces().Create(t.Context(), store.WorkspaceCreate{Key: "WS", Name: "ws"}); err != nil {
+	if _, err := s.Workspaces().Create(t.Context(), workspaceowner.WorkspaceCreate{Key: "WS", Name: "ws"}); err != nil {
 		t.Fatalf("create WS: %v", err)
 	}
 	reader := &fakeIssueJournalReader{pages: map[string]journalPage{
-		"": {events: []store.JournalEvent{issueEvent("5", "issue.create", "u", "1", `{"status":"open"}`)}, next: "5"},
+		"": {events: []automation.JournalEvent{issueEvent("5", "issue.create", "u", "1", `{"status":"open"}`)}, next: "5"},
 	}}
 	cursors := newFixedCursorStore()
 	seenStart(cursors, "WS")
-	bridge := &trigger.IssueJournalBridge{Store: s, Source: &failingInternalEmitter{err: domain.ErrNotFound}, Reader: reader, WorkspaceKey: "WS", Cursors: cursors}
+	bridge := &trigger.IssueJournalBridge{Store: s, Source: &failingInternalEmitter{err: persistence.ErrNotFound}, Reader: reader, WorkspaceKey: "WS", Cursors: cursors}
 
 	out, err := bridge.RunOnce(t.Context())
 	if err != nil {
@@ -643,7 +644,7 @@ type perWorkspaceReader struct {
 	m map[string]*fakeIssueJournalReader
 }
 
-func (r *perWorkspaceReader) ListIssueEvents(ctx context.Context, ws, afterCursor string, limit int) ([]store.JournalEvent, string, bool, error) {
+func (r *perWorkspaceReader) ListIssueEvents(ctx context.Context, ws, afterCursor string, limit int) ([]automation.JournalEvent, string, bool, error) {
 	inner, ok := r.m[ws]
 	if !ok {
 		return nil, afterCursor, false, nil

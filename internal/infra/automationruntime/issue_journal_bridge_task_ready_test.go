@@ -8,10 +8,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/modules/automation"
+
 	trigger "github.com/tysonthomas9/loomcli/internal/infra/automationruntime"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
-	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 func runTaskReadyBridge(t *testing.T, bridge *trigger.IssueJournalBridge) (*trigger.IssueJournalSweepResult, error) {
@@ -31,7 +32,7 @@ func runTaskReadyBridge(t *testing.T, bridge *trigger.IssueJournalBridge) (*trig
 						return snapshot, nil
 					}
 				}
-				return trigger.TaskReadySnapshot{}, domain.ErrNotFound
+				return trigger.TaskReadySnapshot{}, persistence.ErrNotFound
 			}
 		}
 		if bridge.RepositoryRequiredBlocker == nil {
@@ -51,7 +52,7 @@ func runTaskReadyBridge(t *testing.T, bridge *trigger.IssueJournalBridge) (*trig
 // newly-created open task emits a task.ready internal event carrying the task id.
 func TestIssueJournalBridgeEmitsTaskReady(t *testing.T) {
 	reader := &fakeIssueJournalReader{pages: map[string]journalPage{
-		"": {events: []store.JournalEvent{
+		"": {events: []automation.JournalEvent{
 			issueEvent("200", "issue.create", "user:alice", "SANDBOX-7",
 				`{"status":"open","title":"Write docs","repo":"acme/app"}`),
 		}, next: "200"},
@@ -131,7 +132,7 @@ func TestIssueJournalBridgeTaskReadySuppressesLiveEpics(t *testing.T) {
 			eventID := fmt.Sprintf("epic-suppression-%d", i)
 			taskID := fmt.Sprintf("TASK-%d", i)
 			reader := &fakeIssueJournalReader{pages: map[string]journalPage{
-				"": {events: []store.JournalEvent{
+				"": {events: []automation.JournalEvent{
 					issueEvent(eventID, tt.action, "user:alice", taskID, tt.after),
 				}, next: eventID},
 			}}
@@ -179,7 +180,7 @@ func TestIssueJournalBridgeTaskReadySuppressesLaggedOpenJournalForNonOpenLiveTas
 		t.Run(status, func(t *testing.T) {
 			eventID := "lagged-" + status
 			reader := &fakeIssueJournalReader{pages: map[string]journalPage{
-				"": {events: []store.JournalEvent{
+				"": {events: []automation.JournalEvent{
 					issueEvent(eventID, "issue.update", "user:alice", "TASK-LAGGED",
 						`{"status":"open","repo":"acme/app"}`),
 				}, next: eventID},
@@ -222,7 +223,7 @@ func TestIssueJournalBridgeTaskReadySuppressesLaggedOpenJournalForNonOpenLiveTas
 // true and its labels/type; the fields are always present with a stable type.
 func TestIssueJournalBridgeTaskReadyPayloadEnrichment(t *testing.T) {
 	reader := &fakeIssueJournalReader{pages: map[string]journalPage{
-		"": {events: []store.JournalEvent{
+		"": {events: []automation.JournalEvent{
 			issueEvent("500", "issue.update", "user:alice", "SANDBOX-11",
 				`{"status":"open","title":"Fix it","type":"bug","design":"approved plan","labels":["urgent","backend"]}`),
 		}, next: "500"},
@@ -279,7 +280,7 @@ func TestIssueJournalBridgeTaskReadyPayloadEnrichment(t *testing.T) {
 // null), so the claim gate can compare without nil checks.
 func TestIssueJournalBridgeTaskReadyPayloadZeroValues(t *testing.T) {
 	reader := &fakeIssueJournalReader{pages: map[string]journalPage{
-		"": {events: []store.JournalEvent{
+		"": {events: []automation.JournalEvent{
 			issueEvent("501", "issue.create", "user:alice", "SANDBOX-12", `{"status":"open","title":"Plan me"}`),
 		}, next: "501"},
 	}}
@@ -332,7 +333,7 @@ func TestIssueJournalBridgeTaskReadyPayloadZeroValues(t *testing.T) {
 // with EmitTaskReady off, no task.ready event is emitted.
 func TestIssueJournalBridgeTaskReadyGatedOff(t *testing.T) {
 	reader := &fakeIssueJournalReader{pages: map[string]journalPage{
-		"": {events: []store.JournalEvent{
+		"": {events: []automation.JournalEvent{
 			issueEvent("201", "issue.create", "user:alice", "SANDBOX-8", `{"status":"open"}`),
 		}, next: "201"},
 	}}
@@ -362,7 +363,7 @@ func TestIssueJournalBridgeTaskReadyGatedOff(t *testing.T) {
 // stale projection says open.
 func TestIssueJournalBridgeTaskReadyOnlyForReadyEntryAction(t *testing.T) {
 	reader := &fakeIssueJournalReader{pages: map[string]journalPage{
-		"": {events: []store.JournalEvent{
+		"": {events: []automation.JournalEvent{
 			issueEvent("300", "issue.update", "task-run:x", "SANDBOX-9", `{"status":"blocked"}`),
 			issueEvent("301", "issue.close", "task-run:x", "SANDBOX-9", `{"status":"closed"}`),
 			issueEvent("302", "issue.assign", "user:alice", "SANDBOX-9", `{"status":"open"}`),
@@ -393,7 +394,7 @@ func TestIssueJournalBridgeTaskReadyOnlyForReadyEntryAction(t *testing.T) {
 // unblock/reopen) emits task.ready.
 func TestIssueJournalBridgeTaskReadyOnUnblock(t *testing.T) {
 	reader := &fakeIssueJournalReader{pages: map[string]journalPage{
-		"": {events: []store.JournalEvent{
+		"": {events: []automation.JournalEvent{
 			issueEvent("400", "issue.update", "user:alice", "SANDBOX-10", `{"status":"open"}`),
 		}, next: "400"},
 	}}
@@ -425,7 +426,7 @@ func TestIssueJournalBridgeTaskReadyOnUnblock(t *testing.T) {
 // would send the coder away and invite the planner to re-plan.
 func TestIssueJournalBridgeTaskReadyDeltaUsesIssueLookup(t *testing.T) {
 	reader := &fakeIssueJournalReader{pages: map[string]journalPage{
-		"": {events: []store.JournalEvent{
+		"": {events: []automation.JournalEvent{
 			issueEvent("600", "issue.update", "user:alice", "SANDBOX-13", `{"status":"open"}`),
 		}, next: "600"},
 	}}
@@ -480,7 +481,7 @@ func TestIssueJournalBridgeTaskReadyDeltaUsesIssueLookup(t *testing.T) {
 
 func TestIssueJournalBridgeTaskReadyWithoutCurrentProjectionFailsClosed(t *testing.T) {
 	reader := &fakeIssueJournalReader{pages: map[string]journalPage{
-		"": {events: []store.JournalEvent{
+		"": {events: []automation.JournalEvent{
 			issueEvent("601", "issue.update", "user:alice", "SANDBOX-14", `{"status":"open"}`),
 		}, next: "601"},
 	}}
@@ -496,7 +497,7 @@ func TestIssueJournalBridgeTaskReadyWithoutCurrentProjectionFailsClosed(t *testi
 	bridge.RepositoryRequiredBlocker = func(context.Context, string, string) (trigger.TaskReadyRepositoryRequiredResult, error) {
 		return trigger.TaskReadyRepositoryRequiredResult{}, nil
 	}
-	if _, err := bridge.RunOnce(t.Context()); !errors.Is(err, domain.ErrInvalid) {
+	if _, err := bridge.RunOnce(t.Context()); !errors.Is(err, persistence.ErrInvalid) {
 		t.Fatalf("RunOnce error = %v, want fail-closed ErrInvalid", err)
 	}
 	if events := emitter.eventsOfType(trigger.TaskReadyEventType); len(events) != 0 {
@@ -510,7 +511,7 @@ func TestIssueJournalBridgeTaskReadyWithoutCurrentProjectionFailsClosed(t *testi
 // a repo-less multi-repo task would cross the prompt-agent's pre-claim guard.
 func TestIssueJournalBridgeTaskReadyLookupFailureRetriesBeforeClaim(t *testing.T) {
 	reader := &fakeIssueJournalReader{pages: map[string]journalPage{
-		"": {events: []store.JournalEvent{
+		"": {events: []automation.JournalEvent{
 			issueEvent("602", "issue.create", "user:alice", "SANDBOX-15", `{"status":"open","title":"Pick a repository"}`),
 		}, next: "602"},
 	}}
@@ -562,7 +563,7 @@ func TestIssueJournalBridgeTaskReadyLookupFailureRetriesBeforeClaim(t *testing.T
 
 func TestIssueJournalBridgeTaskReadyDeletedIssueDoesNotPoisonCursor(t *testing.T) {
 	reader := &fakeIssueJournalReader{pages: map[string]journalPage{
-		"": {events: []store.JournalEvent{
+		"": {events: []automation.JournalEvent{
 			issueEvent("602-gone", "issue.create", "user:alice", "TASK-GONE", `{"status":"open"}`),
 			issueEvent("602-live", "issue.create", "user:alice", "TASK-LIVE", `{"status":"open"}`),
 		}, next: "602-live"},
@@ -576,7 +577,7 @@ func TestIssueJournalBridgeTaskReadyDeletedIssueDoesNotPoisonCursor(t *testing.T
 		WorkspaceKey: "WS", Cursors: cursors, EmitTaskReady: true,
 		IssueLookup: func(_ context.Context, _ string, id string) (trigger.TaskReadySnapshot, error) {
 			if id == "TASK-GONE" {
-				return trigger.TaskReadySnapshot{}, domain.ErrNotFound
+				return trigger.TaskReadySnapshot{}, persistence.ErrNotFound
 			}
 			return trigger.TaskReadySnapshot{TaskID: id, Status: "open", IssueType: "task"}, nil
 		},
@@ -610,7 +611,7 @@ func TestIssueJournalBridgeBlocksRepositoryRequiredTaskBeforeDispatch(t *testing
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			reader := &fakeIssueJournalReader{pages: map[string]journalPage{
-				"": {events: []store.JournalEvent{
+				"": {events: []automation.JournalEvent{
 					issueEvent("603", "issue.create", "user:alice", "PHASE4-TERRA-FRESH-20260718-10",
 						`{"status":"open","title":"Testing HTML design"}`),
 				}, next: "603"},
@@ -657,7 +658,7 @@ func TestIssueJournalBridgeBlocksRepositoryRequiredTaskBeforeDispatch(t *testing
 
 func TestIssueJournalBridgeRepositoryAdmissionRaceDispatchesCanonicalAssignedRepo(t *testing.T) {
 	reader := &fakeIssueJournalReader{pages: map[string]journalPage{
-		"": {events: []store.JournalEvent{
+		"": {events: []automation.JournalEvent{
 			issueEvent("604", "issue.create", "user:alice", "TASK-604",
 				`{"status":"open","title":"Stale repo-less snapshot","labels":["stale"]}`),
 		}, next: "604"},
@@ -888,7 +889,7 @@ func TestIssueJournalBridgeReconcilesCurrentReadyPastCursor(t *testing.T) {
 func TestIssueJournalBridgeReconcileSuppressesSameJournalGeneration(t *testing.T) {
 	updatedAt := time.Date(2026, 7, 18, 20, 1, 0, 0, time.UTC)
 	reader := &fakeIssueJournalReader{pages: map[string]journalPage{
-		"": {events: []store.JournalEvent{
+		"": {events: []automation.JournalEvent{
 			issueEvent("910", "issue.create", "user:alice", "TASK-910",
 				`{"status":"open","updated_at":"2026-07-18T20:01:00Z","repo":"acme/app"}`),
 		}, next: "910"},
@@ -926,7 +927,7 @@ func TestIssueJournalBridgeReconcileSuppressesSameJournalGeneration(t *testing.T
 func TestIssueJournalBridgeReconcileSuppressesReleaseWithoutUpdatedAt(t *testing.T) {
 	updatedAt := time.Date(2026, 7, 18, 20, 2, 0, 0, time.UTC)
 	reader := &fakeIssueJournalReader{pages: map[string]journalPage{
-		"": {events: []store.JournalEvent{
+		"": {events: []automation.JournalEvent{
 			issueEvent("911", "issue.release", "driver-run:stale", "TASK-911",
 				`{"status":"open","assignee":""}`),
 		}, next: "911"},
@@ -967,7 +968,7 @@ func TestIssueJournalBridgeReconcileEmitsReleaseFromNewerLiveGeneration(t *testi
 	reconciledAt := time.Date(2026, 7, 18, 20, 3, 0, 0, time.UTC)
 	releasedAt := reconciledAt.Add(time.Minute)
 	reader := &fakeIssueJournalReader{pages: map[string]journalPage{
-		"": {events: []store.JournalEvent{
+		"": {events: []automation.JournalEvent{
 			issueEvent("912", "issue.release", "driver-run:newer", "TASK-912",
 				`{"status":"open","assignee":""}`),
 		}, next: "912"},

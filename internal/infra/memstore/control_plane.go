@@ -7,36 +7,39 @@ import (
 	"sync"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
+
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
+
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 type nodeStore struct {
 	mu    sync.RWMutex
-	items map[string]map[string]*domain.Node
+	items map[string]map[string]*execution.WorkerNode
 }
 
 func newNodeStore() *nodeStore {
-	return &nodeStore{items: make(map[string]map[string]*domain.Node)}
+	return &nodeStore{items: make(map[string]map[string]*execution.WorkerNode)}
 }
 
-var _ store.NodeStore = (*nodeStore)(nil)
+var _ execution.NodeStore = (*nodeStore)(nil)
 
-func (s *nodeStore) Create(_ context.Context, in store.NodeCreate) (*domain.Node, error) {
+func (s *nodeStore) Create(_ context.Context, in execution.NodeCreate) (*execution.WorkerNode, error) {
 	if in.WorkspaceKey == "" || in.NodeID == "" {
-		return nil, fmt.Errorf("workspace_key + node_id required: %w", domain.ErrInvalid)
+		return nil, fmt.Errorf("workspace_key + node_id required: %w", persistence.ErrInvalid)
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.items[in.WorkspaceKey] == nil {
-		s.items[in.WorkspaceKey] = make(map[string]*domain.Node)
+		s.items[in.WorkspaceKey] = make(map[string]*execution.WorkerNode)
 	}
 	now := time.Now().UTC()
 	ttl := in.TTL
 	if ttl <= 0 {
 		ttl = 5 * time.Minute
 	}
-	n := &domain.Node{
+	n := &execution.WorkerNode{
 		WorkspaceKey:    in.WorkspaceKey,
 		NodeID:          in.NodeID,
 		OwnerActor:      in.OwnerActor,
@@ -56,21 +59,21 @@ func (s *nodeStore) Create(_ context.Context, in store.NodeCreate) (*domain.Node
 	return cloneNode(n), nil
 }
 
-func (s *nodeStore) Get(_ context.Context, ws, nodeID string) (*domain.Node, error) {
+func (s *nodeStore) Get(_ context.Context, ws, nodeID string) (*execution.WorkerNode, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	n, ok := s.items[ws][nodeID]
 	if !ok {
-		return nil, fmt.Errorf("node %q in workspace %q: %w", nodeID, ws, domain.ErrNotFound)
+		return nil, fmt.Errorf("node %q in workspace %q: %w", nodeID, ws, persistence.ErrNotFound)
 	}
 	return cloneNode(n), nil
 }
 
-func (s *nodeStore) List(_ context.Context, ws string) ([]*domain.Node, error) {
+func (s *nodeStore) List(_ context.Context, ws string) ([]*execution.WorkerNode, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	nodes := s.items[ws]
-	out := make([]*domain.Node, 0, len(nodes))
+	out := make([]*execution.WorkerNode, 0, len(nodes))
 	for _, n := range nodes {
 		out = append(out, cloneNode(n))
 	}
@@ -78,12 +81,12 @@ func (s *nodeStore) List(_ context.Context, ws string) ([]*domain.Node, error) {
 	return out, nil
 }
 
-func (s *nodeStore) Heartbeat(_ context.Context, ws, nodeID string, ttl time.Duration) (*domain.Node, error) {
+func (s *nodeStore) Heartbeat(_ context.Context, ws, nodeID string, ttl time.Duration) (*execution.WorkerNode, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	n, ok := s.items[ws][nodeID]
 	if !ok {
-		return nil, fmt.Errorf("node %q in workspace %q: %w", nodeID, ws, domain.ErrNotFound)
+		return nil, fmt.Errorf("node %q in workspace %q: %w", nodeID, ws, persistence.ErrNotFound)
 	}
 	if ttl <= 0 {
 		ttl = 5 * time.Minute
@@ -95,12 +98,12 @@ func (s *nodeStore) Heartbeat(_ context.Context, ws, nodeID string, ttl time.Dur
 	return cloneNode(n), nil
 }
 
-func (s *nodeStore) Update(_ context.Context, ws, nodeID string, patch store.NodeUpdate) (*domain.Node, error) {
+func (s *nodeStore) Update(_ context.Context, ws, nodeID string, patch execution.NodeUpdate) (*execution.WorkerNode, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	n, ok := s.items[ws][nodeID]
 	if !ok {
-		return nil, fmt.Errorf("node %q in workspace %q: %w", nodeID, ws, domain.ErrNotFound)
+		return nil, fmt.Errorf("node %q in workspace %q: %w", nodeID, ws, persistence.ErrNotFound)
 	}
 	if patch.OwnerActor != nil {
 		n.OwnerActor = *patch.OwnerActor
@@ -135,29 +138,29 @@ func (s *nodeStore) Update(_ context.Context, ws, nodeID string, patch store.Nod
 
 type agentSessionStore struct {
 	mu    sync.RWMutex
-	items map[string]map[string]*domain.AgentSession
+	items map[string]map[string]*interaction.SessionRecord
 }
 
 func newAgentSessionStore() *agentSessionStore {
-	return &agentSessionStore{items: make(map[string]map[string]*domain.AgentSession)}
+	return &agentSessionStore{items: make(map[string]map[string]*interaction.SessionRecord)}
 }
 
-var _ store.AgentSessionStore = (*agentSessionStore)(nil)
+var _ interaction.AgentSessionStore = (*agentSessionStore)(nil)
 
-func (s *agentSessionStore) Create(_ context.Context, in store.AgentSessionCreate) (*domain.AgentSession, error) {
+func (s *agentSessionStore) Create(_ context.Context, in interaction.AgentSessionCreate) (*interaction.SessionRecord, error) {
 	if in.WorkspaceKey == "" || in.SessionID == "" || in.AgentID == "" {
-		return nil, fmt.Errorf("workspace_key + session_id + agent_id required: %w", domain.ErrInvalid)
+		return nil, fmt.Errorf("workspace_key + session_id + agent_id required: %w", persistence.ErrInvalid)
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.items[in.WorkspaceKey] == nil {
-		s.items[in.WorkspaceKey] = make(map[string]*domain.AgentSession)
+		s.items[in.WorkspaceKey] = make(map[string]*interaction.SessionRecord)
 	}
 	if _, ok := s.items[in.WorkspaceKey][in.SessionID]; ok {
-		return nil, fmt.Errorf("agent session %q in workspace %q: %w", in.SessionID, in.WorkspaceKey, domain.ErrAlreadyExists)
+		return nil, fmt.Errorf("agent session %q in workspace %q: %w", in.SessionID, in.WorkspaceKey, persistence.ErrAlreadyExists)
 	}
 	now := time.Now().UTC()
-	session := &domain.AgentSession{
+	session := &interaction.SessionRecord{
 		WorkspaceKey:    in.WorkspaceKey,
 		SessionID:       in.SessionID,
 		AgentID:         in.AgentID,
@@ -177,21 +180,21 @@ func (s *agentSessionStore) Create(_ context.Context, in store.AgentSessionCreat
 	return cloneAgentSession(session), nil
 }
 
-func (s *agentSessionStore) Get(_ context.Context, ws, sessionID string) (*domain.AgentSession, error) {
+func (s *agentSessionStore) Get(_ context.Context, ws, sessionID string) (*interaction.SessionRecord, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	session, ok := s.items[ws][sessionID]
 	if !ok {
-		return nil, fmt.Errorf("agent session %q in workspace %q: %w", sessionID, ws, domain.ErrNotFound)
+		return nil, fmt.Errorf("agent session %q in workspace %q: %w", sessionID, ws, persistence.ErrNotFound)
 	}
 	return cloneAgentSession(session), nil
 }
 
-func (s *agentSessionStore) List(_ context.Context, ws string, filter store.AgentSessionFilter) ([]*domain.AgentSession, error) {
+func (s *agentSessionStore) List(_ context.Context, ws string, filter interaction.AgentSessionFilter) ([]*interaction.SessionRecord, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	sessions := s.items[ws]
-	out := make([]*domain.AgentSession, 0, len(sessions))
+	out := make([]*interaction.SessionRecord, 0, len(sessions))
 	for _, session := range sessions {
 		if !sessionMatches(session, filter) {
 			continue
@@ -205,17 +208,17 @@ func (s *agentSessionStore) List(_ context.Context, ws string, filter store.Agen
 	return out, nil
 }
 
-func (s *agentSessionStore) Heartbeat(ctx context.Context, ws, sessionID string) (*domain.AgentSession, error) {
+func (s *agentSessionStore) Heartbeat(ctx context.Context, ws, sessionID string) (*interaction.SessionRecord, error) {
 	now := time.Now().UTC()
-	return s.Update(ctx, ws, sessionID, store.AgentSessionUpdate{LastHeartbeat: &now})
+	return s.Update(ctx, ws, sessionID, interaction.AgentSessionUpdate{LastHeartbeat: &now})
 }
 
-func (s *agentSessionStore) Update(_ context.Context, ws, sessionID string, patch store.AgentSessionUpdate) (*domain.AgentSession, error) {
+func (s *agentSessionStore) Update(_ context.Context, ws, sessionID string, patch interaction.AgentSessionUpdate) (*interaction.SessionRecord, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	session, ok := s.items[ws][sessionID]
 	if !ok {
-		return nil, fmt.Errorf("agent session %q in workspace %q: %w", sessionID, ws, domain.ErrNotFound)
+		return nil, fmt.Errorf("agent session %q in workspace %q: %w", sessionID, ws, persistence.ErrNotFound)
 	}
 	if patch.NodeID != nil {
 		session.NodeID = *patch.NodeID
@@ -251,7 +254,7 @@ func (s *agentSessionStore) Update(_ context.Context, ws, sessionID string, patc
 	return cloneAgentSession(session), nil
 }
 
-func cloneNode(n *domain.Node) *domain.Node {
+func cloneNode(n *execution.WorkerNode) *execution.WorkerNode {
 	out := *n
 	out.Labels = append([]string(nil), n.Labels...)
 	out.Capabilities = append([]string(nil), n.Capabilities...)
@@ -259,7 +262,7 @@ func cloneNode(n *domain.Node) *domain.Node {
 	return &out
 }
 
-func cloneAgentSession(s *domain.AgentSession) *domain.AgentSession {
+func cloneAgentSession(s *interaction.SessionRecord) *interaction.SessionRecord {
 	out := *s
 	out.FinishedAt = clonePtr(s.FinishedAt)
 	out.ExitCode = clonePtr(s.ExitCode)
@@ -278,7 +281,7 @@ func cloneMap(in map[string]string) map[string]string {
 	return out
 }
 
-func sessionMatches(s *domain.AgentSession, filter store.AgentSessionFilter) bool {
+func sessionMatches(s *interaction.SessionRecord, filter interaction.AgentSessionFilter) bool {
 	if filter.AgentID != "" && s.AgentID != filter.AgentID {
 		return false
 	}

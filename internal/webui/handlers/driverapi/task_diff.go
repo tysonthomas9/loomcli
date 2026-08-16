@@ -16,7 +16,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 	workspacemodule "github.com/tysonthomas9/loomcli/internal/modules/workspace"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 const (
@@ -56,7 +56,7 @@ func taskDiffError(status int, code, message string, retryable bool, details map
 		status = http.StatusBadRequest
 	}
 	if cause == nil {
-		cause = domain.ErrInvalid
+		cause = persistence.ErrInvalid
 	}
 	return &codedOpError{
 		status:    status,
@@ -108,7 +108,7 @@ func (m *Module) taskDiff(ctx context.Context, ws string, id driverIdentity, bod
 	}
 	taskID := strings.TrimSpace(params.TaskID)
 	if taskID == "" {
-		return nil, taskDiffError(http.StatusBadRequest, "task_diff_task_id_required", "taskId required", false, nil, domain.ErrInvalid)
+		return nil, taskDiffError(http.StatusBadRequest, "task_diff_task_id_required", "taskId required", false, nil, persistence.ErrInvalid)
 	}
 	items, _, err := m.workItemsForRun(ctx, ws, id)
 	if err != nil {
@@ -149,7 +149,7 @@ func (m *Module) taskDiff(ctx context.Context, ws string, id driverIdentity, bod
 	if !shaMatches(stampedSHA, headCommit) {
 		return nil, taskDiffError(http.StatusConflict, "task_diff_sha_mismatch",
 			"local branch "+branch+" points at "+shortSHA(headCommit)+" but external_ref stamped "+stampedSHA,
-			false, map[string]any{"branch": branch, "head": headCommit, "stamped": stampedSHA}, domain.ErrConflict)
+			false, map[string]any{"branch": branch, "head": headCommit, "stamped": stampedSHA}, persistence.ErrConflict)
 	}
 	defaultBranch, err := taskDiffDefaultBranch(ctx, repositoryPath, repo.DefaultBranch)
 	if err != nil {
@@ -182,7 +182,7 @@ func (m *Module) taskDiff(ctx context.Context, ws string, id driverIdentity, bod
 
 func (m *Module) taskDiffRepositoryPath(ctx context.Context, ws string, repo *workspacemodule.Repository) (string, string, error) {
 	if repo == nil {
-		return "", "", taskDiffError(http.StatusNotFound, "task_diff_repo_missing", "workspace repo is missing", false, nil, domain.ErrNotFound)
+		return "", "", taskDiffError(http.StatusNotFound, "task_diff_repo_missing", "workspace repo is missing", false, nil, persistence.ErrNotFound)
 	}
 	originPath, originErr := filesystemOriginPath(ctx, repo.RemoteURL)
 	if originErr == nil {
@@ -207,7 +207,7 @@ func (m *Module) taskDiffRepositoryPath(ctx context.Context, ws string, repo *wo
 	if checkoutPath == "" {
 		return "", "", taskDiffError(http.StatusNotFound, "task_diff_checkout_missing",
 			"selected repo has no machine-local checkout for local review", false,
-			map[string]any{"repo": repo.Name}, domain.ErrNotFound)
+			map[string]any{"repo": repo.Name}, persistence.ErrNotFound)
 	}
 	if err := validateTaskDiffCheckout(ctx, checkoutPath, repo); err != nil {
 		return "", "", err
@@ -220,7 +220,7 @@ func validateTaskDiffCheckout(ctx context.Context, checkoutPath string, repo *wo
 	if err != nil || !info.IsDir() {
 		return taskDiffError(http.StatusNotFound, "task_diff_checkout_missing",
 			"selected repo machine-local checkout is missing", false,
-			map[string]any{"repo": repo.Name}, firstNonNil(err, domain.ErrNotFound))
+			map[string]any{"repo": repo.Name}, firstNonNil(err, persistence.ErrNotFound))
 	}
 	if _, _, err := runTaskDiffGit(ctx, checkoutPath, taskDiffSmallOutLimit, "rev-parse", "--git-dir"); err != nil {
 		return taskDiffError(http.StatusBadRequest, "task_diff_checkout_not_git",
@@ -246,7 +246,7 @@ func validateTaskDiffCheckout(ctx context.Context, checkoutPath string, repo *wo
 	if !sameTaskDiffRemote(got, repo.RemoteURL) {
 		return taskDiffError(http.StatusConflict, "task_diff_checkout_remote_mismatch",
 			"selected repo machine-local checkout remote does not match the workspace repo", false,
-			map[string]any{"repo": repo.Name}, domain.ErrConflict)
+			map[string]any{"repo": repo.Name}, persistence.ErrConflict)
 	}
 	return nil
 }
@@ -266,29 +266,29 @@ func firstNonNil(values ...error) error {
 			return value
 		}
 	}
-	return domain.ErrInvalid
+	return persistence.ErrInvalid
 }
 
 func parseLocalBranchExternalRef(externalRef string) (string, string, error) {
 	externalRef = strings.TrimSpace(externalRef)
 	if externalRef == "" {
-		return "", "", taskDiffError(http.StatusBadRequest, "task_diff_external_ref_missing", "task has no external_ref", false, nil, domain.ErrInvalid)
+		return "", "", taskDiffError(http.StatusBadRequest, "task_diff_external_ref_missing", "task has no external_ref", false, nil, persistence.ErrInvalid)
 	}
 	if !strings.HasPrefix(externalRef, "local-branch:") {
-		return "", "", taskDiffError(http.StatusBadRequest, "task_diff_external_ref_unsupported", "external_ref is not a local-branch ref", false, nil, domain.ErrInvalid)
+		return "", "", taskDiffError(http.StatusBadRequest, "task_diff_external_ref_unsupported", "external_ref is not a local-branch ref", false, nil, persistence.ErrInvalid)
 	}
 	body := strings.TrimPrefix(externalRef, "local-branch:")
 	at := strings.LastIndex(body, "@")
 	if at <= 0 || at == len(body)-1 {
-		return "", "", taskDiffError(http.StatusBadRequest, "task_diff_external_ref_invalid", "local-branch external_ref must be local-branch:<branch>@<sha>", false, nil, domain.ErrInvalid)
+		return "", "", taskDiffError(http.StatusBadRequest, "task_diff_external_ref_invalid", "local-branch external_ref must be local-branch:<branch>@<sha>", false, nil, persistence.ErrInvalid)
 	}
 	branch := strings.TrimSpace(body[:at])
 	sha := strings.TrimSpace(body[at+1:])
 	if branch == "" || sha == "" {
-		return "", "", taskDiffError(http.StatusBadRequest, "task_diff_external_ref_invalid", "local-branch external_ref must include branch and sha", false, nil, domain.ErrInvalid)
+		return "", "", taskDiffError(http.StatusBadRequest, "task_diff_external_ref_invalid", "local-branch external_ref must include branch and sha", false, nil, persistence.ErrInvalid)
 	}
 	if !isHexSHA(sha) {
-		return "", "", taskDiffError(http.StatusBadRequest, "task_diff_sha_invalid", "local-branch external_ref sha must be a 7-64 character hex commit prefix", false, nil, domain.ErrInvalid)
+		return "", "", taskDiffError(http.StatusBadRequest, "task_diff_sha_invalid", "local-branch external_ref sha must be a 7-64 character hex commit prefix", false, nil, persistence.ErrInvalid)
 	}
 	return branch, strings.ToLower(sha), nil
 }
@@ -299,14 +299,14 @@ func selectTaskDiffRepo(repos []workspacemodule.Repository, sourceRepo string) (
 		available = append(available, &repos[index])
 	}
 	if len(available) == 0 {
-		return nil, taskDiffError(http.StatusNotFound, "task_diff_repo_missing", "workspace has no repos", false, nil, domain.ErrNotFound)
+		return nil, taskDiffError(http.StatusNotFound, "task_diff_repo_missing", "workspace has no repos", false, nil, persistence.ErrNotFound)
 	}
 	sourceRepo = strings.TrimSpace(sourceRepo)
 	if sourceRepo == "" {
 		if len(available) == 1 {
 			return available[0], nil
 		}
-		return nil, taskDiffError(http.StatusBadRequest, "task_diff_repo_ambiguous", "task has no source_repo and workspace has multiple repos", false, nil, domain.ErrInvalid)
+		return nil, taskDiffError(http.StatusBadRequest, "task_diff_repo_ambiguous", "task has no source_repo and workspace has multiple repos", false, nil, persistence.ErrInvalid)
 	}
 	want := normalizedTaskDiffRepoToken(sourceRepo)
 	wantBase := normalizedTaskDiffRepoToken(repoBaseName(sourceRepo))
@@ -318,28 +318,28 @@ func selectTaskDiffRepo(repos []workspacemodule.Repository, sourceRepo string) (
 			}
 		}
 	}
-	return nil, taskDiffError(http.StatusNotFound, "task_diff_repo_missing", "no workspace repo matches task source_repo "+sourceRepo, false, nil, domain.ErrNotFound)
+	return nil, taskDiffError(http.StatusNotFound, "task_diff_repo_missing", "no workspace repo matches task source_repo "+sourceRepo, false, nil, persistence.ErrNotFound)
 }
 
 func filesystemOriginPath(ctx context.Context, remoteURL string) (string, error) {
 	remoteURL = strings.TrimSpace(remoteURL)
 	if remoteURL == "" {
-		return "", taskDiffError(http.StatusBadRequest, "task_diff_origin_missing", "selected repo has no remote URL", false, nil, domain.ErrInvalid)
+		return "", taskDiffError(http.StatusBadRequest, "task_diff_origin_missing", "selected repo has no remote URL", false, nil, persistence.ErrInvalid)
 	}
 	path := ""
 	if strings.HasPrefix(remoteURL, "file://") {
 		parsed, err := url.Parse(remoteURL)
 		if err != nil || parsed.Scheme != "file" {
-			return "", taskDiffError(http.StatusBadRequest, "task_diff_origin_invalid", "selected repo origin file URL is invalid", false, nil, domain.ErrInvalid)
+			return "", taskDiffError(http.StatusBadRequest, "task_diff_origin_invalid", "selected repo origin file URL is invalid", false, nil, persistence.ErrInvalid)
 		}
 		if parsed.Host != "" && parsed.Host != "localhost" {
-			return "", taskDiffError(http.StatusBadRequest, "task_diff_origin_not_filesystem", "selected repo origin file URL must be local", false, nil, domain.ErrInvalid)
+			return "", taskDiffError(http.StatusBadRequest, "task_diff_origin_not_filesystem", "selected repo origin file URL must be local", false, nil, persistence.ErrInvalid)
 		}
 		path = parsed.Path
 	} else if filepath.IsAbs(remoteURL) {
 		path = remoteURL
 	} else {
-		return "", taskDiffError(http.StatusBadRequest, "task_diff_origin_not_filesystem", "selected repo origin is not a local filesystem path", false, nil, domain.ErrInvalid)
+		return "", taskDiffError(http.StatusBadRequest, "task_diff_origin_not_filesystem", "selected repo origin is not a local filesystem path", false, nil, persistence.ErrInvalid)
 	}
 	path = filepath.Clean(path)
 	info, err := os.Stat(path)
@@ -347,7 +347,7 @@ func filesystemOriginPath(ctx context.Context, remoteURL string) (string, error)
 		return "", taskDiffError(http.StatusNotFound, "task_diff_origin_missing", "selected repo filesystem origin is missing", false, nil, err)
 	}
 	if !info.IsDir() {
-		return "", taskDiffError(http.StatusBadRequest, "task_diff_origin_not_git", "selected repo filesystem origin is not a directory", false, nil, domain.ErrInvalid)
+		return "", taskDiffError(http.StatusBadRequest, "task_diff_origin_not_git", "selected repo filesystem origin is not a directory", false, nil, persistence.ErrInvalid)
 	}
 	if _, _, err := runTaskDiffGit(ctx, path, taskDiffSmallOutLimit, "rev-parse", "--git-dir"); err != nil {
 		if isCodedTaskDiffError(err) {
@@ -360,7 +360,7 @@ func filesystemOriginPath(ctx context.Context, remoteURL string) (string, error)
 
 func validateLocalBranchRef(ctx context.Context, originPath, branch string) error {
 	if branch == "" || strings.HasPrefix(branch, "-") {
-		return taskDiffError(http.StatusBadRequest, "task_diff_branch_invalid", "local branch name is invalid", false, nil, domain.ErrInvalid)
+		return taskDiffError(http.StatusBadRequest, "task_diff_branch_invalid", "local branch name is invalid", false, nil, persistence.ErrInvalid)
 	}
 	_, stderr, err := runTaskDiffGit(ctx, originPath, taskDiffSmallOutLimit, "check-ref-format", "--branch", branch)
 	if err != nil {
@@ -389,7 +389,7 @@ func taskDiffDefaultBranch(ctx context.Context, originPath, configured string) (
 	}
 	branch := normalizeTaskDiffBranch(stdout)
 	if branch == "" {
-		return "", taskDiffError(http.StatusBadRequest, "task_diff_default_branch_missing", "repo default branch is empty", false, nil, domain.ErrInvalid)
+		return "", taskDiffError(http.StatusBadRequest, "task_diff_default_branch_missing", "repo default branch is empty", false, nil, persistence.ErrInvalid)
 	}
 	return branch, nil
 }
@@ -404,7 +404,7 @@ func gitRevParseCommit(ctx context.Context, originPath, ref, code, message strin
 	}
 	sha := strings.TrimSpace(stdout)
 	if !isHexSHA(sha) {
-		return "", taskDiffError(http.StatusBadRequest, "task_diff_sha_invalid", "git resolved a non-hex commit for "+ref, false, nil, domain.ErrInvalid)
+		return "", taskDiffError(http.StatusBadRequest, "task_diff_sha_invalid", "git resolved a non-hex commit for "+ref, false, nil, persistence.ErrInvalid)
 	}
 	return strings.ToLower(sha), nil
 }
@@ -412,7 +412,7 @@ func gitRevParseCommit(ctx context.Context, originPath, ref, code, message strin
 func gitDiff(ctx context.Context, originPath, baseCommit, headCommit string) (string, error) {
 	stdout, stderr, err := runTaskDiffGit(ctx, originPath, taskDiffMaxBytes+1, "diff", "--binary", baseCommit+"..."+headCommit)
 	if len([]byte(stdout)) > taskDiffMaxBytes {
-		return "", taskDiffError(http.StatusRequestEntityTooLarge, "task_diff_too_large", fmt.Sprintf("task diff exceeds %d byte limit", taskDiffMaxBytes), false, nil, domain.ErrInvalid)
+		return "", taskDiffError(http.StatusRequestEntityTooLarge, "task_diff_too_large", fmt.Sprintf("task diff exceeds %d byte limit", taskDiffMaxBytes), false, nil, persistence.ErrInvalid)
 	}
 	if err != nil {
 		if isCodedTaskDiffError(err) {

@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	artifactsmodule "github.com/tysonthomas9/loomcli/internal/modules/artifacts"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 // artifactResult is the camelCase wire view of a task-run artifact.
@@ -295,15 +295,15 @@ func artifactDomainError(err error) error {
 	var mapped error
 	switch {
 	case errors.Is(err, artifactsmodule.ErrNotFound):
-		mapped = domain.ErrNotFound
+		mapped = persistence.ErrNotFound
 	case errors.Is(err, artifactsmodule.ErrAlreadyExists):
-		mapped = domain.ErrAlreadyExists
+		mapped = persistence.ErrAlreadyExists
 	case errors.Is(err, artifactsmodule.ErrNotOwner):
-		mapped = domain.ErrNotOwner
+		mapped = persistence.ErrNotOwner
 	case errors.Is(err, artifactsmodule.ErrInvalidTransition):
-		mapped = domain.ErrInvalidTransition
+		mapped = persistence.ErrInvalidTransition
 	case errors.Is(err, artifactsmodule.ErrInvalid):
-		mapped = domain.ErrInvalid
+		mapped = persistence.ErrInvalid
 	default:
 		return err
 	}

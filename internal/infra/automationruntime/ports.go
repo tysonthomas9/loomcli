@@ -1,8 +1,8 @@
 package trigger
 
-import "github.com/tysonthomas9/loomcli/internal/store"
+import workspaceowner "github.com/tysonthomas9/loomcli/internal/modules/workspace"
 
 // workspaceLister is the workspace query required by runtime sweepers.
 type workspaceLister interface {
-	Workspaces() store.WorkspaceStore
+	Workspaces() workspaceowner.WorkspaceStore
 }

@@ -9,8 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
+
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 func awaitWireRow(key, status string) map[string]any {
@@ -61,7 +62,7 @@ func TestAwaitRegisterAndCheckWire(t *testing.T) {
 		row["satisfied_payload"] = json.RawMessage(`{"ok":true}`)
 		writeJSON(t, w, map[string]any{"await": row, "satisfied": true})
 	})
-	res, err := client.Awaits().RegisterAwaitAndCheck(t.Context(), "WS", store.AwaitRegistration{
+	res, err := client.Awaits().RegisterAwaitAndCheck(t.Context(), "WS", execution.AwaitRegistration{
 		InstanceKey: "run-1#await-1",
 		RunID:       "run-1",
 		Pattern:     "pr.approved:repo-1",
@@ -71,32 +72,36 @@ func TestAwaitRegisterAndCheckWire(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RegisterAwaitAndCheck: %v", err)
 	}
-	if !res.Satisfied || res.Instance.Status != domain.AwaitSatisfied ||
+	if !res.Satisfied || res.Instance.Status != execution.AwaitSatisfied ||
 		res.Instance.SatisfiedByEventID != "event-7" || string(res.Instance.SatisfiedPayload) != `{"ok":true}` {
 		t.Fatalf("register result = %+v / %+v", res.Satisfied, res.Instance)
 	}
 }
 
-// Client-side registration validation fails fast with the domain sentinels —
-// no request reaches the server.
+// Client-side registration validation fails fast with Execution-owned
+// sentinels — no request reaches the server and no backend error vocabulary
+// escapes the owner seam.
 func TestAwaitRegisterValidatesClientSide(t *testing.T) {
 	client := awaitTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		t.Errorf("unexpected request %s %s for invalid registration", r.Method, r.URL.Path)
 	})
 	cases := []struct {
 		name    string
-		in      store.AwaitRegistration
+		in      execution.AwaitRegistration
 		wantErr error
 	}{
-		{"missing deadline", store.AwaitRegistration{InstanceKey: "run-1#await-1", RunID: "run-1", Pattern: "a:b"}, domain.ErrAwaitTimeoutRequired},
-		{"unscoped pattern", store.AwaitRegistration{InstanceKey: "run-1#await-1", RunID: "run-1", Pattern: "a", Deadline: time.Now().Add(time.Hour)}, domain.ErrAwaitPatternUnscoped},
-		{"malformed key", store.AwaitRegistration{InstanceKey: "run-1#await-0", RunID: "run-1", Pattern: "a:b", Deadline: time.Now().Add(time.Hour)}, domain.ErrAwaitInstanceKeyMalformed},
+		{"missing deadline", execution.AwaitRegistration{InstanceKey: "run-1#await-1", RunID: "run-1", Pattern: "a:b"}, execution.ErrAwaitTimeoutRequired},
+		{"unscoped pattern", execution.AwaitRegistration{InstanceKey: "run-1#await-1", RunID: "run-1", Pattern: "a", Deadline: time.Now().Add(time.Hour)}, execution.ErrAwaitPatternUnscoped},
+		{"malformed key", execution.AwaitRegistration{InstanceKey: "run-1#await-0", RunID: "run-1", Pattern: "a:b", Deadline: time.Now().Add(time.Hour)}, execution.ErrAwaitInstanceKeyMalformed},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := client.Awaits().RegisterAwaitAndCheck(t.Context(), "WS", tc.in)
-			if !errors.Is(err, tc.wantErr) || !errors.Is(err, domain.ErrInvalid) {
-				t.Fatalf("err = %v, want %v wrapping ErrInvalid", err, tc.wantErr)
+			if !errors.Is(err, tc.wantErr) {
+				t.Fatalf("err = %v, want %v", err, tc.wantErr)
+			}
+			if errors.Is(err, persistence.ErrInvalid) {
+				t.Fatalf("err = %v leaks backend persistence.ErrInvalid", err)
 			}
 		})
 	}
@@ -147,7 +152,7 @@ func TestResolveRunOutcomeAwaitAndResumeWire(t *testing.T) {
 		}
 		writeJSON(t, w, map[string]bool{"resolved": true})
 	})
-	resolver := client.Awaits().(store.RunOutcomeAwaitStore)
+	resolver := client.Awaits().(execution.RunOutcomeAwaitStore)
 	err := resolver.ResolveRunOutcomeAwaitAndResume(
 		t.Context(), "WS", "parent#await-1", "run-finished:child:completed",
 		json.RawMessage(`{"runId":"child","status":"completed"}`),
@@ -177,7 +182,7 @@ func TestResolveAwaitAndResumeWire(t *testing.T) {
 		}
 		writeJSON(t, w, map[string]bool{"resolved": true})
 	})
-	resolver := client.Awaits().(store.AtomicAwaitStore)
+	resolver := client.Awaits().(execution.AtomicAwaitStore)
 	if err := resolver.ResolveAwaitAndResume(
 		t.Context(), "WS", "run-1#await-1", "approval-9",
 		json.RawMessage(`{"decision":"approved"}`), "alice",
@@ -197,10 +202,10 @@ func TestResolveAwaitAndResumeTimeoutWire(t *testing.T) {
 		}
 		writeJSON(t, w, map[string]bool{"resolved": true})
 	})
-	resolver := client.Awaits().(store.AtomicAwaitStore)
+	resolver := client.Awaits().(execution.AtomicAwaitStore)
 	if err := resolver.ResolveAwaitAndResume(
-		t.Context(), "WS", "run-1#await-1", domain.AwaitTimeoutEventID("run-1#await-1"), nil,
-		domain.AwaitTimeoutActor,
+		t.Context(), "WS", "run-1#await-1", execution.AwaitTimeoutEventID("run-1#await-1"), nil,
+		execution.AwaitTimeoutActor,
 	); err != nil {
 		t.Fatal(err)
 	}
@@ -220,8 +225,8 @@ func TestAwaitResolveTimeoutStatus(t *testing.T) {
 		writeJSON(t, w, map[string]any{"await": awaitWireRow("run-1#await-1", "timed_out"), "resume": true})
 	})
 	res, err := client.Awaits().ResolveAwait(t.Context(), "WS", "run-1#await-1",
-		domain.AwaitTimeoutEventIDPrefix+"deadline-1", nil, "system")
-	if err != nil || res.Instance.Status != domain.AwaitTimedOut {
+		execution.AwaitTimeoutEventIDPrefix+"deadline-1", nil, "system")
+	if err != nil || res.Instance.Status != execution.AwaitTimedOut {
 		t.Fatalf("timeout resolve = %+v err=%v", res, err)
 	}
 }
@@ -230,9 +235,9 @@ func TestAwaitResolvePayloadCapClientSide(t *testing.T) {
 	client := awaitTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		t.Errorf("oversized payload reached the wire")
 	})
-	oversize := json.RawMessage(make([]byte, domain.DefaultAwaitResumePayloadCap+1))
+	oversize := json.RawMessage(make([]byte, execution.DefaultAwaitResumePayloadCap+1))
 	_, err := client.Awaits().ResolveAwait(t.Context(), "WS", "run-1#await-1", "event-1", oversize, "alice")
-	if !errors.Is(err, domain.ErrInvalid) {
+	if !errors.Is(err, persistence.ErrInvalid) {
 		t.Fatalf("oversize resolve err = %v, want ErrInvalid", err)
 	}
 }
@@ -241,12 +246,12 @@ func TestResolveRunOutcomeAwaitPayloadCapClientSide(t *testing.T) {
 	client := awaitTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		t.Errorf("oversized atomic run outcome payload reached the wire")
 	})
-	resolver := client.Awaits().(store.RunOutcomeAwaitStore)
+	resolver := client.Awaits().(execution.RunOutcomeAwaitStore)
 	err := resolver.ResolveRunOutcomeAwaitAndResume(
 		t.Context(), "WS", "parent#await-1", "run-finished:child:completed",
-		json.RawMessage(make([]byte, domain.DefaultAwaitResumePayloadCap+1)),
+		json.RawMessage(make([]byte, execution.DefaultAwaitResumePayloadCap+1)),
 	)
-	if !errors.Is(err, domain.ErrInvalid) {
+	if !errors.Is(err, persistence.ErrInvalid) {
 		t.Fatalf("oversize atomic resolve err = %v, want ErrInvalid", err)
 	}
 }
@@ -331,11 +336,11 @@ func TestDriverRunSuspendResumeWire(t *testing.T) {
 		}
 	})
 	run, err := client.DriverRuns().Suspend(t.Context(), "WS", "run-1", "node-1", "lease-1", 3, "run-1#await-1")
-	if err != nil || run.Status != domain.DriverRunSuspendedAwaitingEvent || run.SuspendedAt == nil {
+	if err != nil || run.Status != execution.DriverRunSuspendedAwait || run.SuspendedAt == nil {
 		t.Fatalf("suspend = %+v err=%v", run, err)
 	}
 	resumed, err := client.DriverRuns().ResumeAwaiting(t.Context(), "WS", "run-1", "run-1#await-1", "event-9")
-	if err != nil || resumed.Status != domain.DriverRunQueued || resumed.ResumeSourceEventID != "event-9" {
+	if err != nil || resumed.Status != execution.DriverRunQueued || resumed.ResumeSourceEventID != "event-9" {
 		t.Fatalf("resume = %+v err=%v", resumed, err)
 	}
 }
@@ -355,13 +360,13 @@ func TestAwaitErrorClassification(t *testing.T) {
 			name: "timeout required", status: http.StatusBadRequest, code: "await_timeout_required",
 			call: func(c *Client, ctx context.Context) error {
 				// Bypass client-side validation with a server-rejected (race) deadline.
-				_, err := c.Awaits().RegisterAwaitAndCheck(ctx, "WS", store.AwaitRegistration{
+				_, err := c.Awaits().RegisterAwaitAndCheck(ctx, "WS", execution.AwaitRegistration{
 					InstanceKey: "run-1#await-1", RunID: "run-1", Pattern: "a:b",
 					Deadline: time.Now().Add(time.Hour),
 				})
 				return err
 			},
-			wantErr: domain.ErrAwaitTimeoutRequired, alsoWant: domain.ErrInvalid,
+			wantErr: execution.ErrAwaitTimeoutRequired,
 		},
 		{
 			name: "payload too large server-side", status: http.StatusBadRequest, code: "await_payload_too_large",
@@ -369,7 +374,7 @@ func TestAwaitErrorClassification(t *testing.T) {
 				_, err := c.Awaits().ResolveAwait(ctx, "WS", "run-1#await-1", "event-1", nil, "alice")
 				return err
 			},
-			wantErr: domain.ErrInvalid,
+			wantErr: persistence.ErrInvalid,
 		},
 		{
 			name: "actor forbidden", status: http.StatusForbidden, code: "await_actor_forbidden",
@@ -377,7 +382,7 @@ func TestAwaitErrorClassification(t *testing.T) {
 				_, err := c.Awaits().ResolveAwait(ctx, "WS", "run-1#await-1", "event-1", nil, "mallory")
 				return err
 			},
-			wantErr: domain.ErrAwaitActorForbidden,
+			wantErr: execution.ErrAwaitActorForbidden,
 		},
 		{
 			name: "resolve not found", status: http.StatusNotFound, code: "not_found",
@@ -385,7 +390,7 @@ func TestAwaitErrorClassification(t *testing.T) {
 				_, err := c.Awaits().ResolveAwait(ctx, "WS", "run-9#await-1", "event-1", nil, "alice")
 				return err
 			},
-			wantErr: domain.ErrNotFound,
+			wantErr: persistence.ErrNotFound,
 		},
 		{
 			name: "suspend already resumed (pending->suspend window)", status: http.StatusConflict, code: "driver_run_already_resumed",
@@ -393,7 +398,7 @@ func TestAwaitErrorClassification(t *testing.T) {
 				_, err := c.DriverRuns().Suspend(ctx, "WS", "run-1", "node-1", "lease-1", 3, "run-1#await-1")
 				return err
 			},
-			wantErr: domain.ErrDriverRunAlreadyResumed,
+			wantErr: execution.ErrAlreadyResumed,
 		},
 		{
 			name: "suspend owner mismatch", status: http.StatusForbidden, code: "forbidden",
@@ -401,7 +406,7 @@ func TestAwaitErrorClassification(t *testing.T) {
 				_, err := c.DriverRuns().Suspend(ctx, "WS", "run-1", "node-2", "lease-2", 4, "run-1#await-1")
 				return err
 			},
-			wantErr: domain.ErrNotOwner,
+			wantErr: persistence.ErrNotOwner,
 		},
 		{
 			name: "resume racing loser", status: http.StatusConflict, code: "invalid_transition",
@@ -409,7 +414,7 @@ func TestAwaitErrorClassification(t *testing.T) {
 				_, err := c.DriverRuns().ResumeAwaiting(ctx, "WS", "run-1", "run-1#await-1", "event-9")
 				return err
 			},
-			wantErr: domain.ErrInvalidTransition,
+			wantErr: persistence.ErrInvalidTransition,
 		},
 	}
 	for _, tc := range cases {

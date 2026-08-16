@@ -9,8 +9,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 )
 
 const issueTriggerSubjectPrefix = "issue:"
@@ -31,7 +30,7 @@ type TaskWorkflowRunQuery struct {
 // sessionless DriverRuns.
 type TaskWorkflowRunResult struct {
 	SubjectRef string
-	Runs       []*domain.DriverRun
+	Runs       []*execution.DriverRunRecord
 }
 
 // TaskWorkflowRunReader is the narrow read-model port exposed to HTTP
@@ -41,15 +40,15 @@ type TaskWorkflowRunReader interface {
 }
 
 type taskRunListPort interface {
-	List(context.Context, string, store.TaskRunFilter) ([]*domain.TaskRun, error)
+	List(context.Context, string, execution.TaskRunFilter) ([]*execution.TaskRunRecord, error)
 }
 
 type triggerEventListPort interface {
-	List(context.Context, string, store.TriggerEventFilter) ([]*automation.Event, error)
+	List(context.Context, string, automation.TriggerEventFilter) ([]*automation.Event, error)
 }
 
 type driverRunListPort interface {
-	List(context.Context, string, store.DriverRunFilter) ([]*domain.DriverRun, error)
+	List(context.Context, string, execution.DriverRunFilter) ([]*execution.DriverRunRecord, error)
 }
 
 type taskWorkflowRunReader struct {
@@ -115,12 +114,12 @@ func (reader *taskWorkflowRunReader) ListTaskWorkflowRuns(
 	if err != nil {
 		return TaskWorkflowRunResult{}, err
 	}
-	store.SortDriverRunsNewestFirst(runs)
+	execution.SortDriverRunsNewestFirst(runs)
 	if query.Limit > 0 && len(runs) > query.Limit {
 		runs = runs[:query.Limit]
 	}
 	if runs == nil {
-		runs = []*domain.DriverRun{}
+		runs = []*execution.DriverRunRecord{}
 	}
 	return TaskWorkflowRunResult{SubjectRef: subjectRef, Runs: runs}, nil
 }
@@ -129,7 +128,7 @@ func (reader *taskWorkflowRunReader) taskEventIDs(
 	ctx context.Context,
 	workspace, subjectRef string,
 ) (map[string]struct{}, error) {
-	events, err := reader.events.List(ctx, workspace, store.TriggerEventFilter{SubjectRef: subjectRef})
+	events, err := reader.events.List(ctx, workspace, automation.TriggerEventFilter{SubjectRef: subjectRef})
 	if err != nil {
 		return nil, err
 	}
@@ -149,12 +148,12 @@ func (reader *taskWorkflowRunReader) unrepresentedDriverRuns(
 	ctx context.Context,
 	workspace string,
 	eventIDs, representedDriverRuns map[string]struct{},
-) ([]*domain.DriverRun, error) {
-	allRuns, err := reader.driverRuns.List(ctx, workspace, store.DriverRunFilter{})
+) ([]*execution.DriverRunRecord, error) {
+	allRuns, err := reader.driverRuns.List(ctx, workspace, execution.DriverRunFilter{})
 	if err != nil {
 		return nil, err
 	}
-	runsByID := make(map[string]*domain.DriverRun)
+	runsByID := make(map[string]*execution.DriverRunRecord)
 	for _, run := range allRuns {
 		if run == nil || run.WorkspaceKey != workspace || strings.TrimSpace(run.RunID) == "" {
 			continue
@@ -168,7 +167,7 @@ func (reader *taskWorkflowRunReader) unrepresentedDriverRuns(
 		runsByID[run.RunID] = run
 	}
 
-	runs := make([]*domain.DriverRun, 0, len(runsByID))
+	runs := make([]*execution.DriverRunRecord, 0, len(runsByID))
 	for _, run := range runsByID {
 		runs = append(runs, run)
 	}
@@ -179,7 +178,7 @@ func (reader *taskWorkflowRunReader) representedDriverRunIDs(
 	ctx context.Context,
 	workspace, taskID string,
 ) (map[string]struct{}, error) {
-	taskRuns, err := reader.taskRuns.List(ctx, workspace, store.TaskRunFilter{TaskID: taskID})
+	taskRuns, err := reader.taskRuns.List(ctx, workspace, execution.TaskRunFilter{TaskID: taskID})
 	if err != nil {
 		return nil, err
 	}

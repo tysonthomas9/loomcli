@@ -9,9 +9,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	transcript "github.com/tysonthomas9/loomcli/internal/modules/artifacts"
 	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 const (
@@ -101,7 +101,7 @@ func resolveCodexTranscriptCaptureTarget(
 	}
 	if cfg.Store != nil && cfg.Store.AgentSessions() != nil {
 		session, err := cfg.Store.AgentSessions().Get(ctx, workspace, sessionID)
-		if err != nil && !errors.Is(err, domain.ErrNotFound) {
+		if err != nil && !errors.Is(err, persistence.ErrNotFound) {
 			return nil, fmt.Errorf("load codex interactive session: %w", err)
 		}
 		if session != nil {

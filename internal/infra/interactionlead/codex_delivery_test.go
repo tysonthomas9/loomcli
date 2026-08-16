@@ -5,9 +5,13 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
+
+	"github.com/tysonthomas9/loomcli/internal/modules/agents"
+
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
+
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
-	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
 func TestCodexDeliverCurrentAssignmentStartsTurnWhenIdle(t *testing.T) {
@@ -263,12 +267,12 @@ func TestCodexDeliverLeadMessageQueuesBeforeSessionAndDrainsLater(t *testing.T) 
 		t.Fatalf("queued inbox messages = %#v, want one sessionless message", queued)
 	}
 
-	if _, err := st.AgentSessions().Create(ctx, store.AgentSessionCreate{
+	if _, err := st.AgentSessions().Create(ctx, interaction.AgentSessionCreate{
 		WorkspaceKey: "WS",
 		SessionID:    "lead-session",
 		AgentID:      "nova",
-		Kind:         domain.AgentSessionKindInteractive,
-		Status:       domain.AgentSessionRunning,
+		Kind:         interaction.SessionRecordInteractive,
+		Status:       interaction.SessionRecordRunning,
 		Metadata:     map[string]string{"actor": "test"},
 	}); err != nil {
 		t.Fatalf("create session: %v", err)
@@ -304,12 +308,12 @@ func TestCodexDeliverLeadMessageDoesNotDuplicateSessionlessMessageAfterSessionSt
 		t.Fatalf("delivery result = %#v, want pending with inbox message", result)
 	}
 
-	if _, err := st.AgentSessions().Create(ctx, store.AgentSessionCreate{
+	if _, err := st.AgentSessions().Create(ctx, interaction.AgentSessionCreate{
 		WorkspaceKey: "WS",
 		SessionID:    "lead-session",
 		AgentID:      "nova",
-		Kind:         domain.AgentSessionKindInteractive,
-		Status:       domain.AgentSessionRunning,
+		Kind:         interaction.SessionRecordInteractive,
+		Status:       interaction.SessionRecordRunning,
 		Metadata:     map[string]string{"actor": "test"},
 	}); err != nil {
 		t.Fatalf("create session: %v", err)
@@ -366,12 +370,12 @@ func TestCodexDeliverPendingLeadMessagesDrainsQueueWithoutNewMessage(t *testing.
 	}
 }
 
-func queuedInboxMessagesForTest(t *testing.T, st store.Store, workspace, leadName, sessionID string) []*domain.AgentInboxMessage {
+func queuedInboxMessagesForTest(t *testing.T, st *memstore.Store, workspace, leadName, sessionID string) []*interaction.InboxRecord {
 	t.Helper()
-	items, err := st.AgentInboxMessages().List(context.Background(), workspace, store.AgentInboxMessageFilter{
+	items, err := st.AgentInboxMessages().List(context.Background(), workspace, interaction.AgentInboxMessageFilter{
 		TargetAgentID: leadName,
 		SessionID:     sessionID,
-		Status:        domain.AgentInboxMessageQueued,
+		Status:        interaction.InboxRecordQueued,
 	})
 	if err != nil {
 		t.Fatalf("list queued inbox messages: %v", err)
@@ -379,38 +383,38 @@ func queuedInboxMessagesForTest(t *testing.T, st store.Store, workspace, leadNam
 	return items
 }
 
-func createAssignedLeadSession(t *testing.T, st store.Store, label string, metadata map[string]string) {
+func createAssignedLeadSession(t *testing.T, st *memstore.Store, label string, metadata map[string]string) {
 	t.Helper()
 	ctx := context.Background()
 	if metadata == nil {
 		metadata = map[string]string{"actor": "test"}
 	}
 	seedAssignedLeadIdentity(t, st)
-	if _, err := st.AgentSessions().Create(ctx, store.AgentSessionCreate{
+	if _, err := st.AgentSessions().Create(ctx, interaction.AgentSessionCreate{
 		WorkspaceKey: "WS",
 		SessionID:    "lead-session",
 		AgentID:      "nova",
-		Kind:         domain.AgentSessionKindInteractive,
-		Status:       domain.AgentSessionRunning,
+		Kind:         interaction.SessionRecordInteractive,
+		Status:       interaction.SessionRecordRunning,
 		Metadata:     metadata,
 	}); err != nil {
 		t.Fatalf("%s: create session: %v", label, err)
 	}
 }
 
-func seedAssignedLeadIdentity(t *testing.T, st store.Store) {
+func seedAssignedLeadIdentity(t *testing.T, st *memstore.Store) {
 	t.Helper()
 	ctx := context.Background()
-	if _, err := st.Roles().Create(ctx, store.RoleCreate{WorkspaceKey: "WS", Name: "lead"}); err != nil {
+	if _, err := st.Roles().Create(ctx, agents.RoleRecordCreate{WorkspaceKey: "WS", Name: "lead"}); err != nil {
 		t.Fatalf("create lead Role: %v", err)
 	}
-	if _, err := st.WorkerProfiles().Create(ctx, store.WorkerProfileCreate{
+	if _, err := st.WorkerProfiles().Create(ctx, execution.WorkerProfileCreate{
 		WorkspaceKey: "WS", ProfileID: "nova-profile", Role: "lead", ParentEpic: "EPIC-1",
 	}); err != nil {
 		t.Fatalf("create lead WorkerProfile: %v", err)
 	}
-	if _, err := st.AgentServices().Create(ctx, store.AgentServiceCreate{
-		WorkspaceKey: "WS", ServiceID: "nova", Kind: domain.AgentServiceKindLead,
+	if _, err := st.AgentServices().Create(ctx, agents.AgentServiceCreate{
+		WorkspaceKey: "WS", ServiceID: "nova", Kind: agents.AgentKindLead,
 		RoleName: "lead", ProfileName: "nova-profile",
 	}); err != nil {
 		t.Fatalf("create lead Agent: %v", err)

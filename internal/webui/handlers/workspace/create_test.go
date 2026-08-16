@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tysonthomas9/loomcli/internal/ops"
+	"github.com/tysonthomas9/loomcli/internal/app/query/operationalview"
 	"github.com/tysonthomas9/loomcli/internal/webui/apperrors"
 	"github.com/tysonthomas9/loomcli/internal/webui/workspacecoord"
 )
@@ -16,7 +16,7 @@ import (
 func TestHandleWorkspaceCreate_EmptyType_Success(t *testing.T) {
 	createCalled := false
 	svc := &mockWorkspaceService{
-		createWorkspaceFn: func(_ context.Context, req workspacecoord.WorkspaceCreateRequest) (*ops.WorkspaceData, []string, error) {
+		createWorkspaceFn: func(_ context.Context, req workspacecoord.WorkspaceCreateRequest) (*operationalview.Workspace, []string, error) {
 			createCalled = true
 			if req.Name != "my-ws" {
 				t.Errorf("expected name %q, got %q", "my-ws", req.Name)
@@ -24,7 +24,7 @@ func TestHandleWorkspaceCreate_EmptyType_Success(t *testing.T) {
 			if req.Type != "empty" {
 				t.Errorf("expected type %q, got %q", "empty", req.Type)
 			}
-			return &ops.WorkspaceData{Name: "test-ws"}, nil, nil
+			return &operationalview.Workspace{Name: "test-ws"}, nil, nil
 		},
 		startAsyncCreateFn: func(_ context.Context, _ workspacecoord.WorkspaceCreateRequest) (string, error) {
 			return "", apperrors.ErrUnavailable("not available")
@@ -94,9 +94,9 @@ func TestHandleWorkspaceCreate_CloneType_AsyncUnavailableReturnsError(t *testing
 		startAsyncCreateFn: func(_ context.Context, _ workspacecoord.WorkspaceCreateRequest) (string, error) {
 			return "", apperrors.ErrUnavailable("async not available")
 		},
-		createWorkspaceFn: func(_ context.Context, _ workspacecoord.WorkspaceCreateRequest) (*ops.WorkspaceData, []string, error) {
+		createWorkspaceFn: func(_ context.Context, _ workspacecoord.WorkspaceCreateRequest) (*operationalview.Workspace, []string, error) {
 			createCalled = true
-			return &ops.WorkspaceData{Name: "cloned-ws"}, nil, nil
+			return &operationalview.Workspace{Name: "cloned-ws"}, nil, nil
 		},
 	}
 
@@ -120,7 +120,7 @@ func TestHandleWorkspaceCreate_ValidationError(t *testing.T) {
 		startAsyncCreateFn: func(_ context.Context, _ workspacecoord.WorkspaceCreateRequest) (string, error) {
 			return "", apperrors.ErrUnavailable("not available")
 		},
-		createWorkspaceFn: func(_ context.Context, _ workspacecoord.WorkspaceCreateRequest) (*ops.WorkspaceData, []string, error) {
+		createWorkspaceFn: func(_ context.Context, _ workspacecoord.WorkspaceCreateRequest) (*operationalview.Workspace, []string, error) {
 			return nil, nil, apperrors.ErrValidation("name is required")
 		},
 	}
@@ -142,7 +142,7 @@ func TestHandleWorkspaceCreate_ConflictError(t *testing.T) {
 		startAsyncCreateFn: func(_ context.Context, _ workspacecoord.WorkspaceCreateRequest) (string, error) {
 			return "", apperrors.ErrUnavailable("not available")
 		},
-		createWorkspaceFn: func(_ context.Context, _ workspacecoord.WorkspaceCreateRequest) (*ops.WorkspaceData, []string, error) {
+		createWorkspaceFn: func(_ context.Context, _ workspacecoord.WorkspaceCreateRequest) (*operationalview.Workspace, []string, error) {
 			return nil, nil, apperrors.ErrConflict("workspace already exists")
 		},
 	}
@@ -178,8 +178,8 @@ func TestHandleWorkspaceCreate_WithWarnings(t *testing.T) {
 		startAsyncCreateFn: func(_ context.Context, _ workspacecoord.WorkspaceCreateRequest) (string, error) {
 			return "", apperrors.ErrUnavailable("not available")
 		},
-		createWorkspaceFn: func(_ context.Context, _ workspacecoord.WorkspaceCreateRequest) (*ops.WorkspaceData, []string, error) {
-			return &ops.WorkspaceData{Name: "ws"}, []string{"warning 1", "warning 2"}, nil
+		createWorkspaceFn: func(_ context.Context, _ workspacecoord.WorkspaceCreateRequest) (*operationalview.Workspace, []string, error) {
+			return &operationalview.Workspace{Name: "ws"}, []string{"warning 1", "warning 2"}, nil
 		},
 	}
 

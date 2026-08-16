@@ -19,9 +19,11 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
+	workspaceowner "github.com/tysonthomas9/loomcli/internal/modules/workspace"
+
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
-	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 func TestHostBridgeTaskExecutorCancellationStopsDescendants(t *testing.T) {
@@ -295,14 +297,14 @@ func TestHostBridgeTaskExecutorRequiresTaskRunAPIURL(t *testing.T) {
 			context.Background(),
 			TaskRunRequestOptions{ProviderProfile: "codex-default"},
 		)
-		if !errors.Is(err, domain.ErrInvalid) || !strings.Contains(err.Error(), "task runner requires the loom serve task-run API URL") {
+		if !errors.Is(err, persistence.ErrInvalid) || !strings.Contains(err.Error(), "task runner requires the loom serve task-run API URL") {
 			t.Fatalf("PreflightTaskProvider error = %v, want missing task-run API URL", err)
 		}
 	})
 
 	t.Run("execute", func(t *testing.T) {
 		_, err := (HostBridgeTaskExecutor{Command: []string{"unused"}}).ExecuteTask(context.Background(), hostBridgeTaskExecRequest())
-		if !errors.Is(err, domain.ErrInvalid) || !strings.Contains(err.Error(), "task runner requires the loom serve task-run API URL") {
+		if !errors.Is(err, persistence.ErrInvalid) || !strings.Contains(err.Error(), "task runner requires the loom serve task-run API URL") {
 			t.Fatalf("ExecuteTask error = %v, want missing task-run API URL", err)
 		}
 	})
@@ -377,7 +379,7 @@ func TestLocalTaskRunnerManagedPolicyParsingFailsClosed(t *testing.T) {
 	_, present, err = localTaskRunnerAgentPolicyFromInput(json.RawMessage(`{
 		"loomAgentPolicy": {"version": 1, "backend": "codex"}
 	}`))
-	if !present || err == nil || !errors.Is(err, domain.ErrInvalid) {
+	if !present || err == nil || !errors.Is(err, persistence.ErrInvalid) {
 		t.Fatalf("incomplete managed policy parse = (present=%v, err=%v), want invalid error", present, err)
 	}
 
@@ -412,7 +414,7 @@ func TestHostBridgeTaskExecutorAppliesPatchUploadsAndFinalizesArtifact(t *testin
 	if err != nil {
 		t.Fatalf("ExecuteTask: %v", err)
 	}
-	if result.Status != domain.TaskRunCompleted || result.ExitCode != 0 {
+	if result.Status != execution.TaskRunRecordCompleted || result.ExitCode != 0 {
 		t.Fatalf("result status/exit = %q/%d, want completed and zero exit", result.Status, result.ExitCode)
 	}
 	if repo.read("file.txt") != "new\n" {
@@ -442,17 +444,17 @@ func TestLocalTaskRunnerPublishedDelivery(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
 		req      TaskExecRequest
-		status   domain.TaskRunStatus
+		status   execution.TaskRunRecordStatus
 		delivery string
 		want     bool
 	}{
-		{name: "local branch", req: localReq, status: domain.TaskRunCompleted, delivery: "local_branch", want: true},
-		{name: "stack branch", req: localReq, status: domain.TaskRunCompleted, delivery: "stack_branch", want: true},
-		{name: "pull request", req: localReq, status: domain.TaskRunCompleted, delivery: "pull_request", want: true},
-		{name: "patch back", req: localReq, status: domain.TaskRunCompleted, delivery: "patch_back"},
-		{name: "empty published unit", req: localReq, status: domain.TaskRunCompleted, delivery: "pull_request_skipped_no_changes"},
-		{name: "failed result", req: localReq, status: domain.TaskRunFailed, delivery: "local_branch"},
-		{name: "foreign runner cannot self assert", req: hostBridgeTaskExecRequest(), status: domain.TaskRunCompleted, delivery: "local_branch"},
+		{name: "local branch", req: localReq, status: execution.TaskRunRecordCompleted, delivery: "local_branch", want: true},
+		{name: "stack branch", req: localReq, status: execution.TaskRunRecordCompleted, delivery: "stack_branch", want: true},
+		{name: "pull request", req: localReq, status: execution.TaskRunRecordCompleted, delivery: "pull_request", want: true},
+		{name: "patch back", req: localReq, status: execution.TaskRunRecordCompleted, delivery: "patch_back"},
+		{name: "empty published unit", req: localReq, status: execution.TaskRunRecordCompleted, delivery: "pull_request_skipped_no_changes"},
+		{name: "failed result", req: localReq, status: execution.TaskRunRecordFailed, delivery: "local_branch"},
+		{name: "foreign runner cannot self assert", req: hostBridgeTaskExecRequest(), status: execution.TaskRunRecordCompleted, delivery: "local_branch"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			result := TaskExecResult{
@@ -488,7 +490,7 @@ func TestHostBridgeTaskExecutorPersistsPublishedPatchWithoutPatchBack(t *testing
 	if err != nil {
 		t.Fatalf("ExecuteTask: %v", err)
 	}
-	if result.Status != domain.TaskRunCompleted || result.ExitCode != 0 {
+	if result.Status != execution.TaskRunRecordCompleted || result.ExitCode != 0 {
 		t.Fatalf("result = %+v, want completed and zero exit", result)
 	}
 	if got := repo.read("file.txt"); got != "old\n" {
@@ -536,7 +538,7 @@ func TestHostBridgeTaskExecutorPreservesFinalizedPatchArtifactOnConflict(t *test
 	if err != nil {
 		t.Fatalf("ExecuteTask: %v", err)
 	}
-	if result.Status != domain.TaskRunFailed || result.ErrorClass != PatchBackConflict {
+	if result.Status != execution.TaskRunRecordFailed || result.ErrorClass != PatchBackConflict {
 		t.Fatalf("result = %+v, want failed patch conflict", result)
 	}
 	if repo.read("file.txt") != "local edit\n" {
@@ -578,7 +580,7 @@ func TestHostBridgeTaskExecutorPersistsPatchArtifact(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ExecuteTask: %v", err)
 	}
-	if result.Status != domain.TaskRunCompleted || result.ArtifactsRef != "artifacts://task-run-1" {
+	if result.Status != execution.TaskRunRecordCompleted || result.ArtifactsRef != "artifacts://task-run-1" {
 		t.Fatalf("result = %+v, want completed with artifacts ref", result)
 	}
 	if len(result.ArtifactIDs) != 1 || result.ArtifactIDs[0] != "patch-task-run-1" {
@@ -611,7 +613,7 @@ func TestHostBridgeTaskExecutorRegistersFinalizedRunnerArtifacts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ExecuteTask: %v", err)
 	}
-	if result.Status != domain.TaskRunCompleted {
+	if result.Status != execution.TaskRunRecordCompleted {
 		t.Fatalf("run status = %s error=%s, want completed", result.Status, result.ErrorMessage)
 	}
 	if len(result.ArtifactIDs) != 1 || result.ArtifactIDs[0] != "artifact-task-run-1" {
@@ -650,13 +652,13 @@ func TestHostBridgeTaskExecutorPersistsFlueTranscriptWithoutSessionShadow(t *tes
 	if err != nil {
 		t.Fatalf("ExecuteTask: %v", err)
 	}
-	if result.Status != domain.TaskRunCompleted {
+	if result.Status != execution.TaskRunRecordCompleted {
 		t.Fatalf("run status = %s error=%s, want completed", result.Status, result.ErrorMessage)
 	}
 	if len(result.ArtifactIDs) != 2 || result.ArtifactIDs[0] != "transcript-task-run-1" || result.ArtifactIDs[1] != "logs-task-run-1" {
 		t.Fatalf("artifact ids = %+v, want transcript and logs artifacts", result.ArtifactIDs)
 	}
-	if _, err := st.AgentSessions().Get(ctx, "TEST", "flue-task-run-1"); !errors.Is(err, domain.ErrNotFound) {
+	if _, err := st.AgentSessions().Get(ctx, "TEST", "flue-task-run-1"); !errors.Is(err, persistence.ErrNotFound) {
 		t.Fatalf("batch TaskRun created Interaction AgentSession shadow: err=%v", err)
 	}
 	transcriptArtifact, err := st.ArtifactQueries().GetArtifactRecord(ctx, "TEST", "transcript-task-run-1")
@@ -716,14 +718,14 @@ func TestHostBridgeTaskExecutorReusesOutputArtifactsOnRetry(t *testing.T) {
 	if err != nil {
 		t.Fatalf("first ExecuteTask: %v", err)
 	}
-	if first.Status != domain.TaskRunCompleted {
+	if first.Status != execution.TaskRunRecordCompleted {
 		t.Fatalf("first status = %s, want completed", first.Status)
 	}
 	second, err := executor.ExecuteTask(ctx, req)
 	if err != nil {
 		t.Fatalf("second ExecuteTask: %v", err)
 	}
-	if second.Status != domain.TaskRunCompleted {
+	if second.Status != execution.TaskRunRecordCompleted {
 		t.Fatalf("second status = %s, want completed", second.Status)
 	}
 	want := []string{"transcript-task-run-1", "logs-task-run-1"}
@@ -771,7 +773,7 @@ func TestHostBridgeTaskExecutorRunsNodeModuleThroughGenericInvoker(t *testing.T)
 	if err != nil {
 		t.Fatalf("ExecuteTask: %v", err)
 	}
-	if result.Status != domain.TaskRunCompleted || result.ExitCode != 0 || result.LogsRef != "logs://task-run-1" {
+	if result.Status != execution.TaskRunRecordCompleted || result.ExitCode != 0 || result.LogsRef != "logs://task-run-1" {
 		t.Fatalf("result = %+v, want completed node-module result", result)
 	}
 	if result.RuntimeMetadata["module_runner"] != "ok" ||
@@ -825,7 +827,7 @@ func TestHostBridgeTaskExecutorPreflightsBuiltInFlueWorkflowWithoutCommand(t *te
 		Runner:           "node-runner",
 		RunnerKind:       RunnerKindNodeModule,
 		RunnerTrustLevel: workflowcatalog.DriverTrustTrusted,
-	}); !errors.Is(err, domain.ErrInvalid) {
+	}); !errors.Is(err, persistence.ErrInvalid) {
 		t.Fatalf("PreflightTaskProvider node-module err = %v, want ErrInvalid", err)
 	}
 }
@@ -847,7 +849,7 @@ func TestHostBridgeTaskExecutorRefusesUntrustedNamedRunner(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ExecuteTask: %v", err)
 	}
-	if result.Status != domain.TaskRunFailed || result.ErrorClass != ErrorClassSandboxRequired || result.ExitCode != 1 {
+	if result.Status != execution.TaskRunRecordFailed || result.ErrorClass != ErrorClassSandboxRequired || result.ExitCode != 1 {
 		t.Fatalf("result = %+v, want failed %s", result, ErrorClassSandboxRequired)
 	}
 	if result.RuntimeMetadata[ErrorCodeOutputKey] != ErrorClassSandboxRequired ||
@@ -862,7 +864,7 @@ func TestHostBridgeTaskExecutorRefusesUntrustedNamedRunner(t *testing.T) {
 		Runner:           "local-task-runner",
 		RunnerKind:       RunnerKindFlueWorkflow,
 		RunnerTrustLevel: workflowcatalog.DriverTrustUntrusted,
-	}); !errors.Is(err, domain.ErrInvalid) || !strings.Contains(err.Error(), ErrorClassSandboxRequired) {
+	}); !errors.Is(err, persistence.ErrInvalid) || !strings.Contains(err.Error(), ErrorClassSandboxRequired) {
 		t.Fatalf("PreflightTaskProvider err = %v, want ErrInvalid containing %s", err, ErrorClassSandboxRequired)
 	}
 }
@@ -872,10 +874,10 @@ func TestHostBridgeTaskExecutorRunsFlueWorkflowThroughGenericInvoker(t *testing.
 	defer cancel()
 	st := memstore.New()
 	worktree := t.TempDir()
-	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "WS", Name: "ws"}); err != nil {
+	if _, err := st.Workspaces().Create(ctx, workspaceowner.WorkspaceCreate{Key: "WS", Name: "ws"}); err != nil {
 		t.Fatalf("Create workspace: %v", err)
 	}
-	if _, err := st.Drivers().Create(ctx, store.DriverCreate{
+	if _, err := st.Drivers().Create(ctx, workflowcatalog.DriverCreate{
 		WorkspaceKey: "WS",
 		DriverID:     "epic-runner",
 		Name:         "epic-runner",
@@ -927,7 +929,7 @@ setInterval(() => {}, 1000);
 	if err != nil {
 		t.Fatalf("digest bundle: %v", err)
 	}
-	if _, err := st.DriverVersions().Create(ctx, store.DriverVersionCreate{
+	if _, err := st.DriverVersions().Create(ctx, workflowcatalog.DriverVersionCreate{
 		WorkspaceKey:     "WS",
 		VersionID:        "driver-version-1",
 		DriverID:         "epic-runner",
@@ -961,7 +963,7 @@ setInterval(() => {}, 1000);
 	if err != nil {
 		t.Fatalf("ExecuteTask: %v", err)
 	}
-	if result.Status != domain.TaskRunCompleted || result.ExitCode != 0 || result.LogsRef != "logs://task-run-1" {
+	if result.Status != execution.TaskRunRecordCompleted || result.ExitCode != 0 || result.LogsRef != "logs://task-run-1" {
 		t.Fatalf("result = %+v, want completed flue-workflow result", result)
 	}
 	if result.RuntimeMetadata["workflow"] != "local-task-runner" ||
@@ -984,7 +986,7 @@ setInterval(() => {}, 1000);
 	if err != nil {
 		t.Fatalf("direct ExecuteTask: %v", err)
 	}
-	if directResult.Status != domain.TaskRunCompleted || directResult.ExitCode != 0 || directResult.LogsRef != "logs://task-run-2" {
+	if directResult.Status != execution.TaskRunRecordCompleted || directResult.ExitCode != 0 || directResult.LogsRef != "logs://task-run-2" {
 		t.Fatalf("direct result = %+v, want completed flue-workflow result", directResult)
 	}
 	if directResult.RuntimeMetadata["workflow"] != "local-task-runner" ||
@@ -1000,10 +1002,10 @@ func TestTaskRunnerEnvIncludesFlueBundleForRunnerVersion(t *testing.T) {
 	ctx := context.Background()
 	st := memstore.New()
 	worktree := t.TempDir()
-	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "WS", Name: "ws"}); err != nil {
+	if _, err := st.Workspaces().Create(ctx, workspaceowner.WorkspaceCreate{Key: "WS", Name: "ws"}); err != nil {
 		t.Fatalf("Create workspace: %v", err)
 	}
-	if _, err := st.Drivers().Create(ctx, store.DriverCreate{
+	if _, err := st.Drivers().Create(ctx, workflowcatalog.DriverCreate{
 		WorkspaceKey: "WS",
 		DriverID:     "epic-runner",
 		Name:         "epic-runner",
@@ -1032,7 +1034,7 @@ func TestTaskRunnerEnvIncludesFlueBundleForRunnerVersion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("digest bundle: %v", err)
 	}
-	if _, err := st.DriverVersions().Create(ctx, store.DriverVersionCreate{
+	if _, err := st.DriverVersions().Create(ctx, workflowcatalog.DriverVersionCreate{
 		WorkspaceKey:     "WS",
 		VersionID:        "driver-version-1",
 		DriverID:         "epic-runner",

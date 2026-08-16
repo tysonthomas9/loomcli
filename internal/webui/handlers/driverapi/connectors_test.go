@@ -13,14 +13,18 @@ import (
 	"testing"
 	"time"
 
-	driverpkg "github.com/tysonthomas9/loomcli/internal/driver"
+	"github.com/tysonthomas9/loomcli/internal/modules/automation"
+
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
+
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
+
+	driverpkg "github.com/tysonthomas9/loomcli/internal/driver"
 
 	providers "github.com/tysonthomas9/loomcli/internal/infra/connectorsproviders"
 	"github.com/tysonthomas9/loomcli/internal/infra/connectorsvault"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	connectorsmodule "github.com/tysonthomas9/loomcli/internal/modules/connectors"
-	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
 // connectorTestCredential is the plaintext outbound credential sealed into
@@ -62,27 +66,27 @@ func newConnectorHarness(t *testing.T) *connectorHarness {
 	t.Helper()
 	ctx := context.Background()
 	st := memstore.New()
-	if _, err := st.Drivers().Create(ctx, store.DriverCreate{
+	if _, err := st.Drivers().Create(ctx, workflowcatalog.DriverCreate{
 		WorkspaceKey: "WS", DriverID: "driver-1", Name: "epic-runner",
 		OwnerType: workflowcatalog.DriverOwnerSystem, Status: workflowcatalog.DriverStatusActive,
 	}); err != nil {
 		t.Fatalf("Create driver: %v", err)
 	}
-	if _, err := st.DriverVersions().Create(ctx, store.DriverVersionCreate{
+	if _, err := st.DriverVersions().Create(ctx, workflowcatalog.DriverVersionCreate{
 		WorkspaceKey: "WS", VersionID: "version-1", DriverID: "driver-1", Version: 1,
 		SourceDigest: "sha256:source", BundleDigest: "sha256:bundle",
 		ValidationStatus: workflowcatalog.DriverVersionValidationPassed,
 	}); err != nil {
 		t.Fatalf("Create driver version: %v", err)
 	}
-	if _, err := st.TriggerBindings().Create(ctx, store.TriggerBindingCreate{
+	if _, err := st.TriggerBindings().Create(ctx, automation.TriggerBindingCreate{
 		WorkspaceKey: "WS", BindingID: "binding-1", Name: "PR webhook",
 		SourceKind: "github", RouteKey: "github.pull_request.opened",
 		DriverID: "driver-1", DriverVersionID: "version-1", Enabled: true,
 	}); err != nil {
 		t.Fatalf("Create trigger binding: %v", err)
 	}
-	run, err := st.DriverRuns().Create(ctx, store.DriverRunCreate{
+	run, err := st.DriverRuns().Create(ctx, execution.DriverRunCreate{
 		WorkspaceKey: "WS", RunID: "run-connector-1",
 		DriverID: "driver-1", DriverVersionID: "version-1", Entrypoint: "run",
 		SourceKind: "github", SourceRef: "event-connector-1",

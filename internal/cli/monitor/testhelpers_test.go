@@ -7,6 +7,8 @@ import (
 	"sort"
 	"testing"
 
+	workspaceowner "github.com/tysonthomas9/loomcli/internal/modules/workspace"
+
 	"github.com/spf13/cobra"
 
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
@@ -15,7 +17,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/testdata/clitest"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
-	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
 func commandWithContext(t *testing.T) *cobra.Command {
@@ -88,14 +89,14 @@ func setupMonitorWorkspaceConfig(t *testing.T, workspaceDir string, agentNames .
 	const workspaceKey = "TEST"
 	const repoName = "repo"
 	t.Setenv("LOOM_WORKSPACE", workspaceKey)
-	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{
+	if _, err := st.Workspaces().Create(ctx, workspaceowner.WorkspaceCreate{
 		Key:           workspaceKey,
 		Name:          "test",
 		DefaultBranch: "main",
 	}); err != nil {
 		t.Fatalf("create workspace: %v", err)
 	}
-	if _, err := st.Repos().Create(ctx, store.RepoCreate{
+	if _, err := st.Repos().Create(ctx, workspaceowner.RepoCreate{
 		WorkspaceKey:  workspaceKey,
 		Name:          repoName,
 		DefaultBranch: "main",

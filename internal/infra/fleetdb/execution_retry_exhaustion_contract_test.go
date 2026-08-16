@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 )
 
 func TestExecutionTaskRunRetryExhaustionAcceptsCertifiedBlockedAndPreservedOutcomes(t *testing.T) {
@@ -164,9 +164,9 @@ func validExecutionTaskRunRetryExhaustionResult(issueBlocked bool, issue *Execut
 	at := finishedAt.Add(time.Second)
 	appliedAt := at
 	return ExecutionTaskRunRetryExhaustionResult{
-		TaskRun: &domain.TaskRun{
+		TaskRun: &execution.TaskRunRecord{
 			WorkspaceKey: "WS", TaskRunID: "task-run-1", TaskID: "TASK-1",
-			Status: domain.TaskRunFailed, FinishedAt: &finishedAt,
+			Status: execution.TaskRunRecordFailed, FinishedAt: &finishedAt,
 		},
 		Issue: issue,
 		Action: &ExecutionActionLedger{
@@ -179,7 +179,7 @@ func validExecutionTaskRunRetryExhaustionResult(issueBlocked bool, issue *Execut
 		},
 		Committed: ExecutionTaskRunRetryExhaustionCommit{
 			WorkspaceKey: "WS", TaskRunID: "task-run-1", TaskID: "TASK-1",
-			Status: domain.TaskRunFailed, IssueBlocked: issueBlocked, Attempt: 3, MaxAttempts: 3,
+			Status: execution.TaskRunRecordFailed, IssueBlocked: issueBlocked, Attempt: 3, MaxAttempts: 3,
 			ErrorClass: "agent_failed", ErrorMessage: "retry budget exhausted", FinishedAt: retryExhaustionFinishedAt(),
 		},
 		Replayed: replayed,

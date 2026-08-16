@@ -4,7 +4,6 @@ import (
 	"context"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 )
@@ -115,7 +114,7 @@ func (adapter *fleetDriverRunCommandPort) RecoverTerminalDriverRunWork(
 ) (execution.RecoverTerminalDriverRunWorkResult, error) {
 	result, err := adapter.transport.RecoverTerminalDriverRunWork(ctx, fleetdb.ExecutionTerminalDriverRunWorkRecoveryCommand{
 		WorkspaceKey: command.WorkspaceKey, RequestID: command.RequestID, DriverRunID: command.DriverRunID,
-		ParentStatus: domain.DriverRunStatus(command.ParentStatus), Reason: command.Reason,
+		ParentStatus: command.ParentStatus, Reason: command.Reason,
 		ErrorClass: command.ErrorClass, RecoveredAt: command.RecoveredAt,
 	})
 	if err != nil {
@@ -133,7 +132,7 @@ func (adapter *fleetDriverRunCommandPort) RecoverTerminalDriverRunWork(
 		PreservedSuccessorWorkItemIDs: preservedSuccessorWorkItemIDs,
 		Committed: &execution.RecoverTerminalDriverRunWorkCommit{
 			WorkspaceKey: result.WorkspaceKey, DriverRunID: result.DriverRunID,
-			ParentStatus: execution.DriverRunStatus(result.ParentStatus), Reason: result.Reason,
+			ParentStatus: result.ParentStatus, Reason: result.Reason,
 			ErrorClass: result.ErrorClass, RecoveredAt: result.RecoveredAt,
 			RecoveredTaskRunIDs: recoveredTaskRunIDs, ReleasedWorkItemIDs: releasedWorkItemIDs,
 			PreservedSuccessorWorkItemIDs: preservedSuccessorWorkItemIDs,
@@ -267,7 +266,7 @@ func (adapter *fleetDriverRunCommandPort) CascadeChildDriverRuns(ctx context.Con
 		CancelledRuns: cancelled, CancelRequestedRuns: requested,
 		Committed: &execution.CascadeChildDriverRunsCommit{
 			WorkspaceKey: result.Committed.WorkspaceKey, ParentRunID: result.Committed.ParentRunID,
-			ParentStatus: execution.DriverRunStatus(result.Committed.ParentStatus), Reason: result.Committed.Reason,
+			ParentStatus: result.Committed.ParentStatus, Reason: result.Committed.Reason,
 			ErrorClass: result.Committed.ErrorClass, CascadedAt: result.Committed.CascadedAt, MaxDepth: result.Committed.MaxDepth,
 			CancelledRunIDs:       append([]string(nil), result.Committed.CancelledRunIDs...),
 			CancelRequestedRunIDs: append([]string(nil), result.Committed.CancelRequestedRunIDs...),
@@ -276,7 +275,7 @@ func (adapter *fleetDriverRunCommandPort) CascadeChildDriverRuns(ctx context.Con
 	}, nil
 }
 
-func executionDriverRunSnapshots(runs []*domain.DriverRun) ([]*execution.DriverRun, error) {
+func executionDriverRunSnapshots(runs []*execution.DriverRunRecord) ([]*execution.DriverRun, error) {
 	out := make([]*execution.DriverRun, 0, len(runs))
 	for _, run := range runs {
 		snapshot, err := executionDriverRunSnapshot(run)
@@ -288,8 +287,8 @@ func executionDriverRunSnapshots(runs []*domain.DriverRun) ([]*execution.DriverR
 	return out, nil
 }
 
-func storedDriverRunStatusValue(status execution.DriverRunStatus) domain.DriverRunStatus {
-	return domain.DriverRunStatus(status)
+func storedDriverRunStatusValue(status execution.DriverRunStatus) execution.DriverRunStatus {
+	return status
 }
 
 // executionDriverAwaitFleetPort keeps await registration/satisfied reads and

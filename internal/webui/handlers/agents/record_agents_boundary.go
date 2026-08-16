@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	agentsmodule "github.com/tysonthomas9/loomcli/internal/modules/agents"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
@@ -16,7 +15,7 @@ func (m *Module) getAgentRecord(
 	ctx context.Context,
 	workspace,
 	agentID string,
-) (*domain.AgentService, error) {
+) (*agentsmodule.AgentServiceRecord, error) {
 	if m == nil || m.agentRecords == nil {
 		return nil, agentsmodule.ErrUnavailable
 	}
@@ -37,7 +36,7 @@ func (m *Module) listAgentRecords(
 	ctx context.Context,
 	workspace string,
 	includeArchived bool,
-) ([]*domain.AgentService, error) {
+) ([]*agentsmodule.AgentServiceRecord, error) {
 	if m == nil || m.agentRecords == nil {
 		return nil, agentsmodule.ErrUnavailable
 	}
@@ -47,7 +46,7 @@ func (m *Module) listAgentRecords(
 	if err != nil {
 		return nil, err
 	}
-	out := make([]*domain.AgentService, 0, len(records))
+	out := make([]*agentsmodule.AgentServiceRecord, 0, len(records))
 	for _, record := range records {
 		if record == nil {
 			return nil, agentsmodule.ErrInvalidPersistedState
@@ -60,17 +59,17 @@ func (m *Module) listAgentRecords(
 	return out, nil
 }
 
-func canonicalAgentServiceProjection(record *agentsmodule.Agent) *domain.AgentService {
+func canonicalAgentServiceProjection(record *agentsmodule.Agent) *agentsmodule.AgentServiceRecord {
 	if record == nil {
 		return nil
 	}
-	return &domain.AgentService{
+	return &agentsmodule.AgentServiceRecord{
 		WorkspaceKey:    record.WorkspaceKey,
 		ServiceID:       record.AgentID,
 		GenerationID:    record.GenerationID,
 		Name:            record.Name,
-		Kind:            domain.AgentServiceKind(record.Kind),
-		DesiredState:    domain.AgentServiceDesiredState(record.DesiredState),
+		Kind:            record.Kind,
+		DesiredState:    record.DesiredState,
 		RoleName:        record.Behavior.RoleName,
 		DriverID:        record.Behavior.DriverID,
 		DriverVersionID: record.Behavior.DriverVersionID,

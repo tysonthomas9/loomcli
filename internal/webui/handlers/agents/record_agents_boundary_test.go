@@ -10,10 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	agentsmodule "github.com/tysonthomas9/loomcli/internal/modules/agents"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
-	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
 type recordingAgentRecordAPI struct {
@@ -164,9 +162,9 @@ func (api *recordingAgentRecordAPI) ApplyLifecycle(
 func TestUnifiedAgentDisableUsesOneAtomicLifecycleCommand(t *testing.T) {
 	st := newAgentRecordStore(t)
 	seedRole(t, st, "docs")
-	persisted, err := st.AgentServices().Create(t.Context(), store.AgentServiceCreate{
+	persisted, err := st.AgentServices().Create(t.Context(), agentsmodule.AgentServiceCreate{
 		WorkspaceKey: agentRecordTestWS, ServiceID: "docs-agent", Name: "Docs agent",
-		Kind: domain.AgentServiceKindEvent, DesiredState: domain.AgentServiceDesiredRunning,
+		Kind: agentsmodule.AgentKindEvent, DesiredState: agentsmodule.DesiredRunning,
 		RoleName: "docs",
 	})
 	if err != nil {
@@ -290,11 +288,11 @@ func TestUnifiedAgentRecordReadsPreferCanonicalAgentsAndFailClosed(t *testing.T)
 	t.Run("canonical record wins over conflicting legacy persistence", func(t *testing.T) {
 		st := newAgentRecordStore(t)
 		seedRole(t, st, "legacy-role")
-		if _, err := st.AgentServices().Create(t.Context(), store.AgentServiceCreate{
+		if _, err := st.AgentServices().Create(t.Context(), agentsmodule.AgentServiceCreate{
 			WorkspaceKey: agentRecordTestWS,
 			ServiceID:    "docs",
 			Name:         "Legacy name",
-			Kind:         domain.AgentServiceKindEvent,
+			Kind:         agentsmodule.AgentKindEvent,
 			RoleName:     "legacy-role",
 		}); err != nil {
 			t.Fatal(err)
@@ -340,11 +338,11 @@ func TestUnifiedAgentRecordReadsPreferCanonicalAgentsAndFailClosed(t *testing.T)
 	t.Run("canonical outage does not fall back to legacy record", func(t *testing.T) {
 		st := newAgentRecordStore(t)
 		seedRole(t, st, "legacy-role")
-		if _, err := st.AgentServices().Create(t.Context(), store.AgentServiceCreate{
+		if _, err := st.AgentServices().Create(t.Context(), agentsmodule.AgentServiceCreate{
 			WorkspaceKey: agentRecordTestWS,
 			ServiceID:    "docs",
 			Name:         "Must not leak through fallback",
-			Kind:         domain.AgentServiceKindEvent,
+			Kind:         agentsmodule.AgentKindEvent,
 			RoleName:     "legacy-role",
 		}); err != nil {
 			t.Fatal(err)
@@ -464,11 +462,11 @@ func TestPublicAgentRecordProductionPathsHaveNoLegacyMutations(t *testing.T) {
 func TestUnifiedAgentIdentityUpdateDoesNotFallbackAfterCanonicalConflict(t *testing.T) {
 	st := newAgentRecordStore(t)
 	seedRole(t, st, "legacy-role")
-	legacy, err := st.AgentServices().Create(t.Context(), store.AgentServiceCreate{
+	legacy, err := st.AgentServices().Create(t.Context(), agentsmodule.AgentServiceCreate{
 		WorkspaceKey: agentRecordTestWS,
 		ServiceID:    "docs",
 		Name:         "Legacy name",
-		Kind:         domain.AgentServiceKindEvent,
+		Kind:         agentsmodule.AgentKindEvent,
 		RoleName:     "legacy-role",
 	})
 	if err != nil {

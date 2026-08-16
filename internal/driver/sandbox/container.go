@@ -52,9 +52,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
-
-	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 // SandboxProviderContainer is the placement provider recorded by the
@@ -120,7 +120,7 @@ func ResolveSandboxLauncher() (SandboxLauncher, error) {
 		return launcher, nil
 	default:
 		return nil, fmt.Errorf("%s=%q: want %q or %q: %w",
-			SandboxModeEnvVar, mode, SandboxModeProcess, SandboxModeContainer, domain.ErrInvalid)
+			SandboxModeEnvVar, mode, SandboxModeProcess, SandboxModeContainer, persistence.ErrInvalid)
 	}
 }
 
@@ -201,7 +201,7 @@ func (l *containerLauncher) pidsLimit() int {
 
 func (l *containerLauncher) Launch(ctx context.Context, spec LaunchSpec) (SandboxProcess, error) {
 	if strings.TrimSpace(spec.BundleRoot) == "" {
-		return nil, fmt.Errorf("container sandbox: bundle root required: %w", domain.ErrInvalid)
+		return nil, fmt.Errorf("container sandbox: bundle root required: %w", persistence.ErrInvalid)
 	}
 	egress, err := l.prepareEgress(spec)
 	if err != nil {
@@ -236,7 +236,7 @@ func (l *containerLauncher) Launch(ctx context.Context, spec LaunchSpec) (Sandbo
 		sandbox.startErr = startErr
 		return sandbox, nil
 	}
-	sandbox.placement = domain.TaskRunPlacement{
+	sandbox.placement = execution.TaskRunPlacementRecord{
 		Provider:        SandboxProviderContainer,
 		ProcessRef:      strconv.Itoa(cmd.Process.Pid),
 		SandboxID:       sandbox.name,
@@ -352,7 +352,7 @@ func containerMounts(bundleRoot, launcherPath string) ([]string, error) {
 // syntax cannot carry commas in paths.
 func bindMountArg(src string, readOnly bool) (string, error) {
 	if strings.ContainsAny(src, ",\n") {
-		return "", fmt.Errorf("container sandbox: mount source %q must not contain commas or newlines: %w", src, domain.ErrInvalid)
+		return "", fmt.Errorf("container sandbox: mount source %q must not contain commas or newlines: %w", src, persistence.ErrInvalid)
 	}
 	mount := "type=bind,src=" + src + ",dst=" + src
 	if readOnly {
@@ -393,10 +393,10 @@ func splitContainerEnv(env []string) (fileEnv, passEnv []string, err error) {
 	for _, entry := range env {
 		key, value, ok := strings.Cut(entry, "=")
 		if !ok || key == "" {
-			return nil, nil, fmt.Errorf("container sandbox: env entry %q is not KEY=VALUE: %w", entry, domain.ErrInvalid)
+			return nil, nil, fmt.Errorf("container sandbox: env entry %q is not KEY=VALUE: %w", entry, persistence.ErrInvalid)
 		}
 		if strings.ContainsAny(key, " \t\r\n#") {
-			return nil, nil, fmt.Errorf("container sandbox: env name %q contains unsupported characters: %w", key, domain.ErrInvalid)
+			return nil, nil, fmt.Errorf("container sandbox: env name %q contains unsupported characters: %w", key, persistence.ErrInvalid)
 		}
 		if strings.ContainsAny(value, "\r\n") {
 			passEnv = append(passEnv, entry)
@@ -482,7 +482,7 @@ type containerSandbox struct {
 	stderr    strings.Builder
 	cleanup   func()
 	startErr  error
-	placement domain.TaskRunPlacement
+	placement execution.TaskRunPlacementRecord
 	waitOnce  sync.Once
 	waitErr   error
 }
@@ -515,7 +515,7 @@ func (c *containerSandbox) Kill() error {
 	return nil
 }
 
-func (c *containerSandbox) Placement() domain.TaskRunPlacement {
+func (c *containerSandbox) Placement() execution.TaskRunPlacementRecord {
 	return c.placement
 }
 

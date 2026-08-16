@@ -4,8 +4,9 @@ import (
 	"context"
 	"testing"
 
+	workspaceowner "github.com/tysonthomas9/loomcli/internal/modules/workspace"
+
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
-	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
 func TestBuildActiveWorkspaceData_FallsBackToFirstWorkspace(t *testing.T) {
@@ -14,13 +15,13 @@ func TestBuildActiveWorkspaceData_FallsBackToFirstWorkspace(t *testing.T) {
 
 	ctx := context.Background()
 	st := memstore.New()
-	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "BETA", Name: "Beta"}); err != nil {
+	if _, err := st.Workspaces().Create(ctx, workspaceowner.WorkspaceCreate{Key: "BETA", Name: "Beta"}); err != nil {
 		t.Fatalf("create beta: %v", err)
 	}
-	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "ALPHA", Name: "Alpha"}); err != nil {
+	if _, err := st.Workspaces().Create(ctx, workspaceowner.WorkspaceCreate{Key: "ALPHA", Name: "Alpha"}); err != nil {
 		t.Fatalf("create alpha: %v", err)
 	}
-	if _, err := st.Repos().Create(ctx, store.RepoCreate{WorkspaceKey: "ALPHA", Name: "api"}); err != nil {
+	if _, err := st.Repos().Create(ctx, workspaceowner.RepoCreate{WorkspaceKey: "ALPHA", Name: "api"}); err != nil {
 		t.Fatalf("create repo: %v", err)
 	}
 
@@ -45,10 +46,10 @@ func TestBuildActiveWorkspaceData_ExposesRepoRemoteURL(t *testing.T) {
 
 	ctx := context.Background()
 	st := memstore.New()
-	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "ALPHA", Name: "Alpha"}); err != nil {
+	if _, err := st.Workspaces().Create(ctx, workspaceowner.WorkspaceCreate{Key: "ALPHA", Name: "Alpha"}); err != nil {
 		t.Fatalf("create workspace: %v", err)
 	}
-	if _, err := st.Repos().Create(ctx, store.RepoCreate{
+	if _, err := st.Repos().Create(ctx, workspaceowner.RepoCreate{
 		WorkspaceKey: "ALPHA",
 		Name:         "api",
 		Remote:       "origin",

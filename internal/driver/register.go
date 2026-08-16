@@ -15,8 +15,8 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 const (
@@ -98,7 +98,7 @@ type StagedFlueRegistration struct {
 // without reading or mutating Driver/DriverVersion persistence.
 func StageFlueDriverBundle(opts RegisterFlueOptions) (*StagedFlueRegistration, error) {
 	if strings.TrimSpace(opts.WorkspaceKey) == "" {
-		return nil, fmt.Errorf("workspace key required: %w", domain.ErrInvalid)
+		return nil, fmt.Errorf("workspace key required: %w", persistence.ErrInvalid)
 	}
 	reg, err := resolveFlueRegistrationInput(opts)
 	if err != nil {
@@ -132,7 +132,7 @@ func StageFlueDriverBundle(opts RegisterFlueOptions) (*StagedFlueRegistration, e
 // BundleRef. It is idempotent for a successfully promoted instance.
 func (staged *StagedFlueRegistration) Promote() error {
 	if staged == nil || staged.staged == nil {
-		return fmt.Errorf("staged Flue registration is required: %w", domain.ErrInvalid)
+		return fmt.Errorf("staged Flue registration is required: %w", persistence.ErrInvalid)
 	}
 	if staged.staged.tmpRoot == "" {
 		return nil
@@ -182,7 +182,7 @@ func decodeDriverRunnerManifest(manifest map[string]string) ([]DriverRunnerSpec,
 	}
 	runners = normalizeDriverRunnerSpecs(runners)
 	if len(runners) == 0 {
-		return nil, fmt.Errorf("driver runners manifest has no usable runner entries: %w", domain.ErrInvalid)
+		return nil, fmt.Errorf("driver runners manifest has no usable runner entries: %w", persistence.ErrInvalid)
 	}
 	if err := validateDriverRunnerSpecs(runners); err != nil {
 		return nil, fmt.Errorf("invalid driver runners manifest: %w", err)
@@ -231,22 +231,22 @@ func validateDriverRunnerSpecs(runners []DriverRunnerSpec) error {
 		kind := strings.TrimSpace(runner.Kind)
 		entrypoint := strings.TrimSpace(runner.Entrypoint)
 		if name == "" {
-			return fmt.Errorf("driver runner spec has empty name: %w", domain.ErrInvalid)
+			return fmt.Errorf("driver runner spec has empty name: %w", persistence.ErrInvalid)
 		}
 		if kind == "" {
-			return fmt.Errorf("driver runner %q has empty kind: %w", name, domain.ErrInvalid)
+			return fmt.Errorf("driver runner %q has empty kind: %w", name, persistence.ErrInvalid)
 		}
 		if entrypoint == "" {
-			return fmt.Errorf("driver runner %q has empty entrypoint: %w", name, domain.ErrInvalid)
+			return fmt.Errorf("driver runner %q has empty entrypoint: %w", name, persistence.ErrInvalid)
 		}
 		if _, ok := validDriverRunnerKinds[kind]; !ok {
-			return fmt.Errorf("driver runner %q has unknown kind %q: %w", name, kind, domain.ErrInvalid)
+			return fmt.Errorf("driver runner %q has unknown kind %q: %w", name, kind, persistence.ErrInvalid)
 		}
 		if err := validateRunnerEntrypoint(name, entrypoint); err != nil {
 			return err
 		}
 		if _, ok := seen[name]; ok {
-			return fmt.Errorf("driver runner name %q is declared more than once: %w", name, domain.ErrInvalid)
+			return fmt.Errorf("driver runner name %q is declared more than once: %w", name, persistence.ErrInvalid)
 		}
 		seen[name] = struct{}{}
 	}
@@ -261,12 +261,12 @@ func ValidateDriverRunnerSpecs(runners []DriverRunnerSpec) error {
 // path traversal escape the bundle root and are never legitimate.
 func validateRunnerEntrypoint(name, entrypoint string) error {
 	if filepath.IsAbs(entrypoint) || strings.HasPrefix(entrypoint, "/") {
-		return fmt.Errorf("driver runner %q entrypoint %q must be relative: %w", name, entrypoint, domain.ErrInvalid)
+		return fmt.Errorf("driver runner %q entrypoint %q must be relative: %w", name, entrypoint, persistence.ErrInvalid)
 	}
 	clean := filepath.ToSlash(filepath.Clean(filepath.FromSlash(entrypoint)))
 	for _, part := range strings.Split(clean, "/") {
 		if part == ".." {
-			return fmt.Errorf("driver runner %q entrypoint %q must not contain path traversal: %w", name, entrypoint, domain.ErrInvalid)
+			return fmt.Errorf("driver runner %q entrypoint %q must not contain path traversal: %w", name, entrypoint, persistence.ErrInvalid)
 		}
 	}
 	return nil
@@ -294,10 +294,10 @@ func resolveDriverRunner(version *workflowcatalog.DriverVersion, runnerName stri
 		return DriverRunnerSpec{}, nil
 	}
 	if runnerName == OpenShellRunnerName {
-		return DriverRunnerSpec{}, fmt.Errorf("runner %q: %w: %w", runnerName, ErrOpenShellRunnerUnimplemented, domain.ErrInvalid)
+		return DriverRunnerSpec{}, fmt.Errorf("runner %q: %w: %w", runnerName, ErrOpenShellRunnerUnimplemented, persistence.ErrInvalid)
 	}
 	if version == nil {
-		return DriverRunnerSpec{}, fmt.Errorf("driver version required to resolve runner %q: %w", runnerName, domain.ErrInvalid)
+		return DriverRunnerSpec{}, fmt.Errorf("driver version required to resolve runner %q: %w", runnerName, persistence.ErrInvalid)
 	}
 	runners, err := decodeDriverRunnerManifest(version.Manifest)
 	if err != nil {
@@ -309,8 +309,8 @@ func resolveDriverRunner(version *workflowcatalog.DriverVersion, runnerName stri
 		}
 	}
 	// ErrRunnerNotDeclared distinguishes this case for the global fallback;
-	// domain.ErrInvalid preserves the existing error class/HTTP mapping.
-	return DriverRunnerSpec{}, fmt.Errorf("runner %q is not declared by driver version %q: %w: %w", runnerName, version.VersionID, ErrRunnerNotDeclared, domain.ErrInvalid)
+	// persistence.ErrInvalid preserves the existing error class/HTTP mapping.
+	return DriverRunnerSpec{}, fmt.Errorf("runner %q is not declared by driver version %q: %w: %w", runnerName, version.VersionID, ErrRunnerNotDeclared, persistence.ErrInvalid)
 }
 
 func applyResolvedRunner(opts TaskRunRequestOptions, parent *execution.DriverRun, version *workflowcatalog.DriverVersion) (TaskRunRequestOptions, error) {
@@ -380,14 +380,14 @@ func resolveFlueRegistrationInput(opts RegisterFlueOptions) (*flueRegistrationIn
 	}
 	driverID := firstNonEmpty(opts.DriverID, externalManifest["driver_id"], slug(driverName))
 	if driverID == "" {
-		return nil, fmt.Errorf("driver name %q does not contain a usable id: %w", driverName, domain.ErrInvalid)
+		return nil, fmt.Errorf("driver name %q does not contain a usable id: %w", driverName, persistence.ErrInvalid)
 	}
 	if err := validateFlueDriverID(driverID); err != nil {
 		return nil, err
 	}
 	workflowName := firstNonEmpty(opts.WorkflowName, externalManifest["workflow_name"], driverID)
 	if workflowName == "" {
-		return nil, fmt.Errorf("workflow name required: %w", domain.ErrInvalid)
+		return nil, fmt.Errorf("workflow name required: %w", persistence.ErrInvalid)
 	}
 	runnerSpecs := normalizeDriverRunnerSpecs(opts.RunnerSpecs)
 	if err := validateDriverRunnerSpecs(runnerSpecs); err != nil {
@@ -416,7 +416,7 @@ func validateFlueDriverID(driverID string) error {
 		driverID == "." || driverID == ".." ||
 		strings.ContainsAny(driverID, `/\:`) ||
 		strings.ContainsRune(driverID, '\x00') {
-		return fmt.Errorf("driver id %q must be a canonical path segment: %w", driverID, domain.ErrInvalid)
+		return fmt.Errorf("driver id %q must be a canonical path segment: %w", driverID, persistence.ErrInvalid)
 	}
 	return nil
 }
@@ -431,7 +431,7 @@ func resolveFlueDistPath(workDir, distPath string) (string, string, error) {
 	}
 	distPath = strings.TrimSpace(distPath)
 	if distPath == "" {
-		return "", "", fmt.Errorf("flue dist path required: %w", domain.ErrInvalid)
+		return "", "", fmt.Errorf("flue dist path required: %w", persistence.ErrInvalid)
 	}
 	if !filepath.IsAbs(distPath) {
 		distPath = filepath.Join(absWorkDir, distPath)
@@ -443,12 +443,12 @@ func resolveFlueDistPath(workDir, distPath string) (string, string, error) {
 	if info, err := os.Stat(absDist); err != nil {
 		return "", "", fmt.Errorf("stat flue dist path: %w", err)
 	} else if !info.IsDir() {
-		return "", "", fmt.Errorf("flue dist path must be a directory: %w", domain.ErrInvalid)
+		return "", "", fmt.Errorf("flue dist path must be a directory: %w", persistence.ErrInvalid)
 	}
 	if info, err := os.Stat(filepath.Join(absDist, "server.mjs")); err != nil {
 		return "", "", fmt.Errorf("flue dist missing server.mjs: %w", err)
 	} else if info.IsDir() {
-		return "", "", fmt.Errorf("flue dist server.mjs is a directory: %w", domain.ErrInvalid)
+		return "", "", fmt.Errorf("flue dist server.mjs is a directory: %w", persistence.ErrInvalid)
 	}
 	return absWorkDir, absDist, nil
 }
@@ -616,11 +616,11 @@ func readRegistrationManifest(workDir, distPath, manifestPath string) (map[strin
 		return nil, fmt.Errorf("decode native Flue manifest: %w", err)
 	}
 	if serverRef := strings.TrimSpace(raw["server_ref"]); serverRef != "" && serverRef != filepath.ToSlash(filepath.Join("dist", "server.mjs")) {
-		return nil, fmt.Errorf("native Flue manifest server_ref must be dist/server.mjs: %w", domain.ErrInvalid)
+		return nil, fmt.Errorf("native Flue manifest server_ref must be dist/server.mjs: %w", persistence.ErrInvalid)
 	}
 	for _, generatedRef := range []string{"source_bundle_ref", "workflow_ref"} {
 		if strings.TrimSpace(raw[generatedRef]) != "" {
-			return nil, fmt.Errorf("native Flue manifest must not contain generated-project field %s: %w", generatedRef, domain.ErrInvalid)
+			return nil, fmt.Errorf("native Flue manifest must not contain generated-project field %s: %w", generatedRef, persistence.ErrInvalid)
 		}
 	}
 	// Trust is stamped server-side by the registration path (§7 step 9): a

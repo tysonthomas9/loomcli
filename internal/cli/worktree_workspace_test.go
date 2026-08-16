@@ -9,10 +9,11 @@ import (
 	"strings"
 	"testing"
 
+	workspaceowner "github.com/tysonthomas9/loomcli/internal/modules/workspace"
+
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	cfgpkg "github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
-	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/testutil"
 )
 
@@ -51,7 +52,7 @@ func setupWorkspaceConfig(t *testing.T, cfg *LoomConfig) {
 	for _, name := range names {
 		ws := cfg.Workspaces[name]
 		key := strings.ToUpper(name)
-		if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{
+		if _, err := st.Workspaces().Create(ctx, workspaceowner.WorkspaceCreate{
 			Key:           key,
 			Name:          name,
 			DefaultBranch: firstRepoDefaultBranch(ws.Repos),
@@ -65,7 +66,7 @@ func setupWorkspaceConfig(t *testing.T, cfg *LoomConfig) {
 			if sourceRepoID == "" {
 				sourceRepoID = repo.Name
 			}
-			if _, err := st.Repos().Create(ctx, store.RepoCreate{
+			if _, err := st.Repos().Create(ctx, workspaceowner.RepoCreate{
 				WorkspaceKey:  key,
 				Name:          repo.Name,
 				Remote:        repo.Remote,

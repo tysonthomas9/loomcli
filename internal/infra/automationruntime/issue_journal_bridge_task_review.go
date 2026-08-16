@@ -9,8 +9,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 // TaskReviewEventType is the normalized internal event type emitted when a
@@ -37,7 +36,7 @@ const (
 // Authorized Review-origin handoffs are still accepted here. They must enter
 // emitTaskReview so commit-time repository admission can repair a repo-less
 // Review card before Automation emission is suppressed.
-func isTaskReviewEntry(ev store.JournalEvent) bool {
+func isTaskReviewEntry(ev automation.JournalEvent) bool {
 	if strings.ToLower(strings.TrimSpace(ev.Action)) != "issue.update" {
 		return false
 	}
@@ -51,7 +50,7 @@ func isTaskReviewEntry(ev store.JournalEvent) bool {
 	return true
 }
 
-func taskReviewSuppressedBindingID(ev store.JournalEvent) string {
+func taskReviewSuppressedBindingID(ev automation.JournalEvent) string {
 	before := journalSnapshotStatus(ev.Before)
 	if before != "in_progress" {
 		return ""
@@ -70,7 +69,7 @@ func taskReviewSuppressedBindingID(ev store.JournalEvent) string {
 // emitTaskReview emits one task.review occurrence. A missing listener is a
 // durable no-op, matching the normal issue and task.ready lanes; other errors
 // pin the cursor so this exact journal row is retried.
-func (b *IssueJournalBridge) emitTaskReview(ctx context.Context, ws string, ev store.JournalEvent) (bool, error) {
+func (b *IssueJournalBridge) emitTaskReview(ctx context.Context, ws string, ev automation.JournalEvent) (bool, error) {
 	event, dispatch, snapshot, err := b.toTaskReviewEvent(ctx, ws, ev)
 	if err != nil {
 		return false, err
@@ -87,7 +86,7 @@ func (b *IssueJournalBridge) emitTaskReview(ctx context.Context, ws string, ev s
 	// this generation; a stale pre-read never becomes dispatch authority.
 	if snapshot != nil && taskReadyNeedsRepositoryAdmission(*snapshot) {
 		if b.RepositoryRequiredBlocker == nil {
-			return false, fmt.Errorf("task.review requires repository admission: %w", domain.ErrInvalid)
+			return false, fmt.Errorf("task.review requires repository admission: %w", persistence.ErrInvalid)
 		}
 		admission, blockErr := b.RepositoryRequiredBlocker(ctx, ws, snapshot.TaskID)
 		if blockErr != nil {
@@ -121,7 +120,7 @@ func (b *IssueJournalBridge) emitTaskReview(ctx context.Context, ws string, ev s
 	switch {
 	case err == nil:
 		return true, nil
-	case errors.Is(err, domain.ErrNotFound):
+	case errors.Is(err, persistence.ErrNotFound):
 		b.logger().Debug("issue journal bridge: no binding for task.review event, advancing past it",
 			"workspace", ws, "event_id", event.EventID, "task_id", ev.EntityID)
 		return true, nil
@@ -137,14 +136,14 @@ func (b *IssueJournalBridge) emitTaskReview(ctx context.Context, ws string, ev s
 func (b *IssueJournalBridge) toTaskReviewEvent(
 	ctx context.Context,
 	ws string,
-	ev store.JournalEvent,
+	ev automation.JournalEvent,
 ) (InternalEvent, bool, *TaskReadySnapshot, error) {
 	if b.IssueLookup == nil {
-		return InternalEvent{}, false, nil, fmt.Errorf("task.review requires current issue lookup: %w", domain.ErrInvalid)
+		return InternalEvent{}, false, nil, fmt.Errorf("task.review requires current issue lookup: %w", persistence.ErrInvalid)
 	}
 	snapshot, err := b.IssueLookup(ctx, ws, ev.EntityID)
 	if err != nil {
-		if errors.Is(err, domain.ErrNotFound) {
+		if errors.Is(err, persistence.ErrNotFound) {
 			return InternalEvent{}, false, nil, nil
 		}
 		return InternalEvent{}, false, nil, fmt.Errorf(

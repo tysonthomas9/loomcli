@@ -5,15 +5,16 @@ import (
 	"fmt"
 	"sort"
 
+	workspaceowner "github.com/tysonthomas9/loomcli/internal/modules/workspace"
+
 	"github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
-	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
 // ExecutionTaskRunRecoveryDependencies keeps workspace enumeration read-only
 // and binds stale-child mutation to the exact Execution-owned recovery port.
 type ExecutionTaskRunRecoveryDependencies struct {
-	Workspaces      store.WorkspaceStore
+	Workspaces      workspaceowner.WorkspaceStore
 	ChildRecoveries execution.TaskRunStaleChildRecoveryPort
 }
 
@@ -31,7 +32,7 @@ func NewExecutionTaskRunRecoveryDependencies(dependencies ExecutionTaskRunRecove
 }
 
 type executionTaskRunRecoveryScopeAdapter struct {
-	workspaces store.WorkspaceStore
+	workspaces workspaceowner.WorkspaceStore
 }
 
 func (adapter *executionTaskRunRecoveryScopeAdapter) ListTaskRunRecoveryWorkspaces(ctx context.Context) ([]string, error) {

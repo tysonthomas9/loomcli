@@ -18,13 +18,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/bootstrap"
-	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
+
+	workspaceowner "github.com/tysonthomas9/loomcli/internal/modules/workspace"
+
+	"github.com/tysonthomas9/loomcli/internal/bootstrap"
+	"github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
 	"github.com/tysonthomas9/loomcli/internal/netutil"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
-	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 // TestE2E_WorkflowCatalogPhase2RealFleetDBLoomHTTPAndCLI is the Phase 2
@@ -264,16 +266,16 @@ func (e *workflowCatalogPhase2E2E) seedPrerequisites() {
 	e.t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	if _, err := e.fleetClient.Workspaces().Create(ctx, store.WorkspaceCreate{Key: e.workspace, Name: "Workflow Catalog Phase 2 E2E"}); err != nil && !errors.Is(err, domain.ErrAlreadyExists) {
+	if _, err := e.fleetClient.Workspaces().Create(ctx, workspaceowner.WorkspaceCreate{Key: e.workspace, Name: "Workflow Catalog Phase 2 E2E"}); err != nil && !errors.Is(err, persistence.ErrAlreadyExists) {
 		e.t.Fatalf("seed workspace: %v", err)
 	}
 	// A real second workspace lets the request pass the server's workspace
 	// existence guard so the catalog's workspace-bound operator authority is
 	// what denies the cross-workspace mutation.
-	if _, err := e.fleetClient.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "OTHER", Name: "Workflow Catalog Negative Scope"}); err != nil && !errors.Is(err, domain.ErrAlreadyExists) {
+	if _, err := e.fleetClient.Workspaces().Create(ctx, workspaceowner.WorkspaceCreate{Key: "OTHER", Name: "Workflow Catalog Negative Scope"}); err != nil && !errors.Is(err, persistence.ErrAlreadyExists) {
 		e.t.Fatalf("seed wrong-workspace authority fixture: %v", err)
 	}
-	driver, err := e.fleetClient.Drivers().Create(ctx, store.DriverCreate{
+	driver, err := e.fleetClient.Drivers().Create(ctx, workflowcatalog.DriverCreate{
 		WorkspaceKey: e.workspace,
 		DriverID:     e.driverID,
 		Name:         e.driverID,
@@ -289,7 +291,7 @@ func (e *workflowCatalogPhase2E2E) seedPrerequisites() {
 	if driver.Revision != 1 {
 		e.t.Fatalf("seed driver revision = %d, want 1", driver.Revision)
 	}
-	version, err := e.fleetClient.DriverVersions().Create(ctx, store.DriverVersionCreate{
+	version, err := e.fleetClient.DriverVersions().Create(ctx, workflowcatalog.DriverVersionCreate{
 		WorkspaceKey:     e.workspace,
 		DriverID:         e.driverID,
 		VersionID:        e.versionID,

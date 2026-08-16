@@ -8,10 +8,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/agents"
+
+	workspaceowner "github.com/tysonthomas9/loomcli/internal/modules/workspace"
+
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
-	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 func TestEmbeddedFleetDBPersistenceSmoke(t *testing.T) {
@@ -37,18 +40,18 @@ func TestEmbeddedFleetDBPersistenceSmoke(t *testing.T) {
 	if err := client.RequireCapabilities(ctx, []string{fleetdb.WorkflowCatalogVersionLifecycleCapability}); err != nil {
 		t.Fatalf("embedded FleetDB capability readiness: %v", err)
 	}
-	if _, err := client.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "SMOKE", Name: "Smoke"}); err != nil {
+	if _, err := client.Workspaces().Create(ctx, workspaceowner.WorkspaceCreate{Key: "SMOKE", Name: "Smoke"}); err != nil {
 		t.Fatalf("create workspace: %v", err)
 	}
-	if _, err := client.Repos().Create(ctx, store.RepoCreate{WorkspaceKey: "SMOKE", Name: "repo"}); err != nil {
+	if _, err := client.Repos().Create(ctx, workspaceowner.RepoCreate{WorkspaceKey: "SMOKE", Name: "repo"}); err != nil {
 		t.Fatalf("create repo: %v", err)
 	}
-	if _, err := client.Roles().Create(ctx, store.RoleCreate{WorkspaceKey: "SMOKE", Name: "task"}); err != nil && !errors.Is(err, domain.ErrAlreadyExists) {
+	if _, err := client.Roles().Create(ctx, agents.RoleRecordCreate{WorkspaceKey: "SMOKE", Name: "task"}); err != nil && !errors.Is(err, persistence.ErrAlreadyExists) {
 		t.Fatalf("create role: %v", err)
 	}
-	if _, err := client.AgentServices().Create(ctx, store.AgentServiceCreate{
+	if _, err := client.AgentServices().Create(ctx, agents.AgentServiceCreate{
 		WorkspaceKey: "SMOKE", ServiceID: "worker", Name: "worker", RoleName: "task",
-		Kind: domain.AgentServiceKindSupport, DesiredState: domain.AgentServiceDesiredRunning, MaxInstances: 1,
+		Kind: agents.AgentKindSupport, DesiredState: agents.DesiredRunning, MaxInstances: 1,
 	}); err != nil {
 		t.Fatalf("create agent: %v", err)
 	}

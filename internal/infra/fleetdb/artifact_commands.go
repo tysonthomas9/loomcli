@@ -15,8 +15,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/modules/artifacts"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 var (
@@ -711,15 +711,15 @@ func mapArtifactTransportError(operation string, err error) error {
 	switch {
 	case errors.Is(err, ErrArtifactsNotFound), errors.Is(err, ErrArtifactsInvalid), errors.Is(err, ErrArtifactsConflict), errors.Is(err, ErrArtifactsNotOwner), errors.Is(err, ErrArtifactsInvalidTransition), errors.Is(err, ErrArtifactsUnavailable):
 		return err
-	case errors.Is(err, domain.ErrNotFound):
+	case errors.Is(err, persistence.ErrNotFound):
 		sentinel = ErrArtifactsNotFound
-	case errors.Is(err, domain.ErrNotOwner), errors.Is(err, domain.ErrGone):
+	case errors.Is(err, persistence.ErrNotOwner), errors.Is(err, persistence.ErrGone):
 		sentinel = ErrArtifactsNotOwner
-	case errors.Is(err, domain.ErrInvalidTransition):
+	case errors.Is(err, persistence.ErrInvalidTransition):
 		sentinel = ErrArtifactsInvalidTransition
-	case errors.Is(err, domain.ErrAlreadyExists), errors.Is(err, domain.ErrAlreadyClaimed), errors.Is(err, domain.ErrConflict), errors.Is(err, ErrWorkflowCatalogRevisionConflict):
+	case errors.Is(err, persistence.ErrAlreadyExists), errors.Is(err, persistence.ErrAlreadyClaimed), errors.Is(err, persistence.ErrConflict), errors.Is(err, ErrWorkflowCatalogRevisionConflict):
 		sentinel = ErrArtifactsConflict
-	case errors.Is(err, domain.ErrInvalid):
+	case errors.Is(err, persistence.ErrInvalid):
 		sentinel = ErrArtifactsInvalid
 	default:
 		sentinel = ErrArtifactsUnavailable
@@ -829,7 +829,7 @@ func (s *artifactStore) ListArtifactRecords(ctx context.Context, workspace strin
 func (s *artifactStore) ReadArtifactContent(ctx context.Context, workspace, artifactID string) ([]byte, error) {
 	content, err := s.client.doBytes(ctx, "GET", "/api/v1/"+pathEscape(workspace)+"/artifacts/"+pathEscape(artifactID)+"/content")
 	if err != nil {
-		if errors.Is(err, ErrArtifactsUnavailable) || errors.Is(err, domain.ErrUnavailable) {
+		if errors.Is(err, ErrArtifactsUnavailable) || errors.Is(err, persistence.ErrUnavailable) {
 			return nil, fmt.Errorf("read artifact content: %w", errors.Join(artifacts.ErrContentUnavailable, err))
 		}
 		return nil, mapArtifactQueryError(err)
@@ -849,9 +849,9 @@ func mapArtifactQueryError(err error) error {
 	}
 	var owner error
 	switch {
-	case errors.Is(err, domain.ErrNotFound), errors.Is(err, ErrArtifactsNotFound):
+	case errors.Is(err, persistence.ErrNotFound), errors.Is(err, ErrArtifactsNotFound):
 		owner = artifacts.ErrNotFound
-	case errors.Is(err, domain.ErrInvalid), errors.Is(err, ErrArtifactsInvalid):
+	case errors.Is(err, persistence.ErrInvalid), errors.Is(err, ErrArtifactsInvalid):
 		owner = artifacts.ErrInvalid
 	default:
 		owner = artifacts.ErrUnavailable

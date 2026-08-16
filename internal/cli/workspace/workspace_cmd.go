@@ -18,7 +18,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/cli/serve/serveadapter"
 	repositoryadmissioninfra "github.com/tysonthomas9/loomcli/internal/infra/repositoryadmission"
-	"github.com/tysonthomas9/loomcli/internal/infra/workspacecatalog"
+
 	workspacemodule "github.com/tysonthomas9/loomcli/internal/modules/workspace"
 )
 
@@ -133,7 +133,7 @@ func runWorkspaceCreate(cmd *cobra.Command, args []string) {
 		if err != nil {
 			return fmt.Errorf("compose Agents for workspace creation: %w", err)
 		}
-		workspaceCapability, err := workspacecatalog.New(h.Store.Workspaces(), h.Store.Repos())
+		workspaceCapability, err := workspacemodule.NewFromRecordStores(h.Store.Workspaces(), h.Store.Repos())
 		if err != nil {
 			return fmt.Errorf("compose Workspace for workspace creation: %w", err)
 		}

@@ -15,7 +15,11 @@ func ConnectorManagement(handle *bootstrap.StoreHandle) (connectorsmodule.Manage
 	if handle == nil || handle.Store == nil {
 		return nil, fmt.Errorf("compose Connectors capability: %w", connectorsmodule.ErrUnavailable)
 	}
-	management, err := connectorsmodule.NewManagement(handle.Store.Connectors())
+	return connectorManagementFromRecords(handle.Store.Connectors())
+}
+
+func connectorManagementFromRecords(records connectorsmodule.ManagementStore) (connectorsmodule.Management, error) {
+	management, err := connectorsmodule.NewManagement(records)
 	if err != nil {
 		return nil, fmt.Errorf("compose Connectors capability: %w", err)
 	}

@@ -14,8 +14,8 @@ func TestBuildConnectorCapabilitiesUsePersistedVault(t *testing.T) {
 	t.Setenv(connectorsmodule.VaultKeyEnvVar, "")
 	dataDir := t.TempDir()
 	server := &Server{config: webui.ServerConfig{
-		Store:            memstore.New(),
-		LocalSettingsDir: dataDir,
+		ProjectionRecords: memstore.New(),
+		LocalSettingsDir:  dataDir,
 	}}
 	if dispatcher, management, sealer := server.buildConnectorCapabilities(); !connectorsmodule.DispatcherAvailable(dispatcher) || management == nil || sealer == nil {
 		t.Fatal("buildConnectorCapabilities returned nil without env key despite configured data dir")
@@ -29,7 +29,7 @@ func TestBuildConnectorCapabilitiesVaultSourcePrecedence(t *testing.T) {
 	t.Run("env works without data dir", func(t *testing.T) {
 		key := base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{0x42}, 32))
 		t.Setenv(connectorsmodule.VaultKeyEnvVar, key)
-		server := &Server{config: webui.ServerConfig{Store: memstore.New()}}
+		server := &Server{config: webui.ServerConfig{ProjectionRecords: memstore.New()}}
 		if dispatcher, management, sealer := server.buildConnectorCapabilities(); !connectorsmodule.DispatcherAvailable(dispatcher) || management == nil || sealer == nil {
 			t.Fatal("buildConnectorCapabilities ignored env vault key")
 		}
@@ -37,7 +37,7 @@ func TestBuildConnectorCapabilitiesVaultSourcePrecedence(t *testing.T) {
 
 	t.Run("missing env and data dir fails closed", func(t *testing.T) {
 		t.Setenv(connectorsmodule.VaultKeyEnvVar, "")
-		server := &Server{config: webui.ServerConfig{Store: memstore.New()}}
+		server := &Server{config: webui.ServerConfig{ProjectionRecords: memstore.New()}}
 		if dispatcher, management, sealer := server.buildConnectorCapabilities(); dispatcher != nil || management != nil || sealer != nil {
 			t.Fatal("buildConnectorCapabilities enabled connectors without a vault source")
 		}

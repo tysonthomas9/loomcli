@@ -131,7 +131,7 @@ func TestEncodeDirectWriteSnapshotIncludesProvenance(t *testing.T) {
 		SourceDirty:      true,
 		AnalysisProfiles: []string{"linux-amd64", "race"},
 		Writes: []archtest.DirectWriteUse{{
-			File: "internal/cli/write.go", Receiver: "example/internal/store.WorkspaceStore",
+			File: "internal/cli/write.go", Receiver: "example/internal/workspaceowner.WorkspaceStore",
 			Method: "Create", Count: 1, AggregateOwner: "workspace", Disposition: "transitional", ExpiresAfterPhase: 7,
 		}},
 	}

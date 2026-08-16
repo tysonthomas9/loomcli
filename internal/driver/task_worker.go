@@ -10,11 +10,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
-
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	artifactsmodule "github.com/tysonthomas9/loomcli/internal/modules/artifacts"
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
+	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 var ErrNoQueuedTaskRun = errors.New("task worker: no queued task run")
@@ -66,8 +65,8 @@ type TaskWorker struct {
 	SupportedProviders []string
 	Capabilities       []string
 	WorkerProfileIDs   []string
-	RunnerPlacement    domain.TaskRunPlacement
-	SandboxPlacement   domain.TaskRunPlacement
+	RunnerPlacement    execution.TaskRunPlacementRecord
+	SandboxPlacement   execution.TaskRunPlacementRecord
 	HeartbeatInterval  time.Duration
 	MaxAttempts        int
 	Executor           TaskExecutor
@@ -117,7 +116,7 @@ type TaskWorker struct {
 
 func (w *TaskWorker) RunOnce(ctx context.Context) (*TaskRunRequestOutcome, error) {
 	if w == nil || w.Store == nil {
-		return nil, fmt.Errorf("store required: %w", domain.ErrInvalid)
+		return nil, fmt.Errorf("store required: %w", persistence.ErrInvalid)
 	}
 	claimState := w.taskWorkerRuntimeClaimState()
 	claimState.runMu.Lock()
@@ -180,7 +179,7 @@ func (w *TaskWorker) runOnceInWorkspace(ctx context.Context, ws, workDir string)
 		nodeID = pending.NodeID
 	}
 	if nodeID == "" {
-		return nil, fmt.Errorf("worker node id required: %w", domain.ErrInvalid)
+		return nil, fmt.Errorf("worker node id required: %w", persistence.ErrInvalid)
 	}
 	if err := w.ensureNode(ctx, ws, nodeID); err != nil {
 		if errors.Is(err, errTaskWorkerNodeLifecycleInFlight) {
@@ -213,7 +212,7 @@ func (w *TaskWorker) runOnceInWorkspace(ctx context.Context, ws, workDir string)
 	}
 	outcome, err := w.claimAndExecuteTaskRun(ctx, ws, nodeID, executor)
 	if err != nil {
-		if errors.Is(err, domain.ErrNotFound) {
+		if errors.Is(err, persistence.ErrNotFound) {
 			return nil, ErrNoQueuedTaskRun
 		}
 		return nil, err
@@ -258,7 +257,7 @@ func (w *TaskWorker) claimAndExecuteTaskRun(ctx context.Context, workspace, node
 	command := w.pendingOrNewTaskRunClaim(claimState, workspace, nodeID, componentID)
 	claim, err := w.Execution.ClaimTaskRun(ctx, systemAuth, command)
 	if err != nil {
-		if errors.Is(err, execution.ErrNotFound) || errors.Is(err, domain.ErrNotFound) {
+		if errors.Is(err, execution.ErrNotFound) || errors.Is(err, persistence.ErrNotFound) {
 			clearTaskWorkerPendingClaim(claimState, command.RequestID)
 			return nil, ErrNoQueuedTaskRun
 		}
@@ -418,7 +417,7 @@ func (w *TaskWorker) finishExecutedTaskRun(
 	if state.retry.Retry {
 		return w.requeueExecutedTaskRun(ctx, workspace, state)
 	}
-	if state.completion.Status == domain.TaskRunFailed {
+	if state.completion.Status == execution.TaskRunRecordFailed {
 		return w.exhaustExecutedTaskRun(ctx, workspace, state)
 	}
 	return w.finalizeExecutedTaskRun(ctx, workspace, state)
@@ -478,7 +477,7 @@ func (w *TaskWorker) finalizeExecutedTaskRun(ctx context.Context, workspace stri
 		return nil, fmt.Errorf("resolve TaskRun finalize authority: %w", err)
 	}
 	status := execution.StatusSucceeded
-	if state.completion.Status == domain.TaskRunCancelled {
+	if state.completion.Status == execution.TaskRunRecordCancelled {
 		status = execution.StatusCancelled
 	}
 	exitCode := state.completion.ExitCode
@@ -505,9 +504,9 @@ func (w *TaskWorker) finalizeExecutedTaskRun(ctx context.Context, workspace stri
 
 func applyExecutedTaskRunResult(claimed *execution.TaskRun, result TaskExecResult, completion taskExecCompletion, metadata map[string]string, exitCode int, finishedAt time.Time) {
 	claimed.Status = execution.StatusFailed
-	if completion.Status == domain.TaskRunCompleted {
+	if completion.Status == execution.TaskRunRecordCompleted {
 		claimed.Status = execution.StatusSucceeded
-	} else if completion.Status == domain.TaskRunCancelled {
+	} else if completion.Status == execution.TaskRunRecordCancelled {
 		claimed.Status = execution.StatusCancelled
 	}
 	claimed.ExitCode = &exitCode
@@ -559,7 +558,7 @@ func (w *TaskWorker) startExecutionTaskRunHeartbeat(
 	return cancel
 }
 
-func executionTaskRunPlacement(value domain.TaskRunPlacement) execution.Placement {
+func executionTaskRunPlacement(value execution.TaskRunPlacementRecord) execution.Placement {
 	return execution.Placement{
 		Provider: value.Provider, NodeID: value.NodeID, RunnerID: value.RunnerID,
 		SandboxID: value.SandboxID, CWD: value.CWD, RepoRef: value.RepoRef,
@@ -613,7 +612,7 @@ func (w *TaskWorker) nodeCapacity() int {
 	return w.NodeCapacity
 }
 
-func (w *TaskWorker) runnerPlacement(nodeID string) domain.TaskRunPlacement {
+func (w *TaskWorker) runnerPlacement(nodeID string) execution.TaskRunPlacementRecord {
 	placement := w.RunnerPlacement
 	if placement.Provider == "" {
 		placement.Provider = "loom-serve"
@@ -659,7 +658,7 @@ func (w *TaskWorker) ensureNode(ctx context.Context, ws, nodeID string) error {
 	heartbeatDue := !entry.heartbeatSent || !now.Before(entry.nextHeartbeatAt)
 	if heartbeatDue {
 		if err := w.heartbeatTaskWorkerRuntimeNode(ctx, ws, nodeID, componentID, ttl, now); err != nil {
-			if errors.Is(err, execution.ErrNotFound) || errors.Is(err, domain.ErrNotFound) {
+			if errors.Is(err, execution.ErrNotFound) || errors.Is(err, persistence.ErrNotFound) {
 				keyState.entry = taskWorkerNodeLifecycleEntry{}
 			}
 			return err
@@ -671,7 +670,7 @@ func (w *TaskWorker) ensureNode(ctx context.Context, ws, nodeID string) error {
 
 	if !entry.active {
 		if err := w.activateTaskWorkerRuntimeNode(ctx, ws, nodeID, componentID, now); err != nil {
-			if errors.Is(err, execution.ErrNotFound) || errors.Is(err, domain.ErrNotFound) {
+			if errors.Is(err, execution.ErrNotFound) || errors.Is(err, persistence.ErrNotFound) {
 				keyState.entry = taskWorkerNodeLifecycleEntry{}
 			}
 			return err
@@ -691,7 +690,7 @@ func (w *TaskWorker) registerTaskWorkerRuntimeNode(
 	}
 	_, err = w.Execution.RegisterWorkerNode(ctx, registerAuth, execution.RegisterWorkerNodeCommand{
 		WorkspaceKey: ws, RequestID: "register-task-worker:" + componentID + ":" + nodeID,
-		NodeID: nodeID, OwnerActor: executorOwnerActor(), RuntimeProvider: string(domain.RuntimeProviderLocal),
+		NodeID: nodeID, OwnerActor: executorOwnerActor(), RuntimeProvider: string(execution.RuntimeProviderLocal),
 		Labels: []string{"loom-driver-executor", "loom-task-worker"}, Capabilities: w.nodeCapabilities(),
 		ToolInventory: []string{"loom-driver", "loom-task-worker"}, Version: "loom-serve", Capacity: w.nodeCapacity(),
 		TTL: ttl, RegisteredAt: now,
@@ -765,7 +764,7 @@ func taskWorkerNodeHeartbeatInterval(interval time.Duration) time.Duration {
 	return interval
 }
 
-func TaskRunResultFromDomain(run *domain.TaskRun, artifactIDs ...[]string) TaskRunRequestResult {
+func TaskRunResultFromDomain(run *execution.TaskRunRecord, artifactIDs ...[]string) TaskRunRequestResult {
 	if run == nil {
 		return TaskRunRequestResult{}
 	}
@@ -813,12 +812,12 @@ func TaskRunResultFromExecution(run *execution.TaskRun, artifactIDs ...[]string)
 	if run == nil {
 		return TaskRunRequestResult{}
 	}
-	status := domain.TaskRunStatus(run.Status)
+	status := execution.TaskRunRecordStatus(run.Status)
 	switch run.Status {
 	case execution.StatusSucceeded:
-		status = domain.TaskRunCompleted
+		status = execution.TaskRunRecordCompleted
 	case execution.StatusBlocked:
-		status = domain.TaskRunFailed
+		status = execution.TaskRunRecordFailed
 	}
 	ids := []string(nil)
 	if len(artifactIDs) > 0 {

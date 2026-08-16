@@ -7,14 +7,17 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
+
+	"github.com/tysonthomas9/loomcli/internal/modules/agents"
+
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
+
 	"github.com/tysonthomas9/loomcli/internal/app/query/runcapture"
 	"github.com/tysonthomas9/loomcli/internal/app/query/sessionarchive"
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	artifactsmodule "github.com/tysonthomas9/loomcli/internal/modules/artifacts"
-	"github.com/tysonthomas9/loomcli/internal/modules/execution"
-	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
-	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 	"github.com/tysonthomas9/loomcli/internal/webui/apperrors"
 )
 
@@ -22,19 +25,19 @@ func TestFlueTaskRunIsOwnedByTaskSessionsNotAgentHistory(t *testing.T) {
 	ctx := t.Context()
 	st := newAgentRecordStore(t)
 	seedRole(t, st, "task")
-	if _, err := st.AgentServices().Create(ctx, store.AgentServiceCreate{
+	if _, err := st.AgentServices().Create(ctx, agents.AgentServiceCreate{
 		WorkspaceKey: agentRecordTestWS, ServiceID: "flue-worker", Name: "flue-worker", RoleName: "task",
-		Kind: domain.AgentServiceKindSupport, DesiredState: domain.AgentServiceDesiredRunning, MaxInstances: 1,
+		Kind: agents.AgentKindSupport, DesiredState: agents.DesiredRunning, MaxInstances: 1,
 	}); err != nil {
 		t.Fatalf("create supervised agent: %v", err)
 	}
-	if _, err := st.TaskRuns().Create(ctx, store.TaskRunCreate{
+	if _, err := st.TaskRuns().Create(ctx, execution.TaskRunCreate{
 		WorkspaceKey:    agentRecordTestWS,
 		TaskRunID:       "task-run-shared-1",
 		TaskID:          "TASK-SHARED-1",
 		WorkerProfileID: "flue-worker",
 		RunnerKind:      "flue-workflow",
-		Status:          domain.TaskRunCompleted,
+		Status:          execution.TaskRunRecordCompleted,
 		RuntimeMetadata: map[string]string{"runtime": "flue"},
 	}); err != nil {
 		t.Fatalf("create Flue task run: %v", err)
@@ -81,9 +84,9 @@ func TestAgentRunsDoesNotIncludeDaemonLocalCompatibilitySession(t *testing.T) {
 	ctx := t.Context()
 	st := newAgentRecordStore(t)
 	seedRole(t, st, "plan")
-	if _, err := st.AgentServices().Create(ctx, store.AgentServiceCreate{
+	if _, err := st.AgentServices().Create(ctx, agents.AgentServiceCreate{
 		WorkspaceKey: agentRecordTestWS, ServiceID: "advanced-planner", Name: "advanced-planner", RoleName: "plan",
-		Kind: domain.AgentServiceKindSupport, DesiredState: domain.AgentServiceDesiredRunning, MaxInstances: 1,
+		Kind: agents.AgentKindSupport, DesiredState: agents.DesiredRunning, MaxInstances: 1,
 	}); err != nil {
 		t.Fatalf("create supervised agent: %v", err)
 	}
@@ -130,12 +133,12 @@ func TestAgentSessionTranscriptRouteReturnsCanonicalEntriesAndEnforcesOwner(t *t
 	if err != nil {
 		t.Fatalf("create transcript artifact: %v", err)
 	}
-	if _, err := st.AgentSessions().Create(ctx, store.AgentSessionCreate{
+	if _, err := st.AgentSessions().Create(ctx, interaction.AgentSessionCreate{
 		WorkspaceKey: agentRecordTestWS,
 		SessionID:    "interactive-1",
 		AgentID:      "local-review",
-		Kind:         domain.AgentSessionKindInteractive,
-		Status:       domain.AgentSessionCompleted,
+		Kind:         interaction.SessionRecordInteractive,
+		Status:       interaction.SessionRecordCompleted,
 		Metadata:     map[string]string{"transcript_ref": "artifact://" + finalized.ArtifactID},
 	}); err != nil {
 		t.Fatalf("create interactive session: %v", err)
@@ -250,7 +253,7 @@ func TestAgentSessionTranscriptRouteReturnsCanonicalEntriesAndEnforcesOwner(t *t
 				}
 			}
 			metadata := map[string]string{"transcript_ref": test.ref}
-			if _, err := st.AgentSessions().Update(ctx, agentRecordTestWS, "interactive-1", store.AgentSessionUpdate{
+			if _, err := st.AgentSessions().Update(ctx, agentRecordTestWS, "interactive-1", interaction.AgentSessionUpdate{
 				Metadata: &metadata,
 			}); err != nil {
 				t.Fatalf("update transcript ref: %v", err)
@@ -326,14 +329,14 @@ func TestAgentSessionTranscriptRoutePreservesUnavailable(t *testing.T) {
 
 type agentSessionTranscriptErrorService struct{ err error }
 
-type agentTranscriptExecutionQueries struct{ store store.TaskRunStore }
+type agentTranscriptExecutionQueries struct{ store execution.TaskRunStore }
 
 func (queries agentTranscriptExecutionQueries) GetTaskRun(ctx context.Context, workspace, taskRunID string) (*execution.TaskRun, error) {
 	if queries.store == nil {
 		return nil, execution.ErrNotFound
 	}
 	value, err := queries.store.Get(ctx, workspace, taskRunID)
-	if errors.Is(err, domain.ErrNotFound) {
+	if errors.Is(err, persistence.ErrNotFound) {
 		return nil, execution.ErrNotFound
 	}
 	if err != nil {
@@ -346,7 +349,7 @@ func (queries agentTranscriptExecutionQueries) ListTaskRuns(ctx context.Context,
 	if queries.store == nil {
 		return []*execution.TaskRun{}, nil
 	}
-	values, err := queries.store.List(ctx, query.WorkspaceKey, store.TaskRunFilter{
+	values, err := queries.store.List(ctx, query.WorkspaceKey, execution.TaskRunFilter{
 		TaskID: query.WorkItemID, Limit: query.Limit,
 	})
 	if err != nil {
@@ -367,12 +370,12 @@ func (agentTranscriptExecutionQueries) ListTaskRunEvents(context.Context, execut
 	return nil, nil
 }
 
-func agentTranscriptExecutionSnapshot(value *domain.TaskRun) *execution.TaskRun {
+func agentTranscriptExecutionSnapshot(value *execution.TaskRunRecord) *execution.TaskRun {
 	if value == nil {
 		return nil
 	}
 	status := execution.Status(value.Status)
-	if value.Status == domain.TaskRunCompleted {
+	if value.Status == execution.TaskRunRecordCompleted {
 		status = execution.StatusSucceeded
 	}
 	return &execution.TaskRun{
@@ -386,14 +389,16 @@ func agentTranscriptExecutionSnapshot(value *domain.TaskRun) *execution.TaskRun 
 	}
 }
 
-type agentTranscriptInteractionQueries struct{ store store.AgentSessionStore }
+type agentTranscriptInteractionQueries struct {
+	store interaction.AgentSessionStore
+}
 
 func (queries agentTranscriptInteractionQueries) GetSession(
 	ctx context.Context,
 	workspace, sessionID string,
 ) (*interaction.AgentSession, error) {
 	value, err := queries.store.Get(ctx, workspace, sessionID)
-	if errors.Is(err, domain.ErrNotFound) {
+	if errors.Is(err, persistence.ErrNotFound) {
 		return nil, interaction.ErrNotFound
 	}
 	if err != nil {
@@ -406,7 +411,7 @@ func (queries agentTranscriptInteractionQueries) ListSessions(
 	ctx context.Context,
 	query interaction.SessionArchiveQuery,
 ) ([]*interaction.AgentSession, error) {
-	values, err := queries.store.List(ctx, query.WorkspaceKey, store.AgentSessionFilter{
+	values, err := queries.store.List(ctx, query.WorkspaceKey, interaction.AgentSessionFilter{
 		AgentID: query.AgentID,
 		TaskID:  query.WorkItemID,
 		Limit:   query.Limit,
@@ -421,7 +426,7 @@ func (queries agentTranscriptInteractionQueries) ListSessions(
 	return result, nil
 }
 
-func agentTranscriptInteractionSnapshot(value *domain.AgentSession) *interaction.AgentSession {
+func agentTranscriptInteractionSnapshot(value *interaction.SessionRecord) *interaction.AgentSession {
 	if value == nil {
 		return nil
 	}

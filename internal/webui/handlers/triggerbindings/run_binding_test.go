@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 )
 
 // The binding-scoped run-now endpoint stamps the binding on the run and carries
@@ -31,7 +31,7 @@ func TestRunBinding_StampsBindingAndOmitsRunInput(t *testing.T) {
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("run status = %d, want 202; body=%s", rec.Code, rec.Body.String())
 	}
-	var run domain.DriverRun
+	var run execution.DriverRunRecord
 	if err := json.Unmarshal(rec.Body.Bytes(), &run); err != nil {
 		t.Fatalf("decode run: %v", err)
 	}
@@ -43,7 +43,7 @@ func TestRunBinding_StampsBindingAndOmitsRunInput(t *testing.T) {
 	if run.SourceRef != "cron:prompt-agent-cron" {
 		t.Fatalf("run source_ref = %q, want cron:prompt-agent-cron", run.SourceRef)
 	}
-	if run.DriverID != "driver-1" || run.Status != domain.DriverRunQueued {
+	if run.DriverID != "driver-1" || run.Status != execution.DriverRunQueued {
 		t.Fatalf("unexpected run: driver=%q status=%q", run.DriverID, run.Status)
 	}
 	if run.IdempotencyKey != "manual-request-1" {

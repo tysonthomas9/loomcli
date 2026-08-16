@@ -7,8 +7,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 const (
@@ -52,7 +51,7 @@ func newRetryTestDelivery(deliveryID string, status automation.DeliveryStatus, a
 // fleet-db's ZSET-membership assertions.
 func dueIDs(t *testing.T, s *Store, now time.Time) []string {
 	t.Helper()
-	due, err := s.TriggerDeliveries().ListDue(t.Context(), "WS", store.TriggerDeliveryDueFilter{Now: now})
+	due, err := s.TriggerDeliveries().ListDue(t.Context(), "WS", automation.TriggerDeliveryDueFilter{Now: now})
 	if err != nil {
 		t.Fatalf("ListDue: %v", err)
 	}
@@ -133,13 +132,13 @@ func TestMemListDueTriggerDeliveries(t *testing.T) {
 
 	tests := []struct {
 		name   string
-		filter store.TriggerDeliveryDueFilter
+		filter automation.TriggerDeliveryDueFilter
 		want   []string
 	}{
-		{"cutoff before soon", store.TriggerDeliveryDueFilter{Now: base}, []string{"d-now"}},
-		{"cutoff after soon", store.TriggerDeliveryDueFilter{Now: base.Add(time.Minute)}, []string{"d-now", "d-soon"}},
-		{"cutoff after all in due order", store.TriggerDeliveryDueFilter{Now: base.Add(time.Hour)}, []string{"d-now", "d-soon", "d-late"}},
-		{"limit truncates in due order", store.TriggerDeliveryDueFilter{Now: base.Add(time.Hour), Limit: 2}, []string{"d-now", "d-soon"}},
+		{"cutoff before soon", automation.TriggerDeliveryDueFilter{Now: base}, []string{"d-now"}},
+		{"cutoff after soon", automation.TriggerDeliveryDueFilter{Now: base.Add(time.Minute)}, []string{"d-now", "d-soon"}},
+		{"cutoff after all in due order", automation.TriggerDeliveryDueFilter{Now: base.Add(time.Hour)}, []string{"d-now", "d-soon", "d-late"}},
+		{"limit truncates in due order", automation.TriggerDeliveryDueFilter{Now: base.Add(time.Hour), Limit: 2}, []string{"d-now", "d-soon"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -179,7 +178,7 @@ func TestMemUpdateTriggerDeliveryResult(t *testing.T) {
 	tests := []struct {
 		name           string
 		initial        *automation.Delivery
-		update         store.TriggerDeliveryResultUpdate
+		update         automation.TriggerDeliveryResultUpdate
 		wantErr        error
 		wantStatus     automation.DeliveryStatus
 		wantAttempt    int
@@ -191,7 +190,7 @@ func TestMemUpdateTriggerDeliveryResult(t *testing.T) {
 		{
 			name:        "failed reschedules with new score",
 			initial:     newRetryTestDelivery("d-1", automation.DeliveryFailed, 1, at(30*time.Second)),
-			update:      store.TriggerDeliveryResultUpdate{Status: automation.DeliveryFailed, Attempt: 2, NextRetryAt: at(2 * time.Minute), ErrorClass: "admission_failed"},
+			update:      automation.TriggerDeliveryResultUpdate{Status: automation.DeliveryFailed, Attempt: 2, NextRetryAt: at(2 * time.Minute), ErrorClass: "admission_failed"},
 			wantStatus:  automation.DeliveryFailed,
 			wantAttempt: 2, wantErrorClass: "admission_failed",
 			wantDue: true, wantRetryAt: at(2 * time.Minute),
@@ -199,7 +198,7 @@ func TestMemUpdateTriggerDeliveryResult(t *testing.T) {
 		{
 			name:        "accepted moves into index on failure",
 			initial:     newRetryTestDelivery("d-2", automation.DeliveryAccepted, 1, nil),
-			update:      store.TriggerDeliveryResultUpdate{Status: automation.DeliveryFailed, Attempt: 1, NextRetryAt: at(time.Minute)},
+			update:      automation.TriggerDeliveryResultUpdate{Status: automation.DeliveryFailed, Attempt: 1, NextRetryAt: at(time.Minute)},
 			wantStatus:  automation.DeliveryFailed,
 			wantAttempt: 1,
 			wantDue:     true, wantRetryAt: at(time.Minute),
@@ -207,49 +206,49 @@ func TestMemUpdateTriggerDeliveryResult(t *testing.T) {
 		{
 			name:        "dispatch removes from index and stamps run",
 			initial:     newRetryTestDelivery("d-3", automation.DeliveryFailed, 2, at(30*time.Second)),
-			update:      store.TriggerDeliveryResultUpdate{Status: automation.DeliveryDispatched, Attempt: 3, DriverRunID: "run-retry-1"},
+			update:      automation.TriggerDeliveryResultUpdate{Status: automation.DeliveryDispatched, Attempt: 3, DriverRunID: "run-retry-1"},
 			wantStatus:  automation.DeliveryDispatched,
 			wantAttempt: 3, wantRunID: "run-retry-1",
 		},
 		{
 			name:        "held promotion to dispatched removes from index",
 			initial:     newRetryTestDelivery("d-4", automation.DeliveryHeld, 1, at(30*time.Second)),
-			update:      store.TriggerDeliveryResultUpdate{Status: automation.DeliveryDispatched, Attempt: 1, DriverRunID: "run-retry-2"},
+			update:      automation.TriggerDeliveryResultUpdate{Status: automation.DeliveryDispatched, Attempt: 1, DriverRunID: "run-retry-2"},
 			wantStatus:  automation.DeliveryDispatched,
 			wantAttempt: 1, wantRunID: "run-retry-2",
 		},
 		{
 			name:        "supersede removes from index",
 			initial:     newRetryTestDelivery("d-5", automation.DeliveryHeld, 1, nil),
-			update:      store.TriggerDeliveryResultUpdate{Status: automation.DeliverySuperseded, Attempt: 1},
+			update:      automation.TriggerDeliveryResultUpdate{Status: automation.DeliverySuperseded, Attempt: 1},
 			wantStatus:  automation.DeliverySuperseded,
 			wantAttempt: 1,
 		},
 		{
 			name:        "attempt at binding budget is terminal retries_exhausted",
 			initial:     newRetryTestDelivery("d-6", automation.DeliveryFailed, 2, at(30*time.Second)),
-			update:      store.TriggerDeliveryResultUpdate{Status: automation.DeliveryFailed, Attempt: 3, NextRetryAt: at(time.Minute), ErrorClass: "admission_failed"},
+			update:      automation.TriggerDeliveryResultUpdate{Status: automation.DeliveryFailed, Attempt: 3, NextRetryAt: at(time.Minute), ErrorClass: "admission_failed"},
 			wantStatus:  automation.DeliveryFailed,
 			wantAttempt: 3, wantErrorClass: automation.TriggerDeliveryErrorRetriesExhausted,
 		},
 		{
 			name:    "terminal failed rejects retry transition",
 			initial: terminal("d-7"),
-			update:  store.TriggerDeliveryResultUpdate{Status: automation.DeliveryDispatched, Attempt: 4},
-			wantErr: domain.ErrInvalidTransition,
+			update:  automation.TriggerDeliveryResultUpdate{Status: automation.DeliveryDispatched, Attempt: 4},
+			wantErr: persistence.ErrInvalidTransition,
 		},
 		{
 			name:        "dispatched re-applied idempotently",
 			initial:     newRetryTestDelivery("d-8", automation.DeliveryDispatched, 2, nil),
-			update:      store.TriggerDeliveryResultUpdate{Status: automation.DeliveryDispatched, Attempt: 2, DriverRunID: "run-retry-3"},
+			update:      automation.TriggerDeliveryResultUpdate{Status: automation.DeliveryDispatched, Attempt: 2, DriverRunID: "run-retry-3"},
 			wantStatus:  automation.DeliveryDispatched,
 			wantAttempt: 2, wantRunID: "run-retry-3",
 		},
 		{
 			name:    "dispatched rejects move back to failed",
 			initial: newRetryTestDelivery("d-9", automation.DeliveryDispatched, 1, nil),
-			update:  store.TriggerDeliveryResultUpdate{Status: automation.DeliveryFailed, Attempt: 2, NextRetryAt: at(time.Minute)},
-			wantErr: domain.ErrInvalidTransition,
+			update:  automation.TriggerDeliveryResultUpdate{Status: automation.DeliveryFailed, Attempt: 2, NextRetryAt: at(time.Minute)},
+			wantErr: persistence.ErrInvalidTransition,
 		},
 	}
 	for _, tt := range tests {
@@ -308,7 +307,7 @@ func TestMemUpdateTriggerDeliveryResult_Validation(t *testing.T) {
 
 	t.Run("missing delivery wraps not found", func(t *testing.T) {
 		s := newRetryTestStore(t)
-		if _, err := s.TriggerDeliveries().UpdateResult(t.Context(), "WS", "d-missing", store.TriggerDeliveryResultUpdate{Status: automation.DeliveryFailed}); !errors.Is(err, domain.ErrNotFound) {
+		if _, err := s.TriggerDeliveries().UpdateResult(t.Context(), "WS", "d-missing", automation.TriggerDeliveryResultUpdate{Status: automation.DeliveryFailed}); !errors.Is(err, persistence.ErrNotFound) {
 			t.Fatalf("err = %v, want ErrNotFound", err)
 		}
 	})
@@ -318,7 +317,7 @@ func TestMemUpdateTriggerDeliveryResult_Validation(t *testing.T) {
 		if err := s.deliveries.create(newRetryTestDelivery("d-bad", automation.DeliveryFailed, 1, nil)); err != nil {
 			t.Fatalf("create delivery: %v", err)
 		}
-		if _, err := s.TriggerDeliveries().UpdateResult(t.Context(), "WS", "d-bad", store.TriggerDeliveryResultUpdate{Status: "exploded"}); !errors.Is(err, domain.ErrInvalid) {
+		if _, err := s.TriggerDeliveries().UpdateResult(t.Context(), "WS", "d-bad", automation.TriggerDeliveryResultUpdate{Status: "exploded"}); !errors.Is(err, persistence.ErrInvalid) {
 			t.Fatalf("err = %v, want ErrInvalid", err)
 		}
 	})
@@ -331,7 +330,7 @@ func TestMemUpdateTriggerDeliveryResult_Validation(t *testing.T) {
 			t.Fatalf("create delivery: %v", err)
 		}
 		// Attempt 4 < default budget 5: still retryable, not exhausted.
-		got, err := s.TriggerDeliveries().UpdateResult(t.Context(), "WS", "d-orphan", store.TriggerDeliveryResultUpdate{Status: automation.DeliveryFailed, Attempt: 4, NextRetryAt: &retryAt, ErrorClass: "admission_failed"})
+		got, err := s.TriggerDeliveries().UpdateResult(t.Context(), "WS", "d-orphan", automation.TriggerDeliveryResultUpdate{Status: automation.DeliveryFailed, Attempt: 4, NextRetryAt: &retryAt, ErrorClass: "admission_failed"})
 		if err != nil {
 			t.Fatalf("UpdateResult: %v", err)
 		}
@@ -339,7 +338,7 @@ func TestMemUpdateTriggerDeliveryResult_Validation(t *testing.T) {
 			t.Fatalf("delivery = %+v, want retryable below the %d-attempt default", got, automation.DefaultTriggerRetryMaxAttempts)
 		}
 		// Attempt 5 hits the default budget: terminal.
-		got, err = s.TriggerDeliveries().UpdateResult(t.Context(), "WS", "d-orphan", store.TriggerDeliveryResultUpdate{Status: automation.DeliveryFailed, Attempt: 5, NextRetryAt: &retryAt, ErrorClass: "admission_failed"})
+		got, err = s.TriggerDeliveries().UpdateResult(t.Context(), "WS", "d-orphan", automation.TriggerDeliveryResultUpdate{Status: automation.DeliveryFailed, Attempt: 5, NextRetryAt: &retryAt, ErrorClass: "admission_failed"})
 		if err != nil {
 			t.Fatalf("UpdateResult: %v", err)
 		}

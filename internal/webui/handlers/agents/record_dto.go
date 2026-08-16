@@ -9,9 +9,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	agentsmodule "github.com/tysonthomas9/loomcli/internal/modules/agents"
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 	loomapi "github.com/tysonthomas9/loomcli/internal/platform/loomapi/gen"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/triggerbindings"
@@ -70,7 +70,7 @@ type promptAgentGrantRequest struct {
 	GrantID         string
 }
 
-func (m *Module) agentRecordDTO(ctx context.Context, ws string, record *domain.AgentService, now time.Time) (loomapi.UnifiedAgent, error) {
+func (m *Module) agentRecordDTO(ctx context.Context, ws string, record *agentsmodule.AgentServiceRecord, now time.Time) (loomapi.UnifiedAgent, error) {
 	kind, err := m.canonicalAgentRecordKind(ctx, ws, record)
 	if err != nil {
 		out, mapErr := newAgentRecordDTO(record, deriveAgentRecordKind(record), nil, nil)
@@ -100,7 +100,7 @@ func (m *Module) agentRecordDTO(ctx context.Context, ws string, record *domain.A
 func (m *Module) canonicalAgentRecordKind(
 	ctx context.Context,
 	workspace string,
-	record *domain.AgentService,
+	record *agentsmodule.AgentServiceRecord,
 ) (string, error) {
 	if record == nil {
 		return "", agentsmodule.ErrInvalidPersistedState
@@ -109,10 +109,10 @@ func (m *Module) canonicalAgentRecordKind(
 	if err != nil {
 		return "", err
 	}
-	if runtime.RoleKind == string(domain.RoleKindInteractive) {
+	if runtime.RoleKind == string(agentsmodule.RoleKindInteractive) {
 		return agentRecordKindInteractive, nil
 	}
-	if runtime.RoleKind == string(domain.RoleKindWorker) {
+	if runtime.RoleKind == string(agentsmodule.RoleKindWorker) {
 		return agentRecordKindPrompt, nil
 	}
 	if strings.TrimSpace(record.RoleName) == "" {
@@ -128,7 +128,7 @@ func (m *Module) canonicalAgentRecordKind(
 	if role == nil || role.WorkspaceKey != workspace || role.Name != record.RoleName {
 		return "", agentsmodule.ErrInvalidPersistedState
 	}
-	if strings.TrimSpace(role.Kind) == string(domain.RoleKindInteractive) {
+	if strings.TrimSpace(role.Kind) == string(agentsmodule.RoleKindInteractive) {
 		return agentRecordKindInteractive, nil
 	}
 	return agentRecordKindPrompt, nil
@@ -137,7 +137,7 @@ func (m *Module) canonicalAgentRecordKind(
 func (m *Module) agentRecordDTOWithBindings(
 	ctx context.Context,
 	ws string,
-	record *domain.AgentService,
+	record *agentsmodule.AgentServiceRecord,
 	bindings []*automation.Binding,
 	now time.Time,
 ) (loomapi.UnifiedAgent, error) {
@@ -151,7 +151,7 @@ func (m *Module) agentRecordDTOWithBindings(
 func (m *Module) agentRecordDTOWithBindingsAndKind(
 	ctx context.Context,
 	ws string,
-	record *domain.AgentService,
+	record *agentsmodule.AgentServiceRecord,
 	kind string,
 	bindings []*automation.Binding,
 	now time.Time,
@@ -179,7 +179,7 @@ type agentRecordDecorators struct {
 }
 
 func newAgentRecordDTO(
-	record *domain.AgentService,
+	record *agentsmodule.AgentServiceRecord,
 	kind string,
 	bindings []loomapi.AgentRecordBinding,
 	decorators *agentRecordDecorators,
@@ -238,14 +238,14 @@ type agentRecordTransportFields struct {
 }
 
 func agentRecordFields(
-	record *domain.AgentService,
+	record *agentsmodule.AgentServiceRecord,
 	bindings []loomapi.AgentRecordBinding,
 	decorators *agentRecordDecorators,
 ) agentRecordTransportFields {
 	fields := agentRecordTransportFields{
 		bindings:     optionalAgentRecordBindings(bindings),
 		budgetPolicy: optionalAgentRecordString(record.BudgetPolicy),
-		enabled:      record.DesiredState == domain.AgentServiceDesiredRunning,
+		enabled:      record.DesiredState == agentsmodule.DesiredRunning,
 		metadata:     optionalAgentRecordMap(cloneStringMap(record.Metadata)),
 	}
 	if decorators != nil {
@@ -389,22 +389,22 @@ func aggregateBindingDecorators(decorators []triggerbindings.BindingDecorators) 
 }
 
 func runStatusRank(status string) int {
-	switch domain.DriverRunStatus(status) {
-	case domain.DriverRunFailed:
+	switch execution.DriverRunStatus(status) {
+	case execution.DriverRunFailed:
 		return 50
-	case domain.DriverRunNeedsReview, domain.DriverRunCancelled:
+	case execution.DriverRunNeedsReview, execution.DriverRunCancelled:
 		return 40
-	case domain.DriverRunRunning, domain.DriverRunQueued, domain.DriverRunSuspendedAwaitingEvent:
+	case execution.DriverRunRunning, execution.DriverRunQueued, execution.DriverRunSuspendedAwait:
 		return 30
-	case domain.DriverRunCompleted:
+	case execution.DriverRunCompleted:
 		return 10
 	default:
 		return 0
 	}
 }
 
-func deriveAgentRecordKind(record *domain.AgentService) string {
-	if record != nil && record.Metadata[agentsmodule.MetadataRoleKind] == string(domain.RoleKindInteractive) {
+func deriveAgentRecordKind(record *agentsmodule.AgentServiceRecord) string {
+	if record != nil && record.Metadata[agentsmodule.MetadataRoleKind] == string(agentsmodule.RoleKindInteractive) {
 		return agentRecordKindInteractive
 	}
 	if strings.TrimSpace(record.RoleName) != "" {
@@ -413,7 +413,7 @@ func deriveAgentRecordKind(record *domain.AgentService) string {
 	return agentRecordKindScripted
 }
 
-func isAgentRecordArchived(record *domain.AgentService) bool {
+func isAgentRecordArchived(record *agentsmodule.AgentServiceRecord) bool {
 	if record == nil {
 		return false
 	}
@@ -422,11 +422,11 @@ func isAgentRecordArchived(record *domain.AgentService) bool {
 	return record.DeletedAt != nil || strings.TrimSpace(record.Metadata[agentArchiveMetadataKey]) != ""
 }
 
-func agentServiceKindForSource(sourceKind string) domain.AgentServiceKind {
+func agentServiceKindForSource(sourceKind string) agentsmodule.AgentKind {
 	if sourceKind == promptAgentSourceCron {
-		return domain.AgentServiceKindCron
+		return agentsmodule.AgentKindCron
 	}
-	return domain.AgentServiceKindEvent
+	return agentsmodule.AgentKindEvent
 }
 
 func mintAgentRecordID(name string) (string, error) {

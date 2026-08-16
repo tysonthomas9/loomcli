@@ -5,14 +5,16 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
+
+	"github.com/tysonthomas9/loomcli/internal/modules/agents"
+
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
+
 	hwtranscript "github.com/olesho/harness-wrapper/pkg/transcript"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	leadcontrol "github.com/tysonthomas9/loomcli/internal/infra/interactionlead"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
-	"github.com/tysonthomas9/loomcli/internal/modules/agents"
-	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
-	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
 type inboxStub struct {
@@ -390,16 +392,16 @@ func TestRuntimeRejectsMissingTargetBeforeInboxMutation(t *testing.T) {
 
 func TestRuntimeValidatesLeadBeforeAssignmentInboxMutation(t *testing.T) {
 	st := memstore.New()
-	if _, err := st.Roles().Create(t.Context(), store.RoleCreate{WorkspaceKey: "WS", Name: "lead"}); err != nil {
+	if _, err := st.Roles().Create(t.Context(), agents.RoleRecordCreate{WorkspaceKey: "WS", Name: "lead"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.WorkerProfiles().Create(t.Context(), store.WorkerProfileCreate{
+	if _, err := st.WorkerProfiles().Create(t.Context(), execution.WorkerProfileCreate{
 		WorkspaceKey: "WS", ProfileID: "lead-profile", Role: "lead", ParentEpic: "EPIC-1",
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.AgentServices().Create(t.Context(), store.AgentServiceCreate{
-		WorkspaceKey: "WS", ServiceID: "lead-1", Kind: domain.AgentServiceKindLead,
+	if _, err := st.AgentServices().Create(t.Context(), agents.AgentServiceCreate{
+		WorkspaceKey: "WS", ServiceID: "lead-1", Kind: agents.AgentKindLead,
 		RoleName: "lead", ProfileName: "lead-profile",
 	}); err != nil {
 		t.Fatal(err)
@@ -477,14 +479,14 @@ func TestNewFailsClosedWithoutOwnedDependencies(t *testing.T) {
 }
 
 func newTestRuntime(
-	st store.Store,
+	st *memstore.Store,
 	inbox interaction.InboxEnqueuer,
 	queries AgentQueries,
 ) *Runtime {
 	return newRuntime(testLeadRuntime(st), inbox, queries)
 }
 
-func testLeadRuntime(st store.Store) LeadRuntimeDependencies {
+func testLeadRuntime(st *memstore.Store) LeadRuntimeDependencies {
 	return LeadRuntimeDependencies{
 		DeliverMessage: func(
 			ctx context.Context,
@@ -518,8 +520,8 @@ func testLeadRuntime(st store.Store) LeadRuntimeDependencies {
 		FindSession: func(
 			ctx context.Context,
 			workspace, agentID string,
-		) (*domain.AgentSession, error) {
-			return store.OrchestrationSessionFor(
+		) (*interaction.SessionRecord, error) {
+			return interaction.OrchestrationSessionFor(
 				ctx,
 				st,
 				workspace,
@@ -543,18 +545,18 @@ func equalStrings(left, right []string) bool {
 
 func seedRuntimeSession(
 	t *testing.T,
-	st store.Store,
+	st *memstore.Store,
 	metadata map[string]string,
 ) {
 	t.Helper()
 	_, err := st.AgentSessions().Create(
 		t.Context(),
-		store.AgentSessionCreate{
+		interaction.AgentSessionCreate{
 			WorkspaceKey: "WS",
 			SessionID:    "session-1",
 			AgentID:      "reviewer",
-			Kind:         domain.AgentSessionKindInteractive,
-			Status:       domain.AgentSessionRunning,
+			Kind:         interaction.SessionRecordInteractive,
+			Status:       interaction.SessionRecordRunning,
 			Metadata:     metadata,
 		},
 	)

@@ -5,8 +5,9 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/store"
+	workspaceowner "github.com/tysonthomas9/loomcli/internal/modules/workspace"
+
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 func TestRepoStoreCreateUsesSingleAtomicFleetCommand(t *testing.T) {
@@ -24,7 +25,7 @@ func TestRepoStoreCreateUsesSingleAtomicFleetCommand(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	repo, err := client.Repos().Create(t.Context(), store.RepoCreate{
+	repo, err := client.Repos().Create(t.Context(), workspaceowner.RepoCreate{
 		WorkspaceKey: "FLEET",
 		Name:         "loomcli",
 		RemoteURL:    "https://example.test/loomcli.git",
@@ -57,8 +58,8 @@ func TestRepoStoreDeleteStopsBeforeWorkspaceRemovalOnReferenceConflict(t *testin
 	}
 
 	err = client.Repos().Delete(t.Context(), "FLEET", "linked-worktree")
-	if !errors.Is(err, domain.ErrConflict) {
-		t.Fatalf("Delete err = %v, want domain.ErrConflict", err)
+	if !errors.Is(err, persistence.ErrConflict) {
+		t.Fatalf("Delete err = %v, want persistence.ErrConflict", err)
 	}
 	if requests != 1 {
 		t.Fatalf("request count = %d, want one guarded repository DELETE and no workspace PATCH", requests)

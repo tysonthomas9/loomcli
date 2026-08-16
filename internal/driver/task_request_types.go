@@ -9,9 +9,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
-
-	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 const NoopTaskProviderEnvVar = "LOOM_DRIVER_ENABLE_TEST_NOOP_PROVIDER"
@@ -93,7 +93,7 @@ func localTaskRunnerAgentPolicyFromInput(input json.RawMessage) (localTaskRunner
 	if policy.Version != 1 || policy.AgentServiceID == "" || policy.RoleName == "" || policy.Backend == "" {
 		return localTaskRunnerAgentPolicy{}, true, fmt.Errorf(
 			"managed agent policy requires version 1, agentServiceId, roleName, and backend: %w",
-			domain.ErrInvalid,
+			persistence.ErrInvalid,
 		)
 	}
 	return policy, true, nil
@@ -153,8 +153,8 @@ type TaskRunRequestOptions struct {
 	SupportedProviders []string
 	Capabilities       []string
 	WorkerProfileIDs   []string
-	RunnerPlacement    domain.TaskRunPlacement
-	SandboxPlacement   domain.TaskRunPlacement
+	RunnerPlacement    execution.TaskRunPlacementRecord
+	SandboxPlacement   execution.TaskRunPlacementRecord
 	HeartbeatInterval  time.Duration
 	DeferCompletion    bool
 	CloseTaskOnSuccess *bool
@@ -193,8 +193,8 @@ type TaskRunWorkerOptions struct {
 	SupportedProviders []string
 	Capabilities       []string
 	WorkerProfileIDs   []string
-	RunnerPlacement    domain.TaskRunPlacement
-	SandboxPlacement   domain.TaskRunPlacement
+	RunnerPlacement    execution.TaskRunPlacementRecord
+	SandboxPlacement   execution.TaskRunPlacementRecord
 	HeartbeatInterval  time.Duration
 	DeferCompletion    bool
 	CloseTaskOnSuccess bool
@@ -222,13 +222,13 @@ type TaskExecRequest struct {
 	LeaseID          string                           `json:"lease_id,omitempty"`
 	LeaseToken       string                           `json:"lease_token,omitempty"`
 	FencingToken     int64                            `json:"fencing_token,omitempty"`
-	RunnerPlacement  domain.TaskRunPlacement          `json:"runner_placement,omitempty"`
-	SandboxPlacement domain.TaskRunPlacement          `json:"sandbox_placement,omitempty"`
+	RunnerPlacement  execution.TaskRunPlacementRecord `json:"runner_placement,omitempty"`
+	SandboxPlacement execution.TaskRunPlacementRecord `json:"sandbox_placement,omitempty"`
 	Input            json.RawMessage                  `json:"input,omitempty"`
 }
 
 type TaskExecResult struct {
-	Status           domain.TaskRunStatus
+	Status           execution.TaskRunRecordStatus
 	ExitCode         int
 	LogsRef          string
 	ArtifactsRef     string

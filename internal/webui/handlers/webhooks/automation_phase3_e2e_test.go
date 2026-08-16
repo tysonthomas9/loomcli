@@ -24,12 +24,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
+
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
 
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
-	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
-	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 const (
@@ -122,7 +123,7 @@ func TestE2E_AutomationPhase3RealFleetDBLoomHTTPAndCLI(t *testing.T) {
 	// Keep the manual dispatch after the duplicate-delivery assertion so the
 	// shared webhook verifier can prove the webhook itself created exactly one
 	// run. The manual path is then proven independently through the public CLI.
-	var manualRun domain.DriverRun
+	var manualRun execution.DriverRunRecord
 	e2e.runAutomationPhase3CLIJSON(&manualRun, "trigger", "bindings", "run", automationPhase3BindingID, "--json")
 	assertAutomationPhase3Run(t, &manualRun, automationPhase3BindingID)
 
@@ -212,7 +213,7 @@ func (e *githubWebhookE2E) seedAutomationPhase3Target() {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 
-	driver, err := e.fleetClient.Drivers().Create(ctx, store.DriverCreate{
+	driver, err := e.fleetClient.Drivers().Create(ctx, workflowcatalog.DriverCreate{
 		WorkspaceKey: e.workspace,
 		DriverID:     automationPhase3DriverID,
 		Name:         automationPhase3DriverID,
@@ -227,7 +228,7 @@ func (e *githubWebhookE2E) seedAutomationPhase3Target() {
 	if driver.Revision != 1 {
 		e.t.Fatalf("seed Phase 3 driver revision = %d, want 1", driver.Revision)
 	}
-	version, err := e.fleetClient.DriverVersions().Create(ctx, store.DriverVersionCreate{
+	version, err := e.fleetClient.DriverVersions().Create(ctx, workflowcatalog.DriverVersionCreate{
 		WorkspaceKey:     e.workspace,
 		VersionID:        automationPhase3VersionID,
 		DriverID:         automationPhase3DriverID,
@@ -336,7 +337,7 @@ func (e *githubWebhookE2E) assertAutomationPhase3BindingDeleted(bindingID string
 	e.t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	if _, err := e.fleetClient.TriggerBindings().Get(ctx, e.workspace, bindingID); !errors.Is(err, domain.ErrNotFound) {
+	if _, err := e.fleetClient.TriggerBindings().Get(ctx, e.workspace, bindingID); !errors.Is(err, persistence.ErrNotFound) {
 		e.t.Fatalf("durable binding after delete = %v, want not found", err)
 	}
 }
@@ -360,11 +361,11 @@ func assertAutomationPhase3BindingListed(t *testing.T, bindings []*automation.Bi
 	t.Fatalf("binding %s not found in %+v", bindingID, bindings)
 }
 
-func assertAutomationPhase3Run(t *testing.T, run *domain.DriverRun, bindingID string) {
+func assertAutomationPhase3Run(t *testing.T, run *execution.DriverRunRecord, bindingID string) {
 	t.Helper()
 	if run == nil || strings.TrimSpace(run.RunID) == "" || run.TriggerBindingID != bindingID ||
 		run.DriverID != automationPhase3DriverID || run.DriverVersionID != automationPhase3VersionID ||
-		run.Status != domain.DriverRunQueued {
+		run.Status != execution.DriverRunQueued {
 		t.Fatalf("manual run = %+v, want queued %s/%s for %s", run, automationPhase3DriverID, automationPhase3VersionID, bindingID)
 	}
 }

@@ -11,7 +11,7 @@ import (
 	"github.com/olesho/harness-wrapper/pkg/chat"
 	"github.com/olesho/harness-wrapper/pkg/wrapper"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
 )
 
 const (
@@ -148,7 +148,7 @@ type harnessTurnDeliverer struct {
 	runtime      HarnessRuntimeMetadata
 }
 
-func newHarnessTurnDeliverer(provider string, session *domain.AgentSession) *harnessTurnDeliverer {
+func newHarnessTurnDeliverer(provider string, session *interaction.SessionRecord) *harnessTurnDeliverer {
 	return &harnessTurnDeliverer{
 		providerName: provider,
 		runtime:      HarnessRuntimeMetadataFromSession(session),
@@ -188,7 +188,7 @@ func (d *harnessTurnDeliverer) claimedBy(sessionID string) string {
 	return d.providerName + ":" + sessionID
 }
 
-func (d *harnessTurnDeliverer) populate(result *DeliveryResult, session *domain.AgentSession) {
+func (d *harnessTurnDeliverer) populate(result *DeliveryResult, session *interaction.SessionRecord) {
 	d.runtime = HarnessRuntimeMetadataFromSession(session)
 	result.Provider = d.providerName
 	result.HarnessRuntime = d.runtime

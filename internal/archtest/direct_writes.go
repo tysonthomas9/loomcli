@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
-	"sync"
 
 	"golang.org/x/tools/go/packages"
 )
@@ -69,6 +68,7 @@ type PersistencePackage struct {
 	ReceiverNames    []string `yaml:"receiver_names"`
 	ReceiverSuffixes []string `yaml:"receiver_suffixes"`
 	GuardSubpackages bool     `yaml:"guard_subpackages,omitempty"`
+	GuardFunctions   bool     `yaml:"guard_functions,omitempty"`
 }
 
 type PersistenceMethodSet struct {
@@ -244,7 +244,6 @@ func (i DirectWriteInventory) validateMetadata() error {
 		"internal/infra/localredis",
 		"internal/infra/repositoryadmission",
 		"internal/infra/sourcecontrolstackstore",
-		"internal/infra/workspacecatalog",
 		"internal/modules",
 		"internal/usage",
 		"internal/webui/handlers",
@@ -448,7 +447,10 @@ func snapshotDirectWritesAtRoots(
 		return nil, errors.New("direct-write analysis requires at least one declared analysis profile")
 	}
 	classifier := newPersistenceClassifier(inventory)
-	results := snapshotDirectWriteProfiles(root, profiles, roots, classifier)
+	results, err := snapshotDirectWriteProfiles(root, profiles, roots, classifier)
+	if err != nil {
+		return nil, err
+	}
 	calls, problems, err := mergeDirectWriteProfileResults(profiles, results)
 	if err != nil {
 		return nil, err
@@ -496,28 +498,16 @@ func snapshotDirectWriteProfiles(
 	profiles []AnalysisProfile,
 	adapterRoots []string,
 	classifier persistenceClassifier,
-) []directWriteProfileResult {
+) ([]directWriteProfileResult, error) {
 	results := make([]directWriteProfileResult, len(profiles))
-	semaphore := make(chan struct{}, repositoryScaleLoadConcurrency)
-	var wg sync.WaitGroup
-	for index, profile := range profiles {
-		index, profile := index, profile
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			semaphore <- struct{}{}
-			defer func() { <-semaphore }()
-			results[index].err = withRepositoryProfileCache(profile, func(environment []string) error {
-				var err error
-				results[index].calls, results[index].problems, err = snapshotDirectWriteProfileWithEnvironment(
-					root, profile, adapterRoots, classifier, environment,
-				)
-				return err
-			})
-		}()
-	}
-	wg.Wait()
-	return results
+	err := withRepositoryProfileCaches(profiles, func(index int, profile AnalysisProfile, environment []string) error {
+		var err error
+		results[index].calls, results[index].problems, err = snapshotDirectWriteProfileWithEnvironment(
+			root, profile, adapterRoots, classifier, environment,
+		)
+		return err
+	})
+	return results, err
 }
 
 func mergeDirectWriteProfileResults(

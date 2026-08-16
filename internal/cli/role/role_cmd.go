@@ -14,9 +14,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/cli/managementapi"
-	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/modules/agents"
-	"github.com/tysonthomas9/loomcli/internal/store"
+	agentsowner "github.com/tysonthomas9/loomcli/internal/modules/agents"
 )
 
 var (
@@ -138,7 +136,7 @@ func runRoleAdd(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	definition := agents.RoleDefinition{
+	definition := agentsowner.RoleDefinition{
 		Name: args[0], Kind: normalizeRoleKindValue(roleAddKind),
 		Description: roleAddDescription, Prompt: roleAddPrompt, PromptFile: roleAddPromptFile,
 		Model: roleAddModel, Backend: roleAddBackend, Effort: roleAddEffort,
@@ -271,24 +269,17 @@ func runRoleUnset(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func agentsRolePatch(patch store.RoleUpdate) agents.RolePatch {
-	return agents.RolePatch{
-		Kind: patch.Kind, Description: patch.Description, Prompt: patch.Prompt,
-		PromptFile: patch.PromptFile, Model: patch.Model, TaskFilter: patch.TaskFilter,
-		Backend: patch.Backend, Effort: patch.Effort, PathPatterns: patch.PathPatterns,
-		Skills: patch.Skills, MaxPriority: patch.MaxPriority, MaxConcurrency: patch.MaxConcurrency,
-		ReadOnly: patch.ReadOnly, AllowedTools: patch.AllowedTools, DeniedTools: patch.DeniedTools,
-		MaxBudgetUSD: patch.MaxBudgetUSD,
-	}
+func agentsRolePatch(patch agentsowner.RoleRecordUpdate) agentsowner.RolePatch {
+	return agentsowner.RolePatch(patch)
 }
 
-// buildRolePatch produces a store.RoleUpdate for a single key. When unset
+// buildRolePatch produces a agentsowner.RoleRecordUpdate for a single key. When unset
 // is true, *int / *float64 fields use the clear-via-double-pointer
 // signal (&nil); string fields go to "" / empty slice; bool to false.
 //
 //nolint:cyclop,funlen // Mirrors the supported role patch fields one-to-one.
-func buildRolePatch(key, value string, unset bool) (store.RoleUpdate, error) {
-	var patch store.RoleUpdate
+func buildRolePatch(key, value string, unset bool) (agentsowner.RoleRecordUpdate, error) {
+	var patch agentsowner.RoleRecordUpdate
 	switch key {
 	case "description":
 		patch.Description = strPtr(value)
@@ -381,7 +372,7 @@ func normalizeRoleKindValue(value string) string {
 
 func validateRoleKindValue(value string) error {
 	switch normalizeRoleKindValue(value) {
-	case "", string(domain.RoleKindInteractive), string(domain.RoleKindWorker):
+	case "", string(agentsowner.RoleKindInteractive), string(agentsowner.RoleKindWorker):
 		return nil
 	default:
 		return fmt.Errorf("kind must be interactive or worker")

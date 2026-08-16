@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tysonthomas9/loomcli/internal/ops"
+	"github.com/tysonthomas9/loomcli/internal/app/query/operationalview"
 	"github.com/tysonthomas9/loomcli/internal/webui/apperrors"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/workspace"
 	"github.com/tysonthomas9/loomcli/internal/webui/workspacecoord"
@@ -60,7 +60,7 @@ func TestWorkspaceCreateE2E_ErrorCodes(t *testing.T) {
 				startAsyncCreateFn: func(_ context.Context, _ workspacecoord.WorkspaceCreateRequest) (string, error) {
 					return "", apperrors.ErrUnavailable("not available")
 				},
-				createWorkspaceFn: func(_ context.Context, _ workspacecoord.WorkspaceCreateRequest) (*ops.WorkspaceData, []string, error) {
+				createWorkspaceFn: func(_ context.Context, _ workspacecoord.WorkspaceCreateRequest) (*operationalview.Workspace, []string, error) {
 					return nil, nil, tt.svcErr
 				},
 			}
@@ -128,9 +128,9 @@ func TestWorkspaceCreateE2E_CloneAsyncUnavailable(t *testing.T) {
 		startAsyncCreateFn: func(_ context.Context, _ workspacecoord.WorkspaceCreateRequest) (string, error) {
 			return "", apperrors.ErrUnavailable("async not available")
 		},
-		createWorkspaceFn: func(_ context.Context, _ workspacecoord.WorkspaceCreateRequest) (*ops.WorkspaceData, []string, error) {
+		createWorkspaceFn: func(_ context.Context, _ workspacecoord.WorkspaceCreateRequest) (*operationalview.Workspace, []string, error) {
 			createCalled = true
-			return &ops.WorkspaceData{Name: "sync-e2e"}, nil, nil
+			return &operationalview.Workspace{Name: "sync-e2e"}, nil, nil
 		},
 	}
 
@@ -155,11 +155,11 @@ func TestWorkspaceCreateE2E_EmptySuccess(t *testing.T) {
 		startAsyncCreateFn: func(_ context.Context, _ workspacecoord.WorkspaceCreateRequest) (string, error) {
 			return "", apperrors.ErrUnavailable("not available")
 		},
-		createWorkspaceFn: func(_ context.Context, req workspacecoord.WorkspaceCreateRequest) (*ops.WorkspaceData, []string, error) {
+		createWorkspaceFn: func(_ context.Context, req workspacecoord.WorkspaceCreateRequest) (*operationalview.Workspace, []string, error) {
 			if req.Type != "empty" {
 				t.Errorf("expected type %q, got %q", "empty", req.Type)
 			}
-			return &ops.WorkspaceData{Name: "test-ws"}, nil, nil
+			return &operationalview.Workspace{Name: "test-ws"}, nil, nil
 		},
 	}
 

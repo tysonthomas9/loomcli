@@ -219,31 +219,30 @@ func analyzeProfilesAndDirectWrites(
 	}
 	agentsResults := make([][]phase5AgentsMutation, len(profiles))
 	violations := []string{}
-	for index, profile := range profiles {
-		profileViolations := []string{}
-		err := withRepositoryProfileCache(profile, func(environment []string) error {
-			var err error
-			profileViolations, err = analyzeProfileWithEnvironment(
-				root, profile, graph, inventory.GenericMechanisms, environment,
-			)
-			if err != nil {
-				return err
-			}
-			directResults[index].calls, directResults[index].problems, err = snapshotDirectWriteProfileWithEnvironment(
-				root, profile, inventory.AdapterRoots, classifier, environment,
-			)
-			if err != nil || len(agentsPatterns) == 0 {
-				return err
-			}
-			agentsResults[index], err = snapshotPhase5AgentsMutationProfile(
-				root, profile, agentsPatterns, environment,
-			)
-			return err
-		})
-		if err != nil {
-			return nil, nil, fmt.Errorf("analyze profile %s: %w", profile.Name, err)
+	err = withRepositoryProfileCaches(profiles, func(index int, profile AnalysisProfile, environment []string) error {
+		profileViolations, profileErr := analyzeProfileWithEnvironment(
+			root, profile, graph, inventory.GenericMechanisms, environment,
+		)
+		if profileErr != nil {
+			return profileErr
+		}
+		directResults[index].calls, directResults[index].problems, profileErr = snapshotDirectWriteProfileWithEnvironment(
+			root, profile, inventory.AdapterRoots, classifier, environment,
+		)
+		if profileErr != nil || len(agentsPatterns) == 0 {
+			return profileErr
+		}
+		agentsResults[index], profileErr = snapshotPhase5AgentsMutationProfile(
+			root, profile, agentsPatterns, environment,
+		)
+		if profileErr != nil {
+			return profileErr
 		}
 		violations = append(violations, profileViolations...)
+		return nil
+	})
+	if err != nil {
+		return nil, nil, err
 	}
 	calls, problems, err := mergeDirectWriteProfileResults(profiles, directResults)
 	if err != nil {

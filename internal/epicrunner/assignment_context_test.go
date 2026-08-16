@@ -6,9 +6,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
+
+	"github.com/tysonthomas9/loomcli/internal/modules/agents"
+
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
+
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
-	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
 func TestLoadLeadAssignmentContextReturnsAssignedLead(t *testing.T) {
@@ -17,7 +21,7 @@ func TestLoadLeadAssignmentContextReturnsAssignedLead(t *testing.T) {
 	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
 	createAssignmentRole(t, ctx, st, "lead")
 
-	profile, err := st.WorkerProfiles().Create(ctx, store.WorkerProfileCreate{
+	profile, err := st.WorkerProfiles().Create(ctx, execution.WorkerProfileCreate{
 		WorkspaceKey: "WS",
 		ProfileID:    "nova-profile",
 		Role:         "lead",
@@ -26,21 +30,21 @@ func TestLoadLeadAssignmentContextReturnsAssignedLead(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create lead profile: %v", err)
 	}
-	if _, err := st.AgentServices().Create(ctx, store.AgentServiceCreate{
+	if _, err := st.AgentServices().Create(ctx, agents.AgentServiceCreate{
 		WorkspaceKey: "WS",
 		ServiceID:    "nova",
-		Kind:         domain.AgentServiceKindLead,
+		Kind:         agents.AgentKindLead,
 		RoleName:     "lead",
 		ProfileName:  "nova-profile",
 	}); err != nil {
 		t.Fatalf("create lead identity: %v", err)
 	}
-	if _, err := st.AgentSessions().Create(ctx, store.AgentSessionCreate{
+	if _, err := st.AgentSessions().Create(ctx, interaction.AgentSessionCreate{
 		WorkspaceKey: "WS",
 		SessionID:    "lead-session",
 		AgentID:      "nova",
-		Kind:         domain.AgentSessionKindInteractive,
-		Status:       domain.AgentSessionRunning,
+		Kind:         interaction.SessionRecordInteractive,
+		Status:       interaction.SessionRecordRunning,
 	}); err != nil {
 		t.Fatalf("create session: %v", err)
 	}
@@ -68,7 +72,7 @@ func TestLoadLeadAssignmentContextSkipsUnassignedAndNonLeadAgents(t *testing.T) 
 	createAssignmentRole(t, ctx, st, "lead")
 	createAssignmentRole(t, ctx, st, "task")
 
-	for _, in := range []store.WorkerProfileCreate{
+	for _, in := range []execution.WorkerProfileCreate{
 		{WorkspaceKey: "WS", ProfileID: "atlas-profile", Role: "lead"},
 		{WorkspaceKey: "WS", ProfileID: "worker-profile", Role: "task", ParentEpic: "EPIC-1"},
 	} {
@@ -76,9 +80,9 @@ func TestLoadLeadAssignmentContextSkipsUnassignedAndNonLeadAgents(t *testing.T) 
 			t.Fatalf("create profile %s: %v", in.ProfileID, err)
 		}
 	}
-	for _, in := range []store.AgentServiceCreate{
-		{WorkspaceKey: "WS", ServiceID: "atlas", Kind: domain.AgentServiceKindLead, RoleName: "lead", ProfileName: "atlas-profile"},
-		{WorkspaceKey: "WS", ServiceID: "worker", Kind: domain.AgentServiceKindSupport, RoleName: "task", ProfileName: "worker-profile"},
+	for _, in := range []agents.AgentServiceCreate{
+		{WorkspaceKey: "WS", ServiceID: "atlas", Kind: agents.AgentKindLead, RoleName: "lead", ProfileName: "atlas-profile"},
+		{WorkspaceKey: "WS", ServiceID: "worker", Kind: agents.AgentKindSupport, RoleName: "task", ProfileName: "worker-profile"},
 	} {
 		if _, err := st.AgentServices().Create(ctx, in); err != nil {
 			t.Fatalf("create identity %s: %v", in.ServiceID, err)
@@ -101,7 +105,7 @@ func TestLoadLeadAssignmentContextRejectsRoleMismatch(t *testing.T) {
 	st := memstore.New()
 	createAssignmentRole(t, ctx, st, "lead")
 	createAssignmentRole(t, ctx, st, "task")
-	if _, err := st.WorkerProfiles().Create(ctx, store.WorkerProfileCreate{
+	if _, err := st.WorkerProfiles().Create(ctx, execution.WorkerProfileCreate{
 		WorkspaceKey: "WS",
 		ProfileID:    "nova-profile",
 		Role:         "task",
@@ -109,10 +113,10 @@ func TestLoadLeadAssignmentContextRejectsRoleMismatch(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("create profile: %v", err)
 	}
-	if _, err := st.AgentServices().Create(ctx, store.AgentServiceCreate{
+	if _, err := st.AgentServices().Create(ctx, agents.AgentServiceCreate{
 		WorkspaceKey: "WS",
 		ServiceID:    "nova",
-		Kind:         domain.AgentServiceKindLead,
+		Kind:         agents.AgentKindLead,
 		RoleName:     "lead",
 		ProfileName:  "nova-profile",
 	}); err != nil {
@@ -128,9 +132,9 @@ func TestLoadLeadAssignmentContextRejectsRoleMismatch(t *testing.T) {
 	}
 }
 
-func createAssignmentRole(t *testing.T, ctx context.Context, st store.Store, name string) {
+func createAssignmentRole(t *testing.T, ctx context.Context, st *memstore.Store, name string) {
 	t.Helper()
-	if _, err := st.Roles().Create(ctx, store.RoleCreate{WorkspaceKey: "WS", Name: name}); err != nil {
+	if _, err := st.Roles().Create(ctx, agents.RoleRecordCreate{WorkspaceKey: "WS", Name: name}); err != nil {
 		t.Fatalf("create role %s: %v", name, err)
 	}
 }

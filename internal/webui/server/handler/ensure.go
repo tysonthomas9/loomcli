@@ -4,7 +4,7 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 // WriteExistingIfFound is the fast idempotent path for POST-create handlers: if
@@ -33,7 +33,7 @@ func WriteCreatedOrExisting[T any](w http.ResponseWriter, created T, err error, 
 		WriteJSON(w, http.StatusCreated, created)
 		return
 	}
-	if errors.Is(err, domain.ErrAlreadyExists) || errors.Is(err, domain.ErrConflict) {
+	if errors.Is(err, persistence.ErrAlreadyExists) || errors.Is(err, persistence.ErrConflict) {
 		if existing, ok := fetch(); ok {
 			WriteJSON(w, http.StatusOK, existing)
 			return

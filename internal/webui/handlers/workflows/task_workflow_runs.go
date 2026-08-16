@@ -5,7 +5,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 	loomapi "github.com/tysonthomas9/loomcli/internal/platform/loomapi/gen"
 	"github.com/tysonthomas9/loomcli/internal/webui/readprojection"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
@@ -43,7 +43,7 @@ func (m *Module) listTaskWorkflowRuns(w http.ResponseWriter, r *http.Request) {
 	}
 	runs := projection.Runs
 	if runs == nil {
-		runs = []*domain.DriverRun{}
+		runs = []*execution.DriverRunRecord{}
 	}
 	handler.WriteJSON(w, http.StatusOK, loomapi.TaskWorkflowRunsResponse{
 		TaskId: taskID, SubjectRef: projection.SubjectRef, Runs: handler.DriverRunsFromDomain(runs),

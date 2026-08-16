@@ -16,13 +16,13 @@ import (
 	"time"
 
 	appworkflowauthoring "github.com/tysonthomas9/loomcli/internal/app/workflowauthoring"
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/driver"
 	workflowdefs "github.com/tysonthomas9/loomcli/internal/infra/workflowdistribution/authoring"
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 	workflowcataloghttp "github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog/httpapi"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 	"github.com/tysonthomas9/loomcli/internal/webui/readprojection"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
@@ -291,7 +291,7 @@ func (m *Module) resolveDriverRunSubmissionTarget(
 		version = requested.Version
 	} else {
 		if driverTarget.Status != workflowcatalog.DriverStatusActive {
-			writeDomainError(w, domain.ErrInvalid, "DriverRun target is not active")
+			writeDomainError(w, persistence.ErrInvalid, "DriverRun target is not active")
 			return nil, nil, false
 		}
 		version, err = m.catalog.GetVersion(r.Context(), workspace, strings.TrimSpace(driverTarget.ActiveVersionID))
@@ -302,7 +302,7 @@ func (m *Module) resolveDriverRunSubmissionTarget(
 	}
 	if version == nil || version.DriverID != driverTarget.DriverID ||
 		version.ValidationStatus != workflowcatalog.DriverVersionValidationPassed {
-		writeDomainError(w, domain.ErrInvalid, "DriverRun version is not a passed version for the target driver")
+		writeDomainError(w, persistence.ErrInvalid, "DriverRun version is not a passed version for the target driver")
 		return nil, nil, false
 	}
 	return driverTarget, version, true
@@ -339,7 +339,7 @@ func driverRunCLISourceRef(command string) (string, error) {
 	case "epic-run":
 		return "loom epic run", nil
 	default:
-		return "", fmt.Errorf("unknown cli_command %q: %w", command, domain.ErrInvalid)
+		return "", fmt.Errorf("unknown cli_command %q: %w", command, persistence.ErrInvalid)
 	}
 }
 
@@ -677,7 +677,7 @@ func (m *Module) createWorkflowRun(w http.ResponseWriter, r *http.Request) {
 		// bundling error) must surface its real status/message instead of being
 		// collapsed into a misleading generic 500 "workflow not found", which
 		// hides the true failure in the serve log alone.
-		if errors.Is(err, domain.ErrNotFound) {
+		if errors.Is(err, persistence.ErrNotFound) {
 			writeError(w, http.StatusNotFound, "workflow not found")
 			return
 		}
@@ -701,7 +701,7 @@ func (m *Module) createWorkflowRun(w http.ResponseWriter, r *http.Request) {
 
 func (m *Module) submitWorkflowRun(r *http.Request, workspace string, target *workflowcatalog.Driver, payload json.RawMessage) (*driverRunResponse, error) {
 	if target == nil {
-		return nil, domain.ErrNotFound
+		return nil, persistence.ErrNotFound
 	}
 	if m.execution == nil {
 		return nil, fmt.Errorf("execution submit API is unavailable: %w", execution.ErrUnavailable)
@@ -895,7 +895,7 @@ func (m *Module) loadRunEvents(ctx context.Context, r *http.Request, defaultLimi
 	if raw := strings.TrimSpace(r.URL.Query().Get("limit")); raw != "" {
 		parsed, err := strconv.Atoi(raw)
 		if err != nil || parsed < 1 || parsed > 1000 {
-			return nil, fmt.Errorf("invalid limit: %w", domain.ErrInvalid)
+			return nil, fmt.Errorf("invalid limit: %w", persistence.ErrInvalid)
 		}
 		limit = parsed
 	}

@@ -738,7 +738,7 @@
   },
   "ratchets": {
     "composite_store": {
-      "max_production_files": 12,
+      "max_production_files": 0,
       "max_outside_composition": 0,
       "composition_prefixes": [
         "internal/bootstrap/",
@@ -748,20 +748,7 @@
         "internal/webui/app/",
         "internal/webui/server_config.go"
       ],
-      "allowed_production_file_uses": [
-        "internal/bootstrap/openstore.go",
-        "internal/cli/cmdstore/cmdstore.go",
-        "internal/cli/serve/metricscmd/handlers.go",
-        "internal/cli/serve/metricscmd/monitor_store_data_source.go",
-        "internal/cli/serve/serve.go",
-        "internal/cli/serve/serve_runtime.go",
-        "internal/cli/serve/serve_runtime_loops.go",
-        "internal/cli/serve/serveadapter/serveadapter.go",
-        "internal/infra/fleetdb/client.go",
-        "internal/infra/memstore/store.go",
-        "internal/webui/app/server_workspace.go",
-        "internal/webui/server_config.go"
-      ]
+      "allowed_production_file_uses": []
     },
     "legacy_handler_imports": {
       "root": "internal/webui/handlers",

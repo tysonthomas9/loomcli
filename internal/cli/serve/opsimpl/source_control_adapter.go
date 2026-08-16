@@ -5,8 +5,8 @@ import (
 	"errors"
 
 	cligit "github.com/tysonthomas9/loomcli/internal/cli/git"
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 // SourceControlAdapter translates machine-local repository mechanisms into
@@ -37,7 +37,7 @@ func (adapter *SourceControlAdapter) ResolveAgentCheckout(
 	}
 	worktree, err := adapter.git.ResolveAgentWorktree(workspaceKey, agentID)
 	if err != nil {
-		if errors.Is(err, domain.ErrNotFound) ||
+		if errors.Is(err, persistence.ErrNotFound) ||
 			errors.Is(err, sourcecontrol.ErrAgentWorktreeNotFound) ||
 			errors.Is(err, sourcecontrol.ErrAgentRepoNotAllowed) {
 			return sourcecontrol.AgentCheckout{}, sourcecontrol.ErrNotFound

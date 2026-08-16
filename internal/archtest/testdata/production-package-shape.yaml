@@ -14,11 +14,11 @@ semantics:
     - vendor
     - worktrees
 ceilings:
-  total_packages: 155
+  total_packages: 153
   module_packages: 18
-  outside_module_packages: 137
+  outside_module_packages: 135
   one_file_packages: 37
-  one_or_two_file_packages: 57
+  one_or_two_file_packages: 55
 packages:
   - internal/agenterr
   - internal/agentpolicy
@@ -26,6 +26,7 @@ packages:
   - internal/app/agentprovisioning/fleetdb
   - internal/app/connectorgrants
   - internal/app/prreviewer
+  - internal/app/query/operationalview
   - internal/app/query/runcapture
   - internal/app/query/sessionarchive
   - internal/app/repositoryadmission
@@ -70,7 +71,6 @@ packages:
   - internal/cli/trigger
   - internal/cli/workflow
   - internal/cli/workspace
-  - internal/domain
   - internal/driver
   - internal/driver/daytonahost
   - internal/driver/nativearchive
@@ -100,7 +100,6 @@ packages:
   - internal/infra/sourcecontrolstackstore
   - internal/infra/workflowdistribution
   - internal/infra/workflowdistribution/authoring
-  - internal/infra/workspacecatalog
   - internal/kv
   - internal/localsettings
   - internal/localworkspace
@@ -127,15 +126,14 @@ packages:
   - internal/modules/workspace
   - internal/netutil
   - internal/observability/tracing
-  - internal/ops
   - internal/platform/authority
   - internal/platform/fleethttp
   - internal/platform/httptransport
   - internal/platform/loomapi/gen
+  - internal/platform/persistence
   - internal/platform/repositoryremote
   - internal/platform/runtime
   - internal/roleprompts
-  - internal/store
   - internal/testutil
   - internal/usage
   - internal/webui

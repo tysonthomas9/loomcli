@@ -2,6 +2,7 @@ package agents
 
 import (
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 )
@@ -10,6 +11,44 @@ const (
 	RoleKindInteractive = "interactive"
 	RoleKindWorker      = "worker"
 )
+
+// BuiltinRoleNames are the role-backed Agents seeded for every Workspace.
+// Seeding and mutation guards consult this one Agents-owned policy list.
+var BuiltinRoleNames = []string{"plan", "task", "lead"}
+
+func IsBuiltinRole(name string) bool { return slices.Contains(BuiltinRoleNames, name) }
+
+func IsInteractiveRoleName(name string) bool {
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "lead", "orchestrator":
+		return true
+	default:
+		return false
+	}
+}
+
+// BuiltinInteractivePrompt is one selectable prompt for an interactive Agent.
+type BuiltinInteractivePrompt struct {
+	ID     string `json:"id"`
+	Label  string `json:"label"`
+	Hidden bool   `json:"-"`
+}
+
+var builtinInteractivePrompts = []BuiltinInteractivePrompt{
+	{ID: "lead", Label: "Lead"},
+	{ID: "pr-review", Label: "PR Review"},
+	{ID: "pr-review-checkout", Label: "PR Review (checkout)", Hidden: true},
+}
+
+func BuiltinInteractivePrompts() []BuiltinInteractivePrompt {
+	return append([]BuiltinInteractivePrompt(nil), builtinInteractivePrompts...)
+}
+
+func IsBuiltinInteractivePrompt(id string) bool {
+	return slices.ContainsFunc(builtinInteractivePrompts, func(prompt BuiltinInteractivePrompt) bool {
+		return prompt.ID == id
+	})
+}
 
 var (
 	legacyAgentIdentifier = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)

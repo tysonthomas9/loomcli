@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/modules/agents"
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 type managementRoundTripper func(*http.Request) (*http.Response, error)
@@ -64,9 +64,9 @@ func TestManagementStatusErrorPreservesDomainClass(t *testing.T) {
 		status int
 		want   error
 	}{
-		{status: http.StatusBadRequest, want: domain.ErrInvalid},
-		{status: http.StatusNotFound, want: domain.ErrNotFound},
-		{status: http.StatusConflict, want: domain.ErrConflict},
+		{status: http.StatusBadRequest, want: persistence.ErrInvalid},
+		{status: http.StatusNotFound, want: persistence.ErrNotFound},
+		{status: http.StatusConflict, want: persistence.ErrConflict},
 	}
 	for _, test := range tests {
 		err := statusError(test.status, []byte(`{"error":"denied"}`))
@@ -157,13 +157,13 @@ func TestWorkerProfileMutationsFailClosedOnBlankOrMismatchedIdentity(t *testing.
 	if requests != 1 {
 		t.Fatalf("mismatched create requests = %d, want 1", requests)
 	}
-	if _, err := client.CreateWorkerProfile(context.Background(), execution.CreateWorkerProfileCommand{ProfileID: "  ", Role: "task"}); !errors.Is(err, domain.ErrInvalid) {
+	if _, err := client.CreateWorkerProfile(context.Background(), execution.CreateWorkerProfileCommand{ProfileID: "  ", Role: "task"}); !errors.Is(err, persistence.ErrInvalid) {
 		t.Fatalf("blank create id error = %v, want ErrInvalid", err)
 	}
-	if _, err := client.UpdateWorkerProfile(context.Background(), "  ", execution.WorkerProfilePatch{}); !errors.Is(err, domain.ErrInvalid) {
+	if _, err := client.UpdateWorkerProfile(context.Background(), "  ", execution.WorkerProfilePatch{}); !errors.Is(err, persistence.ErrInvalid) {
 		t.Fatalf("blank update id error = %v, want ErrInvalid", err)
 	}
-	if err := client.DeleteWorkerProfile(context.Background(), "  "); !errors.Is(err, domain.ErrInvalid) {
+	if err := client.DeleteWorkerProfile(context.Background(), "  "); !errors.Is(err, persistence.ErrInvalid) {
 		t.Fatalf("blank delete id error = %v, want ErrInvalid", err)
 	}
 	if requests != 1 {
@@ -315,7 +315,7 @@ func TestAgentIdentityManagementRejectsWorkspaceMismatchBeforeTransport(t *testi
 	}
 	if _, err := client.CreateAgent(context.Background(), agents.CreateAgentCommand{
 		WorkspaceKey: "OTHER", AgentID: "docs",
-	}); !errors.Is(err, domain.ErrInvalid) {
+	}); !errors.Is(err, persistence.ErrInvalid) {
 		t.Fatalf("CreateAgent workspace mismatch error = %v, want ErrInvalid", err)
 	}
 	if requests != 0 {
@@ -397,7 +397,7 @@ func TestAgentLifecycleManagementRejectsMalformedGenerationBeforeTransport(t *te
 		ExpectedGenerationID: "CALLER-SELECTED",
 		IdempotencyKey:       "agentdef-disable-1",
 	})
-	if !errors.Is(err, domain.ErrInvalid) {
+	if !errors.Is(err, persistence.ErrInvalid) {
 		t.Fatalf("malformed generation error = %v, want ErrInvalid", err)
 	}
 	if requests != 0 {

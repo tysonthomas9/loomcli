@@ -14,15 +14,15 @@ func TestCheckedInDirectWriteInventoryStrictCounts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(inventory.Writes) != 77 {
-		t.Fatalf("direct-write rows = %d, want current source-backed ratchet of 77", len(inventory.Writes))
+	if len(inventory.Writes) != 71 {
+		t.Fatalf("direct-write rows = %d, want current source-backed ratchet of 71", len(inventory.Writes))
 	}
 	totalSites := 0
 	for _, use := range inventory.Writes {
 		totalSites += use.Count
 	}
-	if totalSites != 93 {
-		t.Fatalf("direct-write sites = %d, want current source-backed ratchet of 93", totalSites)
+	if totalSites != 85 {
+		t.Fatalf("direct-write sites = %d, want current source-backed ratchet of 85", totalSites)
 	}
 	if err := inventory.ValidateCompletedPhase(7); err != nil {
 		t.Fatalf("checked-in inventory is not ready for Phase 7 completion: %v", err)
@@ -53,7 +53,7 @@ func TestSnapshotDirectWritesAcceptsExactAdapterFile(t *testing.T) {
 	root := directWriteFixture(t)
 	writeGoFile(t, root, "internal/cli/other.go", `package cli
 import "github.com/tysonthomas9/loomcli/internal/store"
-func otherWrite(s store.WorkspaceStore) error { return s.Create("outside-exact-adapter") }
+func otherWrite(s workspaceowner.WorkspaceStore) error { return s.Create("outside-exact-adapter") }
 `)
 	matrix := oneDirectWriteProfile()
 	inventory := directWriteTestInventory(matrix)
@@ -99,12 +99,12 @@ func TestDirectWriteRatchetRejectsAdditionAndStaleEntry(t *testing.T) {
 func TestSnapshotDirectWritesRejectsUnclassifiedStoreMethods(t *testing.T) {
 	root := t.TempDir()
 	writeDirectWriteModule(t, root)
-	writeGoFile(t, root, "internal/store/store.go", `package store
+	writeGoFile(t, root, "internal/store/store.go", `package workspaceowner
 type WorkspaceStore interface { Save(string) error; ApproveVersion(string) error }
 `)
 	writeGoFile(t, root, "internal/cli/write.go", `package cli
 import "github.com/tysonthomas9/loomcli/internal/store"
-func write(s store.WorkspaceStore) error {
+func write(s workspaceowner.WorkspaceStore) error {
 	if err := s.Save("one"); err != nil { return err }
 	return s.ApproveVersion("two")
 }
@@ -163,7 +163,7 @@ func TestSnapshotDirectWritesCountsAssignedAndCallbackMethodValues(t *testing.T)
 	writeGoFile(t, root, "internal/cli/write.go", `package cli
 import "github.com/tysonthomas9/loomcli/internal/store"
 func consume(func(string) error) {}
-func refs(s store.WorkspaceStore) {
+func refs(s workspaceowner.WorkspaceStore) {
 	assigned := s.Create
 	_ = assigned
 	consume(s.Create)
@@ -260,16 +260,16 @@ func persist(port agentprovisioning.ProgressStore) error { return port.Save() }
 func TestSnapshotDirectWritesIncludesPackageLevelPersistenceHelper(t *testing.T) {
 	root := t.TempDir()
 	writeDirectWriteModule(t, root)
-	writeGoFile(t, root, "internal/store/store.go", `package store
+	writeGoFile(t, root, "internal/store/store.go", `package workspaceowner
 type WorkspaceStore interface { Create(string) error }
 func UploadContentArtifact(s WorkspaceStore) error { return s.Create("artifact") }
 `)
 	writeGoFile(t, root, "internal/cli/write.go", `package cli
 import "github.com/tysonthomas9/loomcli/internal/store"
-func consume(func(store.WorkspaceStore) error) {}
-func write(s store.WorkspaceStore) error {
-	consume(store.UploadContentArtifact)
-	return store.UploadContentArtifact(s)
+func consume(func(workspaceowner.WorkspaceStore) error) {}
+func write(s workspaceowner.WorkspaceStore) error {
+	consume(workspaceowner.UploadContentArtifact)
+	return workspaceowner.UploadContentArtifact(s)
 }
 `)
 
@@ -289,20 +289,20 @@ func write(s store.WorkspaceStore) error {
 	use := uses[0]
 	if use.File != "internal/cli/write.go" || use.Receiver != modulePath+"/internal/store" ||
 		use.Method != "UploadContentArtifact" || use.Count != 2 || use.AggregateOwner != "artifacts" {
-		t.Fatalf("direct write = %+v, want classified store.UploadContentArtifact helper", use)
+		t.Fatalf("direct write = %+v, want classified workspaceowner.UploadContentArtifact helper", use)
 	}
 }
 
 func TestSnapshotDirectWritesRejectsUnclassifiedPackageLevelPersistenceHelper(t *testing.T) {
 	root := t.TempDir()
 	writeDirectWriteModule(t, root)
-	writeGoFile(t, root, "internal/store/store.go", `package store
+	writeGoFile(t, root, "internal/store/store.go", `package workspaceowner
 type WorkspaceStore interface { Create(string) error }
 func UploadContentArtifact(s WorkspaceStore) error { return s.Create("artifact") }
 `)
 	writeGoFile(t, root, "internal/cli/write.go", `package cli
 import "github.com/tysonthomas9/loomcli/internal/store"
-func write(s store.WorkspaceStore) error { return store.UploadContentArtifact(s) }
+func write(s workspaceowner.WorkspaceStore) error { return workspaceowner.UploadContentArtifact(s) }
 `)
 
 	_, err := SnapshotDirectWrites(root, oneDirectWriteProfile(), directWriteTestInventory(oneDirectWriteProfile()))
@@ -314,7 +314,7 @@ func write(s store.WorkspaceStore) error { return store.UploadContentArtifact(s)
 func TestSnapshotDirectWritesRejectsDotImportedPersistencePackage(t *testing.T) {
 	root := t.TempDir()
 	writeDirectWriteModule(t, root)
-	writeGoFile(t, root, "internal/store/store.go", `package store
+	writeGoFile(t, root, "internal/store/store.go", `package workspaceowner
 type WorkspaceStore interface { Create(string) error }
 func UploadContentArtifact(s WorkspaceStore) error { return s.Create("artifact") }
 `)
@@ -332,13 +332,13 @@ func write(s WorkspaceStore) error { return UploadContentArtifact(s) }
 func TestSnapshotDirectWritesRejectsUnknownCompositeStoreMethod(t *testing.T) {
 	root := t.TempDir()
 	writeDirectWriteModule(t, root)
-	writeGoFile(t, root, "internal/store/store.go", `package store
+	writeGoFile(t, root, "internal/store/store.go", `package workspaceowner
 type Store interface { Workspaces() WorkspaceStore; Save() error }
 type WorkspaceStore interface { Create(string) error }
 `)
 	writeGoFile(t, root, "internal/cli/write.go", `package cli
 import "github.com/tysonthomas9/loomcli/internal/store"
-func write(s store.Store) { _ = s.Workspaces(); _ = s.Save }
+func write(s workspaceowner.Store) { _ = s.Workspaces(); _ = s.Save }
 `)
 	matrix := oneDirectWriteProfile()
 	inventory := directWriteTestInventory(matrix)
@@ -463,6 +463,21 @@ func TestDirectWritePersistencePolicyAllowsExactReceiverWithoutClassifyingWholeP
 	}
 }
 
+func TestPersistencePackageReceiverPolicyDoesNotClassifyUnlistedFunctions(t *testing.T) {
+	inventory := directWriteTestInventory(oneDirectWriteProfile())
+	const packagePath = modulePath + "/internal/example"
+	inventory.PersistencePackages = append(inventory.PersistencePackages, PersistencePackage{
+		Path: packagePath, ReceiverNames: []string{"Journal"}, ReceiverSuffixes: []string{},
+	})
+	classifier := newPersistenceClassifier(inventory)
+	if classifier.isPersistenceFunctionPackage(packagePath) {
+		t.Fatal("a receiver-only persistence package classified unrelated package functions")
+	}
+	if !classifier.isPersistenceCandidate(packagePath, "Journal") {
+		t.Fatal("declared receiver was not recognized as a persistence candidate")
+	}
+}
+
 func TestSnapshotDirectWritesExactReceiverFailsClosedWithoutClassifyingPackageFunctions(t *testing.T) {
 	root := t.TempDir()
 	writeDirectWriteModule(t, root)
@@ -581,12 +596,12 @@ func TestDirectWriteRowsPreserveLegacyDriverPhase6Expiry(t *testing.T) {
 func TestLegacyDriverDirectWriteRatchetRejectsDrift(t *testing.T) {
 	root := t.TempDir()
 	writeDirectWriteModule(t, root)
-	writeGoFile(t, root, "internal/store/store.go", `package store
+	writeGoFile(t, root, "internal/store/store.go", `package workspaceowner
 type WorkspaceStore interface { Create(string) error }
 `)
 	writeGoFile(t, root, "internal/driver/write.go", `package driver
 import "github.com/tysonthomas9/loomcli/internal/store"
-func write(s store.WorkspaceStore) error { return s.Create("one") }
+func write(s workspaceowner.WorkspaceStore) error { return s.Create("one") }
 `)
 	writeGoFile(t, root, "internal/cli/read.go", "package cli\n")
 
@@ -613,7 +628,7 @@ func write(s store.WorkspaceStore) error { return s.Create("one") }
 
 	writeGoFile(t, root, "internal/driver/write.go", `package driver
 import "github.com/tysonthomas9/loomcli/internal/store"
-func write(s store.WorkspaceStore) error {
+func write(s workspaceowner.WorkspaceStore) error {
 	if err := s.Create("one"); err != nil { return err }
 	return s.Create("two")
 }
@@ -662,7 +677,7 @@ func TestLegacyDriverDirectWriteRatchetExpiresAtPhase6Completion(t *testing.T) {
 func TestSnapshotDirectWritesIncludesTaggedOnlyMutation(t *testing.T) {
 	root := t.TempDir()
 	writeDirectWriteModule(t, root)
-	writeGoFile(t, root, "internal/store/store.go", `package store
+	writeGoFile(t, root, "internal/store/store.go", `package workspaceowner
 type WorkspaceStore interface { Create(string) error }
 `)
 	writeGoFile(t, root, "internal/cli/base.go", "package cli\n")
@@ -672,7 +687,7 @@ package cli
 
 import "github.com/tysonthomas9/loomcli/internal/store"
 
-func taggedWrite(s store.WorkspaceStore) error { return s.Create("tagged") }
+func taggedWrite(s workspaceowner.WorkspaceStore) error { return s.Create("tagged") }
 `)
 	matrix := AnalysisMatrix{
 		Release: []AnalysisProfile{{Name: "untagged", GOOS: "linux", GOARCH: "amd64"}},
@@ -764,12 +779,12 @@ func directWriteFixture(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
 	writeDirectWriteModule(t, root)
-	writeGoFile(t, root, "internal/store/store.go", `package store
+	writeGoFile(t, root, "internal/store/store.go", `package workspaceowner
 type WorkspaceStore interface { Create(string) error; Get(string) error }
 `)
 	writeGoFile(t, root, "internal/cli/write.go", `package cli
 import "github.com/tysonthomas9/loomcli/internal/store"
-func write(s store.WorkspaceStore) error { _ = s.Get("one"); return s.Create("two") }
+func write(s workspaceowner.WorkspaceStore) error { _ = s.Get("one"); return s.Create("two") }
 `)
 	return root
 }
@@ -798,7 +813,7 @@ func directWriteTestInventory(matrix AnalysisMatrix) DirectWriteInventory {
 		AnalysisProfiles:          directWriteProfileNames(matrix),
 		CandidateReceiverSuffixes: []string{"Repository", "Store"},
 		PersistencePackages: []PersistencePackage{{
-			Path: modulePath + "/internal/store", ReceiverNames: []string{}, ReceiverSuffixes: []string{"Store"},
+			Path: modulePath + "/internal/store", ReceiverNames: []string{}, ReceiverSuffixes: []string{"Store"}, GuardFunctions: true,
 		}},
 		MethodSets: []PersistenceMethodSet{{Name: "store", ReadOnly: []string{"Get"}, Mutating: []string{"Create"}}},
 		ReceiverSurfaces: []PersistenceReceiverSurface{{

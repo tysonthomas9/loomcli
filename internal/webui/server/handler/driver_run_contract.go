@@ -4,14 +4,14 @@ import (
 	"encoding/json"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 	loomapi "github.com/tysonthomas9/loomcli/internal/platform/loomapi/gen"
 )
 
 // DriverRunsFromDomain maps the legacy read projection explicitly into the
 // canonical generated HTTP contract. WebUI readers share this mapping until
 // the legacy read model is retired.
-func DriverRunsFromDomain(runs []*domain.DriverRun) []loomapi.DriverRun {
+func DriverRunsFromDomain(runs []*execution.DriverRunRecord) []loomapi.DriverRun {
 	out := make([]loomapi.DriverRun, 0, len(runs))
 	for _, run := range runs {
 		if run != nil {
@@ -22,7 +22,7 @@ func DriverRunsFromDomain(runs []*domain.DriverRun) []loomapi.DriverRun {
 }
 
 // DriverRunFromDomain maps one legacy DriverRun into the generated schema.
-func DriverRunFromDomain(run *domain.DriverRun) loomapi.DriverRun {
+func DriverRunFromDomain(run *execution.DriverRunRecord) loomapi.DriverRun {
 	var payload interface{}
 	if len(run.Payload) != 0 {
 		payload = json.RawMessage(append([]byte(nil), run.Payload...))

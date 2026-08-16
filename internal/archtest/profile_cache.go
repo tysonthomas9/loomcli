@@ -9,6 +9,71 @@ import (
 	"strings"
 )
 
+type profileTargetGroup struct {
+	indices []int
+}
+
+func groupProfileIndices(profiles []AnalysisProfile) []profileTargetGroup {
+	groups := make([]profileTargetGroup, 0)
+	groupByTarget := map[string]int{}
+	for index, profile := range profiles {
+		key := profile.GOOS + "/" + profile.GOARCH
+		groupIndex, ok := groupByTarget[key]
+		if !ok {
+			groupIndex = len(groups)
+			groupByTarget[key] = groupIndex
+			groups = append(groups, profileTargetGroup{})
+		}
+		groups[groupIndex].indices = append(groups[groupIndex].indices, index)
+	}
+	return groups
+}
+
+// withRepositoryProfileCaches analyzes profiles serially while sharing one
+// content-addressed build cache across profiles with the same GOOS/GOARCH.
+// Tagged and race variants reuse their target's compiled dependencies; the
+// disposable cache is removed before the next cross target starts, so disk
+// remains bounded by one target graph rather than the whole matrix.
+func withRepositoryProfileCaches(
+	profiles []AnalysisProfile,
+	analyze func(index int, profile AnalysisProfile, environment []string) error,
+) (resultErr error) {
+	for _, group := range groupProfileIndices(profiles) {
+		first := profiles[group.indices[0]]
+		cacheDir, shared := reusableNativeProfileCache(first)
+		if !shared {
+			var err error
+			cacheDir, err = os.MkdirTemp("", "loom-archcheck-gocache-")
+			if err != nil {
+				return fmt.Errorf("create build cache for target %s/%s: %w", first.GOOS, first.GOARCH, err)
+			}
+			cacheDir, err = filepath.Abs(cacheDir)
+			if err != nil {
+				_ = os.RemoveAll(cacheDir)
+				return fmt.Errorf("resolve build cache for target %s/%s: %w", first.GOOS, first.GOARCH, err)
+			}
+		}
+
+		var analysisErr error
+		for _, index := range group.indices {
+			profile := profiles[index]
+			if err := analyze(index, profile, profileEnvironmentWithCache(profile, cacheDir)); err != nil {
+				analysisErr = fmt.Errorf("analyze profile %s: %w", profile.Name, err)
+				break
+			}
+		}
+		if !shared {
+			if err := os.RemoveAll(cacheDir); err != nil {
+				analysisErr = errors.Join(analysisErr, fmt.Errorf("remove build cache for target %s/%s: %w", first.GOOS, first.GOARCH, err))
+			}
+		}
+		if analysisErr != nil {
+			return analysisErr
+		}
+	}
+	return nil
+}
+
 // withRepositoryProfileCache gives one repository-scale package analysis an
 // isolated build cache and removes it before the next profile starts. Cross
 // target and tag-profile export data otherwise accumulates in the caller's

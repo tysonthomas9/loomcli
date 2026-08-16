@@ -9,8 +9,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 // Task-ready internal events (Phase 4 prompt-agent packaging, flag-gated).
@@ -68,7 +67,7 @@ var taskReadyJournalActions = map[string]bool{
 // isTaskReadyEntry reports whether a journal entry marks a task entering the
 // ready-eligible (open) state: one of the actions above whose After snapshot is
 // open. Close/block/claim/assign transitions are not ready-entry actions.
-func isTaskReadyEntry(ev store.JournalEvent) bool {
+func isTaskReadyEntry(ev automation.JournalEvent) bool {
 	if !taskReadyJournalActions[strings.ToLower(strings.TrimSpace(ev.Action))] {
 		return false
 	}
@@ -96,13 +95,13 @@ func journalSnapshotStatus(after json.RawMessage) string {
 }
 
 // emitTaskReady re-enters one entry into the router as a system-origin
-// task.ready event. A no-listener dispatch (domain.ErrNotFound — no binding on
+// task.ready event. A no-listener dispatch (persistence.ErrNotFound — no binding on
 // internal.task.ready) is NOT a failure: the cursor still advances so a missing
 // binding never stalls the bridge, mirroring emitOne. Any other Emit error is
 // returned so the drain stops and the entry is retried. The boolean reports
 // whether the event reached Source.Emit; live epics are deliberately suppressed
 // before that boundary because prompt-agent bindings must never claim epics.
-func (b *IssueJournalBridge) emitTaskReady(ctx context.Context, ws string, ev store.JournalEvent) (bool, bool, error) {
+func (b *IssueJournalBridge) emitTaskReady(ctx context.Context, ws string, ev automation.JournalEvent) (bool, bool, error) {
 	event, dispatch, snapshot, err := b.toTaskReadyEvent(ctx, ws, ev)
 	if err != nil {
 		return false, false, err
@@ -120,7 +119,7 @@ func (b *IssueJournalBridge) emitTaskReady(ctx context.Context, ws string, ev st
 	// returns the canonical dispatchable task or blocks it.
 	if snapshot != nil && taskReadyNeedsRepositoryAdmission(*snapshot) {
 		if b.RepositoryRequiredBlocker == nil {
-			return false, false, fmt.Errorf("task.ready requires repository admission: %w", domain.ErrInvalid)
+			return false, false, fmt.Errorf("task.ready requires repository admission: %w", persistence.ErrInvalid)
 		}
 		admission, blockErr := b.RepositoryRequiredBlocker(ctx, ws, snapshot.TaskID)
 		if blockErr != nil {
@@ -151,7 +150,7 @@ func (b *IssueJournalBridge) emitTaskReady(ctx context.Context, ws string, ev st
 			b.rememberTaskReadyGeneration(ws, *snapshot)
 		}
 		return true, false, nil
-	case errors.Is(err, domain.ErrNotFound):
+	case errors.Is(err, persistence.ErrNotFound):
 		if snapshot != nil {
 			b.rememberTaskReadyGeneration(ws, *snapshot)
 		}
@@ -173,14 +172,14 @@ func taskReadyNeedsRepositoryAdmission(snapshot TaskReadySnapshot) bool {
 // so replay dedups; Origin is system (a depth-0 root); ActorRef is the journal
 // actor verbatim; SubjectRef is issue:{entityID}; Payload carries the task id
 // explicitly so the fired run can claim by id, plus the role-gating hints below.
-func (b *IssueJournalBridge) toTaskReadyEvent(ctx context.Context, ws string, ev store.JournalEvent) (InternalEvent, bool, *TaskReadySnapshot, error) {
+func (b *IssueJournalBridge) toTaskReadyEvent(ctx context.Context, ws string, ev automation.JournalEvent) (InternalEvent, bool, *TaskReadySnapshot, error) {
 	payloadFields, snapshot, err := b.taskReadyPayload(ctx, ws, ev)
 	if err != nil {
 		// A deleted issue can still have an older open journal entry waiting
 		// behind the bridge cursor. That entry is durably stale: suppress it so
 		// one tombstoned task cannot poison the workspace cursor forever. Other
 		// lookup failures remain retryable and continue to pin the entry.
-		if errors.Is(err, domain.ErrNotFound) {
+		if errors.Is(err, persistence.ErrNotFound) {
 			return InternalEvent{}, false, nil, nil
 		}
 		return InternalEvent{}, false, nil, err
@@ -223,9 +222,9 @@ func (b *IssueJournalBridge) toTaskReadyEvent(ctx context.Context, ws string, ev
 // dispatch authority. IssueLookup supplies the current complete card; a lookup
 // failure pins the cursor and retries rather than emitting incomplete phase or
 // repository facts.
-func (b *IssueJournalBridge) taskReadyPayload(ctx context.Context, ws string, ev store.JournalEvent) (map[string]any, *TaskReadySnapshot, error) {
+func (b *IssueJournalBridge) taskReadyPayload(ctx context.Context, ws string, ev automation.JournalEvent) (map[string]any, *TaskReadySnapshot, error) {
 	if b.IssueLookup == nil {
-		return nil, nil, fmt.Errorf("task.ready requires current issue lookup: %w", domain.ErrInvalid)
+		return nil, nil, fmt.Errorf("task.ready requires current issue lookup: %w", persistence.ErrInvalid)
 	}
 	issue, err := b.IssueLookup(ctx, ws, ev.EntityID)
 	if err != nil {

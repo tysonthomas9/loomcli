@@ -8,11 +8,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
+
+	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
-	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 	"github.com/tysonthomas9/loomcli/internal/testutil"
 )
 
@@ -42,10 +42,10 @@ func (executionTestClaimPort) ExhaustTaskRunRetries(context.Context, execution.E
 	return execution.ExhaustTaskRunRetriesResult{}, execution.ErrUnavailable
 }
 
-func executionTestDependencies(t *testing.T, st store.Store) ExecutionDependencies {
+func executionTestDependencies(t *testing.T, st *memstore.Store) ExecutionDependencies {
 	t.Helper()
 	mutations := testutil.TaskRunMutationAdapter{TaskRuns: st.TaskRuns()}
-	repairs, ok := st.DriverSteps().(store.TerminalDriverStepRepairStore)
+	repairs, ok := st.DriverSteps().(execution.TerminalDriverStepRepairStore)
 	if !ok {
 		t.Fatal("test DriverStep store lacks terminal repair support")
 	}
@@ -73,9 +73,9 @@ func TestExecutionCapabilityOwnsTaskRunMutationAndForwardsOpaqueToken(t *testing
 		LeaseToken:   "secret-token",
 		FencingToken: 42,
 	}
-	if _, err := st.TaskRuns().Create(ctx, store.TaskRunCreate{
+	if _, err := st.TaskRuns().Create(ctx, execution.TaskRunCreate{
 		WorkspaceKey: "WS", TaskRunID: owner.ResourceID, TaskID: "TASK-1",
-		Status: domain.TaskRunRunning, NodeID: owner.NodeID, LeaseID: owner.LeaseID,
+		Status: execution.TaskRunRecordRunning, NodeID: owner.NodeID, LeaseID: owner.LeaseID,
 		LeaseToken: owner.LeaseToken, FencingToken: owner.FencingToken,
 	}); err != nil {
 		t.Fatalf("create TaskRun: %v", err)
@@ -248,9 +248,9 @@ func TestExecutionCapabilityRejectsWrongTaskRunLeaseToken(t *testing.T) {
 		ResourceKind: execution.ResourceTaskRun, ResourceID: "task-run-1",
 		NodeID: "node-1", LeaseID: "lease-1", LeaseToken: "secret-token", FencingToken: 42,
 	}
-	if _, err := st.TaskRuns().Create(ctx, store.TaskRunCreate{
+	if _, err := st.TaskRuns().Create(ctx, execution.TaskRunCreate{
 		WorkspaceKey: "WS", TaskRunID: owner.ResourceID, TaskID: "TASK-1",
-		Status: domain.TaskRunRunning, NodeID: owner.NodeID, LeaseID: owner.LeaseID,
+		Status: execution.TaskRunRecordRunning, NodeID: owner.NodeID, LeaseID: owner.LeaseID,
 		LeaseToken: owner.LeaseToken, FencingToken: owner.FencingToken,
 	}); err != nil {
 		t.Fatal(err)
@@ -270,7 +270,7 @@ func TestExecutionCapabilityRejectsWrongTaskRunLeaseToken(t *testing.T) {
 	_, err = capability.TaskRunAPI().Heartbeat(ctx, auth, execution.HeartbeatCommand{
 		WorkspaceKey: "WS", Owner: wrong, At: time.Now().UTC(),
 	})
-	if !errors.Is(err, domain.ErrNotOwner) {
+	if !errors.Is(err, persistence.ErrNotOwner) {
 		t.Fatalf("wrong-token heartbeat error = %v, want ErrNotOwner", err)
 	}
 }

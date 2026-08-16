@@ -36,35 +36,35 @@ func (status DriverRunStatus) IsTerminal() bool {
 // DriverRun is Execution's public snapshot. It intentionally contains no
 // repository methods and no Store/domain type aliases.
 type DriverRun struct {
-	WorkspaceKey          string
-	RunID                 string
-	DriverID              string
-	DriverVersionID       string
-	Entrypoint            string
-	SourceKind            string
-	SourceRef             string
-	EpicID                string
-	ParentRunID           string
-	TriggerBindingID      string
-	AgentServiceID        string
-	SubjectKey            string
-	Status                DriverRunStatus
-	Owner                 Owner
-	IdempotencyKey        string
-	Payload               json.RawMessage
-	Output                map[string]string
-	Summary               string
-	ErrorClass            string
-	StartedAt             time.Time
-	LastHeartbeat         time.Time
-	FinishedAt            *time.Time
-	AwaitInstanceKey      string
-	SuspendedAt           *time.Time
-	CancelRequestedAt     *time.Time
-	CancelRequestedReason string
-	ResumeSourceEventID   string
-	CreatedAt             time.Time
-	UpdatedAt             time.Time
+	WorkspaceKey          string            `json:"workspace_key"`
+	RunID                 string            `json:"run_id"`
+	DriverID              string            `json:"driver_id"`
+	DriverVersionID       string            `json:"driver_version_id"`
+	Entrypoint            string            `json:"entrypoint,omitempty"`
+	SourceKind            string            `json:"source_kind,omitempty"`
+	SourceRef             string            `json:"source_ref,omitempty"`
+	EpicID                string            `json:"epic_id,omitempty"`
+	ParentRunID           string            `json:"parent_run_id,omitempty"`
+	TriggerBindingID      string            `json:"trigger_binding_id,omitempty"`
+	AgentServiceID        string            `json:"agent_service_id,omitempty"`
+	SubjectKey            string            `json:"subject_key,omitempty"`
+	Status                DriverRunStatus   `json:"status"`
+	Owner                 Owner             `json:"owner,omitempty"`
+	IdempotencyKey        string            `json:"idempotency_key,omitempty"`
+	Payload               json.RawMessage   `json:"payload,omitempty"`
+	Output                map[string]string `json:"output,omitempty"`
+	Summary               string            `json:"summary,omitempty"`
+	ErrorClass            string            `json:"error_class,omitempty"`
+	StartedAt             time.Time         `json:"started_at,omitempty"`
+	LastHeartbeat         time.Time         `json:"last_heartbeat,omitempty"`
+	FinishedAt            *time.Time        `json:"finished_at,omitempty"`
+	AwaitInstanceKey      string            `json:"await_instance_key,omitempty"`
+	SuspendedAt           *time.Time        `json:"suspended_at,omitempty"`
+	CancelRequestedAt     *time.Time        `json:"cancel_requested_at,omitempty"`
+	CancelRequestedReason string            `json:"cancel_requested_reason,omitempty"`
+	ResumeSourceEventID   string            `json:"resume_source_event_id,omitempty"`
+	CreatedAt             time.Time         `json:"created_at"`
+	UpdatedAt             time.Time         `json:"updated_at"`
 }
 
 // DriverRunQuery is Execution's consumer-owned run-history filter. It keeps

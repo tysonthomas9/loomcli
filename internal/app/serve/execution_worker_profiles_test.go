@@ -5,22 +5,22 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
-	"github.com/tysonthomas9/loomcli/internal/store"
+
+	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 var errWorkerProfileResponseLost = errors.New("worker profile response lost after commit")
 
 type lostResponseWorkerProfileStore struct {
-	store.WorkerProfileStore
+	execution.WorkerProfileStore
 	loseCreate bool
 	loseUpdate bool
 	loseDelete bool
 }
 
-func (wrapped *lostResponseWorkerProfileStore) Create(ctx context.Context, input store.WorkerProfileCreate) (*domain.WorkerProfile, error) {
+func (wrapped *lostResponseWorkerProfileStore) Create(ctx context.Context, input execution.WorkerProfileCreate) (*execution.WorkerProfile, error) {
 	profile, err := wrapped.WorkerProfileStore.Create(ctx, input)
 	if err == nil && wrapped.loseCreate {
 		wrapped.loseCreate = false
@@ -29,7 +29,7 @@ func (wrapped *lostResponseWorkerProfileStore) Create(ctx context.Context, input
 	return profile, err
 }
 
-func (wrapped *lostResponseWorkerProfileStore) Update(ctx context.Context, workspace, profileID string, patch store.WorkerProfileUpdate) (*domain.WorkerProfile, error) {
+func (wrapped *lostResponseWorkerProfileStore) Update(ctx context.Context, workspace, profileID string, patch execution.WorkerProfileUpdate) (*execution.WorkerProfile, error) {
 	profile, err := wrapped.WorkerProfileStore.Update(ctx, workspace, profileID, patch)
 	if err == nil && wrapped.loseUpdate {
 		wrapped.loseUpdate = false
@@ -175,7 +175,7 @@ func TestExecutionWorkerProfileRetriesConvergeAfterCommittedResponseLoss(t *test
 	if err := adapter.DeleteWorkerProfile(ctx, remove); err != nil {
 		t.Fatalf("delete retry: %v", err)
 	}
-	if _, err := st.WorkerProfiles().Get(ctx, "WS", create.ProfileID); !errors.Is(err, domain.ErrNotFound) {
+	if _, err := st.WorkerProfiles().Get(ctx, "WS", create.ProfileID); !errors.Is(err, persistence.ErrNotFound) {
 		t.Fatalf("deleted profile remained readable: %v", err)
 	}
 }

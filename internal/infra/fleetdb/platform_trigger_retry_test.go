@@ -10,8 +10,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 // triggerRetryTestServer is the fake fleet-db for the trigger-delivery retry
@@ -115,7 +114,7 @@ func TestPlatformTriggerDeliveryRetryClientRoutes(t *testing.T) {
 	}
 	retryAt := now.Add(30 * time.Second)
 
-	due, err := client.TriggerDeliveries().ListDue(t.Context(), "WS", store.TriggerDeliveryDueFilter{Now: now, Limit: 5})
+	due, err := client.TriggerDeliveries().ListDue(t.Context(), "WS", automation.TriggerDeliveryDueFilter{Now: now, Limit: 5})
 	if err != nil {
 		t.Fatalf("ListDue: %v", err)
 	}
@@ -129,7 +128,7 @@ func TestPlatformTriggerDeliveryRetryClientRoutes(t *testing.T) {
 	}
 
 	// Failed reschedule: next_retry_at and error_class ride the wire.
-	failed, err := client.TriggerDeliveries().UpdateResult(t.Context(), "WS", "d-1", store.TriggerDeliveryResultUpdate{
+	failed, err := client.TriggerDeliveries().UpdateResult(t.Context(), "WS", "d-1", automation.TriggerDeliveryResultUpdate{
 		Status:      automation.DeliveryFailed,
 		Attempt:     2,
 		NextRetryAt: &retryAt,
@@ -144,7 +143,7 @@ func TestPlatformTriggerDeliveryRetryClientRoutes(t *testing.T) {
 	}
 
 	// Dispatch: no next_retry_at key on the wire, run id stamped.
-	dispatched, err := client.TriggerDeliveries().UpdateResult(t.Context(), "WS", "d-1", store.TriggerDeliveryResultUpdate{
+	dispatched, err := client.TriggerDeliveries().UpdateResult(t.Context(), "WS", "d-1", automation.TriggerDeliveryResultUpdate{
 		Status:      automation.DeliveryDispatched,
 		Attempt:     3,
 		DriverRunID: "run-retry-1",
@@ -158,10 +157,10 @@ func TestPlatformTriggerDeliveryRetryClientRoutes(t *testing.T) {
 
 	// Error mapping: 404 -> ErrNotFound, 409 invalid_transition ->
 	// ErrInvalidTransition (fleet-db's writeStorageError shapes).
-	if _, err := client.TriggerDeliveries().UpdateResult(t.Context(), "WS", "missing", store.TriggerDeliveryResultUpdate{Status: automation.DeliveryFailed}); !errors.Is(err, domain.ErrNotFound) {
+	if _, err := client.TriggerDeliveries().UpdateResult(t.Context(), "WS", "missing", automation.TriggerDeliveryResultUpdate{Status: automation.DeliveryFailed}); !errors.Is(err, persistence.ErrNotFound) {
 		t.Fatalf("missing delivery err = %v, want ErrNotFound", err)
 	}
-	if _, err := client.TriggerDeliveries().UpdateResult(t.Context(), "WS", "d-final", store.TriggerDeliveryResultUpdate{Status: automation.DeliveryFailed}); !errors.Is(err, domain.ErrInvalidTransition) {
+	if _, err := client.TriggerDeliveries().UpdateResult(t.Context(), "WS", "d-final", automation.TriggerDeliveryResultUpdate{Status: automation.DeliveryFailed}); !errors.Is(err, persistence.ErrInvalidTransition) {
 		t.Fatalf("final delivery err = %v, want ErrInvalidTransition", err)
 	}
 }

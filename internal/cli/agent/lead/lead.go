@@ -18,11 +18,11 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/agent"
 	"github.com/tysonthomas9/loomcli/internal/cli/backends"
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/epicrunner"
 	"github.com/tysonthomas9/loomcli/internal/infra/interactionclient"
 	leadcontrol "github.com/tysonthomas9/loomcli/internal/infra/interactionlead"
 	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 // envOrchestratorSessionID is the env var lead injects so descendants
@@ -192,7 +192,7 @@ func loadLeadRolePrompt(ctx context.Context, registration leadSessionRegistratio
 	loadCtx, cancel := context.WithTimeout(ctx, leadStoreOpTimeout)
 	defer cancel()
 	role, err := st.Roles().Get(loadCtx, ws, roleName)
-	if errors.Is(err, domain.ErrNotFound) {
+	if errors.Is(err, persistence.ErrNotFound) {
 		return ""
 	}
 	if err != nil {
@@ -282,6 +282,7 @@ func markLeadAssignmentDelivered(
 
 type leadSessionRegistration struct {
 	handle    *bootstrap.StoreHandle
+	store     leadcontrol.RuntimeStore
 	runtime   leadcontrol.SessionRuntime
 	err       error
 	Workspace string
@@ -297,6 +298,9 @@ func (r leadSessionRegistration) Finalize() {
 }
 
 func (r leadSessionRegistration) Store() leadcontrol.RuntimeStore {
+	if r.store != nil {
+		return r.store
+	}
 	if r.handle == nil {
 		return nil
 	}

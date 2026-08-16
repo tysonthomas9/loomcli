@@ -13,18 +13,18 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
+
 	"github.com/tysonthomas9/loomcli/internal/app/prreviewer"
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	providers "github.com/tysonthomas9/loomcli/internal/infra/connectorsproviders"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/localworkspace"
 	"github.com/tysonthomas9/loomcli/internal/modules/agents"
-	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
 	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
 	workflowcataloghttp "github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog/httpapi"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
-	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
 
@@ -527,7 +527,7 @@ func TestEnsureReviewerCreatesAgentWorktreeAndSeed(t *testing.T) {
 		context.Background(),
 		prReviewTestWorkspace,
 		reviewerRoleName,
-	); !errors.Is(err, domain.ErrNotFound) {
+	); !errors.Is(err, persistence.ErrNotFound) {
 		t.Fatalf("legacy Role row lookup = %v, want not found", err)
 	}
 	worktreePath, err := localworkspace.PRReviewWorktreePath(workspacePath, "hello", 7)
@@ -770,11 +770,11 @@ func cancelAfterReads(want int, cancel context.CancelFunc) func() {
 	}
 }
 
-func queuedReviewerMessagesForTest(t *testing.T, st store.Store, agentName string) []*domain.AgentInboxMessage {
+func queuedReviewerMessagesForTest(t *testing.T, st *memstore.Store, agentName string) []*interaction.InboxRecord {
 	t.Helper()
-	items, err := st.AgentInboxMessages().List(context.Background(), prReviewTestWorkspace, store.AgentInboxMessageFilter{
+	items, err := st.AgentInboxMessages().List(context.Background(), prReviewTestWorkspace, interaction.AgentInboxMessageFilter{
 		TargetAgentID: agentName,
-		Status:        domain.AgentInboxMessageQueued,
+		Status:        interaction.InboxRecordQueued,
 		Limit:         100,
 	})
 	if err != nil {
@@ -784,14 +784,14 @@ func queuedReviewerMessagesForTest(t *testing.T, st store.Store, agentName strin
 }
 
 type reviewerTestInboxEnqueuer struct {
-	store store.Store
+	store *memstore.Store
 }
 
 func (enqueuer reviewerTestInboxEnqueuer) Enqueue(
 	ctx context.Context,
 	command interaction.EnqueueInboxCommand,
 ) (*interaction.InboxMessage, error) {
-	message, err := enqueuer.store.AgentInboxMessages().Create(ctx, store.AgentInboxMessageCreate{
+	message, err := enqueuer.store.AgentInboxMessages().Create(ctx, interaction.AgentInboxMessageCreate{
 		WorkspaceKey: command.WorkspaceKey, TargetAgentID: command.TargetAgentID,
 		SessionID: command.SessionID, Body: command.Body,
 		SourceKind: command.SourceKind, SourceRef: command.SourceRef,

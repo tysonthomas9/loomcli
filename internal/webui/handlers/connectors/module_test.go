@@ -12,16 +12,16 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/automation"
+
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	connectorvault "github.com/tysonthomas9/loomcli/internal/infra/connectorsvault"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/localsettings"
-	"github.com/tysonthomas9/loomcli/internal/modules/automation"
 	connectorsmodule "github.com/tysonthomas9/loomcli/internal/modules/connectors"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
-	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
 
@@ -33,11 +33,11 @@ func newTestServer(t *testing.T) *httptest.Server {
 	return newTestServerWithStore(t, memstore.New())
 }
 
-func newTestServerWithStore(t *testing.T, st store.Store) *httptest.Server {
+func newTestServerWithStore(t *testing.T, st *memstore.Store) *httptest.Server {
 	return newTestServerWithStoreAndSettings(t, st, "")
 }
 
-func newTestServerWithStoreAndSettings(t *testing.T, st store.Store, localSettingsDir string) *httptest.Server {
+func newTestServerWithStoreAndSettings(t *testing.T, st *memstore.Store, localSettingsDir string) *httptest.Server {
 	t.Helper()
 	mux := http.NewServeMux()
 	NewModule(st, localSettingsDir, &connectorBindingQueries{store: st.TriggerBindings()}, connectorTestOperatorResolver{}).Register(mux)
@@ -49,7 +49,7 @@ func newTestServerWithStoreAndSettings(t *testing.T, st store.Store, localSettin
 type connectorTestOperatorResolver struct{}
 
 type connectorBindingQueries struct {
-	store store.TriggerBindingStore
+	store automation.TriggerBindingStore
 }
 
 func (queries *connectorBindingQueries) GetBinding(
@@ -58,7 +58,7 @@ func (queries *connectorBindingQueries) GetBinding(
 ) (*automation.Binding, error) {
 	binding, err := queries.store.Get(ctx, workspace, bindingID)
 	if err != nil {
-		if errors.Is(err, domain.ErrNotFound) {
+		if errors.Is(err, persistence.ErrNotFound) {
 			return nil, errors.Join(automation.ErrNotFound, err)
 		}
 		return nil, err
@@ -334,17 +334,17 @@ func TestCreateGrantRejectsDifferentResourceForSameID(t *testing.T) {
 	}
 }
 
-func seedGrantReplacementFixture(t *testing.T) (store.Store, *automation.Binding) {
+func seedGrantReplacementFixture(t *testing.T) (*memstore.Store, *automation.Binding) {
 	t.Helper()
 	st := memstore.New()
 	ctx := context.Background()
-	if _, err := st.Drivers().Create(ctx, store.DriverCreate{
+	if _, err := st.Drivers().Create(ctx, workflowcatalog.DriverCreate{
 		WorkspaceKey: "WS", DriverID: "review-loop", Name: "review-loop",
 		OwnerType: workflowcatalog.DriverOwnerSystem, Status: workflowcatalog.DriverStatusActive,
 	}); err != nil {
 		t.Fatalf("create driver: %v", err)
 	}
-	if _, err := st.DriverVersions().Create(ctx, store.DriverVersionCreate{
+	if _, err := st.DriverVersions().Create(ctx, workflowcatalog.DriverVersionCreate{
 		WorkspaceKey: "WS", VersionID: "review-loop-v1", DriverID: "review-loop", Version: 1,
 		SourceDigest: "sha256:source", BundleDigest: "sha256:bundle",
 		ValidationStatus: workflowcatalog.DriverVersionValidationPassed,
@@ -356,9 +356,9 @@ func seedGrantReplacementFixture(t *testing.T) (store.Store, *automation.Binding
 	}); err != nil {
 		t.Fatalf("create connector: %v", err)
 	}
-	binding, err := st.TriggerBindings().Create(ctx, store.TriggerBindingCreate{
+	binding, err := st.TriggerBindings().Create(ctx, automation.TriggerBindingCreate{
 		WorkspaceKey: "WS", BindingID: "s2-review-loop", Name: "review-loop",
-		SourceKind: store.CronSourceKind, Schedule: "*/10 * * * *",
+		SourceKind: automation.CronSourceKind, Schedule: "*/10 * * * *",
 		DriverID: "review-loop", DriverVersionID: "review-loop-v1", Enabled: false,
 	})
 	if err != nil {
@@ -425,7 +425,7 @@ func TestReplaceBindingGrantsRetargetsWithoutRetainingOldScope(t *testing.T) {
 	// The UI patches run_input before reconciling grants. Retargeting to beta
 	// therefore carries a new exact binding revision while preserving CreatedAt.
 	sourceConfig := `{"targetRepo":"beta","githubRepo":"acme/beta"}`
-	updated, err := st.TriggerBindings().Update(context.Background(), "WS", binding.BindingID, store.TriggerBindingUpdate{
+	updated, err := st.TriggerBindings().Update(context.Background(), "WS", binding.BindingID, automation.TriggerBindingUpdate{
 		SourceConfigRef: &sourceConfig,
 	})
 	if err != nil {
@@ -482,9 +482,9 @@ func TestReplaceBindingGrantsFencesRecreatedBindingGeneration(t *testing.T) {
 		t.Fatalf("delete old binding: %v", err)
 	}
 	time.Sleep(time.Millisecond)
-	newBinding, err := st.TriggerBindings().Create(context.Background(), store.TriggerBindingCreate{
+	newBinding, err := st.TriggerBindings().Create(context.Background(), automation.TriggerBindingCreate{
 		WorkspaceKey: "WS", BindingID: "s2-review-loop", Name: "review-loop",
-		SourceKind: store.CronSourceKind, Schedule: "*/10 * * * *",
+		SourceKind: automation.CronSourceKind, Schedule: "*/10 * * * *",
 		DriverID: "review-loop", DriverVersionID: "review-loop-v1", Enabled: false,
 	})
 	if err != nil {
@@ -524,7 +524,7 @@ func TestReplaceBindingGrantsRequiresExactDisabledRevisionBeforeMutation(t *test
 		t.Fatalf("seed grants: status = %d (body %s)", status, raw)
 	}
 	enabled := true
-	enabledBinding, err := st.TriggerBindings().Update(context.Background(), "WS", binding.BindingID, store.TriggerBindingUpdate{
+	enabledBinding, err := st.TriggerBindings().Update(context.Background(), "WS", binding.BindingID, automation.TriggerBindingUpdate{
 		Enabled: &enabled,
 	})
 	if err != nil {

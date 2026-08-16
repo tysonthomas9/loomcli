@@ -11,9 +11,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/modules/agents"
+
+	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
+
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
+
 	"github.com/tysonthomas9/loomcli/internal/modules/artifacts"
-	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
 func TestControlPlaneClientNodeLifecycle(t *testing.T) {
@@ -33,12 +37,20 @@ func TestControlPlaneClientNodeLifecycle(t *testing.T) {
 			if req.NodeID != "node-1" || req.TTLSeconds != 30 {
 				t.Fatalf("create body = %+v", req)
 			}
-			writeJSON(t, w, domain.Node{WorkspaceKey: "WS", NodeID: req.NodeID, LastHeartbeat: now, ExpiresAt: now.Add(30 * time.Second), CreatedAt: now, UpdatedAt: now})
+			writeJSON(t, w, map[string]any{
+				"workspace_key": "WS", "node_id": req.NodeID, "runtime_provider": "local",
+				"drain_state": "active", "last_heartbeat": now, "expires_at": now.Add(30 * time.Second),
+				"created_at": now, "updated_at": now,
+			})
 		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/WS/nodes/node-1/heartbeat":
 			if r.URL.Query().Get("ttl_seconds") != "45" {
 				t.Fatalf("ttl_seconds = %q", r.URL.Query().Get("ttl_seconds"))
 			}
-			writeJSON(t, w, domain.Node{WorkspaceKey: "WS", NodeID: "node-1", LastHeartbeat: now, ExpiresAt: now.Add(45 * time.Second), CreatedAt: now, UpdatedAt: now})
+			writeJSON(t, w, map[string]any{
+				"workspace_key": "WS", "node_id": "node-1", "runtime_provider": "local",
+				"drain_state": "active", "last_heartbeat": now, "expires_at": now.Add(45 * time.Second),
+				"created_at": now, "updated_at": now,
+			})
 		default:
 			t.Fatalf("unexpected request %s %s", r.Method, r.URL.String())
 		}
@@ -49,11 +61,12 @@ func TestControlPlaneClientNodeLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	node, err := client.Nodes().Create(t.Context(), store.NodeCreate{WorkspaceKey: "WS", NodeID: "node-1", TTL: 30 * time.Second})
+	node, err := client.Nodes().Create(t.Context(), execution.NodeCreate{WorkspaceKey: "WS", NodeID: "node-1", TTL: 30 * time.Second})
 	if err != nil {
 		t.Fatalf("create node: %v", err)
 	}
-	if !sawCreate || node.NodeID != "node-1" {
+	if !sawCreate || node.WorkspaceKey != "WS" || node.NodeID != "node-1" ||
+		node.RuntimeProvider != execution.RuntimeProviderLocal || node.DrainState != execution.WorkerNodeActive {
 		t.Fatalf("node = %+v sawCreate=%v", node, sawCreate)
 	}
 	if _, err := client.Nodes().Heartbeat(t.Context(), "WS", "node-1", 45*time.Second); err != nil {
@@ -70,7 +83,7 @@ func TestControlPlaneClientAgentSessionListQuery(t *testing.T) {
 		if q.Get("agent_id") != "agent-1" || q.Get("node_id") != "node-1" || q.Get("task_id") != "T-1" || q.Get("status") != "running" || q.Get("limit") != "2" {
 			t.Fatalf("query = %s", r.URL.RawQuery)
 		}
-		writeJSON(t, w, map[string]any{"agent_sessions": []domain.AgentSession{{WorkspaceKey: "WS", SessionID: "sess-1", AgentID: "agent-1"}}})
+		writeJSON(t, w, map[string]any{"agent_sessions": []interaction.SessionRecord{{WorkspaceKey: "WS", SessionID: "sess-1", AgentID: "agent-1"}}})
 	}))
 	defer ts.Close()
 
@@ -78,11 +91,11 @@ func TestControlPlaneClientAgentSessionListQuery(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	sessions, err := client.AgentSessions().List(t.Context(), "WS", store.AgentSessionFilter{
+	sessions, err := client.AgentSessions().List(t.Context(), "WS", interaction.AgentSessionFilter{
 		AgentID: "agent-1",
 		NodeID:  "node-1",
 		TaskID:  "T-1",
-		Status:  domain.AgentSessionRunning,
+		Status:  interaction.SessionRecordRunning,
 		Limit:   2,
 	})
 	if err != nil {
@@ -114,11 +127,11 @@ func TestAgentSessionList_FiltersKindAndParentClientSide(t *testing.T) {
 		if q.Has("limit") {
 			t.Fatalf("limit must not be set when client-side kind/parent filter is active; got %q", q.Get("limit"))
 		}
-		writeJSON(t, w, map[string]any{"agent_sessions": []domain.AgentSession{
-			{WorkspaceKey: "WS", SessionID: "orch-1", Kind: domain.AgentSessionKindInteractive},
-			{WorkspaceKey: "WS", SessionID: "task-a", Kind: domain.AgentSessionKindTask, ParentSessionID: "orch-1"},
-			{WorkspaceKey: "WS", SessionID: "task-b", Kind: domain.AgentSessionKindTask, ParentSessionID: "orch-1"},
-			{WorkspaceKey: "WS", SessionID: "task-c", Kind: domain.AgentSessionKindTask, ParentSessionID: "orch-other"},
+		writeJSON(t, w, map[string]any{"agent_sessions": []interaction.SessionRecord{
+			{WorkspaceKey: "WS", SessionID: "orch-1", Kind: interaction.SessionRecordInteractive},
+			{WorkspaceKey: "WS", SessionID: "task-a", Kind: interaction.SessionRecordTask, ParentSessionID: "orch-1"},
+			{WorkspaceKey: "WS", SessionID: "task-b", Kind: interaction.SessionRecordTask, ParentSessionID: "orch-1"},
+			{WorkspaceKey: "WS", SessionID: "task-c", Kind: interaction.SessionRecordTask, ParentSessionID: "orch-other"},
 		}})
 	}))
 	defer ts.Close()
@@ -127,8 +140,8 @@ func TestAgentSessionList_FiltersKindAndParentClientSide(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, err := client.AgentSessions().List(t.Context(), "WS", store.AgentSessionFilter{
-		Kind:            domain.AgentSessionKindTask,
+	got, err := client.AgentSessions().List(t.Context(), "WS", interaction.AgentSessionFilter{
+		Kind:            interaction.SessionRecordTask,
 		ParentSessionID: "orch-1",
 		Limit:           5,
 	})
@@ -139,7 +152,7 @@ func TestAgentSessionList_FiltersKindAndParentClientSide(t *testing.T) {
 		t.Fatalf("filtered len = %d, want 2; got %+v", len(got), got)
 	}
 	for _, s := range got {
-		if s.Kind != domain.AgentSessionKindTask || s.ParentSessionID != "orch-1" {
+		if s.Kind != interaction.SessionRecordTask || s.ParentSessionID != "orch-1" {
 			t.Fatalf("unexpected session passed filter: %+v", s)
 		}
 	}
@@ -150,7 +163,7 @@ func TestControlPlaneClientAgentSessionUpdateBodyUsesWireNames(t *testing.T) {
 	exitCode := 7
 	finishedAtPtr := &finishedAt
 	exitCodePtr := &exitCode
-	status := domain.AgentSessionFailed
+	status := interaction.SessionRecordFailed
 	taskID := "T-1"
 	errClass := "Fatal"
 
@@ -177,12 +190,12 @@ func TestControlPlaneClientAgentSessionUpdateBodyUsesWireNames(t *testing.T) {
 		if body["finished_at"] == nil {
 			t.Fatalf("body missing finished_at: %#v", body)
 		}
-		writeJSON(t, w, domain.AgentSession{
+		writeJSON(t, w, interaction.SessionRecord{
 			WorkspaceKey: "WS",
 			SessionID:    "sess-1",
 			AgentID:      "agent-1",
 			TaskID:       "T-1",
-			Status:       domain.AgentSessionFailed,
+			Status:       interaction.SessionRecordFailed,
 			ExitCode:     &exitCode,
 			FinishedAt:   &finishedAt,
 		})
@@ -193,7 +206,7 @@ func TestControlPlaneClientAgentSessionUpdateBodyUsesWireNames(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	session, err := client.AgentSessions().Update(t.Context(), "WS", "sess-1", store.AgentSessionUpdate{
+	session, err := client.AgentSessions().Update(t.Context(), "WS", "sess-1", interaction.AgentSessionUpdate{
 		TaskID:     &taskID,
 		Status:     &status,
 		FinishedAt: &finishedAtPtr,
@@ -203,7 +216,7 @@ func TestControlPlaneClientAgentSessionUpdateBodyUsesWireNames(t *testing.T) {
 	if err != nil {
 		t.Fatalf("update session: %v", err)
 	}
-	if session.TaskID != "T-1" || session.Status != domain.AgentSessionFailed {
+	if session.TaskID != "T-1" || session.Status != interaction.SessionRecordFailed {
 		t.Fatalf("session = %+v", session)
 	}
 }
@@ -222,14 +235,14 @@ func TestControlPlaneClientAgentLeaseCreateDecodesOneTimeTokenEnvelope(t *testin
 			t.Fatalf("create body = %#v", body)
 		}
 		writeJSON(t, w, map[string]any{
-			"lease": domain.AgentLease{
+			"lease": interaction.LeaseRecord{
 				WorkspaceKey:  "WS",
 				LeaseID:       "lease-1",
 				SessionID:     "session-1",
 				AgentID:       "agent-1",
 				NodeID:        "node-1",
 				FencingToken:  7,
-				Status:        domain.AgentLeaseActive,
+				Status:        interaction.LeaseRecordActive,
 				ExpiresAt:     now.Add(30 * time.Second),
 				LastHeartbeat: now,
 				CreatedAt:     now,
@@ -244,7 +257,7 @@ func TestControlPlaneClientAgentLeaseCreateDecodesOneTimeTokenEnvelope(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	lease, err := client.AgentLeases().Create(t.Context(), store.AgentLeaseCreate{
+	lease, err := client.AgentLeases().Create(t.Context(), interaction.AgentLeaseCreate{
 		WorkspaceKey: "WS",
 		SessionID:    "session-1",
 		LeaseID:      "lease-1",
@@ -279,15 +292,15 @@ func TestControlPlaneClientAgentOwnershipLeaseAcquireDecodesOneTimeTokenEnvelope
 			t.Fatalf("acquire body = %#v", body)
 		}
 		writeJSON(t, w, map[string]any{
-			"lease": domain.AgentOwnershipLease{
+			"lease": agents.OwnershipRecord{
 				WorkspaceKey:    "WS",
 				AgentID:         "agent-1",
 				LeaseID:         "ownership-1",
 				OwnerID:         "runtime-1",
-				RuntimeProvider: domain.RuntimeProviderLocal,
+				RuntimeProvider: agents.RuntimeProviderLocal,
 				NodeID:          "node-1",
 				FencingToken:    11,
-				Status:          domain.AgentLeaseActive,
+				Status:          agents.OwnershipActive,
 				ExpiresAt:       now.Add(45 * time.Second),
 				LastHeartbeat:   now,
 				CreatedAt:       now,
@@ -302,12 +315,12 @@ func TestControlPlaneClientAgentOwnershipLeaseAcquireDecodesOneTimeTokenEnvelope
 	if err != nil {
 		t.Fatal(err)
 	}
-	lease, err := client.AgentOwnershipLeases().Acquire(t.Context(), store.AgentOwnershipLeaseAcquire{
+	lease, err := client.AgentOwnershipLeases().Acquire(t.Context(), agents.AgentOwnershipLeaseAcquire{
 		WorkspaceKey:    "WS",
 		AgentID:         "agent-1",
 		LeaseID:         "ownership-1",
 		OwnerID:         "runtime-1",
-		RuntimeProvider: domain.RuntimeProviderLocal,
+		RuntimeProvider: agents.RuntimeProviderLocal,
 		NodeID:          "node-1",
 		TTL:             45 * time.Second,
 	})
@@ -320,11 +333,11 @@ func TestControlPlaneClientAgentOwnershipLeaseAcquireDecodesOneTimeTokenEnvelope
 }
 
 func TestValidateAgentOwnershipLeaseEnvelopeAcceptsOnlyNonEmptyServerGeneratedLeaseID(t *testing.T) {
-	in := store.AgentOwnershipLeaseAcquire{
+	in := agents.AgentOwnershipLeaseAcquire{
 		WorkspaceKey: "WS", AgentID: "agent-1", OwnerID: "runtime-1",
-		RuntimeProvider: domain.RuntimeProviderLocal, NodeID: "node-1",
+		RuntimeProvider: agents.RuntimeProviderLocal, NodeID: "node-1",
 	}
-	lease := domain.AgentOwnershipLease{
+	lease := agents.OwnershipRecord{
 		WorkspaceKey: in.WorkspaceKey, AgentID: in.AgentID, LeaseID: "ol-generated",
 		OwnerID: in.OwnerID, RuntimeProvider: in.RuntimeProvider, NodeID: in.NodeID,
 		FencingToken: 1,
@@ -347,10 +360,10 @@ func TestValidateAgentOwnershipLeaseEnvelopeAcceptsOnlyNonEmptyServerGeneratedLe
 
 func TestControlPlaneClientOwnedAgentOwnershipLifecycleSendsCompleteProof(t *testing.T) {
 	now := time.Now().UTC()
-	proof := store.AgentOwnershipLeaseProof{
+	proof := agents.AgentOwnershipLeaseProof{
 		WorkspaceKey: "WS", AgentID: "agent-1", LeaseID: "ownership-1",
 		LeaseToken: "raw-ownership-token", OwnerID: "runtime-1",
-		RuntimeProvider: domain.RuntimeProviderLocal, NodeID: "node-1", FencingToken: 11,
+		RuntimeProvider: agents.RuntimeProviderLocal, NodeID: "node-1", FencingToken: 11,
 	}
 	calls := 0
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -382,10 +395,10 @@ func TestControlPlaneClientOwnedAgentOwnershipLifecycleSendsCompleteProof(t *tes
 		default:
 			t.Fatalf("unexpected request %s %s", r.Method, r.URL.String())
 		}
-		writeJSON(t, w, domain.AgentOwnershipLease{
+		writeJSON(t, w, agents.OwnershipRecord{
 			WorkspaceKey: proof.WorkspaceKey, AgentID: proof.AgentID, LeaseID: proof.LeaseID,
 			OwnerID: proof.OwnerID, RuntimeProvider: proof.RuntimeProvider, NodeID: proof.NodeID,
-			FencingToken: proof.FencingToken, Status: domain.AgentLeaseActive,
+			FencingToken: proof.FencingToken, Status: agents.OwnershipActive,
 			LastHeartbeat: now, ExpiresAt: now.Add(time.Minute), CreatedAt: now, UpdatedAt: now,
 		})
 	}))
@@ -395,7 +408,7 @@ func TestControlPlaneClientOwnedAgentOwnershipLifecycleSendsCompleteProof(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	owned, ok := client.AgentOwnershipLeases().(store.AgentOwnershipLeaseOwnedStore)
+	owned, ok := client.AgentOwnershipLeases().(agents.AgentOwnershipLeaseOwnedStore)
 	if !ok {
 		t.Fatal("FleetDB ownership adapter does not expose owner-fenced lifecycle commands")
 	}
@@ -421,14 +434,14 @@ func TestControlPlaneClientLeaseCreationRejectsMissingEnvelopeToken(t *testing.T
 			name: "session lease",
 			path: "/api/v1/WS/agent-sessions/session-1/leases",
 			run: func(client *Client) error {
-				_, err := client.AgentLeases().Create(t.Context(), store.AgentLeaseCreate{
+				_, err := client.AgentLeases().Create(t.Context(), interaction.AgentLeaseCreate{
 					WorkspaceKey: "WS",
 					SessionID:    "session-1",
 					LeaseID:      "lease-1",
 				})
 				return err
 			},
-			body: domain.AgentLease{
+			body: interaction.LeaseRecord{
 				WorkspaceKey: "WS",
 				LeaseID:      "lease-1",
 				SessionID:    "session-1",
@@ -439,19 +452,19 @@ func TestControlPlaneClientLeaseCreationRejectsMissingEnvelopeToken(t *testing.T
 			name: "ownership lease",
 			path: "/api/v1/WS/agent-ownership-leases/agent-1/acquire",
 			run: func(client *Client) error {
-				_, err := client.AgentOwnershipLeases().Acquire(t.Context(), store.AgentOwnershipLeaseAcquire{
+				_, err := client.AgentOwnershipLeases().Acquire(t.Context(), agents.AgentOwnershipLeaseAcquire{
 					WorkspaceKey:    "WS",
 					AgentID:         "agent-1",
 					LeaseID:         "ownership-1",
 					OwnerID:         "runtime-1",
-					RuntimeProvider: domain.RuntimeProviderLocal,
+					RuntimeProvider: agents.RuntimeProviderLocal,
 					NodeID:          "node-1",
 				})
 				return err
 			},
-			body: map[string]any{"lease": domain.AgentOwnershipLease{
+			body: map[string]any{"lease": agents.OwnershipRecord{
 				WorkspaceKey: "WS", AgentID: "agent-1", LeaseID: "ownership-1",
-				OwnerID: "runtime-1", RuntimeProvider: domain.RuntimeProviderLocal,
+				OwnerID: "runtime-1", RuntimeProvider: agents.RuntimeProviderLocal,
 				NodeID: "node-1", FencingToken: 1,
 			}},
 		},

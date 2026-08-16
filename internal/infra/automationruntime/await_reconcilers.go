@@ -12,10 +12,12 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/modules/automation"
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
-	"github.com/tysonthomas9/loomcli/internal/store"
+
+	workspaceowner "github.com/tysonthomas9/loomcli/internal/modules/workspace"
+
+	"github.com/tysonthomas9/loomcli/internal/modules/automation"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 const (
@@ -33,9 +35,9 @@ type workspaceKeyLister interface {
 }
 
 type awaitTimeoutStore interface {
-	Workspaces() store.WorkspaceStore
-	Awaits() store.AwaitStore
-	DriverRuns() store.DriverRunStore
+	Workspaces() workspaceowner.WorkspaceStore
+	Awaits() execution.AwaitStore
+	DriverRuns() execution.DriverRunStore
 }
 
 // automationAwaitEventNotifier is the narrow Automation -> Execution bridge
@@ -49,9 +51,9 @@ type automationAwaitEventNotifier struct {
 var _ automation.AwaitEventNotifier = (*automationAwaitEventNotifier)(nil)
 
 func NewAutomationAwaitEventNotifierWithResolver(
-	awaits store.AwaitStore,
-	driverRuns store.DriverRunStore,
-	resolver store.AtomicAwaitStore,
+	awaits execution.AwaitStore,
+	driverRuns execution.DriverRunStore,
+	resolver execution.AtomicAwaitStore,
 ) (automation.AwaitEventNotifier, error) {
 	if awaits == nil || driverRuns == nil || resolver == nil {
 		return nil, fmt.Errorf("compose automation await notifier: %w", automation.ErrUnavailable)
@@ -66,7 +68,7 @@ func (notifier *automationAwaitEventNotifier) NotifyAwaitEvent(
 	if notifier == nil || notifier.matcher == nil {
 		return automation.ErrUnavailable
 	}
-	if len(event.Payload) > domain.DefaultAwaitResumePayloadCap {
+	if len(event.Payload) > execution.DefaultAwaitResumePayloadCap {
 		return nil
 	}
 	_, err := notifier.matcher.Dispatch(ctx, event.WorkspaceKey, AwaitDispatchEvent{
@@ -122,9 +124,9 @@ func NewAwaitEventReconcilerWithExecution(
 func NewAwaitEventReconcilerWithExecutionStores(
 	queue execution.AwaitEventNotificationAPI,
 	authorities execution.SystemAuthorityResolver,
-	awaits store.AwaitStore,
-	driverRuns store.DriverRunStore,
-	resolver store.AtomicAwaitStore,
+	awaits execution.AwaitStore,
+	driverRuns execution.DriverRunStore,
+	resolver execution.AtomicAwaitStore,
 	workspace string,
 	workspaces workspaceKeyLister,
 	componentID string,
@@ -232,7 +234,7 @@ func (reconciler *AwaitEventReconciler) runWorkspace(ctx context.Context, worksp
 			}
 			continue
 		}
-		if domain.IsAwaitTimeoutEventID(canonicalID) {
+		if execution.IsAwaitTimeoutEventID(canonicalID) {
 			// Timeout IDs are reserved to the non-journaled deadline-sweeper
 			// lane. Quarantine an old/poisoned row by completing it without
 			// dispatch, while surfacing the invariant violation once.
@@ -275,7 +277,7 @@ func (reconciler *AwaitEventReconciler) runWorkspace(ctx context.Context, worksp
 			continue
 		}
 		if !notification.PayloadOversized && notification.PayloadSize > 0 &&
-			notification.PayloadSize <= domain.DefaultAwaitResumePayloadCap &&
+			notification.PayloadSize <= execution.DefaultAwaitResumePayloadCap &&
 			notification.PayloadSize != len(event.Payload) {
 			// Fleet reports the original byte size explicitly. Never resolve an
 			// await from a truncated or otherwise inconsistent response body;
@@ -288,8 +290,8 @@ func (reconciler *AwaitEventReconciler) runWorkspace(ctx context.Context, worksp
 			}
 			continue
 		}
-		if notification.PayloadOversized || notification.PayloadSize > domain.DefaultAwaitResumePayloadCap ||
-			len(event.Payload) > domain.DefaultAwaitResumePayloadCap {
+		if notification.PayloadOversized || notification.PayloadSize > execution.DefaultAwaitResumePayloadCap ||
+			len(event.Payload) > execution.DefaultAwaitResumePayloadCap {
 			// The event remains available for audit, but its payload is not an
 			// eligible resume value. Complete this notification so it cannot
 			// poison the queue; a later valid event can still satisfy the await.
@@ -302,7 +304,7 @@ func (reconciler *AwaitEventReconciler) runWorkspace(ctx context.Context, worksp
 				"event_id", event.EventID,
 				"canonical_event_id", canonicalID,
 				"payload_size", payloadSize,
-				"payload_cap", domain.DefaultAwaitResumePayloadCap,
+				"payload_cap", execution.DefaultAwaitResumePayloadCap,
 			)
 			if completeErr := reconciler.complete(ctx, workspace, claimID, durableID, now); completeErr != nil {
 				errs = append(errs, completeErr)
@@ -402,7 +404,7 @@ func newAwaitEventClaimPrefix() string {
 // stores' deadline feed), and this sweeper guarantees a past-deadline
 // instance is freed and its run reaches a terminal arm in bounded time. Per
 // due instance it emits a synthetic timeout event — deterministic ID
-// domain.AwaitTimeoutEventID(instanceKey), actor domain.AwaitTimeoutActor,
+// execution.AwaitTimeoutEventID(instanceKey), actor execution.AwaitTimeoutActor,
 // subject key exactly the original awaited pattern — through the normal
 // dispatch-time matcher (AW7), which resolves the row as timed_out
 // (resume-with-timeout-event decision: stores classify the
@@ -444,7 +446,7 @@ type AwaitTimeoutSweeper struct {
 	Store awaitTimeoutStore
 	// Resolver is the required, injected Execution-owned atomic mutation port.
 	// RunOnce fails closed when it is unavailable and never derives it from Store.
-	Resolver store.AtomicAwaitStore
+	Resolver execution.AtomicAwaitStore
 	// WorkspaceKey scopes the sweep to one workspace. Empty sweeps every
 	// workspace returned by Store.Workspaces().List.
 	WorkspaceKey string
@@ -490,7 +492,7 @@ func (result *AwaitTimeoutSweepResult) RuntimeSummary() (timedOut, resumeDeferre
 // Per-instance failures are joined, never abort the pass.
 func (s *AwaitTimeoutSweeper) RunOnce(ctx context.Context) (*AwaitTimeoutSweepResult, error) {
 	if s == nil || s.Store == nil {
-		return nil, fmt.Errorf("store required: %w", domain.ErrInvalid)
+		return nil, fmt.Errorf("store required: %w", persistence.ErrInvalid)
 	}
 	if s.Resolver == nil {
 		return nil, fmt.Errorf("execution await resolver is unavailable: %w", execution.ErrUnavailable)
@@ -548,7 +550,7 @@ func (s *AwaitTimeoutSweeper) sweepWorkspace(ctx context.Context, ws string, now
 
 // sweepInstance emits one due instance's synthetic timeout event through the
 // dispatch matcher and folds the per-instance record into the result.
-func (s *AwaitTimeoutSweeper) sweepInstance(ctx context.Context, matcher *AwaitMatcher, ws string, inst *domain.AwaitInstance, out *AwaitTimeoutSweepResult) error {
+func (s *AwaitTimeoutSweeper) sweepInstance(ctx context.Context, matcher *AwaitMatcher, ws string, inst *execution.AwaitInstance, out *AwaitTimeoutSweepResult) error {
 	ev, err := awaitTimeoutDispatchEvent(inst)
 	if err != nil {
 		out.Failed++
@@ -579,7 +581,7 @@ func (s *AwaitTimeoutSweeper) sweepInstance(ctx context.Context, matcher *AwaitM
 		// actor_rejected here would mean the sweeper-lane carve-out broke.
 		out.Failed++
 		return fmt.Errorf("await timeout sweep %q: dispatch outcome %s (%s): %w",
-			inst.InstanceKey, record.Outcome, record.Reason, domain.ErrInvalid)
+			inst.InstanceKey, record.Outcome, record.Reason, persistence.ErrInvalid)
 	}
 	return nil
 }
@@ -597,16 +599,16 @@ type awaitTimeoutPayload struct {
 
 // awaitTimeoutDispatchEvent builds the synthetic timeout event for one due
 // instance. The event's type/subject are the awaited pattern's own segments,
-// so domain.AwaitEventKey re-renders exactly the registered pattern (subject
+// so execution.AwaitEventKey re-renders exactly the registered pattern (subject
 // key = the original awaited pattern); the ".timeout" suffix rides the
 // payload and the timed_out row status, never the matching key.
-func awaitTimeoutDispatchEvent(inst *domain.AwaitInstance) (AwaitDispatchEvent, error) {
+func awaitTimeoutDispatchEvent(inst *execution.AwaitInstance) (AwaitDispatchEvent, error) {
 	eventType, subjectRef, ok := strings.Cut(inst.Pattern, ":")
 	if !ok || eventType == "" || subjectRef == "" {
 		// Registration validated RULE 1, so this is a corrupted row; leave it
 		// to operator attention rather than guessing a key.
 		return AwaitDispatchEvent{}, fmt.Errorf("await timeout sweep: instance %q pattern %q: %w",
-			inst.InstanceKey, inst.Pattern, domain.ErrAwaitPatternUnscoped)
+			inst.InstanceKey, inst.Pattern, execution.ErrAwaitPatternUnscoped)
 	}
 	payload, err := json.Marshal(awaitTimeoutPayload{
 		Timeout:     true,
@@ -618,12 +620,12 @@ func awaitTimeoutDispatchEvent(inst *domain.AwaitInstance) (AwaitDispatchEvent, 
 		return AwaitDispatchEvent{}, fmt.Errorf("encode await timeout payload for %q: %w", inst.InstanceKey, err)
 	}
 	return AwaitDispatchEvent{
-		EventID:    domain.AwaitTimeoutEventID(inst.InstanceKey),
+		EventID:    execution.AwaitTimeoutEventID(inst.InstanceKey),
 		EventType:  eventType,
 		SourceKind: "timeout",
 		Origin:     automation.EventOriginSystem,
 		SubjectRef: subjectRef,
-		ActorRef:   domain.AwaitTimeoutActor,
+		ActorRef:   execution.AwaitTimeoutActor,
 		Payload:    payload,
 	}, nil
 }

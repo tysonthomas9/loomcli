@@ -8,8 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 )
 
 func TestDriverRunOutcomeTransportClaimCompleteAndRetry(t *testing.T) {
@@ -31,8 +30,8 @@ func TestDriverRunOutcomeTransportClaimCompleteAndRetry(t *testing.T) {
 				!request.ClaimUntil.Equal(now.Add(time.Minute)) || request.Limit != 7 {
 				t.Fatalf("claim request = %+v", request)
 			}
-			writeJSON(t, w, map[string]any{"outcomes": []store.DriverRunOutcome{{
-				WorkspaceKey: "WS", RunID: "run-1", Status: domain.DriverRunFailed,
+			writeJSON(t, w, map[string]any{"outcomes": []execution.DriverRunOutcome{{
+				WorkspaceKey: "WS", RunID: "run-1", Status: execution.DriverRunFailed,
 				Summary: "failed", ErrorClass: "driver_runtime", ParentRunID: "parent-run",
 				ParentEventID: "parent-event", EpicID: "WS-1", OccurredAt: now, Attempt: 2,
 			}}})
@@ -70,26 +69,26 @@ func TestDriverRunOutcomeTransportClaimCompleteAndRetry(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	outbox, ok := client.DriverRuns().(store.DriverRunOutcomeStore)
+	outbox, ok := client.DriverRuns().(execution.DriverRunOutcomeStore)
 	if !ok {
 		t.Fatal("Fleet DriverRun adapter does not expose durable outcome capability")
 	}
-	claimed, err := outbox.ClaimDriverRunOutcomes(t.Context(), store.DriverRunOutcomeClaim{
+	claimed, err := outbox.ClaimDriverRunOutcomes(t.Context(), execution.DriverRunOutcomeLease{
 		WorkspaceKey: "WS", ClaimID: "publisher-1", Before: now, ClaimUntil: now.Add(time.Minute), Limit: 7,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(claimed) != 1 || claimed[0].RunID != "run-1" || claimed[0].Attempt != 2 ||
-		claimed[0].ParentEventID != "parent-event" || claimed[0].Status != domain.DriverRunFailed {
+		claimed[0].ParentEventID != "parent-event" || claimed[0].Status != execution.DriverRunFailed {
 		t.Fatalf("claimed outcomes = %+v", claimed)
 	}
-	if err := outbox.CompleteDriverRunOutcome(t.Context(), store.DriverRunOutcomeCompletion{
+	if err := outbox.CompleteDriverRunOutcome(t.Context(), execution.DriverRunOutcomeCompletion{
 		WorkspaceKey: "WS", RunID: opaqueRunID, ClaimID: "publisher-1", CompletedAt: now.Add(2 * time.Second),
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := outbox.RetryDriverRunOutcome(t.Context(), store.DriverRunOutcomeRetry{
+	if err := outbox.RetryDriverRunOutcome(t.Context(), execution.DriverRunOutcomeRetry{
 		WorkspaceKey: "WS", RunID: opaqueRunID, ClaimID: "publisher-2",
 		AvailableAt: now.Add(time.Minute), Error: "temporary",
 	}); err != nil {
@@ -109,9 +108,9 @@ func TestDriverRunOutcomeTransportNormalizesNilClaimList(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	outbox := client.DriverRuns().(store.DriverRunOutcomeStore)
+	outbox := client.DriverRuns().(execution.DriverRunOutcomeStore)
 	now := time.Now().UTC()
-	values, err := outbox.ClaimDriverRunOutcomes(t.Context(), store.DriverRunOutcomeClaim{
+	values, err := outbox.ClaimDriverRunOutcomes(t.Context(), execution.DriverRunOutcomeLease{
 		WorkspaceKey: "WS", ClaimID: "publisher-1", Before: now, ClaimUntil: now.Add(time.Minute), Limit: 1,
 	})
 	if err != nil {
@@ -141,8 +140,8 @@ func TestTerminalDriverRunWorkRecoveryQueueTransportClaimCompleteAndRetry(t *tes
 				!request.ClaimUntil.Equal(now.Add(time.Minute)) || request.Limit != 7 {
 				t.Fatalf("claim request = %+v", request)
 			}
-			writeJSON(t, w, map[string]any{"outcomes": []store.DriverRunOutcome{{
-				WorkspaceKey: "WS", RunID: opaqueRunID, Status: domain.DriverRunFailed,
+			writeJSON(t, w, map[string]any{"outcomes": []execution.DriverRunOutcome{{
+				WorkspaceKey: "WS", RunID: opaqueRunID, Status: execution.DriverRunFailed,
 				Summary: "failed", ErrorClass: "driver_runtime", ParentRunID: "parent-run",
 				ParentEventID: "parent-event", EpicID: "WS-1", OccurredAt: now, Attempt: 2,
 			}}, "count": 1})
@@ -180,26 +179,26 @@ func TestTerminalDriverRunWorkRecoveryQueueTransportClaimCompleteAndRetry(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	queue, ok := client.DriverRuns().(store.TerminalDriverRunWorkRecoveryQueueStore)
+	queue, ok := client.DriverRuns().(execution.TerminalDriverRunWorkRecoveryQueueStore)
 	if !ok {
 		t.Fatal("Fleet DriverRun adapter does not expose terminal-work recovery queue capability")
 	}
-	claimed, err := queue.ClaimTerminalDriverRunWorkRecoveries(t.Context(), store.TerminalDriverRunWorkRecoveryClaim{
+	claimed, err := queue.ClaimTerminalDriverRunWorkRecoveries(t.Context(), execution.TerminalDriverRunWorkRecoveryLease{
 		WorkspaceKey: "WS", ClaimID: "recovery-1", Before: now, ClaimUntil: now.Add(time.Minute), Limit: 7,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(claimed) != 1 || claimed[0].RunID != opaqueRunID || claimed[0].Attempt != 2 ||
-		claimed[0].ParentEventID != "parent-event" || claimed[0].Status != domain.DriverRunFailed {
+		claimed[0].ParentEventID != "parent-event" || claimed[0].Status != execution.DriverRunFailed {
 		t.Fatalf("claimed terminal-work recoveries = %+v", claimed)
 	}
-	if err := queue.CompleteTerminalDriverRunWorkRecovery(t.Context(), store.TerminalDriverRunWorkRecoveryCompletion{
+	if err := queue.CompleteTerminalDriverRunWorkRecovery(t.Context(), execution.TerminalDriverRunWorkRecoveryCompletion{
 		WorkspaceKey: "WS", RunID: opaqueRunID, ClaimID: "recovery-1", CompletedAt: now.Add(2 * time.Second),
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := queue.RetryTerminalDriverRunWorkRecovery(t.Context(), store.TerminalDriverRunWorkRecoveryRetry{
+	if err := queue.RetryTerminalDriverRunWorkRecovery(t.Context(), execution.TerminalDriverRunWorkRecoveryRetry{
 		WorkspaceKey: "WS", RunID: opaqueRunID, ClaimID: "recovery-2",
 		AvailableAt: now.Add(time.Minute), Error: "temporary",
 	}); err != nil {
@@ -231,8 +230,8 @@ func TestTerminalDriverRunWorkRecoveryQueueTransportRejectsDivergentResponses(t 
 			if err != nil {
 				t.Fatal(err)
 			}
-			queue := client.DriverRuns().(store.TerminalDriverRunWorkRecoveryQueueStore)
-			_, err = queue.ClaimTerminalDriverRunWorkRecoveries(t.Context(), store.TerminalDriverRunWorkRecoveryClaim{
+			queue := client.DriverRuns().(execution.TerminalDriverRunWorkRecoveryQueueStore)
+			_, err = queue.ClaimTerminalDriverRunWorkRecoveries(t.Context(), execution.TerminalDriverRunWorkRecoveryLease{
 				WorkspaceKey: "WS", ClaimID: "recovery-1", Before: now, ClaimUntil: now.Add(time.Minute), Limit: 7,
 			})
 			if err == nil || !strings.Contains(err.Error(), ErrExecutionUnavailable.Error()) {

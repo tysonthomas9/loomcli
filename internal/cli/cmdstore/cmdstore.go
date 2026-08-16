@@ -16,9 +16,13 @@ import (
 	"syscall"
 
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
-	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/store"
+	workspacemodule "github.com/tysonthomas9/loomcli/internal/modules/workspace"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
+
+type workspaceStoreSource interface {
+	Workspaces() workspacemodule.WorkspaceStore
+}
 
 // OpenStore opens a fleet-db-backed Store appropriate for the current
 // Mode. Returns the handle so callers can `defer h.Close()`.
@@ -69,14 +73,14 @@ func SignalContext(parent context.Context) (context.Context, context.CancelFunc)
 // (LOOM_WORKSPACE / --workspace) and verifies it exists in the store.
 // It intentionally does not consult state.json's last_workspace because
 // runtime commands must not silently cross workspace boundaries.
-func ActiveWorkspace(ctx context.Context, s store.Store) (string, error) {
+func ActiveWorkspace(ctx context.Context, s workspaceStoreSource) (string, error) {
 	return bootstrap.ResolveActiveWorkspaceKey(ctx, s.Workspaces())
 }
 
-// IsNotFound is a convenience wrapper for matching domain.ErrNotFound,
+// IsNotFound is a convenience wrapper for matching persistence.ErrNotFound,
 // the only sentinel callers reliably need to check (e.g., to print a
 // nicer "not found" message instead of the wrapped error chain).
-func IsNotFound(err error) bool { return errors.Is(err, domain.ErrNotFound) }
+func IsNotFound(err error) bool { return errors.Is(err, persistence.ErrNotFound) }
 
 // WriteJSON encodes v as indented JSON to stdout. Returns the encode
 // error so RunE handlers can propagate it; in practice an encode

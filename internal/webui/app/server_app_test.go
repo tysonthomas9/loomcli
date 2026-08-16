@@ -10,10 +10,11 @@ import (
 	"testing"
 	"time"
 
+	workspaceowner "github.com/tysonthomas9/loomcli/internal/modules/workspace"
+
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/infra/pty"
 	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
-	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui"
 )
 
@@ -81,11 +82,11 @@ func TestServer_RegisterRoutes_HealthRegistered(t *testing.T) {
 
 func TestNewServerFleetClientHealthProbe(t *testing.T) {
 	app, err := NewServer(context.Background(), webui.ServerConfig{
-		Port:            freeTCPPort(t),
-		BindAddress:     "127.0.0.1",
-		MaxPortAttempts: 1,
-		FleetClient:     true,
-		Store:           memstore.New(),
+		Port:              freeTCPPort(t),
+		BindAddress:       "127.0.0.1",
+		MaxPortAttempts:   1,
+		FleetClient:       true,
+		ProjectionRecords: memstore.New(),
 	})
 	if err != nil {
 		t.Fatalf("NewServer: %v", err)
@@ -115,15 +116,15 @@ func TestNewServerWorkspaceDeleteUsesOwnerCommandAndCleanup(t *testing.T) {
 	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
 	t.Setenv("LOOM_WORKSPACE", "")
 	st := memstore.New()
-	if _, err := st.Workspaces().Create(t.Context(), store.WorkspaceCreate{Key: "ALPHA", Name: "Alpha"}); err != nil {
+	if _, err := st.Workspaces().Create(t.Context(), workspaceowner.WorkspaceCreate{Key: "ALPHA", Name: "Alpha"}); err != nil {
 		t.Fatal(err)
 	}
 	cleaned := ""
 	app, err := NewServer(t.Context(), webui.ServerConfig{
-		Port:            freeTCPPort(t),
-		BindAddress:     "127.0.0.1",
-		MaxPortAttempts: 1,
-		Store:           st,
+		Port:              freeTCPPort(t),
+		BindAddress:       "127.0.0.1",
+		MaxPortAttempts:   1,
+		ProjectionRecords: st,
 		WorkspaceDeleteCleanupFn: func(key string) error {
 			cleaned = key
 			return nil

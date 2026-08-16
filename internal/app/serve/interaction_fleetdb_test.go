@@ -10,7 +10,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	infrafleetdb "github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
 	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
 	interactionfleetdb "github.com/tysonthomas9/loomcli/internal/modules/interaction/fleetdb"
@@ -46,17 +45,17 @@ func TestInteractionFleetDBOwnedCommandConsumesCredentialOnce(t *testing.T) {
 					t.Fatalf("raw credential entered request body: %s", body)
 				}
 				payload, err := json.Marshal(infrafleetdb.InteractionSessionMutationResult{
-					Session: &domain.AgentSession{
+					Session: &interaction.SessionRecord{
 						WorkspaceKey: "WS", SessionID: "session-1",
 						AgentID: "agent-1", NodeID: "node-1",
-						Kind:   domain.AgentSessionKind("interactive"),
-						Status: domain.AgentSessionRunning,
+						Kind:   interaction.SessionRecordKind("interactive"),
+						Status: interaction.SessionRecordRunning,
 					},
-					Lease: &domain.AgentLease{
+					Lease: &interaction.LeaseRecord{
 						WorkspaceKey: "WS", LeaseID: "lease-1",
 						SessionID: "session-1", AgentID: "agent-1",
 						NodeID: "node-1", FencingToken: 7,
-						Status:    domain.AgentLeaseActive,
+						Status:    interaction.LeaseRecordActive,
 						ExpiresAt: now.Add(time.Minute),
 					},
 				})

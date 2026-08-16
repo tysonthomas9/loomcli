@@ -9,16 +9,18 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/automation"
+
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
+
 	"github.com/tysonthomas9/loomcli/internal/app/webhookingestion"
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	trigger "github.com/tysonthomas9/loomcli/internal/infra/automationruntime"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
-	"github.com/tysonthomas9/loomcli/internal/modules/automation"
 	connectorsmodule "github.com/tysonthomas9/loomcli/internal/modules/connectors"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
-	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 const (
@@ -31,13 +33,13 @@ func seedStoreWithoutConnector(t *testing.T, enabled bool) *memstore.Store {
 	t.Helper()
 	st := memstore.New()
 	ctx := context.Background()
-	if _, err := st.Drivers().Create(ctx, store.DriverCreate{
+	if _, err := st.Drivers().Create(ctx, workflowcatalog.DriverCreate{
 		WorkspaceKey: testWS, DriverID: "github-pr-review", Name: "github-pr-review",
 		Status: workflowcatalog.DriverStatusActive,
 	}); err != nil {
 		t.Fatalf("seed driver: %v", err)
 	}
-	if _, err := st.DriverVersions().Create(ctx, store.DriverVersionCreate{
+	if _, err := st.DriverVersions().Create(ctx, workflowcatalog.DriverVersionCreate{
 		WorkspaceKey: testWS, VersionID: "v1", DriverID: "github-pr-review", Version: 1,
 		SourceDigest: "sha256:src", BundleDigest: "sha256:bundle",
 		ValidationStatus: workflowcatalog.DriverVersionValidationPassed,
@@ -50,7 +52,7 @@ func seedStoreWithoutConnector(t *testing.T, enabled bool) *memstore.Store {
 	if _, err := st.ActivateDriverVersionForTest(ctx, testWS, "github-pr-review", "v1"); err != nil {
 		t.Fatalf("activate version: %v", err)
 	}
-	if _, err := st.TriggerBindings().Create(ctx, store.TriggerBindingCreate{
+	if _, err := st.TriggerBindings().Create(ctx, automation.TriggerBindingCreate{
 		WorkspaceKey: testWS, BindingID: "b1", Name: "pr-review", SourceKind: "github",
 		RouteKey: testRoute, DriverID: "github-pr-review", DriverVersionID: "v1",
 		Enabled: enabled,
@@ -72,7 +74,9 @@ func seedStore(t *testing.T, enabled bool) *memstore.Store {
 	return st
 }
 
-type testBindingQueries struct{ bindings store.TriggerBindingStore }
+type testBindingQueries struct {
+	bindings automation.TriggerBindingStore
+}
 
 func (queries testBindingQueries) GetBinding(ctx context.Context, workspace, bindingID string) (*automation.Binding, error) {
 	binding, err := queries.bindings.Get(ctx, workspace, bindingID)
@@ -80,10 +84,7 @@ func (queries testBindingQueries) GetBinding(ctx context.Context, workspace, bin
 }
 
 func (queries testBindingQueries) ListBindings(ctx context.Context, workspace string, filter automation.BindingFilter) ([]*automation.Binding, error) {
-	bindings, err := queries.bindings.List(ctx, workspace, store.TriggerBindingFilter{
-		SourceKind: filter.SourceKind, RouteKey: filter.RouteKey, DriverID: filter.DriverID,
-		TargetAgentServiceID: filter.TargetAgentServiceID, Enabled: filter.Enabled, Limit: filter.Limit,
-	})
+	bindings, err := queries.bindings.List(ctx, workspace, automation.TriggerBindingFilter(filter))
 	return bindings, automationTestError(err)
 }
 
@@ -143,11 +144,11 @@ func automationTestError(err error) error {
 		return nil
 	}
 	switch {
-	case errors.Is(err, domain.ErrNotFound):
+	case errors.Is(err, persistence.ErrNotFound):
 		return errors.Join(automation.ErrNotFound, err)
-	case errors.Is(err, domain.ErrInvalid):
+	case errors.Is(err, persistence.ErrInvalid):
 		return errors.Join(automation.ErrInvalid, err)
-	case errors.Is(err, domain.ErrConflict), errors.Is(err, domain.ErrAlreadyExists):
+	case errors.Is(err, persistence.ErrConflict), errors.Is(err, persistence.ErrAlreadyExists):
 		return errors.Join(automation.ErrConflict, err)
 	default:
 		return err
@@ -160,13 +161,20 @@ func (testAuthorityProvider) AuthorityForVerifiedWebhook(context.Context, webhoo
 	return authority.WebhookAuthority{}, nil
 }
 
-func newServer(st store.Store) *http.ServeMux {
+type webhookFixture interface {
+	Connectors() connectorsmodule.ManagementStore
+	TriggerBindings() automation.TriggerBindingStore
+	Awaits() execution.AwaitStore
+	DriverRuns() execution.DriverRunStore
+}
+
+func newServer(st webhookFixture) *http.ServeMux {
 	return newServerWithPorts(st, &testAdmission{}, testAutomationQueries{})
 }
 
-func newServerWithPorts(st store.Store, admission automation.EventAdmission, queries AutomationQueries) *http.ServeMux {
+func newServerWithPorts(st webhookFixture, admission automation.EventAdmission, queries AutomationQueries) *http.ServeMux {
 	mux := http.NewServeMux()
-	resolver, ok := st.Awaits().(store.AtomicAwaitStore)
+	resolver, ok := st.Awaits().(execution.AtomicAwaitStore)
 	if !ok {
 		panic("webhook test store lacks atomic await resolution")
 	}

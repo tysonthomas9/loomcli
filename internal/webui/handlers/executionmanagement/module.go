@@ -10,10 +10,10 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 	workflowcataloghttp "github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog/httpapi"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 	serverhandler "github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
@@ -195,11 +195,11 @@ func writeMappedError(w http.ResponseWriter, err error) {
 		return
 	}
 	switch {
-	case errors.Is(err, execution.ErrInvalid), errors.Is(err, domain.ErrInvalid):
+	case errors.Is(err, execution.ErrInvalid), errors.Is(err, persistence.ErrInvalid):
 		writeError(w, http.StatusBadRequest, "invalid", err.Error())
-	case errors.Is(err, execution.ErrNotFound), errors.Is(err, domain.ErrNotFound):
+	case errors.Is(err, execution.ErrNotFound), errors.Is(err, persistence.ErrNotFound):
 		writeError(w, http.StatusNotFound, "not_found", err.Error())
-	case errors.Is(err, execution.ErrConflict), errors.Is(err, domain.ErrConflict), errors.Is(err, domain.ErrAlreadyExists), errors.Is(err, domain.ErrInvalidTransition):
+	case errors.Is(err, execution.ErrConflict), errors.Is(err, persistence.ErrConflict), errors.Is(err, persistence.ErrAlreadyExists), errors.Is(err, persistence.ErrInvalidTransition):
 		writeError(w, http.StatusConflict, "conflict", err.Error())
 	case errors.Is(err, execution.ErrUnavailable):
 		writeError(w, http.StatusServiceUnavailable, "unavailable", err.Error())

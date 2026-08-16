@@ -8,10 +8,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/epicrunner"
 	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
-	"github.com/tysonthomas9/loomcli/internal/store"
+
+	"github.com/tysonthomas9/loomcli/internal/modules/agents"
+
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
+
+	"github.com/tysonthomas9/loomcli/internal/epicrunner"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 type DeliveryState string
@@ -48,45 +52,45 @@ type LeadMessageDeliveryOptions struct {
 }
 
 type RuntimeStore interface {
-	store.OrchestrationSessionStore
-	AgentInboxMessages() store.AgentInboxMessageStore
-	AgentServices() store.AgentServiceStore
-	WorkerProfiles() store.WorkerProfileStore
-	Roles() store.RoleStore
+	interaction.OrchestrationSessionStore
+	AgentInboxMessages() interaction.AgentInboxMessageStore
+	AgentServices() agents.AgentServiceStore
+	WorkerProfiles() execution.WorkerProfileStore
+	Roles() agents.RoleRecordStore
 }
 
 // RuntimeDependencies names the exact persistence ports required by lead
 // delivery. Composition must supply each port explicitly; the provider never
 // receives the process-wide Store aggregate.
 type RuntimeDependencies struct {
-	Sessions       store.OrchestrationSessionStore
-	InboxMessages  store.AgentInboxMessageStore
-	AgentServices  store.AgentServiceStore
-	WorkerProfiles store.WorkerProfileStore
-	Roles          store.RoleStore
+	Sessions       interaction.OrchestrationSessionStore
+	InboxMessages  interaction.AgentInboxMessageStore
+	AgentServices  agents.AgentServiceStore
+	WorkerProfiles execution.WorkerProfileStore
+	Roles          agents.RoleRecordStore
 }
 
 type runtimeDependencies struct {
 	RuntimeDependencies
 }
 
-func (dependencies runtimeDependencies) AgentSessions() store.AgentSessionStore {
+func (dependencies runtimeDependencies) AgentSessions() interaction.AgentSessionStore {
 	return dependencies.Sessions.AgentSessions()
 }
 
-func (dependencies runtimeDependencies) AgentInboxMessages() store.AgentInboxMessageStore {
+func (dependencies runtimeDependencies) AgentInboxMessages() interaction.AgentInboxMessageStore {
 	return dependencies.InboxMessages
 }
 
-func (dependencies runtimeDependencies) AgentServices() store.AgentServiceStore {
+func (dependencies runtimeDependencies) AgentServices() agents.AgentServiceStore {
 	return dependencies.RuntimeDependencies.AgentServices
 }
 
-func (dependencies runtimeDependencies) WorkerProfiles() store.WorkerProfileStore {
+func (dependencies runtimeDependencies) WorkerProfiles() execution.WorkerProfileStore {
 	return dependencies.RuntimeDependencies.WorkerProfiles
 }
 
-func (dependencies runtimeDependencies) Roles() store.RoleStore {
+func (dependencies runtimeDependencies) Roles() agents.RoleRecordStore {
 	return dependencies.RuntimeDependencies.Roles
 }
 
@@ -112,7 +116,7 @@ type InteractionChatDependencies struct {
 		context.Context,
 		string,
 		string,
-	) (*domain.AgentSession, error)
+	) (*interaction.SessionRecord, error)
 }
 
 // NewInteractionChatDependencies binds the exact provider persistence ports
@@ -156,8 +160,8 @@ func NewInteractionChatDependencies(dependencies RuntimeDependencies) (Interacti
 		FindSession: func(
 			ctx context.Context,
 			workspace, agentID string,
-		) (*domain.AgentSession, error) {
-			return store.OrchestrationSessionFor(ctx, st, workspace, agentID)
+		) (*interaction.SessionRecord, error) {
+			return interaction.OrchestrationSessionFor(ctx, st, workspace, agentID)
 		},
 	}, nil
 }
@@ -185,7 +189,7 @@ type leadTurnDeliverer interface {
 	pendingReason() string
 	// populate refreshes the deliverer's cached runtime view from the session
 	// and mirrors it onto the result.
-	populate(result *DeliveryResult, session *domain.AgentSession)
+	populate(result *DeliveryResult, session *interaction.SessionRecord)
 	deliveredThreadID() string
 	deliverTurn(ctx context.Context, st RuntimeStore, runtime SessionRuntime, workspace, sessionID string,
 		result *DeliveryResult, message, closeReason string) (*DeliveryResult, error)
@@ -194,7 +198,7 @@ type leadTurnDeliverer interface {
 // delivererForSession picks the delivery strategy from the session's runtime
 // provider metadata. Sessions without provider metadata default to codex,
 // preserving the pre-provider behavior (and its exact pending reasons).
-func delivererForSession(session *domain.AgentSession) leadTurnDeliverer {
+func delivererForSession(session *interaction.SessionRecord) leadTurnDeliverer {
 	provider := ""
 	if session != nil {
 		provider = strings.TrimSpace(session.Metadata[MetadataRuntimeProvider])
@@ -246,7 +250,7 @@ func deliverCurrentAssignmentOwned(
 		return &DeliveryResult{State: DeliveryStateNone}, err
 	}
 
-	session, err := store.OrchestrationSessionFor(ctx, st, workspace, assignment.LeadName)
+	session, err := interaction.OrchestrationSessionFor(ctx, st, workspace, assignment.LeadName)
 	if err != nil {
 		return nil, err
 	}
@@ -360,7 +364,7 @@ func deliverLeadMessageWithOptionsOwned(
 		return nil, fmt.Errorf("lead message required")
 	}
 
-	session, err := store.OrchestrationSessionFor(ctx, st, workspace, leadName)
+	session, err := interaction.OrchestrationSessionFor(ctx, st, workspace, leadName)
 	if err != nil {
 		return nil, err
 	}
@@ -437,7 +441,7 @@ func leadMessageDeliveryBlock(
 	ctx context.Context,
 	runtime SessionRuntime,
 	workspace string,
-	session *domain.AgentSession,
+	session *interaction.SessionRecord,
 	d leadTurnDeliverer,
 	result *DeliveryResult,
 ) *DeliveryResult {
@@ -473,7 +477,7 @@ func deliverPendingLeadMessagesOwned(
 	if leadName == "" {
 		return nil, fmt.Errorf("lead agent required")
 	}
-	session, err := store.OrchestrationSessionFor(ctx, st, workspace, leadName)
+	session, err := interaction.OrchestrationSessionFor(ctx, st, workspace, leadName)
 	if err != nil {
 		return nil, err
 	}
@@ -528,7 +532,7 @@ func deliverNextLeadInboxMessage(
 		SessionID:    sessionID,
 		LeaseTTL:     2 * time.Minute,
 	})
-	if errors.Is(err, domain.ErrNotFound) {
+	if errors.Is(err, persistence.ErrNotFound) {
 		result.State = DeliveryStateNone
 		result.Reason = ""
 		return result, nil
@@ -721,9 +725,9 @@ func hasQueuedLeadInboxMessages(ctx context.Context, st RuntimeStore, workspace,
 	if st == nil || st.AgentInboxMessages() == nil {
 		return false
 	}
-	items, err := st.AgentInboxMessages().List(ctx, workspace, store.AgentInboxMessageFilter{
+	items, err := st.AgentInboxMessages().List(ctx, workspace, interaction.AgentInboxMessageFilter{
 		TargetAgentID: leadName,
-		Status:        domain.AgentInboxMessageQueued,
+		Status:        interaction.InboxRecordQueued,
 		Limit:         100,
 	})
 	if err != nil {

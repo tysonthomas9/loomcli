@@ -21,7 +21,7 @@ func TestPhase5GenericDriverLifecycleRetirementRatchet(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	storeSource := parseGenericDriverLifecycleFile(t, root, "internal/store/platform_store.go")
+	storeSource := parseGenericDriverLifecycleFile(t, root, "internal/modules/workflowcatalog/record_store.go")
 	for _, structName := range []string{"DriverCreate", "DriverUpdate"} {
 		fields := namedStructFields(t, storeSource, structName)
 		if fields["ActiveVersionID"] {

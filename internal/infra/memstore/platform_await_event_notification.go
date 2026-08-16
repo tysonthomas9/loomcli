@@ -7,10 +7,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
+
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 type awaitEventNotificationRow struct {
@@ -23,14 +24,14 @@ type awaitEventNotificationRow struct {
 	completedAt time.Time
 }
 
-var _ store.AwaitEventNotificationStore = (*triggerEventStore)(nil)
+var _ execution.AwaitEventNotificationStore = (*triggerEventStore)(nil)
 
 func (s *triggerEventStore) enqueueAwaitEventNotificationLocked(event *automation.Event) {
 	if event == nil {
 		return
 	}
 	canonicalID, canonical := event.CanonicalEventID()
-	if !canonical || domain.IsAwaitTimeoutEventID(canonicalID) {
+	if !canonical || execution.IsAwaitTimeoutEventID(canonicalID) {
 		return
 	}
 	if s.notifications[event.WorkspaceKey] == nil {
@@ -51,11 +52,11 @@ func (s *triggerEventStore) enqueueAwaitEventNotificationLocked(event *automatio
 //nolint:funlen // Selection, ordering, and lease mutation share the same in-memory critical section.
 func (s *triggerEventStore) ClaimAwaitEventNotifications(
 	_ context.Context,
-	claim store.AwaitEventNotificationClaim,
-) ([]store.AwaitEventNotification, error) {
+	claim execution.AwaitEventNotificationLease,
+) ([]execution.AwaitEventNotification, error) {
 	if strings.TrimSpace(claim.WorkspaceKey) == "" || strings.TrimSpace(claim.ClaimID) == "" ||
 		claim.Before.IsZero() || claim.ClaimUntil.IsZero() || !claim.ClaimUntil.After(claim.Before) || claim.Limit < 1 {
-		return nil, fmt.Errorf("claim await event notifications: %w", domain.ErrInvalid)
+		return nil, fmt.Errorf("claim await event notifications: %w", persistence.ErrInvalid)
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -90,7 +91,7 @@ func (s *triggerEventStore) ClaimAwaitEventNotifications(
 	if len(values) > claim.Limit {
 		values = values[:claim.Limit]
 	}
-	out := make([]store.AwaitEventNotification, 0, len(values))
+	out := make([]execution.AwaitEventNotification, 0, len(values))
 	for _, value := range values {
 		value.row.state = "claimed"
 		value.row.claimID = claim.ClaimID
@@ -99,11 +100,11 @@ func (s *triggerEventStore) ClaimAwaitEventNotifications(
 		event := cloneAwaitNotificationEvent(value.event)
 		canonicalID, _ := event.CanonicalEventID()
 		payloadSize := len(event.Payload)
-		payloadOversized := payloadSize > domain.DefaultAwaitResumePayloadCap
+		payloadOversized := payloadSize > execution.DefaultAwaitResumePayloadCap
 		if payloadOversized {
 			event.Payload = nil
 		}
-		out = append(out, store.AwaitEventNotification{
+		out = append(out, execution.AwaitEventNotification{
 			Event: event, Attempt: value.row.attempt,
 			DurableEventID: value.event.EventID, CanonicalEventID: canonicalID,
 			PayloadOversized: payloadOversized, PayloadSize: payloadSize,
@@ -114,23 +115,23 @@ func (s *triggerEventStore) ClaimAwaitEventNotifications(
 
 func (s *triggerEventStore) CompleteAwaitEventNotification(
 	_ context.Context,
-	completion store.AwaitEventNotificationCompletion,
+	completion execution.AwaitEventNotificationCompletion,
 ) error {
 	if strings.TrimSpace(completion.WorkspaceKey) == "" || strings.TrimSpace(completion.EventID) == "" ||
 		strings.TrimSpace(completion.ClaimID) == "" {
-		return fmt.Errorf("complete await event notification: %w", domain.ErrInvalid)
+		return fmt.Errorf("complete await event notification: %w", persistence.ErrInvalid)
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	row := s.notifications[completion.WorkspaceKey][completion.EventID]
 	if row == nil {
-		return domain.ErrNotFound
+		return persistence.ErrNotFound
 	}
 	if row.state == "delivered" && row.claimID == completion.ClaimID {
 		return nil
 	}
 	if row.state != "claimed" || row.claimID != completion.ClaimID {
-		return domain.ErrNotOwner
+		return persistence.ErrNotOwner
 	}
 	completedAt := completion.CompletedAt.UTC()
 	if completedAt.IsZero() {
@@ -145,20 +146,20 @@ func (s *triggerEventStore) CompleteAwaitEventNotification(
 
 func (s *triggerEventStore) RetryAwaitEventNotification(
 	_ context.Context,
-	retry store.AwaitEventNotificationRetry,
+	retry execution.AwaitEventNotificationRetry,
 ) error {
 	if strings.TrimSpace(retry.WorkspaceKey) == "" || strings.TrimSpace(retry.EventID) == "" ||
 		strings.TrimSpace(retry.ClaimID) == "" || retry.AvailableAt.IsZero() {
-		return fmt.Errorf("retry await event notification: %w", domain.ErrInvalid)
+		return fmt.Errorf("retry await event notification: %w", persistence.ErrInvalid)
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	row := s.notifications[retry.WorkspaceKey][retry.EventID]
 	if row == nil {
-		return domain.ErrNotFound
+		return persistence.ErrNotFound
 	}
 	if row.state != "claimed" || row.claimID != retry.ClaimID {
-		return domain.ErrNotOwner
+		return persistence.ErrNotOwner
 	}
 	row.state = "pending"
 	row.claimID = ""
@@ -168,14 +169,16 @@ func (s *triggerEventStore) RetryAwaitEventNotification(
 	return nil
 }
 
-func cloneAwaitNotificationEvent(event *automation.Event) automation.Event {
-	out := *event
-	out.Payload = append([]byte(nil), event.Payload...)
-	if event.SubjectAttrs != nil {
-		out.SubjectAttrs = make(map[string]string, len(event.SubjectAttrs))
-		for key, value := range event.SubjectAttrs {
-			out.SubjectAttrs[key] = value
-		}
+func cloneAwaitNotificationEvent(event *automation.Event) execution.AwaitEvent {
+	return execution.AwaitEvent{
+		WorkspaceKey:  event.WorkspaceKey,
+		EventID:       event.EventID,
+		SourceEventID: event.SourceEventID,
+		EventType:     event.EventType,
+		SubjectRef:    event.SubjectRef,
+		SourceKind:    event.SourceKind,
+		Origin:        string(event.Origin),
+		ActorRef:      event.ActorRef,
+		Payload:       append([]byte(nil), event.Payload...),
 	}
-	return out
 }

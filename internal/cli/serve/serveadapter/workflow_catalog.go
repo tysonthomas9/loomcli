@@ -14,7 +14,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/app/systemeventing"
 	appworkflowauthoring "github.com/tysonthomas9/loomcli/internal/app/workflowauthoring"
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/driver"
 	"github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
 	workflowdefs "github.com/tysonthomas9/loomcli/internal/infra/workflowdistribution/authoring"
@@ -23,6 +22,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 	platformruntime "github.com/tysonthomas9/loomcli/internal/platform/runtime"
 	"github.com/tysonthomas9/loomcli/internal/webui"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/webhooks"
@@ -550,10 +550,10 @@ func newGlobalBuiltinRunnerResolver(
 			runnerName,
 		)
 		if errors.Is(err, workflowcatalog.ErrNotFound) {
-			return nil, domain.ErrNotFound
+			return nil, persistence.ErrNotFound
 		}
 		if errors.Is(err, workflowcatalog.ErrInvalid) {
-			return nil, domain.ErrInvalid
+			return nil, persistence.ErrInvalid
 		}
 		if err != nil {
 			return nil, err

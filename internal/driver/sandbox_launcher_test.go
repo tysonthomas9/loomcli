@@ -12,8 +12,6 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
-
-	"github.com/tysonthomas9/loomcli/internal/domain"
 )
 
 func TestProcessLauncherPassesLaunchSpecEnvVerbatim(t *testing.T) {
@@ -113,12 +111,12 @@ func TestProcessLauncherStartFailureSurfacesFromWait(t *testing.T) {
 type stubSandboxProcess struct {
 	exit      SandboxExit
 	err       error
-	placement domain.TaskRunPlacement
+	placement execution.TaskRunPlacementRecord
 }
 
-func (s *stubSandboxProcess) Wait() (SandboxExit, error)         { return s.exit, s.err }
-func (s *stubSandboxProcess) Kill() error                        { return nil }
-func (s *stubSandboxProcess) Placement() domain.TaskRunPlacement { return s.placement }
+func (s *stubSandboxProcess) Wait() (SandboxExit, error)                  { return s.exit, s.err }
+func (s *stubSandboxProcess) Kill() error                                 { return nil }
+func (s *stubSandboxProcess) Placement() execution.TaskRunPlacementRecord { return s.placement }
 
 type stubSandboxLauncher struct {
 	spec    LaunchSpec
@@ -162,7 +160,7 @@ func TestNodeRunnerRoutesThroughInjectedSandboxLauncher(t *testing.T) {
 	root := t.TempDir()
 	launcher := &stubSandboxLauncher{process: &stubSandboxProcess{
 		exit:      SandboxExit{Stdout: `{"status":"completed","summary":"container ok"}` + "\n"},
-		placement: domain.TaskRunPlacement{Provider: "container", ImageOrSnapshot: "loom-sandbox:1"},
+		placement: execution.TaskRunPlacementRecord{Provider: "container", ImageOrSnapshot: "loom-sandbox:1"},
 	}}
 	result, err := (NodeRunner{Launcher: launcher}).Run(context.Background(), sandboxSeamRunRequest(root))
 	if err != nil {
@@ -195,7 +193,7 @@ func TestNodeRunnerRoutesThroughInjectedSandboxLauncher(t *testing.T) {
 			t.Fatalf("spec.Env missing %q (env = %v)", entry, spec.Env)
 		}
 	}
-	var placement domain.TaskRunPlacement
+	var placement execution.TaskRunPlacementRecord
 	if err := json.Unmarshal([]byte(result.Output[SandboxPlacementOutputKey]), &placement); err != nil {
 		t.Fatalf("decode %s output: %v (output = %+v)", SandboxPlacementOutputKey, err, result.Output)
 	}
@@ -223,7 +221,7 @@ func TestNodeRunnerDefaultLauncherRecordsProcessPlacement(t *testing.T) {
 	if result.Status != execution.DriverRunCompleted {
 		t.Fatalf("result = %+v, want completed", result)
 	}
-	var placement domain.TaskRunPlacement
+	var placement execution.TaskRunPlacementRecord
 	if err := json.Unmarshal([]byte(result.Output[SandboxPlacementOutputKey]), &placement); err != nil {
 		t.Fatalf("decode %s output: %v (output = %+v)", SandboxPlacementOutputKey, err, result.Output)
 	}

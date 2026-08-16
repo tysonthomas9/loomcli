@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
-	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
 // RunOutcomeAwaitComponentID is the registered Execution system component
@@ -26,8 +25,8 @@ type ExecutionAwaitResolver struct {
 }
 
 var (
-	_ store.AtomicAwaitStore  = (*ExecutionAwaitResolver)(nil)
-	_ RunOutcomeAwaitResolver = (*ExecutionAwaitResolver)(nil)
+	_ execution.AtomicAwaitStore = (*ExecutionAwaitResolver)(nil)
+	_ RunOutcomeAwaitResolver    = (*ExecutionAwaitResolver)(nil)
 )
 
 func (resolver *ExecutionAwaitResolver) ResolveAwaitAndResume(

@@ -6,15 +6,14 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/agents"
+
 	"github.com/spf13/cobra"
 
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/cli/managementapi"
-	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/modules/agents"
-	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
 var (
@@ -179,7 +178,7 @@ func runWorkerServiceAdd(cmd *cobra.Command, args []string) error {
 	}
 	record, err := client.CreateAgent(cmd.Context(), agents.CreateAgentCommand{
 		WorkspaceKey: client.Workspace(), AgentID: args[0], Name: name,
-		Kind: agents.AgentKind(kind), DesiredState: agents.DesiredState(desiredState),
+		Kind: kind, DesiredState: desiredState,
 		Behavior:    agents.BehaviorReference{RoleName: workerServiceAddRoleName},
 		ProfileName: workerServiceAddProfileName, ScheduleID: workerServiceAddScheduleID,
 		EventSources: workerServiceAddEventSources, TriggerRefs: workerServiceAddTriggerRefs,
@@ -201,14 +200,14 @@ func runWorkerServiceList(cmd *cobra.Command, _ []string) error {
 		if err != nil {
 			return err
 		}
-		var kind domain.AgentServiceKind
+		var kind agents.AgentKind
 		if strings.TrimSpace(workerServiceListKind) != "" {
 			kind, err = parseAgentServiceKind(workerServiceListKind)
 			if err != nil {
 				return err
 			}
 		}
-		services, err := h.Store.AgentServices().List(ctx, ws, store.AgentServiceFilter{
+		services, err := h.Store.AgentServices().List(ctx, ws, agents.AgentServiceFilter{
 			Kind:         kind,
 			DesiredState: desiredState,
 			RoleName:     workerServiceListRoleName,
@@ -290,7 +289,7 @@ func runWorkerServiceMutation(
 	if patch.DesiredState != nil {
 		if _, err := client.SetAgentDesiredState(cmd.Context(), serviceID, managementapi.SetAgentDesiredStateRequest{
 			ExpectedState: current.DesiredState,
-			DesiredState:  agents.DesiredState(*patch.DesiredState), ExpectedUpdatedAt: current.UpdatedAt,
+			DesiredState:  *patch.DesiredState, ExpectedUpdatedAt: current.UpdatedAt,
 		}); err != nil {
 			return fmt.Errorf("update agent service: %w", err)
 		}
@@ -305,7 +304,7 @@ func runWorkerServiceMutation(
 	return nil
 }
 
-func agentPatchFromStore(patch store.AgentServiceUpdate) agents.AgentPatch {
+func agentPatchFromStore(patch agents.AgentServiceUpdate) agents.AgentPatch {
 	out := agents.AgentPatch{
 		Name: patch.Name, ProfileName: patch.ProfileName, ScheduleID: patch.ScheduleID,
 		EventSources: patch.EventSources, TriggerRefs: patch.TriggerRefs,
@@ -315,7 +314,7 @@ func agentPatchFromStore(patch store.AgentServiceUpdate) agents.AgentPatch {
 		StateRef: patch.StateRef, Metadata: patch.Metadata,
 	}
 	if patch.Kind != nil {
-		value := agents.AgentKind(*patch.Kind)
+		value := *patch.Kind
 		out.Kind = &value
 	}
 	if patch.RoleName != nil || patch.DriverID != nil || patch.DriverVersionID != nil {
@@ -334,7 +333,7 @@ func agentPatchFromStore(patch store.AgentServiceUpdate) agents.AgentPatch {
 	return out
 }
 
-func printAgentService(svc *domain.AgentService) {
+func printAgentService(svc *agents.AgentServiceRecord) {
 	fmt.Printf("Workspace:      %s\n", svc.WorkspaceKey)
 	fmt.Printf("Service ID:     %s\n", svc.ServiceID)
 	fmt.Printf("Name:           %s\n", svc.Name)
@@ -374,7 +373,7 @@ func printAgentService(svc *domain.AgentService) {
 	}
 }
 
-func buildAgentServicePatch(key, value string, unset bool) (store.AgentServiceUpdate, error) {
+func buildAgentServicePatch(key, value string, unset bool) (agents.AgentServiceUpdate, error) {
 	switch key {
 	case "name", "role_name", "profile_name", "schedule_id", "placement_policy",
 		"lease_id", "restart_policy", "budget_policy", "state_ref":
@@ -384,15 +383,15 @@ func buildAgentServicePatch(key, value string, unset bool) (store.AgentServiceUp
 	case "event_sources", "trigger_refs", "permissions", "metadata":
 		return buildAgentServiceListPatch(key, value, unset)
 	default:
-		var patch store.AgentServiceUpdate
+		var patch agents.AgentServiceUpdate
 		return patch, fmt.Errorf("unsupported agent service field %q", key)
 	}
 }
 
 // buildAgentServiceStringPatch handles the plain string agent service
 // fields for buildAgentServicePatch.
-func buildAgentServiceStringPatch(key, value string, unset bool) (store.AgentServiceUpdate, error) {
-	var patch store.AgentServiceUpdate
+func buildAgentServiceStringPatch(key, value string, unset bool) (agents.AgentServiceUpdate, error) {
+	var patch agents.AgentServiceUpdate
 	switch key {
 	case "name":
 		if unset {
@@ -424,8 +423,8 @@ func buildAgentServiceStringPatch(key, value string, unset bool) (store.AgentSer
 
 // buildAgentServiceTypedPatch handles the agent service fields that parse
 // into typed values (enums, ints) for buildAgentServicePatch.
-func buildAgentServiceTypedPatch(key, value string, unset bool) (store.AgentServiceUpdate, error) {
-	var patch store.AgentServiceUpdate
+func buildAgentServiceTypedPatch(key, value string, unset bool) (agents.AgentServiceUpdate, error) {
+	var patch agents.AgentServiceUpdate
 	switch key {
 	case "kind":
 		if unset {
@@ -463,8 +462,8 @@ func buildAgentServiceTypedPatch(key, value string, unset bool) (store.AgentServ
 
 // buildAgentServiceListPatch handles the list- and map-valued agent service
 // fields for buildAgentServicePatch.
-func buildAgentServiceListPatch(key, value string, unset bool) (store.AgentServiceUpdate, error) {
-	var patch store.AgentServiceUpdate
+func buildAgentServiceListPatch(key, value string, unset bool) (agents.AgentServiceUpdate, error) {
+	var patch agents.AgentServiceUpdate
 	switch key {
 	case "event_sources":
 		list := splitWorkerProfileList(value)
@@ -490,27 +489,27 @@ func buildAgentServiceListPatch(key, value string, unset bool) (store.AgentServi
 	return patch, nil
 }
 
-func parseAgentServiceKind(raw string) (domain.AgentServiceKind, error) {
-	kind := domain.AgentServiceKind(strings.TrimSpace(raw))
+func parseAgentServiceKind(raw string) (agents.AgentKind, error) {
+	kind := agents.AgentKind(strings.TrimSpace(raw))
 	switch kind {
-	case domain.AgentServiceKindLead, domain.AgentServiceKindSupport, domain.AgentServiceKindTriage,
-		domain.AgentServiceKindOnCall, domain.AgentServiceKindScheduled, domain.AgentServiceKindMaintenance,
-		domain.AgentServiceKindOrchestrator, domain.AgentServiceKindAlwaysOn, domain.AgentServiceKindCron,
-		domain.AgentServiceKindEvent, domain.AgentServiceKindCampaignOrchestrator:
+	case agents.AgentKindLead, agents.AgentKindSupport, agents.AgentKindTriage,
+		agents.AgentKindOnCall, agents.AgentKindScheduled, agents.AgentKindMaintenance,
+		agents.AgentKindOrchestrator, agents.AgentKindAlwaysOn, agents.AgentKindCron,
+		agents.AgentKindEvent, agents.AgentKindCampaignOrchestrator:
 		return kind, nil
 	default:
 		return "", fmt.Errorf("unsupported agent service kind %q", raw)
 	}
 }
 
-func parseAgentServiceDesiredState(raw string, allowEmpty bool) (domain.AgentServiceDesiredState, error) {
+func parseAgentServiceDesiredState(raw string, allowEmpty bool) (agents.DesiredState, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" && allowEmpty {
 		return "", nil
 	}
-	state := domain.AgentServiceDesiredState(raw)
+	state := agents.DesiredState(raw)
 	switch state {
-	case domain.AgentServiceDesiredRunning, domain.AgentServiceDesiredStopped, domain.AgentServiceDesiredPaused:
+	case agents.DesiredRunning, agents.DesiredStopped, agents.DesiredPaused:
 		return state, nil
 	default:
 		return "", fmt.Errorf("unsupported agent service desired_state %q", raw)

@@ -9,13 +9,16 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/automation"
+
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
+
+	workspaceowner "github.com/tysonthomas9/loomcli/internal/modules/workspace"
+
+	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
-	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
 type runOutcomeCascadeProbe struct {
@@ -172,23 +175,23 @@ func (probe *runOutcomeCascadeAuthorityProbe) ResolveExecutionSystemAuthority(
 func TestRunOutcomeReconcilerFailureRestartConvergesWithoutDuplicate(t *testing.T) {
 	st := memstore.New()
 	ctx := t.Context()
-	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "WS", Name: "workspace"}); err != nil {
+	if _, err := st.Workspaces().Create(ctx, workspaceowner.WorkspaceCreate{Key: "WS", Name: "workspace"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.Drivers().Create(ctx, store.DriverCreate{
+	if _, err := st.Drivers().Create(ctx, workflowcatalog.DriverCreate{
 		WorkspaceKey: "WS", DriverID: "driver", Name: "driver",
 		OwnerType: workflowcatalog.DriverOwnerSystem, Status: workflowcatalog.DriverStatusActive,
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.DriverVersions().Create(ctx, store.DriverVersionCreate{
+	if _, err := st.DriverVersions().Create(ctx, workflowcatalog.DriverVersionCreate{
 		WorkspaceKey: "WS", DriverID: "driver", VersionID: "v1", Version: 1,
 		SourceDigest: "sha256:source", BundleDigest: "sha256:bundle",
 		ValidationStatus: workflowcatalog.DriverVersionValidationPassed,
 	}); err != nil {
 		t.Fatal(err)
 	}
-	created, err := st.DriverRuns().Create(ctx, store.DriverRunCreate{
+	created, err := st.DriverRuns().Create(ctx, execution.DriverRunCreate{
 		WorkspaceKey: "WS", RunID: "run-1", DriverID: "driver", DriverVersionID: "v1", EpicID: "WS-1",
 	})
 	if err != nil {
@@ -198,21 +201,21 @@ func TestRunOutcomeReconcilerFailureRestartConvergesWithoutDuplicate(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	final, err := st.DriverRuns().Finish(ctx, "WS", created.RunID, store.DriverRunFinish{
+	final, err := st.DriverRuns().Finish(ctx, "WS", created.RunID, execution.DriverRunFinish{
 		NodeID: "node", LeaseID: "lease", FencingToken: claimed.FencingToken,
-		Status: domain.DriverRunFailed, Summary: "runtime failed", ErrorClass: "driver_runtime",
+		Status: execution.DriverRunFailed, Summary: "runtime failed", ErrorClass: "driver_runtime",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	failing := &recordingRunOutcomePublisher{err: errors.New("automation unavailable")}
-	outbox := st.DriverRuns().(store.DriverRunOutcomeStore)
+	outbox := st.DriverRuns().(execution.DriverRunOutcomeStore)
 	notifier, err := newTestRunOutcomeAwaitNotifier(st.Awaits())
 	if err != nil {
 		t.Fatal(err)
 	}
-	journal := st.TriggerEvents().(store.TriggerEventAppender)
+	journal := st.TriggerEvents().(automation.TriggerEventAppender)
 	first, err := newTestRunOutcomeReconciler(outbox, notifier, journal, failing, "WS", nil)
 	if err != nil {
 		t.Fatal(err)
@@ -259,7 +262,7 @@ func TestRunOutcomeReconcilerRecoversFinalizeBeforeCascadeCrash(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	journal := st.TriggerEvents().(store.TriggerEventAppender)
+	journal := st.TriggerEvents().(automation.TriggerEventAppender)
 	queue, queueAuthorities, err := testRunOutcomeQueue(outbox)
 	if err != nil {
 		t.Fatal(err)
@@ -337,7 +340,7 @@ func TestRunOutcomeReconcilerRetriesTerminalWorkBeforeChildCascade(t *testing.T)
 	}
 	probe := &runOutcomeCascadeProbe{terminalErr: errors.New("terminal work response lost")}
 	reconciler, err := NewRunOutcomeReconcilerWithExecution(
-		queue, noOpTerminalDriverRunWorkRecoveryQueue{}, notifier, st.TriggerEvents().(store.TriggerEventAppender), nil, "WS", nil,
+		queue, noOpTerminalDriverRunWorkRecoveryQueue{}, notifier, st.TriggerEvents().(automation.TriggerEventAppender), nil, "WS", nil,
 		probe, queueAuthorities, string(execution.DriverRunOutcomeComponentID),
 	)
 	if err != nil {
@@ -371,7 +374,7 @@ func TestRunOutcomeReconcilerTerminalWorkQueueContinuesAfterRowFailure(t *testin
 	}}
 	cascades := &runOutcomeCascadeProbe{terminalErrors: map[string]error{"run-fails": errors.New("temporary conflict")}}
 	reconciler, err := NewRunOutcomeReconcilerWithExecution(
-		ordinary, recovery, notifier, st.TriggerEvents().(store.TriggerEventAppender), nil, "WS", nil,
+		ordinary, recovery, notifier, st.TriggerEvents().(automation.TriggerEventAppender), nil, "WS", nil,
 		cascades, authorities, string(execution.DriverRunOutcomeComponentID),
 	)
 	if err != nil {
@@ -410,7 +413,7 @@ func TestRunOutcomeReconcilerRecoveryClaimFailureDoesNotBlockOrdinaryDelivery(t 
 	recovery := &terminalWorkRecoveryQueueAPIProbe{claimErr: errors.New("recovery queue unavailable")}
 	cascades := &runOutcomeCascadeProbe{}
 	reconciler, err := NewRunOutcomeReconcilerWithExecution(
-		ordinary, recovery, notifier, st.TriggerEvents().(store.TriggerEventAppender), nil, "WS", nil,
+		ordinary, recovery, notifier, st.TriggerEvents().(automation.TriggerEventAppender), nil, "WS", nil,
 		cascades, authorities, string(execution.DriverRunOutcomeComponentID),
 	)
 	if err != nil {
@@ -444,7 +447,7 @@ func TestRunOutcomeReconcilerOrdinaryClaimFailureDoesNotBlockRecovery(t *testing
 	}}}
 	cascades := &runOutcomeCascadeProbe{}
 	reconciler, err := NewRunOutcomeReconcilerWithExecution(
-		ordinary, recovery, notifier, st.TriggerEvents().(store.TriggerEventAppender), nil, "WS", nil,
+		ordinary, recovery, notifier, st.TriggerEvents().(automation.TriggerEventAppender), nil, "WS", nil,
 		cascades, authorities, string(execution.DriverRunOutcomeComponentID),
 	)
 	if err != nil {
@@ -480,7 +483,7 @@ func TestRunOutcomeReconcilerSameRunInterleavingUsesDeterministicRecoveryAndSepa
 	recovery := &terminalWorkRecoveryQueueAPIProbe{outcomes: []execution.DriverRunOutcome{persisted}}
 	cascades := &runOutcomeCascadeProbe{}
 	reconciler, err := NewRunOutcomeReconcilerWithExecution(
-		ordinary, recovery, notifier, st.TriggerEvents().(store.TriggerEventAppender), nil, "WS", nil,
+		ordinary, recovery, notifier, st.TriggerEvents().(automation.TriggerEventAppender), nil, "WS", nil,
 		cascades, authorities, string(execution.DriverRunOutcomeComponentID),
 	)
 	if err != nil {
@@ -514,7 +517,7 @@ func TestRunOutcomeReconcilerRecoversCompositionWithoutSynchronousEmitOrAutomati
 		t.Fatal(err)
 	}
 	reconciler, err := newTestRunOutcomeReconciler(
-		outbox, notifier, st.TriggerEvents().(store.TriggerEventAppender), nil, "WS", nil,
+		outbox, notifier, st.TriggerEvents().(automation.TriggerEventAppender), nil, "WS", nil,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -533,7 +536,7 @@ func TestRunOutcomeReconcilerJournalsBeforeLateRegistrationWithoutAutomation(t *
 		t.Fatal(err)
 	}
 	reconciler, err := newTestRunOutcomeReconciler(
-		outbox, notifier, st.TriggerEvents().(store.TriggerEventAppender), nil, "WS", nil,
+		outbox, notifier, st.TriggerEvents().(automation.TriggerEventAppender), nil, "WS", nil,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -543,13 +546,13 @@ func TestRunOutcomeReconcilerJournalsBeforeLateRegistrationWithoutAutomation(t *
 	}
 
 	lateParent := createClaimedOutcomeParent(t, st, "late-parent")
-	result, err := st.Awaits().RegisterAwaitAndCheck(t.Context(), "WS", store.AwaitRegistration{
-		InstanceKey: domain.AwaitInstanceKey(lateParent.RunID, 1), RunID: lateParent.RunID,
+	result, err := st.Awaits().RegisterAwaitAndCheck(t.Context(), "WS", execution.AwaitRegistration{
+		InstanceKey: execution.AwaitInstanceKey(lateParent.RunID, 1), RunID: lateParent.RunID,
 		Pattern: RunFinishedSubjectKey("child"), ActorAllow: []string{RunFinishedActor},
 		Deadline: time.Now().Add(time.Hour).UTC(),
 	})
 	if err != nil || !result.Satisfied || result.Instance == nil ||
-		result.Instance.SatisfiedByEventID != RunFinishedEventID("child", domain.DriverRunCompleted) ||
+		result.Instance.SatisfiedByEventID != RunFinishedEventID("child", execution.DriverRunCompleted) ||
 		result.Instance.SatisfiedActor != RunFinishedActor {
 		t.Fatalf("late registration = %+v, %v", result, err)
 	}
@@ -566,7 +569,7 @@ func TestRunOutcomeReconcilerJournalClosesListRegisterRace(t *testing.T) {
 		inner: inner, awaits: st.Awaits(), parent: lateParent,
 	}
 	reconciler, err := newTestRunOutcomeReconciler(
-		outbox, notifier, st.TriggerEvents().(store.TriggerEventAppender), nil, "WS", nil,
+		outbox, notifier, st.TriggerEvents().(automation.TriggerEventAppender), nil, "WS", nil,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -575,7 +578,7 @@ func TestRunOutcomeReconcilerJournalClosesListRegisterRace(t *testing.T) {
 		t.Fatal(err)
 	}
 	if notifier.result == nil || !notifier.result.Satisfied || notifier.result.Instance == nil ||
-		notifier.result.Instance.SatisfiedByEventID != RunFinishedEventID("child", domain.DriverRunCompleted) {
+		notifier.result.Instance.SatisfiedByEventID != RunFinishedEventID("child", execution.DriverRunCompleted) {
 		t.Fatalf("registration after notifier list = %+v", notifier.result)
 	}
 }
@@ -591,7 +594,7 @@ func TestRunOutcomeReconcilerBoundsHugeTerminalPayloadWithoutStrandingParent(t *
 		t.Fatal(err)
 	}
 	reconciler, err := newTestRunOutcomeReconciler(
-		outbox, notifier, st.TriggerEvents().(store.TriggerEventAppender), nil, "WS", nil,
+		outbox, notifier, st.TriggerEvents().(automation.TriggerEventAppender), nil, "WS", nil,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -600,15 +603,15 @@ func TestRunOutcomeReconcilerBoundsHugeTerminalPayloadWithoutStrandingParent(t *
 		t.Fatal(err)
 	}
 	assertParentResumedByChildOutcome(t, st, parent.RunID)
-	instance, err := st.Awaits().GetSatisfiedAwait(t.Context(), "WS", domain.AwaitInstanceKey(parent.RunID, 1))
-	if err != nil || len(instance.SatisfiedPayload) > domain.DefaultAwaitResumePayloadCap {
+	instance, err := st.Awaits().GetSatisfiedAwait(t.Context(), "WS", execution.AwaitInstanceKey(parent.RunID, 1))
+	if err != nil || len(instance.SatisfiedPayload) > execution.DefaultAwaitResumePayloadCap {
 		t.Fatalf("bounded satisfied payload = %d bytes, %v", len(instance.SatisfiedPayload), err)
 	}
 	var payload runFinishedPayload
 	if err := json.Unmarshal(instance.SatisfiedPayload, &payload); err != nil {
 		t.Fatal(err)
 	}
-	if payload.RunID != "child" || payload.Status != string(domain.DriverRunCompleted) || !payload.Truncated {
+	if payload.RunID != "child" || payload.Status != string(execution.DriverRunCompleted) || !payload.Truncated {
 		t.Fatalf("bounded payload = %+v", payload)
 	}
 }
@@ -620,7 +623,7 @@ func TestRunOutcomeReconcilerResponseLossAfterAtomicResolveConvergesOnRestart(t 
 		t.Fatal(err)
 	}
 	losingResponse := &responseLossRunOutcomeAwaitNotifier{inner: atomicNotifier}
-	journal := st.TriggerEvents().(store.TriggerEventAppender)
+	journal := st.TriggerEvents().(automation.TriggerEventAppender)
 	first, err := newTestRunOutcomeReconciler(outbox, losingResponse, journal, nil, "WS", nil)
 	if err != nil {
 		t.Fatal(err)
@@ -651,17 +654,17 @@ type responseLossRunOutcomeAwaitNotifier struct {
 
 type registerAfterRunOutcomeListNotifier struct {
 	inner  RunOutcomeAwaitNotifier
-	awaits store.AwaitStore
-	parent *domain.DriverRun
-	result *store.AwaitResult
+	awaits execution.AwaitStore
+	parent *execution.DriverRunRecord
+	result *execution.AwaitRegistrationResult
 }
 
 func (notifier *registerAfterRunOutcomeListNotifier) NotifyRunOutcomeAwaits(ctx context.Context, outcome RunOutcome) error {
 	if err := notifier.inner.NotifyRunOutcomeAwaits(ctx, outcome); err != nil {
 		return err
 	}
-	result, err := notifier.awaits.RegisterAwaitAndCheck(ctx, outcome.WorkspaceKey, store.AwaitRegistration{
-		InstanceKey: domain.AwaitInstanceKey(notifier.parent.RunID, 1), RunID: notifier.parent.RunID,
+	result, err := notifier.awaits.RegisterAwaitAndCheck(ctx, outcome.WorkspaceKey, execution.AwaitRegistration{
+		InstanceKey: execution.AwaitInstanceKey(notifier.parent.RunID, 1), RunID: notifier.parent.RunID,
 		Pattern: RunFinishedSubjectKey(outcome.RunID), ActorAllow: []string{RunFinishedActor},
 		Deadline: time.Now().Add(time.Hour).UTC(),
 	})
@@ -682,34 +685,34 @@ func (notifier *responseLossRunOutcomeAwaitNotifier) NotifyRunOutcomeAwaits(ctx 
 
 func setupDurableCompositionOutcome(
 	t *testing.T,
-) (*memstore.Store, store.DriverRunOutcomeStore, *domain.DriverRun, time.Time) {
+) (*memstore.Store, execution.DriverRunOutcomeStore, *execution.DriverRunRecord, time.Time) {
 	return setupDurableCompositionOutcomeWithDetails(t, "done", "")
 }
 
 func setupDurableCompositionOutcomeWithDetails(
 	t *testing.T,
 	summary, errorClass string,
-) (*memstore.Store, store.DriverRunOutcomeStore, *domain.DriverRun, time.Time) {
+) (*memstore.Store, execution.DriverRunOutcomeStore, *execution.DriverRunRecord, time.Time) {
 	t.Helper()
 	st := memstore.New()
 	ctx := t.Context()
-	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "WS", Name: "workspace"}); err != nil {
+	if _, err := st.Workspaces().Create(ctx, workspaceowner.WorkspaceCreate{Key: "WS", Name: "workspace"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.Drivers().Create(ctx, store.DriverCreate{
+	if _, err := st.Drivers().Create(ctx, workflowcatalog.DriverCreate{
 		WorkspaceKey: "WS", DriverID: "driver", Name: "driver",
 		OwnerType: workflowcatalog.DriverOwnerSystem, Status: workflowcatalog.DriverStatusActive,
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.DriverVersions().Create(ctx, store.DriverVersionCreate{
+	if _, err := st.DriverVersions().Create(ctx, workflowcatalog.DriverVersionCreate{
 		WorkspaceKey: "WS", DriverID: "driver", VersionID: "v1", Version: 1,
 		SourceDigest: "sha256:source", BundleDigest: "sha256:bundle",
 		ValidationStatus: workflowcatalog.DriverVersionValidationPassed,
 	}); err != nil {
 		t.Fatal(err)
 	}
-	parent, err := st.DriverRuns().Create(ctx, store.DriverRunCreate{
+	parent, err := st.DriverRuns().Create(ctx, execution.DriverRunCreate{
 		WorkspaceKey: "WS", RunID: "parent", DriverID: "driver", DriverVersionID: "v1",
 	})
 	if err != nil {
@@ -719,8 +722,8 @@ func setupDurableCompositionOutcomeWithDetails(
 	if err != nil {
 		t.Fatal(err)
 	}
-	instanceKey := domain.AwaitInstanceKey(parent.RunID, 1)
-	if _, err := st.Awaits().RegisterAwaitAndCheck(ctx, "WS", store.AwaitRegistration{
+	instanceKey := execution.AwaitInstanceKey(parent.RunID, 1)
+	if _, err := st.Awaits().RegisterAwaitAndCheck(ctx, "WS", execution.AwaitRegistration{
 		InstanceKey: instanceKey, RunID: parent.RunID, Pattern: RunFinishedSubjectKey("child"),
 		ActorAllow: []string{RunFinishedActor}, Deadline: time.Now().Add(time.Hour).UTC(),
 	}); err != nil {
@@ -729,7 +732,7 @@ func setupDurableCompositionOutcomeWithDetails(
 	if _, err := st.DriverRuns().Suspend(ctx, "WS", parent.RunID, "node", "lease", parent.FencingToken, instanceKey); err != nil {
 		t.Fatal(err)
 	}
-	child, err := st.DriverRuns().Create(ctx, store.DriverRunCreate{
+	child, err := st.DriverRuns().Create(ctx, execution.DriverRunCreate{
 		WorkspaceKey: "WS", RunID: "child", DriverID: "driver", DriverVersionID: "v1", ParentRunID: parent.RunID,
 	})
 	if err != nil {
@@ -739,19 +742,19 @@ func setupDurableCompositionOutcomeWithDetails(
 	if err != nil {
 		t.Fatal(err)
 	}
-	final, err := st.DriverRuns().Finish(ctx, "WS", child.RunID, store.DriverRunFinish{
+	final, err := st.DriverRuns().Finish(ctx, "WS", child.RunID, execution.DriverRunFinish{
 		NodeID: "child-node", LeaseID: "child-lease", FencingToken: child.FencingToken,
-		Status: domain.DriverRunCompleted, Summary: summary, ErrorClass: errorClass,
+		Status: execution.DriverRunCompleted, Summary: summary, ErrorClass: errorClass,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	return st, st.DriverRuns().(store.DriverRunOutcomeStore), parent, final.FinishedAt.UTC()
+	return st, st.DriverRuns().(execution.DriverRunOutcomeStore), parent, final.FinishedAt.UTC()
 }
 
-func createClaimedOutcomeParent(t *testing.T, st *memstore.Store, runID string) *domain.DriverRun {
+func createClaimedOutcomeParent(t *testing.T, st *memstore.Store, runID string) *execution.DriverRunRecord {
 	t.Helper()
-	run, err := st.DriverRuns().Create(t.Context(), store.DriverRunCreate{
+	run, err := st.DriverRuns().Create(t.Context(), execution.DriverRunCreate{
 		WorkspaceKey: "WS", RunID: runID, DriverID: "driver", DriverVersionID: "v1",
 	})
 	if err != nil {
@@ -764,20 +767,20 @@ func createClaimedOutcomeParent(t *testing.T, st *memstore.Store, runID string) 
 	return run
 }
 
-func assertParentResumedByChildOutcome(t *testing.T, st store.Store, runID string) {
+func assertParentResumedByChildOutcome(t *testing.T, st *memstore.Store, runID string) {
 	t.Helper()
 	run, err := st.DriverRuns().Get(t.Context(), "WS", runID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if run.Status != domain.DriverRunQueued || run.ResumeSourceEventID != RunFinishedEventID("child", domain.DriverRunCompleted) {
+	if run.Status != execution.DriverRunQueued || run.ResumeSourceEventID != RunFinishedEventID("child", execution.DriverRunCompleted) {
 		t.Fatalf("parent run = %+v", run)
 	}
 }
 
-func assertNoClaimableRunOutcomes(t *testing.T, outbox store.DriverRunOutcomeStore, now time.Time) {
+func assertNoClaimableRunOutcomes(t *testing.T, outbox execution.DriverRunOutcomeStore, now time.Time) {
 	t.Helper()
-	values, err := outbox.ClaimDriverRunOutcomes(t.Context(), store.DriverRunOutcomeClaim{
+	values, err := outbox.ClaimDriverRunOutcomes(t.Context(), execution.DriverRunOutcomeLease{
 		WorkspaceKey: "WS", ClaimID: "assert-completed", Before: now, ClaimUntil: now.Add(time.Minute), Limit: 10,
 	})
 	if err != nil {
@@ -788,8 +791,8 @@ func assertNoClaimableRunOutcomes(t *testing.T, outbox store.DriverRunOutcomeSto
 	}
 }
 
-func newTestRunOutcomeAwaitNotifier(awaits store.AwaitStore) (RunOutcomeAwaitNotifier, error) {
-	resolver, ok := awaits.(store.RunOutcomeAwaitStore)
+func newTestRunOutcomeAwaitNotifier(awaits execution.AwaitStore) (RunOutcomeAwaitNotifier, error) {
+	resolver, ok := awaits.(execution.RunOutcomeAwaitStore)
 	if !ok {
 		return nil, errors.New("test await store lacks run-outcome resolver")
 	}

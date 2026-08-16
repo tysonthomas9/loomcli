@@ -12,10 +12,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/app/agentprovisioning"
-	"github.com/tysonthomas9/loomcli/internal/domain"
-	workflowdefs "github.com/tysonthomas9/loomcli/internal/infra/workflowdistribution/authoring"
 	agentsmodule "github.com/tysonthomas9/loomcli/internal/modules/agents"
+
+	"github.com/tysonthomas9/loomcli/internal/app/agentprovisioning"
+	workflowdefs "github.com/tysonthomas9/loomcli/internal/infra/workflowdistribution/authoring"
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
@@ -85,9 +85,9 @@ func (m *Module) createAgent(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	switch strings.ToLower(strings.TrimSpace(kind)) {
-	case "", string(domain.RoleKindInteractive):
+	case "", string(agentsmodule.RoleKindInteractive):
 		m.createCanonicalInteractiveAgent(w, r, ws, body)
-	case string(domain.RoleKindWorker):
+	case string(agentsmodule.RoleKindWorker):
 		handler.RespondError(w, http.StatusBadRequest, "background agents must be created through AgentProvisioning")
 	case "supervised":
 		handler.RespondError(w, http.StatusBadRequest, "supervised agents were retired; create an interactive agent or a managed prompt agent")
@@ -103,7 +103,7 @@ type promptAgentCreatePlan struct {
 	roleName   string
 	sourceKind string
 	enabled    bool
-	desired    domain.AgentServiceDesiredState
+	desired    agentsmodule.DesiredState
 }
 
 const (
@@ -134,9 +134,9 @@ func parsePromptAgentCreatePlan(body []byte) (promptAgentCreatePlan, error) {
 	if sourceKind == promptAgentSourceCron && strings.TrimSpace(req.Trigger.Schedule) == "" {
 		return promptAgentCreatePlan{}, errors.New("schedule is required for a cron prompt agent")
 	}
-	desired := domain.AgentServiceDesiredPaused
+	desired := agentsmodule.DesiredPaused
 	if enabled {
-		desired = domain.AgentServiceDesiredRunning
+		desired = agentsmodule.DesiredRunning
 	}
 	return promptAgentCreatePlan{
 		request:    req,
@@ -474,7 +474,7 @@ func (m *Module) requireAgentRuns(w http.ResponseWriter) bool {
 	return false
 }
 
-func (m *Module) agentServiceForHistory(ctx context.Context, ws, id string) (*domain.AgentService, error) {
+func (m *Module) agentServiceForHistory(ctx context.Context, ws, id string) (*agentsmodule.AgentServiceRecord, error) {
 	return m.getAgentRecord(ctx, ws, id)
 }
 
@@ -482,7 +482,7 @@ func (m *Module) listAgentServiceRunsForHistory(
 	ctx context.Context,
 	ws, agentID string,
 	limit int,
-) ([]*domain.DriverRun, error) {
+) ([]*execution.DriverRunRecord, error) {
 	runs, err := m.agentRuns.ListDriverRuns(ctx, execution.DriverRunQuery{
 		WorkspaceKey: ws, AgentServiceID: agentID, Limit: limit,
 	})
@@ -492,19 +492,19 @@ func (m *Module) listAgentServiceRunsForHistory(
 	return agentHistoryRuns(runs), nil
 }
 
-func agentHistoryRuns(runs []*execution.DriverRun) []*domain.DriverRun {
-	out := make([]*domain.DriverRun, 0, len(runs))
+func agentHistoryRuns(runs []*execution.DriverRun) []*execution.DriverRunRecord {
+	out := make([]*execution.DriverRunRecord, 0, len(runs))
 	for _, run := range runs {
 		if run == nil {
 			continue
 		}
-		out = append(out, &domain.DriverRun{
+		out = append(out, &execution.DriverRunRecord{
 			WorkspaceKey: run.WorkspaceKey, RunID: run.RunID,
 			DriverID: run.DriverID, DriverVersionID: run.DriverVersionID,
 			Entrypoint: run.Entrypoint, SourceKind: run.SourceKind, SourceRef: run.SourceRef,
 			EpicID: run.EpicID, ParentRunID: run.ParentRunID,
 			TriggerBindingID: run.TriggerBindingID, AgentServiceID: run.AgentServiceID,
-			SubjectKey: run.SubjectKey, Status: domain.DriverRunStatus(run.Status),
+			SubjectKey: run.SubjectKey, Status: run.Status,
 			NodeID: run.Owner.NodeID, LeaseID: run.Owner.LeaseID, FencingToken: run.Owner.FencingToken,
 			IdempotencyKey: run.IdempotencyKey, Payload: append([]byte(nil), run.Payload...),
 			Output: cloneStringMap(run.Output), Summary: run.Summary, ErrorClass: run.ErrorClass,

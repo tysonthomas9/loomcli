@@ -589,13 +589,13 @@ func TestAnalyzeProfileRejectsForbiddenTypeInsideAllowedGenericWrapper(t *testin
 		t.Fatal(err)
 	}
 	writeGoFile(t, root, "internal/domain/domain.go", "package domain\ntype Agent struct{}\n")
-	writeGoFile(t, root, "internal/neutral/box.go", "package neutral\ntype Box[T any] struct { Value T }\n")
+	writeGoFile(t, root, "internal/platform/persistence/box.go", "package persistence\ntype Box[T any] struct { Value T }\n")
 	writeGoFile(t, root, "internal/modules/workspace/api.go", `package workspace
 import (
 	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/neutral"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
-func Leaked() neutral.Box[domain.Agent] { return neutral.Box[domain.Agent]{} }
+func Leaked() persistence.Box[domain.Agent] { return persistence.Box[domain.Agent]{} }
 `)
 
 	violations, err := analyzeProfile(root, AnalysisProfile{

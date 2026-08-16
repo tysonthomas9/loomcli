@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	agentsmodule "github.com/tysonthomas9/loomcli/internal/modules/agents"
 	loomapi "github.com/tysonthomas9/loomcli/internal/platform/loomapi/gen"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
@@ -47,7 +46,7 @@ func (m *Module) createCanonicalInteractiveAgent(
 		return
 	}
 	metadata, err := agentsmodule.WithRuntimeMetadata(nil, agentsmodule.RuntimeMetadata{
-		RoleKind: string(domain.RoleKindInteractive), Backend: input.Backend,
+		RoleKind: string(agentsmodule.RoleKindInteractive), Backend: input.Backend,
 		FallbackBackends: input.FallbackBackends, Repos: input.Repos,
 		RepoGroups: input.RepoGroups, CrossRepo: input.CrossRepo,
 	})
@@ -124,10 +123,10 @@ func parseCanonicalInteractiveAgentCreate(
 	if input.RoleName == "" {
 		return input, "role_name required"
 	}
-	if input.Kind == string(domain.RoleKindWorker) {
+	if input.Kind == string(agentsmodule.RoleKindWorker) {
 		return input, "background agents must be created from a role behavior through AgentProvisioning"
 	}
-	if input.Kind != "" && input.Kind != string(domain.RoleKindInteractive) {
+	if input.Kind != "" && input.Kind != string(agentsmodule.RoleKindInteractive) {
 		return input, "kind must be interactive"
 	}
 	return input, ""
@@ -145,7 +144,7 @@ func (m *Module) ensureCanonicalInteractiveRole(
 			writeAgentRecordError(w, agentsmodule.ErrInvalidPersistedState, "canonical Agents returned no Role")
 			return false
 		}
-		if strings.ToLower(strings.TrimSpace(existing.Kind)) != string(domain.RoleKindInteractive) {
+		if strings.ToLower(strings.TrimSpace(existing.Kind)) != string(agentsmodule.RoleKindInteractive) {
 			writeAgentConflictError(w, "role already exists and is not interactive")
 			return false
 		}
@@ -168,13 +167,13 @@ func (m *Module) ensureCanonicalInteractiveRole(
 		return false
 	}
 	description := "Interactive terminal agent"
-	if domain.IsInteractiveRoleName(input.RoleName) {
+	if agentsmodule.IsInteractiveRoleName(input.RoleName) {
 		description = "Lead/orchestrator interactive"
 	}
 	_, err = m.agentIdentityCreator.CreateRole(r.Context(), auth, agentsmodule.CreateRoleCommand{
 		WorkspaceKey: workspace,
 		Role: agentsmodule.RoleDefinition{
-			Name: input.RoleName, Kind: string(domain.RoleKindInteractive),
+			Name: input.RoleName, Kind: string(agentsmodule.RoleKindInteractive),
 			Description: description, Prompt: input.Prompt, PromptFile: input.PromptFile,
 			Backend: input.Backend,
 		},
@@ -188,7 +187,7 @@ func (m *Module) ensureCanonicalInteractiveRole(
 
 func normalizeInteractiveRoleName(value string) string {
 	trimmed := strings.TrimSpace(value)
-	if domain.IsInteractiveRoleName(trimmed) {
+	if agentsmodule.IsInteractiveRoleName(trimmed) {
 		return strings.ToLower(trimmed)
 	}
 	return trimmed

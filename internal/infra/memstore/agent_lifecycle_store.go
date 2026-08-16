@@ -7,41 +7,42 @@ import (
 	"sync"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/modules/agents"
+
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 type agentOwnershipLeaseStore struct {
 	mu    sync.RWMutex
-	items map[string]map[string]*domain.AgentOwnershipLease
+	items map[string]map[string]*agents.OwnershipRecord
 	next  int64
 }
 
 func newAgentOwnershipLeaseStore() *agentOwnershipLeaseStore {
-	return &agentOwnershipLeaseStore{items: make(map[string]map[string]*domain.AgentOwnershipLease)}
+	return &agentOwnershipLeaseStore{items: make(map[string]map[string]*agents.OwnershipRecord)}
 }
 
-func (s *agentOwnershipLeaseStore) Acquire(_ context.Context, in store.AgentOwnershipLeaseAcquire) (*domain.AgentOwnershipLease, error) {
+func (s *agentOwnershipLeaseStore) Acquire(_ context.Context, in agents.AgentOwnershipLeaseAcquire) (*agents.OwnershipRecord, error) {
 	if err := validateAgentOwnershipLeaseAcquire(in); err != nil {
 		return nil, err
 	}
 	return s.acquireAgentOwnershipLease(in)
 }
 
-func validateAgentOwnershipLeaseAcquire(in store.AgentOwnershipLeaseAcquire) error {
+func validateAgentOwnershipLeaseAcquire(in agents.AgentOwnershipLeaseAcquire) error {
 	if in.WorkspaceKey == "" || in.AgentID == "" || in.OwnerID == "" {
-		return fmt.Errorf("workspace_key + agent_id + owner_id required: %w", domain.ErrInvalid)
+		return fmt.Errorf("workspace_key + agent_id + owner_id required: %w", persistence.ErrInvalid)
 	}
 	return nil
 }
 
 func (s *agentOwnershipLeaseStore) acquireAgentOwnershipLease(
-	in store.AgentOwnershipLeaseAcquire,
-) (*domain.AgentOwnershipLease, error) {
+	in agents.AgentOwnershipLeaseAcquire,
+) (*agents.OwnershipRecord, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.items[in.WorkspaceKey] == nil {
-		s.items[in.WorkspaceKey] = make(map[string]*domain.AgentOwnershipLease)
+		s.items[in.WorkspaceKey] = make(map[string]*agents.OwnershipRecord)
 	}
 	now := time.Now().UTC()
 	if err := s.validateExistingAgentOwnershipLeaseLocked(in, now); err != nil {
@@ -53,23 +54,23 @@ func (s *agentOwnershipLeaseStore) acquireAgentOwnershipLease(
 }
 
 func (s *agentOwnershipLeaseStore) validateExistingAgentOwnershipLeaseLocked(
-	in store.AgentOwnershipLeaseAcquire,
+	in agents.AgentOwnershipLeaseAcquire,
 	now time.Time,
 ) error {
 	existing := s.items[in.WorkspaceKey][in.AgentID]
-	if existing == nil || existing.Status != domain.AgentLeaseActive || !existing.ExpiresAt.After(now) {
+	if existing == nil || existing.Status != agents.OwnershipActive || !existing.ExpiresAt.After(now) {
 		return nil
 	}
 	if existing.OwnerID != in.OwnerID {
-		return fmt.Errorf("agent ownership lease %q in workspace %q: %w", in.AgentID, in.WorkspaceKey, domain.ErrAlreadyClaimed)
+		return fmt.Errorf("agent ownership lease %q in workspace %q: %w", in.AgentID, in.WorkspaceKey, persistence.ErrAlreadyClaimed)
 	}
 	return nil
 }
 
 func (s *agentOwnershipLeaseStore) newAgentOwnershipLeaseLocked(
-	in store.AgentOwnershipLeaseAcquire,
+	in agents.AgentOwnershipLeaseAcquire,
 	now time.Time,
-) *domain.AgentOwnershipLease {
+) *agents.OwnershipRecord {
 	s.next++
 	ttl := in.TTL
 	if ttl <= 0 {
@@ -81,10 +82,10 @@ func (s *agentOwnershipLeaseStore) newAgentOwnershipLeaseLocked(
 	}
 	provider := in.RuntimeProvider
 	if provider == "" {
-		provider = domain.RuntimeProviderLocal
+		provider = agents.RuntimeProviderLocal
 	}
 	token := fmt.Sprintf("ownership-token-%d", s.next)
-	return &domain.AgentOwnershipLease{
+	return &agents.OwnershipRecord{
 		WorkspaceKey:    in.WorkspaceKey,
 		AgentID:         in.AgentID,
 		LeaseID:         id,
@@ -93,7 +94,7 @@ func (s *agentOwnershipLeaseStore) newAgentOwnershipLeaseLocked(
 		NodeID:          in.NodeID,
 		Token:           token,
 		FencingToken:    s.next,
-		Status:          domain.AgentLeaseActive,
+		Status:          agents.OwnershipActive,
 		ExpiresAt:       now.Add(ttl),
 		LastHeartbeat:   now,
 		CreatedAt:       now,
@@ -101,20 +102,20 @@ func (s *agentOwnershipLeaseStore) newAgentOwnershipLeaseLocked(
 	}
 }
 
-func (s *agentOwnershipLeaseStore) Get(_ context.Context, ws, agentID string) (*domain.AgentOwnershipLease, error) {
+func (s *agentOwnershipLeaseStore) Get(_ context.Context, ws, agentID string) (*agents.OwnershipRecord, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	lease, ok := s.items[ws][agentID]
 	if !ok {
-		return nil, fmt.Errorf("agent ownership lease %q in workspace %q: %w", agentID, ws, domain.ErrNotFound)
+		return nil, fmt.Errorf("agent ownership lease %q in workspace %q: %w", agentID, ws, persistence.ErrNotFound)
 	}
 	return cloneAgentOwnershipLease(lease), nil
 }
 
-func (s *agentOwnershipLeaseStore) List(_ context.Context, ws string, filter store.AgentOwnershipLeaseFilter) ([]*domain.AgentOwnershipLease, error) {
+func (s *agentOwnershipLeaseStore) List(_ context.Context, ws string, filter agents.AgentOwnershipLeaseFilter) ([]*agents.OwnershipRecord, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	out := make([]*domain.AgentOwnershipLease, 0, len(s.items[ws]))
+	out := make([]*agents.OwnershipRecord, 0, len(s.items[ws]))
 	now := time.Now().UTC()
 	for _, stored := range s.items[ws] {
 		lease := cloneAgentOwnershipLease(stored)
@@ -130,12 +131,12 @@ func (s *agentOwnershipLeaseStore) List(_ context.Context, ws string, filter sto
 	return out, nil
 }
 
-func (s *agentOwnershipLeaseStore) Heartbeat(_ context.Context, ws, agentID, token string, ttl time.Duration) (*domain.AgentOwnershipLease, error) {
+func (s *agentOwnershipLeaseStore) Heartbeat(_ context.Context, ws, agentID, token string, ttl time.Duration) (*agents.OwnershipRecord, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	lease, ok := s.items[ws][agentID]
-	if !ok || lease.Token != token || lease.Status != domain.AgentLeaseActive || !lease.ExpiresAt.After(time.Now().UTC()) {
-		return nil, fmt.Errorf("agent ownership lease %q in workspace %q: %w", agentID, ws, domain.ErrConflict)
+	if !ok || lease.Token != token || lease.Status != agents.OwnershipActive || !lease.ExpiresAt.After(time.Now().UTC()) {
+		return nil, fmt.Errorf("agent ownership lease %q in workspace %q: %w", agentID, ws, persistence.ErrConflict)
 	}
 	now := time.Now().UTC()
 	if ttl <= 0 {
@@ -147,35 +148,35 @@ func (s *agentOwnershipLeaseStore) Heartbeat(_ context.Context, ws, agentID, tok
 	return cloneAgentOwnershipLease(lease), nil
 }
 
-func (s *agentOwnershipLeaseStore) Release(_ context.Context, ws, agentID, token string) (*domain.AgentOwnershipLease, error) {
+func (s *agentOwnershipLeaseStore) Release(_ context.Context, ws, agentID, token string) (*agents.OwnershipRecord, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	lease, ok := s.items[ws][agentID]
 	if !ok || lease.Token != token {
-		return nil, fmt.Errorf("agent ownership lease %q in workspace %q: %w", agentID, ws, domain.ErrConflict)
+		return nil, fmt.Errorf("agent ownership lease %q in workspace %q: %w", agentID, ws, persistence.ErrConflict)
 	}
-	lease.Status = domain.AgentLeaseReleased
+	lease.Status = agents.OwnershipReleased
 	lease.UpdatedAt = time.Now().UTC()
 	return cloneAgentOwnershipLease(lease), nil
 }
 
-func cloneAgentOwnershipLease(l *domain.AgentOwnershipLease) *domain.AgentOwnershipLease {
+func cloneAgentOwnershipLease(l *agents.OwnershipRecord) *agents.OwnershipRecord {
 	out := *l
 	return &out
 }
 
-func ownershipLeaseMatchesMem(l *domain.AgentOwnershipLease, f store.AgentOwnershipLeaseFilter) bool {
+func ownershipLeaseMatchesMem(l *agents.OwnershipRecord, f agents.AgentOwnershipLeaseFilter) bool {
 	return (f.OwnerID == "" || l.OwnerID == f.OwnerID) && (f.NodeID == "" || l.NodeID == f.NodeID) && (f.RuntimeProvider == "" || l.RuntimeProvider == f.RuntimeProvider) && (f.Status == "" || l.Status == f.Status)
 }
 
 func effectiveAgentOwnershipLeaseStatusMem(
-	lease *domain.AgentOwnershipLease,
+	lease *agents.OwnershipRecord,
 	now time.Time,
-) domain.AgentLeaseStatus {
+) agents.OwnershipStatus {
 	if lease != nil &&
-		lease.Status == domain.AgentLeaseActive &&
+		lease.Status == agents.OwnershipActive &&
 		!lease.ExpiresAt.After(now) {
-		return domain.AgentLeaseExpired
+		return agents.OwnershipExpired
 	}
 	if lease == nil {
 		return ""

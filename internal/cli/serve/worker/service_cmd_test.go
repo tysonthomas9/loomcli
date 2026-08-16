@@ -3,7 +3,7 @@ package worker
 import (
 	"testing"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/modules/agents"
 )
 
 func TestBuildAgentServicePatch(t *testing.T) {
@@ -12,7 +12,7 @@ func TestBuildAgentServicePatch(t *testing.T) {
 		if err != nil {
 			t.Fatalf("buildAgentServicePatch: %v", err)
 		}
-		if patch.DesiredState == nil || *patch.DesiredState != domain.AgentServiceDesiredPaused {
+		if patch.DesiredState == nil || *patch.DesiredState != agents.DesiredPaused {
 			t.Fatalf("desired_state = %#v, want paused", patch.DesiredState)
 		}
 	})
@@ -63,13 +63,13 @@ func TestBuildAgentServicePatch(t *testing.T) {
 }
 
 func TestAgentServiceParsingHelpers(t *testing.T) {
-	if kind, err := parseAgentServiceKind("lead"); err != nil || kind != domain.AgentServiceKindLead {
+	if kind, err := parseAgentServiceKind("lead"); err != nil || kind != agents.AgentKindLead {
 		t.Fatalf("parseAgentServiceKind = %q err=%v, want lead", kind, err)
 	}
 	if _, err := parseAgentServiceKind("bad"); err == nil {
 		t.Fatal("parseAgentServiceKind bad err = nil, want error")
 	}
-	if state, err := parseAgentServiceDesiredState("running", false); err != nil || state != domain.AgentServiceDesiredRunning {
+	if state, err := parseAgentServiceDesiredState("running", false); err != nil || state != agents.DesiredRunning {
 		t.Fatalf("parseAgentServiceDesiredState = %q err=%v, want running", state, err)
 	}
 	if state, err := parseAgentServiceDesiredState("", true); err != nil || state != "" {

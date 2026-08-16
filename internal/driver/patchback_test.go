@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 func TestApplyPatchBackAppliesPatchWhenBaseMatches(t *testing.T) {
@@ -94,7 +94,7 @@ func TestApplyPatchBackPreservesPatchWhenBaseRefIsUnreachable(t *testing.T) {
 
 func TestApplyPatchBackRejectsMissingInputs(t *testing.T) {
 	ctx := context.Background()
-	if _, err := ApplyPatchBack(ctx, PatchBackOptions{}); !errors.Is(err, domain.ErrInvalid) {
+	if _, err := ApplyPatchBack(ctx, PatchBackOptions{}); !errors.Is(err, persistence.ErrInvalid) {
 		t.Fatalf("ApplyPatchBack empty err = %v, want ErrInvalid", err)
 	}
 }

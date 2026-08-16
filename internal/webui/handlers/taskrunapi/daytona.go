@@ -7,9 +7,9 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/driver"
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 const (
@@ -39,7 +39,7 @@ func (m *Module) daytonaExecute(
 		return nil, err
 	}
 	if !isDaytonaTaskRun(run) {
-		return nil, fmt.Errorf("daytona provider execution is restricted to %s: %w", driver.DaytonaTaskRunnerEntrypoint, domain.ErrNotOwner)
+		return nil, fmt.Errorf("daytona provider execution is restricted to %s: %w", driver.DaytonaTaskRunnerEntrypoint, persistence.ErrNotOwner)
 	}
 	if m.daytonaProvider == nil {
 		return nil, fmt.Errorf("daytona provider broker is not configured: %w", execution.ErrUnavailable)
@@ -73,7 +73,7 @@ func isDaytonaTaskRun(run *execution.TaskRun) bool {
 
 func validateDaytonaProviderIntent(intent execution.DaytonaProviderIntent) error {
 	if intent.SchemaVersion != execution.DaytonaProviderSchemaV1 {
-		return fmt.Errorf("schemaVersion must be %q: %w", execution.DaytonaProviderSchemaV1, domain.ErrInvalid)
+		return fmt.Errorf("schemaVersion must be %q: %w", execution.DaytonaProviderSchemaV1, persistence.ErrInvalid)
 	}
 	if err := validateBoundedUTF8("repositoryUrl", intent.RepositoryURL, 1, maxDaytonaRepositoryURLBytes); err != nil {
 		return err
@@ -88,7 +88,7 @@ func validateDaytonaProviderIntent(intent execution.DaytonaProviderIntent) error
 		return err
 	}
 	if !strings.EqualFold(strings.TrimSpace(intent.Backend), "codex") {
-		return fmt.Errorf("backend must be %q: %w", "codex", domain.ErrInvalid)
+		return fmt.Errorf("backend must be %q: %w", "codex", persistence.ErrInvalid)
 	}
 	for _, field := range []struct {
 		name  string
@@ -107,7 +107,7 @@ func validateDaytonaProviderIntent(intent execution.DaytonaProviderIntent) error
 	}
 	if intent.Delivery.OpenPullRequest {
 		if strings.TrimSpace(intent.Delivery.BaseBranch) == "" || strings.TrimSpace(intent.Delivery.OutputBranch) == "" {
-			return fmt.Errorf("delivery baseBranch and outputBranch are required for pull-request delivery: %w", domain.ErrInvalid)
+			return fmt.Errorf("delivery baseBranch and outputBranch are required for pull-request delivery: %w", persistence.ErrInvalid)
 		}
 	}
 	return nil
@@ -122,23 +122,23 @@ func validateDaytonaRepositoryURL(value string) error {
 			!strings.ContainsAny(repo, "@?#\\\r\n\t ") {
 			return nil
 		}
-		return fmt.Errorf("repositoryUrl must be a credential-free HTTPS or git@github.com repository URL: %w", domain.ErrInvalid)
+		return fmt.Errorf("repositoryUrl must be a credential-free HTTPS or git@github.com repository URL: %w", persistence.ErrInvalid)
 	}
 	parsed, err := url.Parse(value)
 	if err != nil || parsed.Scheme != "https" || parsed.Hostname() == "" || parsed.User != nil ||
 		parsed.RawQuery != "" || parsed.Fragment != "" || strings.ContainsAny(value, "\r\n\t") {
-		return fmt.Errorf("repositoryUrl must be a credential-free HTTPS or git@github.com repository URL: %w", domain.ErrInvalid)
+		return fmt.Errorf("repositoryUrl must be a credential-free HTTPS or git@github.com repository URL: %w", persistence.ErrInvalid)
 	}
 	return nil
 }
 
 func validateBoundedUTF8(name, value string, minBytes, maxBytes int) error {
 	if !utf8.ValidString(value) {
-		return fmt.Errorf("%s must be valid UTF-8: %w", name, domain.ErrInvalid)
+		return fmt.Errorf("%s must be valid UTF-8: %w", name, persistence.ErrInvalid)
 	}
 	size := len(value)
 	if size < minBytes || size > maxBytes {
-		return fmt.Errorf("%s must be between %d and %d bytes: %w", name, minBytes, maxBytes, domain.ErrInvalid)
+		return fmt.Errorf("%s must be between %d and %d bytes: %w", name, minBytes, maxBytes, persistence.ErrInvalid)
 	}
 	return nil
 }

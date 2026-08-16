@@ -8,8 +8,6 @@ import (
 	"testing"
 
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
-
-	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
 // TestIssueSubjectAttrs is a table over the After-snapshot projection: only
@@ -92,7 +90,7 @@ func TestIssueSubjectAttrs(t *testing.T) {
 // subject ref, and the After snapshot as the emitter payload.
 func TestToInternalEventShape(t *testing.T) {
 	b := &IssueJournalBridge{}
-	got := b.toInternalEvent(store.JournalEvent{
+	got := b.toInternalEvent(automation.JournalEvent{
 		ID:       "1707-0",
 		Action:   "issue.create",
 		Actor:    "user:alice",

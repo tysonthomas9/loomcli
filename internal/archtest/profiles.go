@@ -12,7 +12,6 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"golang.org/x/tools/go/packages"
@@ -30,36 +29,18 @@ const repositoryScaleLoadConcurrency = 1
 // transitive forbidden paths or profile-specific import cycles.
 func analyzeProfiles(root string, matrix AnalysisMatrix, graph CapabilityGraph, genericMechanisms []GenericMechanismUse) ([]string, error) {
 	profiles := append(append([]AnalysisProfile{}, matrix.Release...), matrix.Tagged...)
-	type result struct {
-		violations []string
-		err        error
+	results := make([][]string, len(profiles))
+	err := withRepositoryProfileCaches(profiles, func(index int, profile AnalysisProfile, environment []string) error {
+		var err error
+		results[index], err = analyzeProfileWithEnvironment(root, profile, graph, genericMechanisms, environment)
+		return err
+	})
+	if err != nil {
+		return nil, err
 	}
-	results := make([]result, len(profiles))
-	semaphore := make(chan struct{}, repositoryScaleLoadConcurrency)
-	var wg sync.WaitGroup
-	for i, profile := range profiles {
-		i, profile := i, profile
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			semaphore <- struct{}{}
-			defer func() { <-semaphore }()
-			results[i].err = withRepositoryProfileCache(profile, func(environment []string) error {
-				var err error
-				results[i].violations, err = analyzeProfileWithEnvironment(
-					root, profile, graph, genericMechanisms, environment,
-				)
-				return err
-			})
-		}()
-	}
-	wg.Wait()
 	violations := []string{}
-	for i, result := range results {
-		if result.err != nil {
-			return nil, fmt.Errorf("analyze profile %s: %w", profiles[i].Name, result.err)
-		}
-		violations = append(violations, result.violations...)
+	for _, result := range results {
+		violations = append(violations, result...)
 	}
 	return violations, nil
 }

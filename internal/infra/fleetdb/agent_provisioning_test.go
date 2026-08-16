@@ -12,9 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/agents"
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
-
-	"github.com/tysonthomas9/loomcli/internal/domain"
 )
 
 type agentProvisioningRoundTripFunc func(*http.Request) (*http.Response, error)
@@ -127,11 +126,11 @@ func TestAgentProvisioningTransportUsesServerOwnedIntentAndProgressRoutes(t *tes
 			}
 			switch call {
 			case 5:
-				_ = json.NewEncoder(w).Encode(domain.Role{
+				_ = json.NewEncoder(w).Encode(agents.Role{
 					WorkspaceKey: "space/name", Name: "docs",
 				})
 			case 6:
-				_ = json.NewEncoder(w).Encode(domain.AgentService{
+				_ = json.NewEncoder(w).Encode(agents.AgentServiceRecord{
 					WorkspaceKey: "space/name", ServiceID: "agent-1",
 				})
 			case 7:

@@ -7,9 +7,10 @@ import (
 	"testing"
 	"time"
 
+	workspaceowner "github.com/tysonthomas9/loomcli/internal/modules/workspace"
+
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
-	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
 // TestExecutorRunOnceMintsRunTokenAtClaim drives the real claim path against
@@ -96,7 +97,7 @@ func runOnceWithRunTokenKeyResult(t *testing.T, key []byte) (*recordingRunner, *
 	ctx := context.Background()
 	root := t.TempDir()
 	st := memstore.New()
-	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "TEST", Name: "test"}); err != nil {
+	if _, err := st.Workspaces().Create(ctx, workspaceowner.WorkspaceCreate{Key: "TEST", Name: "test"}); err != nil {
 		t.Fatalf("Create workspace: %v", err)
 	}
 	writeFlueDist(t, root, "epic-runner", "done")

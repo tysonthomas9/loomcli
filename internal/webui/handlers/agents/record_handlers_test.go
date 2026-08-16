@@ -13,12 +13,21 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/bootstrap"
-	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
-	connectorsmodule "github.com/tysonthomas9/loomcli/internal/modules/connectors"
+	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
+
+	"github.com/tysonthomas9/loomcli/internal/modules/automation"
+
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
+
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
-	"github.com/tysonthomas9/loomcli/internal/store"
+
+	workspaceowner "github.com/tysonthomas9/loomcli/internal/modules/workspace"
+
+	"github.com/tysonthomas9/loomcli/internal/bootstrap"
+	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	agentsowner "github.com/tysonthomas9/loomcli/internal/modules/agents"
+	connectorsmodule "github.com/tysonthomas9/loomcli/internal/modules/connectors"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/triggerbindings"
 	"github.com/tysonthomas9/loomcli/internal/webui/readprojection"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
@@ -31,29 +40,29 @@ func TestUnifiedAgentsListUsesCanonicalRecordsOnly(t *testing.T) {
 	ctx := context.Background()
 	seedRole(t, st, "docs-assistant")
 	seedDriverVersion(t, st, "driver-1", "version-1")
-	if _, err := st.AgentServices().Create(ctx, store.AgentServiceCreate{
+	if _, err := st.AgentServices().Create(ctx, agentsowner.AgentServiceCreate{
 		WorkspaceKey: agentRecordTestWS, ServiceID: "agt-docs-x7", Name: "Docs assistant",
-		Kind: domain.AgentServiceKindEvent, DesiredState: domain.AgentServiceDesiredRunning, RoleName: "docs-assistant",
+		Kind: agentsowner.AgentKindEvent, DesiredState: agentsowner.DesiredRunning, RoleName: "docs-assistant",
 	}); err != nil {
 		t.Fatalf("create agent service: %v", err)
 	}
-	if _, err := st.AgentServices().Create(ctx, store.AgentServiceCreate{
+	if _, err := st.AgentServices().Create(ctx, agentsowner.AgentServiceCreate{
 		WorkspaceKey: agentRecordTestWS, ServiceID: "agt-scripted-x8", Name: "Scripted assistant",
-		Kind: domain.AgentServiceKindEvent, DesiredState: domain.AgentServiceDesiredRunning,
+		Kind: agentsowner.AgentKindEvent, DesiredState: agentsowner.DesiredRunning,
 		DriverID: "driver-1", DriverVersionID: "version-1",
 	}); err != nil {
 		t.Fatalf("create scripted agent service: %v", err)
 	}
-	if _, err := st.TriggerBindings().Create(ctx, store.TriggerBindingCreate{
+	if _, err := st.TriggerBindings().Create(ctx, automation.TriggerBindingCreate{
 		WorkspaceKey: agentRecordTestWS, BindingID: "agt-docs-x7-1", Name: "Docs assistant",
-		SourceKind: store.InternalSourceKind, DriverID: "driver-1", DriverVersionID: "version-1",
+		SourceKind: automation.InternalSourceKind, DriverID: "driver-1", DriverVersionID: "version-1",
 		TargetAgentServiceID: "agt-docs-x7", Enabled: true,
 	}); err != nil {
 		t.Fatalf("create attached binding: %v", err)
 	}
-	if _, err := st.TriggerBindings().Create(ctx, store.TriggerBindingCreate{
+	if _, err := st.TriggerBindings().Create(ctx, automation.TriggerBindingCreate{
 		WorkspaceKey: agentRecordTestWS, BindingID: "legacy-review", Name: "Legacy review",
-		SourceKind: store.CronSourceKind, DriverID: "driver-1", DriverVersionID: "version-1",
+		SourceKind: automation.CronSourceKind, DriverID: "driver-1", DriverVersionID: "version-1",
 		Schedule: "*/10 * * * *", Enabled: true,
 	}); err != nil {
 		t.Fatalf("create legacy binding: %v", err)
@@ -90,9 +99,9 @@ func TestUnifiedLegacyBindingFallbackIsRetired(t *testing.T) {
 	st := newAgentRecordStore(t)
 	ctx := context.Background()
 	seedDriverVersion(t, st, "legacy-driver", "legacy-version")
-	if _, err := st.TriggerBindings().Create(ctx, store.TriggerBindingCreate{
+	if _, err := st.TriggerBindings().Create(ctx, automation.TriggerBindingCreate{
 		WorkspaceKey: agentRecordTestWS, BindingID: "legacy-review", Name: "Legacy review",
-		SourceKind: store.CronSourceKind, DriverID: "legacy-driver", DriverVersionID: "legacy-version",
+		SourceKind: automation.CronSourceKind, DriverID: "legacy-driver", DriverVersionID: "legacy-version",
 		Schedule: "*/10 * * * *", Enabled: true,
 	}); err != nil {
 		t.Fatalf("create legacy binding: %v", err)
@@ -132,15 +141,15 @@ func TestUnifiedLegacyBindingFallbackRejectsAttachedBinding(t *testing.T) {
 	ctx := context.Background()
 	seedRole(t, st, "docs-assistant")
 	seedDriverVersion(t, st, "driver-1", "version-1")
-	if _, err := st.AgentServices().Create(ctx, store.AgentServiceCreate{
+	if _, err := st.AgentServices().Create(ctx, agentsowner.AgentServiceCreate{
 		WorkspaceKey: agentRecordTestWS, ServiceID: "agt-docs", Name: "Docs",
-		Kind: domain.AgentServiceKindEvent, RoleName: "docs-assistant",
+		Kind: agentsowner.AgentKindEvent, RoleName: "docs-assistant",
 	}); err != nil {
 		t.Fatalf("create record: %v", err)
 	}
-	if _, err := st.TriggerBindings().Create(ctx, store.TriggerBindingCreate{
+	if _, err := st.TriggerBindings().Create(ctx, automation.TriggerBindingCreate{
 		WorkspaceKey: agentRecordTestWS, BindingID: "attached-binding", Name: "Attached",
-		SourceKind: store.InternalSourceKind, DriverID: "driver-1", DriverVersionID: "version-1",
+		SourceKind: automation.InternalSourceKind, DriverID: "driver-1", DriverVersionID: "version-1",
 		TargetAgentServiceID: "agt-docs", Enabled: true,
 	}); err != nil {
 		t.Fatalf("create attached binding: %v", err)
@@ -166,9 +175,9 @@ func TestUnifiedSupervisedCreateRejectsAgentRecordIDCollision(t *testing.T) {
 	st := newAgentRecordStore(t)
 	ctx := context.Background()
 	seedRole(t, st, "docs-assistant")
-	if _, err := st.AgentServices().Create(ctx, store.AgentServiceCreate{
+	if _, err := st.AgentServices().Create(ctx, agentsowner.AgentServiceCreate{
 		WorkspaceKey: agentRecordTestWS, ServiceID: "agt-reserved", Name: "Reserved",
-		Kind: domain.AgentServiceKindEvent, RoleName: "docs-assistant",
+		Kind: agentsowner.AgentKindEvent, RoleName: "docs-assistant",
 	}); err != nil {
 		t.Fatalf("create agent record: %v", err)
 	}
@@ -185,9 +194,9 @@ func TestUnifiedSupervisedCreateRejectsLegacyBindingIDCollision(t *testing.T) {
 	st := newAgentRecordStore(t)
 	ctx := context.Background()
 	seedRole(t, st, "task")
-	if _, err := st.TriggerBindings().Create(ctx, store.TriggerBindingCreate{
+	if _, err := st.TriggerBindings().Create(ctx, automation.TriggerBindingCreate{
 		WorkspaceKey: agentRecordTestWS, BindingID: "legacy-reserved", Name: "Legacy reserved",
-		SourceKind: store.InternalSourceKind, DriverID: workflowcatalog.BuiltinPromptAgentWorkflowName,
+		SourceKind: automation.InternalSourceKind, DriverID: workflowcatalog.BuiltinPromptAgentWorkflowName,
 		DriverVersionID: "prompt-agent-version-1", Enabled: true,
 	}); err != nil {
 		t.Fatalf("create legacy binding: %v", err)
@@ -208,9 +217,9 @@ func TestUnifiedItemRoutesUseCanonicalRecord(t *testing.T) {
 	st := newAgentRecordStore(t)
 	ctx := context.Background()
 	seedRole(t, st, "docs-assistant")
-	if _, err := st.AgentServices().Create(ctx, store.AgentServiceCreate{
+	if _, err := st.AgentServices().Create(ctx, agentsowner.AgentServiceCreate{
 		WorkspaceKey: agentRecordTestWS, ServiceID: "collision", Name: "Record",
-		Kind: domain.AgentServiceKindEvent, RoleName: "docs-assistant",
+		Kind: agentsowner.AgentKindEvent, RoleName: "docs-assistant",
 	}); err != nil {
 		t.Fatalf("create record: %v", err)
 	}
@@ -263,18 +272,18 @@ func TestUnifiedRoutesIgnoreUnrelatedBindingIdentityCollision(t *testing.T) {
 			ctx := context.Background()
 			seedRole(t, st, "task")
 			seedRole(t, st, "docs-assistant")
-			if _, err := st.TriggerBindings().Create(ctx, store.TriggerBindingCreate{
+			if _, err := st.TriggerBindings().Create(ctx, automation.TriggerBindingCreate{
 				WorkspaceKey: agentRecordTestWS, BindingID: "collision", Name: "Legacy binding",
-				SourceKind: store.InternalSourceKind, DriverID: workflowcatalog.BuiltinPromptAgentWorkflowName,
+				SourceKind: automation.InternalSourceKind, DriverID: workflowcatalog.BuiltinPromptAgentWorkflowName,
 				DriverVersionID: "prompt-agent-version-1", Enabled: true,
 			}); err != nil {
 				t.Fatalf("create legacy binding: %v", err)
 			}
 			switch ownerKind {
 			case "record":
-				if _, err := st.AgentServices().Create(ctx, store.AgentServiceCreate{
+				if _, err := st.AgentServices().Create(ctx, agentsowner.AgentServiceCreate{
 					WorkspaceKey: agentRecordTestWS, ServiceID: "collision", Name: "Record",
-					Kind: domain.AgentServiceKindEvent, RoleName: "docs-assistant",
+					Kind: agentsowner.AgentKindEvent, RoleName: "docs-assistant",
 				}); err != nil {
 					t.Fatalf("create agent record: %v", err)
 				}
@@ -420,14 +429,14 @@ func TestPromptAgentCreateAcceptsReadOnlyBugFilter(t *testing.T) {
 func TestPromptAgentCreateRejectsUnreadyRoleBeforeAgentArtifacts(t *testing.T) {
 	tests := []struct {
 		name       string
-		role       store.RoleCreate
+		role       agentsowner.RoleRecordCreate
 		body       string
 		wantError  string
 		wantNoRole bool
 	}{
 		{
 			name: "existing role without prompt",
-			role: store.RoleCreate{
+			role: agentsowner.RoleRecordCreate{
 				WorkspaceKey: agentRecordTestWS, Name: "docs-assistant", TaskFilter: "has_design",
 			},
 			body:      `{"kind":"prompt","name":"Docs","behavior":{"role_name":"docs-assistant"},"trigger":{"source_kind":"internal"},"enabled":true}`,
@@ -435,7 +444,7 @@ func TestPromptAgentCreateRejectsUnreadyRoleBeforeAgentArtifacts(t *testing.T) {
 		},
 		{
 			name: "existing role with unsupported filter",
-			role: store.RoleCreate{
+			role: agentsowner.RoleRecordCreate{
 				WorkspaceKey: agentRecordTestWS, Name: "docs-assistant", Prompt: "Do the work.", TaskFilter: "docs",
 			},
 			body:      `{"kind":"prompt","name":"Docs","behavior":{"role_name":"docs-assistant"},"trigger":{"source_kind":"internal"},"enabled":true}`,
@@ -478,7 +487,7 @@ func TestPromptAgentCreateRejectsUnreadyRoleBeforeAgentArtifacts(t *testing.T) {
 			}
 			assertNoPromptAgentArtifacts(t, st)
 			if tt.wantNoRole {
-				if _, err := st.Roles().Get(context.Background(), agentRecordTestWS, "docs-assistant"); !errors.Is(err, domain.ErrNotFound) {
+				if _, err := st.Roles().Get(context.Background(), agentRecordTestWS, "docs-assistant"); !errors.Is(err, persistence.ErrNotFound) {
 					t.Fatalf("invalid role definition was persisted: %v", err)
 				}
 			}
@@ -489,7 +498,7 @@ func TestPromptAgentCreateRejectsUnreadyRoleBeforeAgentArtifacts(t *testing.T) {
 func TestPromptAgentCreateRejectsIncompatibleRoleCollisionBeforeAgentArtifacts(t *testing.T) {
 	st := newAgentRecordStore(t)
 	ctx := context.Background()
-	if _, err := st.Roles().Create(ctx, store.RoleCreate{
+	if _, err := st.Roles().Create(ctx, agentsowner.RoleRecordCreate{
 		WorkspaceKey: agentRecordTestWS,
 		Name:         "bug-triage",
 		Description:  "Triage bugs",
@@ -532,7 +541,7 @@ func TestPromptAgentCreateRejectsIncompatibleRoleCollisionBeforeAgentArtifacts(t
 func TestPromptAgentCreateWithoutBuildToolchainFailsAtomically(t *testing.T) {
 	st := memstore.New()
 	ctx := context.Background()
-	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: agentRecordTestWS, Name: "Test Workspace"}); err != nil {
+	if _, err := st.Workspaces().Create(ctx, workspaceowner.WorkspaceCreate{Key: agentRecordTestWS, Name: "Test Workspace"}); err != nil {
 		t.Fatalf("create workspace: %v", err)
 	}
 	runtimeDir := t.TempDir()
@@ -553,14 +562,14 @@ func TestPromptAgentCreateWithoutBuildToolchainFailsAtomically(t *testing.T) {
 	if !strings.Contains(rec.Body.String(), "workflow build toolchain is unavailable") {
 		t.Fatalf("POST /agents body = %s, want actionable toolchain error", rec.Body.String())
 	}
-	if _, err := st.Roles().Get(ctx, agentRecordTestWS, "docs-assistant"); !errors.Is(err, domain.ErrNotFound) {
+	if _, err := st.Roles().Get(ctx, agentRecordTestWS, "docs-assistant"); !errors.Is(err, persistence.ErrNotFound) {
 		t.Fatalf("role was persisted before driver preflight: %v", err)
 	}
-	records, err := st.AgentServices().List(ctx, agentRecordTestWS, store.AgentServiceFilter{})
+	records, err := st.AgentServices().List(ctx, agentRecordTestWS, agentsowner.AgentServiceFilter{})
 	if err != nil || len(records) != 0 {
 		t.Fatalf("agent records after unavailable preflight = %+v err=%v, want none", records, err)
 	}
-	bindings, err := st.TriggerBindings().List(ctx, agentRecordTestWS, store.TriggerBindingFilter{})
+	bindings, err := st.TriggerBindings().List(ctx, agentRecordTestWS, automation.TriggerBindingFilter{})
 	if err != nil || len(bindings) != 0 {
 		t.Fatalf("bindings after unavailable preflight = %+v err=%v, want none", bindings, err)
 	}
@@ -569,7 +578,7 @@ func TestPromptAgentCreateWithoutBuildToolchainFailsAtomically(t *testing.T) {
 func TestPromptAgentCreateWithMissingRolldownNativeBindingReturns503Atomically(t *testing.T) {
 	st := memstore.New()
 	ctx := context.Background()
-	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: agentRecordTestWS, Name: "Test Workspace"}); err != nil {
+	if _, err := st.Workspaces().Create(ctx, workspaceowner.WorkspaceCreate{Key: agentRecordTestWS, Name: "Test Workspace"}); err != nil {
 		t.Fatalf("create workspace: %v", err)
 	}
 	configureMissingRolldownBuild(t)
@@ -588,22 +597,22 @@ func TestPromptAgentCreateWithMissingRolldownNativeBindingReturns503Atomically(t
 	if !strings.Contains(rec.Body.String(), "target-platform Rolldown native binding") {
 		t.Fatalf("POST /agents body = %s, want native-binding remediation", rec.Body.String())
 	}
-	if _, err := st.Roles().Get(ctx, agentRecordTestWS, "docs-assistant"); !errors.Is(err, domain.ErrNotFound) {
+	if _, err := st.Roles().Get(ctx, agentRecordTestWS, "docs-assistant"); !errors.Is(err, persistence.ErrNotFound) {
 		t.Fatalf("role was persisted before failed driver build: %v", err)
 	}
-	records, err := st.AgentServices().List(ctx, agentRecordTestWS, store.AgentServiceFilter{})
+	records, err := st.AgentServices().List(ctx, agentRecordTestWS, agentsowner.AgentServiceFilter{})
 	if err != nil || len(records) != 0 {
 		t.Fatalf("agent records after failed driver build = %+v err=%v, want none", records, err)
 	}
-	bindings, err := st.TriggerBindings().List(ctx, agentRecordTestWS, store.TriggerBindingFilter{})
+	bindings, err := st.TriggerBindings().List(ctx, agentRecordTestWS, automation.TriggerBindingFilter{})
 	if err != nil || len(bindings) != 0 {
 		t.Fatalf("bindings after failed driver build = %+v err=%v, want none", bindings, err)
 	}
-	drivers, err := st.Drivers().List(ctx, agentRecordTestWS, store.DriverFilter{})
+	drivers, err := st.Drivers().List(ctx, agentRecordTestWS, workflowcatalog.DriverFilter{})
 	if err != nil || len(drivers) != 0 {
 		t.Fatalf("drivers after failed driver build = %+v err=%v, want none", drivers, err)
 	}
-	versions, err := st.DriverVersions().List(ctx, agentRecordTestWS, store.DriverVersionFilter{})
+	versions, err := st.DriverVersions().List(ctx, agentRecordTestWS, workflowcatalog.DriverVersionFilter{})
 	if err != nil || len(versions) != 0 {
 		t.Fatalf("driver versions after failed driver build = %+v err=%v, want none", versions, err)
 	}
@@ -655,9 +664,9 @@ func TestPromptAgentCreateBindingFailureRetainsCommittedAgentForRecovery(t *test
 	if err != nil {
 		t.Fatalf("get prompt-agent driver: %v", err)
 	}
-	if _, err := st.TriggerBindings().Create(ctx, store.TriggerBindingCreate{
+	if _, err := st.TriggerBindings().Create(ctx, automation.TriggerBindingCreate{
 		WorkspaceKey: agentRecordTestWS, BindingID: "taken", Name: "Taken",
-		SourceKind: store.InternalSourceKind, DriverID: driver.DriverID, DriverVersionID: driver.ActiveVersionID,
+		SourceKind: automation.InternalSourceKind, DriverID: driver.DriverID, DriverVersionID: driver.ActiveVersionID,
 		Enabled: true,
 	}); err != nil {
 		t.Fatalf("seed taken binding: %v", err)
@@ -674,7 +683,7 @@ func TestPromptAgentCreateBindingFailureRetainsCommittedAgentForRecovery(t *test
 	if rec.Code != http.StatusConflict {
 		t.Fatalf("POST /agents status = %d body=%s", rec.Code, rec.Body.String())
 	}
-	records, err := st.AgentServices().List(ctx, agentRecordTestWS, store.AgentServiceFilter{})
+	records, err := st.AgentServices().List(ctx, agentRecordTestWS, agentsowner.AgentServiceFilter{})
 	if err != nil {
 		t.Fatalf("list agent services: %v", err)
 	}
@@ -696,9 +705,9 @@ func TestPromptAgentCreateBindingFailureRetainsCommittedRoleWithoutPrecommitProm
 			if err != nil {
 				t.Fatalf("get prompt-agent driver: %v", err)
 			}
-			if _, err := st.TriggerBindings().Create(ctx, store.TriggerBindingCreate{
+			if _, err := st.TriggerBindings().Create(ctx, automation.TriggerBindingCreate{
 				WorkspaceKey: agentRecordTestWS, BindingID: "taken", Name: "Taken",
-				SourceKind: store.InternalSourceKind, DriverID: driver.DriverID, DriverVersionID: driver.ActiveVersionID,
+				SourceKind: automation.InternalSourceKind, DriverID: driver.DriverID, DriverVersionID: driver.ActiveVersionID,
 				Enabled: true,
 			}); err != nil {
 				t.Fatalf("seed taken binding: %v", err)
@@ -706,7 +715,7 @@ func TestPromptAgentCreateBindingFailureRetainsCommittedRoleWithoutPrecommitProm
 
 			const prompt = "Review the documentation."
 			if preexisting {
-				if _, err := st.Roles().Create(ctx, store.RoleCreate{
+				if _, err := st.Roles().Create(ctx, agentsowner.RoleRecordCreate{
 					WorkspaceKey: agentRecordTestWS, Name: "transactional-reviewer",
 					Prompt: prompt, TaskFilter: "has_design",
 				}); err != nil {
@@ -739,7 +748,7 @@ func TestPromptAgentCreateBindingFailureRetainsCommittedRoleWithoutPrecommitProm
 			records, listErr := st.AgentServices().List(
 				ctx,
 				agentRecordTestWS,
-				store.AgentServiceFilter{},
+				agentsowner.AgentServiceFilter{},
 			)
 			if listErr != nil || len(records) != 1 ||
 				records[0].RoleName != "transactional-reviewer" {
@@ -783,7 +792,7 @@ func TestAgentEnableDisableFanoutAndBindingGuard(t *testing.T) {
 		t.Fatalf("disable status = %d body=%s", rec.Code, rec.Body.String())
 	}
 	record, err := st.AgentServices().Get(context.Background(), agentRecordTestWS, created.ID)
-	if err != nil || record.DesiredState != domain.AgentServiceDesiredPaused {
+	if err != nil || record.DesiredState != agentsowner.DesiredPaused {
 		t.Fatalf("record after disable = %+v err=%v", record, err)
 	}
 	binding, err := st.TriggerBindings().Get(context.Background(), agentRecordTestWS, bindingID)
@@ -822,7 +831,7 @@ func TestAgentDeleteDeletesBindingsRevokesGrantsAndArchivesRecord(t *testing.T) 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("delete status = %d body=%s", rec.Code, rec.Body.String())
 	}
-	if _, err := st.TriggerBindings().Get(context.Background(), agentRecordTestWS, bindingID); !errors.Is(err, domain.ErrNotFound) {
+	if _, err := st.TriggerBindings().Get(context.Background(), agentRecordTestWS, bindingID); !errors.Is(err, persistence.ErrNotFound) {
 		t.Fatalf("binding get err = %v, want ErrNotFound", err)
 	}
 	grants, err := st.Connectors().ListGrantRecordsByBinding(context.Background(), agentRecordTestWS, bindingID)
@@ -835,7 +844,7 @@ func TestAgentDeleteDeletesBindingsRevokesGrantsAndArchivesRecord(t *testing.T) 
 	}
 	// Wave B: deleted_at is the archive signal (the Wave-A metadata marker is
 	// superseded); desired_state is parked stopped before archiving.
-	if record.DesiredState != domain.AgentServiceDesiredStopped || record.DeletedAt == nil {
+	if record.DesiredState != agentsowner.DesiredStopped || record.DeletedAt == nil {
 		t.Fatalf("archived record = %+v", record)
 	}
 
@@ -855,41 +864,41 @@ func TestAgentRunsNewestFirstAndExcludesUnattributedRuns(t *testing.T) {
 	created := createPromptAgentForTest(t, mux)
 	binding := created.Bindings[0].Binding
 	ctx := context.Background()
-	if _, err := st.DriverRuns().Create(ctx, store.DriverRunCreate{
+	if _, err := st.DriverRuns().Create(ctx, execution.DriverRunCreate{
 		WorkspaceKey: agentRecordTestWS, RunID: "run-old", DriverID: binding.DriverID,
 		DriverVersionID: binding.DriverVersionID, TriggerBindingID: binding.BindingID,
 	}); err != nil {
 		t.Fatalf("create old run: %v", err)
 	}
-	if _, err := st.DriverRuns().Create(ctx, store.DriverRunCreate{
+	if _, err := st.DriverRuns().Create(ctx, execution.DriverRunCreate{
 		WorkspaceKey: agentRecordTestWS, RunID: "run-unattributed", DriverID: binding.DriverID,
 		DriverVersionID: binding.DriverVersionID,
 	}); err != nil {
 		t.Fatalf("create unattributed run: %v", err)
 	}
 	time.Sleep(time.Millisecond)
-	if _, err := st.DriverRuns().Create(ctx, store.DriverRunCreate{
+	if _, err := st.DriverRuns().Create(ctx, execution.DriverRunCreate{
 		WorkspaceKey: agentRecordTestWS, RunID: "run-new", DriverID: binding.DriverID,
 		DriverVersionID: binding.DriverVersionID, TriggerBindingID: binding.BindingID,
 	}); err != nil {
 		t.Fatalf("create new run: %v", err)
 	}
-	if _, err := st.TriggerBindings().Create(ctx, store.TriggerBindingCreate{
+	if _, err := st.TriggerBindings().Create(ctx, automation.TriggerBindingCreate{
 		WorkspaceKey: agentRecordTestWS, BindingID: "legacy-binding", Name: "Legacy binding",
-		SourceKind: store.InternalSourceKind, DriverID: binding.DriverID, DriverVersionID: binding.DriverVersionID,
+		SourceKind: automation.InternalSourceKind, DriverID: binding.DriverID, DriverVersionID: binding.DriverVersionID,
 		Enabled: true,
 	}); err != nil {
 		t.Fatalf("create legacy binding: %v", err)
 	}
 	time.Sleep(time.Millisecond)
-	if _, err := st.DriverRuns().Create(ctx, store.DriverRunCreate{
+	if _, err := st.DriverRuns().Create(ctx, execution.DriverRunCreate{
 		WorkspaceKey: agentRecordTestWS, RunID: "run-legacy", DriverID: binding.DriverID,
 		DriverVersionID: binding.DriverVersionID, TriggerBindingID: "legacy-binding",
 	}); err != nil {
 		t.Fatalf("create legacy run: %v", err)
 	}
 	legacyTarget := created.ID
-	if _, err := st.TriggerBindings().Update(ctx, agentRecordTestWS, "legacy-binding", store.TriggerBindingUpdate{TargetAgentServiceID: &legacyTarget}); err != nil {
+	if _, err := st.TriggerBindings().Update(ctx, agentRecordTestWS, "legacy-binding", automation.TriggerBindingUpdate{TargetAgentServiceID: &legacyTarget}); err != nil {
 		t.Fatalf("attach legacy binding: %v", err)
 	}
 
@@ -898,8 +907,8 @@ func TestAgentRunsNewestFirstAndExcludesUnattributedRuns(t *testing.T) {
 		t.Fatalf("runs status = %d body=%s", rec.Code, rec.Body.String())
 	}
 	var out struct {
-		AgentID string              `json:"agent_id"`
-		Runs    []*domain.DriverRun `json:"runs"`
+		AgentID string                       `json:"agent_id"`
+		Runs    []*execution.DriverRunRecord `json:"runs"`
 	}
 	decodeJSON(t, rec.Body.Bytes(), &out)
 	if out.AgentID != created.ID {
@@ -918,8 +927,8 @@ func TestAgentRunsNewestFirstAndExcludesUnattributedRuns(t *testing.T) {
 		t.Fatalf("archived runs status = %d body=%s", rec.Code, rec.Body.String())
 	}
 	out = struct {
-		AgentID string              `json:"agent_id"`
-		Runs    []*domain.DriverRun `json:"runs"`
+		AgentID string                       `json:"agent_id"`
+		Runs    []*execution.DriverRunRecord `json:"runs"`
 	}{}
 	decodeJSON(t, rec.Body.Bytes(), &out)
 	if len(out.Runs) != 2 || out.Runs[0].RunID != "run-new" || out.Runs[1].RunID != "run-old" {
@@ -931,30 +940,30 @@ func TestAgentRunsDoesNotProjectInteractionSessions(t *testing.T) {
 	st := newAgentRecordStore(t)
 	ctx := context.Background()
 	seedRole(t, st, "task")
-	if _, err := st.AgentServices().Create(ctx, store.AgentServiceCreate{
+	if _, err := st.AgentServices().Create(ctx, agentsowner.AgentServiceCreate{
 		WorkspaceKey: agentRecordTestWS, ServiceID: "falcon", Name: "falcon", RoleName: "task",
-		Kind: domain.AgentServiceKindSupport, DesiredState: domain.AgentServiceDesiredRunning, MaxInstances: 1,
+		Kind: agentsowner.AgentKindSupport, DesiredState: agentsowner.DesiredRunning, MaxInstances: 1,
 	}); err != nil {
 		t.Fatalf("create canonical agent: %v", err)
 	}
-	if _, err := st.AgentSessions().Create(ctx, store.AgentSessionCreate{
+	if _, err := st.AgentSessions().Create(ctx, interaction.AgentSessionCreate{
 		WorkspaceKey: agentRecordTestWS,
 		SessionID:    "session-old",
 		AgentID:      "falcon",
-		Kind:         domain.AgentSessionKindTask,
+		Kind:         interaction.SessionRecordTask,
 		TaskID:       "TASK-1",
-		Status:       domain.AgentSessionCompleted,
+		Status:       interaction.SessionRecordCompleted,
 	}); err != nil {
 		t.Fatalf("create old session: %v", err)
 	}
 	time.Sleep(time.Millisecond)
-	if _, err := st.AgentSessions().Create(ctx, store.AgentSessionCreate{
+	if _, err := st.AgentSessions().Create(ctx, interaction.AgentSessionCreate{
 		WorkspaceKey: agentRecordTestWS,
 		SessionID:    "session-new",
 		AgentID:      "falcon",
-		Kind:         domain.AgentSessionKindTask,
+		Kind:         interaction.SessionRecordTask,
 		TaskID:       "TASK-2",
-		Status:       domain.AgentSessionRunning,
+		Status:       interaction.SessionRecordRunning,
 		Metadata: map[string]string{
 			"backend":         "codex",
 			"transcript_path": "/tmp/private-session.jsonl",
@@ -991,40 +1000,40 @@ func TestAgentRunsDoesNotProjectTaskRunsOrLegacySessionShadows(t *testing.T) {
 	st := newAgentRecordStore(t)
 	ctx := context.Background()
 	seedRole(t, st, "task")
-	if _, err := st.AgentServices().Create(ctx, store.AgentServiceCreate{
+	if _, err := st.AgentServices().Create(ctx, agentsowner.AgentServiceCreate{
 		WorkspaceKey: agentRecordTestWS, ServiceID: "falcon", Name: "falcon", RoleName: "task",
-		Kind: domain.AgentServiceKindSupport, DesiredState: domain.AgentServiceDesiredRunning, MaxInstances: 1,
+		Kind: agentsowner.AgentKindSupport, DesiredState: agentsowner.DesiredRunning, MaxInstances: 1,
 	}); err != nil {
 		t.Fatalf("create canonical agent: %v", err)
 	}
-	if _, err := st.TaskRuns().Create(ctx, store.TaskRunCreate{
+	if _, err := st.TaskRuns().Create(ctx, execution.TaskRunCreate{
 		WorkspaceKey:    agentRecordTestWS,
 		TaskRunID:       "task-run-batch-1",
 		TaskID:          "TASK-42",
 		WorkerProfileID: "falcon",
 		Runner:          "local-task-runner",
-		Status:          domain.TaskRunCompleted,
+		Status:          execution.TaskRunRecordCompleted,
 		RuntimeMetadata: map[string]string{"backend": "codex"},
 	}); err != nil {
 		t.Fatalf("create canonical task run: %v", err)
 	}
-	if _, err := st.TaskRuns().Create(ctx, store.TaskRunCreate{
+	if _, err := st.TaskRuns().Create(ctx, execution.TaskRunCreate{
 		WorkspaceKey:    agentRecordTestWS,
 		TaskRunID:       "task-run-foreign",
 		TaskID:          "TASK-FOREIGN",
 		WorkerProfileID: "hawk",
-		Status:          domain.TaskRunCompleted,
+		Status:          execution.TaskRunRecordCompleted,
 	}); err != nil {
 		t.Fatalf("create foreign task run: %v", err)
 	}
 	time.Sleep(time.Millisecond)
-	if _, err := st.AgentSessions().Create(ctx, store.AgentSessionCreate{
+	if _, err := st.AgentSessions().Create(ctx, interaction.AgentSessionCreate{
 		WorkspaceKey: agentRecordTestWS,
 		SessionID:    "legacy-task-run-shadow",
 		AgentID:      "falcon",
-		Kind:         domain.AgentSessionKindTask,
+		Kind:         interaction.SessionRecordTask,
 		TaskID:       "TASK-42",
-		Status:       domain.AgentSessionCompleted,
+		Status:       interaction.SessionRecordCompleted,
 		Metadata:     map[string]string{"task_run_id": "task-run-batch-1"},
 	}); err != nil {
 		t.Fatalf("create legacy task-run shadow: %v", err)
@@ -1068,11 +1077,11 @@ func TestAgentRunsRejectsUnattachedLegacyBindingIdentity(t *testing.T) {
 	st := newAgentRecordStore(t)
 	ctx := context.Background()
 	seedDriverVersion(t, st, "legacy-driver", "legacy-version")
-	if _, err := st.TriggerBindings().Create(ctx, store.TriggerBindingCreate{
+	if _, err := st.TriggerBindings().Create(ctx, automation.TriggerBindingCreate{
 		WorkspaceKey:    agentRecordTestWS,
 		BindingID:       "legacy-review",
 		Name:            "Legacy review",
-		SourceKind:      store.CronSourceKind,
+		SourceKind:      automation.CronSourceKind,
 		DriverID:        "legacy-driver",
 		DriverVersionID: "legacy-version",
 		Schedule:        "*/10 * * * *",
@@ -1080,7 +1089,7 @@ func TestAgentRunsRejectsUnattachedLegacyBindingIdentity(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("create legacy binding: %v", err)
 	}
-	if _, err := st.DriverRuns().Create(ctx, store.DriverRunCreate{
+	if _, err := st.DriverRuns().Create(ctx, execution.DriverRunCreate{
 		WorkspaceKey:     agentRecordTestWS,
 		RunID:            "legacy-run",
 		DriverID:         "legacy-driver",
@@ -1107,29 +1116,29 @@ func newAgentRecordStore(t *testing.T) *memstore.Store {
 		t.Fatalf("seed workspace local path: %v", err)
 	}
 	st := memstore.New()
-	if _, err := st.Workspaces().Create(context.Background(), store.WorkspaceCreate{Key: agentRecordTestWS, Name: "Test Workspace"}); err != nil {
+	if _, err := st.Workspaces().Create(context.Background(), workspaceowner.WorkspaceCreate{Key: agentRecordTestWS, Name: "Test Workspace"}); err != nil {
 		t.Fatalf("create workspace: %v", err)
 	}
 	seedPromptAgentDriver(t, st)
 	return st
 }
 
-func newAgentsMux(st store.Store) *http.ServeMux {
+func newAgentsMux(st *memstore.Store) *http.ServeMux {
 	mux := http.NewServeMux()
 	newTestAgentsModule(nil, st, nil, agentRecordTestWS).Register(mux)
 	return mux
 }
 
-func seedRole(t *testing.T, st store.Store, name string) {
+func seedRole(t *testing.T, st *memstore.Store, name string) {
 	t.Helper()
-	if _, err := st.Roles().Create(context.Background(), store.RoleCreate{WorkspaceKey: agentRecordTestWS, Name: name}); err != nil {
+	if _, err := st.Roles().Create(context.Background(), agentsowner.RoleRecordCreate{WorkspaceKey: agentRecordTestWS, Name: name}); err != nil {
 		t.Fatalf("create role %s: %v", name, err)
 	}
 }
 
-func seedPromptAgentRole(t *testing.T, st store.Store, name string) {
+func seedPromptAgentRole(t *testing.T, st *memstore.Store, name string) {
 	t.Helper()
-	if _, err := st.Roles().Create(context.Background(), store.RoleCreate{
+	if _, err := st.Roles().Create(context.Background(), agentsowner.RoleRecordCreate{
 		WorkspaceKey: agentRecordTestWS,
 		Name:         name,
 		Prompt:       "Complete the assigned task.",
@@ -1142,12 +1151,12 @@ func seedPromptAgentRole(t *testing.T, st store.Store, name string) {
 func seedDriverVersion(t *testing.T, st *memstore.Store, driverID, versionID string) {
 	t.Helper()
 	ctx := context.Background()
-	if _, err := st.Drivers().Create(ctx, store.DriverCreate{
+	if _, err := st.Drivers().Create(ctx, workflowcatalog.DriverCreate{
 		WorkspaceKey: agentRecordTestWS, DriverID: driverID, Name: driverID,
 	}); err != nil {
 		t.Fatalf("create driver: %v", err)
 	}
-	if _, err := st.DriverVersions().Create(ctx, store.DriverVersionCreate{
+	if _, err := st.DriverVersions().Create(ctx, workflowcatalog.DriverVersionCreate{
 		WorkspaceKey: agentRecordTestWS, VersionID: versionID, DriverID: driverID, Version: 1,
 		SourceDigest: "src-" + versionID, BundleDigest: "bundle-" + versionID,
 		ValidationStatus: workflowcatalog.DriverVersionValidationPassed,
@@ -1179,14 +1188,14 @@ func createPromptAgentForTest(t *testing.T, mux *http.ServeMux) agentRecordDTO {
 	return created
 }
 
-func assertNoPromptAgentArtifacts(t *testing.T, st store.Store) {
+func assertNoPromptAgentArtifacts(t *testing.T, st *memstore.Store) {
 	t.Helper()
 	ctx := context.Background()
-	records, err := st.AgentServices().List(ctx, agentRecordTestWS, store.AgentServiceFilter{IncludeDeleted: true})
+	records, err := st.AgentServices().List(ctx, agentRecordTestWS, agentsowner.AgentServiceFilter{IncludeDeleted: true})
 	if err != nil || len(records) != 0 {
 		t.Fatalf("agent records after rejected create = %+v err=%v, want none", records, err)
 	}
-	bindings, err := st.TriggerBindings().List(ctx, agentRecordTestWS, store.TriggerBindingFilter{})
+	bindings, err := st.TriggerBindings().List(ctx, agentRecordTestWS, automation.TriggerBindingFilter{})
 	if err != nil || len(bindings) != 0 {
 		t.Fatalf("bindings after rejected create = %+v err=%v, want none", bindings, err)
 	}

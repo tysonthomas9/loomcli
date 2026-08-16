@@ -3,16 +3,16 @@ package opsimpl
 import (
 	"context"
 
-	"github.com/tysonthomas9/loomcli/internal/ops"
-	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/app/query/operationalview"
+	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/webui/storeadapter"
 )
 
 type testWorkspaceProjection struct {
-	store store.Store
+	store *memstore.Store
 }
 
-func (projection testWorkspaceProjection) WorkspaceData(ctx context.Context, workspaceKey string) (*ops.WorkspaceData, error) {
+func (projection testWorkspaceProjection) WorkspaceData(ctx context.Context, workspaceKey string) (*operationalview.Workspace, error) {
 	return storeadapter.BuildWorkspaceDataForKey(ctx, projection.store, workspaceKey)
 }
 

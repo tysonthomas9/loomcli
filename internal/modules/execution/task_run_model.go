@@ -296,20 +296,20 @@ const (
 )
 
 type WorkerNode struct {
-	WorkspaceKey    string
-	NodeID          string
-	OwnerActor      string
-	RuntimeProvider string
-	Labels          []string
-	Capabilities    []string
-	ToolInventory   []string
-	Version         string
-	Capacity        int
-	DrainState      WorkerNodeDrainState
-	LastHeartbeat   time.Time
-	ExpiresAt       time.Time
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
+	WorkspaceKey    string               `json:"workspace_key"`
+	NodeID          string               `json:"node_id"`
+	OwnerActor      string               `json:"owner_actor,omitempty"`
+	RuntimeProvider RuntimeProvider      `json:"runtime_provider"`
+	Labels          []string             `json:"labels,omitempty"`
+	Capabilities    []string             `json:"capabilities,omitempty"`
+	ToolInventory   []string             `json:"tool_inventory,omitempty"`
+	Version         string               `json:"version,omitempty"`
+	Capacity        int                  `json:"capacity,omitempty"`
+	DrainState      WorkerNodeDrainState `json:"drain_state"`
+	LastHeartbeat   time.Time            `json:"last_heartbeat"`
+	ExpiresAt       time.Time            `json:"expires_at"`
+	CreatedAt       time.Time            `json:"created_at"`
+	UpdatedAt       time.Time            `json:"updated_at"`
 }
 
 type RegisterWorkerNodeCommand struct {

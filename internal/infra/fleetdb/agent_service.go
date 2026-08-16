@@ -8,35 +8,34 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/modules/agents"
 )
 
 type agentServiceStore struct{ client *Client }
 
-var _ store.AgentServiceStore = (*agentServiceStore)(nil)
+var _ agents.AgentServiceStore = (*agentServiceStore)(nil)
 
-func (s *agentServiceStore) Create(ctx context.Context, in store.AgentServiceCreate) (*domain.AgentService, error) {
+func (s *agentServiceStore) Create(ctx context.Context, in agents.AgentServiceCreate) (*agents.AgentServiceRecord, error) {
 	body := struct {
-		ServiceID       string                          `json:"service_id"`
-		Name            string                          `json:"name,omitempty"`
-		Kind            domain.AgentServiceKind         `json:"kind"`
-		DesiredState    domain.AgentServiceDesiredState `json:"desired_state,omitempty"`
-		RoleName        string                          `json:"role_name,omitempty"`
-		DriverID        string                          `json:"driver_id,omitempty"`
-		DriverVersionID string                          `json:"driver_version_id,omitempty"`
-		ProfileName     string                          `json:"profile_name,omitempty"`
-		ScheduleID      string                          `json:"schedule_id,omitempty"`
-		EventSources    []string                        `json:"event_sources,omitempty"`
-		TriggerRefs     []string                        `json:"trigger_refs,omitempty"`
-		PlacementPolicy string                          `json:"placement_policy,omitempty"`
-		MaxInstances    int                             `json:"max_instances,omitempty"`
-		LeaseID         string                          `json:"lease_id,omitempty"`
-		RestartPolicy   string                          `json:"restart_policy,omitempty"`
-		Permissions     []string                        `json:"permissions,omitempty"`
-		BudgetPolicy    string                          `json:"budget_policy,omitempty"`
-		StateRef        string                          `json:"state_ref,omitempty"`
-		Metadata        map[string]string               `json:"metadata,omitempty"`
+		ServiceID       string              `json:"service_id"`
+		Name            string              `json:"name,omitempty"`
+		Kind            agents.AgentKind    `json:"kind"`
+		DesiredState    agents.DesiredState `json:"desired_state,omitempty"`
+		RoleName        string              `json:"role_name,omitempty"`
+		DriverID        string              `json:"driver_id,omitempty"`
+		DriverVersionID string              `json:"driver_version_id,omitempty"`
+		ProfileName     string              `json:"profile_name,omitempty"`
+		ScheduleID      string              `json:"schedule_id,omitempty"`
+		EventSources    []string            `json:"event_sources,omitempty"`
+		TriggerRefs     []string            `json:"trigger_refs,omitempty"`
+		PlacementPolicy string              `json:"placement_policy,omitempty"`
+		MaxInstances    int                 `json:"max_instances,omitempty"`
+		LeaseID         string              `json:"lease_id,omitempty"`
+		RestartPolicy   string              `json:"restart_policy,omitempty"`
+		Permissions     []string            `json:"permissions,omitempty"`
+		BudgetPolicy    string              `json:"budget_policy,omitempty"`
+		StateRef        string              `json:"state_ref,omitempty"`
+		Metadata        map[string]string   `json:"metadata,omitempty"`
 	}{
 		ServiceID:       in.ServiceID,
 		Name:            in.Name,
@@ -58,15 +57,15 @@ func (s *agentServiceStore) Create(ctx context.Context, in store.AgentServiceCre
 		StateRef:        in.StateRef,
 		Metadata:        in.Metadata,
 	}
-	var out domain.AgentService
+	var out agents.AgentServiceRecord
 	if err := s.client.do(ctx, "POST", "/api/v1/"+pathEscape(in.WorkspaceKey)+"/agent-services", body, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
 }
 
-func (s *agentServiceStore) Get(ctx context.Context, ws, serviceID string) (*domain.AgentService, error) {
-	var out domain.AgentService
+func (s *agentServiceStore) Get(ctx context.Context, ws, serviceID string) (*agents.AgentServiceRecord, error) {
+	var out agents.AgentServiceRecord
 	path := "/api/v1/" + pathEscape(ws) + "/agent-services/" + pathEscape(serviceID)
 	if err := s.client.do(ctx, "GET", path, nil, &out); err != nil {
 		return nil, err
@@ -74,7 +73,7 @@ func (s *agentServiceStore) Get(ctx context.Context, ws, serviceID string) (*dom
 	return &out, nil
 }
 
-func (s *agentServiceStore) List(ctx context.Context, ws string, filter store.AgentServiceFilter) ([]*domain.AgentService, error) {
+func (s *agentServiceStore) List(ctx context.Context, ws string, filter agents.AgentServiceFilter) ([]*agents.AgentServiceRecord, error) {
 	q := url.Values{}
 	if filter.Kind != "" {
 		q.Set("kind", string(filter.Kind))
@@ -96,37 +95,37 @@ func (s *agentServiceStore) List(ctx context.Context, ws string, filter store.Ag
 	}
 	path := withQuery("/api/v1/"+pathEscape(ws)+"/agent-services", q)
 	var resp struct {
-		AgentServices []*domain.AgentService `json:"agent_services"`
+		AgentServices []*agents.AgentServiceRecord `json:"agent_services"`
 	}
 	if err := s.client.do(ctx, "GET", path, nil, &resp); err != nil {
 		return nil, err
 	}
 	if resp.AgentServices == nil {
-		resp.AgentServices = []*domain.AgentService{}
+		resp.AgentServices = []*agents.AgentServiceRecord{}
 	}
 	return resp.AgentServices, nil
 }
 
-func (s *agentServiceStore) Update(ctx context.Context, ws, serviceID string, patch store.AgentServiceUpdate) (*domain.AgentService, error) {
+func (s *agentServiceStore) Update(ctx context.Context, ws, serviceID string, patch agents.AgentServiceUpdate) (*agents.AgentServiceRecord, error) {
 	body := struct {
-		Name            *string                          `json:"name,omitempty"`
-		Kind            *domain.AgentServiceKind         `json:"kind,omitempty"`
-		DesiredState    *domain.AgentServiceDesiredState `json:"desired_state,omitempty"`
-		RoleName        *string                          `json:"role_name,omitempty"`
-		DriverID        *string                          `json:"driver_id,omitempty"`
-		DriverVersionID *string                          `json:"driver_version_id,omitempty"`
-		ProfileName     *string                          `json:"profile_name,omitempty"`
-		ScheduleID      *string                          `json:"schedule_id,omitempty"`
-		EventSources    *[]string                        `json:"event_sources,omitempty"`
-		TriggerRefs     *[]string                        `json:"trigger_refs,omitempty"`
-		PlacementPolicy *string                          `json:"placement_policy,omitempty"`
-		MaxInstances    *int                             `json:"max_instances,omitempty"`
-		LeaseID         *string                          `json:"lease_id,omitempty"`
-		RestartPolicy   *string                          `json:"restart_policy,omitempty"`
-		Permissions     *[]string                        `json:"permissions,omitempty"`
-		BudgetPolicy    *string                          `json:"budget_policy,omitempty"`
-		StateRef        *string                          `json:"state_ref,omitempty"`
-		Metadata        *map[string]string               `json:"metadata,omitempty"`
+		Name            *string              `json:"name,omitempty"`
+		Kind            *agents.AgentKind    `json:"kind,omitempty"`
+		DesiredState    *agents.DesiredState `json:"desired_state,omitempty"`
+		RoleName        *string              `json:"role_name,omitempty"`
+		DriverID        *string              `json:"driver_id,omitempty"`
+		DriverVersionID *string              `json:"driver_version_id,omitempty"`
+		ProfileName     *string              `json:"profile_name,omitempty"`
+		ScheduleID      *string              `json:"schedule_id,omitempty"`
+		EventSources    *[]string            `json:"event_sources,omitempty"`
+		TriggerRefs     *[]string            `json:"trigger_refs,omitempty"`
+		PlacementPolicy *string              `json:"placement_policy,omitempty"`
+		MaxInstances    *int                 `json:"max_instances,omitempty"`
+		LeaseID         *string              `json:"lease_id,omitempty"`
+		RestartPolicy   *string              `json:"restart_policy,omitempty"`
+		Permissions     *[]string            `json:"permissions,omitempty"`
+		BudgetPolicy    *string              `json:"budget_policy,omitempty"`
+		StateRef        *string              `json:"state_ref,omitempty"`
+		Metadata        *map[string]string   `json:"metadata,omitempty"`
 	}{
 		Name:            patch.Name,
 		Kind:            patch.Kind,
@@ -147,7 +146,7 @@ func (s *agentServiceStore) Update(ctx context.Context, ws, serviceID string, pa
 		StateRef:        patch.StateRef,
 		Metadata:        patch.Metadata,
 	}
-	var out domain.AgentService
+	var out agents.AgentServiceRecord
 	path := "/api/v1/" + pathEscape(ws) + "/agent-services/" + pathEscape(serviceID)
 	if err := s.client.do(ctx, "PATCH", path, body, &out); err != nil {
 		return nil, err
@@ -174,10 +173,10 @@ type agentOwnershipLeaseStore struct {
 	management AgentManagementTransport
 }
 
-var _ store.AgentOwnershipLeaseStore = (*agentOwnershipLeaseStore)(nil)
-var _ store.AgentOwnershipLeaseOwnedStore = (*agentOwnershipLeaseStore)(nil)
+var _ agents.AgentOwnershipLeaseStore = (*agentOwnershipLeaseStore)(nil)
+var _ agents.AgentOwnershipLeaseOwnedStore = (*agentOwnershipLeaseStore)(nil)
 
-func (s *agentOwnershipLeaseStore) Acquire(ctx context.Context, in store.AgentOwnershipLeaseAcquire) (*domain.AgentOwnershipLease, error) {
+func (s *agentOwnershipLeaseStore) Acquire(ctx context.Context, in agents.AgentOwnershipLeaseAcquire) (*agents.OwnershipRecord, error) {
 	grant, err := s.management.AcquireAgentOwnership(ctx, AgentOwnershipAcquireInput{
 		WorkspaceKey: in.WorkspaceKey, AgentID: in.AgentID, LeaseID: in.LeaseID,
 		OwnerID: in.OwnerID, RuntimeProvider: in.RuntimeProvider, NodeID: in.NodeID,
@@ -196,7 +195,7 @@ func (s *agentOwnershipLeaseStore) Acquire(ctx context.Context, in store.AgentOw
 	return grant.Lease, nil
 }
 
-func validateAgentOwnershipLeaseEnvelope(lease domain.AgentOwnershipLease, token string, in store.AgentOwnershipLeaseAcquire) error {
+func validateAgentOwnershipLeaseEnvelope(lease agents.OwnershipRecord, token string, in agents.AgentOwnershipLeaseAcquire) error {
 	switch {
 	case token == "":
 		return errors.New("fleetdb: agent ownership lease acquire response omitted one-time token")
@@ -220,15 +219,15 @@ func validateAgentOwnershipLeaseEnvelope(lease domain.AgentOwnershipLease, token
 	return nil
 }
 
-func (s *agentOwnershipLeaseStore) Get(ctx context.Context, ws, agentID string) (*domain.AgentOwnershipLease, error) {
-	var out domain.AgentOwnershipLease
+func (s *agentOwnershipLeaseStore) Get(ctx context.Context, ws, agentID string) (*agents.OwnershipRecord, error) {
+	var out agents.OwnershipRecord
 	if err := s.client.do(ctx, "GET", "/api/v1/"+pathEscape(ws)+"/agent-ownership-leases/"+pathEscape(agentID), nil, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
 }
 
-func (s *agentOwnershipLeaseStore) List(ctx context.Context, ws string, filter store.AgentOwnershipLeaseFilter) ([]*domain.AgentOwnershipLease, error) {
+func (s *agentOwnershipLeaseStore) List(ctx context.Context, ws string, filter agents.AgentOwnershipLeaseFilter) ([]*agents.OwnershipRecord, error) {
 	q := url.Values{}
 	if filter.OwnerID != "" {
 		q.Set("owner_id", filter.OwnerID)
@@ -247,23 +246,23 @@ func (s *agentOwnershipLeaseStore) List(ctx context.Context, ws string, filter s
 	}
 	path := withQuery("/api/v1/"+pathEscape(ws)+"/agent-ownership-leases", q)
 	var resp struct {
-		AgentOwnershipLeases []*domain.AgentOwnershipLease `json:"agent_ownership_leases"`
+		AgentOwnershipLeases []*agents.OwnershipRecord `json:"agent_ownership_leases"`
 	}
 	if err := s.client.do(ctx, "GET", path, nil, &resp); err != nil {
 		return nil, err
 	}
 	if resp.AgentOwnershipLeases == nil {
-		resp.AgentOwnershipLeases = []*domain.AgentOwnershipLease{}
+		resp.AgentOwnershipLeases = []*agents.OwnershipRecord{}
 	}
 	return resp.AgentOwnershipLeases, nil
 }
 
-func (s *agentOwnershipLeaseStore) Heartbeat(ctx context.Context, ws, agentID, token string, ttl time.Duration) (*domain.AgentOwnershipLease, error) {
+func (s *agentOwnershipLeaseStore) Heartbeat(ctx context.Context, ws, agentID, token string, ttl time.Duration) (*agents.OwnershipRecord, error) {
 	path := "/api/v1/" + pathEscape(ws) + "/agent-ownership-leases/" + pathEscape(agentID) + "/heartbeat"
 	if seconds := ttlSeconds(ttl); seconds > 0 {
 		path += "?ttl_seconds=" + strconv.Itoa(seconds)
 	}
-	var out domain.AgentOwnershipLease
+	var out agents.OwnershipRecord
 	if err := s.client.doWithHeaders(ctx, "POST", path, nil, &out, map[string]string{"X-Agent-Ownership-Lease-Token": token}); err != nil {
 		return nil, err
 	}
@@ -272,9 +271,9 @@ func (s *agentOwnershipLeaseStore) Heartbeat(ctx context.Context, ws, agentID, t
 
 func (s *agentOwnershipLeaseStore) HeartbeatOwned(
 	ctx context.Context,
-	proof store.AgentOwnershipLeaseProof,
+	proof agents.AgentOwnershipLeaseProof,
 	ttl time.Duration,
-) (*domain.AgentOwnershipLease, error) {
+) (*agents.OwnershipRecord, error) {
 	return s.management.RenewAgentOwnership(ctx, AgentOwnershipRenewInput{
 		Proof:          ownershipProofInput(proof),
 		TTLSeconds:     ttlSeconds(ttl),
@@ -282,8 +281,8 @@ func (s *agentOwnershipLeaseStore) HeartbeatOwned(
 	})
 }
 
-func (s *agentOwnershipLeaseStore) Release(ctx context.Context, ws, agentID, token string) (*domain.AgentOwnershipLease, error) {
-	var out domain.AgentOwnershipLease
+func (s *agentOwnershipLeaseStore) Release(ctx context.Context, ws, agentID, token string) (*agents.OwnershipRecord, error) {
+	var out agents.OwnershipRecord
 	if err := s.client.doWithHeaders(ctx, "POST", "/api/v1/"+pathEscape(ws)+"/agent-ownership-leases/"+pathEscape(agentID)+"/release", nil, &out, map[string]string{"X-Agent-Ownership-Lease-Token": token}); err != nil {
 		return nil, err
 	}
@@ -292,15 +291,15 @@ func (s *agentOwnershipLeaseStore) Release(ctx context.Context, ws, agentID, tok
 
 func (s *agentOwnershipLeaseStore) ReleaseOwned(
 	ctx context.Context,
-	proof store.AgentOwnershipLeaseProof,
-) (*domain.AgentOwnershipLease, error) {
+	proof agents.AgentOwnershipLeaseProof,
+) (*agents.OwnershipRecord, error) {
 	return s.management.ReleaseAgentOwnership(ctx, AgentOwnershipReleaseInput{
 		Proof:          ownershipProofInput(proof),
 		DelegatedActor: proof.OwnerID,
 	})
 }
 
-func ownershipProofInput(proof store.AgentOwnershipLeaseProof) AgentOwnershipProof {
+func ownershipProofInput(proof agents.AgentOwnershipLeaseProof) AgentOwnershipProof {
 	return AgentOwnershipProof{
 		WorkspaceKey: proof.WorkspaceKey, AgentID: proof.AgentID, LeaseID: proof.LeaseID,
 		LeaseToken: proof.LeaseToken, OwnerID: proof.OwnerID,

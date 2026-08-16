@@ -38,14 +38,14 @@ func (app *Server) buildConnectorCapabilities() (
 	connectorsmodule.Management,
 	connectorsmodule.CredentialSealer,
 ) {
-	if app.config.Store == nil {
+	if app.config.ProjectionRecords == nil {
 		return nil, nil, nil
 	}
 	vault, err := connectorsvault.NewVaultFromEnvOrKeyFile(app.config.LocalSettingsDir)
 	if err != nil {
 		return nil, nil, nil
 	}
-	store := app.config.Store.Connectors()
+	store := app.config.ProjectionRecords.Connectors()
 	dispatcher, err := connectorsmodule.NewDispatch(
 		store,
 		vault,

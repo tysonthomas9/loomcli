@@ -12,9 +12,10 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 const (
@@ -183,12 +184,12 @@ func (f *workflowManagementFixture) serveHTTP(w http.ResponseWriter, r *http.Req
 		if runID == "" {
 			runID = "run-management-1"
 		}
-		writeWorkflowManagementTestJSON(w, http.StatusAccepted, &domain.DriverRun{
+		writeWorkflowManagementTestJSON(w, http.StatusAccepted, &execution.DriverRunRecord{
 			WorkspaceKey: workflowManagementTestWorkspace, RunID: runID,
 			DriverID: f.driver.DriverID, DriverVersionID: versionID,
 			Entrypoint: request.Entrypoint, SourceKind: "cli", SourceRef: "loom workflow run",
 			EpicID: request.EpicID, IdempotencyKey: request.IdempotencyKey,
-			Status: domain.DriverRunQueued, Payload: append(json.RawMessage(nil), request.Payload...),
+			Status: execution.DriverRunQueued, Payload: append(json.RawMessage(nil), request.Payload...),
 		})
 		return
 	case r.Method == http.MethodGet && r.URL.Path == workspacePrefix+"/workflow-catalog/drivers":
@@ -581,9 +582,9 @@ func TestWorkflowManagementStatusErrorsPreserveDomainExitClasses(t *testing.T) {
 		status int
 		want   error
 	}{
-		{status: http.StatusBadRequest, want: domain.ErrInvalid},
-		{status: http.StatusNotFound, want: domain.ErrNotFound},
-		{status: http.StatusConflict, want: domain.ErrConflict},
+		{status: http.StatusBadRequest, want: persistence.ErrInvalid},
+		{status: http.StatusNotFound, want: persistence.ErrNotFound},
+		{status: http.StatusConflict, want: persistence.ErrConflict},
 	}
 	for _, tt := range tests {
 		t.Run(fmt.Sprint(tt.status), func(t *testing.T) {

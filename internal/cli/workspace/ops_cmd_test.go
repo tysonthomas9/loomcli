@@ -7,7 +7,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli/local"
-	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/modules/agents"
 )
 
 func clearRuntimeRoutingEnv(t *testing.T) {
@@ -21,22 +21,22 @@ func clearRuntimeRoutingEnv(t *testing.T) {
 func TestAgentDesiredRunnable(t *testing.T) {
 	tests := []struct {
 		name  string
-		agent *domain.AgentService
+		agent *agents.AgentServiceRecord
 		want  bool
 	}{
 		{
 			name:  "desired running is runnable",
-			agent: &domain.AgentService{DesiredState: domain.AgentServiceDesiredRunning},
+			agent: &agents.AgentServiceRecord{DesiredState: agents.DesiredRunning},
 			want:  true,
 		},
 		{
 			name:  "desired paused is not runnable",
-			agent: &domain.AgentService{DesiredState: domain.AgentServiceDesiredPaused},
+			agent: &agents.AgentServiceRecord{DesiredState: agents.DesiredPaused},
 			want:  false,
 		},
 		{
 			name:  "desired stopped is not runnable",
-			agent: &domain.AgentService{DesiredState: domain.AgentServiceDesiredStopped},
+			agent: &agents.AgentServiceRecord{DesiredState: agents.DesiredStopped},
 			want:  false,
 		},
 	}
@@ -247,14 +247,14 @@ func TestBuildLocalRuntimeDesktopModeReadErrorSurfacesAsError(t *testing.T) {
 }
 
 func TestWorkspaceOpsAgentStatusFlagsUnknownRole(t *testing.T) {
-	rolesByName := map[string]*domain.Role{
+	rolesByName := map[string]*agents.Role{
 		"plan": {Name: "plan"},
 		"task": {Name: "task"},
 	}
-	agent := &domain.AgentService{
+	agent := &agents.AgentServiceRecord{
 		ServiceID:    "rogue",
 		RoleName:     "missing",
-		DesiredState: domain.AgentServiceDesiredRunning,
+		DesiredState: agents.DesiredRunning,
 	}
 
 	item, problems := workspaceOpsAgentStatus(bootstrap.WorkspaceLocalState{}, nil, rolesByName, agent)
@@ -277,17 +277,17 @@ func TestWorkspaceOpsAgentStatusFlagsUnknownRole(t *testing.T) {
 }
 
 func TestWorkspaceOpsAgentStatusFlagsMissingWorktree(t *testing.T) {
-	rolesByName := map[string]*domain.Role{"plan": {Name: "plan"}}
+	rolesByName := map[string]*agents.Role{"plan": {Name: "plan"}}
 	localState := bootstrap.WorkspaceLocalState{
 		Path: "/some/workspace",
 		Agents: map[string]bootstrap.AgentLocalState{
 			"planner": {Worktree: "/nonexistent/path/that/has/no/dot-git"},
 		},
 	}
-	agent := &domain.AgentService{
+	agent := &agents.AgentServiceRecord{
 		ServiceID:    "planner",
 		RoleName:     "plan",
-		DesiredState: domain.AgentServiceDesiredRunning,
+		DesiredState: agents.DesiredRunning,
 	}
 
 	item, problems := workspaceOpsAgentStatus(localState, nil, rolesByName, agent)
@@ -310,17 +310,17 @@ func TestWorkspaceOpsAgentStatusFlagsMissingWorktree(t *testing.T) {
 }
 
 func TestWorkspaceOpsAgentStatusDoesNotRequireInteractiveWorktree(t *testing.T) {
-	rolesByName := map[string]*domain.Role{
+	rolesByName := map[string]*agents.Role{
 		"pr-review": {
 			Name: "pr-review",
-			Kind: domain.RoleKindInteractive,
+			Kind: agents.RoleKindInteractive,
 		},
 	}
 	localState := bootstrap.WorkspaceLocalState{Path: "/some/workspace"}
-	agent := &domain.AgentService{
+	agent := &agents.AgentServiceRecord{
 		ServiceID:    "reviewer",
 		RoleName:     "pr-review",
-		DesiredState: domain.AgentServiceDesiredRunning,
+		DesiredState: agents.DesiredRunning,
 	}
 
 	item, problems := workspaceOpsAgentStatus(localState, nil, rolesByName, agent)

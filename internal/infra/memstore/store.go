@@ -1,4 +1,5 @@
-// Package memstore provides a test-only in-memory implementation of store.Store.
+// Package memstore provides test-only in-memory implementations of
+// capability-owned persistence ports.
 //
 // Runtime code must use the fleet-db HTTP client. Local mode talks to an
 // embedded fleet-db subprocess backed by Redis/miniredis; cloud mode talks to a
@@ -12,11 +13,22 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
+
+	"github.com/tysonthomas9/loomcli/internal/modules/automation"
+
+	"github.com/tysonthomas9/loomcli/internal/modules/agents"
+
+	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
+
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
+
+	workspaceowner "github.com/tysonthomas9/loomcli/internal/modules/workspace"
+
 	"github.com/tysonthomas9/loomcli/internal/modules/artifacts"
-	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
-// Store implements store.Store with all data held in memory. Safe for
+// Store exposes owner-specific in-memory adapters with all data held in memory. Safe for
 // concurrent use across goroutines. Each entity store carries its own
 // RWMutex; the package intentionally has no shared lock.
 //
@@ -150,48 +162,48 @@ func clonePtr[T any](p *T) *T {
 }
 
 // Workspaces returns the WorkspaceStore.
-func (s *Store) Workspaces() store.WorkspaceStore { return s.workspaces }
+func (s *Store) Workspaces() workspaceowner.WorkspaceStore { return s.workspaces }
 
 // Repos returns the RepoStore.
-func (s *Store) Repos() store.RepoStore { return s.repos }
+func (s *Store) Repos() workspaceowner.RepoStore { return s.repos }
 
 // Nodes returns the NodeStore.
-func (s *Store) Nodes() store.NodeStore { return s.nodes }
+func (s *Store) Nodes() execution.NodeStore { return s.nodes }
 
 // AgentSessions returns the AgentSessionStore.
-func (s *Store) AgentSessions() store.AgentSessionStore { return s.sessions }
+func (s *Store) AgentSessions() interaction.AgentSessionStore { return s.sessions }
 
-func (s *Store) TerminalSessions() store.TerminalSessionStore { return s.terminals }
+func (s *Store) TerminalSessions() interaction.TerminalSessionStore { return s.terminals }
 
 // ArtifactQueries exposes the Artifacts-owned read port implemented by the
 // same in-memory persistence adapter used by lifecycle tests.
 func (s *Store) ArtifactQueries() artifacts.QueryStore { return s.artifacts }
 
-func (s *Store) AgentLeases() store.AgentLeaseStore { return s.leases }
+func (s *Store) AgentLeases() interaction.AgentLeaseStore { return s.leases }
 
-func (s *Store) AgentOwnershipLeases() store.AgentOwnershipLeaseStore { return s.ownership }
+func (s *Store) AgentOwnershipLeases() agents.AgentOwnershipLeaseStore { return s.ownership }
 
-func (s *Store) AgentInboxMessages() store.AgentInboxMessageStore { return s.inbox }
+func (s *Store) AgentInboxMessages() interaction.AgentInboxMessageStore { return s.inbox }
 
-func (s *Store) Drivers() store.DriverStore { return s.drivers }
+func (s *Store) Drivers() workflowcatalog.DriverStore { return s.drivers }
 
-func (s *Store) DriverVersions() store.DriverVersionStore { return s.versions }
+func (s *Store) DriverVersions() workflowcatalog.DriverVersionStore { return s.versions }
 
-func (s *Store) WorkerProfiles() store.WorkerProfileStore { return s.profiles }
+func (s *Store) WorkerProfiles() execution.WorkerProfileStore { return s.profiles }
 
-func (s *Store) AgentServices() store.AgentServiceStore { return s.services }
+func (s *Store) AgentServices() agents.AgentServiceStore { return s.services }
 
-func (s *Store) TriggerBindings() store.TriggerBindingStore { return s.bindings }
+func (s *Store) TriggerBindings() automation.TriggerBindingStore { return s.bindings }
 
-func (s *Store) TriggerEvents() store.TriggerEventStore { return s.events }
+func (s *Store) TriggerEvents() automation.TriggerEventStore { return s.events }
 
-func (s *Store) TriggerDeliveries() store.TriggerDeliveryStore { return s.deliveries }
+func (s *Store) TriggerDeliveries() automation.TriggerDeliveryStore { return s.deliveries }
 
-func (s *Store) DriverRuns() store.DriverRunStore { return s.runs }
+func (s *Store) DriverRuns() execution.DriverRunStore { return s.runs }
 
-func (s *Store) DriverSteps() store.DriverStepStore { return s.steps }
+func (s *Store) DriverSteps() execution.DriverStepStore { return s.steps }
 
-func (s *Store) TaskRuns() store.TaskRunStore { return s.taskRuns }
+func (s *Store) TaskRuns() execution.TaskRunStore { return s.taskRuns }
 
 // TaskBlocked reports whether a TaskRunFinish with BlockTask marked the given
 // task ID blocked. memstore has no issue model (issues live in fleet-db), so
@@ -199,24 +211,21 @@ func (s *Store) TaskRuns() store.TaskRunStore { return s.taskRuns }
 func (s *Store) TaskBlocked(ws, taskID string) bool { return s.taskRuns.TaskBlocked(ws, taskID) }
 
 // TaskRunEvents returns the TaskRunEventStore.
-func (s *Store) TaskRunEvents() store.TaskRunEventStore { return s.taskEvents }
+func (s *Store) TaskRunEvents() execution.TaskRunEventStore { return s.taskEvents }
 
 // Outbox returns the OutboxStore.
-func (s *Store) Outbox() store.OutboxStore { return s.outbox }
+func (s *Store) Outbox() execution.OutboxStore { return s.outbox }
 
 // Awaits returns the AwaitStore (chunk AW4). The await index shares the
 // trigger-event journal's lock so register-and-check is atomic with event
 // appends; see awaitStore.
-func (s *Store) Awaits() store.AwaitStore { return s.awaits }
+func (s *Store) Awaits() execution.AwaitStore { return s.awaits }
 
 // Workers returns the WorkerStore.
-func (s *Store) Workers() store.WorkerStore { return s.workers }
+func (s *Store) Workers() execution.WorkerStore { return s.workers }
 
 // Roles returns the RoleStore.
-func (s *Store) Roles() store.RoleStore { return s.roles }
+func (s *Store) Roles() agents.RoleRecordStore { return s.roles }
 
 // Close is a no-op — memory has no resources to release.
 func (s *Store) Close() error { return nil }
-
-// Compile-time check.
-var _ store.Store = (*Store)(nil)

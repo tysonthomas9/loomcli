@@ -15,7 +15,6 @@ import (
 	"testing"
 
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
-	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
 type recordingAutomationQueries struct {
@@ -88,7 +87,7 @@ func TestVerificationDenialsAreUniformAndDoNotAdmit(t *testing.T) {
 			if recorder.Code != http.StatusUnauthorized || recorder.Body.String() != uniform401Body {
 				t.Fatalf("denial = %d %q, want uniform 401", recorder.Code, recorder.Body.String())
 			}
-			events, err := st.TriggerEvents().List(t.Context(), testWS, store.TriggerEventFilter{})
+			events, err := st.TriggerEvents().List(t.Context(), testWS, automation.TriggerEventFilter{})
 			if err != nil || len(events) != 0 {
 				t.Fatalf("denied request events = %d, %v; want none", len(events), err)
 			}

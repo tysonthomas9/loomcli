@@ -12,13 +12,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
-
-	"github.com/tysonthomas9/loomcli/internal/domain"
-	artifactsmodule "github.com/tysonthomas9/loomcli/internal/modules/artifacts"
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
+
+	workspaceowner "github.com/tysonthomas9/loomcli/internal/modules/workspace"
+
+	artifactsmodule "github.com/tysonthomas9/loomcli/internal/modules/artifacts"
+	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
-	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 type countingTaskWorkerLifecycleAPI struct {
@@ -126,27 +127,27 @@ func (api *blockingTaskWorkerLifecycleAPI) RegisterWorkerNode(
 
 func TestTaskWorkerRunOnceClaimsQueuedTaskRunAndClosesTask(t *testing.T) {
 	ctx, st, run := setupRunningDriverRun(t)
-	if _, err := st.DriverSteps().Create(ctx, store.DriverStepCreate{
+	if _, err := st.DriverSteps().Create(ctx, execution.DriverStepCreate{
 		WorkspaceKey: "TEST",
 		StepID:       "step-worker-loop",
 		DriverRunID:  run.RunID,
 		StepKind:     "task_run",
-		Status:       domain.DriverStepQueued,
+		Status:       execution.DriverStepQueued,
 		NodeID:       run.NodeID,
 		LeaseID:      run.LeaseID,
 		FencingToken: run.FencingToken,
 	}); err != nil {
 		t.Fatalf("Create driver step: %v", err)
 	}
-	if _, err := st.TaskRuns().Create(ctx, store.TaskRunCreate{
+	if _, err := st.TaskRuns().Create(ctx, execution.TaskRunCreate{
 		WorkspaceKey:    "TEST",
 		TaskRunID:       "task-run-worker-loop",
 		DriverRunID:     run.RunID,
 		DriverStepID:    "step-worker-loop",
 		TaskID:          "TEST-11",
 		ProviderProfile: "flue-local",
-		Status:          domain.TaskRunQueued,
-		SandboxPlacement: domain.TaskRunPlacement{
+		Status:          execution.TaskRunRecordQueued,
+		SandboxPlacement: execution.TaskRunPlacementRecord{
 			Provider: "flue-local",
 		},
 		RuntimeMetadata: map[string]string{
@@ -156,7 +157,7 @@ func TestTaskWorkerRunOnceClaimsQueuedTaskRunAndClosesTask(t *testing.T) {
 		t.Fatalf("Create queued task run: %v", err)
 	}
 	executor := &recordingTaskExecutor{result: TaskExecResult{
-		Status:       domain.TaskRunCompleted,
+		Status:       execution.TaskRunRecordCompleted,
 		ExitCode:     0,
 		LogsRef:      "logs://task-run-worker-loop",
 		ArtifactsRef: "artifacts://task-run-worker-loop",
@@ -185,13 +186,13 @@ func TestTaskWorkerRunOnceClaimsQueuedTaskRunAndClosesTask(t *testing.T) {
 	if executor.req.ParentSessionID != "lead-session-1" || outcome.Run.RuntimeMetadata["parent_session_id"] != "lead-session-1" {
 		t.Fatalf("parent session propagation req=%q metadata=%q, want lead-session-1", executor.req.ParentSessionID, outcome.Run.RuntimeMetadata["parent_session_id"])
 	}
-	replayed, err := st.TaskRuns().Complete(ctx, "TEST", "task-run-worker-loop", store.TaskRunComplete{
+	replayed, err := st.TaskRuns().Complete(ctx, "TEST", "task-run-worker-loop", execution.TaskRunComplete{
 		CompletionID: "worker-complete-task-run-worker-loop",
 		NodeID:       outcome.Run.Owner.NodeID,
 		LeaseID:      outcome.Run.Owner.LeaseID,
 		LeaseToken:   executor.req.LeaseToken,
 		FencingToken: outcome.Run.Owner.FencingToken,
-		Status:       domain.TaskRunCompleted,
+		Status:       execution.TaskRunRecordCompleted,
 	})
 	if err != nil {
 		t.Fatalf("replay worker completion: %v", err)
@@ -203,7 +204,7 @@ func TestTaskWorkerRunOnceClaimsQueuedTaskRunAndClosesTask(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Get driver step: %v", err)
 	}
-	if step.Status != domain.DriverStepCompleted || step.TaskRunID != "task-run-worker-loop" || step.OutputRef != "artifacts://task-run-worker-loop" {
+	if step.Status != execution.DriverStepCompleted || step.TaskRunID != "task-run-worker-loop" || step.OutputRef != "artifacts://task-run-worker-loop" {
 		t.Fatalf("driver step = %+v, want completed linked step with task output", step)
 	}
 }
@@ -211,13 +212,13 @@ func TestTaskWorkerRunOnceClaimsQueuedTaskRunAndClosesTask(t *testing.T) {
 func TestTaskWorkerUnscopedIdleLifecycleIsBoundedAcrossConcurrencySlots(t *testing.T) {
 	ctx, st, run := setupRunningDriverRun(t)
 	for _, workspace := range []string{"WS2", "WS3", "WS4", "WS5"} {
-		if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: workspace, Name: workspace}); err != nil {
+		if _, err := st.Workspaces().Create(ctx, workspaceowner.WorkspaceCreate{Key: workspace, Name: workspace}); err != nil {
 			t.Fatalf("Create workspace %s: %v", workspace, err)
 		}
 	}
 
 	now := time.Now().UTC()
-	executor := &recordingTaskExecutor{result: TaskExecResult{Status: domain.TaskRunCompleted, ExitCode: 0}}
+	executor := &recordingTaskExecutor{result: TaskExecResult{Status: execution.TaskRunRecordCompleted, ExitCode: 0}}
 	template := TaskWorker{
 		Store: st, WorkspaceKey: "", NodeID: "task-worker-node-shared",
 		NodeCapacity:       2,
@@ -283,18 +284,18 @@ func TestTaskWorkerUnscopedIdleLifecycleIsBoundedAcrossConcurrencySlots(t *testi
 		t.Fatalf("heartbeat cadence claim calls = %d, want one additional 5-workspace pass after %d", claims, claimsBeforeHeartbeat)
 	}
 
-	if _, err := st.DriverSteps().Create(ctx, store.DriverStepCreate{
+	if _, err := st.DriverSteps().Create(ctx, execution.DriverStepCreate{
 		WorkspaceKey: "TEST", StepID: "step-worker-after-idle", DriverRunID: run.RunID,
-		StepKind: "task_run", Status: domain.DriverStepQueued,
+		StepKind: "task_run", Status: execution.DriverStepQueued,
 		NodeID: run.NodeID, LeaseID: run.LeaseID, FencingToken: run.FencingToken,
 	}); err != nil {
 		t.Fatalf("Create driver step after idle: %v", err)
 	}
-	if _, err := st.TaskRuns().Create(ctx, store.TaskRunCreate{
+	if _, err := st.TaskRuns().Create(ctx, execution.TaskRunCreate{
 		WorkspaceKey: "TEST", TaskRunID: "task-run-after-idle", DriverRunID: run.RunID,
 		DriverStepID: "step-worker-after-idle", TaskID: "TEST-AFTER-IDLE",
-		ProviderProfile: "flue-local", Status: domain.TaskRunQueued,
-		SandboxPlacement: domain.TaskRunPlacement{Provider: "flue-local"},
+		ProviderProfile: "flue-local", Status: execution.TaskRunRecordQueued,
+		SandboxPlacement: execution.TaskRunPlacementRecord{Provider: "flue-local"},
 	}); err != nil {
 		t.Fatalf("Create queued task run after idle: %v", err)
 	}
@@ -365,26 +366,26 @@ func TestTaskWorkerExpiredNodeNotFoundReRegistersWithRunHeartbeatsDisabled(t *te
 
 func TestTaskWorkerBlockedLifecycleWorkspaceDoesNotBlockAnotherClone(t *testing.T) {
 	ctx, st, run := setupRunningDriverRun(t)
-	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "BLOCKED", Name: "blocked"}); err != nil {
+	if _, err := st.Workspaces().Create(ctx, workspaceowner.WorkspaceCreate{Key: "BLOCKED", Name: "blocked"}); err != nil {
 		t.Fatalf("Create blocked workspace: %v", err)
 	}
-	if _, err := st.DriverSteps().Create(ctx, store.DriverStepCreate{
+	if _, err := st.DriverSteps().Create(ctx, execution.DriverStepCreate{
 		WorkspaceKey: "TEST", StepID: "step-worker-unblocked", DriverRunID: run.RunID,
-		StepKind: "task_run", Status: domain.DriverStepQueued,
+		StepKind: "task_run", Status: execution.DriverStepQueued,
 		NodeID: run.NodeID, LeaseID: run.LeaseID, FencingToken: run.FencingToken,
 	}); err != nil {
 		t.Fatalf("Create driver step: %v", err)
 	}
-	if _, err := st.TaskRuns().Create(ctx, store.TaskRunCreate{
+	if _, err := st.TaskRuns().Create(ctx, execution.TaskRunCreate{
 		WorkspaceKey: "TEST", TaskRunID: "task-run-unblocked", DriverRunID: run.RunID,
 		DriverStepID: "step-worker-unblocked", TaskID: "TEST-UNBLOCKED",
-		ProviderProfile: "flue-local", Status: domain.TaskRunQueued,
-		SandboxPlacement: domain.TaskRunPlacement{Provider: "flue-local"},
+		ProviderProfile: "flue-local", Status: execution.TaskRunRecordQueued,
+		SandboxPlacement: execution.TaskRunPlacementRecord{Provider: "flue-local"},
 	}); err != nil {
 		t.Fatalf("Create queued task run: %v", err)
 	}
 
-	executor := &recordingTaskExecutor{result: TaskExecResult{Status: domain.TaskRunCompleted, ExitCode: 0}}
+	executor := &recordingTaskExecutor{result: TaskExecResult{Status: execution.TaskRunRecordCompleted, ExitCode: 0}}
 	template := TaskWorker{
 		Store: st, NodeID: "task-worker-node-shared", SupportedProviders: []string{"flue-local"},
 		HeartbeatInterval: 30 * time.Second, Executor: executor,
@@ -445,22 +446,22 @@ func TestTaskWorkerBlockedLifecycleWorkspaceDoesNotBlockAnotherClone(t *testing.
 
 func TestTaskWorkerRunOnceReplaysExactClaimEnvelopeAfterLostResponse(t *testing.T) {
 	ctx, st, run := setupRunningDriverRun(t)
-	if _, err := st.DriverSteps().Create(ctx, store.DriverStepCreate{
+	if _, err := st.DriverSteps().Create(ctx, execution.DriverStepCreate{
 		WorkspaceKey: "TEST", StepID: "step-worker-lost-response", DriverRunID: run.RunID,
-		StepKind: "task_run", Status: domain.DriverStepQueued,
+		StepKind: "task_run", Status: execution.DriverStepQueued,
 		NodeID: run.NodeID, LeaseID: run.LeaseID, FencingToken: run.FencingToken,
 	}); err != nil {
 		t.Fatalf("Create driver step: %v", err)
 	}
-	if _, err := st.TaskRuns().Create(ctx, store.TaskRunCreate{
+	if _, err := st.TaskRuns().Create(ctx, execution.TaskRunCreate{
 		WorkspaceKey: "TEST", TaskRunID: "task-run-worker-lost-response", DriverRunID: run.RunID,
 		DriverStepID: "step-worker-lost-response", TaskID: "TEST-LOST-RESPONSE",
-		ProviderProfile: "flue-local", Status: domain.TaskRunQueued,
-		SandboxPlacement: domain.TaskRunPlacement{Provider: "flue-local"},
+		ProviderProfile: "flue-local", Status: execution.TaskRunRecordQueued,
+		SandboxPlacement: execution.TaskRunPlacementRecord{Provider: "flue-local"},
 	}); err != nil {
 		t.Fatalf("Create queued task run: %v", err)
 	}
-	executor := &recordingTaskExecutor{result: TaskExecResult{Status: domain.TaskRunCompleted, ExitCode: 0}}
+	executor := &recordingTaskExecutor{result: TaskExecResult{Status: execution.TaskRunRecordCompleted, ExitCode: 0}}
 	now := time.Now().UTC()
 	worker := &TaskWorker{
 		Store: st, WorkspaceKey: "TEST", NodeID: "task-worker-node-1", RunnerID: "task-worker-runner-1",
@@ -536,7 +537,7 @@ func TestTaskWorkerRunOnceSerializesClaimReceiptReplay(t *testing.T) {
 
 func TestTaskWorkerRunOnceKeepsFlueTaskRunDistinctFromInteractionSession(t *testing.T) {
 	ctx, st, run := setupRunningDriverRun(t)
-	if _, err := st.TaskRuns().Create(ctx, store.TaskRunCreate{
+	if _, err := st.TaskRuns().Create(ctx, execution.TaskRunCreate{
 		WorkspaceKey:     "TEST",
 		TaskRunID:        "task-run-worker-flue",
 		DriverRunID:      run.RunID,
@@ -544,7 +545,7 @@ func TestTaskWorkerRunOnceKeepsFlueTaskRunDistinctFromInteractionSession(t *test
 		Runner:           "local-task-runner",
 		RunnerKind:       RunnerKindFlueWorkflow,
 		RunnerEntrypoint: "local-task-runner",
-		Status:           domain.TaskRunQueued,
+		Status:           execution.TaskRunRecordQueued,
 		RuntimeMetadata: map[string]string{
 			"parent_session_id":  "lead-session-1",
 			"runner_trust_level": string(workflowcatalog.DriverTrustTrusted),
@@ -576,7 +577,7 @@ func TestTaskWorkerRunOnceKeepsFlueTaskRunDistinctFromInteractionSession(t *test
 	if outcome.Run.Status != execution.StatusSucceeded {
 		t.Fatalf("outcome status = %s error=%s, want completed", outcome.Run.Status, outcome.Run.ErrorMessage)
 	}
-	if _, err := st.AgentSessions().Get(ctx, "TEST", "flue-task-run-worker-flue"); !errors.Is(err, domain.ErrNotFound) {
+	if _, err := st.AgentSessions().Get(ctx, "TEST", "flue-task-run-worker-flue"); !errors.Is(err, persistence.ErrNotFound) {
 		t.Fatalf("batch worker created Interaction AgentSession shadow: %v", err)
 	}
 	if outcome.Run.RuntimeMetadata["transcript_ref"] != "artifact://transcript-task-run-worker-flue" {
@@ -586,7 +587,7 @@ func TestTaskWorkerRunOnceKeepsFlueTaskRunDistinctFromInteractionSession(t *test
 
 func TestTaskWorkerRunOnceRefusesUntrustedQueuedNamedRunner(t *testing.T) {
 	ctx, st, run := setupRunningDriverRun(t)
-	if _, err := st.TaskRuns().Create(ctx, store.TaskRunCreate{
+	if _, err := st.TaskRuns().Create(ctx, execution.TaskRunCreate{
 		WorkspaceKey:     "TEST",
 		TaskRunID:        "task-run-worker-untrusted",
 		DriverRunID:      run.RunID,
@@ -594,7 +595,7 @@ func TestTaskWorkerRunOnceRefusesUntrustedQueuedNamedRunner(t *testing.T) {
 		Runner:           "local-task-runner",
 		RunnerKind:       RunnerKindFlueWorkflow,
 		RunnerEntrypoint: "local-task-runner",
-		Status:           domain.TaskRunQueued,
+		Status:           execution.TaskRunRecordQueued,
 		RuntimeMetadata: map[string]string{
 			"runner_trust_level": string(workflowcatalog.DriverTrustUntrusted),
 		},
@@ -638,34 +639,34 @@ func TestTaskWorkerRunOnceRefusesUntrustedQueuedNamedRunner(t *testing.T) {
 
 func TestTaskWorkerRunOnceRetriesThenBlocksFailedTaskRun(t *testing.T) {
 	ctx, st, run := setupRunningDriverRun(t)
-	if _, err := st.DriverSteps().Create(ctx, store.DriverStepCreate{
+	if _, err := st.DriverSteps().Create(ctx, execution.DriverStepCreate{
 		WorkspaceKey: "TEST",
 		StepID:       "step-worker-retry",
 		DriverRunID:  run.RunID,
 		StepKind:     "task_run",
-		Status:       domain.DriverStepQueued,
+		Status:       execution.DriverStepQueued,
 		NodeID:       run.NodeID,
 		LeaseID:      run.LeaseID,
 		FencingToken: run.FencingToken,
 	}); err != nil {
 		t.Fatalf("Create driver step: %v", err)
 	}
-	if _, err := st.TaskRuns().Create(ctx, store.TaskRunCreate{
+	if _, err := st.TaskRuns().Create(ctx, execution.TaskRunCreate{
 		WorkspaceKey:    "TEST",
 		TaskRunID:       "task-run-worker-retry",
 		DriverRunID:     run.RunID,
 		DriverStepID:    "step-worker-retry",
 		TaskID:          "TEST-13",
 		ProviderProfile: "flue-local",
-		Status:          domain.TaskRunQueued,
-		SandboxPlacement: domain.TaskRunPlacement{
+		Status:          execution.TaskRunRecordQueued,
+		SandboxPlacement: execution.TaskRunPlacementRecord{
 			Provider: "flue-local",
 		},
 	}); err != nil {
 		t.Fatalf("Create queued task run: %v", err)
 	}
 	executor := &recordingTaskExecutor{result: TaskExecResult{
-		Status:       domain.TaskRunFailed,
+		Status:       execution.TaskRunRecordFailed,
 		ExitCode:     1,
 		LogsRef:      "logs://task-run-worker-retry",
 		ErrorClass:   "task_runner_error",
@@ -699,7 +700,7 @@ func TestTaskWorkerRunOnceRetriesThenBlocksFailedTaskRun(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Get step after retry: %v", err)
 	}
-	if step.Status != domain.DriverStepQueued || step.TaskRunID != "task-run-worker-retry" {
+	if step.Status != execution.DriverStepQueued || step.TaskRunID != "task-run-worker-retry" {
 		t.Fatalf("step after retry = %+v, want queued linked step", step)
 	}
 	requeued, err := st.TaskRuns().Get(ctx, "TEST", "task-run-worker-retry")
@@ -728,7 +729,7 @@ func TestTaskWorkerRunOnceRetriesThenBlocksFailedTaskRun(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Get step after blocked: %v", err)
 	}
-	if step.Status != domain.DriverStepFailed || step.TaskRunID != "task-run-worker-retry" || step.OutputRef != "logs://task-run-worker-retry" {
+	if step.Status != execution.DriverStepFailed || step.TaskRunID != "task-run-worker-retry" || step.OutputRef != "logs://task-run-worker-retry" {
 		t.Fatalf("step after blocked = %+v, want failed linked step with logs output", step)
 	}
 }
@@ -736,7 +737,7 @@ func TestTaskWorkerRunOnceRetriesThenBlocksFailedTaskRun(t *testing.T) {
 func TestTaskWorkerRetryPersistsDistinctAttemptTranscriptsAndCompletes(t *testing.T) {
 	ctx, st, run := setupRunningDriverRun(t)
 	const taskRunID = "task-run-worker-transcript-retry"
-	if _, err := st.TaskRuns().Create(ctx, store.TaskRunCreate{
+	if _, err := st.TaskRuns().Create(ctx, execution.TaskRunCreate{
 		WorkspaceKey:     "TEST",
 		TaskRunID:        taskRunID,
 		DriverRunID:      run.RunID,
@@ -744,7 +745,7 @@ func TestTaskWorkerRetryPersistsDistinctAttemptTranscriptsAndCompletes(t *testin
 		Runner:           "local-task-runner",
 		RunnerKind:       RunnerKindFlueWorkflow,
 		RunnerEntrypoint: LocalTaskRunnerEntrypoint,
-		Status:           domain.TaskRunQueued,
+		Status:           execution.TaskRunRecordQueued,
 		RuntimeMetadata: map[string]string{
 			"runner_trust_level": string(workflowcatalog.DriverTrustTrusted),
 		},
@@ -811,7 +812,7 @@ func TestTaskWorkerRetryPersistsDistinctAttemptTranscriptsAndCompletes(t *testin
 		!strings.Contains(string(secondContent), "transcript for attempt 2") {
 		t.Fatalf("transcript contents first=%q second=%q, want distinct attempt evidence", firstContent, secondContent)
 	}
-	if _, err := st.AgentSessions().Get(ctx, "TEST", "flue-"+taskRunID); !errors.Is(err, domain.ErrNotFound) {
+	if _, err := st.AgentSessions().Get(ctx, "TEST", "flue-"+taskRunID); !errors.Is(err, persistence.ErrNotFound) {
 		t.Fatalf("retry created Interaction AgentSession shadow: %v", err)
 	}
 }

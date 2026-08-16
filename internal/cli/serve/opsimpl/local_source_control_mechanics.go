@@ -11,20 +11,20 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/app/query/operationalview"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/cli/git"
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/modules/agents"
 	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
-	"github.com/tysonthomas9/loomcli/internal/ops"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 // WorkspaceProjection is the exact machine-local workspace view required by
 // Source Control mechanics. The composition root adapts the legacy aggregate
 // store; this implementation never receives store.Store.
 type WorkspaceProjection interface {
-	WorkspaceData(context.Context, string) (*ops.WorkspaceData, error)
+	WorkspaceData(context.Context, string) (*operationalview.Workspace, error)
 	WorkspacePath(context.Context, string) string
 }
 
@@ -158,18 +158,18 @@ func (g *LocalSourceControlMechanics) ResolveAgentWorktreeForRepo(workspaceID, n
 	if !ok {
 		return nil, fmt.Errorf("%w: repo %q is not known in workspace %q", sourcecontrol.ErrAgentRepoNotAllowed, repoName, workspaceID)
 	}
-	return resolveAgentWorktreeFromWSForRepo(&ops.WorkspaceData{Path: root}, name, repo)
+	return resolveAgentWorktreeFromWSForRepo(&operationalview.Workspace{Path: root}, name, repo)
 }
 
 // loadStoreWorkspace loads the workspace topology for store-backed agent
 // resolution, applying the shared nil-guard and not-found mapping.
-func (g *LocalSourceControlMechanics) loadStoreWorkspace(ctx context.Context, workspaceID, name string) (*ops.WorkspaceData, error) {
+func (g *LocalSourceControlMechanics) loadStoreWorkspace(ctx context.Context, workspaceID, name string) (*operationalview.Workspace, error) {
 	if g == nil || g.workspaces == nil || workspaceID == "" || name == "" {
-		return nil, domain.ErrNotFound
+		return nil, persistence.ErrNotFound
 	}
 	ws, err := g.workspaces.WorkspaceData(ctx, workspaceID)
 	if err != nil {
-		if errors.Is(err, domain.ErrNotFound) {
+		if errors.Is(err, persistence.ErrNotFound) {
 			return nil, err
 		}
 		return nil, fmt.Errorf("load fleet-db workspace %q: %w", workspaceID, err)
@@ -179,7 +179,7 @@ func (g *LocalSourceControlMechanics) loadStoreWorkspace(ctx context.Context, wo
 
 func (g *LocalSourceControlMechanics) loadRuntimeIdentity(ctx context.Context, workspaceID, name string) (*agents.RuntimeIdentity, error) {
 	if g == nil || g.agentQueries == nil {
-		return nil, fmt.Errorf("canonical agent identity queries are not composed: %w", domain.ErrNotFound)
+		return nil, fmt.Errorf("canonical agent identity queries are not composed: %w", persistence.ErrNotFound)
 	}
 	record, err := g.agentQueries.GetAgent(ctx, workspaceID, name)
 	if err != nil {
@@ -195,7 +195,7 @@ func (g *LocalSourceControlMechanics) loadRuntimeIdentity(ctx context.Context, w
 // newWorkspaceWorktree builds an AgentWorktree pointing at a workspace-local
 // path (an agent worktree or a lead's primary repo). DefaultBranch falls back
 // to "main" when the repo declares none.
-func newWorkspaceWorktree(name, path, branch string, repo ops.WorkspaceRepo) *sourcecontrol.Worktree {
+func newWorkspaceWorktree(name, path, branch string, repo operationalview.Repository) *sourcecontrol.Worktree {
 	db := repo.DefaultBranch
 	if db == "" {
 		db = "main"
@@ -225,7 +225,7 @@ func (g *LocalSourceControlMechanics) resolveAgentWorktreeFromStore(ctx context.
 
 // resolveAgentWorktreeFromWS builds the agent's own worktree (under
 // <ws>/worktrees) from an already-loaded workspace.
-func resolveAgentWorktreeFromWS(ws *ops.WorkspaceData, agent *agents.RuntimeIdentity) (*sourcecontrol.Worktree, error) {
+func resolveAgentWorktreeFromWS(ws *operationalview.Workspace, agent *agents.RuntimeIdentity) (*sourcecontrol.Worktree, error) {
 	repo, err := selectAgentRepo(ws.Repos, agent.AgentID, agent.Repos, agent.RepoGroups)
 	if err != nil {
 		return nil, err
@@ -233,7 +233,7 @@ func resolveAgentWorktreeFromWS(ws *ops.WorkspaceData, agent *agents.RuntimeIden
 	return resolveAgentWorktreeFromWSForRepo(ws, agent.AgentID, repo)
 }
 
-func resolveAgentWorktreeFromWSForRepo(ws *ops.WorkspaceData, name string, repo ops.WorkspaceRepo) (*sourcecontrol.Worktree, error) {
+func resolveAgentWorktreeFromWSForRepo(ws *operationalview.Workspace, name string, repo operationalview.Repository) (*sourcecontrol.Worktree, error) {
 	wtPath := filepath.Join(ws.Path, "worktrees", repo.Name, name)
 	if _, err := os.Stat(filepath.Join(wtPath, ".git")); err != nil {
 		if os.IsNotExist(err) {
@@ -278,7 +278,7 @@ func (g *LocalSourceControlMechanics) ResolveWorkspaceRoot(workspaceID string) (
 // ResolveWorkspaceData returns workspace topology for file-scope target
 // validation. Store-backed deployments use the fleet-db projection; the legacy
 // config path exposes repo topology from local config.
-func (g *LocalSourceControlMechanics) ResolveWorkspaceData(workspaceID string) (*ops.WorkspaceData, error) {
+func (g *LocalSourceControlMechanics) ResolveWorkspaceData(workspaceID string) (*operationalview.Workspace, error) {
 	if workspaceID == "" {
 		return nil, fmt.Errorf("workspace id is required")
 	}
@@ -290,7 +290,7 @@ func (g *LocalSourceControlMechanics) ResolveWorkspaceData(workspaceID string) (
 	return resolveConfigWorkspaceData(workspaceID)
 }
 
-func resolveConfigWorkspaceData(workspaceID string) (*ops.WorkspaceData, error) {
+func resolveConfigWorkspaceData(workspaceID string) (*operationalview.Workspace, error) {
 	resolver, err := cli.NewResolver()
 	if err != nil {
 		return nil, fmt.Errorf("creating resolver: %v", err)
@@ -306,7 +306,7 @@ func resolveConfigWorkspaceData(workspaceID string) (*ops.WorkspaceData, error) 
 	}
 
 	repos, groups := configWorkspaceRepos(ws, root)
-	return &ops.WorkspaceData{
+	return &operationalview.Workspace{
 		ID:     ws.ID,
 		Name:   wsName,
 		Path:   root,
@@ -315,8 +315,8 @@ func resolveConfigWorkspaceData(workspaceID string) (*ops.WorkspaceData, error) 
 	}, nil
 }
 
-func configWorkspaceRepos(ws config.WorkspaceConfig, root string) ([]ops.WorkspaceRepo, []string) {
-	repos := make([]ops.WorkspaceRepo, 0, len(ws.Repos))
+func configWorkspaceRepos(ws config.WorkspaceConfig, root string) ([]operationalview.Repository, []string) {
+	repos := make([]operationalview.Repository, 0, len(ws.Repos))
 	groupSet := make(map[string]bool)
 	for _, r := range ws.Repos {
 		db := r.DefaultBranch
@@ -331,7 +331,7 @@ func configWorkspaceRepos(ws config.WorkspaceConfig, root string) ([]ops.Workspa
 		if r.Path == "" {
 			repoPath = filepath.Join(root, r.Name)
 		}
-		repos = append(repos, ops.WorkspaceRepo{
+		repos = append(repos, operationalview.Repository{
 			Name:          r.Name,
 			Path:          repoPath,
 			DefaultBranch: db,
@@ -370,9 +370,9 @@ func validateWorkspaceRoot(workspaceID, path string) (string, error) {
 	return path, nil
 }
 
-func selectAgentRepo(repos []ops.WorkspaceRepo, agentName string, agentRepos, agentRepoGroups []string) (ops.WorkspaceRepo, error) {
+func selectAgentRepo(repos []operationalview.Repository, agentName string, agentRepos, agentRepoGroups []string) (operationalview.Repository, error) {
 	if len(repos) == 0 {
-		return ops.WorkspaceRepo{}, fmt.Errorf("workspace has no repos for agent %q", agentName)
+		return operationalview.Repository{}, fmt.Errorf("workspace has no repos for agent %q", agentName)
 	}
 	allowed := make(map[string]bool)
 	for _, name := range agentRepos {
@@ -396,30 +396,30 @@ func selectAgentRepo(repos []ops.WorkspaceRepo, agentName string, agentRepos, ag
 			return repo, nil
 		}
 	}
-	return ops.WorkspaceRepo{}, fmt.Errorf("agent %q repo affinity does not match any workspace repo", agentName)
+	return operationalview.Repository{}, fmt.Errorf("agent %q repo affinity does not match any workspace repo", agentName)
 }
 
-func selectAgentRepoByName(repos []ops.WorkspaceRepo, agentName string, agentRepos, agentRepoGroups []string, repoName string) (ops.WorkspaceRepo, error) {
+func selectAgentRepoByName(repos []operationalview.Repository, agentName string, agentRepos, agentRepoGroups []string, repoName string) (operationalview.Repository, error) {
 	repo, ok := findWorkspaceRepo(repos, repoName)
 	if !ok {
-		return ops.WorkspaceRepo{}, fmt.Errorf("%w: repo %q is not known in workspace", sourcecontrol.ErrAgentRepoNotAllowed, repoName)
+		return operationalview.Repository{}, fmt.Errorf("%w: repo %q is not known in workspace", sourcecontrol.ErrAgentRepoNotAllowed, repoName)
 	}
 	if !agentRepoAllowed(repos, agentRepos, agentRepoGroups, repo.Name) {
-		return ops.WorkspaceRepo{}, fmt.Errorf("%w: repo %q is not allowed for agent %q", sourcecontrol.ErrAgentRepoNotAllowed, repo.Name, agentName)
+		return operationalview.Repository{}, fmt.Errorf("%w: repo %q is not allowed for agent %q", sourcecontrol.ErrAgentRepoNotAllowed, repo.Name, agentName)
 	}
 	return repo, nil
 }
 
-func findWorkspaceRepo(repos []ops.WorkspaceRepo, repoName string) (ops.WorkspaceRepo, bool) {
+func findWorkspaceRepo(repos []operationalview.Repository, repoName string) (operationalview.Repository, bool) {
 	for _, repo := range repos {
 		if repo.Name == repoName {
 			return repo, true
 		}
 	}
-	return ops.WorkspaceRepo{}, false
+	return operationalview.Repository{}, false
 }
 
-func agentRepoAllowed(repos []ops.WorkspaceRepo, agentRepos, agentRepoGroups []string, repoName string) bool {
+func agentRepoAllowed(repos []operationalview.Repository, agentRepos, agentRepoGroups []string, repoName string) bool {
 	if len(agentRepos) == 0 && len(agentRepoGroups) == 0 {
 		_, ok := findWorkspaceRepo(repos, repoName)
 		return ok
@@ -509,7 +509,7 @@ func githubRepoNameFromPath(path string) string {
 	return strings.TrimSpace(parts[0]) + "/" + strings.TrimSuffix(strings.TrimSpace(parts[1]), ".git")
 }
 
-func (g *LocalSourceControlMechanics) listWorkspaceRepos(workspaceID string) ([]ops.WorkspaceRepo, error) {
+func (g *LocalSourceControlMechanics) listWorkspaceRepos(workspaceID string) ([]operationalview.Repository, error) {
 	if g != nil && g.workspaces != nil {
 		ws, err := g.workspaces.WorkspaceData(context.Background(), workspaceID)
 		if err != nil {
@@ -535,8 +535,8 @@ func (g *LocalSourceControlMechanics) listWorkspaceRepos(workspaceID string) ([]
 
 // workspaceReposFromWorktrees maps discovered worktrees to workspace repos,
 // deduping by path and sorting by name.
-func workspaceReposFromWorktrees(worktrees []cli.WorktreeInfo) []ops.WorkspaceRepo {
-	byPath := make(map[string]ops.WorkspaceRepo)
+func workspaceReposFromWorktrees(worktrees []cli.WorktreeInfo) []operationalview.Repository {
+	byPath := make(map[string]operationalview.Repository)
 	for _, wt := range worktrees {
 		if wt.Path == "" {
 			continue
@@ -544,7 +544,7 @@ func workspaceReposFromWorktrees(worktrees []cli.WorktreeInfo) []ops.WorkspaceRe
 		if _, ok := byPath[wt.Path]; ok {
 			continue
 		}
-		repo := ops.WorkspaceRepo{
+		repo := operationalview.Repository{
 			Name:          wt.Name,
 			Path:          wt.Path,
 			CurrentBranch: wt.Branch,
@@ -562,7 +562,7 @@ func workspaceReposFromWorktrees(worktrees []cli.WorktreeInfo) []ops.WorkspaceRe
 		byPath[wt.Path] = repo
 	}
 
-	repos := make([]ops.WorkspaceRepo, 0, len(byPath))
+	repos := make([]operationalview.Repository, 0, len(byPath))
 	for _, repo := range byPath {
 		repos = append(repos, repo)
 	}

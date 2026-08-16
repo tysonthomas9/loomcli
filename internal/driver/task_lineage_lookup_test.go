@@ -11,12 +11,13 @@ import (
 	"testing"
 	"time"
 
+	workspaceowner "github.com/tysonthomas9/loomcli/internal/modules/workspace"
+
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	stackstore "github.com/tysonthomas9/loomcli/internal/infra/sourcecontrolstackstore"
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
-	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
 // lineageFixture builds a repo with a `main` branch and a stacked predecessor
@@ -71,10 +72,10 @@ func setupLineageFixture(t *testing.T) lineageFixture {
 	}
 
 	st := memstore.New()
-	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "TEST", Name: "test"}); err != nil {
+	if _, err := st.Workspaces().Create(ctx, workspaceowner.WorkspaceCreate{Key: "TEST", Name: "test"}); err != nil {
 		t.Fatalf("create workspace: %v", err)
 	}
-	if _, err := st.Repos().Create(ctx, store.RepoCreate{
+	if _, err := st.Repos().Create(ctx, workspaceowner.RepoCreate{
 		WorkspaceKey:  "TEST",
 		Name:          "app",
 		DefaultBranch: "main",
@@ -115,7 +116,7 @@ func resolveHead(t *testing.T, r LocalTaskWorktreeResolver, taskID, taskRunID st
 		WorkspaceKey:     "TEST",
 		TaskRunID:        taskRunID,
 		TaskID:           taskID,
-		SandboxPlacement: domain.TaskRunPlacement{RepoRef: "frontend"},
+		SandboxPlacement: execution.TaskRunPlacementRecord{RepoRef: "frontend"},
 	}, t.TempDir())
 	if err != nil {
 		t.Fatalf("ResolveTaskWorktree(%s): %v", taskID, err)
@@ -343,7 +344,7 @@ func TestResolveTaskWorktree_LineageErrorFailsClosed(t *testing.T) {
 		WorkspaceKey:     "TEST",
 		TaskRunID:        "task/run:err",
 		TaskID:           "task-b",
-		SandboxPlacement: domain.TaskRunPlacement{RepoRef: "frontend"},
+		SandboxPlacement: execution.TaskRunPlacementRecord{RepoRef: "frontend"},
 	}, t.TempDir())
 	if err == nil || !strings.Contains(err.Error(), "resolve task stack lineage") {
 		t.Fatalf("lineage-error ResolveTaskWorktree error = %v, want fail-closed lineage error", err)

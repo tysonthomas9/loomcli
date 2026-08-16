@@ -8,9 +8,9 @@ import (
 	"strings"
 
 	"github.com/tysonthomas9/loomcli/internal/app/systemeventing"
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	trigger "github.com/tysonthomas9/loomcli/internal/infra/automationruntime"
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 // automationIssueJournalEmitter adapts the journal poller's narrow producer
@@ -45,7 +45,7 @@ func (emitter *automationIssueJournalEmitter) Emit(
 	}
 	workspace = strings.TrimSpace(workspace)
 	if workspace == "" || event.Origin != automation.EventOriginSystem {
-		return nil, fmt.Errorf("issue journal emitter requires a system event and workspace: %w", domain.ErrInvalid)
+		return nil, fmt.Errorf("issue journal emitter requires a system event and workspace: %w", persistence.ErrInvalid)
 	}
 	result, err := emitter.emitter.EmitIssueJournal(ctx, workspace, event.ActorRef, systemeventing.EmitRequest{
 		WorkspaceKey:  workspace,
@@ -60,7 +60,7 @@ func (emitter *automationIssueJournalEmitter) Emit(
 	})
 	if err != nil {
 		if errors.Is(err, automation.ErrNotFound) || errors.Is(err, automation.ErrNoMatchingBinding) {
-			return nil, errors.Join(domain.ErrNotFound, err)
+			return nil, errors.Join(persistence.ErrNotFound, err)
 		}
 		return nil, err
 	}

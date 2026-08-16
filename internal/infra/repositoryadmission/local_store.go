@@ -10,7 +10,6 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/app/repositoryadmission"
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/modules/agents"
 	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
 	workspacemodule "github.com/tysonthomas9/loomcli/internal/modules/workspace"
@@ -323,7 +322,7 @@ func materializeAddReposWorktrees(
 	return created, repos, nil
 }
 
-// seedBuiltInRoles creates the domain.BuiltinRoleNames set — the two lists
+// seedBuiltInRoles creates the agents.BuiltinRoleNames set — the two lists
 // must stay in step, since delete guards consult the domain list. The
 // task-running roles (plan/task) are seeded with a TS-contract prompt body on
 // disk so the prompt-agent → local-task-runner lane can reuse them by name
@@ -355,7 +354,7 @@ func seedBuiltInRoles(
 		},
 		{
 			Name:        "lead",
-			Kind:        string(domain.RoleKindInteractive),
+			Kind:        string(agents.RoleKindInteractive),
 			Description: "Lead/orchestrator terminal",
 		},
 	}

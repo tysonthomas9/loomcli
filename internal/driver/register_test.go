@@ -10,11 +10,12 @@ import (
 	"strings"
 	"testing"
 
+	workspaceowner "github.com/tysonthomas9/loomcli/internal/modules/workspace"
+
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
-	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 func TestSeedFlueDriverFixtureStagesNativeArtifactAndActivates(t *testing.T) {
@@ -22,7 +23,7 @@ func TestSeedFlueDriverFixtureStagesNativeArtifactAndActivates(t *testing.T) {
 	root := t.TempDir()
 	writeFlueDist(t, root, "epic-runner", "one")
 	st := memstore.New()
-	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "TEST", Name: "test"}); err != nil {
+	if _, err := st.Workspaces().Create(ctx, workspaceowner.WorkspaceCreate{Key: "TEST", Name: "test"}); err != nil {
 		t.Fatalf("Create workspace: %v", err)
 	}
 
@@ -137,7 +138,7 @@ func TestSeedFlueDriverFixtureNewDigestCreatesNewVersion(t *testing.T) {
 	root := t.TempDir()
 	writeFlueDist(t, root, "epic-runner", "one")
 	st := memstore.New()
-	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "TEST", Name: "test"}); err != nil {
+	if _, err := st.Workspaces().Create(ctx, workspaceowner.WorkspaceCreate{Key: "TEST", Name: "test"}); err != nil {
 		t.Fatalf("Create workspace: %v", err)
 	}
 	first, err := SeedFlueDriverFixture(ctx, st, RegisterFlueOptions{
@@ -181,7 +182,7 @@ func TestSeedFlueDriverFixtureRejectsInvalidManifest(t *testing.T) {
 		t.Fatalf("write manifest: %v", err)
 	}
 	st := memstore.New()
-	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "TEST", Name: "test"}); err != nil {
+	if _, err := st.Workspaces().Create(ctx, workspaceowner.WorkspaceCreate{Key: "TEST", Name: "test"}); err != nil {
 		t.Fatalf("Create workspace: %v", err)
 	}
 
@@ -191,10 +192,10 @@ func TestSeedFlueDriverFixtureRejectsInvalidManifest(t *testing.T) {
 		DistPath:     "dist",
 		DriverName:   "epic-runner",
 		Activate:     true,
-	}); !errors.Is(err, domain.ErrInvalid) {
+	}); !errors.Is(err, persistence.ErrInvalid) {
 		t.Fatalf("SeedFlueDriverFixture invalid manifest err = %v, want ErrInvalid", err)
 	}
-	if _, err := st.Drivers().Get(ctx, "TEST", "epic-runner"); !errors.Is(err, domain.ErrNotFound) {
+	if _, err := st.Drivers().Get(ctx, "TEST", "epic-runner"); !errors.Is(err, persistence.ErrNotFound) {
 		t.Fatalf("driver after invalid manifest err = %v, want not found", err)
 	}
 }
@@ -207,7 +208,7 @@ func TestSeedFlueDriverFixtureRejectsGeneratedManifestRefs(t *testing.T) {
 		t.Fatalf("write manifest: %v", err)
 	}
 	st := memstore.New()
-	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "TEST", Name: "test"}); err != nil {
+	if _, err := st.Workspaces().Create(ctx, workspaceowner.WorkspaceCreate{Key: "TEST", Name: "test"}); err != nil {
 		t.Fatalf("Create workspace: %v", err)
 	}
 
@@ -217,7 +218,7 @@ func TestSeedFlueDriverFixtureRejectsGeneratedManifestRefs(t *testing.T) {
 		DistPath:     "dist",
 		DriverName:   "epic-runner",
 		Activate:     true,
-	}); !errors.Is(err, domain.ErrInvalid) {
+	}); !errors.Is(err, persistence.ErrInvalid) {
 		t.Fatalf("SeedFlueDriverFixture generated refs err = %v, want ErrInvalid", err)
 	}
 }
@@ -229,7 +230,7 @@ func TestSeedFlueDriverFixtureRejectsMissingServer(t *testing.T) {
 		t.Fatalf("mkdir dist: %v", err)
 	}
 	st := memstore.New()
-	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "TEST", Name: "test"}); err != nil {
+	if _, err := st.Workspaces().Create(ctx, workspaceowner.WorkspaceCreate{Key: "TEST", Name: "test"}); err != nil {
 		t.Fatalf("Create workspace: %v", err)
 	}
 
@@ -242,7 +243,7 @@ func TestSeedFlueDriverFixtureRejectsMissingServer(t *testing.T) {
 	}); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("SeedFlueDriverFixture missing server err = %v, want not exist", err)
 	}
-	if _, err := st.Drivers().Get(ctx, "TEST", "epic-runner"); !errors.Is(err, domain.ErrNotFound) {
+	if _, err := st.Drivers().Get(ctx, "TEST", "epic-runner"); !errors.Is(err, persistence.ErrNotFound) {
 		t.Fatalf("driver after missing server err = %v, want not found", err)
 	}
 }

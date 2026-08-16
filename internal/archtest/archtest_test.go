@@ -52,7 +52,7 @@ func TestProductionAwaitDispatchDoesNotFallbackToRawAtomicStore(t *testing.T) {
 		return true
 	})
 	if len(rawFallbacks) != 0 {
-		t.Fatalf("production Await dispatch must use its injected Execution resolver and fail closed when unavailable; raw store.AtomicAwaitStore fallback at %v", rawFallbacks)
+		t.Fatalf("production Await dispatch must use its injected Execution resolver and fail closed when unavailable; raw executionstore.AtomicAwaitStore fallback at %v", rawFallbacks)
 	}
 }
 
@@ -65,7 +65,7 @@ func TestCheckedInManifestsAndRepository(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, want := len(report.CompositeStoreFiles), 12; got != want {
+	if got, want := len(report.CompositeStoreFiles), 0; got != want {
 		t.Fatalf("composite Store file count = %d, want %d; files = %v", got, want, report.CompositeStoreFiles)
 	}
 	if got, want := len(report.CompositeStoreOutside), 0; got != want {
@@ -86,13 +86,13 @@ func TestCheckedInManifestsAndRepository(t *testing.T) {
 	if got, want := report.MutationCommands, 107; got != want {
 		t.Fatalf("mutation commands = %d, want %d", got, want)
 	}
-	if got, want := report.DirectPersistenceWrites, 77; got != want {
+	if got, want := report.DirectPersistenceWrites, 71; got != want {
 		t.Fatalf("direct persistence-write rows = %d, want %d", got, want)
 	}
 	if got, want := report.RuntimeComponents, 71; got != want {
 		t.Fatalf("runtime components = %d, want %d", got, want)
 	}
-	if got, want := report.RuntimeGoroutineLaunches, 77; got != want {
+	if got, want := report.RuntimeGoroutineLaunches, 74; got != want {
 		t.Fatalf("runtime goroutine launches = %d, want %d", got, want)
 	}
 	if got, want := report.PerformanceMetrics, 6; got != want {
@@ -692,6 +692,7 @@ func TestRetiredHorizontalRootsCannotReturn(t *testing.T) {
 		"internal/connector",
 		"internal/driver/runtypes",
 		"internal/driver/taskworktree",
+		"internal/domain",
 		"internal/infra/agentsbootstrapstore",
 		"internal/infra/artifactcatalog",
 		"internal/infra/connectorscatalog",
@@ -703,13 +704,14 @@ func TestRetiredHorizontalRootsCannotReturn(t *testing.T) {
 		"internal/modules/connectors/fleetdb",
 		"internal/modules/sourcecontrol/stackpublish",
 		"internal/pathsec",
+		"internal/ops",
 		"internal/runtimectx",
 		"internal/runtimepreflight",
 		"internal/sessions",
 		"internal/stacklineage",
 		"internal/stackpublish",
 		"internal/stackstore",
-		"internal/store/storetest",
+		"internal/store",
 		"internal/trigger",
 		"internal/types",
 		"internal/webui/service",
@@ -770,6 +772,58 @@ func TestRetiredHorizontalRootsCannotReturn(t *testing.T) {
 				t.Fatalf("retired horizontal root callers = %v, want none", callers)
 			}
 		})
+	}
+}
+
+func TestCapabilityOwnersDoNotExposeBackendErrorVocabulary(t *testing.T) {
+	root, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	modulesRoot := filepath.Join(root, "internal", "modules")
+	const backendErrors = "github.com/tysonthomas9/loomcli/internal/platform/persistence"
+	allowed := map[string]struct{}{
+		// Workspace's record adapter is the owning seam that translates the
+		// backend classes into Workspace errors before they reach its API.
+		"internal/modules/workspace/record_store_adapter.go": {},
+	}
+	var leaks []string
+	if err := filepath.WalkDir(modulesRoot, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") ||
+			strings.Contains(filepath.ToSlash(path), "/testdata/") {
+			return nil
+		}
+		parsed, parseErr := parser.ParseFile(token.NewFileSet(), path, nil, parser.ImportsOnly)
+		if parseErr != nil {
+			return parseErr
+		}
+		for _, imported := range parsed.Imports {
+			value, unquoteErr := strconv.Unquote(imported.Path.Value)
+			if unquoteErr != nil {
+				return unquoteErr
+			}
+			if value != backendErrors {
+				continue
+			}
+			relative, relErr := filepath.Rel(root, path)
+			if relErr != nil {
+				return relErr
+			}
+			relative = filepath.ToSlash(relative)
+			if _, ok := allowed[relative]; !ok {
+				leaks = append(leaks, relative)
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	slices.Sort(leaks)
+	if len(leaks) != 0 {
+		t.Fatalf("capability owners import backend-format error classes outside an owning adapter: %v", leaks)
 	}
 }
 
@@ -1081,7 +1135,6 @@ func TestRetiredCompatibilitySurfacesCannotReturn(t *testing.T) {
 		"internal/app/serve/execution.go":                           {"LegacyDriverRuns:"},
 		"internal/driver/task_worker.go":                            {"legacyTaskRunFromExecution"},
 		"internal/driver/task_worktree_resolver.go":                 {"repoBasename"},
-		"internal/domain/control_plane.go":                          {"AgentSessionKindOrchestration"},
 		"internal/webui/app/server.go":                              {"wsExistsFn"},
 		"internal/app/query/sessionarchive/execution_projection.go": {"legacyAgentSessionTaskRunID"},
 		"internal/app/query/sessionarchive/service.go": {
@@ -1096,9 +1149,6 @@ func TestRetiredCompatibilitySurfacesCannotReturn(t *testing.T) {
 		"internal/cli/hooks/hooks_cmd.go":                                     {"hooksDispatchCmd"},
 		"internal/modules/automation/admission.go":                            {"deliveryDispatchLegacyKeyAccepted", "taskReadyExhaustedRecoverySuffix"},
 		"internal/infra/automationruntime/issue_journal_bridge_task_ready.go": {"snapshotSourceRepo"},
-		"internal/store/platform_store.go": {
-			"TriggerRouteDispatcher", "TriggerRouteDispatch", "TriggerRouteDelivery", "PrimaryRun *domain.DriverRun",
-		},
 		"internal/infra/memstore/platform_trigger.go": {
 			"triggerRouteStore", "DispatchTriggerRouteV2", "legacy := exact", "runID(supplied",
 		},

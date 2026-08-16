@@ -6,9 +6,9 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 )
 
@@ -62,12 +62,12 @@ func writeBindingError(w http.ResponseWriter, err error, fallback string) {
 		return
 	}
 	switch {
-	case errors.Is(err, automation.ErrNotFound), errors.Is(err, domain.ErrNotFound):
+	case errors.Is(err, automation.ErrNotFound), errors.Is(err, persistence.ErrNotFound):
 		handler.RespondError(w, http.StatusNotFound, fallback)
-	case errors.Is(err, automation.ErrInvalid), errors.Is(err, automation.ErrWrongWorkspace), errors.Is(err, domain.ErrInvalid):
+	case errors.Is(err, automation.ErrInvalid), errors.Is(err, automation.ErrWrongWorkspace), errors.Is(err, persistence.ErrInvalid):
 		handler.RespondError(w, http.StatusBadRequest, err.Error())
 	case errors.Is(err, automation.ErrConflict), errors.Is(err, automation.ErrManagedBinding),
-		errors.Is(err, automation.ErrBindingEnabled), errors.Is(err, domain.ErrConflict):
+		errors.Is(err, automation.ErrBindingEnabled), errors.Is(err, persistence.ErrConflict):
 		handler.RespondError(w, http.StatusConflict, err.Error())
 	case handler.IsControlPlaneRateLimited(err):
 		handler.RespondError(w, http.StatusTooManyRequests, fallback)
@@ -81,7 +81,7 @@ func writeBindingError(w http.ResponseWriter, err error, fallback string) {
 }
 
 func bindingNotFound(err error) bool {
-	return errors.Is(err, automation.ErrNotFound) || errors.Is(err, domain.ErrNotFound)
+	return errors.Is(err, automation.ErrNotFound) || errors.Is(err, persistence.ErrNotFound)
 }
 
 func (m *Module) deleteUnmanagedBinding(

@@ -15,19 +15,23 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
+
+	"github.com/tysonthomas9/loomcli/internal/modules/automation"
+
+	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
+
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
+
 	appserve "github.com/tysonthomas9/loomcli/internal/app/serve"
 	"github.com/tysonthomas9/loomcli/internal/app/workfloweventing"
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	driverpkg "github.com/tysonthomas9/loomcli/internal/driver"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
-	"github.com/tysonthomas9/loomcli/internal/modules/agents"
-	"github.com/tysonthomas9/loomcli/internal/modules/automation"
-	"github.com/tysonthomas9/loomcli/internal/modules/execution"
-	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
+	agentsowner "github.com/tysonthomas9/loomcli/internal/modules/agents"
 	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
-	workspacemodule "github.com/tysonthomas9/loomcli/internal/modules/workspace"
+	workspaceowner "github.com/tysonthomas9/loomcli/internal/modules/workspace"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
-	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 	"github.com/tysonthomas9/loomcli/internal/testutil"
 )
 
@@ -53,12 +57,12 @@ type fakeWorkItems struct {
 	repositoryBlockErr    error
 }
 
-type testAutomationQueries struct{ store store.Store }
+type testAutomationQueries struct{ store *memstore.Store }
 
-type testRepositoryQueries struct{ store store.RepoStore }
+type testRepositoryQueries struct{ store workspaceowner.RepoStore }
 
 type testOrchestrationSessionQueries struct {
-	store store.OrchestrationSessionStore
+	store interaction.OrchestrationSessionStore
 }
 
 func (queries testOrchestrationSessionQueries) FindActiveOrchestrationSession(
@@ -66,25 +70,25 @@ func (queries testOrchestrationSessionQueries) FindActiveOrchestrationSession(
 	workspace,
 	agentID string,
 ) (string, error) {
-	return store.OrchestrationSessionIDFor(ctx, queries.store, workspace, agentID)
+	return interaction.OrchestrationSessionIDFor(ctx, queries.store, workspace, agentID)
 }
 
 func (queries testRepositoryQueries) GetRepository(
 	ctx context.Context,
-	query workspacemodule.GetRepositoryQuery,
-) (*workspacemodule.Repository, error) {
+	query workspaceowner.GetRepositoryQuery,
+) (*workspaceowner.Repository, error) {
 	return queries.store.Get(ctx, query.WorkspaceReference, query.Name)
 }
 
 func (queries testRepositoryQueries) ListRepositories(
 	ctx context.Context,
-	query workspacemodule.ListRepositoriesQuery,
-) ([]workspacemodule.Repository, error) {
+	query workspaceowner.ListRepositoriesQuery,
+) ([]workspaceowner.Repository, error) {
 	values, err := queries.store.List(ctx, query.WorkspaceReference)
 	if err != nil {
 		return nil, err
 	}
-	out := make([]workspacemodule.Repository, 0, len(values))
+	out := make([]workspaceowner.Repository, 0, len(values))
 	for _, value := range values {
 		if value != nil {
 			out = append(out, *value)
@@ -103,10 +107,7 @@ func (queries testAutomationQueries) ListBindings(
 	workspace string,
 	filter automation.BindingFilter,
 ) ([]*automation.Binding, error) {
-	values, err := queries.store.TriggerBindings().List(ctx, workspace, store.TriggerBindingFilter{
-		SourceKind: filter.SourceKind, RouteKey: filter.RouteKey, DriverID: filter.DriverID,
-		TargetAgentServiceID: filter.TargetAgentServiceID, Enabled: filter.Enabled, Limit: filter.Limit,
-	})
+	values, err := queries.store.TriggerBindings().List(ctx, workspace, automation.TriggerBindingFilter(filter))
 	return values, testAutomationError(err)
 }
 
@@ -120,7 +121,7 @@ func (queries testAutomationQueries) ListEvents(
 	workspace string,
 	filter automation.EventFilter,
 ) ([]*automation.Event, error) {
-	values, err := queries.store.TriggerEvents().List(ctx, workspace, store.TriggerEventFilter{
+	values, err := queries.store.TriggerEvents().List(ctx, workspace, automation.TriggerEventFilter{
 		SourceKind: filter.SourceKind, TriggerBindingID: filter.BindingID, Limit: filter.Limit,
 	})
 	return values, testAutomationError(err)
@@ -136,7 +137,7 @@ func (queries testAutomationQueries) ListDeliveries(
 	workspace string,
 	filter automation.DeliveryFilter,
 ) ([]*automation.Delivery, error) {
-	values, err := queries.store.TriggerDeliveries().List(ctx, workspace, store.TriggerDeliveryFilter{
+	values, err := queries.store.TriggerDeliveries().List(ctx, workspace, automation.TriggerDeliveryFilter{
 		TriggerEventID: filter.EventID, TriggerBindingID: filter.BindingID, Status: filter.Status, Limit: filter.Limit,
 	})
 	return values, testAutomationError(err)
@@ -146,9 +147,9 @@ func testAutomationError(err error) error {
 	switch {
 	case err == nil:
 		return nil
-	case errors.Is(err, domain.ErrNotFound):
+	case errors.Is(err, persistence.ErrNotFound):
 		return fmt.Errorf("%s: %w", err, automation.ErrNotFound)
-	case errors.Is(err, domain.ErrConflict):
+	case errors.Is(err, persistence.ErrConflict):
 		return fmt.Errorf("%s: %w", err, automation.ErrConflict)
 	default:
 		return err
@@ -269,12 +270,12 @@ type testHarness struct {
 }
 
 type testStoreAgentIdentities struct {
-	store store.AgentServiceStore
+	store agentsowner.AgentServiceStore
 }
 
-type testStoreAgentRoles struct{ store store.RoleStore }
+type testStoreAgentRoles struct{ store agentsowner.RoleRecordStore }
 
-func (queries testStoreAgentRoles) GetRole(ctx context.Context, workspace, roleName string) (*agents.Role, error) {
+func (queries testStoreAgentRoles) GetRole(ctx context.Context, workspace, roleName string) (*agentsowner.Role, error) {
 	value, err := queries.store.Get(ctx, workspace, roleName)
 	if err != nil {
 		return nil, err
@@ -282,24 +283,24 @@ func (queries testStoreAgentRoles) GetRole(ctx context.Context, workspace, roleN
 	return testCanonicalRole(value), nil
 }
 
-func (queries testStoreAgentRoles) ListRoles(ctx context.Context, workspace string) ([]*agents.Role, error) {
+func (queries testStoreAgentRoles) ListRoles(ctx context.Context, workspace string) ([]*agentsowner.Role, error) {
 	values, err := queries.store.List(ctx, workspace)
 	if err != nil {
 		return nil, err
 	}
-	out := make([]*agents.Role, 0, len(values))
+	out := make([]*agentsowner.Role, 0, len(values))
 	for _, value := range values {
 		out = append(out, testCanonicalRole(value))
 	}
 	return out, nil
 }
 
-func testCanonicalRole(value *domain.Role) *agents.Role {
+func testCanonicalRole(value *agentsowner.Role) *agentsowner.Role {
 	if value == nil {
 		return nil
 	}
-	return &agents.Role{
-		WorkspaceKey: value.WorkspaceKey, Name: value.Name, Kind: string(value.Kind),
+	return &agentsowner.Role{
+		WorkspaceKey: value.WorkspaceKey, Name: value.Name, Kind: value.Kind,
 		Description: value.Description, Prompt: value.Prompt, PromptFile: value.PromptFile,
 		Model: value.Model, TaskFilter: value.TaskFilter, Backend: value.Backend, Effort: value.Effort,
 		PathPatterns: append([]string(nil), value.PathPatterns...), Skills: append([]string(nil), value.Skills...),
@@ -309,7 +310,7 @@ func testCanonicalRole(value *domain.Role) *agents.Role {
 	}
 }
 
-func (queries testStoreAgentIdentities) GetAgent(ctx context.Context, workspace, agentID string) (*agents.Agent, error) {
+func (queries testStoreAgentIdentities) GetAgent(ctx context.Context, workspace, agentID string) (*agentsowner.Agent, error) {
 	value, err := queries.store.Get(ctx, workspace, agentID)
 	if err != nil {
 		return nil, err
@@ -317,8 +318,8 @@ func (queries testStoreAgentIdentities) GetAgent(ctx context.Context, workspace,
 	return testCanonicalAgent(value), nil
 }
 
-func (queries testStoreAgentIdentities) ListAgents(ctx context.Context, workspace string, filter agents.AgentFilter) ([]*agents.Agent, error) {
-	values, err := queries.store.List(ctx, workspace, store.AgentServiceFilter{
+func (queries testStoreAgentIdentities) ListAgents(ctx context.Context, workspace string, filter agentsowner.AgentFilter) ([]*agentsowner.Agent, error) {
+	values, err := queries.store.List(ctx, workspace, agentsowner.AgentServiceFilter{
 		RoleName:       filter.RoleName,
 		IncludeDeleted: filter.IncludeDeleted,
 		Limit:          filter.Limit,
@@ -326,23 +327,23 @@ func (queries testStoreAgentIdentities) ListAgents(ctx context.Context, workspac
 	if err != nil {
 		return nil, err
 	}
-	out := make([]*agents.Agent, 0, len(values))
+	out := make([]*agentsowner.Agent, 0, len(values))
 	for _, value := range values {
 		out = append(out, testCanonicalAgent(value))
 	}
 	return out, nil
 }
 
-func testCanonicalAgent(value *domain.AgentService) *agents.Agent {
+func testCanonicalAgent(value *agentsowner.AgentServiceRecord) *agentsowner.Agent {
 	if value == nil {
 		return nil
 	}
-	return &agents.Agent{
+	return &agentsowner.Agent{
 		WorkspaceKey: value.WorkspaceKey,
 		AgentID:      value.ServiceID,
 		GenerationID: value.GenerationID,
 		Name:         value.Name,
-		Behavior:     agents.BehaviorReference{RoleName: value.RoleName},
+		Behavior:     agentsowner.BehaviorReference{RoleName: value.RoleName},
 		ProfileName:  value.ProfileName,
 		Metadata:     maps.Clone(value.Metadata),
 		CreatedAt:    value.CreatedAt,
@@ -352,7 +353,7 @@ func testCanonicalAgent(value *domain.AgentService) *agents.Agent {
 
 type testDriverRunExecution struct {
 	execution.DriverRunAPI
-	store  store.Store
+	store  *memstore.Store
 	issues *fakeWorkItems
 }
 
@@ -559,14 +560,14 @@ func (adapter testDriverRunExecution) StartChildDriverRun(
 		childDepth++
 	}
 	if childDepth > command.MaxDepth {
-		return nil, domain.ErrCompositionDepthExceeded
+		return nil, execution.ErrCompositionDepthExceeded
 	}
 	childRunID := execution.ChildDriverRunID(command.Owner.ResourceID, command.ChildKey)
 	payload := append(json.RawMessage(nil), command.Payload...)
 	if len(payload) == 0 {
 		payload = json.RawMessage(`{}`)
 	}
-	run, err := adapter.store.DriverRuns().Create(ctx, store.DriverRunCreate{
+	run, err := adapter.store.DriverRuns().Create(ctx, execution.DriverRunCreate{
 		WorkspaceKey: command.WorkspaceKey, RunID: childRunID,
 		DriverID: command.DriverID, DriverVersionID: command.DriverVersionID,
 		Entrypoint: driverpkg.EntrypointRun, SourceKind: driverpkg.ChildRunSourceKind,
@@ -574,7 +575,7 @@ func (adapter testDriverRunExecution) StartChildDriverRun(
 		IdempotencyKey: execution.ChildDriverRunRequestID(command.Owner.ResourceID, command.ChildKey),
 		Payload:        payload,
 	})
-	if errors.Is(err, domain.ErrAlreadyExists) {
+	if errors.Is(err, persistence.ErrAlreadyExists) {
 		run, err = adapter.store.DriverRuns().Get(ctx, command.WorkspaceKey, childRunID)
 	}
 	if err != nil {
@@ -599,7 +600,7 @@ func (testDriverRunAuthorityResolver) ResolveDriverRunAuthority(
 // mutation here prevents the production Execution composition from regaining
 // a generic Store-writing request fallback just to support HTTP unit tests.
 type testTaskRunClaimPort struct {
-	store           store.Store
+	store           *memstore.Store
 	mu              sync.Mutex
 	requestReceipts map[string]execution.RequestTaskRunResult
 }
@@ -626,8 +627,8 @@ func (port *testTaskRunClaimPort) RequestTaskRun(ctx context.Context, command ex
 		return cloneTestTaskRunRequestReceipt(receipt, true), nil
 	}
 	actionID := command.RequestID
-	step, err := port.store.DriverSteps().CreateForRun(ctx, command.WorkspaceKey, command.DriverRunID, store.DriverStepCreate{
-		StepID: command.DriverStepID, StepKind: "task_run", Status: domain.DriverStepQueued,
+	step, err := port.store.DriverSteps().CreateForRun(ctx, command.WorkspaceKey, command.DriverRunID, execution.DriverStepCreate{
+		StepID: command.DriverStepID, StepKind: "task_run", Status: execution.DriverStepQueued,
 		TaskRunID: command.TaskRunID, ActionLedgerID: actionID,
 		NodeID: command.ParentOwner.NodeID, LeaseID: command.ParentOwner.LeaseID, FencingToken: command.ParentOwner.FencingToken,
 	})
@@ -639,12 +640,12 @@ func (port *testTaskRunClaimPort) RequestTaskRun(ctx context.Context, command ex
 		metadata = map[string]string{}
 	}
 	metadata["execution_request_id"] = command.RequestID
-	run, err := port.store.TaskRuns().Create(ctx, store.TaskRunCreate{
+	run, err := port.store.TaskRuns().Create(ctx, execution.TaskRunCreate{
 		WorkspaceKey: command.WorkspaceKey, TaskRunID: command.TaskRunID, DriverRunID: command.DriverRunID,
 		DriverStepID: command.DriverStepID, TaskID: command.WorkItemID, WorkerProfileID: command.WorkerProfileID,
 		Runner: command.Runner, RunnerRef: command.RunnerRef, RunnerKind: command.RunnerKind,
 		RunnerEntrypoint: command.RunnerEntrypoint, RunnerVersionID: command.RunnerVersionID,
-		ProviderProfile: command.ProviderProfile, Status: domain.TaskRunQueued, TargetNodeID: command.TargetNodeID,
+		ProviderProfile: command.ProviderProfile, Status: execution.TaskRunRecordQueued, TargetNodeID: command.TargetNodeID,
 		RunnerPlacement:  testDomainTaskRunPlacement(command.RunnerPlacement),
 		SandboxPlacement: testDomainTaskRunPlacement(command.SandboxPlacement),
 		RuntimeMetadata:  metadata, Input: append(json.RawMessage(nil), command.Input...),
@@ -704,8 +705,8 @@ func cloneTestStringMap(values map[string]string) map[string]string {
 	return cloned
 }
 
-func testDomainTaskRunPlacement(value execution.Placement) domain.TaskRunPlacement {
-	return domain.TaskRunPlacement{
+func testDomainTaskRunPlacement(value execution.Placement) execution.TaskRunPlacementRecord {
+	return execution.TaskRunPlacementRecord{
 		Provider: value.Provider, NodeID: value.NodeID, RunnerID: value.RunnerID,
 		SandboxID: value.SandboxID, CWD: value.CWD, RepoRef: value.RepoRef,
 	}
@@ -725,7 +726,7 @@ func (*testTaskRunClaimPort) ExhaustTaskRunRetries(context.Context, execution.Ex
 
 type testWorkflowCatalog struct {
 	workflowcatalog.API
-	store store.Store
+	store *memstore.Store
 }
 
 func (catalog testWorkflowCatalog) GetDriver(ctx context.Context, workspace, driverRef string) (*workflowcatalog.Driver, error) {
@@ -736,14 +737,14 @@ func (catalog testWorkflowCatalog) GetVersion(ctx context.Context, workspace, ve
 	return catalog.store.DriverVersions().Get(ctx, workspace, versionID)
 }
 
-func testExecutionDriverRun(run *domain.DriverRun) *execution.DriverRun {
+func testExecutionDriverRun(run *execution.DriverRunRecord) *execution.DriverRun {
 	if run == nil {
 		return nil
 	}
 	return &execution.DriverRun{
 		WorkspaceKey: run.WorkspaceKey, RunID: run.RunID, DriverID: run.DriverID, DriverVersionID: run.DriverVersionID,
 		Entrypoint: run.Entrypoint, SourceKind: run.SourceKind, SourceRef: run.SourceRef, EpicID: run.EpicID,
-		ParentRunID: run.ParentRunID, TriggerBindingID: run.TriggerBindingID, Status: execution.DriverRunStatus(run.Status),
+		ParentRunID: run.ParentRunID, TriggerBindingID: run.TriggerBindingID, Status: run.Status,
 		Owner:          execution.Owner{ResourceKind: execution.ResourceDriverRun, ResourceID: run.RunID, NodeID: run.NodeID, LeaseID: run.LeaseID, FencingToken: run.FencingToken},
 		IdempotencyKey: run.IdempotencyKey, Payload: append(json.RawMessage(nil), run.Payload...),
 		Summary: run.Summary, ErrorClass: run.ErrorClass, AwaitInstanceKey: run.AwaitInstanceKey,
@@ -751,7 +752,7 @@ func testExecutionDriverRun(run *domain.DriverRun) *execution.DriverRun {
 	}
 }
 
-func testExecutionAwait(instance *domain.AwaitInstance) *execution.DriverAwaitInstance {
+func testExecutionAwait(instance *execution.AwaitInstance) *execution.DriverAwaitInstance {
 	if instance == nil {
 		return nil
 	}
@@ -769,7 +770,7 @@ func newTestHarness(t *testing.T) *testHarness {
 	t.Helper()
 	ctx := context.Background()
 	st := memstore.New()
-	if _, err := st.Drivers().Create(ctx, store.DriverCreate{
+	if _, err := st.Drivers().Create(ctx, workflowcatalog.DriverCreate{
 		WorkspaceKey: "WS",
 		DriverID:     "driver-1",
 		Name:         "epic-runner",
@@ -778,7 +779,7 @@ func newTestHarness(t *testing.T) *testHarness {
 	}); err != nil {
 		t.Fatalf("Create driver: %v", err)
 	}
-	if _, err := st.DriverVersions().Create(ctx, store.DriverVersionCreate{
+	if _, err := st.DriverVersions().Create(ctx, workflowcatalog.DriverVersionCreate{
 		WorkspaceKey:     "WS",
 		VersionID:        "version-1",
 		DriverID:         "driver-1",
@@ -789,7 +790,7 @@ func newTestHarness(t *testing.T) *testHarness {
 	}); err != nil {
 		t.Fatalf("Create driver version: %v", err)
 	}
-	if _, err := st.DriverRuns().Create(ctx, store.DriverRunCreate{
+	if _, err := st.DriverRuns().Create(ctx, execution.DriverRunCreate{
 		WorkspaceKey:    "WS",
 		RunID:           "run-1",
 		DriverID:        "driver-1",
@@ -810,7 +811,7 @@ func newTestHarness(t *testing.T) *testHarness {
 	if err != nil {
 		t.Fatalf("new test workflow eventing: %v", err)
 	}
-	repairs, ok := st.DriverSteps().(store.TerminalDriverStepRepairStore)
+	repairs, ok := st.DriverSteps().(execution.TerminalDriverStepRepairStore)
 	if !ok {
 		t.Fatal("test DriverStep store lacks terminal repair support")
 	}
@@ -955,22 +956,22 @@ func TestIssueOpsFailClosedWithoutInjectedWorkItems(t *testing.T) {
 
 func TestUpdateAgentParentUsesVerifiedDriverRunGeneration(t *testing.T) {
 	h := newTestHarness(t)
-	if _, err := h.store.Roles().Create(t.Context(), store.RoleCreate{WorkspaceKey: "WS", Name: "task"}); err != nil {
+	if _, err := h.store.Roles().Create(t.Context(), agentsowner.RoleRecordCreate{WorkspaceKey: "WS", Name: "task"}); err != nil {
 		t.Fatalf("create task role: %v", err)
 	}
 	for _, name := range []string{"child", "wrong-generation-child"} {
 		profileID := name + "-profile"
-		if _, err := h.store.WorkerProfiles().Create(t.Context(), store.WorkerProfileCreate{
+		if _, err := h.store.WorkerProfiles().Create(t.Context(), execution.WorkerProfileCreate{
 			WorkspaceKey: "WS",
 			ProfileID:    profileID,
 			Role:         "task",
 		}); err != nil {
 			t.Fatalf("create %s profile: %v", name, err)
 		}
-		if _, err := h.store.AgentServices().Create(t.Context(), store.AgentServiceCreate{
+		if _, err := h.store.AgentServices().Create(t.Context(), agentsowner.AgentServiceCreate{
 			WorkspaceKey: "WS",
 			ServiceID:    name,
-			Kind:         domain.AgentServiceKindSupport,
+			Kind:         agentsowner.AgentKindSupport,
 			RoleName:     "task",
 			ProfileName:  profileID,
 		}); err != nil {
@@ -1525,7 +1526,7 @@ func TestDriverAPIExecTaskEnqueueUnschedulable(t *testing.T) {
 	if retryable, _ := envelope["retryable"].(bool); !retryable {
 		t.Fatalf("retryable = %v, want true", envelope["retryable"])
 	}
-	children, err := h.store.TaskRuns().List(context.Background(), "WS", store.TaskRunFilter{DriverRunID: h.runID})
+	children, err := h.store.TaskRuns().List(context.Background(), "WS", execution.TaskRunFilter{DriverRunID: h.runID})
 	if err != nil {
 		t.Fatalf("List children: %v", err)
 	}
@@ -1575,18 +1576,18 @@ func TestDecodeParamsRejectsTrailingJSON(t *testing.T) {
 	}
 
 	_, err = decodeParams[params]([]byte(`{"taskId":"TASK-1"} {"taskId":"TASK-2"}`))
-	if err == nil || !errors.Is(err, domain.ErrInvalid) {
-		t.Fatalf("decodeParams(trailing) error = %T %v, want domain.ErrInvalid", err, err)
+	if err == nil || !errors.Is(err, persistence.ErrInvalid) {
+		t.Fatalf("decodeParams(trailing) error = %T %v, want persistence.ErrInvalid", err, err)
 	}
 
-	if err := decodeNoParams([]byte(`{} {}`)); err == nil || !errors.Is(err, domain.ErrInvalid) {
-		t.Fatalf("decodeNoParams(trailing) error = %T %v, want domain.ErrInvalid", err, err)
+	if err := decodeNoParams([]byte(`{} {}`)); err == nil || !errors.Is(err, persistence.ErrInvalid) {
+		t.Fatalf("decodeNoParams(trailing) error = %T %v, want persistence.ErrInvalid", err, err)
 	}
 }
 
 func TestRoleGetUsesInjectedPromptReader(t *testing.T) {
 	h := newTestHarness(t)
-	if _, err := h.store.Roles().Create(t.Context(), store.RoleCreate{
+	if _, err := h.store.Roles().Create(t.Context(), agentsowner.RoleRecordCreate{
 		WorkspaceKey: "WS",
 		Name:         "reviewer",
 		Prompt:       "persisted inline prompt",
@@ -1595,8 +1596,8 @@ func TestRoleGetUsesInjectedPromptReader(t *testing.T) {
 		t.Fatalf("create role: %v", err)
 	}
 
-	var readRole *agents.Role
-	h.module.rolePrompts = func(role *agents.Role) string {
+	var readRole *agentsowner.Role
+	h.module.rolePrompts = func(role *agentsowner.Role) string {
 		readRole = role
 		return "materialized file prompt"
 	}

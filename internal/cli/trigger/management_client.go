@@ -12,10 +12,10 @@ import (
 	"os"
 	"strings"
 
-	"github.com/tysonthomas9/loomcli/internal/modules/automation"
-
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/httpclient"
+	"github.com/tysonthomas9/loomcli/internal/modules/automation"
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 const triggerManagementResponseLimit = 4 << 20
@@ -147,7 +147,7 @@ func (c *triggerManagementClient) getBinding(ctx context.Context, bindingID stri
 			return binding, nil
 		}
 	}
-	return nil, fmt.Errorf("trigger binding %q: %w", bindingID, domain.ErrNotFound)
+	return nil, fmt.Errorf("trigger binding %q: %w", bindingID, persistence.ErrNotFound)
 }
 
 func (c *triggerManagementClient) createBinding(ctx context.Context, input triggerBindingCreateRequest) (*automation.Binding, error) {
@@ -179,8 +179,8 @@ func (c *triggerManagementClient) deleteBinding(ctx context.Context, bindingID s
 	return &out, nil
 }
 
-func (c *triggerManagementClient) runBinding(ctx context.Context, bindingID string) (*domain.DriverRun, error) {
-	var out domain.DriverRun
+func (c *triggerManagementClient) runBinding(ctx context.Context, bindingID string) (*execution.DriverRunRecord, error) {
+	var out execution.DriverRunRecord
 	path := c.workspacePath("/trigger-bindings/" + url.PathEscape(strings.TrimSpace(bindingID)) + "/run")
 	if err := c.doJSON(ctx, http.MethodPost, path, nil, &out, nil); err != nil {
 		return nil, err
@@ -326,11 +326,11 @@ func triggerManagementStatusError(status int, data []byte) error {
 	}
 	switch status {
 	case http.StatusBadRequest, http.StatusPreconditionRequired, http.StatusPreconditionFailed:
-		return fmt.Errorf("%s: %w", detail, domain.ErrInvalid)
+		return fmt.Errorf("%s: %w", detail, persistence.ErrInvalid)
 	case http.StatusNotFound:
-		return fmt.Errorf("%s: %w", detail, domain.ErrNotFound)
+		return fmt.Errorf("%s: %w", detail, persistence.ErrNotFound)
 	case http.StatusConflict:
-		return fmt.Errorf("%s: %w", detail, domain.ErrConflict)
+		return fmt.Errorf("%s: %w", detail, persistence.ErrConflict)
 	case http.StatusUnauthorized:
 		return errors.New("trigger management API unauthorized: " + detail)
 	case http.StatusForbidden:

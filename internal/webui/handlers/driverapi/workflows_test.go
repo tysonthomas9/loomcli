@@ -5,9 +5,9 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
+
 	driverpkg "github.com/tysonthomas9/loomcli/internal/driver"
-	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
 // activateWorkflow makes the harness driver startable as a workflow target
@@ -41,7 +41,7 @@ func TestDriverAPIWorkflowsStartIdempotent(t *testing.T) {
 		t.Fatalf("status = %d (%v), want 200", resp.StatusCode, decoded)
 	}
 	wantChild := driverpkg.ChildWorkflowRunID(h.runID, "deploy")
-	if decoded["childRunId"] != wantChild || decoded["status"] != string(domain.DriverRunQueued) ||
+	if decoded["childRunId"] != wantChild || decoded["status"] != string(execution.DriverRunQueued) ||
 		decoded["parentRunId"] != h.runID || decoded["workflowName"] != "driver-1" {
 		t.Fatalf("response = %v, want queued child %q of %q", decoded, wantChild, h.runID)
 	}
@@ -110,8 +110,8 @@ func TestDriverAPIWorkflowsStartDepthCap(t *testing.T) {
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("depth-2 start = %d (%v), want 400", resp.StatusCode, decoded)
 	}
-	if code := errorCode(t, decoded); code != domain.CompositionErrCodeDepthExceeded {
-		t.Fatalf("error code = %q, want %q", code, domain.CompositionErrCodeDepthExceeded)
+	if code := errorCode(t, decoded); code != execution.CompositionErrCodeDepthExceeded {
+		t.Fatalf("error code = %q, want %q", code, execution.CompositionErrCodeDepthExceeded)
 	}
 }
 
@@ -135,20 +135,20 @@ func TestDriverAPIWorkflowsAwaitValidation(t *testing.T) {
 	child := startChildViaAPI(t, h, "await-validation")
 	resp, decoded = h.do(t, opRequest{op: "workflows/await", headers: h.ownerHeaders(t),
 		body: map[string]any{"childRunId": child, "awaitIndex": 1}})
-	if resp.StatusCode != http.StatusBadRequest || errorCode(t, decoded) != domain.AwaitErrCodeTimeoutRequired {
-		t.Fatalf("missing timeout = %d %v, want 400 %s", resp.StatusCode, decoded, domain.AwaitErrCodeTimeoutRequired)
+	if resp.StatusCode != http.StatusBadRequest || errorCode(t, decoded) != execution.AwaitErrCodeTimeoutRequired {
+		t.Fatalf("missing timeout = %d %v, want 400 %s", resp.StatusCode, decoded, execution.AwaitErrCodeTimeoutRequired)
 	}
 	resp, decoded = h.do(t, opRequest{op: "workflows/await", headers: h.ownerHeaders(t),
 		body: map[string]any{"childRunId": child, "timeoutMs": 60_000}})
-	if resp.StatusCode != http.StatusBadRequest || errorCode(t, decoded) != domain.AwaitErrCodeInstanceKeyMalformed {
-		t.Fatalf("missing awaitIndex = %d %v, want 400 %s", resp.StatusCode, decoded, domain.AwaitErrCodeInstanceKeyMalformed)
+	if resp.StatusCode != http.StatusBadRequest || errorCode(t, decoded) != execution.AwaitErrCodeInstanceKeyMalformed {
+		t.Fatalf("missing awaitIndex = %d %v, want 400 %s", resp.StatusCode, decoded, execution.AwaitErrCodeInstanceKeyMalformed)
 	}
 }
 
 func TestDriverAPIWorkflowsAwaitRejectsNonChild(t *testing.T) {
 	h := newTestHarness(t)
 	activateWorkflow(t, h)
-	if _, err := h.store.DriverRuns().Create(context.Background(), store.DriverRunCreate{
+	if _, err := h.store.DriverRuns().Create(context.Background(), execution.DriverRunCreate{
 		WorkspaceKey: "WS", RunID: "run-detached", DriverID: "driver-1", DriverVersionID: "version-1",
 	}); err != nil {
 		t.Fatalf("create detached run: %v", err)
@@ -192,7 +192,7 @@ func TestDriverAPIWorkflowsAwaitSuspendsParent(t *testing.T) {
 		t.Fatalf("response = %v, want no child outcome while suspended", decoded)
 	}
 	parent, err := h.store.DriverRuns().Get(context.Background(), "WS", h.runID)
-	if err != nil || parent.Status != domain.DriverRunSuspendedAwaitingEvent {
+	if err != nil || parent.Status != execution.DriverRunSuspendedAwait {
 		t.Fatalf("parent = %+v, %v; want suspended_awaiting_event", parent, err)
 	}
 }
@@ -226,7 +226,7 @@ func TestDriverAPIWorkflowsAwaitTerminalChildInline(t *testing.T) {
 
 	resp, decoded := h.do(t, opRequest{op: "workflows/await", headers: h.ownerHeaders(t),
 		body: map[string]any{"childRunId": childID, "timeoutMs": 60_000, "awaitIndex": 1}})
-	if resp.StatusCode != http.StatusOK || decoded["status"] != string(domain.AwaitSatisfied) {
+	if resp.StatusCode != http.StatusOK || decoded["status"] != string(execution.AwaitSatisfied) {
 		t.Fatalf("await = %d %v, want satisfied inline", resp.StatusCode, decoded)
 	}
 	event, _ := decoded["event"].(map[string]any)
@@ -241,10 +241,10 @@ func TestDriverAPIWorkflowsAwaitTerminalChildInline(t *testing.T) {
 	// The await consumed a normal awaitIndex slot and the parent never
 	// suspended.
 	parent, err := h.store.DriverRuns().Get(ctx, "WS", h.runID)
-	if err != nil || parent.Status != domain.DriverRunRunning {
+	if err != nil || parent.Status != execution.DriverRunRunning {
 		t.Fatalf("parent = %+v, %v; want still running", parent, err)
 	}
-	if decoded["instanceKey"] != domain.AwaitInstanceKey(h.runID, 1) {
-		t.Fatalf("instanceKey = %v, want %s", decoded["instanceKey"], domain.AwaitInstanceKey(h.runID, 1))
+	if decoded["instanceKey"] != execution.AwaitInstanceKey(h.runID, 1) {
+		t.Fatalf("instanceKey = %v, want %s", decoded["instanceKey"], execution.AwaitInstanceKey(h.runID, 1))
 	}
 }

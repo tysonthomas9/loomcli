@@ -5,16 +5,14 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
-	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
 // TaskRunMutationAdapter gives focused tests a consumer-owned Execution port
 // over their in-memory TaskRun repository. Production composition never uses
 // this package and always binds the Fleet transport adapter.
 type TaskRunMutationAdapter struct {
-	TaskRuns store.TaskRunStore
+	TaskRuns execution.TaskRunStore
 }
 
 func (adapter TaskRunMutationAdapter) Heartbeat(
@@ -24,7 +22,7 @@ func (adapter TaskRunMutationAdapter) Heartbeat(
 	if adapter.TaskRuns == nil {
 		return execution.HeartbeatResult{}, execution.ErrUnavailable
 	}
-	run, err := adapter.TaskRuns.Heartbeat(ctx, command.WorkspaceKey, command.Owner.ResourceID, store.TaskRunHeartbeat{
+	run, err := adapter.TaskRuns.Heartbeat(ctx, command.WorkspaceKey, command.Owner.ResourceID, execution.TaskRunHeartbeat{
 		NodeID: command.Owner.NodeID, LeaseID: command.Owner.LeaseID, LeaseToken: command.Owner.LeaseToken,
 		FencingToken: command.Owner.FencingToken, RuntimeMetadata: cloneExecutionMetadata(command.RuntimeMetadata),
 		LogsRef: command.LogsRef, ArtifactsRef: command.ArtifactsRef, HeartbeatAt: command.At,
@@ -46,7 +44,7 @@ func (adapter TaskRunMutationAdapter) AppendLog(
 	if adapter.TaskRuns == nil {
 		return execution.LogEntry{}, execution.ErrUnavailable
 	}
-	entry, err := adapter.TaskRuns.AppendLog(ctx, command.WorkspaceKey, command.Owner.ResourceID, store.TaskRunLogAppend{
+	entry, err := adapter.TaskRuns.AppendLog(ctx, command.WorkspaceKey, command.Owner.ResourceID, execution.TaskRunLogAppend{
 		RequestID: command.RequestID, NodeID: command.Owner.NodeID, LeaseID: command.Owner.LeaseID,
 		LeaseToken: command.Owner.LeaseToken, FencingToken: command.Owner.FencingToken,
 		Stream: command.Stream, Text: command.Text, Timestamp: command.Timestamp,
@@ -74,7 +72,7 @@ func (adapter TaskRunMutationAdapter) Finalize(
 	if err != nil {
 		return execution.FinalizeResult{}, err
 	}
-	run, err := adapter.TaskRuns.Complete(ctx, command.WorkspaceKey, command.Owner.ResourceID, store.TaskRunComplete{
+	run, err := adapter.TaskRuns.Complete(ctx, command.WorkspaceKey, command.Owner.ResourceID, execution.TaskRunComplete{
 		CompletionID: command.RequestID, NodeID: command.Owner.NodeID, LeaseID: command.Owner.LeaseID,
 		LeaseToken: command.Owner.LeaseToken, FencingToken: command.Owner.FencingToken, Status: status,
 		ExitCode: command.ExitCode, LogsRef: command.LogsRef, ArtifactsRef: command.ArtifactsRef,
@@ -99,7 +97,7 @@ func (adapter TaskRunMutationAdapter) Finalize(
 	return execution.FinalizeResult{Owner: owner, Status: command.Classification.Status, FinishedAt: finishedAt}, nil
 }
 
-func taskRunOwner(leaseToken string, run *domain.TaskRun) (execution.Owner, error) {
+func taskRunOwner(leaseToken string, run *execution.TaskRunRecord) (execution.Owner, error) {
 	if run == nil || strings.TrimSpace(run.TaskRunID) == "" || strings.TrimSpace(run.NodeID) == "" ||
 		strings.TrimSpace(run.LeaseID) == "" || run.FencingToken <= 0 {
 		return execution.Owner{}, execution.ErrConflict
@@ -110,14 +108,14 @@ func taskRunOwner(leaseToken string, run *domain.TaskRun) (execution.Owner, erro
 	}, nil
 }
 
-func taskRunStatus(status execution.Status) (domain.TaskRunStatus, error) {
+func taskRunStatus(status execution.Status) (execution.TaskRunRecordStatus, error) {
 	switch status {
 	case execution.StatusSucceeded:
-		return domain.TaskRunCompleted, nil
+		return execution.TaskRunRecordCompleted, nil
 	case execution.StatusFailed, execution.StatusBlocked:
-		return domain.TaskRunFailed, nil
+		return execution.TaskRunRecordFailed, nil
 	case execution.StatusCancelled:
-		return domain.TaskRunCancelled, nil
+		return execution.TaskRunRecordCancelled, nil
 	default:
 		return "", fmt.Errorf("unsupported terminal Execution status %q: %w", status, execution.ErrInvalid)
 	}

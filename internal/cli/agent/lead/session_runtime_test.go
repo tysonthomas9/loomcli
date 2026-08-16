@@ -3,14 +3,15 @@ package lead
 import (
 	"context"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
-	leadcontrol "github.com/tysonthomas9/loomcli/internal/infra/interactionlead"
 	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
-	"github.com/tysonthomas9/loomcli/internal/store"
+
+	leadcontrol "github.com/tysonthomas9/loomcli/internal/infra/interactionlead"
+	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 type testLeadSessionRuntime struct {
-	store store.Store
+	store *memstore.Store
 }
 
 var _ leadcontrol.SessionRuntime = (*testLeadSessionRuntime)(nil)
@@ -45,7 +46,7 @@ func (runtime *testLeadSessionRuntime) PatchSessionRuntimeContext(
 		ctx,
 		command.WorkspaceKey,
 		command.SessionID,
-		store.AgentSessionUpdate{Phase: command.Phase, Metadata: &metadata},
+		interaction.AgentSessionUpdate{Phase: command.Phase, Metadata: &metadata},
 	)
 	return err
 }
@@ -65,8 +66,8 @@ func (runtime *testLeadSessionRuntime) FinishSession(
 	ctx context.Context,
 	command interaction.FinishSessionCommand,
 ) error {
-	status := domain.AgentSessionStatus(command.Status)
-	_, err := runtime.store.AgentSessions().Update(ctx, command.WorkspaceKey, command.SessionID, store.AgentSessionUpdate{
+	status := interaction.SessionRecordStatus(command.Status)
+	_, err := runtime.store.AgentSessions().Update(ctx, command.WorkspaceKey, command.SessionID, interaction.AgentSessionUpdate{
 		Status: &status,
 	})
 	return err
@@ -76,7 +77,7 @@ func (*testLeadSessionRuntime) ClaimNextInbox(
 	context.Context,
 	interaction.ClaimInboxCommand,
 ) (*interaction.InboxMessage, error) {
-	return nil, domain.ErrNotFound
+	return nil, persistence.ErrNotFound
 }
 
 func (*testLeadSessionRuntime) CompleteInbox(

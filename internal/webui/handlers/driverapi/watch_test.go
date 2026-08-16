@@ -11,9 +11,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
+
 	driverpkg "github.com/tysonthomas9/loomcli/internal/driver"
-	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
 // watchTestTimeout bounds every streaming test so a broken stream fails
@@ -122,9 +122,9 @@ func openWatch(t *testing.T, h *testHarness, query string, headers map[string]st
 
 // appendWatchEvent appends one journal event for the harness epic/run and
 // returns its store-assigned Seq.
-func appendWatchEvent(t *testing.T, h *testHarness, taskRunID string, eventType domain.TaskRunEventType) int64 {
+func appendWatchEvent(t *testing.T, h *testHarness, taskRunID string, eventType execution.TaskRunEventType) int64 {
 	t.Helper()
-	event, err := h.store.TaskRunEvents().Append(context.Background(), store.TaskRunEventAppend{
+	event, err := h.store.TaskRunEvents().Append(context.Background(), execution.TaskRunEventAppend{
 		WorkspaceKey: "WS",
 		EpicID:       "EPIC-1",
 		DriverRunID:  h.runID,
@@ -203,8 +203,8 @@ func TestWatchEpicAuth(t *testing.T) {
 func TestWatchEpicSnapshotFirstThenEvents(t *testing.T) {
 	h := newTestHarness(t)
 	h.module.watchPollInterval = 5 * time.Millisecond
-	seq1 := appendWatchEvent(t, h, "task-run-1", domain.TaskRunEventQueued)
-	seq2 := appendWatchEvent(t, h, "task-run-1", domain.TaskRunEventClaimed)
+	seq1 := appendWatchEvent(t, h, "task-run-1", execution.TaskRunEventQueued)
+	seq2 := appendWatchEvent(t, h, "task-run-1", execution.TaskRunEventClaimed)
 
 	stream := openWatch(t, h, "", h.ownerHeaders(t))
 	if stream.resp.StatusCode != http.StatusOK {
@@ -233,7 +233,7 @@ func TestWatchEpicSnapshotFirstThenEvents(t *testing.T) {
 
 	// Pre-connect journal events stream next with id = Seq.
 	wantSeqs := []int64{seq1, seq2}
-	wantTypes := []string{string(domain.TaskRunEventQueued), string(domain.TaskRunEventClaimed)}
+	wantTypes := []string{string(execution.TaskRunEventQueued), string(execution.TaskRunEventClaimed)}
 	for i, wantSeq := range wantSeqs {
 		frame, ok := stream.nextEvent(t)
 		if !ok || frame.event != "taskRun" {
@@ -255,7 +255,7 @@ func TestWatchEpicSnapshotFirstThenEvents(t *testing.T) {
 	}
 
 	// Events appended while connected are streamed too.
-	seq3 := appendWatchEvent(t, h, "task-run-1", domain.TaskRunEventCompleted)
+	seq3 := appendWatchEvent(t, h, "task-run-1", execution.TaskRunEventCompleted)
 	frame, ok = stream.nextEvent(t)
 	if !ok || frame.event != "taskRun" {
 		t.Fatalf("live frame = %+v, want event taskRun", frame)
@@ -292,9 +292,9 @@ func TestWatchEpicResumeSkipsSeenSeqs(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			h := newTestHarness(t)
 			h.module.watchPollInterval = 5 * time.Millisecond
-			appendWatchEvent(t, h, "task-run-1", domain.TaskRunEventQueued)
-			seq2 := appendWatchEvent(t, h, "task-run-1", domain.TaskRunEventClaimed)
-			seq3 := appendWatchEvent(t, h, "task-run-1", domain.TaskRunEventCompleted)
+			appendWatchEvent(t, h, "task-run-1", execution.TaskRunEventQueued)
+			seq2 := appendWatchEvent(t, h, "task-run-1", execution.TaskRunEventClaimed)
+			seq3 := appendWatchEvent(t, h, "task-run-1", execution.TaskRunEventCompleted)
 
 			cursor := strconvInt64(seq2)
 			query := ""
@@ -339,11 +339,11 @@ func TestWatchEpicClosesWhenParentFinishes(t *testing.T) {
 		t.Fatalf("first frame = %+v, want event snapshot", frame)
 	}
 
-	if _, err := h.store.DriverRuns().Finish(context.Background(), "WS", h.runID, store.DriverRunFinish{
+	if _, err := h.store.DriverRuns().Finish(context.Background(), "WS", h.runID, execution.DriverRunFinish{
 		NodeID:       h.nodeID,
 		LeaseID:      h.leaseID,
 		FencingToken: h.fence,
-		Status:       domain.DriverRunCompleted,
+		Status:       execution.DriverRunCompleted,
 	}); err != nil {
 		t.Fatalf("finish driver run: %v", err)
 	}

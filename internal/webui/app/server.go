@@ -22,7 +22,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
 	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 	"github.com/tysonthomas9/loomcli/internal/modules/workspace"
-	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui"
 	"github.com/tysonthomas9/loomcli/internal/webui/agentcoord"
 	"github.com/tysonthomas9/loomcli/internal/webui/readprojection"
@@ -81,7 +80,7 @@ type Server struct {
 		workitems.StatsQueries
 	}
 	workspaceCatalog workspace.API
-	workspaceStore   store.WorkspaceStore
+	workspaceStore   workspace.WorkspaceStore
 	workItemMover    workitemmove.Commands
 	agentSvc         agentcoord.AgentService
 	agentRuntime     agentcoord.InteractiveAgentRuntime

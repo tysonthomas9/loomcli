@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/modules/agents"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 )
 
@@ -38,7 +38,7 @@ func TestHandleInteractivePromptsListsBuiltins(t *testing.T) {
 	if _, ok := seen["pr-review-checkout"]; ok {
 		t.Fatalf("hidden prompt pr-review-checkout was returned: %#v", got.Prompts)
 	}
-	if !domain.IsBuiltinInteractivePrompt("pr-review-checkout") {
+	if !agents.IsBuiltinInteractivePrompt("pr-review-checkout") {
 		t.Fatal("pr-review-checkout must remain registered as a launchable builtin prompt")
 	}
 }

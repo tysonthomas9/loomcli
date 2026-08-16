@@ -11,8 +11,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	connectorsmodule "github.com/tysonthomas9/loomcli/internal/modules/connectors"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 // VaultKeyEnvVar names the environment variable holding the serve-held vault
@@ -34,16 +34,16 @@ const vaultKeySize = 32
 const sealedFormatV1 byte = 0x01
 
 // Vault sentinel errors. Callers match them via errors.Is; the key-shape
-// errors additionally wrap domain.ErrInvalid.
+// errors additionally wrap persistence.ErrInvalid.
 var (
 	// ErrVaultKeyMissing indicates LOOM_CONNECTOR_VAULT_KEY is unset or
 	// empty while connectors are enabled. The constructor errors loudly so
 	// serve refuses to start a connector path without a sealing key.
-	ErrVaultKeyMissing = fmt.Errorf("connector: %s not set: %w", VaultKeyEnvVar, domain.ErrInvalid)
+	ErrVaultKeyMissing = fmt.Errorf("connector: %s not set: %w", VaultKeyEnvVar, persistence.ErrInvalid)
 
 	// ErrVaultKeyInvalid indicates the supplied key material is not the
 	// standard base64 encoding of exactly 32 bytes.
-	ErrVaultKeyInvalid = fmt.Errorf("connector: vault key invalid: %w", domain.ErrInvalid)
+	ErrVaultKeyInvalid = fmt.Errorf("connector: vault key invalid: %w", persistence.ErrInvalid)
 
 	// ErrUnseal indicates a sealed credential failed authentication: the
 	// blob was tampered with, truncated, sealed under a different key, or

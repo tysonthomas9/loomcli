@@ -11,8 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 )
 
 var (
@@ -42,16 +41,16 @@ type ExecutionClaimAndStartCommand struct {
 	SupportedProviders []string
 	Capabilities       []string
 	WorkerProfileIDs   []string
-	RunnerPlacement    domain.TaskRunPlacement
-	SandboxPlacement   domain.TaskRunPlacement
+	RunnerPlacement    execution.TaskRunPlacementRecord
+	SandboxPlacement   execution.TaskRunPlacementRecord
 }
 
 type ExecutionClaimAndStartResult struct {
-	TaskRun    *domain.TaskRun        `json:"task_run"`
-	DriverStep *domain.DriverStep     `json:"driver_step"`
-	Issue      *ExecutionIssue        `json:"issue"`
-	Action     *ExecutionActionLedger `json:"action"`
-	Replayed   bool                   `json:"replayed"`
+	TaskRun    *execution.TaskRunRecord    `json:"task_run"`
+	DriverStep *execution.DriverStepRecord `json:"driver_step"`
+	Issue      *ExecutionIssue             `json:"issue"`
+	Action     *ExecutionActionLedger      `json:"action"`
+	Replayed   bool                        `json:"replayed"`
 }
 
 // ExecutionTaskRunRequestCommand is FleetDB's atomic queued TaskRun request.
@@ -77,8 +76,8 @@ type ExecutionTaskRunRequestCommand struct {
 	ProviderProfile      string
 	TargetNodeID         string
 	RequiredCapabilities []string
-	RunnerPlacement      domain.TaskRunPlacement
-	SandboxPlacement     domain.TaskRunPlacement
+	RunnerPlacement      execution.TaskRunPlacementRecord
+	SandboxPlacement     execution.TaskRunPlacementRecord
 	RuntimeMetadata      map[string]string
 	Input                []byte
 	RequestedAt          time.Time
@@ -86,13 +85,13 @@ type ExecutionTaskRunRequestCommand struct {
 }
 
 type ExecutionTaskRunRequestResult struct {
-	DriverStep                *domain.DriverStep      `json:"driver_step"`
-	TaskRun                   *domain.TaskRun         `json:"task_run"`
-	Action                    *ExecutionActionLedger  `json:"action"`
-	ClaimActionID             string                  `json:"claim_action_id"`
-	CommittedTaskRunStatus    domain.TaskRunStatus    `json:"committed_task_run_status"`
-	CommittedDriverStepStatus domain.DriverStepStatus `json:"committed_driver_step_status"`
-	Replayed                  bool                    `json:"replayed"`
+	DriverStep                *execution.DriverStepRecord   `json:"driver_step"`
+	TaskRun                   *execution.TaskRunRecord      `json:"task_run"`
+	Action                    *ExecutionActionLedger        `json:"action"`
+	ClaimActionID             string                        `json:"claim_action_id"`
+	CommittedTaskRunStatus    execution.TaskRunRecordStatus `json:"committed_task_run_status"`
+	CommittedDriverStepStatus execution.DriverStepStatus    `json:"committed_driver_step_status"`
+	Replayed                  bool                          `json:"replayed"`
 }
 
 type ExecutionTaskRunRequeueCommand struct {
@@ -113,26 +112,26 @@ type ExecutionTaskRunRequeueCommand struct {
 }
 
 type ExecutionTaskRunRequeueCommit struct {
-	WorkspaceKey     string                  `json:"workspace_key"`
-	TaskRunID        string                  `json:"task_run_id"`
-	DriverRunID      string                  `json:"driver_run_id"`
-	DriverStepID     string                  `json:"driver_step_id"`
-	TaskID           string                  `json:"task_id"`
-	Attempt          int                     `json:"attempt"`
-	Status           domain.TaskRunStatus    `json:"status"`
-	DriverStepStatus domain.DriverStepStatus `json:"driver_step_status"`
-	RuntimeMetadata  map[string]string       `json:"runtime_metadata,omitempty"`
-	LogsRef          string                  `json:"logs_ref,omitempty"`
-	ArtifactsRef     string                  `json:"artifacts_ref,omitempty"`
-	ErrorClass       string                  `json:"error_class,omitempty"`
-	ErrorMessage     string                  `json:"error_message,omitempty"`
-	RequeuedAt       time.Time               `json:"requeued_at"`
-	NextEligibleAt   time.Time               `json:"next_eligible_at,omitempty"`
+	WorkspaceKey     string                        `json:"workspace_key"`
+	TaskRunID        string                        `json:"task_run_id"`
+	DriverRunID      string                        `json:"driver_run_id"`
+	DriverStepID     string                        `json:"driver_step_id"`
+	TaskID           string                        `json:"task_id"`
+	Attempt          int                           `json:"attempt"`
+	Status           execution.TaskRunRecordStatus `json:"status"`
+	DriverStepStatus execution.DriverStepStatus    `json:"driver_step_status"`
+	RuntimeMetadata  map[string]string             `json:"runtime_metadata,omitempty"`
+	LogsRef          string                        `json:"logs_ref,omitempty"`
+	ArtifactsRef     string                        `json:"artifacts_ref,omitempty"`
+	ErrorClass       string                        `json:"error_class,omitempty"`
+	ErrorMessage     string                        `json:"error_message,omitempty"`
+	RequeuedAt       time.Time                     `json:"requeued_at"`
+	NextEligibleAt   time.Time                     `json:"next_eligible_at,omitempty"`
 }
 
 type ExecutionTaskRunRequeueResult struct {
-	TaskRun    *domain.TaskRun               `json:"task_run"`
-	DriverStep *domain.DriverStep            `json:"driver_step"`
+	TaskRun    *execution.TaskRunRecord      `json:"task_run"`
+	DriverStep *execution.DriverStepRecord   `json:"driver_step"`
 	Action     *ExecutionActionLedger        `json:"action"`
 	Committed  ExecutionTaskRunRequeueCommit `json:"committed"`
 	Replayed   bool                          `json:"replayed"`
@@ -165,31 +164,31 @@ type ExecutionTaskRunRetryExhaustionCommand struct {
 }
 
 type ExecutionTaskRunRetryExhaustionCommit struct {
-	WorkspaceKey        string               `json:"workspace_key"`
-	TaskRunID           string               `json:"task_run_id"`
-	TaskID              string               `json:"task_id"`
-	Status              domain.TaskRunStatus `json:"status"`
-	IssueBlocked        bool                 `json:"issue_blocked"`
-	Attempt             int                  `json:"attempt"`
-	MaxAttempts         int                  `json:"max_attempts"`
-	ExitCode            *int                 `json:"exit_code,omitempty"`
-	LogsRef             string               `json:"logs_ref,omitempty"`
-	ArtifactsRef        string               `json:"artifacts_ref,omitempty"`
-	RequiredArtifactIDs []string             `json:"required_artifact_ids,omitempty"`
-	RequireArtifacts    bool                 `json:"require_artifacts"`
-	InputTokens         int64                `json:"input_tokens,omitempty"`
-	OutputTokens        int64                `json:"output_tokens,omitempty"`
-	CacheReadTokens     int64                `json:"cache_read_tokens,omitempty"`
-	CacheWriteTokens    int64                `json:"cache_write_tokens,omitempty"`
-	EstimatedCostUSD    float64              `json:"estimated_cost_usd,omitempty"`
-	RuntimeMetadata     map[string]string    `json:"runtime_metadata,omitempty"`
-	ErrorClass          string               `json:"error_class"`
-	ErrorMessage        string               `json:"error_message"`
-	FinishedAt          time.Time            `json:"finished_at"`
+	WorkspaceKey        string                        `json:"workspace_key"`
+	TaskRunID           string                        `json:"task_run_id"`
+	TaskID              string                        `json:"task_id"`
+	Status              execution.TaskRunRecordStatus `json:"status"`
+	IssueBlocked        bool                          `json:"issue_blocked"`
+	Attempt             int                           `json:"attempt"`
+	MaxAttempts         int                           `json:"max_attempts"`
+	ExitCode            *int                          `json:"exit_code,omitempty"`
+	LogsRef             string                        `json:"logs_ref,omitempty"`
+	ArtifactsRef        string                        `json:"artifacts_ref,omitempty"`
+	RequiredArtifactIDs []string                      `json:"required_artifact_ids,omitempty"`
+	RequireArtifacts    bool                          `json:"require_artifacts"`
+	InputTokens         int64                         `json:"input_tokens,omitempty"`
+	OutputTokens        int64                         `json:"output_tokens,omitempty"`
+	CacheReadTokens     int64                         `json:"cache_read_tokens,omitempty"`
+	CacheWriteTokens    int64                         `json:"cache_write_tokens,omitempty"`
+	EstimatedCostUSD    float64                       `json:"estimated_cost_usd,omitempty"`
+	RuntimeMetadata     map[string]string             `json:"runtime_metadata,omitempty"`
+	ErrorClass          string                        `json:"error_class"`
+	ErrorMessage        string                        `json:"error_message"`
+	FinishedAt          time.Time                     `json:"finished_at"`
 }
 
 type ExecutionTaskRunRetryExhaustionResult struct {
-	TaskRun *domain.TaskRun `json:"task_run"`
+	TaskRun *execution.TaskRunRecord `json:"task_run"`
 	// Issue is the current Work Item projection. FleetDB returns null only for
 	// a defensively absent Issue; a stale command may instead return the
 	// successor projection that it deliberately preserved.
@@ -331,7 +330,7 @@ type ExecutionDriverRunFinalizeCommand struct {
 	LeaseID      string
 	LeaseToken   string `json:"-"`
 	FencingToken int64
-	Status       domain.DriverRunStatus
+	Status       execution.DriverRunStatus
 	Summary      string
 	ErrorClass   string
 	Output       map[string]string
@@ -355,13 +354,13 @@ type ExecutionDriverRunChildStartCommand struct {
 }
 
 type ExecutionDriverRunChildStartResult struct {
-	Parent      *domain.DriverRun      `json:"parent"`
-	Child       *domain.DriverRun      `json:"child"`
-	ParentDepth int                    `json:"parent_depth"`
-	ChildDepth  int                    `json:"child_depth"`
-	Action      *ExecutionActionLedger `json:"action"`
-	ActionID    string                 `json:"action_id"`
-	Replay      bool                   `json:"replay"`
+	Parent      *execution.DriverRunRecord `json:"parent"`
+	Child       *execution.DriverRunRecord `json:"child"`
+	ParentDepth int                        `json:"parent_depth"`
+	ChildDepth  int                        `json:"child_depth"`
+	Action      *ExecutionActionLedger     `json:"action"`
+	ActionID    string                     `json:"action_id"`
+	Replay      bool                       `json:"replay"`
 }
 
 type ExecutionDriverRunCascadeCommand struct {
@@ -372,7 +371,7 @@ type ExecutionDriverRunCascadeCommand struct {
 	LeaseID        string
 	LeaseToken     string `json:"-"`
 	FencingToken   int64
-	ParentStatus   domain.DriverRunStatus
+	ParentStatus   execution.DriverRunStatus
 	Reason         string
 	ErrorClass     string
 	CascadedAt     time.Time
@@ -381,21 +380,21 @@ type ExecutionDriverRunCascadeCommand struct {
 }
 
 type ExecutionDriverRunCascadeCommit struct {
-	WorkspaceKey          string                 `json:"workspace_key"`
-	ParentRunID           string                 `json:"parent_run_id"`
-	ParentStatus          domain.DriverRunStatus `json:"parent_status"`
-	Reason                string                 `json:"reason"`
-	ErrorClass            string                 `json:"error_class"`
-	CascadedAt            time.Time              `json:"cascaded_at"`
-	MaxDepth              int                    `json:"max_depth"`
-	CancelledRunIDs       []string               `json:"cancelled_run_ids"`
-	CancelRequestedRunIDs []string               `json:"cancel_requested_run_ids"`
-	ActionID              string                 `json:"action_id"`
+	WorkspaceKey          string                    `json:"workspace_key"`
+	ParentRunID           string                    `json:"parent_run_id"`
+	ParentStatus          execution.DriverRunStatus `json:"parent_status"`
+	Reason                string                    `json:"reason"`
+	ErrorClass            string                    `json:"error_class"`
+	CascadedAt            time.Time                 `json:"cascaded_at"`
+	MaxDepth              int                       `json:"max_depth"`
+	CancelledRunIDs       []string                  `json:"cancelled_run_ids"`
+	CancelRequestedRunIDs []string                  `json:"cancel_requested_run_ids"`
+	ActionID              string                    `json:"action_id"`
 }
 
 type ExecutionDriverRunCascadeResult struct {
-	CancelledRuns       []*domain.DriverRun              `json:"cancelled_runs"`
-	CancelRequestedRuns []*domain.DriverRun              `json:"cancel_requested_runs"`
+	CancelledRuns       []*execution.DriverRunRecord     `json:"cancelled_runs"`
+	CancelRequestedRuns []*execution.DriverRunRecord     `json:"cancel_requested_runs"`
 	Committed           *ExecutionDriverRunCascadeCommit `json:"committed"`
 	Action              *ExecutionActionLedger           `json:"action"`
 	ActionID            string                           `json:"action_id"`
@@ -410,25 +409,25 @@ type ExecutionTerminalDriverRunWorkRecoveryCommand struct {
 	WorkspaceKey string
 	RequestID    string
 	DriverRunID  string
-	ParentStatus domain.DriverRunStatus
+	ParentStatus execution.DriverRunStatus
 	Reason       string
 	ErrorClass   string
 	RecoveredAt  time.Time
 }
 
 type ExecutionTerminalDriverRunWorkRecoveryResult struct {
-	WorkspaceKey                  string                 `json:"workspace_key"`
-	DriverRunID                   string                 `json:"driver_run_id"`
-	ParentStatus                  domain.DriverRunStatus `json:"parent_status"`
-	Reason                        string                 `json:"reason"`
-	ErrorClass                    string                 `json:"error_class"`
-	RecoveredAt                   time.Time              `json:"recovered_at"`
-	RecoveredTaskRunIDs           []string               `json:"recovered_task_run_ids"`
-	ReleasedWorkItemIDs           []string               `json:"released_work_item_ids"`
-	PreservedSuccessorWorkItemIDs []string               `json:"preserved_successor_work_item_ids"`
-	Action                        *ExecutionActionLedger `json:"action"`
-	ActionID                      string                 `json:"action_id"`
-	Replayed                      bool                   `json:"replayed"`
+	WorkspaceKey                  string                    `json:"workspace_key"`
+	DriverRunID                   string                    `json:"driver_run_id"`
+	ParentStatus                  execution.DriverRunStatus `json:"parent_status"`
+	Reason                        string                    `json:"reason"`
+	ErrorClass                    string                    `json:"error_class"`
+	RecoveredAt                   time.Time                 `json:"recovered_at"`
+	RecoveredTaskRunIDs           []string                  `json:"recovered_task_run_ids"`
+	ReleasedWorkItemIDs           []string                  `json:"released_work_item_ids"`
+	PreservedSuccessorWorkItemIDs []string                  `json:"preserved_successor_work_item_ids"`
+	Action                        *ExecutionActionLedger    `json:"action"`
+	ActionID                      string                    `json:"action_id"`
+	Replayed                      bool                      `json:"replayed"`
 }
 
 // ExecutionIssue is the claim result subset needed to verify that FleetDB
@@ -473,17 +472,17 @@ type ExecutionTransport interface {
 	RequeueTaskRunAndResetStep(context.Context, ExecutionTaskRunRequeueCommand) (*ExecutionTaskRunRequeueResult, error)
 	ExhaustTaskRunRetries(context.Context, ExecutionTaskRunRetryExhaustionCommand) (*ExecutionTaskRunRetryExhaustionResult, error)
 	UpdateTaskRunWorkItemDesign(context.Context, ExecutionTaskRunWorkItemDesignCommand) (*ExecutionTaskRunWorkItemDesignResult, error)
-	HeartbeatTaskRun(context.Context, string, string, store.TaskRunHeartbeat) (*domain.TaskRun, error)
-	RequeueTaskRun(context.Context, string, string, store.TaskRunRequeue) (*domain.TaskRun, error)
-	CompleteTaskRun(context.Context, string, string, store.TaskRunComplete) (*domain.TaskRun, error)
-	AppendTaskRunLog(context.Context, string, string, store.TaskRunLogAppend) (*domain.TaskRunLogEntry, error)
-	ClaimDriverRun(context.Context, ExecutionDriverRunClaimCommand) (*domain.DriverRun, error)
-	HeartbeatDriverRun(context.Context, ExecutionDriverRunHeartbeatCommand) (*domain.DriverRun, error)
+	HeartbeatTaskRun(context.Context, string, string, execution.TaskRunHeartbeat) (*execution.TaskRunRecord, error)
+	RequeueTaskRun(context.Context, string, string, execution.TaskRunRequeue) (*execution.TaskRunRecord, error)
+	CompleteTaskRun(context.Context, string, string, execution.TaskRunComplete) (*execution.TaskRunRecord, error)
+	AppendTaskRunLog(context.Context, string, string, execution.TaskRunLogAppend) (*execution.TaskRunLogEntry, error)
+	ClaimDriverRun(context.Context, ExecutionDriverRunClaimCommand) (*execution.DriverRunRecord, error)
+	HeartbeatDriverRun(context.Context, ExecutionDriverRunHeartbeatCommand) (*execution.DriverRunRecord, error)
 	ClaimDriverRunWorkItem(context.Context, ExecutionDriverRunWorkItemClaimCommand) (*ExecutionDriverRunWorkItemResult, error)
 	ReleaseDriverRunWorkItem(context.Context, ExecutionDriverRunWorkItemReleaseCommand) (*ExecutionDriverRunWorkItemResult, error)
 	HandoffDriverRunReviewWorkItem(context.Context, ExecutionDriverRunReviewWorkItemHandoffCommand) (*ExecutionDriverRunWorkItemResult, error)
-	SuspendDriverRun(context.Context, ExecutionDriverRunSuspendCommand) (*domain.DriverRun, error)
-	FinalizeDriverRun(context.Context, ExecutionDriverRunFinalizeCommand) (*domain.DriverRun, error)
+	SuspendDriverRun(context.Context, ExecutionDriverRunSuspendCommand) (*execution.DriverRunRecord, error)
+	FinalizeDriverRun(context.Context, ExecutionDriverRunFinalizeCommand) (*execution.DriverRunRecord, error)
 	RecoverStaleChildTaskRuns(context.Context, ExecutionDriverRunStaleTaskRecoveryCommand) (*ExecutionDriverRunStaleTaskRecoveryResult, error)
 	StartChildDriverRun(context.Context, ExecutionDriverRunChildStartCommand) (*ExecutionDriverRunChildStartResult, error)
 	CascadeChildDriverRuns(context.Context, ExecutionDriverRunCascadeCommand) (*ExecutionDriverRunCascadeResult, error)
@@ -494,7 +493,7 @@ type ExecutionTransport interface {
 // surface. Keeping it separate avoids widening focused ExecutionTransport
 // test doubles while making the production foundation contract explicit.
 type TaskRunTerminalConvergenceTransport interface {
-	store.TaskRunTerminalConvergenceStore
+	execution.TaskRunTerminalConvergenceStore
 }
 
 // ExecutionFoundationTransport is the production composition surface. Keep
@@ -503,7 +502,7 @@ type TaskRunTerminalConvergenceTransport interface {
 // FleetDB client returned to serve composition.
 type ExecutionFoundationTransport interface {
 	ExecutionTransport
-	store.TerminalDriverStepRepairStore
+	execution.TerminalDriverStepRepairStore
 	TaskRunTerminalConvergenceTransport
 }
 
@@ -532,12 +531,12 @@ func executionChecksPass(checks ...bool) bool {
 
 func (s *executionStore) ListTaskRunTerminalConvergenceCandidates(
 	ctx context.Context,
-	query store.TaskRunTerminalConvergenceQuery,
-) (store.TaskRunTerminalConvergencePage, error) {
+	query execution.TaskRunTerminalConvergenceQuery,
+) (execution.TaskRunTerminalConvergencePage, error) {
 	query.WorkspaceKey = strings.TrimSpace(query.WorkspaceKey)
 	query.After = strings.TrimSpace(query.After)
 	if query.WorkspaceKey == "" || query.RequiredVersion <= 0 {
-		return store.TaskRunTerminalConvergencePage{}, fmt.Errorf("terminal convergence workspace and positive version are required: %w", ErrExecutionInvalid)
+		return execution.TaskRunTerminalConvergencePage{}, fmt.Errorf("terminal convergence workspace and positive version are required: %w", ErrExecutionInvalid)
 	}
 	limit := query.Limit
 	if limit <= 0 || limit > 1000 {
@@ -550,22 +549,22 @@ func (s *executionStore) ListTaskRunTerminalConvergenceCandidates(
 		values.Set("after", query.After)
 	}
 	path := "/api/v1/" + pathEscape(query.WorkspaceKey) + "/task-runs/terminal-convergence-candidates?" + values.Encode()
-	var page store.TaskRunTerminalConvergencePage
+	var page execution.TaskRunTerminalConvergencePage
 	if err := s.client.do(ctx, http.MethodGet, path, nil, &page); err != nil {
-		return store.TaskRunTerminalConvergencePage{}, mapExecutionTransportError("list terminal TaskRun convergence candidates", err)
+		return execution.TaskRunTerminalConvergencePage{}, mapExecutionTransportError("list terminal TaskRun convergence candidates", err)
 	}
 	if len(page.TaskRunIDs) > limit {
-		return store.TaskRunTerminalConvergencePage{}, fmt.Errorf("terminal convergence page exceeds requested limit: %w", ErrExecutionUnavailable)
+		return execution.TaskRunTerminalConvergencePage{}, fmt.Errorf("terminal convergence page exceeds requested limit: %w", ErrExecutionUnavailable)
 	}
 	previous := query.After
 	for _, taskRunID := range page.TaskRunIDs {
 		if strings.TrimSpace(taskRunID) == "" || taskRunID <= previous {
-			return store.TaskRunTerminalConvergencePage{}, fmt.Errorf("terminal convergence page is not strictly ordered after cursor: %w", ErrExecutionUnavailable)
+			return execution.TaskRunTerminalConvergencePage{}, fmt.Errorf("terminal convergence page is not strictly ordered after cursor: %w", ErrExecutionUnavailable)
 		}
 		previous = taskRunID
 	}
 	if page.Next != "" && (len(page.TaskRunIDs) == 0 || page.Next != page.TaskRunIDs[len(page.TaskRunIDs)-1]) {
-		return store.TaskRunTerminalConvergencePage{}, fmt.Errorf("terminal convergence page returned divergent cursor: %w", ErrExecutionUnavailable)
+		return execution.TaskRunTerminalConvergencePage{}, fmt.Errorf("terminal convergence page returned divergent cursor: %w", ErrExecutionUnavailable)
 	}
 	page.TaskRunIDs = append([]string(nil), page.TaskRunIDs...)
 	return page, nil
@@ -573,8 +572,8 @@ func (s *executionStore) ListTaskRunTerminalConvergenceCandidates(
 
 func (s *executionStore) CompleteTaskRunTerminalConvergence(
 	ctx context.Context,
-	command store.TaskRunTerminalConvergenceComplete,
-) (*store.TaskRunTerminalConvergenceResult, error) {
+	command execution.TaskRunTerminalConvergenceComplete,
+) (*execution.TaskRunTerminalConvergenceResult, error) {
 	command.WorkspaceKey = strings.TrimSpace(command.WorkspaceKey)
 	command.TaskRunID = strings.TrimSpace(command.TaskRunID)
 	command.CompletedAt = command.CompletedAt.UTC()
@@ -586,7 +585,7 @@ func (s *executionStore) CompleteTaskRunTerminalConvergence(
 		CompletedAt     time.Time `json:"completed_at"`
 	}{RequiredVersion: command.RequiredVersion, CompletedAt: command.CompletedAt}
 	path := "/api/v1/" + pathEscape(command.WorkspaceKey) + "/task-runs/" + pathEscape(command.TaskRunID) + "/complete-terminal-convergence"
-	var result store.TaskRunTerminalConvergenceResult
+	var result execution.TaskRunTerminalConvergenceResult
 	if err := s.client.do(ctx, http.MethodPost, path, body, &result); err != nil {
 		return nil, mapExecutionTransportError("complete terminal TaskRun convergence", err)
 	}
@@ -633,7 +632,7 @@ func (s *executionStore) RequeueTaskRunAndResetStep(ctx context.Context, command
 		result.TaskRun.WorkspaceKey == command.WorkspaceKey, result.TaskRun.TaskRunID == command.TaskRunID,
 		result.DriverStep.WorkspaceKey == command.WorkspaceKey, result.DriverStep.StepID == result.TaskRun.DriverStepID,
 		result.Committed.WorkspaceKey == command.WorkspaceKey, result.Committed.TaskRunID == command.TaskRunID,
-		result.Committed.Status == domain.TaskRunQueued, result.Committed.DriverStepStatus == domain.DriverStepQueued,
+		result.Committed.Status == execution.TaskRunRecordQueued, result.Committed.DriverStepStatus == execution.DriverStepQueued,
 		result.Action.ActionID == wantActionID, result.Action.IdempotencyKey == wantActionID,
 		result.Action.ActionType == "requeue_task_run",
 	) {
@@ -691,9 +690,9 @@ func (s *executionStore) ExhaustTaskRunRetries(ctx context.Context, command Exec
 	wantResponseRef := executionTaskRunRetryExhaustionResponseRef(command.TaskRunID, result.Committed.IssueBlocked)
 	if !executionChecksPass(
 		result.TaskRun.WorkspaceKey == command.WorkspaceKey, result.TaskRun.TaskRunID == command.TaskRunID,
-		result.TaskRun.Status == domain.TaskRunFailed, strings.TrimSpace(result.TaskRun.TaskID) != "",
+		result.TaskRun.Status == execution.TaskRunRecordFailed, strings.TrimSpace(result.TaskRun.TaskID) != "",
 		result.Committed.WorkspaceKey == command.WorkspaceKey, result.Committed.TaskRunID == command.TaskRunID,
-		result.Committed.TaskID == result.TaskRun.TaskID, result.Committed.Status == domain.TaskRunFailed,
+		result.Committed.TaskID == result.TaskRun.TaskID, result.Committed.Status == execution.TaskRunRecordFailed,
 		result.Action.ActionID == wantActionID, result.Action.IdempotencyKey == wantActionID,
 		result.Action.WorkspaceKey == command.WorkspaceKey, result.Action.ActionType == "exhaust_task_run_retries",
 		result.Action.TargetRef == command.TaskRunID, result.Action.RequestedBy == "node:"+command.NodeID,
@@ -728,7 +727,7 @@ func executionTaskRunRetryExhaustionIssueMatches(result *ExecutionTaskRunRetryEx
 	return result.Issue.Workspace == workspace && result.Issue.ID == result.TaskRun.TaskID && !result.Issue.UpdatedAt.IsZero()
 }
 
-func (s *executionStore) HeartbeatTaskRun(ctx context.Context, workspaceKey, taskRunID string, heartbeat store.TaskRunHeartbeat) (*domain.TaskRun, error) {
+func (s *executionStore) HeartbeatTaskRun(ctx context.Context, workspaceKey, taskRunID string, heartbeat execution.TaskRunHeartbeat) (*execution.TaskRunRecord, error) {
 	run, err := s.client.taskRuns.Heartbeat(ctx, workspaceKey, taskRunID, heartbeat)
 	if err != nil {
 		return nil, mapExecutionTransportError("heartbeat task run", err)
@@ -736,7 +735,7 @@ func (s *executionStore) HeartbeatTaskRun(ctx context.Context, workspaceKey, tas
 	return run, nil
 }
 
-func (s *executionStore) RequeueTaskRun(ctx context.Context, workspaceKey, taskRunID string, requeue store.TaskRunRequeue) (*domain.TaskRun, error) {
+func (s *executionStore) RequeueTaskRun(ctx context.Context, workspaceKey, taskRunID string, requeue execution.TaskRunRequeue) (*execution.TaskRunRecord, error) {
 	run, err := s.client.taskRuns.Requeue(ctx, workspaceKey, taskRunID, requeue)
 	if err != nil {
 		return nil, mapExecutionTransportError("requeue task run", err)
@@ -744,7 +743,7 @@ func (s *executionStore) RequeueTaskRun(ctx context.Context, workspaceKey, taskR
 	return run, nil
 }
 
-func (s *executionStore) CompleteTaskRun(ctx context.Context, workspaceKey, taskRunID string, complete store.TaskRunComplete) (*domain.TaskRun, error) {
+func (s *executionStore) CompleteTaskRun(ctx context.Context, workspaceKey, taskRunID string, complete execution.TaskRunComplete) (*execution.TaskRunRecord, error) {
 	run, err := s.client.taskRuns.Complete(ctx, workspaceKey, taskRunID, complete)
 	if err != nil {
 		return nil, mapExecutionTransportError("complete task run", err)
@@ -752,7 +751,7 @@ func (s *executionStore) CompleteTaskRun(ctx context.Context, workspaceKey, task
 	return run, nil
 }
 
-func (s *executionStore) AppendTaskRunLog(ctx context.Context, workspaceKey, taskRunID string, appendLog store.TaskRunLogAppend) (*domain.TaskRunLogEntry, error) {
+func (s *executionStore) AppendTaskRunLog(ctx context.Context, workspaceKey, taskRunID string, appendLog execution.TaskRunLogAppend) (*execution.TaskRunLogEntry, error) {
 	entry, err := s.client.taskRuns.AppendLog(ctx, workspaceKey, taskRunID, appendLog)
 	if err != nil {
 		return nil, mapExecutionTransportError("append task run log", err)
@@ -760,7 +759,7 @@ func (s *executionStore) AppendTaskRunLog(ctx context.Context, workspaceKey, tas
 	return entry, nil
 }
 
-func (s *executionStore) ClaimDriverRun(ctx context.Context, command ExecutionDriverRunClaimCommand) (*domain.DriverRun, error) {
+func (s *executionStore) ClaimDriverRun(ctx context.Context, command ExecutionDriverRunClaimCommand) (*execution.DriverRunRecord, error) {
 	if strings.TrimSpace(command.WorkspaceKey) == "" || strings.TrimSpace(command.RequestID) == "" ||
 		strings.TrimSpace(command.RunID) == "" || strings.TrimSpace(command.NodeID) == "" ||
 		strings.TrimSpace(command.LeaseID) == "" || strings.TrimSpace(command.LeaseToken) == "" {
@@ -771,19 +770,19 @@ func (s *executionStore) ClaimDriverRun(ctx context.Context, command ExecutionDr
 		NodeID    string `json:"node_id"`
 		LeaseID   string `json:"lease_id"`
 	}{RequestID: command.RequestID, NodeID: command.NodeID, LeaseID: command.LeaseID}
-	var run domain.DriverRun
+	var run execution.DriverRunRecord
 	path := "/api/v1/" + pathEscape(command.WorkspaceKey) + "/driver-runs/" + pathEscape(command.RunID) + "/claim"
 	if err := s.client.doWithHeaders(ctx, http.MethodPost, path, body, &run, map[string]string{"X-Lease-Token": command.LeaseToken}); err != nil {
 		return nil, mapExecutionTransportError("claim DriverRun", err)
 	}
-	if run.WorkspaceKey != command.WorkspaceKey || run.RunID != command.RunID || run.Status != domain.DriverRunRunning ||
+	if run.WorkspaceKey != command.WorkspaceKey || run.RunID != command.RunID || run.Status != execution.DriverRunRunning ||
 		run.NodeID != command.NodeID || run.LeaseID != command.LeaseID || run.FencingToken <= 0 {
 		return nil, fmt.Errorf("DriverRun claim returned divergent owner: %w", ErrExecutionUnavailable)
 	}
 	return &run, nil
 }
 
-func (s *executionStore) HeartbeatDriverRun(ctx context.Context, command ExecutionDriverRunHeartbeatCommand) (*domain.DriverRun, error) {
+func (s *executionStore) HeartbeatDriverRun(ctx context.Context, command ExecutionDriverRunHeartbeatCommand) (*execution.DriverRunRecord, error) {
 	if strings.TrimSpace(command.WorkspaceKey) == "" || strings.TrimSpace(command.RunID) == "" ||
 		strings.TrimSpace(command.NodeID) == "" || strings.TrimSpace(command.LeaseID) == "" ||
 		strings.TrimSpace(command.LeaseToken) == "" || command.FencingToken <= 0 {
@@ -794,7 +793,7 @@ func (s *executionStore) HeartbeatDriverRun(ctx context.Context, command Executi
 		LeaseID      string `json:"lease_id"`
 		FencingToken int64  `json:"fencing_token"`
 	}{NodeID: command.NodeID, LeaseID: command.LeaseID, FencingToken: command.FencingToken}
-	var run domain.DriverRun
+	var run execution.DriverRunRecord
 	path := "/api/v1/" + pathEscape(command.WorkspaceKey) + "/driver-runs/" + pathEscape(command.RunID) + "/heartbeat"
 	if err := s.client.doWithHeaders(ctx, http.MethodPost, path, body, &run, map[string]string{"X-Lease-Token": command.LeaseToken}); err != nil {
 		return nil, mapExecutionTransportError("heartbeat DriverRun", err)
@@ -802,7 +801,7 @@ func (s *executionStore) HeartbeatDriverRun(ctx context.Context, command Executi
 	return &run, nil
 }
 
-func (s *executionStore) SuspendDriverRun(ctx context.Context, command ExecutionDriverRunSuspendCommand) (*domain.DriverRun, error) {
+func (s *executionStore) SuspendDriverRun(ctx context.Context, command ExecutionDriverRunSuspendCommand) (*execution.DriverRunRecord, error) {
 	if strings.TrimSpace(command.WorkspaceKey) == "" || strings.TrimSpace(command.RunID) == "" ||
 		strings.TrimSpace(command.NodeID) == "" || strings.TrimSpace(command.LeaseID) == "" ||
 		strings.TrimSpace(command.LeaseToken) == "" || command.FencingToken <= 0 ||
@@ -818,39 +817,39 @@ func (s *executionStore) SuspendDriverRun(ctx context.Context, command Execution
 		NodeID: command.NodeID, LeaseID: command.LeaseID, FencingToken: command.FencingToken,
 		AwaitInstanceKey: command.AwaitInstanceKey,
 	}
-	var run domain.DriverRun
+	var run execution.DriverRunRecord
 	path := "/api/v1/" + pathEscape(command.WorkspaceKey) + "/driver-runs/" + pathEscape(command.RunID) + "/suspend"
 	if err := s.client.doWithHeaders(ctx, http.MethodPost, path, body, &run, map[string]string{"X-Lease-Token": command.LeaseToken}); err != nil {
 		return nil, mapExecutionTransportError("suspend DriverRun", err)
 	}
 	if run.WorkspaceKey != command.WorkspaceKey || run.RunID != command.RunID ||
-		run.Status != domain.DriverRunSuspendedAwaitingEvent || run.AwaitInstanceKey != command.AwaitInstanceKey {
+		run.Status != execution.DriverRunSuspendedAwait || run.AwaitInstanceKey != command.AwaitInstanceKey {
 		return nil, fmt.Errorf("DriverRun suspend returned divergent state: %w", ErrExecutionUnavailable)
 	}
 	return &run, nil
 }
 
-func (s *executionStore) FinalizeDriverRun(ctx context.Context, command ExecutionDriverRunFinalizeCommand) (*domain.DriverRun, error) {
+func (s *executionStore) FinalizeDriverRun(ctx context.Context, command ExecutionDriverRunFinalizeCommand) (*execution.DriverRunRecord, error) {
 	if strings.TrimSpace(command.WorkspaceKey) == "" || strings.TrimSpace(command.RequestID) == "" ||
 		strings.TrimSpace(command.RunID) == "" || strings.TrimSpace(command.NodeID) == "" ||
 		strings.TrimSpace(command.LeaseID) == "" || strings.TrimSpace(command.LeaseToken) == "" || command.FencingToken <= 0 {
 		return nil, fmt.Errorf("execution DriverRun finalize identity, owner, and token are required: %w", ErrExecutionInvalid)
 	}
 	body := struct {
-		RequestID    string                 `json:"request_id"`
-		NodeID       string                 `json:"node_id"`
-		LeaseID      string                 `json:"lease_id"`
-		FencingToken int64                  `json:"fencing_token"`
-		Status       domain.DriverRunStatus `json:"status"`
-		Summary      string                 `json:"summary,omitempty"`
-		ErrorClass   string                 `json:"error_class,omitempty"`
-		Output       map[string]string      `json:"output,omitempty"`
+		RequestID    string                    `json:"request_id"`
+		NodeID       string                    `json:"node_id"`
+		LeaseID      string                    `json:"lease_id"`
+		FencingToken int64                     `json:"fencing_token"`
+		Status       execution.DriverRunStatus `json:"status"`
+		Summary      string                    `json:"summary,omitempty"`
+		ErrorClass   string                    `json:"error_class,omitempty"`
+		Output       map[string]string         `json:"output,omitempty"`
 	}{
 		RequestID: command.RequestID, NodeID: command.NodeID, LeaseID: command.LeaseID,
 		FencingToken: command.FencingToken, Status: command.Status, Summary: command.Summary,
 		ErrorClass: command.ErrorClass, Output: cloneExecutionTransportStringMap(command.Output),
 	}
-	var run domain.DriverRun
+	var run execution.DriverRunRecord
 	path := "/api/v1/" + pathEscape(command.WorkspaceKey) + "/driver-runs/" + pathEscape(command.RunID) + "/finish"
 	if err := s.client.doWithHeaders(ctx, http.MethodPost, path, body, &run, map[string]string{"X-Lease-Token": command.LeaseToken}); err != nil {
 		return nil, mapExecutionTransportError("finalize DriverRun", err)
@@ -947,12 +946,12 @@ func (s *executionStore) CascadeChildDriverRuns(ctx context.Context, command Exe
 	headers := map[string]string(nil)
 	if command.SystemRecovery {
 		body = struct {
-			RequestID    string                 `json:"request_id"`
-			ParentStatus domain.DriverRunStatus `json:"parent_status"`
-			Reason       string                 `json:"reason"`
-			ErrorClass   string                 `json:"error_class"`
-			CascadedAt   time.Time              `json:"cascaded_at"`
-			MaxDepth     int                    `json:"max_depth"`
+			RequestID    string                    `json:"request_id"`
+			ParentStatus execution.DriverRunStatus `json:"parent_status"`
+			Reason       string                    `json:"reason"`
+			ErrorClass   string                    `json:"error_class"`
+			CascadedAt   time.Time                 `json:"cascaded_at"`
+			MaxDepth     int                       `json:"max_depth"`
 		}{command.RequestID, command.ParentStatus, command.Reason, command.ErrorClass, command.CascadedAt, command.MaxDepth}
 		path = "/api/v1/" + pathEscape(command.WorkspaceKey) + "/driver-runs/" + pathEscape(command.ParentRunID) + "/commands/recover-child-cascade"
 	} else {
@@ -960,15 +959,15 @@ func (s *executionStore) CascadeChildDriverRuns(ctx context.Context, command Exe
 			return nil, fmt.Errorf("live DriverRun cascade owner and token are required: %w", ErrExecutionInvalid)
 		}
 		body = struct {
-			RequestID    string                 `json:"request_id"`
-			NodeID       string                 `json:"node_id"`
-			LeaseID      string                 `json:"lease_id"`
-			FencingToken int64                  `json:"fencing_token"`
-			ParentStatus domain.DriverRunStatus `json:"parent_status"`
-			Reason       string                 `json:"reason"`
-			ErrorClass   string                 `json:"error_class"`
-			CascadedAt   time.Time              `json:"cascaded_at"`
-			MaxDepth     int                    `json:"max_depth"`
+			RequestID    string                    `json:"request_id"`
+			NodeID       string                    `json:"node_id"`
+			LeaseID      string                    `json:"lease_id"`
+			FencingToken int64                     `json:"fencing_token"`
+			ParentStatus execution.DriverRunStatus `json:"parent_status"`
+			Reason       string                    `json:"reason"`
+			ErrorClass   string                    `json:"error_class"`
+			CascadedAt   time.Time                 `json:"cascaded_at"`
+			MaxDepth     int                       `json:"max_depth"`
 		}{command.RequestID, command.NodeID, command.LeaseID, command.FencingToken, command.ParentStatus, command.Reason, command.ErrorClass, command.CascadedAt, command.MaxDepth}
 		headers = map[string]string{"X-Lease-Token": command.LeaseToken}
 		path = "/api/v1/" + pathEscape(command.WorkspaceKey) + "/driver-runs/" + pathEscape(command.ParentRunID) + "/commands/cascade-children"

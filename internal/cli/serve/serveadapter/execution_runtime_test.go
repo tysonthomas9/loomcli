@@ -5,12 +5,13 @@ import (
 	"sync"
 	"testing"
 
+	workspaceowner "github.com/tysonthomas9/loomcli/internal/modules/workspace"
+
 	driverexecutor "github.com/tysonthomas9/loomcli/internal/driver"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	artifactsmodule "github.com/tysonthomas9/loomcli/internal/modules/artifacts"
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
-	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
 type taskWorkerCapacityCapture struct {
@@ -99,7 +100,7 @@ type taskWorkerCapacityConvergence struct {
 func TestBuildSharedNodeExecutionRuntimePassesUsesOneCapacity(t *testing.T) {
 	ctx := context.Background()
 	st := memstore.New()
-	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "TEST", Name: "Test"}); err != nil {
+	if _, err := st.Workspaces().Create(ctx, workspaceowner.WorkspaceCreate{Key: "TEST", Name: "Test"}); err != nil {
 		t.Fatalf("create workspace: %v", err)
 	}
 	capture := &taskWorkerCapacityCapture{}

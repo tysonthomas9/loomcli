@@ -10,9 +10,9 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/cli/managementapi"
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/modules/agents"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 // ErrCapabilityUnavailable is the default-deny result while the standalone
@@ -225,7 +225,7 @@ func (boundary *managementAgentDefinitionBoundary) ApplyAgentLifecycle(
 		command,
 		current,
 		getErr,
-		errors.Is(getErr, domain.ErrNotFound),
+		errors.Is(getErr, persistence.ErrNotFound),
 	)
 	if err != nil {
 		return nil, err
@@ -538,9 +538,9 @@ func ambiguousLifecycleResponse(ctx context.Context, err error) bool {
 		return false
 	}
 	for _, definitive := range []error{
-		domain.ErrInvalid,
-		domain.ErrNotFound,
-		domain.ErrConflict,
+		persistence.ErrInvalid,
+		persistence.ErrNotFound,
+		persistence.ErrConflict,
 		agents.ErrInvalid,
 		agents.ErrNotFound,
 		agents.ErrAlreadyExists,

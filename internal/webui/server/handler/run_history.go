@@ -5,8 +5,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 )
 
 const (
@@ -38,8 +37,8 @@ func ParseRunLimit(w http.ResponseWriter, r *http.Request) (int, bool) {
 // SortAndTrim orders runs newest-first and trims to limit. Stores should apply
 // this order before pushdown limits; this stays as defense in depth for mixed
 // backends and tests.
-func SortAndTrim(runs []*domain.DriverRun, limit int) []*domain.DriverRun {
-	store.SortDriverRunsNewestFirst(runs)
+func SortAndTrim(runs []*execution.DriverRunRecord, limit int) []*execution.DriverRunRecord {
+	execution.SortDriverRunsNewestFirst(runs)
 	if limit > 0 && len(runs) > limit {
 		return runs[:limit]
 	}

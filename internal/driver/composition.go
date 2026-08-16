@@ -10,42 +10,47 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
+
+	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
+
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
-	"github.com/tysonthomas9/loomcli/internal/store"
+
+	workspaceowner "github.com/tysonthomas9/loomcli/internal/modules/workspace"
+
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 type workspaceReadStore interface {
-	Workspaces() store.WorkspaceStore
+	Workspaces() workspaceowner.WorkspaceStore
 }
 
 type awaitTimeoutStore interface {
 	workspaceReadStore
-	Awaits() store.AwaitStore
-	DriverRuns() store.DriverRunStore
+	Awaits() execution.AwaitStore
+	DriverRuns() execution.DriverRunStore
 }
 
 type executorStore interface {
 	workspaceReadStore
-	Awaits() store.AwaitStore
-	Drivers() store.DriverStore
-	DriverVersions() store.DriverVersionStore
-	DriverRuns() store.DriverRunStore
-	TriggerEvents() store.TriggerEventStore
+	Awaits() execution.AwaitStore
+	Drivers() workflowcatalog.DriverStore
+	DriverVersions() workflowcatalog.DriverVersionStore
+	DriverRuns() execution.DriverRunStore
+	TriggerEvents() automation.TriggerEventStore
 }
 
 type taskWorkerStore interface {
 	workspaceReadStore
-	DriverVersions() store.DriverVersionStore
-	Repos() store.RepoStore
-	WorkerProfiles() store.WorkerProfileStore
+	DriverVersions() workflowcatalog.DriverVersionStore
+	Repos() workspaceowner.RepoStore
+	WorkerProfiles() execution.WorkerProfileStore
 }
 
 type driverRunReadStore interface {
-	Drivers() store.DriverStore
-	DriverVersions() store.DriverVersionStore
-	TriggerEvents() store.TriggerEventStore
+	Drivers() workflowcatalog.DriverStore
+	DriverVersions() workflowcatalog.DriverVersionStore
+	TriggerEvents() automation.TriggerEventStore
 }
 
 // CompositionMaxDepthEnvVar overrides the composition depth cap (a positive
@@ -81,7 +86,7 @@ func ResolveChildWorkflowStartKey(idempotencyKey string, startIndex int) (string
 	if startIndex >= 1 {
 		return "start-" + strconv.Itoa(startIndex), nil
 	}
-	return "", fmt.Errorf("idempotencyKey or startIndex >= 1 required for a deterministic child run id: %w", domain.ErrInvalid)
+	return "", fmt.Errorf("idempotencyKey or startIndex >= 1 required for a deterministic child run id: %w", persistence.ErrInvalid)
 }
 
 func compositionMaxDepthFromEnv() int {
@@ -105,7 +110,7 @@ func ResolveCompositionMaxDepth() int {
 // authority; event identity, actor, and bounded payload must agree exactly.
 func ValidateSatisfiedChildAwait(ctx context.Context, instance *execution.DriverAwaitInstance, child *execution.DriverRun) error {
 	if instance == nil || child == nil || !child.Status.IsTerminal() {
-		return fmt.Errorf("composition await was satisfied while child is nonterminal: %w", domain.ErrConflict)
+		return fmt.Errorf("composition await was satisfied while child is nonterminal: %w", persistence.ErrConflict)
 	}
 	expectedEventID := RunFinishedEventID(child.RunID, child.Status)
 	expectedPayload := marshalRunFinishedPayload(ctx, child)
@@ -114,7 +119,7 @@ func ValidateSatisfiedChildAwait(ctx context.Context, instance *execution.Driver
 		return fmt.Errorf(
 			"composition await winner %q/%q does not match terminal child outcome %q/%q: %w",
 			instance.SatisfiedByEventID, instance.SatisfiedActor,
-			expectedEventID, RunFinishedActor, domain.ErrConflict,
+			expectedEventID, RunFinishedActor, persistence.ErrConflict,
 		)
 	}
 	return nil

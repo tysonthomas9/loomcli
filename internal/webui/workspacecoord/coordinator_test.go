@@ -7,11 +7,10 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	agentsmodule "github.com/tysonthomas9/loomcli/internal/modules/agents"
-	workspacemodule "github.com/tysonthomas9/loomcli/internal/modules/workspace"
-	"github.com/tysonthomas9/loomcli/internal/store"
+	workspaceowner "github.com/tysonthomas9/loomcli/internal/modules/workspace"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 type workspaceAgentDirectoryStub struct {
@@ -21,62 +20,62 @@ type workspaceAgentDirectoryStub struct {
 }
 
 type workspaceCapabilityStub struct {
-	setDesignFormatFn func(context.Context, workspacemodule.SetDesignFormatCommand) (*workspacemodule.Reference, error)
-	deleteFn          func(context.Context, workspacemodule.DeleteCommand) (*workspacemodule.Reference, error)
+	setDesignFormatFn func(context.Context, workspaceowner.SetDesignFormatCommand) (*workspaceowner.Reference, error)
+	deleteFn          func(context.Context, workspaceowner.DeleteCommand) (*workspaceowner.Reference, error)
 }
 
-func (stub *workspaceCapabilityStub) Create(context.Context, workspacemodule.CreateCommand) (*workspacemodule.Reference, error) {
-	return nil, workspacemodule.ErrUnavailable
+func (stub *workspaceCapabilityStub) Create(context.Context, workspaceowner.CreateCommand) (*workspaceowner.Reference, error) {
+	return nil, workspaceowner.ErrUnavailable
 }
 
-func (stub *workspaceCapabilityStub) Resolve(context.Context, workspacemodule.ResolveQuery) (*workspacemodule.Reference, error) {
-	return nil, workspacemodule.ErrNotFound
+func (stub *workspaceCapabilityStub) Resolve(context.Context, workspaceowner.ResolveQuery) (*workspaceowner.Reference, error) {
+	return nil, workspaceowner.ErrNotFound
 }
 
-func (stub *workspaceCapabilityStub) List(context.Context, workspacemodule.ListQuery) ([]workspacemodule.Reference, error) {
+func (stub *workspaceCapabilityStub) List(context.Context, workspaceowner.ListQuery) ([]workspaceowner.Reference, error) {
 	return nil, nil
 }
 
-func (stub *workspaceCapabilityStub) Rename(context.Context, workspacemodule.RenameCommand) (*workspacemodule.Reference, error) {
-	return nil, workspacemodule.ErrUnavailable
+func (stub *workspaceCapabilityStub) Rename(context.Context, workspaceowner.RenameCommand) (*workspaceowner.Reference, error) {
+	return nil, workspaceowner.ErrUnavailable
 }
 
-func (stub *workspaceCapabilityStub) SetDesignFormat(ctx context.Context, command workspacemodule.SetDesignFormatCommand) (*workspacemodule.Reference, error) {
+func (stub *workspaceCapabilityStub) SetDesignFormat(ctx context.Context, command workspaceowner.SetDesignFormatCommand) (*workspaceowner.Reference, error) {
 	if stub.setDesignFormatFn == nil {
-		return nil, workspacemodule.ErrInvalid
+		return nil, workspaceowner.ErrInvalid
 	}
 	return stub.setDesignFormatFn(ctx, command)
 }
 
-func (stub *workspaceCapabilityStub) SetLifecycle(context.Context, workspacemodule.SetLifecycleCommand) (*workspacemodule.Reference, error) {
-	return nil, workspacemodule.ErrUnavailable
+func (stub *workspaceCapabilityStub) SetLifecycle(context.Context, workspaceowner.SetLifecycleCommand) (*workspaceowner.Reference, error) {
+	return nil, workspaceowner.ErrUnavailable
 }
 
-func (stub *workspaceCapabilityStub) Delete(ctx context.Context, command workspacemodule.DeleteCommand) (*workspacemodule.Reference, error) {
+func (stub *workspaceCapabilityStub) Delete(ctx context.Context, command workspaceowner.DeleteCommand) (*workspaceowner.Reference, error) {
 	if stub.deleteFn == nil {
-		return nil, workspacemodule.ErrUnavailable
+		return nil, workspaceowner.ErrUnavailable
 	}
 	return stub.deleteFn(ctx, command)
 }
 
-func (stub *workspaceCapabilityStub) GetRepository(context.Context, workspacemodule.GetRepositoryQuery) (*workspacemodule.Repository, error) {
-	return nil, workspacemodule.ErrUnavailable
+func (stub *workspaceCapabilityStub) GetRepository(context.Context, workspaceowner.GetRepositoryQuery) (*workspaceowner.Repository, error) {
+	return nil, workspaceowner.ErrUnavailable
 }
 
-func (stub *workspaceCapabilityStub) ListRepositories(context.Context, workspacemodule.ListRepositoriesQuery) ([]workspacemodule.Repository, error) {
-	return nil, workspacemodule.ErrUnavailable
+func (stub *workspaceCapabilityStub) ListRepositories(context.Context, workspaceowner.ListRepositoriesQuery) ([]workspaceowner.Repository, error) {
+	return nil, workspaceowner.ErrUnavailable
 }
 
-func (stub *workspaceCapabilityStub) RegisterRepository(context.Context, workspacemodule.RegisterRepositoryCommand) (*workspacemodule.Repository, error) {
-	return nil, workspacemodule.ErrUnavailable
+func (stub *workspaceCapabilityStub) RegisterRepository(context.Context, workspaceowner.RegisterRepositoryCommand) (*workspaceowner.Repository, error) {
+	return nil, workspaceowner.ErrUnavailable
 }
 
-func (stub *workspaceCapabilityStub) UpdateRepository(context.Context, workspacemodule.UpdateRepositoryCommand) (*workspacemodule.Repository, error) {
-	return nil, workspacemodule.ErrUnavailable
+func (stub *workspaceCapabilityStub) UpdateRepository(context.Context, workspaceowner.UpdateRepositoryCommand) (*workspaceowner.Repository, error) {
+	return nil, workspaceowner.ErrUnavailable
 }
 
-func (stub *workspaceCapabilityStub) UnregisterRepository(context.Context, workspacemodule.UnregisterRepositoryCommand) (*workspacemodule.Repository, error) {
-	return nil, workspacemodule.ErrUnavailable
+func (stub *workspaceCapabilityStub) UnregisterRepository(context.Context, workspaceowner.UnregisterRepositoryCommand) (*workspaceowner.Repository, error) {
+	return nil, workspaceowner.ErrUnavailable
 }
 
 func (stub *workspaceAgentDirectoryStub) ListAgents(
@@ -95,7 +94,7 @@ func (stub *workspaceAgentDirectoryStub) ListRoles(context.Context, string) ([]*
 func TestGetWorkspaceProjectsCanonicalAgentsOutsideTopologyCache(t *testing.T) {
 	ctx := context.Background()
 	st := memstore.New()
-	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "ALPHA", Name: "Alpha"}); err != nil {
+	if _, err := st.Workspaces().Create(ctx, workspaceowner.WorkspaceCreate{Key: "ALPHA", Name: "Alpha"}); err != nil {
 		t.Fatal(err)
 	}
 	metadata, err := agentsmodule.WithRuntimeMetadata(nil, agentsmodule.RuntimeMetadata{
@@ -141,7 +140,7 @@ func TestGetWorkspaceProjectsCanonicalAgentsOutsideTopologyCache(t *testing.T) {
 func TestGetWorkspaceRejectsCanonicalAgentWithMissingRole(t *testing.T) {
 	ctx := context.Background()
 	st := memstore.New()
-	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "ALPHA", Name: "Alpha"}); err != nil {
+	if _, err := st.Workspaces().Create(ctx, workspaceowner.WorkspaceCreate{Key: "ALPHA", Name: "Alpha"}); err != nil {
 		t.Fatal(err)
 	}
 	directory := &workspaceAgentDirectoryStub{agents: []*agentsmodule.Agent{{
@@ -156,7 +155,7 @@ func TestGetWorkspaceRejectsCanonicalAgentWithMissingRole(t *testing.T) {
 func TestDeleteWorkspaceFailsClosedWithoutWorkspaceCapability(t *testing.T) {
 	ctx := context.Background()
 	st := memstore.New()
-	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "ALPHA", Name: "Alpha Project"}); err != nil {
+	if _, err := st.Workspaces().Create(ctx, workspaceowner.WorkspaceCreate{Key: "ALPHA", Name: "Alpha Project"}); err != nil {
 		t.Fatalf("create workspace: %v", err)
 	}
 
@@ -173,18 +172,18 @@ func TestDeleteWorkspaceFailsClosedWithoutWorkspaceCapability(t *testing.T) {
 func TestDeleteWorkspaceUsesOwnerCommandThenLocalCleanup(t *testing.T) {
 	ctx := context.Background()
 	st := memstore.New()
-	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "ALPHA", Name: "Alpha Project"}); err != nil {
+	if _, err := st.Workspaces().Create(ctx, workspaceowner.WorkspaceCreate{Key: "ALPHA", Name: "Alpha Project"}); err != nil {
 		t.Fatal(err)
 	}
 	cleanupKey := ""
-	capability := &workspaceCapabilityStub{deleteFn: func(ctx context.Context, command workspacemodule.DeleteCommand) (*workspacemodule.Reference, error) {
+	capability := &workspaceCapabilityStub{deleteFn: func(ctx context.Context, command workspaceowner.DeleteCommand) (*workspaceowner.Reference, error) {
 		if command.Reference != "Alpha Project" {
 			t.Fatalf("delete reference = %q", command.Reference)
 		}
 		if err := st.Workspaces().Delete(ctx, "ALPHA"); err != nil {
 			return nil, err
 		}
-		return &workspacemodule.Reference{Key: "ALPHA", Name: "Alpha Project"}, nil
+		return &workspaceowner.Reference{Key: "ALPHA", Name: "Alpha Project"}, nil
 	}}
 	svc := NewWorkspaceService(WorkspaceServiceConfig{
 		Topology:  st,
@@ -201,7 +200,7 @@ func TestDeleteWorkspaceUsesOwnerCommandThenLocalCleanup(t *testing.T) {
 	if cleanupKey != "ALPHA" {
 		t.Fatalf("cleanup key=%q", cleanupKey)
 	}
-	if _, err := st.Workspaces().Get(ctx, "ALPHA"); !errors.Is(err, domain.ErrNotFound) {
+	if _, err := st.Workspaces().Get(ctx, "ALPHA"); !errors.Is(err, persistence.ErrNotFound) {
 		t.Fatalf("workspace still exists: %v", err)
 	}
 }
@@ -209,14 +208,14 @@ func TestDeleteWorkspaceUsesOwnerCommandThenLocalCleanup(t *testing.T) {
 func TestDeleteWorkspaceDoesNotReportFailureAfterDurableDelete(t *testing.T) {
 	ctx := context.Background()
 	st := memstore.New()
-	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "ALPHA", Name: "Alpha"}); err != nil {
+	if _, err := st.Workspaces().Create(ctx, workspaceowner.WorkspaceCreate{Key: "ALPHA", Name: "Alpha"}); err != nil {
 		t.Fatal(err)
 	}
-	capability := &workspaceCapabilityStub{deleteFn: func(ctx context.Context, _ workspacemodule.DeleteCommand) (*workspacemodule.Reference, error) {
+	capability := &workspaceCapabilityStub{deleteFn: func(ctx context.Context, _ workspaceowner.DeleteCommand) (*workspaceowner.Reference, error) {
 		if err := st.Workspaces().Delete(ctx, "ALPHA"); err != nil {
 			return nil, err
 		}
-		return &workspacemodule.Reference{Key: "ALPHA", Name: "Alpha"}, nil
+		return &workspaceowner.Reference{Key: "ALPHA", Name: "Alpha"}, nil
 	}}
 	svc := NewWorkspaceService(WorkspaceServiceConfig{
 		Topology: st, Workspace: capability,
@@ -251,7 +250,7 @@ func TestCreateWorkspace_StoreBackedReturnsCreatedWorkspaceData(t *testing.T) {
 
 	ctx := context.Background()
 	st := memstore.New()
-	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "ALPHA", Name: "alpha"}); err != nil {
+	if _, err := st.Workspaces().Create(ctx, workspaceowner.WorkspaceCreate{Key: "ALPHA", Name: "alpha"}); err != nil {
 		t.Fatalf("create alpha: %v", err)
 	}
 	if err := bootstrap.SetActiveWorkspaceKey("ALPHA"); err != nil {
@@ -261,7 +260,7 @@ func TestCreateWorkspace_StoreBackedReturnsCreatedWorkspaceData(t *testing.T) {
 	svc := NewWorkspaceService(WorkspaceServiceConfig{
 		Topology: st,
 		CreateFn: func(ctx context.Context, req WorkspaceCreateRequest) (WorkspaceCreateResult, error) {
-			if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "BETA", Name: req.Name}); err != nil {
+			if _, err := st.Workspaces().Create(ctx, workspaceowner.WorkspaceCreate{Key: "BETA", Name: req.Name}); err != nil {
 				return WorkspaceCreateResult{}, err
 			}
 			return WorkspaceCreateResult{WorkspaceID: "BETA"}, nil
@@ -289,7 +288,7 @@ func TestCreateWorkspace_StoreBackedReturnsCreatedWorkspaceData(t *testing.T) {
 func TestAddWorkspaceReposNormalizesCloneURLInput(t *testing.T) {
 	ctx := context.Background()
 	st := memstore.New()
-	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "ALPHA", Name: "alpha"}); err != nil {
+	if _, err := st.Workspaces().Create(ctx, workspaceowner.WorkspaceCreate{Key: "ALPHA", Name: "alpha"}); err != nil {
 		t.Fatalf("create alpha: %v", err)
 	}
 
@@ -449,8 +448,8 @@ func TestStartAsyncAddReposPreparesNormalizedAdmissionAndUsesExactJobID(t *testi
 func TestStartAsyncCreateClassifiesAdmissionConflict(t *testing.T) {
 	coordinator := &testWorkspaceAdmissionCoordinator{
 		startCreate: func(context.Context, WorkspaceCreateRequest) (string, error) {
-			return "", workspacemodule.NewCreateError(
-				workspacemodule.AlreadyExists,
+			return "", workspaceowner.NewCreateError(
+				workspaceowner.AlreadyExists,
 				"workspace already exists",
 				errors.New("repository admission conflict"),
 			)
@@ -476,8 +475,8 @@ func TestStartAsyncCreateClassifiesAdmissionConflict(t *testing.T) {
 func TestStartAsyncAddReposClassifiesAdmissionConflict(t *testing.T) {
 	coordinator := &testWorkspaceAdmissionCoordinator{
 		startAddRepos: func(context.Context, WorkspaceAddReposRequest) (string, error) {
-			return "", workspacemodule.NewCreateError(
-				workspacemodule.AlreadyExists,
+			return "", workspaceowner.NewCreateError(
+				workspaceowner.AlreadyExists,
 				"repository already exists in workspace",
 				errors.New("repository admission conflict"),
 			)
@@ -532,7 +531,7 @@ func TestGetWorkspace_StoreBackedMissReturnsNotFound(t *testing.T) {
 
 func TestGetWorkspace_StoreBackedCanonicalizesDisplayNameRoute(t *testing.T) {
 	st := memstore.New()
-	if _, err := st.Workspaces().Create(context.Background(), store.WorkspaceCreate{
+	if _, err := st.Workspaces().Create(context.Background(), workspaceowner.WorkspaceCreate{
 		Key: "LOOM-P61", Name: "Loom-P61",
 	}); err != nil {
 		t.Fatal(err)
@@ -552,16 +551,16 @@ func TestGetWorkspace_StoreBackedCachesTopologyAcrossRepeatedCalls(t *testing.T)
 	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
 	ctx := context.Background()
 	base := memstore.New()
-	if _, err := base.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "ALPHA", Name: "Alpha Project"}); err != nil {
+	if _, err := base.Workspaces().Create(ctx, workspaceowner.WorkspaceCreate{Key: "ALPHA", Name: "Alpha Project"}); err != nil {
 		t.Fatalf("create alpha: %v", err)
 	}
-	if _, err := base.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "BETA", Name: "Beta Project"}); err != nil {
+	if _, err := base.Workspaces().Create(ctx, workspaceowner.WorkspaceCreate{Key: "BETA", Name: "Beta Project"}); err != nil {
 		t.Fatalf("create beta: %v", err)
 	}
-	if _, err := base.Repos().Create(ctx, store.RepoCreate{WorkspaceKey: "ALPHA", Name: "repo-a"}); err != nil {
+	if _, err := base.Repos().Create(ctx, workspaceowner.RepoCreate{WorkspaceKey: "ALPHA", Name: "repo-a"}); err != nil {
 		t.Fatalf("create alpha repo: %v", err)
 	}
-	if _, err := base.Repos().Create(ctx, store.RepoCreate{WorkspaceKey: "BETA", Name: "repo-b"}); err != nil {
+	if _, err := base.Repos().Create(ctx, workspaceowner.RepoCreate{WorkspaceKey: "BETA", Name: "repo-b"}); err != nil {
 		t.Fatalf("create beta repo: %v", err)
 	}
 	counted := newWorkspaceCountingStore(base)
@@ -604,7 +603,7 @@ func TestGetWorkspaceBackend_ReadsLocalNodeConfig(t *testing.T) {
 	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
 	ctx := context.Background()
 	st := memstore.New()
-	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "ALPHA", Name: "Alpha Project"}); err != nil {
+	if _, err := st.Workspaces().Create(ctx, workspaceowner.WorkspaceCreate{Key: "ALPHA", Name: "Alpha Project"}); err != nil {
 		t.Fatalf("create workspace: %v", err)
 	}
 	if err := bootstrap.SetRuntimeProvider("ALPHA", "codex"); err != nil {
@@ -628,7 +627,7 @@ func TestGetWorkspaceBackend_StoreBackedDefaultsToCodex(t *testing.T) {
 	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
 	ctx := context.Background()
 	st := memstore.New()
-	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "ALPHA", Name: "Alpha Project"}); err != nil {
+	if _, err := st.Workspaces().Create(ctx, workspaceowner.WorkspaceCreate{Key: "ALPHA", Name: "Alpha Project"}); err != nil {
 		t.Fatalf("create workspace: %v", err)
 	}
 
@@ -649,7 +648,7 @@ func TestPatchWorkspaceBackend_WritesLocalNodeConfig(t *testing.T) {
 	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
 	ctx := context.Background()
 	st := memstore.New()
-	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "ALPHA", Name: "Alpha Project"}); err != nil {
+	if _, err := st.Workspaces().Create(ctx, workspaceowner.WorkspaceCreate{Key: "ALPHA", Name: "Alpha Project"}); err != nil {
 		t.Fatalf("create workspace: %v", err)
 	}
 
@@ -673,11 +672,11 @@ func TestPatchWorkspaceBackend_WritesLocalNodeConfig(t *testing.T) {
 func TestGetWorkspaceJobDoesNotInferAdmissionFromWorkspaceLifecycle(t *testing.T) {
 	ctx := context.Background()
 	st := memstore.New()
-	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "CLONE-WS", Name: "clone-ws"}); err != nil {
+	if _, err := st.Workspaces().Create(ctx, workspaceowner.WorkspaceCreate{Key: "CLONE-WS", Name: "clone-ws"}); err != nil {
 		t.Fatalf("create workspace: %v", err)
 	}
-	cloning := workspacemodule.StateCloning
-	if _, err := st.Workspaces().Update(ctx, "CLONE-WS", store.WorkspaceUpdate{State: &cloning}); err != nil {
+	cloning := workspaceowner.StateCloning
+	if _, err := st.Workspaces().Update(ctx, "CLONE-WS", workspaceowner.WorkspaceUpdate{State: &cloning}); err != nil {
 		t.Fatalf("mark cloning: %v", err)
 	}
 
@@ -754,12 +753,12 @@ func (c *testWorkspaceAdmissionCoordinator) LookupJob(
 }
 
 type workspaceCountingStore struct {
-	store.Store
+	*memstore.Store
 	workspaces *workspaceCountingWorkspaceStore
 	repos      *workspaceCountingRepoStore
 }
 
-func newWorkspaceCountingStore(base store.Store) *workspaceCountingStore {
+func newWorkspaceCountingStore(base *memstore.Store) *workspaceCountingStore {
 	return &workspaceCountingStore{
 		Store:      base,
 		workspaces: &workspaceCountingWorkspaceStore{WorkspaceStore: base.Workspaces()},
@@ -767,31 +766,31 @@ func newWorkspaceCountingStore(base store.Store) *workspaceCountingStore {
 	}
 }
 
-func (s *workspaceCountingStore) Workspaces() store.WorkspaceStore { return s.workspaces }
-func (s *workspaceCountingStore) Repos() store.RepoStore           { return s.repos }
+func (s *workspaceCountingStore) Workspaces() workspaceowner.WorkspaceStore { return s.workspaces }
+func (s *workspaceCountingStore) Repos() workspaceowner.RepoStore           { return s.repos }
 
 type workspaceCountingWorkspaceStore struct {
-	store.WorkspaceStore
+	workspaceowner.WorkspaceStore
 	getCalls  int
 	listCalls int
 }
 
-func (s *workspaceCountingWorkspaceStore) Get(ctx context.Context, key string) (*workspacemodule.Workspace, error) {
+func (s *workspaceCountingWorkspaceStore) Get(ctx context.Context, key string) (*workspaceowner.Workspace, error) {
 	s.getCalls++
 	return s.WorkspaceStore.Get(ctx, key)
 }
 
-func (s *workspaceCountingWorkspaceStore) List(ctx context.Context) ([]*workspacemodule.Workspace, error) {
+func (s *workspaceCountingWorkspaceStore) List(ctx context.Context) ([]*workspaceowner.Workspace, error) {
 	s.listCalls++
 	return s.WorkspaceStore.List(ctx)
 }
 
 type workspaceCountingRepoStore struct {
-	store.RepoStore
+	workspaceowner.RepoStore
 	listByWorkspace map[string]int
 }
 
-func (s *workspaceCountingRepoStore) List(ctx context.Context, workspaceKey string) ([]*workspacemodule.Repository, error) {
+func (s *workspaceCountingRepoStore) List(ctx context.Context, workspaceKey string) ([]*workspaceowner.Repository, error) {
 	s.listByWorkspace[workspaceKey]++
 	return s.RepoStore.List(ctx, workspaceKey)
 }

@@ -24,17 +24,21 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
+
+	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
+
+	workspaceowner "github.com/tysonthomas9/loomcli/internal/modules/workspace"
+
 	appserve "github.com/tysonthomas9/loomcli/internal/app/serve"
 	appworkflowauthoring "github.com/tysonthomas9/loomcli/internal/app/workflowauthoring"
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
 	workflowauthoring "github.com/tysonthomas9/loomcli/internal/infra/workflowdistribution/authoring"
 	connectorsmodule "github.com/tysonthomas9/loomcli/internal/modules/connectors"
-	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 	"github.com/tysonthomas9/loomcli/internal/netutil"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
-	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 func TestE2E_GitHubWebhookDispatchesDriverRunWithEphemeralStack(t *testing.T) {
@@ -268,11 +272,11 @@ func (e *githubWebhookE2E) seedWorkspace() {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 
-	_, err := e.fleetClient.Workspaces().Create(ctx, store.WorkspaceCreate{
+	_, err := e.fleetClient.Workspaces().Create(ctx, workspaceowner.WorkspaceCreate{
 		Key:  e.workspace,
 		Name: "GitHub webhook E2E",
 	})
-	if err != nil && !errors.Is(err, domain.ErrAlreadyExists) {
+	if err != nil && !errors.Is(err, persistence.ErrAlreadyExists) {
 		e.t.Fatalf("create workspace: %v", err)
 	}
 }
@@ -348,7 +352,7 @@ func (e *githubWebhookE2E) registerGitHubDriver() *automation.Binding {
 		secret   = "e2e-webhook-secret"
 	)
 	e.createGitHubConnector(ctx, secret)
-	driver, err := e.fleetClient.Drivers().Create(ctx, store.DriverCreate{
+	driver, err := e.fleetClient.Drivers().Create(ctx, workflowcatalog.DriverCreate{
 		WorkspaceKey: e.workspace,
 		DriverID:     driverID,
 		Name:         driverID,
@@ -363,7 +367,7 @@ func (e *githubWebhookE2E) registerGitHubDriver() *automation.Binding {
 	if driver.Revision != 1 {
 		e.t.Fatalf("created driver revision = %d, want 1", driver.Revision)
 	}
-	_, err = e.fleetClient.DriverVersions().Create(ctx, store.DriverVersionCreate{
+	_, err = e.fleetClient.DriverVersions().Create(ctx, workflowcatalog.DriverVersionCreate{
 		WorkspaceKey:     e.workspace,
 		VersionID:        version,
 		DriverID:         driverID,
@@ -389,7 +393,7 @@ func (e *githubWebhookE2E) registerGitHubDriver() *automation.Binding {
 		e.t.Fatalf("activate driver version = %+v, %v", activated, err)
 	}
 
-	binding, err := e.fleetClient.TriggerBindings().Create(ctx, store.TriggerBindingCreate{
+	binding, err := e.fleetClient.TriggerBindings().Create(ctx, automation.TriggerBindingCreate{
 		WorkspaceKey:     e.workspace,
 		BindingID:        "binding-github-pr-opened",
 		Name:             "pr-review",
@@ -400,7 +404,7 @@ func (e *githubWebhookE2E) registerGitHubDriver() *automation.Binding {
 		TargetEntrypoint: "run",
 		Enabled:          true,
 	})
-	if err != nil && !errors.Is(err, domain.ErrAlreadyExists) {
+	if err != nil && !errors.Is(err, persistence.ErrAlreadyExists) {
 		e.t.Fatalf("create trigger binding: %v", err)
 	}
 	if binding == nil {
@@ -645,7 +649,7 @@ func (e *githubWebhookE2E) registerLiveGitHubDriver(live liveGitHubPR) *automati
 	}
 	e.createGitHubConnector(ctx, "e2e-webhook-secret")
 
-	binding, err := e.fleetClient.TriggerBindings().Create(ctx, store.TriggerBindingCreate{
+	binding, err := e.fleetClient.TriggerBindings().Create(ctx, automation.TriggerBindingCreate{
 		WorkspaceKey:     e.workspace,
 		BindingID:        "binding-live-github-pr-opened",
 		Name:             "live-pr-review",
@@ -703,7 +707,7 @@ func (e *githubWebhookE2E) postGitHubWebhookPayload(deliveryID string, body []by
 	return out
 }
 
-func (e *githubWebhookE2E) expectQueuedDriverRun(runID string) *domain.DriverRun {
+func (e *githubWebhookE2E) expectQueuedDriverRun(runID string) *execution.DriverRunRecord {
 	e.t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
@@ -712,7 +716,7 @@ func (e *githubWebhookE2E) expectQueuedDriverRun(runID string) *domain.DriverRun
 	if err != nil {
 		e.t.Fatalf("get driver run %s: %v", runID, err)
 	}
-	if run.Status != domain.DriverRunQueued {
+	if run.Status != execution.DriverRunQueued {
 		e.t.Fatalf("driver run status = %s, want queued: %+v", run.Status, run)
 	}
 	if run.DriverID != "github-pr-review" || run.DriverVersionID != "github-pr-review-v1" || run.Entrypoint != "run" ||
@@ -746,7 +750,7 @@ func (e *githubWebhookE2E) expectTriggerEvent(binding *automation.Binding) *auto
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 
-	events, err := e.fleetClient.TriggerEvents().List(ctx, e.workspace, store.TriggerEventFilter{
+	events, err := e.fleetClient.TriggerEvents().List(ctx, e.workspace, automation.TriggerEventFilter{
 		SourceKind:       "github",
 		TriggerBindingID: binding.BindingID,
 		Limit:            10,
@@ -770,12 +774,12 @@ func (e *githubWebhookE2E) expectTriggerEvent(binding *automation.Binding) *auto
 	return event
 }
 
-func (e *githubWebhookE2E) expectTriggerDelivery(event *automation.Event, binding *automation.Binding, run *domain.DriverRun) {
+func (e *githubWebhookE2E) expectTriggerDelivery(event *automation.Event, binding *automation.Binding, run *execution.DriverRunRecord) {
 	e.t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 
-	deliveries, err := e.fleetClient.TriggerDeliveries().List(ctx, e.workspace, store.TriggerDeliveryFilter{
+	deliveries, err := e.fleetClient.TriggerDeliveries().List(ctx, e.workspace, automation.TriggerDeliveryFilter{
 		TriggerEventID:   event.EventID,
 		TriggerBindingID: binding.BindingID,
 		Status:           automation.DeliveryDispatched,
@@ -795,7 +799,7 @@ func (e *githubWebhookE2E) expectTriggerDelivery(event *automation.Event, bindin
 
 func (e *githubWebhookE2E) expectRunEvents(runID string, requiredActions ...string) {
 	e.t.Helper()
-	var page domain.PlatformEventsPage
+	var page execution.AuditPage
 	e.getLoomJSON("/api/workspaces/"+e.workspace+"/runs/"+runID+"/events?limit=50", http.StatusOK, &page)
 
 	actions := map[string]bool{}
@@ -809,21 +813,21 @@ func (e *githubWebhookE2E) expectRunEvents(runID string, requiredActions ...stri
 	}
 }
 
-func (e *githubWebhookE2E) waitForRunCompleted(runID string) *domain.DriverRun {
+func (e *githubWebhookE2E) waitForRunCompleted(runID string) *execution.DriverRunRecord {
 	e.t.Helper()
 	deadline := time.Now().Add(90 * time.Second)
 	for time.Now().Before(deadline) {
-		var run domain.DriverRun
+		var run execution.DriverRunRecord
 		e.getLoomJSON("/api/workspaces/"+e.workspace+"/runs/"+runID, http.StatusOK, &run)
 		switch run.Status {
-		case domain.DriverRunCompleted:
+		case execution.DriverRunCompleted:
 			return &run
-		case domain.DriverRunFailed, domain.DriverRunNeedsReview, domain.DriverRunCancelled:
+		case execution.DriverRunFailed, execution.DriverRunNeedsReview, execution.DriverRunCancelled:
 			e.t.Fatalf("driver run %s reached terminal status %s: %+v", runID, run.Status, run)
 		}
 		time.Sleep(500 * time.Millisecond)
 	}
-	var run domain.DriverRun
+	var run execution.DriverRunRecord
 	e.getLoomJSON("/api/workspaces/"+e.workspace+"/runs/"+runID, http.StatusOK, &run)
 	e.t.Fatalf("driver run %s did not complete before deadline: %+v", runID, run)
 	return nil
@@ -834,7 +838,7 @@ func (e *githubWebhookE2E) expectLiveTriggerEvent(binding *automation.Binding, l
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 
-	events, err := e.fleetClient.TriggerEvents().List(ctx, e.workspace, store.TriggerEventFilter{
+	events, err := e.fleetClient.TriggerEvents().List(ctx, e.workspace, automation.TriggerEventFilter{
 		SourceKind:       "github",
 		TriggerBindingID: binding.BindingID,
 		Limit:            10,
@@ -864,15 +868,15 @@ func (e *githubWebhookE2E) expectIdempotentRedelivery(runID string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 
-	events, err := e.fleetClient.TriggerEvents().List(ctx, e.workspace, store.TriggerEventFilter{SourceKind: "github", Limit: 10})
+	events, err := e.fleetClient.TriggerEvents().List(ctx, e.workspace, automation.TriggerEventFilter{SourceKind: "github", Limit: 10})
 	if err != nil {
 		e.t.Fatalf("list trigger events after redelivery: %v", err)
 	}
-	deliveries, err := e.fleetClient.TriggerDeliveries().List(ctx, e.workspace, store.TriggerDeliveryFilter{Status: automation.DeliveryDispatched, Limit: 10})
+	deliveries, err := e.fleetClient.TriggerDeliveries().List(ctx, e.workspace, automation.TriggerDeliveryFilter{Status: automation.DeliveryDispatched, Limit: 10})
 	if err != nil {
 		e.t.Fatalf("list trigger deliveries after redelivery: %v", err)
 	}
-	runs, err := e.fleetClient.DriverRuns().List(ctx, e.workspace, store.DriverRunFilter{DriverID: "github-pr-review", Limit: 10})
+	runs, err := e.fleetClient.DriverRuns().List(ctx, e.workspace, execution.DriverRunFilter{DriverID: "github-pr-review", Limit: 10})
 	if err != nil {
 		e.t.Fatalf("list driver runs after redelivery: %v", err)
 	}
@@ -889,22 +893,22 @@ func (e *githubWebhookE2E) expectIdempotentLiveRedelivery(runID string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 
-	events, err := e.fleetClient.TriggerEvents().List(ctx, e.workspace, store.TriggerEventFilter{SourceKind: "github", Limit: 10})
+	events, err := e.fleetClient.TriggerEvents().List(ctx, e.workspace, automation.TriggerEventFilter{SourceKind: "github", Limit: 10})
 	if err != nil {
 		e.t.Fatalf("list live trigger events after redelivery: %v", err)
 	}
-	deliveries, err := e.fleetClient.TriggerDeliveries().List(ctx, e.workspace, store.TriggerDeliveryFilter{Status: automation.DeliveryDispatched, Limit: 10})
+	deliveries, err := e.fleetClient.TriggerDeliveries().List(ctx, e.workspace, automation.TriggerDeliveryFilter{Status: automation.DeliveryDispatched, Limit: 10})
 	if err != nil {
 		e.t.Fatalf("list live trigger deliveries after redelivery: %v", err)
 	}
-	runs, err := e.fleetClient.DriverRuns().List(ctx, e.workspace, store.DriverRunFilter{DriverID: "github-pr-review", Limit: 10})
+	runs, err := e.fleetClient.DriverRuns().List(ctx, e.workspace, execution.DriverRunFilter{DriverID: "github-pr-review", Limit: 10})
 	if err != nil {
 		e.t.Fatalf("list live driver runs after redelivery: %v", err)
 	}
 	if len(events) != 1 || len(deliveries) != 1 || len(runs) != 1 {
 		e.t.Fatalf("live redelivery created duplicate state: events=%d deliveries=%d runs=%d", len(events), len(deliveries), len(runs))
 	}
-	if runs[0].RunID != runID || runs[0].Status != domain.DriverRunCompleted {
+	if runs[0].RunID != runID || runs[0].Status != execution.DriverRunCompleted {
 		e.t.Fatalf("live redelivery run = %+v, want completed %s", runs[0], runID)
 	}
 }

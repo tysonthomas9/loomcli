@@ -8,13 +8,13 @@ import (
 	"testing"
 
 	"github.com/tysonthomas9/loomcli/internal/cli/managementapi"
-	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 )
 
 type epicRunManagementStub struct {
 	workspace string
 	requests  []managementapi.SubmitDriverRunRequest
-	states    []*domain.DriverRun
+	states    []*execution.DriverRunRecord
 	getErr    error
 }
 
@@ -23,17 +23,17 @@ func (stub *epicRunManagementStub) Workspace() string { return stub.workspace }
 func (stub *epicRunManagementStub) SubmitDriverRun(
 	_ context.Context,
 	request managementapi.SubmitDriverRunRequest,
-) (*domain.DriverRun, error) {
+) (*execution.DriverRunRecord, error) {
 	stub.requests = append(stub.requests, request)
-	return &domain.DriverRun{
+	return &execution.DriverRunRecord{
 		WorkspaceKey: stub.workspace, RunID: request.RunID,
 		DriverID: request.DriverRef, DriverVersionID: "version-1",
-		Status: domain.DriverRunQueued, EpicID: request.EpicID,
+		Status: execution.DriverRunQueued, EpicID: request.EpicID,
 		Payload: append(json.RawMessage(nil), request.Payload...),
 	}, nil
 }
 
-func (stub *epicRunManagementStub) GetDriverRun(context.Context, string) (*domain.DriverRun, error) {
+func (stub *epicRunManagementStub) GetDriverRun(context.Context, string) (*execution.DriverRunRecord, error) {
 	if stub.getErr != nil {
 		return nil, stub.getErr
 	}
@@ -67,8 +67,8 @@ func TestQueueEpicWorkflowRunUsesServerStampedManagementSubmission(t *testing.T)
 }
 
 func TestExecuteWorkflowRunObservesTerminalManagementState(t *testing.T) {
-	management := &epicRunManagementStub{states: []*domain.DriverRun{{
-		RunID: "run-1", Status: domain.DriverRunCompleted, Summary: "done",
+	management := &epicRunManagementStub{states: []*execution.DriverRunRecord{{
+		RunID: "run-1", Status: execution.DriverRunCompleted, Summary: "done",
 	}}}
 	if err := executeWorkflowRun(context.Background(), management, "run-1"); err != nil {
 		t.Fatalf("executeWorkflowRun: %v", err)
@@ -76,8 +76,8 @@ func TestExecuteWorkflowRunObservesTerminalManagementState(t *testing.T) {
 }
 
 func TestExecuteWorkflowRunReturnsFailedStateOrReadError(t *testing.T) {
-	failed := &epicRunManagementStub{states: []*domain.DriverRun{{
-		RunID: "run-1", Status: domain.DriverRunFailed, Summary: "boom",
+	failed := &epicRunManagementStub{states: []*execution.DriverRunRecord{{
+		RunID: "run-1", Status: execution.DriverRunFailed, Summary: "boom",
 	}}}
 	if err := executeWorkflowRun(context.Background(), failed, "run-1"); err == nil || !strings.Contains(err.Error(), "boom") {
 		t.Fatalf("failed execute error = %v", err)

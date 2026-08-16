@@ -12,7 +12,7 @@ import (
 
 func TestConnectorManagementComposesOwnerAPI(t *testing.T) {
 	backend := memstore.New()
-	management, err := ConnectorManagement(&bootstrap.StoreHandle{Store: backend})
+	management, err := connectorManagementFromRecords(backend.Connectors())
 	if err != nil {
 		t.Fatalf("compose management: %v", err)
 	}

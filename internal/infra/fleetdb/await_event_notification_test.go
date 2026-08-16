@@ -6,10 +6,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 )
 
-func TestAwaitEventNotificationClaimWire(t *testing.T) {
+func TestAwaitEventNotificationLeaseWire(t *testing.T) {
 	now := time.Now().UTC()
 	client := awaitTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost || r.URL.Path != "/api/v1/WS/await-event-notifications/claim" {
@@ -40,8 +40,8 @@ func TestAwaitEventNotificationClaimWire(t *testing.T) {
 			"count": 1,
 		})
 	})
-	outbox := client.TriggerEvents().(store.AwaitEventNotificationStore)
-	values, err := outbox.ClaimAwaitEventNotifications(t.Context(), store.AwaitEventNotificationClaim{
+	outbox := client.TriggerEvents().(execution.AwaitEventNotificationStore)
+	values, err := outbox.ClaimAwaitEventNotifications(t.Context(), execution.AwaitEventNotificationLease{
 		WorkspaceKey: "WS", ClaimID: "claim-1", Before: now,
 		ClaimUntil: now.Add(time.Minute), Limit: 17,
 	})
@@ -81,13 +81,13 @@ func TestAwaitEventNotificationCompleteAndRetryWire(t *testing.T) {
 		}
 		writeJSON(t, w, map[string]bool{"ok": true})
 	})
-	outbox := client.TriggerEvents().(store.AwaitEventNotificationStore)
-	if err := outbox.CompleteAwaitEventNotification(t.Context(), store.AwaitEventNotificationCompletion{
+	outbox := client.TriggerEvents().(execution.AwaitEventNotificationStore)
+	if err := outbox.CompleteAwaitEventNotification(t.Context(), execution.AwaitEventNotificationCompletion{
 		WorkspaceKey: "WS", EventID: "stored-1", ClaimID: "claim-1", CompletedAt: now,
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := outbox.RetryAwaitEventNotification(t.Context(), store.AwaitEventNotificationRetry{
+	if err := outbox.RetryAwaitEventNotification(t.Context(), execution.AwaitEventNotificationRetry{
 		WorkspaceKey: "WS", EventID: "stored-1", ClaimID: "claim-1",
 		AvailableAt: now.Add(time.Second), Error: "temporary",
 	}); err != nil {

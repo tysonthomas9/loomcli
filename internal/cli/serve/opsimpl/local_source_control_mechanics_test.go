@@ -8,28 +8,29 @@ import (
 	"path/filepath"
 	"testing"
 
+	workspaceowner "github.com/tysonthomas9/loomcli/internal/modules/workspace"
+
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
-	"github.com/tysonthomas9/loomcli/internal/modules/agents"
+	agentsowner "github.com/tysonthomas9/loomcli/internal/modules/agents"
 	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
-	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/testutil"
 )
 
-func runtimeAgent(t *testing.T, workspace, name, role string, repos, groups []string) *agents.Agent {
+func runtimeAgent(t *testing.T, workspace, name, role string, repos, groups []string) *agentsowner.Agent {
 	t.Helper()
-	metadata, err := agents.WithRuntimeMetadata(nil, agents.RuntimeMetadata{Repos: repos, RepoGroups: groups})
+	metadata, err := agentsowner.WithRuntimeMetadata(nil, agentsowner.RuntimeMetadata{Repos: repos, RepoGroups: groups})
 	if err != nil {
 		t.Fatalf("runtime metadata: %v", err)
 	}
-	return &agents.Agent{
+	return &agentsowner.Agent{
 		WorkspaceKey: workspace,
 		AgentID:      name,
 		Name:         name,
-		Behavior:     agents.BehaviorReference{RoleName: role},
-		DesiredState: agents.DesiredRunning,
+		Behavior:     agentsowner.BehaviorReference{RoleName: role},
+		DesiredState: agentsowner.DesiredRunning,
 		MaxInstances: 1,
 		Metadata:     metadata,
 	}
@@ -198,10 +199,10 @@ func TestResolveAgentWorktree_StoreBackedFleetDB(t *testing.T) {
 	t.Setenv("LOOM_CONFIG_DIR", loomDir)
 
 	st := memstore.New()
-	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "WS1", Name: "Workspace One"}); err != nil {
+	if _, err := st.Workspaces().Create(ctx, workspaceowner.WorkspaceCreate{Key: "WS1", Name: "Workspace One"}); err != nil {
 		t.Fatalf("create workspace: %v", err)
 	}
-	if _, err := st.Repos().Create(ctx, store.RepoCreate{
+	if _, err := st.Repos().Create(ctx, workspaceowner.RepoCreate{
 		WorkspaceKey:  "WS1",
 		Name:          "api",
 		DefaultBranch: "main",
@@ -210,7 +211,7 @@ func TestResolveAgentWorktree_StoreBackedFleetDB(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("create repo: %v", err)
 	}
-	if _, err := st.Roles().Create(ctx, store.RoleCreate{WorkspaceKey: "WS1", Name: "task"}); err != nil {
+	if _, err := st.Roles().Create(ctx, agentsowner.RoleRecordCreate{WorkspaceKey: "WS1", Name: "task"}); err != nil {
 		t.Fatalf("create role: %v", err)
 	}
 	nova := runtimeAgent(t, "WS1", "nova", "task", nil, []string{"backend"})
@@ -230,7 +231,7 @@ func TestResolveAgentWorktree_StoreBackedFleetDB(t *testing.T) {
 		t.Fatalf("save state cache: %v", err)
 	}
 
-	got, err := NewLocalSourceControlMechanics().WithWorkspaceProjection(testWorkspaceProjection{store: st}).WithAgentQueries(testutil.StaticAgentQueries{Agents: []*agents.Agent{nova}}).ResolveAgentWorktree("WS1", "nova")
+	got, err := NewLocalSourceControlMechanics().WithWorkspaceProjection(testWorkspaceProjection{store: st}).WithAgentQueries(testutil.StaticAgentQueries{Agents: []*agentsowner.Agent{nova}}).ResolveAgentWorktree("WS1", "nova")
 	if err != nil {
 		t.Fatalf("ResolveAgentWorktree: %v", err)
 	}
@@ -249,10 +250,10 @@ func TestResolveAgentWorktreeForRepo_StoreBackedFleetDB(t *testing.T) {
 	t.Setenv("LOOM_CONFIG_DIR", loomDir)
 
 	st := memstore.New()
-	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "WS1", Name: "Workspace One"}); err != nil {
+	if _, err := st.Workspaces().Create(ctx, workspaceowner.WorkspaceCreate{Key: "WS1", Name: "Workspace One"}); err != nil {
 		t.Fatalf("create workspace: %v", err)
 	}
-	for _, repo := range []store.RepoCreate{
+	for _, repo := range []workspaceowner.RepoCreate{
 		{WorkspaceKey: "WS1", Name: "api", DefaultBranch: "main", Remote: "origin", Groups: []string{"backend"}},
 		{WorkspaceKey: "WS1", Name: "docs", DefaultBranch: "main", Remote: "origin", Groups: []string{"docs"}},
 	} {
@@ -260,7 +261,7 @@ func TestResolveAgentWorktreeForRepo_StoreBackedFleetDB(t *testing.T) {
 			t.Fatalf("create repo %s: %v", repo.Name, err)
 		}
 	}
-	if _, err := st.Roles().Create(ctx, store.RoleCreate{WorkspaceKey: "WS1", Name: "task"}); err != nil {
+	if _, err := st.Roles().Create(ctx, agentsowner.RoleRecordCreate{WorkspaceKey: "WS1", Name: "task"}); err != nil {
 		t.Fatalf("create role: %v", err)
 	}
 	nova := runtimeAgent(t, "WS1", "nova", "task", nil, []string{"backend"})
@@ -288,7 +289,7 @@ func TestResolveAgentWorktreeForRepo_StoreBackedFleetDB(t *testing.T) {
 		t.Fatalf("save state cache: %v", err)
 	}
 
-	g := NewLocalSourceControlMechanics().WithWorkspaceProjection(testWorkspaceProjection{store: st}).WithAgentQueries(testutil.StaticAgentQueries{Agents: []*agents.Agent{nova, any}})
+	g := NewLocalSourceControlMechanics().WithWorkspaceProjection(testWorkspaceProjection{store: st}).WithAgentQueries(testutil.StaticAgentQueries{Agents: []*agentsowner.Agent{nova, any}})
 	got, err := g.ResolveAgentWorktreeForRepo("WS1", "nova", "api")
 	if err != nil {
 		t.Fatalf("ResolveAgentWorktreeForRepo nova/api: %v", err)
@@ -323,10 +324,10 @@ func TestResolveAgentWorktree_BrokenGitMetadataReturnsUnknownBranch(t *testing.T
 	t.Setenv("LOOM_CONFIG_DIR", loomDir)
 
 	st := memstore.New()
-	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "WS1", Name: "Workspace One"}); err != nil {
+	if _, err := st.Workspaces().Create(ctx, workspaceowner.WorkspaceCreate{Key: "WS1", Name: "Workspace One"}); err != nil {
 		t.Fatalf("create workspace: %v", err)
 	}
-	if _, err := st.Repos().Create(ctx, store.RepoCreate{
+	if _, err := st.Repos().Create(ctx, workspaceowner.RepoCreate{
 		WorkspaceKey:  "WS1",
 		Name:          "api",
 		DefaultBranch: "main",
@@ -335,7 +336,7 @@ func TestResolveAgentWorktree_BrokenGitMetadataReturnsUnknownBranch(t *testing.T
 	}); err != nil {
 		t.Fatalf("create repo: %v", err)
 	}
-	if _, err := st.Roles().Create(ctx, store.RoleCreate{WorkspaceKey: "WS1", Name: "task"}); err != nil {
+	if _, err := st.Roles().Create(ctx, agentsowner.RoleRecordCreate{WorkspaceKey: "WS1", Name: "task"}); err != nil {
 		t.Fatalf("create role: %v", err)
 	}
 	broken := runtimeAgent(t, "WS1", "broken", "task", nil, []string{"backend"})
@@ -359,7 +360,7 @@ func TestResolveAgentWorktree_BrokenGitMetadataReturnsUnknownBranch(t *testing.T
 		t.Fatalf("save state cache: %v", err)
 	}
 
-	g := NewLocalSourceControlMechanics().WithWorkspaceProjection(testWorkspaceProjection{store: st}).WithAgentQueries(testutil.StaticAgentQueries{Agents: []*agents.Agent{broken}})
+	g := NewLocalSourceControlMechanics().WithWorkspaceProjection(testWorkspaceProjection{store: st}).WithAgentQueries(testutil.StaticAgentQueries{Agents: []*agentsowner.Agent{broken}})
 	for name, resolve := range map[string]func() (*sourcecontrol.Worktree, error){
 		"ResolveAgentWorktree": func() (*sourcecontrol.Worktree, error) {
 			return g.ResolveAgentWorktree("WS1", "broken")

@@ -5,17 +5,18 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
+
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 func setupBlockTestStore(t *testing.T) (context.Context, *Store) {
 	t.Helper()
 	ctx := t.Context()
 	s := New()
-	if _, err := s.Drivers().Create(ctx, store.DriverCreate{
+	if _, err := s.Drivers().Create(ctx, workflowcatalog.DriverCreate{
 		WorkspaceKey: "WS",
 		DriverID:     "driver-1",
 		Name:         "epic-runner",
@@ -24,7 +25,7 @@ func setupBlockTestStore(t *testing.T) (context.Context, *Store) {
 	}); err != nil {
 		t.Fatalf("Create driver: %v", err)
 	}
-	if _, err := s.DriverVersions().Create(ctx, store.DriverVersionCreate{
+	if _, err := s.DriverVersions().Create(ctx, workflowcatalog.DriverVersionCreate{
 		WorkspaceKey:     "WS",
 		VersionID:        "version-1",
 		DriverID:         "driver-1",
@@ -35,7 +36,7 @@ func setupBlockTestStore(t *testing.T) (context.Context, *Store) {
 	}); err != nil {
 		t.Fatalf("Create driver version: %v", err)
 	}
-	if _, err := s.DriverRuns().Create(ctx, store.DriverRunCreate{
+	if _, err := s.DriverRuns().Create(ctx, execution.DriverRunCreate{
 		WorkspaceKey:    "WS",
 		RunID:           "run-1",
 		DriverID:        "driver-1",
@@ -47,15 +48,15 @@ func setupBlockTestStore(t *testing.T) (context.Context, *Store) {
 	return ctx, s
 }
 
-func createBlockTestTaskRun(t *testing.T, ctx context.Context, s *Store, taskRunID string) *domain.TaskRun {
+func createBlockTestTaskRun(t *testing.T, ctx context.Context, s *Store, taskRunID string) *execution.TaskRunRecord {
 	t.Helper()
-	run, err := s.TaskRuns().Create(ctx, store.TaskRunCreate{
+	run, err := s.TaskRuns().Create(ctx, execution.TaskRunCreate{
 		WorkspaceKey:    "WS",
 		TaskRunID:       taskRunID,
 		DriverRunID:     "run-1",
 		TaskID:          "WS-2",
 		ProviderProfile: "codex-default",
-		Status:          domain.TaskRunRunning,
+		Status:          execution.TaskRunRecordRunning,
 		NodeID:          "node-1",
 		LeaseID:         "lease-1",
 	})
@@ -71,25 +72,25 @@ func TestTaskRunFinishBlockTaskMarksTaskBlocked(t *testing.T) {
 
 	exitCode := 1
 	// BlockTask is only valid on failed finishes.
-	if _, err := s.TaskRuns().Finish(ctx, "WS", "task-run-block-1", store.TaskRunFinish{
+	if _, err := s.TaskRuns().Finish(ctx, "WS", "task-run-block-1", execution.TaskRunFinish{
 		NodeID:       "node-1",
 		LeaseID:      "lease-1",
 		FencingToken: run.FencingToken,
-		Status:       domain.TaskRunCompleted,
+		Status:       execution.TaskRunRecordCompleted,
 		ExitCode:     &exitCode,
 		BlockTask:    true,
-	}); !errors.Is(err, domain.ErrInvalidTransition) {
+	}); !errors.Is(err, persistence.ErrInvalidTransition) {
 		t.Fatalf("Finish block+completed err = %v, want ErrInvalidTransition", err)
 	}
 	if s.TaskBlocked("WS", "WS-2") {
 		t.Fatalf("task blocked after rejected finish, want not blocked")
 	}
 
-	finished, err := s.TaskRuns().Finish(ctx, "WS", "task-run-block-1", store.TaskRunFinish{
+	finished, err := s.TaskRuns().Finish(ctx, "WS", "task-run-block-1", execution.TaskRunFinish{
 		NodeID:       "node-1",
 		LeaseID:      "lease-1",
 		FencingToken: run.FencingToken,
-		Status:       domain.TaskRunFailed,
+		Status:       execution.TaskRunRecordFailed,
 		ExitCode:     &exitCode,
 		ErrorClass:   "task_failed",
 		ErrorMessage: "attempts exhausted",
@@ -98,7 +99,7 @@ func TestTaskRunFinishBlockTaskMarksTaskBlocked(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Finish block: %v", err)
 	}
-	if finished.Status != domain.TaskRunFailed || finished.FinishedAt == nil {
+	if finished.Status != execution.TaskRunRecordFailed || finished.FinishedAt == nil {
 		t.Fatalf("finished = %+v, want failed with finished_at", finished)
 	}
 	if !s.TaskBlocked("WS", "WS-2") {
@@ -110,11 +111,11 @@ func TestTaskRunFinishBlockTaskMarksTaskBlocked(t *testing.T) {
 
 	// Blocking again via another run on the same task is an idempotent no-op.
 	second := createBlockTestTaskRun(t, ctx, s, "task-run-block-2")
-	if _, err := s.TaskRuns().Finish(ctx, "WS", "task-run-block-2", store.TaskRunFinish{
+	if _, err := s.TaskRuns().Finish(ctx, "WS", "task-run-block-2", execution.TaskRunFinish{
 		NodeID:       "node-1",
 		LeaseID:      "lease-1",
 		FencingToken: second.FencingToken,
-		Status:       domain.TaskRunFailed,
+		Status:       execution.TaskRunRecordFailed,
 		ExitCode:     &exitCode,
 		BlockTask:    true,
 	}); err != nil {
@@ -130,11 +131,11 @@ func TestTaskRunFinishWithoutBlockTaskLeavesTaskUnblocked(t *testing.T) {
 	run := createBlockTestTaskRun(t, ctx, s, "task-run-no-block")
 
 	exitCode := 1
-	if _, err := s.TaskRuns().Finish(ctx, "WS", "task-run-no-block", store.TaskRunFinish{
+	if _, err := s.TaskRuns().Finish(ctx, "WS", "task-run-no-block", execution.TaskRunFinish{
 		NodeID:       "node-1",
 		LeaseID:      "lease-1",
 		FencingToken: run.FencingToken,
-		Status:       domain.TaskRunFailed,
+		Status:       execution.TaskRunRecordFailed,
 		ExitCode:     &exitCode,
 	}); err != nil {
 		t.Fatalf("Finish without block: %v", err)

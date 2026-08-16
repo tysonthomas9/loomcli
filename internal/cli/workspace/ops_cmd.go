@@ -9,15 +9,15 @@ import (
 	"strings"
 	"time"
 
+	agentsmodule "github.com/tysonthomas9/loomcli/internal/modules/agents"
+
 	"github.com/spf13/cobra"
 
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/cli/local"
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/localworkspace"
-	agentsmodule "github.com/tysonthomas9/loomcli/internal/modules/agents"
 	workspacemodule "github.com/tysonthomas9/loomcli/internal/modules/workspace"
 )
 
@@ -246,8 +246,8 @@ func buildWorkspaceOpsStatus(
 	ctx context.Context,
 	ws *workspacemodule.Workspace,
 	repos []*workspacemodule.Repository,
-	agents []*domain.AgentService,
-	roles []*domain.Role,
+	agents []*agentsmodule.AgentServiceRecord,
+	roles []*agentsmodule.Role,
 ) (*WorkspaceOpsStatus, error) {
 	sc, _ := bootstrap.LoadStateCache()
 	localState := bootstrap.WorkspaceLocalState{}
@@ -383,8 +383,8 @@ func collectOpsRepos(status *WorkspaceOpsStatus, repos []*workspacemodule.Reposi
 	return repoByName
 }
 
-func collectRolesByName(roles []*domain.Role) map[string]*domain.Role {
-	rolesByName := map[string]*domain.Role{}
+func collectRolesByName(roles []*agentsmodule.Role) map[string]*agentsmodule.Role {
+	rolesByName := map[string]*agentsmodule.Role{}
 	for _, role := range roles {
 		if role != nil {
 			rolesByName[role.Name] = role
@@ -393,7 +393,7 @@ func collectRolesByName(roles []*domain.Role) map[string]*domain.Role {
 	return rolesByName
 }
 
-func collectOpsAgents(status *WorkspaceOpsStatus, agents []*domain.AgentService, localState bootstrap.WorkspaceLocalState, repoByName map[string]*workspacemodule.Repository, rolesByName map[string]*domain.Role) {
+func collectOpsAgents(status *WorkspaceOpsStatus, agents []*agentsmodule.AgentServiceRecord, localState bootstrap.WorkspaceLocalState, repoByName map[string]*workspacemodule.Repository, rolesByName map[string]*agentsmodule.Role) {
 	for _, agent := range agents {
 		if agent == nil {
 			continue
@@ -419,8 +419,8 @@ func repoLocalPath(localState bootstrap.WorkspaceLocalState, name string) string
 func workspaceOpsAgentStatus(
 	localState bootstrap.WorkspaceLocalState,
 	repoByName map[string]*workspacemodule.Repository,
-	rolesByName map[string]*domain.Role,
-	agent *domain.AgentService,
+	rolesByName map[string]*agentsmodule.Role,
+	agent *agentsmodule.AgentServiceRecord,
 ) (WorkspaceOpsAgent, []WorkspaceOpsProblem) {
 	runtime, runtimeErr := agentsmodule.ParseRuntimeMetadata(agent.Metadata)
 	item := WorkspaceOpsAgent{
@@ -461,7 +461,7 @@ func workspaceOpsAgentStatus(
 			Fix:      "use `loom role list` and update the agent role",
 		})
 	}
-	requiresWorktree := roleExists && domain.ResolveRoleKind(role, agent.RoleName) != domain.RoleKindInteractive
+	requiresWorktree := roleExists && agentsmodule.ResolveRoleKind(role, agent.RoleName) != agentsmodule.RoleKindInteractive
 	if item.Runnable && requiresWorktree && localState.Path != "" && !item.WorktreeReady {
 		if item.Reason == "" {
 			item.Reason = "missing_local_worktree"
@@ -488,8 +488,8 @@ func workspaceOpsAgentStatus(
 	return item, problems
 }
 
-func agentDesiredRunnable(agent *domain.AgentService) bool {
-	return agent != nil && agent.DesiredState == domain.AgentServiceDesiredRunning
+func agentDesiredRunnable(agent *agentsmodule.AgentServiceRecord) bool {
+	return agent != nil && agent.DesiredState == agentsmodule.DesiredRunning
 }
 
 // agentBackendProblem returns a WorkspaceOpsProblem describing a missing

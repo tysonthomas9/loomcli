@@ -9,8 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
-	storepkg "github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
 )
 
 // InteractionMutationTransport contains only the compound Phase 5
@@ -19,22 +18,22 @@ import (
 type InteractionMutationTransport interface {
 	StartInteractionSession(context.Context, InteractionSessionStartInput) (*InteractionSessionStartResult, error)
 	RecoverInteractionSessionStart(context.Context, InteractionSessionStartRecoveryInput) (*InteractionSessionStartResult, error)
-	GetInteractionSession(context.Context, string, string) (*domain.AgentSession, error)
-	ListInteractionSessions(context.Context, InteractionSessionQuery) ([]*domain.AgentSession, error)
+	GetInteractionSession(context.Context, string, string) (*interaction.SessionRecord, error)
+	ListInteractionSessions(context.Context, InteractionSessionQuery) ([]*interaction.SessionRecord, error)
 	PatchInteractionSession(context.Context, InteractionSessionPatchInput) (*InteractionSessionMutationResult, error)
 	HeartbeatInteractionSession(context.Context, InteractionSessionHeartbeatInput) (*InteractionSessionMutationResult, error)
 	FinishInteractionSession(context.Context, InteractionSessionFinishInput) (*InteractionSessionMutationResult, error)
 	ForceInterruptInteractionSession(context.Context, InteractionSessionForceInterruptInput) (*InteractionSessionForceInterruptResult, error)
-	ListRecoverableInteractionSessions(context.Context, string) ([]*domain.AgentSession, error)
+	ListRecoverableInteractionSessions(context.Context, string) ([]*interaction.SessionRecord, error)
 	InterruptInteractionSessionIfLeaseMissing(context.Context, string, string) (*InteractionSessionInterruptResult, error)
 
-	CreateInteractionTerminal(context.Context, InteractionTerminalCreateInput) (*domain.TerminalSession, error)
-	GetInteractionTerminal(context.Context, string, string) (*domain.TerminalSession, error)
-	UpdateInteractionTerminal(context.Context, InteractionTerminalUpdateInput) (*domain.TerminalSession, error)
+	CreateInteractionTerminal(context.Context, InteractionTerminalCreateInput) (*interaction.TerminalRecord, error)
+	GetInteractionTerminal(context.Context, string, string) (*interaction.TerminalRecord, error)
+	UpdateInteractionTerminal(context.Context, InteractionTerminalUpdateInput) (*interaction.TerminalRecord, error)
 
-	EnqueueInteractionInbox(context.Context, InteractionInboxEnqueueInput) (*domain.AgentInboxMessage, error)
-	ClaimInteractionInbox(context.Context, InteractionInboxClaimInput) (*domain.AgentInboxMessage, error)
-	CompleteInteractionInbox(context.Context, InteractionInboxCompleteInput) (*domain.AgentInboxMessage, error)
+	EnqueueInteractionInbox(context.Context, InteractionInboxEnqueueInput) (*interaction.InboxRecord, error)
+	ClaimInteractionInbox(context.Context, InteractionInboxClaimInput) (*interaction.InboxRecord, error)
+	CompleteInteractionInbox(context.Context, InteractionInboxCompleteInput) (*interaction.InboxRecord, error)
 
 	ListInteractionActivity(context.Context, string, string, int) ([]InteractionActivity, error)
 }
@@ -63,9 +62,9 @@ type InteractionSessionStartInput struct {
 }
 
 type InteractionSessionStartResult struct {
-	Session *domain.AgentSession `json:"session"`
-	Lease   *domain.AgentLease   `json:"lease"`
-	Token   string               `json:"token"`
+	Session *interaction.SessionRecord `json:"session"`
+	Lease   *interaction.LeaseRecord   `json:"lease"`
+	Token   string                     `json:"token"`
 }
 
 type InteractionSessionStartRecoveryInput struct {
@@ -100,14 +99,14 @@ type InteractionSessionFinishInput struct {
 }
 
 type InteractionSessionMutationResult struct {
-	Session  *domain.AgentSession    `json:"session"`
-	Terminal *domain.TerminalSession `json:"terminal,omitempty"`
-	Lease    *domain.AgentLease      `json:"lease"`
+	Session  *interaction.SessionRecord  `json:"session"`
+	Terminal *interaction.TerminalRecord `json:"terminal,omitempty"`
+	Lease    *interaction.LeaseRecord    `json:"lease"`
 }
 
 type InteractionSessionInterruptResult struct {
-	Session *domain.AgentSession `json:"session"`
-	Changed bool                 `json:"changed"`
+	Session *interaction.SessionRecord `json:"session"`
+	Changed bool                       `json:"changed"`
 }
 
 type InteractionSessionForceInterruptInput struct {
@@ -123,10 +122,10 @@ type InteractionSessionForceInterruptInput struct {
 }
 
 type InteractionSessionForceInterruptResult struct {
-	Session  *domain.AgentSession    `json:"session"`
-	Terminal *domain.TerminalSession `json:"terminal"`
-	Lease    *domain.AgentLease      `json:"lease"`
-	Changed  bool                    `json:"changed"`
+	Session  *interaction.SessionRecord  `json:"session"`
+	Terminal *interaction.TerminalRecord `json:"terminal"`
+	Lease    *interaction.LeaseRecord    `json:"lease"`
+	Changed  bool                        `json:"changed"`
 }
 
 type InteractionTerminalCreateInput struct {
@@ -316,14 +315,14 @@ func (store *interactionStore) GetInteractionSession(
 	ctx context.Context,
 	workspace,
 	sessionID string,
-) (*domain.AgentSession, error) {
+) (*interaction.SessionRecord, error) {
 	if store == nil || store.client == nil {
 		return nil, ErrInteractionUnavailable
 	}
 	if err := validateInteractionCoordinates(workspace, sessionID); err != nil {
 		return nil, err
 	}
-	var response domain.AgentSession
+	var response interaction.SessionRecord
 	err := store.client.Do(
 		ctx,
 		http.MethodGet,
@@ -340,7 +339,7 @@ func (store *interactionStore) GetInteractionSession(
 func (store *interactionStore) ListInteractionSessions(
 	ctx context.Context,
 	query InteractionSessionQuery,
-) ([]*domain.AgentSession, error) {
+) ([]*interaction.SessionRecord, error) {
 	if store == nil || store.client == nil {
 		return nil, ErrInteractionUnavailable
 	}
@@ -350,7 +349,7 @@ func (store *interactionStore) ListInteractionSessions(
 	if query.WorkspaceKey == "" || query.Limit < 1 || query.Limit > 100 {
 		return nil, ErrInteractionInvalid
 	}
-	values, err := store.client.ListAgentSessions(ctx, query.WorkspaceKey, storepkg.AgentSessionFilter{
+	values, err := store.client.ListAgentSessions(ctx, query.WorkspaceKey, interaction.AgentSessionFilter{
 		AgentID: query.AgentID,
 		TaskID:  query.WorkItemID,
 		Limit:   query.Limit,
@@ -553,7 +552,7 @@ func (store *interactionStore) ForceInterruptInteractionSession(
 func (store *interactionStore) ListRecoverableInteractionSessions(
 	ctx context.Context,
 	workspace string,
-) ([]*domain.AgentSession, error) {
+) ([]*interaction.SessionRecord, error) {
 	if store == nil || store.client == nil {
 		return nil, ErrInteractionUnavailable
 	}
@@ -561,8 +560,8 @@ func (store *interactionStore) ListRecoverableInteractionSessions(
 		return nil, ErrInteractionInvalid
 	}
 	var response struct {
-		Sessions []*domain.AgentSession `json:"agent_sessions"`
-		Count    int                    `json:"count"`
+		Sessions []*interaction.SessionRecord `json:"agent_sessions"`
+		Count    int                          `json:"count"`
 	}
 	err := store.client.Do(
 		ctx,
@@ -575,7 +574,7 @@ func (store *interactionStore) ListRecoverableInteractionSessions(
 		return nil, mapInteractionAuthorityError("list recoverable interaction sessions", err)
 	}
 	if response.Sessions == nil {
-		response.Sessions = []*domain.AgentSession{}
+		response.Sessions = []*interaction.SessionRecord{}
 	}
 	return response.Sessions, nil
 }
@@ -609,7 +608,7 @@ func (store *interactionStore) InterruptInteractionSessionIfLeaseMissing(
 func (store *interactionStore) CreateInteractionTerminal(
 	ctx context.Context,
 	input InteractionTerminalCreateInput,
-) (*domain.TerminalSession, error) {
+) (*interaction.TerminalRecord, error) {
 	if store == nil || store.client == nil {
 		return nil, ErrInteractionUnavailable
 	}
@@ -640,7 +639,7 @@ func (store *interactionStore) CreateInteractionTerminal(
 		PTYProvider: input.PTYProvider, StreamRef: input.StreamRef,
 		Metadata: cloneInteractionMetadata(input.Metadata),
 	}
-	var response domain.TerminalSession
+	var response interaction.TerminalRecord
 	err := store.client.DoWithHeaders(
 		ctx,
 		http.MethodPost,
@@ -659,14 +658,14 @@ func (store *interactionStore) GetInteractionTerminal(
 	ctx context.Context,
 	workspace,
 	terminalID string,
-) (*domain.TerminalSession, error) {
+) (*interaction.TerminalRecord, error) {
 	if store == nil || store.client == nil {
 		return nil, ErrInteractionUnavailable
 	}
 	if err := validateInteractionCoordinates(workspace, terminalID); err != nil {
 		return nil, err
 	}
-	var response domain.TerminalSession
+	var response interaction.TerminalRecord
 	err := store.client.Do(
 		ctx,
 		http.MethodGet,
@@ -683,7 +682,7 @@ func (store *interactionStore) GetInteractionTerminal(
 func (store *interactionStore) UpdateInteractionTerminal(
 	ctx context.Context,
 	input InteractionTerminalUpdateInput,
-) (*domain.TerminalSession, error) {
+) (*interaction.TerminalRecord, error) {
 	if store == nil || store.client == nil {
 		return nil, ErrInteractionUnavailable
 	}
@@ -702,7 +701,7 @@ func (store *interactionStore) UpdateInteractionTerminal(
 	bodyPtr(request, "stream_ref", input.StreamRef)
 	bodyPtr(request, "transcript_artifact_id", input.TranscriptArtifactID)
 	bodyPtr(request, "attached_clients", input.AttachedClients)
-	var response domain.TerminalSession
+	var response interaction.TerminalRecord
 	err := store.client.DoWithHeaders(
 		ctx,
 		http.MethodPatch,
@@ -720,7 +719,7 @@ func (store *interactionStore) UpdateInteractionTerminal(
 func (store *interactionStore) EnqueueInteractionInbox(
 	ctx context.Context,
 	input InteractionInboxEnqueueInput,
-) (*domain.AgentInboxMessage, error) {
+) (*interaction.InboxRecord, error) {
 	if store == nil || store.client == nil {
 		return nil, ErrInteractionUnavailable
 	}
@@ -749,7 +748,7 @@ func (store *interactionStore) EnqueueInteractionInbox(
 		TriggerEventID: input.TriggerEventID, TriggerDeliveryID: input.TriggerDeliveryID,
 		DedupeKey: input.DedupeKey,
 	}
-	var response domain.AgentInboxMessage
+	var response interaction.InboxRecord
 	err := store.client.Do(
 		ctx,
 		http.MethodPost,
@@ -766,7 +765,7 @@ func (store *interactionStore) EnqueueInteractionInbox(
 func (store *interactionStore) ClaimInteractionInbox(
 	ctx context.Context,
 	input InteractionInboxClaimInput,
-) (*domain.AgentInboxMessage, error) {
+) (*interaction.InboxRecord, error) {
 	if store == nil || store.client == nil {
 		return nil, ErrInteractionUnavailable
 	}
@@ -789,7 +788,7 @@ func (store *interactionStore) ClaimInteractionInbox(
 		FencingToken:    input.Proof.FencingToken,
 		LeaseTTLSeconds: interactionTTLSeconds(input.LeaseTTL),
 	}
-	var response domain.AgentInboxMessage
+	var response interaction.InboxRecord
 	err := store.client.DoWithHeaders(
 		ctx,
 		http.MethodPost,
@@ -807,7 +806,7 @@ func (store *interactionStore) ClaimInteractionInbox(
 func (store *interactionStore) CompleteInteractionInbox(
 	ctx context.Context,
 	input InteractionInboxCompleteInput,
-) (*domain.AgentInboxMessage, error) {
+) (*interaction.InboxRecord, error) {
 	if store == nil || store.client == nil {
 		return nil, ErrInteractionUnavailable
 	}
@@ -835,7 +834,7 @@ func (store *interactionStore) CompleteInteractionInbox(
 		FencingToken: input.Proof.FencingToken, Attempt: input.Attempt, Status: input.Status,
 		DeliveredThreadID: input.DeliveredThreadID, ErrorClass: input.ErrorClass,
 	}
-	var response domain.AgentInboxMessage
+	var response interaction.InboxRecord
 	err := store.client.DoWithHeaders(
 		ctx,
 		http.MethodPost,

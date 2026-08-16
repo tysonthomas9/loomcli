@@ -9,9 +9,9 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	driverpkg "github.com/tysonthomas9/loomcli/internal/driver"
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 var (
@@ -190,7 +190,7 @@ func runDriverActiveTaskRuns(cmd *cobra.Command, _ []string) error {
 func runDriverCompleteTask(cmd *cobra.Command, _ []string) error {
 	taskRunID := strings.TrimSpace(driverCompleteTaskTaskRunID)
 	if taskRunID == "" {
-		return fmt.Errorf("--task-run-id is required for fenced driver completion: %w", domain.ErrInvalid)
+		return fmt.Errorf("--task-run-id is required for fenced driver completion: %w", persistence.ErrInvalid)
 	}
 	client, err := newDriverRuntimeClient(driverRuntimeClientOptions{
 		WorkspaceKey: driverCompleteTaskWorkspaceKey, DriverRunID: driverCompleteTaskDriverRunID,
@@ -244,7 +244,7 @@ func runDriverRecoverStaleTasks(cmd *cobra.Command, args []string) error {
 		runID = firstNonEmpty(args[0], runID)
 	}
 	if runID == "" {
-		return fmt.Errorf("driver-run-id required: %w", domain.ErrInvalid)
+		return fmt.Errorf("driver-run-id required: %w", persistence.ErrInvalid)
 	}
 	staleBefore, err := parseDriverRecoverStaleBefore(driverRecoverStaleBefore)
 	if err != nil {

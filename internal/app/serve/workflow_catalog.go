@@ -11,15 +11,17 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
+
+	workspaceowner "github.com/tysonthomas9/loomcli/internal/modules/workspace"
+
 	"github.com/tysonthomas9/loomcli/internal/driver"
 	infrafleetdb "github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
-	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 	catalogfleetdb "github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog/fleetdb"
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog/httpapi"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
-	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
 const externalOperatorAuthorityTTL = time.Minute
@@ -227,9 +229,9 @@ type WorkflowCatalogConfig struct {
 	// These narrow stores are used only by composition-time compatibility
 	// adapters whose owner capabilities land in later phases. Automation core
 	// never receives the composite Store or any of these repository types.
-	AutomationDriverRuns             store.DriverRunStore
-	AutomationAwaits                 store.AwaitStore
-	AutomationWorkspaces             store.WorkspaceStore
+	AutomationDriverRuns             execution.DriverRunStore
+	AutomationAwaits                 execution.AwaitStore
+	AutomationWorkspaces             workspaceowner.WorkspaceStore
 	AutomationWebhookVerifierFactory WebhookVerifierFactory
 	// PrepareWorkflowTarget is held only by the temporary composition adapter
 	// around legacy builtin materialization. It never enters Automation or an

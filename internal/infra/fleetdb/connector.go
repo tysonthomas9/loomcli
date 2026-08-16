@@ -33,8 +33,8 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	connectorsmodule "github.com/tysonthomas9/loomcli/internal/modules/connectors"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 type connectorCatalog struct {
@@ -82,32 +82,32 @@ func connectorOwnerError(err error) error {
 		errors.Is(err, connectorsmodule.ErrGrantRevoked),
 		errors.Is(err, connectorsmodule.ErrUnavailable):
 		return err
-	case errors.Is(err, domain.ErrNotFound):
+	case errors.Is(err, persistence.ErrNotFound):
 		return fmt.Errorf("%w: %w", connectorsmodule.ErrNotFound, err)
-	case errors.Is(err, domain.ErrAlreadyExists):
+	case errors.Is(err, persistence.ErrAlreadyExists):
 		return fmt.Errorf("%w: %w", connectorsmodule.ErrAlreadyExists, err)
-	case errors.Is(err, domain.ErrInvalid):
+	case errors.Is(err, persistence.ErrInvalid):
 		return fmt.Errorf("%w: %w", connectorsmodule.ErrInvalid, err)
-	case errors.Is(err, domain.ErrConflict):
+	case errors.Is(err, persistence.ErrConflict):
 		return fmt.Errorf("%w: %w", connectorsmodule.ErrConflict, err)
-	case errors.Is(err, domain.ErrUnavailable), errors.Is(err, domain.ErrRateLimited):
+	case errors.Is(err, persistence.ErrUnavailable), errors.Is(err, persistence.ErrRateLimited):
 		return fmt.Errorf("%w: %w", connectorsmodule.ErrUnavailable, err)
 	}
 	return fmt.Errorf("%w: %w", connectorsmodule.ErrUnavailable, err)
 }
 
 func connectorRotationError(err error) error {
-	if err != nil && errors.Is(err, domain.ErrConflict) {
+	if err != nil && errors.Is(err, persistence.ErrConflict) {
 		return fmt.Errorf("%w: %w", connectorsmodule.ErrRotationConflict, err)
 	}
 	return connectorOwnerError(err)
 }
 
 // grantRevokeSentinel maps fleet-db's 409 invalid_transition on a
-// double-revoke (classified as domain.ErrInvalidTransition) to the CV1
+// double-revoke (classified as persistence.ErrInvalidTransition) to the CV1
 // sentinel connectors.ErrGrantRevoked, matching the memstore contract.
 func grantRevokeSentinel(err error) error {
-	if err != nil && errors.Is(err, domain.ErrInvalidTransition) {
+	if err != nil && errors.Is(err, persistence.ErrInvalidTransition) {
 		return fmt.Errorf("%w: %w", connectorsmodule.ErrGrantRevoked, err)
 	}
 	return err
@@ -423,7 +423,7 @@ type connectorAuditStore struct{ client *Client }
 
 func (s *connectorAuditStore) AppendConnectorCallRecord(ctx context.Context, rec *connectorsmodule.ConnectorCallRecord) error {
 	// Validate client-side like memstore so malformed records fail with
-	// the exact domain.ErrInvalid wrap without a round-trip.
+	// the exact persistence.ErrInvalid wrap without a round-trip.
 	if err := rec.Validate(); err != nil {
 		return err
 	}

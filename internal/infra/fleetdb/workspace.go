@@ -5,18 +5,17 @@ import (
 	"fmt"
 	"time"
 
-	workspacemodule "github.com/tysonthomas9/loomcli/internal/modules/workspace"
+	workspaceowner "github.com/tysonthomas9/loomcli/internal/modules/workspace"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
-// workspaceStore implements store.WorkspaceStore against fleet-db's
+// workspaceStore implements workspaceowner.WorkspaceStore against fleet-db's
 // /api/v1/admin/workspaces endpoints. Bound to a parent *Client which
 // owns the HTTP transport + auth state.
 type workspaceStore struct{ client *Client }
 
-var _ store.WorkspaceStore = (*workspaceStore)(nil)
+var _ workspaceowner.WorkspaceStore = (*workspaceStore)(nil)
 
 // workspaceWire is the JSON shape fleet-db emits for a workspace.
 // Mirrors models.Workspace but lives here so loom doesn't import
@@ -36,12 +35,12 @@ type workspaceWire struct {
 	DesignFormat  string `json:"design_format,omitempty"`
 }
 
-func (w workspaceWire) toDomain() *workspacemodule.Workspace {
-	return &workspacemodule.Workspace{
+func (w workspaceWire) toDomain() *workspaceowner.Workspace {
+	return &workspaceowner.Workspace{
 		Key:           w.Key,
 		Name:          w.Name,
 		Description:   w.Description,
-		State:         workspacemodule.State(w.State),
+		State:         workspaceowner.State(w.State),
 		ErrorMessage:  w.ErrorMessage,
 		DefaultBranch: w.DefaultBranch,
 		DesignFormat:  w.DesignFormat,
@@ -50,7 +49,7 @@ func (w workspaceWire) toDomain() *workspacemodule.Workspace {
 	}
 }
 
-func (s *workspaceStore) Create(ctx context.Context, in store.WorkspaceCreate) (*workspacemodule.Workspace, error) {
+func (s *workspaceStore) Create(ctx context.Context, in workspaceowner.WorkspaceCreate) (*workspaceowner.Workspace, error) {
 	body := struct {
 		Key           string `json:"key"`
 		Name          string `json:"name"`
@@ -71,7 +70,7 @@ func (s *workspaceStore) Create(ctx context.Context, in store.WorkspaceCreate) (
 	return resp.toDomain(), nil
 }
 
-func (s *workspaceStore) Get(ctx context.Context, key string) (*workspacemodule.Workspace, error) {
+func (s *workspaceStore) Get(ctx context.Context, key string) (*workspaceowner.Workspace, error) {
 	var resp workspaceWire
 	if err := s.client.do(ctx, "GET", "/api/v1/admin/workspaces/"+pathEscape(key), nil, &resp); err != nil {
 		return nil, err
@@ -79,7 +78,7 @@ func (s *workspaceStore) Get(ctx context.Context, key string) (*workspacemodule.
 	return resp.toDomain(), nil
 }
 
-func (s *workspaceStore) GetByName(ctx context.Context, name string) (*workspacemodule.Workspace, error) {
+func (s *workspaceStore) GetByName(ctx context.Context, name string) (*workspaceowner.Workspace, error) {
 	// Fleet-db does not currently expose a name-lookup endpoint, so we
 	// fall back to List + scan. List is cheap (workspace count is tiny);
 	// upgrade to a dedicated endpoint if it ever becomes a hotspot.
@@ -92,24 +91,24 @@ func (s *workspaceStore) GetByName(ctx context.Context, name string) (*workspace
 			return ws, nil
 		}
 	}
-	return nil, fmt.Errorf("fleetdb: workspace name %q: %w", name, domain.ErrNotFound)
+	return nil, fmt.Errorf("fleetdb: workspace name %q: %w", name, persistence.ErrNotFound)
 }
 
-func (s *workspaceStore) List(ctx context.Context) ([]*workspacemodule.Workspace, error) {
+func (s *workspaceStore) List(ctx context.Context) ([]*workspaceowner.Workspace, error) {
 	var resp struct {
 		Workspaces []workspaceWire `json:"workspaces"`
 	}
 	if err := s.client.do(ctx, "GET", "/api/v1/admin/workspaces", nil, &resp); err != nil {
 		return nil, err
 	}
-	out := make([]*workspacemodule.Workspace, 0, len(resp.Workspaces))
+	out := make([]*workspaceowner.Workspace, 0, len(resp.Workspaces))
 	for _, w := range resp.Workspaces {
 		out = append(out, w.toDomain())
 	}
 	return out, nil
 }
 
-func (s *workspaceStore) Update(ctx context.Context, key string, patch store.WorkspaceUpdate) (*workspacemodule.Workspace, error) {
+func (s *workspaceStore) Update(ctx context.Context, key string, patch workspaceowner.WorkspaceUpdate) (*workspaceowner.Workspace, error) {
 	if patch.Name == nil &&
 		patch.Description == nil &&
 		patch.State == nil &&
@@ -119,12 +118,12 @@ func (s *workspaceStore) Update(ctx context.Context, key string, patch store.Wor
 		return s.Get(ctx, key)
 	}
 	body := struct {
-		Name          *string                `json:"name,omitempty"`
-		Description   *string                `json:"description,omitempty"`
-		State         *workspacemodule.State `json:"state,omitempty"`
-		ErrorMessage  *string                `json:"error_message,omitempty"`
-		DefaultBranch *string                `json:"default_branch,omitempty"`
-		DesignFormat  *string                `json:"design_format,omitempty"`
+		Name          *string               `json:"name,omitempty"`
+		Description   *string               `json:"description,omitempty"`
+		State         *workspaceowner.State `json:"state,omitempty"`
+		ErrorMessage  *string               `json:"error_message,omitempty"`
+		DefaultBranch *string               `json:"default_branch,omitempty"`
+		DesignFormat  *string               `json:"design_format,omitempty"`
 	}{
 		Name:          patch.Name,
 		Description:   patch.Description,
@@ -145,7 +144,7 @@ func (s *workspaceStore) Delete(ctx context.Context, key string) error {
 
 type repoStore struct{ client *Client }
 
-var _ store.RepoStore = (*repoStore)(nil)
+var _ workspaceowner.RepoStore = (*repoStore)(nil)
 
 // repoWire mirrors fleet-db's models.Repo JSON shape.
 type repoWire struct {
@@ -160,8 +159,8 @@ type repoWire struct {
 	UpdatedAt     time.Time `json:"updated_at"`
 }
 
-func (r repoWire) toDomain() *workspacemodule.Repository {
-	return &workspacemodule.Repository{
+func (r repoWire) toDomain() *workspaceowner.Repository {
+	return &workspaceowner.Repository{
 		WorkspaceKey:  r.WorkspaceKey,
 		Name:          r.Name,
 		RemoteURL:     r.RemoteURL,
@@ -174,7 +173,7 @@ func (r repoWire) toDomain() *workspacemodule.Repository {
 	}
 }
 
-func (s *repoStore) Create(ctx context.Context, in store.RepoCreate) (*workspacemodule.Repository, error) {
+func (s *repoStore) Create(ctx context.Context, in workspaceowner.RepoCreate) (*workspaceowner.Repository, error) {
 	body := struct {
 		Name          string   `json:"name"`
 		RemoteURL     string   `json:"remote_url"`
@@ -200,7 +199,7 @@ func (s *repoStore) Create(ctx context.Context, in store.RepoCreate) (*workspace
 	return resp.toDomain(), nil
 }
 
-func (s *repoStore) Get(ctx context.Context, ws, name string) (*workspacemodule.Repository, error) {
+func (s *repoStore) Get(ctx context.Context, ws, name string) (*workspaceowner.Repository, error) {
 	var resp repoWire
 	if err := s.client.do(ctx, "GET", "/api/v1/"+pathEscape(ws)+"/repos/"+pathEscape(name), nil, &resp); err != nil {
 		return nil, err
@@ -208,21 +207,21 @@ func (s *repoStore) Get(ctx context.Context, ws, name string) (*workspacemodule.
 	return resp.toDomain(), nil
 }
 
-func (s *repoStore) List(ctx context.Context, ws string) ([]*workspacemodule.Repository, error) {
+func (s *repoStore) List(ctx context.Context, ws string) ([]*workspaceowner.Repository, error) {
 	var resp struct {
 		Repos []repoWire `json:"repos"`
 	}
 	if err := s.client.do(ctx, "GET", "/api/v1/"+pathEscape(ws)+"/repos", nil, &resp); err != nil {
 		return nil, err
 	}
-	out := make([]*workspacemodule.Repository, 0, len(resp.Repos))
+	out := make([]*workspaceowner.Repository, 0, len(resp.Repos))
 	for _, r := range resp.Repos {
 		out = append(out, r.toDomain())
 	}
 	return out, nil
 }
 
-func (s *repoStore) Update(ctx context.Context, ws, name string, patch store.RepoUpdate) (*workspacemodule.Repository, error) {
+func (s *repoStore) Update(ctx context.Context, ws, name string, patch workspaceowner.RepoUpdate) (*workspaceowner.Repository, error) {
 	body := struct {
 		RemoteURL     *string   `json:"remote_url,omitempty"`
 		Remote        *string   `json:"remote,omitempty"`

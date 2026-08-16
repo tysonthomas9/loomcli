@@ -5,7 +5,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 )
 
@@ -26,7 +25,7 @@ func taskRunRetryDecision(claimed *execution.TaskRun, opts executeClaimedTaskRun
 	}
 	attempt := taskRunAttempt(claimed) + 1
 	decision := taskRunRetryDecisionResult{Attempt: attempt, MaxAttempts: maxAttempts}
-	if completion.Status == domain.TaskRunFailed && attempt < maxAttempts {
+	if completion.Status == execution.TaskRunRecordFailed && attempt < maxAttempts {
 		decision.Retry = true
 	}
 	return decision
@@ -108,17 +107,17 @@ func schedulerMetadata(metadata map[string]string, state string, attempt, maxAtt
 	return out
 }
 
-func driverStepStatusForTaskRun(status domain.TaskRunStatus) domain.DriverStepStatus {
+func driverStepStatusForTaskRun(status execution.TaskRunRecordStatus) execution.DriverStepStatus {
 	switch status {
-	case domain.TaskRunQueued:
-		return domain.DriverStepQueued
-	case domain.TaskRunRunning:
-		return domain.DriverStepRunning
-	case domain.TaskRunCompleted:
-		return domain.DriverStepCompleted
-	case domain.TaskRunCancelled:
-		return domain.DriverStepSkipped
+	case execution.TaskRunRecordQueued:
+		return execution.DriverStepQueued
+	case execution.TaskRunRecordRunning:
+		return execution.DriverStepRunning
+	case execution.TaskRunRecordCompleted:
+		return execution.DriverStepCompleted
+	case execution.TaskRunRecordCancelled:
+		return execution.DriverStepSkipped
 	default:
-		return domain.DriverStepFailed
+		return execution.DriverStepFailed
 	}
 }

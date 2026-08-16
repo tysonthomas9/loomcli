@@ -10,11 +10,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/app/query/operationalview"
 	"github.com/tysonthomas9/loomcli/internal/gitbranch"
 	"github.com/tysonthomas9/loomcli/internal/localworkspace"
 	"github.com/tysonthomas9/loomcli/internal/modules/agents"
 	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
-	"github.com/tysonthomas9/loomcli/internal/ops"
 )
 
 const (
@@ -27,7 +27,7 @@ const (
 type repairCheckoutSpec struct {
 	scope      string
 	target     string
-	repo       ops.WorkspaceRepo
+	repo       operationalview.Repository
 	path       string
 	branch     string
 	baseBranch string
@@ -146,7 +146,7 @@ func repairNone(message string) sourcecontrol.RepairResult {
 	return sourcecontrol.RepairResult{Repaired: false, Method: repairMethodNone, Message: message}
 }
 
-func repairCheckoutTarget(ws *ops.WorkspaceData, wsRoot string, agent *agents.RuntimeIdentity, scope, target, repoName string) (repairCheckoutSpec, error) {
+func repairCheckoutTarget(ws *operationalview.Workspace, wsRoot string, agent *agents.RuntimeIdentity, scope, target, repoName string) (repairCheckoutSpec, error) {
 	scope = strings.TrimSpace(scope)
 	target = strings.TrimSpace(target)
 	repoName = strings.TrimSpace(repoName)
@@ -160,12 +160,12 @@ func repairCheckoutTarget(ws *ops.WorkspaceData, wsRoot string, agent *agents.Ru
 	}
 }
 
-func repairAgentCheckoutTarget(ws *ops.WorkspaceData, wsRoot string, agent *agents.RuntimeIdentity, target, repoName string) (repairCheckoutSpec, error) {
+func repairAgentCheckoutTarget(ws *operationalview.Workspace, wsRoot string, agent *agents.RuntimeIdentity, target, repoName string) (repairCheckoutSpec, error) {
 	if agent == nil || agent.AgentID != target || agent.WorkspaceKey != ws.ID {
 		return repairCheckoutSpec{}, fmt.Errorf("%w: agent %q is not known in workspace", sourcecontrol.ErrCheckoutTargetNotAllowed, target)
 	}
 	var err error
-	var repo ops.WorkspaceRepo
+	var repo operationalview.Repository
 	if repoName != "" {
 		repo, err = selectAgentRepoByName(ws.Repos, agent.AgentID, agent.Repos, agent.RepoGroups, repoName)
 	} else {
@@ -189,7 +189,7 @@ func repairAgentCheckoutTarget(ws *ops.WorkspaceData, wsRoot string, agent *agen
 	}, nil
 }
 
-func repairRepoCheckoutTarget(ws *ops.WorkspaceData, wsRoot, target, repoName string) (repairCheckoutSpec, error) {
+func repairRepoCheckoutTarget(ws *operationalview.Workspace, wsRoot, target, repoName string) (repairCheckoutSpec, error) {
 	if repoName != "" && repoName != target {
 		return repairCheckoutSpec{}, fmt.Errorf("%w: repo body value %q does not match target %q", sourcecontrol.ErrCheckoutTargetNotAllowed, repoName, target)
 	}
@@ -216,7 +216,7 @@ func repairRepoCheckoutTarget(ws *ops.WorkspaceData, wsRoot, target, repoName st
 	}, nil
 }
 
-func repairDefaultBranch(repo ops.WorkspaceRepo) string {
+func repairDefaultBranch(repo operationalview.Repository) string {
 	branch := strings.TrimSpace(repo.DefaultBranch)
 	if branch == "" {
 		return "main"
@@ -224,7 +224,7 @@ func repairDefaultBranch(repo ops.WorkspaceRepo) string {
 	return branch
 }
 
-func repairRepoCheckoutPath(wsRoot string, repo ops.WorkspaceRepo) string {
+func repairRepoCheckoutPath(wsRoot string, repo operationalview.Repository) string {
 	if repo.Path != "" {
 		return repo.Path
 	}
@@ -285,7 +285,7 @@ func repairPathExists(path string) (bool, error) {
 	return false, fmt.Errorf("inspect checkout path: %w", err)
 }
 
-func findRepairSource(ws *ops.WorkspaceData, wsRoot string, repo ops.WorkspaceRepo, targetPath string) (string, bool) {
+func findRepairSource(ws *operationalview.Workspace, wsRoot string, repo operationalview.Repository, targetPath string) (string, bool) {
 	for _, candidate := range repairSourceCandidates(ws, wsRoot, repo, targetPath) {
 		if candidate == "" || sameRepairPath(candidate, targetPath) {
 			continue
@@ -300,7 +300,7 @@ func findRepairSource(ws *ops.WorkspaceData, wsRoot string, repo ops.WorkspaceRe
 	return "", false
 }
 
-func repairSourceCandidates(ws *ops.WorkspaceData, wsRoot string, repo ops.WorkspaceRepo, targetPath string) []string {
+func repairSourceCandidates(ws *operationalview.Workspace, wsRoot string, repo operationalview.Repository, targetPath string) []string {
 	candidates := []string{repairRepoCheckoutPath(wsRoot, repo)}
 	worktreesRoot := filepath.Join(wsRoot, "worktrees", repo.Name)
 	entries, err := os.ReadDir(worktreesRoot)

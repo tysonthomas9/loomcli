@@ -118,6 +118,42 @@ func TestRepositoryProfileCacheIsRemovedAfterAnalysisFailure(t *testing.T) {
 	}
 }
 
+func TestRepositoryProfileCachesReuseTargetAndRemoveEachGroup(t *testing.T) {
+	t.Setenv("GOCACHE", filepath.Join(t.TempDir(), "missing-cache"))
+	profiles := []AnalysisProfile{
+		{Name: "plan9-base", GOOS: "plan9", GOARCH: "amd64"},
+		{Name: "plan9-tagged", GOOS: "plan9", GOARCH: "amd64", Tags: []string{"proof"}},
+		{Name: "wasm", GOOS: "js", GOARCH: "wasm"},
+	}
+	caches := make([]string, len(profiles))
+	err := withRepositoryProfileCaches(profiles, func(index int, _ AnalysisProfile, environment []string) error {
+		for _, entry := range environment {
+			if strings.HasPrefix(entry, "GOCACHE=") {
+				caches[index] = strings.TrimPrefix(entry, "GOCACHE=")
+				break
+			}
+		}
+		if caches[index] == "" {
+			t.Fatalf("profile %d has no scoped GOCACHE", index)
+		}
+		return os.WriteFile(filepath.Join(caches[index], "proof-"+strconv.Itoa(index)), []byte("scoped"), 0o600)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if caches[0] != caches[1] {
+		t.Fatalf("same-target caches = %q and %q, want reuse", caches[0], caches[1])
+	}
+	if caches[2] == caches[0] {
+		t.Fatalf("cross-target cache = %q, want isolation from %q", caches[2], caches[0])
+	}
+	for _, cache := range []string{caches[0], caches[2]} {
+		if _, err := os.Stat(cache); !os.IsNotExist(err) {
+			t.Fatalf("target cache %q still exists after grouped analysis: %v", cache, err)
+		}
+	}
+}
+
 func TestDirectWritePackageLoadModeTypesOnlyRequestedRoots(t *testing.T) {
 	if directWritePackageLoadMode&packages.NeedDeps != 0 {
 		t.Fatalf("direct-write package load mode %v includes dependency graph expansion", directWritePackageLoadMode)

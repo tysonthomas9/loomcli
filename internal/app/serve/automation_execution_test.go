@@ -11,11 +11,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
+
 	infrafleetdb "github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
-	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
 type automationRoundTripFunc func(*http.Request) (*http.Response, error)
@@ -25,13 +25,13 @@ func (fn automationRoundTripFunc) RoundTrip(request *http.Request) (*http.Respon
 }
 
 type automationRunReaderStub struct {
-	store.DriverRunStore
-	run   *domain.DriverRun
+	execution.DriverRunStore
+	run   *execution.DriverRunRecord
 	err   error
 	calls int
 }
 
-func (stub *automationRunReaderStub) Get(context.Context, string, string) (*domain.DriverRun, error) {
+func (stub *automationRunReaderStub) Get(context.Context, string, string) (*execution.DriverRunRecord, error) {
 	stub.calls++
 	return stub.run, stub.err
 }
@@ -53,8 +53,8 @@ func issueAutomationExecutionAuthority(t *testing.T, issuer *authority.Issuer, w
 }
 
 func TestAutomationExecutionPortReloadsFencedEmissionContext(t *testing.T) {
-	runs := &automationRunReaderStub{run: &domain.DriverRun{
-		WorkspaceKey: "TEST", RunID: "run-1", Status: domain.DriverRunRunning,
+	runs := &automationRunReaderStub{run: &execution.DriverRunRecord{
+		WorkspaceKey: "TEST", RunID: "run-1", Status: execution.DriverRunRunning,
 		NodeID: "node-1", LeaseID: "lease-1", FencingToken: 42,
 		SourceRef: "event-parent", Payload: json.RawMessage(`{"epicId":"EPIC-9"}`),
 	}}
@@ -77,8 +77,8 @@ func TestAutomationExecutionPortReloadsFencedEmissionContext(t *testing.T) {
 
 func TestAutomationExecutionPortRejectsWrongActionAndStaleRun(t *testing.T) {
 	issuer := authority.NewIssuer()
-	runs := &automationRunReaderStub{run: &domain.DriverRun{
-		WorkspaceKey: "TEST", RunID: "run-1", Status: domain.DriverRunRunning,
+	runs := &automationRunReaderStub{run: &execution.DriverRunRecord{
+		WorkspaceKey: "TEST", RunID: "run-1", Status: execution.DriverRunRunning,
 		NodeID: "node", LeaseID: "lease", FencingToken: 1,
 	}}
 	port := &automationExecutionPort{runs: runs}
@@ -92,16 +92,16 @@ func TestAutomationExecutionPortRejectsWrongActionAndStaleRun(t *testing.T) {
 	}
 
 	valid := issueAutomationExecutionAuthority(t, issuer, "TEST", "run-1", automation.ActionAdmitEvent, owner)
-	for _, mutate := range []func(*domain.DriverRun){
-		func(run *domain.DriverRun) { run.Status = domain.DriverRunQueued },
-		func(run *domain.DriverRun) { run.NodeID = "" },
-		func(run *domain.DriverRun) { run.LeaseID = "" },
-		func(run *domain.DriverRun) { run.FencingToken = 0 },
-		func(run *domain.DriverRun) { run.NodeID = "node-handoff" },
-		func(run *domain.DriverRun) { run.LeaseID = "lease-handoff" },
-		func(run *domain.DriverRun) { run.FencingToken = 2 },
-		func(run *domain.DriverRun) { run.WorkspaceKey = "OTHER" },
-		func(run *domain.DriverRun) { run.RunID = "other-run" },
+	for _, mutate := range []func(*execution.DriverRunRecord){
+		func(run *execution.DriverRunRecord) { run.Status = execution.DriverRunQueued },
+		func(run *execution.DriverRunRecord) { run.NodeID = "" },
+		func(run *execution.DriverRunRecord) { run.LeaseID = "" },
+		func(run *execution.DriverRunRecord) { run.FencingToken = 0 },
+		func(run *execution.DriverRunRecord) { run.NodeID = "node-handoff" },
+		func(run *execution.DriverRunRecord) { run.LeaseID = "lease-handoff" },
+		func(run *execution.DriverRunRecord) { run.FencingToken = 2 },
+		func(run *execution.DriverRunRecord) { run.WorkspaceKey = "OTHER" },
+		func(run *execution.DriverRunRecord) { run.RunID = "other-run" },
 	} {
 		candidate := *runs.run
 		mutate(&candidate)
@@ -109,8 +109,8 @@ func TestAutomationExecutionPortRejectsWrongActionAndStaleRun(t *testing.T) {
 		if _, err := port.EmissionContext(context.Background(), valid); !errors.Is(err, automation.ErrInvalidPersistedState) {
 			t.Fatalf("invalid run %+v error = %v, want invalid persisted state", candidate, err)
 		}
-		runs.run = &domain.DriverRun{
-			WorkspaceKey: "TEST", RunID: "run-1", Status: domain.DriverRunRunning,
+		runs.run = &execution.DriverRunRecord{
+			WorkspaceKey: "TEST", RunID: "run-1", Status: execution.DriverRunRunning,
 			NodeID: "node", LeaseID: "lease", FencingToken: 1,
 		}
 	}

@@ -8,7 +8,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 const (
@@ -222,7 +222,7 @@ func (c *Client) RequireCapabilities(ctx context.Context, requiredKeys []string)
 
 	var manifest capabilityManifest
 	if err := c.do(ctx, http.MethodGet, CapabilitiesAPIPath, nil, &manifest); err != nil {
-		if errors.Is(err, domain.ErrNotFound) {
+		if errors.Is(err, persistence.ErrNotFound) {
 			return &CapabilityIncompatibilityError{
 				Kind:     CapabilityEndpointUnavailable,
 				Required: required,

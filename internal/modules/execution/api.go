@@ -3,6 +3,7 @@ package execution
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -24,7 +25,7 @@ var (
 	ErrTaskRunRequestReplayNotFound = errors.New("execution: task run request replay not found")
 	ErrLaunchFailed                 = errors.New("execution: launch failed")
 	ErrInvalidTransition            = errors.New("execution: invalid transition")
-	ErrCompositionDepthExceeded     = errors.New("execution: composition depth exceeded")
+	ErrCompositionDepthExceeded     = fmt.Errorf("execution: composition depth exceeded: %w", ErrInvalid)
 )
 
 const (
@@ -122,6 +123,7 @@ type OutboxDeliveryEnqueue struct {
 type OutboxDelivery struct {
 	WorkspaceKey   string
 	OutboxID       string
+	Seq            int64
 	Kind           OutboxKind
 	EpicID         string
 	DriverRunID    string
@@ -134,6 +136,9 @@ type OutboxDelivery struct {
 	NextRetryAt    *time.Time
 	LastError      string
 	InboxMessageID string
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+	DeliveredAt    *time.Time
 }
 
 // OutboxDeliveryPort is Execution's owner-private persistence boundary.

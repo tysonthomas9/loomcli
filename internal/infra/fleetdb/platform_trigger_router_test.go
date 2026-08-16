@@ -6,8 +6,6 @@ import (
 	"testing"
 
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
-
-	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
 // TestTriggerBindingRouterFieldsWire pins the snake_case fleet-db v1 wire for
@@ -66,7 +64,7 @@ func TestTriggerBindingRouterFieldsWire(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	created, err := client.TriggerBindings().Create(t.Context(), store.TriggerBindingCreate{
+	created, err := client.TriggerBindings().Create(t.Context(), automation.TriggerBindingCreate{
 		WorkspaceKey:        "WS",
 		BindingID:           "binding-router",
 		Name:                "Router binding",
@@ -88,7 +86,7 @@ func TestTriggerBindingRouterFieldsWire(t *testing.T) {
 		t.Fatalf("created binding response = %+v, want router fields decoded", created)
 	}
 
-	if _, err := client.TriggerBindings().Create(t.Context(), store.TriggerBindingCreate{
+	if _, err := client.TriggerBindings().Create(t.Context(), automation.TriggerBindingCreate{
 		WorkspaceKey:    "WS2",
 		BindingID:       "binding-plain",
 		Name:            "Plain binding",
@@ -103,7 +101,7 @@ func TestTriggerBindingRouterFieldsWire(t *testing.T) {
 	template := "{{event_type}}"
 	attempts := 7
 	clearFilter := automation.ActorFilter{}
-	updated, err := client.TriggerBindings().Update(t.Context(), "WS", "binding-router", store.TriggerBindingUpdate{
+	updated, err := client.TriggerBindings().Update(t.Context(), "WS", "binding-router", automation.TriggerBindingUpdate{
 		SubjectKeyTemplate: &template,
 		ActorFilter:        &clearFilter,
 		RetryMaxAttempts:   &attempts,
@@ -116,7 +114,7 @@ func TestTriggerBindingRouterFieldsWire(t *testing.T) {
 	}
 
 	name := "renamed"
-	if _, err := client.TriggerBindings().Update(t.Context(), "WS", "binding-untouched", store.TriggerBindingUpdate{Name: &name}); err != nil {
+	if _, err := client.TriggerBindings().Update(t.Context(), "WS", "binding-untouched", automation.TriggerBindingUpdate{Name: &name}); err != nil {
 		t.Fatalf("Update untouched: %v", err)
 	}
 }

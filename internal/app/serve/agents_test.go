@@ -12,23 +12,21 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	infrafleetdb "github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
 	"github.com/tysonthomas9/loomcli/internal/modules/agents"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
-	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
 type agentsRoundTripFunc func(*http.Request) (*http.Response, error)
 
 type agentsTriggerBindingStoreStub struct {
-	store.TriggerBindingStore
+	automation.TriggerBindingStore
 }
 
 func (*agentsTriggerBindingStoreStub) List(
 	context.Context,
 	string,
-	store.TriggerBindingFilter,
+	automation.TriggerBindingFilter,
 ) ([]*automation.Binding, error) {
 	return nil, nil
 }
@@ -48,8 +46,8 @@ func TestAgentsCompositionUsesPublicAPIAndTrustedOperatorAttribution(t *testing.
 			if request.Method != http.MethodGet || request.URL.Path != "/api/v1/WS/roles/docs" {
 				t.Fatalf("role request = %s %s", request.Method, request.URL.Path)
 			}
-			writeAgentsResponse(t, recorder, domain.Role{
-				WorkspaceKey: "WS", Name: "docs", Kind: domain.RoleKindWorker,
+			writeAgentsResponse(t, recorder, agents.Role{
+				WorkspaceKey: "WS", Name: "docs", Kind: agents.RoleKindWorker,
 				Prompt: "Review docs.", CreatedAt: now, UpdatedAt: now,
 			})
 		case 2:
@@ -67,10 +65,10 @@ func TestAgentsCompositionUsesPublicAPIAndTrustedOperatorAttribution(t *testing.
 				strings.Contains(string(body), LocalOpenOperatorSubject) {
 				t.Fatalf("create body leaked audit actor: %s", body)
 			}
-			writeAgentsResponse(t, recorder, domain.AgentService{
+			writeAgentsResponse(t, recorder, agents.AgentServiceRecord{
 				WorkspaceKey: "WS", ServiceID: "agent-docs", Name: "Docs review",
 				GenerationID: "00112233445566778899aabbccddeeff",
-				Kind:         domain.AgentServiceKindEvent, DesiredState: domain.AgentServiceDesiredRunning,
+				Kind:         agents.AgentKindEvent, DesiredState: agents.DesiredRunning,
 				RoleName: "docs", MaxInstances: 1, CreatedBy: LocalOpenOperatorSubject,
 				CreatedAt: now, UpdatedAt: now,
 			})

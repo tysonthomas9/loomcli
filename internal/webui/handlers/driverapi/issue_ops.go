@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	driverpkg "github.com/tysonthomas9/loomcli/internal/driver"
 	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 func (m *Module) workItemsForRun(
@@ -37,7 +37,7 @@ func (m *Module) issueGet(ctx context.Context, ws string, id driverIdentity, bod
 		return nil, err
 	}
 	if strings.TrimSpace(params.IssueID) == "" {
-		return nil, fmt.Errorf("issueId required: %w", domain.ErrInvalid)
+		return nil, fmt.Errorf("issueId required: %w", persistence.ErrInvalid)
 	}
 	return items.Get(ctx, workitems.GetQuery{IssueID: params.IssueID})
 }
@@ -88,7 +88,7 @@ func (m *Module) issueListComments(ctx context.Context, ws string, id driverIden
 		return nil, err
 	}
 	if strings.TrimSpace(params.IssueID) == "" {
-		return nil, fmt.Errorf("issueId required: %w", domain.ErrInvalid)
+		return nil, fmt.Errorf("issueId required: %w", persistence.ErrInvalid)
 	}
 	return items.ListComments(ctx, workitems.ListCommentsQuery{IssueID: params.IssueID})
 }
@@ -106,7 +106,7 @@ func (m *Module) issueComment(ctx context.Context, ws string, id driverIdentity,
 		return nil, err
 	}
 	if strings.TrimSpace(params.IssueID) == "" || strings.TrimSpace(params.Body) == "" {
-		return nil, fmt.Errorf("issueId and body required: %w", domain.ErrInvalid)
+		return nil, fmt.Errorf("issueId and body required: %w", persistence.ErrInvalid)
 	}
 	return items.AddComment(ctx, workitems.AddCommentCommand{
 		IssueID: params.IssueID,
@@ -132,7 +132,7 @@ func (m *Module) issueUpdate(ctx context.Context, ws string, id driverIdentity, 
 		return nil, err
 	}
 	if strings.TrimSpace(params.IssueID) == "" {
-		return nil, fmt.Errorf("issueId required: %w", domain.ErrInvalid)
+		return nil, fmt.Errorf("issueId required: %w", persistence.ErrInvalid)
 	}
 	command := workitems.PatchCommand{
 		IssueID: params.IssueID, Status: params.Status, Priority: params.Priority,
@@ -159,7 +159,7 @@ func (m *Module) issueBlockRepositoryRequired(ctx context.Context, ws string, id
 		return nil, err
 	}
 	if strings.TrimSpace(params.IssueID) == "" {
-		return nil, fmt.Errorf("issueId required: %w", domain.ErrInvalid)
+		return nil, fmt.Errorf("issueId required: %w", persistence.ErrInvalid)
 	}
 	result, err := items.BlockRepositoryRequired(ctx, workitems.BlockRepositoryRequiredCommand{IssueID: params.IssueID})
 	if err != nil {
@@ -189,7 +189,7 @@ func (m *Module) issueLabelOp(ctx context.Context, ws string, id driverIdentity,
 		return nil, err
 	}
 	if strings.TrimSpace(params.IssueID) == "" || strings.TrimSpace(params.Label) == "" {
-		return nil, fmt.Errorf("issueId and label required: %w", domain.ErrInvalid)
+		return nil, fmt.Errorf("issueId and label required: %w", persistence.ErrInvalid)
 	}
 	command := workitems.PatchCommand{IssueID: params.IssueID}
 	if add {

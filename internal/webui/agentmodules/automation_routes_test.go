@@ -3,8 +3,9 @@ package agentmodules
 import (
 	"testing"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
+
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
-	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
 func TestNewRequiresExplicitAwaitResolver(t *testing.T) {
@@ -14,9 +15,9 @@ func TestNewRequiresExplicitAwaitResolver(t *testing.T) {
 		t.Fatal("EventAwaits composed without an explicit Execution resolver")
 	}
 
-	resolver, ok := st.Awaits().(store.AtomicAwaitStore)
+	resolver, ok := st.Awaits().(execution.AtomicAwaitStore)
 	if !ok {
-		t.Fatalf("memstore awaits %T does not implement store.AtomicAwaitStore", st.Awaits())
+		t.Fatalf("memstore awaits %T does not implement execution.AtomicAwaitStore", st.Awaits())
 	}
 	withResolver := newAutomationRouteModules(automationRouteDeps{
 		Awaits: st.Awaits(), DriverRuns: st.DriverRuns(), AwaitResolver: resolver,
