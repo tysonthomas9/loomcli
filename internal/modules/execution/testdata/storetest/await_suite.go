@@ -284,8 +284,8 @@ func testRegistrationValidation(t *testing.T, h *AwaitHarness) {
 			if !errors.Is(err, tc.wantErr) {
 				t.Fatalf("err = %v, want %v", err, tc.wantErr)
 			}
-			if !errors.Is(err, persistence.ErrInvalid) {
-				t.Fatalf("err = %v, want it to wrap persistence.ErrInvalid", err)
+			if !errors.Is(err, execution.ErrInvalid) {
+				t.Fatalf("err = %v, want it to wrap execution.ErrInvalid", err)
 			}
 		})
 	}

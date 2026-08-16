@@ -92,10 +92,10 @@ type AwaitResolution struct {
 // AwaitStore is the durable await-event registry every backend (memstore,
 // fleetdb) must satisfy.
 //
-// Errors wrap the sentinels in package domain per the package doc; the
+// Errors wrap the sentinels owned by Execution; the
 // await-specific validation sentinels (ErrAwaitPatternUnscoped,
 // ErrAwaitTimeoutRequired, ErrAwaitInstanceKeyMalformed) all
-// wrap persistence.ErrInvalid.
+// wrap ErrInvalid before any persistence adapter is invoked.
 type AwaitStore interface {
 	// RegisterAwaitAndCheck atomically checks for an already-matching event
 	// and otherwise leaves the await pending (RULE 2: one call, one transaction).
