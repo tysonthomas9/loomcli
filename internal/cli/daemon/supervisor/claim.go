@@ -253,8 +253,17 @@ func (s *Supervisor) claimIssueForAgent(ap *AgentProcess, taskID, reason string)
 	ap.Mu.Lock()
 	ap.AssignedTaskID = taskID
 	ap.RequestedTaskID = ""
+	// The counters still hold the streak that just ended: applyNoWorkRestart
+	// increments NoWorkCount, and every reset lives in an exit-path handler
+	// that runs on the NEXT cycle. So this claim is also the "left idle" line.
+	idlePolls := ap.NoWorkCount
+	idleSince := ap.IdleSince
 	ap.Mu.Unlock()
-	slog.Info("claimed task for agent", "worktree", ap.Entry.Worktree, "task_id", taskID, "reason", reason)
+	args := []any{"worktree", ap.Entry.Worktree, "task_id", taskID, "reason", reason}
+	if idlePolls > 0 {
+		args = append(args, "idle_polls", idlePolls, "idle_for", time.Since(idleSince))
+	}
+	slog.Info("claimed task for agent", args...)
 	return nil
 }
 

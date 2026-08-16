@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/agenterr"
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/automode"
@@ -855,22 +856,47 @@ func (s *Supervisor) sleepBeforeRestart(ap *AgentProcess) bool {
 	ap.Mu.Lock()
 	count := ap.RestartCount
 	errType := errorTypeFromAgentErr(ap.LastError)
+	lastErr := ap.LastError
+	noWorkCount := ap.NoWorkCount
+	idleSince := ap.IdleSince
 	ap.BackoffUntil = time.Now().Add(backoff)
 	ap.Mu.Unlock()
-	slog.Info("waiting before restart", "worktree", ap.Entry.Worktree, "backoff", backoff, "attempt", count)
 
-	_, span := startSpan(cmdstore.RootContext(),
-		"daemon.supervisor.restart",
-		attribute.String("loom.agent", ap.Entry.Worktree),
-		attribute.String("loom.role", ap.Entry.Role),
-		attribute.String("loom.workspace", s.WorkspaceID),
-		attribute.Int("loom.restart_count", count),
-		attribute.String("loom.error_type", errType),
-	)
-	defer span.End()
+	// An idle poll is not a restart. It reaches here because claimTask found
+	// nothing, and announcing it as a restart both floods the log and makes
+	// the fleet restart metrics fiction (events.handleAgentRestarted counts
+	// every AgentRestarted). Announce the first poll of an idle streak — so a
+	// "went idle" signal survives in the log and in the metrics — and demote
+	// the rest to Debug with no event and no span.
+	idle := lastErr != nil && lastErr.Class.Is(agenterr.NoWorkOutcome)
+	// applyNoWorkRestart has already incremented, so the first poll of a
+	// streak arrives here with NoWorkCount == 1.
+	firstIdle := idle && noWorkCount <= 1
 
-	if evt, err := events.NewEvent(events.AgentRestarted, ap.Entry.Worktree, ap.Entry.Role, "", events.AgentRestartedData{PID: 0, RestartCount: count}); err == nil {
-		s.EmitEvent(evt)
+	announce := !idle || firstIdle
+	switch {
+	case !idle:
+		slog.Info("waiting before restart", "worktree", ap.Entry.Worktree, "backoff", backoff, "attempt", count)
+	case firstIdle:
+		slog.Info("agent idle", "worktree", ap.Entry.Worktree, "role", ap.Entry.Role, "poll", backoff, "reason", lastErr.Message)
+	default:
+		slog.Debug("agent still idle", "worktree", ap.Entry.Worktree, "poll", backoff, "polls", noWorkCount, "idle_for", time.Since(idleSince))
+	}
+
+	if announce {
+		_, span := startSpan(cmdstore.RootContext(),
+			"daemon.supervisor.restart",
+			attribute.String("loom.agent", ap.Entry.Worktree),
+			attribute.String("loom.role", ap.Entry.Role),
+			attribute.String("loom.workspace", s.WorkspaceID),
+			attribute.Int("loom.restart_count", count),
+			attribute.String("loom.error_type", errType),
+		)
+		defer span.End()
+
+		if evt, err := events.NewEvent(events.AgentRestarted, ap.Entry.Worktree, ap.Entry.Role, "", events.AgentRestartedData{PID: 0, RestartCount: count}); err == nil {
+			s.EmitEvent(evt)
+		}
 	}
 
 	// Keep the agent's liveness tick fresh during a long wait (a block, or a
