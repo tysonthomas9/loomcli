@@ -487,32 +487,55 @@ func runDaemonStatus(cmd *cobra.Command, args []string) {
 		os.Exit(1)
 	}
 
+	out := cmd.OutOrStdout()
+
 	// Use shared runtime detection, then fall back to the workspace lock
 	rt := detectDaemonRuntimeForCommand(projectDir)
 	if !rt.Running {
-		fmt.Println("Daemon: not running")
+		fmt.Fprintln(out, "Daemon: not running")
 		return
 	}
 
-	fmt.Printf("Daemon: running (PID %d)\n", rt.PID)
+	// One target, one directory: every sidecar path below comes from the
+	// evidence that proved this daemon alive, never from the cwd
+	// independently. See DaemonRuntimeInfo's provenance contract.
+	stateFilePath := statePathForTarget(rt, projectDir)
+	state, stateMTime := readStateForTarget(stateFilePath)
 
-	// Read and display agent status
-	stateFilePath := cfgpkg.ResolveDaemonStatePath(projectDir)
-	state, err := ReadStateFile(stateFilePath)
-	if err != nil {
-		fmt.Printf("  (no agent status available: %v)\n", err)
-		return
+	in := daemonStatusInputs{
+		RT:         rt,
+		State:      state,
+		StatePath:  stateFilePath,
+		StateMTime: stateMTime,
+		LiveCount:  agentCountUnknown,
+		Now:        time.Now(),
+	}
+	// Ask the daemon itself only when the snapshot cannot be believed, so a
+	// healthy in-project status costs no extra control-socket round trip.
+	if trusted, _ := stateFileTrust(in); !trusted {
+		in.LiveCount = liveAgentCount(rt, projectDir)
 	}
 
-	fmt.Printf("Started: %s\n", state.StartedAt.Format(time.RFC3339))
-	fmt.Printf("Agents: %d\n", len(state.Agents))
-	fmt.Println("")
+	view := buildDaemonStatusView(in)
+	for _, line := range view.HeaderLines() {
+		fmt.Fprintln(out, line)
+	}
+
+	// The agent table is a rendering of the state file, so it is shown only
+	// when the state file was accepted as describing this daemon.
+	if !view.Trusted {
+		if state == nil {
+			fmt.Fprintf(out, "  (no agent status available: cannot read %s)\n", stateFilePath)
+		}
+		return
+	}
+	fmt.Fprintln(out, "")
 
 	// Pending interactive prompts come from the live daemon, not the state
 	// file: a question is meaningful only while the asking process waits, so
 	// it is never persisted. Best-effort — status must render even when the
 	// control socket does not.
-	waiting := pendingInputsByAgent()
+	waiting := pendingInputsForDir(targetDir(rt, projectDir))
 
 	// Format agent table
 	for _, agent := range state.Agents {
@@ -526,16 +549,12 @@ func runDaemonStatus(cmd *cobra.Command, args []string) {
 	printQuarantinedTasks(state.QuarantinedTasks)
 }
 
-// pendingInputsByAgent fetches every pending prompt from the daemon control
-// socket, keyed by agent name. Any failure returns an empty map — the status
-// listing degrades to what the state file knows.
-func pendingInputsByAgent() map[string]PendingInput {
+// pendingInputsForDir fetches every pending prompt from the control socket of
+// the daemon in dir, keyed by agent name. Any failure returns an empty map —
+// the status listing degrades to what the state file knows.
+func pendingInputsForDir(dir string) map[string]PendingInput {
 	out := map[string]PendingInput{}
-	socketPath, err := resolveControlSocketFromCwd()
-	if err != nil {
-		return out
-	}
-	pending, err := fetchPendingInputs(socketPath, "")
+	pending, err := fetchPendingInputs(socketPathForDir(dir), "")
 	if err != nil {
 		return out
 	}
