@@ -26,6 +26,14 @@ func stubCheckBackend(t *testing.T, fn func(string) (discovery.Info, error)) {
 	prev := backendcheck.CheckBackend
 	backendcheck.CheckBackend = fn
 	t.Cleanup(func() { backendcheck.CheckBackend = prev })
+
+	// Neutralize the confirm-before-declare sleeps. Every negative-path test
+	// in this package drives the gate through this helper, and ConfirmBackend
+	// spends ~1.7s per miss in production; without this each such test would
+	// pay it in wall time.
+	prevSleep := backendcheck.ConfirmSleep
+	backendcheck.ConfirmSleep = func(time.Duration) {}
+	t.Cleanup(func() { backendcheck.ConfirmSleep = prevSleep })
 }
 
 func newBackendUnavailableSupervisor() *Supervisor {
