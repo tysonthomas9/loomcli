@@ -702,6 +702,8 @@ paths:
                     $ref: "#/components/schemas/IssueResponse"
         "404":
           description: Issue not found
+        "409":
+          description: Source revision changed, request id conflicts, or source is not eligible to move
           content:
             application/json:
               schema:
@@ -5787,6 +5789,10 @@ components:
           format: date-time
         close_reason:
           type: string
+        moved_to:
+          $ref: "#/components/schemas/WorkItemReference"
+        moved_from:
+          $ref: "#/components/schemas/WorkItemReference"
         due_at:
           type: [string, "null"]
           format: date-time
@@ -6251,23 +6257,38 @@ components:
 
     MoveIssueRequest:
       type: object
-      required: [target_workspace]
+      additionalProperties: false
+      required: [target_workspace, expected_source_revision, request_id]
       properties:
         target_workspace:
+          type: string
+        expected_source_revision:
+          type: string
+          format: date-time
+        request_id:
+          type: string
+          minLength: 1
+          maxLength: 200
+
+    WorkItemReference:
+      type: object
+      required: [workspace, issue_id]
+      properties:
+        workspace:
+          type: string
+        issue_id:
           type: string
 
     MoveResult:
       type: object
-      required: [source_id, target_id]
+      required: [source_id, target_id, replayed]
       properties:
         source_id:
           type: string
         target_id:
           type: string
-        warnings:
-          type: array
-          items:
-            type: string
+        replayed:
+          type: boolean
 
     CommentRequest:
       type: object

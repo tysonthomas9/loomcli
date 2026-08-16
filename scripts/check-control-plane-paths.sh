@@ -71,6 +71,8 @@ fi
 # composition root. Every Phase 5 exception is an exact file: none constructs
 # fleetdb.New, selects a base URL, authenticates another client, or opens an
 # alternate control-plane path.
+# Phase 10's WorkItemMove adapter receives only the shared client's atomic
+# move transport and maps it into the application-owned one-write port.
 rg -n \
   -e 'github\.com/tysonthomas9/loomcli/internal/infra/fleetdb' \
   cmd internal \

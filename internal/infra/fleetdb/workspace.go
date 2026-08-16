@@ -2,7 +2,11 @@ package fleetdb
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net/http"
+	"net/url"
+	"strings"
 	"time"
 
 	workspaceowner "github.com/tysonthomas9/loomcli/internal/modules/workspace"
@@ -248,4 +252,76 @@ func (s *repoStore) Delete(ctx context.Context, ws, name string) error {
 	// workspace PATCH would reintroduce a race in which new work can be admitted
 	// between the two calls.
 	return s.client.do(ctx, "DELETE", "/api/v1/"+pathEscape(ws)+"/repos/"+pathEscape(name), nil, nil)
+}
+
+// The atomic move transport is colocated with workspace/repository transport
+// because it is the only Fleet command spanning two workspace coordinates.
+// It remains exposed through Client.WorkItemMoves rather than either owner
+// store, so neither Workspace nor Work Items gains the low-level command.
+var (
+	ErrWorkItemMoveRevisionConflict    = errors.New("fleetdb: work item move revision conflict")
+	ErrWorkItemMoveIdempotencyConflict = errors.New("fleetdb: work item move idempotency conflict")
+	ErrWorkItemMoveIneligible          = errors.New("fleetdb: work item move ineligible")
+	ErrWorkItemMoveForbidden           = errors.New("fleetdb: work item move forbidden")
+)
+
+type WorkItemMoveInput struct {
+	TargetWorkspace        string    `json:"target_workspace"`
+	ExpectedSourceRevision time.Time `json:"expected_source_revision"`
+	RequestID              string    `json:"request_id"`
+}
+
+type WorkItemReference struct {
+	Workspace string `json:"workspace"`
+	IssueID   string `json:"issue_id"`
+}
+
+type WorkItemMoveIssue struct {
+	ID        string             `json:"id"`
+	Workspace string             `json:"workspace"`
+	MovedTo   *WorkItemReference `json:"moved_to,omitempty"`
+	MovedFrom *WorkItemReference `json:"moved_from,omitempty"`
+}
+
+type WorkItemMoveResult struct {
+	Source   *WorkItemMoveIssue `json:"source"`
+	Target   *WorkItemMoveIssue `json:"target"`
+	Replayed bool               `json:"replayed"`
+}
+
+type WorkItemMoveTransport interface {
+	MoveWorkItem(context.Context, string, string, WorkItemMoveInput) (*WorkItemMoveResult, error)
+}
+
+type workItemMoveTransport struct{ client fleetRequester }
+
+func newWorkItemMoveTransport(requester fleetRequester) WorkItemMoveTransport {
+	return &workItemMoveTransport{client: requester}
+}
+
+func (transport *workItemMoveTransport) MoveWorkItem(
+	ctx context.Context,
+	sourceWorkspace,
+	sourceIssueID string,
+	input WorkItemMoveInput,
+) (*WorkItemMoveResult, error) {
+	sourceWorkspace = strings.TrimSpace(sourceWorkspace)
+	sourceIssueID = strings.TrimSpace(sourceIssueID)
+	input.TargetWorkspace = strings.TrimSpace(input.TargetWorkspace)
+	input.RequestID = strings.TrimSpace(input.RequestID)
+	input.ExpectedSourceRevision = input.ExpectedSourceRevision.UTC()
+	if transport == nil || transport.client == nil {
+		return nil, fmt.Errorf("move work item transport is unavailable: %w", persistence.ErrUnavailable)
+	}
+	if sourceWorkspace == "" || sourceIssueID == "" || input.TargetWorkspace == "" ||
+		input.TargetWorkspace == sourceWorkspace || input.ExpectedSourceRevision.IsZero() ||
+		input.RequestID == "" || len(input.RequestID) > 200 {
+		return nil, fmt.Errorf("invalid work item move intent: %w", persistence.ErrInvalid)
+	}
+	var result WorkItemMoveResult
+	path := "/api/v1/" + url.PathEscape(sourceWorkspace) + "/issues/" + url.PathEscape(sourceIssueID) + "/move"
+	if err := transport.client.Do(ctx, http.MethodPost, path, input, &result); err != nil {
+		return nil, fmt.Errorf("move work item %s/%s: %w", sourceWorkspace, sourceIssueID, err)
+	}
+	return &result, nil
 }

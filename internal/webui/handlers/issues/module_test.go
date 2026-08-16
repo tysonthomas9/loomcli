@@ -2,6 +2,7 @@ package issues
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -128,11 +129,17 @@ type routeWorkItems struct {
 }
 
 type routeMover struct {
-	calls int
+	calls   int
+	command workitemmove.Command
+	err     error
 }
 
 func (m *routeMover) Move(_ context.Context, command workitemmove.Command) (*workitemmove.Result, error) {
 	m.calls++
+	m.command = command
+	if m.err != nil {
+		return nil, m.err
+	}
 	return &workitemmove.Result{SourceID: command.IssueID, TargetID: "TARGET-1"}, nil
 }
 
@@ -242,7 +249,7 @@ func TestIssueModule_WorkItemRoutesUseCapability(t *testing.T) {
 		{http.MethodPatch, "/api/workspaces/ws/issues/TASK-1", `{"title":"updated"}`, http.StatusOK},
 		{http.MethodPost, "/api/workspaces/ws/issues/TASK-1/close", `{"reason":"done"}`, http.StatusOK},
 		{http.MethodPut, "/api/workspaces/ws/issues/TASK-1/repository", `{"repo":"loomcli"}`, http.StatusOK},
-		{http.MethodPost, "/api/workspaces/ws/issues/TASK-1/move", `{"target_workspace":"target"}`, http.StatusOK},
+		{http.MethodPost, "/api/workspaces/ws/issues/TASK-1/move", `{"target_workspace":"target","expected_source_revision":"2026-08-16T12:00:00Z","request_id":"move-1"}`, http.StatusOK},
 		{http.MethodPost, "/api/workspaces/ws/issues/TASK-1/comments", `{"text":" proof "}`, http.StatusCreated},
 		{http.MethodGet, "/api/workspaces/ws/issues/TASK-1/comments", "", http.StatusOK},
 		{http.MethodPost, "/api/workspaces/ws/issues/TASK-1/dependencies", `{"depends_on_id":"TASK-2"}`, http.StatusOK},
@@ -263,7 +270,72 @@ func TestIssueModule_WorkItemRoutesUseCapability(t *testing.T) {
 	if mover.calls != 1 {
 		t.Fatalf("move route did not invoke coordinator: %#v", mover)
 	}
+	if mover.command.RequestID != "move-1" || mover.command.ExpectedSourceRevision.IsZero() {
+		t.Fatalf("move route dropped atomic intent: %#v", mover.command)
+	}
 	if capability.createCalls != 1 || capability.listCalls != 1 || capability.searchCalls != 1 || len(capability.getIDs) != 1 || capability.getIDs[0] != "TASK-1" || len(capability.claimIDs) != 1 || capability.claimIDs[0] != "TASK-1" || len(capability.reopenIDs) != 1 || capability.reopenIDs[0] != "TASK-1" || len(capability.deleteIDs) != 1 || capability.deleteIDs[0] != "TASK-1" || capability.eventCalls != 1 || len(capability.patchIDs) != 1 || capability.patchIDs[0] != "TASK-1" || len(capability.closeIDs) != 1 || capability.closeIDs[0] != "TASK-1" || len(capability.repositoryIDs) != 1 || capability.repositoryIDs[0] != "TASK-1" || capability.listCommentsCalls != 1 || capability.addDependencyCalls != 1 || capability.listDependencyCalls != 1 || len(capability.removeDependencyIDs) != 1 || capability.removeDependencyIDs[0] != "TASK-2" {
 		t.Fatalf("unexpected Work Items route calls: %#v", capability)
+	}
+}
+
+func TestMoveWorkItemRequiresCompleteAtomicIntentBeforeCallingCapability(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		body string
+	}{
+		{name: "missing target", body: `{"expected_source_revision":"2026-08-16T12:00:00Z","request_id":"move-1"}`},
+		{name: "missing revision", body: `{"target_workspace":"target","request_id":"move-1"}`},
+		{name: "missing request id", body: `{"target_workspace":"target","expected_source_revision":"2026-08-16T12:00:00Z"}`},
+		{name: "unknown field", body: `{"target_workspace":"target","expected_source_revision":"2026-08-16T12:00:00Z","request_id":"move-1","warnings":true}`},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			mover := &routeMover{}
+			mux := http.NewServeMux()
+			NewIssueModule(nil, mover).Register(mux)
+			recorder := httptest.NewRecorder()
+			request := httptest.NewRequest(http.MethodPost, "/api/workspaces/source/issues/SOURCE-1/move", strings.NewReader(test.body))
+			mux.ServeHTTP(recorder, request)
+			if recorder.Code != http.StatusBadRequest || mover.calls != 0 {
+				t.Fatalf("status=%d calls=%d body=%s", recorder.Code, mover.calls, recorder.Body.String())
+			}
+			var response MoveIssueResponse
+			if err := json.NewDecoder(recorder.Body).Decode(&response); err != nil {
+				t.Fatal(err)
+			}
+			if response.Success || response.Error == "" {
+				t.Fatalf("response=%+v", response)
+			}
+		})
+	}
+}
+
+func TestMoveWorkItemUsesStableFailureEnvelope(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		err    error
+		status int
+	}{
+		{name: "conflict", err: workitems.AdapterConflict("move", "source changed"), status: http.StatusConflict},
+		{name: "forbidden", err: workitemmove.ErrForbidden, status: http.StatusForbidden},
+		{name: "unavailable", err: workitems.ErrUnavailable, status: http.StatusServiceUnavailable},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			mover := &routeMover{err: test.err}
+			mux := http.NewServeMux()
+			NewIssueModule(nil, mover).Register(mux)
+			recorder := httptest.NewRecorder()
+			request := httptest.NewRequest(http.MethodPost, "/api/workspaces/source/issues/SOURCE-1/move", strings.NewReader(`{"target_workspace":"target","expected_source_revision":"2026-08-16T12:00:00Z","request_id":"move-1"}`))
+			mux.ServeHTTP(recorder, request)
+			if recorder.Code != test.status || mover.calls != 1 {
+				t.Fatalf("status=%d calls=%d body=%s", recorder.Code, mover.calls, recorder.Body.String())
+			}
+			var response MoveIssueResponse
+			if err := json.NewDecoder(recorder.Body).Decode(&response); err != nil {
+				t.Fatal(err)
+			}
+			if response.Success || response.Error == "" || response.Data != nil {
+				t.Fatalf("response=%+v", response)
+			}
+		})
 	}
 }

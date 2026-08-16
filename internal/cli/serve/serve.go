@@ -661,6 +661,15 @@ type serveCapabilitySet struct {
 	runtime             []serveadapter.RuntimeContributor
 }
 
+func composeWorkItemMove(cfg *webui.ServerConfig, storeHandle *bootstrap.StoreHandle) error {
+	if storeHandle == nil || storeHandle.FleetDBClient() == nil || cfg.WorkspaceCatalog == nil {
+		return nil
+	}
+	var err error
+	cfg.WorkItemMove, err = appserve.NewWorkItemMove(storeHandle.FleetDBClient(), cfg.WorkspaceCatalog)
+	return err
+}
+
 //nolint:funlen // Serve composition assembles the complete dependency graph without moving product policy into the application host.
 func buildServerConfig(
 	monitorHandlers webui.MonitorHandlers,
@@ -693,6 +702,9 @@ func buildServerConfig(
 			return webui.ServerConfig{}, serveCapabilitySet{}, fmt.Errorf("compose Workspace capability: %w", workspaceErr)
 		}
 		cfg.WorkspaceCatalog = workspaceCapability
+	}
+	if err := composeWorkItemMove(&cfg, storeHandle); err != nil {
+		return webui.ServerConfig{}, serveCapabilitySet{}, err
 	}
 	applyFleetConfig(&cfg, fs)
 	module, err := buildServeWorkflowCatalogModule(cfg, storeHandle)

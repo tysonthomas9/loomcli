@@ -896,6 +896,61 @@ paths:
         "500":
           $ref: "#/components/responses/InternalError"
 
+  /api/v1/{workspace}/issues/{id}/move:
+    parameters:
+      - $ref: "#/components/parameters/Workspace"
+      - $ref: "#/components/parameters/IssueID"
+
+    post:
+      tags: [Issues]
+      summary: Atomically move a Work Item to another workspace
+      description: |
+        Creates an open, unassigned target Work Item and closes the immutable
+        source Work Item in one backend transaction. The caller must have
+        `issue.close` in the source workspace and `issue.create` in the target
+        workspace. The source must match `expected_source_revision` exactly and
+        must not be assigned, in progress, claimed, or connected to dependency
+        edges. `request_id` is an idempotency key bound to the source ID, exact
+        revision, and target workspace: exact replay returns the original target
+        while divergent reuse returns 409.
+      operationId: moveWorkItem
+      parameters:
+        - $ref: "#/components/parameters/XActor"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WorkItemMoveRequest"
+      responses:
+        "200":
+          description: Canonical source and target Work Items
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkItemMoveResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: |
+            Revision conflict, divergent idempotency replay, or ineligible
+            source. Stable error codes are
+            `work_item_move_revision_conflict`,
+            `work_item_move_idempotency_conflict`, and
+            `work_item_move_ineligible`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "413":
+          $ref: "#/components/responses/BodyTooLarge"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
   /api/v1/{workspace}/issues/{id}/reopen:
     parameters:
       - $ref: "#/components/parameters/Workspace"
@@ -10301,6 +10356,50 @@ components:
           nullable: true
         close_reason:
           type: string
+
+        moved_to:
+          $ref: "#/components/schemas/WorkItemReference"
+        moved_from:
+          $ref: "#/components/schemas/WorkItemReference"
+
+    WorkItemReference:
+      type: object
+      required: [workspace, issue_id]
+      properties:
+        workspace:
+          type: string
+        issue_id:
+          type: string
+
+    WorkItemMoveRequest:
+      type: object
+      additionalProperties: false
+      required: [target_workspace, expected_source_revision, request_id]
+      properties:
+        target_workspace:
+          type: string
+          description: Destination workspace key; must differ from the source.
+        expected_source_revision:
+          type: string
+          format: date-time
+          description: Exact `updated_at` value read from the source Work Item.
+        request_id:
+          type: string
+          minLength: 1
+          maxLength: 200
+          description: Client-generated idempotency key for this move intent.
+
+    WorkItemMoveResult:
+      type: object
+      required: [source, target, replayed]
+      properties:
+        source:
+          $ref: "#/components/schemas/Issue"
+        target:
+          $ref: "#/components/schemas/Issue"
+        replayed:
+          type: boolean
+          description: True when this exact request returns its original result.
 
     Comment:
       type: object

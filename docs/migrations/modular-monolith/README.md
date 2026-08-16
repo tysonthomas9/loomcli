@@ -100,6 +100,7 @@ one-file packages, and 60 one-or-two-file packages.
 | [24-phase-10-4-interaction-pty-evidence.md](24-phase-10-4-interaction-pty-evidence.md) | Stack 10.4 implementation and proof for Interaction-owned terminal lifecycle, private PTY and Redis adapters, replay and resize correctness, legacy coordinator deletion, full gates, and packaged Desktop terminal journeys. |
 | [25-phase-10-5-repository-admission-evidence.md](25-phase-10-5-repository-admission-evidence.md) | Stack 10.5 implementation and proof for durable Workspace and Repository Admission, exact replay and recovery, cleanup and failure, process-local job-store deletion, and packaged Desktop repository journeys. |
 | [26-phase-10-6-owner-plane-query-evidence.md](26-phase-10-6-owner-plane-query-evidence.md) | Stack 10.6 implementation and proof for owner-local records and ports, production domain/store/ops deletion, immutable operational queries, architecture and full gate results, and packaged Desktop read surfaces. |
+| [27-phase-10-7-atomic-work-item-move-evidence.md](27-phase-10-7-atomic-work-item-move-evidence.md) | Stack 10.7 implementation and proof for the paired FleetDB atomic move command, Loom application/delivery seam, replay/conflict/concurrency and immutable-source contracts, clickable UI history, and packaged restart durability. |
 
 ## Scope boundaries
 

@@ -11,7 +11,6 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/app/query/operationalview"
 	"github.com/tysonthomas9/loomcli/internal/app/query/sessionarchive"
-	"github.com/tysonthomas9/loomcli/internal/app/workitemmove"
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
@@ -122,12 +121,7 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 			}
 		}
 	}
-	if app.workItems != nil && app.workspaceCatalog != nil {
-		app.workItemMover, err = workitemmove.New(app.workItems, app.workspaceCatalog, middleware.WithWorkspace)
-		if err != nil {
-			return nil, fmt.Errorf("compose work item move workflow: %w", err)
-		}
-	}
+	app.workItemMover = config.WorkItemMove
 
 	// Create SSE hub for real-time push notifications
 	app.hub = NewHub()

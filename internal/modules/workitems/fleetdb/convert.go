@@ -11,33 +11,35 @@ import (
 // fleetIssueWire mirrors fleet-db's wire shape and projects directly to the
 // Work Items-owned representation.
 type fleetIssueWire struct {
-	ID               string     `json:"id,omitempty"`
-	Title            string     `json:"title,omitempty"`
-	Status           string     `json:"status,omitempty"`
-	Priority         int        `json:"priority,omitempty"`
-	Type             string     `json:"type,omitempty"`
-	Assignee         string     `json:"assignee,omitempty"`
-	Owner            string     `json:"owner,omitempty"`
-	Labels           []string   `json:"labels,omitempty"`
-	Repo             string     `json:"repo,omitempty"`
-	SourceRepo       string     `json:"source_repo,omitempty"`
-	ParentID         string     `json:"parent_id,omitempty"`
-	Parent           string     `json:"parent,omitempty"`
-	Design           string     `json:"design,omitempty"`
-	DesignArtifactID string     `json:"design_artifact_id,omitempty"`
-	DesignFormat     string     `json:"design_format,omitempty"`
-	HasDesign        bool       `json:"has_design"`
-	Notes            string     `json:"notes,omitempty"`
-	Description      string     `json:"description,omitempty"`
-	Acceptance       string     `json:"acceptance_criteria,omitempty"`
-	ExternalRef      string     `json:"external_ref,omitempty"`
-	CreatedAt        time.Time  `json:"created_at,omitempty"`
-	CreatedBy        string     `json:"created_by,omitempty"`
-	UpdatedAt        time.Time  `json:"updated_at,omitempty"`
-	DueAt            *time.Time `json:"due_at,omitempty"`
-	DeferUntil       *time.Time `json:"defer_until,omitempty"`
-	ClosedAt         *time.Time `json:"closed_at,omitempty"`
-	CloseReason      string     `json:"close_reason,omitempty"`
+	ID               string               `json:"id,omitempty"`
+	Title            string               `json:"title,omitempty"`
+	Status           string               `json:"status,omitempty"`
+	Priority         int                  `json:"priority,omitempty"`
+	Type             string               `json:"type,omitempty"`
+	Assignee         string               `json:"assignee,omitempty"`
+	Owner            string               `json:"owner,omitempty"`
+	Labels           []string             `json:"labels,omitempty"`
+	Repo             string               `json:"repo,omitempty"`
+	SourceRepo       string               `json:"source_repo,omitempty"`
+	ParentID         string               `json:"parent_id,omitempty"`
+	Parent           string               `json:"parent,omitempty"`
+	Design           string               `json:"design,omitempty"`
+	DesignArtifactID string               `json:"design_artifact_id,omitempty"`
+	DesignFormat     string               `json:"design_format,omitempty"`
+	HasDesign        bool                 `json:"has_design"`
+	Notes            string               `json:"notes,omitempty"`
+	Description      string               `json:"description,omitempty"`
+	Acceptance       string               `json:"acceptance_criteria,omitempty"`
+	ExternalRef      string               `json:"external_ref,omitempty"`
+	CreatedAt        time.Time            `json:"created_at,omitempty"`
+	CreatedBy        string               `json:"created_by,omitempty"`
+	UpdatedAt        time.Time            `json:"updated_at,omitempty"`
+	DueAt            *time.Time           `json:"due_at,omitempty"`
+	DeferUntil       *time.Time           `json:"defer_until,omitempty"`
+	ClosedAt         *time.Time           `json:"closed_at,omitempty"`
+	CloseReason      string               `json:"close_reason,omitempty"`
+	MovedTo          *workitems.Reference `json:"moved_to,omitempty"`
+	MovedFrom        *workitems.Reference `json:"moved_from,omitempty"`
 }
 
 func (w fleetIssueWire) toIssueSummary() workitems.IssueSummary {
@@ -54,6 +56,7 @@ func (w fleetIssueWire) toIssueSummary() workitems.IssueSummary {
 		HasDesign: w.HasDesign || w.Design != "", Notes: w.Notes,
 		CreatedBy: w.CreatedBy, CreatedAt: w.CreatedAt, UpdatedAt: w.UpdatedAt,
 		ClosedAt: w.ClosedAt, CloseReason: w.CloseReason, ExternalRef: w.ExternalRef,
+		MovedTo: cloneReference(w.MovedTo), MovedFrom: cloneReference(w.MovedFrom),
 		DueAt: w.DueAt, DeferUntil: w.DeferUntil,
 	}
 }
@@ -69,9 +72,18 @@ func (w fleetIssueWire) toIssueDetail() workitems.IssueDetail {
 		Description: w.Description, AcceptanceCriteria: w.Acceptance, Notes: summary.Notes,
 		CreatedBy: summary.CreatedBy, CreatedAt: summary.CreatedAt, UpdatedAt: summary.UpdatedAt,
 		ClosedAt: summary.ClosedAt, CloseReason: summary.CloseReason, ExternalRef: summary.ExternalRef,
+		MovedTo: cloneReference(summary.MovedTo), MovedFrom: cloneReference(summary.MovedFrom),
 		DueAt: summary.DueAt, DeferUntil: summary.DeferUntil,
 		Dependencies: []workitems.Dependency{}, Dependents: []workitems.Dependency{}, Comments: []*workitems.Comment{},
 	}
+}
+
+func cloneReference(value *workitems.Reference) *workitems.Reference {
+	if value == nil {
+		return nil
+	}
+	clone := *value
+	return &clone
 }
 
 func (w fleetIssueWire) parent() string {

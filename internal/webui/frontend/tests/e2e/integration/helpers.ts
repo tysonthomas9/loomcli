@@ -626,25 +626,72 @@ export async function moveWsIssue(
   wsId: string,
   id: string,
   targetWorkspace: string,
+  intent?: { expectedSourceRevision: string; requestId: string },
 ): Promise<{
   status: number;
   body: {
     success: boolean;
-    data?: { source_id: string; target_id: string; warnings?: string[] };
+    data?: { source_id: string; target_id: string; replayed: boolean };
     error?: string;
   };
 }> {
+  let expectedSourceRevision = intent?.expectedSourceRevision;
+  if (!expectedSourceRevision) {
+    expectedSourceRevision = new Date().toISOString();
+    try {
+      const source = await getWsIssue(wsId, id);
+      if (typeof source.updated_at === "string" && source.updated_at) {
+        expectedSourceRevision = source.updated_at;
+      }
+    } catch {
+      // Keep direct missing-source coverage; FleetDB still owns the 404.
+    }
+  }
   const response = await fetchWithRetry(
     `${BASE_URL}/api/workspaces/${encodeURIComponent(wsId)}/issues/${encodeURIComponent(id)}/move`,
     {
       method: "POST",
       headers: authHeaders({ "Content-Type": "application/json" }),
-      body: JSON.stringify({ target_workspace: targetWorkspace }),
+      body: JSON.stringify({
+        target_workspace: targetWorkspace,
+        expected_source_revision: expectedSourceRevision,
+        request_id: intent?.requestId ?? crypto.randomUUID(),
+      }),
     },
   );
 
   const body = await response.json();
   return { status: response.status, body };
+}
+
+/**
+ * Exercise a Work Item mutation without hiding a conflict response. This is
+ * used to prove that a moved source is immutable through Loom's public API.
+ */
+export async function mutateWsIssue(
+  wsId: string,
+  id: string,
+  method: "PATCH" | "POST" | "DELETE",
+  suffix = "",
+  body?: Record<string, unknown>,
+): Promise<{ status: number; body: { error?: string } }> {
+  const response = await fetchWithRetry(
+    `${BASE_URL}/api/workspaces/${encodeURIComponent(wsId)}/issues/${encodeURIComponent(id)}${suffix}`,
+    {
+      method,
+      headers: authHeaders(
+        body === undefined ? undefined : { "Content-Type": "application/json" },
+      ),
+      body: body === undefined ? undefined : JSON.stringify(body),
+    },
+  );
+  let result: { error?: string } = {};
+  try {
+    result = await response.json();
+  } catch {
+    // The status remains the authoritative assertion for an empty response.
+  }
+  return { status: response.status, body: result };
 }
 
 /**

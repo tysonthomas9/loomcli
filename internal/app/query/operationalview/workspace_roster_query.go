@@ -50,45 +50,63 @@ func (query workspaceRosterQuery) Project(ctx context.Context, view *Workspace) 
 	if err != nil {
 		return fmt.Errorf("workspace roster: list Roles: %w", err)
 	}
-	rolesByName := make(map[string]*agentsowner.Role, len(roles))
-	for _, role := range roles {
-		if role == nil || role.WorkspaceKey != view.ID || role.Name == "" {
-			return fmt.Errorf("workspace roster: invalid persisted Role: %w", agentsowner.ErrInvalidPersistedState)
-		}
-		rolesByName[role.Name] = role
+	rolesByName, err := indexWorkspaceRoles(view.ID, roles)
+	if err != nil {
+		return err
 	}
 	for _, agent := range agents {
-		if agent == nil || agent.WorkspaceKey != view.ID || agent.AgentID == "" {
-			return fmt.Errorf("workspace roster: invalid persisted Agent: %w", agentsowner.ErrInvalidPersistedState)
+		projected, projectErr := projectWorkspaceAgent(view.ID, agent, rolesByName)
+		if projectErr != nil {
+			return projectErr
 		}
-		if agent.Behavior.RoleName == "" {
-			continue
+		if projected != nil {
+			view.Agents = append(view.Agents, *projected)
 		}
-		role := rolesByName[agent.Behavior.RoleName]
-		if role == nil {
-			return fmt.Errorf(
-				"workspace roster: Agent %q references missing Role %q: %w",
-				agent.AgentID, agent.Behavior.RoleName, agentsowner.ErrInvalidPersistedState,
-			)
-		}
-		runtime, parseErr := agentsowner.ParseRuntimeMetadata(agent.Metadata)
-		if parseErr != nil {
-			return fmt.Errorf("workspace roster: Agent %q runtime metadata: %w", agent.AgentID, parseErr)
-		}
-		roleKind := runtime.RoleKind
-		if roleKind == "" {
-			roleKind = role.Kind
-		}
-		backend := runtime.Backend
-		if backend == "" {
-			backend = role.Backend
-		}
-		view.Agents = append(view.Agents, Agent{
-			Name: agent.AgentID, Kind: roleKind, RoleName: agent.Behavior.RoleName,
-			Backend: backend, Repos: append([]string(nil), runtime.Repos...),
-			RepoGroups: append([]string(nil), runtime.RepoGroups...), CrossRepo: runtime.CrossRepo,
-		})
 	}
 	sort.Slice(view.Agents, func(i, j int) bool { return view.Agents[i].Name < view.Agents[j].Name })
 	return nil
+}
+
+func indexWorkspaceRoles(workspaceID string, roles []*agentsowner.Role) (map[string]*agentsowner.Role, error) {
+	rolesByName := make(map[string]*agentsowner.Role, len(roles))
+	for _, role := range roles {
+		if role == nil || role.WorkspaceKey != workspaceID || role.Name == "" {
+			return nil, fmt.Errorf("workspace roster: invalid persisted Role: %w", agentsowner.ErrInvalidPersistedState)
+		}
+		rolesByName[role.Name] = role
+	}
+	return rolesByName, nil
+}
+
+func projectWorkspaceAgent(workspaceID string, agent *agentsowner.Agent, rolesByName map[string]*agentsowner.Role) (*Agent, error) {
+	if agent == nil || agent.WorkspaceKey != workspaceID || agent.AgentID == "" {
+		return nil, fmt.Errorf("workspace roster: invalid persisted Agent: %w", agentsowner.ErrInvalidPersistedState)
+	}
+	if agent.Behavior.RoleName == "" {
+		return nil, nil
+	}
+	role := rolesByName[agent.Behavior.RoleName]
+	if role == nil {
+		return nil, fmt.Errorf(
+			"workspace roster: Agent %q references missing Role %q: %w",
+			agent.AgentID, agent.Behavior.RoleName, agentsowner.ErrInvalidPersistedState,
+		)
+	}
+	runtime, err := agentsowner.ParseRuntimeMetadata(agent.Metadata)
+	if err != nil {
+		return nil, fmt.Errorf("workspace roster: Agent %q runtime metadata: %w", agent.AgentID, err)
+	}
+	roleKind := runtime.RoleKind
+	if roleKind == "" {
+		roleKind = role.Kind
+	}
+	backend := runtime.Backend
+	if backend == "" {
+		backend = role.Backend
+	}
+	return &Agent{
+		Name: agent.AgentID, Kind: roleKind, RoleName: agent.Behavior.RoleName,
+		Backend: backend, Repos: append([]string(nil), runtime.Repos...),
+		RepoGroups: append([]string(nil), runtime.RepoGroups...), CrossRepo: runtime.CrossRepo,
+	}, nil
 }

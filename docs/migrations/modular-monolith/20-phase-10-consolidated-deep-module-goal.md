@@ -334,6 +334,8 @@ Stack 10.5 is documented in
 [Phase 10.5 Repository Admission evidence](25-phase-10-5-repository-admission-evidence.md).
 Stack 10.6 is documented in
 [Phase 10.6 owner-plane deletion and query evidence](26-phase-10-6-owner-plane-query-evidence.md).
+Stack 10.7 is documented in
+[Phase 10.7 atomic Work Item move evidence](27-phase-10-7-atomic-work-item-move-evidence.md).
 
 ## Superseded decisions and alternatives
 

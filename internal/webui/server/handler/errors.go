@@ -1,11 +1,13 @@
 package handler
 
 import (
+	"context"
 	"errors"
 	"log/slog"
 	"net/http"
 
 	"github.com/tysonthomas9/loomcli/internal/app/query/sessionarchive"
+	"github.com/tysonthomas9/loomcli/internal/app/workitemmove"
 	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
 	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
 	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
@@ -13,6 +15,13 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 	"github.com/tysonthomas9/loomcli/internal/webui/apperrors"
 )
+
+// WorkItemMover is the delivery-facing command needed by the issue move
+// handler. Keeping the port at the shared HTTP seam avoids coupling the WebUI
+// composition record to a concrete route module.
+type WorkItemMover interface {
+	Move(context.Context, workitemmove.Command) (*workitemmove.Result, error)
+}
 
 // HandleSessionArchiveError maps the immutable session Read Projection's
 // transport-neutral failures at the HTTP delivery seam.
@@ -102,6 +111,15 @@ func HandleServiceError(w http.ResponseWriter, err error) {
 // HandleWorkItemsError maps the Work Items capability's public failure
 // vocabulary without translating it back through the legacy Web UI service.
 func HandleWorkItemsError(w http.ResponseWriter, err error) {
+	status, message := WorkItemsHTTPError(err)
+	slog.Error("work items error", "status", status, "err", err)
+	WriteJSON(w, status, map[string]string{"error": message})
+}
+
+// WorkItemsHTTPError is the single public HTTP classification for Work Items
+// failures. Endpoint-specific envelopes may reuse it without duplicating the
+// capability's status and safe-message policy.
+func WorkItemsHTTPError(err error) (int, string) {
 	status := http.StatusInternalServerError
 	message := workitems.PublicErrorMessage(err)
 	switch {
@@ -118,8 +136,7 @@ func HandleWorkItemsError(w http.ResponseWriter, err error) {
 	case errors.Is(err, workitems.ErrNotImplemented):
 		status = http.StatusNotImplemented
 	}
-	slog.Error("work items error", "status", status, "err", err)
-	WriteJSON(w, status, map[string]string{"error": message})
+	return status, message
 }
 
 // HandleWorkspaceError maps the Workspace capability's public failure
