@@ -104,7 +104,14 @@ EXAMPLES
 // var so a test can substitute a failing stub without dragging in
 // ResolveAndSetBackend and DefaultDeps side effects.
 var rootPreRun = func(cmd *cobra.Command, args []string) error {
-	if err := InitLogger(logFormat, logOutput); err != nil {
+	// --log-level wins over LOOM_LOG_LEVEL; the env var matters because
+	// the daemon is launched by pm2, where an env var is the only
+	// practical lever.
+	lvl := logLevel
+	if lvl == "" {
+		lvl = os.Getenv("LOOM_LOG_LEVEL")
+	}
+	if err := InitLogger(logFormat, logOutput, lvl); err != nil {
 		return err
 	}
 	// Mirror --server / --workspace flags into env vars so that
@@ -142,6 +149,7 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&backendFlag, "backend", "", "AI backend CLI to use (codex, claude, opencode). Env: LOOM_BACKEND")
 	rootCmd.PersistentFlags().StringVar(&logFormat, "log-format", "text", "Log format (text|json)")
 	rootCmd.PersistentFlags().StringVar(&logOutput, "log-output", "stderr", "Log output destination (stderr|<filepath>)")
+	rootCmd.PersistentFlags().StringVar(&logLevel, "log-level", "", "Log level (debug|info|warn|error). Env: LOOM_LOG_LEVEL")
 	rootCmd.PersistentFlags().StringVar(&serverFlag, "server", "", "Remote loom server base URL. When set, CLI uses HTTP API backend instead of local FleetDB. Env: LOOM_SERVER_URL")
 	rootCmd.PersistentFlags().StringVar(&workspaceFlag, "workspace", "", "Workspace ID. Env: LOOM_WORKSPACE")
 

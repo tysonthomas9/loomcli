@@ -157,6 +157,15 @@ func (s *Supervisor) earlyRestartVerdict(ap *AgentProcess) (decided, restart boo
 	return false, false
 }
 
+// resetNoWork ends an idle streak: both the counter and the streak start must
+// clear together, or an idle → work → idle sequence would resume the second
+// streak mid-count with a stale start time. Every NoWorkCount reset in this
+// package goes through here. Caller holds ap.Mu.
+func resetNoWork(ap *AgentProcess) {
+	ap.NoWorkCount = 0
+	ap.IdleSince = time.Time{}
+}
+
 // stopAfterEphemeralTask stops the supervisor once an ephemeral agent has
 // completed its one assigned task cycle cleanly. A NoWork exit still falls
 // through so it can re-poll until a task arrives. Caller holds ap.Mu.
@@ -166,7 +175,7 @@ func stopAfterEphemeralTask(ap *AgentProcess) bool {
 	}
 	ap.RestartCount = 0
 	ap.RateRetryCount = 0
-	ap.NoWorkCount = 0
+	resetNoWork(ap)
 	ap.StopReason = StopReasonEphemeralDone
 	log.Printf("[daemon] Agent %s: ephemeral task complete, exiting supervisor", ap.Entry.Worktree)
 	return true
@@ -177,7 +186,7 @@ func stopAfterEphemeralTask(ap *AgentProcess) bool {
 func (s *Supervisor) applyFatalStop(ap *AgentProcess, outcome agenterr.Outcome) {
 	log.Printf("[daemon] Agent %s: fatal error (%s), stopping supervisor",
 		ap.Entry.Worktree, outcome)
-	ap.NoWorkCount = 0
+	resetNoWork(ap)
 	ap.StopReason = StopReasonFatalError
 }
 
@@ -186,7 +195,7 @@ func (s *Supervisor) applyFatalStop(ap *AgentProcess, outcome agenterr.Outcome) 
 func (s *Supervisor) applyFastFailStop(ap *AgentProcess, outcome agenterr.Outcome) {
 	log.Printf("[daemon] Agent %s: deterministic failure (%s), stopping supervisor (fast-fail)",
 		ap.Entry.Worktree, outcome)
-	ap.NoWorkCount = 0
+	resetNoWork(ap)
 	ap.StopReason = StopReasonFastFail
 }
 
@@ -196,7 +205,7 @@ func (s *Supervisor) applyFastFailStop(ap *AgentProcess, outcome agenterr.Outcom
 func (s *Supervisor) applyFailoverExhaustedStop(ap *AgentProcess, outcome agenterr.Outcome) {
 	log.Printf("[daemon] Agent %s: failover-only error (%s) with no fallback remaining, stopping supervisor (fast-fail)",
 		ap.Entry.Worktree, outcome)
-	ap.NoWorkCount = 0
+	resetNoWork(ap)
 	ap.StopReason = StopReasonFastFail
 }
 
@@ -206,7 +215,7 @@ func (s *Supervisor) applyFailoverExhaustedStop(ap *AgentProcess, outcome agente
 func (s *Supervisor) applyCleanSuccessRestart(ap *AgentProcess) {
 	ap.RestartCount = 0
 	ap.RateRetryCount = 0
-	ap.NoWorkCount = 0
+	resetNoWork(ap)
 	ap.BlockCount = 0
 	ap.StopReason = ""
 	if time.Since(ap.LastStart) > time.Minute {
@@ -217,7 +226,7 @@ func (s *Supervisor) applyCleanSuccessRestart(ap *AgentProcess) {
 // applyRateLimitedRestart handles an uncounted rate-limit retry. Caller holds ap.Mu.
 func (s *Supervisor) applyRateLimitedRestart(ap *AgentProcess) {
 	ap.RateRetryCount++
-	ap.NoWorkCount = 0
+	resetNoWork(ap)
 	ap.StopReason = ""
 	log.Printf("[daemon] Agent %s: rate limited (retry %d, not counted toward max_retries)",
 		ap.Entry.Worktree, ap.RateRetryCount)
@@ -233,7 +242,7 @@ func (s *Supervisor) applyRateLimitedRestart(ap *AgentProcess) {
 func (s *Supervisor) applyCountedRestart(ap *AgentProcess, d agentpolicy.Disposition, maxRetries int) bool {
 	ap.RestartCount++
 	ap.RateRetryCount = 0 // reset rate counter on non-rate error
-	ap.NoWorkCount = 0
+	resetNoWork(ap)
 	if ap.RestartCount <= maxRetries {
 		ap.StopReason = ""
 		return true
@@ -277,7 +286,7 @@ func (s *Supervisor) applyMaxRetriesBlock(ap *AgentProcess) {
 	ap.BlockCount++
 	ap.RestartCount = 0
 	ap.RateRetryCount = 0
-	ap.NoWorkCount = 0
+	resetNoWork(ap)
 	ap.StopReason = StopReasonMaxRetriesBlocked
 	log.Printf("[daemon] Agent %s: restart budget exhausted, blocking (cycle %d) — will recheck in %s",
 		ap.Entry.Worktree, ap.BlockCount, s.maxRetriesBlockBackoff())
@@ -300,6 +309,9 @@ func (s *Supervisor) applyNoWorkRestart(ap *AgentProcess) {
 	ap.RestartCount = 0
 	ap.RateRetryCount = 0
 	ap.NoWorkCount++
+	if ap.NoWorkCount == 1 {
+		ap.IdleSince = time.Now()
+	}
 	if ap.CurrentBackendIdx > 0 && shouldRetryPrimaryAfterNoWork(ap.NoWorkCount, s.getNoWorkBackoff()) {
 		ap.CurrentBackendIdx = 0
 	}
@@ -314,7 +326,7 @@ func (s *Supervisor) applyNoWorkRestart(ap *AgentProcess) {
 // runtime, after the process has already been spawned.
 func (s *Supervisor) applyBackendUnavailableRestart(ap *AgentProcess) {
 	ap.RateRetryCount = 0
-	ap.NoWorkCount = 0
+	resetNoWork(ap)
 	ap.StopReason = StopReasonBackendUnavailable
 	log.Printf("[daemon] Agent %s: backend unavailable, will recheck in %s (not counted toward max_retries)",
 		ap.Entry.Worktree, s.backendRecheckBackoff())
