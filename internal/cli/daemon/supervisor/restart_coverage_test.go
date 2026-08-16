@@ -491,7 +491,7 @@ func TestSupervisor_ResolveRoleConfig_UnknownRole(t *testing.T) {
 
 // captureSlogDebug is captureSlog with the handler level lowered to Debug:
 // the default TextHandler starts at Info, which would drop exactly the
-// records the idle-state behaviour is made of.
+// records the idle-state behavior is made of.
 func captureSlogDebug(t *testing.T) *syncBuffer {
 	t.Helper()
 	buf := &syncBuffer{}

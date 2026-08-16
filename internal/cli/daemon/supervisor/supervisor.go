@@ -851,6 +851,27 @@ func (s *Supervisor) startBackoffHeartbeat(ap *AgentProcess, backoff time.Durati
 	return s.startAgentWaitHeartbeat(ap)
 }
 
+// announceRestartWait opens the restart span and emits the AgentRestarted
+// event for a wait that is a genuine restart — or the first poll of an idle
+// streak, which keeps a "went idle" signal in the restart metrics. It returns
+// the span's End so callers can defer it across the backoff sleep. Repeated
+// idle polls never call this: they are a state, not a restart.
+func (s *Supervisor) announceRestartWait(ap *AgentProcess, count int, errType string) func() {
+	_, span := startSpan(cmdstore.RootContext(),
+		"daemon.supervisor.restart",
+		attribute.String("loom.agent", ap.Entry.Worktree),
+		attribute.String("loom.role", ap.Entry.Role),
+		attribute.String("loom.workspace", s.WorkspaceID),
+		attribute.Int("loom.restart_count", count),
+		attribute.String("loom.error_type", errType),
+	)
+
+	if evt, err := events.NewEvent(events.AgentRestarted, ap.Entry.Worktree, ap.Entry.Role, "", events.AgentRestartedData{PID: 0, RestartCount: count}); err == nil {
+		s.EmitEvent(evt)
+	}
+	return func() { span.End() }
+}
+
 func (s *Supervisor) sleepBeforeRestart(ap *AgentProcess) bool {
 	backoff := s.computeBackoff(ap)
 	ap.Mu.Lock()
@@ -873,7 +894,6 @@ func (s *Supervisor) sleepBeforeRestart(ap *AgentProcess) bool {
 	// streak arrives here with NoWorkCount == 1.
 	firstIdle := idle && noWorkCount <= 1
 
-	announce := !idle || firstIdle
 	switch {
 	case !idle:
 		slog.Info("waiting before restart", "worktree", ap.Entry.Worktree, "backoff", backoff, "attempt", count)
@@ -883,20 +903,8 @@ func (s *Supervisor) sleepBeforeRestart(ap *AgentProcess) bool {
 		slog.Debug("agent still idle", "worktree", ap.Entry.Worktree, "poll", backoff, "polls", noWorkCount, "idle_for", time.Since(idleSince))
 	}
 
-	if announce {
-		_, span := startSpan(cmdstore.RootContext(),
-			"daemon.supervisor.restart",
-			attribute.String("loom.agent", ap.Entry.Worktree),
-			attribute.String("loom.role", ap.Entry.Role),
-			attribute.String("loom.workspace", s.WorkspaceID),
-			attribute.Int("loom.restart_count", count),
-			attribute.String("loom.error_type", errType),
-		)
-		defer span.End()
-
-		if evt, err := events.NewEvent(events.AgentRestarted, ap.Entry.Worktree, ap.Entry.Role, "", events.AgentRestartedData{PID: 0, RestartCount: count}); err == nil {
-			s.EmitEvent(evt)
-		}
+	if !idle || firstIdle {
+		defer s.announceRestartWait(ap, count, errType)()
 	}
 
 	// Keep the agent's liveness tick fresh during a long wait (a block, or a
