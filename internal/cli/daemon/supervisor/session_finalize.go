@@ -268,7 +268,8 @@ func (s *Supervisor) runCompletionHooks(ap *AgentProcess, exitCode int) int {
 // The counter lives in the label set as <prefix><n>; CompletedRounds takes the
 // max, so a counter left behind by a crashed cleanup is harmless.
 //
-// ORDER IS THE CRASH-SAFETY MECHANISM. There is no atomic multi-label write, so:
+// ORDER IS THE CRASH-SAFETY MECHANISM, on BOTH branches. There is no atomic
+// multi-label write, so the re-arm sequence is:
 //
 //  1. remove the re-arm label FIRST — this hands the task back to the previous
 //     stage. A crash between 1 and 2 repeats a round: at worst one extra review,
@@ -281,9 +282,22 @@ func (s *Supervisor) runCompletionHooks(ap *AgentProcess, exitCode int) int {
 // from a round that already ran, so the next pass skips a review and the task
 // ships under-reviewed.
 //
-// The ship branch writes NO counter, so a shipped task's highest counter is
-// threshold-1, and a threshold of 1 ships with no counter at all. "N rounds ran"
-// is observable from the stage's comments, not from the label.
+// The ship branch is an EXIT from the cycle and obeys the same ordering for the
+// same reason: remove the re-arm label, stamp the ship label, then clear the
+// counters. Its end state is exactly
+//
+//	ship label present, re-arm label absent, no counters, status open
+//
+// and every part of that is load-bearing. Leaving the re-arm label behind was a
+// re-ship spin: the previous stage's filter still matched, it re-claimed the
+// task, the recomputed count was unchanged, `completed >= threshold` held again,
+// and the pipeline shipped forever. Leaving the counters behind is the mirror
+// failure — any later re-entry into the cycle computes threshold-1 + 1 and ships
+// with zero rounds run, i.e. a SKIPPED review, which this ordering doctrine
+// exists to rule out. Do not re-introduce either.
+//
+// The ship branch writes NO counter and erases the ones it finds, so "N rounds
+// ran" is observable from the stage's comments, not from the label set.
 func (s *Supervisor) advanceReviewCycle(ctx context.Context, taskID string, cycle *domain.AgentHookCycle) error {
 	if cycle == nil {
 		return fmt.Errorf("cycle action has no cycle block")
@@ -315,19 +329,7 @@ func (s *Supervisor) advanceReviewCycle(ctx context.Context, taskID string, cycl
 	completed := cycle.CompletedRounds(issue.Labels) + 1 // this pass finished a round
 
 	if completed >= cycle.Threshold {
-		if err := s.IssueBackend.AddLabel(ctx, taskID, cycle.ShipLabel); err != nil {
-			return fmt.Errorf("stamp %q: %w", cycle.ShipLabel, err)
-		}
-		// The ship label routes the task to the next stage, and that stage can
-		// only claim an `open` task — exactly like the re-arm below. Without
-		// this the loop bounds correctly and then stalls at the hand-off:
-		// ship label stamped, nothing able to act on it.
-		if err := s.reopenForNextStage(ctx, taskID, issue.Status); err != nil {
-			return err
-		}
-		slog.InfoContext(ctx, "review cycle complete; shipping",
-			"task", taskID, "rounds", completed, "threshold", cycle.Threshold, "ship_label", cycle.ShipLabel)
-		return nil
+		return s.shipReviewCycle(ctx, taskID, cycle, issue, completed)
 	}
 
 	if err := s.IssueBackend.RemoveLabel(ctx, taskID, cycle.RearmLabel); err != nil {
@@ -352,6 +354,49 @@ func (s *Supervisor) advanceReviewCycle(ctx context.Context, taskID string, cycl
 	}
 	slog.InfoContext(ctx, "review cycle re-armed",
 		"task", taskID, "round", completed, "threshold", cycle.Threshold, "rearmed", cycle.RearmLabel)
+	return nil
+}
+
+// shipReviewCycle is the cycle's exit: the task leaves carrying the ship label
+// and nothing the cycle can re-trigger on. See advanceReviewCycle's doc comment
+// for why the order and the counter cleanup are both load-bearing.
+//
+// The caller has already run the deliberate-stop guard, so this never writes to
+// a closed or blocked task.
+func (s *Supervisor) shipReviewCycle(ctx context.Context, taskID string, cycle *domain.AgentHookCycle, issue *backend.IssueDetailData, completed int) error {
+	// Remove FIRST: a crash before the ship label lands repeats a round, which
+	// is the trade the re-arm branch already takes. Stamping first would
+	// reproduce the both-labels-present re-ship spin on every crash.
+	//
+	// Hard-failing here is safe even when the re-arm label is already absent:
+	// fleet-db's RemoveLabel is a no-op on a label the issue does not carry.
+	if err := s.IssueBackend.RemoveLabel(ctx, taskID, cycle.RearmLabel); err != nil {
+		return fmt.Errorf("clear re-arm %q before shipping: %w", cycle.RearmLabel, err)
+	}
+	if err := s.IssueBackend.AddLabel(ctx, taskID, cycle.ShipLabel); err != nil {
+		return fmt.Errorf("stamp %q: %w", cycle.ShipLabel, err)
+	}
+	// Counters are the cycle's memory, and a survivor makes a later re-entry
+	// ship with zero rounds run. Best-effort for the same reason as the stale
+	// cleanup above: the ship label is already stamped, so the hand-off is
+	// complete and a lingering counter is cosmetic — never fail the run for it.
+	for _, label := range issue.Labels {
+		if cycle.ParseCounter(label) > 0 {
+			if err := s.IssueBackend.RemoveLabel(ctx, taskID, label); err != nil {
+				slog.WarnContext(ctx, "cycle counter left in place after ship",
+					"task", taskID, "label", label, "err", err)
+			}
+		}
+	}
+	// The ship label routes the task to the next stage, and that stage can only
+	// claim an `open` task — exactly like the re-arm above. Without this the
+	// loop bounds correctly and then stalls at the hand-off: ship label
+	// stamped, nothing able to act on it.
+	if err := s.reopenForNextStage(ctx, taskID, issue.Status); err != nil {
+		return err
+	}
+	slog.InfoContext(ctx, "review cycle complete; shipping",
+		"task", taskID, "rounds", completed, "threshold", cycle.Threshold, "ship_label", cycle.ShipLabel)
 	return nil
 }
 

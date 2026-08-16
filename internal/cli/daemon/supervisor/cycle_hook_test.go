@@ -57,9 +57,11 @@ func TestAdvanceReviewCycle_RearmBeforeBump(t *testing.T) {
 	}
 }
 
-// The ship branch writes NO counter, so a shipped task's highest counter is
-// threshold-1. "N rounds ran" is observable from comments, not labels.
-func TestAdvanceReviewCycle_ShipsWithoutWritingACounter(t *testing.T) {
+// The ship branch writes NO counter — it only ever removes them. "N rounds ran"
+// is observable from comments, not labels. Asserted as a property rather than an
+// exact op string, because the ship path also clears the re-arm label and the
+// counters it finds.
+func TestAdvanceReviewCycle_ShipWritesNoCounter(t *testing.T) {
 	m, ops := cycleRecorder([]string{"plan", "criticized", "review-cycle=2"})
 	s := &Supervisor{IssueBackend: m}
 
@@ -67,16 +69,171 @@ func TestAdvanceReviewCycle_ShipsWithoutWritingACounter(t *testing.T) {
 		t.Fatalf("advanceReviewCycle: %v", err)
 	}
 
-	got := strings.Join(*ops, " ")
-	if got != "add:ready" {
-		t.Errorf("ops = %q, want only the ship label", got)
+	for _, op := range *ops {
+		if strings.HasPrefix(op, "add:") && strings.Contains(op, "review-cycle") {
+			t.Errorf("the ship branch must not write a counter: ops = %v", *ops)
+		}
 	}
-	if strings.Contains(got, "review-cycle") {
-		t.Error("the ship branch must not write a counter")
+}
+
+// The regression test for the re-ship spin: shipping must clear the re-arm
+// label, or the previous stage's filter still matches and it re-claims the task.
+//
+// Order is asserted, not just the set: remove-before-stamp is the crash-safety
+// property, and the inverse order reproduces the both-labels-present bug on
+// every crash.
+func TestAdvanceReviewCycle_ShipClearsTheRearmLabel(t *testing.T) {
+	m, ops := cycleRecorder([]string{"plan", "criticized", "review-cycle=2"})
+	s := &Supervisor{IssueBackend: m}
+
+	if err := s.advanceReviewCycle(context.Background(), "T-1", testCycle(3)); err != nil {
+		t.Fatalf("advanceReviewCycle: %v", err)
+	}
+
+	got := *ops
+	if len(got) < 2 || got[0] != "remove:criticized" || got[1] != "add:ready" {
+		t.Fatalf("ops = %v, want the re-arm cleared before the ship label is stamped", got)
+	}
+	for _, op := range got {
+		if op == "add:criticized" {
+			t.Errorf("the ship branch must never re-add the re-arm label: %v", got)
+		}
+	}
+}
+
+// The end-to-end property, and the one that earns this change: a second pass
+// over the shipped label set must NOT ship again.
+//
+// The single-call assertions above would all pass against the buggy code paired
+// with a lenient matcher; only running the loop twice against a stateful label
+// set exposes the spin.
+func TestAdvanceReviewCycle_ShipDoesNotReShip(t *testing.T) {
+	labels := []string{"plan", "criticized", "review-cycle=2"}
+	var ops []string
+	m := clitest.NewMockIssueBackend()
+	m.GetFn = func(_ context.Context, id string) (*backend.IssueDetailData, error) {
+		snapshot := append([]string(nil), labels...)
+		return &backend.IssueDetailData{IssueData: backend.IssueData{ID: id, Status: "open", Labels: snapshot}}, nil
+	}
+	m.AddLabelFn = func(_ context.Context, _ string, l string) error {
+		ops = append(ops, "add:"+l)
+		if !containsLabel(labels, l) {
+			labels = append(labels, l)
+		}
+		return nil
+	}
+	m.RemoveLabelFn = func(_ context.Context, _ string, l string) error {
+		ops = append(ops, "remove:"+l)
+		kept := labels[:0]
+		for _, existing := range labels {
+			if existing != l {
+				kept = append(kept, existing)
+			}
+		}
+		labels = kept
+		return nil
+	}
+	s := &Supervisor{IssueBackend: m}
+
+	if err := s.advanceReviewCycle(context.Background(), "T-1", testCycle(3)); err != nil {
+		t.Fatalf("first pass: %v", err)
+	}
+	if !containsLabel(labels, "ready") || containsLabel(labels, "criticized") {
+		t.Fatalf("labels after ship = %v, want the ship label and no re-arm label", labels)
+	}
+
+	// The previous stage is gone, but simulate it re-claiming anyway: with the
+	// re-arm label and the counters cleared, CompletedRounds is 0, so the second
+	// pass must re-arm at round 1 rather than re-enter the ship branch.
+	ops = nil
+	if err := s.advanceReviewCycle(context.Background(), "T-1", testCycle(3)); err != nil {
+		t.Fatalf("second pass: %v", err)
+	}
+	for _, op := range ops {
+		if op == "add:ready" {
+			t.Fatalf("the shipped task re-shipped on the next pass: ops = %v", ops)
+		}
+	}
+	if got := strings.Join(ops, " "); got != "remove:criticized add:review-cycle=1" {
+		t.Errorf("second-pass ops = %q, want a re-arm at round 1", got)
+	}
+}
+
+// Counters are the cycle's memory. A survivor makes any later re-entry compute
+// threshold-1 + 1 and ship with zero rounds run — a skipped review. They are
+// cleared AFTER the ship label lands, so a crash mid-cleanup leaves a completed
+// hand-off with cosmetic litter rather than an unshipped task.
+func TestAdvanceReviewCycle_ShipClearsCounters(t *testing.T) {
+	m, ops := cycleRecorder([]string{"criticized", "review-cycle=1", "review-cycle=2"})
+	s := &Supervisor{IssueBackend: m}
+
+	if err := s.advanceReviewCycle(context.Background(), "T-1", testCycle(3)); err != nil {
+		t.Fatalf("advanceReviewCycle: %v", err)
+	}
+
+	got := *ops
+	if len(got) < 2 || got[0] != "remove:criticized" || got[1] != "add:ready" {
+		t.Fatalf("ops = %v, want re-arm cleared then ship stamped first", got)
+	}
+	rest := strings.Join(got[2:], " ")
+	for _, counter := range []string{"remove:review-cycle=1", "remove:review-cycle=2"} {
+		if !strings.Contains(rest, counter) {
+			t.Errorf("counter not cleared after ship: %v", got)
+		}
+	}
+}
+
+// Counter cleanup on the ship path is best-effort for the same reason as the
+// re-arm branch's: the hand-off is already complete, so failing the run would
+// demote a run that actually succeeded.
+func TestAdvanceReviewCycle_ShipCounterCleanupFailureDoesNotFailTheRun(t *testing.T) {
+	m, _ := cycleRecorder([]string{"criticized", "review-cycle=2"})
+	m.RemoveLabelFn = func(_ context.Context, _ string, l string) error {
+		if strings.HasPrefix(l, "review-cycle=") {
+			return fmt.Errorf("boom")
+		}
+		return nil
+	}
+	s := &Supervisor{IssueBackend: m}
+
+	if err := s.advanceReviewCycle(context.Background(), "T-1", testCycle(3)); err != nil {
+		t.Errorf("a failed counter cleanup must not fail the ship: %v", err)
+	}
+}
+
+// A failed re-arm removal on the ship path MUST fail the run, and must fail
+// BEFORE the ship label is stamped: the alternative is the double-labeled
+// reopen this whole change exists to prevent.
+func TestAdvanceReviewCycle_ShipRearmRemovalFailureFailsTheRun(t *testing.T) {
+	stamped := false
+	m, _ := cycleRecorder([]string{"criticized", "review-cycle=2"})
+	m.RemoveLabelFn = func(_ context.Context, _ string, l string) error {
+		if l == "criticized" {
+			return fmt.Errorf("boom")
+		}
+		return nil
+	}
+	m.AddLabelFn = func(_ context.Context, _ string, _ string) error {
+		stamped = true
+		return nil
+	}
+	s := &Supervisor{IssueBackend: m}
+
+	err := s.advanceReviewCycle(context.Background(), "T-1", testCycle(3))
+	if err == nil {
+		t.Fatal("a failed re-arm removal must fail the ship")
+	}
+	if !strings.Contains(err.Error(), "re-arm") {
+		t.Errorf("error should name the re-arm: %v", err)
+	}
+	if stamped {
+		t.Error("the ship label must not be stamped once the re-arm removal failed")
 	}
 }
 
 // Threshold 1 is the degenerate single-pass flow: ship immediately, no counter.
+// It is also the case the re-ship spin hit hardest — every pass ships, and the
+// re-arm label is always present because the stage that just ran matched it.
 func TestAdvanceReviewCycle_ThresholdOneShipsImmediately(t *testing.T) {
 	m, ops := cycleRecorder([]string{"plan", "criticized"})
 	s := &Supervisor{IssueBackend: m}
@@ -85,8 +242,8 @@ func TestAdvanceReviewCycle_ThresholdOneShipsImmediately(t *testing.T) {
 		t.Fatalf("advanceReviewCycle: %v", err)
 	}
 
-	if got := strings.Join(*ops, " "); got != "add:ready" {
-		t.Errorf("ops = %q, want an immediate ship with no counter", got)
+	if got := strings.Join(*ops, " "); got != "remove:criticized add:ready" {
+		t.Errorf("ops = %q, want an immediate ship that clears the re-arm and writes no counter", got)
 	}
 }
 
