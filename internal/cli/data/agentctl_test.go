@@ -9,8 +9,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
-
-	"github.com/tysonthomas9/loomcli/internal/backend/api/gen"
+	"time"
 )
 
 // agentMockServer records observed request paths and bodies so tests can
@@ -39,7 +38,7 @@ func newAgentMockServer(t *testing.T) (*httptest.Server, *agentMockServer) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(agentsListEnvelope{
 			Success: true,
-			Data: []gen.AgentControlEntry{
+			Data: []agentEntry{
 				{Name: "falcon", Role: "task", Status: "idle"},
 				{Name: "nova", Role: "plan", Status: "running"},
 			},
@@ -143,7 +142,7 @@ func TestAgentStopDefault(t *testing.T) {
 	withDataClientState(t, func() {
 		setupAgentTest(t, srv.URL)
 		agentStopForce = false
-		if err := runAgentControl(context.Background(), "falcon", "stop", false, true); err != nil {
+		if err := runAgentControl(context.Background(), "falcon", "stop", nil, true); err != nil {
 			t.Fatalf("runAgentControl: %v", err)
 		}
 		body := state.bodies["/agents/falcon/stop"]
@@ -161,7 +160,7 @@ func TestAgentStopForce(t *testing.T) {
 	defer srv.Close()
 	withDataClientState(t, func() {
 		setupAgentTest(t, srv.URL)
-		if err := runAgentControl(context.Background(), "falcon", "stop", true, false); err != nil {
+		if err := runAgentControl(context.Background(), "falcon", "stop", map[string]any{"force": true}, false); err != nil {
 			t.Fatalf("runAgentControl: %v", err)
 		}
 		body := state.bodies["/agents/falcon/stop"]
@@ -177,7 +176,7 @@ func TestAgentStartRestartYield(t *testing.T) {
 	withDataClientState(t, func() {
 		setupAgentTest(t, srv.URL)
 		for _, verb := range []string{"start", "restart", "yield"} {
-			if err := runAgentControl(context.Background(), "falcon", verb, false, verb == "yield"); err != nil {
+			if err := runAgentControl(context.Background(), "falcon", verb, nil, verb == "yield"); err != nil {
 				t.Errorf("%s: %v", verb, err)
 			}
 			if !state.seenPath("/api/workspaces/default/agents/falcon/" + verb) {
@@ -192,7 +191,7 @@ func TestAgent503(t *testing.T) {
 	defer srv.Close()
 	withDataClientState(t, func() {
 		setupAgentTest(t, srv.URL)
-		err := runAgentControl(context.Background(), "ghost", "stop", false, true)
+		err := runAgentControl(context.Background(), "ghost", "stop", nil, true)
 		if err == nil {
 			t.Fatal("expected 503 to surface as error")
 		}
@@ -270,7 +269,7 @@ func TestPostAgentActionHTTPErrorIncludesBody(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	_, err := postAgentAction(context.Background(), srv.Client(), srv.URL, "start", false)
+	_, err := postAgentAction(context.Background(), srv.Client(), srv.URL, "start", nil)
 	if err == nil {
 		t.Fatal("expected HTTP error")
 	}
@@ -293,7 +292,7 @@ func TestRunAgentControlUsesFallbackMessage(t *testing.T) {
 	withDataClientState(t, func() {
 		setupAgentTest(t, srv.URL)
 		out, err := captureDataStdout(t, func() error {
-			return runAgentControl(context.Background(), "falcon", "yield", false, true)
+			return runAgentControl(context.Background(), "falcon", "yield", nil, true)
 		})
 		if err != nil {
 			t.Fatalf("runAgentControl: %v", err)
@@ -302,4 +301,85 @@ func TestRunAgentControlUsesFallbackMessage(t *testing.T) {
 			t.Fatalf("output = %q, want fallback message", out)
 		}
 	})
+}
+
+// TestAgentYieldTTLBody pins the wire shape of a yield: the TTL rides the
+// generic {"payload": {...}} passthrough the server already merges into the
+// queued command, so no new server-side request field is involved.
+func TestAgentYieldTTLBody(t *testing.T) {
+	var gotBody, gotContentType string
+	mux := http.NewServeMux()
+	registerAuthConfig(mux)
+	mux.HandleFunc("/api/workspaces/default/agents/falcon/yield", func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(io.LimitReader(r.Body, 1<<12))
+		gotBody = string(raw)
+		gotContentType = r.Header.Get("Content-Type")
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusAccepted)
+		_ = json.NewEncoder(w).Encode(agentMessageEnvelope{Success: true, Message: "ok"})
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	withDataClientState(t, func() {
+		setupAgentTest(t, srv.URL)
+		body := map[string]any{"payload": map[string]any{"ttl_seconds": "300"}}
+		if err := runAgentControl(context.Background(), "falcon", "yield", body, true); err != nil {
+			t.Fatalf("runAgentControl: %v", err)
+		}
+	})
+
+	if !strings.Contains(gotBody, `"ttl_seconds":"300"`) || !strings.Contains(gotBody, `"payload"`) {
+		t.Errorf("yield body = %q, want a payload carrying ttl_seconds=300", gotBody)
+	}
+	if gotContentType != "application/json" {
+		t.Errorf("Content-Type = %q, want application/json", gotContentType)
+	}
+}
+
+// TestAgentActionNoBodySetsNoContentType: a bodiless action must not claim to
+// carry JSON.
+func TestAgentActionNoBodySetsNoContentType(t *testing.T) {
+	var gotContentType, gotBody string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(io.LimitReader(r.Body, 1<<12))
+		gotBody, gotContentType = string(raw), r.Header.Get("Content-Type")
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(agentMessageEnvelope{Success: true, Message: "ok"})
+	}))
+	defer srv.Close()
+
+	if _, err := postAgentAction(context.Background(), srv.Client(), srv.URL, "start", nil); err != nil {
+		t.Fatalf("postAgentAction: %v", err)
+	}
+	if gotBody != "" {
+		t.Errorf("body = %q, want empty", gotBody)
+	}
+	if gotContentType != "" {
+		t.Errorf("Content-Type = %q, want unset when no body is sent", gotContentType)
+	}
+}
+
+// TestAgentYieldTTLAndUntilRestartConflict: the two flags are mutually
+// exclusive and must fail as a plain command error.
+func TestAgentYieldTTLAndUntilRestartConflict(t *testing.T) {
+	t.Cleanup(func() {
+		agentYieldTTL = 2 * time.Hour
+		agentYieldUntilRestart = false
+		_ = agentYieldCmd.Flags().Set("ttl", "2h")
+		agentYieldCmd.Flags().Lookup("ttl").Changed = false
+	})
+
+	if err := agentYieldCmd.Flags().Set("ttl", "5m"); err != nil {
+		t.Fatalf("set --ttl: %v", err)
+	}
+	agentYieldUntilRestart = true
+
+	err := agentYieldCmd.RunE(agentYieldCmd, []string{"falcon"})
+	if err == nil {
+		t.Fatal("expected --ttl with --until-restart to error")
+	}
+	if !strings.Contains(err.Error(), "mutually exclusive") {
+		t.Errorf("err = %q, want a mutual-exclusion error", err.Error())
+	}
 }
