@@ -15,6 +15,13 @@ func printAgentStatus(agent DaemonAgentStatus) {
 	statusIcon := statusToIcon(agent.Status)
 	fmt.Printf("  %s %s (%s)\n", statusIcon, agent.Worktree, agent.Role)
 
+	// A parked agent has no PID, no run history and no task: the only useful
+	// things to print are why it is parked and how to un-park it.
+	if agent.Status == "parked" {
+		printParkedAgentStatus(agent)
+		return
+	}
+
 	// PID line with uptime for running agents
 	if agent.PID > 0 {
 		if !agent.LastStart.IsZero() {
@@ -37,6 +44,24 @@ func printAgentStatus(agent DaemonAgentStatus) {
 
 	printAgentBranchInfo(agent)
 	printAgentDiagnostics(agent)
+}
+
+// printParkedAgentStatus renders the parked detail line, always ending in the
+// command that resumes the agent so an operator never has to look it up.
+func printParkedAgentStatus(agent DaemonAgentStatus) {
+	detail := "parked"
+	if agent.DesiredState != "" {
+		detail = fmt.Sprintf("parked (%s", agent.DesiredState)
+		if agent.DrainExpiresAt != nil {
+			detail += ", expires " + agent.DrainExpiresAt.UTC().Format(time.RFC3339)
+		}
+		detail += ")"
+	}
+	resume := agent.ResumeCommand
+	if resume == "" {
+		resume = "loom data agent start " + agent.Worktree
+	}
+	fmt.Printf("      %s — resume: %s\n", detail, resume)
 }
 
 // printAgentDiagnostics prints the post-run signals (last exit code, error

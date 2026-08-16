@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/domain"
@@ -124,7 +125,7 @@ func TestAgentEntryShouldSuperviseSkipsLeadRoles(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := tt.entry.ShouldSuperviseWithRoles(tt.roles); got != tt.want {
+			if got := tt.entry.ShouldSuperviseWithRoles(tt.roles, "", time.Now()); got != tt.want {
 				t.Fatalf("ShouldSuperviseWithRoles() = %v, want %v", got, tt.want)
 			}
 		})
@@ -237,5 +238,100 @@ func TestLoadDaemonConfigFromStoreProjectsRoleLabels(t *testing.T) {
 	}
 	if len(role.ExcludeLabels) != 1 || role.ExcludeLabels[0] != "plan-reviewed" {
 		t.Errorf("ExcludeLabels = %v, want [plan-reviewed]", role.ExcludeLabels)
+	}
+}
+
+// TestAgentEntryShouldSuperviseDrainIsOneShot pins the drain half of the
+// supervision predicate: a drain parks only while it still belongs to the
+// asking supervisor and has not lapsed.
+func TestAgentEntryShouldSuperviseDrainIsOneShot(t *testing.T) {
+	const thisNode = "loom-supervisor-h-222"
+	const otherNode = "loom-supervisor-h-111"
+	now := time.Date(2026, 8, 16, 12, 0, 0, 0, time.UTC)
+	past := now.Add(-time.Hour)
+	future := now.Add(time.Hour)
+
+	tests := []struct {
+		name  string
+		entry AgentEntry
+		want  bool
+	}{
+		{
+			name: "drain for this supervisor parks",
+			entry: AgentEntry{Worktree: "w", Role: "task",
+				DesiredState: domain.AgentDesiredDraining, DrainNodeID: thisNode, DrainExpiresAt: &future},
+			want: false,
+		},
+		{
+			name: "untargeted drain parks, honoring a yield not yet stamped",
+			entry: AgentEntry{Worktree: "w", Role: "task",
+				DesiredState: domain.AgentDesiredDraining},
+			want: false,
+		},
+		{
+			name: "drain from a previous supervisor no longer parks",
+			entry: AgentEntry{Worktree: "w", Role: "task",
+				DesiredState: domain.AgentDesiredDraining, DrainNodeID: otherNode, DrainExpiresAt: &future},
+			want: true,
+		},
+		{
+			name: "expired drain no longer parks",
+			entry: AgentEntry{Worktree: "w", Role: "task",
+				DesiredState: domain.AgentDesiredDraining, DrainNodeID: thisNode, DrainExpiresAt: &past},
+			want: true,
+		},
+		{
+			name: "stopped parks regardless of drain metadata",
+			entry: AgentEntry{Worktree: "w", Role: "task",
+				DesiredState: domain.AgentDesiredStopped, DrainNodeID: otherNode, DrainExpiresAt: &past},
+			want: false,
+		},
+		{
+			name: "an interactive role is excluded even when the drain lapsed",
+			entry: AgentEntry{Worktree: "lead", Role: "lead",
+				DesiredState: domain.AgentDesiredDraining, DrainNodeID: otherNode},
+			want: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.entry.ShouldSuperviseWithRoles(nil, thisNode, now); got != tt.want {
+				t.Fatalf("ShouldSuperviseWithRoles() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestAgentEntryEqualDetectsDrainChanges: a drain change has to register as a
+// config diff, or the reconciler would never act on it.
+func TestAgentEntryEqualDetectsDrainChanges(t *testing.T) {
+	t1 := time.Date(2026, 8, 16, 12, 0, 0, 0, time.UTC)
+	t2 := t1.Add(time.Hour)
+	base := AgentEntry{Worktree: "w", Role: "task", DesiredState: domain.AgentDesiredDraining}
+
+	sameAsBase := AgentEntry{Worktree: "w", Role: "task", DesiredState: domain.AgentDesiredDraining}
+	if !base.Equal(sameAsBase) {
+		t.Fatal("two identical entries must compare equal")
+	}
+	withNode := base
+	withNode.DrainNodeID = "node-1"
+	if base.Equal(withNode) {
+		t.Error("Equal ignored a drain_node_id change")
+	}
+	withExpiry := base
+	withExpiry.DrainExpiresAt = &t1
+	if base.Equal(withExpiry) {
+		t.Error("Equal ignored a drain_expires_at change")
+	}
+	otherExpiry := base
+	otherExpiry.DrainExpiresAt = &t2
+	if withExpiry.Equal(otherExpiry) {
+		t.Error("Equal ignored a differing drain_expires_at")
+	}
+	sameExpiry := base
+	sameInstant := t1
+	sameExpiry.DrainExpiresAt = &sameInstant
+	if !withExpiry.Equal(sameExpiry) {
+		t.Error("Equal must compare expiries by instant, not by pointer")
 	}
 }

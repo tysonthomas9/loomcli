@@ -117,10 +117,10 @@ func printCreatedIssue(w, errW io.Writer, issue *backend.IssueData, format strin
 	return nil
 }
 
-// printAgentList renders a []gen.AgentControlEntry in the requested format.
-func printAgentList(w io.Writer, entries []gen.AgentControlEntry, format string) error {
+// printAgentList renders the agent rows in the requested format.
+func printAgentList(w io.Writer, entries []agentEntry, format string) error {
 	if entries == nil {
-		entries = []gen.AgentControlEntry{}
+		entries = []agentEntry{}
 	}
 	if format == formatJSON {
 		return writeJSON(w, entries)
@@ -131,9 +131,37 @@ func printAgentList(w io.Writer, entries []gen.AgentControlEntry, format string)
 	}
 	fmt.Fprintf(w, "%-20s  %-15s  %s\n", "NAME", "ROLE", "STATUS")
 	for _, a := range entries {
-		fmt.Fprintf(w, "%-20s  %-15s  %s\n", a.Name, a.Role, a.Status)
+		fmt.Fprintf(w, "%-20s  %-15s  %s\n", a.Name, agentDisplayRole(a), agentDisplayStatus(a))
 	}
 	return nil
+}
+
+// agentDisplayRole prefers the socket-mode "role" and falls back to the
+// store-backed "role_name", which otherwise left the ROLE column blank.
+func agentDisplayRole(a agentEntry) string {
+	if a.Role != "" {
+		return a.Role
+	}
+	return a.RoleName
+}
+
+// agentDisplayStatus picks the most informative status a row carries.
+//
+// live_status wins because it is the derived, current signal (and is where
+// "draining" shows up); "status" is the socket-mode field and keeps that
+// output unchanged; "state" is the coarse stored intent and the last resort.
+// A row carrying none of them renders "unknown" rather than an empty column.
+func agentDisplayStatus(a agentEntry) string {
+	switch {
+	case a.LiveStatus != "":
+		return a.LiveStatus
+	case a.Status != "":
+		return a.Status
+	case a.State != "":
+		return a.State
+	default:
+		return "unknown"
+	}
 }
 
 // printMessageResult renders a single human-readable message (e.g., "agent

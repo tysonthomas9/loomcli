@@ -346,6 +346,42 @@ candidate runner exits
 UI continues to show current owner
 ```
 
+### Draining An Agent (One-Shot)
+
+`desired_state=draining` is a **one-shot** park, unlike `stopped`, which stays
+indefinite and explicit. A drain is honored only while it is addressed to the
+currently running supervisor and still inside its TTL:
+
+```text
+loom data agent yield <name> [--ttl 5m | --until-restart]
+  -> desired_state=draining
+  -> drain_node_id=<current supervisor node id>
+  -> drain_expires_at=now+ttl        (omitted for --until-restart)
+```
+
+At startup the daemon reconciles drains once, before it builds its agent list:
+
+| Drain shape | Startup behavior |
+|---|---|
+| Addressed to this supervisor, unexpired | Honored — agent stays parked. |
+| Addressed to a different supervisor | Released — the supervisor it named is gone. |
+| Past its expiry | Released. |
+| No `drain_node_id` and no `drain_expires_at` | Released — unattributable. |
+
+Clearing happens **only** at startup, never on the 30s reconcile tick, so a
+yield issued seconds before a tick is not undone by that tick. `stopped` is
+untouched by all of this.
+
+Parked agents remain visible: they are reported in `loom daemon status` as
+`parked`, counted in the Agents line, and warned about at startup and roughly
+every five minutes, always carrying `resume="loom data agent start <name>"`.
+
+**Deploy note.** Every agent parked by a pre-one-shot-drain `yield` has the
+unattributable shape above, so the first daemon start after this change
+releases them all at once, each with a `Warn` naming the untargeted drain. That
+is a one-time release and is the intended migration: previously such a park
+could only be undone by an explicit `loom data agent start` per agent.
+
 ### Completing A Run (on_complete Hooks)
 
 An agent definition may carry an ordered `hooks.on_complete` pipeline. The

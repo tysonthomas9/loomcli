@@ -97,7 +97,7 @@ func (d *Daemon) handleAgentCommand(cmd *domain.AgentCommand) {
 	case "restart":
 		resp = d.handleAgentControlRestart(cmd.TargetAgentID)
 	case "yield":
-		resp = d.handleAgentControlYield(cmd.TargetAgentID)
+		resp = d.handleAgentControlYield(cmd.TargetAgentID, parseYieldTTL(cmd.Payload["ttl_seconds"]))
 	default:
 		resp = DaemonControlResponse{Error: fmt.Sprintf("unsupported agent command type %q", cmd.Type)}
 	}

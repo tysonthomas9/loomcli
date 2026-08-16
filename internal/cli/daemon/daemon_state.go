@@ -92,15 +92,21 @@ func ReadStateFile(path string) (*DaemonState, error) {
 }
 
 // writeStateFile writes the daemon-agents.json state file.
-func writeStateFile(path string, startedAt time.Time, agents []supervisor.SupervisedAgentStatus, quarantined []supervisor.QuarantinedTaskInfo, maxRetries int) error {
+func writeStateFile(path string, startedAt time.Time, agents []supervisor.SupervisedAgentStatus, parked []ParkedAgent, quarantined []supervisor.QuarantinedTaskInfo, maxRetries int) error {
 	state := DaemonState{
 		PID:              os.Getpid(),
 		StartedAt:        startedAt,
-		Agents:           make([]DaemonAgentStatus, len(agents)),
+		Agents:           make([]DaemonAgentStatus, len(agents), len(agents)+len(parked)),
 		QuarantinedTasks: quarantined,
 	}
 	for i, ap := range agents {
 		state.Agents[i] = toDaemonAgentStatus(ap, maxRetries)
+	}
+	// Parked agents are not in sup.Agents. Appending them here is what keeps a
+	// parked agent visible in `loom daemon status` and in the Agents count
+	// instead of silently disappearing from the fleet.
+	for _, p := range parked {
+		state.Agents = append(state.Agents, p.toDaemonAgentStatus())
 	}
 
 	data, err := json.MarshalIndent(state, "", "  ")

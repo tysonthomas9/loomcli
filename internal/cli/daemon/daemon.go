@@ -63,6 +63,14 @@ type Daemon struct {
 	// inputs holds each agent's outstanding interactive prompt so an operator
 	// can see and answer it (see daemon_input.go).
 	inputs *inputRegistry
+
+	// parked lists agents the daemon deliberately did not claim. They are not
+	// in sup.Agents, so they are carried here to reach the state file and
+	// `loom daemon status` instead of disappearing.
+	parked []ParkedAgent
+
+	// parkedTicks counts config-poll ticks for the parked-agent log throttle.
+	parkedTicks int
 }
 
 // configSnapshot returns a snapshot of the current config pointer under RLock.
@@ -115,9 +123,16 @@ func NewDaemon(config *cfgpkg.DaemonConfig, projectDir string, eventBus events.E
 	wireSupervisorCallbacks(sup, issueBackend)
 	loadSupervisorWorkspace(sup)
 
-	if err := initSupervisorAgents(sup, config.Agents, config.Roles); err != nil {
+	// Release drains left behind by a previous supervisor before the agent
+	// list is built: initSupervisorAgents reads config.Agents, so the clear
+	// has to land in memory first. Never fails daemon construction.
+	reconcileStaleDrains(sup, st, config)
+
+	parked, err := initSupervisorAgents(sup, config.Agents, config.Roles)
+	if err != nil {
 		return nil, err
 	}
+	d.parked = parked
 
 	d.sup = sup
 
@@ -335,18 +350,32 @@ func loadSupervisorWorkspace(sup *supervisor.Supervisor) {
 	}
 }
 
-// initSupervisorAgents creates agent processes from config entries.
-func initSupervisorAgents(sup *supervisor.Supervisor, agents []cfgpkg.AgentEntry, roles map[string]cfgpkg.RoleConfig) error {
+// initSupervisorAgents creates agent processes from config entries, returning
+// the agents it deliberately skipped.
+//
+// Skips are logged at Warn, not Info: an unclaimed agent is an anomaly an
+// operator needs to see, and logging it at Info is how a fleet-wide park once
+// went unnoticed for hours.
+func initSupervisorAgents(sup *supervisor.Supervisor, agents []cfgpkg.AgentEntry, roles map[string]cfgpkg.RoleConfig) ([]ParkedAgent, error) {
+	currentNodeID := sup.ResolveNodeID()
+	now := time.Now().UTC()
+	var parked []ParkedAgent
 	for i, entry := range agents {
-		if !entry.ShouldSuperviseWithRoles(roles) {
-			slog.Info("skipping agent with non-running desired state", "worktree", entry.Worktree, "desired_state", entry.DesiredState)
+		if !entry.ShouldSuperviseWithRoles(roles, currentNodeID, now) {
+			p := newParkedAgent(entry)
+			parked = append(parked, p)
+			slog.Warn("agent parked: not claiming",
+				"worktree", entry.Worktree,
+				"desired_state", string(entry.DesiredState),
+				"drain_expires_at", formatDrainExpiry(entry.DrainExpiresAt),
+				"resume", p.ResumeCommand)
 			continue
 		}
 		ap, err := sup.NewAgent(entry, i)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		sup.Agents = append(sup.Agents, ap)
 	}
-	return nil
+	return parked, nil
 }
