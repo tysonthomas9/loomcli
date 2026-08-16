@@ -450,7 +450,7 @@ describe("useTabInit", () => {
         writable: true,
         created_at: "2024-01-01T00:00:00Z",
         updated_at: "2024-01-01T00:00:00Z",
-        pty_alive: true,
+        attachable: true,
         attached_clients: 0,
       },
     ];
@@ -495,7 +495,7 @@ describe("useTabInit", () => {
         writable: true,
         created_at: "2024-01-01T00:00:00Z",
         updated_at: "2024-01-01T00:00:00Z",
-        pty_alive: true,
+        attachable: true,
         attached_clients: 0,
       },
       {
@@ -506,7 +506,7 @@ describe("useTabInit", () => {
         pinned: false,
         created_at: "2024-01-01T00:00:00Z",
         updated_at: "2024-01-01T00:00:00Z",
-        pty_alive: true,
+        attachable: true,
         attached_clients: 0,
       },
     ];
@@ -547,7 +547,7 @@ describe("useTabInit", () => {
         writable: true,
         created_at: "2024-01-01T00:00:00Z",
         updated_at: "2024-01-01T00:00:00Z",
-        pty_alive: true,
+        attachable: true,
         attached_clients: 0,
       },
     ];

@@ -809,13 +809,13 @@ export function TerminalView({
       const meta = metaBySession.get(tab.sessionName);
       // Undefined while metadata is still loading — preserves connect-on-
       // mount. Only concrete `false` gates auto-attach.
-      const ptyAlive = meta?.pty_alive;
+      const attachable = meta?.attachable;
       return (
         <TerminalPane
           tab={tab}
           isActive={paneIsActive}
           instanceRef={setInstanceRef(tab.id)}
-          ptyAlive={ptyAlive}
+          attachable={attachable}
           autoStartStaleSession={false}
           autoReconnect
           onConnectionStateChange={(state, hasConnected) =>

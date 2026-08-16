@@ -38,7 +38,7 @@ const mockMetadataHook = vi.hoisted(() => ({
     notes: string;
     sort_order: number;
     pinned: boolean;
-    pty_alive: boolean;
+    attachable: boolean;
     attached_clients: number;
     created_at: string;
     updated_at: string;
@@ -225,7 +225,7 @@ function setMetadata(
     notes?: string;
     sort_order?: number;
     pinned?: boolean;
-    pty_alive?: boolean;
+    attachable?: boolean;
     attached_clients?: number;
     kind?: string;
     agent_id?: string;
@@ -242,7 +242,7 @@ function setMetadata(
     notes: t.notes ?? "",
     sort_order: t.sort_order ?? i,
     pinned: t.pinned ?? false,
-    pty_alive: t.pty_alive ?? true,
+    attachable: t.attachable ?? true,
     attached_clients: t.attached_clients ?? 0,
     kind: t.kind,
     agent_id: t.agent_id,
@@ -284,7 +284,7 @@ describe("TerminalView", () => {
         role: "lead",
         backend: "codex",
         writable: true,
-        pty_alive: true,
+        attachable: true,
         attached_clients: 0,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
@@ -361,12 +361,12 @@ describe("TerminalView", () => {
         {
           session_name: "DESKTOP-QA--lead-codex-1",
           label: "lead-codex-1",
-          pty_alive: false,
+          attachable: false,
         },
         {
           session_name: "issue-PROJ-42",
           label: "issue-PROJ-42",
-          pty_alive: false,
+          attachable: false,
         },
       ]);
       render(<TerminalView />);
@@ -397,12 +397,12 @@ describe("TerminalView", () => {
           label: "agent-lead-ui-e2e",
           kind: "agent",
           agent_id: "lead-ui-e2e",
-          pty_alive: true,
+          attachable: true,
         },
         {
           session_name: "session-1",
           label: "Session 1",
-          pty_alive: true,
+          attachable: true,
         },
       ]);
       render(<TerminalView />);
@@ -632,7 +632,7 @@ describe("TerminalView", () => {
         {
           session_name: "session-1",
           label: "Session 1",
-          pty_alive: true,
+          attachable: true,
         },
       ]);
       const { rerender } = render(<TerminalView isActive />);
@@ -1226,7 +1226,7 @@ describe("TerminalView", () => {
         role: string;
         backend: string;
         writable: boolean;
-        pty_alive: boolean;
+        attachable: boolean;
         attached_clients: number;
         created_at: string;
         updated_at: string;
@@ -1283,7 +1283,7 @@ describe("TerminalView", () => {
           role: "lead",
           backend: "codex",
           writable: true,
-          pty_alive: true,
+          attachable: true,
           attached_clients: 0,
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),

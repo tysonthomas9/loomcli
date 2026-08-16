@@ -878,6 +878,21 @@ func (e SessionHistoryRecordStatus) Valid() bool {
 	}
 }
 
+// Defines values for TabMetadataReplacedReason.
+const (
+	ServerRestart TabMetadataReplacedReason = "server_restart"
+)
+
+// Valid indicates whether the value is a known member of the TabMetadataReplacedReason enum.
+func (e TabMetadataReplacedReason) Valid() bool {
+	switch e {
+	case ServerRestart:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for TranscriptEntryRole.
 const (
 	TranscriptEntryRoleAssistant TranscriptEntryRole = "assistant"
@@ -2721,6 +2736,19 @@ type Statistics struct {
 
 // TabMetadata Terminal tab metadata (Redis-backed)
 type TabMetadata struct {
+	// Attachable Whether connecting to this tab will yield a working PTY. True when a
+	// PTY is live in this server process, and also when the tab's metadata
+	// was created during this server process — such a tab has no PTY until
+	// the first WebSocket connects, and connecting spawns one.
+	//
+	// This is NOT a process-liveness check: true does not guarantee the
+	// child process is still running, only that the manager has not
+	// released the session. False means the tab metadata outlived its
+	// server (e.g. a restart) or its PTY has exited; clients should render
+	// the tab as "session ended" and prompt before reconnecting, since
+	// reconnecting spawns a fresh session.
+	Attachable bool `json:"attachable"`
+
 	// AttachedClients Count of concurrent WebSocket clients currently viewing this
 	// session. 0 means no one is attached (but the PTY may still be
 	// live, within its grace window). Values ≥2 can be surfaced as
@@ -2733,25 +2761,39 @@ type TabMetadata struct {
 	Notes           string    `json:"notes"`
 	Pinned          bool      `json:"pinned"`
 
-	// PtyAlive Whether the backend PTY for this tab is currently alive in the
-	// server process. False means the tab metadata survived (e.g. a
-	// server restart) but the PTY did not; clients should render the
-	// tab as "session ended" and prompt before reconnecting (which
-	// will spawn a fresh session).
-	PtyAlive    bool      `json:"pty_alive"`
-	SessionName string    `json:"session_name"`
-	SortOrder   int       `json:"sort_order"`
-	UpdatedAt   time.Time `json:"updated_at"`
-	Workspace   *string   `json:"workspace,omitempty"`
+	// ReplacedAt When this tab's shell was replaced by a fresh one — the previous
+	// PTY died with a previous server process. Absent means never
+	// replaced, or the marker was dismissed via PATCH. Unlike
+	// attachable this is persisted, so the marker survives a reload and
+	// is visible to every client.
+	ReplacedAt *time.Time `json:"replaced_at,omitempty"`
+
+	// ReplacedReason Why the shell was replaced. Server-written only; clients cannot
+	// set it. Present only alongside replaced_at.
+	ReplacedReason *TabMetadataReplacedReason `json:"replaced_reason,omitempty"`
+	SessionName    string                     `json:"session_name"`
+	SortOrder      int                        `json:"sort_order"`
+	UpdatedAt      time.Time                  `json:"updated_at"`
+	Workspace      *string                    `json:"workspace,omitempty"`
 }
+
+// TabMetadataReplacedReason Why the shell was replaced. Server-written only; clients cannot
+// set it. Present only alongside replaced_at.
+type TabMetadataReplacedReason string
 
 // TabPatchRequest All fields optional for partial update
 type TabPatchRequest struct {
-	IssueId   *string `json:"issue_id,omitempty"`
-	Label     *string `json:"label,omitempty"`
-	Notes     *string `json:"notes,omitempty"`
-	Pinned    *bool   `json:"pinned,omitempty"`
-	SortOrder *int    `json:"sort_order,omitempty"`
+	IssueId *string `json:"issue_id,omitempty"`
+	Label   *string `json:"label,omitempty"`
+	Notes   *string `json:"notes,omitempty"`
+	Pinned  *bool   `json:"pinned,omitempty"`
+
+	// ReplacedAt Dismiss the session-replacement marker by sending an empty
+	// string. A non-empty value must be an RFC3339 timestamp;
+	// anything else is rejected with 400. replaced_reason is not
+	// client-settable — the server owns its enum.
+	ReplacedAt *string `json:"replaced_at,omitempty"`
+	SortOrder  *int    `json:"sort_order,omitempty"`
 }
 
 // TabPutRequest defines model for TabPutRequest.

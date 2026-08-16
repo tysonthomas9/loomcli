@@ -119,7 +119,7 @@ export function useTerminalMetadata(
         // Optimistic; next ListTabs refresh returns the server's truth.
         // `replaced_at` is deliberately absent: a tab created just now has
         // never been replaced, and seeding it would flash a restart marker.
-        pty_alive: true,
+        attachable: true,
         attached_clients: 0,
       };
       let prev: TabMetadata[] = [];
