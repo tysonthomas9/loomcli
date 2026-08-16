@@ -37,7 +37,12 @@ type backendAdapter struct {
 
 var backendAdapters = map[string]backendAdapter{
 	"claude": {dirName: ".claude", fileName: "settings.json"},
-	"codex":  {dirName: ".codex", fileName: "hooks.json"},
+	// codex trust-gates repo-local hooks per handler and, in linked git
+	// worktrees, reads .codex from the root checkout instead of the worktree.
+	// Loom-owned containers therefore run the hook via the managed
+	// /etc/codex/requirements.toml baked into the local-mode image; this
+	// adapter covers host sessions, where the operator trusts it via /hooks.
+	"codex": {dirName: ".codex", fileName: "hooks.json"},
 }
 
 // SupportsBackend reports whether backend has a native hook adapter.

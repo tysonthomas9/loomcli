@@ -46,6 +46,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 ENV SHELL=/bin/bash
 
 COPY --from=builder /out/loom /usr/local/bin/loom
+# Managed codex hook policy: the pre-turn `loom skill materialize` hook runs
+# with managed provenance (no per-handler trust review), and unmanaged hooks —
+# including .codex/hooks.json inside cloned task repos — are refused. Only
+# codex reads /etc/codex, so the file is inert in non-codex image variants.
+COPY test/local-mode/codex-requirements.toml /etc/codex/requirements.toml
 COPY test/local-mode/local-mode-entrypoint /usr/local/bin/local-mode-entrypoint
 # A TUI harness needs a terminal type and a UTF-8 locale, and this image had
 # neither: TERM unset, LC_CTYPE=POSIX. Claude Code then renders nothing usable,
