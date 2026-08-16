@@ -13,7 +13,7 @@ export const NEEDS_REVISION_LABEL = "needs-revision";
 
 export type OpenStatus = "needs_plan" | "ready";
 
-export type ReviewType = "plan" | "code" | "help";
+export type ReviewType = "plan" | "code" | "help" | "recommendation";
 
 // --- Predicate interfaces ---
 
@@ -29,6 +29,7 @@ interface ReviewCheckable {
   status?: string;
   notes?: string;
   external_ref?: string | null;
+  labels?: string[];
 }
 
 // --- Simple predicates ---
@@ -111,6 +112,13 @@ export function getReviewType(issue: ReviewCheckable): ReviewType | null {
   const isReviewStatus = issue.status === "review";
   const isBlockedWithNotes = issue.status === "blocked" && !!issue.notes;
   const hasExternalPR = isPRUrl(issue.external_ref);
+
+  // Recommendation triage: a quarantined scout proposal awaiting a human
+  // verdict. Checked first — a recommendation has no PR and no plan to review;
+  // Approve releases the quarantine, Reject dismisses it for good.
+  if (isReviewStatus && (issue.labels?.includes("recommended") ?? false)) {
+    return "recommendation";
+  }
 
   // Code review: status=review AND external_ref is a PR URL
   if (isReviewStatus && hasExternalPR) {

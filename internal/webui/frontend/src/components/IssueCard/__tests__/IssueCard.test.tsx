@@ -88,6 +88,29 @@ describe("IssueCard", () => {
 
       expect(container.querySelector("article")).toBeInTheDocument();
     });
+
+    it("renders non-repo labels with an accented Recommended badge and overflow cap", () => {
+      const issue = createTestIssue({
+        labels: [
+          "backend",
+          "repo:loomcli",
+          "needs-design",
+          "recommended",
+          "ux",
+        ],
+      });
+      renderIssueCard(<IssueCard issue={issue} />);
+
+      expect(screen.getByText("Recommended")).toHaveAttribute(
+        "data-variant",
+        "recommended",
+      );
+      expect(screen.getByText("backend")).toBeInTheDocument();
+      expect(screen.getByText("needs-design")).toBeInTheDocument();
+      expect(screen.queryByText("repo:loomcli")).not.toBeInTheDocument();
+      expect(screen.queryByText("ux")).not.toBeInTheDocument();
+      expect(screen.getByText("+1")).toHaveAccessibleName("1 more label");
+    });
   });
 
   // The visible priority badge was removed for the Aether V3 design (tickets

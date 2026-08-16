@@ -73,6 +73,7 @@ import { ConfirmDialog } from "../ConfirmDialog";
 import { MoveIssueDialog } from "./actions";
 import { SplitDetailSummary } from "./SplitDetailSummary";
 import { EmbeddedTerminal } from "../EmbeddedTerminal";
+import { IssueLabelChips } from "../IssueLabelChips";
 import { ResizeDivider } from "./actions";
 import { ErrorToast } from "../ErrorToast";
 import { useSplitRatio, useToast } from "@/hooks/ui";
@@ -1227,6 +1228,7 @@ function DefaultContent({
               isSaving={isSavingRepo}
             />
           )}
+          <IssueLabelChips labels={issue.labels} />
           {issue.created_at && (
             <span
               className={styles.metadataItem}
@@ -1607,7 +1609,7 @@ export function IssueDetailPanel({
   onCopyLink,
   onNavigateToIssue,
   inline = false,
-}: IssueDetailPanelProps): JSX.Element {
+}: IssueDetailPanelProps): JSX.Element | null {
   const panelRef = useRef<HTMLElement>(null);
 
   // Full-page maximize toggle for the slide-over.
@@ -1641,6 +1643,11 @@ export function IssueDetailPanel({
   // Focus management: only meaningful for the slide-out overlay.
   useFocusReturn(isOpen && !inline, { focusTarget: panelRef });
   useFocusTrap(panelRef, isOpen && !inline);
+
+  // A closed slide-out must not leave a full-viewport element behind. Hidden
+  // overlays still intercept automation click guards and can confuse assistive
+  // technology even when CSS visibility suppresses normal pointer events.
+  if (!isOpen && !inline) return null;
 
   // Determine content: children override default, otherwise render default content
   const content = children ?? (

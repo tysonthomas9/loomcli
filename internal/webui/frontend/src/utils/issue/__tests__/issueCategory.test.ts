@@ -238,6 +238,49 @@ describe("getReviewType", () => {
     });
   });
 
+  describe("recommendation review", () => {
+    it('returns "recommendation" when status is review with the recommended label', () => {
+      expect(
+        getReviewType({
+          title: "Start the topic bridge",
+          status: "review",
+          labels: ["recommended", "repo:loomcli"],
+        }),
+      ).toBe("recommendation");
+    });
+
+    it("wins over code review when a recommended issue somehow carries a PR ref", () => {
+      expect(
+        getReviewType({
+          title: "Task",
+          status: "review",
+          labels: ["recommended"],
+          external_ref: "https://github.com/owner/repo/pull/42",
+        }),
+      ).toBe("recommendation");
+    });
+
+    it("does not fire for the recommended label outside review status", () => {
+      expect(
+        getReviewType({
+          title: "Task",
+          status: "open",
+          labels: ["recommended"],
+        }),
+      ).toBeNull();
+    });
+
+    it('still returns "plan" for review status without the recommended label', () => {
+      expect(
+        getReviewType({
+          title: "Task",
+          status: "review",
+          labels: ["ux"],
+        }),
+      ).toBe("plan");
+    });
+  });
+
   describe("help review", () => {
     it('returns "help" when status is "blocked" with notes', () => {
       expect(

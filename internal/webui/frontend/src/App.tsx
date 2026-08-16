@@ -717,6 +717,15 @@ function App() {
             "PR approved after code review",
           );
           await refetch();
+        } else if (reviewType === "recommendation") {
+          // Recommendation triage: approving releases the quarantine. One
+          // atomic update — status and label together — so the issue never
+          // sits open-but-quarantined if the second write were to fail.
+          await updateIssue(workspaceId, issue.id, {
+            status: "open",
+            remove_labels: ["recommended"],
+          });
+          await refetch();
         } else if (reviewType === "plan") {
           // Plan review: Move to open (ready for implementation)
           await updateIssueStatus(issue.id, "open");
@@ -732,7 +741,7 @@ function App() {
         // Only show toast for non-updateIssueStatus errors (e.g., closeIssue)
         if (!mountedRef.current) return;
         const reviewType = getReviewType(issue);
-        if (reviewType === "code") {
+        if (reviewType === "code" || reviewType === "recommendation") {
           const message =
             err instanceof Error ? err.message : "Failed to approve";
           showToast(message, { type: "error" });
@@ -748,15 +757,23 @@ function App() {
       try {
         const reviewType = getReviewType(issue);
 
-        // Add feedback comment
-        const prefix = reviewType === "code" ? "CODE REVIEW" : "FEEDBACK";
-        await addComment(workspaceId, issue.id, `${prefix}: ${comment}`);
+        if (reviewType === "recommendation") {
+          // Rejecting a recommendation dismisses it: closed with the
+          // recommended label kept, so the scout's dedupe never proposes it
+          // again. The comment records why it was turned down.
+          await addComment(workspaceId, issue.id, `DISMISSED: ${comment}`);
+          await updateIssue(workspaceId, issue.id, { status: "closed" });
+        } else {
+          // Add feedback comment
+          const prefix = reviewType === "code" ? "CODE REVIEW" : "FEEDBACK";
+          await addComment(workspaceId, issue.id, `${prefix}: ${comment}`);
 
-        // Add needs-revision label and set status to open
-        await updateIssue(workspaceId, issue.id, {
-          status: "open",
-          add_labels: ["needs-revision"],
-        });
+          // Add needs-revision label and set status to open
+          await updateIssue(workspaceId, issue.id, {
+            status: "open",
+            add_labels: ["needs-revision"],
+          });
+        }
 
         // Refetch to reflect label/status changes and close panel
         await refetch();

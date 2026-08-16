@@ -9,6 +9,7 @@ import { useStoreWithEqualityFn } from "zustand/traditional";
 
 import { BlockedBadge } from "@/components/BlockedBadge";
 import { HighlightText } from "@/components/HighlightText";
+import { IssueLabelChips } from "@/components/IssueLabelChips";
 import { RepoBadge } from "@/components/RepoBadge";
 import { useHasActiveSession } from "@/contexts/IssueSessionContext";
 import { useSearchTerm } from "@/contexts/SearchTermContext";
@@ -32,7 +33,9 @@ import styles from "./IssueCard.module.css";
  * design's plan-badge (no emoji adornments).
  */
 const REVIEW_BADGE_CONFIG: Record<
-  Exclude<ReviewType, "plan">,
+  // Recommendations are excluded like plans: the amber Recommended label chip
+  // already marks them, so a second badge would be noise.
+  Exclude<ReviewType, "plan" | "recommendation">,
   { label: string; className: string }
 > = {
   code: { label: "Code", className: styles.reviewCode ?? "" },
@@ -250,7 +253,10 @@ export const IssueCard = memo(function IssueCard({
         </span>
         <span className={styles.icons}>
           {columnId !== "done" && <CopyIssueIdButton issueId={issue.id} />}
-          {reviewType && reviewType !== "plan" && columnId !== "review" && (
+          {reviewType &&
+            reviewType !== "plan" &&
+            reviewType !== "recommendation" &&
+            columnId !== "review" && (
             <span
               className={`${styles.reviewTypeBadge} ${styles.hoverReveal} ${REVIEW_BADGE_CONFIG[reviewType].className}`}
               aria-label={`${REVIEW_BADGE_CONFIG[reviewType].label} review`}
@@ -322,6 +328,11 @@ export const IssueCard = memo(function IssueCard({
       <h3 className={styles.title}>
         <HighlightText text={displayTitle} searchTerm={searchTerm} />
       </h3>
+      <IssueLabelChips
+        labels={issue.labels}
+        maxVisible={3}
+        className={styles.labels}
+      />
       {showFooter && (
         <footer className={styles.footer}>
           <div className={styles.footerLeft}>

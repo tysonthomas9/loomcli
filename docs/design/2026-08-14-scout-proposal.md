@@ -19,8 +19,9 @@ creates up to five quarantined **recommended issues** per run, and maintains
 two files at the workspace root: `agents.md` (workspace-level agent
 onboarding notes) and `history.md` (the scout's own run journal and dedupe
 memory). Recommendations are real fleet-db issues from the moment they are
-created; a `recommended` label quarantines them from every automatic claim
-path until a human **blesses** them by removing the label.
+created; they are born in `review` status with a `recommended` label, so they
+surface in the human review queue and stay quarantined from every automatic
+claim path until a human **accepts** them via the review bar's Approve.
 
 This proposal is the destination of the Scout wayfinder map
 (`.scratch/scout/issues/` tickets 01–06, all resolved; charting decisions
@@ -41,9 +42,24 @@ ends at the spec.
   carrying the `recommended` label (canonical spelling: lowercase — fleet-db
   compares labels case-sensitively, `fleet-db/internal/models/role.go:203-204`)
   plus the existing `repo:<name>` routing label.
-- **Blessing** — a human removing the `recommended` label, which releases the
-  issue for auto-claim. This is the one and only bless mechanism: CLI
-  `loom data update --remove-label` or the web label UI. No new UI surface.
+- **Accepting** — approving a recommendation on the standard review bar
+  (recommendations are created in `review` status, so they carry the same
+  Approve/Reject affordance as plan and code reviews). Approve releases the
+  quarantine in one atomic update — status to `open` plus removal of the
+  `recommended` label — so the issue can never sit open-but-quarantined.
+  CLI equivalent: `loom data update --status open --remove-label recommended`.
+  (Terminology note: earlier drafts called this "blessing"; renamed
+  2026-08-15.)
+- **Dismissing** — rejecting a recommendation on the review bar. The reject
+  comment is recorded as `DISMISSED: <reason>` and the issue closes while it
+  keeps the `recommended` label; the closed issue stays visible to the
+  scout's dedupe pass, so a dismissed recommendation is never re-proposed.
+  Unlike plan/code rejection, no `needs-revision` label and no reopen. CLI
+  equivalent: `loom data update --status closed`.
+- The quarantine is **layered**: `review` status is the primary UX surface
+  (review queue, ready set excludes non-open statuses) and the fleet-db
+  ready-filter on the `recommended` label is the enforcement backstop — a
+  stray status flip alone cannot release a recommendation.
 - **Journal** — `history.md`, the scout's append-only run log and dedupe
   memory at the workspace root. It is *not* a general workspace activity log.
 - Loom's canonical noun is **issue**, not ticket; **lead** is taken
@@ -241,7 +257,7 @@ Bearer auth; camelCase; only `title` required):
   "repo": "string (optional; → CreateParams.SourceRepo → fleet-db 'repo')",
   "parent": "string (optional; create-time only — PATCH cannot set parent later)",
   "design": "string (optional; → fleet-db 'design')",
-  "status": "open|deferred (optional; any other value is a fleet-db 400)",
+  "status": "open|deferred|review (optional; the scout passes review to park recommendations in the human review queue; any other value is a 400)",
   "idempotencyKey": "string (optional, <=128 printable ASCII; default: sha256(utcDate + '\\x00' + wire body))"
 }
 ```
@@ -320,7 +336,7 @@ const issue = await loom.issues.create({
 });
 ```
 
-## Quarantine and blessing
+## Quarantine and acceptance
 
 The quarantine audit (ticket 01) enumerated every path an agent can acquire
 a task and found the decisive fact: **every automatic acquisition path
@@ -339,7 +355,7 @@ query param parsed in `parseReadyFilter` (`fleet-db/internal/api/ready.go:124`)
 and threaded through `service.ReadyFilter`
 (`fleet-db/internal/service/ready.go:33,101`). Enforcement sits at **query
 time**, not eligibility/index time: label edits take effect instantly, and
-blessing (removing the label) de-quarantines with no ready-queue membership
+accepting (removing the label) de-quarantines with no ready-queue membership
 rebuild. Client plumbing for the opt-in rides on `backend.ReadyOpts`
 (`internal/backend/types.go:252`) → `readyOptsToQuery`
 (`internal/backend/fleet/params.go:222`), needed only by callers that must
@@ -528,7 +544,7 @@ for the MVP: revisiting isolation is a platform-wide effort, not scout's.
   through `backend.CreateParams` / the create-issue op so provenance is
   machine-queryable beyond the label; judged non-trivial in ticket 02
   (frozen idempotency-hash projection + deployed-server compat risk).
-- **Blessing ergonomics** — bulk bless, notification when new
+- **Triage ergonomics** — bulk accept, notification when new
   recommendations land, surfacing counts in existing UI lists; wait until
   the label flow is felt in practice.
 - **Cost/model tuning** for the leaf (cheaper pinned model, thinner backend
@@ -609,7 +625,7 @@ out of gates.
 **Unit (deterministic, no provisioning, both polarities):**
 
 - fleet-db: `matchesReadyFilter` default-excludes `recommended`; opt-in
-  includes it; case-sensitive exact match; blessing (label removal) makes
+  includes it; case-sensitive exact match; acceptance (label removal) makes
   the issue ready with no re-index. Negative: a recommended issue never
   appears in the default ready view.
 - loomcli op handler: `create-issue` via the existing driverapi harness
@@ -641,7 +657,7 @@ via the existing `test-fleetdb-*` lanes):**
   next-day/next-run key mints fresh.
 - Ready-view round trip: created recommended issue invisible to
   `loom data ready` and supervisor claim; visible with the opt-in; claimable
-  by explicit ID (the human path, positive); blessed issue claimed by the
+  by explicit ID (the human path, positive); accepted issue claimed by the
   normal auto path.
 - Hook-to-run: workspace create on a real store seeds binding + run;
   `EnsureBuiltinWorkflow` at seed (needs the flue toolchain — provisioning
