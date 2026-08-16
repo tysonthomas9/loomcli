@@ -177,3 +177,42 @@ jobs:
             test/playground/.runtime-*/daemon.log
             test/playground/.runtime-*/setup.log
           if-no-files-found: ignore
+
+  compose-smoke:
+    # End-to-end smoke of the SHIPPED compose stacks (docker-compose.dev.yml
+    # and deploy/docker-compose.yml). Deliberately NOT in ci.yml: it builds
+    # four images including an `npm ci` frontend build and runs for minutes.
+    #
+    # Getting it into *some* scheduled job is the entire point — both compose
+    # files rotted into an unstartable state because nothing ever ran them.
+    #
+    # Needs the same FLEET_DB_REPO_TOKEN secret as the Playground job (see the
+    # operator setup notes there). Starts as continue-on-error while we gather
+    # signal; flip to false once it has been green for a while.
+    name: Compose smoke (shipped stacks)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    continue-on-error: true
+    steps:
+      # Both repos are checked out as SIBLINGS: the compose files build
+      # fleet-db from ../fleet-db relative to the loomcli repo root.
+      - name: Checkout loomcli
+        uses: actions/checkout@v4
+        with:
+          path: loomcli
+
+      - name: Checkout fleet-db (sibling repo)
+        uses: actions/checkout@v4
+        with:
+          repository: BrowserOperator/fleet-db
+          path: fleet-db
+          token: ${{ secrets.FLEET_DB_REPO_TOKEN }}
+
+      - name: Run compose smoke
+        working-directory: loomcli
+        run: make compose-smoke
+
+      - name: Dump stack logs on failure
+        if: failure()
+        working-directory: loomcli
+        run: docker compose -f docker-compose.dev.yml logs --tail 200 || true
