@@ -8,8 +8,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/driver"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 const WorkflowSourceSchemaVersion = "1"
@@ -33,11 +33,11 @@ type LocalSource struct {
 func CloneBuiltinSource(name, outDir string) (*SourceManifest, error) {
 	spec, ok := BuiltinWorkflow(name)
 	if !ok {
-		return nil, fmt.Errorf("built-in workflow %q: %w", name, domain.ErrNotFound)
+		return nil, fmt.Errorf("built-in workflow %q: %w", name, persistence.ErrNotFound)
 	}
 	outDir = strings.TrimSpace(outDir)
 	if outDir == "" {
-		return nil, fmt.Errorf("output directory required: %w", domain.ErrInvalid)
+		return nil, fmt.Errorf("output directory required: %w", persistence.ErrInvalid)
 	}
 	manifest := SourceManifest{
 		SchemaVersion: WorkflowSourceSchemaVersion,
@@ -62,7 +62,7 @@ func CloneBuiltinSource(name, outDir string) (*SourceManifest, error) {
 func ReadLocalSource(workflow, sourceDir string) (*LocalSource, error) {
 	sourceDir = strings.TrimSpace(sourceDir)
 	if sourceDir == "" {
-		return nil, fmt.Errorf("source directory required: %w", domain.ErrInvalid)
+		return nil, fmt.Errorf("source directory required: %w", persistence.ErrInvalid)
 	}
 	manifest, err := readSourceManifest(sourceDir)
 	if err != nil {
@@ -73,10 +73,10 @@ func ReadLocalSource(workflow, sourceDir string) (*LocalSource, error) {
 		manifest.DriverID = strings.TrimSpace(workflow)
 	}
 	if manifest.DriverID == "" {
-		return nil, fmt.Errorf("workflow driver_id required: %w", domain.ErrInvalid)
+		return nil, fmt.Errorf("workflow driver_id required: %w", persistence.ErrInvalid)
 	}
 	if workflow = strings.TrimSpace(workflow); workflow != "" && workflow != manifest.DriverID {
-		return nil, fmt.Errorf("workflow %q does not match source driver_id %q: %w", workflow, manifest.DriverID, domain.ErrInvalid)
+		return nil, fmt.Errorf("workflow %q does not match source driver_id %q: %w", workflow, manifest.DriverID, persistence.ErrInvalid)
 	}
 	if manifest.Entrypoint == "" {
 		manifest.Entrypoint = filepath.ToSlash(filepath.Join("workflows", manifest.DriverID+".ts"))
@@ -96,7 +96,7 @@ func ReadLocalSource(workflow, sourceDir string) (*LocalSource, error) {
 		return nil, err
 	}
 	if _, ok := files[manifest.Entrypoint]; !ok {
-		return nil, fmt.Errorf("entrypoint %s not found in source files: %w", manifest.Entrypoint, domain.ErrInvalid)
+		return nil, fmt.Errorf("entrypoint %s not found in source files: %w", manifest.Entrypoint, persistence.ErrInvalid)
 	}
 	runners := []driver.DriverRunnerSpec(nil)
 	if len(manifest.Runners) > 0 {
@@ -136,7 +136,7 @@ func writeSourceManifest(root string, manifest SourceManifest) error {
 	}
 	path := filepath.Join(root, "workflow.json")
 	if _, err := os.Stat(path); err == nil {
-		return fmt.Errorf("%s already exists: %w", path, domain.ErrAlreadyExists)
+		return fmt.Errorf("%s already exists: %w", path, persistence.ErrAlreadyExists)
 	} else if err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("stat workflow manifest: %w", err)
 	}
@@ -158,7 +158,7 @@ func writeNewSourceFile(root, rel, content string) error {
 	}
 	path := filepath.Join(root, filepath.FromSlash(rel))
 	if _, err := os.Stat(path); err == nil {
-		return fmt.Errorf("%s already exists: %w", path, domain.ErrAlreadyExists)
+		return fmt.Errorf("%s already exists: %w", path, persistence.ErrAlreadyExists)
 	} else if err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("stat workflow source file: %w", err)
 	}
@@ -199,7 +199,7 @@ func readWorkflowSourceFiles(root string) (map[string]string, error) {
 		}
 		rel = filepath.ToSlash(rel)
 		if filepath.Ext(rel) != ".ts" {
-			return fmt.Errorf("%s is not a TypeScript workflow source file: %w", rel, domain.ErrInvalid)
+			return fmt.Errorf("%s is not a TypeScript workflow source file: %w", rel, persistence.ErrInvalid)
 		}
 		data, err := os.ReadFile(path) //nolint:gosec // path is produced by WalkDir under the source root and validated before use.
 		if err != nil {
@@ -211,7 +211,7 @@ func readWorkflowSourceFiles(root string) (map[string]string, error) {
 		return nil, fmt.Errorf("read workflow source files: %w", err)
 	}
 	if len(files) == 0 {
-		return nil, fmt.Errorf("workflow source directory has no .ts files: %w", domain.ErrInvalid)
+		return nil, fmt.Errorf("workflow source directory has no .ts files: %w", persistence.ErrInvalid)
 	}
 	return files, nil
 }
@@ -248,12 +248,12 @@ func validateSourceDependencies(deps map[string]string) error {
 		switch name {
 		case "@loom/sdk", "@flue/runtime", "@daytona/sdk":
 		default:
-			return fmt.Errorf("workflow dependency %q is not supported in phase 1: %w", name, domain.ErrInvalid)
+			return fmt.Errorf("workflow dependency %q is not supported in phase 1: %w", name, persistence.ErrInvalid)
 		}
 		switch mode {
 		case "", "local", "optional-local":
 		default:
-			return fmt.Errorf("workflow dependency %q has unsupported mode %q: %w", name, mode, domain.ErrInvalid)
+			return fmt.Errorf("workflow dependency %q has unsupported mode %q: %w", name, mode, persistence.ErrInvalid)
 		}
 	}
 	return nil

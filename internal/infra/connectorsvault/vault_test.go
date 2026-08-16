@@ -10,7 +10,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 func testKey(t *testing.T, b byte) []byte {
@@ -181,8 +181,8 @@ func TestNewVaultKeyShape(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if _, err := NewVault(tt.key); !errors.Is(err, ErrVaultKeyInvalid) {
 				t.Fatalf("NewVault err = %v, want ErrVaultKeyInvalid", err)
-			} else if !errors.Is(err, domain.ErrInvalid) {
-				t.Fatalf("NewVault err = %v, want wrap of domain.ErrInvalid", err)
+			} else if !errors.Is(err, persistence.ErrInvalid) {
+				t.Fatalf("NewVault err = %v, want wrap of persistence.ErrInvalid", err)
 			}
 		})
 	}

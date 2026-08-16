@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/automation"
+
 	"github.com/tysonthomas9/loomcli/internal/app/prreviewer"
 	infrafleetdb "github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
 	"github.com/tysonthomas9/loomcli/internal/modules/agents"
@@ -16,7 +18,6 @@ import (
 	workflowcataloghttp "github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog/httpapi"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 	platformruntime "github.com/tysonthomas9/loomcli/internal/platform/runtime"
-	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
 // AgentsCapability is the composition-owned Phase 5 Agents handle. Consumers
@@ -136,7 +137,7 @@ func (capability *AgentsCapability) PRReviewerProvisioning() prreviewer.Commands
 
 type AgentsConfig struct {
 	FleetDBClient                   *infrafleetdb.Client
-	TriggerBindings                 store.TriggerBindingStore
+	TriggerBindings                 automation.TriggerBindingStore
 	WorkspaceKey                    string
 	WorkspaceLister                 agents.RuntimeWorkspaceLister
 	ExternalAuth                    bool
@@ -229,12 +230,12 @@ func agentsOperatorActions() []authority.Action {
 }
 
 type agentBindingStateSource struct {
-	bindings store.TriggerBindingStore
+	bindings automation.TriggerBindingStore
 }
 
 var _ agents.DesiredStateBindingSource = (*agentBindingStateSource)(nil)
 
-func newAgentBindingStateSource(bindings store.TriggerBindingStore) agents.DesiredStateBindingSource {
+func newAgentBindingStateSource(bindings automation.TriggerBindingStore) agents.DesiredStateBindingSource {
 	if bindings == nil {
 		return nil
 	}
@@ -249,7 +250,7 @@ func (source *agentBindingStateSource) ListAgentBindingStates(
 	if source == nil || source.bindings == nil {
 		return nil, agents.ErrUnavailable
 	}
-	bindings, err := source.bindings.List(ctx, workspace, store.TriggerBindingFilter{
+	bindings, err := source.bindings.List(ctx, workspace, automation.TriggerBindingFilter{
 		TargetAgentServiceID: agentID,
 	})
 	if err != nil {

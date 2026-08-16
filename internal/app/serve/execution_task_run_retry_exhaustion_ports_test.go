@@ -6,7 +6,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 )
@@ -142,15 +141,15 @@ func TestFleetTaskRunRetryExhaustionPortRejectsMismatchedWorkItemIdentity(t *tes
 
 func retryExhaustionFleetResult(issue *fleetdb.ExecutionIssue, issueBlocked, replayed bool) *fleetdb.ExecutionTaskRunRetryExhaustionResult {
 	return &fleetdb.ExecutionTaskRunRetryExhaustionResult{
-		TaskRun: &domain.TaskRun{
-			WorkspaceKey: "WS", TaskRunID: "task-run-1", TaskID: "TASK-1", Status: domain.TaskRunFailed,
+		TaskRun: &execution.TaskRunRecord{
+			WorkspaceKey: "WS", TaskRunID: "task-run-1", TaskID: "TASK-1", Status: execution.TaskRunRecordFailed,
 		},
 		Issue: issue,
 		Action: &fleetdb.ExecutionActionLedger{
 			WorkspaceKey: "WS", ActionID: "task-run-exhaust:exhaust-1",
 		},
 		Committed: fleetdb.ExecutionTaskRunRetryExhaustionCommit{
-			WorkspaceKey: "WS", TaskRunID: "task-run-1", TaskID: "TASK-1", Status: domain.TaskRunFailed,
+			WorkspaceKey: "WS", TaskRunID: "task-run-1", TaskID: "TASK-1", Status: execution.TaskRunRecordFailed,
 			IssueBlocked: issueBlocked, Attempt: 3, MaxAttempts: 3,
 			ErrorClass: "agent_failed", ErrorMessage: "retry budget exhausted", FinishedAt: retryExhaustionPortFinishedAt(),
 		},

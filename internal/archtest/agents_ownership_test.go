@@ -23,7 +23,6 @@ func TestPhase5AgentsMutationMethodClassificationIsComplete(t *testing.T) {
 			Dir:  root,
 			Env:  os.Environ(),
 		},
-		"./internal/store",
 		"./internal/modules/agents",
 	)
 	if err != nil {
@@ -109,6 +108,11 @@ func TestPhase5AgentsOwnershipBlockerRatchet(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	patterns, err := phase5AgentsMutationCandidatePatterns(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("Agents ownership type-check candidates: %d packages", len(patterns))
 	mutations, err := snapshotPhase5AgentsMutations(root, matrix)
 	if err != nil {
 		t.Fatal(err)
@@ -146,17 +150,15 @@ func TestMergePhase5AgentsMutationProfilesPreservesProfileEvidence(t *testing.T)
 func TestCollectPhase5AgentsMutationPackageUsesDeclaringInterfaceType(t *testing.T) {
 	root := t.TempDir()
 	writePhase5AgentsOwnershipFixture(t, root, "go.mod", "module github.com/tysonthomas9/loomcli\n\ngo 1.24\n")
-	writePhase5AgentsOwnershipFixture(t, root, "internal/store/store.go", `package store
-type RoleStore interface {
-	Create()
-	Get()
-}
+	writePhase5AgentsOwnershipFixture(t, root, "internal/modules/agents/ports.go", `package agents
 type AgentServiceStore interface {
 	Update()
 	List()
 }
-`)
-	writePhase5AgentsOwnershipFixture(t, root, "internal/modules/agents/ports.go", `package agents
+type RoleRecordStore interface {
+	Create()
+	Get()
+}
 type RoleStore interface {
 	DeleteRole()
 	GetRole()
@@ -177,17 +179,16 @@ type OwnershipStore interface {
 `)
 	writePhase5AgentsOwnershipFixture(t, root, "internal/sample/sample.go", `package sample
 import (
-	"github.com/tysonthomas9/loomcli/internal/modules/agents"
-	"github.com/tysonthomas9/loomcli/internal/store"
+	agentsowner "github.com/tysonthomas9/loomcli/internal/modules/agents"
 )
 func mutate(
-	legacyRole store.RoleStore,
-	legacyAgent store.AgentServiceStore,
-	role agents.RoleStore,
-	identity agents.AgentIdentityStore,
-	desired agents.DesiredStateStore,
-	lifecycle agents.LifecycleStore,
-	ownership agents.OwnershipStore,
+	legacyRole agentsowner.RoleRecordStore,
+	legacyAgent agentsowner.AgentServiceStore,
+	role agentsowner.RoleStore,
+	identity agentsowner.AgentIdentityStore,
+	desired agentsowner.DesiredStateStore,
+	lifecycle agentsowner.LifecycleStore,
+	ownership agentsowner.OwnershipStore,
 ) {
 	_ = legacyRole.Create
 	legacyRole.Get()

@@ -6,8 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 )
 
 // The optional task-run Input payload is persisted on create and returned
@@ -28,21 +27,21 @@ func TestTaskRunInputRoundTripMem(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := t.Context()
 			s := New()
-			if _, err := s.Nodes().Create(ctx, store.NodeCreate{
+			if _, err := s.Nodes().Create(ctx, execution.NodeCreate{
 				WorkspaceKey:    "WS",
 				NodeID:          "node-1",
-				RuntimeProvider: domain.RuntimeProviderLocal,
-				DrainState:      domain.NodeDrainActive,
+				RuntimeProvider: execution.RuntimeProviderLocal,
+				DrainState:      execution.WorkerNodeActive,
 				TTL:             time.Hour,
 			}); err != nil {
 				t.Fatalf("Create node: %v", err)
 			}
 
-			created, err := s.TaskRuns().Create(ctx, store.TaskRunCreate{
+			created, err := s.TaskRuns().Create(ctx, execution.TaskRunCreate{
 				WorkspaceKey: "WS",
 				TaskRunID:    "run-1",
 				TaskID:       "WS-1",
-				Status:       domain.TaskRunQueued,
+				Status:       execution.TaskRunRecordQueued,
 				Input:        tc.in,
 			})
 			if err != nil {
@@ -56,7 +55,7 @@ func TestTaskRunInputRoundTripMem(t *testing.T) {
 			}
 			assertInput(t, "get", got.Input, tc.want)
 
-			runs, err := s.TaskRuns().List(ctx, "WS", store.TaskRunFilter{})
+			runs, err := s.TaskRuns().List(ctx, "WS", execution.TaskRunFilter{})
 			if err != nil {
 				t.Fatalf("List: %v", err)
 			}
@@ -65,7 +64,7 @@ func TestTaskRunInputRoundTripMem(t *testing.T) {
 			}
 			assertInput(t, "list", runs[0].Input, tc.want)
 
-			claimed, err := s.TaskRuns().ClaimQueued(ctx, "WS", store.TaskRunClaim{
+			claimed, err := s.TaskRuns().ClaimQueued(ctx, "WS", execution.TaskRunClaim{
 				NodeID:  "node-1",
 				LeaseID: "lease-1",
 			})

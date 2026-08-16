@@ -5,14 +5,14 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/modules/artifacts"
 	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
-	"github.com/tysonthomas9/loomcli/internal/store"
+
+	"github.com/tysonthomas9/loomcli/internal/modules/artifacts"
 )
 
 type sessionRuntimeFixtureStore interface {
-	store.Store
+	AgentSessions() interaction.AgentSessionStore
+	AgentInboxMessages() interaction.AgentInboxMessageStore
 	SeedArtifact(context.Context, artifacts.Artifact, []byte) (*artifacts.Artifact, error)
 }
 
@@ -31,7 +31,7 @@ func (runtime *storeBackedSessionRuntime) Enqueue(
 	ctx context.Context,
 	command interaction.EnqueueInboxCommand,
 ) (*interaction.InboxMessage, error) {
-	message, err := runtime.store.AgentInboxMessages().Create(ctx, store.AgentInboxMessageCreate{
+	message, err := runtime.store.AgentInboxMessages().Create(ctx, interaction.AgentInboxMessageCreate{
 		WorkspaceKey: command.WorkspaceKey, TargetAgentID: command.TargetAgentID,
 		SessionID: command.SessionID, Body: command.Body,
 		SourceKind: command.SourceKind, SourceRef: command.SourceRef,
@@ -75,7 +75,7 @@ func (runtime *storeBackedSessionRuntime) PatchSessionRuntimeContext(
 		ctx,
 		command.WorkspaceKey,
 		command.SessionID,
-		store.AgentSessionUpdate{Phase: command.Phase, Metadata: &metadata},
+		interaction.AgentSessionUpdate{Phase: command.Phase, Metadata: &metadata},
 	)
 	return err
 }
@@ -125,8 +125,8 @@ func (runtime *storeBackedSessionRuntime) FinishSession(
 	ctx context.Context,
 	command interaction.FinishSessionCommand,
 ) error {
-	status := domain.AgentSessionStatus(command.Status)
-	_, err := runtime.store.AgentSessions().Update(ctx, command.WorkspaceKey, command.SessionID, store.AgentSessionUpdate{
+	status := interaction.SessionRecordStatus(command.Status)
+	_, err := runtime.store.AgentSessions().Update(ctx, command.WorkspaceKey, command.SessionID, interaction.AgentSessionUpdate{
 		Status:     &status,
 		Summary:    &command.Summary,
 		ErrorClass: &command.ErrorClass,
@@ -139,7 +139,7 @@ func (runtime *storeBackedSessionRuntime) ClaimNextInbox(
 	ctx context.Context,
 	command interaction.ClaimInboxCommand,
 ) (*interaction.InboxMessage, error) {
-	message, err := runtime.store.AgentInboxMessages().ClaimNext(ctx, store.AgentInboxMessageClaim{
+	message, err := runtime.store.AgentInboxMessages().ClaimNext(ctx, interaction.AgentInboxMessageClaim{
 		WorkspaceKey:  command.WorkspaceKey,
 		TargetAgentID: command.AgentID,
 		SessionID:     command.SessionID,
@@ -152,7 +152,7 @@ func (runtime *storeBackedSessionRuntime) ClaimNextInbox(
 	return interactionInboxMessageForTest(message), nil
 }
 
-func interactionInboxMessageForTest(message *domain.AgentInboxMessage) *interaction.InboxMessage {
+func interactionInboxMessageForTest(message *interaction.InboxRecord) *interaction.InboxMessage {
 	if message == nil {
 		return nil
 	}
@@ -196,7 +196,7 @@ func (runtime *storeBackedSessionRuntime) CompleteInbox(
 		ctx,
 		command.WorkspaceKey,
 		command.MessageID,
-		store.AgentInboxMessageComplete{
+		interaction.AgentInboxMessageComplete{
 			Outcome:           outcome,
 			DeliveredThreadID: command.DeliveredThreadID,
 			ErrorClass:        command.ErrorClass,

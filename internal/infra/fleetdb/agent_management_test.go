@@ -9,7 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/modules/agents"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 func TestAgentManagementUsesDelegatedAuditHeaderAndHeaderOnlyLeaseCredential(t *testing.T) {
@@ -50,10 +51,10 @@ func TestAgentManagementUsesDelegatedAuditHeaderAndHeaderOnlyLeaseCredential(t *
 			if _, ok := decoded["created_by"]; ok {
 				t.Fatalf("create body accepted created_by: %#v", decoded)
 			}
-			writeAgentManagementJSON(t, response, domain.AgentService{
+			writeAgentManagementJSON(t, response, agents.AgentServiceRecord{
 				WorkspaceKey: "WS", ServiceID: "agent-1", Name: "Docs",
-				Kind: domain.AgentServiceKindEvent, RoleName: "docs",
-				DesiredState: domain.AgentServiceDesiredRunning, MaxInstances: 1,
+				Kind: agents.AgentKindEvent, RoleName: "docs",
+				DesiredState: agents.DesiredRunning, MaxInstances: 1,
 				CreatedBy: "operator:alice", CreatedAt: now, UpdatedAt: now,
 			})
 		case 2:
@@ -66,10 +67,10 @@ func TestAgentManagementUsesDelegatedAuditHeaderAndHeaderOnlyLeaseCredential(t *
 			if strings.Contains(string(body), "raw-lease-token") {
 				t.Fatalf("owned desired-state token entered JSON: %s", body)
 			}
-			writeAgentManagementJSON(t, response, domain.AgentService{
+			writeAgentManagementJSON(t, response, agents.AgentServiceRecord{
 				WorkspaceKey: "WS", ServiceID: "agent-1", Name: "Docs",
-				Kind: domain.AgentServiceKindEvent, RoleName: "docs",
-				DesiredState: domain.AgentServiceDesiredPaused, MaxInstances: 1,
+				Kind: agents.AgentKindEvent, RoleName: "docs",
+				DesiredState: agents.DesiredPaused, MaxInstances: 1,
 				CreatedBy: "operator:alice", CreatedAt: now, UpdatedAt: now.Add(time.Second),
 			})
 		case 3:
@@ -77,10 +78,10 @@ func TestAgentManagementUsesDelegatedAuditHeaderAndHeaderOnlyLeaseCredential(t *
 				t.Fatalf("acquire path = %s", request.URL.Path)
 			}
 			writeAgentManagementJSON(t, response, map[string]any{
-				"lease": domain.AgentOwnershipLease{
+				"lease": agents.OwnershipRecord{
 					WorkspaceKey: "WS", AgentID: "agent-1", LeaseID: "lease-1",
-					OwnerID: "operator:alice", RuntimeProvider: domain.RuntimeProviderLocal,
-					NodeID: "node-1", FencingToken: 7, Status: domain.AgentLeaseActive,
+					OwnerID: "operator:alice", RuntimeProvider: agents.RuntimeProviderLocal,
+					NodeID: "node-1", FencingToken: 7, Status: agents.OwnershipActive,
 					ExpiresAt: now.Add(time.Minute), LastHeartbeat: now,
 					CreatedAt: now, UpdatedAt: now,
 				},
@@ -100,13 +101,13 @@ func TestAgentManagementUsesDelegatedAuditHeaderAndHeaderOnlyLeaseCredential(t *
 			if strings.Contains(string(body), "raw-lease-token") {
 				t.Fatalf("ownership token entered JSON: %s", body)
 			}
-			status := domain.AgentLeaseActive
+			status := agents.OwnershipActive
 			if calls == 5 {
-				status = domain.AgentLeaseReleased
+				status = agents.OwnershipReleased
 			}
-			writeAgentManagementJSON(t, response, domain.AgentOwnershipLease{
+			writeAgentManagementJSON(t, response, agents.OwnershipRecord{
 				WorkspaceKey: "WS", AgentID: "agent-1", LeaseID: "lease-1",
-				OwnerID: "operator:alice", RuntimeProvider: domain.RuntimeProviderLocal,
+				OwnerID: "operator:alice", RuntimeProvider: agents.RuntimeProviderLocal,
 				NodeID: "node-1", FencingToken: 7, Status: status,
 				ExpiresAt: now.Add(time.Minute), LastHeartbeat: now,
 				CreatedAt: now, UpdatedAt: now,
@@ -122,7 +123,7 @@ func TestAgentManagementUsesDelegatedAuditHeaderAndHeaderOnlyLeaseCredential(t *
 	transport := client.AgentManagement()
 	if _, err := transport.CreateAgentService(t.Context(), AgentServiceCreateInput{
 		WorkspaceKey: "WS", ServiceID: "agent-1", Name: "Docs",
-		Kind: domain.AgentServiceKindEvent, DesiredState: domain.AgentServiceDesiredRunning,
+		Kind: agents.AgentKindEvent, DesiredState: agents.DesiredRunning,
 		RoleName: "docs", MaxInstances: 1, DelegatedActor: "operator:alice",
 	}); err != nil {
 		t.Fatal(err)
@@ -130,18 +131,18 @@ func TestAgentManagementUsesDelegatedAuditHeaderAndHeaderOnlyLeaseCredential(t *
 	proof := AgentOwnershipProof{
 		WorkspaceKey: "WS", AgentID: "agent-1", LeaseID: "lease-1",
 		LeaseToken: "raw-lease-token", OwnerID: "operator:alice",
-		RuntimeProvider: domain.RuntimeProviderLocal, NodeID: "node-1", FencingToken: 7,
+		RuntimeProvider: agents.RuntimeProviderLocal, NodeID: "node-1", FencingToken: 7,
 	}
 	if _, err := transport.SetAgentServiceDesiredStateOwned(t.Context(), AgentServiceOwnedDesiredStateInput{
-		Proof: proof, ExpectedState: domain.AgentServiceDesiredRunning,
-		DesiredState: domain.AgentServiceDesiredPaused, ExpectedUpdatedAt: now,
+		Proof: proof, ExpectedState: agents.DesiredRunning,
+		DesiredState: agents.DesiredPaused, ExpectedUpdatedAt: now,
 		IdempotencyKey: "desired-1", DelegatedActor: "operator:alice",
 	}); err != nil {
 		t.Fatal(err)
 	}
 	grant, err := transport.AcquireAgentOwnership(t.Context(), AgentOwnershipAcquireInput{
 		WorkspaceKey: "WS", AgentID: "agent-1", LeaseID: "lease-1",
-		OwnerID: "operator:alice", RuntimeProvider: domain.RuntimeProviderLocal,
+		OwnerID: "operator:alice", RuntimeProvider: agents.RuntimeProviderLocal,
 		NodeID: "node-1", TTLSeconds: 30, DelegatedActor: "operator:alice",
 	})
 	if err != nil || grant == nil || grant.Token != "raw-lease-token" ||
@@ -184,12 +185,12 @@ func TestAgentManagementRejectsInvalidDelegationBeforeTransport(t *testing.T) {
 	_, err = client.AgentManagement().ReleaseAgentOwnership(t.Context(), AgentOwnershipReleaseInput{
 		Proof: AgentOwnershipProof{
 			WorkspaceKey: "WS", AgentID: "agent-1", LeaseID: "lease-1",
-			OwnerID: "owner-1", RuntimeProvider: domain.RuntimeProviderLocal,
+			OwnerID: "owner-1", RuntimeProvider: agents.RuntimeProviderLocal,
 			NodeID: "node-1", FencingToken: 1,
 		},
 		DelegatedActor: "owner-1",
 	})
-	if !errors.Is(err, domain.ErrInvalid) {
+	if !errors.Is(err, persistence.ErrInvalid) {
 		t.Fatalf("missing token error = %v", err)
 	}
 }
@@ -218,11 +219,11 @@ func TestAgentManagementLifecycleUsesSingleFleetCommand(t *testing.T) {
 		writeAgentManagementJSON(t, response, AgentServiceLifecycleResult{
 			WorkspaceKey: "WS", ServiceID: "agent-1",
 			IdempotencyKey: "lifecycle-1", Action: "delete",
-			Agent: &domain.AgentService{
+			Agent: &agents.AgentServiceRecord{
 				WorkspaceKey: "WS", ServiceID: "agent-1", Name: "Docs",
 				GenerationID: generationID,
-				Kind:         domain.AgentServiceKindEvent, RoleName: "docs",
-				DesiredState: domain.AgentServiceDesiredStopped, MaxInstances: 1,
+				Kind:         agents.AgentKindEvent, RoleName: "docs",
+				DesiredState: agents.DesiredStopped, MaxInstances: 1,
 				DeletedAt: &deletedAt, CreatedAt: now, UpdatedAt: deletedAt,
 			},
 			BindingIDs: []string{"binding-1"}, GrantIDs: []string{"grant-1"},
@@ -281,7 +282,7 @@ func TestAgentManagementRoleMutationsUseAtomicFleetCommands(t *testing.T) {
 				patch["clear_max_priority"] != true {
 				t.Fatalf("update patch = %#v", body["patch"])
 			}
-			writeAgentManagementJSON(t, response, domain.Role{
+			writeAgentManagementJSON(t, response, agents.Role{
 				WorkspaceKey: "WS", Name: "docs", Description: "new docs role",
 				CreatedAt: now.Add(-time.Hour), UpdatedAt: now.Add(time.Microsecond),
 			})
@@ -353,7 +354,7 @@ func TestAgentManagementUnsupportedIdentityFieldsFailClosedWithoutLegacyIO(t *te
 		},
 	)
 	if !errors.Is(err, ErrAgentServiceUnsupportedIdentityPatch) ||
-		!errors.Is(err, domain.ErrInvalid) {
+		!errors.Is(err, persistence.ErrInvalid) {
 		t.Fatalf("unsupported patch error = %v", err)
 	}
 	if calls != 0 {

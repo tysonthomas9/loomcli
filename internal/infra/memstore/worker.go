@@ -3,7 +3,7 @@ package memstore
 import (
 	"context"
 
-	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 )
 
 // workerStore is a no-op in-memory WorkerStore. In production a worker
@@ -12,7 +12,7 @@ import (
 // methods succeed without tracking state.
 type workerStore struct{}
 
-var _ store.WorkerStore = (*workerStore)(nil)
+var _ execution.WorkerStore = (*workerStore)(nil)
 
 func newWorkerStore() *workerStore { return &workerStore{} }
 

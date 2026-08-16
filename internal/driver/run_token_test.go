@@ -11,7 +11,7 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 func testRunTokenKey(t *testing.T, fill byte) []byte {
@@ -91,8 +91,8 @@ func TestMintRunTokenRejectsInvalidInput(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			_, err := MintRunToken(tt.claims, tt.key, tt.ttl)
-			if !errors.Is(err, domain.ErrInvalid) {
-				t.Errorf("MintRunToken error = %v, want domain.ErrInvalid", err)
+			if !errors.Is(err, persistence.ErrInvalid) {
+				t.Errorf("MintRunToken error = %v, want persistence.ErrInvalid", err)
 			}
 		})
 	}
@@ -160,8 +160,8 @@ func TestParseRunTokenRejections(t *testing.T) {
 			if !errors.Is(parseErr, ErrRunTokenInvalid) {
 				t.Errorf("error = %v, want ErrRunTokenInvalid", parseErr)
 			}
-			if !errors.Is(parseErr, domain.ErrNotOwner) {
-				t.Errorf("error = %v, want to wrap domain.ErrNotOwner", parseErr)
+			if !errors.Is(parseErr, persistence.ErrNotOwner) {
+				t.Errorf("error = %v, want to wrap persistence.ErrNotOwner", parseErr)
 			}
 		})
 	}
@@ -169,8 +169,8 @@ func TestParseRunTokenRejections(t *testing.T) {
 
 func TestParseRunTokenRequiresKey(t *testing.T) {
 	_, err := ParseRunToken("whatever", nil)
-	if !errors.Is(err, domain.ErrInvalid) {
-		t.Errorf("ParseRunToken with empty key error = %v, want domain.ErrInvalid", err)
+	if !errors.Is(err, persistence.ErrInvalid) {
+		t.Errorf("ParseRunToken with empty key error = %v, want persistence.ErrInvalid", err)
 	}
 }
 
@@ -192,8 +192,8 @@ func TestResolveRunTokenSigningKeyFromEnv(t *testing.T) {
 			t.Setenv(RunTokenSigningKeyEnv, tt.value)
 			key, err := ResolveRunTokenSigningKey()
 			if tt.wantErr {
-				if !errors.Is(err, domain.ErrInvalid) {
-					t.Errorf("error = %v, want domain.ErrInvalid", err)
+				if !errors.Is(err, persistence.ErrInvalid) {
+					t.Errorf("error = %v, want persistence.ErrInvalid", err)
 				}
 				return
 			}
@@ -257,8 +257,8 @@ func TestRunTokenTTL(t *testing.T) {
 			t.Setenv(RunTokenTTLEnv, tt.value)
 			ttl, err := RunTokenTTL()
 			if tt.wantErr {
-				if !errors.Is(err, domain.ErrInvalid) {
-					t.Errorf("error = %v, want domain.ErrInvalid", err)
+				if !errors.Is(err, persistence.ErrInvalid) {
+					t.Errorf("error = %v, want persistence.ErrInvalid", err)
 				}
 				return
 			}

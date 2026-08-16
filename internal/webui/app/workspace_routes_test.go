@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tysonthomas9/loomcli/internal/app/query/operationalview"
 	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 	workspacemodule "github.com/tysonthomas9/loomcli/internal/modules/workspace"
-	"github.com/tysonthomas9/loomcli/internal/ops"
 )
 
 // Compile-time assertion: *WorkspaceOpsModule implements wsModule.
@@ -184,7 +184,7 @@ type stubWorkspaceCatalogProjection struct {
 
 func (*stubWorkspaceCatalogProjection) ActiveWorkspaceKey(context.Context) string { return "" }
 func (*stubWorkspaceCatalogProjection) WorkspacePath(string) string               { return "" }
-func (s *stubWorkspaceCatalogProjection) WorkspaceTopology(_ context.Context, workspace string) (*ops.WorkspaceData, error) {
+func (s *stubWorkspaceCatalogProjection) WorkspaceTopology(_ context.Context, workspace string) (*operationalview.Workspace, error) {
 	s.workspace = workspace
-	return &ops.WorkspaceData{Repos: []ops.WorkspaceRepo{{Name: "loom", Path: "/workspace/loom"}}}, nil
+	return &operationalview.Workspace{Repos: []operationalview.Repository{{Name: "loom", Path: "/workspace/loom"}}}, nil
 }

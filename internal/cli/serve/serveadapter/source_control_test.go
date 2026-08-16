@@ -13,9 +13,8 @@ import (
 	infrafleetdb "github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
-	workspacemodule "github.com/tysonthomas9/loomcli/internal/modules/workspace"
+	workspaceowner "github.com/tysonthomas9/loomcli/internal/modules/workspace"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
-	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
 type repositoryAdmissionTransportStub struct {
@@ -92,13 +91,13 @@ func (matchedSourceControlInspector) ResolveCommit(
 func TestSourceControlRepositoryResolverResolvesNameAndStableSourceID(t *testing.T) {
 	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
 	memory := memstore.New()
-	if _, err := memory.Workspaces().Create(t.Context(), store.WorkspaceCreate{
+	if _, err := memory.Workspaces().Create(t.Context(), workspaceowner.WorkspaceCreate{
 		Key:  "PROOF",
 		Name: "proof-workspace",
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := memory.Repos().Create(t.Context(), store.RepoCreate{
+	if _, err := memory.Repos().Create(t.Context(), workspaceowner.RepoCreate{
 		WorkspaceKey: "PROOF",
 		Name:         "loomcli",
 		RemoteURL:    "https://example.test/loomcli.git",
@@ -188,7 +187,7 @@ func TestSourceControlRepositoryResolverResolvesNameAndStableSourceID(t *testing
 func TestSourceControlRepositoryAdmissionProjectionIsDurableAndExactAdmissionBound(t *testing.T) {
 	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
 	memory := memstore.New()
-	if _, err := memory.Workspaces().Create(t.Context(), store.WorkspaceCreate{
+	if _, err := memory.Workspaces().Create(t.Context(), workspaceowner.WorkspaceCreate{
 		Key: "PROOF", Name: "proof-workspace",
 	}); err != nil {
 		t.Fatal(err)
@@ -267,10 +266,10 @@ func TestSourceControlRepositoryAdmissionProjectionIsDurableAndExactAdmissionBou
 		"PROOF",
 		"task-run:unrelated:checkout",
 		"pending-repo",
-	); !errors.Is(err, workspacemodule.ErrNotFound) {
+	); !errors.Is(err, workspaceowner.ErrNotFound) {
 		t.Fatalf("unrelated operation resolved pending repository: %v", err)
 	}
-	if _, err := memory.Repos().Create(t.Context(), store.RepoCreate{
+	if _, err := memory.Repos().Create(t.Context(), workspaceowner.RepoCreate{
 		WorkspaceKey: "PROOF",
 		Name:         "pending-repo",
 		RemoteURL:    "https://example.test/concurrently-committed.git",
@@ -489,14 +488,14 @@ func TestSourceControlRepositoryAdmissionProjectionIsDurableAndExactAdmissionBou
 func TestSourceControlRepositoryResolverRejectsAmbiguousAndUnsafeState(t *testing.T) {
 	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
 	memory := memstore.New()
-	if _, err := memory.Workspaces().Create(t.Context(), store.WorkspaceCreate{
+	if _, err := memory.Workspaces().Create(t.Context(), workspaceowner.WorkspaceCreate{
 		Key:  "PROOF",
 		Name: "proof-workspace",
 	}); err != nil {
 		t.Fatal(err)
 	}
 	for _, name := range []string{"loomcli", "fleet-db"} {
-		if _, err := memory.Repos().Create(t.Context(), store.RepoCreate{
+		if _, err := memory.Repos().Create(t.Context(), workspaceowner.RepoCreate{
 			WorkspaceKey: "PROOF",
 			Name:         name,
 			RemoteURL:    "https://example.test/" + name + ".git",
@@ -543,7 +542,7 @@ func TestSourceControlRepositoryResolverRejectsAmbiguousAndUnsafeState(t *testin
 		t.Fatal("unsafe workspace root reached directory creation")
 	}
 
-	if _, err := memory.Repos().Create(t.Context(), store.RepoCreate{
+	if _, err := memory.Repos().Create(t.Context(), workspaceowner.RepoCreate{
 		WorkspaceKey: "PROOF",
 		Name:         "credentialed",
 		RemoteURL:    "https://token@example.test/private.git",
@@ -559,13 +558,13 @@ func TestSourceControlRepositoryResolverRejectsAmbiguousAndUnsafeState(t *testin
 		t.Fatalf("credentialed remote error = %v, want %v", err, sourcecontrol.ErrInvalid)
 	}
 
-	if _, err := memory.Workspaces().Create(t.Context(), store.WorkspaceCreate{
+	if _, err := memory.Workspaces().Create(t.Context(), workspaceowner.WorkspaceCreate{
 		Key:  "ESCAPE",
 		Name: "../escape",
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := memory.Repos().Create(t.Context(), store.RepoCreate{
+	if _, err := memory.Repos().Create(t.Context(), workspaceowner.RepoCreate{
 		WorkspaceKey: "ESCAPE",
 		Name:         "repo",
 		RemoteURL:    "https://example.test/repo.git",
@@ -585,7 +584,7 @@ func TestSourceControlRepositoryResolverRejectsAmbiguousAndUnsafeState(t *testin
 func TestAgentProvisioningWorkspaceListerReturnsFreshSortedKeys(t *testing.T) {
 	memory := memstore.New()
 	lister := newAgentProvisioningWorkspaceLister(memory.Workspaces())
-	for _, workspace := range []store.WorkspaceCreate{
+	for _, workspace := range []workspaceowner.WorkspaceCreate{
 		{Key: "ZETA", Name: "zeta"},
 		{Key: "ALPHA", Name: "alpha"},
 	} {
@@ -600,7 +599,7 @@ func TestAgentProvisioningWorkspaceListerReturnsFreshSortedKeys(t *testing.T) {
 	if len(got) != 2 || got[0] != "ALPHA" || got[1] != "ZETA" {
 		t.Fatalf("workspace keys = %v", got)
 	}
-	if _, err := memory.Workspaces().Create(t.Context(), store.WorkspaceCreate{
+	if _, err := memory.Workspaces().Create(t.Context(), workspaceowner.WorkspaceCreate{
 		Key:  "MIDDLE",
 		Name: "middle",
 	}); err != nil {

@@ -3,7 +3,7 @@ package storeadapter
 import (
 	"context"
 
-	"github.com/tysonthomas9/loomcli/internal/ops"
+	"github.com/tysonthomas9/loomcli/internal/app/query/operationalview"
 )
 
 // SourceControlWorkspaceProjection adapts the legacy Workspace read model to
@@ -21,7 +21,7 @@ func NewSourceControlWorkspaceProjection(topology WorkspaceTopologyReader) Sourc
 func (projection SourceControlWorkspaceProjection) WorkspaceData(
 	ctx context.Context,
 	workspaceKey string,
-) (*ops.WorkspaceData, error) {
+) (*operationalview.Workspace, error) {
 	return BuildWorkspaceDataForKey(ctx, projection.topology, workspaceKey)
 }
 

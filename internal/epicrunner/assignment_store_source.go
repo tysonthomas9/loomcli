@@ -4,8 +4,13 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
+
+	"github.com/tysonthomas9/loomcli/internal/modules/agents"
+
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
+
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 // StoreLeadAssignmentSource is the composition-edge adapter for standalone
@@ -17,9 +22,9 @@ type StoreLeadAssignmentSource struct {
 }
 
 type leadAssignmentStore interface {
-	store.OrchestrationSessionStore
-	AgentServices() store.AgentServiceStore
-	WorkerProfiles() store.WorkerProfileStore
+	interaction.OrchestrationSessionStore
+	AgentServices() agents.AgentServiceStore
+	WorkerProfiles() execution.WorkerProfileStore
 }
 
 func NewStoreLeadAssignmentSource(st leadAssignmentStore) LeadAssignmentSource {
@@ -35,14 +40,14 @@ func (source *StoreLeadAssignmentSource) GetLeadAssignmentIdentity(
 	agentID string,
 ) (*LeadAssignmentIdentity, error) {
 	if source == nil || source.store == nil {
-		return nil, domain.ErrUnavailable
+		return nil, persistence.ErrUnavailable
 	}
 	record, err := source.store.AgentServices().Get(ctx, workspace, agentID)
 	if err != nil {
 		return nil, err
 	}
 	if record == nil {
-		return nil, fmt.Errorf("canonical Agent %q is nil: %w", agentID, domain.ErrInvalid)
+		return nil, fmt.Errorf("canonical Agent %q is nil: %w", agentID, persistence.ErrInvalid)
 	}
 	return &LeadAssignmentIdentity{
 		WorkspaceKey: record.WorkspaceKey,
@@ -58,14 +63,14 @@ func (source *StoreLeadAssignmentSource) GetLeadAssignmentProfile(
 	profileID string,
 ) (*LeadAssignmentProfile, error) {
 	if source == nil || source.store == nil {
-		return nil, domain.ErrUnavailable
+		return nil, persistence.ErrUnavailable
 	}
 	profile, err := source.store.WorkerProfiles().Get(ctx, workspace, profileID)
 	if err != nil {
 		return nil, err
 	}
 	if profile == nil {
-		return nil, fmt.Errorf("canonical WorkerProfile %q is nil: %w", profileID, domain.ErrInvalid)
+		return nil, fmt.Errorf("canonical WorkerProfile %q is nil: %w", profileID, persistence.ErrInvalid)
 	}
 	return &LeadAssignmentProfile{
 		WorkspaceKey: profile.WorkspaceKey,
@@ -82,7 +87,7 @@ func (source *StoreLeadAssignmentSource) GetLeadOrchestrationSessionID(
 	agentID string,
 ) (string, error) {
 	if source == nil || source.store == nil {
-		return "", domain.ErrUnavailable
+		return "", persistence.ErrUnavailable
 	}
-	return store.OrchestrationSessionIDFor(ctx, source.store, workspace, agentID)
+	return interaction.OrchestrationSessionIDFor(ctx, source.store, workspace, agentID)
 }

@@ -15,7 +15,7 @@
  * optional-chain in `write()`.
  */
 
-import { act, render } from "@testing-library/react";
+import { act, render, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -377,7 +377,9 @@ describe("TerminalInstance", () => {
       });
       await flushPendingWork();
 
-      expect(connectionState.writeCallbacks.length).toBeGreaterThanOrEqual(1);
+      await waitFor(() => {
+        expect(connectionState.writeCallbacks.length).toBeGreaterThanOrEqual(1);
+      });
       expect(wtermState.stub.resize).toHaveBeenCalledWith(80, 20);
 
       unmount();

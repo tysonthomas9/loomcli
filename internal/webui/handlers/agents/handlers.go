@@ -4,8 +4,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
-	agentmodule "github.com/tysonthomas9/loomcli/internal/modules/agents"
+	agentsmodule "github.com/tysonthomas9/loomcli/internal/modules/agents"
 	loomapi "github.com/tysonthomas9/loomcli/internal/platform/loomapi/gen"
 	"github.com/tysonthomas9/loomcli/internal/webui/apperrors"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
@@ -20,7 +19,7 @@ func HandleInteractivePrompts() http.HandlerFunc {
 	}
 }
 
-func generatedInteractivePrompts(prompts []domain.BuiltinInteractivePrompt) []loomapi.InteractivePrompt {
+func generatedInteractivePrompts(prompts []agentsmodule.BuiltinInteractivePrompt) []loomapi.InteractivePrompt {
 	out := make([]loomapi.InteractivePrompt, 0, len(prompts))
 	for _, prompt := range prompts {
 		out = append(out, loomapi.InteractivePrompt{Id: prompt.ID, Label: prompt.Label})
@@ -28,9 +27,9 @@ func generatedInteractivePrompts(prompts []domain.BuiltinInteractivePrompt) []lo
 	return out
 }
 
-func visibleInteractivePrompts() []domain.BuiltinInteractivePrompt {
-	prompts := domain.BuiltinInteractivePrompts()
-	out := make([]domain.BuiltinInteractivePrompt, 0, len(prompts))
+func visibleInteractivePrompts() []agentsmodule.BuiltinInteractivePrompt {
+	prompts := agentsmodule.BuiltinInteractivePrompts()
+	out := make([]agentsmodule.BuiltinInteractivePrompt, 0, len(prompts))
 	for _, prompt := range prompts {
 		if !prompt.Hidden {
 			out = append(out, prompt)
@@ -56,7 +55,7 @@ func writeAgentInternalError(w http.ResponseWriter, message string, cause error)
 }
 
 func validStoredAgentName(value string) bool {
-	return agentmodule.ValidStoredAgentName(value)
+	return agentsmodule.ValidStoredAgentName(value)
 }
 
 type lifecycleRequest struct{}

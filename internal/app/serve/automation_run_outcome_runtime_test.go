@@ -7,15 +7,16 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
+
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 
+	workspaceowner "github.com/tysonthomas9/loomcli/internal/modules/workspace"
+
 	"github.com/tysonthomas9/loomcli/internal/app/systemeventing"
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
-	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
-	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
 type runOutcomeRuntimeTestExecution struct {
@@ -106,16 +107,16 @@ func TestRunOutcomeRuntimePublishesOpaqueRunIDThroughAutomationAdmission(t *test
 	st := memstore.New()
 	ctx := t.Context()
 	const workspace = "WS"
-	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: workspace, Name: "workspace"}); err != nil {
+	if _, err := st.Workspaces().Create(ctx, workspaceowner.WorkspaceCreate{Key: workspace, Name: "workspace"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.Drivers().Create(ctx, store.DriverCreate{
+	if _, err := st.Drivers().Create(ctx, workflowcatalog.DriverCreate{
 		WorkspaceKey: workspace, DriverID: "driver", Name: "driver",
 		OwnerType: workflowcatalog.DriverOwnerSystem, Status: workflowcatalog.DriverStatusActive,
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.DriverVersions().Create(ctx, store.DriverVersionCreate{
+	if _, err := st.DriverVersions().Create(ctx, workflowcatalog.DriverVersionCreate{
 		WorkspaceKey: workspace, DriverID: "driver", VersionID: "v1", Version: 1,
 		SourceDigest: "sha256:source", BundleDigest: "sha256:bundle",
 		ValidationStatus: workflowcatalog.DriverVersionValidationPassed,
@@ -123,7 +124,7 @@ func TestRunOutcomeRuntimePublishesOpaqueRunIDThroughAutomationAdmission(t *test
 		t.Fatal(err)
 	}
 	runID := " run/1 " + strings.Repeat("x", 300)
-	created, err := st.DriverRuns().Create(ctx, store.DriverRunCreate{
+	created, err := st.DriverRuns().Create(ctx, execution.DriverRunCreate{
 		WorkspaceKey: workspace, RunID: runID, DriverID: "driver", DriverVersionID: "v1",
 	})
 	if err != nil {
@@ -133,9 +134,9 @@ func TestRunOutcomeRuntimePublishesOpaqueRunIDThroughAutomationAdmission(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	final, err := st.DriverRuns().Finish(ctx, workspace, created.RunID, store.DriverRunFinish{
+	final, err := st.DriverRuns().Finish(ctx, workspace, created.RunID, execution.DriverRunFinish{
 		NodeID: "node", LeaseID: "lease", FencingToken: claimed.FencingToken,
-		Status: domain.DriverRunFailed, Summary: "failed", ErrorClass: "runtime",
+		Status: execution.DriverRunFailed, Summary: "failed", ErrorClass: "runtime",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -187,7 +188,7 @@ func TestRunOutcomeRuntimePublishesOpaqueRunIDThroughAutomationAdmission(t *test
 	if err := json.Unmarshal(got.Payload, &payload); err != nil {
 		t.Fatal(err)
 	}
-	if payload["runId"] != runID || payload["status"] != string(domain.DriverRunFailed) {
+	if payload["runId"] != runID || payload["status"] != string(execution.DriverRunFailed) {
 		t.Fatalf("admission payload = %s", got.Payload)
 	}
 }

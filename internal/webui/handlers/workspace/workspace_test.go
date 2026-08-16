@@ -7,18 +7,18 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/tysonthomas9/loomcli/internal/ops"
+	"github.com/tysonthomas9/loomcli/internal/app/query/operationalview"
 	"github.com/tysonthomas9/loomcli/internal/webui/apperrors"
 )
 
 func TestHandleActiveWorkspace_EmptyResponse(t *testing.T) {
 	svc := &mockWorkspaceService{
-		getActiveWorkspaceFn: func(_ context.Context) (*ops.WorkspaceData, error) {
-			return &ops.WorkspaceData{
-				Repos:      []ops.WorkspaceRepo{},
+		getActiveWorkspaceFn: func(_ context.Context) (*operationalview.Workspace, error) {
+			return &operationalview.Workspace{
+				Repos:      []operationalview.Repository{},
 				Groups:     []string{},
-				Agents:     []ops.WorkspaceAgentInfo{},
-				Workspaces: []ops.WorkspaceSummary{},
+				Agents:     []operationalview.Agent{},
+				Workspaces: []operationalview.Summary{},
 			}, nil
 		},
 	}
@@ -49,17 +49,17 @@ func TestHandleActiveWorkspace_EmptyResponse(t *testing.T) {
 
 func TestHandleActiveWorkspace_WithRepos(t *testing.T) {
 	svc := &mockWorkspaceService{
-		getActiveWorkspaceFn: func(_ context.Context) (*ops.WorkspaceData, error) {
-			return &ops.WorkspaceData{
+		getActiveWorkspaceFn: func(_ context.Context) (*operationalview.Workspace, error) {
+			return &operationalview.Workspace{
 				Name: "myworkspace",
 				Path: "/workspaces/myworkspace",
-				Repos: []ops.WorkspaceRepo{
+				Repos: []operationalview.Repository{
 					{Name: "payments/api", Path: "/workspaces/payments/api", DefaultBranch: "main", Remote: "origin"},
 					{Name: "auth/service", Path: "/workspaces/auth/service", DefaultBranch: "develop", Remote: "upstream"},
 				},
 				Groups:     []string{},
-				Agents:     []ops.WorkspaceAgentInfo{},
-				Workspaces: []ops.WorkspaceSummary{},
+				Agents:     []operationalview.Agent{},
+				Workspaces: []operationalview.Summary{},
 			}, nil
 		},
 	}
@@ -89,7 +89,7 @@ func TestHandleActiveWorkspace_WithRepos(t *testing.T) {
 
 func TestHandleActiveWorkspace_ConfigError(t *testing.T) {
 	svc := &mockWorkspaceService{
-		getActiveWorkspaceFn: func(_ context.Context) (*ops.WorkspaceData, error) {
+		getActiveWorkspaceFn: func(_ context.Context) (*operationalview.Workspace, error) {
 			return nil, apperrors.ErrInternal("config broken", nil)
 		},
 	}
@@ -105,20 +105,20 @@ func TestHandleActiveWorkspace_ConfigError(t *testing.T) {
 
 func TestHandleActiveWorkspace_FullResponse(t *testing.T) {
 	svc := &mockWorkspaceService{
-		getActiveWorkspaceFn: func(_ context.Context) (*ops.WorkspaceData, error) {
-			return &ops.WorkspaceData{
+		getActiveWorkspaceFn: func(_ context.Context) (*operationalview.Workspace, error) {
+			return &operationalview.Workspace{
 				Name: "prod",
 				Path: "/workspaces/prod",
-				Repos: []ops.WorkspaceRepo{
+				Repos: []operationalview.Repository{
 					{Name: "api", Path: "/code/api", SourceRepoID: "api", Groups: []string{"backend"}},
 					{Name: "web", Path: "/code/web", SourceRepoID: "web", Groups: []string{"frontend"}},
 				},
 				Groups: []string{"backend", "frontend"},
-				Agents: []ops.WorkspaceAgentInfo{
+				Agents: []operationalview.Agent{
 					{Name: "agent-1", Repos: []string{"api"}, RepoGroups: []string{"backend"}, CrossRepo: false},
 					{Name: "agent-2", Repos: []string{"web"}, RepoGroups: []string{"frontend"}, CrossRepo: true},
 				},
-				Workspaces: []ops.WorkspaceSummary{},
+				Workspaces: []operationalview.Summary{},
 			}, nil
 		},
 	}

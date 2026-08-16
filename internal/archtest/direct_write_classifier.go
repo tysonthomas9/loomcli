@@ -13,6 +13,7 @@ type persistenceClassifier struct {
 	packages                  map[string]PersistencePackage
 	surfaces                  map[string]persistenceSurfacePolicy
 	functions                 map[string]persistenceFunctionPolicy
+	functionPackages          map[string]struct{}
 	candidateReceiverSuffixes []string
 }
 
@@ -31,10 +32,14 @@ func newPersistenceClassifier(inventory DirectWriteInventory) persistenceClassif
 		packages:                  make(map[string]PersistencePackage, len(inventory.PersistencePackages)),
 		surfaces:                  make(map[string]persistenceSurfacePolicy, len(inventory.ReceiverSurfaces)),
 		functions:                 make(map[string]persistenceFunctionPolicy, len(inventory.FunctionSurfaces)),
+		functionPackages:          make(map[string]struct{}),
 		candidateReceiverSuffixes: append([]string(nil), inventory.CandidateReceiverSuffixes...),
 	}
 	for _, pkg := range inventory.PersistencePackages {
 		classifier.packages[pkg.Path] = pkg
+		if pkg.GuardFunctions {
+			classifier.functionPackages[pkg.Path] = struct{}{}
+		}
 	}
 	methodSets := make(map[string]map[string]persistenceAccess, len(inventory.MethodSets))
 	for _, methodSet := range inventory.MethodSets {
@@ -51,6 +56,7 @@ func newPersistenceClassifier(inventory DirectWriteInventory) persistenceClassif
 		classifier.functions[persistenceFunctionKey(surface.Package, surface.Function)] = persistenceFunctionPolicy{
 			owner: surface.CapabilityOwner, access: persistenceAccessFromLabel(surface.Access),
 		}
+		classifier.functionPackages[surface.Package] = struct{}{}
 	}
 	return classifier
 }
@@ -87,7 +93,7 @@ func (c persistenceClassifier) classify(receiver, method string) (persistenceAcc
 }
 
 func (c persistenceClassifier) isPersistenceFunctionPackage(packagePath string) bool {
-	_, ok := c.packages[packagePath]
+	_, ok := c.functionPackages[packagePath]
 	return ok
 }
 

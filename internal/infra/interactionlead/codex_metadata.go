@@ -6,7 +6,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
 )
 
@@ -47,7 +46,7 @@ type CodexRuntimeMetadata struct {
 	Controlled  bool
 }
 
-func RuntimeMetadataFromSession(session *domain.AgentSession) CodexRuntimeMetadata {
+func RuntimeMetadataFromSession(session *interaction.SessionRecord) CodexRuntimeMetadata {
 	if session == nil {
 		return CodexRuntimeMetadata{}
 	}

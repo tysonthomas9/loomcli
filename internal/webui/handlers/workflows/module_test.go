@@ -12,16 +12,21 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/automation"
+
+	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
+
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
+
+	workspaceowner "github.com/tysonthomas9/loomcli/internal/modules/workspace"
+
 	appworkflowauthoring "github.com/tysonthomas9/loomcli/internal/app/workflowauthoring"
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/driver"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	workflowdefs "github.com/tysonthomas9/loomcli/internal/infra/workflowdistribution/authoring"
-	"github.com/tysonthomas9/loomcli/internal/modules/automation"
-	"github.com/tysonthomas9/loomcli/internal/modules/execution"
-	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
+	agentsowner "github.com/tysonthomas9/loomcli/internal/modules/agents"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
-	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 	"github.com/tysonthomas9/loomcli/internal/webui/readprojection"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
@@ -91,11 +96,11 @@ func (stub *workflowRunCaptureExecution) SubmitDriverRun(
 
 type workflowRunStoreTestExecution struct {
 	execution.DriverRunAPI
-	store store.Store
+	store *memstore.Store
 }
 
 func (adapter workflowRunStoreTestExecution) ListDriverRunSteps(ctx context.Context, workspace, runID string) ([]execution.DriverRunStep, error) {
-	values, err := adapter.store.DriverSteps().ListForRun(ctx, workspace, runID, store.DriverStepFilter{})
+	values, err := adapter.store.DriverSteps().ListForRun(ctx, workspace, runID, execution.DriverStepFilter{})
 	if err != nil {
 		return nil, err
 	}
@@ -109,7 +114,7 @@ func (adapter workflowRunStoreTestExecution) ListDriverRunSteps(ctx context.Cont
 }
 
 func (adapter workflowRunStoreTestExecution) ListDriverRunEvents(ctx context.Context, query execution.DriverRunEventQuery) (*execution.DriverRunEventPage, error) {
-	reader, ok := adapter.store.DriverRuns().(store.DriverRunEventsReader)
+	reader, ok := adapter.store.DriverRuns().(execution.DriverRunEventsReader)
 	if !ok {
 		return nil, execution.ErrUnavailable
 	}
@@ -119,7 +124,7 @@ func (adapter workflowRunStoreTestExecution) ListDriverRunEvents(ctx context.Con
 	}
 	out := &execution.DriverRunEventPage{Cursor: page.Cursor, Events: make([]execution.DriverRunEvent, 0, len(page.Events))}
 	for _, value := range page.Events {
-		out.Events = append(out.Events, execution.DriverRunEvent{ID: value.ID, Timestamp: value.Timestamp, Actor: value.Actor, Action: value.Action, EntityType: value.EntityType, EntityID: value.EntityID, WorkspaceID: value.WorkspaceID, Before: value.Before, After: value.After, Metadata: value.Metadata})
+		out.Events = append(out.Events, execution.DriverRunEvent(value))
 	}
 	return out, nil
 }
@@ -144,14 +149,16 @@ func (adapter workflowRunStoreTestExecution) ListTaskRunEvents(context.Context, 
 	return nil, nil
 }
 
-type workflowBindingQueries struct{ store store.TriggerBindingStore }
+type workflowBindingQueries struct {
+	store automation.TriggerBindingStore
+}
 
 func (queries workflowBindingQueries) GetBinding(ctx context.Context, workspace, bindingID string) (*automation.Binding, error) {
 	return queries.store.Get(ctx, workspace, bindingID)
 }
 
 func (queries workflowBindingQueries) ListBindings(ctx context.Context, workspace string, filter automation.BindingFilter) ([]*automation.Binding, error) {
-	return queries.store.List(ctx, workspace, store.TriggerBindingFilter{DriverID: filter.DriverID, Limit: filter.Limit})
+	return queries.store.List(ctx, workspace, automation.TriggerBindingFilter{DriverID: filter.DriverID, Limit: filter.Limit})
 }
 
 func (adapter workflowRunStoreTestExecution) GetDriverRun(
@@ -169,9 +176,9 @@ func (adapter workflowRunStoreTestExecution) ListDriverRuns(
 	ctx context.Context,
 	query execution.DriverRunQuery,
 ) ([]*execution.DriverRun, error) {
-	runs, err := adapter.store.DriverRuns().List(ctx, query.WorkspaceKey, store.DriverRunFilter{
+	runs, err := adapter.store.DriverRuns().List(ctx, query.WorkspaceKey, execution.DriverRunFilter{
 		DriverID: query.DriverID, EpicID: query.EpicID,
-		AgentServiceID: query.AgentServiceID, Status: domain.DriverRunStatus(query.Status),
+		AgentServiceID: query.AgentServiceID, Status: query.Status,
 	})
 	if err != nil {
 		return nil, err
@@ -201,7 +208,7 @@ func (adapter workflowRunStoreTestCatalog) GetDriver(
 	workspace, driverRef string,
 ) (*workflowcatalog.Driver, error) {
 	record, err := resolveWorkflowDriverForTest(ctx, adapter.store, workspace, driverRef)
-	if errors.Is(err, domain.ErrNotFound) {
+	if errors.Is(err, persistence.ErrNotFound) {
 		return nil, workflowcatalog.ErrNotFound
 	}
 	if record != nil && record.Revision == 0 {
@@ -215,7 +222,7 @@ func (adapter workflowRunStoreTestCatalog) GetVersion(
 	workspace, versionID string,
 ) (*workflowcatalog.DriverVersion, error) {
 	record, err := adapter.store.DriverVersions().Get(ctx, workspace, versionID)
-	if errors.Is(err, domain.ErrNotFound) {
+	if errors.Is(err, persistence.ErrNotFound) {
 		return nil, workflowcatalog.ErrNotFound
 	}
 	return record, err
@@ -237,8 +244,8 @@ func (adapter workflowRunStoreTestCatalog) AuthorManagedVersion(
 	intent := command.AuthorVersionCommand
 	driverRecord, err := adapter.store.Drivers().Get(ctx, intent.WorkspaceKey, intent.DriverID)
 	createdDriver := false
-	if errors.Is(err, domain.ErrNotFound) {
-		driverRecord, err = adapter.store.Drivers().Create(ctx, store.DriverCreate{
+	if errors.Is(err, persistence.ErrNotFound) {
+		driverRecord, err = adapter.store.Drivers().Create(ctx, workflowcatalog.DriverCreate{
 			WorkspaceKey: intent.WorkspaceKey,
 			DriverID:     intent.DriverID,
 			Name:         intent.DriverName,
@@ -256,8 +263,8 @@ func (adapter workflowRunStoreTestCatalog) AuthorManagedVersion(
 	versionRecord, err := adapter.store.DriverVersions().Get(ctx, intent.WorkspaceKey, intent.VersionID)
 	createdVersion := false
 	reusedVersion := false
-	if errors.Is(err, domain.ErrNotFound) {
-		versions, listErr := adapter.store.DriverVersions().List(ctx, intent.WorkspaceKey, store.DriverVersionFilter{
+	if errors.Is(err, persistence.ErrNotFound) {
+		versions, listErr := adapter.store.DriverVersions().List(ctx, intent.WorkspaceKey, workflowcatalog.DriverVersionFilter{
 			DriverID: intent.DriverID,
 		})
 		if listErr != nil {
@@ -274,7 +281,7 @@ func (adapter workflowRunStoreTestCatalog) AuthorManagedVersion(
 			manifest[key] = value
 		}
 		manifest[workflowcatalog.ManifestTrustLevelKey] = string(workflowcatalog.DriverTrustTrusted)
-		versionRecord, err = adapter.store.DriverVersions().Create(ctx, store.DriverVersionCreate{
+		versionRecord, err = adapter.store.DriverVersions().Create(ctx, workflowcatalog.DriverVersionCreate{
 			WorkspaceKey:     intent.WorkspaceKey,
 			VersionID:        intent.VersionID,
 			DriverID:         intent.DriverID,
@@ -305,7 +312,7 @@ func (adapter workflowRunStoreTestCatalog) AuthorManagedVersion(
 	activated := false
 	if command.Activate {
 		trusted := workflowcatalog.DriverTrustTrusted
-		driverRecord, err = adapter.store.Drivers().Update(ctx, intent.WorkspaceKey, intent.DriverID, store.DriverUpdate{
+		driverRecord, err = adapter.store.Drivers().Update(ctx, intent.WorkspaceKey, intent.DriverID, workflowcatalog.DriverUpdate{
 			TrustLevel: &trusted,
 		})
 		if err != nil {
@@ -355,7 +362,7 @@ func (adapter workflowRunStoreTestExecution) SubmitDriverRun(
 	_ authority.OperatorAuthority,
 	command execution.SubmitDriverRunCommand,
 ) (*execution.DriverRun, error) {
-	run, err := adapter.store.DriverRuns().Create(ctx, store.DriverRunCreate{
+	run, err := adapter.store.DriverRuns().Create(ctx, execution.DriverRunCreate{
 		WorkspaceKey: command.WorkspaceKey, RunID: command.RunID,
 		DriverID: command.DriverID, DriverVersionID: command.DriverVersionID,
 		Entrypoint: command.Entrypoint, SourceKind: command.SourceKind, SourceRef: command.SourceRef,
@@ -368,7 +375,7 @@ func (adapter workflowRunStoreTestExecution) SubmitDriverRun(
 	return workflowExecutionRun(run), nil
 }
 
-func workflowExecutionRun(run *domain.DriverRun) *execution.DriverRun {
+func workflowExecutionRun(run *execution.DriverRunRecord) *execution.DriverRun {
 	if run == nil {
 		return nil
 	}
@@ -377,7 +384,7 @@ func workflowExecutionRun(run *domain.DriverRun) *execution.DriverRun {
 		DriverVersionID: run.DriverVersionID, Entrypoint: run.Entrypoint,
 		SourceKind: run.SourceKind, SourceRef: run.SourceRef, EpicID: run.EpicID,
 		ParentRunID: run.ParentRunID, TriggerBindingID: run.TriggerBindingID,
-		Status:         execution.DriverRunStatus(run.Status),
+		Status:         run.Status,
 		Owner:          execution.Owner{ResourceKind: execution.ResourceDriverRun, ResourceID: run.RunID},
 		IdempotencyKey: run.IdempotencyKey, Payload: append(json.RawMessage(nil), run.Payload...),
 		CreatedAt: run.CreatedAt, UpdatedAt: run.UpdatedAt,
@@ -637,16 +644,16 @@ func TestCreateDriverRunServerStampsWorkflowBindingSourceRef(t *testing.T) {
 	ctx := context.Background()
 	st := memstore.New()
 	const workspace, driverID, versionID = "TEST", "driver-demo", "version-active"
-	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: workspace, Name: workspace}); err != nil {
+	if _, err := st.Workspaces().Create(ctx, workspaceowner.WorkspaceCreate{Key: workspace, Name: workspace}); err != nil {
 		t.Fatalf("create workspace: %v", err)
 	}
-	if _, err := st.Drivers().Create(ctx, store.DriverCreate{
+	if _, err := st.Drivers().Create(ctx, workflowcatalog.DriverCreate{
 		WorkspaceKey: workspace, DriverID: driverID, Name: "demo",
 		Status: workflowcatalog.DriverStatusActive,
 	}); err != nil {
 		t.Fatalf("create driver: %v", err)
 	}
-	if _, err := st.DriverVersions().Create(ctx, store.DriverVersionCreate{
+	if _, err := st.DriverVersions().Create(ctx, workflowcatalog.DriverVersionCreate{
 		WorkspaceKey: workspace, DriverID: driverID, VersionID: versionID, Version: 1,
 		SourceDigest: "sha256:source", BundleDigest: "sha256:bundle",
 		ValidationStatus: workflowcatalog.DriverVersionValidationPassed,
@@ -659,9 +666,9 @@ func TestCreateDriverRunServerStampsWorkflowBindingSourceRef(t *testing.T) {
 	if _, err := st.ActivateDriverVersionForTest(ctx, workspace, driverID, versionID); err != nil {
 		t.Fatalf("activate driver version: %v", err)
 	}
-	if _, err := st.TriggerBindings().Create(ctx, store.TriggerBindingCreate{
+	if _, err := st.TriggerBindings().Create(ctx, automation.TriggerBindingCreate{
 		WorkspaceKey: workspace, BindingID: "binding-demo", Name: "binding-demo",
-		SourceKind: store.CronSourceKind, DriverID: driverID, DriverVersionID: versionID,
+		SourceKind: automation.CronSourceKind, DriverID: driverID, DriverVersionID: versionID,
 		Schedule: "*/10 * * * *", Enabled: true,
 	}); err != nil {
 		t.Fatalf("create trigger binding: %v", err)
@@ -731,7 +738,7 @@ func TestCreateWorkflowRunLostResponseRetryKeepsRunIdentity(t *testing.T) {
 			t.Fatalf("command[%d] identity = %q/%q, want %q/%q", index, command.RunID, command.RequestID, wantRunID, requestID)
 		}
 	}
-	var run domain.DriverRun
+	var run execution.DriverRunRecord
 	if err := json.Unmarshal(second.Body.Bytes(), &run); err != nil {
 		t.Fatalf("decode retry run: %v", err)
 	}
@@ -742,22 +749,22 @@ func TestCreateWorkflowRunLostResponseRetryKeepsRunIdentity(t *testing.T) {
 
 func resolveWorkflowDriverForTest(
 	ctx context.Context,
-	st store.Store,
+	st *memstore.Store,
 	workspace, workflow string,
 ) (*workflowcatalog.Driver, error) {
 	record, err := st.Drivers().Get(ctx, workspace, workflow)
 	if err == nil {
 		return record, nil
 	}
-	if !errors.Is(err, domain.ErrNotFound) {
+	if !errors.Is(err, persistence.ErrNotFound) {
 		return nil, err
 	}
-	records, err := st.Drivers().List(ctx, workspace, store.DriverFilter{Name: workflow, Limit: 1})
+	records, err := st.Drivers().List(ctx, workspace, workflowcatalog.DriverFilter{Name: workflow, Limit: 1})
 	if err != nil {
 		return nil, err
 	}
 	if len(records) == 0 {
-		return nil, domain.ErrNotFound
+		return nil, persistence.ErrNotFound
 	}
 	return records[0], nil
 }
@@ -774,7 +781,7 @@ func TestCreateWorkflowRunPassesRawPayload(t *testing.T) {
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("status = %d body=%s, want 202", rec.Code, rec.Body.String())
 	}
-	var run domain.DriverRun
+	var run execution.DriverRunRecord
 	if err := json.Unmarshal(rec.Body.Bytes(), &run); err != nil {
 		t.Fatalf("decode run: %v", err)
 	}
@@ -838,7 +845,7 @@ func TestCreateWorkflowRunRegistersBuiltinEpicRunner(t *testing.T) {
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("status = %d body=%s, want 202", rec.Code, rec.Body.String())
 	}
-	var run domain.DriverRun
+	var run execution.DriverRunRecord
 	if err := json.Unmarshal(rec.Body.Bytes(), &run); err != nil {
 		t.Fatalf("decode run: %v", err)
 	}
@@ -875,7 +882,7 @@ func TestCreateWorkflowRunRefreshesStaleBuiltinRunnerManifest(t *testing.T) {
 	if err != nil {
 		t.Fatalf("digest epic-runner source: %v", err)
 	}
-	if _, err := st.Drivers().Create(ctx, store.DriverCreate{
+	if _, err := st.Drivers().Create(ctx, workflowcatalog.DriverCreate{
 		WorkspaceKey: "TEST",
 		DriverID:     BuiltinEpicRunnerWorkflowName,
 		Name:         BuiltinEpicRunnerWorkflowName,
@@ -885,7 +892,7 @@ func TestCreateWorkflowRunRefreshesStaleBuiltinRunnerManifest(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("create stale built-in driver: %v", err)
 	}
-	if _, err := st.DriverVersions().Create(ctx, store.DriverVersionCreate{
+	if _, err := st.DriverVersions().Create(ctx, workflowcatalog.DriverVersionCreate{
 		WorkspaceKey:     "TEST",
 		VersionID:        "stale-version",
 		DriverID:         BuiltinEpicRunnerWorkflowName,
@@ -981,7 +988,7 @@ func TestCreateWorkflowRunPromotesPayloadEpicID(t *testing.T) {
 			if rec.Code != http.StatusAccepted {
 				t.Fatalf("status = %d body=%s, want 202", rec.Code, rec.Body.String())
 			}
-			var run domain.DriverRun
+			var run execution.DriverRunRecord
 			if err := json.Unmarshal(rec.Body.Bytes(), &run); err != nil {
 				t.Fatalf("decode run: %v", err)
 			}
@@ -1006,7 +1013,7 @@ func TestCreateWorkflowRunPromotesPayloadEpicID(t *testing.T) {
 				return
 			}
 			row := rows[0]
-			if row.Kind != domain.OutboxKindLeadTaskMessage || row.TargetAgent != "epic-lead-1" || row.EpicID != tc.wantEpicID {
+			if row.Kind != execution.OutboxKindLeadTaskMessage || row.TargetAgent != "epic-lead-1" || row.EpicID != tc.wantEpicID {
 				t.Fatalf("outbox row = %+v, want leadTaskMessage targeting epic-lead-1 under %q", row, tc.wantEpicID)
 			}
 		})
@@ -1016,32 +1023,32 @@ func TestCreateWorkflowRunPromotesPayloadEpicID(t *testing.T) {
 // driveTerminalTaskRun creates a terminal fixture and then invokes the real
 // Execution convergence command. Store writes stay test-only; the production
 // projection and lead-notification policy remains under Execution.
-func driveTerminalTaskRun(t *testing.T, ctx context.Context, st store.Store, driverRunID string) {
+func driveTerminalTaskRun(t *testing.T, ctx context.Context, st *memstore.Store, driverRunID string) {
 	t.Helper()
-	if _, err := st.Nodes().Create(ctx, store.NodeCreate{
+	if _, err := st.Nodes().Create(ctx, execution.NodeCreate{
 		WorkspaceKey:    "TEST",
 		NodeID:          "wf-node-1",
-		RuntimeProvider: domain.RuntimeProviderLocal,
+		RuntimeProvider: execution.RuntimeProviderLocal,
 		Capabilities:    []string{"driver-runner", "task-runner", "local-noop"},
-		DrainState:      domain.NodeDrainActive,
+		DrainState:      execution.WorkerNodeActive,
 		TTL:             time.Minute,
 	}); err != nil {
 		t.Fatalf("create worker node: %v", err)
 	}
 	taskRunID := "wf-task-run-1"
-	if _, err := st.TaskRuns().Create(ctx, store.TaskRunCreate{
+	if _, err := st.TaskRuns().Create(ctx, execution.TaskRunCreate{
 		WorkspaceKey:    "TEST",
 		TaskRunID:       taskRunID,
 		DriverRunID:     driverRunID,
 		TaskID:          "WF-TASK-1",
 		ProviderProfile: "local-noop",
-		Status:          domain.TaskRunQueued,
+		Status:          execution.TaskRunRecordQueued,
 	}); err != nil {
 		t.Fatalf("create queued task run: %v", err)
 	}
 	const leaseID = "wf-task-run-lease-1"
 	const leaseToken = "wf-task-run-token-1"
-	claimed, err := st.TaskRuns().ClaimQueued(ctx, "TEST", store.TaskRunClaim{
+	claimed, err := st.TaskRuns().ClaimQueued(ctx, "TEST", execution.TaskRunClaim{
 		TaskRunID: taskRunID, NodeID: "wf-node-1", LeaseID: leaseID, LeaseToken: leaseToken,
 		SupportedProviders: []string{"local-noop"}, ClaimedAt: time.Now().UTC(),
 	})
@@ -1049,9 +1056,9 @@ func driveTerminalTaskRun(t *testing.T, ctx context.Context, st store.Store, dri
 		t.Fatalf("claim queued task run fixture: %v", err)
 	}
 	finishedAt := time.Now().UTC()
-	if _, err := st.TaskRuns().Finish(ctx, "TEST", taskRunID, store.TaskRunFinish{
+	if _, err := st.TaskRuns().Finish(ctx, "TEST", taskRunID, execution.TaskRunFinish{
 		NodeID: claimed.NodeID, LeaseID: claimed.LeaseID, LeaseToken: leaseToken,
-		FencingToken: claimed.FencingToken, Status: domain.TaskRunCompleted, FinishedAt: finishedAt,
+		FencingToken: claimed.FencingToken, Status: execution.TaskRunRecordCompleted, FinishedAt: finishedAt,
 	}); err != nil {
 		t.Fatalf("finish task run fixture: %v", err)
 	}
@@ -1088,7 +1095,7 @@ func driveTerminalTaskRun(t *testing.T, ctx context.Context, st store.Store, dri
 }
 
 type workflowTaskRunConvergencePorts struct {
-	store store.Store
+	store *memstore.Store
 }
 
 func (ports *workflowTaskRunConvergencePorts) GetTerminalTaskRun(ctx context.Context, workspace, taskRunID string) (*execution.TerminalTaskRunRecord, error) {
@@ -1101,9 +1108,9 @@ func (ports *workflowTaskRunConvergencePorts) GetTerminalTaskRun(ctx context.Con
 	}
 	status := execution.StatusFailed
 	switch run.Status {
-	case domain.TaskRunCompleted:
+	case execution.TaskRunRecordCompleted:
 		status = execution.StatusSucceeded
-	case domain.TaskRunCancelled:
+	case execution.TaskRunRecordCancelled:
 		status = execution.StatusCancelled
 	}
 	record := &execution.TerminalTaskRunRecord{
@@ -1131,14 +1138,14 @@ func (ports *workflowTaskRunConvergencePorts) CompleteTaskRunTerminalConvergence
 	ctx context.Context,
 	command execution.CompleteTaskRunTerminalConvergence,
 ) (execution.TaskRunTerminalConvergenceCheckpoint, error) {
-	checkpoints, ok := ports.store.TaskRuns().(store.TaskRunTerminalConvergenceStore)
+	checkpoints, ok := ports.store.TaskRuns().(execution.TaskRunTerminalConvergenceStore)
 	if !ok {
 		return execution.TaskRunTerminalConvergenceCheckpoint{}, execution.ErrUnavailable
 	}
-	result, err := checkpoints.CompleteTaskRunTerminalConvergence(ctx, store.TaskRunTerminalConvergenceComplete{
-		WorkspaceKey: command.WorkspaceKey, TaskRunID: command.TaskRunID,
-		RequiredVersion: command.RequiredVersion, CompletedAt: command.CompletedAt,
-	})
+	result, err := checkpoints.CompleteTaskRunTerminalConvergence(
+		ctx,
+		execution.TaskRunTerminalConvergenceComplete(command),
+	)
 	if err != nil {
 		return execution.TaskRunTerminalConvergenceCheckpoint{}, err
 	}
@@ -1155,17 +1162,17 @@ func (ports *workflowTaskRunConvergencePorts) CompleteTaskRunTerminalConvergence
 }
 
 func (ports *workflowTaskRunConvergencePorts) EnsureTaskRunTerminalEvent(ctx context.Context, event execution.TaskRunTerminalEvent) error {
-	eventType := domain.TaskRunEventFailed
-	status := domain.TaskRunFailed
+	eventType := execution.TaskRunEventFailed
+	status := execution.TaskRunRecordFailed
 	switch event.Type {
 	case execution.TaskRunTerminalCompleted:
-		eventType = domain.TaskRunEventCompleted
-		status = domain.TaskRunCompleted
+		eventType = execution.TaskRunEventCompleted
+		status = execution.TaskRunRecordCompleted
 	case execution.TaskRunTerminalCancelled:
-		eventType = domain.TaskRunEventCancelled
-		status = domain.TaskRunCancelled
+		eventType = execution.TaskRunEventCancelled
+		status = execution.TaskRunRecordCancelled
 	}
-	_, err := ports.store.TaskRunEvents().Append(ctx, store.TaskRunEventAppend{
+	_, err := ports.store.TaskRunEvents().Append(ctx, execution.TaskRunEventAppend{
 		WorkspaceKey: event.WorkspaceKey, EventID: event.EventID, EpicID: event.EpicID,
 		DriverRunID: event.DriverRunID, TaskID: event.WorkItemID, TaskRunID: event.TaskRunID,
 		Type: eventType, Status: status, SchedulerState: event.SchedulerState, Attempt: event.Attempt,
@@ -1176,7 +1183,7 @@ func (ports *workflowTaskRunConvergencePorts) EnsureTaskRunTerminalEvent(ctx con
 }
 
 func (ports *workflowTaskRunConvergencePorts) ResolveEpicLead(ctx context.Context, workspace, epicID string) (string, error) {
-	agents, err := ports.store.AgentServices().List(ctx, workspace, store.AgentServiceFilter{})
+	agents, err := ports.store.AgentServices().List(ctx, workspace, agentsowner.AgentServiceFilter{})
 	if err != nil {
 		return "", err
 	}
@@ -1196,38 +1203,38 @@ func (ports *workflowTaskRunConvergencePorts) ResolveEpicLead(ctx context.Contex
 }
 
 func (ports *workflowTaskRunConvergencePorts) EnsureLeadTaskNotification(ctx context.Context, notification execution.LeadTaskNotification) error {
-	_, err := ports.store.Outbox().Create(ctx, store.OutboxCreate{
-		WorkspaceKey: notification.WorkspaceKey, Kind: domain.OutboxKindLeadTaskMessage,
+	_, err := ports.store.Outbox().Create(ctx, execution.OutboxCreate{
+		WorkspaceKey: notification.WorkspaceKey, Kind: execution.OutboxKindLeadTaskMessage,
 		EpicID: notification.EpicID, DriverRunID: notification.DriverRunID, TaskRunID: notification.TaskRunID,
 		TargetAgent: notification.TargetAgent, Body: "terminal task run", DedupeKey: notification.DedupeKey,
 	})
 	return err
 }
 
-func bindWorkflowEpicLead(t *testing.T, ctx context.Context, st store.Store, name, epicID string) {
+func bindWorkflowEpicLead(t *testing.T, ctx context.Context, st *memstore.Store, name, epicID string) {
 	t.Helper()
 	profileID := name + "-profile"
-	if _, err := st.Roles().Create(ctx, store.RoleCreate{
+	if _, err := st.Roles().Create(ctx, agentsowner.RoleRecordCreate{
 		WorkspaceKey: "TEST", Name: "lead",
-	}); err != nil && !errors.Is(err, domain.ErrAlreadyExists) {
+	}); err != nil && !errors.Is(err, persistence.ErrAlreadyExists) {
 		t.Fatalf("create lead role: %v", err)
 	}
-	if _, err := st.WorkerProfiles().Create(ctx, store.WorkerProfileCreate{
+	if _, err := st.WorkerProfiles().Create(ctx, execution.WorkerProfileCreate{
 		WorkspaceKey: "TEST", ProfileID: profileID, Name: profileID, Role: "lead", ParentEpic: epicID,
 	}); err != nil {
 		t.Fatalf("create lead profile: %v", err)
 	}
-	if _, err := st.AgentServices().Create(ctx, store.AgentServiceCreate{
+	if _, err := st.AgentServices().Create(ctx, agentsowner.AgentServiceCreate{
 		WorkspaceKey: "TEST", ServiceID: name, Name: name, RoleName: "lead", ProfileName: profileID,
-		Kind: domain.AgentServiceKindLead, DesiredState: domain.AgentServiceDesiredRunning, MaxInstances: 1,
+		Kind: agentsowner.AgentKindLead, DesiredState: agentsowner.DesiredRunning, MaxInstances: 1,
 	}); err != nil {
 		t.Fatalf("create lead agent service: %v", err)
 	}
 }
 
-func listWorkflowOutboxRows(t *testing.T, ctx context.Context, st store.Store) []*domain.OutboxRecord {
+func listWorkflowOutboxRows(t *testing.T, ctx context.Context, st *memstore.Store) []*execution.OutboxDelivery {
 	t.Helper()
-	rows, err := st.Outbox().ListDue(ctx, "TEST", store.OutboxDueFilter{Now: time.Now().UTC()})
+	rows, err := st.Outbox().ListDue(ctx, "TEST", execution.OutboxDueFilter{Now: time.Now().UTC()})
 	if err != nil {
 		t.Fatalf("list due outbox: %v", err)
 	}
@@ -1237,7 +1244,7 @@ func listWorkflowOutboxRows(t *testing.T, ctx context.Context, st store.Store) [
 func TestGetRunEventsReturnsDriverRunEvents(t *testing.T) {
 	ctx := context.Background()
 	st := seededWorkflowStore(t, ctx)
-	run, err := st.DriverRuns().Create(ctx, store.DriverRunCreate{
+	run, err := st.DriverRuns().Create(ctx, execution.DriverRunCreate{
 		WorkspaceKey:    "TEST",
 		RunID:           "run-1",
 		DriverID:        "demo",
@@ -1256,7 +1263,7 @@ func TestGetRunEventsReturnsDriverRunEvents(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d body=%s, want 200", rec.Code, rec.Body.String())
 	}
-	var page domain.PlatformEventsPage
+	var page execution.AuditPage
 	if err := json.Unmarshal(rec.Body.Bytes(), &page); err != nil {
 		t.Fatalf("decode events page: %v", err)
 	}
@@ -1268,7 +1275,7 @@ func TestGetRunEventsReturnsDriverRunEvents(t *testing.T) {
 func TestGetRunEmbedsDriverSteps(t *testing.T) {
 	ctx := context.Background()
 	st := seededWorkflowStore(t, ctx)
-	run, err := st.DriverRuns().Create(ctx, store.DriverRunCreate{
+	run, err := st.DriverRuns().Create(ctx, execution.DriverRunCreate{
 		WorkspaceKey:    "TEST",
 		RunID:           "run-with-steps",
 		DriverID:        "demo",
@@ -1277,23 +1284,23 @@ func TestGetRunEmbedsDriverSteps(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create run: %v", err)
 	}
-	if _, err := st.DriverSteps().Create(ctx, store.DriverStepCreate{
+	if _, err := st.DriverSteps().Create(ctx, execution.DriverStepCreate{
 		WorkspaceKey: "TEST",
 		StepID:       "step-1",
 		DriverRunID:  run.RunID,
 		StepKind:     "exec_task",
-		Status:       domain.DriverStepRunning,
+		Status:       execution.DriverStepRunning,
 		TaskRunID:    "task-run-1",
 	}); err != nil {
 		t.Fatalf("create driver step: %v", err)
 	}
-	if _, err := st.TaskRuns().Create(ctx, store.TaskRunCreate{
+	if _, err := st.TaskRuns().Create(ctx, execution.TaskRunCreate{
 		WorkspaceKey: "TEST",
 		TaskRunID:    "task-run-1",
 		DriverRunID:  run.RunID,
 		DriverStepID: "step-1",
 		TaskID:       "TASK-1",
-		Status:       domain.TaskRunRunning,
+		Status:       execution.TaskRunRecordRunning,
 	}); err != nil {
 		t.Fatalf("create task run: %v", err)
 	}
@@ -1360,7 +1367,7 @@ func TestCreateWorkflowVersionRejectsInlineActivation(t *testing.T) {
 	if !strings.Contains(rec.Body.String(), "approve and activate the version through the workflow catalog lifecycle API") {
 		t.Fatalf("body = %s, want lifecycle API guidance", rec.Body.String())
 	}
-	if _, err := st.Drivers().Get(context.Background(), "TEST", "demo"); !errors.Is(err, domain.ErrNotFound) {
+	if _, err := st.Drivers().Get(context.Background(), "TEST", "demo"); !errors.Is(err, persistence.ErrNotFound) {
 		t.Fatalf("activation bypass registered driver: %v", err)
 	}
 }
@@ -1409,7 +1416,7 @@ func TestCreateWorkflowVersionRegistersWithoutActivation(t *testing.T) {
 	if catalog.getDriverWorkspace != "TEST" || catalog.getDriverRef != "demo" {
 		t.Fatalf("catalog lookup = %q/%q, want TEST/demo", catalog.getDriverWorkspace, catalog.getDriverRef)
 	}
-	if _, err := st.Drivers().Get(ctx, "TEST", "demo"); !errors.Is(err, domain.ErrNotFound) {
+	if _, err := st.Drivers().Get(ctx, "TEST", "demo"); !errors.Is(err, persistence.ErrNotFound) {
 		t.Fatalf("HTTP adapter wrote generic Driver store: %v", err)
 	}
 }
@@ -1417,7 +1424,7 @@ func TestCreateWorkflowVersionRegistersWithoutActivation(t *testing.T) {
 func seededWorkflowStore(t *testing.T, ctx context.Context) *memstore.Store {
 	t.Helper()
 	st := memstore.New()
-	if _, err := st.Drivers().Create(ctx, store.DriverCreate{
+	if _, err := st.Drivers().Create(ctx, workflowcatalog.DriverCreate{
 		WorkspaceKey: "TEST",
 		DriverID:     "demo",
 		Name:         "demo",
@@ -1426,7 +1433,7 @@ func seededWorkflowStore(t *testing.T, ctx context.Context) *memstore.Store {
 	}); err != nil {
 		t.Fatalf("create driver: %v", err)
 	}
-	if _, err := st.DriverVersions().Create(ctx, store.DriverVersionCreate{
+	if _, err := st.DriverVersions().Create(ctx, workflowcatalog.DriverVersionCreate{
 		WorkspaceKey:     "TEST",
 		VersionID:        "version-1",
 		DriverID:         "demo",

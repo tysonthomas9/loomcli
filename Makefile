@@ -670,7 +670,7 @@ check-go:
 	@echo "=== [5/16] Go: LOC check ==="
 	@./scripts/check-loc.sh 1000 2500
 	@echo "=== [6/16] Go: package size check ==="
-	@./scripts/check-package-size.sh 25
+	@./scripts/check-package-size.sh 25 40
 	@echo "=== [7/16] Go: import fanout check ==="
 	@./scripts/check-import-fanout.sh 18
 	@echo "=== [8/16] Go: modular-monolith architecture guard ==="

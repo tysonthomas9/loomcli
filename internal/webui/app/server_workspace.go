@@ -7,10 +7,14 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/tysonthomas9/loomcli/internal/store"
+	workspaceowner "github.com/tysonthomas9/loomcli/internal/modules/workspace"
 	"github.com/tysonthomas9/loomcli/internal/webui/storeadapter"
 	"github.com/tysonthomas9/loomcli/internal/webui/workspacecoord"
 )
+
+type workspaceRecordSource interface {
+	Workspaces() workspaceowner.WorkspaceStore
+}
 
 func wrapWorkspaceCreateFn(
 	innerCreate workspacecoord.WorkspaceCreateFn,
@@ -102,17 +106,17 @@ func (app *Server) registerWorkerAPIRoutes() {
 	}
 
 	SetupWorkerAPIRoutes(app.mux, workerToken,
-		workerResolveWorktree(app.config.Store),
-		workerResolveEventsDir(app.config.Store),
-		workerResolveLogPath(app.config.Store),
-		workerValidateWorkspace(app.config.Store),
+		workerResolveWorktree(app.config.ProjectionRecords),
+		workerResolveEventsDir(app.config.ProjectionRecords),
+		workerResolveLogPath(app.config.ProjectionRecords),
+		workerValidateWorkspace(app.config.ProjectionRecords),
 	)
 	logger.Info("worker API routes registered", "component", "worker")
 }
 
 // workerValidateWorkspace returns a function that checks whether a workspace ID
 // exists in FleetDB.
-func workerValidateWorkspace(st store.Store) func(string) bool {
+func workerValidateWorkspace(st workspaceRecordSource) func(string) bool {
 	return func(id string) bool {
 		if st == nil {
 			return false
@@ -127,7 +131,7 @@ func workerValidateWorkspace(st store.Store) func(string) bool {
 
 // workerResolveWorktree returns a function that resolves a safe worktree path
 // for the given workspace and agent, creating the directory if needed.
-func workerResolveWorktree(st store.Store) func(string, string) string {
+func workerResolveWorktree(st workspaceRecordSource) func(string, string) string {
 	return func(workspace, agent string) string {
 		if st == nil {
 			return ""
@@ -157,7 +161,7 @@ func workerResolveWorktree(st store.Store) func(string, string) string {
 
 // workerResolveEventsDir returns a function that resolves the events directory
 // path for a workspace.
-func workerResolveEventsDir(st store.Store) func(string) string {
+func workerResolveEventsDir(st workspaceRecordSource) func(string) string {
 	return func(workspace string) string {
 		if st == nil {
 			return ""
@@ -172,7 +176,7 @@ func workerResolveEventsDir(st store.Store) func(string) string {
 
 // workerResolveLogPath returns a function that resolves a safe log file path
 // for a workspace agent.
-func workerResolveLogPath(st store.Store) func(string, string) string {
+func workerResolveLogPath(st workspaceRecordSource) func(string, string) string {
 	return func(workspace, agent string) string {
 		if st == nil {
 			return ""

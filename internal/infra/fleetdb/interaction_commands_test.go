@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
 )
 
 func TestInteractionStartUsesAtomicCommandAndReturnsOneTimeToken(t *testing.T) {
@@ -27,15 +27,15 @@ func TestInteractionStartUsesAtomicCommandAndReturnsOneTimeToken(t *testing.T) {
 			t.Fatal(err)
 		}
 		return interactionCommandJSONResponse(t, http.StatusCreated, InteractionSessionStartResult{
-			Session: &domain.AgentSession{
+			Session: &interaction.SessionRecord{
 				WorkspaceKey: "WS", SessionID: "session-1", AgentID: "agent-1",
-				NodeID: "node-1", Kind: domain.AgentSessionKind("interactive"),
-				Status: domain.AgentSessionStarting,
+				NodeID: "node-1", Kind: interaction.SessionRecordKind("interactive"),
+				Status: interaction.SessionRecordStarting,
 			},
-			Lease: &domain.AgentLease{
+			Lease: &interaction.LeaseRecord{
 				WorkspaceKey: "WS", LeaseID: "lease-1", SessionID: "session-1",
 				AgentID: "agent-1", NodeID: "node-1", FencingToken: 1,
-				Status: domain.AgentLeaseActive, ExpiresAt: time.Now().Add(time.Minute),
+				Status: interaction.LeaseRecordActive, ExpiresAt: time.Now().Add(time.Minute),
 			},
 			Token: "raw-session-token",
 		})
@@ -79,16 +79,16 @@ func TestInteractionRecoverStartUsesExactGenerationAndNoCredentialReceipt(t *tes
 			t.Fatalf("recovery request leaked credential or caller time: %s", body)
 		}
 		return interactionCommandJSONResponse(t, http.StatusOK, InteractionSessionStartResult{
-			Session: &domain.AgentSession{
+			Session: &interaction.SessionRecord{
 				WorkspaceKey: "WS", SessionID: "session-1", AgentID: "agent-1",
-				NodeID: "node-1", Kind: domain.AgentSessionKind("interactive"),
-				Status:         domain.AgentSessionStarting,
+				NodeID: "node-1", Kind: interaction.SessionRecordKind("interactive"),
+				Status:         interaction.SessionRecordStarting,
 				CurrentLeaseID: "lease-2", CurrentLeaseFencingToken: 8,
 			},
-			Lease: &domain.AgentLease{
+			Lease: &interaction.LeaseRecord{
 				WorkspaceKey: "WS", LeaseID: "lease-2", SessionID: "session-1",
 				AgentID: "agent-1", NodeID: "node-1", FencingToken: 8,
-				Status: domain.AgentLeaseActive, ExpiresAt: time.Now().Add(time.Minute),
+				Status: interaction.LeaseRecordActive, ExpiresAt: time.Now().Add(time.Minute),
 			},
 			Token: "raw-replacement-token",
 		})
@@ -208,15 +208,15 @@ func TestInteractionOwnedHeartbeatUsesHeaderOnlyCredential(t *testing.T) {
 			t.Fatalf("heartbeat sent caller-controlled time: %s", body)
 		}
 		return interactionCommandJSONResponse(t, http.StatusOK, InteractionSessionMutationResult{
-			Session: &domain.AgentSession{
+			Session: &interaction.SessionRecord{
 				WorkspaceKey: "WS", SessionID: "session-1", AgentID: "agent-1",
-				NodeID: "node-1", Kind: domain.AgentSessionKind("interactive"),
-				Status: domain.AgentSessionRunning,
+				NodeID: "node-1", Kind: interaction.SessionRecordKind("interactive"),
+				Status: interaction.SessionRecordRunning,
 			},
-			Lease: &domain.AgentLease{
+			Lease: &interaction.LeaseRecord{
 				WorkspaceKey: "WS", LeaseID: "lease-1", SessionID: "session-1",
 				AgentID: "agent-1", NodeID: "node-1", FencingToken: 7,
-				Status: domain.AgentLeaseActive, ExpiresAt: time.Now().Add(time.Minute),
+				Status: interaction.LeaseRecordActive, ExpiresAt: time.Now().Add(time.Minute),
 			},
 		})
 	})
@@ -259,9 +259,9 @@ func TestInteractionInboxCompletionBindsExactClaimAttempt(t *testing.T) {
 		if err := json.Unmarshal(body, &captured); err != nil {
 			t.Fatal(err)
 		}
-		return interactionCommandJSONResponse(t, http.StatusOK, &domain.AgentInboxMessage{
+		return interactionCommandJSONResponse(t, http.StatusOK, &interaction.InboxRecord{
 			WorkspaceKey: "WS", InboxMessageID: "message-1",
-			SessionID: "session-1", Attempt: 3, Status: domain.AgentInboxMessageQueued,
+			SessionID: "session-1", Attempt: 3, Status: interaction.InboxRecordQueued,
 		})
 	})
 	proof := InteractionSessionAuthorityProof{
@@ -273,13 +273,13 @@ func TestInteractionInboxCompletionBindsExactClaimAttempt(t *testing.T) {
 		t.Context(),
 		InteractionInboxCompleteInput{
 			Proof: proof, InboxMessageID: "message-1", Attempt: 3,
-			Status: string(domain.AgentInboxMessageQueued), ErrorClass: "delivery_pending",
+			Status: string(interaction.InboxRecordQueued), ErrorClass: "delivery_pending",
 		},
 	)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if message == nil || message.Attempt != 3 || message.Status != domain.AgentInboxMessageQueued {
+	if message == nil || message.Attempt != 3 || message.Status != interaction.InboxRecordQueued {
 		t.Fatalf("message = %+v", message)
 	}
 	if captured["attempt"] != float64(3) || captured["status"] != "queued" {
@@ -368,7 +368,7 @@ func TestInteractionCommandsNeverSendCallerControlledLifecycleTime(t *testing.T)
 			if bytes.Contains(body, []byte("last_seen_at")) {
 				t.Fatalf("terminal update sent caller-controlled time: %s", body)
 			}
-			return interactionCommandJSONResponse(t, http.StatusOK, &domain.TerminalSession{
+			return interactionCommandJSONResponse(t, http.StatusOK, &interaction.TerminalRecord{
 				WorkspaceKey: "WS", TerminalID: "terminal-1",
 				SessionID: "session-1", AgentID: "agent-1", NodeID: "node-1",
 			})

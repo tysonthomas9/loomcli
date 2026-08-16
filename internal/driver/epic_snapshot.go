@@ -6,9 +6,10 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
+
 	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
-	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 const (
@@ -74,11 +75,11 @@ type EpicWorkItems interface {
 
 func LoadEpicSnapshot(ctx context.Context, items EpicWorkItems, opts EpicSnapshotOptions) (*EpicSnapshot, error) {
 	if items == nil {
-		return nil, fmt.Errorf("work items projection required: %w", domain.ErrInvalid)
+		return nil, fmt.Errorf("work items projection required: %w", persistence.ErrInvalid)
 	}
 	epicID := strings.TrimSpace(opts.EpicID)
 	if epicID == "" {
-		return nil, fmt.Errorf("epic id required: %w", domain.ErrInvalid)
+		return nil, fmt.Errorf("epic id required: %w", persistence.ErrInvalid)
 	}
 	readyLimit := opts.ReadyLimit
 	if readyLimit <= 0 {
@@ -124,22 +125,22 @@ func LoadEpicSnapshot(ctx context.Context, items EpicWorkItems, opts EpicSnapsho
 }
 
 type taskRunListStore interface {
-	TaskRuns() store.TaskRunStore
+	TaskRuns() execution.TaskRunStore
 }
 
 func ListActiveTaskRuns(ctx context.Context, s taskRunListStore, opts ActiveTaskRunsOptions) (*ActiveTaskRuns, error) {
 	if s == nil {
-		return nil, fmt.Errorf("store required: %w", domain.ErrInvalid)
+		return nil, fmt.Errorf("store required: %w", persistence.ErrInvalid)
 	}
 	workspaceKey := strings.TrimSpace(opts.WorkspaceKey)
 	driverRunID := strings.TrimSpace(opts.DriverRunID)
 	if workspaceKey == "" || driverRunID == "" {
-		return nil, fmt.Errorf("workspace key and driver run id required: %w", domain.ErrInvalid)
+		return nil, fmt.Errorf("workspace key and driver run id required: %w", persistence.ErrInvalid)
 	}
 	limit := opts.Limit
-	var active []*domain.TaskRun
-	for _, status := range []domain.TaskRunStatus{domain.TaskRunQueued, domain.TaskRunRunning} {
-		filter := store.TaskRunFilter{DriverRunID: driverRunID, Status: status}
+	var active []*execution.TaskRunRecord
+	for _, status := range []execution.TaskRunRecordStatus{execution.TaskRunRecordQueued, execution.TaskRunRecordRunning} {
+		filter := execution.TaskRunFilter{DriverRunID: driverRunID, Status: status}
 		if limit > 0 {
 			filter.Limit = limit
 		}

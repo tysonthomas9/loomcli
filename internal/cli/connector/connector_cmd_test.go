@@ -16,7 +16,6 @@ import (
 	vault "github.com/tysonthomas9/loomcli/internal/infra/connectorsvault"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	connectorsmodule "github.com/tysonthomas9/loomcli/internal/modules/connectors"
-	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
 const (
@@ -26,7 +25,7 @@ const (
 	testRotatedSecret = "whsec-ROTATED-secret-2"
 )
 
-func testConnectorManagement(t *testing.T, st store.Store) connectorsmodule.Management {
+func testConnectorManagement(t *testing.T, st *memstore.Store) connectorsmodule.Management {
 	t.Helper()
 	management, err := connectorsmodule.NewManagement(st.Connectors())
 	if err != nil {
@@ -35,7 +34,7 @@ func testConnectorManagement(t *testing.T, st store.Store) connectorsmodule.Mana
 	return management
 }
 
-func testConnectorSecretManagement(t *testing.T, st store.Store) connectorsmodule.Management {
+func testConnectorSecretManagement(t *testing.T, st *memstore.Store) connectorsmodule.Management {
 	t.Helper()
 	sealer, err := newConnectorVault()
 	if err != nil {
@@ -606,7 +605,7 @@ func TestListGrants_SelectorValidation(t *testing.T) {
 
 // seedAuditJournal appends one granted and one denied call for run-1 on
 // binding-pr, plus a granted call for run-2 on binding-other.
-func seedAuditJournal(t *testing.T, st store.Store) {
+func seedAuditJournal(t *testing.T, st *memstore.Store) {
 	t.Helper()
 	now := time.Date(2026, 6, 11, 12, 0, 0, 0, time.UTC)
 	recs := []*connectorsmodule.ConnectorCallRecord{

@@ -11,14 +11,15 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
+
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 type triggerEventStore struct{ client *Client }
 
-var _ store.TriggerEventStore = (*triggerEventStore)(nil)
-var _ store.TriggerEventAppender = (*triggerEventStore)(nil)
+var _ automation.TriggerEventStore = (*triggerEventStore)(nil)
+var _ automation.TriggerEventAppender = (*triggerEventStore)(nil)
 
 // AppendTriggerEvent uses FleetDB's service-auth producer lane. Loom has
 // already derived any external session actor at its authenticated application
@@ -28,7 +29,7 @@ func (s *triggerEventStore) AppendTriggerEvent(
 	event *automation.Event,
 ) (*automation.Event, error) {
 	if event == nil || event.WorkspaceKey == "" || event.SourceKind == "" || event.EventType == "" {
-		return nil, fmt.Errorf("append trigger event requires workspace, source kind, and event type: %w", domain.ErrInvalid)
+		return nil, fmt.Errorf("append trigger event requires workspace, source kind, and event type: %w", persistence.ErrInvalid)
 	}
 	canonicalID, canonical := event.CanonicalEventID()
 	validProvenance := false
@@ -40,10 +41,10 @@ func (s *triggerEventStore) AppendTriggerEvent(
 	case "", automation.EventOriginWorkflow:
 		validProvenance = true
 	}
-	if !canonical || domain.IsAwaitTimeoutEventID(canonicalID) || event.RouteKey != "" ||
+	if !canonical || execution.IsAwaitTimeoutEventID(canonicalID) || event.RouteKey != "" ||
 		event.EmittingRunID != "" || event.HopDepth != 0 || len(event.SubjectAttrs) != 0 ||
 		!validProvenance {
-		return nil, fmt.Errorf("append trigger event envelope is invalid: %w", domain.ErrInvalid)
+		return nil, fmt.Errorf("append trigger event envelope is invalid: %w", persistence.ErrInvalid)
 	}
 	body := map[string]any{
 		"event_id": event.EventID, "trigger_binding_id": event.TriggerBindingID,
@@ -73,7 +74,7 @@ func (s *triggerEventStore) Get(ctx context.Context, ws, eventID string) (*autom
 	return out.event(), nil
 }
 
-func (s *triggerEventStore) List(ctx context.Context, ws string, filter store.TriggerEventFilter) ([]*automation.Event, error) {
+func (s *triggerEventStore) List(ctx context.Context, ws string, filter automation.TriggerEventFilter) ([]*automation.Event, error) {
 	q := url.Values{}
 	if filter.SourceKind != "" {
 		q.Set("source_kind", filter.SourceKind)
@@ -106,7 +107,7 @@ func (s *triggerEventStore) List(ctx context.Context, ws string, filter store.Tr
 
 type triggerDeliveryStore struct{ client *Client }
 
-var _ store.TriggerDeliveryStore = (*triggerDeliveryStore)(nil)
+var _ automation.TriggerDeliveryStore = (*triggerDeliveryStore)(nil)
 
 func (s *triggerDeliveryStore) Get(ctx context.Context, ws, deliveryID string) (*automation.Delivery, error) {
 	var out automation.Delivery
@@ -117,7 +118,7 @@ func (s *triggerDeliveryStore) Get(ctx context.Context, ws, deliveryID string) (
 	return &out, nil
 }
 
-func (s *triggerDeliveryStore) List(ctx context.Context, ws string, filter store.TriggerDeliveryFilter) ([]*automation.Delivery, error) {
+func (s *triggerDeliveryStore) List(ctx context.Context, ws string, filter automation.TriggerDeliveryFilter) ([]*automation.Delivery, error) {
 	q := url.Values{}
 	if filter.TriggerEventID != "" {
 		q.Set("trigger_event_id", filter.TriggerEventID)
@@ -147,12 +148,12 @@ func (s *triggerDeliveryStore) List(ctx context.Context, ws string, filter store
 	return resp.TriggerDeliveries, nil
 }
 
-var _ store.AwaitEventNotificationStore = (*triggerEventStore)(nil)
+var _ execution.AwaitEventNotificationStore = (*triggerEventStore)(nil)
 
 func (s *triggerEventStore) ClaimAwaitEventNotifications(
 	ctx context.Context,
-	claim store.AwaitEventNotificationClaim,
-) ([]store.AwaitEventNotification, error) {
+	claim execution.AwaitEventNotificationLease,
+) ([]execution.AwaitEventNotification, error) {
 	body := map[string]any{
 		"claim_id": claim.ClaimID, "before": claim.Before,
 		"claim_until": claim.ClaimUntil, "limit": claim.Limit,
@@ -171,14 +172,14 @@ func (s *triggerEventStore) ClaimAwaitEventNotifications(
 	if err := s.client.do(ctx, "POST", path, body, &response); err != nil {
 		return nil, err
 	}
-	out := make([]store.AwaitEventNotification, 0, len(response.Notifications))
+	out := make([]execution.AwaitEventNotification, 0, len(response.Notifications))
 	for _, notification := range response.Notifications {
 		event := notification.Event.event()
 		if event == nil {
 			continue
 		}
-		out = append(out, store.AwaitEventNotification{
-			Event: *event, Attempt: notification.Attempt,
+		out = append(out, execution.AwaitEventNotification{
+			Event: awaitEventProjection(event), Attempt: notification.Attempt,
 			DurableEventID: notification.DurableEventID, CanonicalEventID: notification.CanonicalEventID,
 			PayloadOversized: notification.PayloadOversized, PayloadSize: notification.PayloadSize,
 		})
@@ -186,9 +187,23 @@ func (s *triggerEventStore) ClaimAwaitEventNotifications(
 	return out, nil
 }
 
+func awaitEventProjection(event *automation.Event) execution.AwaitEvent {
+	return execution.AwaitEvent{
+		WorkspaceKey:  event.WorkspaceKey,
+		EventID:       event.EventID,
+		SourceEventID: event.SourceEventID,
+		EventType:     event.EventType,
+		SubjectRef:    event.SubjectRef,
+		SourceKind:    event.SourceKind,
+		Origin:        string(event.Origin),
+		ActorRef:      event.ActorRef,
+		Payload:       append([]byte(nil), event.Payload...),
+	}
+}
+
 func (s *triggerEventStore) CompleteAwaitEventNotification(
 	ctx context.Context,
-	completion store.AwaitEventNotificationCompletion,
+	completion execution.AwaitEventNotificationCompletion,
 ) error {
 	completedAt := completion.CompletedAt
 	if completedAt.IsZero() {
@@ -203,7 +218,7 @@ func (s *triggerEventStore) CompleteAwaitEventNotification(
 
 func (s *triggerEventStore) RetryAwaitEventNotification(
 	ctx context.Context,
-	retry store.AwaitEventNotificationRetry,
+	retry execution.AwaitEventNotificationRetry,
 ) error {
 	body := map[string]any{
 		"event_id": retry.EventID, "claim_id": retry.ClaimID,
@@ -213,13 +228,13 @@ func (s *triggerEventStore) RetryAwaitEventNotification(
 	return s.client.do(ctx, "POST", path, body, nil)
 }
 
-// IssueJournalReader is the OPTIONAL store.IssueJournalReader capability,
+// IssueJournalReader is the OPTIONAL automation.IssueJournalReader capability,
 // served by the fleet-db backend only (memstore deliberately omits it — the
 // A4 bridge is capability-gated on its presence). It is implemented on the
 // triggerEventStore so it rides the same TriggerEventStore type assertion as
 // TriggerEventAppender; there is no fleet-db change, the issue journal is just
 // the entity_type=issue slice of GET /events/mutations.
-var _ store.IssueJournalReader = (*triggerEventStore)(nil)
+var _ automation.IssueJournalReader = (*triggerEventStore)(nil)
 
 // mutationsResponse mirrors fleet-db's MutationsResponse (api/mutations.go).
 // Wire is snake_case v1; cursor is the opaque resume token echoed back, and
@@ -255,7 +270,7 @@ type journalEventWire struct {
 // A malformed before/after state on any one event is skipped (that field is
 // left nil) rather than failing the whole batch — a single poisoned snapshot
 // must not stall the bridge's forward progress.
-func (s *triggerEventStore) ListIssueEvents(ctx context.Context, ws, afterCursor string, limit int) ([]store.JournalEvent, string, bool, error) {
+func (s *triggerEventStore) ListIssueEvents(ctx context.Context, ws, afterCursor string, limit int) ([]automation.JournalEvent, string, bool, error) {
 	q := url.Values{}
 	q.Set("entity_type", "issue")
 	since := afterCursor
@@ -273,9 +288,9 @@ func (s *triggerEventStore) ListIssueEvents(ctx context.Context, ws, afterCursor
 		return nil, "", false, err
 	}
 
-	events := make([]store.JournalEvent, 0, len(resp.Events))
+	events := make([]automation.JournalEvent, 0, len(resp.Events))
 	for _, e := range resp.Events {
-		events = append(events, store.JournalEvent{
+		events = append(events, automation.JournalEvent{
 			ID:        e.ID,
 			Action:    e.Action,
 			Actor:     e.Actor,
@@ -314,7 +329,7 @@ func unwrapJournalSnapshot(snapshot string) json.RawMessage {
 // ListDue returns deliveries awaiting the retry sweeper whose due score is
 // <= filter.Now, in due order. A zero Now is omitted from the query; the
 // server then cuts off at its own current time.
-func (s *triggerDeliveryStore) ListDue(ctx context.Context, ws string, filter store.TriggerDeliveryDueFilter) ([]*automation.Delivery, error) {
+func (s *triggerDeliveryStore) ListDue(ctx context.Context, ws string, filter automation.TriggerDeliveryDueFilter) ([]*automation.Delivery, error) {
 	q := url.Values{}
 	if !filter.Now.IsZero() {
 		q.Set("now", filter.Now.UTC().Format(time.RFC3339Nano))
@@ -337,9 +352,9 @@ func (s *triggerDeliveryStore) ListDue(ctx context.Context, ws string, filter st
 
 // UpdateResult records one attempt outcome. next_retry_at is only sent when
 // set (mirrors the outbox MarkResult wire); a final delivery transitioning
-// to a different status surfaces as domain.ErrInvalidTransition via the 409
+// to a different status surfaces as persistence.ErrInvalidTransition via the 409
 // invalid_transition mapping in classifyHTTPError.
-func (s *triggerDeliveryStore) UpdateResult(ctx context.Context, ws, deliveryID string, update store.TriggerDeliveryResultUpdate) (*automation.Delivery, error) {
+func (s *triggerDeliveryStore) UpdateResult(ctx context.Context, ws, deliveryID string, update automation.TriggerDeliveryResultUpdate) (*automation.Delivery, error) {
 	body := map[string]any{
 		"status":        update.Status,
 		"attempt":       update.Attempt,

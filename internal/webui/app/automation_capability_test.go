@@ -5,16 +5,17 @@ import (
 	"encoding/json"
 	"errors"
 
+	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	"github.com/tysonthomas9/loomcli/internal/modules/automation"
+
 	"github.com/tysonthomas9/loomcli/internal/app/systemeventing"
 	"github.com/tysonthomas9/loomcli/internal/app/webhookingestion"
 	"github.com/tysonthomas9/loomcli/internal/app/workflowbinding"
 	"github.com/tysonthomas9/loomcli/internal/app/workfloweventing"
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/driver"
-	"github.com/tysonthomas9/loomcli/internal/modules/automation"
 	workflowcataloghttp "github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog/httpapi"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 	platformruntime "github.com/tysonthomas9/loomcli/internal/platform/runtime"
-	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui"
 )
 
@@ -28,7 +29,7 @@ type agentRouteAutomationCapability struct {
 
 var _ webui.AutomationCapability = (*agentRouteAutomationCapability)(nil)
 
-func newAgentRouteAutomationCapability(st store.Store) webui.AutomationCapability {
+func newAgentRouteAutomationCapability(st *memstore.Store) webui.AutomationCapability {
 	return &agentRouteAutomationCapability{bindings: &agentRouteBindingQueries{st: st}}
 }
 
@@ -61,7 +62,7 @@ func (*agentRouteAutomationCapability) RuntimeRegistrations() []platformruntime.
 
 type agentRouteBindingQueries struct {
 	automation.BindingOperations
-	st store.Store
+	st *memstore.Store
 }
 
 func (queries *agentRouteBindingQueries) GetBinding(ctx context.Context, workspace, bindingID string) (*automation.Binding, error) {
@@ -73,10 +74,7 @@ func (queries *agentRouteBindingQueries) GetBinding(ctx context.Context, workspa
 }
 
 func (queries *agentRouteBindingQueries) ListBindings(ctx context.Context, workspace string, filter automation.BindingFilter) ([]*automation.Binding, error) {
-	bindings, err := queries.st.TriggerBindings().List(ctx, workspace, store.TriggerBindingFilter{
-		SourceKind: filter.SourceKind, RouteKey: filter.RouteKey, DriverID: filter.DriverID,
-		TargetAgentServiceID: filter.TargetAgentServiceID, Enabled: filter.Enabled, Limit: filter.Limit,
-	})
+	bindings, err := queries.st.TriggerBindings().List(ctx, workspace, automation.TriggerBindingFilter(filter))
 	if err != nil {
 		return nil, mapAgentRouteBindingError(err)
 	}
@@ -107,7 +105,7 @@ func projectAgentRouteBinding(binding *automation.Binding) (*automation.Binding,
 }
 
 func mapAgentRouteBindingError(err error) error {
-	if errors.Is(err, domain.ErrNotFound) {
+	if errors.Is(err, persistence.ErrNotFound) {
 		return errors.Join(automation.ErrNotFound, err)
 	}
 	return err

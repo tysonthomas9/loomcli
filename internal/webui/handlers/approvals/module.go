@@ -43,9 +43,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	trigger "github.com/tysonthomas9/loomcli/internal/infra/automationruntime"
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
@@ -83,7 +83,7 @@ type Module struct {
 // It exposes only the eligibility projection needed before journal dispatch;
 // approval handlers cannot reach await persistence or any mutation method.
 type PendingAwaitQueries interface {
-	ListAwaitsByPattern(context.Context, string, string) ([]*domain.AwaitInstance, error)
+	ListAwaitsByPattern(context.Context, string, string) ([]*execution.AwaitInstance, error)
 }
 
 // AwaitDispatcher is the Execution-backed mutation surface used after the
@@ -192,7 +192,7 @@ func (m *Module) postApproval(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid", err.Error())
 		return
 	}
-	subjectKey := domain.AwaitEventKey(params.EventType, params.SubjectRef)
+	subjectKey := execution.AwaitEventKey(params.EventType, params.SubjectRef)
 	pending, err := m.pendingAwaits(r.Context(), ws, subjectKey)
 	if errors.Is(err, errors.ErrUnsupported) {
 		writeError(w, http.StatusNotImplemented, "unsupported", "await store unavailable for this backend: "+err.Error())
@@ -283,7 +283,7 @@ func decodeApproval(w http.ResponseWriter, r *http.Request) (approvalParams, err
 	if params.Decision != DecisionApproved && params.Decision != DecisionRejected {
 		return params, fmt.Errorf("decision must be %q or %q", DecisionApproved, DecisionRejected)
 	}
-	if err := domain.ValidateAwaitPattern(domain.AwaitEventKey(params.EventType, params.SubjectRef)); err != nil {
+	if err := execution.ValidateAwaitPattern(execution.AwaitEventKey(params.EventType, params.SubjectRef)); err != nil {
 		return params, fmt.Errorf("subjectRef and eventType must render a subject-scoped key: %s", err.Error())
 	}
 	return params, nil
@@ -292,7 +292,7 @@ func decodeApproval(w http.ResponseWriter, r *http.Request) (approvalParams, err
 // pendingAwaits lists the pending awaits on the rendered key. Backends
 // without await support surface errors.ErrUnsupported; other errors are
 // treated the same fail-closed way by the caller.
-func (m *Module) pendingAwaits(ctx context.Context, ws, subjectKey string) ([]*domain.AwaitInstance, error) {
+func (m *Module) pendingAwaits(ctx context.Context, ws, subjectKey string) ([]*execution.AwaitInstance, error) {
 	pending, err := m.awaitQueries.ListAwaitsByPattern(ctx, ws, subjectKey)
 	if err != nil {
 		return nil, err
@@ -302,7 +302,7 @@ func (m *Module) pendingAwaits(ctx context.Context, ws, subjectKey string) ([]*d
 
 // actorEligible reports whether the verified actor may resolve at least one
 // of the pending awaits (empty ActorAllow admits any actor).
-func actorEligible(pending []*domain.AwaitInstance, actor string) bool {
+func actorEligible(pending []*execution.AwaitInstance, actor string) bool {
 	for _, inst := range pending {
 		if len(inst.ActorAllow) == 0 {
 			return true

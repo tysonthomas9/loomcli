@@ -8,11 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
-	"github.com/tysonthomas9/loomcli/internal/modules/agents"
+	agentsowner "github.com/tysonthomas9/loomcli/internal/modules/agents"
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
-	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
 func TestSnapshotManagedAgentPolicyOverridesSpoofedPolicy(t *testing.T) {
@@ -82,7 +80,7 @@ func TestSnapshotManagedAgentPolicyBytesRemainImmutableAcrossStoreEdits(t *testi
 	readOnly := false
 	allowedTools := []string{"Read"}
 	deniedTools := []string{"Bash", "Write"}
-	if _, err := h.store.Roles().Update(t.Context(), "WS", "managed-role", store.RoleUpdate{
+	if _, err := h.store.Roles().Update(t.Context(), "WS", "managed-role", agentsowner.RoleRecordUpdate{
 		Model:        &model,
 		Effort:       &effort,
 		ReadOnly:     &readOnly,
@@ -96,7 +94,7 @@ func TestSnapshotManagedAgentPolicyBytesRemainImmutableAcrossStoreEdits(t *testi
 		t.Context(),
 		"WS",
 		"managed-agent",
-		store.AgentServiceUpdate{Metadata: &metadata},
+		agentsowner.AgentServiceUpdate{Metadata: &metadata},
 	); err != nil {
 		t.Fatalf("update managed agent service: %v", err)
 	}
@@ -184,7 +182,7 @@ func TestSnapshotManagedAgentPolicyFailsClosedWhenRoleIsMissing(t *testing.T) {
 	if snapshot != nil {
 		t.Fatalf("snapshot = %s, want nil on missing managed role", snapshot)
 	}
-	if !errors.Is(err, agents.ErrNotFound) {
+	if !errors.Is(err, agentsowner.ErrNotFound) {
 		t.Fatalf("error = %v, want Agents ErrNotFound", err)
 	}
 	if !strings.Contains(err.Error(), `resolve managed TaskRun role "managed-role"`) {
@@ -194,7 +192,7 @@ func TestSnapshotManagedAgentPolicyFailsClosedWhenRoleIsMissing(t *testing.T) {
 
 type managedAgentPolicyHarness struct {
 	module *Module
-	store  store.Store
+	store  *memstore.Store
 }
 
 func newManagedAgentPolicyHarness(t *testing.T) *managedAgentPolicyHarness {
@@ -217,7 +215,7 @@ func newManagedAgentPolicyHarness(t *testing.T) *managedAgentPolicyHarness {
 func seedManagedAgentPolicy(t *testing.T, h *managedAgentPolicyHarness) *execution.DriverRun {
 	t.Helper()
 	budget := 3.25
-	if _, err := h.store.Roles().Create(t.Context(), store.RoleCreate{
+	if _, err := h.store.Roles().Create(t.Context(), agentsowner.RoleRecordCreate{
 		WorkspaceKey: "WS",
 		Name:         "managed-role",
 		Model:        "server-model",
@@ -230,10 +228,10 @@ func seedManagedAgentPolicy(t *testing.T, h *managedAgentPolicyHarness) *executi
 	}); err != nil {
 		t.Fatalf("create managed role: %v", err)
 	}
-	if _, err := h.store.AgentServices().Create(t.Context(), store.AgentServiceCreate{
+	if _, err := h.store.AgentServices().Create(t.Context(), agentsowner.AgentServiceCreate{
 		WorkspaceKey: "WS",
 		ServiceID:    "managed-agent",
-		Kind:         domain.AgentServiceKindEvent,
+		Kind:         agentsowner.AgentKindEvent,
 		RoleName:     "managed-role",
 		Metadata:     map[string]string{"backend": "service-backend"},
 	}); err != nil {
@@ -277,10 +275,10 @@ func decodeJSONString(t *testing.T, raw json.RawMessage) string {
 
 type snapshotMissingRoleQueries struct{}
 
-func (snapshotMissingRoleQueries) GetRole(context.Context, string, string) (*agents.Role, error) {
-	return nil, agents.ErrNotFound
+func (snapshotMissingRoleQueries) GetRole(context.Context, string, string) (*agentsowner.Role, error) {
+	return nil, agentsowner.ErrNotFound
 }
 
-func (snapshotMissingRoleQueries) ListRoles(context.Context, string) ([]*agents.Role, error) {
-	return nil, agents.ErrNotFound
+func (snapshotMissingRoleQueries) ListRoles(context.Context, string) ([]*agentsowner.Role, error) {
+	return nil, agentsowner.ErrNotFound
 }

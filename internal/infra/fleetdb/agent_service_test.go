@@ -7,8 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/modules/agents"
 )
 
 func TestAgentServiceClientRoutesBodiesAndQueries(t *testing.T) {
@@ -17,33 +16,33 @@ func TestAgentServiceClientRoutesBodiesAndQueries(t *testing.T) {
 		switch {
 		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/WS/agent-services":
 			var req struct {
-				ServiceID       string                          `json:"service_id"`
-				Name            string                          `json:"name"`
-				Kind            domain.AgentServiceKind         `json:"kind"`
-				DesiredState    domain.AgentServiceDesiredState `json:"desired_state"`
-				RoleName        string                          `json:"role_name"`
-				DriverID        string                          `json:"driver_id"`
-				DriverVersionID string                          `json:"driver_version_id"`
-				ProfileName     string                          `json:"profile_name"`
-				EventSources    []string                        `json:"event_sources"`
-				TriggerRefs     []string                        `json:"trigger_refs"`
-				PlacementPolicy string                          `json:"placement_policy"`
-				MaxInstances    int                             `json:"max_instances"`
-				RestartPolicy   string                          `json:"restart_policy"`
-				Permissions     []string                        `json:"permissions"`
-				BudgetPolicy    string                          `json:"budget_policy"`
-				StateRef        string                          `json:"state_ref"`
-				Metadata        map[string]string               `json:"metadata"`
+				ServiceID       string              `json:"service_id"`
+				Name            string              `json:"name"`
+				Kind            agents.AgentKind    `json:"kind"`
+				DesiredState    agents.DesiredState `json:"desired_state"`
+				RoleName        string              `json:"role_name"`
+				DriverID        string              `json:"driver_id"`
+				DriverVersionID string              `json:"driver_version_id"`
+				ProfileName     string              `json:"profile_name"`
+				EventSources    []string            `json:"event_sources"`
+				TriggerRefs     []string            `json:"trigger_refs"`
+				PlacementPolicy string              `json:"placement_policy"`
+				MaxInstances    int                 `json:"max_instances"`
+				RestartPolicy   string              `json:"restart_policy"`
+				Permissions     []string            `json:"permissions"`
+				BudgetPolicy    string              `json:"budget_policy"`
+				StateRef        string              `json:"state_ref"`
+				Metadata        map[string]string   `json:"metadata"`
 			}
 			decodeAgentServiceJSONBody(t, r, &req)
 			if req.ServiceID == "scripted" {
 				if req.RoleName != "" || req.DriverID != "driver-1" || req.DriverVersionID != "version-1" {
 					t.Fatalf("scripted create body behavior = %+v", req)
 				}
-				writeJSON(t, w, domain.AgentService{WorkspaceKey: "WS", ServiceID: req.ServiceID, Name: req.Name, Kind: req.Kind, DesiredState: req.DesiredState, DriverID: req.DriverID, DriverVersionID: req.DriverVersionID, CreatedBy: "tester", DeletedAt: &deletedAt, MaxInstances: req.MaxInstances})
+				writeJSON(t, w, agents.AgentServiceRecord{WorkspaceKey: "WS", ServiceID: req.ServiceID, Name: req.Name, Kind: req.Kind, DesiredState: req.DesiredState, DriverID: req.DriverID, DriverVersionID: req.DriverVersionID, CreatedBy: "tester", DeletedAt: &deletedAt, MaxInstances: req.MaxInstances})
 				return
 			}
-			if req.ServiceID != "lead" || req.Kind != domain.AgentServiceKindLead || req.DesiredState != domain.AgentServiceDesiredRunning || req.RoleName != "lead" || req.ProfileName != "falcon" {
+			if req.ServiceID != "lead" || req.Kind != agents.AgentKindLead || req.DesiredState != agents.DesiredRunning || req.RoleName != "lead" || req.ProfileName != "falcon" {
 				t.Fatalf("create body identity = %+v", req)
 			}
 			if req.MaxInstances != 2 || req.PlacementPolicy != "local" || req.RestartPolicy != "always" || req.BudgetPolicy != "daily:10" || req.StateRef != "state://lead" {
@@ -52,26 +51,26 @@ func TestAgentServiceClientRoutesBodiesAndQueries(t *testing.T) {
 			if len(req.EventSources) != 1 || req.EventSources[0] != "github:issues" || len(req.TriggerRefs) != 1 || req.TriggerRefs[0] != "binding-1" || len(req.Permissions) != 1 || req.Permissions[0] != "task_run.create" || req.Metadata["tier"] != "gold" {
 				t.Fatalf("create body collections = %+v", req)
 			}
-			writeJSON(t, w, domain.AgentService{WorkspaceKey: "WS", ServiceID: req.ServiceID, Name: req.Name, Kind: req.Kind, DesiredState: req.DesiredState, RoleName: req.RoleName, ProfileName: req.ProfileName, CreatedBy: "tester", MaxInstances: req.MaxInstances})
+			writeJSON(t, w, agents.AgentServiceRecord{WorkspaceKey: "WS", ServiceID: req.ServiceID, Name: req.Name, Kind: req.Kind, DesiredState: req.DesiredState, RoleName: req.RoleName, ProfileName: req.ProfileName, CreatedBy: "tester", MaxInstances: req.MaxInstances})
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/WS/agent-services":
 			q := r.URL.Query()
 			if q.Get("kind") != "lead" || q.Get("desired_state") != "running" || q.Get("role_name") != "lead" || q.Get("profile_name") != "falcon" || q.Get("include_deleted") != "true" || q.Get("limit") != "3" {
 				t.Fatalf("list query = %s", r.URL.RawQuery)
 			}
-			writeJSON(t, w, map[string]any{"agent_services": []*domain.AgentService{{WorkspaceKey: "WS", ServiceID: "lead", Kind: domain.AgentServiceKindLead, DesiredState: domain.AgentServiceDesiredRunning, RoleName: "lead", ProfileName: "falcon", CreatedBy: "tester", MaxInstances: 2}}, "count": 1})
+			writeJSON(t, w, map[string]any{"agent_services": []*agents.AgentServiceRecord{{WorkspaceKey: "WS", ServiceID: "lead", Kind: agents.AgentKindLead, DesiredState: agents.DesiredRunning, RoleName: "lead", ProfileName: "falcon", CreatedBy: "tester", MaxInstances: 2}}, "count": 1})
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/WS/agent-services/lead":
-			writeJSON(t, w, domain.AgentService{WorkspaceKey: "WS", ServiceID: "lead", Kind: domain.AgentServiceKindLead, DesiredState: domain.AgentServiceDesiredRunning, RoleName: "lead", ProfileName: "falcon", CreatedBy: "tester", MaxInstances: 2, UpdatedAt: deletedAt})
+			writeJSON(t, w, agents.AgentServiceRecord{WorkspaceKey: "WS", ServiceID: "lead", Kind: agents.AgentKindLead, DesiredState: agents.DesiredRunning, RoleName: "lead", ProfileName: "falcon", CreatedBy: "tester", MaxInstances: 2, UpdatedAt: deletedAt})
 		case r.Method == http.MethodPatch && r.URL.Path == "/api/v1/WS/agent-services/lead":
 			var req struct {
-				DesiredState *domain.AgentServiceDesiredState `json:"desired_state"`
-				LeaseID      *string                          `json:"lease_id"`
-				Metadata     *map[string]string               `json:"metadata"`
+				DesiredState *agents.DesiredState `json:"desired_state"`
+				LeaseID      *string              `json:"lease_id"`
+				Metadata     *map[string]string   `json:"metadata"`
 			}
 			decodeAgentServiceJSONBody(t, r, &req)
-			if req.DesiredState == nil || *req.DesiredState != domain.AgentServiceDesiredPaused || req.LeaseID == nil || *req.LeaseID != "lease-service-1" || req.Metadata == nil || (*req.Metadata)["tier"] != "silver" {
+			if req.DesiredState == nil || *req.DesiredState != agents.DesiredPaused || req.LeaseID == nil || *req.LeaseID != "lease-service-1" || req.Metadata == nil || (*req.Metadata)["tier"] != "silver" {
 				t.Fatalf("update body = %+v", req)
 			}
-			writeJSON(t, w, domain.AgentService{WorkspaceKey: "WS", ServiceID: "lead", Kind: domain.AgentServiceKindLead, DesiredState: *req.DesiredState, RoleName: "lead", ProfileName: "falcon", LeaseID: *req.LeaseID, Metadata: *req.Metadata, MaxInstances: 2})
+			writeJSON(t, w, agents.AgentServiceRecord{WorkspaceKey: "WS", ServiceID: "lead", Kind: agents.AgentKindLead, DesiredState: *req.DesiredState, RoleName: "lead", ProfileName: "falcon", LeaseID: *req.LeaseID, Metadata: *req.Metadata, MaxInstances: 2})
 		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/WS/agent-services/lead/archive":
 			if got := r.Header.Get(FleetDelegatedActorHeader); got != "tester" {
 				t.Fatalf("%s = %q, want tester", FleetDelegatedActorHeader, got)
@@ -83,9 +82,9 @@ func TestAgentServiceClientRoutesBodiesAndQueries(t *testing.T) {
 			if !req.ExpectedUpdatedAt.Equal(deletedAt) {
 				t.Fatalf("expected_updated_at = %s, want %s", req.ExpectedUpdatedAt, deletedAt)
 			}
-			writeJSON(t, w, domain.AgentService{
+			writeJSON(t, w, agents.AgentServiceRecord{
 				WorkspaceKey: "WS", ServiceID: "lead",
-				Kind: domain.AgentServiceKindLead, DesiredState: domain.AgentServiceDesiredPaused,
+				Kind: agents.AgentKindLead, DesiredState: agents.DesiredPaused,
 				DeletedAt: &deletedAt, UpdatedAt: deletedAt,
 			})
 		default:
@@ -98,12 +97,12 @@ func TestAgentServiceClientRoutesBodiesAndQueries(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	created, err := client.AgentServices().Create(t.Context(), store.AgentServiceCreate{
+	created, err := client.AgentServices().Create(t.Context(), agents.AgentServiceCreate{
 		WorkspaceKey:    "WS",
 		ServiceID:       "lead",
 		Name:            "Lead",
-		Kind:            domain.AgentServiceKindLead,
-		DesiredState:    domain.AgentServiceDesiredRunning,
+		Kind:            agents.AgentKindLead,
+		DesiredState:    agents.DesiredRunning,
 		RoleName:        "lead",
 		ProfileName:     "falcon",
 		EventSources:    []string{"github:issues"},
@@ -126,12 +125,12 @@ func TestAgentServiceClientRoutesBodiesAndQueries(t *testing.T) {
 		t.Fatalf("created_by = %q, want tester", created.CreatedBy)
 	}
 
-	scripted, err := client.AgentServices().Create(t.Context(), store.AgentServiceCreate{
+	scripted, err := client.AgentServices().Create(t.Context(), agents.AgentServiceCreate{
 		WorkspaceKey:    "WS",
 		ServiceID:       "scripted",
 		Name:            "Scripted",
-		Kind:            domain.AgentServiceKindEvent,
-		DesiredState:    domain.AgentServiceDesiredRunning,
+		Kind:            agents.AgentKindEvent,
+		DesiredState:    agents.DesiredRunning,
 		DriverID:        "driver-1",
 		DriverVersionID: "version-1",
 		MaxInstances:    1,
@@ -143,7 +142,7 @@ func TestAgentServiceClientRoutesBodiesAndQueries(t *testing.T) {
 		t.Fatalf("scripted = %+v, want driver fields, created_by, deleted_at", scripted)
 	}
 
-	services, err := client.AgentServices().List(t.Context(), "WS", store.AgentServiceFilter{Kind: domain.AgentServiceKindLead, DesiredState: domain.AgentServiceDesiredRunning, RoleName: "lead", ProfileName: "falcon", IncludeDeleted: true, Limit: 3})
+	services, err := client.AgentServices().List(t.Context(), "WS", agents.AgentServiceFilter{Kind: agents.AgentKindLead, DesiredState: agents.DesiredRunning, RoleName: "lead", ProfileName: "falcon", IncludeDeleted: true, Limit: 3})
 	if err != nil {
 		t.Fatalf("List agent services: %v", err)
 	}
@@ -158,14 +157,14 @@ func TestAgentServiceClientRoutesBodiesAndQueries(t *testing.T) {
 		t.Fatalf("got = %+v, want lead", got)
 	}
 
-	paused := domain.AgentServiceDesiredPaused
+	paused := agents.DesiredPaused
 	leaseID := "lease-service-1"
 	metadata := map[string]string{"tier": "silver"}
-	updated, err := client.AgentServices().Update(t.Context(), "WS", "lead", store.AgentServiceUpdate{DesiredState: &paused, LeaseID: &leaseID, Metadata: &metadata})
+	updated, err := client.AgentServices().Update(t.Context(), "WS", "lead", agents.AgentServiceUpdate{DesiredState: &paused, LeaseID: &leaseID, Metadata: &metadata})
 	if err != nil {
 		t.Fatalf("Update agent service: %v", err)
 	}
-	if updated.DesiredState != domain.AgentServiceDesiredPaused || updated.LeaseID != "lease-service-1" || updated.Metadata["tier"] != "silver" {
+	if updated.DesiredState != agents.DesiredPaused || updated.LeaseID != "lease-service-1" || updated.Metadata["tier"] != "silver" {
 		t.Fatalf("updated = %+v, want paused leased silver service", updated)
 	}
 	if err := client.AgentServices().Delete(t.Context(), "WS", "lead"); err != nil {

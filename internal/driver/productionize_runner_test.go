@@ -11,13 +11,20 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/automation"
+
+	"github.com/tysonthomas9/loomcli/internal/modules/agents"
+
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
+
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 
+	workspaceowner "github.com/tysonthomas9/loomcli/internal/modules/workspace"
+
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	artifactsmodule "github.com/tysonthomas9/loomcli/internal/modules/artifacts"
-	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 // Malformed runner outputs must fail closed as invalid_task_result (§4.2) and
@@ -53,7 +60,7 @@ func TestHostBridgeTaskExecutorFailsClosedOnInvalidResult(t *testing.T) {
 			if err != nil {
 				t.Fatalf("ExecuteTask: %v", err)
 			}
-			if result.Status != domain.TaskRunFailed || result.ExitCode != 1 {
+			if result.Status != execution.TaskRunRecordFailed || result.ExitCode != 1 {
 				t.Fatalf("result status/exit = %q/%d, want failed/1", result.Status, result.ExitCode)
 			}
 			if result.ErrorClass != "invalid_task_result" {
@@ -93,12 +100,12 @@ func TestValidateBridgeTaskRunnerResult(t *testing.T) {
 	}{
 		{name: "empty", result: bridgeTaskRunnerResult{}, wantOK: false},
 		{name: "unknown status", result: bridgeTaskRunnerResult{Status: "weird"}, wantOK: false},
-		{name: "non-terminal", result: bridgeTaskRunnerResult{Status: domain.TaskRunRunning}, wantOK: false},
-		{name: "completed nonzero", result: bridgeTaskRunnerResult{Status: domain.TaskRunCompleted, ExitCode: exit(2)}, wantOK: false},
-		{name: "completed zero", result: bridgeTaskRunnerResult{Status: domain.TaskRunCompleted, ExitCode: exit(0)}, wantOK: true},
-		{name: "completed unset exit", result: bridgeTaskRunnerResult{Status: domain.TaskRunCompleted}, wantOK: true},
-		{name: "failed", result: bridgeTaskRunnerResult{Status: domain.TaskRunFailed}, wantOK: true},
-		{name: "cancelled", result: bridgeTaskRunnerResult{Status: domain.TaskRunCancelled}, wantOK: true},
+		{name: "non-terminal", result: bridgeTaskRunnerResult{Status: execution.TaskRunRecordRunning}, wantOK: false},
+		{name: "completed nonzero", result: bridgeTaskRunnerResult{Status: execution.TaskRunRecordCompleted, ExitCode: exit(2)}, wantOK: false},
+		{name: "completed zero", result: bridgeTaskRunnerResult{Status: execution.TaskRunRecordCompleted, ExitCode: exit(0)}, wantOK: true},
+		{name: "completed unset exit", result: bridgeTaskRunnerResult{Status: execution.TaskRunRecordCompleted}, wantOK: true},
+		{name: "failed", result: bridgeTaskRunnerResult{Status: execution.TaskRunRecordFailed}, wantOK: true},
+		{name: "cancelled", result: bridgeTaskRunnerResult{Status: execution.TaskRunRecordCancelled}, wantOK: true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -111,12 +118,12 @@ func TestValidateBridgeTaskRunnerResult(t *testing.T) {
 
 // requireTerminalStatus rejects completed+nonzero as invalid_task_result (§4.2).
 func TestRequireTerminalStatusRejectsCompletedNonZeroExit(t *testing.T) {
-	completion := normalizeTaskExecCompletion(TaskExecResult{Status: domain.TaskRunCompleted, ExitCode: 5}, nil)
-	if completion.Status != domain.TaskRunFailed || completion.ExitCode != 5 || completion.ErrorClass != "invalid_task_result" {
+	completion := normalizeTaskExecCompletion(TaskExecResult{Status: execution.TaskRunRecordCompleted, ExitCode: 5}, nil)
+	if completion.Status != execution.TaskRunRecordFailed || completion.ExitCode != 5 || completion.ErrorClass != "invalid_task_result" {
 		t.Fatalf("completion = %+v, want failed/exit5/invalid_task_result", completion)
 	}
-	ok := normalizeTaskExecCompletion(TaskExecResult{Status: domain.TaskRunCompleted, ExitCode: 0}, nil)
-	if ok.Status != domain.TaskRunCompleted || ok.ErrorClass != "" {
+	ok := normalizeTaskExecCompletion(TaskExecResult{Status: execution.TaskRunRecordCompleted, ExitCode: 0}, nil)
+	if ok.Status != execution.TaskRunRecordCompleted || ok.ErrorClass != "" {
 		t.Fatalf("completion = %+v, want completed with no error class", ok)
 	}
 }
@@ -134,10 +141,10 @@ func TestNoopProviderGate(t *testing.T) {
 		if err != nil {
 			t.Fatalf("ExecuteTask: %v", err)
 		}
-		if result.Status != domain.TaskRunFailed || result.ErrorClass != "provider_unsupported" {
+		if result.Status != execution.TaskRunRecordFailed || result.ErrorClass != "provider_unsupported" {
 			t.Fatalf("disabled noop execute = %+v, want failed/provider_unsupported", result)
 		}
-		if _, perr := (LocalTaskExecutor{}).PreflightTaskProvider(ctx, opts); !errors.Is(perr, domain.ErrInvalid) {
+		if _, perr := (LocalTaskExecutor{}).PreflightTaskProvider(ctx, opts); !errors.Is(perr, persistence.ErrInvalid) {
 			t.Fatalf("disabled noop preflight err = %v, want ErrInvalid", perr)
 		}
 	})
@@ -148,7 +155,7 @@ func TestNoopProviderGate(t *testing.T) {
 		if err != nil {
 			t.Fatalf("ExecuteTask: %v", err)
 		}
-		if result.Status != domain.TaskRunCompleted || result.ExitCode != 0 {
+		if result.Status != execution.TaskRunRecordCompleted || result.ExitCode != 0 {
 			t.Fatalf("enabled noop execute = %+v, want completed/0", result)
 		}
 		if _, perr := (LocalTaskExecutor{}).PreflightTaskProvider(ctx, opts); perr != nil {
@@ -218,7 +225,7 @@ func TestLocalTaskRunnerBackendEnvResolution(t *testing.T) {
 
 	t.Run("defaults to codex without a profile", func(t *testing.T) {
 		st := memstore.New()
-		if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "WS", Name: "ws"}); err != nil {
+		if _, err := st.Workspaces().Create(ctx, workspaceowner.WorkspaceCreate{Key: "WS", Name: "ws"}); err != nil {
 			t.Fatalf("create workspace: %v", err)
 		}
 		req := hostBridgeTaskExecRequest()
@@ -232,7 +239,7 @@ func TestLocalTaskRunnerBackendEnvResolution(t *testing.T) {
 	t.Run("uses workspace local runtime provider", func(t *testing.T) {
 		t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
 		st := memstore.New()
-		if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "WS", Name: "ws"}); err != nil {
+		if _, err := st.Workspaces().Create(ctx, workspaceowner.WorkspaceCreate{Key: "WS", Name: "ws"}); err != nil {
 			t.Fatalf("create workspace: %v", err)
 		}
 		if err := bootstrap.SetRuntimeProvider("WS", "claude"); err != nil {
@@ -249,7 +256,7 @@ func TestLocalTaskRunnerBackendEnvResolution(t *testing.T) {
 	t.Run("retired supervised-agent override is ignored", func(t *testing.T) {
 		t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
 		st := memstore.New()
-		if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "WS", Name: "ws"}); err != nil {
+		if _, err := st.Workspaces().Create(ctx, workspaceowner.WorkspaceCreate{Key: "WS", Name: "ws"}); err != nil {
 			t.Fatalf("create workspace: %v", err)
 		}
 		if err := bootstrap.SetRuntimeProvider("WS", "claude"); err != nil {
@@ -266,44 +273,44 @@ func TestLocalTaskRunnerBackendEnvResolution(t *testing.T) {
 
 	t.Run("prompt agent role config follows immutable request policy", func(t *testing.T) {
 		st := memstore.New()
-		if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "WS", Name: "ws"}); err != nil {
+		if _, err := st.Workspaces().Create(ctx, workspaceowner.WorkspaceCreate{Key: "WS", Name: "ws"}); err != nil {
 			t.Fatalf("create workspace: %v", err)
 		}
 		budget := 3.25
-		if _, err := st.Roles().Create(ctx, store.RoleCreate{
+		if _, err := st.Roles().Create(ctx, agents.RoleRecordCreate{
 			WorkspaceKey: "WS", Name: "reviewer", Backend: "opencode", Model: "openai/gpt-5.6-terra",
 			Effort: "high", ReadOnly: true, AllowedTools: []string{"read", "grep"},
 			DeniedTools: []string{"write"}, MaxBudgetUSD: &budget,
 		}); err != nil {
 			t.Fatalf("create role: %v", err)
 		}
-		if _, err := st.AgentServices().Create(ctx, store.AgentServiceCreate{
+		if _, err := st.AgentServices().Create(ctx, agents.AgentServiceCreate{
 			WorkspaceKey: "WS", ServiceID: "agt-reviewer", Name: "reviewer",
-			Kind: domain.AgentServiceKindEvent, DesiredState: domain.AgentServiceDesiredRunning, RoleName: "reviewer",
+			Kind: agents.AgentKindEvent, DesiredState: agents.DesiredRunning, RoleName: "reviewer",
 		}); err != nil {
 			t.Fatalf("create agent service: %v", err)
 		}
-		if _, err := st.Drivers().Create(ctx, store.DriverCreate{
+		if _, err := st.Drivers().Create(ctx, workflowcatalog.DriverCreate{
 			WorkspaceKey: "WS", DriverID: "prompt-agent", Name: "prompt-agent",
 			OwnerType: workflowcatalog.DriverOwnerSystem, Status: workflowcatalog.DriverStatusActive,
 		}); err != nil {
 			t.Fatalf("create driver: %v", err)
 		}
-		if _, err := st.DriverVersions().Create(ctx, store.DriverVersionCreate{
+		if _, err := st.DriverVersions().Create(ctx, workflowcatalog.DriverVersionCreate{
 			WorkspaceKey: "WS", VersionID: "prompt-agent-v1", DriverID: "prompt-agent", Version: 1,
 			SourceDigest: "sha256:source", BundleDigest: "sha256:bundle",
 			ValidationStatus: workflowcatalog.DriverVersionValidationPassed,
 		}); err != nil {
 			t.Fatalf("create driver version: %v", err)
 		}
-		if _, err := st.TriggerBindings().Create(ctx, store.TriggerBindingCreate{
+		if _, err := st.TriggerBindings().Create(ctx, automation.TriggerBindingCreate{
 			WorkspaceKey: "WS", BindingID: "agt-reviewer-1", Name: "reviewer",
 			SourceKind: "internal", DriverID: "prompt-agent", DriverVersionID: "prompt-agent-v1",
 			TargetAgentServiceID: "agt-reviewer", Enabled: true,
 		}); err != nil {
 			t.Fatalf("create trigger binding: %v", err)
 		}
-		if _, err := st.DriverRuns().Create(ctx, store.DriverRunCreate{
+		if _, err := st.DriverRuns().Create(ctx, execution.DriverRunCreate{
 			WorkspaceKey: "WS", RunID: "driver-run-1", DriverID: "prompt-agent",
 			DriverVersionID: "prompt-agent-v1", TriggerBindingID: "agt-reviewer-1",
 		}); err != nil {
@@ -344,7 +351,7 @@ func TestLocalTaskRunnerBackendEnvResolution(t *testing.T) {
 			}
 		}
 		metadata := map[string]string{"backend": "cursor"}
-		if _, err := st.AgentServices().Update(ctx, "WS", "agt-reviewer", store.AgentServiceUpdate{Metadata: &metadata}); err != nil {
+		if _, err := st.AgentServices().Update(ctx, "WS", "agt-reviewer", agents.AgentServiceUpdate{Metadata: &metadata}); err != nil {
 			t.Fatalf("update per-agent backend: %v", err)
 		}
 		env = envMap(HostBridgeTaskExecutor{Store: st}.taskRunnerEnv(req, "{}"))
@@ -399,7 +406,7 @@ func TestValidateDriverRunnerSpecs(t *testing.T) {
 			if !tc.wantErr && err != nil {
 				t.Fatalf("validateDriverRunnerSpecs(%+v) = %v, want nil", tc.runners, err)
 			}
-			if tc.wantErr && err != nil && !errors.Is(err, domain.ErrInvalid) {
+			if tc.wantErr && err != nil && !errors.Is(err, persistence.ErrInvalid) {
 				t.Fatalf("validateDriverRunnerSpecs error = %v, want ErrInvalid", err)
 			}
 		})
@@ -445,10 +452,10 @@ func TestRunBuiltInFlueWorkflowRejectsEmptyResult(t *testing.T) {
 	defer cancel()
 	st := memstore.New()
 	worktree := t.TempDir()
-	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "WS", Name: "ws"}); err != nil {
+	if _, err := st.Workspaces().Create(ctx, workspaceowner.WorkspaceCreate{Key: "WS", Name: "ws"}); err != nil {
 		t.Fatalf("Create workspace: %v", err)
 	}
-	if _, err := st.Drivers().Create(ctx, store.DriverCreate{
+	if _, err := st.Drivers().Create(ctx, workflowcatalog.DriverCreate{
 		WorkspaceKey: "WS",
 		DriverID:     "epic-runner",
 		Name:         "epic-runner",
@@ -486,7 +493,7 @@ setInterval(() => {}, 1000);
 	if err != nil {
 		t.Fatalf("digest bundle: %v", err)
 	}
-	if _, err := st.DriverVersions().Create(ctx, store.DriverVersionCreate{
+	if _, err := st.DriverVersions().Create(ctx, workflowcatalog.DriverVersionCreate{
 		WorkspaceKey:     "WS",
 		VersionID:        "driver-version-1",
 		DriverID:         "epic-runner",
@@ -514,7 +521,7 @@ setInterval(() => {}, 1000);
 	if err != nil {
 		t.Fatalf("ExecuteTask: %v", err)
 	}
-	if result.Status != domain.TaskRunFailed || result.ExitCode != 1 || result.ErrorClass != "invalid_task_result" {
+	if result.Status != execution.TaskRunRecordFailed || result.ExitCode != 1 || result.ErrorClass != "invalid_task_result" {
 		t.Fatalf("empty result = %+v, want failed/1/invalid_task_result", result)
 	}
 	if len(result.ArtifactIDs) != 0 || result.LogsRef != "" {
@@ -534,10 +541,10 @@ func TestRunBuiltInFlueWorkflowRejectsCompletedStringizedNonzeroExit(t *testing.
 	defer cancel()
 	st := memstore.New()
 	worktree := t.TempDir()
-	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "WS", Name: "ws"}); err != nil {
+	if _, err := st.Workspaces().Create(ctx, workspaceowner.WorkspaceCreate{Key: "WS", Name: "ws"}); err != nil {
 		t.Fatalf("Create workspace: %v", err)
 	}
-	if _, err := st.Drivers().Create(ctx, store.DriverCreate{
+	if _, err := st.Drivers().Create(ctx, workflowcatalog.DriverCreate{
 		WorkspaceKey: "WS",
 		DriverID:     "epic-runner",
 		Name:         "epic-runner",
@@ -576,7 +583,7 @@ setInterval(() => {}, 1000);
 	if err != nil {
 		t.Fatalf("digest bundle: %v", err)
 	}
-	if _, err := st.DriverVersions().Create(ctx, store.DriverVersionCreate{
+	if _, err := st.DriverVersions().Create(ctx, workflowcatalog.DriverVersionCreate{
 		WorkspaceKey:     "WS",
 		VersionID:        "driver-version-1",
 		DriverID:         "epic-runner",
@@ -604,10 +611,10 @@ setInterval(() => {}, 1000);
 	if err != nil {
 		t.Fatalf("ExecuteTask: %v", err)
 	}
-	if result.Status == domain.TaskRunCompleted {
+	if result.Status == execution.TaskRunRecordCompleted {
 		t.Fatalf("stringized nonzero exit laundered to completed: %+v", result)
 	}
-	if result.Status != domain.TaskRunFailed || result.ErrorClass != "invalid_task_result" {
+	if result.Status != execution.TaskRunRecordFailed || result.ErrorClass != "invalid_task_result" {
 		t.Fatalf("stringized nonzero exit = %+v, want failed/invalid_task_result", result)
 	}
 	if len(result.ArtifactIDs) != 0 || result.LogsRef != "" {

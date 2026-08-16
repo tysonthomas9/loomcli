@@ -8,9 +8,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
-	"github.com/tysonthomas9/loomcli/internal/infra/workspacecatalog"
 	workspacemodule "github.com/tysonthomas9/loomcli/internal/modules/workspace"
-	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
 func TestValidDesignFormat(t *testing.T) {
@@ -84,10 +82,10 @@ func TestWorkspaceSetPersistsDesignFormat(t *testing.T) {
 	st := memstore.New()
 	t.Cleanup(func() { _ = st.Close() })
 
-	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "MYWS", Name: "MYWS"}); err != nil {
+	if _, err := st.Workspaces().Create(ctx, workspacemodule.WorkspaceCreate{Key: "MYWS", Name: "MYWS"}); err != nil {
 		t.Fatalf("create workspace: %v", err)
 	}
-	workspace, err := workspacecatalog.New(st.Workspaces(), st.Repos())
+	workspace, err := workspacemodule.NewFromRecordStores(st.Workspaces(), st.Repos())
 	if err != nil {
 		t.Fatal(err)
 	}

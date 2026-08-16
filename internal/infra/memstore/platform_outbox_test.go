@@ -5,12 +5,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
+
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
-func taskRunEventAppend(taskRunID string, attempt int, eventType domain.TaskRunEventType) store.TaskRunEventAppend {
-	return store.TaskRunEventAppend{
+func taskRunEventAppend(taskRunID string, attempt int, eventType execution.TaskRunEventType) execution.TaskRunEventAppend {
+	return execution.TaskRunEventAppend{
 		WorkspaceKey: "WS",
 		EpicID:       "epic-1",
 		DriverRunID:  "run-1",
@@ -26,11 +27,11 @@ func TestTaskRunEventAppendIdempotency(t *testing.T) {
 	ctx := t.Context()
 	s := New()
 
-	first, err := s.TaskRunEvents().Append(ctx, taskRunEventAppend("tr-1", 1, domain.TaskRunEventQueued))
+	first, err := s.TaskRunEvents().Append(ctx, taskRunEventAppend("tr-1", 1, execution.TaskRunEventQueued))
 	if err != nil {
 		t.Fatalf("first append: %v", err)
 	}
-	wantEventID := domain.TaskRunEventID("tr-1", 1, domain.TaskRunEventQueued)
+	wantEventID := execution.TaskRunEventID("tr-1", 1, execution.TaskRunEventQueued)
 	if first.EventID != wantEventID {
 		t.Fatalf("derived EventID = %q, want %q", first.EventID, wantEventID)
 	}
@@ -38,7 +39,7 @@ func TestTaskRunEventAppendIdempotency(t *testing.T) {
 		t.Fatalf("first Seq = %d, want 1", first.Seq)
 	}
 
-	second, err := s.TaskRunEvents().Append(ctx, taskRunEventAppend("tr-1", 1, domain.TaskRunEventQueued))
+	second, err := s.TaskRunEvents().Append(ctx, taskRunEventAppend("tr-1", 1, execution.TaskRunEventQueued))
 	if err != nil {
 		t.Fatalf("duplicate append: %v", err)
 	}
@@ -47,7 +48,7 @@ func TestTaskRunEventAppendIdempotency(t *testing.T) {
 			second.EventID, second.Seq, first.EventID, first.Seq)
 	}
 
-	events, err := s.TaskRunEvents().ListSince(ctx, "WS", store.TaskRunEventFilter{})
+	events, err := s.TaskRunEvents().ListSince(ctx, "WS", execution.TaskRunEventFilter{})
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
@@ -60,11 +61,11 @@ func TestTaskRunEventListSince(t *testing.T) {
 	ctx := t.Context()
 	s := New()
 
-	appends := []store.TaskRunEventAppend{
-		taskRunEventAppend("tr-1", 1, domain.TaskRunEventQueued),
-		taskRunEventAppend("tr-1", 1, domain.TaskRunEventClaimed),
-		taskRunEventAppend("tr-2", 1, domain.TaskRunEventQueued),
-		taskRunEventAppend("tr-1", 1, domain.TaskRunEventCompleted),
+	appends := []execution.TaskRunEventAppend{
+		taskRunEventAppend("tr-1", 1, execution.TaskRunEventQueued),
+		taskRunEventAppend("tr-1", 1, execution.TaskRunEventClaimed),
+		taskRunEventAppend("tr-2", 1, execution.TaskRunEventQueued),
+		taskRunEventAppend("tr-1", 1, execution.TaskRunEventCompleted),
 	}
 	appends[2].EpicID = "epic-2"
 	appends[2].DriverRunID = "run-2"
@@ -76,15 +77,15 @@ func TestTaskRunEventListSince(t *testing.T) {
 
 	tests := []struct {
 		name     string
-		filter   store.TaskRunEventFilter
+		filter   execution.TaskRunEventFilter
 		wantSeqs []int64
 	}{
-		{name: "all from zero", filter: store.TaskRunEventFilter{}, wantSeqs: []int64{1, 2, 3, 4}},
-		{name: "after cursor", filter: store.TaskRunEventFilter{AfterSeq: 2}, wantSeqs: []int64{3, 4}},
-		{name: "limit window", filter: store.TaskRunEventFilter{AfterSeq: 1, Limit: 2}, wantSeqs: []int64{2, 3}},
-		{name: "epic filter", filter: store.TaskRunEventFilter{EpicID: "epic-2"}, wantSeqs: []int64{3}},
-		{name: "driver run filter", filter: store.TaskRunEventFilter{DriverRunID: "run-1"}, wantSeqs: []int64{1, 2, 4}},
-		{name: "past the end", filter: store.TaskRunEventFilter{AfterSeq: 4}, wantSeqs: []int64{}},
+		{name: "all from zero", filter: execution.TaskRunEventFilter{}, wantSeqs: []int64{1, 2, 3, 4}},
+		{name: "after cursor", filter: execution.TaskRunEventFilter{AfterSeq: 2}, wantSeqs: []int64{3, 4}},
+		{name: "limit window", filter: execution.TaskRunEventFilter{AfterSeq: 1, Limit: 2}, wantSeqs: []int64{2, 3}},
+		{name: "epic filter", filter: execution.TaskRunEventFilter{EpicID: "epic-2"}, wantSeqs: []int64{3}},
+		{name: "driver run filter", filter: execution.TaskRunEventFilter{DriverRunID: "run-1"}, wantSeqs: []int64{1, 2, 4}},
+		{name: "past the end", filter: execution.TaskRunEventFilter{AfterSeq: 4}, wantSeqs: []int64{}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -104,10 +105,10 @@ func TestTaskRunEventListSince(t *testing.T) {
 	}
 }
 
-func outboxCreate(dedupeKey string) store.OutboxCreate {
-	return store.OutboxCreate{
+func outboxCreate(dedupeKey string) execution.OutboxCreate {
+	return execution.OutboxCreate{
 		WorkspaceKey: "WS",
-		Kind:         domain.OutboxKindLeadTaskMessage,
+		Kind:         execution.OutboxKindLeadTaskMessage,
 		EpicID:       "epic-1",
 		DriverRunID:  "run-1",
 		TaskRunID:    "tr-1",
@@ -125,7 +126,7 @@ func TestOutboxCreateDedupe(t *testing.T) {
 	if err != nil {
 		t.Fatalf("first create: %v", err)
 	}
-	if first.Status != domain.OutboxStatusPending || first.Attempt != 0 {
+	if first.Status != execution.OutboxDeliveryStatusPending || first.Attempt != 0 {
 		t.Fatalf("new record (status %q, attempt %d), want (pending, 0)", first.Status, first.Attempt)
 	}
 	if first.OutboxID == "" || first.Seq == 0 {
@@ -165,8 +166,8 @@ func TestOutboxListDue(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create retry-later: %v", err)
 	}
-	if _, err := s.Outbox().MarkResult(ctx, "WS", retryLater.OutboxID, store.OutboxDeliveryUpdate{
-		Status: domain.OutboxStatusPending, Attempt: 1, NextRetryAt: &future, LastError: "inbox busy",
+	if _, err := s.Outbox().MarkResult(ctx, "WS", retryLater.OutboxID, execution.OutboxDeliveryUpdate{
+		Status: execution.OutboxDeliveryStatusPending, Attempt: 1, NextRetryAt: &future, LastError: "inbox busy",
 	}); err != nil {
 		t.Fatalf("mark retry-later: %v", err)
 	}
@@ -174,8 +175,8 @@ func TestOutboxListDue(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create retry-due: %v", err)
 	}
-	if _, err := s.Outbox().MarkResult(ctx, "WS", retryDue.OutboxID, store.OutboxDeliveryUpdate{
-		Status: domain.OutboxStatusPending, Attempt: 1, NextRetryAt: &past, LastError: "inbox busy",
+	if _, err := s.Outbox().MarkResult(ctx, "WS", retryDue.OutboxID, execution.OutboxDeliveryUpdate{
+		Status: execution.OutboxDeliveryStatusPending, Attempt: 1, NextRetryAt: &past, LastError: "inbox busy",
 	}); err != nil {
 		t.Fatalf("mark retry-due: %v", err)
 	}
@@ -183,20 +184,20 @@ func TestOutboxListDue(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create delivered: %v", err)
 	}
-	if _, err := s.Outbox().MarkResult(ctx, "WS", delivered.OutboxID, store.OutboxDeliveryUpdate{
-		Status: domain.OutboxStatusDelivered, Attempt: 1, InboxMessageID: "msg-1",
+	if _, err := s.Outbox().MarkResult(ctx, "WS", delivered.OutboxID, execution.OutboxDeliveryUpdate{
+		Status: execution.OutboxDeliveryStatusDelivered, Attempt: 1, InboxMessageID: "msg-1",
 	}); err != nil {
 		t.Fatalf("mark delivered: %v", err)
 	}
 
 	tests := []struct {
 		name    string
-		filter  store.OutboxDueFilter
+		filter  execution.OutboxDueFilter
 		wantIDs []string
 	}{
-		{name: "due now", filter: store.OutboxDueFilter{Now: now}, wantIDs: []string{due.OutboxID, retryDue.OutboxID}},
-		{name: "limit", filter: store.OutboxDueFilter{Now: now, Limit: 1}, wantIDs: []string{due.OutboxID}},
-		{name: "all retries elapsed", filter: store.OutboxDueFilter{Now: now.Add(time.Hour)}, wantIDs: []string{due.OutboxID, retryLater.OutboxID, retryDue.OutboxID}},
+		{name: "due now", filter: execution.OutboxDueFilter{Now: now}, wantIDs: []string{due.OutboxID, retryDue.OutboxID}},
+		{name: "limit", filter: execution.OutboxDueFilter{Now: now, Limit: 1}, wantIDs: []string{due.OutboxID}},
+		{name: "all retries elapsed", filter: execution.OutboxDueFilter{Now: now.Add(time.Hour)}, wantIDs: []string{due.OutboxID, retryLater.OutboxID, retryDue.OutboxID}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -222,32 +223,32 @@ func TestOutboxMarkResult(t *testing.T) {
 
 	tests := []struct {
 		name            string
-		update          store.OutboxDeliveryUpdate
+		update          execution.OutboxDeliveryUpdate
 		wantDeliveredAt bool
 	}{
 		{
 			name: "pending to delivered",
-			update: store.OutboxDeliveryUpdate{
-				Status: domain.OutboxStatusDelivered, Attempt: 1, InboxMessageID: "msg-1",
+			update: execution.OutboxDeliveryUpdate{
+				Status: execution.OutboxDeliveryStatusDelivered, Attempt: 1, InboxMessageID: "msg-1",
 			},
 			wantDeliveredAt: true,
 		},
 		{
 			name: "pending retry with backoff",
-			update: store.OutboxDeliveryUpdate{
-				Status: domain.OutboxStatusPending, Attempt: 2, NextRetryAt: &retryAt, LastError: "inbox busy",
+			update: execution.OutboxDeliveryUpdate{
+				Status: execution.OutboxDeliveryStatusPending, Attempt: 2, NextRetryAt: &retryAt, LastError: "inbox busy",
 			},
 		},
 		{
 			name: "pending to unsupported",
-			update: store.OutboxDeliveryUpdate{
-				Status: domain.OutboxStatusUnsupported, Attempt: 1, LastError: "agent has no inbox",
+			update: execution.OutboxDeliveryUpdate{
+				Status: execution.OutboxDeliveryStatusUnsupported, Attempt: 1, LastError: "agent has no inbox",
 			},
 		},
 		{
 			name: "pending to failed",
-			update: store.OutboxDeliveryUpdate{
-				Status: domain.OutboxStatusFailed, Attempt: 5, LastError: "retries exhausted",
+			update: execution.OutboxDeliveryUpdate{
+				Status: execution.OutboxDeliveryStatusFailed, Attempt: 5, LastError: "retries exhausted",
 			},
 		},
 	}
@@ -294,12 +295,12 @@ func TestOutboxNotFound(t *testing.T) {
 	ctx := t.Context()
 	s := New()
 
-	if _, err := s.Outbox().MarkResult(ctx, "WS", "missing", store.OutboxDeliveryUpdate{
-		Status: domain.OutboxStatusDelivered, Attempt: 1,
-	}); !errors.Is(err, domain.ErrNotFound) {
-		t.Fatalf("MarkResult missing record error = %v, want domain.ErrNotFound", err)
+	if _, err := s.Outbox().MarkResult(ctx, "WS", "missing", execution.OutboxDeliveryUpdate{
+		Status: execution.OutboxDeliveryStatusDelivered, Attempt: 1,
+	}); !errors.Is(err, persistence.ErrNotFound) {
+		t.Fatalf("MarkResult missing record error = %v, want persistence.ErrNotFound", err)
 	}
-	if _, err := s.Outbox().Get(ctx, "WS", "missing"); !errors.Is(err, domain.ErrNotFound) {
-		t.Fatalf("Get missing record error = %v, want domain.ErrNotFound", err)
+	if _, err := s.Outbox().Get(ctx, "WS", "missing"); !errors.Is(err, persistence.ErrNotFound) {
+		t.Fatalf("Get missing record error = %v, want persistence.ErrNotFound", err)
 	}
 }

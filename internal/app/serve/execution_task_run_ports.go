@@ -8,10 +8,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
-	"github.com/tysonthomas9/loomcli/internal/store"
+
+	"github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 // ExecutionTaskRunPortDependencies separates the atomic TaskRun command
@@ -19,15 +19,15 @@ import (
 // command port from FleetDB's Execution transport; this composition has no
 // generic TaskRun/DriverStep/Event mutation fallback.
 type ExecutionTaskRunPortDependencies struct {
-	TaskRuns        store.TaskRunStore
-	TaskRunEvents   store.TaskRunEventStore
+	TaskRuns        execution.TaskRunStore
+	TaskRunEvents   execution.TaskRunEventStore
 	Requests        execution.TaskRunRequestPort
 	Claims          execution.TaskRunClaimPort
 	WorkItemDesign  execution.TaskRunWorkItemDesignPort
 	Requeues        execution.TaskRunRequeuePort
 	RetryExhaustion execution.TaskRunRetryExhaustionPort
-	Nodes           store.NodeStore
-	WorkerProfiles  store.WorkerProfileStore
+	Nodes           execution.NodeStore
+	WorkerProfiles  execution.WorkerProfileStore
 }
 
 func NewExecutionTaskRunPorts(dependencies ExecutionTaskRunPortDependencies) (execution.TaskRunDependencies, execution.WorkerDependencies, error) {
@@ -50,9 +50,9 @@ func (adapter *executionTaskRunPortsAdapter) ListActiveTaskRuns(
 	ctx context.Context,
 	query execution.ActiveTaskRunQuery,
 ) ([]*execution.TaskRun, error) {
-	var active []*domain.TaskRun
-	for _, status := range []domain.TaskRunStatus{domain.TaskRunQueued, domain.TaskRunRunning} {
-		filter := store.TaskRunFilter{DriverRunID: query.DriverRunID, Status: status}
+	var active []*execution.TaskRunRecord
+	for _, status := range []execution.TaskRunRecordStatus{execution.TaskRunRecordQueued, execution.TaskRunRecordRunning} {
+		filter := execution.TaskRunFilter{DriverRunID: query.DriverRunID, Status: status}
 		if query.Limit > 0 {
 			filter.Limit = query.Limit
 		}
@@ -86,7 +86,7 @@ func (adapter *executionTaskRunPortsAdapter) ListTaskRuns(
 	ctx context.Context,
 	query execution.TaskRunArchiveQuery,
 ) ([]*execution.TaskRun, error) {
-	values, err := adapter.dependencies.TaskRuns.List(ctx, query.WorkspaceKey, store.TaskRunFilter{
+	values, err := adapter.dependencies.TaskRuns.List(ctx, query.WorkspaceKey, execution.TaskRunFilter{
 		TaskID: query.WorkItemID,
 		Limit:  query.Limit,
 	})
@@ -108,7 +108,7 @@ func (adapter *executionTaskRunPortsAdapter) ListTaskRunEvents(
 	ctx context.Context,
 	query execution.TaskRunEventQuery,
 ) ([]*execution.TaskRunEvent, error) {
-	values, err := adapter.dependencies.TaskRunEvents.ListSince(ctx, query.WorkspaceKey, store.TaskRunEventFilter{
+	values, err := adapter.dependencies.TaskRunEvents.ListSince(ctx, query.WorkspaceKey, execution.TaskRunEventFilter{
 		EpicID: query.EpicID, DriverRunID: query.DriverRunID, AfterSeq: query.AfterSeq, Limit: query.Limit,
 	})
 	if err != nil {
@@ -120,7 +120,7 @@ func (adapter *executionTaskRunPortsAdapter) ListTaskRunEvents(
 			return nil, execution.ErrConflict
 		}
 		status := execution.Status(value.Status)
-		if value.Status == domain.TaskRunCompleted {
+		if value.Status == execution.TaskRunRecordCompleted {
 			status = execution.StatusSucceeded
 		}
 		out = append(out, &execution.TaskRunEvent{
@@ -345,17 +345,17 @@ func (adapter *fleetTaskRunCommandPort) ExhaustTaskRunRetries(ctx context.Contex
 
 func mapFleetExecutionPortError(err error) error {
 	switch {
-	case errors.Is(err, fleetdb.ErrExecutionNotFound), errors.Is(err, domain.ErrNotFound):
+	case errors.Is(err, fleetdb.ErrExecutionNotFound), errors.Is(err, persistence.ErrNotFound):
 		return errors.Join(execution.ErrNotFound, err)
-	case errors.Is(err, fleetdb.ErrExecutionInvalid), errors.Is(err, domain.ErrInvalid):
+	case errors.Is(err, fleetdb.ErrExecutionInvalid), errors.Is(err, persistence.ErrInvalid):
 		return errors.Join(execution.ErrInvalid, err)
-	case errors.Is(err, fleetdb.ErrExecutionNotOwner), errors.Is(err, domain.ErrNotOwner):
+	case errors.Is(err, fleetdb.ErrExecutionNotOwner), errors.Is(err, persistence.ErrNotOwner):
 		return errors.Join(execution.ErrFenceConflict, err)
-	case errors.Is(err, fleetdb.ErrExecutionInvalidTransition), errors.Is(err, domain.ErrInvalidTransition):
+	case errors.Is(err, fleetdb.ErrExecutionInvalidTransition), errors.Is(err, persistence.ErrInvalidTransition):
 		return errors.Join(execution.ErrInvalidTransition, err)
 	case errors.Is(err, fleetdb.ErrExecutionAlreadyResumed):
 		return errors.Join(execution.ErrAlreadyResumed, err)
-	case errors.Is(err, fleetdb.ErrExecutionConflict), errors.Is(err, domain.ErrConflict):
+	case errors.Is(err, fleetdb.ErrExecutionConflict), errors.Is(err, persistence.ErrConflict):
 		return errors.Join(execution.ErrConflict, err)
 	default:
 		return errors.Join(execution.ErrUnavailable, err)
@@ -383,21 +383,21 @@ func (adapter *executionTaskRunPortsAdapter) RegisterWorkerNode(ctx context.Cont
 	if err == nil {
 		return adapter.refreshWorkerNode(ctx, existing, command)
 	}
-	if !errors.Is(err, domain.ErrNotFound) {
+	if !errors.Is(err, persistence.ErrNotFound) {
 		return nil, err
 	}
 
-	initialDrain := domain.NodeDrainActive
-	node, err := adapter.dependencies.Nodes.Create(ctx, store.NodeCreate{
+	initialDrain := execution.WorkerNodeActive
+	node, err := adapter.dependencies.Nodes.Create(ctx, execution.NodeCreate{
 		WorkspaceKey: command.WorkspaceKey, NodeID: command.NodeID, OwnerActor: command.OwnerActor,
-		RuntimeProvider: domain.RuntimeProvider(command.RuntimeProvider), Labels: append([]string(nil), command.Labels...),
+		RuntimeProvider: execution.RuntimeProvider(command.RuntimeProvider), Labels: append([]string(nil), command.Labels...),
 		Capabilities: append([]string(nil), command.Capabilities...), ToolInventory: append([]string(nil), command.ToolInventory...),
 		Version: command.Version, Capacity: command.Capacity, DrainState: initialDrain, TTL: command.TTL,
 	})
 	if err == nil {
 		return executionWorkerNodeSnapshot(node), nil
 	}
-	if !errors.Is(err, domain.ErrAlreadyExists) && !errors.Is(err, domain.ErrConflict) {
+	if !errors.Is(err, persistence.ErrAlreadyExists) && !errors.Is(err, persistence.ErrConflict) {
 		return nil, err
 	}
 	existing, err = adapter.dependencies.Nodes.Get(ctx, command.WorkspaceKey, command.NodeID)
@@ -407,15 +407,15 @@ func (adapter *executionTaskRunPortsAdapter) RegisterWorkerNode(ctx context.Cont
 	return adapter.refreshWorkerNode(ctx, existing, command)
 }
 
-func (adapter *executionTaskRunPortsAdapter) refreshWorkerNode(ctx context.Context, existing *domain.Node, command execution.RegisterWorkerNodeCommand) (*execution.WorkerNode, error) {
+func (adapter *executionTaskRunPortsAdapter) refreshWorkerNode(ctx context.Context, existing *execution.WorkerNode, command execution.RegisterWorkerNodeCommand) (*execution.WorkerNode, error) {
 	owner := command.OwnerActor
-	provider := domain.RuntimeProvider(command.RuntimeProvider)
+	provider := execution.RuntimeProvider(command.RuntimeProvider)
 	labels := mergeExecutionStringSet(existing.Labels, command.Labels)
 	capabilities := mergeExecutionStringSet(existing.Capabilities, command.Capabilities)
 	tools := mergeExecutionStringSet(existing.ToolInventory, command.ToolInventory)
 	version := command.Version
 	capacity := command.Capacity
-	node, err := adapter.dependencies.Nodes.Update(ctx, command.WorkspaceKey, command.NodeID, store.NodeUpdate{
+	node, err := adapter.dependencies.Nodes.Update(ctx, command.WorkspaceKey, command.NodeID, execution.NodeUpdate{
 		OwnerActor: &owner, RuntimeProvider: &provider, Labels: &labels, Capabilities: &capabilities,
 		ToolInventory: &tools, Version: &version, Capacity: &capacity,
 	})
@@ -434,8 +434,8 @@ func (adapter *executionTaskRunPortsAdapter) HeartbeatWorkerNode(ctx context.Con
 }
 
 func (adapter *executionTaskRunPortsAdapter) SetWorkerNodeDrain(ctx context.Context, command execution.SetWorkerNodeDrainCommand) (*execution.WorkerNode, error) {
-	drain := domain.NodeDrainState(command.DrainState)
-	node, err := adapter.dependencies.Nodes.Update(ctx, command.WorkspaceKey, command.NodeID, store.NodeUpdate{DrainState: &drain})
+	drain := command.DrainState
+	node, err := adapter.dependencies.Nodes.Update(ctx, command.WorkspaceKey, command.NodeID, execution.NodeUpdate{DrainState: &drain})
 	if err != nil {
 		return nil, err
 	}
@@ -448,7 +448,7 @@ func (adapter *executionTaskRunPortsAdapter) CheckTaskRunScheduling(ctx context.
 	if query.WorkerProfileID != "" {
 		profile, err := adapter.dependencies.WorkerProfiles.Get(ctx, query.WorkspaceKey, query.WorkerProfileID)
 		if err != nil {
-			if errors.Is(err, domain.ErrNotFound) {
+			if errors.Is(err, persistence.ErrNotFound) {
 				return execution.TaskRunSchedulingResult{ReasonCode: "worker_profile_not_found"}, nil
 			}
 			return execution.TaskRunSchedulingResult{}, err
@@ -466,7 +466,7 @@ func (adapter *executionTaskRunPortsAdapter) CheckTaskRunScheduling(ctx context.
 	now := time.Now().UTC()
 	for _, node := range nodes {
 		if node == nil || (query.TargetNodeID != "" && node.NodeID != query.TargetNodeID) ||
-			node.DrainState != domain.NodeDrainActive || (!node.ExpiresAt.IsZero() && !node.ExpiresAt.After(now)) {
+			node.DrainState != execution.WorkerNodeActive || (!node.ExpiresAt.IsZero() && !node.ExpiresAt.After(now)) {
 			continue
 		}
 		if executionNodeSatisfies(node, requiredProviders, requiredFeatures) {
@@ -476,7 +476,7 @@ func (adapter *executionTaskRunPortsAdapter) CheckTaskRunScheduling(ctx context.
 	return execution.TaskRunSchedulingResult{ReasonCode: "no_live_capable_node"}, nil
 }
 
-func executionNodeSatisfies(node *domain.Node, providers, features []string) bool {
+func executionNodeSatisfies(node *execution.WorkerNode, providers, features []string) bool {
 	for _, required := range normalizeExecutionStringSet(providers) {
 		if string(node.RuntimeProvider) != required && !executionStringSetContains(node.Capabilities, required) {
 			return false
@@ -490,7 +490,7 @@ func executionNodeSatisfies(node *domain.Node, providers, features []string) boo
 	return true
 }
 
-func executionTaskRunSnapshot(run *domain.TaskRun, leaseToken string) (*execution.TaskRun, error) {
+func executionTaskRunSnapshot(run *execution.TaskRunRecord, leaseToken string) (*execution.TaskRun, error) {
 	if run == nil || strings.TrimSpace(run.WorkspaceKey) == "" || strings.TrimSpace(run.TaskRunID) == "" {
 		return nil, execution.ErrConflict
 	}
@@ -522,45 +522,45 @@ func executionTaskRunSnapshot(run *domain.TaskRun, leaseToken string) (*executio
 	}, nil
 }
 
-func executionTaskRunStatus(status domain.TaskRunStatus) (execution.Status, error) {
+func executionTaskRunStatus(status execution.TaskRunRecordStatus) (execution.Status, error) {
 	switch status {
-	case domain.TaskRunQueued:
+	case execution.TaskRunRecordQueued:
 		return execution.StatusQueued, nil
-	case domain.TaskRunRunning:
+	case execution.TaskRunRecordRunning:
 		return execution.StatusRunning, nil
-	case domain.TaskRunCompleted:
+	case execution.TaskRunRecordCompleted:
 		return execution.StatusSucceeded, nil
-	case domain.TaskRunFailed:
+	case execution.TaskRunRecordFailed:
 		return execution.StatusFailed, nil
-	case domain.TaskRunCancelled:
+	case execution.TaskRunRecordCancelled:
 		return execution.StatusCancelled, nil
 	default:
 		return "", execution.ErrConflict
 	}
 }
 
-func executionPlacement(value domain.TaskRunPlacement) execution.Placement {
+func executionPlacement(value execution.TaskRunPlacementRecord) execution.Placement {
 	return execution.Placement{Provider: value.Provider, NodeID: value.NodeID, RunnerID: value.RunnerID, SandboxID: value.SandboxID, CWD: value.CWD, RepoRef: value.RepoRef}
 }
 
-func storedExecutionPlacement(value execution.Placement) domain.TaskRunPlacement {
-	return domain.TaskRunPlacement{Provider: value.Provider, NodeID: value.NodeID, RunnerID: value.RunnerID, SandboxID: value.SandboxID, CWD: value.CWD, RepoRef: value.RepoRef}
+func storedExecutionPlacement(value execution.Placement) execution.TaskRunPlacementRecord {
+	return execution.TaskRunPlacementRecord{Provider: value.Provider, NodeID: value.NodeID, RunnerID: value.RunnerID, SandboxID: value.SandboxID, CWD: value.CWD, RepoRef: value.RepoRef}
 }
 
-func executionWorkerNodeSnapshot(node *domain.Node) *execution.WorkerNode {
+func executionWorkerNodeSnapshot(node *execution.WorkerNode) *execution.WorkerNode {
 	if node == nil {
 		return nil
 	}
 	return &execution.WorkerNode{
 		WorkspaceKey: node.WorkspaceKey, NodeID: node.NodeID, OwnerActor: node.OwnerActor,
-		RuntimeProvider: string(node.RuntimeProvider), Labels: append([]string(nil), node.Labels...),
+		RuntimeProvider: node.RuntimeProvider, Labels: append([]string(nil), node.Labels...),
 		Capabilities: append([]string(nil), node.Capabilities...), ToolInventory: append([]string(nil), node.ToolInventory...),
-		Version: node.Version, Capacity: node.Capacity, DrainState: execution.WorkerNodeDrainState(node.DrainState),
+		Version: node.Version, Capacity: node.Capacity, DrainState: node.DrainState,
 		LastHeartbeat: node.LastHeartbeat, ExpiresAt: node.ExpiresAt, CreatedAt: node.CreatedAt, UpdatedAt: node.UpdatedAt,
 	}
 }
 
-func executionTaskRunDriverStepSnapshot(step *domain.DriverStep) *execution.TaskRunDriverStep {
+func executionTaskRunDriverStepSnapshot(step *execution.DriverStepRecord) *execution.TaskRunDriverStep {
 	if step == nil {
 		return nil
 	}

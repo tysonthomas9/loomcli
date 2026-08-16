@@ -5,7 +5,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/ops"
+	"github.com/tysonthomas9/loomcli/internal/app/query/operationalview"
 )
 
 const (
@@ -13,7 +13,7 @@ const (
 	maxWorkspaceDataCacheEntries = 128
 )
 
-type workspaceDataLoadFn func(context.Context, string) (*ops.WorkspaceData, error)
+type workspaceDataLoadFn func(context.Context, string) (*operationalview.Workspace, error)
 
 type workspaceDataCache struct {
 	ttl time.Duration
@@ -25,7 +25,7 @@ type workspaceDataCache struct {
 type workspaceDataCacheEntry struct {
 	mu       sync.Mutex
 	cachedAt time.Time
-	data     *ops.WorkspaceData
+	data     *operationalview.Workspace
 }
 
 func newWorkspaceDataCache(ttl time.Duration) *workspaceDataCache {
@@ -38,7 +38,7 @@ func newWorkspaceDataCache(ttl time.Duration) *workspaceDataCache {
 	}
 }
 
-func (c *workspaceDataCache) get(ctx context.Context, key string, load workspaceDataLoadFn) (*ops.WorkspaceData, error) {
+func (c *workspaceDataCache) get(ctx context.Context, key string, load workspaceDataLoadFn) (*operationalview.Workspace, error) {
 	if load == nil {
 		return nil, nil
 	}
@@ -89,22 +89,22 @@ func (c *workspaceDataCache) cacheEntry(key string) *workspaceDataCacheEntry {
 	return entry
 }
 
-func cloneWorkspaceData(in *ops.WorkspaceData) *ops.WorkspaceData {
+func cloneWorkspaceData(in *operationalview.Workspace) *operationalview.Workspace {
 	if in == nil {
 		return nil
 	}
 	out := *in
-	out.Repos = append([]ops.WorkspaceRepo(nil), in.Repos...)
+	out.Repos = append([]operationalview.Repository(nil), in.Repos...)
 	for i := range out.Repos {
 		out.Repos[i].Groups = append([]string(nil), in.Repos[i].Groups...)
 	}
 	out.Groups = append([]string(nil), in.Groups...)
-	out.Agents = append([]ops.WorkspaceAgentInfo(nil), in.Agents...)
+	out.Agents = append([]operationalview.Agent(nil), in.Agents...)
 	for i := range out.Agents {
 		out.Agents[i].Repos = append([]string(nil), in.Agents[i].Repos...)
 		out.Agents[i].RepoGroups = append([]string(nil), in.Agents[i].RepoGroups...)
 	}
-	out.Workspaces = append([]ops.WorkspaceSummary(nil), in.Workspaces...)
+	out.Workspaces = append([]operationalview.Summary(nil), in.Workspaces...)
 	out.WorkspaceOrder = append([]string(nil), in.WorkspaceOrder...)
 	return &out
 }

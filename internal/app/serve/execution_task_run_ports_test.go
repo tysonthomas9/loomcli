@@ -7,13 +7,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
+
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
+	workspaceowner "github.com/tysonthomas9/loomcli/internal/modules/workspace"
+
 	"github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
-	"github.com/tysonthomas9/loomcli/internal/modules/execution"
-	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
 type atomicTaskRunPortStub struct{}
@@ -152,13 +153,13 @@ func (stub *fleetExecutionTransportStub) ClaimAndStartTaskRun(_ context.Context,
 		taskRunID = "task-run-next"
 	}
 	return &fleetdb.ExecutionClaimAndStartResult{
-		TaskRun: &domain.TaskRun{
+		TaskRun: &execution.TaskRunRecord{
 			WorkspaceKey: command.WorkspaceKey, TaskRunID: taskRunID, DriverRunID: "run-1", DriverStepID: "step-1",
-			TaskID: "TASK-1", Status: domain.TaskRunRunning, NodeID: command.NodeID, LeaseID: command.LeaseID, FencingToken: 7,
+			TaskID: "TASK-1", Status: execution.TaskRunRecordRunning, NodeID: command.NodeID, LeaseID: command.LeaseID, FencingToken: 7,
 		},
-		DriverStep: &domain.DriverStep{
+		DriverStep: &execution.DriverStepRecord{
 			WorkspaceKey: command.WorkspaceKey, StepID: "step-1", DriverRunID: "run-1",
-			TaskRunID: taskRunID, Status: domain.DriverStepRunning, ActionLedgerID: "task-run-start:" + command.CommandID,
+			TaskRunID: taskRunID, Status: execution.DriverStepRunning, ActionLedgerID: "task-run-start:" + command.CommandID,
 		},
 		Issue: &fleetdb.ExecutionIssue{ID: "TASK-1"},
 		Action: &fleetdb.ExecutionActionLedger{
@@ -169,19 +170,19 @@ func (stub *fleetExecutionTransportStub) ClaimAndStartTaskRun(_ context.Context,
 	}, nil
 }
 
-func (*fleetExecutionTransportStub) HeartbeatTaskRun(context.Context, string, string, store.TaskRunHeartbeat) (*domain.TaskRun, error) {
+func (*fleetExecutionTransportStub) HeartbeatTaskRun(context.Context, string, string, execution.TaskRunHeartbeat) (*execution.TaskRunRecord, error) {
 	return nil, nil
 }
 
-func (*fleetExecutionTransportStub) RequeueTaskRun(context.Context, string, string, store.TaskRunRequeue) (*domain.TaskRun, error) {
+func (*fleetExecutionTransportStub) RequeueTaskRun(context.Context, string, string, execution.TaskRunRequeue) (*execution.TaskRunRecord, error) {
 	return nil, nil
 }
 
-func (*fleetExecutionTransportStub) CompleteTaskRun(context.Context, string, string, store.TaskRunComplete) (*domain.TaskRun, error) {
+func (*fleetExecutionTransportStub) CompleteTaskRun(context.Context, string, string, execution.TaskRunComplete) (*execution.TaskRunRecord, error) {
 	return nil, nil
 }
 
-func (*fleetExecutionTransportStub) AppendTaskRunLog(context.Context, string, string, store.TaskRunLogAppend) (*domain.TaskRunLogEntry, error) {
+func (*fleetExecutionTransportStub) AppendTaskRunLog(context.Context, string, string, execution.TaskRunLogAppend) (*execution.TaskRunLogEntry, error) {
 	return nil, nil
 }
 
@@ -193,11 +194,11 @@ func (*fleetExecutionTransportStub) ExhaustTaskRunRetries(context.Context, fleet
 	return nil, nil
 }
 
-func (*fleetExecutionTransportStub) ClaimDriverRun(context.Context, fleetdb.ExecutionDriverRunClaimCommand) (*domain.DriverRun, error) {
+func (*fleetExecutionTransportStub) ClaimDriverRun(context.Context, fleetdb.ExecutionDriverRunClaimCommand) (*execution.DriverRunRecord, error) {
 	return nil, nil
 }
 
-func (*fleetExecutionTransportStub) HeartbeatDriverRun(context.Context, fleetdb.ExecutionDriverRunHeartbeatCommand) (*domain.DriverRun, error) {
+func (*fleetExecutionTransportStub) HeartbeatDriverRun(context.Context, fleetdb.ExecutionDriverRunHeartbeatCommand) (*execution.DriverRunRecord, error) {
 	return nil, nil
 }
 
@@ -216,11 +217,11 @@ func (stub *fleetExecutionTransportStub) HandoffDriverRunReviewWorkItem(_ contex
 	return stub.workItemHandoffResult, nil
 }
 
-func (*fleetExecutionTransportStub) SuspendDriverRun(context.Context, fleetdb.ExecutionDriverRunSuspendCommand) (*domain.DriverRun, error) {
+func (*fleetExecutionTransportStub) SuspendDriverRun(context.Context, fleetdb.ExecutionDriverRunSuspendCommand) (*execution.DriverRunRecord, error) {
 	return nil, nil
 }
 
-func (*fleetExecutionTransportStub) FinalizeDriverRun(context.Context, fleetdb.ExecutionDriverRunFinalizeCommand) (*domain.DriverRun, error) {
+func (*fleetExecutionTransportStub) FinalizeDriverRun(context.Context, fleetdb.ExecutionDriverRunFinalizeCommand) (*execution.DriverRunRecord, error) {
 	return nil, nil
 }
 
@@ -461,7 +462,7 @@ func TestFleetDriverRunPortForwardsTerminalWorkRecoveryEnvelope(t *testing.T) {
 		t.Fatal(err)
 	}
 	if transport.terminalWork.RequestID != command.RequestID || transport.terminalWork.DriverRunID != command.DriverRunID ||
-		transport.terminalWork.ParentStatus != domain.DriverRunFailed || !transport.terminalWork.RecoveredAt.Equal(recoveredAt) {
+		transport.terminalWork.ParentStatus != execution.DriverRunFailed || !transport.terminalWork.RecoveredAt.Equal(recoveredAt) {
 		t.Fatalf("terminal work transport command = %+v", transport.terminalWork)
 	}
 	if result.Committed == nil || result.ActionID != command.RequestID || result.Committed.DriverRunID != command.DriverRunID ||
@@ -471,9 +472,9 @@ func TestFleetDriverRunPortForwardsTerminalWorkRecoveryEnvelope(t *testing.T) {
 }
 
 func TestExecutionTaskRunSnapshotPreservesQueuedTargetNodeWithoutInventingOwner(t *testing.T) {
-	snapshot, err := executionTaskRunSnapshot(&domain.TaskRun{
+	snapshot, err := executionTaskRunSnapshot(&execution.TaskRunRecord{
 		WorkspaceKey: "WS", TaskRunID: "task-run-targeted", DriverRunID: "run-1",
-		TaskID: "TASK-1", Status: domain.TaskRunQueued, TargetNodeID: "target-node-1",
+		TaskID: "TASK-1", Status: execution.TaskRunRecordQueued, TargetNodeID: "target-node-1",
 	}, "")
 	if err != nil {
 		t.Fatal(err)
@@ -483,24 +484,24 @@ func TestExecutionTaskRunSnapshotPreservesQueuedTargetNodeWithoutInventingOwner(
 	}
 }
 
-func setupExecutionTaskRunParent(t *testing.T, ctx context.Context) (*memstore.Store, *domain.DriverRun) {
+func setupExecutionTaskRunParent(t *testing.T, ctx context.Context) (*memstore.Store, *execution.DriverRunRecord) {
 	t.Helper()
 	st := memstore.New()
-	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "WS", Name: "workspace"}); err != nil {
+	if _, err := st.Workspaces().Create(ctx, workspaceowner.WorkspaceCreate{Key: "WS", Name: "workspace"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.Drivers().Create(ctx, store.DriverCreate{
+	if _, err := st.Drivers().Create(ctx, workflowcatalog.DriverCreate{
 		WorkspaceKey: "WS", DriverID: "driver-1", Name: "driver", OwnerType: workflowcatalog.DriverOwnerSystem, Status: workflowcatalog.DriverStatusActive,
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.DriverVersions().Create(ctx, store.DriverVersionCreate{
+	if _, err := st.DriverVersions().Create(ctx, workflowcatalog.DriverVersionCreate{
 		WorkspaceKey: "WS", VersionID: "version-1", DriverID: "driver-1", Version: 1,
 		SourceDigest: "sha256:source", BundleDigest: "sha256:bundle", ValidationStatus: workflowcatalog.DriverVersionValidationPassed,
 	}); err != nil {
 		t.Fatal(err)
 	}
-	parent, err := st.DriverRuns().Create(ctx, store.DriverRunCreate{
+	parent, err := st.DriverRuns().Create(ctx, execution.DriverRunCreate{
 		WorkspaceKey: "WS", RunID: "run-1", DriverID: "driver-1", DriverVersionID: "version-1",
 		SourceKind: "manual", SourceRef: "test", IdempotencyKey: "run-request-1",
 	})

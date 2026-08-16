@@ -5,10 +5,11 @@ import (
 	"errors"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	infrafleetdb "github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
 	"github.com/tysonthomas9/loomcli/internal/modules/agents"
 	agentsfleetdb "github.com/tysonthomas9/loomcli/internal/modules/agents/fleetdb"
+	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 // agentsFleetDBTransport is the composition-owned bridge between the one
@@ -43,7 +44,7 @@ func (transport *agentsFleetDBTransport) ListAgentServices(
 	filter agentsfleetdb.AgentServiceFilterWire,
 ) ([]*agentsfleetdb.AgentServiceWire, error) {
 	values, err := transport.transport.ListAgentServices(ctx, workspace, infrafleetdb.AgentServiceQuery{
-		Kind: domain.AgentServiceKind(filter.Kind), DesiredState: domain.AgentServiceDesiredState(filter.DesiredState),
+		Kind: agents.AgentKind(filter.Kind), DesiredState: agents.DesiredState(filter.DesiredState),
 		RoleName: filter.RoleName, IncludeDeleted: filter.IncludeDeleted, Limit: filter.Limit,
 	})
 	if err != nil {
@@ -158,7 +159,7 @@ func (transport *agentsFleetDBTransport) CreateAgentService(
 ) (*agentsfleetdb.AgentServiceWire, error) {
 	value, err := transport.transport.CreateAgentService(ctx, infrafleetdb.AgentServiceCreateInput{
 		WorkspaceKey: input.WorkspaceKey, ServiceID: input.ServiceID, Name: input.Name,
-		Kind: domain.AgentServiceKind(input.Kind), DesiredState: domain.AgentServiceDesiredState(input.DesiredState),
+		Kind: agents.AgentKind(input.Kind), DesiredState: agents.DesiredState(input.DesiredState),
 		RoleName: input.RoleName, DriverID: input.DriverID, DriverVersionID: input.DriverVersionID,
 		ProfileName: input.ProfileName, ScheduleID: input.ScheduleID,
 		EventSources:    append([]string(nil), input.EventSources...),
@@ -220,8 +221,8 @@ func (transport *agentsFleetDBTransport) SetAgentServiceDesiredState(
 ) (*agentsfleetdb.AgentServiceWire, error) {
 	value, err := transport.transport.SetAgentServiceDesiredState(ctx, infrafleetdb.AgentServiceDesiredStateInput{
 		WorkspaceKey: input.WorkspaceKey, ServiceID: input.ServiceID,
-		ExpectedState:     domain.AgentServiceDesiredState(input.ExpectedState),
-		DesiredState:      domain.AgentServiceDesiredState(input.DesiredState),
+		ExpectedState:     agents.DesiredState(input.ExpectedState),
+		DesiredState:      agents.DesiredState(input.DesiredState),
 		ExpectedUpdatedAt: input.ExpectedUpdatedAt, DelegatedActor: input.ChangedBy,
 	})
 	return agentServiceWire(value), translateAgentsFleetDBError(err)
@@ -235,11 +236,11 @@ func (transport *agentsFleetDBTransport) SetAgentServiceDesiredStateOwned(
 		Proof: infrafleetdb.AgentOwnershipProof{
 			WorkspaceKey: input.WorkspaceKey, AgentID: input.ServiceID,
 			LeaseID: input.LeaseID, LeaseToken: input.LeaseToken, OwnerID: input.OwnerID,
-			RuntimeProvider: domain.RuntimeProvider(input.RuntimeProvider),
+			RuntimeProvider: agents.RuntimeProvider(input.RuntimeProvider),
 			NodeID:          input.NodeID, FencingToken: input.FencingToken,
 		},
-		ExpectedState:     domain.AgentServiceDesiredState(input.ExpectedState),
-		DesiredState:      domain.AgentServiceDesiredState(input.DesiredState),
+		ExpectedState:     agents.DesiredState(input.ExpectedState),
+		DesiredState:      agents.DesiredState(input.DesiredState),
 		ExpectedUpdatedAt: input.ExpectedUpdatedAt, IdempotencyKey: input.IdempotencyKey,
 		DelegatedActor: input.OwnerID,
 	})
@@ -276,7 +277,7 @@ func (transport *agentsFleetDBTransport) AcquireAgentOwnership(
 ) (*agentsfleetdb.AgentOwnershipLeaseWire, error) {
 	grant, err := transport.transport.AcquireAgentOwnership(ctx, infrafleetdb.AgentOwnershipAcquireInput{
 		WorkspaceKey: input.WorkspaceKey, AgentID: input.AgentID, LeaseID: input.LeaseID,
-		OwnerID: input.OwnerID, RuntimeProvider: domain.RuntimeProvider(input.RuntimeProvider),
+		OwnerID: input.OwnerID, RuntimeProvider: agents.RuntimeProvider(input.RuntimeProvider),
 		NodeID: input.NodeID, TTLSeconds: input.TTLSeconds, DelegatedActor: input.OwnerID,
 	})
 	if err != nil {
@@ -307,8 +308,8 @@ func (transport *agentsFleetDBTransport) ListAgentOwnership(
 	filter agentsfleetdb.OwnershipFilterWire,
 ) ([]*agentsfleetdb.AgentOwnershipLeaseWire, error) {
 	values, err := transport.transport.ListAgentOwnership(ctx, workspace, infrafleetdb.AgentOwnershipQuery{
-		OwnerID: filter.OwnerID, RuntimeProvider: domain.RuntimeProvider(filter.RuntimeProvider),
-		NodeID: filter.NodeID, Status: domain.AgentLeaseStatus(filter.Status), Limit: filter.Limit,
+		OwnerID: filter.OwnerID, RuntimeProvider: agents.RuntimeProvider(filter.RuntimeProvider),
+		NodeID: filter.NodeID, Status: interaction.LeaseRecordStatus(filter.Status), Limit: filter.Limit,
 	})
 	if err != nil {
 		return nil, translateAgentsFleetDBError(err)
@@ -342,7 +343,7 @@ func (transport *agentsFleetDBTransport) ReleaseAgentOwnership(
 	return agentOwnershipWire(value), translateAgentsFleetDBError(err)
 }
 
-func agentServiceWire(value *domain.AgentService) *agentsfleetdb.AgentServiceWire {
+func agentServiceWire(value *agents.AgentServiceRecord) *agentsfleetdb.AgentServiceWire {
 	if value == nil {
 		return nil
 	}
@@ -363,12 +364,12 @@ func agentServiceWire(value *domain.AgentService) *agentsfleetdb.AgentServiceWir
 	}
 }
 
-func roleWire(value *domain.Role) *agentsfleetdb.RoleWire {
+func roleWire(value *agents.Role) *agentsfleetdb.RoleWire {
 	if value == nil {
 		return nil
 	}
 	return &agentsfleetdb.RoleWire{
-		WorkspaceKey: value.WorkspaceKey, Name: value.Name, Kind: string(value.Kind),
+		WorkspaceKey: value.WorkspaceKey, Name: value.Name, Kind: value.Kind,
 		Description: value.Description, Prompt: value.Prompt, PromptFile: value.PromptFile,
 		Model: value.Model, TaskFilter: value.TaskFilter, Backend: value.Backend, Effort: value.Effort,
 		PathPatterns:   append([]string(nil), value.PathPatterns...),
@@ -383,7 +384,7 @@ func roleWire(value *domain.Role) *agentsfleetdb.RoleWire {
 	}
 }
 
-func agentOwnershipWire(value *domain.AgentOwnershipLease) *agentsfleetdb.AgentOwnershipLeaseWire {
+func agentOwnershipWire(value *agents.OwnershipRecord) *agentsfleetdb.AgentOwnershipLeaseWire {
 	if value == nil {
 		return nil
 	}
@@ -399,7 +400,7 @@ func agentOwnershipProof(value agentsfleetdb.OwnershipProofWire) infrafleetdb.Ag
 	return infrafleetdb.AgentOwnershipProof{
 		WorkspaceKey: value.WorkspaceKey, AgentID: value.AgentID,
 		LeaseID: value.LeaseID, LeaseToken: value.LeaseToken, OwnerID: value.OwnerID,
-		RuntimeProvider: domain.RuntimeProvider(value.RuntimeProvider),
+		RuntimeProvider: agents.RuntimeProvider(value.RuntimeProvider),
 		NodeID:          value.NodeID, FencingToken: value.FencingToken,
 	}
 }
@@ -410,17 +411,17 @@ func translateAgentsFleetDBError(err error) error {
 	}
 	var translated error
 	switch {
-	case errors.Is(err, domain.ErrNotFound):
+	case errors.Is(err, persistence.ErrNotFound):
 		translated = agentsfleetdb.ErrTransportNotFound
-	case errors.Is(err, domain.ErrInvalid), errors.Is(err, infrafleetdb.ErrAgentManagementInvalidDelegatedActor):
+	case errors.Is(err, persistence.ErrInvalid), errors.Is(err, infrafleetdb.ErrAgentManagementInvalidDelegatedActor):
 		translated = agentsfleetdb.ErrTransportInvalid
-	case errors.Is(err, domain.ErrAlreadyExists):
+	case errors.Is(err, persistence.ErrAlreadyExists):
 		translated = agentsfleetdb.ErrTransportAlreadyExists
-	case errors.Is(err, domain.ErrNotOwner):
+	case errors.Is(err, persistence.ErrNotOwner):
 		translated = agentsfleetdb.ErrTransportNotOwner
-	case errors.Is(err, domain.ErrInvalidTransition), errors.Is(err, domain.ErrGone):
+	case errors.Is(err, persistence.ErrInvalidTransition), errors.Is(err, persistence.ErrGone):
 		translated = agentsfleetdb.ErrTransportInvalidTransition
-	case errors.Is(err, domain.ErrConflict), errors.Is(err, domain.ErrAlreadyClaimed),
+	case errors.Is(err, persistence.ErrConflict), errors.Is(err, persistence.ErrAlreadyClaimed),
 		errors.Is(err, infrafleetdb.ErrAgentRoleRevisionConflict),
 		errors.Is(err, infrafleetdb.ErrAgentServiceRevisionConflict),
 		errors.Is(err, infrafleetdb.ErrAgentServiceDesiredStateConflict),
@@ -491,11 +492,11 @@ func cloneAgentsOptionalFloat64Pointer(value **float64) **float64 {
 	return &out
 }
 
-func agentServiceKindPointer(value *string) *domain.AgentServiceKind {
+func agentServiceKindPointer(value *string) *agents.AgentKind {
 	if value == nil {
 		return nil
 	}
-	out := domain.AgentServiceKind(*value)
+	out := agents.AgentKind(*value)
 	return &out
 }
 

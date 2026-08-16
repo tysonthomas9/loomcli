@@ -6,12 +6,11 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/modules/workspace"
-	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
 func TestWorkspaceCatalogResolvesPersistedWorkspace(t *testing.T) {
 	st := memstore.New()
-	_, err := st.Workspaces().Create(context.Background(), store.WorkspaceCreate{Key: "HELLO", Name: "Hello"})
+	_, err := st.Workspaces().Create(context.Background(), workspace.WorkspaceCreate{Key: "HELLO", Name: "Hello"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -27,7 +26,7 @@ func TestWorkspaceCatalogResolvesPersistedWorkspace(t *testing.T) {
 
 func TestWorkspaceCatalogListsAndUpdatesPersistedWorkspace(t *testing.T) {
 	st := memstore.New()
-	_, err := st.Workspaces().Create(context.Background(), store.WorkspaceCreate{Key: "HELLO", Name: "Hello"})
+	_, err := st.Workspaces().Create(context.Background(), workspace.WorkspaceCreate{Key: "HELLO", Name: "Hello"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -52,10 +51,10 @@ func TestWorkspaceCatalogListsAndUpdatesPersistedWorkspace(t *testing.T) {
 func TestWorkspaceCapabilityListsOwnedRepositoryCatalog(t *testing.T) {
 	st := memstore.New()
 	ctx := context.Background()
-	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "HELLO", Name: "Hello"}); err != nil {
+	if _, err := st.Workspaces().Create(ctx, workspace.WorkspaceCreate{Key: "HELLO", Name: "Hello"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.Repos().Create(ctx, store.RepoCreate{WorkspaceKey: "HELLO", Name: "loom", Groups: []string{"core"}}); err != nil {
+	if _, err := st.Repos().Create(ctx, workspace.RepoCreate{WorkspaceKey: "HELLO", Name: "loom", Groups: []string{"core"}}); err != nil {
 		t.Fatal(err)
 	}
 	api, err := NewWorkspaceCapability(st.Workspaces(), st.Repos())

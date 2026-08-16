@@ -18,7 +18,6 @@ import (
 	hwtranscript "github.com/olesho/harness-wrapper/pkg/transcript"
 	"github.com/olesho/harness-wrapper/pkg/transcript/claudecode"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	leadcontrol "github.com/tysonthomas9/loomcli/internal/infra/interactionlead"
 	"github.com/tysonthomas9/loomcli/internal/localworkspace"
 	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
@@ -655,7 +654,7 @@ func rememberedAgentWorktree(
 func (runtime *Runtime) readHarnessConversation(
 	ctx context.Context,
 	query interaction.ConversationQuery,
-	session *domain.AgentSession,
+	session *interaction.SessionRecord,
 	provider string,
 ) (*interaction.Conversation, error) {
 	reader, ok := runtime.harnesses[provider]

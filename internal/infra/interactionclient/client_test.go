@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 const testToken = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
@@ -338,7 +338,7 @@ func TestClaimNextMapsNotFoundToNoQueuedMessage(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = client.ClaimNextInbox(t.Context(), interaction.ClaimInboxCommand{LeaseTTL: time.Minute})
-	if !errors.Is(err, domain.ErrNotFound) {
+	if !errors.Is(err, persistence.ErrNotFound) {
 		t.Fatalf("ClaimNextInbox error = %v, want not found", err)
 	}
 }

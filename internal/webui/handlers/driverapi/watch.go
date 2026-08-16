@@ -10,9 +10,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	driverpkg "github.com/tysonthomas9/loomcli/internal/driver"
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 )
 
@@ -192,7 +192,7 @@ func watchCursor(r *http.Request) (int64, error) {
 	}
 	seq, err := strconv.ParseInt(raw, 10, 64)
 	if err != nil || seq < 0 {
-		return 0, fmt.Errorf("parse watch cursor %q as non-negative int64 seq: %w", raw, domain.ErrInvalid)
+		return 0, fmt.Errorf("parse watch cursor %q as non-negative int64 seq: %w", raw, persistence.ErrInvalid)
 	}
 	return seq, nil
 }
@@ -256,7 +256,7 @@ func writeWatchClosed(sw *realtime.Writer, cursor int64, code string) {
 // "closed" frame; transient errors just drop the connection so the client
 // reconnects with its cursor.
 func watchParentNotRunning(err error) bool {
-	return errors.Is(err, domain.ErrNotFound) ||
-		errors.Is(err, domain.ErrNotOwner) ||
-		errors.Is(err, domain.ErrInvalidTransition)
+	return errors.Is(err, persistence.ErrNotFound) ||
+		errors.Is(err, persistence.ErrNotOwner) ||
+		errors.Is(err, persistence.ErrInvalidTransition)
 }

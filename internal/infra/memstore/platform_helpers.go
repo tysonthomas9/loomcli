@@ -8,10 +8,9 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
 
-	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 )
 
 func cloneDriver(d *workflowcatalog.Driver) *workflowcatalog.Driver {
@@ -52,7 +51,7 @@ func defaultRetryFieldMem(value, fallback int) int {
 	return value
 }
 
-func cloneDriverRun(r *domain.DriverRun) *domain.DriverRun {
+func cloneDriverRun(r *execution.DriverRunRecord) *execution.DriverRunRecord {
 	out := *r
 	out.Payload = cloneJSON(r.Payload)
 	out.Output = cloneMap(r.Output)
@@ -82,7 +81,7 @@ func cloneRawMessage(payload json.RawMessage) json.RawMessage {
 	return out
 }
 
-func cloneDriverStep(s *domain.DriverStep) *domain.DriverStep {
+func cloneDriverStep(s *execution.DriverStepRecord) *execution.DriverStepRecord {
 	if s == nil {
 		return nil
 	}
@@ -91,7 +90,7 @@ func cloneDriverStep(s *domain.DriverStep) *domain.DriverStep {
 	return &out
 }
 
-func cloneTaskRun(r *domain.TaskRun) *domain.TaskRun {
+func cloneTaskRun(r *execution.TaskRunRecord) *execution.TaskRunRecord {
 	out := *r
 	out.ExitCode = clonePtr(r.ExitCode)
 	out.RunnerPlacement = cloneTaskRunPlacement(r.RunnerPlacement)
@@ -103,13 +102,13 @@ func cloneTaskRun(r *domain.TaskRun) *domain.TaskRun {
 	return &out
 }
 
-func cloneTaskRunPlacement(p domain.TaskRunPlacement) domain.TaskRunPlacement {
+func cloneTaskRunPlacement(p execution.TaskRunPlacementRecord) execution.TaskRunPlacementRecord {
 	out := p
 	out.RetainedUntil = clonePtr(p.RetainedUntil)
 	return out
 }
 
-func cloneTaskRunLogEntry(entry *domain.TaskRunLogEntry) *domain.TaskRunLogEntry {
+func cloneTaskRunLogEntry(entry *execution.TaskRunLogEntry) *execution.TaskRunLogEntry {
 	if entry == nil {
 		return nil
 	}
@@ -131,15 +130,15 @@ func mergeStringMapMem(base, patch map[string]string) map[string]string {
 	return out
 }
 
-func driverMatchesMem(d *workflowcatalog.Driver, f store.DriverFilter) bool {
+func driverMatchesMem(d *workflowcatalog.Driver, f workflowcatalog.DriverFilter) bool {
 	return (f.Name == "" || d.Name == f.Name) && (f.Status == "" || d.Status == f.Status)
 }
 
-func driverVersionMatchesMem(v *workflowcatalog.DriverVersion, f store.DriverVersionFilter) bool {
+func driverVersionMatchesMem(v *workflowcatalog.DriverVersion, f workflowcatalog.DriverVersionFilter) bool {
 	return (f.DriverID == "" || v.DriverID == f.DriverID) && (f.ValidationStatus == "" || v.ValidationStatus == f.ValidationStatus)
 }
 
-func triggerBindingMatchesMem(b *automation.Binding, f store.TriggerBindingFilter) bool {
+func triggerBindingMatchesMem(b *automation.Binding, f automation.TriggerBindingFilter) bool {
 	return (f.SourceKind == "" || b.SourceKind == f.SourceKind) &&
 		(f.RouteKey == "" || b.RouteKey == f.RouteKey) &&
 		(f.DriverID == "" || b.DriverID == f.DriverID) &&
@@ -147,7 +146,7 @@ func triggerBindingMatchesMem(b *automation.Binding, f store.TriggerBindingFilte
 		(f.Enabled == nil || b.Enabled == *f.Enabled)
 }
 
-func driverRunMatchesMem(r *domain.DriverRun, f store.DriverRunFilter) bool {
+func driverRunMatchesMem(r *execution.DriverRunRecord, f execution.DriverRunFilter) bool {
 	return (f.DriverID == "" || r.DriverID == f.DriverID) &&
 		(f.DriverVersionID == "" || r.DriverVersionID == f.DriverVersionID) &&
 		(f.EpicID == "" || r.EpicID == f.EpicID) &&
@@ -157,7 +156,7 @@ func driverRunMatchesMem(r *domain.DriverRun, f store.DriverRunFilter) bool {
 		(f.Status == "" || r.Status == f.Status)
 }
 
-func driverStepMatchesMem(s *domain.DriverStep, f store.DriverStepFilter) bool {
+func driverStepMatchesMem(s *execution.DriverStepRecord, f execution.DriverStepFilter) bool {
 	return (f.DriverRunID == "" || s.DriverRunID == f.DriverRunID) &&
 		(f.TaskRunID == "" || s.TaskRunID == f.TaskRunID) &&
 		(f.ActionLedgerID == "" || s.ActionLedgerID == f.ActionLedgerID) &&
@@ -165,7 +164,7 @@ func driverStepMatchesMem(s *domain.DriverStep, f store.DriverStepFilter) bool {
 		(f.Status == "" || s.Status == f.Status)
 }
 
-func taskRunMatchesMem(r *domain.TaskRun, f store.TaskRunFilter) bool {
+func taskRunMatchesMem(r *execution.TaskRunRecord, f execution.TaskRunFilter) bool {
 	return (f.DriverRunID == "" || r.DriverRunID == f.DriverRunID) &&
 		(f.DriverStepID == "" || r.DriverStepID == f.DriverStepID) &&
 		(f.TaskID == "" || r.TaskID == f.TaskID) &&
@@ -173,8 +172,8 @@ func taskRunMatchesMem(r *domain.TaskRun, f store.TaskRunFilter) bool {
 		(f.Status == "" || r.Status == f.Status)
 }
 
-func claimCandidatesMem(runs map[string]*domain.TaskRun, taskRunID string) []*domain.TaskRun {
-	out := make([]*domain.TaskRun, 0, len(runs))
+func claimCandidatesMem(runs map[string]*execution.TaskRunRecord, taskRunID string) []*execution.TaskRunRecord {
+	out := make([]*execution.TaskRunRecord, 0, len(runs))
 	for _, run := range runs {
 		if taskRunID != "" && run.TaskRunID != taskRunID {
 			continue
@@ -185,8 +184,8 @@ func claimCandidatesMem(runs map[string]*domain.TaskRun, taskRunID string) []*do
 	return out
 }
 
-func taskRunMatchesClaimMem(run *domain.TaskRun, profile *domain.WorkerProfile, claim store.TaskRunClaim, now time.Time) bool {
-	if run == nil || run.Status != domain.TaskRunQueued {
+func taskRunMatchesClaimMem(run *execution.TaskRunRecord, profile *execution.WorkerProfile, claim execution.TaskRunClaim, now time.Time) bool {
+	if run == nil || run.Status != execution.TaskRunRecordQueued {
 		return false
 	}
 	// Retry backoff: a zero NextEligibleAt keeps the run immediately claimable.
@@ -230,7 +229,7 @@ func taskRunMatchesClaimMem(run *domain.TaskRun, profile *domain.WorkerProfile, 
 	return provider == "" || stringListEmptyOrContainsMem(claim.SupportedProviders, provider)
 }
 
-func runHasNamedRunnerIdentityMem(run *domain.TaskRun) bool {
+func runHasNamedRunnerIdentityMem(run *execution.TaskRunRecord) bool {
 	if run == nil {
 		return false
 	}
@@ -262,7 +261,7 @@ func stringListContainsAllMem(have, required []string) bool {
 	return true
 }
 
-func nodeAdvertisedProvidersMem(node *domain.Node) []string {
+func nodeAdvertisedProvidersMem(node *execution.WorkerNode) []string {
 	if node == nil {
 		return nil
 	}
@@ -312,14 +311,14 @@ func stringListContainsAllStrictMem(have, required []string) bool {
 	return true
 }
 
-func applyTriggerBindingUpdateMem(b *automation.Binding, patch store.TriggerBindingUpdate) {
+func applyTriggerBindingUpdateMem(b *automation.Binding, patch automation.TriggerBindingUpdate) {
 	applyTriggerBindingSourceUpdateMem(b, patch)
 	applyTriggerBindingTargetUpdateMem(b, patch)
 	applyTriggerBindingPolicyUpdateMem(b, patch)
 	applyTriggerBindingRouterUpdateMem(b, patch)
 }
 
-func applyTriggerBindingSourceUpdateMem(b *automation.Binding, patch store.TriggerBindingUpdate) {
+func applyTriggerBindingSourceUpdateMem(b *automation.Binding, patch automation.TriggerBindingUpdate) {
 	if patch.Name != nil {
 		b.Name = *patch.Name
 	}
@@ -352,7 +351,7 @@ func applyTriggerBindingSourceUpdateMem(b *automation.Binding, patch store.Trigg
 	}
 }
 
-func applyTriggerBindingTargetUpdateMem(b *automation.Binding, patch store.TriggerBindingUpdate) {
+func applyTriggerBindingTargetUpdateMem(b *automation.Binding, patch automation.TriggerBindingUpdate) {
 	if patch.DriverID != nil {
 		b.DriverID = *patch.DriverID
 	}
@@ -367,7 +366,7 @@ func applyTriggerBindingTargetUpdateMem(b *automation.Binding, patch store.Trigg
 	}
 }
 
-func applyTriggerBindingPolicyUpdateMem(b *automation.Binding, patch store.TriggerBindingUpdate) {
+func applyTriggerBindingPolicyUpdateMem(b *automation.Binding, patch automation.TriggerBindingUpdate) {
 	if patch.ConcurrencyPolicy != nil {
 		b.ConcurrencyPolicy = *patch.ConcurrencyPolicy
 	}
@@ -388,7 +387,7 @@ func applyTriggerBindingPolicyUpdateMem(b *automation.Binding, patch store.Trigg
 // applyTriggerBindingRouterUpdateMem applies the Router v2 binding fields.
 // ActorFilter is replace-whole: a zero-valued filter clears it (normalized to
 // nil), mirroring fleet-db's patch semantics.
-func applyTriggerBindingRouterUpdateMem(b *automation.Binding, patch store.TriggerBindingUpdate) {
+func applyTriggerBindingRouterUpdateMem(b *automation.Binding, patch automation.TriggerBindingUpdate) {
 	if patch.SubjectKeyTemplate != nil {
 		b.SubjectKeyTemplate = *patch.SubjectKeyTemplate
 	}

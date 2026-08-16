@@ -7,9 +7,10 @@ import (
 	"path/filepath"
 	"testing"
 
+	workspaceowner "github.com/tysonthomas9/loomcli/internal/modules/workspace"
+
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
-	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
 // gitCheckout creates a git work tree at dir (git init) and, when originURL is
@@ -56,7 +57,7 @@ func TestResolveOrHealWorkspacePath_BindsOnMatchingRemote(t *testing.T) {
 
 	st := memstore.New()
 	mustCreateWS(t, ctx, st, "WS1", "demo")
-	mustCreateRepo(t, ctx, st, store.RepoCreate{WorkspaceKey: "WS1", Name: "repo", Remote: "origin", RemoteURL: url})
+	mustCreateRepo(t, ctx, st, workspaceowner.RepoCreate{WorkspaceKey: "WS1", Name: "repo", Remote: "origin", RemoteURL: url})
 
 	wsDir := filepath.Join(bootstrap.LoomDir(), "workspaces", "demo")
 	repoDir := filepath.Join(wsDir, "repo")
@@ -82,7 +83,7 @@ func TestResolveOrHealWorkspacePath_ReturnsEmptyOnRemoteMismatch(t *testing.T) {
 
 	st := memstore.New()
 	mustCreateWS(t, ctx, st, "WS1", "demo")
-	mustCreateRepo(t, ctx, st, store.RepoCreate{
+	mustCreateRepo(t, ctx, st, workspaceowner.RepoCreate{
 		WorkspaceKey: "WS1", Name: "repo", Remote: "origin",
 		RemoteURL: "https://github.com/owner/repo.git",
 	})
@@ -104,7 +105,7 @@ func TestResolveOrHealWorkspacePath_ReturnsEmptyWhenDirAbsent(t *testing.T) {
 
 	st := memstore.New()
 	mustCreateWS(t, ctx, st, "WS1", "demo")
-	mustCreateRepo(t, ctx, st, store.RepoCreate{WorkspaceKey: "WS1", Name: "repo", RemoteURL: "x"})
+	mustCreateRepo(t, ctx, st, workspaceowner.RepoCreate{WorkspaceKey: "WS1", Name: "repo", RemoteURL: "x"})
 
 	if got := ResolveOrHealWorkspacePath(ctx, st, "WS1"); got != "" {
 		t.Fatalf("resolved path = %q, want \"\" when no checkout on disk", got)
@@ -139,7 +140,7 @@ func TestResolveOrHealWorkspacePath_EmptyRemoteURLBindsGitDir(t *testing.T) {
 
 	st := memstore.New()
 	mustCreateWS(t, ctx, st, "WS1", "demo")
-	mustCreateRepo(t, ctx, st, store.RepoCreate{WorkspaceKey: "WS1", Name: "repo"}) // no RemoteURL
+	mustCreateRepo(t, ctx, st, workspaceowner.RepoCreate{WorkspaceKey: "WS1", Name: "repo"}) // no RemoteURL
 
 	wsDir := filepath.Join(bootstrap.LoomDir(), "workspaces", "demo")
 	gitCheckout(t, filepath.Join(wsDir, "repo"), "") // real git dir, no origin
@@ -157,8 +158,8 @@ func TestResolveOrHealWorkspacePath_MultiRepoBindsVerifiedSubset(t *testing.T) {
 
 	st := memstore.New()
 	mustCreateWS(t, ctx, st, "WS1", "demo")
-	mustCreateRepo(t, ctx, st, store.RepoCreate{WorkspaceKey: "WS1", Name: "a", Remote: "origin", RemoteURL: urlA})
-	mustCreateRepo(t, ctx, st, store.RepoCreate{WorkspaceKey: "WS1", Name: "b", Remote: "origin", RemoteURL: "https://github.com/owner/b.git"})
+	mustCreateRepo(t, ctx, st, workspaceowner.RepoCreate{WorkspaceKey: "WS1", Name: "a", Remote: "origin", RemoteURL: urlA})
+	mustCreateRepo(t, ctx, st, workspaceowner.RepoCreate{WorkspaceKey: "WS1", Name: "b", Remote: "origin", RemoteURL: "https://github.com/owner/b.git"})
 
 	wsDir := filepath.Join(bootstrap.LoomDir(), "workspaces", "demo")
 	gitCheckout(t, filepath.Join(wsDir, "a"), urlA)                                 // matches
@@ -193,7 +194,7 @@ func TestListWorkspacePathsOrHeal_HealsEmptyEntries(t *testing.T) {
 	}
 	// Healable workspace (path missing, clone on disk).
 	mustCreateWS(t, ctx, st, "HEAL", "healme")
-	mustCreateRepo(t, ctx, st, store.RepoCreate{WorkspaceKey: "HEAL", Name: "repo", Remote: "origin", RemoteURL: url})
+	mustCreateRepo(t, ctx, st, workspaceowner.RepoCreate{WorkspaceKey: "HEAL", Name: "repo", Remote: "origin", RemoteURL: url})
 	healDir := filepath.Join(bootstrap.LoomDir(), "workspaces", "healme")
 	gitCheckout(t, filepath.Join(healDir, "repo"), url)
 
@@ -217,7 +218,7 @@ func TestResolveOrHealWorkspacePath_Idempotent(t *testing.T) {
 
 	st := memstore.New()
 	mustCreateWS(t, ctx, st, "WS1", "demo")
-	mustCreateRepo(t, ctx, st, store.RepoCreate{WorkspaceKey: "WS1", Name: "repo", Remote: "origin", RemoteURL: url})
+	mustCreateRepo(t, ctx, st, workspaceowner.RepoCreate{WorkspaceKey: "WS1", Name: "repo", Remote: "origin", RemoteURL: url})
 	wsDir := filepath.Join(bootstrap.LoomDir(), "workspaces", "demo")
 	gitCheckout(t, filepath.Join(wsDir, "repo"), url)
 
@@ -228,14 +229,14 @@ func TestResolveOrHealWorkspacePath_Idempotent(t *testing.T) {
 	}
 }
 
-func mustCreateWS(t *testing.T, ctx context.Context, s store.Store, key, name string) {
+func mustCreateWS(t *testing.T, ctx context.Context, s *memstore.Store, key, name string) {
 	t.Helper()
-	if _, err := s.Workspaces().Create(ctx, store.WorkspaceCreate{Key: key, Name: name}); err != nil {
+	if _, err := s.Workspaces().Create(ctx, workspaceowner.WorkspaceCreate{Key: key, Name: name}); err != nil {
 		t.Fatalf("create workspace %s: %v", key, err)
 	}
 }
 
-func mustCreateRepo(t *testing.T, ctx context.Context, s store.Store, rc store.RepoCreate) {
+func mustCreateRepo(t *testing.T, ctx context.Context, s *memstore.Store, rc workspaceowner.RepoCreate) {
 	t.Helper()
 	if _, err := s.Repos().Create(ctx, rc); err != nil {
 		t.Fatalf("create repo %s: %v", rc.Name, err)

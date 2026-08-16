@@ -24,12 +24,12 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/app/connectorgrants"
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/connectorsvault"
 	"github.com/tysonthomas9/loomcli/internal/localsettings"
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
 	connectorsmodule "github.com/tysonthomas9/loomcli/internal/modules/connectors"
 	workflowcataloghttp "github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog/httpapi"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
@@ -176,7 +176,7 @@ func (m *Module) respondWithExistingConnector(
 			return true
 		}
 		if ensured == nil {
-			handler.WriteDomainError(w, domain.ErrConflict, "validate existing connector failed")
+			handler.WriteDomainError(w, persistence.ErrConflict, "validate existing connector failed")
 			return true
 		}
 		handler.WriteJSON(w, http.StatusOK, ensured)
@@ -207,11 +207,11 @@ func (m *Module) ensureExistingConnector(
 func validateExistingConnector(existing *connectorsmodule.Connector, source connectorsmodule.ConnectorSourceKind) error {
 	switch {
 	case existing == nil:
-		return fmt.Errorf("connector store returned no record: %w", domain.ErrConflict)
+		return fmt.Errorf("connector store returned no record: %w", persistence.ErrConflict)
 	case existing.SourceKind != source:
-		return fmt.Errorf("existing connector id belongs to a different source: %w", domain.ErrConflict)
+		return fmt.Errorf("existing connector id belongs to a different source: %w", persistence.ErrConflict)
 	case existing.Status != connectorsmodule.ConnectorStatusActive:
-		return fmt.Errorf("existing connector is not active: %w", domain.ErrConflict)
+		return fmt.Errorf("existing connector is not active: %w", persistence.ErrConflict)
 	default:
 		return nil
 	}
@@ -286,7 +286,7 @@ func (m *Module) createNewConnector(
 		return
 	}
 	if errors.Is(err, connectorsmodule.ErrAlreadyExists) || errors.Is(err, connectorsmodule.ErrConflict) ||
-		errors.Is(err, domain.ErrAlreadyExists) || errors.Is(err, domain.ErrConflict) {
+		errors.Is(err, persistence.ErrAlreadyExists) || errors.Is(err, persistence.ErrConflict) {
 		existing, fetchErr := m.management.GetConnector(r.Context(), connectorsmodule.GetConnectorQuery{
 			WorkspaceKey: in.WorkspaceKey, ConnectorID: in.ConnectorID,
 		})
@@ -380,7 +380,7 @@ func (m *Module) createGrant(w http.ResponseWriter, r *http.Request) {
 	// concurrent identical ensure returns the winner; a different winner fails
 	// closed so callers cannot enable a binding against stale scope.
 	if errors.Is(err, connectorsmodule.ErrAlreadyExists) || errors.Is(err, connectorsmodule.ErrConflict) ||
-		errors.Is(err, domain.ErrAlreadyExists) || errors.Is(err, domain.ErrConflict) {
+		errors.Is(err, persistence.ErrAlreadyExists) || errors.Is(err, persistence.ErrConflict) {
 		if existing := m.findGrant(r.Context(), ws, connectorID, expected.GrantID); existing != nil {
 			m.writeExistingGrant(w, existing, expected)
 			return

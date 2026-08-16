@@ -19,12 +19,13 @@ import (
 	"testing"
 	"time"
 
+	workspaceowner "github.com/tysonthomas9/loomcli/internal/modules/workspace"
+
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
 	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
-	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 type workItemsFleetRuntime struct {
@@ -204,22 +205,22 @@ func createRemoteWorkspace(t *testing.T, runtime workItemsFleetRuntime, workspac
 	createRepository(t, ctx, client.Repos(), workspace)
 }
 
-func createWorkspace(t *testing.T, ctx context.Context, workspaces store.WorkspaceStore, key string) {
+func createWorkspace(t *testing.T, ctx context.Context, workspaces workspaceowner.WorkspaceStore, key string) {
 	t.Helper()
-	_, err := workspaces.Create(ctx, store.WorkspaceCreate{Key: key, Name: key})
-	if err != nil && !errors.Is(err, domain.ErrAlreadyExists) {
+	_, err := workspaces.Create(ctx, workspaceowner.WorkspaceCreate{Key: key, Name: key})
+	if err != nil && !errors.Is(err, persistence.ErrAlreadyExists) {
 		t.Fatalf("create workspace %s: %v", key, err)
 	}
 }
 
-func createRepository(t *testing.T, ctx context.Context, repos store.RepoStore, workspace string) {
+func createRepository(t *testing.T, ctx context.Context, repos workspaceowner.RepoStore, workspace string) {
 	t.Helper()
-	_, err := repos.Create(ctx, store.RepoCreate{
+	_, err := repos.Create(ctx, workspaceowner.RepoCreate{
 		WorkspaceKey: workspace,
 		Name:         "contract-repo",
 		SourceRepoID: "contract-repo",
 	})
-	if err != nil && !errors.Is(err, domain.ErrAlreadyExists) {
+	if err != nil && !errors.Is(err, persistence.ErrAlreadyExists) {
 		t.Fatalf("create repository in %s: %v", workspace, err)
 	}
 }

@@ -13,10 +13,10 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	artifactsmodule "github.com/tysonthomas9/loomcli/internal/modules/artifacts"
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 	platformruntime "github.com/tysonthomas9/loomcli/internal/platform/runtime"
 )
 
@@ -323,7 +323,7 @@ func readHostBridgeArtifactFile(path, label string) ([]byte, error) {
 		return nil, fmt.Errorf("stat %s file: %w", label, err)
 	}
 	if info.Size() > maxHostBridgeArtifactFileBytes {
-		return nil, fmt.Errorf("%s file exceeds %d-byte artifact limit: %w", label, maxHostBridgeArtifactFileBytes, domain.ErrInvalid)
+		return nil, fmt.Errorf("%s file exceeds %d-byte artifact limit: %w", label, maxHostBridgeArtifactFileBytes, persistence.ErrInvalid)
 	}
 
 	content, err := io.ReadAll(io.LimitReader(file, maxHostBridgeArtifactFileBytes+1))
@@ -331,7 +331,7 @@ func readHostBridgeArtifactFile(path, label string) ([]byte, error) {
 		return nil, fmt.Errorf("read %s file: %w", label, err)
 	}
 	if int64(len(content)) > maxHostBridgeArtifactFileBytes {
-		return nil, fmt.Errorf("%s file exceeds %d-byte artifact limit: %w", label, maxHostBridgeArtifactFileBytes, domain.ErrInvalid)
+		return nil, fmt.Errorf("%s file exceeds %d-byte artifact limit: %w", label, maxHostBridgeArtifactFileBytes, persistence.ErrInvalid)
 	}
 	return content, nil
 }
@@ -536,7 +536,7 @@ func lastJSONLine(stdout []byte) ([]byte, error) {
 		}
 		return line, nil
 	}
-	return nil, fmt.Errorf("task runner command returned empty output: %w", domain.ErrInvalid)
+	return nil, fmt.Errorf("task runner command returned empty output: %w", persistence.ErrInvalid)
 }
 
 func (r bridgeTaskRunnerResult) taskExecResult() TaskExecResult {
@@ -594,7 +594,7 @@ func (e HostBridgeTaskExecutor) safePatchPath(patchPath string) (string, error) 
 func (e HostBridgeTaskExecutor) safeRunnerPath(rawPath, label string) (string, error) {
 	rawPath = strings.TrimSpace(rawPath)
 	if rawPath == "" {
-		return "", fmt.Errorf("%s path required: %w", label, domain.ErrInvalid)
+		return "", fmt.Errorf("%s path required: %w", label, persistence.ErrInvalid)
 	}
 	if filepath.IsAbs(rawPath) {
 		return rawPath, nil
@@ -613,7 +613,7 @@ func (e HostBridgeTaskExecutor) safeRunnerPath(rawPath, label string) (string, e
 		return "", fmt.Errorf("resolve %s path: %w", label, err)
 	}
 	if rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return "", fmt.Errorf("%s path escapes worktree: %w", label, domain.ErrInvalid)
+		return "", fmt.Errorf("%s path escapes worktree: %w", label, persistence.ErrInvalid)
 	}
 	return path, nil
 }

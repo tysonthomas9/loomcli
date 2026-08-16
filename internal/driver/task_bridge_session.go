@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
-
-	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 // validateBridgeTaskRunnerResult mirrors §4.1/§4.2: a decoded runner result is
@@ -22,7 +22,7 @@ func validateBridgeTaskRunnerResult(r bridgeTaskRunnerResult) (string, bool) {
 	if !r.Status.IsTerminal() {
 		return fmt.Sprintf("task runner result status %q is not terminal", status), false
 	}
-	if r.Status == domain.TaskRunCompleted {
+	if r.Status == execution.TaskRunRecordCompleted {
 		exit := bridgeResultExitCode(r)
 		if exit != 0 {
 			return fmt.Sprintf("task runner reported completed with non-zero exit code %d", exit), false
@@ -54,7 +54,7 @@ func invalidBridgeTaskExecResult(r bridgeTaskRunnerResult, reason string) TaskEx
 	metadata["invalid_task_result_reason"] = reason
 	errorMessage := firstNonEmpty(r.ErrorMessage, r.ErrorMessageCamel, reason)
 	return TaskExecResult{
-		Status:          domain.TaskRunFailed,
+		Status:          execution.TaskRunRecordFailed,
 		ExitCode:        1,
 		RuntimeMetadata: metadata,
 		ErrorClass:      "invalid_task_result",
@@ -84,7 +84,7 @@ func localWorktreeResolutionFailure(err error) TaskExecResult {
 		message += ": " + err.Error()
 	}
 	return TaskExecResult{
-		Status:       domain.TaskRunFailed,
+		Status:       execution.TaskRunRecordFailed,
 		ExitCode:     1,
 		ErrorClass:   ErrorClassLocalWorktreeUnprovisioned,
 		ErrorMessage: message,
@@ -121,7 +121,7 @@ func refuseUntrustedTaskRunnerPreflight(opts TaskRunRequestOptions) error {
 	if trust.Trusted() {
 		return nil
 	}
-	return fmt.Errorf("%s: child runner %q is untrusted and the host bridge does not isolate runner code: %w", ErrorClassSandboxRequired, opts.Runner, domain.ErrInvalid)
+	return fmt.Errorf("%s: child runner %q is untrusted and the host bridge does not isolate runner code: %w", ErrorClassSandboxRequired, opts.Runner, persistence.ErrInvalid)
 }
 
 func refuseUntrustedTaskRunnerExecution(req TaskExecRequest) (TaskExecResult, bool) {
@@ -134,7 +134,7 @@ func refuseUntrustedTaskRunnerExecution(req TaskExecRequest) (TaskExecResult, bo
 	}
 	runner := firstNonEmpty(req.Runner, req.RunnerEntrypoint, req.RunnerKind, "<unknown>")
 	return TaskExecResult{
-		Status:       domain.TaskRunFailed,
+		Status:       execution.TaskRunRecordFailed,
 		ExitCode:     1,
 		ErrorClass:   ErrorClassSandboxRequired,
 		ErrorMessage: fmt.Sprintf("child runner %q is untrusted and the host bridge does not isolate runner code", runner),

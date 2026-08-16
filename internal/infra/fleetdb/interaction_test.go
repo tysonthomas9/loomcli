@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
 )
 
 type interactionRoundTripFunc func(*http.Request) (*http.Response, error)
@@ -28,7 +28,7 @@ type validateInteractionSessionAuthorityRequest struct {
 }
 
 type validateInteractionSessionAuthorityResponse struct {
-	Lease *domain.AgentLease `json:"lease"`
+	Lease *interaction.LeaseRecord `json:"lease"`
 }
 
 func TestInteractionValidateSessionAuthorityUsesHeaderCredentialAndDurableIdentity(t *testing.T) {
@@ -62,10 +62,10 @@ func TestInteractionValidateSessionAuthorityUsesHeaderCredentialAndDurableIdenti
 				t.Fatalf("validation body = %+v", got)
 			}
 			_ = json.NewEncoder(response).Encode(validateInteractionSessionAuthorityResponse{
-				Lease: &domain.AgentLease{
+				Lease: &interaction.LeaseRecord{
 					WorkspaceKey: "WS", SessionID: "session-1", AgentID: "agent-1",
 					NodeID: "node-1", LeaseID: "lease-1", FencingToken: 7,
-					Status: domain.AgentLeaseActive, ExpiresAt: expiresAt,
+					Status: interaction.LeaseRecordActive, ExpiresAt: expiresAt,
 				},
 			})
 		case 2:
@@ -73,10 +73,10 @@ func TestInteractionValidateSessionAuthorityUsesHeaderCredentialAndDurableIdenti
 				request.URL.Path != "/api/v1/WS/agent-sessions/session-1" {
 				t.Fatalf("session request = %s %s", request.Method, request.URL.Path)
 			}
-			_ = json.NewEncoder(response).Encode(&domain.AgentSession{
+			_ = json.NewEncoder(response).Encode(&interaction.SessionRecord{
 				WorkspaceKey: "WS", SessionID: "session-1", AgentID: "agent-1",
 				NodeID: "node-1", TerminalID: "terminal-1",
-				Status: domain.AgentSessionRunning,
+				Status: interaction.SessionRecordRunning,
 			})
 		default:
 			t.Fatalf("unexpected call %d", calls)
@@ -139,18 +139,18 @@ func TestInteractionValidateSessionAuthorityRejectsCrossTerminalProjection(t *te
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		if strings.HasSuffix(request.URL.Path, "/validate") {
 			_ = json.NewEncoder(response).Encode(validateInteractionSessionAuthorityResponse{
-				Lease: &domain.AgentLease{
+				Lease: &interaction.LeaseRecord{
 					WorkspaceKey: "WS", SessionID: "session-1", AgentID: "agent-1",
 					NodeID: "node-1", LeaseID: "lease-1", FencingToken: 7,
-					Status: domain.AgentLeaseActive, ExpiresAt: expiresAt,
+					Status: interaction.LeaseRecordActive, ExpiresAt: expiresAt,
 				},
 			})
 			return
 		}
-		_ = json.NewEncoder(response).Encode(&domain.AgentSession{
+		_ = json.NewEncoder(response).Encode(&interaction.SessionRecord{
 			WorkspaceKey: "WS", SessionID: "session-1", AgentID: "agent-1",
 			NodeID: "node-1", TerminalID: "terminal-2",
-			Status: domain.AgentSessionRunning,
+			Status: interaction.SessionRecordRunning,
 		})
 	}))
 	defer server.Close()

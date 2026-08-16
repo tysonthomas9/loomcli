@@ -1,101 +1,62 @@
-// Package storeadapter exposes ops.WorkspaceData-shaped views over narrow
+// Package storeadapter exposes operationalview.Workspace-shaped views over narrow
 // persisted workspace topology collections.
 package storeadapter
 
 import (
 	"context"
 	"errors"
-	"fmt"
-	"path/filepath"
-	"sort"
 
+	workspaceowner "github.com/tysonthomas9/loomcli/internal/modules/workspace"
+
+	"github.com/tysonthomas9/loomcli/internal/app/query/operationalview"
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
-	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/ops"
-	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 type workspaceRepositoryStore interface {
-	Workspaces() store.WorkspaceStore
-	Repos() store.RepoStore
+	Workspaces() workspaceowner.WorkspaceStore
+	Repos() workspaceowner.RepoStore
 }
 
 // WorkspaceTopologyReader is the read surface required to compose Workspace
 // and Repository projections for the legacy WorkspaceData transport shape.
 type WorkspaceTopologyReader interface {
-	Workspaces() store.WorkspaceStore
-	Repos() store.RepoStore
+	Workspaces() workspaceowner.WorkspaceStore
+	Repos() workspaceowner.RepoStore
 }
 
 // ActiveWorkspaceKey projects the explicit runtime workspace selection for UI
 // composition. An unavailable selection is represented as the empty key.
-func ActiveWorkspaceKey(ctx context.Context, workspaces store.WorkspaceStore) string {
+func ActiveWorkspaceKey(ctx context.Context, workspaces workspaceowner.WorkspaceStore) string {
 	key, _ := bootstrap.ResolveActiveWorkspaceKey(ctx, workspaces)
 	return key
 }
 
 // BuildActiveWorkspaceData materializes the active workspace topology as
-// an *ops.WorkspaceData using the supplied Store. The "active" workspace
+// an *operationalview.Workspace using the supplied Store. The "active" workspace
 // key comes from the explicit runtime workspace. If no runtime workspace is
 // set, the web UI falls back to the first workspace for initial rendering.
 //
 // Returns nil, nil when no workspace exists — single-repo /
 // un-initialized mode.
-func BuildActiveWorkspaceData(ctx context.Context, s WorkspaceTopologyReader) (*ops.WorkspaceData, error) {
+func BuildActiveWorkspaceData(ctx context.Context, s WorkspaceTopologyReader) (*operationalview.Workspace, error) {
 	if s == nil {
 		return nil, nil
 	}
-	key, err := bootstrap.ResolveActiveWorkspaceKey(ctx, s.Workspaces())
-	if err != nil {
-		if errors.Is(err, bootstrap.ErrNoActiveWorkspace) || errors.Is(err, domain.ErrNotFound) {
-			key, err = firstWorkspaceKey(ctx, s)
-			if err != nil || key == "" {
-				return nil, err
-			}
-			return BuildWorkspaceDataForKey(ctx, s, key)
-		}
-		return nil, err
-	}
-	return BuildWorkspaceDataForKey(ctx, s, key)
+	return newWorkspaceTopologyQuery(s).Active(ctx)
 }
 
 // BuildWorkspaceDataForKey materializes a specific workspace's topology
-// as an *ops.WorkspaceData. Includes per-workspace repo + agent lists
+// as an *operationalview.Workspace. Includes per-workspace repo + agent lists
 // plus a summary list of all workspaces (used by the workspace switcher
 // in the frontend).
 //
 // Returns ErrNotFound (wrapped) if the workspace key does not exist.
-func BuildWorkspaceDataForKey(ctx context.Context, s WorkspaceTopologyReader, key string) (*ops.WorkspaceData, error) {
+func BuildWorkspaceDataForKey(ctx context.Context, s WorkspaceTopologyReader, key string) (*operationalview.Workspace, error) {
 	if s == nil {
 		return nil, errors.New("storeadapter: nil store")
 	}
-	ws, err := s.Workspaces().Get(ctx, key)
-	if err != nil {
-		return nil, err
-	}
-	repos, groups, err := loadRepos(ctx, s, ws.Key)
-	if err != nil {
-		return nil, err
-	}
-	summaries, err := loadSummaries(ctx, s, ws.Key)
-	if err != nil {
-		return nil, err
-	}
-
-	wsPath := resolveWorkspacePath(ws.Key)
-
-	return &ops.WorkspaceData{
-		ID:               ws.Key,
-		Name:             ws.Name,
-		Path:             wsPath,
-		Repos:            repos,
-		Groups:           groups,
-		Agents:           []ops.WorkspaceAgentInfo{},
-		Workspaces:       summaries,
-		WorkspaceOrder:   nil,
-		DefaultWorkspace: "",
-		DesignFormat:     ws.DesignFormat,
-	}, nil
+	return newWorkspaceTopologyQuery(s).ByKey(ctx, key)
 }
 
 // ListWorkspacePaths returns a map of workspace-key -> on-disk path for
@@ -108,18 +69,7 @@ func ListWorkspacePaths(ctx context.Context, s workspaceRepositoryStore) (map[st
 	if s == nil {
 		return nil, nil
 	}
-	all, err := s.Workspaces().List(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("storeadapter: list workspaces: %w", err)
-	}
-	if len(all) == 0 {
-		return nil, nil
-	}
-	out := make(map[string]string, len(all))
-	for _, ws := range all {
-		out[ws.Key] = resolveWorkspacePath(ws.Key)
-	}
-	return out, nil
+	return newWorkspaceTopologyQuery(s).Paths(ctx)
 }
 
 // ResolveWorkspaceKeyByName looks up a workspace by display name and
@@ -128,98 +78,31 @@ func ResolveWorkspaceKeyByName(ctx context.Context, s workspaceRepositoryStore, 
 	if s == nil {
 		return "", errors.New("storeadapter: nil store")
 	}
-	// Try Get first because generated keys can also be valid workspace names.
-	if ws, err := s.Workspaces().Get(ctx, name); err == nil {
-		return ws.Key, nil
-	}
-	ws, err := s.Workspaces().GetByName(ctx, name)
-	if err != nil {
-		return "", err
-	}
-	return ws.Key, nil
+	return newWorkspaceTopologyQuery(s).ResolveKey(ctx, name)
 }
 
-func loadRepos(ctx context.Context, s WorkspaceTopologyReader, wsKey string) ([]ops.WorkspaceRepo, []string, error) {
-	repos, err := s.Repos().List(ctx, wsKey)
-	if err != nil {
-		return nil, nil, fmt.Errorf("storeadapter: list repos: %w", err)
-	}
-	groupSet := make(map[string]bool)
-	out := make([]ops.WorkspaceRepo, 0, len(repos))
-	wsRoot := resolveWorkspacePath(wsKey)
-	for _, r := range repos {
-		db := r.DefaultBranch
-		if db == "" {
-			db = "main"
-		}
-		remote := r.Remote
-		if remote == "" {
-			remote = "origin"
-		}
-		// Best-effort path resolution: state cache should have an entry.
-		repoPath := resolveRepoPath(wsKey, r.Name)
-		if repoPath == "" && wsRoot != "" {
-			repoPath = filepath.Join(wsRoot, r.Name)
-		}
-		out = append(out, ops.WorkspaceRepo{
-			Name:          r.Name,
-			Path:          repoPath,
-			DefaultBranch: db,
-			Remote:        remote,
-			RemoteURL:     r.RemoteURL,
-			SourceRepoID:  r.SourceRepoID,
-			Groups:        r.Groups,
-		})
-		for _, g := range r.Groups {
-			groupSet[g] = true
-		}
-	}
-	groups := make([]string, 0, len(groupSet))
-	for g := range groupSet {
-		groups = append(groups, g)
-	}
-	sort.Strings(groups)
-	return out, groups, nil
+func newWorkspaceTopologyQuery(s WorkspaceTopologyReader) operationalview.WorkspaceTopologyQuery {
+	return operationalview.NewWorkspaceTopologyQuery(
+		s.Workspaces(), s.Repos(), localWorkspacePlacement{},
+		func(ctx context.Context) (string, error) {
+			key, err := bootstrap.ResolveActiveWorkspaceKey(ctx, s.Workspaces())
+			if errors.Is(err, bootstrap.ErrNoActiveWorkspace) || errors.Is(err, persistence.ErrNotFound) {
+				return "", nil
+			}
+			return key, err
+		},
+	)
 }
 
-func loadSummaries(ctx context.Context, s WorkspaceTopologyReader, activeKey string) ([]ops.WorkspaceSummary, error) {
-	all, err := s.Workspaces().List(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("storeadapter: list workspaces: %w", err)
-	}
-	out := make([]ops.WorkspaceSummary, 0, len(all))
-	for _, ws := range all {
-		repoCount := 0
-		if repos, repoErr := s.Repos().List(ctx, ws.Key); repoErr == nil {
-			repoCount = len(repos)
-		}
-		backend, _ := bootstrap.RuntimeProvider(ws.Key)
-		out = append(out, ops.WorkspaceSummary{
-			ID:           ws.Key,
-			Name:         ws.Name,
-			Path:         resolveWorkspacePath(ws.Key),
-			Active:       ws.Key == activeKey,
-			RepoCount:    repoCount,
-			IsDefault:    false,
-			Backend:      backend,
-			State:        string(ws.State),
-			ErrorMessage: ws.ErrorMessage,
-		})
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
-	return out, nil
-}
+type localWorkspacePlacement struct{}
 
-func firstWorkspaceKey(ctx context.Context, s WorkspaceTopologyReader) (string, error) {
-	all, err := s.Workspaces().List(ctx)
-	if err != nil {
-		return "", fmt.Errorf("storeadapter: list workspaces: %w", err)
-	}
-	if len(all) == 0 {
-		return "", nil
-	}
-	sort.Slice(all, func(i, j int) bool { return all[i].Name < all[j].Name })
-	return all[0].Key, nil
+func (localWorkspacePlacement) WorkspacePath(key string) string { return resolveWorkspacePath(key) }
+func (localWorkspacePlacement) RepositoryPath(workspaceKey, repository string) string {
+	return resolveRepoPath(workspaceKey, repository)
+}
+func (localWorkspacePlacement) Backend(key string) string {
+	backend, _ := bootstrap.RuntimeProvider(key)
+	return backend
 }
 
 // resolveWorkspacePath looks up the per-machine workspace path from the

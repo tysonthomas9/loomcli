@@ -9,8 +9,8 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	driverpkg "github.com/tysonthomas9/loomcli/internal/driver"
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 	fleet "github.com/tysonthomas9/loomcli/internal/modules/workitems/fleetdb"
 )
@@ -61,7 +61,7 @@ func resolveDriverRunID(flagValue string) string {
 	return firstNonEmpty(flagValue, os.Getenv("LOOM_DRIVER_RUN_ID"))
 }
 
-func resolveRunningDriverRun(ctx context.Context, h *bootstrap.StoreHandle, workspaceKey, driverRunID string) (string, *domain.DriverRun, error) {
+func resolveRunningDriverRun(ctx context.Context, h *bootstrap.StoreHandle, workspaceKey, driverRunID string) (string, *execution.DriverRunRecord, error) {
 	rc, err := resolveDriverRunContext(ctx, h, workspaceKey, driverRunID)
 	if err != nil {
 		return "", nil, err

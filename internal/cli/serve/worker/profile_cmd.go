@@ -6,15 +6,14 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
+
 	"github.com/spf13/cobra"
 
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/cli/managementapi"
-	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/modules/execution"
-	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
 var (
@@ -163,7 +162,7 @@ func runWorkerProfileList(cmd *cobra.Command, _ []string) error {
 		if err != nil {
 			return fmt.Errorf("enabled must be true/false: %w", err)
 		}
-		profiles, err := h.Store.WorkerProfiles().List(ctx, ws, store.WorkerProfileFilter{
+		profiles, err := h.Store.WorkerProfiles().List(ctx, ws, execution.WorkerProfileFilter{
 			Role:    workerProfileListRole,
 			Backend: workerProfileListBackend,
 			Enabled: enabled,
@@ -246,7 +245,7 @@ func runWorkerProfileRemove(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func printWorkerProfile(p *domain.WorkerProfile) {
+func printWorkerProfile(p *execution.WorkerProfile) {
 	fmt.Printf("Workspace:    %s\n", p.WorkspaceKey)
 	fmt.Printf("Profile ID:   %s\n", p.ProfileID)
 	fmt.Printf("Name:         %s\n", p.Name)

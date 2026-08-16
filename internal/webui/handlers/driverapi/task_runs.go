@@ -8,10 +8,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	driverpkg "github.com/tysonthomas9/loomcli/internal/driver"
 	"github.com/tysonthomas9/loomcli/internal/modules/agents"
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 // execTaskParams is the exec-task request body.
@@ -79,7 +79,7 @@ func (p execTaskParams) requestOptions(ws string, id driverIdentity, fencingToke
 		CloseTaskOnSuccess:  p.CloseTask,
 		RetainWorkItemClaim: p.RetainWorkItemClaim,
 		Input:               p.Input,
-		SandboxPlacement: domain.TaskRunPlacement{
+		SandboxPlacement: execution.TaskRunPlacementRecord{
 			Provider:  p.SandboxPlacement.Provider,
 			SandboxID: p.SandboxPlacement.SandboxID,
 			CWD:       p.SandboxPlacement.CWD,
@@ -129,10 +129,10 @@ func (m *Module) execTask(ctx context.Context, ws string, id driverIdentity, bod
 		return nil, err
 	}
 	if strings.TrimSpace(params.TaskID) == "" {
-		return nil, fmt.Errorf("taskId required: %w", domain.ErrInvalid)
+		return nil, fmt.Errorf("taskId required: %w", persistence.ErrInvalid)
 	}
 	if params.RetainWorkItemClaim && (params.CloseTask == nil || *params.CloseTask) {
-		return nil, fmt.Errorf("retainWorkItemClaim requires closeTask=false: %w", domain.ErrInvalid)
+		return nil, fmt.Errorf("retainWorkItemClaim requires closeTask=false: %w", persistence.ErrInvalid)
 	}
 	if m.taskRunRequests == nil || m.executionAuthorities == nil {
 		return nil, fmt.Errorf("execution TaskRun request capability is unavailable: %w", execution.ErrUnavailable)
@@ -184,7 +184,7 @@ func (m *Module) snapshotManagedAgentPolicy(
 		return stripUnmanagedAgentPolicyInput(input, object, objectInput)
 	}
 	if !objectInput {
-		return nil, fmt.Errorf("managed agent TaskRun input must be a JSON object: %w", domain.ErrInvalid)
+		return nil, fmt.Errorf("managed agent TaskRun input must be a JSON object: %w", persistence.ErrInvalid)
 	}
 	policy, err := m.resolveManagedAgentPolicy(ctx, ws, agentServiceID)
 	if err != nil {
@@ -227,7 +227,7 @@ func (m *Module) resolveManagedAgentPolicy(
 	}
 	roleName := strings.TrimSpace(service.Behavior.RoleName)
 	if roleName == "" {
-		return managedAgentPolicyInput{}, fmt.Errorf("managed agent %q has no role: %w", agentServiceID, domain.ErrInvalid)
+		return managedAgentPolicyInput{}, fmt.Errorf("managed agent %q has no role: %w", agentServiceID, persistence.ErrInvalid)
 	}
 	role, err := m.agentRoles.GetRole(ctx, ws, roleName)
 	if err != nil {
@@ -266,7 +266,7 @@ func taskRunInputObject(input json.RawMessage) (map[string]json.RawMessage, bool
 		return map[string]json.RawMessage{}, true, nil
 	}
 	if !json.Valid(input) {
-		return nil, false, fmt.Errorf("TaskRun input must be valid JSON: %w", domain.ErrInvalid)
+		return nil, false, fmt.Errorf("TaskRun input must be valid JSON: %w", persistence.ErrInvalid)
 	}
 	var object map[string]json.RawMessage
 	if err := json.Unmarshal(input, &object); err != nil || object == nil {
@@ -275,7 +275,7 @@ func taskRunInputObject(input json.RawMessage) (map[string]json.RawMessage, bool
 	return object, true, nil
 }
 
-func executionPlacementFromDomain(value domain.TaskRunPlacement) execution.Placement {
+func executionPlacementFromDomain(value execution.TaskRunPlacementRecord) execution.Placement {
 	return execution.Placement{
 		Provider: value.Provider, NodeID: value.NodeID, RunnerID: value.RunnerID,
 		SandboxID: value.SandboxID, CWD: value.CWD, RepoRef: value.RepoRef,
@@ -306,9 +306,9 @@ func taskRunResultFromExecution(run *execution.TaskRun) driverpkg.TaskRunRequest
 	if run == nil {
 		return driverpkg.TaskRunRequestResult{}
 	}
-	status := domain.TaskRunStatus(run.Status)
+	status := execution.TaskRunRecordStatus(run.Status)
 	if run.Status == execution.StatusSucceeded {
-		status = domain.TaskRunCompleted
+		status = execution.TaskRunRecordCompleted
 	}
 	return driverpkg.TaskRunRequestResult{
 		ID: run.TaskRunID, TaskRunID: run.TaskRunID, DriverStepID: run.DriverStepID, TaskID: run.WorkItemID,
@@ -346,7 +346,7 @@ func (m *Module) taskRunGet(ctx context.Context, ws string, id driverIdentity, b
 	}
 	taskRunID := strings.TrimSpace(params.TaskRunID)
 	if taskRunID == "" {
-		return nil, fmt.Errorf("taskRunId required: %w", domain.ErrInvalid)
+		return nil, fmt.Errorf("taskRunId required: %w", persistence.ErrInvalid)
 	}
 	if m.taskRunQueries == nil {
 		return nil, fmt.Errorf("execution TaskRun queries are unavailable: %w", execution.ErrUnavailable)
@@ -356,7 +356,7 @@ func (m *Module) taskRunGet(ctx context.Context, ws string, id driverIdentity, b
 		return nil, fmt.Errorf("get task run: %w", err)
 	}
 	if run.DriverRunID != parent.RunID {
-		return nil, fmt.Errorf("task run %q does not belong to driver run %q: %w", taskRunID, parent.RunID, domain.ErrNotFound)
+		return nil, fmt.Errorf("task run %q does not belong to driver run %q: %w", taskRunID, parent.RunID, persistence.ErrNotFound)
 	}
 	return taskRunResultFromExecution(run), nil
 }
@@ -419,7 +419,7 @@ func staleTaskRecoveryWindow(params recoverStaleTasksParams) (time.Time, time.Ti
 	if raw := strings.TrimSpace(params.StaleBefore); raw != "" {
 		parsed, err := time.Parse(time.RFC3339, raw)
 		if err != nil {
-			return time.Time{}, time.Time{}, fmt.Errorf("parse staleBefore as RFC3339: %s: %w", err.Error(), domain.ErrInvalid)
+			return time.Time{}, time.Time{}, fmt.Errorf("parse staleBefore as RFC3339: %s: %w", err.Error(), persistence.ErrInvalid)
 		}
 		return parsed.UTC(), observedAt, nil
 	}
@@ -509,7 +509,7 @@ func (m *Module) completeTask(ctx context.Context, ws string, id driverIdentity,
 	}
 	taskRunID := strings.TrimSpace(params.TaskRunID)
 	if taskRunID == "" {
-		return nil, fmt.Errorf("taskRunId is required for fenced driver completion: %w", domain.ErrInvalid)
+		return nil, fmt.Errorf("taskRunId is required for fenced driver completion: %w", persistence.ErrInvalid)
 	}
 	if m.taskRunQueries == nil {
 		return nil, fmt.Errorf("execution TaskRun queries are unavailable: %w", execution.ErrUnavailable)
@@ -519,10 +519,10 @@ func (m *Module) completeTask(ctx context.Context, ws string, id driverIdentity,
 		return nil, fmt.Errorf("get task run: %w", err)
 	}
 	if run.DriverRunID != parent.RunID {
-		return nil, fmt.Errorf("task run %q does not belong to driver run %q: %w", taskRunID, parent.RunID, domain.ErrNotFound)
+		return nil, fmt.Errorf("task run %q does not belong to driver run %q: %w", taskRunID, parent.RunID, persistence.ErrNotFound)
 	}
 	if taskID := strings.TrimSpace(params.TaskID); taskID != "" && taskID != run.WorkItemID {
-		return nil, fmt.Errorf("task run %q belongs to task %q, not %q: %w", taskRunID, run.WorkItemID, taskID, domain.ErrInvalid)
+		return nil, fmt.Errorf("task run %q belongs to task %q, not %q: %w", taskRunID, run.WorkItemID, taskID, persistence.ErrInvalid)
 	}
 	owner := execution.Owner{
 		ResourceKind: execution.ResourceTaskRun, ResourceID: run.TaskRunID,
@@ -544,7 +544,7 @@ func (m *Module) completeTask(ctx context.Context, ws string, id driverIdentity,
 	if err != nil {
 		return nil, fmt.Errorf("complete task run: %w", err)
 	}
-	return &driverpkg.TaskMutationResult{ID: run.WorkItemID, Status: string(domain.TaskRunCompleted), Reason: reason}, nil
+	return &driverpkg.TaskMutationResult{ID: run.WorkItemID, Status: string(execution.TaskRunRecordCompleted), Reason: reason}, nil
 }
 
 func (m *Module) releaseTask(ctx context.Context, ws string, id driverIdentity, body []byte) (any, error) {
@@ -592,7 +592,7 @@ func decodeHandoffReviewParams(body []byte) (handoffReviewParams, handoffReviewF
 	var rawFields map[string]json.RawMessage
 	if err := json.Unmarshal(body, &rawFields); err != nil {
 		return handoffReviewParams{}, handoffReviewFieldPresence{},
-			fmt.Errorf("decode handoff review field presence: %w", domain.ErrInvalid)
+			fmt.Errorf("decode handoff review field presence: %w", persistence.ErrInvalid)
 	}
 	_, priorityProvided := rawFields["priority"]
 	_, labelsProvided := rawFields["labels"]
@@ -625,16 +625,16 @@ func normalizeHandoffReviewRequest(params handoffReviewParams) handoffReviewRequ
 
 func validateHandoffReviewRequest(request handoffReviewRequest, fields handoffReviewFieldPresence) error {
 	if request.taskID == "" || request.taskRunID == "" || !validHandoffReviewTargetStatus(request.targetStatus) {
-		return fmt.Errorf("taskId, taskRunId, and status open, review, or closed are required: %w", domain.ErrInvalid)
+		return fmt.Errorf("taskId, taskRunId, and status open, review, or closed are required: %w", persistence.ErrInvalid)
 	}
 	if request.targetStatus == execution.DriverRunWorkItemRestoreReview {
 		if !validHandoffReviewAnnotations(request, fields) {
-			return fmt.Errorf("review status requires priority 0 through 4 and nonblank commentBody: %w", domain.ErrInvalid)
+			return fmt.Errorf("review status requires priority 0 through 4 and nonblank commentBody: %w", persistence.ErrInvalid)
 		}
 		return nil
 	}
 	if fields.priority || fields.labels || fields.commentBody || fields.externalRef {
-		return fmt.Errorf("priority, labels, commentBody, and externalRef are only valid for review status: %w", domain.ErrInvalid)
+		return fmt.Errorf("priority, labels, commentBody, and externalRef are only valid for review status: %w", persistence.ErrInvalid)
 	}
 	return nil
 }
@@ -735,7 +735,7 @@ func (m *Module) releaseTaskToStatus(
 		return nil, err
 	}
 	if strings.TrimSpace(params.TaskID) == "" {
-		return nil, fmt.Errorf("taskId required: %w", domain.ErrInvalid)
+		return nil, fmt.Errorf("taskId required: %w", persistence.ErrInvalid)
 	}
 	if m.execution == nil || m.executionAuthorities == nil {
 		return nil, fmt.Errorf("execution DriverRun Work Item release capability is unavailable: %w", execution.ErrUnavailable)

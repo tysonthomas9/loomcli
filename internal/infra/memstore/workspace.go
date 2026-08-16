@@ -7,44 +7,43 @@ import (
 	"sync"
 	"time"
 
-	workspacemodule "github.com/tysonthomas9/loomcli/internal/modules/workspace"
+	workspaceowner "github.com/tysonthomas9/loomcli/internal/modules/workspace"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 type workspaceStore struct {
 	mu    sync.RWMutex
-	items map[string]*workspacemodule.Workspace // keyed by Workspace.Key
+	items map[string]*workspaceowner.Workspace // keyed by Workspace.Key
 }
 
 func newWorkspaceStore() *workspaceStore {
-	return &workspaceStore{items: make(map[string]*workspacemodule.Workspace)}
+	return &workspaceStore{items: make(map[string]*workspaceowner.Workspace)}
 }
 
 // Compile-time check.
-var _ store.WorkspaceStore = (*workspaceStore)(nil)
+var _ workspaceowner.WorkspaceStore = (*workspaceStore)(nil)
 
-func (s *workspaceStore) Create(_ context.Context, in store.WorkspaceCreate) (*workspacemodule.Workspace, error) {
+func (s *workspaceStore) Create(_ context.Context, in workspaceowner.WorkspaceCreate) (*workspaceowner.Workspace, error) {
 	if in.Key == "" {
-		return nil, fmt.Errorf("workspace key required: %w", domain.ErrInvalid)
+		return nil, fmt.Errorf("workspace key required: %w", persistence.ErrInvalid)
 	}
 	if in.Name == "" {
-		return nil, fmt.Errorf("workspace name required: %w", domain.ErrInvalid)
+		return nil, fmt.Errorf("workspace name required: %w", persistence.ErrInvalid)
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if _, ok := s.items[in.Key]; ok {
-		return nil, fmt.Errorf("workspace %q: %w", in.Key, domain.ErrAlreadyExists)
+		return nil, fmt.Errorf("workspace %q: %w", in.Key, persistence.ErrAlreadyExists)
 	}
 	now := time.Now().UTC()
-	ws := &workspacemodule.Workspace{
+	ws := &workspaceowner.Workspace{
 		Key:           in.Key,
 		Name:          in.Name,
 		Description:   in.Description,
 		DefaultBranch: in.DefaultBranch,
 		DesignFormat:  in.DesignFormat,
-		State:         workspacemodule.StateReady,
+		State:         workspaceowner.StateReady,
 		CreatedAt:     now,
 		UpdatedAt:     now,
 	}
@@ -52,17 +51,17 @@ func (s *workspaceStore) Create(_ context.Context, in store.WorkspaceCreate) (*w
 	return cloneWorkspace(ws), nil
 }
 
-func (s *workspaceStore) Get(_ context.Context, key string) (*workspacemodule.Workspace, error) {
+func (s *workspaceStore) Get(_ context.Context, key string) (*workspaceowner.Workspace, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	ws, ok := s.items[key]
 	if !ok {
-		return nil, fmt.Errorf("workspace %q: %w", key, domain.ErrNotFound)
+		return nil, fmt.Errorf("workspace %q: %w", key, persistence.ErrNotFound)
 	}
 	return cloneWorkspace(ws), nil
 }
 
-func (s *workspaceStore) GetByName(_ context.Context, name string) (*workspacemodule.Workspace, error) {
+func (s *workspaceStore) GetByName(_ context.Context, name string) (*workspaceowner.Workspace, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	for _, ws := range s.items {
@@ -70,13 +69,13 @@ func (s *workspaceStore) GetByName(_ context.Context, name string) (*workspacemo
 			return cloneWorkspace(ws), nil
 		}
 	}
-	return nil, fmt.Errorf("workspace name %q: %w", name, domain.ErrNotFound)
+	return nil, fmt.Errorf("workspace name %q: %w", name, persistence.ErrNotFound)
 }
 
-func (s *workspaceStore) List(_ context.Context) ([]*workspacemodule.Workspace, error) {
+func (s *workspaceStore) List(_ context.Context) ([]*workspaceowner.Workspace, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	out := make([]*workspacemodule.Workspace, 0, len(s.items))
+	out := make([]*workspaceowner.Workspace, 0, len(s.items))
 	for _, ws := range s.items {
 		out = append(out, cloneWorkspace(ws))
 	}
@@ -84,16 +83,16 @@ func (s *workspaceStore) List(_ context.Context) ([]*workspacemodule.Workspace, 
 	return out, nil
 }
 
-func (s *workspaceStore) Update(_ context.Context, key string, patch store.WorkspaceUpdate) (*workspacemodule.Workspace, error) {
+func (s *workspaceStore) Update(_ context.Context, key string, patch workspaceowner.WorkspaceUpdate) (*workspaceowner.Workspace, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	ws, ok := s.items[key]
 	if !ok {
-		return nil, fmt.Errorf("workspace %q: %w", key, domain.ErrNotFound)
+		return nil, fmt.Errorf("workspace %q: %w", key, persistence.ErrNotFound)
 	}
 	if patch.Name != nil {
 		if *patch.Name == "" {
-			return nil, fmt.Errorf("workspace name cannot be empty: %w", domain.ErrInvalid)
+			return nil, fmt.Errorf("workspace name cannot be empty: %w", persistence.ErrInvalid)
 		}
 		ws.Name = *patch.Name
 	}
@@ -120,7 +119,7 @@ func (s *workspaceStore) Delete(_ context.Context, key string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if _, ok := s.items[key]; !ok {
-		return fmt.Errorf("workspace %q: %w", key, domain.ErrNotFound)
+		return fmt.Errorf("workspace %q: %w", key, persistence.ErrNotFound)
 	}
 	delete(s.items, key)
 	return nil
@@ -130,7 +129,7 @@ func (s *workspaceStore) Delete(_ context.Context, key string) error {
 // internal state. Workspace currently has no slice/map fields so a
 // shallow struct copy suffices; if fields are added (e.g., Tags []string),
 // extend this helper.
-func cloneWorkspace(ws *workspacemodule.Workspace) *workspacemodule.Workspace {
+func cloneWorkspace(ws *workspaceowner.Workspace) *workspaceowner.Workspace {
 	out := *ws
 	return &out
 }

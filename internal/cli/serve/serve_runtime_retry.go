@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 type serveStartupRetryPolicy struct {
@@ -62,7 +62,7 @@ func retryServeStartupTransient(
 		if err == nil {
 			return nil
 		}
-		if !errors.Is(err, domain.ErrUnavailable) {
+		if !errors.Is(err, persistence.ErrUnavailable) {
 			return err
 		}
 		lastErr = err

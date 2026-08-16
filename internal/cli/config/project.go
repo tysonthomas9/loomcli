@@ -9,7 +9,7 @@ import (
 	"slices"
 
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
-	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/modules/agents"
 )
 
 // RoleConfig defines an agent role (built-in like "plan"/"task", or custom).
@@ -42,20 +42,20 @@ type RoleConfig struct {
 //
 // An agent with neither repos nor repo_groups can work on any repo.
 type AgentEntry struct {
-	Worktree         string                   `yaml:"worktree"`
-	Role             string                   `yaml:"role"`
-	Repo             string                   `yaml:"repo,omitempty"`
-	Auto             bool                     `yaml:"auto,omitempty"`
-	Backend          string                   `yaml:"backend,omitempty"`
-	FallbackBackends []string                 `yaml:"fallback_backends,omitempty"`
-	PathPatterns     []string                 `yaml:"path_patterns,omitempty"`
-	SourceRepos      []string                 `yaml:"-" json:"-"` // resolved repo IDs; env-only transport, not persisted in YAML
-	Repos            []string                 `yaml:"repos,omitempty"`
-	RepoGroups       []string                 `yaml:"repo_groups,omitempty"`
-	CrossRepo        bool                     `yaml:"cross_repo,omitempty"`
-	Parent           string                   `yaml:"parent,omitempty"` // epic ID to scope this agent to; empty = no epic assignment
-	Mode             domain.AgentMode         `yaml:"mode,omitempty"`   // ephemeral: exit cleanly after one successful task; service: loop forever (default)
-	DesiredState     domain.AgentDesiredState `yaml:"desired_state,omitempty"`
+	Worktree         string                     `yaml:"worktree"`
+	Role             string                     `yaml:"role"`
+	Repo             string                     `yaml:"repo,omitempty"`
+	Auto             bool                       `yaml:"auto,omitempty"`
+	Backend          string                     `yaml:"backend,omitempty"`
+	FallbackBackends []string                   `yaml:"fallback_backends,omitempty"`
+	PathPatterns     []string                   `yaml:"path_patterns,omitempty"`
+	SourceRepos      []string                   `yaml:"-" json:"-"` // resolved repo IDs; env-only transport, not persisted in YAML
+	Repos            []string                   `yaml:"repos,omitempty"`
+	RepoGroups       []string                   `yaml:"repo_groups,omitempty"`
+	CrossRepo        bool                       `yaml:"cross_repo,omitempty"`
+	Parent           string                     `yaml:"parent,omitempty"` // epic ID to scope this agent to; empty = no epic assignment
+	Mode             agents.RuntimeMode         `yaml:"mode,omitempty"`   // ephemeral: exit cleanly after one successful task; service: loop forever (default)
+	DesiredState     agents.RuntimeDesiredState `yaml:"desired_state,omitempty"`
 }
 
 // Equal compares persisted config fields only (excludes SourceRepos). Update when adding fields.
@@ -71,7 +71,7 @@ func (a AgentEntry) Equal(b AgentEntry) bool {
 // ShouldRun reports whether durable desired state permits this non-interactive
 // agent to execute.
 func (a AgentEntry) ShouldRun() bool {
-	if domain.IsInteractiveRoleName(a.Role) {
+	if agents.IsInteractiveRoleName(a.Role) {
 		return false
 	}
 	return a.shouldRunByDesiredState()
@@ -80,8 +80,8 @@ func (a AgentEntry) ShouldRun() bool {
 // ShouldRunWithRoles applies role-kind metadata before desired state.
 func (a AgentEntry) ShouldRunWithRoles(roles map[string]RoleConfig) bool {
 	if rc, ok := roles[a.Role]; ok {
-		role := &domain.Role{Kind: domain.RoleKind(rc.Kind)}
-		if domain.ResolveRoleKind(role, a.Role) == domain.RoleKindInteractive {
+		role := &agents.Role{Kind: rc.Kind}
+		if agents.ResolveRoleKind(role, a.Role) == agents.RoleKindInteractive {
 			return false
 		}
 		return a.shouldRunByDesiredState()
@@ -91,7 +91,7 @@ func (a AgentEntry) ShouldRunWithRoles(roles map[string]RoleConfig) bool {
 
 func (a AgentEntry) shouldRunByDesiredState() bool {
 	switch a.DesiredState {
-	case domain.AgentDesiredStopped, domain.AgentDesiredDraining:
+	case agents.RuntimeDesiredStopped, agents.RuntimeDesiredDraining:
 		return false
 	default:
 		return true

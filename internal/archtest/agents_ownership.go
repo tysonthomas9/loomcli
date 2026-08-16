@@ -9,16 +9,17 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
+	"strconv"
 	"strings"
-	"sync"
 
 	"golang.org/x/tools/go/packages"
 )
 
 const (
-	legacyAgentServiceStoreReceiver  = "github.com/tysonthomas9/loomcli/internal/store.AgentServiceStore"
-	legacyRoleStoreReceiver          = "github.com/tysonthomas9/loomcli/internal/store.RoleStore"
+	legacyAgentServiceStoreReceiver  = "github.com/tysonthomas9/loomcli/internal/modules/agents.AgentServiceStore"
+	legacyRoleStoreReceiver          = "github.com/tysonthomas9/loomcli/internal/modules/agents.RoleRecordStore"
 	agentsAgentIdentityStoreReceiver = "github.com/tysonthomas9/loomcli/internal/modules/agents.AgentIdentityStore"
 	agentsDesiredStateStoreReceiver  = "github.com/tysonthomas9/loomcli/internal/modules/agents.DesiredStateStore"
 	agentsLifecycleStoreReceiver     = "github.com/tysonthomas9/loomcli/internal/modules/agents.LifecycleStore"
@@ -129,8 +130,6 @@ func (mutation phase5AgentsMutation) withProfiles() string {
 // supported build profile then type-checks only those candidates, so aliases,
 // embedded interfaces, and method values resolve to the declaring interface
 // without loading syntax for the whole repository.
-//
-//nolint:funlen // Keep the bounded per-profile cache lifetime, concurrent scan, and deterministic merge as one auditable analysis transaction.
 func snapshotPhase5AgentsMutations(
 	root string,
 	matrix AnalysisMatrix,
@@ -147,44 +146,25 @@ func snapshotPhase5AgentsMutations(
 	if len(profiles) == 0 {
 		return nil, fmt.Errorf("phase 5 Agents ownership analysis requires at least one build profile")
 	}
-	type result struct {
-		mutations []phase5AgentsMutation
-		err       error
-	}
-	results := make([]result, len(profiles))
-	semaphore := make(chan struct{}, repositoryScaleLoadConcurrency)
-	var wg sync.WaitGroup
-	for index, profile := range profiles {
-		index, profile := index, profile
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			semaphore <- struct{}{}
-			defer func() { <-semaphore }()
-			results[index].err = withRepositoryProfileCache(profile, func(environment []string) error {
-				var loadErr error
-				results[index].mutations, loadErr = snapshotPhase5AgentsMutationProfile(
-					root,
-					profile,
-					patterns,
-					environment,
-				)
-				return loadErr
-			})
-		}()
-	}
-	wg.Wait()
-
-	profileMutations := make([][]phase5AgentsMutation, len(results))
-	for index, result := range results {
-		if result.err != nil {
-			return nil, fmt.Errorf(
-				"scan Phase 5 Agents ownership for profile %s: %w",
-				profiles[index].Name,
-				result.err,
-			)
+	// Candidate files are required to be build-profile neutral below. One
+	// native untagged type-check therefore proves the exact same owner method
+	// selections without recompiling the same packages for eleven targets.
+	selected := profiles[0]
+	for _, profile := range profiles {
+		if profile.GOOS == runtime.GOOS && profile.GOARCH == runtime.GOARCH && len(profile.Tags) == 0 && !profile.Race {
+			selected = profile
+			break
 		}
-		profileMutations[index] = result.mutations
+	}
+	profiles = []AnalysisProfile{selected}
+	profileMutations := make([][]phase5AgentsMutation, 1)
+	err = withRepositoryProfileCache(selected, func(environment []string) error {
+		var loadErr error
+		profileMutations[0], loadErr = snapshotPhase5AgentsMutationProfile(root, selected, patterns, environment)
+		return loadErr
+	})
+	if err != nil {
+		return nil, fmt.Errorf("scan Phase 5 Agents ownership for profile %s: %w", selected.Name, err)
 	}
 	return mergePhase5AgentsMutationProfiles(profiles, profileMutations), nil
 }
@@ -290,6 +270,22 @@ func sourceContainsPhase5AgentsMutationSelector(path string) (bool, error) {
 		// The focused type-check will produce the authoritative syntax error.
 		return true, nil
 	}
+	ownerSource := strings.Contains(filepath.ToSlash(path), "/internal/modules/agents/")
+	if !ownerSource {
+		for _, imported := range file.Imports {
+			importPath, unquoteErr := strconv.Unquote(imported.Path.Value)
+			if unquoteErr != nil {
+				return false, unquoteErr
+			}
+			if importPath == modulePath+"/internal/modules/agents" {
+				ownerSource = true
+				break
+			}
+		}
+	}
+	if !ownerSource {
+		return false, nil
+	}
 	candidate := false
 	ast.Inspect(file, func(node ast.Node) bool {
 		selector, ok := node.(*ast.SelectorExpr)
@@ -299,6 +295,9 @@ func sourceContainsPhase5AgentsMutationSelector(path string) (bool, error) {
 		candidate = true
 		return false
 	})
+	if candidate && strings.Contains(string(contents), "//go:build") {
+		return false, fmt.Errorf("agents ownership mutation candidate %s is build-constrained; extend the focused profile proof before adding it", path)
+	}
 	return candidate, nil
 }
 

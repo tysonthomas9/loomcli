@@ -10,8 +10,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/store"
+	agentsowner "github.com/tysonthomas9/loomcli/internal/modules/agents"
+	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 var (
@@ -28,38 +29,38 @@ var (
 // behavior; CAS role mutations continue to use the exact atomic commands.
 type agentManagementRequester interface {
 	fleetRequester
-	GetRole(context.Context, string, string) (*domain.Role, error)
-	ListRoles(context.Context, string) ([]*domain.Role, error)
-	CreateRole(context.Context, store.RoleCreate) (*domain.Role, error)
+	GetRole(context.Context, string, string) (*agentsowner.Role, error)
+	ListRoles(context.Context, string) ([]*agentsowner.Role, error)
+	CreateRole(context.Context, agentsowner.RoleRecordCreate) (*agentsowner.Role, error)
 }
 
 // AgentManagementTransport is the low-level Phase 5 transport consumed only
 // through the Agents capability adapter. Each mutation is one FleetDB command;
 // full ownership proofs are never decomposed into read-then-write sequences.
 type AgentManagementTransport interface {
-	GetAgentService(context.Context, string, string) (*domain.AgentService, error)
-	ListAgentServices(context.Context, string, AgentServiceQuery) ([]*domain.AgentService, error)
-	GetAgentRole(context.Context, string, string) (*domain.Role, error)
-	ListAgentRoles(context.Context, string) ([]*domain.Role, error)
-	CreateAgentRole(context.Context, string, AgentRoleInput) (*domain.Role, error)
-	UpdateAgentRole(context.Context, AgentRoleUpdateInput) (*domain.Role, error)
+	GetAgentService(context.Context, string, string) (*agentsowner.AgentServiceRecord, error)
+	ListAgentServices(context.Context, string, AgentServiceQuery) ([]*agentsowner.AgentServiceRecord, error)
+	GetAgentRole(context.Context, string, string) (*agentsowner.Role, error)
+	ListAgentRoles(context.Context, string) ([]*agentsowner.Role, error)
+	CreateAgentRole(context.Context, string, AgentRoleInput) (*agentsowner.Role, error)
+	UpdateAgentRole(context.Context, AgentRoleUpdateInput) (*agentsowner.Role, error)
 	DeleteAgentRole(context.Context, AgentRoleDeleteInput) error
-	CreateAgentService(context.Context, AgentServiceCreateInput) (*domain.AgentService, error)
-	UpdateAgentServiceIdentity(context.Context, AgentServiceUpdateInput) (*domain.AgentService, error)
-	ArchiveAgentService(context.Context, AgentServiceArchiveInput) (*domain.AgentService, error)
-	SetAgentServiceDesiredState(context.Context, AgentServiceDesiredStateInput) (*domain.AgentService, error)
-	SetAgentServiceDesiredStateOwned(context.Context, AgentServiceOwnedDesiredStateInput) (*domain.AgentService, error)
+	CreateAgentService(context.Context, AgentServiceCreateInput) (*agentsowner.AgentServiceRecord, error)
+	UpdateAgentServiceIdentity(context.Context, AgentServiceUpdateInput) (*agentsowner.AgentServiceRecord, error)
+	ArchiveAgentService(context.Context, AgentServiceArchiveInput) (*agentsowner.AgentServiceRecord, error)
+	SetAgentServiceDesiredState(context.Context, AgentServiceDesiredStateInput) (*agentsowner.AgentServiceRecord, error)
+	SetAgentServiceDesiredStateOwned(context.Context, AgentServiceOwnedDesiredStateInput) (*agentsowner.AgentServiceRecord, error)
 	ApplyAgentServiceLifecycle(context.Context, AgentServiceLifecycleInput) (*AgentServiceLifecycleResult, error)
 	AcquireAgentOwnership(context.Context, AgentOwnershipAcquireInput) (*AgentOwnershipGrant, error)
-	GetAgentOwnership(context.Context, string, string) (*domain.AgentOwnershipLease, error)
-	ListAgentOwnership(context.Context, string, AgentOwnershipQuery) ([]*domain.AgentOwnershipLease, error)
-	RenewAgentOwnership(context.Context, AgentOwnershipRenewInput) (*domain.AgentOwnershipLease, error)
-	ReleaseAgentOwnership(context.Context, AgentOwnershipReleaseInput) (*domain.AgentOwnershipLease, error)
+	GetAgentOwnership(context.Context, string, string) (*agentsowner.OwnershipRecord, error)
+	ListAgentOwnership(context.Context, string, AgentOwnershipQuery) ([]*agentsowner.OwnershipRecord, error)
+	RenewAgentOwnership(context.Context, AgentOwnershipRenewInput) (*agentsowner.OwnershipRecord, error)
+	ReleaseAgentOwnership(context.Context, AgentOwnershipReleaseInput) (*agentsowner.OwnershipRecord, error)
 }
 
 type AgentServiceQuery struct {
-	Kind           domain.AgentServiceKind
-	DesiredState   domain.AgentServiceDesiredState
+	Kind           agentsowner.AgentKind
+	DesiredState   agentsowner.DesiredState
 	RoleName       string
 	IncludeDeleted bool
 	Limit          int
@@ -76,14 +77,14 @@ type AgentServiceLifecycleInput struct {
 }
 
 type AgentServiceLifecycleResult struct {
-	WorkspaceKey   string               `json:"workspace_key"`
-	ServiceID      string               `json:"service_id"`
-	IdempotencyKey string               `json:"idempotency_key"`
-	Action         string               `json:"action"`
-	Agent          *domain.AgentService `json:"agent"`
-	BindingIDs     []string             `json:"binding_ids,omitempty"`
-	GrantIDs       []string             `json:"grant_ids,omitempty"`
-	CommittedAt    time.Time            `json:"committed_at"`
+	WorkspaceKey   string                          `json:"workspace_key"`
+	ServiceID      string                          `json:"service_id"`
+	IdempotencyKey string                          `json:"idempotency_key"`
+	Action         string                          `json:"action"`
+	Agent          *agentsowner.AgentServiceRecord `json:"agent"`
+	BindingIDs     []string                        `json:"binding_ids,omitempty"`
+	GrantIDs       []string                        `json:"grant_ids,omitempty"`
+	CommittedAt    time.Time                       `json:"committed_at"`
 }
 
 type AgentRoleInput struct {
@@ -144,8 +145,8 @@ type AgentServiceCreateInput struct {
 	WorkspaceKey    string
 	ServiceID       string
 	Name            string
-	Kind            domain.AgentServiceKind
-	DesiredState    domain.AgentServiceDesiredState
+	Kind            agentsowner.AgentKind
+	DesiredState    agentsowner.DesiredState
 	RoleName        string
 	DriverID        string
 	DriverVersionID string
@@ -166,7 +167,7 @@ type AgentServiceCreateInput struct {
 
 type AgentServiceIdentityPatch struct {
 	Name            *string
-	Kind            *domain.AgentServiceKind
+	Kind            *agentsowner.AgentKind
 	RoleName        *string
 	DriverID        *string
 	DriverVersionID *string
@@ -202,8 +203,8 @@ type AgentServiceArchiveInput struct {
 type AgentServiceDesiredStateInput struct {
 	WorkspaceKey      string
 	ServiceID         string
-	ExpectedState     domain.AgentServiceDesiredState
-	DesiredState      domain.AgentServiceDesiredState
+	ExpectedState     agentsowner.DesiredState
+	DesiredState      agentsowner.DesiredState
 	ExpectedUpdatedAt time.Time
 	DelegatedActor    string
 }
@@ -214,15 +215,15 @@ type AgentOwnershipProof struct {
 	LeaseID         string
 	LeaseToken      string
 	OwnerID         string
-	RuntimeProvider domain.RuntimeProvider
+	RuntimeProvider agentsowner.RuntimeProvider
 	NodeID          string
 	FencingToken    int64
 }
 
 type AgentServiceOwnedDesiredStateInput struct {
 	Proof             AgentOwnershipProof
-	ExpectedState     domain.AgentServiceDesiredState
-	DesiredState      domain.AgentServiceDesiredState
+	ExpectedState     agentsowner.DesiredState
+	DesiredState      agentsowner.DesiredState
 	ExpectedUpdatedAt time.Time
 	IdempotencyKey    string
 	DelegatedActor    string
@@ -233,22 +234,22 @@ type AgentOwnershipAcquireInput struct {
 	AgentID         string
 	LeaseID         string
 	OwnerID         string
-	RuntimeProvider domain.RuntimeProvider
+	RuntimeProvider agentsowner.RuntimeProvider
 	NodeID          string
 	TTLSeconds      int
 	DelegatedActor  string
 }
 
 type AgentOwnershipGrant struct {
-	Lease *domain.AgentOwnershipLease
+	Lease *agentsowner.OwnershipRecord
 	Token string
 }
 
 type AgentOwnershipQuery struct {
 	OwnerID         string
-	RuntimeProvider domain.RuntimeProvider
+	RuntimeProvider agentsowner.RuntimeProvider
 	NodeID          string
-	Status          domain.AgentLeaseStatus
+	Status          interaction.LeaseRecordStatus
 	Limit           int
 }
 
@@ -277,8 +278,8 @@ func (transport *agentManagementStore) GetAgentService(
 	ctx context.Context,
 	workspace,
 	serviceID string,
-) (*domain.AgentService, error) {
-	var out domain.AgentService
+) (*agentsowner.AgentServiceRecord, error) {
+	var out agentsowner.AgentServiceRecord
 	path := "/api/v1/" + pathEscape(workspace) + "/agent-services/" + pathEscape(serviceID)
 	if err := transport.client.Do(ctx, http.MethodGet, path, nil, &out); err != nil {
 		return nil, err
@@ -290,7 +291,7 @@ func (transport *agentManagementStore) ListAgentServices(
 	ctx context.Context,
 	workspace string,
 	query AgentServiceQuery,
-) ([]*domain.AgentService, error) {
+) ([]*agentsowner.AgentServiceRecord, error) {
 	values := url.Values{}
 	if query.Kind != "" {
 		values.Set("kind", string(query.Kind))
@@ -308,7 +309,7 @@ func (transport *agentManagementStore) ListAgentServices(
 		values.Set("limit", strconv.Itoa(query.Limit))
 	}
 	var response struct {
-		AgentServices []*domain.AgentService `json:"agent_services"`
+		AgentServices []*agentsowner.AgentServiceRecord `json:"agent_services"`
 	}
 	path := withQuery(
 		"/api/v1/"+pathEscape(workspace)+"/agent-services",
@@ -318,7 +319,7 @@ func (transport *agentManagementStore) ListAgentServices(
 		return nil, err
 	}
 	if response.AgentServices == nil {
-		response.AgentServices = []*domain.AgentService{}
+		response.AgentServices = []*agentsowner.AgentServiceRecord{}
 	}
 	return response.AgentServices, nil
 }
@@ -327,14 +328,14 @@ func (transport *agentManagementStore) GetAgentRole(
 	ctx context.Context,
 	workspace,
 	name string,
-) (*domain.Role, error) {
+) (*agentsowner.Role, error) {
 	return transport.client.GetRole(ctx, workspace, name)
 }
 
 func (transport *agentManagementStore) ListAgentRoles(
 	ctx context.Context,
 	workspace string,
-) ([]*domain.Role, error) {
+) ([]*agentsowner.Role, error) {
 	return transport.client.ListRoles(ctx, workspace)
 }
 
@@ -342,8 +343,8 @@ func (transport *agentManagementStore) CreateAgentRole(
 	ctx context.Context,
 	workspace string,
 	input AgentRoleInput,
-) (*domain.Role, error) {
-	return transport.client.CreateRole(ctx, store.RoleCreate{
+) (*agentsowner.Role, error) {
+	return transport.client.CreateRole(ctx, agentsowner.RoleRecordCreate{
 		WorkspaceKey: workspace, Name: input.Name, Kind: input.Kind,
 		Description: input.Description, Prompt: input.Prompt, PromptFile: input.PromptFile,
 		Model: input.Model, TaskFilter: input.TaskFilter, Backend: input.Backend, Effort: input.Effort,
@@ -361,7 +362,7 @@ func (transport *agentManagementStore) CreateAgentRole(
 func (transport *agentManagementStore) UpdateAgentRole(
 	ctx context.Context,
 	input AgentRoleUpdateInput,
-) (*domain.Role, error) {
+) (*agentsowner.Role, error) {
 	headers, err := delegatedActorHeaders(input.DelegatedActor)
 	if err != nil {
 		return nil, err
@@ -373,7 +374,7 @@ func (transport *agentManagementStore) UpdateAgentRole(
 		ExpectedUpdatedAt: input.ExpectedUpdatedAt,
 		Patch:             newAgentRoleCASPatchBody(input.Patch),
 	}
-	var out domain.Role
+	var out agentsowner.Role
 	path := "/api/v1/" + pathEscape(input.WorkspaceKey) + "/roles/" +
 		pathEscape(input.RoleName) + "/definition"
 	if err := transport.client.DoWithHeaders(ctx, http.MethodPatch, path, body, &out, headers); err != nil {
@@ -457,31 +458,31 @@ func newAgentRoleCASPatchBody(patch AgentRolePatch) agentRoleCASPatchBody {
 func (transport *agentManagementStore) CreateAgentService(
 	ctx context.Context,
 	input AgentServiceCreateInput,
-) (*domain.AgentService, error) {
+) (*agentsowner.AgentServiceRecord, error) {
 	headers, err := delegatedActorHeaders(input.DelegatedActor)
 	if err != nil {
 		return nil, err
 	}
 	body := struct {
-		ServiceID       string                          `json:"service_id"`
-		Name            string                          `json:"name,omitempty"`
-		Kind            domain.AgentServiceKind         `json:"kind"`
-		DesiredState    domain.AgentServiceDesiredState `json:"desired_state,omitempty"`
-		RoleName        string                          `json:"role_name,omitempty"`
-		DriverID        string                          `json:"driver_id,omitempty"`
-		DriverVersionID string                          `json:"driver_version_id,omitempty"`
-		ProfileName     string                          `json:"profile_name,omitempty"`
-		ScheduleID      string                          `json:"schedule_id,omitempty"`
-		EventSources    []string                        `json:"event_sources,omitempty"`
-		TriggerRefs     []string                        `json:"trigger_refs,omitempty"`
-		PlacementPolicy string                          `json:"placement_policy,omitempty"`
-		MaxInstances    int                             `json:"max_instances,omitempty"`
-		LeaseID         string                          `json:"lease_id,omitempty"`
-		RestartPolicy   string                          `json:"restart_policy,omitempty"`
-		Permissions     []string                        `json:"permissions,omitempty"`
-		BudgetPolicy    string                          `json:"budget_policy,omitempty"`
-		StateRef        string                          `json:"state_ref,omitempty"`
-		Metadata        map[string]string               `json:"metadata,omitempty"`
+		ServiceID       string                   `json:"service_id"`
+		Name            string                   `json:"name,omitempty"`
+		Kind            agentsowner.AgentKind    `json:"kind"`
+		DesiredState    agentsowner.DesiredState `json:"desired_state,omitempty"`
+		RoleName        string                   `json:"role_name,omitempty"`
+		DriverID        string                   `json:"driver_id,omitempty"`
+		DriverVersionID string                   `json:"driver_version_id,omitempty"`
+		ProfileName     string                   `json:"profile_name,omitempty"`
+		ScheduleID      string                   `json:"schedule_id,omitempty"`
+		EventSources    []string                 `json:"event_sources,omitempty"`
+		TriggerRefs     []string                 `json:"trigger_refs,omitempty"`
+		PlacementPolicy string                   `json:"placement_policy,omitempty"`
+		MaxInstances    int                      `json:"max_instances,omitempty"`
+		LeaseID         string                   `json:"lease_id,omitempty"`
+		RestartPolicy   string                   `json:"restart_policy,omitempty"`
+		Permissions     []string                 `json:"permissions,omitempty"`
+		BudgetPolicy    string                   `json:"budget_policy,omitempty"`
+		StateRef        string                   `json:"state_ref,omitempty"`
+		Metadata        map[string]string        `json:"metadata,omitempty"`
 	}{
 		ServiceID: input.ServiceID, Name: input.Name, Kind: input.Kind,
 		DesiredState: input.DesiredState, RoleName: input.RoleName,
@@ -495,7 +496,7 @@ func (transport *agentManagementStore) CreateAgentService(
 		BudgetPolicy: input.BudgetPolicy, StateRef: input.StateRef,
 		Metadata: cloneAgentManagementMap(input.Metadata),
 	}
-	var out domain.AgentService
+	var out agentsowner.AgentServiceRecord
 	path := "/api/v1/" + pathEscape(input.WorkspaceKey) + "/agent-services"
 	if err := transport.client.DoWithHeaders(ctx, http.MethodPost, path, body, &out, headers); err != nil {
 		return nil, err
@@ -506,19 +507,19 @@ func (transport *agentManagementStore) CreateAgentService(
 func (transport *agentManagementStore) UpdateAgentServiceIdentity(
 	ctx context.Context,
 	input AgentServiceUpdateInput,
-) (*domain.AgentService, error) {
+) (*agentsowner.AgentServiceRecord, error) {
 	headers, err := delegatedActorHeaders(input.DelegatedActor)
 	if err != nil {
 		return nil, err
 	}
 	if agentServiceCompatibilityPatch(input.Patch) {
-		return nil, errors.Join(ErrAgentServiceUnsupportedIdentityPatch, domain.ErrInvalid)
+		return nil, errors.Join(ErrAgentServiceUnsupportedIdentityPatch, persistence.ErrInvalid)
 	}
 	body := struct {
 		ExpectedUpdatedAt time.Time                 `json:"expected_updated_at"`
 		Patch             AgentServiceIdentityPatch `json:"patch"`
 	}{ExpectedUpdatedAt: input.ExpectedUpdatedAt, Patch: input.Patch}
-	var out domain.AgentService
+	var out agentsowner.AgentServiceRecord
 	path := "/api/v1/" + pathEscape(input.WorkspaceKey) + "/agent-services/" +
 		pathEscape(input.ServiceID)
 	if err := transport.client.DoWithHeaders(ctx, http.MethodPatch, path, body, &out, headers); err != nil {
@@ -536,7 +537,7 @@ func agentServiceCompatibilityPatch(patch AgentServiceIdentityPatch) bool {
 func (transport *agentManagementStore) ArchiveAgentService(
 	ctx context.Context,
 	input AgentServiceArchiveInput,
-) (*domain.AgentService, error) {
+) (*agentsowner.AgentServiceRecord, error) {
 	headers, err := delegatedActorHeaders(input.DelegatedActor)
 	if err != nil {
 		return nil, err
@@ -544,7 +545,7 @@ func (transport *agentManagementStore) ArchiveAgentService(
 	body := struct {
 		ExpectedUpdatedAt time.Time `json:"expected_updated_at"`
 	}{ExpectedUpdatedAt: input.ExpectedUpdatedAt}
-	var out domain.AgentService
+	var out agentsowner.AgentServiceRecord
 	path := "/api/v1/" + pathEscape(input.WorkspaceKey) + "/agent-services/" +
 		pathEscape(input.ServiceID) + "/archive"
 	if err := transport.client.DoWithHeaders(ctx, http.MethodPost, path, body, &out, headers); err != nil {
@@ -556,20 +557,20 @@ func (transport *agentManagementStore) ArchiveAgentService(
 func (transport *agentManagementStore) SetAgentServiceDesiredState(
 	ctx context.Context,
 	input AgentServiceDesiredStateInput,
-) (*domain.AgentService, error) {
+) (*agentsowner.AgentServiceRecord, error) {
 	headers, err := delegatedActorHeaders(input.DelegatedActor)
 	if err != nil {
 		return nil, err
 	}
 	body := struct {
-		ExpectedState     domain.AgentServiceDesiredState `json:"expected_state"`
-		DesiredState      domain.AgentServiceDesiredState `json:"desired_state"`
-		ExpectedUpdatedAt time.Time                       `json:"expected_updated_at"`
+		ExpectedState     agentsowner.DesiredState `json:"expected_state"`
+		DesiredState      agentsowner.DesiredState `json:"desired_state"`
+		ExpectedUpdatedAt time.Time                `json:"expected_updated_at"`
 	}{
 		ExpectedState: input.ExpectedState, DesiredState: input.DesiredState,
 		ExpectedUpdatedAt: input.ExpectedUpdatedAt,
 	}
-	var out domain.AgentService
+	var out agentsowner.AgentServiceRecord
 	path := "/api/v1/" + pathEscape(input.WorkspaceKey) + "/agent-services/" +
 		pathEscape(input.ServiceID) + "/desired-state"
 	if err := transport.client.DoWithHeaders(ctx, http.MethodPost, path, body, &out, headers); err != nil {
@@ -581,21 +582,21 @@ func (transport *agentManagementStore) SetAgentServiceDesiredState(
 func (transport *agentManagementStore) SetAgentServiceDesiredStateOwned(
 	ctx context.Context,
 	input AgentServiceOwnedDesiredStateInput,
-) (*domain.AgentService, error) {
+) (*agentsowner.AgentServiceRecord, error) {
 	headers, err := ownershipHeaders(input.DelegatedActor, input.Proof.LeaseToken)
 	if err != nil {
 		return nil, err
 	}
 	body := struct {
-		LeaseID           string                          `json:"lease_id"`
-		OwnerID           string                          `json:"owner_id"`
-		RuntimeProvider   domain.RuntimeProvider          `json:"runtime_provider"`
-		NodeID            string                          `json:"node_id"`
-		FencingToken      int64                           `json:"fencing_token"`
-		ExpectedState     domain.AgentServiceDesiredState `json:"expected_state"`
-		DesiredState      domain.AgentServiceDesiredState `json:"desired_state"`
-		ExpectedUpdatedAt time.Time                       `json:"expected_updated_at"`
-		IdempotencyKey    string                          `json:"idempotency_key"`
+		LeaseID           string                      `json:"lease_id"`
+		OwnerID           string                      `json:"owner_id"`
+		RuntimeProvider   agentsowner.RuntimeProvider `json:"runtime_provider"`
+		NodeID            string                      `json:"node_id"`
+		FencingToken      int64                       `json:"fencing_token"`
+		ExpectedState     agentsowner.DesiredState    `json:"expected_state"`
+		DesiredState      agentsowner.DesiredState    `json:"desired_state"`
+		ExpectedUpdatedAt time.Time                   `json:"expected_updated_at"`
+		IdempotencyKey    string                      `json:"idempotency_key"`
 	}{
 		LeaseID: input.Proof.LeaseID, OwnerID: input.Proof.OwnerID,
 		RuntimeProvider: input.Proof.RuntimeProvider, NodeID: input.Proof.NodeID,
@@ -603,7 +604,7 @@ func (transport *agentManagementStore) SetAgentServiceDesiredStateOwned(
 		DesiredState: input.DesiredState, ExpectedUpdatedAt: input.ExpectedUpdatedAt,
 		IdempotencyKey: input.IdempotencyKey,
 	}
-	var out domain.AgentService
+	var out agentsowner.AgentServiceRecord
 	path := "/api/v1/" + pathEscape(input.Proof.WorkspaceKey) + "/agent-services/" +
 		pathEscape(input.Proof.AgentID) + "/desired-state/owned"
 	if err := transport.client.DoWithHeaders(ctx, http.MethodPost, path, body, &out, headers); err != nil {
@@ -648,19 +649,19 @@ func (transport *agentManagementStore) AcquireAgentOwnership(
 		return nil, err
 	}
 	body := struct {
-		LeaseID         string                 `json:"lease_id,omitempty"`
-		OwnerID         string                 `json:"owner_id"`
-		RuntimeProvider domain.RuntimeProvider `json:"runtime_provider"`
-		NodeID          string                 `json:"node_id"`
-		TTLSeconds      int                    `json:"ttl_seconds,omitempty"`
+		LeaseID         string                      `json:"lease_id,omitempty"`
+		OwnerID         string                      `json:"owner_id"`
+		RuntimeProvider agentsowner.RuntimeProvider `json:"runtime_provider"`
+		NodeID          string                      `json:"node_id"`
+		TTLSeconds      int                         `json:"ttl_seconds,omitempty"`
 	}{
 		LeaseID: input.LeaseID, OwnerID: input.OwnerID,
 		RuntimeProvider: input.RuntimeProvider, NodeID: input.NodeID,
 		TTLSeconds: input.TTLSeconds,
 	}
 	var response struct {
-		Lease *domain.AgentOwnershipLease `json:"lease"`
-		Token string                      `json:"token"`
+		Lease *agentsowner.OwnershipRecord `json:"lease"`
+		Token string                       `json:"token"`
 	}
 	path := "/api/v1/" + pathEscape(input.WorkspaceKey) + "/agent-ownership-leases/" +
 		pathEscape(input.AgentID) + "/acquire"
@@ -674,8 +675,8 @@ func (transport *agentManagementStore) GetAgentOwnership(
 	ctx context.Context,
 	workspace,
 	agentID string,
-) (*domain.AgentOwnershipLease, error) {
-	var out domain.AgentOwnershipLease
+) (*agentsowner.OwnershipRecord, error) {
+	var out agentsowner.OwnershipRecord
 	path := "/api/v1/" + pathEscape(workspace) + "/agent-ownership-leases/" + pathEscape(agentID)
 	if err := transport.client.Do(ctx, http.MethodGet, path, nil, &out); err != nil {
 		return nil, err
@@ -687,7 +688,7 @@ func (transport *agentManagementStore) ListAgentOwnership(
 	ctx context.Context,
 	workspace string,
 	query AgentOwnershipQuery,
-) ([]*domain.AgentOwnershipLease, error) {
+) ([]*agentsowner.OwnershipRecord, error) {
 	values := url.Values{}
 	if query.OwnerID != "" {
 		values.Set("owner_id", query.OwnerID)
@@ -705,7 +706,7 @@ func (transport *agentManagementStore) ListAgentOwnership(
 		values.Set("limit", strconv.Itoa(query.Limit))
 	}
 	var response struct {
-		AgentOwnershipLeases []*domain.AgentOwnershipLease `json:"agent_ownership_leases"`
+		AgentOwnershipLeases []*agentsowner.OwnershipRecord `json:"agent_ownership_leases"`
 	}
 	path := withQuery(
 		"/api/v1/"+pathEscape(workspace)+"/agent-ownership-leases",
@@ -715,7 +716,7 @@ func (transport *agentManagementStore) ListAgentOwnership(
 		return nil, err
 	}
 	if response.AgentOwnershipLeases == nil {
-		response.AgentOwnershipLeases = []*domain.AgentOwnershipLease{}
+		response.AgentOwnershipLeases = []*agentsowner.OwnershipRecord{}
 	}
 	return response.AgentOwnershipLeases, nil
 }
@@ -723,24 +724,24 @@ func (transport *agentManagementStore) ListAgentOwnership(
 func (transport *agentManagementStore) RenewAgentOwnership(
 	ctx context.Context,
 	input AgentOwnershipRenewInput,
-) (*domain.AgentOwnershipLease, error) {
+) (*agentsowner.OwnershipRecord, error) {
 	headers, err := ownershipHeaders(input.DelegatedActor, input.Proof.LeaseToken)
 	if err != nil {
 		return nil, err
 	}
 	body := struct {
-		LeaseID         string                 `json:"lease_id"`
-		OwnerID         string                 `json:"owner_id"`
-		RuntimeProvider domain.RuntimeProvider `json:"runtime_provider"`
-		NodeID          string                 `json:"node_id"`
-		FencingToken    int64                  `json:"fencing_token"`
-		TTLSeconds      int                    `json:"ttl_seconds,omitempty"`
+		LeaseID         string                      `json:"lease_id"`
+		OwnerID         string                      `json:"owner_id"`
+		RuntimeProvider agentsowner.RuntimeProvider `json:"runtime_provider"`
+		NodeID          string                      `json:"node_id"`
+		FencingToken    int64                       `json:"fencing_token"`
+		TTLSeconds      int                         `json:"ttl_seconds,omitempty"`
 	}{
 		LeaseID: input.Proof.LeaseID, OwnerID: input.Proof.OwnerID,
 		RuntimeProvider: input.Proof.RuntimeProvider, NodeID: input.Proof.NodeID,
 		FencingToken: input.Proof.FencingToken, TTLSeconds: input.TTLSeconds,
 	}
-	var out domain.AgentOwnershipLease
+	var out agentsowner.OwnershipRecord
 	path := "/api/v1/" + pathEscape(input.Proof.WorkspaceKey) + "/agent-ownership-leases/" +
 		pathEscape(input.Proof.AgentID) + "/heartbeat"
 	if err := transport.client.DoWithHeaders(ctx, http.MethodPost, path, body, &out, headers); err != nil {
@@ -752,23 +753,23 @@ func (transport *agentManagementStore) RenewAgentOwnership(
 func (transport *agentManagementStore) ReleaseAgentOwnership(
 	ctx context.Context,
 	input AgentOwnershipReleaseInput,
-) (*domain.AgentOwnershipLease, error) {
+) (*agentsowner.OwnershipRecord, error) {
 	headers, err := ownershipHeaders(input.DelegatedActor, input.Proof.LeaseToken)
 	if err != nil {
 		return nil, err
 	}
 	body := struct {
-		LeaseID         string                 `json:"lease_id"`
-		OwnerID         string                 `json:"owner_id"`
-		RuntimeProvider domain.RuntimeProvider `json:"runtime_provider"`
-		NodeID          string                 `json:"node_id"`
-		FencingToken    int64                  `json:"fencing_token"`
+		LeaseID         string                      `json:"lease_id"`
+		OwnerID         string                      `json:"owner_id"`
+		RuntimeProvider agentsowner.RuntimeProvider `json:"runtime_provider"`
+		NodeID          string                      `json:"node_id"`
+		FencingToken    int64                       `json:"fencing_token"`
 	}{
 		LeaseID: input.Proof.LeaseID, OwnerID: input.Proof.OwnerID,
 		RuntimeProvider: input.Proof.RuntimeProvider, NodeID: input.Proof.NodeID,
 		FencingToken: input.Proof.FencingToken,
 	}
-	var out domain.AgentOwnershipLease
+	var out agentsowner.OwnershipRecord
 	path := "/api/v1/" + pathEscape(input.Proof.WorkspaceKey) + "/agent-ownership-leases/" +
 		pathEscape(input.Proof.AgentID) + "/release"
 	if err := transport.client.DoWithHeaders(ctx, http.MethodPost, path, body, &out, headers); err != nil {
@@ -783,7 +784,7 @@ func ownershipHeaders(actor, token string) (map[string]string, error) {
 		return nil, err
 	}
 	if token == "" || token != strings.TrimSpace(token) {
-		return nil, fmt.Errorf("agent ownership lease token is required: %w", domain.ErrInvalid)
+		return nil, fmt.Errorf("agent ownership lease token is required: %w", persistence.ErrInvalid)
 	}
 	headers[AgentOwnershipLeaseTokenHeader] = token
 	return headers, nil

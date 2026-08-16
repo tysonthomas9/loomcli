@@ -8,7 +8,6 @@ import (
 
 	"github.com/olesho/harness-wrapper/pkg/wrapper"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
 )
 
@@ -43,7 +42,7 @@ type HarnessRuntimeMetadata struct {
 	StartedAt        time.Time
 }
 
-func HarnessRuntimeMetadataFromSession(session *domain.AgentSession) HarnessRuntimeMetadata {
+func HarnessRuntimeMetadataFromSession(session *interaction.SessionRecord) HarnessRuntimeMetadata {
 	if session == nil {
 		return HarnessRuntimeMetadata{}
 	}

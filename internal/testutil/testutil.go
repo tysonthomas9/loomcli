@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/modules/agents"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 // StaticAgentQueries is a canonical, mutation-free Agents query fixture. It
@@ -32,7 +32,7 @@ func (queries StaticAgentQueries) GetAgent(_ context.Context, workspace, agentID
 			return &copy, nil
 		}
 	}
-	return nil, domain.ErrNotFound
+	return nil, persistence.ErrNotFound
 }
 
 func (queries StaticAgentQueries) ListAgents(_ context.Context, workspace string, _ agents.AgentFilter) ([]*agents.Agent, error) {

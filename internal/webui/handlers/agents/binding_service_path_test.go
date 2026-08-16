@@ -8,12 +8,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	agentsmodule "github.com/tysonthomas9/loomcli/internal/modules/agents"
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
-	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
 type agentServiceCASBindingStore struct {
@@ -142,7 +141,7 @@ func cloneAgentServiceTestBinding(binding *automation.Binding) *automation.Bindi
 }
 
 type countingAgentServiceStore struct {
-	store.AgentServiceStore
+	agentsmodule.AgentServiceStore
 	updates int
 	deletes int
 }
@@ -155,18 +154,18 @@ func (s *countingAgentServiceStore) Delete(ctx context.Context, workspaceKey, se
 func (s *countingAgentServiceStore) Update(
 	ctx context.Context,
 	workspaceKey, serviceID string,
-	patch store.AgentServiceUpdate,
-) (*domain.AgentService, error) {
+	patch agentsmodule.AgentServiceUpdate,
+) (*agentsmodule.AgentServiceRecord, error) {
 	s.updates++
 	return s.AgentServiceStore.Update(ctx, workspaceKey, serviceID, patch)
 }
 
 type storeWithCountingAgentServices struct {
-	store.Store
+	*memstore.Store
 	services *countingAgentServiceStore
 }
 
-func (s *storeWithCountingAgentServices) AgentServices() store.AgentServiceStore {
+func (s *storeWithCountingAgentServices) AgentServices() agentsmodule.AgentServiceStore {
 	return s.services
 }
 

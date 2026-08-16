@@ -7,7 +7,6 @@ import (
 	"net/http"
 
 	"github.com/tysonthomas9/loomcli/internal/app/workfloweventing"
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/modules/agents"
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
@@ -15,6 +14,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 	"github.com/tysonthomas9/loomcli/internal/modules/workspace"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 // opError is the structured v2 error envelope. The shape is FROZEN as the
@@ -213,17 +213,17 @@ func writeExecutionDomainOpError(w http.ResponseWriter, err error) bool {
 
 func writeBaseDomainOpError(w http.ResponseWriter, err error) {
 	switch {
-	case errors.Is(err, domain.ErrNotFound):
+	case errors.Is(err, persistence.ErrNotFound):
 		writeOpError(w, http.StatusNotFound, "not_found", err.Error(), false)
-	case errors.Is(err, domain.ErrNotOwner):
+	case errors.Is(err, persistence.ErrNotOwner):
 		writeOpError(w, http.StatusForbidden, "not_owner", err.Error(), false)
-	case errors.Is(err, domain.ErrUnschedulable):
+	case errors.Is(err, persistence.ErrUnschedulable):
 		writeOpError(w, http.StatusConflict, "unschedulable", err.Error(), true)
-	case errors.Is(err, domain.ErrInvalidTransition):
+	case errors.Is(err, persistence.ErrInvalidTransition):
 		writeOpError(w, http.StatusConflict, "invalid_transition", err.Error(), false)
-	case errors.Is(err, domain.ErrConflict), errors.Is(err, domain.ErrAlreadyExists), errors.Is(err, domain.ErrAlreadyClaimed):
+	case errors.Is(err, persistence.ErrConflict), errors.Is(err, persistence.ErrAlreadyExists), errors.Is(err, persistence.ErrAlreadyClaimed):
 		writeOpError(w, http.StatusConflict, "conflict", err.Error(), false)
-	case errors.Is(err, domain.ErrInvalid):
+	case errors.Is(err, persistence.ErrInvalid):
 		writeOpError(w, http.StatusBadRequest, "invalid", err.Error(), false)
 	case errors.Is(err, context.DeadlineExceeded):
 		writeOpError(w, http.StatusGatewayTimeout, "timeout", err.Error(), true)

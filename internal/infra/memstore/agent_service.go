@@ -8,13 +8,14 @@ import (
 	"sync"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/modules/agents"
+
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 type agentServiceStore struct {
 	mu       sync.RWMutex
-	items    map[string]map[string]*domain.AgentService
+	items    map[string]map[string]*agents.AgentServiceRecord
 	roles    *roleStore
 	profiles *workerProfileStore
 	drivers  *driverStore
@@ -29,7 +30,7 @@ func newAgentServiceStore(
 	versions *driverVersionStore,
 ) *agentServiceStore {
 	return &agentServiceStore{
-		items:    make(map[string]map[string]*domain.AgentService),
+		items:    make(map[string]map[string]*agents.AgentServiceRecord),
 		roles:    roles,
 		profiles: profiles,
 		drivers:  drivers,
@@ -37,9 +38,9 @@ func newAgentServiceStore(
 	}
 }
 
-var _ store.AgentServiceStore = (*agentServiceStore)(nil)
+var _ agents.AgentServiceStore = (*agentServiceStore)(nil)
 
-func (s *agentServiceStore) Create(_ context.Context, in store.AgentServiceCreate) (*domain.AgentService, error) {
+func (s *agentServiceStore) Create(_ context.Context, in agents.AgentServiceCreate) (*agents.AgentServiceRecord, error) {
 	svc, err := newAgentServiceMem(in)
 	if err != nil {
 		return nil, err
@@ -54,22 +55,22 @@ func (s *agentServiceStore) Create(_ context.Context, in store.AgentServiceCreat
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.items[svc.WorkspaceKey] == nil {
-		s.items[svc.WorkspaceKey] = make(map[string]*domain.AgentService)
+		s.items[svc.WorkspaceKey] = make(map[string]*agents.AgentServiceRecord)
 	}
 	if _, ok := s.items[svc.WorkspaceKey][svc.ServiceID]; ok {
-		return nil, fmt.Errorf("agent service %q in workspace %q: %w", svc.ServiceID, svc.WorkspaceKey, domain.ErrAlreadyExists)
+		return nil, fmt.Errorf("agent service %q in workspace %q: %w", svc.ServiceID, svc.WorkspaceKey, persistence.ErrAlreadyExists)
 	}
 	s.items[svc.WorkspaceKey][svc.ServiceID] = svc
 	return cloneAgentService(svc), nil
 }
 
-func newAgentServiceMem(in store.AgentServiceCreate) (*domain.AgentService, error) {
+func newAgentServiceMem(in agents.AgentServiceCreate) (*agents.AgentServiceRecord, error) {
 	serviceID := strings.TrimSpace(in.ServiceID)
 	if in.WorkspaceKey == "" || serviceID == "" {
-		return nil, fmt.Errorf("workspace_key + service_id required: %w", domain.ErrInvalid)
+		return nil, fmt.Errorf("workspace_key + service_id required: %w", persistence.ErrInvalid)
 	}
 	now := time.Now().UTC()
-	return &domain.AgentService{
+	return &agents.AgentServiceRecord{
 		WorkspaceKey:    in.WorkspaceKey,
 		ServiceID:       serviceID,
 		Name:            firstNonEmptyMem(in.Name, serviceID),
@@ -95,9 +96,9 @@ func newAgentServiceMem(in store.AgentServiceCreate) (*domain.AgentService, erro
 	}, nil
 }
 
-func defaultAgentServiceDesiredStateMem(state domain.AgentServiceDesiredState) domain.AgentServiceDesiredState {
+func defaultAgentServiceDesiredStateMem(state agents.DesiredState) agents.DesiredState {
 	if state == "" {
-		return domain.AgentServiceDesiredStopped
+		return agents.DesiredStopped
 	}
 	return state
 }
@@ -118,20 +119,20 @@ func firstNonEmptyMem(values ...string) string {
 	return ""
 }
 
-func (s *agentServiceStore) Get(_ context.Context, ws, serviceID string) (*domain.AgentService, error) {
+func (s *agentServiceStore) Get(_ context.Context, ws, serviceID string) (*agents.AgentServiceRecord, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	svc, ok := s.items[ws][serviceID]
 	if !ok {
-		return nil, fmt.Errorf("agent service %q in workspace %q: %w", serviceID, ws, domain.ErrNotFound)
+		return nil, fmt.Errorf("agent service %q in workspace %q: %w", serviceID, ws, persistence.ErrNotFound)
 	}
 	return cloneAgentService(svc), nil
 }
 
-func (s *agentServiceStore) List(_ context.Context, ws string, filter store.AgentServiceFilter) ([]*domain.AgentService, error) {
+func (s *agentServiceStore) List(_ context.Context, ws string, filter agents.AgentServiceFilter) ([]*agents.AgentServiceRecord, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	out := make([]*domain.AgentService, 0, len(s.items[ws]))
+	out := make([]*agents.AgentServiceRecord, 0, len(s.items[ws]))
 	for _, svc := range s.items[ws] {
 		if agentServiceMatchesMem(svc, filter) {
 			out = append(out, cloneAgentService(svc))
@@ -144,12 +145,12 @@ func (s *agentServiceStore) List(_ context.Context, ws string, filter store.Agen
 	return out, nil
 }
 
-func (s *agentServiceStore) Update(_ context.Context, ws, serviceID string, patch store.AgentServiceUpdate) (*domain.AgentService, error) {
+func (s *agentServiceStore) Update(_ context.Context, ws, serviceID string, patch agents.AgentServiceUpdate) (*agents.AgentServiceRecord, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	svc, ok := s.items[ws][serviceID]
 	if !ok {
-		return nil, fmt.Errorf("agent service %q in workspace %q: %w", serviceID, ws, domain.ErrNotFound)
+		return nil, fmt.Errorf("agent service %q in workspace %q: %w", serviceID, ws, persistence.ErrNotFound)
 	}
 	updated := cloneAgentService(svc)
 	applyAgentServiceUpdateMem(updated, patch)
@@ -158,7 +159,7 @@ func (s *agentServiceStore) Update(_ context.Context, ws, serviceID string, patc
 		updated.Name = updated.ServiceID
 	}
 	if updated.DesiredState == "" {
-		updated.DesiredState = domain.AgentServiceDesiredStopped
+		updated.DesiredState = agents.DesiredStopped
 	}
 	if updated.MaxInstances == 0 {
 		updated.MaxInstances = 1
@@ -176,13 +177,13 @@ func (s *agentServiceStore) Update(_ context.Context, ws, serviceID string, patc
 
 func (s *agentServiceStore) Delete(_ context.Context, ws, serviceID string) error {
 	if s.bindings != nil && s.bindings.hasTargetAgentService(ws, serviceID) {
-		return fmt.Errorf("agent service %q in workspace %q is targeted by trigger binding: %w", serviceID, ws, domain.ErrInvalidTransition)
+		return fmt.Errorf("agent service %q in workspace %q is targeted by trigger binding: %w", serviceID, ws, persistence.ErrInvalidTransition)
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	svc, ok := s.items[ws][serviceID]
 	if !ok {
-		return fmt.Errorf("agent service %q in workspace %q: %w", serviceID, ws, domain.ErrNotFound)
+		return fmt.Errorf("agent service %q in workspace %q: %w", serviceID, ws, persistence.ErrNotFound)
 	}
 	// Wave B semantics (mirrors fleet-db): DELETE archives, never erases — the
 	// record stays GET-able for run attribution; List hides it by default.
@@ -242,30 +243,30 @@ func (s *agentServiceStore) hasProfile(ws, profileName string) bool {
 	return false
 }
 
-func (s *agentServiceStore) validateReferences(svc *domain.AgentService) error {
+func (s *agentServiceStore) validateReferences(svc *agents.AgentServiceRecord) error {
 	if err := s.validateBehaviorReferences(svc); err != nil {
 		return err
 	}
 	if svc.ProfileName != "" && s.profiles != nil && !s.profiles.exists(svc.WorkspaceKey, svc.ProfileName) {
-		return fmt.Errorf("agent service %q profile %q in workspace %q: %w", svc.ServiceID, svc.ProfileName, svc.WorkspaceKey, domain.ErrNotFound)
+		return fmt.Errorf("agent service %q profile %q in workspace %q: %w", svc.ServiceID, svc.ProfileName, svc.WorkspaceKey, persistence.ErrNotFound)
 	}
 	return s.validateTriggerReferences(svc)
 }
 
-func (s *agentServiceStore) validateBehaviorReferences(svc *domain.AgentService) error {
+func (s *agentServiceStore) validateBehaviorReferences(svc *agents.AgentServiceRecord) error {
 	if svc.RoleName != "" && s.roles != nil && !s.roles.exists(svc.WorkspaceKey, svc.RoleName) {
-		return fmt.Errorf("agent service %q role %q in workspace %q: %w", svc.ServiceID, svc.RoleName, svc.WorkspaceKey, domain.ErrNotFound)
+		return fmt.Errorf("agent service %q role %q in workspace %q: %w", svc.ServiceID, svc.RoleName, svc.WorkspaceKey, persistence.ErrNotFound)
 	}
 	if svc.DriverID != "" && s.drivers != nil && !s.drivers.exists(svc.WorkspaceKey, svc.DriverID) {
-		return fmt.Errorf("agent service %q driver %q in workspace %q: %w", svc.ServiceID, svc.DriverID, svc.WorkspaceKey, domain.ErrNotFound)
+		return fmt.Errorf("agent service %q driver %q in workspace %q: %w", svc.ServiceID, svc.DriverID, svc.WorkspaceKey, persistence.ErrNotFound)
 	}
 	if svc.DriverVersionID != "" && s.versions != nil && !s.versions.belongsToDriver(svc.WorkspaceKey, svc.DriverVersionID, svc.DriverID) {
-		return fmt.Errorf("agent service %q driver version %q does not belong to driver %q in workspace %q: %w", svc.ServiceID, svc.DriverVersionID, svc.DriverID, svc.WorkspaceKey, domain.ErrNotFound)
+		return fmt.Errorf("agent service %q driver version %q does not belong to driver %q in workspace %q: %w", svc.ServiceID, svc.DriverVersionID, svc.DriverID, svc.WorkspaceKey, persistence.ErrNotFound)
 	}
 	return nil
 }
 
-func (s *agentServiceStore) validateTriggerReferences(svc *domain.AgentService) error {
+func (s *agentServiceStore) validateTriggerReferences(svc *agents.AgentServiceRecord) error {
 	seen := map[string]struct{}{}
 	for _, ref := range svc.TriggerRefs {
 		ref = strings.TrimSpace(ref)
@@ -278,64 +279,64 @@ func (s *agentServiceStore) validateTriggerReferences(svc *domain.AgentService) 
 		seen[ref] = struct{}{}
 		binding, ok := s.bindings.getForValidation(svc.WorkspaceKey, ref)
 		if s.bindings != nil && !ok {
-			return fmt.Errorf("agent service %q trigger ref %q in workspace %q: %w", svc.ServiceID, ref, svc.WorkspaceKey, domain.ErrNotFound)
+			return fmt.Errorf("agent service %q trigger ref %q in workspace %q: %w", svc.ServiceID, ref, svc.WorkspaceKey, persistence.ErrNotFound)
 		}
 		if binding != nil && binding.TargetAgentServiceID != "" && binding.TargetAgentServiceID != svc.ServiceID {
-			return fmt.Errorf("agent service %q trigger ref %q targets %q: %w", svc.ServiceID, ref, binding.TargetAgentServiceID, domain.ErrInvalidTransition)
+			return fmt.Errorf("agent service %q trigger ref %q targets %q: %w", svc.ServiceID, ref, binding.TargetAgentServiceID, persistence.ErrInvalidTransition)
 		}
 	}
 	return nil
 }
 
-func validateAgentServiceMem(svc *domain.AgentService) error {
+func validateAgentServiceMem(svc *agents.AgentServiceRecord) error {
 	if svc.WorkspaceKey == "" || svc.ServiceID == "" {
-		return fmt.Errorf("workspace_key + service_id required: %w", domain.ErrInvalid)
+		return fmt.Errorf("workspace_key + service_id required: %w", persistence.ErrInvalid)
 	}
 	hasRole := strings.TrimSpace(svc.RoleName) != ""
 	hasDriver := strings.TrimSpace(svc.DriverID) != "" || strings.TrimSpace(svc.DriverVersionID) != ""
 	if hasRole == hasDriver {
-		return fmt.Errorf("agent service %q requires exactly one behavior reference (role_name or driver_id + driver_version_id): %w", svc.ServiceID, domain.ErrInvalid)
+		return fmt.Errorf("agent service %q requires exactly one behavior reference (role_name or driver_id + driver_version_id): %w", svc.ServiceID, persistence.ErrInvalid)
 	}
 	if hasDriver && (strings.TrimSpace(svc.DriverID) == "" || strings.TrimSpace(svc.DriverVersionID) == "") {
-		return fmt.Errorf("agent service %q driver_id + driver_version_id required together: %w", svc.ServiceID, domain.ErrInvalid)
+		return fmt.Errorf("agent service %q driver_id + driver_version_id required together: %w", svc.ServiceID, persistence.ErrInvalid)
 	}
 	if !validAgentServiceKindMem(svc.Kind) {
-		return fmt.Errorf("agent service %q kind %q invalid: %w", svc.ServiceID, svc.Kind, domain.ErrInvalid)
+		return fmt.Errorf("agent service %q kind %q invalid: %w", svc.ServiceID, svc.Kind, persistence.ErrInvalid)
 	}
 	if !validAgentServiceDesiredStateMem(svc.DesiredState) {
-		return fmt.Errorf("agent service %q desired_state %q invalid: %w", svc.ServiceID, svc.DesiredState, domain.ErrInvalid)
+		return fmt.Errorf("agent service %q desired_state %q invalid: %w", svc.ServiceID, svc.DesiredState, persistence.ErrInvalid)
 	}
 	if svc.MaxInstances < 1 {
-		return fmt.Errorf("agent service %q max_instances must be positive: %w", svc.ServiceID, domain.ErrInvalid)
+		return fmt.Errorf("agent service %q max_instances must be positive: %w", svc.ServiceID, persistence.ErrInvalid)
 	}
 	if svc.CreatedAt.IsZero() || svc.UpdatedAt.IsZero() {
-		return fmt.Errorf("agent service %q timestamps required: %w", svc.ServiceID, domain.ErrInvalid)
+		return fmt.Errorf("agent service %q timestamps required: %w", svc.ServiceID, persistence.ErrInvalid)
 	}
 	return nil
 }
 
-func validAgentServiceKindMem(kind domain.AgentServiceKind) bool {
+func validAgentServiceKindMem(kind agents.AgentKind) bool {
 	switch kind {
-	case domain.AgentServiceKindLead, domain.AgentServiceKindSupport, domain.AgentServiceKindTriage,
-		domain.AgentServiceKindOnCall, domain.AgentServiceKindScheduled, domain.AgentServiceKindMaintenance,
-		domain.AgentServiceKindOrchestrator, domain.AgentServiceKindAlwaysOn, domain.AgentServiceKindCron,
-		domain.AgentServiceKindEvent, domain.AgentServiceKindCampaignOrchestrator:
+	case agents.AgentKindLead, agents.AgentKindSupport, agents.AgentKindTriage,
+		agents.AgentKindOnCall, agents.AgentKindScheduled, agents.AgentKindMaintenance,
+		agents.AgentKindOrchestrator, agents.AgentKindAlwaysOn, agents.AgentKindCron,
+		agents.AgentKindEvent, agents.AgentKindCampaignOrchestrator:
 		return true
 	default:
 		return false
 	}
 }
 
-func validAgentServiceDesiredStateMem(state domain.AgentServiceDesiredState) bool {
+func validAgentServiceDesiredStateMem(state agents.DesiredState) bool {
 	switch state {
-	case domain.AgentServiceDesiredRunning, domain.AgentServiceDesiredStopped, domain.AgentServiceDesiredPaused:
+	case agents.DesiredRunning, agents.DesiredStopped, agents.DesiredPaused:
 		return true
 	default:
 		return false
 	}
 }
 
-func cloneAgentService(svc *domain.AgentService) *domain.AgentService {
+func cloneAgentService(svc *agents.AgentServiceRecord) *agents.AgentServiceRecord {
 	if svc == nil {
 		return nil
 	}
@@ -347,7 +348,7 @@ func cloneAgentService(svc *domain.AgentService) *domain.AgentService {
 	return &out
 }
 
-func agentServiceMatchesMem(svc *domain.AgentService, filter store.AgentServiceFilter) bool {
+func agentServiceMatchesMem(svc *agents.AgentServiceRecord, filter agents.AgentServiceFilter) bool {
 	return (filter.IncludeDeleted || svc.DeletedAt == nil) &&
 		(filter.Kind == "" || svc.Kind == filter.Kind) &&
 		(filter.DesiredState == "" || svc.DesiredState == filter.DesiredState) &&
@@ -355,13 +356,13 @@ func agentServiceMatchesMem(svc *domain.AgentService, filter store.AgentServiceF
 		(filter.ProfileName == "" || svc.ProfileName == filter.ProfileName)
 }
 
-func applyAgentServiceUpdateMem(svc *domain.AgentService, patch store.AgentServiceUpdate) {
+func applyAgentServiceUpdateMem(svc *agents.AgentServiceRecord, patch agents.AgentServiceUpdate) {
 	applyAgentServiceCoreUpdateMem(svc, patch)
 	applyAgentServiceExecutionUpdateMem(svc, patch)
 	applyAgentServicePolicyUpdateMem(svc, patch)
 }
 
-func applyAgentServiceCoreUpdateMem(svc *domain.AgentService, patch store.AgentServiceUpdate) {
+func applyAgentServiceCoreUpdateMem(svc *agents.AgentServiceRecord, patch agents.AgentServiceUpdate) {
 	if patch.Name != nil {
 		svc.Name = *patch.Name
 	}
@@ -385,7 +386,7 @@ func applyAgentServiceCoreUpdateMem(svc *domain.AgentService, patch store.AgentS
 	}
 }
 
-func applyAgentServiceExecutionUpdateMem(svc *domain.AgentService, patch store.AgentServiceUpdate) {
+func applyAgentServiceExecutionUpdateMem(svc *agents.AgentServiceRecord, patch agents.AgentServiceUpdate) {
 	if patch.ScheduleID != nil {
 		svc.ScheduleID = *patch.ScheduleID
 	}
@@ -409,7 +410,7 @@ func applyAgentServiceExecutionUpdateMem(svc *domain.AgentService, patch store.A
 	}
 }
 
-func applyAgentServicePolicyUpdateMem(svc *domain.AgentService, patch store.AgentServiceUpdate) {
+func applyAgentServicePolicyUpdateMem(svc *agents.AgentServiceRecord, patch agents.AgentServiceUpdate) {
 	if patch.Permissions != nil {
 		svc.Permissions = cloneStringSlice(*patch.Permissions)
 	}

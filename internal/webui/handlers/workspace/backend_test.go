@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tysonthomas9/loomcli/internal/ops"
+	"github.com/tysonthomas9/loomcli/internal/app/query/operationalview"
 	"github.com/tysonthomas9/loomcli/internal/webui/apperrors"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
@@ -22,14 +22,14 @@ func backendPatchRequest(wsID, body string) *http.Request {
 
 func TestHandleWorkspaceBackendPatch_Success(t *testing.T) {
 	svc := &mockWorkspaceService{
-		patchWorkspaceBackendFn: func(_ context.Context, wsID string, backend string) (*ops.WorkspaceData, error) {
+		patchWorkspaceBackendFn: func(_ context.Context, wsID string, backend string) (*operationalview.Workspace, error) {
 			if wsID != "ws-uuid-1" {
 				t.Errorf("expected wsID %q, got %q", "ws-uuid-1", wsID)
 			}
 			if backend != "codex" {
 				t.Errorf("expected backend %q, got %q", "codex", backend)
 			}
-			return &ops.WorkspaceData{Name: "my-ws"}, nil
+			return &operationalview.Workspace{Name: "my-ws"}, nil
 		},
 	}
 	handler := handleWorkspaceBackendPatch(svc)
@@ -103,7 +103,7 @@ func TestHandleWorkspaceBackendPatch_MissingWorkspaceID(t *testing.T) {
 
 func TestHandleWorkspaceBackendPatch_UnknownUUID(t *testing.T) {
 	svc := &mockWorkspaceService{
-		patchWorkspaceBackendFn: func(_ context.Context, _ string, _ string) (*ops.WorkspaceData, error) {
+		patchWorkspaceBackendFn: func(_ context.Context, _ string, _ string) (*operationalview.Workspace, error) {
 			return nil, apperrors.ErrNotFound("workspace not found")
 		},
 	}

@@ -14,9 +14,10 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	driverpkg "github.com/tysonthomas9/loomcli/internal/driver"
 	workflows "github.com/tysonthomas9/loomcli/internal/infra/workflowdistribution/authoring"
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 func TestWorkflowCloneJSONWritesSourceLayout(t *testing.T) {
@@ -62,7 +63,7 @@ func TestWorkflowCloneUnknownWorkflowReturnsError(t *testing.T) {
 	_, err := captureWorkflowStdout(t, func() error {
 		return runWorkflowClone(&cobra.Command{}, []string{"missing-workflow"})
 	})
-	if !errors.Is(err, domain.ErrNotFound) {
+	if !errors.Is(err, persistence.ErrNotFound) {
 		t.Fatalf("runWorkflowClone err = %v, want ErrNotFound", err)
 	}
 }
@@ -151,11 +152,11 @@ func TestWorkflowManagementAndStoreLaneCommandsJSON(t *testing.T) {
 	if err != nil {
 		t.Fatalf("runWorkflowRun: %v", err)
 	}
-	var run domain.DriverRun
+	var run execution.DriverRunRecord
 	if err := json.Unmarshal([]byte(runJSON), &run); err != nil {
 		t.Fatalf("decode run JSON %q: %v", runJSON, err)
 	}
-	if run.DriverVersionID != "version-1" || run.EpicID != "EPIC-1" || run.Status != domain.DriverRunQueued {
+	if run.DriverVersionID != "version-1" || run.EpicID != "EPIC-1" || run.Status != execution.DriverRunQueued {
 		t.Fatalf("run = %+v, want queued preview run on version-1", run)
 	}
 	var runPayload map[string]string
@@ -225,7 +226,7 @@ func TestWorkflowApproveUnknownVersionReturnsError(t *testing.T) {
 	_, err := captureWorkflowStdout(t, func() error {
 		return runWorkflowApprove(&cobra.Command{}, []string{workflows.BuiltinEpicRunnerWorkflowName})
 	})
-	if !errors.Is(err, domain.ErrNotFound) {
+	if !errors.Is(err, persistence.ErrNotFound) {
 		t.Fatalf("runWorkflowApprove err = %v, want ErrNotFound", err)
 	}
 }
@@ -273,7 +274,7 @@ func TestWorkflowVersionsUnknownWorkflowReturnsError(t *testing.T) {
 	_, err := captureWorkflowStdout(t, func() error {
 		return runWorkflowVersions(&cobra.Command{}, []string{"missing-workflow"})
 	})
-	if !errors.Is(err, domain.ErrNotFound) {
+	if !errors.Is(err, persistence.ErrNotFound) {
 		t.Fatalf("runWorkflowVersions err = %v, want ErrNotFound", err)
 	}
 }

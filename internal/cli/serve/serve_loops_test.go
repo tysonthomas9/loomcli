@@ -7,18 +7,21 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/automation"
+
+	workspaceowner "github.com/tysonthomas9/loomcli/internal/modules/workspace"
+
 	trigger "github.com/tysonthomas9/loomcli/internal/infra/automationruntime"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
-	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
-// readerCapableEvents satisfies store.TriggerEventStore AND the optional
-// store.IssueJournalReader capability, so a store returning it from
+// readerCapableEvents satisfies automation.TriggerEventStore AND the optional
+// automation.IssueJournalReader capability, so a store returning it from
 // TriggerEvents() passes the bridge's capability gate (the path a fleet-db
 // client takes). memstore deliberately does not implement IssueJournalReader.
 type readerCapableEvents struct {
-	store.TriggerEventStore
+	automation.TriggerEventStore
 }
 
 type discardIssueJournalEmitter struct{}
@@ -57,24 +60,24 @@ func (*repositoryRequirementTestBackend) AssignRepository(_ context.Context, com
 	return &workitems.IssueSummary{ID: command.IssueID, SourceRepo: command.Repository}, nil
 }
 
-func (readerCapableEvents) ListIssueEvents(_ context.Context, _, afterCursor string, _ int) ([]store.JournalEvent, string, bool, error) {
+func (readerCapableEvents) ListIssueEvents(_ context.Context, _, afterCursor string, _ int) ([]automation.JournalEvent, string, bool, error) {
 	return nil, afterCursor, false, nil
 }
 
 // readerCapableStore wraps a memstore but advertises the issue-journal reader
 // capability, so startIssueJournalBridge takes the enabled branch.
 type readerCapableStore struct {
-	store.Store
+	*memstore.Store
 }
 
-func (s readerCapableStore) TriggerEvents() store.TriggerEventStore {
+func (s readerCapableStore) TriggerEvents() automation.TriggerEventStore {
 	return readerCapableEvents{TriggerEventStore: s.Store.TriggerEvents()}
 }
 
 // seedWorkspace creates a workspace so an unscoped bridge sweep has a target.
-func seedWorkspace(t *testing.T, s store.Store, key string) {
+func seedWorkspace(t *testing.T, s *memstore.Store, key string) {
 	t.Helper()
-	if _, err := s.Workspaces().Create(context.Background(), store.WorkspaceCreate{Key: key, Name: key}); err != nil {
+	if _, err := s.Workspaces().Create(context.Background(), workspaceowner.WorkspaceCreate{Key: key, Name: key}); err != nil {
 		t.Fatalf("seed workspace %q: %v", key, err)
 	}
 }
@@ -88,7 +91,7 @@ func TestStartIssueJournalBridge_MemstoreGatedNoLoop(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// memstore does not implement store.IssueJournalReader, so the bridge must
+	// memstore does not implement automation.IssueJournalReader, so the bridge must
 	// not start: no cursor state file is ever created.
 	mem := memstore.New()
 	if err := startIssueJournalBridge(

@@ -1050,7 +1050,7 @@ func TestStartTmuxSession_CodexBackend_NoTermDumb(t *testing.T) {
 		TaskPause:    10 * time.Millisecond,
 	}
 
-	setTmuxRemainOnExit(t)
+	installBlockingLoomExecutable(t)
 
 	err := startTmuxSession(sessionName, opts, logFile)
 	if err != nil {
@@ -1099,7 +1099,7 @@ func TestStartTmuxSession_ClaudeBackend_HasTermDumb(t *testing.T) {
 		TaskPause:    10 * time.Millisecond,
 	}
 
-	setTmuxRemainOnExit(t)
+	installBlockingLoomExecutable(t)
 
 	err := startTmuxSession(sessionName, opts, logFile)
 	if err != nil {

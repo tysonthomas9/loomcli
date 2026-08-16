@@ -7,8 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
+
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 // outboxTestServer is the fake fleet-db for the task-run-event journal and
@@ -166,11 +167,11 @@ func TestPlatformOutboxClientTaskRunEventRoutes(t *testing.T) {
 
 	// Append derives EventID when empty and translates the camelCase
 	// domain type to the snake_case wire value (and back on decode).
-	event, err := client.TaskRunEvents().Append(t.Context(), store.TaskRunEventAppend{
+	event, err := client.TaskRunEvents().Append(t.Context(), execution.TaskRunEventAppend{
 		WorkspaceKey: "WS",
 		TaskRunID:    "task-run-1",
-		Type:         domain.TaskRunEventQueued,
-		Status:       domain.TaskRunQueued,
+		Type:         execution.TaskRunEventQueued,
+		Status:       execution.TaskRunRecordQueued,
 		Attempt:      1,
 		OccurredAt:   now,
 	})
@@ -180,11 +181,11 @@ func TestPlatformOutboxClientTaskRunEventRoutes(t *testing.T) {
 	if event.EventID != "task-run-1#1#taskRunQueued" || event.Seq != 7 {
 		t.Fatalf("Append event = %+v, want derived event id + seq 7", event)
 	}
-	if event.Type != domain.TaskRunEventQueued || event.Status != domain.TaskRunQueued {
+	if event.Type != execution.TaskRunEventQueued || event.Status != execution.TaskRunRecordQueued {
 		t.Fatalf("Append enums = type %q status %q, want camelCase domain values", event.Type, event.Status)
 	}
 
-	events, err := client.TaskRunEvents().ListSince(t.Context(), "WS", store.TaskRunEventFilter{
+	events, err := client.TaskRunEvents().ListSince(t.Context(), "WS", execution.TaskRunEventFilter{
 		EpicID:      "WS-1",
 		DriverRunID: "run-1",
 		AfterSeq:    7,
@@ -193,7 +194,7 @@ func TestPlatformOutboxClientTaskRunEventRoutes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListSince: %v", err)
 	}
-	if len(events) != 1 || events[0].Seq != 8 || events[0].Type != domain.TaskRunEventCompleted {
+	if len(events) != 1 || events[0].Seq != 8 || events[0].Type != execution.TaskRunEventCompleted {
 		t.Fatalf("ListSince = %+v, want one taskRunCompleted event at seq 8", events)
 	}
 }
@@ -207,10 +208,10 @@ func TestPlatformOutboxClientOutboxRoutes(t *testing.T) {
 	}
 	now := time.Date(2026, 6, 11, 10, 0, 0, 0, time.UTC)
 
-	created, err := client.Outbox().Create(t.Context(), store.OutboxCreate{
+	created, err := client.Outbox().Create(t.Context(), execution.OutboxCreate{
 		WorkspaceKey: "WS",
 		OutboxID:     "outbox-1",
-		Kind:         domain.OutboxKindLeadAssignment,
+		Kind:         execution.OutboxKindLeadAssignment,
 		EpicID:       "WS-1",
 		TargetAgent:  "lead",
 		Body:         "epic assigned",
@@ -219,16 +220,16 @@ func TestPlatformOutboxClientOutboxRoutes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	if created.OutboxID != "outbox-1" || created.Seq != 1 || created.Kind != domain.OutboxKindLeadAssignment || created.Status != domain.OutboxStatusPending {
+	if created.OutboxID != "outbox-1" || created.Seq != 1 || created.Kind != execution.OutboxKindLeadAssignment || created.Status != execution.OutboxDeliveryStatusPending {
 		t.Fatalf("Create = %+v, want pending leadAssignment outbox-1", created)
 	}
 
 	// Dedupe collision: same DedupeKey with a new OutboxID returns the
 	// existing record, not a new row.
-	dup, err := client.Outbox().Create(t.Context(), store.OutboxCreate{
+	dup, err := client.Outbox().Create(t.Context(), execution.OutboxCreate{
 		WorkspaceKey: "WS",
 		OutboxID:     "outbox-2",
-		Kind:         domain.OutboxKindLeadAssignment,
+		Kind:         execution.OutboxKindLeadAssignment,
 		EpicID:       "WS-1",
 		TargetAgent:  "lead",
 		Body:         "epic assigned",
@@ -241,17 +242,17 @@ func TestPlatformOutboxClientOutboxRoutes(t *testing.T) {
 		t.Fatalf("duplicate Create = %+v, want existing outbox-1", dup)
 	}
 
-	due, err := client.Outbox().ListDue(t.Context(), "WS", store.OutboxDueFilter{Now: now, Limit: 5})
+	due, err := client.Outbox().ListDue(t.Context(), "WS", execution.OutboxDueFilter{Now: now, Limit: 5})
 	if err != nil {
 		t.Fatalf("ListDue: %v", err)
 	}
-	if len(due) != 1 || due[0].OutboxID != "outbox-1" || due[0].Kind != domain.OutboxKindLeadAssignment {
+	if len(due) != 1 || due[0].OutboxID != "outbox-1" || due[0].Kind != execution.OutboxKindLeadAssignment {
 		t.Fatalf("ListDue = %+v, want one leadAssignment record", due)
 	}
 
 	retryAt := now.Add(30 * time.Second)
-	marked, err := client.Outbox().MarkResult(t.Context(), "WS", "outbox-1", store.OutboxDeliveryUpdate{
-		Status:      domain.OutboxStatusPending,
+	marked, err := client.Outbox().MarkResult(t.Context(), "WS", "outbox-1", execution.OutboxDeliveryUpdate{
+		Status:      execution.OutboxDeliveryStatusPending,
 		Attempt:     1,
 		NextRetryAt: &retryAt,
 		LastError:   "lead busy",
@@ -259,7 +260,7 @@ func TestPlatformOutboxClientOutboxRoutes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("MarkResult: %v", err)
 	}
-	if marked.Status != domain.OutboxStatusPending || marked.Attempt != 1 || marked.NextRetryAt == nil || !marked.NextRetryAt.Equal(retryAt) {
+	if marked.Status != execution.OutboxDeliveryStatusPending || marked.Attempt != 1 || marked.NextRetryAt == nil || !marked.NextRetryAt.Equal(retryAt) {
 		t.Fatalf("MarkResult = %+v, want rescheduled pending record", marked)
 	}
 }
@@ -279,10 +280,10 @@ func TestPlatformOutboxClientSentinelMapping(t *testing.T) {
 			status: http.StatusNotFound,
 			code:   "not_found",
 			call: func(t *testing.T, c *Client) error {
-				_, err := c.Outbox().MarkResult(t.Context(), "WS", "missing", store.OutboxDeliveryUpdate{Status: domain.OutboxStatusDelivered})
+				_, err := c.Outbox().MarkResult(t.Context(), "WS", "missing", execution.OutboxDeliveryUpdate{Status: execution.OutboxDeliveryStatusDelivered})
 				return err
 			},
-			sentinel: domain.ErrNotFound,
+			sentinel: persistence.ErrNotFound,
 		},
 		{
 			name:   "outbox get missing record",
@@ -292,27 +293,27 @@ func TestPlatformOutboxClientSentinelMapping(t *testing.T) {
 				_, err := c.Outbox().Get(t.Context(), "WS", "missing")
 				return err
 			},
-			sentinel: domain.ErrNotFound,
+			sentinel: persistence.ErrNotFound,
 		},
 		{
 			name:   "append invalid event",
 			status: http.StatusBadRequest,
 			code:   "invalid_parameter",
 			call: func(t *testing.T, c *Client) error {
-				_, err := c.TaskRunEvents().Append(t.Context(), store.TaskRunEventAppend{WorkspaceKey: "WS", TaskRunID: "task-run-1", Type: domain.TaskRunEventQueued})
+				_, err := c.TaskRunEvents().Append(t.Context(), execution.TaskRunEventAppend{WorkspaceKey: "WS", TaskRunID: "task-run-1", Type: execution.TaskRunEventQueued})
 				return err
 			},
-			sentinel: domain.ErrInvalid,
+			sentinel: persistence.ErrInvalid,
 		},
 		{
 			name:   "outbox create invalid",
 			status: http.StatusUnprocessableEntity,
 			code:   "invalid_parameter",
 			call: func(t *testing.T, c *Client) error {
-				_, err := c.Outbox().Create(t.Context(), store.OutboxCreate{WorkspaceKey: "WS", Kind: domain.OutboxKindLeadAssignment})
+				_, err := c.Outbox().Create(t.Context(), execution.OutboxCreate{WorkspaceKey: "WS", Kind: execution.OutboxKindLeadAssignment})
 				return err
 			},
-			sentinel: domain.ErrInvalid,
+			sentinel: persistence.ErrInvalid,
 		},
 	}
 	for _, tt := range tests {
@@ -366,7 +367,7 @@ func TestPlatformOutboxClientGetRoute(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
-	if record.Kind != domain.OutboxKindLeadTaskMessage || record.Status != domain.OutboxStatusDelivered || record.DeliveredAt == nil {
+	if record.Kind != execution.OutboxKindLeadTaskMessage || record.Status != execution.OutboxDeliveryStatusDelivered || record.DeliveredAt == nil {
 		t.Fatalf("Get = %+v, want delivered leadTaskMessage", record)
 	}
 }

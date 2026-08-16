@@ -3,24 +3,24 @@ package storeadapter
 import (
 	"context"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
+
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/localworkspace"
-	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
-	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
 // NewTerminalPlacement builds Interaction's machine-local read adapter from
 // existing Store and local-workspace projections. The adapter never mutates a
 // capability aggregate or exposes private runtime handles to HTTP delivery.
 func NewTerminalPlacement(
-	orchestration store.OrchestrationSessionStore,
+	orchestration interaction.OrchestrationSessionStore,
 	workspacePath func(context.Context, string) string,
 ) interaction.AgentTerminalPlacement {
 	return terminalPlacement{orchestration: orchestration, workspacePath: workspacePath}
 }
 
 type terminalPlacement struct {
-	orchestration store.OrchestrationSessionStore
+	orchestration interaction.OrchestrationSessionStore
 	workspacePath func(context.Context, string) string
 }
 
@@ -31,7 +31,7 @@ func (adapter terminalPlacement) FindActiveOrchestrationSession(
 	if adapter.orchestration == nil {
 		return "", nil
 	}
-	return store.OrchestrationSessionIDFor(ctx, adapter.orchestration, workspaceKey, agentID)
+	return interaction.OrchestrationSessionIDFor(ctx, adapter.orchestration, workspaceKey, agentID)
 }
 
 func (terminalPlacement) AgentWorktree(_ context.Context, workspaceKey, agentID string) string {

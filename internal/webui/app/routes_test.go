@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	workspaceowner "github.com/tysonthomas9/loomcli/internal/modules/workspace"
+
 	"github.com/tysonthomas9/loomcli/internal/app/query/sessionarchive"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
@@ -16,9 +18,8 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/agentcoord"
 	"github.com/tysonthomas9/loomcli/internal/webui/workspacecoord"
 
+	"github.com/tysonthomas9/loomcli/internal/app/query/operationalview"
 	"github.com/tysonthomas9/loomcli/internal/infra/pty"
-	"github.com/tysonthomas9/loomcli/internal/ops"
-	"github.com/tysonthomas9/loomcli/internal/store"
 	healthhandlers "github.com/tysonthomas9/loomcli/internal/webui/handlers/health"
 	hterminal "github.com/tysonthomas9/loomcli/internal/webui/handlers/terminal"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
@@ -449,7 +450,7 @@ func TestSetupRoutes_WorkspaceMonitorStatusInjectsWorkspace(t *testing.T) {
 
 func TestSetupRoutes_WorkspaceGetUsesCanonicalWorkspace(t *testing.T) {
 	st := memstore.New()
-	if _, err := st.Workspaces().Create(context.Background(), store.WorkspaceCreate{Key: "canonical-ws", Name: "Canonical"}); err != nil {
+	if _, err := st.Workspaces().Create(context.Background(), workspaceowner.WorkspaceCreate{Key: "canonical-ws", Name: "Canonical"}); err != nil {
 		t.Fatal(err)
 	}
 	catalog, err := NewWorkspaceCapability(st.Workspaces(), st.Repos())
@@ -458,7 +459,7 @@ func TestSetupRoutes_WorkspaceGetUsesCanonicalWorkspace(t *testing.T) {
 	}
 	wsSvc := workspacecoord.NewWorkspaceService(workspacecoord.WorkspaceServiceConfig{Topology: st, Workspace: catalog})
 	app := &Server{
-		config:           webui.ServerConfig{Store: st},
+		config:           webui.ServerConfig{ProjectionRecords: st},
 		workspaceSvc:     wsSvc,
 		workspaceCatalog: catalog,
 		workspaceStore:   st.Workspaces(),
@@ -542,8 +543,8 @@ func TestSetupRoutes_WorkspaceBackendGetEndpoint(t *testing.T) {
 // (which returns workspaceResponse shape) rather than handlePatchBackendConfig.
 func TestSetupRoutes_WorkspaceBackendPatchEndpoint(t *testing.T) {
 	wsSvc := &mockWorkspaceService{
-		patchWorkspaceBackendFn: func(_ context.Context, _ string, _ string) (*ops.WorkspaceData, error) {
-			return &ops.WorkspaceData{Name: "test-ws", Path: "/tmp/test"}, nil
+		patchWorkspaceBackendFn: func(_ context.Context, _ string, _ string) (*operationalview.Workspace, error) {
+			return &operationalview.Workspace{Name: "test-ws", Path: "/tmp/test"}, nil
 		},
 	}
 	app := &Server{config: webui.ServerConfig{}, wsResolveFn: testWorkspaceResolver("test-ws"), workspaceSvc: wsSvc}
@@ -594,7 +595,7 @@ func TestSetupRoutes_WorkspaceBackendPatchEndpoint(t *testing.T) {
 // body decoding would break and this test would catch it.
 func TestSetupRoutes_WorkspaceRenamePatchEndpoint(t *testing.T) {
 	st := memstore.New()
-	if _, err := st.Workspaces().Create(context.Background(), store.WorkspaceCreate{Key: "test-ws", Name: "test-ws"}); err != nil {
+	if _, err := st.Workspaces().Create(context.Background(), workspaceowner.WorkspaceCreate{Key: "test-ws", Name: "test-ws"}); err != nil {
 		t.Fatal(err)
 	}
 	catalog, err := NewWorkspaceCapability(st.Workspaces(), st.Repos())
@@ -603,7 +604,7 @@ func TestSetupRoutes_WorkspaceRenamePatchEndpoint(t *testing.T) {
 	}
 	wsSvc := workspacecoord.NewWorkspaceService(workspacecoord.WorkspaceServiceConfig{Topology: st, Workspace: catalog})
 	app := &Server{
-		config:           webui.ServerConfig{Store: st},
+		config:           webui.ServerConfig{ProjectionRecords: st},
 		wsResolveFn:      testWorkspaceResolver("test-ws"),
 		workspaceSvc:     wsSvc,
 		workspaceCatalog: catalog,
@@ -657,9 +658,9 @@ func TestSetupRoutes_WorkspaceRenamePatchEndpoint(t *testing.T) {
 func TestSetupRoutes_WorkspaceBackendPatchReadsBody(t *testing.T) {
 	var capturedBackend string
 	wsSvc := &mockWorkspaceService{
-		patchWorkspaceBackendFn: func(_ context.Context, _ string, backend string) (*ops.WorkspaceData, error) {
+		patchWorkspaceBackendFn: func(_ context.Context, _ string, backend string) (*operationalview.Workspace, error) {
 			capturedBackend = backend
-			return &ops.WorkspaceData{Name: "test-ws", Path: "/tmp/test"}, nil
+			return &operationalview.Workspace{Name: "test-ws", Path: "/tmp/test"}, nil
 		},
 	}
 	app := &Server{config: webui.ServerConfig{}, wsResolveFn: testWorkspaceResolver("test-ws"), workspaceSvc: wsSvc}

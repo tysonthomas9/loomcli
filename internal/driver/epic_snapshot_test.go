@@ -4,13 +4,15 @@ import (
 	"context"
 	"testing"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
+
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 
+	workspaceowner "github.com/tysonthomas9/loomcli/internal/modules/workspace"
+
 	"github.com/tysonthomas9/loomcli/internal/cli/testdata/clitest"
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
-	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
 func listResultFromSummaries(summaries []workitems.IssueSummary) *workitems.ListResult {
@@ -47,10 +49,10 @@ func TestLoadEpicSnapshotCountsOnlyOpenChildren(t *testing.T) {
 func TestListActiveTaskRunsReturnsQueuedAndRunningOnly(t *testing.T) {
 	ctx := context.Background()
 	st := memstore.New()
-	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "WS", Name: "workspace"}); err != nil {
+	if _, err := st.Workspaces().Create(ctx, workspaceowner.WorkspaceCreate{Key: "WS", Name: "workspace"}); err != nil {
 		t.Fatalf("Create workspace: %v", err)
 	}
-	if _, err := st.Drivers().Create(ctx, store.DriverCreate{
+	if _, err := st.Drivers().Create(ctx, workflowcatalog.DriverCreate{
 		WorkspaceKey: "WS",
 		DriverID:     "driver-1",
 		Name:         "driver-1",
@@ -59,7 +61,7 @@ func TestListActiveTaskRunsReturnsQueuedAndRunningOnly(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("Create driver: %v", err)
 	}
-	if _, err := st.DriverVersions().Create(ctx, store.DriverVersionCreate{
+	if _, err := st.DriverVersions().Create(ctx, workflowcatalog.DriverVersionCreate{
 		WorkspaceKey:     "WS",
 		VersionID:        "version-1",
 		DriverID:         "driver-1",
@@ -77,7 +79,7 @@ func TestListActiveTaskRunsReturnsQueuedAndRunningOnly(t *testing.T) {
 	if _, err := st.ActivateDriverVersionForTest(ctx, "WS", "driver-1", "version-1"); err != nil {
 		t.Fatalf("Activate driver version: %v", err)
 	}
-	if _, err := st.DriverRuns().Create(ctx, store.DriverRunCreate{
+	if _, err := st.DriverRuns().Create(ctx, execution.DriverRunCreate{
 		WorkspaceKey:    "WS",
 		RunID:           "run-1",
 		DriverID:        "driver-1",
@@ -86,7 +88,7 @@ func TestListActiveTaskRunsReturnsQueuedAndRunningOnly(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("Create driver run: %v", err)
 	}
-	if _, err := st.DriverRuns().Create(ctx, store.DriverRunCreate{
+	if _, err := st.DriverRuns().Create(ctx, execution.DriverRunCreate{
 		WorkspaceKey:    "WS",
 		RunID:           "run-2",
 		DriverID:        "driver-1",
@@ -95,11 +97,11 @@ func TestListActiveTaskRunsReturnsQueuedAndRunningOnly(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("Create other driver run: %v", err)
 	}
-	for _, run := range []store.TaskRunCreate{
-		{WorkspaceKey: "WS", TaskRunID: "task-run-queued", DriverRunID: "run-1", TaskID: "TASK-1", Status: domain.TaskRunQueued},
-		{WorkspaceKey: "WS", TaskRunID: "task-run-running", DriverRunID: "run-1", TaskID: "TASK-2", Status: domain.TaskRunRunning},
-		{WorkspaceKey: "WS", TaskRunID: "task-run-completed", DriverRunID: "run-1", TaskID: "TASK-3", Status: domain.TaskRunCompleted},
-		{WorkspaceKey: "WS", TaskRunID: "task-run-other", DriverRunID: "run-2", TaskID: "TASK-4", Status: domain.TaskRunRunning},
+	for _, run := range []execution.TaskRunCreate{
+		{WorkspaceKey: "WS", TaskRunID: "task-run-queued", DriverRunID: "run-1", TaskID: "TASK-1", Status: execution.TaskRunRecordQueued},
+		{WorkspaceKey: "WS", TaskRunID: "task-run-running", DriverRunID: "run-1", TaskID: "TASK-2", Status: execution.TaskRunRecordRunning},
+		{WorkspaceKey: "WS", TaskRunID: "task-run-completed", DriverRunID: "run-1", TaskID: "TASK-3", Status: execution.TaskRunRecordCompleted},
+		{WorkspaceKey: "WS", TaskRunID: "task-run-other", DriverRunID: "run-2", TaskID: "TASK-4", Status: execution.TaskRunRecordRunning},
 	} {
 		if _, err := st.TaskRuns().Create(ctx, run); err != nil {
 			t.Fatalf("Create task run %s: %v", run.TaskRunID, err)
@@ -116,7 +118,7 @@ func TestListActiveTaskRunsReturnsQueuedAndRunningOnly(t *testing.T) {
 	ids := map[string]bool{}
 	for _, taskRun := range got.TaskRuns {
 		ids[taskRun.ID] = true
-		if taskRun.Status != domain.TaskRunQueued && taskRun.Status != domain.TaskRunRunning {
+		if taskRun.Status != execution.TaskRunRecordQueued && taskRun.Status != execution.TaskRunRecordRunning {
 			t.Fatalf("task run %s has terminal status %s", taskRun.ID, taskRun.Status)
 		}
 	}

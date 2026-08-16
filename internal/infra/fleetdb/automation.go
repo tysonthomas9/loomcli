@@ -12,8 +12,7 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
-
-	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 )
 
 var (
@@ -216,7 +215,7 @@ type AutomationBindingDispatch struct {
 }
 
 type AutomationBindingDispatchResult struct {
-	DriverRun *domain.DriverRun `json:"driver_run,omitempty"`
+	DriverRun *execution.DriverRunRecord `json:"driver_run,omitempty"`
 	// DriverRunSnapshot preserves the exact committed Fleet response object,
 	// including fields unknown to this client version. It is never sent back to Fleet.
 	DriverRunSnapshot json.RawMessage                   `json:"-"`
@@ -262,7 +261,7 @@ const (
 type AutomationDeliveryDispatchResult struct {
 	Event            *automation.Event
 	Delivery         *automation.Delivery
-	DriverRun        *domain.DriverRun
+	DriverRun        *execution.DriverRunRecord
 	Outcome          AutomationDeliveryDispatchOutcome
 	BusyRunID        string
 	SupersededRunIDs []string
@@ -505,7 +504,7 @@ func (s *automationStore) DispatchAutomationBinding(ctx context.Context, dispatc
 		RunReused:        wire.RunReused, Replayed: wire.Replayed,
 	}
 	if len(wire.DriverRun) > 0 && string(wire.DriverRun) != "null" {
-		var run domain.DriverRun
+		var run execution.DriverRunRecord
 		if err := json.Unmarshal(wire.DriverRun, &run); err != nil {
 			return nil, fmt.Errorf("decode automation binding DriverRun: %v: %w", err, ErrAutomationInvalid)
 		}
@@ -604,7 +603,7 @@ type automationClaimedDeliveryWire struct {
 type automationDeliveryDispatchWire struct {
 	Event            *automationEventWire              `json:"event"`
 	Delivery         *automation.Delivery              `json:"delivery"`
-	DriverRun        *domain.DriverRun                 `json:"driver_run,omitempty"`
+	DriverRun        *execution.DriverRunRecord        `json:"driver_run,omitempty"`
 	Outcome          AutomationDeliveryDispatchOutcome `json:"outcome"`
 	BusyRunID        string                            `json:"busy_run_id,omitempty"`
 	SupersededRunIDs []string                          `json:"superseded_run_ids,omitempty"`

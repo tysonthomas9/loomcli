@@ -13,15 +13,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/modules/automation"
-	"github.com/tysonthomas9/loomcli/internal/modules/execution"
-
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
+
+	"github.com/tysonthomas9/loomcli/internal/modules/automation"
+
 	trigger "github.com/tysonthomas9/loomcli/internal/infra/automationruntime"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
-	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 const matcherWS = "WS"
@@ -31,7 +31,7 @@ const matcherWS = "WS"
 func seedAwaitMatcherCatalog(t *testing.T, s *memstore.Store) {
 	t.Helper()
 	ctx := t.Context()
-	if _, err := s.Drivers().Create(ctx, store.DriverCreate{
+	if _, err := s.Drivers().Create(ctx, workflowcatalog.DriverCreate{
 		WorkspaceKey: matcherWS, DriverID: "awaiter", Name: "awaiter",
 		OwnerType: workflowcatalog.DriverOwnerSystem, Status: workflowcatalog.DriverStatusActive,
 	}); err != nil {
@@ -39,7 +39,7 @@ func seedAwaitMatcherCatalog(t *testing.T, s *memstore.Store) {
 	}
 	// VersionID is workspace-unique in memstore, so use a driver-scoped id —
 	// the loopback/cron tests seed their own "v1" alongside this catalog.
-	if _, err := s.DriverVersions().Create(ctx, store.DriverVersionCreate{
+	if _, err := s.DriverVersions().Create(ctx, workflowcatalog.DriverVersionCreate{
 		WorkspaceKey: matcherWS, VersionID: "awaiter-v1", DriverID: "awaiter", Version: 1,
 		SourceDigest: "sha256:s", BundleDigest: "sha256:b", ValidationStatus: workflowcatalog.DriverVersionValidationPassed,
 	}); err != nil {
@@ -49,10 +49,10 @@ func seedAwaitMatcherCatalog(t *testing.T, s *memstore.Store) {
 
 // createClaimedRun creates and claims one run so it can be suspended (or left
 // running for the pending->suspend-window cases).
-func createClaimedRun(t *testing.T, s *memstore.Store, runID string) *domain.DriverRun {
+func createClaimedRun(t *testing.T, s *memstore.Store, runID string) *execution.DriverRunRecord {
 	t.Helper()
 	ctx := t.Context()
-	if _, err := s.DriverRuns().Create(ctx, store.DriverRunCreate{
+	if _, err := s.DriverRuns().Create(ctx, execution.DriverRunCreate{
 		WorkspaceKey: matcherWS, RunID: runID, DriverID: "awaiter", DriverVersionID: "awaiter-v1", Entrypoint: "run",
 	}); err != nil {
 		t.Fatalf("Create run %s: %v", runID, err)
@@ -67,8 +67,8 @@ func createClaimedRun(t *testing.T, s *memstore.Store, runID string) *domain.Dri
 // registerPendingAwait registers run's first await and asserts it pending.
 func registerPendingAwait(t *testing.T, s *memstore.Store, runID, pattern string, actorAllow []string) string {
 	t.Helper()
-	key := domain.AwaitInstanceKey(runID, 1)
-	res, err := s.Awaits().RegisterAwaitAndCheck(t.Context(), matcherWS, store.AwaitRegistration{
+	key := execution.AwaitInstanceKey(runID, 1)
+	res, err := s.Awaits().RegisterAwaitAndCheck(t.Context(), matcherWS, execution.AwaitRegistration{
 		InstanceKey: key, RunID: runID, Pattern: pattern, ActorAllow: actorAllow,
 		Deadline: time.Now().Add(time.Hour),
 	})
@@ -81,7 +81,7 @@ func registerPendingAwait(t *testing.T, s *memstore.Store, runID, pattern string
 	return key
 }
 
-func suspendRun(t *testing.T, s *memstore.Store, run *domain.DriverRun, instanceKey string) {
+func suspendRun(t *testing.T, s *memstore.Store, run *execution.DriverRunRecord, instanceKey string) {
 	t.Helper()
 	if _, err := s.DriverRuns().Suspend(t.Context(), matcherWS, run.RunID,
 		run.NodeID, run.LeaseID, run.FencingToken, instanceKey); err != nil {
@@ -99,7 +99,7 @@ func newSuspendedAwaitRun(t *testing.T, s *memstore.Store, runID, pattern string
 	return key
 }
 
-func runStatus(t *testing.T, s *memstore.Store, runID string) *domain.DriverRun {
+func runStatus(t *testing.T, s *memstore.Store, runID string) *execution.DriverRunRecord {
 	t.Helper()
 	run, err := s.DriverRuns().Get(t.Context(), matcherWS, runID)
 	if err != nil {
@@ -108,7 +108,7 @@ func runStatus(t *testing.T, s *memstore.Store, runID string) *domain.DriverRun 
 	return run
 }
 
-func pendingAwaits(t *testing.T, s *memstore.Store, pattern string) []*domain.AwaitInstance {
+func pendingAwaits(t *testing.T, s *memstore.Store, pattern string) []*execution.AwaitInstance {
 	t.Helper()
 	awaits, err := s.Awaits().ListAwaitsByPattern(t.Context(), matcherWS, pattern)
 	if err != nil {
@@ -117,37 +117,42 @@ func pendingAwaits(t *testing.T, s *memstore.Store, pattern string) []*domain.Aw
 	return awaits
 }
 
-func newAwaitMatcher(t testing.TB, st store.Store) *trigger.AwaitMatcher {
+type awaitMatcherFixture interface {
+	Awaits() execution.AwaitStore
+	DriverRuns() execution.DriverRunStore
+}
+
+func newAwaitMatcher(t testing.TB, st awaitMatcherFixture) *trigger.AwaitMatcher {
 	t.Helper()
-	resolver, ok := st.Awaits().(store.AtomicAwaitStore)
+	resolver, ok := st.Awaits().(execution.AtomicAwaitStore)
 	if !ok {
-		t.Fatalf("await store %T does not implement store.AtomicAwaitStore", st.Awaits())
+		t.Fatalf("await store %T does not implement execution.AtomicAwaitStore", st.Awaits())
 	}
 	return trigger.NewAwaitMatcherWithResolver(st.Awaits(), st.DriverRuns(), resolver)
 }
 
 type atomicFailureStore struct {
-	store.Store
+	*memstore.Store
 	awaits *atomicFailureAwaitStore
 }
 
-func newAtomicFailureStore(inner store.Store, mode string) *atomicFailureStore {
+func newAtomicFailureStore(inner *memstore.Store, mode string) *atomicFailureStore {
 	awaits := inner.Awaits()
 	return &atomicFailureStore{
 		Store: inner,
 		awaits: &atomicFailureAwaitStore{
 			AwaitStore: awaits,
-			atomic:     awaits.(store.AtomicAwaitStore),
+			atomic:     awaits.(execution.AtomicAwaitStore),
 			mode:       mode,
 		},
 	}
 }
 
-func (s *atomicFailureStore) Awaits() store.AwaitStore { return s.awaits }
+func (s *atomicFailureStore) Awaits() execution.AwaitStore { return s.awaits }
 
 type atomicFailureAwaitStore struct {
-	store.AwaitStore
-	atomic store.AtomicAwaitStore
+	execution.AwaitStore
+	atomic execution.AtomicAwaitStore
 	mode   string
 	mu     sync.Mutex
 	failed bool
@@ -181,7 +186,7 @@ func (s *atomicFailureAwaitStore) ResolveAwaitAndResume(
 func TestAwaitMatcherDispatchResolvesAndResumes(t *testing.T) {
 	s := memstore.New()
 	seedAwaitMatcherCatalog(t, s)
-	pattern := domain.AwaitEventKey("pull_request", "acme/widgets#7")
+	pattern := execution.AwaitEventKey("pull_request", "acme/widgets#7")
 	key := newSuspendedAwaitRun(t, s, "run-a", pattern, nil)
 
 	matcher := newAwaitMatcher(t, s)
@@ -202,14 +207,14 @@ func TestAwaitMatcherDispatchResolvesAndResumes(t *testing.T) {
 	}
 
 	run := runStatus(t, s, "run-a")
-	if run.Status != domain.DriverRunQueued || run.ResumeSourceEventID != "evt-1" {
+	if run.Status != execution.DriverRunQueued || run.ResumeSourceEventID != "evt-1" {
 		t.Fatalf("run = %s/%s, want queued resumed by evt-1", run.Status, run.ResumeSourceEventID)
 	}
 	satisfied, err := s.Awaits().GetSatisfiedAwait(t.Context(), matcherWS, key)
 	if err != nil {
 		t.Fatalf("GetSatisfiedAwait: %v", err)
 	}
-	if satisfied.Status != domain.AwaitSatisfied || satisfied.SatisfiedByEventID != "evt-1" ||
+	if satisfied.Status != execution.AwaitSatisfied || satisfied.SatisfiedByEventID != "evt-1" ||
 		!bytes.Equal(satisfied.SatisfiedPayload, payload) {
 		t.Fatalf("satisfied row = %+v, want evt-1 with payload inline", satisfied)
 	}
@@ -218,7 +223,7 @@ func TestAwaitMatcherDispatchResolvesAndResumes(t *testing.T) {
 func TestAwaitMatcherWithoutExplicitResolverFailsClosed(t *testing.T) {
 	s := memstore.New()
 	seedAwaitMatcherCatalog(t, s)
-	pattern := domain.AwaitEventKey("approval.granted", "deploy-no-resolver")
+	pattern := execution.AwaitEventKey("approval.granted", "deploy-no-resolver")
 	key := newSuspendedAwaitRun(t, s, "run-no-resolver", pattern, []string{"alice"})
 
 	matcher := &trigger.AwaitMatcher{AwaitStore: s.Awaits(), DriverRunStore: s.DriverRuns()}
@@ -233,7 +238,7 @@ func TestAwaitMatcherWithoutExplicitResolverFailsClosed(t *testing.T) {
 	if got := pendingAwaits(t, s, pattern); len(got) != 1 || got[0].InstanceKey != key {
 		t.Fatalf("pending awaits = %+v, want %s untouched", got, key)
 	}
-	if run := runStatus(t, s, "run-no-resolver"); run.Status != domain.DriverRunSuspendedAwaitingEvent {
+	if run := runStatus(t, s, "run-no-resolver"); run.Status != execution.DriverRunSuspendedAwait {
 		t.Fatalf("run status = %s, want suspended", run.Status)
 	}
 }
@@ -241,7 +246,7 @@ func TestAwaitMatcherWithoutExplicitResolverFailsClosed(t *testing.T) {
 func TestAwaitMatcherAtomicPreCommitFailureRedispatchConverges(t *testing.T) {
 	s := memstore.New()
 	seedAwaitMatcherCatalog(t, s)
-	pattern := domain.AwaitEventKey("approval.granted", "deploy-atomic-pre")
+	pattern := execution.AwaitEventKey("approval.granted", "deploy-atomic-pre")
 	key := newSuspendedAwaitRun(t, s, "run-atomic-pre", pattern, []string{"alice"})
 	matcher := newAwaitMatcher(t, newAtomicFailureStore(s, "pre_commit"))
 	event := trigger.AwaitDispatchEvent{
@@ -255,7 +260,7 @@ func TestAwaitMatcherAtomicPreCommitFailureRedispatchConverges(t *testing.T) {
 	if got := pendingAwaits(t, s, pattern); len(got) != 1 || got[0].InstanceKey != key {
 		t.Fatalf("await after pre-commit failure = %+v, want %s pending/indexed", got, key)
 	}
-	if run := runStatus(t, s, "run-atomic-pre"); run.Status != domain.DriverRunSuspendedAwaitingEvent {
+	if run := runStatus(t, s, "run-atomic-pre"); run.Status != execution.DriverRunSuspendedAwait {
 		t.Fatalf("run after pre-commit failure = %s, want suspended", run.Status)
 	}
 
@@ -263,7 +268,7 @@ func TestAwaitMatcherAtomicPreCommitFailureRedispatchConverges(t *testing.T) {
 	if err != nil || second.Resolved() != 1 {
 		t.Fatalf("exact redispatch = %+v, %v; want one resolved", second, err)
 	}
-	if run := runStatus(t, s, "run-atomic-pre"); run.Status != domain.DriverRunQueued || run.ResumeSourceEventID != event.EventID {
+	if run := runStatus(t, s, "run-atomic-pre"); run.Status != execution.DriverRunQueued || run.ResumeSourceEventID != event.EventID {
 		t.Fatalf("run after exact redispatch = %s/%s, want queued by %s", run.Status, run.ResumeSourceEventID, event.EventID)
 	}
 }
@@ -271,7 +276,7 @@ func TestAwaitMatcherAtomicPreCommitFailureRedispatchConverges(t *testing.T) {
 func TestAwaitMatcherAtomicLostResponseIsAlreadyConverged(t *testing.T) {
 	s := memstore.New()
 	seedAwaitMatcherCatalog(t, s)
-	pattern := domain.AwaitEventKey("approval.granted", "deploy-atomic-post")
+	pattern := execution.AwaitEventKey("approval.granted", "deploy-atomic-post")
 	key := newSuspendedAwaitRun(t, s, "run-atomic-post", pattern, []string{"alice"})
 	matcher := newAwaitMatcher(t, newAtomicFailureStore(s, "post_commit"))
 	event := trigger.AwaitDispatchEvent{
@@ -286,7 +291,7 @@ func TestAwaitMatcherAtomicLostResponseIsAlreadyConverged(t *testing.T) {
 	if readErr != nil || satisfied.SatisfiedByEventID != event.EventID {
 		t.Fatalf("await after lost response = %+v, %v", satisfied, readErr)
 	}
-	if run := runStatus(t, s, "run-atomic-post"); run.Status != domain.DriverRunQueued || run.ResumeSourceEventID != event.EventID {
+	if run := runStatus(t, s, "run-atomic-post"); run.Status != execution.DriverRunQueued || run.ResumeSourceEventID != event.EventID {
 		t.Fatalf("run after lost response = %s/%s, want already queued by %s", run.Status, run.ResumeSourceEventID, event.EventID)
 	}
 
@@ -294,7 +299,7 @@ func TestAwaitMatcherAtomicLostResponseIsAlreadyConverged(t *testing.T) {
 	if err != nil || len(second.Records) != 0 {
 		t.Fatalf("exact redispatch = %+v, %v; want stable no-op", second, err)
 	}
-	if run := runStatus(t, s, "run-atomic-post"); run.Status != domain.DriverRunQueued || run.ResumeSourceEventID != event.EventID {
+	if run := runStatus(t, s, "run-atomic-post"); run.Status != execution.DriverRunQueued || run.ResumeSourceEventID != event.EventID {
 		t.Fatalf("run after exact redispatch = %s/%s, want stable queued", run.Status, run.ResumeSourceEventID)
 	}
 }
@@ -331,7 +336,7 @@ func TestAwaitMatcherExactKeyNearMisses(t *testing.T) {
 			if got := pendingAwaits(t, s, tt.pattern); len(got) != 1 || got[0].InstanceKey != key {
 				t.Fatalf("await index = %+v, want %s still pending", got, key)
 			}
-			if run := runStatus(t, s, "run-miss"); run.Status != domain.DriverRunSuspendedAwaitingEvent {
+			if run := runStatus(t, s, "run-miss"); run.Status != execution.DriverRunSuspendedAwait {
 				t.Fatalf("run status = %s, want still suspended", run.Status)
 			}
 		})
@@ -342,7 +347,7 @@ func TestAwaitMatcherExactKeyNearMisses(t *testing.T) {
 // no-op (no resolve, no resume, no payload); allowed and empty predicates
 // resolve.
 func TestAwaitMatcherActorPredicate(t *testing.T) {
-	pattern := domain.AwaitEventKey("approval.granted", "deploy-42")
+	pattern := execution.AwaitEventKey("approval.granted", "deploy-42")
 	tests := []struct {
 		name       string
 		actorAllow []string
@@ -369,13 +374,13 @@ func TestAwaitMatcherActorPredicate(t *testing.T) {
 			}
 			run := runStatus(t, s, "run-actor")
 			if tt.want == trigger.AwaitMatchResolved {
-				if run.Status != domain.DriverRunQueued {
+				if run.Status != execution.DriverRunQueued {
 					t.Fatalf("run status = %s, want queued", run.Status)
 				}
 				return
 			}
 			// Denied: await still pending, run untouched, no payload recorded.
-			if run.Status != domain.DriverRunSuspendedAwaitingEvent {
+			if run.Status != execution.DriverRunSuspendedAwait {
 				t.Fatalf("run status = %s, want still suspended after actor rejection", run.Status)
 			}
 			if got := pendingAwaits(t, s, pattern); len(got) != 1 {
@@ -398,7 +403,7 @@ func TestAwaitMatcherActorPredicate(t *testing.T) {
 func TestAwaitMatcherReservedRunFinishedProvenanceIsNoOpAndLaterGenuineEventWins(t *testing.T) {
 	s := memstore.New()
 	seedAwaitMatcherCatalog(t, s)
-	pattern := domain.AwaitEventKey(execution.RunFinishedEventType, "child-1")
+	pattern := execution.AwaitEventKey(execution.RunFinishedEventType, "child-1")
 	key := newSuspendedAwaitRun(t, s, "run-parent", pattern, []string{execution.RunFinishedActorRef})
 	matcher := newAwaitMatcher(t, s)
 
@@ -424,7 +429,7 @@ func TestAwaitMatcherReservedRunFinishedProvenanceIsNoOpAndLaterGenuineEventWins
 	if got := pendingAwaits(t, s, pattern); len(got) != 1 || got[0].InstanceKey != key {
 		t.Fatalf("await after forged events = %+v, want %s pending", got, key)
 	}
-	if run := runStatus(t, s, "run-parent"); run.Status != domain.DriverRunSuspendedAwaitingEvent {
+	if run := runStatus(t, s, "run-parent"); run.Status != execution.DriverRunSuspendedAwait {
 		t.Fatalf("run after forged events = %s, want suspended", run.Status)
 	}
 
@@ -439,7 +444,7 @@ func TestAwaitMatcherReservedRunFinishedProvenanceIsNoOpAndLaterGenuineEventWins
 	if err != nil || result.Resolved() != 1 {
 		t.Fatalf("genuine Dispatch = %+v, %v; want one resolution", result, err)
 	}
-	if run := runStatus(t, s, "run-parent"); run.Status != domain.DriverRunQueued || run.ResumeSourceEventID != genuine.EventID {
+	if run := runStatus(t, s, "run-parent"); run.Status != execution.DriverRunQueued || run.ResumeSourceEventID != genuine.EventID {
 		t.Fatalf("run after genuine event = %s/%s, want queued by %s", run.Status, run.ResumeSourceEventID, genuine.EventID)
 	}
 }
@@ -447,7 +452,7 @@ func TestAwaitMatcherReservedRunFinishedProvenanceIsNoOpAndLaterGenuineEventWins
 func TestAwaitMatcherRejectsReservedActorOnOrdinaryNonSystemEvent(t *testing.T) {
 	s := memstore.New()
 	seedAwaitMatcherCatalog(t, s)
-	pattern := domain.AwaitEventKey("approval.granted", "deploy-reserved")
+	pattern := execution.AwaitEventKey("approval.granted", "deploy-reserved")
 	newSuspendedAwaitRun(t, s, "run-reserved-actor", pattern, []string{"system:approver"})
 	result, err := newAwaitMatcher(t, s).Dispatch(t.Context(), matcherWS, trigger.AwaitDispatchEvent{
 		EventID: "approval-1", EventType: "approval.granted", SourceKind: "github",
@@ -466,7 +471,7 @@ func TestAwaitMatcherRejectsReservedActorOnOrdinaryNonSystemEvent(t *testing.T) 
 func TestAwaitMatcherMultiWaiter(t *testing.T) {
 	s := memstore.New()
 	seedAwaitMatcherCatalog(t, s)
-	pattern := domain.AwaitEventKey("issue.closed", "issue#9")
+	pattern := execution.AwaitEventKey("issue.closed", "issue#9")
 	newSuspendedAwaitRun(t, s, "run-w1", pattern, nil)
 	newSuspendedAwaitRun(t, s, "run-w2", pattern, nil)
 
@@ -478,7 +483,7 @@ func TestAwaitMatcherMultiWaiter(t *testing.T) {
 		t.Fatalf("Dispatch = %+v, %v; want both waiters resolved", result, err)
 	}
 	for _, runID := range []string{"run-w1", "run-w2"} {
-		if run := runStatus(t, s, runID); run.Status != domain.DriverRunQueued || run.ResumeSourceEventID != "evt-multi" {
+		if run := runStatus(t, s, runID); run.Status != execution.DriverRunQueued || run.ResumeSourceEventID != "evt-multi" {
 			t.Fatalf("run %s = %s/%s, want queued by evt-multi", runID, run.Status, run.ResumeSourceEventID)
 		}
 	}
@@ -492,7 +497,7 @@ func TestAwaitMatcherMultiWaiter(t *testing.T) {
 func TestAwaitMatcherConcurrentEventRace(t *testing.T) {
 	s := memstore.New()
 	seedAwaitMatcherCatalog(t, s)
-	pattern := domain.AwaitEventKey("pr.merged", "acme/widgets#3")
+	pattern := execution.AwaitEventKey("pr.merged", "acme/widgets#3")
 	key := newSuspendedAwaitRun(t, s, "run-race", pattern, nil)
 
 	matcher := newAwaitMatcher(t, s)
@@ -522,7 +527,7 @@ func TestAwaitMatcherConcurrentEventRace(t *testing.T) {
 		t.Fatalf("GetSatisfiedAwait: %v", err)
 	}
 	run := runStatus(t, s, "run-race")
-	if run.Status != domain.DriverRunQueued || run.ResumeSourceEventID != satisfied.SatisfiedByEventID {
+	if run.Status != execution.DriverRunQueued || run.ResumeSourceEventID != satisfied.SatisfiedByEventID {
 		t.Fatalf("run = %s/%s, want queued by winner %s", run.Status, run.ResumeSourceEventID, satisfied.SatisfiedByEventID)
 	}
 }
@@ -533,10 +538,10 @@ func TestAwaitMatcherConcurrentEventRace(t *testing.T) {
 func TestAwaitMatcherTimeoutWinnerStands(t *testing.T) {
 	s := memstore.New()
 	seedAwaitMatcherCatalog(t, s)
-	pattern := domain.AwaitEventKey("review.submitted", "acme/widgets#5")
+	pattern := execution.AwaitEventKey("review.submitted", "acme/widgets#5")
 	key := newSuspendedAwaitRun(t, s, "run-to", pattern, nil)
 
-	timeoutEvent := domain.AwaitTimeoutEventIDPrefix + "1"
+	timeoutEvent := execution.AwaitTimeoutEventIDPrefix + "1"
 	if _, err := s.Awaits().ResolveAwait(t.Context(), matcherWS, key, timeoutEvent, nil, "system"); err != nil {
 		t.Fatalf("ResolveAwait(timeout): %v", err)
 	}
@@ -560,7 +565,7 @@ func TestAwaitMatcherTimeoutWinnerStands(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetSatisfiedAwait: %v", err)
 	}
-	if satisfied.Status != domain.AwaitTimedOut || satisfied.SatisfiedByEventID != timeoutEvent {
+	if satisfied.Status != execution.AwaitTimedOut || satisfied.SatisfiedByEventID != timeoutEvent {
 		t.Fatalf("timeout record = %+v, want timed_out by %s intact", satisfied, timeoutEvent)
 	}
 	if run := runStatus(t, s, "run-to"); run.ResumeSourceEventID != timeoutEvent {
@@ -574,7 +579,7 @@ func TestAwaitMatcherTimeoutWinnerStands(t *testing.T) {
 func TestAwaitMatcherPendingSuspendWindowRetry(t *testing.T) {
 	s := memstore.New()
 	seedAwaitMatcherCatalog(t, s)
-	pattern := domain.AwaitEventKey("build.finished", "build-7")
+	pattern := execution.AwaitEventKey("build.finished", "build-7")
 	run := createClaimedRun(t, s, "run-window")
 	key := registerPendingAwait(t, s, "run-window", pattern, nil) // run still RUNNING
 
@@ -589,10 +594,10 @@ func TestAwaitMatcherPendingSuspendWindowRetry(t *testing.T) {
 		t.Fatalf("result = %+v, want atomic pending-resume", result)
 	}
 	if _, err := s.DriverRuns().Suspend(t.Context(), matcherWS, run.RunID,
-		run.NodeID, run.LeaseID, run.FencingToken, key); !errors.Is(err, domain.ErrDriverRunAlreadyResumed) {
+		run.NodeID, run.LeaseID, run.FencingToken, key); !errors.Is(err, execution.ErrAlreadyResumed) {
 		t.Fatalf("Suspend after atomic window resolution = %v, want ErrDriverRunAlreadyResumed", err)
 	}
-	if got := runStatus(t, s, "run-window"); got.Status != domain.DriverRunRunning || got.ResumeSourceEventID != "evt-window" {
+	if got := runStatus(t, s, "run-window"); got.Status != execution.DriverRunRunning || got.ResumeSourceEventID != "evt-window" {
 		t.Fatalf("run = %s/%s, want running with pending-resume marker", got.Status, got.ResumeSourceEventID)
 	}
 }
@@ -603,12 +608,12 @@ func TestAwaitMatcherPendingSuspendWindowRetry(t *testing.T) {
 func TestAwaitMatcherResumeInvalidKeepsResolution(t *testing.T) {
 	s := memstore.New()
 	seedAwaitMatcherCatalog(t, s)
-	pattern := domain.AwaitEventKey("external.signal", "sig-1")
+	pattern := execution.AwaitEventKey("external.signal", "sig-1")
 	run := createClaimedRun(t, s, "run-term")
 	key := registerPendingAwait(t, s, "run-term", pattern, nil)
-	if _, err := s.DriverRuns().Finish(t.Context(), matcherWS, "run-term", store.DriverRunFinish{
+	if _, err := s.DriverRuns().Finish(t.Context(), matcherWS, "run-term", execution.DriverRunFinish{
 		NodeID: run.NodeID, LeaseID: run.LeaseID, FencingToken: run.FencingToken,
-		Status: domain.DriverRunCompleted, Summary: "done before signal",
+		Status: execution.DriverRunCompleted, Summary: "done before signal",
 	}); err != nil {
 		t.Fatalf("Finish: %v", err)
 	}
@@ -628,7 +633,7 @@ func TestAwaitMatcherResumeInvalidKeepsResolution(t *testing.T) {
 	if err != nil || satisfied.SatisfiedByEventID != "evt-term" {
 		t.Fatalf("satisfied = %+v, %v; want resolution standing by evt-term", satisfied, err)
 	}
-	if got := runStatus(t, s, "run-term"); got.Status != domain.DriverRunCompleted {
+	if got := runStatus(t, s, "run-term"); got.Status != execution.DriverRunCompleted {
 		t.Fatalf("run status = %s, want completed untouched", got.Status)
 	}
 }
@@ -638,10 +643,10 @@ func TestAwaitMatcherResumeInvalidKeepsResolution(t *testing.T) {
 func TestAwaitMatcherPayloadCap(t *testing.T) {
 	s := memstore.New()
 	seedAwaitMatcherCatalog(t, s)
-	pattern := domain.AwaitEventKey("bulk.imported", "batch-1")
+	pattern := execution.AwaitEventKey("bulk.imported", "batch-1")
 	key := newSuspendedAwaitRun(t, s, "run-big", pattern, nil)
 
-	big, err := json.Marshal(map[string]string{"blob": strings.Repeat("x", domain.DefaultAwaitResumePayloadCap)})
+	big, err := json.Marshal(map[string]string{"blob": strings.Repeat("x", execution.DefaultAwaitResumePayloadCap)})
 	if err != nil {
 		t.Fatalf("marshal oversized payload: %v", err)
 	}
@@ -652,10 +657,10 @@ func TestAwaitMatcherPayloadCap(t *testing.T) {
 	if err == nil || result.Resolved() != 0 || len(result.Records) != 1 || result.Records[0].Outcome != trigger.AwaitMatchFailed {
 		t.Fatalf("Dispatch = %+v, %v; want failed oversized resolution", result, err)
 	}
-	if satisfied, getErr := s.Awaits().GetSatisfiedAwait(t.Context(), matcherWS, key); !errors.Is(getErr, domain.ErrNotFound) {
+	if satisfied, getErr := s.Awaits().GetSatisfiedAwait(t.Context(), matcherWS, key); !errors.Is(getErr, persistence.ErrNotFound) {
 		t.Fatalf("satisfied = %+v, %v; want pending/not found", satisfied, getErr)
 	}
-	if got := runStatus(t, s, "run-big"); got.Status != domain.DriverRunSuspendedAwaitingEvent {
+	if got := runStatus(t, s, "run-big"); got.Status != execution.DriverRunSuspendedAwait {
 		t.Fatalf("run status = %s, want suspended", got.Status)
 	}
 }

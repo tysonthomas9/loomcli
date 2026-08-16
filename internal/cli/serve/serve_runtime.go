@@ -13,16 +13,15 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli/serve/metricscmd"
 	"github.com/tysonthomas9/loomcli/internal/cli/serve/serveadapter"
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	driverexecutor "github.com/tysonthomas9/loomcli/internal/driver"
 	trigger "github.com/tysonthomas9/loomcli/internal/infra/automationruntime"
-	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 	"github.com/tysonthomas9/loomcli/internal/webui"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
 
 type serveDriverExecutorBuilder func(
-	store.Store,
+	executionRuntimeRecords,
 	string,
 	driverexecutor.RunOutcomePublisher,
 	webui.ExecutionCapability,
@@ -100,12 +99,12 @@ func buildTaskReadyIssueLookup(
 		detail, err := workItemsFn(middleware.WithWorkspace(ctx, ws)).Get(ctx, workitems.GetQuery{IssueID: issueID})
 		if err != nil {
 			if errors.Is(err, workitems.ErrNotFound) {
-				return trigger.TaskReadySnapshot{}, domain.ErrNotFound
+				return trigger.TaskReadySnapshot{}, persistence.ErrNotFound
 			}
 			return trigger.TaskReadySnapshot{}, err
 		}
 		if detail == nil {
-			return trigger.TaskReadySnapshot{}, domain.ErrNotFound
+			return trigger.TaskReadySnapshot{}, persistence.ErrNotFound
 		}
 		repoRequired, err := repositoryRequired(ctx, ws, detail.IssueType, detail.SourceRepo)
 		if err != nil {

@@ -11,16 +11,16 @@ import (
 	"testing"
 	"time"
 
-	workspacemodule "github.com/tysonthomas9/loomcli/internal/modules/workspace"
+	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
+
+	agentsmodule "github.com/tysonthomas9/loomcli/internal/modules/agents"
+	workspaceowner "github.com/tysonthomas9/loomcli/internal/modules/workspace"
 
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli/monitor"
 	"github.com/tysonthomas9/loomcli/internal/cli/testdata/clitest"
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
-	agentsmodule "github.com/tysonthomas9/loomcli/internal/modules/agents"
 	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
-	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/usage"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
@@ -75,10 +75,10 @@ func TestHandleAgents_UsesCanonicalAgentsAsSourceOfTruth(t *testing.T) {
 	ctx := context.Background()
 	st := memstore.New()
 	wsRoot := t.TempDir()
-	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "WS1", Name: "Test"}); err != nil {
+	if _, err := st.Workspaces().Create(ctx, workspaceowner.WorkspaceCreate{Key: "WS1", Name: "Test"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.Repos().Create(ctx, store.RepoCreate{
+	if _, err := st.Repos().Create(ctx, workspaceowner.RepoCreate{
 		WorkspaceKey:  "WS1",
 		Name:          "repo-a",
 		DefaultBranch: "main",
@@ -89,34 +89,34 @@ func TestHandleAgents_UsesCanonicalAgentsAsSourceOfTruth(t *testing.T) {
 	directory := &monitorAgentDirectoryStub{
 		agents: map[string][]*agentsmodule.Agent{"WS1": {
 			monitorCanonicalAgent(t, "WS1", "falcon", "task", agentsmodule.DesiredStopped, agentsmodule.RuntimeMetadata{
-				RoleKind: string(domain.RoleKindWorker), Repos: []string{"repo-a"},
+				RoleKind: string(agentsmodule.RoleKindWorker), Repos: []string{"repo-a"},
 			}),
 			monitorCanonicalAgent(t, "WS1", "nova", "plan", agentsmodule.DesiredStopped, agentsmodule.RuntimeMetadata{
-				RoleKind: string(domain.RoleKindWorker), CrossRepo: true,
+				RoleKind: string(agentsmodule.RoleKindWorker), CrossRepo: true,
 			}),
 		}},
 		roles: map[string][]*agentsmodule.Role{"WS1": {
-			{WorkspaceKey: "WS1", Name: "task", Kind: string(domain.RoleKindWorker)},
-			{WorkspaceKey: "WS1", Name: "plan", Kind: string(domain.RoleKindWorker)},
+			{WorkspaceKey: "WS1", Name: "task", Kind: string(agentsmodule.RoleKindWorker)},
+			{WorkspaceKey: "WS1", Name: "plan", Kind: string(agentsmodule.RoleKindWorker)},
 		}},
 	}
 	// Seed the orchestration AgentSession row — the monitor data source
 	// reads attribution via OrchestrationSessionIDFor.
-	if _, err := st.AgentSessions().Create(ctx, store.AgentSessionCreate{
+	if _, err := st.AgentSessions().Create(ctx, interaction.AgentSessionCreate{
 		WorkspaceKey: "WS1",
 		SessionID:    "lead-session",
 		AgentID:      "falcon",
-		Kind:         domain.AgentSessionKindInteractive,
-		Status:       domain.AgentSessionRunning,
+		Kind:         interaction.SessionRecordInteractive,
+		Status:       interaction.SessionRecordRunning,
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.AgentSessions().Create(ctx, store.AgentSessionCreate{
+	if _, err := st.AgentSessions().Create(ctx, interaction.AgentSessionCreate{
 		WorkspaceKey: "WS1",
 		SessionID:    "session-falcon",
 		AgentID:      "falcon",
 		TaskID:       "TASK-1",
-		Status:       domain.AgentSessionRunning,
+		Status:       interaction.SessionRecordRunning,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -203,10 +203,10 @@ func TestHandleStatus_ActiveStoreAgentWithoutWorkIsReady(t *testing.T) {
 	t.Setenv("LOOM_WORKSPACE", "WS1")
 	ctx := context.Background()
 	st := memstore.New()
-	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "WS1", Name: "Test"}); err != nil {
+	if _, err := st.Workspaces().Create(ctx, workspaceowner.WorkspaceCreate{Key: "WS1", Name: "Test"}); err != nil {
 		t.Fatal(err)
 	}
-	directory := monitorSingleAgentDirectory(t, "WS1", "planner", "plan", agentsmodule.DesiredRunning, string(domain.RoleKindWorker))
+	directory := monitorSingleAgentDirectory(t, "WS1", "planner", "plan", agentsmodule.DesiredRunning, string(agentsmodule.RoleKindWorker))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/monitor/status", nil)
 	rr := httptest.NewRecorder()
@@ -236,10 +236,10 @@ func TestHandleStatus_DerivesPlanningFromInProgressTaskWithoutRuntimeAgent(t *te
 	t.Setenv("LOOM_WORKSPACE", "WS1")
 	ctx := context.Background()
 	st := memstore.New()
-	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "WS1", Name: "Test"}); err != nil {
+	if _, err := st.Workspaces().Create(ctx, workspaceowner.WorkspaceCreate{Key: "WS1", Name: "Test"}); err != nil {
 		t.Fatal(err)
 	}
-	directory := monitorSingleAgentDirectory(t, "WS1", "planner", "plan", agentsmodule.DesiredRunning, string(domain.RoleKindWorker))
+	directory := monitorSingleAgentDirectory(t, "WS1", "planner", "plan", agentsmodule.DesiredRunning, string(agentsmodule.RoleKindWorker))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/monitor/status", nil)
 	rr := httptest.NewRecorder()
@@ -290,7 +290,7 @@ func TestHandleAgents_EmptyWorkspaceDoesNotLeakRuntimeAgents(t *testing.T) {
 	t.Setenv("LOOM_WORKSPACE", "WS1")
 	ctx := context.Background()
 	st := memstore.New()
-	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "WS1", Name: "Test"}); err != nil {
+	if _, err := st.Workspaces().Create(ctx, workspaceowner.WorkspaceCreate{Key: "WS1", Name: "Test"}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -324,13 +324,13 @@ func TestHandleAgents_UsesWorkspaceQueryOverActiveWorkspace(t *testing.T) {
 	t.Setenv("LOOM_WORKSPACE", "WS1")
 	ctx := context.Background()
 	st := memstore.New()
-	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "WS1", Name: "First"}); err != nil {
+	if _, err := st.Workspaces().Create(ctx, workspaceowner.WorkspaceCreate{Key: "WS1", Name: "First"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "WS2", Name: "Second"}); err != nil {
+	if _, err := st.Workspaces().Create(ctx, workspaceowner.WorkspaceCreate{Key: "WS2", Name: "Second"}); err != nil {
 		t.Fatal(err)
 	}
-	directory := monitorSingleAgentDirectory(t, "WS2", "nova", "task", agentsmodule.DesiredRunning, string(domain.RoleKindWorker))
+	directory := monitorSingleAgentDirectory(t, "WS2", "nova", "task", agentsmodule.DesiredRunning, string(agentsmodule.RoleKindWorker))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/monitor/agents?workspace=WS2", nil)
 	rr := httptest.NewRecorder()
@@ -360,10 +360,10 @@ func TestHandleStatusWithBackend_UsesWorkspaceScopedWorkItems(t *testing.T) {
 	t.Setenv("LOOM_WORKSPACE", "WS1")
 	ctx := context.Background()
 	st := memstore.New()
-	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "WS1", Name: "First"}); err != nil {
+	if _, err := st.Workspaces().Create(ctx, workspaceowner.WorkspaceCreate{Key: "WS1", Name: "First"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "WS2", Name: "Second"}); err != nil {
+	if _, err := st.Workspaces().Create(ctx, workspaceowner.WorkspaceCreate{Key: "WS2", Name: "Second"}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -415,10 +415,10 @@ func TestMonitorDataSource_CachesWorkspaceCollectionAcrossEndpoints(t *testing.T
 	t.Setenv("LOOM_WORKSPACE", "WS1")
 	ctx := context.Background()
 	st := memstore.New()
-	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "WS1", Name: "First"}); err != nil {
+	if _, err := st.Workspaces().Create(ctx, workspaceowner.WorkspaceCreate{Key: "WS1", Name: "First"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "WS2", Name: "Second"}); err != nil {
+	if _, err := st.Workspaces().Create(ctx, workspaceowner.WorkspaceCreate{Key: "WS2", Name: "Second"}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -494,21 +494,21 @@ func TestMonitorStoreDataSource_CachesWorkspaceMetadataAcrossEndpoints(t *testin
 	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
 	ctx := context.Background()
 	base := memstore.New()
-	if _, err := base.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "WS1", Name: "First"}); err != nil {
+	if _, err := base.Workspaces().Create(ctx, workspaceowner.WorkspaceCreate{Key: "WS1", Name: "First"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := base.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "WS2", Name: "Second"}); err != nil {
+	if _, err := base.Workspaces().Create(ctx, workspaceowner.WorkspaceCreate{Key: "WS2", Name: "Second"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := base.Repos().Create(ctx, store.RepoCreate{WorkspaceKey: "WS1", Name: "repo-a"}); err != nil {
+	if _, err := base.Repos().Create(ctx, workspaceowner.RepoCreate{WorkspaceKey: "WS1", Name: "repo-a"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := base.Repos().Create(ctx, store.RepoCreate{WorkspaceKey: "WS2", Name: "repo-b", Groups: []string{"backend"}}); err != nil {
+	if _, err := base.Repos().Create(ctx, workspaceowner.RepoCreate{WorkspaceKey: "WS2", Name: "repo-b", Groups: []string{"backend"}}); err != nil {
 		t.Fatal(err)
 	}
-	directory := monitorSingleAgentDirectory(t, "WS2", "nova", "task", agentsmodule.DesiredRunning, string(domain.RoleKindWorker))
+	directory := monitorSingleAgentDirectory(t, "WS2", "nova", "task", agentsmodule.DesiredRunning, string(agentsmodule.RoleKindWorker))
 	directory.agents["WS2"][0].Metadata = mustMonitorRuntimeMetadata(t, agentsmodule.RuntimeMetadata{
-		RoleKind: string(domain.RoleKindWorker), RepoGroups: []string{"backend"},
+		RoleKind: string(agentsmodule.RoleKindWorker), RepoGroups: []string{"backend"},
 	})
 
 	counted := newCountingStore(base)
@@ -553,7 +553,7 @@ func TestMonitorStoreDataSource_CachesWorkspaceMetadataAcrossEndpoints(t *testin
 func TestMonitorStoreDataSourcePopulatesRoleKind(t *testing.T) {
 	ctx := context.Background()
 	st := memstore.New()
-	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "WS1", Name: "Workspace"}); err != nil {
+	if _, err := st.Workspaces().Create(ctx, workspaceowner.WorkspaceCreate{Key: "WS1", Name: "Workspace"}); err != nil {
 		t.Fatal(err)
 	}
 	directory := &monitorAgentDirectoryStub{
@@ -563,9 +563,9 @@ func TestMonitorStoreDataSourcePopulatesRoleKind(t *testing.T) {
 			monitorCanonicalAgent(t, "WS1", "task-a", "task", agentsmodule.DesiredRunning, agentsmodule.RuntimeMetadata{}),
 		}},
 		roles: map[string][]*agentsmodule.Role{"WS1": {
-			{WorkspaceKey: "WS1", Name: "lead", Kind: string(domain.RoleKindInteractive)},
-			{WorkspaceKey: "WS1", Name: "operator", Kind: string(domain.RoleKindInteractive)},
-			{WorkspaceKey: "WS1", Name: "task", Kind: string(domain.RoleKindWorker)},
+			{WorkspaceKey: "WS1", Name: "lead", Kind: string(agentsmodule.RoleKindInteractive)},
+			{WorkspaceKey: "WS1", Name: "operator", Kind: string(agentsmodule.RoleKindInteractive)},
+			{WorkspaceKey: "WS1", Name: "task", Kind: string(agentsmodule.RoleKindWorker)},
 		}},
 	}
 
@@ -574,13 +574,13 @@ func TestMonitorStoreDataSourcePopulatesRoleKind(t *testing.T) {
 	for _, agent := range data.Agents {
 		got[agent.Name] = agent.RoleKind
 	}
-	if got["lead-a"] != string(domain.RoleKindInteractive) {
+	if got["lead-a"] != string(agentsmodule.RoleKindInteractive) {
 		t.Fatalf("lead-a role_kind = %q, want interactive", got["lead-a"])
 	}
-	if got["operator-a"] != string(domain.RoleKindInteractive) {
+	if got["operator-a"] != string(agentsmodule.RoleKindInteractive) {
 		t.Fatalf("operator-a role_kind = %q, want interactive", got["operator-a"])
 	}
-	if got["task-a"] != string(domain.RoleKindWorker) {
+	if got["task-a"] != string(agentsmodule.RoleKindWorker) {
 		t.Fatalf("task-a role_kind = %q, want worker", got["task-a"])
 	}
 }
@@ -669,12 +669,12 @@ func mustMonitorRuntimeMetadata(t *testing.T, runtime agentsmodule.RuntimeMetada
 }
 
 type countingStore struct {
-	store.Store
+	*memstore.Store
 	workspaces *countingWorkspaceStore
 	repos      *countingRepoStore
 }
 
-func newCountingStore(base store.Store) *countingStore {
+func newCountingStore(base *memstore.Store) *countingStore {
 	return &countingStore{
 		Store:      base,
 		workspaces: &countingWorkspaceStore{WorkspaceStore: base.Workspaces()},
@@ -682,38 +682,38 @@ func newCountingStore(base store.Store) *countingStore {
 	}
 }
 
-func (s *countingStore) Workspaces() store.WorkspaceStore { return s.workspaces }
-func (s *countingStore) Repos() store.RepoStore           { return s.repos }
+func (s *countingStore) Workspaces() workspaceowner.WorkspaceStore { return s.workspaces }
+func (s *countingStore) Repos() workspaceowner.RepoStore           { return s.repos }
 
 type countingWorkspaceStore struct {
-	store.WorkspaceStore
+	workspaceowner.WorkspaceStore
 	getCalls       int
 	getByNameCalls int
 	listCalls      int
 }
 
-func (s *countingWorkspaceStore) Get(ctx context.Context, key string) (*workspacemodule.Workspace, error) {
+func (s *countingWorkspaceStore) Get(ctx context.Context, key string) (*workspaceowner.Workspace, error) {
 	s.getCalls++
 	return s.WorkspaceStore.Get(ctx, key)
 }
 
-func (s *countingWorkspaceStore) GetByName(ctx context.Context, name string) (*workspacemodule.Workspace, error) {
+func (s *countingWorkspaceStore) GetByName(ctx context.Context, name string) (*workspaceowner.Workspace, error) {
 	s.getByNameCalls++
 	return s.WorkspaceStore.GetByName(ctx, name)
 }
 
-func (s *countingWorkspaceStore) List(ctx context.Context) ([]*workspacemodule.Workspace, error) {
+func (s *countingWorkspaceStore) List(ctx context.Context) ([]*workspaceowner.Workspace, error) {
 	s.listCalls++
 	return s.WorkspaceStore.List(ctx)
 }
 
 type countingRepoStore struct {
-	store.RepoStore
+	workspaceowner.RepoStore
 	listCalls       int
 	listByWorkspace map[string]int
 }
 
-func (s *countingRepoStore) List(ctx context.Context, workspaceKey string) ([]*workspacemodule.Repository, error) {
+func (s *countingRepoStore) List(ctx context.Context, workspaceKey string) ([]*workspaceowner.Repository, error) {
 	s.listCalls++
 	s.listByWorkspace[workspaceKey]++
 	return s.RepoStore.List(ctx, workspaceKey)

@@ -16,8 +16,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 const (
@@ -204,7 +204,7 @@ func lastJSONLine(stdout []byte) ([]byte, error) {
 			return line, nil
 		}
 	}
-	return nil, fmt.Errorf("task runner command returned empty output: %w", domain.ErrInvalid)
+	return nil, fmt.Errorf("task runner command returned empty output: %w", persistence.ErrInvalid)
 }
 
 func decodeDaytonaProviderResult(raw []byte) (execution.DaytonaProviderResult, error) {

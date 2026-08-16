@@ -16,9 +16,9 @@ import (
 	_ "embed"
 
 	appworkflowauthoring "github.com/tysonthomas9/loomcli/internal/app/workflowauthoring"
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/driver"
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 const (
@@ -186,7 +186,7 @@ func IsBuiltinWorkflow(name string) bool {
 func BuildBuiltinBundle(ctx context.Context, name, destDir string) (string, string, error) {
 	spec, ok := BuiltinWorkflow(name)
 	if !ok {
-		return "", "", domain.ErrNotFound
+		return "", "", persistence.ErrNotFound
 	}
 	files, err := ValidateWorkflowFiles(spec.Files)
 	if err != nil {

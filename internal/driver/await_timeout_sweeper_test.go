@@ -11,22 +11,25 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
+
+	workspaceowner "github.com/tysonthomas9/loomcli/internal/modules/workspace"
+
 	trigger "github.com/tysonthomas9/loomcli/internal/infra/automationruntime"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
-	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
-func testAtomicAwaitResolver(t testing.TB, st store.Store) store.AtomicAwaitStore {
+func testAtomicAwaitResolver(t testing.TB, st *memstore.Store) execution.AtomicAwaitStore {
 	t.Helper()
-	resolver, ok := st.Awaits().(store.AtomicAwaitStore)
+	resolver, ok := st.Awaits().(execution.AtomicAwaitStore)
 	if !ok {
-		t.Fatalf("await store %T does not implement store.AtomicAwaitStore", st.Awaits())
+		t.Fatalf("await store %T does not implement execution.AtomicAwaitStore", st.Awaits())
 	}
 	return resolver
 }
 
-func testAwaitMatcher(t testing.TB, st store.Store) *trigger.AwaitMatcher {
+func testAwaitMatcher(t testing.TB, st *memstore.Store) *trigger.AwaitMatcher {
 	t.Helper()
 	return trigger.NewAwaitMatcherWithResolver(st.Awaits(), st.DriverRuns(), testAtomicAwaitResolver(t, st))
 }
@@ -38,16 +41,16 @@ func newAwaitSweepStore(t *testing.T, workspaces ...string) *memstore.Store {
 	ctx := context.Background()
 	st := memstore.New()
 	for _, ws := range workspaces {
-		if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: ws, Name: ws}); err != nil {
+		if _, err := st.Workspaces().Create(ctx, workspaceowner.WorkspaceCreate{Key: ws, Name: ws}); err != nil {
 			t.Fatalf("Create workspace %s: %v", ws, err)
 		}
-		if _, err := st.Drivers().Create(ctx, store.DriverCreate{
+		if _, err := st.Drivers().Create(ctx, workflowcatalog.DriverCreate{
 			WorkspaceKey: ws, DriverID: "awaiter", Name: "awaiter",
 			OwnerType: workflowcatalog.DriverOwnerSystem, Status: workflowcatalog.DriverStatusActive,
 		}); err != nil {
 			t.Fatalf("Create driver in %s: %v", ws, err)
 		}
-		if _, err := st.DriverVersions().Create(ctx, store.DriverVersionCreate{
+		if _, err := st.DriverVersions().Create(ctx, workflowcatalog.DriverVersionCreate{
 			WorkspaceKey: ws, VersionID: "v1", DriverID: "awaiter", Version: 1,
 			SourceDigest: "sha256:s", BundleDigest: "sha256:b",
 			ValidationStatus: workflowcatalog.DriverVersionValidationPassed,
@@ -65,7 +68,7 @@ func newAwaitSweepStore(t *testing.T, workspaces ...string) *memstore.Store {
 func suspendAwaitingRun(t *testing.T, st *memstore.Store, ws, runID, pattern string, actorAllow []string, deadlineIn time.Duration) string {
 	t.Helper()
 	ctx := context.Background()
-	if _, err := st.DriverRuns().Create(ctx, store.DriverRunCreate{
+	if _, err := st.DriverRuns().Create(ctx, execution.DriverRunCreate{
 		WorkspaceKey: ws, RunID: runID, DriverID: "awaiter", DriverVersionID: "v1",
 	}); err != nil {
 		t.Fatalf("Create run %s: %v", runID, err)
@@ -74,8 +77,8 @@ func suspendAwaitingRun(t *testing.T, st *memstore.Store, ws, runID, pattern str
 	if err != nil {
 		t.Fatalf("Claim run %s: %v", runID, err)
 	}
-	key := domain.AwaitInstanceKey(runID, 1)
-	reg, err := st.Awaits().RegisterAwaitAndCheck(ctx, ws, store.AwaitRegistration{
+	key := execution.AwaitInstanceKey(runID, 1)
+	reg, err := st.Awaits().RegisterAwaitAndCheck(ctx, ws, execution.AwaitRegistration{
 		InstanceKey: key, RunID: runID, Pattern: pattern, ActorAllow: actorAllow,
 		Deadline: time.Now().UTC().Add(deadlineIn),
 	})
@@ -120,16 +123,16 @@ func TestAwaitTimeoutSweeperResumesDueAwait(t *testing.T) {
 		t.Fatalf("result = %+v, want exactly one timed-out instance", result)
 	}
 
-	wantEventID := domain.AwaitTimeoutEventID(key)
+	wantEventID := execution.AwaitTimeoutEventID(key)
 	run, err := st.DriverRuns().Get(ctx, "WS", "run-1")
-	if err != nil || run.Status != domain.DriverRunQueued || run.ResumeSourceEventID != wantEventID {
+	if err != nil || run.Status != execution.DriverRunQueued || run.ResumeSourceEventID != wantEventID {
 		t.Fatalf("run = %+v, %v; want queued resumed by %s", run, err, wantEventID)
 	}
 	inst, err := st.Awaits().GetSatisfiedAwait(ctx, "WS", key)
 	if err != nil {
 		t.Fatalf("GetSatisfiedAwait: %v", err)
 	}
-	if inst.Status != domain.AwaitTimedOut || inst.SatisfiedByEventID != wantEventID {
+	if inst.Status != execution.AwaitTimedOut || inst.SatisfiedByEventID != wantEventID {
 		t.Fatalf("row = %s by %q, want timed_out by %q", inst.Status, inst.SatisfiedByEventID, wantEventID)
 	}
 	var payload struct {
@@ -154,7 +157,7 @@ func TestAwaitTimeoutSweeperResumesDueAwait(t *testing.T) {
 		t.Fatalf("second pass = %+v, want all-zero (timeout emitted exactly once)", again)
 	}
 	final, err := st.DriverRuns().Get(ctx, "WS", "run-1")
-	if err != nil || final.Status != domain.DriverRunQueued || final.ResumeSourceEventID != wantEventID {
+	if err != nil || final.Status != execution.DriverRunQueued || final.ResumeSourceEventID != wantEventID {
 		t.Fatalf("run after second pass = %+v, %v; want unchanged", final, err)
 	}
 }
@@ -176,11 +179,11 @@ func TestAwaitTimeoutSweeperTargetsOnlyDueInstance(t *testing.T) {
 	if result.TimedOut != 1 || result.TimedOutInstanceKeys[0] != dueKey {
 		t.Fatalf("result = %+v, want only %s timed out", result, dueKey)
 	}
-	if _, err := st.Awaits().GetSatisfiedAwait(ctx, "WS", lateKey); !errors.Is(err, domain.ErrNotFound) {
+	if _, err := st.Awaits().GetSatisfiedAwait(ctx, "WS", lateKey); !errors.Is(err, persistence.ErrNotFound) {
 		t.Fatalf("co-waiter row = %v, want still pending (ErrNotFound)", err)
 	}
 	late, err := st.DriverRuns().Get(ctx, "WS", "run-late")
-	if err != nil || late.Status != domain.DriverRunSuspendedAwaitingEvent {
+	if err != nil || late.Status != execution.DriverRunSuspendedAwait {
 		t.Fatalf("co-waiter run = %+v, %v; want still suspended", late, err)
 	}
 }
@@ -226,7 +229,7 @@ func TestAwaitTimeoutSweeperRaceAlreadySatisfied(t *testing.T) {
 		t.Fatalf("out = %+v, want exactly one already_satisfied no-op", out)
 	}
 	inst, err := st.Awaits().GetSatisfiedAwait(ctx, "WS", key)
-	if err != nil || inst.Status != domain.AwaitSatisfied || inst.SatisfiedByEventID != "evt-real" {
+	if err != nil || inst.Status != execution.AwaitSatisfied || inst.SatisfiedByEventID != "evt-real" {
 		t.Fatalf("row = %+v, %v; want satisfied by evt-real (resolution untouched)", inst, err)
 	}
 	run, err := st.DriverRuns().Get(ctx, "WS", "run-1")
@@ -236,14 +239,14 @@ func TestAwaitTimeoutSweeperRaceAlreadySatisfied(t *testing.T) {
 }
 
 type awaitRaceSweepStore struct {
-	store.Store
-	awaits store.AwaitStore
+	*memstore.Store
+	awaits execution.AwaitStore
 }
 
-func (s *awaitRaceSweepStore) Awaits() store.AwaitStore { return s.awaits }
+func (s *awaitRaceSweepStore) Awaits() execution.AwaitStore { return s.awaits }
 
 type awaitRaceStore struct {
-	store.AwaitStore
+	execution.AwaitStore
 	afterList func()
 	fired     bool
 }
@@ -253,7 +256,7 @@ func (s *awaitRaceStore) ListDueAwaitDeadlines(
 	workspace string,
 	before time.Time,
 	limit int,
-) ([]*domain.AwaitInstance, error) {
+) ([]*execution.AwaitInstance, error) {
 	values, err := s.AwaitStore.ListDueAwaitDeadlines(ctx, workspace, before, limit)
 	if err == nil && len(values) > 0 && !s.fired {
 		s.fired = true
@@ -276,7 +279,7 @@ func TestAwaitTimeoutSweeperWorkspaceScope(t *testing.T) {
 		t.Fatalf("scoped RunOnce = %+v, %v; want one timed out in WS1 only", result, err)
 	}
 	other, err := st.DriverRuns().Get(ctx, "WS2", "run-b")
-	if err != nil || other.Status != domain.DriverRunSuspendedAwaitingEvent {
+	if err != nil || other.Status != execution.DriverRunSuspendedAwait {
 		t.Fatalf("WS2 run = %+v, %v; want untouched by the scoped sweep", other, err)
 	}
 
@@ -307,7 +310,7 @@ func TestAwaitTimeoutSweeperDrainsBacklog(t *testing.T) {
 	}
 	for _, runID := range []string{"run-1", "run-2", "run-3"} {
 		run, err := st.DriverRuns().Get(ctx, "WS", runID)
-		if err != nil || run.Status != domain.DriverRunQueued {
+		if err != nil || run.Status != execution.DriverRunQueued {
 			t.Fatalf("run %s = %+v, %v; want queued", runID, run, err)
 		}
 	}
@@ -332,19 +335,19 @@ func TestAwaitMatcherTimeoutCarveOutSweeperLaneOnly(t *testing.T) {
 			key := suspendAwaitingRun(t, st, "WS", "run-1", "pr.merged:pr#7", tc.actorAllow, time.Hour)
 			otherKey := suspendAwaitingRun(t, st, "WS", "run-2", "pr.merged:pr#7", nil, time.Hour)
 			forged := trigger.AwaitDispatchEvent{
-				EventID: domain.AwaitTimeoutEventID(key), EventType: "pr.merged", SubjectRef: "pr#7",
+				EventID: execution.AwaitTimeoutEventID(key), EventType: "pr.merged", SubjectRef: "pr#7",
 				ActorRef: tc.actor, Payload: []byte(`{"timeout":true}`),
 			}
 			res, err := testAwaitMatcher(t, st).Dispatch(ctx, "WS", forged)
-			if !errors.Is(err, domain.ErrInvalid) || len(res.Records) != 0 {
+			if !errors.Is(err, persistence.ErrInvalid) || len(res.Records) != 0 {
 				t.Fatalf("Dispatch = records %+v, err %v; want reserved-prefix rejection", res.Records, err)
 			}
 			for runID, wantKey := range map[string]string{"run-1": key, "run-2": otherKey} {
 				run, err := st.DriverRuns().Get(ctx, "WS", runID)
-				if err != nil || run.Status != domain.DriverRunSuspendedAwaitingEvent {
+				if err != nil || run.Status != execution.DriverRunSuspendedAwait {
 					t.Fatalf("run %s = %+v, %v; want still suspended", runID, run, err)
 				}
-				if _, err := st.Awaits().GetSatisfiedAwait(ctx, "WS", wantKey); !errors.Is(err, domain.ErrNotFound) {
+				if _, err := st.Awaits().GetSatisfiedAwait(ctx, "WS", wantKey); !errors.Is(err, persistence.ErrNotFound) {
 					t.Fatalf("await %s = %v, want still pending", wantKey, err)
 				}
 			}

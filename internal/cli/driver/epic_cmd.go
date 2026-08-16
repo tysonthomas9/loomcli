@@ -8,9 +8,9 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	driverpkg "github.com/tysonthomas9/loomcli/internal/driver"
 	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 var (
@@ -63,7 +63,7 @@ func runDriverEpicGet(cmd *cobra.Command, _ []string) error {
 		}
 		epicID := firstNonEmpty(driverEpicGetEpicID, parent.EpicID, driverRunPayloadEpicID(parent.Payload))
 		if epicID == "" {
-			return fmt.Errorf("epic id required: %w", domain.ErrInvalid)
+			return fmt.Errorf("epic id required: %w", persistence.ErrInvalid)
 		}
 		items, err := newDriverWorkItems(h, ws, driverRunActor(parent.RunID))
 		if err != nil {

@@ -8,14 +8,14 @@ import (
 	"sync"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
+
 	workspacemodule "github.com/tysonthomas9/loomcli/internal/modules/workspace"
 
+	"github.com/tysonthomas9/loomcli/internal/app/query/operationalview"
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli/monitor"
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	agentsmodule "github.com/tysonthomas9/loomcli/internal/modules/agents"
-	"github.com/tysonthomas9/loomcli/internal/ops"
-	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/storeadapter"
 )
 
@@ -23,11 +23,20 @@ import (
 // workspace. Status and agents endpoints share it so adjacent poll requests
 // do not each re-read workspace metadata and agent assignments.
 type MonitorStoreDataSource struct {
-	st      store.Store
+	st      MonitorProjectionSources
 	agents  MonitorAgentDirectory
 	ttl     time.Duration
 	mu      sync.Mutex
 	entries map[string]*monitorStoreCacheEntry
+}
+
+// MonitorProjectionSources is the read-only owner-record seam used to build
+// the immutable workspace topology projection.
+type MonitorProjectionSources interface {
+	Workspaces() workspacemodule.WorkspaceStore
+	Repos() workspacemodule.RepoStore
+	AgentSessions() interaction.AgentSessionStore
+	AgentInboxMessages() interaction.AgentInboxMessageStore
 }
 
 // MonitorAgentDirectory is the canonical identity and Role read surface used
@@ -56,13 +65,13 @@ type monitorStoreCacheEntry struct {
 }
 
 // NewMonitorStoreDataSource returns a cache for store-backed monitor data.
-func NewMonitorStoreDataSource(st store.Store) *MonitorStoreDataSource {
+func NewMonitorStoreDataSource(st MonitorProjectionSources) *MonitorStoreDataSource {
 	return NewMonitorStoreDataSourceWithTTL(st, defaultWorkspaceMonitorCacheTTL)
 }
 
 // NewMonitorStoreDataSourceWithTTL returns a store data source with a
 // configurable TTL for tests.
-func NewMonitorStoreDataSourceWithTTL(st store.Store, ttl time.Duration) *MonitorStoreDataSource {
+func NewMonitorStoreDataSourceWithTTL(st MonitorProjectionSources, ttl time.Duration) *MonitorStoreDataSource {
 	if ttl <= 0 {
 		ttl = defaultWorkspaceMonitorCacheTTL
 	}
@@ -141,7 +150,7 @@ func emptyMonitorStoreData() monitorStoreData {
 
 func collectMonitorStoreData(
 	ctx context.Context,
-	st store.Store,
+	st MonitorProjectionSources,
 	directory MonitorAgentDirectory,
 	workspaceHint string,
 ) monitorStoreData {
@@ -188,9 +197,9 @@ func collectMonitorStoreData(
 func monitorAgentStatuses(
 	identities []*agentsmodule.Agent,
 	rolesByName map[string]*agentsmodule.Role,
-	workspaceData *ops.WorkspaceData,
-	latestSessions map[string]*domain.AgentSession,
-	interactiveByAgent map[string]*domain.AgentSession,
+	workspaceData *operationalview.Workspace,
+	latestSessions map[string]*interaction.SessionRecord,
+	interactiveByAgent map[string]*interaction.SessionRecord,
 	inboxByAgent map[string]agentInboxSummary,
 	wsName string,
 ) []monitor.AgentStatus {
@@ -212,9 +221,9 @@ type monitorAgentSessionState struct {
 func monitorAgentStatus(
 	identity *agentsmodule.Agent,
 	rolesByName map[string]*agentsmodule.Role,
-	workspaceData *ops.WorkspaceData,
-	latestSessions map[string]*domain.AgentSession,
-	interactiveByAgent map[string]*domain.AgentSession,
+	workspaceData *operationalview.Workspace,
+	latestSessions map[string]*interaction.SessionRecord,
+	interactiveByAgent map[string]*interaction.SessionRecord,
 	inboxByAgent map[string]agentInboxSummary,
 	wsName string,
 ) (monitor.AgentStatus, bool) {
@@ -225,7 +234,7 @@ func monitorAgentStatus(
 	if !ok {
 		return monitor.AgentStatus{}, false
 	}
-	placement := ops.WorkspaceAgentInfo{
+	placement := operationalview.Agent{
 		Name: identity.AgentID, Kind: roleKind, RoleName: identity.Behavior.RoleName,
 		Backend: runtime.Backend, Repos: runtime.Repos,
 		RepoGroups: runtime.RepoGroups, CrossRepo: runtime.CrossRepo,
@@ -264,7 +273,7 @@ func monitorAgentRuntime(
 	return runtime, roleKind, true
 }
 
-func monitorAgentSession(session *domain.AgentSession) monitorAgentSessionState {
+func monitorAgentSession(session *interaction.SessionRecord) monitorAgentSessionState {
 	if session == nil {
 		return monitorAgentSessionState{}
 	}
@@ -296,13 +305,13 @@ func monitorStatusFromDesiredState(state agentsmodule.DesiredState) string {
 	return "stopped"
 }
 
-func agentInboxSummariesForMonitor(ctx context.Context, st store.Store, wsKey string) map[string]agentInboxSummary {
+func agentInboxSummariesForMonitor(ctx context.Context, st MonitorProjectionSources, wsKey string) map[string]agentInboxSummary {
 	out := make(map[string]agentInboxSummary)
 	if st == nil || st.AgentInboxMessages() == nil || wsKey == "" {
 		return out
 	}
-	for _, status := range []domain.AgentInboxMessageStatus{domain.AgentInboxMessageQueued, domain.AgentInboxMessageFailed} {
-		items, err := st.AgentInboxMessages().List(ctx, wsKey, store.AgentInboxMessageFilter{Status: status, Limit: 10000})
+	for _, status := range []interaction.InboxRecordStatus{interaction.InboxRecordQueued, interaction.InboxRecordFailed} {
+		items, err := st.AgentInboxMessages().List(ctx, wsKey, interaction.AgentInboxMessageFilter{Status: status, Limit: 10000})
 		if err != nil {
 			slog.Warn("monitor: list agent inbox messages failed", "workspace", wsKey, "status", status, "err", err)
 			continue
@@ -312,9 +321,9 @@ func agentInboxSummariesForMonitor(ctx context.Context, st store.Store, wsKey st
 				continue
 			}
 			summary := out[item.TargetAgentID]
-			if status == domain.AgentInboxMessageQueued {
+			if status == interaction.InboxRecordQueued {
 				summary.QueuedCount++
-			} else if status == domain.AgentInboxMessageFailed {
+			} else if status == interaction.InboxRecordFailed {
 				summary.FailedCount++
 			}
 			if item.Cursor >= summary.LatestCursor {
@@ -337,7 +346,7 @@ func workspaceNames(workspaces []*workspacemodule.Workspace) []string {
 	return names
 }
 
-func resolveMonitorWorkspaceFromList(ctx context.Context, st store.Store, workspaceHint string, workspaces []*workspacemodule.Workspace) (key string, name string, ok bool) {
+func resolveMonitorWorkspaceFromList(ctx context.Context, st MonitorProjectionSources, workspaceHint string, workspaces []*workspacemodule.Workspace) (key string, name string, ok bool) {
 	if workspaceHint != "" {
 		if key, name, ok := findMonitorWorkspace(workspaces, workspaceHint, true); ok {
 			return key, name, true
@@ -367,7 +376,7 @@ func findMonitorWorkspace(workspaces []*workspacemodule.Workspace, hint string, 
 	return "", "", false
 }
 
-func monitorWorkspaceDataForAgents(ctx context.Context, st store.Store, wsKey string, wsName string) *ops.WorkspaceData {
+func monitorWorkspaceDataForAgents(ctx context.Context, st MonitorProjectionSources, wsKey string, wsName string) *operationalview.Workspace {
 	if st == nil {
 		return nil
 	}
@@ -377,18 +386,18 @@ func monitorWorkspaceDataForAgents(ctx context.Context, st store.Store, wsKey st
 		return nil
 	}
 
-	out := make([]ops.WorkspaceRepo, 0, len(repos))
+	out := make([]operationalview.Repository, 0, len(repos))
 	for _, repo := range repos {
 		if repo == nil {
 			continue
 		}
-		out = append(out, ops.WorkspaceRepo{
+		out = append(out, operationalview.Repository{
 			Name:   repo.Name,
 			Groups: repo.Groups,
 		})
 	}
 
-	return &ops.WorkspaceData{
+	return &operationalview.Workspace{
 		ID:    wsKey,
 		Name:  wsName,
 		Path:  storeadapter.ResolveWorkspacePath(wsKey),

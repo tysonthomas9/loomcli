@@ -10,9 +10,9 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/tysonthomas9/loomcli/internal/cli/managementapi"
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/modules/agents"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 func TestRunAgentAddRoutesCanonicalIdentityThroughBoundary(t *testing.T) {
@@ -360,7 +360,7 @@ func TestManagementBoundaryDeleteReplaysAfterIdentityNotFound(t *testing.T) {
 	if _, err := boundary.ApplyAgentLifecycle(t.Context(), command); err != nil {
 		t.Fatalf("first management delete: %v", err)
 	}
-	client.getErr = domain.ErrNotFound
+	client.getErr = persistence.ErrNotFound
 	if _, err := boundary.ApplyAgentLifecycle(t.Context(), command); err != nil {
 		t.Fatalf("management replay after identity disappeared: %v", err)
 	}
@@ -376,14 +376,14 @@ func TestManagementBoundaryDeleteReplaysAfterIdentityNotFound(t *testing.T) {
 		t.Fatalf("management replay revision = %s", replay.ExpectedUpdatedAt)
 	}
 
-	client.lifecycleErr = domain.ErrNotFound
+	client.lifecycleErr = persistence.ErrNotFound
 	if _, err := boundary.ApplyAgentLifecycle(t.Context(), AgentLifecycleCommand{
 		WorkspaceKey: "TEST",
 		AgentID:      "never-existed",
 		Action:       agents.LifecycleDelete,
 		RequestID:    testBoundLifecycleRequestID("delete-never-existed"),
-	}); !errors.Is(err, domain.ErrNotFound) {
-		t.Fatalf("never-existing management delete error = %v, want domain.ErrNotFound", err)
+	}); !errors.Is(err, persistence.ErrNotFound) {
+		t.Fatalf("never-existing management delete error = %v, want persistence.ErrNotFound", err)
 	}
 }
 
@@ -466,7 +466,7 @@ func TestLifecycleBoundaryNeverRebindsRetryTokenToReplacementGeneration(t *testi
 		client := &agentManagementClientStub{
 			workspace:    "TEST",
 			current:      replacement,
-			lifecycleErr: domain.ErrConflict,
+			lifecycleErr: persistence.ErrConflict,
 		}
 		boundary := &managementAgentDefinitionBoundary{client: client}
 		oldCommand := AgentLifecycleCommand{
@@ -475,7 +475,7 @@ func TestLifecycleBoundaryNeverRebindsRetryTokenToReplacementGeneration(t *testi
 		}
 		if _, err := boundary.ApplyAgentLifecycle(t.Context(), oldCommand); !errors.Is(
 			err,
-			domain.ErrConflict,
+			persistence.ErrConflict,
 		) {
 			t.Fatalf("old-token replacement error=%v, want conflict", err)
 		}
@@ -656,10 +656,10 @@ func TestLifecycleBoundaryReturnsDefinitiveErrorsWithoutPanicking(t *testing.T) 
 			canonicalCreateCommand("TEST", "worker-one", agents.DesiredStopped),
 			now,
 		),
-		lifecycleErr: domain.ErrConflict,
+		lifecycleErr: persistence.ErrConflict,
 	}
 	managementBoundary := &managementAgentDefinitionBoundary{client: managementClient}
-	if _, err := managementBoundary.ApplyAgentLifecycle(t.Context(), command); !errors.Is(err, domain.ErrConflict) {
+	if _, err := managementBoundary.ApplyAgentLifecycle(t.Context(), command); !errors.Is(err, persistence.ErrConflict) {
 		t.Fatalf("management lifecycle error = %v, want conflict", err)
 	}
 	if len(managementClient.lifecycle) != 1 {

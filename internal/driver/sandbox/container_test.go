@@ -23,7 +23,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 func TestResolveSandboxLauncher(t *testing.T) {
@@ -44,8 +44,8 @@ func TestResolveSandboxLauncher(t *testing.T) {
 			t.Setenv(SandboxModeEnvVar, tc.mode)
 			launcher, err := ResolveSandboxLauncher()
 			if tc.wantErr {
-				if !errors.Is(err, domain.ErrInvalid) {
-					t.Fatalf("err = %v, want domain.ErrInvalid", err)
+				if !errors.Is(err, persistence.ErrInvalid) {
+					t.Fatalf("err = %v, want persistence.ErrInvalid", err)
 				}
 				return
 			}
@@ -162,8 +162,8 @@ func TestContainerLauncherRunArgsGolden(t *testing.T) {
 func TestContainerLauncherRunArgsRejectsCommaMountSource(t *testing.T) {
 	launcher := &containerLauncher{Binary: "podman"}
 	_, err := launcher.runArgs("sbx-1", LaunchSpec{BundleRoot: "/work/a,b"}, "/tmp/launcher.mjs", "/tmp/run.env", nil, nil)
-	if !errors.Is(err, domain.ErrInvalid) {
-		t.Fatalf("err = %v, want domain.ErrInvalid for comma in mount source", err)
+	if !errors.Is(err, persistence.ErrInvalid) {
+		t.Fatalf("err = %v, want persistence.ErrInvalid for comma in mount source", err)
 	}
 }
 
@@ -226,8 +226,8 @@ func TestSplitContainerEnv(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			fileEnv, passEnv, err := splitContainerEnv(tc.env)
 			if tc.wantErr {
-				if !errors.Is(err, domain.ErrInvalid) {
-					t.Fatalf("err = %v, want domain.ErrInvalid", err)
+				if !errors.Is(err, persistence.ErrInvalid) {
+					t.Fatalf("err = %v, want persistence.ErrInvalid", err)
 				}
 				return
 			}

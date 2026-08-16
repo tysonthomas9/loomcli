@@ -6,24 +6,24 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
 
-	trigger "github.com/tysonthomas9/loomcli/internal/infra/automationruntime"
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
+
+	trigger "github.com/tysonthomas9/loomcli/internal/infra/automationruntime"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
-	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
 // testReconciliationQueuePort adapts compact memstore fixtures to Execution's
 // current queue ports. Production composition publishes only the typed API.
 type testReconciliationQueuePort struct {
-	awaitEvents store.AwaitEventNotificationStore
-	runOutcomes store.DriverRunOutcomeStore
+	awaitEvents execution.AwaitEventNotificationStore
+	runOutcomes execution.DriverRunOutcomeStore
 }
 
 func (port *testReconciliationQueuePort) ClaimAwaitEventNotifications(
 	ctx context.Context,
 	lease execution.AwaitEventNotificationLease,
 ) ([]execution.AwaitEventNotification, error) {
-	values, err := port.awaitEvents.ClaimAwaitEventNotifications(ctx, store.AwaitEventNotificationClaim{
+	values, err := port.awaitEvents.ClaimAwaitEventNotifications(ctx, execution.AwaitEventNotificationLease{
 		WorkspaceKey: lease.WorkspaceKey, ClaimID: lease.ClaimID, Before: lease.Before,
 		ClaimUntil: lease.ClaimUntil, Limit: lease.Limit,
 	})
@@ -37,7 +37,7 @@ func (port *testReconciliationQueuePort) ClaimAwaitEventNotifications(
 				WorkspaceKey: value.Event.WorkspaceKey, EventID: value.Event.EventID,
 				SourceEventID: value.Event.SourceEventID, EventType: value.Event.EventType,
 				SubjectRef: value.Event.SubjectRef, SourceKind: value.Event.SourceKind,
-				Origin: string(value.Event.Origin), ActorRef: value.Event.ActorRef,
+				Origin: value.Event.Origin, ActorRef: value.Event.ActorRef,
 				Payload: append([]byte(nil), value.Event.Payload...),
 			},
 			Attempt: value.Attempt, DurableEventID: value.DurableEventID,
@@ -52,7 +52,7 @@ func (port *testReconciliationQueuePort) CompleteAwaitEventNotification(
 	ctx context.Context,
 	completion execution.AwaitEventNotificationCompletion,
 ) error {
-	return port.awaitEvents.CompleteAwaitEventNotification(ctx, store.AwaitEventNotificationCompletion{
+	return port.awaitEvents.CompleteAwaitEventNotification(ctx, execution.AwaitEventNotificationCompletion{
 		WorkspaceKey: completion.WorkspaceKey, EventID: completion.EventID,
 		ClaimID: completion.ClaimID, CompletedAt: completion.CompletedAt,
 	})
@@ -62,7 +62,7 @@ func (port *testReconciliationQueuePort) RetryAwaitEventNotification(
 	ctx context.Context,
 	retry execution.AwaitEventNotificationRetry,
 ) error {
-	return port.awaitEvents.RetryAwaitEventNotification(ctx, store.AwaitEventNotificationRetry{
+	return port.awaitEvents.RetryAwaitEventNotification(ctx, execution.AwaitEventNotificationRetry{
 		WorkspaceKey: retry.WorkspaceKey, EventID: retry.EventID, ClaimID: retry.ClaimID,
 		AvailableAt: retry.AvailableAt, Error: retry.Error,
 	})
@@ -72,7 +72,7 @@ func (port *testReconciliationQueuePort) ClaimDriverRunOutcomes(
 	ctx context.Context,
 	lease execution.DriverRunOutcomeLease,
 ) ([]execution.DriverRunOutcome, error) {
-	values, err := port.runOutcomes.ClaimDriverRunOutcomes(ctx, store.DriverRunOutcomeClaim{
+	values, err := port.runOutcomes.ClaimDriverRunOutcomes(ctx, execution.DriverRunOutcomeLease{
 		WorkspaceKey: lease.WorkspaceKey, ClaimID: lease.ClaimID, Before: lease.Before,
 		ClaimUntil: lease.ClaimUntil, Limit: lease.Limit,
 	})
@@ -83,7 +83,7 @@ func (port *testReconciliationQueuePort) ClaimDriverRunOutcomes(
 	for _, value := range values {
 		out = append(out, execution.DriverRunOutcome{
 			WorkspaceKey: value.WorkspaceKey, RunID: value.RunID,
-			Status: execution.DriverRunStatus(value.Status), Summary: value.Summary,
+			Status: value.Status, Summary: value.Summary,
 			ErrorClass: value.ErrorClass, ParentRunID: value.ParentRunID,
 			ParentEventID: value.ParentEventID, EpicID: value.EpicID,
 			OccurredAt: value.OccurredAt, Attempt: value.Attempt,
@@ -96,7 +96,7 @@ func (port *testReconciliationQueuePort) CompleteDriverRunOutcome(
 	ctx context.Context,
 	completion execution.DriverRunOutcomeCompletion,
 ) error {
-	return port.runOutcomes.CompleteDriverRunOutcome(ctx, store.DriverRunOutcomeCompletion{
+	return port.runOutcomes.CompleteDriverRunOutcome(ctx, execution.DriverRunOutcomeCompletion{
 		WorkspaceKey: completion.WorkspaceKey, RunID: completion.RunID,
 		ClaimID: completion.ClaimID, CompletedAt: completion.CompletedAt,
 	})
@@ -106,7 +106,7 @@ func (port *testReconciliationQueuePort) RetryDriverRunOutcome(
 	ctx context.Context,
 	retry execution.DriverRunOutcomeRetry,
 ) error {
-	return port.runOutcomes.RetryDriverRunOutcome(ctx, store.DriverRunOutcomeRetry{
+	return port.runOutcomes.RetryDriverRunOutcome(ctx, execution.DriverRunOutcomeRetry{
 		WorkspaceKey: retry.WorkspaceKey, RunID: retry.RunID, ClaimID: retry.ClaimID,
 		AvailableAt: retry.AvailableAt, Error: retry.Error,
 	})
@@ -133,8 +133,8 @@ func (resolver *testReconciliationAuthorities) ResolveExecutionSystemAuthority(
 }
 
 func newTestReconciliationQueues(
-	awaitEvents store.AwaitEventNotificationStore,
-	runOutcomes store.DriverRunOutcomeStore,
+	awaitEvents execution.AwaitEventNotificationStore,
+	runOutcomes execution.DriverRunOutcomeStore,
 ) (*execution.Service, *testReconciliationAuthorities, error) {
 	issuer := authority.NewIssuer()
 	rules := append(execution.OperationRules(), execution.DriverRunOperationRules()...)
@@ -151,7 +151,7 @@ func newTestReconciliationQueues(
 }
 
 func newTestAwaitEventReconciler(
-	outbox store.AwaitEventNotificationStore,
+	outbox execution.AwaitEventNotificationStore,
 	dispatcher trigger.AwaitEventDispatcher,
 	workspace string,
 	workspaces RunOutcomeWorkspaceLister,
@@ -228,9 +228,9 @@ func (noOpRunOutcomeCascade) RecoverChildDriverRunCascade(
 }
 
 func newTestRunOutcomeReconciler(
-	outbox store.DriverRunOutcomeStore,
+	outbox execution.DriverRunOutcomeStore,
 	awaits RunOutcomeAwaitNotifier,
-	journal store.TriggerEventAppender,
+	journal automation.TriggerEventAppender,
 	publisher RunOutcomePublisher,
 	workspace string,
 	workspaces RunOutcomeWorkspaceLister,
@@ -246,7 +246,7 @@ func newTestRunOutcomeReconciler(
 }
 
 func testRunOutcomeQueue(
-	outbox store.DriverRunOutcomeStore,
+	outbox execution.DriverRunOutcomeStore,
 ) (*execution.Service, *testReconciliationAuthorities, error) {
 	return newTestReconciliationQueues(nil, outbox)
 }

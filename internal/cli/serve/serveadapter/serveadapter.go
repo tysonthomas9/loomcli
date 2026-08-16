@@ -3,17 +3,23 @@ package serveadapter
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
-	"github.com/tysonthomas9/loomcli/internal/store"
+	workspaceowner "github.com/tysonthomas9/loomcli/internal/modules/workspace"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
+
+type workspaceStoreSource interface {
+	Workspaces() workspaceowner.WorkspaceStore
+}
 
 // BuildWorkspaceIDResolverFn returns a closure satisfying
 // webui.ServerConfig.WorkspaceIDResolverFn — name→key (or pass-through
 // if name == key). In fleet-db mode key IS name for workspaces created
 // via `loom workspace add`; the resolver is a thin existence check.
-func BuildWorkspaceIDResolverFn(s store.Store) func(string) (string, error) {
+func BuildWorkspaceIDResolverFn(s workspaceStoreSource) func(string) (string, error) {
 	if s == nil {
 		return nil
 	}
@@ -22,7 +28,7 @@ func BuildWorkspaceIDResolverFn(s store.Store) func(string) (string, error) {
 		// Try direct key lookup first — the dominant case.
 		if ws, err := s.Workspaces().Get(ctx, name); err == nil && ws != nil {
 			return ws.Key, nil
-		} else if !store.IsNotFound(err) {
+		} else if !errors.Is(err, persistence.ErrNotFound) {
 			return "", err
 		}
 		// Fallback: name lookup for workspaces with distinct Name vs Key.
@@ -36,7 +42,7 @@ func BuildWorkspaceIDResolverFn(s store.Store) func(string) (string, error) {
 // ResolveInitialWorkspaceID returns the explicit workspace key (LOOM_WORKSPACE)
 // or "" when no workspace is active. Used as the
 // InitialWorkspaceID for the webui server bootstrap.
-func ResolveInitialWorkspaceID(s store.Store) string {
+func ResolveInitialWorkspaceID(s workspaceStoreSource) string {
 	if s == nil {
 		return ""
 	}

@@ -9,8 +9,8 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 func TestTriggerEventAppenderPreservesTrustedEnvelopeAndPayload(t *testing.T) {
@@ -52,7 +52,7 @@ func TestTriggerEventAppenderPreservesTrustedEnvelopeAndPayload(t *testing.T) {
 			"payload_base64": body.PayloadBase64,
 		})
 	})
-	appender := client.TriggerEvents().(store.TriggerEventAppender)
+	appender := client.TriggerEvents().(automation.TriggerEventAppender)
 	got, err := appender.AppendTriggerEvent(t.Context(), &automation.Event{
 		WorkspaceKey: "WS", EventID: "execution-await-event-1", SourceKind: "execution",
 		SourceEventID: "run-finished:child:completed", EventType: "run.finished",
@@ -82,7 +82,7 @@ func TestTriggerEventAppenderPreservesSessionAttestation(t *testing.T) {
 			"signature_status": "session", "occurred_at": time.Now().UTC(), "received_at": time.Now().UTC(),
 		})
 	})
-	_, err := client.TriggerEvents().(store.TriggerEventAppender).AppendTriggerEvent(t.Context(), &automation.Event{
+	_, err := client.TriggerEvents().(automation.TriggerEventAppender).AppendTriggerEvent(t.Context(), &automation.Event{
 		WorkspaceKey: "WS", EventID: "approval-1", SourceKind: "approval", SourceEventID: "approval-1",
 		EventType: "approval.granted", SubjectRef: "deploy-1", ActorRef: "user:alice",
 		Origin: automation.EventOriginExternal, SignatureStatus: "session",
@@ -96,7 +96,7 @@ func TestTriggerEventAppenderRejectsNoncanonicalOrUnattestableEnvelope(t *testin
 	client := awaitTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		t.Fatalf("invalid envelope reached FleetDB: %s %s", r.Method, r.URL.Path)
 	})
-	appender := client.TriggerEvents().(store.TriggerEventAppender)
+	appender := client.TriggerEvents().(automation.TriggerEventAppender)
 	base := automation.Event{
 		WorkspaceKey: "WS", EventID: "event-1", SourceKind: "test", SourceEventID: "source-1",
 		EventType: "test.event", Origin: automation.EventOriginSystem,
@@ -106,7 +106,7 @@ func TestTriggerEventAppenderRejectsNoncanonicalOrUnattestableEnvelope(t *testin
 		mutate func(*automation.Event)
 	}{
 		{name: "padded source", mutate: func(event *automation.Event) { event.SourceEventID = " source-1 " }},
-		{name: "reserved source", mutate: func(event *automation.Event) { event.SourceEventID = domain.AwaitTimeoutEventID("run#await-1") }},
+		{name: "reserved source", mutate: func(event *automation.Event) { event.SourceEventID = execution.AwaitTimeoutEventID("run#await-1") }},
 		{name: "system parent", mutate: func(event *automation.Event) { event.ParentEventID = "parent-1" }},
 		{name: "caller hop", mutate: func(event *automation.Event) { event.HopDepth = 1 }},
 		{name: "unsupported attrs", mutate: func(event *automation.Event) { event.SubjectAttrs = map[string]string{"x": "y"} }},
@@ -115,7 +115,7 @@ func TestTriggerEventAppenderRejectsNoncanonicalOrUnattestableEnvelope(t *testin
 		t.Run(test.name, func(t *testing.T) {
 			event := base
 			test.mutate(&event)
-			if _, err := appender.AppendTriggerEvent(t.Context(), &event); !errors.Is(err, domain.ErrInvalid) {
+			if _, err := appender.AppendTriggerEvent(t.Context(), &event); !errors.Is(err, persistence.ErrInvalid) {
 				t.Fatalf("AppendTriggerEvent error = %v, want ErrInvalid", err)
 			}
 		})

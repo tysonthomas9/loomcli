@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 // LeadAssignmentContext is the provider-neutral context a lead runtime should
@@ -60,7 +60,7 @@ func LoadLeadAssignmentContext(ctx context.Context, source LeadAssignmentSource,
 
 	lead, err := source.GetLeadAssignmentIdentity(ctx, workspace, leadName)
 	if err != nil {
-		if errors.Is(err, domain.ErrNotFound) {
+		if errors.Is(err, persistence.ErrNotFound) {
 			return nil, nil
 		}
 		return nil, fmt.Errorf("load lead assignment context: %w", err)
@@ -71,7 +71,7 @@ func LoadLeadAssignmentContext(ctx context.Context, source LeadAssignmentSource,
 	}
 	profile, err := source.GetLeadAssignmentProfile(ctx, workspace, lead.ProfileName)
 	if err != nil {
-		if errors.Is(err, domain.ErrNotFound) {
+		if errors.Is(err, persistence.ErrNotFound) {
 			return nil, nil
 		}
 		return nil, fmt.Errorf("load lead assignment profile: %w", err)

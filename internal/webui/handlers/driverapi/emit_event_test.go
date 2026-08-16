@@ -14,12 +14,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/automation"
+
 	"github.com/tysonthomas9/loomcli/internal/app/workfloweventing"
 	driverpkg "github.com/tysonthomas9/loomcli/internal/driver"
 	trigger "github.com/tysonthomas9/loomcli/internal/infra/automationruntime"
-	"github.com/tysonthomas9/loomcli/internal/modules/automation"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
-	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
 type driverEventAuthorityProviderFunc func(context.Context, workfloweventing.VerifiedRun) (authority.ExecutionAuthority, error)
@@ -216,7 +216,7 @@ func TestDriverAPIEmitEventWithoutWorkflowIsInert(t *testing.T) {
 	if resp.StatusCode != http.StatusServiceUnavailable || errorCode(t, decoded) != "unavailable" {
 		t.Fatalf("response = status %d %v, want 503 unavailable", resp.StatusCode, decoded)
 	}
-	events, err := h.store.TriggerEvents().List(context.Background(), "WS", store.TriggerEventFilter{SourceKind: "internal"})
+	events, err := h.store.TriggerEvents().List(context.Background(), "WS", automation.TriggerEventFilter{SourceKind: "internal"})
 	if err != nil || len(events) != 0 {
 		t.Fatalf("events after inert emit = %v, %v; want none", events, err)
 	}

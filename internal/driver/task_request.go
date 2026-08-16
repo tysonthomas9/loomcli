@@ -7,20 +7,19 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
-
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
+	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 type LocalTaskExecutor struct{}
 
 func (LocalTaskExecutor) PreflightTaskProvider(_ context.Context, opts TaskRunRequestOptions) (TaskRunRequestOptions, error) {
 	if taskRunHasNamedRunner(opts) {
-		return opts, fmt.Errorf("runner %q requires a configured task runner command: %w", opts.Runner, domain.ErrInvalid)
+		return opts, fmt.Errorf("runner %q requires a configured task runner command: %w", opts.Runner, persistence.ErrInvalid)
 	}
 	if taskProviderIsNoop(opts.ProviderProfile) && !testNoopProviderEnabled() {
-		return opts, fmt.Errorf("noop provider profile %q requires %s=1 (provider_unsupported): %w", opts.ProviderProfile, NoopTaskProviderEnvVar, domain.ErrInvalid)
+		return opts, fmt.Errorf("noop provider profile %q requires %s=1 (provider_unsupported): %w", opts.ProviderProfile, NoopTaskProviderEnvVar, persistence.ErrInvalid)
 	}
 	return resolveTaskProviderProfile(opts, false)
 }
@@ -34,7 +33,7 @@ func (LocalTaskExecutor) ExecuteTask(_ context.Context, req TaskExecRequest) (Ta
 	case "local-noop", "noop":
 		if !testNoopProviderEnabled() {
 			return TaskExecResult{
-				Status:          domain.TaskRunFailed,
+				Status:          execution.TaskRunRecordFailed,
 				ExitCode:        2,
 				LogsRef:         "task-run://" + req.TaskRunID + "/logs",
 				RuntimeMetadata: metadata,
@@ -43,7 +42,7 @@ func (LocalTaskExecutor) ExecuteTask(_ context.Context, req TaskExecRequest) (Ta
 			}, nil
 		}
 		return TaskExecResult{
-			Status:          domain.TaskRunCompleted,
+			Status:          execution.TaskRunRecordCompleted,
 			ExitCode:        0,
 			LogsRef:         "task-run://" + req.TaskRunID + "/logs",
 			RuntimeMetadata: metadata,
@@ -54,7 +53,7 @@ func (LocalTaskExecutor) ExecuteTask(_ context.Context, req TaskExecRequest) (Ta
 			profile = "<empty>"
 		}
 		return TaskExecResult{
-			Status:          domain.TaskRunFailed,
+			Status:          execution.TaskRunRecordFailed,
 			ExitCode:        2,
 			LogsRef:         "task-run://" + req.TaskRunID + "/logs",
 			RuntimeMetadata: metadata,
@@ -65,29 +64,29 @@ func (LocalTaskExecutor) ExecuteTask(_ context.Context, req TaskExecRequest) (Ta
 }
 
 type TaskRunRequestResult struct {
-	ID               string               `json:"id"`
-	TaskRunID        string               `json:"taskRunId,omitempty"`
-	DriverStepID     string               `json:"driverStepId,omitempty"`
-	TaskID           string               `json:"taskId"`
-	Status           domain.TaskRunStatus `json:"status"`
-	ExitCode         *int                 `json:"exitCode,omitempty"`
-	LogsRef          string               `json:"logsRef,omitempty"`
-	ArtifactsRef     string               `json:"artifactsRef,omitempty"`
-	ArtifactIDs      []string             `json:"artifactIds,omitempty"`
-	InputTokens      int64                `json:"inputTokens,omitempty"`
-	OutputTokens     int64                `json:"outputTokens,omitempty"`
-	CacheReadTokens  int64                `json:"cacheReadTokens,omitempty"`
-	CacheWriteTokens int64                `json:"cacheWriteTokens,omitempty"`
-	EstimatedCostUSD float64              `json:"estimatedCostUsd,omitempty"`
-	ErrorClass       string               `json:"errorClass,omitempty"`
-	ErrorMessage     string               `json:"errorMessage,omitempty"`
-	FinishedAt       *time.Time           `json:"finishedAt,omitempty"`
-	Runner           string               `json:"runner,omitempty"`
-	RunnerRef        string               `json:"runnerRef,omitempty"`
-	RunnerKind       string               `json:"runnerKind,omitempty"`
-	RunnerEntrypoint string               `json:"runnerEntrypoint,omitempty"`
-	RunnerVersionID  string               `json:"runnerDriverVersionId,omitempty"`
-	ProviderProfile  string               `json:"providerProfile,omitempty"`
+	ID               string                        `json:"id"`
+	TaskRunID        string                        `json:"taskRunId,omitempty"`
+	DriverStepID     string                        `json:"driverStepId,omitempty"`
+	TaskID           string                        `json:"taskId"`
+	Status           execution.TaskRunRecordStatus `json:"status"`
+	ExitCode         *int                          `json:"exitCode,omitempty"`
+	LogsRef          string                        `json:"logsRef,omitempty"`
+	ArtifactsRef     string                        `json:"artifactsRef,omitempty"`
+	ArtifactIDs      []string                      `json:"artifactIds,omitempty"`
+	InputTokens      int64                         `json:"inputTokens,omitempty"`
+	OutputTokens     int64                         `json:"outputTokens,omitempty"`
+	CacheReadTokens  int64                         `json:"cacheReadTokens,omitempty"`
+	CacheWriteTokens int64                         `json:"cacheWriteTokens,omitempty"`
+	EstimatedCostUSD float64                       `json:"estimatedCostUsd,omitempty"`
+	ErrorClass       string                        `json:"errorClass,omitempty"`
+	ErrorMessage     string                        `json:"errorMessage,omitempty"`
+	FinishedAt       *time.Time                    `json:"finishedAt,omitempty"`
+	Runner           string                        `json:"runner,omitempty"`
+	RunnerRef        string                        `json:"runnerRef,omitempty"`
+	RunnerKind       string                        `json:"runnerKind,omitempty"`
+	RunnerEntrypoint string                        `json:"runnerEntrypoint,omitempty"`
+	RunnerVersionID  string                        `json:"runnerDriverVersionId,omitempty"`
+	ProviderProfile  string                        `json:"providerProfile,omitempty"`
 	// RuntimeMetadata surfaces the runner's runtimeMetadata to the awaiting
 	// workflow (e.g. the github-review-agent reads review_findings off it).
 	// The task-run-get op must carry it through, else a completed run looks
@@ -118,14 +117,14 @@ func PrepareTaskRunRequest(
 	preflighter TaskProviderPreflighter,
 ) (TaskRunRequestOptions, error) {
 	if catalog == nil || parent == nil {
-		return opts, fmt.Errorf("workflow catalog and parent driver run required: %w", domain.ErrInvalid)
+		return opts, fmt.Errorf("workflow catalog and parent driver run required: %w", persistence.ErrInvalid)
 	}
 	opts = normalizeTaskRunRequestOptions(opts)
 	if err := validateTaskRunRequestOptions(opts); err != nil {
 		return opts, err
 	}
 	if parent.WorkspaceKey != opts.WorkspaceKey || parent.RunID != opts.DriverRunID || parent.Status != execution.DriverRunRunning {
-		return opts, fmt.Errorf("parent driver run does not match active request owner: %w", domain.ErrNotOwner)
+		return opts, fmt.Errorf("parent driver run does not match active request owner: %w", persistence.ErrNotOwner)
 	}
 	resolved, err := resolveTaskRunRequestRunner(ctx, catalog, opts, parent)
 	if err != nil {
@@ -163,7 +162,7 @@ func normalizeTaskRunRequestOptions(opts TaskRunRequestOptions) TaskRunRequestOp
 
 func validateTaskRunRequestOptions(opts TaskRunRequestOptions) error {
 	if opts.WorkspaceKey == "" || opts.DriverRunID == "" || opts.TaskID == "" {
-		return fmt.Errorf("workspace key, driver run id, and task id required: %w", domain.ErrInvalid)
+		return fmt.Errorf("workspace key, driver run id, and task id required: %w", persistence.ErrInvalid)
 	}
 	return nil
 }
@@ -185,14 +184,14 @@ func resolveTaskRunRequestRunner(ctx context.Context, catalog TaskRunRequestCata
 		return opts, nil
 	}
 	if parent == nil || strings.TrimSpace(parent.DriverVersionID) == "" {
-		return opts, fmt.Errorf("parent driver run version required to resolve runner %q: %w", opts.Runner, domain.ErrInvalid)
+		return opts, fmt.Errorf("parent driver run version required to resolve runner %q: %w", opts.Runner, persistence.ErrInvalid)
 	}
 	version, err := catalog.GetVersion(ctx, opts.WorkspaceKey, parent.DriverVersionID)
 	if err != nil {
 		return opts, fmt.Errorf("load runner manifest from driver version %q: %w", parent.DriverVersionID, err)
 	}
 	if version.DriverID != parent.DriverID {
-		return opts, fmt.Errorf("runner manifest version %q belongs to driver %q, run wants %q: %w", version.VersionID, version.DriverID, parent.DriverID, domain.ErrInvalid)
+		return opts, fmt.Errorf("runner manifest version %q belongs to driver %q, run wants %q: %w", version.VersionID, version.DriverID, parent.DriverID, persistence.ErrInvalid)
 	}
 	resolved, err := applyResolvedRunner(opts, parent, version)
 	if err == nil {
@@ -277,7 +276,7 @@ type claimedTaskRunRefs struct {
 }
 
 type taskExecCompletion struct {
-	Status       domain.TaskRunStatus
+	Status       execution.TaskRunRecordStatus
 	ExitCode     int
 	ErrorClass   string
 	ErrorMessage string
@@ -328,8 +327,8 @@ func taskExecRequest(claimed *execution.TaskRun, opts executeClaimedTaskRunOptio
 	}
 }
 
-func domainTaskRunPlacement(value execution.Placement) domain.TaskRunPlacement {
-	return domain.TaskRunPlacement{
+func domainTaskRunPlacement(value execution.Placement) execution.TaskRunPlacementRecord {
+	return execution.TaskRunPlacementRecord{
 		Provider: value.Provider, NodeID: value.NodeID, RunnerID: value.RunnerID,
 		SandboxID: value.SandboxID, CWD: value.CWD, RepoRef: value.RepoRef,
 	}
@@ -367,13 +366,13 @@ func (c *taskExecCompletion) requireTerminalStatus() {
 		c.markInvalidResult("task executor result missing terminal status")
 	case !c.Status.IsTerminal():
 		c.markInvalidResult(fmt.Sprintf("task executor result status %q is not terminal", c.Status))
-	case c.Status == domain.TaskRunCompleted && c.ExitCode != 0:
+	case c.Status == execution.TaskRunRecordCompleted && c.ExitCode != 0:
 		c.markInvalidResult(fmt.Sprintf("task executor reported completed with non-zero exit code %d", c.ExitCode))
 	}
 }
 
 func (c *taskExecCompletion) markInvalidResult(message string) {
-	c.Status = domain.TaskRunFailed
+	c.Status = execution.TaskRunRecordFailed
 	if c.ExitCode == 0 {
 		c.ExitCode = 1
 	}

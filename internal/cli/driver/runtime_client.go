@@ -12,8 +12,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 const (
@@ -133,8 +133,8 @@ func (client *driverRuntimeClient) call(ctx context.Context, op string, input, o
 	return nil
 }
 
-func (client *driverRuntimeClient) verifyRun(ctx context.Context) (*domain.DriverRun, error) {
-	var run domain.DriverRun
+func (client *driverRuntimeClient) verifyRun(ctx context.Context) (*execution.DriverRunRecord, error) {
+	var run execution.DriverRunRecord
 	if err := client.call(ctx, "verify-run", struct{}{}, &run); err != nil {
 		return nil, fmt.Errorf("verify running driver run: %w", err)
 	}
@@ -168,13 +168,13 @@ func driverRuntimeStatusError(status int, body []byte) error {
 	}
 	switch apiErr.Code {
 	case "invalid":
-		return fmt.Errorf("%w: %s", domain.ErrInvalid, apiErr)
+		return fmt.Errorf("%w: %s", persistence.ErrInvalid, apiErr)
 	case "not_found":
-		return fmt.Errorf("%w: %s", domain.ErrNotFound, apiErr)
+		return fmt.Errorf("%w: %s", persistence.ErrNotFound, apiErr)
 	case "not_owner":
-		return fmt.Errorf("%w: %s", domain.ErrNotOwner, apiErr)
+		return fmt.Errorf("%w: %s", persistence.ErrNotOwner, apiErr)
 	case "conflict", "invalid_transition", "unschedulable":
-		return fmt.Errorf("%w: %s", domain.ErrConflict, apiErr)
+		return fmt.Errorf("%w: %s", persistence.ErrConflict, apiErr)
 	case "unavailable", "timeout", "canceled":
 		return fmt.Errorf("%w: %s", execution.ErrUnavailable, apiErr)
 	default:

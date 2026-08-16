@@ -4,13 +4,12 @@ import (
 	"context"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/store"
+	agentsowner "github.com/tysonthomas9/loomcli/internal/modules/agents"
 )
 
 type roleStore struct{ client *Client }
 
-var _ store.RoleStore = (*roleStore)(nil)
+var _ agentsowner.RoleRecordStore = (*roleStore)(nil)
 
 // roleWire mirrors fleet-db's models.Role JSON shape.
 type roleWire struct {
@@ -36,11 +35,11 @@ type roleWire struct {
 	UpdatedAt      time.Time `json:"updated_at"`
 }
 
-func (r roleWire) toDomain() *domain.Role {
-	return &domain.Role{
+func (r roleWire) toDomain() *agentsowner.Role {
+	return &agentsowner.Role{
 		WorkspaceKey:   r.WorkspaceKey,
 		Name:           r.Name,
-		Kind:           domain.RoleKind(r.Kind),
+		Kind:           r.Kind,
 		Description:    r.Description,
 		Prompt:         r.Prompt,
 		PromptFile:     r.PromptFile,
@@ -61,7 +60,7 @@ func (r roleWire) toDomain() *domain.Role {
 	}
 }
 
-func (s *roleStore) Create(ctx context.Context, in store.RoleCreate) (*domain.Role, error) {
+func (s *roleStore) Create(ctx context.Context, in agentsowner.RoleRecordCreate) (*agentsowner.Role, error) {
 	body := struct {
 		Name           string   `json:"name"`
 		Kind           string   `json:"kind,omitempty"`
@@ -106,7 +105,7 @@ func (s *roleStore) Create(ctx context.Context, in store.RoleCreate) (*domain.Ro
 	return resp.toDomain(), nil
 }
 
-func (s *roleStore) Get(ctx context.Context, ws, name string) (*domain.Role, error) {
+func (s *roleStore) Get(ctx context.Context, ws, name string) (*agentsowner.Role, error) {
 	var resp roleWire
 	if err := s.client.do(ctx, "GET", "/api/v1/"+pathEscape(ws)+"/roles/"+pathEscape(name), nil, &resp); err != nil {
 		return nil, err
@@ -114,22 +113,22 @@ func (s *roleStore) Get(ctx context.Context, ws, name string) (*domain.Role, err
 	return resp.toDomain(), nil
 }
 
-func (s *roleStore) List(ctx context.Context, ws string) ([]*domain.Role, error) {
+func (s *roleStore) List(ctx context.Context, ws string) ([]*agentsowner.Role, error) {
 	var resp struct {
 		Roles []roleWire `json:"roles"`
 	}
 	if err := s.client.do(ctx, "GET", "/api/v1/"+pathEscape(ws)+"/roles", nil, &resp); err != nil {
 		return nil, err
 	}
-	out := make([]*domain.Role, 0, len(resp.Roles))
+	out := make([]*agentsowner.Role, 0, len(resp.Roles))
 	for _, r := range resp.Roles {
 		out = append(out, r.toDomain())
 	}
 	return out, nil
 }
 
-//nolint:funlen // Patch serialization mirrors the store.RoleUpdate surface area.
-func (s *roleStore) Update(ctx context.Context, ws, name string, patch store.RoleUpdate) (*domain.Role, error) {
+//nolint:funlen // Patch serialization mirrors the agentsowner.RoleRecordUpdate surface area.
+func (s *roleStore) Update(ctx context.Context, ws, name string, patch agentsowner.RoleRecordUpdate) (*agentsowner.Role, error) {
 	// Fleet-db's PATCH role contract uses single-pointer fields plus
 	// explicit Clear* booleans for the *int / *float64 optional fields.
 	// Translate the store's RoleUpdate (where **int = &nil signals

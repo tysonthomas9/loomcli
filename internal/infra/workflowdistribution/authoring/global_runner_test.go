@@ -8,9 +8,9 @@ import (
 	"testing"
 
 	appworkflowauthoring "github.com/tysonthomas9/loomcli/internal/app/workflowauthoring"
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/driver"
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 // builtinWorkflowsDeclaringRunner is the pure catalog lookup that drives GAP A:
@@ -64,10 +64,10 @@ func activeTrustedBuiltinRunner(
 		ctx, catalog, NewBuiltinSupport(), workspace, workflowName, runnerName,
 	)
 	if errors.Is(err, workflowcatalog.ErrNotFound) {
-		return nil, domain.ErrNotFound
+		return nil, persistence.ErrNotFound
 	}
 	if errors.Is(err, workflowcatalog.ErrInvalid) {
-		return nil, domain.ErrInvalid
+		return nil, persistence.ErrInvalid
 	}
 	if err != nil {
 		return nil, err

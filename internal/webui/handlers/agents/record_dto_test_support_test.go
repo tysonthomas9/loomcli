@@ -3,8 +3,10 @@ package agents
 import (
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/modules/agents"
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
+	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
 )
 
 // Test-only decoding shapes keep legacy assertion names readable while the
@@ -21,24 +23,24 @@ type agentSessionTranscriptData struct {
 }
 
 type agentRunsResponse struct {
-	AgentID  string                    `json:"agent_id"`
-	Runs     []*domain.DriverRun       `json:"runs"`
-	Sessions []*agentHistorySessionDTO `json:"sessions"`
+	AgentID  string                       `json:"agent_id"`
+	Runs     []*execution.DriverRunRecord `json:"runs"`
+	Sessions []*agentHistorySessionDTO    `json:"sessions"`
 }
 
 type agentHistorySessionDTO struct {
-	WorkspaceKey string                    `json:"workspace_key"`
-	SessionID    string                    `json:"session_id"`
-	AgentID      string                    `json:"agent_id"`
-	Kind         domain.AgentSessionKind   `json:"kind"`
-	TaskID       string                    `json:"task_id,omitempty"`
-	Status       domain.AgentSessionStatus `json:"status"`
-	StartedAt    *time.Time                `json:"started_at,omitempty"`
-	Metadata     map[string]string         `json:"metadata,omitempty"`
+	WorkspaceKey string                          `json:"workspace_key"`
+	SessionID    string                          `json:"session_id"`
+	AgentID      string                          `json:"agent_id"`
+	Kind         interaction.SessionRecordKind   `json:"kind"`
+	TaskID       string                          `json:"task_id,omitempty"`
+	Status       interaction.SessionRecordStatus `json:"status"`
+	StartedAt    *time.Time                      `json:"started_at,omitempty"`
+	Metadata     map[string]string               `json:"metadata,omitempty"`
 }
 
 type interactivePromptsResponse struct {
-	Prompts []domain.BuiltinInteractivePrompt `json:"prompts"`
+	Prompts []agents.BuiltinInteractivePrompt `json:"prompts"`
 }
 
 // agentRecordDTO is a test-only decoder for assertions over the public JSON

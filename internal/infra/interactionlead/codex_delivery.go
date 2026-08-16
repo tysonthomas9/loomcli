@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
 )
 
 // codexTurnDeliverer injects turns through the codex app-server endpoint
@@ -15,7 +15,7 @@ type codexTurnDeliverer struct {
 	runtime CodexRuntimeMetadata
 }
 
-func newCodexTurnDeliverer(session *domain.AgentSession) *codexTurnDeliverer {
+func newCodexTurnDeliverer(session *interaction.SessionRecord) *codexTurnDeliverer {
 	return &codexTurnDeliverer{runtime: RuntimeMetadataFromSession(session)}
 }
 
@@ -48,7 +48,7 @@ func (d *codexTurnDeliverer) claimedBy(sessionID string) string {
 	return claimedBy
 }
 
-func (d *codexTurnDeliverer) populate(result *DeliveryResult, session *domain.AgentSession) {
+func (d *codexTurnDeliverer) populate(result *DeliveryResult, session *interaction.SessionRecord) {
 	d.runtime = RuntimeMetadataFromSession(session)
 	result.Provider = RuntimeProviderCodex
 	result.Runtime = d.runtime

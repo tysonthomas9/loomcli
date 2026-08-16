@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 func normalizeArtifactIDs(ids []string) []string {
@@ -38,7 +38,7 @@ func resolveTaskProviderProfile(opts TaskRunRequestOptions, hostBridgeAvailable 
 		return opts, nil
 	case "flue-daytona":
 		if !hostBridgeAvailable {
-			return opts, fmt.Errorf("provider profile %q requires a configured task runner command: %w", profile, domain.ErrInvalid)
+			return opts, fmt.Errorf("provider profile %q requires a configured task runner command: %w", profile, persistence.ErrInvalid)
 		}
 		if opts.RunnerPlacement.Provider == "" {
 			opts.RunnerPlacement.Provider = "flue"
@@ -49,20 +49,20 @@ func resolveTaskProviderProfile(opts TaskRunRequestOptions, hostBridgeAvailable 
 		opts.SupportedProviders = append(opts.SupportedProviders, "daytona")
 		return opts, nil
 	case "":
-		return opts, fmt.Errorf("provider profile required: %w", domain.ErrInvalid)
+		return opts, fmt.Errorf("provider profile required: %w", persistence.ErrInvalid)
 	default:
 		if !hostBridgeAvailable {
-			return opts, fmt.Errorf("provider profile %q is not supported by local exec-task: %w", profile, domain.ErrInvalid)
+			return opts, fmt.Errorf("provider profile %q is not supported by local exec-task: %w", profile, persistence.ErrInvalid)
 		}
 		providers := normalizeStringList(opts.SupportedProviders)
 		if opts.SandboxPlacement.Provider == "" {
 			switch len(providers) {
 			case 0:
-				return opts, fmt.Errorf("provider profile %q requires --sandbox-provider or --supported-provider: %w", profile, domain.ErrInvalid)
+				return opts, fmt.Errorf("provider profile %q requires --sandbox-provider or --supported-provider: %w", profile, persistence.ErrInvalid)
 			case 1:
 				opts.SandboxPlacement.Provider = providers[0]
 			default:
-				return opts, fmt.Errorf("provider profile %q has multiple supported providers; --sandbox-provider is required: %w", profile, domain.ErrInvalid)
+				return opts, fmt.Errorf("provider profile %q has multiple supported providers; --sandbox-provider is required: %w", profile, persistence.ErrInvalid)
 			}
 		}
 		return opts, nil

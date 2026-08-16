@@ -3,19 +3,17 @@ package workspacecoord
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/app/query/operationalview"
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	agentsmodule "github.com/tysonthomas9/loomcli/internal/modules/agents"
 	workspacemodule "github.com/tysonthomas9/loomcli/internal/modules/workspace"
-	"github.com/tysonthomas9/loomcli/internal/ops"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 	"github.com/tysonthomas9/loomcli/internal/webui/storeadapter"
 )
 
@@ -30,22 +28,13 @@ var workspaceBackendOptions = []string{"claude", defaultWorkspaceBackend, "openc
 
 // WorkspaceServiceConfig holds the dependencies for workspace service construction.
 type WorkspaceServiceConfig struct {
-	Topology             storeadapter.WorkspaceTopologyReader // Narrow Workspace and Repository read projection.
-	Workspace            workspacemodule.API                  // Workspace-owned catalog commands and queries
-	CreateFn             WorkspaceCreateFn                    // Synchronous empty-workspace creation.
-	AddReposFn           WorkspaceAddReposFn                  // Store-backed repo attachment
-	DeleteCleanupFn      func(string) error                   // Machine-local cleanup after a Workspace-owned durable delete.
-	AdmissionCoordinator WorkspaceAdmissionCoordinator        // Durable admission seam for async repository mutations.
-	AgentDirectory       WorkspaceAgentDirectory              // Canonical Agents/Role read surface; nil fails closed to an empty roster.
-}
-
-// WorkspaceAgentDirectory is the canonical read surface needed to project
-// repository-scoped Agents into the workspace shell. The workspace cache never
-// stores this projection, so an Agent create/archive is visible on the next
-// read without a cache invalidation side channel.
-type WorkspaceAgentDirectory interface {
-	ListAgents(context.Context, string, agentsmodule.AgentFilter) ([]*agentsmodule.Agent, error)
-	ListRoles(context.Context, string) ([]*agentsmodule.Role, error)
+	Topology             storeadapter.WorkspaceTopologyReader  // Narrow Workspace and Repository read projection.
+	Workspace            workspacemodule.API                   // Workspace-owned catalog commands and queries
+	CreateFn             WorkspaceCreateFn                     // Synchronous empty-workspace creation.
+	AddReposFn           WorkspaceAddReposFn                   // Store-backed repo attachment
+	DeleteCleanupFn      func(string) error                    // Machine-local cleanup after a Workspace-owned durable delete.
+	AdmissionCoordinator WorkspaceAdmissionCoordinator         // Durable admission seam for async repository mutations.
+	AgentDirectory       operationalview.WorkspaceAgentRecords // Canonical Agents/Role read surface; nil fails closed to an empty roster.
 }
 
 type workspaceServiceImpl struct {
@@ -55,7 +44,7 @@ type workspaceServiceImpl struct {
 	addReposFn           WorkspaceAddReposFn
 	deleteCleanupFn      func(string) error
 	admissionCoordinator WorkspaceAdmissionCoordinator
-	agentDirectory       WorkspaceAgentDirectory
+	agentDirectory       operationalview.WorkspaceAgentRecords
 	workspaceCache       *workspaceDataCache
 }
 
@@ -73,7 +62,7 @@ func NewWorkspaceService(cfg WorkspaceServiceConfig) WorkspaceService {
 	}
 }
 
-func (s *workspaceServiceImpl) AddWorkspaceRepos(ctx context.Context, req WorkspaceAddReposRequest) (*ops.WorkspaceData, error) {
+func (s *workspaceServiceImpl) AddWorkspaceRepos(ctx context.Context, req WorkspaceAddReposRequest) (*operationalview.Workspace, error) {
 	if s.addReposFn == nil {
 		return nil, ErrUnavailable("workspace repo attachment is not available")
 	}
@@ -135,7 +124,7 @@ func (s *workspaceServiceImpl) StartAsyncAddRepos(ctx context.Context, req Works
 }
 
 // loadActiveWorkspace returns the active workspace topology from FleetDB.
-func (s *workspaceServiceImpl) loadActiveWorkspace(ctx context.Context) (*ops.WorkspaceData, error) {
+func (s *workspaceServiceImpl) loadActiveWorkspace(ctx context.Context) (*operationalview.Workspace, error) {
 	if s.topology != nil {
 		data, err := storeadapter.BuildActiveWorkspaceData(ctx, s.topology)
 		if err != nil || data == nil {
@@ -150,9 +139,9 @@ func (s *workspaceServiceImpl) loadActiveWorkspace(ctx context.Context) (*ops.Wo
 }
 
 // loadWorkspaceByID returns a specific workspace's topology from FleetDB.
-func (s *workspaceServiceImpl) loadWorkspaceByID(ctx context.Context, wsID string) (*ops.WorkspaceData, error) {
+func (s *workspaceServiceImpl) loadWorkspaceByID(ctx context.Context, wsID string) (*operationalview.Workspace, error) {
 	if s.topology != nil {
-		data, err := s.workspaceCache.get(ctx, wsID, func(ctx context.Context, key string) (*ops.WorkspaceData, error) {
+		data, err := s.workspaceCache.get(ctx, wsID, func(ctx context.Context, key string) (*operationalview.Workspace, error) {
 			return storeadapter.BuildWorkspaceDataForKey(ctx, s.topology, key)
 		})
 		if err != nil || data == nil {
@@ -166,66 +155,17 @@ func (s *workspaceServiceImpl) loadWorkspaceByID(ctx context.Context, wsID strin
 	return nil, nil
 }
 
-func (s *workspaceServiceImpl) projectCanonicalAgents(ctx context.Context, data *ops.WorkspaceData) error {
-	data.Agents = []ops.WorkspaceAgentInfo{}
-	if s.agentDirectory == nil {
-		return nil
-	}
-	agents, err := s.agentDirectory.ListAgents(ctx, data.ID, agentsmodule.AgentFilter{})
-	if err != nil {
-		return fmt.Errorf("list canonical workspace agents: %w", err)
-	}
-	roles, err := s.agentDirectory.ListRoles(ctx, data.ID)
-	if err != nil {
-		return fmt.Errorf("list canonical workspace roles: %w", err)
-	}
-	rolesByName := make(map[string]*agentsmodule.Role, len(roles))
-	for _, role := range roles {
-		if role == nil || role.WorkspaceKey != data.ID || role.Name == "" {
-			return fmt.Errorf("invalid canonical workspace Role: %w", agentsmodule.ErrInvalidPersistedState)
-		}
-		rolesByName[role.Name] = role
-	}
-	for _, agent := range agents {
-		if agent == nil || agent.WorkspaceKey != data.ID || agent.AgentID == "" {
-			return fmt.Errorf("invalid canonical workspace Agent: %w", agentsmodule.ErrInvalidPersistedState)
-		}
-		if agent.Behavior.RoleName == "" {
-			continue
-		}
-		role := rolesByName[agent.Behavior.RoleName]
-		if role == nil {
-			return fmt.Errorf("canonical Agent %q references missing Role %q: %w", agent.AgentID, agent.Behavior.RoleName, agentsmodule.ErrInvalidPersistedState)
-		}
-		runtime, parseErr := agentsmodule.ParseRuntimeMetadata(agent.Metadata)
-		if parseErr != nil {
-			return fmt.Errorf("canonical Agent %q runtime metadata: %w", agent.AgentID, parseErr)
-		}
-		roleKind := runtime.RoleKind
-		if roleKind == "" {
-			roleKind = role.Kind
-		}
-		backend := runtime.Backend
-		if backend == "" {
-			backend = role.Backend
-		}
-		data.Agents = append(data.Agents, ops.WorkspaceAgentInfo{
-			Name: agent.AgentID, Kind: roleKind, RoleName: agent.Behavior.RoleName,
-			Backend: backend, Repos: append([]string{}, runtime.Repos...),
-			RepoGroups: append([]string{}, runtime.RepoGroups...), CrossRepo: runtime.CrossRepo,
-		})
-	}
-	sort.Slice(data.Agents, func(i, j int) bool { return data.Agents[i].Name < data.Agents[j].Name })
-	return nil
+func (s *workspaceServiceImpl) projectCanonicalAgents(ctx context.Context, data *operationalview.Workspace) error {
+	return operationalview.NewWorkspaceRosterQuery(s.agentDirectory).Project(ctx, data)
 }
 
-func (s *workspaceServiceImpl) GetActiveWorkspace(ctx context.Context) (*ops.WorkspaceData, error) {
+func (s *workspaceServiceImpl) GetActiveWorkspace(ctx context.Context) (*operationalview.Workspace, error) {
 	if s.topology == nil {
-		return &ops.WorkspaceData{
-			Repos:      []ops.WorkspaceRepo{},
+		return &operationalview.Workspace{
+			Repos:      []operationalview.Repository{},
 			Groups:     []string{},
-			Agents:     []ops.WorkspaceAgentInfo{},
-			Workspaces: []ops.WorkspaceSummary{},
+			Agents:     []operationalview.Agent{},
+			Workspaces: []operationalview.Summary{},
 		}, nil
 	}
 
@@ -234,7 +174,7 @@ func (s *workspaceServiceImpl) GetActiveWorkspace(ctx context.Context) (*ops.Wor
 		return nil, ErrInternal("failed to load workspace data", err)
 	}
 	if data == nil {
-		data = &ops.WorkspaceData{}
+		data = &operationalview.Workspace{}
 	}
 	normalizeWorkspaceData(data)
 	for i := range data.Repos {
@@ -259,7 +199,7 @@ func readGitHeadBranch(repoPath string) string {
 	return after
 }
 
-func (s *workspaceServiceImpl) GetWorkspace(ctx context.Context, wsID string) (*ops.WorkspaceData, error) {
+func (s *workspaceServiceImpl) GetWorkspace(ctx context.Context, wsID string) (*operationalview.Workspace, error) {
 	if data, ok, err := s.lookupWorkspace(ctx, wsID); err != nil {
 		return nil, err
 	} else if ok {
@@ -271,7 +211,7 @@ func (s *workspaceServiceImpl) GetWorkspace(ctx context.Context, wsID string) (*
 // lookupWorkspace resolves a workspace UUID via the store. Returns
 // (data, true, nil) when a match is found, (nil, false, nil) when the ID is
 // unknown, or (nil, false, err) on a load error.
-func (s *workspaceServiceImpl) lookupWorkspace(ctx context.Context, wsID string) (*ops.WorkspaceData, bool, error) {
+func (s *workspaceServiceImpl) lookupWorkspace(ctx context.Context, wsID string) (*operationalview.Workspace, bool, error) {
 	if s.topology != nil {
 		// FleetDB workspace keys are canonical uppercase identifiers. Routes may
 		// still receive a display name immediately after creation or from a
@@ -301,7 +241,7 @@ func (s *workspaceServiceImpl) lookupWorkspace(ctx context.Context, wsID string)
 			}
 			return data, true, nil
 		}
-		if errors.Is(err, domain.ErrNotFound) {
+		if errors.Is(err, persistence.ErrNotFound) {
 			return nil, false, nil
 		}
 		return nil, false, ErrInternal("failed to load workspace data", err)
@@ -309,7 +249,7 @@ func (s *workspaceServiceImpl) lookupWorkspace(ctx context.Context, wsID string)
 	return nil, false, nil
 }
 
-func (s *workspaceServiceImpl) CreateWorkspace(ctx context.Context, req WorkspaceCreateRequest) (*ops.WorkspaceData, []string, error) {
+func (s *workspaceServiceImpl) CreateWorkspace(ctx context.Context, req WorkspaceCreateRequest) (*operationalview.Workspace, []string, error) {
 	if s.createFn == nil {
 		return nil, nil, ErrUnavailable("workspace creation is not available")
 	}
@@ -335,7 +275,7 @@ func (s *workspaceServiceImpl) CreateWorkspace(ctx context.Context, req Workspac
 		return nil, nil, classifyWorkspaceCreateError(err)
 	}
 
-	var data *ops.WorkspaceData
+	var data *operationalview.Workspace
 	if s.topology != nil && result.WorkspaceID != "" {
 		s.invalidateWorkspaceCache()
 		d, buildErr := s.loadWorkspaceByID(ctx, result.WorkspaceID)
@@ -383,7 +323,7 @@ func (s *workspaceServiceImpl) GetWorkspaceJob(ctx context.Context, jobID string
 	return nil, ErrNotFound("job not found")
 }
 
-func (s *workspaceServiceImpl) DeleteWorkspace(ctx context.Context, wsID string) (*ops.WorkspaceData, error) {
+func (s *workspaceServiceImpl) DeleteWorkspace(ctx context.Context, wsID string) (*operationalview.Workspace, error) {
 	if s.topology == nil {
 		return nil, ErrUnavailable("workspace store unavailable")
 	}
@@ -404,7 +344,7 @@ func (s *workspaceServiceImpl) DeleteWorkspace(ctx context.Context, wsID string)
 		return nil, ErrInternal("failed to load workspace data", err)
 	}
 	if data == nil {
-		data = &ops.WorkspaceData{}
+		data = &operationalview.Workspace{}
 	}
 	normalizeWorkspaceData(data)
 	return data, nil
@@ -433,14 +373,14 @@ func (s *workspaceServiceImpl) resolveStoreWorkspaceForDefault(ctx context.Conte
 	if err == nil {
 		return ws, nil
 	}
-	if !errors.Is(err, domain.ErrNotFound) && !errors.Is(err, domain.ErrInvalid) {
+	if !errors.Is(err, persistence.ErrNotFound) && !errors.Is(err, persistence.ErrInvalid) {
 		return nil, ErrInternal("failed to load workspace", err)
 	}
 	ws, err = s.topology.Workspaces().GetByName(ctx, name)
 	if err == nil {
 		return ws, nil
 	}
-	if errors.Is(err, domain.ErrNotFound) {
+	if errors.Is(err, persistence.ErrNotFound) {
 		return nil, ErrNotFound("workspace not found: " + name)
 	}
 	return nil, ErrInternal("failed to load workspace", err)
@@ -499,7 +439,7 @@ func (s *workspaceServiceImpl) GetWorkspaceBackend(ctx context.Context, wsID str
 	}, nil
 }
 
-func (s *workspaceServiceImpl) PatchWorkspaceBackend(ctx context.Context, wsID string, backend string) (*ops.WorkspaceData, error) {
+func (s *workspaceServiceImpl) PatchWorkspaceBackend(ctx context.Context, wsID string, backend string) (*operationalview.Workspace, error) {
 	if s.topology == nil {
 		return nil, ErrUnavailable("workspace store unavailable")
 	}
@@ -541,18 +481,18 @@ func (s *workspaceServiceImpl) invalidateWorkspaceCache() {
 }
 
 // normalizeWorkspaceData ensures all slice fields are non-nil so JSON marshals as [] not null.
-func normalizeWorkspaceData(data *ops.WorkspaceData) {
+func normalizeWorkspaceData(data *operationalview.Workspace) {
 	if data.Repos == nil {
-		data.Repos = []ops.WorkspaceRepo{}
+		data.Repos = []operationalview.Repository{}
 	}
 	if data.Groups == nil {
 		data.Groups = []string{}
 	}
 	if data.Agents == nil {
-		data.Agents = []ops.WorkspaceAgentInfo{}
+		data.Agents = []operationalview.Agent{}
 	}
 	if data.Workspaces == nil {
-		data.Workspaces = []ops.WorkspaceSummary{}
+		data.Workspaces = []operationalview.Summary{}
 	}
 	for i := range data.Repos {
 		if data.Repos[i].Groups == nil {

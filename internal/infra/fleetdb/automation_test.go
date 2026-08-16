@@ -15,8 +15,7 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
-
-	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 )
 
 func TestAutomationTransportUsesSharedClientAndBindingBoundary(t *testing.T) {
@@ -330,7 +329,7 @@ func TestAutomationTransportClaimDispatchTransitionAndOriginFilter(t *testing.T)
 					PayloadBase64: payload,
 				},
 				Delivery: &dispatched,
-				DriverRun: &domain.DriverRun{
+				DriverRun: &execution.DriverRunRecord{
 					WorkspaceKey: "WS", RunID: "run-1", DriverID: "driver-a", DriverVersionID: "version-a",
 				},
 				Outcome: AutomationDeliveryDispatchRun, SupersededRunIDs: []string{"run-old"},
@@ -534,10 +533,10 @@ func TestAutomationTransportBindingDispatchWireContractAndFailClosed(t *testing.
 			t.Errorf("effective version = %+v, %v", guard, err)
 		}
 		_ = json.NewEncoder(w).Encode(AutomationBindingDispatchResult{
-			DriverRun: &domain.DriverRun{
+			DriverRun: &execution.DriverRunRecord{
 				WorkspaceKey: "WS", RunID: "run-manual-1", DriverID: "driver-1", DriverVersionID: "version-1",
 				Entrypoint: "run", SourceKind: "binding-run", SourceRef: "route.manual", TriggerBindingID: "binding-1",
-				AgentServiceID: "agent-1", SubjectKey: "repo/main", Status: domain.DriverRunQueued, Payload: payload,
+				AgentServiceID: "agent-1", SubjectKey: "repo/main", Status: execution.DriverRunQueued, Payload: payload,
 			},
 			Outcome: AutomationDeliveryDispatchRun,
 		})
@@ -565,15 +564,15 @@ func TestAutomationTransportBindingDispatchWireContractAndFailClosed(t *testing.
 		result AutomationBindingDispatchResult
 	}{
 		{name: "wrong workspace", result: AutomationBindingDispatchResult{
-			DriverRun: &domain.DriverRun{WorkspaceKey: "OTHER", RunID: "run-1", DriverID: "driver-1", DriverVersionID: "version-1", TriggerBindingID: "binding-1"},
+			DriverRun: &execution.DriverRunRecord{WorkspaceKey: "OTHER", RunID: "run-1", DriverID: "driver-1", DriverVersionID: "version-1", TriggerBindingID: "binding-1"},
 			Outcome:   AutomationDeliveryDispatchRun,
 		}},
 		{name: "wrong binding", result: AutomationBindingDispatchResult{
-			DriverRun: &domain.DriverRun{WorkspaceKey: "WS", RunID: "run-1", DriverID: "driver-1", DriverVersionID: "version-1", TriggerBindingID: "binding-2"},
+			DriverRun: &execution.DriverRunRecord{WorkspaceKey: "WS", RunID: "run-1", DriverID: "driver-1", DriverVersionID: "version-1", TriggerBindingID: "binding-2"},
 			Outcome:   AutomationDeliveryDispatchRun,
 		}},
 		{name: "malformed busy", result: AutomationBindingDispatchResult{
-			DriverRun: &domain.DriverRun{WorkspaceKey: "WS", RunID: "run-1"}, Outcome: AutomationDeliveryDispatchBusy, BusyRunID: "busy-1",
+			DriverRun: &execution.DriverRunRecord{WorkspaceKey: "WS", RunID: "run-1"}, Outcome: AutomationDeliveryDispatchBusy, BusyRunID: "busy-1",
 		}},
 	} {
 		t.Run(test.name, func(t *testing.T) {

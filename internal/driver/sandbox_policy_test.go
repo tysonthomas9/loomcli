@@ -6,12 +6,11 @@ import (
 	"strings"
 	"testing"
 
+	workspaceowner "github.com/tysonthomas9/loomcli/internal/modules/workspace"
+
+	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
-
-	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
-	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
 // countingSandboxLauncher records Launch calls so refusal tests can prove no
@@ -32,7 +31,7 @@ func (c *countingSandboxLauncher) Isolates() bool { return c.isolates }
 func completedStubProcess(summary string) *stubSandboxProcess {
 	return &stubSandboxProcess{
 		exit:      SandboxExit{Stdout: `{"status":"completed","summary":"` + summary + `"}` + "\n"},
-		placement: domain.TaskRunPlacement{Provider: "container", SandboxID: "sbx-1"},
+		placement: execution.TaskRunPlacementRecord{Provider: "container", SandboxID: "sbx-1"},
 	}
 }
 
@@ -116,12 +115,12 @@ func TestTrustPlacementPolicyRefusesDefaultProcessLauncher(t *testing.T) {
 	}
 }
 
-func setupTrustPolicyExecutorRun(t *testing.T, trust workflowcatalog.DriverTrustLevel) (context.Context, store.Store, string) {
+func setupTrustPolicyExecutorRun(t *testing.T, trust workflowcatalog.DriverTrustLevel) (context.Context, *memstore.Store, string) {
 	t.Helper()
 	ctx := context.Background()
 	root := t.TempDir()
 	st := memstore.New()
-	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "TEST", Name: "test"}); err != nil {
+	if _, err := st.Workspaces().Create(ctx, workspaceowner.WorkspaceCreate{Key: "TEST", Name: "test"}); err != nil {
 		t.Fatalf("Create workspace: %v", err)
 	}
 	writeFlueDist(t, root, "epic-runner", "done")

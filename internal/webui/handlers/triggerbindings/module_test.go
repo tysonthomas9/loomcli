@@ -12,29 +12,35 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/app/workflowbinding"
-	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
-	agentsmodule "github.com/tysonthomas9/loomcli/internal/modules/agents"
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
-	connectorsmodule "github.com/tysonthomas9/loomcli/internal/modules/connectors"
+
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
+
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
+
+	agentsmodule "github.com/tysonthomas9/loomcli/internal/modules/agents"
+
+	workspaceowner "github.com/tysonthomas9/loomcli/internal/modules/workspace"
+
+	"github.com/tysonthomas9/loomcli/internal/app/workflowbinding"
+	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	connectorsmodule "github.com/tysonthomas9/loomcli/internal/modules/connectors"
 	workflowcataloghttp "github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog/httpapi"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
-	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 	"github.com/tysonthomas9/loomcli/internal/webui/readprojection"
 )
 
 // seededMux returns a mux wired to a memstore that already has a workflow
 // driver ("driver-1") with a validated active version ("version-1").
-func seededMux(t *testing.T) (*http.ServeMux, store.Store) {
+func seededMux(t *testing.T) (*http.ServeMux, *memstore.Store) {
 	t.Helper()
 	s := memstore.New()
 	ctx := context.Background()
-	if _, err := s.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "WS", Name: "WS"}); err != nil {
+	if _, err := s.Workspaces().Create(ctx, workspaceowner.WorkspaceCreate{Key: "WS", Name: "WS"}); err != nil {
 		t.Fatalf("create workspace: %v", err)
 	}
-	if _, err := s.Drivers().Create(ctx, store.DriverCreate{
+	if _, err := s.Drivers().Create(ctx, workflowcatalog.DriverCreate{
 		WorkspaceKey: "WS",
 		DriverID:     "driver-1",
 		Name:         "epic-runner",
@@ -43,7 +49,7 @@ func seededMux(t *testing.T) (*http.ServeMux, store.Store) {
 	}); err != nil {
 		t.Fatalf("create driver: %v", err)
 	}
-	if _, err := s.DriverVersions().Create(ctx, store.DriverVersionCreate{
+	if _, err := s.DriverVersions().Create(ctx, workflowcatalog.DriverVersionCreate{
 		WorkspaceKey:     "WS",
 		VersionID:        "version-1",
 		DriverID:         "driver-1",
@@ -74,7 +80,7 @@ func seededMux(t *testing.T) (*http.ServeMux, store.Store) {
 
 func muxWithIdentityChecker(
 	t *testing.T,
-	s store.Store,
+	s *memstore.Store,
 	checker agentsmodule.IdentityQueries,
 ) *http.ServeMux {
 	t.Helper()
@@ -116,7 +122,7 @@ func (testOperatorResolver) ResolveOperatorAuthority(r *http.Request, _ string, 
 }
 
 type testAgentIdentityChecker struct {
-	store store.Store
+	store *memstore.Store
 }
 
 func (checker testAgentIdentityChecker) GetAgent(
@@ -125,7 +131,7 @@ func (checker testAgentIdentityChecker) GetAgent(
 ) (*agentsmodule.Agent, error) {
 	if _, err := checker.store.AgentServices().Get(ctx, workspace, bindingID); err == nil {
 		return &agentsmodule.Agent{WorkspaceKey: workspace, AgentID: bindingID}, nil
-	} else if errors.Is(err, domain.ErrNotFound) {
+	} else if errors.Is(err, persistence.ErrNotFound) {
 		return nil, agentsmodule.ErrNotFound
 	} else {
 		return nil, err
@@ -137,7 +143,7 @@ func (checker testAgentIdentityChecker) ListAgents(context.Context, string, agen
 }
 
 type postCreateCollisionChecker struct {
-	store store.Store
+	store *memstore.Store
 	mu    sync.Mutex
 	calls int
 }
@@ -150,9 +156,9 @@ func (checker *postCreateCollisionChecker) GetAgent(
 	defer checker.mu.Unlock()
 	checker.calls++
 	if checker.calls == 2 {
-		if _, err := checker.store.AgentServices().Create(ctx, store.AgentServiceCreate{
+		if _, err := checker.store.AgentServices().Create(ctx, agentsmodule.AgentServiceCreate{
 			WorkspaceKey: workspace, ServiceID: bindingID, Name: bindingID, RoleName: "review",
-			Kind: domain.AgentServiceKindEvent, DesiredState: domain.AgentServiceDesiredRunning, MaxInstances: 1,
+			Kind: agentsmodule.AgentKindEvent, DesiredState: agentsmodule.DesiredRunning, MaxInstances: 1,
 		}); err != nil {
 			return nil, fmt.Errorf("insert concurrent agent fixture: %w", err)
 		}
@@ -199,7 +205,7 @@ func (preparer *testWorkflowTargetPreparer) PrepareWorkflowTarget(
 // Automation's public interfaces. Direct store writes are intentionally
 // confined to test setup, never the HTTP adapter.
 type testAutomationAPI struct {
-	store store.Store
+	store *memstore.Store
 	mu    sync.Mutex
 	runs  int
 }
@@ -210,7 +216,7 @@ func (a *testAutomationAPI) CreateBinding(ctx context.Context, _ authority.Opera
 	if versionID == "" {
 		versionID = "version-1"
 	}
-	created, err := a.store.TriggerBindings().Create(ctx, store.TriggerBindingCreate{
+	created, err := a.store.TriggerBindings().Create(ctx, automation.TriggerBindingCreate{
 		WorkspaceKey: command.WorkspaceKey, BindingID: definition.BindingID, Name: definition.Name,
 		SourceKind: definition.SourceKind, SourceRef: definition.SourceRef, SourceConfigRef: definition.SourceConfigRef,
 		RouteKey: definition.RouteKey, EventTypePatterns: definition.EventTypePatterns,
@@ -234,7 +240,7 @@ func (a *testAutomationAPI) UpdateBinding(ctx context.Context, _ authority.Opera
 	if strings.TrimSpace(existing.TargetAgentServiceID) != "" {
 		return nil, automation.ErrManagedBinding
 	}
-	patch := store.TriggerBindingUpdate{
+	patch := automation.TriggerBindingUpdate{
 		Name: command.Patch.Name, Schedule: command.Patch.Schedule, ScheduleTimezone: command.Patch.ScheduleTimezone,
 		SourceConfigRef:     command.Patch.SourceConfigRef,
 		EventTypePatterns:   command.Patch.EventTypePatterns,
@@ -271,7 +277,7 @@ func (a *testAutomationAPI) setEnabled(ctx context.Context, command automation.B
 	if strings.TrimSpace(existing.TargetAgentServiceID) != "" {
 		return nil, automation.ErrManagedBinding
 	}
-	updated, err := a.store.TriggerBindings().Update(ctx, command.WorkspaceKey, command.BindingID, store.TriggerBindingUpdate{Enabled: &enabled})
+	updated, err := a.store.TriggerBindings().Update(ctx, command.WorkspaceKey, command.BindingID, automation.TriggerBindingUpdate{Enabled: &enabled})
 	if err != nil {
 		return nil, mapTestAutomationError(err)
 	}
@@ -301,10 +307,7 @@ func (a *testAutomationAPI) GetBinding(ctx context.Context, workspace, bindingID
 }
 
 func (a *testAutomationAPI) ListBindings(ctx context.Context, workspace string, filter automation.BindingFilter) ([]*automation.Binding, error) {
-	bindings, err := a.store.TriggerBindings().List(ctx, workspace, store.TriggerBindingFilter{
-		SourceKind: filter.SourceKind, RouteKey: filter.RouteKey, DriverID: filter.DriverID,
-		TargetAgentServiceID: filter.TargetAgentServiceID, Enabled: filter.Enabled, Limit: filter.Limit,
-	})
+	bindings, err := a.store.TriggerBindings().List(ctx, workspace, automation.TriggerBindingFilter(filter))
 	if err != nil {
 		return nil, mapTestAutomationError(err)
 	}
@@ -324,7 +327,7 @@ func (a *testAutomationAPI) DispatchBinding(ctx context.Context, _ authority.Ope
 	a.runs++
 	runID := fmt.Sprintf("manual-run-%d", a.runs)
 	a.mu.Unlock()
-	run, err := a.store.DriverRuns().Create(ctx, store.DriverRunCreate{
+	run, err := a.store.DriverRuns().Create(ctx, execution.DriverRunCreate{
 		WorkspaceKey: command.WorkspaceKey, RunID: runID, DriverID: binding.DriverID,
 		DriverVersionID: binding.DriverVersionID, TriggerBindingID: binding.BindingID,
 		SourceKind: "binding-run", SourceRef: firstNonEmpty(binding.RouteKey, binding.BindingID),
@@ -363,11 +366,11 @@ func mapTestAutomationError(err error) error {
 		return nil
 	}
 	switch {
-	case errors.Is(err, domain.ErrNotFound):
+	case errors.Is(err, persistence.ErrNotFound):
 		return errors.Join(automation.ErrNotFound, err)
-	case errors.Is(err, domain.ErrInvalid):
+	case errors.Is(err, persistence.ErrInvalid):
 		return errors.Join(automation.ErrInvalid, err)
-	case errors.Is(err, domain.ErrConflict), errors.Is(err, domain.ErrAlreadyExists):
+	case errors.Is(err, persistence.ErrConflict), errors.Is(err, persistence.ErrAlreadyExists):
 		return errors.Join(automation.ErrConflict, err)
 	default:
 		return err
@@ -375,7 +378,7 @@ func mapTestAutomationError(err error) error {
 }
 
 type testConnectorLifecycle struct {
-	store store.Store
+	store *memstore.Store
 }
 
 func (c *testConnectorLifecycle) RevokeBindingGrants(ctx context.Context, command connectorsmodule.BindingGrantCleanupCommand) (int, error) {
@@ -433,15 +436,15 @@ func TestCreateBinding_CreatesThenDisables(t *testing.T) {
 func TestCreateBinding_RejectsCanonicalAgentIdentifier(t *testing.T) {
 	mux, st := seededMux(t)
 	ctx := context.Background()
-	if _, err := st.Roles().Create(ctx, store.RoleCreate{
+	if _, err := st.Roles().Create(ctx, agentsmodule.RoleRecordCreate{
 		WorkspaceKey: "WS",
 		Name:         "task",
 	}); err != nil {
 		t.Fatalf("create role: %v", err)
 	}
-	if _, err := st.AgentServices().Create(ctx, store.AgentServiceCreate{
+	if _, err := st.AgentServices().Create(ctx, agentsmodule.AgentServiceCreate{
 		WorkspaceKey: "WS", ServiceID: "s3-local-review", Name: "s3-local-review", RoleName: "task",
-		Kind: domain.AgentServiceKindEvent, DesiredState: domain.AgentServiceDesiredRunning, MaxInstances: 1,
+		Kind: agentsmodule.AgentKindEvent, DesiredState: agentsmodule.DesiredRunning, MaxInstances: 1,
 	}); err != nil {
 		t.Fatalf("create canonical agent: %v", err)
 	}
@@ -451,7 +454,7 @@ func TestCreateBinding_RejectsCanonicalAgentIdentifier(t *testing.T) {
 	if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "already used by a durable agent record") {
 		t.Fatalf("create status = %d body=%s, want clean canonical-agent 409", rec.Code, rec.Body.String())
 	}
-	if _, err := st.TriggerBindings().Get(ctx, "WS", "s3-local-review"); !errors.Is(err, domain.ErrNotFound) {
+	if _, err := st.TriggerBindings().Get(ctx, "WS", "s3-local-review"); !errors.Is(err, persistence.ErrNotFound) {
 		t.Fatalf("binding after rejected create err = %v, want not found", err)
 	}
 }
@@ -459,18 +462,18 @@ func TestCreateBinding_RejectsCanonicalAgentIdentifier(t *testing.T) {
 func TestCreateBinding_RejectsArchivedAgentRecordIdentifier(t *testing.T) {
 	mux, st := seededMux(t)
 	ctx := context.Background()
-	if _, err := st.Roles().Create(ctx, store.RoleCreate{
+	if _, err := st.Roles().Create(ctx, agentsmodule.RoleRecordCreate{
 		WorkspaceKey: "WS",
 		Name:         "review",
 	}); err != nil {
 		t.Fatalf("create role: %v", err)
 	}
-	if _, err := st.AgentServices().Create(ctx, store.AgentServiceCreate{
+	if _, err := st.AgentServices().Create(ctx, agentsmodule.AgentServiceCreate{
 		WorkspaceKey: "WS",
 		ServiceID:    "s2-review-loop",
 		Name:         "Review loop",
-		Kind:         domain.AgentServiceKindEvent,
-		DesiredState: domain.AgentServiceDesiredPaused,
+		Kind:         agentsmodule.AgentKindEvent,
+		DesiredState: agentsmodule.DesiredPaused,
 		RoleName:     "review",
 	}); err != nil {
 		t.Fatalf("create agent record: %v", err)
@@ -484,7 +487,7 @@ func TestCreateBinding_RejectsArchivedAgentRecordIdentifier(t *testing.T) {
 	if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "already used by a durable agent record") {
 		t.Fatalf("create status = %d body=%s, want clean durable-record 409", rec.Code, rec.Body.String())
 	}
-	if _, err := st.TriggerBindings().Get(ctx, "WS", "s2-review-loop"); !errors.Is(err, domain.ErrNotFound) {
+	if _, err := st.TriggerBindings().Get(ctx, "WS", "s2-review-loop"); !errors.Is(err, persistence.ErrNotFound) {
 		t.Fatalf("binding after rejected create err = %v, want not found", err)
 	}
 }
@@ -535,18 +538,18 @@ func TestCreateAndPatchBindingPreserveRouterV2Fields(t *testing.T) {
 func TestSetEnabledRejectsAgentManagedBinding(t *testing.T) {
 	mux, st := seededMux(t)
 	ctx := context.Background()
-	if _, err := st.Roles().Create(ctx, store.RoleCreate{WorkspaceKey: "WS", Name: "docs-assistant"}); err != nil {
+	if _, err := st.Roles().Create(ctx, agentsmodule.RoleRecordCreate{WorkspaceKey: "WS", Name: "docs-assistant"}); err != nil {
 		t.Fatalf("create role: %v", err)
 	}
-	if _, err := st.AgentServices().Create(ctx, store.AgentServiceCreate{
+	if _, err := st.AgentServices().Create(ctx, agentsmodule.AgentServiceCreate{
 		WorkspaceKey: "WS", ServiceID: "agt-docs", Name: "Docs",
-		Kind: domain.AgentServiceKindEvent, DesiredState: domain.AgentServiceDesiredRunning, RoleName: "docs-assistant",
+		Kind: agentsmodule.AgentKindEvent, DesiredState: agentsmodule.DesiredRunning, RoleName: "docs-assistant",
 	}); err != nil {
 		t.Fatalf("create agent service: %v", err)
 	}
-	if _, err := st.TriggerBindings().Create(ctx, store.TriggerBindingCreate{
+	if _, err := st.TriggerBindings().Create(ctx, automation.TriggerBindingCreate{
 		WorkspaceKey: "WS", BindingID: "agt-docs-1", Name: "Docs",
-		SourceKind: store.InternalSourceKind, DriverID: "driver-1", DriverVersionID: "version-1",
+		SourceKind: automation.InternalSourceKind, DriverID: "driver-1", DriverVersionID: "version-1",
 		TargetAgentServiceID: "agt-docs", Enabled: false,
 	}); err != nil {
 		t.Fatalf("create attached binding: %v", err)
@@ -600,12 +603,12 @@ func TestCreateBinding_IdempotentEnsureRechecksAgentIdentity(t *testing.T) {
 	if rec := do(t, mux, http.MethodPost, "/api/workspaces/WS/trigger-bindings", body); rec.Code != http.StatusCreated {
 		t.Fatalf("create status = %d, want 201; body=%s", rec.Code, rec.Body.String())
 	}
-	if _, err := st.Roles().Create(t.Context(), store.RoleCreate{WorkspaceKey: "WS", Name: "review"}); err != nil {
+	if _, err := st.Roles().Create(t.Context(), agentsmodule.RoleRecordCreate{WorkspaceKey: "WS", Name: "review"}); err != nil {
 		t.Fatalf("create role: %v", err)
 	}
-	if _, err := st.AgentServices().Create(t.Context(), store.AgentServiceCreate{
+	if _, err := st.AgentServices().Create(t.Context(), agentsmodule.AgentServiceCreate{
 		WorkspaceKey: "WS", ServiceID: "ensure-collision", Name: "ensure-collision", RoleName: "review",
-		Kind: domain.AgentServiceKindEvent, DesiredState: domain.AgentServiceDesiredRunning, MaxInstances: 1,
+		Kind: agentsmodule.AgentKindEvent, DesiredState: agentsmodule.DesiredRunning, MaxInstances: 1,
 	}); err != nil {
 		t.Fatalf("create colliding agent fixture: %v", err)
 	}
@@ -622,7 +625,7 @@ func TestCreateBinding_IdempotentEnsureRechecksAgentIdentity(t *testing.T) {
 // Automation's fenced disable/delete commands.
 func TestCreateBinding_PostCreateCollisionRollsBackBinding(t *testing.T) {
 	_, st := seededMux(t)
-	if _, err := st.Roles().Create(t.Context(), store.RoleCreate{WorkspaceKey: "WS", Name: "review"}); err != nil {
+	if _, err := st.Roles().Create(t.Context(), agentsmodule.RoleRecordCreate{WorkspaceKey: "WS", Name: "review"}); err != nil {
 		t.Fatalf("create role: %v", err)
 	}
 	checker := &postCreateCollisionChecker{store: st}
@@ -640,7 +643,7 @@ func TestCreateBinding_PostCreateCollisionRollsBackBinding(t *testing.T) {
 	if checker.callCount() != 2 {
 		t.Fatalf("identity checks = %d, want pre- and post-create checks", checker.callCount())
 	}
-	if _, err := st.TriggerBindings().Get(t.Context(), "WS", "raced-identity"); !errors.Is(err, domain.ErrNotFound) {
+	if _, err := st.TriggerBindings().Get(t.Context(), "WS", "raced-identity"); !errors.Is(err, persistence.ErrNotFound) {
 		t.Fatalf("binding after compensated race err = %v, want not found", err)
 	}
 	if _, err := st.AgentServices().Get(t.Context(), "WS", "raced-identity"); err != nil {
@@ -748,7 +751,7 @@ func TestCreateBinding_EnsureResolvesWorkflowBeforeReusingBinding(t *testing.T) 
 // shape with 200 without writing another binding or driver.
 func TestCreateBinding_WorkflowTargetFreshStoreReturns201Then200(t *testing.T) {
 	st := memstore.New()
-	if _, err := st.Workspaces().Create(t.Context(), store.WorkspaceCreate{Key: "WS", Name: "WS"}); err != nil {
+	if _, err := st.Workspaces().Create(t.Context(), workspaceowner.WorkspaceCreate{Key: "WS", Name: "WS"}); err != nil {
 		t.Fatalf("create workspace: %v", err)
 	}
 	automationAPI := &testAutomationAPI{store: st}
@@ -762,13 +765,13 @@ func TestCreateBinding_WorkflowTargetFreshStoreReturns201Then200(t *testing.T) {
 			if materializations > 0 {
 				return nil
 			}
-			if _, err := st.Drivers().Create(ctx, store.DriverCreate{
+			if _, err := st.Drivers().Create(ctx, workflowcatalog.DriverCreate{
 				WorkspaceKey: workspace, DriverID: "builtin-review", Name: workflow,
 				OwnerType: workflowcatalog.DriverOwnerSystem, Status: workflowcatalog.DriverStatusActive,
 			}); err != nil {
 				return err
 			}
-			_, err := st.DriverVersions().Create(ctx, store.DriverVersionCreate{
+			_, err := st.DriverVersions().Create(ctx, workflowcatalog.DriverVersionCreate{
 				WorkspaceKey: workspace, VersionID: "builtin-review-v1", DriverID: "builtin-review",
 				Version: 1, SourceDigest: "sha256:builtin", BundleDigest: "sha256:bundle",
 				ValidationStatus: workflowcatalog.DriverVersionValidationPassed,
@@ -1029,8 +1032,8 @@ func TestListBindingRuns_FiltersToBindingRuns(t *testing.T) {
 		t.Fatalf("list binding runs status = %d, want 200; body=%s", rec.Code, rec.Body.String())
 	}
 	var out struct {
-		BindingID string             `json:"binding_id"`
-		Runs      []domain.DriverRun `json:"runs"`
+		BindingID string                      `json:"binding_id"`
+		Runs      []execution.DriverRunRecord `json:"runs"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
 		t.Fatalf("decode binding runs: %v", err)
@@ -1073,7 +1076,7 @@ func TestListBindingRuns_LimitHonored(t *testing.T) {
 		t.Fatalf("limited list status = %d, want 200; body=%s", rec.Code, rec.Body.String())
 	}
 	var out struct {
-		Runs []domain.DriverRun `json:"runs"`
+		Runs []execution.DriverRunRecord `json:"runs"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
 		t.Fatalf("decode limited runs: %v", err)
@@ -1083,13 +1086,13 @@ func TestListBindingRuns_LimitHonored(t *testing.T) {
 	}
 }
 
-func seedBindingRecord(t *testing.T, st store.Store, bindingID string) {
+func seedBindingRecord(t *testing.T, st *memstore.Store, bindingID string) {
 	t.Helper()
-	if _, err := st.TriggerBindings().Create(context.Background(), store.TriggerBindingCreate{
+	if _, err := st.TriggerBindings().Create(context.Background(), automation.TriggerBindingCreate{
 		WorkspaceKey:     "WS",
 		BindingID:        bindingID,
 		Name:             bindingID,
-		SourceKind:       store.CronSourceKind,
+		SourceKind:       automation.CronSourceKind,
 		RouteKey:         "cron:" + bindingID,
 		DriverID:         "driver-1",
 		DriverVersionID:  "version-1",
@@ -1101,9 +1104,9 @@ func seedBindingRecord(t *testing.T, st store.Store, bindingID string) {
 	}
 }
 
-func seedDriverRun(t *testing.T, st store.Store, runID, bindingID string) {
+func seedDriverRun(t *testing.T, st *memstore.Store, runID, bindingID string) {
 	t.Helper()
-	if _, err := st.DriverRuns().Create(context.Background(), store.DriverRunCreate{
+	if _, err := st.DriverRuns().Create(context.Background(), execution.DriverRunCreate{
 		WorkspaceKey:     "WS",
 		RunID:            runID,
 		DriverID:         "driver-1",
@@ -1331,9 +1334,9 @@ func TestListBindings_FailureHealth(t *testing.T) {
 
 	// Claim order stamps strictly increasing StartedAt, so newest-first is
 	// D(running) > C(failed) > B(failed) > A(completed).
-	seed := func(runID, bindingID string, status domain.DriverRunStatus, finish bool) {
+	seed := func(runID, bindingID string, status execution.DriverRunStatus, finish bool) {
 		t.Helper()
-		if _, err := st.DriverRuns().Create(ctx, store.DriverRunCreate{
+		if _, err := st.DriverRuns().Create(ctx, execution.DriverRunCreate{
 			WorkspaceKey: "WS", RunID: runID, DriverID: "driver-1", DriverVersionID: "version-1",
 			TriggerBindingID: bindingID,
 		}); err != nil {
@@ -1346,16 +1349,16 @@ func TestListBindings_FailureHealth(t *testing.T) {
 		if !finish {
 			return
 		}
-		if _, err := st.DriverRuns().Finish(ctx, "WS", runID, store.DriverRunFinish{
+		if _, err := st.DriverRuns().Finish(ctx, "WS", runID, execution.DriverRunFinish{
 			NodeID: run.NodeID, LeaseID: run.LeaseID, FencingToken: run.FencingToken, Status: status,
 		}); err != nil {
 			t.Fatalf("finish run %s: %v", runID, err)
 		}
 	}
-	seed("A", "s1", domain.DriverRunCompleted, true)
-	seed("B", "s1", domain.DriverRunFailed, true)
-	seed("C", "s1", domain.DriverRunFailed, true)
-	seed("D", "s1", domain.DriverRunRunning, false) // in-flight, must be skipped
+	seed("A", "s1", execution.DriverRunCompleted, true)
+	seed("B", "s1", execution.DriverRunFailed, true)
+	seed("C", "s1", execution.DriverRunFailed, true)
+	seed("D", "s1", execution.DriverRunRunning, false) // in-flight, must be skipped
 
 	rec := do(t, mux, http.MethodGet, "/api/workspaces/WS/trigger-bindings", "")
 	if rec.Code != http.StatusOK {
@@ -1379,7 +1382,7 @@ func TestListBindings_FailureHealth(t *testing.T) {
 			if b.ConsecutiveFailures != 2 {
 				t.Fatalf("consecutive_failures = %d, want 2 (D running skipped, C+B failed, A completed breaks)", b.ConsecutiveFailures)
 			}
-			if b.LastRunStatus != string(domain.DriverRunRunning) {
+			if b.LastRunStatus != string(execution.DriverRunRunning) {
 				t.Fatalf("last_run_status = %q, want running", b.LastRunStatus)
 			}
 		case "s2-shares-driver":

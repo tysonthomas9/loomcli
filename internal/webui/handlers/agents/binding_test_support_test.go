@@ -10,23 +10,52 @@ import (
 	"sort"
 	"strings"
 
-	appworkflowauthoring "github.com/tysonthomas9/loomcli/internal/app/workflowauthoring"
-	"github.com/tysonthomas9/loomcli/internal/domain"
-	workflowdefs "github.com/tysonthomas9/loomcli/internal/infra/workflowdistribution/authoring"
-	agentsmodule "github.com/tysonthomas9/loomcli/internal/modules/agents"
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
-	connectorsmodule "github.com/tysonthomas9/loomcli/internal/modules/connectors"
+
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
+
+	agentsmodule "github.com/tysonthomas9/loomcli/internal/modules/agents"
+
+	appworkflowauthoring "github.com/tysonthomas9/loomcli/internal/app/workflowauthoring"
+	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	workflowdefs "github.com/tysonthomas9/loomcli/internal/infra/workflowdistribution/authoring"
+	connectorsmodule "github.com/tysonthomas9/loomcli/internal/modules/connectors"
 	workflowcataloghttp "github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog/httpapi"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
-	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 	"github.com/tysonthomas9/loomcli/internal/webui/agentcoord"
 	"github.com/tysonthomas9/loomcli/internal/webui/readprojection"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 )
 
-type testBindingOperations struct{ store store.Store }
+type bindingRecordFixture interface {
+	TriggerBindings() automation.TriggerBindingStore
+}
+
+type agentRecordFixture interface {
+	bindingRecordFixture
+	AgentServices() agentsmodule.AgentServiceStore
+	Roles() agentsmodule.RoleRecordStore
+	Connectors() connectorsmodule.ManagementStore
+}
+
+type agentRunFixture interface {
+	DriverRuns() execution.DriverRunStore
+}
+
+type agentProvisioningFixture interface {
+	AgentServices() agentsmodule.AgentServiceStore
+	Roles() agentsmodule.RoleRecordStore
+	Connectors() connectorsmodule.ManagementStore
+}
+
+type workflowTargetFixture interface {
+	Drivers() workflowcatalog.DriverStore
+	DriverVersions() workflowcatalog.DriverVersionStore
+}
+
+type testBindingOperations struct{ store bindingRecordFixture }
 
 func (a *testBindingOperations) CreateBinding(ctx context.Context, _ authority.OperatorAuthority, command automation.CreateBindingCommand) (*automation.Binding, error) {
 	if strings.TrimSpace(command.Definition.TargetAgentServiceID) != "" {
@@ -168,7 +197,7 @@ func testActorFiltersEqual(left, right *automation.ActorFilter) bool {
 }
 
 func (a *testBindingOperations) create(ctx context.Context, workspace string, definition automation.BindingDefinition) (*automation.Binding, error) {
-	binding, err := a.store.TriggerBindings().Create(ctx, store.TriggerBindingCreate{
+	binding, err := a.store.TriggerBindings().Create(ctx, automation.TriggerBindingCreate{
 		WorkspaceKey: workspace, BindingID: definition.BindingID, Name: definition.Name,
 		SourceKind: definition.SourceKind, SourceRef: definition.SourceRef, SourceConfigRef: definition.SourceConfigRef,
 		RouteKey: definition.RouteKey, Method: definition.Method, PathTemplate: definition.PathTemplate,
@@ -207,7 +236,7 @@ func (a *testBindingOperations) UpdateManagedBinding(ctx context.Context, _ auth
 }
 
 func (a *testBindingOperations) update(ctx context.Context, workspace, bindingID string, patch automation.BindingPatch) (*automation.Binding, error) {
-	updated, err := a.store.TriggerBindings().Update(ctx, workspace, bindingID, store.TriggerBindingUpdate{
+	updated, err := a.store.TriggerBindings().Update(ctx, workspace, bindingID, automation.TriggerBindingUpdate{
 		Name: patch.Name, SourceKind: patch.SourceKind, SourceRef: patch.SourceRef,
 		SourceConfigRef: patch.SourceConfigRef, RouteKey: patch.RouteKey, Method: patch.Method,
 		PathTemplate: patch.PathTemplate, Topic: patch.Topic, EventTypePatterns: patch.EventTypePatterns,
@@ -245,7 +274,7 @@ func (a *testBindingOperations) setEnabled(ctx context.Context, workspace, bindi
 	if agentServiceID == "" && existing.TargetAgentServiceID != "" || agentServiceID != "" && existing.TargetAgentServiceID != agentServiceID {
 		return nil, automation.ErrManagedBinding
 	}
-	updated, err := a.store.TriggerBindings().Update(ctx, workspace, bindingID, store.TriggerBindingUpdate{Enabled: &enabled})
+	updated, err := a.store.TriggerBindings().Update(ctx, workspace, bindingID, automation.TriggerBindingUpdate{Enabled: &enabled})
 	return updated, mapTestBindingError(err)
 }
 
@@ -277,10 +306,7 @@ func (a *testBindingOperations) GetBinding(ctx context.Context, workspace, bindi
 }
 
 func (a *testBindingOperations) ListBindings(ctx context.Context, workspace string, filter automation.BindingFilter) ([]*automation.Binding, error) {
-	bindings, err := a.store.TriggerBindings().List(ctx, workspace, store.TriggerBindingFilter{
-		SourceKind: filter.SourceKind, RouteKey: filter.RouteKey, DriverID: filter.DriverID,
-		TargetAgentServiceID: filter.TargetAgentServiceID, Enabled: filter.Enabled, Limit: filter.Limit,
-	})
+	bindings, err := a.store.TriggerBindings().List(ctx, workspace, automation.TriggerBindingFilter(filter))
 	return bindings, mapTestBindingError(err)
 }
 
@@ -293,11 +319,11 @@ func mapTestBindingError(err error) error {
 		return nil
 	}
 	switch {
-	case errors.Is(err, domain.ErrNotFound):
+	case errors.Is(err, persistence.ErrNotFound):
 		return errors.Join(automation.ErrNotFound, err)
-	case errors.Is(err, domain.ErrInvalid):
+	case errors.Is(err, persistence.ErrInvalid):
 		return errors.Join(automation.ErrInvalid, err)
-	case errors.Is(err, domain.ErrAlreadyExists), errors.Is(err, domain.ErrConflict):
+	case errors.Is(err, persistence.ErrAlreadyExists), errors.Is(err, persistence.ErrConflict):
 		return errors.Join(automation.ErrConflict, err)
 	default:
 		return err
@@ -327,20 +353,20 @@ func (testAgentRecordAuthorityResolver) ResolveOperatorAuthority(
 // retaining memstore as an inspectable persistence fixture. Production
 // handlers never receive AgentServiceStore directly for durable record writes.
 type testAgentRecordAPI struct {
-	store store.Store
+	store agentRecordFixture
 }
 
 type testAgentRunQueries struct {
-	store store.Store
+	store agentRunFixture
 }
 
 func (queries testAgentRunQueries) ListDriverRuns(
 	ctx context.Context,
 	query execution.DriverRunQuery,
 ) ([]*execution.DriverRun, error) {
-	runs, err := queries.store.DriverRuns().List(ctx, query.WorkspaceKey, store.DriverRunFilter{
+	runs, err := queries.store.DriverRuns().List(ctx, query.WorkspaceKey, execution.DriverRunFilter{
 		DriverID: query.DriverID, EpicID: query.EpicID,
-		AgentServiceID: query.AgentServiceID, Status: domain.DriverRunStatus(query.Status), Limit: query.Limit,
+		AgentServiceID: query.AgentServiceID, Status: query.Status, Limit: query.Limit,
 	})
 	if err != nil {
 		return nil, err
@@ -356,7 +382,7 @@ func (queries testAgentRunQueries) ListDriverRuns(
 			Entrypoint: run.Entrypoint, SourceKind: run.SourceKind, SourceRef: run.SourceRef,
 			EpicID: run.EpicID, ParentRunID: run.ParentRunID,
 			TriggerBindingID: run.TriggerBindingID, AgentServiceID: run.AgentServiceID,
-			SubjectKey: run.SubjectKey, Status: execution.DriverRunStatus(run.Status),
+			SubjectKey: run.SubjectKey, Status: run.Status,
 			Owner: execution.Owner{ResourceKind: execution.ResourceDriverRun, ResourceID: run.RunID,
 				NodeID: run.NodeID, LeaseID: run.LeaseID, FencingToken: run.FencingToken},
 			IdempotencyKey: run.IdempotencyKey, Payload: append([]byte(nil), run.Payload...),
@@ -386,9 +412,9 @@ func (api *testAgentRecordAPI) ListAgents(
 	workspace string,
 	filter agentsmodule.AgentFilter,
 ) ([]*agentsmodule.Agent, error) {
-	records, err := api.store.AgentServices().List(ctx, workspace, store.AgentServiceFilter{
-		Kind:           domain.AgentServiceKind(filter.Kind),
-		DesiredState:   domain.AgentServiceDesiredState(filter.DesiredState),
+	records, err := api.store.AgentServices().List(ctx, workspace, agentsmodule.AgentServiceFilter{
+		Kind:           filter.Kind,
+		DesiredState:   filter.DesiredState,
 		RoleName:       filter.RoleName,
 		IncludeDeleted: filter.IncludeDeleted,
 		Limit:          filter.Limit,
@@ -427,12 +453,12 @@ func (api *testAgentRecordAPI) ListRoles(
 	return out, nil
 }
 
-func canonicalRoleForTest(role *domain.Role) *agentsmodule.Role {
+func canonicalRoleForTest(role *agentsmodule.Role) *agentsmodule.Role {
 	if role == nil {
 		return nil
 	}
 	return &agentsmodule.Role{
-		WorkspaceKey: role.WorkspaceKey, Name: role.Name, Kind: string(role.Kind),
+		WorkspaceKey: role.WorkspaceKey, Name: role.Name, Kind: role.Kind,
 		Description: role.Description, Prompt: role.Prompt, PromptFile: role.PromptFile,
 		Model: role.Model, TaskFilter: role.TaskFilter, Backend: role.Backend, Effort: role.Effort,
 		PathPatterns: append([]string(nil), role.PathPatterns...), Skills: append([]string(nil), role.Skills...),
@@ -454,7 +480,7 @@ func (api *testAgentRecordAPI) UpdateAgent(
 	if !existing.UpdatedAt.Equal(command.ExpectedUpdatedAt) {
 		return nil, agentsmodule.ErrConflict
 	}
-	patch := store.AgentServiceUpdate{
+	patch := agentsmodule.AgentServiceUpdate{
 		Name:            command.Patch.Name,
 		PlacementPolicy: command.Patch.PlacementPolicy,
 		MaxInstances:    command.Patch.MaxInstances,
@@ -463,7 +489,7 @@ func (api *testAgentRecordAPI) UpdateAgent(
 		Metadata:        command.Patch.Metadata,
 	}
 	if command.Patch.Kind != nil {
-		value := domain.AgentServiceKind(*command.Patch.Kind)
+		value := *command.Patch.Kind
 		patch.Kind = &value
 	}
 	if command.Patch.Behavior != nil {
@@ -507,15 +533,15 @@ func (api *testAgentRecordAPI) SetDesiredState(
 		return nil, mapTestAgentRecordError(err)
 	}
 	if !existing.UpdatedAt.Equal(command.ExpectedUpdatedAt) ||
-		agentsmodule.DesiredState(existing.DesiredState) != command.ExpectedState {
+		existing.DesiredState != command.ExpectedState {
 		return nil, agentsmodule.ErrConflict
 	}
-	desired := domain.AgentServiceDesiredState(command.DesiredState)
+	desired := command.DesiredState
 	updated, err := api.store.AgentServices().Update(
 		ctx,
 		command.WorkspaceKey,
 		command.AgentID,
-		store.AgentServiceUpdate{DesiredState: &desired},
+		agentsmodule.AgentServiceUpdate{DesiredState: &desired},
 	)
 	return canonicalAgentRecordForTest(updated), mapTestAgentRecordError(err)
 }
@@ -532,7 +558,7 @@ func (api *testAgentRecordAPI) ApplyLifecycle(
 	if !existing.UpdatedAt.Equal(command.ExpectedUpdatedAt) {
 		return nil, agentsmodule.ErrConflict
 	}
-	bindings, err := api.store.TriggerBindings().List(ctx, command.WorkspaceKey, store.TriggerBindingFilter{
+	bindings, err := api.store.TriggerBindings().List(ctx, command.WorkspaceKey, automation.TriggerBindingFilter{
 		TargetAgentServiceID: command.AgentID,
 	})
 	if err != nil {
@@ -549,7 +575,7 @@ func (api *testAgentRecordAPI) ApplyLifecycle(
 				ctx,
 				command.WorkspaceKey,
 				binding.BindingID,
-				store.TriggerBindingUpdate{Enabled: &enabled},
+				automation.TriggerBindingUpdate{Enabled: &enabled},
 			); err != nil {
 				return nil, mapTestAgentRecordError(err)
 			}
@@ -578,7 +604,7 @@ func (api *testAgentRecordAPI) ApplyLifecycle(
 					ctx,
 					command.WorkspaceKey,
 					binding.BindingID,
-					store.TriggerBindingUpdate{Enabled: &disabled},
+					automation.TriggerBindingUpdate{Enabled: &disabled},
 				); err != nil {
 					return nil, mapTestAgentRecordError(err)
 				}
@@ -592,17 +618,17 @@ func (api *testAgentRecordAPI) ApplyLifecycle(
 			}
 		}
 	}
-	desired := domain.AgentServiceDesiredPaused
+	desired := agentsmodule.DesiredPaused
 	if command.Action == agentsmodule.LifecycleEnable {
-		desired = domain.AgentServiceDesiredRunning
+		desired = agentsmodule.DesiredRunning
 	} else if command.Action == agentsmodule.LifecycleDelete {
-		desired = domain.AgentServiceDesiredStopped
+		desired = agentsmodule.DesiredStopped
 	}
 	updated, err := api.store.AgentServices().Update(
 		ctx,
 		command.WorkspaceKey,
 		command.AgentID,
-		store.AgentServiceUpdate{DesiredState: &desired},
+		agentsmodule.AgentServiceUpdate{DesiredState: &desired},
 	)
 	if err != nil {
 		return nil, mapTestAgentRecordError(err)
@@ -626,7 +652,7 @@ func (api *testAgentRecordAPI) ApplyLifecycle(
 	}, nil
 }
 
-func canonicalAgentRecordForTest(record *domain.AgentService) *agentsmodule.Agent {
+func canonicalAgentRecordForTest(record *agentsmodule.AgentServiceRecord) *agentsmodule.Agent {
 	if record == nil {
 		return nil
 	}
@@ -634,13 +660,13 @@ func canonicalAgentRecordForTest(record *domain.AgentService) *agentsmodule.Agen
 		WorkspaceKey: record.WorkspaceKey,
 		AgentID:      record.ServiceID,
 		Name:         record.Name,
-		Kind:         agentsmodule.AgentKind(record.Kind),
+		Kind:         record.Kind,
 		Behavior: agentsmodule.BehaviorReference{
 			RoleName:        record.RoleName,
 			DriverID:        record.DriverID,
 			DriverVersionID: record.DriverVersionID,
 		},
-		DesiredState:    agentsmodule.DesiredState(record.DesiredState),
+		DesiredState:    record.DesiredState,
 		PlacementPolicy: record.PlacementPolicy,
 		MaxInstances:    record.MaxInstances,
 		RestartPolicy:   record.RestartPolicy,
@@ -658,15 +684,15 @@ func mapTestAgentRecordError(err error) error {
 		return nil
 	}
 	switch {
-	case errors.Is(err, domain.ErrNotFound):
+	case errors.Is(err, persistence.ErrNotFound):
 		return errors.Join(agentsmodule.ErrNotFound, err)
-	case errors.Is(err, domain.ErrInvalid):
+	case errors.Is(err, persistence.ErrInvalid):
 		return errors.Join(agentsmodule.ErrInvalid, err)
-	case errors.Is(err, domain.ErrAlreadyExists):
+	case errors.Is(err, persistence.ErrAlreadyExists):
 		return errors.Join(agentsmodule.ErrAlreadyExists, err)
-	case errors.Is(err, domain.ErrConflict):
+	case errors.Is(err, persistence.ErrConflict):
 		return errors.Join(agentsmodule.ErrConflict, err)
-	case errors.Is(err, domain.ErrInvalidTransition):
+	case errors.Is(err, persistence.ErrInvalidTransition):
 		return errors.Join(agentsmodule.ErrInvalidTransition, err)
 	default:
 		return err
@@ -713,7 +739,7 @@ func (c testBindingGrantCleanup) RevokeBindingGrants(ctx context.Context, worksp
 	return revoked, nil
 }
 
-func newTestAgentsModule(agentSvc agentcoord.AgentService, st store.Store, hub *realtime.Hub, workspace string) *Module {
+func newTestAgentsModule(agentSvc agentcoord.AgentService, st *memstore.Store, hub *realtime.Hub, workspace string) *Module {
 	config := Config{
 		Hub:               hub,
 		OperatorAuthority: testOperatorAuthorityResolver{}, WorkspaceFromContext: func(context.Context) string { return workspace },
@@ -735,12 +761,12 @@ func newTestAgentsModule(agentSvc agentcoord.AgentService, st store.Store, hub *
 }
 
 func testWorkflowTargetPreparation(
-	st store.Store,
+	st workflowTargetFixture,
 ) func(context.Context, string, string) (*workflowcatalog.Driver, error) {
 	return func(ctx context.Context, workspace, workflow string) (*workflowcatalog.Driver, error) {
 		driverRecord, err := st.Drivers().Get(ctx, workspace, workflow)
 		if err != nil {
-			if !errors.Is(err, domain.ErrNotFound) || !workflowdefs.IsBuiltinWorkflow(workflow) {
+			if !errors.Is(err, persistence.ErrNotFound) || !workflowdefs.IsBuiltinWorkflow(workflow) {
 				return nil, err
 			}
 			spec, ok := workflowdefs.BuiltinWorkflow(workflow)

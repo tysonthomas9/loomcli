@@ -17,7 +17,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 const (
@@ -39,7 +40,7 @@ type triggerManagementFixture struct {
 	binding        *automation.Binding
 	event          *automation.Event
 	delivery       *automation.Delivery
-	run            *domain.DriverRun
+	run            *execution.DriverRunRecord
 }
 
 func setupTriggerManagementFixture(t *testing.T) *triggerManagementFixture {
@@ -60,9 +61,9 @@ func setupTriggerManagementFixture(t *testing.T) *triggerManagementFixture {
 			WorkspaceKey: triggerManagementTestWorkspace, DeliveryID: "delivery-1", TriggerEventID: "event-1",
 			TriggerBindingID: "binding-pr", Status: automation.DeliveryDispatched, DriverRunID: "run-1",
 		},
-		run: &domain.DriverRun{
+		run: &execution.DriverRunRecord{
 			WorkspaceKey: triggerManagementTestWorkspace, RunID: "run-1", DriverID: "reviewer",
-			DriverVersionID: "version-1", TriggerBindingID: "binding-pr", Status: domain.DriverRunQueued,
+			DriverVersionID: "version-1", TriggerBindingID: "binding-pr", Status: execution.DriverRunQueued,
 		},
 	}
 	fixture.server = httptest.NewServer(http.HandlerFunc(fixture.serveHTTP))
@@ -228,7 +229,7 @@ func TestTriggerManagementDuplicateCreatePreservesConflictExitClass(t *testing.T
 		BindingID: "binding-pr", Name: "PR", SourceKind: "github", RouteKey: "github.pull_request.opened",
 		DriverID: "reviewer", DriverVersionID: "version-1", Enabled: &enabled,
 	})
-	if !errors.Is(err, domain.ErrConflict) || !strings.Contains(err.Error(), "code=already_exists") {
+	if !errors.Is(err, persistence.ErrConflict) || !strings.Contains(err.Error(), "code=already_exists") {
 		t.Fatalf("duplicate create error = %v, want conflict exit class", err)
 	}
 	_, queries, _, _ := fixture.snapshot()
@@ -412,7 +413,7 @@ func TestTriggerManagementCommandJSONCompatibility(t *testing.T) {
 	if err != nil {
 		t.Fatalf("runBindingsRun: %v", err)
 	}
-	var run domain.DriverRun
+	var run execution.DriverRunRecord
 	if err := json.Unmarshal([]byte(runJSON), &run); err != nil || run.RunID != "run-1" {
 		t.Fatalf("run JSON = %q decoded=%+v err=%v", runJSON, run, err)
 	}
@@ -565,9 +566,9 @@ func TestTriggerManagementStatusErrorsPreserveDomainExitClasses(t *testing.T) {
 		status int
 		want   error
 	}{
-		{status: http.StatusBadRequest, want: domain.ErrInvalid},
-		{status: http.StatusNotFound, want: domain.ErrNotFound},
-		{status: http.StatusConflict, want: domain.ErrConflict},
+		{status: http.StatusBadRequest, want: persistence.ErrInvalid},
+		{status: http.StatusNotFound, want: persistence.ErrNotFound},
+		{status: http.StatusConflict, want: persistence.ErrConflict},
 	} {
 		t.Run(fmt.Sprint(test.status), func(t *testing.T) {
 			err := triggerManagementStatusError(test.status, []byte(`{"error":"test failure","code":"test"}`))

@@ -4,19 +4,19 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/tysonthomas9/loomcli/internal/ops"
+	"github.com/tysonthomas9/loomcli/internal/app/query/operationalview"
 )
 
 type backendsHealthResp struct {
-	Success bool                `json:"success"`
-	Data    []ops.BackendHealth `json:"data"`
-	Error   string              `json:"error,omitempty"`
+	Success bool                      `json:"success"`
+	Data    []operationalview.Backend `json:"data"`
+	Error   string                    `json:"error,omitempty"`
 }
 
 // HandleBackendsHealth returns an HTTP handler that lists registered backends
 // with health status. This thin wrapper exists so that the app package can
 // build the handler without importing handlers/misc directly.
-func HandleBackendsHealth(backendOps ops.BackendOps) http.HandlerFunc {
+func HandleBackendsHealth(backendOps operationalview.BackendHealthQuery) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		backends, err := backendOps.ListBackendsHealth()
 		if err != nil {
@@ -26,7 +26,7 @@ func HandleBackendsHealth(backendOps ops.BackendOps) http.HandlerFunc {
 			return
 		}
 		if backends == nil {
-			backends = []ops.BackendHealth{}
+			backends = []operationalview.Backend{}
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(backendsHealthResp{Success: true, Data: backends})

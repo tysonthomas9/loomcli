@@ -10,8 +10,8 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 // triggerEventStore is the in-memory TriggerEvent repository. It dedups on
@@ -34,8 +34,8 @@ func newTriggerEventStore() *triggerEventStore {
 }
 
 var (
-	_ store.TriggerEventStore    = (*triggerEventStore)(nil)
-	_ store.TriggerEventAppender = (*triggerEventStore)(nil)
+	_ automation.TriggerEventStore    = (*triggerEventStore)(nil)
+	_ automation.TriggerEventAppender = (*triggerEventStore)(nil)
 )
 
 func (s *triggerEventStore) Get(_ context.Context, ws, eventID string) (*automation.Event, error) {
@@ -43,13 +43,13 @@ func (s *triggerEventStore) Get(_ context.Context, ws, eventID string) (*automat
 	defer s.mu.RUnlock()
 	event, ok := s.items[ws][eventID]
 	if !ok {
-		return nil, fmt.Errorf("trigger event %q in workspace %q: %w", eventID, ws, domain.ErrNotFound)
+		return nil, fmt.Errorf("trigger event %q in workspace %q: %w", eventID, ws, persistence.ErrNotFound)
 	}
 	out := *event
 	return &out, nil
 }
 
-func (s *triggerEventStore) List(_ context.Context, ws string, filter store.TriggerEventFilter) ([]*automation.Event, error) {
+func (s *triggerEventStore) List(_ context.Context, ws string, filter automation.TriggerEventFilter) ([]*automation.Event, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	out := make([]*automation.Event, 0, len(s.items[ws]))
@@ -73,7 +73,7 @@ func (s *triggerEventStore) List(_ context.Context, ws string, filter store.Trig
 	return out, nil
 }
 
-// AppendTriggerEvent is the store.TriggerEventAppender capability: journal
+// AppendTriggerEvent is the automation.TriggerEventAppender capability: journal
 // one server-stamped event without route dispatch (the run.finished lifecycle
 // lane, AW6). Unlike create it preserves the caller's deterministic EventID
 // and is idempotent on it; the idempotency-key index is shared with the
@@ -83,11 +83,11 @@ func (s *triggerEventStore) List(_ context.Context, ws string, filter store.Trig
 // sees this event or registers pending strictly before it (RULE 2 — no lost wakeup).
 func (s *triggerEventStore) AppendTriggerEvent(_ context.Context, event *automation.Event) (*automation.Event, error) {
 	if event == nil || event.WorkspaceKey == "" || event.EventID == "" || event.EventType == "" {
-		return nil, fmt.Errorf("trigger event append requires workspace, event id and event type: %w", domain.ErrInvalid)
+		return nil, fmt.Errorf("trigger event append requires workspace, event id and event type: %w", persistence.ErrInvalid)
 	}
 	canonicalID, canonical := event.CanonicalEventID()
-	if !canonical || domain.IsAwaitTimeoutEventID(canonicalID) {
-		return nil, fmt.Errorf("trigger event append requires a canonical non-reserved identity: %w", domain.ErrInvalid)
+	if !canonical || execution.IsAwaitTimeoutEventID(canonicalID) {
+		return nil, fmt.Errorf("trigger event append requires a canonical non-reserved identity: %w", persistence.ErrInvalid)
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -162,19 +162,19 @@ func newTriggerDeliveryStore(bindings *triggerBindingStore) *triggerDeliveryStor
 	}
 }
 
-var _ store.TriggerDeliveryStore = (*triggerDeliveryStore)(nil)
+var _ automation.TriggerDeliveryStore = (*triggerDeliveryStore)(nil)
 
 func (s *triggerDeliveryStore) Get(_ context.Context, ws, deliveryID string) (*automation.Delivery, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	delivery, ok := s.items[ws][deliveryID]
 	if !ok {
-		return nil, fmt.Errorf("trigger delivery %q in workspace %q: %w", deliveryID, ws, domain.ErrNotFound)
+		return nil, fmt.Errorf("trigger delivery %q in workspace %q: %w", deliveryID, ws, persistence.ErrNotFound)
 	}
 	return cloneTriggerDelivery(delivery), nil
 }
 
-func (s *triggerDeliveryStore) List(_ context.Context, ws string, filter store.TriggerDeliveryFilter) ([]*automation.Delivery, error) {
+func (s *triggerDeliveryStore) List(_ context.Context, ws string, filter automation.TriggerDeliveryFilter) ([]*automation.Delivery, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	out := make([]*automation.Delivery, 0, len(s.items[ws]))
@@ -201,7 +201,7 @@ func (s *triggerDeliveryStore) List(_ context.Context, ws string, filter store.T
 // ZSET: a mutex-guarded scan over held / retryable-failed deliveries whose
 // due score (NextRetryAt unix seconds, nil = 0 = immediately due) is <= Now,
 // ordered like ZRANGEBYSCORE — ascending score, deliveryID for ties.
-func (s *triggerDeliveryStore) ListDue(_ context.Context, ws string, filter store.TriggerDeliveryDueFilter) ([]*automation.Delivery, error) {
+func (s *triggerDeliveryStore) ListDue(_ context.Context, ws string, filter automation.TriggerDeliveryDueFilter) ([]*automation.Delivery, error) {
 	now := filter.Now
 	if now.IsZero() {
 		now = time.Now().UTC()
@@ -236,7 +236,7 @@ func (s *triggerDeliveryStore) ListDue(_ context.Context, ws string, filter stor
 // count reaches the binding's retry budget is forced terminal
 // (failed/retries_exhausted, NextRetryAt cleared) and final deliveries
 // reject transitions to a different status.
-func (s *triggerDeliveryStore) UpdateResult(ctx context.Context, ws, deliveryID string, update store.TriggerDeliveryResultUpdate) (*automation.Delivery, error) {
+func (s *triggerDeliveryStore) UpdateResult(ctx context.Context, ws, deliveryID string, update automation.TriggerDeliveryResultUpdate) (*automation.Delivery, error) {
 	// The binding lookup happens before the write lock: the binding store
 	// guards itself, and ordering the locks this way keeps the stores free
 	// of nested-lock deadlocks.
@@ -248,7 +248,7 @@ func (s *triggerDeliveryStore) UpdateResult(ctx context.Context, ws, deliveryID 
 	defer s.mu.Unlock()
 	delivery, ok := s.items[ws][deliveryID]
 	if !ok {
-		return nil, fmt.Errorf("trigger delivery %q in workspace %q: %w", deliveryID, ws, domain.ErrNotFound)
+		return nil, fmt.Errorf("trigger delivery %q in workspace %q: %w", deliveryID, ws, persistence.ErrNotFound)
 	}
 	if err := applyTriggerDeliveryResult(delivery, update, maxAttempts, time.Now().UTC()); err != nil {
 		return nil, err
@@ -268,10 +268,10 @@ func (s *triggerDeliveryStore) resultMaxAttempts(ctx context.Context, ws, delive
 	}
 	s.mu.RUnlock()
 	if !ok {
-		return 0, fmt.Errorf("trigger delivery %q in workspace %q: %w", deliveryID, ws, domain.ErrNotFound)
+		return 0, fmt.Errorf("trigger delivery %q in workspace %q: %w", deliveryID, ws, persistence.ErrNotFound)
 	}
 	binding, err := s.bindings.Get(ctx, ws, bindingID)
-	if errors.Is(err, domain.ErrNotFound) {
+	if errors.Is(err, persistence.ErrNotFound) {
 		return automation.DefaultTriggerRetryMaxAttempts, nil
 	}
 	if err != nil {
@@ -287,12 +287,12 @@ func (s *triggerDeliveryStore) resultMaxAttempts(ctx context.Context, ws, delive
 // (mirrors fleet-db's applyTriggerDeliveryResult). Final deliveries reject
 // transitions to a different status; re-applying the same status stays
 // idempotent.
-func applyTriggerDeliveryResult(d *automation.Delivery, update store.TriggerDeliveryResultUpdate, maxAttempts int, now time.Time) error {
+func applyTriggerDeliveryResult(d *automation.Delivery, update automation.TriggerDeliveryResultUpdate, maxAttempts int, now time.Time) error {
 	if !update.Status.IsValid() {
-		return fmt.Errorf("update trigger delivery result: delivery status %q: %w", update.Status, domain.ErrInvalid)
+		return fmt.Errorf("update trigger delivery result: delivery status %q: %w", update.Status, persistence.ErrInvalid)
 	}
 	if triggerDeliveryResultFinal(d) && update.Status != d.Status && !triggerDeliverySupersedeTransition(d.Status, update.Status) {
-		return fmt.Errorf("update trigger delivery result: delivery already %s: %w", d.Status, domain.ErrInvalidTransition)
+		return fmt.Errorf("update trigger delivery result: delivery already %s: %w", d.Status, persistence.ErrInvalidTransition)
 	}
 	d.Status = update.Status
 	if update.Attempt != 0 {
@@ -367,7 +367,7 @@ func cloneTriggerDelivery(d *automation.Delivery) *automation.Delivery {
 	return &out
 }
 
-// create inserts a delivery, returning domain.ErrAlreadyExists when one with
+// create inserts a delivery, returning persistence.ErrAlreadyExists when one with
 // the same ID is already present (so replays are idempotent).
 func (s *triggerDeliveryStore) create(delivery *automation.Delivery) error {
 	s.mu.Lock()
@@ -376,7 +376,7 @@ func (s *triggerDeliveryStore) create(delivery *automation.Delivery) error {
 		s.items[delivery.WorkspaceKey] = make(map[string]*automation.Delivery)
 	}
 	if _, ok := s.items[delivery.WorkspaceKey][delivery.DeliveryID]; ok {
-		return domain.ErrAlreadyExists
+		return persistence.ErrAlreadyExists
 	}
 	if s.failCreate != nil {
 		if err := s.failCreate(delivery); err != nil {

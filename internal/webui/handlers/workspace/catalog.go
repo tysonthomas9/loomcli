@@ -5,8 +5,8 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/tysonthomas9/loomcli/internal/app/query/operationalview"
 	workspacemodule "github.com/tysonthomas9/loomcli/internal/modules/workspace"
-	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
@@ -16,7 +16,7 @@ import (
 type CatalogProjection interface {
 	ActiveWorkspaceKey(context.Context) string
 	WorkspacePath(string) string
-	WorkspaceTopology(context.Context, string) (*ops.WorkspaceData, error)
+	WorkspaceTopology(context.Context, string) (*operationalview.Workspace, error)
 }
 
 type CatalogListItem struct {
@@ -114,11 +114,11 @@ func HandleCatalogRepositories(api workspacemodule.API, projection CatalogProjec
 			handler.HandleServiceError(w, err)
 			return
 		}
-		localByName := make(map[string]ops.WorkspaceRepo, len(topology.Repos))
+		localByName := make(map[string]operationalview.Repository, len(topology.Repos))
 		for _, repository := range topology.Repos {
 			localByName[repository.Name] = repository
 		}
-		items := make([]ops.WorkspaceRepo, 0, len(repositories))
+		items := make([]operationalview.Repository, 0, len(repositories))
 		for _, repository := range repositories {
 			local := localByName[repository.Name]
 			defaultBranch := repository.DefaultBranch
@@ -129,7 +129,7 @@ func HandleCatalogRepositories(api workspacemodule.API, projection CatalogProjec
 			if remote == "" {
 				remote = "origin"
 			}
-			items = append(items, ops.WorkspaceRepo{
+			items = append(items, operationalview.Repository{
 				Name: repository.Name, Path: local.Path, DefaultBranch: defaultBranch,
 				CurrentBranch: local.CurrentBranch, Remote: remote, RemoteURL: repository.RemoteURL,
 				SourceRepoID: repository.SourceRepoID, Groups: append([]string(nil), repository.Groups...),

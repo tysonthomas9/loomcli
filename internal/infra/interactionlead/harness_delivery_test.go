@@ -9,12 +9,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
+
 	"github.com/olesho/harness-wrapper/pkg/chat"
 	"github.com/olesho/harness-wrapper/pkg/wrapper"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
-	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
 func TestDeliverLeadMessageToHarnessLeadDeliversWhenQuiet(t *testing.T) {
@@ -199,7 +199,7 @@ func TestHarnessDeliveryUncontrolledSessionUnsupported(t *testing.T) {
 	session := getLeadSession(t, st)
 	metadata := cloneMetadata(session.Metadata)
 	metadata[MetadataRuntimeProvider] = "claude"
-	if _, err := st.AgentSessions().Update(ctx, "WS", "lead-session", store.AgentSessionUpdate{Metadata: &metadata}); err != nil {
+	if _, err := st.AgentSessions().Update(ctx, "WS", "lead-session", interaction.AgentSessionUpdate{Metadata: &metadata}); err != nil {
 		t.Fatalf("seed metadata: %v", err)
 	}
 
@@ -333,21 +333,21 @@ func TestLeadConversationHandleInFlightOverride(t *testing.T) {
 
 // --- helpers and fakes ---
 
-func createHarnessLeadSession(t *testing.T, st store.Store) {
+func createHarnessLeadSession(t *testing.T, st *memstore.Store) {
 	t.Helper()
 	createAssignedLeadSessionWithBackend(t, st, "claude")
 }
 
-func createAssignedLeadSessionWithBackend(t *testing.T, st store.Store, backend string) {
+func createAssignedLeadSessionWithBackend(t *testing.T, st *memstore.Store, backend string) {
 	t.Helper()
 	ctx := context.Background()
 	seedAssignedLeadIdentity(t, st)
-	if _, err := st.AgentSessions().Create(ctx, store.AgentSessionCreate{
+	if _, err := st.AgentSessions().Create(ctx, interaction.AgentSessionCreate{
 		WorkspaceKey: "WS",
 		SessionID:    "lead-session",
 		AgentID:      "nova",
-		Kind:         domain.AgentSessionKindInteractive,
-		Status:       domain.AgentSessionRunning,
+		Kind:         interaction.SessionRecordInteractive,
+		Status:       interaction.SessionRecordRunning,
 		Metadata:     map[string]string{"actor": "test"},
 	}); err != nil {
 		t.Fatalf("create session: %v", err)
@@ -368,7 +368,7 @@ func setHarnessRuntimeMetadata(t *testing.T, st sessionRuntimeFixtureStore, stat
 	}
 }
 
-func getLeadSession(t *testing.T, st store.Store) *domain.AgentSession {
+func getLeadSession(t *testing.T, st *memstore.Store) *interaction.SessionRecord {
 	t.Helper()
 	session, err := st.AgentSessions().Get(context.Background(), "WS", "lead-session")
 	if err != nil {

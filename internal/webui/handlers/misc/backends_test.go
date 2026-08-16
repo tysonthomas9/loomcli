@@ -7,25 +7,25 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/tysonthomas9/loomcli/internal/ops"
+	"github.com/tysonthomas9/loomcli/internal/app/query/operationalview"
 )
 
-// mockBackendOps implements ops.BackendOps for testing.
+// mockBackendOps implements operationalview.BackendHealthQuery for testing.
 type mockBackendOps struct {
-	fn func() ([]ops.BackendHealth, error)
+	fn func() ([]operationalview.Backend, error)
 }
 
-func (m *mockBackendOps) ListBackendsHealth() ([]ops.BackendHealth, error) {
+func (m *mockBackendOps) ListBackendsHealth() ([]operationalview.Backend, error) {
 	return m.fn()
 }
 
-func (m *mockBackendOps) BackendHealth(string) (ops.BackendHealth, bool) {
-	return ops.BackendHealth{}, false
+func (m *mockBackendOps) BackendHealth(string) (operationalview.Backend, bool) {
+	return operationalview.Backend{}, false
 }
 
 func TestHandleGetBackendsHealth_AllAvailable(t *testing.T) {
-	backendOps := &mockBackendOps{fn: func() ([]ops.BackendHealth, error) {
-		return []ops.BackendHealth{
+	backendOps := &mockBackendOps{fn: func() ([]operationalview.Backend, error) {
+		return []operationalview.Backend{
 			{Name: "claude", DisplayName: "Claude", Available: true, Installed: true, APIKeySet: true, Version: "1.0.0"},
 			{Name: "codex", DisplayName: "Codex", Available: true, Installed: true, APIKeySet: true},
 		}, nil
@@ -60,8 +60,8 @@ func TestHandleGetBackendsHealth_AllAvailable(t *testing.T) {
 }
 
 func TestHandleGetBackendsHealth_MixedAvailability(t *testing.T) {
-	backendOps := &mockBackendOps{fn: func() ([]ops.BackendHealth, error) {
-		return []ops.BackendHealth{
+	backendOps := &mockBackendOps{fn: func() ([]operationalview.Backend, error) {
+		return []operationalview.Backend{
 			{Name: "claude", DisplayName: "Claude", Available: true, Installed: true, APIKeySet: true, Version: "1.0.0"},
 			{Name: "codex", DisplayName: "Codex", Available: false, Installed: false, APIKeySet: false, Message: "codex not found on PATH"},
 		}, nil
@@ -96,8 +96,8 @@ func TestHandleGetBackendsHealth_MixedAvailability(t *testing.T) {
 }
 
 func TestHandleGetBackendsHealth_EmptyList(t *testing.T) {
-	backendOps := &mockBackendOps{fn: func() ([]ops.BackendHealth, error) {
-		return []ops.BackendHealth{}, nil
+	backendOps := &mockBackendOps{fn: func() ([]operationalview.Backend, error) {
+		return []operationalview.Backend{}, nil
 	}}
 	handler := handleGetBackendsHealth(backendOps)
 
@@ -126,7 +126,7 @@ func TestHandleGetBackendsHealth_EmptyList(t *testing.T) {
 }
 
 func TestHandleGetBackendsHealth_NilResult(t *testing.T) {
-	backendOps := &mockBackendOps{fn: func() ([]ops.BackendHealth, error) {
+	backendOps := &mockBackendOps{fn: func() ([]operationalview.Backend, error) {
 		return nil, nil
 	}}
 	handler := handleGetBackendsHealth(backendOps)
@@ -153,7 +153,7 @@ func TestHandleGetBackendsHealth_NilResult(t *testing.T) {
 }
 
 func TestHandleGetBackendsHealth_Error(t *testing.T) {
-	backendOps := &mockBackendOps{fn: func() ([]ops.BackendHealth, error) {
+	backendOps := &mockBackendOps{fn: func() ([]operationalview.Backend, error) {
 		return nil, errors.New("backend inspection failed")
 	}}
 	handler := handleGetBackendsHealth(backendOps)

@@ -12,15 +12,17 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	"github.com/tysonthomas9/loomcli/internal/modules/automation"
+
 	connectorsmodule "github.com/tysonthomas9/loomcli/internal/modules/connectors"
-	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
 // uniform401Body is the single body every inbound verification failure
 // returns (writeJSON's encoder appends the newline).
 const uniform401Body = `{"error":"webhook signature verification failed"}` + "\n"
 
-func seedConnector(t *testing.T, st store.Store, id string, kind connectorsmodule.ConnectorSourceKind, secret string, status connectorsmodule.ConnectorStatus) {
+func seedConnector(t *testing.T, st *memstore.Store, id string, kind connectorsmodule.ConnectorSourceKind, secret string, status connectorsmodule.ConnectorStatus) {
 	t.Helper()
 	if _, err := st.Connectors().CreateConnectorRecord(context.Background(), connectorsmodule.CreateConnectorMutation{
 		WorkspaceKey: testWS, ConnectorID: id, SourceKind: kind, InboundSecret: secret, Status: status,
@@ -57,14 +59,14 @@ func TestWebhookConnectorSecretAuthority(t *testing.T) {
 	const connSecret = "connector-inbound-secret"
 	tests := []struct {
 		name       string
-		seed       func(t *testing.T, st store.Store)
+		seed       func(t *testing.T, st *memstore.Store)
 		signSecret string
 		wantStatus int
 		wantCalls  int
 	}{
 		{
 			name: "connector secret verifies",
-			seed: func(t *testing.T, st store.Store) {
+			seed: func(t *testing.T, st *memstore.Store) {
 				seedConnector(t, st, "gh-main", connectorsmodule.ConnectorSourceGitHub, connSecret, "")
 			},
 			signSecret: connSecret,
@@ -73,7 +75,7 @@ func TestWebhookConnectorSecretAuthority(t *testing.T) {
 		},
 		{
 			name: "wrong secret rejected when connector exists",
-			seed: func(t *testing.T, st store.Store) {
+			seed: func(t *testing.T, st *memstore.Store) {
 				seedConnector(t, st, "gh-main", connectorsmodule.ConnectorSourceGitHub, connSecret, "")
 			},
 			signSecret: testSecret,
@@ -82,14 +84,14 @@ func TestWebhookConnectorSecretAuthority(t *testing.T) {
 		},
 		{
 			name:       "no connector fails closed",
-			seed:       func(*testing.T, store.Store) {},
+			seed:       func(*testing.T, *memstore.Store) {},
 			signSecret: testSecret,
 			wantStatus: http.StatusUnauthorized,
 			wantCalls:  0,
 		},
 		{
 			name: "connector for another source fails closed",
-			seed: func(t *testing.T, st store.Store) {
+			seed: func(t *testing.T, st *memstore.Store) {
 				seedConnector(t, st, "slack-main", connectorsmodule.ConnectorSourceSlack, "slack-secret", "")
 			},
 			signSecret: testSecret,
@@ -98,7 +100,7 @@ func TestWebhookConnectorSecretAuthority(t *testing.T) {
 		},
 		{
 			name: "disabled connector fails closed",
-			seed: func(t *testing.T, st store.Store) {
+			seed: func(t *testing.T, st *memstore.Store) {
 				seedConnector(t, st, "gh-off", connectorsmodule.ConnectorSourceGitHub, connSecret, connectorsmodule.ConnectorStatusDisabled)
 			},
 			signSecret: testSecret,
@@ -107,7 +109,7 @@ func TestWebhookConnectorSecretAuthority(t *testing.T) {
 		},
 		{
 			name: "any active connector for the source kind verifies",
-			seed: func(t *testing.T, st store.Store) {
+			seed: func(t *testing.T, st *memstore.Store) {
 				seedConnector(t, st, "gh-a", connectorsmodule.ConnectorSourceGitHub, "secret-a", "")
 				seedConnector(t, st, "gh-b", connectorsmodule.ConnectorSourceGitHub, "secret-b", "")
 			},
@@ -117,7 +119,7 @@ func TestWebhookConnectorSecretAuthority(t *testing.T) {
 		},
 		{
 			name: "tampered signature 401 with connector",
-			seed: func(t *testing.T, st store.Store) {
+			seed: func(t *testing.T, st *memstore.Store) {
 				seedConnector(t, st, "gh-main", connectorsmodule.ConnectorSourceGitHub, connSecret, "")
 			},
 			signSecret: "not-the-secret",
@@ -153,7 +155,7 @@ func TestWebhookConnectorSecretAuthority(t *testing.T) {
 // previous secret verifies inside the window (with a stale-secret audit
 // signal) and is rejected once the window closes.
 func TestWebhookRotationWindow(t *testing.T) {
-	rotate := func(t *testing.T, st store.Store, validUntil time.Time) {
+	rotate := func(t *testing.T, st *memstore.Store, validUntil time.Time) {
 		t.Helper()
 		if _, err := st.Connectors().RotateConnectorSecretsRecord(context.Background(), testWS, "gh-main", connectorsmodule.RotateConnectorSecretsMutation{
 			NewInboundSecret: "new-secret", PreviousSecretValidUntil: validUntil,
@@ -216,7 +218,7 @@ func TestWebhookRotationWindow(t *testing.T) {
 		if rr.Body.String() != uniform401Body {
 			t.Errorf("401 body = %q, want uniform %q", rr.Body.String(), uniform401Body)
 		}
-		events, _ := st.TriggerEvents().List(context.Background(), testWS, store.TriggerEventFilter{})
+		events, _ := st.TriggerEvents().List(context.Background(), testWS, automation.TriggerEventFilter{})
 		if len(events) != 0 {
 			t.Fatalf("expired-secret request persisted %d trigger events", len(events))
 		}
@@ -226,7 +228,7 @@ func TestWebhookRotationWindow(t *testing.T) {
 // connectorOverrideStore swaps the connector store while keeping memstore's
 // binding reads real.
 type connectorOverrideStore struct {
-	store.Store
+	*memstore.Store
 	conns connectorsmodule.ManagementStore
 }
 
@@ -405,7 +407,7 @@ func TestConnectorSecretResolutionFailureIsUniform401(t *testing.T) {
 	if !strings.Contains(logs.String(), "webhook inbound secret resolution failed") {
 		t.Errorf("resolution failure not logged server-side, logs: %s", logs.String())
 	}
-	events, _ := st.TriggerEvents().List(context.Background(), testWS, store.TriggerEventFilter{})
+	events, _ := st.TriggerEvents().List(context.Background(), testWS, automation.TriggerEventFilter{})
 	if len(events) != 0 {
 		t.Fatalf("resolution failure persisted %d trigger events", len(events))
 	}
@@ -424,7 +426,7 @@ func TestWebhookNilResolvedConnectorSecretFailsClosed(t *testing.T) {
 	if recorder.Code != http.StatusUnauthorized || recorder.Body.String() != uniform401Body {
 		t.Fatalf("nil secret result = %d %q, want uniform 401", recorder.Code, recorder.Body.String())
 	}
-	events, err := st.TriggerEvents().List(t.Context(), testWS, store.TriggerEventFilter{})
+	events, err := st.TriggerEvents().List(t.Context(), testWS, automation.TriggerEventFilter{})
 	if err != nil || len(events) != 0 {
 		t.Fatalf("nil secret result persisted events = %d, %v", len(events), err)
 	}

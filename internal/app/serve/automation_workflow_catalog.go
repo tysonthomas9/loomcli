@@ -9,25 +9,28 @@ import (
 	"sync"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/automation"
+
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
+
+	workspaceowner "github.com/tysonthomas9/loomcli/internal/modules/workspace"
+
 	"github.com/tysonthomas9/loomcli/internal/app/systemeventing"
 	"github.com/tysonthomas9/loomcli/internal/app/webhookingestion"
 	"github.com/tysonthomas9/loomcli/internal/app/workflowbinding"
 	"github.com/tysonthomas9/loomcli/internal/driver"
 	trigger "github.com/tysonthomas9/loomcli/internal/infra/automationruntime"
 	infrafleetdb "github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
-	"github.com/tysonthomas9/loomcli/internal/modules/automation"
 	automationfleetdb "github.com/tysonthomas9/loomcli/internal/modules/automation/fleetdb"
-	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 	workflowcataloghttp "github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog/httpapi"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 	platformruntime "github.com/tysonthomas9/loomcli/internal/platform/runtime"
-	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
-type DriverRunStore = store.DriverRunStore
-type AwaitStore = store.AwaitStore
-type WorkspaceStore = store.WorkspaceStore
+type DriverRunStore = execution.DriverRunStore
+type AwaitStore = execution.AwaitStore
+type WorkspaceStore = workspaceowner.WorkspaceStore
 type WebhookVerifier = webhookingestion.Verifier
 
 // WebhookVerifierFactory lets the composition root supply Automation's
@@ -41,9 +44,9 @@ type WebhookVerifierFactory func(automation.BindingQueries) webhookingestion.Ver
 func NewAwaitEventReconcilerWithExecutionStores(
 	queue execution.AwaitEventNotificationAPI,
 	authorities execution.SystemAuthorityResolver,
-	awaits store.AwaitStore,
-	driverRuns store.DriverRunStore,
-	resolver store.AtomicAwaitStore,
+	awaits execution.AwaitStore,
+	driverRuns execution.DriverRunStore,
+	resolver execution.AtomicAwaitStore,
 	workspace string,
 	workspaces interface {
 		ListWorkspaceKeys(context.Context) ([]string, error)
@@ -112,9 +115,9 @@ type CatalogOwner struct {
 type automationWorkflowCatalogConfig struct {
 	Workspace              string
 	FleetDBClient          *infrafleetdb.Client
-	DriverRuns             store.DriverRunStore
-	Awaits                 store.AwaitStore
-	Workspaces             store.WorkspaceStore
+	DriverRuns             execution.DriverRunStore
+	Awaits                 execution.AwaitStore
+	Workspaces             workspaceowner.WorkspaceStore
 	WebhookVerifierFactory WebhookVerifierFactory
 	PrepareWorkflowTarget  WorkflowTargetPreparationFactory
 	Catalog                CatalogOwner
@@ -124,10 +127,10 @@ type automationWorkflowCatalogConfig struct {
 // ordering to Execution without exposing a mutable Store or issuer.
 type ExecutionAwaitResolverBinding struct {
 	mu       sync.RWMutex
-	resolver store.AtomicAwaitStore
+	resolver execution.AtomicAwaitStore
 }
 
-func (binding *ExecutionAwaitResolverBinding) Bind(resolver store.AtomicAwaitStore) {
+func (binding *ExecutionAwaitResolverBinding) Bind(resolver execution.AtomicAwaitStore) {
 	if binding == nil {
 		return
 	}
@@ -243,19 +246,19 @@ func OperatorActions() []authority.Action {
 }
 
 type automationWorkspaceLister struct {
-	workspaces store.WorkspaceStore
+	workspaces workspaceowner.WorkspaceStore
 }
 
 var _ automation.WorkspaceLister = (*automationWorkspaceLister)(nil)
 
-func newAutomationWorkspaceLister(workspaces store.WorkspaceStore) automation.WorkspaceLister {
+func newAutomationWorkspaceLister(workspaces workspaceowner.WorkspaceStore) automation.WorkspaceLister {
 	if workspaces == nil {
 		return nil
 	}
 	return &automationWorkspaceLister{workspaces: workspaces}
 }
 
-func NewAutomationWorkspaceLister(workspaces store.WorkspaceStore) automation.WorkspaceLister {
+func NewAutomationWorkspaceLister(workspaces workspaceowner.WorkspaceStore) automation.WorkspaceLister {
 	return newAutomationWorkspaceLister(workspaces)
 }
 
@@ -361,9 +364,9 @@ func (component *runOutcomeRuntimeComponent) RunOnce(ctx context.Context, now ti
 }
 
 func NewRunOutcomeRuntimeRegistrationWithExecution(
-	awaits store.AwaitStore,
-	triggerEvents store.TriggerEventStore,
-	workspacesStore store.WorkspaceStore,
+	awaits execution.AwaitStore,
+	triggerEvents automation.TriggerEventStore,
+	workspacesStore workspaceowner.WorkspaceStore,
 	publisher driver.RunOutcomePublisher,
 	workspace string,
 	api execution.DriverRunAPI,
@@ -431,9 +434,9 @@ func (component *awaitEventRuntimeComponent) RunOnce(ctx context.Context, now ti
 }
 
 func NewAwaitEventRuntimeRegistrationWithExecution(
-	awaits store.AwaitStore,
-	driverRuns store.DriverRunStore,
-	workspacesStore store.WorkspaceStore,
+	awaits execution.AwaitStore,
+	driverRuns execution.DriverRunStore,
+	workspacesStore workspaceowner.WorkspaceStore,
 	workspace string,
 	api execution.DriverRunAPI,
 	queue execution.AwaitEventNotificationAPI,

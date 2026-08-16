@@ -7,7 +7,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	infrafleetdb "github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
 	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
 	interactionfleetdb "github.com/tysonthomas9/loomcli/internal/modules/interaction/fleetdb"
@@ -603,7 +602,7 @@ func interactionOwnedProof(
 	return proof, closeProof, nil
 }
 
-func interactionSession(value *domain.AgentSession) *interaction.AgentSession {
+func interactionSession(value *interaction.SessionRecord) *interaction.AgentSession {
 	if value == nil {
 		return nil
 	}
@@ -623,7 +622,7 @@ func interactionSession(value *domain.AgentSession) *interaction.AgentSession {
 	}
 }
 
-func interactionLease(value *domain.AgentLease) *interaction.SessionLease {
+func interactionLease(value *interaction.LeaseRecord) *interaction.SessionLease {
 	if value == nil {
 		return nil
 	}
@@ -636,7 +635,7 @@ func interactionLease(value *domain.AgentLease) *interaction.SessionLease {
 	}
 }
 
-func interactionTerminal(value *domain.TerminalSession) *interaction.TerminalSession {
+func interactionTerminal(value *interaction.TerminalRecord) *interaction.TerminalSession {
 	if value == nil {
 		return nil
 	}
@@ -653,7 +652,7 @@ func interactionTerminal(value *domain.TerminalSession) *interaction.TerminalSes
 	}
 }
 
-func interactionInbox(value *domain.AgentInboxMessage) *interaction.InboxMessage {
+func interactionInbox(value *interaction.InboxRecord) *interaction.InboxMessage {
 	if value == nil {
 		return nil
 	}

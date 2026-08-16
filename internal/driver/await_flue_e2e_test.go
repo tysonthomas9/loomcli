@@ -24,11 +24,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
+	workspaceowner "github.com/tysonthomas9/loomcli/internal/modules/workspace"
+
 	"github.com/tysonthomas9/loomcli/internal/driver"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
-	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
 // The two AW11-documented suspension styles, one workflow source each:
@@ -116,7 +116,7 @@ func runRealFlueAwaitSmoke(t *testing.T, flueCommand []string, workflow, source 
 	ctx := context.Background()
 	st := memstore.New()
 	const ws = "TEST"
-	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: ws, Name: "test"}); err != nil {
+	if _, err := st.Workspaces().Create(ctx, workspaceowner.WorkspaceCreate{Key: ws, Name: "test"}); err != nil {
 		t.Fatalf("Create workspace: %v", err)
 	}
 	root := t.TempDir()
@@ -168,7 +168,7 @@ func runRealFlueAwaitSmoke(t *testing.T, flueCommand []string, workflow, source 
 		t.Fatalf("approval = %d %v, want 200", status, decoded)
 	}
 	eventID, _ := decoded["eventId"].(string)
-	h.requireRun(t, runID, domain.DriverRunQueued, eventID)
+	h.requireRun(t, runID, execution.DriverRunQueued, eventID)
 
 	// Pass 2 on a second executor: the replayed await returns the recorded
 	// decision inline and the workflow completes.

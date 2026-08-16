@@ -9,16 +9,15 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 var (
 	// ErrWorkflowCatalogNotFound is the transport-level not-found sentinel.
-	ErrWorkflowCatalogNotFound = domain.ErrNotFound
+	ErrWorkflowCatalogNotFound = persistence.ErrNotFound
 	// ErrWorkflowCatalogInvalid keeps generic FleetDB validation failures out
 	// of the capability adapter's legacy-domain dependency surface.
-	ErrWorkflowCatalogInvalid = domain.ErrInvalid
+	ErrWorkflowCatalogInvalid = persistence.ErrInvalid
 	// These transport sentinels preserve FleetDB's machine-readable lifecycle
 	// failures until the capability adapter maps them to catalog-owned errors.
 	ErrWorkflowCatalogRevisionConflict    = errFleetRevisionConflict
@@ -106,7 +105,7 @@ func (s *workflowCatalogStore) GetDriver(ctx context.Context, workspace, driverI
 }
 
 func (s *workflowCatalogStore) FindDriverByName(ctx context.Context, workspace, name string) (*workflowcatalog.Driver, error) {
-	drivers, err := s.client.drivers.List(ctx, workspace, store.DriverFilter{Name: name, Limit: 2})
+	drivers, err := s.client.drivers.List(ctx, workspace, workflowcatalog.DriverFilter{Name: name, Limit: 2})
 	if err != nil {
 		return nil, err
 	}
@@ -115,11 +114,11 @@ func (s *workflowCatalogStore) FindDriverByName(ctx context.Context, workspace, 
 			return driver, nil
 		}
 	}
-	return nil, domain.ErrNotFound
+	return nil, persistence.ErrNotFound
 }
 
 func (s *workflowCatalogStore) ListDrivers(ctx context.Context, workspace string) ([]*workflowcatalog.Driver, error) {
-	return s.client.drivers.List(ctx, workspace, store.DriverFilter{})
+	return s.client.drivers.List(ctx, workspace, workflowcatalog.DriverFilter{})
 }
 
 func (s *workflowCatalogStore) GetVersion(ctx context.Context, workspace, versionID string) (*workflowcatalog.DriverVersion, error) {
@@ -127,7 +126,7 @@ func (s *workflowCatalogStore) GetVersion(ctx context.Context, workspace, versio
 }
 
 func (s *workflowCatalogStore) ListVersions(ctx context.Context, workspace, driverID string) ([]*workflowcatalog.DriverVersion, error) {
-	return s.client.versions.List(ctx, workspace, store.DriverVersionFilter{DriverID: driverID})
+	return s.client.versions.List(ctx, workspace, workflowcatalog.DriverVersionFilter{DriverID: driverID})
 }
 
 func (s *workflowCatalogStore) ApproveVersion(ctx context.Context, workspace, driverID, versionID string, expectedRevision uint64) (*WorkflowCatalogLifecycleResult, error) {

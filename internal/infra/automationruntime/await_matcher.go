@@ -7,7 +7,7 @@ package trigger
 // durable router dispatch admitted the event, on the adapter-normalized
 // fields only (C7/C15: the matcher never re-parses raw payloads):
 //
-//	RULE 1 — the event's matching key is domain.AwaitEventKey(eventType,
+//	RULE 1 — the event's matching key is execution.AwaitEventKey(eventType,
 //	         subjectRef), compared by exact string equality against pending
 //	         await patterns (no glob; the same rendering every backend's
 //	         registration scan uses), so cross-repo/cross-entity confusion
@@ -29,7 +29,7 @@ package trigger
 // Pending->suspend window (locked decision): an event can arrive after
 // RegisterAwaitAndCheck pends the await but before the executor's Suspend
 // lands. Both backends atomically write a pending-resume marker; Suspend then
-// surfaces domain.ErrDriverRunAlreadyResumed and the execution continues
+// surfaces execution.ErrAlreadyResumed and the execution continues
 // inline. No retry budget or split resolve/resume crash window remains.
 
 import (
@@ -40,24 +40,25 @@ import (
 	"log/slog"
 	"strings"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
+
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 // AwaitMatcher resolves pending awaits against admitted router events through
 // explicit read and mutation ports. It is safe for concurrent use because it
 // holds no state of its own.
 type AwaitMatcher struct {
-	AwaitStore     store.AwaitStore
-	DriverRunStore store.DriverRunStore
-	AtomicResolver store.AtomicAwaitStore
+	AwaitStore     execution.AwaitStore
+	DriverRunStore execution.DriverRunStore
+	AtomicResolver execution.AtomicAwaitStore
 	// Logger receives audit records (actor rejections, deferred resumes);
 	// slog.Default when nil.
 	Logger *slog.Logger
 	// SystemTimeoutLane marks the deadline sweeper's dispatch lane (AW8): the
-	// RULE 4 carve-out — domain.AwaitTimeoutActor is always allowed to resolve
+	// RULE 4 carve-out — execution.AwaitTimeoutActor is always allowed to resolve
 	// the one instance its synthetic event targets, so a due await times out
 	// no matter how restrictive its allow-list — applies only when set. Every
 	// other lane leaves it false, so a forged system:timeout actor on an
@@ -67,9 +68,9 @@ type AwaitMatcher struct {
 }
 
 func NewAwaitMatcherWithResolver(
-	awaits store.AwaitStore,
-	driverRuns store.DriverRunStore,
-	resolver store.AtomicAwaitStore,
+	awaits execution.AwaitStore,
+	driverRuns execution.DriverRunStore,
+	resolver execution.AtomicAwaitStore,
 ) *AwaitMatcher {
 	return &AwaitMatcher{AwaitStore: awaits, DriverRunStore: driverRuns, AtomicResolver: resolver}
 }
@@ -161,13 +162,13 @@ func (m *AwaitMatcher) Dispatch(ctx context.Context, ws string, ev AwaitDispatch
 		strings.TrimSpace(ev.EventType) == "" || strings.TrimSpace(ev.SubjectRef) == "" {
 		return result, nil
 	}
-	isTimeout := domain.IsAwaitTimeoutEventID(ev.EventID)
+	isTimeout := execution.IsAwaitTimeoutEventID(ev.EventID)
 	switch {
 	case isTimeout && !m.SystemTimeoutLane:
 		return result, fmt.Errorf("await dispatch: event id %q uses the reserved timeout prefix outside the timeout lane: %w",
-			ev.EventID, domain.ErrInvalid)
-	case m.SystemTimeoutLane && (!isTimeout || ev.ActorRef != domain.AwaitTimeoutActor):
-		return result, fmt.Errorf("await dispatch: timeout lane requires a canonical timeout id and actor: %w", domain.ErrInvalid)
+			ev.EventID, persistence.ErrInvalid)
+	case m.SystemTimeoutLane && (!isTimeout || ev.ActorRef != execution.AwaitTimeoutActor):
+		return result, fmt.Errorf("await dispatch: timeout lane requires a canonical timeout id and actor: %w", persistence.ErrInvalid)
 	}
 	if !isTimeout && !automation.EligibleForAwait(
 		ev.EventType, string(ev.Origin), ev.SourceKind, ev.ActorRef, ev.EventID,
@@ -178,7 +179,7 @@ func (m *AwaitMatcher) Dispatch(ctx context.Context, ws string, ev AwaitDispatch
 		m.auditReservedProvenanceRejected(ws, ev)
 		return result, nil
 	}
-	result.SubjectKey = domain.AwaitEventKey(ev.EventType, ev.SubjectRef)
+	result.SubjectKey = execution.AwaitEventKey(ev.EventType, ev.SubjectRef)
 	candidates, err := awaits.ListAwaitsByPattern(ctx, ws, result.SubjectKey)
 	if err != nil {
 		if errors.Is(err, errors.ErrUnsupported) {
@@ -186,7 +187,7 @@ func (m *AwaitMatcher) Dispatch(ctx context.Context, ws string, ev AwaitDispatch
 		}
 		return result, fmt.Errorf("await dispatch: list awaits for key %q in workspace %q: %w", result.SubjectKey, ws, err)
 	}
-	timeoutTarget, _ := domain.AwaitTimeoutTargetInstance(ev.EventID)
+	timeoutTarget, _ := execution.AwaitTimeoutTargetInstance(ev.EventID)
 	var errs []error
 	for _, inst := range candidates { // resolve ALL matching (locked decision)
 		if isTimeout && inst.InstanceKey != timeoutTarget {
@@ -204,7 +205,7 @@ func (m *AwaitMatcher) Dispatch(ctx context.Context, ws string, ev AwaitDispatch
 
 // dispatchOne runs the RULE 4 actor predicate and the atomic resolve+resume
 // command for a single candidate instance.
-func (m *AwaitMatcher) dispatchOne(ctx context.Context, ws string, ev AwaitDispatchEvent, inst *domain.AwaitInstance, payload json.RawMessage) (AwaitMatchRecord, error) { //nolint:funlen // Atomic resolution outcome classification stays adjacent to the command it verifies.
+func (m *AwaitMatcher) dispatchOne(ctx context.Context, ws string, ev AwaitDispatchEvent, inst *execution.AwaitInstance, payload json.RawMessage) (AwaitMatchRecord, error) { //nolint:funlen // Atomic resolution outcome classification stays adjacent to the command it verifies.
 	record := AwaitMatchRecord{InstanceKey: inst.InstanceKey, RunID: inst.RunID}
 	awaits, driverRuns := m.persistence()
 	if !m.dispatchActorAllowed(ev, inst) {
@@ -228,7 +229,7 @@ func (m *AwaitMatcher) dispatchOne(ctx context.Context, ws string, ev AwaitDispa
 		// A cancel cascade can win after the pending candidate list was read.
 		// Cancelled rows intentionally are not returned by GetSatisfiedAwait;
 		// their terminal owner run proves this dispatch is a no-op loser.
-		if errors.Is(err, domain.ErrNotFound) {
+		if errors.Is(err, persistence.ErrNotFound) {
 			run, runErr := driverRuns.Get(ctx, ws, inst.RunID)
 			if runErr == nil && run.Status.IsTerminal() {
 				record.Outcome = AwaitMatchAlreadyResolved
@@ -264,7 +265,7 @@ func (m *AwaitMatcher) dispatchOne(ctx context.Context, ws string, ev AwaitDispa
 		inst.InstanceKey, ev.EventID, inst.RunID, record.Reason)
 }
 
-func (m *AwaitMatcher) persistence() (store.AwaitStore, store.DriverRunStore) {
+func (m *AwaitMatcher) persistence() (execution.AwaitStore, execution.DriverRunStore) {
 	if m == nil {
 		return nil, nil
 	}
@@ -277,7 +278,7 @@ func (m *AwaitMatcher) persistence() (store.AwaitStore, store.DriverRunStore) {
 // so the durable audit is the structured log record plus the actor_rejected
 // record on the dispatch result; the await stays pending and the event never
 // reaches the run.
-func (m *AwaitMatcher) auditActorRejected(ws string, ev AwaitDispatchEvent, inst *domain.AwaitInstance) {
+func (m *AwaitMatcher) auditActorRejected(ws string, ev AwaitDispatchEvent, inst *execution.AwaitInstance) {
 	m.logger().Warn("await dispatch: event actor rejected by allow-list",
 		"workspace", ws,
 		"await_instance", inst.InstanceKey,
@@ -308,7 +309,7 @@ func (m *AwaitMatcher) auditReservedProvenanceRejected(ws string, ev AwaitDispat
 }
 
 // auditResumeOutcome records a resolution whose resume did not land here.
-func (m *AwaitMatcher) auditResumeOutcome(ws string, ev AwaitDispatchEvent, inst *domain.AwaitInstance, record AwaitMatchRecord) {
+func (m *AwaitMatcher) auditResumeOutcome(ws string, ev AwaitDispatchEvent, inst *execution.AwaitInstance, record AwaitMatchRecord) {
 	m.logger().Warn("await dispatch: resolved without resuming run",
 		"workspace", ws,
 		"await_instance", inst.InstanceKey,
@@ -327,14 +328,14 @@ func (m *AwaitMatcher) logger() *slog.Logger {
 }
 
 // dispatchActorAllowed applies RULE 4 with the AW8 timeout carve-out: on the
-// sweeper's lane, domain.AwaitTimeoutActor resolving the one instance its own
+// sweeper's lane, execution.AwaitTimeoutActor resolving the one instance its own
 // synthetic event targets bypasses the allow-list (a due await must time out
 // no matter how restrictive its predicate). Everything else — including the
 // same actor name on any other lane, or a timeout-shaped event naming a
 // different instance — goes through the allow-list.
-func (m *AwaitMatcher) dispatchActorAllowed(ev AwaitDispatchEvent, inst *domain.AwaitInstance) bool {
-	if m.SystemTimeoutLane && ev.ActorRef == domain.AwaitTimeoutActor {
-		if target, ok := domain.AwaitTimeoutTargetInstance(ev.EventID); ok && target == inst.InstanceKey {
+func (m *AwaitMatcher) dispatchActorAllowed(ev AwaitDispatchEvent, inst *execution.AwaitInstance) bool {
+	if m.SystemTimeoutLane && ev.ActorRef == execution.AwaitTimeoutActor {
+		if target, ok := execution.AwaitTimeoutTargetInstance(ev.EventID); ok && target == inst.InstanceKey {
 			return true
 		}
 	}

@@ -12,8 +12,8 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/lockfile"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 const (
@@ -62,7 +62,7 @@ func ErrorKindOf(err error) ErrorKind {
 	if errors.As(err, &runErr) {
 		return runErr.Kind
 	}
-	if errors.Is(err, domain.ErrNotFound) {
+	if errors.Is(err, persistence.ErrNotFound) {
 		return ErrorKindNotFound
 	}
 	return ErrorKindInternal

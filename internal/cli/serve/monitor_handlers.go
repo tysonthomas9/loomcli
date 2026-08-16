@@ -6,10 +6,10 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
+
 	"github.com/tysonthomas9/loomcli/internal/cli/monitor"
 	"github.com/tysonthomas9/loomcli/internal/cli/serve/metricscmd"
-	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
@@ -51,7 +51,7 @@ func composeMonitorHandlers(
 	usageHandler http.HandlerFunc,
 	monitorStoreDataSource *metricscmd.MonitorStoreDataSource,
 	workspacesHandler http.HandlerFunc,
-	driverRuns store.DriverRunStore,
+	driverRuns execution.DriverRunStore,
 ) webui.MonitorHandlers {
 	eventsDir := metricscmd.ResolveEventsDir()
 	monitorDataSource := metricscmd.NewMonitorDataSourceWithDefaultWorkspace(collectDataFn, workItemsFn, defaultWorkspace)
@@ -71,12 +71,12 @@ func composeMonitorHandlers(
 	}
 }
 
-func durableDriverRunMetricsReader(runs store.DriverRunStore) metricscmd.DriverRunMetricsReader {
+func durableDriverRunMetricsReader(runs execution.DriverRunStore) metricscmd.DriverRunMetricsReader {
 	if runs == nil {
 		return nil
 	}
 	return func(ctx context.Context, workspace string, limit int) ([]metricscmd.DriverRunMetric, error) {
-		values, err := runs.List(ctx, workspace, store.DriverRunFilter{Limit: limit})
+		values, err := runs.List(ctx, workspace, execution.DriverRunFilter{Limit: limit})
 		if err != nil {
 			return nil, err
 		}
@@ -97,7 +97,7 @@ func durableDriverRunMetricsReader(runs store.DriverRunStore) metricscmd.DriverR
 	}
 }
 
-func durableRunTaskID(run *domain.DriverRun) string {
+func durableRunTaskID(run *execution.DriverRunRecord) string {
 	if run.SourceKind == "issue" || run.SourceKind == "task" {
 		return run.SourceRef
 	}

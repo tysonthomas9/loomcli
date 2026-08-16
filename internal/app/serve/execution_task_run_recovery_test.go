@@ -5,10 +5,11 @@ import (
 	"testing"
 	"time"
 
+	workspaceowner "github.com/tysonthomas9/loomcli/internal/modules/workspace"
+
 	"github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
-	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
 type recoveryFleetTransportStub struct {
@@ -28,7 +29,7 @@ func (stub *recoveryFleetTransportStub) RecoverStaleChildTaskRuns(_ context.Cont
 func TestExecutionTaskRunRecoveryAdapterUsesFleetParentOwnerCommand(t *testing.T) {
 	ctx := context.Background()
 	state := memstore.New()
-	if _, err := state.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "WS", Name: "workspace"}); err != nil {
+	if _, err := state.Workspaces().Create(ctx, workspaceowner.WorkspaceCreate{Key: "WS", Name: "workspace"}); err != nil {
 		t.Fatal(err)
 	}
 	transport := &recoveryFleetTransportStub{}

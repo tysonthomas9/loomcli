@@ -8,8 +8,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 )
 
 // The fleetdb client sends the optional task-run Input payload as a verbatim
@@ -63,11 +62,11 @@ func TestPlatformClientTaskRunInputRoundTrip(t *testing.T) {
 			if err != nil {
 				t.Fatalf("New client: %v", err)
 			}
-			run, err := client.TaskRuns().Create(t.Context(), store.TaskRunCreate{
+			run, err := client.TaskRuns().Create(t.Context(), execution.TaskRunCreate{
 				WorkspaceKey: "WS",
 				TaskRunID:    "run-1",
 				TaskID:       "WS-1",
-				Status:       domain.TaskRunQueued,
+				Status:       execution.TaskRunRecordQueued,
 				Input:        tc.in,
 			})
 			if err != nil {

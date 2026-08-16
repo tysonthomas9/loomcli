@@ -10,11 +10,11 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
+
 	appserve "github.com/tysonthomas9/loomcli/internal/app/serve"
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	driverpkg "github.com/tysonthomas9/loomcli/internal/driver"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
-	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
 // e2eRunnerScript is the bridge-spawned task runner for the end-to-end test:
@@ -118,11 +118,11 @@ func TestBridgeRunnerCompletesTaskRunViaServeSurface(t *testing.T) {
 
 	ctx := context.Background()
 	st := memstore.New()
-	if _, err := st.TaskRuns().Create(ctx, store.TaskRunCreate{
+	if _, err := st.TaskRuns().Create(ctx, execution.TaskRunCreate{
 		WorkspaceKey: "WS",
 		TaskRunID:    "task-run-e2e",
 		TaskID:       "TASK-1",
-		Status:       domain.TaskRunRunning,
+		Status:       execution.TaskRunRecordRunning,
 		NodeID:       "node-1",
 		LeaseID:      "lease-1",
 		LeaseToken:   "lease-token-e2e",
@@ -171,7 +171,7 @@ func TestBridgeRunnerCompletesTaskRunViaServeSurface(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ExecuteTask: %v", err)
 	}
-	if result.Status != domain.TaskRunCompleted {
+	if result.Status != execution.TaskRunRecordCompleted {
 		t.Fatalf("runner result status = %q, want completed", result.Status)
 	}
 
@@ -190,7 +190,7 @@ func assertServeSurfaceEffects(t *testing.T, st *memstore.Store) {
 	if err != nil {
 		t.Fatalf("get task run: %v", err)
 	}
-	if run.Status != domain.TaskRunCompleted {
+	if run.Status != execution.TaskRunRecordCompleted {
 		t.Fatalf("task run status = %q, want completed via serve surface", run.Status)
 	}
 	// Completion replaces runtime metadata wholesale (store semantics), so
@@ -199,7 +199,7 @@ func assertServeSurfaceEffects(t *testing.T, st *memstore.Store) {
 	if run.RuntimeMetadata["phase"] != "done" {
 		t.Fatalf("completion metadata missing: %v", run.RuntimeMetadata)
 	}
-	logs, err := st.TaskRuns().ListLogs(ctx, "WS", "task-run-e2e", store.TaskRunLogFilter{})
+	logs, err := st.TaskRuns().ListLogs(ctx, "WS", "task-run-e2e", execution.TaskRunLogFilter{})
 	if err != nil || len(logs) != 1 || logs[0].Text != "working\n" {
 		t.Fatalf("logs = %v err=%v, want the runner's appended line", logs, err)
 	}

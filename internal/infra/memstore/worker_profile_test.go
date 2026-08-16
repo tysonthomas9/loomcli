@@ -4,15 +4,16 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
+
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 func TestWorkerProfileMemstoreLifecycle(t *testing.T) {
 	ctx := t.Context()
 	s := New()
 
-	empty, err := s.WorkerProfiles().List(ctx, "WS", store.WorkerProfileFilter{})
+	empty, err := s.WorkerProfiles().List(ctx, "WS", execution.WorkerProfileFilter{})
 	if err != nil {
 		t.Fatalf("List empty worker profiles: %v", err)
 	}
@@ -25,7 +26,7 @@ func TestWorkerProfileMemstoreLifecycle(t *testing.T) {
 	labels := []string{"gpu"}
 	capabilities := []string{"tests"}
 	metadata := map[string]string{"tier": "gold"}
-	created, err := s.WorkerProfiles().Create(ctx, store.WorkerProfileCreate{
+	created, err := s.WorkerProfiles().Create(ctx, execution.WorkerProfileCreate{
 		WorkspaceKey: "WS",
 		ProfileID:    " falcon ",
 		Role:         "task",
@@ -62,26 +63,26 @@ func TestWorkerProfileMemstoreLifecycle(t *testing.T) {
 		t.Fatalf("stored clone = %+v, want original values", got)
 	}
 
-	if _, err := s.WorkerProfiles().Create(ctx, store.WorkerProfileCreate{WorkspaceKey: "WS", ProfileID: "falcon", Role: "task"}); !errors.Is(err, domain.ErrAlreadyExists) {
+	if _, err := s.WorkerProfiles().Create(ctx, execution.WorkerProfileCreate{WorkspaceKey: "WS", ProfileID: "falcon", Role: "task"}); !errors.Is(err, persistence.ErrAlreadyExists) {
 		t.Fatalf("duplicate Create err = %v, want ErrAlreadyExists", err)
 	}
 	invalidPriority := 5
-	if _, err := s.WorkerProfiles().Create(ctx, store.WorkerProfileCreate{WorkspaceKey: "WS", ProfileID: "bad-priority", Role: "task", MaxPriority: &invalidPriority}); !errors.Is(err, domain.ErrInvalid) {
+	if _, err := s.WorkerProfiles().Create(ctx, execution.WorkerProfileCreate{WorkspaceKey: "WS", ProfileID: "bad-priority", Role: "task", MaxPriority: &invalidPriority}); !errors.Is(err, persistence.ErrInvalid) {
 		t.Fatalf("invalid priority Create err = %v, want ErrInvalid", err)
 	}
 
 	disabled := false
-	if _, err := s.WorkerProfiles().Create(ctx, store.WorkerProfileCreate{WorkspaceKey: "WS", ProfileID: "raven", Name: "Raven", Role: "service", Backend: "claude", Enabled: &disabled}); err != nil {
+	if _, err := s.WorkerProfiles().Create(ctx, execution.WorkerProfileCreate{WorkspaceKey: "WS", ProfileID: "raven", Name: "Raven", Role: "service", Backend: "claude", Enabled: &disabled}); err != nil {
 		t.Fatalf("Create disabled worker profile: %v", err)
 	}
-	enabledProfiles, err := s.WorkerProfiles().List(ctx, "WS", store.WorkerProfileFilter{Role: "task", Enabled: boolPtr(true)})
+	enabledProfiles, err := s.WorkerProfiles().List(ctx, "WS", execution.WorkerProfileFilter{Role: "task", Enabled: boolPtr(true)})
 	if err != nil {
 		t.Fatalf("List enabled task profiles: %v", err)
 	}
 	if len(enabledProfiles) != 1 || enabledProfiles[0].ProfileID != "falcon" {
 		t.Fatalf("enabled task profiles = %+v, want falcon", enabledProfiles)
 	}
-	claudeProfiles, err := s.WorkerProfiles().List(ctx, "WS", store.WorkerProfileFilter{Backend: "claude", Limit: 1})
+	claudeProfiles, err := s.WorkerProfiles().List(ctx, "WS", execution.WorkerProfileFilter{Backend: "claude", Limit: 1})
 	if err != nil {
 		t.Fatalf("List claude profiles: %v", err)
 	}
@@ -99,7 +100,7 @@ func TestWorkerProfileMemstoreLifecycle(t *testing.T) {
 	updateMetadata := map[string]string{"tier": "platinum"}
 	maxPriority = 1
 	disabled = false
-	updated, err := s.WorkerProfiles().Update(ctx, "WS", "falcon", store.WorkerProfileUpdate{
+	updated, err := s.WorkerProfiles().Update(ctx, "WS", "falcon", execution.WorkerProfileUpdate{
 		Name:             &name,
 		Role:             &role,
 		Backend:          &backend,
@@ -134,7 +135,7 @@ func TestWorkerProfileMemstoreLifecycle(t *testing.T) {
 	}
 
 	blankRole := " "
-	if _, err := s.WorkerProfiles().Update(ctx, "WS", "falcon", store.WorkerProfileUpdate{Role: &blankRole}); !errors.Is(err, domain.ErrInvalid) {
+	if _, err := s.WorkerProfiles().Update(ctx, "WS", "falcon", execution.WorkerProfileUpdate{Role: &blankRole}); !errors.Is(err, persistence.ErrInvalid) {
 		t.Fatalf("invalid role Update err = %v, want ErrInvalid", err)
 	}
 	got, err = s.WorkerProfiles().Get(ctx, "WS", "falcon")
@@ -147,13 +148,13 @@ func TestWorkerProfileMemstoreLifecycle(t *testing.T) {
 	if err := s.WorkerProfiles().Delete(ctx, "WS", "falcon"); err != nil {
 		t.Fatalf("Delete worker profile: %v", err)
 	}
-	if _, err := s.WorkerProfiles().Get(ctx, "WS", "falcon"); !errors.Is(err, domain.ErrNotFound) {
+	if _, err := s.WorkerProfiles().Get(ctx, "WS", "falcon"); !errors.Is(err, persistence.ErrNotFound) {
 		t.Fatalf("deleted Get err = %v, want ErrNotFound", err)
 	}
-	if err := s.WorkerProfiles().Delete(ctx, "WS", "falcon"); !errors.Is(err, domain.ErrNotFound) {
+	if err := s.WorkerProfiles().Delete(ctx, "WS", "falcon"); !errors.Is(err, persistence.ErrNotFound) {
 		t.Fatalf("duplicate Delete err = %v, want ErrNotFound", err)
 	}
-	if _, err := s.WorkerProfiles().Get(ctx, "WS", "missing"); !errors.Is(err, domain.ErrNotFound) {
+	if _, err := s.WorkerProfiles().Get(ctx, "WS", "missing"); !errors.Is(err, persistence.ErrNotFound) {
 		t.Fatalf("missing Get err = %v, want ErrNotFound", err)
 	}
 }

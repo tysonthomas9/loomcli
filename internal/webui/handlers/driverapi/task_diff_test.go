@@ -8,8 +8,9 @@ import (
 	"strings"
 	"testing"
 
+	workspaceowner "github.com/tysonthomas9/loomcli/internal/modules/workspace"
+
 	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
-	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
 func TestTaskDiffReturnsLocalBranchDiffFromFilesystemOrigin(t *testing.T) {
@@ -49,7 +50,7 @@ func TestTaskDiffReturnsLocalBranchDiffFromFilesystemOrigin(t *testing.T) {
 
 func TestTaskDiffRejectsNonFilesystemOrigin(t *testing.T) {
 	h := newTestHarness(t)
-	if _, err := h.store.Repos().Create(t.Context(), store.RepoCreate{
+	if _, err := h.store.Repos().Create(t.Context(), workspaceowner.RepoCreate{
 		WorkspaceKey:  "WS",
 		Name:          "source-repo",
 		RemoteURL:     "https://github.com/example/source-repo.git",
@@ -82,7 +83,7 @@ func TestTaskDiffRejectsNonFilesystemOrigin(t *testing.T) {
 func TestTaskDiffReturnsLocalBranchDiffFromVerifiedWorkspaceCheckout(t *testing.T) {
 	checkout, head := createLocalBranchCheckout(t, "https://github.com/example/source-repo.git", "changed locally\n")
 	h := newTestHarness(t)
-	if _, err := h.store.Repos().Create(t.Context(), store.RepoCreate{
+	if _, err := h.store.Repos().Create(t.Context(), workspaceowner.RepoCreate{
 		WorkspaceKey:  "WS",
 		Name:          "source-repo",
 		RemoteURL:     "https://github.com/example/source-repo.git",
@@ -125,7 +126,7 @@ func TestTaskDiffReturnsLocalBranchDiffFromVerifiedWorkspaceCheckout(t *testing.
 func TestTaskDiffReturnsLocalBranchDiffFromWorkspaceCheckoutWithoutOrigin(t *testing.T) {
 	checkout, head := createLocalBranchCheckout(t, "", "changed without origin\n")
 	h := newTestHarness(t)
-	if _, err := h.store.Repos().Create(t.Context(), store.RepoCreate{
+	if _, err := h.store.Repos().Create(t.Context(), workspaceowner.RepoCreate{
 		WorkspaceKey:  "WS",
 		Name:          "source-repo",
 		DefaultBranch: "main",
@@ -169,7 +170,7 @@ func TestTaskDiffRejectsMissingConfiguredFilesystemOrigin(t *testing.T) {
 	missingOrigin := filepath.Join(t.TempDir(), "missing-origin.git")
 	checkout, head := createLocalBranchCheckout(t, missingOrigin, "changed locally\n")
 	h := newTestHarness(t)
-	if _, err := h.store.Repos().Create(t.Context(), store.RepoCreate{
+	if _, err := h.store.Repos().Create(t.Context(), workspaceowner.RepoCreate{
 		WorkspaceKey:  "WS",
 		Name:          "source-repo",
 		RemoteURL:     missingOrigin,
@@ -208,14 +209,14 @@ func TestTaskDiffRejectsMissingConfiguredFilesystemOrigin(t *testing.T) {
 func TestTaskDiffUsesRepoDefaultInsteadOfWorkspaceIsolationBranch(t *testing.T) {
 	origin, head := createLocalBranchOrigin(t, "changed through local delivery\n")
 	h := newTestHarness(t)
-	if _, err := h.store.Workspaces().Create(t.Context(), store.WorkspaceCreate{
+	if _, err := h.store.Workspaces().Create(t.Context(), workspaceowner.WorkspaceCreate{
 		Key:           "WS",
 		Name:          "WS",
 		DefaultBranch: "WS",
 	}); err != nil {
 		t.Fatalf("create workspace: %v", err)
 	}
-	if _, err := h.store.Repos().Create(t.Context(), store.RepoCreate{
+	if _, err := h.store.Repos().Create(t.Context(), workspaceowner.RepoCreate{
 		WorkspaceKey:  "WS",
 		Name:          "source-repo",
 		RemoteURL:     origin,
@@ -252,7 +253,7 @@ func TestTaskDiffUsesRepoDefaultInsteadOfWorkspaceIsolationBranch(t *testing.T) 
 func TestTaskDiffRejectsWorkspaceCheckoutRemoteMismatch(t *testing.T) {
 	checkout, _ := createLocalBranchCheckout(t, "https://github.com/other/repo.git", "changed\n")
 	h := newTestHarness(t)
-	if _, err := h.store.Repos().Create(t.Context(), store.RepoCreate{
+	if _, err := h.store.Repos().Create(t.Context(), workspaceowner.RepoCreate{
 		WorkspaceKey:  "WS",
 		Name:          "source-repo",
 		RemoteURL:     "https://github.com/example/source-repo.git",
@@ -339,7 +340,7 @@ func createLocalBranchCheckout(t *testing.T, remoteURL, branchContent string) (s
 
 func seedTaskDiffRepo(t *testing.T, h *testHarness, origin string) {
 	t.Helper()
-	if _, err := h.store.Repos().Create(t.Context(), store.RepoCreate{
+	if _, err := h.store.Repos().Create(t.Context(), workspaceowner.RepoCreate{
 		WorkspaceKey:  "WS",
 		Name:          "source-repo",
 		RemoteURL:     origin,

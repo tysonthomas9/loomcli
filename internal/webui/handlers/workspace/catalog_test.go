@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tysonthomas9/loomcli/internal/app/query/operationalview"
 	workspacemodule "github.com/tysonthomas9/loomcli/internal/modules/workspace"
-	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
 
@@ -79,14 +79,14 @@ func (f *fakeCatalogAPI) UnregisterRepository(context.Context, workspacemodule.U
 type fakeCatalogProjection struct {
 	active      string
 	paths       map[string]string
-	topology    *ops.WorkspaceData
+	topology    *operationalview.Workspace
 	topologyErr error
 	topologyKey string
 }
 
 func (f *fakeCatalogProjection) ActiveWorkspaceKey(context.Context) string { return f.active }
 func (f *fakeCatalogProjection) WorkspacePath(key string) string           { return f.paths[key] }
-func (f *fakeCatalogProjection) WorkspaceTopology(_ context.Context, key string) (*ops.WorkspaceData, error) {
+func (f *fakeCatalogProjection) WorkspaceTopology(_ context.Context, key string) (*operationalview.Workspace, error) {
 	f.topologyKey = key
 	return f.topology, f.topologyErr
 }
@@ -115,7 +115,7 @@ func TestCatalogListComposesMachineLocalProjection(t *testing.T) {
 
 func TestCatalogGetResolvesBeforeReadingTopology(t *testing.T) {
 	api := &fakeCatalogAPI{value: &workspacemodule.Reference{Key: "ALPHA", Name: "Alpha"}}
-	projection := &fakeCatalogProjection{topology: &ops.WorkspaceData{ID: "ALPHA", Name: "Alpha"}}
+	projection := &fakeCatalogProjection{topology: &operationalview.Workspace{ID: "ALPHA", Name: "Alpha"}}
 	request := httptest.NewRequest(http.MethodGet, "/api/workspaces/Alpha", nil)
 	request.SetPathValue("ws", "Alpha")
 	recorder := httptest.NewRecorder()
@@ -133,7 +133,7 @@ func TestCatalogRepositoriesUsesWorkspaceCatalogWithLocalProjectionOnlyForChecko
 			Groups: []string{"core"},
 		}},
 	}
-	projection := &fakeCatalogProjection{topology: &ops.WorkspaceData{Repos: []ops.WorkspaceRepo{{
+	projection := &fakeCatalogProjection{topology: &operationalview.Workspace{Repos: []operationalview.Repository{{
 		Name: "loom", Path: "/workspace/loom", CurrentBranch: "feature", RemoteURL: "must-not-win",
 	}}}}
 	request := httptest.NewRequest(http.MethodGet, "/api/workspaces/Alpha/repos", nil)
@@ -144,7 +144,7 @@ func TestCatalogRepositoriesUsesWorkspaceCatalogWithLocalProjectionOnlyForChecko
 		t.Fatalf("status=%d query=%#v topology_key=%q body=%s", recorder.Code, api.repoListQuery, projection.topologyKey, recorder.Body.String())
 	}
 	var body struct {
-		Repos []ops.WorkspaceRepo `json:"repos"`
+		Repos []operationalview.Repository `json:"repos"`
 	}
 	if err := json.NewDecoder(recorder.Body).Decode(&body); err != nil {
 		t.Fatal(err)
@@ -157,7 +157,7 @@ func TestCatalogRepositoriesUsesWorkspaceCatalogWithLocalProjectionOnlyForChecko
 
 func TestCatalogRenameUsesWorkspaceCommandAndReturnsTopology(t *testing.T) {
 	api := &fakeCatalogAPI{value: &workspacemodule.Reference{Key: "ALPHA", Name: "Renamed"}}
-	projection := &fakeCatalogProjection{topology: &ops.WorkspaceData{ID: "ALPHA", Name: "Renamed"}}
+	projection := &fakeCatalogProjection{topology: &operationalview.Workspace{ID: "ALPHA", Name: "Renamed"}}
 	request := httptest.NewRequest(http.MethodPatch, "/api/workspaces/ALPHA/name", strings.NewReader(`{"new_name":"Renamed"}`))
 	request = request.WithContext(middleware.WithWorkspace(request.Context(), "ALPHA"))
 	recorder := httptest.NewRecorder()

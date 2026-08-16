@@ -6,16 +6,19 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
-	"github.com/tysonthomas9/loomcli/internal/store"
+
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
+
+	workspaceowner "github.com/tysonthomas9/loomcli/internal/modules/workspace"
+
+	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/testutil"
 )
 
 const outboxTestWorkspace = "WS"
 
-func createOutboxRow(t *testing.T, ctx context.Context, st store.Store, in store.OutboxCreate) *domain.OutboxRecord {
+func createOutboxRow(t *testing.T, ctx context.Context, st *memstore.Store, in execution.OutboxCreate) *execution.OutboxDelivery {
 	t.Helper()
 	if in.WorkspaceKey == "" {
 		in.WorkspaceKey = outboxTestWorkspace
@@ -27,7 +30,7 @@ func createOutboxRow(t *testing.T, ctx context.Context, st store.Store, in store
 	return row
 }
 
-func getOutboxRow(t *testing.T, ctx context.Context, st store.Store, outboxID string) *domain.OutboxRecord {
+func getOutboxRow(t *testing.T, ctx context.Context, st *memstore.Store, outboxID string) *execution.OutboxDelivery {
 	t.Helper()
 	row, err := st.Outbox().Get(ctx, outboxTestWorkspace, outboxID)
 	if err != nil {
@@ -40,13 +43,13 @@ func TestOutboxDispatcherRunOnce(t *testing.T) {
 	now := time.Date(2026, 6, 11, 12, 0, 0, 0, time.UTC)
 	cases := []struct {
 		name          string
-		create        store.OutboxCreate
+		create        execution.OutboxCreate
 		assignment    *interaction.ChatDelivery
 		assignmentErr error
 		message       AgentMessageDeliveryResult
 		messageErr    error
 		wantDelivered int
-		wantStatus    domain.OutboxStatus
+		wantStatus    execution.OutboxDeliveryStatus
 		wantAttempt   int
 		wantInboxID   string
 		wantRetryAt   bool
@@ -54,69 +57,69 @@ func TestOutboxDispatcherRunOnce(t *testing.T) {
 	}{
 		{
 			name:          "lead assignment delivered",
-			create:        store.OutboxCreate{Kind: domain.OutboxKindLeadAssignment, TargetAgent: "lead-1"},
+			create:        execution.OutboxCreate{Kind: execution.OutboxKindLeadAssignment, TargetAgent: "lead-1"},
 			assignment:    &interaction.ChatDelivery{State: interaction.ChatDeliveryDelivered},
 			wantDelivered: 1,
-			wantStatus:    domain.OutboxStatusDelivered,
+			wantStatus:    execution.OutboxDeliveryStatusDelivered,
 			wantAttempt:   1,
 		},
 		{
 			name:          "lead assignment pending with inbox message counts as delivered",
-			create:        store.OutboxCreate{Kind: domain.OutboxKindLeadAssignment, TargetAgent: "lead-1"},
+			create:        execution.OutboxCreate{Kind: execution.OutboxKindLeadAssignment, TargetAgent: "lead-1"},
 			assignment:    &interaction.ChatDelivery{State: interaction.ChatDeliveryPending, InboxMessageID: "inbox-1"},
 			wantDelivered: 1,
-			wantStatus:    domain.OutboxStatusDelivered,
+			wantStatus:    execution.OutboxDeliveryStatusDelivered,
 			wantAttempt:   1,
 			wantInboxID:   "inbox-1",
 		},
 		{
 			name:          "lead assignment unsupported is terminal",
-			create:        store.OutboxCreate{Kind: domain.OutboxKindLeadAssignment, TargetAgent: "lead-1"},
+			create:        execution.OutboxCreate{Kind: execution.OutboxKindLeadAssignment, TargetAgent: "lead-1"},
 			assignment:    &interaction.ChatDelivery{State: interaction.ChatDeliveryUnsupported, Reason: "runtime cannot accept turns"},
-			wantStatus:    domain.OutboxStatusUnsupported,
+			wantStatus:    execution.OutboxDeliveryStatusUnsupported,
 			wantAttempt:   1,
 			wantLastError: "runtime cannot accept turns",
 		},
 		{
 			name:          "lead assignment pending stays pending with retry",
-			create:        store.OutboxCreate{Kind: domain.OutboxKindLeadAssignment, TargetAgent: "lead-1"},
+			create:        execution.OutboxCreate{Kind: execution.OutboxKindLeadAssignment, TargetAgent: "lead-1"},
 			assignment:    &interaction.ChatDelivery{State: interaction.ChatDeliveryPending, Reason: "runtime not ready"},
-			wantStatus:    domain.OutboxStatusPending,
+			wantStatus:    execution.OutboxDeliveryStatusPending,
 			wantAttempt:   1,
 			wantRetryAt:   true,
 			wantLastError: "runtime not ready",
 		},
 		{
 			name:          "lead assignment transient error stays pending",
-			create:        store.OutboxCreate{Kind: domain.OutboxKindLeadAssignment, TargetAgent: "lead-1"},
+			create:        execution.OutboxCreate{Kind: execution.OutboxKindLeadAssignment, TargetAgent: "lead-1"},
 			assignmentErr: errors.New("store hiccup"),
-			wantStatus:    domain.OutboxStatusPending,
+			wantStatus:    execution.OutboxDeliveryStatusPending,
 			wantAttempt:   1,
 			wantRetryAt:   true,
 			wantLastError: "store hiccup",
 		},
 		{
 			name:          "lead task message queued is delivered",
-			create:        store.OutboxCreate{Kind: domain.OutboxKindLeadTaskMessage, TargetAgent: "lead-1", Body: "task done"},
+			create:        execution.OutboxCreate{Kind: execution.OutboxKindLeadTaskMessage, TargetAgent: "lead-1", Body: "task done"},
 			message:       AgentMessageDeliveryResult{State: "queued", InboxMessageID: "inbox-2"},
 			wantDelivered: 1,
-			wantStatus:    domain.OutboxStatusDelivered,
+			wantStatus:    execution.OutboxDeliveryStatusDelivered,
 			wantAttempt:   1,
 			wantInboxID:   "inbox-2",
 		},
 		{
 			name:          "lead task message error stays pending",
-			create:        store.OutboxCreate{Kind: domain.OutboxKindLeadTaskMessage, TargetAgent: "lead-1", Body: "task done"},
+			create:        execution.OutboxCreate{Kind: execution.OutboxKindLeadTaskMessage, TargetAgent: "lead-1", Body: "task done"},
 			messageErr:    errors.New("agent missing"),
-			wantStatus:    domain.OutboxStatusPending,
+			wantStatus:    execution.OutboxDeliveryStatusPending,
 			wantAttempt:   1,
 			wantRetryAt:   true,
 			wantLastError: "agent missing",
 		},
 		{
 			name:          "unknown kind is terminal unsupported",
-			create:        store.OutboxCreate{Kind: domain.OutboxKind("mystery"), TargetAgent: "lead-1"},
-			wantStatus:    domain.OutboxStatusUnsupported,
+			create:        execution.OutboxCreate{Kind: execution.OutboxKind("mystery"), TargetAgent: "lead-1"},
+			wantStatus:    execution.OutboxDeliveryStatusUnsupported,
 			wantAttempt:   1,
 			wantLastError: `unknown outbox kind "mystery"`,
 		},
@@ -181,8 +184,8 @@ func TestOutboxDispatcherRunOnce(t *testing.T) {
 func TestOutboxDispatcherBackoffGrowsAndSkipsNotDueRows(t *testing.T) {
 	ctx := context.Background()
 	st := memstore.New()
-	row := createOutboxRow(t, ctx, st, store.OutboxCreate{
-		Kind:        domain.OutboxKindLeadAssignment,
+	row := createOutboxRow(t, ctx, st, execution.OutboxCreate{
+		Kind:        execution.OutboxKindLeadAssignment,
 		TargetAgent: "lead-1",
 	})
 	now := time.Date(2026, 6, 11, 12, 0, 0, 0, time.UTC)
@@ -260,8 +263,8 @@ func TestOutboxRetryDelayIsCapped(t *testing.T) {
 func TestOutboxDispatcherForwardsDedupeKeyToInbox(t *testing.T) {
 	ctx := context.Background()
 	st := memstore.New()
-	row := createOutboxRow(t, ctx, st, store.OutboxCreate{
-		Kind:        domain.OutboxKindLeadTaskMessage,
+	row := createOutboxRow(t, ctx, st, execution.OutboxCreate{
+		Kind:        execution.OutboxKindLeadTaskMessage,
 		EpicID:      "EPIC-1",
 		DriverRunID: "run-1",
 		TaskRunID:   "task-run-1",
@@ -285,10 +288,10 @@ func TestOutboxDispatcherForwardsDedupeKeyToInbox(t *testing.T) {
 		t.Fatalf("delivered = %d, want 1", delivered)
 	}
 	got := getOutboxRow(t, ctx, st, row.OutboxID)
-	if got.Status != domain.OutboxStatusDelivered || got.InboxMessageID == "" {
+	if got.Status != execution.OutboxDeliveryStatusDelivered || got.InboxMessageID == "" {
 		t.Fatalf("row = %+v, want delivered with inbox message id", got)
 	}
-	messages, err := st.AgentInboxMessages().List(ctx, outboxTestWorkspace, store.AgentInboxMessageFilter{
+	messages, err := st.AgentInboxMessages().List(ctx, outboxTestWorkspace, interaction.AgentInboxMessageFilter{
 		TargetAgentID: "worker-bot",
 		Limit:         10,
 	})
@@ -330,7 +333,7 @@ func TestOutboxDispatcherForwardsDedupeKeyToInbox(t *testing.T) {
 	if again.InboxMessageID != got.InboxMessageID {
 		t.Fatalf("redelivered inbox id = %q, want original %q", again.InboxMessageID, got.InboxMessageID)
 	}
-	messages, err = st.AgentInboxMessages().List(ctx, outboxTestWorkspace, store.AgentInboxMessageFilter{
+	messages, err = st.AgentInboxMessages().List(ctx, outboxTestWorkspace, interaction.AgentInboxMessageFilter{
 		TargetAgentID: "worker-bot",
 		Limit:         10,
 	})
@@ -343,7 +346,7 @@ func TestOutboxDispatcherForwardsDedupeKeyToInbox(t *testing.T) {
 }
 
 type testInteractionInbox struct {
-	store store.Store
+	store *memstore.Store
 }
 
 type testInteractionChatMessenger struct {
@@ -395,7 +398,7 @@ func (inbox testInteractionInbox) Enqueue(
 	ctx context.Context,
 	command interaction.EnqueueInboxCommand,
 ) (*interaction.InboxMessage, error) {
-	message, err := inbox.store.AgentInboxMessages().Create(ctx, store.AgentInboxMessageCreate{
+	message, err := inbox.store.AgentInboxMessages().Create(ctx, interaction.AgentInboxMessageCreate{
 		WorkspaceKey: command.WorkspaceKey, TargetAgentID: command.TargetAgentID,
 		SessionID: command.SessionID, Body: command.Body,
 		SourceKind: command.SourceKind, SourceRef: command.SourceRef,
@@ -425,8 +428,8 @@ func (inbox testInteractionInbox) Enqueue(
 func TestOutboxDispatcherTerminalRowsAreNotRetried(t *testing.T) {
 	ctx := context.Background()
 	st := memstore.New()
-	createOutboxRow(t, ctx, st, store.OutboxCreate{
-		Kind:        domain.OutboxKindLeadAssignment,
+	createOutboxRow(t, ctx, st, execution.OutboxCreate{
+		Kind:        execution.OutboxKindLeadAssignment,
 		TargetAgent: "lead-1",
 	})
 	attempts := 0
@@ -461,7 +464,7 @@ func TestOutboxDispatcherUnscopedResolvesEveryWorkspace(t *testing.T) {
 	ctx := context.Background()
 	st := memstore.New()
 	for _, workspace := range []string{"WS-A", "WS-B"} {
-		if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{
+		if _, err := st.Workspaces().Create(ctx, workspaceowner.WorkspaceCreate{
 			Key: workspace, Name: workspace,
 		}); err != nil {
 			t.Fatalf("create workspace %q: %v", workspace, err)

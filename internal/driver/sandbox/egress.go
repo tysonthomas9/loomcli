@@ -45,7 +45,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 // SandboxEgressEnvVar declares the egress mode for every containerized run.
@@ -109,7 +109,7 @@ func resolveSandboxEgress(configured string, trust workflowcatalog.DriverTrustLe
 		return mode, nil
 	default:
 		return "", fmt.Errorf("%s=%q: want %q, %q, %q or %q: %w", SandboxEgressEnvVar, configured,
-			SandboxEgressAll, SandboxEgressServeOnly, SandboxEgressNone, SandboxEgressDelegated, domain.ErrInvalid)
+			SandboxEgressAll, SandboxEgressServeOnly, SandboxEgressNone, SandboxEgressDelegated, persistence.ErrInvalid)
 	}
 }
 
@@ -149,7 +149,7 @@ func prepareContainerEgress(mode SandboxEgressMode, env []string) (*containerEgr
 	case SandboxEgressServeOnly:
 		return prepareServeOnlyEgress(env)
 	default:
-		return nil, fmt.Errorf("container sandbox: unknown egress mode %q: %w", mode, domain.ErrInvalid)
+		return nil, fmt.Errorf("container sandbox: unknown egress mode %q: %w", mode, persistence.ErrInvalid)
 	}
 }
 
@@ -224,13 +224,13 @@ func serveRelayMounts(relayDir, forwarderPath string) ([]string, error) {
 func serveRelayAddress(rawURL string) (dialTarget, rewritten string, err error) {
 	parsed, err := url.Parse(strings.TrimSpace(rawURL))
 	if err != nil {
-		return "", "", fmt.Errorf("container sandbox: parse LOOM_DRIVER_API_URL %q: %v: %w", rawURL, err, domain.ErrInvalid)
+		return "", "", fmt.Errorf("container sandbox: parse LOOM_DRIVER_API_URL %q: %v: %w", rawURL, err, persistence.ErrInvalid)
 	}
 	if parsed.Scheme != "http" && parsed.Scheme != "https" {
-		return "", "", fmt.Errorf("container sandbox: LOOM_DRIVER_API_URL %q: scheme must be http or https: %w", rawURL, domain.ErrInvalid)
+		return "", "", fmt.Errorf("container sandbox: LOOM_DRIVER_API_URL %q: scheme must be http or https: %w", rawURL, persistence.ErrInvalid)
 	}
 	if parsed.Hostname() == "" {
-		return "", "", fmt.Errorf("container sandbox: LOOM_DRIVER_API_URL %q has no host: %w", rawURL, domain.ErrInvalid)
+		return "", "", fmt.Errorf("container sandbox: LOOM_DRIVER_API_URL %q has no host: %w", rawURL, persistence.ErrInvalid)
 	}
 	port := parsed.Port()
 	if port == "" {

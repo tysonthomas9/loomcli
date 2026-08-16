@@ -5,15 +5,16 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/modules/agents"
+
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 func TestAgentOwnershipLeaseAcquireSameOwnerRefreshesAndAdvancesFence(t *testing.T) {
 	leases := New().AgentOwnershipLeases()
 	ctx := t.Context()
 
-	first, err := leases.Acquire(ctx, store.AgentOwnershipLeaseAcquire{
+	first, err := leases.Acquire(ctx, agents.AgentOwnershipLeaseAcquire{
 		WorkspaceKey: "WS",
 		AgentID:      "agent-1",
 		LeaseID:      "lease-1",
@@ -25,12 +26,12 @@ func TestAgentOwnershipLeaseAcquireSameOwnerRefreshesAndAdvancesFence(t *testing
 		t.Fatalf("first acquire: %v", err)
 	}
 
-	refreshed, err := leases.Acquire(ctx, store.AgentOwnershipLeaseAcquire{
+	refreshed, err := leases.Acquire(ctx, agents.AgentOwnershipLeaseAcquire{
 		WorkspaceKey:    "WS",
 		AgentID:         "agent-1",
 		LeaseID:         "lease-2",
 		OwnerID:         "owner-1",
-		RuntimeProvider: domain.RuntimeProviderE2B,
+		RuntimeProvider: agents.RuntimeProviderE2B,
 		NodeID:          "node-2",
 		TTL:             2 * time.Minute,
 	})
@@ -43,16 +44,16 @@ func TestAgentOwnershipLeaseAcquireSameOwnerRefreshesAndAdvancesFence(t *testing
 	if refreshed.FencingToken <= first.FencingToken {
 		t.Fatalf("same-owner fencing token = %d, want > %d", refreshed.FencingToken, first.FencingToken)
 	}
-	if refreshed.LeaseID != "lease-2" || refreshed.NodeID != "node-2" || refreshed.RuntimeProvider != domain.RuntimeProviderE2B {
+	if refreshed.LeaseID != "lease-2" || refreshed.NodeID != "node-2" || refreshed.RuntimeProvider != agents.RuntimeProviderE2B {
 		t.Fatalf("same-owner refreshed lease = %+v, want replacement acquire fields", refreshed)
 	}
 	if !refreshed.ExpiresAt.After(first.ExpiresAt) {
 		t.Fatalf("same-owner expiry = %s, want after original expiry %s", refreshed.ExpiresAt, first.ExpiresAt)
 	}
-	if _, err := leases.Heartbeat(ctx, "WS", "agent-1", first.Token, time.Minute); !errors.Is(err, domain.ErrConflict) {
+	if _, err := leases.Heartbeat(ctx, "WS", "agent-1", first.Token, time.Minute); !errors.Is(err, persistence.ErrConflict) {
 		t.Fatalf("heartbeat with stale token error = %v, want ErrConflict", err)
 	}
-	if _, err := leases.Release(ctx, "WS", "agent-1", first.Token); !errors.Is(err, domain.ErrConflict) {
+	if _, err := leases.Release(ctx, "WS", "agent-1", first.Token); !errors.Is(err, persistence.ErrConflict) {
 		t.Fatalf("release with stale token error = %v, want ErrConflict", err)
 	}
 	if _, err := leases.Heartbeat(ctx, "WS", "agent-1", refreshed.Token, time.Minute); err != nil {
@@ -64,7 +65,7 @@ func TestAgentOwnershipLeaseAcquireDifferentOwnerConflictsWithoutMutation(t *tes
 	leases := New().AgentOwnershipLeases()
 	ctx := t.Context()
 
-	first, err := leases.Acquire(ctx, store.AgentOwnershipLeaseAcquire{
+	first, err := leases.Acquire(ctx, agents.AgentOwnershipLeaseAcquire{
 		WorkspaceKey: "WS",
 		AgentID:      "agent-1",
 		LeaseID:      "lease-1",
@@ -76,7 +77,7 @@ func TestAgentOwnershipLeaseAcquireDifferentOwnerConflictsWithoutMutation(t *tes
 		t.Fatalf("first acquire: %v", err)
 	}
 
-	_, err = leases.Acquire(ctx, store.AgentOwnershipLeaseAcquire{
+	_, err = leases.Acquire(ctx, agents.AgentOwnershipLeaseAcquire{
 		WorkspaceKey: "WS",
 		AgentID:      "agent-1",
 		LeaseID:      "lease-2",
@@ -84,7 +85,7 @@ func TestAgentOwnershipLeaseAcquireDifferentOwnerConflictsWithoutMutation(t *tes
 		NodeID:       "node-2",
 		TTL:          2 * time.Minute,
 	})
-	if !errors.Is(err, domain.ErrAlreadyClaimed) {
+	if !errors.Is(err, persistence.ErrAlreadyClaimed) {
 		t.Fatalf("different-owner acquire error = %v, want ErrAlreadyClaimed", err)
 	}
 

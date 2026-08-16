@@ -6,12 +6,13 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
+
 	driverpkg "github.com/tysonthomas9/loomcli/internal/driver"
 	infrafleetdb "github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
-	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 type automationExecutionDispatchFunc func(context.Context, automation.ExecutionDispatchRequest) (*automation.ExecutionDispatchResult, error)
@@ -22,13 +23,13 @@ type automationExecutionDispatchFunc func(context.Context, automation.ExecutionD
 // delivery and manual-binding dispatch are supplied by atomic Fleet intents
 // and never fall back to DriverRunStore.Create.
 type automationExecutionPort struct {
-	runs     store.DriverRunStore
+	runs     execution.DriverRunStore
 	dispatch automationExecutionDispatchFunc
 }
 
 var _ automation.ExecutionPort = (*automationExecutionPort)(nil)
 
-func newAutomationExecutionPort(runs store.DriverRunStore, dispatch automationExecutionDispatchFunc) automation.ExecutionPort {
+func newAutomationExecutionPort(runs execution.DriverRunStore, dispatch automationExecutionDispatchFunc) automation.ExecutionPort {
 	if runs == nil {
 		return nil
 	}
@@ -157,14 +158,14 @@ func isStableAutomationFleetDBError(err error) bool {
 		infrafleetdb.ErrAutomationPayloadDigestMismatch,
 		infrafleetdb.ErrAutomationBindingNotFound,
 		infrafleetdb.ErrAutomationBindingDispatchReplayNotFound,
-		domain.ErrNotFound,
-		domain.ErrAlreadyExists,
-		domain.ErrAlreadyClaimed,
-		domain.ErrInvalidTransition,
-		domain.ErrInvalid,
-		domain.ErrConflict,
-		domain.ErrGone,
-		domain.ErrNotOwner,
+		persistence.ErrNotFound,
+		persistence.ErrAlreadyExists,
+		persistence.ErrAlreadyClaimed,
+		persistence.ErrInvalidTransition,
+		persistence.ErrInvalid,
+		persistence.ErrConflict,
+		persistence.ErrGone,
+		persistence.ErrNotOwner,
 	}
 	for _, sentinel := range stable {
 		if errors.Is(err, sentinel) {
@@ -186,17 +187,17 @@ func translateAutomationExecutionFleetDBError(err error) error {
 	case errors.Is(err, infrafleetdb.ErrAutomationBindingDispatchReplayNotFound):
 		mapped = automation.ErrDispatchReplayNotFound
 	case errors.Is(err, infrafleetdb.ErrAutomationDeliveryNotFound),
-		errors.Is(err, infrafleetdb.ErrAutomationBindingNotFound), errors.Is(err, domain.ErrNotFound):
+		errors.Is(err, infrafleetdb.ErrAutomationBindingNotFound), errors.Is(err, persistence.ErrNotFound):
 		mapped = automation.ErrNotFound
-	case errors.Is(err, infrafleetdb.ErrAutomationInvalid), errors.Is(err, domain.ErrInvalid):
+	case errors.Is(err, infrafleetdb.ErrAutomationInvalid), errors.Is(err, persistence.ErrInvalid):
 		mapped = automation.ErrInvalid
 	case errors.Is(err, infrafleetdb.ErrAutomationIdempotencyConflict),
 		errors.Is(err, infrafleetdb.ErrAutomationBindingSnapshotConflict),
 		errors.Is(err, infrafleetdb.ErrAutomationCatalogSnapshotConflict),
 		errors.Is(err, infrafleetdb.ErrAutomationDeliveryNotDispatchable),
 		errors.Is(err, infrafleetdb.ErrAutomationDeliveryTransitionConflict),
-		errors.Is(err, domain.ErrAlreadyExists), errors.Is(err, domain.ErrAlreadyClaimed),
-		errors.Is(err, domain.ErrInvalidTransition), errors.Is(err, domain.ErrConflict):
+		errors.Is(err, persistence.ErrAlreadyExists), errors.Is(err, persistence.ErrAlreadyClaimed),
+		errors.Is(err, persistence.ErrInvalidTransition), errors.Is(err, persistence.ErrConflict):
 		mapped = automation.ErrConflict
 	default:
 		mapped = automation.ErrUnavailable
@@ -254,12 +255,12 @@ func validateAutomationEmissionAuthority(auth authority.ExecutionAuthority) (str
 }
 
 func validateAutomationEmissionRun(
-	run *domain.DriverRun,
+	run *execution.DriverRunRecord,
 	workspace, runID string,
 	auth authority.ExecutionAuthority,
 ) error {
 	if run == nil || run.WorkspaceKey != workspace || run.RunID != runID ||
-		run.Status != domain.DriverRunRunning || strings.TrimSpace(run.NodeID) == "" ||
+		run.Status != execution.DriverRunRunning || strings.TrimSpace(run.NodeID) == "" ||
 		strings.TrimSpace(run.LeaseID) == "" || run.FencingToken <= 0 ||
 		run.NodeID != auth.NodeID() || run.LeaseID != auth.LeaseID() || run.FencingToken != auth.FencingToken() {
 		return fmt.Errorf("execution emission run is not a fenced running owner: %w", automation.ErrInvalidPersistedState)

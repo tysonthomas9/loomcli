@@ -10,8 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 )
 
 func TestExecutionTerminalDriverStepRepairUsesSystemCommandRoute(t *testing.T) {
@@ -31,27 +30,27 @@ func TestExecutionTerminalDriverStepRepairUsesSystemCommandRoute(t *testing.T) {
 			}
 		}
 		var body struct {
-			CommandID   string                  `json:"command_id"`
-			DriverRunID string                  `json:"driver_run_id"`
-			TaskRunID   string                  `json:"task_run_id"`
-			Status      domain.DriverStepStatus `json:"status"`
-			OutputRef   string                  `json:"output_ref"`
+			CommandID   string                     `json:"command_id"`
+			DriverRunID string                     `json:"driver_run_id"`
+			TaskRunID   string                     `json:"task_run_id"`
+			Status      execution.DriverStepStatus `json:"status"`
+			OutputRef   string                     `json:"output_ref"`
 		}
 		encoded, _ := json.Marshal(raw)
 		if err := json.Unmarshal(encoded, &body); err != nil {
 			t.Fatal(err)
 		}
 		if body.CommandID != "repair-1" || body.DriverRunID != "run-1" || body.TaskRunID != "task-run-1" ||
-			body.Status != domain.DriverStepCompleted || body.OutputRef != "artifact://result" {
+			body.Status != execution.DriverStepCompleted || body.OutputRef != "artifact://result" {
 			t.Fatalf("terminal repair body = %+v", body)
 		}
 		writeJSON(t, w, struct {
-			DriverStep *domain.DriverStep `json:"driver_step"`
-			Replayed   bool               `json:"replayed"`
+			DriverStep *execution.DriverStepRecord `json:"driver_step"`
+			Replayed   bool                        `json:"replayed"`
 		}{
-			DriverStep: &domain.DriverStep{
+			DriverStep: &execution.DriverStepRecord{
 				WorkspaceKey: "WS", StepID: "step-1", DriverRunID: "run-1", TaskRunID: "task-run-1",
-				Status: domain.DriverStepCompleted, OutputRef: "artifact://result", CreatedAt: now, UpdatedAt: now,
+				Status: execution.DriverStepCompleted, OutputRef: "artifact://result", CreatedAt: now, UpdatedAt: now,
 			},
 			Replayed: true,
 		})
@@ -61,14 +60,14 @@ func TestExecutionTerminalDriverStepRepairUsesSystemCommandRoute(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	step, replayed, err := client.Execution().RepairTerminalDriverStep(t.Context(), store.TerminalDriverStepRepair{
+	step, replayed, err := client.Execution().RepairTerminalDriverStep(t.Context(), execution.TerminalDriverStepRepair{
 		RequestID: "repair-1", WorkspaceKey: "WS", DriverRunID: "run-1", DriverStepID: "step-1",
-		TaskRunID: "task-run-1", Status: domain.DriverStepCompleted, OutputRef: "artifact://result", RepairedAt: now,
+		TaskRunID: "task-run-1", Status: execution.DriverStepCompleted, OutputRef: "artifact://result", RepairedAt: now,
 	})
 	if err != nil {
 		t.Fatalf("RepairTerminalDriverStep: %v", err)
 	}
-	if !replayed || step == nil || step.StepID != "step-1" || step.Status != domain.DriverStepCompleted {
+	if !replayed || step == nil || step.StepID != "step-1" || step.Status != execution.DriverStepCompleted {
 		t.Fatalf("RepairTerminalDriverStep() = %+v replayed=%v", step, replayed)
 	}
 }
@@ -89,7 +88,7 @@ func TestExecutionTaskRunTerminalConvergenceUsesTypedSystemRoutes(t *testing.T) 
 			if r.URL.Query().Get("required_version") != "2" || r.URL.Query().Get("after") != "task-a" || r.URL.Query().Get("limit") != "7" {
 				t.Fatalf("candidate query = %s", r.URL.RawQuery)
 			}
-			writeJSON(t, w, store.TaskRunTerminalConvergencePage{TaskRunIDs: []string{"task-b", "task-c"}, Next: "task-c"})
+			writeJSON(t, w, execution.TaskRunTerminalConvergencePage{TaskRunIDs: []string{"task-b", "task-c"}, Next: "task-c"})
 		case 2:
 			if r.Method != http.MethodPost || r.URL.Path != "/api/v1/WS/task-runs/task-b/complete-terminal-convergence" {
 				t.Fatalf("completion request = %s %s", r.Method, r.URL.Path)
@@ -102,9 +101,9 @@ func TestExecutionTaskRunTerminalConvergenceUsesTypedSystemRoutes(t *testing.T) 
 			if body.RequiredVersion != 2 || !body.CompletedAt.Equal(completedAt) {
 				t.Fatalf("completion body = %+v", body)
 			}
-			writeJSON(t, w, store.TaskRunTerminalConvergenceResult{
-				TaskRun: &domain.TaskRun{
-					WorkspaceKey: "WS", TaskRunID: "task-b", TaskID: "TASK-1", Status: domain.TaskRunCompleted,
+			writeJSON(t, w, execution.TaskRunTerminalConvergenceResult{
+				TaskRun: &execution.TaskRunRecord{
+					WorkspaceKey: "WS", TaskRunID: "task-b", TaskID: "TASK-1", Status: execution.TaskRunRecordCompleted,
 					TerminalConvergenceVersion: 2, TerminalConvergedAt: &completedAt,
 				},
 				Replayed: true,
@@ -118,13 +117,13 @@ func TestExecutionTaskRunTerminalConvergenceUsesTypedSystemRoutes(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	page, err := client.Execution().ListTaskRunTerminalConvergenceCandidates(t.Context(), store.TaskRunTerminalConvergenceQuery{
+	page, err := client.Execution().ListTaskRunTerminalConvergenceCandidates(t.Context(), execution.TaskRunTerminalConvergenceQuery{
 		WorkspaceKey: "WS", RequiredVersion: 2, After: "task-a", Limit: 7,
 	})
 	if err != nil || len(page.TaskRunIDs) != 2 || page.Next != "task-c" {
 		t.Fatalf("candidate page = %+v, %v", page, err)
 	}
-	result, err := client.Execution().CompleteTaskRunTerminalConvergence(t.Context(), store.TaskRunTerminalConvergenceComplete{
+	result, err := client.Execution().CompleteTaskRunTerminalConvergence(t.Context(), execution.TaskRunTerminalConvergenceComplete{
 		WorkspaceKey: "WS", TaskRunID: "task-b", RequiredVersion: 2, CompletedAt: completedAt,
 	})
 	if err != nil || result == nil || !result.Replayed || result.TaskRun.TerminalConvergenceVersion != 2 {
@@ -139,9 +138,9 @@ func TestExecutionTaskRunTerminalConvergenceRejectsDivergentEnvelopes(t *testing
 		body any
 		list bool
 	}{
-		{name: "unordered page", list: true, body: store.TaskRunTerminalConvergencePage{TaskRunIDs: []string{"task-c", "task-b"}}},
-		{name: "divergent marker", body: store.TaskRunTerminalConvergenceResult{TaskRun: &domain.TaskRun{
-			WorkspaceKey: "OTHER", TaskRunID: "task-b", Status: domain.TaskRunCompleted,
+		{name: "unordered page", list: true, body: execution.TaskRunTerminalConvergencePage{TaskRunIDs: []string{"task-c", "task-b"}}},
+		{name: "divergent marker", body: execution.TaskRunTerminalConvergenceResult{TaskRun: &execution.TaskRunRecord{
+			WorkspaceKey: "OTHER", TaskRunID: "task-b", Status: execution.TaskRunRecordCompleted,
 			TerminalConvergenceVersion: 2, TerminalConvergedAt: &completedAt,
 		}}},
 	} {
@@ -153,11 +152,11 @@ func TestExecutionTaskRunTerminalConvergenceRejectsDivergentEnvelopes(t *testing
 				t.Fatal(err)
 			}
 			if test.list {
-				_, err = client.Execution().ListTaskRunTerminalConvergenceCandidates(t.Context(), store.TaskRunTerminalConvergenceQuery{
+				_, err = client.Execution().ListTaskRunTerminalConvergenceCandidates(t.Context(), execution.TaskRunTerminalConvergenceQuery{
 					WorkspaceKey: "WS", RequiredVersion: 2, After: "task-a", Limit: 7,
 				})
 			} else {
-				_, err = client.Execution().CompleteTaskRunTerminalConvergence(t.Context(), store.TaskRunTerminalConvergenceComplete{
+				_, err = client.Execution().CompleteTaskRunTerminalConvergence(t.Context(), execution.TaskRunTerminalConvergenceComplete{
 					WorkspaceKey: "WS", TaskRunID: "task-b", RequiredVersion: 2, CompletedAt: completedAt,
 				})
 			}
@@ -341,13 +340,13 @@ func validExecutionClaimAndStartResult(taskRunID string) ExecutionClaimAndStartR
 	now := time.Date(2026, 7, 16, 12, 0, 0, 0, time.UTC)
 	appliedAt := now
 	return ExecutionClaimAndStartResult{
-		TaskRun: &domain.TaskRun{
+		TaskRun: &execution.TaskRunRecord{
 			WorkspaceKey: "WS", TaskRunID: taskRunID, DriverRunID: "run-1", DriverStepID: "step-1",
-			TaskID: "TASK-1", Status: domain.TaskRunRunning, NodeID: "node-1", LeaseID: "lease-1", FencingToken: 7,
+			TaskID: "TASK-1", Status: execution.TaskRunRecordRunning, NodeID: "node-1", LeaseID: "lease-1", FencingToken: 7,
 		},
-		DriverStep: &domain.DriverStep{
+		DriverStep: &execution.DriverStepRecord{
 			WorkspaceKey: "WS", StepID: "step-1", DriverRunID: "run-1",
-			TaskRunID: taskRunID, Status: domain.DriverStepRunning, ActionLedgerID: "task-run-start:claim-1",
+			TaskRunID: taskRunID, Status: execution.DriverStepRunning, ActionLedgerID: "task-run-start:claim-1",
 		},
 		Issue: &ExecutionIssue{ID: "TASK-1", Status: "in_progress", Assignee: "driver-run:run-1", UpdatedAt: now},
 		Action: &ExecutionActionLedger{
@@ -400,13 +399,13 @@ func TestExecutionTaskRunRequestCarriesExactClaimActionID(t *testing.T) {
 func executionTaskRunRequestFixture(at time.Time, claimActionID string) ExecutionTaskRunRequestResult {
 	appliedAt := at
 	return ExecutionTaskRunRequestResult{
-		TaskRun: &domain.TaskRun{
+		TaskRun: &execution.TaskRunRecord{
 			WorkspaceKey: "WS", TaskRunID: "task-run-1", DriverRunID: "run-1",
-			DriverStepID: "step-1", TaskID: "TASK-1", Status: domain.TaskRunQueued,
+			DriverStepID: "step-1", TaskID: "TASK-1", Status: execution.TaskRunRecordQueued,
 		},
-		DriverStep: &domain.DriverStep{
+		DriverStep: &execution.DriverStepRecord{
 			WorkspaceKey: "WS", StepID: "step-1", DriverRunID: "run-1",
-			TaskRunID: "task-run-1", Status: domain.DriverStepQueued, ActionLedgerID: "task-run-request:request-1",
+			TaskRunID: "task-run-1", Status: execution.DriverStepQueued, ActionLedgerID: "task-run-request:request-1",
 		},
 		Action: &ExecutionActionLedger{
 			WorkspaceKey: "WS", ActionID: "task-run-request:request-1",
@@ -415,8 +414,8 @@ func executionTaskRunRequestFixture(at time.Time, claimActionID string) Executio
 			ResponseRef: "task-run://task-run-1#queued", CreatedAt: at, AppliedAt: &appliedAt,
 		},
 		ClaimActionID:             claimActionID,
-		CommittedTaskRunStatus:    domain.TaskRunQueued,
-		CommittedDriverStepStatus: domain.DriverStepQueued,
+		CommittedTaskRunStatus:    execution.TaskRunRecordQueued,
+		CommittedDriverStepStatus: execution.DriverStepQueued,
 	}
 }
 
@@ -938,8 +937,8 @@ func TestExecutionDriverRunSuspendUsesWriteOnlyLeaseTokenHeader(t *testing.T) {
 		if body.NodeID != "node-1" || body.LeaseID != "lease-1" || body.FencingToken != 7 || body.AwaitInstanceKey != "run-1#await-1" {
 			t.Fatalf("suspend body = %+v", body)
 		}
-		writeJSON(t, w, domain.DriverRun{
-			WorkspaceKey: "WS", RunID: "run-1", Status: domain.DriverRunSuspendedAwaitingEvent,
+		writeJSON(t, w, execution.DriverRunRecord{
+			WorkspaceKey: "WS", RunID: "run-1", Status: execution.DriverRunSuspendedAwait,
 			AwaitInstanceKey: "run-1#await-1", CreatedAt: now, UpdatedAt: now,
 		})
 	}))
@@ -952,7 +951,7 @@ func TestExecutionDriverRunSuspendUsesWriteOnlyLeaseTokenHeader(t *testing.T) {
 		WorkspaceKey: "WS", RunID: "run-1", NodeID: "node-1", LeaseID: "lease-1",
 		LeaseToken: "raw-driver-secret", FencingToken: 7, AwaitInstanceKey: "run-1#await-1",
 	})
-	if err != nil || run.Status != domain.DriverRunSuspendedAwaitingEvent {
+	if err != nil || run.Status != execution.DriverRunSuspendedAwait {
 		t.Fatalf("SuspendDriverRun() = %#v, %v", run, err)
 	}
 }
@@ -1036,21 +1035,21 @@ func TestExecutionTerminalDriverRunWorkRecoveryUsesSystemRouteAndStrictReceipt(t
 			t.Fatalf("system recovery unexpectedly carried X-Lease-Token = %q", got)
 		}
 		var request struct {
-			RequestID    string                 `json:"request_id"`
-			ParentStatus domain.DriverRunStatus `json:"parent_status"`
-			Reason       string                 `json:"reason"`
-			ErrorClass   string                 `json:"error_class"`
-			RecoveredAt  time.Time              `json:"recovered_at"`
+			RequestID    string                    `json:"request_id"`
+			ParentStatus execution.DriverRunStatus `json:"parent_status"`
+			Reason       string                    `json:"reason"`
+			ErrorClass   string                    `json:"error_class"`
+			RecoveredAt  time.Time                 `json:"recovered_at"`
 		}
 		decodeJSONBody(t, r, &request)
-		if request.RequestID != "terminal-work-1" || request.ParentStatus != domain.DriverRunFailed ||
+		if request.RequestID != "terminal-work-1" || request.ParentStatus != execution.DriverRunFailed ||
 			request.Reason != "parent driver run became failed" || request.ErrorClass != "parent_run_terminal" ||
 			!request.RecoveredAt.Equal(recoveredAt) {
 			t.Fatalf("recovery request = %+v", request)
 		}
 		appliedAt := recoveredAt
 		writeJSON(t, w, ExecutionTerminalDriverRunWorkRecoveryResult{
-			WorkspaceKey: "WS", DriverRunID: "run-1", ParentStatus: domain.DriverRunFailed,
+			WorkspaceKey: "WS", DriverRunID: "run-1", ParentStatus: execution.DriverRunFailed,
 			Reason: "parent driver run became failed", ErrorClass: "parent_run_terminal", RecoveredAt: recoveredAt,
 			RecoveredTaskRunIDs: []string{"task-run-1"}, ReleasedWorkItemIDs: []string{"TASK-1"},
 			PreservedSuccessorWorkItemIDs: []string{}, ActionID: "action-1",
@@ -1065,7 +1064,7 @@ func TestExecutionTerminalDriverRunWorkRecoveryUsesSystemRouteAndStrictReceipt(t
 	}
 	result, err := client.Execution().RecoverTerminalDriverRunWork(t.Context(), ExecutionTerminalDriverRunWorkRecoveryCommand{
 		WorkspaceKey: "WS", RequestID: "terminal-work-1", DriverRunID: "run-1",
-		ParentStatus: domain.DriverRunFailed, Reason: "parent driver run became failed",
+		ParentStatus: execution.DriverRunFailed, Reason: "parent driver run became failed",
 		ErrorClass: "parent_run_terminal", RecoveredAt: recoveredAt,
 	})
 	if err != nil || result.ActionID != "action-1" || len(result.RecoveredTaskRunIDs) != 1 || len(result.ReleasedWorkItemIDs) != 1 {

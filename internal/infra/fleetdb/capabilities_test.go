@@ -10,7 +10,7 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 func TestRequireCapabilitiesEmptyRequirementsSkipProbe(t *testing.T) {
@@ -182,7 +182,7 @@ func TestRequireCapabilitiesReturnsTypedIncompatibilities(t *testing.T) {
 			if !reflect.DeepEqual(incompatibility.Missing, tt.wantMissing) {
 				t.Errorf("Missing = %q, want %q", incompatibility.Missing, tt.wantMissing)
 			}
-			if got := errors.Is(err, domain.ErrNotFound); got != tt.wantNotFound {
+			if got := errors.Is(err, persistence.ErrNotFound); got != tt.wantNotFound {
 				t.Errorf("errors.Is(ErrNotFound) = %v, want %v", got, tt.wantNotFound)
 			}
 		})

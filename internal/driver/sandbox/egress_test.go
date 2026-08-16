@@ -39,9 +39,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
-
-	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 func TestResolveSandboxEgress(t *testing.T) {
@@ -67,8 +67,8 @@ func TestResolveSandboxEgress(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			got, err := resolveSandboxEgress(tc.configured, tc.trust)
 			if tc.wantErr {
-				if !errors.Is(err, domain.ErrInvalid) {
-					t.Fatalf("err = %v, want domain.ErrInvalid", err)
+				if !errors.Is(err, persistence.ErrInvalid) {
+					t.Fatalf("err = %v, want persistence.ErrInvalid", err)
 				}
 				return
 			}
@@ -85,8 +85,8 @@ func TestResolveSandboxEgress(t *testing.T) {
 func TestResolveSandboxLauncherRejectsInvalidEgressConfig(t *testing.T) {
 	t.Setenv(SandboxModeEnvVar, "container")
 	t.Setenv(SandboxEgressEnvVar, "firewall")
-	if _, err := ResolveSandboxLauncher(); !errors.Is(err, domain.ErrInvalid) {
-		t.Fatalf("err = %v, want domain.ErrInvalid (fail closed at wiring time)", err)
+	if _, err := ResolveSandboxLauncher(); !errors.Is(err, persistence.ErrInvalid) {
+		t.Fatalf("err = %v, want persistence.ErrInvalid (fail closed at wiring time)", err)
 	}
 	t.Setenv(SandboxEgressEnvVar, "serve-only")
 	resolved, err := ResolveSandboxLauncher()
@@ -133,8 +133,8 @@ func TestServeRelayAddress(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			target, rewritten, err := serveRelayAddress(tc.rawURL)
 			if tc.wantErr {
-				if !errors.Is(err, domain.ErrInvalid) {
-					t.Fatalf("err = %v, want domain.ErrInvalid", err)
+				if !errors.Is(err, persistence.ErrInvalid) {
+					t.Fatalf("err = %v, want persistence.ErrInvalid", err)
 				}
 				return
 			}
@@ -463,7 +463,7 @@ func assertEgressBlocked(t *testing.T, name, probe string) {
 	}
 }
 
-func launchEgressProbe(t *testing.T, launcher *containerLauncher, apiURL, backendPort string) (egressProbeReport, domain.TaskRunPlacement) {
+func launchEgressProbe(t *testing.T, launcher *containerLauncher, apiURL, backendPort string) (egressProbeReport, execution.TaskRunPlacementRecord) {
 	t.Helper()
 	bundleRoot := t.TempDir()
 	serverPath := filepath.Join(bundleRoot, "dist", "server.mjs")

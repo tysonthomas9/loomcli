@@ -34,7 +34,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/automation"
+
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
+
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 
 	appserve "github.com/tysonthomas9/loomcli/internal/app/serve"
 	"github.com/tysonthomas9/loomcli/internal/app/webhookingestion"
@@ -42,11 +46,8 @@ import (
 	providers "github.com/tysonthomas9/loomcli/internal/infra/connectorsproviders"
 	"github.com/tysonthomas9/loomcli/internal/infra/connectorsvault"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
-	"github.com/tysonthomas9/loomcli/internal/modules/automation"
 	connectorsmodule "github.com/tysonthomas9/loomcli/internal/modules/connectors"
-	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
-	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/testutil"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/driverapi"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/webhooks"
@@ -179,7 +180,7 @@ func (g *fakeGitHub) snapshot() (calls []upstreamCall, merged bool) {
 // over one memstore behind one httptest server, with a real Dispatcher, a
 // real AES-256-GCM vault, and the real GitHub provider pointed at fakeGitHub.
 type e2eHarness struct {
-	store  store.Store
+	store  *memstore.Store
 	vault  *connectorsvault.Vault
 	github *fakeGitHub
 	server *httptest.Server
@@ -234,17 +235,14 @@ func (adapter *connectorE2EAdmission) callCount() int {
 	return len(adapter.commands)
 }
 
-type connectorE2EQueries struct{ st store.Store }
+type connectorE2EQueries struct{ st *memstore.Store }
 
 func (adapter connectorE2EQueries) GetBinding(ctx context.Context, workspace, bindingID string) (*automation.Binding, error) {
 	return adapter.st.TriggerBindings().Get(ctx, workspace, bindingID)
 }
 
 func (adapter connectorE2EQueries) ListBindings(ctx context.Context, workspace string, filter automation.BindingFilter) ([]*automation.Binding, error) {
-	return adapter.st.TriggerBindings().List(ctx, workspace, store.TriggerBindingFilter{
-		SourceKind: filter.SourceKind, RouteKey: filter.RouteKey, DriverID: filter.DriverID,
-		TargetAgentServiceID: filter.TargetAgentServiceID, Enabled: filter.Enabled, Limit: filter.Limit,
-	})
+	return adapter.st.TriggerBindings().List(ctx, workspace, automation.TriggerBindingFilter(filter))
 }
 
 func (adapter connectorE2EQueries) GetEvent(ctx context.Context, workspace, eventID string) (*automation.Event, error) {
@@ -252,7 +250,7 @@ func (adapter connectorE2EQueries) GetEvent(ctx context.Context, workspace, even
 }
 
 func (adapter connectorE2EQueries) ListEvents(ctx context.Context, workspace string, filter automation.EventFilter) ([]*automation.Event, error) {
-	return adapter.st.TriggerEvents().List(ctx, workspace, store.TriggerEventFilter{
+	return adapter.st.TriggerEvents().List(ctx, workspace, automation.TriggerEventFilter{
 		SourceKind: filter.SourceKind, TriggerBindingID: filter.BindingID, Limit: filter.Limit,
 	})
 }
@@ -262,7 +260,7 @@ func (adapter connectorE2EQueries) GetDelivery(ctx context.Context, workspace, d
 }
 
 func (adapter connectorE2EQueries) ListDeliveries(ctx context.Context, workspace string, filter automation.DeliveryFilter) ([]*automation.Delivery, error) {
-	return adapter.st.TriggerDeliveries().List(ctx, workspace, store.TriggerDeliveryFilter{
+	return adapter.st.TriggerDeliveries().List(ctx, workspace, automation.TriggerDeliveryFilter{
 		TriggerEventID: filter.EventID, TriggerBindingID: filter.BindingID,
 		Status: filter.Status, Limit: filter.Limit,
 	})
@@ -329,7 +327,7 @@ func newE2EHarness(t *testing.T) *e2eHarness {
 	if err != nil {
 		t.Fatalf("New connector dispatcher: %v", err)
 	}
-	repairs, ok := h.store.DriverSteps().(store.TerminalDriverStepRepairStore)
+	repairs, ok := h.store.DriverSteps().(execution.TerminalDriverStepRepairStore)
 	if !ok {
 		t.Fatal("test DriverStep store lacks terminal repair support")
 	}
@@ -380,20 +378,20 @@ func newE2EHarness(t *testing.T) *e2eHarness {
 func (h *e2eHarness) provisionWorkspace(t *testing.T) {
 	t.Helper()
 	ctx := context.Background()
-	if _, err := h.store.Drivers().Create(ctx, store.DriverCreate{
+	if _, err := h.store.Drivers().Create(ctx, workflowcatalog.DriverCreate{
 		WorkspaceKey: e2eWorkspace, DriverID: "driver-1", Name: "pr-agent",
 		OwnerType: workflowcatalog.DriverOwnerSystem, Status: workflowcatalog.DriverStatusActive,
 	}); err != nil {
 		t.Fatalf("Create driver: %v", err)
 	}
-	if _, err := h.store.DriverVersions().Create(ctx, store.DriverVersionCreate{
+	if _, err := h.store.DriverVersions().Create(ctx, workflowcatalog.DriverVersionCreate{
 		WorkspaceKey: e2eWorkspace, VersionID: "version-1", DriverID: "driver-1", Version: 1,
 		SourceDigest: "sha256:source", BundleDigest: "sha256:bundle",
 		ValidationStatus: workflowcatalog.DriverVersionValidationPassed,
 	}); err != nil {
 		t.Fatalf("Create driver version: %v", err)
 	}
-	if _, err := h.store.TriggerBindings().Create(ctx, store.TriggerBindingCreate{
+	if _, err := h.store.TriggerBindings().Create(ctx, automation.TriggerBindingCreate{
 		WorkspaceKey: e2eWorkspace, BindingID: "binding-1", Name: "PR opened",
 		SourceKind: "github", RouteKey: "github.pull_request.opened",
 		DriverID: "driver-1", DriverVersionID: "version-1", Enabled: true,
@@ -521,7 +519,7 @@ func (h *e2eHarness) do(t *testing.T, req *http.Request) (int, []byte) {
 // admission-to-run behavior belongs to Automation's own tests.
 func (h *e2eHarness) seedAndClaimRun(t *testing.T) {
 	t.Helper()
-	run, err := h.store.DriverRuns().Create(t.Context(), store.DriverRunCreate{
+	run, err := h.store.DriverRuns().Create(t.Context(), execution.DriverRunCreate{
 		WorkspaceKey:     e2eWorkspace,
 		RunID:            "connector-proof-run",
 		DriverID:         "driver-1",

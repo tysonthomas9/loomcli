@@ -29,19 +29,20 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
+	workspaceowner "github.com/tysonthomas9/loomcli/internal/modules/workspace"
+
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 
 	appserve "github.com/tysonthomas9/loomcli/internal/app/serve"
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/driver"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
-	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
-	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/testutil"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/driverapi"
 )
@@ -52,7 +53,7 @@ var step9TokenKey = bytes.Repeat([]byte{0x42}, 32)
 // runs through the real executor claim path.
 type step9Fixture struct {
 	ctx  context.Context
-	st   store.Store
+	st   *memstore.Store
 	root string
 	reg  *driver.FlueDriverFixture
 	exec *appserve.ExecutionCapability
@@ -117,7 +118,7 @@ func newStep9Fixture(t *testing.T, trust workflowcatalog.DriverTrustLevel) *step
 	ctx := context.Background()
 	root := t.TempDir()
 	st := memstore.New()
-	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "TEST", Name: "test"}); err != nil {
+	if _, err := st.Workspaces().Create(ctx, workspaceowner.WorkspaceCreate{Key: "TEST", Name: "test"}); err != nil {
 		t.Fatalf("Create workspace: %v", err)
 	}
 	step9WriteFlueDist(t, root)
@@ -136,7 +137,7 @@ func newStep9Fixture(t *testing.T, trust workflowcatalog.DriverTrustLevel) *step
 	if err != nil {
 		t.Fatalf("SeedFlueDriverFixture: %v", err)
 	}
-	repairs, ok := st.DriverSteps().(store.TerminalDriverStepRepairStore)
+	repairs, ok := st.DriverSteps().(execution.TerminalDriverStepRepairStore)
 	if !ok {
 		t.Fatal("step9 memstore lacks terminal DriverStep repair support")
 	}
@@ -174,7 +175,7 @@ func step9WriteFlueDist(t *testing.T, root string) {
 
 func (f *step9Fixture) queueRun(t *testing.T, runID, epicID string) {
 	t.Helper()
-	if _, err := f.st.DriverRuns().Create(f.ctx, store.DriverRunCreate{
+	if _, err := f.st.DriverRuns().Create(f.ctx, execution.DriverRunCreate{
 		WorkspaceKey: "TEST", RunID: runID,
 		DriverID: f.reg.Driver.DriverID, DriverVersionID: f.reg.Version.VersionID,
 		Entrypoint: driver.EntrypointRun, SourceKind: "test", SourceRef: "step9-fixture",
@@ -228,8 +229,8 @@ func (step9CaptureProcess) Wait() (driver.SandboxExit, error) {
 
 func (step9CaptureProcess) Kill() error { return nil }
 
-func (step9CaptureProcess) Placement() domain.TaskRunPlacement {
-	return domain.TaskRunPlacement{Provider: "step9-capture", StartedAt: time.Now().UTC()}
+func (step9CaptureProcess) Placement() execution.TaskRunPlacementRecord {
+	return execution.TaskRunPlacementRecord{Provider: "step9-capture", StartedAt: time.Now().UTC()}
 }
 
 // TestStep9UntrustedDriverRefusedOutsideSandbox: the trust placement policy is
@@ -399,7 +400,7 @@ func assertStep9PlacementAudit(t *testing.T, output map[string]string) {
 	if got := output[driver.SandboxLauncherOutputKey]; got != "custom-isolating" {
 		t.Fatalf("output[%s] = %q, want custom-isolating", driver.SandboxLauncherOutputKey, got)
 	}
-	var placement domain.TaskRunPlacement
+	var placement execution.TaskRunPlacementRecord
 	if err := json.Unmarshal([]byte(output[driver.SandboxPlacementOutputKey]), &placement); err != nil {
 		t.Fatalf("decode output[%s] %q: %v", driver.SandboxPlacementOutputKey, output[driver.SandboxPlacementOutputKey], err)
 	}
@@ -414,8 +415,8 @@ func assertStep9PlacementAudit(t *testing.T, output map[string]string) {
 type step9TwoRuns struct {
 	f      *step9Fixture
 	server *httptest.Server
-	runA   *domain.DriverRun
-	runB   *domain.DriverRun
+	runA   *execution.DriverRunRecord
+	runB   *execution.DriverRunRecord
 }
 
 func newStep9TwoRuns(t *testing.T) *step9TwoRuns {
@@ -439,39 +440,39 @@ func newStep9TwoRuns(t *testing.T) *step9TwoRuns {
 	return rig
 }
 
-func (r *step9TwoRuns) claimRunWithTaskRun(t *testing.T, runID, epicID, nodeID, leaseID string) *domain.DriverRun {
+func (r *step9TwoRuns) claimRunWithTaskRun(t *testing.T, runID, epicID, nodeID, leaseID string) *execution.DriverRunRecord {
 	t.Helper()
 	r.f.queueRun(t, runID, epicID)
 	claimed, err := r.f.st.DriverRuns().Claim(r.f.ctx, "TEST", runID, nodeID, leaseID)
 	if err != nil {
 		t.Fatalf("Claim %s: %v", runID, err)
 	}
-	if _, err := r.f.st.DriverSteps().Create(r.f.ctx, store.DriverStepCreate{
+	if _, err := r.f.st.DriverSteps().Create(r.f.ctx, execution.DriverStepCreate{
 		WorkspaceKey: "TEST",
 		StepID:       "step-" + runID,
 		DriverRunID:  runID,
 		StepKind:     "task_run",
-		Status:       domain.DriverStepQueued,
+		Status:       execution.DriverStepQueued,
 		NodeID:       claimed.NodeID,
 		LeaseID:      claimed.LeaseID,
 		FencingToken: claimed.FencingToken,
 	}); err != nil {
 		t.Fatalf("Create driver step for %s: %v", runID, err)
 	}
-	if _, err := r.f.st.TaskRuns().Create(r.f.ctx, store.TaskRunCreate{
+	if _, err := r.f.st.TaskRuns().Create(r.f.ctx, execution.TaskRunCreate{
 		WorkspaceKey: "TEST",
 		TaskRunID:    "task-run-" + runID,
 		DriverRunID:  runID,
 		DriverStepID: "step-" + runID,
 		TaskID:       epicID + "-1",
-		Status:       domain.TaskRunQueued,
+		Status:       execution.TaskRunRecordQueued,
 	}); err != nil {
 		t.Fatalf("Create task run for %s: %v", runID, err)
 	}
 	return claimed
 }
 
-func (r *step9TwoRuns) mint(t *testing.T, run *domain.DriverRun, ttl time.Duration, mutate func(*driver.RunTokenClaims)) string {
+func (r *step9TwoRuns) mint(t *testing.T, run *execution.DriverRunRecord, ttl time.Duration, mutate func(*driver.RunTokenClaims)) string {
 	t.Helper()
 	claims := driver.RunTokenClaims{
 		WorkspaceKey: run.WorkspaceKey,
@@ -612,11 +613,11 @@ func TestStep9RunTokenRevokedWhenRunFinishes(t *testing.T) {
 	if status, _ := rig.doOp(t, "list-agents", `{}`, step9Bearer(tokenA)); status != http.StatusOK {
 		t.Fatalf("pre-finish status = %d, want 200", status)
 	}
-	if _, err := rig.f.st.DriverRuns().Finish(rig.f.ctx, "TEST", rig.runA.RunID, store.DriverRunFinish{
+	if _, err := rig.f.st.DriverRuns().Finish(rig.f.ctx, "TEST", rig.runA.RunID, execution.DriverRunFinish{
 		NodeID:       rig.runA.NodeID,
 		LeaseID:      rig.runA.LeaseID,
 		FencingToken: rig.runA.FencingToken,
-		Status:       domain.DriverRunCompleted,
+		Status:       execution.DriverRunCompleted,
 		Summary:      "step9 revocation",
 	}); err != nil {
 		t.Fatalf("Finish run A: %v", err)

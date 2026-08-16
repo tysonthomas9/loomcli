@@ -6,11 +6,14 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/automation"
+
+	workspaceowner "github.com/tysonthomas9/loomcli/internal/modules/workspace"
+
 	appworkflowauthoring "github.com/tysonthomas9/loomcli/internal/app/workflowauthoring"
 	"github.com/tysonthomas9/loomcli/internal/driver"
 	workflowdistribution "github.com/tysonthomas9/loomcli/internal/infra/workflowdistribution"
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
-	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
 type builtinSupport struct{}
@@ -121,13 +124,13 @@ func builtinWorkflowWorkDir() string {
 }
 
 type boundPromptAgentIndex struct {
-	workspaces store.WorkspaceStore
-	bindings   store.TriggerBindingStore
+	workspaces workspaceowner.WorkspaceStore
+	bindings   automation.TriggerBindingStore
 }
 
 func NewBoundPromptAgentIndex(
-	workspaces store.WorkspaceStore,
-	bindings store.TriggerBindingStore,
+	workspaces workspaceowner.WorkspaceStore,
+	bindings automation.TriggerBindingStore,
 ) appworkflowauthoring.BoundPromptAgentIndex {
 	if workspaces == nil || bindings == nil {
 		return nil
@@ -159,7 +162,7 @@ func (adapter boundPromptAgentIndex) HasEnabledPromptAgentBinding(
 	bindings, err := adapter.bindings.List(
 		ctx,
 		workspace,
-		store.TriggerBindingFilter{
+		automation.TriggerBindingFilter{
 			DriverID: workflowcatalog.BuiltinPromptAgentWorkflowName,
 			Enabled:  &enabled,
 			Limit:    1,

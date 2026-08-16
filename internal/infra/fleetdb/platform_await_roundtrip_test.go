@@ -28,11 +28,12 @@ import (
 	"testing"
 	"time"
 
+	workspaceowner "github.com/tysonthomas9/loomcli/internal/modules/workspace"
+
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
+	"github.com/tysonthomas9/loomcli/internal/modules/execution/testdata/storetest"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
-	"github.com/tysonthomas9/loomcli/internal/store"
-	"github.com/tysonthomas9/loomcli/internal/store/testdata/storetest"
 )
 
 func TestFleetDBAwaitConformanceRoundTrip(t *testing.T) {
@@ -64,7 +65,7 @@ func TestFleetDBAwaitConformanceRoundTrip(t *testing.T) {
 	var wsSeq atomic.Int64
 	storetest.RunAwaitConformance(t, func(t testing.TB) *storetest.AwaitHarness {
 		ws := fmt.Sprintf("AWRT%d", wsSeq.Add(1))
-		if _, err := client.Workspaces().Create(ctx, store.WorkspaceCreate{Key: ws, Name: ws}); err != nil {
+		if _, err := client.Workspaces().Create(ctx, workspaceowner.WorkspaceCreate{Key: ws, Name: ws}); err != nil {
 			t.Fatalf("create workspace %s: %v", ws, err)
 		}
 		return &storetest.AwaitHarness{

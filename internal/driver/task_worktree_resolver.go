@@ -8,11 +8,11 @@ import (
 	"sort"
 	"strings"
 
-	workspacemodule "github.com/tysonthomas9/loomcli/internal/modules/workspace"
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
-	"github.com/tysonthomas9/loomcli/internal/store"
+	workspaceowner "github.com/tysonthomas9/loomcli/internal/modules/workspace"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 const ErrorClassLocalWorktreeUnprovisioned = "local_worktree_unprovisioned"
@@ -172,7 +172,7 @@ func stackBindingForTask(
 // finalizeStackNode records the completed task's stack node state/SHA before
 // ExecuteTask returns, so dependents read a durable predecessor node.
 func (e HostBridgeTaskExecutor) finalizeStackNode(ctx context.Context, req TaskExecRequest, wt TaskWorktree, result TaskExecResult, runErr error) {
-	if e.TaskOutcomes == nil || runErr != nil || result.Status != domain.TaskRunCompleted {
+	if e.TaskOutcomes == nil || runErr != nil || result.Status != execution.TaskRunRecordCompleted {
 		return
 	}
 	taskID := strings.TrimSpace(req.TaskID)
@@ -213,22 +213,22 @@ type LocalTaskWorktreeResolver struct {
 }
 
 type taskWorktreeStore interface {
-	Repos() store.RepoStore
-	WorkerProfiles() store.WorkerProfileStore
+	Repos() workspaceowner.RepoStore
+	WorkerProfiles() execution.WorkerProfileStore
 }
 
 //nolint:funlen // Resolution validates workspace state, repo selection, checkout, lineage base, and worktree creation.
 func (r LocalTaskWorktreeResolver) ResolveTaskWorktree(ctx context.Context, req TaskExecRequest, _ string) (TaskWorktree, error) {
 	if r.Store == nil {
-		return TaskWorktree{}, fmt.Errorf("store required: %w", domain.ErrInvalid)
+		return TaskWorktree{}, fmt.Errorf("store required: %w", persistence.ErrInvalid)
 	}
 	workspaceKey := strings.TrimSpace(req.WorkspaceKey)
 	if workspaceKey == "" {
-		return TaskWorktree{}, fmt.Errorf("workspace key required: %w", domain.ErrInvalid)
+		return TaskWorktree{}, fmt.Errorf("workspace key required: %w", persistence.ErrInvalid)
 	}
 	taskRunID := strings.TrimSpace(req.TaskRunID)
 	if taskRunID == "" {
-		return TaskWorktree{}, fmt.Errorf("task run id required: %w", domain.ErrInvalid)
+		return TaskWorktree{}, fmt.Errorf("task run id required: %w", persistence.ErrInvalid)
 	}
 	repos, err := r.Store.Repos().List(ctx, workspaceKey)
 	if err != nil {
@@ -294,12 +294,12 @@ func (r LocalTaskWorktreeResolver) ResolveTaskWorktree(ctx context.Context, req 
 	}, nil
 }
 
-func (r LocalTaskWorktreeResolver) selectRepo(ctx context.Context, workspaceKey string, repos []*workspacemodule.Repository, req TaskExecRequest) (*workspacemodule.Repository, error) {
+func (r LocalTaskWorktreeResolver) selectRepo(ctx context.Context, workspaceKey string, repos []*workspaceowner.Repository, req TaskExecRequest) (*workspaceowner.Repository, error) {
 	taskSelectors := taskWorktreeRepoSelectors(req)
 	var profileSelectors []string
 	if req.WorkerProfileID != "" {
 		if r.Store == nil {
-			return nil, fmt.Errorf("worker profile store required for repo scope: %w", domain.ErrInvalid)
+			return nil, fmt.Errorf("worker profile store required for repo scope: %w", persistence.ErrInvalid)
 		}
 		profile, err := r.Store.WorkerProfiles().Get(ctx, workspaceKey, req.WorkerProfileID)
 		if err != nil {
@@ -335,7 +335,7 @@ func (r LocalTaskWorktreeResolver) selectRepo(ctx context.Context, workspaceKey 
 	}
 
 	if len(profileSelectors) > 0 {
-		matches := make([]*workspacemodule.Repository, 0, len(repos))
+		matches := make([]*workspaceowner.Repository, 0, len(repos))
 		for _, repo := range repos {
 			for _, selector := range profileSelectors {
 				if repoMatchesExactSelector(repo, selector) {
@@ -407,13 +407,13 @@ func repoSelectorKey(key string) bool {
 	}
 }
 
-func findRepoBySelector(repos []*workspacemodule.Repository, selector string) *workspacemodule.Repository {
+func findRepoBySelector(repos []*workspaceowner.Repository, selector string) *workspaceowner.Repository {
 	selector = strings.TrimSpace(selector)
 	if selector == "" {
 		return nil
 	}
 	want := normalizedRepoToken(selector)
-	var exact []*workspacemodule.Repository
+	var exact []*workspaceowner.Repository
 	for _, repo := range repos {
 		if repoMatchesExactSelector(repo, want) {
 			exact = append(exact, repo)
@@ -428,7 +428,7 @@ func findRepoBySelector(repos []*workspacemodule.Repository, selector string) *w
 	return nil
 }
 
-func repoMatchesExactSelector(repo *workspacemodule.Repository, selector string) bool {
+func repoMatchesExactSelector(repo *workspaceowner.Repository, selector string) bool {
 	if repo == nil {
 		return false
 	}
@@ -487,7 +487,7 @@ func normalizedRepoToken(value string) string {
 func (r LocalTaskWorktreeResolver) baseBranchForTask(
 	ctx context.Context,
 	workspaceKey string,
-	selected *workspacemodule.Repository,
+	selected *workspaceowner.Repository,
 	req TaskExecRequest,
 ) (string, error) {
 	defaultBranch := repoDefaultBranch(selected)
@@ -508,7 +508,7 @@ func (r LocalTaskWorktreeResolver) baseBranchForTask(
 	return defaultBranch, nil
 }
 
-func repoDefaultBranch(repo *workspacemodule.Repository) string {
+func repoDefaultBranch(repo *workspaceowner.Repository) string {
 	if repo == nil {
 		return ""
 	}

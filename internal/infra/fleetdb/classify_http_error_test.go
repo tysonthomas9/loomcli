@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 type classifyRoundTripFunc func(*http.Request) (*http.Response, error)
@@ -20,10 +20,10 @@ func TestClassifyHTTPError_GoneMapsToErrGone(t *testing.T) {
 	t.Parallel()
 	body := []byte(`{"error":{"code":"lease_expired","message":"heartbeat agent ownership lease failed"}}`)
 	err := classifyHTTPError(http.MethodPost, "/api/v1/WS/agent-ownership-leases/a/heartbeat", http.StatusGone, body)
-	if !errors.Is(err, domain.ErrGone) {
+	if !errors.Is(err, persistence.ErrGone) {
 		t.Fatalf("err = %v, want errors.Is ErrGone", err)
 	}
-	if errors.Is(err, domain.ErrAlreadyExists) || errors.Is(err, domain.ErrConflict) {
+	if errors.Is(err, persistence.ErrAlreadyExists) || errors.Is(err, persistence.ErrConflict) {
 		t.Fatalf("err = %v, must not satisfy ErrAlreadyExists/ErrConflict", err)
 	}
 }
@@ -39,13 +39,13 @@ func TestClassifyHTTPError_RateLimitRemainsRetryable(t *testing.T) {
 	if !errors.Is(err, ErrRateLimited) {
 		t.Fatalf("err = %v, want errors.Is ErrRateLimited", err)
 	}
-	if !errors.Is(err, domain.ErrRateLimited) {
+	if !errors.Is(err, persistence.ErrRateLimited) {
 		t.Fatalf(
-			"err = %v, want errors.Is domain.ErrRateLimited",
+			"err = %v, want errors.Is persistence.ErrRateLimited",
 			err,
 		)
 	}
-	if errors.Is(err, domain.ErrAlreadyExists) || errors.Is(err, domain.ErrConflict) {
+	if errors.Is(err, persistence.ErrAlreadyExists) || errors.Is(err, persistence.ErrConflict) {
 		t.Fatalf("err = %v, must not satisfy a deterministic conflict", err)
 	}
 	mapped := mapExecutionTransportError("request TaskRun", err)
@@ -64,14 +64,14 @@ func TestClassifyHTTPError_ServerFailureIsControlPlaneUnavailable(
 		http.StatusServiceUnavailable,
 		[]byte(`{"error":{"code":"unavailable","message":"try again"}}`),
 	)
-	if !errors.Is(err, domain.ErrUnavailable) {
+	if !errors.Is(err, persistence.ErrUnavailable) {
 		t.Fatalf(
-			"err = %v, want errors.Is domain.ErrUnavailable",
+			"err = %v, want errors.Is persistence.ErrUnavailable",
 			err,
 		)
 	}
-	if errors.Is(err, domain.ErrNotFound) ||
-		errors.Is(err, domain.ErrConflict) {
+	if errors.Is(err, persistence.ErrNotFound) ||
+		errors.Is(err, persistence.ErrConflict) {
 		t.Fatalf("err = %v, must not be a deterministic read failure", err)
 	}
 }
@@ -94,9 +94,9 @@ func TestClientTransportFailureIsControlPlaneUnavailable(t *testing.T) {
 		"WS",
 		"session-1",
 	)
-	if !errors.Is(err, domain.ErrUnavailable) {
+	if !errors.Is(err, persistence.ErrUnavailable) {
 		t.Fatalf(
-			"err = %v, want errors.Is domain.ErrUnavailable",
+			"err = %v, want errors.Is persistence.ErrUnavailable",
 			err,
 		)
 	}
@@ -110,7 +110,7 @@ func TestClassifyHTTPError_AgentOwnershipForbiddenMapsToNotOwner(t *testing.T) {
 		http.StatusForbidden,
 		[]byte(`{"error":{"code":"forbidden","message":"ownership proof rejected"}}`),
 	)
-	if !errors.Is(err, domain.ErrNotOwner) {
+	if !errors.Is(err, persistence.ErrNotOwner) {
 		t.Fatalf("err = %v, want errors.Is ErrNotOwner", err)
 	}
 }
@@ -122,11 +122,11 @@ func TestClassifyHTTPError_ExistingMappingsUnchanged(t *testing.T) {
 		status int
 		want   error
 	}{
-		{http.StatusNotFound, domain.ErrNotFound},
-		{http.StatusConflict, domain.ErrAlreadyExists},
-		{http.StatusBadRequest, domain.ErrInvalid},
-		{http.StatusUnprocessableEntity, domain.ErrInvalid},
-		{http.StatusForbidden, domain.ErrConflict},
+		{http.StatusNotFound, persistence.ErrNotFound},
+		{http.StatusConflict, persistence.ErrAlreadyExists},
+		{http.StatusBadRequest, persistence.ErrInvalid},
+		{http.StatusUnprocessableEntity, persistence.ErrInvalid},
+		{http.StatusForbidden, persistence.ErrConflict},
 	}
 	for _, tc := range cases {
 		err := classifyHTTPError(http.MethodPost, "/x", tc.status, nil)

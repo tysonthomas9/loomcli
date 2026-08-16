@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
-	"github.com/tysonthomas9/loomcli/internal/infra/workspacecatalog"
+
 	workspacemodule "github.com/tysonthomas9/loomcli/internal/modules/workspace"
 )
 
@@ -19,7 +19,11 @@ func WorkspaceCatalog(handle *bootstrap.StoreHandle) (workspacemodule.API, error
 	if handle == nil || handle.Store == nil {
 		return nil, fmt.Errorf("compose Workspace capability: %w", workspacemodule.ErrUnavailable)
 	}
-	api, err := workspacecatalog.New(handle.Store.Workspaces(), handle.Store.Repos())
+	return workspaceCatalogFromRecords(handle.Store.Workspaces(), handle.Store.Repos())
+}
+
+func workspaceCatalogFromRecords(workspaces workspacemodule.WorkspaceStore, repositories workspacemodule.RepoStore) (workspacemodule.API, error) {
+	api, err := workspacemodule.NewFromRecordStores(workspaces, repositories)
 	if err != nil {
 		return nil, fmt.Errorf("compose Workspace capability: %w", err)
 	}

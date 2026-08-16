@@ -14,13 +14,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
+
 	appserve "github.com/tysonthomas9/loomcli/internal/app/serve"
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	artifactsmodule "github.com/tysonthomas9/loomcli/internal/modules/artifacts"
-	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
-	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 	"github.com/tysonthomas9/loomcli/internal/testutil"
 )
 
@@ -86,7 +86,7 @@ func (stub *taskRunWorkItemDesignPortStub) snapshot() (int, int, execution.Updat
 
 func executionDependenciesForTaskRunAPITest(
 	t *testing.T,
-	st store.Store,
+	st *memstore.Store,
 	designPorts ...execution.TaskRunWorkItemDesignPort,
 ) appserve.ExecutionDependencies {
 	t.Helper()
@@ -95,7 +95,7 @@ func executionDependenciesForTaskRunAPITest(
 	if len(designPorts) > 0 && designPorts[0] != nil {
 		designs = designPorts[0]
 	}
-	repairs, ok := st.DriverSteps().(store.TerminalDriverStepRepairStore)
+	repairs, ok := st.DriverSteps().(execution.TerminalDriverStepRepairStore)
 	if !ok {
 		t.Fatal("test DriverStep store lacks terminal repair support")
 	}
@@ -160,12 +160,12 @@ func newHarnessWithRunner(t *testing.T, runner string) *testHarness {
 		LeaseToken:   h.token,
 		FencingToken: h.fence,
 	}}
-	if _, err := st.TaskRuns().Create(context.Background(), store.TaskRunCreate{
+	if _, err := st.TaskRuns().Create(context.Background(), execution.TaskRunCreate{
 		WorkspaceKey: "WS",
 		TaskRunID:    h.taskRunID,
 		TaskID:       "TASK-1",
 		Runner:       runner,
-		Status:       domain.TaskRunRunning,
+		Status:       execution.TaskRunRecordRunning,
 		NodeID:       h.nodeID,
 		LeaseID:      h.leaseID,
 		LeaseToken:   h.token,
@@ -446,7 +446,7 @@ func TestTaskRunHeartbeatAndLogs(t *testing.T) {
 	if resp.StatusCode != http.StatusOK || replayed["sequence"] != entry["sequence"] {
 		t.Fatalf("log-append replay = %d %v, want committed sequence %v", resp.StatusCode, replayed, entry["sequence"])
 	}
-	logs, err := h.store.TaskRuns().ListLogs(context.Background(), "WS", h.taskRunID, store.TaskRunLogFilter{})
+	logs, err := h.store.TaskRuns().ListLogs(context.Background(), "WS", h.taskRunID, execution.TaskRunLogFilter{})
 	if err != nil || len(logs) != 1 || logs[0].Text != "hello\n" {
 		t.Fatalf("stored logs = %v err=%v, want the appended line", logs, err)
 	}
@@ -635,7 +635,7 @@ func TestTaskRunComplete(t *testing.T) {
 		t.Fatalf("complete taskRun = %v", out["taskRun"])
 	}
 	stored, err := h.store.TaskRuns().Get(context.Background(), "WS", h.taskRunID)
-	if err != nil || stored.Status != domain.TaskRunCompleted {
+	if err != nil || stored.Status != execution.TaskRunRecordCompleted {
 		t.Fatalf("stored run = %+v err=%v, want completed", stored, err)
 	}
 
@@ -654,7 +654,7 @@ func TestTaskRunCompleteStaleFenceRejected(t *testing.T) {
 		t.Fatalf("stale-fence complete = %d %v, want 403 not_owner", resp.StatusCode, decoded)
 	}
 	stored, err := h.store.TaskRuns().Get(context.Background(), "WS", h.taskRunID)
-	if err != nil || stored.Status != domain.TaskRunRunning {
+	if err != nil || stored.Status != execution.TaskRunRecordRunning {
 		t.Fatalf("stored run = %+v err=%v, want still running", stored, err)
 	}
 }
@@ -749,8 +749,8 @@ func TestDecodeStrictParamsUsesExactOnePolicy(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, err := decodeStrictParams[params]([]byte(body))
-			if err == nil || !errors.Is(err, domain.ErrInvalid) {
-				t.Fatalf("decodeStrictParams(%s) error = %T %v, want domain.ErrInvalid", name, err, err)
+			if err == nil || !errors.Is(err, persistence.ErrInvalid) {
+				t.Fatalf("decodeStrictParams(%s) error = %T %v, want persistence.ErrInvalid", name, err, err)
 			}
 		})
 	}
@@ -767,7 +767,7 @@ func TestDecodeParamsUsesExactOnePolicy(t *testing.T) {
 	}
 
 	_, err = decodeParams[params]([]byte(`{"taskId":"TASK-1"} {"taskId":"TASK-2"}`))
-	if err == nil || !errors.Is(err, domain.ErrInvalid) {
-		t.Fatalf("decodeParams(trailing) error = %T %v, want domain.ErrInvalid", err, err)
+	if err == nil || !errors.Is(err, persistence.ErrInvalid) {
+		t.Fatalf("decodeParams(trailing) error = %T %v, want persistence.ErrInvalid", err, err)
 	}
 }

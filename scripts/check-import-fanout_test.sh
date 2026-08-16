@@ -39,6 +39,10 @@ mkdir -p "$FAKE_SCRIPTS" "$FAKE_BIN"
 
 cp "$SCRIPT_DIR/check-import-fanout.sh" "$FAKE_SCRIPTS/check-import-fanout.sh"
 chmod +x "$FAKE_SCRIPTS/check-import-fanout.sh"
+# Most cases exercise the default ceiling. A header-only ratchet is valid and
+# prevents production exception rows from referring to packages absent from
+# the fake go-list fixture.
+printf '# package\texact_count\trationale\n' > "$FAKE_SCRIPTS/import-fanout-exceptions.tsv"
 
 SCRIPT_UNDER_TEST="$FAKE_SCRIPTS/check-import-fanout.sh"
 

@@ -5,7 +5,9 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/modules/automation"
+
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 )
 
 // bindConfigHeaders creates a binding carrying run-input plus a driver run
@@ -13,7 +15,7 @@ import (
 func (h *testHarness) bindConfigHeaders(t *testing.T, bindingID, sourceConfigRef, runID string) map[string]string {
 	t.Helper()
 	ctx := context.Background()
-	if _, err := h.store.TriggerBindings().Create(ctx, store.TriggerBindingCreate{
+	if _, err := h.store.TriggerBindings().Create(ctx, automation.TriggerBindingCreate{
 		WorkspaceKey:    "WS",
 		BindingID:       bindingID,
 		Name:            bindingID,
@@ -26,7 +28,7 @@ func (h *testHarness) bindConfigHeaders(t *testing.T, bindingID, sourceConfigRef
 	}); err != nil {
 		t.Fatalf("create binding %q: %v", bindingID, err)
 	}
-	if _, err := h.store.DriverRuns().Create(ctx, store.DriverRunCreate{
+	if _, err := h.store.DriverRuns().Create(ctx, execution.DriverRunCreate{
 		WorkspaceKey:     "WS",
 		RunID:            runID,
 		DriverID:         "driver-1",
@@ -48,7 +50,7 @@ func TestBindingConfigResolvesFromStampedProvenance(t *testing.T) {
 	h := newTestHarness(t)
 	// A DIFFERENT binding the caller will try to smuggle via the request body.
 	// If the body were honored, the response would carry "evil-role".
-	if _, err := h.store.TriggerBindings().Create(context.Background(), store.TriggerBindingCreate{
+	if _, err := h.store.TriggerBindings().Create(context.Background(), automation.TriggerBindingCreate{
 		WorkspaceKey: "WS", BindingID: "attacker-binding", Name: "attacker",
 		SourceKind: "internal", RouteKey: "internal.attacker",
 		DriverID: "driver-1", DriverVersionID: "version-1", Enabled: true,

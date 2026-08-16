@@ -3,10 +3,15 @@ package serveadapter
 import (
 	"fmt"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/automation"
+
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
+
+	workspaceowner "github.com/tysonthomas9/loomcli/internal/modules/workspace"
+
 	appserve "github.com/tysonthomas9/loomcli/internal/app/serve"
 	"github.com/tysonthomas9/loomcli/internal/driver"
 	platformruntime "github.com/tysonthomas9/loomcli/internal/platform/runtime"
-	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui"
 )
 
@@ -22,10 +27,10 @@ type AutomationRuntimeContributor = RuntimeContributor
 // BuildServeRuntimeHost composes the always-on Execution recovery components
 // with optional Automation registrations behind one CLI adapter boundary.
 func BuildServeRuntimeHost(
-	driverRuns store.DriverRunStore,
-	awaits store.AwaitStore,
-	events store.TriggerEventStore,
-	workspaces store.WorkspaceStore,
+	driverRuns execution.DriverRunStore,
+	awaits execution.AwaitStore,
+	events automation.TriggerEventStore,
+	workspaces workspaceowner.WorkspaceStore,
 	runOutcomes driver.RunOutcomePublisher,
 	workspace string,
 	executionCapability webui.ExecutionCapability,

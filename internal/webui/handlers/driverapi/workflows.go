@@ -22,10 +22,10 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	driverpkg "github.com/tysonthomas9/loomcli/internal/driver"
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 // workflowsStartParams is the camelCase workflows/start request body.
@@ -54,7 +54,7 @@ func normalizedWorkflowStartPayload(input json.RawMessage) (json.RawMessage, err
 		payload = json.RawMessage(`{}`)
 	}
 	if !json.Valid(payload) {
-		return nil, fmt.Errorf("child input must be valid JSON: %w", domain.ErrInvalid)
+		return nil, fmt.Errorf("child input must be valid JSON: %w", persistence.ErrInvalid)
 	}
 	return payload, nil
 }
@@ -77,7 +77,7 @@ func decodeWorkflowsStartParams(body []byte) (workflowsStartParams, string, erro
 	}
 	workflowName := strings.TrimSpace(params.WorkflowName)
 	if workflowName == "" {
-		return workflowsStartParams{}, "", fmt.Errorf("workflowName required: %w", domain.ErrInvalid)
+		return workflowsStartParams{}, "", fmt.Errorf("workflowName required: %w", persistence.ErrInvalid)
 	}
 	return params, workflowName, nil
 }
@@ -143,17 +143,17 @@ func (m *Module) resolveWorkflowStartTarget(
 		return nil, nil, err
 	}
 	if target == nil {
-		return nil, nil, fmt.Errorf("workflow %q was not found: %w", workflowName, domain.ErrNotFound)
+		return nil, nil, fmt.Errorf("workflow %q was not found: %w", workflowName, persistence.ErrNotFound)
 	}
 	if strings.TrimSpace(target.ActiveVersionID) == "" {
-		return nil, nil, fmt.Errorf("workflow %q has no active version: %w", workflowName, domain.ErrInvalid)
+		return nil, nil, fmt.Errorf("workflow %q has no active version: %w", workflowName, persistence.ErrInvalid)
 	}
 	version, err := m.workflowCatalog.GetVersion(ctx, workspace, target.ActiveVersionID)
 	if err != nil {
 		return nil, nil, err
 	}
 	if version == nil || version.DriverID != target.DriverID || version.ValidationStatus != workflowcatalog.DriverVersionValidationPassed {
-		return nil, nil, fmt.Errorf("workflow %q active version %q is not passed: %w", workflowName, target.ActiveVersionID, domain.ErrInvalid)
+		return nil, nil, fmt.Errorf("workflow %q active version %q is not passed: %w", workflowName, target.ActiveVersionID, persistence.ErrInvalid)
 	}
 	return target, version, nil
 }
@@ -196,14 +196,14 @@ func (m *Module) workflowsAwait(ctx context.Context, ws string, id driverIdentit
 	}
 	childRunID := strings.TrimSpace(params.ChildRunID)
 	if childRunID == "" {
-		return nil, fmt.Errorf("childRunId required: %w", domain.ErrInvalid)
+		return nil, fmt.Errorf("childRunId required: %w", persistence.ErrInvalid)
 	}
 	child, err := m.execution.GetDriverRun(ctx, ws, childRunID)
 	if err != nil {
 		return nil, err
 	}
 	if child.ParentRunID == "" || child.ParentRunID != parent.RunID {
-		return nil, fmt.Errorf("run %s is not a child of run %s: %w", childRunID, parent.RunID, domain.ErrNotOwner)
+		return nil, fmt.Errorf("run %s is not a child of run %s: %w", childRunID, parent.RunID, persistence.ErrNotOwner)
 	}
 	outcome, err := m.awaitDriverRun(
 		ctx, ws, id, parent, driverpkg.RunFinishedSubjectKey(childRunID),

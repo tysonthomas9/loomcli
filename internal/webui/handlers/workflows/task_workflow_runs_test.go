@@ -8,23 +8,27 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
+
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
-	"github.com/tysonthomas9/loomcli/internal/store"
+
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
+
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
 
 type taskWorkflowRunsResponse struct {
-	TaskID     string              `json:"task_id"`
-	SubjectRef string              `json:"subject_ref"`
-	Runs       []*domain.DriverRun `json:"runs"`
+	TaskID     string                       `json:"task_id"`
+	SubjectRef string                       `json:"subject_ref"`
+	Runs       []*execution.DriverRunRecord `json:"runs"`
 }
 
 const taskWorkflowRunRoute = "internal.task.ready"
 
-func seedTaskWorkflowBinding(t *testing.T, ctx context.Context, st store.Store) {
+func seedTaskWorkflowBinding(t *testing.T, ctx context.Context, st *memstore.Store) {
 	t.Helper()
-	if _, err := st.TriggerBindings().Create(ctx, store.TriggerBindingCreate{
+	if _, err := st.TriggerBindings().Create(ctx, automation.TriggerBindingCreate{
 		WorkspaceKey: "TEST", BindingID: "task-automation", Name: "task automation",
 		SourceKind: "internal", RouteKey: taskWorkflowRunRoute,
 		DriverID: "demo", DriverVersionID: "version-1", TargetEntrypoint: "run", Enabled: true,
@@ -33,10 +37,10 @@ func seedTaskWorkflowBinding(t *testing.T, ctx context.Context, st store.Store) 
 	}
 }
 
-func dispatchTaskWorkflowRun(t *testing.T, ctx context.Context, st store.Store, taskID, idempotencyKey string, payload json.RawMessage) *domain.DriverRun {
+func dispatchTaskWorkflowRun(t *testing.T, ctx context.Context, st *memstore.Store, taskID, idempotencyKey string, payload json.RawMessage) *execution.DriverRunRecord {
 	t.Helper()
 	eventID := "event-" + idempotencyKey
-	journal, ok := st.TriggerEvents().(store.TriggerEventAppender)
+	journal, ok := st.TriggerEvents().(automation.TriggerEventAppender)
 	if !ok {
 		t.Fatal("task workflow fixture requires the current event journal port")
 	}
@@ -49,7 +53,7 @@ func dispatchTaskWorkflowRun(t *testing.T, ctx context.Context, st store.Store, 
 	if err != nil {
 		t.Fatalf("append task workflow event: %v", err)
 	}
-	run, err := st.DriverRuns().Create(ctx, store.DriverRunCreate{
+	run, err := st.DriverRuns().Create(ctx, execution.DriverRunCreate{
 		WorkspaceKey: "TEST", RunID: "run-" + idempotencyKey,
 		DriverID: "demo", DriverVersionID: "version-1", Entrypoint: "run",
 		SourceKind: automation.SourceKindInternal, SourceRef: eventID,
@@ -61,15 +65,15 @@ func dispatchTaskWorkflowRun(t *testing.T, ctx context.Context, st store.Store, 
 	return run
 }
 
-func finishTaskWorkflowRun(t *testing.T, ctx context.Context, st store.Store, runID string) {
+func finishTaskWorkflowRun(t *testing.T, ctx context.Context, st *memstore.Store, runID string) {
 	t.Helper()
 	claimed, err := st.DriverRuns().Claim(ctx, "TEST", runID, "node-1", "lease-"+runID)
 	if err != nil {
 		t.Fatalf("claim task workflow run: %v", err)
 	}
-	if _, err := st.DriverRuns().Finish(ctx, "TEST", runID, store.DriverRunFinish{
+	if _, err := st.DriverRuns().Finish(ctx, "TEST", runID, execution.DriverRunFinish{
 		NodeID: "node-1", LeaseID: "lease-" + runID, FencingToken: claimed.FencingToken,
-		Status:  domain.DriverRunCompleted,
+		Status:  execution.DriverRunCompleted,
 		Summary: "Repository selection is required before an agent task can start.",
 		Output:  map[string]string{"skipped": "true", "blocker": "repository_required"},
 	}); err != nil {
@@ -77,21 +81,21 @@ func finishTaskWorkflowRun(t *testing.T, ctx context.Context, st store.Store, ru
 	}
 }
 
-func seedTaskRunForWorkflow(t *testing.T, ctx context.Context, st store.Store, taskRunID, driverRunID string) {
+func seedTaskRunForWorkflow(t *testing.T, ctx context.Context, st *memstore.Store, taskRunID, driverRunID string) {
 	t.Helper()
-	if _, err := st.TaskRuns().Create(ctx, store.TaskRunCreate{
+	if _, err := st.TaskRuns().Create(ctx, execution.TaskRunCreate{
 		WorkspaceKey: "TEST", TaskRunID: taskRunID, DriverRunID: driverRunID,
-		TaskID: "TASK-1", Runner: "local", Status: domain.TaskRunQueued,
+		TaskID: "TASK-1", Runner: "local", Status: execution.TaskRunRecordQueued,
 	}); err != nil {
 		t.Fatalf("create task run %s: %v", taskRunID, err)
 	}
 }
 
-func seedTaskAgentSession(t *testing.T, ctx context.Context, st store.Store, sessionID string, metadata map[string]string) {
+func seedTaskAgentSession(t *testing.T, ctx context.Context, st *memstore.Store, sessionID string, metadata map[string]string) {
 	t.Helper()
-	if _, err := st.AgentSessions().Create(ctx, store.AgentSessionCreate{
+	if _, err := st.AgentSessions().Create(ctx, interaction.AgentSessionCreate{
 		WorkspaceKey: "TEST", SessionID: sessionID, AgentID: "task-agent-" + sessionID,
-		Kind: domain.AgentSessionKindTask, TaskID: "TASK-1", Status: domain.AgentSessionRunning,
+		Kind: interaction.SessionRecordTask, TaskID: "TASK-1", Status: interaction.SessionRecordRunning,
 		Metadata: metadata,
 	}); err != nil {
 		t.Fatalf("create task agent session %s: %v", sessionID, err)
@@ -148,7 +152,7 @@ func TestListTaskWorkflowRunsUsesExactSubjectAndExcludesExecutionRepresentedDriv
 		t.Fatalf("response association = %+v, want TASK-1/issue:TASK-1", response)
 	}
 	gotRunIDs := make(map[string]struct{}, len(response.Runs))
-	var gotPreclaim *domain.DriverRun
+	var gotPreclaim *execution.DriverRunRecord
 	for _, run := range response.Runs {
 		gotRunIDs[run.RunID] = struct{}{}
 		if run.RunID == preclaim.RunID {

@@ -275,6 +275,57 @@ test_default_threshold() {
 }
 
 # ---------------------------------------------------------------------------
+# Test 10: Deep owner roots use the owner-root threshold
+# ---------------------------------------------------------------------------
+test_owner_root_threshold() {
+    reset_repo
+    make_package "internal/modules/execution" 37
+
+    local output exit_code
+    output=$("$SCRIPT_UNDER_TEST" 25 40 2>&1) && exit_code=0 || exit_code=$?
+
+    if [[ "$exit_code" -eq 0 ]]; then
+        pass "Owner root threshold: 37-file deep module passes 40-file ceiling"
+    else
+        fail "Owner root threshold: expected deep module to pass, got $exit_code. Output: $output"
+    fi
+}
+
+# ---------------------------------------------------------------------------
+# Test 11: Deep owner roots remain bounded
+# ---------------------------------------------------------------------------
+test_owner_root_over_threshold() {
+    reset_repo
+    make_package "internal/modules/execution" 41
+
+    local output exit_code
+    output=$("$SCRIPT_UNDER_TEST" 25 40 2>&1) && exit_code=0 || exit_code=$?
+
+    if [[ "$exit_code" -eq 1 ]] && echo "$output" | grep -q "internal/modules/execution"; then
+        pass "Owner root threshold: 41-file deep module fails"
+    else
+        fail "Owner root threshold: expected bounded failure, got $exit_code. Output: $output"
+    fi
+}
+
+# ---------------------------------------------------------------------------
+# Test 12: Nested module packages keep the strict default threshold
+# ---------------------------------------------------------------------------
+test_nested_module_threshold() {
+    reset_repo
+    make_package "internal/modules/execution/fleetdb" 26
+
+    local output exit_code
+    output=$("$SCRIPT_UNDER_TEST" 25 40 2>&1) && exit_code=0 || exit_code=$?
+
+    if [[ "$exit_code" -eq 1 ]] && echo "$output" | grep -q "internal/modules/execution/fleetdb"; then
+        pass "Nested module package: strict 25-file ceiling remains"
+    else
+        fail "Nested module package: expected strict failure, got $exit_code. Output: $output"
+    fi
+}
+
+# ---------------------------------------------------------------------------
 # Run all tests
 # ---------------------------------------------------------------------------
 
@@ -290,6 +341,9 @@ test_generated_code_excluded
 test_invalid_threshold
 test_exactly_at_threshold
 test_default_threshold
+test_owner_root_threshold
+test_owner_root_over_threshold
+test_nested_module_threshold
 
 echo ""
 echo "=== Results: $PASS_COUNT passed, $FAIL_COUNT failed ==="

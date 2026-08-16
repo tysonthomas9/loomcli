@@ -35,12 +35,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	driverpkg "github.com/tysonthomas9/loomcli/internal/driver"
 	artifactsmodule "github.com/tysonthomas9/loomcli/internal/modules/artifacts"
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 	serverhandler "github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 )
 
@@ -276,7 +276,7 @@ func decodeParams[T any](body []byte) (T, error) {
 		err = errors.New("multiple JSON values")
 	}
 	if err != nil {
-		return params, fmt.Errorf("decode task-run op params: %s: %w", err.Error(), domain.ErrInvalid)
+		return params, fmt.Errorf("decode task-run op params: %s: %w", err.Error(), persistence.ErrInvalid)
 	}
 	return params, nil
 }
@@ -294,7 +294,7 @@ func decodeStrictParams[T any](body []byte) (T, error) {
 		err = errors.New("multiple JSON values")
 	}
 	if err != nil {
-		return params, fmt.Errorf("decode task-run op params: %s: %w", err.Error(), domain.ErrInvalid)
+		return params, fmt.Errorf("decode task-run op params: %s: %w", err.Error(), persistence.ErrInvalid)
 	}
 	return params, nil
 }
@@ -324,7 +324,7 @@ func (m *Module) taskGet(ctx context.Context, ws string, id leaseIdentity, body 
 		return result, nil
 	}
 	if requested := strings.TrimSpace(params.TaskID); requested != "" && requested != taskID {
-		return nil, fmt.Errorf("task %q is outside task run %q: %w", requested, run.TaskRunID, domain.ErrNotOwner)
+		return nil, fmt.Errorf("task %q is outside task run %q: %w", requested, run.TaskRunID, persistence.ErrNotOwner)
 	}
 	if m.workItems == nil {
 		return nil, workitems.ErrUnavailable
@@ -354,17 +354,17 @@ func (m *Module) taskDesignUpdate(ctx context.Context, ws string, id leaseIdenti
 	}
 	requestID := strings.TrimSpace(params.RequestID)
 	if requestID == "" {
-		return nil, fmt.Errorf("requestId is required: %w", domain.ErrInvalid)
+		return nil, fmt.Errorf("requestId is required: %w", persistence.ErrInvalid)
 	}
 	if params.Design == nil || strings.TrimSpace(*params.Design) == "" {
-		return nil, fmt.Errorf("nonblank design is required: %w", domain.ErrInvalid)
+		return nil, fmt.Errorf("nonblank design is required: %w", persistence.ErrInvalid)
 	}
 	format := "markdown"
 	if params.DesignFormat != nil && strings.TrimSpace(*params.DesignFormat) != "" {
 		format = strings.TrimSpace(*params.DesignFormat)
 	}
 	if format != "markdown" && format != "html" {
-		return nil, fmt.Errorf("designFormat must be markdown or html: %w", domain.ErrInvalid)
+		return nil, fmt.Errorf("designFormat must be markdown or html: %w", persistence.ErrInvalid)
 	}
 	params.DesignFormat = &format
 
@@ -428,13 +428,13 @@ func (params logAppendParams) replayIdentity() (string, time.Time, error) {
 	requestID := strings.TrimSpace(params.RequestID)
 	snakeRequestID := strings.TrimSpace(params.RequestIDSnake)
 	if requestID != "" && snakeRequestID != "" && requestID != snakeRequestID {
-		return "", time.Time{}, fmt.Errorf("requestId and request_id disagree: %w", domain.ErrInvalid)
+		return "", time.Time{}, fmt.Errorf("requestId and request_id disagree: %w", persistence.ErrInvalid)
 	}
 	if requestID == "" {
 		requestID = snakeRequestID
 	}
 	if requestID == "" || params.Timestamp == nil || params.Timestamp.IsZero() {
-		return "", time.Time{}, fmt.Errorf("requestId and timestamp required: %w", domain.ErrInvalid)
+		return "", time.Time{}, fmt.Errorf("requestId and timestamp required: %w", persistence.ErrInvalid)
 	}
 	return requestID, params.Timestamp.UTC(), nil
 }
@@ -445,7 +445,7 @@ func (m *Module) logAppend(ctx context.Context, ws string, id leaseIdentity, bod
 		return nil, err
 	}
 	if params.Text == nil {
-		return nil, fmt.Errorf("text required: %w", domain.ErrInvalid)
+		return nil, fmt.Errorf("text required: %w", persistence.ErrInvalid)
 	}
 	requestID, timestamp, err := params.replayIdentity()
 	if err != nil {
@@ -621,21 +621,21 @@ func writeDomainOpError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, errLeaseDenied):
 		writeOpError(w, http.StatusUnauthorized, "lease_denied", err.Error(), false)
-	case errors.Is(err, domain.ErrNotFound):
+	case errors.Is(err, persistence.ErrNotFound):
 		writeOpError(w, http.StatusNotFound, "not_found", err.Error(), false)
 	case errors.Is(err, execution.ErrNotFound):
 		writeOpError(w, http.StatusNotFound, "not_found", err.Error(), false)
 	case errors.Is(err, workitems.ErrNotFound):
 		writeOpError(w, http.StatusNotFound, "not_found", err.Error(), false)
-	case errors.Is(err, domain.ErrNotOwner):
+	case errors.Is(err, persistence.ErrNotOwner):
 		writeOpError(w, http.StatusForbidden, "not_owner", err.Error(), false)
-	case errors.Is(err, domain.ErrInvalidTransition):
+	case errors.Is(err, persistence.ErrInvalidTransition):
 		writeOpError(w, http.StatusConflict, "invalid_transition", err.Error(), false)
 	case errors.Is(err, execution.ErrInvalidTransition):
 		writeOpError(w, http.StatusConflict, "invalid_transition", err.Error(), false)
-	case errors.Is(err, domain.ErrConflict), errors.Is(err, domain.ErrAlreadyExists), errors.Is(err, execution.ErrConflict):
+	case errors.Is(err, persistence.ErrConflict), errors.Is(err, persistence.ErrAlreadyExists), errors.Is(err, execution.ErrConflict):
 		writeOpError(w, http.StatusConflict, "conflict", err.Error(), false)
-	case errors.Is(err, domain.ErrInvalid):
+	case errors.Is(err, persistence.ErrInvalid):
 		writeOpError(w, http.StatusBadRequest, "invalid", err.Error(), false)
 	case errors.Is(err, execution.ErrInvalid):
 		writeOpError(w, http.StatusBadRequest, "invalid", err.Error(), false)

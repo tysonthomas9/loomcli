@@ -19,7 +19,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/cli/managementapi"
-	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 )
 
@@ -70,8 +70,8 @@ another registered workflow with the same payload shape.`,
 
 type epicRunManagement interface {
 	Workspace() string
-	SubmitDriverRun(context.Context, managementapi.SubmitDriverRunRequest) (*domain.DriverRun, error)
-	GetDriverRun(context.Context, string) (*domain.DriverRun, error)
+	SubmitDriverRun(context.Context, managementapi.SubmitDriverRunRequest) (*execution.DriverRunRecord, error)
+	GetDriverRun(context.Context, string) (*execution.DriverRunRecord, error)
 }
 
 var newEpicRunManagementClient = func(ctx context.Context) (epicRunManagement, error) {
@@ -174,7 +174,7 @@ func runEpicRun(cmd *cobra.Command, _ []string) error {
 	return nil
 }
 
-func queueEpicWorkflowRun(ctx context.Context, management epicRunManagement, workflowName, runID string, payload json.RawMessage) (*domain.DriverRun, error) {
+func queueEpicWorkflowRun(ctx context.Context, management epicRunManagement, workflowName, runID string, payload json.RawMessage) (*execution.DriverRunRecord, error) {
 	run, err := management.SubmitDriverRun(ctx, managementapi.SubmitDriverRunRequest{
 		CLICommand: "epic-run", DriverRef: workflowName, RunID: runID,
 		Entrypoint: "run", EpicID: runParent, Payload: payload,
@@ -269,7 +269,7 @@ func executeWorkflowRun(ctx context.Context, management epicRunManagement, runID
 			if run.Summary != "" {
 				fmt.Printf("[epic-run] %s\n", run.Summary)
 			}
-			if run.Status == domain.DriverRunFailed {
+			if run.Status == execution.DriverRunFailed {
 				return fmt.Errorf("epic workflow run %s failed: %s", runID, run.Summary)
 			}
 			return nil

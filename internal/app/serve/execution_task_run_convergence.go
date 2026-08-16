@@ -7,10 +7,10 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
-	agentsmodule "github.com/tysonthomas9/loomcli/internal/modules/agents"
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
-	"github.com/tysonthomas9/loomcli/internal/store"
+
+	agentsmodule "github.com/tysonthomas9/loomcli/internal/modules/agents"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 // ExecutionTaskRunConvergenceDependencies keeps every cross-capability leg
@@ -18,14 +18,14 @@ import (
 // journal append, DriverStep projection, lead lookup, and notification enqueue
 // remain explicit consumer ports.
 type ExecutionTaskRunConvergenceDependencies struct {
-	TaskRuns       store.TaskRunStore
-	Checkpoints    store.TaskRunTerminalConvergenceStore
-	DriverRuns     store.DriverRunStore
-	DriverSteps    store.TerminalDriverStepRepairStore
-	Events         store.TaskRunEventStore
+	TaskRuns       execution.TaskRunStore
+	Checkpoints    execution.TaskRunTerminalConvergenceStore
+	DriverRuns     execution.DriverRunStore
+	DriverSteps    execution.TerminalDriverStepRepairStore
+	Events         execution.TaskRunEventStore
 	AgentQueries   agentsmodule.IdentityQueries
-	WorkerProfiles store.WorkerProfileStore
-	Outbox         store.OutboxStore
+	WorkerProfiles execution.WorkerProfileStore
+	Outbox         execution.OutboxStore
 }
 
 func NewExecutionTaskRunConvergenceDependencies(dependencies ExecutionTaskRunConvergenceDependencies) (execution.TaskRunConvergenceDependencies, error) {
@@ -78,10 +78,10 @@ func (adapter *executionTaskRunConvergenceAdapter) GetTerminalTaskRun(ctx contex
 }
 
 func (adapter *executionTaskRunConvergenceAdapter) ListTaskRunConvergenceCandidates(ctx context.Context, query execution.TaskRunConvergenceCandidateQuery) (execution.TaskRunConvergenceCandidatePage, error) {
-	page, err := adapter.dependencies.Checkpoints.ListTaskRunTerminalConvergenceCandidates(ctx, store.TaskRunTerminalConvergenceQuery{
-		WorkspaceKey: query.WorkspaceKey, RequiredVersion: query.RequiredVersion,
-		After: query.After, Limit: query.Limit,
-	})
+	page, err := adapter.dependencies.Checkpoints.ListTaskRunTerminalConvergenceCandidates(
+		ctx,
+		execution.TaskRunTerminalConvergenceQuery(query),
+	)
 	if err != nil {
 		return execution.TaskRunConvergenceCandidatePage{}, err
 	}
@@ -94,10 +94,10 @@ func (adapter *executionTaskRunConvergenceAdapter) CompleteTaskRunTerminalConver
 	ctx context.Context,
 	command execution.CompleteTaskRunTerminalConvergence,
 ) (execution.TaskRunTerminalConvergenceCheckpoint, error) {
-	result, err := adapter.dependencies.Checkpoints.CompleteTaskRunTerminalConvergence(ctx, store.TaskRunTerminalConvergenceComplete{
-		WorkspaceKey: command.WorkspaceKey, TaskRunID: command.TaskRunID,
-		RequiredVersion: command.RequiredVersion, CompletedAt: command.CompletedAt,
-	})
+	result, err := adapter.dependencies.Checkpoints.CompleteTaskRunTerminalConvergence(
+		ctx,
+		execution.TaskRunTerminalConvergenceComplete(command),
+	)
 	if err != nil {
 		return execution.TaskRunTerminalConvergenceCheckpoint{}, err
 	}
@@ -116,7 +116,7 @@ func (adapter *executionTaskRunConvergenceAdapter) EnsureTaskRunTerminalEvent(ct
 	if err != nil {
 		return err
 	}
-	_, err = adapter.dependencies.Events.Append(ctx, store.TaskRunEventAppend{
+	_, err = adapter.dependencies.Events.Append(ctx, execution.TaskRunEventAppend{
 		WorkspaceKey: event.WorkspaceKey, EventID: event.EventID, EpicID: event.EpicID,
 		DriverRunID: event.DriverRunID, TaskID: event.WorkItemID, TaskRunID: event.TaskRunID,
 		Type: eventType, Status: status, SchedulerState: event.SchedulerState, Attempt: event.Attempt,
@@ -127,11 +127,11 @@ func (adapter *executionTaskRunConvergenceAdapter) EnsureTaskRunTerminalEvent(ct
 }
 
 func (adapter *executionTaskRunConvergenceAdapter) RepairTerminalDriverStep(ctx context.Context, projection execution.DriverStepTerminalProjection) (execution.RepairTerminalDriverStepResult, error) {
-	desired := domain.DriverStepStatus(projection.Status)
+	desired := execution.DriverStepStatus(projection.Status)
 	if !desired.IsTerminal() {
 		return execution.RepairTerminalDriverStepResult{}, execution.ErrInvalid
 	}
-	step, replay, err := adapter.dependencies.DriverSteps.RepairTerminalDriverStep(ctx, store.TerminalDriverStepRepair{
+	step, replay, err := adapter.dependencies.DriverSteps.RepairTerminalDriverStep(ctx, execution.TerminalDriverStepRepair{
 		RequestID: projection.RequestID, WorkspaceKey: projection.WorkspaceKey,
 		DriverRunID: projection.DriverRunID, DriverStepID: projection.StepID, TaskRunID: projection.TaskRunID,
 		Status: desired, OutputRef: projection.OutputRef,
@@ -159,7 +159,7 @@ func (adapter *executionTaskRunConvergenceAdapter) ResolveEpicLead(ctx context.C
 		}
 		profile, err := adapter.dependencies.WorkerProfiles.Get(ctx, workspace, agent.ProfileName)
 		if err != nil {
-			if errors.Is(err, domain.ErrNotFound) {
+			if errors.Is(err, persistence.ErrNotFound) {
 				continue
 			}
 			return "", err
@@ -184,35 +184,35 @@ func canonicalEpicLead(agent *agentsmodule.Agent) bool {
 }
 
 func (adapter *executionTaskRunConvergenceAdapter) EnsureLeadTaskNotification(ctx context.Context, notification execution.LeadTaskNotification) error {
-	_, err := adapter.dependencies.Outbox.Create(ctx, store.OutboxCreate{
-		WorkspaceKey: notification.WorkspaceKey, Kind: domain.OutboxKindLeadTaskMessage,
+	_, err := adapter.dependencies.Outbox.Create(ctx, execution.OutboxCreate{
+		WorkspaceKey: notification.WorkspaceKey, Kind: execution.OutboxKindLeadTaskMessage,
 		EpicID: notification.EpicID, DriverRunID: notification.DriverRunID, TaskRunID: notification.TaskRunID,
 		TargetAgent: notification.TargetAgent, Body: convergenceLeadTaskMessage(notification), DedupeKey: notification.DedupeKey,
 	})
 	return err
 }
 
-func convergenceExecutionStatus(status domain.TaskRunStatus) (execution.Status, error) {
+func convergenceExecutionStatus(status execution.TaskRunRecordStatus) (execution.Status, error) {
 	switch status {
-	case domain.TaskRunCompleted:
+	case execution.TaskRunRecordCompleted:
 		return execution.StatusSucceeded, nil
-	case domain.TaskRunFailed:
+	case execution.TaskRunRecordFailed:
 		return execution.StatusFailed, nil
-	case domain.TaskRunCancelled:
+	case execution.TaskRunRecordCancelled:
 		return execution.StatusCancelled, nil
 	default:
 		return "", fmt.Errorf("TaskRun status %q is not terminal: %w", status, execution.ErrInvalid)
 	}
 }
 
-func convergenceTerminalEventWire(event execution.TaskRunTerminalEvent) (domain.TaskRunEventType, domain.TaskRunStatus, error) {
+func convergenceTerminalEventWire(event execution.TaskRunTerminalEvent) (execution.TaskRunEventType, execution.TaskRunRecordStatus, error) {
 	switch event.Type {
 	case execution.TaskRunTerminalCompleted:
-		return domain.TaskRunEventCompleted, domain.TaskRunCompleted, nil
+		return execution.TaskRunEventCompleted, execution.TaskRunRecordCompleted, nil
 	case execution.TaskRunTerminalFailed:
-		return domain.TaskRunEventFailed, domain.TaskRunFailed, nil
+		return execution.TaskRunEventFailed, execution.TaskRunRecordFailed, nil
 	case execution.TaskRunTerminalCancelled:
-		return domain.TaskRunEventCancelled, domain.TaskRunCancelled, nil
+		return execution.TaskRunEventCancelled, execution.TaskRunRecordCancelled, nil
 	default:
 		return "", "", execution.ErrInvalid
 	}

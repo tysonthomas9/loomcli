@@ -7,39 +7,39 @@ import (
 	"sync"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/store"
+	agentsowner "github.com/tysonthomas9/loomcli/internal/modules/agents"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 type roleStore struct {
 	mu       sync.RWMutex
-	items    map[string]map[string]*domain.Role // wsKey → name → Role
+	items    map[string]map[string]*agentsowner.Role // wsKey → name → Role
 	services *agentServiceStore
 }
 
 func newRoleStore() *roleStore {
-	return &roleStore{items: make(map[string]map[string]*domain.Role)}
+	return &roleStore{items: make(map[string]map[string]*agentsowner.Role)}
 }
 
-var _ store.RoleStore = (*roleStore)(nil)
+var _ agentsowner.RoleRecordStore = (*roleStore)(nil)
 
-func (s *roleStore) Create(_ context.Context, in store.RoleCreate) (*domain.Role, error) {
+func (s *roleStore) Create(_ context.Context, in agentsowner.RoleRecordCreate) (*agentsowner.Role, error) {
 	if in.WorkspaceKey == "" || in.Name == "" {
-		return nil, fmt.Errorf("workspace_key + name required: %w", domain.ErrInvalid)
+		return nil, fmt.Errorf("workspace_key + name required: %w", persistence.ErrInvalid)
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.items[in.WorkspaceKey] == nil {
-		s.items[in.WorkspaceKey] = make(map[string]*domain.Role)
+		s.items[in.WorkspaceKey] = make(map[string]*agentsowner.Role)
 	}
 	if _, ok := s.items[in.WorkspaceKey][in.Name]; ok {
-		return nil, fmt.Errorf("role %q in workspace %q: %w", in.Name, in.WorkspaceKey, domain.ErrAlreadyExists)
+		return nil, fmt.Errorf("role %q in workspace %q: %w", in.Name, in.WorkspaceKey, persistence.ErrAlreadyExists)
 	}
 	now := time.Now().UTC()
-	r := &domain.Role{
+	r := &agentsowner.Role{
 		WorkspaceKey:   in.WorkspaceKey,
 		Name:           in.Name,
-		Kind:           domain.RoleKind(in.Kind),
+		Kind:           in.Kind,
 		Description:    in.Description,
 		Prompt:         in.Prompt,
 		PromptFile:     in.PromptFile,
@@ -62,21 +62,21 @@ func (s *roleStore) Create(_ context.Context, in store.RoleCreate) (*domain.Role
 	return cloneRole(r), nil
 }
 
-func (s *roleStore) Get(_ context.Context, ws, name string) (*domain.Role, error) {
+func (s *roleStore) Get(_ context.Context, ws, name string) (*agentsowner.Role, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	r, ok := s.items[ws][name]
 	if !ok {
-		return nil, fmt.Errorf("role %q in workspace %q: %w", name, ws, domain.ErrNotFound)
+		return nil, fmt.Errorf("role %q in workspace %q: %w", name, ws, persistence.ErrNotFound)
 	}
 	return cloneRole(r), nil
 }
 
-func (s *roleStore) List(_ context.Context, ws string) ([]*domain.Role, error) {
+func (s *roleStore) List(_ context.Context, ws string) ([]*agentsowner.Role, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	wsRoles := s.items[ws]
-	out := make([]*domain.Role, 0, len(wsRoles))
+	out := make([]*agentsowner.Role, 0, len(wsRoles))
 	for _, r := range wsRoles {
 		out = append(out, cloneRole(r))
 	}
@@ -84,19 +84,19 @@ func (s *roleStore) List(_ context.Context, ws string) ([]*domain.Role, error) {
 	return out, nil
 }
 
-//nolint:funlen // Patch application mirrors the store.RoleUpdate surface area.
-func (s *roleStore) Update(_ context.Context, ws, name string, patch store.RoleUpdate) (*domain.Role, error) {
+//nolint:funlen // Patch application mirrors the agentsowner.RoleRecordUpdate surface area.
+func (s *roleStore) Update(_ context.Context, ws, name string, patch agentsowner.RoleRecordUpdate) (*agentsowner.Role, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	r, ok := s.items[ws][name]
 	if !ok {
-		return nil, fmt.Errorf("role %q in workspace %q: %w", name, ws, domain.ErrNotFound)
+		return nil, fmt.Errorf("role %q in workspace %q: %w", name, ws, persistence.ErrNotFound)
 	}
 	if patch.Description != nil {
 		r.Description = *patch.Description
 	}
 	if patch.Kind != nil {
-		r.Kind = domain.RoleKind(*patch.Kind)
+		r.Kind = *patch.Kind
 	}
 	if patch.Prompt != nil {
 		r.Prompt = *patch.Prompt
@@ -146,12 +146,12 @@ func (s *roleStore) Update(_ context.Context, ws, name string, patch store.RoleU
 
 func (s *roleStore) Delete(_ context.Context, ws, name string) error {
 	if s.services != nil && s.services.hasRole(ws, name) {
-		return fmt.Errorf("role %q in workspace %q is used by agent service: %w", name, ws, domain.ErrInvalidTransition)
+		return fmt.Errorf("role %q in workspace %q is used by agent service: %w", name, ws, persistence.ErrInvalidTransition)
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if _, ok := s.items[ws][name]; !ok {
-		return fmt.Errorf("role %q in workspace %q: %w", name, ws, domain.ErrNotFound)
+		return fmt.Errorf("role %q in workspace %q: %w", name, ws, persistence.ErrNotFound)
 	}
 	delete(s.items[ws], name)
 	return nil
@@ -164,7 +164,7 @@ func (s *roleStore) exists(ws, name string) bool {
 	return ok
 }
 
-func cloneRole(r *domain.Role) *domain.Role {
+func cloneRole(r *agentsowner.Role) *agentsowner.Role {
 	out := *r
 	out.PathPatterns = append([]string(nil), r.PathPatterns...)
 	out.Skills = append([]string(nil), r.Skills...)

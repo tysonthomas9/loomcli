@@ -2,6 +2,7 @@ package serveadapter
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io/fs"
 	"net/url"
@@ -10,13 +11,13 @@ import (
 	"strings"
 	"time"
 
-	workspacemodule "github.com/tysonthomas9/loomcli/internal/modules/workspace"
+	workspaceowner "github.com/tysonthomas9/loomcli/internal/modules/workspace"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 
 	"github.com/tysonthomas9/loomcli/internal/app/agentprovisioning"
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	infrafleetdb "github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
 	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
-	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
 type workspaceDirectoryResolver func(string) string
@@ -29,8 +30,8 @@ const sourceControlRepositoryAdmissionMaximumLeaseWindow = 30 * time.Minute
 // only an opaque repository ref; this adapter is the sole place that expands
 // it to the durable token-free remote and local workspace root.
 type sourceControlRepositoryResolver struct {
-	workspaces      store.WorkspaceStore
-	repositories    store.RepoStore
+	workspaces      workspaceowner.WorkspaceStore
+	repositories    workspaceowner.RepoStore
 	admissions      infrafleetdb.RepositoryAdmissionTransport
 	localAdmissions sourcecontrol.RepositoryAdmissionLocalResolver
 	workspaceDir    workspaceDirectoryResolver
@@ -40,8 +41,8 @@ type sourceControlRepositoryResolver struct {
 var _ sourcecontrol.RepositoryResolver = (*sourceControlRepositoryResolver)(nil)
 
 func newSourceControlRepositoryResolver(
-	workspaces store.WorkspaceStore,
-	repositories store.RepoStore,
+	workspaces workspaceowner.WorkspaceStore,
+	repositories workspaceowner.RepoStore,
 	workspaceDir workspaceDirectoryResolver,
 	ensureDir directoryEnsurer,
 ) sourcecontrol.RepositoryResolver {
@@ -56,8 +57,8 @@ func newSourceControlRepositoryResolver(
 }
 
 func newSourceControlRepositoryResolverWithAdmissions(
-	workspaces store.WorkspaceStore,
-	repositories store.RepoStore,
+	workspaces workspaceowner.WorkspaceStore,
+	repositories workspaceowner.RepoStore,
 	admissions infrafleetdb.RepositoryAdmissionTransport,
 	localAdmissions sourcecontrol.RepositoryAdmissionLocalResolver,
 	workspaceDir workspaceDirectoryResolver,
@@ -396,19 +397,19 @@ func (resolver *sourceControlRepositoryResolver) resolveRepository(
 	ctx context.Context,
 	workspaceKey,
 	repositoryRef string,
-) (*workspacemodule.Repository, error) {
+) (*workspaceowner.Repository, error) {
 	repository, err := resolver.repositories.Get(ctx, workspaceKey, repositoryRef)
 	if err == nil {
 		return validateSourceControlRepository(repository, workspaceKey, repositoryRef)
 	}
-	if !store.IsNotFound(err) {
+	if !errors.Is(err, persistence.ErrNotFound) {
 		return nil, fmt.Errorf("resolve repository %q: %w", repositoryRef, err)
 	}
 	repositories, listErr := resolver.repositories.List(ctx, workspaceKey)
 	if listErr != nil {
 		return nil, fmt.Errorf("list repositories for reference %q: %w", repositoryRef, listErr)
 	}
-	var matched *workspacemodule.Repository
+	var matched *workspaceowner.Repository
 	for _, candidate := range repositories {
 		if candidate == nil {
 			return nil, fmt.Errorf("repository list contains a nil projection: %w", sourcecontrol.ErrInvalid)
@@ -430,16 +431,16 @@ func (resolver *sourceControlRepositoryResolver) resolveRepository(
 		matched = candidate
 	}
 	if matched == nil {
-		return nil, fmt.Errorf("repository reference %q: %w", repositoryRef, workspacemodule.ErrNotFound)
+		return nil, fmt.Errorf("repository reference %q: %w", repositoryRef, workspaceowner.ErrNotFound)
 	}
 	return validateSourceControlRepository(matched, workspaceKey, repositoryRef)
 }
 
 func validateSourceControlRepository(
-	repository *workspacemodule.Repository,
+	repository *workspaceowner.Repository,
 	workspaceKey,
 	repositoryRef string,
-) (*workspacemodule.Repository, error) {
+) (*workspaceowner.Repository, error) {
 	if repository == nil || repository.WorkspaceKey != workspaceKey ||
 		!safeLocalPathSegment(repository.Name) ||
 		!safeTokenFreeRemote(repository.RemoteURL) {
@@ -479,13 +480,13 @@ func safeTokenFreeRemote(value string) bool {
 // agentProvisioningWorkspaceLister provides the manager's recovery component
 // with a fresh, sorted workspace set on every pass.
 type agentProvisioningWorkspaceLister struct {
-	workspaces store.WorkspaceStore
+	workspaces workspaceowner.WorkspaceStore
 }
 
 var _ agentprovisioning.WorkspaceLister = (*agentProvisioningWorkspaceLister)(nil)
 
 func newAgentProvisioningWorkspaceLister(
-	workspaces store.WorkspaceStore,
+	workspaces workspaceowner.WorkspaceStore,
 ) agentprovisioning.WorkspaceLister {
 	if workspaces == nil {
 		return nil

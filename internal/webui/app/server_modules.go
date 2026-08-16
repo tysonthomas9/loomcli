@@ -15,7 +15,7 @@ import (
 // buildModules conditionally constructs workspace-scoped route modules
 // and assigns them to app.wsModules.
 func (app *Server) buildModules() {
-	storeBacked := app.config.Store != nil
+	storeBacked := app.config.ProjectionRecords != nil
 
 	// Core workspace operations use owned capability ports.
 	opsModule := NewWorkspaceOpsModule(app.workspaceSvc, nil).
@@ -29,7 +29,7 @@ func (app *Server) buildModules() {
 	if storeBacked {
 		// Healing variant: when readyz finds no local path, attempt a one-shot
 		// re-bind to an existing on-disk checkout before reporting "not ready".
-		store := app.config.Store
+		store := app.config.ProjectionRecords
 		opsModule = opsModule.WithLocalWorkspacePathFn(func(wsKey string) string {
 			return storeadapter.ResolveOrHealWorkspacePath(context.Background(), store, wsKey)
 		})
@@ -91,7 +91,7 @@ func (app *Server) buildTerminalModules() {
 // buildInfraModules adds fleet, diff, file, and agent control modules
 // when their dependencies are available.
 func (app *Server) buildInfraModules() {
-	storeBacked := app.config.Store != nil
+	storeBacked := app.config.ProjectionRecords != nil
 
 	if app.fleetRegistry != nil {
 		app.wsModules = append(app.wsModules,
@@ -129,8 +129,8 @@ func (app *Server) buildStoreBackedInfraModules() {
 
 func (app *Server) unifiedAgentModuleDeps() UnifiedAgentModuleDeps {
 	deps := UnifiedAgentModuleDeps{
-		Store: app.config.Store, InteractiveAgentRuntime: app.agentRuntime,
-		WorkItems: app.workItems, Workspace: app.workspaceCatalog, Hub: app.hub,
+		InteractiveAgentRuntime: app.agentRuntime,
+		WorkItems:               app.workItems, Workspace: app.workspaceCatalog, Hub: app.hub,
 		FleetBaseURL: app.config.FleetDBBaseURL, DriverAPIBaseURL: app.config.DriverAPIBaseURL,
 		DriverRunTokenKey: app.config.DriverRunTokenKey,
 		DaytonaProvider:   app.config.DaytonaProvider,
@@ -143,6 +143,15 @@ func (app *Server) unifiedAgentModuleDeps() UnifiedAgentModuleDeps {
 		SourceControl:                  app.config.SourceControl,
 		TaskStackBindings:              app.config.TaskStackBindings,
 		TaskOutcomes:                   app.config.TaskOutcomes,
+	}
+	if records := app.config.ProjectionRecords; records != nil {
+		deps.WorkspaceTopology = records
+		deps.ConnectorRecords = records
+		deps.OrchestrationSessions = records
+		deps.AwaitRecords = records.Awaits()
+		deps.DriverRunRecords = records.DriverRuns()
+		deps.TaskRunRecords = records.TaskRuns()
+		deps.TriggerEventRecords = records.TriggerEvents()
 	}
 	if app.config.BackendOps != nil {
 		deps.WorkflowBackendHealth = agentmodules.NewWorkflowBackendHealthQuery(

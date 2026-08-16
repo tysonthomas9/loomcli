@@ -17,8 +17,8 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/modules/agents"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 var (
@@ -365,7 +365,7 @@ func applyAgentLifecycle(
 			}
 			generationID = current.GenerationID
 		} else {
-			notFound := errors.Is(getErr, domain.ErrNotFound) ||
+			notFound := errors.Is(getErr, persistence.ErrNotFound) ||
 				errors.Is(getErr, agents.ErrNotFound)
 			if action != agents.LifecycleDelete || !notFound {
 				return fmt.Errorf("read Agent generation before %s: %w", commandType, getErr)

@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 )
 
 func TestExecutionTaskRunWorkItemDesignUsesOwnerFencedExactTaskRoute(t *testing.T) {
@@ -86,7 +86,7 @@ func TestExecutionTaskRunWorkItemDesignRejectsBlankBeforeTransport(t *testing.T)
 func TestExecutionTaskRunWorkItemDesignReplayAcceptsAdvancedCurrentProjection(t *testing.T) {
 	fixture := validExecutionTaskRunWorkItemDesignResult()
 	fixture.Replayed = true
-	fixture.TaskRun.Status = domain.TaskRunCompleted
+	fixture.TaskRun.Status = execution.TaskRunRecordCompleted
 	fixture.TaskRun.NodeID = "node-next"
 	fixture.TaskRun.LeaseID = "lease-next"
 	fixture.TaskRun.FencingToken++
@@ -133,7 +133,7 @@ func TestExecutionTaskRunWorkItemDesignFailsClosed(t *testing.T) {
 		}},
 		{"non-replay terminal run", func(result *ExecutionTaskRunWorkItemDesignResult) {
 			result.Replayed = false
-			result.TaskRun.Status = domain.TaskRunCompleted
+			result.TaskRun.Status = execution.TaskRunRecordCompleted
 		}},
 		{"missing commit time", func(result *ExecutionTaskRunWorkItemDesignResult) { result.Committed.UpdatedAt = time.Time{} }},
 	} {
@@ -171,9 +171,9 @@ func validExecutionTaskRunWorkItemDesignResult() ExecutionTaskRunWorkItemDesignR
 	designDigest, designSHA256 := executionTaskRunWorkItemDesignDigest("# Plan")
 	responseRef := executionTaskRunWorkItemDesignResponseRef("TASK-1", "markdown", designDigest, "artifact-design-1")
 	return ExecutionTaskRunWorkItemDesignResult{
-		TaskRun: &domain.TaskRun{
+		TaskRun: &execution.TaskRunRecord{
 			WorkspaceKey: "WS", TaskRunID: "task-run-1", TaskID: "TASK-1",
-			Status: domain.TaskRunRunning, NodeID: "node-1", LeaseID: "lease-1", FencingToken: 7,
+			Status: execution.TaskRunRecordRunning, NodeID: "node-1", LeaseID: "lease-1", FencingToken: 7,
 		},
 		Issue: &ExecutionIssue{
 			ID: "TASK-1", Workspace: "WS", Title: "Plan this work", Status: "in_progress", UpdatedAt: updatedAt,

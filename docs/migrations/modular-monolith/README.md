@@ -99,6 +99,7 @@ one-file packages, and 60 one-or-two-file packages.
 | [23-phase-10-3-deep-source-control-evidence.md](23-phase-10-3-deep-source-control-evidence.md) | Stack 10.3 implementation and proof for the three Source Control ports, private filesystem adapter, legacy FileOps/GitOps deletion, full gates, and exact-source Files/PR UI journeys. |
 | [24-phase-10-4-interaction-pty-evidence.md](24-phase-10-4-interaction-pty-evidence.md) | Stack 10.4 implementation and proof for Interaction-owned terminal lifecycle, private PTY and Redis adapters, replay and resize correctness, legacy coordinator deletion, full gates, and packaged Desktop terminal journeys. |
 | [25-phase-10-5-repository-admission-evidence.md](25-phase-10-5-repository-admission-evidence.md) | Stack 10.5 implementation and proof for durable Workspace and Repository Admission, exact replay and recovery, cleanup and failure, process-local job-store deletion, and packaged Desktop repository journeys. |
+| [26-phase-10-6-owner-plane-query-evidence.md](26-phase-10-6-owner-plane-query-evidence.md) | Stack 10.6 implementation and proof for owner-local records and ports, production domain/store/ops deletion, immutable operational queries, architecture and full gate results, and packaged Desktop read surfaces. |
 
 ## Scope boundaries
 

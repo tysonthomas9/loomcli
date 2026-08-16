@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 func TestRetryServeStartupTransient_RetriesUnavailableUntilSuccess(t *testing.T) {
@@ -19,7 +19,7 @@ func TestRetryServeStartupTransient_RetriesUnavailableUntilSuccess(t *testing.T)
 		func(context.Context) error {
 			attempts++
 			if attempts < 3 {
-				return errors.Join(domain.ErrUnavailable, errors.New("FleetDB circuit open"))
+				return errors.Join(persistence.ErrUnavailable, errors.New("FleetDB circuit open"))
 			}
 			return nil
 		},
@@ -56,7 +56,7 @@ func TestRetryServeStartupTransient_DoesNotRetryPermanentFailure(t *testing.T) {
 func TestRetryServeStartupTransient_TimesOutWithLastUnavailableFailure(t *testing.T) {
 	t.Parallel()
 
-	transient := errors.Join(domain.ErrUnavailable, errors.New("FleetDB circuit open"))
+	transient := errors.Join(persistence.ErrUnavailable, errors.New("FleetDB circuit open"))
 	err := retryServeStartupTransient(
 		context.Background(),
 		serveStartupRetryPolicy{Timeout: 5 * time.Millisecond, InitialBackoff: time.Millisecond, MaxBackoff: 2 * time.Millisecond},
@@ -78,7 +78,7 @@ func TestRetryServeStartupTransient_RespectsParentCancellation(t *testing.T) {
 	err := retryServeStartupTransient(
 		ctx,
 		serveStartupRetryPolicy{Timeout: time.Second, InitialBackoff: time.Millisecond, MaxBackoff: 2 * time.Millisecond},
-		func(context.Context) error { return domain.ErrUnavailable },
+		func(context.Context) error { return persistence.ErrUnavailable },
 	)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("error = %v, want context canceled", err)

@@ -8,12 +8,13 @@ import (
 	"strings"
 	"testing"
 
+	workspaceowner "github.com/tysonthomas9/loomcli/internal/modules/workspace"
+
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/gitbranch"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
-	"github.com/tysonthomas9/loomcli/internal/modules/agents"
+	agentsowner "github.com/tysonthomas9/loomcli/internal/modules/agents"
 	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
-	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/testutil"
 )
 
@@ -60,10 +61,10 @@ func setupRepairFixture(t *testing.T, createAgentWorktree bool) repairFixture {
 	}
 
 	st := memstore.New()
-	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "WS1", Name: "Workspace One"}); err != nil {
+	if _, err := st.Workspaces().Create(ctx, workspaceowner.WorkspaceCreate{Key: "WS1", Name: "Workspace One"}); err != nil {
 		t.Fatalf("create workspace: %v", err)
 	}
-	if _, err := st.Repos().Create(ctx, store.RepoCreate{
+	if _, err := st.Repos().Create(ctx, workspaceowner.RepoCreate{
 		WorkspaceKey:  "WS1",
 		Name:          "api",
 		DefaultBranch: "main",
@@ -72,7 +73,7 @@ func setupRepairFixture(t *testing.T, createAgentWorktree bool) repairFixture {
 	}); err != nil {
 		t.Fatalf("create repo: %v", err)
 	}
-	if _, err := st.Repos().Create(ctx, store.RepoCreate{
+	if _, err := st.Repos().Create(ctx, workspaceowner.RepoCreate{
 		WorkspaceKey:  "WS1",
 		Name:          "docs",
 		DefaultBranch: "main",
@@ -81,7 +82,7 @@ func setupRepairFixture(t *testing.T, createAgentWorktree bool) repairFixture {
 	}); err != nil {
 		t.Fatalf("create docs repo: %v", err)
 	}
-	if _, err := st.Roles().Create(ctx, store.RoleCreate{WorkspaceKey: "WS1", Name: "task"}); err != nil {
+	if _, err := st.Roles().Create(ctx, agentsowner.RoleRecordCreate{WorkspaceKey: "WS1", Name: "task"}); err != nil {
 		t.Fatalf("create role: %v", err)
 	}
 	nova := runtimeAgent(t, "WS1", "nova", "task", nil, []string{"backend"})
@@ -100,7 +101,7 @@ func setupRepairFixture(t *testing.T, createAgentWorktree bool) repairFixture {
 	}
 
 	return repairFixture{
-		g:      NewLocalSourceControlMechanics().WithWorkspaceProjection(testWorkspaceProjection{store: st}).WithAgentQueries(testutil.StaticAgentQueries{Agents: []*agents.Agent{nova}}),
+		g:      NewLocalSourceControlMechanics().WithWorkspaceProjection(testWorkspaceProjection{store: st}).WithAgentQueries(testutil.StaticAgentQueries{Agents: []*agentsowner.Agent{nova}}),
 		wsRoot: wsRoot, repoPath: repoPath, agentPath: agentPath,
 	}
 }

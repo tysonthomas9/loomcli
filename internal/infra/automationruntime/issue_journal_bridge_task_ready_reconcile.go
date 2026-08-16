@@ -13,8 +13,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 // taskReadyReconcileEventIDPrefix identifies synthetic current-state events.
@@ -145,7 +144,7 @@ func (b *IssueJournalBridge) admitTaskReadySnapshot(
 	snapshot := normalizeTaskReadySnapshot(raw)
 	if snapshot.TaskID == "" {
 		return snapshot, false, false, fmt.Errorf(
-			"reconcile current ready tasks in workspace %q: task id is required: %w", ws, domain.ErrInvalid,
+			"reconcile current ready tasks in workspace %q: task id is required: %w", ws, persistence.ErrInvalid,
 		)
 	}
 	// Ready() is the canonical eligibility gate. Epics are orchestration
@@ -253,7 +252,7 @@ func (b *IssueJournalBridge) emitTaskReadyInternal(ctx context.Context, ws, task
 	switch {
 	case err == nil:
 		return nil
-	case errors.Is(err, domain.ErrNotFound):
+	case errors.Is(err, persistence.ErrNotFound):
 		b.logger().Debug("issue journal bridge: no binding for task.ready event, advancing past it",
 			"workspace", ws, "event_id", event.EventID, "task_id", taskID)
 		return nil
@@ -298,7 +297,7 @@ func (b *IssueJournalBridge) rememberTaskReadyGeneration(ws string, snapshot Tas
 func (b *IssueJournalBridge) taskReadyJournalGenerationReconciled(
 	ctx context.Context,
 	ws string,
-	event store.JournalEvent,
+	event automation.JournalEvent,
 ) (bool, error) {
 	b.mu.Lock()
 	workspace := b.taskReadyGenerations[ws]
@@ -322,7 +321,7 @@ func (b *IssueJournalBridge) taskReadyJournalGenerationReconciled(
 	}
 	current, err := b.IssueLookup(ctx, ws, event.EntityID)
 	if err != nil {
-		if errors.Is(err, domain.ErrNotFound) {
+		if errors.Is(err, persistence.ErrNotFound) {
 			// The reconciled ready generation was deleted before its older
 			// journal occurrence reached the cursor. Treat the occurrence as
 			// durably stale so it cannot pin every later task in the workspace.

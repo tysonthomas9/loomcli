@@ -56,8 +56,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 // IssueJournalEventIDPrefix anchors the deterministic loopback event id derived
@@ -118,9 +117,9 @@ type IssueJournalBridge struct {
 	// Source is the single system-event admission seam. Production serve
 	// supplies an Automation-backed emitter.
 	Source InternalEventEmitter
-	// Reader is the issue-journal read capability (store.IssueJournalReader,
+	// Reader is the issue-journal read capability (automation.IssueJournalReader,
 	// the fleet-db-only capability from A4-1). Required.
-	Reader store.IssueJournalReader
+	Reader automation.IssueJournalReader
 	// ActionAllowlist names the journal actions to re-emit (e.g.
 	// "issue.create"). Empty falls back to defaultIssueJournalActionAllowlist.
 	ActionAllowlist []string
@@ -221,13 +220,13 @@ type IssueJournalSweepResult struct {
 // returned even when some workspaces errored.
 func (b *IssueJournalBridge) RunOnce(ctx context.Context) (*IssueJournalSweepResult, error) {
 	if b == nil || b.Store == nil || b.Source == nil || b.Reader == nil || b.Cursors == nil {
-		return nil, fmt.Errorf("issue journal bridge: store, source, reader and cursor store are required: %w", domain.ErrInvalid)
+		return nil, fmt.Errorf("issue journal bridge: store, source, reader and cursor store are required: %w", persistence.ErrInvalid)
 	}
 	if (b.EmitTaskReady || b.EmitTaskReview) && (b.IssueLookup == nil || b.RepositoryRequiredBlocker == nil) {
-		return nil, fmt.Errorf("issue journal bridge: task lanes require current issue lookup and repository admission: %w", domain.ErrInvalid)
+		return nil, fmt.Errorf("issue journal bridge: task lanes require current issue lookup and repository admission: %w", persistence.ErrInvalid)
 	}
 	if b.EmitTaskReady && b.ReadySnapshots == nil {
-		return nil, fmt.Errorf("issue journal bridge: task-ready emission requires current ready snapshots: %w", domain.ErrInvalid)
+		return nil, fmt.Errorf("issue journal bridge: task-ready emission requires current ready snapshots: %w", persistence.ErrInvalid)
 	}
 	workspaces, err := b.workspaceKeys(ctx)
 	if err != nil {
@@ -381,7 +380,7 @@ func (b *IssueJournalBridge) drainFrom(ctx context.Context, ws, cursor string, o
 // additional task.ready event, plus a task.review event when its independently
 // gated transition lane is on; the cursor advances only after every applicable
 // event is durably handled, so a failure resumes exactly at this entry.
-func (b *IssueJournalBridge) emitBatch(ctx context.Context, ws string, events []store.JournalEvent, out *IssueJournalSweepResult) (string, error) {
+func (b *IssueJournalBridge) emitBatch(ctx context.Context, ws string, events []automation.JournalEvent, out *IssueJournalSweepResult) (string, error) {
 	advanced := ""
 	for _, ev := range events {
 		if ctx.Err() != nil {
@@ -398,7 +397,7 @@ func (b *IssueJournalBridge) emitBatch(ctx context.Context, ws string, events []
 func (b *IssueJournalBridge) emitJournalEntry(
 	ctx context.Context,
 	ws string,
-	ev store.JournalEvent,
+	ev automation.JournalEvent,
 	out *IssueJournalSweepResult,
 ) error {
 	if b.actionAllowed(ev.Action) {
@@ -441,16 +440,16 @@ func (b *IssueJournalBridge) emitJournalEntry(
 }
 
 // emitOne re-enters one journal entry into the router as a system-origin
-// internal event. A no-listener dispatch (domain.ErrNotFound — no binding on
+// internal event. A no-listener dispatch (persistence.ErrNotFound — no binding on
 // internal.issue.created) is NOT a bridge failure: the cursor still advances so
 // a missing binding never permanently stalls the bridge. Any other Emit error
 // is returned so the drain stops and the entry is retried.
-func (b *IssueJournalBridge) emitOne(ctx context.Context, ws string, ev store.JournalEvent) error {
+func (b *IssueJournalBridge) emitOne(ctx context.Context, ws string, ev automation.JournalEvent) error {
 	_, err := b.Source.Emit(ctx, ws, b.toInternalEvent(ev))
 	switch {
 	case err == nil:
 		return nil
-	case errors.Is(err, domain.ErrNotFound):
+	case errors.Is(err, persistence.ErrNotFound):
 		b.logger().Debug("issue journal bridge: no binding for internal event, advancing past it",
 			"workspace", ws, "event_id", IssueJournalEventIDPrefix+ev.ID, "action", ev.Action)
 		return nil
@@ -465,7 +464,7 @@ func (b *IssueJournalBridge) emitOne(ctx context.Context, ws string, ev store.Jo
 // continuation of a known trigger chain); ActorRef is the journal actor
 // VERBATIM (the bridge never filters or rewrites it — see the self-trigger
 // story); SubjectAttrs are extracted from the After snapshot.
-func (b *IssueJournalBridge) toInternalEvent(ev store.JournalEvent) InternalEvent {
+func (b *IssueJournalBridge) toInternalEvent(ev automation.JournalEvent) InternalEvent {
 	return InternalEvent{
 		EventID:      IssueJournalEventIDPrefix + ev.ID,
 		EventType:    ev.Action,

@@ -13,12 +13,12 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/app/agentprovisioning"
-	"github.com/tysonthomas9/loomcli/internal/domain"
+	agentsowner "github.com/tysonthomas9/loomcli/internal/modules/agents"
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
 	connectorsmodule "github.com/tysonthomas9/loomcli/internal/modules/connectors"
 	workflowcataloghttp "github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog/httpapi"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
-	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 // testAgentProvisioning composes the real process manager around lightweight,
@@ -34,7 +34,7 @@ type testAgentProvisioning struct {
 }
 
 func newTestAgentProvisioning(
-	st store.Store,
+	st agentProvisioningFixture,
 	bindings automation.BindingOperations,
 ) *testAgentProvisioning {
 	return newTestAgentProvisioningWithBindingAuthority(
@@ -45,7 +45,7 @@ func newTestAgentProvisioning(
 }
 
 func newTestAgentProvisioningWithBindingAuthority(
-	st store.Store,
+	st agentProvisioningFixture,
 	bindings automation.BindingOperations,
 	bindingAuthority authority.SystemAuthority,
 ) *testAgentProvisioning {
@@ -270,7 +270,7 @@ func (progress *testAgentProvisioningProgressStore) ListPending(
 }
 
 type testAgentProvisioningOperations struct {
-	store            store.Store
+	store            agentProvisioningFixture
 	bindings         automation.BindingOperations
 	bindingAuthority authority.SystemAuthority
 }
@@ -290,10 +290,10 @@ func (operations *testAgentProvisioningOperations) EnsureRole(
 	switch {
 	case err == nil:
 		return testExactProvisionedRole(existing, command.Role)
-	case !errors.Is(err, domain.ErrNotFound):
+	case !errors.Is(err, persistence.ErrNotFound):
 		return mapTestProvisioningOperationError(err)
 	}
-	_, err = operations.store.Roles().Create(ctx, store.RoleCreate{
+	_, err = operations.store.Roles().Create(ctx, agentsowner.RoleRecordCreate{
 		WorkspaceKey: command.WorkspaceKey,
 		Name:         command.Role.Name,
 		Kind:         command.Role.Kind,
@@ -318,7 +318,7 @@ func (operations *testAgentProvisioningOperations) EnsureRole(
 	if err == nil {
 		return nil
 	}
-	if !errors.Is(err, domain.ErrAlreadyExists) {
+	if !errors.Is(err, persistence.ErrAlreadyExists) {
 		return mapTestProvisioningOperationError(err)
 	}
 	existing, getErr := operations.store.Roles().Get(
@@ -333,7 +333,7 @@ func (operations *testAgentProvisioningOperations) EnsureRole(
 }
 
 func testExactProvisionedRole(
-	existing *domain.Role,
+	existing *agentsowner.Role,
 	expected agentprovisioning.RoleSpec,
 ) error {
 	if existing != nil {
@@ -384,17 +384,17 @@ func (operations *testAgentProvisioningOperations) EnsureAgent(
 	switch {
 	case err == nil:
 		return testExactProvisionedAgent(existing, command.Agent)
-	case !errors.Is(err, domain.ErrNotFound):
+	case !errors.Is(err, persistence.ErrNotFound):
 		return mapTestProvisioningOperationError(err)
 	}
 	_, err = operations.store.AgentServices().Create(
 		ctx,
-		store.AgentServiceCreate{
+		agentsowner.AgentServiceCreate{
 			WorkspaceKey: command.WorkspaceKey,
 			ServiceID:    command.Agent.AgentID,
 			Name:         command.Agent.Name,
-			Kind:         domain.AgentServiceKind(command.Agent.Kind),
-			DesiredState: domain.AgentServiceDesiredState(command.Agent.DesiredState),
+			Kind:         agentsowner.AgentKind(command.Agent.Kind),
+			DesiredState: agentsowner.DesiredState(command.Agent.DesiredState),
 			RoleName:     command.Agent.RoleName,
 			MaxInstances: 1,
 			BudgetPolicy: command.Agent.BudgetPolicy,
@@ -404,7 +404,7 @@ func (operations *testAgentProvisioningOperations) EnsureAgent(
 	if err == nil {
 		return nil
 	}
-	if !errors.Is(err, domain.ErrAlreadyExists) {
+	if !errors.Is(err, persistence.ErrAlreadyExists) {
 		return mapTestProvisioningOperationError(err)
 	}
 	existing, getErr := operations.store.AgentServices().Get(
@@ -419,7 +419,7 @@ func (operations *testAgentProvisioningOperations) EnsureAgent(
 }
 
 func testExactProvisionedAgent(
-	existing *domain.AgentService,
+	existing *agentsowner.AgentServiceRecord,
 	expected agentprovisioning.AgentSpec,
 ) error {
 	if existing != nil &&
@@ -528,7 +528,7 @@ func (operations *testAgentProvisioningOperations) EnsureGrant(
 	if err == nil {
 		return nil
 	}
-	if !errors.Is(err, domain.ErrAlreadyExists) {
+	if !errors.Is(err, persistence.ErrAlreadyExists) {
 		return mapTestProvisioningOperationError(err)
 	}
 	existing, getErr := operations.store.Connectors().ListGrantRecordsByBinding(
@@ -577,12 +577,12 @@ func mapTestProvisioningOperationError(err error) error {
 		errors.Is(err, agentprovisioning.ErrNotFound),
 		errors.Is(err, agentprovisioning.ErrUnavailable):
 		return err
-	case errors.Is(err, domain.ErrInvalid),
+	case errors.Is(err, persistence.ErrInvalid),
 		errors.Is(err, automation.ErrInvalid):
 		return errors.Join(agentprovisioning.ErrInvalid, err)
-	case errors.Is(err, domain.ErrAlreadyExists),
-		errors.Is(err, domain.ErrConflict),
-		errors.Is(err, domain.ErrNotFound),
+	case errors.Is(err, persistence.ErrAlreadyExists),
+		errors.Is(err, persistence.ErrConflict),
+		errors.Is(err, persistence.ErrNotFound),
 		errors.Is(err, automation.ErrConflict),
 		errors.Is(err, automation.ErrManagedBinding),
 		errors.Is(err, automation.ErrNotFound):

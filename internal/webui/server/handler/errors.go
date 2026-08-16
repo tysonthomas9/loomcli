@@ -6,11 +6,11 @@ import (
 	"net/http"
 
 	"github.com/tysonthomas9/loomcli/internal/app/query/sessionarchive"
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
 	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
 	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 	"github.com/tysonthomas9/loomcli/internal/modules/workspace"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 	"github.com/tysonthomas9/loomcli/internal/webui/apperrors"
 )
 
@@ -213,13 +213,13 @@ func HandleTerminalError(w http.ResponseWriter, err error) {
 // Keeping this translation in the shared HTTP boundary lets feature handlers
 // depend on capability APIs instead of importing persistence contracts.
 func IsControlPlaneRateLimited(err error) bool {
-	return errors.Is(err, domain.ErrRateLimited)
+	return errors.Is(err, persistence.ErrRateLimited)
 }
 
 // IsControlPlaneUnavailable reports whether a compatibility dependency
 // preserved a retryable control-plane availability failure.
 func IsControlPlaneUnavailable(err error) bool {
-	return errors.Is(err, domain.ErrUnavailable)
+	return errors.Is(err, persistence.ErrUnavailable)
 }
 
 // WriteDomainError maps a domain.Err* sentinel to an HTTP status and writes a
@@ -229,11 +229,11 @@ func IsControlPlaneUnavailable(err error) bool {
 // the client message for ErrNotFound and unmapped errors.
 func WriteDomainError(w http.ResponseWriter, err error, fallback string) {
 	switch {
-	case errors.Is(err, domain.ErrNotFound):
+	case errors.Is(err, persistence.ErrNotFound):
 		RespondError(w, http.StatusNotFound, fallback)
-	case errors.Is(err, domain.ErrInvalid):
+	case errors.Is(err, persistence.ErrInvalid):
 		RespondError(w, http.StatusBadRequest, err.Error())
-	case errors.Is(err, domain.ErrConflict), errors.Is(err, domain.ErrAlreadyExists):
+	case errors.Is(err, persistence.ErrConflict), errors.Is(err, persistence.ErrAlreadyExists):
 		RespondError(w, http.StatusConflict, err.Error())
 	default:
 		RespondError(w, http.StatusInternalServerError, fallback)

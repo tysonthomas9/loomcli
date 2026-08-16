@@ -4,6 +4,8 @@ import (
 	"context"
 	"net/http"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
+
 	"github.com/tysonthomas9/loomcli/internal/app/webhookingestion"
 	"github.com/tysonthomas9/loomcli/internal/app/workflowbinding"
 	trigger "github.com/tysonthomas9/loomcli/internal/infra/automationruntime"
@@ -11,7 +13,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
 	connectorsmodule "github.com/tysonthomas9/loomcli/internal/modules/connectors"
 	workflowcataloghttp "github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog/httpapi"
-	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/triggerbindings"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/webhooks"
 	"github.com/tysonthomas9/loomcli/internal/webui/readprojection"
@@ -38,9 +39,9 @@ type automationRouteCapabilities struct {
 // trigger bindings.
 type automationRouteDeps struct {
 	Capabilities    automationRouteCapabilities
-	Awaits          store.AwaitStore
-	DriverRuns      store.DriverRunStore
-	AwaitResolver   store.AtomicAwaitStore
+	Awaits          execution.AwaitStore
+	DriverRuns      execution.DriverRunStore
+	AwaitResolver   execution.AtomicAwaitStore
 	Connectors      connectorsmodule.BindingGrantLifecycle
 	AgentIdentities agents.IdentityQueries
 }

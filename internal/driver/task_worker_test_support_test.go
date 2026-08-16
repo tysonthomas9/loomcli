@@ -7,9 +7,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
+
+	workspaceowner "github.com/tysonthomas9/loomcli/internal/modules/workspace"
+
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
-	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 type driverRunFixtureOptions struct {
@@ -26,7 +29,7 @@ type driverRunFixtureOptions struct {
 	Payload          json.RawMessage
 }
 
-func createDriverRunFixture(ctx context.Context, st store.Store, options driverRunFixtureOptions) (*domain.DriverRun, error) {
+func createDriverRunFixture(ctx context.Context, st *memstore.Store, options driverRunFixtureOptions) (*execution.DriverRunRecord, error) {
 	versionID := options.DriverVersionID
 	if versionID == "" {
 		driver, err := st.Drivers().Get(ctx, options.WorkspaceKey, options.DriverID)
@@ -51,7 +54,7 @@ func createDriverRunFixture(ctx context.Context, st store.Store, options driverR
 	if len(payload) == 0 {
 		payload = json.RawMessage(`{}`)
 	}
-	return st.DriverRuns().Create(ctx, store.DriverRunCreate{
+	return st.DriverRuns().Create(ctx, execution.DriverRunCreate{
 		WorkspaceKey: options.WorkspaceKey, RunID: options.RunID,
 		DriverID: options.DriverID, DriverVersionID: versionID,
 		Entrypoint: entrypoint, SourceKind: sourceKind, SourceRef: sourceRef,
@@ -60,7 +63,7 @@ func createDriverRunFixture(ctx context.Context, st store.Store, options driverR
 	})
 }
 
-func setupRunningDriverRun(t *testing.T) (context.Context, *memstore.Store, *domain.DriverRun) {
+func setupRunningDriverRun(t *testing.T) (context.Context, *memstore.Store, *execution.DriverRunRecord) {
 	t.Helper()
 	ctx, st, run := setupQueuedDriverRun(t)
 	registerTaskWorkerNode(t, ctx, st, "node-1", []string{"codex-default", "local-noop", "noop", "remote-sandbox", "daytona", "flue-local"}, []string{"git", "shell"})
@@ -71,12 +74,12 @@ func setupRunningDriverRun(t *testing.T) (context.Context, *memstore.Store, *dom
 	return ctx, st, claimed
 }
 
-func setupQueuedDriverRun(t *testing.T) (context.Context, *memstore.Store, *domain.DriverRun) {
+func setupQueuedDriverRun(t *testing.T) (context.Context, *memstore.Store, *execution.DriverRunRecord) {
 	t.Helper()
 	ctx := context.Background()
 	root := t.TempDir()
 	st := memstore.New()
-	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "TEST", Name: "test"}); err != nil {
+	if _, err := st.Workspaces().Create(ctx, workspaceowner.WorkspaceCreate{Key: "TEST", Name: "test"}); err != nil {
 		t.Fatalf("Create workspace: %v", err)
 	}
 	writeFlueDist(t, root, "epic-runner", "done")
@@ -107,18 +110,18 @@ func setupQueuedDriverRun(t *testing.T) (context.Context, *memstore.Store, *doma
 	return ctx, st, run
 }
 
-func registerTaskWorkerNode(t *testing.T, ctx context.Context, st store.Store, nodeID string, providers, capabilities []string) {
+func registerTaskWorkerNode(t *testing.T, ctx context.Context, st *memstore.Store, nodeID string, providers, capabilities []string) {
 	t.Helper()
 	nodeCapabilities := append([]string{"driver-runner", "task-runner", "flue-local"}, providers...)
 	nodeCapabilities = append(nodeCapabilities, capabilities...)
-	if _, err := st.Nodes().Create(ctx, store.NodeCreate{
+	if _, err := st.Nodes().Create(ctx, execution.NodeCreate{
 		WorkspaceKey:    "TEST",
 		NodeID:          nodeID,
-		RuntimeProvider: domain.RuntimeProviderLocal,
+		RuntimeProvider: execution.RuntimeProviderLocal,
 		Capabilities:    normalizeStringList(nodeCapabilities),
-		DrainState:      domain.NodeDrainActive,
+		DrainState:      execution.WorkerNodeActive,
 		TTL:             time.Minute,
-	}); err != nil && !errors.Is(err, domain.ErrAlreadyExists) {
+	}); err != nil && !errors.Is(err, persistence.ErrAlreadyExists) {
 		t.Fatalf("Create task worker node %s: %v", nodeID, err)
 	}
 }

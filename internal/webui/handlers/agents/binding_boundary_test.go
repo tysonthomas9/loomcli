@@ -10,13 +10,15 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tysonthomas9/loomcli/internal/app/agentprovisioning"
-	"github.com/tysonthomas9/loomcli/internal/domain"
-	agentsmodule "github.com/tysonthomas9/loomcli/internal/modules/agents"
+	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
+
+	agentsmodule "github.com/tysonthomas9/loomcli/internal/modules/agents"
+
+	"github.com/tysonthomas9/loomcli/internal/app/agentprovisioning"
 	connectorsmodule "github.com/tysonthomas9/loomcli/internal/modules/connectors"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
-	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 type boundaryOperatorResolverFunc func(*http.Request, string, authority.Action) (authority.OperatorAuthority, error)
@@ -39,10 +41,10 @@ func TestPromptAgentCreateRequiresManagedBindingAuthorityBeforeMutation(t *testi
 	if response.Code != http.StatusUnauthorized {
 		t.Fatalf("status = %d, want 401; body=%s", response.Code, response.Body.String())
 	}
-	if _, err := st.Roles().Get(context.Background(), agentRecordTestWS, "docs"); !errors.Is(err, domain.ErrNotFound) {
+	if _, err := st.Roles().Get(context.Background(), agentRecordTestWS, "docs"); !errors.Is(err, persistence.ErrNotFound) {
 		t.Fatalf("unauthorized create mutated role: %v", err)
 	}
-	records, err := st.AgentServices().List(context.Background(), agentRecordTestWS, store.AgentServiceFilter{})
+	records, err := st.AgentServices().List(context.Background(), agentRecordTestWS, agentsmodule.AgentServiceFilter{})
 	if err != nil || len(records) != 0 {
 		t.Fatalf("unauthorized create records = %+v err=%v, want none", records, err)
 	}
@@ -50,8 +52,8 @@ func TestPromptAgentCreateRequiresManagedBindingAuthorityBeforeMutation(t *testi
 
 func TestLegacyBindingPatchIsNotAnAgentRoute(t *testing.T) {
 	st := newAgentRecordStore(t)
-	if _, err := st.TriggerBindings().Create(context.Background(), store.TriggerBindingCreate{
-		WorkspaceKey: agentRecordTestWS, BindingID: "legacy", Name: "Legacy", SourceKind: store.InternalSourceKind,
+	if _, err := st.TriggerBindings().Create(context.Background(), automation.TriggerBindingCreate{
+		WorkspaceKey: agentRecordTestWS, BindingID: "legacy", Name: "Legacy", SourceKind: automation.InternalSourceKind,
 		DriverID: "prompt-agent", DriverVersionID: promptAgentDriverTestVersion, Enabled: true,
 	}); err != nil {
 		t.Fatalf("seed legacy binding: %v", err)
@@ -240,7 +242,7 @@ func TestManagedAgentDeleteResumesAfterParkOrArchiveFailure(t *testing.T) {
 			if first.Code != http.StatusInternalServerError {
 				t.Fatalf("first delete status = %d, want 500; body=%s", first.Code, first.Body.String())
 			}
-			if _, err := base.TriggerBindings().Get(context.Background(), agentRecordTestWS, bindingID); !errors.Is(err, domain.ErrNotFound) {
+			if _, err := base.TriggerBindings().Get(context.Background(), agentRecordTestWS, bindingID); !errors.Is(err, persistence.ErrNotFound) {
 				t.Fatalf("binding after %s failure err=%v, want already deleted", failStep, err)
 			}
 			grants, err := base.Connectors().ListGrantRecordsByBinding(context.Background(), agentRecordTestWS, bindingID)
@@ -251,7 +253,7 @@ func TestManagedAgentDeleteResumesAfterParkOrArchiveFailure(t *testing.T) {
 			if err != nil || record.DeletedAt != nil {
 				t.Fatalf("record after %s failure = %+v err=%v, want retryable unarchived record", failStep, record, err)
 			}
-			if failStep == "archive" && record.DesiredState != domain.AgentServiceDesiredStopped {
+			if failStep == "archive" && record.DesiredState != agentsmodule.DesiredStopped {
 				t.Fatalf("record after archive failure desired_state=%q, want stopped", record.DesiredState)
 			}
 
@@ -260,7 +262,7 @@ func TestManagedAgentDeleteResumesAfterParkOrArchiveFailure(t *testing.T) {
 				t.Fatalf("retry delete status = %d, want 200; body=%s", second.Code, second.Body.String())
 			}
 			record, err = base.AgentServices().Get(context.Background(), agentRecordTestWS, created.ID)
-			if err != nil || record.DesiredState != domain.AgentServiceDesiredStopped || record.DeletedAt == nil {
+			if err != nil || record.DesiredState != agentsmodule.DesiredStopped || record.DeletedAt == nil {
 				t.Fatalf("record after retry = %+v err=%v, want stopped and archived", record, err)
 			}
 		})
@@ -331,14 +333,16 @@ func (grants *managedDeleteFaultGrants) RevokeBindingGrants(context.Context, str
 }
 
 type faultAgentRecordStore struct {
-	store.Store
-	services store.AgentServiceStore
+	*memstore.Store
+	services agentsmodule.AgentServiceStore
 }
 
-func (faults *faultAgentRecordStore) AgentServices() store.AgentServiceStore { return faults.services }
+func (faults *faultAgentRecordStore) AgentServices() agentsmodule.AgentServiceStore {
+	return faults.services
+}
 
 type faultAgentServiceStore struct {
-	store.AgentServiceStore
+	agentsmodule.AgentServiceStore
 	failStep string
 	failed   bool
 }
@@ -346,8 +350,8 @@ type faultAgentServiceStore struct {
 func (faults *faultAgentServiceStore) Update(
 	ctx context.Context,
 	workspace, serviceID string,
-	patch store.AgentServiceUpdate,
-) (*domain.AgentService, error) {
+	patch agentsmodule.AgentServiceUpdate,
+) (*agentsmodule.AgentServiceRecord, error) {
 	if faults.failStep == "park" && !faults.failed {
 		faults.failed = true
 		return nil, errors.New("injected agent park failure")

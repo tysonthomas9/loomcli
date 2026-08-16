@@ -8,12 +8,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
-
-	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
-	"github.com/tysonthomas9/loomcli/internal/store"
+
+	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 func TestParseDriverRunPayload(t *testing.T) {
@@ -105,7 +104,7 @@ func TestDriverRegisterTrustDefaultsUntrusted(t *testing.T) {
 
 	driverRegisterTrusted = true
 	driverRegisterUntrusted = true
-	if _, err := driverRegisterTrust(); !errors.Is(err, domain.ErrInvalid) {
+	if _, err := driverRegisterTrust(); !errors.Is(err, persistence.ErrInvalid) {
 		t.Fatalf("driverRegisterTrust with both flags err = %v, want ErrInvalid", err)
 	}
 
@@ -144,9 +143,9 @@ func TestDeliverAgentMessageForDriverQueuesGenericMessage(t *testing.T) {
 		result.InboxMessageID == "" {
 		t.Fatalf("result = %#v, want queued inbox message", result)
 	}
-	msgs, err := st.AgentInboxMessages().List(ctx, "WS", store.AgentInboxMessageFilter{
+	msgs, err := st.AgentInboxMessages().List(ctx, "WS", interaction.AgentInboxMessageFilter{
 		TargetAgentID: "worker-1",
-		Status:        domain.AgentInboxMessageQueued,
+		Status:        interaction.InboxRecordQueued,
 	})
 	if err != nil {
 		t.Fatalf("list inbox messages: %v", err)
@@ -201,7 +200,7 @@ func (driverCommandChatMessenger) DeliverAssignment(
 }
 
 type driverCommandInbox struct {
-	store store.Store
+	store *memstore.Store
 }
 
 func (inbox driverCommandInbox) Enqueue(
@@ -210,7 +209,7 @@ func (inbox driverCommandInbox) Enqueue(
 ) (*interaction.InboxMessage, error) {
 	message, err := inbox.store.AgentInboxMessages().Create(
 		ctx,
-		store.AgentInboxMessageCreate{
+		interaction.AgentInboxMessageCreate{
 			WorkspaceKey:  command.WorkspaceKey,
 			TargetAgentID: command.TargetAgentID,
 			SessionID:     command.SessionID,

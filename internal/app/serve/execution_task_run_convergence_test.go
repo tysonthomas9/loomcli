@@ -10,11 +10,13 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
+
+	workspaceowner "github.com/tysonthomas9/loomcli/internal/modules/workspace"
+
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	agentsmodule "github.com/tysonthomas9/loomcli/internal/modules/agents"
-	"github.com/tysonthomas9/loomcli/internal/modules/execution"
-	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 type convergenceAgentQueries struct {
@@ -27,7 +29,7 @@ func (queries convergenceAgentQueries) GetAgent(_ context.Context, workspace, ag
 			return agent, nil
 		}
 	}
-	return nil, domain.ErrNotFound
+	return nil, persistence.ErrNotFound
 }
 
 func (queries convergenceAgentQueries) ListAgents(_ context.Context, workspace string, _ agentsmodule.AgentFilter) ([]*agentsmodule.Agent, error) {
@@ -43,10 +45,10 @@ func (queries convergenceAgentQueries) ListAgents(_ context.Context, workspace s
 func TestExecutionTaskRunConvergenceAdaptersAreIdempotentAndTokenFree(t *testing.T) {
 	ctx := context.Background()
 	st := memstore.New()
-	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "WS", Name: "workspace"}); err != nil {
+	if _, err := st.Workspaces().Create(ctx, workspaceowner.WorkspaceCreate{Key: "WS", Name: "workspace"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.WorkerProfiles().Create(ctx, store.WorkerProfileCreate{
+	if _, err := st.WorkerProfiles().Create(ctx, execution.WorkerProfileCreate{
 		WorkspaceKey: "WS", ProfileID: "lead-profile", Name: "lead-profile", Role: "lead", ParentEpic: "EPIC-1",
 	}); err != nil {
 		t.Fatal(err)
@@ -55,19 +57,19 @@ func TestExecutionTaskRunConvergenceAdaptersAreIdempotentAndTokenFree(t *testing
 		WorkspaceKey: "WS", AgentID: "lead-1", Name: "lead-1", Kind: agentsmodule.AgentKindLead,
 		Behavior: agentsmodule.BehaviorReference{RoleName: "lead"}, ProfileName: "lead-profile",
 	}}}
-	if _, err := st.Drivers().Create(ctx, store.DriverCreate{
+	if _, err := st.Drivers().Create(ctx, workflowcatalog.DriverCreate{
 		WorkspaceKey: "WS", DriverID: "driver-1", Name: "driver", OwnerType: workflowcatalog.DriverOwnerSystem,
 		Status: workflowcatalog.DriverStatusActive,
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.DriverVersions().Create(ctx, store.DriverVersionCreate{
+	if _, err := st.DriverVersions().Create(ctx, workflowcatalog.DriverVersionCreate{
 		WorkspaceKey: "WS", VersionID: "version-1", DriverID: "driver-1", Version: 1,
 		SourceDigest: "sha256:source", BundleDigest: "sha256:bundle", ValidationStatus: workflowcatalog.DriverVersionValidationPassed,
 	}); err != nil {
 		t.Fatal(err)
 	}
-	parent, err := st.DriverRuns().Create(ctx, store.DriverRunCreate{
+	parent, err := st.DriverRuns().Create(ctx, execution.DriverRunCreate{
 		WorkspaceKey: "WS", RunID: "run-1", DriverID: "driver-1", DriverVersionID: "version-1",
 		SourceKind: "manual", SourceRef: "test", EpicID: "EPIC-1", IdempotencyKey: "run-request-1",
 	})
@@ -78,41 +80,41 @@ func TestExecutionTaskRunConvergenceAdaptersAreIdempotentAndTokenFree(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.DriverSteps().Create(ctx, store.DriverStepCreate{
+	if _, err := st.DriverSteps().Create(ctx, execution.DriverStepCreate{
 		WorkspaceKey: "WS", StepID: "step-1", DriverRunID: parent.RunID, StepKind: "task_run",
-		Status: domain.DriverStepRunning, NodeID: parent.NodeID, LeaseID: parent.LeaseID, FencingToken: parent.FencingToken,
+		Status: execution.DriverStepRunning, NodeID: parent.NodeID, LeaseID: parent.LeaseID, FencingToken: parent.FencingToken,
 	}); err != nil {
 		t.Fatal(err)
 	}
 	const token = "worker-secret-token"
-	if _, err := st.TaskRuns().Create(ctx, store.TaskRunCreate{
+	if _, err := st.TaskRuns().Create(ctx, execution.TaskRunCreate{
 		WorkspaceKey: "WS", TaskRunID: "task-run-1", DriverRunID: parent.RunID, DriverStepID: "step-1",
-		TaskID: "TASK-1", Status: domain.TaskRunRunning, NodeID: "worker-node", LeaseID: "worker-lease",
+		TaskID: "TASK-1", Status: execution.TaskRunRecordRunning, NodeID: "worker-node", LeaseID: "worker-lease",
 		LeaseToken: token, FencingToken: 11, RuntimeMetadata: map[string]string{"scheduler_attempt": "1"},
 	}); err != nil {
 		t.Fatal(err)
 	}
 	exitCode := 0
-	finished, err := st.TaskRuns().Complete(ctx, "WS", "task-run-1", store.TaskRunComplete{
+	finished, err := st.TaskRuns().Complete(ctx, "WS", "task-run-1", execution.TaskRunComplete{
 		CompletionID: "complete-1", NodeID: "worker-node", LeaseID: "worker-lease", LeaseToken: token,
-		FencingToken: 11, Status: domain.TaskRunCompleted, ExitCode: &exitCode,
+		FencingToken: 11, Status: execution.TaskRunRecordCompleted, ExitCode: &exitCode,
 		LogsRef: "logs://1", ArtifactsRef: "artifacts://1", FinishedAt: time.Now().UTC(),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.DriverRuns().Finish(ctx, "WS", parent.RunID, store.DriverRunFinish{
+	if _, err := st.DriverRuns().Finish(ctx, "WS", parent.RunID, execution.DriverRunFinish{
 		NodeID: parent.NodeID, LeaseID: parent.LeaseID, FencingToken: parent.FencingToken,
-		Status: domain.DriverRunCompleted, Summary: "parent completed before projection repair",
+		Status: execution.DriverRunCompleted, Summary: "parent completed before projection repair",
 	}); err != nil {
 		t.Fatal(err)
 	}
 
-	repairStore, ok := st.DriverSteps().(store.TerminalDriverStepRepairStore)
+	repairStore, ok := st.DriverSteps().(execution.TerminalDriverStepRepairStore)
 	if !ok {
 		t.Fatal("memstore DriverSteps does not expose terminal repair store")
 	}
-	checkpoints, ok := st.TaskRuns().(store.TaskRunTerminalConvergenceStore)
+	checkpoints, ok := st.TaskRuns().(execution.TaskRunTerminalConvergenceStore)
 	if !ok {
 		t.Fatal("memstore TaskRuns does not expose terminal convergence checkpoints")
 	}
@@ -151,7 +153,7 @@ func TestExecutionTaskRunConvergenceAdaptersAreIdempotentAndTokenFree(t *testing
 	conflicting := projection
 	conflicting.RequestID = "repair-step-1-conflict"
 	conflicting.Status = "failed"
-	if _, err := dependencies.DriverSteps.RepairTerminalDriverStep(ctx, conflicting); !errors.Is(err, domain.ErrInvalidTransition) {
+	if _, err := dependencies.DriverSteps.RepairTerminalDriverStep(ctx, conflicting); !errors.Is(err, persistence.ErrInvalidTransition) {
 		t.Fatalf("conflicting terminal repair error = %v, want invalid transition", err)
 	}
 	lead, err := dependencies.LeadResolver.ResolveEpicLead(ctx, "WS", "EPIC-1")
@@ -168,7 +170,7 @@ func TestExecutionTaskRunConvergenceAdaptersAreIdempotentAndTokenFree(t *testing
 			t.Fatal(err)
 		}
 	}
-	events, err := st.TaskRunEvents().ListSince(ctx, "WS", store.TaskRunEventFilter{})
+	events, err := st.TaskRunEvents().ListSince(ctx, "WS", execution.TaskRunEventFilter{})
 	if err != nil || len(events) != 1 {
 		t.Fatalf("events=%+v err=%v", events, err)
 	}
@@ -180,10 +182,10 @@ func TestExecutionTaskRunConvergenceAdaptersAreIdempotentAndTokenFree(t *testing
 		t.Fatalf("event exposed lease credential: %s", wire)
 	}
 	step, err := st.DriverSteps().Get(ctx, "WS", "step-1")
-	if err != nil || step.Status != domain.DriverStepCompleted || step.OutputRef != "artifacts://1" {
+	if err != nil || step.Status != execution.DriverStepCompleted || step.OutputRef != "artifacts://1" {
 		t.Fatalf("step=%+v err=%v", step, err)
 	}
-	rows, err := st.Outbox().ListDue(ctx, "WS", store.OutboxDueFilter{Now: time.Now().UTC()})
+	rows, err := st.Outbox().ListDue(ctx, "WS", execution.OutboxDueFilter{Now: time.Now().UTC()})
 	if err != nil || len(rows) != 1 {
 		t.Fatalf("outbox=%+v err=%v", rows, err)
 	}
@@ -192,28 +194,28 @@ func TestExecutionTaskRunConvergenceAdaptersAreIdempotentAndTokenFree(t *testing
 func TestExecutionTaskRunConvergenceAdapterAcceptsCancelledToSkippedOnly(t *testing.T) {
 	ctx := context.Background()
 	st, parent := setupExecutionTaskRunParent(t, ctx)
-	if _, err := st.DriverSteps().CreateForRun(ctx, "WS", parent.RunID, store.DriverStepCreate{
-		StepID: "step-cancelled", StepKind: "task_run", Status: domain.DriverStepRunning,
+	if _, err := st.DriverSteps().CreateForRun(ctx, "WS", parent.RunID, execution.DriverStepCreate{
+		StepID: "step-cancelled", StepKind: "task_run", Status: execution.DriverStepRunning,
 		NodeID: parent.NodeID, LeaseID: parent.LeaseID, FencingToken: parent.FencingToken,
 	}); err != nil {
 		t.Fatal(err)
 	}
 	const token = "cancelled-secret"
-	if _, err := st.TaskRuns().Create(ctx, store.TaskRunCreate{
+	if _, err := st.TaskRuns().Create(ctx, execution.TaskRunCreate{
 		WorkspaceKey: "WS", TaskRunID: "task-run-cancelled", DriverRunID: parent.RunID, DriverStepID: "step-cancelled",
-		TaskID: "TASK-CANCELED", Status: domain.TaskRunRunning, NodeID: "worker", LeaseID: "lease",
+		TaskID: "TASK-CANCELED", Status: execution.TaskRunRecordRunning, NodeID: "worker", LeaseID: "lease",
 		LeaseToken: token, FencingToken: 8,
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.TaskRuns().Finish(ctx, "WS", "task-run-cancelled", store.TaskRunFinish{
+	if _, err := st.TaskRuns().Finish(ctx, "WS", "task-run-cancelled", execution.TaskRunFinish{
 		NodeID: "worker", LeaseID: "lease", LeaseToken: token, FencingToken: 8,
-		Status: domain.TaskRunCancelled, FinishedAt: time.Now().UTC(),
+		Status: execution.TaskRunRecordCancelled, FinishedAt: time.Now().UTC(),
 	}); err != nil {
 		t.Fatal(err)
 	}
-	repairs := st.DriverSteps().(store.TerminalDriverStepRepairStore)
-	checkpoints := st.TaskRuns().(store.TaskRunTerminalConvergenceStore)
+	repairs := st.DriverSteps().(execution.TerminalDriverStepRepairStore)
+	checkpoints := st.TaskRuns().(execution.TaskRunTerminalConvergenceStore)
 	dependencies, err := NewExecutionTaskRunConvergenceDependencies(ExecutionTaskRunConvergenceDependencies{
 		TaskRuns: st.TaskRuns(), Checkpoints: checkpoints, DriverRuns: st.DriverRuns(), DriverSteps: repairs,
 		Events: st.TaskRunEvents(), AgentQueries: convergenceAgentQueries{}, WorkerProfiles: st.WorkerProfiles(), Outbox: st.Outbox(),
@@ -230,7 +232,7 @@ func TestExecutionTaskRunConvergenceAdapterAcceptsCancelledToSkippedOnly(t *test
 	}
 	projection.RequestID = "repair-cancelled-conflict"
 	projection.Status = "failed"
-	if _, err := dependencies.DriverSteps.RepairTerminalDriverStep(ctx, projection); !errors.Is(err, domain.ErrInvalidTransition) {
+	if _, err := dependencies.DriverSteps.RepairTerminalDriverStep(ctx, projection); !errors.Is(err, persistence.ErrInvalidTransition) {
 		t.Fatalf("cancelled->failed error=%v, want invalid transition", err)
 	}
 }

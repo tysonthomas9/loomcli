@@ -9,13 +9,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/modules/automation"
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/modules/automation"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
-// awaitStore is the in-memory store.AwaitStore (ARCHITECTURE-PROPOSAL §7
+// awaitStore is the in-memory execution.AwaitStore (ARCHITECTURE-PROPOSAL §7
 // step 8, chunk AW4).
 //
 // It deliberately carries no mutex of its own: every method synchronizes on
@@ -39,7 +39,7 @@ type awaitStore struct {
 	// the replay journal GetSatisfiedAwait serves (RULE 3: a re-executed run
 	// deterministically learns which event satisfied which await).
 	// ws -> instanceKey -> row.
-	items map[string]map[string]*domain.AwaitInstance
+	items map[string]map[string]*execution.AwaitInstance
 	// byPattern indexes PENDING awaits only — the dispatch-side reverse
 	// lookup (resolve-ALL multi-waiter). Resolved rows leave the index.
 	// ws -> pattern -> instanceKey set.
@@ -52,14 +52,14 @@ type awaitStore struct {
 func newAwaitStore(events *triggerEventStore) *awaitStore {
 	return &awaitStore{
 		events:    events,
-		items:     make(map[string]map[string]*domain.AwaitInstance),
+		items:     make(map[string]map[string]*execution.AwaitInstance),
 		byPattern: make(map[string]map[string]map[string]struct{}),
 	}
 }
 
-var _ store.AwaitStore = (*awaitStore)(nil)
-var _ store.AtomicAwaitStore = (*awaitStore)(nil)
-var _ store.RunOutcomeAwaitStore = (*awaitStore)(nil)
+var _ execution.AwaitStore = (*awaitStore)(nil)
+var _ execution.AtomicAwaitStore = (*awaitStore)(nil)
+var _ execution.RunOutcomeAwaitStore = (*awaitStore)(nil)
 
 // defaultAwaitDeadlineListLimit caps ListDueAwaitDeadlines when the caller
 // passes limit <= 0 (the "implementation default" of the store contract).
@@ -77,7 +77,7 @@ func (s *awaitStore) resumeEligible(ws, instanceKey string) bool {
 	if !ok {
 		return false
 	}
-	return row.Status == domain.AwaitSatisfied || row.Status == domain.AwaitTimedOut
+	return row.Status == execution.AwaitSatisfied || row.Status == execution.AwaitTimedOut
 }
 
 // RegisterAwaitAndCheck atomically checks the journal and otherwise suspends the
@@ -85,7 +85,7 @@ func (s *awaitStore) resumeEligible(ws, instanceKey string) bool {
 // a pending row is returned unchanged (crash-before-suspend replay) and a
 // terminal row replays its recorded outcome with Satisfied=true so the caller
 // never re-holds a finished await (RULE 3).
-func (s *awaitStore) RegisterAwaitAndCheck(_ context.Context, workspaceKey string, in store.AwaitRegistration) (*store.AwaitResult, error) {
+func (s *awaitStore) RegisterAwaitAndCheck(_ context.Context, workspaceKey string, in execution.AwaitRegistration) (*execution.AwaitRegistrationResult, error) {
 	now := time.Now().UTC()
 	inst, err := in.Instance(workspaceKey, now)
 	if err != nil {
@@ -94,7 +94,7 @@ func (s *awaitStore) RegisterAwaitAndCheck(_ context.Context, workspaceKey strin
 	s.events.mu.Lock()
 	defer s.events.mu.Unlock()
 	if existing, ok := s.items[workspaceKey][inst.InstanceKey]; ok {
-		return &store.AwaitResult{
+		return &execution.AwaitRegistrationResult{
 			Instance:  cloneAwaitInstance(existing),
 			Satisfied: existing.Status.IsTerminal(),
 		}, nil
@@ -103,7 +103,7 @@ func (s *awaitStore) RegisterAwaitAndCheck(_ context.Context, workspaceKey strin
 	// filtered by the actor allow-list, inside the same lock the journal's
 	// appends take — the lost-wakeup fix (vet A2).
 	if event := s.matchJournalLocked(workspaceKey, inst); event != nil {
-		inst.Status = domain.AwaitSatisfied
+		inst.Status = execution.AwaitSatisfied
 		inst.SatisfiedByEventID = event.SourceEventID
 		if inst.SatisfiedByEventID == "" {
 			inst.SatisfiedByEventID = event.EventID
@@ -112,9 +112,9 @@ func (s *awaitStore) RegisterAwaitAndCheck(_ context.Context, workspaceKey strin
 		inst.SatisfiedPayload = cloneAwaitPayload(event.Payload)
 	}
 	s.insertLocked(workspaceKey, inst)
-	return &store.AwaitResult{
+	return &execution.AwaitRegistrationResult{
 		Instance:  cloneAwaitInstance(inst),
-		Satisfied: inst.Status == domain.AwaitSatisfied,
+		Satisfied: inst.Status == execution.AwaitSatisfied,
 	}, nil
 }
 
@@ -122,7 +122,7 @@ func (s *awaitStore) RegisterAwaitAndCheck(_ context.Context, workspaceKey strin
 // whose rendered key exactly equals the await pattern and whose actor passes
 // the allow-list. Earliest = ReceivedAt, then EventID, so re-registration
 // replays deterministically. Caller holds the journal lock.
-func (s *awaitStore) matchJournalLocked(ws string, inst *domain.AwaitInstance) *automation.Event {
+func (s *awaitStore) matchJournalLocked(ws string, inst *execution.AwaitInstance) *automation.Event {
 	var best *automation.Event
 	for _, event := range s.events.items[ws] {
 		eventID := event.SourceEventID
@@ -132,7 +132,7 @@ func (s *awaitStore) matchJournalLocked(ws string, inst *domain.AwaitInstance) *
 		// Synthetic timeout IDs are reserved to the deadline sweeper's
 		// non-journaled SystemTimeoutLane. An ingress event that copied the
 		// prefix must never satisfy a later registration through catch-up.
-		if domain.IsAwaitTimeoutEventID(eventID) {
+		if execution.IsAwaitTimeoutEventID(eventID) {
 			continue
 		}
 		// run.finished is a reserved lifecycle lane. Historical external or
@@ -148,10 +148,10 @@ func (s *awaitStore) matchJournalLocked(ws string, inst *domain.AwaitInstance) *
 		// Oversized event envelopes remain durable audit records but are not
 		// eligible await-resume payloads. Continue scanning so one large event
 		// cannot poison this pattern forever or hide a later valid winner.
-		if len(event.Payload) > domain.DefaultAwaitResumePayloadCap {
+		if len(event.Payload) > execution.DefaultAwaitResumePayloadCap {
 			continue
 		}
-		if domain.AwaitEventKey(event.EventType, event.SubjectRef) != inst.Pattern {
+		if execution.AwaitEventKey(event.EventType, event.SubjectRef) != inst.Pattern {
 			continue
 		}
 		if !awaitActorAllowed(inst.ActorAllow, event.ActorRef) {
@@ -167,14 +167,14 @@ func (s *awaitStore) matchJournalLocked(ws string, inst *domain.AwaitInstance) *
 
 // insertLocked stores the row and, while it is pending, indexes it for the
 // dispatch matcher. Caller holds the journal lock.
-func (s *awaitStore) insertLocked(ws string, inst *domain.AwaitInstance) {
+func (s *awaitStore) insertLocked(ws string, inst *execution.AwaitInstance) {
 	if s.items[ws] == nil {
-		s.items[ws] = make(map[string]*domain.AwaitInstance)
+		s.items[ws] = make(map[string]*execution.AwaitInstance)
 		s.byPattern[ws] = make(map[string]map[string]struct{})
 	}
 	stored := cloneAwaitInstance(inst)
 	s.items[ws][stored.InstanceKey] = stored
-	if stored.Status != domain.AwaitPending {
+	if stored.Status != execution.AwaitPending {
 		return
 	}
 	if s.byPattern[ws][stored.Pattern] == nil {
@@ -185,40 +185,40 @@ func (s *awaitStore) insertLocked(ws string, inst *domain.AwaitInstance) {
 
 // ResolveAwait transitions one pending await out of pending, persisting the
 // size-capped resume payload on the row. A synthetic deadline-sweeper event
-// (domain.IsAwaitTimeoutEventID) lands the row in timed_out instead of
+// (execution.IsAwaitTimeoutEventID) lands the row in timed_out instead of
 // satisfied. Resolving an already-terminal await is the idempotent replay:
 // Resume=false, first writer's outcome untouched. The actor parameter is the
 // verified resolver identity; the eligible-actor predicate is enforced by the
 // dispatch matcher / approval endpoint before this call (AW7), mirroring
 // fleet-db's resolve_await.lua, so it is not re-checked here.
-func (s *awaitStore) ResolveAwait(_ context.Context, workspaceKey, instanceKey, eventID string, payload json.RawMessage, actor string) (*store.AwaitResolution, error) {
+func (s *awaitStore) ResolveAwait(_ context.Context, workspaceKey, instanceKey, eventID string, payload json.RawMessage, actor string) (*execution.AwaitResolution, error) {
 	if eventID == "" {
-		return nil, fmt.Errorf("resolve await %q: event id required: %w", instanceKey, domain.ErrInvalid)
+		return nil, fmt.Errorf("resolve await %q: event id required: %w", instanceKey, persistence.ErrInvalid)
 	}
-	if len(payload) > domain.DefaultAwaitResumePayloadCap {
+	if len(payload) > execution.DefaultAwaitResumePayloadCap {
 		return nil, fmt.Errorf("resolve await %q: resume payload %d bytes exceeds cap %d: %w",
-			instanceKey, len(payload), domain.DefaultAwaitResumePayloadCap, domain.ErrInvalid)
+			instanceKey, len(payload), execution.DefaultAwaitResumePayloadCap, persistence.ErrInvalid)
 	}
 	s.events.mu.Lock()
 	defer s.events.mu.Unlock()
 	inst, ok := s.items[workspaceKey][instanceKey]
 	if !ok {
-		return nil, fmt.Errorf("await %q in workspace %q: %w", instanceKey, workspaceKey, domain.ErrNotFound)
+		return nil, fmt.Errorf("await %q in workspace %q: %w", instanceKey, workspaceKey, persistence.ErrNotFound)
 	}
 	if inst.Status.IsTerminal() {
-		return &store.AwaitResolution{Instance: cloneAwaitInstance(inst), Resume: false}, nil
+		return &execution.AwaitResolution{Instance: cloneAwaitInstance(inst), Resume: false}, nil
 	}
 	now := time.Now().UTC()
-	inst.Status = domain.AwaitSatisfied
-	if domain.IsAwaitTimeoutEventID(eventID) {
-		inst.Status = domain.AwaitTimedOut
+	inst.Status = execution.AwaitSatisfied
+	if execution.IsAwaitTimeoutEventID(eventID) {
+		inst.Status = execution.AwaitTimedOut
 	}
 	inst.SatisfiedByEventID = eventID
 	inst.SatisfiedActor = actor
 	inst.SatisfiedPayload = cloneAwaitPayload(payload)
 	inst.ResumedAt = &now
 	s.dropPatternIndexLocked(workspaceKey, inst.Pattern, inst.InstanceKey)
-	return &store.AwaitResolution{Instance: cloneAwaitInstance(inst), Resume: true}, nil
+	return &execution.AwaitResolution{Instance: cloneAwaitInstance(inst), Resume: true}, nil
 }
 
 // ResolveAwaitAndResume is the generic atomic dispatch lane. It acquires the
@@ -233,26 +233,26 @@ func (s *awaitStore) ResolveAwaitAndResume(
 	actor string,
 ) error {
 	if strings.TrimSpace(eventID) == "" {
-		return fmt.Errorf("resolve await and resume %q: event id required: %w", instanceKey, domain.ErrInvalid)
+		return fmt.Errorf("resolve await and resume %q: event id required: %w", instanceKey, persistence.ErrInvalid)
 	}
-	if len(payload) > domain.DefaultAwaitResumePayloadCap {
+	if len(payload) > execution.DefaultAwaitResumePayloadCap {
 		return fmt.Errorf("resolve await and resume %q: resume payload %d bytes exceeds cap %d: %w",
-			instanceKey, len(payload), domain.DefaultAwaitResumePayloadCap, domain.ErrInvalid)
+			instanceKey, len(payload), execution.DefaultAwaitResumePayloadCap, persistence.ErrInvalid)
 	}
 	if s.runs == nil {
-		return fmt.Errorf("resolve await and resume %q: DriverRun store unavailable: %w", instanceKey, domain.ErrInvalid)
+		return fmt.Errorf("resolve await and resume %q: DriverRun store unavailable: %w", instanceKey, persistence.ErrInvalid)
 	}
-	targetStatus := domain.AwaitSatisfied
-	if domain.IsAwaitTimeoutEventID(eventID) {
-		if actor != domain.AwaitTimeoutActor {
+	targetStatus := execution.AwaitSatisfied
+	if execution.IsAwaitTimeoutEventID(eventID) {
+		if actor != execution.AwaitTimeoutActor {
 			return fmt.Errorf("resolve await and resume %q: timeout event actor %q: %w",
-				instanceKey, actor, domain.ErrAwaitActorForbidden)
+				instanceKey, actor, execution.ErrAwaitActorForbidden)
 		}
-		if target, ok := domain.AwaitTimeoutTargetInstance(eventID); !ok || target != instanceKey {
+		if target, ok := execution.AwaitTimeoutTargetInstance(eventID); !ok || target != instanceKey {
 			return fmt.Errorf("resolve await and resume %q: timeout event targets %q: %w",
-				instanceKey, target, domain.ErrInvalid)
+				instanceKey, target, persistence.ErrInvalid)
 		}
-		targetStatus = domain.AwaitTimedOut
+		targetStatus = execution.AwaitTimedOut
 	}
 	return s.resolveAwaitAndResume(workspaceKey, instanceKey, eventID, payload, actor, targetStatus)
 }
@@ -267,10 +267,10 @@ func (s *awaitStore) ResolveRunOutcomeAwaitAndResume(
 	payload json.RawMessage,
 ) error {
 	if !strings.HasPrefix(eventID, "run-finished:") {
-		return fmt.Errorf("resolve run outcome await %q: invalid event id: %w", instanceKey, domain.ErrInvalid)
+		return fmt.Errorf("resolve run outcome await %q: invalid event id: %w", instanceKey, persistence.ErrInvalid)
 	}
-	err := s.resolveAwaitAndResume(workspaceKey, instanceKey, eventID, payload, runOutcomeAwaitActor, domain.AwaitSatisfied)
-	if errors.Is(err, domain.ErrAwaitActorForbidden) {
+	err := s.resolveAwaitAndResume(workspaceKey, instanceKey, eventID, payload, runOutcomeAwaitActor, execution.AwaitSatisfied)
+	if errors.Is(err, execution.ErrAwaitActorForbidden) {
 		return nil
 	}
 	return err
@@ -281,16 +281,16 @@ func (s *awaitStore) resolveAwaitAndResume(
 	workspaceKey, instanceKey, eventID string,
 	payload json.RawMessage,
 	actor string,
-	targetStatus domain.AwaitStatus,
+	targetStatus execution.AwaitStatus,
 ) error {
-	if len(payload) > domain.DefaultAwaitResumePayloadCap {
+	if len(payload) > execution.DefaultAwaitResumePayloadCap {
 		return fmt.Errorf("resolve await and resume %q: resume payload %d bytes exceeds cap %d: %w",
-			instanceKey, len(payload), domain.DefaultAwaitResumePayloadCap, domain.ErrInvalid)
+			instanceKey, len(payload), execution.DefaultAwaitResumePayloadCap, persistence.ErrInvalid)
 	}
 	if s.runs == nil {
-		return fmt.Errorf("resolve await and resume %q: DriverRun store unavailable: %w", instanceKey, domain.ErrInvalid)
+		return fmt.Errorf("resolve await and resume %q: DriverRun store unavailable: %w", instanceKey, persistence.ErrInvalid)
 	}
-	runID, _, err := domain.ParseAwaitInstanceKey(instanceKey)
+	runID, _, err := execution.ParseAwaitInstanceKey(instanceKey)
 	if err != nil {
 		return fmt.Errorf("resolve await and resume %q: %w", instanceKey, err)
 	}
@@ -301,25 +301,25 @@ func (s *awaitStore) resolveAwaitAndResume(
 	defer s.events.mu.Unlock()
 	inst := s.items[workspaceKey][instanceKey]
 	if inst == nil {
-		return fmt.Errorf("await %q in workspace %q: %w", instanceKey, workspaceKey, domain.ErrNotFound)
+		return fmt.Errorf("await %q in workspace %q: %w", instanceKey, workspaceKey, persistence.ErrNotFound)
 	}
 	if inst.RunID != runID {
 		return fmt.Errorf("await %q belongs to run %q, not %q: %w",
-			instanceKey, inst.RunID, runID, domain.ErrInvalidTransition)
+			instanceKey, inst.RunID, runID, persistence.ErrInvalidTransition)
 	}
 	replay := inst.Status.IsTerminal()
 	if replay && (inst.Status != targetStatus || inst.SatisfiedByEventID != eventID) {
 		// A racing event (or timeout) won. This event is an idempotent no-op.
 		return nil
 	}
-	if inst.Status == domain.AwaitPending && targetStatus == domain.AwaitSatisfied && !awaitActorAllowed(inst.ActorAllow, actor) {
+	if inst.Status == execution.AwaitPending && targetStatus == execution.AwaitSatisfied && !awaitActorAllowed(inst.ActorAllow, actor) {
 		return fmt.Errorf("resolve await and resume %q by actor %q: %w",
-			instanceKey, actor, domain.ErrAwaitActorForbidden)
+			instanceKey, actor, execution.ErrAwaitActorForbidden)
 	}
 
 	run := s.runs.items[workspaceKey][runID]
 	if run == nil {
-		return fmt.Errorf("driver run %q in workspace %q: %w", inst.RunID, workspaceKey, domain.ErrNotFound)
+		return fmt.Errorf("driver run %q in workspace %q: %w", inst.RunID, workspaceKey, persistence.ErrNotFound)
 	}
 	if replay {
 		return convergeAtomicAwaitReplay(run, instanceKey, eventID, time.Now().UTC())
@@ -329,7 +329,7 @@ func (s *awaitStore) resolveAwaitAndResume(
 	}
 
 	now := time.Now().UTC()
-	if inst.Status == domain.AwaitPending {
+	if inst.Status == execution.AwaitPending {
 		inst.Status = targetStatus
 		inst.SatisfiedByEventID = eventID
 		inst.SatisfiedActor = actor
@@ -338,11 +338,11 @@ func (s *awaitStore) resolveAwaitAndResume(
 		s.dropPatternIndexLocked(workspaceKey, inst.Pattern, inst.InstanceKey)
 	}
 	switch run.Status {
-	case domain.DriverRunSuspendedAwaitingEvent:
-		run.Status = domain.DriverRunQueued
+	case execution.DriverRunSuspendedAwait:
+		run.Status = execution.DriverRunQueued
 		run.ResumeSourceEventID = eventID
 		run.UpdatedAt = now
-	case domain.DriverRunRunning:
+	case execution.DriverRunRunning:
 		// Resolution won the pending->suspend window. Suspend observes this
 		// marker and refuses to park the run.
 		run.AwaitInstanceKey = instanceKey
@@ -355,46 +355,46 @@ func (s *awaitStore) resolveAwaitAndResume(
 // convergeAtomicAwaitReplay heals only the same committed await cycle. A run
 // that has progressed to another running/queued marker is a successful no-op;
 // delayed replay must never move execution backward.
-func convergeAtomicAwaitReplay(run *domain.DriverRun, instanceKey, eventID string, now time.Time) error {
+func convergeAtomicAwaitReplay(run *execution.DriverRunRecord, instanceKey, eventID string, now time.Time) error {
 	switch run.Status {
-	case domain.DriverRunSuspendedAwaitingEvent:
+	case execution.DriverRunSuspendedAwait:
 		if run.AwaitInstanceKey != instanceKey {
 			return nil
 		}
-		run.Status = domain.DriverRunQueued
+		run.Status = execution.DriverRunQueued
 		run.ResumeSourceEventID = eventID
 		run.UpdatedAt = now
 		return nil
-	case domain.DriverRunRunning, domain.DriverRunQueued:
+	case execution.DriverRunRunning, execution.DriverRunQueued:
 		return nil
 	default:
 		if run.Status.IsTerminal() {
 			return nil
 		}
 		return fmt.Errorf("driver run %q cannot replay await resume from %s: %w",
-			run.RunID, run.Status, domain.ErrInvalidTransition)
+			run.RunID, run.Status, persistence.ErrInvalidTransition)
 	}
 }
 
-func validateAtomicAwaitResumeState(run *domain.DriverRun, instanceKey, eventID string) error {
+func validateAtomicAwaitResumeState(run *execution.DriverRunRecord, instanceKey, eventID string) error {
 	switch run.Status {
-	case domain.DriverRunSuspendedAwaitingEvent:
+	case execution.DriverRunSuspendedAwait:
 		if run.AwaitInstanceKey != instanceKey {
 			return fmt.Errorf("driver run %q awaits %q, not %q: %w",
-				run.RunID, run.AwaitInstanceKey, instanceKey, domain.ErrInvalidTransition)
+				run.RunID, run.AwaitInstanceKey, instanceKey, persistence.ErrInvalidTransition)
 		}
-	case domain.DriverRunRunning:
+	case execution.DriverRunRunning:
 		if run.AwaitInstanceKey == instanceKey && run.ResumeSourceEventID != "" && run.ResumeSourceEventID != eventID {
-			return fmt.Errorf("driver run %q already has a different pending resume: %w", run.RunID, domain.ErrInvalidTransition)
+			return fmt.Errorf("driver run %q already has a different pending resume: %w", run.RunID, persistence.ErrInvalidTransition)
 		}
-	case domain.DriverRunQueued:
+	case execution.DriverRunQueued:
 		if run.ResumeSourceEventID != eventID {
 			return fmt.Errorf("driver run %q is queued without await resume %q: %w",
-				run.RunID, eventID, domain.ErrInvalidTransition)
+				run.RunID, eventID, persistence.ErrInvalidTransition)
 		}
 	default:
 		if !run.Status.IsTerminal() {
-			return fmt.Errorf("driver run %q cannot resume from %s: %w", run.RunID, run.Status, domain.ErrInvalidTransition)
+			return fmt.Errorf("driver run %q cannot resume from %s: %w", run.RunID, run.Status, persistence.ErrInvalidTransition)
 		}
 	}
 	return nil
@@ -403,13 +403,13 @@ func validateAtomicAwaitResumeState(run *domain.DriverRun, instanceKey, eventID 
 // ListAwaitsByPattern returns ALL pending awaits whose pattern exactly equals
 // pattern (resolve-ALL multi-waiter decision), RegisteredAt ascending with
 // InstanceKey tie-break so dispatch resolves waiters deterministically.
-func (s *awaitStore) ListAwaitsByPattern(_ context.Context, workspaceKey, pattern string) ([]*domain.AwaitInstance, error) {
+func (s *awaitStore) ListAwaitsByPattern(_ context.Context, workspaceKey, pattern string) ([]*execution.AwaitInstance, error) {
 	s.events.mu.RLock()
 	defer s.events.mu.RUnlock()
 	keys := s.byPattern[workspaceKey][pattern]
-	out := make([]*domain.AwaitInstance, 0, len(keys))
+	out := make([]*execution.AwaitInstance, 0, len(keys))
 	for key := range keys {
-		if inst := s.items[workspaceKey][key]; inst != nil && inst.Status == domain.AwaitPending {
+		if inst := s.items[workspaceKey][key]; inst != nil && inst.Status == execution.AwaitPending {
 			out = append(out, cloneAwaitInstance(inst))
 		}
 	}
@@ -425,15 +425,15 @@ func (s *awaitStore) ListAwaitsByPattern(_ context.Context, workspaceKey, patter
 // ListDueAwaitDeadlines returns pending awaits due at or before before,
 // Deadline ascending with InstanceKey tie-break — the sweeper feed (the
 // in-memory twin of fleet-db's deadline ZSET, sorted on read).
-func (s *awaitStore) ListDueAwaitDeadlines(_ context.Context, workspaceKey string, before time.Time, limit int) ([]*domain.AwaitInstance, error) {
+func (s *awaitStore) ListDueAwaitDeadlines(_ context.Context, workspaceKey string, before time.Time, limit int) ([]*execution.AwaitInstance, error) {
 	if limit <= 0 {
 		limit = defaultAwaitDeadlineListLimit
 	}
 	s.events.mu.RLock()
 	defer s.events.mu.RUnlock()
-	out := make([]*domain.AwaitInstance, 0, len(s.items[workspaceKey]))
+	out := make([]*execution.AwaitInstance, 0, len(s.items[workspaceKey]))
 	for _, inst := range s.items[workspaceKey] {
-		if inst.Status != domain.AwaitPending || inst.Deadline.After(before) {
+		if inst.Status != execution.AwaitPending || inst.Deadline.After(before) {
 			continue
 		}
 		out = append(out, cloneAwaitInstance(inst))
@@ -452,13 +452,13 @@ func (s *awaitStore) ListDueAwaitDeadlines(_ context.Context, workspaceKey strin
 
 // GetSatisfiedAwait is the replay path: the satisfied (or timed_out) row with
 // its persisted resume payload inline. Missing, pending, and cancelled rows
-// wrap domain.ErrNotFound.
-func (s *awaitStore) GetSatisfiedAwait(_ context.Context, workspaceKey, instanceKey string) (*domain.AwaitInstance, error) {
+// wrap persistence.ErrNotFound.
+func (s *awaitStore) GetSatisfiedAwait(_ context.Context, workspaceKey, instanceKey string) (*execution.AwaitInstance, error) {
 	s.events.mu.RLock()
 	defer s.events.mu.RUnlock()
 	inst, ok := s.items[workspaceKey][instanceKey]
-	if !ok || (inst.Status != domain.AwaitSatisfied && inst.Status != domain.AwaitTimedOut) {
-		return nil, fmt.Errorf("satisfied await %q in workspace %q: %w", instanceKey, workspaceKey, domain.ErrNotFound)
+	if !ok || (inst.Status != execution.AwaitSatisfied && inst.Status != execution.AwaitTimedOut) {
+		return nil, fmt.Errorf("satisfied await %q in workspace %q: %w", instanceKey, workspaceKey, persistence.ErrNotFound)
 	}
 	return cloneAwaitInstance(inst), nil
 }
@@ -487,7 +487,7 @@ func awaitActorAllowed(allow []string, actor string) bool {
 }
 
 // cloneAwaitInstance deep-copies a row so callers never mutate stored state.
-func cloneAwaitInstance(inst *domain.AwaitInstance) *domain.AwaitInstance {
+func cloneAwaitInstance(inst *execution.AwaitInstance) *execution.AwaitInstance {
 	out := *inst
 	out.ActorAllow = append([]string(nil), inst.ActorAllow...)
 	out.SatisfiedPayload = cloneAwaitPayload(inst.SatisfiedPayload)

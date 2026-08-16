@@ -12,7 +12,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 	"github.com/tysonthomas9/loomcli/internal/platform/fleethttp"
-	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
 // EnvFleetDBAPIKey is the env var holding the fleet-db API key value.
@@ -26,11 +25,11 @@ const EnvFleetDBActor = "LOOM_FLEET_DB_ACTOR"
 // EnvAgentName is the env var used to identify the current agent process.
 const EnvAgentName = "LOOM_AGENT_NAME"
 
-// StoreHandle bundles a Store with the cleanup function for any
+// StoreHandle bundles the runtime FleetDB adapter with the cleanup function for any
 // subprocess (embedded fleet-db) the bootstrap had to start. Callers
 // MUST call Close to terminate the subprocess.
 type StoreHandle struct {
-	Store store.Store
+	Store *fleetdb.Client
 	mode  Mode
 	url   string
 	// fleetDBClientAPIKey is retained only in process memory so composition
@@ -111,7 +110,7 @@ func (h *StoreHandle) Close() error {
 	return firstErr
 }
 
-// OpenStore constructs a Store appropriate for the current Mode.
+// OpenStore constructs the FleetDB adapter appropriate for the current Mode.
 //
 // In ModeCloud (LOOM_FLEET_DB_URL set), it builds an HTTP client against
 // the configured URL. The returned handle's embedded field is nil.
@@ -184,10 +183,6 @@ func openStoreForMode(ctx context.Context, dataDir string, cfg fleetdb.Config, l
 	}
 }
 
-type fleetDBCapabilityChecker interface {
-	RequireCapabilities(context.Context, []string) error
-}
-
 func requireFleetDBCapabilities(ctx context.Context, handle *StoreHandle, required []string) error {
 	if len(required) == 0 {
 		return nil
@@ -195,11 +190,7 @@ func requireFleetDBCapabilities(ctx context.Context, handle *StoreHandle, requir
 	if handle == nil || handle.Store == nil {
 		return errors.New("store handle is unavailable")
 	}
-	checker, ok := handle.Store.(fleetDBCapabilityChecker)
-	if !ok {
-		return fmt.Errorf("store %T does not support FleetDB capability negotiation", handle.Store)
-	}
-	return checker.RequireCapabilities(ctx, required)
+	return handle.Store.RequireCapabilities(ctx, required)
 }
 
 func openCloudStore(cfg fleetdb.Config, logger *slog.Logger) (*StoreHandle, error) {

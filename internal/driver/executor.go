@@ -11,12 +11,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
-
-	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/driver/sandbox"
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
-	"github.com/tysonthomas9/loomcli/internal/store"
+
+	"github.com/tysonthomas9/loomcli/internal/driver/sandbox"
+	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 var ErrNoQueuedRun = errors.New("driver executor: no queued run")
@@ -143,7 +142,7 @@ type ExecutionResult struct {
 
 func (e *Executor) RunOnce(ctx context.Context) (*ExecutionResult, error) {
 	if e == nil || e.Store == nil {
-		return nil, fmt.Errorf("store required: %w", domain.ErrInvalid)
+		return nil, fmt.Errorf("store required: %w", persistence.ErrInvalid)
 	}
 	if e.Execution == nil || e.RunOutcomeQueue == nil || e.TerminalWorkRecoveryQueue == nil || e.ExecutionWorkers == nil || e.ExecutionAuthorities == nil || e.SystemAuthorities == nil {
 		return nil, fmt.Errorf("execution DriverRun, outcome queue, and worker-node APIs are required: %w", execution.ErrUnavailable)
@@ -170,7 +169,7 @@ func (e *Executor) RunOnce(ctx context.Context) (*ExecutionResult, error) {
 	}
 	claimed, err := e.claimDriverRun(ctx, run, nodeID, leaseID, leaseToken)
 	if err != nil {
-		if errors.Is(err, domain.ErrAlreadyClaimed) || errors.Is(err, domain.ErrInvalidTransition) {
+		if errors.Is(err, persistence.ErrAlreadyClaimed) || errors.Is(err, persistence.ErrInvalidTransition) {
 			return &ExecutionResult{Run: run, Skipped: true}, nil
 		}
 		return nil, fmt.Errorf("claim driver run: %w", err)
@@ -235,7 +234,7 @@ func (e *Executor) runClaimed(ctx context.Context, workDir string, claimed *exec
 // available.
 func (e *Executor) mintRunToken(claimed *execution.DriverRun) (string, error) {
 	if len(e.RunTokenKey) == 0 || claimed == nil {
-		return "", fmt.Errorf("driver run-token signing key and claimed run are required: %w", domain.ErrInvalid)
+		return "", fmt.Errorf("driver run-token signing key and claimed run are required: %w", persistence.ErrInvalid)
 	}
 	ttl, err := RunTokenTTL()
 	if err != nil {
@@ -254,12 +253,12 @@ func (e *Executor) mintRunToken(claimed *execution.DriverRun) (string, error) {
 	return token, nil
 }
 
-func (e *Executor) RecoverStaleOnce(ctx context.Context) (*store.StaleDriverRunRecoveryResult, error) {
+func (e *Executor) RecoverStaleOnce(ctx context.Context) (*execution.StaleDriverRunRecoveryResult, error) {
 	if e == nil || e.Store == nil {
-		return nil, fmt.Errorf("store required: %w", domain.ErrInvalid)
+		return nil, fmt.Errorf("store required: %w", persistence.ErrInvalid)
 	}
 	maxAge := 5 * time.Minute
-	recover := store.StaleDriverRunRecovery{
+	recover := execution.StaleDriverRunRecovery{
 		MaxAgeSeconds: int64(maxAge / time.Second),
 		Summary:       "driver executor heartbeat expired",
 	}
@@ -270,7 +269,7 @@ func (e *Executor) RecoverStaleOnce(ctx context.Context) (*store.StaleDriverRunR
 	if err != nil {
 		return nil, fmt.Errorf("list workspaces for stale driver recovery: %w", err)
 	}
-	out := &store.StaleDriverRunRecoveryResult{}
+	out := &execution.StaleDriverRunRecoveryResult{}
 	for _, ws := range workspaces {
 		if ws == nil {
 			continue
@@ -298,7 +297,7 @@ func (e *Executor) RecoverStaleOnce(ctx context.Context) (*store.StaleDriverRunR
 // run.finished for every recovered run (AW6): a stale-failed run is a
 // terminal transition like any other, so a parent awaiting the child must
 // learn about it. The store stamps error class stale_driver_run by default.
-func (e *Executor) recoverStaleWorkspace(ctx context.Context, ws string, recover store.StaleDriverRunRecovery) (*store.StaleDriverRunRecoveryResult, error) {
+func (e *Executor) recoverStaleWorkspace(ctx context.Context, ws string, recover execution.StaleDriverRunRecovery) (*execution.StaleDriverRunRecoveryResult, error) {
 	result, err := e.recoverDriverRuns(ctx, ws, recover)
 	if err != nil {
 		return nil, err
@@ -343,7 +342,7 @@ func (e *Executor) nextQueuedRun(ctx context.Context) (*execution.DriverRun, err
 
 func queuedRunByID(ctx context.Context, runs execution.DriverRunAPI, ws, runID string) (*execution.DriverRun, error) {
 	if strings.TrimSpace(ws) == "" {
-		return nil, fmt.Errorf("workspace key required for run %q: %w", runID, domain.ErrInvalid)
+		return nil, fmt.Errorf("workspace key required for run %q: %w", runID, persistence.ErrInvalid)
 	}
 	run, err := runs.GetDriverRun(ctx, ws, runID)
 	if err != nil {
@@ -506,7 +505,7 @@ func (e *Executor) executionRunOutcomeAwaitNotifier() RunOutcomeAwaitNotifier {
 // accepted register->suspend window. Anything else (zombie lease, stale
 // recovery) stays an error.
 func (e *Executor) settleDisownedFinish(ctx context.Context, claimed *execution.DriverRun, finishErr error) (*execution.DriverRun, bool) {
-	if !errors.Is(finishErr, domain.ErrNotOwner) {
+	if !errors.Is(finishErr, persistence.ErrNotOwner) {
 		return nil, false
 	}
 	run, err := e.Execution.GetDriverRun(ctx, claimed.WorkspaceKey, claimed.RunID)
@@ -574,7 +573,7 @@ func (e *Executor) ensureNode(ctx context.Context, ws, nodeID string) error {
 	}
 	_, err = e.ExecutionWorkers.RegisterWorkerNode(ctx, registerAuth, execution.RegisterWorkerNodeCommand{
 		WorkspaceKey: ws, RequestID: "register-driver-executor-node:" + nodeID, NodeID: nodeID,
-		OwnerActor: executorOwnerActor(), RuntimeProvider: string(domain.RuntimeProviderLocal),
+		OwnerActor: executorOwnerActor(), RuntimeProvider: string(execution.RuntimeProviderLocal),
 		Labels:        []string{"loom-driver-executor"},
 		Capabilities:  []string{"driver-runner", "task-runner", "flue-local"},
 		ToolInventory: []string{"loom-driver"}, Version: "loom-serve", Capacity: e.nodeCapacity(), TTL: ttl, RegisteredAt: now,
@@ -663,7 +662,7 @@ func (e *Executor) claimDriverRun(ctx context.Context, queued *execution.DriverR
 		return nil, execution.ErrUnavailable
 	}
 	if e.SystemAuthorities == nil {
-		return nil, fmt.Errorf("execution system authority resolver required: %w", domain.ErrInvalid)
+		return nil, fmt.Errorf("execution system authority resolver required: %w", persistence.ErrInvalid)
 	}
 	auth, err := e.SystemAuthorities.ResolveExecutionSystemAuthority(
 		ctx, queued.WorkspaceKey, execution.ActionClaimDriverRun, string(execution.DriverExecutorComponentID),
@@ -686,7 +685,7 @@ func (e *Executor) heartbeatDriverRun(ctx context.Context, claimed *execution.Dr
 		return nil, execution.ErrUnavailable
 	}
 	if e.ExecutionAuthorities == nil {
-		return nil, fmt.Errorf("execution DriverRun authority resolver required: %w", domain.ErrInvalid)
+		return nil, fmt.Errorf("execution DriverRun authority resolver required: %w", persistence.ErrInvalid)
 	}
 	owner := executionOwnerFromDriverRun(claimed, leaseToken)
 	auth, err := e.ExecutionAuthorities.ResolveDriverRunAuthority(ctx, claimed.WorkspaceKey, execution.ActionHeartbeatDriverRun, owner)
@@ -707,7 +706,7 @@ func (e *Executor) finalizeDriverRun(ctx context.Context, claimed *execution.Dri
 		return nil, execution.ErrUnavailable
 	}
 	if e.ExecutionAuthorities == nil {
-		return nil, fmt.Errorf("execution DriverRun authority resolver required: %w", domain.ErrInvalid)
+		return nil, fmt.Errorf("execution DriverRun authority resolver required: %w", persistence.ErrInvalid)
 	}
 	owner := executionOwnerFromDriverRun(claimed, leaseToken)
 	auth, err := e.ExecutionAuthorities.ResolveDriverRunAuthority(ctx, claimed.WorkspaceKey, execution.ActionFinalizeDriverRun, owner)
@@ -726,12 +725,12 @@ func (e *Executor) finalizeDriverRun(ctx context.Context, claimed *execution.Dri
 	return run, nil
 }
 
-func (e *Executor) recoverDriverRuns(ctx context.Context, workspace string, recover store.StaleDriverRunRecovery) (*store.StaleDriverRunRecoveryResult, error) {
+func (e *Executor) recoverDriverRuns(ctx context.Context, workspace string, recover execution.StaleDriverRunRecovery) (*execution.StaleDriverRunRecoveryResult, error) {
 	if e.Execution == nil {
 		return nil, execution.ErrUnavailable
 	}
 	if e.SystemAuthorities == nil {
-		return nil, fmt.Errorf("execution system authority resolver required: %w", domain.ErrInvalid)
+		return nil, fmt.Errorf("execution system authority resolver required: %w", persistence.ErrInvalid)
 	}
 	observedAt := time.Now().UTC()
 	maxAge := time.Duration(recover.MaxAgeSeconds) * time.Second
@@ -757,7 +756,7 @@ func (e *Executor) recoverDriverRuns(ctx context.Context, workspace string, reco
 	if err != nil {
 		return nil, err
 	}
-	return &store.StaleDriverRunRecoveryResult{
+	return &execution.StaleDriverRunRecoveryResult{
 		WorkspaceKey: result.WorkspaceKey, StaleBefore: result.StaleBefore, RecoveredAt: result.RecoveredAt,
 		Recovered: result.Recovered, SkippedFresh: result.SkippedFresh,
 		RecoveredRunIDs:    append([]string(nil), result.RecoveredRunIDs...),
@@ -811,13 +810,13 @@ func loadRunRequest(ctx context.Context, workDir string, run *execution.DriverRu
 		return RunRequest{}, fmt.Errorf("load pinned driver version: %w", err)
 	}
 	if version.DriverID != run.DriverID {
-		return RunRequest{}, fmt.Errorf("pinned version %q belongs to driver %q, run wants %q: %w", version.VersionID, version.DriverID, run.DriverID, domain.ErrInvalid)
+		return RunRequest{}, fmt.Errorf("pinned version %q belongs to driver %q, run wants %q: %w", version.VersionID, version.DriverID, run.DriverID, persistence.ErrInvalid)
 	}
 	if version.ValidationStatus != workflowcatalog.DriverVersionValidationPassed {
-		return RunRequest{}, fmt.Errorf("pinned version %q is not passed: %w", version.VersionID, domain.ErrInvalid)
+		return RunRequest{}, fmt.Errorf("pinned version %q is not passed: %w", version.VersionID, persistence.ErrInvalid)
 	}
 	if version.BundleRef == "" {
-		return RunRequest{}, fmt.Errorf("pinned version %q has no bundle_ref: %w", version.VersionID, domain.ErrInvalid)
+		return RunRequest{}, fmt.Errorf("pinned version %q has no bundle_ref: %w", version.VersionID, persistence.ErrInvalid)
 	}
 	bundleRoot, err := safeBundleRoot(workDir, version.BundleRef)
 	if err != nil {
@@ -856,7 +855,7 @@ func verifyBundleManifest(bundleRoot, wantDigest string) (map[string]string, str
 	}
 	serverRef := manifest["server_ref"]
 	if serverRef == "" {
-		return nil, "", fmt.Errorf("native Flue bundle manifest missing server_ref: %w", domain.ErrInvalid)
+		return nil, "", fmt.Errorf("native Flue bundle manifest missing server_ref: %w", persistence.ErrInvalid)
 	}
 	serverPath, err := safeBundleFile(bundleRoot, serverRef)
 	if err != nil {
@@ -865,19 +864,19 @@ func verifyBundleManifest(bundleRoot, wantDigest string) (map[string]string, str
 	if info, err := os.Stat(serverPath); err != nil {
 		return nil, "", fmt.Errorf("stat built Flue server: %w", err)
 	} else if info.IsDir() {
-		return nil, "", fmt.Errorf("built Flue server %q is a directory: %w", serverRef, domain.ErrInvalid)
+		return nil, "", fmt.Errorf("built Flue server %q is a directory: %w", serverRef, persistence.ErrInvalid)
 	}
 	if got, err := digestBundleTree(bundleRoot, manifestBytes); err != nil {
 		return nil, "", err
 	} else if got != wantDigest {
-		return nil, "", fmt.Errorf("bundle digest mismatch: got %s want %s: %w", got, wantDigest, domain.ErrInvalid)
+		return nil, "", fmt.Errorf("bundle digest mismatch: got %s want %s: %w", got, wantDigest, persistence.ErrInvalid)
 	}
 	return manifest, serverPath, nil
 }
 
 func safeBundleRoot(workDir, bundleRef string) (string, error) {
 	if filepath.IsAbs(bundleRef) {
-		return "", fmt.Errorf("bundle_ref must be relative: %w", domain.ErrInvalid)
+		return "", fmt.Errorf("bundle_ref must be relative: %w", persistence.ErrInvalid)
 	}
 	root := filepath.Clean(filepath.Join(workDir, filepath.FromSlash(bundleRef)))
 	rel, err := filepath.Rel(workDir, root)
@@ -885,14 +884,14 @@ func safeBundleRoot(workDir, bundleRef string) (string, error) {
 		return "", fmt.Errorf("resolve bundle_ref: %w", err)
 	}
 	if rel == "." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || rel == ".." {
-		return "", fmt.Errorf("bundle_ref escapes work dir: %w", domain.ErrInvalid)
+		return "", fmt.Errorf("bundle_ref escapes work dir: %w", persistence.ErrInvalid)
 	}
 	return root, nil
 }
 
 func safeBundleFile(bundleRoot, ref string) (string, error) {
 	if filepath.IsAbs(ref) {
-		return "", fmt.Errorf("bundle file ref must be relative: %w", domain.ErrInvalid)
+		return "", fmt.Errorf("bundle file ref must be relative: %w", persistence.ErrInvalid)
 	}
 	path := filepath.Clean(filepath.Join(bundleRoot, filepath.FromSlash(ref)))
 	rel, err := filepath.Rel(bundleRoot, path)
@@ -900,7 +899,7 @@ func safeBundleFile(bundleRoot, ref string) (string, error) {
 		return "", fmt.Errorf("resolve bundle file ref: %w", err)
 	}
 	if rel == "." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || rel == ".." {
-		return "", fmt.Errorf("bundle file ref escapes bundle root: %w", domain.ErrInvalid)
+		return "", fmt.Errorf("bundle file ref escapes bundle root: %w", persistence.ErrInvalid)
 	}
 	return path, nil
 }

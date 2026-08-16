@@ -10,15 +10,15 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
+
 	"go.opentelemetry.io/otel/attribute"
 
+	"github.com/tysonthomas9/loomcli/internal/app/query/operationalview"
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/monitor"
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
-	"github.com/tysonthomas9/loomcli/internal/ops"
-	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/storeadapter"
 )
 
@@ -110,15 +110,15 @@ type StatusResponse struct {
 type WorkItemsFn func(ctx context.Context) workitems.API
 
 // HandleStatus returns an HTTP handler for the full status endpoint.
-func HandleStatus(collectDataFn CollectDataFn, st store.Store) http.HandlerFunc {
+func HandleStatus(collectDataFn CollectDataFn, st MonitorProjectionSources) http.HandlerFunc {
 	return HandleStatusWithWorkItems(collectDataFn, st, nil)
 }
 
-func HandleStatusWithWorkItems(collectDataFn CollectDataFn, st store.Store, workItemsFn WorkItemsFn) http.HandlerFunc {
+func HandleStatusWithWorkItems(collectDataFn CollectDataFn, st MonitorProjectionSources, workItemsFn WorkItemsFn) http.HandlerFunc {
 	return HandleStatusWithDataSource(NewMonitorDataSource(collectDataFn, workItemsFn), st)
 }
 
-func HandleStatusWithDataSource(dataSource *MonitorDataSource, st store.Store) http.HandlerFunc {
+func HandleStatusWithDataSource(dataSource *MonitorDataSource, st MonitorProjectionSources) http.HandlerFunc {
 	return HandleStatusWithSources(dataSource, NewMonitorStoreDataSource(st))
 }
 
@@ -160,15 +160,15 @@ func HandleStatusWithSources(dataSource *MonitorDataSource, storeDataSource *Mon
 }
 
 // HandleAgents returns an HTTP handler for the agents endpoint.
-func HandleAgents(collectDataFn CollectDataFn, st store.Store) http.HandlerFunc {
+func HandleAgents(collectDataFn CollectDataFn, st MonitorProjectionSources) http.HandlerFunc {
 	return HandleAgentsWithWorkItems(collectDataFn, st, nil)
 }
 
-func HandleAgentsWithWorkItems(collectDataFn CollectDataFn, st store.Store, workItemsFn WorkItemsFn) http.HandlerFunc {
+func HandleAgentsWithWorkItems(collectDataFn CollectDataFn, st MonitorProjectionSources, workItemsFn WorkItemsFn) http.HandlerFunc {
 	return HandleAgentsWithDataSource(NewMonitorDataSource(collectDataFn, workItemsFn), st)
 }
 
-func HandleAgentsWithDataSource(dataSource *MonitorDataSource, st store.Store) http.HandlerFunc {
+func HandleAgentsWithDataSource(dataSource *MonitorDataSource, st MonitorProjectionSources) http.HandlerFunc {
 	return HandleAgentsWithSources(dataSource, NewMonitorStoreDataSource(st))
 }
 
@@ -289,7 +289,7 @@ func HandleSync(collectDataFn CollectDataFn) http.HandlerFunc {
 }
 
 // HandleWorkspaces returns an HTTP handler for the workspaces endpoint.
-func HandleWorkspaces(st store.Store) http.HandlerFunc {
+func HandleWorkspaces(st MonitorProjectionSources) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		response := WorkspacesResponse{
 			Mode:       "workspace",
@@ -342,7 +342,7 @@ func writeJSON(w http.ResponseWriter, v any) {
 }
 
 // getWorkspaceInfo returns workspace metadata for API responses.
-func getWorkspaceInfo(ctx context.Context, st store.Store, workspaceHint string) WorkspaceInfo {
+func getWorkspaceInfo(ctx context.Context, st MonitorProjectionSources, workspaceHint string) WorkspaceInfo {
 	info := WorkspaceInfo{Mode: "workspace"}
 	if st == nil {
 		return info
@@ -374,12 +374,12 @@ func groupAgentsByWorkspace(agents []monitor.AgentStatus) map[string][]monitor.A
 	return groups
 }
 
-func latestAgentSessionsForMonitor(ctx context.Context, st store.Store, wsKey string) map[string]*domain.AgentSession {
-	out := make(map[string]*domain.AgentSession)
+func latestAgentSessionsForMonitor(ctx context.Context, st MonitorProjectionSources, wsKey string) map[string]*interaction.SessionRecord {
+	out := make(map[string]*interaction.SessionRecord)
 	if st == nil || st.AgentSessions() == nil || wsKey == "" {
 		return out
 	}
-	sessions, err := st.AgentSessions().List(ctx, wsKey, store.AgentSessionFilter{Limit: 10000})
+	sessions, err := st.AgentSessions().List(ctx, wsKey, interaction.AgentSessionFilter{Limit: 10000})
 	if err != nil {
 		log.Printf("Failed to list agent sessions for monitor response: %v", err)
 		return out
@@ -396,13 +396,13 @@ func latestAgentSessionsForMonitor(ctx context.Context, st store.Store, wsKey st
 	return out
 }
 
-func latestInteractiveSessionsForMonitor(ctx context.Context, st store.Store, wsKey string) map[string]*domain.AgentSession {
-	out := make(map[string]*domain.AgentSession)
+func latestInteractiveSessionsForMonitor(ctx context.Context, st MonitorProjectionSources, wsKey string) map[string]*interaction.SessionRecord {
+	out := make(map[string]*interaction.SessionRecord)
 	if st == nil || st.AgentSessions() == nil || wsKey == "" {
 		return out
 	}
-	sessions, err := st.AgentSessions().List(ctx, wsKey, store.AgentSessionFilter{
-		Kind:  domain.AgentSessionKindInteractive,
+	sessions, err := st.AgentSessions().List(ctx, wsKey, interaction.AgentSessionFilter{
+		Kind:  interaction.SessionRecordInteractive,
 		Limit: 10000,
 	})
 	if err != nil {
@@ -421,7 +421,7 @@ func latestInteractiveSessionsForMonitor(ctx context.Context, st store.Store, ws
 	return out
 }
 
-func monitorSessionMoreRecent(candidate, current *domain.AgentSession) bool {
+func monitorSessionMoreRecent(candidate, current *interaction.SessionRecord) bool {
 	if candidate == nil {
 		return false
 	}
@@ -447,9 +447,9 @@ func monitorSessionMoreRecent(candidate, current *domain.AgentSession) bool {
 	return candidate.SessionID > current.SessionID
 }
 
-func monitorSessionActive(status domain.AgentSessionStatus) bool {
+func monitorSessionActive(status interaction.SessionRecordStatus) bool {
 	switch status {
-	case domain.AgentSessionCompleted, domain.AgentSessionFailed, domain.AgentSessionCancelled, domain.AgentSessionExpired:
+	case interaction.SessionRecordCompleted, interaction.SessionRecordFailed, interaction.SessionRecordCancelled, interaction.SessionRecordExpired:
 		return false
 	default:
 		return true
@@ -503,7 +503,7 @@ func mergeRuntimeAgentStatus(storeAgent monitor.AgentStatus, runtimeAgent monito
 	return merged
 }
 
-func monitorBranchFromAgent(ws *ops.WorkspaceData, agent ops.WorkspaceAgentInfo) string {
+func monitorBranchFromAgent(ws *operationalview.Workspace, agent operationalview.Agent) string {
 	if ws == nil || agent.Name == "" || ws.Path == "" {
 		return "unknown"
 	}
@@ -522,9 +522,9 @@ func monitorBranchFromAgent(ws *ops.WorkspaceData, agent ops.WorkspaceAgentInfo)
 	return branch
 }
 
-func selectMonitorAgentRepo(repos []ops.WorkspaceRepo, agent ops.WorkspaceAgentInfo) (ops.WorkspaceRepo, bool) {
+func selectMonitorAgentRepo(repos []operationalview.Repository, agent operationalview.Agent) (operationalview.Repository, bool) {
 	if len(repos) == 0 {
-		return ops.WorkspaceRepo{}, false
+		return operationalview.Repository{}, false
 	}
 	allowed := make(map[string]bool)
 	for _, name := range agent.Repos {
@@ -548,17 +548,17 @@ func selectMonitorAgentRepo(repos []ops.WorkspaceRepo, agent ops.WorkspaceAgentI
 			return repo, true
 		}
 	}
-	return ops.WorkspaceRepo{}, false
+	return operationalview.Repository{}, false
 }
 
-func monitorRepoFromAgent(agent ops.WorkspaceAgentInfo) string {
+func monitorRepoFromAgent(agent operationalview.Agent) string {
 	if agent.CrossRepo || len(agent.Repos) != 1 {
 		return ""
 	}
 	return agent.Repos[0]
 }
 
-func resolveMonitorWorkspace(ctx context.Context, st store.Store, workspaceHint string) (key string, name string, ok bool) {
+func resolveMonitorWorkspace(ctx context.Context, st MonitorProjectionSources, workspaceHint string) (key string, name string, ok bool) {
 	if st == nil {
 		return "", "", false
 	}

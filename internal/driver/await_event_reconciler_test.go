@@ -8,21 +8,22 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
-	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
+
+	workspaceowner "github.com/tysonthomas9/loomcli/internal/modules/workspace"
+
 	trigger "github.com/tysonthomas9/loomcli/internal/infra/automationruntime"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
-	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
 func TestAwaitEventReconcilerResolvesPendingAwaitAndCompletesNotification(t *testing.T) {
 	st, run, instanceKey := setupAwaitEventReconcileRun(t, "run-1", "approval.granted:deploy-1")
 	payload := json.RawMessage(`{"approved":true}`)
 	event := appendAwaitReconcileEvent(t, st, "stored-event-1", "approval-source-1", "approval.granted", "deploy-1", "alice", payload)
-	outbox := st.TriggerEvents().(store.AwaitEventNotificationStore)
+	outbox := st.TriggerEvents().(execution.AwaitEventNotificationStore)
 	reconciler, err := newTestAwaitEventReconciler(outbox, testAwaitMatcher(t, st), "WS", nil)
 	if err != nil {
 		t.Fatal(err)
@@ -48,7 +49,7 @@ func TestAwaitEventReconcilerResponseLossRetriesAndConverges(t *testing.T) {
 	st, run, instanceKey := setupAwaitEventReconcileRun(t, "run-loss", "approval.granted:deploy-loss")
 	event := appendAwaitReconcileEvent(t, st, "stored-event-loss", "approval-source-loss",
 		"approval.granted", "deploy-loss", "alice", nil)
-	outbox := st.TriggerEvents().(store.AwaitEventNotificationStore)
+	outbox := st.TriggerEvents().(execution.AwaitEventNotificationStore)
 	dispatcher := &responseLossAwaitEventDispatcher{inner: testAwaitMatcher(t, st)}
 	first, err := newTestAwaitEventReconciler(outbox, dispatcher, "WS", nil)
 	if err != nil {
@@ -76,12 +77,12 @@ func TestAwaitEventReconcilerResponseLossRetriesAndConverges(t *testing.T) {
 func TestAwaitEventReconcilerCompletionKeepsRegistrationCatchUp(t *testing.T) {
 	st := memstore.New()
 	ctx := t.Context()
-	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "WS", Name: "workspace"}); err != nil {
+	if _, err := st.Workspaces().Create(ctx, workspaceowner.WorkspaceCreate{Key: "WS", Name: "workspace"}); err != nil {
 		t.Fatal(err)
 	}
 	event := appendAwaitReconcileEvent(t, st, "stored-event-before", "approval-source-before",
 		"approval.granted", "deploy-before", "alice", json.RawMessage(`{"approved":true}`))
-	outbox := st.TriggerEvents().(store.AwaitEventNotificationStore)
+	outbox := st.TriggerEvents().(execution.AwaitEventNotificationStore)
 	reconciler, err := newTestAwaitEventReconciler(outbox, testAwaitMatcher(t, st), "WS", nil)
 	if err != nil {
 		t.Fatal(err)
@@ -89,8 +90,8 @@ func TestAwaitEventReconcilerCompletionKeepsRegistrationCatchUp(t *testing.T) {
 	if count, err := reconciler.DrainOnce(ctx, event.ReceivedAt.Add(time.Millisecond)); err != nil || count != 1 {
 		t.Fatalf("DrainOnce = %d, %v", count, err)
 	}
-	result, err := st.Awaits().RegisterAwaitAndCheck(ctx, "WS", store.AwaitRegistration{
-		InstanceKey: domain.AwaitInstanceKey("run-later", 1), RunID: "run-later",
+	result, err := st.Awaits().RegisterAwaitAndCheck(ctx, "WS", execution.AwaitRegistration{
+		InstanceKey: execution.AwaitInstanceKey("run-later", 1), RunID: "run-later",
 		Pattern: "approval.granted:deploy-before", ActorAllow: []string{"alice"},
 		Deadline: time.Now().Add(time.Hour).UTC(),
 	})
@@ -101,10 +102,10 @@ func TestAwaitEventReconcilerCompletionKeepsRegistrationCatchUp(t *testing.T) {
 
 func TestAwaitEventReconcilerQuarantinesOversizedEventWithoutPoisoningLaterWinner(t *testing.T) {
 	st, run, instanceKey := setupAwaitEventReconcileRun(t, "run-large", "approval.granted:deploy-large")
-	oversized := json.RawMessage(make([]byte, domain.DefaultAwaitResumePayloadCap+1))
+	oversized := json.RawMessage(make([]byte, execution.DefaultAwaitResumePayloadCap+1))
 	first := appendAwaitReconcileEvent(t, st, "stored-event-large", "approval-source-large",
 		"approval.granted", "deploy-large", "alice", oversized)
-	outbox := st.TriggerEvents().(store.AwaitEventNotificationStore)
+	outbox := st.TriggerEvents().(execution.AwaitEventNotificationStore)
 	reconciler, err := newTestAwaitEventReconciler(outbox, testAwaitMatcher(t, st), "WS", nil)
 	if err != nil {
 		t.Fatal(err)
@@ -113,7 +114,7 @@ func TestAwaitEventReconcilerQuarantinesOversizedEventWithoutPoisoningLaterWinne
 		t.Fatalf("oversized DrainOnce = %d, %v; want one audited no-op", count, err)
 	}
 	stillSuspended, err := st.DriverRuns().Get(t.Context(), "WS", run.RunID)
-	if err != nil || stillSuspended.Status != domain.DriverRunSuspendedAwaitingEvent {
+	if err != nil || stillSuspended.Status != execution.DriverRunSuspendedAwait {
 		t.Fatalf("run after oversized event = %+v, %v; want suspended", stillSuspended, err)
 	}
 	if count, err := reconciler.DrainOnce(t.Context(), first.ReceivedAt.Add(time.Hour)); err != nil || count != 0 {
@@ -129,7 +130,7 @@ func TestAwaitEventReconcilerQuarantinesOversizedEventWithoutPoisoningLaterWinne
 }
 
 func TestAwaitEventReconcilerCompletesForgedRunFinishedAndLaterGenuineEventWins(t *testing.T) {
-	pattern := domain.AwaitEventKey(execution.RunFinishedEventType, "child-1")
+	pattern := execution.AwaitEventKey(execution.RunFinishedEventType, "child-1")
 	st, run, instanceKey := setupAwaitEventReconcileRunWithActors(
 		t, "run-parent", pattern, []string{execution.RunFinishedActorRef},
 	)
@@ -140,7 +141,7 @@ func TestAwaitEventReconcilerCompletesForgedRunFinishedAndLaterGenuineEventWins(
 		execution.RunFinishedEventType, "child-1", execution.RunFinishedActorRef,
 		"github", automation.EventOriginExternal, payload,
 	)
-	outbox := st.TriggerEvents().(store.AwaitEventNotificationStore)
+	outbox := st.TriggerEvents().(execution.AwaitEventNotificationStore)
 	reconciler, err := newTestAwaitEventReconciler(outbox, testAwaitMatcher(t, st), "WS", nil)
 	if err != nil {
 		t.Fatal(err)
@@ -152,7 +153,7 @@ func TestAwaitEventReconcilerCompletesForgedRunFinishedAndLaterGenuineEventWins(
 	if count, err := reconciler.DrainOnce(t.Context(), now.Add(time.Hour)); err != nil || count != 0 {
 		t.Fatalf("forged notification replay = %d, %v; want completed", count, err)
 	}
-	if got, err := st.DriverRuns().Get(t.Context(), "WS", run.RunID); err != nil || got.Status != domain.DriverRunSuspendedAwaitingEvent {
+	if got, err := st.DriverRuns().Get(t.Context(), "WS", run.RunID); err != nil || got.Status != execution.DriverRunSuspendedAwait {
 		t.Fatalf("run after forged event = %+v, %v; want suspended", got, err)
 	}
 	if pending, err := st.Awaits().ListAwaitsByPattern(t.Context(), "WS", pattern); err != nil || len(pending) != 1 {
@@ -175,7 +176,7 @@ func TestAwaitEventReconcilerRetriesTruncatedPayloadMetadataWithoutResolving(t *
 	payload := json.RawMessage(`{"approved":true}`)
 	event := appendAwaitReconcileEvent(t, st, "stored-event-truncated", "approval-source-truncated",
 		"approval.granted", "deploy-truncated", "alice", payload)
-	inner := st.TriggerEvents().(store.AwaitEventNotificationStore)
+	inner := st.TriggerEvents().(execution.AwaitEventNotificationStore)
 	outbox := &payloadSizeMismatchAwaitEventOutbox{AwaitEventNotificationStore: inner}
 	reconciler, err := newTestAwaitEventReconciler(outbox, testAwaitMatcher(t, st), "WS", nil)
 	if err != nil {
@@ -186,7 +187,7 @@ func TestAwaitEventReconcilerRetriesTruncatedPayloadMetadataWithoutResolving(t *
 		t.Fatalf("mismatched DrainOnce = %d, %v; want retryable metadata error", count, err)
 	}
 	stillSuspended, err := st.DriverRuns().Get(t.Context(), "WS", run.RunID)
-	if err != nil || stillSuspended.Status != domain.DriverRunSuspendedAwaitingEvent {
+	if err != nil || stillSuspended.Status != execution.DriverRunSuspendedAwait {
 		t.Fatalf("run after truncated payload = %+v, %v; want suspended", stillSuspended, err)
 	}
 	if count, err := reconciler.DrainOnce(t.Context(), now.Add(2*time.Second)); err != nil || count != 1 {
@@ -196,14 +197,14 @@ func TestAwaitEventReconcilerRetriesTruncatedPayloadMetadataWithoutResolving(t *
 }
 
 type payloadSizeMismatchAwaitEventOutbox struct {
-	store.AwaitEventNotificationStore
+	execution.AwaitEventNotificationStore
 	mutated bool
 }
 
 func (outbox *payloadSizeMismatchAwaitEventOutbox) ClaimAwaitEventNotifications(
 	ctx context.Context,
-	claim store.AwaitEventNotificationClaim,
-) ([]store.AwaitEventNotification, error) {
+	claim execution.AwaitEventNotificationLease,
+) ([]execution.AwaitEventNotification, error) {
 	values, err := outbox.AwaitEventNotificationStore.ClaimAwaitEventNotifications(ctx, claim)
 	if err == nil && !outbox.mutated && len(values) > 0 {
 		outbox.mutated = true
@@ -233,7 +234,7 @@ func (dispatcher *responseLossAwaitEventDispatcher) Dispatch(
 	return result, nil
 }
 
-func setupAwaitEventReconcileRun(t *testing.T, runID, pattern string) (*memstore.Store, *domain.DriverRun, string) {
+func setupAwaitEventReconcileRun(t *testing.T, runID, pattern string) (*memstore.Store, *execution.DriverRunRecord, string) {
 	return setupAwaitEventReconcileRunWithActors(t, runID, pattern, []string{"alice"})
 }
 
@@ -241,27 +242,27 @@ func setupAwaitEventReconcileRunWithActors(
 	t *testing.T,
 	runID, pattern string,
 	actorAllow []string,
-) (*memstore.Store, *domain.DriverRun, string) {
+) (*memstore.Store, *execution.DriverRunRecord, string) {
 	t.Helper()
 	st := memstore.New()
 	ctx := t.Context()
-	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "WS", Name: "workspace"}); err != nil {
+	if _, err := st.Workspaces().Create(ctx, workspaceowner.WorkspaceCreate{Key: "WS", Name: "workspace"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.Drivers().Create(ctx, store.DriverCreate{
+	if _, err := st.Drivers().Create(ctx, workflowcatalog.DriverCreate{
 		WorkspaceKey: "WS", DriverID: "driver", Name: "driver",
 		OwnerType: workflowcatalog.DriverOwnerSystem, Status: workflowcatalog.DriverStatusActive,
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.DriverVersions().Create(ctx, store.DriverVersionCreate{
+	if _, err := st.DriverVersions().Create(ctx, workflowcatalog.DriverVersionCreate{
 		WorkspaceKey: "WS", DriverID: "driver", VersionID: "v1", Version: 1,
 		SourceDigest: "sha256:source", BundleDigest: "sha256:bundle",
 		ValidationStatus: workflowcatalog.DriverVersionValidationPassed,
 	}); err != nil {
 		t.Fatal(err)
 	}
-	run, err := st.DriverRuns().Create(ctx, store.DriverRunCreate{
+	run, err := st.DriverRuns().Create(ctx, execution.DriverRunCreate{
 		WorkspaceKey: "WS", RunID: runID, DriverID: "driver", DriverVersionID: "v1",
 	})
 	if err != nil {
@@ -271,8 +272,8 @@ func setupAwaitEventReconcileRunWithActors(
 	if err != nil {
 		t.Fatal(err)
 	}
-	instanceKey := domain.AwaitInstanceKey(runID, 1)
-	if _, err := st.Awaits().RegisterAwaitAndCheck(ctx, "WS", store.AwaitRegistration{
+	instanceKey := execution.AwaitInstanceKey(runID, 1)
+	if _, err := st.Awaits().RegisterAwaitAndCheck(ctx, "WS", execution.AwaitRegistration{
 		InstanceKey: instanceKey, RunID: runID, Pattern: pattern,
 		ActorAllow: actorAllow, Deadline: time.Now().Add(time.Hour).UTC(),
 	}); err != nil {
@@ -305,7 +306,7 @@ func appendAwaitReconcileEventWithProvenance(
 ) *automation.Event {
 	t.Helper()
 	now := time.Now().UTC()
-	appender := st.TriggerEvents().(store.TriggerEventAppender)
+	appender := st.TriggerEvents().(automation.TriggerEventAppender)
 	event, err := appender.AppendTriggerEvent(t.Context(), &automation.Event{
 		WorkspaceKey: "WS", EventID: storedID, SourceEventID: sourceID, SourceKind: sourceKind,
 		EventType: eventType, SubjectRef: subject, ActorRef: actor,
@@ -325,7 +326,7 @@ func assertAwaitEventReconciled(
 ) {
 	t.Helper()
 	run, err := st.DriverRuns().Get(t.Context(), "WS", runID)
-	if err != nil || run.Status != domain.DriverRunQueued || run.ResumeSourceEventID != eventID {
+	if err != nil || run.Status != execution.DriverRunQueued || run.ResumeSourceEventID != eventID {
 		t.Fatalf("run = %+v, %v; want queued by %q", run, err, eventID)
 	}
 	await, err := st.Awaits().GetSatisfiedAwait(t.Context(), "WS", instanceKey)

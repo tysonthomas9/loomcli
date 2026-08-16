@@ -6,10 +6,9 @@ import (
 	"fmt"
 	"path/filepath"
 
-	workspacemodule "github.com/tysonthomas9/loomcli/internal/modules/workspace"
+	workspaceowner "github.com/tysonthomas9/loomcli/internal/modules/workspace"
 
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
-	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
 // LoomConfig is a FleetDB-backed workspace view used by older command code
@@ -160,8 +159,8 @@ func ResolveActiveWorkspace(ctx context.Context) (*WorkspaceConfig, error) {
 }
 
 type configStore interface {
-	Workspaces() store.WorkspaceStore
-	Repos() store.RepoStore
+	Workspaces() workspaceowner.WorkspaceStore
+	Repos() workspaceowner.RepoStore
 }
 
 func loadConfigFromStore(ctx context.Context, st configStore) (*LoomConfig, error) {
@@ -201,7 +200,7 @@ func loadConfigFromStore(ctx context.Context, st configStore) (*LoomConfig, erro
 func workspaceConfigFromStore(
 	ctx context.Context,
 	st configStore,
-	ws *workspacemodule.Workspace,
+	ws *workspaceowner.Workspace,
 	local bootstrap.WorkspaceLocalState,
 ) (WorkspaceConfig, error) {
 	repos, err := repoConfigsFromStore(ctx, st, ws.Key, local)
@@ -240,7 +239,7 @@ func repoConfigsFromStore(
 	return repos, nil
 }
 
-func repoConfigFromStore(r *workspacemodule.Repository, local bootstrap.WorkspaceLocalState) RepoConfig {
+func repoConfigFromStore(r *workspaceowner.Repository, local bootstrap.WorkspaceLocalState) RepoConfig {
 	path := local.Repos[r.Name]
 	if path == "" {
 		path = r.Name

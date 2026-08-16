@@ -15,11 +15,9 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/tysonthomas9/loomcli/internal/modules/automation"
-
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
-	"github.com/tysonthomas9/loomcli/internal/store"
+
+	"github.com/tysonthomas9/loomcli/internal/modules/automation"
 )
 
 const (
@@ -104,17 +102,17 @@ func marshalBoundedRunFinishedPayload(
 	if err != nil {
 		return nil, err
 	}
-	if len(encoded) <= domain.DefaultAwaitResumePayloadCap {
+	if len(encoded) <= execution.DefaultAwaitResumePayloadCap {
 		return encoded, nil
 	}
 	payload.Summary, payload.ErrorClass, payload.Truncated = "", "", true
 	encoded, err = json.Marshal(payload)
-	if err != nil || len(encoded) <= domain.DefaultAwaitResumePayloadCap {
+	if err != nil || len(encoded) <= execution.DefaultAwaitResumePayloadCap {
 		return encoded, err
 	}
 	payload.ParentRunID = ""
 	encoded, err = json.Marshal(payload)
-	if err != nil || len(encoded) <= domain.DefaultAwaitResumePayloadCap {
+	if err != nil || len(encoded) <= execution.DefaultAwaitResumePayloadCap {
 		return encoded, err
 	}
 	sum := sha256.Sum256([]byte(runID))
@@ -175,12 +173,12 @@ type RunOutcomeAwaitResolver interface {
 }
 
 type storeRunOutcomeAwaitNotifier struct {
-	awaits   store.AwaitStore
+	awaits   execution.AwaitStore
 	resolver RunOutcomeAwaitResolver
 }
 
 func NewRunOutcomeAwaitNotifierWithResolver(
-	awaits store.AwaitStore,
+	awaits execution.AwaitStore,
 	resolver RunOutcomeAwaitResolver,
 ) (RunOutcomeAwaitNotifier, error) {
 	if awaits == nil {

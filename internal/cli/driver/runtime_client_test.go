@@ -8,8 +8,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 func TestDriverRuntimeClientUsesRunTokenWithoutLegacyIdentityHeaders(t *testing.T) {
@@ -96,7 +96,7 @@ func TestDriverRuntimeClientMapsStructuredDomainError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newDriverRuntimeClient: %v", err)
 	}
-	if err := client.call(context.Background(), "complete-task", map[string]string{}, nil); !errors.Is(err, domain.ErrNotOwner) {
+	if err := client.call(context.Background(), "complete-task", map[string]string{}, nil); !errors.Is(err, persistence.ErrNotOwner) {
 		t.Fatalf("call error = %v, want ErrNotOwner", err)
 	}
 }

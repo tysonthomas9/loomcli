@@ -4,7 +4,7 @@ import (
 	"context"
 	"net/http"
 
-	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
 
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/agents"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/agentsmanagement"
@@ -28,10 +28,7 @@ import (
 func newWorkspaceModules(deps Deps, automationModules automationRouteModules) []interface{ Register(*http.ServeMux) } {
 	onboardingModule := onboarding.NewModule(deps.WorkItems, deps.Agents, deps.AgentsOperator)
 	taskWorkflowRuns := newTaskWorkflowRunReader(deps)
-	var pendingAwaits approvals.PendingAwaitQueries
-	if deps.Store != nil {
-		pendingAwaits = deps.Store.Awaits()
-	}
+	var pendingAwaits approvals.PendingAwaitQueries = deps.AwaitRecords
 
 	return []interface{ Register(*http.ServeMux) }{
 		agents.New(agents.Config{
@@ -68,12 +65,12 @@ func newWorkspaceModules(deps Deps, automationModules automationRouteModules) []
 		automationModules.Webhooks,
 		roles.NewModule(roles.Config{
 			WorkspacePath: func(ctx context.Context, workspace string) string {
-				return storeadapter.ResolveOrHealWorkspacePath(ctx, deps.Store, workspace)
+				return storeadapter.ResolveOrHealWorkspacePath(ctx, deps.WorkspaceTopology, workspace)
 			},
 			Roles: deps.Agents, Authority: deps.AgentsOperator,
 		}),
 		automationModules.TriggerBindings,
-		connectors.NewModule(deps.Store, deps.LocalSettingsDir, deps.AutomationBindings, deps.AutomationOperator),
+		connectors.NewModule(deps.ConnectorRecords, deps.LocalSettingsDir, deps.AutomationBindings, deps.AutomationOperator),
 		approvals.New(approvals.Config{
 			PendingAwaits: pendingAwaits, Awaits: automationModules.EventAwaits,
 			Journal: deps.AutomationApprovalJournal, Authority: deps.AutomationApprovalAuthority,
@@ -87,7 +84,7 @@ func newWorkspaceModules(deps Deps, automationModules automationRouteModules) []
 			APIBaseURL:            deps.DriverAPIBaseURL,
 			WorkItems:             deps.WorkItems,
 			Repositories:          deps.Workspace,
-			OrchestrationSessions: orchestrationSessionQueryAdapter{store: deps.Store},
+			OrchestrationSessions: orchestrationSessionQueryAdapter{store: deps.OrchestrationSessions},
 			AutomationBindings:    deps.AutomationBindings,
 			AutomationEvents:      deps.AutomationAudit,
 			AutomationDeliveries:  deps.AutomationAudit,
@@ -107,7 +104,7 @@ func newWorkspaceModules(deps Deps, automationModules automationRouteModules) []
 }
 
 type orchestrationSessionQueryAdapter struct {
-	store store.OrchestrationSessionStore
+	store interaction.OrchestrationSessionStore
 }
 
 func (adapter orchestrationSessionQueryAdapter) FindActiveOrchestrationSession(
@@ -118,7 +115,7 @@ func (adapter orchestrationSessionQueryAdapter) FindActiveOrchestrationSession(
 	if adapter.store == nil {
 		return "", nil
 	}
-	return store.OrchestrationSessionIDFor(ctx, adapter.store, workspace, agentID)
+	return interaction.OrchestrationSessionIDFor(ctx, adapter.store, workspace, agentID)
 }
 
 type workflowBackendHealthAdapter struct {
@@ -150,12 +147,12 @@ func (adapter workflowBackendHealthAdapter) BackendHealth(name string) (workflow
 }
 
 func newTaskWorkflowRunReader(deps Deps) readprojection.TaskWorkflowRunReader {
-	if deps.Store == nil {
+	if deps.TaskRunRecords == nil || deps.TriggerEventRecords == nil || deps.DriverRunRecords == nil {
 		return nil
 	}
 	return readprojection.NewTaskWorkflowRunReader(
-		deps.Store.TaskRuns(),
-		deps.Store.TriggerEvents(),
-		deps.Store.DriverRuns(),
+		deps.TaskRunRecords,
+		deps.TriggerEventRecords,
+		deps.DriverRunRecords,
 	)
 }

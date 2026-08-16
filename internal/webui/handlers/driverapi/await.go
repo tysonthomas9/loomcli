@@ -27,9 +27,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	driverpkg "github.com/tysonthomas9/loomcli/internal/driver"
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 // awaitActorList accepts the actor field as either a single JSON string or a
@@ -48,7 +48,7 @@ func (a *awaitActorList) UnmarshalJSON(data []byte) error {
 	}
 	var many []string
 	if err := json.Unmarshal(data, &many); err != nil {
-		return fmt.Errorf("actor must be a string or an array of strings: %w", domain.ErrInvalid)
+		return fmt.Errorf("actor must be a string or an array of strings: %w", persistence.ErrInvalid)
 	}
 	*a = many
 	return nil
@@ -140,16 +140,16 @@ func (m *Module) awaitDriverRun(
 	if m.execution == nil || m.executionAuthorities == nil {
 		return nil, fmt.Errorf("execution await API is unavailable: %w", execution.ErrUnavailable)
 	}
-	if err := domain.ValidateAwaitPattern(pattern); err != nil {
+	if err := execution.ValidateAwaitPattern(pattern); err != nil {
 		return nil, err
 	}
 	if awaitIndex < 1 {
-		return nil, fmt.Errorf("awaitIndex %d must be >= 1: %w", awaitIndex, domain.ErrAwaitInstanceKeyMalformed)
+		return nil, fmt.Errorf("awaitIndex %d must be >= 1: %w", awaitIndex, execution.ErrAwaitInstanceKeyMalformed)
 	}
 	limits := driverpkg.ResolveAwaitLimits()
 	timeout := time.Duration(timeoutMs) * time.Millisecond
 	if timeoutMs <= 0 || timeout/time.Millisecond != time.Duration(timeoutMs) || timeout > limits.MaxTimeout {
-		return nil, fmt.Errorf("timeoutMs %d is required, positive, and at most %s: %w", timeoutMs, limits.MaxTimeout, domain.ErrAwaitTimeoutRequired)
+		return nil, fmt.Errorf("timeoutMs %d is required, positive, and at most %s: %w", timeoutMs, limits.MaxTimeout, execution.ErrAwaitTimeoutRequired)
 	}
 	fence, err := id.FencingToken()
 	if err != nil {
@@ -201,7 +201,7 @@ func (m *Module) awaitWireEvent(ctx context.Context, ws string, inst *execution.
 	if inst.ResumedAt != nil {
 		event.OccurredAt = *inst.ResumedAt
 	}
-	if domain.IsAwaitTimeoutEventID(inst.SatisfiedByEventID) {
+	if execution.IsAwaitTimeoutEventID(inst.SatisfiedByEventID) {
 		return event
 	}
 	if m.automationEvents == nil {
@@ -264,22 +264,22 @@ func (m *Module) handleListAwaits(w http.ResponseWriter, r *http.Request) {
 }
 
 // writeAwaitOpError maps the structured await sentinels onto the error
-// envelope ahead of the generic domain mapping (they wrap domain.ErrInvalid,
+// envelope ahead of the generic domain mapping (they wrap persistence.ErrInvalid,
 // which would otherwise flatten them to "invalid"). Reports whether it
 // handled err.
 func writeAwaitOpError(w http.ResponseWriter, err error) bool {
 	switch {
-	case errors.Is(err, domain.ErrAwaitPatternUnscoped):
-		writeOpError(w, http.StatusBadRequest, domain.AwaitErrCodePatternUnscoped, err.Error(), false)
-	case errors.Is(err, domain.ErrAwaitTimeoutRequired):
-		writeOpError(w, http.StatusBadRequest, domain.AwaitErrCodeTimeoutRequired, err.Error(), false)
-	case errors.Is(err, domain.ErrAwaitInstanceKeyMalformed):
-		writeOpError(w, http.StatusBadRequest, domain.AwaitErrCodeInstanceKeyMalformed, err.Error(), false)
-	case errors.Is(err, domain.ErrCompositionDepthExceeded):
-		writeOpError(w, http.StatusBadRequest, domain.CompositionErrCodeDepthExceeded, err.Error(), false)
-	case errors.Is(err, domain.ErrAwaitActorForbidden):
+	case errors.Is(err, execution.ErrAwaitPatternUnscoped):
+		writeOpError(w, http.StatusBadRequest, execution.AwaitErrCodePatternUnscoped, err.Error(), false)
+	case errors.Is(err, execution.ErrAwaitTimeoutRequired):
+		writeOpError(w, http.StatusBadRequest, execution.AwaitErrCodeTimeoutRequired, err.Error(), false)
+	case errors.Is(err, execution.ErrAwaitInstanceKeyMalformed):
+		writeOpError(w, http.StatusBadRequest, execution.AwaitErrCodeInstanceKeyMalformed, err.Error(), false)
+	case errors.Is(err, execution.ErrCompositionDepthExceeded):
+		writeOpError(w, http.StatusBadRequest, execution.CompositionErrCodeDepthExceeded, err.Error(), false)
+	case errors.Is(err, execution.ErrAwaitActorForbidden):
 		writeOpError(w, http.StatusForbidden, "await_actor_forbidden", err.Error(), false)
-	case errors.Is(err, domain.ErrDriverRunAlreadyResumed):
+	case errors.Is(err, execution.ErrAlreadyResumed):
 		// Defensive: the op flow handles this inline; surfaced only if a
 		// future caller lets it escape.
 		writeOpError(w, http.StatusConflict, "driver_run_already_resumed", err.Error(), false)

@@ -4,14 +4,13 @@ import (
 	"context"
 	"strings"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	leadcontrol "github.com/tysonthomas9/loomcli/internal/infra/interactionlead"
 	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
 )
 
 func (runtime *Runtime) readCodexConversation(
 	ctx context.Context,
-	session *domain.AgentSession,
+	session *interaction.SessionRecord,
 ) *interaction.Conversation {
 	metadata := leadcontrol.RuntimeMetadataFromSession(session)
 	if session == nil || metadata.Endpoint == "" || metadata.ThreadID == "" {

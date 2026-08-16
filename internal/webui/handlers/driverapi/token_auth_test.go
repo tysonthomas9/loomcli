@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
+
 	driverpkg "github.com/tysonthomas9/loomcli/internal/driver"
-	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
 // mintToken signs a run token for the harness run with optional claim
@@ -34,7 +34,7 @@ func (h *testHarness) mintToken(t *testing.T, ttl time.Duration, mutate func(*dr
 	return token
 }
 
-func (h *testHarness) tokenHeadersForRun(t *testing.T, run *domain.DriverRun) map[string]string {
+func (h *testHarness) tokenHeadersForRun(t *testing.T, run *execution.DriverRunRecord) map[string]string {
 	t.Helper()
 	claims := driverpkg.RunTokenClaims{
 		WorkspaceKey: run.WorkspaceKey,
@@ -189,11 +189,11 @@ func TestDriverAPIRunTokenRejections(t *testing.T) {
 func TestDriverAPIRunTokenRevokedByFinish(t *testing.T) {
 	h := newTestHarness(t)
 	token := h.mintToken(t, time.Hour, nil)
-	if _, err := h.store.DriverRuns().Finish(context.Background(), "WS", h.runID, store.DriverRunFinish{
+	if _, err := h.store.DriverRuns().Finish(context.Background(), "WS", h.runID, execution.DriverRunFinish{
 		NodeID:       h.nodeID,
 		LeaseID:      h.leaseID,
 		FencingToken: h.fence,
-		Status:       domain.DriverRunCompleted,
+		Status:       execution.DriverRunCompleted,
 	}); err != nil {
 		t.Fatalf("Finish driver run: %v", err)
 	}
@@ -215,8 +215,8 @@ func TestDriverAPIRunTokenRevokedByReclaim(t *testing.T) {
 	stale := h.mintToken(t, time.Hour, nil)
 	// Full await cycle so the resume-eligibility gate grants the re-queue:
 	// register -> suspend -> resolve -> resume.
-	awaitKey := domain.AwaitInstanceKey(h.runID, 1)
-	if _, err := h.store.Awaits().RegisterAwaitAndCheck(ctx, "WS", store.AwaitRegistration{
+	awaitKey := execution.AwaitInstanceKey(h.runID, 1)
+	if _, err := h.store.Awaits().RegisterAwaitAndCheck(ctx, "WS", execution.AwaitRegistration{
 		InstanceKey: awaitKey,
 		RunID:       h.runID,
 		Pattern:     "pr.merged:pr#1",

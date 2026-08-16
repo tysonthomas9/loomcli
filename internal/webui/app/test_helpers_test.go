@@ -5,10 +5,10 @@ import (
 	"errors"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/app/query/operationalview"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
-	"github.com/tysonthomas9/loomcli/internal/ops"
-	storepkg "github.com/tysonthomas9/loomcli/internal/store"
+	workspaceowner "github.com/tysonthomas9/loomcli/internal/modules/workspace"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 )
 
@@ -72,7 +72,7 @@ func (tc *testSSEClient) Close() {
 }
 
 // testWorkspaceStore returns a FleetDB-style workspace store for testing.
-func testWorkspaceStore(_ string, workspaces []ops.WorkspaceSummary) storepkg.Store {
+func testWorkspaceStore(_ string, workspaces []operationalview.Summary) *memstore.Store {
 	st := memstore.New()
 	for _, ws := range workspaces {
 		key := ws.ID
@@ -82,7 +82,7 @@ func testWorkspaceStore(_ string, workspaces []ops.WorkspaceSummary) storepkg.St
 		if key == "" {
 			continue
 		}
-		_, _ = st.Workspaces().Create(context.Background(), storepkg.WorkspaceCreate{Key: key, Name: ws.Name})
+		_, _ = st.Workspaces().Create(context.Background(), workspaceowner.WorkspaceCreate{Key: key, Name: ws.Name})
 	}
 	return st
 }

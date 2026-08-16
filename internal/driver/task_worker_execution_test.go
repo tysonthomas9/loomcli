@@ -8,10 +8,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
+
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
-	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 // taskWorkerTestExecution is deliberately test-only. Production TaskWorker
@@ -19,7 +20,7 @@ import (
 // memstore fixtures without restoring a Store fallback to TaskWorker itself.
 type taskWorkerTestExecution struct {
 	execution.DriverRunAPI
-	store    store.Store
+	store    taskWorkerTestStore
 	outcomes RunOutcomePublisher
 }
 
@@ -102,8 +103,12 @@ func (taskWorkerTestAuthorities) ResolveDriverRunAuthority(context.Context, stri
 }
 
 type taskWorkerTestStore interface {
-	store.Store
 	bridgeArtifactFixtureStore
+	DriverRuns() execution.DriverRunStore
+	DriverSteps() execution.DriverStepStore
+	TaskRuns() execution.TaskRunStore
+	Awaits() execution.AwaitStore
+	Nodes() execution.NodeStore
 }
 
 func wireTaskWorkerTestExecution(worker *TaskWorker, st taskWorkerTestStore) {
@@ -116,9 +121,9 @@ func wireTaskWorkerTestExecution(worker *TaskWorker, st taskWorkerTestStore) {
 	worker.Artifacts = testArtifactsAPI(st)
 }
 
-func wireExecutorTestExecution(executor *Executor, st store.Store) {
+func wireExecutorTestExecution(executor *Executor, st *memstore.Store) {
 	adapter := taskWorkerTestExecution{store: st, outcomes: executor.RunOutcomes}
-	outbox, ok := st.DriverRuns().(store.DriverRunOutcomeStore)
+	outbox, ok := st.DriverRuns().(execution.DriverRunOutcomeStore)
 	if !ok {
 		panic("test DriverRun store lacks durable outcomes")
 	}
@@ -134,7 +139,7 @@ func wireExecutorTestExecution(executor *Executor, st store.Store) {
 	executor.SystemAuthorities = systemAuthorities
 }
 
-func testExecutor(st store.Store, value Executor) *Executor {
+func testExecutor(st *memstore.Store, value Executor) *Executor {
 	executor := &value
 	if len(executor.RunTokenKey) == 0 {
 		executor.RunTokenKey = bytes.Repeat([]byte{0x42}, 32)
@@ -149,9 +154,9 @@ func (adapter taskWorkerTestExecution) GetDriverRun(ctx context.Context, workspa
 }
 
 func (adapter taskWorkerTestExecution) ListDriverRuns(ctx context.Context, query execution.DriverRunQuery) ([]*execution.DriverRun, error) {
-	runs, err := adapter.store.DriverRuns().List(ctx, query.WorkspaceKey, store.DriverRunFilter{
+	runs, err := adapter.store.DriverRuns().List(ctx, query.WorkspaceKey, execution.DriverRunFilter{
 		DriverID: query.DriverID, EpicID: query.EpicID, AgentServiceID: query.AgentServiceID,
-		Status: domain.DriverRunStatus(query.Status), Limit: query.Limit,
+		Status: query.Status, Limit: query.Limit,
 	})
 	if err != nil {
 		return nil, err
@@ -177,9 +182,9 @@ func (adapter taskWorkerTestExecution) HeartbeatDriverRun(ctx context.Context, _
 }
 
 func (adapter taskWorkerTestExecution) FinalizeDriverRun(ctx context.Context, _ authority.ExecutionAuthority, command execution.FinalizeDriverRunCommand) (*execution.DriverRun, error) {
-	run, err := adapter.store.DriverRuns().Finish(ctx, command.WorkspaceKey, command.Owner.ResourceID, store.DriverRunFinish{
+	run, err := adapter.store.DriverRuns().Finish(ctx, command.WorkspaceKey, command.Owner.ResourceID, execution.DriverRunFinish{
 		NodeID: command.Owner.NodeID, LeaseID: command.Owner.LeaseID, FencingToken: command.Owner.FencingToken,
-		Status: domain.DriverRunStatus(command.Status), Summary: command.Summary, ErrorClass: command.ErrorClass,
+		Status: command.Status, Summary: command.Summary, ErrorClass: command.ErrorClass,
 		Output: cloneStringMap(command.Output),
 	})
 	return testExecutionDriverRunSnapshot(run), err
@@ -225,7 +230,7 @@ func (adapter taskWorkerTestExecution) RecoverChildDriverRunCascade(
 }
 
 func (adapter taskWorkerTestExecution) RecoverDriverRuns(ctx context.Context, _ authority.SystemAuthority, command execution.RecoverDriverRunsCommand) (*execution.DriverRunRecoveryResult, error) {
-	result, err := adapter.store.DriverRuns().RecoverStale(ctx, command.WorkspaceKey, store.StaleDriverRunRecovery{
+	result, err := adapter.store.DriverRuns().RecoverStale(ctx, command.WorkspaceKey, execution.StaleDriverRunRecovery{
 		StaleBefore: command.ObservedAt.Add(-command.MaxAge), MaxAgeSeconds: int64(command.MaxAge / time.Second), ErrorClass: command.ErrorClass,
 		Summary: command.Summary, Limit: command.Limit,
 	})
@@ -241,14 +246,14 @@ func (adapter taskWorkerTestExecution) RecoverDriverRuns(ctx context.Context, _ 
 }
 
 func (adapter taskWorkerTestExecution) ResolveDriverAwait(ctx context.Context, _ authority.SystemAuthority, command execution.ResolveDriverAwaitCommand) error {
-	atomic, ok := adapter.store.Awaits().(store.AtomicAwaitStore)
+	atomic, ok := adapter.store.Awaits().(execution.AtomicAwaitStore)
 	if !ok {
 		return execution.ErrUnavailable
 	}
 	return atomic.ResolveAwaitAndResume(ctx, command.WorkspaceKey, command.InstanceKey, command.EventID, command.Payload, command.Actor)
 }
 
-func testExecutionDriverRunSnapshot(run *domain.DriverRun) *execution.DriverRun {
+func testExecutionDriverRunSnapshot(run *execution.DriverRunRecord) *execution.DriverRun {
 	if run == nil {
 		return nil
 	}
@@ -256,7 +261,7 @@ func testExecutionDriverRunSnapshot(run *domain.DriverRun) *execution.DriverRun 
 		WorkspaceKey: run.WorkspaceKey, RunID: run.RunID, DriverID: run.DriverID, DriverVersionID: run.DriverVersionID,
 		Entrypoint: run.Entrypoint, SourceKind: run.SourceKind, SourceRef: run.SourceRef, EpicID: run.EpicID,
 		ParentRunID: run.ParentRunID, TriggerBindingID: run.TriggerBindingID, AgentServiceID: run.AgentServiceID,
-		SubjectKey: run.SubjectKey, Status: execution.DriverRunStatus(run.Status),
+		SubjectKey: run.SubjectKey, Status: run.Status,
 		Owner:          execution.Owner{ResourceKind: execution.ResourceDriverRun, ResourceID: run.RunID, NodeID: run.NodeID, LeaseID: run.LeaseID, FencingToken: run.FencingToken},
 		IdempotencyKey: run.IdempotencyKey, Payload: append([]byte(nil), run.Payload...), Output: cloneStringMap(run.Output),
 		Summary: run.Summary, ErrorClass: run.ErrorClass, StartedAt: run.StartedAt, LastHeartbeat: run.LastHeartbeat,
@@ -267,7 +272,7 @@ func testExecutionDriverRunSnapshot(run *domain.DriverRun) *execution.DriverRun 
 }
 
 func (adapter taskWorkerTestExecution) ClaimTaskRun(ctx context.Context, _ authority.SystemAuthority, command execution.ClaimTaskRunCommand) (execution.ClaimTaskRunResult, error) {
-	run, err := adapter.store.TaskRuns().ClaimQueued(ctx, command.WorkspaceKey, store.TaskRunClaim{
+	run, err := adapter.store.TaskRuns().ClaimQueued(ctx, command.WorkspaceKey, execution.TaskRunClaim{
 		TaskRunID: command.TaskRunID, NodeID: command.NodeID, RunnerID: command.RunnerID,
 		LeaseID: command.LeaseID, LeaseToken: command.LeaseToken,
 		SupportedProviders: command.SupportedProviders, Capabilities: command.Capabilities,
@@ -277,14 +282,14 @@ func (adapter taskWorkerTestExecution) ClaimTaskRun(ctx context.Context, _ autho
 	if err != nil {
 		return execution.ClaimTaskRunResult{}, err
 	}
-	if err := adapter.projectStep(ctx, run, domain.DriverStepRunning); err != nil {
+	if err := adapter.projectStep(ctx, run, execution.DriverStepRunning); err != nil {
 		return execution.ClaimTaskRunResult{}, err
 	}
 	return execution.ClaimTaskRunResult{Run: testExecutionTaskRun(run, command.LeaseToken), ActionID: command.RequestID}, nil
 }
 
 func (adapter taskWorkerTestExecution) Heartbeat(ctx context.Context, _ authority.ExecutionAuthority, command execution.HeartbeatCommand) (execution.HeartbeatResult, error) {
-	run, err := adapter.store.TaskRuns().Heartbeat(ctx, command.WorkspaceKey, command.Owner.ResourceID, store.TaskRunHeartbeat{
+	run, err := adapter.store.TaskRuns().Heartbeat(ctx, command.WorkspaceKey, command.Owner.ResourceID, execution.TaskRunHeartbeat{
 		NodeID: command.Owner.NodeID, LeaseID: command.Owner.LeaseID, LeaseToken: command.Owner.LeaseToken,
 		FencingToken: command.Owner.FencingToken, RuntimeMetadata: command.RuntimeMetadata, HeartbeatAt: command.At,
 	})
@@ -295,7 +300,7 @@ func (adapter taskWorkerTestExecution) Heartbeat(ctx context.Context, _ authorit
 }
 
 func (adapter taskWorkerTestExecution) RequeueTaskRun(ctx context.Context, _ authority.ExecutionAuthority, command execution.RequeueTaskRunCommand) (execution.RequeueTaskRunResult, error) {
-	run, err := adapter.store.TaskRuns().Requeue(ctx, command.WorkspaceKey, command.Owner.ResourceID, store.TaskRunRequeue{
+	run, err := adapter.store.TaskRuns().Requeue(ctx, command.WorkspaceKey, command.Owner.ResourceID, execution.TaskRunRequeue{
 		NodeID: command.Owner.NodeID, LeaseID: command.Owner.LeaseID, LeaseToken: command.Owner.LeaseToken,
 		FencingToken: command.Owner.FencingToken, RuntimeMetadata: command.RuntimeMetadata,
 		LogsRef: command.LogsRef, ArtifactsRef: command.ArtifactsRef, ErrorClass: command.ErrorClass,
@@ -304,7 +309,7 @@ func (adapter taskWorkerTestExecution) RequeueTaskRun(ctx context.Context, _ aut
 	if err != nil {
 		return execution.RequeueTaskRunResult{}, err
 	}
-	if err := adapter.projectStep(ctx, run, domain.DriverStepQueued); err != nil {
+	if err := adapter.projectStep(ctx, run, execution.DriverStepQueued); err != nil {
 		return execution.RequeueTaskRunResult{}, err
 	}
 	return execution.RequeueTaskRunResult{
@@ -312,7 +317,7 @@ func (adapter taskWorkerTestExecution) RequeueTaskRun(ctx context.Context, _ aut
 		Committed: &execution.RequeueTaskRunCommit{
 			WorkspaceKey: command.WorkspaceKey, TaskRunID: run.TaskRunID, DriverRunID: run.DriverRunID,
 			DriverStepID: run.DriverStepID, WorkItemID: run.TaskID, TaskRunStatus: execution.StatusQueued,
-			DriverStepStatus: string(domain.DriverStepQueued), RuntimeMetadata: cloneStringMap(command.RuntimeMetadata),
+			DriverStepStatus: string(execution.DriverStepQueued), RuntimeMetadata: cloneStringMap(command.RuntimeMetadata),
 			LogsRef: command.LogsRef, ArtifactsRef: command.ArtifactsRef,
 			ErrorClass: command.ErrorClass, ErrorMessage: command.ErrorMessage,
 			RequeuedAt: command.RequeuedAt, NextEligibleAt: command.NextEligibleAt,
@@ -321,9 +326,9 @@ func (adapter taskWorkerTestExecution) RequeueTaskRun(ctx context.Context, _ aut
 }
 
 func (adapter taskWorkerTestExecution) ExhaustTaskRunRetries(ctx context.Context, _ authority.ExecutionAuthority, command execution.ExhaustTaskRunRetriesCommand) (execution.ExhaustTaskRunRetriesResult, error) {
-	run, err := adapter.store.TaskRuns().Finish(ctx, command.WorkspaceKey, command.Owner.ResourceID, store.TaskRunFinish{
+	run, err := adapter.store.TaskRuns().Finish(ctx, command.WorkspaceKey, command.Owner.ResourceID, execution.TaskRunFinish{
 		NodeID: command.Owner.NodeID, LeaseID: command.Owner.LeaseID, LeaseToken: command.Owner.LeaseToken,
-		FencingToken: command.Owner.FencingToken, Status: domain.TaskRunFailed, ExitCode: command.ExitCode,
+		FencingToken: command.Owner.FencingToken, Status: execution.TaskRunRecordFailed, ExitCode: command.ExitCode,
 		LogsRef: command.LogsRef, ArtifactsRef: command.ArtifactsRef, InputTokens: command.InputTokens,
 		OutputTokens: command.OutputTokens, CacheReadTokens: command.CacheReadTokens,
 		CacheWriteTokens: command.CacheWriteTokens, EstimatedCostUSD: command.EstimatedCostUSD,
@@ -333,7 +338,7 @@ func (adapter taskWorkerTestExecution) ExhaustTaskRunRetries(ctx context.Context
 	if err != nil {
 		return execution.ExhaustTaskRunRetriesResult{}, err
 	}
-	if err := adapter.projectStep(ctx, run, domain.DriverStepFailed); err != nil {
+	if err := adapter.projectStep(ctx, run, execution.DriverStepFailed); err != nil {
 		return execution.ExhaustTaskRunRetriesResult{}, err
 	}
 	return execution.ExhaustTaskRunRetriesResult{
@@ -346,11 +351,11 @@ func (adapter taskWorkerTestExecution) ExhaustTaskRunRetries(ctx context.Context
 }
 
 func (adapter taskWorkerTestExecution) Finalize(ctx context.Context, _ authority.ExecutionAuthority, command execution.FinalizeCommand) (execution.FinalizeResult, error) {
-	status := domain.TaskRunCompleted
+	status := execution.TaskRunRecordCompleted
 	if command.Classification.Status == execution.StatusCancelled {
-		status = domain.TaskRunCancelled
+		status = execution.TaskRunRecordCancelled
 	}
-	run, err := adapter.store.TaskRuns().Complete(ctx, command.WorkspaceKey, command.Owner.ResourceID, store.TaskRunComplete{
+	run, err := adapter.store.TaskRuns().Complete(ctx, command.WorkspaceKey, command.Owner.ResourceID, execution.TaskRunComplete{
 		CompletionID: command.RequestID, NodeID: command.Owner.NodeID, LeaseID: command.Owner.LeaseID,
 		LeaseToken: command.Owner.LeaseToken, FencingToken: command.Owner.FencingToken, Status: status,
 		ExitCode: command.ExitCode, LogsRef: command.LogsRef, ArtifactsRef: command.ArtifactsRef,
@@ -368,13 +373,13 @@ func (adapter taskWorkerTestExecution) Finalize(ctx context.Context, _ authority
 }
 
 func (adapter taskWorkerTestExecution) RegisterWorkerNode(ctx context.Context, _ authority.SystemAuthority, command execution.RegisterWorkerNodeCommand) (*execution.WorkerNode, error) {
-	node, err := adapter.store.Nodes().Create(ctx, store.NodeCreate{
+	node, err := adapter.store.Nodes().Create(ctx, execution.NodeCreate{
 		WorkspaceKey: command.WorkspaceKey, NodeID: command.NodeID, OwnerActor: command.OwnerActor,
-		RuntimeProvider: domain.RuntimeProvider(command.RuntimeProvider), Labels: command.Labels,
+		RuntimeProvider: execution.RuntimeProvider(command.RuntimeProvider), Labels: command.Labels,
 		Capabilities: command.Capabilities, ToolInventory: command.ToolInventory, Version: command.Version,
-		Capacity: command.Capacity, DrainState: domain.NodeDrainActive, TTL: command.TTL,
+		Capacity: command.Capacity, DrainState: execution.WorkerNodeActive, TTL: command.TTL,
 	})
-	if err != nil && errors.Is(err, domain.ErrAlreadyExists) {
+	if err != nil && errors.Is(err, persistence.ErrAlreadyExists) {
 		node, err = adapter.store.Nodes().Get(ctx, command.WorkspaceKey, command.NodeID)
 	}
 	return testExecutionWorkerNode(node), err
@@ -386,8 +391,8 @@ func (adapter taskWorkerTestExecution) HeartbeatWorkerNode(ctx context.Context, 
 }
 
 func (adapter taskWorkerTestExecution) SetWorkerNodeDrain(ctx context.Context, _ authority.SystemAuthority, command execution.SetWorkerNodeDrainCommand) (*execution.WorkerNode, error) {
-	drain := domain.NodeDrainState(command.DrainState)
-	node, err := adapter.store.Nodes().Update(ctx, command.WorkspaceKey, command.NodeID, store.NodeUpdate{DrainState: &drain})
+	drain := command.DrainState
+	node, err := adapter.store.Nodes().Update(ctx, command.WorkspaceKey, command.NodeID, execution.NodeUpdate{DrainState: &drain})
 	return testExecutionWorkerNode(node), err
 }
 
@@ -406,7 +411,7 @@ func (adapter taskWorkerTestExecution) RepairTerminalDriverStep(context.Context,
 	return execution.RepairTerminalDriverStepResult{}, execution.ErrUnavailable
 }
 
-func (adapter taskWorkerTestExecution) projectStep(ctx context.Context, run *domain.TaskRun, status domain.DriverStepStatus) error {
+func (adapter taskWorkerTestExecution) projectStep(ctx context.Context, run *execution.TaskRunRecord, status execution.DriverStepStatus) error {
 	if run == nil || run.DriverStepID == "" {
 		return nil
 	}
@@ -415,19 +420,19 @@ func (adapter taskWorkerTestExecution) projectStep(ctx context.Context, run *dom
 		return err
 	}
 	output := firstNonEmpty(run.ArtifactsRef, run.LogsRef)
-	_, err = adapter.store.DriverSteps().Update(ctx, run.WorkspaceKey, run.DriverStepID, store.DriverStepUpdate{
+	_, err = adapter.store.DriverSteps().Update(ctx, run.WorkspaceKey, run.DriverStepID, execution.DriverStepUpdate{
 		Status: &status, TaskRunID: &run.TaskRunID, OutputRef: &output,
 		NodeID: parent.NodeID, LeaseID: parent.LeaseID, FencingToken: parent.FencingToken,
 	})
 	return err
 }
 
-func testExecutionTaskRun(run *domain.TaskRun, leaseToken string) *execution.TaskRun {
+func testExecutionTaskRun(run *execution.TaskRunRecord, leaseToken string) *execution.TaskRun {
 	if run == nil {
 		return nil
 	}
 	status := execution.Status(run.Status)
-	if run.Status == domain.TaskRunCompleted {
+	if run.Status == execution.TaskRunRecordCompleted {
 		status = execution.StatusSucceeded
 	}
 	return &execution.TaskRun{
@@ -446,26 +451,26 @@ func testExecutionTaskRun(run *domain.TaskRun, leaseToken string) *execution.Tas
 	}
 }
 
-func testTaskRunOwner(run *domain.TaskRun, token string) execution.Owner {
+func testTaskRunOwner(run *execution.TaskRunRecord, token string) execution.Owner {
 	if run == nil || run.NodeID == "" {
 		return execution.Owner{}
 	}
 	return execution.Owner{ResourceKind: execution.ResourceTaskRun, ResourceID: run.TaskRunID, NodeID: run.NodeID, LeaseID: run.LeaseID, LeaseToken: token, FencingToken: run.FencingToken}
 }
 
-func testLegacyPlacement(value execution.Placement) domain.TaskRunPlacement {
-	return domain.TaskRunPlacement{Provider: value.Provider, NodeID: value.NodeID, RunnerID: value.RunnerID, SandboxID: value.SandboxID, CWD: value.CWD, RepoRef: value.RepoRef}
+func testLegacyPlacement(value execution.Placement) execution.TaskRunPlacementRecord {
+	return execution.TaskRunPlacementRecord{Provider: value.Provider, NodeID: value.NodeID, RunnerID: value.RunnerID, SandboxID: value.SandboxID, CWD: value.CWD, RepoRef: value.RepoRef}
 }
 
-func testExecutionWorkerNode(node *domain.Node) *execution.WorkerNode {
+func testExecutionWorkerNode(node *execution.WorkerNode) *execution.WorkerNode {
 	if node == nil {
 		return nil
 	}
 	return &execution.WorkerNode{
 		WorkspaceKey: node.WorkspaceKey, NodeID: node.NodeID, OwnerActor: node.OwnerActor,
-		RuntimeProvider: string(node.RuntimeProvider), Labels: append([]string(nil), node.Labels...),
+		RuntimeProvider: node.RuntimeProvider, Labels: append([]string(nil), node.Labels...),
 		Capabilities: append([]string(nil), node.Capabilities...), ToolInventory: append([]string(nil), node.ToolInventory...),
-		Version: node.Version, Capacity: node.Capacity, DrainState: execution.WorkerNodeDrainState(node.DrainState),
+		Version: node.Version, Capacity: node.Capacity, DrainState: node.DrainState,
 		LastHeartbeat: node.LastHeartbeat, ExpiresAt: node.ExpiresAt, CreatedAt: node.CreatedAt, UpdatedAt: node.UpdatedAt,
 	}
 }

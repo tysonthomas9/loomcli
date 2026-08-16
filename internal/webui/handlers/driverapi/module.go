@@ -24,7 +24,6 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/app/workfloweventing"
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	driverpkg "github.com/tysonthomas9/loomcli/internal/driver"
 	"github.com/tysonthomas9/loomcli/internal/modules/agents"
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
@@ -33,6 +32,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 	serverhandler "github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 )
 
@@ -204,7 +204,7 @@ func (id driverIdentity) FencingToken() (int64, error) {
 	token, err := strconv.ParseInt(raw, 10, 64)
 	if err != nil || token <= 0 {
 		if err == nil {
-			err = domain.ErrInvalid
+			err = persistence.ErrInvalid
 		}
 		return 0, fmt.Errorf("parse driver run fencing claim: %w", err)
 	}
@@ -320,7 +320,7 @@ func decodeNoParams(body []byte) error {
 		err = errors.New("multiple JSON values")
 	}
 	if err != nil {
-		return fmt.Errorf("decode driver op params: %s: %w", err.Error(), domain.ErrInvalid)
+		return fmt.Errorf("decode driver op params: %s: %w", err.Error(), persistence.ErrInvalid)
 	}
 	return nil
 }
@@ -330,7 +330,7 @@ func decodeParams[T any](body []byte) (T, error) {
 	if err := serverhandler.DecodeOneJSONBytes(body, &params, serverhandler.JSONDecodeOptions{
 		MaxBytes: maxDriverOpBodyBytes,
 	}); err != nil {
-		return params, fmt.Errorf("decode driver op params: %s: %w", err.Error(), domain.ErrInvalid)
+		return params, fmt.Errorf("decode driver op params: %s: %w", err.Error(), persistence.ErrInvalid)
 	}
 	return params, nil
 }
@@ -409,7 +409,7 @@ func (m *Module) claimTask(ctx context.Context, ws string, id driverIdentity, bo
 		return nil, err
 	}
 	if strings.TrimSpace(params.TaskID) == "" {
-		return nil, fmt.Errorf("taskId required: %w", domain.ErrInvalid)
+		return nil, fmt.Errorf("taskId required: %w", persistence.ErrInvalid)
 	}
 	items, err := m.requireWorkItems()
 	if err != nil {
@@ -444,7 +444,7 @@ func (m *Module) claimReview(ctx context.Context, ws string, id driverIdentity, 
 	}
 	taskID := strings.TrimSpace(params.TaskID)
 	if taskID == "" {
-		return nil, fmt.Errorf("taskId required: %w", domain.ErrInvalid)
+		return nil, fmt.Errorf("taskId required: %w", persistence.ErrInvalid)
 	}
 	items, err := m.requireWorkItems()
 	if err != nil {
@@ -524,7 +524,7 @@ func (m *Module) roleGet(ctx context.Context, ws string, id driverIdentity, body
 	}
 	name := strings.TrimSpace(params.Name)
 	if name == "" {
-		return nil, fmt.Errorf("name required: %w", domain.ErrInvalid)
+		return nil, fmt.Errorf("name required: %w", persistence.ErrInvalid)
 	}
 	if m.rolePrompts == nil {
 		return nil, fmt.Errorf("role prompt reader is not configured: %w", agents.ErrUnavailable)
@@ -552,7 +552,7 @@ func (m *Module) epicGet(ctx context.Context, ws string, id driverIdentity, body
 	}
 	epicID := firstNonEmpty(params.EpicID, parent.EpicID, driverpkg.DriverRunPayloadEpicID(parent.Payload))
 	if epicID == "" {
-		return nil, fmt.Errorf("epic id required: %w", domain.ErrInvalid)
+		return nil, fmt.Errorf("epic id required: %w", persistence.ErrInvalid)
 	}
 	items, err := m.requireWorkItems()
 	if err != nil {
@@ -614,7 +614,7 @@ func (m *Module) agentOrchestrationSession(ctx context.Context, ws string, id dr
 	}
 	agentName := strings.TrimSpace(params.Agent)
 	if agentName == "" {
-		return nil, fmt.Errorf("agent required: %w", domain.ErrInvalid)
+		return nil, fmt.Errorf("agent required: %w", persistence.ErrInvalid)
 	}
 	if m.orchestrationSessions == nil {
 		return nil, fmt.Errorf("interaction orchestration-session query is unavailable: %w", interaction.ErrUnavailable)
@@ -642,7 +642,7 @@ func (m *Module) updateAgentParent(ctx context.Context, ws string, id driverIden
 	agentName := strings.TrimSpace(params.Agent)
 	parentID := strings.TrimSpace(params.Parent)
 	if agentName == "" || parentID == "" {
-		return nil, fmt.Errorf("agent and parent required: %w", domain.ErrInvalid)
+		return nil, fmt.Errorf("agent and parent required: %w", persistence.ErrInvalid)
 	}
 	if m.agentIdentities == nil || m.execution == nil || m.executionAuthorities == nil {
 		return nil, fmt.Errorf("canonical Agent parent binding is unavailable: %w", execution.ErrUnavailable)
@@ -690,7 +690,7 @@ func (m *Module) deliverLeadAssignment(ctx context.Context, ws string, id driver
 	}
 	leadName := strings.TrimSpace(params.Agent)
 	if leadName == "" {
-		return nil, fmt.Errorf("agent required: %w", domain.ErrInvalid)
+		return nil, fmt.Errorf("agent required: %w", persistence.ErrInvalid)
 	}
 	// Attempt-then-enqueue: one inline delivery attempt covers the fast
 	// path; anything short of delivered/unsupported durably enqueues an
@@ -733,7 +733,7 @@ func (m *Module) deliverAgentMessage(ctx context.Context, ws string, id driverId
 	agentName := strings.TrimSpace(params.Agent)
 	message := strings.TrimSpace(params.Message)
 	if agentName == "" || message == "" {
-		return nil, fmt.Errorf("agent and message required: %w", domain.ErrInvalid)
+		return nil, fmt.Errorf("agent and message required: %w", persistence.ErrInvalid)
 	}
 	result, err := driverpkg.DeliverAgentMessageForDriver(
 		ctx,

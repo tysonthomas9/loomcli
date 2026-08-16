@@ -9,17 +9,18 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
+
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 type driverStore struct{ client *Client }
 
-var _ store.DriverStore = (*driverStore)(nil)
+var _ workflowcatalog.DriverStore = (*driverStore)(nil)
 
-func (s *driverStore) Create(ctx context.Context, in store.DriverCreate) (*workflowcatalog.Driver, error) {
+func (s *driverStore) Create(ctx context.Context, in workflowcatalog.DriverCreate) (*workflowcatalog.Driver, error) {
 	body := map[string]any{
 		"driver_id":   in.DriverID,
 		"name":        in.Name,
@@ -45,7 +46,7 @@ func (s *driverStore) Get(ctx context.Context, ws, driverID string) (*workflowca
 	return &out, nil
 }
 
-func (s *driverStore) List(ctx context.Context, ws string, filter store.DriverFilter) ([]*workflowcatalog.Driver, error) {
+func (s *driverStore) List(ctx context.Context, ws string, filter workflowcatalog.DriverFilter) ([]*workflowcatalog.Driver, error) {
 	q := url.Values{}
 	if filter.Name != "" {
 		q.Set("name", filter.Name)
@@ -69,7 +70,7 @@ func (s *driverStore) List(ctx context.Context, ws string, filter store.DriverFi
 	return resp.Drivers, nil
 }
 
-func (s *driverStore) Update(ctx context.Context, ws, driverID string, patch store.DriverUpdate) (*workflowcatalog.Driver, error) {
+func (s *driverStore) Update(ctx context.Context, ws, driverID string, patch workflowcatalog.DriverUpdate) (*workflowcatalog.Driver, error) {
 	var out workflowcatalog.Driver
 	if err := s.client.do(ctx, "PATCH", "/api/v1/"+pathEscape(ws)+"/drivers/"+pathEscape(driverID), driverUpdateBody(patch), &out); err != nil {
 		return nil, err
@@ -79,9 +80,9 @@ func (s *driverStore) Update(ctx context.Context, ws, driverID string, patch sto
 
 type driverVersionStore struct{ client *Client }
 
-var _ store.DriverVersionStore = (*driverVersionStore)(nil)
+var _ workflowcatalog.DriverVersionStore = (*driverVersionStore)(nil)
 
-func (s *driverVersionStore) Create(ctx context.Context, in store.DriverVersionCreate) (*workflowcatalog.DriverVersion, error) {
+func (s *driverVersionStore) Create(ctx context.Context, in workflowcatalog.DriverVersionCreate) (*workflowcatalog.DriverVersion, error) {
 	body := map[string]any{
 		"version_id":        in.VersionID,
 		"version":           in.Version,
@@ -112,7 +113,7 @@ func (s *driverVersionStore) Get(ctx context.Context, ws, versionID string) (*wo
 	return &out, nil
 }
 
-func (s *driverVersionStore) List(ctx context.Context, ws string, filter store.DriverVersionFilter) ([]*workflowcatalog.DriverVersion, error) {
+func (s *driverVersionStore) List(ctx context.Context, ws string, filter workflowcatalog.DriverVersionFilter) ([]*workflowcatalog.DriverVersion, error) {
 	q := url.Values{}
 	if filter.ValidationStatus != "" {
 		q.Set("validation_status", string(filter.ValidationStatus))
@@ -139,9 +140,9 @@ func (s *driverVersionStore) List(ctx context.Context, ws string, filter store.D
 
 type triggerBindingStore struct{ client *Client }
 
-var _ store.TriggerBindingStore = (*triggerBindingStore)(nil)
+var _ automation.TriggerBindingStore = (*triggerBindingStore)(nil)
 
-func (s *triggerBindingStore) Create(ctx context.Context, in store.TriggerBindingCreate) (*automation.Binding, error) {
+func (s *triggerBindingStore) Create(ctx context.Context, in automation.TriggerBindingCreate) (*automation.Binding, error) {
 	in = in.WithDerivedRoute()
 	body := map[string]any{
 		"binding_id":              in.BindingID,
@@ -190,17 +191,17 @@ func (s *triggerBindingStore) Get(ctx context.Context, ws, bindingID string) (*a
 }
 
 func (s *triggerBindingStore) GetByRouteKey(ctx context.Context, ws, routeKey string) (*automation.Binding, error) {
-	bindings, err := s.List(ctx, ws, store.TriggerBindingFilter{RouteKey: routeKey, Limit: 1})
+	bindings, err := s.List(ctx, ws, automation.TriggerBindingFilter{RouteKey: routeKey, Limit: 1})
 	if err != nil {
 		return nil, err
 	}
 	if len(bindings) == 0 {
-		return nil, domain.ErrNotFound
+		return nil, persistence.ErrNotFound
 	}
 	return bindings[0], nil
 }
 
-func (s *triggerBindingStore) List(ctx context.Context, ws string, filter store.TriggerBindingFilter) ([]*automation.Binding, error) {
+func (s *triggerBindingStore) List(ctx context.Context, ws string, filter automation.TriggerBindingFilter) ([]*automation.Binding, error) {
 	q := url.Values{}
 	if filter.SourceKind != "" {
 		q.Set("source_kind", filter.SourceKind)
@@ -233,7 +234,7 @@ func (s *triggerBindingStore) List(ctx context.Context, ws string, filter store.
 	return resp.TriggerBindings, nil
 }
 
-func (s *triggerBindingStore) Update(ctx context.Context, ws, bindingID string, patch store.TriggerBindingUpdate) (*automation.Binding, error) {
+func (s *triggerBindingStore) Update(ctx context.Context, ws, bindingID string, patch automation.TriggerBindingUpdate) (*automation.Binding, error) {
 	var out automation.Binding
 	if err := s.client.do(ctx, "PATCH", "/api/v1/"+pathEscape(ws)+"/trigger-bindings/"+pathEscape(bindingID), triggerBindingUpdateBody(patch), &out); err != nil {
 		return nil, err
@@ -250,7 +251,7 @@ func (s *triggerBindingStore) Delete(ctx context.Context, ws, bindingID string) 
 	return s.client.do(ctx, "DELETE", "/api/v1/"+pathEscape(ws)+"/trigger-bindings/"+pathEscape(bindingID), nil, nil)
 }
 
-func (s *driverRunStore) Create(ctx context.Context, in store.DriverRunCreate) (*domain.DriverRun, error) {
+func (s *driverRunStore) Create(ctx context.Context, in execution.DriverRunCreate) (*execution.DriverRunRecord, error) {
 	body := map[string]any{
 		"run_id":            in.RunID,
 		"driver_id":         in.DriverID,
@@ -270,14 +271,14 @@ func (s *driverRunStore) Create(ctx context.Context, in store.DriverRunCreate) (
 	if in.TriggerBindingID != "" {
 		body["trigger_binding_id"] = in.TriggerBindingID
 	}
-	var out domain.DriverRun
+	var out execution.DriverRunRecord
 	if err := s.client.do(ctx, "POST", "/api/v1/"+pathEscape(in.WorkspaceKey)+"/driver-runs", body, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
 }
 
-func (s *driverRunStore) CreateEpic(ctx context.Context, ws, epicID string, in store.EpicRunCreate) (*domain.DriverRun, error) {
+func (s *driverRunStore) CreateEpic(ctx context.Context, ws, epicID string, in execution.EpicRunCreate) (*execution.DriverRunRecord, error) {
 	body := map[string]any{
 		"run_id":          in.RunID,
 		"idempotency_key": in.IdempotencyKey,
@@ -287,7 +288,7 @@ func (s *driverRunStore) CreateEpic(ctx context.Context, ws, epicID string, in s
 	if in.IdempotencyKey != "" {
 		headers["Idempotency-Key"] = in.IdempotencyKey
 	}
-	var out domain.DriverRun
+	var out execution.DriverRunRecord
 	path := "/api/v1/" + pathEscape(ws) + "/epics/" + pathEscape(epicID) + "/runs"
 	if err := s.client.doWithHeaders(ctx, "POST", path, body, &out, headers); err != nil {
 		return nil, err
@@ -295,15 +296,15 @@ func (s *driverRunStore) CreateEpic(ctx context.Context, ws, epicID string, in s
 	return &out, nil
 }
 
-func (s *driverRunStore) Get(ctx context.Context, ws, runID string) (*domain.DriverRun, error) {
-	var out domain.DriverRun
+func (s *driverRunStore) Get(ctx context.Context, ws, runID string) (*execution.DriverRunRecord, error) {
+	var out execution.DriverRunRecord
 	if err := s.client.do(ctx, "GET", "/api/v1/"+pathEscape(ws)+"/driver-runs/"+pathEscape(runID), nil, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
 }
 
-func (s *driverRunStore) Events(ctx context.Context, ws, runID, after string, limit int) (*domain.PlatformEventsPage, error) {
+func (s *driverRunStore) Events(ctx context.Context, ws, runID, after string, limit int) (*execution.AuditPage, error) {
 	q := url.Values{}
 	if after != "" {
 		q.Set("after", after)
@@ -312,17 +313,17 @@ func (s *driverRunStore) Events(ctx context.Context, ws, runID, after string, li
 		q.Set("limit", strconv.Itoa(limit))
 	}
 	path := withQuery("/api/v1/"+pathEscape(ws)+"/driver-runs/"+pathEscape(runID)+"/events", q)
-	var out domain.PlatformEventsPage
+	var out execution.AuditPage
 	if err := s.client.do(ctx, "GET", path, nil, &out); err != nil {
 		return nil, err
 	}
 	if out.Events == nil {
-		out.Events = []domain.PlatformEvent{}
+		out.Events = []execution.AuditEvent{}
 	}
 	return &out, nil
 }
 
-func (s *driverRunStore) List(ctx context.Context, ws string, filter store.DriverRunFilter) ([]*domain.DriverRun, error) {
+func (s *driverRunStore) List(ctx context.Context, ws string, filter execution.DriverRunFilter) ([]*execution.DriverRunRecord, error) {
 	q := url.Values{}
 	if filter.DriverID != "" {
 		q.Set("driver_id", filter.DriverID)
@@ -350,20 +351,20 @@ func (s *driverRunStore) List(ctx context.Context, ws string, filter store.Drive
 	}
 	path := withQuery("/api/v1/"+pathEscape(ws)+"/driver-runs", q)
 	var resp struct {
-		DriverRuns []*domain.DriverRun `json:"driver_runs"`
+		DriverRuns []*execution.DriverRunRecord `json:"driver_runs"`
 	}
 	if err := s.client.do(ctx, "GET", path, nil, &resp); err != nil {
 		return nil, err
 	}
 	if resp.DriverRuns == nil {
-		resp.DriverRuns = []*domain.DriverRun{}
+		resp.DriverRuns = []*execution.DriverRunRecord{}
 	}
 	return resp.DriverRuns, nil
 }
 
-func (s *driverRunStore) Claim(ctx context.Context, ws, runID, nodeID, leaseID string) (*domain.DriverRun, error) {
+func (s *driverRunStore) Claim(ctx context.Context, ws, runID, nodeID, leaseID string) (*execution.DriverRunRecord, error) {
 	body := map[string]string{"node_id": nodeID, "lease_id": leaseID}
-	var out domain.DriverRun
+	var out execution.DriverRunRecord
 	path := "/api/v1/" + pathEscape(ws) + "/driver-runs/" + pathEscape(runID) + "/claim"
 	if err := s.client.do(ctx, "POST", path, body, &out); err != nil {
 		return nil, err
@@ -371,9 +372,9 @@ func (s *driverRunStore) Claim(ctx context.Context, ws, runID, nodeID, leaseID s
 	return &out, nil
 }
 
-func (s *driverRunStore) Heartbeat(ctx context.Context, ws, runID, nodeID, leaseID string, fencingToken int64) (*domain.DriverRun, error) {
+func (s *driverRunStore) Heartbeat(ctx context.Context, ws, runID, nodeID, leaseID string, fencingToken int64) (*execution.DriverRunRecord, error) {
 	body := map[string]any{"node_id": nodeID, "lease_id": leaseID, "fencing_token": fencingToken}
-	var out domain.DriverRun
+	var out execution.DriverRunRecord
 	path := "/api/v1/" + pathEscape(ws) + "/driver-runs/" + pathEscape(runID) + "/heartbeat"
 	if err := s.client.do(ctx, "POST", path, body, &out); err != nil {
 		return nil, err
@@ -381,7 +382,7 @@ func (s *driverRunStore) Heartbeat(ctx context.Context, ws, runID, nodeID, lease
 	return &out, nil
 }
 
-func (s *driverRunStore) Finish(ctx context.Context, ws, runID string, finish store.DriverRunFinish) (*domain.DriverRun, error) {
+func (s *driverRunStore) Finish(ctx context.Context, ws, runID string, finish execution.DriverRunFinish) (*execution.DriverRunRecord, error) {
 	body := map[string]any{
 		"node_id":       finish.NodeID,
 		"lease_id":      finish.LeaseID,
@@ -391,7 +392,7 @@ func (s *driverRunStore) Finish(ctx context.Context, ws, runID string, finish st
 		"error_class":   finish.ErrorClass,
 		"output":        finish.Output,
 	}
-	var out domain.DriverRun
+	var out execution.DriverRunRecord
 	path := "/api/v1/" + pathEscape(ws) + "/driver-runs/" + pathEscape(runID) + "/finish"
 	if err := s.client.do(ctx, "POST", path, body, &out); err != nil {
 		return nil, err
@@ -399,7 +400,7 @@ func (s *driverRunStore) Finish(ctx context.Context, ws, runID string, finish st
 	return &out, nil
 }
 
-func (s *driverRunStore) RecoverStale(ctx context.Context, ws string, recover store.StaleDriverRunRecovery) (*store.StaleDriverRunRecoveryResult, error) {
+func (s *driverRunStore) RecoverStale(ctx context.Context, ws string, recover execution.StaleDriverRunRecovery) (*execution.StaleDriverRunRecoveryResult, error) {
 	type recoverStaleDriverRunsRequest struct {
 		StaleBefore   *time.Time `json:"stale_before,omitempty"`
 		MaxAgeSeconds int64      `json:"max_age_seconds,omitempty"`
@@ -417,7 +418,7 @@ func (s *driverRunStore) RecoverStale(ctx context.Context, ws string, recover st
 		staleBefore := recover.StaleBefore.UTC()
 		body.StaleBefore = &staleBefore
 	}
-	var out store.StaleDriverRunRecoveryResult
+	var out execution.StaleDriverRunRecoveryResult
 	path := "/api/v1/" + pathEscape(ws) + "/driver-runs/recover-stale"
 	if err := s.client.do(ctx, "POST", path, body, &out); err != nil {
 		return nil, err
@@ -425,7 +426,7 @@ func (s *driverRunStore) RecoverStale(ctx context.Context, ws string, recover st
 	return &out, nil
 }
 
-func (s *driverRunStore) RecoverStaleTaskRuns(ctx context.Context, ws, runID string, recover store.StaleTaskRunRecovery) (*store.StaleTaskRunRecoveryResult, error) {
+func (s *driverRunStore) RecoverStaleTaskRuns(ctx context.Context, ws, runID string, recover execution.StaleTaskRunRecovery) (*execution.StaleTaskRunRecoveryResult, error) {
 	type recoverStaleTaskRunsRequest struct {
 		StaleBefore   *time.Time `json:"stale_before,omitempty"`
 		MaxAgeSeconds int64      `json:"max_age_seconds,omitempty"`
@@ -441,7 +442,7 @@ func (s *driverRunStore) RecoverStaleTaskRuns(ctx context.Context, ws, runID str
 		staleBefore := recover.StaleBefore.UTC()
 		body.StaleBefore = &staleBefore
 	}
-	var out store.StaleTaskRunRecoveryResult
+	var out execution.StaleTaskRunRecoveryResult
 	path := "/api/v1/" + pathEscape(ws) + "/driver-runs/" + pathEscape(runID) + "/recover-stale-tasks"
 	if err := s.client.do(ctx, "POST", path, body, &out); err != nil {
 		return nil, err
@@ -451,18 +452,18 @@ func (s *driverRunStore) RecoverStaleTaskRuns(ctx context.Context, ws, runID str
 
 type driverStepStore struct{ client *Client }
 
-var _ store.DriverStepStore = (*driverStepStore)(nil)
+var _ execution.DriverStepStore = (*driverStepStore)(nil)
 
-func (s *driverStepStore) Create(ctx context.Context, in store.DriverStepCreate) (*domain.DriverStep, error) {
-	var out domain.DriverStep
+func (s *driverStepStore) Create(ctx context.Context, in execution.DriverStepCreate) (*execution.DriverStepRecord, error) {
+	var out execution.DriverStepRecord
 	if err := s.client.do(ctx, "POST", "/api/v1/"+pathEscape(in.WorkspaceKey)+"/driver-steps", driverStepCreateBody(in), &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
 }
 
-func (s *driverStepStore) CreateForRun(ctx context.Context, ws, runID string, in store.DriverStepCreate) (*domain.DriverStep, error) {
-	var out domain.DriverStep
+func (s *driverStepStore) CreateForRun(ctx context.Context, ws, runID string, in execution.DriverStepCreate) (*execution.DriverStepRecord, error) {
+	var out execution.DriverStepRecord
 	path := "/api/v1/" + pathEscape(ws) + "/driver-runs/" + pathEscape(runID) + "/steps"
 	if err := s.client.do(ctx, "POST", path, driverStepCreateBody(in), &out); err != nil {
 		return nil, err
@@ -470,44 +471,44 @@ func (s *driverStepStore) CreateForRun(ctx context.Context, ws, runID string, in
 	return &out, nil
 }
 
-func (s *driverStepStore) Get(ctx context.Context, ws, stepID string) (*domain.DriverStep, error) {
-	var out domain.DriverStep
+func (s *driverStepStore) Get(ctx context.Context, ws, stepID string) (*execution.DriverStepRecord, error) {
+	var out execution.DriverStepRecord
 	if err := s.client.do(ctx, "GET", "/api/v1/"+pathEscape(ws)+"/driver-steps/"+pathEscape(stepID), nil, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
 }
 
-func (s *driverStepStore) List(ctx context.Context, ws string, filter store.DriverStepFilter) ([]*domain.DriverStep, error) {
+func (s *driverStepStore) List(ctx context.Context, ws string, filter execution.DriverStepFilter) ([]*execution.DriverStepRecord, error) {
 	path := "/api/v1/" + pathEscape(ws) + "/driver-steps" + driverStepListQuery(filter, true)
 	var resp struct {
-		DriverSteps []*domain.DriverStep `json:"driver_steps"`
+		DriverSteps []*execution.DriverStepRecord `json:"driver_steps"`
 	}
 	if err := s.client.do(ctx, "GET", path, nil, &resp); err != nil {
 		return nil, err
 	}
 	if resp.DriverSteps == nil {
-		resp.DriverSteps = []*domain.DriverStep{}
+		resp.DriverSteps = []*execution.DriverStepRecord{}
 	}
 	return resp.DriverSteps, nil
 }
 
-func (s *driverStepStore) ListForRun(ctx context.Context, ws, runID string, filter store.DriverStepFilter) ([]*domain.DriverStep, error) {
+func (s *driverStepStore) ListForRun(ctx context.Context, ws, runID string, filter execution.DriverStepFilter) ([]*execution.DriverStepRecord, error) {
 	path := "/api/v1/" + pathEscape(ws) + "/driver-runs/" + pathEscape(runID) + "/steps" + driverStepListQuery(filter, false)
 	var resp struct {
-		DriverSteps []*domain.DriverStep `json:"driver_steps"`
+		DriverSteps []*execution.DriverStepRecord `json:"driver_steps"`
 	}
 	if err := s.client.do(ctx, "GET", path, nil, &resp); err != nil {
 		return nil, err
 	}
 	if resp.DriverSteps == nil {
-		resp.DriverSteps = []*domain.DriverStep{}
+		resp.DriverSteps = []*execution.DriverStepRecord{}
 	}
 	return resp.DriverSteps, nil
 }
 
-func (s *driverStepStore) Update(ctx context.Context, ws, stepID string, update store.DriverStepUpdate) (*domain.DriverStep, error) {
-	var out domain.DriverStep
+func (s *driverStepStore) Update(ctx context.Context, ws, stepID string, update execution.DriverStepUpdate) (*execution.DriverStepRecord, error) {
+	var out execution.DriverStepRecord
 	path := "/api/v1/" + pathEscape(ws) + "/driver-steps/" + pathEscape(stepID)
 	if err := s.client.do(ctx, "PATCH", path, update, &out); err != nil {
 		return nil, err
@@ -515,7 +516,7 @@ func (s *driverStepStore) Update(ctx context.Context, ws, stepID string, update 
 	return &out, nil
 }
 
-func driverStepCreateBody(in store.DriverStepCreate) map[string]any {
+func driverStepCreateBody(in execution.DriverStepCreate) map[string]any {
 	return map[string]any{
 		"step_id":          in.StepID,
 		"driver_run_id":    in.DriverRunID,
@@ -534,7 +535,7 @@ func driverStepCreateBody(in store.DriverStepCreate) map[string]any {
 	}
 }
 
-func driverStepListQuery(filter store.DriverStepFilter, includeDriverRunID bool) string {
+func driverStepListQuery(filter execution.DriverStepFilter, includeDriverRunID bool) string {
 	q := url.Values{}
 	if includeDriverRunID && filter.DriverRunID != "" {
 		q.Set("driver_run_id", filter.DriverRunID)
@@ -571,9 +572,9 @@ func leaseTokenHeaders(token string) map[string]string {
 
 type taskRunStore struct{ client *Client }
 
-var _ store.TaskRunStore = (*taskRunStore)(nil)
+var _ execution.TaskRunStore = (*taskRunStore)(nil)
 
-func (s *taskRunStore) Create(ctx context.Context, in store.TaskRunCreate) (*domain.TaskRun, error) {
+func (s *taskRunStore) Create(ctx context.Context, in execution.TaskRunCreate) (*execution.TaskRunRecord, error) {
 	body := map[string]any{
 		"task_run_id":              in.TaskRunID,
 		"driver_run_id":            in.DriverRunID,
@@ -598,14 +599,14 @@ func (s *taskRunStore) Create(ctx context.Context, in store.TaskRunCreate) (*dom
 	if len(in.Input) > 0 {
 		body["input"] = in.Input
 	}
-	var out domain.TaskRun
+	var out execution.TaskRunRecord
 	if err := s.client.do(ctx, "POST", "/api/v1/"+pathEscape(in.WorkspaceKey)+"/task-runs", body, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
 }
 
-func (s *taskRunStore) ClaimQueued(ctx context.Context, ws string, claim store.TaskRunClaim) (*domain.TaskRun, error) {
+func (s *taskRunStore) ClaimQueued(ctx context.Context, ws string, claim execution.TaskRunClaim) (*execution.TaskRunRecord, error) {
 	body := map[string]any{
 		"task_run_id":         claim.TaskRunID,
 		"node_id":             claim.NodeID,
@@ -618,22 +619,22 @@ func (s *taskRunStore) ClaimQueued(ctx context.Context, ws string, claim store.T
 		"sandbox_placement":   claim.SandboxPlacement,
 	}
 	headers := leaseTokenHeaders(claim.LeaseToken)
-	var out domain.TaskRun
+	var out execution.TaskRunRecord
 	if err := s.client.doWithHeaders(ctx, "POST", "/api/v1/"+pathEscape(ws)+"/task-runs/claim", body, &out, headers); err != nil {
 		return nil, err
 	}
 	return &out, nil
 }
 
-func (s *taskRunStore) Get(ctx context.Context, ws, taskRunID string) (*domain.TaskRun, error) {
-	var out domain.TaskRun
+func (s *taskRunStore) Get(ctx context.Context, ws, taskRunID string) (*execution.TaskRunRecord, error) {
+	var out execution.TaskRunRecord
 	if err := s.client.do(ctx, "GET", "/api/v1/"+pathEscape(ws)+"/task-runs/"+pathEscape(taskRunID), nil, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
 }
 
-func (s *taskRunStore) List(ctx context.Context, ws string, filter store.TaskRunFilter) ([]*domain.TaskRun, error) {
+func (s *taskRunStore) List(ctx context.Context, ws string, filter execution.TaskRunFilter) ([]*execution.TaskRunRecord, error) {
 	q := url.Values{}
 	if filter.DriverRunID != "" {
 		q.Set("driver_run_id", filter.DriverRunID)
@@ -655,18 +656,18 @@ func (s *taskRunStore) List(ctx context.Context, ws string, filter store.TaskRun
 	}
 	path := withQuery("/api/v1/"+pathEscape(ws)+"/task-runs", q)
 	var resp struct {
-		TaskRuns []*domain.TaskRun `json:"task_runs"`
+		TaskRuns []*execution.TaskRunRecord `json:"task_runs"`
 	}
 	if err := s.client.do(ctx, "GET", path, nil, &resp); err != nil {
 		return nil, err
 	}
 	if resp.TaskRuns == nil {
-		resp.TaskRuns = []*domain.TaskRun{}
+		resp.TaskRuns = []*execution.TaskRunRecord{}
 	}
 	return resp.TaskRuns, nil
 }
 
-func (s *taskRunStore) Finish(ctx context.Context, ws, taskRunID string, finish store.TaskRunFinish) (*domain.TaskRun, error) {
+func (s *taskRunStore) Finish(ctx context.Context, ws, taskRunID string, finish execution.TaskRunFinish) (*execution.TaskRunRecord, error) {
 	body := map[string]any{
 		"node_id":            finish.NodeID,
 		"lease_id":           finish.LeaseID,
@@ -685,7 +686,7 @@ func (s *taskRunStore) Finish(ctx context.Context, ws, taskRunID string, finish 
 		"error_message":      finish.ErrorMessage,
 		"block_task":         finish.BlockTask,
 	}
-	var out domain.TaskRun
+	var out execution.TaskRunRecord
 	path := "/api/v1/" + pathEscape(ws) + "/task-runs/" + pathEscape(taskRunID) + "/finish"
 	headers := leaseTokenHeaders(finish.LeaseToken)
 	if err := s.client.doWithHeaders(ctx, "POST", path, body, &out, headers); err != nil {
@@ -694,7 +695,7 @@ func (s *taskRunStore) Finish(ctx context.Context, ws, taskRunID string, finish 
 	return &out, nil
 }
 
-func (s *taskRunStore) Heartbeat(ctx context.Context, ws, taskRunID string, heartbeat store.TaskRunHeartbeat) (*domain.TaskRun, error) {
+func (s *taskRunStore) Heartbeat(ctx context.Context, ws, taskRunID string, heartbeat execution.TaskRunHeartbeat) (*execution.TaskRunRecord, error) {
 	body := map[string]any{
 		"node_id":          heartbeat.NodeID,
 		"lease_id":         heartbeat.LeaseID,
@@ -703,7 +704,7 @@ func (s *taskRunStore) Heartbeat(ctx context.Context, ws, taskRunID string, hear
 		"logs_ref":         heartbeat.LogsRef,
 		"artifacts_ref":    heartbeat.ArtifactsRef,
 	}
-	var out domain.TaskRun
+	var out execution.TaskRunRecord
 	path := "/api/v1/" + pathEscape(ws) + "/task-runs/" + pathEscape(taskRunID) + "/heartbeat"
 	headers := leaseTokenHeaders(heartbeat.LeaseToken)
 	if err := s.client.doWithHeaders(ctx, "POST", path, body, &out, headers); err != nil {
@@ -712,7 +713,7 @@ func (s *taskRunStore) Heartbeat(ctx context.Context, ws, taskRunID string, hear
 	return &out, nil
 }
 
-func (s *taskRunStore) Requeue(ctx context.Context, ws, taskRunID string, requeue store.TaskRunRequeue) (*domain.TaskRun, error) {
+func (s *taskRunStore) Requeue(ctx context.Context, ws, taskRunID string, requeue execution.TaskRunRequeue) (*execution.TaskRunRecord, error) {
 	body := map[string]any{
 		"node_id":          requeue.NodeID,
 		"lease_id":         requeue.LeaseID,
@@ -726,7 +727,7 @@ func (s *taskRunStore) Requeue(ctx context.Context, ws, taskRunID string, requeu
 	if !requeue.NextEligibleAt.IsZero() {
 		body["next_eligible_at"] = requeue.NextEligibleAt
 	}
-	var out domain.TaskRun
+	var out execution.TaskRunRecord
 	path := "/api/v1/" + pathEscape(ws) + "/task-runs/" + pathEscape(taskRunID) + "/requeue"
 	headers := leaseTokenHeaders(requeue.LeaseToken)
 	if err := s.client.doWithHeaders(ctx, "POST", path, body, &out, headers); err != nil {
@@ -735,7 +736,7 @@ func (s *taskRunStore) Requeue(ctx context.Context, ws, taskRunID string, requeu
 	return &out, nil
 }
 
-func (s *taskRunStore) Complete(ctx context.Context, ws, taskRunID string, complete store.TaskRunComplete) (*domain.TaskRun, error) {
+func (s *taskRunStore) Complete(ctx context.Context, ws, taskRunID string, complete execution.TaskRunComplete) (*execution.TaskRunRecord, error) {
 	body := map[string]any{
 		"completion_id":         complete.CompletionID,
 		"node_id":               complete.NodeID,
@@ -762,7 +763,7 @@ func (s *taskRunStore) Complete(ctx context.Context, ws, taskRunID string, compl
 		body["finished_at"] = complete.FinishedAt.UTC()
 	}
 	var resp struct {
-		TaskRun *domain.TaskRun `json:"task_run"`
+		TaskRun *execution.TaskRunRecord `json:"task_run"`
 	}
 	path := "/api/v1/" + pathEscape(ws) + "/task-runs/" + pathEscape(taskRunID) + "/complete"
 	headers := leaseTokenHeaders(complete.LeaseToken)
@@ -775,7 +776,7 @@ func (s *taskRunStore) Complete(ctx context.Context, ws, taskRunID string, compl
 	return resp.TaskRun, nil
 }
 
-func (s *taskRunStore) AppendLog(ctx context.Context, ws, taskRunID string, appendLog store.TaskRunLogAppend) (*domain.TaskRunLogEntry, error) {
+func (s *taskRunStore) AppendLog(ctx context.Context, ws, taskRunID string, appendLog execution.TaskRunLogAppend) (*execution.TaskRunLogEntry, error) {
 	body := map[string]any{
 		"request_id":    appendLog.RequestID,
 		"node_id":       appendLog.NodeID,
@@ -787,7 +788,7 @@ func (s *taskRunStore) AppendLog(ctx context.Context, ws, taskRunID string, appe
 	if !appendLog.Timestamp.IsZero() {
 		body["timestamp"] = appendLog.Timestamp
 	}
-	var out domain.TaskRunLogEntry
+	var out execution.TaskRunLogEntry
 	path := "/api/v1/" + pathEscape(ws) + "/task-runs/" + pathEscape(taskRunID) + "/logs"
 	headers := leaseTokenHeaders(appendLog.LeaseToken)
 	if err := s.client.doWithHeaders(ctx, "POST", path, body, &out, headers); err != nil {
@@ -796,7 +797,7 @@ func (s *taskRunStore) AppendLog(ctx context.Context, ws, taskRunID string, appe
 	return &out, nil
 }
 
-func (s *taskRunStore) ListLogs(ctx context.Context, ws, taskRunID string, filter store.TaskRunLogFilter) ([]*domain.TaskRunLogEntry, error) {
+func (s *taskRunStore) ListLogs(ctx context.Context, ws, taskRunID string, filter execution.TaskRunLogFilter) ([]*execution.TaskRunLogEntry, error) {
 	q := url.Values{}
 	if filter.AfterSequence > 0 {
 		q.Set("after_sequence", strconv.FormatInt(filter.AfterSequence, 10))
@@ -806,18 +807,18 @@ func (s *taskRunStore) ListLogs(ctx context.Context, ws, taskRunID string, filte
 	}
 	path := withQuery("/api/v1/"+pathEscape(ws)+"/task-runs/"+pathEscape(taskRunID)+"/logs", q)
 	var resp struct {
-		Logs []*domain.TaskRunLogEntry `json:"logs"`
+		Logs []*execution.TaskRunLogEntry `json:"logs"`
 	}
 	if err := s.client.do(ctx, "GET", path, nil, &resp); err != nil {
 		return nil, err
 	}
 	if resp.Logs == nil {
-		resp.Logs = []*domain.TaskRunLogEntry{}
+		resp.Logs = []*execution.TaskRunLogEntry{}
 	}
 	return resp.Logs, nil
 }
 
-func driverUpdateBody(patch store.DriverUpdate) map[string]any {
+func driverUpdateBody(patch workflowcatalog.DriverUpdate) map[string]any {
 	body := map[string]any{}
 	if patch.Name != nil {
 		body["name"] = *patch.Name
@@ -843,7 +844,7 @@ func driverUpdateBody(patch store.DriverUpdate) map[string]any {
 	return body
 }
 
-func triggerBindingUpdateBody(patch store.TriggerBindingUpdate) map[string]any {
+func triggerBindingUpdateBody(patch automation.TriggerBindingUpdate) map[string]any {
 	body := map[string]any{}
 	bodyPtr(body, "name", patch.Name)
 	bodyPtr(body, "source_kind", patch.SourceKind)

@@ -7,13 +7,14 @@ import (
 	"sync"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
+
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 type driverRunStore struct {
 	mu                     sync.RWMutex
-	items                  map[string]map[string]*domain.DriverRun
+	items                  map[string]map[string]*execution.DriverRunRecord
 	outcomes               map[string]map[string]*memDriverRunOutcome
 	terminalWorkRecoveries map[string]map[string]*memDriverRunOutcome
 	versions               *driverVersionStore
@@ -29,7 +30,7 @@ type driverRunStore struct {
 }
 
 type memDriverRunOutcome struct {
-	value       store.DriverRunOutcome
+	value       execution.DriverRunOutcome
 	state       string
 	claimID     string
 	claimUntil  time.Time
@@ -39,7 +40,7 @@ type memDriverRunOutcome struct {
 
 func newDriverRunStore(versions *driverVersionStore, bindings *triggerBindingStore) *driverRunStore {
 	return &driverRunStore{
-		items: make(map[string]map[string]*domain.DriverRun), outcomes: make(map[string]map[string]*memDriverRunOutcome),
+		items: make(map[string]map[string]*execution.DriverRunRecord), outcomes: make(map[string]map[string]*memDriverRunOutcome),
 		terminalWorkRecoveries: make(map[string]map[string]*memDriverRunOutcome),
 		versions:               versions, bindings: bindings,
 	}
@@ -53,18 +54,18 @@ func (s *driverRunStore) setAwaitResumeEligible(probe func(ws, instanceKey strin
 }
 
 var (
-	_ store.DriverRunStore                          = (*driverRunStore)(nil)
-	_ store.DriverRunCancelSupport                  = (*driverRunStore)(nil)
-	_ store.DriverRunOutcomeStore                   = (*driverRunStore)(nil)
-	_ store.TerminalDriverRunWorkRecoveryQueueStore = (*driverRunStore)(nil)
+	_ execution.DriverRunStore                          = (*driverRunStore)(nil)
+	_ execution.DriverRunCancelSupport                  = (*driverRunStore)(nil)
+	_ execution.DriverRunOutcomeStore                   = (*driverRunStore)(nil)
+	_ execution.TerminalDriverRunWorkRecoveryQueueStore = (*driverRunStore)(nil)
 )
 
-func (s *driverRunStore) Create(ctx context.Context, in store.DriverRunCreate) (*domain.DriverRun, error) { //nolint:funlen // Validation and persisted run assembly stay adjacent.
+func (s *driverRunStore) Create(ctx context.Context, in execution.DriverRunCreate) (*execution.DriverRunRecord, error) { //nolint:funlen // Validation and persisted run assembly stay adjacent.
 	if in.WorkspaceKey == "" || in.RunID == "" || in.DriverID == "" || in.DriverVersionID == "" {
-		return nil, fmt.Errorf("workspace_key + run_id + driver_id + driver_version_id required: %w", domain.ErrInvalid)
+		return nil, fmt.Errorf("workspace_key + run_id + driver_id + driver_version_id required: %w", persistence.ErrInvalid)
 	}
 	if s.versions != nil && !s.versions.belongsToDriver(in.WorkspaceKey, in.DriverVersionID, in.DriverID) {
-		return nil, fmt.Errorf("driver version %q for driver %q in workspace %q: %w", in.DriverVersionID, in.DriverID, in.WorkspaceKey, domain.ErrNotFound)
+		return nil, fmt.Errorf("driver version %q for driver %q in workspace %q: %w", in.DriverVersionID, in.DriverID, in.WorkspaceKey, persistence.ErrNotFound)
 	}
 	agentServiceID, err := s.resolveAgentServiceID(ctx, in)
 	if err != nil {
@@ -73,7 +74,7 @@ func (s *driverRunStore) Create(ctx context.Context, in store.DriverRunCreate) (
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.items[in.WorkspaceKey] == nil {
-		s.items[in.WorkspaceKey] = make(map[string]*domain.DriverRun)
+		s.items[in.WorkspaceKey] = make(map[string]*execution.DriverRunRecord)
 	}
 	if in.IdempotencyKey != "" {
 		for _, run := range s.items[in.WorkspaceKey] {
@@ -84,16 +85,16 @@ func (s *driverRunStore) Create(ctx context.Context, in store.DriverRunCreate) (
 	}
 	if in.EpicID != "" {
 		for _, run := range s.items[in.WorkspaceKey] {
-			if run.EpicID == in.EpicID && (run.Status == domain.DriverRunQueued || run.Status == domain.DriverRunRunning) {
+			if run.EpicID == in.EpicID && (run.Status == execution.DriverRunQueued || run.Status == execution.DriverRunRunning) {
 				return cloneDriverRun(run), nil
 			}
 		}
 	}
 	if _, ok := s.items[in.WorkspaceKey][in.RunID]; ok {
-		return nil, fmt.Errorf("driver run %q in workspace %q: %w", in.RunID, in.WorkspaceKey, domain.ErrAlreadyExists)
+		return nil, fmt.Errorf("driver run %q in workspace %q: %w", in.RunID, in.WorkspaceKey, persistence.ErrAlreadyExists)
 	}
 	now := time.Now().UTC()
-	run := &domain.DriverRun{
+	run := &execution.DriverRunRecord{
 		WorkspaceKey:     in.WorkspaceKey,
 		RunID:            in.RunID,
 		DriverID:         in.DriverID,
@@ -105,7 +106,7 @@ func (s *driverRunStore) Create(ctx context.Context, in store.DriverRunCreate) (
 		TriggerBindingID: in.TriggerBindingID,
 		AgentServiceID:   agentServiceID,
 		ParentRunID:      in.ParentRunID,
-		Status:           domain.DriverRunQueued,
+		Status:           execution.DriverRunQueued,
 		IdempotencyKey:   in.IdempotencyKey,
 		Payload:          cloneJSON(in.Payload),
 		CreatedAt:        now,
@@ -115,42 +116,42 @@ func (s *driverRunStore) Create(ctx context.Context, in store.DriverRunCreate) (
 	return cloneDriverRun(run), nil
 }
 
-func (s *driverRunStore) resolveAgentServiceID(ctx context.Context, in store.DriverRunCreate) (string, error) {
+func (s *driverRunStore) resolveAgentServiceID(ctx context.Context, in execution.DriverRunCreate) (string, error) {
 	if in.TriggerBindingID == "" {
 		return "", nil
 	}
 	if s.bindings == nil {
-		return "", fmt.Errorf("trigger binding %q in workspace %q: %w", in.TriggerBindingID, in.WorkspaceKey, domain.ErrNotFound)
+		return "", fmt.Errorf("trigger binding %q in workspace %q: %w", in.TriggerBindingID, in.WorkspaceKey, persistence.ErrNotFound)
 	}
 	binding, err := s.bindings.Get(ctx, in.WorkspaceKey, in.TriggerBindingID)
 	if err != nil {
 		return "", err
 	}
 	if binding.DriverID != in.DriverID || binding.DriverVersionID != in.DriverVersionID {
-		return "", fmt.Errorf("trigger binding %q does not reference driver version %q/%q: %w", in.TriggerBindingID, in.DriverID, in.DriverVersionID, domain.ErrInvalid)
+		return "", fmt.Errorf("trigger binding %q does not reference driver version %q/%q: %w", in.TriggerBindingID, in.DriverID, in.DriverVersionID, persistence.ErrInvalid)
 	}
 	return binding.TargetAgentServiceID, nil
 }
 
-func (s *driverRunStore) CreateEpic(ctx context.Context, ws, epicID string, in store.EpicRunCreate) (*domain.DriverRun, error) {
+func (s *driverRunStore) CreateEpic(ctx context.Context, ws, epicID string, in execution.EpicRunCreate) (*execution.DriverRunRecord, error) {
 	if ws == "" || epicID == "" {
-		return nil, fmt.Errorf("workspace_key + epic_id required: %w", domain.ErrInvalid)
+		return nil, fmt.Errorf("workspace_key + epic_id required: %w", persistence.ErrInvalid)
 	}
 	if s.bindings == nil {
-		return nil, fmt.Errorf("trigger binding route %q in workspace %q: %w", "epics.runs.create", ws, domain.ErrNotFound)
+		return nil, fmt.Errorf("trigger binding route %q in workspace %q: %w", "epics.runs.create", ws, persistence.ErrNotFound)
 	}
 	binding, err := s.bindings.GetByRouteKey(ctx, ws, "epics.runs.create")
 	if err != nil {
 		return nil, err
 	}
 	if !binding.Enabled {
-		return nil, fmt.Errorf("trigger binding route %q in workspace %q: %w", "epics.runs.create", ws, domain.ErrNotFound)
+		return nil, fmt.Errorf("trigger binding route %q in workspace %q: %w", "epics.runs.create", ws, persistence.ErrNotFound)
 	}
 	runID := in.RunID
 	if runID == "" {
 		runID = fmt.Sprintf("run-%d", time.Now().UTC().UnixNano())
 	}
-	return s.Create(ctx, store.DriverRunCreate{
+	return s.Create(ctx, execution.DriverRunCreate{
 		WorkspaceKey:    ws,
 		RunID:           runID,
 		DriverID:        binding.DriverID,
@@ -164,26 +165,26 @@ func (s *driverRunStore) CreateEpic(ctx context.Context, ws, epicID string, in s
 	})
 }
 
-func (s *driverRunStore) Get(_ context.Context, ws, runID string) (*domain.DriverRun, error) {
+func (s *driverRunStore) Get(_ context.Context, ws, runID string) (*execution.DriverRunRecord, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	run, ok := s.items[ws][runID]
 	if !ok {
-		return nil, fmt.Errorf("driver run %q in workspace %q: %w", runID, ws, domain.ErrNotFound)
+		return nil, fmt.Errorf("driver run %q in workspace %q: %w", runID, ws, persistence.ErrNotFound)
 	}
 	return cloneDriverRun(run), nil
 }
 
-func (s *driverRunStore) Events(ctx context.Context, ws, runID, after string, limit int) (*domain.PlatformEventsPage, error) {
+func (s *driverRunStore) Events(ctx context.Context, ws, runID, after string, limit int) (*execution.AuditPage, error) {
 	run, err := s.Get(ctx, ws, runID)
 	if err != nil {
 		return nil, err
 	}
 	if after != "" && after != "0" {
-		return &domain.PlatformEventsPage{Events: []domain.PlatformEvent{}, Cursor: after}, nil
+		return &execution.AuditPage{Events: []execution.AuditEvent{}, Cursor: after}, nil
 	}
 	action := "driver_run.create"
-	if run.Status == domain.DriverRunRunning {
+	if run.Status == execution.DriverRunRunning {
 		action = "driver_run.claim"
 	} else if run.Status.IsTerminal() {
 		action = "driver_run.finish"
@@ -192,7 +193,7 @@ func (s *driverRunStore) Events(ctx context.Context, ws, runID, after string, li
 	if timestamp.IsZero() {
 		timestamp = run.CreatedAt
 	}
-	event := domain.PlatformEvent{
+	event := execution.AuditEvent{
 		ID:          "1-0",
 		Timestamp:   timestamp,
 		Actor:       "memstore",
@@ -207,13 +208,13 @@ func (s *driverRunStore) Events(ctx context.Context, ws, runID, after string, li
 			"source_ref":        run.SourceRef,
 		},
 	}
-	return &domain.PlatformEventsPage{Events: []domain.PlatformEvent{event}, Cursor: event.ID}, nil
+	return &execution.AuditPage{Events: []execution.AuditEvent{event}, Cursor: event.ID}, nil
 }
 
-func (s *driverRunStore) List(_ context.Context, ws string, filter store.DriverRunFilter) ([]*domain.DriverRun, error) {
+func (s *driverRunStore) List(_ context.Context, ws string, filter execution.DriverRunFilter) ([]*execution.DriverRunRecord, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	out := make([]*domain.DriverRun, 0, len(s.items[ws]))
+	out := make([]*execution.DriverRunRecord, 0, len(s.items[ws]))
 	for _, run := range s.items[ws] {
 		if driverRunMatchesMem(run, filter) {
 			out = append(out, cloneDriverRun(run))
@@ -223,35 +224,35 @@ func (s *driverRunStore) List(_ context.Context, ws string, filter store.DriverR
 	// order fleet-db applies server-side. Ordering BEFORE the limit is what lets
 	// callers push a limit down safely: the newest-by-StartedAt window survives
 	// truncation instead of being dropped by a CreatedAt-only order.
-	store.SortDriverRunsNewestFirst(out)
+	execution.SortDriverRunsNewestFirst(out)
 	if filter.Limit > 0 && len(out) > filter.Limit {
 		out = out[:filter.Limit]
 	}
 	return out, nil
 }
 
-func (s *driverRunStore) Claim(_ context.Context, ws, runID, nodeID, leaseID string) (*domain.DriverRun, error) {
+func (s *driverRunStore) Claim(_ context.Context, ws, runID, nodeID, leaseID string) (*execution.DriverRunRecord, error) {
 	if nodeID == "" {
-		return nil, fmt.Errorf("node_id required: %w", domain.ErrInvalid)
+		return nil, fmt.Errorf("node_id required: %w", persistence.ErrInvalid)
 	}
 	if leaseID == "" {
-		return nil, fmt.Errorf("lease_id required: %w", domain.ErrInvalid)
+		return nil, fmt.Errorf("lease_id required: %w", persistence.ErrInvalid)
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	run, ok := s.items[ws][runID]
 	if !ok {
-		return nil, fmt.Errorf("driver run %q in workspace %q: %w", runID, ws, domain.ErrNotFound)
+		return nil, fmt.Errorf("driver run %q in workspace %q: %w", runID, ws, persistence.ErrNotFound)
 	}
 	if run.NodeID != "" {
-		return nil, fmt.Errorf("driver run %q in workspace %q: %w", runID, ws, domain.ErrAlreadyClaimed)
+		return nil, fmt.Errorf("driver run %q in workspace %q: %w", runID, ws, persistence.ErrAlreadyClaimed)
 	}
-	if run.Status != domain.DriverRunQueued {
-		return nil, fmt.Errorf("driver run %q in workspace %q: %w", runID, ws, domain.ErrInvalidTransition)
+	if run.Status != execution.DriverRunQueued {
+		return nil, fmt.Errorf("driver run %q in workspace %q: %w", runID, ws, persistence.ErrInvalidTransition)
 	}
 	now := time.Now().UTC()
 	s.next++
-	run.Status = domain.DriverRunRunning
+	run.Status = execution.DriverRunRunning
 	run.NodeID = nodeID
 	run.LeaseID = leaseID
 	run.FencingToken = s.next
@@ -261,24 +262,24 @@ func (s *driverRunStore) Claim(_ context.Context, ws, runID, nodeID, leaseID str
 	return cloneDriverRun(run), nil
 }
 
-func (s *driverRunStore) Heartbeat(_ context.Context, ws, runID, nodeID, leaseID string, fencingToken int64) (*domain.DriverRun, error) {
+func (s *driverRunStore) Heartbeat(_ context.Context, ws, runID, nodeID, leaseID string, fencingToken int64) (*execution.DriverRunRecord, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	run, ok := s.items[ws][runID]
 	if !ok {
-		return nil, fmt.Errorf("driver run %q in workspace %q: %w", runID, ws, domain.ErrNotFound)
+		return nil, fmt.Errorf("driver run %q in workspace %q: %w", runID, ws, persistence.ErrNotFound)
 	}
 	// Explicit suspended rejection BEFORE owner validation (mirrors
 	// fleet-db's heartbeat guard, AW3): a suspended run released its slot,
 	// so even the formerly-owning executor must not renew it.
-	if run.Status == domain.DriverRunSuspendedAwaitingEvent {
-		return nil, fmt.Errorf("driver run %q in workspace %q: %w", runID, ws, domain.ErrInvalidTransition)
+	if run.Status == execution.DriverRunSuspendedAwait {
+		return nil, fmt.Errorf("driver run %q in workspace %q: %w", runID, ws, persistence.ErrInvalidTransition)
 	}
 	if run.NodeID != nodeID || run.LeaseID != leaseID || run.FencingToken != fencingToken {
-		return nil, fmt.Errorf("driver run %q in workspace %q: %w", runID, ws, domain.ErrNotOwner)
+		return nil, fmt.Errorf("driver run %q in workspace %q: %w", runID, ws, persistence.ErrNotOwner)
 	}
-	if run.Status != domain.DriverRunRunning {
-		return nil, fmt.Errorf("driver run %q in workspace %q: %w", runID, ws, domain.ErrInvalidTransition)
+	if run.Status != execution.DriverRunRunning {
+		return nil, fmt.Errorf("driver run %q in workspace %q: %w", runID, ws, persistence.ErrInvalidTransition)
 	}
 	now := time.Now().UTC()
 	run.LastHeartbeat = now
@@ -286,21 +287,21 @@ func (s *driverRunStore) Heartbeat(_ context.Context, ws, runID, nodeID, leaseID
 	return cloneDriverRun(run), nil
 }
 
-func (s *driverRunStore) Finish(_ context.Context, ws, runID string, finish store.DriverRunFinish) (*domain.DriverRun, error) {
+func (s *driverRunStore) Finish(_ context.Context, ws, runID string, finish execution.DriverRunFinish) (*execution.DriverRunRecord, error) {
 	if !finish.Status.IsTerminal() {
-		return nil, fmt.Errorf("driver run %q in workspace %q: %w", runID, ws, domain.ErrInvalidTransition)
+		return nil, fmt.Errorf("driver run %q in workspace %q: %w", runID, ws, persistence.ErrInvalidTransition)
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	run, ok := s.items[ws][runID]
 	if !ok {
-		return nil, fmt.Errorf("driver run %q in workspace %q: %w", runID, ws, domain.ErrNotFound)
+		return nil, fmt.Errorf("driver run %q in workspace %q: %w", runID, ws, persistence.ErrNotFound)
 	}
 	if run.NodeID != finish.NodeID || run.LeaseID != finish.LeaseID || run.FencingToken != finish.FencingToken {
-		return nil, fmt.Errorf("driver run %q in workspace %q: %w", runID, ws, domain.ErrNotOwner)
+		return nil, fmt.Errorf("driver run %q in workspace %q: %w", runID, ws, persistence.ErrNotOwner)
 	}
-	if run.Status != domain.DriverRunRunning {
-		return nil, fmt.Errorf("driver run %q in workspace %q: %w", runID, ws, domain.ErrInvalidTransition)
+	if run.Status != execution.DriverRunRunning {
+		return nil, fmt.Errorf("driver run %q in workspace %q: %w", runID, ws, persistence.ErrInvalidTransition)
 	}
 	now := time.Now().UTC()
 	run.Status = finish.Status
@@ -322,37 +323,37 @@ func (s *driverRunStore) Finish(_ context.Context, ws, runID string, finish stor
 // can retry the pending->suspend leg safely. awaitInstanceKey names and is
 // persisted as the current await cycle, including when an atomic outcome
 // resolution wins the pending->suspend window.
-func (s *driverRunStore) Suspend(_ context.Context, ws, runID, nodeID, leaseID string, fencingToken int64, awaitInstanceKey string) (*domain.DriverRun, error) {
+func (s *driverRunStore) Suspend(_ context.Context, ws, runID, nodeID, leaseID string, fencingToken int64, awaitInstanceKey string) (*execution.DriverRunRecord, error) {
 	if awaitInstanceKey == "" {
-		return nil, fmt.Errorf("await instance key required: %w", domain.ErrInvalid)
+		return nil, fmt.Errorf("await instance key required: %w", persistence.ErrInvalid)
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	run, ok := s.items[ws][runID]
 	if !ok {
-		return nil, fmt.Errorf("driver run %q in workspace %q: %w", runID, ws, domain.ErrNotFound)
+		return nil, fmt.Errorf("driver run %q in workspace %q: %w", runID, ws, persistence.ErrNotFound)
 	}
-	if run.Status == domain.DriverRunSuspendedAwaitingEvent {
+	if run.Status == execution.DriverRunSuspendedAwait {
 		if run.AwaitInstanceKey == awaitInstanceKey {
 			return cloneDriverRun(run), nil
 		}
 		return nil, fmt.Errorf("driver run %q is suspended on await %q, not %q: %w",
-			runID, run.AwaitInstanceKey, awaitInstanceKey, domain.ErrInvalidTransition)
+			runID, run.AwaitInstanceKey, awaitInstanceKey, persistence.ErrInvalidTransition)
 	}
 	if run.NodeID != nodeID || run.LeaseID != leaseID || run.FencingToken != fencingToken {
-		return nil, fmt.Errorf("driver run %q in workspace %q: %w", runID, ws, domain.ErrNotOwner)
+		return nil, fmt.Errorf("driver run %q in workspace %q: %w", runID, ws, persistence.ErrNotOwner)
 	}
-	if run.Status != domain.DriverRunRunning {
-		return nil, fmt.Errorf("driver run %q in workspace %q: %w", runID, ws, domain.ErrInvalidTransition)
+	if run.Status != execution.DriverRunRunning {
+		return nil, fmt.Errorf("driver run %q in workspace %q: %w", runID, ws, persistence.ErrInvalidTransition)
 	}
 	if run.ResumeSourceEventID != "" {
 		if run.AwaitInstanceKey == awaitInstanceKey {
 			return nil, fmt.Errorf("driver run %q await %q already resolved: %w",
-				runID, awaitInstanceKey, domain.ErrDriverRunAlreadyResumed)
+				runID, awaitInstanceKey, execution.ErrAlreadyResumed)
 		}
 	}
 	now := time.Now().UTC()
-	run.Status = domain.DriverRunSuspendedAwaitingEvent
+	run.Status = execution.DriverRunSuspendedAwait
 	run.AwaitInstanceKey = awaitInstanceKey
 	// A resume marker belongs to the await cycle named by AwaitInstanceKey.
 	// Once the re-queued run is claimed for a later cycle, a fresh suspend
@@ -375,38 +376,38 @@ func (s *driverRunStore) Suspend(_ context.Context, ws, runID, nodeID, leaseID s
 // gets ErrInvalidTransition, which the resume path (AW7) tolerates and
 // retries once the suspend lands. The re-queued run is claimable again with
 // a fresh lease and fencing token.
-func (s *driverRunStore) ResumeAwaiting(_ context.Context, ws, runID, awaitInstanceKey, resumeSourceEventID string) (*domain.DriverRun, error) {
+func (s *driverRunStore) ResumeAwaiting(_ context.Context, ws, runID, awaitInstanceKey, resumeSourceEventID string) (*execution.DriverRunRecord, error) {
 	if awaitInstanceKey == "" {
-		return nil, fmt.Errorf("await instance key required: %w", domain.ErrInvalid)
+		return nil, fmt.Errorf("await instance key required: %w", persistence.ErrInvalid)
 	}
 	if resumeSourceEventID == "" {
-		return nil, fmt.Errorf("resume source event id required: %w", domain.ErrInvalid)
+		return nil, fmt.Errorf("resume source event id required: %w", persistence.ErrInvalid)
 	}
 	// The await cycle must belong to THIS run and must have resolved
 	// (satisfied/timed_out) before the run may leave suspended_awaiting_event
 	// — only ResolveAwait gates resume (security review fix, mirroring
 	// fleet-db's INVALID/AWAIT_NOT_TERMINAL Lua guards). Checked before the
 	// run lock; the await store guards itself.
-	if keyRunID, _, err := domain.ParseAwaitInstanceKey(awaitInstanceKey); err != nil || keyRunID != runID {
-		return nil, fmt.Errorf("await %q does not belong to driver run %q: %w", awaitInstanceKey, runID, domain.ErrInvalidTransition)
+	if keyRunID, _, err := execution.ParseAwaitInstanceKey(awaitInstanceKey); err != nil || keyRunID != runID {
+		return nil, fmt.Errorf("await %q does not belong to driver run %q: %w", awaitInstanceKey, runID, persistence.ErrInvalidTransition)
 	}
 	if s.awaitResumeEligible != nil && !s.awaitResumeEligible(ws, awaitInstanceKey) {
-		return nil, fmt.Errorf("await %q has not resolved; resume denied: %w", awaitInstanceKey, domain.ErrInvalidTransition)
+		return nil, fmt.Errorf("await %q has not resolved; resume denied: %w", awaitInstanceKey, persistence.ErrInvalidTransition)
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	run, ok := s.items[ws][runID]
 	if !ok {
-		return nil, fmt.Errorf("driver run %q in workspace %q: %w", runID, ws, domain.ErrNotFound)
+		return nil, fmt.Errorf("driver run %q in workspace %q: %w", runID, ws, persistence.ErrNotFound)
 	}
-	if run.Status != domain.DriverRunSuspendedAwaitingEvent {
-		return nil, fmt.Errorf("driver run %q in workspace %q: %w", runID, ws, domain.ErrInvalidTransition)
+	if run.Status != execution.DriverRunSuspendedAwait {
+		return nil, fmt.Errorf("driver run %q in workspace %q: %w", runID, ws, persistence.ErrInvalidTransition)
 	}
 	if run.AwaitInstanceKey != awaitInstanceKey {
 		return nil, fmt.Errorf("driver run %q awaits %q, not %q: %w",
-			runID, run.AwaitInstanceKey, awaitInstanceKey, domain.ErrInvalidTransition)
+			runID, run.AwaitInstanceKey, awaitInstanceKey, persistence.ErrInvalidTransition)
 	}
-	run.Status = domain.DriverRunQueued
+	run.Status = execution.DriverRunQueued
 	run.ResumeSourceEventID = resumeSourceEventID
 	run.UpdatedAt = time.Now().UTC()
 	return cloneDriverRun(run), nil
@@ -420,11 +421,11 @@ func (s *driverRunStore) cancelQueuedForSupersede(ws, runID, summary string) boo
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	run, ok := s.items[ws][runID]
-	if !ok || run.Status != domain.DriverRunQueued {
+	if !ok || run.Status != execution.DriverRunQueued {
 		return false
 	}
 	now := time.Now().UTC()
-	run.Status = domain.DriverRunCancelled
+	run.Status = execution.DriverRunCancelled
 	run.Summary = summary
 	run.ErrorClass = "superseded"
 	run.FinishedAt = &now
@@ -433,27 +434,27 @@ func (s *driverRunStore) cancelQueuedForSupersede(ws, runID, summary string) boo
 	return true
 }
 
-// CancelQueuedRun is the store.DriverRunCancelSupport queued leg (composition
+// CancelQueuedRun is the execution.DriverRunCancelSupport queued leg (composition
 // cascade, AW10): a still-queued run terminalizes as cancelled with no owner
 // check — there is no owner to fence against. Idempotent on an
 // already-cancelled run; any other status (claimed in the race window,
 // suspended, otherwise terminal) returns ErrInvalidTransition so an executing
 // run is never terminalized out from under its executor.
-func (s *driverRunStore) CancelQueuedRun(_ context.Context, ws, runID, summary, errorClass string) (*domain.DriverRun, error) {
+func (s *driverRunStore) CancelQueuedRun(_ context.Context, ws, runID, summary, errorClass string) (*execution.DriverRunRecord, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	run, ok := s.items[ws][runID]
 	if !ok {
-		return nil, fmt.Errorf("driver run %q in workspace %q: %w", runID, ws, domain.ErrNotFound)
+		return nil, fmt.Errorf("driver run %q in workspace %q: %w", runID, ws, persistence.ErrNotFound)
 	}
-	if run.Status == domain.DriverRunCancelled {
+	if run.Status == execution.DriverRunCancelled {
 		return cloneDriverRun(run), nil
 	}
-	if run.Status != domain.DriverRunQueued {
-		return nil, fmt.Errorf("driver run %q in workspace %q: %w", runID, ws, domain.ErrInvalidTransition)
+	if run.Status != execution.DriverRunQueued {
+		return nil, fmt.Errorf("driver run %q in workspace %q: %w", runID, ws, persistence.ErrInvalidTransition)
 	}
 	now := time.Now().UTC()
-	run.Status = domain.DriverRunCancelled
+	run.Status = execution.DriverRunCancelled
 	run.Summary = summary
 	run.ErrorClass = errorClass
 	run.FinishedAt = &now
@@ -462,23 +463,23 @@ func (s *driverRunStore) CancelQueuedRun(_ context.Context, ws, runID, summary, 
 	return cloneDriverRun(run), nil
 }
 
-// RequestCancel is the store.DriverRunCancelSupport running leg: it stamps a
+// RequestCancel is the execution.DriverRunCancelSupport running leg: it stamps a
 // cooperative cancel request on a RUNNING run. The owning executor sees the
 // marker on its next heartbeat, cancels its runner, and the run terminalizes
 // through the normal fenced Finish as cancelled. Idempotent once requested;
 // non-running runs return ErrInvalidTransition.
-func (s *driverRunStore) RequestCancel(_ context.Context, ws, runID, reason string) (*domain.DriverRun, error) {
+func (s *driverRunStore) RequestCancel(_ context.Context, ws, runID, reason string) (*execution.DriverRunRecord, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	run, ok := s.items[ws][runID]
 	if !ok {
-		return nil, fmt.Errorf("driver run %q in workspace %q: %w", runID, ws, domain.ErrNotFound)
+		return nil, fmt.Errorf("driver run %q in workspace %q: %w", runID, ws, persistence.ErrNotFound)
 	}
 	if run.CancelRequestedAt != nil {
 		return cloneDriverRun(run), nil
 	}
-	if run.Status != domain.DriverRunRunning {
-		return nil, fmt.Errorf("driver run %q in workspace %q: %w", runID, ws, domain.ErrInvalidTransition)
+	if run.Status != execution.DriverRunRunning {
+		return nil, fmt.Errorf("driver run %q in workspace %q: %w", runID, ws, persistence.ErrInvalidTransition)
 	}
 	now := time.Now().UTC()
 	run.CancelRequestedAt = &now
@@ -487,7 +488,7 @@ func (s *driverRunStore) RequestCancel(_ context.Context, ws, runID, reason stri
 	return cloneDriverRun(run), nil
 }
 
-func (s *driverRunStore) RecoverStale(_ context.Context, ws string, recover store.StaleDriverRunRecovery) (*store.StaleDriverRunRecoveryResult, error) {
+func (s *driverRunStore) RecoverStale(_ context.Context, ws string, recover execution.StaleDriverRunRecovery) (*execution.StaleDriverRunRecoveryResult, error) {
 	plan, err := newStaleDriverRunRecoveryMem(ws, recover)
 	if err != nil {
 		return nil, err
@@ -500,10 +501,10 @@ func (s *driverRunStore) RecoverStale(_ context.Context, ws string, recover stor
 		// fleet-db's recover guard, AW3): a suspended run holds no lease and
 		// is never stale work, however ancient its last heartbeat — only the
 		// await timeout sweeper may move it on.
-		if run.Status == domain.DriverRunSuspendedAwaitingEvent {
+		if run.Status == execution.DriverRunSuspendedAwait {
 			continue
 		}
-		if run.Status != domain.DriverRunRunning {
+		if run.Status != execution.DriverRunRunning {
 			continue
 		}
 		lastHeartbeat := driverRunRecoveryHeartbeatMem(run)
@@ -515,7 +516,7 @@ func (s *driverRunStore) RecoverStale(_ context.Context, ws string, recover stor
 		if recover.Limit > 0 && plan.result.Recovered >= recover.Limit {
 			break
 		}
-		run.Status = domain.DriverRunFailed
+		run.Status = execution.DriverRunFailed
 		run.Summary = plan.summary
 		run.ErrorClass = plan.errorClass
 		run.FinishedAt = &plan.recoveredAt
@@ -527,7 +528,7 @@ func (s *driverRunStore) RecoverStale(_ context.Context, ws string, recover stor
 	return plan.result, nil
 }
 
-func (s *driverRunStore) enqueueRunOutcomeLocked(run *domain.DriverRun) {
+func (s *driverRunStore) enqueueRunOutcomeLocked(run *execution.DriverRunRecord) {
 	if run == nil || !run.Status.IsTerminal() || run.FinishedAt == nil {
 		return
 	}
@@ -548,7 +549,7 @@ func (s *driverRunStore) enqueueRunOutcomeLocked(run *domain.DriverRun) {
 	}
 	occurredAt := run.FinishedAt.UTC()
 	s.outcomes[run.WorkspaceKey][run.RunID] = &memDriverRunOutcome{
-		value: store.DriverRunOutcome{
+		value: execution.DriverRunOutcome{
 			WorkspaceKey: run.WorkspaceKey, RunID: run.RunID, Status: run.Status,
 			Summary: run.Summary, ErrorClass: run.ErrorClass, ParentRunID: run.ParentRunID,
 			ParentEventID: parentEventID, EpicID: run.EpicID, OccurredAt: occurredAt,
@@ -564,9 +565,9 @@ func (s *driverRunStore) enqueueRunOutcomeLocked(run *domain.DriverRun) {
 	}
 }
 
-func (s *driverRunStore) ClaimDriverRunOutcomes(_ context.Context, claim store.DriverRunOutcomeClaim) ([]store.DriverRunOutcome, error) {
+func (s *driverRunStore) ClaimDriverRunOutcomes(_ context.Context, claim execution.DriverRunOutcomeLease) ([]execution.DriverRunOutcome, error) {
 	if claim.WorkspaceKey == "" || claim.ClaimID == "" || claim.Limit < 0 || claim.ClaimUntil.IsZero() || !claim.ClaimUntil.After(claim.Before) {
-		return nil, fmt.Errorf("invalid driver run outcome claim: %w", domain.ErrInvalid)
+		return nil, fmt.Errorf("invalid driver run outcome claim: %w", persistence.ErrInvalid)
 	}
 	limit := claim.Limit
 	if limit == 0 {
@@ -591,7 +592,7 @@ func (s *driverRunStore) ClaimDriverRunOutcomes(_ context.Context, claim store.D
 	if len(rows) > limit {
 		rows = rows[:limit]
 	}
-	out := make([]store.DriverRunOutcome, 0, len(rows))
+	out := make([]execution.DriverRunOutcome, 0, len(rows))
 	for _, row := range rows {
 		row.state = "claimed"
 		row.claimID = claim.ClaimID
@@ -602,18 +603,18 @@ func (s *driverRunStore) ClaimDriverRunOutcomes(_ context.Context, claim store.D
 	return out, nil
 }
 
-func (s *driverRunStore) CompleteDriverRunOutcome(_ context.Context, completion store.DriverRunOutcomeCompletion) error {
+func (s *driverRunStore) CompleteDriverRunOutcome(_ context.Context, completion execution.DriverRunOutcomeCompletion) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	row := s.outcomes[completion.WorkspaceKey][completion.RunID]
 	if row == nil {
-		return domain.ErrNotFound
+		return persistence.ErrNotFound
 	}
 	if row.state == "delivered" && row.claimID == completion.ClaimID {
 		return nil
 	}
 	if row.state != "claimed" || row.claimID != completion.ClaimID {
-		return domain.ErrNotOwner
+		return persistence.ErrNotOwner
 	}
 	row.state = "delivered"
 	row.claimUntil = time.Time{}
@@ -621,18 +622,18 @@ func (s *driverRunStore) CompleteDriverRunOutcome(_ context.Context, completion 
 	return nil
 }
 
-func (s *driverRunStore) RetryDriverRunOutcome(_ context.Context, retry store.DriverRunOutcomeRetry) error {
+func (s *driverRunStore) RetryDriverRunOutcome(_ context.Context, retry execution.DriverRunOutcomeRetry) error {
 	if retry.AvailableAt.IsZero() {
-		return fmt.Errorf("driver run outcome retry available_at required: %w", domain.ErrInvalid)
+		return fmt.Errorf("driver run outcome retry available_at required: %w", persistence.ErrInvalid)
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	row := s.outcomes[retry.WorkspaceKey][retry.RunID]
 	if row == nil {
-		return domain.ErrNotFound
+		return persistence.ErrNotFound
 	}
 	if row.state != "claimed" || row.claimID != retry.ClaimID {
-		return domain.ErrNotOwner
+		return persistence.ErrNotOwner
 	}
 	row.state = "pending"
 	row.claimID = ""
@@ -644,10 +645,10 @@ func (s *driverRunStore) RetryDriverRunOutcome(_ context.Context, retry store.Dr
 
 func (s *driverRunStore) ClaimTerminalDriverRunWorkRecoveries(
 	_ context.Context,
-	claim store.TerminalDriverRunWorkRecoveryClaim,
-) ([]store.DriverRunOutcome, error) {
+	claim execution.TerminalDriverRunWorkRecoveryLease,
+) ([]execution.DriverRunOutcome, error) {
 	if claim.WorkspaceKey == "" || claim.ClaimID == "" || claim.Limit < 0 || claim.ClaimUntil.IsZero() || !claim.ClaimUntil.After(claim.Before) {
-		return nil, fmt.Errorf("invalid terminal DriverRun work recovery claim: %w", domain.ErrInvalid)
+		return nil, fmt.Errorf("invalid terminal DriverRun work recovery claim: %w", persistence.ErrInvalid)
 	}
 	limit := claim.Limit
 	if limit == 0 {
@@ -672,7 +673,7 @@ func (s *driverRunStore) ClaimTerminalDriverRunWorkRecoveries(
 	if len(rows) > limit {
 		rows = rows[:limit]
 	}
-	out := make([]store.DriverRunOutcome, 0, len(rows))
+	out := make([]execution.DriverRunOutcome, 0, len(rows))
 	for _, row := range rows {
 		row.state = "claimed"
 		row.claimID = claim.ClaimID
@@ -685,19 +686,19 @@ func (s *driverRunStore) ClaimTerminalDriverRunWorkRecoveries(
 
 func (s *driverRunStore) CompleteTerminalDriverRunWorkRecovery(
 	_ context.Context,
-	completion store.TerminalDriverRunWorkRecoveryCompletion,
+	completion execution.TerminalDriverRunWorkRecoveryCompletion,
 ) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	row := s.terminalWorkRecoveries[completion.WorkspaceKey][completion.RunID]
 	if row == nil {
-		return domain.ErrNotFound
+		return persistence.ErrNotFound
 	}
 	if row.state == "completed" && row.claimID == completion.ClaimID {
 		return nil
 	}
 	if row.state != "claimed" || row.claimID != completion.ClaimID {
-		return domain.ErrNotOwner
+		return persistence.ErrNotOwner
 	}
 	row.state = "completed"
 	row.claimUntil = time.Time{}
@@ -707,19 +708,19 @@ func (s *driverRunStore) CompleteTerminalDriverRunWorkRecovery(
 
 func (s *driverRunStore) RetryTerminalDriverRunWorkRecovery(
 	_ context.Context,
-	retry store.TerminalDriverRunWorkRecoveryRetry,
+	retry execution.TerminalDriverRunWorkRecoveryRetry,
 ) error {
 	if retry.AvailableAt.IsZero() {
-		return fmt.Errorf("terminal DriverRun work recovery retry available_at required: %w", domain.ErrInvalid)
+		return fmt.Errorf("terminal DriverRun work recovery retry available_at required: %w", persistence.ErrInvalid)
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	row := s.terminalWorkRecoveries[retry.WorkspaceKey][retry.RunID]
 	if row == nil {
-		return domain.ErrNotFound
+		return persistence.ErrNotFound
 	}
 	if row.state != "claimed" || row.claimID != retry.ClaimID {
-		return domain.ErrNotOwner
+		return persistence.ErrNotOwner
 	}
 	row.state = "pending"
 	row.claimID = ""
@@ -730,24 +731,24 @@ func (s *driverRunStore) RetryTerminalDriverRunWorkRecovery(
 }
 
 type staleDriverRunRecoveryMem struct {
-	result      *store.StaleDriverRunRecoveryResult
+	result      *execution.StaleDriverRunRecoveryResult
 	recoveredAt time.Time
 	staleBefore time.Time
 	errorClass  string
 	summary     string
 }
 
-func newStaleDriverRunRecoveryMem(ws string, recover store.StaleDriverRunRecovery) (*staleDriverRunRecoveryMem, error) {
+func newStaleDriverRunRecoveryMem(ws string, recover execution.StaleDriverRunRecovery) (*staleDriverRunRecoveryMem, error) {
 	if ws == "" {
-		return nil, fmt.Errorf("workspace_key required: %w", domain.ErrInvalid)
+		return nil, fmt.Errorf("workspace_key required: %w", persistence.ErrInvalid)
 	}
 	if recover.MaxAgeSeconds < 0 || recover.Limit < 0 {
-		return nil, fmt.Errorf("stale driver run recovery values must be non-negative: %w", domain.ErrInvalid)
+		return nil, fmt.Errorf("stale driver run recovery values must be non-negative: %w", persistence.ErrInvalid)
 	}
 	recoveredAt := time.Now().UTC()
 	staleBefore := staleBeforeMem(recover.StaleBefore, recoveredAt, recover.MaxAgeSeconds)
 	return &staleDriverRunRecoveryMem{
-		result:      &store.StaleDriverRunRecoveryResult{WorkspaceKey: ws, StaleBefore: staleBefore, RecoveredAt: recoveredAt},
+		result:      &execution.StaleDriverRunRecoveryResult{WorkspaceKey: ws, StaleBefore: staleBefore, RecoveredAt: recoveredAt},
 		recoveredAt: recoveredAt,
 		staleBefore: staleBefore,
 		errorClass:  firstNonEmptyMem(recover.ErrorClass, "stale_driver_run"),
@@ -766,7 +767,7 @@ func staleBeforeMem(explicit time.Time, recoveredAt time.Time, maxAgeSeconds int
 	return recoveredAt.Add(-maxAge)
 }
 
-func driverRunRecoveryHeartbeatMem(run *domain.DriverRun) time.Time {
+func driverRunRecoveryHeartbeatMem(run *execution.DriverRunRecord) time.Time {
 	if run == nil {
 		return time.Time{}
 	}
@@ -779,7 +780,7 @@ func driverRunRecoveryHeartbeatMem(run *domain.DriverRun) time.Time {
 	return run.CreatedAt
 }
 
-func (s *driverRunStore) RecoverStaleTaskRuns(_ context.Context, ws, runID string, recover store.StaleTaskRunRecovery) (*store.StaleTaskRunRecoveryResult, error) {
+func (s *driverRunStore) RecoverStaleTaskRuns(_ context.Context, ws, runID string, recover execution.StaleTaskRunRecovery) (*execution.StaleTaskRunRecoveryResult, error) {
 	plan, err := newStaleTaskRunRecoveryMem(ws, runID, recover)
 	if err != nil {
 		return nil, err
@@ -801,24 +802,24 @@ func (s *driverRunStore) RecoverStaleTaskRuns(_ context.Context, ws, runID strin
 }
 
 type staleTaskRunRecoveryMem struct {
-	result       *store.StaleTaskRunRecoveryResult
+	result       *execution.StaleTaskRunRecoveryResult
 	recoveredAt  time.Time
 	staleBefore  time.Time
 	errorClass   string
 	errorMessage string
 }
 
-func newStaleTaskRunRecoveryMem(ws, runID string, recover store.StaleTaskRunRecovery) (*staleTaskRunRecoveryMem, error) {
+func newStaleTaskRunRecoveryMem(ws, runID string, recover execution.StaleTaskRunRecovery) (*staleTaskRunRecoveryMem, error) {
 	if ws == "" || runID == "" {
-		return nil, fmt.Errorf("workspace_key + run_id required: %w", domain.ErrInvalid)
+		return nil, fmt.Errorf("workspace_key + run_id required: %w", persistence.ErrInvalid)
 	}
 	if recover.MaxAgeSeconds < 0 {
-		return nil, fmt.Errorf("max_age_seconds must be non-negative: %w", domain.ErrInvalid)
+		return nil, fmt.Errorf("max_age_seconds must be non-negative: %w", persistence.ErrInvalid)
 	}
 	recoveredAt := time.Now().UTC()
 	staleBefore := staleBeforeMem(recover.StaleBefore, recoveredAt, recover.MaxAgeSeconds)
 	return &staleTaskRunRecoveryMem{
-		result:       &store.StaleTaskRunRecoveryResult{WorkspaceKey: ws, DriverRunID: runID, StaleBefore: staleBefore.UTC(), RecoveredAt: recoveredAt},
+		result:       &execution.StaleTaskRunRecoveryResult{WorkspaceKey: ws, DriverRunID: runID, StaleBefore: staleBefore.UTC(), RecoveredAt: recoveredAt},
 		recoveredAt:  recoveredAt,
 		staleBefore:  staleBefore,
 		errorClass:   firstNonEmptyMem(recover.ErrorClass, "stale_task_run"),
@@ -830,12 +831,12 @@ func (s *driverRunStore) ensureDriverRunExistsMem(ws, runID string) error {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	if _, ok := s.items[ws][runID]; !ok {
-		return fmt.Errorf("driver run %q in workspace %q: %w", runID, ws, domain.ErrNotFound)
+		return fmt.Errorf("driver run %q in workspace %q: %w", runID, ws, persistence.ErrNotFound)
 	}
 	return nil
 }
 
-func recoverStaleTaskRunsLocked(taskRuns map[string]*domain.TaskRun, runID string, plan *staleTaskRunRecoveryMem) (map[string]struct{}, map[string]struct{}) {
+func recoverStaleTaskRunsLocked(taskRuns map[string]*execution.TaskRunRecord, runID string, plan *staleTaskRunRecoveryMem) (map[string]struct{}, map[string]struct{}) {
 	recoveredTaskRunIDs := make(map[string]struct{})
 	recoveredStepIDs := make(map[string]struct{})
 	for _, taskRun := range taskRuns {
@@ -850,15 +851,15 @@ func recoverStaleTaskRunsLocked(taskRuns map[string]*domain.TaskRun, runID strin
 	return recoveredTaskRunIDs, recoveredStepIDs
 }
 
-func recoverStaleTaskRunMem(taskRun *domain.TaskRun, runID string, plan *staleTaskRunRecoveryMem) bool {
-	if taskRun.DriverRunID != runID || taskRun.Status != domain.TaskRunRunning {
+func recoverStaleTaskRunMem(taskRun *execution.TaskRunRecord, runID string, plan *staleTaskRunRecoveryMem) bool {
+	if taskRun.DriverRunID != runID || taskRun.Status != execution.TaskRunRecordRunning {
 		return false
 	}
 	if !taskRunLastObservedMem(taskRun).Before(plan.staleBefore) {
 		plan.result.SkippedFresh++
 		return false
 	}
-	taskRun.Status = domain.TaskRunFailed
+	taskRun.Status = execution.TaskRunRecordFailed
 	taskRun.ErrorClass = plan.errorClass
 	taskRun.ErrorMessage = plan.errorMessage
 	taskRun.FinishedAt = &plan.recoveredAt
@@ -881,7 +882,7 @@ func (s *driverRunStore) recoverLinkedDriverStepsMem(ws, runID string, recovered
 	}
 }
 
-func driverStepRecoveredByTaskRunMem(step *domain.DriverStep, runID string, recoveredTaskRunIDs, recoveredStepIDs map[string]struct{}) bool {
+func driverStepRecoveredByTaskRunMem(step *execution.DriverStepRecord, runID string, recoveredTaskRunIDs, recoveredStepIDs map[string]struct{}) bool {
 	if step.DriverRunID != runID || step.Status.IsTerminal() {
 		return false
 	}
@@ -890,15 +891,15 @@ func driverStepRecoveredByTaskRunMem(step *domain.DriverStep, runID string, reco
 	return linkedByStepID || linkedByTaskRunID
 }
 
-func markDriverStepRecoveredMem(step *domain.DriverStep, recoveredAt time.Time) {
-	step.Status = domain.DriverStepFailed
+func markDriverStepRecoveredMem(step *execution.DriverStepRecord, recoveredAt time.Time) {
+	step.Status = execution.DriverStepFailed
 	if step.EndedAt == nil {
 		step.EndedAt = &recoveredAt
 	}
 	step.UpdatedAt = recoveredAt
 }
 
-func taskRunLastObservedMem(run *domain.TaskRun) time.Time {
+func taskRunLastObservedMem(run *execution.TaskRunRecord) time.Time {
 	switch {
 	case !run.LastHeartbeat.IsZero():
 		return run.LastHeartbeat

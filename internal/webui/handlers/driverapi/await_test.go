@@ -7,18 +7,19 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
+
 	driverpkg "github.com/tysonthomas9/loomcli/internal/driver"
-	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
 // appendAwaitJournalEvent journals one trigger event the way the dispatch
 // path does (the registration-scan source), returning the assigned event ID.
-func appendAwaitJournalEvent(t *testing.T, st store.Store, eventID, eventType, subjectRef, actorRef string) string {
+func appendAwaitJournalEvent(t *testing.T, st *memstore.Store, eventID, eventType, subjectRef, actorRef string) string {
 	t.Helper()
-	appender, ok := st.TriggerEvents().(store.TriggerEventAppender)
+	appender, ok := st.TriggerEvents().(automation.TriggerEventAppender)
 	if !ok {
 		t.Fatalf("store %T does not implement TriggerEventAppender", st.TriggerEvents())
 	}
@@ -55,23 +56,23 @@ func TestDriverAPIAwaitEventValidation(t *testing.T) {
 		{
 			name:     "unscoped pattern",
 			body:     awaitBody("pr.merged", 60_000, 1),
-			wantCode: domain.AwaitErrCodePatternUnscoped,
+			wantCode: execution.AwaitErrCodePatternUnscoped,
 		},
 		{
 			name:     "missing timeout",
 			body:     map[string]any{"pattern": "pr.merged:pr#7", "awaitIndex": 1},
-			wantCode: domain.AwaitErrCodeTimeoutRequired,
+			wantCode: execution.AwaitErrCodeTimeoutRequired,
 		},
 		{
 			name:     "timeout over env max",
 			body:     awaitBody("pr.merged:pr#7", 5_000, 1),
 			maxEnv:   "1000",
-			wantCode: domain.AwaitErrCodeTimeoutRequired,
+			wantCode: execution.AwaitErrCodeTimeoutRequired,
 		},
 		{
 			name:     "await index missing",
 			body:     map[string]any{"pattern": "pr.merged:pr#7", "timeoutMs": 60_000},
-			wantCode: domain.AwaitErrCodeInstanceKeyMalformed,
+			wantCode: execution.AwaitErrCodeInstanceKeyMalformed,
 		},
 		{
 			name:     "actor wrong type",
@@ -105,8 +106,8 @@ func TestDriverAPIAwaitEventSatisfiedInline(t *testing.T) {
 		t.Fatalf("status = %d (%v), want 200", resp.StatusCode, decoded)
 	}
 	// camelCase wire shape: status/instanceKey/pattern/deadline/event{id,actor,occurredAt}.
-	if decoded["status"] != string(domain.AwaitSatisfied) ||
-		decoded["instanceKey"] != domain.AwaitInstanceKey(h.runID, 1) ||
+	if decoded["status"] != string(execution.AwaitSatisfied) ||
+		decoded["instanceKey"] != execution.AwaitInstanceKey(h.runID, 1) ||
 		decoded["pattern"] != "pr.merged:pr#7" {
 		t.Fatalf("response = %v, want satisfied run-1#await-1 on pr.merged:pr#7", decoded)
 	}
@@ -122,7 +123,7 @@ func TestDriverAPIAwaitEventSatisfiedInline(t *testing.T) {
 	}
 	// The workflow continues synchronously: the run stays running.
 	run, err := h.store.DriverRuns().Get(context.Background(), "WS", h.runID)
-	if err != nil || run.Status != domain.DriverRunRunning {
+	if err != nil || run.Status != execution.DriverRunRunning {
 		t.Fatalf("run = %+v, %v; want still running", run, err)
 	}
 }
@@ -144,7 +145,7 @@ func TestDriverAPIAwaitEventPendingSuspendsRun(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Get run: %v", err)
 	}
-	if run.Status != domain.DriverRunSuspendedAwaitingEvent || run.NodeID != "" || run.LeaseID != "" {
+	if run.Status != execution.DriverRunSuspendedAwait || run.NodeID != "" || run.LeaseID != "" {
 		t.Fatalf("run = %+v, want suspended_awaiting_event with slot released", run)
 	}
 }
@@ -156,7 +157,7 @@ func TestDriverAPIAwaitEventReplayAfterResume(t *testing.T) {
 	h := newTestHarness(t)
 	ctx := context.Background()
 	body := awaitBody("pr.merged:pr#9", 60_000, 1)
-	instanceKey := domain.AwaitInstanceKey(h.runID, 1)
+	instanceKey := execution.AwaitInstanceKey(h.runID, 1)
 
 	resp, decoded := h.do(t, opRequest{op: "events/await", headers: h.ownerHeaders(t), body: body})
 	if resp.StatusCode != http.StatusOK || decoded["status"] != driverpkg.AwaitOutcomeSuspended {
@@ -182,7 +183,7 @@ func TestDriverAPIAwaitEventReplayAfterResume(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("replay status = %d (%v), want 200", resp.StatusCode, decoded)
 	}
-	if decoded["status"] != string(domain.AwaitSatisfied) {
+	if decoded["status"] != string(execution.AwaitSatisfied) {
 		t.Fatalf("replay = %v, want satisfied", decoded)
 	}
 	event, _ := decoded["event"].(map[string]any)
@@ -195,7 +196,7 @@ func TestDriverAPIAwaitEventReplayAfterResume(t *testing.T) {
 	}
 	// Replay is read-only on the run: it stays running.
 	run, err := h.store.DriverRuns().Get(ctx, "WS", h.runID)
-	if err != nil || run.Status != domain.DriverRunRunning {
+	if err != nil || run.Status != execution.DriverRunRunning {
 		t.Fatalf("run after replay = %+v, %v; want running", run, err)
 	}
 }
@@ -215,7 +216,7 @@ func TestDriverAPIAwaitEventFencingMismatch(t *testing.T) {
 	}
 	// No write happened: the run is untouched and nothing was registered.
 	run, err := h.store.DriverRuns().Get(context.Background(), "WS", h.runID)
-	if err != nil || run.Status != domain.DriverRunRunning {
+	if err != nil || run.Status != execution.DriverRunRunning {
 		t.Fatalf("run = %+v, %v; want untouched running run", run, err)
 	}
 }
@@ -233,7 +234,7 @@ func TestDriverAPIAwaitEventActorNormalization(t *testing.T) {
 	body1 := awaitBody("approval.granted:deploy#1", 60_000, 1)
 	body1["actor"] = "carol"
 	resp, decoded := h.do(t, opRequest{op: "events/await", headers: h.ownerHeaders(t), body: body1})
-	if resp.StatusCode != http.StatusOK || decoded["status"] != string(domain.AwaitSatisfied) {
+	if resp.StatusCode != http.StatusOK || decoded["status"] != string(execution.AwaitSatisfied) {
 		t.Fatalf("string-actor await = %d %v, want satisfied", resp.StatusCode, decoded)
 	}
 
@@ -287,13 +288,13 @@ func TestDriverAPIListAwaits(t *testing.T) {
 	// Await 1: satisfied inline (run stays running).
 	eventID := appendAwaitJournalEvent(t, h.store, "event-merge-1", "pr.merged", "pr#7", "alice")
 	resp, decoded := h.do(t, opRequest{op: "events/await", headers: h.ownerHeaders(t), body: awaitBody("pr.merged:pr#7", 60_000, 1)})
-	if resp.StatusCode != http.StatusOK || decoded["status"] != string(domain.AwaitSatisfied) {
+	if resp.StatusCode != http.StatusOK || decoded["status"] != string(execution.AwaitSatisfied) {
 		t.Fatalf("await 1 = %d %v, want satisfied", resp.StatusCode, decoded)
 	}
 	// Await 2: pending directly through the store (the crash-before-suspend
 	// shape — a pending row while the run is still running).
-	if _, err := h.store.Awaits().RegisterAwaitAndCheck(ctx, "WS", store.AwaitRegistration{
-		InstanceKey: domain.AwaitInstanceKey(h.runID, 2),
+	if _, err := h.store.Awaits().RegisterAwaitAndCheck(ctx, "WS", execution.AwaitRegistration{
+		InstanceKey: execution.AwaitInstanceKey(h.runID, 2),
 		RunID:       h.runID,
 		Pattern:     "pr.merged:pr#8",
 		Deadline:    time.Now().UTC().Add(time.Hour),
@@ -314,12 +315,12 @@ func TestDriverAPIListAwaits(t *testing.T) {
 	}
 	first, _ := awaits[0].(map[string]any)
 	second, _ := awaits[1].(map[string]any)
-	if first["instanceKey"] != domain.AwaitInstanceKey(h.runID, 1) ||
-		first["status"] != string(domain.AwaitSatisfied) || first["satisfiedByEventId"] != eventID {
+	if first["instanceKey"] != execution.AwaitInstanceKey(h.runID, 1) ||
+		first["status"] != string(execution.AwaitSatisfied) || first["satisfiedByEventId"] != eventID {
 		t.Fatalf("awaits[0] = %v, want satisfied await-1 by %q", first, eventID)
 	}
-	if second["instanceKey"] != domain.AwaitInstanceKey(h.runID, 2) ||
-		second["status"] != string(domain.AwaitPending) || second["pattern"] != "pr.merged:pr#8" {
+	if second["instanceKey"] != execution.AwaitInstanceKey(h.runID, 2) ||
+		second["status"] != string(execution.AwaitPending) || second["pattern"] != "pr.merged:pr#8" {
 		t.Fatalf("awaits[1] = %v, want pending await-2", second)
 	}
 }

@@ -3,16 +3,17 @@ package testutil
 import (
 	"context"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
+
+	workspaceowner "github.com/tysonthomas9/loomcli/internal/modules/workspace"
+
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
-	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
 // StoreOutboxDeliveryAPI adapts a test store to Execution's public runtime
 // port without teaching driver tests about production composition.
 type StoreOutboxDeliveryAPI struct {
-	Store store.OutboxStore
+	Store execution.OutboxStore
 }
 
 func (api StoreOutboxDeliveryAPI) ListDueOutboxDeliveries(
@@ -20,7 +21,7 @@ func (api StoreOutboxDeliveryAPI) ListDueOutboxDeliveries(
 	_ authority.SystemAuthority,
 	command execution.ListDueOutboxDeliveriesCommand,
 ) ([]execution.OutboxDelivery, error) {
-	values, err := api.Store.ListDue(ctx, command.WorkspaceKey, store.OutboxDueFilter{Now: command.Now, Limit: command.Limit})
+	values, err := api.Store.ListDue(ctx, command.WorkspaceKey, execution.OutboxDueFilter{Now: command.Now, Limit: command.Limit})
 	if err != nil {
 		return nil, err
 	}
@@ -30,9 +31,9 @@ func (api StoreOutboxDeliveryAPI) ListDueOutboxDeliveries(
 			continue
 		}
 		out = append(out, execution.OutboxDelivery{
-			WorkspaceKey: value.WorkspaceKey, OutboxID: value.OutboxID, Kind: execution.OutboxKind(value.Kind),
+			WorkspaceKey: value.WorkspaceKey, OutboxID: value.OutboxID, Kind: value.Kind,
 			DriverRunID: value.DriverRunID, TaskRunID: value.TaskRunID, TargetAgent: value.TargetAgent,
-			Body: value.Body, DedupeKey: value.DedupeKey, Status: execution.OutboxDeliveryStatus(value.Status), Attempt: value.Attempt,
+			Body: value.Body, DedupeKey: value.DedupeKey, Status: value.Status, Attempt: value.Attempt,
 			NextRetryAt: value.NextRetryAt, LastError: value.LastError, InboxMessageID: value.InboxMessageID,
 		})
 	}
@@ -44,14 +45,14 @@ func (api StoreOutboxDeliveryAPI) RecordOutboxDeliveryResult(
 	_ authority.SystemAuthority,
 	command execution.RecordOutboxDeliveryResultCommand,
 ) (*execution.OutboxDelivery, error) {
-	value, err := api.Store.MarkResult(ctx, command.WorkspaceKey, command.OutboxID, store.OutboxDeliveryUpdate{
-		Status: domain.OutboxStatus(command.Status), Attempt: command.Attempt, NextRetryAt: command.NextRetryAt,
+	value, err := api.Store.MarkResult(ctx, command.WorkspaceKey, command.OutboxID, execution.OutboxDeliveryUpdate{
+		Status: command.Status, Attempt: command.Attempt, NextRetryAt: command.NextRetryAt,
 		LastError: command.LastError, InboxMessageID: command.InboxMessageID,
 	})
 	if err != nil {
 		return nil, err
 	}
-	return &execution.OutboxDelivery{WorkspaceKey: value.WorkspaceKey, OutboxID: value.OutboxID, Status: execution.OutboxDeliveryStatus(value.Status), Attempt: value.Attempt}, nil
+	return &execution.OutboxDelivery{WorkspaceKey: value.WorkspaceKey, OutboxID: value.OutboxID, Status: value.Status, Attempt: value.Attempt}, nil
 }
 
 type StaticExecutionSystemAuthorityResolver struct{}
@@ -66,7 +67,7 @@ func (StaticExecutionSystemAuthorityResolver) ResolveExecutionSystemAuthority(
 }
 
 type StoreWorkspaceLister struct {
-	Store store.WorkspaceStore
+	Store workspaceowner.WorkspaceStore
 }
 
 func (lister StoreWorkspaceLister) ListWorkspaceKeys(ctx context.Context) ([]string, error) {

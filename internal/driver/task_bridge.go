@@ -11,11 +11,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
+
+	workspaceowner "github.com/tysonthomas9/loomcli/internal/modules/workspace"
+
 	driversandbox "github.com/tysonthomas9/loomcli/internal/driver/sandbox"
 	artifactsmodule "github.com/tysonthomas9/loomcli/internal/modules/artifacts"
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
-	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 const (
@@ -90,70 +93,70 @@ type HostBridgeTaskExecutor struct {
 }
 
 type hostBridgeStore interface {
-	DriverVersions() store.DriverVersionStore
-	Repos() store.RepoStore
+	DriverVersions() workflowcatalog.DriverVersionStore
+	Repos() workspaceowner.RepoStore
 }
 
 type bridgeTaskRunnerResult struct {
-	Status                  domain.TaskRunStatus    `json:"status"`
-	ExitCode                *int                    `json:"exit_code"`
-	ExitCodeCamel           *int                    `json:"exitCode"`
-	LogsRef                 string                  `json:"logs_ref"`
-	LogsRefCamel            string                  `json:"logsRef"`
-	Logs                    string                  `json:"logs"`
-	LogsPath                string                  `json:"logs_path"`
-	LogsPathCamel           string                  `json:"logsPath"`
-	ArtifactsRef            string                  `json:"artifacts_ref"`
-	ArtifactsRefCamel       string                  `json:"artifactsRef"`
-	ArtifactIDs             []string                `json:"artifact_ids"`
-	ArtifactIDsCamel        []string                `json:"artifactIds"`
-	InputTokens             int64                   `json:"input_tokens"`
-	InputTokensCamel        int64                   `json:"inputTokens"`
-	OutputTokens            int64                   `json:"output_tokens"`
-	OutputTokensCamel       int64                   `json:"outputTokens"`
-	CacheReadTokens         int64                   `json:"cache_read_tokens"`
-	CacheReadTokensCamel    int64                   `json:"cacheReadTokens"`
-	CacheWriteTokens        int64                   `json:"cache_write_tokens"`
-	CacheWriteTokensCamel   int64                   `json:"cacheWriteTokens"`
-	EstimatedCostUSD        float64                 `json:"estimated_cost_usd"`
-	EstimatedCostUSDCamel   float64                 `json:"estimatedCostUsd"`
-	Artifacts               []bridgeArtifact        `json:"artifacts"`
-	ArtifactDescriptors     []bridgeArtifact        `json:"artifact_descriptors"`
-	ArtifactDescriptorsAlt  []bridgeArtifact        `json:"artifactDescriptors"`
-	SessionID               string                  `json:"session_id"`
-	SessionIDCamel          string                  `json:"sessionId"`
-	TranscriptRef           string                  `json:"transcript_ref"`
-	TranscriptRefCamel      string                  `json:"transcriptRef"`
-	Transcript              string                  `json:"transcript"`
-	TranscriptPath          string                  `json:"transcript_path"`
-	TranscriptPathCamel     string                  `json:"transcriptPath"`
-	TranscriptEntries       []artifactsmodule.Event `json:"transcript_entries"`
-	TranscriptEntriesCamel  []artifactsmodule.Event `json:"transcriptEntries"`
-	TranscriptEvents        []artifactsmodule.Event `json:"transcript_events"`
-	TranscriptEventsCamel   []artifactsmodule.Event `json:"transcriptEvents"`
-	RuntimeMetadata         map[string]string       `json:"runtime_metadata"`
-	RuntimeMetadataCamel    map[string]string       `json:"runtimeMetadata"`
-	ErrorClass              string                  `json:"error_class"`
-	ErrorClassCamel         string                  `json:"errorClass"`
-	ErrorMessage            string                  `json:"error_message"`
-	ErrorMessageCamel       string                  `json:"errorMessage"`
-	Patch                   string                  `json:"patch"`
-	PatchPath               string                  `json:"patch_path"`
-	PatchPathCamel          string                  `json:"patchPath"`
-	PatchBaseRef            string                  `json:"patch_base_ref"`
-	PatchBaseRefCamel       string                  `json:"patchBaseRef"`
-	BaseRef                 string                  `json:"base_ref"`
-	BaseRefCamel            string                  `json:"baseRef"`
-	PatchArtifactID         string                  `json:"patch_artifact_id"`
-	PatchArtifactIDCamel    string                  `json:"patchArtifactId"`
-	PatchSummary            string                  `json:"patch_summary"`
-	PatchSummaryCamel       string                  `json:"patchSummary"`
-	PatchMIMEType           string                  `json:"patch_mime_type"`
-	PatchMIMETypeCamel      string                  `json:"patchMimeType"`
-	PatchVisibility         string                  `json:"patch_visibility"`
-	PatchVisibilityCamel    string                  `json:"patchVisibility"`
-	PatchRedactionStatus    string                  `json:"patch_redaction_status"`
-	PatchRedactionStatusAlt string                  `json:"patchRedactionStatus"`
+	Status                  execution.TaskRunRecordStatus `json:"status"`
+	ExitCode                *int                          `json:"exit_code"`
+	ExitCodeCamel           *int                          `json:"exitCode"`
+	LogsRef                 string                        `json:"logs_ref"`
+	LogsRefCamel            string                        `json:"logsRef"`
+	Logs                    string                        `json:"logs"`
+	LogsPath                string                        `json:"logs_path"`
+	LogsPathCamel           string                        `json:"logsPath"`
+	ArtifactsRef            string                        `json:"artifacts_ref"`
+	ArtifactsRefCamel       string                        `json:"artifactsRef"`
+	ArtifactIDs             []string                      `json:"artifact_ids"`
+	ArtifactIDsCamel        []string                      `json:"artifactIds"`
+	InputTokens             int64                         `json:"input_tokens"`
+	InputTokensCamel        int64                         `json:"inputTokens"`
+	OutputTokens            int64                         `json:"output_tokens"`
+	OutputTokensCamel       int64                         `json:"outputTokens"`
+	CacheReadTokens         int64                         `json:"cache_read_tokens"`
+	CacheReadTokensCamel    int64                         `json:"cacheReadTokens"`
+	CacheWriteTokens        int64                         `json:"cache_write_tokens"`
+	CacheWriteTokensCamel   int64                         `json:"cacheWriteTokens"`
+	EstimatedCostUSD        float64                       `json:"estimated_cost_usd"`
+	EstimatedCostUSDCamel   float64                       `json:"estimatedCostUsd"`
+	Artifacts               []bridgeArtifact              `json:"artifacts"`
+	ArtifactDescriptors     []bridgeArtifact              `json:"artifact_descriptors"`
+	ArtifactDescriptorsAlt  []bridgeArtifact              `json:"artifactDescriptors"`
+	SessionID               string                        `json:"session_id"`
+	SessionIDCamel          string                        `json:"sessionId"`
+	TranscriptRef           string                        `json:"transcript_ref"`
+	TranscriptRefCamel      string                        `json:"transcriptRef"`
+	Transcript              string                        `json:"transcript"`
+	TranscriptPath          string                        `json:"transcript_path"`
+	TranscriptPathCamel     string                        `json:"transcriptPath"`
+	TranscriptEntries       []artifactsmodule.Event       `json:"transcript_entries"`
+	TranscriptEntriesCamel  []artifactsmodule.Event       `json:"transcriptEntries"`
+	TranscriptEvents        []artifactsmodule.Event       `json:"transcript_events"`
+	TranscriptEventsCamel   []artifactsmodule.Event       `json:"transcriptEvents"`
+	RuntimeMetadata         map[string]string             `json:"runtime_metadata"`
+	RuntimeMetadataCamel    map[string]string             `json:"runtimeMetadata"`
+	ErrorClass              string                        `json:"error_class"`
+	ErrorClassCamel         string                        `json:"errorClass"`
+	ErrorMessage            string                        `json:"error_message"`
+	ErrorMessageCamel       string                        `json:"errorMessage"`
+	Patch                   string                        `json:"patch"`
+	PatchPath               string                        `json:"patch_path"`
+	PatchPathCamel          string                        `json:"patchPath"`
+	PatchBaseRef            string                        `json:"patch_base_ref"`
+	PatchBaseRefCamel       string                        `json:"patchBaseRef"`
+	BaseRef                 string                        `json:"base_ref"`
+	BaseRefCamel            string                        `json:"baseRef"`
+	PatchArtifactID         string                        `json:"patch_artifact_id"`
+	PatchArtifactIDCamel    string                        `json:"patchArtifactId"`
+	PatchSummary            string                        `json:"patch_summary"`
+	PatchSummaryCamel       string                        `json:"patchSummary"`
+	PatchMIMEType           string                        `json:"patch_mime_type"`
+	PatchMIMETypeCamel      string                        `json:"patchMimeType"`
+	PatchVisibility         string                        `json:"patch_visibility"`
+	PatchVisibilityCamel    string                        `json:"patchVisibility"`
+	PatchRedactionStatus    string                        `json:"patch_redaction_status"`
+	PatchRedactionStatusAlt string                        `json:"patchRedactionStatus"`
 }
 
 type bridgeArtifact struct {
@@ -178,7 +181,7 @@ type bridgeArtifact struct {
 
 func (e HostBridgeTaskExecutor) PreflightTaskProvider(ctx context.Context, opts TaskRunRequestOptions) (TaskRunRequestOptions, error) {
 	if !taskProviderIsNoop(opts.ProviderProfile) && strings.TrimSpace(e.APIBaseURL) == "" {
-		return opts, fmt.Errorf("task runner requires the loom serve task-run API URL: %w", domain.ErrInvalid)
+		return opts, fmt.Errorf("task runner requires the loom serve task-run API URL: %w", persistence.ErrInvalid)
 	}
 	if taskRunHasNamedRunner(opts) {
 		if err := refuseUntrustedTaskRunnerPreflight(opts); err != nil {
@@ -192,7 +195,7 @@ func (e HostBridgeTaskExecutor) PreflightTaskProvider(ctx context.Context, opts 
 			return opts, nil
 		}
 		if len(command) == 0 {
-			return opts, fmt.Errorf("runner %q requires a configured task runner command: %w", opts.Runner, domain.ErrInvalid)
+			return opts, fmt.Errorf("runner %q requires a configured task runner command: %w", opts.Runner, persistence.ErrInvalid)
 		}
 		return opts, nil
 	}
@@ -215,7 +218,7 @@ func (e HostBridgeTaskExecutor) ExecuteTask(ctx context.Context, req TaskExecReq
 		return LocalTaskExecutor{}.ExecuteTask(ctx, req)
 	}
 	if strings.TrimSpace(e.APIBaseURL) == "" {
-		return TaskExecResult{}, fmt.Errorf("task runner requires the loom serve task-run API URL: %w", domain.ErrInvalid)
+		return TaskExecResult{}, fmt.Errorf("task runner requires the loom serve task-run API URL: %w", persistence.ErrInvalid)
 	}
 	if result, refused := refuseUntrustedTaskRunnerExecution(req); refused {
 		return result, nil
@@ -223,7 +226,7 @@ func (e HostBridgeTaskExecutor) ExecuteTask(ctx context.Context, req TaskExecReq
 	if isLocalTaskRunner(req) {
 		if _, _, policyErr := localTaskRunnerAgentPolicyFromInput(req.Input); policyErr != nil {
 			return TaskExecResult{
-				Status:       domain.TaskRunFailed,
+				Status:       execution.TaskRunRecordFailed,
 				ExitCode:     2,
 				ErrorClass:   "managed_agent_policy_invalid",
 				ErrorMessage: policyErr.Error(),
@@ -314,7 +317,7 @@ func (e HostBridgeTaskExecutor) ExecuteTask(ctx context.Context, req TaskExecReq
 // Only that runner may suppress patch-back from result metadata: other runners
 // cannot self-assert "pull_request" to bypass their configured delivery path.
 func localTaskRunnerPublishedDelivery(req TaskExecRequest, result TaskExecResult) bool {
-	if !isLocalTaskRunner(req) || result.Status != domain.TaskRunCompleted {
+	if !isLocalTaskRunner(req) || result.Status != execution.TaskRunRecordCompleted {
 		return false
 	}
 	switch strings.TrimSpace(result.RuntimeMetadata["delivery"]) {
@@ -340,7 +343,7 @@ func (e HostBridgeTaskExecutor) bridgeRunner(ctx context.Context, req TaskExecRe
 			return e.runBuiltInFlueWorkflow(ctx, req)
 		}, nil
 	case taskExecHasNamedRunner(req):
-		return nil, fmt.Errorf("runner %q requires a configured task runner command: %w", req.Runner, domain.ErrInvalid)
+		return nil, fmt.Errorf("runner %q requires a configured task runner command: %w", req.Runner, persistence.ErrInvalid)
 	default:
 		return nil, nil
 	}
@@ -371,7 +374,7 @@ func normalizeCommand(command []string) ([]string, error) {
 		}
 	}
 	if len(out) == 0 {
-		return nil, fmt.Errorf("task runner command is empty: %w", domain.ErrInvalid)
+		return nil, fmt.Errorf("task runner command is empty: %w", persistence.ErrInvalid)
 	}
 	return out, nil
 }
@@ -812,7 +815,7 @@ func (e HostBridgeTaskExecutor) taskRunnerBundleEnv(req TaskExecRequest) []strin
 	return nil
 }
 
-func taskRunPlacementJSON(placement domain.TaskRunPlacement) string {
+func taskRunPlacementJSON(placement execution.TaskRunPlacementRecord) string {
 	if placement.Empty() {
 		return "{}"
 	}
@@ -825,7 +828,7 @@ func taskRunPlacementJSON(placement domain.TaskRunPlacement) string {
 
 func (e HostBridgeTaskExecutor) finalizeAndApplyPatch(ctx context.Context, req TaskExecRequest, runner bridgeTaskRunnerResult, patch []byte, result TaskExecResult) (TaskExecResult, error) {
 	if e.Store == nil {
-		return TaskExecResult{}, fmt.Errorf("store required for patch artifact finalization: %w", domain.ErrInvalid)
+		return TaskExecResult{}, fmt.Errorf("store required for patch artifact finalization: %w", persistence.ErrInvalid)
 	}
 	finalized, baseRef, err := e.createPatchArtifact(ctx, req, runner, patch)
 	if err != nil {
@@ -849,7 +852,7 @@ func (e HostBridgeTaskExecutor) finalizeAndApplyPatch(ctx context.Context, req T
 		result.RuntimeMetadata = map[string]string{}
 	}
 	if strings.TrimSpace(e.WorktreePath) == "" || strings.TrimSpace(baseRef) == "" {
-		result.Status = domain.TaskRunFailed
+		result.Status = execution.TaskRunRecordFailed
 		if result.ExitCode == 0 {
 			result.ExitCode = 1
 		}
@@ -880,7 +883,7 @@ func (e HostBridgeTaskExecutor) applyPatchBack(ctx context.Context, baseRef stri
 	if patchBack.Applied {
 		return result, nil
 	}
-	result.Status = domain.TaskRunFailed
+	result.Status = execution.TaskRunRecordFailed
 	if result.ExitCode == 0 {
 		result.ExitCode = 1
 	}

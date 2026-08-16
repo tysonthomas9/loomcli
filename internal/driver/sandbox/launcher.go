@@ -36,9 +36,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
-
-	"github.com/tysonthomas9/loomcli/internal/domain"
 )
 
 // SandboxFrameType discriminates host-bound frames on the sandbox stdout
@@ -71,7 +70,7 @@ type SandboxFrame struct {
 const SandboxProviderProcess = "process"
 
 // SandboxPlacementOutputKey is the run-output key carrying the launcher's
-// JSON-encoded domain.TaskRunPlacement descriptor (§9.6 audit).
+// JSON-encoded execution.TaskRunPlacementRecord descriptor (§9.6 audit).
 const SandboxPlacementOutputKey = "sandbox_placement"
 
 // SandboxLauncher launches one workflow-bundle runtime per driver run.
@@ -108,7 +107,7 @@ type SandboxProcess interface {
 	Kill() error
 	// Placement reports where the runtime ran; the runner records it onto
 	// the run output (§9.6). Empty when the launch never started.
-	Placement() domain.TaskRunPlacement
+	Placement() execution.TaskRunPlacementRecord
 }
 
 // SandboxExit carries the captured stdio after the runtime exits: Stdout is
@@ -122,7 +121,7 @@ type SandboxExit struct {
 // RecordSandboxPlacement stamps the launcher's placement descriptor onto the
 // run result output: Finish persists Output onto the DriverRun row, so the
 // row records where the workflow executed (§9.6 audit).
-func RecordSandboxPlacement(output map[string]string, placement domain.TaskRunPlacement) map[string]string {
+func RecordSandboxPlacement(output map[string]string, placement execution.TaskRunPlacementRecord) map[string]string {
 	if placement.Empty() {
 		return output
 	}
@@ -170,7 +169,7 @@ func (l ProcessLauncher) Launch(ctx context.Context, spec LaunchSpec) (SandboxPr
 		process.startErr = startErr
 		return process, nil
 	}
-	process.placement = domain.TaskRunPlacement{
+	process.placement = execution.TaskRunPlacementRecord{
 		Provider:   SandboxProviderProcess,
 		ProcessRef: strconv.Itoa(cmd.Process.Pid),
 		CWD:        workDir,
@@ -185,7 +184,7 @@ type processSandbox struct {
 	stderr    bytes.Buffer
 	cleanup   func()
 	startErr  error
-	placement domain.TaskRunPlacement
+	placement execution.TaskRunPlacementRecord
 	waitOnce  sync.Once
 	waitErr   error
 }
@@ -212,7 +211,7 @@ func (p *processSandbox) Kill() error {
 	return nil
 }
 
-func (p *processSandbox) Placement() domain.TaskRunPlacement {
+func (p *processSandbox) Placement() execution.TaskRunPlacementRecord {
 	return p.placement
 }
 

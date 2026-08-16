@@ -6,14 +6,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
+
 	driverpkg "github.com/tysonthomas9/loomcli/internal/driver"
-	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
-func listDueOutboxRows(t *testing.T, st store.Store) []*domain.OutboxRecord {
+func listDueOutboxRows(t *testing.T, st *memstore.Store) []*execution.OutboxDelivery {
 	t.Helper()
-	rows, err := st.Outbox().ListDue(context.Background(), "WS", store.OutboxDueFilter{
+	rows, err := st.Outbox().ListDue(context.Background(), "WS", execution.OutboxDueFilter{
 		Now:   time.Now().UTC(),
 		Limit: 10,
 	})
@@ -47,7 +48,7 @@ func TestDeliverLeadAssignmentEnqueuesOutboxOnPending(t *testing.T) {
 		t.Fatalf("outbox rows = %d, want exactly 1 enqueued on pending", len(rows))
 	}
 	row := rows[0]
-	if row.Kind != domain.OutboxKindLeadAssignment || row.TargetAgent != "lead-1" {
+	if row.Kind != execution.OutboxKindLeadAssignment || row.TargetAgent != "lead-1" {
 		t.Fatalf("row = %+v, want leadAssignment for lead-1", row)
 	}
 	if row.DedupeKey != "lead-assignment:"+h.runID+":lead-1" {

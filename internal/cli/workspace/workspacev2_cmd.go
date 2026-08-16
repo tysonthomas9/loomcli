@@ -11,9 +11,8 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
-	"github.com/tysonthomas9/loomcli/internal/domain"
+	agentsowner "github.com/tysonthomas9/loomcli/internal/modules/agents"
 	workspacemodule "github.com/tysonthomas9/loomcli/internal/modules/workspace"
-	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
 var (
@@ -189,10 +188,10 @@ func runWorkspaceShow(cmd *cobra.Command, args []string) error {
 		}
 		if wsShowJSON {
 			return cmdstore.WriteJSON(struct {
-				Workspace *workspacemodule.Workspace    `json:"workspace"`
-				Repos     []*workspacemodule.Repository `json:"repos"`
-				Agents    []*domain.AgentService        `json:"agents"`
-				Roles     []*domain.Role                `json:"roles"`
+				Workspace *workspacemodule.Workspace        `json:"workspace"`
+				Repos     []*workspacemodule.Repository     `json:"repos"`
+				Agents    []*agentsowner.AgentServiceRecord `json:"agents"`
+				Roles     []*agentsowner.Role               `json:"roles"`
 			}{ws, repos, agents, roles})
 		}
 		fmt.Printf("Workspace:    %s\n", ws.Key)
@@ -218,16 +217,16 @@ func runWorkspaceShow(cmd *cobra.Command, args []string) error {
 // fan-out adds 2-3× round-trip latency for no benefit. Returns the first
 // error any of the four sub-fetches produces.
 type workspaceDetailStore interface {
-	AgentServices() store.AgentServiceStore
-	Roles() store.RoleStore
+	AgentServices() agentsowner.AgentServiceStore
+	Roles() agentsowner.RoleRecordStore
 }
 
-func gatherWorkspaceDetails(ctx context.Context, s workspaceDetailStore, workspace workspacemodule.API, key string) (*workspacemodule.Workspace, []*workspacemodule.Repository, []*domain.AgentService, []*domain.Role, error) {
+func gatherWorkspaceDetails(ctx context.Context, s workspaceDetailStore, workspace workspacemodule.API, key string) (*workspacemodule.Workspace, []*workspacemodule.Repository, []*agentsowner.AgentServiceRecord, []*agentsowner.Role, error) {
 	var (
 		ws     *workspacemodule.Workspace
 		repos  []*workspacemodule.Repository
-		agents []*domain.AgentService
-		roles  []*domain.Role
+		agents []*agentsowner.AgentServiceRecord
+		roles  []*agentsowner.Role
 	)
 	g, gctx := errgroup.WithContext(ctx)
 	g.Go(func() (err error) {
@@ -247,7 +246,7 @@ func gatherWorkspaceDetails(ctx context.Context, s workspaceDetailStore, workspa
 		return nil
 	})
 	g.Go(func() (err error) {
-		agents, err = s.AgentServices().List(gctx, key, store.AgentServiceFilter{})
+		agents, err = s.AgentServices().List(gctx, key, agentsowner.AgentServiceFilter{})
 		return
 	})
 	g.Go(func() (err error) { roles, err = s.Roles().List(gctx, key); return })

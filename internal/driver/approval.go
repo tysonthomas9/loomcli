@@ -8,9 +8,8 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
-	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 const ApprovedVersionMetadataPrefix = "approved_version:"
@@ -55,9 +54,9 @@ func DriverVersionEffectiveTrust(driver *workflowcatalog.Driver, version *workfl
 // here (not in internal/driver/sandbox) because it depends on
 // DriverVersionEffectiveTrust; the sandbox package owns only the admission
 // decision once a trust level is known.
-func driverTrustLevel(ctx context.Context, drivers store.DriverStore, run *execution.DriverRun, version *workflowcatalog.DriverVersion) (workflowcatalog.DriverTrustLevel, error) {
+func driverTrustLevel(ctx context.Context, drivers workflowcatalog.DriverStore, run *execution.DriverRun, version *workflowcatalog.DriverVersion) (workflowcatalog.DriverTrustLevel, error) {
 	driver, err := drivers.Get(ctx, run.WorkspaceKey, run.DriverID)
-	if errors.Is(err, domain.ErrNotFound) {
+	if errors.Is(err, persistence.ErrNotFound) {
 		return workflowcatalog.DriverTrustUntrusted, nil
 	}
 	if err != nil {
@@ -66,14 +65,14 @@ func driverTrustLevel(ctx context.Context, drivers store.DriverStore, run *execu
 	return DriverVersionEffectiveTrust(driver, version), nil
 }
 
-func loadDriverVersionForOperatorAction(ctx context.Context, drivers store.DriverStore, versions store.DriverVersionStore, ws, driverID, versionID string) (*workflowcatalog.Driver, *workflowcatalog.DriverVersion, error) {
+func loadDriverVersionForOperatorAction(ctx context.Context, drivers workflowcatalog.DriverStore, versions workflowcatalog.DriverVersionStore, ws, driverID, versionID string) (*workflowcatalog.Driver, *workflowcatalog.DriverVersion, error) {
 	if drivers == nil || versions == nil {
-		return nil, nil, fmt.Errorf("driver and driver version stores required: %w", domain.ErrInvalid)
+		return nil, nil, fmt.Errorf("driver and driver version stores required: %w", persistence.ErrInvalid)
 	}
 	driverID = strings.TrimSpace(driverID)
 	versionID = strings.TrimSpace(versionID)
 	if ws == "" || driverID == "" || versionID == "" {
-		return nil, nil, fmt.Errorf("workspace key, driver id, and version id required: %w", domain.ErrInvalid)
+		return nil, nil, fmt.Errorf("workspace key, driver id, and version id required: %w", persistence.ErrInvalid)
 	}
 	driver, err := drivers.Get(ctx, ws, driverID)
 	if err != nil {
@@ -84,10 +83,10 @@ func loadDriverVersionForOperatorAction(ctx context.Context, drivers store.Drive
 		return nil, nil, fmt.Errorf("get driver version: %w", err)
 	}
 	if version.DriverID != driver.DriverID {
-		return nil, nil, fmt.Errorf("driver version %q belongs to %q, not %q: %w", version.VersionID, version.DriverID, driver.DriverID, domain.ErrInvalid)
+		return nil, nil, fmt.Errorf("driver version %q belongs to %q, not %q: %w", version.VersionID, version.DriverID, driver.DriverID, persistence.ErrInvalid)
 	}
 	if version.ValidationStatus != workflowcatalog.DriverVersionValidationPassed {
-		return nil, nil, fmt.Errorf("driver version %q is not passed: %w", version.VersionID, domain.ErrInvalid)
+		return nil, nil, fmt.Errorf("driver version %q is not passed: %w", version.VersionID, persistence.ErrInvalid)
 	}
 	return driver, version, nil
 }

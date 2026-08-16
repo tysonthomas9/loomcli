@@ -7,10 +7,10 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/app/systemeventing"
 	"github.com/tysonthomas9/loomcli/internal/cli/serve/serveadapter"
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	trigger "github.com/tysonthomas9/loomcli/internal/infra/automationruntime"
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 type systemAuthorityProviderFunc func(context.Context, systemeventing.VerifiedSource) (authority.SystemAuthority, error)
@@ -84,11 +84,11 @@ func TestAutomationIssueJournalEmitterMapsNoListenerAndRejectsForgedOrigin(t *te
 		t.Fatal(err)
 	}
 	emitter := serveadapter.NewAutomationIssueJournalEmitter(journalEvents, nil)
-	if _, err := emitter.Emit(t.Context(), "WS", trigger.InternalEvent{EventID: "event-1", EventType: "issue.create", Origin: automation.EventOriginSystem}); !errors.Is(err, domain.ErrNotFound) {
-		t.Fatalf("no listener error = %v, want domain.ErrNotFound", err)
+	if _, err := emitter.Emit(t.Context(), "WS", trigger.InternalEvent{EventID: "event-1", EventType: "issue.create", Origin: automation.EventOriginSystem}); !errors.Is(err, persistence.ErrNotFound) {
+		t.Fatalf("no listener error = %v, want persistence.ErrNotFound", err)
 	}
-	if _, err := emitter.Emit(t.Context(), "WS", trigger.InternalEvent{EventID: "event-2", EventType: "issue.create", Origin: automation.EventOriginWorkflow}); !errors.Is(err, domain.ErrInvalid) {
-		t.Fatalf("forged origin error = %v, want domain.ErrInvalid", err)
+	if _, err := emitter.Emit(t.Context(), "WS", trigger.InternalEvent{EventID: "event-2", EventType: "issue.create", Origin: automation.EventOriginWorkflow}); !errors.Is(err, persistence.ErrInvalid) {
+		t.Fatalf("forged origin error = %v, want persistence.ErrInvalid", err)
 	}
 	if got := serveadapter.NewAutomationIssueJournalEmitter(nil, nil); got != nil {
 		t.Fatalf("nil workflow emitter = %#v, want nil", got)

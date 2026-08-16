@@ -5,9 +5,9 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
-	"github.com/tysonthomas9/loomcli/internal/store"
+
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 // FlueDriverFixture is the catalog projection needed by Driver behavior tests.
@@ -20,8 +20,8 @@ type FlueDriverFixture struct {
 }
 
 type flueDriverFixtureStore interface {
-	Drivers() store.DriverStore
-	DriverVersions() store.DriverVersionStore
+	Drivers() workflowcatalog.DriverStore
+	DriverVersions() workflowcatalog.DriverVersionStore
 }
 
 type flueDriverFixtureLifecycle interface {
@@ -39,7 +39,7 @@ func SeedFlueDriverFixture(
 	options RegisterFlueOptions,
 ) (*FlueDriverFixture, error) {
 	if state == nil {
-		return nil, fmt.Errorf("fixture store is required: %w", domain.ErrInvalid)
+		return nil, fmt.Errorf("fixture store is required: %w", persistence.ErrInvalid)
 	}
 	staged, err := StageFlueDriverBundle(options)
 	if err != nil {
@@ -51,8 +51,8 @@ func SeedFlueDriverFixture(
 	}
 
 	driverRecord, err := state.Drivers().Get(ctx, options.WorkspaceKey, staged.DriverID)
-	if errors.Is(err, domain.ErrNotFound) {
-		driverRecord, err = state.Drivers().Create(ctx, store.DriverCreate{
+	if errors.Is(err, persistence.ErrNotFound) {
+		driverRecord, err = state.Drivers().Create(ctx, workflowcatalog.DriverCreate{
 			WorkspaceKey: options.WorkspaceKey,
 			DriverID:     staged.DriverID,
 			Name:         staged.DriverName,
@@ -72,12 +72,12 @@ func SeedFlueDriverFixture(
 	}
 
 	versionRecord, err := state.DriverVersions().Get(ctx, options.WorkspaceKey, staged.VersionID)
-	if errors.Is(err, domain.ErrNotFound) {
-		versions, listErr := state.DriverVersions().List(ctx, options.WorkspaceKey, store.DriverVersionFilter{DriverID: staged.DriverID})
+	if errors.Is(err, persistence.ErrNotFound) {
+		versions, listErr := state.DriverVersions().List(ctx, options.WorkspaceKey, workflowcatalog.DriverVersionFilter{DriverID: staged.DriverID})
 		if listErr != nil {
 			return nil, listErr
 		}
-		versionRecord, err = state.DriverVersions().Create(ctx, store.DriverVersionCreate{
+		versionRecord, err = state.DriverVersions().Create(ctx, workflowcatalog.DriverVersionCreate{
 			WorkspaceKey:     options.WorkspaceKey,
 			VersionID:        staged.VersionID,
 			DriverID:         staged.DriverID,
@@ -100,7 +100,7 @@ func SeedFlueDriverFixture(
 	if options.Activate {
 		lifecycle, ok := state.(flueDriverFixtureLifecycle)
 		if !ok {
-			return nil, fmt.Errorf("fixture store lacks Workflow Catalog lifecycle setup: %w", domain.ErrInvalid)
+			return nil, fmt.Errorf("fixture store lacks Workflow Catalog lifecycle setup: %w", persistence.ErrInvalid)
 		}
 		if _, err := lifecycle.ApproveDriverVersionForTest(ctx, options.WorkspaceKey, staged.DriverID, staged.VersionID); err != nil {
 			return nil, err

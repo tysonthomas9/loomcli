@@ -10,10 +10,9 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
-	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 // trustedBuiltinRunnerOwner builds an in-memory trusted builtin owner (driver +
@@ -42,14 +41,14 @@ func trustedBuiltinRunnerOwner(t *testing.T, trust workflowcatalog.DriverTrustLe
 func registerUntrustedCaller(t *testing.T, st *memstore.Store) *execution.DriverRun {
 	t.Helper()
 	ctx := context.Background()
-	if _, err := st.Drivers().Create(ctx, store.DriverCreate{
+	if _, err := st.Drivers().Create(ctx, workflowcatalog.DriverCreate{
 		WorkspaceKey: "WS", DriverID: "custom-agent", Name: "custom-agent",
 		OwnerType: workflowcatalog.DriverOwnerUser, Status: workflowcatalog.DriverStatusActive,
 		TrustLevel: workflowcatalog.DriverTrustUntrusted,
 	}); err != nil {
 		t.Fatalf("create caller driver: %v", err)
 	}
-	if _, err := st.DriverVersions().Create(ctx, store.DriverVersionCreate{
+	if _, err := st.DriverVersions().Create(ctx, workflowcatalog.DriverVersionCreate{
 		WorkspaceKey: "WS", VersionID: "custom-agent-v1", DriverID: "custom-agent", Version: 1,
 		SourceDigest: "sha256:custom", BundleDigest: "sha256:custom",
 		Runtime:          RuntimeFlueNode,
@@ -91,7 +90,7 @@ func TestResolveTaskRunRequestRunnerGlobalFallbackUsesBuiltinOwner(t *testing.T)
 
 	restore := swapGlobalRunnerResolver(func(_ context.Context, _, runnerName string) (*GlobalRunnerResolution, error) {
 		if runnerName != "local-task-runner" {
-			return nil, domain.ErrNotFound
+			return nil, persistence.ErrNotFound
 		}
 		return &GlobalRunnerResolution{Driver: builtinDriver, Version: builtinVersion, Spec: DriverRunnerSpec{Name: "local-task-runner", Kind: RunnerKindFlueWorkflow, Entrypoint: "local-task-runner"}}, nil
 	})
@@ -121,12 +120,12 @@ func TestResolveTaskRunRequestRunnerUnknownRunnerSameError(t *testing.T) {
 	st := memstore.New()
 	parent := registerUntrustedCaller(t, st)
 	restore := swapGlobalRunnerResolver(func(_ context.Context, _, _ string) (*GlobalRunnerResolution, error) {
-		return nil, domain.ErrNotFound
+		return nil, persistence.ErrNotFound
 	})
 	defer restore()
 
 	_, err := resolveTaskRunRequestRunner(context.Background(), testTaskRunRequestCatalog{store: st}, TaskRunRequestOptions{WorkspaceKey: "WS", Runner: "no-such-runner"}, parent)
-	if !errors.Is(err, ErrRunnerNotDeclared) || !errors.Is(err, domain.ErrInvalid) {
+	if !errors.Is(err, ErrRunnerNotDeclared) || !errors.Is(err, persistence.ErrInvalid) {
 		t.Fatalf("unknown runner err = %v, want the original not-declared (ErrRunnerNotDeclared + ErrInvalid)", err)
 	}
 	if !strings.Contains(err.Error(), "custom-agent-v1") {

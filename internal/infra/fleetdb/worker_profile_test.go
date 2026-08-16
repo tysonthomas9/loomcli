@@ -6,8 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 )
 
 func TestWorkerProfileClientRoutesBodiesAndQueries(t *testing.T) {
@@ -42,15 +41,15 @@ func TestWorkerProfileClientRoutesBodiesAndQueries(t *testing.T) {
 			if req.ParentEpic != "EPIC-1" || len(req.Repos) != 1 || req.Repos[0] != "api" || len(req.Labels) != 1 || req.Labels[0] != "gpu" || len(req.Capabilities) != 1 || req.Capabilities[0] != "tests" || req.Metadata["tier"] != "gold" {
 				t.Fatalf("create body collections = %+v", req)
 			}
-			writeJSON(t, w, domain.WorkerProfile{WorkspaceKey: "WS", ProfileID: req.ProfileID, Name: req.Name, Role: req.Role, Backend: req.Backend, RuntimePolicy: req.RuntimePolicy, MaxPriority: req.MaxPriority, MaxParallel: req.MaxParallel, Enabled: *req.Enabled})
+			writeJSON(t, w, execution.WorkerProfile{WorkspaceKey: "WS", ProfileID: req.ProfileID, Name: req.Name, Role: req.Role, Backend: req.Backend, RuntimePolicy: req.RuntimePolicy, MaxPriority: req.MaxPriority, MaxParallel: req.MaxParallel, Enabled: *req.Enabled})
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/WS/worker-profiles":
 			q := r.URL.Query()
 			if q.Get("role") != "task" || q.Get("backend") != "codex" || q.Get("enabled") != "false" || q.Get("limit") != "3" {
 				t.Fatalf("list query = %s", r.URL.RawQuery)
 			}
-			writeJSON(t, w, map[string]any{"worker_profiles": []*domain.WorkerProfile{{WorkspaceKey: "WS", ProfileID: "falcon", Role: "task", Backend: "codex", Enabled: false}}, "count": 1})
+			writeJSON(t, w, map[string]any{"worker_profiles": []*execution.WorkerProfile{{WorkspaceKey: "WS", ProfileID: "falcon", Role: "task", Backend: "codex", Enabled: false}}, "count": 1})
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/WS/worker-profiles/falcon":
-			writeJSON(t, w, domain.WorkerProfile{WorkspaceKey: "WS", ProfileID: "falcon", Role: "task", Backend: "codex", Enabled: false})
+			writeJSON(t, w, execution.WorkerProfile{WorkspaceKey: "WS", ProfileID: "falcon", Role: "task", Backend: "codex", Enabled: false})
 		case r.Method == http.MethodPatch && r.URL.Path == "/api/v1/WS/worker-profiles/falcon":
 			var req struct {
 				Name             *string            `json:"name"`
@@ -75,7 +74,7 @@ func TestWorkerProfileClientRoutesBodiesAndQueries(t *testing.T) {
 			if req.Repos == nil || len(*req.Repos) != 0 || req.Metadata == nil || (*req.Metadata)["tier"] != "platinum" {
 				t.Fatalf("update body collections = %+v", req)
 			}
-			writeJSON(t, w, domain.WorkerProfile{WorkspaceKey: "WS", ProfileID: "falcon", Name: *req.Name, Role: "task", Backend: *req.Backend, RuntimePolicy: *req.RuntimePolicy, MaxParallel: *req.MaxParallel, Repos: *req.Repos, Enabled: *req.Enabled, Metadata: *req.Metadata})
+			writeJSON(t, w, execution.WorkerProfile{WorkspaceKey: "WS", ProfileID: "falcon", Name: *req.Name, Role: "task", Backend: *req.Backend, RuntimePolicy: *req.RuntimePolicy, MaxParallel: *req.MaxParallel, Repos: *req.Repos, Enabled: *req.Enabled, Metadata: *req.Metadata})
 		case r.Method == http.MethodDelete && r.URL.Path == "/api/v1/WS/worker-profiles/falcon":
 			w.WriteHeader(http.StatusNoContent)
 		default:
@@ -90,7 +89,7 @@ func TestWorkerProfileClientRoutesBodiesAndQueries(t *testing.T) {
 	}
 	maxPriority := 2
 	enabled := false
-	created, err := client.WorkerProfiles().Create(t.Context(), store.WorkerProfileCreate{
+	created, err := client.WorkerProfiles().Create(t.Context(), execution.WorkerProfileCreate{
 		WorkspaceKey:  "WS",
 		ProfileID:     "falcon",
 		Name:          "Falcon",
@@ -113,7 +112,7 @@ func TestWorkerProfileClientRoutesBodiesAndQueries(t *testing.T) {
 		t.Fatalf("created = %+v, want falcon disabled", created)
 	}
 
-	profiles, err := client.WorkerProfiles().List(t.Context(), "WS", store.WorkerProfileFilter{Role: "task", Backend: "codex", Enabled: &enabled, Limit: 3})
+	profiles, err := client.WorkerProfiles().List(t.Context(), "WS", execution.WorkerProfileFilter{Role: "task", Backend: "codex", Enabled: &enabled, Limit: 3})
 	if err != nil {
 		t.Fatalf("List worker profiles: %v", err)
 	}
@@ -135,7 +134,7 @@ func TestWorkerProfileClientRoutesBodiesAndQueries(t *testing.T) {
 	maxParallel := 3
 	metadata := map[string]string{"tier": "platinum"}
 	enabled = true
-	updated, err := client.WorkerProfiles().Update(t.Context(), "WS", "falcon", store.WorkerProfileUpdate{Name: &name, Backend: &backend, RuntimePolicy: &runtimePolicy, Repos: &repos, MaxParallel: &maxParallel, ClearMaxPriority: true, Enabled: &enabled, Metadata: &metadata})
+	updated, err := client.WorkerProfiles().Update(t.Context(), "WS", "falcon", execution.WorkerProfileUpdate{Name: &name, Backend: &backend, RuntimePolicy: &runtimePolicy, Repos: &repos, MaxParallel: &maxParallel, ClearMaxPriority: true, Enabled: &enabled, Metadata: &metadata})
 	if err != nil {
 		t.Fatalf("Update worker profile: %v", err)
 	}

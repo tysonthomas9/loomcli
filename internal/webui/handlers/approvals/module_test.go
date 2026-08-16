@@ -14,16 +14,18 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/automation"
+
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
+
+	workspaceowner "github.com/tysonthomas9/loomcli/internal/modules/workspace"
+
 	"github.com/tysonthomas9/loomcli/internal/driver"
 	trigger "github.com/tysonthomas9/loomcli/internal/infra/automationruntime"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
-	"github.com/tysonthomas9/loomcli/internal/modules/automation"
-	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
-	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
 
@@ -48,7 +50,7 @@ func newApprovalsHarness(t *testing.T) *approvalsHarness {
 
 type recordingExecutionDriverRuns struct {
 	execution.DriverRunAPI
-	resolver     store.AtomicAwaitStore
+	resolver     execution.AtomicAwaitStore
 	resolveCalls int
 }
 
@@ -102,16 +104,16 @@ func newApprovalsHarnessWithExecution(t *testing.T, executionAvailable bool) *ap
 	t.Helper()
 	st := memstore.New()
 	ctx := context.Background()
-	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: approvalsTestWS, Name: "ws"}); err != nil {
+	if _, err := st.Workspaces().Create(ctx, workspaceowner.WorkspaceCreate{Key: approvalsTestWS, Name: "ws"}); err != nil {
 		t.Fatalf("Create workspace: %v", err)
 	}
-	if _, err := st.Drivers().Create(ctx, store.DriverCreate{
+	if _, err := st.Drivers().Create(ctx, workflowcatalog.DriverCreate{
 		WorkspaceKey: approvalsTestWS, DriverID: "approval-gate", Name: "approval-gate",
 		OwnerType: workflowcatalog.DriverOwnerSystem, Status: workflowcatalog.DriverStatusActive,
 	}); err != nil {
 		t.Fatalf("Create driver: %v", err)
 	}
-	if _, err := st.DriverVersions().Create(ctx, store.DriverVersionCreate{
+	if _, err := st.DriverVersions().Create(ctx, workflowcatalog.DriverVersionCreate{
 		WorkspaceKey: approvalsTestWS, VersionID: "v1", DriverID: "approval-gate", Version: 1,
 		SourceDigest: "sha256:source", BundleDigest: "sha256:bundle",
 		ValidationStatus: workflowcatalog.DriverVersionValidationPassed,
@@ -123,9 +125,9 @@ func newApprovalsHarnessWithExecution(t *testing.T, executionAvailable bool) *ap
 		executionAPI *recordingExecutionDriverRuns
 	)
 	if executionAvailable {
-		atomicAwaits, ok := st.Awaits().(store.AtomicAwaitStore)
+		atomicAwaits, ok := st.Awaits().(execution.AtomicAwaitStore)
 		if !ok {
-			t.Fatalf("memstore awaits %T does not implement store.AtomicAwaitStore", st.Awaits())
+			t.Fatalf("memstore awaits %T does not implement execution.AtomicAwaitStore", st.Awaits())
 		}
 		executionAPI = &recordingExecutionDriverRuns{resolver: atomicAwaits}
 		resolver := &driver.ExecutionAwaitResolver{
@@ -167,7 +169,7 @@ func newApprovalsHarnessWithExecution(t *testing.T, executionAvailable bool) *ap
 func (h *approvalsHarness) suspendedRun(t *testing.T, runID, pattern string, actorAllow []string) string {
 	t.Helper()
 	ctx := context.Background()
-	if _, err := h.store.DriverRuns().Create(ctx, store.DriverRunCreate{
+	if _, err := h.store.DriverRuns().Create(ctx, execution.DriverRunCreate{
 		WorkspaceKey: approvalsTestWS, RunID: runID, DriverID: "approval-gate", DriverVersionID: "v1", Entrypoint: "run",
 	}); err != nil {
 		t.Fatalf("Create run: %v", err)
@@ -176,8 +178,8 @@ func (h *approvalsHarness) suspendedRun(t *testing.T, runID, pattern string, act
 	if err != nil {
 		t.Fatalf("Claim run: %v", err)
 	}
-	key := domain.AwaitInstanceKey(runID, 1)
-	res, err := h.store.Awaits().RegisterAwaitAndCheck(ctx, approvalsTestWS, store.AwaitRegistration{
+	key := execution.AwaitInstanceKey(runID, 1)
+	res, err := h.store.Awaits().RegisterAwaitAndCheck(ctx, approvalsTestWS, execution.AwaitRegistration{
 		InstanceKey: key, RunID: runID, Pattern: pattern, ActorAllow: actorAllow,
 		Deadline: time.Now().Add(time.Hour),
 	})
@@ -196,7 +198,7 @@ func (h *approvalsHarness) suspendedRun(t *testing.T, runID, pattern string, act
 func (h *approvalsHarness) pendingCompositionAwait(t *testing.T, parentRunID, childRunID string) string {
 	t.Helper()
 	ctx := context.Background()
-	if _, err := h.store.DriverRuns().Create(ctx, store.DriverRunCreate{
+	if _, err := h.store.DriverRuns().Create(ctx, execution.DriverRunCreate{
 		WorkspaceKey: approvalsTestWS, RunID: parentRunID, DriverID: "approval-gate",
 		DriverVersionID: "v1", Entrypoint: "run",
 	}); err != nil {
@@ -206,15 +208,15 @@ func (h *approvalsHarness) pendingCompositionAwait(t *testing.T, parentRunID, ch
 	if err != nil {
 		t.Fatalf("Claim composition parent: %v", err)
 	}
-	if _, err := h.store.DriverRuns().Create(ctx, store.DriverRunCreate{
+	if _, err := h.store.DriverRuns().Create(ctx, execution.DriverRunCreate{
 		WorkspaceKey: approvalsTestWS, RunID: childRunID, DriverID: "approval-gate",
 		DriverVersionID: "v1", Entrypoint: "run", SourceKind: driver.ChildRunSourceKind,
 		SourceRef: parentRunID, ParentRunID: parentRunID,
 	}); err != nil {
 		t.Fatalf("Create composition child: %v", err)
 	}
-	key := domain.AwaitInstanceKey(parentRunID, 1)
-	registered, err := h.store.Awaits().RegisterAwaitAndCheck(ctx, approvalsTestWS, store.AwaitRegistration{
+	key := execution.AwaitInstanceKey(parentRunID, 1)
+	registered, err := h.store.Awaits().RegisterAwaitAndCheck(ctx, approvalsTestWS, execution.AwaitRegistration{
 		InstanceKey: key, RunID: parentRunID, Pattern: driver.RunFinishedSubjectKey(childRunID),
 		ActorAllow: []string{driver.RunFinishedActor}, Deadline: time.Now().Add(time.Minute),
 	})
@@ -266,7 +268,7 @@ func (h *approvalsHarness) post(t *testing.T, call approvalCall) (*http.Response
 
 func (h *approvalsHarness) journalEvents(t *testing.T) []*automation.Event {
 	t.Helper()
-	events, err := h.store.TriggerEvents().List(context.Background(), approvalsTestWS, store.TriggerEventFilter{})
+	events, err := h.store.TriggerEvents().List(context.Background(), approvalsTestWS, automation.TriggerEventFilter{})
 	if err != nil {
 		t.Fatalf("List trigger events: %v", err)
 	}
@@ -388,7 +390,7 @@ func TestApprovalCannotResumePendingCompositionAwait(t *testing.T) {
 		t.Fatalf("journal = %d events after rejected resume spoof, want none", len(events))
 	}
 	run, err := h.store.DriverRuns().Get(context.Background(), approvalsTestWS, parentRunID)
-	if err != nil || run.Status != domain.DriverRunSuspendedAwaitingEvent || run.ResumeSourceEventID != "" {
+	if err != nil || run.Status != execution.DriverRunSuspendedAwait || run.ResumeSourceEventID != "" {
 		t.Fatalf("parent = %+v, %v; want still suspended", run, err)
 	}
 	pending, err := h.store.Awaits().ListAwaitsByPattern(
@@ -403,7 +405,7 @@ func TestApprovalCannotResumePendingCompositionAwait(t *testing.T) {
 // actor) is persisted on the satisfied row.
 func TestApprovalResolvesAndResumesEligibleAwait(t *testing.T) {
 	h := newApprovalsHarness(t)
-	pattern := domain.AwaitEventKey(DefaultApprovalEventType, "acme/widgets#7@shaA")
+	pattern := execution.AwaitEventKey(DefaultApprovalEventType, "acme/widgets#7@shaA")
 	key := h.suspendedRun(t, "run-gate", pattern, []string{"alice@example.com"})
 
 	resp, decoded := h.post(t, approvalCall{
@@ -430,11 +432,11 @@ func TestApprovalResolvesAndResumesEligibleAwait(t *testing.T) {
 
 	ctx := context.Background()
 	run, err := h.store.DriverRuns().Get(ctx, approvalsTestWS, "run-gate")
-	if err != nil || run.Status != domain.DriverRunQueued || run.ResumeSourceEventID != eventID {
+	if err != nil || run.Status != execution.DriverRunQueued || run.ResumeSourceEventID != eventID {
 		t.Fatalf("run = %+v, %v; want queued resumed by %s", run, err, eventID)
 	}
 	satisfied, err := h.store.Awaits().GetSatisfiedAwait(ctx, approvalsTestWS, key)
-	if err != nil || satisfied.Status != domain.AwaitSatisfied || satisfied.SatisfiedByEventID != eventID {
+	if err != nil || satisfied.Status != execution.AwaitSatisfied || satisfied.SatisfiedByEventID != eventID {
 		t.Fatalf("satisfied = %+v, %v; want satisfied by %s", satisfied, err, eventID)
 	}
 	var payload approvalPayload
@@ -457,7 +459,7 @@ func TestApprovalResolvesAndResumesEligibleAwait(t *testing.T) {
 // the run stays suspended.
 func TestApprovalIneligibleActorRefusedAndNothingEmitted(t *testing.T) {
 	h := newApprovalsHarness(t)
-	pattern := domain.AwaitEventKey(DefaultApprovalEventType, "acme/widgets#7@shaA")
+	pattern := execution.AwaitEventKey(DefaultApprovalEventType, "acme/widgets#7@shaA")
 	h.suspendedRun(t, "run-guarded", pattern, []string{"release-manager@example.com"})
 
 	resp, decoded := h.post(t, approvalCall{
@@ -472,7 +474,7 @@ func TestApprovalIneligibleActorRefusedAndNothingEmitted(t *testing.T) {
 	}
 	ctx := context.Background()
 	run, err := h.store.DriverRuns().Get(ctx, approvalsTestWS, "run-guarded")
-	if err != nil || run.Status != domain.DriverRunSuspendedAwaitingEvent || run.ResumeSourceEventID != "" {
+	if err != nil || run.Status != execution.DriverRunSuspendedAwait || run.ResumeSourceEventID != "" {
 		t.Fatalf("run = %+v, %v; want still suspended untouched", run, err)
 	}
 	pending, err := h.store.Awaits().ListAwaitsByPattern(ctx, approvalsTestWS, pattern)
@@ -483,12 +485,12 @@ func TestApprovalIneligibleActorRefusedAndNothingEmitted(t *testing.T) {
 
 func TestApprovalRejectsOversizedResumePayloadBeforeJournal(t *testing.T) {
 	h := newApprovalsHarness(t)
-	pattern := domain.AwaitEventKey(DefaultApprovalEventType, "deploy-large")
+	pattern := execution.AwaitEventKey(DefaultApprovalEventType, "deploy-large")
 	h.suspendedRun(t, "run-large-approval", pattern, []string{"alice@example.com"})
 
 	resp, decoded := h.post(t, approvalCall{
 		user: "user-alice", email: "alice@example.com",
-		body: map[string]any{"subjectRef": "deploy-large", "note": strings.Repeat("x", domain.DefaultAwaitResumePayloadCap)},
+		body: map[string]any{"subjectRef": "deploy-large", "note": strings.Repeat("x", execution.DefaultAwaitResumePayloadCap)},
 	})
 	errorBody, _ := decoded["error"].(map[string]any)
 	if resp.StatusCode != http.StatusRequestEntityTooLarge || errorBody["code"] != "await_payload_too_large" {
@@ -498,7 +500,7 @@ func TestApprovalRejectsOversizedResumePayloadBeforeJournal(t *testing.T) {
 		t.Fatalf("journal = %d events after oversized approval, want none", len(events))
 	}
 	run, err := h.store.DriverRuns().Get(context.Background(), approvalsTestWS, "run-large-approval")
-	if err != nil || run.Status != domain.DriverRunSuspendedAwaitingEvent || run.ResumeSourceEventID != "" {
+	if err != nil || run.Status != execution.DriverRunSuspendedAwait || run.ResumeSourceEventID != "" {
 		t.Fatalf("run = %+v, %v; want still suspended", run, err)
 	}
 	pending, err := h.store.Awaits().ListAwaitsByPattern(context.Background(), approvalsTestWS, pattern)
@@ -521,9 +523,9 @@ func TestApprovalBeforeRegistrationSatisfiesLaterAwaitInline(t *testing.T) {
 	}
 	eventID, _ := decoded["eventId"].(string)
 
-	res, err := h.store.Awaits().RegisterAwaitAndCheck(context.Background(), approvalsTestWS, store.AwaitRegistration{
-		InstanceKey: domain.AwaitInstanceKey("run-later", 1), RunID: "run-later",
-		Pattern:    domain.AwaitEventKey(DefaultApprovalEventType, "acme/widgets#9@shaB"),
+	res, err := h.store.Awaits().RegisterAwaitAndCheck(context.Background(), approvalsTestWS, execution.AwaitRegistration{
+		InstanceKey: execution.AwaitInstanceKey("run-later", 1), RunID: "run-later",
+		Pattern:    execution.AwaitEventKey(DefaultApprovalEventType, "acme/widgets#9@shaB"),
 		ActorAllow: []string{"alice@example.com"},
 		Deadline:   time.Now().Add(time.Hour),
 	})
@@ -541,9 +543,9 @@ func TestApprovalBeforeRegistrationSatisfiesLaterAwaitInline(t *testing.T) {
 
 	// The same pre-granted approval does NOT satisfy a registration whose
 	// allow-list excludes the recorded actor (RULE 4 at scan time).
-	guarded, err := h.store.Awaits().RegisterAwaitAndCheck(context.Background(), approvalsTestWS, store.AwaitRegistration{
-		InstanceKey: domain.AwaitInstanceKey("run-later-guarded", 1), RunID: "run-later-guarded",
-		Pattern:    domain.AwaitEventKey(DefaultApprovalEventType, "acme/widgets#9@shaB"),
+	guarded, err := h.store.Awaits().RegisterAwaitAndCheck(context.Background(), approvalsTestWS, execution.AwaitRegistration{
+		InstanceKey: execution.AwaitInstanceKey("run-later-guarded", 1), RunID: "run-later-guarded",
+		Pattern:    execution.AwaitEventKey(DefaultApprovalEventType, "acme/widgets#9@shaB"),
 		ActorAllow: []string{"release-manager@example.com"},
 		Deadline:   time.Now().Add(time.Hour),
 	})
@@ -556,7 +558,7 @@ func TestApprovalBeforeRegistrationSatisfiesLaterAwaitInline(t *testing.T) {
 // payload.decision.
 func TestApprovalRejectionResolvesAwait(t *testing.T) {
 	h := newApprovalsHarness(t)
-	pattern := domain.AwaitEventKey(DefaultApprovalEventType, "acme/widgets#7@shaA")
+	pattern := execution.AwaitEventKey(DefaultApprovalEventType, "acme/widgets#7@shaA")
 	key := h.suspendedRun(t, "run-reject", pattern, nil) // empty allow-list: any verified actor
 
 	resp, decoded := h.post(t, approvalCall{
@@ -578,7 +580,7 @@ func TestApprovalRejectionResolvesAwait(t *testing.T) {
 		t.Fatalf("payload = %+v, want rejected by user-bob", payload)
 	}
 	run, err := h.store.DriverRuns().Get(context.Background(), approvalsTestWS, "run-reject")
-	if err != nil || run.Status != domain.DriverRunQueued {
+	if err != nil || run.Status != execution.DriverRunQueued {
 		t.Fatalf("run = %+v, %v; want re-queued on rejection", run, err)
 	}
 }

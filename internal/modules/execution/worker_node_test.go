@@ -23,7 +23,7 @@ func (stub *workerNodePortStub) RegisterWorkerNode(_ context.Context, command Re
 	stub.register = command
 	return &WorkerNode{
 		WorkspaceKey: command.WorkspaceKey, NodeID: command.NodeID, OwnerActor: command.OwnerActor,
-		RuntimeProvider: command.RuntimeProvider, DrainState: WorkerNodeActive,
+		RuntimeProvider: RuntimeProvider(command.RuntimeProvider), DrainState: WorkerNodeActive,
 	}, nil
 }
 

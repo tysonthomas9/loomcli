@@ -8,9 +8,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
+
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
-	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
 func setWorkflowRuntimeProvider(t *testing.T, backend string) {
@@ -51,7 +52,7 @@ func TestCreateWorkflowRunPreflightFailsClosedForLocalRunner(t *testing.T) {
 		t.Fatalf("error body = %q, want local_backend_unavailable preflight message", body)
 	}
 
-	runs, err := st.DriverRuns().List(ctx, "TEST", store.DriverRunFilter{})
+	runs, err := st.DriverRuns().List(ctx, "TEST", execution.DriverRunFilter{})
 	if err != nil {
 		t.Fatalf("list runs: %v", err)
 	}
@@ -194,7 +195,7 @@ func TestCreateWorkflowRunPreflightRejectsMissingHealthPort(t *testing.T) {
 	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "backend health is unavailable") {
 		t.Fatalf("status = %d body=%s, want missing-port fail-closed rejection", rec.Code, rec.Body.String())
 	}
-	runs, err := st.DriverRuns().List(context.Background(), "TEST", store.DriverRunFilter{})
+	runs, err := st.DriverRuns().List(context.Background(), "TEST", execution.DriverRunFilter{})
 	if err != nil {
 		t.Fatal(err)
 	}

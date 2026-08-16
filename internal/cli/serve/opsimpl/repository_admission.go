@@ -88,11 +88,11 @@ func ConfigureWorkspaceAdmission(
 	journal repositoryadmission.Journal,
 	agentsCommands repositoryadmission.ManagedAgentsCommands,
 ) *repositoryadmission.Workflow {
-	if cfg == nil || cfg.Store == nil || agentsCommands == nil {
+	if cfg == nil || cfg.ProjectionRecords == nil || agentsCommands == nil {
 		return nil
 	}
-	cfg.WorkspaceIDResolverFn = serveadapter.BuildWorkspaceIDResolverFn(cfg.Store)
-	cfg.InitialWorkspaceID = serveadapter.ResolveInitialWorkspaceID(cfg.Store)
+	cfg.WorkspaceIDResolverFn = serveadapter.BuildWorkspaceIDResolverFn(cfg.ProjectionRecords)
+	cfg.InitialWorkspaceID = serveadapter.ResolveInitialWorkspaceID(cfg.ProjectionRecords)
 	cfg.WorkspaceDeleteCleanupFn = serveadapter.BuildWorkspaceDeleteCleanupFn()
 	var admissions repositoryadmission.DurableAdmissions
 	if storeHandle != nil && storeHandle.FleetDBClient() != nil {

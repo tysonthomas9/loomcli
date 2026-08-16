@@ -7,10 +7,11 @@ import (
 	"strings"
 	"testing"
 
+	workspaceowner "github.com/tysonthomas9/loomcli/internal/modules/workspace"
+
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
-	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/modules/agents"
 )
 
 func TestGetConfigDir(t *testing.T) {
@@ -100,27 +101,27 @@ func TestAgentEntryShouldRunSkipsInteractiveRoles(t *testing.T) {
 			name:  "custom interactive kind does not run as a worker",
 			entry: AgentEntry{Worktree: "operator", Role: "operator"},
 			roles: map[string]RoleConfig{
-				"operator": {Kind: string(domain.RoleKindInteractive)},
+				"operator": {Kind: string(agents.RoleKindInteractive)},
 			},
 			want: false,
 		},
 		{
 			name:  "interactive kind ignores running desired state",
-			entry: AgentEntry{Worktree: "operator", Role: "operator", DesiredState: domain.AgentDesiredRunning},
+			entry: AgentEntry{Worktree: "operator", Role: "operator", DesiredState: agents.RuntimeDesiredRunning},
 			roles: map[string]RoleConfig{
-				"operator": {Kind: string(domain.RoleKindInteractive)},
+				"operator": {Kind: string(agents.RoleKindInteractive)},
 			},
 			want: false,
 		},
 		{
 			name:  "worker kind uses desired state",
-			entry: AgentEntry{Worktree: "operator", Role: "operator", DesiredState: domain.AgentDesiredRunning},
+			entry: AgentEntry{Worktree: "operator", Role: "operator", DesiredState: agents.RuntimeDesiredRunning},
 			roles: map[string]RoleConfig{
-				"operator": {Kind: string(domain.RoleKindWorker)},
+				"operator": {Kind: string(agents.RoleKindWorker)},
 			},
 			want: true,
 		},
-		{name: "stopped worker does not run", entry: AgentEntry{Worktree: "worker", Role: "task", DesiredState: domain.AgentDesiredStopped}, want: false},
+		{name: "stopped worker does not run", entry: AgentEntry{Worktree: "worker", Role: "task", DesiredState: agents.RuntimeDesiredStopped}, want: false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -137,10 +138,10 @@ func TestLoadConfigFromStoreProjectsFleetDBWithLocalState(t *testing.T) {
 	st := memstore.New()
 	t.Cleanup(func() { _ = st.Close() })
 
-	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "WS1", Name: "Workspace One"}); err != nil {
+	if _, err := st.Workspaces().Create(ctx, workspaceowner.WorkspaceCreate{Key: "WS1", Name: "Workspace One"}); err != nil {
 		t.Fatalf("create workspace: %v", err)
 	}
-	if _, err := st.Repos().Create(ctx, store.RepoCreate{
+	if _, err := st.Repos().Create(ctx, workspaceowner.RepoCreate{
 		WorkspaceKey:  "WS1",
 		Name:          "api",
 		Remote:        "upstream",
@@ -187,10 +188,10 @@ func TestLoadConfigFromStoreCopiesDesignFormat(t *testing.T) {
 	st := memstore.New()
 	t.Cleanup(func() { _ = st.Close() })
 
-	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "WSHTML", Name: "HTML WS", DesignFormat: "html"}); err != nil {
+	if _, err := st.Workspaces().Create(ctx, workspaceowner.WorkspaceCreate{Key: "WSHTML", Name: "HTML WS", DesignFormat: "html"}); err != nil {
 		t.Fatalf("create workspace: %v", err)
 	}
-	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "WSPLAIN", Name: "Plain WS"}); err != nil {
+	if _, err := st.Workspaces().Create(ctx, workspaceowner.WorkspaceCreate{Key: "WSPLAIN", Name: "Plain WS"}); err != nil {
 		t.Fatalf("create workspace: %v", err)
 	}
 

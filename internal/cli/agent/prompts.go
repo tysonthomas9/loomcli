@@ -17,7 +17,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/backends"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/cli/git"
-	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/modules/agents"
 )
 
 //go:embed prompts/*.md
@@ -52,14 +52,6 @@ func resolveDesignFormat(workspace *config.WorkspaceConfig) string {
 		return "html"
 	}
 	return "markdown"
-}
-
-// BuiltinInteractivePrompt is a selectable built-in terminal-agent prompt.
-type BuiltinInteractivePrompt = domain.BuiltinInteractivePrompt
-
-// BuiltinInteractivePrompts returns the built-in interactive terminal prompts.
-func BuiltinInteractivePrompts() []BuiltinInteractivePrompt {
-	return domain.BuiltinInteractivePrompts()
 }
 
 // renderPrompt loads a template by name, checks for per-project override,
@@ -405,7 +397,7 @@ func GenerateTerminalPromptText(text string) (string, error) {
 }
 
 func isBuiltinInteractivePrompt(id string) bool {
-	return domain.IsBuiltinInteractivePrompt(id)
+	return agents.IsBuiltinInteractivePrompt(id)
 }
 
 func terminalPromptTemplateData() promptTemplateData {

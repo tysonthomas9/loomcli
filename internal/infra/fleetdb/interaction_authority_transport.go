@@ -8,8 +8,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
+
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 var (
@@ -73,8 +74,8 @@ type InteractionTransport interface {
 // commands and post-validation immutable AgentSession identity read.
 type interactionRequester interface {
 	fleetRequester
-	GetAgentSession(context.Context, string, string) (*domain.AgentSession, error)
-	ListAgentSessions(context.Context, string, store.AgentSessionFilter) ([]*domain.AgentSession, error)
+	GetAgentSession(context.Context, string, string) (*interaction.SessionRecord, error)
+	ListAgentSessions(context.Context, string, interaction.AgentSessionFilter) ([]*interaction.SessionRecord, error)
 }
 
 type interactionStore struct {
@@ -96,7 +97,7 @@ type interactionAuthorityRequestWire struct {
 }
 
 type interactionAuthorityResponseWire struct {
-	Lease *domain.AgentLease `json:"lease"`
+	Lease *interaction.LeaseRecord `json:"lease"`
 }
 
 func (store *interactionStore) ValidateSessionAuthority(
@@ -173,7 +174,7 @@ func validateInteractionSessionAuthorityProof(proof InteractionSessionAuthorityP
 
 func validateInteractionLeaseResponse(
 	proof InteractionSessionAuthorityProof,
-	lease *domain.AgentLease,
+	lease *interaction.LeaseRecord,
 ) error {
 	if lease == nil ||
 		lease.WorkspaceKey != proof.WorkspaceKey ||
@@ -182,7 +183,7 @@ func validateInteractionLeaseResponse(
 		lease.NodeID != proof.NodeID ||
 		lease.LeaseID != proof.LeaseID ||
 		lease.FencingToken != proof.FencingToken ||
-		lease.Status != domain.AgentLeaseActive ||
+		lease.Status != interaction.LeaseRecordActive ||
 		lease.ExpiresAt.IsZero() ||
 		lease.Token != "" {
 		return fmt.Errorf("FleetDB returned a mismatched or credential-bearing lease: %w", ErrInteractionInvalidPersistedState)
@@ -192,7 +193,7 @@ func validateInteractionLeaseResponse(
 
 func validateInteractionSessionIdentity(
 	proof InteractionSessionAuthorityProof,
-	session *domain.AgentSession,
+	session *interaction.SessionRecord,
 ) error {
 	if session == nil ||
 		session.WorkspaceKey != proof.WorkspaceKey ||
@@ -206,11 +207,11 @@ func validateInteractionSessionIdentity(
 	return nil
 }
 
-func interactionSessionStatusLive(status domain.AgentSessionStatus) bool {
+func interactionSessionStatusLive(status interaction.SessionRecordStatus) bool {
 	switch status {
-	case domain.AgentSessionQueued, domain.AgentSessionLeased,
-		domain.AgentSessionStarting, domain.AgentSessionRunning,
-		domain.AgentSessionIdle, domain.AgentSessionYielded:
+	case interaction.SessionRecordQueued, interaction.SessionRecordLeased,
+		interaction.SessionRecordStarting, interaction.SessionRecordRunning,
+		interaction.SessionRecordIdle, interaction.SessionRecordYielded:
 		return true
 	default:
 		return false
@@ -223,16 +224,16 @@ func mapInteractionAuthorityError(operation string, err error) error {
 	}
 	var sentinel error
 	switch {
-	case errors.Is(err, domain.ErrNotFound):
+	case errors.Is(err, persistence.ErrNotFound):
 		sentinel = ErrInteractionNotFound
-	case errors.Is(err, domain.ErrNotOwner), errors.Is(err, domain.ErrConflict),
-		errors.Is(err, domain.ErrGone):
+	case errors.Is(err, persistence.ErrNotOwner), errors.Is(err, persistence.ErrConflict),
+		errors.Is(err, persistence.ErrGone):
 		sentinel = ErrInteractionNotOwner
-	case errors.Is(err, domain.ErrInvalidTransition):
+	case errors.Is(err, persistence.ErrInvalidTransition):
 		sentinel = ErrInteractionInvalidTransition
-	case errors.Is(err, domain.ErrAlreadyExists), errors.Is(err, domain.ErrAlreadyClaimed):
+	case errors.Is(err, persistence.ErrAlreadyExists), errors.Is(err, persistence.ErrAlreadyClaimed):
 		sentinel = ErrInteractionConflict
-	case errors.Is(err, domain.ErrInvalid):
+	case errors.Is(err, persistence.ErrInvalid):
 		sentinel = ErrInteractionInvalid
 	default:
 		sentinel = ErrInteractionUnavailable

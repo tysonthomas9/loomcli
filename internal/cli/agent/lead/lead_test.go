@@ -12,29 +12,31 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/bootstrap"
+	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
+
+	workspaceowner "github.com/tysonthomas9/loomcli/internal/modules/workspace"
+
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/agent"
 	"github.com/tysonthomas9/loomcli/internal/cli/testdata/clitest"
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/epicrunner"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
-	"github.com/tysonthomas9/loomcli/internal/store"
+	agentsowner "github.com/tysonthomas9/loomcli/internal/modules/agents"
 	"github.com/tysonthomas9/loomcli/internal/usage"
 )
 
 func TestRegisteredLeadSessionHeartbeatAdvancesUntilStopped(t *testing.T) {
 	ctx := context.Background()
 	st := memstore.New()
-	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "WS", Name: "ws"}); err != nil {
+	if _, err := st.Workspaces().Create(ctx, workspaceowner.WorkspaceCreate{Key: "WS", Name: "ws"}); err != nil {
 		t.Fatalf("create workspace: %v", err)
 	}
-	if _, err := st.AgentSessions().Create(ctx, store.AgentSessionCreate{
+	if _, err := st.AgentSessions().Create(ctx, interaction.AgentSessionCreate{
 		WorkspaceKey: "WS",
 		SessionID:    "lead-session",
 		AgentID:      "lead",
-		Kind:         domain.AgentSessionKindInteractive,
-		Status:       domain.AgentSessionRunning,
+		Kind:         interaction.SessionRecordInteractive,
+		Status:       interaction.SessionRecordRunning,
 	}); err != nil {
 		t.Fatalf("create session: %v", err)
 	}
@@ -289,10 +291,10 @@ func TestRunLeadUsesCustomTerminalPrompt(t *testing.T) {
 func TestGenerateLeadTerminalPromptUsesLiteralRolePrompt(t *testing.T) {
 	t.Setenv("LOOM_AGENT_ROLE", "operator")
 	st := memstore.New()
-	if _, err := st.Roles().Create(context.Background(), store.RoleCreate{
+	if _, err := st.Roles().Create(context.Background(), agentsowner.RoleRecordCreate{
 		WorkspaceKey: "E2E",
 		Name:         "operator",
-		Kind:         string(domain.RoleKindInteractive),
+		Kind:         string(agentsowner.RoleKindInteractive),
 		Prompt:       "Literal {{ marker }}",
 		PromptFile:   "prompts/ignored.md",
 	}); err != nil {
@@ -303,7 +305,7 @@ func TestGenerateLeadTerminalPromptUsesLiteralRolePrompt(t *testing.T) {
 	t.Cleanup(func() { leadPromptFile = oldPromptFile })
 
 	prompt, err := generateLeadTerminalPrompt(context.Background(), leadSessionRegistration{
-		handle:    &bootstrap.StoreHandle{Store: st},
+		store:     st,
 		Workspace: "E2E",
 	})
 	if err != nil {
@@ -436,12 +438,12 @@ func TestResolveLeadAgentIDDefaultsToLead(t *testing.T) {
 func TestMarkLeadAssignmentDelivered(t *testing.T) {
 	ctx := context.Background()
 	st := memstore.New()
-	if _, err := st.AgentSessions().Create(ctx, store.AgentSessionCreate{
+	if _, err := st.AgentSessions().Create(ctx, interaction.AgentSessionCreate{
 		WorkspaceKey: "WS",
 		SessionID:    "lead-session",
 		AgentID:      "nova",
-		Kind:         domain.AgentSessionKindInteractive,
-		Status:       domain.AgentSessionRunning,
+		Kind:         interaction.SessionRecordInteractive,
+		Status:       interaction.SessionRecordRunning,
 		Metadata:     map[string]string{"actor": "test"},
 	}); err != nil {
 		t.Fatalf("create session: %v", err)

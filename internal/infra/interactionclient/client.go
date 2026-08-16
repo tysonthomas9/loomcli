@@ -16,8 +16,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 const (
@@ -358,7 +358,7 @@ func (client *Client) do(
 	}
 	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
 		if response.StatusCode == http.StatusNotFound {
-			return domain.ErrNotFound
+			return persistence.ErrNotFound
 		}
 		return fmt.Errorf("interaction request failed with status %d", response.StatusCode)
 	}
@@ -405,7 +405,7 @@ func (client *Client) doTranscript(ctx context.Context, content []byte, metadata
 	}
 	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
 		if response.StatusCode == http.StatusNotFound {
-			return domain.ErrNotFound
+			return persistence.ErrNotFound
 		}
 		return fmt.Errorf("interaction transcript request failed with status %d", response.StatusCode)
 	}
@@ -441,7 +441,7 @@ func (client *Client) Close() error {
 //nolint:funlen // Keep strict envelope decoding, identity validation, and payload normalization in one untrusted-message boundary.
 func decodeInboxMessage(raw json.RawMessage) (*interaction.InboxMessage, error) {
 	if len(bytes.TrimSpace(raw)) == 0 {
-		return nil, domain.ErrNotFound
+		return nil, persistence.ErrNotFound
 	}
 	var wrapped struct {
 		Message json.RawMessage `json:"message"`

@@ -14,12 +14,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
+
+	"github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
 	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 	issuefleet "github.com/tysonthomas9/loomcli/internal/modules/workitems/fleetdb"
-	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/taskrunapi"
 )
 
@@ -151,14 +150,14 @@ func seedPhase4TaskDesignFixture(t *testing.T, e2e *workflowCatalogPhase2E2E) ph
 		taskLeaseID   = "phase4-task-design-task-lease"
 		taskToken     = "phase4-task-design-task-token"
 	)
-	if _, err := e2e.fleetClient.Nodes().Create(ctx, store.NodeCreate{
+	if _, err := e2e.fleetClient.Nodes().Create(ctx, execution.NodeCreate{
 		WorkspaceKey: e2e.workspace, NodeID: taskNodeID, OwnerActor: e2e.actor,
-		RuntimeProvider: domain.RuntimeProviderLocal, DrainState: domain.NodeDrainActive,
+		RuntimeProvider: execution.RuntimeProviderLocal, DrainState: execution.WorkerNodeActive,
 		Capacity: 2, TTL: 15 * time.Minute,
 	}); err != nil {
 		t.Fatalf("create TaskRun node fixture: %v", err)
 	}
-	if _, err := e2e.fleetClient.DriverRuns().Create(ctx, store.DriverRunCreate{
+	if _, err := e2e.fleetClient.DriverRuns().Create(ctx, execution.DriverRunCreate{
 		WorkspaceKey: e2e.workspace, RunID: driverRunID,
 		DriverID: e2e.driverID, DriverVersionID: e2e.versionID,
 		Entrypoint: "run", SourceKind: "phase4-e2e", SourceRef: "task-design-performance",
@@ -201,7 +200,7 @@ func seedPhase4TaskDesignFixture(t *testing.T, e2e *workflowCatalogPhase2E2E) ph
 	if err != nil {
 		t.Fatalf("request typed TaskRun fixture: %v", err)
 	}
-	if requested.TaskRun == nil || requested.TaskRun.Status != domain.TaskRunQueued {
+	if requested.TaskRun == nil || requested.TaskRun.Status != execution.TaskRunRecordQueued {
 		t.Fatalf("requested TaskRun fixture = %+v, want queued", requested)
 	}
 
@@ -213,7 +212,7 @@ func seedPhase4TaskDesignFixture(t *testing.T, e2e *workflowCatalogPhase2E2E) ph
 	if err != nil {
 		t.Fatalf("claim and start TaskRun fixture: %v", err)
 	}
-	if started.TaskRun == nil || started.TaskRun.Status != domain.TaskRunRunning || started.TaskRun.TaskID != workItem.ID || started.TaskRun.FencingToken <= 0 {
+	if started.TaskRun == nil || started.TaskRun.Status != execution.TaskRunRecordRunning || started.TaskRun.TaskID != workItem.ID || started.TaskRun.FencingToken <= 0 {
 		t.Fatalf("started TaskRun fixture = %+v, want running TaskRun bound to %s", started, workItem.ID)
 	}
 

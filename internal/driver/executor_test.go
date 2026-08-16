@@ -12,12 +12,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
-
-	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
-	"github.com/tysonthomas9/loomcli/internal/store"
+
+	"github.com/tysonthomas9/loomcli/internal/modules/automation"
+
+	workspaceowner "github.com/tysonthomas9/loomcli/internal/modules/workspace"
+
+	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 )
 
 const testWorkflowRunToken = "test-run-scoped-token"
@@ -26,7 +28,7 @@ func TestExecutorRunOnceClaimsVerifiesAndFinishes(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
 	st := memstore.New()
-	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "TEST", Name: "test"}); err != nil {
+	if _, err := st.Workspaces().Create(ctx, workspaceowner.WorkspaceCreate{Key: "TEST", Name: "test"}); err != nil {
 		t.Fatalf("Create workspace: %v", err)
 	}
 	writeFlueDist(t, root, "epic-runner", "done")
@@ -80,14 +82,14 @@ func TestExecutorRunOnceClaimsVerifiesAndFinishes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Get stored run: %v", err)
 	}
-	if stored.Status != domain.DriverRunCompleted || stored.FencingToken == 0 {
+	if stored.Status != execution.DriverRunCompleted || stored.FencingToken == 0 {
 		t.Fatalf("stored run = %+v, want completed with fencing token", stored)
 	}
 	node, err := st.Nodes().Get(ctx, "TEST", "node-1")
 	if err != nil {
 		t.Fatalf("Get executor node: %v", err)
 	}
-	if node.DrainState != domain.NodeDrainActive || node.RuntimeProvider != domain.RuntimeProviderLocal {
+	if node.DrainState != execution.WorkerNodeActive || node.RuntimeProvider != execution.RuntimeProviderLocal {
 		t.Fatalf("executor node = %+v, want active local node", node)
 	}
 }
@@ -96,7 +98,7 @@ func TestExecutorRunOnceTargetsSpecificQueuedRunID(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
 	st := memstore.New()
-	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "TEST", Name: "test"}); err != nil {
+	if _, err := st.Workspaces().Create(ctx, workspaceowner.WorkspaceCreate{Key: "TEST", Name: "test"}); err != nil {
 		t.Fatalf("Create workspace: %v", err)
 	}
 	writeFlueDist(t, root, "epic-runner", "done")
@@ -135,7 +137,7 @@ func TestExecutorRunOnceTargetsSpecificQueuedRunID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Get run-1: %v", err)
 	}
-	if untouched.Status != domain.DriverRunQueued {
+	if untouched.Status != execution.DriverRunQueued {
 		t.Fatalf("run-1 status = %s, want queued", untouched.Status)
 	}
 }
@@ -143,15 +145,15 @@ func TestExecutorRunOnceTargetsSpecificQueuedRunID(t *testing.T) {
 func TestExecutorEnsureNodeRefreshesExistingNodeCapabilities(t *testing.T) {
 	ctx := context.Background()
 	st := memstore.New()
-	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "TEST", Name: "test"}); err != nil {
+	if _, err := st.Workspaces().Create(ctx, workspaceowner.WorkspaceCreate{Key: "TEST", Name: "test"}); err != nil {
 		t.Fatalf("Create workspace: %v", err)
 	}
-	if _, err := st.Nodes().Create(ctx, store.NodeCreate{
+	if _, err := st.Nodes().Create(ctx, execution.NodeCreate{
 		WorkspaceKey:    "TEST",
 		NodeID:          "node-1",
-		RuntimeProvider: domain.RuntimeProviderOther,
+		RuntimeProvider: execution.RuntimeProviderOther,
 		Capabilities:    []string{"stale"},
-		DrainState:      domain.NodeDrainDrained,
+		DrainState:      execution.WorkerNodeDrained,
 		TTL:             time.Minute,
 	}); err != nil {
 		t.Fatalf("Create stale node: %v", err)
@@ -164,7 +166,7 @@ func TestExecutorEnsureNodeRefreshesExistingNodeCapabilities(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Get node: %v", err)
 	}
-	if node.RuntimeProvider != domain.RuntimeProviderLocal || node.DrainState != domain.NodeDrainActive {
+	if node.RuntimeProvider != execution.RuntimeProviderLocal || node.DrainState != execution.WorkerNodeActive {
 		t.Fatalf("node runtime/drain = %s/%s, want local/active", node.RuntimeProvider, node.DrainState)
 	}
 	for _, capability := range []string{"driver-runner", "task-runner", "flue-local"} {
@@ -177,12 +179,12 @@ func TestExecutorEnsureNodeRefreshesExistingNodeCapabilities(t *testing.T) {
 func TestExecutorEnsureNodePreservesConfiguredSharedNodeCapacity(t *testing.T) {
 	ctx := context.Background()
 	st := memstore.New()
-	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "TEST", Name: "test"}); err != nil {
+	if _, err := st.Workspaces().Create(ctx, workspaceowner.WorkspaceCreate{Key: "TEST", Name: "test"}); err != nil {
 		t.Fatalf("Create workspace: %v", err)
 	}
-	if _, err := st.Nodes().Create(ctx, store.NodeCreate{
-		WorkspaceKey: "TEST", NodeID: "shared-node", RuntimeProvider: domain.RuntimeProviderLocal,
-		Capacity: 4, DrainState: domain.NodeDrainActive, TTL: time.Minute,
+	if _, err := st.Nodes().Create(ctx, execution.NodeCreate{
+		WorkspaceKey: "TEST", NodeID: "shared-node", RuntimeProvider: execution.RuntimeProviderLocal,
+		Capacity: 4, DrainState: execution.WorkerNodeActive, TTL: time.Minute,
 	}); err != nil {
 		t.Fatalf("Create shared node: %v", err)
 	}
@@ -212,7 +214,7 @@ func TestExecutorRunOnceFailsNonTerminalRunnerResult(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
 	st := memstore.New()
-	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "TEST", Name: "test"}); err != nil {
+	if _, err := st.Workspaces().Create(ctx, workspaceowner.WorkspaceCreate{Key: "TEST", Name: "test"}); err != nil {
 		t.Fatalf("Create workspace: %v", err)
 	}
 	writeFlueDist(t, root, "epic-runner", "done")
@@ -252,7 +254,7 @@ func TestExecutorRunOnceFailsTamperedBundleBeforeRunner(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
 	st := memstore.New()
-	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "TEST", Name: "test"}); err != nil {
+	if _, err := st.Workspaces().Create(ctx, workspaceowner.WorkspaceCreate{Key: "TEST", Name: "test"}); err != nil {
 		t.Fatalf("Create workspace: %v", err)
 	}
 	writeFlueDist(t, root, "epic-runner", "done")
@@ -302,7 +304,7 @@ func TestNodeRunnerRunsBuiltFlueServer(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
 	st := memstore.New()
-	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "TEST", Name: "test"}); err != nil {
+	if _, err := st.Workspaces().Create(ctx, workspaceowner.WorkspaceCreate{Key: "TEST", Name: "test"}); err != nil {
 		t.Fatalf("Create workspace: %v", err)
 	}
 	writeFlueDist(t, root, "epic-runner", "fake flue")
@@ -341,7 +343,7 @@ func TestNodeRunnerRunsRegisteredNativeFlueArtifact(t *testing.T) {
 	root := t.TempDir()
 	writeFlueDist(t, root, "epic-runner", "native flue")
 	st := memstore.New()
-	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "TEST", Name: "test"}); err != nil {
+	if _, err := st.Workspaces().Create(ctx, workspaceowner.WorkspaceCreate{Key: "TEST", Name: "test"}); err != nil {
 		t.Fatalf("Create workspace: %v", err)
 	}
 	registered, err := SeedFlueDriverFixture(ctx, st, RegisterFlueOptions{
@@ -613,10 +615,10 @@ func TestExecutorScansWorkspacesAndReportsNoQueuedRun(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
 	st := memstore.New()
-	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "EMPTY", Name: "empty"}); err != nil {
+	if _, err := st.Workspaces().Create(ctx, workspaceowner.WorkspaceCreate{Key: "EMPTY", Name: "empty"}); err != nil {
 		t.Fatalf("Create EMPTY workspace: %v", err)
 	}
-	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "TEST", Name: "test"}); err != nil {
+	if _, err := st.Workspaces().Create(ctx, workspaceowner.WorkspaceCreate{Key: "TEST", Name: "test"}); err != nil {
 		t.Fatalf("Create TEST workspace: %v", err)
 	}
 	writeFlueDist(t, root, "epic-runner", "done")
@@ -653,7 +655,7 @@ type recordingRunner struct {
 	err    error
 }
 
-func nodeHasCapability(node *domain.Node, want string) bool {
+func nodeHasCapability(node *execution.WorkerNode, want string) bool {
 	if node == nil {
 		return false
 	}
@@ -675,12 +677,12 @@ func (r *recordingRunner) Run(_ context.Context, req RunRequest) (RunResult, err
 // suspends the run through the store (as the events/await driver op does)
 // and reports the suspended runner result the launcher emits.
 type suspendingRunner struct {
-	store store.Store
+	store *memstore.Store
 }
 
 func (r *suspendingRunner) Run(ctx context.Context, req RunRequest) (RunResult, error) {
 	run := req.Run
-	if _, err := r.store.DriverRuns().Suspend(ctx, run.WorkspaceKey, run.RunID, run.Owner.NodeID, run.Owner.LeaseID, run.Owner.FencingToken, domain.AwaitInstanceKey(run.RunID, 1)); err != nil {
+	if _, err := r.store.DriverRuns().Suspend(ctx, run.WorkspaceKey, run.RunID, run.Owner.NodeID, run.Owner.LeaseID, run.Owner.FencingToken, execution.AwaitInstanceKey(run.RunID, 1)); err != nil {
 		return RunResult{}, err
 	}
 	return RunResult{Status: execution.DriverRunSuspendedAwait, Summary: "workflow suspended awaiting event"}, nil
@@ -693,7 +695,7 @@ func TestExecutorRunOnceAcknowledgesSuspendedRun(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
 	st := memstore.New()
-	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "TEST", Name: "test"}); err != nil {
+	if _, err := st.Workspaces().Create(ctx, workspaceowner.WorkspaceCreate{Key: "TEST", Name: "test"}); err != nil {
 		t.Fatalf("Create workspace: %v", err)
 	}
 	writeFlueDist(t, root, "epic-runner", "done")
@@ -724,10 +726,10 @@ func TestExecutorRunOnceAcknowledgesSuspendedRun(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Get stored run: %v", err)
 	}
-	if stored.Status != domain.DriverRunSuspendedAwaitingEvent || stored.NodeID != "" || stored.LeaseID != "" {
+	if stored.Status != execution.DriverRunSuspendedAwait || stored.NodeID != "" || stored.LeaseID != "" {
 		t.Fatalf("stored run = %+v, want suspended with released slot", stored)
 	}
-	events, err := st.TriggerEvents().List(ctx, "TEST", store.TriggerEventFilter{})
+	events, err := st.TriggerEvents().List(ctx, "TEST", automation.TriggerEventFilter{})
 	if err != nil {
 		t.Fatalf("List trigger events: %v", err)
 	}
@@ -743,7 +745,7 @@ func TestExecutorRunOnceFailsSuspendedReportWithoutSuspendedRun(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
 	st := memstore.New()
-	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "TEST", Name: "test"}); err != nil {
+	if _, err := st.Workspaces().Create(ctx, workspaceowner.WorkspaceCreate{Key: "TEST", Name: "test"}); err != nil {
 		t.Fatalf("Create workspace: %v", err)
 	}
 	writeFlueDist(t, root, "epic-runner", "done")
@@ -805,7 +807,7 @@ func TestNodeRunnerMapsWorkflowSuspensionToSuspendedResult(t *testing.T) {
 			ctx := context.Background()
 			root := t.TempDir()
 			st := memstore.New()
-			if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "TEST", Name: "test"}); err != nil {
+			if _, err := st.Workspaces().Create(ctx, workspaceowner.WorkspaceCreate{Key: "TEST", Name: "test"}); err != nil {
 				t.Fatalf("Create workspace: %v", err)
 			}
 			writeFlueDistWithHandler(t, root, "suspender", tc.send)

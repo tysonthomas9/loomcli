@@ -8,26 +8,27 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
+
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 )
 
 type nodeStore struct{ client *Client }
 
-var _ store.NodeStore = (*nodeStore)(nil)
+var _ execution.NodeStore = (*nodeStore)(nil)
 
-func (s *nodeStore) Create(ctx context.Context, in store.NodeCreate) (*domain.Node, error) {
+func (s *nodeStore) Create(ctx context.Context, in execution.NodeCreate) (*execution.WorkerNode, error) {
 	body := struct {
-		NodeID          string                 `json:"node_id"`
-		OwnerActor      string                 `json:"owner_actor,omitempty"`
-		RuntimeProvider domain.RuntimeProvider `json:"runtime_provider,omitempty"`
-		Labels          []string               `json:"labels,omitempty"`
-		Capabilities    []string               `json:"capabilities,omitempty"`
-		ToolInventory   []string               `json:"tool_inventory,omitempty"`
-		Version         string                 `json:"version,omitempty"`
-		Capacity        int                    `json:"capacity,omitempty"`
-		DrainState      domain.NodeDrainState  `json:"drain_state,omitempty"`
-		TTLSeconds      int                    `json:"ttl_seconds,omitempty"`
+		NodeID          string                         `json:"node_id"`
+		OwnerActor      string                         `json:"owner_actor,omitempty"`
+		RuntimeProvider execution.RuntimeProvider      `json:"runtime_provider,omitempty"`
+		Labels          []string                       `json:"labels,omitempty"`
+		Capabilities    []string                       `json:"capabilities,omitempty"`
+		ToolInventory   []string                       `json:"tool_inventory,omitempty"`
+		Version         string                         `json:"version,omitempty"`
+		Capacity        int                            `json:"capacity,omitempty"`
+		DrainState      execution.WorkerNodeDrainState `json:"drain_state,omitempty"`
+		TTLSeconds      int                            `json:"ttl_seconds,omitempty"`
 	}{
 		NodeID:          in.NodeID,
 		OwnerActor:      in.OwnerActor,
@@ -40,48 +41,48 @@ func (s *nodeStore) Create(ctx context.Context, in store.NodeCreate) (*domain.No
 		DrainState:      in.DrainState,
 		TTLSeconds:      ttlSeconds(in.TTL),
 	}
-	var out domain.Node
+	var out execution.WorkerNode
 	if err := s.client.do(ctx, "POST", "/api/v1/"+pathEscape(in.WorkspaceKey)+"/nodes", body, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
 }
 
-func (s *nodeStore) Get(ctx context.Context, ws, nodeID string) (*domain.Node, error) {
-	var out domain.Node
+func (s *nodeStore) Get(ctx context.Context, ws, nodeID string) (*execution.WorkerNode, error) {
+	var out execution.WorkerNode
 	if err := s.client.do(ctx, "GET", "/api/v1/"+pathEscape(ws)+"/nodes/"+pathEscape(nodeID), nil, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
 }
 
-func (s *nodeStore) List(ctx context.Context, ws string) ([]*domain.Node, error) {
+func (s *nodeStore) List(ctx context.Context, ws string) ([]*execution.WorkerNode, error) {
 	var resp struct {
-		Nodes []*domain.Node `json:"nodes"`
+		Nodes []*execution.WorkerNode `json:"nodes"`
 	}
 	if err := s.client.do(ctx, "GET", "/api/v1/"+pathEscape(ws)+"/nodes", nil, &resp); err != nil {
 		return nil, err
 	}
 	if resp.Nodes == nil {
-		resp.Nodes = []*domain.Node{}
+		resp.Nodes = []*execution.WorkerNode{}
 	}
 	return resp.Nodes, nil
 }
 
-func (s *nodeStore) Heartbeat(ctx context.Context, ws, nodeID string, ttl time.Duration) (*domain.Node, error) {
+func (s *nodeStore) Heartbeat(ctx context.Context, ws, nodeID string, ttl time.Duration) (*execution.WorkerNode, error) {
 	path := "/api/v1/" + pathEscape(ws) + "/nodes/" + pathEscape(nodeID) + "/heartbeat"
 	if seconds := ttlSeconds(ttl); seconds > 0 {
 		path += "?ttl_seconds=" + strconv.Itoa(seconds)
 	}
-	var out domain.Node
+	var out execution.WorkerNode
 	if err := s.client.do(ctx, "POST", path, nil, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
 }
 
-func (s *nodeStore) Update(ctx context.Context, ws, nodeID string, patch store.NodeUpdate) (*domain.Node, error) {
-	var out domain.Node
+func (s *nodeStore) Update(ctx context.Context, ws, nodeID string, patch execution.NodeUpdate) (*execution.WorkerNode, error) {
+	var out execution.WorkerNode
 	if err := s.client.do(ctx, "PATCH", "/api/v1/"+pathEscape(ws)+"/nodes/"+pathEscape(nodeID), nodeUpdateBody(patch), &out); err != nil {
 		return nil, err
 	}
@@ -90,21 +91,21 @@ func (s *nodeStore) Update(ctx context.Context, ws, nodeID string, patch store.N
 
 type agentSessionStore struct{ client *Client }
 
-var _ store.AgentSessionStore = (*agentSessionStore)(nil)
+var _ interaction.AgentSessionStore = (*agentSessionStore)(nil)
 
-func (s *agentSessionStore) Create(ctx context.Context, in store.AgentSessionCreate) (*domain.AgentSession, error) {
+func (s *agentSessionStore) Create(ctx context.Context, in interaction.AgentSessionCreate) (*interaction.SessionRecord, error) {
 	body := struct {
-		SessionID       string                    `json:"session_id"`
-		AgentID         string                    `json:"agent_id"`
-		NodeID          string                    `json:"node_id,omitempty"`
-		Kind            domain.AgentSessionKind   `json:"kind,omitempty"`
-		TaskID          string                    `json:"task_id,omitempty"`
-		TerminalID      string                    `json:"terminal_id,omitempty"`
-		ParentSessionID string                    `json:"parent_session_id,omitempty"`
-		Status          domain.AgentSessionStatus `json:"status,omitempty"`
-		Phase           string                    `json:"phase,omitempty"`
-		Attempt         int                       `json:"attempt,omitempty"`
-		Metadata        map[string]string         `json:"metadata,omitempty"`
+		SessionID       string                          `json:"session_id"`
+		AgentID         string                          `json:"agent_id"`
+		NodeID          string                          `json:"node_id,omitempty"`
+		Kind            interaction.SessionRecordKind   `json:"kind,omitempty"`
+		TaskID          string                          `json:"task_id,omitempty"`
+		TerminalID      string                          `json:"terminal_id,omitempty"`
+		ParentSessionID string                          `json:"parent_session_id,omitempty"`
+		Status          interaction.SessionRecordStatus `json:"status,omitempty"`
+		Phase           string                          `json:"phase,omitempty"`
+		Attempt         int                             `json:"attempt,omitempty"`
+		Metadata        map[string]string               `json:"metadata,omitempty"`
 	}{
 		SessionID:       in.SessionID,
 		AgentID:         in.AgentID,
@@ -118,22 +119,22 @@ func (s *agentSessionStore) Create(ctx context.Context, in store.AgentSessionCre
 		Attempt:         in.Attempt,
 		Metadata:        in.Metadata,
 	}
-	var out domain.AgentSession
+	var out interaction.SessionRecord
 	if err := s.client.do(ctx, "POST", "/api/v1/"+pathEscape(in.WorkspaceKey)+"/agent-sessions", body, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
 }
 
-func (s *agentSessionStore) Get(ctx context.Context, ws, sessionID string) (*domain.AgentSession, error) {
-	var out domain.AgentSession
+func (s *agentSessionStore) Get(ctx context.Context, ws, sessionID string) (*interaction.SessionRecord, error) {
+	var out interaction.SessionRecord
 	if err := s.client.do(ctx, "GET", "/api/v1/"+pathEscape(ws)+"/agent-sessions/"+pathEscape(sessionID), nil, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
 }
 
-func (s *agentSessionStore) List(ctx context.Context, ws string, filter store.AgentSessionFilter) ([]*domain.AgentSession, error) {
+func (s *agentSessionStore) List(ctx context.Context, ws string, filter interaction.AgentSessionFilter) ([]*interaction.SessionRecord, error) {
 	q := url.Values{}
 	if filter.AgentID != "" {
 		q.Set("agent_id", filter.AgentID)
@@ -162,13 +163,13 @@ func (s *agentSessionStore) List(ctx context.Context, ws string, filter store.Ag
 	}
 	path := withQuery("/api/v1/"+pathEscape(ws)+"/agent-sessions", q)
 	var resp struct {
-		AgentSessions []*domain.AgentSession `json:"agent_sessions"`
+		AgentSessions []*interaction.SessionRecord `json:"agent_sessions"`
 	}
 	if err := s.client.do(ctx, "GET", path, nil, &resp); err != nil {
 		return nil, err
 	}
 	if resp.AgentSessions == nil {
-		resp.AgentSessions = []*domain.AgentSession{}
+		resp.AgentSessions = []*interaction.SessionRecord{}
 	}
 	if clientSideKind != "" || clientSideParent != "" {
 		resp.AgentSessions = filterAgentSessionsClientSide(resp.AgentSessions, clientSideKind, clientSideParent, clientSideLimit)
@@ -177,8 +178,8 @@ func (s *agentSessionStore) List(ctx context.Context, ws string, filter store.Ag
 }
 
 // Client-side filter for Kind / ParentSessionID; see List comment above.
-func filterAgentSessionsClientSide(sessions []*domain.AgentSession, kind domain.AgentSessionKind, parent string, limit int) []*domain.AgentSession {
-	filtered := make([]*domain.AgentSession, 0, len(sessions))
+func filterAgentSessionsClientSide(sessions []*interaction.SessionRecord, kind interaction.SessionRecordKind, parent string, limit int) []*interaction.SessionRecord {
+	filtered := make([]*interaction.SessionRecord, 0, len(sessions))
 	for _, sess := range sessions {
 		if sess == nil {
 			continue
@@ -197,16 +198,16 @@ func filterAgentSessionsClientSide(sessions []*domain.AgentSession, kind domain.
 	return filtered
 }
 
-func (s *agentSessionStore) Heartbeat(ctx context.Context, ws, sessionID string) (*domain.AgentSession, error) {
-	var out domain.AgentSession
+func (s *agentSessionStore) Heartbeat(ctx context.Context, ws, sessionID string) (*interaction.SessionRecord, error) {
+	var out interaction.SessionRecord
 	if err := s.client.do(ctx, "POST", "/api/v1/"+pathEscape(ws)+"/agent-sessions/"+pathEscape(sessionID)+"/heartbeat", nil, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
 }
 
-func (s *agentSessionStore) Update(ctx context.Context, ws, sessionID string, patch store.AgentSessionUpdate) (*domain.AgentSession, error) {
-	var out domain.AgentSession
+func (s *agentSessionStore) Update(ctx context.Context, ws, sessionID string, patch interaction.AgentSessionUpdate) (*interaction.SessionRecord, error) {
+	var out interaction.SessionRecord
 	if err := s.client.do(ctx, "PATCH", "/api/v1/"+pathEscape(ws)+"/agent-sessions/"+pathEscape(sessionID), agentSessionUpdateBody(patch), &out); err != nil {
 		return nil, err
 	}
@@ -223,7 +224,7 @@ func ttlSeconds(ttl time.Duration) int {
 // workerStore renews/removes fleet-db worker registrations over HTTP.
 type workerStore struct{ client *Client }
 
-var _ store.WorkerStore = (*workerStore)(nil)
+var _ execution.WorkerStore = (*workerStore)(nil)
 
 // Heartbeat renews the worker registration lease via the fleet-db worker
 // heartbeat endpoint. The response body (HeartbeatResult) is not consumed.
@@ -239,9 +240,9 @@ func (s *workerStore) Deregister(ctx context.Context, ws, workerID string) error
 
 type terminalSessionStore struct{ client *Client }
 
-var _ store.TerminalSessionStore = (*terminalSessionStore)(nil)
+var _ interaction.TerminalSessionStore = (*terminalSessionStore)(nil)
 
-func (s *terminalSessionStore) Create(ctx context.Context, in store.TerminalSessionCreate) (*domain.TerminalSession, error) {
+func (s *terminalSessionStore) Create(ctx context.Context, in interaction.TerminalSessionCreate) (*interaction.TerminalRecord, error) {
 	body := map[string]any{
 		"terminal_id":      in.TerminalID,
 		"agent_id":         in.AgentID,
@@ -257,22 +258,22 @@ func (s *terminalSessionStore) Create(ctx context.Context, in store.TerminalSess
 		"attached_clients": in.AttachedClients,
 		"metadata":         in.Metadata,
 	}
-	var out domain.TerminalSession
+	var out interaction.TerminalRecord
 	if err := s.client.do(ctx, "POST", "/api/v1/"+pathEscape(in.WorkspaceKey)+"/terminal-sessions", body, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
 }
 
-func (s *terminalSessionStore) Get(ctx context.Context, ws, terminalID string) (*domain.TerminalSession, error) {
-	var out domain.TerminalSession
+func (s *terminalSessionStore) Get(ctx context.Context, ws, terminalID string) (*interaction.TerminalRecord, error) {
+	var out interaction.TerminalRecord
 	if err := s.client.do(ctx, "GET", "/api/v1/"+pathEscape(ws)+"/terminal-sessions/"+pathEscape(terminalID), nil, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
 }
 
-func (s *terminalSessionStore) List(ctx context.Context, ws string, filter store.TerminalSessionFilter) ([]*domain.TerminalSession, error) {
+func (s *terminalSessionStore) List(ctx context.Context, ws string, filter interaction.TerminalSessionFilter) ([]*interaction.TerminalRecord, error) {
 	q := url.Values{}
 	if filter.AgentID != "" {
 		q.Set("agent_id", filter.AgentID)
@@ -294,26 +295,26 @@ func (s *terminalSessionStore) List(ctx context.Context, ws string, filter store
 	}
 	path := withQuery("/api/v1/"+pathEscape(ws)+"/terminal-sessions", q)
 	var resp struct {
-		TerminalSessions []*domain.TerminalSession `json:"terminal_sessions"`
+		TerminalSessions []*interaction.TerminalRecord `json:"terminal_sessions"`
 	}
 	if err := s.client.do(ctx, "GET", path, nil, &resp); err != nil {
 		return nil, err
 	}
 	if resp.TerminalSessions == nil {
-		resp.TerminalSessions = []*domain.TerminalSession{}
+		resp.TerminalSessions = []*interaction.TerminalRecord{}
 	}
 	return resp.TerminalSessions, nil
 }
 
-func (s *terminalSessionStore) Update(ctx context.Context, ws, terminalID string, patch store.TerminalSessionUpdate) (*domain.TerminalSession, error) {
-	var out domain.TerminalSession
+func (s *terminalSessionStore) Update(ctx context.Context, ws, terminalID string, patch interaction.TerminalSessionUpdate) (*interaction.TerminalRecord, error) {
+	var out interaction.TerminalRecord
 	if err := s.client.do(ctx, "PATCH", "/api/v1/"+pathEscape(ws)+"/terminal-sessions/"+pathEscape(terminalID), terminalSessionUpdateBody(patch), &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
 }
 
-func nodeUpdateBody(patch store.NodeUpdate) map[string]any {
+func nodeUpdateBody(patch execution.NodeUpdate) map[string]any {
 	body := map[string]any{}
 	if patch.OwnerActor != nil {
 		body["owner_actor"] = *patch.OwnerActor
@@ -345,7 +346,7 @@ func nodeUpdateBody(patch store.NodeUpdate) map[string]any {
 	return body
 }
 
-func agentSessionUpdateBody(patch store.AgentSessionUpdate) map[string]any {
+func agentSessionUpdateBody(patch interaction.AgentSessionUpdate) map[string]any {
 	body := map[string]any{}
 	if patch.NodeID != nil {
 		body["node_id"] = *patch.NodeID
@@ -380,7 +381,7 @@ func agentSessionUpdateBody(patch store.AgentSessionUpdate) map[string]any {
 	return body
 }
 
-func terminalSessionUpdateBody(patch store.TerminalSessionUpdate) map[string]any {
+func terminalSessionUpdateBody(patch interaction.TerminalSessionUpdate) map[string]any {
 	body := map[string]any{}
 	if patch.AgentID != nil {
 		body["agent_id"] = *patch.AgentID
@@ -429,13 +430,13 @@ func terminalSessionUpdateBody(patch store.TerminalSessionUpdate) map[string]any
 
 type agentLeaseStore struct{ client *Client }
 
-var _ store.AgentLeaseStore = (*agentLeaseStore)(nil)
+var _ interaction.AgentLeaseStore = (*agentLeaseStore)(nil)
 
-func (s *agentLeaseStore) Create(ctx context.Context, in store.AgentLeaseCreate) (*domain.AgentLease, error) {
+func (s *agentLeaseStore) Create(ctx context.Context, in interaction.AgentLeaseCreate) (*interaction.LeaseRecord, error) {
 	body := map[string]any{"lease_id": in.LeaseID, "agent_id": in.AgentID, "node_id": in.NodeID, "ttl_seconds": ttlSeconds(in.TTL)}
 	var response struct {
-		Lease domain.AgentLease `json:"lease"`
-		Token string            `json:"token"`
+		Lease interaction.LeaseRecord `json:"lease"`
+		Token string                  `json:"token"`
 	}
 	if err := s.client.do(ctx, "POST", "/api/v1/"+pathEscape(in.WorkspaceKey)+"/agent-sessions/"+pathEscape(in.SessionID)+"/leases", body, &response); err != nil {
 		return nil, err
@@ -447,15 +448,15 @@ func (s *agentLeaseStore) Create(ctx context.Context, in store.AgentLeaseCreate)
 	return &response.Lease, nil
 }
 
-func (s *agentLeaseStore) Get(ctx context.Context, ws, leaseID string) (*domain.AgentLease, error) {
-	var out domain.AgentLease
+func (s *agentLeaseStore) Get(ctx context.Context, ws, leaseID string) (*interaction.LeaseRecord, error) {
+	var out interaction.LeaseRecord
 	if err := s.client.do(ctx, "GET", "/api/v1/"+pathEscape(ws)+"/agent-leases/"+pathEscape(leaseID), nil, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
 }
 
-func (s *agentLeaseStore) List(ctx context.Context, ws string, filter store.AgentLeaseFilter) ([]*domain.AgentLease, error) {
+func (s *agentLeaseStore) List(ctx context.Context, ws string, filter interaction.AgentLeaseFilter) ([]*interaction.LeaseRecord, error) {
 	q := url.Values{}
 	if filter.SessionID != "" {
 		q.Set("session_id", filter.SessionID)
@@ -474,38 +475,38 @@ func (s *agentLeaseStore) List(ctx context.Context, ws string, filter store.Agen
 	}
 	path := withQuery("/api/v1/"+pathEscape(ws)+"/agent-leases", q)
 	var resp struct {
-		AgentLeases []*domain.AgentLease `json:"agent_leases"`
+		AgentLeases []*interaction.LeaseRecord `json:"agent_leases"`
 	}
 	if err := s.client.do(ctx, "GET", path, nil, &resp); err != nil {
 		return nil, err
 	}
 	if resp.AgentLeases == nil {
-		resp.AgentLeases = []*domain.AgentLease{}
+		resp.AgentLeases = []*interaction.LeaseRecord{}
 	}
 	return resp.AgentLeases, nil
 }
 
-func (s *agentLeaseStore) Heartbeat(ctx context.Context, ws, leaseID, token string, ttl time.Duration) (*domain.AgentLease, error) {
+func (s *agentLeaseStore) Heartbeat(ctx context.Context, ws, leaseID, token string, ttl time.Duration) (*interaction.LeaseRecord, error) {
 	path := "/api/v1/" + pathEscape(ws) + "/agent-leases/" + pathEscape(leaseID) + "/heartbeat"
 	if seconds := ttlSeconds(ttl); seconds > 0 {
 		path += "?ttl_seconds=" + strconv.Itoa(seconds)
 	}
-	var out domain.AgentLease
+	var out interaction.LeaseRecord
 	if err := s.client.doWithHeaders(ctx, "POST", path, nil, &out, map[string]string{"X-Agent-Lease-Token": token}); err != nil {
 		return nil, err
 	}
 	return &out, nil
 }
 
-func (s *agentLeaseStore) Release(ctx context.Context, ws, leaseID, token string) (*domain.AgentLease, error) {
-	var out domain.AgentLease
+func (s *agentLeaseStore) Release(ctx context.Context, ws, leaseID, token string) (*interaction.LeaseRecord, error) {
+	var out interaction.LeaseRecord
 	if err := s.client.doWithHeaders(ctx, "POST", "/api/v1/"+pathEscape(ws)+"/agent-leases/"+pathEscape(leaseID)+"/release", nil, &out, map[string]string{"X-Agent-Lease-Token": token}); err != nil {
 		return nil, err
 	}
 	return &out, nil
 }
 
-func validateAgentLeaseEnvelope(lease domain.AgentLease, token string, in store.AgentLeaseCreate) error {
+func validateAgentLeaseEnvelope(lease interaction.LeaseRecord, token string, in interaction.AgentLeaseCreate) error {
 	switch {
 	case token == "":
 		return errors.New("fleetdb: agent lease create response omitted one-time token")
@@ -527,9 +528,9 @@ func validateAgentLeaseEnvelope(lease domain.AgentLease, token string, in store.
 
 type agentInboxMessageStore struct{ client *Client }
 
-var _ store.AgentInboxMessageStore = (*agentInboxMessageStore)(nil)
+var _ interaction.AgentInboxMessageStore = (*agentInboxMessageStore)(nil)
 
-func (s *agentInboxMessageStore) Create(ctx context.Context, in store.AgentInboxMessageCreate) (*domain.AgentInboxMessage, error) {
+func (s *agentInboxMessageStore) Create(ctx context.Context, in interaction.AgentInboxMessageCreate) (*interaction.InboxRecord, error) {
 	body := map[string]any{
 		"inbox_message_id":    in.InboxMessageID,
 		"target_agent_id":     in.TargetAgentID,
@@ -543,25 +544,25 @@ func (s *agentInboxMessageStore) Create(ctx context.Context, in store.AgentInbox
 		"trigger_delivery_id": in.TriggerDeliveryID,
 		"dedupe_key":          in.DedupeKey,
 	}
-	var out domain.AgentInboxMessage
+	var out interaction.InboxRecord
 	if err := s.client.do(ctx, "POST", "/api/v1/"+pathEscape(in.WorkspaceKey)+"/agent-inbox-messages", body, &out); err != nil {
 		return nil, err
 	}
 	if out.Status == "" {
-		out.Status = domain.AgentInboxMessageQueued
+		out.Status = interaction.InboxRecordQueued
 	}
 	return &out, nil
 }
 
-func (s *agentInboxMessageStore) Get(ctx context.Context, ws, inboxMessageID string) (*domain.AgentInboxMessage, error) {
-	var out domain.AgentInboxMessage
+func (s *agentInboxMessageStore) Get(ctx context.Context, ws, inboxMessageID string) (*interaction.InboxRecord, error) {
+	var out interaction.InboxRecord
 	if err := s.client.do(ctx, "GET", "/api/v1/"+pathEscape(ws)+"/agent-inbox-messages/"+pathEscape(inboxMessageID), nil, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
 }
 
-func (s *agentInboxMessageStore) List(ctx context.Context, ws string, filter store.AgentInboxMessageFilter) ([]*domain.AgentInboxMessage, error) {
+func (s *agentInboxMessageStore) List(ctx context.Context, ws string, filter interaction.AgentInboxMessageFilter) ([]*interaction.InboxRecord, error) {
 	q := url.Values{}
 	if filter.TargetAgentID != "" {
 		q.Set("target_agent_id", filter.TargetAgentID)
@@ -592,18 +593,18 @@ func (s *agentInboxMessageStore) List(ctx context.Context, ws string, filter sto
 	}
 	path := withQuery("/api/v1/"+pathEscape(ws)+"/agent-inbox-messages", q)
 	var resp struct {
-		AgentInboxMessages []*domain.AgentInboxMessage `json:"agent_inbox_messages"`
+		AgentInboxMessages []*interaction.InboxRecord `json:"agent_inbox_messages"`
 	}
 	if err := s.client.do(ctx, "GET", path, nil, &resp); err != nil {
 		return nil, err
 	}
 	if resp.AgentInboxMessages == nil {
-		resp.AgentInboxMessages = []*domain.AgentInboxMessage{}
+		resp.AgentInboxMessages = []*interaction.InboxRecord{}
 	}
 	return resp.AgentInboxMessages, nil
 }
 
-func (s *agentInboxMessageStore) ClaimNext(ctx context.Context, in store.AgentInboxMessageClaim) (*domain.AgentInboxMessage, error) {
+func (s *agentInboxMessageStore) ClaimNext(ctx context.Context, in interaction.AgentInboxMessageClaim) (*interaction.InboxRecord, error) {
 	body := map[string]any{
 		"target_agent_id": in.TargetAgentID,
 		"session_id":      in.SessionID,
@@ -612,15 +613,15 @@ func (s *agentInboxMessageStore) ClaimNext(ctx context.Context, in store.AgentIn
 	if in.LeaseTTL > 0 {
 		body["lease_ttl_ms"] = in.LeaseTTL.Milliseconds()
 	}
-	var out domain.AgentInboxMessage
+	var out interaction.InboxRecord
 	if err := s.client.do(ctx, "POST", "/api/v1/"+pathEscape(in.WorkspaceKey)+"/agent-inbox-messages/claim-next", body, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
 }
 
-func (s *agentInboxMessageStore) Complete(ctx context.Context, ws, inboxMessageID string, update store.AgentInboxMessageComplete) (*domain.AgentInboxMessage, error) {
-	var out domain.AgentInboxMessage
+func (s *agentInboxMessageStore) Complete(ctx context.Context, ws, inboxMessageID string, update interaction.AgentInboxMessageComplete) (*interaction.InboxRecord, error) {
+	var out interaction.InboxRecord
 	if err := s.client.do(ctx, "POST", "/api/v1/"+pathEscape(ws)+"/agent-inbox-messages/"+pathEscape(inboxMessageID)+"/complete", update, &out); err != nil {
 		return nil, err
 	}

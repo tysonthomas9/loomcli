@@ -9,10 +9,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	artifactsmodule "github.com/tysonthomas9/loomcli/internal/modules/artifacts"
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 type recordingBridgeArtifactsAPI struct {
@@ -88,8 +89,8 @@ func TestHostBridgeRejectsOversizedArtifactFilesBeforeReading(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			content, err := test.read()
-			if !errors.Is(err, domain.ErrInvalid) || !strings.Contains(err.Error(), "artifact limit") {
-				t.Fatalf("read error = %v, want artifact limit domain.ErrInvalid", err)
+			if !errors.Is(err, persistence.ErrInvalid) || !strings.Contains(err.Error(), "artifact limit") {
+				t.Fatalf("read error = %v, want artifact limit persistence.ErrInvalid", err)
 			}
 			if content != nil {
 				t.Fatalf("oversized read returned %d bytes", len(content))
@@ -155,7 +156,7 @@ func TestHostBridgeKeepsSuccessfulWorkOutcomeWhenEvidenceCaptureFails(t *testing
 	if err != nil {
 		t.Fatalf("ExecuteTask returned evidence error: %v", err)
 	}
-	if result.Status != domain.TaskRunCompleted || result.ExitCode != 0 {
+	if result.Status != execution.TaskRunRecordCompleted || result.ExitCode != 0 {
 		t.Fatalf("work outcome = %+v, want completed/0", result)
 	}
 	if len(result.ArtifactIDs) != 0 {
@@ -184,7 +185,7 @@ func TestHostBridgeRejectsRunnerForgedEvidenceState(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Status != domain.TaskRunCompleted || result.RuntimeMetadata["helper"] != "host_bridge" {
+	if result.Status != execution.TaskRunRecordCompleted || result.RuntimeMetadata["helper"] != "host_bridge" {
 		t.Fatalf("result = %+v, want completed result with ordinary metadata", result)
 	}
 	for key := range result.RuntimeMetadata {
@@ -265,7 +266,7 @@ func TestBridgeRunnerURIEvidenceFailsClosedWithoutArtifact(t *testing.T) {
 	result, err := executor.registerRunnerArtifacts(ctx, req, []bridgeArtifact{{
 		ArtifactID: "report-task-run-1", Type: "report", URI: "artifact://opaque-report",
 		ContentHash: "sha256:runner-asserted",
-	}}, TaskExecResult{Status: domain.TaskRunCompleted})
+	}}, TaskExecResult{Status: execution.TaskRunRecordCompleted})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -291,7 +292,7 @@ func TestBridgeRunnerTranscriptRefCannotBypassArtifactsEvidencePolicy(t *testing
 	t.Run("opaque reference is rejected", func(t *testing.T) {
 		result := executor.persistRunnerOutputArtifacts(ctx, req, bridgeTaskRunnerResult{
 			TranscriptRef: "logs://runner-controlled-transcript",
-		}, TaskExecResult{Status: domain.TaskRunCompleted})
+		}, TaskExecResult{Status: execution.TaskRunRecordCompleted})
 		if result.RuntimeMetadata["transcript_ref"] != "" || len(result.ArtifactIDs) != 0 {
 			t.Fatalf("result = %+v, want no runner-controlled transcript reference", result)
 		}
@@ -307,7 +308,7 @@ func TestBridgeRunnerTranscriptRefCannotBypassArtifactsEvidencePolicy(t *testing
 		result := executor.persistRunnerOutputArtifacts(ctx, req, bridgeTaskRunnerResult{
 			TranscriptRef: "logs://runner-controlled-transcript",
 			Transcript:    "{\"seq\":1,\"timestamp\":\"2026-08-12T00:00:00Z\",\"role\":\"assistant\",\"type\":\"text\",\"text\":\"done\"}\n",
-		}, TaskExecResult{Status: domain.TaskRunCompleted})
+		}, TaskExecResult{Status: execution.TaskRunRecordCompleted})
 		wantID := taskRunAttemptArtifactID(req, "transcript-"+req.TaskRunID)
 		if result.RuntimeMetadata["transcript_ref"] != "artifact://"+wantID ||
 			!slices.Equal(result.ArtifactIDs, []string{wantID}) {

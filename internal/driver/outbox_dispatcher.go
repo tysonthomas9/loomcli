@@ -6,9 +6,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 type (
@@ -237,7 +237,7 @@ type outboxAttempt struct {
 // returns how many rows reached delivered status.
 func (d *OutboxDispatcher) RunOnce(ctx context.Context) (int, error) {
 	if d == nil || d.Delivery == nil || d.Authorities == nil {
-		return 0, fmt.Errorf("execution outbox delivery API required: %w", domain.ErrInvalid)
+		return 0, fmt.Errorf("execution outbox delivery API required: %w", persistence.ErrInvalid)
 	}
 	workspaces, err := d.workspaceKeys(ctx)
 	if err != nil {
@@ -404,7 +404,7 @@ func (d *OutboxDispatcher) workspaceKeys(ctx context.Context) ([]string, error) 
 		return []string{d.WorkspaceKey}, nil
 	}
 	if d.Workspaces == nil {
-		return nil, fmt.Errorf("workspace lister required: %w", domain.ErrInvalid)
+		return nil, fmt.Errorf("workspace lister required: %w", persistence.ErrInvalid)
 	}
 	keys, err := d.Workspaces.ListWorkspaceKeys(ctx)
 	if err != nil {

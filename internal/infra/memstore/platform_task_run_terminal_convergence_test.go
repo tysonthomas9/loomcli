@@ -7,45 +7,44 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 )
 
 func TestTaskRunTerminalConvergenceCheckpointPaginationReplayAndConcurrentUpgrade(t *testing.T) {
 	ctx := context.Background()
 	st := New()
-	checkpoints := st.TaskRuns().(store.TaskRunTerminalConvergenceStore)
+	checkpoints := st.TaskRuns().(execution.TaskRunTerminalConvergenceStore)
 	finishedAt := time.Date(2026, 7, 18, 13, 0, 0, 0, time.UTC)
 	for _, id := range []string{"task-a", "task-b"} {
 		seedTerminalConvergenceTaskRun(t, ctx, st, id, finishedAt)
 	}
-	if _, err := st.TaskRuns().Create(ctx, store.TaskRunCreate{
+	if _, err := st.TaskRuns().Create(ctx, execution.TaskRunCreate{
 		WorkspaceKey: "WS", TaskRunID: "task-running", TaskID: "TASK-running",
-		Status: domain.TaskRunRunning, NodeID: "node", LeaseID: "lease", LeaseToken: "token", FencingToken: 7,
+		Status: execution.TaskRunRecordRunning, NodeID: "node", LeaseID: "lease", LeaseToken: "token", FencingToken: 7,
 	}); err != nil {
 		t.Fatal(err)
 	}
 
-	first, err := checkpoints.ListTaskRunTerminalConvergenceCandidates(ctx, store.TaskRunTerminalConvergenceQuery{
+	first, err := checkpoints.ListTaskRunTerminalConvergenceCandidates(ctx, execution.TaskRunTerminalConvergenceQuery{
 		WorkspaceKey: "WS", RequiredVersion: 1, Limit: 1,
 	})
 	if err != nil || len(first.TaskRunIDs) != 1 || first.TaskRunIDs[0] != "task-a" || first.Next != "task-a" {
 		t.Fatalf("first page=%+v err=%v", first, err)
 	}
-	second, err := checkpoints.ListTaskRunTerminalConvergenceCandidates(ctx, store.TaskRunTerminalConvergenceQuery{
+	second, err := checkpoints.ListTaskRunTerminalConvergenceCandidates(ctx, execution.TaskRunTerminalConvergenceQuery{
 		WorkspaceKey: "WS", RequiredVersion: 1, After: first.Next, Limit: 1,
 	})
 	if err != nil || len(second.TaskRunIDs) != 1 || second.TaskRunIDs[0] != "task-b" || second.Next != "" {
 		t.Fatalf("second page=%+v err=%v", second, err)
 	}
 
-	completed, err := checkpoints.CompleteTaskRunTerminalConvergence(ctx, store.TaskRunTerminalConvergenceComplete{
+	completed, err := checkpoints.CompleteTaskRunTerminalConvergence(ctx, execution.TaskRunTerminalConvergenceComplete{
 		WorkspaceKey: "WS", TaskRunID: "task-a", RequiredVersion: 1, CompletedAt: finishedAt.Add(time.Minute),
 	})
 	if err != nil || completed.Replayed || completed.TaskRun.TerminalConvergenceVersion != 1 || completed.TaskRun.TerminalConvergedAt == nil {
 		t.Fatalf("completion=%+v err=%v", completed, err)
 	}
-	replay, err := checkpoints.CompleteTaskRunTerminalConvergence(ctx, store.TaskRunTerminalConvergenceComplete{
+	replay, err := checkpoints.CompleteTaskRunTerminalConvergence(ctx, execution.TaskRunTerminalConvergenceComplete{
 		WorkspaceKey: "WS", TaskRunID: "task-a", RequiredVersion: 1, CompletedAt: finishedAt.Add(2 * time.Minute),
 	})
 	if err != nil || !replay.Replayed || !replay.TaskRun.TerminalConvergedAt.Equal(finishedAt.Add(time.Minute)) {
@@ -62,7 +61,7 @@ func TestTaskRunTerminalConvergenceCheckpointPaginationReplayAndConcurrentUpgrad
 		wg.Add(1)
 		go func(index, version int) {
 			defer wg.Done()
-			_, commandErr := checkpoints.CompleteTaskRunTerminalConvergence(ctx, store.TaskRunTerminalConvergenceComplete{
+			_, commandErr := checkpoints.CompleteTaskRunTerminalConvergence(ctx, execution.TaskRunTerminalConvergenceComplete{
 				WorkspaceKey: "WS", TaskRunID: "task-a", RequiredVersion: version,
 				CompletedAt: finishedAt.Add(time.Duration(index+3) * time.Minute),
 			})
@@ -80,7 +79,7 @@ func TestTaskRunTerminalConvergenceCheckpointPaginationReplayAndConcurrentUpgrad
 	if err != nil || final.TerminalConvergenceVersion != 2 || final.TerminalConvergedAt == nil {
 		t.Fatalf("final=%+v err=%v", final, err)
 	}
-	upgrade, err := checkpoints.ListTaskRunTerminalConvergenceCandidates(ctx, store.TaskRunTerminalConvergenceQuery{
+	upgrade, err := checkpoints.ListTaskRunTerminalConvergenceCandidates(ctx, execution.TaskRunTerminalConvergenceQuery{
 		WorkspaceKey: "WS", RequiredVersion: 3, Limit: 10,
 	})
 	if err != nil || len(upgrade.TaskRunIDs) != 2 {
@@ -91,15 +90,15 @@ func TestTaskRunTerminalConvergenceCheckpointPaginationReplayAndConcurrentUpgrad
 func seedTerminalConvergenceTaskRun(t *testing.T, ctx context.Context, st *Store, id string, finishedAt time.Time) {
 	t.Helper()
 	token := "token-" + id
-	if _, err := st.TaskRuns().Create(ctx, store.TaskRunCreate{
+	if _, err := st.TaskRuns().Create(ctx, execution.TaskRunCreate{
 		WorkspaceKey: "WS", TaskRunID: id, TaskID: "TASK-" + id,
-		Status: domain.TaskRunRunning, NodeID: "node", LeaseID: "lease", LeaseToken: token, FencingToken: 7,
+		Status: execution.TaskRunRecordRunning, NodeID: "node", LeaseID: "lease", LeaseToken: token, FencingToken: 7,
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.TaskRuns().Finish(ctx, "WS", id, store.TaskRunFinish{
+	if _, err := st.TaskRuns().Finish(ctx, "WS", id, execution.TaskRunFinish{
 		NodeID: "node", LeaseID: "lease", LeaseToken: token, FencingToken: 7,
-		Status: domain.TaskRunCompleted, FinishedAt: finishedAt,
+		Status: execution.TaskRunRecordCompleted, FinishedAt: finishedAt,
 	}); err != nil {
 		t.Fatal(fmt.Errorf("finish %s: %w", id, err))
 	}

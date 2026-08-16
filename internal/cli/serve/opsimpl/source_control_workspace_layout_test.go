@@ -6,9 +6,10 @@ import (
 	"path/filepath"
 	"testing"
 
+	workspaceowner "github.com/tysonthomas9/loomcli/internal/modules/workspace"
+
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
-	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
 func TestValidateWorkspaceRoot(t *testing.T) {
@@ -44,7 +45,7 @@ func TestResolveWorkspaceRoot_StoreBacked(t *testing.T) {
 	wsRoot := t.TempDir()
 
 	st := memstore.New()
-	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "WS1", Name: "One"}); err != nil {
+	if _, err := st.Workspaces().Create(ctx, workspaceowner.WorkspaceCreate{Key: "WS1", Name: "One"}); err != nil {
 		t.Fatalf("create workspace: %v", err)
 	}
 	if err := bootstrap.MutateStateCache(func(sc *bootstrap.StateCache) error {
@@ -70,7 +71,7 @@ func TestResolveWorkspaceRoot_NotCheckedOut(t *testing.T) {
 	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
 
 	st := memstore.New()
-	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "WS1", Name: "One"}); err != nil {
+	if _, err := st.Workspaces().Create(ctx, workspaceowner.WorkspaceCreate{Key: "WS1", Name: "One"}); err != nil {
 		t.Fatalf("create workspace: %v", err)
 	}
 	// No state-cache entry → workspace has no local path on this machine.

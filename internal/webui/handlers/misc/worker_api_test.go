@@ -11,7 +11,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/tysonthomas9/loomcli/internal/ops"
+	"github.com/tysonthomas9/loomcli/internal/app/query/operationalview"
 )
 
 // ---------------------------------------------------------------------------
@@ -1910,7 +1910,7 @@ func TestAppendToLogFile_ReadOnlyParent(t *testing.T) {
 // workspacePathByID tests (loomcli-n28bt.10)
 // ---------------------------------------------------------------------------
 
-func workspacePathByID(wsData *ops.WorkspaceData, id string) string {
+func workspacePathByID(wsData *operationalview.Workspace, id string) string {
 	if wsData == nil || id == "" {
 		return ""
 	}
@@ -1923,9 +1923,9 @@ func workspacePathByID(wsData *ops.WorkspaceData, id string) string {
 }
 
 func TestWorkspacePathByID(t *testing.T) {
-	wsData := &ops.WorkspaceData{
+	wsData := &operationalview.Workspace{
 		Path: "/default/path",
-		Workspaces: []ops.WorkspaceSummary{
+		Workspaces: []operationalview.Summary{
 			{ID: "uuid-aaa", Name: "alpha", Path: "/ws/alpha"},
 			{ID: "uuid-bbb", Name: "beta", Path: "/ws/beta"},
 		},
@@ -1933,7 +1933,7 @@ func TestWorkspacePathByID(t *testing.T) {
 
 	tests := []struct {
 		name   string
-		wsData *ops.WorkspaceData
+		wsData *operationalview.Workspace
 		id     string
 		want   string
 	}{
@@ -1963,8 +1963,8 @@ func TestWorkspacePathByID(t *testing.T) {
 		},
 		{
 			name: "empty ID in summary is skipped",
-			wsData: &ops.WorkspaceData{
-				Workspaces: []ops.WorkspaceSummary{
+			wsData: &operationalview.Workspace{
+				Workspaces: []operationalview.Summary{
 					{ID: "", Name: "no-id", Path: "/ws/no-id"},
 					{ID: "uuid-ccc", Name: "gamma", Path: "/ws/gamma"},
 				},
@@ -1974,8 +1974,8 @@ func TestWorkspacePathByID(t *testing.T) {
 		},
 		{
 			name: "lookup with empty ID returns empty",
-			wsData: &ops.WorkspaceData{
-				Workspaces: []ops.WorkspaceSummary{
+			wsData: &operationalview.Workspace{
+				Workspaces: []operationalview.Summary{
 					{ID: "uuid-aaa", Name: "alpha", Path: "/ws/alpha"},
 				},
 			},
@@ -2102,9 +2102,9 @@ func TestResolveWorktreePath_UsesWorkspaceUUID(t *testing.T) {
 	os.WriteFile(filepath.Join(wsAPath, ".agent.lock"), []byte(`{"state":"idle"}`), 0600)
 	os.WriteFile(filepath.Join(wsBPath, ".agent.lock"), []byte(`{"state":"idle"}`), 0600)
 
-	wsData := &ops.WorkspaceData{
+	wsData := &operationalview.Workspace{
 		Path: tmpDir,
-		Workspaces: []ops.WorkspaceSummary{
+		Workspaces: []operationalview.Summary{
 			{ID: uuidA, Name: "alpha", Path: wsAPath},
 			{ID: uuidB, Name: "beta", Path: wsBPath},
 		},

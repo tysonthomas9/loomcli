@@ -14,9 +14,9 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/driver"
 	"github.com/tysonthomas9/loomcli/internal/httpclient"
+	"github.com/tysonthomas9/loomcli/internal/platform/persistence"
 )
 
 const workflowManagementResponseLimit = 4 << 20
@@ -194,7 +194,7 @@ func (c *workflowManagementClient) applyVersionAction(ctx context.Context, workf
 		}
 	}
 	if !found {
-		return nil, fmt.Errorf("workflow version %q: %w", versionID, domain.ErrNotFound)
+		return nil, fmt.Errorf("workflow version %q: %w", versionID, persistence.ErrNotFound)
 	}
 
 	path := c.workspacePath("/workflows/" + url.PathEscape(strings.TrimSpace(workflow)) +
@@ -289,11 +289,11 @@ func workflowManagementStatusError(status int, data []byte) error {
 	}
 	switch status {
 	case http.StatusBadRequest, http.StatusPreconditionRequired, http.StatusPreconditionFailed:
-		return fmt.Errorf("%s: %w", detail, domain.ErrInvalid)
+		return fmt.Errorf("%s: %w", detail, persistence.ErrInvalid)
 	case http.StatusNotFound:
-		return fmt.Errorf("%s: %w", detail, domain.ErrNotFound)
+		return fmt.Errorf("%s: %w", detail, persistence.ErrNotFound)
 	case http.StatusConflict:
-		return fmt.Errorf("%s: %w", detail, domain.ErrConflict)
+		return fmt.Errorf("%s: %w", detail, persistence.ErrConflict)
 	case http.StatusUnauthorized:
 		return errors.New("workflow management API unauthorized: " + detail)
 	case http.StatusForbidden:
