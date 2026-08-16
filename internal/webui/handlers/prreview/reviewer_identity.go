@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/tysonthomas9/loomcli/internal/modules/agents"
+	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
 )
 
 const (
@@ -40,7 +41,7 @@ func reviewerPreset() (agents.ManagedReviewerPreset, error) {
 }
 
 func (m *Module) archiveReviewer(w http.ResponseWriter, r *http.Request) {
-	if m == nil || m.reviewerIdentities == nil {
+	if m == nil || m.reviewerIdentities == nil || m.reviewerRuntime == nil {
 		writeReviewerProvisioningError(w, agents.ErrUnavailable)
 		return
 	}
@@ -49,9 +50,21 @@ func (m *Module) archiveReviewer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	agentName := reviewerAgentName(params.owner, params.repo, params.number)
+	unlock := interaction.LockAgentLifecycle(ws, agentName)
+	defer unlock()
 	result, err := m.archiveReviewerAgent(r.Context(), ws, agentName)
 	if err != nil {
 		writeReviewerProvisioningError(w, err)
+		return
+	}
+	if err := m.reviewerRuntime.StopReviewerSession(r.Context(), ws, agentName); err != nil {
+		writePRReviewErrorCode(
+			w,
+			http.StatusServiceUnavailable,
+			"reviewer_session_stop_failed",
+			"failed to stop the PR reviewer session",
+			true,
+		)
 		return
 	}
 	writeJSON(w, reviewerArchiveResult{AgentName: agentName, Archived: result.Agent.DeletedAt != nil})

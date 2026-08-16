@@ -212,10 +212,30 @@ type prReviewHarness struct {
 	module        *Module
 	dataDir       string
 	reviewers     *reviewerAgentRegistry
+	runtime       *reviewerTestRuntime
 	materializer  *reviewerTestMaterializer
 	chat          *reviewerTestChatAPI
 	messenger     *reviewerTestChatMessenger
 	chatAuthority *reviewerTestOperatorAuthority
+}
+
+type reviewerTestRuntime struct {
+	mu    sync.Mutex
+	calls [][2]string
+	err   error
+}
+
+func (runtime *reviewerTestRuntime) StopReviewerSession(_ context.Context, workspace, agentID string) error {
+	runtime.mu.Lock()
+	defer runtime.mu.Unlock()
+	runtime.calls = append(runtime.calls, [2]string{workspace, agentID})
+	return runtime.err
+}
+
+func (runtime *reviewerTestRuntime) stopCalls() [][2]string {
+	runtime.mu.Lock()
+	defer runtime.mu.Unlock()
+	return append([][2]string(nil), runtime.calls...)
 }
 
 type reviewerTestMaterializer struct {
@@ -579,6 +599,7 @@ func newPRReviewHarnessWithCredential(
 		mux:           http.NewServeMux(),
 		dataDir:       t.TempDir(),
 		reviewers:     newReviewerAgentRegistry(),
+		runtime:       &reviewerTestRuntime{},
 		materializer:  newReviewerTestMaterializer(),
 		chat:          &reviewerTestChatAPI{},
 		chatAuthority: &reviewerTestOperatorAuthority{},
@@ -612,6 +633,7 @@ func newPRReviewHarnessWithCredential(
 		Workspace: buildTestWorkspaceQueries(t, h.store), ConnectorManagement: connectorManagement, ConnectorSealer: connectorSealer,
 		Dispatcher: dispatcher, PullRequests: pullRequests, LocalSettingsDir: h.dataDir,
 		ReviewerIdentities: h.reviewers, ReviewerAgents: h.reviewers, SourceControl: h.materializer,
+		ReviewerRuntime: h.runtime,
 		InteractionChat: h.chat, InteractionMessenger: h.messenger, InteractionAuthority: h.chatAuthority,
 	})
 	h.module.Register(h.mux)
@@ -647,6 +669,7 @@ func (h *prReviewHarness) rebuildWithDataDir(t *testing.T, dataDir string) {
 		Workspace: buildTestWorkspaceQueries(t, h.store), ConnectorManagement: connectorManagement, ConnectorSealer: connectorSealer,
 		Dispatcher: dispatcher, LocalSettingsDir: dataDir,
 		ReviewerIdentities: h.reviewers, ReviewerAgents: h.reviewers, SourceControl: h.materializer,
+		ReviewerRuntime: h.runtime,
 		InteractionChat: h.chat, InteractionMessenger: h.messenger, InteractionAuthority: h.chatAuthority,
 	})
 	h.mux = http.NewServeMux()
